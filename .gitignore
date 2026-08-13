@@ -1,0 +1,5 @@
+legacy/
+workspace/
+fdps_game_files/
+**/__pycache__/
+.claude/settings.local.json
