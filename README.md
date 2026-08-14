@@ -33,7 +33,7 @@ Ghidra 專案本身不進版控，取而代之的是 `ghidra_snapshot/` 這份�
 
 只要動過 Ghidra 就重跑一次匯出——快照對同樣的狀態會產生 byte 相同的輸出，狀態沒變就不會有 diff，多跑沒有代價。反過來說，commit 裡出現 Ghidra 的行為改變卻沒有對應的快照 diff，就是漏匯出了。
 
-其他入口：[`CONTEXT.md`](CONTEXT.md) 是詞彙表，[`CLAUDE.md`](CLAUDE.md) 是工作規範，[`docs/research/fd2-playbook.md`](docs/research/fd2-playbook.md) 是前作 FD2 專案的完整 playbook。
+其他入口：[`CONTEXT.md`](CONTEXT.md) 是詞彙表，[`CLAUDE.md`](CLAUDE.md) 是工作規範，[`open_issues.md`](open_issues.md) 是當下收不了、要等更後面階段才有材料回答的問題，[`docs/research/fd2-playbook.md`](docs/research/fd2-playbook.md) 是前作 FD2 專案的完整 playbook。
 
 ## 建置
 
