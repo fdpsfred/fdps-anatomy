@@ -1,9 +1,8 @@
 """Compile and link the link probes inside DOSBox-X with Watcom 10.0a.
 
-The NT hosted WLINK.EXE that ships with 10.0a hangs on this machine, and the
-project builds under DOS anyway, so the linking half of the flag forensics runs
-in DOSBox-X (silent, fully automated).  Compilation still uses the NT hosted
-wcc386 because its codegen was verified identical.
+Everything runs the DOS hosted tools inside DOSBox-X, the way the original was
+built; nothing runs on the Windows host.  (The NT hosted WLINK.EXE that ships
+with 10.0a hangs on this machine anyway.)
 
 Produces workspace/build_flags/link/<tag>.exe plus a per-variant .map, then
 reports the container facts that the flag derivation depends on.
@@ -58,21 +57,6 @@ BASE_CFLAGS = ["-bt=dos4g", "-mf", "-zq", "-4s", "-s", "-od"]
 EMU_SIG = bytes.fromhex("8bec8b75388e5d3c668b4d04668b5506")
 
 
-def compile_objs():
-    env = dict(os.environ)
-    env["WATCOM"] = WATCOM
-    env["INCLUDE"] = os.path.join(WATCOM, "H")
-    env.pop("WCC386", None)
-    for tag, (cflags, _stack) in VARIANTS.items():
-        r = subprocess.run(
-            [os.path.join(WATCOM, "BINNT", "WCC386.EXE")] + BASE_CFLAGS +
-            cflags + ["-fo=%s.obj" % tag, "main.c"],
-            cwd=OUT, env=env, capture_output=True, text=True)
-        if r.returncode != 0:
-            raise SystemExit("compile %s failed: %s" % (tag, r.stdout or r.stderr))
-        print("[cc]   %s %s" % (tag, " ".join(cflags)))
-
-
 def write_inputs():
     with open(os.path.join(OUT, "main.c"), "w", encoding="latin-1") as fh:
         fh.write(MAIN_C)
@@ -90,9 +74,12 @@ def write_inputs():
               encoding="latin-1", newline="\r\n") as fh:
         fh.write("@echo off\r\n")
         fh.write("set WATCOM=D:\\\r\n")
-        fh.write("set PATH=Z:\\;D:\\BIN;D:\\BINB\r\n")
+        fh.write("set PATH=Z:\\;D:\\BIN;D:\\BINB;D:\\BINW\r\n")
         fh.write("set INCLUDE=D:\\H\r\n")
         fh.write("c:\r\n")
+        for tag, (cflags, _stack) in VARIANTS.items():
+            fh.write("wcc386 %s %s -fo=%s.obj main.c >>build.out\r\n"
+                     % (" ".join(BASE_CFLAGS), " ".join(cflags), tag))
         for tag in VARIANTS:
             fh.write("wlink @%s.lnk >>build.out\r\n" % tag)
         fh.write("echo done >DONE.TXT\r\n")
@@ -181,7 +168,6 @@ def report(started=0.0):
 def main():
     os.makedirs(OUT, exist_ok=True)
     conf = write_inputs()
-    compile_objs()
     started = 0.0
     if "--report-only" not in sys.argv:
         started = run_dosbox(conf)

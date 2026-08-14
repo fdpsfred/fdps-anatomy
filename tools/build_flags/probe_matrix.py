@@ -1,113 +1,171 @@
 """Compile probe.c under a matrix of wcc386 flag sets and disassemble each OBJ.
 
-The point is differential evidence: run the real Watcom 10.0a compiler, then read
-which flag combination reproduces the code shapes observed in FDPS.LE.  The NT
-hosted compiler is used because it is byte-identical in codegen to the DOS
-hosted one and needs no emulator.
+The point is differential evidence: run the real compiler under DOS, then read
+which flag combination reproduces the code shapes observed in FDPS.LE, rather
+than guessing from the machine code.  One DOSBox-X session runs the whole
+matrix; nothing is compiled on the Windows host.
 
-Outputs land in workspace/build_flags/probe/<tag>.{obj,dis}.
+Variant tags are v01..vNN because DOS tools only see 8.3 names; the legend maps
+each tag back to its flags.  Outputs land in workspace/build_flags/probe/.
 
 Usage:
     python probe_matrix.py            # run the whole matrix
-    python probe_matrix.py <tag>...   # only the named variants
+    python probe_matrix.py v03 v07    # only the named variants
+    python probe_matrix.py --legend   # print the tag -> flags mapping
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
 
 WATCOM = r"C:\Users\fdpsf\Documents\WATCOM_10_series\WATCOM_10.0a"
+DOSBOX = r"C:\DOSBox-X\dosbox-x.exe"
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 OUT = os.path.join(REPO, "workspace", "build_flags", "probe")
 
-# Sweep starting point, not the derived answer: the memory model here is the
-# one the sweep began with, and the variants below override it where relevant.
-# The settled flag set lives in verify_flags.py.
-BASE = ["-bt=dos4g", "-ms", "-zq"]
+SRC = "probe.c"
+BINDIRS = ["BIN", "BINB", "BINW"]
+BASE = ["-bt=dos4g", "-zq"]
+MTIME_SLACK = 4.0
 
-# tag -> flags replacing/extending BASE
-VARIANTS = {
-    "3s":        ["-3s", "-fpi87"],
-    "3r":        ["-3r", "-fpi87"],
-    "4s":        ["-4s", "-fpi87"],
-    "5s":        ["-5s", "-fpi87"],
-    "3s_flat":   ["-3s", "-fpi87", "-mf"],
-    "3s_zc":     ["-3s", "-fpi87", "-zc"],
-    "3s_fpi":    ["-3s", "-fpi"],
-    "3s_fpc":    ["-3s", "-fpc"],
-    "3s_fp3":    ["-3s", "-fpi87", "-fp3"],
-    "3s_fp5":    ["-3s", "-fpi87", "-fp5"],
-    "3s_nostk":  ["-3s", "-fpi87", "-s"],
-    "3s_ox":     ["-3s", "-fpi87", "-ox"],
-    "3s_zp1":    ["-3s", "-fpi87", "-zp1"],
-    "3s_zp4":    ["-3s", "-fpi87", "-zp4"],
-    "3s_zp8":    ["-3s", "-fpi87", "-zp8"],
-    "3s_s_of":   ["-3s", "-fpi87", "-s", "-of+"],
-    "3s_of":     ["-3s", "-fpi87", "-of+"],
-    "3s_d1":     ["-3s", "-fpi87", "-d1"],
-    "3s_d2":     ["-3s", "-fpi87", "-d2"],
-    "3s_s_d2":   ["-3s", "-fpi87", "-s", "-d2"],
-    "3s_s_od":   ["-3s", "-fpi87", "-s", "-od"],
-    "3s_s_d1":   ["-3s", "-fpi87", "-s", "-d1"],
-    "3s_s":      ["-3s", "-fpi87", "-s"],
-    "5s_s_d2":   ["-5s", "-fpi87", "-s", "-d2"],
-    "5s_s_of":   ["-5s", "-fpi87", "-s", "-of+"],
-    "4s_s_od":   ["-4s", "-fpi87", "-s", "-od"],
-    "5s_s_od":   ["-5s", "-fpi87", "-s", "-od"],
-    "6s_s_od":   ["-6s", "-fpi87", "-s", "-od"],
-    "5s_s_od_zc":  ["-5s", "-fpi87", "-s", "-od", "-zc"],
-    "5s_s_od_fpi": ["-5s", "-fpi", "-s", "-od"],
-    "5s_s_od_fpc": ["-5s", "-fpc", "-s", "-od"],
-    "5s_s_od_fp3": ["-5s", "-fpi87", "-fp3", "-s", "-od"],
-    "5s_s_od_fp5": ["-5s", "-fpi87", "-fp5", "-s", "-od"],
-    "5s_s_od_zp4": ["-5s", "-fpi87", "-s", "-od", "-zp4"],
-}
+# Sweep of everything that plausibly moves one of the observed shapes.  The
+# settled flag set is -mf -4s -fpi -s -od; verify_flags.py is the gate for it.
+VARIANT_FLAGS = [
+    ["-ms", "-3s", "-fpi87"],
+    ["-ms", "-3r", "-fpi87"],
+    ["-ms", "-4s", "-fpi87"],
+    ["-ms", "-5s", "-fpi87"],
+    ["-mf", "-3s", "-fpi87"],
+    ["-ms", "-3s", "-fpi87", "-zc"],
+    ["-ms", "-3s", "-fpi"],
+    ["-ms", "-3s", "-fpc"],
+    ["-ms", "-3s", "-fpi87", "-fp3"],
+    ["-ms", "-3s", "-fpi87", "-fp5"],
+    ["-ms", "-3s", "-fpi87", "-s"],
+    ["-ms", "-3s", "-fpi87", "-ox"],
+    ["-ms", "-3s", "-fpi87", "-zp1"],
+    ["-ms", "-3s", "-fpi87", "-zp4"],
+    ["-ms", "-3s", "-fpi87", "-zp8"],
+    ["-ms", "-3s", "-fpi87", "-s", "-of+"],
+    ["-ms", "-3s", "-fpi87", "-of+"],
+    ["-ms", "-3s", "-fpi87", "-d1"],
+    ["-ms", "-3s", "-fpi87", "-d2"],
+    ["-ms", "-3s", "-fpi87", "-s", "-d2"],
+    ["-ms", "-3s", "-fpi87", "-s", "-od"],
+    ["-ms", "-4s", "-fpi87", "-s", "-od"],
+    ["-ms", "-5s", "-fpi87", "-s", "-od"],
+    ["-mf", "-4s", "-fpi", "-s", "-od"],          # the settled set
+    ["-mf", "-4s", "-fpi87", "-s", "-od"],
+    ["-mf", "-4s", "-fpc", "-s", "-od"],
+    ["-mf", "-3s", "-fpi", "-s", "-od"],
+    ["-mf", "-5s", "-fpi", "-s", "-od"],
+    ["-mf", "-4s", "-fpi", "-s", "-od", "-zc"],
+    ["-mf", "-4s", "-fpi", "-s", "-od", "-zp4"],
+    ["-mf", "-4s", "-fpi", "-s", "-od", "-fp3"],
+    ["-mf", "-4s", "-fpi", "-s", "-od", "-fp5"],
+    ["-mf", "-4s", "-fpi", "-s", "-d2"],
+    ["-mf", "-4s", "-fpi", "-od"],
+]
+VARIANTS = {"v%02d" % (i + 1): f for i, f in enumerate(VARIANT_FLAGS)}
+
+# shapes worth reading off each variant
+SHAPES = [
+    ("frame", r"five_args:\s+(push\s+ebx|sub\s+esp|push\s+ebp|push\s+0)"),
+    ("probe", r"(call\s+near ptr __CHK)"),
+    ("epilogue", r"^\s+(leave|mov\s+esp,ebp)"),
+    ("scale", r"(shl\s+eax,02H|lea\s+eax,\[eax\*4\])"),
+]
+# segment membership is resolved by walking the listing, not by a spanning
+# regex: every listing opens with `_TEXT SEGMENT`
+CONST_SYMBOL = r"^const_table\s+DB"
 
 
-def env():
-    e = dict(os.environ)
-    e["WATCOM"] = WATCOM
-    e["INCLUDE"] = os.path.join(WATCOM, "H")
-    e["PATH"] = os.path.join(WATCOM, "BINNT") + os.pathsep + e["PATH"]
-    e.pop("WCC386", None)
-    return e
+def write(path, text):
+    with open(path, "w", encoding="latin-1", newline="\r\n") as fh:
+        fh.write(text)
 
 
-def run(tag, flags):
-    """Compile and disassemble one variant; return the flag list actually used."""
-    obj = "%s.obj" % tag
-    # -mf overrides the -ms in BASE; drop the loser so wcc386 sees one model
-    base = [f for f in BASE if not (f == "-ms" and "-mf" in flags)]
-    cmd = [os.path.join(WATCOM, "BINNT", "WCC386.EXE")] + base + flags + \
-          ["-fo=" + obj, "probe.c"]
-    r = subprocess.run(cmd, cwd=OUT, env=env(), capture_output=True, text=True)
-    if r.returncode != 0:
-        print("[FAIL] %-10s %s" % (tag, r.stdout.strip() or r.stderr.strip()))
-        return None
-    # WDISASM parses a leading '-' in any argument as an option switch, so it is
-    # run with cwd set to the output directory and a bare relative file name.
-    d = subprocess.run(
-        [os.path.join(WATCOM, "BINNT", "WDISASM.EXE"), "-l=%s.dis" % tag,
-         "-a", "-e", "-p", obj],
-        cwd=OUT, env=env(), capture_output=True, text=True)
-    if d.returncode != 0:
-        print("[warn] %-10s wdisasm: %s" % (tag, d.stdout.strip() or d.stderr.strip()))
-    print("[ok]   %-10s %s" % (tag, " ".join(base + flags)))
-    return base + flags
+def segment_of(text, pattern):
+    """Name of the SEGMENT block holding the line matching `pattern`."""
+    current = None
+    for line in text.splitlines():
+        seg = re.match(r"^(\w+)\s+SEGMENT\b", line)
+        if seg:
+            current = seg.group(1)
+            continue
+        if re.match(r"^(\w+)\s+ENDS\b", line):
+            current = None
+            continue
+        if re.search(pattern, line):
+            return current
+    return None
+
+
+def run(tags):
+    os.makedirs(OUT, exist_ok=True)
+    shutil.copyfile(os.path.join(HERE, SRC), os.path.join(OUT, SRC))
+    path = ";".join("D:\\" + d for d in BINDIRS)
+    lines = ["@echo off", "set WATCOM=D:\\", "set PATH=Z:\\;" + path,
+             "set INCLUDE=D:\\H", "c:"]
+    for tag in tags:
+        flags = " ".join(BASE + VARIANTS[tag])
+        lines.append("wcc386 %s -fo=%s.obj %s >>build.out" % (flags, tag, SRC))
+        lines.append("wdisasm -l=%s.dis -a -e -p %s.obj >>build.out" % (tag, tag))
+    lines += ["echo done >DONE.TXT", "exit"]
+    write(os.path.join(OUT, "build.bat"), "\n".join(lines) + "\n")
+    write(os.path.join(OUT, "run.conf"),
+          "[cpu]\ncycles=max\n[autoexec]\n"
+          'mount c "%s"\nmount d "%s"\nc:\ncall build.bat\n' % (OUT, WATCOM))
+
+    for name in ["DONE.TXT", "build.out"] + ["%s.dis" % t for t in tags]:
+        p = os.path.join(OUT, name)
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+    started = time.time()
+    proc = subprocess.Popen([DOSBOX, "-silent", "-conf", "run.conf"], cwd=OUT)
+    deadline = time.time() + 600
+    while time.time() < deadline:
+        if os.path.exists(os.path.join(OUT, "DONE.TXT")) or proc.poll() is not None:
+            break
+        time.sleep(1)
+    if proc.poll() is None:
+        proc.terminate()
+    return started
 
 
 def main():
-    os.makedirs(OUT, exist_ok=True)
-    shutil.copyfile(os.path.join(HERE, "probe.c"), os.path.join(OUT, "probe.c"))
-    wanted = sys.argv[1:] or list(VARIANTS)
+    if "--legend" in sys.argv:
+        for tag, flags in VARIANTS.items():
+            print("%s  %s" % (tag, " ".join(BASE + flags)))
+        return
+    wanted = [a for a in sys.argv[1:] if not a.startswith("-")] or list(VARIANTS)
     unknown = [t for t in wanted if t not in VARIANTS]
     if unknown:
-        raise SystemExit("unknown variant(s): %s\nknown: %s"
-                         % (", ".join(unknown), ", ".join(VARIANTS)))
+        raise SystemExit("unknown variant(s): %s\nrun --legend for the list"
+                         % ", ".join(unknown))
+    started = run(wanted)
     for tag in wanted:
-        run(tag, VARIANTS[tag])
+        dis = os.path.join(OUT, "%s.dis" % tag)
+        flags = " ".join(BASE + VARIANTS[tag])
+        if not os.path.exists(dis) or os.path.getmtime(dis) < started - MTIME_SLACK:
+            print("%-5s %-42s (no listing)" % (tag, flags))
+            continue
+        with open(dis, errors="replace") as fh:
+            text = fh.read()
+        cells = []
+        for label, pat in SHAPES:
+            hits = sorted(set(re.sub(r"\s+", " ", m.group(1))[:22]
+                              for m in re.finditer(pat, text, re.M)))
+            cells.append("%s=%s" % (label, ",".join(hits) if hits else "-"))
+        cells.append("const home=%s" % segment_of(text, CONST_SYMBOL))
+        print("%-5s %-42s %s" % (tag, flags, " | ".join(cells)))
 
 
 if __name__ == "__main__":

@@ -56,20 +56,14 @@ def w(name, text):
 def prepare():
     os.makedirs(OUT, exist_ok=True)
     w(SRC, MAIN_C)
-    env = dict(os.environ)
-    env["WATCOM"] = WATCOM
-    env["INCLUDE"] = os.path.join(WATCOM, "H")
-    env.pop("WCC386", None)
-    r = subprocess.run([os.path.join(WATCOM, "BINNT", "WCC386.EXE")] + CFLAGS +
-                       ["-fo=%s.obj" % SRC[:-2], SRC],
-                       cwd=OUT, env=env, capture_output=True, text=True)
-    if r.returncode != 0:
-        raise SystemExit("compile failed: %s" % (r.stdout or r.stderr))
     for tag, lines in LINKS.items():
         w("%s.lnk" % tag, "system dos4g\n" + "\n".join(lines) + "\n" +
           "option map=%s.map\n" % tag +
           "".join("library %s\n" % lib for lib in LIBS))
-    w("build.bat", "@echo off\nset WATCOM=D:\\\nset PATH=Z:\\;D:\\BIN;D:\\BINB\nc:\n" +
+    w("build.bat",
+      "@echo off\nset WATCOM=D:\\\nset PATH=Z:\\;D:\\BIN;D:\\BINB;D:\\BINW\n"
+      "set INCLUDE=D:\\H\nc:\n"
+      "wcc386 %s -fo=%s.obj %s >>build.out\n" % (" ".join(CFLAGS), SRC[:-2], SRC) +
       "".join("wlink @%s.lnk >>build.out\n" % tag for tag in LINKS) +
       "echo done >DONE.TXT\nexit\n")
     w("link.conf", "[cpu]\ncycles=max\n[autoexec]\n"
