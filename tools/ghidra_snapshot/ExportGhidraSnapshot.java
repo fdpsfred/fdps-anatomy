@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
@@ -48,6 +49,8 @@ public class ExportGhidraSnapshot extends GhidraScript {
 	private static final String DEFAULT_OUTPUT_DIR =
 		"C:/Users/fdpsf/Documents/fdps-anatomy/ghidra_snapshot";
 
+	private static final String EXPECTED_PROGRAM = "FDPS.LE";
+
 	// Artifacts the LE loader generates from the relocation table, one per fixup site.
 	// They are import output rather than analysis results, so they are counted but not listed.
 	private static final Pattern FIXUP_LABEL = Pattern.compile("fix_off32_[0-9a-f]{8}");
@@ -58,18 +61,32 @@ public class ExportGhidraSnapshot extends GhidraScript {
 
 	@Override
 	public void run() throws Exception {
+		if (!EXPECTED_PROGRAM.equals(currentProgram.getName())) {
+			// The default output path is version controlled, so exporting another program
+			// would overwrite the snapshot with an unrelated binary's state.
+			throw new IllegalStateException("current program is " + currentProgram.getName()
+				+ ", expected " + EXPECTED_PROGRAM);
+		}
 		String[] args = getScriptArgs();
 		Path outDir = Paths.get(args.length > 0 && !args[0].isBlank() ? args[0] : DEFAULT_OUTPUT_DIR);
-		Files.createDirectories(outDir);
 
-		write(outDir.resolve("functions.txt"), functions());
-		write(outDir.resolve("comments.txt"), comments());
-		write(outDir.resolve("data_types.txt"), dataTypes());
-		write(outDir.resolve("labels.txt"), labels());
-		write(outDir.resolve("data.txt"), data());
-		write(outDir.resolve("bookmarks.txt"), bookmarks());
-		// Written last: its counters are filled in by the sections above.
-		write(outDir.resolve("program.txt"), program());
+		// Every section is collected before anything is written: a failure half way through
+		// would otherwise leave new listings next to a stale program.txt whose counters
+		// describe the previous state.
+		LinkedHashMap<String, List<String>> files = new LinkedHashMap<>();
+		files.put("functions.txt", functions());
+		files.put("comments.txt", comments());
+		files.put("data_types.txt", dataTypes());
+		files.put("labels.txt", labels());
+		files.put("data.txt", data());
+		files.put("bookmarks.txt", bookmarks());
+		// Built last: its counters are filled in by the sections above.
+		files.put("program.txt", program());
+
+		Files.createDirectories(outDir);
+		for (java.util.Map.Entry<String, List<String>> f : files.entrySet()) {
+			write(outDir.resolve(f.getKey()), f.getValue());
+		}
 
 		println("Snapshot written to " + outDir.toAbsolutePath());
 		for (java.util.Map.Entry<String, Long> e : counts.entrySet()) {
@@ -109,7 +126,13 @@ public class ExportGhidraSnapshot extends GhidraScript {
 		out.add("# address | body size | calling convention | signature source | stack purge | flags | tags | prototype");
 		out.add("# An indented 'var' line follows a function for each explicitly named local variable.");
 		long total = 0;
-		for (Function f : currentProgram.getFunctionManager().getFunctions(true)) {
+		// getFunctions() yields non-external functions only, so external ones — a thunk's
+		// target, for instance — have to be collected separately or they would be missing.
+		List<Function> all = new ArrayList<>();
+		currentProgram.getFunctionManager().getFunctions(true).forEach(all::add);
+		currentProgram.getFunctionManager().getExternalFunctions().forEach(all::add);
+		all.sort(Comparator.comparing(f -> f.getEntryPoint().toString()));
+		for (Function f : all) {
 			total++;
 			List<String> flags = new ArrayList<>();
 			if (f.isThunk()) {
@@ -161,7 +184,7 @@ public class ExportGhidraSnapshot extends GhidraScript {
 			locals.sort(Comparator.comparing(v -> v.getVariableStorage().toString()));
 			for (Variable v : locals) {
 				out.add(String.format("    var %s | %s | %s",
-					v.getVariableStorage(), v.getDataType().getName(), v.getName()));
+					v.getVariableStorage(), v.getDataType().getPathName(), v.getName()));
 			}
 		}
 		counts.put("counts.functions", total);
@@ -212,17 +235,22 @@ public class ExportGhidraSnapshot extends GhidraScript {
 		Iterator<DataType> it = dtm.getAllDataTypes();
 		while (it.hasNext()) {
 			DataType d = it.next();
-			if (d.getCategoryPath().getPath().startsWith(LOADER_CATEGORY_PREFIX)) {
-				skipped++;
-				continue;
-			}
 			if (d instanceof BuiltInDataType || d instanceof Pointer || d instanceof Array) {
 				continue;
 			}
-			if (d instanceof Composite || d instanceof ghidra.program.model.data.Enum
-					|| d instanceof TypeDef || d instanceof FunctionDefinition) {
-				kept.add(d);
+			if (!(d instanceof Composite || d instanceof ghidra.program.model.data.Enum
+					|| d instanceof TypeDef || d instanceof FunctionDefinition)) {
+				continue;
 			}
+			// Matched on a path boundary so that a future category such as /_legacy is
+			// not silently swallowed by the loader exclusion.
+			String category = d.getCategoryPath().getPath();
+			if (category.equals(LOADER_CATEGORY_PREFIX)
+					|| category.startsWith(LOADER_CATEGORY_PREFIX + "/")) {
+				skipped++;
+				continue;
+			}
+			kept.add(d);
 		}
 		kept.sort(Comparator.comparing(d -> d.getPathName()));
 		for (DataType d : kept) {

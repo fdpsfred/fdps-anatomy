@@ -37,3 +37,17 @@
 3. 把四項改動全部還原，再匯出一次，與步驟 1 的基準 byte 相同。
 
 第三步不只是驗證匯出，也順便確認了還原是乾淨的——function tag 除了從 function 上移除，還要從 program 的 tag 表刪掉，否則會留下一個沒人用的 tag 定義。
+
+commit 當下 git 警告 `LF will be replaced by CRLF`，這是會咬人的：`autocrlf` 讓 checkout 後工作目錄變成 CRLF，下一次匯出寫回 LF，整份快照就是 diff。加了 `.gitattributes` 把 `ghidra_snapshot/*.txt` 釘成 `eol=lf`，並且真的做了一次 `git rm --cached` + `reset --hard` 的強制重簽出來確認換行沒被改掉——只看 `git status` 乾淨是不夠的，那時候檔案根本沒被 git 重寫過。
+
+## 複審後的修正
+
+`/code-review` 抓到五個問題，全部是真的，也全部修了：
+
+- **沒有檢查 current program。** 預設輸出路徑是進版控的 `ghidra_snapshot/`，而 MCP 有 `switch_program`，前作 FD2.LE 的工作也還在。拿錯程式匯出就是把快照整份換成另一個 binary 的狀態，然後照著「commit 前重跑匯出」的規則 commit 進去。加了硬檢查，而且擺在 `createDirectories` 之前。驗證方式是把期待的程式名暫時改成假名字跑一次，確認拋例外且連目錄都沒建。
+- **七個檔案分開寫，`program.txt` 還寫在最後。** 中途失敗會留下新的清單配上舊的 `program.txt`，計數與清單互相矛盾——而計數正是「被排除的東西數量變動仍看得見」這個設計的支點。改成所有 section 先在記憶體收齊再一次寫出。
+- **`getFunctions()` 不含 external function**，所以 `external` 旗標是永遠走不到的死碼，而且真的出現 external function 時它不會被匯出，指向它的 thunk 卻仍印出目標位址，變成斷掉的參照。改成兩個來源都收，一起排序。這個 LE 模組沒有 import，今天影響是零。
+- **`/_le` 前綴沒有邊界**，未來一個叫 `/_legacy` 的 category 會被整個吞掉、還被算進 loader 排除計數，看起來像雜訊。改成比對路徑邊界。順帶把 kind 判斷移到排除判斷前面，讓計數的語意就是「被排除的 fixup 型別定義」。
+- **區域變數印 `getName()`，其他地方都印 `getPathName()`**。`/Foo` 與 `/combat/Foo` 會印成一樣，把區域變數改型別可能匯出完全相同的內容，違反「Ghidra 狀態有變就一定看得到 diff」。
+
+五項修完重跑匯出，輸出與已 commit 的基準 byte 相同——這些修正都不改變目前狀態的匯出結果，正好當回歸測試。

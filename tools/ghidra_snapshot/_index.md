@@ -11,7 +11,7 @@ run_ghidra_script(
   script_name="C:/Users/fdpsf/Documents/fdps-anatomy/tools/ghidra_snapshot/ExportGhidraSnapshot.java")
 ```
 
-執行前要確認 Ghidra 裡的 current program 是 `FDPS.LE`。整趟約 2 秒，不修改程式。
+整趟約 2 秒，不修改程式。current program 不是 `FDPS.LE` 就直接拋例外，連輸出目錄都不會建立——預設輸出路徑是進版控的，匯出別的程式等於把快照換成另一個 binary 的狀態。所有內容都先在記憶體裡收齊才開始寫檔，避免中途失敗留下新舊混雜的目錄。
 
 ## 輸出
 
