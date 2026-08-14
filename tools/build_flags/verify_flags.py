@@ -34,7 +34,8 @@ CHECKS = [
      r"\+14H\[ebp\]", None, "0002f746 cmp dword ptr [ebp+0x34],7 in an 8-argument frame"),
     ("caller pops the arguments", "probe.c",
      r"call\s+near ptr sink\n\s+add\s+esp,00000014H", r"\bret\s+0",
-     "2464 of 2937 game call sites are followed by ADD ESP,n; zero RET imm"),
+     "2464 of 2937 call sites targeting game functions are followed by "
+     "ADD ESP,n; the game region has zero RET imm"),
     ("no stack probe", "probe.c", None, r"call\s+near ptr __CHK",
      "no game function calls __CHK at 0x4361a; all 17 callers are library code"),
     ("epilogue avoids LEAVE", "probe.c",
