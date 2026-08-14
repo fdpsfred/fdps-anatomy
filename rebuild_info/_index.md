@@ -8,6 +8,7 @@
 
 | 文件 | 內容 |
 | --- | --- |
+| [`build_flags.md`](build_flags.md) | 工具鏈版本、`wcc386` 與 `wlink` 的旗標組與逐項判定依據、預設 calling convention 與偏離者的辨識法 |
 | [`pitfalls.md`](pitfalls.md) | 「照直覺寫就會與原版不同」的事項總表：不能修的原版 bug、不能加的檢查、不能換的型別與寫法 |
 
 ## 踩雷點要當下就記
