@@ -18,12 +18,19 @@
 | [`assets/`](assets/_index.md) | 資料表 | 遊戲的數值內容是什麼 | ✓ |
 | [`chapters/`](chapters/_index.md) | 關卡 | 每一章的關卡內容與事件流程是什麼（共 30 章） | ✓ |
 | [`rebuild_info/`](rebuild_info/_index.md) | 重建 | 怎麼重建成等價執行檔、哪裡會踩雷 | ✓ |
+| [`ghidra_snapshot/`](ghidra_snapshot/_index.md) | Ghidra | Ghidra 目前的分析狀態，以文字快照進版控 | ✓ |
 | [`tools/`](tools/_index.md) | — | 工作腳本，一項工作一個子資料夾 | ✓ |
 | [`docs/`](docs/) | — | 決策記錄（[`adr/`](docs/adr/)）、agent 規範、前作研究筆記 | ✓ |
 | [`devlog/`](devlog/_conventions.md) | — | 怎麼走到這些結論的敘事記錄 | ✓ |
 | `workspace/` | — | 腳本的中間產物與輸出，全部可重生 | ✗ |
 | `legacy/` | — | 單向封存的舊架構，工作時不得閱讀或引用 | ✗ |
 | `fdps_game_files/` | — | 原始遊戲檔（版權），repo 不含 | ✗ |
+
+## Ghidra 快照的匯出時機
+
+Ghidra 專案本身不進版控，取而代之的是 `ghidra_snapshot/` 這份文字快照（[ADR-0005](docs/adr/0005-ghidra-state-as-versioned-text.md)）。匯出與 commit 綁定：每個工作段落結束、要 commit 之前，先跑一次 [`tools/ghidra_snapshot/ExportGhidraSnapshot.java`](tools/ghidra_snapshot/_index.md)，把重新匯出的快照與程式碼、知識庫、devlog 放進同一個 commit。
+
+只要動過 Ghidra 就重跑一次匯出——快照對同樣的狀態會產生 byte 相同的輸出，狀態沒變就不會有 diff，多跑沒有代價。反過來說，commit 裡出現 Ghidra 的行為改變卻沒有對應的快照 diff，就是漏匯出了。
 
 其他入口：[`CONTEXT.md`](CONTEXT.md) 是詞彙表，[`CLAUDE.md`](CLAUDE.md) 是工作規範，[`docs/research/fd2-playbook.md`](docs/research/fd2-playbook.md) 是前作 FD2 專案的完整 playbook。
 

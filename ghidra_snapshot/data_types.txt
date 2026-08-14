@@ -1,0 +1,194 @@
+# Composites, enums, typedefs and function definitions owned by the program.
+# Built-in types and types derived from them (pointers, arrays) carry no analysis
+# decision and are omitted, as are the loader's /_le fixup types.
+struct /IMAGE_LE_FIXUP | size=0xc568 | align=0x1 | packing=disabled
+    +0x000 | 0x138  | /dword[78] | fixup_page_table | The Fixup Page Table provides a simple mapping of a logical page number to an offset into the Fixup Record Table for that page. This table is parallel to the Object Page Table, except that there is one additional entry in this table to indicate the end of the Fixup Record Table.
+    +0x138 | 0xbc84 | /_le/_fixup/00010000_1 | fixups_object1 | Fixup records for object #1
+    +0xbdbc | 0x5bc  | /_le/_fixup/00060000_2 | fixups_object2 | Fixup records for object #2
+    +0xc378 | 0x1f0  | /byte[496] | import_procedure_table | TODO
+struct /IMAGE_LE_HEADER | size=0xc4 | align=0x1 | packing=disabled
+    +0x000 | 0x2    | /char[2] | e32_magic | Magic number for LX/LE/LC
+    +0x002 | 0x1    | /order | e32_border | Byte ordering for EXE
+    +0x003 | 0x1    | /order | e32_worder | Word ordering for EXE
+    +0x004 | 0x4    | /dword | e32_level | EXE Format Level is set to 0 for the initial version of the 32-bit linear EXE format. Each incompatible change to the linear EXE format must increment thisvalue. This allows the system to recognized future EXE file versions so that anappropriate error message may be displayed if an attempt is made to load them.
+    +0x008 | 0x2    | /cpu_type | e32_cpu | CPU
+    +0x00a | 0x2    | /os_type | e32_os | OS
+    +0x00c | 0x4    | /dword | e32_ver | Version of the linear EXE module. Useful for differentiating between revisions of dynamic linked modules. Specified at link time by the user.
+    +0x010 | 0x4    | /dword | e32_mflags | Flag bits for the module.
+    +0x014 | 0x4    | /dword | e32_mpages | # of physical pages in module. This field specifies the number of pages physically contained in this module. In other words, pages containing either enumerated or iterated data, not invalid or zero-fillpages. These pages are contained in the ‘preload pages’, ‘demand load pages’ and ‘iterated data pages’ sections of the linear EXE module.
+    +0x018 | 0x4    | /dword | e32_startobj | Object # to which the Entry Address is relative.
+    +0x01c | 0x4    | /dword | e32_eip | Entry Address of module. The Entry Address is the starting address for program modules and the library initialization and Library termination address for library modules.
+    +0x020 | 0x4    | /dword | e32_stackobj | The Object number to which the ESP is relative.This specifies the object to which the starting ESP is relative. This must be anonzero value for a program module to be correctly loaded. This field is ignored for alibrary module.
+    +0x024 | 0x4    | /dword | esp | Starting stack address of module.
+    +0x028 | 0x4    | /dword | e32_esp | The size of one page for this system.
+    +0x02c | 0x4    | /dword | e32_lastpagesize | Bytes on last page (only LE) / Page offset shift (LX)
+    +0x030 | 0x4    | /dword | e32_fixupsize | Total size of the fixup information in bytes. This includes the following 4 tables:Fixup Page TableFixup Record TableImport Module name TableImport Procedure Name Table
+    +0x034 | 0x4    | /dword | e32_fixupsum | Checksum for fixup information. If the checksum feature is not implemented, then the linker will set these fields to zero.
+    +0x038 | 0x4    | /dword | e32_ldrsize | Flag bits for the module.
+    +0x03c | 0x4    | /dword | e32_ldrsum | Checksum for loader section. If the checksum feature is not implemented, then the linker will set these fields to zero.
+    +0x040 | 0x4    | /dword | e32_objtab | Object Table offset. This offset is relative to the beginning of the linear EXE header. This offset alsopoints to the start of the Loader Section.
+    +0x044 | 0x4    | /dword | e32_objcnt | # of entries in Object Table.
+    +0x048 | 0x4    | /dword | e32_objmap | Object Page Table offset. This offset is relative to the beginning of the linear EXE header.
+    +0x04c | 0x4    | /dword | e32_itermap | Object Iterated Pages offset. This offset is relative to the beginning of the EXE file.
+    +0x050 | 0x4    | /dword | e32_rsrctab | Resource Table offset. This offset is relative to the beginning of the linear EXE header.
+    +0x054 | 0x4    | /dword | e32_rsrccnt | # of entries in Resource Table.
+    +0x058 | 0x4    | /dword | e32_restab | Resident Name Table offset. This offset is relative to the beginning of the linear EXE header.
+    +0x05c | 0x4    | /dword | e32_enttab | Entry Table offset. This offset is relative to the beginning of the linear EXE header.
+    +0x060 | 0x4    | /dword | e32_dirtab | Module Format Directives Table offset.This offset is relative to the beginning of the linear EXE header.
+    +0x064 | 0x4    | /dword | e32_dircnt | # of Module Format Directives in the Table.This field specifies the number of entries in the Module Format Directives Table. 
+    +0x068 | 0x4    | /dword | e32_fpagetab | Fixup Page Table offset. This offset is relative to the beginning of the linear EXE header. This offset alsopoints to the start of the Fixup Section.
+    +0x06c | 0x4    | /dword | e32_frectab | Fixup Record Table Offset. This offset is relative to the beginning of the linear EXE header
+    +0x070 | 0x4    | /dword | e32_impmod | Import Module Name Table offset.This offset is relative to the beginning of the linear EXE header.
+    +0x074 | 0x4    | /dword | e32_impmodcnt | # of entries in the Import Module Name Table
+    +0x078 | 0x4    | /dword | e32_impproc | Import Procedure Name Table offset. This offset is relative to the beginning of the linear EXE header.
+    +0x07c | 0x4    | /dword | e32_pagesum | Per-Page Checksum Table offset.This offset is relative to the beginning of the linear EXE header.
+    +0x080 | 0x4    | /dword | e32_datapage | Data Pages Offset. This offset is relative to the beginning of the EXE file. This offset also points to thestart of the Data Section.
+    +0x084 | 0x4    | /dword | e32_preload | # of Preload pages for this module.Note: OS/2 2.0 does not respect the preload of pages as specified in theexecutable file for performance reasons.
+    +0x088 | 0x4    | /dword | e32_nrestab | Non-Resident Name Table offset. This offset is relative to the beginning of the EXE file
+    +0x08c | 0x4    | /dword | e32_cbnrestab | # of bytes in the Non-resident name table
+    +0x090 | 0x4    | /dword | e32_nressum | Non-Resident Name Table Checksum
+    +0x094 | 0x4    | /dword | e32_autodata | Auto Data Segment Object number.This is the object number for the Auto Data Segment used by 16-bit modules. Thisfield is supported for 16-bit compatibility only and is not used by 32-bit modules.
+    +0x098 | 0x4    | /dword | e32_debuginfo | Debug Information offset. This offset is relative to the beginning of the file. This offset also points to the start of theDebug Section.
+    +0x09c | 0x4    | /dword | e32_debuglen | Debug Information length
+    +0x0a0 | 0x4    | /dword | e32_instpreload | # of instance data pages found in the preload section.
+    +0x0a4 | 0x4    | /dword | e32_instdemand | # of instance data pages found in the demand section.
+    +0x0a8 | 0x4    | /dword | e32_heapsize | Heap size added to the Auto DS Object
+    +0x0ac | 0x4    | /dword | e32_stacksize | Stack size
+    +0x0b0 | 0x8    | /byte[8] | e32_res3 | reserved
+    +0x0b8 | 0x4    | /dword | e32_winresoff
+    +0x0bc | 0x4    | /dword | e32_winreslen
+    +0x0c0 | 0x2    | /word | Dev386_Device_ID
+    +0x0c2 | 0x2    | /word | Dev386_DDK_Version
+struct /IMAGE_LE_LOADER | size=0x184 | align=0x1 | packing=disabled
+    +0x000 | 0x48   | /object_entry[3] | object_table | Module Object Table. Entries are numbered starting from one.
+    +0x048 | 0x120  | /page_entry[72] | pagemap_obj1 | Page map table for object #1
+    +0x168 | 0x10   | /page_entry[4] | pagemap_obj2 | Page map table for object #2
+    +0x178 | 0x4    | /page_entry[1] | pagemap_obj3 | Page map table for object #3
+    +0x17c | 0x7    | /byte[7] | name_table | todo
+    +0x183 | 0x1    | /byte[1] | entry_table | todo (len, ascci, ord) tuples
+struct /IMG_LE_DATA | size=0x4c035 | align=0x1 | packing=disabled
+    +0x000 | 0x1000 | /byte[4096] | page_1
+    +0x1000 | 0x1000 | /byte[4096] | page_2
+    +0x2000 | 0x1000 | /byte[4096] | page_3
+    +0x3000 | 0x1000 | /byte[4096] | page_4
+    +0x4000 | 0x1000 | /byte[4096] | page_5
+    +0x5000 | 0x1000 | /byte[4096] | page_6
+    +0x6000 | 0x1000 | /byte[4096] | page_7
+    +0x7000 | 0x1000 | /byte[4096] | page_8
+    +0x8000 | 0x1000 | /byte[4096] | page_9
+    +0x9000 | 0x1000 | /byte[4096] | page_10
+    +0xa000 | 0x1000 | /byte[4096] | page_11
+    +0xb000 | 0x1000 | /byte[4096] | page_12
+    +0xc000 | 0x1000 | /byte[4096] | page_13
+    +0xd000 | 0x1000 | /byte[4096] | page_14
+    +0xe000 | 0x1000 | /byte[4096] | page_15
+    +0xf000 | 0x1000 | /byte[4096] | page_16
+    +0x10000 | 0x1000 | /byte[4096] | page_17
+    +0x11000 | 0x1000 | /byte[4096] | page_18
+    +0x12000 | 0x1000 | /byte[4096] | page_19
+    +0x13000 | 0x1000 | /byte[4096] | page_20
+    +0x14000 | 0x1000 | /byte[4096] | page_21
+    +0x15000 | 0x1000 | /byte[4096] | page_22
+    +0x16000 | 0x1000 | /byte[4096] | page_23
+    +0x17000 | 0x1000 | /byte[4096] | page_24
+    +0x18000 | 0x1000 | /byte[4096] | page_25
+    +0x19000 | 0x1000 | /byte[4096] | page_26
+    +0x1a000 | 0x1000 | /byte[4096] | page_27
+    +0x1b000 | 0x1000 | /byte[4096] | page_28
+    +0x1c000 | 0x1000 | /byte[4096] | page_29
+    +0x1d000 | 0x1000 | /byte[4096] | page_30
+    +0x1e000 | 0x1000 | /byte[4096] | page_31
+    +0x1f000 | 0x1000 | /byte[4096] | page_32
+    +0x20000 | 0x1000 | /byte[4096] | page_33
+    +0x21000 | 0x1000 | /byte[4096] | page_34
+    +0x22000 | 0x1000 | /byte[4096] | page_35
+    +0x23000 | 0x1000 | /byte[4096] | page_36
+    +0x24000 | 0x1000 | /byte[4096] | page_37
+    +0x25000 | 0x1000 | /byte[4096] | page_38
+    +0x26000 | 0x1000 | /byte[4096] | page_39
+    +0x27000 | 0x1000 | /byte[4096] | page_40
+    +0x28000 | 0x1000 | /byte[4096] | page_41
+    +0x29000 | 0x1000 | /byte[4096] | page_42
+    +0x2a000 | 0x1000 | /byte[4096] | page_43
+    +0x2b000 | 0x1000 | /byte[4096] | page_44
+    +0x2c000 | 0x1000 | /byte[4096] | page_45
+    +0x2d000 | 0x1000 | /byte[4096] | page_46
+    +0x2e000 | 0x1000 | /byte[4096] | page_47
+    +0x2f000 | 0x1000 | /byte[4096] | page_48
+    +0x30000 | 0x1000 | /byte[4096] | page_49
+    +0x31000 | 0x1000 | /byte[4096] | page_50
+    +0x32000 | 0x1000 | /byte[4096] | page_51
+    +0x33000 | 0x1000 | /byte[4096] | page_52
+    +0x34000 | 0x1000 | /byte[4096] | page_53
+    +0x35000 | 0x1000 | /byte[4096] | page_54
+    +0x36000 | 0x1000 | /byte[4096] | page_55
+    +0x37000 | 0x1000 | /byte[4096] | page_56
+    +0x38000 | 0x1000 | /byte[4096] | page_57
+    +0x39000 | 0x1000 | /byte[4096] | page_58
+    +0x3a000 | 0x1000 | /byte[4096] | page_59
+    +0x3b000 | 0x1000 | /byte[4096] | page_60
+    +0x3c000 | 0x1000 | /byte[4096] | page_61
+    +0x3d000 | 0x1000 | /byte[4096] | page_62
+    +0x3e000 | 0x1000 | /byte[4096] | page_63
+    +0x3f000 | 0x1000 | /byte[4096] | page_64
+    +0x40000 | 0x1000 | /byte[4096] | page_65
+    +0x41000 | 0x1000 | /byte[4096] | page_66
+    +0x42000 | 0x1000 | /byte[4096] | page_67
+    +0x43000 | 0x1000 | /byte[4096] | page_68
+    +0x44000 | 0x1000 | /byte[4096] | page_69
+    +0x45000 | 0x1000 | /byte[4096] | page_70
+    +0x46000 | 0x1000 | /byte[4096] | page_71
+    +0x47000 | 0x1000 | /byte[4096] | page_72
+    +0x48000 | 0x1000 | /byte[4096] | page_73
+    +0x49000 | 0x1000 | /byte[4096] | page_74
+    +0x4a000 | 0x1000 | /byte[4096] | page_75
+    +0x4b000 | 0x1000 | /byte[4096] | page_76
+    +0x4c000 | 0x35   | /byte[53] | page_77
+enum /cpu_type | size=0x2
+    286+ = 0x1
+    386+ = 0x2
+    486+ = 0x3
+    x86 = 0x0
+enum /flags | size=0x1
+    ADDITIVE = 0x4
+    ADDITIVE_32 = 0x20
+    CHAINING = 0x8
+    EXTERN_ENTRY = 0x3
+    EXTERN_NAME = 0x2
+    EXTERN_ORDINAL = 0x1
+    INTERNAL = 0x0
+    OBJECT_16 = 0x40
+    OFFSET_32 = 0x10
+    ORDINAL_8 = 0x80
+struct /object_entry | size=0x18 | align=0x1 | packing=disabled
+    +0x000 | 0x4    | /dword | size | Virtual size of object. This is the size of the object that will be allocated when the object is loaded. Theobject data length must be less than or equal to the total size of the pages in theEXE file for the object. This memory size must also be large enough to contain all ofthe iterated data and uninitialized data in the EXE file
+    +0x004 | 0x4    | /dword | base | Base address the object is relocated to
+    +0x008 | 0x4    | /dword | flags | Object flags. 0001h = Readable Object.0002h = Writable Object.0004h = Executable Object.The readable, writable and executable flags provide support for all possible protections.In systems where all of these protections are not supported, the loader will be responsiblefor making the appropriate protection match for the system.0008h = Resource Object.0010h = Discardable Object.0020h = Object is Shared.0040h = Object has Preload Pages.0080h = Object has Invalid Pages.0100h = Object has Zero Filled Pages.0200h = Object is Resident (valid for VDDs, PDDs only).0300h = Object is Resident & Contiguous (VDDs, PDDs only).0400h = Object is Resident & 'long-lockable' (VDDs, PDDs only).0800h = Reserved for system use.1000h = 16:16 Alias Required (80x86 Specific).2000h = Big/Default Bit Setting (80x86 Specific).The 'big/default' bit, for data segments, controls the setting of the Big bit in the segment descriptor.(The Big bit, or B-bit, determines whether ESP or SP is used as the stack pointer.)For code segments, this bit controls the setting of the Default bit in the segment descriptor.(The Default bit, or D-bit, determines whether the default word size is 32-bits or 16-bits.It also affects the interpretation of the instruction stream.)4000h = Object is conforming for code (80x86 Specific).8000h = Object I/O privilege level (80x86 Specific). Only used for 16:16 Alias Objects.
+    +0x00c | 0x4    | /dword | pageTableIndex | Object Page Table Index.This specifies the number of the first object page table entry for this object.The object page table specifies where in the EXE file a page can be found for agiven object and specifies per-page attributes.The object table entries are ordered by logical page in the object table.In other words the object table entries are sorted based on the object page table index value
+    +0x010 | 0x4    | /dword | pageCount | # of object page table entries for this object.Any logical pages at the end of an object that do not have an entry in the object pagetable associated with them are handled as zero filled or invalid pages by the loader.When the last logical pages of an object are not specified with an object page tableentry, they are treated as either zero filled pages or invalid pages based on the lastentry in the object page table for that object.If the last entry was neither a zero filled or invalid page, then theadditional pages are treated as zero filled pages
+    +0x014 | 0x4    | /dword | reserved
+enum /order | size=0x1
+    big = 0x1
+    little = 0x0
+enum /os_type | size=0x2
+    IBM = 0x5
+    OS/2 = 0x1
+    dos4 = 0x3
+    unknown = 0x0
+    win1 = 0x2
+    win3 = 0x4
+struct /page_entry | size=0x4 | align=0x1 | packing=disabled
+    +0x000 | 0x3    | /byte[3] | index | Page index into data pages
+    +0x003 | 0x1    | /byte | flags | Page flags
+enum /src_type | size=0x1
+    FIX_BYTE = 0x0
+    FIX_OFFSET16 = 0x5
+    FIX_OFFSET32 = 0x7
+    FIX_OFFSET32_SELF = 0x7
+    FIX_PTR1616  = 0x2
+    FIX_PTR1632 = 0x6
+    FIX_SEGMENT_16 = 0x3
+    INVALID1 = 0x1
+    INVALID4 = 0x4
+    SOURCELIST = 0x20
+    TO_ALIAS = 0x10

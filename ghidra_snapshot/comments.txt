@@ -1,0 +1,2 @@
+# One block per comment, opened by '=== <address> [<type>]'. Blocks are address-ordered,
+# then ordered by type within an address. Loader fixup comments are excluded.

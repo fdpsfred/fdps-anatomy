@@ -4,10 +4,10 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 匯出內容涵蓋 function 清單與簽章、calling convention、pool 標記、plate comment、struct 與 enum 定義、label、global 命名
-- [ ] 輸出為穩定排序的純文字，同樣的 Ghidra 狀態重複匯出得到相同結果（diff 不會有無意義的雜訊）
-- [ ] 所有檔案讀寫顯式指定 UTF-8 編碼
-- [ ] 匯出結果進版控，並在 README 說明匯出時機與 commit 的關係
-- [ ] 對目前未開工的狀態跑一次，產生基準快照
+- [x] 匯出內容涵蓋 function 清單與簽章、calling convention、pool 標記、plate comment、struct 與 enum 定義、label、global 命名
+- [x] 輸出為穩定排序的純文字，同樣的 Ghidra 狀態重複匯出得到相同結果（diff 不會有無意義的雜訊）
+- [x] 所有檔案讀寫顯式指定 UTF-8 編碼
+- [x] 匯出結果進版控，並在 README 說明匯出時機與 commit 的關係
+- [x] 對目前未開工的狀態跑一次，產生基準快照

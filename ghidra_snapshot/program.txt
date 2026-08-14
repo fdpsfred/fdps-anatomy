@@ -1,0 +1,24 @@
+# Program identity and section counters. No timestamps: identical state exports identically.
+name = FDPS.LE
+format = Linear Executable (LE-Style DOS)
+language = x86:LE:32:watcom
+compilerSpec = watcomcpp
+imageBase = 00000000
+executableMD5 = 5a0d15536b4c0de78b332df7ccdf0020
+executableSHA256 = 350f737fa9b65dba382746f26d774897dffde1a200e6655bf848080685e0f8c6
+
+# name | range | permissions | initialized | byte size
+block .object1 | 00010000-00057c5f | r-- | init=true | 0x47c60
+block .object2 | 00060000-0006c3bf | r-- | init=true | 0xc3c0
+block .object3 | 00070000-00070053 | r-- | init=true | 0x54
+block .image | .image::00000000-.image::000587e4 | --- | init=true | 0x587e5
+
+counts.bookmarks = 63
+counts.comments = 0
+counts.dataTypes = 11
+counts.definedData = 1559
+counts.excluded.loaderFixupComments = 6844
+counts.excluded.loaderFixupLabels = 6844
+counts.excluded.loaderFixupTypes = 6927
+counts.functions = 719
+counts.labels = 338

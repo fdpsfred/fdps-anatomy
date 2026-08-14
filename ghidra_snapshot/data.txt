@@ -1,0 +1,1561 @@
+# address | byte size | data type | primary symbol name | symbol source
+# Every defined data item, so that both global naming and type application are covered.
+000146e0 | 0x4 | /undefined4 | DAT_000146e0 | DEFAULT
+000146e4 | 0x4 | /undefined4 | DAT_000146e4 | DEFAULT
+000146e8 | 0x4 | /undefined4 | DAT_000146e8 | DEFAULT
+000146ec | 0x4 | /undefined4 | DAT_000146ec | DEFAULT
+000146f0 | 0x4 | /undefined4 | DAT_000146f0 | DEFAULT
+000146f4 | 0x4 | /undefined4 | DAT_000146f4 | DEFAULT
+000146f8 | 0x4 | /undefined4 | DAT_000146f8 | DEFAULT
+000146fc | 0x4 | /undefined4 | DAT_000146fc | DEFAULT
+00014700 | 0x4 | /undefined4 | DAT_00014700 | DEFAULT
+00014704 | 0x4 | /undefined4 | DAT_00014704 | DEFAULT
+00014708 | 0x4 | /undefined4 | DAT_00014708 | DEFAULT
+0001470c | 0x4 | /undefined4 | DAT_0001470c | DEFAULT
+00014710 | 0x4 | /undefined4 | DAT_00014710 | DEFAULT
+00014714 | 0x4 | /undefined4 | DAT_00014714 | DEFAULT
+00014718 | 0x4 | /undefined4 | DAT_00014718 | DEFAULT
+0001471c | 0x4 | /undefined4 | DAT_0001471c | DEFAULT
+00014720 | 0x4 | /undefined4 | DAT_00014720 | DEFAULT
+00014724 | 0x4 | /undefined4 | DAT_00014724 | DEFAULT
+00014728 | 0x4 | /undefined4 | DAT_00014728 | DEFAULT
+0001472c | 0x4 | /undefined4 | DAT_0001472c | DEFAULT
+00014730 | 0x4 | /undefined4 | DAT_00014730 | DEFAULT
+00014734 | 0x4 | /undefined4 | DAT_00014734 | DEFAULT
+00014738 | 0x4 | /undefined4 | DAT_00014738 | DEFAULT
+0001473c | 0x4 | /undefined4 | DAT_0001473c | DEFAULT
+00014740 | 0x4 | /undefined4 | DAT_00014740 | DEFAULT
+00014744 | 0x4 | /undefined4 | DAT_00014744 | DEFAULT
+00014758 | 0x4 | /undefined4 | DAT_00014758 | DEFAULT
+0001475c | 0x4 | /undefined4 | DAT_0001475c | DEFAULT
+00014770 | 0x4 | /undefined4 | DAT_00014770 | DEFAULT
+00014774 | 0x4 | /undefined4 | DAT_00014774 | DEFAULT
+00014788 | 0x4 | /undefined4 | DAT_00014788 | DEFAULT
+0001478c | 0x4 | /undefined4 | DAT_0001478c | DEFAULT
+000147ac | 0x4 | /undefined4 | DAT_000147ac | DEFAULT
+000147b0 | 0x4 | /undefined4 | LE_PAGE_9 | USER_DEFINED
+000147d0 | 0x4 | /undefined4 | DAT_000147d0 | DEFAULT
+000147d4 | 0x4 | /undefined4 | DAT_000147d4 | DEFAULT
+000147f4 | 0x4 | /undefined4 | DAT_000147f4 | DEFAULT
+000147f8 | 0x4 | /undefined4 | DAT_000147f8 | DEFAULT
+00014818 | 0x4 | /undefined4 | DAT_00014818 | DEFAULT
+0001481c | 0x4 | /undefined4 | DAT_0001481c | DEFAULT
+00014854 | 0x4 | /undefined4 | DAT_00014854 | DEFAULT
+00014858 | 0x1 | /undefined1 | DAT_00014858 | DEFAULT
+0001485c | 0x4 | /undefined4 | DAT_0001485c | DEFAULT
+00014860 | 0x4 | /undefined4 | DAT_00014860 | DEFAULT
+0001498c | 0x4 | /undefined4 | DAT_0001498c | DEFAULT
+00014990 | 0x4 | /undefined4 | DAT_00014990 | DEFAULT
+00014994 | 0x4 | /undefined4 | DAT_00014994 | DEFAULT
+00014998 | 0x4 | /undefined4 | DAT_00014998 | DEFAULT
+0001499c | 0x4 | /undefined4 | DAT_0001499c | DEFAULT
+000149a0 | 0x4 | /undefined4 | DAT_000149a0 | DEFAULT
+000149a4 | 0x4 | /undefined4 | DAT_000149a4 | DEFAULT
+000149a8 | 0x4 | /undefined4 | DAT_000149a8 | DEFAULT
+000149ac | 0x4 | /undefined4 | DAT_000149ac | DEFAULT
+000149b0 | 0x4 | /undefined4 | DAT_000149b0 | DEFAULT
+000149b4 | 0x4 | /undefined4 | DAT_000149b4 | DEFAULT
+000149b8 | 0x4 | /undefined4 | DAT_000149b8 | DEFAULT
+000149bc | 0x4 | /undefined4 | DAT_000149bc | DEFAULT
+000149c0 | 0x4 | /undefined4 | DAT_000149c0 | DEFAULT
+000149c4 | 0x4 | /undefined4 | DAT_000149c4 | DEFAULT
+000149c8 | 0x4 | /undefined4 | DAT_000149c8 | DEFAULT
+000149cc | 0x4 | /undefined4 | DAT_000149cc | DEFAULT
+000149d0 | 0x4 | /undefined4 | DAT_000149d0 | DEFAULT
+00014a9c | 0x4 | /undefined4 | DAT_00014a9c | DEFAULT
+00014aa0 | 0x4 | /undefined4 | DAT_00014aa0 | DEFAULT
+00014aa4 | 0x4 | /undefined4 | DAT_00014aa4 | DEFAULT
+00014aa8 | 0x4 | /undefined4 | DAT_00014aa8 | DEFAULT
+00018c60 | 0x4 | /undefined4 | DAT_00018c60 | DEFAULT
+00018c64 | 0x4 | /undefined4 | DAT_00018c64 | DEFAULT
+00018c78 | 0x4 | /undefined4 | DAT_00018c78 | DEFAULT
+00018c7c | 0x4 | /undefined4 | DAT_00018c7c | DEFAULT
+00018c90 | 0x4 | /undefined4 | DAT_00018c90 | DEFAULT
+00018c94 | 0x4 | /undefined4 | DAT_00018c94 | DEFAULT
+00018ca8 | 0x4 | /undefined4 | DAT_00018ca8 | DEFAULT
+00018cac | 0x4 | /undefined4 | DAT_00018cac | DEFAULT
+00018cc0 | 0x4 | /undefined4 | DAT_00018cc0 | DEFAULT
+00018cc4 | 0x4 | /undefined4 | DAT_00018cc4 | DEFAULT
+0001c280 | 0x4 | /undefined4 | DAT_0001c280 | DEFAULT
+0001c284 | 0x4 | /undefined4 | DAT_0001c284 | DEFAULT
+0001c2b4 | 0x4 | /undefined4 | DAT_0001c2b4 | DEFAULT
+0001c2b8 | 0x1 | /undefined1 | DAT_0001c2b8 | DEFAULT
+0001c2cd | 0x4 | /undefined4 | DAT_0001c2cd | DEFAULT
+0001c2d1 | 0x1 | /undefined1 | DAT_0001c2d1 | DEFAULT
+0001c2d2 | 0x4 | /undefined4 | DAT_0001c2d2 | DEFAULT
+0001c2d6 | 0x4 | /undefined4 | DAT_0001c2d6 | DEFAULT
+0001fd50 | 0x4 | /undefined4 | DAT_0001fd50 | DEFAULT
+0001fd54 | 0x4 | /undefined4 | DAT_0001fd54 | DEFAULT
+0001fd68 | 0x4 | /undefined4 | DAT_0001fd68 | DEFAULT
+0001fd6c | 0x4 | /undefined4 | DAT_0001fd6c | DEFAULT
+00024d50 | 0x4 | /undefined4 | DAT_00024d50 | DEFAULT
+00024d54 | 0x4 | /undefined4 | DAT_00024d54 | DEFAULT
+00024d58 | 0x4 | /undefined4 | DAT_00024d58 | DEFAULT
+00024d5c | 0x4 | /undefined4 | DAT_00024d5c | DEFAULT
+00024d60 | 0x4 | /undefined4 | DAT_00024d60 | DEFAULT
+00024d64 | 0x4 | /undefined4 | DAT_00024d64 | DEFAULT
+00024d68 | 0x4 | /undefined4 | DAT_00024d68 | DEFAULT
+00024d6c | 0x4 | /undefined4 | DAT_00024d6c | DEFAULT
+00027660 | 0x4 | /undefined4 | DAT_00027660 | DEFAULT
+00027664 | 0x4 | /undefined4 | DAT_00027664 | DEFAULT
+00027668 | 0x4 | /undefined4 | DAT_00027668 | DEFAULT
+0002766c | 0x4 | /undefined4 | DAT_0002766c | DEFAULT
+00027670 | 0x4 | /undefined4 | DAT_00027670 | DEFAULT
+00027674 | 0x4 | /undefined4 | DAT_00027674 | DEFAULT
+00027678 | 0x15 | /string | s_??????99????????????_00027678 | DEFAULT
+0002769c | 0x4 | /undefined4 | DAT_0002769c | DEFAULT
+000276a0 | 0x9 | /string | s_??????**_000276a0 | DEFAULT
+000276c4 | 0x4 | /undefined4 | DAT_000276c4 | DEFAULT
+000276c8 | 0x4 | /undefined4 | DAT_000276c8 | DEFAULT
+00029210 | 0x4 | /undefined4 | DAT_00029210 | DEFAULT
+0002ae40 | 0x4 | /undefined4 | DAT_0002ae40 | DEFAULT
+0002ae44 | 0x4 | /undefined4 | DAT_0002ae44 | DEFAULT
+0002b280 | 0x4 | /undefined4 | DAT_0002b280 | DEFAULT
+0002b284 | 0x4 | /undefined4 | DAT_0002b284 | DEFAULT
+0002b288 | 0x4 | /undefined4 | DAT_0002b288 | DEFAULT
+0002b28c | 0x2 | /undefined2 | DAT_0002b28c | DEFAULT
+0002b28e | 0x4 | /undefined4 | DAT_0002b28e | DEFAULT
+0002b292 | 0x1 | /undefined1 | DAT_0002b292 | DEFAULT
+0002b294 | 0x4 | /undefined4 | DAT_0002b294 | DEFAULT
+0002b298 | 0x4 | /undefined4 | DAT_0002b298 | DEFAULT
+0002b29c | 0x4 | /undefined4 | DAT_0002b29c | DEFAULT
+0002b2a0 | 0x4 | /undefined4 | DAT_0002b2a0 | DEFAULT
+0002b2a4 | 0x4 | /undefined4 | DAT_0002b2a4 | DEFAULT
+0002b2a8 | 0x1 | /undefined1 | DAT_0002b2a8 | DEFAULT
+0002b2a9 | 0x4 | /undefined4 | DAT_0002b2a9 | DEFAULT
+0002b2ad | 0x4 | /undefined4 | DAT_0002b2ad | DEFAULT
+0002b2b1 | 0x1 | /undefined1 | DAT_0002b2b1 | DEFAULT
+0002b2b2 | 0x4 | /undefined4 | DAT_0002b2b2 | DEFAULT
+0002b2b6 | 0x4 | /undefined4 | DAT_0002b2b6 | DEFAULT
+0002b2ba | 0x1 | /undefined1 | DAT_0002b2ba | DEFAULT
+0002b2bb | 0x4 | /undefined4 | DAT_0002b2bb | DEFAULT
+0002b2bf | 0x1 | /undefined1 | DAT_0002b2bf | DEFAULT
+0002b2d8 | 0x4 | /undefined4 | DAT_0002b2d8 | DEFAULT
+0002b2dc | 0x1 | /undefined1 | DAT_0002b2dc | DEFAULT
+0002b2f5 | 0x4 | /undefined4 | DAT_0002b2f5 | DEFAULT
+0002b2f9 | 0x1 | /undefined1 | DAT_0002b2f9 | DEFAULT
+0002b312 | 0x4 | /undefined4 | DAT_0002b312 | DEFAULT
+0002b316 | 0x4 | /undefined4 | DAT_0002b316 | DEFAULT
+0002b31a | 0x4 | /undefined4 | DAT_0002b31a | DEFAULT
+0002b31e | 0x4 | /undefined4 | DAT_0002b31e | DEFAULT
+0002b322 | 0x1 | /undefined1 | DAT_0002b322 | DEFAULT
+0002b323 | 0x4 | /undefined4 | DAT_0002b323 | DEFAULT
+0002b327 | 0x4 | /undefined4 | DAT_0002b327 | DEFAULT
+0002b32b | 0x4 | /undefined4 | DAT_0002b32b | DEFAULT
+0002b32f | 0x4 | /undefined4 | DAT_0002b32f | DEFAULT
+0002b333 | 0x1 | /undefined1 | DAT_0002b333 | DEFAULT
+0002b334 | 0x4 | /undefined4 | DAT_0002b334 | DEFAULT
+0002b338 | 0x4 | /undefined4 | DAT_0002b338 | DEFAULT
+0002b33c | 0x4 | /undefined4 | DAT_0002b33c | DEFAULT
+0002b340 | 0x4 | /undefined4 | DAT_0002b340 | DEFAULT
+0002b344 | 0x1 | /undefined1 | DAT_0002b344 | DEFAULT
+0002b345 | 0x4 | /undefined4 | DAT_0002b345 | DEFAULT
+0002b349 | 0x1 | /undefined1 | DAT_0002b349 | DEFAULT
+0002b362 | 0x4 | /undefined4 | DAT_0002b362 | DEFAULT
+0002b366 | 0x2 | /undefined2 | DAT_0002b366 | DEFAULT
+0002b380 | 0x4 | /undefined4 | DAT_0002b380 | DEFAULT
+0002b384 | 0x1 | /undefined1 | DAT_0002b384 | DEFAULT
+0002b39d | 0x4 | /undefined4 | DAT_0002b39d | DEFAULT
+0002b3a1 | 0x4 | /undefined4 | DAT_0002b3a1 | DEFAULT
+0002b3a5 | 0x4 | /undefined4 | DAT_0002b3a5 | DEFAULT
+0002b3a9 | 0x1 | /undefined1 | DAT_0002b3a9 | DEFAULT
+0002b3aa | 0x4 | /undefined4 | DAT_0002b3aa | DEFAULT
+0002b3ae | 0x4 | /undefined4 | DAT_0002b3ae | DEFAULT
+0002b3b2 | 0x4 | /undefined4 | DAT_0002b3b2 | DEFAULT
+0002b3b6 | 0x1 | /undefined1 | DAT_0002b3b6 | DEFAULT
+0002b3b7 | 0x4 | /undefined4 | DAT_0002b3b7 | DEFAULT
+0002b3bb | 0x4 | /undefined4 | DAT_0002b3bb | DEFAULT
+0002b3bf | 0x4 | /undefined4 | DAT_0002b3bf | DEFAULT
+0002b3c3 | 0x1 | /undefined1 | DAT_0002b3c3 | DEFAULT
+0002b3c4 | 0x4 | /undefined4 | DAT_0002b3c4 | DEFAULT
+0002b3c8 | 0x1 | /undefined1 | DAT_0002b3c8 | DEFAULT
+0002b3e1 | 0x4 | /undefined4 | DAT_0002b3e1 | DEFAULT
+0002b3e5 | 0x1 | /undefined1 | DAT_0002b3e5 | DEFAULT
+0002b3fe | 0x4 | /undefined4 | DAT_0002b3fe | DEFAULT
+0002b402 | 0x1 | /undefined1 | DAT_0002b402 | DEFAULT
+0002b41b | 0x4 | /undefined4 | DAT_0002b41b | DEFAULT
+0002b41f | 0x1 | /undefined1 | DAT_0002b41f | DEFAULT
+0002b430 | 0x4 | /undefined4 | DAT_0002b430 | DEFAULT
+0002b434 | 0x1 | /undefined1 | DAT_0002b434 | DEFAULT
+0002b445 | 0x4 | /undefined4 | DAT_0002b445 | DEFAULT
+0002b449 | 0x1 | /undefined1 | DAT_0002b449 | DEFAULT
+0002b45a | 0x4 | /undefined4 | DAT_0002b45a | DEFAULT
+0002b45e | 0x4 | /undefined4 | DAT_0002b45e | DEFAULT
+0002b462 | 0x4 | /undefined4 | DAT_0002b462 | DEFAULT
+0002b466 | 0x4 | /undefined4 | DAT_0002b466 | DEFAULT
+0002b46a | 0x2 | /undefined2 | DAT_0002b46a | DEFAULT
+0002b46c | 0x1 | /undefined1 | DAT_0002b46c | DEFAULT
+0002b46d | 0x4 | /undefined4 | DAT_0002b46d | DEFAULT
+0002b471 | 0x4 | /undefined4 | DAT_0002b471 | DEFAULT
+0002b475 | 0x4 | /undefined4 | DAT_0002b475 | DEFAULT
+0002b479 | 0x4 | /undefined4 | DAT_0002b479 | DEFAULT
+0002b47d | 0x2 | /undefined2 | DAT_0002b47d | DEFAULT
+0002b47f | 0x1 | /undefined1 | DAT_0002b47f | DEFAULT
+0002b480 | 0x4 | /undefined4 | DAT_0002b480 | DEFAULT
+0002b484 | 0x4 | /undefined4 | DAT_0002b484 | DEFAULT
+0002b488 | 0x4 | /undefined4 | DAT_0002b488 | DEFAULT
+0002b48c | 0x4 | /undefined4 | DAT_0002b48c | DEFAULT
+0002b490 | 0x2 | /undefined2 | DAT_0002b490 | DEFAULT
+0002b492 | 0x1 | /undefined1 | DAT_0002b492 | DEFAULT
+0002b493 | 0x4 | /undefined4 | DAT_0002b493 | DEFAULT
+0002b497 | 0x1 | /undefined1 | DAT_0002b497 | DEFAULT
+0002b4b0 | 0x4 | /undefined4 | DAT_0002b4b0 | DEFAULT
+0002b4b4 | 0x1 | /undefined1 | DAT_0002b4b4 | DEFAULT
+0002b4cd | 0x4 | /undefined4 | DAT_0002b4cd | DEFAULT
+0002b4d1 | 0x1 | /undefined1 | DAT_0002b4d1 | DEFAULT
+0002f6e0 | 0x4 | /undefined * | fix_off32_0002f6e0 | ANALYSIS
+0002f6e4 | 0x4 | /undefined * | fix_off32_0002f6e4 | ANALYSIS
+0002f6e8 | 0x4 | /undefined * | fix_off32_0002f6e8 | ANALYSIS
+0002f6ec | 0x4 | /undefined * | fix_off32_0002f6ec | ANALYSIS
+0002f6f0 | 0x4 | /undefined * | fix_off32_0002f6f0 | ANALYSIS
+0002f6f4 | 0x4 | /undefined * | fix_off32_0002f6f4 | ANALYSIS
+0002f6f8 | 0x4 | /undefined * | fix_off32_0002f6f8 | ANALYSIS
+0002f6fc | 0x4 | /undefined * | fix_off32_0002f6fc | ANALYSIS
+000304a0 | 0x4 | /undefined4 | DAT_000304a0 | DEFAULT
+000304a4 | 0x4 | /undefined4 | DAT_000304a4 | DEFAULT
+00031040 | 0x4 | /undefined4 | DAT_00031040 | DEFAULT
+00031044 | 0x4 | /undefined4 | DAT_00031044 | DEFAULT
+00031064 | 0x4 | /undefined4 | DAT_00031064 | DEFAULT
+00031068 | 0x4 | /undefined4 | DAT_00031068 | DEFAULT
+0003106c | 0x1 | /undefined1 | DAT_0003106c | DEFAULT
+0003106d | 0x4 | /undefined4 | DAT_0003106d | DEFAULT
+00031071 | 0x4 | /undefined4 | DAT_00031071 | DEFAULT
+00031075 | 0x1 | /undefined1 | DAT_00031075 | DEFAULT
+00031076 | 0x4 | /undefined4 | DAT_00031076 | DEFAULT
+0003107a | 0x4 | /undefined4 | DAT_0003107a | DEFAULT
+0003107e | 0x1 | /undefined1 | DAT_0003107e | DEFAULT
+0003107f | 0x4 | /undefined4 | DAT_0003107f | DEFAULT
+00031083 | 0x1 | /undefined1 | DAT_00031083 | DEFAULT
+00031098 | 0x10 | /string | s_magic0gg.saf_00031098 | DEFAULT
+000310ac | 0x10 | /string | - | -
+000310c0 | 0x4 | /undefined4 | DAT_000310c0 | DEFAULT
+000310c4 | 0x4 | /undefined4 | DAT_000310c4 | DEFAULT
+00031180 | 0x4 | /undefined4 | DAT_00031180 | DEFAULT
+00031184 | 0x4 | /undefined4 | DAT_00031184 | DEFAULT
+00031194 | 0x4 | /undefined4 | DAT_00031194 | DEFAULT
+00031198 | 0x4 | /undefined4 | DAT_00031198 | DEFAULT
+0003119c | 0x4 | /undefined4 | DAT_0003119c | DEFAULT
+000311a0 | 0x4 | /undefined4 | DAT_000311a0 | DEFAULT
+000311a4 | 0x4 | /undefined4 | DAT_000311a4 | DEFAULT
+000311a8 | 0x4 | /undefined4 | DAT_000311a8 | DEFAULT
+000311ac | 0x4 | /undefined4 | DAT_000311ac | DEFAULT
+000311b0 | 0x4 | /undefined4 | DAT_000311b0 | DEFAULT
+000311b4 | 0x4 | /undefined4 | DAT_000311b4 | DEFAULT
+000311b8 | 0x4 | /undefined4 | DAT_000311b8 | DEFAULT
+000311c8 | 0x4 | /undefined4 | DAT_000311c8 | DEFAULT
+000311cc | 0x4 | /undefined4 | DAT_000311cc | DEFAULT
+000311e0 | 0x4 | /undefined4 | DAT_000311e0 | DEFAULT
+000311e4 | 0x4 | /undefined4 | DAT_000311e4 | DEFAULT
+00031328 | 0x4 | /pointer | fix_off32_00031328 | ANALYSIS
+0003132c | 0x4 | /pointer | fix_off32_0003132c | ANALYSIS
+00031330 | 0x4 | /pointer | fix_off32_00031330 | ANALYSIS
+00031334 | 0x4 | /pointer | fix_off32_00031334 | ANALYSIS
+00031338 | 0x4 | /pointer | fix_off32_00031338 | ANALYSIS
+00035948 | 0x4 | /pointer | fix_off32_00035948 | ANALYSIS
+0003594c | 0x4 | /pointer | fix_off32_0003594c | ANALYSIS
+00035950 | 0x4 | /pointer | fix_off32_00035950 | ANALYSIS
+00035954 | 0x4 | /pointer | fix_off32_00035954 | ANALYSIS
+00035958 | 0x4 | /pointer | fix_off32_00035958 | ANALYSIS
+00035b84 | 0x4 | /pointer | fix_off32_00035b84 | ANALYSIS
+00035b88 | 0x4 | /pointer | fix_off32_00035b88 | ANALYSIS
+00035b8c | 0x4 | /pointer | fix_off32_00035b8c | ANALYSIS
+00035b90 | 0x4 | /pointer | fix_off32_00035b90 | ANALYSIS
+00035dac | 0x4 | /pointer | fix_off32_00035dac | ANALYSIS
+00035db0 | 0x4 | /pointer | fix_off32_00035db0 | ANALYSIS
+00035db4 | 0x4 | /pointer | fix_off32_00035db4 | ANALYSIS
+00035db8 | 0x4 | /pointer | fix_off32_00035db8 | ANALYSIS
+000360b8 | 0x4 | /pointer | fix_off32_000360b8 | ANALYSIS
+000360bc | 0x4 | /pointer | fix_off32_000360bc | ANALYSIS
+000360c0 | 0x4 | /pointer | fix_off32_000360c0 | ANALYSIS
+000360c4 | 0x4 | /pointer | fix_off32_000360c4 | ANALYSIS
+000360c8 | 0x4 | /pointer | fix_off32_000360c8 | ANALYSIS
+000362f8 | 0x4 | /pointer | fix_off32_000362f8 | ANALYSIS
+000362fc | 0x4 | /pointer | fix_off32_000362fc | ANALYSIS
+00036300 | 0x4 | /pointer | fix_off32_00036300 | ANALYSIS
+00036304 | 0x4 | /pointer | fix_off32_00036304 | ANALYSIS
+00036308 | 0x4 | /pointer | fix_off32_00036308 | ANALYSIS
+0003630c | 0x4 | /pointer | fix_off32_0003630c | ANALYSIS
+00039da0 | 0x4 | /undefined4 | DAT_00039da0 | DEFAULT
+00039da4 | 0x4 | /undefined4 | DAT_00039da4 | DEFAULT
+0004356d | 0x2 | /undefined2 | DAT_0004356d | DEFAULT
+00046394 | 0x4 | /undefined * | fix_off32_00046394 | ANALYSIS
+00046398 | 0x4 | /undefined * | fix_off32_00046398 | ANALYSIS
+0004639c | 0x4 | /undefined * | fix_off32_0004639c | ANALYSIS
+000463a0 | 0x4 | /undefined * | fix_off32_000463a0 | ANALYSIS
+000463a4 | 0x4 | /pointer | fix_off32_000463a4 | ANALYSIS
+000463a8 | 0x4 | /pointer | fix_off32_000463a8 | ANALYSIS
+000463ac | 0x4 | /pointer | fix_off32_000463ac | ANALYSIS
+000463b0 | 0x4 | /pointer | fix_off32_000463b0 | ANALYSIS
+00047598 | 0x4 | /undefined * | fix_off32_00047598 | ANALYSIS
+0004759c | 0x4 | /undefined * | fix_off32_0004759c | ANALYSIS
+000475a0 | 0x4 | /undefined * | fix_off32_000475a0 | ANALYSIS
+000475a4 | 0x4 | /undefined * | fix_off32_000475a4 | ANALYSIS
+0004785c | 0x4 | /undefined * | fix_off32_0004785c | ANALYSIS
+00047860 | 0x4 | /undefined * | fix_off32_00047860 | ANALYSIS
+00047864 | 0x4 | /undefined * | fix_off32_00047864 | ANALYSIS
+00047868 | 0x4 | /undefined * | fix_off32_00047868 | ANALYSIS
+0004786c | 0x4 | /undefined * | fix_off32_0004786c | ANALYSIS
+00047870 | 0x4 | /undefined * | fix_off32_00047870 | ANALYSIS
+00047874 | 0x4 | /undefined * | fix_off32_00047874 | ANALYSIS
+00047878 | 0x4 | /undefined * | fix_off32_00047878 | ANALYSIS
+0004787c | 0x4 | /undefined * | fix_off32_0004787c | ANALYSIS
+00047880 | 0x4 | /undefined * | fix_off32_00047880 | ANALYSIS
+0004e830 | 0x4 | /undefined4 | DAT_0004e830 | DEFAULT
+0004e834 | 0x4 | /undefined4 | DAT_0004e834 | DEFAULT
+0004e838 | 0x2 | /undefined2 | DAT_0004e838 | DEFAULT
+0004e8e8 | 0x4 | /undefined * | fix_off32_0004e8e8 | ANALYSIS
+0004e8ec | 0x4 | /undefined * | fix_off32_0004e8ec | ANALYSIS
+0004e8f0 | 0x4 | /undefined * | fix_off32_0004e8f0 | ANALYSIS
+0004e8f4 | 0x4 | /undefined * | fix_off32_0004e8f4 | ANALYSIS
+0004e8f8 | 0x4 | /undefined * | fix_off32_0004e8f8 | ANALYSIS
+0004e8fc | 0x4 | /undefined * | fix_off32_0004e8fc | ANALYSIS
+0004e900 | 0x4 | /undefined * | fix_off32_0004e900 | ANALYSIS
+0004e904 | 0x4 | /undefined * | fix_off32_0004e904 | ANALYSIS
+0004e908 | 0x4 | /undefined * | fix_off32_0004e908 | ANALYSIS
+0004e90c | 0x4 | /undefined * | fix_off32_0004e90c | ANALYSIS
+0004e910 | 0x4 | /undefined * | fix_off32_0004e910 | ANALYSIS
+0004e914 | 0x4 | /undefined * | fix_off32_0004e914 | ANALYSIS
+0004e918 | 0x4 | /undefined * | fix_off32_0004e918 | ANALYSIS
+0004e91c | 0x4 | /undefined * | fix_off32_0004e91c | ANALYSIS
+0004e920 | 0x4 | /undefined * | fix_off32_0004e920 | ANALYSIS
+0004e924 | 0x4 | /undefined * | fix_off32_0004e924 | ANALYSIS
+0004e928 | 0x4 | /undefined * | fix_off32_0004e928 | ANALYSIS
+0004e92c | 0x4 | /undefined * | fix_off32_0004e92c | ANALYSIS
+0004e930 | 0x4 | /undefined * | fix_off32_0004e930 | ANALYSIS
+0004e934 | 0x4 | /undefined * | fix_off32_0004e934 | ANALYSIS
+0004e938 | 0x4 | /undefined * | fix_off32_0004e938 | ANALYSIS
+0004e93c | 0x4 | /undefined * | fix_off32_0004e93c | ANALYSIS
+0004e940 | 0x4 | /undefined * | fix_off32_0004e940 | ANALYSIS
+0004e944 | 0x4 | /undefined * | fix_off32_0004e944 | ANALYSIS
+0004e948 | 0x4 | /undefined * | fix_off32_0004e948 | ANALYSIS
+0004e94c | 0x4 | /undefined * | fix_off32_0004e94c | ANALYSIS
+0004e950 | 0x4 | /undefined * | fix_off32_0004e950 | ANALYSIS
+0004e954 | 0x4 | /undefined * | fix_off32_0004e954 | ANALYSIS
+0004e958 | 0x4 | /undefined * | fix_off32_0004e958 | ANALYSIS
+0004e95c | 0x4 | /undefined * | fix_off32_0004e95c | ANALYSIS
+0004e960 | 0x4 | /undefined * | fix_off32_0004e960 | ANALYSIS
+0004e964 | 0x4 | /undefined * | fix_off32_0004e964 | ANALYSIS
+0004e968 | 0x4 | /undefined * | fix_off32_0004e968 | ANALYSIS
+0004e96c | 0x4 | /undefined * | fix_off32_0004e96c | ANALYSIS
+0004e970 | 0x4 | /undefined * | fix_off32_0004e970 | ANALYSIS
+0004e974 | 0x4 | /undefined * | fix_off32_0004e974 | ANALYSIS
+0004e978 | 0x4 | /undefined * | fix_off32_0004e978 | ANALYSIS
+0004e97c | 0x4 | /undefined * | fix_off32_0004e97c | ANALYSIS
+0004e980 | 0x4 | /undefined * | fix_off32_0004e980 | ANALYSIS
+0004e984 | 0x4 | /undefined * | fix_off32_0004e984 | ANALYSIS
+0004e988 | 0x4 | /undefined * | fix_off32_0004e988 | ANALYSIS
+0004e98c | 0x4 | /undefined * | fix_off32_0004e98c | ANALYSIS
+0004e990 | 0x4 | /undefined * | fix_off32_0004e990 | ANALYSIS
+0004e994 | 0x4 | /undefined * | fix_off32_0004e994 | ANALYSIS
+0004e998 | 0x4 | /undefined * | fix_off32_0004e998 | ANALYSIS
+0004e99c | 0x4 | /undefined * | fix_off32_0004e99c | ANALYSIS
+0004e9a0 | 0x4 | /undefined * | fix_off32_0004e9a0 | ANALYSIS
+0004e9a4 | 0x4 | /undefined * | fix_off32_0004e9a4 | ANALYSIS
+0004e9a8 | 0x4 | /undefined * | fix_off32_0004e9a8 | ANALYSIS
+0004e9ac | 0x4 | /undefined * | fix_off32_0004e9ac | ANALYSIS
+0004e9b0 | 0x4 | /undefined * | fix_off32_0004e9b0 | ANALYSIS
+0004e9b4 | 0x4 | /undefined * | fix_off32_0004e9b4 | ANALYSIS
+0004e9b8 | 0x4 | /undefined * | fix_off32_0004e9b8 | ANALYSIS
+0004e9bc | 0x4 | /undefined * | fix_off32_0004e9bc | ANALYSIS
+0004e9c0 | 0x4 | /undefined * | fix_off32_0004e9c0 | ANALYSIS
+0004e9c4 | 0x4 | /undefined * | fix_off32_0004e9c4 | ANALYSIS
+0004e9c8 | 0x4 | /undefined * | fix_off32_0004e9c8 | ANALYSIS
+0004e9cc | 0x4 | /undefined * | fix_off32_0004e9cc | ANALYSIS
+0004e9d0 | 0x4 | /undefined * | fix_off32_0004e9d0 | ANALYSIS
+0004e9d4 | 0x4 | /undefined * | fix_off32_0004e9d4 | ANALYSIS
+0004e9d8 | 0x4 | /undefined * | fix_off32_0004e9d8 | ANALYSIS
+0004e9dc | 0x4 | /undefined * | fix_off32_0004e9dc | ANALYSIS
+0004e9e0 | 0x4 | /undefined * | fix_off32_0004e9e0 | ANALYSIS
+0004e9e4 | 0x4 | /undefined * | fix_off32_0004e9e4 | ANALYSIS
+0004e9e8 | 0x4 | /undefined * | fix_off32_0004e9e8 | ANALYSIS
+0004e9ec | 0x4 | /undefined * | fix_off32_0004e9ec | ANALYSIS
+0004e9f0 | 0x4 | /undefined * | fix_off32_0004e9f0 | ANALYSIS
+0004e9f4 | 0x4 | /undefined * | fix_off32_0004e9f4 | ANALYSIS
+0004e9f8 | 0x4 | /undefined * | fix_off32_0004e9f8 | ANALYSIS
+0004e9fc | 0x4 | /undefined * | fix_off32_0004e9fc | ANALYSIS
+0004ea00 | 0x4 | /undefined * | fix_off32_0004ea00 | ANALYSIS
+0004ea04 | 0x4 | /undefined * | fix_off32_0004ea04 | ANALYSIS
+0004ea08 | 0x4 | /undefined * | fix_off32_0004ea08 | ANALYSIS
+0004ea0c | 0x4 | /undefined * | fix_off32_0004ea0c | ANALYSIS
+0004ea10 | 0x4 | /undefined * | fix_off32_0004ea10 | ANALYSIS
+0004ea14 | 0x4 | /undefined * | fix_off32_0004ea14 | ANALYSIS
+0004ea18 | 0x4 | /undefined * | fix_off32_0004ea18 | ANALYSIS
+0004ea1c | 0x4 | /undefined * | fix_off32_0004ea1c | ANALYSIS
+0004ea20 | 0x4 | /undefined * | fix_off32_0004ea20 | ANALYSIS
+0004ea24 | 0x4 | /undefined * | fix_off32_0004ea24 | ANALYSIS
+0004ea28 | 0x4 | /undefined * | fix_off32_0004ea28 | ANALYSIS
+0004ea2c | 0x4 | /undefined * | fix_off32_0004ea2c | ANALYSIS
+0004ea30 | 0x4 | /undefined * | fix_off32_0004ea30 | ANALYSIS
+0004ea34 | 0x4 | /undefined * | fix_off32_0004ea34 | ANALYSIS
+0004ea38 | 0x4 | /undefined * | fix_off32_0004ea38 | ANALYSIS
+0004ea3c | 0x4 | /undefined * | fix_off32_0004ea3c | ANALYSIS
+0004ea40 | 0x4 | /undefined * | fix_off32_0004ea40 | ANALYSIS
+0004ea44 | 0x4 | /undefined * | fix_off32_0004ea44 | ANALYSIS
+0004ea48 | 0x4 | /undefined * | fix_off32_0004ea48 | ANALYSIS
+0004ea4c | 0x4 | /undefined * | fix_off32_0004ea4c | ANALYSIS
+0004ea50 | 0x4 | /undefined * | fix_off32_0004ea50 | ANALYSIS
+0004ea54 | 0x4 | /undefined * | fix_off32_0004ea54 | ANALYSIS
+0004ea58 | 0x4 | /undefined * | fix_off32_0004ea58 | ANALYSIS
+0004ea5c | 0x4 | /undefined * | fix_off32_0004ea5c | ANALYSIS
+0004ea60 | 0x4 | /undefined * | fix_off32_0004ea60 | ANALYSIS
+0004ea64 | 0x4 | /undefined * | fix_off32_0004ea64 | ANALYSIS
+0004ea68 | 0x4 | /undefined * | fix_off32_0004ea68 | ANALYSIS
+0004ea6c | 0x4 | /undefined * | fix_off32_0004ea6c | ANALYSIS
+0004ea70 | 0x4 | /undefined * | fix_off32_0004ea70 | ANALYSIS
+0004ea74 | 0x4 | /undefined * | fix_off32_0004ea74 | ANALYSIS
+0004ea78 | 0x4 | /undefined * | fix_off32_0004ea78 | ANALYSIS
+0004ea7c | 0x4 | /undefined * | fix_off32_0004ea7c | ANALYSIS
+0004ea80 | 0x4 | /undefined * | fix_off32_0004ea80 | ANALYSIS
+0004ea84 | 0x4 | /undefined * | fix_off32_0004ea84 | ANALYSIS
+0004ea88 | 0x4 | /undefined * | fix_off32_0004ea88 | ANALYSIS
+0004ea8c | 0x4 | /undefined * | fix_off32_0004ea8c | ANALYSIS
+0004ea90 | 0x4 | /undefined * | fix_off32_0004ea90 | ANALYSIS
+0004ea94 | 0x4 | /undefined * | fix_off32_0004ea94 | ANALYSIS
+0004ea98 | 0x4 | /undefined * | fix_off32_0004ea98 | ANALYSIS
+0004ea9c | 0x4 | /undefined * | fix_off32_0004ea9c | ANALYSIS
+0004eaa0 | 0x4 | /undefined * | fix_off32_0004eaa0 | ANALYSIS
+0004eaa4 | 0x4 | /undefined * | fix_off32_0004eaa4 | ANALYSIS
+0004eaa8 | 0x4 | /undefined * | fix_off32_0004eaa8 | ANALYSIS
+0004eaac | 0x4 | /undefined * | fix_off32_0004eaac | ANALYSIS
+0004eab0 | 0x4 | /undefined * | fix_off32_0004eab0 | ANALYSIS
+0004eab4 | 0x4 | /undefined * | fix_off32_0004eab4 | ANALYSIS
+0004eab8 | 0x4 | /undefined * | fix_off32_0004eab8 | ANALYSIS
+0004eabc | 0x4 | /undefined * | fix_off32_0004eabc | ANALYSIS
+0004eac0 | 0x4 | /undefined * | fix_off32_0004eac0 | ANALYSIS
+0004eac4 | 0x4 | /undefined * | fix_off32_0004eac4 | ANALYSIS
+0004eac8 | 0x4 | /undefined * | fix_off32_0004eac8 | ANALYSIS
+0004eacc | 0x4 | /undefined * | fix_off32_0004eacc | ANALYSIS
+0004ead0 | 0x4 | /undefined * | fix_off32_0004ead0 | ANALYSIS
+0004ead4 | 0x4 | /undefined * | fix_off32_0004ead4 | ANALYSIS
+0004ead8 | 0x4 | /undefined * | fix_off32_0004ead8 | ANALYSIS
+0004eadc | 0x4 | /undefined * | fix_off32_0004eadc | ANALYSIS
+0004eae0 | 0x4 | /undefined * | fix_off32_0004eae0 | ANALYSIS
+0004eae4 | 0x4 | /undefined * | fix_off32_0004eae4 | ANALYSIS
+0004eae8 | 0x4 | /undefined * | fix_off32_0004eae8 | ANALYSIS
+0004eaec | 0x4 | /undefined * | fix_off32_0004eaec | ANALYSIS
+0004eaf0 | 0x4 | /undefined * | fix_off32_0004eaf0 | ANALYSIS
+0004eaf4 | 0x4 | /undefined * | fix_off32_0004eaf4 | ANALYSIS
+0004eaf8 | 0x4 | /undefined * | fix_off32_0004eaf8 | ANALYSIS
+0004eafc | 0x4 | /undefined * | fix_off32_0004eafc | ANALYSIS
+0004eb00 | 0x4 | /undefined * | fix_off32_0004eb00 | ANALYSIS
+0004eb04 | 0x4 | /undefined * | fix_off32_0004eb04 | ANALYSIS
+0004eb08 | 0x4 | /undefined * | fix_off32_0004eb08 | ANALYSIS
+0004eb0c | 0x4 | /undefined * | fix_off32_0004eb0c | ANALYSIS
+0004eb10 | 0x4 | /undefined * | fix_off32_0004eb10 | ANALYSIS
+0004eb14 | 0x4 | /undefined * | fix_off32_0004eb14 | ANALYSIS
+0004eb18 | 0x4 | /undefined * | fix_off32_0004eb18 | ANALYSIS
+0004eb1c | 0x4 | /undefined * | fix_off32_0004eb1c | ANALYSIS
+0004eb20 | 0x4 | /undefined * | fix_off32_0004eb20 | ANALYSIS
+0004eb24 | 0x4 | /undefined * | fix_off32_0004eb24 | ANALYSIS
+0004eb28 | 0x4 | /undefined * | fix_off32_0004eb28 | ANALYSIS
+0004eb2c | 0x4 | /undefined * | fix_off32_0004eb2c | ANALYSIS
+0004eb30 | 0x4 | /undefined * | fix_off32_0004eb30 | ANALYSIS
+0004eb34 | 0x4 | /undefined * | fix_off32_0004eb34 | ANALYSIS
+0004eb38 | 0x4 | /undefined * | fix_off32_0004eb38 | ANALYSIS
+0004eb3c | 0x4 | /undefined * | fix_off32_0004eb3c | ANALYSIS
+0004eb40 | 0x4 | /undefined * | fix_off32_0004eb40 | ANALYSIS
+0004eb44 | 0x4 | /undefined * | fix_off32_0004eb44 | ANALYSIS
+0004eb48 | 0x4 | /undefined * | fix_off32_0004eb48 | ANALYSIS
+0004eb4c | 0x4 | /undefined * | fix_off32_0004eb4c | ANALYSIS
+0004eb50 | 0x4 | /undefined * | fix_off32_0004eb50 | ANALYSIS
+0004eb54 | 0x4 | /undefined * | fix_off32_0004eb54 | ANALYSIS
+0004eb58 | 0x4 | /undefined * | fix_off32_0004eb58 | ANALYSIS
+0004eb5c | 0x4 | /undefined * | fix_off32_0004eb5c | ANALYSIS
+0004eb60 | 0x4 | /undefined * | fix_off32_0004eb60 | ANALYSIS
+0004eb64 | 0x4 | /undefined * | fix_off32_0004eb64 | ANALYSIS
+0004eb68 | 0x4 | /undefined * | fix_off32_0004eb68 | ANALYSIS
+0004eb6c | 0x4 | /undefined * | fix_off32_0004eb6c | ANALYSIS
+0004eb70 | 0x4 | /undefined * | fix_off32_0004eb70 | ANALYSIS
+0004eb74 | 0x4 | /undefined * | fix_off32_0004eb74 | ANALYSIS
+0004eb78 | 0x4 | /undefined * | fix_off32_0004eb78 | ANALYSIS
+0004eb7c | 0x4 | /undefined * | fix_off32_0004eb7c | ANALYSIS
+0004eb80 | 0x4 | /undefined * | fix_off32_0004eb80 | ANALYSIS
+0004eb84 | 0x4 | /undefined * | fix_off32_0004eb84 | ANALYSIS
+0004eb88 | 0x4 | /undefined * | fix_off32_0004eb88 | ANALYSIS
+0004eb8c | 0x4 | /undefined * | fix_off32_0004eb8c | ANALYSIS
+0004eb90 | 0x4 | /undefined * | fix_off32_0004eb90 | ANALYSIS
+0004eb94 | 0x4 | /undefined * | fix_off32_0004eb94 | ANALYSIS
+0004eb98 | 0x4 | /undefined * | fix_off32_0004eb98 | ANALYSIS
+0004eb9c | 0x4 | /undefined * | fix_off32_0004eb9c | ANALYSIS
+0004eba0 | 0x4 | /undefined * | fix_off32_0004eba0 | ANALYSIS
+0004eba4 | 0x4 | /undefined * | fix_off32_0004eba4 | ANALYSIS
+0004f8bc | 0x4 | /undefined * | fix_off32_0004f8bc | ANALYSIS
+0004f8c0 | 0x4 | /undefined * | fix_off32_0004f8c0 | ANALYSIS
+0004f8c4 | 0x4 | /undefined * | fix_off32_0004f8c4 | ANALYSIS
+0004f8c8 | 0x4 | /undefined * | fix_off32_0004f8c8 | ANALYSIS
+0004f8cc | 0x4 | /undefined * | fix_off32_0004f8cc | ANALYSIS
+0004f8d0 | 0x4 | /undefined * | fix_off32_0004f8d0 | ANALYSIS
+0004f8d4 | 0x4 | /undefined * | fix_off32_0004f8d4 | ANALYSIS
+0004f8d8 | 0x4 | /undefined * | fix_off32_0004f8d8 | ANALYSIS
+0004fb58 | 0x4 | /undefined * | fix_off32_0004fb58 | ANALYSIS
+0004fb5c | 0x4 | /undefined * | fix_off32_0004fb5c | ANALYSIS
+0004fb60 | 0x4 | /undefined * | fix_off32_0004fb60 | ANALYSIS
+0004fb64 | 0x4 | /undefined * | fix_off32_0004fb64 | ANALYSIS
+0004fb68 | 0x4 | /undefined * | fix_off32_0004fb68 | ANALYSIS
+0004fb6c | 0x4 | /undefined * | fix_off32_0004fb6c | ANALYSIS
+0004fb70 | 0x4 | /undefined * | fix_off32_0004fb70 | ANALYSIS
+0004fb74 | 0x4 | /undefined * | fix_off32_0004fb74 | ANALYSIS
+0005000c | 0x4 | /undefined * | fix_off32_0005000c | ANALYSIS
+00050010 | 0x4 | /undefined * | fix_off32_00050010 | ANALYSIS
+00050014 | 0x4 | /undefined * | fix_off32_00050014 | ANALYSIS
+00050018 | 0x4 | /undefined * | fix_off32_00050018 | ANALYSIS
+0005001c | 0x4 | /undefined * | fix_off32_0005001c | ANALYSIS
+00050020 | 0x4 | /undefined * | fix_off32_00050020 | ANALYSIS
+00050024 | 0x4 | /undefined * | fix_off32_00050024 | ANALYSIS
+00050028 | 0x4 | /undefined * | fix_off32_00050028 | ANALYSIS
+000514a6 | 0x2 | /undefined2 | DAT_000514a6 | DEFAULT
+000514b6 | 0x2 | /undefined2 | DAT_000514b6 | DEFAULT
+000516d4 | 0x4 | /undefined4 | DAT_000516d4 | DEFAULT
+000516d8 | 0x4 | /undefined4 | DAT_000516d8 | DEFAULT
+000516dc | 0x2 | /undefined2 | DAT_000516dc | DEFAULT
+000516de | 0x4 | /undefined4 | DAT_000516de | DEFAULT
+000516e2 | 0x4 | /undefined4 | DAT_000516e2 | DEFAULT
+000516e6 | 0x2 | /undefined2 | DAT_000516e6 | DEFAULT
+0005289c | 0x4 | /undefined * | fix_off32_0005289c | ANALYSIS
+000528a0 | 0x4 | /undefined * | fix_off32_000528a0 | ANALYSIS
+000528a4 | 0x4 | /undefined * | fix_off32_000528a4 | ANALYSIS
+000528a8 | 0x4 | /undefined * | fix_off32_000528a8 | ANALYSIS
+000528bc | 0x4 | /undefined * | fix_off32_000528bc | ANALYSIS
+000528c0 | 0x4 | /undefined * | fix_off32_000528c0 | ANALYSIS
+000528c4 | 0x4 | /undefined * | fix_off32_000528c4 | ANALYSIS
+000528c8 | 0x4 | /undefined * | fix_off32_000528c8 | ANALYSIS
+0005291c | 0x4 | /undefined * | fix_off32_0005291c | ANALYSIS
+00052920 | 0x4 | /undefined * | fix_off32_00052920 | ANALYSIS
+00052924 | 0x4 | /undefined * | fix_off32_00052924 | ANALYSIS
+00052928 | 0x4 | /undefined * | fix_off32_00052928 | ANALYSIS
+0005292c | 0x4 | /undefined * | fix_off32_0005292c | ANALYSIS
+00052930 | 0x4 | /undefined * | fix_off32_00052930 | ANALYSIS
+00052934 | 0x4 | /undefined * | fix_off32_00052934 | ANALYSIS
+00052938 | 0x4 | /undefined * | fix_off32_00052938 | ANALYSIS
+0005293c | 0x4 | /undefined * | fix_off32_0005293c | ANALYSIS
+00052940 | 0x4 | /undefined * | fix_off32_00052940 | ANALYSIS
+00052944 | 0x4 | /undefined * | fix_off32_00052944 | ANALYSIS
+00052948 | 0x4 | /undefined * | fix_off32_00052948 | ANALYSIS
+0005294c | 0x4 | /undefined * | fix_off32_0005294c | ANALYSIS
+00052950 | 0x4 | /undefined * | fix_off32_00052950 | ANALYSIS
+00052954 | 0x4 | /undefined * | fix_off32_00052954 | ANALYSIS
+00052958 | 0x4 | /undefined * | fix_off32_00052958 | ANALYSIS
+0005295c | 0x4 | /undefined * | fix_off32_0005295c | ANALYSIS
+00052960 | 0x4 | /undefined * | fix_off32_00052960 | ANALYSIS
+0005299c | 0x4 | /undefined * | fix_off32_0005299c | ANALYSIS
+000529a0 | 0x4 | /undefined * | fix_off32_000529a0 | ANALYSIS
+000529a4 | 0x4 | /undefined * | fix_off32_000529a4 | ANALYSIS
+000529a8 | 0x4 | /undefined * | fix_off32_000529a8 | ANALYSIS
+000529bc | 0x4 | /undefined * | fix_off32_000529bc | ANALYSIS
+000529c0 | 0x4 | /undefined * | fix_off32_000529c0 | ANALYSIS
+000529c4 | 0x4 | /undefined * | fix_off32_000529c4 | ANALYSIS
+000529c8 | 0x4 | /undefined * | fix_off32_000529c8 | ANALYSIS
+00052a1c | 0x4 | /undefined * | fix_off32_00052a1c | ANALYSIS
+00052a20 | 0x4 | /undefined * | fix_off32_00052a20 | ANALYSIS
+00052a24 | 0x4 | /undefined * | fix_off32_00052a24 | ANALYSIS
+00052a28 | 0x4 | /undefined * | fix_off32_00052a28 | ANALYSIS
+00052a2c | 0x4 | /undefined * | fix_off32_00052a2c | ANALYSIS
+00052a30 | 0x4 | /undefined * | fix_off32_00052a30 | ANALYSIS
+00052a34 | 0x4 | /undefined * | fix_off32_00052a34 | ANALYSIS
+00052a38 | 0x4 | /undefined * | fix_off32_00052a38 | ANALYSIS
+00052a3c | 0x4 | /undefined * | fix_off32_00052a3c | ANALYSIS
+00052a40 | 0x4 | /undefined * | fix_off32_00052a40 | ANALYSIS
+00052a44 | 0x4 | /undefined * | fix_off32_00052a44 | ANALYSIS
+00052a48 | 0x4 | /undefined * | fix_off32_00052a48 | ANALYSIS
+00052a4c | 0x4 | /undefined * | fix_off32_00052a4c | ANALYSIS
+00052a50 | 0x4 | /undefined * | fix_off32_00052a50 | ANALYSIS
+00052a54 | 0x4 | /undefined * | fix_off32_00052a54 | ANALYSIS
+00052a58 | 0x4 | /undefined * | fix_off32_00052a58 | ANALYSIS
+00052a5c | 0x4 | /undefined * | fix_off32_00052a5c | ANALYSIS
+00052a60 | 0x4 | /undefined * | fix_off32_00052a60 | ANALYSIS
+00052a64 | 0x4 | /undefined * | fix_off32_00052a64 | ANALYSIS
+00052a68 | 0x4 | /undefined * | fix_off32_00052a68 | ANALYSIS
+00052a74 | 0x4 | /undefined * | fix_off32_00052a74 | ANALYSIS
+00052a78 | 0x4 | /undefined * | fix_off32_00052a78 | ANALYSIS
+00052a7c | 0x4 | /undefined * | fix_off32_00052a7c | ANALYSIS
+00052a80 | 0x4 | /undefined * | fix_off32_00052a80 | ANALYSIS
+00052a84 | 0x4 | /undefined * | fix_off32_00052a84 | ANALYSIS
+00052a88 | 0x4 | /undefined * | fix_off32_00052a88 | ANALYSIS
+00052a94 | 0x4 | /undefined * | fix_off32_00052a94 | ANALYSIS
+00052a98 | 0x4 | /undefined * | fix_off32_00052a98 | ANALYSIS
+00052a9c | 0x4 | /undefined * | fix_off32_00052a9c | ANALYSIS
+00052aa0 | 0x4 | /undefined * | fix_off32_00052aa0 | ANALYSIS
+00052aa4 | 0x4 | /undefined * | fix_off32_00052aa4 | ANALYSIS
+00052aa8 | 0x4 | /undefined * | fix_off32_00052aa8 | ANALYSIS
+00052ab4 | 0x4 | /undefined * | fix_off32_00052ab4 | ANALYSIS
+00052ab8 | 0x4 | /undefined * | fix_off32_00052ab8 | ANALYSIS
+00052abc | 0x4 | /undefined * | fix_off32_00052abc | ANALYSIS
+00052ac0 | 0x4 | /undefined * | fix_off32_00052ac0 | ANALYSIS
+00052ac4 | 0x4 | /undefined * | fix_off32_00052ac4 | ANALYSIS
+00052ac8 | 0x4 | /undefined * | fix_off32_00052ac8 | ANALYSIS
+00052ad4 | 0x4 | /undefined * | fix_off32_00052ad4 | ANALYSIS
+00052ad8 | 0x4 | /undefined * | fix_off32_00052ad8 | ANALYSIS
+00052adc | 0x4 | /undefined * | fix_off32_00052adc | ANALYSIS
+00052ae0 | 0x4 | /undefined * | fix_off32_00052ae0 | ANALYSIS
+00052ae4 | 0x4 | /undefined * | fix_off32_00052ae4 | ANALYSIS
+00052ae8 | 0x4 | /undefined * | fix_off32_00052ae8 | ANALYSIS
+00052af4 | 0x4 | /undefined * | fix_off32_00052af4 | ANALYSIS
+00052af8 | 0x4 | /undefined * | fix_off32_00052af8 | ANALYSIS
+00052afc | 0x4 | /undefined * | fix_off32_00052afc | ANALYSIS
+00052b00 | 0x4 | /undefined * | fix_off32_00052b00 | ANALYSIS
+00052b04 | 0x4 | /undefined * | fix_off32_00052b04 | ANALYSIS
+00052b08 | 0x4 | /undefined * | fix_off32_00052b08 | ANALYSIS
+00052b14 | 0x4 | /undefined * | fix_off32_00052b14 | ANALYSIS
+00052b18 | 0x4 | /undefined * | fix_off32_00052b18 | ANALYSIS
+00052b1c | 0x4 | /undefined * | fix_off32_00052b1c | ANALYSIS
+00052b20 | 0x4 | /undefined * | fix_off32_00052b20 | ANALYSIS
+00052b24 | 0x4 | /undefined * | fix_off32_00052b24 | ANALYSIS
+00052b28 | 0x4 | /undefined * | fix_off32_00052b28 | ANALYSIS
+00052b34 | 0x4 | /undefined * | fix_off32_00052b34 | ANALYSIS
+00052b38 | 0x4 | /undefined * | fix_off32_00052b38 | ANALYSIS
+00052b3c | 0x4 | /undefined * | fix_off32_00052b3c | ANALYSIS
+00052b40 | 0x4 | /undefined * | fix_off32_00052b40 | ANALYSIS
+00052b44 | 0x4 | /undefined * | fix_off32_00052b44 | ANALYSIS
+00052b48 | 0x4 | /undefined * | fix_off32_00052b48 | ANALYSIS
+00052b54 | 0x4 | /undefined * | fix_off32_00052b54 | ANALYSIS
+00052b58 | 0x4 | /undefined * | fix_off32_00052b58 | ANALYSIS
+00052b5c | 0x4 | /undefined * | fix_off32_00052b5c | ANALYSIS
+00052b60 | 0x4 | /undefined * | fix_off32_00052b60 | ANALYSIS
+00052b64 | 0x4 | /undefined * | fix_off32_00052b64 | ANALYSIS
+00052b68 | 0x4 | /undefined * | fix_off32_00052b68 | ANALYSIS
+00052b74 | 0x4 | /undefined * | fix_off32_00052b74 | ANALYSIS
+00052b78 | 0x4 | /undefined * | fix_off32_00052b78 | ANALYSIS
+00052b7c | 0x4 | /undefined * | fix_off32_00052b7c | ANALYSIS
+00052b80 | 0x4 | /undefined * | fix_off32_00052b80 | ANALYSIS
+00052b84 | 0x4 | /undefined * | fix_off32_00052b84 | ANALYSIS
+00052b88 | 0x4 | /undefined * | fix_off32_00052b88 | ANALYSIS
+00052bdc | 0x4 | /undefined * | fix_off32_00052bdc | ANALYSIS
+00052be0 | 0x4 | /undefined * | fix_off32_00052be0 | ANALYSIS
+00052be4 | 0x4 | /undefined * | fix_off32_00052be4 | ANALYSIS
+00052be8 | 0x4 | /undefined * | fix_off32_00052be8 | ANALYSIS
+00052bf4 | 0x4 | /undefined * | fix_off32_00052bf4 | ANALYSIS
+00052bf8 | 0x4 | /undefined * | fix_off32_00052bf8 | ANALYSIS
+00052bfc | 0x4 | /undefined * | fix_off32_00052bfc | ANALYSIS
+00052c00 | 0x4 | /undefined * | fix_off32_00052c00 | ANALYSIS
+00052c04 | 0x4 | /undefined * | fix_off32_00052c04 | ANALYSIS
+00052c08 | 0x4 | /undefined * | fix_off32_00052c08 | ANALYSIS
+00052c18 | 0x4 | /pointer | fix_off32_00052c18 | ANALYSIS
+00054a75 | 0x25 | /string | s_0123456789abcdefghijklmnopqrstuv_00054a75 | DEFAULT
+00054b4b | 0x25 | /string | s_0123456789abcdefghijklmnopqrstuv_00054b4b | DEFAULT
+00060004 | 0x4 | /undefined4 | DAT_00060004 | DEFAULT
+00060008 | 0x1 | /undefined1 | DAT_00060008 | DEFAULT
+0006000c | 0x4 | /undefined4 | DAT_0006000c | DEFAULT
+00060010 | 0x1 | /undefined1 | DAT_00060010 | DEFAULT
+00060014 | 0x4 | /undefined4 | DAT_00060014 | DEFAULT
+00060018 | 0x4 | /undefined4 | DAT_00060018 | DEFAULT
+0006001c | 0xa | /string | s_Fight.vfs_0006001c | DEFAULT
+00060026 | 0xb | /string | s_FigAct.vfs_00060026 | DEFAULT
+00060031 | 0xd | /string | s_BackGrnd.vfs_00060031 | DEFAULT
+00060070 | 0x1 | /undefined1 | DAT_00060070 | DEFAULT
+00060074 | 0x4 | /pointer | fix_off32_00060074 | ANALYSIS
+00060078 | 0x4 | /undefined * | fix_off32_00060078 | ANALYSIS
+0006007c | 0x4 | /undefined * | fix_off32_0006007c | ANALYSIS
+00060080 | 0x4 | /undefined * | fix_off32_00060080 | ANALYSIS
+00060084 | 0x4 | /undefined * | fix_off32_00060084 | ANALYSIS
+00060088 | 0x4 | /undefined * | fix_off32_00060088 | ANALYSIS
+0006008c | 0x4 | /undefined * | fix_off32_0006008c | ANALYSIS
+00060090 | 0x4 | /undefined * | fix_off32_00060090 | ANALYSIS
+00060094 | 0x4 | /undefined * | fix_off32_00060094 | ANALYSIS
+00060098 | 0x4 | /undefined * | fix_off32_00060098 | ANALYSIS
+0006009c | 0x4 | /undefined * | fix_off32_0006009c | ANALYSIS
+000600a0 | 0x4 | /undefined * | fix_off32_000600a0 | ANALYSIS
+000600a4 | 0x4 | /undefined * | fix_off32_000600a4 | ANALYSIS
+000600a8 | 0x4 | /undefined * | fix_off32_000600a8 | ANALYSIS
+000600ac | 0x4 | /undefined * | fix_off32_000600ac | ANALYSIS
+000600b0 | 0x4 | /undefined * | fix_off32_000600b0 | ANALYSIS
+000600b4 | 0x4 | /undefined * | fix_off32_000600b4 | ANALYSIS
+000600b8 | 0x4 | /undefined * | fix_off32_000600b8 | ANALYSIS
+000600bc | 0x4 | /undefined * | fix_off32_000600bc | ANALYSIS
+000600c0 | 0x4 | /undefined * | fix_off32_000600c0 | ANALYSIS
+000600c4 | 0x4 | /undefined * | fix_off32_000600c4 | ANALYSIS
+000600c8 | 0x4 | /undefined * | fix_off32_000600c8 | ANALYSIS
+000600cc | 0x4 | /undefined * | fix_off32_000600cc | ANALYSIS
+000600d0 | 0x4 | /undefined * | fix_off32_000600d0 | ANALYSIS
+000600d4 | 0x4 | /undefined * | fix_off32_000600d4 | ANALYSIS
+000600d8 | 0x4 | /undefined * | fix_off32_000600d8 | ANALYSIS
+000600dc | 0x4 | /undefined * | fix_off32_000600dc | ANALYSIS
+000600e0 | 0x4 | /undefined * | fix_off32_000600e0 | ANALYSIS
+000600e4 | 0x4 | /undefined * | fix_off32_000600e4 | ANALYSIS
+000600e8 | 0x4 | /undefined * | fix_off32_000600e8 | ANALYSIS
+000600ec | 0xc | /string | s_IconAni.vfs_000600ec | DEFAULT
+000600f8 | 0xa | /string | s_Field.vfs_000600f8 | DEFAULT
+00060102 | 0xb | /string | s_Field1.vfs_00060102 | DEFAULT
+0006010d | 0xb | /string | s_Field2.vfs_0006010d | DEFAULT
+00060118 | 0x8 | /string | s_FDE.SAV_00060118 | DEFAULT
+00060120 | 0x4 | /undefined4 | DAT_00060120 | DEFAULT
+00060124 | 0x4 | /undefined4 | DAT_00060124 | DEFAULT
+00060128 | 0x9 | /string | s_MISC.VFS_00060128 | DEFAULT
+00060131 | 0x1 | /undefined1 | DAT_00060131 | DEFAULT
+00060138 | 0x4 | /undefined4 | DAT_00060138 | DEFAULT
+0006013c | 0x4 | /undefined4 | DAT_0006013c | DEFAULT
+00060140 | 0x4 | /undefined4 | DAT_00060140 | DEFAULT
+00060144 | 0x4 | /undefined4 | DAT_00060144 | DEFAULT
+00060148 | 0x4 | /undefined4 | DAT_00060148 | DEFAULT
+0006014c | 0x1 | /undefined1 | DAT_0006014c | DEFAULT
+00060150 | 0x4 | /undefined4 | DAT_00060150 | DEFAULT
+00060154 | 0x4 | /undefined4 | DAT_00060154 | DEFAULT
+00060158 | 0x1 | /undefined1 | DAT_00060158 | DEFAULT
+00060159 | 0x1 | /undefined1 | DAT_00060159 | DEFAULT
+0006015c | 0x4 | /undefined4 | DAT_0006015c | DEFAULT
+00060160 | 0x4 | /undefined4 | DAT_00060160 | DEFAULT
+00060164 | 0x4 | /undefined4 | DAT_00060164 | DEFAULT
+00060168 | 0x4 | /undefined4 | DAT_00060168 | DEFAULT
+0006016c | 0x2 | /undefined2 | DAT_0006016c | DEFAULT
+00060170 | 0x4 | /undefined4 | DAT_00060170 | DEFAULT
+000601a4 | 0x4 | /undefined4 | DAT_000601a4 | DEFAULT
+000601a8 | 0x4 | /undefined4 | DAT_000601a8 | DEFAULT
+000601ac | 0x4 | /undefined4 | DAT_000601ac | DEFAULT
+000601b0 | 0x4 | /undefined4 | DAT_000601b0 | DEFAULT
+000601b4 | 0x4 | /undefined4 | DAT_000601b4 | DEFAULT
+000601b8 | 0x4 | /undefined4 | DAT_000601b8 | DEFAULT
+000601bc | 0x4 | /undefined4 | DAT_000601bc | DEFAULT
+000601c0 | 0x4 | /undefined4 | DAT_000601c0 | DEFAULT
+000601c4 | 0x4 | /undefined * | fix_off32_000601c4 | ANALYSIS
+000601c8 | 0x4 | /undefined * | fix_off32_000601c8 | ANALYSIS
+000601cc | 0x4 | /undefined * | fix_off32_000601cc | ANALYSIS
+000601d0 | 0x4 | /undefined * | fix_off32_000601d0 | ANALYSIS
+000601d4 | 0x4 | /undefined * | fix_off32_000601d4 | ANALYSIS
+000601d8 | 0x4 | /undefined * | fix_off32_000601d8 | ANALYSIS
+000601dc | 0x4 | /undefined * | fix_off32_000601dc | ANALYSIS
+000601e0 | 0x4 | /undefined * | fix_off32_000601e0 | ANALYSIS
+000601e4 | 0x4 | /undefined * | fix_off32_000601e4 | ANALYSIS
+000601e8 | 0x4 | /undefined * | fix_off32_000601e8 | ANALYSIS
+000601ec | 0x4 | /undefined * | fix_off32_000601ec | ANALYSIS
+000601f0 | 0x4 | /undefined * | fix_off32_000601f0 | ANALYSIS
+000601f4 | 0x4 | /undefined * | fix_off32_000601f4 | ANALYSIS
+000601f8 | 0x4 | /undefined * | fix_off32_000601f8 | ANALYSIS
+000601fc | 0x4 | /undefined * | fix_off32_000601fc | ANALYSIS
+00060200 | 0x4 | /undefined * | fix_off32_00060200 | ANALYSIS
+00060204 | 0x4 | /undefined * | fix_off32_00060204 | ANALYSIS
+00060208 | 0x4 | /undefined * | fix_off32_00060208 | ANALYSIS
+0006020c | 0x4 | /undefined * | fix_off32_0006020c | ANALYSIS
+00060210 | 0x4 | /undefined * | fix_off32_00060210 | ANALYSIS
+00060214 | 0x4 | /undefined * | fix_off32_00060214 | ANALYSIS
+00060218 | 0x4 | /undefined * | fix_off32_00060218 | ANALYSIS
+0006021c | 0x4 | /undefined * | fix_off32_0006021c | ANALYSIS
+00060220 | 0x4 | /undefined * | fix_off32_00060220 | ANALYSIS
+00060224 | 0x4 | /undefined * | fix_off32_00060224 | ANALYSIS
+00060228 | 0x4 | /undefined * | fix_off32_00060228 | ANALYSIS
+0006022c | 0x4 | /undefined * | fix_off32_0006022c | ANALYSIS
+00060230 | 0x4 | /undefined * | fix_off32_00060230 | ANALYSIS
+00060234 | 0x4 | /undefined * | fix_off32_00060234 | ANALYSIS
+00060238 | 0x4 | /undefined * | fix_off32_00060238 | ANALYSIS
+0006023c | 0x4 | /undefined * | fix_off32_0006023c | ANALYSIS
+00060240 | 0x4 | /undefined * | fix_off32_00060240 | ANALYSIS
+00060244 | 0x4 | /undefined * | fix_off32_00060244 | ANALYSIS
+00060248 | 0x4 | /undefined * | fix_off32_00060248 | ANALYSIS
+0006024c | 0x4 | /undefined * | fix_off32_0006024c | ANALYSIS
+00060250 | 0x4 | /undefined * | fix_off32_00060250 | ANALYSIS
+00060254 | 0x4 | /undefined * | fix_off32_00060254 | ANALYSIS
+00060258 | 0x4 | /undefined * | fix_off32_00060258 | ANALYSIS
+0006025c | 0x4 | /undefined * | fix_off32_0006025c | ANALYSIS
+00060260 | 0x4 | /undefined * | fix_off32_00060260 | ANALYSIS
+00060264 | 0x4 | /undefined * | fix_off32_00060264 | ANALYSIS
+00060268 | 0x4 | /undefined * | fix_off32_00060268 | ANALYSIS
+0006026c | 0x4 | /undefined * | fix_off32_0006026c | ANALYSIS
+00060270 | 0x4 | /undefined * | fix_off32_00060270 | ANALYSIS
+00060274 | 0x4 | /undefined * | fix_off32_00060274 | ANALYSIS
+00060278 | 0x4 | /undefined * | fix_off32_00060278 | ANALYSIS
+0006027c | 0x4 | /undefined * | fix_off32_0006027c | ANALYSIS
+00060280 | 0x4 | /undefined * | fix_off32_00060280 | ANALYSIS
+00060284 | 0x4 | /undefined * | fix_off32_00060284 | ANALYSIS
+00060288 | 0x4 | /undefined * | fix_off32_00060288 | ANALYSIS
+0006028c | 0x4 | /undefined * | fix_off32_0006028c | ANALYSIS
+00060290 | 0x4 | /undefined * | fix_off32_00060290 | ANALYSIS
+00060294 | 0x4 | /undefined * | fix_off32_00060294 | ANALYSIS
+00060298 | 0x4 | /undefined * | fix_off32_00060298 | ANALYSIS
+0006029c | 0x4 | /undefined * | fix_off32_0006029c | ANALYSIS
+000602a0 | 0x4 | /undefined * | fix_off32_000602a0 | ANALYSIS
+000602a4 | 0x4 | /undefined * | fix_off32_000602a4 | ANALYSIS
+000602a8 | 0x4 | /undefined * | fix_off32_000602a8 | ANALYSIS
+000602ac | 0x4 | /undefined * | fix_off32_000602ac | ANALYSIS
+000602b0 | 0x4 | /undefined * | fix_off32_000602b0 | ANALYSIS
+000602b4 | 0x4 | /undefined * | fix_off32_000602b4 | ANALYSIS
+000602b8 | 0x4 | /undefined * | fix_off32_000602b8 | ANALYSIS
+000602bc | 0x4 | /undefined * | fix_off32_000602bc | ANALYSIS
+000602c0 | 0x4 | /undefined * | fix_off32_000602c0 | ANALYSIS
+000602c4 | 0x4 | /undefined * | fix_off32_000602c4 | ANALYSIS
+000602c8 | 0x4 | /undefined * | fix_off32_000602c8 | ANALYSIS
+000602cc | 0x4 | /undefined * | fix_off32_000602cc | ANALYSIS
+000602d0 | 0x4 | /undefined * | fix_off32_000602d0 | ANALYSIS
+000602d4 | 0x4 | /undefined * | fix_off32_000602d4 | ANALYSIS
+000602d8 | 0x4 | /undefined * | fix_off32_000602d8 | ANALYSIS
+000602dc | 0x4 | /undefined * | fix_off32_000602dc | ANALYSIS
+000602e0 | 0x4 | /undefined * | fix_off32_000602e0 | ANALYSIS
+000602e4 | 0x4 | /undefined * | fix_off32_000602e4 | ANALYSIS
+000602e8 | 0x4 | /undefined * | fix_off32_000602e8 | ANALYSIS
+000602ec | 0x4 | /undefined * | fix_off32_000602ec | ANALYSIS
+000602f0 | 0x4 | /undefined * | fix_off32_000602f0 | ANALYSIS
+000602f4 | 0x4 | /undefined * | fix_off32_000602f4 | ANALYSIS
+000602f8 | 0x4 | /undefined * | fix_off32_000602f8 | ANALYSIS
+000602fc | 0x4 | /undefined * | fix_off32_000602fc | ANALYSIS
+00060300 | 0x4 | /undefined * | fix_off32_00060300 | ANALYSIS
+00060304 | 0x4 | /undefined * | fix_off32_00060304 | ANALYSIS
+00060308 | 0x4 | /undefined * | fix_off32_00060308 | ANALYSIS
+0006030c | 0x4 | /undefined * | fix_off32_0006030c | ANALYSIS
+00060310 | 0x4 | /undefined * | fix_off32_00060310 | ANALYSIS
+00060314 | 0x4 | /undefined * | fix_off32_00060314 | ANALYSIS
+00060318 | 0x4 | /undefined * | fix_off32_00060318 | ANALYSIS
+0006031c | 0x4 | /undefined * | fix_off32_0006031c | ANALYSIS
+00060320 | 0x4 | /undefined * | fix_off32_00060320 | ANALYSIS
+00060324 | 0x4 | /undefined * | fix_off32_00060324 | ANALYSIS
+00060328 | 0x4 | /undefined * | fix_off32_00060328 | ANALYSIS
+0006032c | 0x4 | /undefined * | fix_off32_0006032c | ANALYSIS
+00060330 | 0x4 | /undefined * | fix_off32_00060330 | ANALYSIS
+00060334 | 0x4 | /undefined * | fix_off32_00060334 | ANALYSIS
+00060338 | 0x4 | /undefined * | fix_off32_00060338 | ANALYSIS
+0006033c | 0x4 | /undefined * | fix_off32_0006033c | ANALYSIS
+00060340 | 0x4 | /undefined * | fix_off32_00060340 | ANALYSIS
+00060344 | 0x4 | /undefined * | fix_off32_00060344 | ANALYSIS
+00060348 | 0x4 | /undefined * | fix_off32_00060348 | ANALYSIS
+0006034c | 0x4 | /undefined * | fix_off32_0006034c | ANALYSIS
+00060350 | 0x4 | /undefined * | fix_off32_00060350 | ANALYSIS
+00060354 | 0x4 | /undefined * | fix_off32_00060354 | ANALYSIS
+00060358 | 0x4 | /undefined * | fix_off32_00060358 | ANALYSIS
+0006035c | 0x4 | /undefined * | fix_off32_0006035c | ANALYSIS
+00060360 | 0x4 | /undefined * | fix_off32_00060360 | ANALYSIS
+00060364 | 0x4 | /undefined * | fix_off32_00060364 | ANALYSIS
+00060368 | 0x4 | /undefined * | fix_off32_00060368 | ANALYSIS
+0006036c | 0x4 | /undefined * | fix_off32_0006036c | ANALYSIS
+00060370 | 0x4 | /undefined * | fix_off32_00060370 | ANALYSIS
+00060374 | 0x4 | /undefined * | fix_off32_00060374 | ANALYSIS
+00060378 | 0x4 | /undefined * | fix_off32_00060378 | ANALYSIS
+00060380 | 0x4 | /pointer | fix_off32_00060380 | ANALYSIS
+00060384 | 0x4 | /pointer | fix_off32_00060384 | ANALYSIS
+00060388 | 0x4 | /undefined4 | DAT_00060388 | DEFAULT
+0006038c | 0x4 | /undefined4 | DAT_0006038c | DEFAULT
+00060390 | 0x4 | /undefined4 | DAT_00060390 | DEFAULT
+00060398 | 0x4 | /undefined4 | DAT_00060398 | DEFAULT
+000603a0 | 0x4 | /pointer | fix_off32_000603a0 | ANALYSIS
+000603a4 | 0x4 | /pointer | fix_off32_000603a4 | ANALYSIS
+000603a8 | 0x4 | /pointer | fix_off32_000603a8 | ANALYSIS
+000603ac | 0x4 | /undefined4 | DAT_000603ac | DEFAULT
+000603b0 | 0x2 | /undefined2 | DAT_000603b0 | DEFAULT
+000603bc | 0x2 | /undefined2 | DAT_000603bc | DEFAULT
+000603be | 0x12 | /string | s_Stack_Overflow!_000603be | DEFAULT
+00060410 | 0x4 | /undefined4 | DAT_00060410 | DEFAULT
+00060414 | 0x2 | /undefined2 | DAT_00060414 | DEFAULT
+00060416 | 0x2 | /undefined2 | DAT_00060416 | DEFAULT
+00060418 | 0x1 | /undefined1 | DAT_00060418 | DEFAULT
+00060420 | 0x4 | /undefined4 | DAT_00060420 | DEFAULT
+0006042c | 0x2 | /undefined2 | DAT_0006042c | DEFAULT
+00060430 | 0x4 | /undefined4 | DAT_00060430 | DEFAULT
+00060434 | 0x4 | /undefined4 | DAT_00060434 | DEFAULT
+00060438 | 0x4 | /undefined4 | DAT_00060438 | DEFAULT
+00060440 | 0x4 | /undefined4 | DAT_00060440 | DEFAULT
+0006044e | 0x1 | /undefined1 | DAT_0006044e | DEFAULT
+0006044f | 0x1 | /undefined1 | DAT_0006044f | DEFAULT
+00060450 | 0x1 | /undefined1 | DAT_00060450 | DEFAULT
+00060455 | 0x2 | /undefined2 | DAT_00060455 | DEFAULT
+00060457 | 0x1 | /undefined1 | DAT_00060457 | DEFAULT
+00060459 | 0x4 | /pointer | fix_off32_00060459 | ANALYSIS
+00060460 | 0x4 | /undefined4 | DAT_00060460 | DEFAULT
+00060464 | 0x4 | /undefined4 | DAT_00060464 | DEFAULT
+000604a0 | 0x4 | /undefined4 | DAT_000604a0 | DEFAULT
+000604a4 | 0x4 | /undefined4 | DAT_000604a4 | DEFAULT
+000604e0 | 0x4 | /undefined4 | DAT_000604e0 | DEFAULT
+000604e4 | 0x4 | /undefined4 | DAT_000604e4 | DEFAULT
+00060520 | 0x4 | /undefined4 | DAT_00060520 | DEFAULT
+00060524 | 0x4 | /undefined4 | DAT_00060524 | DEFAULT
+00060560 | 0x4 | /undefined4 | DAT_00060560 | DEFAULT
+00060564 | 0x4 | /undefined4 | DAT_00060564 | DEFAULT
+0006059c | 0x4 | /undefined4 | DAT_0006059c | DEFAULT
+000605a0 | 0x4 | /undefined4 | DAT_000605a0 | DEFAULT
+000605a4 | 0x4 | /undefined4 | DAT_000605a4 | DEFAULT
+000605c0 | 0x4 | /undefined4 | DAT_000605c0 | DEFAULT
+000605e0 | 0x4 | /undefined4 | DAT_000605e0 | DEFAULT
+000605e4 | 0x2 | /undefined2 | DAT_000605e4 | DEFAULT
+000605ee | 0x4 | /undefined4 | DAT_000605ee | DEFAULT
+000605f2 | 0x4 | /undefined4 | DAT_000605f2 | DEFAULT
+000605f6 | 0x4 | /undefined4 | DAT_000605f6 | DEFAULT
+000605fa | 0x2 | /undefined2 | DAT_000605fa | DEFAULT
+000605fc | 0x4 | /undefined4 | DAT_000605fc | DEFAULT
+00060600 | 0x4 | /undefined4 | DAT_00060600 | DEFAULT
+00060604 | 0x4 | /undefined4 | DAT_00060604 | DEFAULT
+00061000 | 0x4 | /undefined4 | DAT_00061000 | DEFAULT
+00061004 | 0x4 | /undefined4 | DAT_00061004 | DEFAULT
+00061008 | 0x2 | /undefined2 | DAT_00061008 | DEFAULT
+0006100c | 0x4 | /undefined4 | DAT_0006100c | DEFAULT
+00061010 | 0x4 | /undefined4 | DAT_00061010 | DEFAULT
+00061014 | 0x4 | /undefined4 | DAT_00061014 | DEFAULT
+00061018 | 0x1 | /undefined1 | DAT_00061018 | DEFAULT
+00061097 | 0x1 | /undefined1 | DAT_00061097 | DEFAULT
+00061098 | 0x4 | /undefined4 | DAT_00061098 | DEFAULT
+0006109c | 0x4 | /undefined4 | DAT_0006109c | DEFAULT
+000610a4 | 0x8 | /string | s_SAMPLE_000610a4 | DEFAULT
+00061124 | 0x4 | /undefined4 | DAT_00061124 | DEFAULT
+00061128 | 0x4 | /undefined4 | DAT_00061128 | DEFAULT
+00061147 | 0x4 | /undefined4 | DAT_00061147 | DEFAULT
+0006114c | 0x4 | /undefined4 | DAT_0006114c | DEFAULT
+0006115c | 0x1 | /undefined1 | DAT_0006115c | DEFAULT
+00061359 | 0x4 | /undefined4 | DAT_00061359 | DEFAULT
+00061364 | 0x4 | /undefined4 | DAT_00061364 | DEFAULT
+000613b8 | 0x4 | /pointer | fix_off32_000613b8 | ANALYSIS
+000613c0 | 0x4 | /undefined4 | DAT_000613c0 | DEFAULT
+000613c4 | 0x4 | /undefined4 | DAT_000613c4 | DEFAULT
+000613c8 | 0x2 | /undefined2 | DAT_000613c8 | DEFAULT
+000613cc | 0x2 | /undefined2 | DAT_000613cc | DEFAULT
+000613d0 | 0x2 | /undefined2 | DAT_000613d0 | DEFAULT
+0006143e | 0x4 | /undefined4 | DAT_0006143e | DEFAULT
+00061444 | 0x1 | /undefined1 | DAT_00061444 | DEFAULT
+00061445 | 0x1 | /undefined1 | DAT_00061445 | DEFAULT
+0006144c | 0x4 | /pointer | fix_off32_0006144c | ANALYSIS
+00061450 | 0x4 | /pointer | fix_off32_00061450 | ANALYSIS
+00061454 | 0x4 | /undefined4 | DAT_00061454 | DEFAULT
+00061468 | 0x4 | /undefined4 | DAT_00061468 | DEFAULT
+0006146c | 0x4 | /undefined4 | DAT_0006146c | DEFAULT
+00061474 | 0x4 | /undefined4 | DAT_00061474 | DEFAULT
+00061478 | 0x4 | /undefined4 | DAT_00061478 | DEFAULT
+0006147c | 0x4 | /undefined4 | DAT_0006147c | DEFAULT
+0006148c | 0x4 | /undefined4 | DAT_0006148c | DEFAULT
+00061490 | 0x4 | /undefined4 | DAT_00061490 | DEFAULT
+00061498 | 0x4 | /undefined4 | DAT_00061498 | DEFAULT
+0006149c | 0x4 | /undefined4 | DAT_0006149c | DEFAULT
+000614a0 | 0x4 | /undefined4 | DAT_000614a0 | DEFAULT
+000614a4 | 0x4 | /undefined4 | DAT_000614a4 | DEFAULT
+000614a8 | 0x4 | /undefined4 | DAT_000614a8 | DEFAULT
+000614cf | 0x1 | /undefined1 | DAT_000614cf | DEFAULT
+000614f2 | 0x4 | /pointer | fix_off32_000614f2 | ANALYSIS
+000614f8 | 0x4 | /undefined4 | DAT_000614f8 | DEFAULT
+000614fc | 0x4 | /undefined4 | DAT_000614fc | DEFAULT
+00061500 | 0x4 | /undefined4 | DAT_00061500 | DEFAULT
+00061504 | 0x4 | /undefined4 | DAT_00061504 | DEFAULT
+00061508 | 0x4 | /undefined4 | DAT_00061508 | DEFAULT
+00061518 | 0x4 | /pointer | fix_off32_00061518 | ANALYSIS
+0006151c | 0x4 | /pointer | fix_off32_0006151c | ANALYSIS
+00061520 | 0x1 | /undefined1 | DAT_00061520 | DEFAULT
+00061548 | 0x4 | /undefined4 | DAT_00061548 | DEFAULT
+0006154c | 0x2 | /undefined2 | DAT_0006154c | DEFAULT
+0006154e | 0x2 | /undefined2 | DAT_0006154e | DEFAULT
+00061550 | 0xa | /string | s_Chess.wav_00061550 | DEFAULT
+0006155c | 0xb | /string | s_Posion.saf_0006155c | DEFAULT
+00061568 | 0x9 | /string | s_REST.WAV_00061568 | DEFAULT
+00061584 | 0xa | /string | s_OpWin.wav_00061584 | DEFAULT
+00061590 | 0xb | /string | s_Status.cel_00061590 | DEFAULT
+0006159c | 0xb | /string | s_OpWin1.wav_0006159c | DEFAULT
+000615ac | 0x2 | /undefined2 | DAT_000615ac | DEFAULT
+000615ae | 0xb | /string | - | -
+000615bc | 0x1c | /string | s_File_not_found:_'FACE.CEL'_000615bc | DEFAULT
+000615d8 | 0x1c | /string | s_file_not_found:_'Misc.vfs'_000615d8 | DEFAULT
+000615f4 | 0xc | /string | s_WinFail.Cel_000615f4 | DEFAULT
+00061600 | 0xa | /string | s_Chess.wav_00061600 | DEFAULT
+0006160c | 0xd | /string | s_Friaprda.dat_0006160c | DEFAULT
+0006161c | 0xd | /string | s_FriLevUp.dat_0006161c | DEFAULT
+0006162c | 0x9 | /string | s_Item.dat_0006162c | DEFAULT
+00061636 | 0xf | /string | - | -
+00061648 | 0xb | /string | s_ProMap.dat_00061648 | DEFAULT
+00061654 | 0xb | /string | s_ProEqu.dat_00061654 | DEFAULT
+0006165f | 0xe | /string | - | -
+00061670 | 0xd | /string | s_GetMgTab.dat_00061670 | DEFAULT
+00061680 | 0xb | /string | s_RankUp.dat_00061680 | DEFAULT
+00061690 | 0xa | /string | s_FMer1.tmp_00061690 | DEFAULT
+0006169c | 0xa | /string | s_FMer2.tmp_0006169c | DEFAULT
+000616a8 | 0xb | /string | s_FigBar.cel_000616a8 | DEFAULT
+000616b4 | 0xe | /string | s_Stand%03d.saf_000616b4 | DEFAULT
+000616c4 | 0xc | /string | s_Act%03d.saf_000616c4 | DEFAULT
+000616d0 | 0xd | /string | s_Back%02d.saf_000616d0 | DEFAULT
+000616e0 | 0x9 | /string | s_Mer1.tmp_000616e0 | DEFAULT
+000616ec | 0x9 | /string | s_Mer2.tmp_000616ec | DEFAULT
+000616f8 | 0x9 | /string | s_Miss.wav_000616f8 | DEFAULT
+00061704 | 0x2 | /undefined2 | DAT_00061704 | DEFAULT
+00061708 | 0x2 | /undefined2 | DAT_00061708 | DEFAULT
+0006170c | 0xc | /string | s_%sB%02d.saf_0006170c | DEFAULT
+00061718 | 0xc | /string | s_%sL%02d.saf_00061718 | DEFAULT
+00061724 | 0xc | /string | s_%sE%02d.saf_00061724 | DEFAULT
+00061730 | 0xc | /string | s_%sS%02d.saf_00061730 | DEFAULT
+0006173c | 0xe | /string | s_Magic%03d.saf_0006173c | DEFAULT
+0006174c | 0x19 | /string | s_ERROR:_No_Hit_Point_!!!_0006174c | DEFAULT
+00061765 | 0x7 | /string | - | -
+0006176c | 0xa | /string | s_Explo.Saf_0006176c | DEFAULT
+00061778 | 0xa | /string | s_Levup.wav_00061778 | DEFAULT
+00061783 | 0xa | /string | - | -
+00061790 | 0xd | /string | s_EnyPhase.saf_00061790 | DEFAULT
+0006179f | 0xe | /string | - | -
+000617ad | 0xc | /string | - | -
+000617bf | 0xe | /string | - | -
+000617d0 | 0xc | /string | s_EasyAni.Saf_000617d0 | DEFAULT
+000617dc | 0xb | /string | s_PosEff.saf_000617dc | DEFAULT
+000617ec | 0xc | /string | s_Chapter.saf_000617ec | DEFAULT
+000617f8 | 0xc | /string | s_Chapter.pal_000617f8 | DEFAULT
+00061804 | 0xb | /string | s_Icon00.dat_00061804 | DEFAULT
+00061810 | 0xb | /string | s_Icon01.dat_00061810 | DEFAULT
+0006181c | 0xb | /string | s_Icon02.dat_0006181c | DEFAULT
+00061827 | 0xc | /string | - | -
+00061833 | 0xc | /string | - | -
+00061840 | 0xb | /string | s_Icon05.dat_00061840 | DEFAULT
+0006184c | 0xb | /string | s_Icon06.dat_0006184c | DEFAULT
+00061858 | 0xb | /string | s_Icon07.dat_00061858 | DEFAULT
+00061863 | 0xc | /string | - | -
+00061870 | 0xb | /string | s_Icon09.dat_00061870 | DEFAULT
+0006187c | 0xb | /string | s_Icon10.dat_0006187c | DEFAULT
+00061887 | 0xc | /string | - | -
+00061894 | 0xb | /string | s_Icon12.dat_00061894 | DEFAULT
+000618a0 | 0xb | /string | s_Icon13.dat_000618a0 | DEFAULT
+000618ac | 0xb | /string | s_Icon14.dat_000618ac | DEFAULT
+000618b8 | 0xb | /string | s_Icon15.dat_000618b8 | DEFAULT
+000618c4 | 0xb | /string | s_Icon16.dat_000618c4 | DEFAULT
+000618d0 | 0xb | /string | s_Icon17.dat_000618d0 | DEFAULT
+000618db | 0xc | /string | - | -
+000618e7 | 0xc | /string | - | -
+000618f4 | 0xb | /string | s_Icon20.dat_000618f4 | DEFAULT
+00061900 | 0xb | /string | s_Icon21.dat_00061900 | DEFAULT
+0006190c | 0xb | /string | s_Icon22.dat_0006190c | DEFAULT
+00061917 | 0xc | /string | - | -
+00061924 | 0xb | /string | s_Icon24.dat_00061924 | DEFAULT
+00061930 | 0xb | /string | s_Icon25.dat_00061930 | DEFAULT
+0006193b | 0xc | /string | - | -
+00061948 | 0xb | /string | s_Icon27.dat_00061948 | DEFAULT
+00061954 | 0xb | /string | s_Icon28.dat_00061954 | DEFAULT
+00061960 | 0xb | /string | s_Icon29.dat_00061960 | DEFAULT
+0006196c | 0x16 | /string | s_file_not_found:_'%s'_0006196c | DEFAULT
+00061984 | 0xd | /string | s_Icon%04d.saf_00061984 | DEFAULT
+00061994 | 0xd | /string | s_Icon%04d.wav_00061994 | DEFAULT
+000619a4 | 0xf | /string | s_fdetxt%02d.txt_000619a4 | DEFAULT
+000619b4 | 0xc | /string | s_map%02d.dat_000619b4 | DEFAULT
+000619c0 | 0xa | /string | s_M%02d.dtl_000619c0 | DEFAULT
+000619cc | 0xc | /string | s_dsc%02d.dat_000619cc | DEFAULT
+000619d8 | 0xc | /string | s_m%02d%d.mpl_000619d8 | DEFAULT
+000619e4 | 0xc | /string | s_m%02d%d.cel_000619e4 | DEFAULT
+000619f0 | 0xf | /string | s_attr%02d%d.dat_000619f0 | DEFAULT
+00061a03 | 0xa | /string | - | -
+00061a10 | 0xc | /string | s_map%02d.cod_00061a10 | DEFAULT
+00061a38 | 0x16 | /string | s_file_not_found:_'%s'_00061a38 | DEFAULT
+00061a50 | 0x25 | /string | s_Out_of_Memory_on_get_save_buffer_00061a50 | DEFAULT
+00061a78 | 0x8 | /string | s_Fde.pal_00061a78 | DEFAULT
+00061a80 | 0x23 | /string | s_Out_of_Memory_at_get_fieldadr!!!_00061a80 | DEFAULT
+00061aa3 | 0x26 | /string | - | -
+00061ac9 | 0x10 | /string | - | -
+00061ad9 | 0xc | /string | - | -
+00061aeb | 0xa | /string | - | -
+00061af5 | 0xf | /string | - | -
+00061b04 | 0x9 | /string | s_Beep.wav_00061b04 | DEFAULT
+00061b0d | 0xf | /string | - | -
+00061b2c | 0xb | /string | s_OpWin1.wav_00061b2c | DEFAULT
+00061b38 | 0x9 | /string | s_Beep.wav_00061b38 | DEFAULT
+00061b44 | 0xa | /string | s_Equip.wav_00061b44 | DEFAULT
+00061b50 | 0xa | /string | s_EMg00.saf_00061b50 | DEFAULT
+00061b5c | 0xa | /string | s_EMg05.saf_00061b5c | DEFAULT
+00061b68 | 0xa | /string | s_EMg08.saf_00061b68 | DEFAULT
+00061b74 | 0xa | /string | s_EarQu.wav_00061b74 | DEFAULT
+00061b80 | 0x9 | /string | s_Cure.saf_00061b80 | DEFAULT
+00061b8c | 0xb | /string | s_CureMP.saf_00061b8c | DEFAULT
+00061b97 | 0xd | /string | - | -
+00061ba4 | 0xa | /string | s_Chess.wav_00061ba4 | DEFAULT
+00061bb0 | 0xa | /string | s_Mag11.saf_00061bb0 | DEFAULT
+00061bbc | 0xc | /string | s_Emg%02d.saf_00061bbc | DEFAULT
+00061bc8 | 0xc | /string | s_Emg33-1.saf_00061bc8 | DEFAULT
+00061bd4 | 0xa | /string | s_EarQu.wav_00061bd4 | DEFAULT
+00061be0 | 0x8 | /string | s_DISK.NO_00061be0 | DEFAULT
+00061c0b | 0x1f | /string | - | -
+00061c30 | 0x8 | /string | s_Disk.no_00061c30 | DEFAULT
+00061c63 | 0x1d | /string | - | -
+00061c80 | 0x2e | /string | s_Thank_you_for_playing_Flame_Drag_00061c80 | DEFAULT
+00061cae | 0x1e | /string | - | -
+00061ccc | 0x8 | /string | s_Fde.pal_00061ccc | DEFAULT
+00061cd4 | 0xa | /string | s_Fight.pal_00061cd4 | DEFAULT
+00061cde | 0xc | /string | - | -
+00061ceb | 0xd | /string | - | -
+00061cf8 | 0xb | /string | s_Shadow.cel_00061cf8 | DEFAULT
+00061d03 | 0xd | /string | - | -
+00061d10 | 0xc | /string | s_Message.cel_00061d10 | DEFAULT
+00061d1c | 0xb | /string | s_Number.cel_00061d1c | DEFAULT
+00061d27 | 0xc | /string | - | -
+00061d33 | 0xb | /string | - | -
+00061d3e | 0xe | /string | - | -
+00061d4c | 0xc | /string | s_BaseAni.vfs_00061d4c | DEFAULT
+00061d58 | 0xa | /string | s_ADWin.cel_00061d58 | DEFAULT
+00061d62 | 0xe | /string | - | -
+00061d70 | 0x8 | /string | s_Bar.cel_00061d70 | DEFAULT
+00061d78 | 0xa | /string | s_Field.vfs_00061d78 | DEFAULT
+00061d82 | 0x1f | /string | - | -
+00061da1 | 0xe | /string | - | -
+00061db0 | 0xd | /string | s_Fdetxt00.txt_00061db0 | DEFAULT
+00061dbd | 0xd | /string | - | -
+00061dd0 | 0xa | /string | s_FMer2.tmp_00061dd0 | DEFAULT
+00061dda | 0xb | /string | - | -
+00061de5 | 0xc | /string | - | -
+00061df8 | 0x16 | /string | s_file_not_found:_'%s'_00061df8 | DEFAULT
+00061e0e | 0x16 | /string | - | -
+00061e24 | 0xc | /string | s_Dynasty.pal_00061e24 | DEFAULT
+00061e30 | 0x9 | /string | s_Logo.saf_00061e30 | DEFAULT
+00061e41 | 0xd | /string | - | -
+00061e4e | 0xe | /string | - | -
+00061e5c | 0xc | /string | s_StBoard.pal_00061e5c | DEFAULT
+00061e68 | 0xd | /string | s_GameOver.saf_00061e68 | DEFAULT
+00061e78 | 0x9 | /string | s_Beep.wav_00061e78 | DEFAULT
+00061e84 | 0x22 | /string | s_Out_of_memory_at_rease_shape_!!!_00061e84 | DEFAULT
+00061ea8 | 0x11 | /string | s_Timer_fail_!!!_00061ea8 | DEFAULT
+00061ebc | 0xc | /string | s_%s\Pack.vfs_00061ebc | DEFAULT
+00061ec8 | 0x9 | /string | s_Pass.Dat_00061ec8 | DEFAULT
+00061ed4 | 0xa | /string | s_%s\fd.exe_00061ed4 | DEFAULT
+00061ee0 | 0xa | /string | s_%s\%s.Vid_00061ee0 | DEFAULT
+00061eec | 0xa | /string | s_%s\%s.Aud_00061eec | DEFAULT
+00061ef8 | 0xc | /string | s_ShopWin.Cel_00061ef8 | DEFAULT
+00061f04 | 0xc | /string | s_Village.cel_00061f04 | DEFAULT
+00061f10 | 0xf | /string | s_fdetxt%02d.txt_00061f10 | DEFAULT
+00061f20 | 0xd | /string | s_Shop%02d.dat_00061f20 | DEFAULT
+00061f34 | 0x9 | /string | s_ICON.CEL_00061f34 | DEFAULT
+00061f40 | 0xb | /string | s_CanBan.cel_00061f40 | DEFAULT
+00061f4c | 0x9 | /string | s_Beep.wav_00061f4c | DEFAULT
+00061f57 | 0xb | /string | - | -
+00061f64 | 0xa | /string | s_FMer1.tmp_00061f64 | DEFAULT
+00061f70 | 0xa | /string | s_FMer2.tmp_00061f70 | DEFAULT
+00061f7c | 0xe | /string | s_Stand%03d.saf_00061f7c | DEFAULT
+00061f8c | 0x9 | /string | s_Mer1.tmp_00061f8c | DEFAULT
+00061f98 | 0x9 | /string | s_Mer2.tmp_00061f98 | DEFAULT
+00061fa4 | 0x9 | /string | s_Item.cel_00061fa4 | DEFAULT
+00061fb0 | 0xb | /string | s_Church.cel_00061fb0 | DEFAULT
+00061fbc | 0xc | /string | s_BarShop.cel_00061fbc | DEFAULT
+00061fc8 | 0xb | /string | s_Weapon.cel_00061fc8 | DEFAULT
+00061fd3 | 0xd | /string | - | -
+00061fe0 | 0xc | /string | s_Bonus-1.saf_00061fe0 | DEFAULT
+00061fec | 0xa | /string | s_Bonus.wav_00061fec | DEFAULT
+00061ff8 | 0xc | /string | s_Icon7-1.dat_00061ff8 | DEFAULT
+00062004 | 0xc | /string | s_Icon7-2.dat_00062004 | DEFAULT
+00062010 | 0xc | /string | s_Icon7-3.dat_00062010 | DEFAULT
+00062020 | 0x31 | /string | s_Can't_allocate_memory_for_VFS_fi_00062020 | DEFAULT
+00062054 | 0x24 | /string | s_Can't_open_the_source_VFS_file:_%_00062054 | DEFAULT
+00062078 | 0x1b | /string | s_Can't_find_the_string:_%s_00062078 | DEFAULT
+00062098 | 0x9 | /string | s_ICON.CEL_00062098 | DEFAULT
+000620a3 | 0xc | /string | - | -
+000620b0 | 0xa | /string | s_Win00.dat_000620b0 | DEFAULT
+000620bc | 0xa | /string | s_Win01.dat_000620bc | DEFAULT
+000620c8 | 0xa | /string | s_Win02.dat_000620c8 | DEFAULT
+000620d4 | 0xa | /string | s_Win03.dat_000620d4 | DEFAULT
+000620e0 | 0xa | /string | s_Win04.dat_000620e0 | DEFAULT
+000620ec | 0xa | /string | s_Win05.dat_000620ec | DEFAULT
+000620f8 | 0xa | /string | s_Win06.dat_000620f8 | DEFAULT
+00062104 | 0xa | /string | s_Win07.dat_00062104 | DEFAULT
+00062110 | 0xa | /string | s_Win08.dat_00062110 | DEFAULT
+0006211c | 0xa | /string | s_Win09.dat_0006211c | DEFAULT
+00062128 | 0xa | /string | s_Win10.dat_00062128 | DEFAULT
+00062134 | 0xa | /string | s_Win11.dat_00062134 | DEFAULT
+00062140 | 0xa | /string | s_Win12.dat_00062140 | DEFAULT
+0006214a | 0xc | /string | - | -
+00062156 | 0xc | /string | - | -
+00062162 | 0xc | /string | - | -
+0006216e | 0xc | /string | - | -
+0006217a | 0xe | /string | - | -
+00062188 | 0xa | /string | s_Win17.dat_00062188 | DEFAULT
+00062192 | 0xc | /string | - | -
+0006219e | 0xc | /string | - | -
+000621aa | 0xc | /string | - | -
+000621b6 | 0xc | /string | - | -
+000621c2 | 0xc | /string | - | -
+000621ce | 0xc | /string | - | -
+000621da | 0xc | /string | - | -
+000621e6 | 0xe | /string | - | -
+000621f4 | 0xc | /string | s_WinGA26.dat_000621f4 | DEFAULT
+00062200 | 0xa | /string | s_Win26.dat_00062200 | DEFAULT
+0006220c | 0xa | /string | s_Win27.dat_0006220c | DEFAULT
+00062216 | 0xc | /string | - | -
+00062222 | 0xc | /string | - | -
+0006222e | 0xe | /string | - | -
+0006223c | 0x1a | /string | s_DEVICE_REQUEST_FAILED!!!_0006223c | DEFAULT
+0006225c | 0x1b | /string | s_[%.02u:%.02u:%.02u.%.02u]_0006225c | DEFAULT
+0006227b | 0xa | /string | s_AIL_DEBUG_0006227b | DEFAULT
+00062285 | 0xe | /string | s_AIL_SYS_DEBUG_00062285 | DEFAULT
+00062297 | 0x51 | /string | s_--------------------------------_00062297 | DEFAULT
+000622ed | 0x47 | /string | s_Audio_Interface_Library_applicat_000622ed | DEFAULT
+00062334 | 0x10 | /string | s_Start_time:_%s_00062334 | DEFAULT
+00062344 | 0x52 | /string | s_--------------------------------_00062344 | DEFAULT
+00062396 | 0xf | /string | s_AIL_startup()_00062396 | DEFAULT
+000623a5 | 0x10 | /string | s_AIL_shutdown()_000623a5 | DEFAULT
+000623b5 | 0x1b | /string | s_AIL_set_preference(%d,%d)_000623b5 | DEFAULT
+000623d0 | 0xd | /string | s_Result_=_%d_000623d0 | DEFAULT
+000623dd | 0x19 | /string | s_AIL_get_real_vect(0x%X)_000623dd | DEFAULT
+000623f6 | 0xf | /string | s_Result_=_0x%X_000623f6 | DEFAULT
+00062405 | 0x1e | /string | s_AIL_set_real_vect(0x%X,0x%X)_00062405 | DEFAULT
+00062423 | 0x1f | /string | - | -
+00062442 | 0x1b | /string | s_AIL_restore_USE16_ISR(%d)_00062442 | DEFAULT
+0006245d | 0x26 | /string | s_AIL_call_driver(0x%X,0x%X,0x%X,0_0006245d | DEFAULT
+00062483 | 0xf | /string | s_AIL_delay(%d)_00062483 | DEFAULT
+00062492 | 0x1b | /string | s_AIL_API_read_INI(0x%X,%s)_00062492 | DEFAULT
+000624ad | 0xd | /string | s_Driver_=_%s_000624ad | DEFAULT
+000624ba | 0xd | /string | s_Device_=_%s_000624ba | DEFAULT
+000624c7 | 0xd | /string | s_IO_=_%X_000624c7 | DEFAULT
+000624d4 | 0xd | /string | s_IRQ_=_%d_000624d4 | DEFAULT
+000624e1 | 0xd | /string | s_DMA_8_=_%d_000624e1 | DEFAULT
+000624ee | 0xd | /string | s_DMA_16_=_%d_000624ee | DEFAULT
+000624fb | 0xd | /string | s_Result_=_%u_000624fb | DEFAULT
+00062508 | 0x1a | /string | s_AIL_register_timer(0x%X)_00062508 | DEFAULT
+00062522 | 0x1b | /string | s_AIL_set_timer_user(%u,%u)_00062522 | DEFAULT
+0006253d | 0x1d | /string | s_AIL_set_timer_period(%u,%u)_0006253d | DEFAULT
+0006255a | 0x20 | /string | s_AIL_set_timer_frequency(%u,%u)_0006255a | DEFAULT
+0006257a | 0x1e | /string | - | -
+00062598 | 0x19 | /string | - | -
+000625b1 | 0x15 | /string | s_AIL_start_timer(%u)_000625b1 | DEFAULT
+000625c6 | 0x18 | /string | - | -
+000625de | 0x14 | /string | - | -
+000625f2 | 0x17 | /string | - | -
+00062609 | 0x1e | /string | s_AIL_release_timer_handle(%u)_00062609 | DEFAULT
+00062627 | 0x1a | /string | s_AIL_release_all_timers()_00062627 | DEFAULT
+00062641 | 0x1e | /string | s_AIL_get_IO_environment(0x%X)_00062641 | DEFAULT
+0006265f | 0x1d | /string | s_AIL_install_driver(0x%X,%u)_0006265f | DEFAULT
+0006267c | 0x1c | /string | s_AIL_uninstall_driver(0x%X)_0006267c | DEFAULT
+00062698 | 0x17 | /string | s_AIL_install_DIG_INI()_00062698 | DEFAULT
+000626af | 0x26 | /string | s_AIL_install_DIG_driver_file(%s,0_000626af | DEFAULT
+000626d5 | 0x20 | /string | - | -
+000626f5 | 0x22 | /string | s_AIL_allocate_sample_handle(0x%X)_000626f5 | DEFAULT
+00062717 | 0x28 | /string | - | -
+0006273f | 0x21 | /string | s_AIL_release_sample_handle(0x%X)_0006273f | DEFAULT
+00062760 | 0x17 | /string | s_AIL_init_sample(0x%X)_00062760 | DEFAULT
+00062777 | 0x23 | /string | - | -
+0006279a | 0x26 | /string | s_AIL_set_sample_address(0x%X,0x%X_0006279a | DEFAULT
+000627c0 | 0x21 | /string | s_AIL_set_sample_type(0x%X,%d,%u)_000627c0 | DEFAULT
+000627e1 | 0x18 | /string | s_AIL_start_sample(0x%X)_000627e1 | DEFAULT
+000627f9 | 0x17 | /string | s_AIL_stop_sample(0x%X)_000627f9 | DEFAULT
+00062810 | 0x19 | /string | - | -
+00062829 | 0x16 | /string | - | -
+0006283f | 0x27 | /string | s_AIL_set_sample_playback_rate(0x%_0006283f | DEFAULT
+00062866 | 0x20 | /string | s_AIL_set_sample_volume(0x%X,%d)_00062866 | DEFAULT
+00062886 | 0x1d | /string | - | -
+000628a3 | 0x24 | /string | s_AIL_set_sample_loop_count(0x%X,%_000628a3 | DEFAULT
+000628c7 | 0x19 | /string | s_AIL_sample_status(0x%X)_000628c7 | DEFAULT
+000628e0 | 0x20 | /string | - | -
+00062900 | 0x19 | /string | - | -
+00062919 | 0x16 | /string | - | -
+0006292f | 0x1d | /string | - | -
+0006294c | 0x2c | /string | - | -
+00062978 | 0x2c | /string | - | -
+000629a4 | 0x1f | /string | - | -
+000629c3 | 0x29 | /string | - | -
+000629ec | 0x22 | /string | - | -
+00062a0e | 0x1b | /string | - | -
+00062a29 | 0x26 | /string | - | -
+00062a4f | 0x26 | /string | - | -
+00062a75 | 0x26 | /string | - | -
+00062a9b | 0x26 | /string | - | -
+00062ac1 | 0x26 | /string | - | -
+00062ae7 | 0x1f | /string | - | -
+00062b06 | 0x1f | /string | - | -
+00062b25 | 0x17 | /string | s_AIL_install_MDI_INI()_00062b25 | DEFAULT
+00062b3c | 0x26 | /string | s_AIL_install_MDI_driver_file(%s,0_00062b3c | DEFAULT
+00062b62 | 0x20 | /string | - | -
+00062b82 | 0x24 | /string | s_AIL_allocate_sequence_handle(0x%_00062b82 | DEFAULT
+00062ba6 | 0x23 | /string | - | -
+00062bc9 | 0x21 | /string | - | -
+00062bea | 0x1a | /string | - | -
+00062c04 | 0x19 | /string | s_AIL_stop_sequence(0x%X)_00062c04 | DEFAULT
+00062c1d | 0x1b | /string | - | -
+00062c38 | 0x18 | /string | s_AIL_end_sequence(0x%X)_00062c38 | DEFAULT
+00062c50 | 0x24 | /string | - | -
+00062c74 | 0x25 | /string | - | -
+00062c99 | 0x26 | /string | - | -
+00062cbf | 0x1b | /string | - | -
+00062cda | 0x1a | /string | - | -
+00062cf4 | 0x1b | /string | - | -
+00062d0f | 0x1f | /string | - | -
+00062d2e | 0x2c | /string | - | -
+00062d5a | 0x21 | /string | - | -
+00062d7b | 0x1f | /string | - | -
+00062d9a | 0x20 | /string | - | -
+00062dba | 0x20 | /string | - | -
+00062dda | 0x22 | /string | - | -
+00062dfc | 0x21 | /string | - | -
+00062e1d | 0x22 | /string | - | -
+00062e3f | 0x1c | /string | - | -
+00062e5b | 0x27 | /string | - | -
+00062e82 | 0x10 | /string | - | -
+00062e92 | 0x1b | /string | s_AIL_branch_index(0x%X,%u)_00062e92 | DEFAULT
+00062ead | 0x29 | /string | - | -
+00062ed6 | 0x2a | /string | - | -
+00062f00 | 0x2b | /string | - | -
+00062f2b | 0x28 | /string | - | -
+00062f53 | 0x29 | /string | - | -
+00062f7c | 0x28 | /string | - | -
+00062fa4 | 0x21 | /string | - | -
+00062fc5 | 0x23 | /string | - | -
+00062fe8 | 0x18 | /string | s_AIL_lock_channel(0x%X)_00062fe8 | DEFAULT
+00063000 | 0x1e | /string | s_AIL_release_channel(0x%X,%d)_00063000 | DEFAULT
+0006301e | 0x26 | /string | s_AIL_map_sequence_channel(0x%X,%d_0006301e | DEFAULT
+00063044 | 0x24 | /string | - | -
+00063068 | 0x3a | /string | - | -
+000630a2 | 0x23 | /string | - | -
+000630c5 | 0x30 | /string | - | -
+000630f5 | 0x27 | /string | - | -
+0006311c | 0x11 | /string | s_0123456789ABCDEF_0006311c | DEFAULT
+00063130 | 0x7 | /string | s_DRIVER_00063130 | DEFAULT
+00063137 | 0x7 | /string | s_DEVICE_00063137 | DEFAULT
+0006313e | 0x8 | /string | s_IO_ADDR_0006313e | DEFAULT
+0006314a | 0xa | /string | s_DMA_8_bit_0006314a | DEFAULT
+00063154 | 0xb | /string | s_DMA_16_bit_00063154 | DEFAULT
+0006315f | 0x15 | /string | s_Corrupted_.INI_file_0006315f | DEFAULT
+00063174 | 0x2b | /string | s_Insufficient_memory_for_driver_d_00063174 | DEFAULT
+0006319f | 0x19 | /string | s_Insufficient_low_memory_0006319f | DEFAULT
+000631b8 | 0x8 | /string | s_AIL3DIG_000631b8 | DEFAULT
+000631c0 | 0x8 | /string | s_AIL3MDI_000631c0 | DEFAULT
+000631c8 | 0x15 | /string | s_Invalid_driver_type_000631c8 | DEFAULT
+000631dd | 0x17 | /string | s_Out_of_driver_handles_000631dd | DEFAULT
+000631f4 | 0x18 | /string | s_Out_of_timer_handles_000631f4 | DEFAULT
+0006320c | 0x2b | /string | s_Minimum_DMA_buffer_size_too_larg_0006320c | DEFAULT
+00063237 | 0x27 | /string | - | -
+0006325e | 0x18 | /string | - | -
+00063276 | 0x24 | /string | - | -
+0006329a | 0x22 | /string | - | -
+000632bc | 0x21 | /string | s_Could_not_allocate_build_buffer_000632bc | DEFAULT
+000632dd | 0x29 | /string | - | -
+00063306 | 0x18 | /string | - | -
+0006331e | 0x19 | /string | - | -
+00063338 | 0x8 | /string | s_DIG.INI_00063338 | DEFAULT
+00063340 | 0x1d | /string | s_Unable_to_open_file_DIG.INI_00063340 | DEFAULT
+0006335d | 0x1b | /string | - | -
+00063382 | 0x9 | /string | - | -
+00063390 | 0x26 | /string | - | -
+000633b6 | 0x1f | /string | - | -
+000633d5 | 0x26 | /string | - | -
+000633fb | 0x21 | /string | - | -
+00063421 | 0x8 | /string | - | -
+00063431 | 0x21 | /string | - | -
+00063452 | 0x28 | /string | - | -
+0006347a | 0x18 | /string | - | -
+00063492 | 0x22 | /string | - | -
+000634b4 | 0x29 | /string | s_Could_not_initialize_instrument_m_000634b4 | DEFAULT
+000634de | 0x2a | /string | - | -
+00063508 | 0x16 | /string | s_Out_of_timer_handles_00063508 | DEFAULT
+0006351e | 0x19 | /string | - | -
+00063538 | 0x8 | /string | s_MDI.INI_00063538 | DEFAULT
+00063540 | 0x1d | /string | s_Unable_to_open_file_MDI.INI_00063540 | DEFAULT
+0006355d | 0x1c | /string | - | -
+00063579 | 0x1b | /string | - | -
+000635a9 | 0x16 | /string | - | -
+000635bf | 0x34 | /string | - | -
+000635f3 | 0x35 | /string | - | -
+00063628 | 0x2c | /string | - | -
+00063654 | 0x10 | /string | - | -
+00063668 | 0x30 | /string | - | -
+00063698 | 0x24 | /string | s_Floating-point_support_not_loade_00063698 | DEFAULT
+000636c7 | 0x4 | /undefined4 | DAT_000636c7 | DEFAULT
+000636cb | 0x1 | /undefined1 | DAT_000636cb | DEFAULT
+000636cc | 0x4 | /undefined4 | DAT_000636cc | DEFAULT
+000636d0 | 0x1 | /undefined1 | DAT_000636d0 | DEFAULT
+000636d1 | 0x4 | /undefined4 | DAT_000636d1 | DEFAULT
+000636d5 | 0x1 | /undefined1 | DAT_000636d5 | DEFAULT
+000636d6 | 0x8 | /string | s_COMSPEC_000636d6 | DEFAULT
+000636e2 | 0x8 | /string | s_COMMAND_000636e2 | DEFAULT
+000636fc | 0x3c | /string | s_JFMAMJJASONDaeapauuuecoenbrrynlg_000636fc | DEFAULT
+00063846 | 0x4 | /undefined4 | DAT_00063846 | DEFAULT
+000638f0 | 0x1 | /undefined1 | DAT_000638f0 | DEFAULT
+000638f1 | 0x1 | /undefined1 | DAT_000638f1 | DEFAULT
+000638f2 | 0x4 | /pointer | fix_off32_000638f2 | ANALYSIS
+000638f6 | 0x1 | /undefined1 | DAT_000638f6 | DEFAULT
+000638f7 | 0x1 | /undefined1 | DAT_000638f7 | DEFAULT
+00063920 | 0x1 | /undefined1 | DAT_00063920 | DEFAULT
+00063921 | 0x1 | /undefined1 | DAT_00063921 | DEFAULT
+00063922 | 0x4 | /pointer | fix_off32_00063922 | ANALYSIS
+00063926 | 0x1 | /undefined1 | DAT_00063926 | DEFAULT
+00063927 | 0x1 | /undefined1 | DAT_00063927 | DEFAULT
+00063930 | 0x4 | /undefined4 | DAT_00063930 | DEFAULT
+00063934 | 0x1 | /undefined1 | DAT_00063934 | DEFAULT
+00063935 | 0x1 | /undefined1 | DAT_00063935 | DEFAULT
+00063f74 | 0x4 | /undefined4 | DAT_00063f74 | DEFAULT
+00063f78 | 0x4 | /undefined4 | DAT_00063f78 | DEFAULT
+00063f7c | 0x4 | /undefined4 | DAT_00063f7c | DEFAULT
+00063f80 | 0x4 | /undefined4 | DAT_00063f80 | DEFAULT
+00063f84 | 0x4 | /undefined4 | DAT_00063f84 | DEFAULT
+00063f88 | 0x4 | /undefined4 | DAT_00063f88 | DEFAULT
+00063f8c | 0x4 | /undefined4 | DAT_00063f8c | DEFAULT
+00063f90 | 0x4 | /undefined4 | DAT_00063f90 | DEFAULT
+00063f94 | 0x4 | /undefined4 | DAT_00063f94 | DEFAULT
+00063f98 | 0x4 | /undefined4 | DAT_00063f98 | DEFAULT
+00063f9c | 0x4 | /undefined4 | DAT_00063f9c | DEFAULT
+00063fa0 | 0x4 | /undefined4 | DAT_00063fa0 | DEFAULT
+00063fb0 | 0x4 | /undefined4 | DAT_00063fb0 | DEFAULT
+00063fb4 | 0x4 | /undefined4 | DAT_00063fb4 | DEFAULT
+00063fb8 | 0x1 | /undefined1 | DAT_00063fb8 | DEFAULT
+00063fbc | 0x4 | /undefined4 | DAT_00063fbc | DEFAULT
+00063fc0 | 0x4 | /undefined4 | DAT_00063fc0 | DEFAULT
+00063fc4 | 0x4 | /undefined4 | DAT_00063fc4 | DEFAULT
+00063fc8 | 0x4 | /undefined4 | DAT_00063fc8 | DEFAULT
+00063fd0 | 0x4 | /undefined4 | DAT_00063fd0 | DEFAULT
+00063fd4 | 0x4 | /undefined4 | DAT_00063fd4 | DEFAULT
+00063fd8 | 0x4 | /undefined4 | DAT_00063fd8 | DEFAULT
+00063fdc | 0x4 | /undefined4 | DAT_00063fdc | DEFAULT
+00063fe0 | 0x4 | /undefined4 | DAT_00063fe0 | DEFAULT
+00063fe4 | 0x4 | /undefined4 | DAT_00063fe4 | DEFAULT
+00063fe8 | 0x4 | /undefined4 | DAT_00063fe8 | DEFAULT
+00063fec | 0x4 | /undefined4 | DAT_00063fec | DEFAULT
+00063ff0 | 0x4 | /undefined4 | DAT_00063ff0 | DEFAULT
+00064000 | 0x4 | /undefined4 | DAT_00064000 | DEFAULT
+00064004 | 0x4 | /undefined4 | DAT_00064004 | DEFAULT
+00064018 | 0x4 | /undefined4 | DAT_00064018 | DEFAULT
+0006401c | 0x4 | /undefined4 | DAT_0006401c | DEFAULT
+00064020 | 0x4 | /undefined4 | DAT_00064020 | DEFAULT
+00064030 | 0x4 | /undefined4 | DAT_00064030 | DEFAULT
+00064034 | 0x4 | /undefined4 | DAT_00064034 | DEFAULT
+00064038 | 0x4 | /undefined4 | DAT_00064038 | DEFAULT
+0006403c | 0x1 | /undefined1 | DAT_0006403c | DEFAULT
+0006403d | 0x1 | /undefined1 | DAT_0006403d | DEFAULT
+0006403e | 0x4 | /undefined4 | DAT_0006403e | DEFAULT
+00064042 | 0x4 | /undefined4 | DAT_00064042 | DEFAULT
+00064046 | 0x4 | /undefined4 | DAT_00064046 | DEFAULT
+0006404a | 0x1 | /undefined1 | DAT_0006404a | DEFAULT
+0006404b | 0x4 | /undefined4 | DAT_0006404b | DEFAULT
+0006404f | 0x4 | /undefined4 | DAT_0006404f | DEFAULT
+000640e8 | 0x1 | /undefined1 | DAT_000640e8 | DEFAULT
+000640e9 | 0x1 | /undefined1 | DAT_000640e9 | DEFAULT
+000640ea | 0x1 | /undefined1 | DAT_000640ea | DEFAULT
+00064104 | 0x4 | /undefined4 | DAT_00064104 | DEFAULT
+00064108 | 0x4 | /undefined4 | DAT_00064108 | DEFAULT
+0006410c | 0x4 | /undefined4 | DAT_0006410c | DEFAULT
+00064110 | 0x4 | /undefined4 | DAT_00064110 | DEFAULT
+00064114 | 0x4 | /undefined4 | DAT_00064114 | DEFAULT
+00064118 | 0x4 | /undefined4 | DAT_00064118 | DEFAULT
+0006411c | 0x4 | /undefined4 | DAT_0006411c | DEFAULT
+00064378 | 0x4 | /undefined4 | DAT_00064378 | DEFAULT
+0006437c | 0x1 | /undefined1 | DAT_0006437c | DEFAULT
+00064380 | 0x1 | /undefined1 | DAT_00064380 | DEFAULT
+00064390 | 0x4 | /undefined4 | DAT_00064390 | DEFAULT
+000643a0 | 0x4 | /undefined4 | DAT_000643a0 | DEFAULT
+000643a4 | 0x4 | /undefined4 | DAT_000643a4 | DEFAULT
+000643a8 | 0x4 | /undefined4 | DAT_000643a8 | DEFAULT
+000643ac | 0x4 | /undefined4 | DAT_000643ac | DEFAULT
+000643b0 | 0x4 | /undefined4 | DAT_000643b0 | DEFAULT
+000643b4 | 0x4 | /undefined4 | DAT_000643b4 | DEFAULT
+000643b8 | 0x4 | /undefined4 | DAT_000643b8 | DEFAULT
+000643bc | 0x4 | /undefined4 | DAT_000643bc | DEFAULT
+000643c0 | 0x4 | /undefined4 | DAT_000643c0 | DEFAULT
+000643c4 | 0x4 | /undefined4 | DAT_000643c4 | DEFAULT
+000643c8 | 0x4 | /undefined4 | DAT_000643c8 | DEFAULT
+000643cc | 0x4 | /undefined4 | DAT_000643cc | DEFAULT
+000643d0 | 0x4 | /undefined4 | DAT_000643d0 | DEFAULT
+000643d4 | 0x4 | /undefined4 | DAT_000643d4 | DEFAULT
+000643d8 | 0x4 | /undefined4 | DAT_000643d8 | DEFAULT
+000643dc | 0x4 | /undefined4 | DAT_000643dc | DEFAULT
+000643e0 | 0x4 | /undefined4 | DAT_000643e0 | DEFAULT
+000643e4 | 0x4 | /undefined4 | DAT_000643e4 | DEFAULT
+000643eb | 0x1 | /undefined1 | DAT_000643eb | DEFAULT
+000643ec | 0x4 | /undefined4 | DAT_000643ec | DEFAULT
+00069c20 | 0x4 | /undefined4 | DAT_00069c20 | DEFAULT
+00069c98 | 0x4 | /undefined4 | DAT_00069c98 | DEFAULT
+00069cb0 | 0x4 | /undefined4 | DAT_00069cb0 | DEFAULT
+00069cc8 | 0x4 | /undefined4 | DAT_00069cc8 | DEFAULT
+00069ccc | 0x4 | /undefined4 | DAT_00069ccc | DEFAULT
+00069cd0 | 0x4 | /undefined4 | DAT_00069cd0 | DEFAULT
+00069cd4 | 0x4 | /undefined4 | DAT_00069cd4 | DEFAULT
+00069cd8 | 0x4 | /undefined4 | DAT_00069cd8 | DEFAULT
+00069cdc | 0x4 | /undefined4 | DAT_00069cdc | DEFAULT
+00069ce0 | 0x4 | /undefined4 | DAT_00069ce0 | DEFAULT
+00069ce4 | 0x4 | /undefined4 | DAT_00069ce4 | DEFAULT
+00069ce8 | 0x4 | /undefined4 | DAT_00069ce8 | DEFAULT
+00069cec | 0x4 | /undefined4 | DAT_00069cec | DEFAULT
+00069cf0 | 0x4 | /undefined4 | DAT_00069cf0 | DEFAULT
+00069cf4 | 0x4 | /undefined4 | DAT_00069cf4 | DEFAULT
+00069d04 | 0x2 | /undefined2 | DAT_00069d04 | DEFAULT
+00069d06 | 0x2 | /undefined2 | DAT_00069d06 | DEFAULT
+00069d08 | 0x1 | /undefined1 | DAT_00069d08 | DEFAULT
+00069d09 | 0x1 | /undefined1 | DAT_00069d09 | DEFAULT
+00069d0b | 0x1 | /undefined1 | DAT_00069d0b | DEFAULT
+00069d0c | 0x1 | /undefined1 | DAT_00069d0c | DEFAULT
+00069d10 | 0x4 | /undefined4 | DAT_00069d10 | DEFAULT
+00069d14 | 0x4 | /undefined4 | DAT_00069d14 | DEFAULT
+00069d18 | 0x4 | /undefined4 | DAT_00069d18 | DEFAULT
+00069d1c | 0x4 | /undefined4 | DAT_00069d1c | DEFAULT
+00069d20 | 0x4 | /undefined4 | DAT_00069d20 | DEFAULT
+00069d24 | 0x4 | /undefined4 | DAT_00069d24 | DEFAULT
+00069d50 | 0x4 | /undefined4 | DAT_00069d50 | DEFAULT
+00069d54 | 0x4 | /undefined4 | DAT_00069d54 | DEFAULT
+00069d64 | 0x4 | /undefined4 | DAT_00069d64 | DEFAULT
+00069d68 | 0x4 | /undefined4 | DAT_00069d68 | DEFAULT
+00069d6c | 0x4 | /undefined4 | DAT_00069d6c | DEFAULT
+00069d70 | 0x1 | /undefined1 | DAT_00069d70 | DEFAULT
+00069d71 | 0x1 | /undefined1 | DAT_00069d71 | DEFAULT
+00069d74 | 0x4 | /undefined4 | DAT_00069d74 | DEFAULT
+00069d80 | 0x4 | /undefined4 | DAT_00069d80 | DEFAULT
+00069d84 | 0x4 | /undefined4 | DAT_00069d84 | DEFAULT
+00069d90 | 0x4 | /undefined4 | DAT_00069d90 | DEFAULT
+00069da0 | 0x4 | /undefined4 | DAT_00069da0 | DEFAULT
+00069da4 | 0x4 | /undefined4 | DAT_00069da4 | DEFAULT
+00069da8 | 0x4 | /undefined4 | DAT_00069da8 | DEFAULT
+00069dac | 0x4 | /undefined4 | DAT_00069dac | DEFAULT
+00069db0 | 0x2 | /undefined2 | DAT_00069db0 | DEFAULT
+00069db4 | 0x1 | /undefined1 | DAT_00069db4 | DEFAULT
+00069dc4 | 0x4 | /undefined4 | DAT_00069dc4 | DEFAULT
+00069de4 | 0x4 | /undefined4 | DAT_00069de4 | DEFAULT
+00069de8 | 0x4 | /undefined4 | DAT_00069de8 | DEFAULT
+00069dec | 0x4 | /undefined4 | DAT_00069dec | DEFAULT
+00069dfe | 0x1 | /undefined1 | DAT_00069dfe | DEFAULT
+00069dff | 0x2 | /undefined2 | DAT_00069dff | DEFAULT
+00069e01 | 0x4 | /undefined4 | DAT_00069e01 | DEFAULT
+00069e07 | 0x1 | /undefined1 | DAT_00069e07 | DEFAULT
+00069e0b | 0x4 | /undefined4 | DAT_00069e0b | DEFAULT
+00069e20 | 0x2 | /undefined2 | DAT_00069e20 | DEFAULT
+00069e54 | 0x2 | /undefined2 | DAT_00069e54 | DEFAULT
+00069e64 | 0x4 | /undefined4 | DAT_00069e64 | DEFAULT
+00069e68 | 0x4 | /undefined4 | DAT_00069e68 | DEFAULT
+00069e6c | 0x4 | /undefined4 | DAT_00069e6c | DEFAULT
+00069e70 | 0x4 | /undefined4 | DAT_00069e70 | DEFAULT
+00069e74 | 0x4 | /undefined4 | DAT_00069e74 | DEFAULT
+00069e78 | 0x4 | /undefined4 | DAT_00069e78 | DEFAULT
+00069e7c | 0x4 | /undefined4 | DAT_00069e7c | DEFAULT
+00069e80 | 0x4 | /undefined4 | DAT_00069e80 | DEFAULT
+00069e84 | 0x4 | /undefined4 | DAT_00069e84 | DEFAULT
+00069ea8 | 0x4 | /undefined4 | DAT_00069ea8 | DEFAULT
+00069eb0 | 0x4 | /undefined4 | DAT_00069eb0 | DEFAULT
+00069eec | 0x4 | /undefined4 | DAT_00069eec | DEFAULT
+00069ef0 | 0x4 | /undefined4 | DAT_00069ef0 | DEFAULT
+00069ef4 | 0x2 | /undefined2 | DAT_00069ef4 | DEFAULT
+00069ef6 | 0x1 | /undefined1 | DAT_00069ef6 | DEFAULT
+00069ff0 | 0x4 | /undefined4 | DAT_00069ff0 | DEFAULT
+00069ff4 | 0x4 | /undefined4 | DAT_00069ff4 | DEFAULT
+00069ff8 | 0x4 | /undefined4 | DAT_00069ff8 | DEFAULT
+00069ffc | 0x4 | /undefined4 | DAT_00069ffc | DEFAULT
+0006a000 | 0x4 | /undefined4 | DAT_0006a000 | DEFAULT
+0006a004 | 0x4 | /undefined4 | DAT_0006a004 | DEFAULT
+0006a008 | 0x4 | /undefined4 | DAT_0006a008 | DEFAULT
+0006a00c | 0x4 | /undefined4 | DAT_0006a00c | DEFAULT
+0006a010 | 0x4 | /undefined4 | DAT_0006a010 | DEFAULT
+0006a014 | 0x4 | /undefined4 | DAT_0006a014 | DEFAULT
+0006a018 | 0x4 | /undefined4 | DAT_0006a018 | DEFAULT
+0006a01c | 0x4 | /undefined4 | DAT_0006a01c | DEFAULT
+0006a020 | 0x4 | /undefined4 | DAT_0006a020 | DEFAULT
+0006a028 | 0x4 | /undefined4 | DAT_0006a028 | DEFAULT
+0006a02c | 0x4 | /undefined4 | DAT_0006a02c | DEFAULT
+0006a030 | 0x4 | /undefined4 | DAT_0006a030 | DEFAULT
+0006a034 | 0x4 | /undefined4 | DAT_0006a034 | DEFAULT
+0006a038 | 0x4 | /undefined4 | DAT_0006a038 | DEFAULT
+0006a03c | 0x4 | /undefined4 | DAT_0006a03c | DEFAULT
+0006a050 | 0x4 | /undefined4 | DAT_0006a050 | DEFAULT
+0006a054 | 0x4 | /undefined4 | DAT_0006a054 | DEFAULT
+0006a058 | 0x4 | /undefined4 | DAT_0006a058 | DEFAULT
+0006a0b8 | 0x4 | /undefined4 | DAT_0006a0b8 | DEFAULT
+0006a0bc | 0x4 | /undefined4 | DAT_0006a0bc | DEFAULT
+0006a0c0 | 0x4 | /undefined4 | DAT_0006a0c0 | DEFAULT
+0006a0c4 | 0x4 | /undefined4 | DAT_0006a0c4 | DEFAULT
+0006a0c8 | 0x4 | /undefined4 | DAT_0006a0c8 | DEFAULT
+0006a0cc | 0x4 | /undefined4 | DAT_0006a0cc | DEFAULT
+0006a0d0 | 0x4 | /undefined4 | DAT_0006a0d0 | DEFAULT
+0006a0d4 | 0x4 | /undefined4 | DAT_0006a0d4 | DEFAULT
+0006a0d8 | 0x4 | /undefined4 | DAT_0006a0d8 | DEFAULT
+0006a0dc | 0x4 | /undefined4 | DAT_0006a0dc | DEFAULT
+0006a0e0 | 0x4 | /undefined4 | DAT_0006a0e0 | DEFAULT
+0006a0e8 | 0x1 | /undefined1 | DAT_0006a0e8 | DEFAULT
+0006a0ec | 0x4 | /undefined4 | DAT_0006a0ec | DEFAULT
+0006a0f0 | 0x4 | /undefined4 | DAT_0006a0f0 | DEFAULT
+0006a0f4 | 0x4 | /undefined4 | DAT_0006a0f4 | DEFAULT
+0006a0f8 | 0x4 | /undefined4 | DAT_0006a0f8 | DEFAULT
+0006a2fc | 0x4 | /undefined4 | DAT_0006a2fc | DEFAULT
+0006a300 | 0x4 | /undefined4 | DAT_0006a300 | DEFAULT
+0006a304 | 0x4 | /undefined4 | DAT_0006a304 | DEFAULT
+0006a3b4 | 0x4 | /undefined4 | DAT_0006a3b4 | DEFAULT
+0006a3b8 | 0x4 | /undefined4 | DAT_0006a3b8 | DEFAULT
+0006a3c0 | 0x1 | /undefined1 | DAT_0006a3c0 | DEFAULT
+0006a3c1 | 0x1 | /undefined1 | DAT_0006a3c1 | DEFAULT
+0006a3c2 | 0x1 | /undefined1 | DAT_0006a3c2 | DEFAULT
+0006a3c3 | 0x1 | /undefined1 | DAT_0006a3c3 | DEFAULT
+00070000 | 0x2 | /undefined2 | DAT_00070000 | DEFAULT
+00070002 | 0x4 | /undefined4 | DAT_00070002 | DEFAULT
+00070019 | 0x4 | /undefined4 | DAT_00070019 | DEFAULT
+0007001d | 0x4 | /undefined4 | DAT_0007001d | DEFAULT
+00070021 | 0x1 | /undefined1 | DAT_00070021 | DEFAULT
+00070022 | 0x2 | /undefined2 | DAT_00070022 | DEFAULT
+00070024 | 0x2 | /undefined2 | DAT_00070024 | DEFAULT
+00070026 | 0x2 | /undefined2 | DAT_00070026 | DEFAULT
+00070028 | 0x2 | /undefined2 | DAT_00070028 | DEFAULT
+0007002a | 0x2 | /undefined2 | DAT_0007002a | DEFAULT
+0007002e | 0x2 | /undefined2 | DAT_0007002e | DEFAULT
+00070044 | 0x2 | /undefined2 | DAT_00070044 | DEFAULT
+00070046 | 0x2 | /undefined2 | DAT_00070046 | DEFAULT
+00070048 | 0x2 | /undefined2 | DAT_00070048 | DEFAULT
+0007004a | 0x2 | /undefined2 | DAT_0007004a | DEFAULT
+00070050 | 0x2 | /undefined2 | DAT_00070050 | DEFAULT
+00070052 | 0x2 | /undefined2 | DAT_00070052 | DEFAULT
+.image::00000000 | 0xc4 | /IMAGE_LE_HEADER | IMG_00000000_LE_HEADER | USER_DEFINED
+.image::000000c4 | 0x184 | /IMAGE_LE_LOADER | IMG_000000C4_LE_LOADER | USER_DEFINED
+.image::00000248 | 0xc568 | /IMAGE_LE_FIXUP | IMG_00000248_LE_FIXUP | USER_DEFINED
+.image::0000c7b0 | 0x4c035 | /IMG_LE_DATA | IMG_LE_DATA_.image__0000c7b0 | DEFAULT
