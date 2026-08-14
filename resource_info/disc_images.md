@@ -12,7 +12,13 @@
 
 ## 各檔案的角色
 
-- **`PACK.VFS`**（兩片都有，內容不同）：VFS 容器，header 帶簽章字串 `Dynasty Information Co.,`，內含 24 個 entry——安裝會用到的全部遊戲檔案，外加 `PASS.DAT`。`PASS.DAT` 只有 3 個 byte，光碟 1 為 `1\r\n`、光碟 2 為 `2\r\n`，是遊戲判斷目前放的是哪一片的依據。兩片的 `PACK.VFS` 差異僅在此。
+- **`PACK.VFS`**（兩片都有，內容不同）：VFS 容器，header 帶簽章字串 `Dynasty Information Co.,`，內含 24 個 entry。兩片的 entry 名稱與順序完全相同，依序為 `BACKGRND.VFS`、`DATA.VFS`、`DEBUG.SAV`、`DIG.INI`、`DISK.NO`、`DOS4GW.EXE`、`F30.SAV`、`FACE.CEL`、`FDE.EXE`、`FDE.SAV`、`FIELD.VFS`、`FIELD1.VFS`、`FIELD2.VFS`、`FIGACT.VFS`、`FIGHT.VFS`、`FMER1.TMP`、`FMER2.TMP`、`ICON.CEL`、`ICONANI.VFS`、`MER1.TMP`、`MER2.TMP`、`MISC.VFS`、`PASS.DAT`、`SBLASTER.DIG`——注意這份清單與資料軌上的檔案清單不是同一組，`FDE.EXE`、`FDE.SAV`、`F30.SAV`、`DEBUG.SAV`、`DATA.VFS`、`DIG.INI`、`DISK.NO`、`FMER*.TMP`、`MER*.TMP` 只存在於容器內。
+
+  兩片之間有 5 個成員內容不同，其餘 19 個成員位元組相同：
+
+  - `PASS.DAT`：3 個 byte，光碟 1 為 `1\r\n`、光碟 2 為 `2\r\n`，是遊戲判斷目前放的是哪一片的依據。
+  - `FDE.EXE`（372,789）與 `FDE.SAV`（22,987）：兩片大小相同而內容不同，只憑大小分辨不出來。
+  - `FIELD.VFS`（249,543 / 248,869）與 `ICONANI.VFS`（4,718,665 / 4,718,685）：大小差 −674 與 +20，恰好構成容器總大小 654 byte 的落差。
 - **`PACK1.VFS`**（只有光碟 2）：139 MB 的填充檔，內容是重複的假 `XXX.ARJ` / `ARCHIVE.RAR` 記錄，不是 VFS 容器，執行檔中沒有任何參照。
 - **`FD.EXE`**：16-bit MZ 執行檔，過場動畫播放器。由 `FDPS.LE` 以 `spawnv` 呼叫，兩片上的檔案位元組相同。
 - **`FD1.VID` / `FD1.AUD`、`FD2.VID` / `FD2.AUD`、`END.VID` / `END.AUD`**：三段過場動畫的影像與伴音，交給 `FD.EXE` 播放。兩片上的檔案位元組相同。
