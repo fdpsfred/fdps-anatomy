@@ -4,7 +4,7 @@
 
 與另外兩個視角的分工：`program_info/` 說明程式怎麼使用這些數值，`resource_info/` 說明承載它們的檔案格式長怎樣，本資料夾只寫數值本身。
 
-每份文件開頭有「來源」段，寫明每個欄位的依據——攻略站、資料檔實際 byte、或 Ghidra 中的 global 符號。三者互相牴觸時以資料檔實際 byte 為準，並在文件中記下差異。
+每份文件開頭有「來源」段，寫明每個欄位的依據——攻略站（鏡像在 [`docs/guide/`](../docs/guide/_index.md)）、資料檔實際 byte、或 Ghidra 中的 global 符號。三者互相牴觸時以資料檔實際 byte 為準，並在文件中記下差異。
 
 [`tables/`](tables/_index.md) 放 record 的 struct 定義，數值本身不重複寫在那裡，一律引用本層的正典檔。
 

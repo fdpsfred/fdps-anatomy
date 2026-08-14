@@ -1,3 +1,11 @@
 # The Ghidra snapshot is regenerated with LF endings. Without this, a checkout on
 # Windows would rewrite it to CRLF and the next export would look like a full-file diff.
 ghidra_snapshot/*.txt text eol=lf
+
+# Same for the guide mirror: fetch writes LF, so a CRLF checkout would make every
+# re-fetch look like a full rewrite. The images are binary and must not be touched.
+docs/guide/**/*.htm text eol=lf
+docs/guide/**/*.txt text eol=lf
+docs/guide/**/*.jpg binary
+docs/guide/**/*.png binary
+docs/guide/**/*.gif binary
