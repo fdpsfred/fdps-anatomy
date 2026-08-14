@@ -2,7 +2,9 @@
 
 `.CEL` 是 FDPS 的 sprite 圖表容器：一個檔裝固定尺寸的一批 sprite，全部共用檔頭宣告的寬高，各自以 RLE 壓縮的像素串排在偏移表後面。
 
-硬碟安裝後有 99 個：`FACE.CEL`（人物頭像）與 `ICON.CEL`（棋子圖示）在根目錄，另外 97 個在 `.VFS` 容器內（`FIELD1.VFS` 69 個地圖圖磚表、`MISC.VFS` 28 個介面圖）。光碟上的 `FACE.CEL` 與 `ICON.CEL` 包在 `PACK.VFS` 裡，見 [`disc_images.md`](disc_images.md)。
+硬碟安裝後有 99 個：`FACE.CEL`（人物頭像）與 `ICON.CEL`（棋子圖示）在根目錄，另外 97 個在 `.VFS` 容器內（`FIELD1.VFS` 69 個、`MISC.VFS` 28 個介面圖）。光碟上的 `FACE.CEL` 與 `ICON.CEL` 包在 `PACK.VFS` 裡，見 [`disc_images.md`](disc_images.md)。
+
+`FIELD1.VFS` 那 69 個裡只有 68 個是取得到的地圖圖磚表：程式的檔名是 `m%02d%d.cel`（地圖編號兩位加圖層一位），對到 64 個地圖的第 0 層與其中 4 個的第 1 層。剩下的 `M09.CEL` 只有兩位數字，這個格式產不出來，`FDPS.LE` 裡也沒有別的字串指向它，是一個開不到的殘留檔——數 `FIELD1.VFS` 的圖磚表時不能把它算進去。
 
 像素是 8-bit 調色盤索引，調色盤不在 `.CEL` 內，由場景另外指定 `MISC.VFS` 的 5 個 `.PAL`（各 768 byte，256 × RGB 的 6-bit VGA DAC 值，還原成 8-bit 是 `c8 = c6 << 2 | c6 >> 4`）。同一個 `.CEL` 套錯調色盤會得到形狀正確但顏色全錯的圖。
 

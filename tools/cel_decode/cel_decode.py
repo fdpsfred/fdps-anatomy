@@ -413,7 +413,18 @@ def cmd_dump(out_path, palette_path, *source_paths):
     out_path = Path(out_path)
     palette = load_palette(palette_path)
     sheets = []
-    found = [path for source in source_paths for path in sheets_in(source)]
+    # Sources are allowed to overlap -- naming a directory and one file inside
+    # it is a natural way to ask for both -- so the same sheet reached twice is
+    # one sheet, while two different sheets sharing a stem are not, since they
+    # would write over each other's contact sheet.
+    found = []
+    resolved = set()
+    for source in source_paths:
+        for path in sheets_in(source):
+            key = path.resolve()
+            if key not in resolved:
+                resolved.add(key)
+                found.append(path)
     seen = {}
     for path in found:
         if path.stem.upper() in seen:

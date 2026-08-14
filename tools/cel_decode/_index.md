@@ -27,8 +27,6 @@ python tools/cel_decode/cel_decode.py report <manifest json>
 先跑 [`vfs_dump`](../vfs_dump/_index.md) 把容器解開，再：
 
 ```
-python tools/cel_decode/cel_decode.py dump workspace/cel_decode ^
-    workspace/vfs_dump/MISC/FDE.PAL fdps_game_files workspace/vfs_dump
-python tools/cel_decode/cel_decode.py report workspace/cel_decode/manifest.json ^
-    > workspace/cel_decode/report.md
+python tools/cel_decode/cel_decode.py dump workspace/cel_decode workspace/vfs_dump/MISC/FDE.PAL fdps_game_files workspace/vfs_dump
+python tools/cel_decode/cel_decode.py report workspace/cel_decode/manifest.json > workspace/cel_decode/report.md
 ```
