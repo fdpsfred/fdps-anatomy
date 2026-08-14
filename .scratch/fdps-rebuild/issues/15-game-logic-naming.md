@@ -12,6 +12,6 @@ calling convention 是逐 function 判定的——個別 function 會偏離預�
 - [ ] 每個 function 的 calling convention 逐一判定，偏離預設值的明確標記
 - [ ] 命名採用專案詞彙表的語彙，並參照攻略基準真值確認語意正確
 - [ ] 每個 function 有描述其行為的註解
-- [ ] 未被辨識的程式碼區域、跳躍表、直落到下一個 function 的情形全部處理完畢
+- [ ] 命名過程中新發現的跳躍表與直落到下一個 function 的情形全部處理完畢（成批的未辨識程式碼已在 14 號票建成 function）
 - [ ] 完成判定：零個預設命名殘留、零個錯誤標記
 - [ ] Ghidra 快照匯出並 commit
