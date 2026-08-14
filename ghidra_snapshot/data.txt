@@ -33,7 +33,7 @@
 00014788 | 0x4 | /undefined4 | DAT_00014788 | DEFAULT
 0001478c | 0x4 | /undefined4 | DAT_0001478c | DEFAULT
 000147ac | 0x4 | /undefined4 | DAT_000147ac | DEFAULT
-000147b0 | 0x4 | /undefined4 | LE_PAGE_9 | USER_DEFINED
+000147b0 | 0x4 | /undefined4 | DAT_000147b0 | DEFAULT
 000147d0 | 0x4 | /undefined4 | DAT_000147d0 | DEFAULT
 000147d4 | 0x4 | /undefined4 | DAT_000147d4 | DEFAULT
 000147f4 | 0x4 | /undefined4 | DAT_000147f4 | DEFAULT
@@ -503,6 +503,15 @@
 00050020 | 0x4 | /undefined * | fix_off32_00050020 | ANALYSIS
 00050024 | 0x4 | /undefined * | fix_off32_00050024 | ANALYSIS
 00050028 | 0x4 | /undefined * | fix_off32_00050028 | ANALYSIS
+00050d82 | 0xa | /float10 | FPEMU_CONST_TBL | USER_DEFINED
+00050d8c | 0xa | /float10 | - | -
+00050d96 | 0xa | /float10 | - | -
+00050da0 | 0xa | /float10 | - | -
+00050daa | 0xa | /float10 | - | -
+00050db4 | 0xa | /float10 | - | -
+00050dbe | 0xa | /float10 | - | -
+00050dc8 | 0xa | /float10 | - | -
+00050dd2 | 0xa | /float10 | - | -
 000514a6 | 0x2 | /undefined2 | DAT_000514a6 | DEFAULT
 000514b6 | 0x2 | /undefined2 | DAT_000514b6 | DEFAULT
 000516d4 | 0x4 | /undefined4 | DAT_000516d4 | DEFAULT
@@ -891,6 +900,9 @@
 000613c8 | 0x2 | /undefined2 | DAT_000613c8 | DEFAULT
 000613cc | 0x2 | /undefined2 | DAT_000613cc | DEFAULT
 000613d0 | 0x2 | /undefined2 | DAT_000613d0 | DEFAULT
+00061434 | 0x4 | /undefined4 | DAT_00061434 | DEFAULT
+00061438 | 0x4 | /undefined4 | DAT_00061438 | DEFAULT
+0006143c | 0x2 | /undefined2 | DAT_0006143c | DEFAULT
 0006143e | 0x4 | /undefined4 | DAT_0006143e | DEFAULT
 00061444 | 0x1 | /undefined1 | DAT_00061444 | DEFAULT
 00061445 | 0x1 | /undefined1 | DAT_00061445 | DEFAULT
@@ -1378,7 +1390,7 @@
 00064020 | 0x4 | /undefined4 | DAT_00064020 | DEFAULT
 00064030 | 0x4 | /undefined4 | DAT_00064030 | DEFAULT
 00064034 | 0x4 | /undefined4 | DAT_00064034 | DEFAULT
-00064038 | 0x4 | /undefined4 | DAT_00064038 | DEFAULT
+00064038 | 0x2 | /undefined2 | DAT_00064038 | DEFAULT
 0006403c | 0x1 | /undefined1 | DAT_0006403c | DEFAULT
 0006403d | 0x1 | /undefined1 | DAT_0006403d | DEFAULT
 0006403e | 0x4 | /undefined4 | DAT_0006403e | DEFAULT
@@ -1489,8 +1501,7 @@
 00069eb0 | 0x4 | /undefined4 | DAT_00069eb0 | DEFAULT
 00069eec | 0x4 | /undefined4 | DAT_00069eec | DEFAULT
 00069ef0 | 0x4 | /undefined4 | DAT_00069ef0 | DEFAULT
-00069ef4 | 0x2 | /undefined2 | DAT_00069ef4 | DEFAULT
-00069ef6 | 0x1 | /undefined1 | DAT_00069ef6 | DEFAULT
+00069ef4 | 0x4 | /undefined4 | DAT_00069ef4 | DEFAULT
 00069ff0 | 0x4 | /undefined4 | DAT_00069ff0 | DEFAULT
 00069ff4 | 0x4 | /undefined4 | DAT_00069ff4 | DEFAULT
 00069ff8 | 0x4 | /undefined4 | DAT_00069ff8 | DEFAULT

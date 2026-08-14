@@ -6,4 +6,5 @@
 
 | 文件 | 內容 |
 | --- | --- |
+| [`memory_layout.md`](memory_layout.md) | 位址空間：LE object table、權限、初始化資料與 BSS 的分界、函式指標表與跳躍表、未辨識為程式碼的區域 |
 | [`cd_audio.md`](cd_audio.md) | CD 音源與光碟相依：MSCDEX 存取層、啟動時的光碟偵測、章節音軌對照表、影片播放外呼 |

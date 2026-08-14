@@ -182,7 +182,7 @@ Status: ready-for-agent
 
 ### 規模參考
 
-前作 FD2 專案的數字可作為估算基礎：2,338 個 commit、約 11 週、binary 內 1,342 個 function（其中 651 個需要 emit 成 C）、重建原始碼 64 個檔案 51,115 行、實機階段修掉 8 類 bug。FDPS 的 binary 稍大（362,469 vs 346,650 byte），function 數目前計為 719（待確認 Phase A 第一項工作的結果）。
+前作 FD2 專案的數字可作為估算基礎：2,338 個 commit、約 11 週、binary 內 1,342 個 function（其中 651 個需要 emit 成 C）、重建原始碼 64 個檔案 51,115 行、實機階段修掉 8 類 bug。FDPS 的 binary 稍大（362,469 vs 346,650 byte），function 數在票 10 的基準盤點後是 1,042。
 
 ### 已知的最大不確定性
 

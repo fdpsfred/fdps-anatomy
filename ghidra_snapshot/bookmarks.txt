@@ -1,6 +1,5 @@
 # address | type | category | comment
 # Error bookmarks mark disassembly damage, so repair progress shows up as a diff.
-000217af | Error | Bad Instruction | Failed to disassemble at 000217af due to conflicting instruction at 000217b0 (flow from 000217a8)
 0002f6e0 | Analysis | Address Table | Address table[8] created
 00030790 | Analysis | Found Code | Found code from operand reference
 00031328 | Analysis | Address Table | Address table[5] created
@@ -9,9 +8,6 @@
 00035dac | Analysis | Address Table | Address table[4] created
 000360b8 | Analysis | Address Table | Address table[5] created
 000362f8 | Analysis | Address Table | Address table[6] created
-000377ac | Error | Bad Instruction | Failed to disassemble at 000377ac due to conflicting instruction at 000377b0 (flow from 000377aa)
-0003a7ac | Error | Bad Instruction | Failed to disassemble at 0003a7ac due to conflicting instruction at 0003a7b0 (flow from 0003a7aa)
-0003b7aa | Error | Bad Instruction | Failed to disassemble at 0003b7aa due to conflicting instruction at 0003b7b0 (flow from 0003b7a6)
 0003d60a | Analysis | Found Code | Found code from operand reference
 000423fd | Analysis | Found Code | Found code from operand reference
 00042d2a | Analysis | Found Code | Found code from operand reference
@@ -25,19 +21,19 @@
 00046940 | Analysis | Found Code | Found code from operand reference
 00047598 | Analysis | Address Table | Address table[4] created
 0004785c | Analysis | Address Table | Address table[10] created
+00047874 | Analysis | Address Table | Address table[4] created
 00048f90 | Analysis | Found Code | Found code from operand reference
-000497ae | Error | Bad Instruction | Failed to disassemble at 000497ae due to conflicting instruction at 000497b0 (flow from 000497a9)
 0004b080 | Analysis | Found Code | Found code from operand reference
 0004ceff | Analysis | Found Code | Found code from operand reference
 0004e8e8 | Analysis | Address Table | Address table[176] created
+0004e948 | Analysis | Address Table | Address table[24] created
+0004e9a8 | Analysis | Address Table | Address table[64] created
+0004eaa8 | Analysis | Address Table | Address table[64] created
 0004ed70 | Analysis | Found Code | Found code from operand reference
 0004edac | Analysis | Found Code | Found code from operand reference
-0004f7ae | Error | Bad Instruction | Failed to disassemble at 0004f7ae due to conflicting instruction at 0004f7b0 (flow from 0004f7aa)
 0004f8bc | Analysis | Address Table | Address table[8] created
 0004fb58 | Analysis | Address Table | Address table[8] created
 0005000c | Analysis | Address Table | Address table[8] created
-000507ac | Error | Bad Instruction | Failed to disassemble at 000507ac due to conflicting instruction at 000507b0 (flow from 000507aa)
-000507c2 | Error | Bad Instruction | Failed to disassemble at 000507c2 due to conflicting instruction at 000507c3 (flow from 000507c0)
 00050d82 | Analysis | Found Code | Found code from operand reference
 0005289c | Analysis | Address Table | Address table[4] created
 000528bc | Analysis | Address Table | Address table[4] created
@@ -56,8 +52,6 @@
 00052b74 | Analysis | Address Table | Address table[6] created
 00052bdc | Analysis | Address Table | Address table[4] created
 00052bf4 | Analysis | Address Table | Address table[6] created
-000537ab | Error | Bad Instruction | Failed to disassemble at 000537ab due to conflicting instruction at 000537b0 (flow from 000537a9)
-000537b3 | Error | Bad Instruction | Failed to disassemble at 000537b3 due to conflicting instruction at 000537b0 (flow from 000537da)
 00056837 | Analysis | Found Code | Found code from operand reference
 00060074 | Analysis | Address Table | Address table[30] created
 000601c4 | Analysis | Address Table | Address table[50] created
