@@ -1,0 +1,3 @@
+# The Ghidra snapshot is regenerated with LF endings. Without this, a checkout on
+# Windows would rewrite it to CRLF and the next export would look like a full-file diff.
+ghidra_snapshot/*.txt text eol=lf
