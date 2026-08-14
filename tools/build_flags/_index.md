@@ -10,7 +10,9 @@
 | --- | --- |
 | `parse_le_header.py` | 逐欄印出 LE header、object table 與 resident name，並算出初始 ESP 與 object 尾端的關係。吃 `.LE` 或帶 MZ stub 的 `.EXE` |
 | `probe_matrix.py` | 用一組旗標矩陣編譯 `probe.c` 並反組譯，比較框架形狀、堆疊檢查、收尾形式、索引縮放與 const 落點。變體標籤是 `v01`…`vNN`（DOS 只認 8.3），`--legend` 印出對照表 |
-| `version_sweep.py` | 用定案旗標跑遍每一個安裝版本的 DOS 版編譯器，列出版本間會分歧的程式碼形狀 |
+| `version_sweep.py` | 用定案旗標跑遍每一個安裝版本的 DOS 版編譯器，列出版本間會分歧的程式碼形狀。定案旗標下每個版本都全中，所以它證明的是「旗標組不綁版本」 |
+| `opt_sweep.py` | 在定案旗標之外每次多加一個旗標編 `scale.c`，找出哪個旗標會改變索引縮放形式。`--help-text` 印出 `wcc386` 自己的選項清單 |
+| `ot_order.py` | 比較 `-od`／`-ot` 各種先後與縮寫組合，同時看框架、區域變數與縮放三項，找出三項全中的那一種 |
 | `lib_bytematch.py` | 拿 `FDPS.LE` 裡沒有重定位的位元組串去搜每個版本的 `LIB386`，判定連的是哪個 lib 變體（`3S` 還是 `3R`）與哪一版。純檔案比對，不執行任何工具 |
 | `dosbox_link.py` | 編譯並連結探針，比對 MZ stub、object 佈局、堆疊大小與模擬器是否被連進去 |
 | `link_defaults.py` | 分別在有／沒有 `option stack` 與 `name` 的情況下各連一次，量出 wlink 的預設堆疊大小，以及 LE 的 resident name 究竟取自輸出檔名還是第一個 `.obj` |
@@ -34,3 +36,4 @@
 - DOS 工具開不了超過 8.3 的檔名：探針原始碼、變體標籤、`.lnk` 檔名全部要壓在 8 個字元內。`wlink` 開不到 `.lnk` 時只在 `build.out` 留一行 `cannot open`，不會讓整批停下來。
 - 產物的新舊靠 mtime 判定而非只靠刪除：Windows 上偶爾會有掃描程序抓住剛寫出的檔案導致刪不掉，而 DOSBox 寫出的時間戳只有 2 秒精度且向下取整，比較時要留寬容值。
 - 判斷資料落在哪個段要**逐行走 `SEGMENT`／`ENDS` 區塊**，不能用「從 `_TEXT SEGMENT` 一路比對到符號」的 regex——每份反組譯都以 `_TEXT SEGMENT` 開頭，那種寫法對後面任何一段的資料都會命中。
+- `wdisasm` 把「只有索引、沒有基底暫存器」的定址寫成 `+0H[eax*4]` 而不是 `[eax*4]`。抓 `lea` 縮放的 regex 少寫 `\+0H` 就會全部漏掉，看起來像「沒有任何版本產得出來」。

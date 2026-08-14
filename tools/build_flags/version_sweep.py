@@ -6,7 +6,11 @@ installed version gets one DOSBox session that compiles all five probes and
 disassembles them with the same version's wdisasm.
 
 The report is one row per version, one column per code shape that FDPS.LE
-pins down.  A version that matches the original has to match every column.
+pins down.  With the settled flag set every installed version matches every
+column, so code shape does not by itself narrow the version down — that comes
+from the byte level evidence in rebuild_info/build_flags.md.  The value here is
+the converse: it shows the flag set is not version specific, and it catches a
+version whose codegen would diverge.
 
 Outputs land in workspace/build_flags/versions/<version>/.
 
@@ -31,7 +35,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 OUT = os.path.join(REPO, "workspace", "build_flags", "versions")
 
-CFLAGS = "-bt=dos4g -mf -zq -4s -fpi -s -od"
+CFLAGS = "-bt=dos4g -mf -zq -4s -fpi -s -ot -od"
 # every name is 8.3: DOS tools see mangled short names otherwise
 SOURCES = ["probe.c", "probesw.c", "shorts.c", "locinit.c", "scale.c"]
 # the wcc386/wdisasm of a given release live in different directories across
@@ -41,13 +45,14 @@ MTIME_SLACK = 4.0
 
 # label -> (source, regex, what FDPS.LE has)
 SHAPES = [
-    ("scale", "scale.c", r"(shl\s+e\w\w,02H|lea\s+e\w\w,\[e\w\w\*4\])",
+    # wdisasm writes the scaled-index-only form as `+0H[eax*4]`, not `[eax*4]`
+    ("scale", "scale.c", r"(shl\s+e\w\w,02H|lea\s+e\w\w,\+0H\[e\w\w\*4\])",
      "lea reg,[reg*4]"),
     ("epilogue", "probe.c", r"(leave|mov\s+esp,ebp)", "mov esp,ebp"),
     ("16-bit load", "shorts.c", r"(movsx\s+eax,word ptr|sar\s+eax,10H)",
      "movsx"),
-    ("switch scale", "probesw.c", r"(shl\s+eax,02H|lea\s+eax,\[eax\*4\])",
-     "lea eax,[eax*4]"),
+    ("switch scale", "probesw.c",
+     r"(shl\s+eax,02H|lea\s+eax,\+0H\[eax\*4\])", "lea eax,[eax*4]"),
 ]
 
 # which segment a datum ends up in, checked by walking the listing rather than

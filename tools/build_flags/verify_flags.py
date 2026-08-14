@@ -26,8 +26,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 OUT = os.path.join(REPO, "workspace", "build_flags", "verify")
 
-CFLAGS = "-bt=dos4g -mf -4s -fpi -s -od -zq"
-SOURCES = ["probe.c", "probesw.c", "shorts.c", "locinit.c"]
+# -ot before -od is not redundant: wcc386 reads options left to right, so -ot
+# sets the favour-time preference that picks `lea` for index scaling and -od
+# then switches the optimiser off without clearing that preference.  Swapping
+# them, or dropping either one, changes the generated code.
+CFLAGS = "-bt=dos4g -mf -4s -fpi -s -ot -od -zq"
+SOURCES = ["probe.c", "probesw.c", "shorts.c", "locinit.c", "scale.c"]
 BINDIRS = ["BIN", "BINB", "BINW"]
 MTIME_SLACK = 4.0
 
@@ -66,6 +70,12 @@ CHECKS = [
     ("x87 inline with __CHP before FISTP", "probe.c",
      r"call\s+near ptr __CHP\n\s+fistp", None,
      "__CHP at 0x43657 is called from game FP code ahead of FISTP"),
+    ("index scaling uses LEA", "scale.c",
+     r"lea\s+e\w\w,\+0H\[e\w\w\*4\]", r"shl\s+e\w\w,02H",
+     "304 LEA reg,[reg*N+0] in the game region, 0 SHL reg,2 for addressing"),
+    ("locals still round-trip through the stack", "probe.c",
+     r"mov\s+dword ptr -4H\[ebp\],eax\n\s+mov\s+eax,dword ptr -4H\[ebp\]", None,
+     "0002f723 mov [ebp-4],eax then 0002f732 mov eax,[ebp-4]"),
 ]
 
 # (label, source, line pattern identifying the datum, expected segment, evidence)
@@ -178,10 +188,6 @@ def main():
             failed += 1
     total = len(CHECKS) + len(SEGMENT_CHECKS)
     print("\n%d/%d signatures reproduced" % (total - failed, total))
-    print("open: FDPS.LE scales indices with `lea reg,[reg*N]` (304 sites in "
-          "the game region) where all installed Watcom versions emit "
-          "`shl reg,N`. Functionally identical; the compiler version stays "
-          "undetermined. See open_issues.md.")
     return 1 if failed else 0
 
 

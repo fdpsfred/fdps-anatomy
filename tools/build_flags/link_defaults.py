@@ -24,7 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 OUT = os.path.join(REPO, "workspace", "build_flags", "defaults")
 
-CFLAGS = ["-bt=dos4g", "-mf", "-4s", "-fpi", "-s", "-od", "-zq"]
+CFLAGS = ["-bt=dos4g", "-mf", "-4s", "-fpi", "-s", "-ot", "-od", "-zq"]
 SRC = "mainprb.c"
 MAIN_C = """\
 #include <stdio.h>

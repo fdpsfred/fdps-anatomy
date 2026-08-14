@@ -6,35 +6,33 @@
 
 ## 工具鏈
 
-連結器與程式庫釘得很死，編譯器則沒有——兩者要分開講。
-
-### 連結器、程式庫與 extender：Watcom 10.0a 或 10.0b
-
-三項 byte 級證據都指向 10.0 家族的後期版本，並排除 9.5 全系列與 10.5 之後：
+**Watcom C/C++ 10.0a**（10.0b 無法排除，兩者的相關產物 byte 相同）。四項獨立證據都指向 10.0 家族的後期版本，並排除 9.5 全系列與 10.5 之後：
 
 | 證據 | 內容 |
 | --- | --- |
+| CRT 的版權字串 | `0x3fa49`：`WATCOM C/C++32 Run-Time system. (c) Copyright by WATCOM International Corp. 1988-1994.` 年份上界 1994 就是 10.0 家族 |
 | 隨遊戲附的 `DOS4GW.EXE` | 265,420 byte，SHA-256 與 10.0a／10.0b 的 `BIN\DOS4GW.EXE` **完全相同**。9.5c 大小相同但雜湊不同，10.5 之後是 265,396 byte |
 | `FDPS.EXE` 的 MZ stub | 10,832 byte。用 10.0a 的 `wlink system dos4g` 連結任意程式，產出的 stub 與 `FDPS.EXE` 的前 10,832 byte **零 byte 差異** |
 | CRT 函式的機械碼 | `0x435f3` 的轉大寫常式（31 byte 無重定位）與 `0x43657` 的 `__CHP`（22 byte）只在 10.0／10.0a／10.0b 的 `CLIB3S.LIB` 命中，9.5 全系列與 10.5 之後都沒有 |
 
 `0x42c3a` 的 `FCOS`／`FSIN` 包裝常式命中 `MATH387x.LIB`（非 `MATH3x`），`0x4ec3c` 起的 80x87 模擬器命中 `EMU387.LIB`。
 
-### 編譯器：Watcom 系，但版本未定
-
-編譯遊戲模組的 `wcc386` **不是手上任何一個版本**。它把陣列與指標的索引縮放編成 `lea reg,[reg*N]`，而 9.5／9.5a／9.5b／9.5c／10.0／10.0a／10.0b／10.5／10.5a／10.6／10.6a 全部編成 `shl reg,N`——十一個版本無一例外。細節與已排除的可能見下方「未定案：索引縮放」。
-
-程式碼形狀本身仍然是 Watcom 的：序幕、引數位置、switch 跳躍表的擺法、`__CHP` 的呼叫形式都與 `wcc386 -4s -od` 完全吻合，所以是同一系的另一個版本（很可能是 11.0 或更後面的 OpenWatcom），不是別家編譯器。
-
-**實務上取 10.0a 編譯**：`-4s -od` 下兩種縮放形式語意完全相同，符合 [ADR-0001](../docs/adr/0001-only-functional-equivalence.md) 的功能等價；代價是重建版與原版永遠不可能 byte 相同，逐指令比對時要預期這一類差異。
-
 ## 編譯旗標
 
 ```
-wcc386 -bt=dos4g -mf -4s -fpi -s -od
+wcc386 -bt=dos4g -mf -4s -fpi -s -ot -od
 ```
 
-（以 10.0a 為準；旗標本身的判定不受編譯器版本未定影響——下表每一項的另一種選擇在十一個版本裡都會產生看得出來的差異，而原版全部落在這一組。）
+**`-ot -od` 的順序不能對調，也不能只留一個。** `wcc386` 由左而右處理選項：`-ot` 先設定「以速度為優先」這個偏好，`-od` 再關掉最佳化器但不會清掉那個偏好。三種寫法的結果都不同：
+
+| 寫法 | 區域變數 | 索引縮放 |
+| --- | --- | --- |
+| `-od` | 來回堆疊 | `shl reg,2` |
+| `-ot` | 留在暫存器 | `lea reg,[reg*4]` |
+| `-od -ot` | 留在暫存器 | `lea reg,[reg*4]` |
+| **`-ot -od`** | **來回堆疊** | **`lea reg,[reg*4]`** |
+
+原版是「來回堆疊 + `lea`」，只有最後一種同時給出這兩項。`-otd` 是等價的縮寫。四種寫法的框架形狀相同，所以框架不是分辨這一組的依據。
 
 每一項的判定依據如下。「原版的樣子」欄位是 `FDPS.LE` 的實際觀察，「另一種選擇會變成」是用同一支編譯器實測其他旗標的產出。
 
@@ -45,28 +43,35 @@ wcc386 -bt=dos4g -mf -4s -fpi -s -od
 | `-4s`（486，堆疊呼叫慣例） | 序幕固定 `53 56 57 55 89 e5`（推 EBX/ESI/EDI/EBP 後建 EBP 框架），第一個引數在 `[ebp+0x14]`；收尾用 `mov esp,ebp` / `pop ebp`，全 binary 遊戲段 **0 個 `LEAVE`**；16-bit 載入保留 `MOVSX`（208 處） | `-3s` 收尾用 `LEAVE`；`-5s` 把每個 `movsx eax,word ptr X` 換成 `mov eax,dword ptr X-2` + `sar eax,0x10`（遊戲段 0 處）；`-4r`／`-3r` 等 register 慣例不會無條件推四個暫存器 |
 | `-fpi`（內嵌 x87，含模擬） | 遊戲段有 70 條內嵌 x87 指令，且映像檔內含 `EMU387.LIB` 的 80x87 模擬器 | `-fpc` 完全不產 x87，改呼叫 `__I4FD`／`__FDM` 等；`-fpi87` 只差在不發出 `__init_387_emulator` 這個外部參照，**實測即使在 `.lnk` 明列 `emu387.lib`，`-fpi87` 產出的映像檔裡也沒有模擬器**——wlink 只抽出解得掉未定義符號的 lib 成員 |
 | `-s`（移除堆疊檢查） | 遊戲段 414 個標準框架的 function **沒有任何一個**呼叫 `__CHK`（`0x4361a`）；17 個呼叫端全部是序幕就是 `push imm` / `call __CHK` 的程式庫 function | 不加 `-s` 時每個有框架的 function 都會被插入 `push <框架大小>` / `call __CHK` |
-| `-od`（關閉最佳化） | 每個區域變數都寫回堆疊再讀出；switch 的跳躍表放在序幕之後、以 `jmp short` 跳過，分派拆成 `mov` + 縮放 + `jmp cs:[reg+表]` 兩三條指令 | 開最佳化後跳躍表移到函式之前，分派收斂成單一條 `jmp cs:[reg*4+表]`——`FDPS.LE` 裡程式庫段的六張表正是這個形狀，遊戲段那張不是 |
+| `-ot`（以速度為優先） | 位址計算的索引縮放編成 `lea reg,[reg*N + 0]`：遊戲段 304 處，程式庫段 41 處。`shl reg,2` 只出現在除法常數展開之類的算術情境（37 處） | 不加 `-ot` 時位址縮放也用 `shl reg,N`；`-os`（以空間為優先）同樣是 `shl` |
+| `-od`（關閉最佳化） | 每個區域變數都寫回堆疊再讀出；switch 的跳躍表放在序幕之後、以 `jmp short` 跳過，分派拆成 `mov` + 縮放 + `jmp cs:[reg+表]` 兩三條指令 | 開最佳化後區域變數留在暫存器、跳躍表移到函式之前，分派收斂成單一條 `jmp cs:[reg*4+表]`——`FDPS.LE` 裡程式庫段的六張表正是這個形狀，遊戲段那張不是 |
 
 `-zq` 只影響訊息輸出，可加可不加。
 
 ### 無法從 binary 判定的旗標
 
-- **`-fp2` / `-fp3` / `-fp5` / `-fpr`**：在 `-od` 下四者與不指定產生完全相同的機械碼，本 binary 沒有可分辨的痕跡。
-- **`-od` vs `-d2`**：`-d2` 會連帶關閉最佳化，產生的機械碼與 `-od` 完全相同；LE header 的 `debug_info_off` 是 0，表示最終執行檔沒有除錯資訊。取 `-od`。
+- **`-fp2` / `-fp3` / `-fp5` / `-fpr`**：在這組旗標下四者與不指定產生完全相同的機械碼，本 binary 沒有可分辨的痕跡。
+- **`-od` vs `-d2`**：`-d2` 會連帶關閉最佳化，接在 `-ot` 之後給出與 `-od` 相同的機械碼；LE header 的 `debug_info_off` 是 0，表示最終執行檔沒有除錯資訊。取 `-od`。
 - **`-zp`（結構對齊）**：編譯器預設等同 `-zp1`（實測 `struct {char a; int b; char c; short d; double e;}` 在預設下的欄位偏移是 0/1/5/6/8）。要確認原版是否另外指定，得等 struct layout 定案，屬於票 17。
 
-### 未定案：索引縮放
+### 逐指令對得上的一段
 
-原版把「索引乘上元素大小」編成 `lea reg,[reg*N + 0]`（例如 `8d 04 85 00 00 00 00`），遊戲段有 **304 處**，程式庫段另有 41 處；同一段裡 `shl reg,2` 只出現在除法常數展開之類的算術情境（37 處），不用於位址計算。手上十一個 Watcom 版本在同樣情境一律產 `shl reg,N`。
+`0x2f6d0` 那個 8-case switch 是整組旗標的收斂點，用上表的旗標重編一份等價的 C，出來的指令序列與位元組填充完全一致：
 
-已排除的可能：
-
-- **手寫組語**：304 處分散在整個遊戲段，且它們所在的函式從序幕到收尾都是編譯器產物
-- **旗標**：五種 CPU 等級 × 三種最佳化層級 ×`-d1`／`-d2`／`-ze`／`-za`／`-oi`／`-or`× 兩種記憶體模型 × C 與 C++ 兩支編譯器，全部產 `shl`
-- **來源寫法**：指標索引、全域陣列索引、函式指標表呼叫、指標運算後再索引，以及索引變數為全域／`unsigned`／`short`／`char`／`long` 的各種組合，全部產 `shl`
-- **版本**：9.5、9.5a、9.5b、9.5c、10.0、10.0a、10.0b、10.5、10.5a、10.6、10.6a，每一個都用它自己的 DOS 版 `wcc386` 在 DOSBox-X 裡編
-
-要收斂需要 Watcom 11.0 或早期 OpenWatcom 的 `wcc386` 再驗一次。追蹤在 [`open_issues.md`](../open_issues.md)。
+```
+FDPS.LE 0x2f6d0                          wcc386 -mf -4s -fpi -s -ot -od
+  push ebx / esi / edi / ebp               push ebx / esi / edi / ebp
+  mov  ebp,esp                             mov  ebp,esp
+  sub  esp,0x10                            sub  esp,<n>
+  jmp  short（跳過表）                     jmp  short L2
+  8b c0（兩 byte 填充，對齊表）            mov  eax,eax
+  <8 筆跳躍表>                             L1 DD ...×8
+  cmp  dword ptr [ebp+0x34],7              cmp  dword ptr +14H[ebp],7
+  ja   <default>                           ja   near ptr L11
+  mov  eax,dword ptr [ebp+0x34]            mov  eax,dword ptr +14H[ebp]
+  lea  eax,[eax*4 + 0]                     lea  eax,+0H[eax*4]
+  jmp  dword ptr cs:[eax + 0x2f6e0]        jmp  dword ptr cs:L1[eax]
+```
 
 ## 連結指令
 
@@ -115,4 +120,4 @@ object 3（`0x70000`，84 byte）不是上面任何一段產生的——它是�
 
 ## 重現方式
 
-[`tools/build_flags/`](../tools/build_flags/_index.md) 收了全部判定腳本。所有 Watcom 工具都在 DOSBox-X 裡以 DOS 版執行，與原版的建置環境一致。`verify_flags.py` 會用上表的旗標組編譯探針並逐項比對本檔列出的 13 個特徵，旗標組若被改動就重跑它。
+[`tools/build_flags/`](../tools/build_flags/_index.md) 收了全部判定腳本。所有 Watcom 工具都在 DOSBox-X 裡以 DOS 版執行，與原版的建置環境一致。`verify_flags.py` 會用上表的旗標組編譯探針並逐項比對本檔列出的 15 個特徵，旗標組若被改動就重跑它。

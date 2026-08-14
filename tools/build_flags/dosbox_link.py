@@ -53,7 +53,7 @@ VARIANTS = {
 # granularity and round down, so a freshly written file can look slightly older
 # than the moment the run started.
 MTIME_SLACK = 4.0
-BASE_CFLAGS = ["-bt=dos4g", "-mf", "-zq", "-4s", "-s", "-od"]
+BASE_CFLAGS = ["-bt=dos4g", "-mf", "-zq", "-4s", "-s", "-ot", "-od"]
 EMU_SIG = bytes.fromhex("8bec8b75388e5d3c668b4d04668b5506")
 
 

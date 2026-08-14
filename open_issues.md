@@ -2,14 +2,6 @@
 
 當下無法收斂、需要更後面的階段才有材料回答的問題。每條要寫清楚卡在哪裡、要什麼才能收斂。
 
-## 編譯遊戲模組的 `wcc386` 是哪一版
-
-原版把索引縮放編成 `lea reg,[reg*N + 0]`（遊戲段 304 處、程式庫段 41 處），而手上十一個 Watcom 版本（9.5 到 10.6a）在同樣情境一律編成 `shl reg,N`。已排除的可能——手寫組語、旗標組合、來源寫法、版本——逐項列在 [`rebuild_info/build_flags.md`](rebuild_info/build_flags.md)。
-
-矛盾在於連結器、CRT、數學庫、80x87 模擬器與 extender 全部 byte 級命中 10.0a／10.0b，而程式碼形狀（序幕、引數位置、switch 表擺法）也完全是 `wcc386 -4s -od`——是同一系的另一個版本，不是別家編譯器。
-
-**要什麼才能收斂**：一套 Watcom 11.0 或早期 OpenWatcom 的 `wcc386`，用同一組旗標編 `tools/build_flags/scale.c` 與 `probesw.c`，看縮放是不是 `lea`。在此之前重建一律用 10.0a——兩種形式語意相同，只是重建版不可能與原版 byte 相同。屬於票 16 的範圍。
-
 ## `M310.CEL` 的像素編碼與繪製器對不上
 
 `M310.CEL` 是 99 個 `.CEL` 裡唯一一個 `0x0D` 欄位為 1 的檔，它的 192 個 sprite 用的是列尾終止的編碼而不是繪製器讀的 4-op RLE，兩者的格式細節見 [`resource_info/cel.md`](resource_info/cel.md)。
