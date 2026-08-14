@@ -21,3 +21,5 @@ python tools/guide_offsets/crosscheck.py <tables.json> <輸出 markdown>
 攻略站的期望值以人手轉錄成腳本內的字面常數，不解析攻略原文（[ADR-0006](../../docs/adr/0006-guide-as-mirrored-text-not-parsed-data.md)）。每一組常數的註解寫明出自哪一頁哪一欄。
 
 已查明原因的不一致列在 `ACCEPTED`；出現任何不在該表內的不一致就以非零狀態結束。要新增例外必須同時寫下原因，這樣「還沒查」與「查過了」不會混在一起。
+
+`ACCEPTED` 同時是 `fdps-data` skill 顯示歧異提示的依據，[`data_skill/build.py`](../data_skill/_index.md) 有一份對應的副本，往這裡加一筆就要往那裡加一筆。

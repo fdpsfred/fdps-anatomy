@@ -2,6 +2,10 @@
 # Windows would rewrite it to CRLF and the next export would look like a full-file diff.
 ghidra_snapshot/*.txt text eol=lf
 
+# Same for the fdps-data skill's data set: the build writes LF, so a CRLF checkout
+# would make every rebuild look like a full rewrite.
+.claude/skills/fdps-data/fdps_data.json text eol=lf
+
 # Same for the guide mirror: fetch writes LF, so a CRLF checkout would make every
 # re-fetch look like a full rewrite. The images are binary and must not be touched.
 docs/guide/**/*.htm text eol=lf

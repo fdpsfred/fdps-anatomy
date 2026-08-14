@@ -174,6 +174,15 @@ GUIDE_APPEARANCE = {
     0x0A: (15, 170, 190, 115, 420, 400), 0x0B: (2, 240, 160, 66, 434, 0),
 }
 
+# spell.htm 人物職業等級擁有的法術, the rows whose level column is `--`: index -> the
+# spells the page says the character already has on the form they join with.
+# 蘭斯洛特 (0B) does not appear on that page at all, so his expectation is the empty set.
+GUIDE_INITIAL_SPELLS = {
+    0x00: (0x00,), 0x01: (0x05,), 0x02: (0x08,), 0x03: (), 0x04: (), 0x05: (),
+    0x06: (0x0E,), 0x07: (0x1F,), 0x08: (), 0x09: (0x1D,),
+    0x0A: (0x05, 0x06, 0x07, 0x0C, 0x20), 0x0B: (),
+}
+
 # modify2.htm 4.升級屬性資料: index -> the eleven bytes the page prints.
 GUIDE_LEVELUP = {
     0x00: (4, 6, 3, 5, 2, 3, 9, 11, 3, 4, 0x00),
@@ -285,11 +294,19 @@ GUIDE_CLASSES = {
 }
 
 # Mismatches that have been investigated; the data file wins in every case.
+# tools/data_skill/build.py ships this same set to the fdps-data skill as DISCREPANCIES,
+# so an entry added here has to be added there too.
 ACCEPTED = {
     ("item.hit", 0x4A): "攻略站的風神弓 HIT 寫 100，資料檔是 150",
     ("spell.hit", 0x17): "攻略站的咒殺術命中率寫 50%，資料檔是 60",
     ("spell.target", 0x16): "神行術的作用對象是 3；攻略站只列了 00／01 兩個值",
     ("class", 0x18): "攻略站的機械大師第八個地形消耗寫 01，資料檔是 FF",
+    ("appearance.spells", 0x00): "攻略站把業火列為劍士蘭迪斯的初始法術，資料檔的遮罩是空的",
+    ("appearance.spells", 0x02): "攻略站只給費塔加冰爆術，資料檔另有 00 業火與 09 絕殺冰封"
+                                 "（09 是他 Lv15 的習得，攻略站列他以 15 級出場）",
+    ("appearance.spells", 0x09): "攻略站列蓋亞有轟神砲，資料檔的遮罩是空的——那來自 A4 強化套件",
+    ("appearance.spells", 0x0A): "珊的法術，攻略站列的五個與資料檔的七個不同",
+    ("appearance.spells", 0x0B): "資料檔的遮罩有 06 奔雷彈，攻略站的法術頁沒有列蘭斯洛特",
 }
 
 
@@ -350,6 +367,14 @@ def check_appearance(appearance, levelup, tally):
             tally.compare("appearance." + name, index, want, got[name])
 
 
+def check_initial_spells(records, tally):
+    """The record holds a 32-bit mask; bit n is spell n."""
+    for index, want in sorted(GUIDE_INITIAL_SPELLS.items()):
+        mask = records[index]["spells"]
+        tally.compare("appearance.spells", index, want,
+                      tuple(i for i in range(32) if mask >> i & 1))
+
+
 def check_levelup(records, tally):
     keys = ("ap_min", "ap_max", "dp_min", "dp_max", "dx_min", "dx_max",
             "hp_min", "hp_max", "mp_min", "mp_max", "learn_index")
@@ -394,6 +419,7 @@ def main():
     check_items(rows["item"], tally)
     check_spells(rows["spell"], tally)
     check_appearance(rows["appearance"], rows["levelup"], tally)
+    check_initial_spells(rows["appearance"], tally)
     check_levelup(rows["levelup"], tally)
     check_learn(rows["learn"], tally)
     check_classes(rows["class"], tally)

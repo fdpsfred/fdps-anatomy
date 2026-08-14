@@ -8,6 +8,8 @@
 
 [`tables/`](tables/_index.md) 放 record 的 struct 定義，數值本身不重複寫在那裡，一律引用本層的正典檔。
 
+本層的表另有一個查詢入口：`fdps-data` skill 可依名稱、代碼與數值範圍反查這些數值，資料集由 [`tools/data_skill/`](../tools/data_skill/_index.md) 從 `MISC.VFS` 現解並逐列對照本層的表產生。
+
 | 文件 | 內容 |
 | --- | --- |
 | [`items.md`](items.md) | 226 個物品的類型、AP／HIT／DP／EV、附加屬性、距離、價格與使用效果 |
