@@ -6,6 +6,11 @@
 
 一個 struct 一檔，檔名對應上層的正典檔名。
 
+承載這些 record 的九個 `.DAT` 成員在容器中的位置、大小與筆數，由 [`resource_info/data_tables.md`](../../resource_info/data_tables.md) 擁有。
+
 | 文件 | 內容 |
 | --- | --- |
-| （尚無） | |
+| [`items.md`](items.md) | `ITEM.DAT` 的 23 byte record |
+| [`spells.md`](spells.md) | `MAGICDAT.DAT` 的 7 byte record，以及執行期的 40 bit 法術遮罩 |
+| [`characters.md`](characters.md) | `FRIAPRDA.DAT`／`FRILEVUP.DAT`／`GETMGTAB.DAT` 三張表的 record |
+| [`classes.md`](classes.md) | `PROMAP.DAT` 的 10 byte record |
