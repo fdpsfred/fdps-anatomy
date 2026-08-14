@@ -61,14 +61,13 @@ library emu387.lib
 | 項目 | 依據 |
 | --- | --- |
 | `system dos4g` | LE header 的 CPU type 2／OS type 1、三個 `BIG32` object、DOS/4G stub。這個 system 定義**不會自動帶任何 C runtime**，三個 lib 必須自己列 |
-| `option stack=8k` | DGROUP 的 `STACK` 段是 `0x6a3c0`–`0x6c3bf` 共 8,192 byte，初始 ESP 指向 `0x6c3c0`。wlink 的**預設是 4K**，實測不寫這行只會拿到 `0x1000` |
-| `name FDE.EXE` | LE 的 resident name table 是 `fde`。實測 wlink 把這個欄位填成輸出檔名的主檔名，所以連結時的輸出檔叫 `FDE.EXE`，`FDPS.EXE` 是事後改名 |
-| 第一個 `.obj` 是 `fde.obj` | 同上；含 `main` 的模組要擺第一個 |
+| `option stack=8k` | DGROUP 的 `STACK` 段是 8,192 byte（範圍見 [`memory_layout.md`](../program_info/memory_layout.md)），初始 ESP 指向段尾。wlink 的**預設是 4K**，實測不寫這行只會拿到 `0x1000` |
+| 連結輸出叫 `FDE.EXE`，含 `main` 的模組是 `fde.obj` | LE 的 resident name table 是 `fde`。實測 wlink 把這欄填成輸出檔的主檔名，而沒有 `name` 指令時輸出檔名又取自第一個 `.obj`。所以這一個觀察無法分辨「明寫了 `name FDE.EXE`」與「沒寫 `name`、第一個 obj 叫 `fde.obj`」——但兩條路都會產生相同的 header，重建時擇一即可。無論哪一條，`FDPS.EXE` 都是事後改名 |
 | 三個 lib | 見上節的 byte 比對。`clib3s`／`math387s` 的 `s` 後綴就是堆疊呼叫慣例的版本，這是 `-4s` 在連結層的獨立佐證 |
 | 沒有 debug directive | `debug_info_off` = 0 |
 | stub 用預設的 `wstub.exe` | stub byte 與 10.0a 產出的完全相同 |
 
-object 3（`0x70000`，84 byte）不是上面任何一段產生的——它是某個 vendor 模組自帶的、不屬於 DGROUP 也不屬於 CGROUP 的資料段，取用者只有 `0x56799`–`0x57c52` 這一段程式。它掛在哪個 lib 上屬於票 14／19。
+object 3（`0x70000`，84 byte）不是上面任何一段產生的——它是某個 vendor 模組自帶的、不屬於 DGROUP 也不屬於 CGROUP 的資料段（取用範圍見 [`memory_layout.md`](../program_info/memory_layout.md)）。它掛在哪個 lib 上屬於票 14／19。
 
 ## 個別 function 的 calling convention
 
@@ -77,7 +76,7 @@ object 3（`0x70000`，84 byte）不是上面任何一段產生的——它是�
 現況的量測（1,042 個 function）：
 
 - 468 個是標準的四推序幕（其中 414 個在 `0x3b000` 以下的遊戲段）——堆疊慣例
-- 18 個序幕就是 `push imm` / `call __CHK`——沒有 `-s` 的程式庫模組，同樣是堆疊慣例
+- 18 個序幕就是 `push imm` / `call`——沒有 `-s` 的程式庫模組，同樣是堆疊慣例。其中 17 個呼叫 `__CHK`，第 18 個（`0x51f6b`）呼叫的是別的東西
 - 其餘 556 個是手寫組語或開了最佳化的 vendor 程式碼，形狀各異
 - 全 binary 只有 2 個 function 含 `RET imm`（`0x4361a` 的 `__CHK`、`0x5038a`）
 

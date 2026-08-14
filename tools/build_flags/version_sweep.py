@@ -58,10 +58,13 @@ def build(name, root):
                        cwd=OUT, env=env, capture_output=True, text=True)
     if r.returncode != 0:
         return None, (r.stdout or r.stderr).strip()
-    subprocess.run([os.path.join(root, "BINNT", "WDISASM.EXE"),
-                    "-l=%s.dis" % name, "-a", "-e", "-p", obj],
-                   cwd=OUT, env=env, capture_output=True, text=True)
-    with open(os.path.join(OUT, "%s.dis" % name), "r", errors="replace") as fh:
+    d = subprocess.run([os.path.join(root, "BINNT", "WDISASM.EXE"),
+                        "-l=%s.dis" % name, "-a", "-e", "-p", obj],
+                       cwd=OUT, env=env, capture_output=True, text=True)
+    listing = os.path.join(OUT, "%s.dis" % name)
+    if d.returncode != 0 or not os.path.exists(listing):
+        return None, "wdisasm: %s" % ((d.stdout or d.stderr).strip() or "no listing")
+    with open(listing, "r", errors="replace") as fh:
         return fh.read(), None
 
 

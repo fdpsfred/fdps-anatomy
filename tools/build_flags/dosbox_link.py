@@ -47,9 +47,14 @@ VARIANTS = {
     "fpi87_8k": (["-fpi87"], "8k"),
     "fpi_8k":   (["-fpi"], "8k"),
     "fpi87_4k": (["-fpi87"], "4k"),
-    "fpi87_16k": (["-fpi87"], "16k"),
+    # tags stay within 8.3: wlink under DOS cannot open a longer .lnk name
+    "fpi87_16": (["-fpi87"], "16k"),
 }
-BASE_CFLAGS = ["-bt=dos4g", "-ms", "-zq", "-5s", "-s", "-od"]
+# DOSBox writes through a FAT-style layer whose timestamps have 2-second
+# granularity and round down, so a freshly written file can look slightly older
+# than the moment the run started.
+MTIME_SLACK = 4.0
+BASE_CFLAGS = ["-bt=dos4g", "-mf", "-zq", "-4s", "-s", "-od"]
 EMU_SIG = bytes.fromhex("8bec8b75388e5d3c668b4d04668b5506")
 
 
@@ -105,10 +110,21 @@ def write_inputs():
 
 
 def run_dosbox(conf, timeout=300):
-    for stale in ("DONE.TXT", "build.out"):
-        p = os.path.join(OUT, stale)
+    # Anything report() reads has to be cleared first, so a variant that fails
+    # to link cannot be reported from the previous run's EXE — the
+    # emulator-inclusion evidence would then silently come from stale output.
+    # Deletion can fail while a scanner still holds a freshly written EXE, so
+    # report() also checks mtimes against the start time returned here.
+    stale = ["DONE.TXT", "build.out"] + ["%s.exe" % t for t in VARIANTS] + \
+            ["%s.map" % t for t in VARIANTS]
+    for name in stale:
+        p = os.path.join(OUT, name)
         if os.path.exists(p):
-            os.remove(p)
+            try:
+                os.remove(p)
+            except OSError as exc:
+                print("[warn] could not remove %s (%s)" % (name, exc))
+    started = time.time()
     proc = subprocess.Popen([DOSBOX, "-silent", "-conf", conf], cwd=OUT)
     done = os.path.join(OUT, "DONE.TXT")
     deadline = time.time() + timeout
@@ -122,14 +138,14 @@ def run_dosbox(conf, timeout=300):
         proc.terminate()
     ok = os.path.exists(done)
     print("[dosbox] %s" % ("DONE" if ok else "TIMEOUT/EXIT"))
-    return ok
+    return started
 
 
 def le_base(data):
     return struct.unpack_from("<I", data, 0x3C)[0] if data[:2] == b"MZ" else 0
 
 
-def report():
+def report(started=0.0):
     with open(os.path.join(GAME, "FDPS.EXE"), "rb") as fh:
         gdata = fh.read()
     gbase = le_base(gdata)
@@ -138,6 +154,9 @@ def report():
         path = os.path.join(OUT, "%s.exe" % tag)
         if not os.path.exists(path):
             print("%-10s (not built)" % tag)
+            continue
+        if os.path.getmtime(path) < started - MTIME_SLACK:
+            print("%-10s (stale from an earlier run — not reported)" % tag)
             continue
         with open(path, "rb") as fh:
             data = fh.read()
@@ -163,9 +182,10 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     conf = write_inputs()
     compile_objs()
+    started = 0.0
     if "--report-only" not in sys.argv:
-        run_dosbox(conf)
-    report()
+        started = run_dosbox(conf)
+    report(started)
 
 
 if __name__ == "__main__":

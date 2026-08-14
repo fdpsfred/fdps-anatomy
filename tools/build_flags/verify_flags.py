@@ -31,7 +31,8 @@ CHECKS = [
      r"five_args:\s+push\s+ebx\n\s+push\s+esi\n\s+push\s+edi\n\s+push\s+ebp\n\s+mov\s+ebp,esp",
      None, "53 56 57 55 89 e5 at every game function entry"),
     ("first stack argument at [ebp+14h]", "probe.c",
-     r"\+14H\[ebp\]", None, "0002f746 cmp dword ptr [ebp+0x34],7 in an 8-argument frame"),
+     r"\+14H\[ebp\]", None,
+     "0002f746 cmp dword ptr [ebp+0x34],7 — the 9th stack slot, counting from +0x14"),
     ("caller pops the arguments", "probe.c",
      r"call\s+near ptr sink\n\s+add\s+esp,00000014H", r"\bret\s+0",
      "2464 of 2937 call sites targeting game functions are followed by "

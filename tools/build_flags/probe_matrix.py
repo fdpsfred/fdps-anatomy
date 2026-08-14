@@ -77,7 +77,6 @@ def env():
 
 def run(tag, flags):
     """Compile and disassemble one variant; return the flag list actually used."""
-    src = os.path.join(OUT, "probe.c")
     obj = "%s.obj" % tag
     # -mf overrides the -ms in BASE; drop the loser so wcc386 sees one model
     base = [f for f in BASE if not (f == "-ms" and "-mf" in flags)]
@@ -103,6 +102,10 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     shutil.copyfile(os.path.join(HERE, "probe.c"), os.path.join(OUT, "probe.c"))
     wanted = sys.argv[1:] or list(VARIANTS)
+    unknown = [t for t in wanted if t not in VARIANTS]
+    if unknown:
+        raise SystemExit("unknown variant(s): %s\nknown: %s"
+                         % (", ".join(unknown), ", ".join(VARIANTS)))
     for tag in wanted:
         run(tag, VARIANTS[tag])
 

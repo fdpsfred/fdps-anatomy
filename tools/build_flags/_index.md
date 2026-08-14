@@ -13,7 +13,7 @@
 | `version_sweep.py` | 同一組旗標跑遍 `WATCOM_9.5_series` 與 `WATCOM_10_series` 底下每個有 NT 版編譯器的安裝，找出版本間會分歧的程式碼形狀 |
 | `lib_bytematch.py` | 拿 `FDPS.LE` 裡沒有重定位的位元組串去搜每個版本的 `LIB386`，判定連的是哪個 lib 變體（`3S` 還是 `3R`）與哪一版 |
 | `dosbox_link.py` | 在 DOSBox-X 裡用 10.0a 的 DOS 版 `wlink` 連結探針，比對 MZ stub、object 佈局、堆疊大小與模擬器是否被連進去 |
-| `default_stack.py` | 不寫 `option stack` 連一次，量出 wlink 的預設堆疊大小 |
+| `link_defaults.py` | 分別在有／沒有 `option stack` 與 `name` 的情況下各連一次，量出 wlink 的預設堆疊大小，以及 LE 的 resident name 究竟取自輸出檔名還是第一個 `.obj`。自帶原始碼與編譯，不依賴其他腳本的產物 |
 | `verify_flags.py` | **回歸閘**：用定案的旗標組編譯全部探針，逐項比對 12 個原版特徵，全過才回 0 |
 
 ## 探針原始碼
@@ -29,4 +29,6 @@
 
 - `WDISASM` 會把任何開頭是 `-` 的引數當成選項，而本 repo 的路徑含 `-`。所有腳本都把工作目錄切到輸出資料夾再傳相對檔名。
 - NT 版 `WLINK.EXE` 在此機器上會無回應（即使關掉 stdin），連結一律走 DOSBox-X。
+- DOS 版 `wlink` 開不了超過 8.3 的 `.lnk` 檔名，所有變體標籤都要控制在 8 個字元內。
+- 連結產物的新舊靠 mtime 判定而非只靠刪除：Windows 上偶爾會有掃描程序抓住剛寫出的 EXE 導致刪不掉，而 DOSBox 寫出的時間戳只有 2 秒精度且向下取整，比較時要留寬容值。
 - 編譯用 NT 版 `wcc386` 是刻意的：實測與 DOS 版產生相同的機械碼，但不必等模擬器啟動。
