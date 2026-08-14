@@ -16,12 +16,13 @@
 | [`program_info/`](program_info/_index.md) | 程式 | `FDPS.LE` 現在做什麼，一檔對應一個子系統與 `src/` 模組 | ✓ |
 | [`resource_info/`](resource_info/_index.md) | 檔案 | 每個資源檔的二進位格式是什麼 | ✓ |
 | [`assets/`](assets/_index.md) | 資料表 | 遊戲的數值內容是什麼 | ✓ |
-| [`chapters/`](chapters/_index.md) | 關卡 | 每一章的關卡內容與事件流程是什麼（共 30 章） | ✓ |
+| [`chapters/`](chapters/_index.md) | 關卡 | 每一章的關卡內容與事件流程是什麼 | ✓ |
 | [`rebuild_info/`](rebuild_info/_index.md) | 重建 | 怎麼重建成等價執行檔、哪裡會踩雷 | ✓ |
 | [`ghidra_snapshot/`](ghidra_snapshot/_index.md) | Ghidra | Ghidra 目前的分析狀態，以文字快照進版控 | ✓ |
 | [`tools/`](tools/_index.md) | — | 工作腳本，一項工作一個子資料夾 | ✓ |
 | [`docs/`](docs/) | — | 決策記錄（[`adr/`](docs/adr/)）、agent 規範、前作研究筆記 | ✓ |
 | [`devlog/`](devlog/_conventions.md) | — | 怎麼走到這些結論的敘事記錄 | ✓ |
+| [`.scratch/`](.scratch/fdps-rebuild/spec.md) | — | 專案 spec 與工作票（`fdps-rebuild/issues/`） | ✓ |
 | `workspace/` | — | 腳本的中間產物與輸出，全部可重生 | ✗ |
 | `legacy/` | — | 單向封存的舊架構，工作時不得閱讀或引用 | ✗ |
 | `fdps_game_files/` | — | 原始遊戲檔（版權），repo 不含 | ✗ |
