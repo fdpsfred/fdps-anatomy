@@ -4,11 +4,11 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 建立程式視角、資源檔視角、資料表視角、關卡視角、重建視角五個知識庫資料夾，以及 `tools/`、`workspace/`、`legacy/`
-- [ ] 每個知識庫資料夾有 `_index.md`，說明該資料夾的職責與內容索引
-- [ ] `devlog/` 與 `devlog/runs/` 建立，並有一篇說明寫作規範的起始文件
-- [ ] README 骨架建立，說明專案目標、知識庫結構與如何建置
-- [ ] `.gitignore` 確認涵蓋 `workspace/`、`legacy/`、遊戲原始檔
-- [ ] 關卡視角的單位依攻略站確認為 30 章
+- [x] 建立程式視角、資源檔視角、資料表視角、關卡視角、重建視角五個知識庫資料夾，以及 `tools/`、`workspace/`、`legacy/`
+- [x] 每個知識庫資料夾有 `_index.md`，說明該資料夾的職責與內容索引
+- [x] `devlog/` 與 `devlog/runs/` 建立，並有一篇說明寫作規範的起始文件
+- [x] README 骨架建立，說明專案目標、知識庫結構與如何建置
+- [x] `.gitignore` 確認涵蓋 `workspace/`、`legacy/`、遊戲原始檔
+- [x] 關卡視角的單位依攻略站確認為 30 章

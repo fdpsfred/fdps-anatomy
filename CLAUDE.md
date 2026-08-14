@@ -60,7 +60,7 @@
 - **DOSBox-X**：`C:\DOSBox-X`，要用 silent mode（`-silent`）執行以達成全自動化
 - **Watcom C/C++ 10.0a**：`C:\Users\fdpsf\Documents\WATCOM_10_series\WATCOM_10.0a`（其他版本同目錄下，供比對用），要在 DOSBox-X 裡執行
 - **光碟映像**：`D:\Game\Flame Dragon\fdps_image\FDPS_DISC_1.cue`（另有 DISC 2）。DOSBox 掛載指令：`imgmount e -t cdrom "D:\Game\Flame Dragon\fdps_image\FDPS_DISC_1.cue"`
-- **FDPS 攻略站**：`https://chiuinan.github.io/game/game/intro/ch/c31/fdps/fdps/`（注意 `fdps` 出現兩次）
+- **FDPS 攻略站**：入口是 `https://chiuinan.github.io/game/game/intro/ch/c31/fdps/index.htm`（frameset），9 個內容頁在 `.../c31/fdps/fdps/*.htm`（注意 `fdps` 出現兩次），選單為 `fdps/menu.htm`。目錄本身不可瀏覽，直接請求 `.../fdps/fdps/` 會拿到 404
 
 ## Ghidra 操作規範
 
