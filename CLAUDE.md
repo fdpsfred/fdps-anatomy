@@ -20,6 +20,12 @@
 - 開始規劃或執行每個 plan 之前，先確認下述可用工具都能使用，否則立刻停下來等使用者檢查
 - 工作過程中產生的所有 deferred / backlog 項目，在整個工作結束前都要被深入研究並解決。真的遇到無法處理的狀況才詢問使用者；使用者確認無法當下解決，才寫進 `open_issues.md`
 
+## 語言規範
+
+程式碼與 scripts 的識別字、註解、docstring、輸出訊息，以及 Ghidra 內的 plate comment、decompiler comment、disassembly comment、符號名稱，一律用英文。唯一的例外是遊戲內的專有名詞（角色、章節、物品名稱等），保留原文。
+
+知識庫、devlog、ADR、issue 與對使用者的回覆用繁體中文。
+
 ## Scripts 規範
 
 - 新增的 scripts 放在 `tools/{工作名稱}/` 下
