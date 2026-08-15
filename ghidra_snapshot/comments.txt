@@ -1,5 +1,697 @@
 # One block per comment, opened by '=== <address> [<type>]'. Blocks are address-ordered,
 # then ordered by type within an address. Loader fixup comments are excluded.
+=== 00010010 [PLATE]
+Advance a single map actor one behavior step.
+
+Algorithm:
+Resolves the actor record for the given index through the record accessor at 0002d210 (the same record is reachable as DAT_00069cd8 + index * 0x50, confirming a 0x50-byte stride). If bit 0 of record[5] is set the actor is inactive and the function returns immediately.
+
+Otherwise it reads the behavior mode from the low nibble of record[0x34] and two byte parameters record[0x35] / record[0x36] (a destination pair), plus an event slot index in record[0x3d], and dispatches:
+  mode 0, 1, 2, 9  -- try the movement handlers 00012c10 / 000126b0 / 000127c0 / 00012230 in a fixed order and fall back to 000120d0 when every attempt fails. Mode 9 first queries 0002dc20 for a target and, when one exists, walks toward it via 000119e0.
+  mode 3           -- like mode 9, but keyed on 00012c10 succeeding first; on a resolved target it clears DAT_00069cd0.
+  mode 4, 7        -- clear DAT_00069cd0 and walk toward the record[0x35]/record[0x36] destination via 000119e0. Mode 7, on arrival, plays the "Posion.saf" effect through 00026e00 when the terrain byte record[7] lies in 0x24..0x27, then sets bit 0 of record[5] to retire the actor.
+  mode 5           -- event step: if the per-slot flag (&DAT_000640d8)[record[0x3d]] is still clear and 00013e10 yields a destination, walk there; on arrival read a 3-byte entry at DAT_0006013c + slot * 3 + 0x53, copy it into record[0x31]/record[0x32], call 00025d20 when the first byte is zero, set the slot flag, call 0002e910, switch the actor to mode 7 and play "Chess.wav" via 0002a1f0.
+  mode 8           -- no action.
+  mode 10, 11      -- the interactive/driven modes: 00013040 or 00013420, gated extra handlers 00027180 / 00013c90 when DAT_00063f8c / DAT_00063f88 reach 6, then 00012230, and finally 00012e50 or the 000126b0 / 000120d0 fallback depending on DAT_00063f78. Mode 11 additionally invokes 00010760 when the terrain byte record[7] is in 0x3c..0x3e.
+
+After dispatch it re-reads the record, calls 0002e030 with the actor's current x/y and 1, sets bit 0x80 of record[5] to mark the actor for redraw, and calls fdps_render_view_frame.
+
+Parameters:
+  actor_index -- index into the actor record array at DAT_00069cd8 (0x50 bytes per record).
+  context     -- second stack argument, passed unchanged to every movement handler.
+
+Returns:
+  Nothing.
+
+=== 00011460 [PLATE]
+Traces the battle movement cost map and returns either a direction path or the nearest reachable unit.
+
+Algorithm:
+The global at DAT_00060144 points to a movement map header: word width, word height, then width*height cells of 2 bytes each. Byte 1 of a cell holds the flood-filled step cost, 0xff meaning unreachable. Cell stride is 2 and row stride is width*2; both are computed into locals up front.
+
+mode == 2: scans the unit table (count in DAT_00060150, records fetched by index through FUN_0002d210). Units are filtered by side: when arg4 is zero only units with record byte 6 == 0 are considered, otherwise only units with byte 6 != 0. Units with bit 0 of record byte 5 set are skipped. For each surviving unit the cost cell at (unit.x, unit.y) is read and the minimum is tracked. If no unit was found the function returns -1, otherwise it stores the winning unit's x and y into out_path[0] and out_path[1] and returns the minimum cost.
+
+mode == 0 or 1: starts at (arg4, arg5) and repeatedly steps to the neighbouring cell with the lowest cost, recording one direction code per step into a local buffer: 0 = y-1, 1 = x+1, 2 = y+1, 3 = x-1, 4 = no move. Edge neighbours are skipped at the map borders. If the starting cell is already 0xff the function returns -1 immediately. Mode 0 takes a neighbour only on a strictly lower cost, which makes runs of identical cost keep the current heading. Mode 1 also accepts an equal cost, but only when the previously recorded step used a different direction code, which makes ties alternate direction instead of running straight. The walk stops once the current tile equals (arg1, arg2). The recorded direction codes are then copied into out_path in reverse order and the step count is returned.
+
+Parameters:
+arg1 goal_x   - x of the tile at which the walk terminates (unused in mode 2)
+arg2 goal_y   - y of the tile at which the walk terminates (unused in mode 2)
+arg3 out_path - byte buffer receiving the reversed direction codes, or the found unit's x,y in mode 2
+arg4 start_x  - x of the tile the walk starts from; in mode 2 this is the side filter instead
+arg5 start_y  - y of the tile the walk starts from (unused in mode 2)
+arg6 mode     - 0 straight-preferring trace, 1 turn-preferring trace, 2 nearest-unit query
+
+Returns:
+Number of direction codes written in modes 0 and 1, the minimum cost found in mode 2, or -1 when the start tile is unreachable or no unit matched.
+
+=== 000119e0 [PLATE]
+Battle movement: walk a unit toward a requested destination tile.
+
+Algorithm:
+1. Resolve the unit record for unit_index via FUN_0002d210, and cache from it: field 0x00 = tile x, field 0x01 = tile y, field 0x20 = movement points, field 0x3b = a movement/terrain cost selector.
+2. FUN_00018b70(move_points + 1) yields a per-unit movement context; malloc(100) is the step buffer (one direction code per step) and malloc(0x800) is the reachable-tile list (x,y byte pairs).
+3. Build the movement/cost map (FUN_00010b90(map_mode) then FUN_00010de0(ctx, x, y, cost_selector)) and try to path from the unit to (dest_x, dest_y) with FUN_00011460(x, y, step_buf, dest_x, dest_y, 0). It returns the step count, or -1 when no path exists.
+4. If that fails, retry the path with the relaxed flag 1. If the relaxed path exists, replay it step by step (direction code 0 = y+1, 1 = x-1, 2 = y-1, else x+1), probing each tile with FUN_0002ba00(x, y) and reading the occupancy result at 0x00069d0c. The last tile whose probe is not 0xff becomes the new destination, i.e. the request is retargeted to the furthest usable tile along the blocked route.
+5. Rebuild the movement map, call FUN_000118f0(unit_index, map_mode) to flood the unit's reach, and FUN_00011da0(tile_buf) to collect the reachable tiles and their count.
+6. Scan the reachable tiles and keep the one minimising Manhattan distance |tx - dest_x| + |ty - dest_y| to the destination, breaking ties on the smaller ||dx| - |dy|| (the more diagonal-balanced tile).
+7. Path to that chosen tile with FUN_00011460(..., 0). If the step count is non-zero, FUN_0002d2d0(unit_index, step_buf, step_count) performs the actual move and the result is 1; otherwise 0.
+8. Free both buffers and return.
+
+Parameters:
+  dest_x     [ebp+0x14] requested destination tile x; reassigned internally when the route is retargeted
+  dest_y     [ebp+0x18] requested destination tile y; likewise reassigned
+  unit_index [ebp+0x1c] index of the acting unit, resolved to its record by FUN_0002d210
+  map_mode   [ebp+0x20] selector handed to the movement-map builder FUN_00010b90 and to FUN_000118f0
+
+Returns:
+  1 if a move of at least one step was executed, 0 if the unit stays where it is.
+
+=== 00013fd0 [PLATE]
+Draws one SAF tilemap layer.
+
+Algorithm:
+Takes a 0x24-byte draw context whose field 0x14 holds the base address of a loaded SAF file and whose field 0x18 holds the tilemap index. Reads the section 1 (tilemap) descriptor from the SAF header: item count at 0x16, offset-table start at 0x18. Returns immediately if the index is negative or not less than the item count. Otherwise resolves the tilemap record via saf + *(u32 *)(saf + saf[0x18] + index * 4) and reads its i16 column count and i16 row count, then advances past the 4-byte tilemap header to the cell array. Copies the whole 0x24-byte context onto the stack as a working copy (memcpy at 0x3d514) and iterates rows outer, columns inner. At the start of each row the working copy's x (offset 0x0c) is reset from the caller's x; for each cell the signed i16 tile index is stored into the working copy's index field (offset 0x18), the per-cell tile drawer at 0x13ed0 is called with the working copy, x is advanced by the SAF cell width (header 0x07) and after the row y (offset 0x10) is advanced by the SAF cell height (header 0x09). Cell indices are read signed while the caller's tilemap index is unsigned; the per-cell drawer performs its own range check.
+
+Parameters:
+  ctx - pointer to the 0x24-byte SAF draw context: 0x0c = x, 0x10 = y, 0x14 = SAF base pointer, 0x18 = tilemap index on entry (reused as tile index for each cell).
+
+Returns:
+  Nothing. Draws nothing when the tilemap index is out of range.
+
+=== 00014140 [PLATE]
+Draws one composite sprite entry: a bank-indexed group of part records blitted at offsets from a common origin.
+
+Algorithm:
+1. Read the bank pointer from req+0x14 and the entry index from req+0x18. The bank header holds an unsigned 16-bit entry count at bank+0x0C and an (unaligned) 32-bit offset-table displacement at bank+0x0E. If the index is negative or >= the count, the lookup yields NULL and the function returns without drawing.
+2. Otherwise entry = bank + *(int32 *)(bank + *(int32 *)(bank+0x0E) + index*4), i.e. table entries are bank-relative offsets.
+3. Copy the caller's 0x24-byte draw request onto the stack as a scratch request, so per-part edits never touch the caller's copy.
+4. Walk the part records, which start at entry+0x0A and are 13 bytes each; the signed 16-bit count is at entry+0x08. Each record holds: u16 sub-sprite id at +0, s16 dx at +2, s16 dy at +4, u8 mode at +6, s16 level at +7 (unaligned).
+5. For each part, when req+0x20 in the caller's request is zero the record's mode byte selects the blend setup: mode 0 clears the scratch request's mode field to 0; mode 1 stores 0x10 - level into a small parameter block built from the two runtime tables at 0x000653F0 and 0x000643F0, sets the scratch mode field to 9, and points the scratch request at that block. Any other mode leaves the previous setup in place.
+6. Set the scratch request's X to req+0x0C + dx, its Y to req+0x10 + dy, its sprite id to the record's u16, and call the per-part blitter at 0x00013FD0 with the scratch request.
+7. After the loop, if the flag argument is non-zero, call 0x000142D0 with the bank pointer and the entry's leading u16.
+
+Parameters:
+  req  - pointer to a 0x24-byte draw request: X at +0x0C, Y at +0x10, sprite bank pointer at +0x14, entry index at +0x18, blend parameter block pointer at +0x1C, blend mode at +0x20.
+  flag - when non-zero, run the post-draw call at 0x000142D0 for this entry.
+
+Returns:
+  Nothing. Silently does nothing when the entry index is out of range.
+
+=== 000142d0 [PLATE]
+Algorithm: Returns immediately unless both sound-enable flags (DAT_00069d71, DAT_00069d70) are set and the entry index is within [0, bank->entry_count) where entry_count is the u16 at bank+0x2a. Locates the entry through the dword offset table at bank+0x2c: entry = bank + *(int*)(bank + *(int*)(bank+0x2c) + index*4), which points at an 8-byte header followed by raw PCM data. Scans the 8-slot sample-handle array at 0x00069d30 for the first handle whose AIL sample status is not 4 (playing); if all eight are busy the request is dropped silently. On the chosen handle it calls the Miles sequence init sample, set sample address (entry+8, length = *(int*)(entry+4)), set sample type (format code, flags 2), set loop count 1, set volume 0x28, set playback rate (u16 at entry+2), start sample. The format code is derived from the first two header bytes, channels at +0 and bits at +1: (1,8)->0, (1,16)->1, (2,8)->2, anything else->3, matching the Miles DIG_F_MONO_8 / MONO_16 / STEREO_8 / STEREO_16 enumeration.
+Parameters: bank - base pointer of a loaded sound bank whose header holds the entry count at +0x2a and the entry offset table pointer at +0x2c; index - zero-based entry index within that bank.
+Returns: nothing; failure to validate, disabled sound, or no free sample handle all return silently.
+
+=== 00014550 [PLATE]
+Advance a SAF animation playback cursor by one tick.
+
+Algorithm:
+The cursor is a 3-dword state block: [0] current frame index, [1] tick counter inside the current frame, [2] pointer to the loaded SAF image. When mode == 1 the call is a reset: both counters are zeroed and 0 is returned without touching the SAF. Otherwise the SAF header is sanity-checked by comparing the magic bytes 'S', 'A' and 'F' at offsets 0, 1 and 2 (note the original code accepts the file if ANY one of the three matches, not all three), and the frame count is taken from the u16 at header offset 0x0C; a zero frame count makes the function return -1. The tick counter is then incremented and the current frame record is located as saf + *(i32 *)(saf + *(i32 *)(saf + 0x0E) + index * 4), with the index bounds-checked against the frame count (an out-of-range index yields a null frame pointer). The frame's hold time is the i16 at frame offset 0x02; while the tick counter stays below it the frame is held. Once the counter reaches the hold time it is cleared and the frame index is incremented. If the index then reaches the frame count the animation has completed one pass: the tick counter is cleared and, when mode == 0, the index wraps to 0 to loop, otherwise it is clamped to the last frame so playback stops on the final frame; the function returns 1 in that case.
+
+Parameters:
+cursor - pointer to the 3-dword playback state block described above.
+mode - 1 resets the cursor, 0 loops back to the first frame at the end, any other value holds on the last frame.
+
+Returns:
+1 when the animation just passed its last frame, 0 while it is still playing or after a reset, -1 when the SAF data is unusable (bad magic or zero frame count).
+
+=== 00014ab0 [PLATE]
+Battle system menu (modal loop).
+
+Algorithm:
+Copies two 16-byte tables out of the read-only island at 0x146e0 and 0x146f0 into locals: four menu entry codes {0x16, 0x0b, 0x0c, 0x13} and a matching four-entry state array cleared to zero. Clears the two menu-active globals DAT_00069cd0 and DAT_00060159 and enters the loop.
+
+Each iteration draws the menu (FUN_00016130), reads a selection (FUN_00016200, which updates the selection index and returns -1 when the player backs out), then runs the close animation as a countdown 0x17, 0x13, 0x0f, 0x0b, 0x07, 0x03 through FUN_00015860 and calls FUN_0002beb0.
+
+A -1 result sets both menu-active globals to 1 and returns 0. Otherwise the selection index picks a branch:
+  index 0: calls FUN_00014ea0; any result other than -1 sets both globals to 1 and is returned to the caller as the menu result, otherwise the loop continues.
+  index 1: darkens/prepares via FUN_000205b0(0), shows panel 0xaa44a with code 0x1ea, then calls FUN_00017990. On a zero result it shows panel 0xabc0a code 0x1eb, waits 300 ticks, dismisses (FUN_00020820), recomputes the cursor tile from DAT_00069cd4/24 and DAT_00069ccc/24, clears both menu-active globals, and walks every unit 0..DAT_00060150-1 (FUN_0002d210): for a unit whose byte 5 has none of mask 0x85 set, whose byte 6 equals 2 and whose byte 0x26 is zero, it centres on the unit tile (FUN_0002d7c0), sets DAT_00069d90 to 0xff, calls FUN_000119e0, dispatches through the handler table at 0x000601c4 when DAT_00069d90 changed, and finishes the unit with FUN_000119b0. It then redraws (FUN_0001e3f0), sets both globals to 1, calls FUN_0002db50 and returns 0. A non-zero result shows panel 0xabc0a code 0x1ec, waits and returns to the loop.
+  index 2: calls FUN_000183d0 and stays in the loop.
+  index 3: same shape as index 1 with codes 0x1ed / 0x1ee / 0x1ef and panel 0xad3ca; on success it clears DAT_00060159, redraws with FUN_0001e3f0, restores the flag and returns 0.
+
+Parameters:
+None. The prologue pushes EBX/ESI/EDI/EBP and builds a 0x48-byte frame but never reads [EBP+0x14] or beyond, so the function takes no arguments; the parameters shown by the decompiler are invented.
+
+Returns:
+int. 0 when the menu is dismissed or when an entry completed its action and the battle screen was restored; otherwise the non-negative command code produced by FUN_00014ea0.
+
+=== 00014ea0 [PLATE]
+In-battle system submenu: entry action, save, load, quit.
+
+Algorithm:
+Builds two parallel 4-entry stack arrays. The id array is copied from the
+constant table at 0x00014700 and holds {0x17, 9, 10, 8}; the state array is
+copied from the zero table at 0x00014710 and is then patched:
+  - state[2] (load) is set to 1 when the CRT file-existence check at 0x00042438
+    reports that "FDE.SAV" (0x00060118) is present.
+  - state[1] (save) is set to 1 when any of the DAT_00060150 unit records
+    obtained through FUN_0002d210(index) has flags byte +0x05 with bit 0 clear
+    and bit 7 set.
+Then loops: FUN_00016130 draws the menu, FUN_00016200 runs the selection and
+returns the chosen index through an out parameter, FUN_000161b0 tears the menu
+down, and fdps_render_view_frame repaints the battlefield. A return of -1 from
+FUN_00016200 aborts the whole submenu with -1.
+Selection handling:
+  0 - calls FUN_00017ca0 and returns 0.
+  1 - save. Shows message 0x1F3, asks for confirmation via FUN_00017990. On
+      confirmation allocates a 0x59CB byte image, seeds it from the existing
+      "FDE.SAV" opened "rb" (or, when no file exists, writes 0xFF slot markers
+      at +0x3B2B, +0x4553, +0x4F7B, +0x59A3), copies 0x8A3 bytes from
+      DAT_0006013C, 0xA00 bytes from DAT_00064108 at +0x8A3, DAT_00060150*0x50
+      bytes from DAT_00069CD8 at +0x12A3 and 0x20 bytes from 0x000640D8 at
+      +0x30A3, fills the descriptor at +0x30C3 (unit count, three coordinate
+      globals divided by 0x18, chapter/flag globals), stores the FUN_00056898
+      checksum at +0x59C7, scrambles with FUN_000568B7, writes the image back
+      through "wb", frees it, reports 0x203, and returns 0.
+  2 - load. Shows message 0x205, asks for confirmation, and on confirmation
+      reports 0x206 and calls fdps_load_savegame; returns 0.
+  3 - quit. Shows message 0x1F0, asks for confirmation, and on confirmation
+      reports 0x1F1, sets the quit flag DAT_000643EB to 1 and returns 1.
+A declined confirmation falls through to the top of the loop and redisplays the
+menu.
+
+Parameters:
+None.
+
+Returns:
+-1 when the menu was aborted, 1 when the player confirmed quit (DAT_000643EB
+has been set), 0 after any other selection completed.
+
+=== 00015470 [PLATE]
+Interactive turn of a single player-controlled battle unit.
+
+Algorithm:
+Loads the unit record for unit_index (helper at 0002d210; records are 0x50 bytes in the array based at 00069cd8). Field 0x3b selects a graphics resource that is acquired once up front (0003d375) and released once at the end (0003d478); field 0x20 is the movement allowance; field 0x08 is the class code; fields 0x00/0x01 are the tile X/Y. Two 16-byte command-menu templates are copied from rodata into locals: the command id list {3,2,1,0} and a per-entry state array {0,0,0,0}. Sets the global at 0006015c to 0x14 and then loops until the turn is finished.
+
+Each pass: refreshes the map, resets the pending-action selector at 00069d90 to 0xff, computes the reachable set for (movement allowance + 1) via 00018b70, converts the current cursor pixel position (00069cd4 / 00069ccc) to tile coordinates by dividing by the 24-pixel tile size, paints the movement range (00010de0) and waits for a map selection (0002b4f0). A -1 selection restores the cursor to the origin tile and ends the turn. Otherwise the destination picker at 00011460 runs; its result -1 restarts the loop (move cancelled), 0 means the unit stays put, any other value is a path to walk. For a real move the class code is checked (values 7 and 3 leave menu entry 1 disabled, all others enable it), the walk is played back by 0002d2d0 and the command menu at 00015d00 is opened with the moved flag set; for a stationary unit the same menu is opened with the flag clear. A -1 from the menu is a cancel: when the global at 00060004 is zero the unit is written back to its origin tile and the loop repeats, otherwise the turn is committed. Any other menu result commits the turn.
+
+On exit sets 00069cd0, releases the graphics resource, and if 00069d90 is no longer 0xff calls the handler at index 00069d90 of the function-pointer table at 000601c4 with unit_index, then calls the handler at index 00069cf4 of the table at 0006028c.
+
+Parameters:
+  unit_index - index of the acting unit within the battle unit array.
+
+Returns:
+  Nothing. The chosen action is carried out through the dispatch tables at 000601c4 and 0006028c.
+
+=== 00015d00 [PLATE]
+Battle action command menu for a single unit.
+
+Algorithm:
+Outer do/while loop, re-entered whenever the chosen command aborts back to the menu.
+Each pass:
+  1. Clears cmd_disabled[0] and the global at 0x00069cec, then probes availability:
+     - FUN_00025140(unit, 0) == -1  -> cmd_disabled[0] = 1 (command 0 unusable);
+       otherwise FUN_00025200/FUN_00018b40 fetch a descriptor whose bytes +0x0b and
+       +0x0c are range values fed, together with the cursor tile derived from the
+       globals 0x00069cd4 and 0x00069ccc divided by the 24-pixel tile size, into
+       FUN_00011e50; a zero result also sets cmd_disabled[0] = 1. FUN_00010b20
+       releases whatever FUN_00011e50 built.
+     - FUN_00025240(unit) == 0 -> cmd_disabled[2] = 1.
+     - FUN_00027840(unit, 0) == 0, or byte +0x27 of the record from FUN_0002d210(unit)
+       is non-zero -> cmd_disabled[1] = 1.
+  2. Scans cmd_disabled[0..3] for the first zero entry and uses it as the initial
+     highlighted index (-1 when every command is disabled).
+  3. FUN_00016130 draws the menu, FUN_00016200 runs the selection loop and writes the
+     chosen index back through a pointer, FUN_000161b0 erases it, then
+     fdps_render_view_frame repaints. A selection result of -1 means cancel: the
+     function returns the pending result value (-1, or 1 when command 2 previously
+     reported code 2).
+  4. Dispatch on the chosen index:
+     index 0: saves the cursor position, allocates a 100-byte work block
+       (FUN_0003d375), rebuilds the reachable/target set via FUN_00011e50, sets the
+       global 0x00069cd0 to 1 and runs target selection FUN_0002b4f0, then frees the
+       block. On cancel the cursor is restored with fdps_map_cursor_move_to and the
+       menu is shown again. On success it resolves the action:
+       fdps_battle_find_unit_at_cursor, FUN_0001c2e0, FUN_00018d60, FUN_00026180,
+       FUN_0001d6c0, scales the 0x00069cec accumulator by 15/10, then FUN_0001dd30 and
+       FUN_0001d990 apply the result and FUN_000119b0 finishes the turn; returns 1.
+     index 1: FUN_00027c20(unit); on success FUN_000119b0 ends the turn, the byte flag
+       at 0x00060159 is set to 1 and 1 is returned, otherwise the menu is shown again.
+     index 2: FUN_000252b0(unit); result 2 latches the pending return value to 1 and
+       re-shows the menu, any other non-(-1) result clears 0x00069cec and returns 1.
+     any other index: when flag == 0 calls FUN_000120d0(unit) first, then FUN_000184f0
+       and FUN_000119b0, and returns 1.
+
+Parameters:
+  unit         - pointer to the acting unit record; passed to every availability probe
+                 and command handler.
+  menu_ctx     - context value handed to the menu draw, select and erase helpers.
+  cmd_disabled - caller-supplied int[4] scratch array; this function fills it with the
+                 per-command disabled flags (0 = selectable, 1 = greyed out).
+  flag         - when zero, the fall-through command runs the extra FUN_000120d0 step.
+
+Returns:
+  1 when a command was carried out and the unit's action is complete.
+  -1 when the menu was cancelled with nothing done (caller returns to unit selection);
+  1 is returned instead if command 2 had earlier reported result code 2.
+
+=== 00016200 [PLATE]
+Modal four-way menu cursor input loop.
+
+Algorithm:
+Loops until a terminating key arrives. Each iteration reads one scan code
+(masked to a byte) from the low-level keyboard reader at 0x000567be and
+dispatches on it:
+  0x01 (Esc) or 0x53      -> result = -1 (cancel), loop ends
+  0x1c (Enter) or 0x39 (Space) -> result = 1 (confirm), loop ends
+  0x48 (Up)    -> if dir_blocked[0] == 0 then *cursor_dir = 0
+  0x4b (Left)  -> if dir_blocked[1] == 0 then *cursor_dir = 1
+  0x4d (Right) -> if dir_blocked[2] == 0 then *cursor_dir = 2
+  0x50 (Down)  -> if dir_blocked[3] == 0 then *cursor_dir = 3
+A non-zero entry in dir_blocked suppresses movement in that direction, so the
+cursor keeps its previous value. Any other scan code falls through unhandled.
+After dispatch every iteration unconditionally calls 0x0002eab0 and 0x00015be0
+(frame pacing / presentation), then calls 0x00015860(ctx, dir_blocked, 0x18,
+*cursor_dir) to repaint the cursor, then repeats.
+
+Parameters:
+  ctx          - opaque context/handle forwarded unchanged as the first
+                 argument of the redraw call at 0x00015860.
+  dir_blocked  - pointer to four ints indexed by direction (0 up, 1 left,
+                 2 right, 3 down); zero means that direction is selectable.
+                 Also forwarded to the redraw call.
+  cursor_dir   - in/out pointer to the currently selected direction index;
+                 updated in place on an accepted arrow key.
+
+Returns:
+  1  on confirm (Enter or Space)
+  -1 on cancel (Esc or scan code 0x53)
+The function never returns while the loop result is still 0.
+
+=== 00016300 [PLATE]
+Draws the body of the unit status panel for one unit.
+
+Algorithm:
+1. If the global mode flag at 0x00060070 is set, latch the caller-supplied unit index into 0x00063fb0.
+2. Resolve the unit record via the accessor at 0x0002d210(unit_index) and copy the fields it will print into locals: current/max HP (record+0x40 / +0x42), current/max MP (record+0x44 / +0x46), a two-digit value at +0x21, four three-digit stats at +0x48, +0x4a, +0x4c, +0x4e, a three-digit value at +0x3e, a two-digit value at +0x3b, and byte fields +0x07, +0x08, +0x1f, +0x20 used as sprite indices. The byte at +0x3c is displayed as 1000 when it holds the sentinel 0xff.
+3. Pick the portrait entry from the table based at 0x00060138 (stride 0x30, first dword of the entry is an offset relative to the table base). The index is record+0x02 in the normal path and the caller-supplied unit index when 0x00060070 is set. Blit that 0x18 x 0x18 image at destination offset 0xd21.
+4. Print every numeric field with the digit renderer at 0x00017530 (destination, pitch 0x140, value, digit count, 0). Before each print, the global colour selector 0x0006000c is set to 3 when the current value differs from its maximum, to 1 when the corresponding status byte (record+0x22, +0x23, +0x24) is non-zero, and back to 0 otherwise.
+5. Draw the HP gauge at offset 0x9396 and the MP gauge at offset 0xab56 with the bar renderer at 0x00017740; the filled length is 0 when the maximum is not positive, otherwise ceil(current * 0x75 / maximum).
+6. Draw the field at record+0x07 with the renderer at 0x000177d0 at offset 0x513, then blit three icons through 0x0001ff60 from the sheet in 0x000643c4 using sprite indices record+0x08 plus 1, record+0x20 plus 0xa1 and record+0x1f plus 0x97, at destination offsets 0x709, 0x1d80 and 0x1dc7.
+
+All destination offsets are byte offsets into a buffer whose pitch is 0x140 (320) pixels, so they encode fixed y*320+x positions inside the panel.
+
+Parameters:
+  unit_index - index of the unit whose record is fetched and drawn.
+  dest - base address of the destination pixel buffer (320-byte pitch).
+
+Returns:
+  Nothing.
+
+=== 00016840 [PLATE]
+Loads the Status.cel image out of MISC.VFS into a new 320x200 offscreen buffer.
+
+Algorithm:
+  1. fdps_vfs_open("MISC.VFS" @ 0x60128) -> archive handle.
+  2. fdps_vfs_load_file("Status.cel" @ 0x61590, handle) -> heap block holding the raw CEL file.
+  3. malloc(0xfa00 = 64000) -> destination image buffer (320*200, one byte per pixel).
+  4. free(archive handle) - the directory handle is no longer needed once the entry is read.
+  5. Pixel payload starts at cel_base + *(int *)(cel_base + 0x0f); that pointer plus the destination
+     buffer are handed to the CEL decoder at 0x568db with (320, 200, 320, 0, 0), i.e. full frame,
+     destination pitch 320, drawn at origin.
+  6. free(raw CEL block) and return the decoded image buffer.
+
+Parameters:
+  none.
+
+Returns:
+  void * - malloc'd 64000 byte 320x200 8bpp image containing the decoded Status.cel.
+  The caller owns the block and must free it.
+
+=== 00016aa0 [PLATE]
+Battle unit information window.
+
+Algorithm:
+1. Resolves the unit record for the incoming unit id via FUN_0002d210 and reads the class byte at offset 7. If the class is in the range 0x24..0x27 the function returns immediately without touching the screen, so those unit kinds have no information window.
+2. Acquires the drawing context via FUN_00016840, saves the global flag at 0x00060159 into 0x00063fb8 and clears it, and calls FUN_0002beb0 when the flag at 0x00060070 is clear.
+3. Plays the sound effect named by the string at 0x0006159c ("OpWin1.wav", the window-open cue).
+4. Allocates a 64000-byte buffer and copies the whole 320x200 VGA frame from 0x000a0000 into it, then allocates a second 0x57e3-byte buffer (151*149) for the window rectangle, and saves the current contents of the window rectangle out of the off-screen page (context + 0x3b58, i.e. screen position x=152, y=47, pitch 320).
+5. Renders the panel into the off-screen page: frame/background via FUN_00016300 and FUN_00024ea0, nine content rows via FUN_00016e80 called once per row index 0..8, then FUN_000170c0 with the unit field at offset 2.
+6. Queries the page content with FUN_00027840 into a 40-byte local descriptor. When the returned count is non-zero the window is animated open by FUN_0002fe40 with step 2,4,6,8,10, each step waiting on one full vertical retrace read from VGA status port 0x3da; the reverse loop (11 down to 1, step -2) animates it closed.
+7. When the returned count exceeds 8 a second page is drawn (FUN_000276f0 with page index 8) and cross-faded in by FUN_00030230 in 8 steps (1..15 step 2), again one retrace per step, before the closing animation.
+8. Restores state via FUN_000168e0, frees the three buffers, and calls FUN_000567b3.
+
+Parameters:
+  unit_id - identifier of the unit whose information window is shown; passed straight to the unit record lookup and to the page/text routines.
+
+Returns:
+  Nothing. The screen and the saved global flag are restored before returning.
+
+=== 00016e80 [PLATE]
+Renders one frame of the four-panel status window slide-in animation.
+
+Algorithm:
+1. Copies four 9-entry int tables (0x14788, 0x147ac, 0x147d0, 0x147f4) onto the stack; each holds the per-step offset of one panel. Values converge on 15 / 108 / 148 / 0 and overshoot by one pixel at steps 6-7, giving the window a small bounce as it settles.
+2. Allocates a 64000-byte (320x200) off-screen buffer and copies the background image argument into it.
+3. Blits four rectangles of the composed window image into that buffer with fdps_blit_rect, each clipped to the current step offset so it appears to slide in from its own edge:
+   - upper-left  panel, final rows 0..107,   cols 15..147,  grows leftward from column 148
+   - lower-left  panel, final rows 108..199, cols 15..147,  grows upward from the bottom
+   - lower-right panel, final rows 44..199,  cols 148..305, grows leftward, width capped at 158
+   - upper-right panel, final rows 0..43,    cols 148..305, grows upward from row 44
+4. Calls the 0x3d370 thunk with 15, then polls the VGA input status register at port 0x3DA until vertical retrace begins and ends.
+5. Copies the 64000-byte buffer to 0xA0000 and frees it.
+
+Parameters:
+  background   pointer to a 320x200 8bpp image used as the frame backdrop
+  window_image pointer to a 320x200 8bpp image holding the assembled window graphics
+  step         animation step index, 0..8, used to index the four offset tables
+
+Returns:
+  nothing.
+
+=== 000170c0 [PLATE]
+Frame-paced input wait loop for the unit status window.
+
+Algorithm:
+Copies a 15-entry sprite Y-position table from 0x14818 (15, 30, 70, 105, 140, 170, 150, 130, 150, 170, 160, 165, 165, 160, 170 -- a drop from the top of the screen followed by two bounces) into a local array, and sets the idle-animation frame counter to -1 (inactive). When the flag argument is non-zero it samples the CRT helper at 0x42cf8 and, when the value is a multiple of 200, arms the idle animation by setting the frame counter to 0.
+
+It then loops: poll the input source at 0x178f0; a returned code greater than 0x7f means nothing selected yet, so a frame is drawn. A frame is skipped entirely unless the global tick at 0x69d64 differs from the last-drawn tick at 0x63fc0.
+
+Per frame: allocate a 0x15180-byte 360x240 backing buffer and a 0xfa00-byte 320x200 work buffer, zero the work buffer, capture the current screen into the backing buffer (from 0xa0504 when the mode flag at 0x60070 is set, otherwise via the helper at 0x2bf60), copy it back into the work buffer, then free the backing buffer. The walk-cycle frame index is (tick at 0x63fc0 % 16) / 4, with 3 folded back to 1, giving the 0,1,2,1 cycle; it selects one of three sprite pointers inside the 0x30-byte per-unit record at the table based at 0x60138, whose four 0x0c-byte groups (offsets 0x00, 0x0c, 0x18, 0x24) are the four facings. A 0x240-byte 24x24 scratch buffer receives the decoded cel via the cel blitter, is blitted into the caller's window image at offset 0xd21 (column 161, row 10), and the window image is then blitted into the work buffer as a 0x123 x 0xc8 region at offset 0xf.
+
+When the idle animation is armed, the frame counter drives four phases -- frames 0..14 draw the facing-0 sprite at the table's Y positions (the drop and bounce), frames 15..24, 25..34 and 35..44 draw the other three facings standing at row 170 -- after which a separate Y counter starting at 170 walks the sprite upward in steps of 4 until it passes row 10, at which point the frame counter returns to -1 and the sprite goes back to the plain walk cycle.
+
+The work buffer is presented to VGA memory at 0xa0000 (whole 64000-byte copy when the mode flag is clear, otherwise a 0x138 x 0xc0 rect blit at 0xa0504), both remaining buffers are freed, and the last-drawn tick is updated.
+
+Parameters:
+  window_image -- pointer to the 320-pitch composed status window image; the unit sprite is stamped into it at offset 0xd21 each frame
+  unit_index -- index into the 0x30-byte-per-entry sprite pointer table at 0x60138; overridden by the global at 0x63fb0 when the mode flag at 0x60070 is set
+  allow_idle_animation -- non-zero enables the randomly triggered drop/bounce/turn/rise idle sequence
+
+Returns:
+  The input code returned by the poller at 0x178f0 once it is <= 0x7f.
+
+=== 00017990 [PLATE]
+Modal two-option (left/right) prompt loop.
+
+Algorithm:
+1. Allocates a 0x561E byte buffer and copies a 302x73 (0x12E x 0x49) region of
+   VGA memory at 0xA9609 into it at stride 302. The caller has already drawn the
+   prompt panel there, so this captures the panel bitmap. The four corner pixels
+   (offsets 0, 0x12D, 0x54F0, 0x561D) are then cleared to 0 so the later masked
+   blit renders the panel with transparent (rounded) corners.
+2. Loops until a confirm or cancel key arrives. Each iteration:
+   - calls the per-frame update helper at 0002EAB0 and allocates a 0x15180 byte
+     (360x240) off-screen work buffer;
+   - if the flag at 00060070 is zero, hands the work buffer to 0002BF60 to draw
+     the background; otherwise copies the current 312x192 screen area at 0xA0504
+     into the work buffer at offset 0x21D8 (x=24, y=24, stride 360);
+   - masked-blits the captured panel into the work buffer at offset 0xC4FD
+     (x=29, y=140) via 0002F390;
+   - if the pointer at 00060120 is non-null, draws it through 000568DB at work
+     buffer offset 0x9AD0 (x=32, y=110);
+   - draws the two option graphics from the cel sheet at 000643DC at x=249 and
+     x=275, y=123. The unselected side uses a fixed cel (13 for the right slot,
+     8 for the left); the selected side cycles a 4-frame animation, cels 4..7 on
+     the left and 9..12 on the right, indexed by ((frame/3)%4);
+   - waits for vertical retrace by polling port 0x3DA (bit 3), blits the work
+     buffer back to the screen at 0xA0504 (312x192), spins until the tick
+     counter at 00069D64 changes, records it as the animation frame, and frees
+     the work buffer;
+   - reads a scancode via 000567BE: 0x1C (Enter) or 0x39 (Space) confirms and
+     keeps the current selection; 0x01 (Esc) or 0x53 (Del) exits with -1;
+     0x4B (Left) selects 0; 0x4D (Right) selects 1. Codes >= 0x7F are ignored.
+3. Frees the captured panel buffer and returns the selection.
+
+Selection starts at 0, so the left option is highlighted on entry.
+
+Parameters: none.
+
+Returns: 0 or 1 for the confirmed option (left or right), -1 if cancelled.
+
+=== 000183d0 [PLATE]
+Option toggle menu (four boolean game settings).
+
+Algorithm:
+Copies 16 zero bytes from 0x00014a9c into a 4-entry menu state array on the stack and clears the selection index. Then loops: for each of the four settings it stores a label id into a 4-entry id array, choosing the ON id when the flag is non-zero and the OFF id otherwise -- 0x0d/0x31 for the CD music flag at 0x00060008, 0x0e/0x32 for the flag at 0x00069d70 (written by fdps_audio_init), 0x0f/0x33 for the flag at 0x00060010, and 0x18/0x3c for the flag at 0x00060158 (also read by fdps_run_village_phase). The OFF id is always the ON id plus 0x24. It then calls the menu widget trio at 0x00016130 (draw), 0x00016200 (run selection, returns the chosen entry or -1) and 0x000161b0 (erase), all with (id array, state array, &selection). A return of -1 ends the loop and the function. Otherwise the flag matching the selection index is XORed with 1; selecting entry 0 additionally calls the audio routine at 0x00030cc0 with (global at 0x00069cf4, 0), and the loop repeats so the labels are redrawn in their new state.
+
+Parameters: none.
+
+Returns: nothing.
+
+=== 00018930 [PLATE]
+Loads the nine global game data tables into their BSS pointer slots.
+
+Algorithm: performs nine fixed, unconditional calls to the shared file loader at 0x29400. Each call passes the function's own single stack argument through unchanged as the loader's first argument, a literal .dat filename as the second, and the address of a distinct BSS pointer global as the third. The order and the filename/destination pairing are hard-coded: Friaprda.dat -> 0x63fd8, FriLevUp.dat -> 0x63fec, Item.dat -> 0x63fe0, EnemyDat.dat -> 0x63fd4, ProMap.dat -> 0x63fd0, ProEqu.dat -> 0x63fe4, MagicDat.dat -> 0x63ff0, GetMgTab.dat -> 0x63fe8, RankUp.dat -> 0x63fdc. There is no branching, no error handling and no return value inspection; every loader result is discarded.
+
+Parameters: one 32-bit stack argument at [ebp+0x14], never inspected here, forwarded verbatim as the first argument of every loader call.
+
+Returns: nothing. Its effect is entirely through the nine BSS pointer globals in 0x63fd0..0x63ff0, which are zero in the image and therefore filled in at runtime.
+
+=== 00018a20 [PLATE]
+Frees the group of nine global resource buffers held at 0x00063fd0..0x00063ff0.
+
+Algorithm: pushes each of the nine global pointers in a fixed order (0x63fd8, 0x63fec, 0x63fd4, 0x63fd0, 0x63fe0, 0x63fe4, 0x63ff0, 0x63fe8, 0x63fdc) and calls the CRT free helper FUN_0003d478 for each, adjusting the stack by 4 after every call. The pointers are not cleared to NULL afterwards, so the function must be called exactly once. The globals are filled by the matching loader at 0x00018930 (reached from fdps_load_global_resources); each buffer additionally has its own small accessor (0x00018ab0, 0x00018ae0, 0x00018b70, 0x00018bd0, 0x00018c00, ...).
+
+Parameters: none.
+
+Returns: nothing.
+
+=== 00018b70 [PLATE]
+Returns a pointer to one record of the class table loaded from PROMAP.DAT.
+
+Algorithm: multiplies the single stack argument by 10 (the PROMAP.DAT record stride, taken straight from the IMUL immediate), adds it to the class-table base pointer held in the BSS global at 0x63fd0, and returns the sum. There is no bounds check, no null check on the base pointer and no branching; the whole body is one IMUL, one load and one ADD. The base pointer is filled in at runtime by fdps_load_data_tables, which loads ProMap.dat into it, and is released by fdps_free_global_resource_buffers. The table is 410 bytes, i.e. 41 records; record 0 is a default entry, so callers index it as class code + 1.
+
+Parameters: one 32-bit stack argument at [ebp+0x14], the record index (class code + 1).
+
+Returns: pointer to the first byte of the requested 10-byte class record. The result is undefined if the index is out of range or if the table has not been loaded.
+
+=== 0001e3f0 [PLATE]
+Advances the battle to the next turn.
+
+Algorithm:
+1. Clears the input-enabled flag at 0x00060159, allocates a 0x15180-byte (360x240) offscreen map buffer via 0x0003d375 and renders the battle map into it with 0x0002bf60.
+2. Walks every unit (count at 0x00060150, unit record via 0x0002d210). A unit that has kind byte +0x06 == 2, none of flag bits 0x81 set in byte +0x05, zero in bytes +0x25 and +0x26, and current HP (+0x40) below max HP (+0x42) recovers maxhp/5 HP, clamped to max. Each heal draws a floating value over the unit with 0x0001ee10(buffer, unit_index, 0xff00, 3) and records that at least one unit rested.
+3. Waits for the VGA vertical retrace by polling port 0x3DA bit 3 (0x0003d4e4), then blits the 312x192 map viewport from buffer+0x21d8 to video memory at 0xa0504 (0x0002f2f0). If any unit rested, plays REST.WAV via 0x0002a1f0. Delays 40 ticks, frees the buffer and repaints the frame (0x0002beb0).
+4. Runs the allied-NPC phase: selects side 1 (0x0002e0c0 / 0x0001fa30) and calls 0x00012b20.
+5. Shows the EnyPhase.saf banner (0x0001eb00), selects side 0 and runs the enemy phase 0x00012960.
+6. Increments the turn counter at 0x00069ce8, shows the PlyPhase.saf banner, clears the cursor-active flag at 0x00069cd0 and selects side 2 (player).
+7. Applies per-unit MP regeneration: looks up item 0xa6 then 0xa7 on unit 4, item 0xb1 on unit 8, and item 0xb3 on every unit (0x00034520). When the found slot has bit 0x40 set in unit+0x0a[slot], the unit is not disabled (byte +0x05 == 0) and current MP (+0x44) differs from max MP (+0x46), it gains MP via 0x000275a0(unit, 0x0f), scrolls the view to the unit (0x0002da50), shows a type-0x0d floating value (0x0001f510) and waits for the display to finish (0x0001f340).
+8. Re-enables the cursor (0x00069cd0 = 1), centres the view on unit 0 unless 0x000109b0 says otherwise, calls 0x000567b3 and sets the input-enabled flag at 0x00060159.
+
+Every stage after step 3 is guarded by the battle-abort flag at 0x00069da0; when it is non-zero the function returns immediately without re-enabling input.
+
+Parameters: none.
+
+Returns: nothing.
+
+=== 0001eb00 [PLATE]
+Play a named full-screen animation entry out of MISC.VFS, wrapped in a fade-out / fade-in of the screen that was showing before.
+
+Algorithm:
+1. fdps_vfs_load_entry("MISC.VFS", name) loads the entry and returns its in-memory handle.
+2. Allocates two 64000-byte (320x200) buffers via the CRT allocator at 0003d375; both receive the current VGA page at 0xa0000 through the CRT block copy at 0003d514. One buffer keeps the pre-animation screen, the other is scratch for playback.
+3. Fade out: for level = 1..5 calls fdps_blit_tint_rect(saved, 320, 0xa0000, 320, 320, 200, DAT_000653f0, DAT_000643f0, 0, level), i.e. redraws the saved image through the tint tables at increasing darkness. Each step first spins on VGA input status port 0x3DA bit 3 (wait for the retrace to start, then to end) and then waits for the tick counter DAT_00069d64 to change, so one fade step lands per frame.
+4. Re-snapshots the (now black) screen into the scratch buffer.
+5. If the requested name is exactly "PLYPHASE.SAF" (CRT string compare at 00042fe0), calls FUN_0001e840 on the scratch buffer for that entry's extra setup.
+6. Calls FUN_0001ecf0(entry, scratch) to actually decode and play the entry, then frees the scratch buffer.
+7. Fade in: same loop with level = 5..1 over the buffer holding the pre-animation screen, restoring what was on screen before the call, and frees both remaining allocations.
+
+Parameters:
+  name - NUL-terminated entry name inside MISC.VFS, pushed on the stack by the caller.
+
+Returns:
+  Nothing. On return the VGA page holds the screen that was showing on entry and every buffer allocated here has been freed.
+
+=== 00022750 [PLATE]
+Resets the per-chapter runtime state and brings it back online.
+
+Algorithm:
+  1. Clears the chapter-state active flag at 00069cd0 and the shared
+     counter at 00069da0.
+  2. Calls FUN_00022be0 with the current chapter id held in 00069cf4.
+     That helper is called from nowhere else and does the chapter-specific
+     re-initialisation.
+  3. Zeroes the 0x20-byte state block at 000640d8 (memset-style helper at
+     00042cd0, args pushed and popped by the caller).
+  4. Zeroes four more counters/indices: 00069ce4, 00069ce0, 00069cd4,
+     00069ccc.
+  5. Sets the active flag 00069cd0 and the second flag 00069ce8 to 1, then
+     calls the shared runtime helper at 000567b3 and returns.
+
+Parameters:
+  none. All inputs are read from globals, chiefly the current chapter id at
+  00069cf4 which is written by the title screen, the demo, and the save/load
+  screens.
+
+Returns:
+  void.
+
+Called from the 31 dispatch stubs at 00020e90..00021650 (reached through the
+function-pointer table at 00060074, dispatched by fdps_title_screen) and from
+fdps_title_demo, so it is the common reset tail every chapter entry runs.
+
+=== 000227e0 [PLATE]
+Loads the whole field-map resource set for the current chapter.
+
+Algorithm:
+1. Releases the resource set left over from the previous chapter: for each of the DAT_00069cdc layers it frees the mpl pointer in DAT_00069cb0[i], the cel pointer in DAT_00069c20[i] and the attr pointer in DAT_00069c98[i].
+2. Frees DAT_00060124 and reloads it with "fdetxt%02d.txt" (current chapter DAT_00069cf4 plus one) from Field.vfs -- the chapter text block.
+3. Frees DAT_0006013c and reloads it with "map%02d.dat" from Field.vfs. Bytes 1 and 2 of that blob are copied out as the map dimensions into DAT_00064118 and DAT_0006410c.
+4. Frees DAT_00060148 and reloads it with "M%02d.dtl" from Field1.vfs.
+5. Loads "dsc%02d.dat" from Field2.vfs into a temporary buffer. Its first dword is the layer count, stored into DAT_00069cdc. The remaining data is an array of 32-byte layer descriptors starting at offset 4; for layer i the six dwords at +0x00..+0x14 are scattered into the parallel arrays DAT_00069bf0, DAT_00069c08, DAT_00069c80, DAT_00069c68, DAT_00069c50 and DAT_00069c38, and the bytes at +0x18 and +0x1c into the byte arrays at 0x00069cfe and 0x00069cf8.
+6. For each layer i it then loads "m%02d%d.mpl" and "m%02d%d.cel" from Field1.vfs and "attr%02d%d.dat" from Field2.vfs (chapter, i) into DAT_00069cb0[i], DAT_00069c20[i] and DAT_00069c98[i].
+7. Frees the descriptor buffer, frees the old working buffer DAT_00060144, reads the 16-bit width and height at offsets 7 and 9 of layer 0's mpl blob, allocates width*height*2+4 bytes for the new working buffer and writes the two dimensions as words at its offsets 0 and 2.
+8. Calls FUN_00010b20 to finish initialising the freshly loaded map.
+
+All file names are built with sprintf into a 0x38-byte stack buffer and resolved through fdps_vfs_load_entry, which returns a malloc'd copy of the archive member.
+
+Parameters: none. The chapter index is read from the global DAT_00069cf4.
+
+Returns: nothing. All results are published through the globals listed above.
+
+=== 00022f40 [PLATE]
+Uploads VGA DAC colour registers for a contiguous palette index range.
+
+Algorithm: For each index i from start to end inclusive, writes i to the DAC write-index port 0x3C8, then reads three consecutive bytes from rgb (red, green, blue). Each byte has the matching bias added, is clamped to the range 0..63 (values above 0x3F become 0x3F, values below 0 become 0), and is written to the DAC data port 0x3C9. The rgb pointer advances by 3 per entry. All port writes go through the Watcom CRT outp helper at 00042cb8 (MOV EDX,[ESP+4]; MOV AL,[ESP+8]; OUT DX,AL). The DAC index is rewritten every iteration rather than relying on the DAC auto-increment. The bias arguments make this the single upload path used for fades and brightness ramps: passing 0,0,0 uploads the palette unchanged.
+
+Parameters: rgb - pointer to packed RGB triples, one per palette entry, the first triple corresponding to index start; start - first palette index to write; end - last palette index to write, inclusive; r_bias, g_bias, b_bias - signed offsets added to the red, green and blue components before clamping.
+
+Returns: nothing.
+
+=== 00023050 [PLATE]
+Loads one 12-sprite group from an open .CEL sheet into the global sprite cache.
+
+Algorithm:
+1. fseek(fp, 0x0F, SEEK_SET) and fread a fixed 0x2970 bytes (2652 u32 = 221 groups x 12) of the CEL offset table into a temporary malloc'd buffer, then free it after use. The offset table position 0x0F is hardcoded; the header field at 0x05 is never read.
+2. Copy the 13 offsets [group_index*12 .. group_index*12+12] into a local array. Entry 12 is the start of the next group and acts as the end sentinel, so group_bytes = off[12] - off[0].
+3. If the cache is empty (count at 0x69CF0 == 0): record the group key in the key table at 0x64060, malloc 0x5A0 + group_bytes for the cache buffer at 0x60138, seek to off[0], read group_bytes directly after the 0x5A0 header area, and fill the 12 pointer-table slots with byte offsets 0x5A0 + (off[i] - off[0]). The write cursor at 0x6411C becomes 0x5A0 + group_bytes. Returns slot 0.
+4. Otherwise scan the key table for group_index; on a hit return that slot immediately without touching the cache or the count.
+5. On a miss, append: store the key, realloc the cache to cursor + group_bytes, seek and read the group at the cursor, fill pointer-table slots (count*12 + i) with cursor + (off[i] - off[0]), advance the cursor and increment the count. Returns the new slot index.
+
+The 0x5A0-byte header region holds exactly 30 slots of 12 u32 offsets; nothing bounds-checks the slot count against 30, so a 31st distinct group would write its pointer table over the cached pixel data. The fixed 0x2970-byte table read is larger than the offset table of a 1920-sprite sheet and spills into pixel data, but only the entries of the requested group are used.
+
+Parameters:
+  group_index - index of the 12-sprite group within the sheet (sprite index = group_index * 12 + i)
+  fp          - FILE * for the already-opened .CEL sheet; the file position is left inside the sheet
+
+Returns:
+  int - cache slot index for the group, valid for the pointer table at the head of the cache buffer
+
+=== 00023bc0 [PLATE]
+Adds a character to the unit roster.
+
+Algorithm:
+Computes the destination slot as g_roster_base[g_roster_count] where the entry
+stride is 0x50 bytes. Looks up two per-character tables by id: a base record
+(FUN_00018ab0) and a growth table (FUN_00018ae0). Level is base_record[2].
+Max HP = *(int16*)(base+3) + growth[6] * (level - 1);
+max MP = *(int16*)(base+5) + growth[8] * (level - 1).
+The entry is then filled: +5 = 0, +6 = 2 (side/team tag), +7 and +8 = the
+character id, +9 = 0, +0x0a = 0x40, +0x0b = base[0x0c], +0x0c = 0x40,
++0x0d = base[0x0d]. Four two-byte slots at +0x0e..+0x15 are copied from
+base[0x0e..0x11]; each slot's flag byte is 0x80 when the source value is 0xff
+(empty) and 0 otherwise. Two further slots at +0x16 and +0x18 are set to 0x80
+(empty). Four bytes are copied from base+8 to entry+0x1a, +0x1e = 0,
++0x1f = base[0], +0x20 = base[1], +0x21 = level, six bytes at +0x22 are
+cleared, +0x31 = 0xff. Three level-scaled stats follow:
++0x37 = *(int16*)(base+0x12) + growth[0] * level,
++0x39 = *(int16*)(base+0x14) + growth[2] * level,
++0x3e = *(int16*)(base+0x16) + growth[4] * level;
++0x3b = base[7], +0x3c = 0. Current and maximum HP are stored at +0x40/+0x42
+and current and maximum MP at +0x44/+0x46. Finally FUN_00023ac0 is called with
+the new slot index and the roster count is incremented.
+
+Parameters:
+  char_id - character/unit identifier, used as the lookup key for both the base
+            record and the growth table, and stored in the entry at +7 and +8.
+
+Returns:
+  Nothing. The new entry is written into the global roster array and the global
+  roster count is incremented.
+
+=== 00023e20 [PLATE]
+Loads the saved game FDE.SAV and restores the whole game state from it.
+
+Algorithm:
+1. malloc(0x59cb) for the raw save image; on failure print "Out of Memory on get save buffer!!!" and exit(1).
+2. fopen("FDE.SAV", "rb"), fread(buf, 1, 0x59cb, fp), fclose.
+3. Descramble the image (0x000568b7) and recompute its checksum (0x00056898); if the result differs from the dword stored at buf+0x59c7 the save is corrupt: blank the screen (0x000205b0), blit a warning message (0x0001ff60 with source 0xaa44a at 320,208 size 0x140x0xd0) and run 0x00020820.
+4. Fan the image out into the global state:
+   - buf+0x08a3, 0xa00 bytes -> buffer pointed to by [0x00064108]
+   - reload the palette resource "Fde.pal" from "MISC.VFS" (0x0002a140) into [0x000643bc], freeing the previous one
+   - buf+0x30c5 -> [0x00069cf4] (phase/chapter selector), then 0x000227e0
+   - fresh malloc(0x8a3) "fieldadr" buffer at [0x0006013c] filled from buf+0x0000; its bytes 1 and 2 become [0x00064118] and [0x0006410c]
+   - unit count = buf+0x30c4 -> [0x00060150]; fresh malloc(0x1e00) "ManDataSeg" buffer at [0x00069cd8] filled from buf+0x12a3 with count*0x50 bytes (0x50-byte records)
+   - buf+0x30a3, 0x20 bytes -> 0x000640d8
+5. fopen("ICON.CEL", "rb"), and for each unit record look up its icon with 0x00023050(record[7], fp), storing the result in record[2]; fclose.
+6. Copy the remaining scalar header fields out of buf+0x30c3 (bytes 0, 3..6 scaled by 0x18, 9, dword at 0xa, bytes 0xe..0x11) into their globals, then free the save image.
+7. Run the post-load setup (0x0002e910, 0x0002beb0), load "PlyPhase.saf" (0x0001eb00) and enter the play phase with 0x00030cc0(phase, 0).
+
+Parameters: none.
+
+Returns: nothing. Does not return at all when a malloc fails, because the error path calls exit(1).
+
+=== 00024490 [PLATE]
+Load-game screen: pick a save slot and install it into the live game state.
+
+Algorithm:
+1. Sets DAT_00064104 = 1 (mode/state flag while the load screen is up).
+2. Loads the cel resource "Load.cel" (string at 0x00061aec) via FUN_00024830 and blits it full screen through FUN_0002fb80 (320x200 to 0xa0000, 16x16 tile params).
+3. Calls the slot-selection UI FUN_00024650, passing &slot_index; it returns 1 when the player confirmed a slot. Releases the cel with FUN_0003d478.
+4. On confirm: allocates 0x59cb bytes (FUN_0003d375), opens "FDE.SAV" (string at 0x00060118) with mode/second string at 0x00061a00 via FUN_0004265e, freads 0x59cb elements of size 1, post-processes the buffer with FUN_000568b7(buf, 0x59cb) (decode/checksum), closes the file.
+5. Computes slot = buf + 0x312b + slot_index * 0xa28, memcpys the first 0xa00 bytes into the global game-state buffer pointed to by [0x00064108], then unpacks the trailing fields: slot[0xa00] -> DAT_00069cf4, slot[0xa01] -> DAT_00064114, dword slot[0xa02] -> DAT_000643a4, slot[0xa06] -> DAT_00060158, slot[0xa07] -> DAT_00060010, slot[0xa08] -> DAT_00060008, slot[0xa09] -> DAT_00069d70. When DAT_00060070 is zero it also copies the dword at slot+0x9ec into DAT_00064110.
+6. Blits the caller-supplied cel handle back through FUN_0002fb80 to restore the screen and returns the selection result.
+
+Parameters:
+  restore_cel - cel/image handle blitted after the load screen closes, restoring the caller's background. Arrives on the stack at [EBP+0x14].
+
+Returns:
+  The slot-selection result: 1 when a save was loaded into the game state, otherwise the non-confirm code from the selection UI.
+
+=== 00024650 [PLATE]
+Save/load slot selection loop.
+
+Algorithm:
+1. Loads the cursor sprite "LoadKon.cel" out of "MISC.VFS" via fdps_vfs_load_entry and keeps the handle for the whole loop.
+2. Loops until a result is decided:
+   - Reads one keyboard scancode (masked to 8 bits).
+   - Scancode 0x48 (Up) or 0x4B (Left): *slot = (*slot + 2) % 3, plays "Beep.wav".
+   - Scancode 0x4D (Right) or 0x50 (Down): *slot = (*slot + 1) % 3, plays "Beep.wav".
+   - Scancode 0x01 (Esc): result = -1, loop ends.
+   - Scancode 0x39 (Space) or 0x1C (Enter): accepted when the global mode flag at 0x00064104 is zero, or when the per-slot entry at 0x000640F8[*slot] is non-zero; on acceptance result = 1 and "morSure.wav" plays. Otherwise the key is ignored.
+   - Allocates a 64000-byte off-screen page, copies the caller's background page into it, picks the cursor animation frame as ((tick >> 2) & 3), folding frame 3 back to 1, where tick is the timer counter at 0x00069D64.
+   - Blits the cursor with fdps_cel_blit_sprite at x = 10, y = 25 + 52 * (*slot) into the off-screen page, calls FUN_00015be0, waits for vertical retrace by polling bit 3 of port 0x03DA, copies the page to 0xA0000, waits for the timer tick to change, then frees the page.
+3. Frees the cursor sprite and returns the result.
+
+Parameters:
+  background - pointer to a 64000-byte (320x200) source page that is restored under the cursor every frame.
+  slot       - pointer to the currently highlighted slot index; updated in place and left holding the final selection.
+
+Returns:
+  1  when the player confirmed the highlighted slot.
+  -1 when the player cancelled with Esc.
+
+=== 00024830 [PLATE]
+Builds the save/load menu screen page.
+
+Algorithm:
+1. Loads the background cel named by bg_cel_name out of the MISC.VFS archive (fdps_vfs_load_entry) and allocates a 64000-byte (320x200) offscreen page. Blits the cel into the page at pitch 0x140 with all clip/offset arguments zero, then frees the cel.
+2. Allocates a 0x59CB-byte save-file buffer and opens FDE.SAV with mode "rb". If the file exists it is read whole (fread size 1, count 0x59CB), post-processed by FUN_000568b7 over the same 0x59CB bytes, and closed; if it does not exist the buffer is filled with 0xFF so every slot reads as empty.
+3. For each of the three save slots i (record base = buf + 0x312B + i * 0xA28): the byte at record + 0xA00 acts as the occupied marker. 0xFF stores 0 into the slot-occupied flag array at 0x640F8[i], anything else stores 1. The slot record is then rendered by FUN_00024A40 into the page at row 0x1A + i * 0x34, column 0x0D, pitch 0x140. The save buffer is freed afterwards.
+4. If the icon-loaded flag at 0x69CF0 is set, the previously loaded icon block at 0x60138 is freed and the flag cleared. ICON.CEL is then opened "rb" and, for each of the 0x64114 party records (array at 0x64108, stride 0x50), the icon id at record + 7 is passed to FUN_00023050 together with the open file; the file is closed at the end.
+5. Returns the offscreen page pointer.
+
+Parameters:
+  bg_cel_name - name of the background cel entry inside MISC.VFS; this is what distinguishes the save screen from the load screen, both of which call this function.
+
+Returns:
+  Pointer to the newly allocated 64000-byte offscreen page holding the composed screen. Ownership passes to the caller, which is responsible for freeing it.
+
+=== 00027840 [PLATE]
+Expands a unit's 40-bit spell bitmask into a list of spell ids.
+
+Algorithm: Looks up the unit record for the incoming id via fdps_get_unit_record (0x0002d210). Walks the five bytes at record offset 0x1a..0x1e; for each byte it tests bits 0..7 from least significant upwards. For every set bit it forms the id byte_index * 8 + bit_index (0..39) and, when the output pointer is non-NULL, stores that byte at the next free slot of the output buffer; the running slot counter is incremented for every set bit whether or not the buffer is written. Nothing bounds-checks the buffer, so it must have room for all 40 ids. Passing NULL as the buffer turns the function into a pure population count of the mask.
+
+Parameters:
+  unit_id - index of the unit record, passed unchanged to fdps_get_unit_record.
+  out_ids - byte buffer receiving the ids of the set bits in ascending order, or NULL to only count them.
+
+Returns: The number of set bits in the 40-bit mask, i.e. the number of ids written when out_ids is non-NULL.
+
+=== 000282b0 [PLATE]
+Algorithm: Builds an 8-entry power-of-two mask table on the stack by copying 8 bytes from the const image at 0x27660 (01 02 04 08 10 20 40 80) with two MOVSD. Calls the record resolver at 0x2d210 with the first argument and keeps the returned base pointer. Splits the second argument into a signed byte index (arg2 / 8, compiled as the SAR/SBB divide-by-power-of-two idiom) and a bit index (arg2 % 8, computed with IDIV by 8 and taking the remainder). ORs the mask for the bit index into the byte at base + 0x1a + byte index, i.e. base[0x1a + n/8] |= 1 << (n % 8). Nothing is read back and nothing is returned. Parameters: arg1 at [EBP+0x14] is the handle or record selector passed straight through to the resolver at 0x2d210; arg2 at [EBP+0x18] is the signed bit number within the flag array at offset 0x1a. Returns: nothing; EAX is left holding the resolved record pointer as a side effect only.
+
 === 00029220 [PLATE]
 C entry point of FDPS. Called by the Watcom startup routine at 0004df4c, which pushes _argc (0006a3b4) and _argv (0006a3b8) and passes this function's return value to exit().
 
@@ -35,6 +727,1115 @@ Returns:
   Nothing meaningful. Control falls off the end of the function, so EAX holds whatever
   the final print call left there; the startup code feeds it to exit(). In C source
   terms this is a main() with no return statement.
+
+=== 00029400 [PLATE]
+Fatal-on-failure wrapper around fdps_vfs_load_file.
+
+Algorithm: Calls fdps_vfs_load_file(name, dest) with the file name and destination buffer taken from its stack arguments and writes the returned pointer through the out parameter. If the returned pointer is NULL the routine calls the shutdown/cleanup helper at 000567a0 and then crt_exit(1), so control never comes back on a failed load. On success it simply returns; the loaded pointer is only visible through *out.
+
+Parameters: dest - destination buffer handed to the VFS loader (may be the caller's preallocated storage); name - NUL-terminated file name looked up by the VFS; out - address of the caller's pointer variable that receives the load result.
+
+Returns: nothing. On failure the function does not return, it exits the process with status 1.
+
+=== 00029440 [PLATE]
+Program-exit teardown for all globally held allocations.
+
+Algorithm: Calls the CRT free helper at 0003d478 on 18 global pointers unconditionally (DAT_00064108 and the block DAT_000643a0..DAT_000643e4), then on 7 more global pointers only when they are non-NULL (DAT_00060120, DAT_00060124, DAT_00060138, DAT_0006013c, DAT_00060144, DAT_00060148, DAT_00069cd8). It then walks i = 0 .. DAT_00069cdc-1 and for each index frees the corresponding dword of three parallel pointer arrays based at 0x00069cb0, 0x00069c20 and 0x00069c98. Finally it calls the subsystem teardown at 00018a20 and the library teardown at 00056818, then returns normally.
+
+Parameters: none.
+
+Returns: void.
+
+=== 00029660 [PLATE]
+Loads all globally shared game resources at startup.
+
+Algorithm:
+1. Initializes the byte/dword configuration block at 0x6403c-0x6404f (0x10, 0x10, 1, 1, 0x20, 0, 0x10, 0x12), calls the subsystem init at 0x567f0 and allocates a 0xa00 byte scratch buffer into the global at 0x64108.
+2. Opens the archive "Misc.vfs" (0x60128). On failure it prints "file not found : Misc.vfs" and exits with status 1.
+3. For each of the following entries it looks the name up in the archive and stores the resulting pointer in a global; a NULL result calls the error reporter at 0x567a0 and exits with status 1:
+   Fde.pal -> 0x643bc, Fight.pal -> 0x643e4, Cusor.cel -> 0x643b8, Command.cel -> 0x643ac, Shadow.cel -> 0x643dc, IconSts.cel -> 0x643d4, Message.cel -> 0x643d0, Number.cel -> 0x643d8, SelBar.cel -> 0x643c0, LevUp.cel -> 0x643b0, BaseWav.vfs -> 0x643a0, BaseAni.vfs -> 0x643a8, ADWin.cel -> 0x643e0.
+4. Loads EasyBar.cel into a temporary, allocates 0x306 bytes into the global at 0x643b4, zero-fills it and copies its first three sub-images (0x2b x 6, stride 0x102) into that buffer, then frees the temporary.
+5. Loads Bar.cel the same way into a 0xaf8 byte buffer at 0x643c8, copying three sub-images of 0x75 x 8 with stride 0x3a8, then frees the temporary and closes Misc.vfs.
+6. Opens the archive "Field.vfs" ("file not found : field.vfs" plus exit 1 on failure), takes Fdetxt.fon -> 0x643cc and Fdetxt00.txt -> 0x643c4, then closes it.
+7. Tests for the cached file "FMer1.tmp". If the cache is absent it reads Mer1.tmp (0x4800 bytes into 0x653f0) and Mer2.tmp (0x1000 bytes into 0x643f0) in mode "rb". If the test reports otherwise it builds the tables from Fight.pal and Fde.pal via the routine at 0x2af60 and writes FMer1.tmp/FMer2.tmp and Mer1.tmp/Mer2.tmp in mode "wb" from the same two buffers.
+
+Parameters: none.
+
+Returns: nothing. Does not return on any resource failure; it exits the process with status 1.
+
+=== 0002a140 [PLATE]
+Loads one named entry from a VFS archive into newly allocated memory.
+
+Algorithm:
+1. Calls the VFS directory loader at 0x00039ab0 with the archive path (first stack argument). The returned pointer is the in-memory directory table whose entries are 0x1a bytes wide (size at +0x1e, file offset at +0x27, as used by 0x00039bd0).
+2. If the directory pointer is NULL, prints "file not found: '%s'" (format string at 0x00061df8) with the archive path and terminates via exit(1).
+3. Copies the directory pointer, the entry name and the address of a local result slot into a small stack block and re-loads them - the shape of an inlined helper - then calls the VFS entry reader at 0x00039bd0 with (entry name, directory table). That callee locates the entry by name, opens the backing VFS file, allocates a block of the recorded size, seeks to the recorded offset and reads the entry in. Its return value (the allocated block, or NULL) is stored into the local result slot.
+4. If the result is NULL, calls 0x000567a0 and terminates via exit(1).
+5. Frees / closes the directory table via 0x0003d478 and returns the allocated block.
+
+Parameters:
+  vfs_path   - path of the VFS archive file whose directory is loaded; also the value printed in the "file not found" message.
+  entry_name - name of the entry inside that archive to extract.
+
+Returns:
+  Pointer to the newly allocated buffer holding the entry's bytes. The function never returns on failure; it exits the process instead. The caller owns the returned block.
+
+=== 0002a1f0 [PLATE]
+Play a sound effect by resource name.
+
+Algorithm:
+  1. Call the sound pack directory lookup at 00039cf0 with the pack base held
+     in the global at 000643a0, the caller supplied name, and the address of a
+     local dword that receives the entry size. The lookup walks fixed 26 byte
+     directory entries, compares the entry name against the caller name and
+     returns pack_base + entry_data_offset, or 0 when the name is absent.
+  2. If the lookup returned a non-null pointer, call the sample playback
+     helper at 00030a00 with (sample, 1, -1, -1). That helper scans the eight
+     AIL sample voices for one whose status is not the playing status, then
+     initialises and starts the sample on it. The two -1 arguments select the
+     default volume and pan path.
+  3. A missing name is silently ignored; no sound is played and nothing is
+     reported.
+
+Parameters:
+  name - NUL terminated resource name of the sample inside the loaded sound
+         pack.
+
+Returns:
+  Nothing. EAX on exit is leftover from the last call and is not a result.
+
+=== 0002a2b0 [PLATE]
+Title screen and opening attract loop; the only caller is main.
+
+Algorithm:
+1. Reset the input/keyboard state, set the global 'in title screen' flag at 0x60159 and clear 0x64110.
+2. Try to open the save file "FDE.SAV" ("rb") with the stdio wrappers, read 0x59cb bytes into a malloc'd buffer, close it, then compute a checksum over the buffer and compare it against the dword stored at buffer+0x59c7. If the checksum matches and the byte at buffer+0x30c5 is not 0xff, clear menu-state entries 1 and 2 of the local 4-byte menu flag array (initialised from the dword at 0x29210, where 0 means selectable and 2 means greyed out), i.e. enable the save-dependent menu entries.
+3. Outer attract loop, repeated until a menu entry has been chosen: load "Dynasty.pal" from MISC.VFS, allocate a 0x16480 byte animation buffer and load "Logo.saf"; play the animation frame by frame, blitting the frame at offset 0x2298 to 0xa0000 (320x200, source pitch 0x170) after waiting on the VGA vertical retrace bit of port 0x3da and on the timer tick counter at 0x69d64. Any key with scancode < 0x80 aborts the animation.
+4. Format "FD%d" with the alternating track index and start that music track, then enter the title menu loop: load "StSel.cel", "StBoard.cel" and "StBoard.pal" from MISC.VFS, allocate a 64000 byte offscreen buffer, and run a menu frame loop with a 0x6d6 tick idle counter. Up (0x48) and Down (0x50) move the selection modulo 4; Enter (0x1c) or Space (0x39) accepts, but only when the selected entry's flag byte is 0. Each frame clears the offscreen buffer, draws the board cel, draws the four selection cels using frame index i*3 + (i == selection ? 1 : flags[i]) at y = 0x48 + i*0x11, waits for retrace and copies the buffer to 0xa0000.
+5. On exit from the menu loop, fade the palette to black over 10 retrace-synchronised steps, clear video memory, free all buffers and reset the palette. If the idle counter did not reach zero, dispatch on the selection: 0 starts a new game through the state-machine function pointer table at 0x60074 (index 0x69cf4), 1 opens the load-game screen and, on success, runs the post-load entry, 2 runs the other save-dependent entry, and 3 sets the quit flag at 0x643eb. If the idle counter did reach zero the demo/attract routine runs instead and the whole cycle repeats with the other music track.
+
+Parameters: none.
+
+Returns: the index of the title menu entry that was finally chosen (0-3).
+
+=== 0002a960 [PLATE]
+Game Over screen sequence.
+
+Algorithm:
+1. Allocates a 64000-byte (320x200) buffer and copies the current VGA frame at 0xA0000 into it, so the screen the player was looking at can be redrawn.
+2. Loads the resource "GameOver.saf" (0x61e68) out of the archive "MISC.VFS" (0x60128) via the VFS loader at 0002a140, and allocates a 0x16480-byte working surface whose pixel area begins at offset 0x2298.
+3. Fills a 0x50-byte on-stack descriptor (pitch 0x170, 0xf8, 0x18, 0x18, plus the loaded resource pointer) and loops: blit the saved frame into the work surface, run the draw call at 00014140, wait for VGA vertical retrace by polling port 0x3DA (bit 3) low then high, blit the work surface to 0xA0000, wait for the timer tick counter at 00069d64 to advance, and poll the input routine at 00014550. The loop ends when input returns non-zero.
+4. Runs a 16-step fade: for each step i the fade blit at 00030010 is called with the two 4 KB lookup tables at 000653f0 / 000643f0 and level 0x6f, the descriptor is redrawn twice (once with the table pair, once with mode 0x1f), and each step is again paced by retrace and by the tick counter.
+5. Frees the work surface, the loaded resource and the saved frame, then calls 000567b3 and 000567a0, which are the program termination stubs.
+
+Parameters: none.
+
+Returns: nothing. The trailing RET is present but is not expected to be reached, because the two calls that precede it terminate the program.
+
+=== 0002ac10 [PLATE]
+Title screen attract-mode demo sequence.
+
+Algorithm:
+1. Sets three globals: DAT_00069cf4 = 0x19, DAT_00060159 = 0 (demo-active flag), DAT_00064114 = 0.
+2. Calls the loader at 00023bc0 twelve times with ids 0,1,8,9,2,10,3,11,4,12,5,6, then calls 00022750 once and clears DAT_00069cd0.
+3. Fetches record 3 via the table accessor at 0002d210 and stores 4 into its byte at offset 0; calls 00036b60(0,0x0b,0) and 000282b0 twice (1,0x27) and (4,0x0b).
+4. For slots 0..11 fetches the record via 0002d210 and writes byte[6]=1, word[0x40]=word[0x42]=2000, word[0x44]=word[0x46]=word[0x48]=800, word[0x4c]=400 -- a canned set of demo values so nothing in the demo can be knocked out.
+5. Flushes the keyboard ring buffer via the stub at 000567b3 (write index := read index), then runs an outer pass counter initialised to 2. Each pass walks i = 0 .. DAT_00060150-1: record = 0002d210(i); if 000109b0(i) returns 0, calls 00010010(i, record->byte[6]); when i == 0x0c it calls the frame routine 0002db50. After each unit it polls the key stub at 000567be, which returns 0xff when the 10-entry ring at 0x0007000f is empty; any value below 0x7f is a real keypress, which forces the pass counter to 1 and breaks out. Each pass ends with 0002db50 and decrements the counter.
+6. On exit calls 0003d478(DAT_00064108), clears DAT_00064114, sets DAT_00060159 = 1, blanks 64000 bytes at 0x000a0000 (mode 13h frame buffer) via the fill routine at 00042cd0, and flushes the key buffer again.
+
+Parameters: none. The stack frame is PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0c with three locals and no read above the frame pointer.
+
+Returns: nothing.
+
+=== 0002af60 [PLATE]
+Builds the global palette helper tables used by the shading and colour-matching code.
+
+Algorithm:
+1. Copies the 18-entry brightness coefficient table at 0002ae40 onto the stack. The coefficients are {0,1,2,3,4,5,6,7,8,16,15,14,13,12,11,10,9,8}, indexed by shade level.
+2. For each of the 256 palette entries: reads the three bytes (r,g,b) of the source palette (each a 6-bit VGA component, scaled by 4 to 8 bits), packs them as r<<16|g<<8|b, then calls the three component extractors (0002ae90 red, 0002aec0 green, 0002aef0 blue). Each component is masked with 0xF0 and repositioned so the result holds the high nibble of red in bits 16-19, green in bits 8-11 and blue in bits 0-3. Level row 0 of the ramp table (000653f0) is zeroed (black) and this packed value is stored into level row 1 (000657f0, i.e. 000653f0 + 0x400).
+3. For levels 2..17, each of the 256 packed row-1 values is multiplied by the level coefficient and stored at 000653f0[level*256 + index]. Because each channel occupies only the low nibble of its own byte, a multiply by up to 16 scales all three channels at once without carrying between them.
+4. Fills the 16x16x16 inverse lookup cube at 000643f0: for every (r,g,b) triple of 4-bit components (passed as component*4) it calls the nearest-colour matcher at 0002b1b0 with the source palette and stores the returned palette index as a byte, written sequentially over 4096 entries.
+
+Parameters:
+  palette - pointer to 256 packed 3-byte RGB entries (VGA 6-bit components) in r,g,b order.
+
+Returns:
+  Nothing meaningful. EAX holds a leftover loop counter; the decompiler models it as an int return but no caller uses it.
+
+=== 0002b1b0 [PLATE]
+Finds the palette index whose RGB triple is closest to a requested color.
+
+Algorithm: keeps a running best squared distance seeded with 10000000 and a running best index seeded with 0x100. Walks a fixed 256 iterations over the palette, consuming three consecutive bytes per entry (red, green, blue in that order) through an advancing byte cursor. For each entry it forms dr = r - pal[0], dg = g - pal[1], db = b - pal[2] and computes dr*dr + dg*dg + db*db as signed 32-bit arithmetic. If that sum is strictly less than the current best it becomes the new best and the loop counter becomes the new best index. The loop count is hardcoded to 256 and is not derived from any argument, so the palette buffer must hold at least 768 bytes. The strict less-than test makes the first of several equally close entries win. The 0x100 seed can never survive because the maximum possible distance is 3*255*255 = 195075, well below the 10000000 seed, so the function always returns a value in 0..255.
+
+Parameters: r, g, b are the target color components, passed as full 32-bit ints and only compared as such (the palette bytes are zero-extended, the targets are not masked). palette points at the first byte of a 256-entry, 3-bytes-per-entry RGB table.
+
+Returns: the 0..255 index of the closest palette entry.
+
+=== 0002b4f0 [PLATE]
+Interactive battle-map cursor / target selection loop.
+
+Algorithm:
+Reads the map dimensions from the header at 0x00060144 (tile width at +0, tile height at +2) and converts them to pixel extents by multiplying by the 0x18 tile size. When mode == 6 the candidate list length is stashed and then forced to zero, so list cycling is disabled in that mode. If a candidate list is supplied and the first candidate's unit record byte at +7 is not 'y', the cursor is snapped onto that candidate via fdps_map_cursor_move_to using its tile coordinates from unit record bytes +0 and +1 (unit records are 0x50 bytes, base pointer at 0x00069cd8).
+FUN_00056799 yields the pointer to the current keyboard scancode byte; it is reset to 0xFF before the loop and after a cancel. Each iteration calls fdps_cd_music_repeat_poll, then reads the scancode:
+  0x01 (Esc) / 0x53 (Del)  -> result = -1, loop ends
+  0x39 (Space) / 0x1C (Enter) -> confirm. In mode 6 the whole unit array (count at 0x00060150) is scanned for a unit standing on the cursor tile that fails FUN_000109b0; if none blocks, FUN_00018b70 and FUN_0002ba00 are consulted and the tile cost byte read through 0x00069d09 must be below 0x14 for the confirm to succeed (returns 1). Outside mode 6, mode 5 confirms nothing; otherwise FUN_0002ba00 resolves the tile under the cursor and the resolved index at 0x00069d0c must not be 0xFF; mode 4 then returns 1 directly, other modes call FUN_000109f0 with the cursor tile, the clamped value of 0x00069cd0 and the mode, and set the result to 1 when it accepts.
+  0x2C (Z) / 0x4C (numpad 5) -> advance to the next entry of the candidate list (wrapping) and snap the cursor to that unit.
+  0x48/0x50/0x4B/0x4D (arrows) -> move the cursor one tile (0x18 pixels) in Y (0x00069ccc) or X (0x00069cd4), clamped to the map extents, each move playing "Beep.wav" through FUN_0002a1f0. A repeat counter suppresses movement while the same scancode has been held for 1..5 iterations, giving the usual key-repeat delay.
+After key handling the view origin (0x00069ce0 for Y, 0x00069ce4 for X) is scrolled by whole tiles so the cursor stays inside the visible window, and fdps_render_view_frame redraws.
+
+Parameters:
+  mode  - selection mode; 4, 5 and 6 take special confirm paths, other values are passed on to FUN_000109f0
+  count - number of entries in the candidate list; 0 disables list cycling, and mode 6 forces it to 0 after saving it as the acting unit index
+  list  - array of unit indices to cycle through with the cycle key
+
+Returns:
+  1 when the player confirmed a valid selection, -1 when the player cancelled. Selected tile coordinates are left in the cursor globals 0x00069cd4 (X) and 0x00069ccc (Y).
+
+=== 0002ba00 [PLATE]
+Loads the per-cell map information for one battle map tile into the shared "current tile" globals.
+
+Algorithm:
+1. Reads the terrain layer pointer at 0x00069cb0. The layer header stores the map width as a 16-bit value at offset 7 and the cell array (one 16-bit tile id per cell) starts at offset 0xb. The linear cell index is y * width + x; the tile id read from that slot is stored to the global at 0x00069d04.
+2. Uses that tile id to index the tile attribute table pointed to by 0x00069c98: entries are 4 bytes each and begin at offset 0x11 of the table. The four bytes of the entry are copied out individually, in the order byte2 -> 0x00069d09, byte0 -> 0x00069d08, byte1 -> 0x00069d0a, byte3 -> 0x00069d0b.
+3. Indexes a second layer pointed to by 0x00060144 with the same linear cell index (2 bytes per cell, array at offset 4) and copies the high byte of that cell to the global at 0x00069d0c.
+4. Indexes a third layer pointed to by 0x00060148, whose own width field lives at offset 7 of its header and whose cell array is one byte per cell starting at offset 0x10. The byte is zero-extended and stored to the 16-bit global at 0x00069d06.
+The function performs no bounds checking on x or y and calls nothing.
+
+Parameters:
+  x - map column index, pushed last by the caller.
+  y - map row index.
+
+Returns:
+  Nothing. All results are delivered through the globals at 0x00069d04, 0x00069d06, 0x00069d08, 0x00069d09, 0x00069d0a, 0x00069d0b and 0x00069d0c.
+
+=== 0002bae0 [PLATE]
+Player-phase interactive loop on the battle map.
+
+Algorithm:
+Obtains the shared keyboard-state byte via the low-level key accessor at 0x56799 and primes it to 0xFF. Reads the map dimensions from the header pointed to by 0x60144 (word 0 = width, word 1 = height) and converts both to pixel extents by multiplying by the 24-pixel tile size. Then loops until the local exit flag becomes non-zero.
+
+Each iteration polls input (0x30c50), reads the current scancode and maintains an auto-repeat counter: the same scancode as last time increments the counter, a different one resets it and records the new code. An action is only taken when the counter is 0 (first press) or greater than 5 (auto-repeat has kicked in); F1 (0x3B) and F2/Home (0x3C/0x47) are handled on the suppressed path instead.
+
+Scancode dispatch:
+  0x48/0x50 (up/down)    move the cursor Y at 0x69CCC by one tile, clamped to the map height
+  0x4B/0x4D (left/right) move the cursor X at 0x69CD4 by one tile, clamped to the map width
+                         each accepted move calls the feedback routine at 0x2A1F0 with the descriptor at 0x61E78
+  0x01/0x2C/0x4C/0x53    cycle forward through the unit table: starting from the saved rotation index,
+                         scan up to unit-count (0x60150) entries of the 0x50-byte records based at 0x69CD8
+                         and stop at the first with (flags[+5] & 0x85) == 0 and side[+6] == 2, then centre
+                         on it via 0x2D7C0 with its tile coordinates scaled by 24, saving the next index
+  0x1C/0x39 (Enter/Space) clear the key latch (0x567B3), resolve the unit under the cursor (0x2DAA0);
+                         with no unit, open the battle menu (0x14AB0) and take its return as the exit flag;
+                         with a unit that is friendly (side[+6] == 2), not marked done (flags[+5] & 0x80)
+                         and with byte +0x26 clear, open the unit command menu (0x15470) and, if the
+                         phase-end flag 0x69DA0 is still clear, run the post-command step (0x2EA10);
+                         otherwise show the read-only unit info screen (0x16AA0)
+  0x3B (F1)              invoke the routine at 0x2E160
+  0x3C/0x47 (F2/Home)    resolve the unit under the cursor and show its info screen (0x16AA0)
+
+After dispatch the camera origin (X at 0x69CE4, Y at 0x69CE0) is scrolled by one tile whenever the cursor comes within one tile of a viewport edge, clamped so the viewport (0x138 by 0xC0 pixels) stays inside the map. The frame is then drawn by 0x2BEB0, and the loop exits once the phase-end flag at 0x69DA0 is non-zero.
+
+Parameters:
+None. The decompiler's param_1/param_2/unaff_EBX are artifacts; no incoming stack slot or register is read before being written.
+
+Returns:
+Nothing.
+
+=== 0002beb0 [PLATE]
+Renders and presents one frame of the framed main view.
+
+Algorithm:
+1. malloc(0x15180 = 86400) a scratch scene buffer. The buffer is a composite: the first 0x21d8 (8664) bytes are header/state, the pixel plane starts at +0x21d8 and is 360 bytes per scan line.
+2. FUN_0002bf60(buf) fills/initialises the buffer (shared helper, 21 callers).
+3. FUN_0002dcf0(buf) composes this view's content into it (called from nowhere else).
+4. Busy-wait on inp(0x3DA) until bit 3 is set, i.e. until vertical retrace begins.
+5. FUN_0002eab0() runs inside the retrace window (4 callers; typical of DAC/palette programming).
+6. Busy-wait on inp(0x3DA) until bit 3 clears, i.e. until retrace ends.
+7. FUN_0002f2f0(buf + 0x21d8, 0x168, 0xA0504, 0x140, 0x138, 0xC0) blits the composed image to VGA memory: source stride 360, destination 0xA0000 + 0x504 (row 4, column 4 of a 320-wide mode 13h screen), destination stride 320, 312 x 192 pixels. That is exactly the interior of a 4-pixel border around the 320x200 screen.
+8. Spin until the interrupt-driven tick counter DAT_00069d64 differs from the last-seen value DAT_00069d10, then latch DAT_00069d10 = DAT_00069d64. This paces the caller to one tick per frame.
+9. free(buf) and return.
+
+Parameters: none. Everything drawn is taken from global state, which is why 41 different call sites can invoke it with no arguments.
+
+Returns: nothing.
+
+=== 0002bf60 [PLATE]
+Composites the scrolling layer table into a scene buffer.
+
+The layer table is a fixed 6-slot structure-of-arrays block in .data, each array 6 dwords or 6 bytes long and packed back to back: pos_x[6] at 0x69bf0, pos_y[6] at 0x69c08, unknown_a[6] at 0x69c20, vel_y[6] at 0x69c38, vel_x[6] at 0x69c50, scroll_factor_y[6] at 0x69c68, scroll_factor_x[6] at 0x69c80, unknown_b[6] at 0x69c98, image[6] at 0x69cb0, mode[6] (bytes) at 0x69cf8 and depth[6] (bytes) at 0x69cfe. The number of active slots is DAT_00069cdc.
+
+Algorithm:
+1. Tick gate: if the interrupt tick counter DAT_00069d64 differs from the last value this function
+   latched in DAT_00069d14, add vel_x[i] to pos_x[i] and vel_y[i] to pos_y[i] for every active slot,
+   then latch DAT_00069d14 = DAT_00069d64. Position therefore advances once per tick regardless of
+   how many times per tick the function is called.
+2. FUN_0002c220 fills a local 6-entry array with the slot indices in draw order.
+3. Pass one, in that order: for each slot whose depth byte is below 10, compute
+   x = (DAT_00069ce4 * scroll_factor_x[i] + pos_x[i]) >> 3 and
+   y = (DAT_00069ce0 * scroll_factor_y[i] + pos_y[i]) >> 3 -- a per-slot multiple of the two global
+   camera/scroll values plus the slot's own accumulated offset, in 1/8 pixel fixed point -- and call
+   FUN_0002c330(buf, image[i], unknown_a[i], DAT_00060144, x, y, unknown_b[i], mode[i]).
+4. Draw the mid-layer content into the same buffer: FUN_0002c6a0(buf) then FUN_0002d240(buf, 0).
+5. Pass two: the identical loop and blit call for every slot whose depth byte is above 10, so those
+   slots land on top of the mid-layer content. Depth exactly 10 is drawn by neither pass.
+
+Parameters:
+  buf -- destination scene buffer, passed straight through to every drawing callee.
+
+Returns: nothing.
+
+=== 0002d210 [PLATE]
+Accessor for the global unit-record array.
+
+Algorithm: Multiplies the index argument by the record stride 0x50 (80 bytes) and adds it to the base pointer held in the global at 0x00069cd8, returning the address of that record. No bounds check is performed and the base pointer is not tested for NULL. The array is allocated and filled by fdps_load_savegame, read throughout battle and menu code, and released by fdps_shutdown_free_resources.
+
+Parameters: index - zero-based record index; the caller is responsible for keeping it in range.
+
+Returns: Pointer to the start of the indexed 0x50-byte record. Undefined behaviour if the global base pointer has not been initialised.
+
+=== 0002d2d0 [PLATE]
+Plays back a movement path one step at a time.
+
+Algorithm:
+Iterates a local counter i from 0 to count-1. For each i it loads the
+byte at steps[i] and zero-extends it into a local step code, then
+dispatches on that code: 0 calls FUN_0002d360, 1 calls FUN_0002d590,
+2 calls FUN_0002d480, and any other value falls through to the default
+handler FUN_0002d6a0. Every handler receives the same single argument,
+the ctx pointer passed in as the first stack argument; the step byte
+itself is not forwarded. All four handlers share the same callee set
+(a shared helper pair plus fdps_render_view_frame), so each step code
+selects a variant of the same per-step animation-and-redraw work.
+The loop body does nothing else; the function has no early exit and no
+return value.
+
+Parameters:
+ctx    - first stack argument, the animation/actor context handed
+         unchanged to every step handler.
+steps  - second stack argument, pointer to a byte array of step codes,
+         read one byte per iteration.
+count  - third stack argument, number of step codes to play back;
+         a value <= 0 makes the function a no-op.
+
+Returns:
+Nothing. Arguments arrive on the stack and the caller removes them.
+
+=== 0002d7c0 [PLATE]
+Animated move of the map cursor to a target pixel position, with viewport follow.
+
+Algorithm:
+Reads the map dimensions from the header pointed to by DAT_00060144 (word[0] = width in tiles, word[1] = height in tiles) and converts them to pixels by multiplying by the 24-pixel tile size. Computes dx = target_x - cursor_x (DAT_00069cd4) and dy = target_y - cursor_y (DAT_00069ccc); returns immediately when both are zero. Picks the axis with the larger absolute delta as the major axis and derives the step count n = abs(major delta) / 24, i.e. one iteration per tile of travel. The major axis advances by (major delta / n) each step; the minor axis uses a running accumulator that adds (acc / n) and carries (acc % n) forward, so the two axes stay proportional without floating point.
+
+After each step the viewport origin is clamped so the cursor stays inside its scroll margins: vertically the cursor must sit between 0x18 and 0x90 pixels below the view top (DAT_00069ce0), horizontally between 0x18 and 0xd8 pixels right of the view left (DAT_00069ce4). When a clamp pushes the view past the map edge it is pulled back to map_pixel_height - 0xc0 or map_pixel_width - 0x138 (the 192x312 visible map window), and negative origins are pinned to 0. A local flag records whether the viewport actually moved; the map is redrawn through FUN_0002beb0 when it moved or when the forced-redraw flag DAT_00069cd0 is non-zero.
+
+Parameters:
+  target_x - destination cursor X in pixels (map space, 24 pixels per tile)
+  target_y - destination cursor Y in pixels (map space, 24 pixels per tile)
+
+Returns:
+  void. Side effects are on the globals: cursor position DAT_00069cd4 / DAT_00069ccc and viewport origin DAT_00069ce4 / DAT_00069ce0.
+
+=== 0002daa0 [PLATE]
+Find the index of the battle unit standing on the cursor tile.
+
+Algorithm:
+Iterates i from 0 to the unit count at DAT_00060150, walking the unit array whose base pointer is held in DAT_00069cd8 with a stride of 0x50 bytes per record. For each record it loads the unsigned byte at offset 0 (tile column) and the unsigned byte at offset 1 (tile row) and compares them with the cursor position converted from pixels to tiles: DAT_00069cd4 / 24 and DAT_00069ccc / 24, where 24 (0x18) is the map tile size in pixels. When both coordinates match, it calls FUN_000109b0(i); a return value of zero means the unit qualifies, and the loop stops and returns i. Any mismatch, or a non-zero predicate result, advances to the next record. Falling off the end of the array returns -1.
+
+Parameters:
+None. All inputs come from globals: DAT_00069cd8 (unit array base pointer, allocated elsewhere and released by fdps_shutdown_free_resources), DAT_00060150 (unit count), DAT_00069cd4 and DAT_00069ccc (cursor pixel coordinates, moved read-modify-write by fdps_battle_player_phase_loop).
+
+Returns:
+The zero-based index of the matching unit, or -1 when no unit on the cursor tile qualifies.
+
+=== 0002db50 [PLATE]
+Clears status bit 7 (0x80) on every battle unit.
+
+Algorithm: iterates i from 0 while i < the global unit count at 0x00060150. For each i it forms the unit record pointer as (*(char **)0x00069cd8) + i * 0x50, the same base pointer and 0x50 stride used by the battle unit code, and applies AND 0x7f to the byte at unit offset +5, clearing bit 7 while leaving the other status bits intact. No bounds check beyond the count, no early exit, and no other field is touched.
+
+Parameters: none. Both the unit array base pointer and the unit count are read from globals.
+
+Returns: nothing.
+
+=== 0002dba0 [PLATE]
+Draw one sprite from a .CEL sheet into a linear 8-bit surface.
+
+Algorithm:
+  Reads the sheet-wide sprite size from the .CEL header: signed 16-bit width
+  at cel+0x07 and signed 16-bit height at cel+0x09, sign-extended to int.
+  Resolves the pixel stream as cel + *(int *)(cel + index * 4 + 0x0F); the
+  offset-table position 0x0F is hardcoded, so the header field at 0x05 that
+  stores the same value is never read, and neither are the magic, the version,
+  the sprite count at 0x0B nor the encoding tag at 0x0D -- there is no format
+  validation at all here.
+  Computes the destination pointer as dest_base + y * pitch + x, then calls the
+  RLE blitter at 0x568db with (stream, dest, width, height, pitch, mode, arg8).
+  The blitter is a 13-way dispatch over mode whose variants differ only in
+  palette remapping and flipping; the pixel stream format is the 4-op RLE
+  described in resource_info/cel.md.
+  All arguments arrive on the stack and are read through the EBP frame; the
+  callee's seven arguments are cleaned by this function (ADD ESP,0x1C) and this
+  function's own arguments are cleaned by its callers, so both sides are cdecl.
+  EBX, ESI and EDI are saved and restored but never used.
+
+Parameters:
+  cel       pointer to the whole .CEL image loaded in memory (header at offset 0)
+  index     zero-based sprite index into the sheet's offset table
+  dest_base base of the destination 8-bit surface
+  pitch     bytes per destination row
+  x         destination column of the sprite's left edge
+  y         destination row of the sprite's top edge
+  mode      selector forwarded to the blitter's 13-way dispatch (palette remap
+            and flip variants)
+  arg8      second value forwarded unchanged to the blitter; meaning not settled
+
+Returns:
+  Nothing. Draws directly into the caller's surface.
+
+=== 0002dcf0 [PLATE]
+Draws the battle-map cursor information panel into the supplied frame buffer.
+
+Algorithm:
+1. Computes the cursor position in tile units relative to the scroll origin: col = (DAT_00069cd4 - DAT_00069ce4) / 24, row = (DAT_00069ccc - DAT_00069ce0) / 24 (24 = tile size in pixels).
+2. Returns immediately unless both panel-enable flags DAT_00060158 and DAT_00060159 are non-zero.
+3. Calls FUN_0002ba00 with the absolute cursor tile (DAT_00069cd4 / 24, DAT_00069ccc / 24) to refresh the data the panel displays.
+4. Chooses the panel X origin DAT_0006016c so the panel dodges the cursor: row > 4 and col < 2 selects x = 0x124, row > 4 and col > 10 selects x = 0x19; otherwise the previous value is kept.
+5. Blits the panel background cel DAT_000643e0 (width 0xa0) at x, then cel DAT_00069c20 frame DAT_00069d04 (width 0xaf) at x + 9, both into the destination with pitch 0x168.
+6. Emits two text fields via FUN_00017530 at byte offsets 0xe6b3 and 0x11d8b (plus x), using the font/colour tables at 0x60040 and 0x60058 indexed by DAT_00069d09.
+7. Calls fdps_battle_find_unit_at_cursor. On -1 nothing further is drawn.
+8. Otherwise takes the 0x50-byte unit record at DAT_00069cd8 + index * 0x50, derives the walk animation phase from DAT_00069d64 >> 2 & 3 (phase 3 folded back to 1), forms the sprite slot record[2] * 12 + phase, resolves it through the relative offset table at DAT_00060138, and blits the 24x24 sprite at offset 0xf621 + x via FUN_000568db.
+9. Sets the text colour global DAT_0006000c to 3 when current HP (record+0x40) differs from max HP (record+0x42), prints the current HP as a 4-digit field at offset 0x10b39 + x, then restores DAT_0006000c to 0.
+
+Parameters:
+  dest - destination frame buffer, pitch 0x168 bytes per row; all draw offsets are byte offsets into it.
+
+Returns:
+  Nothing.
+
+=== 0002e160 [PLATE]
+Battlefield overview screen, entered from the player phase.
+
+Algorithm:
+1. Allocates a 64000-byte (320x200) off-screen frame buffer and a 0x4000-byte array of 64x64 tile-graphic pointers; calls the minimap tile-graphics loader at 0002e640 for the shared tile source.
+2. Reads map dimensions from the map header at DAT_00069cb0 (+7 = width, +9 = height) and the camera pixel origin from DAT_00069ce4 / DAT_00069ce0, converting to tile units by dividing by the 24-pixel tile size. Marker scale defaults to 4 px per tile (virtual width 0x280); maps taller than 40 tiles drop to 3 px per tile (virtual width 0x380).
+3. Fills the pointer array: for each tile (x,y) calls the tile lookup at 0002ba00, then takes the resulting tile index from DAT_00069d04 and stores tilesrc + 6 + index * 0x240 (24*24 bytes per tile).
+4. Plays a 7-step zoom-out animation: each step interpolates source rect and scale between the camera view and the full map, calls the scaled map blitter at 0002e710 into the off-screen buffer and copies 64000 bytes to 0xa0000.
+5. Flushes the keyboard (000567b3) then loops on 000567be until it returns a value <= 0x7f (a real key). Each time the frame counter DAT_00069d64 advances, it redraws all DAT_00060150 units from the unit array at DAT_00069cd8 (stride 0x50): units with bit 0 of byte +5 set are skipped; byte +0 / +1 are tile x / y, byte +6 selects a faction colour base from the table {0x28, 0xb4, 0xd6} copied from 0002b294. A marker square is drawn by 0002e5e0 at (0xa0 + x*scale - width*scale/2, 0x64 + y*scale - height*scale/2). The map cursor (DAT_00069cd4 / DAT_00069ccc divided by 24) is drawn last with colour base 0x82. A shared brightness offset ping-pongs between 0 and 7 each frame, making every marker pulse.
+6. Plays the 6-step zoom-in animation in reverse and frees the frame buffer, the pointer array and the tile source.
+
+Parameters: none; all state comes from the battle globals listed above.
+Returns: nothing.
+
+=== 0002e640 [PLATE]
+Expand the whole chapter CEL sheet into a newly allocated uncompressed 24x24 shape array.
+
+Algorithm:
+  Takes no arguments; the source sheet is the global CEL pointer at 0x00069c20,
+  which is loaded by fdps_load_field_chapter_resources and released by
+  fdps_shutdown_free_resources.
+  Reads the sheet's sprite count as a signed 16-bit value at cel+0x0B (the same
+  field fdps_cel_blit_sprite documents but never reads) and sign-extends it to
+  int, then allocates count * 0x240 + 6 bytes through the CRT allocator at
+  0x0003d375. 0x240 is 576 = 24 * 24, one byte per pixel, so the sheet's sprites
+  are assumed to be 24x24; nothing here validates that against the width/height
+  fields in the source header.
+  On allocation failure it prints "Out of memory at rease shape !!!" (the typo is
+  the original developer's) through the CRT output helper at 0x00042deb and calls
+  exit(1) -- the failure path does not return.
+  Writes a 6-byte shape header into the new buffer: 16-bit width 0x18, 16-bit
+  height 0x18, 16-bit sprite count. Zero-fills the count * 0x240 pixel bytes that
+  follow with the CRT memset at 0x00042cd0.
+  Then loops i from 0 to count-1 calling
+  fdps_cel_blit_sprite(sheet, i, dest_base, 0x18, 6, i * 0x18, 0, 0). The blitter
+  computes dest_base + y * pitch + x, so pitch 0x18, x 6 and y i*0x18 resolve to
+  dest_base + 6 + i * 0x240 -- x is being abused as a byte fudge to step over the
+  6-byte header, not as a real column. Mode 0 means the plain unremapped,
+  unflipped RLE variant, so each sprite is written out as a flat 24x24 block.
+  Standard four-register prologue (EBX, ESI, EDI, EBP); EBX, ESI and EDI are
+  saved and restored but never used. Every callee's arguments are pushed on the
+  stack and cleaned by this function (ADD ESP,n), and this function itself takes
+  no arguments and ends in a plain RET, matching the module default stack
+  convention.
+
+Parameters:
+  None. The source sheet is read from the global at 0x00069c20.
+
+Returns:
+  Pointer to the newly allocated shape buffer: a 6-byte header (width 24,
+  height 24, sprite count) followed by count consecutive 576-byte uncompressed
+  24x24 sprites. Never returns NULL -- allocation failure exits the process.
+  The caller owns the buffer.
+
+=== 0002e710 [PLATE]
+Renders the scaled (zoomable) battle map overview into an offscreen 320x200 buffer.
+
+Algorithm:
+Reads the current map dimensions from the map header pointed to by the global at 0x00069cb0: width = *(int16*)(hdr+7), height = *(int16*)(hdr+9). Converts the requested camera centre into a top-left world position by subtracting step*0x9c horizontally and step*0x60 vertically (0x9c=156 and 0x60=96 are half the 312x192 viewport), so the caller passes the point that should land at the centre of the view.
+
+World coordinates are 1.12-style fixed point with 0xc00 units per map tile and 0x80 units per source pixel, i.e. every tile is 24x24 pixels (0xc00/0x80 = 24). The top-left position is split into tile index (world / 0xc00) and sub-tile remainder (world % 0xc00), with a manual floor correction that adds 0xc00 to the remainder and decrements the tile index when the remainder is negative, so negative camera positions still sample the correct tile.
+
+The destination buffer is first cleared to colour 0 over its full 64000 bytes, then drawing starts at buffer + 0x504 (row 4, column 4) and advances by 0x140 (320) bytes per output row.
+
+For each of 192 output rows the sub-tile Y remainder is converted to a source row offset ((rem >> 7) * 0x18) inside the tile bitmap. Rows whose tile Y is outside [0, height) are skipped, leaving the cleared background. Otherwise the tile bitmap pointer is fetched from the caller-supplied pointer table as table[tileY * 64 + tileX] (the table has a fixed stride of 64 entries per map row) and the row offset is added.
+
+For each of 312 output columns one byte is copied from the tile bitmap at source column (subX >> 7), skipped when tile X is outside [0, width). After each column the sub-tile X remainder advances by step; when it reaches 0xc00 the tile X index advances, the remainder wraps by subtracting 0xc00, and the tile bitmap pointer is re-fetched from the table. The same wrap logic advances tile Y between rows. Tile X and its remainder are restored from the saved row-start values before each new row.
+
+The step parameter is therefore the zoom factor in source-pixel fixed point: 0x80 gives 1:1, larger values zoom out, smaller values zoom in.
+
+Parameters:
+  dest       - destination 320x200 8bpp offscreen buffer, cleared to 0 first
+  world_x    - camera centre X in 1/0x80-of-a-pixel fixed point (0xc00 per tile)
+  world_y    - camera centre Y in the same fixed point
+  step       - fixed-point source step per output pixel, i.e. the zoom factor
+  tile_table - array of pointers to 24x24 tile bitmaps, indexed [tileY * 64 + tileX]
+
+Returns:
+  Nothing. EAX at RET holds the leftover loop counter and carries no meaning.
+
+=== 0002e910 [PLATE]
+Applies already-triggered map cell state to the tile layer.
+
+Algorithm:
+Reads the current map header via the pointer at 0x00069cb0: width = word at +7, height = word at +9; the tile array is a width*height array of 16-bit tile indices starting at +0x0b. Reads a second, parallel map layer via the pointer at 0x00060148: its own width is the word at +7 and its byte array starts at +0x10.
+Iterates y over [0,height) and x over [0,width). For each cell it calls the map cell query helper at 0x0002ba00 with (x, y), which publishes the cell record into the globals at 0x00069d00..0x00069d0f; this routine then uses the kind byte at 0x00069d08 and the cell id word at 0x00069d06.
+A cell is acted on when (kind & 0x60) equals 0x20 or equals 0x60 and the byte table at 0x000640d8 indexed by the cell id is non-zero. Note that the two equality tests together are exactly the bit test (kind & 0x20), so the original source compared the masked kind against two named constants rather than testing one bit; keep both comparisons when rebuilding.
+For an acted-on cell it increments the 16-bit tile index at tiles[y*width + x] by one and stores 0 into the second layer at layer2[y*layer2_width + x].
+The table at 0x000640d8 is zero-filled in the image and is passed by address to the savegame reader and writer, so it is persistent per-cell trigger state; this routine is the pass that makes that state visible on the map after a load or a map (re)init.
+
+Parameters:
+None. All inputs come from the globals named above.
+
+Returns:
+Nothing.
+
+=== 0002ea10 [PLATE]
+End the player phase once no friendly unit can still act.
+
+Algorithm:
+Sets a local 'all done' flag to 1, then walks the battle unit table: index 0 to DAT_00060150-1 (unit count), record base DAT_00069CD8, record stride 0x50 bytes. A record clears the flag when all three of these hold:
+  byte +5 (status flags) has neither bit 0x80 nor bit 0x01 set, i.e. the unit is neither already finished nor removed
+  byte +6 (side) equals 2, the player's side
+  byte +0x26 equals 0, the per-unit acted marker
+The loop always runs to completion; it does not break early. Afterwards, if the flag is still 1 -- no friendly unit remains actionable -- it calls FUN_0001E3F0, the phase-completion routine that the battle system menu also invokes after sweeping every remaining unit.
+
+Parameters:
+None. The prologue pushes EBX/ESI/EDI/EBP and reserves 0x18 bytes of locals; nothing at [EBP+0x14] or beyond is read, and every local is written before use. The decompiler's param_1/param_2/param_4/unaff_EBX are artifacts, as is the argument list it shows on the call to FUN_0001E3F0 -- the disassembly is a bare CALL with no preceding pushes.
+
+Returns:
+Nothing.
+
+=== 0002eab0 [PLATE]
+Advances the VGA palette colour-cycling animation for the current scene.
+
+Algorithm:
+1. Copies about twenty short byte ramps out of read-only tables at 0002b2a0..0002b4e9 onto the stack. The ramps come in R/G/B triples; every byte is a 6-bit VGA DAC component (observed range 0..63). Each ramp is (count + count/... ) bytes long so that a sliding window of `count` entries can start at any phase without wrapping: e.g. a 5-colour cycle stores 9 bytes, a 15-colour cycle stores 29 bytes.
+2. Calls fdps_cd_music_repeat_poll (00030c50) as per-frame housekeeping.
+3. Gates on the frame tick: if the last-serviced tick at 00069d20 already equals the current tick at 00069d64 the function returns without touching the palette, so the animation advances at most once per tick.
+4. Switches on the scene / screen id at 00069cf4 (cases 0, 2, 8, 0x14, 0x15, 0x16, 0x17, 0x1a, 0x1c, 0x1d). Each case picks its own R/G/B ramp triple, its own DAC start index (0xf0, 0xf5, 0xf6 or 0xf8) and its own colour count (5, 7, 9, 10, 11 or 15).
+5. Advances the shared phase counter at 00069d24 as (phase + 1) mod (count * 4) — the times-four factor makes the cycle advance one colour every four ticks — then derives the window offset as phase / 4 and calls FUN_0002f240(first_index, r + offset, g + offset, b + offset, count) with cdecl argument order (the caller does ADD ESP,0x14).
+6. Records the serviced tick by storing 00069d64 into 00069d20.
+
+Unrecognised scene ids fall through to the tick bookkeeping and change no colours.
+
+Parameters: none. All inputs are globals: 00069cf4 scene id, 00069d20 last serviced tick, 00069d24 cycle phase, 00069d64 current frame tick.
+
+Returns: nothing.
+
+=== 0002f2f0 [PLATE]
+Strided rectangular block transfer for framebuffer/surface memory.
+
+Algorithm:
+Two modes selected by src_stride. When src_stride is zero the routine runs in fill mode: it treats src_or_fill as a byte value and calls memset(dst, src_or_fill, bytes_per_row) once per row, advancing dst by dst_stride after each row. When src_stride is non-zero it runs in copy mode: it calls memmove(dst, src, bytes_per_row) once per row, advancing src by src_stride and dst by dst_stride after each row. Both modes loop exactly rows times with a signed comparison, so a rows value of zero or less transfers nothing. No clipping, no bounds check and no transparency test is performed; the caller is responsible for the geometry. The row counter is kept in a stack local and the working src/dst cursors are stack copies of the incoming pointers, so the caller's values are not disturbed.
+
+Parameters:
+  src_or_fill  - in copy mode the source base pointer; in fill mode the byte value used to fill every row (only the low 8 bits reach memset)
+  src_stride   - bytes added to the source cursor per row; zero selects fill mode
+  dst          - destination base pointer
+  dst_stride   - bytes added to the destination cursor per row
+  bytes_per_row- number of bytes transferred per row
+  rows         - number of rows to transfer; signed, values <= 0 do nothing
+
+Returns:
+  Nothing.
+
+=== 0002fb80 [PLATE]
+Mosaic screen transition: copies the source surface to the destination in block-sized rectangles, visiting them in a shuffled order so the image appears in random patches.
+
+Algorithm:
+1. Allocates grid_cols*grid_rows entries of 4 bytes (two int16 fields: column, row) via the CRT allocator and fills it with every (col,row) pair of the phase grid.
+2. Shuffles the table in place: for every index i it draws two rand() values and forms j = rand()%grid_cols + grid_cols*(rand()%grid_rows), then swaps entry i with entry j. This is a random-swap shuffle, not a Fisher-Yates pass.
+3. Computes the block counts: blocks_x = ceil((width/block_w)/grid_cols), blocks_y = ceil((height/block_h)/grid_rows). Each shuffled entry therefore owns a lattice of blocks spaced grid_cols apart.
+4. For each shuffled entry (bx,by), walks that lattice. Row index is y = block_h*(j*grid_cols + by); column index is x = bx + i*grid_cols. A block is drawn only when x < width and y < height. Source address is src + y*src_pitch + x*block_w; destination address is dst + y*dst_pitch + (dst_pitch ? x*block_w : 0). Each block is handed to fdps_blit_rect with block_w by block_h.
+5. After finishing one shuffled entry it calls the delay/present thunk at 0003d370 with the delay argument, so one entry of the table equals one visible step of the transition.
+6. Frees the table before returning.
+
+Note the bound test on the horizontal axis compares a block-column index against the pixel width, while the vertical test compares a pixel row against the pixel height. The horizontal test is therefore far looser than the vertical one; the real bound comes from the blocks_x loop count.
+
+Parameters:
+  dst        destination surface base address
+  dst_pitch  destination bytes per row; zero suppresses the horizontal destination offset entirely
+  src        source surface base address
+  src_pitch  source bytes per row
+  width      source width in pixels
+  height     source height in pixels
+  grid_cols  number of phase columns; also the horizontal stride between blocks of one phase
+  grid_rows  number of phase rows
+  block_w    block width in pixels
+  block_h    block height in pixels
+  delay      value passed to the per-step delay/present thunk at 0003d370
+
+Returns:
+  Nothing.
+
+=== 00030010 [PLATE]
+Alpha-blends a single constant palette colour over an 8bpp source rectangle.
+
+Algorithm:
+blend_table is a [18][256] array of dwords holding each palette entry pre-scaled by a weight, with the three colour channels packed one per byte (channel n in bits 8n+4..8n+7 before the shift below). Rows 0..8 hold weights 0..8; rows 9..17 (dword offset 0x900 = 9*256) hold the complementary weights. To keep the row index inside 0..8 the function folds alpha: for alpha <= 8 the constant colour reads row alpha and the source pixels read row 9+alpha; for alpha > 8 alpha is replaced by 16-alpha, the constant colour reads row 9+alpha' and the source pixels read row alpha'. Either way the constant colour ends up weighted by the caller's alpha and the source pixel by 16-alpha.
+The scaled constant colour is fetched once before the loops. For each pixel the scaled source colour is added to it, the sum is shifted right by 4 (dividing out the /16 of the weights) and masked with 0x000F0F0F, leaving 4 bits per channel at bits 0..3, 8..11 and 16..19. Those are folded into a 12-bit index by (v & 0xFFFF) | (v >> 12), giving channel0 in bits 0..3, channel2 in bits 4..7 and channel1 in bits 8..11. That index selects a palette byte from the 4096-entry inverse-palette table rgb444_lut, which is stored to the destination.
+Rows advance by src_stride and dst_stride; no clipping, no transparency test, every pixel in the rectangle is written.
+
+Parameters:
+src         - source 8bpp pixels, top-left of the rectangle
+src_stride  - bytes to add to src per row
+dst         - destination 8bpp pixels, top-left of the rectangle
+dst_stride  - bytes to add to dst per row
+width       - pixels per row
+height      - number of rows
+blend_table - base of the [18][256] dword weighted-colour table
+rgb444_lut  - base of the 4096-entry packed-RGB to palette-index table
+tint_color  - palette index of the constant colour being blended in
+alpha       - blend weight of tint_color, 0..16 (0 = source only, 16 = tint only)
+
+Returns:
+Nothing.
+
+=== 000304e0 [PLATE]
+Audio subsystem bring-up.
+
+Algorithm:
+1. Call AIL startup (0003d718) unconditionally.
+2. Clear the two driver-present flags (0x00069d72, 0x00069d71) and set the audio-enabled flag 0x00069d70 to 1.
+3. Install the MDI/music driver (0004044c) and store the driver pointer in 0x00069d6c. If it is non-NULL, set flag 0x00069d72 and allocate a single sequence handle (0004067d) into 0x00069d60.
+4. Install the DIG/digital driver (0003ea65) and store the driver pointer in 0x00069d68. If it is non-NULL, set flag 0x00069d71 and allocate eight sample handles (0003ecaa) into the array at 0x00069d30.
+5. Tail-call the follow-up audio setup routine 000307b0, forwarding this function's single argument.
+
+Both driver installs are optional: a NULL return leaves the corresponding flag at 0 and the game runs without that half of the audio system. The loop counter body contains a dead load of the index, which is normal for the -4s / unoptimised build.
+
+Parameters:
+  param1 - opaque value forwarded unchanged to 000307b0; not inspected here.
+
+Returns:
+  void.
+
+=== 000305a0 [PLATE]
+Tear down the Miles AIL audio stack on the way out of the game.
+
+Algorithm:
+  The entire body is the Watcom four-push prologue, a single call to
+  AIL_shutdown (0003d8b2), and the matching epilogue. Nothing else: no
+  argument is passed, no global is touched, no return value is inspected.
+
+  Identity rests on three things rather than on anything the body itself
+  says. The callee at 0003d8b2 is the Miles public API entry AIL_shutdown,
+  fixed by the string "AIL_shutdown()\n" at 000623a5 and the standard Miles
+  log-wrapper shape around it. This function is the second step of main's
+  three-call teardown sequence, between fdps_shutdown_free_resources
+  (00029440) and fdps_cd_stop_audio (0003c4a7). And it is the exact
+  counterpart of fdps_audio_init (000304e0), which is the one-time AIL
+  startup called from main's init sequence.
+
+  A wrapper this thin exists because the game calls AIL through its own
+  one-per-operation shims rather than calling the library directly; the same
+  pattern appears throughout the audio subsystem.
+
+Parameters:
+  None. No register is read before being written and no stack slot is
+  accessed.
+
+Returns:
+  Nothing. AIL_shutdown's result, if any, is discarded.
+
+=== 00030790 [PLATE]
+Periodic timer tick callback.
+
+Algorithm: Increments the global 32-bit tick counter at 00069d64, then calls the per-tick service routine FUN_00042cf8 and returns. The tick counter is read (never written) by roughly fifty game functions -- title screen, game over, view rendering, and many battle/menu routines -- which sample it to build delay and frame-pacing loops, so this handler is the single writer that makes those loops advance. The function's address is taken and passed to fdps_audio_timer_install (address reference at 000307bc, stored at 000307c1), which is the only reference to it: nothing calls it directly, it is invoked from the installed timer hook. The body touches no parameters and no registers beyond the standard PUSH ESI/EDI/EBP frame; the SUB ESP,0x0 is Watcom's empty-locals prologue.
+
+Parameters: None.
+
+Returns: Nothing.
+
+=== 000307b0 [PLATE]
+Installs and starts the audio service timer.
+
+Algorithm:
+  1. Calls the timer-registration routine FUN_0003e196 with the address of the
+     tick callback FUN_00030790 (which bumps the counter at 0x00069d64 and then
+     calls the audio service routine FUN_00042cf8). The returned timer handle is
+     stored in the global at 0x00069d50.
+  2. If the handle is -1 the registration failed; the fatal/report routine
+     FUN_00042deb is called with the literal " Timer fail !!!\n" at 0x00061ea8.
+     Execution is not stopped locally - the function falls through regardless.
+  3. Calls FUN_0003e3ea(handle, rate) to program the timer with the rate value
+     passed in by the caller.
+  4. Calls FUN_0003e5b3(handle) to start the timer.
+
+All three timer routines are reached with arguments pushed on the stack and the
+caller cleaning up (ADD ESP,n after each CALL), i.e. the vendor sound library's
+stack convention.
+
+Parameters:
+  rate - timer rate/period value handed straight to the timer programming call;
+         the only stack slot this function reads ([EBP+0x14]).
+
+Returns:
+  Nothing. The timer handle is left in the global at 0x00069d50 for later use.
+
+=== 00030c50 [PLATE]
+Periodic CD background-music keep-alive, polled from the game loops.
+
+Algorithm:
+  Compares the cached tick value at 0x00069d74 with the live timer tick at
+  0x00069d64 and returns immediately when they are equal, so the body runs at
+  most once per timer tick regardless of how often the caller polls.
+  On a new tick it increments the tick accumulator at 0x00060170. When the
+  accumulator reaches 0x4b (75 ticks) it performs the actual check: if a track
+  is selected (0x00069d54 != -1) and the CD audio enable flag at 0x00060008 is
+  non-zero, it queries playback state via FUN_0003c6e8; a non-zero 16-bit
+  result means the track is no longer playing, in which case FUN_0003c85b is
+  called with (track index + 1) to start the track again. The accumulator is
+  then reset to zero. Finally the cached tick is refreshed from the live tick.
+  The selected-track global holds a zero-based index; the play routine takes a
+  one-based CD track number, hence the +1.
+
+Parameters:
+  None. All state is read from and written to globals.
+
+Returns:
+  Nothing.
+
+=== 00030cc0 [PLATE]
+Verify the correct game CD is inserted for a chapter, then start its CD audio track.
+
+Algorithm:
+1. Copy a 60-byte constant table from 000304a0 onto the stack. It is 30 chapter rows of 2 bytes; the row is the chapter, the column is the track slot, and the byte is a zero-based CD audio track index.
+2. Stop any playing CD audio (fdps_cd_stop_audio at 0003c4a7).
+3. Loop until the inserted disc is acceptable:
+   - Uninstall the keyboard ISR (00056818) and drain pending input (00043570 / 00043587).
+   - Build "%s\\Pack.vfs" from the CD-ROM root path global at 000643c4 (00042d41) and probe it (00042438). A non-zero result means the archive could not be opened, i.e. no usable disc.
+   - On success, load the "Pass.Dat" entry through fdps_vfs_load_entry and take its first byte minus '0' as the disc number (1 or 2).
+   - Chapters 0..17 live on disc 1, chapters 18 (0x12) and above on disc 2. If the probe failed, or the disc number does not match the chapter, draw the matching prompt string (message id 0x223 for "insert disc 2", 0x222 for "insert disc 1", followed by id 0x22a) via 0001ff60 at 320x208, wait 20000 ticks (0003d370), tear the prompt down (00020820) and retry.
+   - Otherwise set the done flag and leave the loop.
+4. Reinstall the keyboard ISR (fdps_install_keyboard_isr).
+5. If the CD audio enable flag at 00060008 is clear, store -1 into the current-track global at 00069d54 and stop CD audio. Otherwise read table[chapter * 2 + slot], store it at 00069d54, and start playback of track value + 1 (0003c85b).
+
+Parameters:
+  chapter - chapter index, 0..29; also selects the required disc (>= 18 means disc 2).
+  slot    - which of the chapter's two track entries to play, 0 or 1.
+
+Returns:
+  Nothing. Does not return until an acceptable disc is present.
+
+=== 00030f40 [PLATE]
+Plays one full-screen FMV sequence by name.
+
+Algorithm:
+1. Calls 0003d8b2 and 00056818 to quiesce the current display/audio state, then spins on 00043570 / 00043587 until the pending playback-side work drains.
+2. Calls fdps_cd_stop_audio, then fades the active palette at DAT_000643bc down by (-64,-64,-64) over entries 0..255 via 00022f40.
+3. Formats three paths with sprintf (00042d41) into local buffers, all rooted at the base directory string at DAT_000643e8:
+     [ebp-0x3c] = "%s\\fd.exe"      (player/module path, no extra argument)
+     [ebp-0x28] = "%s\\%s.Vid"      (video stream, second %s = movie_name)
+     [ebp-0x14] = "%s\\%s.Aud"      (audio stream, second %s = movie_name)
+4. Invokes the playback entry 000435a2 with (0, fd_exe_path, fd_exe_path, vid_path, aud_path, 0).
+5. On return, zero-fills 64000 bytes at 0x000a0000 (mode 13h framebuffer) via 00042cd0, re-programs the palette to all-zero through 00022f40, calls 000567f0 to tear down the playback display state, and finally calls fdps_audio_init(0x19) to bring music back up.
+
+Parameters:
+  movie_name - pointer to the base name of the movie, substituted for the second %s of both the .Vid and .Aud path templates. Passed on the stack at [ebp+0x14].
+
+Returns:
+  Nothing. Returns after the movie has finished and the screen has been cleared.
+
+=== 00031210 [PLATE]
+Runs the village phase between chapters.
+
+Algorithm:
+1. Poll the background service at 0x000567b3, then bail out immediately with 0 if the global abort flag at 0x000643eb is set.
+2. Test the current chapter number at 0x00069cf4. Chapters 16, 17, 21, 22 and 26+ have no village: those call the fade/transition helper at 0x00030bf0 with -1 and, unless the suppress flag at 0x00060131 is set, clear VGA memory at 0xa0000 (64000 bytes), run the palette routine at 0x00022f40 with the palette at 0x000643bc, allocate and clear a 64000-byte offscreen buffer, present it via 0x000241e0 and free it. Control then falls through to step 6.
+3. Otherwise set the in-village flag at 0x00060070, load "ShopWin.Cel" from the "MISC_VFS" archive via the resource loader at 0x0002a140, cache the handle in 0x00069d84, run the village setup at 0x00031540 and fade in via 0x00030bf0 with mode 2.
+4. Menu loop: allocate a 64000-byte page, load "Village.cel" from "MISC_VFS", blit it to the page at pitch 0x140 via 0x0002dba0, free the background, draw the cursor highlight at the coordinate pair for the current selection (x table at 0x00060174, y table at 0x0006018c) via 0x00031780 with flag 1, run the menu input handler at 0x00031bc0 which updates the selection in place, erase the highlight with flag 0, free the page.
+5. Dispatch on the selection through the jump table at 0x00031328: 1 -> 0x00035cc0 (which forces the selection back to 0 for chapters that have no village), 2 -> 0x00035aa0, 3 -> 0x00035860, 4 -> 0x00035fd0, 5 -> 0x00036210. Poll 0x000567b3 and repeat while the selection is non-zero and no abort is pending. On exit free the two cached cel handles, clear the in-village flag at 0x00060070 and the state words at 0x00060150 and 0x00069cd8.
+6. Save and clear the input-enable byte at 0x00060158, fade out via 0x00030bf0 with -1, and unless an abort is pending call the chapter script entry taken from the per-chapter function pointer table at 0x00060074 indexed by the chapter number. Restore 0x00060158, clear 0x00060131, and call 0x00030cc0 with the chapter number and 0.
+
+Parameters: none.
+
+Returns: the menu selection left over when the loop exited, which is 0 on a normal exit and 0 when the abort flag was already set on entry.
+
+=== 00031540 [PLATE]
+Loads (and reloads) the per-chapter resources used by the field/village phase.
+
+Algorithm:
+1. If the cached chapter text buffer at 0x00060124 is non-NULL, free it.
+2. sprintf a name with the format string "fdetxt%02d.txt" at 0x00061f10 using chapter index [0x00069cf4] + 1, load that member out of the archive named by "Field.vfs" (0x000600f8) via FUN_0002a140, and store the returned buffer in 0x00060124.
+3. sprintf a name with "Shop%02d.dat" (0x00061f20) using chapter index [0x00069cf4] -- note: no +1 here, unlike the text file -- load it the same way and store the buffer in 0x00069d80.
+4. If [0x00060150] is non-zero and the cached roster pointer [0x00069cd8] differs from the live roster base [0x00064108], free the stale roster copy.
+5. Snapshot the live roster: [0x00060150] = roster count [0x00064114], [0x00069cd8] = roster base [0x00064108].
+6. For i in 0 .. [0x00069cdc)-1, free the three parallel per-entry buffer arrays at 0x00069cb0, 0x00069c20 and 0x00069c98, then reset the entry count [0x00069cdc] to 0.
+7. If the flag [0x00069cf0] is set, free the buffer held in [0x00060138] and clear the flag.
+8. Open "ICON.CEL" (0x00061f34) in mode "rb" (0x00061f30) via the CRT fopen at 0x0004265e.
+9. For each of the [0x00064114] roster records (stride 0x50 bytes from [0x00064108]), read the icon id at record offset +7 and pass it with the open stream to FUN_00023050, which decodes that icon.
+10. Close the stream via the CRT fclose at 0x000428be.
+
+Parameters: none. All inputs are globals: the chapter index at 0x00069cf4, the roster base/count at 0x00064108/0x00064114, and the cached-resource slots listed above.
+
+Returns: nothing. The loaded buffers are published through the globals 0x00060124 (chapter text) and 0x00069d80 (shop table).
+
+=== 00031bc0 [PLATE]
+Village signboard menu loop.
+
+Algorithm:
+1. Copies three 9-byte VGA DAC ramp tables (R at 0x31064, G at 0x3106d, B at 0x31076) into locals; they drive the pulsing highlight colour.
+2. Clamps the global scene index at 0x000601a4 against the count at 0x00064114, then loads the signboard cel "CanBan.cel" from the "MISC_VFS" archive (FUN_0002a140). The handle is freed on exit.
+3. Each iteration: draws the village backdrop (FUN_00030c50), reads a keyboard scancode (FUN_000567be, masked to 8 bits). Scancodes >= 0x7F are ignored. FUN_000357a0 acts as a hotkey/abort filter: when it returns non-zero the selection is forced to 5 and the selection-change handler FUN_00031f60 runs.
+   - 0x4B (left) / 0x48 (up): plays "Beep.wav" (FUN_0002a1f0), selection = (selection + 4) % 5, calls FUN_00031f60.
+   - 0x4D (right) / 0x50 (down): plays "Beep.wav", selection = (selection + 1) % 5, calls FUN_00031f60.
+   - 0x1C (Enter) / 0x39 (Space): sets the exit flag.
+   - 0x0F (Tab): advances the scene index at 0x000601a4 modulo the count at 0x00064114.
+4. Picks an animation cell from the frame counter (frame/5 & 3, with 3 folded back to 1), resolves the sprite through the table at 0x00060138 offset by scene index * 0x30, allocates a 64000-byte off-screen page (FUN_0003d375) and fills it with the caller-supplied background image (FUN_0003d514, 320x200).
+5. Blits the animated figure (FUN_000568db) at the position given by the x table at 0x00060174 and the y table at 0x0006018C indexed by the current selection, then draws the signboard text twice through FUN_0002dba0 (once for entry 6, once for the current selection, i.e. the highlighted line).
+6. Waits for vertical retrace on port 0x3DA (bit 3), then writes DAC entries 0xF0..0xF4 through ports 0x3C8/0x3C9 using the ramp tables phase-shifted by (frame/3) % 5, waits for retrace to end, copies the off-screen page to 0xA0000, spins until the timer tick at 0x00069D64 changes, and frees the page.
+
+Parameters:
+  background - pointer to a 64000-byte (320x200) background image copied into the off-screen page every frame.
+  selection  - in/out pointer to the current menu selection (0..4, or 5 when the hotkey filter fires); updated in place and read by the caller after return.
+
+Returns:
+  Nothing. The cel handle and the off-screen page are released before returning.
+
+=== 00035860 [PLATE]
+Village item screen driver.
+
+Algorithm:
+1. Copies a 5-dword menu descriptor table from DAT_00031180 into a local array (the menu entry ids 0x24, 0x14, 0x15, 0x04, 0x10).
+2. Loads asset "Item.cel" from container "MISC.VFS" (FUN_0002a140), allocates a 64000-byte (320x200) surface (FUN_0003d375), publishes it in DAT_00063fb4, blits the cel into it with pitch 0x140 (FUN_0002dba0), then frees the cel (FUN_0003d478).
+3. Runs the screen transition FUN_00031780(surface, 0x9f, 0x63, 1), presents the surface (FUN_00032570), restores the 0xa8208 region (FUN_00032370) and draws the header text (message id 0x1f4 via FUN_0001ff60).
+4. Loops: FUN_000323e0(menu_table, 5, &selection) reads a selection; a jump table at 0x35948 dispatches case 0 (redraw plus message id 4), case 1 -> FUN_00033b80(surface, 0), case 2 -> FUN_00034000(surface), case 3 -> FUN_00034210(surface), case 4 -> FUN_00033f80(surface). After each entry the screen is re-presented and message id 0x1f5 redrawn; selection == -1 leaves the loop.
+5. On exit runs the closing transition FUN_00031780(surface, 0x9f, 0x63, 0) and frees the surface (FUN_0003d478).
+
+Parameters: none. State comes from the globals DAT_000643c4 / DAT_00060124 (text sources) and the menu table at DAT_00031180.
+
+Returns: nothing.
+
+=== 00035aa0 [PLATE]
+Village church facility screen (one of the village sub-screens dispatched from fdps_run_village_phase).
+
+Algorithm:
+1. Copies a 16-byte menu descriptor {0x24, 0x12, 4, 0x10} from the read-only table at 0x00031194 onto the stack; the fields read as x=36, y=18, item_count=4, line_height=16.
+2. Opens resource "Church.cel" out of container "MISC.VFS" (FUN_0002a140), allocates a 64000-byte (320x200) screen buffer (FUN_0003d375), publishes the buffer pointer in the global at 0x00063fb4, decodes the cel into the buffer (FUN_0002dba0, stride 0x140), then frees the cel data (FUN_0003d478).
+3. Presents the backdrop with FUN_00031780(buffer, 0x9f, 0x63, 1) - a fade/transfer centred on (159, 99) with the enable flag set - and does an initial page/cursor update (FUN_00032570) plus a full-width copy of the 0x000A8208 region (FUN_00032370) and a text/dialog draw (FUN_0001ff60, id 0x200).
+4. Main loop: while the selection variable is not -1, run the menu widget FUN_000323e0(descriptor, 4, &selection) and switch on the result via the jump table at 0x00035b84:
+     case 0 - no handler; only toggles the display twice and redraws through the global at 0x00060124 with id 7.
+     case 1 - FUN_000345a0(buffer)
+     case 2 - FUN_00034210(buffer)
+     case 3 - FUN_00033f80(buffer)
+   After the handler, selection == -1 leaves the display enabled and exits the loop; otherwise the backdrop and the id 0x201 text are redrawn and the loop repeats.
+5. On exit, FUN_00031780(buffer, 0x9f, 0x63, 0) fades the screen back out and the 64000-byte buffer is freed.
+
+Parameters: none. The function reads nothing above the frame pointer; all state comes from the resource files and the globals at 0x00063fb4, 0x000643c4 and 0x00060124.
+
+Returns: nothing.
+
+=== 00035cc0 [PLATE]
+Village bar/tavern screen.
+
+Algorithm:
+1. Copies a 4-entry menu descriptor table from 0x000311a4 (0x24, 9, 10, 8) into a local array.
+2. Loads "BarShop.cel" out of the "MISC.VFS" container (FUN_0002a140), allocates a 64000-byte (320x200) backbuffer via the CRT allocator, decodes the cel into it (FUN_0002dba0, pitch 0x140), publishes the buffer in the global at 0x00063fb4, then frees the raw file image.
+3. Fades the screen in (FUN_00031780 with flag 1), starts the screen's audio/entry hook (FUN_00036460), shows the cursor, uploads the palette at 0xa8208 and prints the bar greeting (FUN_0001ff60, text id 0x200).
+4. Loops: FUN_000323e0 drives the 4-entry menu and returns the picked index in a local; a switch dispatches index 0..3. Index 0 prints a canned message (text id 6). Index 1 enters FUN_000241e0. Index 2 enters FUN_00024490 and, when it returns 1, calls FUN_00031540(1) and ends the loop. Index 3 asks a confirmation (text id 0x1f0) via FUN_00017990; on a zero answer it sets the byte flag at 0x000643eb, prints text id 0x1f1, delays ~300 ticks and ends the loop.
+5. Each iteration that does not end the loop hides the cursor, reprints the greeting (text id 0x201) and restores the palette; the sentinel -1 in the selection variable terminates the loop.
+6. On exit fades out (FUN_00031780 with flag 0) and frees the backbuffer.
+
+Parameters: none.
+Returns: nothing.
+
+=== 00035fd0 [PLATE]
+Village weapon-shop screen driver.
+
+Algorithm:
+1. Copies the 5-entry menu descriptor table at 000311b4 (ids 0x24, 0x14, 0x15, 0x04, 0x06) into a local array.
+2. Loads resource "Weapon.cel" out of the container "MISC.VFS" via FUN_0002a140, allocates a 64000-byte (320x200) offscreen buffer via the CRT allocator at 0003d375, publishes the buffer pointer to the global at 00063fb4, decodes the cel into the buffer with FUN_0002dba0 (pitch 0x140), then frees the loaded cel image.
+3. Plays the screen-open transition FUN_00031780(buffer, 0x9f, 0x63, 1) centred on 159,99, presents the buffer with FUN_00032570(buffer, 0), blits the overlay at 000a8208 with FUN_00032370 and draws the header text (entry 0x1fe of the table pointed to by the global at 000643c4) with FUN_0001ff60 into 000aa3d4.
+4. Loops: FUN_000323e0 runs the 5-item menu selector and writes the chosen index into a local; index 0 blanks and redraws the panel and prints message 5 of the table at 00060124; indices 1..4 call the sub-screens FUN_00033b80(buffer, 1), FUN_00034000(buffer), FUN_00034210(buffer) and FUN_00034420(buffer). After each iteration the selection is re-tested: -1 leaves the loop after a final present, otherwise the panel and prompt text (entry 0x1ff) are redrawn and the loop repeats.
+5. On exit plays the closing transition FUN_00031780(buffer, 0x9f, 0x63, 0) and frees the offscreen buffer.
+
+Parameters: none. All state comes from the module globals and the embedded menu table.
+
+Returns: nothing.
+
+=== 00036210 [PLATE]
+Village-phase Secret screen menu loop.
+
+Algorithm:
+1. Copies a 6-entry menu descriptor table from 0x000311c8 (values 0x24, 0x14, 0x15, 0x04, 0x06, 0x10) into a stack copy at [ebp-0x24]; the loop mutates the copy so the table stays pristine.
+2. Loads "Secret.cel" out of the "MISC.VFS" container (0x0002a140), allocates a 64000-byte (320x200) backbuffer via 0x0003d375, publishes the pointer to the global at 0x00063fb4, decodes the CEL into the buffer with pitch 0x140 (0x0002dba0), then frees the raw CEL data (0x0003d478).
+3. Fades the screen in through 0x00031780 with centre (0x9f, 0x63) and direction 1, presents the buffer (0x00032570, mode 0), refreshes the 0x140-wide overlay at 0xa8208 (0x00032370), and draws the prompt with message id 0x202 (0x0001ff60, using the global at 0x000643c4).
+4. Loops while the selection is not -1: 0x000323e0 reads a selection from the 6-entry table into the local, a jump table at 0x000362f8 dispatches cases 0..5 -- case 0 presents mode 2 then mode 0 and draws message id 8 with the global at 0x00060124, cases 1..5 call 0x00033b80 (with sub-mode 2), 0x00034000, 0x00034210, 0x00034420 and 0x00033f80 respectively, each taking only the backbuffer. Selections above 5 fall through to the tail.
+5. Tail of each iteration: if the selection is -1 the screen is presented in mode 1 and the loop exits; otherwise it is presented in mode 0, message id 0x1f5 is drawn and the overlay at 0xa8208 is refreshed, then control returns to the top of the loop.
+6. On exit, fades out with 0x00031780 (centre 0x9f, 0x63, direction 0) and frees the backbuffer.
+
+Parameters: none. The function reads no incoming arguments; Ghidra's param_1/param_2/unaff_EBX are decompiler artefacts.
+
+Returns: nothing. The selected backbuffer pointer is also left in the global at 0x00063fb4 while the screen is live.
+
+=== 00036b60 [PLATE]
+Sets the low nibble of the byte at offset 0x34 for every record in a closed index range of the global 0x50-byte object table.
+
+Algorithm:
+  i = first_index
+  while (i <= last_index) {
+      rec = object_at(i);            /* FUN_0002d210: *(char**)0x00069cd8 + i * 0x50 */
+      rec[0x34] = (rec[0x34] & 0xF0) | value;
+  }
+  The high nibble of rec[0x34] is preserved; only the low nibble is replaced.
+  The loop is inclusive of last_index, so first_index == last_index touches exactly
+  one record. If first_index > last_index nothing is written.
+  All three observed call sites pass value = 0, i.e. they clear the low nibble.
+  Only the low byte of the third stack slot is read (register DH).
+
+Parameters:
+  [EBP+0x14] int first_index  - first object index, inclusive
+  [EBP+0x18] int last_index   - last object index, inclusive
+  [EBP+0x1C] unsigned char value - value merged into the low nibble of field 0x34
+
+Returns:
+  Nothing. Arguments are passed on the stack and removed by the caller (ADD ESP,0xC).
+
+=== 00039990 [PLATE]
+Look up a named entry in an archive directory table.
+
+Algorithm:
+The entry count is the single byte at the start of the directory block (dir[0]).
+For each index i from 0 to count-1 the routine copies 13 (0xd) bytes from
+dir + i*0x1a + 0x11 -- the name field of a 26-byte directory entry -- into a
+16-byte stack buffer via the 3-argument copy helper at 0x000435bc, passes the
+caller-supplied name through the helper at 0x000435f3 (which returns a string
+pointer), and compares the two with the compare helper at 0x00042fe0. A zero
+result means a match: the loop stores i and returns it. If the loop runs off
+the end without a match the result stays at its initial -1.
+The search index is kept in a local and returned unchanged; there is no early
+exit other than the match, and the comparison is done on the raw stored name
+with no case folding of the table side.
+
+Parameters:
+  name - pointer to the name being looked up; passed through the helper at
+         0x000435f3 before comparison (stack slot EBP+0x14)
+  dir  - pointer to the directory block: byte 0 is the entry count, entry i
+         has stride 0x1a and its 13-byte name field at +0x11
+         (stack slot EBP+0x18)
+
+Returns:
+  Zero-based index of the matching directory entry, or -1 when no entry
+  matches.
+
+=== 00039ab0 [PLATE]
+Opens a VFS container and builds its in-memory directory handle.
+
+Algorithm:
+  1. fopen(path, "rb"). Return NULL if it fails.
+  2. fseek to offset 7, fread a u32 entry_count.
+  3. fseek to offset 5, fread a u16 table_offset (later sign-extended when used as a seek target, so the usable range is 0..0x7FFF).
+  4. Allocate 0x11 + entry_count * 0x1A bytes for the handle. If the allocation fails, still close the file and return NULL.
+  5. memset the first 0x11 bytes of the handle to zero, store entry_count at offset 0, and memcpy strlen(path) bytes of the container path to offset 4 (the zeroed header leaves it NUL terminated for names up to 12 characters).
+  6. fseek to table_offset and fread entry_count entries of 0x1A bytes each into handle+0x11.
+  7. fclose and return the handle.
+
+The container magic "VFS", the version word, the 24-byte signature, the duplicated per-entry size and the reserved byte are never examined, so a non-VFS file is not rejected here.
+
+Parameters:
+  path - NUL terminated container file name, opened through the C runtime, no directory search of its own.
+
+Returns:
+  Pointer to the allocated container handle {u32 entry_count; char path[13]; entry table of entry_count * 0x1A bytes}, or NULL if the file could not be opened or the handle could not be allocated.
+
+=== 00039bd0 [PLATE]
+Loads one named entry out of a VFS archive into a freshly allocated buffer.
+
+Algorithm:
+1. Calls the VFS name lookup helper at 00039990 with (name, vfs) to get the entry index; if it returns -1 prints "Can't find the string: %s" and returns NULL.
+2. Copies 13 bytes of the archive path stored at vfs+4 into a local buffer (strncpy) and opens it with fopen(path, "rb"); on failure prints "Can't open the source VFS_file: %s" and returns NULL.
+3. Reads the entry's byte length from the directory record at vfs + 0x1e + index * 0x1a (record field +0) and asks the allocator at 0003d375 for that many bytes; on failure prints "Can't allocate memory for VFS_file: %s(%dbytes)", closes the file and returns NULL.
+4. Reads the entry's file offset from field +9 of the same record, fseek(fp, offset, SEEK_SET), fread(buf, length, 1, fp), then fclose(fp).
+5. Returns the allocated buffer (NULL on any of the error paths above).
+
+Directory layout implied by the arithmetic: a 0x1e byte header (archive path string at +4) followed by 0x1a byte records, each holding the entry length at +0 and the entry offset at +9.
+
+Parameters:
+  name - entry name to look up inside the archive; also used in the error messages.
+  vfs  - pointer to the loaded VFS descriptor (header plus directory records).
+
+Returns: pointer to the newly allocated buffer holding the entry's contents, or NULL if the entry was not found, the archive could not be opened, or the allocation failed. The caller owns the buffer.
+
+=== 0003bade [PLATE]
+Allocates the DOS real-mode communication buffers used by the CD-ROM (MSCDEX) driver layer.
+
+Algorithm:
+1. Zero the 12-byte struct SREGS at 0x00069df0 with memset.
+2. Fill the input REGS at 0x00069dc8 with AX = 0x0100 and BX = 0x0020, then call int386x(0x31, in, out, sregs). DPMI function 0100h allocates 0x20 paragraphs (512 bytes) of DOS memory below 1MB; the returned AX is the real-mode segment and DX the protected-mode selector (the selector is discarded).
+3. Store the first block's real-mode segment as a word at 0x00069e54 and its flat linear address (segment << 4) at 0x00069de8. Under DOS/4GW the first megabyte is identity mapped, so segment << 4 is directly dereferenceable.
+4. Repeat the identical DPMI 0100h call for a second 512-byte block; store its segment shifted left 16 bits at 0x00069da8 (pre-packed seg:0000 real-mode far pointer for the MSCDEX request header transfer address field) and its flat linear address (segment << 4) at 0x00069da4.
+
+The input REGS block is not re-initialised before the second call because int386x leaves the caller's input structure untouched.
+
+No error handling: a failed DPMI allocation leaves the carry flag set and garbage in AX, and the resulting addresses are used unchecked by the CD driver functions.
+
+Parameters: none.
+
+Returns: nothing. Results are published through the globals at 0x00069da4, 0x00069da8, 0x00069de8 and 0x00069e54.
+
+=== 0003bb7d [PLATE]
+Sends the currently prepared MSCDEX request header to the CD-ROM device driver.
+
+Algorithm:
+Clears the SREGS block at 0x00069df0 (12 bytes) and the DPMI real-mode call structure at 0x00069e22 (0x32 bytes). Fills the real-mode structure with EAX=0x1510 (MSCDEX Send Device Request), ECX = the CD-ROM subunit number held in the byte at 0x00069dfe, EBX=0 and ES = the real-mode segment of the request header held in the word at 0x00069e54, so that the driver receives ES:BX pointing at the request header. It then fills the protected-mode input REGS block at 0x00069dc8 with EAX=0x0300 (DPMI Simulate Real Mode Interrupt), BL=0x2f (interrupt 2Fh), BH=0, ECX=0 (no words copied from the protected-mode stack) and EDI = 0x00069e22, sets SREGS.es to DS, and calls int86x(0x31, &inregs, &outregs, &sregs). If the carry flag in the output REGS (0x00069dc4) is set, it prints "DEVICE REQUEST FAILED!!!" and returns anyway; the MSCDEX status word in the request header is not inspected here.
+
+Parameters:
+None. Every input is a file-scope global: the request header itself and its real-mode segment at 0x00069e54, and the CD-ROM subunit number at 0x00069dfe. Callers fill the request header before calling.
+
+Returns:
+Nothing. Failure is only reported on stdout; the caller must read the request header status field itself.
+
+=== 0003bfa5 [PLATE]
+Reads the CD-ROM table-of-contents summary via the MSCDEX device driver.
+
+Algorithm:
+Builds a 26-byte (0x1a) CD-ROM device driver request header on the stack: header length 0x1a, subunit 0, command code 3 (IOCTL Input), media descriptor 0, transfer address taken from the real-mode buffer pointer at 0x00069da8, transfer byte count 7, starting sector 0, volume ID pointer NULL. Next it zero-fills a 7-byte IOCTL control block and sets its first byte to 0x0A (Read Disk Info). Both blocks are copied down into the DOS-addressable low-memory staging buffers whose linear addresses are held in 0x00069de8 (request header) and 0x00069da4 (IOCTL control block), then the driver is invoked through the request dispatcher at 0003bb7d. Afterwards both blocks are copied back up from low memory and the reply is distributed: the 6 payload bytes are mirrored to 0x00069e16, the lowest track number to 0x00069e06, the highest track number to 0x00069e07, the 4-byte lead-out address is split into its three MSF components at 0x00069e08/09/0a by 0003bc3f and converted to a single frame/LBA count at 0x00069e0b by 0003bc78, and the driver status word from offset 3 of the request header is stored to 0x00069e20.
+
+Parameters:
+None. All input and output travel through file-scope globals and the low-memory staging buffers pointed to by 0x00069da4, 0x00069da8 and 0x00069de8.
+
+Returns:
+Nothing. Results are observed through the globals listed above; 0x00069e20 holds the raw device driver status word for error checking by the caller.
+
+=== 0003c4a7 [PLATE]
+Stop CD audio playback.
+
+Algorithm: Reserves a 16-byte local scratch area and fills the first three bytes with a DOS CD-ROM device driver request header: length = 0x0D (13 bytes), subunit = 0, command code = 0x85 (Stop Audio Play). The header is copied into the real-mode-addressable request buffer pointed to by DAT_00069de8 with a 13-byte memcpy, the driver request dispatcher at 0003bb7d is invoked with no further arguments, then the same 13 bytes are copied back from the buffer into the local scratch area. The status word at header offset 3 is stored into the global DAT_00069e20, which holds the result of the most recent CD driver request.
+
+Parameters: none.
+
+Returns: nothing. The driver status word is left in the global at 00069e20.
+
+=== 0003c636 [PLATE]
+CD-ROM presence check, called once from main during startup. main sign-extends the
+result and aborts with "Fatal error: CDROM is not install!!!" unless it is exactly 1.
+
+Algorithm:
+  1. PUSH 0x10 / CALL __CHK (0004361a) - Watcom stack probe for the 16 bytes this call
+     chain needs. Not a parameter.
+  2. Fills the input union REGS at 00069dc8: AL=0 (00069dc8), AH=0x15 (00069dc9),
+     BX=0 (00069dcc), i.e. AX=1500h - the MSCDEX installation check.
+  3. int386(0x2f, &in_regs at 00069dc8, &out_regs at 00069dac) via 00043268.
+     On return the output block holds BX at 00069db0 (number of CD-ROM drive letters)
+     and CX at 00069db4 (index of the first CD-ROM drive letter, 0 = A:).
+  4. If BX == 0 no CD-ROM redirector is loaded: return 0 immediately.
+  5. Otherwise publishes the result to the CD subsystem globals: the drive count word
+     goes to 00069dfc and the low byte of the first-drive-letter index to 00069dfe.
+  6. If the flag at 00069e54 is still zero, calls the one-time CD initialiser at
+     0003bade, then always calls 0003bfa5, which leaves a 16-bit status word at
+     00069e20.
+  7. Returns 2 if that status word is 0x810C, otherwise 1.
+
+Parameters:
+  None. The decompiler's param_1/param_2/unaff_EBX are artifacts: param_1 is the
+  0x10 stack-probe immediate, and nothing in the body reads an incoming register or
+  a stack slot.
+
+Returns:
+  0 - no MSCDEX / CD-ROM redirector installed (INT 2Fh AX=1500h returned BX=0).
+  1 - CD-ROM found and the device request completed with a status other than 0x810C.
+  2 - CD-ROM found but the device request left status 0x810C at 00069e20.
+  Only 1 is accepted by main; both 0 and 2 end the program.
+
+=== 0003c6e8 [PLATE]
+Query whether the CD-ROM drive has finished the current audio playback.
+
+Algorithm:
+  1. Watcom stack-overflow probe: PUSH 4 / CALL __STK at 0004361a (compiler
+     prologue, not a real argument to this function).
+  2. Calls the CD request builder at 0003c34f, which fills a DOS device driver
+     request header and submits it via fdps_cd_device_request (0003bb7d).
+  3. Tail-jumps into the shared epilogue at 0003c6d0, which loads the 16-bit
+     request header status word at 0069e20, clears the low byte (error code
+     bits), masks AH with 0x02 (status bit 9 = BUSY) and returns SETZ of the
+     result. So the value is 1 when the drive is no longer busy and 0 while it
+     is still busy.
+  The neighbouring function at 0003c6bc falls through into the same epilogue
+  after issuing a different request; 0003c6d0 is a shared tail, not a callee in
+  the source.
+
+Parameters:
+  none. The pushed 4 belongs to the Watcom stack-check helper.
+
+Returns:
+  16-bit flag in AX: 1 when the request header BUSY bit (0x0200) is clear
+  (audio idle / command complete), 0 while the drive reports busy.
+
+=== 0003c85b [PLATE]
+Starts CD-DA playback of a single track.
+
+Algorithm:
+1. Calls the argument-forwarding thunk at 0004361a with the constant 0x0c (the thunk swaps the pushed value into EAX, calls 0004362d and returns popping its argument, so ESP is unchanged on return).
+2. Calls fdps_cd_stop_audio to halt any track currently playing.
+3. Sign-extends the 16-bit track argument at [ESP+4] and passes it to FUN_0003c0c8, which selects/queries the requested track (caller cleans the 4-byte argument).
+4. Calls FUN_0003c803, the only writer of the globals at 00069dec and 00069de4; it derives the playback start and end positions for the selected track (00069de4 is written on two paths, i.e. the end position is conditional).
+5. Pushes 00069de4 then 00069dec and calls FUN_0003c452, so that routine receives (value_at_00069dec, value_at_00069de4) - the start and end positions - and performs the actual play request. The 8 bytes of arguments are cleaned by this function.
+
+Parameters:
+  track - 16-bit track index, passed on the stack and read with MOVSX from [ESP+4].
+
+Returns:
+  Nothing. EAX is not set deliberately; the value left in it comes from the last call.
+
+=== 0003d375 [PLATE]
+Watcom C library malloc.
+
+Algorithm: Loads the caller-pushed size from [ESP+4], re-pushes it, calls the near-heap allocator core at 0003d383 (which rounds the request up to a 4-byte multiple with a 12-byte minimum, rejects zero and sizes >= 0xFFFFFFD5, walks the heap list at DAT_00060388/DAT_0006038c/DAT_00060390, and falls back to heap expansion), then pops the argument and returns. The thunk itself performs no bookkeeping; the allocator's return value is left untouched in EAX. Because the callee also clears the out-of-memory flag DAT_00069ead, no error handling happens here.
+
+Parameters: size - number of bytes requested, passed on the stack (cdecl); the caller removes it.
+
+Returns: pointer to the allocated block, or NULL when the size is zero, out of range, or the heap cannot satisfy the request.
+
+=== 0003d478 [PLATE]
+Watcom C library free().
+
+Algorithm: Loads the single stack argument from [ESP+4], pushes it and calls the internal near-heap release routine at 0003d486, then pops the argument. The internal routine walks the mini-heap segment list starting at the heap-begin pointer (DAT_00060388) until it finds the segment whose range contains the pointer, hands the block plus the owning segment to the free-list insert helper (FUN_00043d94), updates the largest-free-block-before-rover cache (DAT_00060390) when the segment is not the rover segment (DAT_0006038c), and clears the heap-state flag at DAT_00069ead. This wrapper adds nothing beyond the stack-to-stack call, which is the usual free()/__nfree() split in the Watcom runtime.
+
+Parameters: void *ptr - pointer previously returned by the matching allocator; behaviour for a pointer outside every mini-heap segment is whatever the internal routine does, no validation happens here.
+
+Returns: nothing.
+
+=== 0003d8b2 [PLATE]
+Miles Sound System AIL API entry point: AIL_shutdown().
+
+Algorithm:
+The function is the standard Miles API wrapper generated for every public AIL
+entry point. It increments the global API nesting depth counter at 0x00069e6c
+on entry and decrements it on exit. If the debug log is enabled (0x00069e80
+non-zero) and either this is the outermost API call (depth == 1) or nested
+logging is enabled (0x00069e84 non-zero), and the "inside interrupt/DOS-unsafe"
+guard at 0x00044f42 returns zero, and the log-line prologue helper at 0x0003d676
+succeeds, then the literal text "AIL_shutdown()\n" at 0x000623a5 is written to
+the log file handle held in 0x00069e7c via the printf-style writer at 0x00045183
+(cdecl, two stack arguments cleaned by the caller).
+The real work is then performed by the internal shutdown routine at 0x00045af9,
+which takes no arguments. Afterwards the same log-enable test is repeated and,
+if it passes, the log stream at 0x00069e7c is flushed through 0x000428be.
+The function has no early exits and always falls through to the depth decrement.
+
+Parameters:
+None.
+
+Returns:
+Nothing.
 
 === 00042e0f [PLATE]
 C runtime exit().
@@ -159,6 +1960,34 @@ recorded.
 
 Returns: never returns. Control leaves through main/exit inside __CMain, or
 through the INT 21h AH=4Ch terminate in the shared exit tail at 0004354d.
+
+=== 000435a2 [PLATE]
+Watcom CRT variadic formatting entry point (sprintf).
+
+Algorithm:
+Preserves EBX, then rebuilds a three-argument stack frame for the internal
+worker at 0004e1e9: it computes LEA EAX,[ESP+0x10], which is the address of
+the first variadic slot on the caller's stack (a va_list), and pushes it last
+of the three so the worker receives (dest, format, va_list) in cdecl order.
+The first two incoming stack arguments are re-pushed unchanged. After the
+call the wrapper removes the 12 bytes it pushed (ADD ESP,0xc), restores EBX
+and returns; EAX is left untouched, so the worker's return value is the
+return value of this function. 0004e1e9 in turn appends a global pointer read
+from 00061454 and calls the formatting engine at 00054dc7. All three
+functions in that chain have exactly one caller each, and the only caller of
+this wrapper is fdps_play_movie at 00030f40, so the whole formatting chain was
+linked in for a single call site.
+
+Parameters:
+  arg1 (stack, [ESP+8] at entry) - destination buffer receiving the formatted
+    text.
+  arg2 (stack, [ESP+0xc] at entry) - format string.
+  ... (stack, from [ESP+0x10] at entry) - variadic arguments consumed by the
+    conversion specifiers; their address is passed on as a va_list.
+
+Returns:
+  int, propagated unchanged from the worker (character count in the CRT
+  contract).
 
 === 00043c82 [PLATE]
 Watcom C runtime initialiser: calibrate the delay() busy-wait loop.
@@ -330,4 +2159,89 @@ Parameters:
 
 Returns:
   Nothing. Only the global at 0x000613c4 is modified; no register is written.
+
+=== 000567f0 [PLATE]
+Installs the game's keyboard (INT 09h / IRQ1) interrupt handler.
+
+Algorithm:
+  1. Saves DS and ES.
+  2. INT 21h with EAX=0x3509 (DOS Get Interrupt Vector, vector 09h). Under
+     DOS/4G this returns the protected-mode vector in ES:EBX.
+  3. Stores the returned handler offset (EBX) at 0x00070002 and the returned
+     selector (ES) at 0x00070000, so the old vector can be restored later.
+  4. Loads DS from CS so DS:EDX addresses code in this module, points EDX at
+     the handler 0x00056837, and issues INT 21h with AH=0x25, AL=0x09 (DOS Set
+     Interrupt Vector) to hook IRQ1.
+  5. Restores ES and DS and returns.
+
+Hand-written assembly: it manipulates segment registers directly and passes
+arguments to DOS in explicit registers, which the C compiler would not emit.
+
+Parameters: none.
+Returns: nothing.
+
+=== 00056837 [PLATE]
+Keyboard IRQ1 interrupt service routine (protected mode, DOS/4G).
+
+Installed by fdps_install_keyboard_isr at 0005680a; it is never called
+directly, only entered through the interrupt vector, and exits with IRETD.
+
+Algorithm:
+  1. STI, then save EDX/ECX/EBX/EAX and DS on the interrupt stack, and load
+     DS with selector 0x0002 so the handler can reach the program data
+     segment regardless of the interrupted context.
+  2. IN AL,0x60 reads the raw scancode; it is stored unconditionally in the
+     last-scancode byte at 0x00070006.
+  3. IN AL,0x61, set bit 7, OUT it back, then clear bit 7 and OUT again --
+     the classic XT-style keyboard acknowledge strobe on port 0x61.
+  4. Compare the new scancode with the previous one at 0x00070021. If they
+     are equal, nothing is queued (this suppresses the auto-repeat stream and
+     duplicate reports). Otherwise the new value becomes the previous one.
+  5. If the scancode is below 0x80 (a make code, i.e. key press rather than
+     the 0x80-or-above break code), store it into the byte ring buffer that
+     begins at 0x0007000f, indexed by the write cursor at 0x0007001d, then
+     increment the cursor and wrap it to 0 when it reaches 10. The buffer has
+     10 entries and the cursor is a pure write index -- the consumer side
+     tracks its own read position.
+  6. OUT 0x20,0x20 sends the non-specific EOI to the master PIC.
+  7. Restore DS and the four saved registers and return with IRETD.
+
+Note that break codes and repeats only update the last-scancode bytes; they
+never enter the ring buffer. The original interrupt handler is not chained.
+
+Parameters:
+  None. Entered from the interrupt gate, not by a call, so no arguments are
+  passed in registers or on the stack. The decompiler's invented param_1 is
+  the interrupt frame and is not real.
+
+Returns:
+  Nothing. Exits with IRETD; all side effects are in the globals at
+  0x00070006 (last scancode), 0x00070021 (previous scancode for the repeat
+  filter), 0x0007000f (10-byte scancode ring buffer) and 0x0007001d (ring
+  write index).
+
+=== 000568b7 [PLATE]
+Algorithm: Runs a self-inverse XOR stream cipher over a byte buffer in place. A 16-bit key register is seeded with 0xA5. For each of len bytes: key = rol16(key + 0x9014, 3), then the source byte is XORed with the low 8 bits of key and stored back at the same offset (the assembly uses LODSB/STOSB with ESI and EDI both initialised from buf, so it is strictly in place). The key stream depends only on the byte index, never on the data, so the same call both encrypts and decrypts. The loop is driven by LOOP with the count in ECX, so a length of 0 wraps and processes 0x100000000 bytes; callers must pass a positive length. Written as hand-tuned assembly with stack-passed arguments rather than the Watcom register convention used elsewhere in the module.
+
+Parameters: buf - pointer to the buffer to transform in place; len - number of bytes to process, must be greater than zero.
+
+Returns: nothing; the buffer is modified in place.
+
+=== 000568db [PLATE]
+Blit mode dispatcher: publishes the blit geometry into the shared graphics globals and jumps into the inner copy loop chosen by the mode byte.
+
+Algorithm:
+  Loads the source pointer into ESI and the destination pointer into EDI, which the mode handlers consume directly as x86 string-operation registers. Stores the destination pitch (arg 5) into the word at 0x0007002e, the run width (arg 3) into the word at 0x00070024, and the row count (arg 4) into the word at 0x00070022, then computes EDX = pitch - width, the number of bytes to advance the destination pointer at the end of each row. Clears EAX and ECX and loads the mode byte (arg 7) into BH. A linear chain of compares on BH selects one of thirteen handlers for modes 0 through 12 (0x00056a0d, 0x00056a8d, 0x00056b25, 0x00056bb7, 0x00056c5e, 0x00056e2a, 0x00057114, 0x00057551, 0x000575ed, 0x0005761b, 0x00057793, 0x00057916, 0x00057a74); every branch converges on the common epilogue, and a mode byte above 12 falls through and draws nothing. The handlers are called, not tail-jumped, so the frame pointer set up here stays live for them; the sixth argument at [EBP+0x1c] is never touched by this function and is presumably read from that frame by individual handlers.
+
+Parameters:
+  src    - source pixel data, loaded into ESI
+  dst    - destination surface pointer, loaded into EDI
+  width  - bytes copied per row, also stored to the global at 0x00070024
+  height - number of rows, also stored to the global at 0x00070022
+  pitch  - destination stride, stored to the global at 0x0007002e; pitch - width is passed to the handler in EDX
+  arg6   - unused by this function, left on the frame for the handlers
+  mode   - blit mode selector, 0 through 12; other values are a no-op
+
+Returns:
+  Nothing. All output goes to the destination surface and the shared blit globals.
 
