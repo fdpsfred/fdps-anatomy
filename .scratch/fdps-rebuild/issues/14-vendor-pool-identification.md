@@ -6,6 +6,10 @@
 
 這三個 pool 的判定不需要遊戲資料當依據——它們靠 function 本身的特徵、字串參照、以及與已知函式庫的比對就能確認，所以不必等攻略基準真值。
 
+**執行方式：** 依 [ADR-0007](../../../docs/adr/0007-workflow-automation-and-agent-context.md)，本票由一支全自動 workflow 跑完。每次 agent 呼叫只帶一個區塊或一個 function；agent 把完整判定寫成檔案、只回傳摘要；判定階段不寫 Ghidra，建 function 與打 pool 標記集中在轉錄階段；每輪落地後跑基準稽核；結束前回掃所有低信心與留有未決問題的判定。
+
+本票的 workflow 形狀與票 12 不同，不要照抄骨幹走查的 BFS：工作清單是 `AuditGhidraBaseline.java` 產生的未反組譯區塊清單與全 function 清單，是固定的，不需要逐輪發現。但**建 function 與 pool 判定必須分成兩個階段**——建完 function 之後 function 集合才完整，pool 判定的清單才算數。
+
 **Blocked by:** 13
 
 **Status:** ready-for-agent
@@ -18,4 +22,5 @@
 - [ ] 編譯器產物（不對應任何原始碼的 function）辨識出來
 - [ ] 剩餘的遊戲本體 function 清單產出，作為 15 號票的工作清單
 - [ ] 判定結果與依據記錄在 Ghidra 的標記與註解中
+- [ ] 全程無人介入跑完，agent 的 context 用量不隨處理量成長
 - [ ] Ghidra 快照匯出並 commit

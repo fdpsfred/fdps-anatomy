@@ -10,6 +10,9 @@
 //   call carries exactly one address and no agent ever sees the list
 //   (ADR-0002). Rounds are discovered, not scheduled: each reader reports which
 //   of its callees carry the backbone forward, and that is the next frontier.
+//   The rescan stage keeps the rule: it lets an agent read a neighbour's
+//   verdict as evidence, which is using a judgement someone else already made,
+//   not making one.
 //
 //   Bounded context everywhere. A reader writes its full judgement -- plate
 //   comment, evidence, prototype -- to verdicts/<addr>.json and returns only a
@@ -22,6 +25,7 @@
 //   alreadyDone:    ["00029220", ...]   walked in an earlier run, do not revisit
 //   maxFunctions:   number              hard cap on newly walked functions
 //   maxRounds:      number              hard cap on BFS depth
+//   maxRescanPasses: number             how many times to retry unresolved verdicts (default 2)
 // }
 
 export const meta = {
@@ -31,6 +35,7 @@ export const meta = {
     { title: 'Walk', detail: 'BFS from the seeds, one reader agent per function' },
     { title: 'Arbitrate', detail: 'resolve duplicate names, one agent per clash' },
     { title: 'Apply', detail: 'transcribe each round into Ghidra' },
+    { title: 'Rescan', detail: 're-read unresolved verdicts against their neighbours' },
     { title: 'Tag', detail: 'pool, subsystem and shared-helper tags' },
     { title: 'Document', detail: 'architecture page and devlog' },
   ],
@@ -45,13 +50,19 @@ const VERDICTS = WS + '\\verdicts'
 const SUMMARY = {
   type: 'object',
   additionalProperties: false,
-  required: ['addr', 'name', 'pool', 'subsystem', 'confidence', 'walk_next', 'wrote_file'],
+  required: ['addr', 'name', 'pool', 'subsystem', 'confidence', 'walk_next', 'wrote_file',
+             'has_open_question'],
   properties: {
     addr: { type: 'string', description: '8-hex address, exactly as given' },
     name: { type: 'string', description: 'The symbol name written into the verdict file' },
     pool: { type: 'string', enum: ['fdps', 'crt', 'ail', 'binary_artifact', 'unknown'] },
     subsystem: { type: 'string' },
     confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+    has_open_question: {
+      type: 'boolean',
+      description: 'True when open_question in the verdict file is non-empty. Anything you '
+        + 'could not settle counts, however small.',
+    },
     walk_next: {
       type: 'array',
       items: { type: 'string' },
@@ -84,6 +95,20 @@ const APPLY_REPORT = {
     error_bookmarks: { type: 'integer', description: 'From the baseline audit gate. Must be 0.' },
     ok: { type: 'boolean' },
     problems: { type: 'string', description: 'What failed and what was done about it, or empty' },
+  },
+}
+
+const RESCAN = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['addr', 'changed', 'confidence', 'still_open'],
+  properties: {
+    addr: { type: 'string' },
+    changed: { type: 'boolean', description: 'True if the verdict file was rewritten' },
+    name: { type: 'string', description: 'The name now in the file, changed or not' },
+    confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+    still_open: { type: 'boolean', description: 'True if something remains unresolved' },
+    what_resolved: { type: 'string', description: 'What the neighbouring verdicts settled, or empty' },
   },
 }
 
@@ -226,6 +251,49 @@ to that file's plate_comment explaining why this function does not carry the
 other name. Do not touch the other function's file.
 
 Return the final name.`
+}
+
+function rescanPrompt(addr, why) {
+  return `An earlier pass of this walk read ONE function in FDPS.LE and could not fully
+settle it. You are re-reading that same function now that its neighbours have
+been read too.
+
+Your function: ${addr}
+Why it came back: ${why}
+
+Its own verdict is at ${VERDICTS}\\${addr}.json. Read it first: it records what
+was concluded, and its open_question field records exactly what was missing.
+
+The reason this pass can succeed where the first could not is that every
+function walked since has a verdict file in ${VERDICTS}\\. A function whose
+meaning is entirely its callee's meaning -- a thin wrapper, a dispatcher, a
+shim -- is unidentifiable on its own and obvious once the callee is known.
+
+So: read your function's own verdict, read the verdict files of its callees and
+callers (their addresses are in the callees/callers you can query from Ghidra),
+and see whether they answer the open question.
+
+You are still working on ONE function. Reading a neighbour's verdict file is
+using evidence someone else already produced; it is not re-judging that
+neighbour. Never rewrite another function's verdict file, and never form an
+opinion about whether a neighbour's name is right.
+
+READ-ONLY on Ghidra. Do not rename, do not set prototypes, do not set plate
+comments. The workflow applies changes afterwards.
+
+${NAMING_RULES}
+
+If the neighbours settle it, rewrite ${VERDICTS}\\${addr}.json with the Write
+tool: update name, pool, subsystem, role, plate_comment, prototype,
+calling_convention, confidence and evidence to match what you now know, clear
+open_question, and add a "_supersedes" field explaining in one short paragraph
+what the first reading concluded and what changed it. Keep the same field
+shape as the file already has. Set changed to true.
+
+If they do not settle it, change nothing, leave the file exactly as it is, set
+changed to false, and say in what_resolved what is still missing. An honest
+unresolved verdict is a correct outcome here. Do not manufacture a conclusion
+just because this is the second attempt.`
 }
 
 function applyPrompt(tag, addrs) {
@@ -395,6 +463,75 @@ if (frontier.length > 0) {
   log(`UNWALKED FRONTIER (${frontier.length}): ${frontier.join(' ')}`)
 }
 
+// ---------------------------------------------------------------- rescan
+//
+// A reader only ever sees its own function, so anything whose identity is
+// really its callee's identity comes back unresolved when the callee has not
+// been walked yet. By now it has been. Re-read those, one agent each, this
+// time letting them use the neighbouring verdicts as evidence.
+
+const MAX_RESCAN_PASSES = (args && args.maxRescanPasses) || 2
+const rescanLog = []
+
+for (let pass = 1; pass <= MAX_RESCAN_PASSES; pass++) {
+  const pending = walked.filter((s) => s.confidence === 'low' || s.has_open_question)
+  if (pending.length === 0) {
+    log(`rescan pass ${pass}: nothing unresolved, skipping`)
+    break
+  }
+  phase('Rescan')
+  log(`rescan pass ${pass}: re-reading ${pending.length} unresolved verdict(s)`)
+
+  const results = (await parallel(pending.map((s) => () =>
+    agent(
+      rescanPrompt(s.addr, s.confidence === 'low'
+        ? `confidence was low${s.has_open_question ? ' and an open question was recorded' : ''}`
+        : 'an open question was recorded'),
+      { label: `rescan:${s.addr}`, phase: 'Rescan', schema: RESCAN }
+    )
+  ))).filter(Boolean)
+
+  const changed = results.filter((r) => r.changed)
+  for (const r of results) {
+    const s = walked.find((w) => w.addr === r.addr)
+    if (!s) {
+      continue
+    }
+    s.confidence = r.confidence
+    s.has_open_question = r.still_open
+    if (r.changed && r.name) {
+      s.name = r.name
+    }
+    if (r.changed) {
+      rescanLog.push(`${r.addr} -> ${r.name} (${r.confidence}): ${r.what_resolved}`)
+      log(`  ${r.addr} -> ${r.name} (${r.confidence}): ${r.what_resolved}`)
+    }
+  }
+
+  if (changed.length === 0) {
+    log(`rescan pass ${pass}: nothing could be resolved, stopping`)
+    break
+  }
+
+  phase('Apply')
+  const report = await agent(applyPrompt(`rescan${pass}`, changed.map((r) => r.addr)), {
+    label: `apply:rescan${pass}`,
+    phase: 'Apply',
+    schema: APPLY_REPORT,
+  })
+  if (report) {
+    applyReports.push(Object.assign({ round: `rescan${pass}` }, report))
+    log(`rescan pass ${pass}: applied=${report.applied} orphans=${report.orphan_ranges} `
+      + `errors=${report.error_bookmarks} ok=${report.ok}`)
+  }
+}
+
+const stillUnresolved = walked.filter((s) => s.confidence === 'low' || s.has_open_question)
+if (stillUnresolved.length > 0) {
+  log(`STILL UNRESOLVED after rescan (${stillUnresolved.length}): `
+    + stillUnresolved.map((s) => `${s.addr} ${s.name}`).join(', '))
+}
+
 // ------------------------------------------------------------------- tag
 
 phase('Tag')
@@ -442,7 +579,9 @@ const stats = {
   unwalkedFrontier: frontier,
   bySubsystem: bySubsystem,
   byPool: byPool,
-  lowConfidence: lowConfidence.map((s) => `${s.addr} ${s.name}`),
+  lowConfidenceAtWalk: lowConfidence.map((s) => `${s.addr} ${s.name}`),
+  rescanResolved: rescanLog,
+  stillUnresolved: stillUnresolved.map((s) => `${s.addr} ${s.name}`),
   applyReports: applyReports,
 }
 
@@ -533,7 +672,9 @@ return {
   unwalkedFrontier: frontier,
   byPool: byPool,
   bySubsystem: bySubsystem,
-  lowConfidence: stats.lowConfidence,
+  lowConfidenceAtWalk: stats.lowConfidenceAtWalk,
+  rescanResolved: rescanLog,
+  stillUnresolved: stats.stillUnresolved,
   applyReports: applyReports,
   documents: docs.map((d) => d.written).flat(),
 }

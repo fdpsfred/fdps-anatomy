@@ -109,8 +109,9 @@ Status: ready-for-agent
 
 - 等價目標是功能等價，不是 byte-exact（ADR-0001）。stub 大小、object 佈局、function 排列、暫存器配置都不要求與原版一致。唯一例外是該差異會實際影響功能或執行正確性。
 - 逐項判斷的工作（function 身分、calling convention、code emit、data 符號判定）一律一次處理一個，禁止批次或抽樣（ADR-0002）。強制機制必須是結構性的：工作清單只存在於 workflow 腳本中，每次 agent 呼叫只帶一個項目。
+- 這些 workflow 一律全自動跑完，中途不回來要人確認；agent 把完整判定寫成檔案、只回傳摘要以控住 context；判定階段不寫入目標資料庫，落地集中在轉錄階段並跑 gate；結束前有回掃段補上「鄰居還沒處理完就無解」的缺口（ADR-0007）。
 - 平行化在 Phase A 用腳本層的並行結構達成（每個並行單位仍只處理一個 function）；Phase C 改為序列，因為該階段的 reviewer 依賴版本控制的暫存狀態檢視改動，要求一次只有一個 function 在飛。
-- Ghidra 寫入競爭需要先用小規模並行（3～4）試跑驗證，穩定後再提高並行度。
+- Ghidra 的寫入競爭不需要驗證：判定階段的 agent 一律不寫 Ghidra，落地是單一序列的轉錄階段，競爭情境不會發生。
 
 ### 已確立的事實（不需重新求證）
 

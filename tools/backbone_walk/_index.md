@@ -32,6 +32,7 @@ Workflow({ scriptPath: "tools/backbone_walk/walk_ticket12.js",
 | Walk | 讀一個 function，判定身分並寫判定檔 | 1 |
 | Arbitrate | 兩個 function 撞名時決定其中一個要改成什麼 | 1 |
 | Apply | 把該輪的判定轉錄進 Ghidra 並跑稽核 gate | 一輪 |
+| Rescan | 重讀一個尚未定案的判定，這次可引用鄰居的判定檔 | 1 |
 | Tag | 打 pool / subsystem / shared_helper 標籤 | 全部 |
 | Document | 寫 `program_info/architecture.md` 與 devlog | — |
 
@@ -51,12 +52,14 @@ reader 完全不碰 Ghidra 的寫入端。這樣一來多 agent 併發寫入的�
 
 **標記 no-return 會產生孤立程式碼。** Ghidra 會砍掉該 function 每個呼叫點的 fall-through，呼叫點後面的指令可能因此掉出所屬 function 的 body；如果那些指令其實是別處跳進來的，它們就變成孤立程式碼。實例是 `crt_cmain` 標成 no-return 後，`crt_cstart_body` 的 body 從 538 縮成 535，尾巴的 `0x43527`–`0x43529` 掉了出來——那三個 byte 由 `crt_exit` 跳進來，屬於同一段組語。修法是把 body 範圍補回去，不是收回 no-return。Apply 階段每輪都跑稽核 gate 就是為了當場抓到這件事。
 
-## 已知的結構性缺口：後續輪次的發現不會回流
+## Rescan：為什麼需要它
 
-reader 永遠只看自己那一個 function，判定檔是一次寫成的。如果某個 function 的身分完全取決於它的 callee，而那個 callee 要到後面幾輪才被走到，第一輪的低信心判定就會留在成果裡——即使推翻它所需的證據已經躺在同一個資料夾的另一個檔案裡。Apply 只做無損轉錄，不會發現這件事。
+reader 永遠只看自己那一個 function。如果某個 function 的身分完全取決於它的 callee，而那個 callee 要到後面幾輪才被走到，第一輪就只能回低信心——即使推翻它所需的證據稍後就會躺在同一個資料夾的另一個檔案裡。
 
-實例是 `0x305a0`：body 只有一個 `CALL 0x3d8b2`，第一輪只能回 low 信心的佔位名稱；`0x3d8b2` 在第二輪被判定為 `AIL_shutdown`，`0x305a0` 的身分就此明朗，但沒有任何機制把它接回去，最後是人在複查時補的。
+實例是 `0x305a0`：body 只有一個 `CALL 0x3d8b2`，第一輪只能給佔位名稱；`0x3d8b2` 在第二輪被判定為 `AIL_shutdown`，身分就此明朗。第一次跑的時候沒有回流機制，是人在複查時補的。
 
-**修法是走查結束後加一段回掃**：把所有信心為 low 或 `open_question` 非空的判定挑出來，用當時已經齊全的判定檔各重讀一次（仍然一個 agent 一個 function）。目前還沒實作，所以跑完之後要人工掃一遍 `open_question`。
+Rescan 段就是那條回流：走查結束後把所有信心為 low 或 `open_question` 非空的判定挑出來，各開一個 agent 重讀，這次允許它讀鄰居的**判定檔**當證據。讀鄰居的判定是引用別人已經下好的判斷，不是替鄰居下判斷，所以「一個 agent 一個 function」沒有被打破。
+
+重讀後如果仍然無解，agent 必須原樣保留並回報還缺什麼——提示裡明講「第二次嘗試不是硬掰結論的理由」。最多跑 `maxRescanPasses` 輪（預設 2），某一輪一個都解不掉就提早停，剩下的列進最終報告。
 
 命名規則的正典是 [`rebuild_info/naming.md`](../../rebuild_info/naming.md)。

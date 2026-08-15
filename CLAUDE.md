@@ -14,6 +14,17 @@
 
 平行化必須靠 workflow 腳本驅動，工作清單只存在於腳本中，每次 agent 呼叫只帶一個 function。**不可以把 function 清單交給單一 agent 讓它自行分配**——實測證明 agent 會退化成批次處理。
 
+## 逐項工作一律全自動
+
+需要逐一處理 function 或 data 的工作，一律由一支 workflow 從頭跑完，中途不回來要人確認。詳見 ADR-0007，四條必要條件：
+
+1. **判定寫檔，只回傳摘要**——agent 把完整結果寫成一個檔案，回傳約 200 byte。這是 context 管理的核心手段，處理 100 個或 1,000 個項目，腳本與後續每一段的 context 都一樣。
+2. **判定階段的 agent 不寫入 Ghidra 或 `src/`**，落地集中在獨立的轉錄階段。
+3. **每輪落地後跑該工作的 gate**，不過就當輪修，修不掉明確回報失敗。
+4. **結束前要有回掃段**，重讀所有低信心或留有未決問題的判定，此時允許引用鄰居的判定檔當證據。
+
+workflow 的形狀依工作內容設計，不必照抄；要照抄的是這四條。參考實作是 `tools/backbone_walk/walk_ticket12.js`。
+
 ## 工作步驟
 
 - 每個新 session 開始時先讀 @README.md 了解知識庫結構（README 尚未建立時，讀 `docs/research/fd2-playbook.md`）

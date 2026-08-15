@@ -17,3 +17,5 @@
 平行化透過腳本的 `pipeline()` 達成，而不是把 function 清單交給單一 agent 自行分配。到了 emit 階段則改用序列模式，因為該階段的 reviewer 依賴 `git diff HEAD` 檢視未 commit 的改動，這要求一次只有一個 function 在飛。
 
 代價是整體工時顯著拉長。這是刻意接受的取捨。
+
+「一次一個」之外，這些 workflow 還要全自動跑完、要管住 agent 的 context、要有回掃段補上「鄰居還沒處理完就無解」的缺口——那些規定在 [ADR-0007](0007-workflow-automation-and-agent-context.md)。

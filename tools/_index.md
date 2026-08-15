@@ -6,7 +6,7 @@
 
 | 子資料夾 | 用途 |
 | --- | --- |
-| [`backbone_walk/`](backbone_walk/_index.md) | 從進入點到主迴圈逐一走查並命名：workflow 每個 agent 只讀一個 function，落地由 orchestrator 轉錄 |
+| [`backbone_walk/`](backbone_walk/_index.md) | 骨幹走查的全自動 workflow，也是 [ADR-0007](../docs/adr/0007-workflow-automation-and-agent-context.md) 的參考實作：一個 agent 一個 function、判定寫檔控 context、集中轉錄、每輪 gate、結束前回掃 |
 | [`build_flags/`](build_flags/_index.md) | 反推建置旗標組：解 LE header、跨 Watcom 版本差分編譯、CRT 位元組比對、連結實驗 |
 | [`call_graph/`](call_graph/_index.md) | 建出呼叫圖（含函式指標表的間接邊）並算可達性、孤島分量與共用 helper 排名 |
 | [`cd_scope/`](cd_scope/_index.md) | 透過 DOSBox-X 把光碟映像的內容複製出來並清點 |
