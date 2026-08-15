@@ -4,11 +4,11 @@
 
 calling convention 是逐 function 判定的——個別 function 會偏離預設值，必須在這裡確認，因為 emit 時要在程式碼中明確宣告。
 
-**執行方式：** 依 [ADR-0007](../../../docs/adr/0007-workflow-automation-and-agent-context.md)，本票由一支全自動 workflow 跑完，形狀最接近票 12 的骨幹走查——同樣是讀一個 function、寫判定檔、只回傳摘要、集中轉錄、每輪 gate、結束前回掃。差別是工作清單來自票 14 產出的遊戲本體 function 清單，不需要 BFS 發現；規模是票 12 的數倍，所以判定檔寫檔控 context 這件事更關鍵。
+**執行方式：** 依 [ADR-0007](../../../docs/adr/0007-workflow-automation-and-agent-context.md) 的五條原則，本票寫自己的 workflow。與票 12 的差別：工作清單來自票 14 產出的遊戲本體 function 清單，是固定的，不需要 BFS 發現；規模是票 12 的數倍，所以判定檔寫檔控 context 與錯誤處理都更關鍵——這個量級一定會有 agent 失敗，靜默跳過就等於漏掉 function 而看不出來。
 
-票 12 已經定案的 109 個 function 不重做，以判定檔的存在跳過。可直接沿用 `tools/backbone_walk/` 的 `collect_verdicts.py`、`ApplyBackboneWalk.java` 與其中記錄的工具坑（`__watcall` 與 `const` 都不能寫進 prototype 字串、標記 no-return 會產生孤立程式碼、Ghidra 的 `__watcall` 預設標籤與 `-4s` 的事實相反）。
+票 12 已經定案的 109 個 function 不重做，以判定檔的存在跳過。`tools/backbone_walk/` 的 `collect_verdicts.py` 與 `ApplyBackboneWalk.java` 這類小工具可以照抄或改寫，但 workflow 本身自己寫。其中記錄的工具坑要沿用：`__watcall` 與 `const` 都不能寫進 prototype 字串、標記 no-return 會產生孤立程式碼、Ghidra 的 `__watcall` 預設標籤與 `-4s` 的事實相反。
 
-**Blocked by:** 13, 07, 14
+**Blocked by:** 07, 14
 
 **Status:** ready-for-agent
 
@@ -20,4 +20,5 @@ calling convention 是逐 function 判定的——個別 function 會偏離預�
 - [ ] 完成判定：零個預設命名殘留、零個錯誤標記
 - [ ] 回掃段跑完，沒有殘留低信心或未決的判定；仍無解的明確列出
 - [ ] 全程無人介入跑完，agent 的 context 用量不隨處理量成長
+- [ ] workflow 有錯誤處理：agent 未回傳或判定檔缺漏會重試、落地與 gate 失敗會明確回報、上游工具失去回應有停止訊號；收尾報告列出完成數、失敗數與未完成清單
 - [ ] Ghidra 快照匯出並 commit

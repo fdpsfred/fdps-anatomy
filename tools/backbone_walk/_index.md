@@ -2,6 +2,8 @@
 
 把從進入點到主迴圈的路徑逐一走過、命名、落地 Ghidra，並產出票 12 的知識庫頁面。
 
+**這是票 12 專屬的 workflow，不是給別票用的框架。** [ADR-0007](../../docs/adr/0007-workflow-automation-and-agent-context.md) 明確決定不抽共用骨架——各票的工作形狀差異太大。這支腳本的價值是當範例：讀它可以看到那五條原則實際長什麼樣。裡面的小工具（`collect_verdicts.py`、`ApplyBackboneWalk.java`）可以照抄或改寫，但別把整支腳本當成新工作的起點去改造。
+
 | 檔案 | 用途 |
 | --- | --- |
 | `walk_ticket12.js` | 主 workflow：BFS 走查、命名仲裁、逐輪落地、打標、寫知識庫與 devlog，全程無人介入 |
@@ -40,7 +42,7 @@ Apply 與 Tag 是轉錄，不是判定：每個名稱、plate comment、prototyp
 
 ## agent 不寫 Ghidra，寫入集中在 Apply
 
-reader 完全不碰 Ghidra 的寫入端。這樣一來多 agent 併發寫入的風險不存在（那是票 13 要驗的事，不該在這裡順便冒險），而且每輪的落地是單一序列動作，出事時範圍明確。
+reader 完全不碰 Ghidra 的寫入端。這樣一來多 agent 併發寫入的風險根本不存在，不需要另外驗證它安不安全，而且每輪的落地是單一序列動作，出事時範圍明確。
 
 ## 已知的坑
 

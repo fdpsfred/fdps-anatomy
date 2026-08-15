@@ -23,4 +23,5 @@
 - [ ] 每個 function 通過後獨立 commit，工作狀態記錄可續跑
 - [ ] 前作記錄的八類實機 bug 列入 reviewer 的檢查項目
 - [ ] emitter 與 reviewer 的完整產出寫成檔案，回傳腳本的只有摘要
+- [ ] workflow 有錯誤處理：agent 未回傳或判定檔缺漏會重試、落地與 gate 失敗會明確回報、上游工具失去回應有停止訊號；收尾報告列出完成數、失敗數與未完成清單
 - [ ] 至少一個 function 完整走通並通過 build gate
