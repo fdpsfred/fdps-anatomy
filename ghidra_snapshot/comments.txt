@@ -1,2 +1,333 @@
 # One block per comment, opened by '=== <address> [<type>]'. Blocks are address-ordered,
 # then ordered by type within an address. Loader fixup comments are excluded.
+=== 00029220 [PLATE]
+C entry point of FDPS. Called by the Watcom startup routine at 0004df4c, which pushes _argc (0006a3b4) and _argv (0006a3b8) and passes this function's return value to exit().
+
+Algorithm:
+  1. access("DISK.NO", 0) via INT 21h AH=43h. A non-zero result means the game was
+     never installed: print "\nCan't found file 'Disk.No' !!!\a\n" and
+     "Please use install function.\n", then exit(1).
+  2. fopen("Disk.no", "rt"), three fscanf(fp, "%s", ...) reads and fclose(). The first
+     two tokens go to a stack buffer and are discarded; the third is stored in the
+     global string buffer at 000643e8. Sets the global at 00069d54 to -1.
+  3. Calls the CD-ROM presence check at 0003c636 (returns a 16-bit value, sign-extended
+     by CWDE). Anything other than 1 prints
+     "Fatal error: CDROM is not install!!!\a\n" and "Check your CDROM please!!!\n",
+     then exit(1).
+  4. Subsystem init: 000304e0(0x19) and 00029660(), then int386(0x10, &regs, &regs)
+     with regs.ax = 0x13 to enter VGA 320x200x256 mode.
+  5. Clears the state globals (00069cf0, 00069cdc, 00069da0) and the quit flag at
+     000643eb, calls 0002a2b0() once, then loops while the quit flag is zero:
+       - 0002bae0() pumps one iteration;
+       - the request code left in 00069da0 is dispatched: 0 does nothing, 1 runs
+         0002a960() followed by 0002a2b0(), 2 calls the handler taken from the
+         function-pointer table at 00060304 indexed by the mode selector in 00069cf4
+         and then 00031210();
+       - the request code is reset to 0 at the end of every iteration.
+  6. Shutdown: 00029440(), 000305a0(), 0003c4a7() (pairs with the CD check),
+     int386(0x10, &regs, &regs) with regs.ax = 3 to return to text mode, and finally
+     prints "\nThank you for playing Flame Dragon Plus!! \n\n".
+
+Parameters:
+  argc, argv - passed on the stack by the startup code but never read by this function.
+
+Returns:
+  Nothing meaningful. Control falls off the end of the function, so EAX holds whatever
+  the final print call left there; the startup code feeds it to exit(). In C source
+  terms this is a main() with no return statement.
+
+=== 00042e0f [PLATE]
+C runtime exit().
+
+Algorithm:
+  Calls two runtime finalizer hooks indirectly through the function-pointer
+  slots at 0x000603a0 and 0x000603a4, then pushes its own status argument and
+  calls the next termination stage at 0x00042e29 (_exit), cleaning the argument
+  off the stack afterwards.
+
+  The three adjacent slots 0x000603a0 / 0x000603a4 / 0x000603a8 form the
+  runtime's finalizer hook table. exit() runs slots [0] and [1]; the _exit
+  stage at 0x00042e29 runs slots [1] and [2] and then jumps into the cstart
+  termination tail at 0x00043527, which pops the status into EAX and reaches
+  INT 21h AH=4Ch. In this build all three slots are statically initialised to
+  0x00042e0e, a bare RET stub, i.e. no finalizer module was linked in, so the
+  hooks are effectively no-ops.
+
+  The trailing RET is unreachable: control never comes back from 0x00042e29.
+  This function does not return.
+
+Parameters:
+  [ESP+4]  int status - process exit code, forwarded unchanged to _exit and
+           ultimately to the DOS terminate call.
+
+Returns:
+  Does not return.
+
+=== 00043298 [PLATE]
+LE module entry point (Watcom cstart_.asm).
+
+Algorithm:
+  The whole body is one 2-byte instruction, JMP 0x00043310 (EB 76). The 0x76
+  bytes it jumps over are data, not code: the ASCII banner "WATCOM C/C++32
+  Run-Time system. (c) Copyright by WATCOM International Corp. 1988-1994. All
+  rights reserved." at 0004329A, a 3-byte LEA EAX,[EAX+0] pad, the runtime
+  version/flag words 0003 0001, and the default console device name "con" at
+  0004330C. Control lands on the startup body at 00043310, which begins
+  STI / AND ESP,-4 / MOV EBX,ESP, identifies the DOS extender (RSX 'DX',
+  'CB', or DPMI via INT 21h AX=FF00 'PHAR'), shrinks the DOS memory block,
+  records PSP/environment pointers, copies the command tail, scans the
+  environment for the "no87=" variable, clears BSS, runs the initialiser
+  chain and finally exits through INT 21h AH=4Ch.
+
+  This stub exists only so the entry address can sit immediately before the
+  banner that the linker embeds; it is emitted by the Watcom startup object
+  linked in by wlink and has no counterpart in hand-written C.
+
+Parameters:
+  None. Execution arrives here from the LE header's initial CS:EIP, set up by
+  the DOS/4G loader; nothing is passed in registers or on the stack by any
+  caller inside the image. Ghidra's six-parameter signature is an artifact of
+  the decompiler inlining the jump target.
+
+Returns:
+  Does not return. The startup path it enters terminates the process with
+  INT 21h AH=4Ch.
+
+=== 00043310 [PLATE]
+Named crt_cstart_body rather than crt_cstart because the LE entry symbol at
+00043298 owns that name; the two are one piece of assembly separated only by
+the banner data the linker embeds between them.
+
+Watcom C/C++ 10.0a runtime startup code (cstrt386.asm, _cstart_). This is the
+real program entry: the LE entry stub at 00043298 is a bare JMP to here. Hand
+written assembly, not compiled C.
+
+Algorithm:
+  1. STI, align ESP down to a dword boundary, and record the initial stack
+     pointer in the runtime globals at 00060434 and 00060420. Preload the
+     default selector 0x24 into 0006042c and EBX with 'PHAR' for the Phar Lap
+     probe.
+  2. INT 21h AH=30h (get DOS version). AL/AH are stored as the DOS major and
+     minor version at 00060457 and 00060458. The high half of EAX selects the
+     host:
+       - 'DX'  (0x4458): Phar Lap 386|DOS-Extender. Take the version digit from
+         BL, read the PSP memory-block end at ES:[5Ch] via selector 0006042c,
+         round it up to a 4K boundary, store it at 00060420 and shrink the
+         block with INT 21h AH=4Ah. Environment selector 0x2C.
+       - 'CB'  (0x4243): Intel Code Builder. EDX points at the Code Builder
+         info block; it is saved at 000603ac. Shrink memory by the amount at
+         [EDX+1Ch] (INT 21h AH=4Ah), take the PSP pointer from [EDX+10h] (the
+         command tail therefore starts at PSP+81h) and the environment segment
+         from [PSP+2Ch], shifted left by 4.
+       - otherwise: INT 21h AX=FF00h with DX=78h. If it reports a host, this is
+         a DPMI/DOS-4G style extender: the GS selector, when non-zero, is saved
+         at 000603b0, INT 31h AX=0006h fetches the DS segment base, the PSP
+         selector is taken from ES and the environment selector from ES:[2Ch].
+         If it reports nothing, fall back to the fixed real-mode-ish selectors
+         (PSP 0x24, environment 0x2C, flat data 0x17).
+     The resulting host type/subtype byte pair is written to 0006044e/0006044f,
+     the environment pointer to 00060451 and its selector to 00060455.
+  3. Self-modifying step: with the flat data selector in ES, store DS into the
+     code at 0004356d, which is the operand of the "MOV DS,CS:[4356Dh]"
+     instruction in the exit path at 00043564.
+  4. Command line: read the tail length from PSP:80h, skip leading spaces with
+     REPE SCASB, and copy the remaining tail with REP MOVSB to the 16-byte
+     aligned buffer just past the end of BSS (0006a3bc rounded up), then append
+     two NUL bytes. The buffer address is kept in 00060428.
+  5. Environment scan: walk the environment strings; a string whose first four
+     bytes lowercase to "no87" and whose fifth byte is '=' increments the
+     no-x87 flag stored at 0006044c. After the terminating double NUL, skip the
+     word count and copy the program name that follows to the end of the
+     command line buffer; the pointer past it is stored at 00060430. The stack
+     pointer is also recorded at 0006041c.
+  6. Zero BSS from 00063930 up to 0006a3bc with REP STOSD plus a byte tail.
+     When the host type byte at 0006044e is 1 (the DPMI path, where the loader
+     already zero-fills the image) the cleared span is clamped to 0x1000 bytes.
+     The aligned end of BSS is then stored at 00060424 as the heap/break base.
+  7. Call __InitRtns (0004dfa6) with EAX=0FFh to run every registered
+     initializer up to priority 255, clear EBP, then call __CMain (0004df4c),
+     which sets up the stack limit, builds argc/argv and calls main (00029220),
+     then exit (00042e0f). __CMain therefore never returns; the POP EAX / JMP
+     00043528 tail that follows it only executes on paths that reach the shared
+     exit sequence at 0004354d, which runs __FiniRtns (0004dff1) with
+     EAX=0, EDX=0FFh and terminates with INT 21h AH=4Ch.
+
+Parameters: none at the C level. The only incoming register state that is read
+is supplied by the extender/loader: EDX (Intel Code Builder info block) and GS
+(DPMI). The incoming stack contents are not used; ESP is only realigned and
+recorded.
+
+Returns: never returns. Control leaves through main/exit inside __CMain, or
+through the INT 21h AH=4Ch terminate in the shared exit tail at 0004354d.
+
+=== 00043c82 [PLATE]
+Watcom C runtime initialiser: calibrate the delay() busy-wait loop.
+
+Algorithm:
+  Phase 1 (sync): issue DOS "Get System Time" (INT 21h, AH=2Ch; returns
+  CH=hour, CL=minute, DH=second, DL=hundredths), keep the seconds field
+  (DH), then re-issue the call until DH changes. This aligns the
+  measurement with a whole-second boundary so no partial second is
+  counted.
+  Phase 2 (count): with the new seconds value latched in BL, spin issuing
+  INT 21h AH=2Ch and incrementing a counter until DH changes again. The
+  counter therefore holds the number of INT 21h AH=2Ch round trips this
+  machine performs in one second.
+  The result is stored to the global at 0x00069ea8. delay() at 0x00043cb0
+  is its only consumer: it computes
+  iterations = (milliseconds * [0x00069ea8] + 500) / 1000, clamps a zero
+  result up to 1, and spins that many INT 21h AH=2Ch calls. The stored
+  value is thus "loop iterations per 1000 ms" on the host CPU.
+
+  The routine is not reached by a CALL. It is entry 0 of the Watcom
+  runtime init table at 0x000638f0 (6-byte records: status byte,
+  priority byte, 32-bit routine address); its record reads
+  00 20 82 3C 04 00 - status 0 (pending), priority 0x20
+  (INIT_PRIORITY_LIBRARY), routine 0x00043C82. The table walker at
+  0x0004DFA6 invokes it during startup and then marks the record 2 (done).
+
+Parameters:
+  None. EBX and ESI are pushed on entry and popped on exit; every other
+  register the body reads (EAX, EDX) is written by INT 21h before being
+  used, so no incoming register or stack argument exists.
+
+Returns:
+  void. The calibration result is delivered through the global at
+  0x00069ea8. Stack is balanced by a plain RET (no purge).
+
+=== 0004df4c [PLATE]
+Watcom C/C++ 10.0a CRT routine __CMain, from library module cmain386 (CLIB3S.LIB).
+Byte-identical to the library copy; the externs it references are, in order,
+__ASTACKSIZ, stackavail, __ASTACKPTR, __CommonInit, ___Argv, ___Argc, main, exit.
+
+Algorithm:
+  1. Load __ASTACKSIZ (0x00060438), round it up to a multiple of 4 ((n + 3) & ~3,
+     coded as ADD EBX,3 / AND BL,0FCh).
+  2. Call stackavail (0x0004e692, ESP - __STACKLOW at 0x00060430). If the rounded
+     size is smaller than the free stack, carve the block off the stack with
+     SUB ESP,size and keep the resulting ESP as the block base; otherwise use a
+     null base, i.e. no auto-stack is reserved.
+  3. Store base + __ASTACKSIZ (the unrounded size) into __ASTACKPTR (0x0006043c).
+     In this build __ASTACKSIZ is 0 and __ASTACKPTR is never read back, so the
+     whole step is inert here.
+  4. Call __CommonInit (0x00054dbc), which sets _amblksiz (0x000613c4) to 0x8000.
+  5. Push _argv (0x0006a3b8) then _argc (0x0006a3b4), call main (0x00029220),
+     clean the two arguments off the stack, then push main's return value and
+     call exit (0x00042e0f).
+
+Control never comes back: exit runs the atexit/fini chains and terminates. The
+epilogue (MOV ESP,EBP / POP EBP / POP EBX / RET) exists only to restore the frame
+and the saved EBX and is unreachable in practice.
+
+The single caller is the DOS/4G CRT startup at 0x00043310, which invokes
+__InitRtns(255) at 0x0004dfa6, then this function, then __FiniRtns(0,255) at
+0x0004dff1 before the INT 21h/AH=4Ch fallback.
+
+Parameters: none. EBX and EBP are callee-saved here, not inputs; every other
+register is written before it is read, and RET performs no stack purge.
+
+Returns: nothing (void). The function does not return to its caller.
+
+=== 0004dfa6 [PLATE]
+Watcom C runtime __InitRtns -- run the link-time initialiser table.
+
+Algorithm:
+The linker gathers records of the form
+
+    struct rt_init { unsigned char rtn_type;      /* 2 == already run */
+                     unsigned char priority;
+                     void (*rtn)( void ); };      /* 6 bytes each */
+
+into a contiguous "XI" table. Here that table spans 0x000638f0
+(inclusive) to 0x00063920 (exclusive), i.e. 8 entries; a matching
+"YI" rundown table begins at 0x00063920 and is walked by the
+termination routine at 0x0004dff1.
+
+Outer loop, repeated until no candidate remains:
+  - set the running minimum priority to the caller-supplied bound and
+    the selected entry to the table end (the "nothing found" sentinel);
+  - scan the whole table forward; an entry is a candidate when its
+    rtn_type is not 2 (not yet executed) and its priority is <= the
+    running minimum, in which case it becomes the new selection and
+    lowers the minimum. Because the test is <= rather than <, a later
+    entry with a priority equal to the current minimum displaces an
+    earlier one, so entries sharing a priority execute in reverse
+    table order;
+  - if nothing was selected, return;
+  - otherwise reload ES from DS, call the entry's function pointer
+    when it is non-NULL, and stamp rtn_type = 2 so the entry is never
+    run twice.
+
+The current table holds eight entries, all rtn_type 0, with priorities
+0x01 (0x0003d50a), 0x02 (0x00044749) and six at 0x20 (0x00043c82,
+0x0004cfc8, 0x0004e040, 0x00043612, 0x00054893, 0x00054f86).
+
+Parameters:
+  EAX (only AL is used) -- the priority ceiling. Entries whose
+  priority exceeds it are skipped. The startup code at 0x00043310
+  passes 0xff, i.e. "run everything".
+
+Returns:
+  Nothing. ESI, EDI, EBX, EDX and the ES segment register are saved on
+  entry and restored before returning.
+
+=== 0004e692 [PLATE]
+Watcom C runtime: stackavail() -- report remaining stack space.
+
+Algorithm:
+  Copies ESP into EAX and subtracts the global stack-low limit stored at
+  0x00060430, then returns. Because ESP at function entry already points at
+  this call's own return address, the reported figure is 4 bytes smaller than
+  the space the caller actually has, which is conservative and harmless.
+  The same 0x00060430 global is the limit used by the compiler-generated
+  stack-overflow probe at 0x0004362d (which tests ESP-size against it) and is
+  initialised by the startup code at 0x000434c0, confirming it is __STACKLOW
+  rather than a stack base or margin constant.
+
+  All three callers are CRT internals that use the result to choose between an
+  on-stack scratch buffer and the heap: 0x0004df4c and 0x000556a9 both compare
+  (size + 3) & ~3 against the return value before pointing their buffer at a
+  local array or at NULL, and 0x00043ab4 (the DOS int 21h AH=40h write path
+  with LF->CRLF translation) calls the stack-overflow handler at 0x0004364b
+  when fewer than 0xB0 bytes remain and otherwise picks a 0x200-byte staging
+  buffer when at least 0x230 bytes are free, falling back to 0x80 bytes.
+
+Parameters:
+  None. EAX is written before any register is read, and no argument register
+  or stack slot is consumed.
+
+Returns:
+  EAX = bytes of stack remaining below the current stack pointer, as an
+  unsigned value. Every caller treats it as unsigned.
+
+=== 00054dbc [PLATE]
+Watcom CRT __CommonInit, identified by position in __CMain's extern order
+(__ASTACKSIZ, stackavail, __ASTACKPTR, __CommonInit, ___Argv, ___Argc, main,
+exit) rather than by its body, which shows only the _amblksiz store below.
+
+Watcom C runtime helper: install the default heap growth granularity.
+
+Algorithm:
+  Stores the constant 0x8000 (32768) into the global at 0x000613c4 and returns.
+  That global is the Watcom CRT variable `_amblksiz`, the minimum amount by
+  which the heap manager grows the heap when it has to ask the system for more
+  memory. Identification of the global rests on two other users of it:
+    - 0x0004442b (heap grow helper) clamps a requested growth amount up to
+      `_amblksiz` (with the low bit masked off, the documented Watcom flag bit)
+      and then rounds the result up to a 4 KiB page boundary.
+    - 0x0005600f (Watcom __cenvarg, the DOS spawn/exec command line and
+      environment block builder) saves the global, forces it to 16 while it
+      allocates the tightly sized argument block, and restores it afterwards -
+      the exact save/set-16/restore idiom of the library source.
+  The image initialises the global to 16; this routine raises it to 32 KiB so
+  that a DOS extender heap is grown in large chunks instead of many small
+  extender calls. It is called from the CRT startup path (0x0004df4c, which
+  sizes the stack, then calls main at 0x00029220 and passes its result to exit
+  at 0x00042e0f), so it runs exactly once before user code starts.
+
+Parameters:
+  None. The function reads no register and no stack slot.
+
+Returns:
+  Nothing. Only the global at 0x000613c4 is modified; no register is written.
+

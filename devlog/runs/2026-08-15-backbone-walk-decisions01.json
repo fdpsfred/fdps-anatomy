@@ -1,0 +1,58 @@
+{
+  "00029220": {
+    "name": "main",
+    "prototype": "int __cdecl main(int argc, char ** argv)",
+    "no_return": false,
+    "_why": "Confirmed against 0004df4c: PUSH [0006a3b8] / PUSH [0006a3b4] / CALL / ADD ESP,8, so cdecl right-to-left gives arg1=[0006a3b4]=_argc, arg2=[0006a3b8]=_argv. The only unprefixed name allowed by rebuild_info/naming.md."
+  },
+  "00042e0f": {
+    "name": "crt_exit",
+    "prototype": "void __cdecl crt_exit(int status)",
+    "no_return": true,
+    "_why": "Argument read from [ESP+4], plain RET, caller does ADD ESP,4 -- caller-cleaned cdecl, not the __watcall default. Tail-calls into the DOS terminate path so the trailing RET is unreachable."
+  },
+  "00043298": {
+    "name": "crt_cstart",
+    "prototype": "void __cdecl crt_cstart(void)",
+    "no_return": true,
+    "_why": "Keeps the entry-point symbol name. Ghidra's six-parameter __watcall signature is an artefact of folding the jump target into a 2-byte stub; it takes nothing and never returns."
+  },
+  "00043310": {
+    "name": "crt_cstart_body",
+    "prototype": "void __cdecl crt_cstart_body(void)",
+    "no_return": true,
+    "_why": "Two agents both proposed crt_cstart for 00043298 and 00043310. They are one contiguous piece of cstrt386.asm split only by the embedded copyright banner, so the entry symbol keeps crt_cstart and the startup body after the banner gets crt_cstart_body.",
+    "plate_prefix": "Named crt_cstart_body rather than crt_cstart because the LE entry symbol at\n00043298 owns that name; the two are one piece of assembly separated only by\nthe banner data the linker embeds between them."
+  },
+  "00043c82": {
+    "name": "crt_init_delay",
+    "prototype": "void __watcall crt_init_delay(void)",
+    "no_return": false,
+    "_why": "Never the target of a CALL: reached through the runtime init table at 000638f0, so void(void) with no register arguments a wrong signature could invent."
+  },
+  "0004df4c": {
+    "name": "crt_cmain",
+    "prototype": "void __watcall crt_cmain(void)",
+    "no_return": true,
+    "_why": "Zero parameters, no stack purge, compatible with the __watcall default. Control leaves through exit, so the epilogue is unreachable."
+  },
+  "0004dfa6": {
+    "name": "crt_init_rtns",
+    "prototype": "void __watcall crt_init_rtns(unsigned int priority_limit)",
+    "no_return": false,
+    "_why": "Single argument arrives in EAX (only AL used) and the startup code passes 0xff. __watcall places one integer argument in EAX, which matches."
+  },
+  "0004e692": {
+    "name": "crt_stackavail",
+    "prototype": "unsigned int __watcall crt_stackavail(void)",
+    "no_return": false,
+    "_why": "MOV EAX,ESP / SUB EAX,[00060430] / RET. No arguments, result in EAX, every caller treats it as unsigned."
+  },
+  "00054dbc": {
+    "name": "crt_common_init",
+    "prototype": "void __watcall crt_common_init(void)",
+    "no_return": false,
+    "_why": "This function's own agent could only name it descriptively (crt_init_amblksiz, medium confidence, open question about the upstream symbol). The agent on 0004df4c read __CMain's extern order from library module cmain386 -- __ASTACKSIZ, stackavail, __ASTACKPTR, __CommonInit, ___Argv, ___Argc, main, exit -- which fixes the fourth call as __CommonInit. Naming it after the library routine rather than after its one visible side effect settles that open question.",
+    "plate_prefix": "Watcom CRT __CommonInit, identified by position in __CMain's extern order\n(__ASTACKSIZ, stackavail, __ASTACKPTR, __CommonInit, ___Argv, ___Argc, main,\nexit) rather than by its body, which shows only the _amblksiz store below."
+  }
+}
