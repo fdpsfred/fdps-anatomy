@@ -13,12 +13,12 @@ block .object2 | 00060000-0006c3bf | rw- | init=true | 0xc3c0
 block .object3 | 00070000-00070053 | rw- | init=true | 0x54
 block .image | .image::00000000-.image::000587e4 | --- | init=true | 0x587e5
 
-counts.bookmarks = 57
-counts.comments = 109
+counts.bookmarks = 65
+counts.comments = 1171
 counts.dataTypes = 11
-counts.definedData = 1570
+counts.definedData = 2325
 counts.excluded.loaderFixupComments = 6844
 counts.excluded.loaderFixupLabels = 6844
 counts.excluded.loaderFixupTypes = 6927
-counts.functions = 1042
-counts.labels = 286
+counts.functions = 1347
+counts.labels = 310

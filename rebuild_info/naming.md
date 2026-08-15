@@ -14,11 +14,13 @@
 | --- | --- | --- | --- |
 | 遊戲邏輯 function | `fdps_` | snake_case | `fdps_rle_blit_sprite`、`fdps_get_item_entry` |
 | 全域資料 | `data_fdps_` | snake_case | `data_fdps_item_table` |
-| Watcom CRT | `crt_` | snake_case | `crt_memcpy` |
+| Watcom CRT | `crt_` | 前綴後照抄程式庫符號 | `crt_memcpy`、`crt___ExpandDGROUP` |
 | CRT 中必須手寫等價實作的 | `crt_equivalent_` | snake_case | `crt_equivalent_strcmp` |
 | Miles AIL | `AIL_` | 保留上游原名，大小寫照舊 | `AIL_startup`、`AIL_set_sequence_loop_count` |
 
 `crt_` 與 `AIL_` 兩類**不套用** `fdps_` 慣例。
+
+`crt_` 之後接的是 Watcom 程式庫 `PUBDEF` 裡的符號原樣，底線與大小寫都不改：`memcpy` → `crt_memcpy`，`__ExpandDGROUP` → `crt___ExpandDGROUP`，`_nmalloc` → `crt__nmalloc`。改寫成 snake_case 會切斷與程式庫的對照關係，而那個對照正是 CRT 判定的證據本身。
 
 **唯一的無前綴豁免是 C 進入點 `main`**——Watcom CRT 的 `cmain386` 契約要求這個符號就叫 `main`。
 

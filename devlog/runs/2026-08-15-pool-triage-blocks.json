@@ -1,0 +1,275 @@
+{
+ "ticket": 14,
+ "stage": "blocks",
+ "date": "2026-08-15",
+ "block_verdicts": 800,
+ "by_kind": {
+  "code": 125,
+  "pad": 578,
+  "data": 77,
+  "mixed": 20
+ },
+ "still_low_or_open": [
+  "00022e85",
+  "00044b5a",
+  "0004e8da",
+  "00052964",
+  "000529ac",
+  "000529cc",
+  "00052a6c",
+  "00052a8c",
+  "00052aac",
+  "00052acc",
+  "00052aec",
+  "00052b0c",
+  "00052b2c",
+  "00052b4c",
+  "00052b6c",
+  "00052b8c",
+  "00052bec",
+  "00052c0c",
+  "00052c1c",
+  "00052d3d",
+  "00053258",
+  "000542b6",
+  "000544fa",
+  "00054893",
+  "00054bf5",
+  "00054f3d",
+  "00055a20",
+  "00055f8d",
+  "00055fd3",
+  "000564ac",
+  "000569a6",
+  "000569cc",
+  "00056abf",
+  "00056afd",
+  "00056b95",
+  "00056c38",
+  "00056d5b",
+  "00056eb5",
+  "00057058",
+  "000571b6",
+  "0005758e",
+  "000575aa",
+  "0005771a",
+  "00057b1b",
+  "00057c36"
+ ],
+ "superseded_files": 21,
+ "apply_rounds": [
+  {
+   "applied": 6,
+   "created": 5,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "None. p1r1: 6/6 blocks applied, 5 functions created, 1 data item, 2 pad ranges, script reported problems = 0 (kinds: code=3, data=1, pad=2). Gate clean on first run (orphan code ranges = 0, error bookmarks = 0); no repair needed. Program saved. Note: Ghidra's script console emits stale compile errors for unrelated leftover McpInline_*.java / T.java files in C:\\Users\\fdpsf\\ghidra_scripts — cosmetic noise, both scripts ran and completed successfully."
+  },
+  {
+   "applied": 2,
+   "created": 0,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "None. ApplyBlockTriage reported \"problems = 0\", blocks applied = 2 of 2, kinds = {code=2}, functions created = 0, data items 0, pad ranges 0 — expected for rescan verdicts whose functions already exist from the first pass; both verdicts carry _supersedes and only revise pool_hint/notes. Gate: orphan code ranges = 0, error bookmarks = 0, functions = 1049. Program saved. Unrelated noise in both script runs: Ghidra's script bundle prints 8 stale compile errors from leftover McpInline_*.java / T.java files in C:\\Users\\fdpsf\\ghidra_scripts — they do not belong to this workflow and neither script was affected (both completed successfully)."
+  },
+  {
+   "applied": 40,
+   "created": 1,
+   "error_bookmarks": 0,
+   "ghidra_responding": true,
+   "ok": true,
+   "orphan_ranges": 0,
+   "problems": "None. p1r1: 40 of 40 blocks applied, problems=0 from ApplyBlockTriage. Kinds: pad=36, data=2, code=1, mixed=1; 1 function created, 3 data items defined, 36 pad ranges defined. Gate clean on first run (orphan code ranges=0, error bookmarks=0), no repair needed. Program saved. Note (cosmetic, not a run problem): every run_ghidra_script call prints stale compile errors from 8 leftover McpInline_*.java / T.java files in C:\\Users\\fdpsf\\ghidra_scripts plus a bundle-activation stack trace; the requested scripts still compiled and ran successfully. Cleaning that directory would quiet the noise."
+  },
+  {
+   "applied": 40,
+   "created": 1,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "None. p1r2: 40 of 40 blocks applied, problems=0 from ApplyBlockTriage. kinds = {code:2, data:8, mixed:1, pad:29}; functions created=1, data items defined=14, pad ranges defined=29. Gate clean on first run (orphan code ranges=0, error bookmarks=0); no repair needed. Program saved. Note (not a run problem): Ghidra's script bundle prints stale compile errors for 8 leftover McpInline_*/T.java files in C:\\Users\\fdpsf\\ghidra_scripts from earlier sessions; both scripts still compiled and ran successfully, but that stale-script noise will keep appearing until those files are deleted."
+  },
+  {
+   "applied": 40,
+   "created": 2,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "None. p1r3: 40 of 40 blocks applied, problems=0 from ApplyBlockTriage; kinds = {pad=30, data=7, code=2, mixed=1}; 2 functions created, 9 data items defined, 30 pad ranges defined. Gate clean on first run (orphan code ranges=0, error bookmarks=0); no repair needed. Program saved. Post-apply totals: 1052 functions, calling conventions {__watcall=963, __cdecl=89}."
+  },
+  {
+   "applied": 40,
+   "created": 0,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "None. ApplyBlockTriage reported blocks applied = 40 of 40, functions created = 0, data items defined = 2, pad ranges defined = 38, kinds = {data=2, pad=38}, problems = 0. Gate clean on first run: orphan code ranges = 0, error bookmarks = 0. Program saved. Note (pre-existing, unrelated, non-blocking): the Ghidra script bundle prints 8 stale compile errors from leftover McpInline_*.java and T.java files in C:\\Users\\fdpsf\\ghidra_scripts from earlier sessions; both scripts still compiled and ran successfully."
+  },
+  {
+   "applied": 40,
+   "created": 1,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "None. p1r5: 40 of 40 blocks applied, problems = 0 from ApplyBlockTriage. kinds = {code=9, mixed=1, pad=30}; 1 function created, 1 data item defined, 30 pad ranges defined. Gate clean on first run (orphan code ranges = 0, error bookmarks = 0); no repair needed. Program saved. Note: the Ghidra console prefixes every run with stale compile errors from 8 leftover McpInline_*.java / T.java files in C:\\Users\\fdpsf\\ghidra_scripts — pre-existing noise unrelated to this round, the target scripts themselves compiled and ran successfully."
+  },
+  {
+   "applied": 40,
+   "created": 1,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "None. p1r6: 40/40 blocks applied, script reported problems = 0. Kinds = {pad=36, data=3, mixed=1}; 1 function created, 6 data items defined, 36 pad ranges defined, 0 dead-code ranges disassembled. Gate clean on first run (orphan code ranges = 0, error bookmarks = 0); no repair needed. Program saved. Note (not a problem with this round): every run_ghidra_script call prints stale compile errors from 8 leftover McpInline_*.java / T.java files in C:\\Users\\fdpsf\\ghidra_scripts; they are unrelated pre-existing junk scripts and did not affect execution."
+  },
+  {
+   "applied": 40,
+   "created": 1,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "Round p1r7: 40 of 40 blocks applied, 1 function created, 4 data items defined, 13 pad ranges defined, 0 dead-code ranges disassembled. kinds = {code=25, data=1, mixed=1, pad=13}. Gate clean on first run (orphan code ranges 0, error bookmarks 0); no repair needed. Program saved.\n\n25 problems, all the same shape and all reported verbatim from ApplyBlockTriage: \"DEAD CODE OUTSIDE ANY FUNCTION at <addr>, left undefined\" for 00029263 00029309 00029435 000296f6 00029752 000297a2 000297f2 00029842 000298a4 0002991b 00029992 00029a09 00029a80 00029af7 00029b6e 00029be5 00029c5c 00029cd2 00029dd2 00029e97 00029f0e 00029f85 0002a17a 0002a1c8 0002a293.\n\nMeaning: these verdicts were kind=code (or mixed) with an empty \"entries\" list, and the block start is not inside any existing function body. The script's applyDeadCode path refuses to disassemble there on purpose, because disassembling outside a function would manufacture orphan code and fail the gate; it leaves the bytes undefined and reports instead. So the gate is clean but those 25 blocks currently have no code representation in Ghidra -- effectively the only landings this round were 1 function, 4 data items and 13 pad ranges. I did not invent entry points or force disassembly to make them land.\n\nThese 25 need the sweep-back stage: either the verdicts should have named an entry point (block start is a real prologue -> create a function), or they are tails of an adjacent function whose body stopped short (-> extend the owning function's body), or the code verdict itself is wrong. That call belongs to an agent that reads the block, not to transcription.\n\nUnrelated console noise, pre-existing and harmless: C:\\Users\\fdpsf\\ghidra_scripts contains 8 stale McpInline_*.java / T.java files that fail to compile, so every run_ghidra_script call prints their javac errors plus an \"Unexpected error activating bundle\" stack trace before the real output. Both scripts still ran and completed successfully. Deleting those stale files would quiet it."
+  },
+  {
+   "applied": 40,
+   "created": 0,
+   "error_bookmarks": 0,
+   "ghidra_responding": true,
+   "ok": true,
+   "orphan_ranges": 0,
+   "problems": "None. p1r8: 40 of 40 blocks applied, 0 problems reported by ApplyBlockTriage; functions created 0, dead code ranges disassembled 0, data items defined 18, pad ranges defined 24, kinds {data=16, pad=24}. Gate clean on first run (orphan code ranges 0, error bookmarks 0); no repair needed. Program saved. Note (pre-existing, unrelated): the Ghidra script bundle emits compile errors for 8 stale McpInline_*.java / T.java files left in C:\\Users\\fdpsf\\ghidra_scripts from earlier sessions; both scripts still loaded and ran successfully."
+  },
+  {
+   "applied": 40,
+   "created": 2,
+   "error_bookmarks": 0,
+   "ghidra_responding": true,
+   "ok": true,
+   "orphan_ranges": 0,
+   "problems": "None. Round p1r9: 40 of 40 blocks applied, script reported problems = 0. Kinds = {pad=32, code=3, data=3, mixed=2}; 2 functions created, 3 dead-code ranges disassembled, 8 data items defined, 32 pad ranges defined. Gate clean on first run (orphan code ranges = 0, error bookmarks = 0); no repair needed. Program saved. Note: the Ghidra console prints stale compile errors for unrelated leftover McpInline_*.java / T.java scripts in C:\\Users\\fdpsf\\ghidra_scripts — pre-existing noise, both scripts ran and completed successfully."
+  },
+  {
+   "applied": 40,
+   "created": 0,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "None. p1r10: 40/40 blocks applied, problems=0, kinds={data=7, pad=33}, 8 data items defined, 33 pad ranges defined, 0 functions created, 0 dead-code ranges disassembled. Gate clean on first run: orphan code ranges=0, error bookmarks=0; functions=1057. Program saved. (Unrelated pre-existing noise: Ghidra's script bundle prints compile errors for 8 stale McpInline_*/T.java leftovers in C:\\Users\\fdpsf\\ghidra_scripts from earlier sessions; both scripts still ran and completed successfully.)"
+  },
+  {
+   "applied": 40,
+   "created": 0,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "None. p1r11: 40/40 blocks applied, all kind=pad (pad ranges defined = 40); functions created = 0, dead code ranges disassembled = 0, data items defined = 0, script-reported problems = 0. Gate clean on first run: orphan code ranges = 0, error bookmarks = 0. Program saved. Benign background noise only: Ghidra's script bundle printed pre-existing compile errors for stale McpInline_*.java / T.java leftovers in C:\\Users\\fdpsf\\ghidra_scripts from earlier sessions; both scripts still ran and completed successfully, so this did not affect the round."
+  },
+  {
+   "applied": 40,
+   "created": 3,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "None. p1r12: 40/40 blocks applied, problems=0 from the apply script; kinds = code 2, data 1, pad 37; 3 functions created, 0 dead-code ranges disassembled, 2 data items defined, 37 pad ranges defined. Gate clean (orphan code ranges 0, error bookmarks 0); function count now 1060. Program saved. The Ghidra console noise about 8 stale McpInline_*/T.java scripts failing to compile in ~/ghidra_scripts is pre-existing bundle clutter unrelated to this round."
+  },
+  {
+   "applied": 40,
+   "created": 0,
+   "error_bookmarks": 0,
+   "ghidra_responding": true,
+   "ok": true,
+   "orphan_ranges": 0,
+   "problems": "None. All 40 p1r13 blocks applied (kinds = {pad=40}); functions created 0, dead code ranges disassembled 0, data items defined 0, pad ranges defined 40, script-reported problems 0. Gate clean on first run: orphan code ranges 0, error bookmarks 0. Program saved. (Note: the script console prints unrelated pre-existing compile errors for stale McpInline_*.java / T.java files in C:\\Users\\fdpsf\\ghidra_scripts; they do not affect this run but leave noise in every script invocation.)"
+  },
+  {
+   "applied": 40,
+   "created": 95,
+   "error_bookmarks": 0,
+   "ghidra_responding": true,
+   "ok": true,
+   "orphan_ranges": 0,
+   "problems": "ApplyBlockTriage reported problems = 0. Blocks applied 40/40, functions created 95, data items defined 5, pad ranges defined 5, dead-code ranges disassembled 0, kinds = {code=33, data=1, mixed=1, pad=5}. First gate run showed 6 orphan code ranges (203 bytes), all OUTSIDE this round's address span (0x3bce2-0x4362a) and therefore pre-existing, not caused by p1r14: 00047af1-00047b00, 00047e0a-00047e2f, 0004b6f5-0004b71f, 0004bced-0004bd12, 0004eba8-0004ebc8, 0004ec18-0004ec3a. Each was inspected instruction-by-instruction: every one starts at a data-referenced entry point (function pointer or interrupt vector) and ends at a terminal RET or IRETD; none was a truncated tail of an adjacent function (the preceding function in each case ends at its own RET/JMP or in undefined bytes). The last two (0004eba8, 0004ec18) are STI/PUSHAD...IRETD interrupt handlers. Repaired by creating a function at each start and pinning the body to the exact orphan range. Re-run gate: orphan ranges 0, error bookmarks 0. No Bad Instruction bookmarks appeared at any point, so no block verdict had to be reversed. Function count went 1222 -> 1228. Program saved. Note: the Ghidra script console prints stale compile errors for 8 unrelated leftover McpInline_*.java / T.java files in C:\\Users\\fdpsf\\ghidra_scripts; they are pre-existing junk from earlier sessions and did not affect any script run here, but that directory could use a cleanup."
+  },
+  {
+   "applied": 40,
+   "created": 16,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "None. p1r15: 40/40 blocks applied (kinds code=17, pad=23), 16 functions created, 23 pad ranges defined, 0 dead-code ranges, 0 data items, script reported problems=0. Gate clean on first run (orphan code ranges=0, error bookmarks=0); no repair needed. Program saved. Post-apply totals: 1245 functions, conventions {__watcall=1156, __cdecl=89}."
+  },
+  {
+   "applied": 40,
+   "created": 22,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "p1r16: 40/40 blocks applied, 22 functions created, 8 data items, 14 pad ranges (kinds code=21 data=1 mixed=4 pad=14). Apply reported 1 problem: \"DEAD CODE OUTSIDE ANY FUNCTION at 0004df9d, left undefined\" -- that block's verdict says it is the unreachable epilogue tail of crt_cmain (0004df4c), so I disassembled 0004df9d-0004dfa4 and extended crt_cmain's body to 0004dfa4 exactly as the verdict directed (no new judgement). First gate run was dirty: orphan ranges=2, error bookmarks=3, all outside this round's address span. Repairs: (1) 00054c0f-00054cf6 and (2) 00054d43-00054d6e were orphan code, each starting at a clean prologue and ending at RET, and each the target of a function pointer defined by this round's block 0004cfc8 (DATA refs from 0004cfc9 and 0004cfce); created FUN_00054c0f and FUN_00054d43 with exactly those bodies. (3) The 3 Bad Instruction bookmarks (000566ae, 000566bd, 000566fa) sat inside bogus FUN_00056653: bytes 00056658-00056707 are an inline 8-byte power-of-ten constant table (1, 10, 100, ...), reached by the Watcom get-IP trick -- 00056653 is CALL 00056708 and 00056708 is POP EDI / RET, so caller FUN_00056544 gets 00056658 in EDI and indexes it with LEA EDI,[EDI+EAX*8]. Shrank FUN_00056653 to the 5-byte thunk 00056653-00056657, cleared the listing over 00056658-00056707, removed the 3 stale Error bookmarks. That region has no verdict file yet (0005xxxx is a later round); it now shows as 176 unreferenced undefined bytes and its correct future verdict is data, not code. Second gate run: orphan code ranges=0, error bookmarks=0, functions=1289. Program saved."
+  },
+  {
+   "applied": 40,
+   "created": 31,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "p1r17: 40/40 blocks applied, ApplyBlockTriage reported problems=0 (kinds code=10 data=22 mixed=6 pad=2; 31 functions created, 38 data items, 2 pad ranges, 0 dead-code disassembly). First gate run showed 4 orphan code ranges (367 bytes), all past this round's last block and all reached only through pointer tables defined by this round's data verdicts (table entries at 0005285c, 000528dc, 000529dc, 00052b94): 00052c5c-00052c78, 00052d3d-00052d86, 00053258-00053311, 000542b6-00054303. Each range is a run of small register-argument asm leaf routines that each end in RET, identical in shape to the already-existing neighbours FUN_00052c79 / FUN_00052d87 / FUN_00053312 / FUN_00054304. Repaired by creating a function at each entry (12 total: 00052c5c, 00052c6d, 00052d3d, 00052d51, 00052d60, 00052d76, 00053258, 00053288, 000532b3, 000532e5, 000542b6, 000542d8); every entry had a data reference from a table plus its own loop back-edge, and the 12 bodies together cover the orphan bytes exactly with no leftovers. Re-run gate is clean: orphan ranges 0, error bookmarks 0 (list_bookmarks \"Bad Instruction\" also empty). Function count 1320 -> 1332, conventions {__cdecl=89, __watcall=1243}. No block verdict had to be overridden. Program saved. Note (not a failure): every run_ghidra_script call echoes stale compile errors and an OSGi bundle stack trace from unrelated leftover McpInline_*.java / T.java files in C:\\Users\\fdpsf\\ghidra_scripts; the requested scripts still compiled and ran."
+  },
+  {
+   "applied": 40,
+   "created": 15,
+   "error_bookmarks": 0,
+   "ghidra_responding": true,
+   "ok": true,
+   "orphan_ranges": 0,
+   "problems": "Round p1r18: 40/40 blocks applied, 15 functions created, 1 dead-code range disassembled, 3 data items defined, 23 pad ranges, kinds={code=13,data=1,mixed=3,pad=23}. ApplyBlockTriage reported 1 problem: \"DATA FAILED 00054f3f: Conflicting instruction exists at address 00054f45 to 00054f49\" — the 00054f3d verdict calls for a 6-byte non-NUL-terminated ASCII string 'WVIDEO', and the apply script's string creation ran past the 6 bytes into the following instructions. Repaired in-round with an inline script that created char[6] at 00054f3f (bytes 57 56 49 44 45 4f = \"WVIDEO\") and the label crt_wvideo_signature, verbatim per the verdict; no judgement changed. Gate after repair: orphan code ranges = 0, error bookmarks = 0. Program saved. Note for the sweep-back stage: the 00054f3d verdict carries an open_question — it says the block is an interior gap of FUN_00054f26 (INT3 debug trap at 00054f3c stopping flow), and the right long-term fix is extending FUN_00054f26's body across the INT3 rather than the function-creation path; it also flags that the WVIDEO guard flag at 0x00061520 has only this one READ xref with no known writer. Neither was actioned here since this stage transcribes verdicts only."
+  },
+  {
+   "applied": 16,
+   "created": 0,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "None. All 16 blocks applied (16 of 16), all verdicts were kind=pad: 16 pad ranges defined, 0 functions created, 0 data items, 0 dead-code ranges disassembled, script reported problems=0. Gate clean on first run: orphan code ranges=0, error bookmarks=0. Program saved. Note (environment only, not caused by this round): every run_ghidra_script call emits stale compile errors from 8 leftover McpInline_*/T.java files in C:\\Users\\fdpsf\\ghidra_scripts and an \"Unexpected error activating bundle\" stack trace; both scripts still executed successfully."
+  },
+  {
+   "applied": 40,
+   "created": 0,
+   "error_bookmarks": 0,
+   "ghidra_responding": true,
+   "ok": true,
+   "orphan_ranges": 0,
+   "problems": "Round p2r1: 40 of 40 blocks applied, 0 functions created, 0 data items, 37 pad ranges, 1 dead-code range disassembled. Kinds = {code=3, pad=37}. ApplyBlockTriage reported 2 problems, both non-fatal and left in a safe state: \"DEAD CODE OUTSIDE ANY FUNCTION at 00010001, left undefined\" and \"DEAD CODE OUTSIDE ANY FUNCTION at 00044b5a, left undefined\" — the verdicts called these code but the ranges belong to no function body, so the script declined to disassemble them and left the bytes undefined rather than creating orphan code. Those two verdicts need a second look (either the range is really pad/data, or it needs an owning function). Gate after apply: orphan code ranges = 0, error bookmarks = 0, functions = 1347. No repair was needed and none was performed. Program saved."
+  },
+  {
+   "applied": 39,
+   "created": 0,
+   "orphan_ranges": 0,
+   "error_bookmarks": 0,
+   "ok": true,
+   "ghidra_responding": true,
+   "problems": "None. p2r2: blocks applied 39/39, functions created 0, dead code ranges disassembled 0, data items defined 3, pad ranges defined 38, kinds {data=1, pad=38}, script problems 0. Gate: orphan code ranges 0, error bookmarks 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Note: Ghidra logged stale compile failures for unrelated leftover McpInline_*/T.java files in C:\\Users\\fdpsf\\ghidra_scripts; they did not affect either script, both ran to completion."
+  }
+ ],
+ "gate_after": {
+  "orphan_code_ranges": 0,
+  "error_bookmarks": 0,
+  "undefined_bytes_object1": 0,
+  "functions": 1347
+ }
+}

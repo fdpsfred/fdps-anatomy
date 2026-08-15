@@ -22,13 +22,19 @@
 00047598 | Analysis | Address Table | Address table[4] created
 0004785c | Analysis | Address Table | Address table[10] created
 00047874 | Analysis | Address Table | Address table[4] created
+00047af1 | Analysis | Found Code | Found code from operand reference
+00047e0a | Analysis | Found Code | Found code from operand reference
 00048f90 | Analysis | Found Code | Found code from operand reference
 0004b080 | Analysis | Found Code | Found code from operand reference
+0004b6f5 | Analysis | Found Code | Found code from operand reference
+0004bced | Analysis | Found Code | Found code from operand reference
 0004ceff | Analysis | Found Code | Found code from operand reference
 0004e8e8 | Analysis | Address Table | Address table[176] created
 0004e948 | Analysis | Address Table | Address table[24] created
 0004e9a8 | Analysis | Address Table | Address table[64] created
 0004eaa8 | Analysis | Address Table | Address table[64] created
+0004eba8 | Analysis | Found Code | Found code from operand reference
+0004ec18 | Analysis | Found Code | Found code from operand reference
 0004ed70 | Analysis | Found Code | Found code from operand reference
 0004edac | Analysis | Found Code | Found code from operand reference
 0004f8bc | Analysis | Address Table | Address table[8] created
@@ -52,6 +58,8 @@
 00052b74 | Analysis | Address Table | Address table[6] created
 00052bdc | Analysis | Address Table | Address table[4] created
 00052bf4 | Analysis | Address Table | Address table[6] created
+00054c0f | Analysis | Found Code | Found code from operand reference
+00054d43 | Analysis | Found Code | Found code from operand reference
 00056837 | Analysis | Found Code | Found code from operand reference
 00060074 | Analysis | Address Table | Address table[30] created
 000601c4 | Analysis | Address Table | Address table[50] created

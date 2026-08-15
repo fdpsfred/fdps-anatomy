@@ -62,13 +62,15 @@ public class AuditGhidraBaseline extends GhidraScript {
 		reportMemoryBlocks(report);
 		reportLeObjectTable(report);
 		int orphanRanges = reportOrphanCode(report);
-		reportUndefinedBytes(report);
+		long undefinedBytes = reportUndefinedBytes(report);
 		int errorBookmarks = reportErrorBookmarks(report);
 		reportFunctionSummary(report);
 
 		report.append("\n# Gate\n");
 		report.append("orphan code ranges = ").append(orphanRanges).append(" (target 0)\n");
 		report.append("error bookmarks = ").append(errorBookmarks).append(" (target 0)\n");
+		report.append("undefined bytes in ").append(CODE_BLOCK).append(" = ")
+			.append(undefinedBytes).append(" (target 0)\n");
 
 		outDir.mkdirs();
 		File out = new File(outDir, "baseline_audit.txt");
@@ -176,13 +178,13 @@ public class AuditGhidraBaseline extends GhidraScript {
 
 	// Undefined bytes inside the code object, split into inter-function alignment padding,
 	// referenced data, and unreferenced blocks (linked-in but never called library code).
-	private void reportUndefinedBytes(StringBuilder sb) throws Exception {
+	private long reportUndefinedBytes(StringBuilder sb) throws Exception {
 		sb.append("\n# Undefined bytes in ").append(CODE_BLOCK).append("\n");
 		Memory mem = currentProgram.getMemory();
 		MemoryBlock code = mem.getBlock(CODE_BLOCK);
 		if (code == null) {
 			sb.append("no such block\n");
-			return;
+			return 0;
 		}
 		Listing listing = currentProgram.getListing();
 		ReferenceManager rm = currentProgram.getReferenceManager();
@@ -196,10 +198,12 @@ public class AuditGhidraBaseline extends GhidraScript {
 		}
 		Map<String, long[]> tally = new TreeMap<>();
 		List<String> notable = new ArrayList<>();
+		long totalUndefined = 0;
 		AddressRangeIterator ri = undefined.getAddressRanges();
 		while (ri.hasNext()) {
 			AddressRange r = ri.next();
 			long len = r.getLength();
+			totalUndefined += len;
 			byte[] b = new byte[(int) Math.min(len, 4096)];
 			mem.getBytes(r.getMinAddress(), b);
 			boolean referenced =
@@ -222,6 +226,7 @@ public class AuditGhidraBaseline extends GhidraScript {
 		for (String s : notable) {
 			sb.append("  ").append(s).append("\n");
 		}
+		return totalUndefined;
 	}
 
 	// Watcom pads between functions with multi-byte NOP forms built from lea/mov encodings

@@ -107,17 +107,24 @@ switch 跳躍表以 `JMP dword ptr CS:[reg*4 + 表位址]` 取用，表本身夾
 | | | `0x52bdc` | 4 |
 | | | `0x52bf4` | 6 |
 
-## 未被辨識為程式碼的區域
+## `.object1` 的每一個 byte 都已歸類
 
-`.object1` 內尚未反組譯的 byte 共 43,143，分成三類：
+程式碼 object 內**沒有未定義的 byte**：每個 byte 不是指令，就是有型別的資料。這個狀態由 738 個未定義區塊逐一判定而來，判定結果分四類：
 
-| 類別 | 範圍數 | byte 數 | 內容 |
-| --- | --- | --- | --- |
-| 對齊填充 | 205 | 745 | 函式之間的補位，由 `8d 80 00 00 00 00`／`8d 54 22 00`／`90`／`cc` 這類多 byte NOP 組成 |
-| 被參照的資料 | 16 | 2,746 | 有 reference 指向的常數表與跳躍表資料。這些落在程式碼 object 裡是 flat 記憶體模型的正常結果，不是誤判，見 [`rebuild_info/build_flags.md`](../rebuild_info/build_flags.md) |
-| 無參照 | 485 | 39,652 | 沒有任何 reference 的區塊 |
+| 類別 | 區塊數 | 內容 |
+| --- | --- | --- |
+| 對齊填充 | 578 | 函式之間的補位，由 `8d 80 00 00 00 00`／`8d 54 22 00`／`8d 76 00`／`90`／`cc` 這類多 byte NOP 與 `00` 連續段組成，定義成 byte 陣列 |
+| 程式碼 | 125 | 連結器帶進來但呼叫圖走不到的常式，已建成 function |
+| 資料 | 77 | 常數表、跳躍表、x87 常數與內嵌字串，已定型別 |
+| 混合 | 20 | 同一段內同時有程式碼與資料 |
 
-無參照的 39,652 byte 裡，7,096 byte 在遊戲邏輯區（`< 0x3c000`），其餘在程式庫區。抽樣檢視顯示這些區塊多數是完整的函式（`8d ..` 填充之後接 `53 56 57 55 89 e5 81 ec` 這組 Watcom prologue），少數是數值表；它們是連結器帶進來但呼叫圖走不到的程式碼。把它們逐一判定並建成 function 屬於後續的 orphan code 工作，不在基準盤點的範圍。
+被參照的資料落在程式碼 object 裡是 flat 記憶體模型的正常結果，不是誤判，見 [`rebuild_info/build_flags.md`](../rebuild_info/build_flags.md)。
+
+### 函式體內的空洞
+
+有一類 byte 不是孤立常式而是**既有函式體內的洞**：呼叫 `crt_exit` 這種不返回的 function 之後，編譯器仍然發出 cdecl 的 `add esp,4`，沒有任何路徑走得到它，Ghidra 因此在該處停止追蹤流程，把那三個 byte 留在所屬 function 的 body 之外。同樣形狀的還有 `INT3` 之後的 `jmp`（`0x10001` 的 trap stub、`0x54f3c` 的 WVIDEO 除錯協定）與 16-bit 遠端返回 `66 cb` 之後的實模式收尾（`0x44b5a`）。這些 byte 已反組譯並補回所屬 function 的 body，不另建 function。
+
+判斷 function 是否涵蓋某個位址時要注意：Ghidra 的 `getFunctionContaining` 問的是 body 這個位址集合，不是「entry 到結尾」這個範圍，遇到上述空洞會回 null。
 
 ## 基準狀態的判定條件
 
@@ -125,5 +132,6 @@ switch 跳躍表以 `JMP dword ptr CS:[reg*4 + 表位址]` 取用，表本身夾
 
 - **孤立程式碼 = 0**：沒有任何指令落在所有 function body 之外
 - **error bookmark = 0**：沒有反組譯損壞
+- **`.object1` 未定義 byte = 0**：程式碼 object 裡沒有還沒被歸類的 byte
 
-兩者目前都是 0。
+三者目前都是 0。

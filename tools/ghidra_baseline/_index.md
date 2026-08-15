@@ -21,4 +21,4 @@
 
 透過 Ghidra MCP 的 `run_ghidra_script` 帶絕對路徑執行；`FDPS.LE` 不是當前程式時腳本會直接拋例外停下。輸出寫到 `workspace/ghidra_baseline/baseline_audit.txt`，可用第一個參數改成別的目錄。
 
-報告末尾的 Gate 段列出兩個門檻值——孤立程式碼範圍數與 error bookmark 數，兩者都必須是 0。
+報告末尾的 Gate 段列出三個門檻值——孤立程式碼範圍數、error bookmark 數，以及 `.object1` 內未定義的 byte 數，三者都必須是 0。第三項自票 14 起成立：程式碼 object 裡每個 byte 都已判定為指令或有型別的資料，之後再出現未定義 byte 就表示有東西被漏掉。
