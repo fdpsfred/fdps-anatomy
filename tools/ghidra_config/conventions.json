@@ -1,0 +1,23 @@
+{
+  "strict_mode": "warn",
+
+  "function_naming": {
+    "min_length": 4
+  },
+
+  "hungarian": {
+    "auto_fix_struct_fields": false
+  },
+
+  "global_naming": {
+    "validate": true,
+    "require_g_prefix": false,
+    "min_descriptor_length": 2
+  },
+
+  "plate_comments": {
+    "validate": true,
+    "required_sections": ["Algorithm", "Parameters", "Returns"],
+    "min_first_line_words": 4
+  }
+}
