@@ -11,6 +11,8 @@
 | `build_worklists.py` | 把匯出結果攤成「一個工作項目一個證據包」，並算出還沒判定的清單 |
 | `ApplyBlockTriage.java` | 把區塊判定轉錄進 Ghidra：建 function、定資料型別、對齊填充定成 byte |
 | `ApplyPoolVerdicts.java` | 把 pool 判定轉錄進 Ghidra：function tag、plate comment、程式庫符號名 |
+| `ReconcilePoolTags.java` | 對帳：讓每個 function 的 `pool_*` tag 與判定檔完全一致，多餘的移除、缺的補上、沒有判定檔卻帶 tag 的回報 |
+| `DumpFdpsFunctions.java` | 匯出 `pool_fdps` 的 function 集合成 JSON，供下游腳本讀取，唯讀 |
 | [`fid/`](#fid--watcom-程式庫比對) | Watcom 程式庫比對，產出 CRT 判定的證據 |
 
 ## 執行
@@ -72,6 +74,21 @@ run_ghidra_script FidQuery.java        args: <fidb dir> <results dir> 0
 
 分數只是證據不是結論：短 function 會互撞，兩條指令的 stub 能同時對上幾十個程式庫模組。每個 function 仍然由一個 agent 讀過 assembly 才定案。
 
+## 錯誤處理
+
+[ADR-0007](../../docs/adr/0007-workflow-automation-and-agent-context.md) 第五條的實作對照，這支腳本是規模大的票的參考形：
+
+| 狀況 | 行為 |
+| --- | --- |
+| 單一 agent 沒回傳或沒寫判定檔 | 重試一次，仍失敗記進未完成清單並繼續 |
+| 一輪裡的 agent 全部沒回傳 | 判定為上游失效，立刻停止並把未動過的項目全部列出，不送重試 |
+| 落地腳本遇到做不了的判定 | 原樣保留該項目、回報原因，不自行改判定 |
+| gate 不過 | 該輪修復，修不掉回報 `ok: false` |
+| Ghidra 沒回應 | apply agent 回報 `ghidra_responding: false`，立刻停止 |
+| 已停止 | 不寫知識庫、不產下游清單，但仍輸出收尾報告 |
+
+**續跑**：已有判定檔的項目不重判；區塊另外比對判定檔記的 `end` 與現況是否相符，不符就把舊判定檔改名成 `.superseded-<舊end>` 並讓該區塊重回清單。落地漏掉的輪次用 `ApplyBlockTriage ... all` 或 `ApplyPoolVerdicts ... all` 補齊，兩者都是冪等的。
+
 ## 已知的坑
 
 **匯入的程式名稱就是檔名，所以要先把去重後的模組攤成 `<key>.obj`。** `FidPopulate` 是用 manifest 的 key 去找 Ghidra 裡的程式；直接匯入 `wlib` 抽出來的 `<module>.obj` 會讓不同版本的同名模組撞成 `xxx.obj.0`、`xxx.obj.1`，`FidPopulate` 一個都找不到，症狀是 `programs: 0  missing(import-failed): 732`。
@@ -79,3 +96,5 @@ run_ghidra_script FidQuery.java        args: <fidb dir> <results dir> 0
 **`font8x8.obj` 匯不進來**（`Unable to read past EOF`），這是 Ghidra OmfLoader 的已知問題。它是 GRAPH.LIB 的 CP437 8×8 字型，FDPS 用自己的中文字型，比對上不受影響。
 
 **Easy OMF-386 的 quirky record 一定要先修。** `emu387.lib` 與 GRAPH 的 11 個模組都是這種形式，不修就是匯入失敗或註冊出幽靈符號。
+
+**回掃改了 pool，舊的 tag 不會自己消失。** Ghidra 的 `Function.addTag` 只加不減，所以一個 function 被回掃改判之後會同時帶著新舊兩個 `pool_*` tag，任何以 tag 計數的清單都會超收。`ApplyPoolVerdicts` 現在會先移除不符的 `pool_*` 再加上正確的，但落地完仍要跑一次 `ReconcilePoolTags`：它是唯一會檢查「tag 集合等於判定集合」的地方，四個 pool 的 tag 數相加必須等於 function 總數。

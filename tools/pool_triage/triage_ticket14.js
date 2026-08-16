@@ -62,12 +62,18 @@ const POOL_VERDICTS = WS + '\\verdicts\\pools'
 const TOOLS = REPO + '\\tools\\pool_triage'
 const AUDIT = REPO + '\\tools\\ghidra_baseline\\AuditGhidraBaseline.java'
 
-const STAGE = (args && args.stage) || 'all'
-const MAX_BLOCKS = (args && args.maxBlocks) || 900
-const MAX_FUNCTIONS = (args && args.maxFunctions) || 900
-const ROUND_SIZE = (args && args.roundSize) || 40
-const MAX_BLOCK_PASSES = (args && args.maxBlockPasses) || 4
-const MAX_RESCAN_PASSES = (args && args.maxRescanPasses) || 2
+// Explicit undefined checks, not `||`: a deliberate 0 (skip the rescan, skip
+// the block passes) must not fall through to the default.
+function arg(name, fallback) {
+  return args && args[name] !== undefined ? args[name] : fallback
+}
+
+const STAGE = arg('stage', 'all')
+const MAX_BLOCKS = arg('maxBlocks', 900)
+const MAX_FUNCTIONS = arg('maxFunctions', 900)
+const ROUND_SIZE = arg('roundSize', 40)
+const MAX_BLOCK_PASSES = arg('maxBlockPasses', 4)
+const MAX_RESCAN_PASSES = arg('maxRescanPasses', 2)
 
 // ---------------------------------------------------------------- schemas
 
@@ -358,8 +364,14 @@ HOW TO JUDGE, in order:
 Tools, in ONE ToolSearch call:
   ToolSearch "select:mcp__ghidra__disassemble_function,mcp__ghidra__decompile_function,mcp__ghidra__get_xrefs_from,mcp__ghidra__read_memory"
 
-Keep to about 12 tool calls. Read your own function; do not disassemble the
-neighbours, their names are already in the packet.
+BUDGET: about 6 tool calls, and stop there. The packet was built so that most
+functions need only the Read plus one disassembly. Do not disassemble the
+neighbours -- their names are in the packet, and a name is what this stage
+needs. Do not decompile unless the disassembly genuinely will not resolve the
+question. Pool assignment is a coarser question than naming: you need to know
+where the code came from, not what every instruction does. When six calls have
+not settled it, that is a low-confidence verdict with an open question, which
+the rescan stage will pick up -- not a reason to keep digging.
 
 NAMING. Only propose a name when the library evidence gives you a real symbol:
 
@@ -535,6 +547,10 @@ Set id in your summary to exactly ${id}.`
 }
 
 function rescanPoolPrompt(id, why) {
+  // The dispatch-table case is worth naming explicitly: a function reached only
+  // through a table of function pointers has no static caller of its own, so
+  // the first reading has to fall back on what the body does -- and a PCM
+  // conversion loop looks like game code if you have not seen the table.
   return `An earlier pass assigned ONE function in FDPS.LE to a pool and could not settle
 it. You are re-reading that same function now that its neighbours have been
 judged too.
@@ -549,6 +565,15 @@ Read, in this order:
 The callers and callees named in the packet now have verdicts of their own in
 ${POOL_VERDICTS}\\. Open the ones that matter. A helper whose callers are all
 crt is crt; one called from the game's main loop is fdps.
+
+If the packet shows no callers at all, the function is probably reached through
+a table of function pointers, and then WHO DISPATCHES THE TABLE decides the
+pool, not what the body computes. Look for a table slot holding this address
+(get_xrefs_to on the function, then xrefs to that table address), find the
+dispatcher, and read its verdict. A routine sitting in the same table as a
+hundred routines already judged ail is ail, however much its body looks like
+game code -- a PCM conversion loop and a sprite loop are hard to tell apart on
+sight.
 
 Reading a neighbour's verdict is using a judgement someone else already made;
 it is not re-judging that neighbour. Never rewrite another function's verdict.
@@ -596,6 +621,28 @@ function noteApply(label, report) {
   return report.ok
 }
 
+// A whole round coming back empty is not a per-item failure. Individual agents
+// fail one at a time -- a bad prompt, a tool error -- and the retry path is for
+// those. When every agent in a round dies, the cause is upstream and outside
+// this run: the session token limit, the API, the machine. Retrying is then
+// guaranteed waste, and the honest move is to stop with the remainder recorded
+// so a later run picks it up.
+function outage(label, got, expected, remaining) {
+  if (expected === 0 || got > 0) {
+    return false
+  }
+  halted = true
+  haltReason = `${label}: all ${expected} agent(s) in the round returned nothing, `
+    + 'which means the failure is upstream of this workflow (session limit, API, host) '
+    + 'rather than in any one item'
+  log(`STOP ${haltReason}`)
+  if (remaining && remaining.length > 0) {
+    unfinished.push(`${remaining.length} item(s) not attempted after the run stopped: `
+      + remaining.slice(0, 12).join(' ') + (remaining.length > 12 ? ' ...' : ''))
+  }
+  return true
+}
+
 function chunk(items, size) {
   const out = []
   for (let i = 0; i < items.length; i += size) {
@@ -612,13 +659,15 @@ function chunk(items, size) {
 // passes are short, so those still go through a refresh agent.
 phase('Plan')
 let plan
-if (args && args.blockIds) {
+if (args && (args.blockIds || args.functionIds)) {
+  const blockIds = args.blockIds || []
+  const functionIds = args.functionIds || []
   plan = {
-    blocks_todo: args.blockIds,
-    functions_todo: (args && args.functionIds) || [],
-    blocks_total: args.blockIds.length,
-    functions_total: ((args && args.functionIds) || []).length,
-    fid_addresses: (args && args.fidAddresses) || 0,
+    blocks_todo: blockIds,
+    functions_todo: functionIds,
+    blocks_total: blockIds.length,
+    functions_total: functionIds.length,
+    fid_addresses: arg('fidAddresses', 0),
   }
   log('worklists supplied through args')
 }
@@ -658,6 +707,10 @@ if (STAGE === 'blocks' || STAGE === 'all') {
       const summaries = (await parallel(rounds[r].map((id) => () =>
         agent(blockPrompt(id), { label: `block:${id}`, phase: 'Blocks', schema: BLOCK_SUMMARY })
       ))).filter(Boolean)
+
+      if (outage(tag, summaries.length, rounds[r].length, rounds.slice(r).flat())) {
+        break
+      }
 
       // A missing verdict file is not a skip: retry once, then record it.
       let usable = summaries.filter((s) => s.wrote_file)
@@ -722,7 +775,9 @@ const poolVerdicts = []
 let functionsTodo = plan.functions_todo
 
 if ((STAGE === 'pools' || STAGE === 'all') && !halted) {
-  if (functionsTodo.length === 0) {
+  // An explicitly supplied list is authoritative, including an empty one: a
+  // rescan-only run passes [] and must not have an agent go and find work.
+  if (!(args && args.functionIds) && functionsTodo.length === 0) {
     phase('Plan')
     const refreshed = await agent(refreshPrompt('before the pool stage').replace(
       'Return it even if it is empty.',
@@ -752,6 +807,10 @@ address in worklist.json with no verdict file under ${POOL_VERDICTS}.`),
     const summaries = (await parallel(rounds[r].map((id) => () =>
       agent(poolPrompt(id), { label: `pool:${id}`, phase: 'Pools', schema: POOL_SUMMARY })
     ))).filter(Boolean)
+
+    if (outage(tag, summaries.length, rounds[r].length, rounds.slice(r).flat())) {
+      break
+    }
 
     let usable = summaries.filter((s) => s.wrote_file)
     const lost = rounds[r].filter((id) => !usable.some((s) => s.addr === id))
@@ -784,6 +843,72 @@ address in worklist.json with no verdict file under ${POOL_VERDICTS}.`),
 // --------------------------------------------------------------- rescan
 
 const rescanLog = []
+
+// A run that stops on the agent budget leaves unresolved verdicts behind that
+// this invocation never saw. The final run collects them off disk so the rescan
+// covers the whole ticket, not just the last slice of it.
+if (arg('rescanFromDisk', false) && !halted) {
+  phase('Rescan')
+  const leftovers = await agent(
+    `List the ticket-14 verdicts that are still unresolved. This is a listing job, not a
+judgement: do not open Ghidra and do not form an opinion about any verdict.
+
+Run exactly this, with the Bash tool:
+
+  python -c "import json,glob,os;print(json.dumps([os.path.basename(p)[:-5] for p in sorted(glob.glob(r'${POOL_VERDICTS}\\*.json')) if (lambda v: v.get('confidence')!='high' or v.get('pool') in (None,'','unknown'))(json.load(open(p,encoding='utf-8')))]))"
+
+The test is "not high confidence, or no pool" on purpose. A high-confidence
+verdict can still carry an open question -- usually about the calling
+convention or which library object a routine came from. Those are real, but
+they are questions for the naming and emit tickets, not for this one, and
+re-reading several hundred settled pool assignments to chase them would cost
+more than it returns. What comes back here is every verdict whose POOL is
+actually in doubt.
+
+Return what it printed as functions_todo, verbatim, and set blocks_todo to the
+same thing for the block verdicts under ${BLOCK_VERDICTS} (same command, that
+directory, dropping the pool test).
+
+blocks_total and functions_total are the total number of verdict files in each
+directory. Set ok to true if both commands ran.`,
+    { label: 'rescan:collect', phase: 'Rescan', schema: WORKLIST })
+  if (leftovers) {
+    for (const id of leftovers.functions_todo || []) {
+      if (!poolVerdicts.some((s) => s.addr === id)) {
+        poolVerdicts.push({ addr: id, pool: 'unknown', confidence: 'low',
+          has_open_question: true, wrote_file: true, fromDisk: true })
+      }
+    }
+    for (const id of leftovers.blocks_todo || []) {
+      if (!blockVerdicts.some((s) => s.start === id)) {
+        blockVerdicts.push({ start: id, kind: 'unknown', entries: 0, confidence: 'low',
+          has_open_question: true, wrote_file: true, fromDisk: true })
+      }
+    }
+    log(`rescan: picked up ${(leftovers.functions_todo || []).length} function and `
+      + `${(leftovers.blocks_todo || []).length} block verdict(s) left unresolved by earlier runs`)
+  }
+  else {
+    unfinished.push('could not collect unresolved verdicts from disk for the rescan')
+  }
+}
+
+// Verdicts named by the caller: high-confidence ones that a later stage found
+// reason to doubt, such as a function whose siblings under the same dispatch
+// table all landed in a different pool. They go through the same rescan, which
+// is the only path allowed to read a neighbour's verdict as evidence.
+for (const id of arg('rescanIds', [])) {
+  const existing = poolVerdicts.find((s) => s.addr === id)
+  if (existing) {
+    existing.confidence = 'low'
+    existing.has_open_question = true
+  }
+  else {
+    poolVerdicts.push({ addr: id, pool: 'unknown', confidence: 'low',
+      has_open_question: true, wrote_file: true, fromDisk: true })
+  }
+}
+
 for (let pass = 1; pass <= MAX_RESCAN_PASSES && !halted; pass++) {
   const openBlocks = blockVerdicts.filter((s) => s.confidence === 'low' || s.has_open_question)
   const openPools = poolVerdicts.filter((s) =>
@@ -807,6 +932,11 @@ for (let pass = 1; pass <= MAX_RESCAN_PASSES && !halted; pass++) {
         { label: `rescan:pool:${s.addr}`, phase: 'Rescan', schema: RESCAN })
     ))
   )).filter(Boolean)
+
+  if (outage(`rescan pass ${pass}`, results.length, openBlocks.length + openPools.length,
+      openBlocks.map((s) => s.start).concat(openPools.map((s) => s.addr)))) {
+    break
+  }
 
   const changedBlocks = []
   const changedPools = []

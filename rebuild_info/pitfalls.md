@@ -41,7 +41,11 @@
 | 章節音軌表的位元組要 **+1** 才是 MSCDEX 音軌編號，加法由呼叫端在起播前做，不在表裡 | 直接把表值當音軌編號送出去，整首曲子會差一軌 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
 | CD 命令的 `INT 2Fh` 不是指令，是 DPMI `INT 31h` AX=0300h 的 real-mode call structure 裡的資料位元組 | 直接寫 `int 0x2f` 內嵌組語。在 DOS/4G 保護模式下走不通 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
 | `0x63930` 以後的 global 全部在 BSS，其中 `0x64000` 之後執行檔裡連內容都沒有 | 照 Ghidra 顯示的零值 emit 成初始化陣列。BSS 從 `0x63930` 起就該宣告成未初始化，而 `0x64000`–`0x6c3bf` 這 33KB 更是連檔案裡都不存在，載入器補的零與檔案帶的零長得一樣，照抄會把它們塞進映像檔 | [`program_info/memory_layout.md`](../program_info/memory_layout.md) |
+| 遊戲的 blit kernel 家族是手寫組語：沒有 prologue，參數由呼叫端預先放在 ESI／EDI／ECX／EDX，共用呼叫端的 EBP frame，還會蓋掉呼叫端的傳入參數槽 | 照 Ghidra 推出來的 `__watcall` 簽章寫成一般 C function。那個簽章是反編譯器猜的，不是真的呼叫慣例；寫成 C 之後編譯器會自己配置 frame 與暫存器，這個以暫存器交接的契約就斷了。必須以 `.ASM` 模組或內嵌組語產出 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
 | DGROUP 最上面的 8KB（`0x6a3c0` 以後）是堆疊段，不是 global | 看到 Ghidra 在那裡標了位址就當成 BSS 變數 emit。真正的 BSS 在 `0x6a3bc` 就結束了，那一段是堆疊、環境變數複本與近端堆積共用的空間 | [`program_info/memory_layout.md`](../program_info/memory_layout.md) |
+| 存檔的 checksum 只加總 **`len - 4`** 個 byte，尾端 4 byte 的 checksum 欄位本身不算進去（`0x56898`） | 加總整個緩衝區。舊存檔一律驗不過 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
+| `FDE.SAV` 的 XOR 串流密鑰是硬寫的：DX 起始 `0xa5`，每個 byte 先 `DX += 0x9014` 再 `ROL DX,3`，取 DL 與資料 XOR（`0x568b7`） | 換一組看起來等價的常數或改變運算順序。加解密是同一支常式，改了之後新舊存檔互不相容 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
+| Watcom 的 `printf` 認得 `%hf`／`%hF`，那是 **16.16 定點數**轉換（吃 32-bit 整數、預設精度 4、完全不碰 FPU），不是 `%f` 的短版 | 轉錄格式字串時把 `%hf` 當成筆誤改成 `%f`。輸出數值會變，而且會把浮點格式化支援拉進映像檔 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
 
 ## 不能照字面理解的資料
 

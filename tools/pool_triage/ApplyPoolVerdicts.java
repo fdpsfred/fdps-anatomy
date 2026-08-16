@@ -109,6 +109,16 @@ public class ApplyPoolVerdicts extends GhidraScript {
 			}
 			counts.merge(pool, 1, Integer::sum);
 			try {
+				// A rescan may move a function between pools, so drop whatever
+				// pool tag an earlier round left before adding this one -- two
+				// pool tags on one function would corrupt every tag-based count.
+				for (ghidra.program.model.listing.FunctionTag t : new ArrayList<>(fn.getTags())) {
+					String tn = t.getName();
+					if (tn.startsWith("pool_") && !tn.equals("pool_" + pool)) {
+						fn.removeTag(tn);
+						problems.add("REPLACED STALE TAG " + key + " " + tn + " -> pool_" + pool);
+					}
+				}
 				if (!"unknown".equals(pool)) {
 					fn.addTag("pool_" + pool);
 					tagged++;

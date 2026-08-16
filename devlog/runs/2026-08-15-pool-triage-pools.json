@@ -1,0 +1,423 @@
+{
+ "ticket": 14,
+ "stage": "pools",
+ "date": "2026-08-15",
+ "workflows": [
+  {
+   "run_id": "wf_9fce766b-52a",
+   "description": "pools chunk 1 (650 functions)",
+   "agent_results": 667,
+   "apply_rounds": [
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f1: 40 of 40 verdicts applied, 0 renames, 40 pool tags added, breakdown {crt=1, fdps=39}, script-reported problems=0, no NAME TAKEN lines. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; 1347 functions, conventions {__watcall=1258, __cdecl=89}. Program saved. Non-fatal noise: both script runs print stale ghidra_scripts bundle build failures from 7 leftover McpInline_*.java files (one references a deleted source file), unrelated to this work but it pollutes every run_ghidra_script output and could be cleaned up in C:\\Users\\fdpsf\\ghidra_scripts."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "None. Round f2: 40 of 40 verdicts applied, 40 pool tags added, pool breakdown {fdps=40}, functions renamed = 0, script-reported problems = 0, no NAME TAKEN lines. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. (Cosmetic only: Ghidra's script console echoes stale compile errors from unrelated leftover McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts; both scripts still ran and completed successfully.)"
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "None. Round f3: verdicts applied 40/40, functions renamed 0, pool tags added 40, pool breakdown {fdps=40}, script-reported problems 0, no NAME TAKEN lines. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Note: both script runs printed pre-existing stale-bundle compile errors from old McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts (unrelated leftovers); both target scripts still compiled and completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "None. Round f4: verdicts applied = 40 of 40, renames = 0 (all 40 verdicts have an empty name field, pool=fdps, so no rename was requested), pool tags added = 40, pool breakdown = {fdps=40}, script problems = 0, no NAME TAKEN lines. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions = 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Note: the Ghidra console prints pre-existing compile errors for stale McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts (leftover inline scripts from earlier sessions); they do not affect these two scripts, both of which ran and completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f5 clean. ApplyPoolVerdicts: verdicts applied = 40 of 40, functions renamed = 0 (all verdict files carry an empty \"name\" field, so nothing to rename), pool tags added = 40, pool breakdown = {fdps=40}, problems = 0, no NAME TAKEN lines. Gate (AuditGhidraBaseline): orphan code ranges = 0, error bookmarks = 0, undefined bytes in .object1 = 0; functions = 1347, still FUN_* = 1230, conventions {__cdecl=89, __watcall=1258}. Program saved. Note (pre-existing, not caused by this round): every run_ghidra_script call prints compile errors for 7 stale McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts plus an \"Unexpected error activating bundle\" stack trace for a missing McpInline_bbac1b33dd84.java source; both target scripts still compiled and ran successfully. Cleaning those leftovers would quiet the output."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "None. Round f6: verdicts applied = 40 of 40, functions renamed = 0, pool tags added = 40, pool breakdown = {fdps=40}, script problems = 0, no NAME TAKEN lines. Gate: orphan code ranges = 0, error bookmarks = 0, undefined bytes in .object1 = 0; functions = 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Unrelated noise: Ghidra's script bundle build prints 7 pre-existing compile errors from stale McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts; both scripts still ran and completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f7: 40 of 40 verdicts applied, renames 0, pool tags 40, breakdown {fdps=40}, script problems 0, no NAME TAKEN lines. Gate: orphan ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Only noise: Ghidra's script bundle rebuild prints pre-existing compile errors for 7 stale McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts (leftover inline snippets, unrelated to this run); both scripts still ran and completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f8: applied 40/40, renames 0, pool tags 40, breakdown {ail=1, fdps=39}, script problems 0, no NAME TAKEN lines. Gate: orphan ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Note (pre-existing, unrelated): every run_ghidra_script call prints stale compile errors for 7 leftover McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts and an \"Unexpected error activating bundle\" trace for a missing McpInline_bbac1b33dd84.java; both scripts still compiled and completed successfully. Cleaning those stray files would quiet the noise."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f9: 40/40 verdicts applied, 0 renames, 40 pool tags, breakdown {fdps=40}, script problems=0, no NAME TAKEN lines. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Non-fatal noise only: Ghidra's script bundle log repeats 7 pre-existing broken McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts (leftover inline scripts from earlier sessions) and one \"Unexpected error activating bundle\" stack trace for a missing McpInline_bbac1b33dd84.java; both scripts still compiled and ran successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f10: verdicts applied 40/40, functions renamed 0, pool tags added 40, pool breakdown {fdps=40}, script problems 0, no NAME TAKEN lines. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Note (pre-existing, unrelated): Ghidra's script bundle prints compile errors for 7 stale McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts from earlier inline runs; both scripts still compiled and completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "none. Round f11: verdicts applied 40/40, renames 0, pool tags added 40, breakdown {fdps=40}, script problems 0, no NAME TAKEN lines. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Note: Ghidra console prints pre-existing compile errors for stale McpInline_*.java scratch scripts in C:\\Users\\fdpsf\\ghidra_scripts — unrelated to this run, both scripts completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f12: 40 of 40 verdicts applied, 0 renames, 40 pool tags added, pool breakdown {fdps=40}, script problems=0, no NAME TAKEN lines. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Note (pre-existing, unrelated): Ghidra's script bundle prints 7 stale McpInline_*.java compile errors from earlier inline scripts on every run; both scripts still executed and completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "None. Round f13: 40/40 verdicts applied, 10 functions renamed, 39 pool tags added (the single unknown-pool verdict carries no tag), script problems = 0, no NAME TAKEN lines. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Pool breakdown: fdps=18, ail=10, crt=8, binary_artifact=3, unknown=1. Program saved."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f14 applied cleanly: 40 of 40 verdicts, 33 functions renamed, 40 pool tags added, script-reported problems = 0, no NAME TAKEN lines. Pool breakdown: ail=35, binary_artifact=4, fdps=1. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347 (1187 still FUN_*), conventions __watcall=1258 / __cdecl=89. Program saved. Note (pre-existing, unrelated to this round): Ghidra's script bundle prints stale compile errors for 7 leftover McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts plus an \"Unexpected error activating bundle\" stack trace for a missing McpInline_bbac1b33dd84.java; both target scripts still compiled and ran successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "None. Round f15: verdicts applied = 40 of 40, functions renamed = 38 (2 already carried their verdict name), pool tags added = 40, script problems = 0, no NAME TAKEN lines. Pool breakdown: ail=39, binary_artifact=1. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions __watcall=1258 / __cdecl=89. Program saved. (The unrelated stale McpInline_*.java compile errors in ~/ghidra_scripts appear in every script run's console and did not affect either script.)"
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f16: applied 40/40, renamed 36, pool tags 40, script problems 0, no NAME TAKEN lines. Pool breakdown = {ail=31, crt=7, fdps=2}. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Note (pre-existing, unrelated): Ghidra's script bundle prints 7 stale McpInline_*.java compile errors from previous inline runs before every script; both scripts still ran and completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 10,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "none; round f17: 10/10 verdicts applied, 8 renamed, 10 pool tags, breakdown {crt=10}, no NAME TAKEN, script problems=0; gate orphan=0 error_bm=0 undefined=0; program saved"
+    }
+   ]
+  },
+  {
+   "run_id": "wf_0c82a348-83d",
+   "description": "pools chunk 2 (697 functions, stopped by the session token limit)",
+   "agent_results": 696,
+   "apply_rounds": [
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f1: 40/40 verdicts applied, 25 functions renamed, 40 pool tags added, breakdown {crt=40}. One non-fatal name collision reported by the script: NAME TAKEN crt_sprintf, using crt_sprintf_00042d41 (both functions kept apart). Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; 1347 functions, conventions {__watcall=1258, __cdecl=89}. Program saved. Note: Ghidra console prints pre-existing compile errors for stale McpInline_*.java scratch scripts in C:\\Users\\fdpsf\\ghidra_scripts; they do not affect these runs (both scripts completed successfully)."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f2: 40/40 verdicts applied, 22 functions renamed, 40 pool tags added, pool breakdown {crt=39, binary_artifact=1}, script-reported problems=0, no NAME TAKEN lines. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions=1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Non-fatal noise: Ghidra's script bundle build prints 7 pre-existing compile errors from stale McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts (unrelated leftovers from earlier inline scripts) plus an \"Unexpected error activating bundle\" stack trace; both target scripts still compiled and completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f3: 40/40 verdicts applied, 14 renamed, 36 pool tags (ail=27, binary_artifact=2, crt=4, fdps=3, unknown=4). Program saved. 8 NAME TAKEN (non-fatal, address suffix used, functions kept apart): AIL_get_real_vect->AIL_get_real_vect_00044abd; AIL_call_driver->AIL_call_driver_00044e2b; AIL_register_timer->AIL_register_timer_00044f4e; AIL_release_all_timers->AIL_release_all_timers_00044fe4; AIL_stop_all_timers->AIL_stop_all_timers_0004508c; AIL_set_timer_period->AIL_set_timer_period_000450b0; AIL_set_timer_frequency->AIL_set_timer_frequency_000450e0; AIL_set_timer_divisor->AIL_set_timer_divisor_00045110. These 8 suggest possible duplicate-identity verdicts against already-named AIL functions and may deserve a look in the sweep-back stage. Gate: orphan ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions=1347, conventions {__watcall=1258, __cdecl=89}."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f4: 40/40 verdicts applied, 21 functions renamed, 39 pool tags added, pool breakdown {ail=23, crt=9, fdps=7, unknown=1}. 6 non-fatal NAME TAKEN collisions, each disambiguated by address suffix: AIL_set_preference_00045681, AIL_install_driver_0004569a, AIL_startup_000459f3, AIL_uninstall_DIG_driver_00046940, AIL_install_DIG_driver_image_00047080, AIL_install_DIG_INI_000470c0. These duplicate-name pairs are worth a look in the sweep-back pass: the same AIL entry point name landing on two distinct addresses may mean one of the two verdicts mis-identified a thunk or a neighbouring stub. Gate clean (orphan ranges 0, error bookmarks 0, undefined bytes in .object1 0; 1347 functions, 1023 still FUN_*). Program saved. Script console also shows pre-existing compile failures for 7 stale McpInline_*.java scratch scripts in C:\\Users\\fdpsf\\ghidra_scripts — unrelated to this run, but they add noise to every script invocation and could be deleted."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f5: 40/40 verdicts applied, 12 functions renamed, 39 pool tags added, breakdown {ail=33, fdps=6, unknown=1}. 9 non-fatal NAME TAKEN lines (script kept the functions apart by appending the address): AIL_set_sample_pan_00047360, AIL_set_sample_position_000473a0, AIL_sample_loop_count_000473c0, AIL_start_sample_000473f0, AIL_register_EOB_callback_00047520, AIL_minimum_sample_buffer_size_000475b0, AIL_load_sample_buffer_00047650, AIL_set_sample_file_00047be9, AIL_set_sample_file_00047d16. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; 1347 functions, conventions {__watcall=1258, __cdecl=89}. Program saved. Note: the Ghidra script console also emits pre-existing unrelated compile errors from stale McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts; both scripts still ran and completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f6: 40/40 verdicts applied, 15 renamed, 37 pool tags (ail=29, fdps=8, unknown=3). Gate clean: orphan ranges 0, error bookmarks 0, undefined bytes 0, functions 1347. Program saved. 10 non-fatal NAME TAKEN collisions, each disambiguated with an address suffix: AIL_install_MDI_INI_00049f60, AIL_init_sequence_0004a0f0, AIL_start_sequence_0004a4a0, AIL_resume_sequence_0004a5b0, AIL_end_sequence_0004a640, AIL_set_sequence_tempo_0004a680, AIL_set_sequence_volume_0004a6f0, AIL_sequence_loop_count_0004a780, AIL_unprotect_timbre_0004a940, AIL_controller_value_0004a9b0. Worth a follow-up look: 10 AIL names colliding in one round suggests duplicate AIL entry-point stubs (thunk vs body) that a later pass should reconcile."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f7: 40/40 verdicts applied, 16 renamed, 38 pool tags, breakdown {ail=19, crt=11, fdps=8, unknown=2}. 7 NAME TAKEN (non-fatal, suffixed): AIL_sequence_position->AIL_sequence_position_0004aa20, AIL_branch_index->_0004aa90, AIL_register_prefix_callback->_0004ab20, AIL_register_sequence_callback->_0004ab60, AIL_register_timbre_callback->_0004aba0, AIL_lock_channel->_0004ac10, AIL_map_sequence_channel->_0004aee0. Gate clean: orphan ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Note: Ghidra console prints pre-existing compile failures for 7 stale McpInline_*.java scratch scripts in C:\\Users\\fdpsf\\ghidra_scripts; unrelated to this run but they pollute every script's output."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f8: 40/40 verdicts applied, 24 renamed, 38 pool tags (crt=35, fdps=3, unknown=2), script problems=0, no NAME TAKEN. Gate: orphan ranges 0, error bookmarks 0, undefined bytes in .object1 0; 1347 functions, conventions {__watcall=1258, __cdecl=89}. Program saved. Note (pre-existing, not caused by this round): Ghidra's script bundle prints compile errors for 7 stale McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts on every run; both scripts still compiled and completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "none. round f9: applied 40/40, renamed 12, pool tags 40, breakdown crt=38 binary_artifact=2, script problems=0, no NAME TAKEN. Gate: orphan ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f10 clean. ApplyPoolVerdicts: verdicts applied = 40 of 40, functions renamed = 0, pool tags added = 40, pool breakdown = {crt=37, binary_artifact=3}, problems = 0, no NAME TAKEN lines. Gate (AuditGhidraBaseline): orphan code ranges = 0, error bookmarks = 0, undefined bytes in .object1 = 0; functions = 1347 (944 still FUN_*), conventions {__watcall=1258, __cdecl=89}. Program saved. Cosmetic note only: both script runs printed pre-existing Ghidra bundle-build errors from 7 stale McpInline_*.java files left in C:\\Users\\fdpsf\\ghidra_scripts by earlier inline-script calls (one references a deleted source file). They are unrelated to this round, did not stop either script from running to completion, and will keep appearing in every run's console output until that directory is cleaned."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "None. Round f11: verdicts applied = 40 of 40, functions renamed = 0, pool tags added = 40, pool breakdown = {crt=40}, script problems = 0, no NAME TAKEN lines. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347 (944 still FUN_*), conventions {__watcall=1258, __cdecl=89}. Program saved. Pre-existing unrelated noise: Ghidra's script bundle build prints 7 stale McpInline_*.java compile errors from earlier inline scripts in C:\\Users\\fdpsf\\ghidra_scripts; both scripts still compiled and ran successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "None. Round f12: verdicts applied = 40 of 40, functions renamed = 18, pool tags added = 38, script-reported problems = 0, no NAME TAKEN lines. Pool breakdown = crt 22, ail 12, fdps 3, unknown 2, binary_artifact 1. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, still FUN_* 926. Program saved. Both script runs printed stale OSGi bundle-build errors from leftover McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts left by earlier sessions; both scripts still compiled and completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "Round f13 clean. Applied 40/40, renames 0, pool tags added 29, script problems 0, no NAME TAKEN lines. Pool breakdown: ail=25, fdps=4, unknown=11. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions __watcall=1258 / __cdecl=89. Program saved. Only noise: pre-existing stale McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts fail to compile on every bundle build (7 files) — unrelated to this run, both scripts still executed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "None. Round f14: 40 of 40 verdicts applied, 0 renames, 32 pool tags added, script problems = 0, no NAME TAKEN lines. Pool breakdown {ail=27, fdps=5, unknown=8} (the 8 unknown get no pool tag, hence 32 tags). Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Note: Ghidra's console prints a pre-existing stale-bundle compile error list for old McpInline_*.java scripts in C:\\Users\\fdpsf\\ghidra_scripts — unrelated to this run, both scripts completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "None. Round f15: verdicts applied 40/40, functions renamed 0, pool tags added 39, pool breakdown {ail=33, fdps=6, unknown=1} (the single unknown-pool verdict gets no tag, which accounts for 39 tags vs 40 verdicts), script problems = 0, no NAME TAKEN lines. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. The Java compile errors printed by the script host are stale leftovers from unrelated McpInline_* scratch scripts in C:\\Users\\fdpsf\\ghidra_scripts and did not affect either script, both of which completed successfully."
+    },
+    {
+     "label": "",
+     "applied": 40,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "None. Round f16: 40/40 verdicts applied, 25 functions renamed, 39 pool tags added, pool breakdown {crt=32, fdps=7, unknown=1}, script-reported problems=0, no NAME TAKEN lines. Gate clean: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions=1347, still FUN_*=901. Program saved. Note (pre-existing, unrelated): the Ghidra script console prints stale compile errors for 7 leftover McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts and an IllegalArgumentException for a missing McpInline source file; both target scripts still ran and completed successfully."
+    }
+   ]
+  },
+  {
+   "run_id": "wf_b45349cf-e33",
+   "description": "remainder + rescan + report",
+   "agent_results": 324,
+   "apply_rounds": [
+    {
+     "label": "",
+     "applied": 17,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "None. Round f1: 17 of 17 verdicts applied, 17 pool tags added, breakdown {fdps=17}, script problems=0, no NAME TAKEN lines. Renames = 0 because every verdict file in this round has an empty \"name\" field (checked 00056898.json) -- expected, not a failure. Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; functions 1347, conventions {__watcall=1258, __cdecl=89}. Program saved. Note: both script runs emitted the pre-existing McpInline_* bundle compile errors from C:\\Users\\fdpsf\\ghidra_scripts (7 stale inline scripts from earlier sessions); they are unrelated leftovers and did not stop either script from running to completion."
+    },
+    {
+     "label": "",
+     "applied": 302,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "rescan1: 302 of 302 verdicts applied, 25 functions renamed, 302 pool tags added, pool breakdown {ail=211, crt=55, fdps=36}. 3 non-fatal NAME TAKEN collisions, each resolved by appending the address suffix so the functions stay distinct: AIL_release_channel -> AIL_release_channel_00041f9a; AIL_install_DIG_driver_file -> AIL_install_DIG_driver_file_00047000; AIL_sequence_tempo -> AIL_sequence_tempo_0004a7a0. Gate clean: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; 1347 functions, calling conventions {__watcall=1258, __cdecl=89}. Program saved. (Ghidra console also echoed pre-existing compile failures for unrelated stale McpInline_*.java scratch scripts in C:\\Users\\fdpsf\\ghidra_scripts; they did not affect either script, both of which completed successfully.)"
+    }
+   ]
+  },
+  {
+   "run_id": "wf_a752bcd5-647",
+   "description": "re-judgement of the 11 mixer functions that contradicted their dispatch-table siblings",
+   "agent_results": 12,
+   "apply_rounds": [
+    {
+     "label": "",
+     "applied": 11,
+     "created": 0,
+     "orphan_ranges": 0,
+     "error_bookmarks": 0,
+     "ok": true,
+     "ghidra_responding": true,
+     "problems": "rescan1: 11 of 11 verdicts applied, 0 renames, 11 pool tags, breakdown {ail=11}. No NAME TAKEN. The script's 11 \"problems\" lines are all REPLACED STALE TAG (pool_fdps -> pool_ail) for every one of the 11 addresses -- the expected rescan reclassification, not failures. Gate: orphan ranges 0, error bookmarks 0, undefined bytes in .object1 0; 1347 functions, conventions {__watcall=1258, __cdecl=89}. Program saved. Note: unrelated pre-existing compile errors for 7 stale McpInline_*.java files in C:\\Users\\fdpsf\\ghidra_scripts appear in both script logs; they do not affect these runs but should be cleaned up."
+    }
+   ]
+  }
+ ],
+ "final": {
+  "verdicts": 1347,
+  "by_pool": {
+   "crt": 379,
+   "fdps": 533,
+   "ail": 423,
+   "binary_artifact": 12
+  },
+  "by_confidence": {
+   "high": 1339,
+   "medium": 8
+  },
+  "rescan_superseded": 305,
+  "named_from_library_symbols": 388,
+  "gate": {
+   "orphan_code_ranges": 0,
+   "error_bookmarks": 0,
+   "undefined_bytes_object1": 0,
+   "functions": 1347
+  },
+  "tag_reconcile": {
+   "verdicts_checked": 1347,
+   "functions_changed": 0,
+   "stale_removed": 0,
+   "missing_added": 0,
+   "tagged_without_verdict": 0
+  }
+ }
+}

@@ -7,5 +7,6 @@
 | 文件 | 內容 |
 | --- | --- |
 | [`architecture.md`](architecture.md) | 程式架構：從 LE 進入點到 `main` 的啟動鏈、頂層迴圈與請求碼分派、各子系統進入點、共用 helper 群集與遞迴環、呼叫圖走不到的部分 |
-| [`memory_layout.md`](memory_layout.md) | 位址空間：LE object table、權限、初始化資料與 BSS 的分界、函式指標表與跳躍表、未辨識為程式碼的區域 |
+| [`memory_layout.md`](memory_layout.md) | 位址空間：LE object table、權限、初始化資料與 BSS 的分界、函式指標表與跳躍表、`.object1` 每個 byte 的歸類結果 |
+| [`code_pools.md`](code_pools.md) | 程式碼歸屬：每個 function 屬於遊戲、Watcom CRT、Miles AIL 還是連結器產物，判定依據與各 pool 規模，以及票 15 要還原的 `pool_fdps` 清單在哪裡 |
 | [`cd_audio.md`](cd_audio.md) | CD 音源與光碟相依：MSCDEX 存取層、啟動時的光碟偵測、章節音軌對照表、影片播放外呼 |
