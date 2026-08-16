@@ -13,7 +13,7 @@
 | `ApplyPoolVerdicts.java` | 把 pool 判定轉錄進 Ghidra：function tag、plate comment、程式庫符號名 |
 | `ReconcilePoolTags.java` | 對帳：讓每個 function 的 `pool_*` tag 與判定檔完全一致，多餘的移除、缺的補上、沒有判定檔卻帶 tag 的回報 |
 | `DumpFdpsFunctions.java` | 匯出 `pool_fdps` 的 function 集合成 JSON，供下游腳本讀取，唯讀 |
-| [`fid/`](#fid--watcom-程式庫比對) | Watcom 程式庫比對，產出 CRT 判定的證據 |
+| [`fid/`](fid/_index.md) | 函式庫比對：Watcom 執行期（票 14）與 Miles AIL（票 14.1） |
 
 ## 執行
 
@@ -46,33 +46,7 @@ Workflow({ scriptPath: "tools/pool_triage/triage_ticket14.js",
 
 一個未定義區塊常常不只裝一個 function——`0x3f6d4` 那段有 3,448 byte。要求單一 agent 把整段切乾淨是逼它猜，所以判定檔有 `covered_to` 欄位：agent 只認它讀得懂的那一段，剩下的照實留著。每輪落地後 workflow 重跑匯出，沒被吃掉的尾巴就會以一個新的、比較小的區塊回到清單裡，下一遍再判。某一遍沒有新建任何 function 就停。
 
-## fid — Watcom 程式庫比對
-
-CRT pool 的判定要有函式庫佐證，做法沿用前作 FD2 的 Ghidra Function ID pipeline，不自己寫 OMF parser。
-
-| 檔案 | 用途 |
-| --- | --- |
-| `extract_libs.py` | 用 `wlib -q -x` 把 10.0／10.0a／10.0b 的 `CLIB3S`、`MATH387S`、`EMU387`、`GRAPH`、`CSTRTX3S` 拆成 `.obj`，修 quirky record，建去重清單與扁平目錄 |
-| `omf_patch_segdef.py` | 修 Watcom Easy OMF-386：型別是 16-bit 但欄位是 32-bit 的 record，Ghidra 的 OmfLoader 讀不了 |
-| `build_manifest.py` / `build_dedup_dir.py` | 以 SHA-256 去重，替每個唯一模組取一個穩定檔名 |
-| `FidWipeFolder.java` / `FidImportBatch.java` / `FidAnalyzeAll.java` | 清空、匯入、分析 Ghidra 專案裡的程式庫模組 |
-| `FidPopulate.java` | 逐版本建出 `.fidb` |
-| `FidQuery.java` | 對 `FDPS.LE` 查詢，輸出每個位址的候選符號與分數 |
-
-跑法（Ghidra MCP，依序）：
-
-```bash
-python tools/pool_triage/fid/extract_libs.py
-```
-```
-run_ghidra_script FidWipeFolder.java   args: /watcom_libs
-run_ghidra_script FidImportBatch.java  args: <manifest> /watcom_libs 0 <n>
-run_ghidra_script FidAnalyzeAll.java   args: /watcom_libs
-run_ghidra_script FidPopulate.java     args: <manifest> /watcom_libs <fidb dir> x86:LE:32:watcom
-run_ghidra_script FidQuery.java        args: <fidb dir> <results dir> 0
-```
-
-分數只是證據不是結論：短 function 會互撞，兩條指令的 stub 能同時對上幾十個程式庫模組。每個 function 仍然由一個 agent 讀過 assembly 才定案。
+函式庫比對是唯一能直接證明程式碼來源的證據，做法沿用前作 FD2 的 Ghidra Function ID pipeline，不自己寫 OMF parser。管線、跑法與踩過的坑都在 [`fid/_index.md`](fid/_index.md)。
 
 ## 錯誤處理
 

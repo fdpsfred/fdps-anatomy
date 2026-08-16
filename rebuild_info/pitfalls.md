@@ -76,6 +76,7 @@
 | 事項 | 內容 | 正典 |
 | --- | --- | --- |
 | 啟動的三道光碟檢查 | `access("DISK.NO")`、由 `Disk.no` 第三個 token 取得路徑前綴、MSCDEX 安裝檢查，任一不過就 `exit(1)`。重建版跑起來前這三件都要滿足 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
+| 連上前作的 `ailv3.lib` 不等於 AIL 齊了 | 12 個 `ail` function 在前作的庫裡完全沒有對應，其中 9 個有呼叫端，主體是 `0003c984`–`0003d176` 的 LX 驅動映像載入層。照直覺「AIL 沿用前作、不用管」會在連結時留下解不掉的外部符號 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
 | 影片播放不在重建範圍 | 三段過場由光碟上的 `FD.EXE` 播放，`FDPS.LE` 只負責 `spawnv` | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
 | CD 音源在重建範圍內 | 選曲、起播、停止、循環全部由 `FDPS.LE` 自己下 MSCDEX 命令 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
 | 140 個章節／事件處理函式沒有任何直接呼叫者 | 只看呼叫圖會把它們當成死碼砍掉。它們全部只透過 `.object2` 的四張函式指標表被間接呼叫 | [`program_info/memory_layout.md`](../program_info/memory_layout.md) |

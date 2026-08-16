@@ -1,0 +1,40 @@
+{
+  "ticket": "14.1",
+  "workflow": "ail-fid-contradictions",
+  "disagreements_total": 2,
+  "judged": 2,
+  "pool_changed": 0,
+  "changes": [],
+  "kept": [
+    "00044e0f",
+    "00052d2b"
+  ],
+  "unresolved": [],
+  "apply_rounds": [
+    {
+      "round": "apply:r1",
+      "applied": 2,
+      "renamed": 0,
+      "orphan_ranges": 0,
+      "error_bookmarks": 0,
+      "tag_totals": "ail=440, binary_artifact=11, crt=379, fdps=517 (sum 1347 = function count)",
+      "ok": true,
+      "ghidra_responding": true,
+      "problems": "None. Both 14.1 verdict files existed (workspace\\pool_triage\\fid_ail\\verdicts\\00044e0f.json, 00052d2b.json); .json.t14 backups did not exist yet so they were created from the ticket-14 verdicts before overwriting. ApplyPoolVerdicts: 2 of 2 applied, 0 renames, 2 pool tags added, pool breakdown {ail=2}, 0 problems, no NAME TAKEN lines. ReconcilePoolTags: 1347 of 1347 verdicts checked, 0 functions changed, 0 stale tags removed, 0 missing tags added, 0 tagged-without-verdict, 0 problems. AuditGhidraBaseline: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0, function count 1347. Program saved."
+    },
+    {
+      "round": "apply:rescan1r1",
+      "applied": 1,
+      "renamed": 0,
+      "orphan_ranges": 0,
+      "error_bookmarks": 0,
+      "tag_totals": "ail=440, binary_artifact=11, crt=379, fdps=517 (sum 1347 = function count 1347)",
+      "ok": true,
+      "ghidra_responding": true,
+      "problems": "None. Note: 00052d2b.json.t14 already existed from an earlier run, so it was preserved rather than re-created; the ticket-14 decision on disk is intact. The 14.1 verdict keeps pool=ail (unchanged from ticket 14, now high confidence instead of medium), name empty, so ApplyPoolVerdicts reported 0 renames and no NAME TAKEN, and ReconcilePoolTags reported 0 changes."
+    }
+  ],
+  "halted": false,
+  "halt_reason": "",
+  "unfinished": []
+}
