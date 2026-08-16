@@ -12,16 +12,26 @@
 
 **Blocked by:** 12
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 未辨識為程式碼的區域逐一判定是程式碼還是資料，一次處理一個；是程式碼的反組譯並建成 function，是資料的定義型別並記錄
-- [ ] 建完之後重跑基準稽核，確認孤立程式碼與 error bookmark 仍是 0
-- [ ] 每個 function 逐一讀過 assembly 後判定 pool 歸屬，不使用位址範圍圈定
-- [ ] CRT pool 成員辨識出來並以函式庫比對佐證
-- [ ] AIL pool 成員辨識出來，邊界明確
-- [ ] 編譯器產物（不對應任何原始碼的 function）辨識出來
-- [ ] 剩餘的遊戲本體 function 清單產出，作為 15 號票的工作清單
-- [ ] 判定結果與依據記錄在 Ghidra 的標記與註解中
-- [ ] 全程無人介入跑完，agent 的 context 用量不隨處理量成長
-- [ ] workflow 有錯誤處理：agent 未回傳或判定檔缺漏會重試、落地與 gate 失敗會明確回報、上游工具失去回應有停止訊號；收尾報告列出完成數、失敗數與未完成清單
-- [ ] Ghidra 快照匯出並 commit
+- [x] 未辨識為程式碼的區域逐一判定是程式碼還是資料，一次處理一個；是程式碼的反組譯並建成 function，是資料的定義型別並記錄
+- [x] 建完之後重跑基準稽核，確認孤立程式碼與 error bookmark 仍是 0
+- [x] 每個 function 逐一讀過 assembly 後判定 pool 歸屬，不使用位址範圍圈定
+- [x] CRT pool 成員辨識出來並以函式庫比對佐證
+- [x] AIL pool 成員辨識出來，邊界明確
+- [x] 編譯器產物（不對應任何原始碼的 function）辨識出來
+- [x] 剩餘的遊戲本體 function 清單產出，作為 15 號票的工作清單
+- [x] 判定結果與依據記錄在 Ghidra 的標記與註解中
+- [x] 全程無人介入跑完，agent 的 context 用量不隨處理量成長
+- [x] workflow 有錯誤處理：agent 未回傳或判定檔缺漏會重試、落地與 gate 失敗會明確回報、上游工具失去回應有停止訊號；收尾報告列出完成數、失敗數與未完成清單
+- [x] Ghidra 快照匯出並 commit
+
+## 結果
+
+- 未定義區塊 738 段逐一判定：填充 578、程式碼 125、資料 77、混合 20。`.object1` 未定義 byte 從 43,143 降到 **0**，基準稽核因此多一個門檻值。
+- function 1,042 → **1,347**（新建 305 個），全部有 pool 判定：`fdps` 533、`ail` 423、`crt` 379、`binary_artifact` 12，沒有 `unknown`。
+- CRT 以 Ghidra Function ID 對 Watcom 10.0 家族的 `CLIB3S`／`MATH387S`／`EMU387` 比對，196 個命中且無一落到其他 pool。AIL 靠連結方向與 debug build 的 API 字串定案，還原出 185 個 Miles 原始 API 名稱。
+- 票 15 的工作清單 = Ghidra 內 `pool_fdps` 這 533 個 function，隨快照進版控；知識庫不另存副本。
+- 結論頁 [`program_info/code_pools.md`](../../../program_info/code_pools.md)，敘事在 `devlog/2026-08-15-pool-triage-blocks.md` 與 `devlog/2026-08-15-pool-triage.md`。
+
+**「全程無人介入」的實際情形**：分成 4 次 workflow 呼叫，每次都自己從頭跑到底、中途不回來要人確認；分段是預算切的（撞過 agent 上限與 session token 上限各一次），不是決策切的。四次中斷都沒有資料遺失，經驗已寫回 [ADR-0007](../../../docs/adr/0007-workflow-automation-and-agent-context.md) 第五條。
