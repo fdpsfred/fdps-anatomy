@@ -240,7 +240,7 @@ build/link 由 AI 做（來源：`rebuild_info/build_test/playtest_bugs.md:13-20
 | 8.3 檔名 | Watcom 9.5a 無 LFN，所有 `.c`/`.h` basename ≤ 8 字元 |
 | game-logic 前綴 | 一律 `fd2_`；**唯一豁免是 C 進入點 `main`**（CRT `cmain386` 契約要求） |
 | global data 前綴 | 一律 `data_fd2_`（Ghidra 與 C 端 byte-identical 同名） |
-| vendor 前綴 | `crt_` / `crt_equivalent_` = Watcom CRT 層；`AIL_` = Miles AIL，兩類不套用 `fd2_` 慣例 |
+| vendor 前綴 | **Watcom 真符號一律用程式庫原名、不加前綴**（`malloc`、`__CHK`、`IF@COS`）；lib 內匿名 static 是 `L$N_<模組>_<用途>`；`crt_equivalent_` 只給「行為等價但 byte 比對不上任何 lib obj、必須手寫」的那一類；`AIL_` = Miles AIL。三類都不套用 `fd2_` 慣例。正典是 FD2 的 `rebuild_info/crt/symbol_inventory.md` 與 `lookup_9.5a.json`——那份 lookup 的 194 筆裡沒有任何一筆帶 `crt_` 前綴 |
 | pool 分類 | 每個 symbol 歸 `ail` / `crt` / `fd2` / `binary_artifact` 四 pool 之一 |
 
 `src/` 依子系統切成 15 個目錄（anim / audio / battle / crt / dialog / field / gfx / input / life / rsrc / save /
@@ -645,7 +645,7 @@ FD2 的 Miles AIL 是 **static lib**，沒辦法「呼叫回原 binary」，只�
 | **KB 資料夾架構與 `_index.md` 規範** | `program_info/` + `resource_info/` + `assets/` + `chapters/` + `rebuild_info/` + `tools/` + `workspace/` + `legacy/` 的四視角切分與單一擁有者原則。FDPS 的 chapters 若不是 30 章制，改成對應的關卡單位即可 |
 | **`CLAUDE.md` 的工作規範段** | §5.8 全部條目，只需把 FD2 換成 FDPS |
 | **`.gitignore`** | 一字不改可用（把 `fd2_game_files/` 換成 `fdps_game_files/`，實測 FDPS 已這麼做） |
-| **命名慣例** | `fdps_` / `data_fdps_` 前綴 + `crt_`/`AIL_` 豁免 + 四 pool 分類；8.3 檔名限制 |
+| **命名慣例** | `fdps_` / `data_fdps_` 前綴 + vendor 豁免（CRT 用程式庫原名、`AIL_`）+ 四 pool 分類；8.3 檔名限制 |
 | **`tools/src_refine/eqcheck.py`** | LE fixup parser 完全通用（純從 header 解析、不硬編），只需改預設路徑常數 |
 | **`tools/src_refine/hash_check.py`** | 純 SHA-256 gate，通用 |
 | **`tools/ail_extract/omf_writer.py`** | 通用 32-bit OMF record encoder |

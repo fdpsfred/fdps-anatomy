@@ -118,7 +118,7 @@ switch 跳躍表以 `JMP dword ptr CS:[reg*4 + 表位址]` 取用，表本身夾
 
 ### 函式體內的空洞
 
-有一類 byte 不是孤立常式而是**既有函式體內的洞**：呼叫 `crt_exit` 這種不返回的 function 之後，編譯器仍然發出 cdecl 的 `add esp,4`，沒有任何路徑走得到它，Ghidra 因此在該處停止追蹤流程，把那三個 byte 留在所屬 function 的 body 之外。同樣形狀的還有 `INT3` 之後的 `jmp`（`0x10001` 的 trap stub、`0x54f3c` 的 WVIDEO 除錯協定）與 16-bit 遠端返回 `66 cb` 之後的實模式收尾（`0x44b5a`）。這些 byte 已反組譯並補回所屬 function 的 body，不另建 function。
+有一類 byte 不是孤立常式而是**既有函式體內的洞**：呼叫 `exit` 這種不返回的 function 之後，編譯器仍然發出 cdecl 的 `add esp,4`，沒有任何路徑走得到它，Ghidra 因此在該處停止追蹤流程，把那三個 byte 留在所屬 function 的 body 之外。同樣形狀的還有 `INT3` 之後的 `jmp`（`0x10001` 的 trap stub、`0x54f3c` 的 WVIDEO 除錯協定）與 16-bit 遠端返回 `66 cb` 之後的實模式收尾（`0x44b5a`）。這些 byte 已反組譯並補回所屬 function 的 body，不另建 function。
 
 判斷 function 是否涵蓋某個位址時要注意：Ghidra 的 `getFunctionContaining` 問的是 body 這個位址集合，不是「entry 到結尾」這個範圍，遇到上述空洞會回 null。
 

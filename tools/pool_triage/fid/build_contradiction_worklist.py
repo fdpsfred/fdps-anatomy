@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -91,30 +92,46 @@ def main() -> int:
     if carried and not args.extra:
         print("carried over %d extra address(es) from the previous worklist" % len(carried))
 
-    for stale in out.glob("*.json"):
-        stale.unlink()
-
     items = list(report["contradictions"])
     by_row = {r["address"]: r for r in report["rows"]}
     for addr in extra:
         if any(c["address"] == addr for c in items):
             continue
         row = by_row.get(addr)
-        if row is None or not row["matched_name"]:
-            print("SKIP %s: no library match to weigh" % addr)
+        if row is not None and row["matched_name"]:
+            items.append({
+                "address": addr,
+                "pool": "pool_ail",
+                "name": row["name"],
+                "body_size": row["body_size"],
+                "matched_name": row["matched_name"],
+                "score": row["score"],
+                "candidates": row["candidates"],
+                "full_hash_equal": row["full_hash_equal"],
+            })
+            continue
+        # An address outside the ail pool, or one Function ID could not hash at
+        # all. The five-byte thunks are both: too short to hash, and filed under
+        # a different pool, yet the library demonstrably publishes them. Their
+        # evidence lives in the naming decision instead of the match table.
+        snap = next((r for r in rows if r["addr"] == addr), None)
+        if snap is None:
+            print("SKIP %s: not in the snapshot" % addr)
             continue
         items.append({
             "address": addr,
-            "pool": "pool_ail",
-            "name": row["name"],
-            "body_size": row["body_size"],
-            "matched_name": row["matched_name"],
-            "score": row["score"],
-            "candidates": row["candidates"],
-            "full_hash_equal": row["full_hash_equal"],
+            "pool": "pool_" + snap["pool"],
+            "name": re.search(r"\b(\w+)\(", snap["proto"]).group(1) if re.search(
+                r"\b(\w+)\(", snap["proto"]) else "?",
+            "body_size": snap["size"],
+            "matched_name": None,
+            "score": None,
+            "candidates": 0,
+            "full_hash_equal": False,
         })
 
     worklist = []
+    packs = {}
     for c in items:
         addr = c["address"]
         i = index.get(addr)
@@ -136,7 +153,17 @@ def main() -> int:
         vf = backup if backup.is_file() else POOL_VERDICTS / ("%s.json" % addr)
         if vf.is_file():
             prior = json.loads(vf.read_text(encoding="utf-8"))
-        libfn = lib.get(c["matched_name"], {})
+        libfn = lib.get(c["matched_name"], {}) if c["matched_name"] else {}
+
+        # A naming decision, where one exists, carries the reading of the body
+        # that produced the name and any doubt it raised about the pool. That is
+        # the whole evidence base for a function Function ID cannot hash.
+        naming = {}
+        nf = args.work / "renames" / "decisions" / ("%s.json" % addr)
+        if nf.is_file():
+            n = json.loads(nf.read_text(encoding="utf-8"))
+            naming = {"name": n.get("name", ""), "kind": n.get("kind", ""),
+                      "evidence": n.get("evidence", ""), "pool_doubt": n.get("pool_doubt", "")}
 
         pack = {
             "addr": addr,
@@ -158,11 +185,20 @@ def main() -> int:
                 "library_code_units": libfn.get("code_units"),
                 "module_matched_n_functions": collisions[c["matched_name"]],
             },
+            "naming_decision": naming,
             "neighbours": neighbours,
         }
-        (out / ("%s.json" % addr)).write_text(json.dumps(pack, indent=2), encoding="utf-8")
+        packs[addr] = pack
         worklist.append(addr)
 
+    # Everything is built before anything is removed. Deleting first and
+    # crashing halfway would take worklist.json with it, and worklist.json is
+    # where the sticky --extra list lives - the state would be gone for good
+    # rather than merely stale.
+    for stale in out.glob("*.json"):
+        stale.unlink()
+    for addr, pack in packs.items():
+        (out / ("%s.json" % addr)).write_text(json.dumps(pack, indent=2), encoding="utf-8")
     (out / "worklist.json").write_text(
         json.dumps({"addresses": worklist, "extra": extra}, indent=2), encoding="utf-8")
     print("wrote %d evidence packs to %s" % (len(worklist), out))

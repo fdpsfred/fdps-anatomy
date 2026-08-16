@@ -1,0 +1,118 @@
+{
+  "ticket": "14.1 follow-up",
+  "workflow": "name-disputed-symbols",
+  "disputed_total": 15,
+  "decided": 15,
+  "named": [
+    {
+      "addr": "00042ca5",
+      "name": "tan",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "00042d41",
+      "name": "sprintf",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "00043298",
+      "name": "_cstart_",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "00043310",
+      "name": "L$1_cstrt386_start_body",
+      "kind": "lib_static"
+    },
+    {
+      "addr": "0004364b",
+      "name": "__STKOVERFLOW",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "00043c82",
+      "name": "__delay_init",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "0004decc",
+      "name": "L$1_scanf_radix_value",
+      "kind": "lib_static"
+    },
+    {
+      "addr": "0004df4c",
+      "name": "__CMain",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "0004dfa6",
+      "name": "__InitRtns",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "00054bf5",
+      "name": "itoa",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "00054dbc",
+      "name": "__CommonInit",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "00042c3a",
+      "name": "IF@COS",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "00042c44",
+      "name": "IF@SIN",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "000435a2",
+      "name": "spawnlp",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "00054b21",
+      "name": "_itoa",
+      "kind": "library_symbol"
+    }
+  ],
+  "left_unnamed": [],
+  "pool_doubts": [],
+  "unresolved": [],
+  "apply_rounds": [
+    {
+      "round": "apply:r1",
+      "applied": 5,
+      "orphan_ranges": 0,
+      "error_bookmarks": 0,
+      "ok": true,
+      "ghidra_responding": true,
+      "problems": "None. All 5 renames succeeded, no skips, no name clashes: 00042ca5 crt__tan -> tan; 00042d41 crt_sprintf_00042d41 -> sprintf; 00043298 crt_cstart -> _cstart_; 00043310 crt_cstart_body -> L$1_cstrt386_start_body; 0004364b crt___stkoverflow -> __STKOVERFLOW. Each rename returned the expected PascalCase/length/verb style warnings, which are not failures for this project. All 5 verdict files under workspace\\pool_triage\\verdicts\\pools\\ had their \"name\" field updated to match (00043310's was previously empty and is now filled in). Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0, functions 1347, FUN_* remaining 634. Program saved."
+    },
+    {
+      "round": "apply:r2",
+      "applied": 5,
+      "orphan_ranges": 0,
+      "error_bookmarks": 0,
+      "ok": true,
+      "ghidra_responding": true,
+      "problems": "None. All 5 renames applied and saved: 00043c82 crt_init_delay -> __delay_init; 0004decc crt_radix_value -> L$1_scanf_radix_value; 0004df4c crt_cmain -> __CMain; 0004dfa6 crt_init_rtns -> __InitRtns; 00054bf5 crt__itoa -> itoa. No skips, no name clashes. Each rename returned the expected PascalCase/underscore/min-length style warnings, which are the known-wrong-for-this-project warnings, not failures. All 5 pool verdict files under workspace\\pool_triage\\verdicts\\pools\\ had their \"name\" field mirrored to the same strings, no other change. Gate (AuditGhidraBaseline.java): orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0, functions 1347, calling conventions __watcall=1258 / __cdecl=89. Program saved."
+    },
+    {
+      "round": "apply:r3",
+      "applied": 5,
+      "orphan_ranges": 0,
+      "error_bookmarks": 0,
+      "ok": true,
+      "ghidra_responding": true,
+      "problems": "None. All 5 renames applied and saved: 00054dbc crt_common_init -> __CommonInit; 00042c3a crt_IF@COS -> IF@COS; 00042c44 crt_IF@SIN -> IF@SIN; 000435a2 crt_sprintf -> spawnlp; 00054b21 FUN_00054b21 -> _itoa. No name clashes, no skipped decisions (none were leave_unnamed or empty). Only the expected PascalCase/min-length advisory warnings from the rename tool, which are wrong for this project. All 5 verdict files under workspace/pool_triage/verdicts/pools/ had their \"name\" field mirrored (00054dbc and 00054b21 were previously empty; the other three replaced their crt_* placeholder). Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0, function count 1347. Program saved."
+    }
+  ],
+  "halted": false,
+  "halt_reason": "",
+  "unfinished": []
+}

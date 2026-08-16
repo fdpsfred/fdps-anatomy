@@ -1,0 +1,74 @@
+{
+  "ticket": "14.1 follow-up",
+  "workflow": "name-disputed-symbols",
+  "disputed_total": 8,
+  "decided": 8,
+  "named": [
+    {
+      "addr": "00047290",
+      "name": "AIL_internal_sample_status_inner",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "00047300",
+      "name": "AIL_internal_sample_playback_rate_inner",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "00047560",
+      "name": "AIL_internal_set_sample_user_data_inner",
+      "kind": "lib_static"
+    },
+    {
+      "addr": "00047580",
+      "name": "AIL_internal_sample_user_data_inner",
+      "kind": "lib_static"
+    },
+    {
+      "addr": "00049f20",
+      "name": "AIL_internal_install_MDI_driver_image_inner",
+      "kind": "library_symbol"
+    },
+    {
+      "addr": "00049fd0",
+      "name": "AIL_internal_set_GTL_filename_prefix_inner",
+      "kind": "lib_static"
+    },
+    {
+      "addr": "0004ab80",
+      "name": "AIL_internal_register_event_callback_inner",
+      "kind": "lib_static"
+    },
+    {
+      "addr": "0004abc0",
+      "name": "AIL_internal_set_sequence_user_data_inner",
+      "kind": "library_symbol"
+    }
+  ],
+  "left_unnamed": [],
+  "pool_doubts": [],
+  "unresolved": [],
+  "apply_rounds": [
+    {
+      "round": "apply:r1",
+      "applied": 4,
+      "orphan_ranges": 0,
+      "error_bookmarks": 0,
+      "ok": true,
+      "ghidra_responding": true,
+      "problems": "Round r1: all 4 renames applied, no clashes, gate clean, program saved.\n\nApplied (old -> new):\n- 00047290 AIL_sample_status_impl -> AIL_internal_sample_status_inner\n- 00047300 AIL_sample_playback_rate_impl -> AIL_internal_sample_playback_rate_inner\n- 00047560 AIL_set_sample_user_data_impl -> AIL_internal_set_sample_user_data_inner\n- 00047580 AIL_sample_user_data_impl -> AIL_internal_sample_user_data_inner\n\nNone were leave_unnamed or empty. Verdict files workspace/pool_triage/verdicts/pools/000472{90,00}.json and 000475{60,80}.json each had only their \"name\" field updated to the same string.\n\nDuplicate check (worth noting for later rounds): the instructed tool search_functions_enhanced is unreliable on this program. With name_pattern set it returned total=0 for every AIL name, including names that demonstrably exist (\"AIL\", \"ail\", the four new names); with no pattern it reports total=632 against a real function_count of 1347, which lines up with the audit's \"still named FUN_* = 633\" - it appears to only see default-named functions. I fell back to search_functions, which behaves correctly, and each of the four names resolves to exactly one address (00047290 / 00047300 / 00047560 / 00047580). A broader search for \"AIL_internal_sample\" returned 6 functions, all distinct names. No collision with 0x0004abc0 (the sequence-side twin flagged in the 00047560 decision) - it does not hold the sample-side name.\n\nGate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0."
+    },
+    {
+      "round": "apply:r2",
+      "applied": 4,
+      "orphan_ranges": 0,
+      "error_bookmarks": 0,
+      "ok": true,
+      "ghidra_responding": true,
+      "problems": "None blocking. All 4 r2 renames applied, verified unique, mirrored into verdict files, gate passed (orphan ranges 0, error bookmarks 0, undefined bytes in .object1 0, functions 1347), program saved.\n\nRenames: 00049f20 AIL_install_MDI_driver_image_impl -> AIL_internal_install_MDI_driver_image_inner; 00049fd0 AIL_set_GTL_filename_prefix_impl -> AIL_internal_set_GTL_filename_prefix_inner; 0004ab80 AIL_register_event_callback_impl -> AIL_internal_register_event_callback_inner; 0004abc0 AIL_set_sequence_user_data_impl -> AIL_internal_set_sequence_user_data_inner. The PascalCase warnings appeared on each rename as expected.\n\nNote for future rounds (tooling behaviour, not a failure): search_functions_enhanced with name_pattern alone returns 0 hits for any custom-named function -- its default view appears to cover only FUN_* names. The duplicate check only works when has_custom_name=true is passed alongside the exact name_pattern. With that flag each of the 4 names returned total=1 at the expected address, so no collisions. Without the flag every check would have silently read as \"0 results\" and looked clean.\n\nAlso carried forward, no action taken (record-only, outside this round's scope): the verdict file 00049fd0.json still has a \"library\" field whose prose says the _impl suffix is a project-side disambiguation, and 0004abc0.json's _supersedes notes the adjacent getter 0x0004abe0 is recorded as fdps with an open question about the +0x694 owner. Both left untouched per the instruction to change only the \"name\" field."
+    }
+  ],
+  "halted": false,
+  "halt_reason": "",
+  "unfinished": []
+}

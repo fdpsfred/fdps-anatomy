@@ -52,7 +52,7 @@ reader 完全不碰 Ghidra 的寫入端。這樣一來多 agent 併發寫入的�
 
 **calling convention 的預設是 `__cdecl` 不是 `__watcall`。** 這個 binary 以 `wcc386 -4s` 建置，用的是堆疊慣例，引數從 `[ebp+0x14]` 起、呼叫端清理（見 [`rebuild_info/build_flags.md`](../../rebuild_info/build_flags.md)）。Ghidra 全 binary 標成 `__watcall` 是自動分析的預設值，不是事實。零參數的 function 兩者無法區分，一律取 `__cdecl` 與 binary 的預設對齊。
 
-**標記 no-return 會產生孤立程式碼。** Ghidra 會砍掉該 function 每個呼叫點的 fall-through，呼叫點後面的指令可能因此掉出所屬 function 的 body；如果那些指令其實是別處跳進來的，它們就變成孤立程式碼。實例是 `crt_cmain` 標成 no-return 後，`crt_cstart_body` 的 body 從 538 縮成 535，尾巴的 `0x43527`–`0x43529` 掉了出來——那三個 byte 由 `crt_exit` 跳進來，屬於同一段組語。修法是把 body 範圍補回去，不是收回 no-return。Apply 階段每輪都跑稽核 gate 就是為了當場抓到這件事。
+**標記 no-return 會產生孤立程式碼。** Ghidra 會砍掉該 function 每個呼叫點的 fall-through，呼叫點後面的指令可能因此掉出所屬 function 的 body；如果那些指令其實是別處跳進來的，它們就變成孤立程式碼。實例是 `__CMain`（當時叫 `crt_cmain`）標成 no-return 後，`L$1_cstrt386_start_body` 的 body 從 538 縮成 535，尾巴的 `0x43527`–`0x43529` 掉了出來——那三個 byte 由 `exit` 跳進來，屬於同一段組語。修法是把 body 範圍補回去，不是收回 no-return。Apply 階段每輪都跑稽核 gate 就是為了當場抓到這件事。
 
 ## Rescan：為什麼需要它
 

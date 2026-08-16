@@ -1,0 +1,42 @@
+{
+  "ticket": "14.1",
+  "workflow": "ail-fid-contradictions",
+  "disagreements_total": 3,
+  "judged": 3,
+  "pool_changed": 3,
+  "changes": [
+    {
+      "addr": "0003d370",
+      "pool": "crt",
+      "confidence": "high"
+    },
+    {
+      "addr": "0003da44",
+      "pool": "ail",
+      "confidence": "high"
+    },
+    {
+      "addr": "0003da49",
+      "pool": "ail",
+      "confidence": "high"
+    }
+  ],
+  "kept": [],
+  "unresolved": [],
+  "apply_rounds": [
+    {
+      "round": "apply:r1",
+      "applied": 3,
+      "renamed": 0,
+      "orphan_ranges": 0,
+      "error_bookmarks": 0,
+      "tag_totals": "ail=442, binary_artifact=8, crt=380, fdps=517 (sum 1347 = function count)",
+      "ok": true,
+      "ghidra_responding": true,
+      "problems": "No blocking problems. All three 14.1 verdict files existed; ticket-14 originals preserved as .t14 (all three backups newly created this round, so no prior run had touched them). ApplyPoolVerdicts reported problems=3, all of them expected reclassification notices, not failures: \"REPLACED STALE TAG 0003d370 pool_binary_artifact -> pool_crt\", \"REPLACED STALE TAG 0003da44 pool_binary_artifact -> pool_ail\", \"REPLACED STALE TAG 0003da49 pool_binary_artifact -> pool_ail\" — i.e. ticket 14 had parked all three in binary_artifact and the 14.1 FID/AIL comparison moved them to crt and ail. No NAME TAKEN lines. renamed=0 because the 14.1 verdicts carry the same names as before. ReconcilePoolTags: 1347 of 1347 verdicts checked, 0 changed, 0 stale, 0 missing, 0 tagged-without-verdict, problems=0. AuditGhidraBaseline gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved."
+    }
+  ],
+  "halted": false,
+  "halt_reason": "",
+  "unfinished": []
+}

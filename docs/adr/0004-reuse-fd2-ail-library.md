@@ -12,15 +12,15 @@
 
 ## 以 Function ID 獨立覆核
 
-上面的依據來自 body 逐一比對。之後把 `ailv3.lib` 拆成 OMF module 建成 Ghidra Function ID 資料庫、對 `FDPS.LE` 查詢，用另一種方法問同一個問題，結論一致：440 個 `ail` function 有 390 個與程式庫的某個 function 位元組相同（遮掉重定位運算元後），沒有任何一個是「命中但雜湊不同」。剩下 50 個裡有 38 個與程式庫那 38 個沒有 FDPS 對應的 function 一一對得起來、body 大小中位數差 1 byte，也就是同一支 function 的不同編譯結果——數量比 body 比對得到的 30 略高，因為 Function ID 對 function 邊界也敏感。完整數字與每一類的明細屬於 [`program_info/code_pools.md`](../../program_info/code_pools.md)。
+上面的依據來自 body 逐一比對。之後把 `ailv3.lib` 拆成 OMF module 建成 Ghidra Function ID 資料庫、對 `FDPS.LE` 查詢，用另一種方法問同一個問題，結論一致：442 個 `ail` function 有 390 個與程式庫的某個 function 位元組相同（遮掉重定位運算元後），沒有任何一個是「命中但雜湊不同」。剩下 52 個裡有 38 個與程式庫那 38 個沒有 FDPS 對應的 function 一一對得起來、body 大小中位數差 1 byte，也就是同一支 function 的不同編譯結果——數量比 body 比對得到的 30 略高，因為 Function ID 對 function 邊界也敏感。完整數字與每一類的明細屬於 [`program_info/code_pools.md`](../../program_info/code_pools.md)。
 
 本 ADR 原本列的兩處未驗證風險，一處關閉、一處縮小：
 
 - **mixer dispatch table 的 slot 內容**：關閉。兩張表的 132 個 slot 目標全部命中、全部單一候選、full hash 相同。
-- **完全由重定位欄位構成的 thunk**：`FDPS.LE` 這邊只有兩個（`0003dcb0`、`0003de38`）。Function ID 對它們算不出雜湊，但它們的目標可以：`0003de38` 的目標與前作的 `AIL_internal_get_isr_lock_count` body 位元組相同，`0003dcb0` 的目標則落在下面那批沒有對應的 function 裡。
+- **完全由重定位欄位構成的 thunk**：`FDPS.LE` 這邊有四個（`0003da44`、`0003da49`、`0003de38`、`0003dcb0`）。Function ID 對它們算不出雜湊，但它們的目標可以，而且前作的庫本來就把這種 thunk 當公開符號收著——前三個的目標分別與 `AIL_internal_log_lock_acquire`、`_release`、`AIL_internal_get_isr_lock_count` 的 body 位元組相同，只有 `0003dcb0` 的目標落在下面那批沒有對應的 function 裡。
 
 ## Consequences
 
 若實際連結時失敗，退路是用前作的抽取 pipeline 對 `FDPS.LE` 重抽——pipeline 本身可沿用，只是要重跑。覆核沒有推翻本 ADR 的前提，所以這條退路維持在「備而不用」，不啟動。
 
-**但沿用前作的庫不等於 FDPS 的 AIL 就齊了。** 有 12 個 `ail` function 在 `ailv3.lib` 裡完全沒有對應，其中 9 個有呼叫端。這批以 `0003c984`–`0003d176` 的驅動映像載入模組為主，前作的 AIL 沒有這一層。連結階段（票 19）要另外補，做法與清單見 [`rebuild_info/pitfalls.md`](../../rebuild_info/pitfalls.md) 與 [`program_info/code_pools.md`](../../program_info/code_pools.md)。
+**但沿用前作的庫不等於 FDPS 的 AIL 就齊了。** 有 13 個 `ail` function 在 `ailv3.lib` 裡完全沒有對應，其中 10 個有呼叫端。這批以 `0003c984`–`0003d176` 的驅動映像載入模組為主，前作的 AIL 沒有這一層。連結階段（票 19）要另外補，做法與清單見 [`rebuild_info/pitfalls.md`](../../rebuild_info/pitfalls.md) 與 [`program_info/code_pools.md`](../../program_info/code_pools.md)。

@@ -6096,9 +6096,9 @@ Evidence: Body is 8b44240485c07d02f7d8c3 = MOV EAX,[ESP+4] / TEST EAX,EAX / JGE 
 Single 00 alignment byte between FUN_0003d364 and thunk_FUN_00043cb0.
 
 === 0003d370 [PLATE]
-Pool: binary_artifact
-A 5-byte jump island consisting of a single JMP rel32 (e9 3b 69 00 00) that transfers control to FUN_00043cb0.
-Evidence: The whole body is one unconditional near jump to 0x00043cb0 and nothing else -- no prologue, no stack frame, no data or string references, and zero callees of its own beyond the jump target. Ghidra already classifies it as a thunk. It has no Function ID hit against CLIB3S/MATH387S/EMU387, so it is not a library stub carrying a real Watcom symbol, which rules out crt; it contains no logic at all, so it cannot be fdps game code; and it touches none of the Miles AIL driver/interrupt/0x70000 state paths, ruling out ail. A pure linker/compiler-emitted transfer stub with 28 call sites across the module corresponds to no C source line and belongs in binary_artifact. The pool of the real body at 0x00043cb0 is a separate judgement.
+Pool: crt
+Five-byte public entry stub that tail-jumps into the Watcom DOS clib delay() implementation at 0x00043cb0.
+Evidence: There is no ailv3.lib hit at all here (candidate_count 0, matched_name null), so nothing points to ail; the contradiction is between ticket 14's binary_artifact and the ticket-14.1 naming pass reading this as the public CLIB3S delay entry. The disassembly settles it in favour of crt. The jump target 0x00043cb0 is unmistakably Watcom's dos.h delay(): it reads the calibration global at 0x00069ea8, scales the millisecond argument by it, and then busy-polls INT 21h AH=2Ch comparing the hundredths byte -- CRT code, and nothing in it touches the AIL state ranges (0x604a0-0x605ee, 0x61500-0x61518, 0x69e6c-0x69e84, 0x69ef0). 0x00069ea8 is the delay calibration word, not one of those. Link direction is consistent: all 28 callers of the island are game code in 0x10000-0x3c000, and 0x00043cb0 has no callers of its own, so the island is the only door into the implementation -- exactly the __delay/delay internal-versus-public split. Ticket 14's premise for binary_artifact was 'no Function ID hit, therefore no real library symbol', but FID does not index five-byte bodies, so the absence is not evidence. Against it: wlink has no reason to emit a jump island in a 32-bit flat LE module, where CALL rel32 already reaches the whole segment, so a transfer stub here is not a linker artifact; and the five bytes sit with zero gap inside the run of tiny CLIB3S objects (crt_abs ends at 0x0003d36f, crt_malloc starts at 0x0003d375), i.e. it is a linked object's own contribution in link order. Whether the JMP came from an assembly alias or a compiled one-line forwarder, its source is the Watcom runtime, so it belongs in crt. Name left empty because the identification comes from the jump target, not from an ailv3.lib match; the naming pass already owns that decision.
 
 === 0003d375 [PLATE]
 Watcom C library malloc.
@@ -6226,14 +6226,14 @@ Public Miles AIL entry point for AIL_set_preference: logs the call and its resul
 Evidence: The function pushes format string 0x000623b5 = "AIL_set_preference(%d,%d)\n" and 0x000623d0 = "Result = %d\n" to the printf-style routine at 0x00045183 with the log FILE handle from [0x00069e7c]; the surrounding string pool at 0x00062275 holds "AIL_DEBUG" and "AIL_SYS_DEBUG" (the Miles AIL debug environment variables) plus the indent strings used by the depth counter at [0x00069e6c]. That depth counter, the enable flags at [0x00069e80]/[0x00069e84], the gate calls to 0x00044f42 and 0x0003d676, and the shared logging epilogue reached via JMP 0x0003eb3c are the standard instrumented-API wrapper shared by every AIL entry point in this build, so this is Miles AIL library code and not game code. No Function ID hit exists (fid empty), and nothing here resembles Watcom CRT or a bare linker thunk: it is a full 250-byte function with real control flow that calls a separate implementation.
 
 === 0003da44 [PLATE]
-Pool: binary_artifact
-A single 5-byte relative JMP to FUN_0004478c, i.e. a jump island that 15 call sites use to reach the real routine.
-Evidence: Disassembly is exactly one instruction (E9 43 6D 00 00 = JMP 0x0004478c) with no body of its own; Ghidra already flags it thunk=true and it has zero callees. There is no C statement this could correspond to, so it is not fdps game logic; it carries no Function ID hit and no library symbol, so it is neither crt nor a named library stub; it touches no DOS interrupt path, .DIG driver structure or 0x70000 state area, so it is not AIL. Per the pool rules a jump island with no library symbol is binary_artifact. The pool of the target FUN_0004478c is a separate judgement and is not decided here.
+Pool: ail
+A 5-byte public JMP thunk that forwards every AIL-internal caller to the lock-acquire body at 0004478c.
+Evidence: Disassembly confirms the ticket-14 description literally: the whole function is one instruction, JMP 0x0004478c, no body, no data references. But link direction settles the pool against ticket 14. All 15 callers are settled AIL code and nothing else: AIL_API_start_all_timers, AIL_internal_call_driver_inner, AIL_internal_recompute_pit_divisor, AIL_internal_register_timer_inner, AIL_internal_release_timer_handle_inner, AIL_internal_set_timer_divisor/frequency/period/user_inner, AIL_internal_start/stop_timer_inner, AIL_internal_allocate_sample_handle_inner, AIL_internal_allocate_sequence_handle_inner, AIL_release_all_timers_00044fe4, AIL_stop_all_timers_0004508c. Not one game call site. An island the linker synthesised for game code would be reached from game code; this one is reachable only from inside the library image, so it ships as part of ailv3.lib rather than being produced at link time, and the AIL pool is where it belongs. It is not crt and not fdps for the same reason. On the library match: there is none for this function (candidate_count 0, no score) and that is expected, not weak evidence -- 5 bytes / 1 code unit is below Ghidra Function ID's hashable minimum. The identification comes from the target instead: 0004478c matched ailv3.lib at score 365, one candidate, full and specific hash equal, and the library's unsuffixed PUBDEF for that routine sits unassigned on a 5-byte JMP thunk of exactly this shape, i.e. the library's own public-entry/implementation split reproduced verbatim in FDPS. Ticket 14's premise (no library symbol, so unattributable) is what the AIL pass overturned; its factual reading of the disassembly stands. I have left name and library empty because this function carries no FID hit of its own -- the PUBDEF assignment is the naming pass's call, not something this pool judgement should stamp.
 
 === 0003da49 [PLATE]
-Pool: binary_artifact
-A 5-byte jump island consisting of a single JMP rel32 (e9 4b 6d 00 00) to FUN_00044799, which decrements the global counter at 0x000605f6.
-Evidence: The whole body is one unconditional JMP to another function; Ghidra already flags it thunk=true and its size is exactly the 5 bytes of a rel32 jump. It has no fid hits at all, so no library symbol backs it, which rules out crt and ail as a named library stub. It cannot be fdps either: no C statement compiles to a bare jump into the middle of the program with no prologue, no stack frame and no return -- the 15 callers all reach the real body at 0x00044799 through it, so in a rebuild the calls simply bind directly to that function and the island disappears without any behavioural change. That is the definition of code corresponding to no C source: a linker/compiler-emitted jump island.
+Pool: ail  [ailv3.lib(AIL_internal_log_lock_release) PUBDEF at ail_code.obj+0x271e, body_size 5; no Function ID hit on the island itself]
+A 5-byte rel32 jump island that forwards to AIL_internal_log_lock_release_3e731 at 0x00044799, which releases the AIL log/timer lock by decrementing the counter at 0x000605f6.
+Evidence: The body is confirmed to be exactly one instruction, JMP 0x00044799, so ticket 14's description of the code is accurate; what is wrong is the inference from it. Link direction settles the pool: all 15 callers are settled AIL functions (AIL_internal_register_timer_inner, AIL_internal_call_driver_inner, AIL_API_start_all_timers, AIL_internal_allocate_sample_handle_inner, and so on) and there is no fdps or crt caller at all. A function reachable only from settled AIL code is AIL whatever its body looks like. That is independently corroborated by the packet's object-level evidence: ail_code.obj publishes a PUBDEF named AIL_internal_log_lock_release at object offset 0x0000271e with body_size 5, immediately after AIL_internal_log_lock_acquire at 0x00002719 with body_size 5, mirroring FDPS 0003da44 followed by 0003da49, with the two 13-byte real bodies at object offsets 0x70f3/0x7100 matching 0x0004478c/0x00044799. So the island is not linker filler with no source of its own -- it ships inside the vendor object under its own published name and reappears by itself when ailv3.lib is linked, which is exactly what disqualifies binary_artifact. It is not a Function ID collision because there is no Function ID hit on this address at all (candidate_count 0); the identification rests on the one-candidate score-365 full-hash-equal match on the jump target plus the size-and-position correspondence of the island in ail_code.obj, not on any 14-byte forwarder shape hash. Not fdps: no game code calls it and no C statement in the game's source produces it. Not crt: it is not Watcom runtime and does not appear in the CLIB3S/MATH387S/EMU387/DOS4G symbol list.
 
 === 0003da4e [PLATE]
 Pool: ail
@@ -7481,36 +7481,16 @@ Reads one keystroke without echo: returns and clears a pushed-back character hel
 Evidence: The disassembly is textbook Watcom getch: consume-and-clear the ungetch pushback global, else INT 21h AH=8, AND EAX,0xff. No echo path, so getch rather than getche. It matches the FID hit's named object (getch.obj) instruction for instruction despite the low score, which is expected for a 27-byte routine. It touches no game data, no .DIG driver structures and nothing near 0x70000, ruling out ail; it is a real library function with a real symbol, not a thunk or jump island, ruling out binary_artifact. Being called from fdps_play_movie and fdps_cd_verify_disc_and_play_track is the normal direction (game code calls the runtime) and is not evidence for fdps.
 
 === 000435a2 [PLATE]
-Watcom CRT variadic formatting entry point (sprintf).
+Watcom CRT process-spawn entry point (spawnlp): spawnlp(mode, path, arg0, ...) searches PATH and runs the program with the argument list given inline.
 
 Algorithm:
-Preserves EBX, then rebuilds a three-argument stack frame for the internal
-worker at 0004e1e9: it computes LEA EAX,[ESP+0x10], which is the address of
-the first variadic slot on the caller's stack (a va_list), and pushes it last
-of the three so the worker receives (dest, format, va_list) in cdecl order.
-The first two incoming stack arguments are re-pushed unchanged. After the
-call the wrapper removes the 12 bytes it pushed (ADD ESP,0xc), restores EBX
-and returns; EAX is left untouched, so the worker's return value is the
-return value of this function. 0004e1e9 in turn appends a global pointer read
-from 00061454 and calls the formatting engine at 00054dc7. All three
-functions in that chain have exactly one caller each, and the only caller of
-this wrapper is fdps_play_movie at 00030f40, so the whole formatting chain was
-linked in for a single call site.
+Preserves EBX, then rebuilds a three-argument frame for the worker at 0004e1e9 (spawnvp): it computes LEA EAX,[ESP+0x10] -- entry ESP+0xC, the address of the first variadic slot, which is already laid out as the argv array -- pushes that, then path and mode, calls 0004e1e9, cleans 12 bytes and returns. __cdecl, caller cleans.
 
-Parameters:
-  arg1 (stack, [ESP+8] at entry) - destination buffer receiving the formatted
-    text.
-  arg2 (stack, [ESP+0xc] at entry) - format string.
-  ... (stack, from [ESP+0x10] at entry) - variadic arguments consumed by the
-    conversion specifiers; their address is passed on as a va_list.
-
-Returns:
-  int, propagated unchanged from the worker (character count in the CRT
-  contract).
-
-Pool: crt  [CLIB3S.LIB(sprintf); FID only offered spawnlp score 26.68 (rejected, same varargs-wrapper shape)]
-Watcom sprintf: takes (buf, fmt, ...), builds a va_list pointer to the first variadic slot and tail-forwards (buf, fmt, va) to the vsprintf-level worker at 0004e1e9.
-Evidence: Disassembly is the canonical Watcom varargs wrapper: PUSH EBX; LEA EAX,[ESP+0x10] (address of the first stack vararg); PUSH EAX; PUSH [fmt]; PUSH [buf]; CALL 0004e1e9; ADD ESP,0xc (cdecl, caller cleans). The callee 0004e1e9 is itself a thin forwarder that re-pushes those three arguments plus a fourth loaded from the global at 00061454 and calls the shared formatting engine at ~00054db0 -- the vsprintf/__vbprintf shape of the printf family. It does no DOS exec/environment work, so the low-score FID hit on spawnlp (which has an identical two-fixed-args-plus-arglist-pointer shape and therefore collides structurally) is a false match; spawnlp in a 1997 DOS/4G game called from the movie player would make no sense, whereas sprintf building a filename or caption string does. Both candidate symbols live in CLIB3S.LIB, so the pool is crt regardless of which name is right. Not fdps: no game data or state is touched and the body is pure argument marshalling. Not binary_artifact: it is a real library entry point with a real library symbol, not a thunk or jump island.
+Evidence for spawnlp over the sprintf name this address used to carry (ticket 14.1 naming pass):
+- 0004e1e9 forwards the same three arguments plus dword [00061454] to 00054dc7, and 00054dc7 is spawnvpe (Function ID 485.85, CLIB3S.LIB(spawnvpe)) -- it calls spawnve, tests errno == ENOENT, reads getenv("PATH") and retries each ';'-separated prefix. So [00061454] is environ, 0004e1e9 is spawnvp, and this is the list-form wrapper over it.
+- Not spawnlpe: that variant walks past the NULL terminator to pick up envp and passes four arguments down. This one passes three and lets the callee supply environ.
+- The real sprintf is 00042d41, whose body is the textbook Watcom form (pushes the character-output helper and a stack sink before the formatter) and which matches sprintf at score 265.7 against a single candidate.
+- `spawnlp` appears verbatim in the linked libraries' PUBDEF set, alongside spawnl/spawnle/spawnlpe/spawnv/spawnve/spawnvp/spawnvpe.
 
 === 000435bc [PLATE]
 Pool: crt  [CLIB3S.LIB(memcpy) score 121.35, Watcom 10.0/10.0a/10.0b]

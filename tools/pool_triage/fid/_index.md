@@ -29,6 +29,11 @@
 | `analyze_ail_matches.py` | 把 AIL 查詢結果換算成涵蓋率、與 pool 判定不一致的個案、兩邊 function 數的對帳 |
 | `build_contradiction_worklist.py` | 替每個不一致的 function 攤一份證據包 |
 | `reread_contradictions.js` | 票 14.1 的 workflow：一個不一致一個 agent，重判、落地、跑 gate、回掃 |
+| `extract_watcom_symbols.py` | 用 `wlib -l` 取出實際連結的四個程式庫的全部公開符號，命名的對照基準 |
+| `build_symbol_renames.py` | 算出哪些 function 可以直接改成程式庫的符號名，哪些要交給 agent |
+| `ApplyLibrarySymbolNames.java` | 把機械改名寫進 Ghidra，兩段式避免互換名稱時撞名 |
+| `sync_verdict_names.py` | 把改名同步回 pool 判定檔，兩邊的記錄不會分岔 |
+| `name_disputed_symbols.js` | workflow：一個爭議名稱一個 agent，定名、落地、跑 gate |
 
 ## 跑法
 
@@ -69,6 +74,27 @@ python tools/pool_triage/fid/build_contradiction_worklist.py
 ```
 Workflow({ scriptPath: "tools/pool_triage/fid/reread_contradictions.js", args: { roundSize: 8 } })
 ```
+
+## 從比對結果取命名
+
+比對的第二個用途是命名。[`rebuild_info/naming.md`](../../../rebuild_info/naming.md) 要求 vendor 的 function 就叫程式庫的名字、不加前綴，而 Function ID 的命中正好就是「這一段等於程式庫的那一個 function」——所以命中本身就是名字的來源，不需要另外造一套。
+
+```bash
+python tools/pool_triage/fid/extract_watcom_symbols.py
+python tools/pool_triage/fid/build_symbol_renames.py --symbols workspace/pool_triage/fid/watcom_symbols.json
+```
+```
+run_ghidra_script ApplyLibrarySymbolNames.java  args: <renames>\mechanical.json          （先跑一次不帶 apply 看清單）
+run_ghidra_script ApplyLibrarySymbolNames.java  args: <renames>\mechanical.json apply
+```
+```bash
+python tools/pool_triage/fid/sync_verdict_names.py
+```
+```
+Workflow({ scriptPath: "tools/pool_triage/fid/name_disputed_symbols.js", args: { roundSize: 5 } })
+```
+
+`build_symbol_renames.py` 只在證據唯一時才自己決定：body 位元組相同、只有一個候選、而且那個名字沒有第二個人在爭。**任何一個名字被兩個位址claim 就整組送進 workflow**——衝突代表其中一邊的識別是錯的，在這裡挑一個贏家就是 ADR-0002 禁止的批次判斷。實測第一輪 461 個裡有 446 個是機械轉換，15 個要逐一讀過；後續又從殘留的命名偏差（`_impl` 後綴）、5-byte thunk 與撞名補進 14 個，逐一定名的共 29 個。
 
 `run_ghidra_script` 的 `script_name` 傳這裡的**完整路徑**即可，它會自己複製到 Ghidra 的腳本目錄；傳短名字只有在該檔已經在那個目錄裡才找得到。另外它作用在 MCP 當下的 current program，而這條管線會把程式庫模組匯進同一個專案，所以**每一次呼叫都要明寫 `program`**。
 

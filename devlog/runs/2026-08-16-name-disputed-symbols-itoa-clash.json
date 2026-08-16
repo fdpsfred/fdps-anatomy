@@ -1,0 +1,30 @@
+{
+  "ticket": "14.1 follow-up",
+  "workflow": "name-disputed-symbols",
+  "disputed_total": 1,
+  "decided": 1,
+  "named": [
+    {
+      "addr": "00054bf5",
+      "name": "_ltoa",
+      "kind": "library_symbol"
+    }
+  ],
+  "left_unnamed": [],
+  "pool_doubts": [],
+  "unresolved": [],
+  "apply_rounds": [
+    {
+      "round": "apply:r1",
+      "applied": 1,
+      "orphan_ranges": 0,
+      "error_bookmarks": 0,
+      "ok": true,
+      "ghidra_responding": true,
+      "problems": "None blocking. 00054bf5 renamed itoa -> _ltoa (kind library_symbol); verdict file workspace/pool_triage/verdicts/pools/00054bf5.json \"name\" updated from \"itoa\" to \"_ltoa\". Duplicate check: search_functions_enhanced returned 0 results for every pattern tried (_ltoa, ltoa, regex .*ltoa.*, and control patterns \"itoa\"/\"main\"), so it appears non-functional in this session; verified instead with search_functions, which returned exactly \"_ltoa @ 00054bf5, ltoa @ 00054bc0, ultoa @ 00054b70\" — one holder of _ltoa, no clash. Gate: orphan ranges 0, error bookmarks 0, undefined bytes in .object1 0, 1347 functions. Program saved. Note for the record: the decision file explicitly contradicts the old pool verdict's \"role\"/\"evidence\" prose (which still argues this address is itoa forwarding to ltoa); only the \"name\" field was changed as instructed, so that file is now internally inconsistent and its prose needs a follow-up correction."
+    }
+  ],
+  "halted": false,
+  "halt_reason": "",
+  "unfinished": []
+}
