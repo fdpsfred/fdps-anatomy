@@ -8,32 +8,30 @@
 
 ## 鐵則
 
-**禁止批次或抽樣決定 function 的身分、calling convention 與 emit。** 每個 function 都必須逐一親自讀過 assembly 才下判斷，一次處理一個。禁止用腳本或規則批次套用，禁止抽樣後外推。詳見 ADR-0002。
+**禁止批次或抽樣決定 function 的身分、calling convention 與 emit。** 每個 function 都必須逐一親自讀過 assembly 才下判斷，一次處理一個。禁止用腳本或規則批次套用，禁止抽樣後外推。理由與取捨見 [ADR-0002](docs/adr/0002-no-batch-processing-per-function.md)。
 
 這條規則的邊界：對整體事實的調查（編譯器版本判定、容器格式解析、統計比對）仍可用腳本，那不是在替每個 function 下判斷。
 
-平行化必須靠 workflow 腳本驅動，工作清單只存在於腳本中，每次 agent 呼叫只帶一個 function。**不可以把 function 清單交給單一 agent 讓它自行分配**——實測證明 agent 會退化成批次處理。
+強制機制是結構性的：工作清單只存在於 workflow 腳本中，每次 agent 呼叫只帶一個項目。**不可以把清單交給單一 agent 讓它自行分配。**
 
 ## 逐項工作一律全自動
 
-需要逐一處理 function 或 data 的工作，一律由一支 workflow 從頭跑完，中途不回來要人確認。**每張票自己寫適合自己的 workflow**——沒有共用骨架，各票的工作形狀差異大到硬套只會變成一堆開關。共用的是原則，不是程式碼。
+需要逐一處理 function 或 data 的工作，一律由一支 workflow 從頭跑完，中途不回來要人確認。**每張票自己寫適合自己的 workflow**，沒有共用骨架；共用的是原則，不是程式碼。
 
-詳見 ADR-0007，五條必要條件：
+**動手寫 workflow 之前先讀 [ADR-0007](docs/adr/0007-workflow-automation-and-agent-context.md)**，五條必要條件的完整規定在那裡，這裡只列名字：
 
-1. **判定寫檔，只回傳摘要**——agent 把完整結果寫成一個檔案，回傳約 200 byte。這是 context 管理的核心手段，處理 100 個或 1,000 個項目，腳本與後續每一段的 context 都一樣。
-2. **判定階段的 agent 不寫入 Ghidra 或 `src/`**，落地集中在獨立的轉錄階段。
-3. **每輪落地後跑該工作的 gate**，不過就當輪修，修不掉明確回報失敗。
-4. **結束前要有回掃段**，重讀所有低信心或留有未決問題的判定，此時允許引用鄰居的判定檔當證據。
-5. **必須處理錯誤，不得靜默跳過**——單項失敗要重試一次再記帳；**整輪 agent 全部沒回傳代表上游失效（session 上限、API、機器），要立刻停止**，不要送註定失敗的重試；落地失敗要回報且落地端不得自行改判定；gate 不過要當輪修或標記失敗；停止之後不得再產出知識庫等收尾成品；每次跑完都要能續跑，「已完成」以判定檔為準且要比對範圍是否仍相符。收尾報告必須列出完成數、失敗數與未完成清單。
-
-**中斷是常態**：單支 workflow 有 agent 呼叫數上限，數百個項目的票本來就要分成幾次呼叫。分段是預算切的，不是決策切的——每次呼叫仍然自己從頭跑到尾。
+1. 判定寫檔，只回傳摘要
+2. 判定階段的 agent 不寫入 Ghidra 或 `src/`，落地集中在獨立的轉錄階段
+3. 每輪落地後跑該工作的 gate
+4. 結束前要有回掃段
+5. 必須處理錯誤，不得靜默跳過——含整輪全滅立刻停止、續跑、收尾報告列出未完成清單
 
 參考範例（不是框架，別當新工作的起點去改造）：`tools/backbone_walk/walk_ticket12.js` 是最小完整形；`tools/pool_triage/triage_ticket14.js` 多了兩階段結構、上游失效偵測與續跑，規模大的票看它。
 
 ## 工作步驟
 
-- **動手前先查前作有沒有做過。** 每張票、每個子題目開工前，先看 `C:\Users\fdpsf\Documents\fd2-anatomy` 的知識庫與 `tools/` 下有沒有對應成果——資料夾名稱與各層 `_index.md` 就是入口。能沿用就沿用、能照抄就照抄，確認沒有或不適用才自己造，並在票裡寫明來源路徑。前作是同一套工具鏈、同一個引擎家族的完整逆向成果；自己重造通常不是多花時間，是繞開已經踩平的坑（實例：票 14 自寫 OMF parser 撞上 Easy OMF-386 的 quirky record，前作早已結論「用 `wlib` 別自己寫」）。
-- 每個新 session 開始時先讀 @README.md 了解知識庫結構（README 尚未建立時，讀 `docs/research/fd2-playbook.md`）
+- **動手前先查前作有沒有做過。** 每張票、每個子題目開工前，先看 `C:\Users\fdpsf\Documents\fd2-anatomy` 的知識庫與 `tools/` 下有沒有對應成果——資料夾名稱與各層 `_index.md` 就是入口。能沿用就沿用、能照抄就照抄，確認沒有或不適用才自己造，並在票裡寫明來源路徑。自己重造通常不是多花時間，是繞開已經踩平的坑（實例：票 14 自寫 OMF parser 撞上 Easy OMF-386 的 quirky record，前作早已結論「用 `wlib` 別自己寫」）。
+- 每個新 session 開始時先讀 @README.md 了解知識庫結構
 - 開始規劃或執行每個 plan 之前，先確認下述可用工具都能使用，否則立刻停下來等使用者檢查
 - 工作過程中產生的所有 deferred / backlog 項目，在整個工作結束前都要被深入研究並解決。真的遇到無法處理的狀況才詢問使用者；使用者確認無法當下解決，才寫進 `open_issues.md`
 
@@ -77,7 +75,7 @@
 - **DOSBox-X**：`C:\DOSBox-X`，要用 silent mode（`-silent`）執行以達成全自動化
 - **Watcom C/C++ 10.0a**：`C:\Users\fdpsf\Documents\WATCOM_10_series\WATCOM_10.0a`（其他版本同目錄下，供比對用），要在 DOSBox-X 裡執行
 - **光碟映像**：`D:\Game\Flame Dragon\fdps_image\FDPS_DISC_1.cue`（另有 DISC 2）。DOSBox 掛載指令：`imgmount e -t cdrom "D:\Game\Flame Dragon\fdps_image\FDPS_DISC_1.cue"`
-- **FDPS 攻略站**：入口是 `https://chiuinan.github.io/game/game/intro/ch/c31/fdps/index.htm`（frameset），9 個內容頁在 `.../c31/fdps/fdps/*.htm`（注意 `fdps` 出現兩次），選單為 `fdps/menu.htm`。目錄本身不可瀏覽，直接請求 `.../fdps/fdps/` 會拿到 404
+- **FDPS 攻略站**：已鏡像進 `docs/guide/`，查資料用 `tools/guide_scrape/` 的 `search` 子命令，不要直接連線抓站。站台結構見 `docs/guide/_index.md`
 
 ## Ghidra 操作規範
 
