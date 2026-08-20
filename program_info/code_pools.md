@@ -1,33 +1,49 @@
 # 程式碼歸屬（pool）
 
-**驗證對象**：`FDPS.LE` 裡全部 1,347 個 function 的歸屬，也就是「這段程式碼是遊戲自己寫的，還是連結器帶進來的」。每個 function 屬於哪個 pool、判定依據是什麼、還有哪些沒定案，以此檔為唯一正典。pool 這四個名字的定義與符號命名規則屬於 [`rebuild_info/naming.md`](../rebuild_info/naming.md)。
+**驗證對象**：`FDPS.LE` 裡全部 1,345 個 function 的歸屬，也就是「這段程式碼是遊戲自己寫的，還是連結器帶進來的」。每個 function 屬於哪個 pool、判定依據是什麼、還有哪些沒定案，以此檔為唯一正典。pool 這四個名字的定義與符號命名規則屬於 [`rebuild_info/naming.md`](../rebuild_info/naming.md)。
+
+每個 function 都被兩雙眼睛獨立讀過：一次只看自己的 assembly，一次可以引用鄰居已定案的判定。下面的數字是覆核後的結果。
 
 ## 四個 pool 的規模
 
 | pool | function 數 | 程式碼 byte | 佔比 | 內容 |
 | --- | --- | --- | --- | --- |
-| `fdps` | 517 | 181,999 | 64.5% | 遊戲自己的程式碼，要逐一還原成 C |
-| `ail` | 442 | 57,873 | 20.5% | Miles Audio Interface Library 3.02 |
-| `crt` | 380 | 42,124 | 14.9% | Watcom C 執行期函式庫與 80x87 模擬器 |
-| `binary_artifact` | 8 | 47 | 0.0% | 連結器與編譯器產生、原始碼裡沒有對應寫法的東西 |
-| 合計 | 1,347 | 282,043 | | |
+| `fdps` | 514 | 181,661 | 64.4% | 遊戲自己的程式碼，要逐一還原成 C |
+| `ail` | 436 | 57,508 | 20.4% | Miles Audio Interface Library 3.02 |
+| `crt` | 395 | 42,874 | 15.2% | Watcom C 執行期函式庫與 80x87 模擬器 |
+| `binary_artifact` | 0 | 0 | 0.0% | 這次連結產生、原始碼裡沒有對應寫法的東西 |
+| 合計 | 1,345 | 282,043 | | |
 
-沒有任何 function 停在 `unknown`。1,341 個是高信心，6 個是中信心，沒有低信心。
+沒有任何 function 停在 `unknown`，1,345 個 pool 判定全部是高信心。17 個 function 有一條**非 pool** 的軸停在中信心（多數是 calling convention），pool 本身不受影響。
+
+## 三種會判錯 pool 的判準
+
+覆核推翻了 22 個 pool 歸屬，佔 1,345 個的 1.6%，而且集中在三種判準上——**這三種在下一次遇到同樣形狀時仍然會誤導**，所以連同它們的正確問法一起記在這裡。名稱另有 90 個換掉，邊界只有 `00043310` 一處錯：它的 body 一路吃到 `_cstart_` 之後的收尾段，切開後 `00043527` 才是 `CSTRT386.ASM` 放 `__exit` 標籤的地方。
+
+| 誤導的判準 | 影響 | 正確的問法 |
+| --- | --- | --- |
+| 拿形狀當歸屬：5 byte 的 `JMP`、共用 epilogue 入口就算連結器產物 | 8 個（`binary_artifact` → `crt` 7、→ `ail` 1） | 問的是「這一段是誰的 object 帶進來的」。廠商的 `.LIB` 出廠前就已經把尾端合併、把 thunk 發佈出來了 |
+| 「Function ID 問不到就不是程式庫的」 | 8 個（`fdps` → `crt`） | 那是 translation unit 內的 file-static，Watcom 把它發成 LPUBDEF 而不是 PUBDEF，比對庫看不到但 `.LIB` 裡有 |
+| 「只被 AIL 呼叫就是 AIL」 | 6 個（`ail` → `fdps`） | 方向可以反過來：vendor object 會以 EXTDEF 參照遊戲自己定義的 helper，見「AIL 會呼叫遊戲的程式碼」 |
+
+`binary_artifact` 因此是空的，理由見下面的專節。
+
+signature 這一軸另有 1,132 個與 Ghidra 記錄的簽章不符，但那是自動分析猜出來的，不是任何人下過的判定。
 
 ## 界線怎麼畫
 
 四類證據算數，強度由高到低：
 
 - **函式庫 byte 比對**。把 Watcom 10.0／10.0a／10.0b 的 `CLIB3S`、`MATH387S`、`EMU387`、`GRAPH`、`CSTRTX3S` 拆成 OMF module、去重後得到 821 個相異的 object，做成 Ghidra Function ID 資料庫回頭比對映像檔。這是唯一能直接證明「這段機械碼來自那個 lib 的那個 module」的手段。AIL 沒有官方 `.LIB`，改用前作 FD2 從 `FD2.LE` 合成的 `ailv3.lib` 走同一條管線，命中的意義因此不同（見下方 AIL 段）。管線本身屬於 [`tools/pool_triage/fid/`](../tools/pool_triage/fid/_index.md)。
-- **caller/callee 關係**。決定性的形式是連結方向：第三方 lib 以編譯好的 `.LIB` 形式連進來，它的 object 不可能呼叫遊戲原始碼裡定義的符號。所以只被 AIL module 直接 `CALL` 的 function 本身就是 AIL；反過來，遊戲呼叫 AIL 的公開 API 是正常的用法，不代表被呼叫者是遊戲的。
+- **caller/callee 關係**。決定性的形式是連結方向：第三方 lib 以編譯好的 `.LIB` 形式連進來，它的 object 不可能呼叫遊戲原始碼裡定義的符號。所以只被 AIL module 直接 `CALL` 的 function 本身就是 AIL；反過來，遊戲呼叫 AIL 的公開 API 是正常的用法，不代表被呼叫者是遊戲的。**這條規則有一個成立的例外**，見「AIL 會呼叫遊戲的程式碼」。
 - **字串參照**。AIL 的 debug 版會把自己的 API 名稱印進 log，格式字串留在映像檔裡，指向它的 wrapper 就等於被自己的資料指名。
 - **共用資料參照**。同一塊執行期狀態的寫入者與讀取者屬於同一個模組。
 
-**位址範圍不算證據。** 三個 pool 在程式碼 object 裡交錯擺放，1,347 個 function 依位址排序後被切成 91 個同 pool 的連續段落。`crt` 從 `00010000` 一路到 `00056786`，`fdps` 從 `00010010` 到 `00057a74`，兩者完整重疊：83 個 `fdps` function 在 `0003c000` 之上，131 個 `crt` function 在 `00050000` 之上。[`memory_layout.md`](memory_layout.md) 說 `0003c000` 之後以程式庫為主，那只是描述密度，不能拿來判定任何一個 function。
+**位址範圍不算證據。** 三個 pool 在程式碼 object 裡交錯擺放，1,345 個 function 依位址排序後被切成 17 個同 pool 的連續段落。`crt` 從 `00010000` 一路到 `00056786`，`fdps` 從 `00010010` 到 `00057a74`，兩者完整重疊：51 個 `fdps` function 在 `0003c000` 之上，137 個 `crt` function 在 `00050000` 之上，而 `0003ca49`–`0003cb01` 那三個 `fdps` function 整個落在 AIL 的地盤中間。[`memory_layout.md`](memory_layout.md) 說 `0003c000` 之後以程式庫為主，那只是描述密度，不能拿來判定任何一個 function。
 
 ## CRT 的辨識結果
 
-380 個 function 歸 `crt`，其中 196 個有 Function ID 命中，共 202 筆比對記錄、132 個相異的 OMF module。命中全部落在 `crt`，沒有一筆落到其他 pool——這同時是判定的證據，也是這套比對沒有亂咬的驗證。
+395 個 function 歸 `crt`，其中 196 個有 Function ID 命中，共 202 筆比對記錄、135 個相異的 OMF module。命中全部落在 `crt`，沒有一筆落到其他 pool——這同時是判定的證據，也是這套比對沒有亂咬的驗證。
 
 | 命中的模組來自 | 命中筆數 |
 | --- | --- |
@@ -40,62 +56,83 @@
 
 202 筆裡有 196 筆在 10.0、10.0a、10.0b 三個版本的 byte 完全相同，剩下 6 筆只出現在其中兩個版本，沒有任何一筆能單獨區分出確切版本。
 
-380 個 `crt` function 裡 210 個已還原出符號名稱。剩下 170 個沒有名字，原因是兩類：translation unit 內的 file-static 不會產生 public symbol，以及函式體短到 Function ID 的門檻以下（一個 3 byte 的 `return 0` 沒有可比對的特徵）。這兩類都是靠所屬 object module 的其他成員把它夾住而定案的，缺名字是命名工作的缺口，不是歸屬的疑點。
+### file-static 的名字在 object 裡，只是不在 PUBDEF 裡
+
+395 個 `crt` function 裡 252 個有符號名稱，其中 58 個的名字不是 Function ID 給的；剩下 143 個沒有名字。
+
+多出來的那批名字來自一個結構性事實：**Watcom 把 translation unit 內的 file-static 發成 OMF 的 LPUBDEF（local public）記錄，不是 PUBDEF。** `wlib` 的列表與 Function ID 資料庫兩邊都只讀 PUBDEF，所以兩邊都看不到它們，但名字確實在 `.LIB` 檔裡，用 `wlib` 抽出 module 再逐 byte 對位就能取回，而且 LPUBDEF 的位移同時把 function 的邊界獨立驗證一次。`00045c92` 的 `convDec`、`0005241e` 的 `calc_yday`、`00054cf7` 的 `forcedecpt`、`0004c936` 的 `FixedPoint_Format`、`0005506d`／`00055110`／`00055183` 的 `DoEFormat`／`DoFFormat`／`AdjField` 都是這樣拿回來的，寫法照程式庫原樣、不加本專案的前綴。
+
+還原不出來的才落回 `L$N_<module>_<purpose>` 這個自創形式，目前有 22 個；其中的序號在映像檔裡本來就取不回來，所以多半留著字面的 `N`。仍然沒有名字的 143 個是兩類：LPUBDEF 也沒有收的內部標籤，以及函式體短到 Function ID 的門檻以下（一個 3 byte 的 `return 0` 沒有可比對的特徵）。這兩類都是靠所屬 object module 的其他成員把它夾住而定案的，缺名字是命名工作的缺口，不是歸屬的疑點。
 
 `EMU387` 的 80x87 模擬器另有一個結構特徵：`0004e8e8` 與 `0004e948` 兩張 ModR/M 解碼表的 slot 依 r/m 與 mod 排列，並在 r/m=4 逸出到 SIB 解碼常式。只有指令模擬器會有 SIB 表，這個特徵把模擬器內部那些沒有名字、沒有 caller 的小 stub 一併釘在 `crt`。
 
 ## AIL 的界線
 
-Miles 的官方 `.LIB` 不在手上，所以 442 個 `ail` function 的第一輪判定靠連結方向、字串與共用狀態。第二輪拿前作 FD2 從 `FD2.LE` 合成的 `ailv3.lib` 補上函式庫佐證，結果與規模見下一節。
+Miles 的官方 `.LIB` 不在手上，所以 436 個 `ail` function 的歸屬靠連結方向、字串與共用狀態判定，再由前作 FD2 從 `FD2.LE` 合成的 `ailv3.lib` 提供函式庫佐證，結果與規模見下一節。
 
-字串是最強的一條。這是 AIL 的 debug build，每個公開 API 進入點都會把自己的名字當格式字串丟給 log，例如 `000622ed` 的 `Audio Interface Library application usage script generated by AIL V%s`。這些格式字串聚成一整塊 literal pool，讓 185 個 function 直接還原出 Miles 的原始 API 名稱。AIL 的公開層因此是「wrapper 印字串、worker 做事」的兩層結構：wrapper 拿走公開名稱，worker 叫 `AIL_internal_<公開名>_inner`——那是前作的庫自己的寫法，不是本專案取的（見 [`rebuild_info/naming.md`](../rebuild_info/naming.md)）。
+字串是最強的一條。這是 AIL 的 debug build，每個公開 API 進入點都會把自己的名字當格式字串丟給 log，例如 `000622ed` 的 `Audio Interface Library application usage script generated by AIL V%s`。這些格式字串聚成一整塊 literal pool，讓 AIL 的 106 個公開進入點直接還原出 Miles 的原始 API 名稱。AIL 的公開層因此是「wrapper 印字串、worker 做事」的兩層結構：wrapper 拿走公開名稱，worker 叫 `AIL_internal_<公開名>_inner`——那是前作的庫自己的寫法，不是本專案取的（見 [`rebuild_info/naming.md`](../rebuild_info/naming.md)）。另有 323 個掛 `AIL_internal_` 開頭的名字，10 個到現在還沒有名字。
 
 沒有字串的部分靠連結方向補完——被已定案的 AIL module 直接呼叫，就是 AIL。AIL 自己的執行期狀態也是印證：last-error 緩衝區在 `00069ef0`、debug logger 在 `00069e6c`–`00069e84`、timer registry 在 `000604a0`–`000605ee`、混音器參數區在 `00061500`–`00061518`。
 
 AIL 集中在三個功能區，中間夾著 `crt` 與 `fdps`（每區內部再被切成幾段連續的同 pool 區間，位址本身不算證據）：
 
-| 範圍 | function 數 | 內容 |
-| --- | --- | --- |
-| `0003c984`–`00042422` | 132 | 驅動映像載入、公開 API 層與 debug trace wrapper |
-| `0004478c`–`0004bd12` | 172 | worker、IRQ0 timer ISR、driver 安裝與 XMIDI 音序器 |
-| `00052c5c`–`00054851` | 136 | 軟體混音與 PCM 格式轉換，無一例外 |
+| 範圍 | function 數 | 程式碼 byte | 內容 |
+| --- | --- | --- | --- |
+| `0003c984`–`00042422` | 132 | 22,392 | 驅動映像載入、公開 API 層與 debug trace wrapper |
+| `0004478c`–`0004bd12` | 171 | 28,041 | worker、IRQ0 timer ISR、driver 安裝與 XMIDI 音序器 |
+| `00052c5c`–`00054851` | 136 | 7,158 | 軟體混音與 PCM 格式轉換，無一例外 |
 
 第三區是手寫組語，由 [`memory_layout.md`](memory_layout.md) 記的那兩張格式分派表驅動，整段 `0005285c`–`00054823` 被 DPMI 鎖頁，因為混音在 timer 中斷裡跑。
+
+### AIL 會呼叫遊戲的程式碼
+
+「只被 AIL 呼叫就是 AIL」有一個成立的例外。`0003ca49`、`0003cad2`、`0003cb01`、`0003cb6e`、`0003cb93`、`0003cbaa` 是一組六支的 DPMI 服務常式（`INT 31h` 的 `0100`／`0101` DOS 記憶體配置與釋放、`0600`／`0601` 區段鎖頁與解鎖，加上兩支以長度為參數的變體），**由遊戲自己定義、由 AIL 的 vendor object 以 EXTDEF 參照**。呼叫方向因此是庫指向遊戲，不是遊戲指向庫。
+
+證據是前作 FD2 的同一組模組：FD2 把這六支放在遊戲自己的 `src/util/dpmi.c` 並打包成獨立的 `fd2common.lib`（不在 `ailv3.lib` 裡），FDPS 這六支的順序與大小逐一相符（137／47／109／37／23／23 byte），參數順序與「兩個端點不分先後、自己取 min/max」的處理也一樣。
+
+六支都歸 `fdps`。**同一個 translation unit 的成員必須同 pool**——這六支曾經被判成兩半，分歧本身就是其中一邊判錯了的訊號，決定性的證據是前作把同一組模組放在遊戲側而不是 `ailv3.lib` 裡。
+
+### AIL 公開進入點會蓋掉 EBX／ECX／EDX
+
+AIL 的 vendor object 不是 `wcc386` 的預設輸出：它會在沒有存回的情況下蓋掉 EBX、ECX、EDX。前作驗證過的 `ailv3.h` 因此在每一條公開宣告上掛 `#pragma aux AIL_<fn> "*" modify [eax ebx ecx edx];`，與該進入點是 `__cdecl` 還是 `__watcall` 無關。這一點在重建時會咬人，收在 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。
 
 ## AIL 的函式庫佐證
 
 `ailv3.lib` 是前作 FD2 從 `FD2.LE` 的位元組合成出來的，不是 Miles 的發行版。**命中因此代表「FDPS 的這一段與 FD2 的那一段位元組相同」，不代表與任何一個官方 Miles build 相同。** 這正是要問的問題：兩邊的 AIL 是不是同一份。
 
-442 個 `ail` function 對上 `ailv3.lib` 的 428 個 function：
+436 個 `ail` function 對上 `ailv3.lib` 的 428 個 function：
 
 | | 數量 | |
 | --- | --- | --- |
-| 命中，且 full hash 完全相同 | 390 | 其中 331 個只對上一個程式庫 function |
-| 沒命中，短到算不出雜湊 | 7 | Function ID 的門檻是 4 個 code unit |
-| 沒命中，可雜湊 | 45 | |
+| 命中，且 full hash 完全相同 | 390 | 其中 332 個只對上一個程式庫 function |
+| 沒命中，短到算不出雜湊 | 8 | Function ID 的門檻是 4 個 code unit |
+| 沒命中，可雜湊 | 38 | |
 
-沒有任何一個是「命中但雜湊不同」——這套比對只有全等或不命中兩種結果。
+沒有任何一個是「命中但雜湊不同」——這套比對只有全等或不命中兩種結果。命中數 390 與程式庫那一側的 428 都不受覆核的改判影響（改判的六個全部落在沒命中的那一堆），變的是分母：442 → 436。
 
-**59 個命中對上的程式庫 function 不只一個。** AIL 的公開層是一整族同形狀的 debug log wrapper（印自己的 API 名稱、再呼叫 worker），而 Function ID 會把重定位過的字串指標與呼叫目標遮掉，所以十幾個不同的 wrapper 雜湊相同。這些命中證明的是「這一層與前作相同」，不是逐個 function 的識別。
+**58 個命中對上的程式庫 function 不只一個。** AIL 的公開層是一整族同形狀的 debug log wrapper（印自己的 API 名稱、再呼叫 worker），而 Function ID 會把重定位過的字串指標與呼叫目標遮掉，所以十幾個不同的 wrapper 雜湊相同。這些命中證明的是「這一層與前作相同」，不是逐個 function 的識別。
 
-52 個沒命中的分成兩類，加上程式庫這邊 38 個沒有 FDPS 對應的 function，正好解釋兩邊 442 與 428 的差額：
-
-- **38 個是同一支 function 的不同編譯結果**，與程式庫那 38 個一一對應，body 大小的中位數差 1 byte。這與 [ADR-0004](../docs/adr/0004-reuse-fd2-ail-library.md) 直接比 body 得到的「30 個只有 codegen 層級差異」是同一件事，由另一條路量到，數字略高是因為 Function ID 對 function 邊界也敏感。
-- **13 個在 `ailv3.lib` 裡完全沒有對應**：`0003c984`–`0003d176` 那 11 個，加上 `00044dc0` 與指向它的 thunk `0003dcb0`。詳見下面兩節。
+**46 個沒命中的裡面，30 個靠雜湊以外的證據接回程式庫裡有名字的 function。** 用的是模組位置（同一個 object 內相鄰成員的相對位移在兩個映像檔裡一致）、前作留下的 fixup 表（呼叫序列與多重度逐一相符），以及 `ailv3.lib` 自己的符號清單。差一個 byte 的 body 就會讓雜湊失效，所以「沒命中」從來不等於「前作沒有」——`00048240` 的 `AIL_internal_xmidi_find_chunk`（281 對 282 byte）與 `000469f0` 的 `AIL_internal_dig_driver_setup_full`（1,547 對 1,546 byte）都是這樣認回來的。
 
 混音那 136 個全部命中、全部單一候選、full hash 相同，其中 132 個正好是兩張格式分派表 slot 指到的那 132 個——分派表的內容因此逐 slot 核對完畢。
 
 ### 命中同時就是名字的來源
 
-判定的副產品是命名。[`rebuild_info/naming.md`](../rebuild_info/naming.md) 要求 vendor 的 function 就叫程式庫的名字，而「body 位元組相同、只有一個候選、那個名字沒有第二個人在爭」正好是可以直接照抄的條件。兩個 vendor pool 合計 446 個 function 因此從 `crt_xxx`／`FUN_xxxxxxxx` 換成程式庫的原名，包括混音分派表那 134 個 callback（`AIL_internal_mix_finalize_<slot>`／`_mix_loop_<slot>`）。剩下 29 個的證據互相衝突或不合慣例——兩個位址搶同一個符號、名字不在任何程式庫的 PUBDEF 裡、或掛著本專案自創的 `_impl` 後綴——一律逐一讀過才定名，結果之一是 `000435a2` 原本掛著 `sprintf` 而它其實是 `spawnlp`，真正的 `sprintf` 在 `00042d41`。
+判定的副產品是命名。[`rebuild_info/naming.md`](../rebuild_info/naming.md) 要求 vendor 的 function 就叫程式庫的名字，而「body 位元組相同、只有一個候選、那個名字沒有第二個人在爭」正好是可以直接照抄的條件。上面那 30 個靠模組位置認回來的適用同一條規則，因為認的是同一個符號，只是證據不是雜湊。
 
-**7 個命中落在 `crt`，全部是形狀撞號。** `malloc`、`free`、`close`、`remove`、`_strupr`、`_toupper`、`_tolower` 的 body 都是同樣的 14 byte「取一個堆疊參數、call、清堆疊、return」轉接，遮掉重定位運算元之後雜湊相同，分數只有 5.34（Ghidra 的預設門檻是 14.6）。七個都逐一重讀過，維持 `crt`。
+**自創的描述性名字一律讓位給程式庫真正發佈的拼法。** 這是 85 個改名裡的主流：`00047884` 是 `AIL_internal_voc_dispatcher` 而不是描述式的 `AIL_internal_voc_block_dispatcher`，`000497f0` 是 `AIL_internal_mdi_driver_setup_full` 而不是 `AIL_register_MDI_driver`——後者是個 Miles 與 `ailv3.lib` 都沒有發佈的名字，連結時解不掉。只有在程式庫確實沒有發佈符號時才用 `AIL_internal_` + 描述的形式。
 
-### FDPS 有而前作沒有的 13 個
+**7 個命中落在 `crt`，全部是形狀撞號。** `malloc`、`free`、`close`、`remove`、`_strupr`、`_toupper`、`_tolower` 的 body 都是同樣的「取一個堆疊參數、call、清堆疊、return」轉接，遮掉重定位運算元之後雜湊相同，分數只有 5.34（Ghidra 的預設門檻是 14.6）。七個都逐一重讀過，維持 `crt`。
 
-`0003c984`–`0003d176` 這 11 個是一整塊模組：`0003ccf8` 把讀進來的 4-byte 簽章跟 `"LX"` 比對，再照 header 與 chunk 的欄位走過去——LX 是 32-bit 保護模式驅動程式的映像格式，這是 AIL 載入 `.DIG`／`.MDI` 驅動映像的那一層。`0003ccf8`、`0003c9db`、`0003c9eb` 沒有任何呼叫端，是連結器整包抽進來的死碼；其餘八個是活的，呼叫端全部在 AIL 範圍內——`0003cb93` 有 37 個、`0003cbaa` 29 個、`0003c984` 17 個、`0003cb01` 12 個、`0003cad2` 8 個、`0003cb6e` 7 個、`0003ca49` 2 個、`0003cbc1` 1 個。
+### FDPS 有而前作沒有的 16 個
 
-另外兩個是 `00044dc0`——4 byte 的 `PUSHFD/POP EAX/CLI/RET`，前作的庫裡最短的可雜湊 function 也有 10 byte——與跳進它的 5-byte thunk `0003dcb0`。
+49 個沒命中的扣掉接回去的 30 個，剩 19 個。其中 3 個（`000452d7`、`00045f50`、`000463c0`）程式庫裡有本體，只是本專案的名字還沒對齊程式庫的拼法——後兩個的 name 軸就是那 7 個中信心之二。
+
+**剩下 16 個在 `ailv3.lib` 裡真的沒有本體，合計 3,894 byte，其中 8 個有呼叫端。** 主體是 `0003c984`、`0003c9db`、`0003c9eb`、`0003cbc1`、`0003ccf8` 這五個：`0003ccf8` 把讀進來的 2-byte 簽章跟 `"LX"` 比對，再照 header 與 object table 的欄位走過去——LX 是 32-bit 保護模式驅動程式的映像格式，這是 AIL 載入 `.DIG`／`.MDI` 驅動映像的那一層，前作的 AIL 沒有這一層；`0003c9db`／`0003c9eb` 是掛在 `00060380`／`00060384` 上的 malloc／free hook 設定器，預設指向 CRT 的 `malloc`／`free`。
+
+同一批裡還有 DPMI 服務常式留在 `ail` 的三支（`0003cb6e`、`0003cb93`、`0003cbaa`）——它們在前作是 `fd2common.lib` 的內容而不是 `ailv3.lib` 的，所以「庫裡沒有」是預期而非異常。另外兩個是 `00044dc0`——4 byte 的 `PUSHFD/POP EAX/CLI/RET`，前作的庫裡最短的可雜湊 function 也有 10 byte——與跳進它的 5-byte thunk `0003dcb0`。
+
+**`00044dc0` 這 4 byte 不是 Watcom 的 `_disable`。** 前作 FD2 的知識庫把它記成 `crt_equivalent_get_eflags`，但 Watcom 真正的 `_disable` 是 `FA C3` 兩個 byte（`CLIB3S.LIB` 的 `disable` module），而 `9C 58 FA C3` 這個序列掃遍 Watcom 10.0–10.6a 的 1,135 個 `.lib`／`.obj` 一次都沒出現。它夾在兩個 Function ID 命中的 `ail_code.obj` body 之間、位於同一個 object 的 `_TEXT` 貢獻內部，連結器不可能在那裡插入外來程式碼。
 
 重建時這一批不會隨 `ailv3.lib` 進來，見 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。
 
@@ -112,43 +149,46 @@ AIL 集中在三個功能區，中間夾著 `crt` 與 `fdps`（每區內部再�
 
 前三個因此是 `ail`——`ailv3.lib` 就以 `AIL_internal_log_lock_acquire` 這種不帶位址後綴的名字發佈它們，是廠商 object 的內容而不是這次連結的產物。這與 `0003dc2f` 是同一條界線。
 
-## binary_artifact 涵蓋什麼
+## binary_artifact 為什麼是空的
 
-8 個 function、合計 47 byte，全部是「原始碼裡沒有這一段，重建時也不該寫出來」的東西，連結器與編譯器會自己產生：
+**這個 pool 沒有成員。** 曾經有 8 個 function 掛在這裡，逐一重讀後全部改判給某個 vendor object。
 
-- **jump island**：只有一條 `JMP rel32` 的 5 byte 轉接，例如 `0003d50a`、`0003d50f`、`0004f770`、`0004f79d`
-- **共用 epilogue 入口**：多個常式尾端合併後，被分支進入的收尾片段，例如 `00056708`
-- **呼叫慣例轉接**：把堆疊參數搬進暫存器再 tail-jump 的墊片，例如 `0004e20c`
+判準是**「原始碼」指的是這次連結的輸入，不是「有沒有人寫過這一段 C」；形狀本身不決定 pool，決定的是誰的 object 帶進來的。** 那 8 個當初是照形狀分的（只有一條 `JMP rel32` 的 5 byte 轉接、多個常式尾端合併後被分支進入的收尾片段、把堆疊參數搬進暫存器再 tail-jump 的墊片）；改問「誰帶進來的」之後，八個的答案都是某個 vendor object 或遊戲自己：
 
-判準是「有沒有對應的原始碼」，不是「有沒有 caller」。沒有 caller 的函式庫常式仍然屬於它的 lib，因為 wlink 是整個 object 抽進來的；反過來，`00051f6a` 那個孤立的 `RET` byte 沒有任何原始碼會產生它。
+| 位址 | 改判為 | 誰帶進來的 |
+| --- | --- | --- |
+| `0003d50a`、`0003d50f` | `crt` | `000638f0`–`00063920` 的 Watcom rt_init 記錄（`{rtn_type, priority, void (*rtn)(void)}`）的指標欄位，由 `__InitRtns`／`__FiniRtns` 走訪並呼叫 |
+| `0004e20c` | `crt` | 夾在 `spawnvp` 與 `__fatal_runtime_error` 之間、只被後者呼叫的堆疊到暫存器墊片，兩端都是 Function ID 命中的 `CLIB3S` body |
+| `0004f770`、`0004f79d` | `crt` | 50 個參照全部是 `EMU387` 模擬器 opcode 分派表的 slot，是那個 object 自己的組語發出來的 catch-all 入口 |
+| `00051f6a` | `crt` | `CLIB3S.LIB` 的 `tzset` module 在 `_TEXT+0` 發佈的 `tryOSTimeZone`，`tzset` 自己在 `_TEXT+1` |
+| `00056708` | `crt` | `MATH387S.LIB` 的 `i64ts386` module 內部標籤，取出 `CALL` 推入的返回位址當作 10 的乘冪表基底 |
+| `0003f6c9` | `ail` | AIL debug trace 離開路徑的尾段，只有 AIL 的 trace 全域變數與 AIL 的入口跳進來 |
 
-**「原始碼」指的是這次連結的輸入，不是「有沒有人寫過這一段 C」。** 廠商的 object 在出廠前就已經把尾端合併、把 thunk 發佈出來了，那些片段隨 `.LIB` 一起進來，屬於那個 lib 而不是本程式的連結產物。`0003dc2f` 是這條界線的實例：形狀確實是共用 epilogue（pop 三個自己沒 push 的暫存器、拆自己沒建的 frame），但它歸 `ail`——九個跳進它的來源全部是 AIL 公開 API，它唯一的資料參照 `0x00069e6c` 是 AIL debug logger 的計數器，前作的庫裡也有位元組相同的同一段（`AIL_internal_log_decrement_nesting`）。`0003da44`／`0003da49` 是同一條線的另一種形狀：5 byte 的 jump island，但 `ailv3.lib` 把它們當成公開符號收著。
+`0003dc2f` 是這條界線的實例：形狀確實是共用 epilogue（pop 三個自己沒 push 的暫存器、拆自己沒建的 frame），但它歸 `ail`——九個跳進它的來源全部是 AIL 公開 API，它唯一的資料參照 `00069e6c` 是 AIL debug logger 的計數器，前作的庫裡也有位元組相同的同一段（`AIL_internal_log_decrement_nesting`）。
 
-**形狀本身不決定 pool，決定的是誰的 object 帶進來的。** 「沒有函式庫命中」也不是證據——5 byte 的 body 在 Function ID 的門檻以下，它從來沒有被問過。
+**這個 pool 保留在分類體系裡。** 它的定義沒有失效，只是 `FDPS.LE` 的連結沒有產生任何符合它的東西；`wlink` 是整個 object 抽進來的，所以沒有 caller 的函式庫常式仍然屬於它的 lib。
 
 ## 還沒定案的部分
 
-**6 個 function 停在中信心**，其餘 1,341 個是高信心：`0003c984`、`0003cb6e`、`0003cbaa`、`0003dcb0` 歸 `ail`，`0004be0c`、`00055063` 歸 `crt`。六個都是沒有名字、沒有函式庫命中的常式，pool 靠所屬模組推得而非直接證據，相鄰函式都與判定一致，所以是信心不足而不是結論可疑。
+**21 個 function 有一條非 pool 的軸停在中信心。** 14 個是 calling convention——全部是沒有參數的 `void` function，`__cdecl` 與 `__watcall` 在這種形狀下產生的 byte 完全相同，所以那是「無法從函式體觀測」而不是「判不出來」。7 個是名字，其中 `00045f50`、`000463c0` 已知程式庫裡有本體、只是拼法還沒對齊，其餘是 `L$N_` 形式裡取不回來的序號。這些都不影響 pool。
 
-四個 `ail` 的中信心不是巧合：`0003c984`、`0003cb6e`、`0003cbaa` 在上面那批「前作的庫裡沒有」的 14 個裡，`0003dcb0` 是唯一一個目標也沒有對應的純重定位 thunk。這兩類正好是函式庫比對問不出答案的兩種形狀。
+**兩張格式分派表下的 136 個成員全部是 `ail`**，沒有例外。這一點值得寫下來，因為它是最會誤導的一種形狀：其中 11 個（`00052c5c`、`00052c79`、`00052cac`、`00052da8`、`00052ddf`、`00052df5`、`00052e96`、`00052ee9`、`000539bf`、`00053ac6`、`00054765`）曾經判成 `fdps`，與同表的另外 125 個相衝突。
 
-**兩張格式分派表下的 136 個成員全部是 `ail`**，沒有例外。這一點值得寫下來，因為它是唯一一次判定之間互相矛盾：其中 11 個（`00052c5c`、`00052c79`、`00052cac`、`00052da8`、`00052ddf`、`00052df5`、`00052e96`、`00052ee9`、`000539bf`、`00053ac6`、`00054765`）第一遍判成 `fdps`，與同表的另外 125 個相衝突。
+矛盾的來源是這批 function **沒有任何靜態呼叫端**——它們只被分派表的 slot 指到，只看函式體的話，PCM 格式轉換迴圈與 sprite 迴圈長得像。決定歸屬的不是函式體而是誰在分派：分派者 `00054765` 的四個呼叫端 `000461d0`、`000463c0`、`00046940`、`000469f0` 全部是高信心 `ail` 的 DIG driver 常式（`00046940` 即 `AIL_internal_dig_driver_teardown`）。
 
-矛盾的來源是這批 function **沒有任何靜態呼叫端**——它們只被分派表的 slot 指到，第一遍只能看函式體，而 PCM 格式轉換迴圈與 sprite 迴圈長得像。決定歸屬的不是函式體而是誰在分派：分派者 `00054765` 的四個呼叫端 `000461d0`、`000463c0`、`00046940`、`000469f0` 全部是高信心 `ail` 的 DIG driver 常式（`00046940` 即 `AIL_internal_dig_driver_teardown`）。11 筆逐一重讀後全部改判 `ail`。
-
-**只被函式指標表指到的 function，pool 由分派者決定，不由函式體決定。** 這是本票學到最會誤導的一種形狀。
+**只被函式指標表指到的 function，pool 由分派者決定，不由函式體決定。** 這條規則套遍全部 1,345 個，沒有第二起同類矛盾。
 
 **沒有任何 undefined block 判不出來。** 共 821 筆 block 判定（筆數多於區塊數，因為大區塊會被逐次切小、同一段落留下多筆前後相承的判定），每一筆都是高信心，種類都已確定，其中的程式碼也都已建成 function 並各自取得 pool 判定。有 37 筆的 pool 欄位留白，但那不是判不出來：20 筆是 object 邊界之間的對齊填充，10 筆是那兩張格式分派表裡未使用格式碼的 NULL slot，7 筆的程式碼已經以 function 的身分定案。區塊本身的數量與種類統計屬於 [`memory_layout.md`](memory_layout.md)。
 
 ## 票 15 的工作清單
 
-要還原成 C 的就是 `fdps` 這 517 個 function，共 181,999 byte。清單存在 Ghidra 裡，形式是 function tag `pool_fdps`，隨 [`ghidra_snapshot/functions.txt`](../ghidra_snapshot/_index.md) 進版控。
+要還原成 C 的就是 `fdps` 這 514 個 function，共 181,661 byte。清單存在 Ghidra 裡，形式是 function tag `pool_fdps`，隨 [`ghidra_snapshot/functions.txt`](../ghidra_snapshot/_index.md) 進版控。
 
 查詢方式：Ghidra MCP 用 `search_functions_by_tag(tag="pool_fdps")`，離線就在 `ghidra_snapshot/functions.txt` 裡抓 `pool_fdps`。
 
-**知識庫不另存一份清單。** pool 判定會被修正——混音模組那 11 筆就是在頁面寫完之後才改判的——多一份副本只會在修正發生的當下變成錯的，而且沒有機制會提醒誰去同步。tag 是唯一的擁有者，其他地方一律去查它。
+**知識庫不另存一份清單。** pool 判定會被修正——混音模組那 11 筆與覆核推翻的 21 筆都是實例——多一份副本只會在修正發生的當下變成錯的，而且沒有機制會提醒誰去同步。tag 是唯一的擁有者，其他地方一律去查它。
 
-517 個裡有 174 個沒有還原出 caller。那是靜態呼叫圖的極限，不是歸屬的疑點，這些 function 一樣要還原。
+514 個裡有 172 個沒有還原出 caller。那是靜態呼叫圖的極限，不是歸屬的疑點，這些 function 一樣要還原。514 個裡 96 個已經有 `fdps_` 開頭的描述性名字，其餘仍是 `FUN_xxxxxxxx`，那是命名工作的缺口，不是歸屬的疑點。
 
 ### 其中有一批不是 C
 
@@ -165,4 +205,8 @@ AIL 集中在三個功能區，中間夾著 `crt` 與 `fdps`（每區內部再�
 
 ### 一個會被「修掉」的 CRT 行為
 
-`0004c936` 是 Watcom `printf` 的 `%hf`／`%hF` 分支（`prtf` module，227 byte 與 `CLIB3S.LIB` 逐 byte 相符）。`%hf` 在 Watcom 是 **16.16 定點數**轉換：吃 32-bit 整數、預設精度 4、整條路徑不碰 FPU。轉錄遊戲的格式字串時不能把它當成 `%f` 的筆誤。
+`0004c936` 是 Watcom `printf` 的 `%hf`／`%hF` 分支（`prtf` module，227 byte 與 `CLIB3S.LIB` 逐 byte 相符，該 module 的 LPUBDEF 把它叫 `FixedPoint_Format`）。`%hf` 在 Watcom 是 **16.16 定點數**轉換：吃 32-bit 整數、預設精度 4、整條路徑不碰 FPU。轉錄遊戲的格式字串時不能把它當成 `%f` 的筆誤。
+
+### 一個沒有 C 原型的 CRT 進入點
+
+`000444a4` 的 `__sys_init_387_emulator` 以 **EBP 收一個活的旗標**（進入後 `INC EBP` / `OR EBP,EBP`），跳進它的 `0003d50a` 把 EBP 原樣轉發過去。沒有任何 C 原型能表達這個介面，重建時的處理見 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。

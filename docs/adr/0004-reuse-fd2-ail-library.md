@@ -12,7 +12,9 @@
 
 ## 以 Function ID 獨立覆核
 
-上面的依據來自 body 逐一比對。之後把 `ailv3.lib` 拆成 OMF module 建成 Ghidra Function ID 資料庫、對 `FDPS.LE` 查詢，用另一種方法問同一個問題，結論一致：442 個 `ail` function 有 390 個與程式庫的某個 function 位元組相同（遮掉重定位運算元後），沒有任何一個是「命中但雜湊不同」。剩下 52 個裡有 38 個與程式庫那 38 個沒有 FDPS 對應的 function 一一對得起來、body 大小中位數差 1 byte，也就是同一支 function 的不同編譯結果——數量比 body 比對得到的 30 略高，因為 Function ID 對 function 邊界也敏感。完整數字與每一類的明細屬於 [`program_info/code_pools.md`](../../program_info/code_pools.md)。
+上面的依據來自 body 逐一比對。之後把 `ailv3.lib` 拆成 OMF module 建成 Ghidra Function ID 資料庫、對 `FDPS.LE` 查詢，用另一種方法問同一個問題，結論一致：436 個 `ail` function 有 390 個與程式庫的某個 function 位元組相同（遮掉重定位運算元後），沒有任何一個是「命中但雜湊不同」。剩下 46 個裡有 30 個能與程式庫那些沒有 FDPS 對應的 function 對得起來，body 只差幾個 byte，也就是同一支 function 的不同編譯結果——與 body 比對得到的那 30 個 codegen 層級差異是同一件事，只是換一條路量到。完整數字與每一類的明細屬於 [`program_info/code_pools.md`](../../program_info/code_pools.md)。
+
+**票 14.2 逐 function 重讀全部 1,345 個判定之後，本 ADR 的前提維持成立。** `ail` pool 從 442 縮到 436（六支 DPMI 服務常式改判為遊戲自己的程式碼，那正是前作把它們放進 `fd2common.lib` 而不是 `ailv3.lib` 的同一條界線），命中數 390 與程式庫那側的 428 都沒有變；重讀還把原本沒命中的 46 個裡的 30 個，用模組位置與前作的 fixup 表接回程式庫裡有名字的 function，「兩邊是同一份 AIL」因此比第一遍更有支撐。退路不啟動。
 
 本 ADR 原本列的兩處未驗證風險，一處關閉、一處縮小：
 
@@ -23,4 +25,4 @@
 
 若實際連結時失敗，退路是用前作的抽取 pipeline 對 `FDPS.LE` 重抽——pipeline 本身可沿用，只是要重跑。覆核沒有推翻本 ADR 的前提，所以這條退路維持在「備而不用」，不啟動。
 
-**但沿用前作的庫不等於 FDPS 的 AIL 就齊了。** 有 13 個 `ail` function 在 `ailv3.lib` 裡完全沒有對應，其中 10 個有呼叫端。這批以 `0003c984`–`0003d176` 的驅動映像載入模組為主，前作的 AIL 沒有這一層。連結階段（票 19）要另外補，做法與清單見 [`rebuild_info/pitfalls.md`](../../rebuild_info/pitfalls.md) 與 [`program_info/code_pools.md`](../../program_info/code_pools.md)。
+**但沿用前作的庫不等於 FDPS 的 AIL 就齊了。** 有 16 個 `ail` function 在 `ailv3.lib` 裡完全沒有對應，其中 8 個有呼叫端。這批以 `0003ccf8` 為首的 LX 驅動映像載入層為主，前作的 AIL 沒有這一層。連結階段（票 19）要另外補，做法與清單見 [`rebuild_info/pitfalls.md`](../../rebuild_info/pitfalls.md) 與 [`program_info/code_pools.md`](../../program_info/code_pools.md)。

@@ -41,6 +41,8 @@
 | 章節音軌表的位元組要 **+1** 才是 MSCDEX 音軌編號，加法由呼叫端在起播前做，不在表裡 | 直接把表值當音軌編號送出去，整首曲子會差一軌 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
 | CD 命令的 `INT 2Fh` 不是指令，是 DPMI `INT 31h` AX=0300h 的 real-mode call structure 裡的資料位元組 | 直接寫 `int 0x2f` 內嵌組語。在 DOS/4G 保護模式下走不通 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
 | `0x63930` 以後的 global 全部在 BSS，其中 `0x64000` 之後執行檔裡連內容都沒有 | 照 Ghidra 顯示的零值 emit 成初始化陣列。BSS 從 `0x63930` 起就該宣告成未初始化，而 `0x64000`–`0x6c3bf` 這 33KB 更是連檔案裡都不存在，載入器補的零與檔案帶的零長得一樣，照抄會把它們塞進映像檔 | [`program_info/memory_layout.md`](../program_info/memory_layout.md) |
+| AIL 的每一條公開宣告都要掛 `#pragma aux AIL_<fn> "*" modify [eax ebx ecx edx];` | 照 C 的常識寫成 `extern void AIL_startup(void);` 就算。AIL 的 vendor object 不是 `wcc386` 的輸出，它會在沒有存回的情況下蓋掉 EBX／ECX／EDX；少了 modify 清單，編譯器會把活值留在 EBX 跨過 AIL 呼叫，值被無聲吃掉，沒有任何診斷，而且與該進入點宣告成 `__cdecl` 還是 `__watcall` 無關 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
+| `__sys_init_387_emulator`（`000444a4`）以 **EBP** 收一個活的旗標，跳進它的 `0003d50a` 把 EBP 原樣轉發過去 | 宣告成 `void __sys_init_387_emulator(void)`。任何 C 原型都表達不了這個介面，寫成 C 之後編譯器會自己配置 EBP，旗標就傳不進去 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
 | 遊戲的 blit kernel 家族是手寫組語：沒有 prologue，參數由呼叫端預先放在 ESI／EDI／ECX／EDX，共用呼叫端的 EBP frame，還會蓋掉呼叫端的傳入參數槽 | 照 Ghidra 推出來的 `__watcall` 簽章寫成一般 C function。那個簽章是反編譯器猜的，不是真的呼叫慣例；寫成 C 之後編譯器會自己配置 frame 與暫存器，這個以暫存器交接的契約就斷了。必須以 `.ASM` 模組或內嵌組語產出 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
 | DGROUP 最上面的 8KB（`0x6a3c0` 以後）是堆疊段，不是 global | 看到 Ghidra 在那裡標了位址就當成 BSS 變數 emit。真正的 BSS 在 `0x6a3bc` 就結束了，那一段是堆疊、環境變數複本與近端堆積共用的空間 | [`program_info/memory_layout.md`](../program_info/memory_layout.md) |
 | 存檔的 checksum 只加總 **`len - 4`** 個 byte，尾端 4 byte 的 checksum 欄位本身不算進去（`0x56898`） | 加總整個緩衝區。舊存檔一律驗不過 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
@@ -76,7 +78,9 @@
 | 事項 | 內容 | 正典 |
 | --- | --- | --- |
 | 啟動的三道光碟檢查 | `access("DISK.NO")`、由 `Disk.no` 第三個 token 取得路徑前綴、MSCDEX 安裝檢查，任一不過就 `exit(1)`。重建版跑起來前這三件都要滿足 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
-| 連上前作的 `ailv3.lib` 不等於 AIL 齊了 | 13 個 `ail` function 在前作的庫裡完全沒有對應，其中 10 個有呼叫端，主體是 `0003c984`–`0003d176` 的 LX 驅動映像載入層。照直覺「AIL 沿用前作、不用管」會在連結時留下解不掉的外部符號 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
+| 連上前作的 `ailv3.lib` 不等於 AIL 齊了 | 16 個 `ail` function 在前作的庫裡完全沒有對應，其中 8 個有呼叫端，主體是 `0003ccf8` 領頭的 LX 驅動映像載入層。照直覺「AIL 沿用前作、不用管」會在連結時留下解不掉的外部符號 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
+| AIL 會反過來呼叫**遊戲自己寫的** DPMI 服務常式 | 把 `INT 31h` 的 `0100`／`0101`／`0600`／`0601` 包裝也算成 AIL 的一部分，等 `ailv3.lib` 提供。方向是庫以 EXTDEF 指向遊戲：這六支要由重建版自己定義並連進去，少了它們 AIL 的鎖頁與 DOS 記憶體配置全部解不掉 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
+| `00044dc0` 那 4 byte 的 `PUSHFD/POP EAX/CLI/RET` 屬於 AIL，不是 Watcom 的 `_disable` | 照抄前作 FD2 的 `crt.c`——它把這一段記成 `crt_equivalent_get_eflags` 收在 `crt` 裡。Watcom 真正的 `_disable` 是 `FA C3` 兩個 byte，這 4 byte 掃遍 10.0–10.6a 的 1,135 個 `.lib`／`.obj` 一次都沒出現；連同跳進它的 thunk `0003dcb0`，兩支都不能路由到 `crt` | [`program_info/code_pools.md`](../program_info/code_pools.md) |
 | 影片播放不在重建範圍 | 三段過場由光碟上的 `FD.EXE` 播放，`FDPS.LE` 只負責 `spawnv` | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
 | CD 音源在重建範圍內 | 選曲、起播、停止、循環全部由 `FDPS.LE` 自己下 MSCDEX 命令 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
 | 140 個章節／事件處理函式沒有任何直接呼叫者 | 只看呼叫圖會把它們當成死碼砍掉。它們全部只透過 `.object2` 的四張函式指標表被間接呼叫 | [`program_info/memory_layout.md`](../program_info/memory_layout.md) |
