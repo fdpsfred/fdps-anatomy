@@ -12,16 +12,16 @@ calling convention 是逐 function 判定的——個別 function 會偏離預�
 
 **Blocked by:** 07, 14.2
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 每個遊戲本體 function 逐一讀過 assembly 後命名，一次處理一個
-- [ ] 每個 function 的 calling convention 逐一判定，偏離預設值的明確標記
-- [ ] 每個 function 的每個參數依其實際用途命名，與 function 名稱在同一次判定中完成
-- [ ] 命名採用專案詞彙表的語彙，並參照攻略基準真值確認語意正確
-- [ ] 每個 function 有描述其行為的註解
-- [ ] 命名過程中新發現的跳躍表與直落到下一個 function 的情形全部處理完畢（成批的未辨識程式碼已在 14 號票建成 function）
-- [ ] 完成判定：零個預設命名殘留（含 `FUN_*` 與 `param_N`）、零個錯誤標記
-- [ ] 回掃段跑完，沒有殘留低信心或未決的判定；仍無解的明確列出
-- [ ] 全程無人介入跑完，agent 的 context 用量不隨處理量成長
-- [ ] workflow 有錯誤處理：agent 未回傳或判定檔缺漏會重試、落地與 gate 失敗會明確回報、上游工具失去回應有停止訊號；收尾報告列出完成數、失敗數與未完成清單
-- [ ] Ghidra 快照匯出並 commit
+- [x] 每個遊戲本體 function 逐一讀過 assembly 後命名，一次處理一個
+- [x] 每個 function 的 calling convention 逐一判定，偏離預設值的明確標記
+- [x] 每個 function 的每個參數依其實際用途命名，與 function 名稱在同一次判定中完成
+- [x] 命名採用專案詞彙表的語彙，並參照攻略基準真值確認語意正確
+- [x] 每個 function 有描述其行為的註解
+- [x] 命名過程中新發現的跳躍表與直落到下一個 function 的情形全部處理完畢（成批的未辨識程式碼已在 14 號票建成 function）
+- [x] 完成判定：零個預設命名殘留（含 `FUN_*` 與 `param_N`）、零個錯誤標記
+- [x] 回掃段跑完，沒有殘留低信心或未決的判定；仍無解的明確列出
+- [x] 全程無人介入跑完，agent 的 context 用量不隨處理量成長
+- [x] workflow 有錯誤處理：agent 未回傳或判定檔缺漏會重試、落地與 gate 失敗會明確回報、上游工具失去回應有停止訊號；收尾報告列出完成數、失敗數與未完成清單
+- [x] Ghidra 快照匯出並 commit

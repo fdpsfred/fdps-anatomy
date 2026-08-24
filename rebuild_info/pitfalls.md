@@ -12,6 +12,12 @@
 - **不能照字面理解的資料**：資料表的欄位語意與欄位名稱或直覺對不上，照字面用會算錯。
 - **不能照編譯器慣例設定的旗標**：用預設值或沿用前作的旗標會產生行為不同的執行檔。
 
+## 單一 function 的踩雷點記在它自己的註解裡
+
+本檔收的是**跨 function 反覆出現的模式**。只影響一支 function 的細節寫在該 function 的 plate comment 尾端、標題為 `Rebuild note:` 的那一段，隨 [`ghidra_snapshot/comments.txt`](../ghidra_snapshot/comments.txt) 進版控。
+
+分界在於重複次數：「未初始化的 tick latch」在十幾支動畫迴圈裡是同一個陷阱，屬於本檔；「章節 15 的結束處理清的是 byte +0x34 而不是 byte +5」只有一處，屬於那支 function 的註解。寫 C 的人手上會同時有這份總表與該 function 的註解，兩邊都看得到。
+
 ## 不能修的原版 bug
 
 | 事項 | 照直覺會怎麼寫 | 正典 |
@@ -19,6 +25,10 @@
 | `.SAF` 的 magic 檢查是 `p[0]=='S' \|\| p[1]=='A' \|\| p[2]=='F'`，三個條件是 OR | 寫成 `&&` 或 `memcmp`。改了之後原本放行的檔會被擋下 | [`resource_info/saf.md`](../resource_info/saf.md) |
 | `.CEL`／`.SAF` 的繪製器逐列扣 column 數，一個 op 超出列尾會讓計數繞回成極大值並寫穿記憶體 | 加上 clamp 或提早 break。原版是靠編碼端保證每列剛好填滿，繪製器本身不設防 | [`resource_info/cel.md`](../resource_info/cel.md) |
 | 職業表的索引一律是「職業代碼 + 1」，但 `0x126b0` 這一處漏了 `INC`，拿到的是前一個職業的地形消耗 | 統一成 `promap[class + 1]`。這處走的是「這個單位走不走得到目標格」的判斷，與實際移動用的表不同，改了行為就不一樣 | [`assets/tables/classes.md`](../assets/tables/classes.md) |
+| 動畫迴圈的「上一次的 tick」區域變數**在寫入之前就被讀取**，所以第一格不等待。十幾支迴圈都是這個形狀（轉場、戰鬥數值條、SAF 播放、村莊行走） | 在迴圈前寫 `int last = tick;`。這是最自然的修法，而它讓每一段動畫都多一個 tick | plate comment 的 `Rebuild note` |
+| 越界寫入是原版行為：狀態視窗的邊框清除迴圈跑 320 圈而畫面只有 200 列（超出 mode 13h 尾端 38KB）、商店的下箭頭 blit 超出 malloc 區 10 列、單位陣列搬移的 `memmove` 比來源多讀一筆 0x50 記錄 | 把長度統一成正確值。這些寫入落在堆積或顯示卡孔徑上，改了之後被踩掉的內容跟著變 | plate comment 的 `Rebuild note` |
+| 記憶體管理的原版錯誤要照留：片尾名單每張卡片配置 89KB 卻只在迴圈外 free 一次、商店的移動網格在迴圈底部才配置而在頂部讀取（第一圈讀未初始化的堆疊、之後讀已 free 的區塊） | 把 `free()` 移進迴圈、把配置提到迴圈外。後者只是「碰巧能跑」——Watcom 的近端堆積會把同尺寸的區塊原樣還回來 | plate comment 的 `Rebuild note` |
+| 鍵盤環形緩衝區沒有滿檢查，寫索引追上讀索引之後 `fdps_read_keyboard_queue` 回報空佇列，而裡面積著十個未讀掃描碼 | 加一個計數或滿檢查。改了之後遊戲收到的按鍵序列就不一樣 | plate comment 的 `Rebuild note` |
 
 ## 不能加的檢查
 
@@ -29,6 +39,10 @@
 | `.CEL` 的像素格式欄位 `0x0D` 從不讀，全程只有一條解碼路徑 | 依 `0x0D` 分派兩種解碼器。原版會把 `M310.CEL` 當 4-op RLE 讀，這個矛盾未收斂，見 [`open_issues.md`](../open_issues.md) | [`resource_info/cel.md`](../resource_info/cel.md) |
 | 九張 `.DAT` 資料表的取值一律是 `base + index * stride`，沒有任何上界檢查 | 加上 `index < count`。物品編號 `FF` 就落在 `ITEM.DAT` 之外，遊戲裡確實拿得到這個編號，效果隨當時的堆積內容而變 | [`assets/items.md`](../assets/items.md) |
 | 建立我方單位時，`FRIAPRDA.DAT` 前兩個物品槽無條件標成「裝備中」，不看值是不是 `FF` | 依值判斷空槽再決定狀態 | [`assets/tables/characters.md`](../assets/tables/characters.md) |
+| 數值條的 clamp 是**單邊**的：下界壓到 0，上界不壓，而呼叫端算出的 `(cur * width + max - 1) / max` 在 `cur > max` 時會超出 | 補上對稱的 `min(width, fill)`。原版的滿溢數值條有的整條不畫、有的畫成超長的糊塊，補了 clamp 就變成乾淨的滿格 | plate comment 的 `Rebuild note` |
+| 視野裁切在兩軸上不對稱（x 兩邊都是嚴格不等式、y 兩邊都含端點），格子繪製的四邊界則全部嚴格，不合格的格子整塊丟掉而不是裁切 | 寫成對稱的、或寫成「超出就裁切」。貼齊畫面邊緣的那一row/column 會出現在原版沒有畫的地方 | plate comment 的 `Rebuild note` |
+| 音效索引 `-1` 是活的輸入值：配置器在音效關閉或八個聲道全忙時回 `-1`，呼叫端不檢查就往下送，原版於是讀到 handle 表前面那個 dword | 加上 `if (index < 0) return;`。這個保護只有在確認過每個呼叫端之後才安全 | plate comment 的 `Rebuild note` |
+| WAV header 的解析結果被忽略，非 RIFF 的緩衝區會以未初始化的 14-byte 堆疊描述子播放出去；chunk 走訪也沒有 RIFF 的偶數對齊與邊界檢查 | 補上「解析失敗就回 -1」與正確的 RIFF 走訪 | plate comment 的 `Rebuild note` |
 
 ## 不能換的型別與寫法
 
@@ -48,6 +62,16 @@
 | 存檔的 checksum 只加總 **`len - 4`** 個 byte，尾端 4 byte 的 checksum 欄位本身不算進去（`0x56898`） | 加總整個緩衝區。舊存檔一律驗不過 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
 | `FDE.SAV` 的 XOR 串流密鑰是硬寫的：DX 起始 `0xa5`，每個 byte 先 `DX += 0x9014` 再 `ROL DX,3`，取 DL 與資料 XOR（`0x568b7`） | 換一組看起來等價的常數或改變運算順序。加解密是同一支常式，改了之後新舊存檔互不相容 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
 | Watcom 的 `printf` 認得 `%hf`／`%hF`，那是 **16.16 定點數**轉換（吃 32-bit 整數、預設精度 4、完全不碰 FPU），不是 `%f` 的短版 | 轉錄格式字串時把 `%hf` 當成筆誤改成 `%f`。輸出數值會變，而且會把浮點格式化支援拉進映像檔 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
+| timer ISR 遞增的 tick 計數器 `0x69d64` 在每一支動畫的空轉迴圈裡都要宣告成 `volatile` | 當成普通 global 讀。最佳化器會把載入提到迴圈外，遊戲在第一個等待點就永遠停住 | plate comment 的 `Rebuild note` |
+| 單位記錄的狀態 byte `+5` 有兩種寫法且不能互換：退場是**整個指派** `rec[5] = 1`，而「本回合已行動」是 `rec[5] \|= 0x80` | 統一寫成 `\|=` 與 `&= ~`。退場改成 OR 之後，已行動旗標會留在一個已經退場的單位上 | plate comment 的 `Rebuild note` |
+| 單位記錄的 `+0x34` 是 packed byte：低 nibble 是行為模式，高 nibble 是別處會測的旗標，所以設模式一律是 `rec[0x34] = (rec[0x34] & 0xf0) \| mode` | 把它當成單純的模式欄位寫 `rec[0x34] = mode`，高 nibble 的旗標被無聲清掉 | plate comment 的 `Rebuild note` |
+| 繪製順序與快照時機是行為的一部分：乾淨背景一律在內容畫上去**之前**取樣，地圖單位的影子全部畫完才畫第一個 sprite | 把「畫完再取樣」寫成比較自然的順序、或把兩趟掃描合併成一趟。前者讓每次重繪都疊上舊高亮，後者讓後面的單位把影子蓋到前面的單位身上 | plate comment 的 `Rebuild note` |
+| VGA 的垂直歸線等待是**兩段式**：先等 `0x3da` bit 3 變 1，再等它變回 0 | 只等 bit 3 變 1 就開始複製。每次複製會提早一個消隱期開始，轉場的樣子跟著變 | plate comment 的 `Rebuild note` |
+| 資料表的記錄要 packed：`MAGICDAT.DAT` 的一筆是 7 byte 而開頭是 16-bit 欄位 | 宣告成自然對齊的 struct 再用 `table[id]` 取值。stride 會變成 8，從第 1 號法術起全部讀到錯的記錄 | [`assets/tables/spells.md`](../assets/tables/spells.md) |
+| VFS 查找內部的 `strupr` 會**就地改寫呼叫端的緩衝區**，而呼叫端傳的是字串字面值——映像檔裡的 `"Turn.saf"` 在第一次呼叫後永久變成 `"TURN.SAF"` | 把參數宣告成 `const char *`（過不了編譯），或把字串字面值放進唯讀儲存區（執行時會當掉） | [`resource_info/vfs.md`](../resource_info/vfs.md) |
+| DPMI 鎖頁的 `end` 是**範圍最後一個 byte**，送給 DPMI 的長度是 `(max - min) + 1`；`fdps_dpmi_lock_size(base, size)` 因此鎖的是 `size + 1` byte | 寫成 `size = end - start`，或把 wrapper 改成半開區間的 `base + size - 1`。少鎖一個 byte，而那個 byte 剛好落在頁邊界時 AIL 的中斷處理會踩到未鎖的頁 | plate comment 的 `Rebuild note` |
+| 反查調色盤立方體的 12-bit 索引順序是 **green:red:blue**，不是 RGB | 寫成 `(r << 8) \| (g << 4) \| b`。查表本身還是查得到顏色，只是查到的是另一個 | plate comment 的 `Rebuild note` |
+| CD 那一段有五支 function 的 body 裡**沒有 `RET`**：控制流以 `JMP` 落進鄰居的 body 借用它的收尾段（`0003bd99`、`0003be36`、`0003c4ff`、`0003c6bc`、`0003c7aa`）。那是 `wcc386` 把兩支近乎相同的 C function 的尾端合併掉的結果 | 照反組譯逐條轉錄、寫到最後一條指令就停。合併掉的那一段是這支 function 的 C 原始碼的一部分，漏掉它就漏掉尾端的儲存動作。反過來說也不能因此改邊界——把尾巴併回來會毀掉另一支 function 跳進去的目標 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
 
 ## 不能照字面理解的資料
 
@@ -60,6 +84,10 @@
 | `ITEM.DAT` 的 23 個 byte 不是物品行為的全部 | 假設把這張表搬過去物品就完整了。每回合回復、以及生命之實與三種藥水這類永久強化的**幅度**都不在 record 裡——它們的 `use_effect` 有值而 `use_amount` 是 0 | [`assets/items.md`](../assets/items.md) |
 | 職業表的魔抗欄位存的是 100 減去魔法抗性 | 直接當抗性用，抗性高低會完全顛倒 | [`assets/tables/classes.md`](../assets/tables/classes.md) |
 | 法術的威力欄位為負數時是攻擊力加乘率的百分比，不是傷害 | 宣告成 `u16` 或直接當傷害用。八個絕招全部靠這個負值表示加乘 | [`assets/tables/spells.md`](../assets/tables/spells.md) |
+| `Icon%02d.dat` 的編號是**章節索引**（0 起算），而章節處理函式以玩家看到的章號命名，兩者差 1——`fdps_chapter_12_init` 載入的是 `Icon11.dat` | 照 function 名稱裡的章號寫檔名。三十支處理函式全部會播到下一章的開場動畫，而且照樣編譯照樣跑 | [`CONTEXT.md`](../CONTEXT.md) |
+| `0x640d8` 起的 0x20 byte 是**章節共用**的事件旗標陣列：`fdps_chapter_state_reset` 每次進章節整塊 memset，讀檔時整塊還原，十幾支不同章節的處理函式各自latch 其中一個 byte | 把它寫成該處理函式裡的 `static char done`。那是 assembly 看起來的樣子，但重來一章時不會被清掉，讀檔也還原不了 | plate comment 的 `Rebuild note` |
+| CD 的 MSF 換算已經扣掉 150 frame 的 pregap：`fdps_cd_msf_to_sector` 回的是邏輯磁區號，`fdps_cd_sector_to_msf` 又再扣一次 150（因為它的輸入已經是扣過的） | 寫教科書版的 `minute*60*75 + second*75 + frame`。每一軌的起點都會差 150 frame，長度查詢則會少兩秒 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
+| 三十支章節 init 處理函式看起來一模一樣，但**不能用迴圈或樣板生成**：`Icon%02d.dat` 的編號差 1、`fdps_roster_add_character` 必須排在 `fdps_chapter_state_reset` 之前（reset 會依名冊人數重建地圖單位，順序反過來新加入的角色會被歸零成退場）、而且第 17／22／23 章傳的游標目標不是 0 | 用一支樣板產生三十支。前兩項會讓某些章節少一個角色或播錯動畫，第三項只影響三章 | plate comment 的 `Rebuild note` |
 
 ## 不能照編譯器慣例設定的旗標
 

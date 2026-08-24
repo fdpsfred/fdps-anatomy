@@ -180,7 +180,7 @@ AIL 的 vendor object 不是 `wcc386` 的預設輸出：它會在沒有存回的
 
 **沒有任何 undefined block 判不出來。** 共 821 筆 block 判定（筆數多於區塊數，因為大區塊會被逐次切小、同一段落留下多筆前後相承的判定），每一筆都是高信心，種類都已確定，其中的程式碼也都已建成 function 並各自取得 pool 判定。有 37 筆的 pool 欄位留白，但那不是判不出來：20 筆是 object 邊界之間的對齊填充，10 筆是那兩張格式分派表裡未使用格式碼的 NULL slot，7 筆的程式碼已經以 function 的身分定案。區塊本身的數量與種類統計屬於 [`memory_layout.md`](memory_layout.md)。
 
-## 票 15 的工作清單
+## 要還原成 C 的清單
 
 要還原成 C 的就是 `fdps` 這 514 個 function，共 181,661 byte。清單存在 Ghidra 裡，形式是 function tag `pool_fdps`，隨 [`ghidra_snapshot/functions.txt`](../ghidra_snapshot/_index.md) 進版控。
 
@@ -188,7 +188,9 @@ AIL 的 vendor object 不是 `wcc386` 的預設輸出：它會在沒有存回的
 
 **知識庫不另存一份清單。** pool 判定會被修正——混音模組那 11 筆與覆核推翻的 21 筆都是實例——多一份副本只會在修正發生的當下變成錯的，而且沒有機制會提醒誰去同步。tag 是唯一的擁有者，其他地方一律去查它。
 
-514 個裡有 172 個沒有還原出 caller。那是靜態呼叫圖的極限，不是歸屬的疑點，這些 function 一樣要還原。514 個裡 96 個已經有 `fdps_` 開頭的描述性名字，其餘仍是 `FUN_xxxxxxxx`，那是命名工作的缺口，不是歸屬的疑點。
+514 個裡有 172 個沒有還原出 caller。那是靜態呼叫圖的極限，不是歸屬的疑點，這些 function 一樣要還原。
+
+514 個全部有 `fdps_` 開頭的語意名稱、逐一判定過的 calling convention、語意化的參數名稱與描述行為的 plate comment，沒有預設命名殘留。子系統分佈見 [`architecture.md`](architecture.md)。
 
 ### 其中有一批不是 C
 
