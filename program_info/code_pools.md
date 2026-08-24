@@ -54,7 +54,7 @@ signature 這一軸另有 1,132 個與 Ghidra 記錄的簽章不符，但那是�
 
 前三個就是連結器實際列進 `.lnk` 的三個 lib，版本判定與連結參數見 [`rebuild_info/build_flags.md`](../rebuild_info/build_flags.md)。`GRAPH` 那一筆是 `fdfs386`（double 轉 float 的浮點輔助模組），比對庫裡只有 `GRAPH` 的副本收錄到它——這代表該模組被多個 lib 共用，不代表 `GRAPH.LIB` 有被連結；映像檔裡沒有任何繪圖程式庫的內容。
 
-202 筆裡有 196 筆在 10.0、10.0a、10.0b 三個版本的 byte 完全相同，剩下 6 筆只出現在其中兩個版本，沒有任何一筆能單獨區分出確切版本。
+202 筆裡有 196 筆在 10.0、10.0a、10.0b 三個版本的 byte 完全相同，剩下 6 筆只出現在其中兩個版本。Function ID 這一關的粒度到此為止；確切的發行版是另外用逐 function 的位元組比對定下來的，見 [`rebuild_info/build_flags.md`](../rebuild_info/build_flags.md)。
 
 ### file-static 的名字在 object 裡，只是不在 PUBDEF 裡
 

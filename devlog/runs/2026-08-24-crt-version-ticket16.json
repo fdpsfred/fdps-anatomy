@@ -1,0 +1,43 @@
+{
+  "totalFunctions": 395,
+  "alreadySettled": 394,
+  "judgedThisRun": 1,
+  "deferredForBudget": [],
+  "unfinished": [],
+  "stopped": null,
+  "rescanChanged": [
+    "00054908 (high): Release verdict unchanged: __full_io_exit (CLIB3S module ioexit, offset 0) is compatible with all twelve labels, excludes nothing, basis ambiguous_match, power family_only. Only the confidence field changed, medium -> high, and the evidence text was extended to say why. Two things settled the first pass's hedge. (1) The hedge was about the module attribution resting on symbol/offset-0 placement rather than on the 7 surviving bytes. Both of this function's relocated targets are pinned by other verdicts: the CALL at 0005490a reaches 00054922 = docloseall in CLIB3S module ioexit (75 comparable bytes, high, discriminating), and the tail JMP reaches 0004bef1 = __purgefp in CLIB3S module allocfp (18 bytes, high). The callee lives in the very module this function's offset-0 public symbol names, so ioexit is corroborated structurally. (2) The aggregate shows this was the pool's only all-twelve ambiguous_match rated medium; the structurally identical 7-byte thunks fcloseall (00054917) and flushall (0005497d) are both rated high, and fcloseall's module field is even empty. With nothing excluded, byte scarcity bears on power (already recorded as family_only), not on reliability, and an over-generous compatible set cannot poison the ticket's intersection, only fail to constrain it. Packet arithmetic re-checked by hand: 6A 00 + E8 + 4 masked + 83 C4 04 + E9 + 4 masked = 15 bytes, 7 comparable, single anchor 83c404e9 at offset 7 -- consistent. No Ghidra writes; no other verdict file touched, and none looked wrong."
+  ],
+  "gateReports": [
+    {
+      "round": 1,
+      "checked": 1,
+      "ok_count": 1,
+      "failing": [],
+      "missing": [],
+      "gate_passed": true,
+      "problems": ""
+    },
+    {
+      "round": "rescan1",
+      "checked": 26,
+      "ok_count": 26,
+      "failing": [],
+      "missing": [],
+      "gate_passed": true,
+      "problems": ""
+    }
+  ],
+  "conclusion": {
+    "version": "10.0a",
+    "intersection": [
+      "10.0a",
+      "10.0a_infobase"
+    ],
+    "agrees_with_previous": true,
+    "excluded_10_0": "0x0004c423 __prtf (CLIB3S!prtf, 649 comparable bytes, 606 of them mismatching against 10.0 at the module's own public offset 0) is the strongest of seven; the others are 0x0005254b __isindst (CLIB3S!timeutil, 595), 0x0004d2da __scnf (CLIB3S!scnf, 396), 0x00043f3e __ReAllocDPMIBlock (CLIB3S!grownear, 253), 0x0003d383 _nmalloc (CLIB3S!nmalloc, 173), 0x0004352a __do_exit_with_msg__ (CLIB3S!cstrt386, 50), 0x00043298 _cstart_ (CLIB3S!cstrt386, 2).",
+    "excluded_10_0b": "Two functions, both in MATH387S. 0x00055443 strtod (MATH387S!strtod, 443 comparable bytes; mismatch 0 against 10.0/10.0a, best 362 of 443 mismatching against 10.0b, which recompiled it with a 4-byte-larger frame: SUB ESP,0x38 vs 0x34 from offset 7). 0x00042ca0 IF@TAN (MATH387S!trig387, only 5 comparable bytes -- d9 f2 dd d8 c3 -- but decided positionally over the whole 136-byte trig387 _TEXT: 10.0b's trig387 is 152 bytes and puts a 21-byte guarded IF@TAN at exactly this offset, which cannot be a 5-byte body under any placement). Either one excludes 10.0b on its own.",
+    "contradictions": "The five verdicts that exclude 10.0a -- 0x00043612 FUN_00043612 (4 bytes), 0x0004361a __CHK (12), 0x0004362a __GRO (3), 0x0004362d __STK (22), 0x0004364b __STKOVERFLOW (4) -- are all CLIB3S!stk386 and are an artifact, not a contradiction. WATCOM_10.0a\\lib386\\dos\\clib3s.lib on this machine is 190,464 bytes with 393 modules and no stk386; 10.0a_infobase's is 190,976 with 394 and has it. Of the 393 shared modules zero differ by SHA-256, and EMU387/GRAPH/MATH387S/both STARTUP libs are identical module-for-module between the two installs. The sweep had nothing to compare against and the miss became an exclusion. Resolved by reading the two installs as one release; the damaged clib3s.lib should be replaced from the infobase install. With that resolved, no verdict fights the rest.",
+    "summary": "395 verdicts, 381 informative (14 too short to compare), 392 high confidence. Raw intersection is the single label 10.0a_infobase; restricting to high-confidence verdicts gives the identical set. The split between 10.0a and 10.0a_infobase is entirely a damaged library file on this machine -- the WATCOM_10.0a install's clib3s.lib is missing the stk386 module (393 vs 394 modules, 190,464 vs 190,976 bytes), and all five verdicts excluding 10.0a are stk386 stubs; every other module in every library is SHA-identical between the two installs. Reading them as one release, the intersection is exactly one release: Watcom C/C++ 10.0a. 10.0 is excluded by 7 verdicts, led by __prtf at 0x0004c423 on 649 comparable bytes (606 mismatching against 10.0; 10.0's __prtf is 687 bytes with SUB ESP,0x48, the image's is 695 with SUB ESP,0x4c) and __isindst at 0x0005254b on 595 bytes, whose three timeutil siblings match 10.0 exactly at their offsets so the module was definitely parsed. 10.0b is excluded by only 2, but neither is thin: strtod at 0x00055443 on 443 comparable bytes with 362 mismatching, and IF@TAN at 0x00042ca0 which rests on just 5 bytes of its own yet is decided by a positional comparison of the entire 136-byte trig387 _TEXT segment against 10.0b's 152-byte version. 10.5+ is excluded by 105-111 verdicts and the 9.5 family by 270-272, so only the intra-family split needed care. Against the standing conclusion in rebuild_info/build_flags.md: the release agrees (10.0a), the caveat does not -- \"10.0b not excludable, the two releases' relevant products are byte-identical\" is superseded, since MATH387S's strtod and trig387 both changed at 10.0b and FDPS.LE carries the 10.0a form of both. The two short runs the standing conclusion cited (strupr, __CHP) are family-only evidence and never could have split 10.0a from 10.0b. Reasoning written to C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\crt_version\\conclusion.md; nothing written to the knowledge base."
+  }
+}

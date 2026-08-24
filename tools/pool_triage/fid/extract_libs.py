@@ -32,7 +32,12 @@ REPO = HERE.parents[2]
 DEFAULT_OUT = REPO / "workspace" / "pool_triage" / "fid"
 
 SERIES = Path(r"C:\Users\fdpsf\Documents\WATCOM_10_series")
-VERSIONS = ["WATCOM_10.0", "WATCOM_10.0a", "WATCOM_10.0b"]
+# 10.0a comes from the infobase install: the other 10.0a copy's CLIB3S.LIB is
+# short of the stk386 module (393 modules against 394), so a comparison built
+# from it cannot see __CHK, __STK, __GRO or __STKOVERFLOW at all.  The two
+# installs agree on every other module of every library, so this only adds what
+# was missing.  See rebuild_info/pitfalls.md.
+VERSIONS = ["WATCOM_10.0", "WATCOM_10.0a_infobase", "WATCOM_10.0b"]
 
 # (label, path relative to a version root)
 LIBRARIES = [

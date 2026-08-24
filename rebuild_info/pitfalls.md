@@ -91,10 +91,11 @@
 
 ## 不能照編譯器慣例設定的旗標
 
-旗標組本身與判定依據見 [`build_flags.md`](build_flags.md)，這裡只收「不照原版設會出事」的四項。
+旗標組本身與判定依據見 [`build_flags.md`](build_flags.md)，這裡只收「不照原版設會出事」的五項。
 
 | 事項 | 照直覺會怎麼寫 | 正典 |
 | --- | --- | --- |
+| 程式庫要用 10.0a 的，10.0 家族的三個發行版不能互換 | 手上裝了哪個 10.0 就連哪個，反正都是 10.0 家族。10.0b 的 `MATH387S.LIB` 把 `strtod` 重編成大 4 byte 的框架，又把 5 byte 的裸 `IF@TAN` 換成 21 byte、會回退到軟體實作的守衛版；10.0 的 `CLIB3S.LIB` 則有另一套 `__prtf`／`__scnf`／`__isindst`／`_nmalloc`。連錯版本不會有任何診斷，映像檔就是另一份 | [`build_flags.md`](build_flags.md) |
 | 遊戲模組用 `-s` 關掉堆疊檢查 | 不加 `-s`，用編譯器預設。預設會在每個有框架的 function 前插入 `push <大小>` / `call __CHK`——原版的遊戲碼在堆疊耗盡時是直接寫穿，重建版會改成印 `Stack Overflow!` 然後結束，外顯行為不同。程式庫模組本來就帶檢查，那 17 個要照留 | [`build_flags.md`](build_flags.md) |
 | `-ot` 要寫在 `-od` 前面 | 只寫 `-od`，或寫成 `-od -ot`。`wcc386` 由左而右處理選項：`-ot` 設定「以速度為優先」的偏好，`-od` 之後才關掉最佳化器而不清掉那個偏好。只寫 `-od` 會讓所有位址縮放從 `lea reg,[reg*N]` 變成 `shl reg,N`（原版有 304 處）；寫成 `-od -ot` 則會連最佳化器一起打開，區域變數不再來回堆疊 | [`build_flags.md`](build_flags.md) |
 | 原版用 `-fpi` 而不是 `-fpi87` | 沿用前作 FD2 的 `-fpi87`。wlink 只抽出解得掉未定義符號的 lib 成員，`-fpi87` 不會發出 `__init_387_emulator` 這個參照，於是 `emu387.lib` 就算在 `.lnk` 裡列了也不會被連進去——在沒有 387 的環境下遊戲的浮點運算直接當掉 | [`build_flags.md`](build_flags.md) |
@@ -105,6 +106,7 @@
 
 | 事項 | 內容 | 正典 |
 | --- | --- | --- |
+| 本機 `WATCOM_10.0a` 的 `lib386\dos\clib3s.lib` 是殘缺的副本 | 它比同一發行版的完整副本少一個模組（`stk386`，393 對 394），少掉的正是 `__CHK`／`__STK`／`__GRO`／`__STKOVERFLOW` 這組堆疊檢查 stub。遊戲模組用 `-s` 不會參照它們，但照留堆疊檢查的那 17 個程式庫模組會，連結時就是解不掉的外部符號。建置與比對都要改用 `WATCOM_10.0a_infobase` 那份，或先把檔案補回去——兩份安裝共有的 393 個模組 SHA-256 全數相同，其餘四個程式庫也是模組對模組、雜湊對雜湊一致，所以換過去不改變任何結論 | [`build_flags.md`](build_flags.md) |
 | 啟動的三道光碟檢查 | `access("DISK.NO")`、由 `Disk.no` 第三個 token 取得路徑前綴、MSCDEX 安裝檢查，任一不過就 `exit(1)`。重建版跑起來前這三件都要滿足 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
 | 連上前作的 `ailv3.lib` 不等於 AIL 齊了 | 16 個 `ail` function 在前作的庫裡完全沒有對應，其中 8 個有呼叫端，主體是 `0003ccf8` 領頭的 LX 驅動映像載入層。照直覺「AIL 沿用前作、不用管」會在連結時留下解不掉的外部符號 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
 | AIL 會反過來呼叫**遊戲自己寫的** DPMI 服務常式 | 把 `INT 31h` 的 `0100`／`0101`／`0600`／`0601` 包裝也算成 AIL 的一部分，等 `ailv3.lib` 提供。方向是庫以 EXTDEF 指向遊戲：這六支要由重建版自己定義並連進去，少了它們 AIL 的鎖頁與 DOS 記憶體配置全部解不掉 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
