@@ -23,6 +23,11 @@
 
 ## Consequences
 
-若實際連結時失敗，退路是用前作的抽取 pipeline 對 `FDPS.LE` 重抽——pipeline 本身可沿用，只是要重跑。覆核沒有推翻本 ADR 的前提，所以這條退路維持在「備而不用」，不啟動。
+**這個決定已經實測過，成立。** 用 FDPS 定案的編譯與連結旗標把 `ailv3.lib` 連進一支客戶端程式，未解析符號 0 個；產出的執行檔在 DOSBox-X 裡以原版的 `DIG.INI` 與 `SB16.DIG` 裝起 driver、播完一段 PCM、計時器 callback 也被觸發。連結契約與驗證項目在 [`rebuild_info/ail_link.md`](../../rebuild_info/ail_link.md)。
 
-**但沿用前作的庫不等於 FDPS 的 AIL 就齊了。** 有 16 個 `ail` function 在 `ailv3.lib` 裡完全沒有對應，其中 8 個有呼叫端。這批以 `0003ccf8` 為首的 LX 驅動映像載入層為主，前作的 AIL 沒有這一層。連結階段（票 19）要另外補，做法與清單見 [`rebuild_info/pitfalls.md`](../../rebuild_info/pitfalls.md) 與 [`program_info/code_pools.md`](../../program_info/code_pools.md)。
+退路（用前作的抽取 pipeline 對 `FDPS.LE` 重抽）因此不啟動。
+
+**沿用前作的庫不等於 FDPS 的 AIL 就齊了，但缺的不是那 16 個沒有對應的 `ail` function。** 「庫裡沒有本體」不會變成未解析符號——沒有人參照的東西不會。缺口在別的地方：
+
+- **要另外提供的是遊戲側的七個符號**。庫以 EXTDEF 指向它們，方向是庫→遊戲，換哪一份 AIL 都不會附帶。六支 DPMI 服務常式加一支存 EFLAGS 的常式（`00044dc0`），名字在兩個專案裡不同，用 wlink 的 `alias` 接。這七個裡有四個正好落在那 16 個之中。
+- **另外 12 個不必補**。`0003ccf8` 領頭的 LX 載入層在 `FDPS.LE` 裡本來就沒有可達的呼叫端——`0003ccf8`、`0003cbc1`、`0003c9db`、`0003c9eb` 四支的 xref 是空的，`0003c984` 那 17 個呼叫端全部來自這個封閉的區塊內部，整塊是連結器抽進來的死碼。其餘的只被 AIL 內部參照，而那些參照方在重建版裡來自 `ailv3.lib`，在庫內就解掉了。遊戲程式碼實際呼叫的 18 個 AIL 進入點全部在庫裡。

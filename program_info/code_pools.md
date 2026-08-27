@@ -88,7 +88,7 @@ AIL 集中在三個功能區，中間夾著 `crt` 與 `fdps`（每區內部再�
 
 「只被 AIL 呼叫就是 AIL」有一個成立的例外。`0003ca49`、`0003cad2`、`0003cb01`、`0003cb6e`、`0003cb93`、`0003cbaa` 是一組六支的 DPMI 服務常式（`INT 31h` 的 `0100`／`0101` DOS 記憶體配置與釋放、`0600`／`0601` 區段鎖頁與解鎖，加上兩支以長度為參數的變體），**由遊戲自己定義、由 AIL 的 vendor object 以 EXTDEF 參照**。呼叫方向因此是庫指向遊戲，不是遊戲指向庫。
 
-證據是前作 FD2 的同一組模組：FD2 把這六支放在遊戲自己的 `src/util/dpmi.c` 並打包成獨立的 `fd2common.lib`（不在 `ailv3.lib` 裡），FDPS 這六支的順序與大小逐一相符（137／47／109／37／23／23 byte），參數順序與「兩個端點不分先後、自己取 min/max」的處理也一樣。
+證據是前作 FD2 的同一組模組：FD2 把這六支放在遊戲自己的 `src/util/dpmi.c` 並打包成獨立的 `fd2common.lib`（不在 `ailv3.lib` 裡），FDPS 這六支的順序與大小逐一相符（137／47／109／37／23／23 byte），參數順序與「兩個端點不分先後、自己取 min/max」的處理也一樣。連結時怎麼把兩邊不同的名字接起來見 [`rebuild_info/ail_link.md`](../rebuild_info/ail_link.md)。
 
 六支都歸 `fdps`。**同一個 translation unit 的成員必須同 pool**——這六支曾經被判成兩半，分歧本身就是其中一邊判錯了的訊號，決定性的證據是前作把同一組模組放在遊戲側而不是 `ailv3.lib` 裡。
 
@@ -134,7 +134,7 @@ AIL 的 vendor object 不是 `wcc386` 的預設輸出：它會在沒有存回的
 
 **`00044dc0` 這 4 byte 不是 Watcom 的 `_disable`。** 前作 FD2 的知識庫把它記成 `crt_equivalent_get_eflags`，但 Watcom 真正的 `_disable` 是 `FA C3` 兩個 byte（`CLIB3S.LIB` 的 `disable` module），而 `9C 58 FA C3` 這個序列掃遍 Watcom 10.0–10.6a 的 1,135 個 `.lib`／`.obj` 一次都沒出現。它夾在兩個 Function ID 命中的 `ail_code.obj` body 之間、位於同一個 object 的 `_TEXT` 貢獻內部，連結器不可能在那裡插入外來程式碼。
 
-重建時這一批不會隨 `ailv3.lib` 進來，見 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。
+重建時這一批不會隨 `ailv3.lib` 進來，但**實測連結不缺它們**：`0003ccf8`、`0003cbc1`、`0003c9db`、`0003c9eb` 沒有任何 xref，`0003c984` 的 17 個呼叫端全部落在這個封閉區塊內部——整塊是連結器抽進來的死碼。其餘幾支只被 AIL 內部參照，重建版裡那些參照方來自 `ailv3.lib`，在庫內就解掉。要另外提供的只有 `00044dc0` 與三支已改判成 `fdps` 的 DPMI 常式，做法見 [`rebuild_info/ail_link.md`](../rebuild_info/ail_link.md)。
 
 ### 5-byte thunk：不能雜湊不等於不能判定
 

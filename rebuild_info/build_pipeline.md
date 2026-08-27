@@ -2,7 +2,7 @@
 
 怎麼把原始碼在 DOSBox-X 裡以當年的工具鏈全自動編譯、連結並實際執行。旗標組本身與每一項的判定依據由 [`build_flags.md`](build_flags.md) 擁有，本檔只引用；這裡回答的是「這些旗標要在什麼環境、以什麼機制送進工具，以及怎麼知道它跑完了」。
 
-腳本在 [`tools/fdps_build/`](../tools/fdps_build/_index.md)。
+腳本在 [`tools/fdps_build/`](../tools/fdps_build/_index.md)，它同時是共用的機制實作；[`tools/ail_link/`](../tools/ail_link/_index.md) 匯入它，只換掉編譯清單與執行階段的內容。
 
 ## 一切都在 DOSBox-X 內以 DOS 版工具執行
 
@@ -13,6 +13,7 @@ Watcom 10.0a 同時附了 DOS 版與 NT 版的 `wcc386` / `wlink`，兩者在定
 | 工具 | 10.0a 的位置 |
 | --- | --- |
 | `WCC386.EXE` | `BINB\` |
+| `WASM.EXE` | `BINB\` |
 | `WLINK.EXE` | `BIN\` |
 | `DOS4GW.EXE` | `BIN\` |
 
@@ -53,9 +54,13 @@ Watcom 10.0a 同時附了 DOS 版與 NT 版的 `wcc386` / `wlink`，兩者在定
 
 保護模式故障另外從 log 掃。log 要在 conf 的 `[log] logfile=` 指定：只捕捉 stdout 拿到的是幾行初始化訊息加上一句「No logfile was given. All further logging will be discarded」，之後什麼都沒有——掃描於是永遠掃到空的，形同沒有這道保護。DOSBox-X 對 logfile 是附加寫入，所以每次跑之前要先刪掉舊的，否則上一輪的故障會算到這一輪頭上。
 
+## `-silent` 只用在不碰音效的階段
+
+`-silent` 是全自動化的預設，但它關掉的不只是主控台輸出——Sound Blaster 的模擬也一起停擺，驅動程式探測不到硬體。要驗證音效的執行階段因此改成不加，代價是會開一個視窗；程序照樣自己跑完自己退出，自動化沒有中斷。症狀與辨識法見 [`pitfalls.md`](pitfalls.md)。
+
 ## 前置檢查
 
-外部相依缺一項就明確報出是哪一項，而不是讓後面的步驟以難解的方式失敗：DOSBox-X 執行檔、Watcom 安裝根與其下的 `wcc386` / `wlink` / `DOS4GW.EXE` / 標頭檔 / 三個程式庫、`clib3s.lib` 是否含 `stk386` 模組（殘缺安裝的辨識法）、光碟 `.cue` 與它指名的 `.bin`。
+外部相依缺一項就明確報出是哪一項，而不是讓後面的步驟以難解的方式失敗：DOSBox-X 執行檔、Watcom 安裝根與其下的 `wcc386` / `wlink` / `DOS4GW.EXE` / 標頭檔 / 三個程式庫、`clib3s.lib` 是否含 `stk386` 模組（殘缺安裝的辨識法）、光碟 `.cue` 與它指名的 `.bin`。要組譯的階段另外檢查 `wasm`，要驗證音效的階段另外檢查 `DIG.INI` 與驅動程式映像。
 
 ## 目前的驗證程式
 
@@ -74,3 +79,5 @@ Watcom 10.0a 同時附了 DOS 版與 NT 版的 `wcc386` / `wlink`，兩者在定
 最後一項是遊戲能不能啟動的前提：原版三道光碟檢查的第三道就是它，不過就 `exit(1)`。
 
 驗證光碟掛載只能靠**真的讀出磁碟上的位元組**。`IMGMOUNT` 掛載失敗時不會有任何診斷，只看命令有沒有報錯，會得到一個掛載其實沒生效卻一路綠燈的流程。
+
+第二支驗證程式是 `tools/ail_link/ailsmoke/ailsmoke.c`，把同一套機制接到音效庫上：多一個 `wasm` 步驟、多一個 vendor 程式庫、執行階段多掛 Sound Blaster 與驅動程式檔案。它驗證到什麼由 [`ail_link.md`](ail_link.md) 擁有。

@@ -170,10 +170,20 @@ def write_conf(path, mounts, disc, lines, logfile):
     path.write_text("\n".join(body) + "\n", encoding="latin-1")
 
 
-def launch(dosbox, conf, log):
+def launch(dosbox, conf, log, silent=True):
+    """Start DOSBox-X on conf, capturing its stdout into log.
+
+    silent=False is for guest work that touches the Sound Blaster: under
+    -silent the SB16 stops answering its probe and any driver install fails
+    (rebuild_info/pitfalls.md). Everything else keeps -silent so the run is
+    unattended.
+    """
+    cmd = [str(dosbox)]
+    if silent:
+        cmd.append("-silent")
+    cmd += ["-exit", "-conf", str(conf)]
     fp = open(str(log), "wb")
-    proc = subprocess.Popen([str(dosbox), "-silent", "-exit", "-conf", str(conf)],
-                            stdout=fp, stderr=subprocess.STDOUT)
+    proc = subprocess.Popen(cmd, stdout=fp, stderr=subprocess.STDOUT)
     return proc, fp
 
 

@@ -1,11 +1,12 @@
 # tools — 工作腳本
 
-每個子資料夾對應一項工作。腳本 self-contained，不 import 共用函式庫。
+每個子資料夾對應一項工作。腳本 self-contained，不 import 共用函式庫；唯一的例外是把 DOSBox-X 跑起來的那套機制（前置檢查、三訊號結束偵測、故障掃描），它由 `fdps_build/build_min.py` 擁有，需要它的工作直接 import 那支腳本。理由是複製一份會讓「掛住被當成跑完」這種缺陷在其中一份悄悄修不到。
 
 儲存慣例：腳本放 `tools/{工作名稱}/`，所有可重生的中間產物與輸出放 `workspace/{工作名稱}/`。知識庫不得引用 `workspace/` 下的路徑。例外是本身就要進版控的產物：Ghidra 文字快照寫到 `ghidra_snapshot/`，攻略站鏡像寫到 `docs/guide/`，遊戲資料查詢 skill 的資料集寫到 `.claude/skills/fdps-data/`。
 
 | 子資料夾 | 用途 |
 | --- | --- |
+| [`ail_link/`](ail_link/_index.md) | 把前作抽出的 `ailv3.lib` 連進客戶端程式並在 DOSBox-X 裡實跑，驗證音效初始化與播放（票 19） |
 | [`backbone_walk/`](backbone_walk/_index.md) | 骨幹走查的全自動 workflow（票 12 專屬），也是 [ADR-0007](../docs/adr/0007-workflow-automation-and-agent-context.md) 五條原則的參考範例——是範例不是框架，別票自己寫自己的 |
 | [`build_flags/`](build_flags/_index.md) | 反推建置旗標組：解 LE header、跨 Watcom 版本差分編譯、CRT 位元組比對、連結實驗 |
 | [`call_graph/`](call_graph/_index.md) | 建出呼叫圖（含函式指標表的間接邊）並算可達性、孤島分量與共用 helper 排名 |

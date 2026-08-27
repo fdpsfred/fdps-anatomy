@@ -18,6 +18,7 @@
 | [`assets/`](assets/_index.md) | 資料表 | 遊戲的數值內容是什麼 | ✓ |
 | [`chapters/`](chapters/_index.md) | 關卡 | 每一章的關卡內容與事件流程是什麼 | ✓ |
 | [`rebuild_info/`](rebuild_info/_index.md) | 重建 | 怎麼重建成等價執行檔、哪裡會踩雷 | ✓ |
+| [`libs/`](libs/_index.md) | — | 重建要連進去的第三方程式庫與標頭，逐 byte 沿用前作的產物 | ✓ |
 | [`ghidra_snapshot/`](ghidra_snapshot/_index.md) | Ghidra | Ghidra 目前的分析狀態，以文字快照進版控 | ✓ |
 | [`tools/`](tools/_index.md) | — | 工作腳本，一項工作一個子資料夾 | ✓ |
 | [`docs/`](docs/) | — | 決策記錄（[`adr/`](docs/adr/)）、攻略站鏡像（[`guide/`](docs/guide/_index.md)）、agent 規範、前作研究筆記 | ✓ |

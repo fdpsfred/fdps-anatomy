@@ -2,7 +2,7 @@
 
 把原始碼在 DOSBox-X 裡以 Watcom 10.0a 的 DOS 版工具編譯、連結成 DOS/4G 執行檔並實際跑起來，全程不需人工介入。流程的結論記在 [`rebuild_info/build_pipeline.md`](../../rebuild_info/build_pipeline.md)，旗標組的判定依據在 [`rebuild_info/build_flags.md`](../../rebuild_info/build_flags.md)。
 
-目前的建置對象是最小驗證程式；後續階段換掉編譯清單即可，其餘機制（前置檢查、conf／批次檔產生、三訊號結束偵測、故障掃描）照用。
+目前的建置對象是最小驗證程式；後續階段換掉編譯清單即可，其餘機制（前置檢查、conf／批次檔產生、三訊號結束偵測、故障掃描）照用。**這套機制的正本就在 `build_min.py`**，別的工作直接 import 它而不是抄一份——[`tools/ail_link/`](../ail_link/_index.md) 是第一個這樣做的。`launch()` 的 `silent` 參數是為那邊開的：DOSBox-X 的 `-silent` 會連 Sound Blaster 的模擬一起關掉。
 
 ## 腳本
 
