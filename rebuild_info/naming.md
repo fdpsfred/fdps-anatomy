@@ -16,6 +16,7 @@
 | --- | --- | --- |
 | 遊戲邏輯 function | `fdps_` + snake_case | `fdps_rle_blit_sprite`、`fdps_get_item_entry` |
 | 遊戲全域資料 | `data_fdps_` + snake_case | `data_fdps_item_table` |
+| Miles AIL 全域資料 | `data_ail_` + snake_case，或上游原名 | `data_ail_mixer_state` |
 | Watcom CRT 真符號 | **程式庫原名，無前綴** | `memcpy`、`_nmalloc`、`__CHK`、`IF@COS` |
 | 程式庫 object 內的 file-static | `L$N_<模組>_<用途>` | `L$1_stk_save_ss` |
 | 行為等價但比對不到程式庫 object、必須手寫的 | `crt_equivalent_` + snake_case | `crt_equivalent_get_eflags` |
@@ -23,8 +24,31 @@
 | AIL 內部 helper 與 inner worker | `AIL_internal_` + 描述，或 `AIL_internal_<公開名>_inner` | `AIL_internal_alloc_and_commit`、`AIL_internal_start_sample_inner` |
 | AIL 混音分派表 callback | `AIL_internal_mix_finalize_<兩位十六進位 slot>` / `AIL_internal_mix_loop_<同>` | `AIL_internal_mix_finalize_01` |
 | 連結器與編譯器產物 | `binary_artifact_` + 描述 + `_<位址>` | `binary_artifact_align_nop_3d370` |
+| struct 型別名稱 | 該 pool 的前綴 + snake_case，不加 `_t` | `fdps_unit_record`、`ail_sample_state` |
 
-`crt_`／`AIL_`／`binary_artifact_` 三類**不套用** `fdps_` 慣例。
+CRT／AIL／連結器產物三類**不套用** `fdps_` 慣例。注意這裡沒有「`crt_` 前綴」這種東西——CRT 的東西要嘛叫程式庫原名（無前綴），要嘛是 `L$N_`，要嘛是 `crt_equivalent_`，三選一。
+
+## 資料符號的 pool 怎麼判
+
+資料符號沒有 function 那樣的 FID 比對可用，判準是**誰取用它**：只有 `pool_ail` 的程式碼碰得到的全域就是音效庫的，只有 `pool_crt` 碰得到的就是 CRT 的。跨 pool 取用時要判斷誰是擁有者、誰只是訪客——遊戲去戳一個 CRT 變數，那個變數仍然是 CRT 的，仍然用程式庫的名字。判定不出 CRT 程式庫符號時走 `L$N_` 或 `crt_equivalent_`，不要硬湊一個像 CRT 的名字。
+
+**字串字面值不是全域符號。** Ghidra 給的 `s_` 標籤留著就好：重建後它們是敘述句裡的字面值，不是具名全域，替它們取名等於憑空造出原版沒有的符號。指向它們的指標表則另當別論，那是實實在在的具名資料。
+
+## struct 型別名稱
+
+型別名稱套用的是與符號完全相同的那兩條鐵則，不另立一套前綴。**不加 `_t` 後綴**（前作的 `runtime_char`、`item_effect` 也不加），名稱裡同樣不能有位址。
+
+| 對象 | 形式 | 例 |
+| --- | --- | --- |
+| 遊戲的結構 | `fdps_` + snake_case | `fdps_unit_record` |
+| 程式庫的結構（CRT 與 AIL） | **程式庫原名，無前綴** | `tm`、`FILE`、`_iobuf`、`rt_init` |
+| 判定不出程式庫名稱、只存在於單一 object 內的結構 | `L$N_<模組>_<用途>` | `L$1_emu387_state` |
+
+**`crt_` 不是前綴。** 唯一合法的形式是複合前綴 `crt_equivalent_`，意思是「行為等價但比對不到程式庫 object、必須手寫的東西」。寫 `crt_tm`、`crt_file` 這種名字是錯的，理由與程式庫函式那條鐵則同源：重建後的 `.c` 是從 `<time.h>`、`<stdio.h>` 拿到這些型別的，加了前綴就會讓 Ghidra 名稱與 C 名稱對不起來。前作 FD2 全庫也只有 `crt_equivalent_`，沒有任何裸 `crt_`。
+
+「判定不出名稱」與「懶得查」是兩回事，這點與符號那條完全一樣：先去 Watcom 10.0a 的標頭找，找不到才落到 `L$N_`。
+
+前作沒有替遊戲型別加專案前綴（它叫 `runtime_char`，本專案叫 `fdps_unit_record`），所以兩邊的遊戲型別名稱不是逐字對應的關係，對應寫在該型別的 `description` 裡。程式庫型別兩邊都用原名，是逐字相同的。
 
 **唯一的無前綴豁免是 C 進入點 `main`**——Watcom CRT 的 `cmain386` 契約要求這個符號就叫 `main`。
 

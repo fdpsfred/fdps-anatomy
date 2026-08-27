@@ -1,0 +1,594 @@
+[
+ {
+  "name": "AIL_DRIVER",
+  "exists": true,
+  "alias_of": "",
+  "size": 40,
+  "fields": 10,
+  "confidence": "high"
+ },
+ {
+  "name": "DIG_DRIVER",
+  "exists": true,
+  "alias_of": "",
+  "size": 136,
+  "fields": 25,
+  "confidence": "high"
+ },
+ {
+  "name": "FILE",
+  "exists": true,
+  "alias_of": "",
+  "size": 26,
+  "fields": 8,
+  "confidence": "high"
+ },
+ {
+  "name": "IO_PARMS",
+  "exists": true,
+  "alias_of": "",
+  "size": 24,
+  "fields": 5,
+  "confidence": "high"
+ },
+ {
+  "name": "L$1_emu387_tag_mask_set",
+  "exists": true,
+  "alias_of": "",
+  "size": 10,
+  "fields": 5,
+  "confidence": "high"
+ },
+ {
+  "name": "L$N_dosinite_extender_sysreg_block",
+  "exists": true,
+  "alias_of": "",
+  "size": 64,
+  "fields": 1,
+  "confidence": "medium"
+ },
+ {
+  "name": "L$N_emu387_extended_real",
+  "exists": false,
+  "alias_of": "long_double_80",
+  "size": 10,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "L$N_emu387_stack_ring_entry",
+  "exists": true,
+  "alias_of": "",
+  "size": 10,
+  "fields": 5,
+  "confidence": "high"
+ },
+ {
+  "name": "L$N_emu387_state",
+  "exists": true,
+  "alias_of": "",
+  "size": 122,
+  "fields": 10,
+  "confidence": "high"
+ },
+ {
+  "name": "L$N_scale_pow10_entry",
+  "exists": true,
+  "alias_of": "",
+  "size": 10,
+  "fields": 2,
+  "confidence": "high"
+ },
+ {
+  "name": "L$N_spawn386_exec_params",
+  "exists": true,
+  "alias_of": "",
+  "size": 32,
+  "fields": 10,
+  "confidence": "high"
+ },
+ {
+  "name": "REGS",
+  "exists": true,
+  "alias_of": "",
+  "size": 28,
+  "fields": 7,
+  "confidence": "high"
+ },
+ {
+  "name": "SAMPLE",
+  "exists": true,
+  "alias_of": "",
+  "size": 2196,
+  "fields": 28,
+  "confidence": "high"
+ },
+ {
+  "name": "SEQUENCE",
+  "exists": true,
+  "alias_of": "",
+  "size": 1748,
+  "fields": 53,
+  "confidence": "high"
+ },
+ {
+  "name": "SREGS",
+  "exists": true,
+  "alias_of": "",
+  "size": 12,
+  "fields": 6,
+  "confidence": "high"
+ },
+ {
+  "name": "VDI_CALL",
+  "exists": true,
+  "alias_of": "",
+  "size": 12,
+  "fields": 6,
+  "confidence": "high"
+ },
+ {
+  "name": "__stream_link",
+  "exists": true,
+  "alias_of": "",
+  "size": 8,
+  "fields": 2,
+  "confidence": "high"
+ },
+ {
+  "name": "ail_xmidi_timb_chunk",
+  "exists": true,
+  "alias_of": "",
+  "size": 12,
+  "fields": 5,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_dos_exec_param_block",
+  "exists": false,
+  "alias_of": "L$N_spawn386_exec_params",
+  "size": 32,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_dst_rule",
+  "exists": false,
+  "alias_of": "tm",
+  "size": 36,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_emu387_extended_real",
+  "exists": false,
+  "alias_of": "long_double_80",
+  "size": 10,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_emu387_stack_ring_entry",
+  "exists": false,
+  "alias_of": "L$N_emu387_stack_ring_entry",
+  "size": 10,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_emu387_state",
+  "exists": false,
+  "alias_of": "L$N_emu387_state",
+  "size": 0,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_emu387_tag_mask_set",
+  "exists": false,
+  "alias_of": "L$1_emu387_tag_mask_set",
+  "size": 0,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_extended_real",
+  "exists": false,
+  "alias_of": "long_double_80",
+  "size": 10,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_extender_sysreg_block",
+  "exists": false,
+  "alias_of": "L$N_dosinite_extender_sysreg_block",
+  "size": 0,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_file",
+  "exists": false,
+  "alias_of": "FILE",
+  "size": 26,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_init_rtn",
+  "exists": false,
+  "alias_of": "rt_init",
+  "size": 6,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_iobuf",
+  "exists": false,
+  "alias_of": "FILE",
+  "size": 26,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_mini_heap_block",
+  "exists": false,
+  "alias_of": "miniheapblkp",
+  "size": 44,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_rt_init",
+  "exists": false,
+  "alias_of": "rt_init",
+  "size": 6,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_scale10_pow10_entry",
+  "exists": false,
+  "alias_of": "L$N_scale_pow10_entry",
+  "size": 10,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_scale10_power_entry",
+  "exists": false,
+  "alias_of": "L$N_scale_pow10_entry",
+  "size": 0,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_scale10_step",
+  "exists": false,
+  "alias_of": "L$N_scale_pow10_entry",
+  "size": 10,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_tm",
+  "exists": false,
+  "alias_of": "tm",
+  "size": 36,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_x87_emu_stack_slot",
+  "exists": false,
+  "alias_of": "L$N_emu387_stack_ring_entry",
+  "size": 10,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_x87_extended",
+  "exists": false,
+  "alias_of": "long_double_80",
+  "size": 10,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_x87_extended_reg",
+  "exists": false,
+  "alias_of": "long_double_80",
+  "size": 10,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "crt_x87_tag_field_patch",
+  "exists": false,
+  "alias_of": "L$1_emu387_tag_mask_set",
+  "size": 0,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_cd_q_channel_block",
+  "exists": true,
+  "alias_of": "",
+  "size": 11,
+  "fields": 11,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_cd_request_header",
+  "exists": true,
+  "alias_of": "",
+  "size": 26,
+  "fields": 10,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_cel_cache_slot",
+  "exists": true,
+  "alias_of": "",
+  "size": 48,
+  "fields": 1,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_cel_header",
+  "exists": true,
+  "alias_of": "",
+  "size": 15,
+  "fields": 7,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_chapter_entry",
+  "exists": false,
+  "alias_of": "",
+  "size": 0,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_char_spawn_record",
+  "exists": true,
+  "alias_of": "",
+  "size": 26,
+  "fields": 15,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_character_base_record",
+  "exists": true,
+  "alias_of": "",
+  "size": 24,
+  "fields": 13,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_character_growth",
+  "exists": true,
+  "alias_of": "",
+  "size": 11,
+  "fields": 11,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_class_entry",
+  "exists": false,
+  "alias_of": "fdps_class_record",
+  "size": 10,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_class_equip_record",
+  "exists": true,
+  "alias_of": "",
+  "size": 6,
+  "fields": 1,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_class_record",
+  "exists": true,
+  "alias_of": "",
+  "size": 10,
+  "fields": 3,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_dpmi_real_mode_call",
+  "exists": true,
+  "alias_of": "",
+  "size": 50,
+  "fields": 17,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_dpmi_real_mode_regs",
+  "exists": false,
+  "alias_of": "fdps_dpmi_real_mode_call",
+  "size": null,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_enemy_data",
+  "exists": true,
+  "alias_of": "",
+  "size": 10,
+  "fields": 9,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_item_effect",
+  "exists": true,
+  "alias_of": "",
+  "size": 23,
+  "fields": 16,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_item_entry",
+  "exists": false,
+  "alias_of": "fdps_item_effect",
+  "size": 23,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_map_cell_code_layer",
+  "exists": true,
+  "alias_of": "",
+  "size": 17,
+  "fields": 8,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_map_spawn_pos_record",
+  "exists": true,
+  "alias_of": "",
+  "size": 6,
+  "fields": 3,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_map_tile_attr_entry",
+  "exists": false,
+  "alias_of": "fdps_tile_attr_entry",
+  "size": null,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_move_grid_cell",
+  "exists": true,
+  "alias_of": "",
+  "size": 2,
+  "fields": 2,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_palette_entry",
+  "exists": true,
+  "alias_of": "",
+  "size": 3,
+  "fields": 3,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_promotion_record",
+  "exists": true,
+  "alias_of": "",
+  "size": 12,
+  "fields": 12,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_save_slot",
+  "exists": true,
+  "alias_of": "",
+  "size": 2600,
+  "fields": 13,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_spell_effect",
+  "exists": true,
+  "alias_of": "",
+  "size": 7,
+  "fields": 6,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_spell_entry",
+  "exists": false,
+  "alias_of": "fdps_spell_effect",
+  "size": 7,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_spell_learning_record",
+  "exists": true,
+  "alias_of": "",
+  "size": 12,
+  "fields": 12,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_tile_attr_entry",
+  "exists": true,
+  "alias_of": "",
+  "size": 4,
+  "fields": 4,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_tile_attribute",
+  "exists": false,
+  "alias_of": "fdps_tile_attr_entry",
+  "size": 4,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_unit_record",
+  "exists": true,
+  "alias_of": "",
+  "size": 80,
+  "fields": 35,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_unit_sprite_cache_entry",
+  "exists": false,
+  "alias_of": "fdps_cel_cache_slot",
+  "size": 48,
+  "fields": 0,
+  "confidence": "high"
+ },
+ {
+  "name": "fdps_vfs_image_header",
+  "exists": true,
+  "alias_of": "",
+  "size": 11,
+  "fields": 4,
+  "confidence": "high"
+ },
+ {
+  "name": "long_double_80",
+  "exists": true,
+  "alias_of": "",
+  "size": 10,
+  "fields": 3,
+  "confidence": "high"
+ },
+ {
+  "name": "miniheapblkp",
+  "exists": true,
+  "alias_of": "",
+  "size": 44,
+  "fields": 11,
+  "confidence": "high"
+ },
+ {
+  "name": "rt_init",
+  "exists": true,
+  "alias_of": "",
+  "size": 6,
+  "fields": 3,
+  "confidence": "high"
+ },
+ {
+  "name": "tm",
+  "exists": true,
+  "alias_of": "",
+  "size": 36,
+  "fields": 9,
+  "confidence": "high"
+ }
+]
