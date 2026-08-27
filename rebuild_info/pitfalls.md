@@ -112,6 +112,10 @@
 | 事項 | 內容 | 正典 |
 | --- | --- | --- |
 | 本機 `WATCOM_10.0a` 的 `lib386\dos\clib3s.lib` 是殘缺的副本 | 它比同一發行版的完整副本少一個模組（`stk386`，393 對 394），少掉的正是 `__CHK`／`__STK`／`__GRO`／`__STKOVERFLOW` 這組堆疊檢查 stub。遊戲模組用 `-s` 不會參照它們，但照留堆疊檢查的那 17 個程式庫模組會，連結時就是解不掉的外部符號。建置與比對都要改用 `WATCOM_10.0a_infobase` 那份，或先把檔案補回去——兩份安裝共有的 393 個模組 SHA-256 全數相同，其餘四個程式庫也是模組對模組、雜湊對雜湊一致，所以換過去不改變任何結論 | [`build_flags.md`](build_flags.md) |
+| 10.0a 的 DOS 版 `wcc386` 與 `wlink` 不在同一個 bin 目錄 | `wcc386` 在 `BINB\`、`wlink` 在 `BIN\`；9.5 家族兩者都在 `BIN`、10.5 之後在 `BINW`。認定工具都在 `BIN\`（或沿用前作 FD2 硬寫的 `D:\BIN\WCC386.EXE`）在 10.0a 上直接找不到編譯器。三個目錄都放進 guest 的 `PATH`、工具以裸名呼叫 | [`build_pipeline.md`](build_pipeline.md) |
+| DOSBox-X 的離開碼一律是 0 | `IMGMOUNT`、編譯器、連結器全部失敗它也回 0，所以 `subprocess` 的回傳值不能當判準。建置看產物存在與未解符號，執行看程式自己寫出來的結果檔，光碟掛載則只有真的讀出磁碟上的位元組才算數 | [`build_pipeline.md`](build_pipeline.md) |
+| 要掃 DOSBox-X 的 log 找保護模式故障，就得在 conf 裡指定 `[log] logfile=` | 只捕捉 stdout 拿到的是幾行初始化訊息加上一句「No logfile was given. All further logging will be discarded」。掃描於是永遠掃到空的、永遠回報沒有故障，而這件事在成功路徑上完全看不出來。log 是附加寫入，每次跑之前還要刪掉舊的 | [`build_pipeline.md`](build_pipeline.md) |
+| 編譯旗標要走 `WCC386` 環境變數，不能展開在批次檔的呼叫行上 | COMMAND.COM 的命令列在變數展開後超過約 176 字元會**靜默截斷**，最先被吃掉的是排在最後的 `-fo=` 目的檔路徑。寫成 `wcc386 %CF% ... -fo=<路徑>` 會在旗標一長就無聲壞掉 | [`build_pipeline.md`](build_pipeline.md) |
 | 啟動的三道光碟檢查 | `access("DISK.NO")`、由 `Disk.no` 第三個 token 取得路徑前綴、MSCDEX 安裝檢查，任一不過就 `exit(1)`。重建版跑起來前這三件都要滿足 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
 | 連上前作的 `ailv3.lib` 不等於 AIL 齊了 | 16 個 `ail` function 在前作的庫裡完全沒有對應，其中 8 個有呼叫端，主體是 `0003ccf8` 領頭的 LX 驅動映像載入層。照直覺「AIL 沿用前作、不用管」會在連結時留下解不掉的外部符號 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
 | AIL 會反過來呼叫**遊戲自己寫的** DPMI 服務常式 | 把 `INT 31h` 的 `0100`／`0101`／`0600`／`0601` 包裝也算成 AIL 的一部分，等 `ailv3.lib` 提供。方向是庫以 EXTDEF 指向遊戲：這六支要由重建版自己定義並連進去，少了它們 AIL 的鎖頁與 DOS 記憶體配置全部解不掉 | [`program_info/code_pools.md`](../program_info/code_pools.md) |

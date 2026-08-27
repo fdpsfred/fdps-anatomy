@@ -9,6 +9,7 @@
 | 文件 | 內容 |
 | --- | --- |
 | [`build_flags.md`](build_flags.md) | 工具鏈版本、`wcc386` 與 `wlink` 的旗標組與逐項判定依據、預設 calling convention 與偏離者的辨識法 |
+| [`build_pipeline.md`](build_pipeline.md) | 自動化建置流程：DOS 版工具的落點、掛載配置、旗標的送入方式、三訊號結束偵測、前置檢查，以及最小驗證程式證明了什麼 |
 | [`naming.md`](naming.md) | 符號前綴、pool 分類、8.3 檔名限制，以及「Ghidra 名稱與 C 名稱逐字相同」這條鐵則 |
 | [`pitfalls.md`](pitfalls.md) | 「照直覺寫就會與原版不同」的事項總表：不能修的原版 bug、不能加的檢查、不能換的型別與寫法、不能照字面理解的資料、不能照編譯器慣例設定的旗標，以及 vendor 程式庫的 ABI 與涵蓋範圍 |
 
