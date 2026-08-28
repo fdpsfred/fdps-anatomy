@@ -16,6 +16,10 @@
 
 **併行度是 1，而且這是設計不是限制。** Reviewer 判斷「本輪改了什麼」的依據是工作區相對 `HEAD` 的 diff，所以同時只能有一個 function 在飛；兩個的話彼此的改動會出現在對方的審查範圍裡。要提高併行度必須先解決 reviewer 的檢視範圍問題（例如 worktree 隔離），那是獨立的決定。
 
+**Reviewer 的視野要含新增檔。** 一個模組的第一支 function 會把 `.c`、`.h`、測試三個檔全部新建出來，而 `git diff` 看不到未追蹤的檔——不先做一次 intent-to-add（`git add -N -- src tests`），reviewer 對「本輪改了什麼」的視野正好在最需要看的那份程式碼上是空的。
+
+**Gate 紅燈要繞回 reviewer，不是只繞回 gate。** 建置閘門失敗多半代表 emit 出來的 C 是錯的，那正是最需要第二次審查的時候；修完直接重跑 gate 就 commit，等於用「編得過」取代「審查過」，而 commit 標題寫的是後者。
+
 **Ghidra 的寫入集中在 Bookkeeper。** Emitter 與 reviewer 對 Ghidra 唯讀，發現描述錯誤時把修正寫進自己的判定檔，由 bookkeeper 在審查通過後一次套用，套用後跑 Ghidra 側的閘門並重新匯出文字快照。判定與落地分離的理由見 [ADR-0007](../docs/adr/0007-workflow-automation-and-agent-context.md)。
 
 **判定寫檔，只回傳摘要。** 完整的判定寫進 `workspace/code_emit/verdicts/<addr>.emit.json` 與 `.review.json`，回傳給 workflow 的只有約 200 byte。「這一項做完了沒」由讀得到檔案的下一個角色回報，不採信寫檔者自己的宣稱。
@@ -76,7 +80,11 @@ B、E、H 三類的共同症狀是「數值或指標讀到不相干的東西」�
 
 `tools/code_emit/data/emit_state.json` 是進度的正本，進版控。一個 function 一筆，`status` 依 `pending → emitted → reviewed → committed` 推進，`failed` 與 `skip` 是終態且必須出現在收尾報告裡。
 
-**「已完成」不能只看狀態欄。** 每筆記下 emit 當時所依據的 Ghidra body size，續跑時與 [`ghidra_snapshot/functions.txt`](../ghidra_snapshot/_index.md) 比對；function 後來變了大小，舊的 emit 描述的是已經不存在的程式碼，該筆退休並重回工作清單。
+**「已完成」不能只看狀態欄。** 每筆記下 emit 當時所依據的 Ghidra body size，續跑時與 [`ghidra_snapshot/functions.txt`](../ghidra_snapshot/_index.md) 比對；function 後來變了大小，舊的 emit 描述的是已經不存在的程式碼，該筆退休並重回工作清單。**沒有記下依據的那一筆也算過期**——「沒人寫下這是照哪一份程式碼做的」不是「程式碼沒變」的證據，當成證據就會讓那筆永遠被跳過。
+
+**判定為不 emit 的 function 也要寫回狀態檔。** 反編譯器碎片、連結器產物之類的東西是一個結論，不是一次失敗；不記下來的話，下一次跑工作清單又會把同一個位址發出去，而且每次都要燒掉一次完整的三源閱讀才能再得到同一個結論。
+
+**狀態檔裡沒有 commit 雜湊。** 雜湊沒辦法寫進產生它的那個 commit 裡，事後 `--amend` 補上去只會得到一個指向被丟棄物件的雜湊。落地 commit 的標題帶著位址，用 `git log --oneline --grep "@ <addr>"` 找。
 
 每一支通過的 function 是一個獨立的 commit，所以任何中斷最多只損失飛在半空的那一支。未通過的 function 由 workflow 清掉工作區的殘留並把狀態記成 `failed`——留著半成品的話，它會出現在下一支 function 的 diff 裡並被當成別人的改動 commit 掉。
 

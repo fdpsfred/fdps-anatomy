@@ -302,11 +302,17 @@ def build_and_compare(name, ctx, baselines):
         # with nothing recorded it holds in its strictest form: zero.  Whoever
         # wants a warning accepted has to record it with `update --reason`, the
         # same as everywhere else.
+        # Both halves, exactly as the compared targets do it: the text scan is
+        # what makes "no NEW warning" decidable, the per-unit summary catches a
+        # count the text scan could miss when output is truncated or interleaved.
+        base_count = (base or {}).get("summary_warnings", 0)
         add("warnings",
-            not new_warnings((base or {}).get("warnings"), diag["warnings"]),
-            "%d warning(s), %s"
-            % (len(diag["warnings"]),
-               "against recorded baseline" if base else "none accepted"))
+            (not new_warnings((base or {}).get("warnings"), diag["warnings"])
+             and diag["summary_warnings"] <= base_count),
+            "%d new, summary %d vs %d %s"
+            % (len(new_warnings((base or {}).get("warnings"), diag["warnings"])),
+               diag["summary_warnings"], base_count,
+               "(recorded baseline)" if base else "(nothing accepted)"))
         row["equivalence"] = {"verdict": "not compared",
                               "detail": "this target has no image baseline "
                                         "-- it changes by design on every emit"}

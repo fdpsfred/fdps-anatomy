@@ -1,0 +1,23 @@
+{
+  "batch": "ticket21",
+  "attempted": 1,
+  "committed": 1,
+  "skipped": 0,
+  "unfinished": 0,
+  "stopped": null,
+  "stop_detail": "",
+  "rescan": [],
+  "results": [
+    {
+      "addr": "000160e0",
+      "name": "fdps_menu_find_first_enabled_entry",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "3221228 fdps_menu_find_first_enabled_entry @ 000160e0",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 34
+    }
+  ],
+  "out_tok_k": 34
+}

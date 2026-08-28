@@ -60,7 +60,10 @@ const VERDICTS = WS + '\\verdicts'
 const A = (typeof args === 'string' && args.length) ? JSON.parse(args) : (args || {})
 const fns = (A && A.functions) || []
 const MAX_ROUNDS = (A && A.maxRounds) || 4
-const MIN_BUDGET_PER_FN = (A && A.minBudgetPerFn) || 400000
+// Measured cost of the first function through the pipeline was 34k output
+// tokens; this is that with room for a function that needs several fix rounds.
+// It is a floor for starting one more, not an estimate of what one costs.
+const MIN_BUDGET_PER_FN = (A && A.minBudgetPerFn) || 120000
 const LABEL = (A && A.batchLabel) || 'emit'
 
 if (!fns.length) {
@@ -397,8 +400,15 @@ function reviewerPrompt(fn, round) {
     '',
     '# Steps',
     '',
-    'A. See exactly what this round changed:',
-    '     cd ' + REPO + ' && git --no-pager diff HEAD -- src tests',
+    'A. See exactly what this round changed. Run all three, in this order:',
+    '     cd ' + REPO + ' && git status --porcelain',
+    '     cd ' + REPO + ' && git add -N -- src tests',
+    '     cd ' + REPO + ' && git --no-pager diff HEAD',
+    '   The middle command is not optional and it is not a mistake. A plain diff does',
+    '   not show untracked files, and the first function to land in a new module',
+    '   creates every one of its files new -- without the intent-to-add, your view of',
+    '   "what changed this round" would be empty for exactly the code you are here to',
+    '   review. It stages nothing; the bookkeeper stages for real later.',
     '   One function is in flight at a time and every approved function is its own',
     '   commit, so everything after HEAD belongs to this function. Review all of it,',
     '   including any knowledge-base or comment changes.',
@@ -480,7 +490,7 @@ function gatePrompt(fn) {
   ].join('\n')
 }
 
-function bookkeepPrompt(fn, hasGhidraFixes) {
+function bookkeepPrompt(fn, hasGhidraFixes, rounds) {
   return [
     '# Role: Bookkeeper. No judgement, no code changes.',
     '',
@@ -509,9 +519,14 @@ function bookkeepPrompt(fn, hasGhidraFixes) {
     '',
     '3. Progress. In tools/code_emit/data/emit_state.json set the entry for key',
     '   "' + fn.addr + '": status "committed", emitted_against "' + (fn.body_size || '') + '",',
-    '   rounds to the number of fix rounds this function took. Write it with python,',
-    '   json.dumps(indent=2, ensure_ascii=False) plus a trailing newline, UTF-8. Touch',
-    '   no other entry and no other field.',
+    '   rounds ' + rounds + ' (that is the count the workflow observed -- use it verbatim,',
+    '   do not recount). Write it with python, json.dumps(indent=2, ensure_ascii=False)',
+    '   plus a trailing newline, UTF-8. Touch no other entry and no other field.',
+    '   There is deliberately no commit hash in this file: a hash cannot be recorded',
+    '   inside the commit that creates it, and amending to add it afterwards produces',
+    '   a hash that points at the object the amend threw away. The commit subject',
+    '   carries the address instead, so the landing commit is found with',
+    '   git log --oneline --grep "@ ' + fn.addr + '".',
     '',
     '4. Equivalence concerns. Append every open_issues entry from both verdict files to',
     '   tools/code_emit/data/emit_issues.json, keyed by the 8-hex address ("' + fn.addr + '",',
@@ -532,17 +547,22 @@ function bookkeepPrompt(fn, hasGhidraFixes) {
     '   line, then:',
     '     Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>',
     '',
-    '6. Report the output of  git --no-pager log --oneline -1  as commit_line.',
+    '6. Report the commit as commit_line, built as  <hash> ' + fn.name + ' @ ' + fn.addr,
+    '   where <hash> comes from  git --no-pager log --format=%h -1  . Do NOT pipe the',
+    '   commit subject itself back: it is Traditional Chinese, this is a Traditional',
+    '   Chinese Windows machine, and reading it through a console pipe turns it into',
+    '   mojibake that then gets archived as the permanent record of this run.',
+    '   Also confirm the tree is clean:  git status --porcelain  must print nothing.',
     '',
     'Your final message is the summary object and nothing else.',
   ].join('\n')
 }
 
-function abandonPrompt(fn, why) {
+function abandonPrompt(fn, why, terminal) {
   return [
-    '# Role: Bookkeeper, abandoning one function.',
+    '# Role: Bookkeeper, ' + (terminal ? 'recording one function as not emittable' : 'abandoning one function') + '.',
     '',
-    'Function ' + fn.name + ' @ ' + fn.addr + ' did not get through: ' + why,
+    'Function ' + fn.name + ' @ ' + fn.addr + ' will not be landed: ' + why,
     '',
     'The next function needs a clean tree, and a half-emitted function left behind',
     'would land inside somebody else\'s diff and be committed as theirs.',
@@ -554,11 +574,14 @@ function abandonPrompt(fn, why) {
     '   Do NOT touch workspace/ -- the verdict files are the record of what went wrong',
     '   and the next run reads them.',
     '3. In tools/code_emit/data/emit_state.json set the entry for "' + fn.addr + '" to',
-    '   status "failed" and put the reason in note. Write it with python, UTF-8,',
+    '   status "' + (terminal ? 'skip' : 'failed') + '" and put the reason in note. Write it with python, UTF-8,',
     '   json.dumps(indent=2, ensure_ascii=False) plus a trailing newline.',
+    '   This step is the whole point of this stage: without it the worklist hands the',
+    '   same address out again on every future run, forever.',
     '4. Commit only that one state file:',
     '     git add tools/code_emit/data/emit_state.json && git commit',
-    '   subject:  emit: ' + fn.name + ' @ ' + fn.addr + ' 未完成，記入工作狀態',
+    '   subject:  emit: ' + fn.name + ' @ ' + fn.addr
+      + (terminal ? ' 不 emit，記入工作狀態' : ' 未完成，記入工作狀態'),
     '   then a blank line, one line on why, a blank line, and',
     '     Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>',
     '5. Confirm the tree is clean and report it.',
@@ -665,7 +688,14 @@ for (let i = 0; i < fns.length && !stopped; i++) {
   // interrupted emit leaves a partial file in the tree for the next run to
   // clean up, and there is nothing to gain by starting one we cannot finish.
   let left = null
-  try { left = budget.total ? budget.remaining() : null } catch (e) { left = null }
+  try {
+    left = budget.total ? budget.remaining() : null
+  } catch (e) {
+    left = null
+    if (i === 0) {
+      log('no budget figures available; the per-function budget guard is off this run')
+    }
+  }
   if (left !== null && left < MIN_BUDGET_PER_FN) {
     log('budget low: ' + Math.round(left / 1000) + 'k left, stopping before ' + tag)
     for (let j = i; j < fns.length; j++) {
@@ -707,80 +737,86 @@ for (let i = 0; i < fns.length && !stopped; i++) {
         verdict = null
       }
 
-      while (verdict && !verdict.approved && rounds < MAX_ROUNDS) {
+      // One loop, two ways in. A function leaves it only by being both approved
+      // and green; a red gate goes back through the emitter AND through the
+      // reviewer, not straight back to the gate. A failing gate usually means
+      // the emitted C is wrong, which is exactly when a second reviewer pass is
+      // worth having -- and the commit subject says the reviewer passed, so it
+      // had better be the reviewer's current opinion.
+      let gate = null
+      while (verdict && rounds < MAX_ROUNDS) {
+        let why_fix = null
+        if (!verdict.approved) {
+          why_fix = 'The reviewer blocked on ' + verdict.blocking_count + ' issue(s).'
+        } else {
+          phase('Gate')
+          gate = await runAgent(gatePrompt(fn),
+            { label: (rounds ? 'regate:' : 'gate:') + fn.addr + ':' + rounds,
+              phase: 'Gate', schema: GATE_SUMMARY })
+          if (!gate) {
+            outcome = 'gate_lost'
+            why = 'the gate stage stopped returning'
+            break
+          }
+          if (gate.gate_pass) {
+            break
+          }
+          why_fix = 'The build gate failed: ' + (gate.detail || '(no detail)')
+            + ' Read workspace/build_gate/result.json for the full report.'
+        }
+
         rounds++
-        log(tag + ' -- fix round ' + rounds + ' (' + verdict.blocking_count + ' blocking)')
+        log(tag + ' -- fix round ' + rounds + ': ' + why_fix)
         phase('Emit')
-        const fixed = await runAgent(emitterPrompt(fn, 'fix', verdict.note),
+        const fixed = await runAgent(emitterPrompt(fn, 'fix', why_fix),
           { label: 'fix:' + fn.addr + ':' + rounds, phase: 'Emit', schema: EMIT_SUMMARY })
         if (!fixed) {
+          outcome = 'emit_lost'
+          why = 'the emitter stopped returning during fix round ' + rounds
           verdict = null
           break
         }
         phase('Review')
+        gate = null
         verdict = await runAgent(reviewerPrompt(fn, rounds + 1),
           { label: 'rereview:' + fn.addr + ':' + rounds, phase: 'Review', schema: REVIEW_SUMMARY })
+        if (!verdict) {
+          outcome = 'review_lost'
+          why = 'the review stage stopped returning after fix round ' + rounds
+        }
       }
 
-      if (!verdict) {
-        outcome = outcome || 'review_lost'
-        why = why || 'the review stage stopped returning'
+      if (outcome) {
+        // one of the loop's own exits already said what went wrong
+      } else if (!verdict) {
+        outcome = 'review_lost'
+        why = 'the review stage stopped returning'
       } else if (!verdict.approved) {
         outcome = 'not_approved'
         why = 'still ' + verdict.blocking_count + ' blocking issue(s) after ' + rounds + ' fix round(s)'
+      } else if (!gate || !gate.gate_pass) {
+        outcome = 'gate_failed'
+        why = (gate && gate.detail) || 'the gate stayed red after ' + rounds + ' fix round(s)'
       } else {
-        // The gate runs on the landed tree, after approval and before the
-        // commit. A gate failure goes back through the emitter as an ordinary
-        // fix round; what it must never do is get committed anyway.
-        phase('Gate')
-        let gate = await runAgent(gatePrompt(fn),
-          { label: 'gate:' + fn.addr, phase: 'Gate', schema: GATE_SUMMARY })
-        let gateTries = 0
-        while (gate && !gate.gate_pass && gateTries < MAX_ROUNDS) {
-          gateTries++
-          rounds++
-          log(tag + ' -- gate failed, repair round ' + gateTries + ': ' + (gate.detail || ''))
-          phase('Emit')
-          const repaired = await runAgent(
-            emitterPrompt(fn, 'fix', 'The build gate failed: ' + (gate.detail || '(no detail)')
-              + ' Read workspace/build_gate/result.json for the full report.'),
-            { label: 'gatefix:' + fn.addr + ':' + gateTries, phase: 'Emit', schema: EMIT_SUMMARY })
-          if (!repaired) {
-            gate = null
-            break
-          }
-          phase('Gate')
-          gate = await runAgent(gatePrompt(fn),
-            { label: 'regate:' + fn.addr + ':' + gateTries, phase: 'Gate', schema: GATE_SUMMARY })
-        }
-
-        if (!gate) {
-          outcome = 'gate_lost'
-          why = 'the gate stage stopped returning'
-        } else if (!gate.gate_pass) {
-          outcome = 'gate_failed'
-          why = gate.detail || 'the gate stayed red after ' + gateTries + ' repair round(s)'
+        phase('Bookkeep')
+        const book = await runAgent(
+          bookkeepPrompt(fn, (verdict.ghidra_fixes || 0) > 0, rounds),
+          { label: 'commit:' + fn.addr, phase: 'Bookkeep', schema: BOOK_SUMMARY })
+        if (!book || !book.committed) {
+          outcome = 'commit_failed'
+          why = (book && book.problems) || 'the bookkeeper did not report a commit'
         } else {
-          phase('Bookkeep')
-          const book = await runAgent(
-            bookkeepPrompt(fn, (verdict.ghidra_fixes || 0) > 0),
-            { label: 'commit:' + fn.addr, phase: 'Bookkeep', schema: BOOK_SUMMARY })
-          if (!book || !book.committed) {
-            outcome = 'commit_failed'
-            why = (book && book.problems) || 'the bookkeeper did not report a commit'
-          } else {
-            outcome = 'committed'
-            log(tag + ' -- COMMITTED after ' + rounds + ' fix round(s): ' + (book.commit_line || ''))
-            results.push({
-              addr: fn.addr, name: fn.name, status: 'committed', rounds: rounds,
-              commit: book.commit_line, ghidra_applied: book.ghidra_applied || 0,
-              issues: book.issues_logged || 0, out_tok_k: spentK(fnStart),
-            })
-            if ((book.issues_logged || 0) > 0
-                || (verdict.open_issues || 0) > 0
-                || (emitted.open_issues || 0) > 0) {
-              withIssues.push(fn)
-            }
+          outcome = 'committed'
+          log(tag + ' -- COMMITTED after ' + rounds + ' fix round(s): ' + (book.commit_line || ''))
+          results.push({
+            addr: fn.addr, name: fn.name, status: 'committed', rounds: rounds,
+            commit: book.commit_line, ghidra_applied: book.ghidra_applied || 0,
+            issues: book.issues_logged || 0, out_tok_k: spentK(fnStart),
+          })
+          if ((book.issues_logged || 0) > 0
+              || (verdict.open_issues || 0) > 0
+              || (emitted.open_issues || 0) > 0) {
+            withIssues.push(fn)
           }
         }
       }
@@ -810,17 +846,32 @@ for (let i = 0; i < fns.length && !stopped; i++) {
       addr: fn.addr, name: fn.name, status: outcome, rounds: rounds,
       reason: why, out_tok_k: spentK(fnStart),
     })
-    // Clean the tree so the next function's diff is its own. Skipped when the
-    // stop signal says the tooling itself is gone -- there is nothing to be
-    // gained from asking another agent to run git through a dead machine.
-    if (outcome !== 'skip' && stopped !== 'upstream_failure') {
+    // Clean the tree so the next function's diff is its own, and record the
+    // outcome so the worklist stops handing this address out. A skip needs the
+    // recording just as much as a failure does -- more, in fact, since a skip is
+    // a conclusion rather than an accident. Only a dead machine excuses it.
+    if (stopped !== 'upstream_failure') {
+      let cleaned = null
       try {
-        const cleaned = await agent(abandonPrompt(fn, why),
+        cleaned = await agent(abandonPrompt(fn, why, outcome === 'skip'),
           { label: 'abandon:' + fn.addr, phase: 'Bookkeep', schema: BOOK_SUMMARY })
-        log('  cleanup: ' + ((cleaned && cleaned.problems) || 'tree cleaned and state recorded'))
       } catch (e) {
-        log('  cleanup FAILED: ' + String((e && e.message) || e)
-          + ' -- the working tree may still hold this function; check git status')
+        log('  cleanup THREW: ' + String((e && e.message) || e))
+      }
+      if (cleaned && cleaned.committed) {
+        log('  cleanup: tree cleaned, state recorded as ' + outcome)
+      } else {
+        // Never report this as done. The next function's bookkeeper stages
+        // src/ and tests/ wholesale, so a half-emitted function left behind
+        // gets committed as somebody else's work.
+        const detail = (cleaned && cleaned.problems) || 'the cleanup agent returned nothing'
+        log('  cleanup FAILED: ' + detail
+          + ' -- src/ and tests/ may still hold this function, and the worklist will'
+          + ' hand it out again; check git status before the next run')
+        const row = results[results.length - 1]
+        if (row) {
+          row.cleanup_failed = detail
+        }
       }
     }
   }

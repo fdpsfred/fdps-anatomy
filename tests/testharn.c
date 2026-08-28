@@ -14,9 +14,32 @@
 int test_total = 0;
 int test_failed = 0;
 
+/* Every string that reaches the transcript is copied through a bounded buffer
+   first. The expression text comes from stringifying whatever was written at
+   the CHECK_EQ site, so its length is not under this file's control, and a
+   DOS/4G image has no guard page: an overrun would quietly rewrite the counters
+   sitting next to the buffer and could turn a failing run into a passing one.
+   NAME_MAX + EXPR_MAX plus the fixed text and the three numbers stays well
+   inside LINE_MAX. */
+#define LINE_MAX 512
+#define NAME_MAX 96
+#define EXPR_MAX 160
+
 static char *current = "(none)";
 static int current_check = 0;
-static char line_buf[256];
+static char line_buf[LINE_MAX];
+static char name_buf[NAME_MAX];
+static char expr_buf[EXPR_MAX];
+
+static void copy_bounded(char *dst, char *src, int limit)
+{
+    int i;
+
+    for (i = 0; i < limit - 1 && src[i] != '\0'; i++) {
+        dst[i] = src[i];
+    }
+    dst[i] = '\0';
+}
 
 static void emit(char *line)
 {
@@ -63,8 +86,10 @@ void test_check(char *expr, long got, long want)
         return;
     }
     test_failed++;
+    copy_bounded(name_buf, current, NAME_MAX);
+    copy_bounded(expr_buf, expr, EXPR_MAX);
     sprintf(line_buf, "FAIL %s check %d: %s -> %ld, expected %ld",
-            current, current_check, expr, got, want);
+            name_buf, current_check, expr_buf, got, want);
     emit(line_buf);
 }
 

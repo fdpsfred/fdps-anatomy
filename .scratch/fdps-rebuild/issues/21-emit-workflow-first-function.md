@@ -12,16 +12,16 @@
 
 **Blocked by:** 15, 17, 19, 20
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 腳本驅動 emitter、reviewer、修正迴圈、記帳四個角色，每次呼叫只帶一個 function
-- [ ] emitter 必須取得三源（plate comment、disassembly、decompiled C）才能作業
-- [ ] reviewer 獨立驗證，不信任 emitter 也不信任 decompiled C，結論自行從 assembly 確認
-- [ ] reviewer 能看到 emitter 本輪的精確改動
-- [ ] 每個 function 的 calling convention 在程式碼中明確宣告
-- [ ] 產出的 C 為 C89、檔名符合 8.3 限制、符號名與 Ghidra 完全一致
-- [ ] 每個 function 通過後獨立 commit，工作狀態記錄可續跑
-- [ ] 前作記錄的八類實機 bug 列入 reviewer 的檢查項目
-- [ ] emitter 與 reviewer 的完整產出寫成檔案，回傳腳本的只有摘要
-- [ ] workflow 有錯誤處理：agent 未回傳或判定檔缺漏會重試、落地與 gate 失敗會明確回報、上游工具失去回應有停止訊號；收尾報告列出完成數、失敗數與未完成清單
-- [ ] 至少一個 function 完整走通並通過 build gate
+- [x] 腳本驅動 emitter、reviewer、修正迴圈、記帳四個角色，每次呼叫只帶一個 function
+- [x] emitter 必須取得三源（plate comment、disassembly、decompiled C）才能作業
+- [x] reviewer 獨立驗證，不信任 emitter 也不信任 decompiled C，結論自行從 assembly 確認
+- [x] reviewer 能看到 emitter 本輪的精確改動
+- [x] 每個 function 的 calling convention 在程式碼中明確宣告
+- [x] 產出的 C 為 C89、檔名符合 8.3 限制、符號名與 Ghidra 完全一致
+- [x] 每個 function 通過後獨立 commit，工作狀態記錄可續跑
+- [x] 前作記錄的八類實機 bug 列入 reviewer 的檢查項目
+- [x] emitter 與 reviewer 的完整產出寫成檔案，回傳腳本的只有摘要
+- [x] workflow 有錯誤處理：agent 未回傳或判定檔缺漏會重試、落地與 gate 失敗會明確回報、上游工具失去回應有停止訊號；收尾報告列出完成數、失敗數與未完成清單
+- [x] 至少一個 function 完整走通並通過 build gate

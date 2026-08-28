@@ -57,14 +57,17 @@ def snapshot_sizes():
 def stale(entry, sizes):
     """True when the recorded emit was made against a body that has changed.
 
-    Silence here is the dangerous answer: an address whose function vanished
-    from the snapshot entirely is reported stale rather than assumed fine.
+    Silence is the dangerous answer here, so both unknowns count as stale: an
+    address that vanished from the snapshot, and an entry that never recorded
+    what it was emitted against. "Nobody wrote down which code this was made
+    from" is not evidence that the code is still the same; treating it as
+    evidence is how an entry becomes permanently done.
     """
     if entry.get("status") != DONE:
         return False
     against = entry.get("emitted_against")
     if against is None:
-        return False
+        return True
     return sizes.get(entry.get("_addr"), None) != against
 
 
