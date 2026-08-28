@@ -1486,8 +1486,9 @@ Run statistics:
 ${JSON.stringify(stats, null, 2)}
 
 Cover honestly what took fix rounds and why, anything the gate caught, any file
-that had to be split, and every function that did not land. If `recovered` is not
-empty, the previous run was killed mid-flight and this one threw its wreckage
+that had to be split, and every function that did not land. If the statistics'
+recovered list is not empty, the previous run was killed mid-flight and this one
+threw its wreckage
 away before starting -- say which function that was and that its work was
 discarded, because that is the one thing a reader cannot reconstruct from the
 commits. Do not claim anything
