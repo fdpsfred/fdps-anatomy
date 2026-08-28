@@ -1,1 +1,24 @@
-{}
+{
+  "000109f0": [
+    {
+      "from": "emit",
+      "what": "The unit index is stored into out_indices as a single byte (MOV AL,byte ptr [EBP-0x1c]), so an index of 256 or more would be written truncated. No test pins that down, because staging 257 records to reach it proves nothing about the game: whether the map unit array can ever hold that many is not settled here.",
+      "needs": "The capacity of the block behind data_fdps_map_unit_array_ptr, which ticket 23's data emit (or whichever function allocates it) will fix. If the capacity is under 256 the truncation is unreachable and the note can be closed; if it is not, the callers that pass a real out_indices need looking at."
+    },
+    {
+      "from": "emit",
+      "what": "data_fdps_map_unit_array_ptr is declared in src/gamedata.h as 'unsigned char *', the type routing.json records, and cast to 'struct fdps_unit_record *' at the point of use. Whether gamedata.c should define it as the record pointer instead -- fdpstype.h says fdps_unit_record is the element of this very array -- is a decision that belongs to whoever emits gamedata.c, and every reader will have to agree with it.",
+      "needs": "The emit of gamedata.c (ticket 23). Until then the generated stub uses the routing type, which is what this header matches, so the two cannot disagree."
+    },
+    {
+      "from": "review",
+      "what": "The unit index is stored into out_indices as a single byte (MOV AL,byte ptr [EBP-0x1c] at 00010afb), so an index of 256 or more would be written truncated while the returned count keeps counting. Unreachable today because the one caller passes NULL, but a future caller that passes a real array inherits it.",
+      "needs": "The capacity of the block behind data_fdps_map_unit_array_ptr, which ticket 23 or whichever function allocates it will settle. Under 256 the truncation is unreachable and this closes; otherwise the callers that pass a real out_indices need looking at."
+    },
+    {
+      "from": "review",
+      "what": "data_fdps_map_unit_array_ptr is declared 'unsigned char *' in src/gamedata.h, matching routing.json's /byte *, and cast to 'struct fdps_unit_record *' at every use. Whether gamedata.c should define it as the record pointer instead -- fdpstype.h says fdps_unit_record is the element of this very array -- is a decision every reader will have to share.",
+      "needs": "The emit of gamedata.c (ticket 23). Until then gen_stubs.py uses the routing type, so the header and the stub cannot disagree."
+    }
+  ]
+}

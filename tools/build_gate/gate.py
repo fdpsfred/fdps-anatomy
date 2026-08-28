@@ -76,10 +76,28 @@ def _build_ailsmoke(ctx):
 
 
 def _build_emittest(ctx):
+    """emittest links twice, so it reads its own transcripts.
+
+    The first link deliberately carries no stubs: the symbols it reports are
+    the data and functions the rebuild has not reached yet, which is a worklist
+    (workspace/code_emit/undefined.json) and not a fault.  What has to resolve
+    is the second link, the one carrying the generated stub module, and that is
+    what `undefined` is judged on -- rebuild_info/build_gate.md.  Scanning only
+    build.out would keep the gate red from the first function that borrows a
+    ticket 23 global until the last one lands.
+
+    build_emit.diagnostics() already draws that line and is selftested on it,
+    so it is used here rather than restated; `transcripts` still lists both
+    passes so the summary counts cover the stub module's compile too.
+    """
     ok = ce.do_build(ctx["dosbox"], ctx["watcom"], ctx["disc"], ctx["timeout"])
     return {"builder_ok": ok,
             "exe": bm.find_ci(ce.OUT, ce.EXE),
-            "build_out": bm.find_ci(ce.OUT, "build.out")}
+            "build_out": bm.find_ci(ce.OUT, "build.out"),
+            "transcripts": [p for p in (bm.find_ci(ce.OUT, "build.out"),
+                                        bm.find_ci(ce.OUT, "build2.out"))
+                            if p is not None],
+            "diagnostics": ce.diagnostics}
 
 
 # The gate is target-parameterised because the thing being gated changes as the
@@ -170,6 +188,21 @@ def diagnostics(text):
         "summary_errors": summary_e,
         "undefined": bm.parse_undefined(text),
     }
+
+
+def merge_diagnostics(texts, own=None):
+    """One diagnostics row for a target, across every transcript it produced.
+
+    `own` is the target's own reader, for a target whose build is not a single
+    pass.  emittest is one: it links twice and only the second link's leftovers
+    are a fault, a distinction build_emit.diagnostics() owns.  The summary
+    counts are still taken from every transcript, because a translation unit
+    that failed to compile in a later pass has to be seen either way.
+    """
+    diag = diagnostics("\n".join(texts))
+    if own is not None:
+        diag.update(own())
+    return diag
 
 
 def new_warnings(baseline_warnings, warnings):
@@ -278,8 +311,9 @@ def build_and_compare(name, ctx, baselines):
         return row
 
     exe, bout = built["exe"], built["build_out"]
-    text = bout.read_text(encoding="latin-1", errors="replace") if bout else ""
-    diag = diagnostics(text)
+    paths = built.get("transcripts") or ([bout] if bout else [])
+    texts = [p.read_text(encoding="latin-1", errors="replace") for p in paths]
+    diag = merge_diagnostics(texts, built.get("diagnostics"))
     row["diagnostics"] = diag
 
     add("build", bool(exe) and built["builder_ok"],
@@ -741,6 +775,42 @@ def _selftest_diagnostics():
     rows.append(("a different warning is new",
                  new_warnings(known, ["OTHER.C(3): Warning! W302: x"]) != [],
                  "detected"))
+
+    # A two-link target: the first link's undefined list is the worklist, the
+    # second link's is the fault.  Judging the first would hold the gate red
+    # for the whole of ticket 23.
+    first = ("=== link ===\n"
+             "Warning(1028): data_fdps_thing is an undefined reference\n"
+             "file OBJS\\A.OBJ(A.C): undefined symbol data_fdps_thing\n")
+    second = ("=== stubs ===\n"
+              "STB\\STUBS.C: 16 lines, 0 warnings, 0 errors\n"
+              "=== link2 ===\n"
+              "creating a DOS/4G executable\n")
+    stubbed = merge_diagnostics(
+        [first, second],
+        lambda: {"errors": [], "warnings": [], "undefined": [],
+                 "stubbed": ["data_fdps_thing"]})
+    rows.append(("a stubbed symbol does not fail the gate",
+                 not stubbed["undefined"]
+                 and stubbed["stubbed"] == ["data_fdps_thing"],
+                 ", ".join(stubbed["undefined"]) or "none"))
+    rows.append(("both transcripts feed the summary counts",
+                 stubbed["summary_errors"] == 0
+                 and stubbed["summary_warnings"] == 0, "0/0"))
+    left = merge_diagnostics(
+        [first, second],
+        lambda: {"errors": ["Error! E2028: mystery is an undefined reference"],
+                 "warnings": [], "undefined": ["mystery"],
+                 "stubbed": ["data_fdps_thing"]})
+    rows.append(("a symbol left after the stubs does fail",
+                 left["undefined"] == ["mystery"] and len(left["errors"]) == 1,
+                 ", ".join(left["undefined"])))
+    # Without a reader of its own a target still behaves exactly as before.
+    plain = merge_diagnostics([first])
+    rows.append(("a one-pass target still reads its one transcript",
+                 plain["undefined"] == ["data_fdps_thing"]
+                 and "stubbed" not in plain,
+                 ", ".join(plain["undefined"])))
     return rows
 
 

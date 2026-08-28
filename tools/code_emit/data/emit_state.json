@@ -14,8 +14,9 @@
       "name": "fdps_collect_targets_in_area",
       "target": "aitarget.c",
       "body_size": "0x12b",
-      "status": "interrupted",
-      "in_flight_since": "2026-08-29 01:20",
+      "status": "committed",
+      "emitted_against": "0x12b",
+      "rounds": 1,
       "note": "Run was killed mid-flight; the emitted code was discarded and the address goes back on the worklist untouched."
     }
   }
