@@ -13,6 +13,7 @@
 | 資料夾 | 視角 | 回答的問題 | git |
 | --- | --- | --- | --- |
 | `src/` | — | 逆向重建的完整 C 原始碼，解析遊戲資訊時的主要依據，Ghidra 為輔 | ✓ |
+| `tests/` | — | 單元測試，一個檔鏡像一個 `src/` 子檔；連結生產程式碼但不修改它（[ADR-0003](docs/adr/0003-manual-playtest-over-automated-golden.md)） | ✓ |
 | [`program_info/`](program_info/_index.md) | 程式 | `FDPS.LE` 現在做什麼，一檔對應一個子系統與 `src/` 模組 | ✓ |
 | [`resource_info/`](resource_info/_index.md) | 檔案 | 每個資源檔的二進位格式是什麼 | ✓ |
 | [`assets/`](assets/_index.md) | 資料表 | 遊戲的數值內容是什麼 | ✓ |
@@ -50,7 +51,7 @@ Ghidra 專案本身不進版控，取而代之的是 `ghidra_snapshot/` 這份�
 
 ## 驗證
 
-- 單元測試連結生產程式碼但不修改它，生產原始碼中不得有條件編譯的測試 hook（[ADR-0003](docs/adr/0003-manual-playtest-over-automated-golden.md)）
+- 單元測試連結生產程式碼但不修改它，生產原始碼中不得有條件編譯的測試 hook（[ADR-0003](docs/adr/0003-manual-playtest-over-automated-golden.md)）。測試怎麼組織、每支 emit 的 function 要對過哪些檢查，見 [`rebuild_info/emit_pipeline.md`](rebuild_info/emit_pipeline.md)
 - Build gate 是與本專案前一版建置結果比較的自我回歸閘，不是與原版的等價性證明
 - 解析器先跑前作的站台與資源檔，對照前作知識庫的已知答案驗證
 - 整合行為由人在 DOSBox-X 中實際遊玩確認，不建自動化對拍設施

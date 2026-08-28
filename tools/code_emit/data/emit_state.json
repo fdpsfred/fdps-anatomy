@@ -1,0 +1,15 @@
+{
+  "_doc": "Per-function emit progress and file routing -- the source of truth for what has been emitted and what is left. Version controlled, because a run that is interrupted has to be able to resume from disk with no conversation context. `status` advances pending -> emitted -> reviewed -> committed; `failed` and `skip` are terminal and both must appear in the closing report. `body_size` is the Ghidra body size the emit was made against: on resume it is compared with ghidra_snapshot/functions.txt, and an entry whose function has since changed size is retired and re-emitted rather than being skipped as done. `target` is the .c file the function belongs in; ticket 21.5 owns the full routing table and will populate the rest.",
+  "functions": {
+    "000160e0": {
+      "name": "fdps_menu_find_first_enabled_entry",
+      "target": "menu.c",
+      "body_size": "0x50",
+      "status": "pending",
+      "emitted_against": null,
+      "commit": null,
+      "rounds": 0,
+      "note": "Ticket 21's trial function: pure, argument-only, no globals and no callees, so the pipeline is exercised without also depending on ticket 23's data emit. Routing to menu.c is provisional until ticket 21.5."
+    }
+  }
+}

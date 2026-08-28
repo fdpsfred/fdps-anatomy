@@ -18,6 +18,12 @@
 
 另外每個註冊的測試套件都要通過。因環境缺件而跳過的套件會逐一列在結果裡，不會靜默消失。
 
+### 不做映像比對的目標
+
+`emittest` 是唯一一個 `equivalence` 顯示 `not compared` 的目標。它把 `src/` 與 `tests/` 編成單元測試映像，內容**按設計**每 emit 一支 function 就變一次；替它記基準值只會每次都紅、每次都被推進，那是一個被訓練成永遠說 yes 的閘門。其餘四項照樣判，而且 `warnings` 在沒有基準值時取最嚴格的形式：零。要接受一個警告就照樣得用 `update --reason` 記錄它。
+
+這個目標保證的是「編得過、連得起來、測試全綠」，不保證映像沒動——它本來就會動。它擋不到的東西由 [`emit_pipeline.md`](emit_pipeline.md) 的八類隱性契約檢查表在 emit 當下擋。
+
 ## 五種等價判定
 
 雜湊相同是最強也最便宜的答案，先問它。雜湊不同時才問第二個問題：差異是不是只落在連結器自己會重寫的地方。
@@ -64,6 +70,7 @@ python tools/build_gate/gate.py update --target smoke --reason "為什麼輸出�
 
 ```
 python tools/build_gate/gate.py                     # 全部目標，建置 + 比對 + 測試
+python tools/build_gate/gate.py check --target emittest   # emit 的閘門
 python tools/build_gate/gate.py check --target smoke --skip-tests
 python tools/build_gate/gate.py check --json        # 結構化結果印到 stdout
 python tools/build_gate/gate.py check --with-audio  # 連音效實跑套件一起

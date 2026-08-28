@@ -51,9 +51,11 @@ WORK = ROOT / "workspace" / "build_gate"
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "tools" / "fdps_build"))
 sys.path.insert(0, str(ROOT / "tools" / "ail_link"))
+sys.path.insert(0, str(ROOT / "tools" / "code_emit"))
 import lefixup  # noqa: E402
 import build_min as bm  # noqa: E402
 import link_ail as la  # noqa: E402
+import build_emit as ce  # noqa: E402
 
 
 # ------------------------------------------------------------------- targets
@@ -73,14 +75,32 @@ def _build_ailsmoke(ctx):
             "build_out": bm.find_ci(la.OUT, "build.out")}
 
 
+def _build_emittest(ctx):
+    ok = ce.do_build(ctx["dosbox"], ctx["watcom"], ctx["disc"], ctx["timeout"])
+    return {"builder_ok": ok,
+            "exe": bm.find_ci(ce.OUT, ce.EXE),
+            "build_out": bm.find_ci(ce.OUT, "build.out")}
+
+
 # The gate is target-parameterised because the thing being gated changes as the
-# rebuild progresses: today the two smoke programs, later the game itself.
-# Adding FDPS here plus one `update --reason` is the whole extension.
+# rebuild progresses: today the two smoke programs and the emit test image,
+# later the game itself.  Adding FDPS here plus one `update --reason` is the
+# whole extension.
+#
+# `compare` says whether an image baseline is meaningful for the target.  It is
+# for the smoke programs: their sources are frozen, so any byte that moves is
+# news.  It is not for emittest, whose whole purpose is to grow by one function
+# at a time -- a baseline there would fail on every emit and be re-recorded on
+# every emit, which is a gate that has been trained to say yes.  What that
+# target is gated on instead is what the emit pipeline actually promises: zero
+# errors, zero unresolved symbols, no new warning, every test green.
 TARGETS = {
-    "smoke": {"build": _build_smoke,
+    "smoke": {"build": _build_smoke, "compare": True,
               "desc": "tools/fdps_build smoke program (CRT + disc probe)"},
-    "ailsmoke": {"build": _build_ailsmoke,
+    "ailsmoke": {"build": _build_ailsmoke, "compare": True,
                  "desc": "tools/ail_link client linked against ailv3.lib"},
+    "emittest": {"build": _build_emittest, "compare": False,
+                 "desc": "tools/code_emit unit-test image over src/ + tests/"},
 }
 
 
@@ -101,9 +121,18 @@ TEST_SUITES = [
     {"name": "ail_link.selftest",
      "argv": ["tools/ail_link/link_ail.py", "selftest"],
      "needs": ("dosbox",), "target": "ailsmoke"},
+    {"name": "code_emit.selftest",
+     "argv": ["tools/code_emit/build_emit.py", "selftest"],
+     "needs": (), "target": None},
     {"name": "fdps_build.run",
      "argv": ["tools/fdps_build/build_min.py", "run"],
      "needs": ("dosbox", "disc"), "target": "smoke"},
+    # The emitted code's own assertions.  This is the suite that decides
+    # whether an emitted function behaves like the original, so it runs
+    # whenever the emittest target is in scope.
+    {"name": "code_emit.run",
+     "argv": ["tools/code_emit/build_emit.py", "run"],
+     "needs": ("dosbox",), "target": "emittest"},
     {"name": "ail_link.run",
      "argv": ["tools/ail_link/link_ail.py", "run"],
      "needs": ("dosbox", "disc", "audio"), "target": "ailsmoke"},
@@ -202,6 +231,8 @@ def _context(watcom, disc, timeout, targets):
     if "ailsmoke" in targets:
         la.preflight_wasm(watcom)
         la.preflight_extra(False)
+    if "emittest" in targets:
+        ce.preflight_extra(watcom, bool(ce.asm_sources(ce.SRC)))
     # The disc is mounted for the builds too, not because compilation reads it
     # but because the gate has to build the way the normal build does
     # (rebuild_info/build_pipeline.md keeps one mount definition for both
@@ -265,6 +296,21 @@ def build_and_compare(name, ctx, baselines):
         row["equivalence"] = None
         return settle()
     row["profile"] = fresh
+
+    if not spec.get("compare", True):
+        # No image baseline for this target.  The warning rule still holds, and
+        # with nothing recorded it holds in its strictest form: zero.  Whoever
+        # wants a warning accepted has to record it with `update --reason`, the
+        # same as everywhere else.
+        add("warnings",
+            not new_warnings((base or {}).get("warnings"), diag["warnings"]),
+            "%d warning(s), %s"
+            % (len(diag["warnings"]),
+               "against recorded baseline" if base else "none accepted"))
+        row["equivalence"] = {"verdict": "not compared",
+                              "detail": "this target has no image baseline "
+                                        "-- it changes by design on every emit"}
+        return settle()
 
     if base is None:
         # A gate with nothing to compare against must not report success: that
