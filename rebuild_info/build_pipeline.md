@@ -2,7 +2,7 @@
 
 怎麼把原始碼在 DOSBox-X 裡以當年的工具鏈全自動編譯、連結並實際執行。旗標組本身與每一項的判定依據由 [`build_flags.md`](build_flags.md) 擁有，本檔只引用；這裡回答的是「這些旗標要在什麼環境、以什麼機制送進工具，以及怎麼知道它跑完了」。
 
-腳本在 [`tools/fdps_build/`](../tools/fdps_build/_index.md)，它同時是共用的機制實作；[`tools/ail_link/`](../tools/ail_link/_index.md) 匯入它，只換掉編譯清單與執行階段的內容。
+腳本在 [`tools/fdps_build/`](../tools/fdps_build/_index.md)，它同時是共用的機制實作；[`tools/ail_link/`](../tools/ail_link/_index.md) 匯入它，只換掉編譯清單與執行階段的內容。建置出來的東西怎麼被檢查有沒有意外改變，見 [`build_gate.md`](build_gate.md)。
 
 ## 一切都在 DOSBox-X 內以 DOS 版工具執行
 

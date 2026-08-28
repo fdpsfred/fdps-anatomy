@@ -1,0 +1,43 @@
+{
+  "_doc": "Build-gate baselines: the previous build of each target, per ADR-0001 a self-regression reference and not a comparison against the original FDPS.EXE. `profile` is tools/build_gate/lefixup.py's relocation-aware fingerprint; `warnings` is the accepted warning text, so a new warning fails even when the count does not rise. Every advance appends the superseded entry to `history` with the reason it was superseded -- the chain is the audit trail for what the gate has been told to accept.",
+  "targets": {
+    "smoke": {
+      "recorded": "2026-08-28",
+      "commit": "ba5129c",
+      "reason": "Ticket 20: first baseline for the smoke program, taken from the ticket 18 toolchain build.",
+      "warnings": [],
+      "summary_warnings": 0,
+      "profile": {
+        "size": 55116,
+        "sha256": "4915bd839c9a635bce4987b1ea2718f6cf6e93e8883052dca37059fdbd271ddc",
+        "fixup_lo": 11170,
+        "fixup_hi": 16119,
+        "fixup_len": 4949,
+        "fixup_sites": 707,
+        "outside_sha256": "45ca70386f41fb77c5f5f25a85b0e1f6b67cd2eb2629d51d738ae906cf187507",
+        "fixup_multiset_sha256": "3101684e4e6b060e056ed2aa040c2032a1a5698d409970c578ad0c8056f289b3",
+        "residual_sha256": "77018c76bb472d775e4e922b1c94e6bb92b9411060d01f276fd3b2540d5430e2"
+      },
+      "history": []
+    },
+    "ailsmoke": {
+      "recorded": "2026-08-28",
+      "commit": "ba5129c",
+      "reason": "Ticket 20: first baseline for the AIL client, taken from the ticket 19 link verification build.",
+      "warnings": [],
+      "summary_warnings": 0,
+      "profile": {
+        "size": 119341,
+        "sha256": "8863a0ee31f18e2d5f18e60af7bbac65a6277366b3cfa9d18754e01c6eea11cc",
+        "fixup_lo": 11276,
+        "fixup_hi": 28216,
+        "fixup_len": 16940,
+        "fixup_sites": 2416,
+        "outside_sha256": "5f3623796d1c1aeb88f733095c37fe05897d96f7c563c2bf20680885ae6eefc4",
+        "fixup_multiset_sha256": "eb58ed2c2bb3cb0059d3096d17afae5e8d22ee668cb5b1713b2c246e0e4279a0",
+        "residual_sha256": "19065f5f1c2b76835d4b9f18c3a82909ad06168c5b715441d4930598fdfb3620"
+      },
+      "history": []
+    }
+  }
+}
