@@ -10,20 +10,27 @@
 | --- | --- |
 | `emit_ticket21.js` | Workflow 編排。序列跑完工作清單：emit → review → 修正迴圈 → gate → commit，收尾做疑慮回掃與 devlog。錯誤處理含單項重試、上游失效偵測、gate 失敗的修復迴圈、未完成項目的工作區清理與記帳 |
 | `build_emit.py` | 四個子命令。`build` 把 `src/` 與 `tests/` 全部編譯連結成 `EMITTEST.EXE`；`run` 在 DOSBox-X 裡執行它並讀回測試紀錄；`all`（預設）依序跑兩者；`selftest` 不碰 DOSBox-X，驗證接線產生與紀錄解析 |
-| `next_batch.py` | 從 `data/emit_state.json` 產生要交給 workflow 的工作清單，並比對 Ghidra 快照退休過期的判定。`--stats` 看進度 |
+| `next_batch.py` | 以 `data/routing.json` 為名冊、`data/emit_state.json` 為進度，產生要交給 workflow 的工作清單，並比對 Ghidra 快照退休過期的判定。`--stats` 看進度 |
+| `DumpRoutingInputs.java` | Ghidra script，唯讀。把 routing 規劃要的整體事實匯出成兩個 JSON：每支 `pool_fdps` function 的反編譯行數、caller／callee、碰到的具名資料，以及每個具名資料符號的取用者 |
+| `build_routing.py` | routing 判定表的所在，產生 `data/routing.json` 與 `data/routing.md`。`--stats` 看每檔行數，`--check` 只驗不寫 |
 
 ## 資料
 
 | 檔案 | 內容 |
 | --- | --- |
-| `data/emit_state.json` | 進度與檔案落點的正本，進版控。續跑的唯一依據 |
+| `data/routing.json` | 每支 function 與每個遊戲全域的目標 `.c`，加上不 emit 的符號清單。由 `build_routing.py` 產生，不手改 |
+| `data/routing.md` | 同一份路由的逐檔清單，人讀用。同樣是產生物 |
+| `data/emit_state.json` | 進度的正本，進版控。續跑的唯一依據。**不記檔案落點** |
 | `data/emit_issues.json` | 尚未收斂的等價性疑慮，一個 function 一組。由 bookkeeper 累加、由回掃段更新 |
 
-判定檔（emitter 與 reviewer 的完整產出）落在 `workspace/code_emit/verdicts/`，中間產物與建置產出落在 `workspace/code_emit/` 其餘位置。
+落點的判定依據與超標處置規則由 [`rebuild_info/code_layout.md`](../../rebuild_info/code_layout.md) 擁有，本目錄只放表與產生器。
+
+判定檔（emitter 與 reviewer 的完整產出）落在 `workspace/code_emit/verdicts/`，`DumpRoutingInputs.java` 的輸出落在 `workspace/code_emit/routing_inputs/`，中間產物與建置產出落在 `workspace/code_emit/` 其餘位置。
 
 ## 跑法
 
 ```
+python tools/code_emit/build_routing.py --check       # 路由表還成立嗎
 python tools/code_emit/next_batch.py --stats          # 還剩多少
 python tools/code_emit/next_batch.py --limit 1        # 產生 workflow 的 args
 python tools/code_emit/build_emit.py all              # emitter 用的快速迴圈

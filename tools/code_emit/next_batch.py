@@ -5,6 +5,14 @@ rebuild has got lives in tools/code_emit/data/emit_state.json, so a run that was
 interrupted -- by a token limit, by a machine, by a person -- resumes by asking
 this script what is left, with no conversation context required.
 
+The worklist itself is not stored twice.  Which functions there are and which
+file each belongs in comes from tools/code_emit/data/routing.json, ticket 21.5's
+routing table; emit_state.json says only how far each one has got.  A function
+absent from the state file has simply not been started, and a `target` in the
+state file that disagrees with routing is reported rather than believed --
+routing owns the file, and a stale copy of that answer in a second file is how
+two emits end up writing the same function into different .c files.
+
 Two jobs:
 
     --stats   how many functions are pending / emitted / reviewed / committed /
@@ -29,6 +37,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 STATE = Path(__file__).resolve().parent / "data" / "emit_state.json"
+ROUTING = Path(__file__).resolve().parent / "data" / "routing.json"
 SNAPSHOT = ROOT / "ghidra_snapshot" / "functions.txt"
 
 DONE = "committed"
@@ -44,6 +53,36 @@ def load_state():
 def save_state(state):
     STATE.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n",
                      encoding="utf-8")
+
+
+def load_routing():
+    if not ROUTING.is_file():
+        sys.exit("missing %s -- ticket 21.5's routing table is the worklist"
+                 % ROUTING)
+    return json.loads(ROUTING.read_text(encoding="utf-8"))["functions"]
+
+
+def merged(state, routing):
+    """address -> entry, routing supplying the roster, state the progress."""
+    progress = state.get("functions", {})
+    out = {}
+    conflicts = []
+    for addr, route in sorted(routing.items()):
+        entry = dict(progress.get(addr, {}))
+        if entry.get("target") and entry["target"] != route["target"]:
+            conflicts.append("%s %s: state says %s, routing says %s"
+                             % (addr, route["name"], entry["target"],
+                                route["target"]))
+        entry.setdefault("status", "pending")
+        entry["name"] = route["name"]
+        entry["target"] = route["target"]
+        out[addr] = entry
+    for addr, entry in progress.items():
+        if addr not in out:
+            conflicts.append("%s %s: in emit_state but not in routing"
+                             % (addr, entry.get("name")))
+            out[addr] = dict(entry)
+    return out, conflicts
 
 
 def snapshot_sizes():
@@ -71,10 +110,10 @@ def stale(entry, sizes):
     return sizes.get(entry.get("_addr"), None) != against
 
 
-def worklist(state, limit):
+def worklist(functions, limit):
     sizes = snapshot_sizes()
     out = []
-    for addr, entry in sorted(state.get("functions", {}).items()):
+    for addr, entry in sorted(functions.items()):
         entry = dict(entry, _addr=addr)
         if entry.get("status") in TERMINAL and not stale(entry, sizes):
             continue
@@ -87,11 +126,11 @@ def worklist(state, limit):
     return out
 
 
-def stats(state):
+def stats(functions):
     sizes = snapshot_sizes()
     counts = {}
     retired = []
-    for addr, entry in sorted(state.get("functions", {}).items()):
+    for addr, entry in sorted(functions.items()):
         status = entry.get("status", "pending")
         if stale(dict(entry, _addr=addr), sizes):
             status = "stale (re-emit)"
@@ -115,12 +154,20 @@ def main():
                     help="batch label, carried into the workflow's report")
     args = ap.parse_args()
 
-    state = load_state()
-    if args.stats:
-        stats(state)
-        return 0
+    functions, conflicts = merged(load_state(), load_routing())
+    for line in conflicts:
+        print("CONFLICT %s" % line, file=sys.stderr)
 
-    fns = worklist(state, args.limit)
+    if args.stats:
+        stats(functions)
+        return 1 if conflicts else 0
+
+    if conflicts:
+        print("refusing to hand out a worklist while routing and state "
+              "disagree", file=sys.stderr)
+        return 1
+
+    fns = worklist(functions, args.limit)
     print(json.dumps({"batchLabel": args.label, "functions": fns},
                      indent=2, ensure_ascii=False))
     return 0

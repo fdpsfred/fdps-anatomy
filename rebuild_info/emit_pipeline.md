@@ -90,4 +90,6 @@ B、E、H 三類的共同症狀是「數值或指標讀到不相干的東西」�
 
 ## 檔案落點
 
-每個 function 與資料符號的目標 `.c`／`.h` 由票 21.5 的 routing 規劃決定，結論屆時成為「哪個符號在哪個檔」的唯一正典。在那之前 `emit_state.json` 的 `target` 欄是暫定值。
+每個 function 與資料符號的目標 `.c`／`.h` 由 [`code_layout.md`](code_layout.md) 擁有，逐項對照表是 `tools/code_emit/data/routing.json`。emit 期間不做落點判斷：工作清單本身就帶著目標檔。
+
+`emit_state.json` 只記進度，不記落點；兩邊對某支 function 的目標檔不一致時 `next_batch.py` 報錯而不是二選一。

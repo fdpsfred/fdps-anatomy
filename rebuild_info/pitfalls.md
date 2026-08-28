@@ -93,6 +93,7 @@
 | **Ghidra 的字串定義常常早 1–2 byte 開始，把 Watcom 留在字面值之間的非零對齊填充算進去**：`s_Icon03.dat_00061827` 的值是 `"zIcon03.dat"`，反編譯印出的是 `fdps_icon_script_run(s_zIcon03_dat_00061827 + 1)` | 把反編譯印的字串原文抄進 C。抄到的是多了填充字元的字串，`fdps_vfs_find_entry` 一定找不到那個成員。這在 `.object2` 的字串區反覆發生，不是個案；判斷方式是看呼叫端有沒有 `+ 1` / `+ 2` 這種偏移 | [`program_info/data_structures.md`](../program_info/data_structures.md) |
 | **調色盤循環表刻意把開頭幾筆複製到尾巴**，例如 24 筆 = 16 筆再接前 8 筆、29 byte = 15 筆再接前 14 筆，好讓 `base + phase` 這種讀法不必做環繞測試 | 看出重複就把尾巴刪掉、改寫成 `(phase + i) & 15`。要嘛脈動序列不同、要嘛直接讀出界，而兩者都不會有任何診斷 | plate comment 的 `Rebuild note` |
 | **`.object1` 裡夾在函式之間的常數表，多半是 wcc386 替 auto 陣列產生的初值影像，不是原始碼裡的全域**：`int cmd_icons[4] = {0x16, 0x0b, 0x0c, 0x13};` 這樣的區域宣告，初值會被擺在宣告它的函式旁邊的唯讀資料裡 | 看到有名字的常數表就當成全域 emit 出來。原版沒有那個全域，重建版多一個符號、而且該函式每次進入時的複製動作不見了。判定過的 1,040 個 anchor 裡有 395 個屬於這一類 | [`program_info/data_structures.md`](../program_info/data_structures.md) |
+| 同一個陷阱還有另外三種產生者：**`switch` 的跳躍表、浮點常數池、字串字面值**，Ghidra 一樣會給它們名字 | 把 `binary_artifact_*_switch_table_*`、`binary_artifact_fp_const_*`、`binary_artifact_string_literal_*` 當全域 emit。編譯器本來就會從 `switch`、從算式裡的浮點字面值、從敘述裡的字串重新產生一份，我們再定義一次就是原版沒有的第二份。這三類加上區域陣列初值共 159 個符號，已經在 routing 表裡標成不 emit | [`code_layout.md`](code_layout.md) |
 | 三十支章節 init 處理函式看起來一模一樣，但**不能用迴圈或樣板生成**：`Icon%02d.dat` 的編號差 1、`fdps_roster_add_character` 必須排在 `fdps_chapter_state_reset` 之前（reset 會依名冊人數重建地圖單位，順序反過來新加入的角色會被歸零成退場）、而且第 17／22／23 章傳的游標目標不是 0 | 用一支樣板產生三十支。前兩項會讓某些章節少一個角色或播錯動畫，第三項只影響三章 | plate comment 的 `Rebuild note` |
 
 ## 不能照編譯器慣例設定的旗標
