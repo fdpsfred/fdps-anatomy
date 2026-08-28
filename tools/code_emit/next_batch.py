@@ -39,6 +39,8 @@ ROOT = Path(__file__).resolve().parents[2]
 STATE = Path(__file__).resolve().parent / "data" / "emit_state.json"
 ROUTING = Path(__file__).resolve().parent / "data" / "routing.json"
 SNAPSHOT = ROOT / "ghidra_snapshot" / "functions.txt"
+ORDER = ROOT / "workspace" / "code_emit" / "emit_order.json"
+GRAPH = ROOT / "workspace" / "call_graph" / "graph.json"
 
 DONE = "committed"
 TERMINAL = ("committed", "skip")
@@ -110,17 +112,59 @@ def stale(entry, sizes):
     return sizes.get(entry.get("_addr"), None) != against
 
 
+def emit_order():
+    """The callee-before-caller order, or None when it has not been built.
+
+    Address order is what `sorted` would give and it is the wrong answer: a
+    function emitted before its callees is tested against generated stubs
+    rather than against the real thing.  tools/code_emit/emit_order.py works
+    the order out from the call graph; if its output is missing the worklist
+    still comes out, in address order, and says so.
+    """
+    if not ORDER.is_file():
+        return None
+    return json.loads(ORDER.read_text(encoding="utf-8"))["order"]
+
+
+def callees():
+    """caller -> [callee address], direct and table-dispatched alike."""
+    if not GRAPH.is_file():
+        return {}
+    graph = json.loads(GRAPH.read_text(encoding="utf-8"))
+    out = {}
+    for key in ("direct_edges", "indirect_edges"):
+        for row in graph.get(key, []):
+            src, dst = row[0], row[1]
+            if src != dst:
+                out.setdefault(src, set()).add(dst)
+    return {k: sorted(v) for k, v in out.items()}
+
+
 def worklist(functions, limit):
     sizes = snapshot_sizes()
+    order = emit_order()
+    calls = callees()
+    done = {addr for addr, entry in functions.items()
+            if entry.get("status") == DONE
+            and not stale(dict(entry, _addr=addr), sizes)}
+
+    addrs = [a for a in (order or sorted(functions)) if a in functions]
+    # Anything the order does not know about -- a function added to routing
+    # after the order was last built -- goes on the end rather than vanishing.
+    addrs += [a for a in sorted(functions) if a not in set(addrs)]
+
     out = []
-    for addr, entry in sorted(functions.items()):
-        entry = dict(entry, _addr=addr)
+    for addr in addrs:
+        entry = dict(functions[addr], _addr=addr)
         if entry.get("status") in TERMINAL and not stale(entry, sizes):
             continue
+        stubbed = [functions[c]["name"] for c in calls.get(addr, [])
+                   if c in functions and c not in done]
         out.append({"addr": addr,
                     "name": entry.get("name"),
                     "target": entry.get("target"),
-                    "body_size": sizes.get(addr) or entry.get("body_size")})
+                    "body_size": sizes.get(addr) or entry.get("body_size"),
+                    "stubbed_callees": stubbed})
         if limit and len(out) >= limit:
             break
     return out

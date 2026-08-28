@@ -44,19 +44,31 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "tools" / "fdps_build"))
 import build_min as bm  # noqa: E402
 
+sys.path.insert(0, str(HERE))
+import gen_stubs  # noqa: E402
+
 SRC = ROOT / "src"
 TESTS = ROOT / "tests"
 GAME = ROOT / "fdps_game_files"
+LIBS = ROOT / "libs" / "ailv3"
 
 WORK = ROOT / "workspace" / "code_emit"
 STAGE = WORK / "stage"
 OUT = WORK / "out"
 OBJ_SRC = OUT / "objs"
 OBJ_TST = OUT / "objt"
+OBJ_STB = OUT / "objz"
+GUEST_LIB = WORK / "lib"
 RUN = WORK / "run"
 
 EXE = "EMITTEST.EXE"
 LNK = "EMITTEST.LNK"
+# The second link, the one that carries the generated stub module.
+LNK2 = "EMITTES2.LNK"
+# The undefined symbols the first link reported: everything the emitted code
+# references and nothing has defined yet.  This file is ticket 23's worklist,
+# regenerated on every build so it cannot drift from the code.
+UNDEF_JSON = WORK / "undefined.json"
 
 DRV_SRC = bm.DRV_SRC
 DRV_WATCOM = bm.DRV_WATCOM
@@ -66,6 +78,18 @@ DRV_WORK = bm.DRV_WORK
 # command line stays far inside COMMAND.COM's silent truncation limit.
 G_SRC = "SRC"
 G_TST = "TST"
+G_STB = "STB"
+
+# The AIL library the game's audio code calls into, and the seven game-side
+# symbols its EXTDEFs reach back for.  tools/ail_link/link_ail.py owns the
+# alias list; it is imported rather than repeated, because two copies of a
+# name-mapping table is how one of them goes stale unnoticed
+# (rebuild_info/ail_link.md).
+sys.path.insert(0, str(ROOT / "tools" / "ail_link"))
+import link_ail  # noqa: E402
+
+AIL_LIB = LIBS / "ailv3.lib"
+AIL_HDR = LIBS / "ailv3.h"
 
 # Real game files a test asks for, one 8.3 name per line, '#' comments allowed.
 # They are copied next to the executable (which is the guest's cwd) only when
@@ -169,20 +193,31 @@ def preflight_extra(watcom, need_asm):
         if bm.find_ci(GAME, name) is None:
             bm.fail("%s lists %s, which is not in %s"
                     % (GAMEFILE_LIST.name, name, GAME))
+    preflight_ail()
 
 
 # ---------------------------------------------------------------- generation
 
-def gen_lnk(src_objs, tst_objs):
+def gen_lnk(src_objs, tst_objs, with_stubs=False):
     """system dos4g pulls in no CRT of its own and wlink's 4K default stack is
     not enough for the harness, so both are spelled out -- same as every other
-    build target in this project (rebuild_info/build_flags.md)."""
+    build target in this project (rebuild_info/build_flags.md).
+
+    `with_stubs` is the difference between the two links of a build.  The first
+    one deliberately has no stub module, so that what it cannot resolve is
+    exactly what the rebuild is still missing; the second adds the generated
+    module and is the one that has to come out clean.
+    """
     w = DRV_WORK
     lines = ["system dos4g",
              r"name %s:\OUT\%s" % (w, EXE),
              "option stack=8k"]
+    lines += ["alias %s=%s" % (a, b) for a, b in link_ail.ALIASES]
     lines += [r"file %s:\OUT\OBJS\%s.OBJ" % (w, s) for s in src_objs]
     lines += [r"file %s:\OUT\OBJT\%s.OBJ" % (w, s) for s in tst_objs]
+    if with_stubs:
+        lines.append(r"file %s:\OUT\OBJZ\STUBS.OBJ" % w)
+    lines.append(r"library %s:\LIB\AILV3.LIB" % w)
     lines += ["library %s" % lib for lib in bm.CRT_LIBS]
     return "\n".join(lines) + "\n"
 
@@ -217,6 +252,28 @@ def gen_build_bat(src_c, src_asm, tst_c):
     return "\r\n".join(out) + "\r\n"
 
 
+def gen_stub_bat():
+    """The second pass: compile the generated stub module and link again.
+
+    Nothing else is recompiled.  The objects from the first pass are still on
+    disk and none of their sources changed between the two links -- the only
+    new input is the stub module, which was generated from what the first link
+    complained about.
+    """
+    w = DRV_WORK
+    out = []
+    for label, cmd in (
+            ("stubs", r"WCC386 %s\STUBS.C -fo=%s:\OUT\OBJZ\STUBS.OBJ >> %s:\OUT\BUILD2.OUT"
+             % (G_STB, w, w)),
+            ("link2", r"WLINK @%s:\%s >> %s:\OUT\BUILD2.OUT" % (w, LNK2, w))):
+        out.append(r"echo %s > %s:\OUT\HB.TXT" % (label, w))
+        out.append(r"echo === %s === >> %s:\OUT\BUILD2.OUT" % (label, w))
+        out.append(cmd)
+    out.append(r"echo done > %s:\OUT\HB.TXT" % w)
+    out.append(r"echo done > %s:\OUT\BUILD2.DON" % w)
+    return "\r\n".join(out) + "\r\n"
+
+
 def stage_sources(test_files):
     """Copy sources into the guest tree under their 8.3 upper-case names.
 
@@ -229,8 +286,12 @@ def stage_sources(test_files):
         shutil.rmtree(str(STAGE))
     (STAGE / G_SRC).mkdir(parents=True)
     (STAGE / G_TST).mkdir(parents=True)
+    (STAGE / G_STB).mkdir(parents=True)
     for path in c_sources(SRC) + asm_sources(SRC) + headers(SRC):
         shutil.copy2(path, STAGE / G_SRC / path.name.upper())
+    # The AIL header goes in with the sources so an emitted audio unit can
+    # include it by plain name, exactly as tools/ail_link stages it.
+    shutil.copy2(AIL_HDR, STAGE / G_SRC / AIL_HDR.name.upper())
     for path in test_files + headers(TESTS):
         shutil.copy2(path, STAGE / G_TST / path.name.upper())
     names = runners(test_files)
@@ -241,20 +302,37 @@ def stage_sources(test_files):
 
 # --------------------------------------------------------------------- build
 
+def preflight_ail():
+    for path in (AIL_LIB, AIL_HDR):
+        if not path.is_file():
+            bm.fail("missing %s -- the emitted game code links against the AIL "
+                    "library (rebuild_info/ail_link.md)" % path)
+
+
+def stage_ail_lib():
+    GUEST_LIB.mkdir(parents=True, exist_ok=True)
+    dst = GUEST_LIB / "AILV3.LIB"
+    if not dst.is_file() or dst.stat().st_size != AIL_LIB.stat().st_size:
+        shutil.copy2(AIL_LIB, dst)
+
+
 def do_build(dosbox, watcom, disc, timeout, quiet=False):
     OBJ_SRC.mkdir(parents=True, exist_ok=True)
     OBJ_TST.mkdir(parents=True, exist_ok=True)
+    OBJ_STB.mkdir(parents=True, exist_ok=True)
     for parent, name in ((OUT, EXE), (OUT, "BUILD.DON"), (OUT, "BUILD.OUT"),
+                         (OUT, "BUILD2.DON"), (OUT, "BUILD2.OUT"),
                          (OUT, "HB.TXT"),
                          (WORK, "dosbox.log"), (WORK, "stdio.log")):
         p = bm.find_ci(parent, name)
         if p is not None:
             p.unlink()
     # Stale objects would let a source that no longer compiles still link.
-    for objdir in (OBJ_SRC, OBJ_TST):
+    for objdir in (OBJ_SRC, OBJ_TST, OBJ_STB):
         for p in objdir.iterdir() if objdir.is_dir() else []:
             if p.is_file():
                 p.unlink()
+    stage_ail_lib()
 
     test_files = c_sources(TESTS)
     names = stage_sources(test_files)
@@ -292,7 +370,6 @@ def do_build(dosbox, watcom, disc, timeout, quiet=False):
 
     bout = bm.find_ci(OUT, "build.out")
     txt = bout.read_text(encoding="latin-1", errors="replace") if bout else ""
-    exe = bm.find_ci(OUT, EXE)
     syms = bm.parse_undefined(txt)
     fault = bm.scan_fault(WORK / "dosbox.log", WORK / "stdio.log")
 
@@ -302,15 +379,6 @@ def do_build(dosbox, watcom, disc, timeout, quiet=False):
             print("[build] protected-mode fault in log:\n%s" % fault)
         if txt:
             print("\n".join("  | " + l for l in txt.splitlines()[-25:]))
-        if syms:
-            print("[build] %d undefined symbols: %s"
-                  % (len(syms), ", ".join(syms[:20])))
-    if exe is None:
-        if not quiet:
-            print("[build] FAIL: %s not produced" % EXE)
-        return False
-    if not quiet:
-        print("[build] %s %d bytes -> %s" % (EXE, exe.stat().st_size, exe))
     if mode != "completed":
         # An image on disk is not proof the build finished: wlink can have
         # written it and the guest then wedged, leaving a truncated BUILD.OUT
@@ -318,7 +386,114 @@ def do_build(dosbox, watcom, disc, timeout, quiet=False):
         if not quiet:
             print("[build] FAIL: no completion marker (mode=%s)" % mode)
         return False
-    return not syms and not fault
+    if fault:
+        return False
+
+    if not stub_pass(dosbox, watcom, disc, timeout, syms, src_c + src_asm,
+                     tst_c, quiet):
+        return False
+
+    exe = bm.find_ci(OUT, EXE)
+    if exe is None:
+        if not quiet:
+            print("[build] FAIL: %s not produced" % EXE)
+        return False
+    if not quiet:
+        print("[build] %s %d bytes -> %s" % (EXE, exe.stat().st_size, exe))
+    return True
+
+
+def record_undefined(syms, resolved, unresolved):
+    """Land the first link's complaint as ticket 23's worklist."""
+    by_symbol = {r["symbol"]: r for r in resolved}
+    WORK.mkdir(parents=True, exist_ok=True)
+    UNDEF_JSON.write_text(json.dumps({
+        "_doc": "Symbols the emitted code references and nothing defines yet, "
+                "as reported by the first of the build's two links. This is "
+                "ticket 23's authoritative worklist: it is regenerated on "
+                "every build, so it shrinks as real definitions land and can "
+                "never disagree with the code. The second link fills these in "
+                "with the zero-filled module tools/code_emit/gen_stubs.py "
+                "writes; nothing here is checked into src/.",
+        "count": len(syms),
+        "symbols": [dict(by_symbol.get(s, {"symbol": s}),
+                         symbol=s) for s in syms],
+        "unresolved": unresolved,
+    }, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def stub_pass(dosbox, watcom, disc, timeout, syms, src_objs, tst_objs, quiet):
+    """The second link: fill the first link's holes with generated stubs.
+
+    Returns True when the program is fully linked -- either because the first
+    link already resolved everything, or because the stub module closed the
+    gap.  A symbol that must not be stubbed (rebuild_info/emit_pipeline.md)
+    fails the build here rather than being papered over.
+    """
+    text, resolved, unresolved = gen_stubs.plan(syms, src_dir=SRC)
+    record_undefined(syms, resolved, unresolved)
+
+    if not syms:
+        if not quiet:
+            print("[build] first link resolved everything; no stubs needed")
+        return True
+    if not quiet:
+        data = sum(1 for r in resolved if r["kind"] == "data")
+        fns = sum(1 for r in resolved if r["kind"] == "function")
+        print("[build] first link left %d undefined symbol(s): %d global(s) "
+              "for ticket 23, %d function(s) not emitted yet"
+              % (len(syms), data, fns))
+    if unresolved:
+        print("[build] FAIL: %d symbol(s) must not be stubbed:" % len(unresolved))
+        for row in unresolved:
+            print("  | %s -- %s" % (row["symbol"], row["why"]))
+        return False
+
+    (STAGE / G_STB / "STUBS.C").write_text(text, encoding="latin-1")
+    (WORK / LNK2).write_text(gen_lnk(src_objs, tst_objs, with_stubs=True),
+                             encoding="latin-1")
+    (WORK / "BUILD2.BAT").write_text(gen_stub_bat(), encoding="latin-1")
+    # The image from the first link is deleted so that its presence cannot be
+    # mistaken for the second link's output.
+    for name in (EXE,):
+        p = bm.find_ci(OUT, name)
+        if p is not None:
+            p.unlink()
+    bm.write_conf(
+        WORK / "build2.conf",
+        [(DRV_SRC, STAGE), (DRV_WATCOM, watcom), (DRV_WORK, WORK)],
+        disc,
+        ["set WATCOM=%s:\\" % DRV_WATCOM,
+         "set PATH=Z:\\;" + ";".join("%s:\\%s" % (DRV_WATCOM, d)
+                                     for d in bm.BINDIRS),
+         "set INCLUDE=%s:\\H;%s:\\%s;%s:\\%s"
+         % (DRV_WATCOM, DRV_SRC, G_SRC, DRV_SRC, G_TST),
+         "set WCC386=" + bm.CFLAGS,
+         "%s:" % DRV_SRC,
+         r"%s:\BUILD2.BAT" % DRV_WORK],
+        logfile=WORK / "dosbox2.log",
+    )
+    proc, fp = bm.launch(dosbox, WORK / "build2.conf", WORK / "stdio2.log")
+    mode, hb, secs = bm.wait(proc, OUT, "build2.don", timeout)
+    fp.close()
+
+    bout = bm.find_ci(OUT, "build2.out")
+    txt = bout.read_text(encoding="latin-1", errors="replace") if bout else ""
+    left = bm.parse_undefined(txt)
+    fault = bm.scan_fault(WORK / "dosbox2.log", WORK / "stdio2.log")
+    if not quiet:
+        print("[build] stub link %s in %ds (last step: %s)"
+              % (mode, secs, hb or "-"))
+        if txt:
+            print("\n".join("  | " + l for l in txt.splitlines()[-15:]))
+        if left:
+            print("[build] still undefined after stubs: %s" % ", ".join(left))
+    if mode != "completed":
+        if not quiet:
+            print("[build] FAIL: stub link produced no completion marker "
+                  "(mode=%s)" % mode)
+        return False
+    return not left and not fault
 
 
 # ----------------------------------------------------------------------- run
@@ -413,13 +588,36 @@ def do_run(dosbox, watcom, disc, timeout, quiet=False):
 
 # ------------------------------------------------------------------- verdict
 
-def diagnostics():
-    bout = bm.find_ci(OUT, "build.out")
-    txt = bout.read_text(encoding="latin-1", errors="replace") if bout else ""
-    lines = [l.strip() for l in txt.splitlines()]
-    return {"errors": [l for l in lines if "Error!" in l],
+def diagnostics(out_dir=None):
+    """The compiler's and linker's own words, across both of the build's links.
+
+    Errors and warnings are collected from both passes.  Undefined symbols are
+    read from the LAST link only: the first link is expected to report the
+    symbols the rebuild has not reached yet, and that expected list is the
+    point of it, so counting those as gate failures would keep the gate red
+    until the very last function of ticket 23 lands.  What must be empty is
+    what the second link, the one carrying the stubs, still cannot resolve.
+    """
+    out_dir = out_dir or OUT
+    first = bm.find_ci(out_dir, "build.out")
+    second = bm.find_ci(out_dir, "build2.out")
+    txt1 = first.read_text(encoding="latin-1", errors="replace") if first else ""
+    txt2 = second.read_text(encoding="latin-1", errors="replace") if second else ""
+    lines = [l.strip() for l in (txt1 + "\n" + txt2).splitlines()]
+    # An "Error!" naming an undefined symbol from the first link is that same
+    # expected list wearing the linker's error prefix; it is dropped here for
+    # the same reason and reported through undefined.json instead.
+    first_undef = set(bm.parse_undefined(txt1))
+
+    def expected_undef(line):
+        return any(sym in line for sym in first_undef) and "undefined" in line
+
+    errors = [l for l in lines if "Error!" in l and not expected_undef(l)]
+    return {"errors": errors,
             "warnings": [l for l in lines if "Warning!" in l],
-            "undefined": bm.parse_undefined(txt)}
+            "undefined": bm.parse_undefined(txt2) if second else
+                         bm.parse_undefined(txt1),
+            "stubbed": sorted(first_undef)}
 
 
 def write_result(result):
@@ -498,6 +696,48 @@ def _selftest_rows():
     lnk = gen_lnk(["AILDPMI"], ["MENU"])
     rows.append(("link file lists both trees",
                  r"OBJS\AILDPMI.OBJ" in lnk and r"OBJT\MENU.OBJ" in lnk, "yes"))
+    rows.append(("first link carries no stub module",
+                 "STUBS.OBJ" not in lnk, "yes"))
+    rows.append(("AIL library and its aliases are linked",
+                 "AILV3.LIB" in lnk
+                 and "alias fd2_dpmi_lock_size=fdps_dpmi_lock_size" in lnk
+                 and len([l for l in lnk.splitlines()
+                          if l.startswith("alias ")]) == len(link_ail.ALIASES),
+                 "%d alias(es)" % len(link_ail.ALIASES)))
+    lnk2 = gen_lnk(["AILDPMI"], ["MENU"], with_stubs=True)
+    rows.append(("second link carries the stub module",
+                 r"OBJZ\STUBS.OBJ" in lnk2, "yes"))
+
+    bat2 = gen_stub_bat()
+    rows.append(("stub pass compiles only the stubs",
+                 bat2.count("WCC386") == 1 and "STUBS.C" in bat2
+                 and "WLINK" in bat2, "yes"))
+    rows.append(("stub pass writes its own transcript and marker",
+                 "BUILD2.OUT" in bat2 and "BUILD2.DON" in bat2, "yes"))
+
+    # The gate must not go red just because the rebuild has not reached a
+    # symbol yet -- that is every build until the last function of ticket 23.
+    # It must go red the moment the second link cannot resolve something.
+    import tempfile as _tempfile
+    tmp = Path(_tempfile.mkdtemp(prefix="fdps_diag_selftest_"))
+    try:
+        (tmp / "build.out").write_text(
+            "Error! E2028: data_fdps_thing is an undefined reference\n",
+            encoding="latin-1")
+        (tmp / "build2.out").write_text("creating a DOS/4G executable\n",
+                                        encoding="latin-1")
+        d = diagnostics(tmp)
+        rows.append(("expected undefined does not fail the gate",
+                     not d["errors"] and not d["undefined"]
+                     and d["stubbed"] == ["data_fdps_thing"], json.dumps(d)))
+        (tmp / "build2.out").write_text(
+            "Error! E2028: mystery_symbol is an undefined reference\n",
+            encoding="latin-1")
+        d = diagnostics(tmp)
+        rows.append(("undefined after stubs does fail the gate",
+                     d["undefined"] == ["mystery_symbol"], json.dumps(d)))
+    finally:
+        shutil.rmtree(str(tmp), ignore_errors=True)
     return rows
 
 

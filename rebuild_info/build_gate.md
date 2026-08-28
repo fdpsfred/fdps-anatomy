@@ -12,7 +12,7 @@
 | --- | --- |
 | build | 產出執行檔存在，且建置流程有完成標記（三訊號結束偵測，見 [`build_pipeline.md`](build_pipeline.md)） |
 | errors | `Error!` 行 0 個，且每個 translation unit 的摘要行回報 0 errors |
-| undefined | 連結器的未解析符號 0 個 |
+| undefined | 連結器的未解析符號 0 個。`emittest` 連結兩次，這一項判的是**第二次**——第一次刻意不帶 stub，它報出來的是還沒 emit 的資料與 function，是清單不是錯誤（[`emit_pipeline.md`](emit_pipeline.md)） |
 | warnings | 出現任何**基準值沒記錄過的警告**就不過。比對的是警告文字不是數量，換掉一個警告不會蒙混過關 |
 | equivalence | 產出與基準值的關係落在下表的前三級 |
 

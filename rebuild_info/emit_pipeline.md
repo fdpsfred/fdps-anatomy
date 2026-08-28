@@ -24,9 +24,34 @@
 
 **判定寫檔，只回傳摘要。** 完整的判定寫進 `workspace/code_emit/verdicts/<addr>.emit.json` 與 `.review.json`，回傳給 workflow 的只有約 200 byte。「這一項做完了沒」由讀得到檔案的下一個角色回報，不採信寫檔者自己的宣稱。
 
+## 順序是 callee 先於 caller
+
+工作清單不照位址排，照 call graph 的拓樸序排：一支 function 的 callee 全部先 emit 完，才輪到它。順序由 `tools/code_emit/emit_order.py` 從 call graph 算出來，`next_batch.py` 照著發。
+
+理由是測試的可信度。還沒 emit 的 callee 在連結時被填成回傳 0 的 stub（見下節），此時替 caller 寫的測試量到的是 stub 而不是真的 callee；照位址排會讓幾乎每支 function 都處在這個狀態。實測 514 支排完只剩 **11 對** caller 早於 callee，全部來自唯一一個 10 支 function 的環——環沒有 callee-first 的排法，這是定義使然，不是排序沒排好。
+
+環裡的成員與那 11 對會被明白告訴 emitter：哪些 callee 現在還是 stub，測試就不准斷言依賴它們回傳值的東西。
+
+## 資料還沒 emit 之前怎麼連結
+
+**編譯只要宣告，連結才要定義。** 全域資料的真值是票 23 的產物，但票 22 每一輪都要連結得起來，所以建置**連結兩次**：
+
+| | 帶什麼 | 產出 |
+| --- | --- | --- |
+| 第一次 | 只有 `src/` 與 `tests/` 的物件 | 未定義符號清單 → `workspace/code_emit/undefined.json` |
+| 第二次 | 加上自動產生的零填充 stub 模組 | 必須零未解析符號 |
+
+第一次報出來的未定義符號**是預期產物，不是失敗**——它就是「已 emit 的程式碼要、而還沒有人定義」的完整集合，也就是**票 23 的權威工作清單**。它每次建置重新產生，所以會隨進度自己縮短，而且永遠不可能與程式碼不一致。
+
+stub 模組由 `tools/code_emit/gen_stubs.py` 產生：資料照票 17 的型別與大小宣告（型別只為了對齊，內容一律是零），還沒 emit 的 function 給一支回傳 0 的空殼。**它不進 `src/`**，每次建置從頭產生、落在暫存區——stub 是「還沒有人下判斷」，放進 `src/` 就與真的 emit 出來的定義分不開了。
+
+三類符號 `gen_stubs.py` 拒絕 stub，直接讓建置失敗：routing 不認得的名字（拼錯，或連結指令列漏了程式庫）、routing 標記為不 emit 的符號（字串字面值、區域陣列初值、switch 表——它們該在使用它的 function 裡面）、以及 `src/` 已經定義過的符號。
+
+**stub 看不見的那一面：** 一個拼對了但拿錯的全域名字會被照樣 stub 成零，而零看起來很像一個合理的答案。這一類只有 reviewer 從 assembly 讀得出來，閘門讀不出來。
+
 ## emit 的 gate
 
-`python tools/build_gate/gate.py check --target emittest`。`emittest` 目標把 `src/` 的全部生產程式碼與 `tests/` 的全部測試編譯連結成一個 DOS/4G 映像並在 DOSBox-X 裡實際執行。通過的條件是**零錯誤、零未解析符號、沒有基準值未記錄過的警告、全部測試通過**。
+`python tools/build_gate/gate.py check --target emittest`。`emittest` 目標把 `src/` 的全部生產程式碼與 `tests/` 的全部測試編譯連結成一個 DOS/4G 映像並在 DOSBox-X 裡實際執行。通過的條件是**零錯誤、零未解析符號、沒有基準值未記錄過的警告、全部測試通過**。「零未解析符號」判的是第二次連結，第一次的那份是清單不是錯誤。
 
 這個目標**不做映像等價比對**。它的內容按設計每 emit 一支 function 就變一次，拿它比對基準值只會每次都紅、每次都被推進，那是一個被訓練成永遠說 yes 的閘門。判定欄位因此顯示 `not compared`，理由與其他目標的差別見 [`build_gate.md`](build_gate.md)。
 
@@ -73,6 +98,9 @@ B、E、H 三類的共同症狀是「數值或指標讀到不相干的東西」�
 | 涵蓋政策 | 風險導向：數值計算、分支結構、狀態轉移，以及任何用到「CALL 之後的回傳值」的地方必須測；純繪圖副作用可延後並註明 |
 | 期望值來源 | 攻略站數值 > Ghidra emulator 對純計算取得的 ground truth > 從 assembly 手推。**禁止拿 emit 出來的 C 自己的行為當期望值**——那種測試只證明程式碼等於它自己 |
 | 真實遊戲檔 | 要讀遊戲檔的測試必須讀真檔：把 8.3 檔名列進 `tests/gamefile.lst`，建置腳本會把它暫存到執行目錄。捏造結構假檔證明不了任何事 |
+| 不准斷言 stub | 全域資料在票 23 之前一律是零、還沒 emit 的 callee 一律回傳 0。**任何期望值取決於這兩者的斷言都不成立**——它今天會過，等真值落地那天變紅，而那是最糟的發現時機。行為由靜態表決定的 function 在測試內自備局部 fixture 表，不得為了測試提前 emit 該符號的真值 |
+
+`src/fdpstype.h` 的 23 個遊戲 struct 由 `tests/fdpstype.c` 逐欄檢查：每個 struct 的 `sizeof` 與每個欄位的 `offsetof` 都對照 `ghidra_snapshot/data_types.txt` 記的偏移。期望值來自快照而不是標頭，所以它證明的是「編出來的佈局等於原版的佈局」，不是「標頭等於它自己」。兩個檔都是 `tools/code_emit/gen_types.py` 的產生物，不手改。
 
 **`__LINE__` 在 `CHECK_EQ` 裡不可用。** wcc386 10.0a 只有在巨集呼叫位於行首時給出正確的行號；跟在同一行其他 token 後面時給的是前處理後串流的行號，會落到檔案結尾之外。所以失敗訊息用「測試名稱＋該測試內的第幾個檢查」定位，不用行號。
 

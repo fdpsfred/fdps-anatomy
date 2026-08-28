@@ -124,6 +124,16 @@ TEST_SUITES = [
     {"name": "code_emit.selftest",
      "argv": ["tools/code_emit/build_emit.py", "selftest"],
      "needs": (), "target": None},
+    {"name": "code_emit.stubs",
+     "argv": ["tools/code_emit/gen_stubs.py", "--selftest"],
+     "needs": (), "target": None},
+    # Not a selftest but a staleness check: src/fdpstype.h and tests/fdpstype.c
+    # are generated from the Ghidra snapshot, and a layout fixed in Ghidra but
+    # not regenerated here would leave the build compiling against offsets the
+    # database no longer claims.
+    {"name": "code_emit.types",
+     "argv": ["tools/code_emit/gen_types.py", "--check"],
+     "needs": (), "target": None},
     {"name": "fdps_build.run",
      "argv": ["tools/fdps_build/build_min.py", "run"],
      "needs": ("dosbox", "disc"), "target": "smoke"},
