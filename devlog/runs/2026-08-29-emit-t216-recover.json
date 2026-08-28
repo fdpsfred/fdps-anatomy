@@ -1,0 +1,44 @@
+{
+  "batch": "t216-recover",
+  "attempted": 1,
+  "committed": 1,
+  "skipped": 0,
+  "unfinished": 0,
+  "never_reached": 0,
+  "cut_short": [],
+  "recovered": [
+    {
+      "addr": "000109f0",
+      "name": "fdps_collect_targets_in_area",
+      "since": "2026-08-29 01:20"
+    }
+  ],
+  "stopped": null,
+  "stop_detail": "",
+  "ended_early": null,
+  "splits": [],
+  "remaining_at_start": 513,
+  "rescan": [
+    {
+      "addr": "000109f0",
+      "name": "fdps_collect_targets_in_area",
+      "changed": false,
+      "resolved": 0,
+      "still_open": 2,
+      "note": "Rescan of 000109f0 fdps_collect_targets_in_area. Neither open issue could be settled honestly, so emit_issues.json was left byte-identical (no write) and no code was touched.\n\nNeighbour route gave nothing: workspace/code_emit/verdicts/ holds only 000109f0.{emit,review}.json and 000160e0.{emit,review}.json (an unrelated menu function). The sole caller fdps_map_cursor_select_loop, the sibling fdps_collect_targets_in_range, fdps_build_map_unit_array, fdps_deploy_wave and gamedata.c all have no verdict file yet, so the contracts both concerns hang on are still unwritten.\n\nThree sources re-read anyway (plate, disassemble_function, decompile_function at 000109f0). The emitted src/aitarget.c still matches the assembly: byte store MOV AL,byte ptr [EBP-0x1c] / MOV byte ptr [EDX],AL at 00010afb-00010afe with EDX = out_indices + match count, guard CMP [EBP+0x20],0 / JZ 00010b00 covering only the store and not the INC at 00010b03, exclusive JL at 00010a81. No blocking finding, nothing to send back as a real emit round.\n\nIssue 1 (single-byte unit index in out_indices) -- advanced but NOT settled. The literal question the entry asks (\"capacity of the block behind data_fdps_map_unit_array_ptr\") is in fact already answered by Ghidra's own global plate at 00069cd8, which I read in ghidra_snapshot/comments.txt:25583: the block is never a fixed buffer -- fdps_build_map_unit_array mallocs DAT_00064118 * 0x50 and seeds the count from it, fdps_deploy_unit reallocs to (count + 1) * 0x50, fdps_load_field_chapter_resources adopts the 0xa00-byte (32-record) roster block, and only fdps_load_savegame allocates a fixed 0x1e00 = 96 records. So capacity always tracks the live count, and the truncation question reduces to the count's ceiling. That is exactly what is still missing, and the plate at 00064118 (comments.txt:25129) says it is not bounded below 256 by anything read so far: the seed is a byte out of the map file, \"runs 0..255 in practice\", and data_fdps_map_unit_count \"grows past it as fdps_deploy_wave appends scripted units\". Still needed: the maximum reachable data_fdps_map_unit_count -- per-chapter deployment totals (chapters/ holds only _index.md today) or the emit of fdps_build_map_unit_array / fdps_deploy_wave / fdps_deploy_unit. Worth recording for whoever picks it up: the savegame path's fixed 96-record block is suggestive of a 96 ceiling for any saveable battle, but a fixed allocation is not a proof of a bound, and I will not manufacture one. Note also that there is no equivalence exposure either way -- the emitted C truncates exactly where the original does, and the one caller passes NULL (PUSH 0x0 at 0002b7c4) -- so this remains a reachability/coverage note, not a correctness risk.\n\nIssue 2 (should gamedata.c define data_fdps_map_unit_array_ptr as struct fdps_unit_record * instead of unsigned char *) -- not settled, and nothing has moved. I checked the canon that could have pre-empted it: rebuild_info/code_layout.md:3 makes routing.json the register of which .c/.h owns each symbol but says nothing about a global's C type; code_layout.md:66-70 only fixes gamedata.h as the owner and sanctions creating it before gamedata.c; emit_pipeline.md:46 and tools/code_emit/_index.md:14 say gen_stubs.py takes the type from routing.json, which is the /byte * that src/gamedata.h already matches. So the header and the stub still cannot disagree, and the choice genuinely belongs to whoever emits gamedata.c in ticket 23. Missing: a gamedata.c verdict.\n\nNo ghidra_fixes proposed; no Ghidra write made; Ghidra answered every call first time."
+    }
+  ],
+  "results": [
+    {
+      "addr": "000109f0",
+      "name": "fdps_collect_targets_in_area",
+      "status": "committed",
+      "rounds": 1,
+      "commit": "b4136c4 fdps_collect_targets_in_area @ 000109f0",
+      "ghidra_applied": 0,
+      "issues": 4,
+      "out_tok_k": 106
+    }
+  ],
+  "out_tok_k": 123
+}

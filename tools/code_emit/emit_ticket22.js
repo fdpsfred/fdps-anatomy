@@ -408,6 +408,30 @@ settled layouts and it is complete. Include it; do not restate a struct, do not
 declare a local look-alike, and do not "fix" a field. If a layout there really
 is wrong, that is a ghidra_fixes entry against the struct, not an edit here.
 
+NOTHING OUTSIDE THE PIPELINE'S OWN PATHS MAY BE LEFT UNCOMMITTED. The recovery
+stage that starts every run reads the working tree to decide what a killed
+session left behind, and it can only tell wreckage from work by the path. These
+six, and nothing else, may be dirty at any moment:
+
+    src/  tests/  tools/code_emit/data/  ghidra_snapshot/
+    tools/code_emit/build_routing.py  rebuild_info/code_layout.md
+
+Every one of them is produced by a stage of this pipeline and can be thrown away
+and made again. Anything dirty outside that set stops the next run and calls for
+a human, which is exactly what this pipeline exists not to need.
+
+So if the work you were given makes you change something else -- a build script,
+the gate, another knowledge-base page -- COMMIT THAT CHANGE BY ITSELF,
+immediately, before you carry on, with its own subject saying what it is and why.
+Do not leave it sitting in the tree and do not let it ride into the function's
+landing commit: that commit says "this function, reviewed and gated", and a gate
+change inside it is neither reviewed as one nor findable afterwards. Two honest
+commits, never one dishonest one.
+
+This is about a change INCIDENTAL to your task. A stage whose given task is
+those files -- the split stage owns routing and code_layout.md -- commits its own
+work in its own commit, which is the same rule and not an exception to it.
+
 THE DATA IS NOT EMITTED YET, AND THAT IS FINE. Ticket 23 writes the real
 contents of every data_fdps_* global; until then the build defines them
 zero-filled so the program links. So: declare what you read, read it, and never
@@ -609,16 +633,22 @@ function reviewerPrompt(fn, round) {
     '   not show untracked files, and the first function to land in a new module',
     '   creates every one of its files new -- without the intent-to-add, your view of',
     '   "what changed this round" would be empty for exactly the code you are here to',
-    '   review. It stages nothing; the bookkeeper stages for real later.',
+    '   review. It stages no content -- the bookkeeper stages for real later -- but it',
+    '   does put the path in the index, which is why the cleanup and recovery stages',
+    '   unstage before they discard anything.',
     '   One function is in flight at a time and every approved function is its own',
-    '   commit, so everything after HEAD belongs to this function. Review all of it,',
-    '   including any knowledge-base or comment changes.',
+    '   commit, so everything after HEAD belongs to this function. Review all of it.',
     '   One modified file is expected and is not the emitter\'s work to review:',
     '   tools/code_emit/data/emit_state.json, whose entry for ' + fn.addr + ' now says',
     '   in_flight. That is the marker the pipeline leaves so a killed session can be',
     '   recovered from. Confirm it says in_flight for this address and nothing else in',
     '   that file changed; if it names a different address, or if some other function\'s',
     '   entry moved, block on it -- somebody is standing in somebody else\'s tree.',
+    '   Anything else uncommitted -- a build script, the gate, a knowledge-base page --',
+    '   is a blocking finding on its own. The emitter is required to commit such a change',
+    '   by itself before carrying on, precisely so it does not end up inside this',
+    '   function\'s commit and so the next run\'s recovery stage is not left guessing',
+    '   whose it was. Block on it and name the path.',
     '',
     'B. Read the three sources for ' + fn.addr + ' yourself.',
     '',
@@ -752,12 +782,32 @@ function bookkeepPrompt(fn, hasGhidraFixes, rounds) {
     '   writing and check the encoding survived -- this is a Traditional Chinese Windows',
     '   machine and an unspecified encoding produces mojibake.',
     '',
-    '5. Commit. Stage the source, the tests, the state files, and the Ghidra snapshot if',
-    '   you re-exported it:',
+    '5. Strays FIRST, before you stage anything. Run  git status --porcelain  and look',
+    '   for anything outside src/, tests/, tools/code_emit/data/ and ghidra_snapshot/ --',
+    '   a build script, the gate, a knowledge-base page an earlier stage had to touch.',
+    '',
+    '   Do NOT sweep it into the function\'s commit. That commit says "this function,',
+    '   reviewed and gated", and something that was neither reviewed nor gated as part of',
+    '   it does not belong under that subject, where nobody will ever find it again.',
+    '   Leaving it uncommitted is not an option either: the next run\'s recovery stage',
+    '   would see a dirty path outside the pipeline\'s own and stop for a human.',
+    '',
+    '   So commit it by itself, NOW, while nothing else is staged, naming the file',
+    '   explicitly so the index cannot smuggle anything in:',
+    '     git add <path> && git commit -- <path>',
+    '   with an honest subject in Traditional Chinese saying what it is and why it had to',
+    '   change, and the same Co-Authored-By trailer. The pathspec on the commit is not',
+    '   decoration: git commits the index, not your intention, so a bare  git commit',
+    '   after the function is staged would land the whole function under the stray file\'s',
+    '   subject and leave nothing for the real commit. Doing this before any  git add',
+    '   src  is the other half of the same protection. Report the path in problems.',
+    '',
+    '6. Now stage the function -- the source, the tests, the state files, and the Ghidra',
+    '   snapshot if you re-exported it -- and NOTHING ELSE:',
     '     git add src tests tools/code_emit/data ghidra_snapshot',
     '   Check with  git --no-pager diff --staged --stat  that the range is this function',
-    '   and nothing else, and with  git status --porcelain  that no tracked file was left',
-    '   behind. Then commit with this subject:',
+    '   and nothing else, and with  git status --porcelain  that nothing is left over.',
+    '   Then commit with this subject:',
     '',
     '     emit: ' + fn.name + ' @ ' + fn.addr + '，reviewer 通過、build gate 通過',
     '',
@@ -765,14 +815,14 @@ function bookkeepPrompt(fn, hasGhidraFixes, rounds) {
     '   line, then:',
     '     Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>',
     '',
-    '6. Report the commit as commit_line, built as  <hash> ' + fn.name + ' @ ' + fn.addr,
+    '7. Report the commit as commit_line, built as  <hash> ' + fn.name + ' @ ' + fn.addr,
     '   where <hash> comes from  git --no-pager log --format=%h -1  . Do NOT pipe the',
     '   commit subject itself back: it is Traditional Chinese, this is a Traditional',
     '   Chinese Windows machine, and reading it through a console pipe turns it into',
     '   mojibake that then gets archived as the permanent record of this run.',
     '   Also confirm the tree is clean:  git status --porcelain  must print nothing.',
     '',
-    '7. Report how long the target file has become:',
+    '8. Report how long the target file has become:',
     '     wc -l src/' + fn.target,
     '   as target_lines. It decides nothing here; the workflow watches the budget.',
     '',
@@ -790,11 +840,17 @@ function abandonPrompt(fn, why, terminal) {
     'would land inside somebody else\'s diff and be committed as theirs.',
     '',
     '1. Look at what is there first:  cd ' + REPO + ' && git status --porcelain && git --no-pager diff --stat HEAD -- src tests',
-    '2. Discard the working-tree changes under src/ and tests/ only:',
+    '2. Discard the working-tree changes under src/ and tests/ only, all three commands:',
+    '     git reset -q -- src tests',
     '     git checkout -- src tests',
     '     git clean -fd src tests            (the files the emitter created new)',
+    '   The reset is not optional. The reviewer runs  git add -N -- src tests  so its',
+    '   diff shows new files, and an intent-to-add file is in the index: checkout',
+    '   truncates it to zero bytes rather than removing it and clean skips it as tracked,',
+    '   leaving a zero-byte .c for the next function\'s bookkeeper to commit as its own.',
     '   Do NOT touch workspace/ -- the verdict files are the record of what went wrong',
-    '   and the next run reads them. Do not touch anything already committed.',
+    '   and the next run reads them. Do not touch anything already committed: this reset',
+    '   takes a pathspec and only unstages, and there is no other reset here.',
     '3. In tools/code_emit/data/emit_state.json the entry for "' + fn.addr + '" says',
     '   in_flight, uncommitted, left there by the emitter. Set it to status',
     '   "' + (terminal ? 'skip' : 'failed') + '", drop in_flight_since, and put the reason in note. Write it with',
@@ -864,37 +920,65 @@ function recoverPrompt() {
     '   If it prints nothing, the tree is clean. Skip to step 4 -- there may still be',
     '   an in_flight entry from a run that died before it wrote any code.',
     '',
-    '2. Classify every line it printed. Exactly three paths are yours to clean:',
-    '     src/...                                    -- emitted code from the dead run',
-    '     tests/...                                  -- its test',
-    '     tools/code_emit/data/emit_state.json       -- its in-flight marker',
+    '2. Classify every line it printed. These six paths, and only these, are the ones',
+    '   this pipeline\'s own stages write, so they are the ones you may clean:',
+    '     src/                              emitted code from the dead run',
+    '     tests/                            its test',
+    '     tools/code_emit/data/             the in-flight marker and the issue log',
+    '     ghidra_snapshot/                  a re-export the bookkeeper had started',
+    '     tools/code_emit/build_routing.py  the split stage\'s routing edit',
+    '     rebuild_info/code_layout.md       the split stage\'s file table',
     '   Ignored, because git does not track them at all: workspace/ and anything else',
     '   already covered by .gitignore. They will not appear in --porcelain; if one',
     '   somehow does, leave it alone and do not count it as out of bounds.',
     '',
-    '   ANY OTHER PATH IS OUT OF BOUNDS. A dirty rebuild_info/, ghidra_snapshot/,',
-    '   tools/ file other than emit_state.json, docs/, devlog/ -- that is not this',
-    '   pipeline\'s wreckage, and guessing what it was for is how somebody\'s unrelated',
-    '   afternoon gets deleted. In that case: change NOTHING, discard NOTHING, set',
-    '   out_of_bounds true, list the paths verbatim, and return. The run stops.',
+    '   ANY OTHER PATH IS OUT OF BOUNDS. A dirty devlog/, docs/, another rebuild_info/',
+    '   page, another tools/ script -- that is not this pipeline\'s wreckage, and',
+    '   guessing what it was for is how somebody\'s unrelated afternoon gets deleted. In',
+    '   that case: change NOTHING, discard NOTHING, set out_of_bounds true, list the',
+    '   paths verbatim, and return. The run stops.',
     '',
-    '3. Discard the residue, and only under those two directories:',
-    '     git checkout -- src tests',
-    '     git clean -fd src tests            (the new files the dead run created)',
+    '3. Read tools/code_emit/data/emit_state.json BEFORE you discard anything -- step 4',
+    '   needs what is in it now, and step 3 is about to revert it.',
+    '',
+    '   Then discard the residue, across exactly those six paths and no others:',
+    '     git reset -q -- src tests tools/code_emit/data ghidra_snapshot tools/code_emit/build_routing.py rebuild_info/code_layout.md',
+    '     git checkout -- src tests tools/code_emit/data ghidra_snapshot tools/code_emit/build_routing.py rebuild_info/code_layout.md',
+    '     git clean -fd src tests',
+    '   The  git reset  is not optional and it is not redundant. The reviewer stage runs',
+    '   git add -N -- src tests  so that untracked new files show up in its diff, and a',
+    '   file that is intent-to-add is IN THE INDEX: checkout truncates it to zero bytes',
+    '   instead of removing it, clean skips it as tracked, and you are left with a',
+    '   zero-byte .c that the next function\'s bookkeeper commits as its own. Unstage',
+    '   first and both commands work as expected.',
+    '',
     '   Never workspace/: the verdict files there are the record of what the dead run',
     '   had worked out, and the re-run reads them. Never anything already committed --',
-    '   no reset, no revert, no amend. Every landed function is somebody\'s finished',
-    '   work and this stage has no opinion about any of it.',
+    '   no revert, no amend, and no reset that moves HEAD (the reset above is a pathspec',
+    '   reset, which only unstages). Every landed function is somebody\'s finished work',
+    '   and this stage has no opinion about any of it.',
     '',
-    '4. Read tools/code_emit/data/emit_state.json and find every entry whose status is',
+    '   If ghidra_snapshot/ was among the dirty paths, the Ghidra database itself may',
+    '   have been changed and saved before the kill, in which case reverting the text',
+    '   snapshot leaves it describing a database that no longer exists. So after the',
+    '   revert, re-export it rather than trusting either version:',
+    '     run_ghidra_script ' + REPO + '\\tools\\ghidra_snapshot\\ExportGhidraSnapshot.java',
+    '     ToolSearch "select:mcp__ghidra__run_ghidra_script"',
+    '   Whatever comes out is the truth about the database and goes into the commit in',
+    '   step 6. Byte-identical output means nothing had been changed, and there will',
+    '   simply be no diff. Only do this if ghidra_snapshot/ was actually dirty.',
+    '',
+    '4. In the copy of tools/code_emit/data/emit_state.json you read in step 3 -- the',
+    '   pre-revert one -- find every entry whose status is',
     '   "in_flight". That is the marker each function writes before its emitter starts,',
     '   and it is left uncommitted on purpose, so an entry still saying it is the one',
     '   line that survives a kill saying which function was flying. Normally there is',
     '   exactly one; zero and several are both possible and neither is an error.',
     '',
-    '   For each one, set status "interrupted", keep the in_flight timestamp in a field',
-    '   named in_flight_since if it is there, and put a one-line note saying the run was',
-    '   killed mid-flight and the work was discarded. Report addr, name and timestamp.',
+    '   For each one, write it back into the reverted file with status "interrupted",',
+    '   keeping the in_flight timestamp in a field named in_flight_since if it was there,',
+    '   and a one-line note saying the run was killed mid-flight and the work was',
+    '   discarded. Report addr, name and timestamp.',
     '   "interrupted" is not a terminal status, so next_batch.py hands the address',
     '   straight back out on the worklist below -- which is the intent. Do not mark it',
     '   failed: nothing about the function was judged, it just never finished.',
@@ -906,8 +990,9 @@ function recoverPrompt() {
     '   -- the boundary is the path, not who owns it -- and set residue_without_marker',
     '   true so the report says the wreckage had no name on it.',
     '',
-    '6. Commit, only if step 4 changed the state file:',
-    '     git add tools/code_emit/data/emit_state.json && git commit',
+    '6. Commit, if step 4 changed the state file or the re-export in step 3 changed the',
+    '   snapshot:',
+    '     git add tools/code_emit/data/emit_state.json ghidra_snapshot && git commit',
     '   subject:  emit: 前一輪中斷的殘留已清除，<n> 支重回工作清單',
     '   then a blank line, one line in Traditional Chinese naming the functions and what',
     '   was discarded, a blank line, and',
@@ -1248,7 +1333,16 @@ for (let i = 0; i < fns.length && !stopped && !endedEarly; i++) {
             addr: fn.addr, name: fn.name, status: 'committed', rounds: rounds,
             commit: book.commit_line, ghidra_applied: book.ghidra_applied || 0,
             issues: book.issues_logged || 0, out_tok_k: spentK(fnStart),
+            // Carried on the success row too. This is where the bookkeeper
+            // reports a change it had to commit out of band -- a gate fix, a
+            // build script -- and that commit is invisible in this function's
+            // own commit by design, so if the note is dropped here nothing
+            // anywhere records that it happened.
+            problems: book.problems || undefined,
           })
+          if (book.problems) {
+            log('  out of band: ' + book.problems)
+          }
           if ((book.issues_logged || 0) > 0
               || (verdict.open_issues || 0) > 0
               || (emitted.open_issues || 0) > 0) {
@@ -1330,13 +1424,18 @@ for (let i = 0; i < fns.length && !stopped && !endedEarly; i++) {
       } catch (e) {
         log('  cleanup THREW: ' + String((e && e.message) || e))
       }
-      if (cleaned && cleaned.committed) {
+      // Both halves, not just the commit. A cleanup that recorded the state but
+      // left the tree dirty is the failure this stage exists to prevent: the
+      // next function's bookkeeper stages src/ and tests/ wholesale.
+      if (cleaned && cleaned.committed && cleaned.tree_clean !== false) {
         log('  cleanup: tree cleaned, state recorded as ' + outcome)
       } else {
         // Never report this as done. The next function's bookkeeper stages
         // src/ and tests/ wholesale, so a half-emitted function left behind
         // gets committed as somebody else's work.
-        const detail = (cleaned && cleaned.problems) || 'the cleanup agent returned nothing'
+        const detail = (cleaned && cleaned.problems)
+          || (cleaned && cleaned.tree_clean === false ? 'the cleanup left the tree dirty' : null)
+          || 'the cleanup agent returned nothing'
         log('  cleanup FAILED: ' + detail
           + ' -- src/ and tests/ may still hold this function. Nothing is lost: the'
           + ' in_flight marker is still in emit_state.json, so the next run\'s Recover'
@@ -1481,6 +1580,21 @@ Sources you may read for detail:
 
 Also write the run report to ${REPO}\\devlog\\runs\\<today>-emit-${LABEL}.json,
 same date, verbatim from the statistics below, UTF-8.
+
+Then COMMIT BOTH FILES, naming them explicitly:
+
+  git add devlog && git commit -- devlog
+
+subject  devlog: emit ${LABEL} 一批的記錄  , a blank line, one line in Traditional
+Chinese on what the batch did, a blank line, and the
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com> trailer.
+
+This is not tidiness. The next run of this workflow starts by looking at the
+working tree to work out what a killed session left behind, and it can only tell
+wreckage from work by the path -- devlog/ is outside the paths it owns, so an
+uncommitted devlog stops the next batch dead and calls for a human. A batch that
+ends by leaving the tree dirty has broken the thing this pipeline is for. Check
+with  git status --porcelain  that it prints nothing, and say so in your summary.
 
 Run statistics:
 ${JSON.stringify(stats, null, 2)}

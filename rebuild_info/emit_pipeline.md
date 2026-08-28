@@ -122,9 +122,29 @@ B、E、H 三類的共同症狀是「數值或指標讀到不相干的東西」�
 
 **唯一保證在「session 已經死過一次」之後還執行得到的時機，是下一次開跑的第一件事**，所以收拾放在那裡：取工作清單之前先看工作區，丟掉殘骸，把對應的 function 記成 `interrupted` 送回工作清單，然後才開始。
 
-**能碰的東西由路徑決定，且不容協商**：`src/`、`tests/`，以及 `emit_state.json` 裡的 in-flight 足跡，就這三個。`workspace/` 不能碰——判定檔是中斷現場的紀錄，重跑要讀它；已經 commit 的東西不能碰，不 reset、不 revert、不 amend；其他資料夾髒了就**停下來報告**，那不是這條 pipeline 的殘骸，猜它是什麼就是在刪別人的一個下午。`src/`／`tests/` 髒了卻沒有任何 `in_flight` 認領它，照樣丟——界線是路徑不是歸屬——但要在報告裡講明殘骸沒有名字。
+**能碰的東西由路徑決定，且不容協商。** 界線就是這條 pipeline 自己的各段會寫的那六個路徑，每一個都可以丟掉重做：
+
+```
+src/  tests/  tools/code_emit/data/  ghidra_snapshot/
+tools/code_emit/build_routing.py  rebuild_info/code_layout.md
+```
+
+`workspace/` 不能碰——判定檔是中斷現場的紀錄，重跑要讀它；已經 commit 的東西不能碰，不 revert、不 amend、不移動 HEAD；界線外的路徑髒了就**停下來報告**，那不是這條 pipeline 的殘骸，猜它是什麼就是在刪別人的一個下午。`src/`／`tests/` 髒了卻沒有任何 `in_flight` 認領它，照樣丟——界線是路徑不是歸屬——但要在報告裡講明殘骸沒有名字。
+
+`ghidra_snapshot/` 是唯一不能單純還原的一個：中斷前 bookkeeper 可能已經改了 Ghidra 並存檔，把文字快照還原成 HEAD 只會讓它描述一個不存在的資料庫。所以那一項髒的時候是**重新匯出**而不是還原，匯出來什麼就是什麼。
+
+**清理要先 `git reset -- <路徑>`。** reviewer 為了讓新檔出現在 diff 裡會跑 `git add -N -- src tests`，而 intent-to-add 的檔案在 index 裡：`git checkout --` 只會把它截成 0 byte 而不是移除，`git clean -fd` 又把它當 tracked 而跳過，結果留下一個 0 byte 的 `.c` 被下一支 function 的 bookkeeper commit 成自己的。三個指令要湊齊：pathspec 的 `reset`（只 unstage，不動 HEAD）、`checkout`、`clean`。
 
 **足跡故意不 commit。** 每支 function 的 emitter 動任何東西之前先把該筆寫成 `in_flight` 並帶上時間，這一筆留在工作區不落 commit：落地 commit 會把它推到 `committed`，所以它永遠不會活過一支跑完的 function；反過來說，開跑時還讀得到 `in_flight` 就代表上一輪死在那一支。這是「工作區髒」之外唯一的線索，而工作區正是要被清掉的東西。`in_flight` 與 `interrupted` 都不是終態，重發規則與 `pending` 完全相同——那一支從頭到尾沒有被判定過任何事，沒有東西需要保留。
+
+**界線是雙向的：pipeline 自己也只准把那六個路徑弄髒。** 收拾段靠路徑分辨殘骸與工作，所以任何一段做出界線外的改動——建置腳本、gate、其他知識庫頁、devlog——都必須**當場單獨 commit 掉**，不能留在工作區，也不能讓它搭上 function 的落地 commit。留著會讓下一輪的收拾段判定成界線外而停下來等人，正好是這條 pipeline 存在的目的的反面；搭順風車則是把一個沒被 review 也沒被 gate 過的改動塞進一個寫著「reviewer 通過、build gate 通過」的 commit 裡，之後沒有人找得到它。兩個誠實的 commit，不要一個不誠實的。
+
+這條對收尾那一段同樣成立：**批次結束寫的 devlog 與 run report 要自己 commit 掉**，否則一批跑完就留下界線外的髒路徑，下一批一開跑就停。
+
+實作上有兩個順序陷阱：
+
+- **界線外的東西要在 `git add src tests …` 之前先處理掉，而且 commit 要帶 pathspec。** git commit 的是 index 不是你的意圖：function 已經 staged 之後再 `git add <那個檔> && git commit`，會把整支 function 一起 commit 在那個檔的標題底下，然後真正的落地 commit 因為「沒有東西可 commit」而失敗。寫成 `git add <path> && git commit -- <path>`，並且擺在 stage function 之前。
+- **判定「清乾淨了」要同時看 commit 與工作區。** 只確認狀態檔 commit 成功、不看工作區是否還髒，等於沒清——殘留會被下一支 function 的 `git add src tests` commit 成它的。
 
 **收尾報告要分得出兩種沒落地。** 「還沒輪到」是 run 在它之前就停了，什麼都沒動、沒有東西要清；「跑到一半被中斷」是工作區裡有東西，要靠下一輪的收拾段處理。合成一個數字就是讓後者被當成前者，於是沒有人去看工作區。
 
