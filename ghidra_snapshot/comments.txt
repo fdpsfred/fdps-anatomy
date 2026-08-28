@@ -1552,13 +1552,13 @@ Alignment padding: 3-byte lea eax,[eax+0] NOP form aligning next function to 4 b
 Returns the index of the first selectable entry of a four-entry menu, so the caller can put the menu cursor on it.
 
 Algorithm:
-Walks an index from 0 while it is below 4, testing cmd_disabled[index], and returns the first index whose entry is zero; falls out of the loop to return -1 when all four entries are non-zero. The four-entry bound is hard-coded, matching the 16-byte (four int) menu availability descriptors these menus use: FUN_000252b0 copies one from 0x00024d60 onto its stack and patches entry 1 before calling here, and fdps_battle_action_menu fills its own such array from the per-command legality probes. An entry of 0 means the command is selectable, non-zero means it is greyed out. The index doubles as the entry's position on the four-way menu -- 0 up, 1 left, 2 right, 3 down -- which is how fdps_menu_cursor_input_loop reads the same array when deciding which cursor moves are allowed.
+Walks an index from 0 while it is below 4, testing cmd_disabled[index], and returns the first index whose entry is zero; falls out of the loop to return -1 when all four entries are non-zero. The four-entry bound is hard-coded, matching the 16-byte (four int) menu availability descriptors these menus use: fdps_battle_item_menu copies one from 0x00024d60 onto its stack and patches entry 1 before calling here, and fdps_battle_action_menu fills its own such array from the per-command legality probes. An entry of 0 means the command is selectable, non-zero means it is greyed out. The index doubles as the entry's position on the four-way menu -- 0 up, 1 left, 2 right, 3 down -- which is how fdps_menu_cursor_input_loop reads the same array when deciding which cursor moves are allowed.
 
 Parameters:
   cmd_disabled -- pointer to four ints, one per menu entry, 0 selectable and non-zero greyed out. Only read, never written.
 
 Returns:
-  The index 0..3 of the first selectable entry, or -1 when every entry is disabled. FUN_000252b0 uses the value as the initial cursor index it hands to FUN_00016130 and to fdps_menu_cursor_input_loop.
+  The index 0..3 of the first selectable entry, or -1 when every entry is disabled. fdps_battle_item_menu uses the value as the initial cursor index it hands to fdps_menu_animate_open and to fdps_menu_cursor_input_loop.
 
 Pool: fdps  [no library match; single static caller is game code, and a fixed four-entry availability scan over a caller-supplied menu descriptor is application policy, not CRT or AIL]
 

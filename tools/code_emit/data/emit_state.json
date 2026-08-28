@@ -5,10 +5,10 @@
       "name": "fdps_menu_find_first_enabled_entry",
       "target": "menu.c",
       "body_size": "0x50",
-      "status": "pending",
-      "emitted_against": null,
+      "status": "committed",
+      "emitted_against": "0x50",
       "commit": null,
-      "rounds": 0,
+      "rounds": 1,
       "note": "Ticket 21's trial function: pure, argument-only, no globals and no callees, so the pipeline is exercised without also depending on ticket 23's data emit. Routing to menu.c is provisional until ticket 21.5."
     }
   }
