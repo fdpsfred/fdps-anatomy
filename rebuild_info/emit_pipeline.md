@@ -106,7 +106,7 @@ B、E、H 三類的共同症狀是「數值或指標讀到不相干的東西」�
 
 ## 工作狀態與續跑
 
-`tools/code_emit/data/emit_state.json` 是進度的正本，進版控。一個 function 一筆，`status` 依 `pending → emitted → reviewed → committed` 推進，`failed` 與 `skip` 是終態且必須出現在收尾報告裡。
+`tools/code_emit/data/emit_state.json` 是進度的正本，進版控。一個 function 一筆，`status` 依 `pending → in_flight → emitted → reviewed → committed` 推進，`failed` 與 `skip` 是終態且必須出現在收尾報告裡。只有 `committed` 與 `skip` 會讓 `next_batch.py` 把該位址從工作清單移除；其餘一律重發。
 
 **「已完成」不能只看狀態欄。** 每筆記下 emit 當時所依據的 Ghidra body size，續跑時與 [`ghidra_snapshot/functions.txt`](../ghidra_snapshot/_index.md) 比對；function 後來變了大小，舊的 emit 描述的是已經不存在的程式碼，該筆退休並重回工作清單。**沒有記下依據的那一筆也算過期**——「沒人寫下這是照哪一份程式碼做的」不是「程式碼沒變」的證據，當成證據就會讓那筆永遠被跳過。
 
@@ -115,6 +115,26 @@ B、E、H 三類的共同症狀是「數值或指標讀到不相干的東西」�
 **狀態檔裡沒有 commit 雜湊。** 雜湊沒辦法寫進產生它的那個 commit 裡，事後 `--amend` 補上去只會得到一個指向被丟棄物件的雜湊。落地 commit 的標題帶著位址，用 `git log --oneline --grep "@ <addr>"` 找。
 
 每一支通過的 function 是一個獨立的 commit，所以任何中斷最多只損失飛在半空的那一支。未通過的 function 由 workflow 清掉工作區的殘留並把狀態記成 `failed`——留著半成品的話，它會出現在下一支 function 的 diff 裡並被當成別人的改動 commit 掉。
+
+## 中斷復原：開跑前收拾，不是失敗時才收拾
+
+「最多只損失飛在半空的那一支」是對**下一次**的承諾，而它只有在 workflow 第一段先收拾工作區時才成立。撞到 usage limit 不會丟出任何腳本攔得到的例外，它是把 session 就地殺掉：失敗路徑上那個清工作區的 agent 從來沒有機會執行，半成品原封不動留在 `src/` 與 `tests/` 裡。下一支 function 的 reviewer 看到的 diff 混著前一支的殘骸，bookkeeper 的 `git add src tests` 把它一起 commit，而 commit 標題寫的是別人的名字——損失的不是一支，是兩支。
+
+**唯一保證在「session 已經死過一次」之後還執行得到的時機，是下一次開跑的第一件事**，所以收拾放在那裡：取工作清單之前先看工作區，丟掉殘骸，把對應的 function 記成 `interrupted` 送回工作清單，然後才開始。
+
+**能碰的東西由路徑決定，且不容協商**：`src/`、`tests/`，以及 `emit_state.json` 裡的 in-flight 足跡，就這三個。`workspace/` 不能碰——判定檔是中斷現場的紀錄，重跑要讀它；已經 commit 的東西不能碰，不 reset、不 revert、不 amend；其他資料夾髒了就**停下來報告**，那不是這條 pipeline 的殘骸，猜它是什麼就是在刪別人的一個下午。`src/`／`tests/` 髒了卻沒有任何 `in_flight` 認領它，照樣丟——界線是路徑不是歸屬——但要在報告裡講明殘骸沒有名字。
+
+**足跡故意不 commit。** 每支 function 的 emitter 動任何東西之前先把該筆寫成 `in_flight` 並帶上時間，這一筆留在工作區不落 commit：落地 commit 會把它推到 `committed`，所以它永遠不會活過一支跑完的 function；反過來說，開跑時還讀得到 `in_flight` 就代表上一輪死在那一支。這是「工作區髒」之外唯一的線索，而工作區正是要被清掉的東西。`in_flight` 與 `interrupted` 都不是終態，重發規則與 `pending` 完全相同——那一支從頭到尾沒有被判定過任何事，沒有東西需要保留。
+
+**收尾報告要分得出兩種沒落地。** 「還沒輪到」是 run 在它之前就停了，什麼都沒動、沒有東西要清；「跑到一半被中斷」是工作區裡有東西，要靠下一輪的收拾段處理。合成一個數字就是讓後者被當成前者，於是沒有人去看工作區。
+
+## 批次大小是呼叫者的決定
+
+workflow 不看自己的預算。它跑完呼叫者給的清單為止，停下來的理由只有三種：清單跑完、上游失效（[ADR-0007](../docs/adr/0007-workflow-automation-and-agent-context.md) 5.2／5.5）、外力中斷。
+
+理由是職責：呼叫者說要跑 40 支，workflow 依一個沒人要求它套用的門檻在第 12 支收手，是在回答沒有人問的問題。預算耗盡的正確表現是被外部殺掉，而上面那段收拾機制就是讓「被殺掉」變成可承受的東西。一批跑完由呼叫者檢查結果、修掉問題、直接呼叫下一批，全程不需要使用者介入。
+
+票 23 的 data emit workflow 自己寫，但照這一節做——[ADR-0007](../docs/adr/0007-workflow-automation-and-agent-context.md) 說不抽共用骨架，共用的是原則。
 
 ## 檔案落點
 

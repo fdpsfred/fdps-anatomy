@@ -8,7 +8,7 @@
 
 | 檔案 | 用途 |
 | --- | --- |
-| `emit_ticket22.js` | 票 22 的 Workflow 編排，遊戲本體全部 function。自己去問 `next_batch.py` 要工作清單，序列跑 emit → review → 修正迴圈 → gate → commit，超出行數預算時插入拆檔段，收尾做疑慮回掃與 devlog。錯誤處理含單項重試、上游失效偵測、gate 失敗的修復迴圈、未完成項目的工作區清理與記帳 |
+| `emit_ticket22.js` | 票 22 的 Workflow 編排，遊戲本體全部 function。開跑第一段先收拾上一輪被殺後留下的殘骸，再去問 `next_batch.py` 要工作清單，序列跑 emit → review → 修正迴圈 → gate → commit，超出行數預算時插入拆檔段，收尾做疑慮回掃與 devlog。錯誤處理含單項重試、上游失效偵測、gate 失敗的修復迴圈、未完成項目的工作區清理與記帳。不看自己的預算，跑完呼叫者給的數量為止 |
 | `emit_ticket21.js` | 票 21 的版本，工作清單由 `args` 帶入、沒有拆檔段。留著當該票的紀錄，新工作用票 22 那支 |
 | `build_emit.py` | 四個子命令。`build` 把 `src/` 與 `tests/` 全部編譯**連結兩次**成 `EMITTEST.EXE`；`run` 在 DOSBox-X 裡執行它並讀回測試紀錄；`all`（預設）依序跑兩者；`selftest` 不碰 DOSBox-X，驗證接線產生、紀錄解析與兩段式連結的判定 |
 | `gen_stubs.py` | 產生第二次連結用的零填充 stub 模組。輸入是第一次連結報出的未定義符號，型別與大小取自 `data/routing.json`。`--selftest` 驗型別對應與該拒絕的三類符號 |
@@ -51,6 +51,8 @@ Workflow({ scriptPath: "tools/code_emit/emit_ticket22.js",
 ```
 
 **可重跑**：`emit_state.json` 是進度的正本，每支通過的 function 各自一個 commit，所以任何中斷最多損失飛在半空的那一支。跑完一次就再呼叫一次，它會從 `next_batch.py` 拿到接下來的一批。
+
+被 usage limit 就地殺掉也一樣：下一次呼叫的第一段（Recover）自己丟掉 `src/`／`tests/` 的殘骸、把飛在半空的那一支從 `in_flight` 改成 `interrupted` 送回工作清單，不需要人先去 `git status`。界線與理由見 [`rebuild_info/emit_pipeline.md`](../../rebuild_info/emit_pipeline.md) 的「中斷復原」。`src/`／`tests/` 以外的地方髒了它會停下來報告而不是自行處理，那時才需要人。
 
 Call graph 改變後（新建或刪除 function）要重算順序：
 

@@ -43,6 +43,12 @@ ORDER = ROOT / "workspace" / "code_emit" / "emit_order.json"
 GRAPH = ROOT / "workspace" / "call_graph" / "graph.json"
 
 DONE = "committed"
+# Only two statuses take a function off the worklist.  Everything else --
+# `pending`, a `failed` that is waiting for another look, the `in_flight` marker
+# a killed session left behind, the `interrupted` the recovery stage rewrote it
+# to -- comes back out.  That is the point: nothing about an interrupted
+# function was ever judged, so there is nothing to preserve and no reason to
+# treat it differently from one that was never started.
 TERMINAL = ("committed", "skip")
 
 SNAP_RX = re.compile(r"^([0-9a-f]{8})\s*\|\s*(0x[0-9a-f]+)\s*\|", re.M)

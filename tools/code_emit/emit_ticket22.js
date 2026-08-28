@@ -51,19 +51,46 @@
 // tools/code_emit/data/emit_state.json and every approved function is its own
 // commit, so a run that stops anywhere loses at most the function in flight.
 //
+// "At most the function in flight" is a claim about the NEXT run, and it is only
+// true because of the Recover stage (ticket 21.6). A usage limit does not raise
+// an exception this script can catch -- it kills the session where it stands, so
+// the tidy-up that failure paths do here never runs, and the half-emitted files
+// stay in the tree. The next function's bookkeeper stages src/ and tests/
+// wholesale, so without a recovery pass the corpse gets committed under a live
+// function's name. The one moment that is guaranteed to execute after a session
+// has already died is the start of the next one, so that is where the tidying
+// lives: before any worklist is fetched, this run looks at the working tree,
+// discards what is under src/ and tests/, and hands the interrupted address back
+// to the worklist. What it may discard is bounded by path -- src/, tests/, and
+// the in-flight marker in emit_state.json, nothing else -- and anything dirty
+// outside that bound stops the run instead of being cleaned up on a guess.
+//
+// The in-flight marker is the other half. Each function is written into
+// emit_state.json as `in_flight` before its emitter touches anything, and that
+// write is deliberately left uncommitted: the landing commit carries it forward
+// to `committed`, and a session that dies leaves it behind as the one line that
+// says which function was flying. `in_flight` is not a terminal status, so
+// next_batch.py hands the address out again exactly as it would a `pending` one.
+//
+// This workflow does not watch its own budget. It runs the list the caller gave
+// it and stops for three reasons only: the list ran out, something upstream is
+// broken (ADR-0007 5.2/5.5), or it was killed. How much to attempt is the
+// caller's decision, made per batch; a workflow that quietly stopped after 12 of
+// the 40 it was asked for would be answering a question nobody asked.
+//
 // args: {
 //   limit:       number   how many functions to ask next_batch.py for (default 40)
 //   functions:   [{addr, name, target, body_size, stubbed_callees}]  optional,
 //                         skips the worklist stage when supplied
 //   batchLabel:  string
 //   maxRounds:   number   fix rounds per function before giving up (default 4)
-//   minBudgetPerFn: number  do not start a function without this much left
 // }
 
 export const meta = {
   name: 'fdps-emit-ticket22',
   description: 'Emit the FDPS game code function by function: three-source emit, independent review, build gate, per-function commit',
   phases: [
+    { title: 'Recover', detail: 'clear the wreckage a killed run left in src/ and tests/' },
     { title: 'Worklist', detail: 'ask next_batch.py what is left, in callee-first order' },
     { title: 'Emit', detail: 'one emitter agent per function, three sources, writes C and tests' },
     { title: 'Review', detail: 'an independent agent verifies the diff against the assembly' },
@@ -81,10 +108,6 @@ const VERDICTS = WS + '\\verdicts'
 
 const A = (typeof args === 'string' && args.length) ? JSON.parse(args) : (args || {})
 const MAX_ROUNDS = (A && A.maxRounds) || 4
-// Measured cost of the first function through the pipeline was 34k output
-// tokens; this is that with room for a function that needs several fix rounds.
-// It is a floor for starting one more, not an estimate of what one costs.
-const MIN_BUDGET_PER_FN = (A && A.minBudgetPerFn) || 120000
 const LABEL = (A && A.batchLabel) || 'emit'
 const LIMIT = (A && A.limit) || 40
 // A target .c that has outgrown this while functions are still routed into it
@@ -211,6 +234,54 @@ const DONE = {
     written: { type: 'array', items: { type: 'string' } },
     summary: { type: 'string' },
   },
+}
+
+const RECOVER_SUMMARY = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['tree_was_dirty', 'out_of_bounds', 'clean_now'],
+  properties: withStops({
+    tree_was_dirty: {
+      type: 'boolean',
+      description: 'True when anything at all was uncommitted before you started',
+    },
+    out_of_bounds: {
+      type: 'boolean',
+      description: 'True when something was dirty outside src/, tests/ and '
+        + 'tools/code_emit/data/emit_state.json. You then change NOTHING and this '
+        + 'run stops.',
+    },
+    out_of_bounds_paths: {
+      type: 'array', items: { type: 'string' },
+      description: 'The offending paths, verbatim from git status --porcelain',
+    },
+    discarded_paths: {
+      type: 'array', items: { type: 'string' },
+      description: 'What you actually threw away under src/ and tests/',
+    },
+    interrupted: {
+      type: 'array',
+      description: 'The functions the state file had marked in_flight, now recorded '
+        + 'as interrupted. Usually zero or one.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['addr'],
+        properties: {
+          addr: { type: 'string' },
+          name: { type: 'string' },
+          since: { type: 'string', description: 'The in_flight timestamp, if one was recorded' },
+        },
+      },
+    },
+    residue_without_marker: {
+      type: 'boolean',
+      description: 'True when src/ or tests/ was dirty but no in_flight entry named an '
+        + 'owner for it. The residue is still discarded; the report says so.',
+    },
+    clean_now: { type: 'boolean', description: 'git status --porcelain prints nothing' },
+    note: { type: 'string' },
+  }),
 }
 
 const WORKLIST = {
@@ -415,6 +486,18 @@ function emitterPrompt(fn, mode, reviewNote) {
     '',
     '# This round: emit the function from nothing.',
     '',
+    '0. Before you read anything or write any code, leave the footprint. In',
+    '   tools/code_emit/data/emit_state.json set the entry for key "' + fn.addr + '" to',
+    '   status "in_flight" with in_flight_since set to the current local time as',
+    '   YYYY-MM-DD HH:MM. Write it with python, json.dumps(indent=2, ensure_ascii=False)',
+    '   plus a trailing newline, UTF-8. Touch no other entry and no other field.',
+    '   Do NOT commit it. Leaving it uncommitted is the whole design: if this session is',
+    '   killed -- a usage limit does not give anyone a chance to tidy up -- that',
+    '   uncommitted line is the only thing left saying which function was in the air, and',
+    '   the next run reads it, throws away whatever you had half-written, and puts this',
+    '   address back on the worklist. The bookkeeper carries the entry on to "committed"',
+    '   in the landing commit, so it never survives a function that finished.',
+    '',
     'A. Read all three sources for ' + fn.addr + '. Work out the calling convention from',
     '   the prologue shape and from what the callers do after the CALL, not from what',
     '   Ghidra\'s signature claims -- Ghidra\'s automatic analysis labels this whole',
@@ -530,6 +613,12 @@ function reviewerPrompt(fn, round) {
     '   One function is in flight at a time and every approved function is its own',
     '   commit, so everything after HEAD belongs to this function. Review all of it,',
     '   including any knowledge-base or comment changes.',
+    '   One modified file is expected and is not the emitter\'s work to review:',
+    '   tools/code_emit/data/emit_state.json, whose entry for ' + fn.addr + ' now says',
+    '   in_flight. That is the marker the pipeline leaves so a killed session can be',
+    '   recovered from. Confirm it says in_flight for this address and nothing else in',
+    '   that file changed; if it names a different address, or if some other function\'s',
+    '   entry moved, block on it -- somebody is standing in somebody else\'s tree.',
     '',
     'B. Read the three sources for ' + fn.addr + ' yourself.',
     '',
@@ -644,8 +733,10 @@ function bookkeepPrompt(fn, hasGhidraFixes, rounds) {
     '   Load these in ONE ToolSearch call:',
     '     ToolSearch "select:mcp__ghidra__run_ghidra_script,mcp__ghidra__set_plate_comment,mcp__ghidra__rename_function_by_address,mcp__ghidra__set_function_prototype,mcp__ghidra__save_program,mcp__ghidra__list_bookmarks"',
     '',
-    '3. Progress. In tools/code_emit/data/emit_state.json set the entry for key',
-    '   "' + fn.addr + '": status "committed", emitted_against "' + (fn.body_size || '') + '",',
+    '3. Progress. In tools/code_emit/data/emit_state.json the entry for key "' + fn.addr + '"',
+    '   currently says in_flight -- the emitter wrote that before it started, deliberately',
+    '   uncommitted, so a killed session leaves a trace. Carry it forward now: status',
+    '   "committed", emitted_against "' + (fn.body_size || '') + '", drop in_flight_since,',
     '   rounds ' + rounds + ' (that is the count the workflow observed -- use it verbatim,',
     '   do not recount). Write it with python, json.dumps(indent=2, ensure_ascii=False)',
     '   plus a trailing newline, UTF-8. Touch no other entry and no other field.',
@@ -701,12 +792,13 @@ function abandonPrompt(fn, why, terminal) {
     '1. Look at what is there first:  cd ' + REPO + ' && git status --porcelain && git --no-pager diff --stat HEAD -- src tests',
     '2. Discard the working-tree changes under src/ and tests/ only:',
     '     git checkout -- src tests',
-    '   and delete any file that is new and untracked under those two directories.',
+    '     git clean -fd src tests            (the files the emitter created new)',
     '   Do NOT touch workspace/ -- the verdict files are the record of what went wrong',
-    '   and the next run reads them.',
-    '3. In tools/code_emit/data/emit_state.json set the entry for "' + fn.addr + '" to',
-    '   status "' + (terminal ? 'skip' : 'failed') + '" and put the reason in note. Write it with python, UTF-8,',
-    '   json.dumps(indent=2, ensure_ascii=False) plus a trailing newline.',
+    '   and the next run reads them. Do not touch anything already committed.',
+    '3. In tools/code_emit/data/emit_state.json the entry for "' + fn.addr + '" says',
+    '   in_flight, uncommitted, left there by the emitter. Set it to status',
+    '   "' + (terminal ? 'skip' : 'failed') + '", drop in_flight_since, and put the reason in note. Write it with',
+    '   python, UTF-8, json.dumps(indent=2, ensure_ascii=False) plus a trailing newline.',
     '   This step is the whole point of this stage: without it the worklist hands the',
     '   same address out again on every future run, forever.',
     '4. Commit only that one state file:',
@@ -751,6 +843,78 @@ function rescanPrompt(fn) {
     'If a concern is not settled, leave it exactly as it is and say what is still',
     'missing. An honest unresolved concern is a correct outcome. A second attempt is not',
     'a reason to manufacture a conclusion.',
+    '',
+    'Your final message is the summary object and nothing else.',
+  ].join('\n')
+}
+
+function recoverPrompt() {
+  return [
+    '# Role: Recovery. Mechanical. You judge no code and you emit nothing.',
+    '',
+    'A previous run of this pipeline may have been killed outright -- a usage limit',
+    'ends the session where it stands, so the failure paths that normally tidy up',
+    'never ran. Anything they left behind is in the working tree right now, and the',
+    'first function of this run would otherwise have somebody else\'s half-written',
+    'code inside its review diff and inside its commit. Clear it before anything',
+    'starts.',
+    '',
+    '1. Look, before you touch anything:',
+    '     cd ' + REPO + ' && git status --porcelain',
+    '   If it prints nothing, the tree is clean. Skip to step 4 -- there may still be',
+    '   an in_flight entry from a run that died before it wrote any code.',
+    '',
+    '2. Classify every line it printed. Exactly three paths are yours to clean:',
+    '     src/...                                    -- emitted code from the dead run',
+    '     tests/...                                  -- its test',
+    '     tools/code_emit/data/emit_state.json       -- its in-flight marker',
+    '   Ignored, because git does not track them at all: workspace/ and anything else',
+    '   already covered by .gitignore. They will not appear in --porcelain; if one',
+    '   somehow does, leave it alone and do not count it as out of bounds.',
+    '',
+    '   ANY OTHER PATH IS OUT OF BOUNDS. A dirty rebuild_info/, ghidra_snapshot/,',
+    '   tools/ file other than emit_state.json, docs/, devlog/ -- that is not this',
+    '   pipeline\'s wreckage, and guessing what it was for is how somebody\'s unrelated',
+    '   afternoon gets deleted. In that case: change NOTHING, discard NOTHING, set',
+    '   out_of_bounds true, list the paths verbatim, and return. The run stops.',
+    '',
+    '3. Discard the residue, and only under those two directories:',
+    '     git checkout -- src tests',
+    '     git clean -fd src tests            (the new files the dead run created)',
+    '   Never workspace/: the verdict files there are the record of what the dead run',
+    '   had worked out, and the re-run reads them. Never anything already committed --',
+    '   no reset, no revert, no amend. Every landed function is somebody\'s finished',
+    '   work and this stage has no opinion about any of it.',
+    '',
+    '4. Read tools/code_emit/data/emit_state.json and find every entry whose status is',
+    '   "in_flight". That is the marker each function writes before its emitter starts,',
+    '   and it is left uncommitted on purpose, so an entry still saying it is the one',
+    '   line that survives a kill saying which function was flying. Normally there is',
+    '   exactly one; zero and several are both possible and neither is an error.',
+    '',
+    '   For each one, set status "interrupted", keep the in_flight timestamp in a field',
+    '   named in_flight_since if it is there, and put a one-line note saying the run was',
+    '   killed mid-flight and the work was discarded. Report addr, name and timestamp.',
+    '   "interrupted" is not a terminal status, so next_batch.py hands the address',
+    '   straight back out on the worklist below -- which is the intent. Do not mark it',
+    '   failed: nothing about the function was judged, it just never finished.',
+    '',
+    '   Write the file with python, json.dumps(indent=2, ensure_ascii=False) plus a',
+    '   trailing newline, UTF-8. Touch no other entry and no other field.',
+    '',
+    '5. If src/ or tests/ was dirty but no entry said in_flight, discard it all the same',
+    '   -- the boundary is the path, not who owns it -- and set residue_without_marker',
+    '   true so the report says the wreckage had no name on it.',
+    '',
+    '6. Commit, only if step 4 changed the state file:',
+    '     git add tools/code_emit/data/emit_state.json && git commit',
+    '   subject:  emit: 前一輪中斷的殘留已清除，<n> 支重回工作清單',
+    '   then a blank line, one line in Traditional Chinese naming the functions and what',
+    '   was discarded, a blank line, and',
+    '     Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>',
+    '   If nothing was dirty and nothing was in flight, commit nothing.',
+    '',
+    '7. Confirm with  git status --porcelain  that the tree is clean now, and report it.',
     '',
     'Your final message is the summary object and nothing else.',
   ].join('\n')
@@ -891,10 +1055,55 @@ let batchStart = 0
 try { batchStart = budget.spent() } catch (e) { batchStart = 0 }
 const spentK = (from) => { try { return Math.round((budget.spent() - from) / 1000) } catch (e) { return -1 } }
 
+// ---------------------------------------------------------------- recover
+//
+// Before anything else, and before the worklist is even asked for. A run that
+// was killed outright -- a usage limit ends the session where it stands -- never
+// got to run any of the tidy-up below, so its half-written files are sitting in
+// src/ and tests/ right now. The first function of this run would find them
+// inside its own review diff and its bookkeeper would commit them under its
+// name. This is the only moment that is guaranteed to execute after a session
+// has already died, so this is where the tidying goes.
+//
+// The boundary is by path and it is not negotiable: src/, tests/, and the
+// in-flight marker in emit_state.json. Anything else dirty means this is not our
+// wreckage, and the run stops rather than deleting somebody's unrelated work.
+phase('Recover')
+const rec = await agent(recoverPrompt(),
+  { label: 'recover', phase: 'Recover', schema: RECOVER_SUMMARY })
+if (!rec) {
+  log('the recovery stage returned nothing; refusing to emit into a tree nobody has looked at')
+  return { error: 'recovery returned nothing', batch: LABEL }
+}
+if (rec.out_of_bounds) {
+  const paths = (rec.out_of_bounds_paths || []).join(', ')
+  log('STOP: uncommitted changes outside src/, tests/ and emit_state.json: ' + paths)
+  return { error: 'working tree dirty outside this pipeline', batch: LABEL,
+    out_of_bounds_paths: rec.out_of_bounds_paths || [], detail: rec.note || '' }
+}
+if (!rec.clean_now) {
+  log('STOP: the tree is still not clean after recovery: ' + (rec.note || '(no detail)'))
+  return { error: 'recovery did not leave a clean tree', batch: LABEL, detail: rec.note || '' }
+}
+const recovered = rec.interrupted || []
+if (recovered.length) {
+  log('recovery: ' + recovered.length + ' function(s) were killed mid-flight last run and '
+    + 'go back on the worklist: '
+    + recovered.map((r) => r.addr + ' ' + (r.name || '')).join(', '))
+}
+if (rec.residue_without_marker) {
+  log('recovery: src/ or tests/ was dirty with no in_flight entry naming an owner; '
+    + 'discarded anyway -- ' + ((rec.discarded_paths || []).join(', ') || '(no list)'))
+} else if (!rec.tree_was_dirty && !recovered.length) {
+  log('recovery: nothing to clean up')
+}
+
 // The worklist is fetched rather than carried. This script cannot read the
 // filesystem, so an agent runs next_batch.py and hands the answer back; that
 // keeps a 514-function roster out of the orchestrator and makes every run
 // resume from whatever is on disk rather than from what a previous run said.
+// Recovery ran first on purpose: an address it just put back to `interrupted`
+// has to be in the list this asks for, not in the one after it.
 let fns = (A && A.functions) || []
 let remainingTotal = null
 if (!fns.length) {
@@ -917,7 +1126,8 @@ if (!fns.length) {
 
 if (!fns.length) {
   log('nothing left to emit')
-  return { batch: LABEL, attempted: 0, committed: 0, remaining_total: remainingTotal }
+  return { batch: LABEL, attempted: 0, committed: 0, remaining_total: remainingTotal,
+    recovered: recovered }
 }
 
 for (let i = 0; i < fns.length && !stopped && !endedEarly; i++) {
@@ -926,27 +1136,11 @@ for (let i = 0; i < fns.length && !stopped && !endedEarly; i++) {
   let fnStart = 0
   try { fnStart = budget.spent() } catch (e) { fnStart = 0 }
 
-  // Stop on a function boundary rather than half way through one: an
-  // interrupted emit leaves a partial file in the tree for the next run to
-  // clean up, and there is nothing to gain by starting one we cannot finish.
-  let left = null
-  try {
-    left = budget.total ? budget.remaining() : null
-  } catch (e) {
-    left = null
-    if (i === 0) {
-      log('no budget figures available; the per-function budget guard is off this run')
-    }
-  }
-  if (left !== null && left < MIN_BUDGET_PER_FN) {
-    log('budget low: ' + Math.round(left / 1000) + 'k left, stopping before ' + tag)
-    for (let j = i; j < fns.length; j++) {
-      results.push({ addr: fns[j].addr, name: fns[j].name, status: 'not_started_budget' })
-    }
-    stopped = 'budget'
-    break
-  }
-
+  // No budget guard here, deliberately (ticket 21.6). How many functions to
+  // attempt is the caller's decision, made per batch; a workflow that stopped
+  // after 12 of the 40 it was handed, on a criterion the caller never asked it
+  // to apply, is answering its own question. Running out of budget shows up as
+  // being killed, and the Recover stage above is what makes that survivable.
   log(tag + ' -- start')
   let rounds = 0
   let outcome = null
@@ -1144,8 +1338,12 @@ for (let i = 0; i < fns.length && !stopped && !endedEarly; i++) {
         // gets committed as somebody else's work.
         const detail = (cleaned && cleaned.problems) || 'the cleanup agent returned nothing'
         log('  cleanup FAILED: ' + detail
-          + ' -- src/ and tests/ may still hold this function, and the worklist will'
-          + ' hand it out again; check git status before the next run')
+          + ' -- src/ and tests/ may still hold this function. Nothing is lost: the'
+          + ' in_flight marker is still in emit_state.json, so the next run\'s Recover'
+          + ' stage discards the residue and puts the address back on the worklist.'
+          + ' This run stops here rather than emit the next function into that tree.')
+        stopped = stopped || 'cleanup_failed'
+        stopDetail = stopDetail || detail
         const row = results[results.length - 1]
         if (row) {
           row.cleanup_failed = detail
@@ -1199,6 +1397,15 @@ if (!stopped && withIssues.length > 0) {
 const landed = results.filter((r) => r.status === 'committed')
 const unfinished = results.filter((r) => r.status !== 'committed' && r.status !== 'skip')
 const skipped = results.filter((r) => r.status === 'skip')
+// Two kinds of "did not land" that read the same in a count and mean opposite
+// things to whoever calls the next batch. Never reached: the run stopped before
+// its turn, nothing was attempted, nothing to clean up. Killed in flight: work
+// was in the tree when the run ended, and the next run's Recover stage is what
+// deals with it. Reporting them as one number is how the second kind gets
+// mistaken for the first and nobody looks at the tree.
+const neverReached = results.filter((r) => r.status === 'not_started_after_stop'
+  || r.status === 'not_started_routing_changed')
+const cutShort = results.filter((r) => r.status === 'interrupted')
 
 const stats = {
   batch: LABEL,
@@ -1206,6 +1413,11 @@ const stats = {
   committed: landed.length,
   skipped: skipped.length,
   unfinished: unfinished.length,
+  never_reached: neverReached.length,
+  cut_short: cutShort.map((r) => ({ addr: r.addr, name: r.name, reason: r.reason })),
+  // What the Recover stage found in the tree when this run started -- the
+  // function the PREVIOUS run was killed in the middle of, if there was one.
+  recovered: recovered,
   stopped: stopped,
   stop_detail: stopDetail,
   ended_early: endedEarly,
@@ -1224,7 +1436,15 @@ log('batch ' + (stopped ? 'STOPPED (' + stopped + ')'
   + landed.length + ' committed, ' + skipped.length + ' skipped, '
   + unfinished.length + ' unfinished of ' + fns.length)
 for (const r of unfinished) {
-  log('  UNFINISHED ' + r.addr + ' ' + r.name + ': ' + r.status + ' -- ' + (r.reason || ''))
+  const kind = r.status === 'interrupted' ? 'CUT SHORT MID-FLIGHT'
+    : (r.status === 'not_started_after_stop' || r.status === 'not_started_routing_changed')
+      ? 'never reached' : 'UNFINISHED'
+  log('  ' + kind + ' ' + r.addr + ' ' + r.name + ': ' + r.status
+    + (r.reason ? ' -- ' + r.reason : ''))
+}
+if (cutShort.length) {
+  log('the tree may hold work for ' + cutShort.map((r) => r.addr).join(', ')
+    + '; the next run\'s Recover stage discards it and puts them back on the worklist')
 }
 
 // A run that stopped does not get closing documents. A knowledge-base page
@@ -1241,9 +1461,10 @@ rambling is allowed, and the point is the dead ends -- the paths that worked end
 up in the code and the knowledge base, the ones that did not are the only thing
 that would otherwise be lost.
 
-Write ${REPO}\\devlog\\2026-08-28-emit-${LABEL}.md in TRADITIONAL
-CHINESE, or append a clearly headed new section if a file of that name is
-already there -- one work session, one entry.
+Write ${REPO}\\devlog\\<today>-emit-${LABEL}.md in TRADITIONAL CHINESE, where
+<today> is today's date as YYYY-MM-DD -- read it off the machine, do not assume
+it. Append a clearly headed new section if a file of that name is already there
+-- one work session, one entry.
 
 What this run was: a batch of ticket 22, the emit of the game's own functions.
 Each one goes emitter (three sources, writes C and a test) -> independent
@@ -1258,14 +1479,18 @@ Sources you may read for detail:
   ${VERDICTS}\\      the per-function emit and review verdicts
   ${REPO}\\tools\\code_emit\\data\\emit_issues.json
 
-Also write the run report to ${REPO}\\devlog\\runs\\2026-08-28-emit-${LABEL}.json,
-verbatim from the statistics below, UTF-8.
+Also write the run report to ${REPO}\\devlog\\runs\\<today>-emit-${LABEL}.json,
+same date, verbatim from the statistics below, UTF-8.
 
 Run statistics:
 ${JSON.stringify(stats, null, 2)}
 
 Cover honestly what took fix rounds and why, anything the gate caught, any file
-that had to be split, and every function that did not land. Do not claim anything
+that had to be split, and every function that did not land. If `recovered` is not
+empty, the previous run was killed mid-flight and this one threw its wreckage
+away before starting -- say which function that was and that its work was
+discarded, because that is the one thing a reader cannot reconstruct from the
+commits. Do not claim anything
 the statistics do not support. With dozens of functions in a run a per-function
 recital is noise: what is worth writing down is what went wrong, what it cost,
 and anything a later batch would waste a day rediscovering.
