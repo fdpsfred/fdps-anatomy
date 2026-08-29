@@ -151,5 +151,37 @@
       "needs": "A playtest in DOSBox-X with DIG.INI and SB16.DIG present: effects audible, several in quick succession to exercise the eight-slot rotation, and no effect cut short or repeated.",
       "status": "open"
     }
+  ],
+  "00014550": [
+    {
+      "from": "emit",
+      "what": "When the cursor's frame index is out of range the lookup stores 0 for the frame pointer and the duration is then read straight through it -- MOVSX EDX,word ptr [EAX+0x2] on address 2 -- with no test in between. The C reproduces that rather than adding the NULL check the shape invites, because adding one would change what the original does. Whether the path is reachable in the shipped game I could not settle: the index is only ever written by this function (0, count-1, or ++ inside the count), so it stays in range as long as the caller resets the cursor with mode 1 before playing and does not re-point cursor[2] at a shorter clip mid-play, and 11 of the 12 callers are not emitted yet.",
+      "needs": "The callers emitted -- fdps_saf_play_over_background, fdps_combat_play_blow, fdps_combat_play_spell_on_targets and the rest -- so it can be read off whether any of them hands over a cursor it did not reset, or swaps the image under a live cursor. Failing that, a run on real hardware where a read of address 2 is what it is.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "The cursor is really a three-field record (frame index, ticks held, image pointer) and reads as one in every caller, but ticket 17's generated fdpstype.h has no SAF playback cursor in it and this stage does not invent record types. It is emitted as the settled `int *` with named element indices (SAF_CURSOR_* in saf.h), which puts a pointer in an int slot.",
+      "needs": "A decision from ticket 17's type set on whether the block earns a struct; if it does, the type lands in Ghidra and fdpstype.h and this signature and its callers follow it.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "Whether the clamp branch (any mode other than 0 or 1) is ever taken by the game is unsettled. Four of the 68 call sites were read (0002a49c, 00019894, 0001bd10, 00034ec3) and all push either 0 (XOR EAX,EAX / PUSH EAX) or 1 (MOV EAX,0x1 / PUSH EAX). The branch is emitted and tested from the assembly regardless.",
+      "needs": "The callers emitted, or a sweep of the pushed immediate at all 68 call sites.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "The out-of-range branch stores 0 for the frame pointer and the duration is then read through it with no test (0x1463a MOV dword ptr [EBP+-0x34],0x0 followed unconditionally by 0x1466f MOVSX EDX,word ptr [EAX+0x2]). Whether any shipped caller can actually reach it is unsettled: the index is only ever written by this function, so it stays in range provided the caller resets with mode 1 before playing and never re-points cursor[2] at a shorter clip mid-play. I confirmed fdps_saf_play_over_background does reset (0001ed49 pushes 1) before its loop, but 11 of the 12 callers are not emitted yet.",
+      "needs": "The remaining callers emitted, so it can be read off whether any hands over a cursor it did not reset or swaps the image under a live cursor.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "The three-dword cursor is a record in everything but declaration -- frame index, ticks held, image pointer -- and is emitted as int * with SAF_CURSOR_* element indices, which parks a pointer in an int slot. ticket 17's fdpstype.h has no SAF playback cursor.",
+      "needs": "A decision from ticket 17's type set on whether the block earns a struct; if it does, the type lands in Ghidra and fdpstype.h and this signature and its callers follow it.",
+      "status": "open"
+    }
   ]
 }

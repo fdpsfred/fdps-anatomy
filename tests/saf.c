@@ -15,6 +15,13 @@
  * memory, so a byte buffer is exactly the shape the function is handed.  Every
  * header and table field is written a byte at a time, so the test makes no
  * alignment assumption of its own about the fields the code reads unaligned.
+ *
+ * The playback cases at the end read the same image through a cursor, and
+ * their expected values come from 00014550 -- XOR EAX,EAX / MOV AL,byte ptr
+ * [EBP+0x18] / CMP EAX,0x1 for the reset, INC dword ptr [EAX+0x4] placed after
+ * the frame-count test, MOVSX EDX,word ptr [EAX+0x2] / CMP EDX,dword ptr
+ * [EAX+0x4] / JG for the hold, and CMP byte ptr [EBP+0x18],0x0 / JNZ for the
+ * choice between restarting and stopping at the end.
  */
 #include <stddef.h>
 #include "testharn.h"
@@ -271,6 +278,202 @@ static void passing_image_with_no_frames_returns_zero(void)
     CHECK_EQ(fdps_saf_frame_count(stage_image), 0);
 }
 
+/* Where the staged clip puts its parts: the frame section's offset table at
+   0x100 and the frame records themselves well past it, far enough apart that a
+   reader landing on the wrong one reads a duration written for another frame
+   rather than a byte of its neighbour. */
+#define CLIP_TABLE 0x100
+#define CLIP_FRAME_0 0x300
+#define CLIP_FRAME_STRIDE 0x40
+
+/* Writes the head of one frame record: i16 sound id then i16 duration in
+   ticks.  The duration goes in byte at a time, so a case can state the bit
+   pattern 0xffff and let the code decide whether that is -1 or 65535 -- which
+   is the whole question MOVSX asks. */
+static void stage_duration(int frame_index, unsigned long duration)
+{
+    unsigned char *frame;
+
+    frame = stage_image + CLIP_FRAME_0 + frame_index * CLIP_FRAME_STRIDE;
+    frame[0] = 0xff; /* sound id -1: this frame starts no sound effect */
+    frame[1] = 0xff;
+    frame[2] = (unsigned char) (duration & 0xff);
+    frame[3] = (unsigned char) ((duration >> 8) & 0xff);
+}
+
+/* A whole playable clip: real magic, a frame count, an offset table and that
+   many frame records, each holding for one tick until a case says otherwise. */
+static void stage_clip(int frame_count)
+{
+    int i;
+
+    stage_magic();
+    stage_header(frame_count, CLIP_TABLE);
+    for (i = 0; i < frame_count; i++) {
+        stage_entry(CLIP_TABLE, i,
+                    CLIP_FRAME_0 + i * CLIP_FRAME_STRIDE);
+        stage_duration(i, 1);
+    }
+}
+
+/* The caller's three-dword playback block, pointed at the staged image. */
+static int play_cursor[3];
+
+static void stage_cursor(int frame_index, int ticks_held)
+{
+    play_cursor[SAF_CURSOR_FRAME_INDEX] = frame_index;
+    play_cursor[SAF_CURSOR_TICKS_HELD] = ticks_held;
+    play_cursor[SAF_CURSOR_IMAGE] = (int) stage_image;
+}
+
+/* XOR EAX,EAX / MOV AL,byte ptr [EBP+0x18] / CMP EAX,0x1 / JNZ is the first
+   thing the function does, and the branch it guards writes both counters and
+   nothing else.  The image is left with all three magic bytes wrong, which
+   every other mode answers -1 to, so an implementation that looked at the
+   image before the mode would be caught here. */
+static void reset_mode_clears_the_cursor_without_reading_the_image(void)
+{
+    stage_clip(2);
+    stage_magic_bytes('x', 'y', 'z');
+    stage_cursor(1, 5);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 1), 0);
+    CHECK_EQ(play_cursor[SAF_CURSOR_FRAME_INDEX], 0);
+    CHECK_EQ(play_cursor[SAF_CURSOR_TICKS_HELD], 0);
+}
+
+/* The magic test feeds the same count-or-zero the standalone reader does, and
+   a zero count stores -1 and leaves.  INC dword ptr [EAX+0x4] sits after that
+   test, so the tick counter must come back untouched. */
+static void all_three_magic_bytes_wrong_returns_minus_one(void)
+{
+    stage_clip(2);
+    stage_magic_bytes('x', 'y', 'z');
+    stage_cursor(0, 4);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 0), -1);
+    CHECK_EQ(play_cursor[SAF_CURSOR_TICKS_HELD], 4);
+    CHECK_EQ(play_cursor[SAF_CURSOR_FRAME_INDEX], 0);
+}
+
+/* The three magic compares are ORed here as well: 'A' in the second position
+   admits the image whatever the other two hold, and playback proceeds. */
+static void one_matching_magic_byte_lets_the_clip_run(void)
+{
+    stage_clip(2);
+    stage_duration(0, 5);
+    stage_magic_bytes('x', 'A', 'y');
+    stage_cursor(0, 0);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 0), 0);
+    CHECK_EQ(play_cursor[SAF_CURSOR_TICKS_HELD], 1);
+}
+
+/* CMP dword ptr [EBP+-0xc],0x0 / JNZ: a header that states no frames is the
+   -1 answer, and again without the tick counter moving. */
+static void an_image_with_no_frames_returns_minus_one(void)
+{
+    stage_magic();
+    stage_header(0, CLIP_TABLE);
+    stage_cursor(0, 2);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 0), -1);
+    CHECK_EQ(play_cursor[SAF_CURSOR_TICKS_HELD], 2);
+}
+
+/* INC dword ptr [EAX+0x4] happens before MOVSX EDX,word ptr [EAX+0x2] / CMP
+   EDX,dword ptr [EAX+0x4] / JG, so the count reaches the duration on the
+   duration-th call: a frame stating 3 is shown for ticks 1, 2 and 3 and steps
+   on at the third.  JG rather than JGE is what puts the step on that call and
+   not the one after it. */
+static void a_frame_is_held_for_exactly_its_duration(void)
+{
+    stage_clip(2);
+    stage_duration(0, 3);
+    stage_duration(1, 3);
+    stage_cursor(0, 0);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 0), 0);
+    CHECK_EQ(play_cursor[SAF_CURSOR_TICKS_HELD], 1);
+    CHECK_EQ(play_cursor[SAF_CURSOR_FRAME_INDEX], 0);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 0), 0);
+    CHECK_EQ(play_cursor[SAF_CURSOR_TICKS_HELD], 2);
+    CHECK_EQ(play_cursor[SAF_CURSOR_FRAME_INDEX], 0);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 0), 0);
+    CHECK_EQ(play_cursor[SAF_CURSOR_TICKS_HELD], 0);
+    CHECK_EQ(play_cursor[SAF_CURSOR_FRAME_INDEX], 1);
+}
+
+/* A duration of 0 is already <= the freshly incremented 1, so the frame is
+   never actually held: the step happens on the first call. */
+static void a_zero_duration_frame_steps_on_at_the_first_tick(void)
+{
+    stage_clip(3);
+    stage_duration(0, 0);
+    stage_cursor(0, 0);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 0), 0);
+    CHECK_EQ(play_cursor[SAF_CURSOR_FRAME_INDEX], 1);
+    CHECK_EQ(play_cursor[SAF_CURSOR_TICKS_HELD], 0);
+}
+
+/* MOVSX sign-extends the duration word, so the pattern 0xffff is -1 and steps
+   the frame on immediately.  Read as an unsigned 65535 it would hold the frame
+   for about eighteen minutes at the game's tick rate, which is the visible
+   difference this pins. */
+static void a_negative_duration_steps_on_at_the_first_tick(void)
+{
+    stage_clip(3);
+    stage_duration(0, 0xffff);
+    stage_cursor(0, 0);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 0), 0);
+    CHECK_EQ(play_cursor[SAF_CURSOR_FRAME_INDEX], 1);
+}
+
+/* The frame whose duration is read is the one the cursor's index names, found
+   through the offset table: with frame 0 stating 1 tick and frame 1 stating 4,
+   a cursor sitting on frame 1 must last four calls.  A lookup that ignored the
+   index, or rebased the stored offset on the table instead of the image base,
+   would read frame 0's duration or a zero and step on at the first call. */
+static void the_duration_comes_from_the_frame_the_index_names(void)
+{
+    stage_clip(2);
+    stage_duration(0, 1);
+    stage_duration(1, 4);
+    stage_cursor(1, 0);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 0), 0);
+    CHECK_EQ(play_cursor[SAF_CURSOR_FRAME_INDEX], 1);
+    CHECK_EQ(play_cursor[SAF_CURSOR_TICKS_HELD], 1);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 0), 0);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 0), 0);
+    CHECK_EQ(play_cursor[SAF_CURSOR_TICKS_HELD], 3);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 0), 1);
+    CHECK_EQ(play_cursor[SAF_CURSOR_FRAME_INDEX], 0);
+}
+
+/* CMP EAX,dword ptr [EBP+-0xc] / JL, then CMP byte ptr [EBP+0x18],0x0 / JNZ
+   with the fall-through storing 0: stepping off the end of the clip in mode 0
+   restarts at frame 0, zeroes the tick counter and reports 1 once. */
+static void passing_the_last_frame_reports_one_and_wraps_in_mode_zero(void)
+{
+    stage_clip(3);
+    stage_duration(2, 1);
+    stage_cursor(2, 0);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 0), 1);
+    CHECK_EQ(play_cursor[SAF_CURSOR_FRAME_INDEX], 0);
+    CHECK_EQ(play_cursor[SAF_CURSOR_TICKS_HELD], 0);
+}
+
+/* The other side of that JNZ: MOV EAX,dword ptr [EBP+-0xc] / DEC EAX leaves
+   the cursor on the last frame instead.  A caller that keeps ticking a clamped
+   cursor gets 1 again every time its last frame's duration elapses, and the
+   index never moves. */
+static void any_other_mode_stops_on_the_last_frame(void)
+{
+    stage_clip(3);
+    stage_duration(2, 1);
+    stage_cursor(2, 0);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 2), 1);
+    CHECK_EQ(play_cursor[SAF_CURSOR_FRAME_INDEX], 2);
+    CHECK_EQ(play_cursor[SAF_CURSOR_TICKS_HELD], 0);
+    CHECK_EQ(fdps_saf_advance_tick(play_cursor, 2), 1);
+    CHECK_EQ(play_cursor[SAF_CURSOR_FRAME_INDEX], 2);
+}
+
 void run_saf_tests(void)
 {
     RUN_TEST(negative_index_is_rejected);
@@ -289,4 +492,14 @@ void run_saf_tests(void)
     RUN_TEST(count_is_the_16_bit_field_at_0x0c);
     RUN_TEST(count_0xffff_is_zero_extended);
     RUN_TEST(passing_image_with_no_frames_returns_zero);
+    RUN_TEST(reset_mode_clears_the_cursor_without_reading_the_image);
+    RUN_TEST(all_three_magic_bytes_wrong_returns_minus_one);
+    RUN_TEST(one_matching_magic_byte_lets_the_clip_run);
+    RUN_TEST(an_image_with_no_frames_returns_minus_one);
+    RUN_TEST(a_frame_is_held_for_exactly_its_duration);
+    RUN_TEST(a_zero_duration_frame_steps_on_at_the_first_tick);
+    RUN_TEST(a_negative_duration_steps_on_at_the_first_tick);
+    RUN_TEST(the_duration_comes_from_the_frame_the_index_names);
+    RUN_TEST(passing_the_last_frame_reports_one_and_wraps_in_mode_zero);
+    RUN_TEST(any_other_mode_stops_on_the_last_frame);
 }

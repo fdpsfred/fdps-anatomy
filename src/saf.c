@@ -76,3 +76,91 @@ int fdps_saf_frame_count(void *saf)
     }
     return frame_count;
 }
+
+/* 00014550.  The clip's whole playback state is the caller's three-dword block
+   (SAF_CURSOR_* in saf.h): the assembly reads it as [EAX], [EAX+4] and [EAX+8]
+   off the pointer at [EBP+0x14], and the mode byte at [EBP+0x18] is loaded
+   with XOR EAX,EAX / MOV AL,byte ptr [EBP+0x18], zero-extended, so it is a
+   byte-wide unsigned argument however wide the dword the caller pushed.
+
+   The magic test and the frame lookup are written out here rather than called,
+   because the assembly has no CALL in it at all and the build is -od, which
+   does not inline: what the original compiled from held this code textually,
+   the same shape fdps_saf_frame_count and fdps_saf_get_frame above hold.  Both
+   copies are read the same way -- the count word at +0x0c zero-extended, the
+   three magic bytes joined with OR, the frame offset rebased on the image base
+   -- so the notes on those two apply here unchanged.
+
+   Three things in the tick arithmetic are decided by the assembly and not by
+   what reads naturally:
+
+   MOVSX EDX,word ptr [EAX+0x2] / CMP EDX,dword ptr [EAX+0x4] / JG: the
+   duration is sign-extended and the compare is signed, so a duration of
+   0xffff is -1 and steps the frame on at the first tick instead of holding it
+   for 65535 of them.  The tick counter is incremented before the compare, so
+   a frame whose duration is n is shown for exactly n ticks.
+
+   INC dword ptr [EAX+0x4] sits after the frame-count test, not before it, so
+   the -1 answer leaves the counter alone: an image with no frames does not
+   accumulate ticks while a caller keeps polling it.
+
+   The lookup's else-branch stores 0 and the duration is then read through it
+   with no test -- MOV EAX,dword ptr [EBP+-0x8] / MOVSX EDX,word ptr [EAX+0x2]
+   reads address 2.  Adding the NULL check that shape asks for would change
+   what the original does with a cursor whose frame index is out of range, so
+   it is not added; the index this function maintains stays in range on its
+   own, which is why the original never had to care. */
+int fdps_saf_advance_tick(int *cursor, unsigned char mode)
+{
+    unsigned char *saf_base;
+    int frame_count;
+    unsigned int frame_section_start;
+    unsigned char *frame;
+    int result;
+
+    if (mode == 1) {
+        cursor[SAF_CURSOR_TICKS_HELD] = 0;
+        cursor[SAF_CURSOR_FRAME_INDEX] = 0;
+        result = 0;
+    } else {
+        saf_base = (unsigned char *) cursor[SAF_CURSOR_IMAGE];
+        if (saf_base[0] == 'S' || saf_base[1] == 'A' || saf_base[2] == 'F') {
+            frame_count =
+                *(unsigned short *) (saf_base + SAF_FRAME_COUNT_OFFSET);
+        } else {
+            frame_count = 0;
+        }
+        if (frame_count == 0) {
+            result = -1;
+        } else {
+            cursor[SAF_CURSOR_TICKS_HELD]++;
+            if (cursor[SAF_CURSOR_FRAME_INDEX]
+                < *(unsigned short *) (saf_base + SAF_FRAME_COUNT_OFFSET)
+                && cursor[SAF_CURSOR_FRAME_INDEX] >= 0) {
+                frame_section_start =
+                    *(unsigned int *) (saf_base +
+                                       SAF_FRAME_SECTION_START_OFFSET);
+                frame = saf_base + *(unsigned int *)
+                    (saf_base + frame_section_start
+                     + cursor[SAF_CURSOR_FRAME_INDEX] * 4);
+            } else {
+                frame = NULL;
+            }
+            result = 0;
+            if (*(short *) (frame + 2) <= cursor[SAF_CURSOR_TICKS_HELD]) {
+                cursor[SAF_CURSOR_TICKS_HELD] = 0;
+                cursor[SAF_CURSOR_FRAME_INDEX]++;
+                if (cursor[SAF_CURSOR_FRAME_INDEX] >= frame_count) {
+                    cursor[SAF_CURSOR_TICKS_HELD] = 0;
+                    if (mode == 0) {
+                        cursor[SAF_CURSOR_FRAME_INDEX] = 0;
+                    } else {
+                        cursor[SAF_CURSOR_FRAME_INDEX] = frame_count - 1;
+                    }
+                    result = 1;
+                }
+            }
+        }
+    }
+    return result;
+}
