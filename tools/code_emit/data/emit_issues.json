@@ -421,5 +421,19 @@
       "needs": "The writer of the three globals, in the font loader that main.c will contain. The constant or expression it stores, and any comparison it makes against them, settles it. If the loader only ever stores small positive values then the choice is unobservable and that should be recorded explicitly rather than left implied.",
       "status": "open"
     }
+  ],
+  "00022e30": [
+    {
+      "what": "Nothing in FDPS calls this reader and no file shipped with FDPS has the layout it reads, so the emitted C is checked only against the assembly's own constants and against the previous game's LLLLLL archive canon. If an FDPS-era file in this layout exists, the header size of 6 and the sentinel-is-file-size convention would be confirmed against real bytes rather than against a fixture the test builds from those same constants.",
+      "needs": "An FDPS data file in the six-byte-header offset-table layout to read with this function, or a settled statement that the routine is dead code carried over and will never see one.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Nothing in FDPS calls this reader and no file shipped with FDPS has the layout it reads, so both the emitted C and its tests are anchored to the assembly's own constants plus the previous game's LLLLLL canon, never to real FDPS bytes. Endorsing the emitter's entry after checking it: the fixture's independence from the code under test is partial for exactly this reason.",
+      "needs": "An FDPS data file in the six-byte-header offset-table layout to read with this function, or a settled statement that the routine is dead code carried over from the previous game and will never see one.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

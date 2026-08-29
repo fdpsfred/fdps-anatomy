@@ -210,6 +210,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x141"
+    },
+    "00022e30": {
+      "name": "fdps_load_indexed_archive_entry",
+      "target": "rsrc.c",
+      "body_size": "0x110",
+      "status": "committed",
+      "emitted_against": "0x110",
+      "rounds": 0
     }
   }
 }
