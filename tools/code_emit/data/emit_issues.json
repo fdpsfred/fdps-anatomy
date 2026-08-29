@@ -267,5 +267,25 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00018b10": [
+    {
+      "what": "Whether the side-byte guard really implies portrait_id >= 0x3c. Both damage-path callers form portrait_id - 0x3c after testing only the unit's side, so the accessor is safe from a negative index exactly to the extent that every unit on the enemy side carries an id of 0x3c or above. That is an invariant of what the map loader and fdps_deploy_unit put into the unit array, not something either caller or this accessor checks, and nothing readable from this function can confirm it holds for scripted or converted units.",
+      "needs": "The unit-array writers being emitted -- fdps_deploy_unit at 000232b0 above all, which is the one caller that does compare against 0x3c -- and a check of whether any path can set a side-0 or side-2 unit's portrait_id below 0x3c. If one can, reading in front of the table is original behaviour that must be preserved rather than a bug to guard.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Whether the 91 records are all real. The count comes from ENEMYDAT.DAT's 910 bytes divided by the 0xa stride (resource_info/data_tables.md), which is arithmetic on the container's directory rather than on the records themselves; ITEM.DAT is the precedent for a table whose tail entries are empty (251 members, 226 with content). The tests use 91 only to choose the indices they exercise and never assert a bound the code does not have, so nothing here depends on it -- but the highest portrait id the game can actually produce is not known.",
+      "needs": "The real ENEMYDAT.DAT read out of the VFS container once the VFS reader is emitted and a test can list the file in tests/gamefile.lst, plus the enemy table's own decoding (resource_info/data_tables.md still marks it 尚未解讀).",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Both of the emitter's open_issues stand and I am carrying them forward unchanged in substance: (1) whether the side-byte guard at the two damage-path callers really implies portrait_id >= 0x3c, since neither tests the id itself and a side-0 or side-2 unit carrying an id below 0x3c would read in front of the table; (2) whether all 91 records ENEMYDAT.DAT has storage for are populated, the count being 910/10 from the container directory rather than from the records.",
+      "needs": "For (1): the unit-array writers emitted -- fdps_deploy_unit at 000232b0 and whatever the map loader turns out to be -- plus a check of whether any path (scripted spawn, conversion, promotion) can leave a side-0 or side-2 unit with a portrait id below 0x3c. Note that two of the four callers, 0001c520 and 000232b0, do test the id, so the invariant is at least assumed in two places. For (2): the real ENEMYDAT.DAT read through the VFS reader once that is emitted, and the enemy table's own decoding (resource_info/data_tables.md still marks it 尚未解讀).",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

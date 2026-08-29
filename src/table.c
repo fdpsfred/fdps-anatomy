@@ -70,3 +70,37 @@ struct fdps_character_growth *fdps_get_growth_record(int char_id)
          + char_id * CHARACTER_GROWTH_RECORD_STRIDE);
     return record;
 }
+
+/* The stride of one ENEMYDAT.DAT record, as the original writes it: IMUL
+   EAX,dword ptr [EBP+0x14],0xa.  A literal and not sizeof(struct
+   fdps_enemy_data) for the same reason as the two tables above -- the file's
+   stride is the fact that has to survive, and the struct agrees with it only
+   while it stays byte-packed (rebuild_info/pitfalls.md). */
+#define ENEMY_RECORD_STRIDE 0x0a
+
+/* 00018b10.  The third accessor of the same one-basic-block shape: IMUL
+   EAX,dword ptr [EBP+0x14],0xa / MOV EDX,dword ptr [0x00063fd4] / ADD EDX,EAX,
+   spilled to a stack local and reloaded into EAX to be returned.  No compare,
+   no branch, no CALL.
+
+   IMUL again, the signed form, and here a negative index is not hypothetical:
+   every caller forms the argument as the unit record's portrait_id byte minus
+   0x3c, so a unit whose portrait_id is below 0x3c would address memory in
+   front of the table.  What keeps that from happening is the caller's own
+   guard on a different field -- fdps_unit_apply_damage tests the unit's side
+   byte at +0x6 for zero before it forms the index, and
+   fdps_combat_compute_hit_outcome tests the two sides of the exchange the same
+   way -- not anything in here.
+
+   The base is read out of the global on every call, uncached and untested, so
+   a call before fdps_load_data_tables has filled it returns the offset alone
+   as though it were an address. */
+struct fdps_enemy_data *fdps_get_enemy_record(int enemy_index)
+{
+    struct fdps_enemy_data *record;
+
+    record = (struct fdps_enemy_data *)
+        (data_fdps_battle_enemy_data_table_ptr
+         + enemy_index * ENEMY_RECORD_STRIDE);
+    return record;
+}

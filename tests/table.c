@@ -1,25 +1,26 @@
 /* tests/table.c -- cover for src/table.c.
  *
- * Expected values come from the assembly of the two accessors -- 00018ab0 over
- * FRIAPRDA.DAT and 00018ae0 over FRILEVUP.DAT -- and from ticket 17's layouts
- * of struct fdps_character_base_record and struct fdps_character_growth in
- * src/fdpstype.h.  None of them is read off the emitted C.
+ * Expected values come from the assembly of the three accessors -- 00018ab0
+ * over FRIAPRDA.DAT, 00018ae0 over FRILEVUP.DAT and 00018b10 over
+ * ENEMYDAT.DAT -- and from ticket 17's layouts of struct
+ * fdps_character_base_record, struct fdps_character_growth and struct
+ * fdps_enemy_data in src/fdpstype.h.  None of them is read off the emitted C.
  *
- * Both bodies are PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x4, then IMUL
+ * Every body is PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x4, then IMUL
  * EAX,dword ptr [EBP+0x14],<stride> / MOV EDX,dword ptr [<table base global>]
  * / ADD EDX,EAX and nothing else, so the three facts everything below is aimed
- * at are the same for each: the stride is the file's own (0x18 and 0x0b), the
- * base is that accessor's own pointer global read fresh on every call, and
- * there is no test of any kind in the body -- no bound on char_id, no null
- * check on the base.
+ * at are the same for each: the stride is the file's own (0x18, 0x0b and
+ * 0x0a), the base is that accessor's own pointer global read fresh on every
+ * call, and there is no test of any kind in the body -- no bound on the index,
+ * no null check on the base.
  *
- * Neither .DAT is a loose file: each reaches its table only as a block
+ * No .DAT is a loose file: each reaches its table only as a block
  * fdps_load_data_tables has already unpacked out of the VFS container into the
  * heap, so a staged byte buffer is exactly the shape the global holds at run
  * time.  Nothing here asserts what the real tables contain -- every byte read
- * back is one this file wrote -- and both globals are put back to null on the
- * way out, since ticket 23 has yet to define them and a later unit must not
- * find a stale address in either.
+ * back is one this file wrote -- and all three globals are put back to null on
+ * the way out, since ticket 23 has yet to define them and a later unit must not
+ * find a stale address in any of them.
  */
 #include <stddef.h>
 #include "testharn.h"
@@ -400,6 +401,227 @@ static void the_offsets_the_roster_reads_are_six_and_eight(void)
     CHECK_EQ((long) (record - growth_base), 9 * GROWTH_STRIDE);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_get_enemy_record @ 00018b10
+ *
+ * The third accessor of the same one-block shape, and its expected values come
+ * from its own assembly: IMUL EAX,dword ptr [EBP+0x14],0xa / MOV EDX,dword ptr
+ * [0x00063fd4] / ADD EDX,EAX, with nothing else in the body.  The stride is
+ * 0x0a, the base is a third global, and there is no test of any kind.  The
+ * record layout is ticket 17's struct fdps_enemy_data in src/fdpstype.h and
+ * the 91 records are ENEMYDAT.DAT's 910 bytes divided by that stride
+ * (resource_info/data_tables.md).
+ * ------------------------------------------------------------------ */
+
+/* What the IMUL multiplies by, and the records the 910-byte file holds. */
+#define ENEMY_STRIDE 0x0a
+#define ENEMY_COUNT 91
+
+/* A record's worth of lead-in and one spare record at the end.  The lead-in
+   matters more here than for the two tables above: every caller forms the
+   index as portrait_id - 0x3c, so a negative index is a value the game can
+   actually produce and the case that exercises it must land on real storage. */
+static unsigned char enemy_image[ENEMY_STRIDE + (ENEMY_COUNT + 1) * ENEMY_STRIDE];
+
+static unsigned char *enemy_base = enemy_image + ENEMY_STRIDE;
+
+static void install_enemy_base(unsigned char *base)
+{
+    data_fdps_battle_enemy_data_table_ptr = base;
+}
+
+static long enemy_offset(int enemy_index)
+{
+    unsigned char *record;
+
+    record = (unsigned char *) fdps_get_enemy_record(enemy_index);
+    return (long) (record - enemy_base);
+}
+
+/* A distinct byte per field so a field picked up one offset out reads a value
+   belonging to some other field.  hp gets 0xffff, which is the value that
+   separates the unsigned short the layout declares from a signed one. */
+static void stage_enemy_record(int enemy_index)
+{
+    unsigned char *record;
+
+    record = enemy_base + enemy_index * ENEMY_STRIDE;
+    record[0x00] = 0x11;  /* race_id */
+    record[0x01] = 0x22;  /* class_id */
+    record[0x02] = 0xff;  /* hp low  -- 0xffff */
+    record[0x03] = 0xff;  /* hp high */
+    record[0x04] = 0x44;  /* mp */
+    record[0x05] = 0x55;  /* ap */
+    record[0x06] = 0x66;  /* dp */
+    record[0x07] = 0x77;  /* dx */
+    record[0x08] = 0x88;  /* mv */
+    record[0x09] = 0x99;  /* exp_reward */
+}
+
+/* The ADD has no constant term, so record 0 is the table base itself -- the
+   file has no header to step over. */
+static void enemy_record_zero_is_the_table_base(void)
+{
+    install_enemy_base(enemy_base);
+    CHECK_EQ(enemy_offset(0), 0);
+}
+
+/* The 0xa the IMUL states.  An accessor that reached for the neighbouring
+   table's stride would land at 0x18 or 0xb here. */
+static void consecutive_enemy_records_are_ten_bytes_apart(void)
+{
+    install_enemy_base(enemy_base);
+    CHECK_EQ(enemy_offset(1), ENEMY_STRIDE);
+    CHECK_EQ(enemy_offset(2) - enemy_offset(1), ENEMY_STRIDE);
+    CHECK_EQ(enemy_offset(41), 41 * ENEMY_STRIDE);
+}
+
+/* 90 is the last index the 910-byte file has storage for, and the last byte of
+   that record is the file's last byte. */
+static void the_last_real_enemy_record_is_at_the_end_of_the_table(void)
+{
+    install_enemy_base(enemy_base);
+    CHECK_EQ(enemy_offset(ENEMY_COUNT - 1), (ENEMY_COUNT - 1) * ENEMY_STRIDE);
+    CHECK_EQ(enemy_offset(ENEMY_COUNT - 1) + ENEMY_STRIDE,
+             ENEMY_COUNT * ENEMY_STRIDE);
+}
+
+/* There is no CMP in the body, so an index past the end is multiplied and
+   added like any other.  A bound added here would change what every caller
+   reads for a portrait id above 0x96. */
+static void an_enemy_index_past_the_end_is_not_clamped(void)
+{
+    install_enemy_base(enemy_base);
+    CHECK_EQ(enemy_offset(ENEMY_COUNT), ENEMY_COUNT * ENEMY_STRIDE);
+}
+
+/* IMUL is the signed multiply, and this is the case the callers can reach:
+   portrait_id - 0x3c is negative for every playable character, so an index of
+   -1 must step one record backwards rather than becoming 0xfffffff6 and an
+   address four gigabytes away. */
+static void a_negative_enemy_index_steps_backwards(void)
+{
+    install_enemy_base(enemy_base);
+    CHECK_EQ(enemy_offset(-1), -ENEMY_STRIDE);
+}
+
+/* MOV EDX,dword ptr [0x00063fd4] is inside the body: the base is re-read on
+   every call, so moving the global moves every answer.  A transcription that
+   cached it in a file-scope copy passes everything above and fails here. */
+static void the_enemy_table_base_is_read_on_every_call(void)
+{
+    install_enemy_base(enemy_base);
+    CHECK_EQ(enemy_offset(3), 3 * ENEMY_STRIDE);
+    install_enemy_base(enemy_base + ENEMY_STRIDE);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_enemy_record(3) - enemy_base),
+             4 * ENEMY_STRIDE);
+    install_enemy_base(enemy_base);
+}
+
+/* Nothing tests the base, so a null table -- the state before
+   fdps_load_data_tables has run -- yields the offset alone as though it were
+   an address.  A null guard returning NULL would be a silent behaviour
+   change. */
+static void a_null_enemy_table_base_is_not_guarded(void)
+{
+    install_enemy_base((unsigned char *) 0);
+    CHECK_EQ((long) (unsigned long) fdps_get_enemy_record(2),
+             2 * ENEMY_STRIDE);
+    install_enemy_base(enemy_base);
+}
+
+/* Three accessors, three globals, at 0x00063fd4, 0x00063fd8 and 0x00063fec.
+   They are neighbours in bss and one loader call fills each, so an accessor
+   naming the wrong one is invisible to any case that installs a single base:
+   here each global gets its own and each accessor must follow its own
+   (contract B -- the nine table pointers are nine globals, not an array). */
+static void the_enemy_accessor_reads_its_own_global(void)
+{
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    CHECK_EQ(enemy_offset(1), ENEMY_STRIDE);
+
+    install_base(table_base + RECORD_STRIDE);
+    install_growth_base(growth_base + GROWTH_STRIDE);
+    CHECK_EQ(enemy_offset(1), ENEMY_STRIDE);
+
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base + ENEMY_STRIDE);
+    CHECK_EQ(record_offset(1), RECORD_STRIDE);
+    CHECK_EQ(growth_offset(1), GROWTH_STRIDE);
+
+    install_enemy_base(enemy_base);
+}
+
+/* The returned pointer addresses the file's own field offsets: all ten fields
+   of the staged record read back the byte written at that offset, so base and
+   stride are checked together against the packed layout.  hp straddles +0x02
+   and +0x03 and is the only field wider than a byte, which is what makes the
+   remaining eight land at odd offsets a padded struct would move. */
+static void the_returned_enemy_pointer_addresses_the_packed_record(void)
+{
+    struct fdps_enemy_data *record;
+
+    install_enemy_base(enemy_base);
+    stage_enemy_record(7);
+    record = fdps_get_enemy_record(7);
+    CHECK_EQ(record->race_id, 0x11);
+    CHECK_EQ(record->class_id, 0x22);
+    CHECK_EQ(record->mp, 0x44);
+    CHECK_EQ(record->ap, 0x55);
+    CHECK_EQ(record->dp, 0x66);
+    CHECK_EQ(record->dx, 0x77);
+    CHECK_EQ(record->mv, 0x88);
+    CHECK_EQ(record->exp_reward, 0x99);
+}
+
+/* hp is the one 16-bit field and the layout declares it unsigned, so the
+   all-ones pattern is 65535 and not -1.  Signedness is the branch a caller
+   takes the moment it compares the value, so it is pinned here rather than
+   left to the first caller to discover (contract C). */
+static void the_enemy_hp_coefficient_is_an_unsigned_word(void)
+{
+    struct fdps_enemy_data *record;
+
+    install_enemy_base(enemy_base);
+    stage_enemy_record(7);
+    record = fdps_get_enemy_record(7);
+    CHECK_EQ(record->hp, 0xffff);
+}
+
+/* The field both damage paths read straight after the call is the byte at
+   +0x9: 0001a319 MOV BL,byte ptr [EDX+0x9] in fdps_combat_compute_hit_outcome
+   and 0002851c MOV DL,byte ptr [EAX+0x9] in fdps_unit_apply_damage, each
+   multiplying it into the reward at 0x00069cec.  Asserted as a raw byte
+   through the returned pointer as well as through the struct above, so the
+   offset is pinned to the file's layout and not merely to the field order this
+   test happens to declare. */
+static void the_offset_the_reward_reads_is_nine(void)
+{
+    unsigned char *record;
+
+    install_enemy_base(enemy_base);
+    stage_enemy_record(9);
+    record = (unsigned char *) fdps_get_enemy_record(9);
+    CHECK_EQ(record[0x09], 0x99);
+    CHECK_EQ((long) (record - enemy_base), 9 * ENEMY_STRIDE);
+}
+
+/* The whole index expression as a caller writes it: portrait_id - 0x3c, with
+   0x3c the first enemy form and 0x96 the last the file has storage for.  This
+   is where the accessor's arithmetic is checked against the id the unit record
+   actually carries, which is the number the strategy-guide tables and
+   assets/characters.md are written in. */
+static void a_portrait_id_maps_to_its_record_by_subtracting_sixty(void)
+{
+    install_enemy_base(enemy_base);
+    CHECK_EQ(enemy_offset(0x3c - 0x3c), 0);
+    CHECK_EQ(enemy_offset(0x3d - 0x3c), ENEMY_STRIDE);
+    CHECK_EQ(enemy_offset(0x96 - 0x3c), (ENEMY_COUNT - 1) * ENEMY_STRIDE);
+}
+
 void run_table_tests(void)
 {
     RUN_TEST(record_zero_is_the_table_base);
@@ -423,9 +645,24 @@ void run_table_tests(void)
     RUN_TEST(the_returned_growth_pointer_addresses_the_packed_record);
     RUN_TEST(the_offsets_the_roster_reads_are_six_and_eight);
 
-    /* Put the global back the way it was found.  It is null until ticket 23
-       defines it, and leaving a pointer to this file's static buffer in it
-       would hand the next unit an address it has no business holding. */
+    RUN_TEST(enemy_record_zero_is_the_table_base);
+    RUN_TEST(consecutive_enemy_records_are_ten_bytes_apart);
+    RUN_TEST(the_last_real_enemy_record_is_at_the_end_of_the_table);
+    RUN_TEST(an_enemy_index_past_the_end_is_not_clamped);
+    RUN_TEST(a_negative_enemy_index_steps_backwards);
+    RUN_TEST(the_enemy_table_base_is_read_on_every_call);
+    RUN_TEST(a_null_enemy_table_base_is_not_guarded);
+    RUN_TEST(the_enemy_accessor_reads_its_own_global);
+    RUN_TEST(the_returned_enemy_pointer_addresses_the_packed_record);
+    RUN_TEST(the_enemy_hp_coefficient_is_an_unsigned_word);
+    RUN_TEST(the_offset_the_reward_reads_is_nine);
+    RUN_TEST(a_portrait_id_maps_to_its_record_by_subtracting_sixty);
+
+    /* Put the globals back the way they were found.  They are null until
+       ticket 23 defines them, and leaving a pointer to this file's static
+       buffers in one would hand the next unit an address it has no business
+       holding. */
     install_base((unsigned char *) 0);
     install_growth_base((unsigned char *) 0);
+    install_enemy_base((unsigned char *) 0);
 }

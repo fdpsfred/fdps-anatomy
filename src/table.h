@@ -62,4 +62,29 @@ extern struct fdps_character_base_record *fdps_get_character_base_record(int cha
 extern struct fdps_character_growth *fdps_get_growth_record(int char_id);
 #pragma aux fdps_get_growth_record "*" parm caller [];
 
+/* Returns a pointer to record enemy_index of the ENEMYDAT.DAT enemy stat
+   table: race and class, the per-level HP coefficient, the per-level MP, AP,
+   DP and DX coefficients, the absolute movement allowance and the experience
+   multiplier the kill reward is scaled by, in the 10 bytes of struct
+   fdps_enemy_data.
+
+   enemy_index is the portrait id minus 0x3c, 0..90 over the 91 records the
+   910-byte file holds (resource_info/data_tables.md): portrait ids 0x00-0x3b
+   are the playable characters and go to the two tables above instead, and
+   0x3c upwards are the enemy forms this table describes.  Nothing is checked
+   -- no bound at either end, and the multiply is signed, so an index below
+   zero addresses memory in front of the table just as one past 90 addresses
+   memory behind it -- and the base is not tested for null either.
+
+   The subtraction is the caller's and so is the guard that makes it safe:
+   fdps_unit_apply_damage and fdps_combat_compute_hit_outcome reach it only
+   after testing the unit's side byte, and fdps_deploy_unit only after
+   comparing the portrait id itself against 0x3c.  What the callers want out of
+   the record is the experience multiplier at +0x9, which both damage paths
+   read straight after the call.
+
+   Reads only the table base global, calls nothing, and dereferences nothing. */
+extern struct fdps_enemy_data *fdps_get_enemy_record(int enemy_index);
+#pragma aux fdps_get_enemy_record "*" parm caller [];
+
 #endif
