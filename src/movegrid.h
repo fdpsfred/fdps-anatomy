@@ -36,6 +36,15 @@ extern void fdps_map_grid_reset(void);
 extern void fdps_move_grid_mark_zone_of_control(int tile_x, int tile_y);
 #pragma aux fdps_move_grid_mark_zone_of_control "*" parm caller [];
 
+/* ORs the movement-stops-here bit 0x80 into the single cell (tile_x, tile_y),
+   leaving every other bit of the cell alone.  A tile carrying it may be
+   entered but movement ends on it; only fdps_map_grid_reset clears it again.
+   Neither coordinate is bounds-checked and the grid pointer is not checked for
+   null: the cell is addressed and written unconditionally.  Nothing in the
+   original image calls this. */
+extern void fdps_move_grid_set_stop_flag(int tile_x, int tile_y);
+#pragma aux fdps_move_grid_set_stop_flag "*" parm caller [];
+
 /* Marks the zone of control of every unit on the side opposite the caller's
    into the grid, so the movement range flooded over it afterwards cannot be
    walked through them.  side_select is a TRUTH VALUE, not a side number: 0

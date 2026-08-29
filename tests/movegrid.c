@@ -593,6 +593,82 @@ static void zones_tile_bytes_are_passed_through_unchecked(void)
     CHECK_EQ(cell_flags(9), 0x80);
 }
 
+/* 00010da0.  The address is base + 4 + 2 * (width * tile_y + tile_x): IMUL
+   EAX,dword ptr [EBP+0x18] takes tile_y, ADD EAX,dword ptr [EBP+0x14] takes
+   tile_x, ADD EAX,EAX is the two-byte stride and ADD EAX,0x4 steps over the
+   header.  On a 4x4 grid (2,1) is therefore cell 6 and its neighbours in the
+   array are untouched.  OR byte ptr [EAX],0x80 is a byte operation on byte 0,
+   so the marker byte of that same cell stays where it was. */
+static void stop_flag_addresses_the_named_cell(void)
+{
+    stage_blank(4, 4);
+    fdps_move_grid_set_stop_flag(2, 1);
+    CHECK_EQ(cell_flags(6), 0x80);
+    CHECK_EQ(cell_marker(6), 0x00);
+    CHECK_EQ(cell_flags(5), 0x00);
+    CHECK_EQ(cell_flags(7), 0x00);
+    CHECK_EQ((int) *(short *) stage_grid, 4);
+}
+
+/* OR, not MOV.  A cell already carrying 0x40 (a unit stands here) and low bits
+   keeps all of them, and byte 1 is not part of the operand: a store would blank
+   the 0x40 the zone-of-control mark had just put there. */
+static void stop_flag_is_ored_into_the_cell(void)
+{
+    stage_blank(3, 3);
+    stage_grid[4 + 4 * 2] = 0x4f;
+    stage_grid[4 + 4 * 2 + 1] = 0x07;
+    fdps_move_grid_set_stop_flag(1, 1);
+    CHECK_EQ(cell_flags(4), 0xcf);
+    CHECK_EQ(cell_marker(4), 0x07);
+}
+
+/* MOVSX EAX,word ptr [EAX] reads the width word signed.  With a width of -1
+   the index for (0,1) is -1, which is base + 2 -- the height word of the
+   header -- and that is where the 0x80 goes.  Read the word unsigned and the
+   index is 65535 instead, 128KB past the end of the block, and this fixture
+   would be left untouched. */
+static void stop_flag_width_word_is_signed(void)
+{
+    stage_blank(-1, 0);
+    fdps_move_grid_set_stop_flag(0, 1);
+    CHECK_EQ((int) stage_grid[2], 0x80);
+    CHECK_EQ((int) stage_grid[3], 0x00);
+    CHECK_EQ((int) stage_grid[0], 0xff);
+    CHECK_EQ(cell_flags(0), 0x00);
+}
+
+/* The width is read out of the header inside the body, so it is whatever the
+   header says at the moment of the call: the same (1,1) lands on cell 5 with a
+   width of 4 and on cell 4 with a width of 3. */
+static void stop_flag_width_comes_from_the_header(void)
+{
+    stage_blank(4, 4);
+    fdps_move_grid_set_stop_flag(1, 1);
+    CHECK_EQ(cell_flags(5), 0x80);
+    CHECK_EQ(cell_flags(4), 0x00);
+
+    *(short *) stage_grid = (short) 3;
+    fdps_move_grid_set_stop_flag(1, 1);
+    CHECK_EQ(cell_flags(4), 0x80);
+}
+
+/* Neither coordinate is compared against the header -- there is no CMP at all
+   between the prologue and the OR.  On a 4x4 grid a tile_x of 5 marks cell 5,
+   which is tile (1,1), and a tile_y of 4 marks cell 16, one row past the last.
+   That is the original's behaviour rather than a desirable one; it is asserted
+   so that a guard added here would be noticed. */
+static void stop_flag_has_no_bounds_check(void)
+{
+    stage_blank(4, 4);
+    fdps_move_grid_set_stop_flag(5, 0);
+    CHECK_EQ(cell_flags(5), 0x80);
+
+    stage_blank(4, 4);
+    fdps_move_grid_set_stop_flag(0, 4);
+    CHECK_EQ(cell_flags(16), 0x80);
+}
+
 void run_movegrid_tests(void)
 {
     RUN_TEST(grid_cell_stride_is_two);
@@ -617,6 +693,12 @@ void run_movegrid_tests(void)
     RUN_TEST(zoc_centre_has_no_bounds_check);
     RUN_TEST(zoc_width_guard_is_signed);
     RUN_TEST(zoc_height_guard_is_signed);
+
+    RUN_TEST(stop_flag_addresses_the_named_cell);
+    RUN_TEST(stop_flag_is_ored_into_the_cell);
+    RUN_TEST(stop_flag_width_word_is_signed);
+    RUN_TEST(stop_flag_width_comes_from_the_header);
+    RUN_TEST(stop_flag_has_no_bounds_check);
 
     RUN_TEST(zones_unit_record_stride_is_0x50);
     RUN_TEST(zones_select_zero_marks_nonzero_sides);

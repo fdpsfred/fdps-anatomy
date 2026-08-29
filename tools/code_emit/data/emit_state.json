@@ -42,6 +42,14 @@
       "status": "committed",
       "emitted_against": "0x96",
       "rounds": 0
+    },
+    "00010da0": {
+      "name": "fdps_move_grid_set_stop_flag",
+      "target": "movegrid.c",
+      "body_size": "0x38",
+      "status": "committed",
+      "emitted_against": "0x38",
+      "rounds": 0
     }
   }
 }

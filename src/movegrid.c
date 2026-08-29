@@ -156,6 +156,41 @@ void fdps_move_grid_mark_zone_of_control(int tile_x, int tile_y)
     unit_cell->flags = (unsigned char) (unit_cell->flags | 0x40);
 }
 
+/* 00010da0.  The one-cell form of the 0x80 mark that the function above writes
+   out inline four times over.  Nothing in the image calls this entry and
+   nothing takes its address -- get_xrefs_to 0x00010da0 comes back empty -- so
+   it is code the linker kept from an object whose other functions are used.
+   It is emitted anyway because it is compiler-emitted game code and its
+   absence would be a hole in the image, not because a call site exists.
+
+   It has no null check, unlike both functions above.  The first two
+   instructions of the body are MOV EAX,[0x00060144] / MOVSX EAX,word ptr
+   [EAX]: the pointer is dereferenced before anything has looked at it.
+   Adding the guard its neighbours have is the obvious tidy-up and it would
+   not be this function.
+
+   The width word arrives through MOVSX, the signed read, and the address is
+   formed as base + 4 + 2 * (width * tile_y + tile_x) with the multiply taking
+   tile_y ([EBP+0x18]) and the add taking tile_x ([EBP+0x14]).  A header width
+   of 0xffff is therefore -1 and puts the cell two bytes *below* the array, in
+   the header itself; read unsigned it would be 65535 and land 128KB past the
+   end of the block.  Neither coordinate is checked against the header at all.
+
+   OR byte ptr [EAX],0x80 leaves byte 0's other bits and byte 1's flood-fill
+   marker where they are.  A store would drop the 0x40 that says a unit stands
+   on the tile, which is exactly the bit the caller of a zone-of-control mark
+   has just set, and would stop zones accumulating. */
+void fdps_move_grid_set_stop_flag(int tile_x, int tile_y)
+{
+    struct fdps_move_grid_cell *cell;
+
+    cell = (struct fdps_move_grid_cell *)
+           (data_fdps_battle_move_grid_ptr + 4 +
+            2 * ((int) *(short *) data_fdps_battle_move_grid_ptr * tile_y +
+                 tile_x));
+    cell->flags = (unsigned char) (cell->flags | 0x80);
+}
+
 /* 00010b90.  Walks the whole map unit array once and hands every unit on the
    opposing side to fdps_move_grid_mark_zone_of_control above, so the range
    flood fill that runs next cannot walk through them.
