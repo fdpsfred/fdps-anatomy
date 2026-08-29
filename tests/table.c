@@ -1,27 +1,27 @@
 /* tests/table.c -- cover for src/table.c.
  *
- * Expected values come from the assembly of the six accessors -- 00018ab0
+ * Expected values come from the assembly of the seven accessors -- 00018ab0
  * over FRIAPRDA.DAT, 00018ae0 over FRILEVUP.DAT, 00018b10 over ENEMYDAT.DAT,
- * 00018b40 over ITEM.DAT, 00018b70 over PROMAP.DAT and 00018ba0 over
- * PROEQU.DAT -- and from ticket 17's layouts of struct
+ * 00018b40 over ITEM.DAT, 00018b70 over PROMAP.DAT, 00018ba0 over PROEQU.DAT
+ * and 00018bd0 over MAGICDAT.DAT -- and from ticket 17's layouts of struct
  * fdps_character_base_record, struct fdps_character_growth, struct
- * fdps_enemy_data, struct fdps_item_effect, struct fdps_class_record and
- * struct fdps_class_equip_record in src/fdpstype.h.  None of them is read off
- * the emitted C.
+ * fdps_enemy_data, struct fdps_item_effect, struct fdps_class_record, struct
+ * fdps_class_equip_record and struct fdps_spell_effect in src/fdpstype.h.
+ * None of them is read off the emitted C.
  *
  * Every body is PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x4, then IMUL
  * EAX,dword ptr [EBP+0x14],<stride> / MOV EDX,dword ptr [<table base global>]
  * / ADD EDX,EAX and nothing else, so the three facts everything below is aimed
  * at are the same for each: the stride is the file's own (0x18, 0x0b, 0x0a,
- * 0x17, 0x0a and 0x06), the base is that accessor's own pointer global read
- * fresh on every call, and there is no test of any kind in the body -- no bound
- * on the index, no null check on the base.
+ * 0x17, 0x0a, 0x06 and 0x07), the base is that accessor's own pointer global
+ * read fresh on every call, and there is no test of any kind in the body -- no
+ * bound on the index, no null check on the base.
  *
  * No .DAT is a loose file: each reaches its table only as a block
  * fdps_load_data_tables has already unpacked out of the VFS container into the
  * heap, so a staged byte buffer is exactly the shape the global holds at run
  * time.  Nothing here asserts what the real tables contain -- every byte read
- * back is one this file wrote -- and all six globals are put back to null on
+ * back is one this file wrote -- and all seven globals are put back to null on
  * the way out, since ticket 23 has yet to define them and a later unit must not
  * find a stale address in any of them.
  */
@@ -1325,6 +1325,291 @@ static void the_caller_scans_offsets_zero_through_five(void)
     CHECK_EQ((long) (record - equip_base), 9 * EQUIP_STRIDE);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_get_spell_record @ 00018bd0
+ *
+ * The seventh accessor of the same one-block shape, and its expected values
+ * come from its own assembly: IMUL EAX,dword ptr [EBP+0x14],0x7 / MOV EDX,dword
+ * ptr [0x00063ff0] / ADD EDX,EAX, with nothing else in the body.  The stride is
+ * 0x07, the base is a seventh global, and there is no test of any kind.  The
+ * record layout is ticket 17's struct fdps_spell_effect in src/fdpstype.h and
+ * the 40 records are MAGICDAT.DAT's 280 bytes divided by that stride
+ * (resource_info/data_tables.md, assets/tables/spells.md).
+ *
+ * The stride is the fact most at risk here: the record opens with a signed
+ * 16-bit power and carries five single bytes behind it, so a struct that lost
+ * the pack pragma measures 8 and every id from 0x01 up reads a record that
+ * starts one byte late and drifts further with each id.
+ * ------------------------------------------------------------------ */
+
+/* What the IMUL multiplies by, the records the 280-byte file holds, and the
+   file's own length.  ids 0x00-0x27 are continuous with no gap
+   (assets/spells.md). */
+#define SPELL_STRIDE 0x07
+#define SPELL_COUNT 40
+#define SPELL_FILE_BYTES 280
+
+/* A record's worth of lead-in for the negative id and a spare record past the
+   end, so both of those cases land on real storage. */
+static unsigned char spell_image[SPELL_STRIDE + (SPELL_COUNT + 1) * SPELL_STRIDE];
+
+static unsigned char *spell_base = spell_image + SPELL_STRIDE;
+
+static void install_spell_base(unsigned char *base)
+{
+    data_fdps_battle_spell_effect_table_ptr = base;
+}
+
+static long spell_offset(int spell_id)
+{
+    unsigned char *record;
+
+    record = (unsigned char *) fdps_get_spell_record(spell_id);
+    return (long) (record - spell_base);
+}
+
+/* A distinct byte per field so a field picked up one offset out reads a value
+   belonging to some other field.  The values are ones the file really carries:
+   power 0xff06 is -250, the form the eight attack-multiplier spells store (a
+   2.50x multiplier held as the negative percentage, assets/tables/spells.md);
+   cast_range_flags 0x17 is the straight-line bit 0x10 over a range of 7;
+   mp_cost 130 is above 0x7f, which separates the unsigned byte the layout
+   declares from a signed one; and target_side 0x03 is the third value the
+   field takes -- spell 0x16 carries it, against the 0x00 and 0x01 the field's
+   documentation lists (assets/spells.md). */
+static void stage_spell_record(int spell_id)
+{
+    unsigned char *record;
+
+    record = spell_base + spell_id * SPELL_STRIDE;
+    record[0x00] = 0x06;  /* power low  -- 0xff06, i.e. -250 signed */
+    record[0x01] = 0xff;  /* power high */
+    record[0x02] = 0x5f;  /* hit_rate, 95 per cent */
+    record[0x03] = 0x17;  /* cast_range_flags, straight line at range 7 */
+    record[0x04] = 0x02;  /* area */
+    record[0x05] = 0x82;  /* mp_cost, 130 */
+    record[0x06] = 0x03;  /* target_side */
+}
+
+/* The ADD has no constant term, so record 0 is the table base itself -- the
+   file has no header to step over, and spell 0x00 is the first record. */
+static void spell_record_zero_is_the_table_base(void)
+{
+    install_spell_base(spell_base);
+    CHECK_EQ(spell_offset(0), 0);
+}
+
+/* The 0x7 the IMUL states.  This is the case a struct that lost the pack
+   pragma fails: sizeof(struct fdps_spell_effect) would be 8 and record 1 would
+   land at 8 rather than 7, with the error growing by a byte per id. */
+static void consecutive_spell_records_are_seven_bytes_apart(void)
+{
+    install_spell_base(spell_base);
+    CHECK_EQ(spell_offset(1), SPELL_STRIDE);
+    CHECK_EQ(spell_offset(2) - spell_offset(1), SPELL_STRIDE);
+    CHECK_EQ(spell_offset(0x14), 0x14 * SPELL_STRIDE);
+    CHECK_EQ(spell_offset(0x27) - spell_offset(0x26), SPELL_STRIDE);
+}
+
+/* 0x27 is the last spell id and the last record the 280-byte file holds; the
+   byte after that record is the file's 280th. */
+static void the_last_real_spell_record_is_at_the_end_of_the_table(void)
+{
+    install_spell_base(spell_base);
+    CHECK_EQ(spell_offset(0x27), 0x27 * SPELL_STRIDE);
+    CHECK_EQ(spell_offset(SPELL_COUNT - 1) + SPELL_STRIDE, SPELL_FILE_BYTES);
+}
+
+/* There is no CMP in the body, so an id past the last spell is multiplied and
+   added like any other.  A bound added here would change what every caller
+   reads for an id above 0x27. */
+static void a_spell_id_past_the_end_is_not_clamped(void)
+{
+    install_spell_base(spell_base);
+    CHECK_EQ(spell_offset(SPELL_COUNT), SPELL_COUNT * SPELL_STRIDE);
+    CHECK_EQ(spell_offset(SPELL_COUNT) - SPELL_FILE_BYTES, 0);
+}
+
+/* IMUL is the signed multiply, so a negative id steps backwards off the front
+   of the table rather than becoming a vast positive offset.  An unsigned
+   stride would read 0xfffffff9 here. */
+static void a_negative_spell_id_steps_backwards(void)
+{
+    install_spell_base(spell_base);
+    CHECK_EQ(spell_offset(-1), -SPELL_STRIDE);
+}
+
+/* MOV EDX,dword ptr [0x00063ff0] is inside the body: the base is re-read on
+   every call, so moving the global moves every answer.  A transcription that
+   cached it in a file-scope copy passes everything above and fails here. */
+static void the_spell_table_base_is_read_on_every_call(void)
+{
+    install_spell_base(spell_base);
+    CHECK_EQ(spell_offset(3), 3 * SPELL_STRIDE);
+    install_spell_base(spell_base + SPELL_STRIDE);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_spell_record(3) - spell_base),
+             4 * SPELL_STRIDE);
+    install_spell_base(spell_base);
+}
+
+/* Nothing tests the base, so a null table -- the state before
+   fdps_load_data_tables has run -- yields the offset alone as though it were
+   an address.  A null guard returning NULL would be a silent behaviour
+   change. */
+static void a_null_spell_table_base_is_not_guarded(void)
+{
+    install_spell_base((unsigned char *) 0);
+    CHECK_EQ((long) (unsigned long) fdps_get_spell_record(2),
+             2 * SPELL_STRIDE);
+    install_spell_base(spell_base);
+}
+
+/* Seven accessors, seven globals, at 0x00063fd0, 0x00063fd4, 0x00063fd8,
+   0x00063fe0, 0x00063fe4, 0x00063fec and 0x00063ff0.  They are neighbours in
+   bss and one loader call fills each, so an accessor naming the wrong one is
+   invisible to any case that installs a single base: here each global gets its
+   own and each accessor must follow its own (contract B -- the nine table
+   pointers are nine globals, not an array). */
+static void the_spell_accessor_reads_its_own_global(void)
+{
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    install_item_base(item_base);
+    install_class_base(class_base);
+    install_equip_base(equip_base);
+    install_spell_base(spell_base);
+    CHECK_EQ(spell_offset(1), SPELL_STRIDE);
+
+    install_base(table_base + RECORD_STRIDE);
+    install_growth_base(growth_base + GROWTH_STRIDE);
+    install_enemy_base(enemy_base + ENEMY_STRIDE);
+    install_item_base(item_base + ITEM_STRIDE);
+    install_class_base(class_base + CLASS_STRIDE);
+    install_equip_base(equip_base + EQUIP_STRIDE);
+    CHECK_EQ(spell_offset(1), SPELL_STRIDE);
+
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    install_item_base(item_base);
+    install_class_base(class_base);
+    install_equip_base(equip_base);
+    install_spell_base(spell_base + SPELL_STRIDE);
+    CHECK_EQ(record_offset(1), RECORD_STRIDE);
+    CHECK_EQ(growth_offset(1), GROWTH_STRIDE);
+    CHECK_EQ(enemy_offset(1), ENEMY_STRIDE);
+    CHECK_EQ(item_offset(1), ITEM_STRIDE);
+    CHECK_EQ(class_offset(1), CLASS_STRIDE);
+    CHECK_EQ(equip_offset(1), EQUIP_STRIDE);
+
+    install_spell_base(spell_base);
+}
+
+/* The returned pointer addresses the file's own field offsets: all seven bytes
+   of the staged record read back what was written there, so base and stride are
+   checked together against the packed layout.  The power word at +0x00 pushes
+   the five bytes behind it onto offsets a padded struct would move, and it is
+   staged at an odd id so the record itself starts at an odd address -- which is
+   where a struct the compiler thought it could align would come apart. */
+static void the_returned_spell_pointer_addresses_the_packed_record(void)
+{
+    struct fdps_spell_effect *record;
+
+    install_spell_base(spell_base);
+    stage_spell_record(7);
+    record = fdps_get_spell_record(7);
+    CHECK_EQ(record->hit_rate, 0x5f);
+    CHECK_EQ(record->cast_range_flags, 0x17);
+    CHECK_EQ(record->area, 0x02);
+    CHECK_EQ(record->mp_cost, 130);
+    CHECK_EQ(record->target_side, 0x03);
+    CHECK_EQ((long) ((unsigned char *) record - spell_base), 7 * SPELL_STRIDE);
+}
+
+/* power is the one 16-bit field and the one signed field in the record, which
+   is what both callers that read it say outright: 00028591 MOVSX EAX,word ptr
+   [EAX] in fdps_spell_heal_unit and 00013945 in fdps_score_targets_for_spell,
+   each straight after the ADD ESP,0x4.  The eight attack-multiplier spells
+   store the multiplier as a negative percentage, so -250 is 2.50x and reading
+   it unsigned would give 65286 (assets/tables/spells.md).  Signedness is the
+   branch a caller takes -- fdps_score_targets_for_spell compares it against a
+   unit's HP with JGE -- so it is pinned here (contract C). */
+static void the_spell_power_is_a_signed_word(void)
+{
+    struct fdps_spell_effect *record;
+
+    install_spell_base(spell_base);
+    stage_spell_record(7);
+    record = fdps_get_spell_record(7);
+    CHECK_EQ(record->power, -250);
+}
+
+/* The five byte fields are unsigned, which is what the callers' zero-extension
+   says: XOR EDX,EDX / MOV DL,byte ptr [EAX+0x5] at 000285f7 in
+   fdps_spell_deduct_mp_cost and XOR EAX,EAX / MOV AL,byte ptr [EDX+0x2] at
+   00028fde in fdps_unit_apply_status_effect.  An all-ones byte must therefore
+   read 255 and not -1: in the hit-rate case that is the difference between a
+   spell that always lands and one whose CMP against a 0..99 roll can never
+   succeed (contract C). */
+static void the_spell_byte_fields_are_unsigned(void)
+{
+    struct fdps_spell_effect *record;
+    unsigned char *bytes;
+    int field;
+
+    install_spell_base(spell_base);
+    bytes = spell_base + 11 * SPELL_STRIDE;
+    for (field = 0x02; field < SPELL_STRIDE; field++) {
+        bytes[field] = 0xff;
+    }
+    record = fdps_get_spell_record(11);
+    CHECK_EQ(record->hit_rate, 255);
+    CHECK_EQ(record->cast_range_flags, 255);
+    CHECK_EQ(record->area, 255);
+    CHECK_EQ(record->mp_cost, 255);
+    CHECK_EQ(record->target_side, 255);
+}
+
+/* The three offsets the callers read straight after the call, as raw bytes
+   through the returned pointer: the power word at +0x00 and +0x01, the hit rate
+   at +0x02 -- 00028fe3 MOV AL,byte ptr [EDX+0x2] -- and the MP cost at +0x05 --
+   000285f9 MOV DL,byte ptr [EAX+0x5].  Pinned to the file's layout and not
+   merely to the field order this test happens to declare, and the last one is
+   +0x06: byte +0x07 already belongs to the next spell, which the last
+   assertion states as the distance between two records. */
+static void the_offsets_the_spell_callers_read_are_zero_two_and_five(void)
+{
+    unsigned char *record;
+
+    install_spell_base(spell_base);
+    stage_spell_record(9);
+    record = (unsigned char *) fdps_get_spell_record(9);
+    CHECK_EQ(record[0x00], 0x06);
+    CHECK_EQ(record[0x01], 0xff);
+    CHECK_EQ(record[0x02], 0x5f);
+    CHECK_EQ(record[0x05], 0x82);
+    CHECK_EQ(record[0x06], 0x03);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_spell_record(10) - record),
+             SPELL_STRIDE);
+    CHECK_EQ((long) (record - spell_base), 9 * SPELL_STRIDE);
+}
+
+/* The id substitution fdps_unit_apply_status_effect performs before it calls:
+   00028f92 onward tests its effect code against 0x11, 0x12 and 0x13 and passes
+   those through, and for anything else 00028fc8 MOV dword ptr [EBP+0x14],0x14
+   replaces it before the PUSH at 00028fd2.  The substitution is the caller's
+   and stays the caller's -- nothing in the accessor maps one id to another --
+   so this pins that asking for 0x14 and asking for 0x11 reach two different
+   records, which is what makes moving the substitution in here visible. */
+static void the_status_effect_substitution_is_not_this_accessors(void)
+{
+    install_spell_base(spell_base);
+    CHECK_EQ(spell_offset(0x14), 0x14 * SPELL_STRIDE);
+    CHECK_EQ(spell_offset(0x11), 0x11 * SPELL_STRIDE);
+    CHECK_EQ(spell_offset(0x14) - spell_offset(0x11), 3 * SPELL_STRIDE);
+}
+
 void run_table_tests(void)
 {
     RUN_TEST(record_zero_is_the_table_base);
@@ -1397,6 +1682,20 @@ void run_table_tests(void)
     RUN_TEST(the_returned_equip_pointer_addresses_the_six_positions);
     RUN_TEST(the_caller_scans_offsets_zero_through_five);
 
+    RUN_TEST(spell_record_zero_is_the_table_base);
+    RUN_TEST(consecutive_spell_records_are_seven_bytes_apart);
+    RUN_TEST(the_last_real_spell_record_is_at_the_end_of_the_table);
+    RUN_TEST(a_spell_id_past_the_end_is_not_clamped);
+    RUN_TEST(a_negative_spell_id_steps_backwards);
+    RUN_TEST(the_spell_table_base_is_read_on_every_call);
+    RUN_TEST(a_null_spell_table_base_is_not_guarded);
+    RUN_TEST(the_spell_accessor_reads_its_own_global);
+    RUN_TEST(the_returned_spell_pointer_addresses_the_packed_record);
+    RUN_TEST(the_spell_power_is_a_signed_word);
+    RUN_TEST(the_spell_byte_fields_are_unsigned);
+    RUN_TEST(the_offsets_the_spell_callers_read_are_zero_two_and_five);
+    RUN_TEST(the_status_effect_substitution_is_not_this_accessors);
+
     /* Put the globals back the way they were found.  They are null until
        ticket 23 defines them, and leaving a pointer to this file's static
        buffers in one would hand the next unit an address it has no business
@@ -1407,4 +1706,5 @@ void run_table_tests(void)
     install_item_base((unsigned char *) 0);
     install_class_base((unsigned char *) 0);
     install_equip_base((unsigned char *) 0);
+    install_spell_base((unsigned char *) 0);
 }

@@ -353,5 +353,31 @@
       "needs": "Establishing whether a live unit can ever carry class code 0x24-0x27 at unit record +0x20 (across deployment and promotion paths); if it can, observing the four in DOSBox-X. If unreachable in play, the concern closes as unobservable.",
       "status": "open"
     }
+  ],
+  "00018bd0": [
+    {
+      "from": "emit",
+      "what": "The tests assert only the accessor's arithmetic against staged bytes: no assertion reads a real MAGICDAT.DAT record, so the 40 rows of assets/spells.md are not checked against what the emitted code would hand a caller. The staged values are drawn from that table (power -250 as an attack multiplier, hit 95, straight-line range 0x17, MP 130, target 3) but they are values this test wrote, not values the shipped file was read for.",
+      "needs": "Ticket 23 emitting data_fdps_battle_spell_effect_table_ptr's real contents, or a test that stages MAGICDAT.DAT itself through tests/gamefile.lst once the VFS extraction path is emitted. Either would let assets/spells.md's rows be asserted end to end -- 40 records at stride 7 filling exactly 280 bytes -- rather than only the stride.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "Whether an out-of-range spell id ever reaches this accessor in play is unsettled, and with it whether the missing bound is observable. Four of the twelve callers were read here (00028570, 000285c0, 00028f70, 00013920) and all four pass an id that is either a spell number from a unit's 40-bit known-spell bitmap or the literal 0x14, so none of them can exceed 0x27. The remaining eight -- fdps_battle_spell_command, fdps_cast_spell_on_targets, fdps_draw_spell_list_page, fdps_map_actor_cast_chosen_spell, fdps_map_actor_score_best_spell, fdps_map_actor_take_best_action, fdps_spell_damage_unit, fdps_spell_list_select_loop -- were not read, and one of them (fdps_map_actor_cast_chosen_spell) takes its id from data_fdps_map_ai_best_spell_id, an int global whose initial value is 0 and whose range depends on the AI scoring pass.",
+      "needs": "Emitting those eight callers, in particular the AI path that fills data_fdps_map_ai_best_spell_id at 0x00063f90, and checking whether that global can hold a value outside 0x00-0x27 when the cast is reached. If it cannot, the absent bound is unobservable and the concern closes; if it can, what the record past the table's end contains is heap residue and differs between the original and the rebuild, which no unit test can pin.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Nothing yet asserts that the emitted accessor hands a caller the right bytes of the real MAGICDAT.DAT. Every test stages its own buffer, so the 40 rows of assets/spells.md are checked against the stride and the field offsets but never against the shipped file.",
+      "needs": "Ticket 23 emitting data_fdps_battle_spell_effect_table_ptr's real contents, or the VFS extraction path reaching a state where MAGICDAT.DAT can be staged through tests/gamefile.lst. Either would let 40 records at stride 7 filling exactly 280 bytes be asserted end to end. Recorded by the emitter and confirmed here.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Whether the absent bound is observable in play is still open. I read four of the twelve callers (00028570, 000285c0, 00028f70, 00013920) and none of them can present an id above 0x27 -- they pass either a spell number out of a unit's 40-bit known-spell bitmap or the literal 0x14. The other eight, in particular fdps_map_actor_cast_chosen_spell taking its id from the int global at 0x00063f90, were not read.",
+      "needs": "Emitting those eight callers and establishing the range data_fdps_map_ai_best_spell_id can hold when the cast is reached. If it cannot leave 0x00-0x27 the missing bound is unobservable and this closes; if it can, what lies past the table is heap residue that differs between the original and the rebuild and no unit test can pin it.",
+      "status": "open"
+    }
   ]
 }

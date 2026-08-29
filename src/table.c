@@ -249,3 +249,50 @@ struct fdps_class_equip_record *fdps_get_class_equip_record(int class_index)
          + class_index * CLASS_EQUIP_RECORD_STRIDE);
     return record;
 }
+
+/* The stride of one MAGICDAT.DAT record, as the original writes it: IMUL
+   EAX,dword ptr [EBP+0x14],0x7.  A literal and not sizeof(struct
+   fdps_spell_effect), and here that distinction is the sharpest of the seven:
+   the record opens with a signed 16-bit power and carries five single bytes
+   behind it, so declared without the pack pragma the struct measures 8 and
+   every lookup from spell 0x01 onward lands one byte further into the table
+   than the file says.  The file's stride is the fact that has to survive
+   (rebuild_info/pitfalls.md). */
+#define SPELL_RECORD_STRIDE 0x07
+
+/* 00018bd0.  The seventh accessor of the same one-basic-block shape: IMUL
+   EAX,dword ptr [EBP+0x14],0x7 / MOV EDX,dword ptr [0x00063ff0] / ADD EDX,EAX,
+   spilled to a stack local and reloaded into EAX to be returned.  No compare,
+   no branch, no CALL.
+
+   IMUL again, the signed form, so a negative id steps backwards off the front
+   of the table instead of becoming a four-gigabyte offset.  int is the width
+   the parameter is read at, and the callers read so far push a value that fits
+   it: fdps_unit_apply_status_effect at 00028fc8 replaces its effect code with a
+   literal 0x14 for everything outside 0x11..0x13 before the PUSH at 00028fd2,
+   and fdps_spell_heal_unit and fdps_spell_deduct_mp_cost forward their own
+   third parameter unchanged.
+
+   Nothing is bounded: MAGICDAT.DAT holds 40 records over its 280 bytes, ids
+   0x00-0x27 with no gap (assets/spells.md), and an id past 0x27 is multiplied
+   and added like any other.
+
+   What the callers do with the pointer is where the record's own widths show:
+   00028591 MOVSX EAX,word ptr [EAX] in fdps_spell_heal_unit and 00013945 in
+   fdps_score_targets_for_spell take power as a SIGNED word -- it is negative
+   for the eight attack-multiplier spells -- while 000285f9 MOV DL,byte ptr
+   [EAX+0x5] after XOR EDX,EDX takes the MP cost and 00028fe3 MOV AL,byte ptr
+   [EDX+0x2] after XOR EAX,EAX takes the hit rate, both zero-extended.
+
+   The base is read out of the global on every call, uncached and untested, so
+   a call before fdps_load_data_tables has filled it returns the offset alone
+   as though it were an address. */
+struct fdps_spell_effect *fdps_get_spell_record(int spell_id)
+{
+    struct fdps_spell_effect *record;
+
+    record = (struct fdps_spell_effect *)
+        (data_fdps_battle_spell_effect_table_ptr
+         + spell_id * SPELL_RECORD_STRIDE);
+    return record;
+}

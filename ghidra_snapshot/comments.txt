@@ -2171,10 +2171,10 @@ Watcom alignment padding: lea eax,[eax+0] / lea edx,[edx+0] / mov ebx,ebx, 11 by
 Returns a pointer to one record of the spell table loaded from MagicDat.dat, computing base + spell_id * 7.
 
 Algorithm:
-Multiplies spell_id by 7 and adds the spell table base pointer held in the global at 0x00063ff0, which fdps_load_data_tables fills by loading "MagicDat.dat" through fdps_vfs_load_file_or_exit. The stride of 7 is the MAGICDAT.DAT record: signed word power at +0x00, hit rate at +0x02, cast distance at +0x03 (bit 0x10 means straight line, low nibble the range), area radius at +0x04, MP cost at +0x05, target side at +0x06 (0 enemy, 1 own side). The table holds 40 records and the index is not checked against that count.
+Multiplies spell_id by 7 and adds the spell table base pointer held in the global at 0x00063ff0, which fdps_load_data_tables fills by loading "MagicDat.dat" through fdps_vfs_load_file_or_exit. The stride of 7 is the MAGICDAT.DAT record: signed word power at +0x00, hit rate at +0x02, cast distance at +0x03 (bit 0x10 means straight line, low nibble the range), area radius at +0x04, MP cost at +0x05, target side at +0x06 (0 enemy, 1 own side, and 3 on spell 0x16). The table holds 40 records and the index is not checked against that count.
 
 Parameters:
-  spell_id -- spell number, 0x00-0x27, the index into MAGICDAT.DAT. Callers pass the spell or effect id they are working on; the caller at 0x00028f70 forces 0x14 for the generic status-ailment case, and the caller at 0x00013c90 passes the AI's selected spell id from the global at 0x00063f90.
+  spell_id -- spell number, 0x00-0x27, the index into MAGICDAT.DAT. Callers pass the spell or effect id they are working on; the caller at 0x00028f70 forces 0x14 for every effect code outside 0x11-0x13, and the caller at 0x00013c90 passes the AI's selected spell id from the global at 0x00063f90.
 
 Returns:
   Pointer to the first byte of the record. Never NULL, and never range-checked, so an out-of-range spell_id yields a pointer past the end of the table.

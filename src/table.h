@@ -167,4 +167,30 @@ extern struct fdps_class_record *fdps_get_class_record(int record_index);
 extern struct fdps_class_equip_record *fdps_get_class_equip_record(int class_index);
 #pragma aux fdps_get_class_equip_record "*" parm caller [];
 
+/* Returns a pointer to record spell_id of the MAGICDAT.DAT spell table: the
+   signed power word -- damage, heal amount, or, when negative, the attack
+   multiplier as a percentage -- the hit rate, the cast distance with its
+   straight-line bit 0x10, the blast radius, the MP cost and the target side,
+   in the 7 bytes of struct fdps_spell_effect.
+
+   spell_id is the spell number, 0x00-0x27 over the 40 records the 280-byte
+   file holds with no gap (assets/spells.md).  It is also the bit number in a
+   unit's five-byte known-spell bitmap, so the ids a caster can reach are
+   exactly the ids this table has records for.  Nothing is checked -- no bound
+   at either end, and the multiply is signed, so an id below zero addresses
+   memory in front of the table just as one past 0x27 addresses memory behind
+   it -- and the base is not tested for null either.
+
+   Twelve callers, and what they read decides the field widths: power at +0x00
+   is taken with MOVSX by fdps_spell_heal_unit and fdps_score_targets_for_spell
+   because the eight attack-multiplier spells store it negative, while the MP
+   cost at +0x05 and the hit rate at +0x02 are taken a byte at a time and
+   zero-extended.  fdps_unit_apply_status_effect is the one caller that does not
+   pass the id it was given: outside effect codes 0x11..0x13 it substitutes
+   0x14, the generic status-ailment spell, and asks for that record instead.
+
+   Reads only the table base global, calls nothing, and dereferences nothing. */
+extern struct fdps_spell_effect *fdps_get_spell_record(int spell_id);
+#pragma aux fdps_get_spell_record "*" parm caller [];
+
 #endif
