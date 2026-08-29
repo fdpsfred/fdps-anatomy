@@ -9,10 +9,11 @@
  * +1, blue +2, stride 3).  None of them is read off the emitted C.
  *
  * The packed-word cases at the bottom come from the channel extractors --
- * 0002ae90 shifts right 16 for red, 0002aec0 shifts right 8 for green, both
- * masking with 0xff -- and from the caller that builds the words, 0002afac
- * onwards, where a six-bit DAC byte is widened by LEA EAX,[EAX*4+0] and
- * shifted into place by SHL EAX,0x10 for red and SHL EDX,0x8 for green.
+ * 0002ae90 shifts right 16 for red, 0002aec0 shifts right 8 for green, 0002aef0
+ * does not shift at all for blue, and all three mask with 0xff -- and from the
+ * caller that builds the words, 0002afac onwards, where a six-bit DAC byte is
+ * widened by LEA EAX,[EAX*4+0] and shifted into place by SHL EAX,0x10 for red
+ * and SHL EDX,0x8 for green, blue being OR'd in where it already sits.
  *
  * WHAT THE COLOUR WRITES ARE OBSERVED THROUGH.  This function's entire output
  * is DAC entries, and the VGA DAC is readable: entry number to 0x3c7, then
@@ -490,6 +491,83 @@ static void a_dac_derived_word_yields_the_widened_green_component(void)
     CHECK_EQ(fdps_get_rgb_green((unsigned int) (32 * 4) << 8), 128);
 }
 
+/* AND EAX,0xff with no shift before it at 0002aef0: the result is bits 0..7 of
+   the argument, left where they already were.  0x00123456 puts 0x56 there, the
+   low byte of the same word whose red is 0x12 and whose green is 0x34. */
+static void the_blue_channel_is_bits_zero_to_seven(void)
+{
+    CHECK_EQ(fdps_get_rgb_blue(0x00123456u), 0x56);
+    CHECK_EQ(fdps_get_rgb_green(0x00123456u), 0x34);
+    CHECK_EQ(fdps_get_rgb_red(0x00123456u), 0x12);
+}
+
+/* There is no shift in this one, so the mask is the only thing separating blue
+   from the two channels above it.  A word that is all red and all green must
+   give 0, and one that also carries a blue byte must give that byte alone
+   rather than 0x00ffff78. */
+static void red_and_green_do_not_reach_the_blue_result(void)
+{
+    CHECK_EQ(fdps_get_rgb_blue(0x00ffff00u), 0);
+    CHECK_EQ(fdps_get_rgb_blue(0x00ffff78u), 0x78);
+}
+
+/* Bits 24 and above are masked off by the same AND rather than assumed clear:
+   without it 0xff345678 would come back whole. */
+static void bits_above_twenty_three_do_not_reach_the_blue_result(void)
+{
+    CHECK_EQ(fdps_get_rgb_blue(0xff000000u), 0);
+    CHECK_EQ(fdps_get_rgb_blue(0xff345678u), 0x78);
+}
+
+/* The ends of the channel's range: an all-zero word gives 0 and a word with
+   every bit of a 24-bit colour set gives 0xff. */
+static void the_blue_channel_spans_zero_to_two_hundred_and_fifty_five(void)
+{
+    CHECK_EQ(fdps_get_rgb_blue(0x00000000u), 0);
+    CHECK_EQ(fdps_get_rgb_blue(0x00ffffffu), 0xff);
+}
+
+/* Bit n of the word becomes bit n of the result: the shift distance here is
+   zero, and any shift at all would move the whole set off the channel. */
+static void every_bit_of_the_blue_channel_stays_where_it_is(void)
+{
+    int bit;
+
+    for (bit = 0; bit < 8; bit++) {
+        CHECK_EQ(fdps_get_rgb_blue(1u << bit), 1L << bit);
+    }
+}
+
+/* The words this actually sees are built by fdps_build_palette_tables at
+   0002afe1: the blue DAC byte is widened by LEA EAX,[EAX*4+0] and folded in
+   with OR EDX,EAX at 0002b025 -- no shift, because blue is already at the
+   bottom -- so a DAC blue of 63 arrives as 0x000000fc and comes back as 252,
+   and a DAC blue of 32 arrives as 0x00000080 and comes back as 128.  The low
+   nibble survives; the AND 0xf0 that keeps only the top nibble is the caller's,
+   at 0002b068, not this function's. */
+static void a_dac_derived_word_yields_the_widened_blue_component(void)
+{
+    CHECK_EQ(fdps_get_rgb_blue((unsigned int) (63 * 4)), 252);
+    CHECK_EQ(fdps_get_rgb_blue((unsigned int) (32 * 4)), 128);
+}
+
+/* One word packed the way 0002b00e..0002b027 packs it -- SHL EAX,0x10 for red,
+   SHL EDX,0x8 for green, blue OR'd in unshifted -- must come apart into the
+   three DAC bytes it was built from, each widened by four.  A word this game
+   builds is the only kind any of the three extractors ever sees. */
+static void a_packed_word_comes_apart_into_the_three_dac_bytes(void)
+{
+    unsigned int packed;
+
+    packed = ((unsigned int) (10 * 4) << 16)
+           | ((unsigned int) (20 * 4) << 8)
+           | (unsigned int) (30 * 4);
+
+    CHECK_EQ(fdps_get_rgb_red(packed), 40);
+    CHECK_EQ(fdps_get_rgb_green(packed), 80);
+    CHECK_EQ(fdps_get_rgb_blue(packed), 120);
+}
+
 void run_palette_tests(void)
 {
     RUN_TEST(the_dac_reads_back_what_was_written);
@@ -518,4 +596,11 @@ void run_palette_tests(void)
     RUN_TEST(the_green_channel_spans_zero_to_two_hundred_and_fifty_five);
     RUN_TEST(every_bit_of_the_green_channel_lands_where_the_shift_puts_it);
     RUN_TEST(a_dac_derived_word_yields_the_widened_green_component);
+    RUN_TEST(the_blue_channel_is_bits_zero_to_seven);
+    RUN_TEST(red_and_green_do_not_reach_the_blue_result);
+    RUN_TEST(bits_above_twenty_three_do_not_reach_the_blue_result);
+    RUN_TEST(the_blue_channel_spans_zero_to_two_hundred_and_fifty_five);
+    RUN_TEST(every_bit_of_the_blue_channel_stays_where_it_is);
+    RUN_TEST(a_dac_derived_word_yields_the_widened_blue_component);
+    RUN_TEST(a_packed_word_comes_apart_into_the_three_dac_bytes);
 }

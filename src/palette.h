@@ -75,4 +75,13 @@ extern unsigned int fdps_get_rgb_red(unsigned int rgb);
 extern unsigned int fdps_get_rgb_green(unsigned int rgb);
 #pragma aux fdps_get_rgb_green "*" parm caller [];
 
+/* Returns the blue component of a packed word, 0..255 -- bits 0..7, which are
+   already in place, so the whole body is the mask that removes green, red and
+   anything the word carries above bit 23.  Reads no global and calls nothing.
+
+   The argument is unsigned to match the other two extractors; this one has no
+   shift, so its own body cannot tell a signed argument from an unsigned one. */
+extern unsigned int fdps_get_rgb_blue(unsigned int rgb);
+#pragma aux fdps_get_rgb_blue "*" parm caller [];
+
 #endif

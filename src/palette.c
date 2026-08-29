@@ -120,3 +120,25 @@ unsigned int fdps_get_rgb_green(unsigned int rgb)
 {
     return (rgb >> 8) & 0xffu;
 }
+
+/* 0002aef0.  MOV EAX,[EBP+0x14] / AND EAX,0xff: the blue component of the same
+   packed 0x00RRGGBB word.  Blue is already in bits 0..7, so this is the one
+   extractor of the three with no shift in it at all -- the whole body is the
+   mask.
+
+   The mask is load-bearing here for every word the game builds, not only for a
+   malformed one: red and green sit above blue in the word and nothing else
+   removes them.
+
+   Nothing in this body distinguishes a signed argument from an unsigned one,
+   since AND 0xff yields the same eight bits either way.  The type is unsigned
+   because it is the same packed word the red and green extractors take, and
+   there SHR rather than SAR settles it.
+
+   The original stores the result into a stack slot and reloads it before
+   returning, which is the unoptimised code wcc386 emits for a one-line return;
+   there is no second value there to name. */
+unsigned int fdps_get_rgb_blue(unsigned int rgb)
+{
+    return rgb & 0xffu;
+}
