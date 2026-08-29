@@ -295,6 +295,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x21"
+    },
+    "0002af20": {
+      "name": "fdps_pack_rgb",
+      "target": "palette.c",
+      "body_size": "0x34",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x34"
     }
   }
 }

@@ -15,6 +15,12 @@
  * widened by LEA EAX,[EAX*4+0] and shifted into place by SHL EAX,0x10 for red
  * and SHL EDX,0x8 for green, blue being OR'd in where it already sits.
  *
+ * The packer's cases come from 0002af20 itself -- XOR EAX,EAX / MOV AL,byte ptr
+ * [EBP+0x14] / SHL EAX,0x10, the same pair with SHL EAX,0x8 for green and with
+ * no shift for blue, the three OR'd together -- so what they pin down is that
+ * one byte per argument reaches exactly one field, zero-extended, and that the
+ * word it builds is the one the extractors above take apart.
+ *
  * WHAT THE COLOUR WRITES ARE OBSERVED THROUGH.  This function's entire output
  * is DAC entries, and the VGA DAC is readable: entry number to 0x3c7, then
  * three reads of 0x3c9 give back red, green and blue.  So every assertion here
@@ -568,6 +574,109 @@ static void a_packed_word_comes_apart_into_the_three_dac_bytes(void)
     CHECK_EQ(fdps_get_rgb_blue(packed), 120);
 }
 
+/* 0002af20 puts each channel in its own field and nowhere else: SHL EAX,0x10
+   after the red byte, SHL EAX,0x8 after the green one, and no shift at all for
+   blue.  One channel set and the other two clear must therefore give exactly
+   the one field. */
+static void each_channel_lands_in_its_own_field(void)
+{
+    CHECK_EQ(fdps_pack_rgb(0x12, 0, 0), 0x00120000L);
+    CHECK_EQ(fdps_pack_rgb(0, 0x34, 0), 0x00003400L);
+    CHECK_EQ(fdps_pack_rgb(0, 0, 0x56), 0x00000056L);
+}
+
+/* The three fields are OR'd together, so three distinct bytes must appear side
+   by side in the 0x00RRGGBB order the extractors read them back out of, and
+   neither of the two ORs may disturb a field already in place. */
+static void the_three_channels_sit_side_by_side(void)
+{
+    CHECK_EQ(fdps_pack_rgb(0x12, 0x34, 0x56), 0x00123456L);
+}
+
+/* The ends of the range.  All three channels at 0xff give exactly 0x00ffffff:
+   the top byte stays clear because only eight bits of each argument are ever
+   loaded, and there is nothing in the body that could set a bit above 23. */
+static void the_word_never_carries_a_bit_above_twenty_three(void)
+{
+    CHECK_EQ(fdps_pack_rgb(0, 0, 0), 0L);
+    CHECK_EQ(fdps_pack_rgb(0xff, 0xff, 0xff), 0x00ffffffL);
+}
+
+/* Each argument is fetched as MOV AL out of a zeroed EAX -- one byte out of the
+   four-byte slot -- so a value carrying bit 8 loses it rather than pushing it
+   into the channel above.  0x1ff as red packs as 0x00ff0000 and not 0x01ff0000;
+   0x100 as green contributes nothing at all. */
+static void only_the_low_byte_of_each_argument_contributes(void)
+{
+    int oversized_red;
+    int oversized_green;
+
+    oversized_red = 0x1ff;
+    oversized_green = 0x100;
+
+    CHECK_EQ(fdps_pack_rgb((unsigned char) oversized_red, 0, 0), 0x00ff0000L);
+    CHECK_EQ(fdps_pack_rgb(0, (unsigned char) oversized_green, 0), 0L);
+}
+
+/* The byte load is a zero extension and not MOVSX: a channel of 0x80 belongs in
+   its own field as 0x80, where a sign extension would smear 0xff across the
+   channels above it.  Red 0x80 alone is 0x00800000, not 0xff800000, and green
+   0x80 alone is 0x00008000, not 0x00ffff80. */
+static void a_channel_of_eighty_hex_is_not_sign_extended(void)
+{
+    CHECK_EQ(fdps_pack_rgb(0x80, 0, 0), 0x00800000L);
+    CHECK_EQ(fdps_pack_rgb(0, 0x80, 0), 0x00008000L);
+    CHECK_EQ(fdps_pack_rgb(0, 0, 0x80), 0x00000080L);
+}
+
+/* The packing this performs is the one fdps_build_palette_tables open-codes at
+   0002b00e..0002b027, so a word built here out of DAC bytes widened by four
+   must be the same word that code builds: DAC 10, 20, 30 widen to 40, 80, 120
+   and land as 0x00285078. */
+static void a_dac_derived_word_matches_the_one_the_builder_packs(void)
+{
+    CHECK_EQ(fdps_pack_rgb((unsigned char) (10 * 4),
+                           (unsigned char) (20 * 4),
+                           (unsigned char) (30 * 4)),
+             0x00285078L);
+    CHECK_EQ(fdps_pack_rgb((unsigned char) (63 * 4),
+                           (unsigned char) (63 * 4),
+                           (unsigned char) (63 * 4)),
+             0x00fcfcfcL);
+}
+
+/* The three extractors in this same file take apart what this builds, so a word
+   packed here must come back out channel for channel.  This is the property the
+   two halves of the pair exist for; the shift distances are read off both sides
+   of the assembly independently. */
+static void the_extractors_undo_the_packing(void)
+{
+    unsigned int packed;
+
+    packed = fdps_pack_rgb(0x12, 0x34, 0x56);
+
+    CHECK_EQ(fdps_get_rgb_red(packed), 0x12);
+    CHECK_EQ(fdps_get_rgb_green(packed), 0x34);
+    CHECK_EQ(fdps_get_rgb_blue(packed), 0x56);
+}
+
+/* Every bit of every channel reaches the field the shift puts it in, and none
+   reaches any other: bit n of red becomes bit n+16, bit n of green becomes bit
+   n+8, and bit n of blue stays where it is. */
+static void every_bit_of_a_channel_lands_where_its_shift_puts_it(void)
+{
+    int bit;
+
+    for (bit = 0; bit < 8; bit++) {
+        CHECK_EQ(fdps_pack_rgb((unsigned char) (1u << bit), 0, 0),
+                 1L << (bit + 16));
+        CHECK_EQ(fdps_pack_rgb(0, (unsigned char) (1u << bit), 0),
+                 1L << (bit + 8));
+        CHECK_EQ(fdps_pack_rgb(0, 0, (unsigned char) (1u << bit)),
+                 1L << bit);
+    }
+}
+
 void run_palette_tests(void)
 {
     RUN_TEST(the_dac_reads_back_what_was_written);
@@ -603,4 +712,12 @@ void run_palette_tests(void)
     RUN_TEST(every_bit_of_the_blue_channel_stays_where_it_is);
     RUN_TEST(a_dac_derived_word_yields_the_widened_blue_component);
     RUN_TEST(a_packed_word_comes_apart_into_the_three_dac_bytes);
+    RUN_TEST(each_channel_lands_in_its_own_field);
+    RUN_TEST(the_three_channels_sit_side_by_side);
+    RUN_TEST(the_word_never_carries_a_bit_above_twenty_three);
+    RUN_TEST(only_the_low_byte_of_each_argument_contributes);
+    RUN_TEST(a_channel_of_eighty_hex_is_not_sign_extended);
+    RUN_TEST(a_dac_derived_word_matches_the_one_the_builder_packs);
+    RUN_TEST(the_extractors_undo_the_packing);
+    RUN_TEST(every_bit_of_a_channel_lands_where_its_shift_puts_it);
 }

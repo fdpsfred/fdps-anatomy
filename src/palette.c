@@ -142,3 +142,32 @@ unsigned int fdps_get_rgb_blue(unsigned int rgb)
 {
     return rgb & 0xffu;
 }
+
+/* 0002af20.  The constructor the three extractors above are the inverse of:
+   XOR EAX,EAX / MOV AL,byte ptr [EBP+0x14] / SHL EAX,0x10 for red, the same
+   pair with SHL EAX,0x8 OR'd in for green, and the same pair unshifted OR'd in
+   for blue.
+
+   The arguments are bytes, not masked words.  Each one is fetched with MOV AL
+   out of a zeroed EAX -- a byte-wide parameter load -- where the extractors in
+   this same object fetch a whole dword and AND it with 0xff.  Two different
+   code shapes for what would otherwise be the same operation is what settles
+   the parameter width here: only the low byte of each argument slot is ever
+   read, so a channel of 256 packs as 0 and the result carries nothing above
+   bit 23.
+
+   The load is a zero extension and not MOVSX, which is why the channels are
+   unsigned: a channel is a bit pattern going into a fixed field, and 0x80
+   belongs in that field as 0x80 rather than sign-extending across the two
+   channels above it.
+
+   The original stores the assembled word into a stack slot and reloads it
+   before returning, the same unoptimised one-line-return shape the three
+   extractors have; there is no second value there to name. */
+unsigned int fdps_pack_rgb(unsigned char red, unsigned char green,
+                           unsigned char blue)
+{
+    return ((unsigned int) red << 16)
+         | ((unsigned int) green << 8)
+         | (unsigned int) blue;
+}

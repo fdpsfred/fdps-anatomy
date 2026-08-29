@@ -84,4 +84,23 @@ extern unsigned int fdps_get_rgb_green(unsigned int rgb);
 extern unsigned int fdps_get_rgb_blue(unsigned int rgb);
 #pragma aux fdps_get_rgb_blue "*" parm caller [];
 
+/* Builds the packed word the three extractors above take apart: red into bits
+   16..23, green into bits 8..15, blue into bits 0..7.  Reads no global and
+   calls nothing.
+
+   Each channel contributes its low eight bits and nothing else -- the original
+   loads one byte per argument slot and zero-extends it -- so a value above 255
+   loses everything above bit 7 rather than spilling into the channel above it,
+   and the result never has a bit set above 23.  Channels are the eight-bit
+   widening of the six-bit DAC values, so the ones this game builds run 0..252
+   in steps of four.
+
+   Nothing in the image calls this: fdps_build_palette_tables open-codes the
+   same packing inline for each of the 256 entries it reads, and this is the
+   named form of it that the linker kept because the object defining it is
+   linked whole. */
+extern unsigned int fdps_pack_rgb(unsigned char red, unsigned char green,
+                                  unsigned char blue);
+#pragma aux fdps_pack_rgb "*" parm caller [];
+
 #endif
