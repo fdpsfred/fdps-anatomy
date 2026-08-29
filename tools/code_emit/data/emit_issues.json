@@ -509,5 +509,19 @@
       "needs": "Reading the enrolment path -- fdps_roster_add_character, which computes the same base and stride inline at 00023bde -- for the limit it compares data_fdps_roster_member_count against before appending.",
       "status": "open"
     }
+  ],
+  "00023ac0": [
+    {
+      "from": "emit",
+      "what": "Whether the four totals can leave 16 bits in real play, which is the only way the word truncation at 00023b90 becomes visible. The body reproduces the truncation exactly, so this is not an equivalence risk in the emitted C; it is unsettled as a fact about the game. It needs the real ITEM.DAT modifier range against the real base-stat range, and both arrays are still zero-filled stubs until ticket 23 emits them.",
+      "needs": "Ticket 23's emitted data_fdps_item_effect_table_ptr contents plus the character base/growth tables, or a DOSBox-X play session with a maximally equipped roster member.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "The two undefined symbols this unit contributes -- data_fdps_roster_array_ptr and data_fdps_item_effect_table_ptr -- are both borrowed on purpose and both are in undefined.json as ticket 23 globals, so they link zero-filled. Nothing in tests/roster.c asserts a value read out of either: every byte read back is one the fixture wrote, and both globals are put back to null at the end of run_roster_tests. Recorded so the batch's re-read can confirm no stub value was believed.",
+      "needs": "Ticket 23 defining the two globals; nothing here changes when it does.",
+      "status": "open"
+    }
   ]
 }

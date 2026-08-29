@@ -255,6 +255,14 @@
       "status": "committed",
       "emitted_against": "0x25",
       "rounds": 0
+    },
+    "00023ac0": {
+      "name": "fdps_roster_recompute_combat_stats",
+      "target": "roster.c",
+      "body_size": "0xf9",
+      "status": "committed",
+      "emitted_against": "0xf9",
+      "rounds": 0
     }
   }
 }
