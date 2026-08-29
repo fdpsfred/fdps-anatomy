@@ -2,11 +2,17 @@
 
 **What to build:** 遊戲本體的每個 function 都有對應的、經過獨立審查的 C 原始碼。做完這張票，程式邏輯的重建就完成了。
 
-**執行方式：** 沿用票 21 建好的 workflow，不另外設計，規模放大到全部遊戲本體 function。[ADR-0007](../../../docs/adr/0007-workflow-automation-and-agent-context.md) 的四條在這裡是硬需求而非建議——這是全專案規模最大的逐項工作，任何「把完整產出帶回 orchestrator」的寫法都撐不到終點。
+**執行方式：** 本票的 workflow 是 `tools/code_emit/emit_ticket22.js`，從票 21 那支改出來、再由票 21.6 補上中斷復原。[ADR-0007](../../../docs/adr/0007-workflow-automation-and-agent-context.md) 說每張票寫自己的 workflow、不抽共用骨架，所以票 21 那支留在原地當該票的紀錄，不去動它。ADR-0007 的五條在這裡是硬需求而非建議——這是全專案規模最大的逐項工作，任何「把完整產出帶回 orchestrator」的寫法都撐不到終點，而第五條（錯誤處理，5.1–5.7）在 514 支的規模下每一款失敗都會真的發生。
 
 每個 function 寫進哪一個 `.c` 由票 21.5 的 routing 規劃決定，本票不在 emit 過程中臨時決定落點。
 
 這張票是最需要「全自動跑完、不中途回來確認」的一張：以每個 function 一次確認計，人工節奏會讓工期完全被回覆延遲支配。批次大小由呼叫的 agent 決定，一批跑完就自己檢查、修正、呼叫下一批；workflow 不自己管預算，中斷之後的現場收拾由票 21.6 負責。
+
+票 21.6 定下的三件事在本票每一批都是驗收點，正典在 [`rebuild_info/emit_pipeline.md`](../../../rebuild_info/emit_pipeline.md) 的「中斷復原」與「批次大小是呼叫者的決定」兩節：
+
+- **每批結束時工作區必須是乾淨的。** 可以被弄髒的只有 pipeline 自己的六個路徑，界線外的改動（build script、gate、其他知識庫頁、收尾寫的 devlog）要當場單獨 commit。留一個界線外的髒路徑，下一批一開跑就停機等人——本票「全程無人介入」的需求就是這樣破的。
+- **每支開跑前記 `in_flight`，收尾報告分得出「還沒輪到」與「跑到一半被中斷」。**
+- **停下來的理由只有三種**：清單跑完、上游失效、外力中斷。
 
 ## 資料還沒 emit 之前怎麼驗證
 
@@ -28,16 +34,24 @@ emit 出來的 C 裡面，**每一個區域變數與每一個參數都必須有�
 
 界線：名稱要反映它在這支 function 裡的角色（`tile_index`、`remaining_mp`、`cursor_row`），不是它的型別（`int_var`）也不是它的來源暫存器。迴圈的索引叫 `i`／`j` 可以，那是慣例不是預設名。真的無法判斷用途的變數，是一則 `open_issues`，不是一個可以留著的名字。
 
-emitter 與 reviewer 兩邊都要遵守：emitter 負責取名，reviewer 把「有沒有殘留的反編譯器預設名稱、名稱有沒有反映真正的用途」列進檢查表並在發現時 block。結論寫進 `rebuild_info/naming.md`——該檔目前只管符號前綴，不管 function 內部。
+**這條規則怎麼進 workflow 是票 21.7 的工作**，本票只是它的使用者：emitter 取名、reviewer 檢查、`rebuild_info/naming.md` 擁有規則。本票下面三個對應的 checkbox 是驗收條件，實作在 21.7 完成之前不要開始下一批。
 
-**Blocked by:** 21, 21.5, 21.6
+## 現況
 
-**Status:** ready-for-agent
+票 21 的試跑（`000160e0`）與票 21.6 的驗證跑（`000109f0`）各落地一支，兩支都在 `emit_state.json` 記為 `committed`。所以本票不是從零開始：`next_batch.py --stats` 說還剩 513 支。
+
+那兩支的區域變數命名經人工檢查合格（`unit`／`count`／`index`／`dist`，參數 `tile_x`／`max_dist`／`out_indices`／`cmd_disabled`），但那是 emitter 自己的判斷，當時 workflow 裡沒有任何規則要求它——所以不能拿它當「規則有效」的證據，票 21.7 仍然要做。
+
+**Blocked by:** 21, 21.5, 21.6, 21.7
+
+**Status:** blocked（等票 21.7 把區域變數命名接進 workflow；514 支已落地 2 支）
 
 - [ ] 遊戲本體 function 全部 emit 完成，每個都經 reviewer 通過
 - [ ] 每個 function 一次處理一個，無任何批次處理
 - [ ] 全程無人介入跑完，可中斷可續跑，重跑跳過已完成的 function
 - [ ] workflow 有錯誤處理：agent 未回傳或判定檔缺漏會重試、落地與 gate 失敗會明確回報、上游工具失去回應有停止訊號；收尾報告列出完成數、失敗數與未完成清單
+- [ ] 收尾報告分得出「還沒輪到」與「跑到一半被中斷」兩種未完成，被中斷的那一支在下一批的收拾段被列出來
+- [ ] 每一批結束時 `git status --porcelain` 是空的；界線外的改動（build script、gate、其他知識庫頁、收尾寫的 devlog）各自是獨立的 commit，沒有搭上任何 function 的落地 commit
 - [ ] 建置採兩段式連結，未定義符號清單先落檔，零填充 stub 模組由該清單自動生成，不手寫、不進 `src/`
 - [ ] 純機械計算的 function 有單元測試，期望值來自攻略公式或 Ghidra emulator，非臆測
 - [ ] 讀取真實遊戲檔的測試讀真檔，不捏造假檔
@@ -46,7 +60,5 @@ emitter 與 reviewer 兩邊都要遵守：emitter 負責取名，reviewer 把「
 - [ ] 無法當下確認的等價性疑慮明確記錄，不遺漏，並在回掃段以已完成的鄰近 function 重讀一次
 - [ ] 絕無半成品、無為遷就測試而扭曲的程式碼
 - [ ] 每個 function 落在票 21.5 routing 指定的檔案，實際行數超標時依 routing 正典的處置規則拆檔並更新正典
-- [ ] `src/` 裡沒有任何 Ghidra 反編譯器的預設變數名稱（`iVar*`、`uVar*`、`param_*`、`local_*`、`in_*` 等），每個區域變數與參數的名稱都反映它在該 function 裡的角色
-- [ ] reviewer 的檢查表含變數命名一項，發現預設名稱或名不副實時 block
-- [ ] 區域變數的命名規則寫進 `rebuild_info/naming.md`
+- [ ] `src/` 裡沒有任何 Ghidra 反編譯器的預設變數名稱（`iVar*`、`uVar*`、`param_*`、`local_*`、`in_*` 等），每個區域變數與參數的名稱都反映它在該 function 裡的角色。規則與檢查機制由票 21.7 提供，本票是它的使用者
 - [ ] 每個工作段落有對應的 devlog
