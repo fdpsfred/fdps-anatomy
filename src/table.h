@@ -111,4 +111,35 @@ extern struct fdps_enemy_data *fdps_get_enemy_record(int enemy_index);
 extern struct fdps_item_effect *fdps_get_item_record(int item_id);
 #pragma aux fdps_get_item_record "*" parm caller [];
 
+/* Returns a pointer to row record_index of the PROMAP.DAT class table: the
+   eight per-terrain movement costs, the class's critical rate and its
+   magic-resistance complement, in the 10 bytes of struct fdps_class_record.
+
+   record_index is the row number in the file and NOT the class code: row 0 is
+   a default row -- eight movement costs of 1, critical 0, magic resistance
+   complement 0 -- and class 0x00 lives in row 1, so every caller that has a
+   unit in hand forms the argument as its class code plus one
+   (assets/tables/classes.md).  The two callers that are not asking about a
+   particular unit, fdps_collect_targets_in_range and
+   fdps_map_actor_score_best_item, push a literal 0 and get the default row on
+   purpose.  One caller,
+   fdps_map_actor_move_toward_nearest_reachable_opponent at 000126b0, omits the
+   INC and so reads the previous class's row; that is an original defect the
+   rebuild copies rather than repairs (rebuild_info/pitfalls.md).
+
+   The table has 41 rows over the file's 410 bytes.  Nothing is checked -- no
+   bound at either end, and the multiply is signed -- and the base is not
+   tested for null either.
+
+   The two combat callers read a single byte straight after the call, each
+   zero-extended: 0001a00c MOV AL,byte ptr [EDX+0x8] in
+   fdps_combat_compute_hit_outcome takes the critical rate, and 0002835e MOV
+   AL,byte ptr [EDX+0x9] in fdps_spell_damage_unit takes the magic-resistance
+   complement.  The movement and AI callers keep the pointer in a stack local
+   and index the eight move_cost bytes by terrain type further on.
+
+   Reads only the table base global, calls nothing, and dereferences nothing. */
+extern struct fdps_class_record *fdps_get_class_record(int record_index);
+#pragma aux fdps_get_class_record "*" parm caller [];
+
 #endif

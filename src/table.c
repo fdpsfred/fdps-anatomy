@@ -154,3 +154,48 @@ struct fdps_item_effect *fdps_get_item_record(int item_id)
         (data_fdps_item_effect_table_ptr + item_id * ITEM_RECORD_STRIDE);
     return record;
 }
+
+/* The stride of one PROMAP.DAT record, as the original writes it: IMUL
+   EAX,dword ptr [EBP+0x14],0xa.  A literal and not sizeof(struct
+   fdps_class_record) for the same reason as the four tables above -- the
+   file's stride is the fact that has to survive.  This record is ten
+   unsigned chars and would measure ten however it were declared, which is
+   exactly why writing sizeof here would look right and record nothing. */
+#define CLASS_RECORD_STRIDE 0x0a
+
+/* 00018b70.  The fifth accessor of the same one-basic-block shape: IMUL
+   EAX,dword ptr [EBP+0x14],0xa / MOV EDX,dword ptr [0x00063fd0] / ADD EDX,EAX,
+   spilled to a stack local and reloaded into EAX to be returned.  No compare,
+   no branch, no CALL.
+
+   The stride matches fdps_get_enemy_record's 0xa exactly, so an accessor that
+   named the wrong global would still step by the right amount and only be
+   caught by reading a record: the base here is 0x00063fd0 and the enemy
+   table's is 0x00063fd4, four bytes apart in bss (contract B).
+
+   record_index is the row number in the file, which the eleven callers form as
+   the unit's class code PLUS ONE -- MOV AL,byte ptr [<unit>+0x20] / INC EAX /
+   PUSH EAX -- because row 0 of PROMAP.DAT is a default row and not class 0x00
+   (assets/tables/classes.md).  The two callers that want that default row,
+   fdps_collect_targets_in_range at 00011e90 and fdps_map_actor_score_best_item
+   at 00013056, push a literal 0 (6a 00) into the call.  The addition is the caller's and stays the
+   caller's: nothing in here biases the index, so moving the +1 in here would
+   shift both of those literal-zero calls onto class 0x00's row.
+
+   IMUL again, the signed form, so a negative index steps backwards off the
+   front of the table instead of becoming a four-gigabyte offset.  Nothing is
+   bounded either: the file holds 41 records over its 410 bytes
+   (resource_info/data_tables.md) and an index past the last one is multiplied
+   and added like any other.
+
+   The base is read out of the global on every call, uncached and untested, so
+   a call before fdps_load_data_tables has filled it returns the offset alone
+   as though it were an address. */
+struct fdps_class_record *fdps_get_class_record(int record_index)
+{
+    struct fdps_class_record *record;
+
+    record = (struct fdps_class_record *)
+        (data_fdps_class_table_ptr + record_index * CLASS_RECORD_STRIDE);
+    return record;
+}

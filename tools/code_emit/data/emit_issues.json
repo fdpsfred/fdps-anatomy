@@ -313,5 +313,19 @@
       "needs": "Once fdps_load_data_tables and fdps_vfs_load_file_or_exit are emitted, compare allocation order and block sizes against the original, then confirm in DOSBox-X with the FF item in a bag. Not settleable by a unit test.",
       "status": "open"
     }
+  ],
+  "00018b70": [
+    {
+      "from": "emit",
+      "what": "Whether any index above row 40 is reachable in play. The accessor is unbounded and the callers form the argument as the unit record's class byte at +0x20 plus one, so a class byte above 0x27 would read past the 410-byte table; seven of the eleven callers are emitted or read far enough to see the INC, but fdps_battle_move_unit_toward, fdps_battle_unit_turn, fdps_map_cursor_select_loop and fdps_unit_resolve_attack_hit have not been read to the point where the class byte's own provenance is settled.",
+      "needs": "Those four callers emitted, plus whatever writes the class byte at unit+0x20 (deployment and promotion), to establish the byte's range. Nothing changes in this function either way -- it must stay unbounded -- but it decides whether the past-the-end read is dead code or observable behaviour like the item table's FF BUG.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Agreeing with and carrying forward the emitter's entry: whether any row index above 40 is reachable in play. The accessor is unbounded (no CMP in the body) and the callers form the argument as the unit record's class byte at +0x20 plus one, so a class byte above 0x27 would read past PROMAP.DAT's 410 bytes. fdps_battle_move_unit_toward, fdps_battle_unit_turn, fdps_map_cursor_select_loop and fdps_unit_resolve_attack_hit have not been read far enough to settle where that byte comes from.",
+      "needs": "Those four callers emitted, plus whatever writes the class byte at unit+0x20 (deployment and promotion), to bound the byte's range. This function must stay unbounded either way; the answer only decides whether the past-the-end read is dead code or observable behaviour.",
+      "status": "open"
+    }
   ]
 }

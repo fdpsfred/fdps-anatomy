@@ -154,6 +154,14 @@
       "status": "committed",
       "rounds": 1,
       "emitted_against": "0x25"
+    },
+    "00018b70": {
+      "name": "fdps_get_class_record",
+      "target": "table.c",
+      "body_size": "0x25",
+      "status": "committed",
+      "emitted_against": "0x25",
+      "rounds": 0
     }
   }
 }

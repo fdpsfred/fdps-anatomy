@@ -1,19 +1,19 @@
 /* tests/table.c -- cover for src/table.c.
  *
- * Expected values come from the assembly of the four accessors -- 00018ab0
- * over FRIAPRDA.DAT, 00018ae0 over FRILEVUP.DAT, 00018b10 over ENEMYDAT.DAT
- * and 00018b40 over ITEM.DAT -- and from ticket 17's layouts of struct
- * fdps_character_base_record, struct fdps_character_growth, struct
- * fdps_enemy_data and struct fdps_item_effect in src/fdpstype.h.  None of them
- * is read off the emitted C.
+ * Expected values come from the assembly of the five accessors -- 00018ab0
+ * over FRIAPRDA.DAT, 00018ae0 over FRILEVUP.DAT, 00018b10 over ENEMYDAT.DAT,
+ * 00018b40 over ITEM.DAT and 00018b70 over PROMAP.DAT -- and from ticket 17's
+ * layouts of struct fdps_character_base_record, struct fdps_character_growth,
+ * struct fdps_enemy_data, struct fdps_item_effect and struct fdps_class_record
+ * in src/fdpstype.h.  None of them is read off the emitted C.
  *
  * Every body is PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x4, then IMUL
  * EAX,dword ptr [EBP+0x14],<stride> / MOV EDX,dword ptr [<table base global>]
  * / ADD EDX,EAX and nothing else, so the three facts everything below is aimed
- * at are the same for each: the stride is the file's own (0x18, 0x0b, 0x0a and
- * 0x17), the base is that accessor's own pointer global read fresh on every
- * call, and there is no test of any kind in the body -- no bound on the index,
- * no null check on the base.
+ * at are the same for each: the stride is the file's own (0x18, 0x0b, 0x0a,
+ * 0x17 and 0x0a), the base is that accessor's own pointer global read fresh on
+ * every call, and there is no test of any kind in the body -- no bound on the
+ * index, no null check on the base.
  *
  * No .DAT is a loose file: each reaches its table only as a block
  * fdps_load_data_tables has already unpacked out of the VFS container into the
@@ -872,6 +872,222 @@ static void the_offsets_the_callers_read_are_zero_thirteen_and_nineteen(void)
     CHECK_EQ((long) (record - item_base), 9 * ITEM_STRIDE);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_get_class_record @ 00018b70
+ *
+ * The fifth accessor of the same one-block shape, and its expected values come
+ * from its own assembly: IMUL EAX,dword ptr [EBP+0x14],0xa / MOV EDX,dword ptr
+ * [0x00063fd0] / ADD EDX,EAX, with nothing else in the body.  The stride is
+ * 0x0a -- the same as the enemy table's, over a different global -- and there
+ * is no test of any kind.  The record layout is ticket 17's struct
+ * fdps_class_record in src/fdpstype.h and the 41 rows are PROMAP.DAT's 410
+ * bytes divided by that stride (resource_info/data_tables.md).
+ *
+ * The one fact about this table that is not arithmetic is the +1: row 0 is a
+ * default row and class 0x00 lives in row 1, so callers with a unit in hand
+ * push class_code + 1 and callers that want the default row push a literal 0
+ * (assets/tables/classes.md).  The bias lives in the caller, and the case
+ * below pins that this accessor adds none of its own.
+ * ------------------------------------------------------------------ */
+
+/* What the IMUL multiplies by, and the rows the 410-byte file holds. */
+#define CLASS_STRIDE 0x0a
+#define CLASS_COUNT 41
+#define CLASS_FILE_BYTES 410
+
+/* A row of lead-in for the negative index and a spare row at the end. */
+static unsigned char class_image[CLASS_STRIDE + (CLASS_COUNT + 1) * CLASS_STRIDE];
+
+static unsigned char *class_base = class_image + CLASS_STRIDE;
+
+static void install_class_base(unsigned char *base)
+{
+    data_fdps_class_table_ptr = base;
+}
+
+static long class_offset(int record_index)
+{
+    unsigned char *record;
+
+    record = (unsigned char *) fdps_get_class_record(record_index);
+    return (long) (record - class_base);
+}
+
+/* A distinct byte per field so a field picked up one offset out reads a value
+   belonging to some other field.  The eight movement costs get 0xff in the
+   middle, the value the file uses for impassable terrain, so the field is
+   pinned as an unsigned byte rather than a signed -1. */
+static void stage_class_record(int record_index)
+{
+    unsigned char *record;
+    int terrain;
+
+    record = class_base + record_index * CLASS_STRIDE;
+    for (terrain = 0; terrain < 8; terrain++) {
+        record[terrain] = (unsigned char) (0x10 + terrain);
+    }
+    record[0x03] = 0xff;  /* move_cost[3], impassable */
+    record[0x08] = 0x1e;  /* critical, 30 per cent */
+    record[0x09] = 0x64;  /* magic_resist_complement, 100 */
+}
+
+/* The ADD has no constant term, so row 0 is the table base itself -- the file
+   has no header to step over, which is what makes the default row reachable
+   with a pushed literal 0. */
+static void class_record_zero_is_the_table_base(void)
+{
+    install_class_base(class_base);
+    CHECK_EQ(class_offset(0), 0);
+}
+
+/* The 0xa the IMUL states, over the whole width of the table. */
+static void consecutive_class_records_are_ten_bytes_apart(void)
+{
+    install_class_base(class_base);
+    CHECK_EQ(class_offset(1), CLASS_STRIDE);
+    CHECK_EQ(class_offset(2) - class_offset(1), CLASS_STRIDE);
+    CHECK_EQ(class_offset(23), 23 * CLASS_STRIDE);
+}
+
+/* 40 is the last row the 410-byte file has storage for, and the byte after
+   that row is the file's last. */
+static void the_last_real_class_record_is_at_the_end_of_the_table(void)
+{
+    install_class_base(class_base);
+    CHECK_EQ(class_offset(CLASS_COUNT - 1), (CLASS_COUNT - 1) * CLASS_STRIDE);
+    CHECK_EQ(class_offset(CLASS_COUNT - 1) + CLASS_STRIDE, CLASS_FILE_BYTES);
+}
+
+/* The whole index expression as a caller writes it: MOV AL,[unit+0x20] / INC
+   EAX / PUSH EAX, so class code 0x00 is row 1 and the 40 class codes fill rows
+   1..40.  Nothing in the accessor performs the addition -- a +1 moved in here
+   would pass every stride case above and silently shift the two literal-zero
+   callers onto class 0x00's row.  The row-0 default and the +1 are
+   assets/tables/classes.md's; the INC is the callers' assembly. */
+static void a_class_code_maps_to_its_row_by_adding_one(void)
+{
+    install_class_base(class_base);
+    CHECK_EQ(class_offset(0x00 + 1), CLASS_STRIDE);
+    CHECK_EQ(class_offset(0x01 + 1), 2 * CLASS_STRIDE);
+    CHECK_EQ(class_offset(0x27 + 1), (CLASS_COUNT - 1) * CLASS_STRIDE);
+    CHECK_EQ(class_offset(0), 0);
+}
+
+/* There is no CMP in the body, so an index past the last row is multiplied and
+   added like any other. */
+static void a_class_index_past_the_end_is_not_clamped(void)
+{
+    install_class_base(class_base);
+    CHECK_EQ(class_offset(CLASS_COUNT), CLASS_COUNT * CLASS_STRIDE);
+}
+
+/* IMUL is the signed multiply, so a negative index steps backwards off the
+   front of the table rather than becoming a vast positive offset.  An unsigned
+   stride would read 0xfffffff6 here. */
+static void a_negative_class_index_steps_backwards(void)
+{
+    install_class_base(class_base);
+    CHECK_EQ(class_offset(-1), -CLASS_STRIDE);
+}
+
+/* MOV EDX,dword ptr [0x00063fd0] is inside the body: the base is re-read on
+   every call, so moving the global moves every answer.  A transcription that
+   cached it in a file-scope copy passes everything above and fails here. */
+static void the_class_table_base_is_read_on_every_call(void)
+{
+    install_class_base(class_base);
+    CHECK_EQ(class_offset(3), 3 * CLASS_STRIDE);
+    install_class_base(class_base + CLASS_STRIDE);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_class_record(3) - class_base),
+             4 * CLASS_STRIDE);
+    install_class_base(class_base);
+}
+
+/* Nothing tests the base, so a null table -- the state before
+   fdps_load_data_tables has run -- yields the offset alone as though it were
+   an address.  A null guard returning NULL would be a silent behaviour
+   change. */
+static void a_null_class_table_base_is_not_guarded(void)
+{
+    install_class_base((unsigned char *) 0);
+    CHECK_EQ((long) (unsigned long) fdps_get_class_record(2),
+             2 * CLASS_STRIDE);
+    install_class_base(class_base);
+}
+
+/* This accessor and fdps_get_enemy_record share the stride 0xa and differ only
+   in the global they read -- 0x00063fd0 against 0x00063fd4, four bytes apart in
+   bss.  Every stride case above would pass with the two globals swapped, so
+   this is the case that separates them: each of the five globals gets its own
+   base and each accessor must follow its own (contract B -- the nine table
+   pointers are nine globals, not an array). */
+static void the_class_accessor_reads_its_own_global(void)
+{
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    install_item_base(item_base);
+    install_class_base(class_base);
+    CHECK_EQ(class_offset(1), CLASS_STRIDE);
+
+    install_enemy_base(enemy_base + ENEMY_STRIDE);
+    install_base(table_base + RECORD_STRIDE);
+    install_growth_base(growth_base + GROWTH_STRIDE);
+    install_item_base(item_base + ITEM_STRIDE);
+    CHECK_EQ(class_offset(1), CLASS_STRIDE);
+
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    install_item_base(item_base);
+    install_class_base(class_base + CLASS_STRIDE);
+    CHECK_EQ(enemy_offset(1), ENEMY_STRIDE);
+    CHECK_EQ(record_offset(1), RECORD_STRIDE);
+    CHECK_EQ(growth_offset(1), GROWTH_STRIDE);
+    CHECK_EQ(item_offset(1), ITEM_STRIDE);
+
+    install_class_base(class_base);
+}
+
+/* The returned pointer addresses the file's own field offsets: all ten bytes
+   of the staged row read back what was written there, so base and stride are
+   checked together against the layout.  move_cost is eight bytes and the two
+   scalars sit behind it at +0x08 and +0x09, which is the arrangement a caller
+   indexing move_cost by terrain type depends on. */
+static void the_returned_class_pointer_addresses_the_packed_record(void)
+{
+    struct fdps_class_record *record;
+
+    install_class_base(class_base);
+    stage_class_record(7);
+    record = fdps_get_class_record(7);
+    CHECK_EQ(record->move_cost[0], 0x10);
+    CHECK_EQ(record->move_cost[1], 0x11);
+    CHECK_EQ(record->move_cost[2], 0x12);
+    CHECK_EQ(record->move_cost[3], 0xff);
+    CHECK_EQ(record->move_cost[7], 0x17);
+    CHECK_EQ(record->critical, 0x1e);
+    CHECK_EQ(record->magic_resist_complement, 0x64);
+}
+
+/* The two bytes the combat callers read straight after the call, each
+   zero-extended: 0001a00c MOV AL,byte ptr [EDX+0x8] in
+   fdps_combat_compute_hit_outcome and 0002835e MOV AL,byte ptr [EDX+0x9] in
+   fdps_spell_damage_unit.  Asserted as raw bytes through the returned pointer
+   as well as through the struct above, so the offsets are pinned to the file's
+   layout and not merely to the field order this test happens to declare. */
+static void the_offsets_the_combat_callers_read_are_eight_and_nine(void)
+{
+    unsigned char *record;
+
+    install_class_base(class_base);
+    stage_class_record(9);
+    record = (unsigned char *) fdps_get_class_record(9);
+    CHECK_EQ(record[0x08], 0x1e);
+    CHECK_EQ(record[0x09], 0x64);
+    CHECK_EQ((long) (record - class_base), 9 * CLASS_STRIDE);
+}
+
 void run_table_tests(void)
 {
     RUN_TEST(record_zero_is_the_table_base);
@@ -920,6 +1136,18 @@ void run_table_tests(void)
     RUN_TEST(the_item_stat_words_are_signed_and_the_price_is_not);
     RUN_TEST(the_offsets_the_callers_read_are_zero_thirteen_and_nineteen);
 
+    RUN_TEST(class_record_zero_is_the_table_base);
+    RUN_TEST(consecutive_class_records_are_ten_bytes_apart);
+    RUN_TEST(the_last_real_class_record_is_at_the_end_of_the_table);
+    RUN_TEST(a_class_code_maps_to_its_row_by_adding_one);
+    RUN_TEST(a_class_index_past_the_end_is_not_clamped);
+    RUN_TEST(a_negative_class_index_steps_backwards);
+    RUN_TEST(the_class_table_base_is_read_on_every_call);
+    RUN_TEST(a_null_class_table_base_is_not_guarded);
+    RUN_TEST(the_class_accessor_reads_its_own_global);
+    RUN_TEST(the_returned_class_pointer_addresses_the_packed_record);
+    RUN_TEST(the_offsets_the_combat_callers_read_are_eight_and_nine);
+
     /* Put the globals back the way they were found.  They are null until
        ticket 23 defines them, and leaving a pointer to this file's static
        buffers in one would hand the next unit an address it has no business
@@ -928,4 +1156,5 @@ void run_table_tests(void)
     install_growth_base((unsigned char *) 0);
     install_enemy_base((unsigned char *) 0);
     install_item_base((unsigned char *) 0);
+    install_class_base((unsigned char *) 0);
 }
