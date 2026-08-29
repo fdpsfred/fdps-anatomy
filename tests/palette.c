@@ -8,6 +8,11 @@
  * of the loop -- and from the palette record ticket 17 settled (red +0, green
  * +1, blue +2, stride 3).  None of them is read off the emitted C.
  *
+ * The packed-word cases at the bottom come from 0002ae90 -- SHR EAX,0x10 then
+ * AND EAX,0xff -- and from the caller that builds the words, 0002afac onwards,
+ * where a six-bit DAC byte is widened by LEA EAX,[EAX*4+0] and shifted into
+ * place by SHL EAX,0x10.
+ *
  * WHAT THE COLOUR WRITES ARE OBSERVED THROUGH.  This function's entire output
  * is DAC entries, and the VGA DAC is readable: entry number to 0x3c7, then
  * three reads of 0x3c9 give back red, green and blue.  So every assertion here
@@ -361,6 +366,62 @@ static void a_full_negative_bias_blacks_the_whole_range(void)
     }
 }
 
+/* SHR EAX,0x10 then AND EAX,0xff at 0002ae90: the result is bits 16..23 of the
+   argument, moved down to bits 0..7.  0x00123456 puts 0x12 there. */
+static void the_red_channel_is_bits_sixteen_to_twenty_three(void)
+{
+    CHECK_EQ(fdps_get_rgb_red(0x00123456u), 0x12);
+}
+
+/* The shift moves the other two channels out below bit 0, so neither reaches
+   the result however they are set. */
+static void green_and_blue_do_not_reach_the_result(void)
+{
+    CHECK_EQ(fdps_get_rgb_red(0x0000ffffu), 0);
+    CHECK_EQ(fdps_get_rgb_red(0x00ff0000u), 0xff);
+}
+
+/* AND EAX,0xff after the shift: whatever a word carries above bit 23 is masked
+   off rather than added to the channel.  Without the mask 0xff345678 would come
+   back as 0xff34. */
+static void bits_above_twenty_three_are_masked_off(void)
+{
+    CHECK_EQ(fdps_get_rgb_red(0xff000000u), 0);
+    CHECK_EQ(fdps_get_rgb_red(0xff345678u), 0x34);
+}
+
+/* The ends of the channel's range: an all-zero word gives 0 and a word with
+   every bit of a 24-bit colour set gives 0xff. */
+static void the_channel_spans_zero_to_two_hundred_and_fifty_five(void)
+{
+    CHECK_EQ(fdps_get_rgb_red(0x00000000u), 0);
+    CHECK_EQ(fdps_get_rgb_red(0x00ffffffu), 0xff);
+}
+
+/* Each of the eight bits of the channel arrives on its own, at the position the
+   shift distance puts it: bit 16 + n of the word becomes bit n of the result.
+   A wrong shift distance would move the whole set. */
+static void every_bit_of_the_channel_lands_where_the_shift_puts_it(void)
+{
+    int bit;
+
+    for (bit = 0; bit < 8; bit++) {
+        CHECK_EQ(fdps_get_rgb_red(1u << (16 + bit)), 1L << bit);
+    }
+}
+
+/* The words this actually sees are built by fdps_build_palette_tables at
+   0002afac: a six-bit DAC byte is widened by LEA EAX,[EAX*4+0] and packed with
+   SHL EAX,0x10, so a DAC red of 63 arrives as 0x00fc0000 and comes back as 252,
+   and a DAC red of 32 arrives as 0x00800000 and comes back as 128.  The low
+   nibble survives -- the AND 0xf0 that keeps only the top nibble is the
+   caller's, at 0002b03c, not this function's. */
+static void a_dac_derived_word_yields_the_widened_component(void)
+{
+    CHECK_EQ(fdps_get_rgb_red((unsigned int) (63 * 4) << 16), 252);
+    CHECK_EQ(fdps_get_rgb_red((unsigned int) (32 * 4) << 16), 128);
+}
+
 void run_palette_tests(void)
 {
     RUN_TEST(the_dac_reads_back_what_was_written);
@@ -376,4 +437,10 @@ void run_palette_tests(void)
     RUN_TEST(each_bias_moves_only_its_own_channel);
     RUN_TEST(the_bias_applies_to_every_entry_of_the_range);
     RUN_TEST(a_full_negative_bias_blacks_the_whole_range);
+    RUN_TEST(the_red_channel_is_bits_sixteen_to_twenty_three);
+    RUN_TEST(green_and_blue_do_not_reach_the_result);
+    RUN_TEST(bits_above_twenty_three_are_masked_off);
+    RUN_TEST(the_channel_spans_zero_to_two_hundred_and_fifty_five);
+    RUN_TEST(every_bit_of_the_channel_lands_where_the_shift_puts_it);
+    RUN_TEST(a_dac_derived_word_yields_the_widened_component);
 }

@@ -46,4 +46,22 @@ extern void fdps_set_palette_range(struct fdps_palette_entry *rgb,
                                    int blue_bias);
 #pragma aux fdps_set_palette_range "*" parm caller [];
 
+/* A colour is also carried around this file as one packed word in the form
+   0x00RRGGBB -- red in bits 16..23, green in bits 8..15, blue in bits 0..7 --
+   which is how a three-byte palette record is handed to the lookup-table
+   builder as a single value.  The three components in a packed word are the
+   DAC's six-bit values widened to eight by multiplying by four, so each one
+   spans 0..252 rather than 0..255.
+
+   Returns the red component of a packed word, 0..255.  Bits 24 and above are
+   masked off rather than assumed clear, so a word carrying anything in its top
+   byte still yields the red channel alone.  Reads no global and calls nothing.
+
+   The argument is unsigned: the extraction is SHR, not SAR.  The mask that
+   follows makes that unobservable through this function's own result, but the
+   packed word is a bit pattern rather than a quantity and is signed nowhere
+   that handles it. */
+extern unsigned int fdps_get_rgb_red(unsigned int rgb);
+#pragma aux fdps_get_rgb_red "*" parm caller [];
+
 #endif

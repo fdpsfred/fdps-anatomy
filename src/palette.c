@@ -79,3 +79,24 @@ void fdps_set_palette_range(struct fdps_palette_entry *rgb,
         rgb++;
     }
 }
+
+/* 0002ae90.  MOV EAX,[EBP+0x14] / SHR EAX,0x10 / AND EAX,0xff, and the result
+   is the whole function: the red component of a packed 0x00RRGGBB word.
+
+   The shift is SHR and not SAR, which is why the argument is unsigned; the AND
+   that follows would hide the difference in this function's own result, but the
+   packed word is a bit pattern and nothing that builds or consumes one treats
+   it as a quantity.
+
+   The mask is not redundant.  fdps_build_palette_tables only ever hands over a
+   word it built itself, whose top byte is clear, but the mask is in the
+   original and a word with bits set above 23 must still come back with the red
+   channel alone.
+
+   The original stores the result into a stack slot and reloads it before
+   returning, which is the unoptimised code wcc386 emits for a one-line return;
+   there is no second value there to name. */
+unsigned int fdps_get_rgb_red(unsigned int rgb)
+{
+    return (rgb >> 16) & 0xffu;
+}
