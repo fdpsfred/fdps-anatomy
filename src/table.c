@@ -296,3 +296,53 @@ struct fdps_spell_effect *fdps_get_spell_record(int spell_id)
          + spell_id * SPELL_RECORD_STRIDE);
     return record;
 }
+
+/* The stride of one GETMGTAB.DAT record, as the original writes it: IMUL
+   EAX,dword ptr [EBP+0x14],0xc.  A literal and not sizeof(struct
+   fdps_spell_learning_record) for the same reason as the seven tables above --
+   the file's stride is the fact that has to survive.  This record is twelve
+   unsigned chars and would measure twelve however it were declared, which is
+   exactly why writing sizeof here would look right and record nothing. */
+#define SPELL_LEARNING_RECORD_STRIDE 0x0c
+
+/* 00018c00.  The eighth and last accessor of the same one-basic-block shape:
+   IMUL EAX,dword ptr [EBP+0x14],0xc / MOV EDX,dword ptr [0x00063fe8] / ADD
+   EDX,EAX, spilled to a stack local and reloaded into EAX to be returned.  No
+   compare, no branch, no CALL.
+
+   learn_index is the spell-learning schedule number, not a character id and
+   not a class code: it is byte +0x0a of the character's FRILEVUP.DAT growth
+   record, which is why two forms of the same character have two different
+   schedules and why several forms share one (assets/characters.md).  The one
+   caller, fdps_unit_award_exp_and_level_up, forms it by zero-extension --
+   0001e02b XOR EAX,EAX / 0001e030 MOV AL,byte ptr [EDX+0xa] -- so what arrives
+   is 0..255, and int is the width the parameter is read at.
+
+   The 0xff that means "this form learns no spells" is tested by that caller and
+   not here: 0001e036 CMP dword ptr [EBP+-0x2c],0xff / JZ skips the call
+   entirely.  Nothing in this body rejects it, so index 0xff multiplied by the
+   stride addresses 2,340 bytes past the end of the 720-byte table.  Moving the
+   sentinel test in here -- returning null, or clamping -- would change what the
+   caller has to cope with, and the caller copes with it by never asking
+   (rebuild_info/pitfalls.md).
+
+   IMUL again, the signed form, so a negative index steps backwards off the
+   front of the table instead of becoming a four-gigabyte offset.  Nothing is
+   bounded either: the file holds 60 records over its 720 bytes
+   (resource_info/data_tables.md), one per FRIAPRDA.DAT character slot, of which
+   38 are entirely 0xff.
+
+   The base is read out of the global on every call, uncached and untested, so
+   a call before fdps_load_data_tables has filled it returns the offset alone
+   as though it were an address.  Its global at 0x00063fe8 is the seventh of
+   the nine table pointers, sitting between the class-equip table's 0x00063fe4
+   and the growth table's 0x00063fec in bss (contract B). */
+struct fdps_spell_learning_record *fdps_get_spell_learn_record(int learn_index)
+{
+    struct fdps_spell_learning_record *record;
+
+    record = (struct fdps_spell_learning_record *)
+        (data_fdps_spell_learning_table_ptr
+         + learn_index * SPELL_LEARNING_RECORD_STRIDE);
+    return record;
+}

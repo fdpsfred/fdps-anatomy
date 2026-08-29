@@ -2194,10 +2194,10 @@ Algorithm:
 Multiplies learn_index by 0xc, the record stride of GetMgTab.dat, and adds it to the table base pointer that fdps_load_data_tables stored in the global at 00063fe8. There is no bounds check and no sentinel check: the table holds 60 records, and rejecting the 0xff "learns no spells" value is the caller's job.
 
 Parameters:
-  learn_index -- record number in GetMgTab.dat, 0..59. It comes from byte 0x0a of the unit's FriLevUp.dat record; 0xff there means the character learns no spells, and FUN_0001dd30 tests for it before calling.
+  learn_index -- record number in GetMgTab.dat, 0..59. It comes from byte 0x0a of the unit's FriLevUp.dat record; 0xff there means the character learns no spells, and fdps_unit_award_exp_and_level_up tests for it before calling.
 
 Returns:
-  Pointer to the 12-byte record, which is six 2-byte {level, spell_id} pairs in ascending level order; an unused pair is {0xff, 0xff}. FUN_0001dd30 walks all six, and on the pair whose level equals the unit's level byte at record+0x21 it grants spell_id through fdps_set_flag_bit.
+  Pointer to the 12-byte record, which is six 2-byte {level, spell_id} pairs in ascending level order; an unused pair is {0xff, 0xff}. fdps_unit_award_exp_and_level_up walks all six, and on the pair whose level equals the unit's level byte at record+0x21 it grants spell_id through fdps_set_flag_bit.
 
 Pool: fdps  [no Function ID hit in either library set; reads a game-owned global table pointer]
 

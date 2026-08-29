@@ -1,27 +1,28 @@
 /* tests/table.c -- cover for src/table.c.
  *
- * Expected values come from the assembly of the seven accessors -- 00018ab0
+ * Expected values come from the assembly of the eight accessors -- 00018ab0
  * over FRIAPRDA.DAT, 00018ae0 over FRILEVUP.DAT, 00018b10 over ENEMYDAT.DAT,
- * 00018b40 over ITEM.DAT, 00018b70 over PROMAP.DAT, 00018ba0 over PROEQU.DAT
- * and 00018bd0 over MAGICDAT.DAT -- and from ticket 17's layouts of struct
- * fdps_character_base_record, struct fdps_character_growth, struct
- * fdps_enemy_data, struct fdps_item_effect, struct fdps_class_record, struct
- * fdps_class_equip_record and struct fdps_spell_effect in src/fdpstype.h.
+ * 00018b40 over ITEM.DAT, 00018b70 over PROMAP.DAT, 00018ba0 over PROEQU.DAT,
+ * 00018bd0 over MAGICDAT.DAT and 00018c00 over GETMGTAB.DAT -- and from ticket
+ * 17's layouts of struct fdps_character_base_record, struct
+ * fdps_character_growth, struct fdps_enemy_data, struct fdps_item_effect,
+ * struct fdps_class_record, struct fdps_class_equip_record, struct
+ * fdps_spell_effect and struct fdps_spell_learning_record in src/fdpstype.h.
  * None of them is read off the emitted C.
  *
  * Every body is PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x4, then IMUL
  * EAX,dword ptr [EBP+0x14],<stride> / MOV EDX,dword ptr [<table base global>]
  * / ADD EDX,EAX and nothing else, so the three facts everything below is aimed
  * at are the same for each: the stride is the file's own (0x18, 0x0b, 0x0a,
- * 0x17, 0x0a, 0x06 and 0x07), the base is that accessor's own pointer global
- * read fresh on every call, and there is no test of any kind in the body -- no
- * bound on the index, no null check on the base.
+ * 0x17, 0x0a, 0x06, 0x07 and 0x0c), the base is that accessor's own pointer
+ * global read fresh on every call, and there is no test of any kind in the
+ * body -- no bound on the index, no null check on the base.
  *
  * No .DAT is a loose file: each reaches its table only as a block
  * fdps_load_data_tables has already unpacked out of the VFS container into the
  * heap, so a staged byte buffer is exactly the shape the global holds at run
  * time.  Nothing here asserts what the real tables contain -- every byte read
- * back is one this file wrote -- and all seven globals are put back to null on
+ * back is one this file wrote -- and all eight globals are put back to null on
  * the way out, since ticket 23 has yet to define them and a later unit must not
  * find a stale address in any of them.
  */
@@ -1610,6 +1611,295 @@ static void the_status_effect_substitution_is_not_this_accessors(void)
     CHECK_EQ(spell_offset(0x14) - spell_offset(0x11), 3 * SPELL_STRIDE);
 }
 
+/* ------------------------------------------------------------------
+ * fdps_get_spell_learn_record @ 00018c00, over GETMGTAB.DAT.
+ *
+ * The eighth accessor of the same one-block shape, and its expected values
+ * come from its own assembly: IMUL EAX,dword ptr [EBP+0x14],0xc / MOV EDX,dword
+ * ptr [0x00063fe8] / ADD EDX,EAX, with nothing else in the body.  The stride is
+ * 0x0c, the base is an eighth global, and there is no test of any kind.  The
+ * record layout is ticket 17's struct fdps_spell_learning_record in
+ * src/fdpstype.h and the 60 records are GETMGTAB.DAT's 720 bytes divided by
+ * that stride (resource_info/data_tables.md, assets/tables/characters.md).
+ *
+ * The fact most at risk here is not the stride but the 0xff sentinel: the
+ * index this accessor is handed comes from a field whose "no spells" value is
+ * 0xff, and the test for it lives in the caller.  An accessor that grew a null
+ * return or a clamp for 0xff would look defensive and would be a behaviour
+ * change, so the cases below pin that 0xff is arithmetic like every other
+ * index, and that an all-0xff record reads back as twelve 255s rather than
+ * twelve -1s.
+ * ------------------------------------------------------------------ */
+
+/* What the IMUL multiplies by, the records the 720-byte file holds, and the
+   file's own length.  One record per FRIAPRDA.DAT character slot, indexes
+   0x00-0x3b (resource_info/data_tables.md). */
+#define LEARN_STRIDE 0x0c
+#define LEARN_COUNT 60
+#define LEARN_FILE_BYTES 720
+
+/* A record's worth of lead-in for the negative index and a spare record past
+   the end, so both of those cases land on real storage. */
+static unsigned char learn_image[LEARN_STRIDE + (LEARN_COUNT + 1) * LEARN_STRIDE];
+
+static unsigned char *learn_base = learn_image + LEARN_STRIDE;
+
+static void install_learn_base(unsigned char *base)
+{
+    data_fdps_spell_learning_table_ptr = base;
+}
+
+static long learn_offset(int learn_index)
+{
+    unsigned char *record;
+
+    record = (unsigned char *) fdps_get_spell_learn_record(learn_index);
+    return (long) (record - learn_base);
+}
+
+/* Schedule 0x01 as the file really carries it -- the second playable
+   spellcaster's unpromoted form: Lv11 -> spell 0x13, Lv15 -> 0x06, Lv20 ->
+   0x0e, Lv25 -> 0x07, the last two pairs unused and therefore (0xff, 0xff)
+   (assets/characters.md).  A real row rather than a made-up one, and staged at
+   an odd index so the record does not start where the array does. */
+static void stage_learn_record(int learn_index)
+{
+    unsigned char *record;
+
+    record = learn_base + learn_index * LEARN_STRIDE;
+    record[0x00] = 11;    /* lv_0 */
+    record[0x01] = 0x13;  /* spell_id_0 */
+    record[0x02] = 15;    /* lv_1 */
+    record[0x03] = 0x06;  /* spell_id_1 */
+    record[0x04] = 20;    /* lv_2 */
+    record[0x05] = 0x0e;  /* spell_id_2 */
+    record[0x06] = 25;    /* lv_3 */
+    record[0x07] = 0x07;  /* spell_id_3 */
+    record[0x08] = 0xff;  /* lv_4, unused pair */
+    record[0x09] = 0xff;  /* spell_id_4 */
+    record[0x0a] = 0xff;  /* lv_5, unused pair */
+    record[0x0b] = 0xff;  /* spell_id_5 */
+}
+
+/* The ADD has no constant term, so record 0 is the table base itself -- the
+   file has no header to step over, and schedule 0x00 is the first record. */
+static void learn_record_zero_is_the_table_base(void)
+{
+    install_learn_base(learn_base);
+    CHECK_EQ(learn_offset(0), 0);
+}
+
+/* The stride the IMUL states, checked as a distance rather than as an absolute
+   offset, at the two schedules the guide names first and at the last pair of
+   records the file holds. */
+static void consecutive_learn_records_are_twelve_bytes_apart(void)
+{
+    install_learn_base(learn_base);
+    CHECK_EQ(learn_offset(1), LEARN_STRIDE);
+    CHECK_EQ(learn_offset(2) - learn_offset(1), LEARN_STRIDE);
+    CHECK_EQ(learn_offset(0x21), 0x21 * LEARN_STRIDE);
+    CHECK_EQ(learn_offset(LEARN_COUNT - 1) - learn_offset(LEARN_COUNT - 2),
+             LEARN_STRIDE);
+}
+
+/* Stride and record count against the file's own length: the last record
+   starts 12 bytes before the end of the 720 bytes GETMGTAB.DAT occupies, so a
+   stride that were wrong by one would not reach it or would overshoot. */
+static void the_last_real_learn_record_is_at_the_end_of_the_table(void)
+{
+    install_learn_base(learn_base);
+    CHECK_EQ(learn_offset(LEARN_COUNT - 1), (LEARN_COUNT - 1) * LEARN_STRIDE);
+    CHECK_EQ(learn_offset(LEARN_COUNT - 1) + LEARN_STRIDE, LEARN_FILE_BYTES);
+}
+
+/* There is no CMP in the body, so an index past the last record is multiplied
+   and added like any other and lands past the end of the table.  A bound added
+   here would be a behaviour change. */
+static void a_learn_index_past_the_end_is_not_clamped(void)
+{
+    install_learn_base(learn_base);
+    CHECK_EQ(learn_offset(LEARN_COUNT), LEARN_COUNT * LEARN_STRIDE);
+    CHECK_EQ(learn_offset(LEARN_COUNT) - LEARN_FILE_BYTES, 0);
+}
+
+/* IMUL is the signed multiply, so a negative index steps backwards off the
+   front of the table rather than becoming a four-gigabyte offset.  The
+   distinction is invisible in the low 32 bits of the product itself and shows
+   only once the product is added to the base, which is what this measures. */
+static void a_negative_learn_index_steps_backwards(void)
+{
+    install_learn_base(learn_base);
+    CHECK_EQ(learn_offset(-1), -LEARN_STRIDE);
+}
+
+/* The MOV reloads the global on every call rather than caching it, so a base
+   moved between two calls moves the answer with it. */
+static void the_learn_table_base_is_read_on_every_call(void)
+{
+    install_learn_base(learn_base);
+    CHECK_EQ(learn_offset(3), 3 * LEARN_STRIDE);
+    install_learn_base(learn_base + LEARN_STRIDE);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_spell_learn_record(3) - learn_base),
+             4 * LEARN_STRIDE);
+    install_learn_base(learn_base);
+}
+
+/* Nothing tests the base, so a null table -- the state before
+   fdps_load_data_tables has run -- yields the offset alone as though it were
+   an address.  A null guard returning NULL would be a silent behaviour
+   change. */
+static void a_null_learn_table_base_is_not_guarded(void)
+{
+    install_learn_base((unsigned char *) 0);
+    CHECK_EQ((long) (unsigned long) fdps_get_spell_learn_record(2),
+             2 * LEARN_STRIDE);
+    install_learn_base(learn_base);
+}
+
+/* Eight accessors, eight globals.  This one's is 0x00063fe8, and its two
+   immediate neighbours in bss are the class-equip table's at 0x00063fe4 and
+   the growth table's at 0x00063fec -- one pointer either side, which is
+   exactly the confusion a single-base fixture cannot see.  Each global gets
+   its own base here and each accessor must follow its own (contract B -- the
+   nine table pointers are nine globals, not an array). */
+static void the_learn_accessor_reads_its_own_global(void)
+{
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    install_item_base(item_base);
+    install_class_base(class_base);
+    install_equip_base(equip_base);
+    install_spell_base(spell_base);
+    install_learn_base(learn_base);
+    CHECK_EQ(learn_offset(1), LEARN_STRIDE);
+
+    install_base(table_base + RECORD_STRIDE);
+    install_growth_base(growth_base + GROWTH_STRIDE);
+    install_enemy_base(enemy_base + ENEMY_STRIDE);
+    install_item_base(item_base + ITEM_STRIDE);
+    install_class_base(class_base + CLASS_STRIDE);
+    install_equip_base(equip_base + EQUIP_STRIDE);
+    install_spell_base(spell_base + SPELL_STRIDE);
+    CHECK_EQ(learn_offset(1), LEARN_STRIDE);
+
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    install_item_base(item_base);
+    install_class_base(class_base);
+    install_equip_base(equip_base);
+    install_spell_base(spell_base);
+    install_learn_base(learn_base + LEARN_STRIDE);
+    CHECK_EQ(equip_offset(1), EQUIP_STRIDE);
+    CHECK_EQ(growth_offset(1), GROWTH_STRIDE);
+
+    install_learn_base(learn_base);
+}
+
+/* The returned pointer addresses the file's own field offsets: all twelve
+   bytes of the staged record read back through the struct's twelve fields, so
+   base and stride are checked together against the layout.  The row is
+   schedule 0x01's real content, and it is staged at an odd index so the record
+   starts at an odd address. */
+static void the_returned_learn_pointer_addresses_the_packed_record(void)
+{
+    struct fdps_spell_learning_record *record;
+
+    install_learn_base(learn_base);
+    stage_learn_record(1);
+    record = fdps_get_spell_learn_record(1);
+    CHECK_EQ(record->lv_0, 11);
+    CHECK_EQ(record->spell_id_0, 0x13);
+    CHECK_EQ(record->lv_1, 15);
+    CHECK_EQ(record->spell_id_1, 0x06);
+    CHECK_EQ(record->lv_2, 20);
+    CHECK_EQ(record->spell_id_2, 0x0e);
+    CHECK_EQ(record->lv_3, 25);
+    CHECK_EQ(record->spell_id_3, 0x07);
+    CHECK_EQ(record->lv_4, 0xff);
+    CHECK_EQ(record->spell_id_4, 0xff);
+    CHECK_EQ(record->lv_5, 0xff);
+    CHECK_EQ(record->spell_id_5, 0xff);
+    CHECK_EQ((long) ((unsigned char *) record - learn_base), LEARN_STRIDE);
+}
+
+/* The record is six two-byte pairs and the caller walks them as such: at
+   0001e069 it doubles its 0..5 counter, adds it to the pointer this accessor
+   returned, compares byte [pair] against the unit's level at +0x21 of the unit
+   record and takes byte [pair+1] as the spell id.  So the six levels are at
+   +0x00, +0x02, +0x04, +0x06, +0x08 and +0x0a and the six ids one byte behind
+   each, pinned here as raw bytes through the returned pointer rather than
+   through the field order this file happens to declare.  Byte +0x0c already
+   belongs to the next schedule, which the last assertion states as the
+   distance between two records. */
+static void the_offsets_the_level_up_walk_reads_are_the_six_even_bytes(void)
+{
+    unsigned char *record;
+
+    install_learn_base(learn_base);
+    stage_learn_record(5);
+    record = (unsigned char *) fdps_get_spell_learn_record(5);
+    CHECK_EQ(record[0x00], 11);
+    CHECK_EQ(record[0x01], 0x13);
+    CHECK_EQ(record[0x02], 15);
+    CHECK_EQ(record[0x03], 0x06);
+    CHECK_EQ(record[0x04], 20);
+    CHECK_EQ(record[0x05], 0x0e);
+    CHECK_EQ(record[0x06], 25);
+    CHECK_EQ(record[0x07], 0x07);
+    CHECK_EQ(record[0x08], 0xff);
+    CHECK_EQ(record[0x09], 0xff);
+    CHECK_EQ(record[0x0a], 0xff);
+    CHECK_EQ(record[0x0b], 0xff);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_spell_learn_record(6) - record),
+             LEARN_STRIDE);
+    CHECK_EQ((long) (record - learn_base), 5 * LEARN_STRIDE);
+}
+
+/* Every field of the record is an unsigned byte, and the value that decides it
+   is 0xff: 38 of the 60 records are twelve 0xff bytes and every real record
+   pads its unused pairs the same way (assets/characters.md).  Read signed, a
+   level byte of 0xff would be -1 and a spell id of 0xff would index the spell
+   bitmap backwards.  The caller zero-extends the id it takes -- 0001e087 XOR
+   EAX,EAX / MOV AL,byte ptr [EDX+0x1] -- so 255 is the answer and -1 is not
+   (contract C). */
+static void the_learn_pair_bytes_are_unsigned(void)
+{
+    struct fdps_spell_learning_record *record;
+    unsigned char *bytes;
+    int field;
+
+    install_learn_base(learn_base);
+    bytes = learn_base + 40 * LEARN_STRIDE;
+    for (field = 0; field < LEARN_STRIDE; field++) {
+        bytes[field] = 0xff;
+    }
+    record = fdps_get_spell_learn_record(40);
+    CHECK_EQ(record->lv_0, 255);
+    CHECK_EQ(record->spell_id_0, 255);
+    CHECK_EQ(record->lv_3, 255);
+    CHECK_EQ(record->spell_id_5, 255);
+}
+
+/* The 0xff that FRILEVUP.DAT byte +0x0a carries for a form that learns no
+   spells is the caller's business and stays the caller's: 0001e036 CMP dword
+   ptr [EBP+-0x2c],0xff / JZ skips the call, and there is no CMP anywhere in
+   this body.  So asking for 0xff is arithmetic like any other index -- the
+   record it names lies 2,340 bytes past the end of the 720-byte table -- and a
+   null return or a clamp added here would hide that rather than preserve it.
+   The buffer is not indexed at 0xff; only the arithmetic is, through the null
+   base, so nothing is dereferenced out there. */
+static void the_ff_no_spells_sentinel_is_not_this_accessors(void)
+{
+    install_learn_base((unsigned char *) 0);
+    CHECK_EQ((long) (unsigned long) fdps_get_spell_learn_record(0xff),
+             0xff * LEARN_STRIDE);
+    CHECK_EQ((long) (unsigned long) fdps_get_spell_learn_record(0xff)
+             - LEARN_FILE_BYTES, 2340);
+    install_learn_base(learn_base);
+}
+
 void run_table_tests(void)
 {
     RUN_TEST(record_zero_is_the_table_base);
@@ -1696,6 +1986,19 @@ void run_table_tests(void)
     RUN_TEST(the_offsets_the_spell_callers_read_are_zero_two_and_five);
     RUN_TEST(the_status_effect_substitution_is_not_this_accessors);
 
+    RUN_TEST(learn_record_zero_is_the_table_base);
+    RUN_TEST(consecutive_learn_records_are_twelve_bytes_apart);
+    RUN_TEST(the_last_real_learn_record_is_at_the_end_of_the_table);
+    RUN_TEST(a_learn_index_past_the_end_is_not_clamped);
+    RUN_TEST(a_negative_learn_index_steps_backwards);
+    RUN_TEST(the_learn_table_base_is_read_on_every_call);
+    RUN_TEST(a_null_learn_table_base_is_not_guarded);
+    RUN_TEST(the_learn_accessor_reads_its_own_global);
+    RUN_TEST(the_returned_learn_pointer_addresses_the_packed_record);
+    RUN_TEST(the_offsets_the_level_up_walk_reads_are_the_six_even_bytes);
+    RUN_TEST(the_learn_pair_bytes_are_unsigned);
+    RUN_TEST(the_ff_no_spells_sentinel_is_not_this_accessors);
+
     /* Put the globals back the way they were found.  They are null until
        ticket 23 defines them, and leaving a pointer to this file's static
        buffers in one would hand the next unit an address it has no business
@@ -1707,4 +2010,5 @@ void run_table_tests(void)
     install_class_base((unsigned char *) 0);
     install_equip_base((unsigned char *) 0);
     install_spell_base((unsigned char *) 0);
+    install_learn_base((unsigned char *) 0);
 }

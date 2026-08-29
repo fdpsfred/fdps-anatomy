@@ -193,4 +193,32 @@ extern struct fdps_class_equip_record *fdps_get_class_equip_record(int class_ind
 extern struct fdps_spell_effect *fdps_get_spell_record(int spell_id);
 #pragma aux fdps_get_spell_record "*" parm caller [];
 
+/* Returns a pointer to record learn_index of the GETMGTAB.DAT spell-learning
+   table: the six (level, spell id) byte pairs at which one character form
+   learns its spells, in ascending level order, an unused pair being
+   (0xff, 0xff), in the 12 bytes of struct fdps_spell_learning_record.
+
+   learn_index is neither a character id nor a class code but a schedule
+   number of its own: byte +0x0a of the character's FRILEVUP.DAT growth
+   record, which fdps_get_growth_record hands back (assets/characters.md).
+   The value 0xff there means the form learns no spells, and rejecting it is
+   the caller's job -- fdps_unit_award_exp_and_level_up compares against 0xff
+   and skips the call, because nothing in the accessor treats that index
+   differently from any other.  Nothing else is checked either: the table holds
+   60 records over the file's 720 bytes and the multiply is signed, so an index
+   outside 0..59 addresses memory past one end of it or the other, and the base
+   is not tested for null.
+
+   Of the 60 records only 22 carry content; the remaining 38 are twelve 0xff
+   bytes, which is how a form that learns nothing is spelt when its growth
+   record does name a schedule (assets/characters.md).  The one caller walks
+   all six pairs with no sentinel test, comparing each pair's level byte
+   against the unit's own level at +0x21 of the unit record and granting the
+   pair's spell id on a match, so an all-0xff record simply never matches a
+   level that fits in the game's 1..99 range.
+
+   Reads only the table base global, calls nothing, and dereferences nothing. */
+extern struct fdps_spell_learning_record *fdps_get_spell_learn_record(int learn_index);
+#pragma aux fdps_get_spell_learn_record "*" parm caller [];
+
 #endif
