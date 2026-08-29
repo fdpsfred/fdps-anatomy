@@ -142,4 +142,29 @@ extern struct fdps_item_effect *fdps_get_item_record(int item_id);
 extern struct fdps_class_record *fdps_get_class_record(int record_index);
 #pragma aux fdps_get_class_record "*" parm caller [];
 
+/* Returns a pointer to record class_index of the PROEQU.DAT class equipment
+   table: the six item type codes a class is allowed to equip, in the 6 bytes
+   of struct fdps_class_equip_record.
+
+   class_index is the class code RAW -- byte +0x20 of the unit record, pushed
+   without the INC that every caller of fdps_get_class_record applies, because
+   PROEQU.DAT has no leading default row and class 0x00 is record 0
+   (assets/tables/classes.md covers the PROMAP.DAT bias this table does not
+   share).  Nothing is checked: the 216-byte file holds 36 records covering
+   class codes 0x00-0x23 (resource_info/data_tables.md) while class codes run
+   to 0x27, so classes 0x24-0x27 address memory past its end, and the multiply
+   is signed, so a negative index addresses memory in front of it.  The base is
+   not tested for null either.
+
+   The record is a variable-length set and not six fixed slots: the types used
+   are stored in ascending order and the unused positions hold 0xFF, never
+   0x00, which is itself a live item type.  The one caller,
+   fdps_unit_can_equip_item, scans all six positions with no sentinel test at
+   all and returns 1 when one of them equals the type byte at +0x00 of the item
+   record it was asked about (rebuild_info/pitfalls.md).
+
+   Reads only the table base global, calls nothing, and dereferences nothing. */
+extern struct fdps_class_equip_record *fdps_get_class_equip_record(int class_index);
+#pragma aux fdps_get_class_equip_record "*" parm caller [];
+
 #endif

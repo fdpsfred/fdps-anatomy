@@ -1,25 +1,27 @@
 /* tests/table.c -- cover for src/table.c.
  *
- * Expected values come from the assembly of the five accessors -- 00018ab0
+ * Expected values come from the assembly of the six accessors -- 00018ab0
  * over FRIAPRDA.DAT, 00018ae0 over FRILEVUP.DAT, 00018b10 over ENEMYDAT.DAT,
- * 00018b40 over ITEM.DAT and 00018b70 over PROMAP.DAT -- and from ticket 17's
- * layouts of struct fdps_character_base_record, struct fdps_character_growth,
- * struct fdps_enemy_data, struct fdps_item_effect and struct fdps_class_record
- * in src/fdpstype.h.  None of them is read off the emitted C.
+ * 00018b40 over ITEM.DAT, 00018b70 over PROMAP.DAT and 00018ba0 over
+ * PROEQU.DAT -- and from ticket 17's layouts of struct
+ * fdps_character_base_record, struct fdps_character_growth, struct
+ * fdps_enemy_data, struct fdps_item_effect, struct fdps_class_record and
+ * struct fdps_class_equip_record in src/fdpstype.h.  None of them is read off
+ * the emitted C.
  *
  * Every body is PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x4, then IMUL
  * EAX,dword ptr [EBP+0x14],<stride> / MOV EDX,dword ptr [<table base global>]
  * / ADD EDX,EAX and nothing else, so the three facts everything below is aimed
  * at are the same for each: the stride is the file's own (0x18, 0x0b, 0x0a,
- * 0x17 and 0x0a), the base is that accessor's own pointer global read fresh on
- * every call, and there is no test of any kind in the body -- no bound on the
- * index, no null check on the base.
+ * 0x17, 0x0a and 0x06), the base is that accessor's own pointer global read
+ * fresh on every call, and there is no test of any kind in the body -- no bound
+ * on the index, no null check on the base.
  *
  * No .DAT is a loose file: each reaches its table only as a block
  * fdps_load_data_tables has already unpacked out of the VFS container into the
  * heap, so a staged byte buffer is exactly the shape the global holds at run
  * time.  Nothing here asserts what the real tables contain -- every byte read
- * back is one this file wrote -- and all four globals are put back to null on
+ * back is one this file wrote -- and all six globals are put back to null on
  * the way out, since ticket 23 has yet to define them and a later unit must not
  * find a stale address in any of them.
  */
@@ -1088,6 +1090,241 @@ static void the_offsets_the_combat_callers_read_are_eight_and_nine(void)
     CHECK_EQ((long) (record - class_base), 9 * CLASS_STRIDE);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_get_class_equip_record @ 00018ba0
+ *
+ * The sixth accessor of the same one-block shape, and its expected values come
+ * from its own assembly: IMUL EAX,dword ptr [EBP+0x14],0x6 / MOV EDX,dword ptr
+ * [0x00063fe4] / ADD EDX,EAX, with nothing else in the body.  The stride is
+ * 0x06, the base is a sixth global, and there is no test of any kind.  The
+ * record layout is ticket 17's struct fdps_class_equip_record in
+ * src/fdpstype.h and the 36 records are PROEQU.DAT's 216 bytes divided by that
+ * stride (resource_info/data_tables.md).
+ *
+ * The one fact here that is not arithmetic is the absence of the +1 its
+ * neighbour fdps_get_class_record needs: the sole caller loads the unit
+ * record's class byte and pushes it unbiased -- 00025ffe MOV AL,byte ptr
+ * [EAX+0x20] / 00026001 AND EAX,0xff / 00026006 PUSH EAX, with no INC between
+ * -- so class code 0x00 is record 0 here where it is row 1 there.
+ * ------------------------------------------------------------------ */
+
+/* What the IMUL multiplies by, the records the 216-byte file holds, and the
+   file's own length. */
+#define EQUIP_STRIDE 0x06
+#define EQUIP_COUNT 36
+#define EQUIP_FILE_BYTES 216
+
+/* The class codes the game uses run to 0x27, four past the last record the
+   file has storage for, so the image covers every one of them plus a record of
+   lead-in for the negative index: each case lands on real storage. */
+static unsigned char equip_image[EQUIP_STRIDE + 0x28 * EQUIP_STRIDE];
+
+static unsigned char *equip_base = equip_image + EQUIP_STRIDE;
+
+static void install_equip_base(unsigned char *base)
+{
+    data_fdps_class_equip_table_ptr = base;
+}
+
+static long equip_offset(int class_index)
+{
+    unsigned char *record;
+
+    record = (unsigned char *) fdps_get_class_equip_record(class_index);
+    return (long) (record - equip_base);
+}
+
+/* A distinct byte per position, in the ascending order the file stores them
+   in, with the tail padded 0xFF the way a class that uses fewer than six types
+   is padded.  0x00 goes in position 0 deliberately: it is a live item type
+   carried by real records, not an empty marker, and a fixture that used it as
+   filler would hide that (rebuild_info/pitfalls.md). */
+static void stage_equip_record(int class_index)
+{
+    unsigned char *record;
+
+    record = equip_base + class_index * EQUIP_STRIDE;
+    record[0x00] = 0x00;  /* allowed_item_type[0], a live type code */
+    record[0x01] = 0x03;  /* allowed_item_type[1] */
+    record[0x02] = 0x2d;  /* allowed_item_type[2] */
+    record[0x03] = 0xff;  /* allowed_item_type[3], padding */
+    record[0x04] = 0xff;  /* allowed_item_type[4], padding */
+    record[0x05] = 0xff;  /* allowed_item_type[5], padding */
+}
+
+/* The ADD has no constant term, so record 0 is the table base itself -- the
+   file has no header to step over. */
+static void equip_record_zero_is_the_table_base(void)
+{
+    install_equip_base(equip_base);
+    CHECK_EQ(equip_offset(0), 0);
+}
+
+/* The 0x6 the IMUL states.  An accessor that reached for a neighbouring
+   table's stride would land at 0xa, 0xb, 0x17 or 0x18 here. */
+static void consecutive_equip_records_are_six_bytes_apart(void)
+{
+    install_equip_base(equip_base);
+    CHECK_EQ(equip_offset(1), EQUIP_STRIDE);
+    CHECK_EQ(equip_offset(2) - equip_offset(1), EQUIP_STRIDE);
+    CHECK_EQ(equip_offset(19), 19 * EQUIP_STRIDE);
+}
+
+/* 0x23 is the last class code the 216-byte file has storage for, and the byte
+   after that record is the file's last. */
+static void the_last_real_equip_record_is_at_the_end_of_the_table(void)
+{
+    install_equip_base(equip_base);
+    CHECK_EQ(equip_offset(0x23), 0x23 * EQUIP_STRIDE);
+    CHECK_EQ(equip_offset(EQUIP_COUNT - 1) + EQUIP_STRIDE, EQUIP_FILE_BYTES);
+}
+
+/* The whole index expression as the caller writes it: the class byte straight
+   out of the unit record, with no INC.  Its neighbour fdps_get_class_record is
+   fed class code PLUS ONE for the same unit, so the two accessors disagree by
+   one record on purpose and a +1 moved in here would pass every stride case
+   above while shifting every class onto the next class's equipment list
+   (rebuild_info/pitfalls.md).  Asserted against the class accessor on the same
+   class code, which is where the difference shows. */
+static void a_class_code_indexes_its_equip_record_unbiased(void)
+{
+    install_equip_base(equip_base);
+    install_class_base(class_base);
+    CHECK_EQ(equip_offset(0x00), 0);
+    CHECK_EQ(equip_offset(0x01), EQUIP_STRIDE);
+    CHECK_EQ(equip_offset(0x23), 0x23 * EQUIP_STRIDE);
+    CHECK_EQ(class_offset(0x00 + 1), CLASS_STRIDE);
+}
+
+/* There is no CMP in the body, so a class code past the last record is
+   multiplied and added like any other.  This is the case the game reaches:
+   class codes run to 0x27 and the file stops at 0x23, so the four classes
+   above it are handed an address off the end and the caller scans six bytes
+   there.  A bound added here would change what those classes may equip. */
+static void a_class_code_past_the_end_is_not_clamped(void)
+{
+    install_equip_base(equip_base);
+    CHECK_EQ(equip_offset(EQUIP_COUNT), EQUIP_COUNT * EQUIP_STRIDE);
+    CHECK_EQ(equip_offset(0x27), 0x27 * EQUIP_STRIDE);
+    CHECK_EQ(equip_offset(0x24) - EQUIP_FILE_BYTES, 0);
+}
+
+/* IMUL is the signed multiply, so a negative index steps backwards off the
+   front of the table rather than becoming a vast positive offset.  An unsigned
+   stride would read 0xfffffffa here. */
+static void a_negative_class_index_steps_back_in_the_equip_table(void)
+{
+    install_equip_base(equip_base);
+    CHECK_EQ(equip_offset(-1), -EQUIP_STRIDE);
+}
+
+/* MOV EDX,dword ptr [0x00063fe4] is inside the body: the base is re-read on
+   every call, so moving the global moves every answer.  A transcription that
+   cached it in a file-scope copy passes everything above and fails here. */
+static void the_equip_table_base_is_read_on_every_call(void)
+{
+    install_equip_base(equip_base);
+    CHECK_EQ(equip_offset(3), 3 * EQUIP_STRIDE);
+    install_equip_base(equip_base + EQUIP_STRIDE);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_class_equip_record(3)
+                     - equip_base),
+             4 * EQUIP_STRIDE);
+    install_equip_base(equip_base);
+}
+
+/* Nothing tests the base, so a null table -- the state before
+   fdps_load_data_tables has run -- yields the offset alone as though it were
+   an address.  A null guard returning NULL would be a silent behaviour
+   change. */
+static void a_null_equip_table_base_is_not_guarded(void)
+{
+    install_equip_base((unsigned char *) 0);
+    CHECK_EQ((long) (unsigned long) fdps_get_class_equip_record(2),
+             2 * EQUIP_STRIDE);
+    install_equip_base(equip_base);
+}
+
+/* Six accessors, six globals, at 0x00063fd0, 0x00063fd4, 0x00063fd8,
+   0x00063fe0, 0x00063fe4 and 0x00063fec.  They are neighbours in bss and one
+   loader call fills each, so an accessor naming the wrong one is invisible to
+   any case that installs a single base: here each global gets its own and each
+   accessor must follow its own (contract B -- the nine table pointers are nine
+   globals, not an array). */
+static void the_equip_accessor_reads_its_own_global(void)
+{
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    install_item_base(item_base);
+    install_class_base(class_base);
+    install_equip_base(equip_base);
+    CHECK_EQ(equip_offset(1), EQUIP_STRIDE);
+
+    install_base(table_base + RECORD_STRIDE);
+    install_growth_base(growth_base + GROWTH_STRIDE);
+    install_enemy_base(enemy_base + ENEMY_STRIDE);
+    install_item_base(item_base + ITEM_STRIDE);
+    install_class_base(class_base + CLASS_STRIDE);
+    CHECK_EQ(equip_offset(1), EQUIP_STRIDE);
+
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    install_item_base(item_base);
+    install_class_base(class_base);
+    install_equip_base(equip_base + EQUIP_STRIDE);
+    CHECK_EQ(record_offset(1), RECORD_STRIDE);
+    CHECK_EQ(growth_offset(1), GROWTH_STRIDE);
+    CHECK_EQ(enemy_offset(1), ENEMY_STRIDE);
+    CHECK_EQ(item_offset(1), ITEM_STRIDE);
+    CHECK_EQ(class_offset(1), CLASS_STRIDE);
+
+    install_equip_base(equip_base);
+}
+
+/* The returned pointer addresses the file's own six positions: all six bytes
+   of the staged record read back what was written there, so base and stride
+   are checked together against the layout.  0xFF is the padding the file
+   really uses and it must read as 255 and not -1, because the caller's compare
+   is against a zero-extended item type byte -- 0002604a AND EAX,0xff before
+   the CMP -- so a signed position byte would never match a type above 0x7f
+   either way round (contract C). */
+static void the_returned_equip_pointer_addresses_the_six_positions(void)
+{
+    struct fdps_class_equip_record *record;
+
+    install_equip_base(equip_base);
+    stage_equip_record(7);
+    record = fdps_get_class_equip_record(7);
+    CHECK_EQ(record->allowed_item_type[0], 0x00);
+    CHECK_EQ(record->allowed_item_type[1], 0x03);
+    CHECK_EQ(record->allowed_item_type[2], 0x2d);
+    CHECK_EQ(record->allowed_item_type[3], 0xff);
+    CHECK_EQ(record->allowed_item_type[5], 0xff);
+}
+
+/* The six positions the caller scans, as raw bytes through the returned
+   pointer: 00026042 MOV EAX,[EBP-0x10] / 00026045 ADD EAX,[EBP-0xc] / 00026048
+   MOV AL,byte ptr [EAX], with the counter at [EBP-0xc] running 0..5 against
+   CMP ...,0x6.  The offsets are pinned to the file's layout and not merely to
+   the field order this test happens to declare, and the last one is +0x05:
+   byte +0x06 already belongs to the next class, which the second assertion
+   states as the distance between the two records. */
+static void the_caller_scans_offsets_zero_through_five(void)
+{
+    unsigned char *record;
+
+    install_equip_base(equip_base);
+    stage_equip_record(9);
+    record = (unsigned char *) fdps_get_class_equip_record(9);
+    CHECK_EQ(record[0x00], 0x00);
+    CHECK_EQ(record[0x05], 0xff);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_class_equip_record(10)
+                     - record),
+             EQUIP_STRIDE);
+    CHECK_EQ((long) (record - equip_base), 9 * EQUIP_STRIDE);
+}
+
 void run_table_tests(void)
 {
     RUN_TEST(record_zero_is_the_table_base);
@@ -1148,6 +1385,18 @@ void run_table_tests(void)
     RUN_TEST(the_returned_class_pointer_addresses_the_packed_record);
     RUN_TEST(the_offsets_the_combat_callers_read_are_eight_and_nine);
 
+    RUN_TEST(equip_record_zero_is_the_table_base);
+    RUN_TEST(consecutive_equip_records_are_six_bytes_apart);
+    RUN_TEST(the_last_real_equip_record_is_at_the_end_of_the_table);
+    RUN_TEST(a_class_code_indexes_its_equip_record_unbiased);
+    RUN_TEST(a_class_code_past_the_end_is_not_clamped);
+    RUN_TEST(a_negative_class_index_steps_back_in_the_equip_table);
+    RUN_TEST(the_equip_table_base_is_read_on_every_call);
+    RUN_TEST(a_null_equip_table_base_is_not_guarded);
+    RUN_TEST(the_equip_accessor_reads_its_own_global);
+    RUN_TEST(the_returned_equip_pointer_addresses_the_six_positions);
+    RUN_TEST(the_caller_scans_offsets_zero_through_five);
+
     /* Put the globals back the way they were found.  They are null until
        ticket 23 defines them, and leaving a pointer to this file's static
        buffers in one would hand the next unit an address it has no business
@@ -1157,4 +1406,5 @@ void run_table_tests(void)
     install_enemy_base((unsigned char *) 0);
     install_item_base((unsigned char *) 0);
     install_class_base((unsigned char *) 0);
+    install_equip_base((unsigned char *) 0);
 }

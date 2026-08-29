@@ -199,3 +199,53 @@ struct fdps_class_record *fdps_get_class_record(int record_index)
         (data_fdps_class_table_ptr + record_index * CLASS_RECORD_STRIDE);
     return record;
 }
+
+/* The stride of one PROEQU.DAT record, as the original writes it: IMUL
+   EAX,dword ptr [EBP+0x14],0x6.  A literal and not sizeof(struct
+   fdps_class_equip_record) for the same reason as the five tables above -- the
+   file's stride is the fact that has to survive.  This record is six unsigned
+   chars and would measure six however it were declared, which is exactly why
+   writing sizeof here would look right and record nothing. */
+#define CLASS_EQUIP_RECORD_STRIDE 0x06
+
+/* 00018ba0.  The sixth accessor of the same one-basic-block shape: IMUL
+   EAX,dword ptr [EBP+0x14],0x6 / MOV EDX,dword ptr [0x00063fe4] / ADD EDX,EAX,
+   spilled to a stack local and reloaded into EAX to be returned.  No compare,
+   no branch, no CALL.
+
+   class_index is the class code RAW, not biased.  That is the one thing about
+   this accessor that is not arithmetic, and it is the opposite of its
+   neighbour: fdps_get_class_record above is fed class code PLUS ONE because
+   row 0 of PROMAP.DAT is a default row, while PROEQU.DAT has no such row and
+   class 0x00 is record 0.  The only caller says so outright -- 00025ffe MOV
+   AL,byte ptr [EAX+0x20] / 00026001 AND EAX,0xff / 00026006 PUSH EAX in
+   fdps_unit_can_equip_item, with no INC between the load and the push, against
+   the MOV AL,[unit+0x20] / INC EAX / PUSH EAX every caller of the class
+   accessor writes.  Adding one here would shift every class's permitted
+   equipment list onto the next class's record (rebuild_info/pitfalls.md).
+
+   The base at 0x00063fe4 is the sixth of the nine table pointers and is a
+   different global from the class table's at 0x00063fd0, four records' worth
+   of bss away (contract B).
+
+   IMUL again, the signed form, so a negative index steps backwards off the
+   front of the table instead of becoming a four-gigabyte offset.  Nothing is
+   bounded either, and here the gap is reachable rather than hypothetical: the
+   216-byte file holds 36 records covering class codes 0x00-0x23
+   (resource_info/data_tables.md) while class codes run to 0x27, so a unit of
+   class 0x24-0x27 is handed an address past the end of the table and the
+   caller scans six bytes there.  A bound added here would change what those
+   four classes are allowed to equip.
+
+   The base is read out of the global on every call, uncached and untested, so
+   a call before fdps_load_data_tables has filled it returns the offset alone
+   as though it were an address. */
+struct fdps_class_equip_record *fdps_get_class_equip_record(int class_index)
+{
+    struct fdps_class_equip_record *record;
+
+    record = (struct fdps_class_equip_record *)
+        (data_fdps_class_equip_table_ptr
+         + class_index * CLASS_EQUIP_RECORD_STRIDE);
+    return record;
+}

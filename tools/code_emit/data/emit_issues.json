@@ -327,5 +327,31 @@
       "needs": "Those four callers emitted, plus whatever writes the class byte at unit+0x20 (deployment and promotion), to bound the byte's range. This function must stay unbounded either way; the answer only decides whether the past-the-end read is dead code or observable behaviour.",
       "status": "open"
     }
+  ],
+  "00018ba0": [
+    {
+      "from": "emit",
+      "what": "resource_info/data_tables.md still marks PROEQU.DAT's contents 尚未解讀, so nothing in the knowledge base states which item types each class may equip. The tests therefore assert only the accessor's arithmetic against staged bytes; no assertion checks a real record, and the plate comment's readings (classes 0x19/0x1a use one type, classes 0x20/0x21 carry the unmatched code 0x2d) are unverified against the shipped file here.",
+      "needs": "Ticket 23 emitting data_fdps_class_equip_table_ptr's real contents, or a test that stages PROEQU.DAT itself through tests/gamefile.lst once the VFS extraction path is emitted; either would let the per-class type sets be asserted against assets/ rather than against bytes this test wrote.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "What classes 0x24-0x27 actually read is unsettled: their records start at the byte after PROEQU.DAT's 216 and the caller scans six bytes there, so the answer is whatever the heap block's allocator left behind the table. The rebuild does not place the block where the original placed it, so those four classes' permitted-equipment answers may differ from the original run for run, and no unit test can pin the value.",
+      "needs": "Establishing whether class codes 0x24-0x27 are reachable on a live unit at all (the class byte at unit record +0x20 across every deployment and promotion path), and if so, observing the four on real hardware or in DOSBox-X. If they are unreachable in play, the concern closes as unobservable.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "PROEQU.DAT's contents are still unread in the knowledge base (resource_info/data_tables.md marks the table 尚未解讀), so no test asserts which item types any class may actually equip -- only the accessor's arithmetic against staged bytes. The plate comment's readings (classes 0x19/0x1a using a single type; code 0x2d in the records for 0x20/0x21 matching no item) are unverified here.",
+      "needs": "Ticket 23 landing the real contents of data_fdps_class_equip_table_ptr, or staging PROEQU.DAT through the VFS path once it is emitted, so per-class type sets can be asserted against assets/ instead of bytes the test wrote.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "What classes 0x24-0x27 read is undetermined. The file stops at record 0x23 and the accessor applies no bound, so those four index past the 216-byte block and the caller scans six bytes of whatever follows it in the heap. The rebuild will not place that block where the original did, so the answer can differ run to run and no unit test can pin it.",
+      "needs": "Establishing whether a live unit can ever carry class code 0x24-0x27 at unit record +0x20 (across deployment and promotion paths); if it can, observing the four in DOSBox-X. If unreachable in play, the concern closes as unobservable.",
+      "status": "open"
+    }
   ]
 }
