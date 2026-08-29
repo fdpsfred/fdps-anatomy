@@ -20,6 +20,29 @@
 #ifndef MOVEGRID_H
 #define MOVEGRID_H
 
+#include "fdpstype.h"
+
+/* 00063c50 and 00063930.  The flood fill's frontier: the tile columns and the
+   tile rows of the cells one wave of fdps_move_grid_flood_fill_range has to
+   expand from.  Each is a pair of 400-entry queues laid end to end -- buffer 0
+   at index 0 and buffer 1 at index 400 -- and the fill alternates between them,
+   reading the wave it is on out of one while appending the next wave into the
+   other.  A one-byte entry, so a tile index above 255 could not be queued; no
+   map in the game is that wide.
+
+   Each is ONE array of 800 and not two of 400 (rebuild_info/pitfalls.md,
+   contract B): the fill forms every index as buffer * 400 + slot, and a wave
+   longer than 400 entries runs off the end of one buffer into the other, which
+   only stays inside the object while the two halves are one declaration.  The
+   two arrays are adjacent in bss -- 00063930 + 800 is 00063c50 -- and nothing
+   indexes from one into the other, so they stay two globals.
+
+   Nothing outside src/movegrid.c reads either of them: they are scratch for
+   the one function, not a result anybody collects.  The definitions arrive
+   with ticket 23 like every other data_fdps_ global. */
+extern unsigned char data_fdps_battle_move_frontier_x[800];
+extern unsigned char data_fdps_battle_move_frontier_y[800];
+
 /* Blanks every cell of the grid so a new movement range or target mask can be
    computed over it: clears the two zone-of-control bits of byte 0, preserving
    the low six bits, and stores the 0xff unreachable sentinel into byte 1.
@@ -54,6 +77,30 @@ extern void fdps_move_grid_set_stop_flag(int tile_x, int tile_y);
    calls this twice, with 0 and then 1. */
 extern void fdps_move_grid_mark_opposing_zones_of_control(int side_select);
 #pragma aux fdps_move_grid_mark_opposing_zones_of_control "*" parm caller [];
+
+/* Floods one unit's movement range over the grid: starting from the tile the
+   unit stands on, relaxes the accumulated movement cost stored in byte 1 of
+   every cell the unit can still afford to enter, so
+   fdps_map_grid_collect_marked_tiles below reads out the range and
+   fdps_move_path_trace walks the same bytes to build a path.
+
+   class_move_cost is the acting unit's class record and only its move_cost[8]
+   is touched: the cost of entering a tile is move_cost[terrain type of that
+   tile].  move_points is the allowance, and a tile stays reachable while its
+   accumulated cost is <= it.  Callers that want the whole map covered rather
+   than one unit's real allowance pass 0x64.
+
+   The two zone-of-control bits the marks above leave in byte 0 are read here:
+   0x40 refuses the cell outright, 0x80 stores move_points into it instead of
+   the cost that was computed.  Expects fdps_map_grid_reset to have run first,
+   so every cell holds the 0xff sentinel a candidate cost can undercut.
+
+   Neither the grid pointer nor the two scene layer pointers are checked, and
+   neither start coordinate is range checked. */
+extern void fdps_move_grid_flood_fill_range(
+                struct fdps_class_record *class_move_cost,
+                int start_x, int start_y, int move_points);
+#pragma aux fdps_move_grid_flood_fill_range "*" parm caller [];
 
 /* Takes the tiles that occupied units stand on back out of the movement range
    that has just been flooded over the grid, by storing the 0xff unreachable

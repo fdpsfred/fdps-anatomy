@@ -327,6 +327,14 @@
       "status": "committed",
       "emitted_against": "0xdb",
       "rounds": 0
+    },
+    "00010de0": {
+      "name": "fdps_move_grid_flood_fill_range",
+      "target": "movegrid.c",
+      "body_size": "0x67b",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x67b"
     }
   }
 }

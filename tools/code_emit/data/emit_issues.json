@@ -621,5 +621,31 @@
       "needs": "The chapter resource loader that allocates data_fdps_battle_move_grid_ptr and fills data_fdps_scene_layer_tile_map_ptrs[0], showing both dimensions come from one source. If they do, it belongs in movegrid.h and maptile.h as a stated invariant; if they can differ, it is a pitfalls.md entry about a reproduced original fault.",
       "status": "open"
     }
+  ],
+  "00010de0": [
+    {
+      "from": "emit",
+      "what": "class_move_cost->move_cost[data_fdps_map_tile_terrain_type] is indexed with no bound of any kind (ADD EAX,[EBP+0x14] / MOV AL,byte ptr [EAX] at 00010fc1). struct fdps_class_record declares eight movement costs, so a terrain type of 8 or 9 reads the critical rate or the magic-resistance byte as a movement cost. The emitted C reproduces the unbounded read, so it behaves identically either way -- but whether it is ever exercised decides whether those two bytes are load-bearing for movement and whether the eight-entry array in fdpstype.h is the whole story.",
+      "needs": "A scan of the terrain_type byte (offset 2) of every row of every shipped ATTR<map><layer>.DAT attribute table for a value above 7. A data question, answerable once ticket 23 or the resource work has the tables in hand.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "Each frontier buffer holds 400 entries and nothing in the function bounds the append: counts[next] is incremented once per accepted neighbour with no compare. A wave longer than 400 entries appends from buffer 0 into buffer 1 (reproduced faithfully, which is why x and y are re-read out of the array at every use rather than latched), and a wave longer than 800 runs off the end of the array entirely, onto whatever the linker happened to put next -- which will not be what the original image had there. A tile can be queued more than once per wave, so the bound is not simply the perimeter of the range.",
+      "needs": "The maximum wave length the fill can actually reach over the shipped battle maps -- their dimensions, and the worst case of re-queueing under the 0x80 stop bit. Settleable by instrumenting the fill against the real chapter maps once the map resources load, or by an argument bounding acceptances per wave from the map size.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "The three dead loads in each direction block index the terrain layer with the MOVEMENT GRID's row stride and the fixed +0xb, rather than with the width in the terrain layer's own header at +7 that fdps_map_load_tile_info uses. On a map whose two headers disagree they address a different tile, and on a short layer they address off the end. They feed nothing, so no value the function produces can differ -- but whether the original ever faults there is a property of the shipped map files, and the emitted C faults in exactly the same place only because the loads were kept.",
+      "needs": "Confirmation from the loaded chapter resources that the movement grid header and the layer-0 terrain header always carry the same width. A resource-format question, not a code one.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Independently confirming the emitter's three open issues rather than adding new ones. (1) class_move_cost->move_cost[data_fdps_map_tile_terrain_type] is indexed with no bound at 00010fc1, so a terrain type of 8 or 9 reads struct fdps_class_record's critical or magic_resist_complement byte as a movement cost. (2) counts[next] is incremented with no compare against 0x190, so a wave over 400 entries appends from one buffer into the other and a wave over 800 leaves the object entirely. (3) The three dead loads index the terrain layer with the movement grid's row stride and a fixed +0xb rather than with the layer's own width at +7. All three are reproduced faithfully in the emitted C, so none of them is an equivalence risk today; each is a question about the shipped data.",
+      "needs": "(1) A scan of byte 2 of every row of every shipped ATTR<map><layer>.DAT for a value above 7. (2) The longest wave the fill reaches over the real chapter maps, allowing for a tile being queued more than once under the 0x80 stop bit. (3) Confirmation that the movement grid header and the layer-0 terrain header always carry the same width. All three become answerable once ticket 23 or the resource work has the map files loaded.",
+      "status": "open"
+    }
   ]
 }

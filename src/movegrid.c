@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "maptile.h"
 #include "movegrid.h"
 
 /* 00010b20.  CMP dword ptr [0x00060144],0 / JZ to the epilogue: an unallocated
@@ -237,6 +238,282 @@ void fdps_move_grid_mark_opposing_zones_of_control(int side_select)
             fdps_move_grid_mark_zone_of_control(tile_x, tile_y);
         }
         unit++;
+    }
+}
+
+/* 00010de0.  The movement range itself, and the reason the grid exists: a
+   breadth-first relaxation outwards from the tile the unit stands on, writing
+   each reached cell's accumulated cost into byte 1.  Byte 1 comes in holding
+   fdps_map_grid_reset's 0xff sentinel, so "cheaper than what is already there"
+   and "not reached yet" are the same test, and fdps_move_path_trace walks the
+   costs this leaves to build the route the unit actually takes.
+
+   There is no null-grid guard, unlike fdps_map_grid_reset and
+   fdps_move_grid_mark_zone_of_control: MOV EAX,[0x00060144] / MOVSX EAX,word
+   ptr [EAX] at 00010df0 dereferences the pointer as the first thing the body
+   does, and the two scene layer pointers below are dereferenced unchecked in
+   the same way.  Adding the guard the neighbours have would not be this
+   function.
+
+   Both dimensions arrive through MOVSX (00010e06, 00010e0f), the signed read,
+   and both edge guards are the signed compare -- CMP EDX,EAX / JGE at 00011081
+   and 000111ce.  A header width of 0xffff is -1, width-1 is -2 and no column
+   passes the guard; read unsigned it is 65535 and the fill walks straight off
+   the end of the block.  Neither start coordinate is checked against either
+   dimension: the cost-0 store at 00010e3c lands wherever the arithmetic puts
+   it.
+
+   The frontier is two waves of queued tile coordinates in
+   data_fdps_battle_move_frontier_x / _y (movegrid.h), a 0/1 selector held in a
+   byte, and the two entry counts on the stack.  Every index into the two
+   arrays is formed as buffer * 400 + slot (IMUL ...,0x190), which is why they
+   are declared as one array of 800 apiece rather than two of 400.
+
+   x and y are re-read out of the frontier array at every use rather than
+   latched into a local -- the assembly reloads them at 00010ed7, 00010f8f,
+   00011028, 0001103e and so on -- and that is reproduced here through the two
+   slot pointers.  It is invisible while a wave stays under 400 entries.  It
+   stops being invisible above that: an append at buffer 0 slot 400 is the same
+   byte as buffer 1 slot 0, so an overlong wave rewrites the very entries the
+   loop is still walking, and a latched copy would then expand a tile the
+   original no longer has queued.
+
+   Each entry tries its four neighbours in the order up, right, down, left, and
+   the guards are the neighbour's own coordinate: y != 0, x < width-1,
+   y < height-1, x != 0.  Diagonals are not tried at all -- the range is
+   4-connected.
+
+   The acceptance test is candidate <= move_points, zone bit 0x40 clear, and
+   candidate < the cost already stored.  The last one is strict, so of two
+   routes arriving at the same cost the first one wins and the second neither
+   stores nor queues; loosening it to <= would queue a great many more cells
+   without changing a single cost byte, which is a difference the movement
+   range cannot show and the frontier can.
+
+   Bit 0x80 -- movement entering this tile has to stop -- does NOT stop the
+   fill at the cell.  It replaces the candidate with move_points, stores that,
+   and still queues the cell (00010ff0-00011064).  Storing the real cost and
+   skipping the queue, or treating the cell as impassable, are both the obvious
+   reading and both put different bytes into the grid: what the original is
+   doing is starving further expansion out of the tile -- every neighbour of it
+   now costs more than the allowance -- while leaving the tile itself relaxable
+   again by a cheaper route (rebuild_info/pitfalls.md).
+
+   Cost 0 is written into the start tile but the start tile is never queued
+   with a cost of its own beyond that, and nothing stops a cell being queued
+   twice in one wave; both are how the original behaves.
+
+   The three dead reads in every direction block are kept.  Each one loads the
+   low byte of the neighbour's tile id out of the terrain layer, masks it with
+   0x3ff and looks up byte 2 of that tile id's attribute row -- the terrain
+   type -- into a local nothing ever reads (00010f3f-00010f82).  It is the
+   inline ancestor of the fdps_map_load_tile_info call that follows and
+   computes the same terrain type properly.  They are pure loads, so dropping
+   them changes no value the function produces; they are emitted because they
+   are three dereferences of two pointers this function never checks, and a
+   rebuild that omitted them would survive a null or short layer that the
+   original faults on.  Note that they index the terrain layer with the
+   MOVEMENT GRID's row stride and not with the width in the terrain layer's own
+   header at +7, which is what fdps_map_load_tile_info uses; the two agree only
+   while the two headers do.
+
+   The terrain type is read back out of data_fdps_map_tile_terrain_type after
+   the call, not out of a return value: the CALL at 00010fb2 is followed by XOR
+   EAX,EAX / MOV AL,[0x00069d09], so EAX is discarded.  The cost byte is then
+   class_move_cost->move_cost[that type], indexed with no bound of any kind --
+   a terrain type above 7 reads past move_cost into the rest of the class
+   record. */
+void fdps_move_grid_flood_fill_range(struct fdps_class_record *class_move_cost,
+                                     int start_x, int start_y, int move_points)
+{
+    unsigned char *grid_cells;
+    unsigned char *attr_terrain_column;
+    unsigned char *tile_map_cursor;
+    unsigned char *entry_x_slot;
+    unsigned char *entry_y_slot;
+    struct fdps_move_grid_cell *cell;
+    struct fdps_move_grid_cell *neighbour;
+    short frontier_count[2];
+    unsigned char buffer_select;
+    int grid_width;
+    int grid_height;
+    int cell_stride;
+    int row_stride;
+    int tile_byte_offset;
+    int current_cost;
+    int neighbour_flags;
+    int neighbour_cost;
+    int neighbour_tile_id;
+    int neighbour_terrain_type;
+    int candidate_cost;
+    int current_buffer;
+    int next_buffer;
+    int entry;
+
+    buffer_select = 0;
+    grid_cells = data_fdps_battle_move_grid_ptr;
+    attr_terrain_column = data_fdps_scene_layer_tile_attr_ptr[0] + 0x13;
+    grid_width = (int) *(short *) grid_cells;
+    grid_height = (int) *(short *) (grid_cells + 2);
+    cell_stride = 2;
+    row_stride = grid_width * 2;
+    grid_cells += 4;
+
+    ((struct fdps_move_grid_cell *)
+     (grid_cells + start_x * cell_stride + start_y * row_stride))->marker = 0;
+
+    data_fdps_battle_move_frontier_x[buffer_select * 400] =
+        (unsigned char) start_x;
+    data_fdps_battle_move_frontier_y[buffer_select * 400] =
+        (unsigned char) start_y;
+    frontier_count[buffer_select] = 1;
+
+    while (frontier_count[buffer_select] != 0) {
+        current_buffer = (int) buffer_select;
+        next_buffer = (int) (unsigned char) (buffer_select ^ 1);
+        frontier_count[next_buffer] = 0;
+
+        for (entry = 0;
+             entry < (int) frontier_count[current_buffer];
+             entry++) {
+            entry_x_slot =
+                &data_fdps_battle_move_frontier_x[current_buffer * 400 + entry];
+            entry_y_slot =
+                &data_fdps_battle_move_frontier_y[current_buffer * 400 + entry];
+            tile_byte_offset = cell_stride * (int) *entry_x_slot +
+                               row_stride * (int) *entry_y_slot;
+            cell = (struct fdps_move_grid_cell *)
+                   (grid_cells + tile_byte_offset);
+            tile_map_cursor = data_fdps_scene_layer_tile_map_ptrs[0] +
+                              tile_byte_offset + 0x0b;
+            current_cost = (int) cell->marker;
+
+            if (*entry_y_slot != 0) {
+                neighbour = cell - grid_width;
+                neighbour_tile_id =
+                    (int) *(tile_map_cursor - row_stride) & 0x3ff;
+                neighbour_flags = (int) neighbour->flags;
+                neighbour_cost = (int) neighbour->marker;
+                neighbour_terrain_type =
+                    (int) attr_terrain_column[neighbour_tile_id * 4];
+                fdps_map_load_tile_info((int) *entry_x_slot,
+                                        (int) *entry_y_slot - 1);
+                candidate_cost = current_cost + (int)
+                    class_move_cost->move_cost[data_fdps_map_tile_terrain_type];
+                if ((candidate_cost <= move_points) &&
+                    ((neighbour_flags & 0x40) == 0) &&
+                    (candidate_cost < neighbour_cost)) {
+                    if ((neighbour_flags & 0x80) != 0) {
+                        candidate_cost = move_points;
+                    }
+                    neighbour->marker = (unsigned char) candidate_cost;
+                    data_fdps_battle_move_frontier_x[
+                        next_buffer * 400 +
+                        (int) frontier_count[next_buffer]] = *entry_x_slot;
+                    data_fdps_battle_move_frontier_y[
+                        next_buffer * 400 +
+                        (int) frontier_count[next_buffer]] =
+                            (unsigned char) (*entry_y_slot - 1);
+                    frontier_count[next_buffer] =
+                        (short) (frontier_count[next_buffer] + 1);
+                }
+            }
+
+            if ((int) *entry_x_slot < grid_width - 1) {
+                neighbour = cell + 1;
+                neighbour_tile_id =
+                    (int) *(tile_map_cursor + cell_stride) & 0x3ff;
+                neighbour_flags = (int) neighbour->flags;
+                neighbour_cost = (int) neighbour->marker;
+                neighbour_terrain_type =
+                    (int) attr_terrain_column[neighbour_tile_id * 4];
+                fdps_map_load_tile_info((int) *entry_x_slot + 1,
+                                        (int) *entry_y_slot);
+                candidate_cost = current_cost + (int)
+                    class_move_cost->move_cost[data_fdps_map_tile_terrain_type];
+                if ((candidate_cost <= move_points) &&
+                    ((neighbour_flags & 0x40) == 0) &&
+                    (candidate_cost < neighbour_cost)) {
+                    if ((neighbour_flags & 0x80) != 0) {
+                        candidate_cost = move_points;
+                    }
+                    neighbour->marker = (unsigned char) candidate_cost;
+                    data_fdps_battle_move_frontier_x[
+                        next_buffer * 400 +
+                        (int) frontier_count[next_buffer]] =
+                            (unsigned char) (*entry_x_slot + 1);
+                    data_fdps_battle_move_frontier_y[
+                        next_buffer * 400 +
+                        (int) frontier_count[next_buffer]] = *entry_y_slot;
+                    frontier_count[next_buffer] =
+                        (short) (frontier_count[next_buffer] + 1);
+                }
+            }
+
+            if ((int) *entry_y_slot < grid_height - 1) {
+                neighbour = cell + grid_width;
+                neighbour_tile_id =
+                    (int) *(tile_map_cursor + row_stride) & 0x3ff;
+                neighbour_flags = (int) neighbour->flags;
+                neighbour_cost = (int) neighbour->marker;
+                neighbour_terrain_type =
+                    (int) attr_terrain_column[neighbour_tile_id * 4];
+                fdps_map_load_tile_info((int) *entry_x_slot,
+                                        (int) *entry_y_slot + 1);
+                candidate_cost = current_cost + (int)
+                    class_move_cost->move_cost[data_fdps_map_tile_terrain_type];
+                if ((candidate_cost <= move_points) &&
+                    ((neighbour_flags & 0x40) == 0) &&
+                    (candidate_cost < neighbour_cost)) {
+                    if ((neighbour_flags & 0x80) != 0) {
+                        candidate_cost = move_points;
+                    }
+                    neighbour->marker = (unsigned char) candidate_cost;
+                    data_fdps_battle_move_frontier_x[
+                        next_buffer * 400 +
+                        (int) frontier_count[next_buffer]] = *entry_x_slot;
+                    data_fdps_battle_move_frontier_y[
+                        next_buffer * 400 +
+                        (int) frontier_count[next_buffer]] =
+                            (unsigned char) (*entry_y_slot + 1);
+                    frontier_count[next_buffer] =
+                        (short) (frontier_count[next_buffer] + 1);
+                }
+            }
+
+            if (*entry_x_slot != 0) {
+                neighbour = cell - 1;
+                neighbour_tile_id =
+                    (int) *(tile_map_cursor - cell_stride) & 0x3ff;
+                neighbour_flags = (int) neighbour->flags;
+                neighbour_cost = (int) neighbour->marker;
+                neighbour_terrain_type =
+                    (int) attr_terrain_column[neighbour_tile_id * 4];
+                fdps_map_load_tile_info((int) *entry_x_slot - 1,
+                                        (int) *entry_y_slot);
+                candidate_cost = current_cost + (int)
+                    class_move_cost->move_cost[data_fdps_map_tile_terrain_type];
+                if ((candidate_cost <= move_points) &&
+                    ((neighbour_flags & 0x40) == 0) &&
+                    (candidate_cost < neighbour_cost)) {
+                    if ((neighbour_flags & 0x80) != 0) {
+                        candidate_cost = move_points;
+                    }
+                    neighbour->marker = (unsigned char) candidate_cost;
+                    data_fdps_battle_move_frontier_x[
+                        next_buffer * 400 +
+                        (int) frontier_count[next_buffer]] =
+                            (unsigned char) (*entry_x_slot - 1);
+                    data_fdps_battle_move_frontier_y[
+                        next_buffer * 400 +
+                        (int) frontier_count[next_buffer]] = *entry_y_slot;
+                    frontier_count[next_buffer] =
+                        (short) (frontier_count[next_buffer] + 1);
+                }
+            }
+        }
+
+        buffer_select = (unsigned char) next_buffer;
     }
 }
 

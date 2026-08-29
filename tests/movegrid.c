@@ -1148,6 +1148,436 @@ static void collect_reaches_the_last_cell(void)
     CHECK_EQ(out_byte(2), 0xee);
 }
 
+/* ------------------------------------------------------------------ *
+ * 00010de0 fdps_move_grid_flood_fill_range
+ *
+ * The fill needs four blocks live, because it calls fdps_map_load_tile_info
+ * (src/maptile.c, already emitted) for every neighbour it considers and that
+ * function reads the terrain layer, the attribute table, the grid and the
+ * event-code layer.  All four are staged here rather than read from a game
+ * file: the function takes its whole input from those globals plus its four
+ * arguments, so pointing them at local blocks is the only way to reach the
+ * body.  Nothing below asserts what any global holds on its own; ticket 23
+ * owns that.
+ *
+ * The fixture gives cell i the tile id i and attribute row i, so a per-cell
+ * terrain type -- and through it a per-cell movement cost -- is one write.
+ * The three widths are deliberately all the same here, unlike tests/maptile.c
+ * which sets them apart on purpose: this function's own arithmetic uses the
+ * grid header for everything, and a fixture whose layers disagree would make
+ * fdps_map_load_tile_info fetch a different tile than the fill was asking
+ * about and turn every expected cost below into a coincidence.
+ *
+ * Expected values come from the assembly at 00010de0 -- MOVSX on the two
+ * header words, CMP EDX,EAX / JGE on the two edge guards, CMP EAX,[EBP+0x20] /
+ * JG, TEST [EBP-0xc],0x40, CMP EAX,[EBP-8] / JL on the three acceptance tests,
+ * MOV EAX,[EBP+0x20] under TEST 0x80, IMUL ...,0x190 on every frontier index,
+ * and the four direction blocks in their listed order -- and by walking that
+ * algorithm over the fixture by hand.  None of them is read off the emitted C.
+ * ------------------------------------------------------------------ */
+
+#define FILL_CELLS 32
+#define FILL_ATTR_ROWS 32
+#define FILL_TILES_AT 0x0b
+#define FILL_ATTR_AT 0x11
+#define FILL_EVENT_AT 0x10
+
+static unsigned char fill_tile_map[FILL_TILES_AT + FILL_CELLS * 2];
+static unsigned char fill_attr[FILL_ATTR_AT + FILL_ATTR_ROWS * 4];
+static unsigned char fill_grid[4 + FILL_CELLS * 2];
+static unsigned char fill_event[FILL_EVENT_AT + FILL_CELLS];
+static struct fdps_class_record fill_class;
+
+/* Build all four blocks and hang the four globals off them.
+
+   Every cell inside width*height comes in as fdps_map_grid_reset leaves it --
+   flags 0x00, marker 0xff -- and every cell past the end gets marker 0xdd
+   instead, so "the fill wrote here" and "the fill never reached here" are
+   distinguishable from "this is off the end of the map".  A negative or
+   oversized product yields no in-grid cells at all, which is what the two
+   signedness cases want.
+
+   Both auxiliary headers are filled with 0xaa before their width goes in at
+   +7, so a read from any other offset lands on 0xaaaa rather than
+   coincidentally agreeing.  Every attribute row starts at terrain type 0 and
+   every class movement cost at 1, so a case that says nothing about terrain
+   gets a uniform cost of one per step. */
+static void stage_fill(int width, int height)
+{
+    int i;
+    int in_grid_cells;
+
+    in_grid_cells = width * height;
+    if (in_grid_cells < 0) {
+        in_grid_cells = 0;
+    }
+    if (in_grid_cells > FILL_CELLS) {
+        in_grid_cells = FILL_CELLS;
+    }
+
+    for (i = 0; i < FILL_TILES_AT; i++) {
+        fill_tile_map[i] = 0xaa;
+    }
+    *(short *) (fill_tile_map + 7) = (short) width;
+    for (i = 0; i < FILL_CELLS; i++) {
+        *(short *) (fill_tile_map + FILL_TILES_AT + i * 2) = (short) i;
+    }
+
+    for (i = 0; i < FILL_ATTR_AT; i++) {
+        fill_attr[i] = 0xaa;
+    }
+    for (i = 0; i < FILL_ATTR_ROWS; i++) {
+        fill_attr[FILL_ATTR_AT + i * 4] = 0x00;
+        fill_attr[FILL_ATTR_AT + i * 4 + 1] = 0x00;
+        fill_attr[FILL_ATTR_AT + i * 4 + 2] = 0x00;
+        fill_attr[FILL_ATTR_AT + i * 4 + 3] = 0x00;
+    }
+
+    *(short *) fill_grid = (short) width;
+    *(short *) (fill_grid + 2) = (short) height;
+    for (i = 0; i < FILL_CELLS; i++) {
+        fill_grid[4 + i * 2] = 0x00;
+        if (i < in_grid_cells) {
+            fill_grid[4 + i * 2 + 1] = 0xff;
+        } else {
+            fill_grid[4 + i * 2 + 1] = 0xdd;
+        }
+    }
+
+    for (i = 0; i < FILL_EVENT_AT; i++) {
+        fill_event[i] = 0xaa;
+    }
+    *(short *) (fill_event + 7) = (short) width;
+    for (i = 0; i < FILL_CELLS; i++) {
+        fill_event[FILL_EVENT_AT + i] = 0x00;
+    }
+
+    for (i = 0; i < 8; i++) {
+        fill_class.move_cost[i] = 1;
+    }
+    fill_class.critical = 0;
+    fill_class.magic_resist_complement = 0;
+
+    data_fdps_scene_layer_tile_map_ptrs[0] = fill_tile_map;
+    data_fdps_scene_layer_tile_attr_ptr[0] = fill_attr;
+    data_fdps_battle_move_grid_ptr = fill_grid;
+    data_fdps_map_cell_event_code_layer_ptr = fill_event;
+}
+
+static int fill_marker(int index)
+{
+    return (int) fill_grid[4 + index * 2 + 1];
+}
+
+static int fill_cell_flags(int index)
+{
+    return (int) fill_grid[4 + index * 2];
+}
+
+static void set_tile_terrain(int tile_id, int terrain_type)
+{
+    fill_attr[FILL_ATTR_AT + tile_id * 4 + 2] = (unsigned char) terrain_type;
+}
+
+static void set_fill_cell_flags(int index, int flags)
+{
+    fill_grid[4 + index * 2] = (unsigned char) flags;
+}
+
+/* ADD EAX,dword ptr [EBP+0x14] at 00010fc1 adds the terrain type straight to
+   the class record pointer with no displacement, so the eight movement costs
+   have to be the first eight bytes of the record for the cost byte to land
+   where the original reads it. */
+static void fill_move_costs_are_the_first_eight_bytes(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_class_record, move_cost), 0);
+    CHECK_EQ((int) sizeof(fill_class.move_cost), 8);
+}
+
+/* MOV byte ptr [EAX + 0x1],0x0 at 00010e3c, with EAX formed as cells +
+   start_x * 2 + start_y * (width * 2): the start tile's accumulated cost is
+   zero before anything is expanded, and the two frontier arrays are seeded at
+   slot 0 of buffer 0 with the start coordinates.  On a 1x1 grid all four edge
+   guards fail at once, so the fill stores that one byte and stops. */
+static void fill_start_tile_gets_cost_zero(void)
+{
+    stage_fill(1, 1);
+    fdps_move_grid_flood_fill_range(&fill_class, 0, 0, 9);
+    CHECK_EQ(fill_marker(0), 0);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_x[0], 0);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_y[0], 0);
+    CHECK_EQ(fill_marker(1), 0xdd);
+}
+
+/* The start cell is addressed through the grid header's width, so on a 4x2
+   grid tile (2,1) is cell 1 * 4 + 2 = 6 and no other cell is written.  With an
+   allowance of 0 every candidate costs 1 and is refused by CMP EAX,[EBP+0x20]
+   / JG, which leaves the first wave empty and ends the fill after it. */
+static void fill_seeds_buffer_zero_from_the_start_coordinates(void)
+{
+    stage_fill(4, 2);
+    fdps_move_grid_flood_fill_range(&fill_class, 2, 1, 0);
+    CHECK_EQ(fill_marker(6), 0);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_x[0], 2);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_y[0], 1);
+    CHECK_EQ(fill_marker(2), 0xff);
+    CHECK_EQ(fill_marker(5), 0xff);
+    CHECK_EQ(fill_marker(7), 0xff);
+}
+
+/* One step per wave along a 4x1 row at a uniform cost of one: cells 0, 1 and 2
+   come out 0, 1 and 2, and cell 3 would cost 3 against an allowance of 2 and
+   stays at the 0xff sentinel.  The bound is CMP EAX,[EBP+0x20] / JG, so a
+   candidate equal to the allowance is accepted and only a greater one is
+   refused -- cell 2 is the inclusive end of the range. */
+static void fill_relaxes_a_row_until_the_allowance_runs_out(void)
+{
+    stage_fill(4, 1);
+    fdps_move_grid_flood_fill_range(&fill_class, 0, 0, 2);
+    CHECK_EQ(fill_marker(0), 0);
+    CHECK_EQ(fill_marker(1), 1);
+    CHECK_EQ(fill_marker(2), 2);
+    CHECK_EQ(fill_marker(3), 0xff);
+}
+
+/* The same bound stated on its own: on a 2x1 grid a step costing exactly the
+   allowance is taken, and the same step against an allowance one lower is not.
+   Writing the guard as < instead of <= would shrink every movement range in
+   the game by one tile. */
+static void fill_allowance_bound_is_inclusive(void)
+{
+    stage_fill(2, 1);
+    fdps_move_grid_flood_fill_range(&fill_class, 0, 0, 1);
+    CHECK_EQ(fill_marker(1), 1);
+
+    stage_fill(2, 1);
+    fdps_move_grid_flood_fill_range(&fill_class, 0, 0, 0);
+    CHECK_EQ(fill_marker(1), 0xff);
+}
+
+/* The cost of a step is the class record's move_cost[terrain type of the tile
+   being entered], where the terrain type is byte 2 of that tile id's attribute
+   row and reaches the fill through data_fdps_map_tile_terrain_type -- the
+   global fdps_map_load_tile_info publishes, not the CALL's return value.
+   Tiles 1, 2 and 3 are given terrain types 3, 5 and 2 whose costs are 2, 1 and
+   4, so the accumulated costs along the row are 0, 2, 3 and 7 rather than the
+   uniform 0, 1, 2, 3 a build reading the cost from anywhere else would
+   produce. */
+static void fill_step_cost_comes_from_the_class_record(void)
+{
+    stage_fill(4, 1);
+    set_tile_terrain(1, 3);
+    set_tile_terrain(2, 5);
+    set_tile_terrain(3, 2);
+    fill_class.move_cost[0] = 1;
+    fill_class.move_cost[2] = 4;
+    fill_class.move_cost[3] = 2;
+    fill_class.move_cost[5] = 1;
+    fdps_move_grid_flood_fill_range(&fill_class, 0, 0, 9);
+    CHECK_EQ(fill_marker(0), 0);
+    CHECK_EQ(fill_marker(1), 2);
+    CHECK_EQ(fill_marker(2), 3);
+    CHECK_EQ(fill_marker(3), 7);
+}
+
+/* TEST dword ptr [EBP-0xc],0x40 / JZ: a cell whose zone-of-control byte says a
+   unit stands on it is refused however cheap the step is, is never queued, and
+   so hides everything behind it -- cells 2 and 3 of the row both stay at the
+   sentinel with an allowance of 9 that would otherwise cover the whole grid.
+   Byte 0 itself is untouched by the fill. */
+static void fill_impassable_bit_hides_everything_behind_it(void)
+{
+    stage_fill(4, 1);
+    set_fill_cell_flags(2, 0x40);
+    fdps_move_grid_flood_fill_range(&fill_class, 0, 0, 9);
+    CHECK_EQ(fill_marker(0), 0);
+    CHECK_EQ(fill_marker(1), 1);
+    CHECK_EQ(fill_marker(2), 0xff);
+    CHECK_EQ(fill_marker(3), 0xff);
+    CHECK_EQ(fill_cell_flags(2), 0x40);
+}
+
+/* The rebuild note at 00010ff0.  Cell 1 carries the movement-stops-here bit,
+   the step into it costs 1, and what is stored is not 1 but the whole
+   allowance of 5.  Cells 2 and 3 are then reachable only because the stop cell
+   was still queued: they are entered at a terrain type whose cost is 0, so
+   they come out at 5 as well.  Had the original skipped the queue -- the
+   obvious reading of "movement stops here" -- both would have stayed at the
+   sentinel, and had it stored the real cost of 1 they would have come out at 1
+   like the case below. */
+static void fill_stop_bit_stores_the_allowance_and_still_queues(void)
+{
+    stage_fill(4, 1);
+    set_tile_terrain(1, 1);
+    set_tile_terrain(2, 2);
+    set_tile_terrain(3, 3);
+    fill_class.move_cost[0] = 1;
+    fill_class.move_cost[1] = 1;
+    fill_class.move_cost[2] = 0;
+    fill_class.move_cost[3] = 0;
+    set_fill_cell_flags(1, 0x80);
+    fdps_move_grid_flood_fill_range(&fill_class, 0, 0, 5);
+    CHECK_EQ(fill_marker(0), 0);
+    CHECK_EQ(fill_marker(1), 5);
+    CHECK_EQ(fill_marker(2), 5);
+    CHECK_EQ(fill_marker(3), 5);
+    CHECK_EQ(fill_cell_flags(1), 0x80);
+}
+
+/* The identical fixture without the 0x80 bit, which is what makes the case
+   above say something: the step into cell 1 costs 1 and 1 is what is stored,
+   and the two free steps behind it inherit that instead of the allowance. */
+static void fill_without_the_stop_bit_stores_the_real_cost(void)
+{
+    stage_fill(4, 1);
+    set_tile_terrain(1, 1);
+    set_tile_terrain(2, 2);
+    set_tile_terrain(3, 3);
+    fill_class.move_cost[0] = 1;
+    fill_class.move_cost[1] = 1;
+    fill_class.move_cost[2] = 0;
+    fill_class.move_cost[3] = 0;
+    fdps_move_grid_flood_fill_range(&fill_class, 0, 0, 5);
+    CHECK_EQ(fill_marker(0), 0);
+    CHECK_EQ(fill_marker(1), 1);
+    CHECK_EQ(fill_marker(2), 1);
+    CHECK_EQ(fill_marker(3), 1);
+}
+
+/* CMP EAX,dword ptr [EBP-0x8] / JL: a cell already holding a cost is written
+   again only by a strictly cheaper route.  On a 2x2 grid where entering (1,0)
+   costs 9 and every other tile costs 1, cell (1,1) is first reached from (1,0)
+   at 10 and then, later in the same wave, from (0,1) at 2 -- and 2 is what it
+   keeps.  The expensive tile itself is not revisited: 2 + 9 is not cheaper
+   than the 9 already there. */
+static void fill_relaxes_a_cell_reached_more_cheaply(void)
+{
+    stage_fill(2, 2);
+    set_tile_terrain(1, 1);
+    set_tile_terrain(2, 2);
+    set_tile_terrain(3, 3);
+    fill_class.move_cost[0] = 1;
+    fill_class.move_cost[1] = 9;
+    fill_class.move_cost[2] = 1;
+    fill_class.move_cost[3] = 1;
+    fdps_move_grid_flood_fill_range(&fill_class, 0, 0, 20);
+    CHECK_EQ(fill_marker(0), 0);
+    CHECK_EQ(fill_marker(1), 9);
+    CHECK_EQ(fill_marker(2), 1);
+    CHECK_EQ(fill_marker(3), 2);
+}
+
+/* Four neighbours and no diagonal.  From the centre of a 3x3 grid with an
+   allowance of exactly one step, the four orthogonal cells come out at 1 and
+   the four corners stay at the sentinel; an eight-way fill would have reached
+   all eight for the same cost. */
+static void fill_expands_four_neighbours_and_no_diagonal(void)
+{
+    stage_fill(3, 3);
+    fdps_move_grid_flood_fill_range(&fill_class, 1, 1, 1);
+    CHECK_EQ(fill_marker(4), 0);
+    CHECK_EQ(fill_marker(1), 1);
+    CHECK_EQ(fill_marker(5), 1);
+    CHECK_EQ(fill_marker(7), 1);
+    CHECK_EQ(fill_marker(3), 1);
+    CHECK_EQ(fill_marker(0), 0xff);
+    CHECK_EQ(fill_marker(2), 0xff);
+    CHECK_EQ(fill_marker(6), 0xff);
+    CHECK_EQ(fill_marker(8), 0xff);
+}
+
+/* The same fixture read out of the frontier instead of the grid.  The four
+   acceptances of the first wave are appended to buffer 1 in the order the four
+   direction blocks run -- up (1,0), right (2,1), down (1,2), left (0,1) -- at
+   slots 0 to 3, and buffer 1 starts at index 400 of an 800-byte array, which
+   is what IMUL ...,0x190 spells at every frontier index in the function.  The
+   second wave can afford nothing, so it appends nothing over buffer 0 and the
+   seed at slot 0 is still the start tile when the fill returns.
+
+   This is the only assertion in the file that can see the direction order at
+   all: two routes arriving at one cell for the same cost leave the same cost
+   byte behind whichever of them got there first. */
+static void fill_queues_neighbours_up_right_down_left(void)
+{
+    stage_fill(3, 3);
+    fdps_move_grid_flood_fill_range(&fill_class, 1, 1, 1);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_x[0], 1);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_y[0], 1);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_x[400], 1);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_y[400], 0);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_x[401], 2);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_y[401], 1);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_x[402], 1);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_y[402], 2);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_x[403], 0);
+    CHECK_EQ((int) data_fdps_battle_move_frontier_y[403], 1);
+}
+
+/* The two edge guards hold at the far side of the grid: on a 2x2 block sitting
+   in a buffer that has room for far more cells, an allowance of 20 covers
+   every cell of the map and writes none of the four beyond it.  The costs are
+   the four-connected distances -- (1,1) is two steps away by either route. */
+static void fill_does_not_write_past_the_last_row_or_column(void)
+{
+    stage_fill(2, 2);
+    fdps_move_grid_flood_fill_range(&fill_class, 0, 0, 20);
+    CHECK_EQ(fill_marker(0), 0);
+    CHECK_EQ(fill_marker(1), 1);
+    CHECK_EQ(fill_marker(2), 1);
+    CHECK_EQ(fill_marker(3), 2);
+    CHECK_EQ(fill_marker(4), 0xdd);
+    CHECK_EQ(fill_marker(5), 0xdd);
+    CHECK_EQ(fill_marker(6), 0xdd);
+    CHECK_EQ(fill_marker(7), 0xdd);
+}
+
+/* Only byte 1 of a cell is ever written.  Every cell of the row comes in with
+   the six low bits of byte 0 set to 0x2a -- bits no other code in the program
+   reads -- and comes back out with them intact alongside the fresh costs. */
+static void fill_writes_only_the_marker_byte(void)
+{
+    stage_fill(4, 1);
+    set_fill_cell_flags(0, 0x2a);
+    set_fill_cell_flags(1, 0x2a);
+    set_fill_cell_flags(2, 0x2a);
+    set_fill_cell_flags(3, 0x2a);
+    fdps_move_grid_flood_fill_range(&fill_class, 0, 0, 9);
+    CHECK_EQ(fill_marker(0), 0);
+    CHECK_EQ(fill_marker(1), 1);
+    CHECK_EQ(fill_marker(2), 2);
+    CHECK_EQ(fill_marker(3), 3);
+    CHECK_EQ(fill_cell_flags(0), 0x2a);
+    CHECK_EQ(fill_cell_flags(1), 0x2a);
+    CHECK_EQ(fill_cell_flags(2), 0x2a);
+    CHECK_EQ(fill_cell_flags(3), 0x2a);
+}
+
+/* MOVSX EAX,word ptr [EAX] at 00010e06 and CMP EDX,EAX / JGE at 00011081.  A
+   header width of 0xffff is -1, width-1 is -2, and column 0 is not less than
+   -2, so the right-hand neighbour is never even looked at.  Read the word
+   unsigned and the guard becomes 0 < 65534, which relaxes the cell next door
+   and walks on off the end of the block; the cell next door is the one
+   assertion that can tell the two apart. */
+static void fill_header_width_word_is_signed(void)
+{
+    stage_fill(-1, 1);
+    fdps_move_grid_flood_fill_range(&fill_class, 0, 0, 9);
+    CHECK_EQ(fill_marker(0), 0);
+    CHECK_EQ(fill_marker(1), 0xdd);
+}
+
+/* MOVSX EAX,word ptr [EAX + 0x2] at 00010e0f and CMP EDX,EAX / JGE at
+   000111ce, the same thing for the lower neighbour.  With width 1 and height
+   -1 the row below is at cell 0 + width = cell 1, so an unsigned height of
+   65535 would write there and a signed -1 leaves it alone. */
+static void fill_header_height_word_is_signed(void)
+{
+    stage_fill(1, -1);
+    fdps_move_grid_flood_fill_range(&fill_class, 0, 0, 9);
+    CHECK_EQ(fill_marker(0), 0);
+    CHECK_EQ(fill_marker(1), 0xdd);
+}
+
 void run_movegrid_tests(void)
 {
     RUN_TEST(grid_cell_stride_is_two);
@@ -1212,6 +1642,24 @@ void run_movegrid_tests(void)
     RUN_TEST(collect_does_not_modify_the_grid);
     RUN_TEST(collect_reaches_the_last_cell);
 
+    RUN_TEST(fill_move_costs_are_the_first_eight_bytes);
+    RUN_TEST(fill_start_tile_gets_cost_zero);
+    RUN_TEST(fill_seeds_buffer_zero_from_the_start_coordinates);
+    RUN_TEST(fill_relaxes_a_row_until_the_allowance_runs_out);
+    RUN_TEST(fill_allowance_bound_is_inclusive);
+    RUN_TEST(fill_step_cost_comes_from_the_class_record);
+    RUN_TEST(fill_impassable_bit_hides_everything_behind_it);
+    RUN_TEST(fill_stop_bit_stores_the_allowance_and_still_queues);
+    RUN_TEST(fill_without_the_stop_bit_stores_the_real_cost);
+    RUN_TEST(fill_relaxes_a_cell_reached_more_cheaply);
+    RUN_TEST(fill_expands_four_neighbours_and_no_diagonal);
+    RUN_TEST(fill_queues_neighbours_up_right_down_left);
+    RUN_TEST(fill_does_not_write_past_the_last_row_or_column);
+    RUN_TEST(fill_writes_only_the_marker_byte);
+    RUN_TEST(fill_header_width_word_is_signed);
+    RUN_TEST(fill_header_height_word_is_signed);
+
+
     /* Put the global back before leaving.  stage() points it at this file's
        own stage_grid, and the runners share one process: a later unit that
        expects an unallocated grid would inherit a live pointer into another
@@ -1219,4 +1667,7 @@ void run_movegrid_tests(void)
     data_fdps_battle_move_grid_ptr = NULL;
     data_fdps_map_unit_array_ptr = NULL;
     data_fdps_map_unit_count = 0;
+    data_fdps_scene_layer_tile_map_ptrs[0] = NULL;
+    data_fdps_scene_layer_tile_attr_ptr[0] = NULL;
+    data_fdps_map_cell_event_code_layer_ptr = NULL;
 }
