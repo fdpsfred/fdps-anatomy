@@ -116,6 +116,93 @@ def headers(directory):
     return sorted((p for p in directory.glob("*.h")), key=lambda p: p.name.lower())
 
 
+# ------------------------------------------------------- decompiler names
+#
+# The rule these enforce is rebuild_info/naming.md: no Ghidra decompiler
+# default name survives into src/.  Only the mechanical half lives here.
+# Whether a name that is not a default actually says what the value is can only
+# be judged by someone who has read the assembly, and that is the reviewer's
+# item 13; asking a regex about it would produce confident nonsense.  Putting
+# the cheap half in the build instead of in the review is deliberate: the
+# emitter runs this itself, so it finds out in seconds rather than after a full
+# review round, and the reviewer's expensive attention is spent only on the
+# half a machine cannot answer.
+
+DEFAULT_NAME_RX = re.compile(
+    # iVar1 / puVar3 / auVar2, and uStack_8 / aiStack_20.  No trailing \b: the
+    # half measure `iVar1_index` is not a name either, and it has to match.
+    r"\b[a-z]{1,4}Var[0-9]+"
+    r"|\b[a-z]{1,4}Stack_[0-9a-f]+"
+    r"|\bparam_[0-9]+"
+    # Hex digits only, so a hand-written local_count is not a false positive.
+    r"|\blocal_(?:res)?[0-9a-f]+\b"
+    r"|\bin_(?:[A-Z]{2,3}|stack_[0-9a-f]+|FS_OFFSET|GS_OFFSET)\b"
+    r"|\bunaff_\w+"
+    r"|\bextraout_\w+"
+    r"|\buRam[0-9a-f]+\b"
+    r"|\b_?(?:DAT|PTR|FUN|LAB|UNK|SUB)_[0-9a-fA-F]{4,}"
+    # The decompiler's own pseudo-operations, which are not C at all.
+    r"|\b(?:CONCAT|SUB|ZEXT|SEXT)[0-9]{2}\b"
+    r"|__return_storage_ptr__")
+
+
+def strip_c(text):
+    """Blank out comments and literals, keeping every line number intact.
+
+    A plate comment is allowed to quote the decompiler -- "Ghidra calls this
+    iVar1, it is the tile index" is exactly the kind of note worth writing --
+    and so is a string literal that happens to contain one.  Scanning the raw
+    file would make the check punish the explanation for naming the thing it
+    explains.  Newlines are preserved rather than the text deleted so the line
+    number in the message points at the real line.
+    """
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        two = text[i:i + 2]
+        if two == "/*":
+            end = text.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            out.append("\n" * text.count("\n", i, end))
+            i = end
+        elif text[i] in "\"'":
+            quote, j = text[i], i + 1
+            while j < n and text[j] != quote:
+                j += 2 if text[j] == "\\" else 1
+            out.append("\n" * text.count("\n", i, min(j + 1, n)))
+            i = min(j + 1, n)
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+def default_names(paths):
+    """[(path, line number, the offending text)] for every default name found."""
+    found = []
+    for path in paths:
+        text = strip_c(path.read_text(encoding="utf-8", errors="replace"))
+        for lineno, line in enumerate(text.splitlines(), 1):
+            for m in DEFAULT_NAME_RX.finditer(line):
+                found.append((path, lineno, m.group(0)))
+    return found
+
+
+def name_report(found):
+    """Findings shaped like the compiler's own diagnostics.
+
+    Wearing Watcom's format is not decoration: diagnostics() collects anything
+    saying "Error!" out of the build transcripts, and the gate counts those, so
+    a finding written this way is reported and gated through the path that
+    already exists instead of through a second one that would have to be kept
+    in step with it.
+    """
+    return "".join(
+        "%s(%d): Error! E9001: %s is a Ghidra decompiler default name "
+        "(rebuild_info/naming.md)\n" % (path.name.upper(), lineno, name)
+        for path, lineno, name in found)
+
+
 def runners(test_files):
     """The `run_<stem>_tests` each test unit defines, in file order.
 
@@ -322,11 +409,25 @@ def do_build(dosbox, watcom, disc, timeout, quiet=False):
     OBJ_STB.mkdir(parents=True, exist_ok=True)
     for parent, name in ((OUT, EXE), (OUT, "BUILD.DON"), (OUT, "BUILD.OUT"),
                          (OUT, "BUILD2.DON"), (OUT, "BUILD2.OUT"),
-                         (OUT, "HB.TXT"),
+                         (OUT, "HB.TXT"), (OUT, "NAMES.OUT"),
                          (WORK, "dosbox.log"), (WORK, "stdio.log")):
         p = bm.find_ci(parent, name)
         if p is not None:
             p.unlink()
+
+    # Before DOSBox is started at all: this costs milliseconds and the build
+    # costs minutes, and a source carrying decompiler names is going to be
+    # rewritten whatever the compiler thinks of it.
+    found = default_names(c_sources(SRC) + headers(SRC)
+                          + c_sources(TESTS) + headers(TESTS))
+    if found:
+        report = name_report(found)
+        (OUT / "NAMES.OUT").write_text(report, encoding="latin-1")
+        if not quiet:
+            print("[build] FAIL: %d Ghidra decompiler default name(s) in the "
+                  "sources" % len(found))
+            print("".join("  | " + l for l in report.splitlines(True)[:25]))
+        return False
     # Stale objects would let a source that no longer compiles still link.
     for objdir in (OBJ_SRC, OBJ_TST, OBJ_STB):
         for p in objdir.iterdir() if objdir.is_dir() else []:
@@ -597,13 +698,20 @@ def diagnostics(out_dir=None):
     point of it, so counting those as gate failures would keep the gate red
     until the very last function of ticket 23 lands.  What must be empty is
     what the second link, the one carrying the stubs, still cannot resolve.
+
+    NAMES.OUT is read the same way.  The decompiler-name check runs before the
+    compiler does and writes its findings in the compiler's format, so they are
+    reported and gated as ordinary errors rather than through a parallel
+    channel that would have to be kept in step with this one.
     """
     out_dir = out_dir or OUT
     first = bm.find_ci(out_dir, "build.out")
     second = bm.find_ci(out_dir, "build2.out")
+    names = bm.find_ci(out_dir, "names.out")
     txt1 = first.read_text(encoding="latin-1", errors="replace") if first else ""
     txt2 = second.read_text(encoding="latin-1", errors="replace") if second else ""
-    lines = [l.strip() for l in (txt1 + "\n" + txt2).splitlines()]
+    txt0 = names.read_text(encoding="latin-1", errors="replace") if names else ""
+    lines = [l.strip() for l in (txt0 + "\n" + txt1 + "\n" + txt2).splitlines()]
     # An "Error!" naming an undefined symbol from the first link is that same
     # expected list wearing the linker's error prefix; it is dropped here for
     # the same reason and reported through undefined.json instead.
@@ -736,6 +844,76 @@ def _selftest_rows():
         d = diagnostics(tmp)
         rows.append(("undefined after stubs does fail the gate",
                      d["undefined"] == ["mystery_symbol"], json.dumps(d)))
+
+        # A finding written in the compiler's format has to arrive as an
+        # error, or the check runs and the gate stays green anyway.
+        (tmp / "names.out").write_text(
+            "AITARGET.C(41): Error! E9001: iVar1 is a Ghidra decompiler "
+            "default name (rebuild_info/naming.md)\n", encoding="latin-1")
+        (tmp / "build2.out").write_text("creating a DOS/4G executable\n",
+                                        encoding="latin-1")
+        d = diagnostics(tmp)
+        rows.append(("a default name reaches the gate as an error",
+                     len(d["errors"]) == 1 and "E9001" in d["errors"][0],
+                     json.dumps(d["errors"])))
+    finally:
+        shutil.rmtree(str(tmp), ignore_errors=True)
+
+    rows += _selftest_default_names()
+    return rows
+
+
+def _selftest_default_names():
+    """The scanner has to be wrong in both directions before it is trusted.
+
+    A check that flags nothing passes every file, and a check that flags the
+    plate comment explaining a name makes the honest note the expensive one to
+    write.  Both are worse than no check, so both are pinned here.
+    """
+    import tempfile as _tempfile
+    rows = []
+    tmp = Path(_tempfile.mkdtemp(prefix="fdps_names_selftest_"))
+    try:
+        def scan(body):
+            p = tmp / "probe.c"
+            p.write_text(body, encoding="utf-8")
+            return [name for _, _, name in default_names([p])]
+
+        for label, body, expect in (
+            ("iVar1 is caught", "int f(void){int iVar1; return iVar1;}", True),
+            ("a pointer default is caught",
+             "void f(char *p){char *puVar3 = p;}", True),
+            ("param_1 is caught", "int f(int param_1){return param_1;}", True),
+            ("local_1c is caught", "void f(void){int local_1c;}", True),
+            ("in_EAX is caught", "int f(void){return in_EAX;}", True),
+            ("DAT_ is caught", "int f(void){return DAT_00069cd8;}", True),
+            ("CONCAT44 is caught", "void f(void){x = CONCAT44(a,b);}", True),
+            # The half measure the ticket names explicitly.
+            ("iVar1_index is still a default name",
+             "void f(void){int iVar1_index;}", True),
+            # Real names that share a prefix with a default one.
+            ("index survives", "void f(void){int index;}", False),
+            ("local_count survives", "void f(void){int local_count;}", False),
+            ("input survives", "void f(void){int input;}", False),
+            ("a name in a comment survives",
+             "/* Ghidra calls this iVar1; it is the tile index. */\n"
+             "void f(void){int tile_index;}", False),
+            ("a name in a string survives",
+             'void f(void){puts(\"param_1\");}', False),
+        ):
+            hits = scan(body)
+            rows.append(("names: " + label, bool(hits) == expect,
+                         ", ".join(hits) or "none"))
+
+        # The line number has to point at the real line, which is the whole
+        # reason strip_c blanks comments instead of deleting them.
+        p = tmp / "probe.c"
+        p.write_text("/* a\n   multi\n   line note */\nint f(void){int iVar1;}\n",
+                     encoding="utf-8")
+        found = default_names([p])
+        rows.append(("names: line number survives a stripped comment",
+                     len(found) == 1 and found[0][1] == 4,
+                     str(found[0][1]) if found else "no finding"))
     finally:
         shutil.rmtree(str(tmp), ignore_errors=True)
     return rows

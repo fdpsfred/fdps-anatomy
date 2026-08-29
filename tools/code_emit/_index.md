@@ -10,7 +10,7 @@
 | --- | --- |
 | `emit_ticket22.js` | 票 22 的 Workflow 編排，遊戲本體全部 function。開跑第一段先收拾上一輪被殺後留下的殘骸，再去問 `next_batch.py` 要工作清單，序列跑 emit → review → 修正迴圈 → gate → commit，超出行數預算時插入拆檔段，收尾做疑慮回掃與 devlog。錯誤處理含單項重試、上游失效偵測、gate 失敗的修復迴圈、未完成項目的工作區清理與記帳。不看自己的預算，跑完呼叫者給的數量為止 |
 | `emit_ticket21.js` | 票 21 的版本，工作清單由 `args` 帶入、沒有拆檔段。留著當該票的紀錄，新工作用票 22 那支 |
-| `build_emit.py` | 四個子命令。`build` 把 `src/` 與 `tests/` 全部編譯**連結兩次**成 `EMITTEST.EXE`；`run` 在 DOSBox-X 裡執行它並讀回測試紀錄；`all`（預設）依序跑兩者；`selftest` 不碰 DOSBox-X，驗證接線產生、紀錄解析與兩段式連結的判定 |
+| `build_emit.py` | 四個子命令。`build` 先掃 `src/`／`tests/` 有沒有 Ghidra 反編譯器的預設變數名稱（有就在啟動 DOSBox 之前以 `E9001` 中止），再把兩邊全部編譯**連結兩次**成 `EMITTEST.EXE`；`run` 在 DOSBox-X 裡執行它並讀回測試紀錄；`all`（預設）依序跑兩者；`selftest` 不碰 DOSBox-X，驗證接線產生、紀錄解析、兩段式連結的判定與命名掃描的雙向正確性 |
 | `gen_stubs.py` | 產生第二次連結用的零填充 stub 模組。輸入是第一次連結報出的未定義符號，型別與大小取自 `data/routing.json`。`--selftest` 驗型別對應與該拒絕的三類符號 |
 | `gen_types.py` | 從 `ghidra_snapshot/data_types.txt` 產生 `src/fdpstype.h` 與 `tests/fdpstype.c`。`--check` 只驗不寫，`--selftest` 驗洞的填補與錯誤佈局的拒絕 |
 | `emit_order.py` | 從 call graph 算出 callee 先於 caller 的 emit 順序，產出 `workspace/code_emit/emit_order.json` |

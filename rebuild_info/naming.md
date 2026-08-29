@@ -1,6 +1,6 @@
 # 命名慣例
 
-**驗證對象**：Ghidra 內的 function 與 global 符號名、`src/` 的識別字與檔名。符號怎麼命名的結論以此檔為唯一正典。
+**驗證對象**：Ghidra 內的 function 與 global 符號名、`src/` 的識別字與檔名、以及 function 內部的區域變數與參數。命名的結論以此檔為唯一正典。
 
 慣例沿用前作 FD2，正典是 FD2 的 `rebuild_info/src_map.md` 與 `rebuild_info/crt/symbol_inventory.md`，只把專案代號換成 `fdps`。
 
@@ -65,6 +65,40 @@ CRT／AIL／連結器產物三類**不套用** `fdps_` 慣例。注意這裡沒�
 **不能用位址範圍判定 pool。** 前作的教訓是三類 function 在同一個 object 裡互相交錯擺放，沒有乾淨的 library／遊戲分界；本專案的 `0x3c000` 分界同樣只是概略值（見 [`program_info/memory_layout.md`](../program_info/memory_layout.md)）。可靠的依據是函式庫比對，輔以 caller/callee 關係與共用資料。逐一判定的要求見 [ADR-0002](../docs/adr/0002-no-batch-processing-per-function.md)。
 
 **名字不是 pool 的證據，pool 也不決定名字。** 兩者各自有判定依據；`0003dc2f` 那個共用 epilogue 帶著 AIL 的名字而形狀像連結產物，就是這條的實例。
+
+## Function 內部：區域變數與參數
+
+上面兩節管的是符號——外部看得見、要與 Ghidra 逐字對應的東西。這一節管 function 內部，規則不同：內部的名字**不需要**與 Ghidra 一致，而且大多數情況下不應該一致。
+
+**每一個區域變數與每一個參數都要有說得出意思的名字。** 反編譯器的預設名稱一個都不留在 `src/` 裡：
+
+| 形式 | 例 |
+| --- | --- |
+| 型別字母 + `Var` + 序號，含指標與陣列變體 | `iVar1`、`uVar3`、`puVar2`、`auVar1` |
+| 堆疊槽 | `uStack_8`、`aiStack_20` |
+| 參數與區域槽 | `param_1`、`local_8`、`local_1c`、`local_res8` |
+| 進入時的暫存器與堆疊 | `in_EAX`、`in_stack_00000008`、`in_FS_OFFSET` |
+| 未受影響／額外輸出 | `unaff_EBX`、`extraout_EDX` |
+| 位址標籤 | `DAT_00069cd8`、`PTR_...`、`FUN_...`、`LAB_...` |
+| 反編譯器的偽運算 | `CONCAT44`、`SUB84`、`ZEXT48`、`__return_storage_ptr__` |
+
+`iVar1_index` 這種半吊子不算數——前綴還在，就還是預設名稱。
+
+**名字反映的是它在這支 function 裡的角色**（`tile_index`、`remaining_mp`、`cursor_row`），不是它的型別（`int_var`）也不是它的來源暫存器（`eax_val`）。迴圈計數器叫 `i`／`j` 可以，那是慣例不是預設名。
+
+理由與符號那兩條鐵則同源：`src/` 是專案其他部分用來查「遊戲到底怎麼運作」的主要依據（見 [`README.md`](../README.md) 的 `src/` 那一列），一支滿是 `iVar1` 的 function 讀起來與反編譯輸出沒有差別，等於 emit 這一步沒有把任何理解沉澱下來。
+
+**判斷不出用途時記 `open_issues`，不要編一個名字。** 一個有自信的錯名字比 `iVar1` 更糟——`iVar1` 至少誠實地告訴下一個讀的人「沒有人知道這是什麼」，而一個看起來很合理的錯名字會被當成已經確認的知識，然後被引用。
+
+### 兩半分開擋
+
+這條規則的執行分成機械可判與不可判兩半，刻意由不同的關卡負責：
+
+**預設名稱由建置擋。** `tools/code_emit/build_emit.py` 在啟動 DOSBox 之前先掃 `src/` 與 `tests/`，命中就以 `E9001` 的形式報錯並中止建置，訊息帶檔名與行號。掃描前會把註解與字串字面值抹掉（保留行號），所以 plate comment 裡寫「Ghidra 把這個叫 `iVar1`，它是地圖格索引」不會被罰——會罰的話，最該寫的那種註解就變成最貴的。
+
+**名不副實由 reviewer 擋**，是檢查表的第 13 項。它只能由讀過那段 assembly 的人判斷，所以成本落在 pipeline 最貴的一段身上，寫法上因此刻意**搭在既有檢查項上**而不是獨立掃一遍：reviewer 在檢查控制流與 CALL 回傳值時本來就得弄清楚幾個值是什麼，第 13 項問的就是「那幾個值的名字有沒有說出你剛才的結論」，不是「逐個變數表示意見」。逐個寫證據會讓 reviewer 的輸出膨脹一倍而且大半是廢話。
+
+分工的界線是：**機器答得出的問題不要問人。** 預設名稱一個 regex 就抓得到，讓 reviewer 再掃一次是純浪費；而「這個名字是不是真的」regex 永遠答不出來，硬要它答只會得到有自信的胡說。
 
 ## 檔名
 

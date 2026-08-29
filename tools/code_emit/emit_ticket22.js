@@ -374,6 +374,29 @@ case, character for character (rebuild_info/naming.md). That correspondence is
 the only thing that lets the C and the database be checked against each other
 later.
 
+EVERY LOCAL AND EVERY PARAMETER HAS A NAME THAT SAYS WHAT IT IS. The decompiler's
+own names -- iVar1, uVar3, param_1, local_8, puVar2, in_EAX, DAT_00069cd8,
+CONCAT44 -- do not survive into src/, and iVar1_index is not a fix. The name says
+the value's role in this function (tile_index, remaining_mp, cursor_row), never
+its type (int_var) or the register it came out of (eax_val). A loop counter
+called i or j is a convention, not a default name, and is fine.
+
+src/ is what the rest of this project reads to find out what the game does. A
+function full of iVar1 reads exactly like the decompiler output it came from,
+which means this step captured nothing. And the name is the evidence: not being
+able to say what a local holds almost always means that stretch of control flow
+has not actually been read yet.
+
+WHEN YOU CANNOT WORK OUT WHAT A VALUE IS FOR, THAT IS AN open_issues ENTRY, NOT A
+NAME YOU INVENT. A confident wrong name is worse than iVar1, because iVar1 at
+least tells the next reader that nobody knows. Say what you could establish, say
+what would settle it, and leave the honest gap.
+
+The build refuses to compile a source carrying a decompiler default name and says
+which line, so the mechanical half of this costs you nothing to check
+(rebuild_info/naming.md). What it cannot check is whether a name that is not a
+default is actually true, and that half is reviewed.
+
 CALLING CONVENTION IS DECLARED IN THE CODE, never inherited from the flag set.
 The binary was built with -4s, the stack convention, and all 503 compiler-emitted
 game functions use it (rebuild_info/build_flags.md). Declare it as:
@@ -548,6 +571,15 @@ function emitterPrompt(fn, mode, reviewNote) {
     '   emitted. Adding an extern to somebody else\'s header is right; adding one',
     '   to your own .c is not.',
     '',
+    '   Name every local and every parameter for what it holds. This is not a',
+    '   tidying pass to do at the end: you worked out what each value is in step A,',
+    '   when you followed it through the assembly, and the name is where that work',
+    '   gets written down. Carrying Ghidra\'s iVar1 through to the C and renaming it',
+    '   afterwards is how a name ends up describing what the C looks like rather',
+    '   than what the assembly does. If step A left you unable to say what a value',
+    '   is for, that is an open_issues entry and the honest gap stays -- do not',
+    '   invent a plausible name to fill it.',
+    '',
     'C. Write the test into tests/' + fn.target + '. The file must define',
     '   void run_' + fn.target.replace(/\.c$/, '') + '_tests(void) -- that exact name is how the',
     '   generated entry point finds it -- and register each case with RUN_TEST. Use',
@@ -685,6 +717,19 @@ function reviewerPrompt(fn, round) {
     '      stubbed, and block on any assertion whose expected value depends on one of',
     '      them. Such a test passes today and turns red the moment the real value',
     '      lands, which is the worst possible time to find out it was never a test.',
+    '  13. Naming inside the function. Do NOT sweep every local: the build already',
+    '      refuses a Ghidra default name and names the line, so a regex-detectable',
+    '      one cannot reach you, and re-checking for it is spent effort. What only',
+    '      you can judge is whether a name that is not a default is TRUE. You have',
+    '      already had to work out what several of these values are -- items 1 to 4',
+    '      cannot be answered without it -- so this item is about those values and',
+    '      no others: for each one you formed an opinion about, does its name say',
+    '      what you concluded? A name that says something the assembly does not',
+    '      support is a blocking finding, and it is a worse defect than a default',
+    '      name, because it reads as settled knowledge. A vague but not wrong name',
+    '      is a note, not a block. If the emitter recorded an open_issues entry',
+    '      instead of naming a value it could not pin down, that is the rule working',
+    '      -- say so and do not push for a name.',
     '',
     '# What to block on',
     '',
