@@ -58,6 +58,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0xbd"
+    },
+    "000119b0": {
+      "name": "fdps_battle_mark_unit_done",
+      "target": "btlturn.c",
+      "body_size": "0x29",
+      "status": "committed",
+      "emitted_against": "0x29",
+      "rounds": 0
     }
   }
 }

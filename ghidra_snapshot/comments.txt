@@ -267,7 +267,7 @@ Algorithm:
 Forms the unit record pointer inline as (base at DAT_00069cd8) + unit_index * 0x50 -- the same array base and 0x50-byte stride fdps_get_unit_record uses -- and ORs 0x80 into the status byte at record + 5. In that byte bit 0 is the retired flag read by fdps_unit_is_retired and bit 7 is the acted-this-turn flag: fdps_battle_end_phase_if_all_units_done tests record[5] & 0x81 and skips any unit for which it is non-zero, so raising 0x80 stops this unit from holding the player phase open, and fdps_units_clear_status_bit7 clears the bit on every unit when fdps_battle_advance_turn opens the next turn. The enemy-side equivalent is inlined at the tail of fdps_map_actor_behavior_step. No other field is touched, unit_index is not range-checked, and nothing is returned.
 
 Parameters:
-  unit_index -- index into the 0x50-byte unit record array based at DAT_00069cd8, 0 .. DAT_00060150 - 1. Callers pass the unit whose turn just ended: fdps_battle_unit_turn on each of its exits, fdps_battle_action_menu after the chosen command is carried out, fdps_battle_system_menu after its all-unit move sweep, and the command sub-menu at 0x000252b0 after it commits an action.
+  unit_index -- index into the 0x50-byte unit record array based at DAT_00069cd8, 0 .. DAT_00060150 - 1. Callers pass the unit whose turn just ended: fdps_battle_unit_turn on each of its exits, fdps_battle_action_menu after the chosen command is carried out, fdps_battle_system_menu after its all-unit move sweep, and fdps_battle_item_menu after it commits an action.
 
 Returns:
   Nothing.

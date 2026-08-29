@@ -71,5 +71,31 @@
       "needs": "The emit of fdps_move_grid_set_stop_flag @ 00010da0, which must decide what a caller-less function looks like in src/ and may settle the shape if the same double-temporary pattern turns up at a call site elsewhere; failing that, a wcc386 10.0a experiment compiling the candidate spellings under -bt=dos4g -mf -4s -fpi -s -ot -od and comparing the stack slots consumed against the 0x5c this frame reserves.",
       "status": "open"
     }
+  ],
+  "000119b0": [
+    {
+      "what": "Whether any live call path can reach this function with an index outside 0 .. data_fdps_map_unit_count - 1, in which case the unchecked write lands outside the unit array and the rebuild has to place the surrounding allocation the way the original did for the damage to be the same damage. The emitted C reproduces the missing check exactly, so the behaviour matches either way; what is not established is whether it is ever exercised.",
+      "needs": "The four callers emitted -- fdps_battle_unit_turn (0x15470), fdps_battle_action_menu (0x15d00), fdps_battle_system_menu (0x14ab0), fdps_battle_item_menu (0x252b0) -- so the index each of the nine call sites passes can be traced to the loop or selection that produced it. All four are on this file's or btlmenu.c's worklist.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Bits 1..6 of the status byte at record +5. This function only ever raises bit 7 and the phase engine only ever tests flags & 0x81, so nothing seen so far writes or reads the middle six bits, yet the OR preserves them and so does the emitted C. Whether they carry anything is unsettled, and the test staging 0x3f -> 0xbf pins the preservation without claiming the bits mean something.",
+      "needs": "The remaining readers and writers of record +5 emitted -- fdps_units_clear_status_bit7 and fdps_battle_advance_turn in particular, plus whatever writes the byte at unit load time -- to show whether any of bits 1..6 is ever set.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Whether any live path reaches fdps_battle_mark_unit_done with an index outside 0 .. data_fdps_map_unit_count - 1. The function has no CMP and no branch, so the record address is formed and the byte written whatever the index holds; the emitted C reproduces that exactly, so behaviour matches either way, but whether the out-of-range write is ever exercised is unestablished. If it is, the rebuild has to place the surrounding allocation the way the original did for the damage to be the same damage.",
+      "needs": "The four callers emitted -- fdps_battle_unit_turn (00015470), fdps_battle_action_menu (00015d00), fdps_battle_system_menu (00014ab0), fdps_battle_item_menu (000252b0) -- so the index at each of the nine call sites can be traced back to the loop or selection that produced it. The one site I read, 000156f8, forwards its own [EBP+0x14] argument straight through, so the question moves up to fdps_battle_unit_turn's caller rather than being settled there.",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "What bits 1..6 of the status byte at record +5 carry. Only bit 0 (fdps_unit_is_retired, AND AL,0x1) and bit 7 (this function, and the AND AL,0x81 in fdps_battle_end_phase_if_all_units_done) have known meanings, yet the OR here preserves the middle six and so does the emitted C.",
+      "needs": "The remaining readers and writers of record +5 emitted -- fdps_units_clear_status_bit7 and fdps_battle_advance_turn above all, plus whatever initialises the byte at unit load time -- to show whether any of bits 1..6 is ever set.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }
