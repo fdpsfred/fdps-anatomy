@@ -107,25 +107,32 @@
       "what": "The function writes one pair per marked cell with no capacity argument and no bound, while callers 00013040 and 00013420 hand it a 0x190-byte block -- room for 200 pairs -- which a wide movement range or targeting mask overruns. Nothing about this function can be made safe without deviating from the original; the equivalence depends on those two callers being emitted with the same 0x190 malloc rather than a corrected one.",
       "needs": "The emit of 00013040 and 00013420 keeping their allocation sizes as measured, and a note in rebuild_info/pitfalls.md so the reviewer of those two functions sees why the obvious enlargement is wrong.",
       "status": "open",
-      "from": "emit"
+      "from": "emit",
+      "rescan": "NOT SETTLED, and sharper about the size of the gap rather than closed. The first half of `needs` cannot be met yet: neither 00013040 nor 00013420 has been emitted (workspace/code_emit/verdicts/ has no file for either), so there is no neighbour judgement to read about what they allocate, and reading their assembly to decide it here would be making their emit round's call early instead of using one already made. The second half -- the rebuild_info/pitfalls.md note -- is still unwritten, and it is not this rescan's to write: it belongs to the round that emits those two callers, and pitfalls.md is outside the paths this pipeline may leave dirty. What the rescan did establish, from the settled companion entry below, is the worst case the buffer is up against: the movement grid is the layer-0 .mpl dimensions, so it is at most 33 x 56 = 1456 cells, and a fully marked grid would write 1456 pairs = 2912 bytes into a 0x190 = 400-byte block (200 pairs). That bounds the damage but does not decide the question, because nothing here says how many cells a real targeting mask or movement range actually marks. Still missing, precisely: the emits of 00013040 and 00013420 with their allocation sizes as measured, and an upper bound on the marked-cell count that fdps_collect_targets_in_range @ 00011e50 and the flood fill at 00010de0 can leave behind. Non-blocking for this function either way -- the emitted C reproduces the unbounded write the original has, and making it safe here would be the deviation."
     },
     {
       "what": "Whether any chapter's grid can exceed 255 tiles in either dimension. The coordinate stores are byte stores, so an index of 256 would be written as 0; the emitted C truncates identically, so this is not an equivalence gap, but the count returned and the pairs written would both be nonsense on such a map and no caller would notice.",
       "needs": "The map dimensions of every chapter map resource, which the map-resource loader's emit or an assets/ table can supply. If all maps are under 256 wide and tall this closes with nothing to do.",
-      "status": "open",
-      "from": "emit"
+      "status": "resolved",
+      "from": "emit",
+      "answer": "SETTLED, and it closes with nothing to do: no chapter map comes anywhere near 256 tiles in either dimension. The widest map in the game is 33 tiles across (M150/M160/M170/M180/M190/M200/M220/M230/M400 and others at width 33) and the tallest is 56 (M320, 26 x 56); the largest by area is that same M320 at 1456 cells. Both byte stores at 00011e1e and 00011e26 therefore receive an index in 0..55 on every map the game can load, the truncation the concern asked about can never happen, and the emitted C's (unsigned char) casts are exact rather than merely identically wrong.",
+      "settled_by": "The map dimensions the concern asked for, read out of the shipped resources rather than assumed. Where the grid header comes from: fdps_field_load_chapter_resources @ 000227e0 is the only writer of data_fdps_battle_move_grid_ptr (get_xrefs_to 00060144 gives exactly one WRITE, at 00022bb3), and at its tail it takes the 16-bit values at +7 and +9 of LAYER 0's m%02d0.mpl blob, mallocs width*height*2+4, and stamps those two words into the block's first two words -- so the header words 00011da0 reads ARE the layer-0 .mpl dimensions. Which .mpl files those are: the loader formats \"m%02d%d.mpl\" against Field1.vfs, and the local FIELD1.VFS is byte-identical to the shipped one (sha256 48346de5ea4d96749c0b6a424bfc57db5d5f29d2850c966cacfccd09c0f0e5d5, 8,934,513 bytes, matching resource_info/disc_images.md), and per that page FIELD1.VFS is one of the 19 PACK.VFS members that are byte-identical on both discs. Reading the 68 .MPL members already unpacked to workspace/vfs_dump/FIELD1: every one satisfies magic bytes 4d 50 4c 00, version 1, table_offset 11 and 11 + width*height*2 == file size exactly, which is what independently confirms +7 and +9 are the two dimensions and that nothing is off by a byte. 64 of the 68 are layer 0 (M%02d0.MPL), covering chapters 00-29 and 31-64 -- chapter 30 has no map resource of any kind, so that is every map the loader can reach, not a sample. Max width 33, max height 56, max area 1456."
     },
     {
       "what": "Confirming the emitter's own entry rather than adding to it: the function writes one pair per marked cell with no capacity argument and no bound, while callers 00013040 and 00013420 hand it a 0x190-byte block. I verified 00013040 does malloc(400) at its call site, so the overrun is real and not a plate-comment claim. It cannot be made safe inside this function without deviating from the original.",
       "needs": "The emits of 00013040 and 00013420 keeping their 0x190 allocations as measured, plus a rebuild_info/pitfalls.md entry so the reviewer of those two sees why enlarging the buffer is the wrong move.",
       "status": "open",
-      "from": "review"
+      "from": "review",
+      "rescan": "NOT SETTLED. Same concern as the emitter's entry above, which carries the rescan record, what was eliminated and what is still missing; see its rescan. Recorded once on purpose.",
+      "same_as": "The function writes one pair per marked cell with no capacity argument and no bound, while callers 00013040 an"
     },
     {
       "what": "Whether any chapter's grid exceeds 255 tiles in either dimension. The stores at 00011e1e and 00011e26 are byte stores and the emitted C truncates identically, so this is not an equivalence gap, but on such a map both the pairs and the count would be nonsense and no caller would notice.",
       "needs": "The map dimensions of every chapter map resource, from the map-resource loader's emit or an assets/ table. If every map is under 256 in both dimensions this closes with nothing to do.",
-      "status": "open",
-      "from": "review"
+      "status": "resolved",
+      "from": "review",
+      "answer": "SETTLED. Same concern as the emitter's entry above, which carries the settlement and the evidence; see its answer / settled_by. Recorded once on purpose: two copies of a conclusion are two things to correct when one of them turns out to be wrong.",
+      "same_as": "Whether any chapter's grid can exceed 255 tiles in either dimension. The coordinate stores are byte stores, so"
     }
   ],
   "000140e0": [
