@@ -50,6 +50,14 @@
       "status": "committed",
       "emitted_against": "0x38",
       "rounds": 0
+    },
+    "000118f0": {
+      "name": "fdps_move_grid_block_occupied_tiles",
+      "target": "movegrid.c",
+      "body_size": "0xbd",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0xbd"
     }
   }
 }

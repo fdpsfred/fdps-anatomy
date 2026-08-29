@@ -239,3 +239,78 @@ void fdps_move_grid_mark_opposing_zones_of_control(int side_select)
         unit++;
     }
 }
+
+/* 000118f0.  The third step of the movement-range sequence every caller runs:
+   mark the opposing zones of control, flood the range, then take the occupied
+   tiles back out of it.  A cell's byte 1 is the flood fill's step cost and
+   0xff is its unreachable sentinel, so storing 0xff there drops the tile out
+   of the range while leaving byte 0's zone bits alone -- the tile can still be
+   crossed, it just cannot be stopped on.
+
+   The side test uses only the TRUTH VALUE of the record's side byte, never its
+   number: CMP dword ptr [EBP+0x18],0x0 against CMP byte ptr [EAX+0x6],0x0, at
+   0001197a and 00011983 / 00011994.  Side bytes run 0 enemy, 1 NPC, 2 player
+   while fdps_battle_unit_turn passes the literal 1 for a player unit, so the
+   obvious `unit->side == side_select` would block only the NPC units during a
+   player unit's move and let that unit finish standing on a comrade.  The
+   partition the original applies is {enemy} against {NPC, player}, which is a
+   real rule: NPC units obstruct the player exactly as comrades do, and never
+   obstruct the enemy AI.  The polarity is the complement of the identically
+   named argument of fdps_move_grid_mark_opposing_zones_of_control above, and
+   both callers hand the same value to the two of them.
+
+   Unlike fdps_map_grid_reset and fdps_move_grid_mark_zone_of_control there is
+   no null-grid guard: MOV EAX,[0x00060144] / MOVSX EAX,word ptr [EAX] at
+   000118fc dereferences the pointer as the first thing the body does.  Adding
+   the guard the neighbours have would not be this function.
+
+   The width word arrives through MOVSX, the signed read, and it is taken once
+   before the loop rather than re-read per unit.  A header width of 0xffff is
+   -1 and sends the cell address below the array into the header; read unsigned
+   it would be 65535 and land far past the block.
+
+   The record is skipped on index alone -- CMP EAX,dword ptr [EBP+0x14] / JZ at
+   00011931 compares the loop counter with the argument, not any field of the
+   record -- and the record pointer is stepped by ADD dword ptr [EBP-0x4],0x50
+   at 000119a0 on every path, the skips included.
+
+   Both tile bytes are zero-extended (MOV AL,byte ptr [EAX+1] / AND EAX,0xff at
+   00011939), so a column byte of 0xff is 255 and not -1, and neither is
+   checked against the header before the store: the cell address is formed and
+   written wherever it lands.  The loop bound is CMP EAX,dword ptr [0x00060150]
+   / JL, the signed compare, so a negative unit count walks nothing.
+
+   The retired test is AND AL,0x1: bit 0 alone, so a unit that has already
+   acted this turn still blocks the tile it stands on. */
+void fdps_move_grid_block_occupied_tiles(int exclude_unit_index,
+                                         int side_select)
+{
+    struct fdps_unit_record *unit;
+    struct fdps_move_grid_cell *cell;
+    int grid_width;
+    int tile_index;
+    int unit_index;
+
+    grid_width = (int) *(short *) data_fdps_battle_move_grid_ptr;
+    unit = (struct fdps_unit_record *) data_fdps_map_unit_array_ptr;
+
+    for (unit_index = 0;
+         unit_index < data_fdps_map_unit_count;
+         unit_index++) {
+        if (unit_index != exclude_unit_index) {
+            tile_index = grid_width * (int) unit->pos_y + (int) unit->pos_x;
+            cell = (struct fdps_move_grid_cell *)
+                   (data_fdps_battle_move_grid_ptr + 4 + 2 * tile_index);
+            if ((unit->flags & 1) == 0) {
+                if (side_select == 0) {
+                    if (unit->side == 0) {
+                        cell->marker = (unsigned char) 0xff;
+                    }
+                } else if (unit->side != 0) {
+                    cell->marker = (unsigned char) 0xff;
+                }
+            }
+        }
+        unit++;
+    }
+}

@@ -669,6 +669,205 @@ static void stop_flag_has_no_bounds_check(void)
     CHECK_EQ(cell_flags(16), 0x80);
 }
 
+/* --- fdps_move_grid_block_occupied_tiles @ 000118f0 -----------------------
+ *
+ * Expected values come from the assembly: the loop bound CMP EAX,dword ptr
+ * [0x00060150] / JL at 00011919, the exclude test CMP EAX,dword ptr [EBP+0x14]
+ * / JZ at 00011931, the address form IMUL EDX,EAX / ADD EAX,EDX / ADD EAX,EAX
+ * / ADD EAX,base / ADD EAX,0x5 at 00011944..00011963, the retired test AND
+ * AL,0x1 on byte +5 at 0001196f, the pair of side tests CMP dword ptr
+ * [EBP+0x18],0x0 against CMP byte ptr [EAX+0x6],0x0 at 0001197a..00011998, the
+ * store MOV byte ptr [EAX],0xff at 0001198c and 0001199d, and the record step
+ * ADD dword ptr [EBP-0x4],0x50 at 000119a0.  None of them is read off the
+ * emitted C.
+ *
+ * stage() rather than stage_blank() is the fixture here: it leaves every cell
+ * flags 0xff / marker 0x00, and this function writes only 0xff into the marker
+ * byte, so one cell says on its own both whether it was blocked and whether
+ * anything touched the flags byte beside it.
+ */
+
+/* The record is skipped on the loop index alone -- the compare is against the
+   loop counter, not against any field of the record -- and the record pointer
+   is stepped on the skip path as well, so slot 2 is still read at the right
+   offset after slot 1 was passed over.  All three units are on the same side
+   and none is retired, so nothing but the index separates them. */
+static void block_excludes_the_named_unit_index(void)
+{
+    stage(4, 4);
+    units_reset(3);
+    put_unit(0, 0, 0, 1, 0);
+    put_unit(1, 1, 0, 1, 0);
+    put_unit(2, 2, 0, 1, 0);
+    fdps_move_grid_block_occupied_tiles(1, 1);
+    CHECK_EQ(cell_marker(0), 0xff);
+    CHECK_EQ(cell_marker(1), 0x00);
+    CHECK_EQ(cell_marker(2), 0xff);
+}
+
+/* side_select 0 leaves the JNZ at 0001197e alone and falls into CMP byte ptr
+   [EAX+0x6],0x0 / JNZ past the store: the tiles blocked are the ones whose
+   side byte is 0, the enemy side.  The NPC unit at (1,0) and the player unit
+   at (2,0) keep their tiles in the range. */
+static void block_select_zero_blocks_side_zero_units(void)
+{
+    stage(4, 4);
+    units_reset(3);
+    put_unit(0, 0, 0, 0, 0);
+    put_unit(1, 1, 0, 1, 0);
+    put_unit(2, 2, 0, 2, 0);
+    fdps_move_grid_block_occupied_tiles(-1, 0);
+    CHECK_EQ(cell_marker(0), 0xff);
+    CHECK_EQ(cell_marker(1), 0x00);
+    CHECK_EQ(cell_marker(2), 0x00);
+}
+
+/* The mirror, and the trap the rebuild note names: a non-zero side_select
+   takes the JNZ at 0001197e to 00011991 and blocks every record whose side
+   byte is non-zero.  fdps_battle_unit_turn passes the literal 1 for a player
+   unit, whose own side byte is 2, so the player unit at (2,0) is blocked by
+   this call as well as the NPC unit at (1,0) -- writing the test as
+   unit->side == side_select would leave cell 2 reachable and let a player unit
+   end its move standing on a comrade. */
+static void block_select_nonzero_blocks_npc_and_player(void)
+{
+    stage(4, 4);
+    units_reset(3);
+    put_unit(0, 0, 0, 0, 0);
+    put_unit(1, 1, 0, 1, 0);
+    put_unit(2, 2, 0, 2, 0);
+    fdps_move_grid_block_occupied_tiles(-1, 1);
+    CHECK_EQ(cell_marker(0), 0x00);
+    CHECK_EQ(cell_marker(1), 0xff);
+    CHECK_EQ(cell_marker(2), 0xff);
+}
+
+/* Both compares are against zero, so only the truth value of side_select
+   counts: 2 -- the player side's own number -- selects exactly the same
+   records as 1 did above, and not the player unit alone. */
+static void block_side_select_is_a_truth_value(void)
+{
+    stage(4, 4);
+    units_reset(3);
+    put_unit(0, 0, 0, 0, 0);
+    put_unit(1, 1, 0, 1, 0);
+    put_unit(2, 2, 0, 2, 0);
+    fdps_move_grid_block_occupied_tiles(-1, 2);
+    CHECK_EQ(cell_marker(0), 0x00);
+    CHECK_EQ(cell_marker(1), 0xff);
+    CHECK_EQ(cell_marker(2), 0xff);
+}
+
+/* MOV byte ptr [EAX],0xff writes one byte, and the address is base + 5 +
+   2 * index -- byte 1 of the cell.  Byte 0 keeps its zone-of-control bits, so
+   a tile blocked here is still marked as occupied for anything that reads
+   them, and a cell the flood fill had relaxed to a step cost of 3 goes back to
+   the unreachable sentinel rather than being left alone.  The neighbouring
+   cell is untouched in both bytes. */
+static void block_writes_only_the_marker_byte(void)
+{
+    stage(4, 4);
+    stage_grid[4 + 5 * 2] = 0x40;
+    stage_grid[4 + 5 * 2 + 1] = 0x03;
+    units_reset(1);
+    put_unit(0, 1, 1, 1, 0);
+    fdps_move_grid_block_occupied_tiles(-1, 1);
+    CHECK_EQ(cell_marker(5), 0xff);
+    CHECK_EQ(cell_flags(5), 0x40);
+    CHECK_EQ(cell_marker(6), 0x00);
+    CHECK_EQ(cell_flags(6), 0xff);
+}
+
+/* AND AL,0x1 tests bit 0 alone.  The retired unit at (0,0) keeps its tile in
+   the range even though its side qualifies, while the unit at (1,0) carrying
+   every other bit of the flags byte blocks its tile normally. */
+static void block_retired_bit_is_bit_zero_only(void)
+{
+    stage(4, 4);
+    units_reset(2);
+    put_unit(0, 0, 0, 1, 0x01);
+    put_unit(1, 1, 0, 1, 0xfe);
+    fdps_move_grid_block_occupied_tiles(-1, 1);
+    CHECK_EQ(cell_marker(0), 0x00);
+    CHECK_EQ(cell_marker(1), 0xff);
+}
+
+/* The bound is data_fdps_map_unit_count and the compare is JL, the signed one:
+   a count of one reaches slot 0 and stops, and a count of -1 walks nothing at
+   all.  Read the count unsigned and -1 is four billion and the walk runs off
+   the end of the array. */
+static void block_walk_stops_at_the_signed_unit_count(void)
+{
+    stage(4, 4);
+    units_reset(1);
+    put_unit(0, 0, 0, 1, 0);
+    put_unit(1, 1, 0, 1, 0);
+    fdps_move_grid_block_occupied_tiles(-1, 1);
+    CHECK_EQ(cell_marker(0), 0xff);
+    CHECK_EQ(cell_marker(1), 0x00);
+
+    stage(4, 4);
+    data_fdps_map_unit_count = -1;
+    fdps_move_grid_block_occupied_tiles(-1, 1);
+    CHECK_EQ(cell_marker(0), 0x00);
+    CHECK_EQ(cell_marker(1), 0x00);
+}
+
+/* The index is width * pos_y + pos_x with the width taken from the header, so
+   the same unit at (1,1) blocks cell 5 on a width of 4 and cell 4 on a width
+   of 3. */
+static void block_index_uses_the_header_width(void)
+{
+    stage(4, 4);
+    units_reset(1);
+    put_unit(0, 1, 1, 1, 0);
+    fdps_move_grid_block_occupied_tiles(-1, 1);
+    CHECK_EQ(cell_marker(5), 0xff);
+    CHECK_EQ(cell_marker(4), 0x00);
+
+    stage(3, 4);
+    fdps_move_grid_block_occupied_tiles(-1, 1);
+    CHECK_EQ(cell_marker(4), 0xff);
+    CHECK_EQ(cell_marker(5), 0x00);
+}
+
+/* MOVSX EAX,word ptr [EAX] at 00011901 reads the width word signed.  With a
+   width of -1 the index for (0,1) is -1, the cell address is base + 2 -- the
+   height word of the header -- and the 0xff lands in its high byte.  Read the
+   word unsigned and the index would be 65535 instead, 128KB past the end of
+   the block, and this fixture would be left untouched. */
+static void block_width_word_is_signed(void)
+{
+    stage(-1, 4);
+    units_reset(1);
+    put_unit(0, 0, 1, 1, 0);
+    fdps_move_grid_block_occupied_tiles(-1, 1);
+    CHECK_EQ((int) *(short *) stage_grid, -1);
+    CHECK_EQ((int) stage_grid[2], 0x04);
+    CHECK_EQ((int) stage_grid[3], 0xff);
+    CHECK_EQ(cell_marker(0), 0x00);
+}
+
+/* Neither tile byte is compared against the header -- there is no CMP between
+   the two zero-extending loads and the store -- so a unit sitting outside the
+   grid still blocks whatever cell the arithmetic reaches.  On a 4x4 grid a
+   unit at (5,0) blocks index 5, which is tile (1,1), and one at (0,4) blocks
+   index 16, one row past the last.  That is the original's behaviour rather
+   than a desirable one; it is asserted so that a guard added here would be
+   noticed. */
+static void block_coordinates_are_not_range_checked(void)
+{
+    stage(4, 4);
+    units_reset(2);
+    put_unit(0, 5, 0, 1, 0);
+    put_unit(1, 0, 4, 1, 0);
+    fdps_move_grid_block_occupied_tiles(-1, 1);
+    CHECK_EQ(cell_marker(5), 0xff);
+    CHECK_EQ(cell_marker(16), 0xff);
+    CHECK_EQ(cell_marker(0), 0x00);
+    CHECK_EQ(cell_marker(4), 0x00);
+}
+
 void run_movegrid_tests(void)
 {
     RUN_TEST(grid_cell_stride_is_two);
@@ -710,6 +909,17 @@ void run_movegrid_tests(void)
     RUN_TEST(zones_unit_count_is_signed);
     RUN_TEST(zones_base_is_reread_from_the_global);
     RUN_TEST(zones_tile_bytes_are_passed_through_unchecked);
+
+    RUN_TEST(block_excludes_the_named_unit_index);
+    RUN_TEST(block_select_zero_blocks_side_zero_units);
+    RUN_TEST(block_select_nonzero_blocks_npc_and_player);
+    RUN_TEST(block_side_select_is_a_truth_value);
+    RUN_TEST(block_writes_only_the_marker_byte);
+    RUN_TEST(block_retired_bit_is_bit_zero_only);
+    RUN_TEST(block_walk_stops_at_the_signed_unit_count);
+    RUN_TEST(block_index_uses_the_header_width);
+    RUN_TEST(block_width_word_is_signed);
+    RUN_TEST(block_coordinates_are_not_range_checked);
 
     /* Put the global back before leaving.  stage() points it at this file's
        own stage_grid, and the runners share one process: a later unit that

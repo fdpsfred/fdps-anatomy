@@ -55,4 +55,18 @@ extern void fdps_move_grid_set_stop_flag(int tile_x, int tile_y);
 extern void fdps_move_grid_mark_opposing_zones_of_control(int side_select);
 #pragma aux fdps_move_grid_mark_opposing_zones_of_control "*" parm caller [];
 
+/* Takes the tiles that occupied units stand on back out of the movement range
+   that has just been flooded over the grid, by storing the 0xff unreachable
+   sentinel into byte 1 of each of their cells, so the moving unit may cross
+   them but may not end its move on one.  The unit at exclude_unit_index keeps
+   its own tile, so standing still stays legal, and retired units (flags bit 0)
+   are passed over.  side_select is a TRUTH VALUE, not a side number: 0 blocks
+   the units whose side byte is 0, any non-zero value blocks the units whose
+   side byte is non-zero -- the opposite polarity to the identically named
+   argument of fdps_move_grid_mark_opposing_zones_of_control above.  Neither
+   the unit coordinates nor the grid pointer are checked. */
+extern void fdps_move_grid_block_occupied_tiles(int exclude_unit_index,
+                                                int side_select);
+#pragma aux fdps_move_grid_block_occupied_tiles "*" parm caller [];
+
 #endif
