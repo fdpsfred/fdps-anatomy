@@ -3401,7 +3401,7 @@ Alignment padding: multi-byte LEA NOP forms aligning FUN_0001fed0 to 16 bytes.
 Blits one 1bpp glyph bitmap into an 8-bit destination surface, painting a single palette colour wherever a source bit is set and leaving every other pixel untouched.
 
 Algorithm:
-Loops row from 0 while row is below the glyph cell height at DAT_0006403d, and inside it column from 0 while column is below the glyph cell width at DAT_0006403c; both bounds are zero-extended bytes re-read from the globals on every iteration. A shift register -- a full dword local -- holds the current source byte: on each column whose low three bits are zero it takes the next byte from glyph_bits and advances that pointer, otherwise it shifts the register left by one. When bit 7 (0x80) of the register is set it stores the low byte of color at dst[column]; when it is clear it writes nothing, so unset bits leave the destination as it was. After each row dst advances by pitch, which is also what makes DAT_0006403c the horizontal extent and DAT_0006403d the vertical one: the inner index is a byte offset inside a single destination row, the outer step is a whole row. Source rows are byte-aligned -- the fetch condition is true again at column 0 of every row, so one row consumes ceil(width/8) bytes and the spare bits of a row's last byte are skipped rather than carried into the next row. There is no clipping and no bounds check of any kind; the caller owns keeping the destination inside its surface.
+Loops row from 0 while row is below the glyph cell height at data_fdps_glyph_cell_height, and inside it column from 0 while column is below the glyph cell width at data_fdps_font_glyph_width; both bounds are zero-extended bytes re-read from the globals on every iteration. A shift register -- a full dword local -- holds the current source byte: on each column whose low three bits are zero it takes the next byte from glyph_bits and advances that pointer, otherwise it shifts the register left by one. When bit 7 (0x80) of the register is set it stores the low byte of color at dst[column]; when it is clear it writes nothing, so unset bits leave the destination as it was. After each row dst advances by pitch, which is also what makes data_fdps_font_glyph_width the horizontal extent and data_fdps_glyph_cell_height the vertical one: the inner index is a byte offset inside a single destination row, the outer step is a whole row. Source rows are byte-aligned -- the fetch condition is true again at column 0 of every row, so one row consumes ceil(width/8) bytes and the spare bits of a row's last byte are skipped rather than carried into the next row. There is no clipping and no bounds check of any kind; the caller owns keeping the destination inside its surface.
 
 Parameters:
   dst -- destination 8bpp pixel at the top-left corner of the glyph cell. fdps_draw_glyph passes its own destination offset by +pitch, -1, -pitch or +1 to lay down the four outline copies, by the shadow displacement for the drop-shadow style, and unoffset for the body pass.
@@ -3410,9 +3410,9 @@ Parameters:
   color -- palette index stored for set bits; only the low byte is used.
 
 Returns:
-  Nothing. EAX at RET holds the zero-extended DAT_0006403d height byte left by the final row test, which no call site reads.
+  Nothing. EAX at RET holds the zero-extended data_fdps_glyph_cell_height height byte left by the final row test, which no call site reads.
 
-Pool: fdps  [no match in either FID set and the body hash is unique in the image; it shares the glyph cell width/height globals DAT_0006403c/DAT_0006403d with its application caller fdps_draw_glyph and touches no CRT, DOS or AIL state]
+Pool: fdps  [no match in either FID set and the body hash is unique in the image; it shares the glyph cell width/height globals data_fdps_font_glyph_width/data_fdps_glyph_cell_height with its application caller fdps_draw_glyph and touches no CRT, DOS or AIL state]
 
 === 0001ff56 [EOL]
 Watcom alignment padding: lea eax,[eax+0] (6) + lea edx,[edx+eiz*1+0] (4), aligning FUN_0001ff60 to 16 bytes

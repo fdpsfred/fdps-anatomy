@@ -194,6 +194,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x25"
+    },
+    "0001fed0": {
+      "name": "fdps_blit_glyph_1bpp",
+      "target": "text.c",
+      "body_size": "0x86",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x86"
     }
   }
 }

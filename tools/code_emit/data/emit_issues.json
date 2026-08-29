@@ -393,5 +393,19 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0001fed0": [
+    {
+      "from": "emit",
+      "what": "The bit window is a dword stack slot in the original (SHL dword ptr [EBP-0x4],0x1 and TEST dword ptr [EBP-0x4],0x80) and is emitted as unsigned int, while Ghidra's decompiler infers it as a byte. The two are indistinguishable in behaviour here -- at most seven shifts happen between fetches, so no bit that a byte would drop can ever reach the 0x80 test -- and the emitted C follows the assembly's width. It is recorded only so that a later reader who compares the C against the decompiler's rendering does not take the difference for a defect.",
+      "needs": "Nothing further unless fdps_draw_text turns out to feed this function a cell width above 8 with a glyph whose row spans more than one byte AND some other reader of the same window appears, neither of which exists in the image today.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "Whether reproducing the per-iteration re-read of the two cell-size globals matters on a real machine. Nothing in the image writes either global except the font loader in main.c, so hoisting the loads out of the loop would be unobservable in behaviour; it would change the instruction count of the game's hottest drawing loop, which is contract D territory. The emitted C spells the globals in the loop conditions so that the same flags produce the same shape, but whether wcc386 10.0a at the project's flags actually keeps them there was not verified against the produced object code.",
+      "needs": "Disassembling the built TEXT.OBJ and comparing the two loop heads against 0001fee3 and 0001ff00, or a timed comparison of text drawing in DOSBox-X at a fixed cycle count once fdps_draw_text is emitted.",
+      "status": "open"
+    }
   ]
 }

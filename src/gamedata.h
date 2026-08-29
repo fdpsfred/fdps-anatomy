@@ -85,4 +85,18 @@ extern unsigned char *data_fdps_spell_learning_table_ptr;
 extern unsigned char *data_fdps_battle_character_growth_table_ptr;
 extern unsigned char *data_fdps_battle_spell_effect_table_ptr;
 
+/* 0006403c and 0006403d.  The glyph cell the font is drawn on: width in
+   pixels, height in rows.  The font loader in main.c writes them once and
+   every text routine reads them, so all glyphs share one cell size.
+
+   They are bytes, and every reader widens them with XOR EAX,EAX / MOV AL --
+   zero extension, not sign extension.  The distinction is behaviour: the loop
+   bounds they feed are tested with the signed JG, so a cell height of 200 read
+   through a signed char is -56 and the drawing loop never runs.
+
+   Adjacent in bss and read one at a time, never indexed across
+   (rebuild_info/pitfalls.md, contract B): they are two globals, not a pair. */
+extern unsigned char data_fdps_font_glyph_width;
+extern unsigned char data_fdps_glyph_cell_height;
+
 #endif
