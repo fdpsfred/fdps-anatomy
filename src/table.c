@@ -104,3 +104,53 @@ struct fdps_enemy_data *fdps_get_enemy_record(int enemy_index)
          + enemy_index * ENEMY_RECORD_STRIDE);
     return record;
 }
+
+/* The stride of one ITEM.DAT record, as the original writes it: IMUL
+   EAX,dword ptr [EBP+0x14],0x17.  A literal and not sizeof(struct
+   fdps_item_effect) for the same reason as the three tables above -- the
+   file's stride is the fact that has to survive, and the struct agrees with it
+   only while it stays byte-packed.  Written naturally, with the four i16 stat
+   fields at +0x01, +0x03, +0x05 and +0x07 aligned, the struct would measure 24
+   and every lookup past index 0 would land on the wrong item
+   (rebuild_info/pitfalls.md). */
+#define ITEM_RECORD_STRIDE 0x17
+
+/* 00018b40.  The fourth accessor of the same one-basic-block shape: IMUL
+   EAX,dword ptr [EBP+0x14],0x17 / MOV EDX,dword ptr [0x00063fe0] / ADD
+   EDX,EAX, spilled to a stack local and reloaded into EAX to be returned.  No
+   compare, no branch, no CALL.
+
+   IMUL again, the signed form, so a negative id steps backwards off the front
+   of the table instead of becoming a four-gigabyte offset.  Whether the game
+   can reach that half is not settled here.  There are twenty-five callers and
+   the equipment path is the one read so far: fdps_unit_equip_slot forms both
+   of its arguments by zero-extending a byte -- 000260b9 XOR EAX,EAX / 000260bb
+   MOV AL,byte ptr [EDX+0xb] into the PUSH at 000260ca, and 0002611b MOV
+   AL,byte ptr [EAX+0x1] / 0002611e AND EAX,0xff into the PUSH at 00026123 --
+   so on that path what arrives is 0..255.  fdps_unit_can_equip_item does not
+   narrow it: at 00026012 it loads its own second parameter, MOV EAX,dword ptr
+   [EBP+0x18], and pushes it unmasked, so there the range is its callers'
+   business.  (The AND EAX,0xff at 00026001, three instructions earlier,
+   belongs to the CALL 0x00018ba0 above it -- fdps_get_class_equip_record, a
+   different accessor -- and says nothing about this argument.)  The remaining
+   callers answer the question as they are emitted.
+
+   The absent bound is load-bearing rather than an oversight.  ITEM.DAT holds
+   251 records, ids 0x00-0xFA (resource_info/data_tables.md), of which only
+   0x00-0xE1 carry content; item id 0xFF is reachable in play and its record
+   address lands 92 bytes past the end of the 5,773-byte table, which is what
+   makes the guide's "FF BUG item" read different values from one run to the
+   next.  Clamping or rejecting an id above 0xFA removes that behaviour
+   (rebuild_info/pitfalls.md).
+
+   The base is read out of the global on every call, uncached and untested, so
+   a call before fdps_load_data_tables has filled it returns the offset alone
+   as though it were an address. */
+struct fdps_item_effect *fdps_get_item_record(int item_id)
+{
+    struct fdps_item_effect *record;
+
+    record = (struct fdps_item_effect *)
+        (data_fdps_item_effect_table_ptr + item_id * ITEM_RECORD_STRIDE);
+    return record;
+}

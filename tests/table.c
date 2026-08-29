@@ -1,16 +1,17 @@
 /* tests/table.c -- cover for src/table.c.
  *
- * Expected values come from the assembly of the three accessors -- 00018ab0
- * over FRIAPRDA.DAT, 00018ae0 over FRILEVUP.DAT and 00018b10 over
- * ENEMYDAT.DAT -- and from ticket 17's layouts of struct
- * fdps_character_base_record, struct fdps_character_growth and struct
- * fdps_enemy_data in src/fdpstype.h.  None of them is read off the emitted C.
+ * Expected values come from the assembly of the four accessors -- 00018ab0
+ * over FRIAPRDA.DAT, 00018ae0 over FRILEVUP.DAT, 00018b10 over ENEMYDAT.DAT
+ * and 00018b40 over ITEM.DAT -- and from ticket 17's layouts of struct
+ * fdps_character_base_record, struct fdps_character_growth, struct
+ * fdps_enemy_data and struct fdps_item_effect in src/fdpstype.h.  None of them
+ * is read off the emitted C.
  *
  * Every body is PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x4, then IMUL
  * EAX,dword ptr [EBP+0x14],<stride> / MOV EDX,dword ptr [<table base global>]
  * / ADD EDX,EAX and nothing else, so the three facts everything below is aimed
- * at are the same for each: the stride is the file's own (0x18, 0x0b and
- * 0x0a), the base is that accessor's own pointer global read fresh on every
+ * at are the same for each: the stride is the file's own (0x18, 0x0b, 0x0a and
+ * 0x17), the base is that accessor's own pointer global read fresh on every
  * call, and there is no test of any kind in the body -- no bound on the index,
  * no null check on the base.
  *
@@ -18,7 +19,7 @@
  * fdps_load_data_tables has already unpacked out of the VFS container into the
  * heap, so a staged byte buffer is exactly the shape the global holds at run
  * time.  Nothing here asserts what the real tables contain -- every byte read
- * back is one this file wrote -- and all three globals are put back to null on
+ * back is one this file wrote -- and all four globals are put back to null on
  * the way out, since ticket 23 has yet to define them and a later unit must not
  * find a stale address in any of them.
  */
@@ -622,6 +623,255 @@ static void a_portrait_id_maps_to_its_record_by_subtracting_sixty(void)
     CHECK_EQ(enemy_offset(0x96 - 0x3c), (ENEMY_COUNT - 1) * ENEMY_STRIDE);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_get_item_record @ 00018b40
+ *
+ * The fourth accessor of the same one-block shape, and its expected values
+ * come from its own assembly: IMUL EAX,dword ptr [EBP+0x14],0x17 / MOV
+ * EDX,dword ptr [0x00063fe0] / ADD EDX,EAX, with nothing else in the body.
+ * The stride is 0x17, the base is a fourth global, and there is no test of any
+ * kind.  The record layout is ticket 17's struct fdps_item_effect in
+ * src/fdpstype.h, and the 251 records are ITEM.DAT's 5,773 bytes divided by
+ * that stride (resource_info/data_tables.md).
+ * ------------------------------------------------------------------ */
+
+/* What the IMUL multiplies by, the records the 5,773-byte file holds, and the
+   file's own length.  ids 0x00-0xFA exist, of which 0x00-0xE1 carry content
+   and 0xE2-0xFA are blank records (assets/items.md). */
+#define ITEM_STRIDE 0x17
+#define ITEM_COUNT 251
+#define ITEM_FILE_BYTES 5773
+
+/* The id an equipment or bag slot can hold is one byte, so the ids the game
+   can reach run to 0xFF -- past the end of the table, which is the point of
+   the FF case below.  The image covers every one of them plus a record of
+   lead-in for the negative id, so each case lands on real storage. */
+static unsigned char item_image[ITEM_STRIDE + 0x100 * ITEM_STRIDE];
+
+static unsigned char *item_base = item_image + ITEM_STRIDE;
+
+static void install_item_base(unsigned char *base)
+{
+    data_fdps_item_effect_table_ptr = base;
+}
+
+static long item_offset(int item_id)
+{
+    unsigned char *record;
+
+    record = (unsigned char *) fdps_get_item_record(item_id);
+    return (long) (record - item_base);
+}
+
+/* A distinct byte per field so a field picked up one offset out reads a value
+   belonging to some other field.  ap and dp get all-ones patterns, which is
+   what separates the signed words the layout declares from unsigned ones, and
+   price gets one too, which separates the unsigned word it declares from a
+   signed one. */
+static void stage_item_record(int item_id)
+{
+    unsigned char *record;
+
+    record = item_base + item_id * ITEM_STRIDE;
+    record[0x00] = 0x03;  /* type */
+    record[0x01] = 0x64;  /* ap low  -- 100 */
+    record[0x02] = 0x00;  /* ap high */
+    record[0x03] = 0x0a;  /* hit low  -- 10 */
+    record[0x04] = 0x00;  /* hit high */
+    record[0x05] = 0xce;  /* dp low  -- 0xffce, i.e. -50 signed */
+    record[0x06] = 0xff;  /* dp high */
+    record[0x07] = 0x2c;  /* ev low  -- 0x012c, i.e. 300 */
+    record[0x08] = 0x01;  /* ev high */
+    record[0x09] = 0x11;  /* hit_effect */
+    record[0x0a] = 0x22;  /* hit_effect_rate */
+    record[0x0b] = 0x01;  /* range_min */
+    record[0x0c] = 0x02;  /* range_max */
+    record[0x0d] = 0x33;  /* use_effect */
+    record[0x0e] = 0xd4;  /* use_amount low  -- 0xffd4, i.e. -44 signed */
+    record[0x0f] = 0xff;  /* use_amount high */
+    record[0x10] = 0x44;  /* use_distance */
+    record[0x11] = 0x55;  /* use_target */
+    record[0x12] = 0x66;  /* use_radius */
+    record[0x13] = 0xff;  /* price low  -- 0xffff, i.e. 65535 unsigned */
+    record[0x14] = 0xff;  /* price high */
+    record[0x15] = 0x77;  /* select_mode */
+    record[0x16] = 0x00;  /* the byte that is zero in every real record */
+}
+
+/* The ADD has no constant term, so record 0 is the table base itself -- the
+   file has no header to step over. */
+static void item_record_zero_is_the_table_base(void)
+{
+    install_item_base(item_base);
+    CHECK_EQ(item_offset(0), 0);
+}
+
+/* The 0x17 the IMUL states.  An accessor that took sizeof(struct
+   fdps_item_effect) with the pack pragma lost would land at 24 here, and one
+   that reached for a neighbouring table's stride at 0x18, 0xb or 0xa. */
+static void consecutive_item_records_are_twenty_three_bytes_apart(void)
+{
+    install_item_base(item_base);
+    CHECK_EQ(item_offset(1), ITEM_STRIDE);
+    CHECK_EQ(item_offset(2) - item_offset(1), ITEM_STRIDE);
+    CHECK_EQ(item_offset(100), 100 * ITEM_STRIDE);
+}
+
+/* 0xE1 is the last id that carries content and 0xFA the last the file has
+   storage for; the byte after that record is the file's 5,773rd
+   (resource_info/data_tables.md). */
+static void the_last_real_item_record_is_at_the_end_of_the_table(void)
+{
+    install_item_base(item_base);
+    CHECK_EQ(item_offset(0xe1), 0xe1 * ITEM_STRIDE);
+    CHECK_EQ(item_offset(ITEM_COUNT - 1), (ITEM_COUNT - 1) * ITEM_STRIDE);
+    CHECK_EQ(item_offset(ITEM_COUNT - 1) + ITEM_STRIDE, ITEM_FILE_BYTES);
+}
+
+/* There is no CMP in the body, so an id past the end is multiplied and added
+   like any other.  Item id 0xFF is the case the game actually reaches: its
+   record starts 92 bytes beyond the end of the table, which is why the guide's
+   "FF BUG item" reads a different price and effect every time.  A bound added
+   here would replace that with a fixed record and change observable play
+   (rebuild_info/pitfalls.md). */
+static void an_item_id_past_the_end_is_not_clamped(void)
+{
+    install_item_base(item_base);
+    CHECK_EQ(item_offset(ITEM_COUNT), ITEM_COUNT * ITEM_STRIDE);
+    CHECK_EQ(item_offset(0xff), 0xff * ITEM_STRIDE);
+    CHECK_EQ(item_offset(0xff) - ITEM_FILE_BYTES, 92);
+}
+
+/* IMUL is the signed multiply, so a negative id steps backwards off the front
+   of the table rather than becoming a vast positive offset.  A test that saw
+   an unsigned stride would read 0xffffffe9 here. */
+static void a_negative_item_id_steps_backwards(void)
+{
+    install_item_base(item_base);
+    CHECK_EQ(item_offset(-1), -ITEM_STRIDE);
+}
+
+/* MOV EDX,dword ptr [0x00063fe0] is inside the body: the base is re-read on
+   every call, so moving the global moves every answer.  A transcription that
+   cached it in a file-scope copy passes everything above and fails here. */
+static void the_item_table_base_is_read_on_every_call(void)
+{
+    install_item_base(item_base);
+    CHECK_EQ(item_offset(3), 3 * ITEM_STRIDE);
+    install_item_base(item_base + ITEM_STRIDE);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_item_record(3) - item_base),
+             4 * ITEM_STRIDE);
+    install_item_base(item_base);
+}
+
+/* Nothing tests the base, so a null table -- the state before
+   fdps_load_data_tables has run -- yields the offset alone as though it were
+   an address.  A null guard returning NULL would be a silent behaviour
+   change. */
+static void a_null_item_table_base_is_not_guarded(void)
+{
+    install_item_base((unsigned char *) 0);
+    CHECK_EQ((long) (unsigned long) fdps_get_item_record(2), 2 * ITEM_STRIDE);
+    install_item_base(item_base);
+}
+
+/* Four accessors, four globals, at 0x00063fd4, 0x00063fd8, 0x00063fe0 and
+   0x00063fec.  They are neighbours in bss and one loader call fills each, so
+   an accessor naming the wrong one is invisible to any case that installs a
+   single base: here each global gets its own and each accessor must follow its
+   own (contract B -- the nine table pointers are nine globals, not an
+   array). */
+static void the_item_accessor_reads_its_own_global(void)
+{
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    install_item_base(item_base);
+    CHECK_EQ(item_offset(1), ITEM_STRIDE);
+
+    install_base(table_base + RECORD_STRIDE);
+    install_growth_base(growth_base + GROWTH_STRIDE);
+    install_enemy_base(enemy_base + ENEMY_STRIDE);
+    CHECK_EQ(item_offset(1), ITEM_STRIDE);
+
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    install_item_base(item_base + ITEM_STRIDE);
+    CHECK_EQ(record_offset(1), RECORD_STRIDE);
+    CHECK_EQ(growth_offset(1), GROWTH_STRIDE);
+    CHECK_EQ(enemy_offset(1), ENEMY_STRIDE);
+
+    install_item_base(item_base);
+}
+
+/* The returned pointer addresses the file's own field offsets: every field of
+   the staged record reads back the byte written at that offset, so base and
+   stride are checked together against the packed layout.  The four stat words
+   push the eleven fields behind them onto odd offsets that a padded struct
+   would move, which is exactly the divergence the literal stride guards
+   against. */
+static void the_returned_item_pointer_addresses_the_packed_record(void)
+{
+    struct fdps_item_effect *record;
+
+    install_item_base(item_base);
+    stage_item_record(11);
+    record = fdps_get_item_record(11);
+    CHECK_EQ(record->type, 0x03);
+    CHECK_EQ(record->hit_effect, 0x11);
+    CHECK_EQ(record->hit_effect_rate, 0x22);
+    CHECK_EQ(record->range_min, 0x01);
+    CHECK_EQ(record->range_max, 0x02);
+    CHECK_EQ(record->use_effect, 0x33);
+    CHECK_EQ(record->use_distance, 0x44);
+    CHECK_EQ(record->use_target, 0x55);
+    CHECK_EQ(record->use_radius, 0x66);
+    CHECK_EQ(record->select_mode, 0x77);
+}
+
+/* The five 16-bit fields, four of them at odd offsets.  The layout declares
+   ap, hit, dp, ev and use_amount signed and price unsigned, so the all-ones
+   pattern is -1 in use_amount and 65535 in price.  Signedness is the branch a
+   caller takes the moment it compares the value -- the stat words are added to
+   a unit's totals and the price to the party's gold -- so it is pinned here
+   rather than left to the first caller to discover (contract C). */
+static void the_item_stat_words_are_signed_and_the_price_is_not(void)
+{
+    struct fdps_item_effect *record;
+
+    install_item_base(item_base);
+    stage_item_record(11);
+    record = fdps_get_item_record(11);
+    CHECK_EQ(record->ap, 100);
+    CHECK_EQ(record->hit, 10);
+    CHECK_EQ(record->dp, -50);
+    CHECK_EQ(record->ev, 300);
+    CHECK_EQ(record->use_amount, -44);
+    CHECK_EQ(record->price, 65535);
+}
+
+/* The three offsets the callers read straight after the call: byte +0x00 to
+   classify the item -- 00026026 MOV AL,byte ptr [EDX] in
+   fdps_unit_can_equip_item, right after ADD ESP,0x4 -- byte +0x0d to dispatch
+   a use effect, and the word at +0x13 for the shop price.  Asserted as raw
+   bytes through the returned pointer as well as through the struct above, so
+   the offsets are pinned to the file's layout and not merely to the field
+   order this test happens to declare. */
+static void the_offsets_the_callers_read_are_zero_thirteen_and_nineteen(void)
+{
+    unsigned char *record;
+
+    install_item_base(item_base);
+    stage_item_record(9);
+    record = (unsigned char *) fdps_get_item_record(9);
+    CHECK_EQ(record[0x00], 0x03);
+    CHECK_EQ(record[0x0d], 0x33);
+    CHECK_EQ(record[0x13], 0xff);
+    CHECK_EQ(record[0x14], 0xff);
+    CHECK_EQ((long) (record - item_base), 9 * ITEM_STRIDE);
+}
+
 void run_table_tests(void)
 {
     RUN_TEST(record_zero_is_the_table_base);
@@ -658,6 +908,18 @@ void run_table_tests(void)
     RUN_TEST(the_offset_the_reward_reads_is_nine);
     RUN_TEST(a_portrait_id_maps_to_its_record_by_subtracting_sixty);
 
+    RUN_TEST(item_record_zero_is_the_table_base);
+    RUN_TEST(consecutive_item_records_are_twenty_three_bytes_apart);
+    RUN_TEST(the_last_real_item_record_is_at_the_end_of_the_table);
+    RUN_TEST(an_item_id_past_the_end_is_not_clamped);
+    RUN_TEST(a_negative_item_id_steps_backwards);
+    RUN_TEST(the_item_table_base_is_read_on_every_call);
+    RUN_TEST(a_null_item_table_base_is_not_guarded);
+    RUN_TEST(the_item_accessor_reads_its_own_global);
+    RUN_TEST(the_returned_item_pointer_addresses_the_packed_record);
+    RUN_TEST(the_item_stat_words_are_signed_and_the_price_is_not);
+    RUN_TEST(the_offsets_the_callers_read_are_zero_thirteen_and_nineteen);
+
     /* Put the globals back the way they were found.  They are null until
        ticket 23 defines them, and leaving a pointer to this file's static
        buffers in one would hand the next unit an address it has no business
@@ -665,4 +927,5 @@ void run_table_tests(void)
     install_base((unsigned char *) 0);
     install_growth_base((unsigned char *) 0);
     install_enemy_base((unsigned char *) 0);
+    install_item_base((unsigned char *) 0);
 }

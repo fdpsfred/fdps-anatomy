@@ -287,5 +287,31 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00018b40": [
+    {
+      "from": "emit",
+      "what": "Item id 0xFF reads a record that begins 92 bytes past the end of ITEM.DAT, inside whatever the heap holds after the table block. The function's arithmetic is equivalent by construction, but what the player actually sees for the \"FF BUG item\" depends on the allocator's layout after fdps_load_data_tables, and the rebuild does not place the nine table blocks the way the original did.",
+      "needs": "Once fdps_load_data_tables and fdps_vfs_load_file_or_exit are emitted, compare the allocation order and block sizes against the original; then a run in DOSBox-X with the FF item in a bag says whether the observed behaviour is in the same family. It cannot be settled by a unit test.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "Whether item_id can reach this function as anything other than a zero-extended byte, and so whether the negative and far-past-the-end paths are live in play. 5 of the 25 callers have been read. Two call sites in fdps_unit_equip_slot do zero-extend a byte (000260b9 XOR EAX,EAX / 000260bb MOV AL,[EDX+0xb], and 0002611b MOV AL,[EAX+0x1] / 0002611e AND EAX,0xff), but fdps_unit_can_equip_item does not narrow the value at all -- at 00026012 it pushes its own second parameter unmasked -- so the range question moves up to that caller's own callers. 20 callers remain unread. Round 1 stated the universal 'every one of the twenty-five zero-extends' as settled fact in the source comment on the strength of a misread instruction; that claim is withdrawn and the honest gap is here instead.",
+      "needs": "Each caller states where its item id comes from as it is emitted -- the equipment, shop and AI item paths. The one concrete pass-through found here is settled by whoever emits fdps_unit_can_equip_item's callers.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Whether item_id can arrive as anything other than a zero-extended byte, and so whether the negative and far-past-the-end arms of the arithmetic are live in play. 5 of 25 callers have been read; fdps_unit_can_equip_item pushes its own second parameter unmasked, which moves the range question up to its callers.",
+      "needs": "Each caller states where its item id comes from as it is emitted -- the equipment, shop, inventory and AI item paths. The concrete pass-through is settled by whoever emits fdps_unit_can_equip_item's own callers. Carried forward from the emitter's verdict; I agree it is the honest gap and not a name to invent.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "What item id 0xFF actually reads. Its record begins 92 bytes past the end of the 5,773-byte ITEM.DAT block, so the guide's 'FF BUG item' values depend on what the allocator leaves after that block, and the rebuild does not place the nine table blocks where the original did. The arithmetic is equivalent by construction; the observed values need not be.",
+      "needs": "Once fdps_load_data_tables and fdps_vfs_load_file_or_exit are emitted, compare allocation order and block sizes against the original, then confirm in DOSBox-X with the FF item in a bag. Not settleable by a unit test.",
+      "status": "open"
+    }
   ]
 }

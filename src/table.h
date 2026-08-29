@@ -87,4 +87,28 @@ extern struct fdps_character_growth *fdps_get_growth_record(int char_id);
 extern struct fdps_enemy_data *fdps_get_enemy_record(int enemy_index);
 #pragma aux fdps_get_enemy_record "*" parm caller [];
 
+/* Returns a pointer to record item_id of the ITEM.DAT item table: the type
+   code that says whether the entry is a weapon, a piece of armour, a
+   consumable or a promotion badge, the four signed equipment stat modifiers
+   ap/hit/dp/ev, the weapon hit effect and its rate, the attack reach, the use
+   effect with its amount, distance, target mode and radius, the shop price and
+   the selection mode, in the 23 bytes of struct fdps_item_effect.
+
+   item_id is the item number, the same byte an equipment or bag slot of a unit
+   record carries and the same number the shop and sell lists hold.  The table
+   has 251 records, ids 0x00-0xFA, of which 0x00-0xE1 carry content and the
+   remainder are blank (assets/items.md).  Nothing is checked -- no bound at
+   either end, and the multiply is signed -- and the base is not tested for
+   null either.  The absence of the bound is behaviour and not an oversight:
+   item id 0xFF occurs in play, its record lies past the end of the table, and
+   the varying values read there are the guide's "FF BUG item".
+
+   Callers read byte +0x00 to classify the item, the four stat words to move a
+   unit's combat totals, byte +0x0d to dispatch a use effect and the word at
+   +0x13 for the shop price.
+
+   Reads only the table base global, calls nothing, and dereferences nothing. */
+extern struct fdps_item_effect *fdps_get_item_record(int item_id);
+#pragma aux fdps_get_item_record "*" parm caller [];
+
 #endif
