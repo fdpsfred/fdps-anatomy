@@ -18,6 +18,14 @@
       "emitted_against": "0x12b",
       "rounds": 1,
       "note": "Run was killed mid-flight; the emitted code was discarded and the address goes back on the worklist untouched."
+    },
+    "00010b20": {
+      "name": "fdps_map_grid_reset",
+      "target": "movegrid.c",
+      "body_size": "0x6e",
+      "status": "committed",
+      "emitted_against": "0x6e",
+      "rounds": 0
     }
   }
 }

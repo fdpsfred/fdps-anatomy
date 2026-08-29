@@ -21,4 +21,11 @@ extern int data_fdps_map_unit_count;
    base as a byte pointer and scales the index itself, so a reader casts. */
 extern unsigned char *data_fdps_map_unit_array_ptr;
 
+/* 00060144.  Base of the battle map's working movement grid: a four-byte
+   header of two signed 16-bit dimensions followed by width*height two-byte
+   cells (see src/movegrid.h).  Null until a chapter has been loaded, and the
+   readers all test it before use.  The original types it as a byte pointer and
+   does the header and cell arithmetic itself, so a reader casts. */
+extern unsigned char *data_fdps_battle_move_grid_ptr;
+
 #endif
