@@ -10,9 +10,12 @@
 #include "movegrid.h"
 
 /* 00010b20.  CMP dword ptr [0x00060144],0 / JZ to the epilogue: an unallocated
-   grid is not an error here, it is a silent return, and the callers rely on
-   that -- fdps_battle_action_menu and fdps_deploy_unit call this before any
-   chapter has been loaded.
+   grid is not an error here, it is a silent return.  Which of the fourteen
+   callers can actually reach it with a null grid is not established -- all
+   fourteen are battle-time routines that normally run after
+   fdps_field_load_chapter_resources has allocated it -- so the check is
+   reproduced because the original has it, not because a caller is known to
+   depend on it.
 
    The two dimensions are read with MOVSX from 16-bit header words, and the
    loop test is CMP EAX,[EBP-8] / JG, the signed compare.  Both halves of that

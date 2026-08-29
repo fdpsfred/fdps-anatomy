@@ -193,4 +193,10 @@ void run_movegrid_tests(void)
     RUN_TEST(grid_bound_follows_the_header);
     RUN_TEST(grid_zero_dimension_touches_nothing);
     RUN_TEST(grid_header_words_are_signed);
+
+    /* Put the global back before leaving.  stage() points it at this file's
+       own stage_grid, and the runners share one process: a later unit that
+       expects an unallocated grid would inherit a live pointer into another
+       translation unit's fixture and pass or fail for the wrong reason. */
+    data_fdps_battle_move_grid_ptr = NULL;
 }
