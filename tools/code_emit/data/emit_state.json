@@ -335,6 +335,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x67b"
+    },
+    "00013e10": {
+      "name": "fdps_map_find_chest_cell",
+      "target": "mapai.c",
+      "body_size": "0xb6",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0xb6"
     }
   }
 }
