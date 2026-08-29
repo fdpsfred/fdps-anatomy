@@ -218,6 +218,14 @@
       "status": "committed",
       "emitted_against": "0x110",
       "rounds": 0
+    },
+    "00022f40": {
+      "name": "fdps_set_palette_range",
+      "target": "palette.c",
+      "body_size": "0x107",
+      "status": "committed",
+      "emitted_against": "0x107",
+      "rounds": 0
     }
   }
 }

@@ -4634,7 +4634,7 @@ Pool: fdps  [no Function ID hit in any library; called only by game translation 
 Evidence: fid.watcom and fid.ail are both empty with zero candidates and full_hash fa4bb1c113ff7a36 is unique in the image, so no byte match claims it for crt or ail. All 16 callers are game code, including fdps_title_screen, fdps_play_movie and fdps_run_village_phase; its sole callee is the CRT port helper outp at 00042cb8, which is the normal game-calls-library direction. The behaviour is a VGA DAC fade/tint primitive belonging to the graphics layer, touches no Miles AIL driver state, and is far too large and structured to be a linker island or convention shim.
 Name: game function, fdps_ + snake_case per naming.md; no vendor symbol involved and no hash collision to inherit a wrong name from.
 Boundary: 00022f40-00023046, canonical Watcom prologue (push ebx/esi/edi/ebp; mov ebp,esp; sub esp,8) through the matching epilogue and RET, with every branch target inside the range; the 9 bytes that follow are LEA-form alignment padding before the next function at 00023050.
-Signature: __cdecl, void fdps_set_palette_range(uchar *rgb, int start, int end, int r_bias, int g_bias, int b_bias) -- six stack arguments read at [EBP+0x14] through [EBP+0x28], no register arguments live at entry, and a plain RET with no purge so the caller cleans up.
+Signature: __cdecl, void fdps_set_palette_range(struct fdps_palette_entry *rgb, int start, int end, int r_bias, int g_bias, int b_bias) -- six stack arguments read at [EBP+0x14] through [EBP+0x28], no register arguments live at entry, and a plain RET with no purge so the caller cleans up.
 
 === 00023047 [EOL]
 Watcom alignment padding: 6-byte and 3-byte LEA NOP forms filling to the 16-byte boundary at 00023050.

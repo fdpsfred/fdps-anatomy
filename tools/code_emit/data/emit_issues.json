@@ -435,5 +435,19 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00022f40": [
+    {
+      "from": "emit",
+      "what": "Contract D for this loop: whether a fade's on-screen pace depends on anything beyond the four port writes per entry. The emitted loop issues the same four outp calls per entry in the same order, but the surrounding instruction count is not byte-matched, and on real hardware a DAC upload of 256 entries is close to the retrace budget the fade scripts run inside.",
+      "needs": "A playtest of a fade (fdps_icon_script_fade_to_black / fdps_icon_script_fade_in, both callers) on real hardware or at the project's DOSBox-X cycle setting, watching for tearing or a visibly different fade duration. Nothing a unit test can reach.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Contract D for this loop, carried forward from the emitter rather than closed: whether a fade's on-screen pace depends on anything beyond the four port writes per DAC entry. The emitted loop issues the same four outp calls per entry in the same order, but the surrounding instruction count is not byte-matched, and a 256-entry upload sits close to the retrace budget the fade scripts run inside.",
+      "needs": "A playtest of fdps_icon_script_fade_to_black (00022410) and fdps_icon_script_fade_in (00022480) at the project's DOSBox-X cycle setting, watching for tearing or a visibly different fade duration. No unit test can reach it.",
+      "status": "open"
+    }
   ]
 }
