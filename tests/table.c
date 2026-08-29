@@ -1,23 +1,25 @@
 /* tests/table.c -- cover for src/table.c.
  *
- * Expected values come from the assembly at 00018ab0 -- PUSH EBX/ESI/EDI/EBP,
- * MOV EBP,ESP, SUB ESP,0x4, then IMUL EAX,dword ptr [EBP+0x14],0x18 / MOV
- * EDX,dword ptr [0x00063fd8] / ADD EDX,EAX and nothing else -- and from ticket
- * 17's layout of struct fdps_character_base_record in src/fdpstype.h.  None of
- * them is read off the emitted C.
+ * Expected values come from the assembly of the two accessors -- 00018ab0 over
+ * FRIAPRDA.DAT and 00018ae0 over FRILEVUP.DAT -- and from ticket 17's layouts
+ * of struct fdps_character_base_record and struct fdps_character_growth in
+ * src/fdpstype.h.  None of them is read off the emitted C.
  *
- * The three facts that assembly states, and that everything below is aimed at:
- * the stride is 0x18, the base is the table pointer global read fresh on every
- * call, and there is no test of any kind in the body -- no bound on char_id, no
- * null check on the base.
+ * Both bodies are PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x4, then IMUL
+ * EAX,dword ptr [EBP+0x14],<stride> / MOV EDX,dword ptr [<table base global>]
+ * / ADD EDX,EAX and nothing else, so the three facts everything below is aimed
+ * at are the same for each: the stride is the file's own (0x18 and 0x0b), the
+ * base is that accessor's own pointer global read fresh on every call, and
+ * there is no test of any kind in the body -- no bound on char_id, no null
+ * check on the base.
  *
- * FRIAPRDA.DAT is not a loose file: it reaches this table only as a block
+ * Neither .DAT is a loose file: each reaches its table only as a block
  * fdps_load_data_tables has already unpacked out of the VFS container into the
  * heap, so a staged byte buffer is exactly the shape the global holds at run
- * time.  Nothing here asserts what the real table contains -- every byte read
- * back is one this file wrote -- and the global is put back to null on the way
- * out, since ticket 23 has yet to define it and a later unit must not find a
- * stale address in it.
+ * time.  Nothing here asserts what the real tables contain -- every byte read
+ * back is one this file wrote -- and both globals are put back to null on the
+ * way out, since ticket 23 has yet to define them and a later unit must not
+ * find a stale address in either.
  */
 #include <stddef.h>
 #include "testharn.h"
@@ -208,6 +210,196 @@ static void the_sixteen_bit_stats_are_signed_and_unaligned(void)
     CHECK_EQ(record->dx_base, 300);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_get_growth_record @ 00018ae0
+ *
+ * The same one-block shape over the other table, and the expected values come
+ * from its own assembly: IMUL EAX,dword ptr [EBP+0x14],0xb / MOV EDX,dword
+ * ptr [0x00063fec] / ADD EDX,EAX, with nothing else in the body.  The stride
+ * is 0x0b, the base is a different global from the one above, and there is no
+ * test of any kind.  The record layout is ticket 17's struct
+ * fdps_character_growth in src/fdpstype.h.
+ * ------------------------------------------------------------------ */
+
+/* What the IMUL multiplies by, and the 60 records FRILEVUP.DAT holds -- the
+   same 60 portrait ids the base table above is indexed by. */
+#define GROWTH_STRIDE 0x0b
+#define GROWTH_COUNT 60
+
+/* A record's worth of lead-in and one spare record at the end, for the
+   negative id and the past-the-end id respectively. */
+static unsigned char growth_image[GROWTH_STRIDE + (GROWTH_COUNT + 1) * GROWTH_STRIDE];
+
+static unsigned char *growth_base = growth_image + GROWTH_STRIDE;
+
+static void install_growth_base(unsigned char *base)
+{
+    data_fdps_battle_character_growth_table_ptr = base;
+}
+
+static long growth_offset(int char_id)
+{
+    unsigned char *record;
+
+    record = (unsigned char *) fdps_get_growth_record(char_id);
+    return (long) (record - growth_base);
+}
+
+/* A distinct byte per field, so a field picked up one offset out reads a
+   value belonging to some other field.  spell_learning_idx gets 0xff, the
+   sentinel the file uses for a form that learns no spells, which also pins
+   that the field is read unsigned rather than as a signed -1. */
+static void stage_growth_record(int char_id)
+{
+    unsigned char *record;
+
+    record = growth_base + char_id * GROWTH_STRIDE;
+    record[0x00] = 0x01;  /* ap_min */
+    record[0x01] = 0x02;  /* ap_max */
+    record[0x02] = 0x03;  /* dp_min */
+    record[0x03] = 0x04;  /* dp_max */
+    record[0x04] = 0x05;  /* dx_min */
+    record[0x05] = 0x06;  /* dx_max */
+    record[0x06] = 0x07;  /* hp_min */
+    record[0x07] = 0x08;  /* hp_max */
+    record[0x08] = 0x09;  /* mp_min */
+    record[0x09] = 0x0a;  /* mp_max */
+    record[0x0a] = 0xff;  /* spell_learning_idx, the "learns nothing" value */
+}
+
+/* The ADD has no constant term, so record 0 is the table base itself. */
+static void growth_record_zero_is_the_table_base(void)
+{
+    install_growth_base(growth_base);
+    CHECK_EQ(growth_offset(0), 0);
+}
+
+/* The 0xb the IMUL states.  An accessor that took the stride from the base
+   table next door would land at 0x18 here. */
+static void consecutive_growth_records_are_eleven_bytes_apart(void)
+{
+    install_growth_base(growth_base);
+    CHECK_EQ(growth_offset(1), GROWTH_STRIDE);
+    CHECK_EQ(growth_offset(2) - growth_offset(1), GROWTH_STRIDE);
+    CHECK_EQ(growth_offset(35), 35 * GROWTH_STRIDE);
+}
+
+/* The promoted forms run to id 0x23, and 59 is the last id the 60-record file
+   has storage for. */
+static void the_last_real_growth_record_is_at_the_end_of_the_table(void)
+{
+    install_growth_base(growth_base);
+    CHECK_EQ(growth_offset(0x23), 0x23 * GROWTH_STRIDE);
+    CHECK_EQ(growth_offset(GROWTH_COUNT - 1), (GROWTH_COUNT - 1) * GROWTH_STRIDE);
+}
+
+/* There is no CMP in the body, so an id past the end is multiplied and added
+   like any other.  Adding a bound here would change what every caller reads
+   for an out-of-range id. */
+static void a_growth_id_past_the_end_is_not_clamped(void)
+{
+    install_growth_base(growth_base);
+    CHECK_EQ(growth_offset(GROWTH_COUNT), GROWTH_COUNT * GROWTH_STRIDE);
+}
+
+/* IMUL is the signed multiply: a negative id steps backwards off the front of
+   the table.  An unsigned stride would read 0xfffffff5 instead. */
+static void a_negative_growth_id_steps_backwards(void)
+{
+    install_growth_base(growth_base);
+    CHECK_EQ(growth_offset(-1), -GROWTH_STRIDE);
+}
+
+/* MOV EDX,dword ptr [0x00063fec] is inside the body: the base is re-read on
+   every call, so moving the global moves every answer.  A transcription that
+   cached it in a file-scope copy passes everything above and fails here. */
+static void the_growth_table_base_is_read_on_every_call(void)
+{
+    install_growth_base(growth_base);
+    CHECK_EQ(growth_offset(3), 3 * GROWTH_STRIDE);
+    install_growth_base(growth_base + GROWTH_STRIDE);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_growth_record(3) - growth_base),
+             4 * GROWTH_STRIDE);
+    install_growth_base(growth_base);
+}
+
+/* Nothing tests the base, so a null table -- the state before
+   fdps_load_data_tables has run -- yields the offset alone as though it were
+   an address.  A "helpful" null guard returning NULL would be a silent
+   behaviour change. */
+static void a_null_growth_table_base_is_not_guarded(void)
+{
+    install_growth_base((unsigned char *) 0);
+    CHECK_EQ((long) (unsigned long) fdps_get_growth_record(2),
+             2 * GROWTH_STRIDE);
+    install_growth_base(growth_base);
+}
+
+/* The two accessors read two different globals, at 0x00063fd8 and 0x00063fec.
+   They are neighbours in bss and one loader call fills each, so an accessor
+   naming the wrong one is not caught by any case that installs a single base:
+   here each global gets its own base and each accessor must follow its own
+   (contract B -- the nine table pointers are nine globals, not an array). */
+static void the_two_accessors_read_two_different_globals(void)
+{
+    install_base(table_base);
+    install_growth_base(growth_base);
+    CHECK_EQ(growth_offset(1), GROWTH_STRIDE);
+    CHECK_EQ(record_offset(1), RECORD_STRIDE);
+
+    install_growth_base(growth_base + GROWTH_STRIDE);
+    CHECK_EQ(record_offset(1), RECORD_STRIDE);
+
+    install_growth_base(growth_base);
+    install_base(table_base + RECORD_STRIDE);
+    CHECK_EQ(growth_offset(1), GROWTH_STRIDE);
+
+    install_base(table_base);
+}
+
+/* The returned pointer addresses the file's own field offsets: all eleven
+   fields of the staged record read back the byte written at that offset, so
+   the base and the stride are checked together against the packed layout.  A
+   record pointer right to within a byte still reads the neighbouring field
+   here, and a struct that lost the pack pragma would find hp_min somewhere
+   other than +0x06. */
+static void the_returned_growth_pointer_addresses_the_packed_record(void)
+{
+    struct fdps_character_growth *record;
+
+    install_growth_base(growth_base);
+    stage_growth_record(7);
+    record = fdps_get_growth_record(7);
+    CHECK_EQ(record->ap_min, 0x01);
+    CHECK_EQ(record->ap_max, 0x02);
+    CHECK_EQ(record->dp_min, 0x03);
+    CHECK_EQ(record->dp_max, 0x04);
+    CHECK_EQ(record->dx_min, 0x05);
+    CHECK_EQ(record->dx_max, 0x06);
+    CHECK_EQ(record->hp_min, 0x07);
+    CHECK_EQ(record->hp_max, 0x08);
+    CHECK_EQ(record->mp_min, 0x09);
+    CHECK_EQ(record->mp_max, 0x0a);
+    CHECK_EQ(record->spell_learning_idx, 0xff);
+}
+
+/* The two fields fdps_roster_add_character reads out of this record are at
+   +0x06 and +0x08, which its assembly states outright.  Asserted as raw bytes
+   through the returned pointer as well as through the struct above, so the
+   offsets are pinned to the file's layout and not merely to the field order
+   this test happens to declare. */
+static void the_offsets_the_roster_reads_are_six_and_eight(void)
+{
+    unsigned char *record;
+
+    install_growth_base(growth_base);
+    stage_growth_record(9);
+    record = (unsigned char *) fdps_get_growth_record(9);
+    CHECK_EQ(record[0x06], 0x07);
+    CHECK_EQ(record[0x08], 0x09);
+    CHECK_EQ((long) (record - growth_base), 9 * GROWTH_STRIDE);
+}
+
 void run_table_tests(void)
 {
     RUN_TEST(record_zero_is_the_table_base);
@@ -220,8 +412,20 @@ void run_table_tests(void)
     RUN_TEST(the_returned_pointer_addresses_the_packed_record);
     RUN_TEST(the_sixteen_bit_stats_are_signed_and_unaligned);
 
+    RUN_TEST(growth_record_zero_is_the_table_base);
+    RUN_TEST(consecutive_growth_records_are_eleven_bytes_apart);
+    RUN_TEST(the_last_real_growth_record_is_at_the_end_of_the_table);
+    RUN_TEST(a_growth_id_past_the_end_is_not_clamped);
+    RUN_TEST(a_negative_growth_id_steps_backwards);
+    RUN_TEST(the_growth_table_base_is_read_on_every_call);
+    RUN_TEST(a_null_growth_table_base_is_not_guarded);
+    RUN_TEST(the_two_accessors_read_two_different_globals);
+    RUN_TEST(the_returned_growth_pointer_addresses_the_packed_record);
+    RUN_TEST(the_offsets_the_roster_reads_are_six_and_eight);
+
     /* Put the global back the way it was found.  It is null until ticket 23
        defines it, and leaving a pointer to this file's static buffer in it
        would hand the next unit an address it has no business holding. */
     install_base((unsigned char *) 0);
+    install_growth_base((unsigned char *) 0);
 }

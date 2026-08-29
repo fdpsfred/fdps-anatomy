@@ -39,3 +39,34 @@ struct fdps_character_base_record *fdps_get_character_base_record(int char_id)
          + char_id * CHARACTER_BASE_RECORD_STRIDE);
     return record;
 }
+
+/* The stride of one FRILEVUP.DAT record, as the original writes it: IMUL
+   EAX,dword ptr [EBP+0x14],0xb.  A literal and not sizeof(struct
+   fdps_character_growth) for the same reason as the base table above -- the
+   file's stride is the fact that has to survive, and the struct agrees with it
+   only while it stays byte-packed (rebuild_info/pitfalls.md). */
+#define CHARACTER_GROWTH_RECORD_STRIDE 0x0b
+
+/* 00018ae0.  The same one-basic-block shape as the accessor above, over the
+   other table: IMUL EAX,dword ptr [EBP+0x14],0xb / MOV EDX,dword ptr
+   [0x00063fec] / ADD EDX,EAX, spilled to a stack local and reloaded into EAX
+   to be returned.  No compare, no branch, no CALL.
+
+   IMUL again, so a negative char_id walks backwards off the front of the table
+   instead of wrapping; int is the width the parameter is read at, and all four
+   callers push a value that fits it -- fdps_unit_award_exp_and_level_up loads
+   unit record byte 0x07 and masks it with AND EAX,0xff before the PUSH, so
+   what arrives is 0..255.
+
+   The base is read out of the global on every call, uncached and untested, so
+   a call before fdps_load_data_tables has filled it returns the offset alone
+   as though it were an address. */
+struct fdps_character_growth *fdps_get_growth_record(int char_id)
+{
+    struct fdps_character_growth *record;
+
+    record = (struct fdps_character_growth *)
+        (data_fdps_battle_character_growth_table_ptr
+         + char_id * CHARACTER_GROWTH_RECORD_STRIDE);
+    return record;
+}

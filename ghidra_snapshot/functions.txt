@@ -73,7 +73,7 @@
 00018930 | 0xe9 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_file_io | void __cdecl fdps_load_data_tables(int arg1)
 00018a20 | 0x8f | __watcall | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_memory | void __watcall fdps_free_global_resource_buffers(void)
 00018ab0 | 0x25 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | fdps_character_base_record * __cdecl fdps_get_character_base_record(int char_id)
-00018ae0 | 0x25 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void * __cdecl fdps_get_growth_record(int char_id)
+00018ae0 | 0x25 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | fdps_character_growth * __cdecl fdps_get_growth_record(int char_id)
 00018b10 | 0x25 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | uchar * __cdecl fdps_get_enemy_record(int enemy_index)
 00018b40 | 0x25 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps,shared_helper | uchar * __cdecl fdps_get_item_record(int item_id)
 00018b70 | 0x25 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,shared_helper,subsys_file_io | uchar * __cdecl fdps_get_class_record(int record_index)
