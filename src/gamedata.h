@@ -28,6 +28,21 @@ extern unsigned char *data_fdps_map_unit_array_ptr;
    does the header and cell arithmetic itself, so a reader casts. */
 extern unsigned char *data_fdps_battle_move_grid_ptr;
 
+/* 00069d64.  The free-running tick counter fdps_timer_tick_handler increments
+   from the timer interrupt, and the game's only clock: 31 files read it, for
+   animation pacing, input repeat and every "once per tick" guard.  Unsigned.
+   The one reader emitted so far, fdps_cycle_ui_palette, latches a copy and
+   tests it for equality rather than for order, so wrapping costs it nothing;
+   whether that holds of the other readers is theirs to state.
+
+   volatile is not decoration here.  The animations spin on this counter
+   waiting for it to move, and nothing inside those loops writes it -- an
+   optimiser is entitled to hoist the load out and the game stops dead at the
+   first wait (rebuild_info/pitfalls.md).  It is qualified at the one
+   declaration rather than at each spinning reader so that no reader has to
+   remember; ticket 23's definition has to carry the same qualifier. */
+extern volatile unsigned int data_fdps_timer_tick_counter;
+
 /* 00069d70.  The player's sound-effect toggle, one of the four option flags
    the options menu writes and a save file carries (the sfx_enabled_flag field
    of struct fdps_save_slot).  Read as a boolean; it says what the player

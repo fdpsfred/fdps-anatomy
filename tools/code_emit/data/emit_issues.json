@@ -183,5 +183,31 @@
       "needs": "A decision from ticket 17's type set on whether the block earns a struct; if it does, the type lands in Ghidra and fdpstype.h and this signature and its callers follow it.",
       "status": "open"
     }
+  ],
+  "00015be0": [
+    {
+      "what": "data_fdps_ui_palette_cycle_phase must be initialised data holding 15, not zero-filled bss. The image has 0f 00 00 00 at 0x60014 and routing.json puts it in the data segment, so the animation starts its window at the top of the cycle; if ticket 23 emits it as an uninitialised global it starts at phase 0 instead and the UI colours begin mid-wave and stay one half-cycle out of step with the original forever after -- there is no code path that ever resets the phase to a known value, so the offset is permanent. Nothing in the build can catch this: a zero-filled stub links and every test here sets the phase itself.",
+      "needs": "Ticket 23's data emit to define it with the initialiser 15. Settled by reading the emitted definition once palcycle.c's data lands.",
+      "from": "emit",
+      "status": "open"
+    },
+    {
+      "what": "data_fdps_timer_tick_counter is declared volatile in gamedata.h while ticket 23 will write the definition. A definition without the qualifier is a mismatch the linker will not mention, and the animations that spin on this counter (not this function -- it reads the counter twice, outside any loop) are the ones that would hang. The qualifier was put at the single shared declaration rather than at each spinning reader on the strength of rebuild_info/pitfalls.md; I measured that it costs this translation unit nothing -- PALCYCLE.OBJ built with and without it is 1002 bytes both ways and differs in exactly 3 bytes, the count and signature build_flags.md records for the source-timestamp COMENT -- but I have not read the spinning readers themselves, only the pitfall that describes them.",
+      "needs": "Ticket 23 to define it volatile as well, and the first emitted animation that spins on the counter to confirm from its assembly that the load really is inside the loop.",
+      "from": "emit",
+      "status": "open"
+    },
+    {
+      "what": "data_fdps_ui_palette_cycle_phase must be defined as initialised data holding 15, not zero-filled bss. I read 00060014 myself: 0f 00 00 00, and routing.json puts it in the data segment. No code path ever resets the phase to a known value, so if ticket 23 emits it uninitialised the UI colour wave starts at phase 0 and stays permanently out of step with the original. Nothing in the build or in this function's tests can catch it -- a zero stub links, and every test here sets the phase itself before calling.",
+      "needs": "Ticket 23's data emit to define it with the initialiser 15; settled by reading the emitted definition once palcycle.c's data lands.",
+      "from": "review",
+      "status": "open"
+    },
+    {
+      "what": "data_fdps_timer_tick_counter is declared volatile in src/gamedata.h on the strength of rebuild_info/pitfalls.md line 68 (the animations spin on it and a hoisted load hangs the game), but ticket 23 will write the definition and gen_stubs.py currently spells the stub without the qualifier. A definition without volatile is a mismatch neither the compiler nor the linker will mention, because the stub module includes no project header. This function is not the one at risk -- it reads the counter twice, outside any loop -- so the qualifier's necessity rests on readers nobody has emitted yet.",
+      "needs": "Ticket 23 to define it volatile as well, and the first emitted animation that spins on the counter to confirm from its own assembly that the load really is inside the loop.",
+      "from": "review",
+      "status": "open"
+    }
   ]
 }
