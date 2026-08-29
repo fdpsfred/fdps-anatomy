@@ -36,4 +36,14 @@
 extern void *fdps_saf_get_frame(void *saf, int frame_index);
 #pragma aux fdps_saf_get_frame "*" parm caller [];
 
+/* Returns the number of frames in the .SAF image based at saf: the u16 item
+   count of section descriptor 0, zero-extended, so 0..65535.  The header's
+   three magic bytes are tested first, but with OR rather than AND, so any one
+   of them matching passes and only an image with all three wrong is refused;
+   a refusal returns 0, which a caller cannot tell from an image that really
+   holds no frames.  Nothing but the passed-in image is read, no global is
+   touched and nothing is called. */
+extern int fdps_saf_frame_count(void *saf);
+#pragma aux fdps_saf_frame_count "*" parm caller [];
+
 #endif

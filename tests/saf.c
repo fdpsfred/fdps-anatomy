@@ -184,6 +184,93 @@ static void count_is_zero_extended_not_sign_extended(void)
     CHECK_EQ(frame_offset(0), 0x44);
 }
 
+/* Writes the three header bytes fdps_saf_frame_count tests, so a case can put
+   any combination of matching and non-matching bytes in front of it. */
+static void stage_magic_bytes(int first, int second, int third)
+{
+    stage_image[0] = (unsigned char) first;
+    stage_image[1] = (unsigned char) second;
+    stage_image[2] = (unsigned char) third;
+}
+
+/* The real header passes and the answer is the count word: MOV AX,word ptr
+   [EDX+0xc] with the accepting branch taken. */
+static void real_magic_returns_the_header_count(void)
+{
+    stage_magic();
+    stage_header(7, 0x100);
+    CHECK_EQ(fdps_saf_frame_count(stage_image), 7);
+}
+
+/* CMP EAX,0x53 / JZ accept, CMP EAX,0x41 / JNZ third-test (fall-through
+   accepts), CMP EAX,0x46 / JNZ reject: the three tests are ORed, so each byte
+   on its own admits an image whose other two bytes are wrong.  An && would
+   turn all three of these into 0. */
+static void any_single_magic_byte_admits_the_image(void)
+{
+    stage_header(5, 0x100);
+    stage_magic_bytes('S', 'x', 'y');
+    CHECK_EQ(fdps_saf_frame_count(stage_image), 5);
+    stage_magic_bytes('x', 'A', 'y');
+    CHECK_EQ(fdps_saf_frame_count(stage_image), 5);
+    stage_magic_bytes('x', 'y', 'F');
+    CHECK_EQ(fdps_saf_frame_count(stage_image), 5);
+}
+
+/* Only the last JNZ's target stores 0, and reaching it needs all three
+   compares to have failed. */
+static void all_three_magic_bytes_wrong_returns_zero(void)
+{
+    stage_header(5, 0x100);
+    stage_magic_bytes('x', 'y', 'z');
+    CHECK_EQ(fdps_saf_frame_count(stage_image), 0);
+}
+
+/* The bytes are read at +0, +1 and +2 in that order and nowhere else: 'A' in
+   the first position or 'S' in the second is not the byte its compare is
+   looking at, so a transposed magic is refused. */
+static void each_magic_byte_is_tested_at_its_own_offset(void)
+{
+    stage_header(5, 0x100);
+    stage_magic_bytes('A', 'S', 'x');
+    CHECK_EQ(fdps_saf_frame_count(stage_image), 0);
+    stage_magic_bytes('x', 'F', 'A');
+    CHECK_EQ(fdps_saf_frame_count(stage_image), 0);
+}
+
+/* MOV AX,word ptr [EDX+0xc] takes 16 bits from 0x0c.  The section start
+   written right behind it starts with 0x01,0x02, so a 32-bit read of the same
+   address would see 0x02010007 instead of 7, and a read displaced two bytes
+   either way would see the junk below or the start's low word. */
+static void count_is_the_16_bit_field_at_0x0c(void)
+{
+    stage_magic();
+    stage_header(7, 0x201);
+    stage_image[0x0a] = 0x77;
+    stage_image[0x0b] = 0x88;
+    CHECK_EQ(fdps_saf_frame_count(stage_image), 7);
+}
+
+/* XOR EAX,EAX before the word load zero-extends it, so the largest count a
+   header can state comes back as 65535.  A sign-extending read would return
+   -1 and every caller's loop would run zero times. */
+static void count_0xffff_is_zero_extended(void)
+{
+    stage_magic();
+    stage_header(0xffff, 0x100);
+    CHECK_EQ(fdps_saf_frame_count(stage_image), 65535L);
+}
+
+/* An image that passes the magic test but states no frames returns 0, the
+   same answer a refused image gives -- the two are deliberately not
+   distinguishable. */
+static void passing_image_with_no_frames_returns_zero(void)
+{
+    stage_magic();
+    stage_header(0, 0x100);
+    CHECK_EQ(fdps_saf_frame_count(stage_image), 0);
+}
+
 void run_saf_tests(void)
 {
     RUN_TEST(negative_index_is_rejected);
@@ -195,4 +282,11 @@ void run_saf_tests(void)
     RUN_TEST(section_start_is_a_full_32_bit_value);
     RUN_TEST(count_is_a_16_bit_field);
     RUN_TEST(count_is_zero_extended_not_sign_extended);
+    RUN_TEST(real_magic_returns_the_header_count);
+    RUN_TEST(any_single_magic_byte_admits_the_image);
+    RUN_TEST(all_three_magic_bytes_wrong_returns_zero);
+    RUN_TEST(each_magic_byte_is_tested_at_its_own_offset);
+    RUN_TEST(count_is_the_16_bit_field_at_0x0c);
+    RUN_TEST(count_0xffff_is_zero_extended);
+    RUN_TEST(passing_image_with_no_frames_returns_zero);
 }

@@ -90,6 +90,14 @@
       "status": "committed",
       "emitted_against": "0x20b",
       "rounds": 0
+    },
+    "000144e0": {
+      "name": "fdps_saf_frame_count",
+      "target": "saf.c",
+      "body_size": "0x64",
+      "status": "committed",
+      "emitted_against": "0x64",
+      "rounds": 0
     }
   }
 }

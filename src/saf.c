@@ -47,3 +47,32 @@ void *fdps_saf_get_frame(void *saf, int frame_index)
     }
     return frame;
 }
+
+/* 000144e0.  The magic test is three compares joined with OR, and the
+   assembly says so without room for doubt: CMP EAX,0x53 / JZ to the accepting
+   block, then CMP EAX,0x41 / JNZ to the third test with the fall-through
+   accepting, then CMP EAX,0x46 / JNZ to the rejecting block.  One matching
+   byte is enough, so an image whose first byte is 'S' is accepted whatever the
+   other two hold.  Writing the natural && here would start rejecting images
+   the original plays, silently -- the caller sees a frame count of 0 and its
+   playback loop runs zero times (rebuild_info/pitfalls.md).
+
+   Each byte is loaded with MOV AL,byte ptr [EAX+n] / AND EAX,0xff, a
+   zero-extending read, and the count with XOR EAX,EAX / MOV AX,word ptr
+   [EDX+0xc], so a count of 0xffff comes back as 65535 and never as -1.  The
+   caller at 000222c0 compares it with its loop counter using JL, the signed
+   compare, which is what an int result gives. */
+int fdps_saf_frame_count(void *saf)
+{
+    unsigned char *saf_base;
+    int frame_count;
+
+    saf_base = (unsigned char *) saf;
+    if (saf_base[0] == 'S' || saf_base[1] == 'A' || saf_base[2] == 'F') {
+        frame_count =
+            *(unsigned short *) (saf_base + SAF_FRAME_COUNT_OFFSET);
+    } else {
+        frame_count = 0;
+    }
+    return frame_count;
+}
