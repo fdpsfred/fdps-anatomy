@@ -235,5 +235,37 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00018ab0": [
+    {
+      "what": "Whether every caller really bounds char_id before it gets here. The plate documents fdps_deploy_unit's CMP against 0x3c, and that is visible; the other caller, fdps_roster_add_character at 00023bc0, pushes [EBP+0x14] straight through (00023bef MOV EAX,dword ptr [EBP+0x14] / PUSH EAX) and no compare appears in the five instructions before the call. Since this accessor bounds nothing itself, an unbounded id on the roster path reads past the 60-record table, and no test on this function can say whether that is reachable.",
+      "needs": "fdps_roster_add_character being read in full when it is emitted -- specifically whether its own caller chain constrains the id to 0..59, or whether the read past the table is a real (and reproducible) original behaviour that must be preserved.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Whether the table really holds exactly 60 records. The 60 is the plate's and program_info/data_structures.md's, taken from the caller-side 0x3c bound rather than from the file; nothing in this function or in FRIAPRDA.DAT's own bytes has been counted to confirm it, and the test uses 60 only to pick the ids it exercises, never to assert a bound the code does not have.",
+      "needs": "The real FRIAPRDA.DAT length out of the VFS container divided by 0x18, once the VFS reader is emitted and a game file can be read in a test.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "The two callers extend the record's five 16-bit stats differently: fdps_roster_add_character uses MOVSX at 00023c2a, 00023c45, 00023c51, 00023c5b and 00023c65, while fdps_deploy_unit zero-extends the same offsets at 0002356b/0002356f, 0002359e, 000235aa and 000235b6. src/fdpstype.h declares hp_base, mp_base, ap_base, dp_base and dx_base as signed short, which reproduces the roster path only. One of the two sites must have had a cast or a different declared type in the original source, and which one decides the branch a comparison on these stats takes.",
+      "needs": "fdps_deploy_unit and fdps_roster_add_character both being emitted, then reading what each does with the widened value downstream -- whether the deploy path's AND 0xffff is a genuine unsigned read of the field or a cast applied at that expression. Settling it may move the field's signedness in src/fdpstype.h, in which case tests/table.c's mp_base == -1 assertion moves with it. Not resolvable from 00018ab0, which never touches the record.",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Whether the character base table really holds exactly 60 records. The 60 is inferred from fdps_deploy_unit's CMP against 0x3c, which I confirmed at 0002348b, not counted out of the file. tests/table.c uses it only to choose which ids to exercise and never asserts a bound the code does not have, so nothing is wrong today, but the record count is still unmeasured.",
+      "needs": "FRIAPRDA.DAT's real length out of the VFS container divided by 0x18, once the VFS reader is emitted and a test can read a game file. Carried forward from the emitter's verdict; I reached the same gap independently.",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Whether fdps_roster_add_character can reach this accessor with an id outside 0..59. It pushes its own [EBP+0x14] straight through (00023bef/00023bf2) with no compare in the instructions before the call, and this accessor bounds nothing, so an out-of-range id on the roster path reads past the table. Whether that is reachable in play is a question about the roster caller's own callers.",
+      "needs": "fdps_roster_add_character read in full when it is emitted, including whichever menu or script path supplies its char_id. Carried forward from the emitter's verdict; the call site confirms the absence of the compare.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

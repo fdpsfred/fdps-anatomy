@@ -122,6 +122,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x8f"
+    },
+    "00018ab0": {
+      "name": "fdps_get_character_base_record",
+      "target": "table.c",
+      "body_size": "0x25",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x25"
     }
   }
 }
