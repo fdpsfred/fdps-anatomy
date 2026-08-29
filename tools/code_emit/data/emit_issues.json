@@ -123,5 +123,19 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "000140e0": [
+    {
+      "what": "The .SAF header has no record layout in src/fdpstype.h, so this function addresses the frame-section descriptor by byte offset (#defines for 0x0c and 0x0e in saf.c) as the plate comment's rebuild note sanctions. That is exactly equivalent here, but the same descriptor block is read by the sibling readers that are still pending -- fdps_saf_frame_count at 000144e0 reads +0x0c, and the tilemap and tile readers read the descriptors at 0x16 and 0x20 -- and if one of them declares an ordinary C struct for the header instead, the compiler pads the u16 count to four bytes and every section field lands two bytes past where the file has it. The descriptor's u32 at +0x0e is only 2-byte aligned, which is the trap.",
+      "needs": "A decision by the batch, once the other SAF readers are emitted, on whether a #pragma pack(1) SAF header struct should be added to Ghidra's data types and regenerated into fdpstype.h, or whether byte-offset addressing stays the house style for this header. rebuild_info/pitfalls.md already carries the general rule that every runtime record needs pack(1) and must not use default alignment, so no new pitfalls row was added for it here; if the decision is that this header needs its own row, that is a separate commit.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "The .SAF file header has no layout in src/fdpstype.h, so this reader addresses the frame-section descriptor by byte offset. The same 10-byte descriptor block is read by the sibling SAF readers still pending (frame count at 000144e0 reads +0x0c; the tilemap and tile readers read +0x16 and +0x20), and the trap is that the u32 section start sits on a 2-byte boundary: an ordinary C struct pads the u16 count to four bytes and lands every section field two bytes late. I confirmed the alignment claim against the assembly -- 00014118 ADD EDX,dword ptr [EAX + 0xe], a 32-bit load two bytes after the u16 at +0x0c -- and against resource_info/saf.md's descriptor table. Byte-offset addressing is correct here; the risk is only that a later reader picks the other style.",
+      "needs": "A decision by the batch, once the remaining SAF readers are emitted, on whether a #pragma pack(1) SAF header struct goes into Ghidra's data types and is regenerated into src/fdpstype.h, or whether byte-offset addressing stays the house style for this header. Carrying the emitter's entry forward unchanged; I agree with its disposition, including that rebuild_info/pitfalls.md's existing general rule about pack(1) on runtime records already covers the underlying trap, so no new pitfalls row was owed by this function.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

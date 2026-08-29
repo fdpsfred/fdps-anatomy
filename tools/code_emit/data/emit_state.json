@@ -74,6 +74,14 @@
       "status": "committed",
       "emitted_against": "0xab",
       "rounds": 0
+    },
+    "000140e0": {
+      "name": "fdps_saf_get_frame",
+      "target": "saf.c",
+      "body_size": "0x5f",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x5f"
     }
   }
 }
