@@ -40,7 +40,7 @@
 00013fd0 | 0x106 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_graphics | void __cdecl fdps_draw_tilemap_layer(void * ctx)
 000140e0 | 0x5f | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void * __cdecl fdps_saf_get_frame(void * saf, int frame_index)
 00014140 | 0x18c | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,shared_helper,subsys_graphics | void __cdecl fdps_draw_composite_sprite(void * req, char flag)
-000142d0 | 0x20b | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_audio | void __cdecl fdps_sfx_play(void * bank, int index)
+000142d0 | 0x20b | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_audio | void __cdecl fdps_sfx_play(void * saf, int sound_index)
 000144e0 | 0x64 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | int __cdecl fdps_saf_frame_count(void * saf)
 00014550 | 0x182 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,shared_helper,subsys_graphics | int __cdecl fdps_saf_advance_tick(int * cursor, uchar mode)
 00014ab0 | 0x3e9 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_menu | int __cdecl fdps_battle_system_menu(void)

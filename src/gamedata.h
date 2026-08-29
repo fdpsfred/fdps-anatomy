@@ -28,4 +28,11 @@ extern unsigned char *data_fdps_map_unit_array_ptr;
    does the header and cell arithmetic itself, so a reader casts. */
 extern unsigned char *data_fdps_battle_move_grid_ptr;
 
+/* 00069d70.  The player's sound-effect toggle, one of the four option flags
+   the options menu writes and a save file carries (the sfx_enabled_flag field
+   of struct fdps_save_slot).  Read as a boolean; it says what the player
+   asked for, not whether a driver was found -- that is
+   data_fdps_audio_sfx_driver_available_flag, in audio.h. */
+extern unsigned char data_fdps_audio_sfx_enabled_flag;
+
 #endif

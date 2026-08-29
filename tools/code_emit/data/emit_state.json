@@ -82,6 +82,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x5f"
+    },
+    "000142d0": {
+      "name": "fdps_sfx_play",
+      "target": "audio.c",
+      "body_size": "0x20b",
+      "status": "committed",
+      "emitted_against": "0x20b",
+      "rounds": 0
     }
   }
 }

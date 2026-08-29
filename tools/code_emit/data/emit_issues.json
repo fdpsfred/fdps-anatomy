@@ -137,5 +137,19 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "000142d0": [
+    {
+      "from": "emit",
+      "what": "What bit 1 of the flags word means in this AIL build is not established. The original PUSHes a literal 2 at 00014445 and the C reproduces it as AIL_SAMPLE_TYPE_FLAGS 2; bit 0 being clear is understood (Miles' signed-PCM flag, and .SAF samples are unsigned PCM per resource_info/saf.md), but the emitted comment deliberately says nothing about what the set bit selects.",
+      "needs": "Reading AIL's own use of the field -- the flags word lands at +0x38 of the handle (000472ee) and is consumed by the mixer setup at 00045f50, whose TEST byte ptr [EBX+0x38],0x1 only looks at bit 0 in the paths reached here -- or a Miles AIL 3.x header. Until then the value is copied, not interpreted, which is the safe state.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "The tests observe what this function hands AIL, not what comes out of the sound card. They stop the vendor library one instruction before it engages the driver (AIL_start_sample returns at 0004742f when the driver's +0x54 is non-zero), so the mixer, the DMA path and the audible result of volume 0x28 and loop count 1 are not exercised. The loop count specifically cannot be distinguished from AIL_init_sample's own default of 1 by any test.",
+      "needs": "A playtest in DOSBox-X with DIG.INI and SB16.DIG present: effects audible, several in quick succession to exercise the eight-slot rotation, and no effect cut short or repeated.",
+      "status": "open"
+    }
   ]
 }
