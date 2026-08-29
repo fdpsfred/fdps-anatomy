@@ -255,8 +255,10 @@
     {
       "what": "The nine globals are declared in gamedata.h as `unsigned char *`, which is Ghidra's typing (/byte *) and what routing.json records. That is right for free() and right for the pointer arithmetic the original does at each use, but the accessors that actually read these tables -- fdps_get_class_record @ 00018b80, fdps_get_spell_record @ 00018be0 and their neighbours in table.c -- are not emitted, so whether the declarations should end up typed to a record from fdpstype.h instead is not settled here.",
       "needs": "table.c's accessors emitted. The width is 4 either way so no equivalence question turns on it; it is a question about which declaration the later readers want, and gamedata.h is the single owner that would have to change.",
-      "status": "open",
-      "from": "emit"
+      "status": "resolved",
+      "from": "emit",
+      "answer": "SETTLED, and the answer is that gamedata.h keeps `unsigned char *` for all nine. The condition the concern named has been met: every reader of these nine globals is now emitted. get_xrefs_to on all nine (00063fd0, 00063fd4, 00063fd8, 00063fdc, 00063fe0, 00063fe4, 00063fe8, 00063fec, 00063ff0) returns exactly four references each and the same four shapes every time -- the two fdps_load_data_tables immediates that push the pointer's own address, the READ in this function, and one READ from that table's single accessor. The nine accessors are 00018ab0 fdps_get_character_base_record, 00018ae0 fdps_get_growth_record, 00018b10 fdps_get_enemy_record, 00018b40 fdps_get_item_record, 00018b70 fdps_get_class_record (the emit entry's '00018b80' was a slip of the pen), 00018ba0 fdps_get_class_equip_record, 00018bd0 fdps_get_spell_record ('00018be0' likewise), 00018c00 fdps_get_spell_learn_record and 00018c30 fdps_get_promotion_record. All nine are emitted into src/table.c with approved verdicts, so the reader set is closed and there is no later reader left to want a different declaration. What those nine readers do settles it against retyping. Each one is `(struct X *)(global + index * <file stride literal>)`: byte arithmetic on the byte pointer, with the stride written as the literal the IMUL carries, then a cast. Retyping the global to a record pointer would make `global + index` scale by sizeof(struct X) instead, and sizeof is not the stride -- struct fdps_spell_effect is a short plus five unsigned chars, which wcc386 sizes at 8, against MAGICDAT.DAT's stride of 7 (00018bd0's IMUL EAX,[EBP+0x14],0x7). The odd strides 0x0b (growth) and 0x17 (item) are the same trap. So a struct-typed declaration would not be a cosmetic improvement for the readers; it would silently change the address every accessor computes, and each accessor would have to cast back to unsigned char * to undo it. The byte pointer is also what free() in this function wants and what the loader's uniform 'address of the pointer' argument wants. Nothing changes in gamedata.h and nothing changes in src/main.c.",
+      "settled_by": "The nine table.c accessor verdicts in workspace/code_emit/verdicts/ (00018ab0, 00018ae0, 00018b10, 00018b40, 00018b70, 00018ba0, 00018bd0, 00018c00, 00018c30), the emitted src/table.c and src/fdpstype.h, and a read-only get_xrefs_to on each of the nine globals confirming one accessor apiece. Rescan of 00018a20."
     },
     {
       "what": "Endorsed from the emit verdict: nothing clears the nine pointers, so the 'runs exactly once' contract is real and a second entry into the shutdown path would be a nine-way double free. Whether that is reachable cannot be decided inside this function -- its only caller fdps_shutdown_free_resources @ 00029440 is not emitted, and neither is main @ 00029220 nor the fatal-error exit path.",
@@ -267,8 +269,10 @@
     {
       "what": "Endorsed from the emit verdict: the nine globals are declared unsigned char * in gamedata.h, matching Ghidra's /byte * and routing.json. That is correct for free() and for the original's per-use record arithmetic, but the accessors that actually read these tables (fdps_get_class_record @ 00018b80, fdps_get_spell_record @ 00018be0 and neighbours, all bound for table.c) are not emitted, so the final declared type is not settled.",
       "needs": "table.c's accessors emitted. No equivalence question turns on it -- the width is 4 either way -- but gamedata.h is the single owner that would have to change, so it should be decided once rather than per reader.",
-      "status": "open",
-      "from": "review"
+      "status": "resolved",
+      "from": "review",
+      "answer": "SETTLED. Same concern as the emit entry above, which carries the settlement and the evidence; see its answer / settled_by. Recorded once on purpose.",
+      "same_as": "The nine globals are declared in gamedata.h as `unsigned char *`, which is Ghidra's typing (/byte *) and what routing.js"
     }
   ],
   "00018ab0": [
