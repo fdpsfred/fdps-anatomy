@@ -66,6 +66,14 @@
       "status": "committed",
       "emitted_against": "0x29",
       "rounds": 0
+    },
+    "00011da0": {
+      "name": "fdps_map_grid_collect_marked_tiles",
+      "target": "movegrid.c",
+      "body_size": "0xab",
+      "status": "committed",
+      "emitted_against": "0xab",
+      "rounds": 0
     }
   }
 }

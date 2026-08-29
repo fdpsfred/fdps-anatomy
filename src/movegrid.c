@@ -314,3 +314,75 @@ void fdps_move_grid_block_occupied_tiles(int exclude_unit_index,
         unit++;
     }
 }
+
+/* 00011da0.  The readout the whole grid exists for: whatever the flood fill or
+   the targeting mask left behind is turned into a flat list of (x, y) tile
+   indices for the caller to iterate, and the count comes back.  A cell counts
+   as marked when byte 1 is anything but the 0xff sentinel, so the same test
+   yields a movement range after 00010de0 has relaxed the costs down and a
+   target list after 00011e50 has written 0 into the mask's tiles.
+
+   There is no null-grid guard, unlike fdps_map_grid_reset and
+   fdps_move_grid_mark_zone_of_control above: MOV EAX,[0x00060144] / ADD EAX,5
+   at 00011db3 dereferences nothing yet, but MOVSX EAX,word ptr [EAX] three
+   instructions later does, with nothing having looked at the pointer.  Adding
+   the guard the neighbours have would not be this function.
+
+   Both dimensions arrive through MOVSX and both loop tests are JL, the signed
+   compare (00011de2 and 00011dfb).  A header word of 0xffff is -1 and the loop
+   it bounds does not run at all; read either word unsigned and it is 65535,
+   and the scan walks 65535 cells off the end of the heap block.
+
+   The cursor is set to grid + 5 once, before the loops, and stepped by ADD
+   dword ptr [EBP-0x8],0x2 at 00011e33 -- byte 1 of the next cell, on the
+   skipped path as well as the collected one.  It is never recomputed from x
+   and y, which is why the walk stays correct only while the two loop bounds
+   are the same header words the block was sized from: it runs straight through
+   the cells in row-major order and the coordinates are counted alongside it
+   rather than derived from it.  Expressed here as a cell pointer starting at
+   grid + 4 whose marker byte is read, which addresses the same byte the
+   original's cursor holds.
+
+   The two coordinate stores are byte stores (MOV AL,byte ptr [EBP-0x1c] / MOV
+   byte ptr [EDX],AL at 00011e18), so an index above 255 would be written
+   truncated; no map in the game is that wide, and widening the output to a
+   short would change the stride the callers walk.
+
+   Nothing bounds the number of pairs written -- there is no capacity argument
+   and no compare against one.  Callers 00013040 and 00013420 hand over a
+   0x190-byte block, room for 200 pairs, which a wide movement range overruns.
+   Adding a capacity parameter or growing those allocations is the obvious fix
+   and it is not what the original does; the signature and the callers' sizes
+   are reproduced as they are (rebuild_info/pitfalls.md).
+
+   The grid itself is only read.  Callers wipe it afterwards with
+   fdps_map_grid_reset. */
+int fdps_map_grid_collect_marked_tiles(unsigned char *out_coords)
+{
+    struct fdps_move_grid_cell *scan_cell;
+    int grid_width;
+    int grid_height;
+    int marked_count;
+    int tile_x;
+    int tile_y;
+
+    marked_count = 0;
+    scan_cell = (struct fdps_move_grid_cell *)
+                (data_fdps_battle_move_grid_ptr + 4);
+    grid_width = (int) *(short *) data_fdps_battle_move_grid_ptr;
+    grid_height = (int) *(short *) (data_fdps_battle_move_grid_ptr + 2);
+
+    for (tile_y = 0; tile_y < grid_height; tile_y++) {
+        for (tile_x = 0; tile_x < grid_width; tile_x++) {
+            if (scan_cell->marker != 0xff) {
+                out_coords[0] = (unsigned char) tile_x;
+                out_coords[1] = (unsigned char) tile_y;
+                out_coords += 2;
+                marked_count++;
+            }
+            scan_cell++;
+        }
+    }
+
+    return marked_count;
+}

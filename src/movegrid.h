@@ -69,4 +69,15 @@ extern void fdps_move_grid_block_occupied_tiles(int exclude_unit_index,
                                                 int side_select);
 #pragma aux fdps_move_grid_block_occupied_tiles "*" parm caller [];
 
+/* Reads the grid out into a flat list: writes one (x, y) pair of tile indices,
+   x first, into out_coords for every cell whose marker byte is not the 0xff
+   unreachable sentinel, and returns how many pairs that was.  The cells are
+   visited in row-major order, so the pairs come out row by row.  The grid is
+   not modified and the grid pointer is not checked for null.  Nothing bounds
+   how many pairs are written: the caller's buffer has to be big enough for
+   every cell of the map, and two of the callers in the original image hand
+   over one that is not. */
+extern int fdps_map_grid_collect_marked_tiles(unsigned char *out_coords);
+#pragma aux fdps_map_grid_collect_marked_tiles "*" parm caller [];
+
 #endif

@@ -868,6 +868,286 @@ static void block_coordinates_are_not_range_checked(void)
     CHECK_EQ(cell_marker(4), 0x00);
 }
 
+/* --- fdps_map_grid_collect_marked_tiles @ 00011da0 ------------------------
+ *
+ * Expected values come from the assembly: the cursor set-up MOV EAX,
+ * [0x00060144] / ADD EAX,0x5 at 00011db3, the two MOVSX word loads at 00011dc3
+ * and 00011dce, the two loop tests CMP EAX,[EBP-0xc] / JL and CMP EAX,
+ * [EBP-0x10] / JL at 00011de2 and 00011dfb, the marked test MOV AL,byte ptr
+ * [EAX] / AND EAX,0xff / CMP EAX,0xff / JZ at 00011e0a..00011e16, the two byte
+ * stores MOV byte ptr [EDX],AL and MOV byte ptr [EDX+0x1],AL at 00011e1e and
+ * 00011e26, the output step ADD dword ptr [EBP+0x14],0x2 at 00011e29, the
+ * cursor step ADD dword ptr [EBP-0x8],0x2 at 00011e33, and the return of the
+ * counter at [EBP-0x14].  None of them is read off the emitted C.
+ *
+ * The grid is staged here for the same reason as above: the function's whole
+ * input is data_fdps_battle_move_grid_ptr, so pointing it at a local block is
+ * the only way to reach the loops.  Neither the existing stage() nor
+ * stage_blank() will do -- both leave every marker byte 0x00, which is every
+ * cell marked -- so this section stages the grid the way fdps_map_grid_reset
+ * leaves it and marks individual cells by hand.
+ */
+
+/* One pair per marked cell, and room for more than a 4x4 grid can produce, so
+   an over-long walk has somewhere to be caught writing.  0xee is a value
+   neither a coordinate nor a count in these fixtures can be, so a byte still
+   holding it was not written. */
+static unsigned char collect_out[64];
+
+static void collect_out_reset(void)
+{
+    int i;
+
+    for (i = 0; i < (int) sizeof collect_out; i++) {
+        collect_out[i] = 0xee;
+    }
+}
+
+/* The grid as fdps_map_grid_reset leaves it: flags cleared, every marker byte
+   holding the 0xff unreachable sentinel, so nothing is marked until a test
+   says so. */
+static void stage_reset_grid(int width, int height)
+{
+    int i;
+
+    for (i = 0; i < STAGE_CELLS; i++) {
+        stage_grid[4 + i * 2] = 0x00;
+        stage_grid[4 + i * 2 + 1] = 0xff;
+    }
+    *(short *) stage_grid = (short) width;
+    *(short *) (stage_grid + 2) = (short) height;
+    data_fdps_battle_move_grid_ptr = stage_grid;
+    collect_out_reset();
+}
+
+/* Relax one cell's marker away from the sentinel, the way the flood fill at
+   00010de0 leaves a reachable tile's step cost behind. */
+static void mark_cell(int index, int marker)
+{
+    stage_grid[4 + index * 2 + 1] = (unsigned char) marker;
+}
+
+static int out_byte(int index)
+{
+    return (int) collect_out[index];
+}
+
+/* The whole contract in one case: the count comes back, one pair is written
+   per marked cell, x goes to byte 0 and y to byte 1, and the pairs land
+   consecutively in the order the cells are visited.  On a 4x4 grid cell 1 is
+   tile (1,0), cell 6 is (2,1) and cell 11 is (3,2).  The seventh output byte
+   is still 0xee: the output pointer advanced twice per marked cell and no
+   further. */
+static void collect_writes_one_xy_pair_per_marked_cell(void)
+{
+    int count;
+
+    stage_reset_grid(4, 4);
+    mark_cell(1, 0x00);
+    mark_cell(6, 0x03);
+    mark_cell(11, 0xfe);
+    count = fdps_map_grid_collect_marked_tiles(collect_out);
+    CHECK_EQ(count, 3);
+    CHECK_EQ(out_byte(0), 1);
+    CHECK_EQ(out_byte(1), 0);
+    CHECK_EQ(out_byte(2), 2);
+    CHECK_EQ(out_byte(3), 1);
+    CHECK_EQ(out_byte(4), 3);
+    CHECK_EQ(out_byte(5), 2);
+    CHECK_EQ(out_byte(6), 0xee);
+}
+
+/* CMP EAX,0xff / JZ skips only on the exact sentinel.  0xfe -- a step cost the
+   flood fill could genuinely leave -- is marked, 0x00 as written by the
+   targeting mask at 00011e50 is marked, and 0xff is the only value that is
+   not.  A test written as `marker < 0xff` would agree here; one written as
+   `marker != 0` or `marker > 0` would drop the mask's tiles. */
+static void collect_sentinel_is_ff_and_nothing_else(void)
+{
+    int count;
+
+    stage_reset_grid(3, 1);
+    mark_cell(0, 0x00);
+    mark_cell(1, 0xfe);
+    count = fdps_map_grid_collect_marked_tiles(collect_out);
+    CHECK_EQ(count, 2);
+    CHECK_EQ(out_byte(0), 0);
+    CHECK_EQ(out_byte(1), 0);
+    CHECK_EQ(out_byte(2), 1);
+    CHECK_EQ(out_byte(3), 0);
+    CHECK_EQ(out_byte(4), 0xee);
+}
+
+/* The cursor starts at grid + 5, byte 1 of the first cell, so byte 0 is never
+   read: a cell whose zone-of-control byte is 0xff and whose marker is 0 is
+   collected, and one whose flags are clear but whose marker is the sentinel is
+   not.  Read the wrong byte of the pair and both answers invert. */
+static void collect_reads_the_marker_not_the_flags(void)
+{
+    int count;
+
+    stage_reset_grid(2, 1);
+    stage_grid[4 + 0 * 2] = 0xff;
+    mark_cell(0, 0x00);
+    stage_grid[4 + 1 * 2] = 0x00;
+    count = fdps_map_grid_collect_marked_tiles(collect_out);
+    CHECK_EQ(count, 1);
+    CHECK_EQ(out_byte(0), 0);
+    CHECK_EQ(out_byte(1), 0);
+    CHECK_EQ(out_byte(2), 0xee);
+}
+
+/* The cursor is stepped by two on every cell and never recomputed from x and
+   y, so the pairs have to come out in row-major order with x running fastest.
+   Every cell of a 3x2 grid is marked, which pins all six pairs and the order
+   they arrive in: an inner loop over y instead of x would give the same count
+   and a transposed list. */
+static void collect_visits_cells_in_row_major_order(void)
+{
+    int count;
+
+    stage_reset_grid(3, 2);
+    mark_cell(0, 0x00);
+    mark_cell(1, 0x00);
+    mark_cell(2, 0x00);
+    mark_cell(3, 0x00);
+    mark_cell(4, 0x00);
+    mark_cell(5, 0x00);
+    count = fdps_map_grid_collect_marked_tiles(collect_out);
+    CHECK_EQ(count, 6);
+    CHECK_EQ(out_byte(0), 0);
+    CHECK_EQ(out_byte(1), 0);
+    CHECK_EQ(out_byte(2), 1);
+    CHECK_EQ(out_byte(3), 0);
+    CHECK_EQ(out_byte(4), 2);
+    CHECK_EQ(out_byte(5), 0);
+    CHECK_EQ(out_byte(6), 0);
+    CHECK_EQ(out_byte(7), 1);
+    CHECK_EQ(out_byte(8), 1);
+    CHECK_EQ(out_byte(9), 1);
+    CHECK_EQ(out_byte(10), 2);
+    CHECK_EQ(out_byte(11), 1);
+    CHECK_EQ(out_byte(12), 0xee);
+}
+
+/* A grid straight out of fdps_map_grid_reset has nothing in it: the count is
+   0 and not one byte of the caller's buffer is touched.  This is the answer
+   the callers test before allocating anything of their own. */
+static void collect_returns_zero_when_nothing_is_marked(void)
+{
+    int count;
+
+    stage_reset_grid(4, 4);
+    count = fdps_map_grid_collect_marked_tiles(collect_out);
+    CHECK_EQ(count, 0);
+    CHECK_EQ(out_byte(0), 0xee);
+    CHECK_EQ(out_byte(1), 0xee);
+}
+
+/* The two bounds are the header words and the walk stops at width*height
+   cells: a cell marked past that bound is never reached, however marked it is.
+   Cell 5 of a 2x2 grid is one row and a half past the last cell the walk
+   visits, and cell 0 inside the bound is collected in the same call. */
+static void collect_bound_comes_from_the_header(void)
+{
+    int count;
+
+    stage_reset_grid(2, 2);
+    mark_cell(0, 0x00);
+    mark_cell(5, 0x00);
+    mark_cell(9, 0x00);
+    count = fdps_map_grid_collect_marked_tiles(collect_out);
+    CHECK_EQ(count, 1);
+    CHECK_EQ(out_byte(0), 0);
+    CHECK_EQ(out_byte(1), 0);
+    CHECK_EQ(out_byte(2), 0xee);
+}
+
+/* Both header words arrive through MOVSX and both loop tests are JL.  A height
+   of -1 fails the outer test at once, so the cursor is never even read; a
+   width of -1 fails the inner test on every row.  Either way the count is 0
+   and the buffer is untouched.  Read either word unsigned and -1 is 65535:
+   the walk leaves this fixture and runs 65535 cells into whatever follows it.
+   Every cell in reach is marked here, so an unsigned read could not come back
+   with 0 by accident. */
+static void collect_header_words_are_signed(void)
+{
+    int count;
+
+    stage_reset_grid(2, -1);
+    mark_cell(0, 0x00);
+    mark_cell(1, 0x00);
+    count = fdps_map_grid_collect_marked_tiles(collect_out);
+    CHECK_EQ(count, 0);
+    CHECK_EQ(out_byte(0), 0xee);
+    CHECK_EQ((int) *(short *) (stage_grid + 2), -1);
+
+    stage_reset_grid(-1, 2);
+    mark_cell(0, 0x00);
+    mark_cell(1, 0x00);
+    count = fdps_map_grid_collect_marked_tiles(collect_out);
+    CHECK_EQ(count, 0);
+    CHECK_EQ(out_byte(0), 0xee);
+    CHECK_EQ((int) *(short *) stage_grid, -1);
+}
+
+/* A zero in either header word is the same story without the sign: the loop
+   whose bound it is runs no iterations. */
+static void collect_zero_dimension_collects_nothing(void)
+{
+    int count;
+
+    stage_reset_grid(0, 4);
+    mark_cell(0, 0x00);
+    count = fdps_map_grid_collect_marked_tiles(collect_out);
+    CHECK_EQ(count, 0);
+    CHECK_EQ(out_byte(0), 0xee);
+
+    stage_reset_grid(4, 0);
+    mark_cell(0, 0x00);
+    count = fdps_map_grid_collect_marked_tiles(collect_out);
+    CHECK_EQ(count, 0);
+    CHECK_EQ(out_byte(0), 0xee);
+}
+
+/* The grid is read and never written: there is no store to the cursor anywhere
+   in the body.  Callers depend on that -- the range stays on the grid until
+   fdps_map_grid_reset wipes it -- so a cell keeps both its flags byte and the
+   exact marker value the fill left, sentinel cells included. */
+static void collect_does_not_modify_the_grid(void)
+{
+    int count;
+
+    stage_reset_grid(2, 2);
+    stage_grid[4 + 1 * 2] = 0xc0;
+    mark_cell(1, 0x03);
+    count = fdps_map_grid_collect_marked_tiles(collect_out);
+    CHECK_EQ(count, 1);
+    CHECK_EQ(cell_flags(1), 0xc0);
+    CHECK_EQ(cell_marker(1), 0x03);
+    CHECK_EQ(cell_marker(0), 0xff);
+    CHECK_EQ(cell_marker(3), 0xff);
+    CHECK_EQ((int) *(short *) stage_grid, 2);
+    CHECK_EQ((int) *(short *) (stage_grid + 2), 2);
+}
+
+/* The last cell of the grid is reachable -- the walk covers width*height cells,
+   not one fewer -- and a single marked cell at the far end still produces
+   exactly one pair at the front of the buffer.  Cell 15 of a 4x4 grid is tile
+   (3,3). */
+static void collect_reaches_the_last_cell(void)
+{
+    int count;
+
+    stage_reset_grid(4, 4);
+    mark_cell(15, 0x00);
+    count = fdps_map_grid_collect_marked_tiles(collect_out);
+    CHECK_EQ(count, 1);
+    CHECK_EQ(out_byte(0), 3);
+    CHECK_EQ(out_byte(1), 3);
+    CHECK_EQ(out_byte(2), 0xee);
+}
+
 void run_movegrid_tests(void)
 {
     RUN_TEST(grid_cell_stride_is_two);
@@ -920,6 +1200,17 @@ void run_movegrid_tests(void)
     RUN_TEST(block_index_uses_the_header_width);
     RUN_TEST(block_width_word_is_signed);
     RUN_TEST(block_coordinates_are_not_range_checked);
+
+    RUN_TEST(collect_writes_one_xy_pair_per_marked_cell);
+    RUN_TEST(collect_sentinel_is_ff_and_nothing_else);
+    RUN_TEST(collect_reads_the_marker_not_the_flags);
+    RUN_TEST(collect_visits_cells_in_row_major_order);
+    RUN_TEST(collect_returns_zero_when_nothing_is_marked);
+    RUN_TEST(collect_bound_comes_from_the_header);
+    RUN_TEST(collect_header_words_are_signed);
+    RUN_TEST(collect_zero_dimension_collects_nothing);
+    RUN_TEST(collect_does_not_modify_the_grid);
+    RUN_TEST(collect_reaches_the_last_cell);
 
     /* Put the global back before leaving.  stage() points it at this file's
        own stage_grid, and the runners share one process: a later unit that

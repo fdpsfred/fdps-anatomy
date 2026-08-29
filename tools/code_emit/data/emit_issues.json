@@ -97,5 +97,31 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00011da0": [
+    {
+      "what": "The function writes one pair per marked cell with no capacity argument and no bound, while callers 00013040 and 00013420 hand it a 0x190-byte block -- room for 200 pairs -- which a wide movement range or targeting mask overruns. Nothing about this function can be made safe without deviating from the original; the equivalence depends on those two callers being emitted with the same 0x190 malloc rather than a corrected one.",
+      "needs": "The emit of 00013040 and 00013420 keeping their allocation sizes as measured, and a note in rebuild_info/pitfalls.md so the reviewer of those two functions sees why the obvious enlargement is wrong.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Whether any chapter's grid can exceed 255 tiles in either dimension. The coordinate stores are byte stores, so an index of 256 would be written as 0; the emitted C truncates identically, so this is not an equivalence gap, but the count returned and the pairs written would both be nonsense on such a map and no caller would notice.",
+      "needs": "The map dimensions of every chapter map resource, which the map-resource loader's emit or an assets/ table can supply. If all maps are under 256 wide and tall this closes with nothing to do.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirming the emitter's own entry rather than adding to it: the function writes one pair per marked cell with no capacity argument and no bound, while callers 00013040 and 00013420 hand it a 0x190-byte block. I verified 00013040 does malloc(400) at its call site, so the overrun is real and not a plate-comment claim. It cannot be made safe inside this function without deviating from the original.",
+      "needs": "The emits of 00013040 and 00013420 keeping their 0x190 allocations as measured, plus a rebuild_info/pitfalls.md entry so the reviewer of those two sees why enlarging the buffer is the wrong move.",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Whether any chapter's grid exceeds 255 tiles in either dimension. The stores at 00011e1e and 00011e26 are byte stores and the emitted C truncates identically, so this is not an equivalence gap, but on such a map both the pairs and the count would be nonsense and no caller would notice.",
+      "needs": "The map dimensions of every chapter map resource, from the map-resource loader's emit or an assets/ table. If every map is under 256 in both dimensions this closes with nothing to do.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }
