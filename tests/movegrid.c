@@ -373,6 +373,226 @@ static void zoc_height_guard_is_signed(void)
     CHECK_EQ(cell_flags(1), 0x00);
 }
 
+/* --- fdps_move_grid_mark_opposing_zones_of_control @ 00010b90 -------------
+ *
+ * Expected values come from the assembly: the loop bound CMP EAX,dword ptr
+ * [0x00060150] / JL at 00010bae, the record step ADD dword ptr [EBP-0x4],0x50
+ * at 00010c19, the tile bytes read from +0 and +1 at 00010bc3 and 00010bcd,
+ * the retired test AND AL,0x1 on byte +5 at 00010bde, and the pair of side
+ * tests CMP dword ptr [EBP+0x14],0x0 against CMP byte ptr [EAX+0x6],0x0 at
+ * 00010be9..00010c05.  Which grid cells a marked tile touches comes from
+ * fdps_move_grid_mark_zone_of_control's own assembly, asserted above.
+ *
+ * Both the unit array and the grid are staged here.  The function takes its
+ * entire input from data_fdps_map_unit_array_ptr, data_fdps_map_unit_count and
+ * the grid pointer, so pointing those at local blocks is the only way to reach
+ * the loop; nothing below asserts what any of the three holds on its own,
+ * which is ticket 23's.
+ */
+
+#define STAGE_UNITS 4
+
+static struct fdps_unit_record stage_units[STAGE_UNITS];
+
+/* Blank every staged record and publish the array.  Zeroing matters: side 0
+   and flags 0 is the state the per-case setters below deviate from. */
+static void units_reset(int count)
+{
+    unsigned char *raw;
+    int i;
+
+    raw = (unsigned char *) stage_units;
+    for (i = 0; i < (int) sizeof(stage_units); i++) {
+        raw[i] = 0x00;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) stage_units;
+    data_fdps_map_unit_count = count;
+}
+
+static void put_unit(int slot, int x, int y, int side, int flags)
+{
+    stage_units[slot].pos_x = (unsigned char) x;
+    stage_units[slot].pos_y = (unsigned char) y;
+    stage_units[slot].side = (unsigned char) side;
+    stage_units[slot].flags = (unsigned char) flags;
+}
+
+/* ADD dword ptr [EBP-0x4],0x50 is the whole of the array walk's arithmetic, so
+   the record has to come out 0x50 bytes for the pointer step in the C to land
+   on the next unit; the four byte offsets the body reads are +0, +1, +5
+   and +6. */
+static void zones_unit_record_stride_is_0x50(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 1);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 5);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 6);
+}
+
+/* side_select 0 takes the JNZ at 00010bed nowhere and falls into CMP byte ptr
+   [EAX+0x6],0x0 / JNZ to the call: the units marked are the ones whose side
+   byte is non-zero.  On a 4x4 grid the unit at (2,2) is cell 10 and its four
+   neighbours are 6, 9, 11 and 14; the side-0 unit at (0,0) leaves cell 0 and
+   its neighbours 1 and 4 untouched. */
+static void zones_select_zero_marks_nonzero_sides(void)
+{
+    stage_blank(4, 4);
+    units_reset(2);
+    put_unit(0, 0, 0, 0, 0);
+    put_unit(1, 2, 2, 1, 0);
+    fdps_move_grid_mark_opposing_zones_of_control(0);
+    CHECK_EQ(cell_flags(10), 0x40);
+    CHECK_EQ(cell_flags(6), 0x80);
+    CHECK_EQ(cell_flags(9), 0x80);
+    CHECK_EQ(cell_flags(11), 0x80);
+    CHECK_EQ(cell_flags(14), 0x80);
+    CHECK_EQ(cell_flags(0), 0x00);
+    CHECK_EQ(cell_flags(1), 0x00);
+    CHECK_EQ(cell_flags(4), 0x00);
+}
+
+/* The mirror: a non-zero side_select takes the JNZ at 00010bed to 00010bf8 and
+   marks only the records whose side byte is 0.  Same two units, opposite
+   outcome. */
+static void zones_select_one_marks_side_zero(void)
+{
+    stage_blank(4, 4);
+    units_reset(2);
+    put_unit(0, 0, 0, 0, 0);
+    put_unit(1, 2, 2, 1, 0);
+    fdps_move_grid_mark_opposing_zones_of_control(1);
+    CHECK_EQ(cell_flags(0), 0x40);
+    CHECK_EQ(cell_flags(1), 0x80);
+    CHECK_EQ(cell_flags(4), 0x80);
+    CHECK_EQ(cell_flags(10), 0x00);
+    CHECK_EQ(cell_flags(6), 0x00);
+}
+
+/* Both tests are against zero, so only the truth value of each side counts.
+   With side_select 2 -- the player side's own number, which no caller passes
+   today but which the code accepts -- the units marked are still exactly the
+   side-0 ones: the neutral unit at (2,0) is cell 2 and the player unit at
+   (0,2) is cell 8, and neither is touched.  Writing the test as
+   unit->side != side_select would put 0x40 into both of them. */
+static void zones_side_is_a_truth_value_not_a_number(void)
+{
+    stage_blank(4, 4);
+    units_reset(3);
+    put_unit(0, 0, 0, 0, 0);
+    put_unit(1, 2, 0, 1, 0);
+    put_unit(2, 0, 2, 2, 0);
+    fdps_move_grid_mark_opposing_zones_of_control(2);
+    CHECK_EQ(cell_flags(0), 0x40);
+    CHECK_EQ(cell_flags(2), 0x00);
+    CHECK_EQ(cell_flags(8), 0x00);
+    CHECK_EQ(cell_flags(3), 0x00);
+    CHECK_EQ(cell_flags(12), 0x00);
+}
+
+/* And the same three units with side_select 0: the neutral and the player unit
+   are both marked and the enemy one is not, which is what makes the two-call
+   sweep with 0 and then 1 cover every unit on the map. */
+static void zones_select_zero_marks_neutral_and_player(void)
+{
+    stage_blank(4, 4);
+    units_reset(3);
+    put_unit(0, 0, 0, 0, 0);
+    put_unit(1, 2, 0, 1, 0);
+    put_unit(2, 0, 2, 2, 0);
+    fdps_move_grid_mark_opposing_zones_of_control(0);
+    CHECK_EQ(cell_flags(2), 0x40);
+    CHECK_EQ(cell_flags(8), 0x40);
+    CHECK_EQ(cell_flags(0), 0x00);
+}
+
+/* AND AL,0x1 at 00010bde tests bit 0 alone.  The retired unit at (0,0) is
+   passed over even though its side qualifies, while the unit at (2,2) carrying
+   every other bit of the flags byte is marked normally -- a unit that has
+   already acted this turn still projects its zone of control. */
+static void zones_retired_bit_is_bit_zero_only(void)
+{
+    stage_blank(4, 4);
+    units_reset(2);
+    put_unit(0, 0, 0, 1, 0x01);
+    put_unit(1, 2, 2, 1, 0xfe);
+    fdps_move_grid_mark_opposing_zones_of_control(0);
+    CHECK_EQ(cell_flags(0), 0x00);
+    CHECK_EQ(cell_flags(1), 0x00);
+    CHECK_EQ(cell_flags(10), 0x40);
+}
+
+/* The bound is data_fdps_map_unit_count and the step is one 0x50-byte record,
+   so slot 1 is reached only when the count says two.  The first call also pins
+   that the walk stops rather than running on into whatever follows. */
+static void zones_walk_stops_at_the_unit_count(void)
+{
+    stage_blank(4, 4);
+    units_reset(1);
+    put_unit(0, 0, 0, 1, 0);
+    put_unit(1, 2, 2, 1, 0);
+    fdps_move_grid_mark_opposing_zones_of_control(0);
+    CHECK_EQ(cell_flags(0), 0x40);
+    CHECK_EQ(cell_flags(10), 0x00);
+
+    stage_blank(4, 4);
+    data_fdps_map_unit_count = 2;
+    fdps_move_grid_mark_opposing_zones_of_control(0);
+    CHECK_EQ(cell_flags(0), 0x40);
+    CHECK_EQ(cell_flags(10), 0x40);
+}
+
+/* CMP EAX,dword ptr [0x00060150] / JL is the signed compare: a count of -1
+   walks nothing.  Read unsigned, 0 < 0xffffffff holds and the walk runs off
+   the end of the array. */
+static void zones_unit_count_is_signed(void)
+{
+    stage_blank(4, 4);
+    units_reset(0);
+    put_unit(0, 0, 0, 1, 0);
+    fdps_move_grid_mark_opposing_zones_of_control(0);
+    CHECK_EQ(cell_flags(0), 0x00);
+
+    data_fdps_map_unit_count = -1;
+    fdps_move_grid_mark_opposing_zones_of_control(0);
+    CHECK_EQ(cell_flags(0), 0x00);
+}
+
+/* MOV EAX,[0x00069cd8] is inside the function, so the base is taken from the
+   global on every call rather than from anything cached across calls: pointing
+   it one record further along makes the same one-unit walk read slot 1. */
+static void zones_base_is_reread_from_the_global(void)
+{
+    stage_blank(4, 4);
+    units_reset(1);
+    put_unit(0, 0, 0, 1, 0);
+    put_unit(1, 2, 2, 1, 0);
+    data_fdps_map_unit_array_ptr = (unsigned char *) &stage_units[1];
+    fdps_move_grid_mark_opposing_zones_of_control(0);
+    CHECK_EQ(cell_flags(10), 0x40);
+    CHECK_EQ(cell_flags(0), 0x00);
+}
+
+/* The tile bytes are zero-extended (XOR EAX,EAX / MOV AL) and handed on as
+   they are: a unit sitting outside the grid is not filtered here, it is passed
+   to the mark, which has no bounds check on the centre tile either.  On a 4x4
+   grid a unit at (5,0) puts its 0x40 into index 5, which is tile (1,1), its
+   left mark into index 4 and its lower mark into index 9; the right neighbour
+   is the one thing refused, by width-1 > tile_x, which is 3 > 5.  That is the
+   original's behaviour rather than a desirable one, and it is asserted so that
+   a guard added here would be noticed. */
+static void zones_tile_bytes_are_passed_through_unchecked(void)
+{
+    stage_blank(4, 4);
+    units_reset(1);
+    put_unit(0, 5, 0, 1, 0);
+    fdps_move_grid_mark_opposing_zones_of_control(0);
+    CHECK_EQ(cell_flags(5), 0x40);
+    CHECK_EQ(cell_flags(4), 0x80);
+    CHECK_EQ(cell_flags(6), 0x00);
+    CHECK_EQ(cell_flags(9), 0x80);
+}
+
 void run_movegrid_tests(void)
 {
     RUN_TEST(grid_cell_stride_is_two);
@@ -398,9 +618,22 @@ void run_movegrid_tests(void)
     RUN_TEST(zoc_width_guard_is_signed);
     RUN_TEST(zoc_height_guard_is_signed);
 
+    RUN_TEST(zones_unit_record_stride_is_0x50);
+    RUN_TEST(zones_select_zero_marks_nonzero_sides);
+    RUN_TEST(zones_select_one_marks_side_zero);
+    RUN_TEST(zones_side_is_a_truth_value_not_a_number);
+    RUN_TEST(zones_select_zero_marks_neutral_and_player);
+    RUN_TEST(zones_retired_bit_is_bit_zero_only);
+    RUN_TEST(zones_walk_stops_at_the_unit_count);
+    RUN_TEST(zones_unit_count_is_signed);
+    RUN_TEST(zones_base_is_reread_from_the_global);
+    RUN_TEST(zones_tile_bytes_are_passed_through_unchecked);
+
     /* Put the global back before leaving.  stage() points it at this file's
        own stage_grid, and the runners share one process: a later unit that
        expects an unallocated grid would inherit a live pointer into another
        translation unit's fixture and pass or fail for the wrong reason. */
     data_fdps_battle_move_grid_ptr = NULL;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_map_unit_count = 0;
 }

@@ -155,3 +155,52 @@ void fdps_move_grid_mark_zone_of_control(int tile_x, int tile_y)
                  2 * (tile_y * grid_width + tile_x));
     unit_cell->flags = (unsigned char) (unit_cell->flags | 0x40);
 }
+
+/* 00010b90.  Walks the whole map unit array once and hands every unit on the
+   opposing side to fdps_move_grid_mark_zone_of_control above, so the range
+   flood fill that runs next cannot walk through them.
+
+   The side test uses the TRUTH VALUE of the record's side byte on both sides,
+   never its number: CMP dword ptr [EBP+0x14],0x0 against CMP byte ptr
+   [EAX+0x6],0x0, twice.  Side bytes run 0 enemy, 1 neutral, 2 player, so
+   side_select 1 marks exactly the units whose side byte is 0.  The obvious C
+   -- unit->side != side_select -- agrees with this on side_select 0 and 1 and
+   is still wrong: fdps_deploy_unit's sweep passes 1 and would then also stamp
+   a zone of control on every player unit.
+
+   The record pointer is cached from the global before the loop and stepped by
+   ADD dword ptr [EBP-0x4],0x50 at 00010c19, on the skip path as well as after
+   a mark, rather than being recomputed from the index.  Both dimensions of
+   that matter for equivalence only if the global moved mid-walk, which nothing
+   here does; it is written the way the original walks it.
+
+   The two tile bytes are read into their slots at the top of the body, before
+   the retired bit is even looked at (XOR EAX,EAX / MOV AL,byte ptr [EDX] at
+   00010bc3 and 00010bcd), and both are zero-extended -- a tile column of 0xff
+   is 255, not -1.
+
+   The loop bound is CMP EAX,dword ptr [0x00060150] / JL, the signed compare,
+   so a negative unit count walks nothing at all.  The retired test is AND
+   AL,0x1: only bit 0, never the whole byte, so a unit that has already acted
+   this turn still projects its zone of control. */
+void fdps_move_grid_mark_opposing_zones_of_control(int side_select)
+{
+    struct fdps_unit_record *unit;
+    int unit_index;
+    int tile_x;
+    int tile_y;
+
+    unit = (struct fdps_unit_record *) data_fdps_map_unit_array_ptr;
+    for (unit_index = 0;
+         unit_index < data_fdps_map_unit_count;
+         unit_index++) {
+        tile_x = (int) unit->pos_x;
+        tile_y = (int) unit->pos_y;
+        if (((unit->flags & 1) == 0) &&
+            (((side_select == 0) && (unit->side != 0)) ||
+             ((side_select != 0) && (unit->side == 0)))) {
+            fdps_move_grid_mark_zone_of_control(tile_x, tile_y);
+        }
+        unit++;
+    }
+}

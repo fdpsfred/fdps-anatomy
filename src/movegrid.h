@@ -36,4 +36,14 @@ extern void fdps_map_grid_reset(void);
 extern void fdps_move_grid_mark_zone_of_control(int tile_x, int tile_y);
 #pragma aux fdps_move_grid_mark_zone_of_control "*" parm caller [];
 
+/* Marks the zone of control of every unit on the side opposite the caller's
+   into the grid, so the movement range flooded over it afterwards cannot be
+   walked through them.  side_select is a TRUTH VALUE, not a side number: 0
+   marks every unit whose side byte is non-zero, any non-zero value marks every
+   unit whose side byte is 0.  Retired units (flags bit 0) are passed over.
+   Callers reset the grid first, and a caller that wants the whole map's zones
+   calls this twice, with 0 and then 1. */
+extern void fdps_move_grid_mark_opposing_zones_of_control(int side_select);
+#pragma aux fdps_move_grid_mark_opposing_zones_of_control "*" parm caller [];
+
 #endif
