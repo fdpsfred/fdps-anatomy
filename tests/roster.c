@@ -452,6 +452,471 @@ static void the_roster_base_is_read_on_every_call(void)
     data_fdps_roster_array_ptr = roster_image;
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_roster_add_character @ 00023bc0
+ *
+ * Expected values come from the assembly of that body and from ticket 17's
+ * three layouts in src/fdpstype.h -- struct fdps_unit_record, struct
+ * fdps_character_base_record and struct fdps_character_growth.  The five
+ * facts the cases below are aimed at:
+ *
+ *   00023bcc  the record is roster base + [0x00064114] * 0x50, and the count
+ *             is incremented only at 00023e12, after everything else.
+ *   00023c23  HP and MP take DEC EAX before the IMUL -- (level - 1) steps --
+ *             while 00023d85, 00023d9f and 00023dcc scale AP, DP and DX by the
+ *             full level with no DEC.
+ *   00023c1b  every growth byte is zero-extended (XOR EDX,EDX / MOV DL, and
+ *             the XOR AH,AH form) while 00023c2a takes the base stats with
+ *             MOVSX -- contract C on both sides of one sum.
+ *   00023cde  a carried item of 0xff makes the entry's flag byte 0x80, any
+ *             other id makes it 0, and the id is copied either way; 00023d1a
+ *             and 00023d21 write only the FLAG byte of bag entries 6 and 7.
+ *   00023e0a  the recompute call is passed the count, i.e. the new member's
+ *             own index, before the increment.
+ *
+ * The two table lookups run through the real accessors in src/table.c, so the
+ * fixtures are staged at those accessors' own strides, 0x18 and 0x0b.  The
+ * roster block is filled with 0xa5 rather than zeroed, because half of what
+ * this body is pinned on is which bytes it leaves alone; a zeroed block cannot
+ * tell an untouched byte from one written with 0.  Nothing here asserts what a
+ * real FRIAPRDA.DAT or FRILEVUP.DAT contains -- every byte read back is one
+ * this file wrote -- and all four globals go back to null on the way out.
+ */
+
+/* Strides and capacities of the two character tables, from
+   fdps_get_character_base_record and fdps_get_growth_record, and the 60
+   records each file holds (resource_info/data_tables.md). */
+#define BASE_STRIDE 0x18
+#define GROWTH_STRIDE 0x0b
+#define CHARACTER_COUNT 60
+
+/* The byte the roster block is filled with before each add, chosen because it
+   is neither 0 nor 0xff nor any value the body writes. */
+#define ROSTER_FILLER 0xa5
+
+/* Field offsets inside a roster record that only the add cases read. */
+#define OFF_FLAGS 0x05
+#define OFF_SIDE 0x06
+#define OFF_PORTRAIT_ID 0x07
+#define OFF_CHAR_ID 0x08
+#define OFF_RESERVED_09 0x09
+#define OFF_SPELLS_KNOWN 0x1a
+#define OFF_RACE 0x1f
+#define OFF_CLASS 0x20
+#define OFF_LEVEL 0x21
+#define OFF_GAP_028 0x28
+#define OFF_DEATH_OPCODE 0x31
+#define OFF_DEATH_OPERAND 0x32
+#define OFF_AI_BEHAVIOR 0x34
+#define OFF_MOVE 0x3b
+#define OFF_EXP_CARRY 0x3c
+#define OFF_EVENT_SLOT 0x3d
+#define OFF_MP_CURRENT 0x44
+#define OFF_MP_MAX 0x46
+
+/* Field offsets inside a FRIAPRDA.DAT base record. */
+#define BASE_OFF_RACE 0x00
+#define BASE_OFF_CLASS 0x01
+#define BASE_OFF_LEVEL 0x02
+#define BASE_OFF_HP 0x03
+#define BASE_OFF_MP 0x05
+#define BASE_OFF_MOVE 0x07
+#define BASE_OFF_SPELL_MASK 0x08
+#define BASE_OFF_EQUIP_0 0x0c
+#define BASE_OFF_EQUIP_1 0x0d
+#define BASE_OFF_CARRIED 0x0e
+#define BASE_OFF_AP 0x12
+#define BASE_OFF_DP 0x14
+#define BASE_OFF_DX 0x16
+
+/* Field offsets inside a FRILEVUP.DAT growth record: five {min, exclusive
+   max} pairs, of which this body reads only the mins. */
+#define GROWTH_OFF_AP_MIN 0x00
+#define GROWTH_OFF_DP_MIN 0x02
+#define GROWTH_OFF_DX_MIN 0x04
+#define GROWTH_OFF_HP_MIN 0x06
+#define GROWTH_OFF_MP_MIN 0x08
+
+/* The character the cases enrol, and the numbers its two records carry.  The
+   five growth mins are all different so a swapped pair shows as a wrong
+   number, and the two equipment ids differ from every carried id. */
+#define FIXTURE_CHAR_ID 5
+#define FIXTURE_RACE 3
+#define FIXTURE_CLASS 7
+#define FIXTURE_LEVEL 5
+#define FIXTURE_HP_BASE 30
+#define FIXTURE_MP_BASE 12
+#define FIXTURE_MOVE 6
+#define FIXTURE_AP_BASE 40
+#define FIXTURE_DP_BASE 25
+#define FIXTURE_DX_BASE 17
+#define FIXTURE_EQUIP_0 3
+#define FIXTURE_EQUIP_1 4
+#define FIXTURE_AP_MIN 2
+#define FIXTURE_DP_MIN 3
+#define FIXTURE_DX_MIN 4
+#define FIXTURE_HP_MIN 6
+#define FIXTURE_MP_MIN 1
+
+static unsigned char base_image[CHARACTER_COUNT * BASE_STRIDE];
+static unsigned char growth_image[CHARACTER_COUNT * GROWTH_STRIDE];
+
+static unsigned char *base_at(int char_id)
+{
+    return base_image + char_id * BASE_STRIDE;
+}
+
+static unsigned char *growth_at(int char_id)
+{
+    return growth_image + char_id * GROWTH_STRIDE;
+}
+
+/* The roster goes to filler and the three tables to zero, then the fixture
+   character's two records are written and the member count is put back to 0.
+   Item 3 carries four distinct modifiers so the recompute the body ends with
+   is visible; item 4, the second equipped id, stays all-zero. */
+static void stage_add_fixture(void)
+{
+    int byte_index;
+    unsigned char *base;
+    unsigned char *growth;
+
+    for (byte_index = 0;
+         byte_index < (ROSTER_CAPACITY + 1) * ROSTER_STRIDE;
+         byte_index++) {
+        roster_image[byte_index] = ROSTER_FILLER;
+    }
+    for (byte_index = 0;
+         byte_index < ITEM_IMAGE_RECORDS * ITEM_STRIDE;
+         byte_index++) {
+        item_image[byte_index] = 0;
+    }
+    for (byte_index = 0; byte_index < CHARACTER_COUNT * BASE_STRIDE;
+         byte_index++) {
+        base_image[byte_index] = 0;
+    }
+    for (byte_index = 0; byte_index < CHARACTER_COUNT * GROWTH_STRIDE;
+         byte_index++) {
+        growth_image[byte_index] = 0;
+    }
+
+    base = base_at(FIXTURE_CHAR_ID);
+    base[BASE_OFF_RACE] = FIXTURE_RACE;
+    base[BASE_OFF_CLASS] = FIXTURE_CLASS;
+    base[BASE_OFF_LEVEL] = FIXTURE_LEVEL;
+    put_word(base + BASE_OFF_HP, FIXTURE_HP_BASE);
+    put_word(base + BASE_OFF_MP, FIXTURE_MP_BASE);
+    base[BASE_OFF_MOVE] = FIXTURE_MOVE;
+    base[BASE_OFF_SPELL_MASK + 0] = 0x11;
+    base[BASE_OFF_SPELL_MASK + 1] = 0x22;
+    base[BASE_OFF_SPELL_MASK + 2] = 0x33;
+    base[BASE_OFF_SPELL_MASK + 3] = 0x44;
+    base[BASE_OFF_EQUIP_0] = FIXTURE_EQUIP_0;
+    base[BASE_OFF_EQUIP_1] = FIXTURE_EQUIP_1;
+    base[BASE_OFF_CARRIED + 0] = 0x10;
+    base[BASE_OFF_CARRIED + 1] = 0xff;
+    base[BASE_OFF_CARRIED + 2] = 0x00;
+    base[BASE_OFF_CARRIED + 3] = 0xff;
+    put_word(base + BASE_OFF_AP, FIXTURE_AP_BASE);
+    put_word(base + BASE_OFF_DP, FIXTURE_DP_BASE);
+    put_word(base + BASE_OFF_DX, FIXTURE_DX_BASE);
+
+    growth = growth_at(FIXTURE_CHAR_ID);
+    growth[GROWTH_OFF_AP_MIN] = FIXTURE_AP_MIN;
+    growth[GROWTH_OFF_DP_MIN] = FIXTURE_DP_MIN;
+    growth[GROWTH_OFF_DX_MIN] = FIXTURE_DX_MIN;
+    growth[GROWTH_OFF_HP_MIN] = FIXTURE_HP_MIN;
+    growth[GROWTH_OFF_MP_MIN] = FIXTURE_MP_MIN;
+
+    stage_item(FIXTURE_EQUIP_0, 7, 5, 3, 9);
+
+    data_fdps_roster_array_ptr = roster_image;
+    data_fdps_item_effect_table_ptr = item_image;
+    data_fdps_battle_character_base_table_ptr = base_image;
+    data_fdps_battle_character_growth_table_ptr = growth_image;
+    data_fdps_roster_member_count = 0;
+}
+
+static unsigned char byte_of(int roster_index, int offset)
+{
+    return member_at(roster_index)[offset];
+}
+
+/* The new member lands at the index the count already holds -- record 2 when
+   the count is 2 -- the records in front of it are not touched, and the count
+   comes out one higher.  Slot 3 stays filler too, so nothing was written a
+   record early or a record late. */
+static void the_member_lands_at_the_count_and_the_count_advances(void)
+{
+    stage_add_fixture();
+    data_fdps_roster_member_count = 2;
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(byte_of(2, OFF_CHAR_ID), FIXTURE_CHAR_ID);
+    CHECK_EQ(data_fdps_roster_member_count, 3);
+    CHECK_EQ(byte_of(0, OFF_CHAR_ID), ROSTER_FILLER);
+    CHECK_EQ(byte_of(1, OFF_CHAR_ID), ROSTER_FILLER);
+    CHECK_EQ(byte_of(3, OFF_CHAR_ID), ROSTER_FILLER);
+}
+
+/* The five fixed header bytes: flags cleared, side 2 -- the player's side, the
+   literal at 00023c76 -- the character id written into BOTH the portrait byte
+   and the char_id byte, and the spare at +0x09 cleared. */
+static void the_header_bytes_are_seeded_from_the_argument(void)
+{
+    stage_add_fixture();
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(byte_of(0, OFF_FLAGS), 0);
+    CHECK_EQ(byte_of(0, OFF_SIDE), 2);
+    CHECK_EQ(byte_of(0, OFF_PORTRAIT_ID), FIXTURE_CHAR_ID);
+    CHECK_EQ(byte_of(0, OFF_CHAR_ID), FIXTURE_CHAR_ID);
+    CHECK_EQ(byte_of(0, OFF_RESERVED_09), 0);
+}
+
+/* Bag entries 0 and 1 take the base record's two equipment ids and the
+   equipped flag 0x40, which is the bit fdps_roster_recompute_combat_stats
+   tests, so both items are worn from the moment the member is enrolled. */
+static void the_two_equipment_entries_are_flagged_equipped(void)
+{
+    stage_add_fixture();
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 0), 0x40);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 1), FIXTURE_EQUIP_0);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 2), 0x40);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 3), FIXTURE_EQUIP_1);
+}
+
+/* Entries 2..5 take the four carried ids.  The flag byte is 0x80 exactly when
+   the id is 0xff and 0 otherwise -- id 0x00 is a real item and gets 0, not the
+   empty flag -- and the id byte is copied either way, 0xff included.  So an
+   empty carried slot is 0x80 alongside an id of 0xff and not alongside a
+   cleared id byte. */
+static void a_carried_id_of_ff_is_the_only_one_flagged_empty(void)
+{
+    stage_add_fixture();
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 4), 0x00);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 5), 0x10);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 6), 0x80);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 7), 0xff);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 8), 0x00);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 9), 0x00);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 10), 0x80);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 11), 0xff);
+}
+
+/* Bag entries 6 and 7 get their flag byte written and their id byte left
+   alone: MOV byte ptr [EAX+0x16],0x80 and [EAX+0x18],0x80 at 00023d1a and
+   00023d1e, and nothing at +0x17 or +0x19.  Clearing those two ids as well is
+   the obvious tidy-up; the original leaves whatever the block held. */
+static void the_last_two_bag_entries_keep_their_id_bytes(void)
+{
+    stage_add_fixture();
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 12), 0x80);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 13), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 14), 0x80);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 15), ROSTER_FILLER);
+}
+
+/* The known-spell bitmap is five bytes and the base record supplies four:
+   memmove of 4 at 00023d35, then MOV byte ptr [EAX+0x1e],0x0 for the fifth.
+   Spell ids 0x20..0x27 therefore start unlearned however the record was
+   filled before. */
+static void the_spell_bitmap_takes_four_bytes_and_clears_the_fifth(void)
+{
+    stage_add_fixture();
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(byte_of(0, OFF_SPELLS_KNOWN + 0), 0x11);
+    CHECK_EQ(byte_of(0, OFF_SPELLS_KNOWN + 1), 0x22);
+    CHECK_EQ(byte_of(0, OFF_SPELLS_KNOWN + 2), 0x33);
+    CHECK_EQ(byte_of(0, OFF_SPELLS_KNOWN + 3), 0x44);
+    CHECK_EQ(byte_of(0, OFF_SPELLS_KNOWN + 4), 0x00);
+}
+
+/* Race, class and level are copied out of the base record, all six status
+   timers are cleared by the memset at 00023d6f, and the death-script opcode is
+   set to 0xff -- the "no script" value, and the one byte of that pair the body
+   writes. */
+static void the_identity_timers_and_death_script_are_set(void)
+{
+    stage_add_fixture();
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(byte_of(0, OFF_RACE), FIXTURE_RACE);
+    CHECK_EQ(byte_of(0, OFF_CLASS), FIXTURE_CLASS);
+    CHECK_EQ(byte_of(0, OFF_LEVEL), FIXTURE_LEVEL);
+    CHECK_EQ(byte_of(0, OFF_STATUS_TIMERS + 0), 0);
+    CHECK_EQ(byte_of(0, OFF_STATUS_TIMERS + 1), 0);
+    CHECK_EQ(byte_of(0, OFF_STATUS_TIMERS + 2), 0);
+    CHECK_EQ(byte_of(0, OFF_STATUS_TIMERS + 3), 0);
+    CHECK_EQ(byte_of(0, OFF_STATUS_TIMERS + 4), 0);
+    CHECK_EQ(byte_of(0, OFF_STATUS_TIMERS + 5), 0);
+    CHECK_EQ(byte_of(0, OFF_DEATH_OPCODE), 0xff);
+    CHECK_EQ(byte_of(0, OFF_MOVE), FIXTURE_MOVE);
+    CHECK_EQ(byte_of(0, OFF_EXP_CARRY), 0);
+}
+
+/* HP and MP take (level - 1) growth steps: at level 5 that is 30 + 4 * 6 = 54
+   and 12 + 4 * 1 = 16, and both the current and the maximum word get the same
+   number, so the member is enrolled at full health. */
+static void hp_and_mp_scale_by_level_minus_one(void)
+{
+    stage_add_fixture();
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(stat_of(0, OFF_HP_CURRENT), 54);
+    CHECK_EQ(stat_of(0, OFF_HP_MAX), 54);
+    CHECK_EQ(stat_of(0, OFF_MP_CURRENT), 16);
+    CHECK_EQ(stat_of(0, OFF_MP_MAX), 16);
+}
+
+/* Attack, defense and dexterity take a FULL level of growth steps: at level 5
+   that is 40 + 5 * 2 = 50, 25 + 5 * 3 = 40 and 17 + 5 * 4 = 37.  The asymmetry
+   with HP and MP above is the point -- writing all five the same way is the
+   obvious reading and gives a level 5 character 6 too much HP. */
+static void ap_dp_and_dx_scale_by_the_full_level(void)
+{
+    stage_add_fixture();
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(stat_of(0, OFF_AP_BASE), 50);
+    CHECK_EQ(stat_of(0, OFF_DP_BASE), 40);
+    CHECK_EQ(stat_of(0, OFF_DX_BASE), 37);
+}
+
+/* The same asymmetry seen at the bottom of the level range, where it is
+   sharpest: a level 1 character gets no HP or MP growth at all and starts on
+   the base record's own 30 and 12, but already carries one step of attack,
+   defense and dexterity -- 42, 28 and 21. */
+static void a_level_one_character_gets_growth_on_the_stats_only(void)
+{
+    stage_add_fixture();
+    base_at(FIXTURE_CHAR_ID)[BASE_OFF_LEVEL] = 1;
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(byte_of(0, OFF_LEVEL), 1);
+    CHECK_EQ(stat_of(0, OFF_HP_MAX), FIXTURE_HP_BASE);
+    CHECK_EQ(stat_of(0, OFF_MP_MAX), FIXTURE_MP_BASE);
+    CHECK_EQ(stat_of(0, OFF_AP_BASE), 42);
+    CHECK_EQ(stat_of(0, OFF_DP_BASE), 28);
+    CHECK_EQ(stat_of(0, OFF_DX_BASE), 21);
+}
+
+/* Contract C, on both sides of the same sum.  A growth byte of 0xff is
+   zero-extended: at level 3 it adds 2 * 255 = 510 to HP, and never subtracts
+   two.  A base stat word of 0xfff6 is sign-extended: it is -10, and with the
+   AP growth staged to 0 the record's attack base comes out -10 and not
+   65526. */
+static void growth_bytes_are_unsigned_and_base_stats_are_signed(void)
+{
+    stage_add_fixture();
+    base_at(FIXTURE_CHAR_ID)[BASE_OFF_LEVEL] = 3;
+    growth_at(FIXTURE_CHAR_ID)[GROWTH_OFF_HP_MIN] = 0xff;
+    growth_at(FIXTURE_CHAR_ID)[GROWTH_OFF_AP_MIN] = 0;
+    put_word(base_at(FIXTURE_CHAR_ID) + BASE_OFF_AP, 0xfff6);
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(stat_of(0, OFF_HP_MAX), FIXTURE_HP_BASE + 510);
+    CHECK_EQ(stat_of(0, OFF_AP_BASE), -10);
+}
+
+/* The body ends by calling fdps_roster_recompute_combat_stats for the new
+   member, so the four derived stats at +0x48..+0x4e are filled before the
+   count moves.  Equipped item 3 carries ap 7, hit 5, dp 3 and ev 9, so the
+   totals are the bases just written plus those: 57, 43, 42 and 46 -- and hit
+   and evade both come off the one dexterity base of 37.  Filler in those four
+   fields would read as 0xa5a5, so a missing call cannot pass this. */
+static void the_derived_combat_stats_are_recomputed_for_the_new_member(void)
+{
+    stage_add_fixture();
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(stat_of(0, OFF_AP), 57);
+    CHECK_EQ(stat_of(0, OFF_DP), 43);
+    CHECK_EQ(stat_of(0, OFF_HIT), 42);
+    CHECK_EQ(stat_of(0, OFF_EV), 46);
+}
+
+/* And it is recomputed for the NEW member's index and not for member 0: with
+   the count at 2 the stats land in record 2, while record 0's four fields stay
+   filler. */
+static void the_recompute_runs_on_the_new_index(void)
+{
+    stage_add_fixture();
+    data_fdps_roster_member_count = 2;
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(stat_of(2, OFF_AP), 57);
+    CHECK_EQ(stat_of(2, OFF_EV), 46);
+    CHECK_EQ(byte_of(0, OFF_AP), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, OFF_EV), ROSTER_FILLER);
+}
+
+/* The record is only partly initialised, and the gaps are behaviour.  Position
+   and sprite state at +0x00..+0x04, the nine bytes at +0x28, the death-script
+   operand at +0x32, the three AI bytes at +0x34 and the event slot at +0x3d
+   are all still filler after the add.  A rebuild that helpfully zeroes the
+   whole record first would pass every other case above and put a scripted unit
+   at (0,0) facing 0. */
+static void the_uninitialised_fields_are_left_alone(void)
+{
+    stage_add_fixture();
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(byte_of(0, 0x00), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, 0x01), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, 0x02), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, 0x03), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, 0x04), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, OFF_GAP_028 + 0), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, OFF_GAP_028 + 8), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, OFF_DEATH_OPERAND + 0), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, OFF_DEATH_OPERAND + 1), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, OFF_AI_BEHAVIOR + 0), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, OFF_AI_BEHAVIOR + 1), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, OFF_AI_BEHAVIOR + 2), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, OFF_EVENT_SLOT), ROSTER_FILLER);
+}
+
+/* Two adds in a row fill two consecutive records and leave the count at 2, so
+   a chapter's opening run of calls enrols one member per call.  Nothing in the
+   body caches the count or the record address across calls. */
+static void consecutive_adds_fill_consecutive_records(void)
+{
+    stage_add_fixture();
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    fdps_roster_add_character(FIXTURE_CHAR_ID);
+    CHECK_EQ(data_fdps_roster_member_count, 2);
+    CHECK_EQ(byte_of(0, OFF_CHAR_ID), FIXTURE_CHAR_ID);
+    CHECK_EQ(byte_of(1, OFF_CHAR_ID), FIXTURE_CHAR_ID);
+    CHECK_EQ(stat_of(1, OFF_HP_MAX), 54);
+    CHECK_EQ(stat_of(1, OFF_AP), 57);
+}
+
+/* The argument reaches both table lookups and the two id bytes: enrolling a
+   different character reads that character's own records.  Character 9 is
+   staged with its own level and bases, and the record that comes out carries
+   its numbers and its id, not the fixture character's. */
+static void the_argument_selects_both_table_records(void)
+{
+    unsigned char *base;
+    unsigned char *growth;
+
+    stage_add_fixture();
+    base = base_at(9);
+    base[BASE_OFF_RACE] = 1;
+    base[BASE_OFF_CLASS] = 2;
+    base[BASE_OFF_LEVEL] = 2;
+    put_word(base + BASE_OFF_HP, 100);
+    put_word(base + BASE_OFF_AP, 11);
+    base[BASE_OFF_CARRIED + 0] = 0xff;
+    base[BASE_OFF_CARRIED + 1] = 0xff;
+    base[BASE_OFF_CARRIED + 2] = 0xff;
+    base[BASE_OFF_CARRIED + 3] = 0xff;
+    growth = growth_at(9);
+    growth[GROWTH_OFF_HP_MIN] = 10;
+    growth[GROWTH_OFF_AP_MIN] = 5;
+
+    fdps_roster_add_character(9);
+    CHECK_EQ(byte_of(0, OFF_CHAR_ID), 9);
+    CHECK_EQ(byte_of(0, OFF_PORTRAIT_ID), 9);
+    CHECK_EQ(byte_of(0, OFF_LEVEL), 2);
+    CHECK_EQ(stat_of(0, OFF_HP_MAX), 110);
+    CHECK_EQ(stat_of(0, OFF_AP_BASE), 21);
+}
+
 void run_roster_tests(void)
 {
     RUN_TEST(the_base_stats_seed_the_totals);
@@ -470,9 +935,31 @@ void run_roster_tests(void)
     RUN_TEST(the_totals_are_recomputed_not_accumulated);
     RUN_TEST(the_roster_base_is_read_on_every_call);
 
-    /* Put both globals back to null.  Ticket 23 has yet to define them, and
-       leaving a pointer to this file's static buffers in either would hand the
-       next unit an address it has no business holding. */
+    RUN_TEST(the_member_lands_at_the_count_and_the_count_advances);
+    RUN_TEST(the_header_bytes_are_seeded_from_the_argument);
+    RUN_TEST(the_two_equipment_entries_are_flagged_equipped);
+    RUN_TEST(a_carried_id_of_ff_is_the_only_one_flagged_empty);
+    RUN_TEST(the_last_two_bag_entries_keep_their_id_bytes);
+    RUN_TEST(the_spell_bitmap_takes_four_bytes_and_clears_the_fifth);
+    RUN_TEST(the_identity_timers_and_death_script_are_set);
+    RUN_TEST(hp_and_mp_scale_by_level_minus_one);
+    RUN_TEST(ap_dp_and_dx_scale_by_the_full_level);
+    RUN_TEST(a_level_one_character_gets_growth_on_the_stats_only);
+    RUN_TEST(growth_bytes_are_unsigned_and_base_stats_are_signed);
+    RUN_TEST(the_derived_combat_stats_are_recomputed_for_the_new_member);
+    RUN_TEST(the_recompute_runs_on_the_new_index);
+    RUN_TEST(the_uninitialised_fields_are_left_alone);
+    RUN_TEST(consecutive_adds_fill_consecutive_records);
+    RUN_TEST(the_argument_selects_both_table_records);
+
+    /* Put every global this file wrote back where it found it.  Ticket 23 has
+       yet to define the four pointers, and leaving a pointer to this file's
+       static buffers in any of them would hand the next unit an address it has
+       no business holding; the member count goes back to 0 for the same
+       reason, since the adds above moved it. */
     data_fdps_roster_array_ptr = (unsigned char *) 0;
     data_fdps_item_effect_table_ptr = (unsigned char *) 0;
+    data_fdps_battle_character_base_table_ptr = (unsigned char *) 0;
+    data_fdps_battle_character_growth_table_ptr = (unsigned char *) 0;
+    data_fdps_roster_member_count = 0;
 }

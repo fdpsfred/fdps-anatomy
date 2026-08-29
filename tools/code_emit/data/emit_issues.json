@@ -523,5 +523,31 @@
       "needs": "Ticket 23 defining the two globals; nothing here changes when it does.",
       "status": "open"
     }
+  ],
+  "00023bc0": [
+    {
+      "from": "emit",
+      "what": "The record is enrolled with bag entries 6 and 7 flagged empty but holding whatever id bytes the roster block already had, and with position, facing, walk step, the AI fields, the event slot, +0x28..+0x30 and +0x32 uninitialised. What those bytes actually hold in play depends on whether the 0xa00 block malloc'ed at 000296b8 is ever written before the first chapter's adds, and on what a chapter reload leaves behind; the emitted C reproduces the absence of the writes, but the observable consequence cannot be pinned from this function alone.",
+      "needs": "fdps_load_global_resources (000296b8) and the save/load path emitted, so it can be said whether the block arrives zeroed from malloc, or a real machine run that reads a fresh member's +0x17 and +0x00.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "level - 1 when the base record's level byte is 0: the assembly does DEC on the zero-extended byte, so the multiply is by -1 and HP/MP come out base minus one growth step. The emitted C reproduces that in int arithmetic, but whether FRIAPRDA.DAT ever carries level 0 for a character an init enrols is not settled here.",
+      "needs": "assets/tables/characters.md checked against the real FRIAPRDA.DAT level column, or ticket 23's emitted table data.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "What the fields this body never writes actually hold when a member is enrolled: bag entries 6 and 7's id bytes at +0x17 and +0x19, position/facing/walk step at +0x00..+0x04, +0x28..+0x30, the death-script operand at +0x32, the AI fields at +0x34..+0x36 and the event slot at +0x3d. The emitted C reproduces the absence of the stores, but the observable consequence depends on what the 0xa00 block malloc'ed at 000296b8 contains before the first chapter's adds and on what a chapter reload leaves behind.",
+      "needs": "fdps_load_global_resources (000296b8) and the save/load path emitted, so it can be said whether the block arrives zeroed; or a real DOSBox-X run reading a fresh member's +0x17 and +0x00.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Whether a base record with level 0 ever reaches this body. DEC EAX on the zero-extended level byte makes the HP/MP multiplier -1, so HP and MP would come out one growth step BELOW the base record's value. The emitted C reproduces that in int arithmetic, but no test covers it and nothing here settles whether FRIAPRDA.DAT carries level 0 for any character an init enrols.",
+      "needs": "the FRIAPRDA.DAT level column checked against assets/tables/characters.md, or ticket 23's emitted table data.",
+      "status": "open"
+    }
   ]
 }

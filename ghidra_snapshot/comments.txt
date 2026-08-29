@@ -4782,12 +4782,14 @@ Hit and evade are both seeded from the one dexterity word at record+0x3e; there 
 Watcom alignment padding: lea eax,[eax+0x0] + nop, aligns next function entry to 16 bytes
 
 === 00023bc0 [PLATE]
-Appends a new 0x50-byte unit record at index [0x00064114] of the roster array based at [0x00064108], filling it from the per-character base record (00018ab0) and per-level growth table (00018ae0) with (level-1)-scaled max HP/MP, level-scaled stats, 0x80/0x40 flag sentinels and cleared equipment and inventory slots, then calling 00023ac0 for the new slot and incrementing the roster count.
+Appends a new 0x50-byte unit record at index [0x00064114] of the roster array based at [0x00064108], filling it from the per-character base record (00018ab0) and per-level growth table (00018ae0) with (level-1)-scaled max HP/MP, level-scaled stats, 0x80/0x40 flag sentinels, and a bag that is seeded rather than cleared: the two equipment entries are seeded from the base record's +0x0c and +0x0d with flag byte 0x40, the four carried entries take their ids with flag 0x00 or 0x80 depending on whether the id is 0xff, and bag entries 6 and 7 get only their flag byte set to 0x80; then calling 00023ac0 for the new slot and incrementing the roster count.
 Pool: fdps  [no Function ID hit in either library set; unique hash in image]
 Evidence: Domain-specific record layout and stat growth arithmetic driven off the game globals 0x00064108 and 0x00064114, called from twelve game-side sites including fdps_title_demo, all of which are themselves game code; its only vendor callees are memmove and memset, which is the game calling the CRT and not the reverse. No AIL driver state, no interrupt path, and far too much structured work to be a linker island or convention shim.
 Name: game code, fdps_ + snake_case describing the observed behaviour; no library symbol identified and none exists to identify. The scenario-entry callers each use this call to add one named roster character, which is where the name comes from.
 Boundary: 00023bc0-00023e1e, Watcom prologue at the entry and the matching MOV ESP,EBP / POP EBP,EDI,ESI,EBX / RET at the end; the single byte after it is a 0x90 alignment pad and the next function begins its own prologue at 00023e20.
 Signature: __cdecl void(int char_id) - the argument is read from [EBP+0x14] rather than a register, and the plain RET leaves the caller to clean up.
+Rebuild note: maximum HP and MP are seeded as base + (level - 1) * growth_min (DEC EAX at 00023c23 and 00023c3e) while AP, DP and DX are seeded as base + level * growth_min with no DEC (00023d85, 00023d9f, 00023dcc); writing all five the same way is the obvious reading and shifts every enrolled character's HP and MP by one growth step.
+Rebuild note: bag entries 6 and 7 get only their FLAG byte written (0x80 at 00023d1a and 00023d1e) and their id bytes at +0x17 and +0x19 keep whatever the roster block held, as do +0x00..+0x04, +0x28..+0x30, +0x32, +0x34..+0x36 and +0x3d -- zeroing the record first is the obvious tidy-up and produces a record the original never writes.
 
 === 00023e1f [EOL]
 Single 0x90 NOP aligning fdps_load_savegame to an even address.

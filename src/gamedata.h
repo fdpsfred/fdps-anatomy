@@ -40,6 +40,18 @@ extern unsigned char *data_fdps_map_unit_array_ptr;
    so a reader casts. */
 extern unsigned char *data_fdps_roster_array_ptr;
 
+/* 00064114.  How many of the roster block's 32 record slots are occupied, and
+   equally the index of the next free one: fdps_roster_add_character at
+   00023bc0 writes the new member at that index -- IMUL EAX,[EBP-0x30],0x50 /
+   MOV EDX,[0x00064108] / ADD -- and only then increments the count, INC dword
+   ptr [0x00064114] at 00023e12.  Nothing compares it against 32 on the way in.
+
+   It is a separate global from the block itself and not a field of it, so the
+   two are written independently: a chapter's init runs a series of
+   fdps_roster_add_character calls that each move this by one, while the block
+   the records land in never moves. */
+extern int data_fdps_roster_member_count;
+
 /* 00060144.  Base of the battle map's working movement grid: a four-byte
    header of two signed 16-bit dimensions followed by width*height two-byte
    cells (see src/movegrid.h).  Null until a chapter has been loaded, and the

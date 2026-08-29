@@ -263,6 +263,14 @@
       "status": "committed",
       "emitted_against": "0xf9",
       "rounds": 0
+    },
+    "00023bc0": {
+      "name": "fdps_roster_add_character",
+      "target": "roster.c",
+      "body_size": "0x25f",
+      "status": "committed",
+      "emitted_against": "0x25f",
+      "rounds": 0
     }
   }
 }

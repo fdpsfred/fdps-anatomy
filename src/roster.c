@@ -8,6 +8,7 @@
  * Nothing in this file owns state: every function works in place on the block
  * that pointer holds.
  */
+#include <string.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "table.h"
@@ -103,4 +104,137 @@ void fdps_roster_recompute_combat_stats(int roster_index)
     member->dp = (short) defense_total;
     member->hit = (short) hit_total;
     member->ev = (short) evade_total;
+}
+
+/* How many carried items the base record hands over: CMP dword ptr
+   [EBP-0x10],0x4 at 00023cc0.  Four, out of the eight bag entries a unit
+   record has -- the two in front of them are the equipment slots and the two
+   behind them are only flagged empty. */
+#define CARRIED_ITEM_COUNT 4
+
+/* The three flag values an inventory entry's first byte takes as the record is
+   seeded: 0x40 equipped, 0x80 empty, 0 carried and not equipped.  0x40 is the
+   bit fdps_roster_recompute_combat_stats above tests, and 0x80 is what the
+   bag-listing screens read as "no item here". */
+#define INVENTORY_FLAG_EQUIPPED 0x40
+#define INVENTORY_FLAG_EMPTY 0x80
+#define INVENTORY_FLAG_CARRIED 0x00
+
+/* The id an unused carried-item position holds in the base record: CMP
+   EAX,0xff at 00023cde, on the byte zero-extended by AND EAX,0xff. */
+#define CARRIED_ITEM_NONE 0xff
+
+/* 00023bc0.  The new member goes at the index the count already holds and the
+   count is incremented last, so the record and the count are only in step
+   after the body has finished; the recompute call in between is passed the
+   OLD count, which is the new member's index.  The count is re-read from the
+   global for that call -- PUSH dword ptr [0x00064114] at 00023e04 -- and not
+   taken from the local the record address was formed from at 00023bcc.
+
+   The two growth scalings differ and the difference is not a typo to tidy up.
+   Maximum HP and MP take (level - 1) steps -- DEC EAX at 00023c23 and
+   00023c3e, on the level before the IMUL -- so a level 1 character starts on
+   exactly the base record's HP and MP.  Attack, defense and dexterity take a
+   full LEVEL of steps, with no DEC anywhere near them (00023d85, 00023d9f,
+   00023dcc), so the same level 1 character already carries one step of each of
+   those.  Writing all five the same way is the obvious reading and moves every
+   enrolled character's HP and MP by one growth step.
+
+   Contract C is live in that arithmetic.  The three base stats and the two
+   base HP/MP words arrive through MOVSX and are signed, while every growth
+   byte arrives zero-extended -- XOR EDX,EDX / MOV DL at 00023c1b, and the
+   16-bit XOR AH,AH form at 00023d83 and 00023d9d -- so a growth byte of 0xff
+   is 255 steps of gain and never one step of loss.
+
+   What the body does NOT write is as much a part of the record's state as
+   what it does.  Position, facing and walk step (+0x00..+0x04), the AI fields
+   (+0x34..+0x36), the event slot (+0x3d), the death-script operand (+0x32) and
+   the nine bytes at +0x28 are left holding whatever the roster block held
+   there before, and so are the id bytes of bag entries 6 and 7 at +0x17 and
+   +0x19 -- those two entries get their empty flag written and nothing else.
+   Clearing them as well is the obvious tidy-up and would make a record that
+   the original never produces.
+
+   The four derived combat stats at +0x48..+0x4f are not written here either:
+   fdps_roster_recompute_combat_stats writes all four from the bases and the
+   equipment this body has just seeded, which is why the call is at the end. */
+void fdps_roster_add_character(int char_id)
+{
+    struct fdps_unit_record *member;
+    struct fdps_character_base_record *base_record;
+    struct fdps_character_growth *growth;
+    int member_index;
+    int level;
+    int hp_start;
+    int mp_start;
+    int ap_base;
+    int dp_base;
+    int dx_base;
+    int carried_index;
+
+    member_index = data_fdps_roster_member_count;
+    member = (struct fdps_unit_record *)
+             (data_fdps_roster_array_ptr +
+              member_index * ROSTER_RECORD_STRIDE);
+
+    base_record = fdps_get_character_base_record(char_id);
+    growth = fdps_get_growth_record(char_id);
+
+    level = (int) base_record->level;
+    hp_start = (int) base_record->hp_base +
+               (int) growth->hp_min * (level - 1);
+    mp_start = (int) base_record->mp_base +
+               (int) growth->mp_min * (level - 1);
+    ap_base = (int) base_record->ap_base;
+    dp_base = (int) base_record->dp_base;
+    dx_base = (int) base_record->dx_base;
+
+    member->flags = 0;
+    member->side = 2;
+    member->portrait_id = (unsigned char) char_id;
+    member->char_id = (unsigned char) char_id;
+    member->reserved_09 = 0;
+
+    member->inventory_slots[0] = INVENTORY_FLAG_EQUIPPED;
+    member->inventory_slots[1] = base_record->equipped_item_0;
+    member->inventory_slots[2] = INVENTORY_FLAG_EQUIPPED;
+    member->inventory_slots[3] = base_record->equipped_item_1;
+
+    for (carried_index = 0;
+         carried_index < CARRIED_ITEM_COUNT;
+         carried_index++) {
+        if (base_record->carried_items[carried_index] == CARRIED_ITEM_NONE) {
+            member->inventory_slots[4 + carried_index * 2] =
+                INVENTORY_FLAG_EMPTY;
+        } else {
+            member->inventory_slots[4 + carried_index * 2] =
+                INVENTORY_FLAG_CARRIED;
+        }
+        member->inventory_slots[5 + carried_index * 2] =
+            base_record->carried_items[carried_index];
+    }
+
+    member->inventory_slots[12] = INVENTORY_FLAG_EMPTY;
+    member->inventory_slots[14] = INVENTORY_FLAG_EMPTY;
+
+    memmove(member->spells_known_bitmap, base_record->spell_mask, 4);
+    member->spells_known_bitmap[4] = 0;
+    member->race = base_record->race_id;
+    member->clazz = base_record->class_id;
+    member->level = (unsigned char) level;
+    memset(member->status_timers, 0, 6);
+    member->death_script_opcode = 0xff;
+
+    member->ap_base = (short) (ap_base + level * (int) growth->ap_min);
+    member->dp_base = (short) (dp_base + level * (int) growth->dp_min);
+    member->move = base_record->move;
+    member->exp_carry = 0;
+    member->dx_base = (short) (dx_base + (int) growth->dx_min * level);
+    member->hp_current = (short) hp_start;
+    member->hp_max = (short) hp_start;
+    member->mp_current = (short) mp_start;
+    member->mp_max = (short) mp_start;
+
+    fdps_roster_recompute_combat_stats(data_fdps_roster_member_count);
+    data_fdps_roster_member_count = data_fdps_roster_member_count + 1;
 }

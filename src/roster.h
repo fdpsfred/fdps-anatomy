@@ -33,4 +33,27 @@
 extern void fdps_roster_recompute_combat_stats(int roster_index);
 #pragma aux fdps_roster_recompute_combat_stats "*" parm caller [];
 
+/* Enrols character char_id as the next roster member: the record at index
+   data_fdps_roster_member_count is filled from that character's FRIAPRDA.DAT
+   base record and FRILEVUP.DAT growth record, its derived combat stats are
+   recomputed by the function above, and the member count is incremented.
+
+   char_id is the portrait id the two table accessors take, and it is written
+   into the new record twice, as both portrait_id (+0x07) and char_id (+0x08).
+   The new member's side byte is 2.
+
+   The two scalings are NOT the same: maximum HP and MP are the base value plus
+   (level - 1) growth steps, while attack, defense and dexterity are the base
+   value plus a full level of growth steps.  Both current and maximum HP are
+   set to the same number, and so are current and maximum MP.
+
+   Nothing is bounded and nothing is checked: the count is not compared against
+   the roster block's 32 slots, and the roster and table base pointers are not
+   tested for null.  The record is only partly initialised -- position, facing,
+   walk step, the AI fields, the event slot and the bytes at +0x28..+0x30 and
+   +0x32 keep whatever the block held, and so do the id bytes of the last two
+   bag entries. */
+extern void fdps_roster_add_character(int char_id);
+#pragma aux fdps_roster_add_character "*" parm caller [];
+
 #endif
