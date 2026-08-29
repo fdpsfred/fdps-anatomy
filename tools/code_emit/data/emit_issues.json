@@ -379,5 +379,19 @@
       "needs": "Emitting those eight callers and establishing the range data_fdps_map_ai_best_spell_id can hold when the cast is reached. If it cannot leave 0x00-0x27 the missing bound is unobservable and this closes; if it can, what lies past the table is heap residue that differs between the original and the rebuild and no unit test can pin it.",
       "status": "open"
     }
+  ],
+  "00018c30": [
+    {
+      "what": "The third byte of each 3-byte route is named *_move_bonus in ticket 17's struct fdps_promotion_record, while the plate comment at 00018c30 states that byte 2 of an entry is not read anywhere in the program. Both cannot be true as written, and nothing in this accessor settles it -- it dereferences nothing. No equivalence risk here, but the next reader of the church screen inherits a field name that may be a guess.",
+      "needs": "The church functions 000345a0 / 00034c10 / 000352c0 emitted, so every read of the record is accounted for; if none touches offset 2, 5, 8 or 11, dumping those bytes out of RANKUP.DAT and comparing them with the guide's per-route movement values is what would either confirm the name or replace it with an honest unknown.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Unit record byte 0x3b, the field the route's third byte is added into at 000349b5, is not identified by name here. The addition is what makes *_move_bonus plausible, but 'the byte a movement bonus is added to' is inference from the field's name at the other end, not an independent identification of 0x3b.",
+      "needs": "The church functions 000345a0 / 00034c10 emitted against the ticket 17 unit record layout, or any other reader of unit byte 0x3b -- a movement-range computation reading it would settle it outright. Cross-checking RANKUP.DAT's bytes at offsets 2, 5, 8 and 11 against the guide's per-route movement values would corroborate it from the data side.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

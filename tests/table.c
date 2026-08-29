@@ -1,20 +1,21 @@
 /* tests/table.c -- cover for src/table.c.
  *
- * Expected values come from the assembly of the eight accessors -- 00018ab0
+ * Expected values come from the assembly of the nine accessors -- 00018ab0
  * over FRIAPRDA.DAT, 00018ae0 over FRILEVUP.DAT, 00018b10 over ENEMYDAT.DAT,
  * 00018b40 over ITEM.DAT, 00018b70 over PROMAP.DAT, 00018ba0 over PROEQU.DAT,
- * 00018bd0 over MAGICDAT.DAT and 00018c00 over GETMGTAB.DAT -- and from ticket
- * 17's layouts of struct fdps_character_base_record, struct
- * fdps_character_growth, struct fdps_enemy_data, struct fdps_item_effect,
- * struct fdps_class_record, struct fdps_class_equip_record, struct
- * fdps_spell_effect and struct fdps_spell_learning_record in src/fdpstype.h.
- * None of them is read off the emitted C.
+ * 00018bd0 over MAGICDAT.DAT, 00018c00 over GETMGTAB.DAT and 00018c30 over
+ * RANKUP.DAT -- and from ticket 17's layouts of struct
+ * fdps_character_base_record, struct fdps_character_growth, struct
+ * fdps_enemy_data, struct fdps_item_effect, struct fdps_class_record, struct
+ * fdps_class_equip_record, struct fdps_spell_effect, struct
+ * fdps_spell_learning_record and struct fdps_promotion_record in
+ * src/fdpstype.h.  None of them is read off the emitted C.
  *
  * Every body is PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x4, then IMUL
  * EAX,dword ptr [EBP+0x14],<stride> / MOV EDX,dword ptr [<table base global>]
  * / ADD EDX,EAX and nothing else, so the three facts everything below is aimed
  * at are the same for each: the stride is the file's own (0x18, 0x0b, 0x0a,
- * 0x17, 0x0a, 0x06, 0x07 and 0x0c), the base is that accessor's own pointer
+ * 0x17, 0x0a, 0x06, 0x07, 0x0c and 0x0c), the base is that accessor's own pointer
  * global read fresh on every call, and there is no test of any kind in the
  * body -- no bound on the index, no null check on the base.
  *
@@ -22,7 +23,7 @@
  * fdps_load_data_tables has already unpacked out of the VFS container into the
  * heap, so a staged byte buffer is exactly the shape the global holds at run
  * time.  Nothing here asserts what the real tables contain -- every byte read
- * back is one this file wrote -- and all eight globals are put back to null on
+ * back is one this file wrote -- and all nine globals are put back to null on
  * the way out, since ticket 23 has yet to define them and a later unit must not
  * find a stale address in any of them.
  */
@@ -1900,6 +1901,283 @@ static void the_ff_no_spells_sentinel_is_not_this_accessors(void)
     install_learn_base(learn_base);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_get_promotion_record @ 00018c30
+ *
+ * The ninth accessor of the same one-block shape, and its expected values come
+ * from its own assembly: IMUL EAX,dword ptr [EBP+0x14],0xc / MOV EDX,dword ptr
+ * [0x00063fdc] / ADD EDX,EAX, with nothing else in the body.  The stride is
+ * 0x0c -- the same as the spell-learning table's, over a different global --
+ * and there is no test of any kind.  The record layout is ticket 17's struct
+ * fdps_promotion_record in src/fdpstype.h and the nine records are
+ * RANKUP.DAT's 108 bytes divided by that stride (resource_info/data_tables.md).
+ *
+ * The two facts here that are not arithmetic are both the callers': the index
+ * is the unit record's char_id byte at +0x08 and not its portrait id at +0x07
+ * -- 00034797, 00034cdd and 00035468 each MOV AL,byte ptr [<unit>+0x8] / AND
+ * EAX,0xff / PUSH EAX -- and the choice among the four 3-byte routes inside the
+ * record is made by the caller scaling a route number by three itself
+ * (00034cee LEA EDX,[EDX+EDX*2] / ADD EAX,EDX).  The cases below pin that this
+ * accessor does neither.
+ * ------------------------------------------------------------------ */
+
+/* What the IMUL multiplies by, the records the 108-byte file holds, and the
+   file's own length. */
+#define PROMO_STRIDE 0x0c
+#define PROMO_COUNT 9
+#define PROMO_FILE_BYTES 108
+
+/* The byte a caller pushes is zero-extended from a unit record field, so the
+   ids the game can reach run to 0xff -- past the end of a nine-record table,
+   which is why the past-the-end case below is arithmetic through a null base
+   rather than an index into this buffer.  A record of lead-in covers the
+   negative id and a spare record the step off the back. */
+static unsigned char promo_image[PROMO_STRIDE + (PROMO_COUNT + 1) * PROMO_STRIDE];
+
+static unsigned char *promo_base = promo_image + PROMO_STRIDE;
+
+static void install_promo_base(unsigned char *base)
+{
+    data_fdps_promotion_table_ptr = base;
+}
+
+static long promo_offset(int char_id)
+{
+    unsigned char *record;
+
+    record = (unsigned char *) fdps_get_promotion_record(char_id);
+    return (long) (record - promo_base);
+}
+
+/* A distinct byte per field, so a field picked up one offset out reads a value
+   belonging to some other field, and the three bytes of a route differ from
+   the three of every other route so a route index scaled by something other
+   than three is visible.  The hero-badge route's portrait id is 0xff, the
+   value that separates the unsigned byte the layout declares from a signed
+   -1. */
+static void stage_promo_record(int char_id)
+{
+    unsigned char *record;
+
+    record = promo_base + char_id * PROMO_STRIDE;
+    record[0x00] = 0x11;  /* default_portrait_id */
+    record[0x01] = 0x12;  /* default_class_id */
+    record[0x02] = 0x13;  /* default_move_bonus */
+    record[0x03] = 0x21;  /* light_badge_portrait_id */
+    record[0x04] = 0x22;  /* light_badge_class_id */
+    record[0x05] = 0x23;  /* light_badge_move_bonus */
+    record[0x06] = 0x31;  /* dark_badge_portrait_id */
+    record[0x07] = 0x32;  /* dark_badge_class_id */
+    record[0x08] = 0x33;  /* dark_badge_move_bonus */
+    record[0x09] = 0xff;  /* hero_badge_portrait_id */
+    record[0x0a] = 0x42;  /* hero_badge_class_id */
+    record[0x0b] = 0x43;  /* hero_badge_move_bonus */
+}
+
+/* The ADD has no constant term, so record 0 is the table base itself -- the
+   file has no header to step over. */
+static void promo_record_zero_is_the_table_base(void)
+{
+    install_promo_base(promo_base);
+    CHECK_EQ(promo_offset(0), 0);
+}
+
+/* The 0xc the IMUL states.  An accessor that reached for a neighbouring
+   table's stride would land at 0xb, 0xa or 0x17 here. */
+static void consecutive_promo_records_are_twelve_bytes_apart(void)
+{
+    install_promo_base(promo_base);
+    CHECK_EQ(promo_offset(1), PROMO_STRIDE);
+    CHECK_EQ(promo_offset(2) - promo_offset(1), PROMO_STRIDE);
+    CHECK_EQ(promo_offset(8), 8 * PROMO_STRIDE);
+}
+
+/* 8 is the last id the 108-byte file has storage for, and the byte after that
+   record is the file's last (resource_info/data_tables.md). */
+static void the_last_real_promo_record_is_at_the_end_of_the_table(void)
+{
+    install_promo_base(promo_base);
+    CHECK_EQ(promo_offset(PROMO_COUNT - 1), (PROMO_COUNT - 1) * PROMO_STRIDE);
+    CHECK_EQ(promo_offset(PROMO_COUNT - 1) + PROMO_STRIDE, PROMO_FILE_BYTES);
+}
+
+/* There is no CMP in the body, so an id past the ninth record is multiplied
+   and added like any other.  The guard is the church screen's own test of the
+   unit's portrait id against 9; a clamp added here would change which record
+   it reads instead of protecting it.  The far case is measured through a null
+   base so nothing out there is dereferenced. */
+static void a_promo_char_id_past_the_end_is_not_clamped(void)
+{
+    install_promo_base(promo_base);
+    CHECK_EQ(promo_offset(PROMO_COUNT), PROMO_COUNT * PROMO_STRIDE);
+    install_promo_base((unsigned char *) 0);
+    CHECK_EQ((long) (unsigned long) fdps_get_promotion_record(0xff),
+             0xff * PROMO_STRIDE);
+    install_promo_base(promo_base);
+}
+
+/* IMUL is the signed multiply, so a negative id steps backwards off the front
+   of the table rather than becoming a vast positive offset.  An unsigned
+   stride would read 0xfffffff4 here. */
+static void a_negative_promo_char_id_steps_backwards(void)
+{
+    install_promo_base(promo_base);
+    CHECK_EQ(promo_offset(-1), -PROMO_STRIDE);
+}
+
+/* MOV EDX,dword ptr [0x00063fdc] is inside the body: the base is re-read on
+   every call, so moving the global moves every answer.  A transcription that
+   cached it in a file-scope copy passes everything above and fails here. */
+static void the_promo_table_base_is_read_on_every_call(void)
+{
+    install_promo_base(promo_base);
+    CHECK_EQ(promo_offset(3), 3 * PROMO_STRIDE);
+    install_promo_base(promo_base + PROMO_STRIDE);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_promotion_record(3) - promo_base),
+             4 * PROMO_STRIDE);
+    install_promo_base(promo_base);
+}
+
+/* Nothing tests the base, so a null table -- the state before
+   fdps_load_data_tables has run -- yields the offset alone as though it were
+   an address.  A null guard returning NULL would be a silent behaviour
+   change. */
+static void a_null_promo_table_base_is_not_guarded(void)
+{
+    install_promo_base((unsigned char *) 0);
+    CHECK_EQ((long) (unsigned long) fdps_get_promotion_record(2),
+             2 * PROMO_STRIDE);
+    install_promo_base(promo_base);
+}
+
+/* This accessor and fdps_get_spell_learn_record share the stride 0xc and
+   differ only in the global they read -- 0x00063fdc against 0x00063fe8.  Every
+   stride case above would pass with the two globals swapped, so this is the
+   case that separates them: each of the nine globals gets its own base and each
+   accessor must follow its own (contract B -- the nine table pointers are nine
+   globals, not an array). */
+static void the_promo_accessor_reads_its_own_global(void)
+{
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    install_item_base(item_base);
+    install_class_base(class_base);
+    install_equip_base(equip_base);
+    install_spell_base(spell_base);
+    install_learn_base(learn_base);
+    install_promo_base(promo_base);
+    CHECK_EQ(promo_offset(1), PROMO_STRIDE);
+
+    install_learn_base(learn_base + LEARN_STRIDE);
+    install_base(table_base + RECORD_STRIDE);
+    install_growth_base(growth_base + GROWTH_STRIDE);
+    install_enemy_base(enemy_base + ENEMY_STRIDE);
+    install_item_base(item_base + ITEM_STRIDE);
+    install_class_base(class_base + CLASS_STRIDE);
+    install_equip_base(equip_base + EQUIP_STRIDE);
+    install_spell_base(spell_base + SPELL_STRIDE);
+    CHECK_EQ(promo_offset(1), PROMO_STRIDE);
+
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    install_item_base(item_base);
+    install_class_base(class_base);
+    install_equip_base(equip_base);
+    install_spell_base(spell_base);
+    install_learn_base(learn_base);
+    install_promo_base(promo_base + PROMO_STRIDE);
+    CHECK_EQ(learn_offset(1), LEARN_STRIDE);
+    CHECK_EQ(record_offset(1), RECORD_STRIDE);
+
+    install_promo_base(promo_base);
+}
+
+/* The returned pointer addresses the file's own field offsets: all twelve
+   bytes of the staged record read back through the struct's twelve fields, so
+   base and stride are checked together against the layout.  A record pointer
+   right to within a byte still reads the neighbouring route's field here. */
+static void the_returned_promo_pointer_addresses_the_packed_record(void)
+{
+    struct fdps_promotion_record *record;
+
+    install_promo_base(promo_base);
+    stage_promo_record(5);
+    record = fdps_get_promotion_record(5);
+    CHECK_EQ(record->default_portrait_id, 0x11);
+    CHECK_EQ(record->default_class_id, 0x12);
+    CHECK_EQ(record->default_move_bonus, 0x13);
+    CHECK_EQ(record->light_badge_portrait_id, 0x21);
+    CHECK_EQ(record->light_badge_class_id, 0x22);
+    CHECK_EQ(record->light_badge_move_bonus, 0x23);
+    CHECK_EQ(record->dark_badge_portrait_id, 0x31);
+    CHECK_EQ(record->dark_badge_class_id, 0x32);
+    CHECK_EQ(record->dark_badge_move_bonus, 0x33);
+    CHECK_EQ(record->hero_badge_class_id, 0x42);
+    CHECK_EQ(record->hero_badge_move_bonus, 0x43);
+    CHECK_EQ((long) ((unsigned char *) record - promo_base), 5 * PROMO_STRIDE);
+}
+
+/* The record is four three-byte routes and the caller addresses them as such:
+   at 00034cee it takes its own route number, triples it with LEA
+   EDX,[EDX+EDX*2], adds it to the pointer this accessor returned, then reads
+   byte [route] as the new portrait id and byte [route+1] as the new class
+   code.  So the four routes start at +0x00, +0x03, +0x06 and +0x09, pinned
+   here as raw bytes through the returned pointer rather than through the field
+   order this file happens to declare.  The accessor itself performs none of
+   that scaling: a triple folded in here would move every route but route 0. */
+static void the_four_routes_are_three_bytes_apart_from_the_record_base(void)
+{
+    unsigned char *record;
+
+    install_promo_base(promo_base);
+    stage_promo_record(6);
+    record = (unsigned char *) fdps_get_promotion_record(6);
+    CHECK_EQ((long) (record - promo_base), 6 * PROMO_STRIDE);
+    CHECK_EQ(record[0 * 3 + 0], 0x11);
+    CHECK_EQ(record[0 * 3 + 1], 0x12);
+    CHECK_EQ(record[1 * 3 + 0], 0x21);
+    CHECK_EQ(record[1 * 3 + 1], 0x22);
+    CHECK_EQ(record[2 * 3 + 0], 0x31);
+    CHECK_EQ(record[2 * 3 + 1], 0x32);
+    CHECK_EQ(record[3 * 3 + 0], 0xff);
+    CHECK_EQ(record[3 * 3 + 1], 0x42);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_promotion_record(7) - record),
+             PROMO_STRIDE);
+}
+
+/* Every field of the record is an unsigned byte.  The caller zero-extends both
+   bytes it takes -- 00034cf9 XOR EAX,EAX / MOV AL,byte ptr [EDX] for the
+   portrait id -- so 0xff reads 255 and not -1, which is the difference between
+   a sprite name of Stand255.saf and an index four gigabytes down
+   (contract C). */
+static void the_promo_record_bytes_are_unsigned(void)
+{
+    struct fdps_promotion_record *record;
+
+    install_promo_base(promo_base);
+    stage_promo_record(5);
+    record = fdps_get_promotion_record(5);
+    CHECK_EQ(record->hero_badge_portrait_id, 255);
+    CHECK_EQ(((unsigned char *) record)[0x09], 255);
+}
+
+/* The index is the unit record's char_id byte at +0x08, which a promotion
+   leaves alone, and not the portrait id at +0x07, which a promotion
+   overwrites: 00034c10 writes route byte 0 into +0x07 after this call.  The
+   nine records are the nine promotable characters, char_ids 0..8, so this is
+   the case that states the mapping the assembly's MOV AL,byte ptr [<unit>+0x8]
+   fixes -- an accessor fed the portrait id of an already-promoted unit would
+   read a record outside the table. */
+static void a_char_id_indexes_its_promotion_record_unbiased(void)
+{
+    install_promo_base(promo_base);
+    CHECK_EQ(promo_offset(0x00), 0);
+    CHECK_EQ(promo_offset(0x01), PROMO_STRIDE);
+    CHECK_EQ(promo_offset(0x08), (PROMO_COUNT - 1) * PROMO_STRIDE);
+}
+
 void run_table_tests(void)
 {
     RUN_TEST(record_zero_is_the_table_base);
@@ -1999,6 +2277,19 @@ void run_table_tests(void)
     RUN_TEST(the_learn_pair_bytes_are_unsigned);
     RUN_TEST(the_ff_no_spells_sentinel_is_not_this_accessors);
 
+    RUN_TEST(promo_record_zero_is_the_table_base);
+    RUN_TEST(consecutive_promo_records_are_twelve_bytes_apart);
+    RUN_TEST(the_last_real_promo_record_is_at_the_end_of_the_table);
+    RUN_TEST(a_promo_char_id_past_the_end_is_not_clamped);
+    RUN_TEST(a_negative_promo_char_id_steps_backwards);
+    RUN_TEST(the_promo_table_base_is_read_on_every_call);
+    RUN_TEST(a_null_promo_table_base_is_not_guarded);
+    RUN_TEST(the_promo_accessor_reads_its_own_global);
+    RUN_TEST(the_returned_promo_pointer_addresses_the_packed_record);
+    RUN_TEST(the_four_routes_are_three_bytes_apart_from_the_record_base);
+    RUN_TEST(the_promo_record_bytes_are_unsigned);
+    RUN_TEST(a_char_id_indexes_its_promotion_record_unbiased);
+
     /* Put the globals back the way they were found.  They are null until
        ticket 23 defines them, and leaving a pointer to this file's static
        buffers in one would hand the next unit an address it has no business
@@ -2011,4 +2302,5 @@ void run_table_tests(void)
     install_equip_base((unsigned char *) 0);
     install_spell_base((unsigned char *) 0);
     install_learn_base((unsigned char *) 0);
+    install_promo_base((unsigned char *) 0);
 }

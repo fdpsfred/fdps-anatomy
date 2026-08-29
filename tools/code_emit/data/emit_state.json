@@ -186,6 +186,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x25"
+    },
+    "00018c30": {
+      "name": "fdps_get_promotion_record",
+      "target": "table.c",
+      "body_size": "0x25",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x25"
     }
   }
 }

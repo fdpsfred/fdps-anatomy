@@ -346,3 +346,53 @@ struct fdps_spell_learning_record *fdps_get_spell_learn_record(int learn_index)
          + learn_index * SPELL_LEARNING_RECORD_STRIDE);
     return record;
 }
+
+/* The stride of one RankUp.dat record, as the original writes it: IMUL
+   EAX,dword ptr [EBP+0x14],0xc.  A literal and not sizeof(struct
+   fdps_promotion_record) for the same reason as the eight tables above -- the
+   file's stride is the fact that has to survive.  This record is twelve
+   unsigned chars and would measure twelve however it were declared, which is
+   exactly why writing sizeof here would look right and record nothing. */
+#define PROMOTION_RECORD_STRIDE 0x0c
+
+/* 00018c30.  The ninth accessor of the same one-basic-block shape: IMUL
+   EAX,dword ptr [EBP+0x14],0xc / MOV EDX,dword ptr [0x00063fdc] / ADD EDX,EAX,
+   spilled to a stack local and reloaded into EAX to be returned.  No compare,
+   no branch, no CALL.
+
+   The stride matches fdps_get_spell_learn_record's 0xc exactly, so an accessor
+   that named the wrong global would still step by the right amount and only be
+   caught by reading a record: the base here is 0x00063fdc and the
+   spell-learning table's is 0x00063fe8, three pointers apart in bss
+   (contract B).
+
+   char_id is the unit record's char_id byte at +0x08 and not its portrait id
+   at +0x07 -- the identity that survives a promotion, against the one a
+   promotion overwrites.  All three callers form it by zero-extension --
+   00034797, 00034cdd and 00035468 each MOV AL,byte ptr [<unit>+0x8] followed by
+   AND EAX,0xff before the PUSH -- so what arrives is 0..255, and int is the
+   width the parameter is read at.
+
+   Nothing is bounded: the 108-byte file holds nine records, one per promotable
+   character (resource_info/data_tables.md), and an id past the ninth is
+   multiplied and added like any other.  The bound is the caller's --
+   fdps_church_promote_loop reaches the call only for units whose portrait id is
+   below 9 -- so a clamp added here would change which record the church screen
+   reads rather than protect it.
+
+   The four class-change routes inside the record are the caller's to choose and
+   the caller's to address: 00034cee MOV EDX,dword ptr [EBP+0x18] / LEA
+   EDX,[EDX+EDX*2] / ADD EAX,EDX scales the route number by the 3-byte triple
+   itself.  Nothing in here indexes past the record base.
+
+   The base is read out of the global on every call, uncached and untested, so
+   a call before fdps_load_data_tables has filled it returns the offset alone
+   as though it were an address. */
+struct fdps_promotion_record *fdps_get_promotion_record(int char_id)
+{
+    struct fdps_promotion_record *record;
+
+    record = (struct fdps_promotion_record *)
+        (data_fdps_promotion_table_ptr + char_id * PROMOTION_RECORD_STRIDE);
+    return record;
+}

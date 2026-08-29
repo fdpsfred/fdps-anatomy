@@ -221,4 +221,34 @@ extern struct fdps_spell_effect *fdps_get_spell_record(int spell_id);
 extern struct fdps_spell_learning_record *fdps_get_spell_learn_record(int learn_index);
 #pragma aux fdps_get_spell_learn_record "*" parm caller [];
 
+/* Returns a pointer to record char_id of the RankUp.dat promotion table: the
+   four class-change routes of one promotable character as four 3-byte triples
+   -- no badge, 光之徽章, 暗之徽章, 勇者徽章 -- in the 12 bytes of struct
+   fdps_promotion_record.
+
+   char_id is the unit record's own char_id byte at +0x08, the base identity
+   the roster seeds when the character is enrolled and nothing rewrites
+   afterwards; it is NOT the portrait id at +0x07, which a promotion changes.
+   All three callers form the argument the same way, MOV AL,byte ptr
+   [<unit>+0x8] / AND EAX,0xff / PUSH EAX, so what arrives is 0..255.  The
+   108-byte file holds nine records, one per promotable character
+   (resource_info/data_tables.md), and nothing here is checked -- no bound at
+   either end, and the multiply is signed, so an id outside 0..8 addresses
+   memory past one end of the table or the other.  The base is not tested for
+   null either.  What keeps the callers inside the table is their own guard:
+   the church screen reaches the call only for units whose portrait id is
+   below 9.
+
+   Which of the four triples applies is the caller's choice and the caller's
+   arithmetic: fdps_church_promote_loop picks triple 3 for promotion item 0xdb,
+   1 for 0xe0, 2 for 0xe1 and 0 for a unit holding none of them, and scales the
+   triple number by 3 itself -- LEA EDX,[EDX+EDX*2] / ADD EAX,EDX -- so this
+   accessor hands back the record and never the entry.  Byte 0 of the chosen
+   triple becomes the unit's portrait id at +0x07 and byte 1 its class code at
+   +0x20.
+
+   Reads only the table base global, calls nothing, and dereferences nothing. */
+extern struct fdps_promotion_record *fdps_get_promotion_record(int char_id);
+#pragma aux fdps_get_promotion_record "*" parm caller [];
+
 #endif
