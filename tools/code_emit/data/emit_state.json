@@ -239,6 +239,14 @@
       "status": "committed",
       "emitted_against": "0x6e",
       "rounds": 0
+    },
+    "00023050": {
+      "name": "fdps_cache_cel_sprite_group",
+      "target": "rsrc.c",
+      "body_size": "0x260",
+      "status": "committed",
+      "emitted_against": "0x260",
+      "rounds": 0
     }
   }
 }

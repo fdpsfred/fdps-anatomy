@@ -149,4 +149,20 @@ extern unsigned char *data_fdps_vga_main_palette_ptr;
    decoration off, it switches to the other one. */
 extern unsigned char data_fdps_font_outline_enabled_flag;
 
+/* 00060138 and 00069cf0.  The .CEL sprite cache: one heap block holding a slot
+   table of thirty struct fdps_cel_cache_slot at its base followed by every
+   cached group's pixel bytes, and how many of those slots are filled.
+
+   Null and zero until fdps_cache_cel_sprite_group (src/rsrc.h) is asked for a
+   group; that function is the only writer of both, and every other reader --
+   fifteen files for the pointer, five for the count -- takes a slot index it
+   was given, reads the slot's offsets and adds the pointer to reach a stream.
+   The block moves on every miss, because a miss reallocs it, so nothing may
+   hold a pointer into it across a call that could cache a group.
+
+   The count is signed: the linear key search compares it with JL.  The
+   original types the block as a byte pointer and casts at each use. */
+extern unsigned char *data_fdps_cel_sprite_cache_ptr;
+extern int data_fdps_cel_sprite_cache_count;
+
 #endif

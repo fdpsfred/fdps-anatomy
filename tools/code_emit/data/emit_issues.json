@@ -463,5 +463,31 @@
       "needs": "A playtest of an IconAni scene that uses opcode 0x0e -- a scripted black-out between pictures -- against the original, watching that the fade takes the same wall-clock time and looks equally smooth; or an instruction-level comparison of the compiled body against 00022410.",
       "status": "open"
     }
+  ],
+  "00023050": [
+    {
+      "what": "Past the thirtieth distinct group the original and the rebuild must diverge, and nothing in this function prevents getting there. The key store at 000231ef writes group_ids[count] with no bound, so a 31st group writes 4 bytes past data_fdps_cel_sprite_cache_group_ids -- into data_fdps_map_cell_event_triggered_flags at 000640d8 in the original, and into whatever the rebuild's linker put there instead. The slot store at 0002328a is unbounded the same way and would overwrite the first cached group's pixel bytes in both builds, which at least stays inside the one heap block. group_index itself is also unchecked: at group_index*12+12 beyond 2652 the copy loop reads past the 0x2970 scratch block, so a large enough index reads heap in both builds and cannot agree. Whether any of this is reachable is not decidable here.",
+      "needs": "The seven callers (fdps_build_map_unit_array 00022be0, fdps_deploy_unit 000232b0, fdps_draw_save_slot_panel 00024a40, fdps_load_field_chapter_resources 00031540, fdps_load_savegame 00023e20, fdps_roster_revive_fallen_members 00039e70, fdps_saveload_screen_build 00024830) emitted, so the set of group indices actually asked for over a run can be bounded -- plus whether anything resets the cache between chapters. If they can exceed thirty distinct groups it is a pitfalls.md entry about the two globals' adjacency, not a bug to fix.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "The reader takes a fixed 0x2970-byte bite of the offset table on every call regardless of the sheet's declared sprite_count, so it reads 2652 entries out of a table that has sprite_count+1 of them: 1921 for ICON.CEL, 161 for FACE.CEL, the rest coming from the sheets' own pixel bytes. Harmless for the thirteen entries actually used and reproduced exactly, but it means the function needs any sheet it is given to be at least 0x0f + 0x2970 = 10,623 bytes long, and neither shipped sheet is anywhere near that small. Whether some chapter resource opens a smaller .CEL cannot be answered from here.",
+      "needs": "fdps_load_field_chapter_resources at 00031540 emitted, or an inventory of every .CEL the game opens with its file size, to confirm no sheet is shorter than 10,623 bytes.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Past the thirtieth distinct group the original and any rebuild must diverge, and nothing in this function prevents reaching it. MOV dword ptr [EDX + 0x64060],EAX at 000231ef writes group_ids[count] with no bound, so a 31st distinct group writes four bytes past data_fdps_cel_sprite_cache_group_ids -- into data_fdps_map_cell_event_triggered_flags at 000640d8 in the original, and into whatever the rebuild's linker put next in the rebuild. The slot store at 0002328a is unbounded the same way and overwrites the first cached group's pixel bytes, which at least stays inside the one heap block and so agrees in both builds. group_index is unchecked too: at group_index*12+12 beyond 2652 the copy loop at 000230d1 reads past the 0x2970 scratch block. I confirmed the layout facts from the snapshot and from get_xrefs_to 00064060; whether any of it is reachable cannot be decided from this function.",
+      "needs": "The seven callers emitted -- fdps_build_map_unit_array 00022be0, fdps_deploy_unit 000232b0, fdps_draw_save_slot_panel 00024a40, fdps_load_field_chapter_resources 00031540, fdps_load_savegame 00023e20, fdps_roster_revive_fallen_members 00039e70, fdps_saveload_screen_build 00024830 -- so the set of group indices asked for over a run can be bounded, plus whether anything resets the cache between chapters. If thirty distinct groups can be exceeded this becomes a pitfalls.md entry about the adjacency of 00064060 and 000640d8, not a bug to fix.",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "The fixed 0x2970-byte offset-table read at 00023097 ignores the sheet's declared sprite_count, so it reads 2652 entries out of a table that has sprite_count+1 of them and runs on into the sheet's pixel bytes. Harmless for the thirteen entries actually used and reproduced exactly, but it means any .CEL handed to this function must be at least 0x0f + 0x2970 = 10,623 bytes long or the read runs off the end of the file, with no return value consulted to notice.",
+      "needs": "fdps_load_field_chapter_resources at 00031540 emitted, or an inventory of every .CEL the game opens with its file size, to confirm no sheet is shorter than 10,623 bytes.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

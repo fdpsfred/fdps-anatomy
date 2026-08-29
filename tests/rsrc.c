@@ -1,5 +1,10 @@
 /* tests/rsrc.c -- cover for src/rsrc.c.
  *
+ * Two subjects, and the second one starts at its own banner below: everything
+ * down to run_rsrc_tests covers fdps_load_indexed_archive_entry at 00022e30,
+ * and after the banner comes fdps_cache_cel_sprite_group at 00023050, which
+ * reads the real ICON.CEL instead of a fixture and says there why.
+ *
  * Expected values come from the assembly at 00022e30: ADD EAX,0x6 onto LEA
  * EAX,[EAX*0x4 + 0x0] for the seek to the table, PUSH 0x8 / PUSH 0x1 for the
  * eight bytes read there, MOV EAX,[EBP + -0xc] / SUB EAX,[EBP + -0x10] for the
@@ -30,6 +35,8 @@
 #include <stdlib.h>
 #include <malloc.h>
 #include "testharn.h"
+#include "fdpstype.h"
+#include "gamedata.h"
 #include "rsrc.h"
 
 /* 8.3, and written into the run directory the test image starts in. */
@@ -365,6 +372,353 @@ static void closes_the_archive_each_time(void)
     }
 }
 
+/* ---------------------------------------------------------------------- */
+/* fdps_cache_cel_sprite_group at 00023050.
+ *
+ * These read the real ICON.CEL, staged through tests/gamefile.lst.  They have
+ * to: the reader takes a fixed 0x2970-byte bite out of the sheet's offset
+ * table whatever the sheet's declared sprite count is, so anything short of a
+ * real sheet is not a smaller fixture, it is a file the reader runs off the
+ * end of.
+ *
+ * Expected values come from the assembly and from the layout in
+ * src/fdpstype.h, and the numbers they are checked against are read out of
+ * ICON.CEL here, independently: PUSH 0xf for the seek to the offset table,
+ * IMUL EAX,[EBP + 0x14],0xc at 000230b6 for the twelve-entry group stride, the
+ * thirteen-iteration copy loop at 000230a6 (CMP ...,0xd), MOV EAX,[EBP + -0x1c]
+ * / SUB EAX,[EBP + -0x4c] at 000230d9 for the group's pixel byte count, and
+ * MOV dword ptr [EBP + -0x10],0x5a0 at 00023063 for the slot table the pixels
+ * are appended after.  A reader that scaled the group index by anything but
+ * twelve, seeked to any base but 0x0f, sized the group from the wrong pair of
+ * entries or wrote a slot offset relative to the file instead of to the block
+ * lands on other bytes of ICON.CEL and the content checks say so.
+ */
+#define CEL_NAME "ICON.CEL"
+
+/* struct fdps_cel_header is fifteen bytes and the offset table starts right
+   after it. */
+#define CEL_TABLE_START 15
+
+/* Sprites per group, and slots the block's table region holds. */
+#define CEL_GROUP_SPRITES 12
+#define CEL_TABLE_BYTES (30 * (int) sizeof(struct fdps_cel_cache_slot))
+
+/* Bytes of a sprite stream compared against the file.  Every stream in
+   ICON.CEL is several hundred bytes, so this stays inside the shortest of
+   them; what it has to be is long enough that two different streams cannot
+   agree by accident. */
+#define CEL_PIXEL_PROBE_BYTES 48
+
+/* Three groups picked apart from each other and away from group 0, so a slot
+   index confused with a group id, or a stride of anything but twelve, reads
+   somewhere else in the sheet.  Group 0 is included because its offsets are
+   the first thing in the table and so pin the 0x0f seek on their own. */
+#define CEL_GROUP_A 0
+#define CEL_GROUP_B 5
+#define CEL_GROUP_C 37
+
+static int cel_ready = 0;
+
+/* Whether the staged sheet is there and long enough to survive the reader's
+   fixed-size table read.  Every test asks first: the reader tests no result it
+   gets back, so a short file does not fail a check, it reads rubbish. */
+static int cel_sheet_present(void)
+{
+    FILE *fp;
+    long size;
+
+    fp = fopen(CEL_NAME, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    fseek(fp, 0, SEEK_END);
+    size = ftell(fp);
+    fclose(fp);
+    return size >= (long) (CEL_TABLE_START + 0x2970);
+}
+
+static void ensure_cel_sheet(void)
+{
+    if (!cel_ready) {
+        cel_ready = cel_sheet_present();
+    }
+}
+
+/* The thirteen absolute file offsets group group_index owns, read out of the
+   sheet one entry at a time so that this shares no arithmetic with the code
+   under test.  Little-endian by hand rather than by fread of an int, because
+   what the file holds is a byte order, not this machine's. */
+static int read_group_offsets(int group_index, int *offsets)
+{
+    FILE *fp;
+    unsigned char raw[4];
+    int i;
+    int ok;
+
+    fp = fopen(CEL_NAME, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    ok = 1;
+    for (i = 0; i < CEL_GROUP_SPRITES + 1; i++) {
+        fseek(fp, CEL_TABLE_START
+                  + (long) (group_index * CEL_GROUP_SPRITES + i) * 4,
+              SEEK_SET);
+        if (fread(raw, 1, 4, fp) != 4) {
+            ok = 0;
+            break;
+        }
+        offsets[i] = (int) raw[0] | ((int) raw[1] << 8)
+                     | ((int) raw[2] << 16) | ((int) raw[3] << 24);
+    }
+    fclose(fp);
+    return ok;
+}
+
+/* How many of the first count bytes at file_offset in the sheet are also at
+   block.  count back means the cached bytes are the file's bytes; anything
+   less locates the first byte that came from somewhere else. */
+static int matching_pixel_bytes(long file_offset, unsigned char *block,
+                                int count)
+{
+    FILE *fp;
+    unsigned char raw;
+    int i;
+
+    fp = fopen(CEL_NAME, "rb");
+    if (fp == NULL) {
+        return -1;
+    }
+    fseek(fp, file_offset, SEEK_SET);
+    for (i = 0; i < count; i++) {
+        if (fread(&raw, 1, 1, fp) != 1 || raw != block[i]) {
+            break;
+        }
+    }
+    fclose(fp);
+    return i;
+}
+
+/* Puts the cache back to the state the program starts in.  bss zero is the
+   real initial state, so this is not a fixture, it is the state the seed
+   branch is defined against. */
+static void reset_cel_cache(void)
+{
+    if (data_fdps_cel_sprite_cache_ptr != NULL) {
+        free(data_fdps_cel_sprite_cache_ptr);
+        data_fdps_cel_sprite_cache_ptr = NULL;
+    }
+    data_fdps_cel_sprite_cache_count = 0;
+    data_fdps_cel_sprite_cache_buffer_used = 0;
+}
+
+/* The cache block's slot table, which is what the block's first 0x5A0 bytes
+   are. */
+static struct fdps_cel_cache_slot *cache_slots(void)
+{
+    return (struct fdps_cel_cache_slot *) data_fdps_cel_sprite_cache_ptr;
+}
+
+static int cache_one_group(int group_index)
+{
+    FILE *fp;
+    int slot;
+
+    fp = fopen(CEL_NAME, "rb");
+    if (fp == NULL) {
+        return -1;
+    }
+    slot = fdps_cache_cel_sprite_group(group_index, fp);
+    fclose(fp);
+    return slot;
+}
+
+/* The empty-cache arm: CMP dword ptr [0x00069cf0],0x0 / JNZ at 000230ee falls
+   through here, and everything it writes is checked -- the key, the count, the
+   block, the byte cursor and all twelve slot offsets.  The offsets are what
+   pin the whole address chain at once: they are 0x5A0 plus each stream's
+   distance from the group's first stream, so they can only come out right if
+   the table was read at 0x0f and indexed by twelve. */
+static void cel_seeds_the_cache_on_the_first_call(void)
+{
+    int offsets[CEL_GROUP_SPRITES + 1];
+    int slot;
+    int group_bytes;
+
+    ensure_cel_sheet();
+    CHECK_EQ(cel_ready, 1);
+    if (!cel_ready) {
+        return;
+    }
+    CHECK_EQ(read_group_offsets(CEL_GROUP_A, offsets), 1);
+    group_bytes = offsets[CEL_GROUP_SPRITES] - offsets[0];
+
+    reset_cel_cache();
+    slot = cache_one_group(CEL_GROUP_A);
+
+    CHECK_EQ(slot, 0);
+    CHECK_EQ(data_fdps_cel_sprite_cache_count, 1);
+    CHECK_EQ(data_fdps_cel_sprite_cache_group_ids[0], CEL_GROUP_A);
+    CHECK_EQ(data_fdps_cel_sprite_cache_ptr != NULL, 1);
+    CHECK_EQ(data_fdps_cel_sprite_cache_buffer_used,
+             CEL_TABLE_BYTES + group_bytes);
+
+    CHECK_EQ(cache_slots()[0].sprite_offset[0], CEL_TABLE_BYTES);
+    CHECK_EQ(cache_slots()[0].sprite_offset[7],
+             CEL_TABLE_BYTES + (offsets[7] - offsets[0]));
+    CHECK_EQ(cache_slots()[0].sprite_offset[11],
+             CEL_TABLE_BYTES + (offsets[11] - offsets[0]));
+
+    CHECK_EQ(matching_pixel_bytes(offsets[0],
+                                  data_fdps_cel_sprite_cache_ptr
+                                      + cache_slots()[0].sprite_offset[0],
+                                  CEL_PIXEL_PROBE_BYTES),
+             CEL_PIXEL_PROBE_BYTES);
+    CHECK_EQ(matching_pixel_bytes(offsets[7],
+                                  data_fdps_cel_sprite_cache_ptr
+                                      + cache_slots()[0].sprite_offset[7],
+                                  CEL_PIXEL_PROBE_BYTES),
+             CEL_PIXEL_PROBE_BYTES);
+    reset_cel_cache();
+}
+
+/* The key hit: CMP EAX,[EDX + 0x64060] / JNZ at 000231cd returns the loop
+   index and jumps straight to the epilogue, so nothing is appended and neither
+   counter moves.  Asking twice for the same group has to be idempotent -- the
+   callers do exactly that, once per drawn unit. */
+static void cel_returns_the_cached_slot_for_a_repeated_group(void)
+{
+    int first_slot;
+    int second_slot;
+    unsigned int used_after_first;
+
+    ensure_cel_sheet();
+    CHECK_EQ(cel_ready, 1);
+    if (!cel_ready) {
+        return;
+    }
+    reset_cel_cache();
+    first_slot = cache_one_group(CEL_GROUP_B);
+    used_after_first = data_fdps_cel_sprite_cache_buffer_used;
+    second_slot = cache_one_group(CEL_GROUP_B);
+
+    CHECK_EQ(first_slot, 0);
+    CHECK_EQ(second_slot, 0);
+    CHECK_EQ(data_fdps_cel_sprite_cache_count, 1);
+    CHECK_EQ(data_fdps_cel_sprite_cache_buffer_used, used_after_first);
+    reset_cel_cache();
+}
+
+/* The miss arm on a non-empty cache: the block is realloc'd, the new group's
+   pixels are read in at the old byte cursor and the slot at index count gets
+   offsets measured from that cursor, IMUL EAX,[0x00069cf0],0xc at 00023271
+   being the slot the count selects.  The first group's slot and pixels are
+   re-checked afterwards, because a realloc that moved the block is exactly
+   where offsets stored as pointers rather than as base-relative distances
+   would come apart. */
+static void cel_appends_a_second_group(void)
+{
+    int offsets_a[CEL_GROUP_SPRITES + 1];
+    int offsets_b[CEL_GROUP_SPRITES + 1];
+    int slot_b;
+    unsigned int used_after_first;
+
+    ensure_cel_sheet();
+    CHECK_EQ(cel_ready, 1);
+    if (!cel_ready) {
+        return;
+    }
+    CHECK_EQ(read_group_offsets(CEL_GROUP_A, offsets_a), 1);
+    CHECK_EQ(read_group_offsets(CEL_GROUP_B, offsets_b), 1);
+
+    reset_cel_cache();
+    cache_one_group(CEL_GROUP_A);
+    used_after_first = data_fdps_cel_sprite_cache_buffer_used;
+    slot_b = cache_one_group(CEL_GROUP_B);
+
+    CHECK_EQ(slot_b, 1);
+    CHECK_EQ(data_fdps_cel_sprite_cache_count, 2);
+    CHECK_EQ(data_fdps_cel_sprite_cache_group_ids[1], CEL_GROUP_B);
+    CHECK_EQ(data_fdps_cel_sprite_cache_buffer_used,
+             used_after_first
+                 + (offsets_b[CEL_GROUP_SPRITES] - offsets_b[0]));
+
+    CHECK_EQ(cache_slots()[1].sprite_offset[0], (int) used_after_first);
+    CHECK_EQ(cache_slots()[1].sprite_offset[9],
+             (int) used_after_first + (offsets_b[9] - offsets_b[0]));
+    CHECK_EQ(matching_pixel_bytes(offsets_b[9],
+                                  data_fdps_cel_sprite_cache_ptr
+                                      + cache_slots()[1].sprite_offset[9],
+                                  CEL_PIXEL_PROBE_BYTES),
+             CEL_PIXEL_PROBE_BYTES);
+
+    CHECK_EQ(cache_slots()[0].sprite_offset[0], CEL_TABLE_BYTES);
+    CHECK_EQ(matching_pixel_bytes(offsets_a[0],
+                                  data_fdps_cel_sprite_cache_ptr
+                                      + cache_slots()[0].sprite_offset[0],
+                                  CEL_PIXEL_PROBE_BYTES),
+             CEL_PIXEL_PROBE_BYTES);
+    reset_cel_cache();
+}
+
+/* The search walks every filled slot, not just the last one: with three groups
+   cached, each of them still answers with its own index and nothing is
+   appended.  A search that compared only the newest key, or that stopped at
+   the wrong bound, appends a duplicate and the count moves. */
+static void cel_finds_a_group_cached_earlier(void)
+{
+    ensure_cel_sheet();
+    CHECK_EQ(cel_ready, 1);
+    if (!cel_ready) {
+        return;
+    }
+    reset_cel_cache();
+    CHECK_EQ(cache_one_group(CEL_GROUP_A), 0);
+    CHECK_EQ(cache_one_group(CEL_GROUP_B), 1);
+    CHECK_EQ(cache_one_group(CEL_GROUP_C), 2);
+
+    CHECK_EQ(cache_one_group(CEL_GROUP_B), 1);
+    CHECK_EQ(cache_one_group(CEL_GROUP_A), 0);
+    CHECK_EQ(cache_one_group(CEL_GROUP_C), 2);
+    CHECK_EQ(data_fdps_cel_sprite_cache_count, 3);
+    CHECK_EQ(data_fdps_cel_sprite_cache_group_ids[2], CEL_GROUP_C);
+    reset_cel_cache();
+}
+
+/* CALL free at 000230e6 gives the 0x2970-byte offset-table block back before
+   either arm runs, so a call leaves at most the cache block behind: one more
+   used heap entry when it seeds, none when it appends, none when it hits.
+   Every arm is measured, because the free is common to all three and a leak
+   there is 10,608 bytes per call in a routine the drawing code calls per
+   unit. */
+static void cel_frees_the_offset_table_scratch(void)
+{
+    int before;
+    int after_seed;
+    int after_append;
+    int after_hit;
+
+    ensure_cel_sheet();
+    CHECK_EQ(cel_ready, 1);
+    if (!cel_ready) {
+        return;
+    }
+    reset_cel_cache();
+    before = used_heap_blocks();
+    cache_one_group(CEL_GROUP_A);
+    after_seed = used_heap_blocks();
+    cache_one_group(CEL_GROUP_B);
+    after_append = used_heap_blocks();
+    cache_one_group(CEL_GROUP_A);
+    after_hit = used_heap_blocks();
+
+    CHECK_EQ(after_seed - before, 1);
+    CHECK_EQ(after_append - after_seed, 0);
+    CHECK_EQ(after_hit - after_append, 0);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    reset_cel_cache();
+}
+
 void run_rsrc_tests(void)
 {
     RUN_TEST(loads_entry_zero);
@@ -375,6 +729,12 @@ void run_rsrc_tests(void)
     RUN_TEST(leaves_the_entry_in_the_callers_slot);
     RUN_TEST(heap_is_intact_after_a_load);
     RUN_TEST(closes_the_archive_each_time);
+
+    RUN_TEST(cel_seeds_the_cache_on_the_first_call);
+    RUN_TEST(cel_returns_the_cached_slot_for_a_repeated_group);
+    RUN_TEST(cel_appends_a_second_group);
+    RUN_TEST(cel_finds_a_group_cached_earlier);
+    RUN_TEST(cel_frees_the_offset_table_scratch);
 
     /* The fixture file belongs to this run and to nothing else; leaving it
        behind would let a later run pass on a stale archive even after the

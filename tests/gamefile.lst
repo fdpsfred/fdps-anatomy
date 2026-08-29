@@ -1,0 +1,9 @@
+# Real game files the tests read, staged next to the test executable by
+# tools/code_emit/build_emit.py.  8.3 names, one per line.
+#
+# ICON.CEL is the unit sprite sheet: 1920 sprites of 24x24 in 160 groups of
+# twelve, read by tests/rsrc.c's cover for fdps_cache_cel_sprite_group.  That
+# reader takes a fixed 0x2970-byte bite out of the sheet's offset table, so it
+# needs a real sheet -- a fabricated one large enough to survive that read
+# would be a copy of this file with different numbers in it.
+ICON.CEL
