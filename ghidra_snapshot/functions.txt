@@ -117,6 +117,9 @@
 0001fa30 | 0x1cf | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_battle_tick_status_effects(int side)
 0001fc00 | 0x14e | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_show_sprite_indicator(int unit_index, uchar * sprite_ids)
 0001fd80 | 0x141 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_draw_glyph(uchar * dst, int pitch, uchar * font_base, int glyph_index, int fg_color, int bg_color, int outline_color)
+    var Stack[-0x14]:4 | /undefined4 | cell_row
+    var Stack[-0x18]:4 | /undefined4 | row
+    var Stack[-0x1c]:4 | /undefined4 | column
 0001fed0 | 0x86 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_blit_glyph_1bpp(uchar * dst, int pitch, uchar * glyph_bits, int color)
 0001ff60 | 0x46e | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps,shared_helper | byte * __cdecl fdps_draw_text(short * text_base, int text_id, byte * dest, int pitch, int fg_color, int bg_color, int outline_color)
 000203d0 | 0x1df | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_message_window_wait_key(int show_wait_indicator, int timeout_ticks)

@@ -99,4 +99,37 @@ extern unsigned char *data_fdps_battle_spell_effect_table_ptr;
 extern unsigned char data_fdps_font_glyph_width;
 extern unsigned char data_fdps_glyph_cell_height;
 
+/* 00064046.  Bytes from one glyph's bitmap to the next in the font sheet, so
+   glyph n lives at sheet + n * this.  A full dword, not a byte like the two
+   cell dimensions above: fdps_draw_glyph reads it with IMUL EAX,dword ptr
+   [0x00064046] at 0001fd8f.  Signed, because that IMUL is the signed multiply
+   and the index it scales is a signed int.
+
+   It is the stride of the sheet and not a size derived from the cell: nothing
+   recomputes it from the width and height, so a rebuild that rounds
+   ceil(width/8)*height for itself will disagree with whatever the font loader
+   wrote here. */
+extern int data_fdps_font_glyph_stride_bytes;
+
+/* 0006403e and 00064042.  The drop shadow's displacement from the glyph it
+   belongs to: a column count in bytes and a row count in whole pitches, so
+   fdps_draw_glyph places the shadow at dst + rows * pitch + columns
+   (0001fe6d-0001fe81).  Both are full dwords and both are signed -- a shadow
+   above or to the left of the glyph is a negative offset here, and reading
+   either through an unsigned type turns it into an enormous forward step.
+
+   They are read only when data_fdps_font_outline_enabled_flag is clear; the
+   outline style ignores them entirely and steps by exactly one pixel. */
+extern int data_fdps_font_shadow_offset_x;
+extern int data_fdps_glyph_shadow_row_offset;
+
+/* 0006404a.  Which decoration the text routines draw under a glyph: non-zero
+   selects the four-way one-pixel outline, zero selects the single drop shadow
+   at the offsets above.  A byte, tested with CMP byte ptr [0x0006404a],0x0 at
+   0001fdf4.
+
+   It is a style selector and not an enable: clearing it does not turn the
+   decoration off, it switches to the other one. */
+extern unsigned char data_fdps_font_outline_enabled_flag;
+
 #endif

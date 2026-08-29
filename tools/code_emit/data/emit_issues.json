@@ -407,5 +407,19 @@
       "needs": "Disassembling the built TEXT.OBJ and comparing the two loop heads against 0001fee3 and 0001ff00, or a timed comparison of text drawing in DOSBox-X at a fixed cycle count once fdps_draw_text is emitted.",
       "status": "open"
     }
+  ],
+  "0001fd80": [
+    {
+      "from": "emit",
+      "what": "Whether data_fdps_font_glyph_stride_bytes, data_fdps_glyph_shadow_row_offset and data_fdps_font_shadow_offset_x are signed cannot be decided from this function. All three are read as full dwords, but the low 32 bits of a two-operand IMUL are identical for signed and unsigned operands, and the results are only ever added into a pointer, where 32-bit wraparound makes the two readings agree on the target as well. They are emitted as int, from routing.json's typing and from the fact that a shadow above or to the left of the glyph is naturally a negative offset -- but nothing observed here rules out an unsigned intent, and the test that asserts a negative offset steps backwards is asserting the emitted C rather than a measurement.",
+      "needs": "The writer. All three globals are written by the font loader in main.c, which is not emitted yet; the constant or computation it stores, and any comparison it makes against them, will decide the signedness. If the loader only ever stores small positive values the choice stays unobservable, and that is worth saying explicitly rather than leaving implied.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Carrying forward the emitter's entry, which I checked and agree with. Whether data_fdps_font_glyph_stride_bytes, data_fdps_glyph_shadow_row_offset and data_fdps_font_shadow_offset_x are signed is not decidable from 0001fd80. All three are read as full dwords and consumed by the two-operand IMUL at 0001fd8f and 0001fe72, whose low 32 bits are identical for signed and unsigned operands, and the results only ever land in a pointer addition where 32-bit wraparound makes both readings agree on the target address too. They are emitted as int on routing.json's typing plus the argument that a shadow above or to the left is naturally negative; the second pass of the_shadow_style_uses_the_two_offset_globals asserts that negative behaviour, which is asserting the emitted C rather than a measurement -- acceptable as a regression pin, but it is not evidence for the typing.",
+      "needs": "The writer of the three globals, in the font loader that main.c will contain. The constant or expression it stores, and any comparison it makes against them, settles it. If the loader only ever stores small positive values then the choice is unobservable and that should be recorded explicitly rather than left implied.",
+      "status": "open"
+    }
   ]
 }

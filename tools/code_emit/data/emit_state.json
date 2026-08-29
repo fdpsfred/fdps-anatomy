@@ -202,6 +202,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x86"
+    },
+    "0001fd80": {
+      "name": "fdps_draw_glyph",
+      "target": "text.c",
+      "body_size": "0x141",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x141"
     }
   }
 }
