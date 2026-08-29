@@ -489,5 +489,25 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00023950": [
+    {
+      "from": "emit",
+      "what": "Whether any caller can reach this accessor with an index at or past the 32 records the 0xa00 block holds. Three callers were read to the instruction -- fdps_roster_revive_fallen_members and fdps_roster_preview_combat_stats_with_item, whose loops the count at 0x00064114 bounds, and fdps_shop_draw_member_entry, which forwards a parameter -- but fdps_village_select_member forms its index as the grid scroll base at 0x000601b8 plus the cursor offset, and I did not read what clamps that sum. Nothing about this function's own emit turns on the answer: it is unbounded either way and the emitted C is unbounded to match. What the answer would change is whether the game can walk off the end of the roster block in play, which is a behaviour a rebuild must reproduce rather than repair.",
+      "needs": "Emitting fdps_village_select_member @ 000336d0 and reading the clamp on data at 0x000601b8, and likewise fdps_church_select_promote_candidate @ 000352c0, which passes an id out of a caller-supplied entry_ids array.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Whether any caller can hand this accessor an index at or past the 32 records the 0xa00 block holds. I confirmed the bound on one path myself -- fdps_roster_revive_fallen_members compares its counter against data_fdps_roster_member_count with CMP EAX,dword ptr [0x00064114] / JL at 00039e9f before the call at 00039eb8 -- but fdps_village_select_member forms its index at 0003389a from the grid scroll base at 0x000601b8 plus a cursor offset, and fdps_church_select_promote_candidate passes an id out of a caller-supplied array; neither clamp was read. Nothing about this emit turns on the answer: the function is unbounded in the original and unbounded in the C, and that is the equivalent behaviour either way. What the answer decides is whether the game can walk off the end of the roster block in play, which a rebuild must reproduce rather than repair. Same issue the emitter recorded; I confirmed its one verified half and am carrying it forward unchanged.",
+      "needs": "Emitting fdps_village_select_member @ 000336d0 and reading what clamps the scroll base at 0x000601b8, and fdps_church_select_promote_candidate @ 000352c0 for the provenance of its entry id.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "How many roster members the game can actually hold, as against how many records the block has room for. The allocation gives 32 records, but struct fdps_save_slot in src/fdpstype.h models the persisted roster as 31 records followed by the wall-clock stamp occupying the 32nd record's 0x50 bytes, so a 32nd enrolled member would have nowhere to be saved. Not a defect in this emit and not asserted anywhere in the tests.",
+      "needs": "Reading the enrolment path -- fdps_roster_add_character, which computes the same base and stride inline at 00023bde -- for the limit it compares data_fdps_roster_member_count against before appending.",
+      "status": "open"
+    }
   ]
 }

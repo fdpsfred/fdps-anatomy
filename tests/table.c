@@ -9,7 +9,11 @@
  * fdps_enemy_data, struct fdps_item_effect, struct fdps_class_record, struct
  * fdps_class_equip_record, struct fdps_spell_effect, struct
  * fdps_spell_learning_record and struct fdps_promotion_record in
- * src/fdpstype.h.  None of them is read off the emitted C.
+ * src/fdpstype.h.  None of them is read off the emitted C.  The tenth
+ * accessor, 00023950 over the party roster, is covered in its own section at
+ * the end of this file: it has the same shape but its array is a heap block
+ * rather than a file table, so what its expected values come from is stated
+ * there.
  *
  * Every body is PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x4, then IMUL
  * EAX,dword ptr [EBP+0x14],<stride> / MOV EDX,dword ptr [<table base global>]
@@ -2178,6 +2182,337 @@ static void a_char_id_indexes_its_promotion_record_unbiased(void)
     CHECK_EQ(promo_offset(0x08), (PROMO_COUNT - 1) * PROMO_STRIDE);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_get_roster_record @ 00023950
+ *
+ * The same one-block shape as the nine table accessors, over the party roster
+ * instead of a file table: IMUL EAX,dword ptr [EBP+0x14],0x50 / MOV EDX,dword
+ * ptr [0x00064108] / ADD EDX,EAX, with nothing else in the body.  Expected
+ * values come from that assembly, from the allocation at 000296b8 in
+ * fdps_load_global_resources -- PUSH 0xa00 / CALL malloc / MOV
+ * [0x00064108],EAX -- and from the field widths the callers state at 000335a7,
+ * 000335ba, 000335cd (MOVSX word) and at 00039ec6, 00039ee0, 00039eee,
+ * 00039ef7 (word and byte).  The record layout is ticket 17's struct
+ * fdps_unit_record in src/fdpstype.h.
+ *
+ * The roster is not one of the nine tables and is not read out of the VFS
+ * container: it is a single heap block that lives for the whole run.  A staged
+ * byte buffer is still exactly the shape the global holds, and nothing here
+ * asserts what a real roster contains -- every byte read back is one this file
+ * wrote.
+ * ------------------------------------------------------------------ */
+
+/* The stride the IMUL states, and the block the allocation sizes: 0xa00 bytes
+   is exactly 32 records, which is the roster's capacity. */
+#define ROSTER_STRIDE 0x50
+#define ROSTER_CAPACITY 32
+#define ROSTER_BLOCK_BYTES 0xa00
+
+/* A record of lead-in in front of the base, so the negative-index case -- which
+   the signed IMUL makes reachable -- lands on real storage, and one spare
+   record behind the block for the step off the back. */
+static unsigned char roster_image[ROSTER_STRIDE
+                                  + (ROSTER_CAPACITY + 1) * ROSTER_STRIDE];
+
+static unsigned char *roster_base = roster_image + ROSTER_STRIDE;
+
+static void install_roster_base(unsigned char *base)
+{
+    data_fdps_roster_array_ptr = base;
+}
+
+static long roster_offset(int roster_index)
+{
+    unsigned char *record;
+
+    record = (unsigned char *) fdps_get_roster_record(roster_index);
+    return (long) (record - roster_base);
+}
+
+/* Writes the one record the field cases read, a distinct value per field the
+   callers touch so a field picked up from a neighbouring offset reads a value
+   belonging to something else.  Byte at a time and little-endian, because the
+   three base stats sit at the ODD offsets 0x37, 0x39 and 0x3e and this fixture
+   must not assume the layout it is checking. */
+static void stage_roster_record(int roster_index)
+{
+    unsigned char *record;
+
+    record = roster_base + roster_index * ROSTER_STRIDE;
+    record[0x05] = 0x03;  /* flags */
+    record[0x07] = 0x0b;  /* portrait_id */
+    record[0x08] = 0x07;  /* char_id */
+    record[0x20] = 0x12;  /* clazz */
+    record[0x21] = 0x2f;  /* level */
+    record[0x37] = 0x34;  /* ap_base low   -- 0x1234 */
+    record[0x38] = 0x12;  /* ap_base high */
+    record[0x39] = 0xce;  /* dp_base low   -- 0xffce, i.e. -50 signed */
+    record[0x3a] = 0xff;  /* dp_base high */
+    record[0x3e] = 0x2c;  /* dx_base low   -- 0x012c, i.e. 300 */
+    record[0x3f] = 0x01;  /* dx_base high */
+    record[0x40] = 0x00;  /* hp_current low  -- 0, the fallen state */
+    record[0x41] = 0x00;  /* hp_current high */
+    record[0x42] = 0xc8;  /* hp_max low    -- 200 */
+    record[0x43] = 0x00;  /* hp_max high */
+    record[0x44] = 0x0a;  /* mp_current low  -- 10 */
+    record[0x45] = 0x00;  /* mp_current high */
+    record[0x46] = 0x1e;  /* mp_max low    -- 30 */
+    record[0x47] = 0x00;  /* mp_max high */
+    record[0x48] = 0x41;  /* ap low        -- 0x41 */
+    record[0x49] = 0x00;  /* ap high */
+    record[0x4a] = 0x42;  /* dp low        -- 0x42 */
+    record[0x4b] = 0x00;  /* dp high */
+    record[0x4c] = 0x43;  /* hit low       -- 0x43 */
+    record[0x4d] = 0x00;  /* hit high */
+    record[0x4e] = 0x44;  /* ev low        -- 0x44 */
+    record[0x4f] = 0x00;  /* ev high */
+}
+
+/* The ADD has no constant term, so member 0 is the array base itself: the
+   roster has no header record in front of it, unlike PROMAP.DAT's default
+   row. */
+static void roster_record_zero_is_the_array_base(void)
+{
+    install_roster_base(roster_base);
+    CHECK_EQ(roster_offset(0), 0);
+}
+
+/* The 0x50 the IMUL states, which is sizeof(struct fdps_unit_record) only for
+   as long as the record stays byte-packed: with the pack pragma lost the three
+   odd-offset stats at 0x37, 0x39 and 0x3e would pad it to 0x52 or 0x54 and
+   every member from 1 on would be read at the wrong address. */
+static void consecutive_roster_records_are_eighty_bytes_apart(void)
+{
+    install_roster_base(roster_base);
+    CHECK_EQ(roster_offset(1), ROSTER_STRIDE);
+    CHECK_EQ(roster_offset(2) - roster_offset(1), ROSTER_STRIDE);
+    CHECK_EQ(roster_offset(13), 13 * ROSTER_STRIDE);
+}
+
+/* The allocation at 000296b8 asks for 0xa00 bytes, so member 31 is the last one
+   the block has storage for and the byte after its record is the end of the
+   block.  This is the case that ties the stride to the allocation: a stride of
+   0x52 would put member 31 past the end of what malloc was asked for. */
+static void the_last_roster_member_is_at_the_end_of_the_block(void)
+{
+    install_roster_base(roster_base);
+    CHECK_EQ(roster_offset(ROSTER_CAPACITY - 1),
+             (ROSTER_CAPACITY - 1) * ROSTER_STRIDE);
+    CHECK_EQ(roster_offset(ROSTER_CAPACITY - 1) + ROSTER_STRIDE,
+             ROSTER_BLOCK_BYTES);
+}
+
+/* There is no CMP in the body at all -- in particular none against
+   data_fdps_roster_member_count at 0x00064114, which is what the callers
+   themselves compare their loop counters with (00039e9f, 00039f77).  An index
+   past the occupied members, or past the 32 the block holds, is multiplied and
+   added like any other.  The far case is measured through a null base so
+   nothing out there is dereferenced. */
+static void a_roster_index_past_the_end_is_not_clamped(void)
+{
+    install_roster_base(roster_base);
+    CHECK_EQ(roster_offset(ROSTER_CAPACITY), ROSTER_CAPACITY * ROSTER_STRIDE);
+    install_roster_base((unsigned char *) 0);
+    CHECK_EQ((long) (unsigned long) fdps_get_roster_record(100),
+             100 * ROSTER_STRIDE);
+    install_roster_base(roster_base);
+}
+
+/* IMUL is the signed multiply, so a negative index steps backwards off the
+   front of the array rather than becoming a vast positive offset.  An unsigned
+   stride would read 0xffffffb0 here. */
+static void a_negative_roster_index_steps_backwards(void)
+{
+    install_roster_base(roster_base);
+    CHECK_EQ(roster_offset(-1), -ROSTER_STRIDE);
+}
+
+/* MOV EDX,dword ptr [0x00064108] is inside the body: the base is re-read on
+   every call, so moving the global moves every answer.  A transcription that
+   cached it in a file-scope copy passes everything above and fails here. */
+static void the_roster_base_is_read_on_every_call(void)
+{
+    install_roster_base(roster_base);
+    CHECK_EQ(roster_offset(3), 3 * ROSTER_STRIDE);
+    install_roster_base(roster_base + ROSTER_STRIDE);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_roster_record(3) - roster_base),
+             4 * ROSTER_STRIDE);
+    install_roster_base(roster_base);
+}
+
+/* Nothing tests the base, so a null roster -- the state before
+   fdps_load_global_resources has allocated it -- yields the offset alone as
+   though it were an address.  A null guard returning NULL would be a silent
+   behaviour change. */
+static void a_null_roster_base_is_not_guarded(void)
+{
+    install_roster_base((unsigned char *) 0);
+    CHECK_EQ((long) (unsigned long) fdps_get_roster_record(2),
+             2 * ROSTER_STRIDE);
+    install_roster_base(roster_base);
+}
+
+/* The roster and the map unit array hold the same record type at the same
+   0x50 stride and differ only in the global they read -- 0x00064108 against
+   0x00069cd8.  Every stride case above would pass with the two swapped, so
+   this is the case that separates them: the accessor must follow the roster
+   base while the map array's is moved out from under it, and follow it back
+   when only the roster base moves.  They are two globals with two lifetimes,
+   not one array (contract B).  The map global is put back to null on the way
+   out, because the other test units in this build read it. */
+static void the_roster_accessor_reads_the_roster_base(void)
+{
+    install_roster_base(roster_base);
+    data_fdps_map_unit_array_ptr = roster_base;
+    CHECK_EQ(roster_offset(1), ROSTER_STRIDE);
+
+    data_fdps_map_unit_array_ptr = roster_base + 7 * ROSTER_STRIDE;
+    CHECK_EQ(roster_offset(1), ROSTER_STRIDE);
+
+    install_roster_base(roster_base + ROSTER_STRIDE);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_roster_record(1) - roster_base),
+             2 * ROSTER_STRIDE);
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) 0;
+    install_roster_base(roster_base);
+}
+
+/* The nine table accessors each read their own one of nine adjacent bss
+   pointers; this one reads a tenth global that is nowhere near them, so a base
+   confusion would show as an answer that moves when one of those nine moves.
+   Every table base is displaced by a record and the roster answer must not
+   budge. */
+static void the_roster_accessor_reads_none_of_the_table_bases(void)
+{
+    install_roster_base(roster_base);
+    CHECK_EQ(roster_offset(2), 2 * ROSTER_STRIDE);
+
+    install_base(table_base + RECORD_STRIDE);
+    install_growth_base(growth_base + GROWTH_STRIDE);
+    install_enemy_base(enemy_base + ENEMY_STRIDE);
+    install_item_base(item_base + ITEM_STRIDE);
+    install_class_base(class_base + CLASS_STRIDE);
+    install_equip_base(equip_base + EQUIP_STRIDE);
+    install_spell_base(spell_base + SPELL_STRIDE);
+    install_learn_base(learn_base + LEARN_STRIDE);
+    install_promo_base(promo_base + PROMO_STRIDE);
+    CHECK_EQ(roster_offset(2), 2 * ROSTER_STRIDE);
+
+    install_base(table_base);
+    install_growth_base(growth_base);
+    install_enemy_base(enemy_base);
+    install_item_base(item_base);
+    install_class_base(class_base);
+    install_equip_base(equip_base);
+    install_spell_base(spell_base);
+    install_learn_base(learn_base);
+    install_promo_base(promo_base);
+}
+
+/* The returned pointer addresses the record's own field offsets: the staged
+   bytes read back through the struct's fields, so base and stride are checked
+   together against the layout.  A record pointer right to within a byte still
+   reads a neighbouring field here, and a record that padded past 0x50 would
+   put every field from ap_base on somewhere else. */
+static void the_returned_roster_pointer_addresses_the_packed_record(void)
+{
+    struct fdps_unit_record *record;
+
+    install_roster_base(roster_base);
+    stage_roster_record(9);
+    record = fdps_get_roster_record(9);
+    CHECK_EQ(record->flags, 0x03);
+    CHECK_EQ(record->portrait_id, 0x0b);
+    CHECK_EQ(record->char_id, 0x07);
+    CHECK_EQ(record->clazz, 0x12);
+    CHECK_EQ(record->level, 0x2f);
+    CHECK_EQ(record->hp_current, 0);
+    CHECK_EQ(record->hp_max, 200);
+    CHECK_EQ(record->mp_current, 10);
+    CHECK_EQ(record->mp_max, 30);
+    CHECK_EQ(record->ap, 0x41);
+    CHECK_EQ(record->dp, 0x42);
+    CHECK_EQ(record->hit, 0x43);
+    CHECK_EQ(record->ev, 0x44);
+    CHECK_EQ((long) ((unsigned char *) record - roster_base),
+             9 * ROSTER_STRIDE);
+}
+
+/* The three base stats live at the odd offsets 0x37, 0x39 and 0x3e and are
+   signed: fdps_roster_preview_combat_stats_with_item takes all three with
+   MOVSX -- 000335a7, 000335ba, 000335cd -- and adds an item's own signed
+   modifier to each.  So 0xffce here is -50, not 65486, and the preview it
+   feeds shows a weaker weapon as a drop rather than as a vast gain
+   (contract C). */
+static void the_roster_base_stats_are_signed_and_unaligned(void)
+{
+    struct fdps_unit_record *record;
+    unsigned char *bytes;
+
+    install_roster_base(roster_base);
+    stage_roster_record(9);
+    record = fdps_get_roster_record(9);
+    CHECK_EQ(record->ap_base, 0x1234);
+    CHECK_EQ(record->dp_base, -50);
+    CHECK_EQ(record->dx_base, 300);
+
+    bytes = (unsigned char *) record;
+    CHECK_EQ((long) ((unsigned char *) &record->ap_base - bytes), 0x37);
+    CHECK_EQ((long) ((unsigned char *) &record->dp_base - bytes), 0x39);
+    CHECK_EQ((long) ((unsigned char *) &record->dx_base - bytes), 0x3e);
+}
+
+/* The offsets the two callers read through the returned pointer, pinned as raw
+   bytes rather than through the field order this file happens to declare.
+   fdps_roster_revive_fallen_members tests the current-HP word at +0x40 for
+   zero (00039ec6), refills it from the maximum at +0x42 (00039ee0), clears the
+   flags byte at +0x05 (00039eee) and zero-extends the class at +0x20 and the
+   level at +0x21 (00039ef7, 00039f02); fdps_shop_draw_member_entry reads the
+   char_id at +0x08 (00033362) and the four derived stats at +0x48, +0x4a,
+   +0x4c and +0x4e (0003347f, 000334db, 0003340a, 000333ae).  The accessor
+   itself performs none of that: an offset folded in here would move every one
+   of them. */
+static void the_offsets_the_roster_callers_read(void)
+{
+    unsigned char *record;
+
+    install_roster_base(roster_base);
+    stage_roster_record(4);
+    record = (unsigned char *) fdps_get_roster_record(4);
+    CHECK_EQ((long) (record - roster_base), 4 * ROSTER_STRIDE);
+    CHECK_EQ(record[0x05], 0x03);
+    CHECK_EQ(record[0x08], 0x07);
+    CHECK_EQ(record[0x20], 0x12);
+    CHECK_EQ(record[0x21], 0x2f);
+    CHECK_EQ(record[0x40], 0x00);
+    CHECK_EQ(record[0x42], 0xc8);
+    CHECK_EQ(record[0x48], 0x41);
+    CHECK_EQ(record[0x4a], 0x42);
+    CHECK_EQ(record[0x4c], 0x43);
+    CHECK_EQ(record[0x4e], 0x44);
+    CHECK_EQ((long) ((unsigned char *) fdps_get_roster_record(5) - record),
+             ROSTER_STRIDE);
+}
+
+/* The write-back loop at 00023980 forms the very same address inline -- IMUL
+   EAX,dword ptr [EBP+-0x18],0x50 / MOV EDX,dword ptr [0x00064108] / ADD EDX,EAX
+   at 000239ed -- rather than calling this accessor, and so does the credit-roll
+   loop at 00039f8d.  The two must agree for every index, because they address
+   the same array: this states that they do, so a stride or base changed in one
+   place shows up here. */
+static void the_inline_roster_arithmetic_agrees_with_the_accessor(void)
+{
+    int index;
+
+    install_roster_base(roster_base);
+    for (index = 0; index < ROSTER_CAPACITY; index++)
+    {
+        CHECK_EQ((long) ((unsigned char *) fdps_get_roster_record(index)
+                         - data_fdps_roster_array_ptr),
+                 (long) index * ROSTER_STRIDE);
+    }
+}
+
 void run_table_tests(void)
 {
     RUN_TEST(record_zero_is_the_table_base);
@@ -2290,6 +2625,20 @@ void run_table_tests(void)
     RUN_TEST(the_promo_record_bytes_are_unsigned);
     RUN_TEST(a_char_id_indexes_its_promotion_record_unbiased);
 
+    RUN_TEST(roster_record_zero_is_the_array_base);
+    RUN_TEST(consecutive_roster_records_are_eighty_bytes_apart);
+    RUN_TEST(the_last_roster_member_is_at_the_end_of_the_block);
+    RUN_TEST(a_roster_index_past_the_end_is_not_clamped);
+    RUN_TEST(a_negative_roster_index_steps_backwards);
+    RUN_TEST(the_roster_base_is_read_on_every_call);
+    RUN_TEST(a_null_roster_base_is_not_guarded);
+    RUN_TEST(the_roster_accessor_reads_the_roster_base);
+    RUN_TEST(the_roster_accessor_reads_none_of_the_table_bases);
+    RUN_TEST(the_returned_roster_pointer_addresses_the_packed_record);
+    RUN_TEST(the_roster_base_stats_are_signed_and_unaligned);
+    RUN_TEST(the_offsets_the_roster_callers_read);
+    RUN_TEST(the_inline_roster_arithmetic_agrees_with_the_accessor);
+
     /* Put the globals back the way they were found.  They are null until
        ticket 23 defines them, and leaving a pointer to this file's static
        buffers in one would hand the next unit an address it has no business
@@ -2303,4 +2652,10 @@ void run_table_tests(void)
     install_spell_base((unsigned char *) 0);
     install_learn_base((unsigned char *) 0);
     install_promo_base((unsigned char *) 0);
+
+    /* Same for the roster base and for the map unit array the contract-B case
+       borrowed: both are null until ticket 23 defines them, and the units that
+       walk the map array must not find this file's buffer in it. */
+    install_roster_base((unsigned char *) 0);
+    data_fdps_map_unit_array_ptr = (unsigned char *) 0;
 }

@@ -251,4 +251,41 @@ extern struct fdps_spell_learning_record *fdps_get_spell_learn_record(int learn_
 extern struct fdps_promotion_record *fdps_get_promotion_record(int char_id);
 #pragma aux fdps_get_promotion_record "*" parm caller [];
 
+/* Returns a pointer to member roster_index of the party roster: one struct
+   fdps_unit_record, the same 0x50-byte record the map unit array holds, giving
+   the member's flags, portrait and character ids, inventory, known spells,
+   class and level, the base stats at the odd offsets 0x37, 0x39 and 0x3e, the
+   current and maximum HP and MP at 0x40..0x47 and the derived combat stats at
+   0x48..0x4f.
+
+   The roster is not one of the nine data tables: it is a single 0xa00-byte
+   heap block -- 32 records -- that fdps_load_global_resources allocates once at
+   startup and never moves, so a pointer into it stays valid across a chapter
+   load, which is not true of the table bases above.
+
+   roster_index is a position in that array, 0..data_fdps_roster_member_count-1
+   for an occupied member.  Nothing is checked: the count at 0x00064114 is not
+   read here, there is no bound at either end, the multiply is signed so a
+   negative index addresses memory in front of the array, and the base is not
+   tested for null.  Each of the seven callers carries its own bound --
+   fdps_roster_revive_fallen_members and fdps_play_ending_credit_roll walk a
+   counter the member count bounds, fdps_village_select_member adds the list's
+   scroll base to the cursor offset, and fdps_shop_draw_member_entry,
+   fdps_shop_buy_loop, fdps_roster_preview_combat_stats_with_item and
+   fdps_church_select_promote_candidate pass a position given to them.
+
+   What the callers read decides the field widths: the three base stats at
+   +0x37, +0x39 and +0x3e are taken with MOVSX by
+   fdps_roster_preview_combat_stats_with_item (000335a7, 000335ba, 000335cd)
+   and so are signed 16-bit at odd offsets, while the class byte at +0x20, the
+   level at +0x21 and the char_id at +0x08 are zero-extended a byte at a time.
+   fdps_roster_revive_fallen_members tests the current-HP word at +0x40 for
+   zero, refills it from the maximum at +0x42 and clears the flags byte at
+   +0x05.
+
+   Reads only the roster base global, calls nothing, and dereferences
+   nothing. */
+extern struct fdps_unit_record *fdps_get_roster_record(int roster_index);
+#pragma aux fdps_get_roster_record "*" parm caller [];
+
 #endif

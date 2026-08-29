@@ -1,8 +1,11 @@
-/* table.c -- record accessors for the game's static data tables.
+/* table.c -- record accessors for the game's static data tables, and for the
+ * party roster, which is addressed the same way.
  *
- * See table.h.  This file owns no state of its own: the table base pointers it
- * reads are gamedata.c's, filled once at startup by fdps_load_data_tables and
- * released by fdps_free_global_resource_buffers.
+ * See table.h.  This file owns no state of its own: the base pointers it reads
+ * are gamedata.c's.  The nine table bases are filled once at startup by
+ * fdps_load_data_tables and released by fdps_free_global_resource_buffers; the
+ * roster base is allocated once by fdps_load_global_resources and lives for
+ * the whole run.
  */
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -394,5 +397,51 @@ struct fdps_promotion_record *fdps_get_promotion_record(int char_id)
 
     record = (struct fdps_promotion_record *)
         (data_fdps_promotion_table_ptr + char_id * PROMOTION_RECORD_STRIDE);
+    return record;
+}
+
+/* The stride of one party-roster record, as the original writes it: IMUL
+   EAX,dword ptr [EBP+0x14],0x50.  A literal and not sizeof(struct
+   fdps_unit_record), for the same reason as the nine tables above and with the
+   same consequence if it drifts: the record carries 16-bit fields at the ODD
+   offsets 0x37, 0x39 and 0x3e, so an aligning compiler would pad it past 0x50
+   and shift every field from 0x37 on, while the array the save file restores
+   keeps the original spacing (rebuild_info/pitfalls.md).
+
+   It is also the stride of the map unit array, which is a different global --
+   0x00069cd8 against 0x00064108 -- holding the same record type.  Nothing
+   derives one stride from the other; both are written as this literal at each
+   use. */
+#define ROSTER_RECORD_STRIDE 0x50
+
+/* 00023950.  The same one-basic-block shape as the nine table accessors above,
+   over the party roster instead of a file table: IMUL EAX,dword ptr
+   [EBP+0x14],0x50 / MOV EDX,dword ptr [0x00064108] / ADD EDX,EAX, spilled to a
+   stack local and reloaded into EAX to be returned.  No compare, no branch, no
+   CALL.
+
+   roster_index is a position in the roster, and the bound on it is the
+   caller's: nothing here compares it against data_fdps_roster_member_count at
+   0x00064114, and the seven callers each carry their own guard --
+   fdps_roster_revive_fallen_members and fdps_play_ending_credit_roll pass a
+   loop counter the count already bounds, fdps_village_select_member passes the
+   list's scroll base plus the cursor offset, and the three shop and church
+   callers pass a position handed to them from further up.  A bound added here
+   would move that responsibility rather than add safety.
+
+   IMUL again, the signed form, so a negative index steps backwards off the
+   front of the array instead of becoming a four-gigabyte offset.
+
+   The array is 0xa00 bytes -- fdps_load_global_resources allocates it with PUSH
+   0xa00 / CALL malloc at 000296b8 -- which is exactly 32 records, and it is
+   allocated once and never moved, so unlike the nine table bases a pointer into
+   it stays valid across a resource load.  The base is still re-read from the
+   global on every call and is not tested for null. */
+struct fdps_unit_record *fdps_get_roster_record(int roster_index)
+{
+    struct fdps_unit_record *record;
+
+    record = (struct fdps_unit_record *)
+        (data_fdps_roster_array_ptr + roster_index * ROSTER_RECORD_STRIDE);
     return record;
 }

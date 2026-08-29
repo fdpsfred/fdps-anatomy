@@ -4714,11 +4714,13 @@ Returns a pointer to one member's record in the party roster array.
 Algorithm:
 Multiplies roster_index by the 0x50-byte roster record stride and adds the array base pointer held in the global at 0x00064108 -- the same base and stride fdps_roster_add_character computes inline when it appends a member. The address is spilled to a stack local and reloaded into EAX as the return value. There is no bounds check: the index is not compared against the roster member count at 0x00064114, and callers do that themselves.
 
+The array is a single 0xa00-byte heap block: fdps_load_global_resources does PUSH 0xa00 / CALL 0x0003d375 / MOV [0x00064108],EAX at 000296b8-000296c5. It is allocated once at startup, never reallocated, and released only by fdps_shutdown_free_resources (read at 0002944c), so 0xa00 / 0x50 fixes the block at 32 records and a pointer into the roster outlives a chapter load. fdps_roster_write_back_battle_units at 000239ed and fdps_roster_revive_fallen_members at 00039f8d form the identical base + index * 0x50 inline rather than calling this accessor.
+
 Parameters:
-  roster_index -- position in the roster array, 0 .. [0x00064114]-1. FUN_00039e70 and FUN_0001ba40 pass a loop counter bounded by the count at 0x00064114; FUN_000352c0 passes an id out of its caller-supplied entry_ids array; FUN_000336d0 passes the grid's scroll base at 0x000601b8 plus the cursor offset; FUN_00033230 and FUN_00033570 pass a roster position received from their own callers.
+  roster_index -- position in the roster array, 0 .. [0x00064114]-1. fdps_roster_revive_fallen_members and fdps_play_ending_credit_roll pass a loop counter bounded by the count at 0x00064114; fdps_church_select_promote_candidate passes an id out of its caller-supplied entry_ids array; fdps_village_select_member passes the grid's scroll base at 0x000601b8 plus the cursor offset; fdps_shop_draw_member_entry, fdps_roster_preview_combat_stats_with_item and fdps_shop_buy_loop @ 00033b80 (calling from 00033d0e) pass a roster position received from their own callers.
 
 Returns:
-  Pointer to the 0x50-byte roster record. Callers read 16-bit fields at the odd offsets 0x37 and 0x39 and at 0x3e (FUN_00033570), the status byte at 0x05 and the class byte at 0x20, and the current-HP word at 0x40 which FUN_00039e70 tests for zero and refills from the maximum-HP word at 0x42. Never NULL, never range-checked.
+  Pointer to the 0x50-byte roster record. Callers read 16-bit fields at the odd offsets 0x37 and 0x39 and at 0x3e (fdps_roster_preview_combat_stats_with_item), the status byte at 0x05 and the class byte at 0x20, and the current-HP word at 0x40 which fdps_roster_revive_fallen_members tests for zero and refills from the maximum-HP word at 0x42. Never NULL, never range-checked.
 
 Pool: fdps  [no library match in the Watcom or ail Function ID sets; every caller is game code and the only data reference is the game's own roster base at 0x00064108]
 

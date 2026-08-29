@@ -21,6 +21,25 @@ extern int data_fdps_map_unit_count;
    base as a byte pointer and scales the index itself, so a reader casts. */
 extern unsigned char *data_fdps_map_unit_array_ptr;
 
+/* 00064108.  Base of the party roster: the members the player has enrolled,
+   held as struct fdps_unit_record just like the map unit array above, so the
+   stride is the same 0x50 and a reader that named the wrong one of the two
+   globals would still step by the right amount (rebuild_info/pitfalls.md,
+   contract B).  They are two separate arrays with two separate lifetimes: the
+   roster is the party between battles and the map array is who is on the field
+   now, and fdps_roster_write_back_battle_units at 00023980 copies one into the
+   other a record at a time.
+
+   fdps_load_global_resources allocates it once at startup -- PUSH 0xa00 / CALL
+   malloc / MOV [0x00064108],EAX at 000296b8 -- so the block is exactly 32
+   records and is never reallocated or freed until shutdown.  How many of those
+   32 are occupied is data_fdps_roster_member_count at 00064114, which is a
+   separate global and is what every walk over the roster compares against.
+
+   The original types the base as a byte pointer and scales the index itself,
+   so a reader casts. */
+extern unsigned char *data_fdps_roster_array_ptr;
+
 /* 00060144.  Base of the battle map's working movement grid: a four-byte
    header of two signed 16-bit dimensions followed by width*height two-byte
    cells (see src/movegrid.h).  Null until a chapter has been loaded, and the

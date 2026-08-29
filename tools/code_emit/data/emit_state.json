@@ -247,6 +247,14 @@
       "status": "committed",
       "emitted_against": "0x260",
       "rounds": 0
+    },
+    "00023950": {
+      "name": "fdps_get_roster_record",
+      "target": "table.c",
+      "body_size": "0x25",
+      "status": "committed",
+      "emitted_against": "0x25",
+      "rounds": 0
     }
   }
 }
