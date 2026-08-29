@@ -549,5 +549,25 @@
       "needs": "the FRIAPRDA.DAT level column checked against assets/tables/characters.md, or ticket 23's emitted table data.",
       "status": "open"
     }
+  ],
+  "0002b1b0": [
+    {
+      "from": "emit",
+      "what": "The function scans a fixed 256 entries with no count parameter and no null check, so it requires 768 readable bytes from whatever pointer it is handed. The only caller passes its own palette parameter straight through, and where that buffer comes from -- and whether anything can reach this with a shorter one -- is not established until fdps_build_palette_tables and its callers are emitted.",
+      "needs": "Emitting fdps_build_palette_tables at 0002af60 and following its palette argument back to the loader that produces it; if that source is always a full 256-entry .PAL image the concern closes with no code change.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "The function scans a fixed 256 entries with no count parameter and no null check, so it requires 768 readable bytes from whatever pointer it is handed. Its only caller passes its own palette parameter straight through at 0002b15e, and where that buffer comes from is not established yet. Recorded by the emitter and confirmed here as a real open question rather than a defect in this function.",
+      "needs": "Emitting fdps_build_palette_tables at 0002af60 and following its palette argument back to the loader that produces it; if that source is always a full 256-entry .PAL image the concern closes with no code change.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Whether the 16x16x16 lookup table at 0x643f0 is indexed r,g,b or with two channels transposed. The caller passes the middle loop variable as this function's red target and the outermost as its green target (pushes at 0002b174 and 0002b17f), while the table index [EBP-0x4] counts in outer/middle/inner nesting order.",
+      "needs": "Emitting fdps_build_palette_tables at 0002af60 and reading the consumers of DAT_000643f0 to see which channel each nibble of the index carries. Nothing about 0002b1b0 changes either way.",
+      "status": "open"
+    }
   ]
 }

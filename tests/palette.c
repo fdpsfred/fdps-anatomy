@@ -677,6 +677,176 @@ static void every_bit_of_a_channel_lands_where_its_shift_puts_it(void)
     }
 }
 
+/* WHAT THE NEAREST-COLOUR CASES BELOW ARE READ OFF.  0002b1b0 seeds
+   [EBP-0x20] with 0x989680 (10000000) and [EBP-0x1c] with 0x100, walks a byte
+   cursor with three MOV AL,byte ptr [EAX] / AND EAX,0xff / SUB pairs and three
+   INCs per iteration, forms IMUL of each difference by itself and adds them,
+   and takes the entry only on JGE falling through -- a strict less-than.  The
+   loop bound is the literal 0x100 in CMP dword ptr [EBP-0x24],0x100 / JL, not
+   anything the caller passes.  Every expected value below is computed from
+   that arithmetic by hand, never read off the emitted C.
+
+   The palette is staged as 257 entries so the entry one past the end of the
+   scan can be loaded with the only exact match in the block: a walk that ran
+   257 times would return 256 and a walk that stops at 256 returns 255. */
+#define NEAR_ENTRIES 257
+
+static unsigned char near_stage[NEAR_ENTRIES * 3];
+
+static void near_entry(int n, int red, int green, int blue)
+{
+    near_stage[n * 3] = (unsigned char) red;
+    near_stage[n * 3 + 1] = (unsigned char) green;
+    near_stage[n * 3 + 2] = (unsigned char) blue;
+}
+
+/* Loads every staged entry, the one past the end included, with one colour, so
+   a test only has to say which entries differ from the background. */
+static void near_fill(int red, int green, int blue)
+{
+    int n;
+
+    for (n = 0; n < NEAR_ENTRIES; n++) {
+        near_entry(n, red, green, blue);
+    }
+}
+
+/* Loads entry n with (n, n, n): 256 distinct colours along the grey axis, so
+   the distance to a target (t, t, t) is 3 * (t - n)^2 and the answer for an
+   exact hit is the index itself. */
+static void near_stage_grey_ramp(void)
+{
+    int n;
+
+    for (n = 0; n < NEAR_ENTRIES; n++) {
+        near_entry(n, n & 0xff, n & 0xff, n & 0xff);
+    }
+}
+
+/* Distance zero cannot be beaten and the seed cannot survive it, so a target
+   that is exactly one entry's colour comes back as that entry's index.  Index
+   0 as well as a middling one: the seeded best index is 0x100 and the seeded
+   distance is huge, so entry 0 has to be able to win on the first iteration. */
+static void an_exact_match_returns_its_own_index(void)
+{
+    near_stage_grey_ramp();
+
+    CHECK_EQ(fdps_palette_find_nearest_color(7, 7, 7, near_stage), 7);
+    CHECK_EQ(fdps_palette_find_nearest_color(0, 0, 0, near_stage), 0);
+    CHECK_EQ(fdps_palette_find_nearest_color(255, 255, 255, near_stage), 255);
+}
+
+/* On the grey ramp a target of (100, 101, 102) is (100-n)^2 + (101-n)^2 +
+   (102-n)^2 away from entry n: 5 at n = 100, 2 at n = 101 and 5 at n = 102.
+   The middle one wins, so the result is not simply the first channel's own
+   value. */
+static void the_closest_entry_wins_when_nothing_matches_exactly(void)
+{
+    near_stage_grey_ramp();
+
+    CHECK_EQ(fdps_palette_find_nearest_color(100, 101, 102, near_stage), 101);
+}
+
+/* AND EAX,0xff after MOV AL: a palette byte of 200 is 200, not -56.  On the
+   grey ramp a target of (200, 200, 200) therefore hits entry 200 exactly.
+   Under sign extension every entry from 128 up would go negative, entry 200
+   would sit 256 away in each channel, and the nearest entry would be 127. */
+static void the_palette_byte_is_taken_unsigned(void)
+{
+    near_stage_grey_ramp();
+
+    CHECK_EQ(fdps_palette_find_nearest_color(200, 200, 200, near_stage), 200);
+    CHECK_EQ(fdps_palette_find_nearest_color(255, 200, 200, near_stage), 218);
+}
+
+/* JGE skips the update, so the comparison is < and not <=: with two entries at
+   distance 0 the earlier one is kept and the later one does not displace it. */
+static void ties_go_to_the_lowest_index(void)
+{
+    near_fill(0, 0, 0);
+    near_entry(5, 10, 10, 10);
+    near_entry(9, 10, 10, 10);
+
+    CHECK_EQ(fdps_palette_find_nearest_color(10, 10, 10, near_stage), 5);
+}
+
+/* The seed is the literal 0x989680 and the test against it is strict.  With
+   every entry black, a target of (3000, 1000, 0) is 3000^2 + 1000^2 =
+   10000000 away from all 256 of them -- equal to the seed, so no entry is ever
+   taken and the seeded index 0x100 comes back.  One less in the green channel
+   makes it 9998001, which is under the seed, and then the first entry wins and
+   the 255 equal ones behind it do not displace it. */
+static void a_distance_equal_to_the_seed_is_not_taken(void)
+{
+    near_fill(0, 0, 0);
+
+    CHECK_EQ(fdps_palette_find_nearest_color(3000, 1000, 0, near_stage), 256);
+    CHECK_EQ(fdps_palette_find_nearest_color(3000, 999, 0, near_stage), 0);
+}
+
+/* CMP dword ptr [EBP-0x24],0x100 / JL: entry 255 is scanned and entry 256 is
+   not.  The background is 67700 away from the target, entry 255 is 1 away and
+   entry 256 -- one past the end of the scan -- is an exact match.  Reading one
+   entry too many would return 256; stopping where the original stops returns
+   255.  With entry 255 back at the background colour the only exact match in
+   the buffer is the one at 256, and the answer becomes the first background
+   entry rather than 256. */
+static void the_scan_covers_the_last_entry_and_no_further(void)
+{
+    near_fill(200, 200, 200);
+    near_entry(255, 40, 50, 61);
+    near_entry(256, 40, 50, 60);
+
+    CHECK_EQ(fdps_palette_find_nearest_color(40, 50, 60, near_stage), 255);
+
+    near_entry(255, 200, 200, 200);
+
+    CHECK_EQ(fdps_palette_find_nearest_color(40, 50, 60, near_stage), 0);
+}
+
+/* The three IMULs are the metric, not a scaling of one: by squares an entry
+   10 off in every channel is 300 away and one 18 off in a single channel is
+   324 away, so the first wins; by sums of absolute differences it would be 30
+   against 18 and the second would win.  The two metrics disagree here, and the
+   answer says which one the function computes. */
+static void the_metric_is_squared_distance_not_absolute_difference(void)
+{
+    near_fill(200, 200, 200);
+    near_entry(3, 10, 10, 10);
+    near_entry(7, 18, 0, 0);
+
+    CHECK_EQ(fdps_palette_find_nearest_color(0, 0, 0, near_stage), 3);
+}
+
+/* A palette entry brighter than the target gives a negative difference, and
+   IMUL of it by itself is positive: entry 4 is 4 below the target and entry 8
+   is 4 above it, both 16 away, so the tie goes to 4.  Entry 12 is 3 above the
+   target, 9 away, and beats both -- which it could not do if a negative
+   difference were compared as a signed quantity instead of being squared. */
+static void a_negative_difference_counts_as_its_square(void)
+{
+    near_fill(200, 200, 200);
+    near_entry(4, 6, 0, 0);
+    near_entry(8, 14, 0, 0);
+
+    CHECK_EQ(fdps_palette_find_nearest_color(10, 0, 0, near_stage), 4);
+
+    near_entry(12, 13, 0, 0);
+
+    CHECK_EQ(fdps_palette_find_nearest_color(10, 0, 0, near_stage), 12);
+}
+
+/* The target components are plain signed ints -- nothing masks them, and the
+   SUB is signed -- so a negative target stays negative and lands nearest to
+   black.  Taken as unsigned it would be an enormous quantity and the answer
+   would be the brightest entry on the ramp instead of the darkest. */
+static void the_target_components_are_signed(void)
+{
+    near_stage_grey_ramp();
+
+    CHECK_EQ(fdps_palette_find_nearest_color(-10, -10, -10, near_stage), 0);
+}
+
 void run_palette_tests(void)
 {
     RUN_TEST(the_dac_reads_back_what_was_written);
@@ -720,4 +890,13 @@ void run_palette_tests(void)
     RUN_TEST(a_dac_derived_word_matches_the_one_the_builder_packs);
     RUN_TEST(the_extractors_undo_the_packing);
     RUN_TEST(every_bit_of_a_channel_lands_where_its_shift_puts_it);
+    RUN_TEST(an_exact_match_returns_its_own_index);
+    RUN_TEST(the_closest_entry_wins_when_nothing_matches_exactly);
+    RUN_TEST(the_palette_byte_is_taken_unsigned);
+    RUN_TEST(ties_go_to_the_lowest_index);
+    RUN_TEST(a_distance_equal_to_the_seed_is_not_taken);
+    RUN_TEST(the_scan_covers_the_last_entry_and_no_further);
+    RUN_TEST(the_metric_is_squared_distance_not_absolute_difference);
+    RUN_TEST(a_negative_difference_counts_as_its_square);
+    RUN_TEST(the_target_components_are_signed);
 }

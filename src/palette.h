@@ -103,4 +103,32 @@ extern unsigned int fdps_pack_rgb(unsigned char red, unsigned char green,
                                   unsigned char blue);
 #pragma aux fdps_pack_rgb "*" parm caller [];
 
+/* Returns the index of the palette entry closest to the target colour, by
+   smallest squared RGB distance: (r - red)^2 + (g - green)^2 + (b - blue)^2.
+   This is what turns an arbitrary 24-bit colour into a DAC index, and
+   fdps_build_palette_tables runs it once per cell of the 16x16x16 lookup
+   table.  Reads no global and calls nothing.
+
+   palette is the raw 768 bytes of a 256-entry palette -- red, green, blue per
+   entry, the byte order of struct fdps_palette_entry -- and all 256 entries
+   are always scanned.  There is no entry-count parameter and no null check;
+   a buffer shorter than 768 bytes is read past its end.
+
+   Palette bytes are taken unsigned; the target components are taken as they
+   come and are neither masked nor clamped, so a caller is responsible for
+   keeping them in range.
+
+   Ties go to the lowest index: the comparison against the running best is a
+   strict less-than, so a later entry at the same distance does not displace
+   an earlier one.
+
+   The result is 0..255 for any target within range.  256 is the seed value
+   and means no entry came within a squared distance of 10000000 -- reachable
+   only with a target component thousands away from anything a DAC byte can
+   hold, which no caller in the image produces. */
+extern int fdps_palette_find_nearest_color(int target_red, int target_green,
+                                           int target_blue,
+                                           unsigned char *palette);
+#pragma aux fdps_palette_find_nearest_color "*" parm caller [];
+
 #endif

@@ -303,6 +303,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x34"
+    },
+    "0002b1b0": {
+      "name": "fdps_palette_find_nearest_color",
+      "target": "palette.c",
+      "body_size": "0xca",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0xca"
     }
   }
 }

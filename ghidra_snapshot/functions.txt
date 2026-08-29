@@ -238,7 +238,7 @@
 0002aef0 | 0x21 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | uint __cdecl fdps_get_rgb_blue(uint rgb)
 0002af20 | 0x34 | __cdecl | USER_DEFINED | 0x0 | - | orphan_block,pool_fdps | uint __cdecl fdps_pack_rgb(uchar r, uchar g, uchar b)
 0002af60 | 0x244 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_graphics | void __cdecl fdps_build_palette_tables(fdps_palette_entry * palette)
-0002b1b0 | 0xca | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_graphics | int __cdecl fdps_palette_find_nearest_color(int r, int g, int b, fdps_palette_entry * palette)
+0002b1b0 | 0xca | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_graphics | int __cdecl fdps_palette_find_nearest_color(int r, int g, int b, uchar * palette)
 0002b4f0 | 0x505 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | int __cdecl fdps_map_cursor_select_loop(int mode, int count, uchar * list)
 0002ba00 | 0xdb | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,shared_helper,subsys_battle | void __cdecl fdps_map_load_tile_info(int x, int y)
 0002bae0 | 0x3cd | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | void __cdecl fdps_battle_player_phase_loop(void)

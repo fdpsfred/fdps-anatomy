@@ -171,3 +171,76 @@ unsigned int fdps_pack_rgb(unsigned char red, unsigned char green,
          | ((unsigned int) green << 8)
          | (unsigned int) blue;
 }
+
+/* 0002b1b0.  The nearest-colour search fdps_build_palette_tables runs 4096
+   times to fill the 16x16x16 lookup table: a linear scan of all 256 palette
+   entries keeping the one whose squared RGB distance to the target is
+   smallest.
+
+   The palette arrives as a byte cursor, not as a record pointer, because that
+   is what the original walks: MOV AL,byte ptr [EAX] with no displacement,
+   followed by INC of the cursor slot, three times per iteration.  The three
+   bytes it steps through are a struct fdps_palette_entry's red, green and
+   blue in that order, so the caller may hand over an array of those records;
+   what this function needs is 768 readable bytes.
+
+   The loop is a fixed 256 iterations -- CMP dword ptr [EBP-0x24],0x100 / JL,
+   with the counter never compared against anything the caller supplies -- so
+   the entry count is not a parameter and a shorter palette is read past its
+   end.
+
+   Three things about the arithmetic are load-bearing:
+
+   AND EAX,0xff after the byte load zero-extends the palette byte, so a
+   component of 200 enters the subtraction as 200 and not as -56.  The target
+   components are not masked at all, which is why they are plain ints here and
+   why a caller passing something outside 0..255 gets a real, and possibly
+   enormous, distance rather than a wrapped one.
+
+   The distance is the squared distance, not the sum of absolute differences.
+   Which entry wins differs between the two metrics -- a target 10 away in all
+   three channels is closer than one 18 away in a single channel by squares and
+   farther by sums -- so the IMULs are not an optimisation of a simpler
+   comparison.
+
+   JGE against the running best makes the test a strict less-than: the first of
+   several equally close entries wins and no later one displaces it.
+
+   The seed is 10000000 for the distance and 0x100 for the index, and 0x100 is
+   not a valid entry.  Three in-range components can be at most 3 * 255 * 255 =
+   195075 apart, so with a target the game itself builds the seed is always
+   beaten and the result is always 0..255; the seed survives only for a target
+   far outside the DAC's range, and then this returns 256. */
+int fdps_palette_find_nearest_color(int target_red, int target_green,
+                                    int target_blue, unsigned char *palette)
+{
+    unsigned char *palette_cursor;
+    int best_distance;
+    int best_index;
+    int entry_index;
+    int red_delta;
+    int green_delta;
+    int blue_delta;
+    int distance;
+
+    best_distance = 10000000;
+    best_index = 0x100;
+    palette_cursor = palette;
+
+    for (entry_index = 0; entry_index < 0x100; entry_index++) {
+        red_delta = target_red - (int) *palette_cursor++;
+        green_delta = target_green - (int) *palette_cursor++;
+        blue_delta = target_blue - (int) *palette_cursor++;
+
+        distance = red_delta * red_delta
+                 + green_delta * green_delta
+                 + blue_delta * blue_delta;
+
+        if (distance < best_distance) {
+            best_distance = distance;
+            best_index = entry_index;
+        }
+    }
+
+    return best_index;
+}
