@@ -49,6 +49,24 @@ reviewer 第 13 項 `pass`，證據寫的是「第 1–4 項我本來就得弄�
 
 0 個 fix round，`out_tok_k` 45——比上一支的 106 少一半以上。不能就此推論規則讓事情變快（那支花掉的時間大半在追 gate 的 bug，而這支簡單得多），但至少可以說**加這條規則沒有讓 emit 變貴**，這是動手前最擔心的事。
 
+## Code review 抓到一個會靜默吃掉整輪回掃的洞
+
+命名這條規則本身 review 沒有意見，但驗證跑順帶暴露了六個 pipeline 問題，其中一個是真的會弄丟工作的。
+
+**回掃的產出沒有人 commit，而下一輪會把它刪掉。** 落地 commit 在回掃**之前**就做完了（bookkeeper 是第四個角色，rescan 是第五個），`rescanPrompt` 從頭到尾沒有 commit 這一步，收尾的 Report 段只 `git add devlog`。所以一批跑完，`emit_issues.json` 就是髒的躺在那裡——而 `tools/code_emit/data/` 正是票 21.6 的收拾段擁有並且會 `git checkout --` 還原的六個路徑之一。
+
+也就是說：**下一批一開跑，整輪回掃的結論就被自己的收拾機制刪掉了**，而且刪得無聲無息——Recover 會回報「沒有界線外的東西」，因為那個檔本來就在界線內。更糟的是重建不回來：支撐那個結論的 verdict 檔在 gitignore 的 `workspace/` 底下。
+
+這個洞的形狀值得記：**票 21.6 加的收拾機制，讓「未 commit」從『下次記得 commit』變成『下次會被刪掉』。** 引進一條不變式，等於把所有既有的違反從無害變成致命——這句話我在 21.6 的 devlog 裡才寫過一次（那次是 devlog 沒 commit 會卡死下一批），現在同一個機制用第二種方式咬了一次。往後任何一段會寫檔的 agent，都要問一次「這個檔誰 commit」。
+
+**第二個是結構性的：疑慮只會被回掃一次，而且是在最不可能答得出來的那一批。** `withIssues` 只裝本批落地的 function，所以一則疑慮的第二次機會發生在**記錄它的那一批**。但一則疑慮之所以懸著，正是因為它在問鄰居的契約——ADR-0007 第四條自己就這麼說——而那要等落地了鄰居的那一批才答得出來。結果是每則疑慮拿到一次機會、用在最差的時機，之後檔案就變成唯寫。`000109f0` 的四則從 t216 那輪起就是這樣躺著，沒有任何機制會再看它們一眼。
+
+修法是新增一個選單階段，從 `emit_issues.json` 與 call graph 挑「仍 open 且鄰居剛落地」的位址。刻意**不是**「全部仍 open 的」：那會無界成長，每批花幾百個 agent 去重問一批資訊量完全沒變的問題，然後得到一模一樣的誠實「還是不知道」。**鄰居落地才是唯一改變了的東西，所以它就是篩選條件。**
+
+其餘四項比較小但都是同一類——記錄的形狀不一致就會被靜默漏掉：`status` 欄位只有一個位址有（另一個位址的四則永遠不會被任何 `status == "open"` 的篩選找到）；同一個結論在 emit 與 review 兩則各存一份 1.5 KB 逐字複本、沒有 key 綁著，於是 review 抓到的那個事實錯誤（位移寫成 `+0x3f`，我自己重解 OMF 確認是 `+0x3e`；說「instruction for instruction 相同的四條」但引的 byte 是五條而且運算元用不同的 frame slot）只會被改到一份，留下另一份繼續矛盾。
+
+還有兩則 reviewer 的觀察原本會直接消失——verdict 檔在 `workspace/` 不進版控，devlog 是敘事不是待辦，`open_issues.md` 沒有它們。其中一則是真的 bug：`tests/movegrid.c` 的 runner 跑完之後把 `data_fdps_battle_move_grid_ptr` 留在指向自己的 file-static fixture，所有 runner 共用一個 process，下一個假設 grid 未配置的測試單元會繼承一個指向別人 fixture 的活指標，然後因為錯誤的理由通過。一行還原成 NULL 就解決，但它能被發現純粹是因為這次跑了 review。
+
 ## 順手記下的一件事
 
 回掃段這次真的解掉了一個 open issue，方法值得記：它要確認「編譯器有沒有把 `width*height` 外提到迴圈外」，而做法不是重跑建置，是直接去讀**上一輪建置已經留在 `workspace/` 裡的 `MOVEGRID.OBJ`**，在 hexdump 裡認出 `8b 45 f8 / 0f af 45 f4 / 3b 45 f0` 這段 `MOV/IMUL/CMP` 就在迴圈頭裡。附帶一句它自己記下的：那個 `.OBJ` 是 Easy OMF-386，泛用的 OMF record walk 什麼都找不到（票 14 的已知坑），所以它是從 hexdump 讀 code byte 而不是寫 parser。這是知識庫的坑條目真的擋下一次重造輪子。

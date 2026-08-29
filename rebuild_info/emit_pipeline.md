@@ -24,6 +24,13 @@
 
 **判定寫檔，只回傳摘要。** 完整的判定寫進 `workspace/code_emit/verdicts/<addr>.emit.json` 與 `.review.json`，回傳給 workflow 的只有約 200 byte。「這一項做完了沒」由讀得到檔案的下一個角色回報，不採信寫檔者自己的宣稱。
 
+**Rescan 自己 commit，而且要挑對名單。** 兩件事都是這一段最容易寫錯的地方：
+
+- **它跑在落地 commit 之後**，所以它對 `emit_issues.json` 的更新是未 commit 的，而 `tools/code_emit/data/` 正是收拾段會還原的路徑之一——不自己 commit 掉，下一批一開跑整輪回掃的結論就沒了，而證據在 `workspace/` 底下不進版控，重建不回來。
+- **名單不能只取本批落地的 function。** 一則疑慮之所以懸著，是因為它其實在問鄰居的契約，而那要等落地了鄰居的**那一批**才答得出來——記錄它的那一批恰好是最不可能答得出來的一批。只看本批等於每則疑慮只有一次機會、還用在最差的時機，之後檔案就變成唯寫。正確的名單是「仍 open，且鄰居剛落地」，從 `emit_issues.json` 與 call graph 挑。也不能取「全部仍 open 的」：那會無界成長，每批重問幾百個資訊量完全沒變的問題。
+
+`emit_issues.json` 的每一則都要有 `status`（`open`／`resolved`）與 `from`（`emit`／`review`），否則用狀態篩選未決疑慮的東西會靜默漏掉它們。**一個結論只記一次**：emitter 與 reviewer 記到同一件事時，settle emitter 那則，reviewer 那則用 `same_as` 指過去——兩份逐字複本的意思是將來發現其中一份錯了，只會改到一份，留下另一份繼續矛盾。
+
 ## 順序是 callee 先於 caller
 
 工作清單不照位址排，照 call graph 的拓樸序排：一支 function 的 callee 全部先 emit 完，才輪到它。順序由 `tools/code_emit/emit_order.py` 從 call graph 算出來，`next_batch.py` 照著發。
