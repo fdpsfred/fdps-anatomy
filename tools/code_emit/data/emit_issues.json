@@ -639,25 +639,32 @@
       "from": "emit",
       "what": "The record is enrolled with bag entries 6 and 7 flagged empty but holding whatever id bytes the roster block already had, and with position, facing, walk step, the AI fields, the event slot, +0x28..+0x30 and +0x32 uninitialised. What those bytes actually hold in play depends on whether the 0xa00 block malloc'ed at 000296b8 is ever written before the first chapter's adds, and on what a chapter reload leaves behind; the emitted C reproduces the absence of the writes, but the observable consequence cannot be pinned from this function alone.",
       "needs": "fdps_load_global_resources (000296b8) and the save/load path emitted, so it can be said whether the block arrives zeroed from malloc, or a real machine run that reads a fresh member's +0x17 and +0x00.",
-      "status": "open"
+      "status": "open",
+      "rescan": "NOT SETTLED, and narrower rather than closed. Neither half of `needs` can be met yet: workspace/code_emit/verdicts/ holds no file for fdps_load_global_resources @ 000296b8 and none for any save/load function, so there is no neighbour judgement to read about what the block holds before the first chapter's adds, and no DOSBox-X run has read a fresh member's +0x17 or +0x00. Reading 000296b8's assembly here to decide it would be making that function's emit round's call early instead of using one already made. What the rescan could take from a neighbour that does have a verdict: 00023950's emit verdict establishes the block behind data_fdps_roster_array_ptr is a plain malloc of 0xa00 at 000296b8 -- exactly 32 records of the 0x50 stride -- so the allocation is not a calloc and does not itself zero the bytes this body leaves unwritten. Whether 000296b8 clears the block after the malloc is still unread, and the chapter-reload half is untouched by that either way. Non-blocking for the emitted C in any case: the C reproduces the absence of the stores, and tests/roster.c pins that over a 0xa5-filled block, so the answer changes what those bytes mean in play, not what this function does. Still missing, precisely: the emit of 000296b8 saying whether the 0xa00 block is cleared after the malloc, the save/load path saying what a chapter reload leaves in a reused record, or a machine run reading +0x17 and +0x00 of a freshly enrolled member."
     },
     {
       "from": "emit",
       "what": "level - 1 when the base record's level byte is 0: the assembly does DEC on the zero-extended byte, so the multiply is by -1 and HP/MP come out base minus one growth step. The emitted C reproduces that in int arithmetic, but whether FRIAPRDA.DAT ever carries level 0 for a character an init enrols is not settled here.",
       "needs": "assets/tables/characters.md checked against the real FRIAPRDA.DAT level column, or ticket 23's emitted table data.",
-      "status": "open"
+      "status": "resolved",
+      "answer": "SETTLED, and it closes with nothing to do: no FRIAPRDA.DAT record carries level 0, and no call site can reach one even if one existed, so the DEC-to--1 path is unreachable in play. The level column, read byte by byte out of the shipped file rather than assumed: FRIAPRDA.DAT is 1,440 bytes = 60 records of 0x18, the size resource_info/data_tables.md records for that VFS member, and byte +0x02 of all 60 records is 1 3 13 15 7 10 3 15 14 16 10 15, then 10 for the template rows, 15 at 0x15 and 0x1F, 1 at 0x23 and 0x24-0x31, the 0x32-0x3A byte-copies of 0x00-0x08, and 16 at 0x3B -- minimum 1, zero occurrences of 0. That matches assets/characters.md's level column row for row, which is the cross-check the `needs` asked for. The ids that actually arrive: the accessor bounds nothing (00018ab0's verdict records one basic block with no CMP anywhere in it), so every one of the 24 call sites of 00023bc0 was read rather than reasoned about, and each is a PUSH imm8 -- the twelve chapter inits pass 0, 6, 4, 1, 3, 2, 8, 9, 7, 5, 11, 10 and fdps_title_demo passes 0, 1, 8, 9, 2, 10, 3, 11, 4, 12, 5, 6. The largest id anywhere is 0x0c, so the base record is always one of records 0x00-0x0c, and 0x0c is the LV 10 template row. HP and MP can therefore never come out below the base record's value, no test is owed for a level-0 case, and the emitted C needs no change: it already reproduces the arithmetic whichever value arrives.",
+      "settled_by": "The two halves the question needed, both measured. (1) The real level column: byte +0x02 of each of the 60 records of the FRIAPRDA.DAT unpacked from MISC.VFS by tools/vfs_dump, 1,440 bytes as resource_info/data_tables.md states, giving minimum 1 and no zero, in agreement with assets/characters.md. (2) The reachable ids: the immediates at all 24 call sites listed by get_xrefs_to 00023bc0, read as bytes (0002ac37 onward for fdps_title_demo's twelve, and the two bytes before each chapter init's CALL), all PUSH imm8 in 0x00-0x0c. Incidental and recorded only here, not written into that function's file: the same 24 immediates also answer 00018ab0's own open question about whether the roster path can hand its accessor an unbounded char_id -- on this path it cannot."
     },
     {
       "from": "review",
       "what": "What the fields this body never writes actually hold when a member is enrolled: bag entries 6 and 7's id bytes at +0x17 and +0x19, position/facing/walk step at +0x00..+0x04, +0x28..+0x30, the death-script operand at +0x32, the AI fields at +0x34..+0x36 and the event slot at +0x3d. The emitted C reproduces the absence of the stores, but the observable consequence depends on what the 0xa00 block malloc'ed at 000296b8 contains before the first chapter's adds and on what a chapter reload leaves behind.",
       "needs": "fdps_load_global_resources (000296b8) and the save/load path emitted, so it can be said whether the block arrives zeroed; or a real DOSBox-X run reading a fresh member's +0x17 and +0x00.",
-      "status": "open"
+      "status": "open",
+      "rescan": "NOT SETTLED. Same concern as the emitter's entry above, which carries the rescan record, what the neighbours could narrow and what is still missing; see its rescan. Recorded once on purpose.",
+      "same_as": "The record is enrolled with bag entries 6 and 7 flagged empty but holding whatever id bytes the rost"
     },
     {
       "from": "review",
       "what": "Whether a base record with level 0 ever reaches this body. DEC EAX on the zero-extended level byte makes the HP/MP multiplier -1, so HP and MP would come out one growth step BELOW the base record's value. The emitted C reproduces that in int arithmetic, but no test covers it and nothing here settles whether FRIAPRDA.DAT carries level 0 for any character an init enrols.",
       "needs": "the FRIAPRDA.DAT level column checked against assets/tables/characters.md, or ticket 23's emitted table data.",
-      "status": "open"
+      "status": "resolved",
+      "answer": "SETTLED. Same concern as the emitter's entry above, which carries the settlement and the evidence; see its answer / settled_by. Recorded once on purpose: two copies of a conclusion are two things to correct when one of them turns out to be wrong.",
+      "same_as": "level - 1 when the base record's level byte is 0: the assembly does DEC on the zero-extended byte, s"
     }
   ],
   "0002b1b0": [
