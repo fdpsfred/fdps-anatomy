@@ -449,5 +449,19 @@
       "needs": "A playtest of fdps_icon_script_fade_to_black (00022410) and fdps_icon_script_fade_in (00022480) at the project's DOSBox-X cycle setting, watching for tearing or a visibly different fade duration. No unit test can reach it.",
       "status": "open"
     }
+  ],
+  "00022410": [
+    {
+      "from": "emit",
+      "what": "The fade's pace has no unit-test observable. Each of the sixteen steps waits one vertical retrace and then holds for step_delay_ms through the CRT delay(), and only the last step's palette survives to be read back -- so the tests pin the ramp's endpoint and its source, but nothing here proves the step count is sixteen rather than any other number that ends on -60, nor that the retrace wait is still ahead of the upload, nor that step_delay_ms reaches delay() at all. Timing it would measure the emulator's cycle setting, not the code.",
+      "needs": "A playtest of an IconAni scene that uses opcode 0x0e (a scripted black-out between pictures) against the original, watching that the fade takes the same wall-clock time and looks equally smooth. That, or an instruction-level comparison of this function's compiled body with 00022410.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "The fade's pace has no unit-test observable. Each of the sixteen steps waits one vertical retrace and then holds for step_delay_ms through the CRT delay(), and only the last step's palette survives to be read back, so the tests pin the ramp's endpoint (-60), its source (the master palette, re-read every step) and its per-entry stride, but nothing proves the step count is sixteen rather than any other count ending on -60, nor that the retrace wait is still ahead of the upload, nor that step_delay_ms reaches delay() at all. Timing it in a unit test would measure the emulator's cycle setting rather than the code (contract D).",
+      "needs": "A playtest of an IconAni scene that uses opcode 0x0e -- a scripted black-out between pictures -- against the original, watching that the fade takes the same wall-clock time and looks equally smooth; or an instruction-level comparison of the compiled body against 00022410.",
+      "status": "open"
+    }
   ]
 }

@@ -123,6 +123,23 @@ extern int data_fdps_font_glyph_stride_bytes;
 extern int data_fdps_font_shadow_offset_x;
 extern int data_fdps_glyph_shadow_row_offset;
 
+/* 000643bc.  Pointer to the game's master VGA palette: the 768 bytes of
+   Fde.pal, 256 records of three 6-bit components in R, G, B order, so a
+   struct fdps_palette_entry[256] read through a cast.  The startup resource
+   loader fills it and a failure there is fatal, so past startup every reader
+   may assume 768 valid bytes; nothing in the image ever writes through the
+   pointer, so the block stays as loaded for the whole run.
+
+   Fourteen files read it, and every one of them hands it to
+   fdps_set_palette_range as the source of a whole-DAC upload.  Bias 0 means
+   "put the normal screen back"; a fade is the same upload repeated with the
+   bias ramped, which is why the block must not be modified in place -- each
+   step re-derives the DAC from these untouched bytes, and that is what makes
+   a ramp land back on the exact original palette at bias 0.
+
+   The original types it as a byte pointer and casts at each use. */
+extern unsigned char *data_fdps_vga_main_palette_ptr;
+
 /* 0006404a.  Which decoration the text routines draw under a glyph: non-zero
    selects the four-way one-pixel outline, zero selects the single drop shadow
    at the offsets above.  A byte, tested with CMP byte ptr [0x0006404a],0x0 at

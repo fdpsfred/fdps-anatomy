@@ -226,6 +226,14 @@
       "status": "committed",
       "emitted_against": "0x107",
       "rounds": 0
+    },
+    "00022410": {
+      "name": "fdps_icon_script_fade_to_black",
+      "target": "icon.c",
+      "body_size": "0x6e",
+      "status": "committed",
+      "emitted_against": "0x6e",
+      "rounds": 0
     }
   }
 }
