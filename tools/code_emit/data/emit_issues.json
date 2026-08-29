@@ -3,44 +3,59 @@
     {
       "from": "emit",
       "what": "The unit index is stored into out_indices as a single byte (MOV AL,byte ptr [EBP-0x1c]), so an index of 256 or more would be written truncated. No test pins that down, because staging 257 records to reach it proves nothing about the game: whether the map unit array can ever hold that many is not settled here.",
-      "needs": "The capacity of the block behind data_fdps_map_unit_array_ptr, which ticket 23's data emit (or whichever function allocates it) will fix. If the capacity is under 256 the truncation is unreachable and the note can be closed; if it is not, the callers that pass a real out_indices need looking at."
+      "needs": "The capacity of the block behind data_fdps_map_unit_array_ptr, which ticket 23's data emit (or whichever function allocates it) will fix. If the capacity is under 256 the truncation is unreachable and the note can be closed; if it is not, the callers that pass a real out_indices need looking at.",
+      "status": "open"
     },
     {
       "from": "emit",
       "what": "data_fdps_map_unit_array_ptr is declared in src/gamedata.h as 'unsigned char *', the type routing.json records, and cast to 'struct fdps_unit_record *' at the point of use. Whether gamedata.c should define it as the record pointer instead -- fdpstype.h says fdps_unit_record is the element of this very array -- is a decision that belongs to whoever emits gamedata.c, and every reader will have to agree with it.",
-      "needs": "The emit of gamedata.c (ticket 23). Until then the generated stub uses the routing type, which is what this header matches, so the two cannot disagree."
+      "needs": "The emit of gamedata.c (ticket 23). Until then the generated stub uses the routing type, which is what this header matches, so the two cannot disagree.",
+      "status": "open"
     },
     {
       "from": "review",
       "what": "The unit index is stored into out_indices as a single byte (MOV AL,byte ptr [EBP-0x1c] at 00010afb), so an index of 256 or more would be written truncated while the returned count keeps counting. Unreachable today because the one caller passes NULL, but a future caller that passes a real array inherits it.",
-      "needs": "The capacity of the block behind data_fdps_map_unit_array_ptr, which ticket 23 or whichever function allocates it will settle. Under 256 the truncation is unreachable and this closes; otherwise the callers that pass a real out_indices need looking at."
+      "needs": "The capacity of the block behind data_fdps_map_unit_array_ptr, which ticket 23 or whichever function allocates it will settle. Under 256 the truncation is unreachable and this closes; otherwise the callers that pass a real out_indices need looking at.",
+      "status": "open"
     },
     {
       "from": "review",
       "what": "data_fdps_map_unit_array_ptr is declared 'unsigned char *' in src/gamedata.h, matching routing.json's /byte *, and cast to 'struct fdps_unit_record *' at every use. Whether gamedata.c should define it as the record pointer instead -- fdpstype.h says fdps_unit_record is the element of this very array -- is a decision every reader will have to share.",
-      "needs": "The emit of gamedata.c (ticket 23). Until then gen_stubs.py uses the routing type, so the header and the stub cannot disagree."
+      "needs": "The emit of gamedata.c (ticket 23). Until then gen_stubs.py uses the routing type, so the header and the stub cannot disagree.",
+      "status": "open"
     }
   ],
   "00010b20": [
     {
       "from": "emit",
       "what": "The original recomputes width*height inside the loop head on every iteration (MOV EAX,[EBP-0x10] / IMUL EAX,[EBP-0xc] at 00010b5e), which is what an unoptimised Watcom build of `index < width * height` produces. The emitted C spells exactly that condition, but the project's flag set may let wcc386 hoist the invariant product out of the loop, which would make the rebuilt loop a couple of instructions shorter per tile than the original. It is a contract-D style difference and I could not settle whether the flag set actually hoists it.",
-      "needs": "Disassemble the loop in the built MOVEGRID.OBJ and compare its shape against 00010b5e-00010b85. If the product is hoisted and that is judged to matter, the fix is a flag-set question rather than a source one -- the source already spells the recomputation."
+      "needs": "Disassemble the loop in the built MOVEGRID.OBJ and compare its shape against 00010b5e-00010b85. If the product is hoisted and that is judged to matter, the fix is a flag-set question rather than a source one -- the source already spells the recomputation.",
+      "status": "resolved",
+      "answer": "SETTLED, no hoist. The built object recomputes the product in the loop head exactly as 00010b20 does. Disassembled the code bytes of the existing workspace/code_emit/out/objs/MOVEGRID.OBJ (LEDATA payload at file offset 0x0192; the object holds only fdps_map_grid_reset): the loop head at payload +0x3e (file offset 0x1d0) is 8b 45 f8 / 0f af 45 f4 / 3b 45 f0 / 7f 07 / eb 18 = MOV EAX,[EBP-0x8] / IMUL EAX,[EBP-0xc] / CMP EAX,[EBP-0x10] / JG body / JMP epilogue -- five instructions, the same SHAPE as 00010b5e-00010b6a with the IMUL inside the head and re-executed every pass. Not the same operands: the original reads the product out of [EBP-0x10] and compares against [EBP-0x8], the rebuild the other way round, because the two frame slots are assigned in the other order (see residual). That is which slot holds what, not whether the multiply is in the loop, which is the only thing this concern asked. The reason is the flag set itself: rebuild_info/build_flags.md fixes it at 'wcc386 -bt=dos4g -mf -4s -fpi -s -ot -od', and -od turns the optimiser off (the same flag that keeps every local written back to the stack, which this object also shows -- both dimension slots and the index are re-read from the frame in the head). No loop-invariant motion runs, so there is nothing to hoist the product out. The emitted C needed no change and gets none: it already spells the recomputation, and the built code proves the spelling survives the toolchain. Contract D closes for this loop.",
+      "settled_by": "workspace/code_emit/out/objs/MOVEGRID.OBJ (already built by the emit round; disassembled read-only, nothing rebuilt) plus rebuild_info/build_flags.md's -ot -od determination. Rescan of 00010b20.",
+      "residual": "Residual, non-blocking, found by the same byte-for-byte comparison and recorded so the next reader does not re-derive it. Two shape differences remain between the built object and 00010b20, neither functional (ADR-0001 is functional equivalence, not byte-exact), and both outside what this concern asked: (1) frame slot assignment differs -- the original puts width at [EBP-0x10] and the index at [EBP-0x8], the rebuild puts width at [EBP-0x8] and the index at [EBP-0x10], which is declaration order and nothing else; (2) the original's increment block at 00010b6c is MOV EAX,[EBP-0x8] / INC [EBP-0x8], while the rebuild emits the INC alone -- one dead load per tile. EAX is dead across it in the original (reloaded at 00010b74 before any use), so no value and no flag crosses the difference. Both are codegen shape, not behaviour; neither is a defect in the emitted C and neither is a reason to touch it."
     },
     {
       "from": "emit",
       "what": "The low six bits of cell byte 0 are preserved by the 0x3f mask, and the plate comment records that no code in the program writes or reads them. The emitted C preserves them, so it is equivalent either way, but whether those bits carry anything at run time (set by a data file rather than by code, say) is not settleable from this function.",
-      "needs": "The rest of movegrid.c -- 00010c30, 00010da0, 00010de0 and 00011da0 -- plus whatever fdps_field_load_chapter_resources leaves in the block before the first reset. If nothing there touches them either, the question closes as 'genuinely dead'."
+      "needs": "The rest of movegrid.c -- 00010c30, 00010da0, 00010de0 and 00011da0 -- plus whatever fdps_field_load_chapter_resources leaves in the block before the first reset. If nothing there touches them either, the question closes as 'genuinely dead'.",
+      "status": "open",
+      "rescan_note": "STILL OPEN after rescan, and for the reason the rescan cannot remove: the functions this concern names have not been emitted. workspace/code_emit/verdicts/ holds three pairs in total -- 000109f0, 00010b20 and 000160e0 -- so 00010c30, 00010da0, 00010de0, 00011da0 and fdps_field_load_chapter_resources have no verdict to read, and reading their assembly to judge them here would be making their emit round's judgement early rather than using one already made. Nothing changes about the emitted C either way: the 0x3f mask is spelled as the original spells it, so the preserved bits carry whatever they carried, and equivalence does not depend on the answer. Non-blocking; re-ask it when the rest of movegrid.c is in."
     },
     {
       "from": "review",
       "what": "Concurring with the emitter's first open issue after checking the shape myself: the original recomputes width*height in the loop head on every pass (MOV EAX,[EBP-0x10] / IMUL EAX,[EBP-0xc] at 00010b5e), which is what an unoptimised build of `index < width * height` emits. The emitted C spells exactly that condition, but whether the project's flag set lets wcc386 hoist the invariant product is unsettled, and a hoist would make the rebuilt loop shorter per tile than the original. Equivalence of result is not in doubt; only the contract-D instruction count is.",
-      "needs": "Disassemble the loop in the built MOVEGRID.OBJ and compare its shape against 00010b5e-00010b85. If the product is hoisted, the question is whether it matters here at all -- this loop drives no mixer and no raster-timed draw -- and the answer is a flag-set decision, not a source edit, since the source already spells the recomputation."
+      "needs": "Disassemble the loop in the built MOVEGRID.OBJ and compare its shape against 00010b5e-00010b85. If the product is hoisted, the question is whether it matters here at all -- this loop drives no mixer and no raster-timed draw -- and the answer is a flag-set decision, not a source edit, since the source already spells the recomputation.",
+      "status": "resolved",
+      "answer": "SETTLED. Same concern as the emit entry above, which carries the settlement, the evidence and the residual; see its answer / settled_by / residual. Recorded once on purpose: two copies of a conclusion are two things to correct when one of them turns out to be wrong.",
+      "same_as": "The original recomputes width*height inside the loop head on every iteration (MOV EAX,[EBP-0x10] / IMUL EAX,[EBP-0xc] at"
     },
     {
       "from": "review",
       "what": "Concurring with the emitter's second open issue: the 0x3f mask preserves the low six bits of cell byte 0 and the plate records that nothing in the program reads or writes them. The emitted C preserves them, so it is equivalent whatever the answer, but whether those bits carry anything at run time is not decidable from this function alone.",
-      "needs": "The rest of movegrid.c -- 00010c30, 00010da0, 00010de0 and 00011da0 -- plus whatever fdps_field_load_chapter_resources leaves in the block before the first reset."
+      "needs": "The rest of movegrid.c -- 00010c30, 00010da0, 00010de0 and 00011da0 -- plus whatever fdps_field_load_chapter_resources leaves in the block before the first reset.",
+      "status": "open",
+      "rescan_note": "STILL OPEN after rescan, and for the reason the rescan cannot remove: the functions this concern names have not been emitted. workspace/code_emit/verdicts/ holds three pairs in total -- 000109f0, 00010b20 and 000160e0 -- so 00010c30, 00010da0, 00010de0, 00011da0 and fdps_field_load_chapter_resources have no verdict to read, and reading their assembly to judge them here would be making their emit round's judgement early rather than using one already made. Nothing changes about the emitted C either way: the 0x3f mask is spelled as the original spells it, so the preserved bits carry whatever they carried, and equivalence does not depend on the answer. Non-blocking; re-ask it when the rest of movegrid.c is in."
     }
   ]
 }

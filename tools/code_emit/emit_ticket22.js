@@ -316,6 +316,37 @@ const WORKLIST = {
   }),
 }
 
+const RESCAN_WORKLIST = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['functions'],
+  properties: withStops({
+    functions: {
+      type: 'array',
+      description: 'Older functions whose still-open concerns are worth re-asking '
+        + 'now, because a neighbour of theirs landed in this batch. Empty is a '
+        + 'normal answer.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['addr'],
+        properties: {
+          addr: { type: 'string' },
+          name: { type: 'string' },
+          why: { type: 'string', description: 'Which neighbour landed, in a few words' },
+        },
+      },
+    },
+    still_open_total: {
+      type: 'integer',
+      description: 'How many entries in emit_issues.json are still open overall, '
+        + 'whether or not they made this list. A number that only grows is the '
+        + 'signal that concerns are accumulating faster than they are settled.',
+    },
+    note: { type: 'string' },
+  }),
+}
+
 const SPLIT_SUMMARY = {
   type: 'object',
   additionalProperties: false,
@@ -823,9 +854,12 @@ function bookkeepPrompt(fn, hasGhidraFixes, rounds) {
     '',
     '4. Equivalence concerns. Append every open_issues entry from both verdict files to',
     '   tools/code_emit/data/emit_issues.json, keyed by the 8-hex address ("' + fn.addr + '",',
-    '   not "0x...") . Create the file as {} if it does not exist. Read it back after',
-    '   writing and check the encoding survived -- this is a Traditional Chinese Windows',
-    '   machine and an unspecified encoding produces mojibake.',
+    '   not "0x...") . Create the file as {} if it does not exist. Give every entry',
+    '   "status": "open" and "from": "emit" or "review" -- the rescan stage flips status',
+    '   to "resolved" and later runs select on it, so an entry without the field is one',
+    '   that silently drops out of every future search for outstanding concerns. Read it',
+    '   back after writing and check the encoding survived -- this is a Traditional',
+    '   Chinese Windows machine and an unspecified encoding produces mojibake.',
     '',
     '5. Strays FIRST, before you stage anything. Run  git status --porcelain  and look',
     '   for anything outside src/, tests/, tools/code_emit/data/ and ghidra_snapshot/ --',
@@ -945,6 +979,30 @@ function rescanPrompt(fn) {
     'missing. An honest unresolved concern is a correct outcome. A second attempt is not',
     'a reason to manufacture a conclusion.',
     '',
+    'Keep every entry the same shape: each one carries status "open" or "resolved", and a',
+    'settlement is written once. If the same concern was recorded by both the emitter and',
+    'the reviewer, settle the emitter\'s entry and have the reviewer\'s point at it with',
+    '"same_as": "<the emitter entry\'s what>" rather than copying the answer -- two copies',
+    'of a conclusion is two things to correct when one of them turns out to be wrong.',
+    '',
+    '# Commit what you wrote, whether or not anything was settled',
+    '',
+    '  cd ' + REPO + ' && git add tools/code_emit/data/emit_issues.json',
+    '    && git commit -- tools/code_emit/data/emit_issues.json',
+    '',
+    'subject  emit: ' + fn.addr + ' 的等價性疑慮回掃  , a blank line, one line in',
+    'Traditional Chinese saying what was settled and what is still open, a blank line, and',
+    '  Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>',
+    'The pathspec on the commit is not decoration: it stops anything else that happens to',
+    'be staged from riding along under this subject.',
+    '',
+    'This step is not tidying, and skipping it destroys the work. The landing commit for',
+    'this function was made BEFORE you ran, so your edit is uncommitted right now -- and',
+    'tools/code_emit/data/ is one of the paths the next run\'s recovery stage owns and',
+    'reverts. An uncommitted settlement does not survive to the next batch, and the',
+    'evidence behind it lives in workspace/, which is not version controlled, so it cannot',
+    'be reconstructed either. If you changed nothing, commit nothing and say so.',
+    '',
     'Your final message is the summary object and nothing else.',
   ].join('\n')
 }
@@ -1045,6 +1103,43 @@ function recoverPrompt() {
     '   If nothing was dirty and nothing was in flight, commit nothing.',
     '',
     '7. Confirm with  git status --porcelain  that the tree is clean now, and report it.',
+    '',
+    'Your final message is the summary object and nothing else.',
+  ].join('\n')
+}
+
+function rescanWorklistPrompt(landed) {
+  return [
+    '# Role: Rescan worklist. Selection only. You settle nothing and edit nothing.',
+    '',
+    'This batch just landed these ' + landed.length + ' function(s):',
+    '  ' + landed.join(', '),
+    '',
+    'Some concern recorded by an EARLIER batch may be answerable now, because the',
+    'thing it was waiting for is one of those. A concern that is really about a',
+    'neighbour\'s contract -- what a callee returns, what a shared table holds -- is',
+    'unanswerable alone and obvious once the neighbour has been read, and the batch',
+    'that recorded it is never the batch that can answer it.',
+    '',
+    '1. Read ' + REPO + '\\tools\\code_emit\\data\\emit_issues.json. Take every entry whose',
+    '   status is "open", or that has no status field at all -- the field was added',
+    '   later, and an entry written before it exists is open, not settled.',
+    '   Report how many there are as still_open_total.',
+    '',
+    '2. For each address holding one of those, ask whether it is a caller or a callee',
+    '   of anything in the landed list. The call graph is at',
+    '     ' + REPO + '\\workspace\\call_graph\\graph.json   (direct_edges, indirect_edges)',
+    '   Read the concern text too: a concern that names one of the landed functions,',
+    '   or names a global that function owns, counts even if there is no call edge.',
+    '',
+    '3. Return those addresses and nothing else. Do NOT return every open concern:',
+    '   a concern whose neighbour has not moved has exactly the same information',
+    '   available as last time, and re-asking it costs a full agent to reproduce the',
+    '   same honest "still not settled". The neighbour landing is the only thing that',
+    '   changed, so it is the only reason to look again.',
+    '',
+    'Addresses already in this batch are handled anyway; do not list them.',
+    'An empty list is a normal and common answer.',
     '',
     'Your final message is the summary object and nothing else.',
   ].join('\n')
@@ -1508,12 +1603,48 @@ for (let i = 0; i < fns.length && !stopped && !endedEarly; i++) {
 //
 // Everything recorded as an unsettled equivalence concern gets one more look,
 // now that the functions around it have verdict files of their own.
+//
+// The list is not just this batch's functions. A concern is unanswerable alone
+// and obvious once the neighbour has been read (ADR-0007 4), so the run that
+// can settle it is the run that lands the NEIGHBOUR -- which is a later batch,
+// by which time this batch's `withIssues` is long gone. Selecting on it alone
+// gives every concern exactly one second look, taken in the batch least likely
+// to be able to answer it, after which the entry is never read again and the
+// file becomes write-only. So a stage picks the list off disk instead: still
+// open, and a caller or callee of something that landed just now.
+//
+// Not "every still-open entry": that grows without bound and would re-ask
+// hundreds of unanswerable questions every batch. The neighbour is what
+// changed, so the neighbour is the filter.
+const landedAddrs = results.filter((r) => r.status === 'committed')
+  .map((r) => r.addr)
+let rescanList = withIssues.map((f) => ({ addr: f.addr, name: f.name }))
+if (!stopped && landedAddrs.length > 0) {
+  const picked = await agent(rescanWorklistPrompt(landedAddrs),
+    { label: 'rescan-worklist', phase: 'Rescan', schema: RESCAN_WORKLIST })
+  if (picked && picked.functions) {
+    const seen = new Set(rescanList.map((f) => f.addr))
+    for (const f of picked.functions) {
+      if (f.addr && !seen.has(f.addr)) {
+        seen.add(f.addr)
+        rescanList.push({ addr: f.addr, name: f.name, why: f.why })
+      }
+    }
+    if (picked.functions.length) {
+      log('rescan: ' + picked.functions.length + ' older function(s) whose '
+        + 'neighbours landed this batch are worth re-asking')
+    }
+  } else {
+    log('rescan: the worklist stage returned nothing; only this batch\'s own '
+      + 'concerns get a second look')
+  }
+}
 
 const rescanLog = []
-if (!stopped && withIssues.length > 0) {
+if (!stopped && rescanList.length > 0) {
   phase('Rescan')
-  log('rescan: ' + withIssues.length + ' function(s) with recorded concerns')
-  for (const fn of withIssues) {
+  log('rescan: ' + rescanList.length + ' function(s) with recorded concerns')
+  for (const fn of rescanList) {
     try {
       const r = await runAgent(rescanPrompt(fn),
         { label: 'rescan:' + fn.addr, phase: 'Rescan', schema: RESCAN_SUMMARY })

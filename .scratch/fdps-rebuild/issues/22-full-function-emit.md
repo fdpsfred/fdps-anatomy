@@ -34,17 +34,17 @@ emit 出來的 C 裡面，**每一個區域變數與每一個參數都必須有�
 
 界線：名稱要反映它在這支 function 裡的角色（`tile_index`、`remaining_mp`、`cursor_row`），不是它的型別（`int_var`）也不是它的來源暫存器。迴圈的索引叫 `i`／`j` 可以，那是慣例不是預設名。真的無法判斷用途的變數，是一則 `open_issues`，不是一個可以留著的名字。
 
-**這條規則怎麼進 workflow 是票 21.7 的工作**，本票只是它的使用者：emitter 取名、reviewer 檢查、`rebuild_info/naming.md` 擁有規則。本票下面三個對應的 checkbox 是驗收條件，實作在 21.7 完成之前不要開始下一批。
+**這條規則怎麼進 workflow 是票 21.7 的工作，已完成**，本票只是它的使用者：預設名稱由建置擋（`build_emit.py` 在啟動 DOSBox 之前掃 `src/` 與 `tests/`，命中就以 `E9001` 中止），名不副實由 reviewer 檢查表第 13 項擋，正典在 [`rebuild_info/naming.md`](../../../rebuild_info/naming.md)。
 
 ## 現況
 
-票 21 的試跑（`000160e0`）與票 21.6 的驗證跑（`000109f0`）各落地一支，兩支都在 `emit_state.json` 記為 `committed`。所以本票不是從零開始：`next_batch.py --stats` 說還剩 513 支。
+票 21 的試跑（`000160e0`）、票 21.6 的驗證跑（`000109f0`）與票 21.7 的驗證跑（`00010b20`）各落地一支，三支都在 `emit_state.json` 記為 `committed`。所以本票不是從零開始：`next_batch.py --stats` 說還剩 511 支。
 
-那兩支的區域變數命名經人工檢查合格（`unit`／`count`／`index`／`dist`，參數 `tile_x`／`max_dist`／`out_indices`／`cmd_disabled`），但那是 emitter 自己的判斷，當時 workflow 裡沒有任何規則要求它——所以不能拿它當「規則有效」的證據，票 21.7 仍然要做。
+前兩支的區域變數命名經人工檢查合格，但那是 emitter 自己的判斷，當時 workflow 裡沒有任何規則要求它，所以不能拿它當「規則有效」的證據。第三支才是票 21.7 的實測：Ghidra 給的四個區域變數全是預設名（`sVar1`／`sVar2`／`local_18`／`local_14`），emit 出來是 `grid_width`／`grid_height`／`cell_index`／`cell`。
 
-**Blocked by:** 21, 21.5, 21.6, 21.7
+**Blocked by:** 21, 21.5, 21.6, 21.7 — 全部已完成
 
-**Status:** blocked（等票 21.7 把區域變數命名接進 workflow；514 支已落地 2 支）
+**Status:** ready-for-agent（514 支已落地 3 支；票 21.7 已完成）
 
 - [ ] 遊戲本體 function 全部 emit 完成，每個都經 reviewer 通過
 - [ ] 每個 function 一次處理一個，無任何批次處理
