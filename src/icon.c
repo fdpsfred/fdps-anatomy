@@ -35,6 +35,14 @@
 #define FADE_DARKEN_STEP 4
 #define FADE_DARKEN_LIMIT 0x40
 
+/* Where the fade back in starts.  Its counter is loaded with 0x40 and the loop
+   runs while the counter is still >= 0, so the darkening takes the seventeen
+   values 64, 60, ... 4, 0 -- one step more than the fade out's sixteen, and the
+   only place in the pair where a bias of 64 (which extinguishes every
+   component) or a bias of 0 (which uploads the master palette untouched) is
+   ever reached. */
+#define FADE_IN_FIRST_DARKENING 0x40
+
 /* 00022410.  The loop is CMP dword ptr [EBP-4],0x40 / JL with ADD 0x4 at the
    bottom, so the counter is signed and counts up while the bias handed to the
    upload is its negation -- NEG EAX, three times, once per channel.  A counter
@@ -56,6 +64,48 @@ void fdps_icon_script_fade_to_black(int step_delay_ms)
 
     for (darken_amount = 0; darken_amount < FADE_DARKEN_LIMIT;
          darken_amount += FADE_DARKEN_STEP) {
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins, so each step of the ramp lands
+               on its own displayed frame. */
+        }
+
+        fdps_set_palette_range(
+            (struct fdps_palette_entry *) data_fdps_vga_main_palette_ptr,
+            FADE_FIRST_DAC_ENTRY, FADE_LAST_DAC_ENTRY,
+            -darken_amount, -darken_amount, -darken_amount);
+
+        delay((unsigned int) step_delay_ms);
+    }
+}
+
+/* 00022480.  The mirror image of the handler above in shape but not in extent.
+   The loop is MOV dword ptr [EBP-4],0x40 / CMP against 0x0 with JGE and ADD
+   -0x4 at the bottom, so the counter starts at 64, counts down, and the body
+   still runs on the pass where the counter has reached 0.  The three NEG EAX
+   hand its negation to the upload as all three channel biases, exactly as the
+   fade out does, so the biases are -64, -60, ... -4, 0.
+
+   The counter is signed -- JGE, not JAE -- and it has to be, because the loop's
+   exit depends on the counter going below zero being recognised as below zero.
+
+   Both ends of that range matter and neither is what a mirror of the sibling
+   would produce.  The first step's -64 puts every component at 0 through the
+   upload's clamp, so the ramp starts from true black whatever the DAC held
+   when the opcode was reached; the last step's 0 uploads the master palette
+   with nothing subtracted, so the handler leaves the DAC holding exactly the
+   master palette.  Copying the sibling's bound -- running while the counter is
+   > 0, or starting it at 60 -- drops that last step and leaves the screen
+   permanently four short of full brightness (rebuild_info/pitfalls.md).
+
+   The retrace wait, the upload and the delay are in the same order and the same
+   one-of-each-per-step arrangement as the fade out, and pace the ramp the same
+   way. */
+void fdps_icon_script_fade_in(int step_delay_ms)
+{
+    int darken_amount;
+
+    for (darken_amount = FADE_IN_FIRST_DARKENING; darken_amount >= 0;
+         darken_amount -= FADE_DARKEN_STEP) {
         while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
             /* Spin until the retrace begins, so each step of the ramp lands
                on its own displayed frame. */

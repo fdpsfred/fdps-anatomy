@@ -37,4 +37,25 @@
 extern void fdps_icon_script_fade_to_black(int step_delay_ms);
 #pragma aux fdps_icon_script_fade_to_black "*" parm caller [];
 
+/* Script opcode 0x0f.  Brings the screen back out of black over seventeen
+   steps, each one paced by a wait for the VGA vertical retrace and then held
+   for step_delay_ms milliseconds through the CRT's delay().
+
+   Like the fade out, every step re-uploads all 256 DAC entries from the master
+   palette with that step's darkening bias applied, so the ramp is derived from
+   the master palette and never from what is on the DAC.
+
+   The biases are -64, -60, ... -4, 0.  Both ends are load-bearing: -64 clamps
+   every component to 0, so the picture always comes up from true black no
+   matter what the DAC held on entry, and the final 0 uploads the master
+   palette untouched, so the handler ends with the screen at full brightness.
+   That is one step more than the fade out's sixteen, and the pair is
+   deliberately asymmetric -- the fade out stops at -60, this one runs all the
+   way home.
+
+   step_delay_ms is the operand byte the interpreter read out of the script, so
+   0..255. */
+extern void fdps_icon_script_fade_in(int step_delay_ms);
+#pragma aux fdps_icon_script_fade_in "*" parm caller [];
+
 #endif
