@@ -6236,7 +6236,7 @@ Parameters:
   rgb -- packed colour word in the form 0x00RRGGBB, 0 to 0x00ffffff. fdps_build_palette_tables builds it from one 3-byte VGA DAC entry of the palette it was handed, red at +0, green at +1, blue at +2, each multiplied by 4 to widen the 6-bit DAC value and truncated to a byte.
 
 Returns:
-  The green component, 0 to 255. fdps_build_palette_tables keeps only its high nibble (AND 0xf0, then shift left 4) and uses it as bits 4-7 of the nibble-per-channel word it stores in the table at DAT_000657f0.
+  The green component, 0 to 255. fdps_build_palette_tables keeps only its high nibble (AND 0xf0, then shift left 4) and uses it as bits 8-11 of the word it stores in the table at DAT_000657f0, which keeps each channel in the byte position it had in the packed word with only its high nibble left.
 
 Pool: fdps  [no Function ID candidate in either the Watcom or the ail set and no library byte match; the sole reference is one CALL from the game function fdps_build_palette_tables, and a linked library object cannot be reachable only from game source]
 

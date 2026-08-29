@@ -64,4 +64,15 @@ extern void fdps_set_palette_range(struct fdps_palette_entry *rgb,
 extern unsigned int fdps_get_rgb_red(unsigned int rgb);
 #pragma aux fdps_get_rgb_red "*" parm caller [];
 
+/* Returns the green component of a packed word, 0..255 -- bits 8..15 brought
+   down to bits 0..7.  Everything above the channel is masked off, so both the
+   red byte the shift leaves in place and anything a word carries in its top
+   byte are excluded rather than assumed absent.  Reads no global and calls
+   nothing.
+
+   The argument is unsigned for the same reason as the red extractor's: the
+   shift is SHR, not SAR. */
+extern unsigned int fdps_get_rgb_green(unsigned int rgb);
+#pragma aux fdps_get_rgb_green "*" parm caller [];
+
 #endif

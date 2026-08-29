@@ -100,3 +100,23 @@ unsigned int fdps_get_rgb_red(unsigned int rgb)
 {
     return (rgb >> 16) & 0xffu;
 }
+
+/* 0002aec0.  MOV EAX,[EBP+0x14] / SHR EAX,0x8 / AND EAX,0xff: the green
+   component of the same packed 0x00RRGGBB word, one byte down from the red
+   one.
+
+   The shift distance is the only thing that differs from fdps_get_rgb_red, so
+   everything said there holds here too.  SHR and not SAR is why the argument
+   is unsigned, and the mask is what stops the red byte, which the shift leaves
+   sitting in bits 8..15, reaching the result.  Here the mask is load-bearing
+   for a word the game itself builds, not only for a malformed one: red is
+   always present in a packed word, so without the AND every colour with any
+   red in it would come back wrong.
+
+   The original stores the result into a stack slot and reloads it before
+   returning, which is the unoptimised code wcc386 emits for a one-line return;
+   there is no second value there to name. */
+unsigned int fdps_get_rgb_green(unsigned int rgb)
+{
+    return (rgb >> 8) & 0xffu;
+}
