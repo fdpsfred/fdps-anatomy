@@ -196,4 +196,36 @@ extern unsigned char data_fdps_font_outline_enabled_flag;
 extern unsigned char *data_fdps_cel_sprite_cache_ptr;
 extern int data_fdps_cel_sprite_cache_count;
 
+/* 000653f0.  The blend weight table: 18 rows of 256 words, one row per weight
+   and one word per palette entry, built by fdps_build_palette_tables
+   (src/palette.h) and read by the alpha blitters in eighteen files.
+
+   Row 0 is all zero, row 1 holds the palette itself in the nibble-per-byte
+   form 0x000R0G0B, and rows 2..17 are row 1 scaled by that row's multiplier.
+   The nibble layout is what makes one 32-bit multiply weight all three
+   channels at once without any of them carrying into the next.
+
+   It is ONE array, not two (rebuild_info/pitfalls.md, contract B).  The
+   builder writes row 0 through the base 0x653f0 and row 1 through 0x657f0,
+   which is the same array with 256 words folded into the displacement, and
+   every reader indexes across the row boundary.  Splitting it into two globals
+   would let the linker put the rows apart and the table would read as
+   garbage. */
+extern unsigned int data_fdps_palette_shade_ramp_table[4608];
+
+/* 000643f0.  The inverse palette: which DAC entry is nearest to each of the
+   4096 quantised colours, one byte per cell, built by
+   fdps_build_palette_tables (src/palette.h) and read by the same eighteen
+   files as the table above -- the pair is what turns a blended 24-bit result
+   back into a palette index.
+
+   Green-major: the cell for a quantised (r, g, b), each 0..15, is at
+   green * 256 + red * 16 + blue.  That is the order the builder's three nested
+   loops write it in, and it is not the order the axis names suggest.
+
+   It sits immediately below the shade ramp -- 000643f0 + 0x1000 is 000653f0 --
+   but nothing indexes from one into the other, so the two are separate
+   globals. */
+extern unsigned char data_fdps_inverse_palette_cube[4096];
+
 #endif

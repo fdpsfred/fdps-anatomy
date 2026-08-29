@@ -42,6 +42,7 @@
 #include <conio.h>
 #include "testharn.h"
 #include "fdpstype.h"
+#include "gamedata.h"
 #include "palette.h"
 
 #define VGA_DAC_READ_INDEX 0x3c7
@@ -847,6 +848,289 @@ static void the_target_components_are_signed(void)
     CHECK_EQ(fdps_palette_find_nearest_color(-10, -10, -10, near_stage), 0);
 }
 
+/* fdps_build_palette_tables, 0002af60.
+ *
+ * Expected values come from the assembly of the builder and of the two
+ * functions it leans on, never from running the emitted C:
+ *
+ *   The widening is LEA EAX,[EAX*4+0] on each of the three palette bytes, so a
+ *   six-bit 63 becomes 252 and a 17 becomes 68.  The packing keeps only the low
+ *   byte of each widened value -- MOV AL,byte ptr -- and the three masks are
+ *   AND EAX,0xf0, so what survives is the TOP nibble of each widened byte: 252
+ *   gives 0xf, 68 gives 0x4, 136 gives 0x8, 204 gives 0xc.
+ *
+ *   Those nibbles go to bits 16..19 (SHL 0xc after the mask), 8..11 (SHL 0x4)
+ *   and 0..3 (SAR 0x4), so a whole entry lands as 0x000R0G0B.  Row 0 of the
+ *   ramp is stored 0 outright, at 0002afa2, before any of that runs.
+ *
+ *   The multipliers are the 18 dwords at 0002ae40 the prologue copies into the
+ *   frame: 0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 15, 14, 13, 12, 11, 10, 9, 8.  Rows
+ *   2..17 are row 1 times that row's entry, IMUL at 0002b0eb, so row 8 and row
+ *   17 are the same table.
+ *
+ *   The cube is filled by three nested loops whose counters reach
+ *   fdps_palette_find_nearest_color as (middle, outer, inner) = (red, green,
+ *   blue), against a write index that only the innermost loop increments.  The
+ *   cell for a quantised (r, g, b) is therefore at green * 256 + red * 16 +
+ *   blue, and the assertions below are what would fail if any pair of the three
+ *   axes were swapped.
+ *
+ * Both tables are poisoned before every build, so "written" is an assertion
+ * here and not an accident of the zero-filled stub the link supplies until
+ * ticket 23 defines them.
+ */
+#define BUILD_ENTRIES 256
+#define RAMP_ROWS 18
+#define RAMP_WORDS (RAMP_ROWS * BUILD_ENTRIES)
+#define CUBE_CELLS 4096
+
+/* Neither poison can be a legitimate result.  A ramp word never has a bit
+   above 23 set, and 0xff is never a winning palette index for the staged
+   palette below: its entry 255 is one of many identical whites and ties go to
+   the lowest index. */
+#define RAMP_POISON 0xdeadbeefu
+#define CUBE_POISON 0xff
+
+#define RAMP_AT(row, entry) ((row) * BUILD_ENTRIES + (entry))
+
+/* Staged as plain bytes and handed over through a cast, for the reason the
+   preamble gives: the builder reaching entry n at 3n is the thing under test,
+   and an array of records would make the step whatever the record is. */
+static unsigned char build_stage[BUILD_ENTRIES * 3];
+static int build_stage_ready = 0;
+
+static struct fdps_palette_entry *build_staged(void)
+{
+    return (struct fdps_palette_entry *) build_stage;
+}
+
+static void build_entry(int n, int red, int green, int blue)
+{
+    build_stage[n * 3] = (unsigned char) red;
+    build_stage[n * 3 + 1] = (unsigned char) green;
+    build_stage[n * 3 + 2] = (unsigned char) blue;
+}
+
+static void poison_tables(void)
+{
+    int i;
+
+    for (i = 0; i < RAMP_WORDS; i++) {
+        data_fdps_palette_shade_ramp_table[i] = RAMP_POISON;
+    }
+    for (i = 0; i < CUBE_CELLS; i++) {
+        data_fdps_inverse_palette_cube[i] = CUBE_POISON;
+    }
+}
+
+/* Entries 0..6 are markers chosen so that every field of a ramp word and every
+   axis of the cube can be told apart; 7..255 are the same white as entry 4, so
+   the brightest corner of the cube has a tie that entry 4 wins. */
+static void stage_marker_palette(void)
+{
+    int i;
+
+    build_entry(0, 0, 0, 0);
+    build_entry(1, 63, 0, 0);
+    build_entry(2, 0, 63, 0);
+    build_entry(3, 0, 0, 63);
+    build_entry(4, 63, 63, 63);
+    build_entry(5, 17, 34, 51);
+    build_entry(6, 100, 0, 0);
+    for (i = 7; i < BUILD_ENTRIES; i++) {
+        build_entry(i, 63, 63, 63);
+    }
+}
+
+/* One build serves every case below it, because a build is 4096 nearest-colour
+   searches over 256 entries each and there is nothing to learn from repeating
+   it.  The one case that needs a second build says so and clears the flag. */
+static void built_from_marker_palette(void)
+{
+    if (build_stage_ready) {
+        return;
+    }
+    stage_marker_palette();
+    poison_tables();
+    fdps_build_palette_tables(build_staged());
+    build_stage_ready = 1;
+}
+
+/* Row 1 is the palette itself.  Entry 0 is black, entries 1, 2 and 3 put a
+   full channel in exactly one field each -- which is what says red reaches bits
+   16..19, green bits 8..11 and blue bits 0..3 -- and entry 4 is all three at
+   once. */
+static void ramp_row_one_holds_the_packed_palette(void)
+{
+    built_from_marker_palette();
+
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(1, 0)], 0x00000000L);
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(1, 1)], 0x000f0000L);
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(1, 2)], 0x00000f00L);
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(1, 3)], 0x0000000fL);
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(1, 4)], 0x000f0f0fL);
+}
+
+/* Entry 5 is (17, 34, 51), which widens to (68, 136, 204) = (0x44, 0x88,
+   0xcc).  The mask keeps the top nibble of each, so the word is 0x0004080c:
+   three different nibbles in three different fields, which no permutation of
+   the channels would reproduce. */
+static void each_channel_keeps_the_top_nibble_of_its_widened_byte(void)
+{
+    built_from_marker_palette();
+
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(1, 5)], 0x0004080cL);
+}
+
+/* Entry 6 has a red of 100, past the six bits a DAC component really has.
+   Nothing rejects or clamps it: 100 * 4 is 400, whose low byte is 0x90, whose
+   top nibble is 9. */
+static void a_component_above_the_dac_range_still_widens_by_four(void)
+{
+    built_from_marker_palette();
+
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(1, 6)], 0x00090000L);
+}
+
+/* Row 0 is stored zero regardless of the palette -- it is the weight-nothing
+   row -- and the poison is what makes that an assertion rather than a reading
+   of the zero-filled stub. */
+static void ramp_row_zero_is_forced_to_zero(void)
+{
+    built_from_marker_palette();
+
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(0, 0)], 0L);
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(0, 4)], 0L);
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(0, 255)], 0L);
+}
+
+/* Rows 2..8 are row 1 times the row number.  0x000f0f0f * 2 is 0x001e1e1e and
+   * 8 is 0x00787878; entry 5's 0x0004080c * 3 is 0x000c1824, where each
+   channel has grown past its nibble but stayed inside its own byte. */
+static void the_scaled_rows_are_row_one_times_the_level(void)
+{
+    built_from_marker_palette();
+
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(2, 4)], 0x001e1e1eL);
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(3, 5)], 0x000c1824L);
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(8, 4)], 0x00787878L);
+}
+
+/* The multiplier table is not a ramp: it climbs 2..8 and then jumps to 16 and
+   walks back down to 8, so row 9 is the heaviest row and row 17 repeats row 8.
+   A table read as a straight 0..17 would give row 9 nine times row 1 and row
+   17 seventeen times it, and both of these would fail. */
+static void the_multiplier_table_turns_round_after_row_eight(void)
+{
+    built_from_marker_palette();
+
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(9, 4)], 0x00f0f0f0L);
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(10, 4)], 0x00e1e1e1L);
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(17, 4)], 0x00787878L);
+}
+
+/* The heaviest row against the brightest entry is the worst case for the whole
+   nibble layout: 0xf * 16 is 0xf0, which is the largest a channel can reach
+   and still be inside its own byte.  Entry 5 at the same row shows the same
+   thing for three unequal channels. */
+static void no_channel_carries_into_the_one_above_it(void)
+{
+    built_from_marker_palette();
+
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(9, 4)], 0x00f0f0f0L);
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(9, 5)], 0x004080c0L);
+}
+
+/* Eighteen rows of 256, and every one of them written.  This is also what says
+   the two absolute bases in the original are one array: row 1 is reached
+   through 0x657f0 and every other row through 0x653f0, and a build that left
+   them apart would leave 256 words of poison behind. */
+static void every_word_of_all_eighteen_rows_is_written(void)
+{
+    int i;
+    int left = 0;
+
+    built_from_marker_palette();
+
+    for (i = 0; i < RAMP_WORDS; i++) {
+        if (data_fdps_palette_shade_ramp_table[i] == RAMP_POISON) {
+            left++;
+        }
+    }
+    CHECK_EQ(left, 0);
+}
+
+/* The three axes, one at a time.  Entry 1 is the only strong red, entry 2 the
+   only strong green and entry 3 the only strong blue, so the cell that holds
+   each of those indices says which loop carries which channel: red is the
+   middle loop (stride 16), green the outer one (stride 256) and blue the
+   innermost (stride 1). */
+static void the_cube_axis_order_is_green_red_blue(void)
+{
+    built_from_marker_palette();
+
+    CHECK_EQ(data_fdps_inverse_palette_cube[0], 0);
+    CHECK_EQ(data_fdps_inverse_palette_cube[15 * 16], 1);
+    CHECK_EQ(data_fdps_inverse_palette_cube[15 * 256], 2);
+    CHECK_EQ(data_fdps_inverse_palette_cube[15], 3);
+}
+
+/* A cell away from the axes, checked against the search itself so that the
+   argument order and the index formula are pinned together: the target for
+   cell (r, g, b) is (r * 4, g * 4, b * 4) and nothing else.  The bright corner
+   is an absolute value -- every entry from 4 up is the same white, 27 away,
+   and the strict less-than gives it to the first of them. */
+static void a_cube_cell_is_the_nearest_entry_to_its_quantised_colour(void)
+{
+    built_from_marker_palette();
+
+    CHECK_EQ(data_fdps_inverse_palette_cube[9 * 256 + 5 * 16 + 2],
+             fdps_palette_find_nearest_color(5 * 4, 9 * 4, 2 * 4,
+                                             build_stage));
+    CHECK_EQ(data_fdps_inverse_palette_cube[CUBE_CELLS - 1], 4);
+}
+
+/* All 4096 cells, and no more of the array than that. */
+static void every_cell_of_the_cube_is_written(void)
+{
+    int i;
+    int left = 0;
+
+    built_from_marker_palette();
+
+    for (i = 0; i < CUBE_CELLS; i++) {
+        if (data_fdps_inverse_palette_cube[i] == CUBE_POISON) {
+            left++;
+        }
+    }
+    CHECK_EQ(left, 0);
+}
+
+/* Nothing is accumulated or merged: a second build with a different palette
+   replaces both tables outright.  The second palette is black everywhere but
+   entry 10, so the word that was 0x000f0000 becomes 0, the white corner of the
+   cube moves from entry 4 to entry 10, and the black corner stays at 0. */
+static void a_second_build_replaces_both_tables(void)
+{
+    int i;
+
+    built_from_marker_palette();
+
+    for (i = 0; i < BUILD_ENTRIES; i++) {
+        build_entry(i, 0, 0, 0);
+    }
+    build_entry(10, 63, 63, 63);
+    fdps_build_palette_tables(build_staged());
+
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(1, 1)], 0L);
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(1, 10)], 0x000f0f0fL);
+    CHECK_EQ(data_fdps_palette_shade_ramp_table[RAMP_AT(9, 10)], 0x00f0f0f0L);
+    CHECK_EQ(data_fdps_inverse_palette_cube[CUBE_CELLS - 1], 10);
+    CHECK_EQ(data_fdps_inverse_palette_cube[0], 0);
+
+    build_stage_ready = 0;
+}
+
 void run_palette_tests(void)
 {
     RUN_TEST(the_dac_reads_back_what_was_written);
@@ -899,4 +1183,16 @@ void run_palette_tests(void)
     RUN_TEST(the_metric_is_squared_distance_not_absolute_difference);
     RUN_TEST(a_negative_difference_counts_as_its_square);
     RUN_TEST(the_target_components_are_signed);
+    RUN_TEST(ramp_row_one_holds_the_packed_palette);
+    RUN_TEST(each_channel_keeps_the_top_nibble_of_its_widened_byte);
+    RUN_TEST(a_component_above_the_dac_range_still_widens_by_four);
+    RUN_TEST(ramp_row_zero_is_forced_to_zero);
+    RUN_TEST(the_scaled_rows_are_row_one_times_the_level);
+    RUN_TEST(the_multiplier_table_turns_round_after_row_eight);
+    RUN_TEST(no_channel_carries_into_the_one_above_it);
+    RUN_TEST(every_word_of_all_eighteen_rows_is_written);
+    RUN_TEST(the_cube_axis_order_is_green_red_blue);
+    RUN_TEST(a_cube_cell_is_the_nearest_entry_to_its_quantised_colour);
+    RUN_TEST(every_cell_of_the_cube_is_written);
+    RUN_TEST(a_second_build_replaces_both_tables);
 }

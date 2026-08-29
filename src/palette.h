@@ -131,4 +131,32 @@ extern int fdps_palette_find_nearest_color(int target_red, int target_green,
                                            unsigned char *palette);
 #pragma aux fdps_palette_find_nearest_color "*" parm caller [];
 
+/* Rebuilds both blending tables -- data_fdps_palette_shade_ramp_table and
+   data_fdps_inverse_palette_cube, declared in gamedata.h -- from one 256-entry
+   DAC palette, and writes nothing else.  fdps_load_global_resources is the
+   only caller; every other file only ever reads the two tables.
+
+   palette must hold 256 struct fdps_palette_entry.  There is no entry-count
+   parameter and no null check, and all 256 are read; the components are the
+   DAC's six-bit values, which this widens to eight by multiplying by four.
+
+   The shade ramp comes out as 18 rows of 256 words.  Row 0 is all zero, row 1
+   is the palette in the nibble-per-byte form 0x000R0G0B -- the top nibble of
+   each widened channel in the low nibble of its own byte -- and rows 2..17 are
+   row 1 multiplied by 2..8 and then by 16 down to 8.  A row is therefore a
+   weight, not a brightness, and the two halves of the table are two separate
+   ramps; a blitter picks a row and reads one word per source pixel.
+
+   The cube comes out as 16x16x16 palette indices in green-major order: the
+   cell for a quantised (r, g, b), each 0..15, is at green * 256 + red * 16 +
+   blue.  Each cell is the nearest entry by squared distance to (red * 4,
+   green * 4, blue * 4), so the whole cube is 4096 calls to
+   fdps_palette_find_nearest_color and this is by far the slowest thing the
+   loader does.
+
+   Nothing here reads either table before writing it, so calling it again with
+   a different palette replaces both outright. */
+extern void fdps_build_palette_tables(struct fdps_palette_entry *palette);
+#pragma aux fdps_build_palette_tables "*" parm caller [];
+
 #endif

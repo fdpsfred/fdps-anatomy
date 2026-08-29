@@ -569,5 +569,31 @@
       "needs": "Emitting fdps_build_palette_tables at 0002af60 and reading the consumers of DAT_000643f0 to see which channel each nibble of the index carries. Nothing about 0002b1b0 changes either way.",
       "status": "open"
     }
+  ],
+  "0002af60": [
+    {
+      "what": "The packing at 0002b00e is emitted open-coded, matching the assembly, but the assembly's shape is an inline expansion of fdps_pack_rgb rather than hand-written arithmetic: the three argument temps at [EBP-0x7c]/[EBP-0x78]/[EBP-0x74] are copied into parameter-shaped slots at [EBP-0x68]/[EBP-0x6c]/[EBP-0x70], only the low byte of each of those is read (exactly as the out-of-line copy at 0002af20 reads only the low byte of each of its own parameter slots), the body writes an inlined local at [EBP-0x64], and the result is copied out to [EBP-0x80]. The build flags are -ot -od with no -oe, so the optimiser did not do this; the likely cause is the original declaring fdps_pack_rgb _inline in a shared header while the linker kept the out-of-line copy, which would also explain why nothing in the image calls it. The rebuild is functionally identical either way, and this is not a timing-sensitive loop, so the only thing at stake is which of the two the source really said.",
+      "needs": "Another inline-expansion site of a known small function elsewhere in the image would settle it -- if the same temp-copy-into-parameter-slot shape shows up at a second call site of some other function that also has an out-of-line copy, the _inline reading is confirmed and this call site should become a call to fdps_pack_rgb. Failing that, an experiment: compile a _inline function with -ot -od under Watcom 10.0a and compare the expansion shape against 0002b00e byte for byte.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "The cube's green-major index order (cell = green*256 + red*16 + blue) is established here from the push order and the running write index alone, and is documented in gamedata.h on that basis. No consumer has been emitted yet to corroborate it: fdps_message_window_close, the only consumer read during this round, just forwards both tables to fdps_blit_blend_rect without indexing either.",
+      "needs": "The emit of fdps_blit_blend_rect, which is where the cube is actually indexed. If its index expression is not green*256 + red*16 + blue, one of the two readings of the argument order is wrong and both functions have to be re-read together.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Whether the packing at 0002b00e was written as a call to fdps_pack_rgb declared _inline in a shared header, or open-coded in the source. The shape is an inline expansion -- three argument temps copied into parameter-shaped slots at [EBP-0x68]/[EBP-0x6c]/[EBP-0x70], only the low byte of each read, an inlined result local at [EBP-0x64] copied out to [EBP-0x80] -- and the build flags are -ot -od with no -oe, so the optimiser did not do it. The rebuild is functionally identical either way and this is not a timing-sensitive loop, so only the source's wording is at stake. Carried over from the emit verdict; I reached the same reading independently from the listing.",
+      "needs": "A second inline-expansion site of some other small function that also kept an out-of-line copy, showing the same temp-copy-into-parameter-slot shape; or a Watcom 10.0a experiment compiling an _inline function with -ot -od and comparing the expansion byte for byte against 0002b00e.",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "The cube's green-major index order (cell = green * 256 + red * 16 + blue) rests on the push order at 0002b15b and on 0002b1b0's own parameter-to-palette-byte mapping ([EBP+0x14] vs byte +0, [EBP+0x18] vs +1, [EBP+0x1c] vs +2). Both readings are solid on their own, but no emitted consumer indexes the cube yet, so the order has not been corroborated from the other side.",
+      "needs": "The emit of fdps_blit_blend_rect, where the cube is actually indexed. If its index expression is not green * 256 + red * 16 + blue, one of the two readings is wrong and this function and that one have to be re-read together.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

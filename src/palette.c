@@ -1,9 +1,10 @@
 /* palette.c -- the VGA DAC registers and the colour lookup tables built on
  * top of them.
  *
- * See palette.h for what a caller has to know.  This file holds no state: the
- * palette and the biases arrive as arguments and the DAC is the only thing
- * written.
+ * See palette.h for what a caller has to know.  The palettes and the biases
+ * arrive as arguments; this file owns no state of its own beyond the two
+ * lookup tables fdps_build_palette_tables fills, and those live in
+ * gamedata.h because eighteen other files read them.
  *
  * outp comes from <conio.h> as an ordinary library call, which is what the
  * original has: 00022f40 issues CALL 00042cb8 rather than an OUT instruction.
@@ -13,6 +14,7 @@
  */
 #include <conio.h>
 #include "fdpstype.h"
+#include "gamedata.h"
 #include "palette.h"
 
 /* The DAC write port pair: the entry number goes to 0x3c8 and its red, green
@@ -170,6 +172,152 @@ unsigned int fdps_pack_rgb(unsigned char red, unsigned char green,
     return ((unsigned int) red << 16)
          | ((unsigned int) green << 8)
          | (unsigned int) blue;
+}
+
+/* The source palette always has 256 entries here: the 256-iteration loops are
+   CMP against 0x100 with the counter never compared against anything the
+   caller supplies, so the entry count is not a parameter. */
+#define PALETTE_ENTRY_COUNT 0x100
+
+/* The shade ramp is 18 rows of PALETTE_ENTRY_COUNT words: row 0 forced to
+   zero, row 1 the palette itself, rows 2..17 the scaled copies.  The row
+   count is the bound of the level loop, CMP [EBP-0x14],0x12 / JL, and it is
+   also the length of the multiplier table the prologue copies in. */
+#define SHADE_LEVEL_COUNT 0x12
+
+/* The inverse lookup is a cube of 16 steps per axis: three nested loops each
+   bounded by CMP ...,0x10 / JL. */
+#define COLOUR_CUBE_AXIS 0x10
+
+/* 0002af60.  Fills both of the lookup tables the blitters blend through, from
+   one 256-entry DAC palette.  The only caller is fdps_load_global_resources,
+   which runs it once at startup and again whenever the main palette changes.
+
+   Three passes, in this order:
+
+   1.  The shade ramp's row 1 (data_fdps_palette_shade_ramp_table + 256) gets
+       one packed word per palette entry, and row 0 is forced to zero.  A
+       packed word here is not the 0x00RRGGBB form the extractors take apart;
+       it is the nibble-per-byte form 0x000R0G0B, the top nibble of each
+       eight-bit channel sitting in the low nibble of its own byte.  That
+       layout is the whole trick of the table: because every channel has four
+       clear bits above it inside its own byte, one multiply scales all three
+       at once and no channel can carry into the next.
+
+   2.  Rows 2..17 are row 1 multiplied by that row's entry in the multiplier
+       table.  The multipliers are 2..8 for rows 2..8 and then 16 down to 8
+       for rows 9..17, so the two halves of the table are two different
+       weight ramps and the row index is not a brightness in itself.
+
+   3.  data_fdps_inverse_palette_cube gets the nearest palette index for every
+       one of the 16x16x16 quantised colours.
+
+   THE TWO ABSOLUTE BASES ARE ONE ARRAY (pitfalls, contract B/H).  The original
+   writes row 0 through 0x653f0 and row 1 through 0x657f0, which is 0x653f0 +
+   0x400 -- the same array, with the row-1 base folded into the displacement.
+   Ghidra attributes nothing separate to 0x657f0 and neither does routing.json:
+   there is one 4608-word global here, and emitting the second base as a global
+   of its own would put row 1 wherever the linker felt like putting it while
+   pass 2 kept reading the row the multiply needs.
+
+   THE PACKING IS OPEN-CODED, and that is not an oversight.  fdps_pack_rgb
+   above has exactly this body, but the original has no CALL here: the shape at
+   0002b00e is an inline expansion of it, right down to reading only the low
+   byte of each of the three argument slots the way the out-of-line copy reads
+   only the low byte of each of its parameters.  Writing the call instead would
+   be functionally identical; writing it out is what the assembly does.
+
+   THE MULTIPLIER TABLE IS A LOCAL, not a global.  The prologue copies 18
+   dwords from 0002ae40 with REP MOVSD into the frame, which is what wcc386
+   emits for an auto array with an initialiser; routing.json lists 0002ae40 as
+   skipped for exactly that reason, so the contents belong here and nowhere
+   else.
+
+   Signedness, all of it deliberate.  The palette bytes are zero-extended, AND
+   EAX,0xff, so a component above 127 enters as itself.  Every loop bound is
+   JL, signed.  The row scaling is IMUL, a signed multiply, on values that
+   cannot exceed 0x0f0f0f * 16 -- so the low 32 bits are the same either way
+   and nothing here can overflow.  The blue nibble comes down with SAR and not
+   SHR, but the mask above it leaves at most 0xf0, so the sign bit is clear and
+   the two shifts agree.
+
+   The cube is filled in one sequential sweep with green outermost, red in the
+   middle and blue innermost -- the call is
+   fdps_palette_find_nearest_color(red, green, blue, palette) with the middle
+   counter as red and the outer one as green -- so the cell for a quantised
+   (r, g, b) is at green * 256 + red * 16 + blue.  The index is a running
+   counter the innermost loop increments, never recomputed from the three
+   loops, which is what fixes that order.
+
+   The nearest-colour search can return 0x100 for a target nothing comes close
+   to, and the store is MOV byte ptr, so such a cell would hold 0.  No target
+   this function builds is out of range -- every component is 0..60 -- so the
+   case does not arise here. */
+void fdps_build_palette_tables(struct fdps_palette_entry *palette)
+{
+    /* 0002ae40, copied into the frame by the prologue's REP MOVSD.  Rows 0
+       and 1 never consult it: the level loop starts at 2. */
+    int shade_multipliers[SHADE_LEVEL_COUNT] = {
+        0, 1, 2, 3, 4, 5, 6, 7, 8,
+        16, 15, 14, 13, 12, 11, 10, 9, 8
+    };
+    int entry_index;
+    int shade_level;
+    int level_multiplier;
+    int level_row_base;
+    int red_scaled;
+    int green_scaled;
+    int blue_scaled;
+    unsigned int packed_color;
+    int cube_green;
+    int cube_red;
+    int cube_blue;
+    int cube_index;
+
+    for (entry_index = 0; entry_index < PALETTE_ENTRY_COUNT; entry_index++) {
+        data_fdps_palette_shade_ramp_table[entry_index] = 0;
+
+        /* The DAC's six bits widened to eight, LEA EAX,[EAX*4+0] on each of
+           the three bytes, so a component of 63 becomes 252. */
+        red_scaled = palette[entry_index].red * 4;
+        green_scaled = palette[entry_index].green * 4;
+        blue_scaled = palette[entry_index].blue * 4;
+
+        packed_color = ((unsigned int) (unsigned char) red_scaled << 16)
+                     | ((unsigned int) (unsigned char) green_scaled << 8)
+                     | (unsigned int) (unsigned char) blue_scaled;
+
+        data_fdps_palette_shade_ramp_table[PALETTE_ENTRY_COUNT + entry_index] =
+            ((fdps_get_rgb_red(packed_color) & 0xf0u) << 12)
+          | ((fdps_get_rgb_green(packed_color) & 0xf0u) << 4)
+          | ((fdps_get_rgb_blue(packed_color) & 0xf0u) >> 4);
+    }
+
+    for (shade_level = 2; shade_level < SHADE_LEVEL_COUNT; shade_level++) {
+        level_multiplier = shade_multipliers[shade_level];
+        level_row_base = shade_level * PALETTE_ENTRY_COUNT;
+
+        for (entry_index = 0; entry_index < PALETTE_ENTRY_COUNT;
+             entry_index++) {
+            data_fdps_palette_shade_ramp_table[level_row_base + entry_index] =
+                data_fdps_palette_shade_ramp_table[PALETTE_ENTRY_COUNT
+                                                   + entry_index]
+                * (unsigned int) level_multiplier;
+        }
+    }
+
+    cube_index = 0;
+    for (cube_green = 0; cube_green < COLOUR_CUBE_AXIS; cube_green++) {
+        for (cube_red = 0; cube_red < COLOUR_CUBE_AXIS; cube_red++) {
+            for (cube_blue = 0; cube_blue < COLOUR_CUBE_AXIS; cube_blue++) {
+                data_fdps_inverse_palette_cube[cube_index] =
+                    (unsigned char) fdps_palette_find_nearest_color(
+                        cube_red * 4, cube_green * 4, cube_blue * 4,
+                        (unsigned char *) palette);
+                cube_index++;
+            }
+        }
+    }
 }
 
 /* 0002b1b0.  The nearest-colour search fdps_build_palette_tables runs 4096

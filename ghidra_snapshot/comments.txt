@@ -6287,12 +6287,12 @@ Pool: fdps  [no library match; game-owned globals and call graph]
 Evidence: Called only by fdps_load_global_resources and calls fdps_palette_find_nearest_color plus three local component extractors (0002ae90/0002aec0/0002aef0); writes the game tables 000643f0, 000653f0 and 000657f0 and reads the 18-dword coefficient table at 0002ae40. Function ID finds no match in the Watcom or ail sets and the hash is unique in the image; no CRT or AIL entry point, no driver state, and far too large for a linker artifact.
 Name: fdps_ + snake_case describing what the body builds; no vendor symbol involved.
 Boundary: 0002af60-0002b1a3, Watcom prologue 53 56 57 55 89 e5 to the matching MOV ESP,EBP/POP/RET epilogue; the 12 bytes after it are LEA-form alignment padding before fdps_palette_find_nearest_color at 0002b1b0.
-Signature: __cdecl, void fdps_build_palette_tables(uchar *palette) -- the single argument is read from [EBP+0x14], the RET purges nothing, and the calls it makes clean up with ADD ESP,n.
+Signature: __cdecl, void fdps_build_palette_tables(fdps_palette_entry *palette) -- the single argument is read from [EBP+0x14], the RET purges nothing, and the calls it makes clean up with ADD ESP,n.
 Algorithm:
 1. Copies the 18-dword brightness coefficient table at 0002ae40 onto the stack, indexed by shade level.
 2. For each of the 256 palette entries: reads the three bytes (r,g,b) of the source palette (6-bit VGA components, scaled by 4 to 8 bits), packs them as r<<16|g<<8|b, then calls the three component extractors. Each result is masked with 0xF0 and repositioned so red lands in bits 16-19, green in bits 8-11 and blue in bits 0-3. Row 0 of the ramp table (000653f0) is zeroed and the packed value is stored into row 1 (000657f0 = 000653f0 + 0x400).
 3. For levels 2..17, each of the 256 row-1 values is multiplied by the level coefficient and stored at 000653f0[level*256 + index]. Because each channel occupies only the low nibble of its own byte, one multiply scales all three channels without carrying between them.
-4. Fills the 16x16x16 inverse lookup cube at 000643f0: for every (r,g,b) triple of 4-bit components (passed as component*4) it calls fdps_palette_find_nearest_color with the source palette and stores the returned index as a byte, written sequentially over 4096 entries.
+4. Fills the 16x16x16 inverse lookup cube at 000643f0: for every (r,g,b) triple of 4-bit components (passed as component*4) it calls fdps_palette_find_nearest_color with the source palette and stores the returned index as a byte, written sequentially over 4096 entries. The outer loop supplies target_green, the middle one target_red and the innermost one target_blue, so the cell for a quantised (r, g, b) is at green * 256 + red * 16 + blue.
 
 === 0002b1a4 [EOL]
 Alignment padding: two 6-byte Watcom NOP forms (lea eax,[eax+0] / lea edx,[edx+0]).

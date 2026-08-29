@@ -311,6 +311,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0xca"
+    },
+    "0002af60": {
+      "name": "fdps_build_palette_tables",
+      "target": "palette.c",
+      "body_size": "0x244",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x244"
     }
   }
 }
