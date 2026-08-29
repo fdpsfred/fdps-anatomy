@@ -57,5 +57,19 @@
       "status": "open",
       "rescan_note": "STILL OPEN after rescan, and for the reason the rescan cannot remove: the functions this concern names have not been emitted. workspace/code_emit/verdicts/ holds three pairs in total -- 000109f0, 00010b20 and 000160e0 -- so 00010c30, 00010da0, 00010de0, 00011da0 and fdps_field_load_chapter_resources have no verdict to read, and reading their assembly to judge them here would be making their emit round's judgement early rather than using one already made. Nothing changes about the emitted C either way: the 0x3f mask is spelled as the original spells it, so the preserved bits carry whatever they carried, and equivalence does not depend on the answer. Non-blocking; re-ask it when the rest of movegrid.c is in."
     }
+  ],
+  "00010c30": [
+    {
+      "from": "emit",
+      "what": "How the four neighbour marks were spelled in the original source cannot be recovered from the binary. They are the body of fdps_move_grid_set_stop_flag @ 00010da0 expanded four times, but the image was built with -od, which does no inlining, so the expansion was in the source: a function-like macro, four hand-written copies, or something else. Each site also carries a second, dead pair of coordinate temporaries (e.g. [EBP-0x20]/[EBP-0x1c] copied into [EBP-0x14]/[EBP-0x18] before either is read), which is one source-level assignment more than a single macro binding its parameters would explain. The emitted C reproduces the marks and drops the dead copies, so the behaviour is identical either way and this cannot change what the program does -- it can change how movegrid.c reads once 00010da0 is emitted alongside it.",
+      "needs": "The emit of fdps_move_grid_set_stop_flag @ 00010da0, which has to decide what an orphan with no callers looks like in src/ and may settle the shape by finding the same double-temporary pattern at a call site elsewhere; failing that, a wcc386 10.0a experiment compiling the candidate spellings under -bt=dos4g -mf -4s -fpi -s -ot -od and comparing the stack slots consumed against the 0x5c this frame reserves.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "The source spelling of the four expanded neighbour marks in 00010c30 cannot be recovered from the binary. They are the body of the orphan fdps_move_grid_set_stop_flag @ 00010da0 appearing four times, and since the image was built with -od the compiler did no inlining, so the expansion was already in the source -- a function-like macro, four hand-written copies, or something else. Each site also carries a dead second pair of coordinate temporaries that 00010da0 itself does not have, which is one source-level assignment more than a macro simply binding its parameters would explain. Behaviour is identical whichever it was; only how movegrid.c reads once 00010da0 is emitted beside it is at stake. Carried forward from the emitter's verdict; I reached the same conclusion from the two disassemblies.",
+      "needs": "The emit of fdps_move_grid_set_stop_flag @ 00010da0, which must decide what a caller-less function looks like in src/ and may settle the shape if the same double-temporary pattern turns up at a call site elsewhere; failing that, a wcc386 10.0a experiment compiling the candidate spellings under -bt=dos4g -mf -4s -fpi -s -ot -od and comparing the stack slots consumed against the 0x5c this frame reserves.",
+      "status": "open"
+    }
   ]
 }

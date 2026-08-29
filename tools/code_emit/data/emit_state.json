@@ -26,6 +26,14 @@
       "status": "committed",
       "emitted_against": "0x6e",
       "rounds": 0
+    },
+    "00010c30": {
+      "name": "fdps_move_grid_mark_zone_of_control",
+      "target": "movegrid.c",
+      "body_size": "0x16d",
+      "status": "committed",
+      "emitted_against": "0x16d",
+      "rounds": 0
     }
   }
 }

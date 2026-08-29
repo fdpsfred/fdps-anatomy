@@ -27,4 +27,13 @@
 extern void fdps_map_grid_reset(void);
 #pragma aux fdps_map_grid_reset "*" parm caller [];
 
+/* Marks one unit's zone of control into the grid: ORs 0x80 into each of the
+   four orthogonal neighbours of (tile_x, tile_y) that exists, then ORs 0x40
+   into the tile itself.  Both bits are sticky -- only fdps_map_grid_reset
+   clears them -- so calling this once per unit accumulates every unit's zone
+   into the one grid.  Does nothing at all when the grid has not been
+   allocated. */
+extern void fdps_move_grid_mark_zone_of_control(int tile_x, int tile_y);
+#pragma aux fdps_move_grid_mark_zone_of_control "*" parm caller [];
+
 #endif

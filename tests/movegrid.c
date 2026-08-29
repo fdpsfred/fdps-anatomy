@@ -181,6 +181,198 @@ static void grid_header_words_are_signed(void)
     CHECK_EQ(cell_marker(0), 0x00);
 }
 
+/* --- fdps_move_grid_mark_zone_of_control @ 00010c30 -----------------------
+ *
+ * Expected values come from the assembly: OR byte ptr [EAX],0x80 at 00010ca1,
+ * 00010ce5, 00010d2c and 00010d73 for the four neighbours, OR byte ptr
+ * [EAX],0x40 at 00010d93 for the centre, the three guards CMP [EBP+0x14],0 /
+ * JZ, CMP [EBP+0x18],0 / JZ and DEC EAX / CMP EAX,[EBP+0x14] / JLE, and the
+ * address form ADD EAX,EAX / ADD EAX,base / ADD EAX,4 around IMUL EAX,y /
+ * ADD EAX,x.  None of them is read off the emitted C.
+ */
+
+/* Same block as stage() but blanked to 0x00 rather than 0xff: this function
+   ORs bits in, so a cell has to start with none of them for an assertion to
+   say which bit arrived and which cell it arrived in. */
+static void stage_blank(int width, int height)
+{
+    int i;
+
+    for (i = 0; i < STAGE_CELLS; i++) {
+        stage_grid[4 + i * 2] = 0x00;
+        stage_grid[4 + i * 2 + 1] = 0x00;
+    }
+    *(short *) stage_grid = (short) width;
+    *(short *) (stage_grid + 2) = (short) height;
+    data_fdps_battle_move_grid_ptr = stage_grid;
+}
+
+/* CMP dword ptr [0x00060144],0x0 / JZ 0x00010d96 is the whole function when
+   no grid is allocated: not even the centre tile is marked. */
+static void zoc_null_pointer_returns_at_once(void)
+{
+    stage_blank(3, 3);
+    data_fdps_battle_move_grid_ptr = NULL;
+    fdps_move_grid_mark_zone_of_control(1, 1);
+    CHECK_EQ(cell_flags(0), 0x00);
+    CHECK_EQ(cell_flags(4), 0x00);
+    CHECK_EQ(cell_flags(8), 0x00);
+}
+
+/* A tile with all four neighbours present: on a 3x3 grid (1,1) is cell 4, its
+   neighbours are cells 3, 1, 5 and 7, and the four diagonals 0, 2, 6 and 8 are
+   not touched -- there is no diagonal mark in the function.  The centre takes
+   0x40 and only 0x40; the neighbours take 0x80 and only 0x80.  The marker byte
+   is never written: every OR is a byte operation on byte 0 of the cell. */
+static void zoc_marks_four_neighbours_and_centre(void)
+{
+    stage_blank(3, 3);
+    fdps_move_grid_mark_zone_of_control(1, 1);
+    CHECK_EQ(cell_flags(4), 0x40);
+    CHECK_EQ(cell_flags(3), 0x80);
+    CHECK_EQ(cell_flags(1), 0x80);
+    CHECK_EQ(cell_flags(5), 0x80);
+    CHECK_EQ(cell_flags(7), 0x80);
+    CHECK_EQ(cell_flags(0), 0x00);
+    CHECK_EQ(cell_flags(2), 0x00);
+    CHECK_EQ(cell_flags(6), 0x00);
+    CHECK_EQ(cell_flags(8), 0x00);
+    CHECK_EQ(cell_marker(4), 0x00);
+    CHECK_EQ(cell_marker(3), 0x00);
+}
+
+/* CMP dword ptr [EBP+0x14],0x0 / JZ 0x00010ca4 guards the left neighbour.  On
+   column 0 the index width*y + x - 1 would wrap onto the last cell of the row
+   above -- cell 2 for (0,1) on a 3x3 -- and a zone would leak across the map's
+   edge.  The other three neighbours are still marked. */
+static void zoc_column_zero_skips_the_left_neighbour(void)
+{
+    stage_blank(3, 3);
+    fdps_move_grid_mark_zone_of_control(0, 1);
+    CHECK_EQ(cell_flags(3), 0x40);
+    CHECK_EQ(cell_flags(2), 0x00);
+    CHECK_EQ(cell_flags(0), 0x80);
+    CHECK_EQ(cell_flags(4), 0x80);
+    CHECK_EQ(cell_flags(6), 0x80);
+}
+
+/* CMP dword ptr [EBP+0x18],0x0 / JZ 0x00010ce8 guards the upper neighbour.  On
+   row 0 that index is negative -- (1,0) on a 3x3 gives -2, which is the four
+   bytes of the header -- so the guard is what keeps the grid's own dimensions
+   from being ORed with 0x80. */
+static void zoc_row_zero_skips_the_upper_neighbour(void)
+{
+    stage_blank(3, 3);
+    fdps_move_grid_mark_zone_of_control(1, 0);
+    CHECK_EQ((int) *(short *) stage_grid, 3);
+    CHECK_EQ((int) *(short *) (stage_grid + 2), 3);
+    CHECK_EQ(cell_flags(1), 0x40);
+    CHECK_EQ(cell_flags(0), 0x80);
+    CHECK_EQ(cell_flags(2), 0x80);
+    CHECK_EQ(cell_flags(4), 0x80);
+}
+
+/* The right guard is width-1 > tile_x, so the last column is skipped: (2,1) on
+   a 3x3 would otherwise mark index 6, the first cell of the row below. */
+static void zoc_last_column_skips_the_right_neighbour(void)
+{
+    stage_blank(3, 3);
+    fdps_move_grid_mark_zone_of_control(2, 1);
+    CHECK_EQ(cell_flags(5), 0x40);
+    CHECK_EQ(cell_flags(6), 0x00);
+    CHECK_EQ(cell_flags(4), 0x80);
+    CHECK_EQ(cell_flags(2), 0x80);
+    CHECK_EQ(cell_flags(8), 0x80);
+}
+
+/* The lower guard is height-1 > tile_y: on the last row the index runs past
+   the end of the cell array -- 10 for (1,2) on a 3x3, which is four cells past
+   the ninth -- and the block only has that room here because the fixture is
+   oversized. */
+static void zoc_last_row_skips_the_lower_neighbour(void)
+{
+    stage_blank(3, 3);
+    fdps_move_grid_mark_zone_of_control(1, 2);
+    CHECK_EQ(cell_flags(7), 0x40);
+    CHECK_EQ(cell_flags(10), 0x00);
+    CHECK_EQ(cell_flags(6), 0x80);
+    CHECK_EQ(cell_flags(4), 0x80);
+    CHECK_EQ(cell_flags(8), 0x80);
+}
+
+/* OR, not MOV: the low six bits of byte 0 survive, and so does the marker byte
+   beside them.  A cell holding 0x2a comes out 0x6a and one holding 0x15 comes
+   out 0x95. */
+static void zoc_bits_are_ored_into_the_cell(void)
+{
+    stage_blank(3, 3);
+    stage_grid[4 + 4 * 2] = 0x2a;
+    stage_grid[4 + 4 * 2 + 1] = 0x07;
+    stage_grid[4 + 3 * 2] = 0x15;
+    fdps_move_grid_mark_zone_of_control(1, 1);
+    CHECK_EQ(cell_flags(4), 0x6a);
+    CHECK_EQ(cell_marker(4), 0x07);
+    CHECK_EQ(cell_flags(3), 0x95);
+}
+
+/* Nothing is cleared between units, which is why the caller can loop over the
+   whole unit array: after (0,0) and then (0,1), cell 0 carries its own 0x40
+   and the 0x80 the second unit put there, and cell 3 carries the 0x80 from the
+   first and the 0x40 from the second.  Only fdps_map_grid_reset takes them
+   off again. */
+static void zoc_zones_accumulate_across_calls(void)
+{
+    stage_blank(3, 3);
+    fdps_move_grid_mark_zone_of_control(0, 0);
+    fdps_move_grid_mark_zone_of_control(0, 1);
+    CHECK_EQ(cell_flags(0), 0xc0);
+    CHECK_EQ(cell_flags(3), 0xc0);
+    CHECK_EQ(cell_flags(1), 0x80);
+    CHECK_EQ(cell_flags(4), 0x80);
+    CHECK_EQ(cell_flags(6), 0x80);
+}
+
+/* There is no guard at all around the centre store at 00010d76.  On a 2x2 grid
+   the column 2 does not exist, yet (2,0) still ORs 0x40 into index 2 -- which
+   is cell (0,1) -- while the right neighbour is correctly refused by
+   width-1 > tile_x and the lower one lands on index 4, past the grid.  The
+   four neighbour guards test the neighbour's coordinate, not the centre's, so
+   they do not add up to a range check on the argument. */
+static void zoc_centre_has_no_bounds_check(void)
+{
+    stage_blank(2, 2);
+    fdps_move_grid_mark_zone_of_control(2, 0);
+    CHECK_EQ(cell_flags(2), 0x40);
+    CHECK_EQ(cell_flags(1), 0x80);
+    CHECK_EQ(cell_flags(4), 0x80);
+    CHECK_EQ(cell_flags(3), 0x00);
+}
+
+/* MOVSX word ptr [EAX] at 00010c4e and JLE at 00010cef: a width word of 0xffff
+   is -1, -1 - 1 is -2, and -2 > 0 is false, so no right neighbour is marked.
+   Read the header unsigned and the same word is 65535, the guard passes, and
+   0x80 goes into cell 1. */
+static void zoc_width_guard_is_signed(void)
+{
+    stage_blank(-1, 1);
+    fdps_move_grid_mark_zone_of_control(0, 0);
+    CHECK_EQ((int) *(short *) stage_grid, -1);
+    CHECK_EQ(cell_flags(0), 0x40);
+    CHECK_EQ(cell_flags(1), 0x00);
+}
+
+/* The same for the height word at 00010c59 and the JLE at 00010d36: a height
+   of -1 marks no lower neighbour, while an unsigned read would put 0x80 into
+   the cell one row down, which here is cell 1. */
+static void zoc_height_guard_is_signed(void)
+{
+    stage_blank(1, -1);
+    fdps_move_grid_mark_zone_of_control(0, 0);
+    CHECK_EQ((int) *(short *) (stage_grid + 2), -1);
+    CHECK_EQ(cell_flags(0), 0x40);
+    CHECK_EQ(cell_flags(1), 0x00);
+}
+
 void run_movegrid_tests(void)
 {
     RUN_TEST(grid_cell_stride_is_two);
@@ -193,6 +385,18 @@ void run_movegrid_tests(void)
     RUN_TEST(grid_bound_follows_the_header);
     RUN_TEST(grid_zero_dimension_touches_nothing);
     RUN_TEST(grid_header_words_are_signed);
+
+    RUN_TEST(zoc_null_pointer_returns_at_once);
+    RUN_TEST(zoc_marks_four_neighbours_and_centre);
+    RUN_TEST(zoc_column_zero_skips_the_left_neighbour);
+    RUN_TEST(zoc_row_zero_skips_the_upper_neighbour);
+    RUN_TEST(zoc_last_column_skips_the_right_neighbour);
+    RUN_TEST(zoc_last_row_skips_the_lower_neighbour);
+    RUN_TEST(zoc_bits_are_ored_into_the_cell);
+    RUN_TEST(zoc_zones_accumulate_across_calls);
+    RUN_TEST(zoc_centre_has_no_bounds_check);
+    RUN_TEST(zoc_width_guard_is_signed);
+    RUN_TEST(zoc_height_guard_is_signed);
 
     /* Put the global back before leaving.  stage() points it at this file's
        own stage_grid, and the runners share one process: a later unit that
