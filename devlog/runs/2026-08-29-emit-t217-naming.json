@@ -1,0 +1,39 @@
+{
+  "batch": "t217-naming",
+  "attempted": 1,
+  "committed": 1,
+  "skipped": 0,
+  "unfinished": 0,
+  "never_reached": 0,
+  "cut_short": [],
+  "recovered": [],
+  "stopped": null,
+  "stop_detail": "",
+  "ended_early": null,
+  "splits": [],
+  "remaining_at_start": 512,
+  "rescan": [
+    {
+      "addr": "00010b20",
+      "name": "fdps_map_grid_reset",
+      "changed": true,
+      "resolved": 1,
+      "still_open": 1,
+      "note": "Concern 1 (loop-invariant product possibly hoisted) is SETTLED, and the answer is that it is not hoisted -- the emitted C is right and untouched. Two things settled it. First, rebuild_info/build_flags.md fixes the flag set at `wcc386 -bt=dos4g -mf -4s -fpi -s -ot -od`, and -od turns the optimiser off, so no loop-invariant motion runs at all. Second, the direct check the open issue asked for, done without rebuilding anything: the emit round's own object, C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\code_emit\\out\\objs\\MOVEGRID.OBJ, already exists and holds only fdps_map_grid_reset. Its LEDATA payload starts at file offset 0x0192, and the loop head reads `8b 45 f8 / 0f af 45 f4 / 3b 45 f0 / 7f 07 / eb 18` = MOV EAX,[EBP-0x8] / IMUL EAX,[EBP-0xc] / CMP EAX,[EBP-0x10] / JG body / JMP epilogue -- the same four instructions as 00010b5e-00010b6a, IMUL inside the head, re-executed every pass. Contract D closes for this loop. (The .OBJ hand-parse was needed because the file is Easy OMF-386 and a generic OMF record walk finds nothing in it -- the known pitfall; I read the code bytes out of the hexdump rather than writing a parser.)\n\nThe same comparison turned up two residual shape differences, recorded in the entry as non-blocking rather than dropped: the original assigns width to [EBP-0x10] and the index to [EBP-0x8] while the rebuild assigns them the other way round (declaration order, nothing more), and the original's increment block at 00010b6c is MOV EAX,[EBP-0x8] / INC [EBP-0x8] where the rebuild emits the INC alone -- one dead load per tile, with EAX dead across it in the original (reloaded at 00010b74 before any use). Neither carries a value or a flag, so under ADR-0001 neither is a functional difference and neither is a reason to touch the code. No blocking finding.\n\nConcern 2 (whether the low six bits preserved by the 0x3f mask carry anything at run time) is still open, and unchanged. What it needs is exactly what the rescan cannot supply yet: verdicts for 00010c30, 00010da0, 00010de0, 00011da0 and fdps_field_load_chapter_resources. workspace\\code_emit\\verdicts\\ currently holds three pairs in total -- 000109f0, 00010b20, 000160e0 -- so none of those neighbours has a verdict to read, and reading their assembly to answer it here would be making their emit round's judgement early rather than using one already made. Equivalence does not depend on the answer either way: the mask is spelled as the original spells it. Re-ask when the rest of movegrid.c is in.\n\nRead-only on Ghidra throughout (one disassemble_function call on 00010b20 to compare against the object); no ghidra_fixes. Only file changed is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tools\\code_emit\\data\\emit_issues.json, a permitted path; git status shows nothing else dirty."
+    }
+  ],
+  "results": [
+    {
+      "addr": "00010b20",
+      "name": "fdps_map_grid_reset",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "4e28feb fdps_map_grid_reset @ 00010b20",
+      "ghidra_applied": 0,
+      "issues": 4,
+      "out_tok_k": 45,
+      "problems": "No strays: git status --porcelain before staging showed only src/gamedata.h, src/movegrid.c, src/movegrid.h, tests/movegrid.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both ghidra_fixes arrays were empty as expected, so Ghidra was not touched: no baseline audit, no save_program, no snapshot re-export, and ghidra_gate_clean is reported false only because the gate was never run, not because it failed. emit_state.json entry for 00010b20 carried forward to status committed / emitted_against 0x6e / rounds 0 with in_flight_since dropped; no other entry or field changed. 4 open_issues (2 emit, 2 review) appended to tools/code_emit/data/emit_issues.json under key \"00010b20\", read back as UTF-8 with no mojibake. Staged diff was exactly the six files above plus emit_issues.json, 319 insertions; tree is clean after the commit and git log --oneline --grep \"@ 00010b20\" finds 4e28feb."
+    }
+  ],
+  "out_tok_k": 61
+}
