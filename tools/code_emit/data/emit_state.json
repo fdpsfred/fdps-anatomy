@@ -114,6 +114,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x112"
+    },
+    "00018a20": {
+      "name": "fdps_free_global_resource_buffers",
+      "target": "main.c",
+      "body_size": "0x8f",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x8f"
     }
   }
 }

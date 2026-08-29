@@ -209,5 +209,31 @@
       "from": "review",
       "status": "open"
     }
+  ],
+  "00018a20": [
+    {
+      "what": "The 'runs exactly once' contract is real -- nothing clears the nine pointers, so a second call is a nine-way double free -- but whether the shutdown path can actually be entered twice is not decidable inside this function. Its only caller is fdps_shutdown_free_resources @ 00029440, which is not emitted yet, and that in turn is reached from main @ 00029220 and from whatever aborts the program on a fatal error.",
+      "needs": "00029440 and 00029220 emitted, plus the error-exit path: if any of them can reach the shutdown twice (an abort during shutdown, say), the original has a latent double free and the rebuild must reproduce it rather than add the guard.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "The nine globals are declared in gamedata.h as `unsigned char *`, which is Ghidra's typing (/byte *) and what routing.json records. That is right for free() and right for the pointer arithmetic the original does at each use, but the accessors that actually read these tables -- fdps_get_class_record @ 00018b80, fdps_get_spell_record @ 00018be0 and their neighbours in table.c -- are not emitted, so whether the declarations should end up typed to a record from fdpstype.h instead is not settled here.",
+      "needs": "table.c's accessors emitted. The width is 4 either way so no equivalence question turns on it; it is a question about which declaration the later readers want, and gamedata.h is the single owner that would have to change.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Endorsed from the emit verdict: nothing clears the nine pointers, so the 'runs exactly once' contract is real and a second entry into the shutdown path would be a nine-way double free. Whether that is reachable cannot be decided inside this function -- its only caller fdps_shutdown_free_resources @ 00029440 is not emitted, and neither is main @ 00029220 nor the fatal-error exit path.",
+      "needs": "00029440 and 00029220 emitted plus the error-exit path traced. If any of them can reach shutdown twice, the original carries a latent double free and the rebuild must reproduce it rather than add a guard.",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Endorsed from the emit verdict: the nine globals are declared unsigned char * in gamedata.h, matching Ghidra's /byte * and routing.json. That is correct for free() and for the original's per-use record arithmetic, but the accessors that actually read these tables (fdps_get_class_record @ 00018b80, fdps_get_spell_record @ 00018be0 and neighbours, all bound for table.c) are not emitted, so the final declared type is not settled.",
+      "needs": "table.c's accessors emitted. No equivalence question turns on it -- the width is 4 either way -- but gamedata.h is the single owner that would have to change, so it should be decided once rather than per reader.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

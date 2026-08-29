@@ -50,4 +50,39 @@ extern volatile unsigned int data_fdps_timer_tick_counter;
    data_fdps_audio_sfx_driver_available_flag, in audio.h. */
 extern unsigned char data_fdps_audio_sfx_enabled_flag;
 
+/* 00063fd0..00063ff0.  The nine static game data tables, each a heap block
+   holding one file read whole out of the VFS container.  fdps_load_data_tables
+   at 00018930 fills all nine at startup -- one loader call per table, each
+   handed the ADDRESS of its own pointer -- and fdps_free_global_resource_buffers
+   releases all nine at shutdown.  Null before the loader has run, and never
+   cleared after the release.
+
+   They are nine separate globals and not an array, however tidily they sit
+   next to each other: both the loader and the releaser name each one by its
+   own absolute address, and nothing in the image indexes across them
+   (rebuild_info/pitfalls.md, contract B).
+
+   The original types them as byte pointers and does the record arithmetic at
+   each use, so a reader casts to the record type it wants.  Which file each
+   one holds, from the loader's argument list:
+
+     data_fdps_class_table_ptr                    ProMap.dat
+     data_fdps_battle_enemy_data_table_ptr        EnemyDat.dat
+     data_fdps_battle_character_base_table_ptr    Friaprda.dat
+     data_fdps_promotion_table_ptr                RankUp.dat
+     data_fdps_item_effect_table_ptr              Item.dat
+     data_fdps_class_equip_table_ptr              ProEqu.dat
+     data_fdps_spell_learning_table_ptr           GetMgTab.dat
+     data_fdps_battle_character_growth_table_ptr  FriLevUp.dat
+     data_fdps_battle_spell_effect_table_ptr      MagicDat.dat */
+extern unsigned char *data_fdps_class_table_ptr;
+extern unsigned char *data_fdps_battle_enemy_data_table_ptr;
+extern unsigned char *data_fdps_battle_character_base_table_ptr;
+extern unsigned char *data_fdps_promotion_table_ptr;
+extern unsigned char *data_fdps_item_effect_table_ptr;
+extern unsigned char *data_fdps_class_equip_table_ptr;
+extern unsigned char *data_fdps_spell_learning_table_ptr;
+extern unsigned char *data_fdps_battle_character_growth_table_ptr;
+extern unsigned char *data_fdps_battle_spell_effect_table_ptr;
+
 #endif
