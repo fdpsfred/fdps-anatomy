@@ -59,6 +59,51 @@ extern int data_fdps_roster_member_count;
    does the header and cell arithmetic itself, so a reader casts. */
 extern unsigned char *data_fdps_battle_move_grid_ptr;
 
+/* 00069c98 and 00069cb0.  The loaded scene's six layers, held as two parallel
+   arrays of six byte pointers each: the tile map of layer n and the tileset
+   attribute table of layer n.  The battle map is layer 0 and is the only one
+   src/maptile.c reads.
+
+   A tile map opens with a header whose signed 16-bit tile width sits at +7,
+   and its 16-bit tile ids follow at +0xb in row-major order.  An attribute
+   table's 4-byte rows -- struct fdps_tile_attr_entry -- start at +0x11, one
+   row per tile id.  The original types both as byte pointers and does that
+   arithmetic itself, so a reader casts.
+
+   The two arrays are adjacent -- 00069c98 + 24 is 00069cb0 -- and are declared
+   as two because that is how ticket 17 settled them; nothing emitted so far
+   indexes past element 5 of either (rebuild_info/pitfalls.md, contract B). */
+extern unsigned char *data_fdps_scene_layer_tile_attr_ptr[6];
+extern unsigned char *data_fdps_scene_layer_tile_map_ptrs[6];
+
+/* 00060148.  The battle map's per-cell event-code layer, a struct
+   fdps_map_cell_code_layer: its own signed 16-bit width at +7 and one byte per
+   cell at +0x10.  It carries its own width and readers use that rather than
+   the terrain layer's.  Null until a chapter has been loaded.  The original
+   types it as a byte pointer, so a reader casts to the record. */
+extern unsigned char *data_fdps_map_cell_event_code_layer_ptr;
+
+/* 00069d04..00069d0c.  The tile-info scratch block: what
+   fdps_map_load_tile_info (src/maptile.h) leaves behind about the one map cell
+   it was last asked about, read by the battle, cursor and combat code straight
+   after the call.  There is no "which cell is this" field -- the caller knows,
+   because it just named it.
+
+   They are separate globals and not one record: every reader in the image
+   names each one by its own absolute address and nothing indexes across them
+   (rebuild_info/pitfalls.md, contract B).  00069d0a is the sixth and is read
+   only by maptile.c, so it is declared in src/maptile.h instead of here.
+
+   The tile id is signed -- it is MOVSX'd out of the layer and scaled into the
+   attribute table -- while the event code, equally signed here, only ever
+   receives a zero-extended byte, so it is 0..255 in practice. */
+extern short data_fdps_map_tile_info_tile_id;
+extern short data_fdps_map_current_cell_event_code;
+extern unsigned char data_fdps_map_current_tile_attr_flags;
+extern unsigned char data_fdps_map_tile_terrain_type;
+extern unsigned char data_fdps_map_tile_combat_backdrop_id;
+extern unsigned char data_fdps_map_current_move_grid_marker;
+
 /* 00069d64.  The free-running tick counter fdps_timer_tick_handler increments
    from the timer interrupt, and the game's only clock: 31 files read it, for
    animation pacing, input repeat and every "once per tick" guard.  Unsigned.

@@ -319,6 +319,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x244"
+    },
+    "0002ba00": {
+      "name": "fdps_map_load_tile_info",
+      "target": "maptile.c",
+      "body_size": "0xdb",
+      "status": "committed",
+      "emitted_against": "0xdb",
+      "rounds": 0
     }
   }
 }

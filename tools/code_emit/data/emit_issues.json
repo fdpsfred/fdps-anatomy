@@ -595,5 +595,31 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0002ba00": [
+    {
+      "from": "emit",
+      "what": "Whether 00069c98 and 00069cb0 are two six-element pointer arrays or one twelve-element array split by Ghidra at a folded base (contract B and contract H). They are exactly adjacent -- 00069c98 + 24 == 00069cb0 -- and this function reads only element 0 of each, with the index folded away into the bare base address, so it cannot distinguish the two possibilities. Emitted as the two arrays routing.json and ticket 17 settled. If the truth is one array, declaring two globals lets the linker separate them and any reader that steps from the attribute array into the map array reads garbage.",
+      "needs": "A function that indexes either array with a non-constant scene-layer index, or the chapter/scene loader that writes them, showing the maximum index each array actually takes. fdps_field_load_chapter_resources and the mapdraw.c readers are the likely places.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "The movement grid is indexed with the terrain layer's width and never with the 16-bit width in its own header ([EBP-0x4] is still the terrain width at 0002ba89). That is reproduced exactly, so this function is faithful either way, but it is only meaningful if the two widths always agree -- if a chapter ever allocated the grid at a different width than the terrain layer, the marker read here would come from the wrong cell, and the rebuild would reproduce that fault rather than any tidier behaviour.",
+      "needs": "The chapter resource loader that allocates data_fdps_battle_move_grid_ptr and fills data_fdps_scene_layer_tile_map_ptrs[0], showing both dimensions come from the same source. movegrid.h already states the loader writes the grid header; what it does not yet state is where those two numbers come from.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Endorsing the emitter's: whether 00069c98 and 00069cb0 are two six-element pointer arrays or one twelve-element array that Ghidra split at a folded base (contracts B and H). They are exactly adjacent, 0x69c98 + 24 == 0x69cb0, and this function loads only the bare base of each -- MOV EAX,[0x00069c98] at 0002ba44 and MOV EAX,[0x00069cb0] at 0002ba0c -- so index 0 is folded away and the function cannot distinguish the two shapes. Emitted as the two arrays routing.json and ticket 17 settled. If the truth is one array, the linker is free to separate the two globals and any reader that steps from the attribute array into the map array would read garbage.",
+      "needs": "A function that indexes either array with a non-constant scene-layer index, or the scene/chapter loader that writes them, showing the maximum index each actually takes. routing.json lists mapdraw.c, rsrc.c, movegrid.c, main.c and (for the map array) aiact.c, icon.c, overview.c and walk.c as the other readers; rsrc.c's loader is the place most likely to settle it in one look.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Endorsing the emitter's second: this function indexes the movement grid with the terrain layer's width and never with the width in the grid's own header, which is reproduced exactly and so is faithful either way -- but it only produces the right cell if the two widths always agree. Corroboration found while reviewing, not yet proof: fdps_map_find_chest_cell at 00013e10 bounds its two loops with the MOVE GRID's own header words ([0x00060144]+0 for x at 00013e21, +2 for y at 00013e2c) and then feeds those coordinates straight to this function, which resolves them against the TERRAIN width. So the two layers' dimensions are already being treated as interchangeable by at least one caller.",
+      "needs": "The chapter resource loader that allocates data_fdps_battle_move_grid_ptr and fills data_fdps_scene_layer_tile_map_ptrs[0], showing both dimensions come from one source. If they do, it belongs in movegrid.h and maptile.h as a stated invariant; if they can differ, it is a pitfalls.md entry about a reproduced original fault.",
+      "status": "open"
+    }
   ]
 }
