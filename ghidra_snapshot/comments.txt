@@ -5387,19 +5387,19 @@ Watcom alignment padding: lea eax,[eax+0] (6-byte nop) + lea edx,[edx+0] (3-byte
 Applies one healing effect to a battle unit's HP and credits the battle experience earned for it.
 
 Algorithm:
-Resolves the 0x50-byte unit record with fdps_get_unit_record(unit_index) and reads its current HP (signed word +0x40) and maximum HP (signed word +0x42). Rolls the heal as amount*9/10 plus (rand()%100)*amount/1000, so a request of N restores between 0.900*N and 0.999*N. Adds the roll to current HP, clamps the total to maximum HP, and stores it back to +0x40. Then, when the record's portrait/character id byte +0x7 is below 0x3c -- the unit is a roster character rather than an EnemyDat entry -- it adds (effective level * 25 * HP actually restored) / maximum HP to the pending experience accumulator DAT_00069cec, where the effective level is the unit's level byte +0x21 plus 30 for portrait ids 0x0f..0x21, the promoted character forms whose levels restart at 1. FUN_0001dd30 is what later clamps DAT_00069cec to 99 and awards it to the acting unit. The value handed back is the rolled heal, not the HP that was actually restored.
+Resolves the 0x50-byte unit record with fdps_get_unit_record(unit_index) and reads its current HP (signed word +0x40) and maximum HP (signed word +0x42). Rolls the heal as amount*9/10 plus (rand()%100)*amount/1000, so a request of N restores between 0.900*N and 0.999*N. Adds the roll to current HP, clamps the total to maximum HP, and stores it back to +0x40. Then, when the record's portrait/character id byte +0x7 is below 0x3c -- the unit is a roster character rather than an EnemyDat entry -- it adds (effective level * 25 * HP actually restored) / maximum HP to the pending experience accumulator data_fdps_battle_pending_xp_credit, where the effective level is the unit's level byte +0x21 plus 30 for portrait ids 0x0f..0x21, the promoted character forms whose levels restart at 1. fdps_unit_award_exp_and_level_up is what later clamps data_fdps_battle_pending_xp_credit to 99 and awards it to the acting unit. The value handed back is the rolled heal, not the HP that was actually restored.
 
 Parameters:
-  unit_index -- index into the 0x50-byte unit record array based at DAT_00069cd8; the callers pass the battle target's unit index.
-  amount -- the requested heal. FUN_00026fd0 passes the item record's use_amount word (+0x0e) for the use_effect 0x0b consumables and 0x20 healing staves; fdps_spell_heal_unit and FUN_000288f0 pass the power word (+0x00) of a spell record.
+  unit_index -- index into the 0x50-byte unit record array based at data_fdps_map_unit_array_ptr; the callers pass the battle target's unit index.
+  amount -- the requested heal. fdps_apply_heal_to_targets passes the item record's use_amount word (+0x0e) for the use_effect 0x0b consumables and 0x20 healing staves; fdps_spell_heal_unit and fdps_cast_spell_on_targets pass the power word (+0x00) of a spell record.
 
 Returns:
-  The heal that was rolled -- amount*9/10 + (rand()%100)*amount/1000 -- before the clamp against maximum HP. FUN_00026fd0 passes it straight to FUN_0001f510 as the number to float over the target.
+  The heal that was rolled -- amount*9/10 + (rand()%100)*amount/1000 -- before the clamp against maximum HP. fdps_apply_heal_to_targets passes it straight to fdps_show_number_indicator as the number to float over the target.
 
-Pool: fdps  [calls fdps_get_unit_record and writes the game global DAT_00069cec; no Function ID hit against the Watcom 10.0x libraries or ailv3.lib, and the only library callee is rand]
+Pool: fdps  [calls fdps_get_unit_record and writes the game global data_fdps_battle_pending_xp_credit; no Function ID hit against the Watcom 10.0x libraries or ailv3.lib, and the only library callee is rand]
 
 Rebuild note:
-The return value is the heal that was rolled, not the HP actually restored, and FUN_00026fd0 prints it as the floating number over the target -- writing the obvious `return new_hp - old_hp` would make a near-full-HP target display a smaller number than the original does. Separately, the +30 effective-level bonus is tested here as portrait id 0x0f..0x21 while FUN_00027c20 tests portrait id > 8 for the same +30 (000280cf), so folding the two into one shared helper changes the experience awarded.
+The return value is the heal that was rolled, not the HP actually restored, and fdps_apply_heal_to_targets prints it as the floating number over the target -- writing the obvious `return new_hp - old_hp` would make a near-full-HP target display a smaller number than the original does. Separately, the +30 effective-level bonus is tested here as portrait id 0x0f..0x21 while fdps_battle_spell_command tests portrait id > 8 for the same +30 (000280cf), so folding the two into one shared helper changes the experience awarded.
 
 === 0002717a [EOL]
 Alignment padding: 6-byte NOP form lea eax,[eax+0x0] before FUN_00027180.

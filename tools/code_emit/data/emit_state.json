@@ -596,6 +596,14 @@
       "status": "committed",
       "emitted_against": "0xa5",
       "rounds": 0
+    },
+    "00027070": {
+      "name": "fdps_unit_apply_heal",
+      "target": "unitstat.c",
+      "body_size": "0x10a",
+      "status": "committed",
+      "emitted_against": "0x10a",
+      "rounds": 1
     }
   }
 }

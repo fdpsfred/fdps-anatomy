@@ -1,0 +1,357 @@
+/* tests/unitstat.c -- cover for src/unitstat.c.
+ *
+ * Every expected value below is read off the assembly of fdps_unit_apply_heal
+ * at 00027070 -- LEA EDX,[EDX+EDX*8] with IDIV by 10 for the base heal, IDIV
+ * by 100 then IMUL by the amount then IDIV by 1000 for the random bonus, the
+ * two MOVSX word loads at 0002708e and 00027098 for which HP field is which,
+ * the JLE clamp at 000270e9, the MOVSX re-read at 000270f4 that runs BEFORE
+ * the store at 00027106, XOR EAX,EAX / MOV AL,byte ptr [EDX+0x21] for the
+ * level, the CMP EAX,0xf / CMP EAX,0x22 pair that bounds the promotion bonus,
+ * ADD dword ptr [EBP-0x8],0x1e for the bonus itself, CMP EAX,0x3c for the
+ * enemy cut-off, IMUL by 0x19 then by the restored HP then IDIV by the
+ * maximum HP for the award, and ADD dword ptr [0x00069cec],EAX for the way it
+ * lands -- and from the record layout ticket 17 settled.  None of them is
+ * read off the emitted C.
+ *
+ * HOW THE RANDOMNESS IS TAKEN OUT.  One roll runs through this function,
+ * (rand() % 100) * amount / 1000, and rand() % 100 is 0..99.  So for any
+ * amount of 10 or less the largest numerator the roll can form is 990, which
+ * the signed divide by 1000 truncates to 0 whatever rand() returned -- the
+ * bonus is identically zero and the heal is exactly amount * 9 / 10.  Every
+ * figure asserted below except one comes from an amount inside that band.
+ *
+ * The exception is the band test itself, which uses an amount of 100 so the
+ * bonus is (rand() % 100) / 10 and therefore 0..9, and asserts the roll
+ * against the interval rather than a value.
+ *
+ * WHY THE EXPERIENCE ACCUMULATOR IS SEEDED WITH 1000.  The function ADDS to
+ * data_fdps_battle_pending_xp_credit, so a seed of 0 could not tell an award
+ * of 0 apart from an assignment of 0.  Seeding it with a value no award here
+ * could produce makes both the accumulate and the untouched cases visible.
+ */
+#include <stddef.h>
+#include "testharn.h"
+#include "fdpstype.h"
+#include "gamedata.h"
+#include "unitstat.h"
+
+/* The stride fdps_get_unit_record multiplies by. */
+#define UNIT_RECORD_STRIDE 0x50
+
+/* Four records are staged so that a walk which strayed into a neighbour would
+   be visible.  The heal is applied to record 1 in every test but the last. */
+#define STAGE_UNITS 4
+#define PATIENT 1
+
+/* CMP EAX,0xf and CMP EAX,0x22: the promoted character forms, and the two
+   portrait ids either side of that span. */
+#define FIRST_PROMOTED_PORTRAIT 0x0f
+#define LAST_PROMOTED_PORTRAIT 0x21
+#define BELOW_PROMOTED_PORTRAIT 0x0e
+#define ABOVE_PROMOTED_PORTRAIT 0x22
+
+/* CMP EAX,0x3c: the first enemy portrait id, and the last roster one. */
+#define FIRST_ENEMY_PORTRAIT 0x3c
+#define LAST_ROSTER_PORTRAIT 0x3b
+
+/* An ordinary roster portrait, well inside 0..0x0e, so the standard fixture
+   takes neither the promotion bonus nor the enemy cut-off. */
+#define PLAIN_PORTRAIT 5
+
+/* A seed no award the fixture can produce could be mistaken for. */
+#define XP_SEED 1000
+
+/* Amounts inside the band where the random bonus is identically zero. */
+#define AMOUNT_TEN 10
+#define AMOUNT_SEVEN 7
+#define AMOUNT_THREE 3
+
+/* Outside it: the bonus is (rand() % 100) / 10, so the roll is 90..99. */
+#define AMOUNT_HUNDRED 100
+#define HUNDRED_ROLL_LOW 90
+#define HUNDRED_ROLL_HIGH 99
+#define BAND_DRAWS 20
+
+static unsigned char unit_block[STAGE_UNITS * UNIT_RECORD_STRIDE];
+
+/* Only ever read for its field sizes. */
+static struct fdps_unit_record layout_probe;
+
+static struct fdps_unit_record *unit(int unit_index)
+{
+    return (struct fdps_unit_record *)
+        (unit_block + unit_index * UNIT_RECORD_STRIDE);
+}
+
+/* Builds the standard patient and publishes every global the function reads.
+ *
+ * Record 1 is a level 4 roster character on 10 of 100 HP: the level and the
+ * maximum are chosen so that the award, level * 25 * restored / max_hp, comes
+ * out as a whole number for the restored figures the tests use, and the
+ * headroom is wide enough that nothing clamps unless a test asks for it. */
+static void stage(void)
+{
+    int i;
+
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        unit_block[i] = 0;
+    }
+
+    data_fdps_map_unit_array_ptr = unit_block;
+    data_fdps_battle_pending_xp_credit = XP_SEED;
+
+    unit(PATIENT)->portrait_id = PLAIN_PORTRAIT;
+    unit(PATIENT)->level = 4;
+    unit(PATIENT)->hp_current = 10;
+    unit(PATIENT)->hp_max = 100;
+}
+
+static void the_record_layout_matches_the_offsets_read(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), UNIT_RECORD_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, portrait_id), 0x07);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, level), 0x21);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_current), 0x40);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_max), 0x42);
+    CHECK_EQ((int) sizeof(layout_probe.hp_current), 2);
+    CHECK_EQ((int) sizeof(layout_probe.hp_max), 2);
+    CHECK_EQ((int) sizeof(layout_probe.level), 1);
+    CHECK_EQ((int) sizeof(layout_probe.portrait_id), 1);
+}
+
+/* amount * 9 / 10 with the bonus pinned to zero: 10 gives exactly 9. */
+static void a_heal_of_ten_rolls_nine_every_time(void)
+{
+    stage();
+    CHECK_EQ(fdps_unit_apply_heal(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 19);
+}
+
+/* 63 / 10 and 27 / 10: the base heal truncates, it does not round. */
+static void the_base_heal_truncates(void)
+{
+    stage();
+    CHECK_EQ(fdps_unit_apply_heal(PATIENT, AMOUNT_SEVEN), 6);
+    CHECK_EQ(unit(PATIENT)->hp_current, 16);
+
+    stage();
+    CHECK_EQ(fdps_unit_apply_heal(PATIENT, AMOUNT_THREE), 2);
+    CHECK_EQ(unit(PATIENT)->hp_current, 12);
+}
+
+/* IDIV on a sign-extended dividend truncates towards zero, so -7 gives -6 and
+   not -7.  Nothing clamps the HP at the bottom either: a drain past zero is
+   written back as a negative word.  The award follows it down, because the
+   restored figure is negative and the accumulator is signed. */
+static void a_negative_amount_truncates_towards_zero_and_drains(void)
+{
+    stage();
+    unit(PATIENT)->hp_current = 2;
+
+    CHECK_EQ(fdps_unit_apply_heal(PATIENT, -AMOUNT_SEVEN), -6);
+    CHECK_EQ(unit(PATIENT)->hp_current, -4);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED - 6);
+}
+
+/* JLE at 000270e9: the total is clamped down to the maximum, and the clamp is
+   a separate test rather than a min(), so a total already at the maximum is
+   left where it is. */
+static void the_total_is_clamped_to_the_maximum_hp(void)
+{
+    stage();
+    unit(PATIENT)->hp_current = 38;
+    unit(PATIENT)->hp_max = 40;
+
+    CHECK_EQ(fdps_unit_apply_heal(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 40);
+}
+
+/* The whole point of the function's return value: the clamped heal gave the
+   unit 2 HP and the figure handed back is still the 9 that was rolled. */
+static void the_return_is_the_roll_and_not_the_hp_restored(void)
+{
+    int rolled;
+
+    stage();
+    unit(PATIENT)->hp_current = 38;
+    unit(PATIENT)->hp_max = 40;
+
+    rolled = fdps_unit_apply_heal(PATIENT, AMOUNT_TEN);
+    CHECK_EQ(rolled, 9);
+    CHECK_EQ(unit(PATIENT)->hp_current - 38, 2);
+    CHECK_EQ(rolled != unit(PATIENT)->hp_current - 38, 1);
+}
+
+/* At an amount of 100 the bonus is (rand() % 100) / 10, so the roll is 90..99
+   and the HP moves by exactly the roll.  Twenty draws, each checked against
+   the interval and against the record.  The maximum is lifted to 200 so that
+   the top of the band cannot reach the clamp and hide itself. */
+static void the_roll_spans_nine_tenths_to_the_full_amount(void)
+{
+    int draw;
+    int rolled;
+    int inside;
+    int matched;
+
+    inside = 0;
+    matched = 0;
+
+    for (draw = 0; draw < BAND_DRAWS; draw++) {
+        stage();
+        unit(PATIENT)->hp_max = 200;
+        rolled = fdps_unit_apply_heal(PATIENT, AMOUNT_HUNDRED);
+        if (rolled >= HUNDRED_ROLL_LOW && rolled <= HUNDRED_ROLL_HIGH) {
+            inside++;
+        }
+        if (unit(PATIENT)->hp_current == 10 + rolled) {
+            matched++;
+        }
+    }
+
+    CHECK_EQ(inside, BAND_DRAWS);
+    CHECK_EQ(matched, BAND_DRAWS);
+}
+
+/* The award is scaled by the HP the record actually gained, which the clamp
+   cut to 5, and not by the 9 that was rolled: 4 * 25 * 5 / 100 is 5, whereas
+   the rolled figure would have given 9. */
+static void the_award_is_scaled_by_the_hp_actually_restored(void)
+{
+    stage();
+    unit(PATIENT)->hp_current = 95;
+
+    CHECK_EQ(fdps_unit_apply_heal(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 100);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 5);
+}
+
+/* A unit already at full HP is restored nothing, so it credits nothing --
+   and still returns its roll. */
+static void a_full_unit_credits_nothing_but_still_returns_its_roll(void)
+{
+    stage();
+    unit(PATIENT)->hp_current = 100;
+
+    CHECK_EQ(fdps_unit_apply_heal(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 100);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED);
+}
+
+/* ADD dword ptr [0x00069cec],EAX: two heals in a row leave the sum of both
+   awards, not the second one.  Each heal here restores the full 9. */
+static void the_award_accumulates_rather_than_replacing(void)
+{
+    stage();
+    unit(PATIENT)->hp_current = 0;
+
+    CHECK_EQ(fdps_unit_apply_heal(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 9);
+
+    CHECK_EQ(fdps_unit_apply_heal(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 18);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 18);
+}
+
+/* The divide by the maximum HP is the LAST step, applied to the whole
+   product.  A level 1 unit restored 9 of 100 gives 1 * 25 * 9 / 100 = 2; had
+   the divide come before the multiply it would have been 0. */
+static void the_award_divides_the_whole_product_last(void)
+{
+    stage();
+    unit(PATIENT)->level = 1;
+    unit(PATIENT)->hp_current = 0;
+
+    CHECK_EQ(fdps_unit_apply_heal(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 2);
+}
+
+/* Portrait 0x0f is a promoted form: the level it credits by is 4 + 30, so the
+   award is 34 * 25 * 9 / 100 = 76 instead of 9. */
+static void a_promoted_portrait_credits_thirty_extra_levels(void)
+{
+    stage();
+    unit(PATIENT)->hp_current = 0;
+    unit(PATIENT)->portrait_id = FIRST_PROMOTED_PORTRAIT;
+
+    CHECK_EQ(fdps_unit_apply_heal(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 76);
+}
+
+/* Both ends of that span, and the portrait id either side of each. */
+static void the_promotion_span_is_0x0f_through_0x21(void)
+{
+    stage();
+    unit(PATIENT)->hp_current = 0;
+    unit(PATIENT)->portrait_id = BELOW_PROMOTED_PORTRAIT;
+    fdps_unit_apply_heal(PATIENT, AMOUNT_TEN);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 9);
+
+    stage();
+    unit(PATIENT)->hp_current = 0;
+    unit(PATIENT)->portrait_id = LAST_PROMOTED_PORTRAIT;
+    fdps_unit_apply_heal(PATIENT, AMOUNT_TEN);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 76);
+
+    stage();
+    unit(PATIENT)->hp_current = 0;
+    unit(PATIENT)->portrait_id = ABOVE_PROMOTED_PORTRAIT;
+    fdps_unit_apply_heal(PATIENT, AMOUNT_TEN);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 9);
+}
+
+/* Portrait 0x3c and up is an EnemyDat entry: the HP is still restored, the
+   roll is still returned, and the accumulator is not touched at all -- so the
+   seed stands rather than being cleared. */
+static void an_enemy_portrait_is_healed_but_credits_nothing(void)
+{
+    stage();
+    unit(PATIENT)->hp_current = 0;
+    unit(PATIENT)->portrait_id = FIRST_ENEMY_PORTRAIT;
+
+    CHECK_EQ(fdps_unit_apply_heal(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 9);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED);
+
+    stage();
+    unit(PATIENT)->hp_current = 0;
+    unit(PATIENT)->portrait_id = LAST_ROSTER_PORTRAIT;
+
+    CHECK_EQ(fdps_unit_apply_heal(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 9);
+}
+
+/* The index picks the record: unit 2 is healed and its three neighbours are
+   left exactly where they were. */
+static void each_index_selects_its_own_record(void)
+{
+    stage();
+    unit(2)->portrait_id = PLAIN_PORTRAIT;
+    unit(2)->level = 4;
+    unit(2)->hp_current = 30;
+    unit(2)->hp_max = 100;
+
+    CHECK_EQ(fdps_unit_apply_heal(2, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(2)->hp_current, 39);
+    CHECK_EQ(unit(0)->hp_current, 0);
+    CHECK_EQ(unit(PATIENT)->hp_current, 10);
+    CHECK_EQ(unit(3)->hp_current, 0);
+}
+
+void run_unitstat_tests(void)
+{
+    RUN_TEST(the_record_layout_matches_the_offsets_read);
+    RUN_TEST(a_heal_of_ten_rolls_nine_every_time);
+    RUN_TEST(the_base_heal_truncates);
+    RUN_TEST(a_negative_amount_truncates_towards_zero_and_drains);
+    RUN_TEST(the_total_is_clamped_to_the_maximum_hp);
+    RUN_TEST(the_return_is_the_roll_and_not_the_hp_restored);
+    RUN_TEST(the_roll_spans_nine_tenths_to_the_full_amount);
+    RUN_TEST(the_award_is_scaled_by_the_hp_actually_restored);
+    RUN_TEST(a_full_unit_credits_nothing_but_still_returns_its_roll);
+    RUN_TEST(the_award_accumulates_rather_than_replacing);
+    RUN_TEST(the_award_divides_the_whole_product_last);
+    RUN_TEST(a_promoted_portrait_credits_thirty_extra_levels);
+    RUN_TEST(the_promotion_span_is_0x0f_through_0x21);
+    RUN_TEST(an_enemy_portrait_is_healed_but_credits_nothing);
+    RUN_TEST(each_index_selects_its_own_record);
+}
