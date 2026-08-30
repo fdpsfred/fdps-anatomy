@@ -78,3 +78,71 @@ int fdps_collect_death_scripts(unsigned char *out_scripts)
     }
     return script_count;
 }
+
+/* The narrow opcode window this collector accepts, inclusive at both ends:
+   CMP EAX,0x2 / JGE at 00027549 and CMP EAX,0x5 / JLE at 0002755b.  Both
+   compares run on the opcode byte after AND EAX,0xff, so the widening carries
+   no sign and 0xff, the "no script" sentinel, falls outside the window without
+   needing a test of its own.
+
+   2, 3, 4 and 5 are exactly the opcodes fdps_run_death_scripts executes with
+   no further question -- the chapter-event call, the scripted line, and the
+   two battle-end verdicts.  0 and 1, the item and the gold, are the two it
+   guards on the unit index it was handed, and that guard's failure is a return
+   out of the whole executor rather than a skip of the one record. */
+#define DEATH_EVENT_OPCODE_MIN 2
+#define DEATH_EVENT_OPCODE_MAX 5
+
+/* 000274e0.  The same walk as fdps_collect_death_scripts with the sentinel
+   test replaced by the window above, so the map AI's spell kills pay out the
+   scripted chapter events and battle-end verdicts and nothing else.
+
+   The bound is data_fdps_map_unit_count read through CMP EAX,[0x00060150] / JL
+   at 000274fd, signed and tested before the body, so a count of 0 or below
+   returns 0 without resolving a record.
+
+   The three rejections all branch to the loop's increment at 0002750a, which
+   is what the four continues below are.  In assembly order: AND AL,0x1 / TEST
+   EAX,EAX / JNZ at 00027527 on bit 0 of the flags byte at record offset 5 --
+   bit 0 alone, so bit 7, the acted-this-turn flag, disqualifies nobody; CMP
+   word ptr [EAX+0x40],0x0 / JLE at 00027535 on the hit-point word, JLE and not
+   JL so a unit resting at exactly zero HP qualifies, and a signed compare over
+   a signed word so an overkilled unit qualifies too -- reading hp_current
+   unsigned turns -1 into 65535 and loses every unit the fight took past zero;
+   and then the two ends of the opcode window.
+
+   The record pointer comes back from CALL 0x0002d210 into [EBP-0x8] and is
+   re-resolved every iteration rather than stepped by 0x50, so the walk stays
+   correct across an array that has moved.
+
+   The append destination is out_events + event_count * 3 -- the OUTPUT
+   counter, not the unit index -- so the records land packed from the front
+   with no gaps whatever spread of units qualified.  Nothing bounds that write;
+   see death.h for why the missing check stays missing. */
+int fdps_collect_death_script_events(unsigned char *out_events)
+{
+    struct fdps_unit_record *unit;
+    int unit_index;
+    int event_count;
+
+    event_count = 0;
+    for (unit_index = 0; unit_index < data_fdps_map_unit_count; unit_index++) {
+        unit = fdps_get_unit_record(unit_index);
+        if ((unit->flags & 1) != 0) {
+            continue;
+        }
+        if (unit->hp_current > 0) {
+            continue;
+        }
+        if (unit->death_script_opcode < DEATH_EVENT_OPCODE_MIN) {
+            continue;
+        }
+        if (unit->death_script_opcode > DEATH_EVENT_OPCODE_MAX) {
+            continue;
+        }
+        memmove(out_events + event_count * DEATH_SCRIPT_RECORD_BYTES,
+                &unit->death_script_opcode, DEATH_SCRIPT_RECORD_BYTES);
+        event_count = event_count + 1;
+    }
+    return event_count;
+}

@@ -52,4 +52,45 @@
 extern int fdps_collect_death_scripts(unsigned char *out_scripts);
 #pragma aux fdps_collect_death_scripts "*" parm caller [];
 
+/* Which death scripts does the map AI's spell kill owe the CHAPTER?  The same
+   walk as fdps_collect_death_scripts over battle unit indices
+   0..data_fdps_map_unit_count-1 (gamedata.h), under the same two tests -- bit
+   0 of the record's flags byte at offset 5 clear, and the signed hit-point
+   word at offset 0x40 at most 0 -- but accepting only death script opcodes 2
+   to 5 inclusive.  Every accepted unit's 3-byte script is copied into
+   out_events, packed from the front with no gaps; the count written is
+   returned, 0 when nothing qualifies.
+
+   Opcodes 2 to 5 are the half of the script vocabulary fdps_run_death_scripts
+   carries out unconditionally: the chapter-event handler call, the scripted
+   text line, and the two battle-end verdicts.  Opcodes 0 and 1, the item drop
+   and the gold, are dropped here on purpose, which is why the sole caller
+   fdps_map_actor_cast_chosen_spell also zeroes the pending-experience
+   accumulator right after this call -- an AI spell kill pays the player
+   nothing.  The suppression has to happen at the collect and not be left to
+   the executor: the executor's own guard on a reward record returns out of the
+   whole array rather than skipping the one record, so letting a reward opcode
+   through would abandon every record behind it, the battle-end verdicts
+   included.  For the same reason this and fdps_collect_death_scripts are two
+   functions and not one shared helper with a flag; they differ only in this
+   test, and the difference is the policy.
+
+   The window also subsumes the sentinel: 0xff, the "no script" opcode
+   fdps_build_map_unit_array stamps into every roster slot, is outside it, and
+   the byte is widened without sign before the compare, so no opcode above the
+   window is mistaken for a negative one.
+
+   The order against fdps_play_death_animation_and_mark_dead is load-bearing in
+   exactly the way it is for fdps_collect_death_scripts above: that routine
+   sets the flag bit this walk rejects on, so a collect that runs after it
+   returns 0 and silently loses every chapter event and battle-end verdict the
+   kills owed.  The caller spells the steps in the right order.
+
+   out_events is written with no bound of any kind; the only caller leaves it
+   0x0c bytes, four records.  A capacity check does not belong here -- the
+   original has none, and adding one would drop records the caller does read --
+   so a caller must keep its buffer at least as large as the original's. */
+extern int fdps_collect_death_script_events(unsigned char *out_events);
+#pragma aux fdps_collect_death_script_events "*" parm caller [];
+
 #endif

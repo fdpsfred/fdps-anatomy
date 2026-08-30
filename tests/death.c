@@ -269,6 +269,224 @@ static void the_walk_follows_the_published_array(void)
     CHECK_EQ(out_scripts[3], 4);
 }
 
+/* ---- fdps_collect_death_script_events, 000274e0 -------------------------
+ *
+ * Expected values come from the assembly at 000274e0: the CMP
+ * EAX,[0x00060150] / JL at 000274fd that bounds the walk with a signed compare
+ * before the body runs, the AND AL,0x1 / TEST EAX,EAX / JNZ at 00027527 that
+ * rejects on bit 0 of the flags byte alone, the CMP word ptr [EAX+0x40],0x0 /
+ * JLE at 00027535 that accepts a hit-point word of zero or less as a signed
+ * 16-bit compare, the pair CMP EAX,0x2 / JGE at 00027549 and CMP EAX,0x5 / JLE
+ * at 0002755b that admit only opcodes 2..5 after AND EAX,0xff has widened the
+ * byte without sign, and the PUSH 0x3 / LEA EAX,[EAX+EAX*0x2] / ADD
+ * EAX,[EBP+0x14] at 00027562 that copies three raw bytes to out_events +
+ * written * 3.  The count returned is the INC dword ptr [EBP-0xc] at 00027580.
+ *
+ * The staging helpers above are shared: the same unit array and the same
+ * output buffer serve both collectors, since both take their whole input from
+ * the argument, the unit count global and the records the accessor resolves.
+ */
+
+/* The bound is tested before the body, so an empty battle collects nothing,
+   and because the compare is the signed JL a negative count does too rather
+   than running away as an unsigned one would. */
+static void an_empty_battle_collects_no_events(void)
+{
+    stage(0);
+    stage_unit(0, 0, 3, 0x1234, 0);
+    CHECK_EQ(fdps_collect_death_script_events(out_scripts), 0);
+    CHECK_EQ(out_scripts[0], OUT_UNWRITTEN);
+    stage(-1);
+    stage_unit(0, 0, 3, 0x1234, 0);
+    CHECK_EQ(fdps_collect_death_script_events(out_scripts), 0);
+    CHECK_EQ(out_scripts[0], OUT_UNWRITTEN);
+}
+
+/* The bound is exclusive: the unit at index == count is outside the walk even
+   though the array holds it and it passes all three tests. */
+static void the_event_bound_is_exclusive(void)
+{
+    stage(2);
+    stage_unit(0, 0, 2, 0x1111, 0);
+    stage_unit(1, 0, 3, 0x2222, 0);
+    stage_unit(2, 0, 4, 0x3333, 0);
+    CHECK_EQ(fdps_collect_death_script_events(out_scripts), 2);
+    CHECK_EQ(out_scripts[0], 2);
+    CHECK_EQ(out_scripts[3], 3);
+    CHECK_EQ(out_scripts[6], OUT_UNWRITTEN);
+}
+
+/* One qualifying unit writes exactly three bytes: the opcode, then the operand
+   word behind it, low byte first.  The fourth byte is untouched, so the copy
+   is three bytes wide and not four. */
+static void an_event_record_is_the_opcode_then_the_operand_word(void)
+{
+    stage(1);
+    stage_unit(0, 0, 3, 0x1234, 0);
+    CHECK_EQ(fdps_collect_death_script_events(out_scripts), 1);
+    CHECK_EQ(out_scripts[0], 3);
+    CHECK_EQ(out_scripts[1], 0x34);
+    CHECK_EQ(out_scripts[2], 0x12);
+    CHECK_EQ(out_scripts[3], OUT_UNWRITTEN);
+}
+
+/* The operand is copied as raw bytes, so a negative one arrives whole rather
+   than clamped or widened: -2 is 0xfffe and both its bytes land. */
+static void a_negative_event_operand_is_copied_whole(void)
+{
+    stage(1);
+    stage_unit(0, 0, 5, -2, 0);
+    CHECK_EQ(fdps_collect_death_script_events(out_scripts), 1);
+    CHECK_EQ(out_scripts[0], 5);
+    CHECK_EQ(out_scripts[1], 0xfe);
+    CHECK_EQ(out_scripts[2], 0xff);
+}
+
+/* The window is 2..5 inclusive and closed at both ends.  The eight staged
+   units carry opcodes 0, 1, 2, 3, 4, 5, 6 and the 0xff sentinel, so the item
+   opcode 0 and the gold opcode 1 below the window, the unused 6 above it and
+   the sentinel above that are all dropped, and exactly the four in between
+   survive -- in unit order, each with its own operand.  This is the whole
+   difference from fdps_collect_death_scripts: a test written as "not the
+   sentinel" would collect seven of these eight. */
+static void only_opcodes_two_through_five_are_events(void)
+{
+    stage(8);
+    stage_unit(0, 0, 0, 0, 0);
+    stage_unit(1, 0, 1, 1, 0);
+    stage_unit(2, 0, 2, 2, 0);
+    stage_unit(3, 0, 3, 3, 0);
+    stage_unit(4, 0, 4, 4, 0);
+    stage_unit(5, 0, 5, 5, 0);
+    stage_unit(6, 0, 6, 6, 0);
+    stage_unit(7, 0, SCRIPT_NONE, 7, 0);
+    CHECK_EQ(fdps_collect_death_script_events(out_scripts), 4);
+    CHECK_EQ(out_scripts[0], 2);
+    CHECK_EQ(out_scripts[1], 2);
+    CHECK_EQ(out_scripts[3], 3);
+    CHECK_EQ(out_scripts[4], 3);
+    CHECK_EQ(out_scripts[6], 4);
+    CHECK_EQ(out_scripts[7], 4);
+    CHECK_EQ(out_scripts[9], 5);
+    CHECK_EQ(out_scripts[10], 5);
+    CHECK_EQ(out_scripts[12], OUT_UNWRITTEN);
+}
+
+/* AND EAX,0xff before both compares: the opcode is widened without sign, so
+   the high half of the byte range sits above the window rather than below it.
+   0x80 and 0xfe are dropped exactly as 6 and 0xff are. */
+static void a_high_opcode_byte_is_above_the_window(void)
+{
+    stage(3);
+    stage_unit(0, 0, 0x80, 0x1111, 0);
+    stage_unit(1, 0, 0xfe, 0x2222, 0);
+    stage_unit(2, 0, 4, 0x3333, 0);
+    CHECK_EQ(fdps_collect_death_script_events(out_scripts), 1);
+    CHECK_EQ(out_scripts[0], 4);
+    CHECK_EQ(out_scripts[3], OUT_UNWRITTEN);
+}
+
+/* A unit already taken off the map is passed over even at zero HP with an
+   in-window opcode.  This is the rejection that makes the order against
+   fdps_play_death_animation_and_mark_dead load-bearing. */
+static void a_retired_unit_owes_no_event(void)
+{
+    stage(3);
+    stage_unit(0, FLAG_RETIRED, 2, 0x1111, 0);
+    stage_unit(1, 0, 3, 0x2222, 0);
+    stage_unit(2, FLAG_RETIRED, 4, 0x3333, 0);
+    CHECK_EQ(fdps_collect_death_script_events(out_scripts), 1);
+    CHECK_EQ(out_scripts[0], 3);
+    CHECK_EQ(out_scripts[3], OUT_UNWRITTEN);
+}
+
+/* Only bit 0 rejects.  Bit 7 is the acted-this-turn flag, and a unit that has
+   already moved this turn still owes its event, so a test against the whole
+   flags byte would lose it. */
+static void the_acted_flag_does_not_reject_an_event(void)
+{
+    stage(3);
+    stage_unit(0, FLAG_ACTED, 2, 0x1111, 0);
+    stage_unit(1, 0xfe, 3, 0x2222, 0);
+    stage_unit(2, FLAG_ACTED | FLAG_RETIRED, 4, 0x3333, 0);
+    CHECK_EQ(fdps_collect_death_script_events(out_scripts), 2);
+    CHECK_EQ(out_scripts[0], 2);
+    CHECK_EQ(out_scripts[3], 3);
+    CHECK_EQ(out_scripts[6], OUT_UNWRITTEN);
+}
+
+/* JLE, not JL: a unit resting at exactly zero HP owes its event, and one still
+   holding a single hit point does not. */
+static void zero_hit_points_owes_an_event_and_one_does_not(void)
+{
+    stage(3);
+    stage_unit(0, 0, 2, 0x1111, 0);
+    stage_unit(1, 0, 3, 0x2222, 1);
+    stage_unit(2, 0, 4, 0x3333, 0x7fff);
+    CHECK_EQ(fdps_collect_death_script_events(out_scripts), 1);
+    CHECK_EQ(out_scripts[0], 2);
+    CHECK_EQ(out_scripts[3], OUT_UNWRITTEN);
+}
+
+/* The hit-point compare is the signed one over a signed word, so an overkill
+   still owes its event; reading hp_current unsigned turns -1 into 65535 and
+   drops every unit the spell took past zero. */
+static void an_overkilled_unit_owes_its_event(void)
+{
+    stage(3);
+    stage_unit(0, 0, 2, 0x1111, -1);
+    stage_unit(1, 0, 3, 0x2222, -300);
+    stage_unit(2, 0, 4, 0x3333, -32768);
+    CHECK_EQ(fdps_collect_death_script_events(out_scripts), 3);
+    CHECK_EQ(out_scripts[0], 2);
+    CHECK_EQ(out_scripts[3], 3);
+    CHECK_EQ(out_scripts[6], 4);
+}
+
+/* The append scales the OUTPUT counter by three, not the unit index, so a
+   scattered set of qualifying units lands packed from the front in unit order
+   with no gaps.  Indices 1 and 4 qualify out of six -- index 0 is retired,
+   index 2 carries the item opcode, index 3 is alive and index 5 carries the
+   gold opcode -- and their records sit at 0 and 3; byte 3 would still read as
+   the sentinel if the unit index had been scaled instead. */
+static void the_event_records_are_packed_from_the_front(void)
+{
+    stage(6);
+    stage_unit(0, FLAG_RETIRED, 2, 0x1111, 0);
+    stage_unit(1, 0, 3, 0x0102, 0);
+    stage_unit(2, 0, 0, 0x2222, 0);
+    stage_unit(3, 0, 4, 0x3333, 5);
+    stage_unit(4, 0, 5, 0x0405, -7);
+    stage_unit(5, 0, 1, 0x4444, -20);
+    CHECK_EQ(fdps_collect_death_script_events(out_scripts), 2);
+    CHECK_EQ(out_scripts[0], 3);
+    CHECK_EQ(out_scripts[1], 0x02);
+    CHECK_EQ(out_scripts[2], 0x01);
+    CHECK_EQ(out_scripts[3], 5);
+    CHECK_EQ(out_scripts[4], 0x05);
+    CHECK_EQ(out_scripts[5], 0x04);
+    CHECK_EQ(out_scripts[6], OUT_UNWRITTEN);
+}
+
+/* The two collectors are not the same function.  Handed one battle in which
+   every opcode appears once, the sibling keeps everything but the sentinel and
+   this one keeps only the middle four; if either were folded into the other
+   these two counts would agree. */
+static void the_two_collectors_disagree_on_the_reward_opcodes(void)
+{
+    stage(8);
+    stage_unit(0, 0, 0, 0, 0);
+    stage_unit(1, 0, 1, 1, 0);
+    stage_unit(2, 0, 2, 2, 0);
+    stage_unit(3, 0, 3, 3, 0);
+    stage_unit(4, 0, 4, 4, 0);
+    stage_unit(5, 0, 5, 5, 0);
+    stage_unit(6, 0, 6, 6, 0);
+    stage_unit(7, 0, SCRIPT_NONE, 7, 0);
+    CHECK_EQ(fdps_collect_death_scripts(out_scripts), 7);
+    CHECK_EQ(fdps_collect_death_script_events(out_scripts), 4);
+}
+
 void run_death_tests(void)
 {
     RUN_TEST(record_layout_matches_the_offsets);
@@ -283,4 +501,16 @@ void run_death_tests(void)
     RUN_TEST(an_overkilled_unit_qualifies);
     RUN_TEST(the_records_are_packed_from_the_front);
     RUN_TEST(the_walk_follows_the_published_array);
+    RUN_TEST(an_empty_battle_collects_no_events);
+    RUN_TEST(the_event_bound_is_exclusive);
+    RUN_TEST(an_event_record_is_the_opcode_then_the_operand_word);
+    RUN_TEST(a_negative_event_operand_is_copied_whole);
+    RUN_TEST(only_opcodes_two_through_five_are_events);
+    RUN_TEST(a_high_opcode_byte_is_above_the_window);
+    RUN_TEST(a_retired_unit_owes_no_event);
+    RUN_TEST(the_acted_flag_does_not_reject_an_event);
+    RUN_TEST(zero_hit_points_owes_an_event_and_one_does_not);
+    RUN_TEST(an_overkilled_unit_owes_its_event);
+    RUN_TEST(the_event_records_are_packed_from_the_front);
+    RUN_TEST(the_two_collectors_disagree_on_the_reward_opcodes);
 }
