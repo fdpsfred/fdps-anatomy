@@ -800,5 +800,19 @@
       "needs": "(1) A scan of byte 2 of every row of every shipped ATTR<map><layer>.DAT for a value above 7. (2) The longest wave the fill reaches over the real chapter maps, allowing for a tile being queued more than once under the 0x80 stop bit. (3) Confirmation that the movement grid header and the layer-0 terrain header always carry the same width. All three become answerable once ticket 23 or the resource work has the map files loaded.",
       "status": "open"
     }
+  ],
+  "0001f510": [
+    {
+      "what": "Nothing bounds the indicator queue cursor. This function appends four cells at data_fdps_indicator_queue_count and adds 4 to it with no comparison against the arrays' 200 cells, and neither do the other three producers (0001f690 and 0001f7d0 add 4, 0001fce4 adds a variable count at 0001fd41). A full sweep of every reference to 0x00064378 returns 24 instructions and no others: the four adds, the reads inside the producers and inside fdps_play_indicator_queue (CMP at 0001f35c and 0001f3a9), and exactly two stores of zero -- 0001f4ff in fdps_play_indicator_queue after it animates everything queued, and 000262ac in the prologue of fdps_apply_item_effect_to_targets. So a batch that queues more than 50 popups before draining runs off the end of each array. In the original the three arrays are contiguous (0x64120, 0x641e8, 0x642b0, 200 apart) and the overrun lands in the next array and then in the cursor itself; in the rebuild they are three separate objects and it would land on whatever the linker put after each. Whether the batch size can reach 50 is set by the callers, not here: fdps_apply_damage_to_targets loops over a target count it is passed (CMP EAX,[EBP+0x14] / JL at 00026246) and drains the queue immediately after the loop.",
+      "needs": "The maximum target count that reaches fdps_apply_damage_to_targets, fdps_apply_heal_to_targets, fdps_apply_item_effect_to_targets, fdps_cast_spell_on_targets and fdps_battle_tick_status_effects, together with the largest data_fdps_map_unit_count a shipped chapter loads. Those five decide whether the cursor can reach 197 before a drain, and none of them is emitted yet, so the evidence does not exist at this point in the batch.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Nothing bounds the indicator queue cursor, and I confirmed that myself rather than inheriting it. search_instructions over operand 0x00064378 returns 24 instructions across the whole image: four unconditional advances (ADD 4 at 0001f678, 0001f7ba, 0001f8fa and ADD EAX at 0001fd41 in fdps_show_sprite_indicator, which adds a variable count), the reads inside the four producers and inside fdps_play_indicator_queue (CMP at 0001f35c and 0001f3a9), and exactly two stores of zero -- 0001f4ff after playback and 000262ac in fdps_apply_item_effect_to_targets' prologue. No comparison against the arrays' 200 cells exists anywhere. A batch that queues more than 50 popups before draining therefore runs off the end of each array; in the original the overrun lands in the next array and finally in the cursor itself, and in the rebuild it lands on whatever the linker placed after each of the three now-separate objects.",
+      "needs": "The largest target count that can reach fdps_apply_damage_to_targets, fdps_apply_heal_to_targets, fdps_apply_item_effect_to_targets, fdps_cast_spell_on_targets and fdps_battle_tick_status_effects, together with the largest data_fdps_map_unit_count a shipped chapter loads. Those five decide whether the cursor can reach 197 before a drain and none of them is emitted yet, so the evidence does not exist at this point in the batch. This is the emitter's entry and I endorse it as written -- it states what is unknown and does not instruct a later stage.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

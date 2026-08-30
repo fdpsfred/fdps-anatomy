@@ -447,6 +447,14 @@
       "status": "committed",
       "emitted_against": "0xe3",
       "rounds": 0
+    },
+    "0001f510": {
+      "name": "fdps_show_number_indicator",
+      "target": "indicat.c",
+      "body_size": "0x176",
+      "status": "committed",
+      "emitted_against": "0x176",
+      "rounds": 1
     }
   }
 }
