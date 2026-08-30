@@ -25,7 +25,7 @@
 | `data/routing.json` | 每支 function 與每個遊戲全域的目標 `.c`，加上不 emit 的符號清單。由 `build_routing.py` 產生，不手改 |
 | `data/routing.md` | 同一份路由的逐檔清單，人讀用。同樣是產生物 |
 | `data/emit_state.json` | 進度的正本，進版控。續跑的唯一依據。**不記檔案落點** |
-| `data/emit_issues.json` | 尚未收斂的等價性疑慮，一個 function 一組。由 bookkeeper 累加，全部 function 落地後由總掃逐條處理。每則的 `status` 與 `from` 是總掃的篩選依據，缺了就等於不存在 |
+| `data/emit_issues.json` | 尚未收斂的等價性疑慮，一個 function 一組。由 bookkeeper 累加，全部 function 落地後由總掃逐條處理。每則的 `status` 與 `from` 是總掃的篩選依據，缺了就等於不存在；reviewer 與 emitter 記到同一件事時，reviewer 那則帶 `same_as` 指回去（`emit#N`），總掃據以併成一則 |
 
 `workspace/code_emit/` 下的兩個產出值得單獨提：`undefined.json` 是第一次連結報出的未定義符號，也就是票 23 的權威工作清單，每次建置重新產生；`emit_order.json` 是 callee 先於 caller 的 emit 順序，call graph 變動後重跑 `emit_order.py` 更新。
 

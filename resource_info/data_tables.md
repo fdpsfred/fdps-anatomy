@@ -17,7 +17,7 @@
 | `MAGICDAT.DAT` | 280 | 7 | 40 | `0x18bd0` | 法術編號 | [`assets/spells.md`](../assets/spells.md) |
 | `PROMAP.DAT` | 410 | 10 | 41 | `0x18b70` | 職業代碼 + 1 | [`assets/classes.md`](../assets/classes.md) |
 | `ENEMYDAT.DAT` | 910 | 10 | 91 | `0x18b10` | 肖像編號減 60 | 尚未解讀 |
-| `PROEQU.DAT` | 216 | 6 | 36 | `0x18ba0` | 職業代碼 | 尚未解讀 |
+| `PROEQU.DAT` | 216 | 6 | 36 | `0x18ba0` | 職業代碼 | [`assets/tables/classes.md`](../assets/tables/classes.md)（佈局；六個代碼各自是哪種物品尚未解讀） |
 | `RANKUP.DAT` | 108 | 12 | 9 | `0x18c30` | 肖像編號 | 尚未解讀 |
 
 `ITEM.DAT` 的 251 筆裡只有前 226 筆有內容；`PROMAP.DAT` 的第 0 筆是預設值而非職業 `00`。兩者的細節在各自的正典檔。
