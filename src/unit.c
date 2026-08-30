@@ -9,6 +9,41 @@
 #include "gamedata.h"
 #include "unit.h"
 
+/* 0002d210.  The map unit array's element accessor, and the whole body is one
+   basic block: IMUL EAX,dword ptr [EBP+0x14],0x50 / MOV EDX,dword ptr
+   [0x00069cd8] / ADD EDX,EAX, spilled to the frame local at [EBP-0x4] and
+   reloaded into EAX to be returned.  No compare, no branch, no CALL, and
+   nothing is dereferenced here -- the address is computed and handed back.
+
+   The stride is the literal 0x50, which is sizeof(struct fdps_unit_record).
+
+   The multiply is IMUL, the signed form, so a negative unit_index steps
+   backwards off the front of the array rather than becoming a four-gigabyte
+   offset.  Nothing bounds it: data_fdps_map_unit_count at 0x00060150 is not
+   read here and the base is not tested for null, so the bound is the caller's.
+   Every walk that reaches this function carries its own -- for one example
+   fdps_battle_count_remaining_units_on_side at 00018350 compares its counter
+   against the count (CMP EAX,dword ptr [0x00060150] / JL) before it pushes it
+   -- and a bound added here would move that responsibility rather than add
+   safety.
+
+   The base is re-read from the global on every call, and that is load-bearing
+   rather than incidental: fdps_relocate_unit_array at 0002df90 moves the array
+   to a fresh heap block, wipes the old storage and frees it, and
+   fdps_battle_unit_turn, fdps_battle_npc_turn_phase and
+   fdps_battle_enemy_turn_phase call it once per unit iteration and re-resolve
+   through here immediately afterwards.  A cached base, or a record pointer
+   held across that call, addresses freed and zeroed memory. */
+struct fdps_unit_record *fdps_get_unit_record(int unit_index)
+{
+    struct fdps_unit_record *record;
+
+    record = (struct fdps_unit_record *)
+        (data_fdps_map_unit_array_ptr +
+         unit_index * (int) sizeof(struct fdps_unit_record));
+    return record;
+}
+
 /* 0002ccd0.  Two passes over the same five record bytes: count how many status
    timers are running, then walk them again and hand back the one the rotation
    counter has come round to.

@@ -11,6 +11,26 @@
 
 #include "fdpstype.h"
 
+/* The map unit array's element accessor: hands back the address of the
+   unit_index-th record in the block reached through
+   data_fdps_map_unit_array_ptr, computed as base + unit_index * 0x50 and
+   nothing else.  Reads the base global, dereferences nothing, calls nothing
+   and never returns null -- with a null base it returns the offset itself.
+
+   unit_index is a position in the current battle's unit array,
+   0..data_fdps_map_unit_count-1 for a live unit, and is NOT range checked at
+   either end: the count at 0x00060150 is not read here and the multiply is
+   signed, so a negative index addresses memory in front of the array.  Every
+   caller carries its own bound.
+
+   The returned pointer is only valid until the array moves.
+   fdps_relocate_unit_array reallocates the block, zeroes the old storage and
+   frees it on every unit iteration of the battle turn loops, so a record
+   pointer must be re-resolved through this function after that call rather
+   than held across it. */
+extern struct fdps_unit_record *fdps_get_unit_record(int unit_index);
+#pragma aux fdps_get_unit_record "*" parm caller [];
+
 /* Picks which of the unit's status-effect timers gets its icon drawn over the
    unit this cycle.  Returns the icon slot 0..4 -- which is the frame index
    into the IconSts.cel sheet, and corresponds to record offsets 0x23, 0x22,
