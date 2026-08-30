@@ -69,4 +69,27 @@ extern int fdps_unit_find_equipped_slot(int unit_index, int want_armor);
 extern int fdps_unit_get_item_id(int unit_index, int slot);
 #pragma aux fdps_unit_get_item_id "*" parm caller [];
 
+/* How many things is this unit carrying?  Returns the number of the unit's
+   eight inventory entries whose flag byte does NOT carry the empty bit 0x80 --
+   0 through 8.  Both ends of that range are what the callers act on: 0 is how
+   fdps_village_item_sell_loop and fdps_village_item_transfer_loop refuse a
+   sale or a hand-over, and 8 is how fdps_shop_buy_loop, the four chapter
+   events that award an item and fdps_chapter_26_end refuse to give the unit
+   another one.  fdps_unit_find_item_slot uses it as the bound of a
+   0..count-1 sweep over fdps_unit_get_item_id.
+
+   All eight entries are examined and the scan does not stop at the first empty
+   one, so a unit whose inventory has a hole in it is still counted correctly;
+   the count is not an index of the first free slot.  The item id byte of an
+   entry is never read, so the answer depends on the flag byte alone.
+
+   unit_index is a position in the current battle's unit array on the battle
+   side and a party member index on the village and shop side -- the same index
+   the caller uses with fdps_get_unit_record and fdps_unit_get_item_id -- and
+   is not range checked; the record is resolved through fdps_get_unit_record,
+   so a call after the array has moved sees the new block.  Nothing is
+   written. */
+extern int fdps_unit_item_count(int unit_index);
+#pragma aux fdps_unit_item_count "*" parm caller [];
+
 #endif

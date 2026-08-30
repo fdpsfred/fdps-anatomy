@@ -25,6 +25,16 @@
  * neither the item table nor the entry's flag byte, so its cases stage the
  * unit block alone.
  *
+ * The fdps_unit_item_count cases take theirs from the assembly at 00025240 --
+ * CMP dword ptr [EBP-0xc],0x8 / JL for the eight entries, ADD EAX,EAX / ADD
+ * EAX,[EBP-0x14] / ADD EAX,0xa for the entry address, AND AL,0x80 / AND
+ * EAX,0xff / TEST EAX,EAX / JNZ for the empty test, and the JMP at 0002529d
+ * that goes to the increment rather than out of the loop -- and from the same
+ * record layouts.  That function reads no id byte and touches no item record,
+ * so its cases stage the unit block alone.  The two answers its callers branch
+ * on are 8 (CMP EAX,0x8 / JNZ at 000388e7) and 0 (TEST EAX,EAX / JNZ at
+ * 0003406e), and both are asserted directly.
+ *
  * The item block is published one record PAST the start of its storage, so
  * record -1 exists and is addressable.  That is what lets the unsigned read of
  * the id byte be told apart from a signed one: id 0xff must reach record 255
@@ -501,6 +511,179 @@ static void get_item_id_resolves_the_record_on_every_call(void)
     CHECK_EQ(fdps_unit_get_item_id(0, 6), 0x77);
 }
 
+/* fdps_unit_item_count at 00025240.  AND AL,0x80 / AND EAX,0xff / TEST EAX,
+   EAX / JNZ: an entry counts when the empty bit is CLEAR.  A record staged
+   with every flag byte zero is therefore eight occupied slots, and one whose
+   entries all carry 0x80 is none.  0 and 8 are the two answers the callers
+   branch on -- CMP EAX,0x8 / JNZ at 000388e7 and 0003b82e, TEST EAX,EAX / JNZ
+   at 0003406e. */
+static void item_count_counts_entries_without_the_empty_bit(void)
+{
+    int slot_index;
+
+    stage();
+    CHECK_EQ(fdps_unit_item_count(0), INVENTORY_ENTRY_COUNT);
+
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_EMPTY, 0);
+    }
+    CHECK_EQ(fdps_unit_item_count(0), 0);
+}
+
+/* AND AL,0x80 is a mask and not a compare, and the bit it tests is 0x80 and no
+   other.  An entry carrying 0x40, 0x01 or 0x7f is occupied; one carrying 0x80,
+   0x81 or 0xff is empty.  A single count over one record staged with three of
+   each pins both halves at once. */
+static void item_count_tests_bit_0x80_alone(void)
+{
+    stage();
+    set_entry(0, 0, FLAG_EQUIPPED, 0x11);
+    set_entry(0, 1, 0x01, 0x11);
+    set_entry(0, 2, 0x7f, 0x11);
+    set_entry(0, 3, FLAG_EMPTY, 0x11);
+    set_entry(0, 4, 0x81, 0x11);
+    set_entry(0, 5, 0xff, 0x11);
+    set_entry(0, 6, FLAG_EMPTY, 0x11);
+    set_entry(0, 7, FLAG_CARRIED, 0x11);
+    CHECK_EQ(fdps_unit_item_count(0), 4);
+}
+
+/* The id byte at +1 of the entry is never read: the same eight flag bytes
+   answer the same whether the ids beside them are 0, 0xff or anything else. */
+static void item_count_ignores_the_item_id_byte(void)
+{
+    stage();
+    set_entry(0, 0, FLAG_CARRIED, 0x00);
+    set_entry(0, 1, FLAG_CARRIED, 0xff);
+    set_entry(0, 2, FLAG_EQUIPPED, 0x80);
+    set_entry(0, 3, FLAG_EMPTY, 0x2a);
+    set_entry(0, 4, FLAG_EMPTY, 0x00);
+    set_entry(0, 5, FLAG_EMPTY, 0xff);
+    set_entry(0, 6, FLAG_EMPTY, 0x7f);
+    set_entry(0, 7, FLAG_EMPTY, 0x01);
+    CHECK_EQ(fdps_unit_item_count(0), 3);
+}
+
+/* The JMP at 0002529d goes to the increment, not out of the loop: an empty
+   entry in the middle does not end the scan, so items sitting above a hole are
+   still counted.  An author who wrote the loop as a search for the first empty
+   slot would answer 1 for the first fixture and 0 for the second. */
+static void item_count_does_not_stop_at_the_first_empty_slot(void)
+{
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_CARRIED, 0x10 + slot_index);
+    }
+    set_entry(0, 1, FLAG_EMPTY, 0x10);
+    set_entry(0, 4, FLAG_EMPTY, 0x10);
+    CHECK_EQ(fdps_unit_item_count(0), 6);
+
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_EMPTY, 0x10);
+    }
+    set_entry(0, 7, FLAG_EQUIPPED, 0x10);
+    CHECK_EQ(fdps_unit_item_count(0), 1);
+}
+
+/* CMP dword ptr [EBP-0xc],0x8 / JL: eight entries and no more.  The last entry
+   is inside the count, while an occupied pair written two entries past the end
+   of the field -- record offsets 0x1a and 0x1c, inside the record and past the
+   inventory -- adds nothing. */
+static void item_count_scans_eight_entries_and_no_more(void)
+{
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_EMPTY, 0);
+    }
+    set_entry(0, 7, FLAG_CARRIED, 0x10);
+    CHECK_EQ(fdps_unit_item_count(0), 1);
+
+    set_entry(0, 7, FLAG_EMPTY, 0x10);
+    set_entry(0, 8, FLAG_CARRIED, 0x10);
+    set_entry(0, 9, FLAG_CARRIED, 0x10);
+    CHECK_EQ(fdps_unit_item_count(0), 0);
+}
+
+/* MOV EAX,[EBP+0x14] / PUSH EAX / CALL fdps_get_unit_record: the argument
+   picks the record the count runs over, so three records staged differently
+   answer differently, and the multiply inside fdps_get_unit_record is signed,
+   so index -1 reaches the record in front of the published base. */
+static void item_count_takes_its_record_from_the_index(void)
+{
+    int slot_index;
+    int unit_index;
+
+    stage();
+    for (unit_index = 0; unit_index < STAGE_UNITS; unit_index++) {
+        for (slot_index = 0;
+             slot_index < INVENTORY_ENTRY_COUNT;
+             slot_index++) {
+            set_entry(unit_index, slot_index, FLAG_EMPTY, 0);
+        }
+    }
+    set_entry(1, 0, FLAG_CARRIED, 0x10);
+    set_entry(1, 3, FLAG_EQUIPPED, 0x11);
+    set_entry(2, 5, FLAG_CARRIED, 0x12);
+    CHECK_EQ(fdps_unit_item_count(0), 0);
+    CHECK_EQ(fdps_unit_item_count(1), 2);
+    CHECK_EQ(fdps_unit_item_count(2), 1);
+
+    data_fdps_map_unit_array_ptr = unit_slot(2);
+    CHECK_EQ(fdps_unit_item_count(-1), 2);
+}
+
+/* No store anywhere in the body: the unit block is byte-for-byte the same
+   after a full inventory, an empty one and a mixed one. */
+static void item_count_writes_nothing(void)
+{
+    static unsigned char block_before[sizeof(unit_block)];
+    int i;
+    int diffs;
+
+    stage();
+    set_entry(0, 2, FLAG_EMPTY, 0x33);
+    set_entry(1, 0, FLAG_EMPTY, 0x44);
+    set_entry(1, 1, FLAG_EMPTY, 0x44);
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        block_before[i] = unit_block[i];
+    }
+
+    CHECK_EQ(fdps_unit_item_count(0), 7);
+    CHECK_EQ(fdps_unit_item_count(1), 6);
+    CHECK_EQ(fdps_unit_item_count(2), 8);
+
+    diffs = 0;
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        if (unit_block[i] != block_before[i]) {
+            diffs++;
+        }
+    }
+    CHECK_EQ(diffs, 0);
+}
+
+/* The record is resolved through fdps_get_unit_record on every call rather
+   than cached, so republishing the base between two identical calls changes
+   the answer. */
+static void item_count_resolves_the_record_on_every_call(void)
+{
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_EMPTY, 0);
+        set_entry(1, slot_index, FLAG_EMPTY, 0);
+    }
+    set_entry(1, 4, FLAG_CARRIED, 0x10);
+    CHECK_EQ(fdps_unit_item_count(0), 0);
+
+    data_fdps_map_unit_array_ptr = unit_slot(1);
+    CHECK_EQ(fdps_unit_item_count(0), 1);
+}
+
 void run_unititem_tests(void)
 {
     RUN_TEST(the_two_record_layouts_match_the_strides);
@@ -525,4 +708,12 @@ void run_unititem_tests(void)
     RUN_TEST(get_item_id_takes_its_record_from_the_index);
     RUN_TEST(get_item_id_writes_nothing);
     RUN_TEST(get_item_id_resolves_the_record_on_every_call);
+    RUN_TEST(item_count_counts_entries_without_the_empty_bit);
+    RUN_TEST(item_count_tests_bit_0x80_alone);
+    RUN_TEST(item_count_ignores_the_item_id_byte);
+    RUN_TEST(item_count_does_not_stop_at_the_first_empty_slot);
+    RUN_TEST(item_count_scans_eight_entries_and_no_more);
+    RUN_TEST(item_count_takes_its_record_from_the_index);
+    RUN_TEST(item_count_writes_nothing);
+    RUN_TEST(item_count_resolves_the_record_on_every_call);
 }

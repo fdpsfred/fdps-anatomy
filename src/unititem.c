@@ -20,6 +20,12 @@
    whose flag byte carries other bits alongside 0x40 is still equipped. */
 #define INVENTORY_FLAG_EQUIPPED 0x40
 
+/* The empty bit of an entry's flag byte: AND AL,0x80 at 0002528c.  Set means
+   the slot holds nothing.  It is the bit fdps_unit_remove_item raises on the
+   last entry -- MOV byte ptr [EAX+0x18],0x80 at 00025d09, record offset 0x0a
+   plus 7 * 2 -- once it has shifted the entries above the removed one down. */
+#define INVENTORY_FLAG_EMPTY 0x80
+
 /* The two ends of the item type field the two searches accept: CMP dword ptr
    [EBP-0x8],0x15 at 000251c0 and again at 000251d2, and CMP dword
    ptr [EBP-0x8],0x27 at 000251d8.  Types 1..0x15 are the weapons and
@@ -117,4 +123,47 @@ int fdps_unit_get_item_id(int unit_index, int slot)
     unit = fdps_get_unit_record(unit_index);
 
     return (int) unit->inventory_slots[slot * 2 + 1];
+}
+
+/* 00025240.  How many of the eight inventory entries are occupied.  One
+   counted loop, i in [EBP-0xc] against the literal 8 with JL at 00025269, and
+   the running total in [EBP-0x8] cleared before the record is even resolved --
+   MOV dword ptr [EBP-0x8],0x0 at 0002524c, ahead of the CALL.
+
+   The entry address is formed exactly as the equipped search forms it, MOV
+   EAX,[EBP-0xc] / ADD EAX,EAX / ADD EAX,[EBP-0x14] / ADD EAX,0xa at 00025279,
+   so the entries are the 2-byte pairs of inventory_slots[] again.
+
+   The test is AND AL,0x80 / AND EAX,0xff / TEST EAX,EAX / JNZ: a mask on the
+   flag byte and not a compare, so an entry carrying other bits alongside 0x80
+   still counts as empty and an entry carrying any bits BUT 0x80 -- the 0x40 of
+   an equipped item, or the plain 0 of a carried one -- counts as occupied.
+   The id byte at +1 is not read at all, so a slot's id says nothing about
+   whether it is counted.
+
+   Every one of the eight entries is examined; the JMP at 0002529d goes to the
+   increment and not out of the loop, so an empty entry in the middle does not
+   end the scan and a unit holding items above a hole answers with all of them.
+   Neither the unit index nor the record pointer coming back from
+   fdps_get_unit_record is checked, and nothing is written. */
+int fdps_unit_item_count(int unit_index)
+{
+    struct fdps_unit_record *unit;
+    unsigned char *inventory_entry;
+    int occupied_count;
+    int slot_index;
+
+    occupied_count = 0;
+    unit = fdps_get_unit_record(unit_index);
+
+    for (slot_index = 0;
+         slot_index < INVENTORY_ENTRY_COUNT;
+         slot_index++) {
+        inventory_entry = &unit->inventory_slots[slot_index * 2];
+        if ((inventory_entry[0] & INVENTORY_FLAG_EMPTY) == 0) {
+            occupied_count++;
+        }
+    }
+
+    return occupied_count;
 }
