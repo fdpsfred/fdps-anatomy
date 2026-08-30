@@ -422,7 +422,7 @@ This does not narrow the rule above about a value whose purpose you cannot work
 out. That one stays exactly as written: an honest gap beats an invented name.
 
 YOUR VERDICT RECORDS FINDINGS, IT DOES NOT LEGISLATE. Do not write a conditional
-obligation into `needs` -- "if X turns out to be true then this should be
+obligation into the needs field -- "if X turns out to be true then this should be
 rewritten as Y". A later stage will read that as an instruction and carry it out,
 and nothing between here and there checks whether the rule you invented was ever
 sound. This has already happened once: an emitter wrote "if this is an inline
