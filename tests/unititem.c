@@ -70,6 +70,19 @@
  * lets an unsigned read be told apart from a signed one: an item id of 0xff
  * must reach record 255 and not the record in front of the base, and so must a
  * class code of 0xff.
+ *
+ * The fdps_unit_equip_slot cases take theirs from the assembly at 00026070 --
+ * XOR EAX,EAX / MOV AL,byte ptr [EDX+0xb] after ADD EDX,EDX for the unsigned id
+ * of the entry being equipped, XOR EAX,EAX / MOV AL,byte ptr [EDX] for both
+ * item type bytes, CMP dword ptr [EBP-0x10],0x8 / JL for the eight entries, AND
+ * AL,0x40 for the equipped test, CMP dword ptr [EBP-0xc],0x0 / JZ for the
+ * type-0 skip, the four signed compares against 0x15 at 0002613f, 00026145,
+ * 0002614b and 00026151, MOV byte ptr [EAX],0x0 for the unequip store and MOV
+ * byte ptr [EAX+0xa],0x40 for the final one -- and from the item type spans in
+ * assets/items.md.  The type values exercised are the two ends of the weapon
+ * span (0x01 and 0x15), the two ends of the armour span (0x16 and 0x27), a
+ * consumable above both (0x2a) and the blank record's 0, which is what pins the
+ * category test to the single 0x15 split rather than to the two named spans.
  */
 #include <stddef.h>
 #include "testharn.h"
@@ -1539,6 +1552,498 @@ static void can_equip_resolves_its_records_on_every_call(void)
     CHECK_EQ(fdps_unit_can_equip_item(0, 7), 0);
 }
 
+/* fdps_unit_equip_slot at 00026070.  MOV EAX,[EBP+0x18] / ADD EAX,EAX / ADD
+   EAX,[EBP-0x1c] / MOV byte ptr [EAX+0xa],0x40 at 00026161: the flag byte of
+   the named entry becomes exactly 0x40, unconditionally and as a store of the
+   literal rather than an OR, so an entry marked empty comes out equipped and
+   occupied.  The id byte beside it is not written. */
+static void equip_slot_stores_0x40_over_the_slots_flag_byte(void)
+{
+    stage();
+    set_item_type(10, 0x01);
+    set_entry(0, 3, FLAG_EMPTY, 10);
+
+    fdps_unit_equip_slot(0, 3);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 6], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 7], 10);
+    CHECK_EQ(fdps_unit_item_count(0), INVENTORY_ENTRY_COUNT);
+
+    stage();
+    set_item_type(10, 0x01);
+    set_entry(0, 3, 0x81, 10);
+
+    fdps_unit_equip_slot(0, 3);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 6], 0x40);
+}
+
+/* The rebuild note.  The category test is the split at type 0x15 and not
+   equality of the type byte: equipping a 刀, type 0x02, takes off an already
+   worn 劍, type 0x01.  A body that compared the two type bytes for equality
+   would leave entry 0 equipped. */
+static void equip_slot_unequips_a_weapon_of_a_different_type(void)
+{
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x02);
+    set_entry(0, 0, FLAG_EQUIPPED, 1);
+    set_entry(0, 4, FLAG_CARRIED, 2);
+
+    fdps_unit_equip_slot(0, 4);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 1], 1);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 8], FLAG_EQUIPPED);
+    CHECK_EQ(fdps_unit_find_equipped_slot(0, 0), 4);
+}
+
+/* The same on the armour side: type 0x16 and type 0x20 are both above 0x15, so
+   equipping one takes the other off whatever their sub-kinds. */
+static void equip_slot_unequips_armor_of_a_different_sub_kind(void)
+{
+    stage();
+    set_item_type(1, 0x16);
+    set_item_type(2, 0x20);
+    set_entry(0, 2, FLAG_EQUIPPED, 1);
+    set_entry(0, 6, FLAG_CARRIED, 2);
+
+    fdps_unit_equip_slot(0, 6);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 4], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 12], FLAG_EQUIPPED);
+    CHECK_EQ(fdps_unit_find_equipped_slot(0, 1), 6);
+}
+
+/* The two sides of the split do not disturb each other: equipping a weapon
+   leaves the worn armour equipped and equipping armour leaves the worn weapon
+   equipped, which is what lets a unit wear one of each. */
+static void equip_slot_leaves_the_other_category_alone(void)
+{
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x02);
+    set_item_type(3, 0x16);
+    set_item_type(4, 0x20);
+    set_entry(0, 0, FLAG_EQUIPPED, 1);
+    set_entry(0, 1, FLAG_EQUIPPED, 3);
+    set_entry(0, 2, FLAG_CARRIED, 2);
+    set_entry(0, 3, FLAG_CARRIED, 4);
+
+    fdps_unit_equip_slot(0, 2);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 2], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 4], FLAG_EQUIPPED);
+
+    fdps_unit_equip_slot(0, 3);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 2], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 4], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 6], FLAG_EQUIPPED);
+    CHECK_EQ(fdps_unit_find_equipped_slot(0, 0), 2);
+    CHECK_EQ(fdps_unit_find_equipped_slot(0, 1), 3);
+}
+
+/* CMP dword ptr [EBP-0x4],0x15 with JG and JLE: the boundary is 0x15 on the
+   weapon side and 0x16 on the other.  Equipping type 0x15 takes off a worn
+   0x01 and leaves a worn 0x16 on; equipping type 0x16 does the reverse. */
+static void equip_slot_splits_the_categories_at_type_0x15(void)
+{
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x16);
+    set_item_type(3, 0x15);
+    set_entry(0, 0, FLAG_EQUIPPED, 1);
+    set_entry(0, 1, FLAG_EQUIPPED, 2);
+    set_entry(0, 7, FLAG_CARRIED, 3);
+
+    fdps_unit_equip_slot(0, 7);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 2], FLAG_EQUIPPED);
+
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x27);
+    set_item_type(3, 0x16);
+    set_entry(0, 0, FLAG_EQUIPPED, 1);
+    set_entry(0, 1, FLAG_EQUIPPED, 2);
+    set_entry(0, 7, FLAG_CARRIED, 3);
+
+    fdps_unit_equip_slot(0, 7);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 2], 0);
+}
+
+/* The split is at 0x15 and NOT at the top of the armour span: an item of type
+   0x2a -- a consumable, above the 0x27 that fdps_unit_find_equipped_slot's
+   armour search stops at -- is on the armour side of this test, so equipping
+   one takes the worn armour off and leaves the worn weapon on. */
+static void equip_slot_counts_everything_above_0x15_as_armor(void)
+{
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x16);
+    set_item_type(3, 0x2a);
+    set_entry(0, 0, FLAG_EQUIPPED, 1);
+    set_entry(0, 1, FLAG_EQUIPPED, 2);
+    set_entry(0, 5, FLAG_CARRIED, 3);
+
+    fdps_unit_equip_slot(0, 5);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 2], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 10], FLAG_EQUIPPED);
+}
+
+/* AND AL,0x40 / AND EAX,0xff / TEST EAX,EAX / JZ at 00026108: only entries
+   carrying the equipped bit are considered, and the test is a mask.  Entries
+   holding the same kind of item with flag bytes 0x00, 0x80, 0x20 and 0x01 keep
+   their bytes exactly; the entry carrying 0xc1 has the bit and is zeroed. */
+static void equip_slot_only_considers_entries_with_bit_0x40(void)
+{
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x02);
+    set_entry(0, 0, FLAG_CARRIED, 1);
+    set_entry(0, 1, FLAG_EMPTY, 1);
+    set_entry(0, 2, 0x20, 1);
+    set_entry(0, 3, 0x01, 1);
+    set_entry(0, 4, 0xc1, 1);
+    set_entry(0, 6, FLAG_CARRIED, 2);
+
+    fdps_unit_equip_slot(0, 6);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], FLAG_CARRIED);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 2], FLAG_EMPTY);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 4], 0x20);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 6], 0x01);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 8], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 12], FLAG_EQUIPPED);
+}
+
+/* CMP dword ptr [EBP-0xc],0x0 / JZ at 00026139: an equipped entry whose item
+   record reads back type 0 -- what ITEM.DAT's all-zero tail records give -- is
+   left alone, even though 0 is on the weapon side of the 0x15 split and a body
+   without that test would zero it.  A real weapon in another entry is still
+   taken off, so the type-0 entry is skipped and not the loop abandoned. */
+static void equip_slot_leaves_a_blank_item_record_equipped(void)
+{
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x02);
+    set_entry(0, 0, FLAG_EQUIPPED, 0xf0);
+    set_entry(0, 1, FLAG_EQUIPPED, 1);
+    set_entry(0, 5, FLAG_CARRIED, 2);
+
+    fdps_unit_equip_slot(0, 5);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 2], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 10], FLAG_EQUIPPED);
+}
+
+/* The type-0 test guards the WORN item only; there is no such test on the item
+   being equipped.  Equipping an entry whose own item record is blank gives an
+   equip type of 0, which is <= 0x15, so the worn weapon still comes off and the
+   worn armour stays on. */
+static void equip_slot_does_not_test_the_equipped_items_own_type(void)
+{
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x16);
+    set_entry(0, 0, FLAG_EQUIPPED, 1);
+    set_entry(0, 1, FLAG_EQUIPPED, 2);
+    set_entry(0, 4, FLAG_CARRIED, 0xf0);
+
+    fdps_unit_equip_slot(0, 4);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 2], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 8], FLAG_EQUIPPED);
+}
+
+/* The JZ at 00026116 and the fall-through at 00026157 both go to the increment
+   at 0002615f, so the loop has no early exit: a unit somehow wearing two items
+   of the same category loses BOTH.  A body written as "find the worn one and
+   unequip it" would leave the higher entry equipped. */
+static void equip_slot_unequips_every_matching_entry(void)
+{
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x03);
+    set_item_type(3, 0x02);
+    set_entry(0, 1, FLAG_EQUIPPED, 1);
+    set_entry(0, 3, FLAG_EQUIPPED, 2);
+    set_entry(0, 6, FLAG_CARRIED, 3);
+
+    fdps_unit_equip_slot(0, 6);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 2], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 6], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 12], FLAG_EQUIPPED);
+}
+
+/* MOV byte ptr [EAX],0x0 at 0002615c writes a plain zero over the WHOLE flag
+   byte rather than clearing bit 0x40, so an entry staged 0x41 comes out 0x00
+   and not 0x01, and its empty bit stays clear -- the item is still carried and
+   still counted.  The id byte beside it is not written. */
+static void equip_slot_zeroes_the_whole_flag_byte_it_unequips(void)
+{
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x02);
+    set_entry(0, 0, 0x41, 1);
+    set_entry(0, 2, FLAG_CARRIED, 2);
+
+    fdps_unit_equip_slot(0, 2);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 1], 1);
+    CHECK_EQ(fdps_unit_item_count(0), INVENTORY_ENTRY_COUNT);
+    CHECK_EQ(fdps_unit_get_item_id(0, 0), 1);
+}
+
+/* The final store happens after the loop and is unconditional, so the entry
+   being equipped is put back even when the loop has just zeroed it: equipping
+   an entry that is already equipped with an item of its own category leaves it
+   at 0x40 rather than at 0. */
+static void equip_slot_re_equips_the_entry_the_loop_zeroed(void)
+{
+    stage();
+    set_item_type(1, 0x01);
+    set_entry(0, 2, FLAG_EQUIPPED, 1);
+
+    fdps_unit_equip_slot(0, 2);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 4], FLAG_EQUIPPED);
+    CHECK_EQ(fdps_unit_find_equipped_slot(0, 0), 2);
+}
+
+/* CMP dword ptr [EBP-0x10],0x8 / JL at 000260e7: eight entries and no more.
+   An equipped pair of the same category written two entries past the end of the
+   field -- record offsets 0x1a and 0x1b, inside the record -- is not seen and
+   keeps its bytes. */
+static void equip_slot_scans_eight_entries_and_no_more(void)
+{
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x02);
+    set_entry(0, 7, FLAG_EQUIPPED, 1);
+    set_entry(0, 8, FLAG_EQUIPPED, 1);
+    set_entry(0, 0, FLAG_CARRIED, 2);
+
+    fdps_unit_equip_slot(0, 0);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 14], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 16], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], FLAG_EQUIPPED);
+}
+
+/* The only stores in the body are the loop's flag byte and the final flag
+   byte: with the whole block filled with a pattern and unit 1's eight entries
+   staged, exactly two bytes differ afterwards -- the flag byte of the entry
+   that was taken off and the flag byte of the entry that was put on.  No id
+   byte, no other field of the record and no neighbouring record moves. */
+static void equip_slot_writes_only_two_flag_bytes(void)
+{
+    static unsigned char block_before[sizeof(unit_block)];
+    int i;
+    int diffs;
+    int unequipped_flag_offset;
+    int equipped_flag_offset;
+    int slot_index;
+
+    stage();
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        unit_block[i] = (unsigned char) (i + 1);
+    }
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x02);
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(1, slot_index, FLAG_CARRIED, 1);
+    }
+    set_entry(1, 0, FLAG_EQUIPPED, 1);
+    set_entry(1, 5, FLAG_CARRIED, 2);
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        block_before[i] = unit_block[i];
+    }
+
+    fdps_unit_equip_slot(1, 5);
+
+    unequipped_flag_offset = UNIT_RECORD_STRIDE + OFF_INVENTORY + 0;
+    equipped_flag_offset = UNIT_RECORD_STRIDE + OFF_INVENTORY + 10;
+    CHECK_EQ(unit_block[unequipped_flag_offset], 0);
+    CHECK_EQ(unit_block[equipped_flag_offset], FLAG_EQUIPPED);
+
+    diffs = 0;
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        if (i == unequipped_flag_offset || i == equipped_flag_offset) {
+            continue;
+        }
+        if (unit_block[i] != block_before[i]) {
+            diffs++;
+        }
+    }
+    CHECK_EQ(diffs, 0);
+}
+
+/* MOV AL,byte ptr [EDX+0xb] at 000260bb: the type of the item being equipped
+   comes from the entry's SECOND byte, the id, and never from its flag byte.
+   The entry under test carries flag byte 0x30 -- which is the id of a weapon
+   here -- and id byte 0x40, the id of a piece of armour, so a body that
+   classified by the flag byte would take the worn weapon off instead of the
+   worn armour.  0x30 has no 0x40 bit, so the entry itself is passed over by
+   the loop. */
+static void equip_slot_classifies_by_the_id_byte_not_the_flag_byte(void)
+{
+    stage();
+    set_item_type(0x30, 0x01);
+    set_item_type(0x40, 0x16);
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x16);
+    set_entry(0, 0, FLAG_EQUIPPED, 1);
+    set_entry(0, 1, FLAG_EQUIPPED, 2);
+    set_entry(0, 2, 0x30, 0x40);
+
+    fdps_unit_equip_slot(0, 2);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 2], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 4], FLAG_EQUIPPED);
+}
+
+/* The id read is XOR EAX,EAX / MOV AL,byte ptr [EDX+0xb], so an entry holding
+   id 0xff asks for record 255 and not for the record in front of the table.
+   Record 255 is staged as armour and record -1 as a weapon, so a signed read
+   would take the worn weapon off; the staged answer is the reverse. */
+static void equip_slot_widens_the_id_byte_without_sign(void)
+{
+    stage();
+    set_item_type(0xff, 0x16);
+    set_item_type(-1, 0x01);
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x16);
+    set_entry(0, 0, FLAG_EQUIPPED, 1);
+    set_entry(0, 1, FLAG_EQUIPPED, 2);
+    set_entry(0, 3, FLAG_CARRIED, 0xff);
+
+    fdps_unit_equip_slot(0, 3);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 2], 0);
+}
+
+/* Nothing bounds the slot: it reaches the address as slot * 2 with no test in
+   between, both for the id read at inventory_slots[slot * 2 + 1] and for the
+   store at inventory_slots[slot * 2].  Slot 8 therefore classifies by record
+   offset 0x1b and writes 0x40 to record offset 0x1a, both past the inventory
+   field, and the loop still runs over the eight real entries.  A guard here
+   would leave 0x1a alone and take nothing off. */
+static void equip_slot_does_not_range_check_the_slot(void)
+{
+    unsigned char *record;
+
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x16);
+    set_item_type(3, 0x20);
+    set_entry(0, 0, FLAG_EQUIPPED, 1);
+    set_entry(0, 1, FLAG_EQUIPPED, 2);
+    record = unit_slot(0);
+    record[OFF_INVENTORY + 16] = 0;
+    record[OFF_INVENTORY + 17] = 3;
+
+    fdps_unit_equip_slot(0, 8);
+
+    CHECK_EQ(record[OFF_INVENTORY + 16], FLAG_EQUIPPED);
+    CHECK_EQ(record[OFF_INVENTORY + 0], FLAG_EQUIPPED);
+    CHECK_EQ(record[OFF_INVENTORY + 2], 0);
+}
+
+/* MOV EAX,[EBP+0x14] / PUSH EAX / CALL fdps_get_unit_record: the first
+   argument picks the record that is walked and written, so the neighbouring
+   units keep their equipped entries.  The multiply inside fdps_get_unit_record
+   is signed, so index -1 reaches the record in front of the published base. */
+static void equip_slot_edits_the_record_the_index_names(void)
+{
+    int unit_index;
+
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x02);
+    for (unit_index = 0; unit_index < STAGE_UNITS; unit_index++) {
+        set_entry(unit_index, 0, FLAG_EQUIPPED, 1);
+        set_entry(unit_index, 4, FLAG_CARRIED, 2);
+    }
+
+    fdps_unit_equip_slot(2, 4);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(1)[OFF_INVENTORY + 0], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(2)[OFF_INVENTORY + 0], 0);
+    CHECK_EQ(unit_slot(2)[OFF_INVENTORY + 8], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(3)[OFF_INVENTORY + 0], FLAG_EQUIPPED);
+
+    data_fdps_map_unit_array_ptr = unit_slot(1);
+    fdps_unit_equip_slot(-1, 4);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 8], FLAG_EQUIPPED);
+}
+
+/* Both resolutions go through fdps_get_unit_record, which reads the base global
+   every time, so republishing it between two otherwise identical calls sends
+   the second equip to a different record. */
+static void equip_slot_resolves_the_record_on_every_call(void)
+{
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x02);
+    set_entry(0, 0, FLAG_EQUIPPED, 1);
+    set_entry(0, 3, FLAG_CARRIED, 2);
+    set_entry(1, 0, FLAG_EQUIPPED, 1);
+    set_entry(1, 3, FLAG_CARRIED, 2);
+
+    fdps_unit_equip_slot(0, 3);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], 0);
+    CHECK_EQ(unit_slot(1)[OFF_INVENTORY + 0], FLAG_EQUIPPED);
+
+    data_fdps_map_unit_array_ptr = unit_slot(1);
+    fdps_unit_equip_slot(0, 3);
+    CHECK_EQ(unit_slot(1)[OFF_INVENTORY + 0], 0);
+    CHECK_EQ(unit_slot(1)[OFF_INVENTORY + 6], FLAG_EQUIPPED);
+}
+
+/* The pairing fdps_shop_buy_loop relies on at 00033f5b: it adds the purchase
+   with fdps_unit_add_item and then equips
+   fdps_unit_item_count(unit_index) - 1, which is the entry the add just
+   filled.  The bought weapon ends up equipped and the one the unit came in
+   with does not. */
+static void equip_slot_equips_the_entry_an_add_just_filled(void)
+{
+    int slot_index;
+
+    stage();
+    set_item_type(1, 0x01);
+    set_item_type(2, 0x02);
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_EMPTY, 0);
+    }
+    set_entry(0, 0, FLAG_EQUIPPED, 1);
+
+    CHECK_EQ(fdps_unit_add_item(0, 2), 1);
+    CHECK_EQ(fdps_unit_item_count(0), 2);
+
+    fdps_unit_equip_slot(0, fdps_unit_item_count(0) - 1);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], 0);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 2], FLAG_EQUIPPED);
+    CHECK_EQ(fdps_unit_find_equipped_slot(0, 0), 1);
+    CHECK_EQ(fdps_unit_get_item_id(0, 1), 2);
+}
+
 void run_unititem_tests(void)
 {
     RUN_TEST(the_two_record_layouts_match_the_strides);
@@ -1602,4 +2107,24 @@ void run_unititem_tests(void)
     RUN_TEST(can_equip_hands_the_item_id_to_the_table_unchanged);
     RUN_TEST(can_equip_writes_nothing);
     RUN_TEST(can_equip_resolves_its_records_on_every_call);
+    RUN_TEST(equip_slot_stores_0x40_over_the_slots_flag_byte);
+    RUN_TEST(equip_slot_unequips_a_weapon_of_a_different_type);
+    RUN_TEST(equip_slot_unequips_armor_of_a_different_sub_kind);
+    RUN_TEST(equip_slot_leaves_the_other_category_alone);
+    RUN_TEST(equip_slot_splits_the_categories_at_type_0x15);
+    RUN_TEST(equip_slot_counts_everything_above_0x15_as_armor);
+    RUN_TEST(equip_slot_only_considers_entries_with_bit_0x40);
+    RUN_TEST(equip_slot_leaves_a_blank_item_record_equipped);
+    RUN_TEST(equip_slot_does_not_test_the_equipped_items_own_type);
+    RUN_TEST(equip_slot_unequips_every_matching_entry);
+    RUN_TEST(equip_slot_zeroes_the_whole_flag_byte_it_unequips);
+    RUN_TEST(equip_slot_re_equips_the_entry_the_loop_zeroed);
+    RUN_TEST(equip_slot_scans_eight_entries_and_no_more);
+    RUN_TEST(equip_slot_writes_only_two_flag_bytes);
+    RUN_TEST(equip_slot_classifies_by_the_id_byte_not_the_flag_byte);
+    RUN_TEST(equip_slot_widens_the_id_byte_without_sign);
+    RUN_TEST(equip_slot_does_not_range_check_the_slot);
+    RUN_TEST(equip_slot_edits_the_record_the_index_names);
+    RUN_TEST(equip_slot_resolves_the_record_on_every_call);
+    RUN_TEST(equip_slot_equips_the_entry_an_add_just_filled);
 }

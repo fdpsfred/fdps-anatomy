@@ -3,8 +3,8 @@
  * A unit record carries eight 2-byte inventory entries at record offset 0x0a,
  * struct fdps_unit_record's inventory_slots[16] in src/fdpstype.h: entry i is
  * inventory_slots[i * 2], a flag byte whose bit 0x40 means "equipped" and bit
- * 0x80 means "no item here", followed by the item id byte.  Four of the functions
- * here read and edit that set; the fifth, fdps_unit_can_equip_item, is about
+ * 0x80 means "no item here", followed by the item id byte.  Five of the functions
+ * here read and edit that set; the sixth, fdps_unit_can_equip_item, is about
  * the unit's class rather than its inventory and asks the PROEQU.DAT class
  * equipment table whether an item's type is one the class may wear.  The
  * records themselves live in the block reached
@@ -198,5 +198,47 @@ extern int fdps_unit_add_item(int unit_index, int item_id);
    is written. */
 extern int fdps_unit_can_equip_item(int unit_index, int item_id);
 #pragma aux fdps_unit_can_equip_item "*" parm caller [];
+
+/* Equip inventory entry `slot` of unit `unit_index`, taking off whatever the
+   unit already wore in the same broad category.  Nothing is returned and both
+   call sites discard EAX: fdps_unit_equip_window calls it at 00025f4e once
+   fdps_unit_can_equip_item has said yes, and fdps_shop_buy_loop at 00033f5b
+   with fdps_unit_item_count(unit_index) - 1, the entry fdps_unit_add_item has
+   just filled.  Both then redraw the status window.
+
+   "The same category" is the coarse split of the item type field at 0x15 --
+   weapons 0x01..0x15 on one side, armour and everything above on the other --
+   and NOT equality of the type byte and NOT the class's PROEQU.DAT equip list.
+   Two items are in the same category exactly when both types are <= 0x15 or
+   both are > 0x15.  Writing the intuitive "unequip the other entry holding an
+   item of the same type" gives the wrong answer: equipping a 刀 (type 0x02)
+   must take off an already worn 劍 (type 0x01), and equipping any armour must
+   take off any other armour whatever its sub-kind.  The split is at 0x15 and
+   not at the top of the armour span, so an item of type 0x28 and above -- a
+   consumable or a story item -- counts as armour for this test and takes the
+   unit's armour off.
+
+   Only entries carrying the equipped bit 0x40 are considered, tested as a mask,
+   and an equipped entry whose item record reads back type 0 -- which is what
+   ITEM.DAT's all-zero tail records give -- is left alone.  Every one of the
+   eight entries is examined: the loop has no early exit, so a unit that somehow
+   wore two items of the same category loses both.  Unequipping stores a plain
+   zero over the WHOLE flag byte rather than clearing the one bit, and the
+   entry's item id byte beside it is not touched.
+
+   The last store is unconditional: the flag byte of entry `slot` becomes
+   exactly 0x40, whatever it held before, so an entry marked empty (0x80)
+   becomes an occupied equipped one and an entry the loop had just zeroed
+   becomes equipped again.  It is a store and not an OR.
+
+   Nothing is range checked and nothing verifies that the entry holds anything:
+   the item id is read at inventory_slots[slot * 2 + 1] and the flag written at
+   inventory_slots[slot * 2] with no test in between, so a slot outside 0..7
+   reads and writes bytes outside the inventory field.  The unit record is
+   resolved through fdps_get_unit_record twice, once for the loop and the final
+   store and once for the id read, so a call after the array has moved edits the
+   new block. */
+extern void fdps_unit_equip_slot(int unit_index, int slot);
+#pragma aux fdps_unit_equip_slot "*" parm caller [];
 
 #endif

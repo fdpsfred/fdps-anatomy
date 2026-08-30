@@ -1,8 +1,8 @@
 /* unititem.c -- a unit's inventory and what it has equipped.
  *
  * See unititem.h.  Every function here reaches its record through
- * fdps_get_unit_record; four of them work on the eight 2-byte inventory
- * entries at record offset 0x0a, and the fifth asks whether the unit's class
+ * fdps_get_unit_record; five of them work on the eight 2-byte inventory
+ * entries at record offset 0x0a, and the sixth asks whether the unit's class
  * is allowed to equip a given item at all.  The file owns no state.
  */
 #include <stddef.h>
@@ -319,4 +319,98 @@ int fdps_unit_can_equip_item(int unit_index, int item_id)
     }
 
     return 0;
+}
+
+/* 00026070.  Equips one inventory entry and takes off whatever the unit wore in
+   the same category.  Two record calls, then one counted loop over the eight
+   entries, then one unconditional store.
+
+   The unit record is resolved TWICE, both times with the same argument: MOV
+   EAX,[EBP+0x14] / PUSH EAX / CALL fdps_get_unit_record / MOV [EBP-0x1c],EAX at
+   00026080, and again through the parameter slots at 000260a6 into [EBP-0x24].
+   The second resolution serves only the id read below and its result is never
+   used again; the loop and the final store both address [EBP-0x1c].  That
+   second frame -- two parameter-shaped slots at [EBP-0x34]/[EBP-0x30] copied on
+   into [EBP-0x28]/[EBP-0x2c], the body replayed against them, and the byte
+   copied out of a result slot at [EBP-0x20] into [EBP-0x8] -- is the shape an
+   inline expansion leaves (rebuild_info/build_flags.md).  Written open-coded it
+   is the same two calls the original makes; turning it into a plain call to
+   fdps_unit_get_item_id would put a CALL here that the original does not have.
+
+   The id of the entry being equipped is MOV EDX,[EBP-0x2c] / ADD EDX,EDX / ADD
+   EDX,[EBP-0x24] / XOR EAX,EAX / MOV AL,byte ptr [EDX+0xb] at 000260b1: record
+   offset 0x0a plus twice the slot plus the 1 that picks the id byte, widened
+   without sign, so an entry holding 0xff asks fdps_get_item_record for record
+   255.  Its type is byte +0x00 of the item record, XOR EAX,EAX / MOV AL,byte
+   ptr [EDX] at 000260d6, kept as an int.
+
+   The loop is i in [EBP-0x10] against the literal 8 with JL at 000260e7, and
+   the entry address is formed as the other four scans form it, MOV EAX,
+   [EBP-0x10] / ADD EAX,EAX / ADD EAX,[EBP-0x1c] / ADD EAX,0xa at 000260fa.  The
+   skip is AND AL,0x40 / AND EAX,0xff / TEST EAX,EAX / JZ -- a mask, so an entry
+   carrying other bits alongside 0x40 is still equipped -- and the JZ goes to the
+   increment at 0002615f, so the scan runs all eight entries with no early exit
+   and every matching entry is unequipped, not just the first.
+
+   The category test is four signed compares against 0x15 on two values that
+   came out of bytes: CMP [EBP-0x4],0x15 / JG at 0002613f goes to the second
+   pair, and the accepting paths are (both <= 0x15) at 00026145 and (both >
+   0x15) at 00026151.  So the two items share a category exactly when they are
+   on the same side of 0x15 -- weapons 0x01..0x15 against armour and everything
+   above, not equality of the type byte and not the armour span's own 0x27 top
+   end.  Ahead of it, CMP [EBP-0xc],0x0 / JZ at 00026139 leaves an equipped
+   entry whose item record reads back type 0 alone; that is what keeps a blank
+   ITEM.DAT tail record from being taken off as though it were a weapon.
+
+   Unequipping is MOV byte ptr [EAX],0x0 at 0002615c -- a plain zero over the
+   whole flag byte, which takes the equipped bit off and leaves the empty bit
+   clear, so the entry becomes a carried item.  The id byte beside it is not
+   written.
+
+   The last store is MOV EAX,[EBP+0x18] / ADD EAX,EAX / ADD EAX,[EBP-0x1c] / MOV
+   byte ptr [EAX+0xa],0x40 at 00026161: it re-reads the slot argument rather
+   than a copy, it is a store of the literal and not an OR, and it is
+   unconditional -- an entry the loop had just zeroed is equipped again here,
+   and so is one that was marked empty.
+
+   Nothing is range checked and neither record pointer is tested for null.  EAX
+   still holds the entry address at the RET, but the function is void: both call
+   sites push two arguments, CALL, ADD ESP,0x8 and go straight on to another
+   MOV EAX. */
+void fdps_unit_equip_slot(int unit_index, int slot)
+{
+    struct fdps_unit_record *unit;
+    struct fdps_item_effect *equip_item;
+    struct fdps_item_effect *worn_item;
+    unsigned char *inventory_entry;
+    int equip_item_id;
+    int equip_type;
+    int worn_type;
+    int slot_index;
+
+    unit = fdps_get_unit_record(unit_index);
+
+    equip_item_id = (int)
+        fdps_get_unit_record(unit_index)->inventory_slots[slot * 2 + 1];
+    equip_item = fdps_get_item_record(equip_item_id);
+    equip_type = (int) equip_item->type;
+
+    for (slot_index = 0;
+         slot_index < INVENTORY_ENTRY_COUNT;
+         slot_index++) {
+        inventory_entry = &unit->inventory_slots[slot_index * 2];
+        if ((inventory_entry[0] & INVENTORY_FLAG_EQUIPPED) != 0) {
+            worn_item = fdps_get_item_record((int) inventory_entry[1]);
+            worn_type = (int) worn_item->type;
+            if (worn_type != 0 &&
+                ((equip_type <= WEAPON_TYPE_MAX &&
+                  worn_type <= WEAPON_TYPE_MAX) ||
+                 (equip_type > WEAPON_TYPE_MAX &&
+                  worn_type > WEAPON_TYPE_MAX))) {
+                inventory_entry[0] = 0;
+            }
+        }
+    }
+
+    unit->inventory_slots[slot * 2] = INVENTORY_FLAG_EQUIPPED;
 }

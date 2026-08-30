@@ -580,6 +580,14 @@
       "status": "committed",
       "emitted_against": "0x90",
       "rounds": 0
+    },
+    "00026070": {
+      "name": "fdps_unit_equip_slot",
+      "target": "unititem.c",
+      "body_size": "0x104",
+      "status": "committed",
+      "emitted_against": "0x104",
+      "rounds": 0
     }
   }
 }
