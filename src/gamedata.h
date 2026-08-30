@@ -52,6 +52,17 @@ extern unsigned char *data_fdps_roster_array_ptr;
    the records land in never moves. */
 extern int data_fdps_roster_member_count;
 
+/* 0006013c.  Base of the loaded chapter's resident MAP%02d.DAT block: a header
+   whose byte +2 is how many scripted unit deployments the map carries,
+   followed at +0x83 by that many struct fdps_char_spawn_record, 0x1a bytes
+   each (src/fdpstype.h).  Eight files read it -- deployment, per-cell events,
+   the battle menus, the AI and the save code -- and each does its own
+   arithmetic from the base, which is why the count is not cached anywhere.
+
+   Null until a chapter has been loaded, and nothing tests it before use.  The
+   original types it as a byte pointer, so a reader casts to the record. */
+extern unsigned char *data_fdps_tile_event_data_table_ptr;
+
 /* 00060144.  Base of the battle map's working movement grid: a four-byte
    header of two signed 16-bit dimensions followed by width*height two-byte
    cells (see src/movegrid.h).  Null until a chapter has been loaded, and the

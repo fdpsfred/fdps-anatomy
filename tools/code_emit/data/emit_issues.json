@@ -814,5 +814,19 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "000232b0": [
+    {
+      "what": "When the nearest-tile search accepts no cell at all -- every cell either occupied or terrain 5 and above -- the tile the unit is placed on is whatever the frame happened to hold. The original writes [EBP-0x58] and [EBP-0x54] only from inside the accept branch at 0002342e and falls through the loop exit at 00023444 straight to the record write, so on that path the position bytes come from stack residue left by whatever ran before. The emitted C reproduces the shape (the two locals are left uninitialised and the C is written so nothing else assigns them), but the residue itself cannot be reproduced: the rebuild's frame layout and its callees' stack use are not the original's, so on such a map the two builds would place the unit on different tiles. Seeding the locals with the anchor would be the obvious repair and is NOT done, because it would also change where a unit lands on any map where the original's residue happens to be a valid tile.",
+      "needs": "Whether the path is reachable at all in the shipped game: a sweep of every fdps_deploy_wave call that passes place_exact == 0, against the map%02d.dat deployment tables and the map%02d.cod anchors of the chapters those calls belong to, asking whether any of them can present a grid in which every cell is either occupied or terrain 5 and above at the moment fdps_deploy_unit runs. That needs the chapter event code emitted (it is what chooses place_exact) and the per-chapter terrain tables read out, neither of which exists yet. If the path is unreachable the concern closes; if it is reachable, only a real-machine observation of the original settles what the residue is on that map.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reviewed and agreed with the emitter's single open issue rather than adding one of my own. When the nearest-tile search accepts no cell -- every cell either flagged 0x40 or terrain 5 and above -- the original never writes [EBP-0x58]/[EBP-0x54] (the only writes are at 0002342e inside the accept branch, and the loop exit at 00023444 jumps straight past the other branch's copy at 00023446), so the unit is placed on stack residue. The emitted C reproduces the shape by leaving chosen_x and chosen_y unassigned, and correctly does NOT seed them with the anchor, which would move units on maps where the residue happens to name a valid tile. The residue itself is not reproducible: the rebuild's frame layout and its callees' stack use are not the original's.",
+      "needs": "Whether the path is reachable in the shipped game -- which chapters call fdps_deploy_wave with place_exact == 0, and whether any of their map%02d.dat deployments can meet a grid whose every cell is occupied or terrain 5 and above at that moment. That needs the chapter event code emitted and the per-chapter terrain tables read out, neither of which exists yet, so it is a genuine evidence gap and not a lookup the emitter skipped: no read of Ghidra, the game files, the knowledge base or its own object could settle it today. If the path turns out to be unreachable the concern closes; if reachable, only a real-machine observation of the original settles what the residue is there.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }
