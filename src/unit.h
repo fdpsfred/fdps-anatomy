@@ -94,4 +94,24 @@ extern int fdps_unit_is_flying(int unit_index);
 extern int fdps_unit_select_status_icon(int unit_index, int cycle);
 #pragma aux fdps_unit_select_status_icon "*" parm caller [];
 
+/* Turns unit_index to face target_unit_index, by writing a direction code into
+   struct fdps_unit_record's facing at record offset 3 of the ACTING unit.  The
+   target's record is only read -- its tile x at +0 and tile y at +1 -- and
+   nothing is returned.
+
+   The codes are the ones the movement playback writes into the same byte:
+   0 is +y (down), 1 is -x (left), 2 is -y (up), 3 is +x (right).  The axis is
+   chosen by comparing the absolute tile differences, and the test is strict --
+   horizontal only when |dx| is greater than |dy|.  A tie therefore faces the
+   unit vertically, so a target on a perfect diagonal turns it up or down, and
+   a call with both units on the same tile forces facing 0 rather than leaving
+   the facing where it was.  There is no "already facing the right way" early
+   out: the byte is written on every call.
+
+   Both indices are positions in the current battle's unit array and neither is
+   range checked; both records are resolved through fdps_get_unit_record, so a
+   call after the array has moved works on the new block. */
+extern void fdps_unit_face_target(int unit_index, int target_unit_index);
+#pragma aux fdps_unit_face_target "*" parm caller [];
+
 #endif

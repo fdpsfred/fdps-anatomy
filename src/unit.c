@@ -5,6 +5,7 @@
  * data_fdps_map_unit_array_ptr and works on what it finds; the file owns no
  * state.
  */
+#include <stdlib.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "unit.h"
@@ -242,4 +243,75 @@ int fdps_unit_select_status_icon(int unit_index, int cycle)
     }
 
     return -1;
+}
+
+/* 0001c2e0.  Turns one unit to face another.  Both records are resolved through
+   fdps_get_unit_record (PUSH EAX / CALL 0x0002d210 / ADD ESP,0x4 twice, the
+   pointers spilled to [EBP-0x10] and [EBP-0xc]), the two tile coordinates are
+   differenced and passed to the CRT abs at 0x0003d364, and one of four literal
+   direction codes is stored into the acting unit's facing byte at record
+   offset 3.  The target's record is never written.
+
+   The axis test is CMP EAX,dword ptr [EBP + -0x4] / JLE at 0001c354, so the
+   horizontal facing is taken only when the absolute x difference is STRICTLY
+   greater than the absolute y one.  Ties fall into the vertical branch, which
+   makes a target on a perfect diagonal turn the unit up or down, and makes a
+   call with both units on the same tile force facing 0 rather than leave the
+   facing where it was.  Writing the symmetric form -- x_distance >= y_distance
+   picks horizontal -- flips every diagonal case and visibly turns sprites the
+   wrong way.  It stays here rather than in rebuild_info/pitfalls.md because
+   that file collects patterns that recur across functions and this one is
+   local to this body.
+
+   The four codes are the ones the movement playback writes into the same byte
+   as it walks, which is what fixes their meaning: 0002d590 stores 1 and then
+   DEC byte ptr [EAX] on pos_x, so 1 is -x/left; 0002d360 stores 0 and then
+   INC byte ptr [EAX + 0x1] on pos_y, so 0 is +y/down; 2 is -y/up (0002d480)
+   and 3 is +x/right (0002d6a0).  So facing 1 when the unit's x exceeds the
+   target's is "the target is to my left", and the pairing is not arbitrary.
+
+   The two coordinate compares are CMP DL,byte ptr [EAX] / JBE at 0001c360 and
+   0001c380 -- unsigned, matching pos_x and pos_y being unsigned char.  The
+   differences fed to abs are built by AND EDX,0xff / AND EAX,0xff before the
+   SUB, so both operands are zero-extended and the subtraction happens at int
+   width; a difference computed in unsigned char would wrap instead.
+
+   abs is a real call here, not an inline NEG: the flag set carries no -oi, so
+   __INLINE_FUNCTIONS__ is not defined and stdlib.h leaves it a call, which is
+   the same treatment fdps_collect_targets_in_area gets in aitarget.c.
+
+   Nothing is returned.  EAX is left holding the acting unit's record pointer
+   at the RET and no caller reads it: all six call sites -- 00012eb0, 00012f13,
+   00012f93, 00012fa5, 000272f9 and 00015f97 -- follow the CALL with ADD ESP,
+   0x8 and then overwrite EAX.
+
+   Neither index is range checked; both records are resolved through
+   fdps_get_unit_record, so the same re-resolution rule applies here as
+   there. */
+void fdps_unit_face_target(int unit_index, int target_unit_index)
+{
+    struct fdps_unit_record *unit;
+    struct fdps_unit_record *target;
+    int x_distance;
+    int y_distance;
+
+    unit = fdps_get_unit_record(unit_index);
+    target = fdps_get_unit_record(target_unit_index);
+
+    x_distance = abs((int) unit->pos_x - (int) target->pos_x);
+    y_distance = abs((int) unit->pos_y - (int) target->pos_y);
+
+    if (x_distance > y_distance) {
+        if (unit->pos_x > target->pos_x) {
+            unit->facing = 1;
+        } else {
+            unit->facing = 3;
+        }
+    } else {
+        if (unit->pos_y > target->pos_y) {
+            unit->facing = 2;
+        } else {
+            unit->facing = 0;
+        }
+    }
 }

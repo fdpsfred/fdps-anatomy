@@ -823,6 +823,296 @@ static void the_flying_record_is_resolved_on_every_call(void)
     CHECK_EQ(fdps_unit_is_flying(LOOKUP_BASE_UNIT), 1);
 }
 
+/* fdps_unit_face_target @ 0001c2e0.  Expected values come from the body's own
+   assembly: the two PUSH EAX / CALL 0x0002d210 / ADD ESP,0x4 pairs at 0001c2f0
+   and 0001c2ff, the AND EDX,0xff / AND EAX,0xff / SUB EDX,EAX pairs feeding the
+   CRT abs at 0x0003d364 (0001c322, 0001c343), the axis test CMP EAX,dword ptr
+   [EBP + -0x4] / JLE 0x0001c374 at 0001c351, the two coordinate compares
+   CMP DL,byte ptr [EAX] / JBE at 0001c35e and 0001c37d, and the four literal
+   stores MOV byte ptr [EAX + 0x3],<code> at 0001c365 (1), 0001c36e (3),
+   0001c385 (2) and 0001c38e (0).  The record layout is ticket 17's, which puts
+   pos_x at +0, pos_y at +1 and facing at +3.
+
+   The direction codes' meaning is fixed by the movement playback that writes
+   the same byte: 0002d590 stores 1 and then DEC byte ptr [EAX] on pos_x, so 1
+   is left, and 0002d360 stores 0 and then INC byte ptr [EAX + 0x1] on pos_y,
+   so 0 is down.
+
+   The lookup_block staging above is reused because this function reaches both
+   of its records through the same accessor; each case republishes the base it
+   wants first. */
+#define FACING_DOWN 0
+#define FACING_LEFT 1
+#define FACING_UP 2
+#define FACING_RIGHT 3
+
+/* Put a record's tile coordinates, by its index into the staged lookup block
+   rather than relative to the published base, so a case can place a unit on
+   either side of the one it asks about. */
+static void set_tile(int block_slot, int tile_x, int tile_y)
+{
+    lookup_block[block_slot * UNIT_RECORD_STRIDE + 0] =
+        (unsigned char) tile_x;
+    lookup_block[block_slot * UNIT_RECORD_STRIDE + 1] =
+        (unsigned char) tile_y;
+}
+
+static void set_facing(int block_slot, int value)
+{
+    lookup_block[block_slot * UNIT_RECORD_STRIDE + 3] =
+        (unsigned char) value;
+}
+
+static int facing_of(int block_slot)
+{
+    return (int) lookup_block[block_slot * UNIT_RECORD_STRIDE + 3];
+}
+
+/* MOV byte ptr [EAX + 0x3],<code> writes at +3 of the record the accessor
+   handed back, and the two coordinates come from +0 and +1 of the same
+   records.  Asserted against the layout so a field moving under this function
+   fails here rather than silently turning the sprite by writing the sprite
+   cache slot. */
+static void the_facing_byte_is_at_record_offset_three(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 1);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, facing), 3);
+
+    stage_lookup();
+    set_tile(LOOKUP_BASE_UNIT, 10, 10);
+    set_tile(LOOKUP_BASE_UNIT + 1, 4, 10);
+    set_facing(LOOKUP_BASE_UNIT, 0xff);
+
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_LEFT);
+}
+
+/* The horizontal arm, both ways round.  JBE at 0001c360 sends "unit x is not
+   above target x" to the store of 3 and falls through to the store of 1
+   otherwise, so a target further left gives 1 and a target further right gives
+   3.  Both cases have dy 0, which is strictly below dx and so cannot reach the
+   vertical arm. */
+static void a_greater_x_gap_faces_along_x(void)
+{
+    stage_lookup();
+
+    set_tile(LOOKUP_BASE_UNIT, 10, 10);
+    set_tile(LOOKUP_BASE_UNIT + 1, 4, 10);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_LEFT);
+
+    set_tile(LOOKUP_BASE_UNIT, 4, 10);
+    set_tile(LOOKUP_BASE_UNIT + 1, 10, 10);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_RIGHT);
+}
+
+/* The vertical arm, both ways round.  JBE at 0001c380 sends "unit y is not
+   above target y" to the store of 0 and falls through to the store of 2
+   otherwise, so a target further up gives 2 and a target further down gives 0.
+   Both cases have dx 0. */
+static void a_greater_y_gap_faces_along_y(void)
+{
+    stage_lookup();
+
+    set_tile(LOOKUP_BASE_UNIT, 10, 10);
+    set_tile(LOOKUP_BASE_UNIT + 1, 10, 4);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_UP);
+
+    set_tile(LOOKUP_BASE_UNIT, 10, 4);
+    set_tile(LOOKUP_BASE_UNIT + 1, 10, 10);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_DOWN);
+}
+
+/* The axis test is JLE, not JL: an equal pair of absolute differences takes
+   the vertical arm.  Every one of the four diagonals with dx == dy answers
+   with a vertical code, and the symmetric form -- horizontal when dx >= dy --
+   would answer all four horizontally instead.  This is the case the rebuild
+   note is about. */
+static void an_equal_gap_goes_to_the_vertical_arm(void)
+{
+    stage_lookup();
+
+    set_tile(LOOKUP_BASE_UNIT, 10, 10);
+    set_tile(LOOKUP_BASE_UNIT + 1, 4, 4);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_UP);
+
+    set_tile(LOOKUP_BASE_UNIT + 1, 16, 4);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_UP);
+
+    set_tile(LOOKUP_BASE_UNIT + 1, 4, 16);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_DOWN);
+
+    set_tile(LOOKUP_BASE_UNIT + 1, 16, 16);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_DOWN);
+}
+
+/* One tile either side of the tie pins the comparison down to strictly
+   greater-than.  dx one larger than dy is horizontal; dy one larger than dx is
+   vertical; the pair in between is the tie above. */
+static void one_tile_either_side_of_the_tie_switches_axis(void)
+{
+    stage_lookup();
+    set_tile(LOOKUP_BASE_UNIT, 10, 10);
+
+    set_tile(LOOKUP_BASE_UNIT + 1, 3, 4);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_LEFT);
+
+    set_tile(LOOKUP_BASE_UNIT + 1, 4, 3);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_UP);
+
+    set_tile(LOOKUP_BASE_UNIT + 1, 17, 16);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_RIGHT);
+
+    set_tile(LOOKUP_BASE_UNIT + 1, 16, 17);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_DOWN);
+}
+
+/* Both units on one tile makes both differences 0, which is a tie, so the
+   vertical arm runs and JBE takes the store of 0.  The facing standing before
+   the call is overwritten: there is no compare against the current facing
+   anywhere in the body and no early return, so a unit facing right that is
+   asked to face something on its own tile ends up facing down. */
+static void the_same_tile_forces_facing_down(void)
+{
+    stage_lookup();
+    set_tile(LOOKUP_BASE_UNIT, 10, 10);
+    set_tile(LOOKUP_BASE_UNIT + 1, 10, 10);
+
+    set_facing(LOOKUP_BASE_UNIT, FACING_RIGHT);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_DOWN);
+
+    set_facing(LOOKUP_BASE_UNIT, FACING_LEFT);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_DOWN);
+}
+
+/* The differences are built after AND EDX,0xff / AND EAX,0xff, so the SUB runs
+   at int width on two zero-extended bytes and the CRT abs at 0x0003d364 turns
+   the negative one positive.  A difference taken in unsigned char instead
+   would wrap: with the unit at x 0 against a target at x 200 the wrapped gap
+   is 56 and the y gap 156, which would pick the vertical arm, where the real
+   gaps 200 and 100 pick the horizontal one. */
+static void the_differences_are_taken_at_int_width(void)
+{
+    stage_lookup();
+
+    set_tile(LOOKUP_BASE_UNIT, 0, 0);
+    set_tile(LOOKUP_BASE_UNIT + 1, 200, 100);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_RIGHT);
+
+    set_tile(LOOKUP_BASE_UNIT, 0, 0);
+    set_tile(LOOKUP_BASE_UNIT + 1, 100, 200);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_DOWN);
+}
+
+/* CMP DL,byte ptr [EAX] / JBE is the unsigned compare, and the coordinates are
+   zero-extended into it, so a tile coordinate above 127 is a large number and
+   not a negative one.  A unit at x 200 facing a target at x 0 is facing left;
+   read as signed char the same pair would answer right. */
+static void the_coordinate_compare_is_unsigned(void)
+{
+    stage_lookup();
+
+    set_tile(LOOKUP_BASE_UNIT, 200, 0);
+    set_tile(LOOKUP_BASE_UNIT + 1, 0, 0);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_LEFT);
+
+    set_tile(LOOKUP_BASE_UNIT, 0, 200);
+    set_tile(LOOKUP_BASE_UNIT + 1, 0, 0);
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_UP);
+}
+
+/* Only the first argument's record is written.  The target's own facing byte,
+   its coordinates and its side byte at +6 all survive the call, and so do the
+   records on either side of the acting one -- the single store is
+   MOV byte ptr [EAX + 0x3],<code> against the pointer the FIRST call to the
+   accessor returned and there is no other write in the body. */
+static void only_the_acting_unit_is_written(void)
+{
+    stage_lookup();
+    set_tile(LOOKUP_BASE_UNIT, 10, 10);
+    set_tile(LOOKUP_BASE_UNIT + 1, 4, 10);
+    set_facing(LOOKUP_BASE_UNIT + 1, FACING_UP);
+    set_facing(LOOKUP_BASE_UNIT - 1, FACING_UP);
+    set_facing(LOOKUP_BASE_UNIT + 2, FACING_UP);
+
+    fdps_unit_face_target(0, 1);
+
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_LEFT);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT + 1), FACING_UP);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT - 1), FACING_UP);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT + 2), FACING_UP);
+    CHECK_EQ((int) lookup_block[(LOOKUP_BASE_UNIT + 1) *
+                                UNIT_RECORD_STRIDE + 0], 4);
+    CHECK_EQ((int) lookup_block[(LOOKUP_BASE_UNIT + 1) *
+                                UNIT_RECORD_STRIDE + 1], 10);
+    CHECK_EQ((int) lookup_block[(LOOKUP_BASE_UNIT + 1) *
+                                UNIT_RECORD_STRIDE + 6], 0x13);
+}
+
+/* Both records come from the accessor, so each index scales by the 0x50 stride
+   and the signed multiply carries a negative index backwards off the front of
+   the array.  Nothing in the body bounds either argument -- there is no
+   compare against the unit count in it at all -- so index -1 turns the record
+   in front of the base to face the record at the base. */
+static void each_index_picks_its_own_record(void)
+{
+    stage_lookup();
+    set_tile(LOOKUP_BASE_UNIT - 1, 10, 10);
+    set_tile(LOOKUP_BASE_UNIT + 0, 10, 4);
+    set_tile(LOOKUP_BASE_UNIT + 2, 20, 10);
+    set_facing(LOOKUP_BASE_UNIT - 1, 0xff);
+    set_facing(LOOKUP_BASE_UNIT + 0, 0xff);
+
+    fdps_unit_face_target(-1, 0);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT - 1), FACING_UP);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), 0xff);
+
+    fdps_unit_face_target(0, 2);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_RIGHT);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT - 1), FACING_UP);
+}
+
+/* Both records are resolved through fdps_get_unit_record on every call, so the
+   pair follows the array when fdps_relocate_unit_array moves it: republishing
+   the base under unchanged indices turns a different unit.  A record pointer
+   cached across that call would write into the old block. */
+static void the_faced_records_are_resolved_on_every_call(void)
+{
+    stage_lookup();
+    set_tile(LOOKUP_BASE_UNIT, 10, 10);
+    set_tile(LOOKUP_BASE_UNIT + 1, 4, 10);
+    set_tile(0, 10, 10);
+    set_tile(1, 10, 4);
+    set_facing(0, 0xff);
+
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_LEFT);
+    CHECK_EQ(facing_of(0), 0xff);
+
+    data_fdps_map_unit_array_ptr = lookup_block;
+    fdps_unit_face_target(0, 1);
+    CHECK_EQ(facing_of(0), FACING_UP);
+    CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_LEFT);
+}
+
 void run_unit_tests(void)
 {
     RUN_TEST(the_record_is_base_plus_index_times_stride);
@@ -859,4 +1149,15 @@ void run_unit_tests(void)
     RUN_TEST(the_classes_next_to_the_set_do_not_fly);
     RUN_TEST(the_index_picks_its_own_record_class);
     RUN_TEST(the_flying_record_is_resolved_on_every_call);
+    RUN_TEST(the_facing_byte_is_at_record_offset_three);
+    RUN_TEST(a_greater_x_gap_faces_along_x);
+    RUN_TEST(a_greater_y_gap_faces_along_y);
+    RUN_TEST(an_equal_gap_goes_to_the_vertical_arm);
+    RUN_TEST(one_tile_either_side_of_the_tie_switches_axis);
+    RUN_TEST(the_same_tile_forces_facing_down);
+    RUN_TEST(the_differences_are_taken_at_int_width);
+    RUN_TEST(the_coordinate_compare_is_unsigned);
+    RUN_TEST(only_the_acting_unit_is_written);
+    RUN_TEST(each_index_picks_its_own_record);
+    RUN_TEST(the_faced_records_are_resolved_on_every_call);
 }

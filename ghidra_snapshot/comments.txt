@@ -2677,8 +2677,8 @@ Algorithm:
 Resolves both records through fdps_get_unit_record (0x50-byte records in the array based at 0x00069cd8), reading record byte 0 as the tile x and byte 1 as the tile y. Calls the CRT abs() on the x difference and again on the y difference, both operands zero-extended from bytes. When the absolute x difference is strictly the larger, the facing is horizontal: 1 when the unit's x is greater than the target's (target to the left), otherwise 3. Otherwise -- ties included, so a perfect diagonal and a same-tile call both land here -- the facing is vertical: 2 when the unit's y is greater than the target's (target above), otherwise 0. The chosen code is stored in byte 3 of the unit's own record; the target's record is read only. These are the same direction codes the movement playback uses: 0 is +y/down (0002d360), 1 is -x/left (0002d590), 2 is -y/up (0002d480), 3 is +x/right (0002d6a0), each of which writes the same byte 3 as it walks.
 
 Parameters:
-  unit_index -- index into the unit array at 0x00069cd8 of the unit that turns; its record is the only one modified. Callers pass the acting unit, from fdps_battle_action_menu's own unit argument, from FUN_00027180's caster, or from the current-actor global at 0x00063f74.
-  target_unit_index -- index of the unit to be faced; its record is only read. Callers pass the unit under the map cursor (via fdps_battle_find_unit_at_cursor), the current actor at 0x00063f74, or FUN_00027180's target unit byte.
+  unit_index -- index into the unit array at 0x00069cd8 of the unit that turns; its record is the only one modified. Callers pass the acting unit, from fdps_battle_action_menu's own unit argument, from fdps_map_actor_use_item's caster, or from the current-actor global at 0x00063f74.
+  target_unit_index -- index of the unit to be faced; its record is only read. Callers pass the unit under the map cursor (via fdps_battle_find_unit_at_cursor), the current actor at 0x00063f74, or fdps_map_actor_use_item's target unit byte.
 
 Returns:
   Nothing. EAX is left holding a leftover record pointer and no caller reads it.
