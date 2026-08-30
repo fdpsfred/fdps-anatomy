@@ -43,9 +43,17 @@
 //   returning nothing means the failure is upstream of this workflow, so the
 //   batch stops instead of spending the rest of its budget on doomed retries.
 //
-//   The batch ends with a rescan of every equivalence concern recorded along
-//   the way, now that the neighbouring functions have verdict files of their
-//   own.
+//   Equivalence concerns are recorded and left where they are. ADR-0007 4 asks
+//   for a rescan before the WORK ends, and a batch is not the work: ticket 22's
+//   work ends when all 514 have landed, and the rescan is a separate sweep over
+//   emit_issues.json at that point (ticket 22.1). Doing it per batch was
+//   measured on t22-01 and did not pay -- 30 of that batch's 196 agents, and 21
+//   of the 30 conclusions they reached used evidence the emitter already had in
+//   hand: Ghidra, the shipped data files, or the .OBJ its own build had just
+//   produced. What that bought was not the sweep, which costs the same wherever
+//   it happens, but a whole agent context rebuilt from nothing to do it. The
+//   convergence rule in RULES moves that work to where the context already
+//   exists; what genuinely needs a neighbour waits for the sweep.
 //
 // Resuming is the normal case, not the exception: progress lives in
 // tools/code_emit/data/emit_state.json and every approved function is its own
@@ -97,7 +105,6 @@ export const meta = {
     { title: 'Gate', detail: 'the build gate over src/ + tests/' },
     { title: 'Bookkeep', detail: 'apply Ghidra corrections, record state, commit' },
     { title: 'Split', detail: 'split a target file that has outgrown its line budget' },
-    { title: 'Rescan', detail: 're-read the equivalence concerns recorded along the way' },
     { title: 'Report', detail: 'devlog and run archive' },
   ],
 }
@@ -171,7 +178,7 @@ const REVIEW_SUMMARY = {
     three_source_done: { type: 'boolean', description: 'You read plate, disassembly and decompilation yourself' },
     diff_reviewed: { type: 'boolean', description: 'You read the working-tree diff against HEAD' },
     blocking_count: { type: 'integer' },
-    open_issues: { type: 'integer', description: 'Equivalence concerns you recorded for the rescan' },
+    open_issues: { type: 'integer', description: 'Equivalence concerns you recorded in your verdict file' },
     ghidra_fixes: { type: 'integer', description: 'Ghidra corrections proposed in your verdict file' },
     note: { type: 'string' },
   }),
@@ -210,19 +217,6 @@ const BOOK_SUMMARY = {
       description: 'Line count of the target .c after the commit, from wc -l',
     },
     problems: { type: 'string' },
-  }),
-}
-
-const RESCAN_SUMMARY = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['addr', 'changed', 'still_open'],
-  properties: withStops({
-    addr: { type: 'string' },
-    changed: { type: 'boolean' },
-    resolved: { type: 'integer' },
-    still_open: { type: 'integer' },
-    note: { type: 'string' },
   }),
 }
 
@@ -316,37 +310,6 @@ const WORKLIST = {
   }),
 }
 
-const RESCAN_WORKLIST = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['functions'],
-  properties: withStops({
-    functions: {
-      type: 'array',
-      description: 'Older functions whose still-open concerns are worth re-asking '
-        + 'now, because a neighbour of theirs landed in this batch. Empty is a '
-        + 'normal answer.',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['addr'],
-        properties: {
-          addr: { type: 'string' },
-          name: { type: 'string' },
-          why: { type: 'string', description: 'Which neighbour landed, in a few words' },
-        },
-      },
-    },
-    still_open_total: {
-      type: 'integer',
-      description: 'How many entries in emit_issues.json are still open overall, '
-        + 'whether or not they made this list. A number that only grows is the '
-        + 'signal that concerns are accumulating faster than they are settled.',
-    },
-    note: { type: 'string' },
-  }),
-}
-
 const SPLIT_SUMMARY = {
   type: 'object',
   additionalProperties: false,
@@ -427,6 +390,52 @@ The build refuses to compile a source carrying a decompiler default name and say
 which line, so the mechanical half of this costs you nothing to check
 (rebuild_info/naming.md). What it cannot check is whether a name that is not a
 default is actually true, and that half is reviewed.
+
+A CONCERN IS FOR EVIDENCE THAT DOES NOT EXIST YET, NOT FOR A LOOKUP YOU DID NOT
+DO. Before you write an open_issues entry, ask what would answer it and whether
+that thing is reachable from where you are sitting. These are, always:
+
+    Ghidra, read-only -- get_xrefs_to over every call site, the disassembly of
+      any caller or callee, search_instructions across the image
+    the shipped game files and resources under fdps_game_files/ and the
+      unpacked resource dumps
+    the knowledge base -- program_info/, resource_info/, assets/, chapters/,
+      rebuild_info/
+    THE .OBJ YOUR OWN BUILD JUST PRODUCED, under
+      workspace/code_emit/out/objs/, disassembled read-only with
+      WATCOM_10.0a/BINNT/WDISASM.EXE
+
+That last one is the one people forget: the object file holding the function you
+just wrote is sitting on disk, and comparing it against the original's bytes
+answers "did the compiler really do that" without guessing.
+
+If the answer is reachable, GO AND GET IT. Sweep every call site rather than
+sampling; read the caller's disassembly rather than assuming what it passes. It
+costs the same tokens now as it would later, and later it costs a whole fresh
+context to rebuild everything you already have in front of you.
+
+Record a concern when the evidence genuinely does not exist yet: a callee that
+has not been emitted, a data symbol ticket 23 has not written, behaviour only a
+real machine settles. "I did not go and look" is not one of those.
+
+This does not narrow the rule above about a value whose purpose you cannot work
+out. That one stays exactly as written: an honest gap beats an invented name.
+
+YOUR VERDICT RECORDS FINDINGS, IT DOES NOT LEGISLATE. Do not write a conditional
+obligation into `needs` -- "if X turns out to be true then this should be
+rewritten as Y". A later stage will read that as an instruction and carry it out,
+and nothing between here and there checks whether the rule you invented was ever
+sound. This has already happened once: an emitter wrote "if this is an inline
+expansion then the call site should become a real call", it was proven to be one,
+and the resulting change would have put a CALL in the rebuild that the original
+does not have.
+
+ADR-0001 is the standard and it is functional equivalence: observable behaviour
+and function, explicitly NOT register allocation, instruction selection or
+anything else at the binary level. Recovering the exact source text the original
+author typed is not the standard. Two spellings that compile to equivalent
+behaviour are BOTH correct, and preferring one is a note, never a blocking
+finding. State what you found and what it means; leave the obligation out.
 
 CALLING CONVENTION IS DECLARED IN THE CODE, never inherited from the flag set.
 The binary was built with -4s, the stack convention, and all 503 compiler-emitted
@@ -666,8 +675,12 @@ function emitterPrompt(fn, mode, reviewNote) {
     '',
     'open_issues is for concerns that only a later function, or a real machine, can',
     'settle -- FPU rounding, a width you could not pin down, a table whose owner is not',
-    'yet emitted. Recording one is not a failure; the batch re-reads them all at the end.',
-    'Leaving one unrecorded is how it gets lost.',
+    'yet emitted. Nothing in this batch will look at them again: they are settled in one',
+    'sweep over emit_issues.json after all 514 functions have landed. So an entry has to',
+    'stand on its own months from now -- say what you established, and say in `needs`',
+    'exactly what evidence would settle it. Leaving one unrecorded is how it gets lost;',
+    'recording one that YOU COULD HAVE SETTLED is the failure the convergence rule above',
+    'is about.',
     '',
     'Your final message is the summary object and nothing else. It is data for a',
     'script, not a report for a person.',
@@ -769,6 +782,22 @@ function reviewerPrompt(fn, round) {
     'or on style. When you are unsure, say so in the verdict and ask the emitter for',
     'evidence rather than blocking outright.',
     '',
+    'Equivalence means ADR-0001: observable behaviour and function, explicitly not',
+    'register allocation, instruction selection, or which of two spellings the original',
+    'author typed. So separate the two questions before you block. "The rebuilt code',
+    'behaves differently" is blocking. "The original source probably said this another',
+    'way" is a note, however good the evidence -- an open-coded expression against an',
+    'inlined call, a byte offset against a struct field. Both compile to the same',
+    'behaviour, so both are correct, and a rewrite to chase the original\'s wording can',
+    'easily land further away than it started.',
+    '',
+    'Check the emitter\'s open_issues against the same standard. Two failures to catch:',
+    'a concern it could have settled with a read it did not do (RULES says which sources',
+    'are always reachable, and the .OBJ its own build produced is one of them), and a',
+    'conditional obligation in `needs` -- "if X then rewrite as Y" -- which is the',
+    'emitter legislating for a later stage. Both are blocking findings. An honest concern',
+    'about evidence that does not exist yet is the rule working; say so and move on.',
+    '',
     '# Write your verdict to a file, then return the summary',
     '',
     'Write ' + VERDICTS + '\\' + fn.addr + '.review.json, UTF-8:',
@@ -855,11 +884,14 @@ function bookkeepPrompt(fn, hasGhidraFixes, rounds) {
     '4. Equivalence concerns. Append every open_issues entry from both verdict files to',
     '   tools/code_emit/data/emit_issues.json, keyed by the 8-hex address ("' + fn.addr + '",',
     '   not "0x...") . Create the file as {} if it does not exist. Give every entry',
-    '   "status": "open" and "from": "emit" or "review" -- the rescan stage flips status',
-    '   to "resolved" and later runs select on it, so an entry without the field is one',
-    '   that silently drops out of every future search for outstanding concerns. Read it',
-    '   back after writing and check the encoding survived -- this is a Traditional',
-    '   Chinese Windows machine and an unspecified encoding produces mojibake.',
+    '   "status": "open" and "from": "emit" or "review". This file is the ENTIRE input',
+    '   to the closing sweep that runs once every function has landed, and that sweep',
+    '   selects on status, so an entry written without the field drops silently out of',
+    '   every future search for outstanding concerns -- nothing else in this pipeline',
+    '   will ever look at it again. Read it back after writing and check the encoding',
+    '   survived: this is a Traditional Chinese Windows machine and an unspecified',
+    '   encoding produces mojibake.',
+    '   Report the number of entries you appended as issues_logged.',
     '',
     '5. Strays FIRST, before you stage anything. Run  git status --porcelain  and look',
     '   for anything outside src/, tests/, tools/code_emit/data/ and ghidra_snapshot/ --',
@@ -946,64 +978,6 @@ function abandonPrompt(fn, why, terminal) {
     '',
     'Report committed=true only if that state commit was made. Your final message is',
     'the summary object and nothing else.',
-  ].join('\n')
-}
-
-function rescanPrompt(fn) {
-  return [ENV, '', RULES, '',
-    '# Role: Rescan. One function, second look.',
-    '',
-    'Function ' + fn.addr + ' ' + fn.name + ' was emitted with equivalence concerns that could',
-    'not be settled at the time. They are in',
-    '  ' + VERDICTS + '\\' + fn.addr + '.emit.json      (open_issues)',
-    '  ' + VERDICTS + '\\' + fn.addr + '.review.json    (open_issues)',
-    'and collected in ' + REPO + '\\tools\\code_emit\\data\\emit_issues.json.',
-    '',
-    'The reason a second look can succeed where the first could not is that the',
-    'functions around this one have verdict files now. A concern that is really about a',
-    'neighbour\'s contract -- what a callee returns, what a shared table holds -- is',
-    'unanswerable alone and obvious once the neighbour has been read.',
-    '',
-    'Read this function\'s own verdicts, then the verdict files of its callers and',
-    'callees in ' + VERDICTS + '\\, and see whether they answer the question. Reading a',
-    'neighbour\'s verdict is using a judgement someone else already made; it is not',
-    'making one. Never rewrite another function\'s verdict file and never form an opinion',
-    'about whether a neighbour\'s name is right.',
-    '',
-    'If a concern is settled: update emit_issues.json for key "' + fn.addr + '" to record',
-    'the answer and what settled it. If the answer means the emitted C is wrong, do NOT',
-    'edit the code -- record it as a blocking finding in the same entry and say so in',
-    'your note, so it comes back as a real emit round.',
-    '',
-    'If a concern is not settled, leave it exactly as it is and say what is still',
-    'missing. An honest unresolved concern is a correct outcome. A second attempt is not',
-    'a reason to manufacture a conclusion.',
-    '',
-    'Keep every entry the same shape: each one carries status "open" or "resolved", and a',
-    'settlement is written once. If the same concern was recorded by both the emitter and',
-    'the reviewer, settle the emitter\'s entry and have the reviewer\'s point at it with',
-    '"same_as": "<the emitter entry\'s what>" rather than copying the answer -- two copies',
-    'of a conclusion is two things to correct when one of them turns out to be wrong.',
-    '',
-    '# Commit what you wrote, whether or not anything was settled',
-    '',
-    '  cd ' + REPO + ' && git add tools/code_emit/data/emit_issues.json',
-    '    && git commit -- tools/code_emit/data/emit_issues.json',
-    '',
-    'subject  emit: ' + fn.addr + ' 的等價性疑慮回掃  , a blank line, one line in',
-    'Traditional Chinese saying what was settled and what is still open, a blank line, and',
-    '  Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>',
-    'The pathspec on the commit is not decoration: it stops anything else that happens to',
-    'be staged from riding along under this subject.',
-    '',
-    'This step is not tidying, and skipping it destroys the work. The landing commit for',
-    'this function was made BEFORE you ran, so your edit is uncommitted right now -- and',
-    'tools/code_emit/data/ is one of the paths the next run\'s recovery stage owns and',
-    'reverts. An uncommitted settlement does not survive to the next batch, and the',
-    'evidence behind it lives in workspace/, which is not version controlled, so it cannot',
-    'be reconstructed either. If you changed nothing, commit nothing and say so.',
-    '',
-    'Your final message is the summary object and nothing else.',
   ].join('\n')
 }
 
@@ -1103,43 +1077,6 @@ function recoverPrompt() {
     '   If nothing was dirty and nothing was in flight, commit nothing.',
     '',
     '7. Confirm with  git status --porcelain  that the tree is clean now, and report it.',
-    '',
-    'Your final message is the summary object and nothing else.',
-  ].join('\n')
-}
-
-function rescanWorklistPrompt(landed) {
-  return [
-    '# Role: Rescan worklist. Selection only. You settle nothing and edit nothing.',
-    '',
-    'This batch just landed these ' + landed.length + ' function(s):',
-    '  ' + landed.join(', '),
-    '',
-    'Some concern recorded by an EARLIER batch may be answerable now, because the',
-    'thing it was waiting for is one of those. A concern that is really about a',
-    'neighbour\'s contract -- what a callee returns, what a shared table holds -- is',
-    'unanswerable alone and obvious once the neighbour has been read, and the batch',
-    'that recorded it is never the batch that can answer it.',
-    '',
-    '1. Read ' + REPO + '\\tools\\code_emit\\data\\emit_issues.json. Take every entry whose',
-    '   status is "open", or that has no status field at all -- the field was added',
-    '   later, and an entry written before it exists is open, not settled.',
-    '   Report how many there are as still_open_total.',
-    '',
-    '2. For each address holding one of those, ask whether it is a caller or a callee',
-    '   of anything in the landed list. The call graph is at',
-    '     ' + REPO + '\\workspace\\call_graph\\graph.json   (direct_edges, indirect_edges)',
-    '   Read the concern text too: a concern that names one of the landed functions,',
-    '   or names a global that function owns, counts even if there is no call edge.',
-    '',
-    '3. Return those addresses and nothing else. Do NOT return every open concern:',
-    '   a concern whose neighbour has not moved has exactly the same information',
-    '   available as last time, and re-asking it costs a full agent to reproduce the',
-    '   same honest "still not settled". The neighbour landing is the only thing that',
-    '   changed, so it is the only reason to look again.',
-    '',
-    'Addresses already in this batch are handled anyway; do not list them.',
-    'An empty list is a normal and common answer.',
     '',
     'Your final message is the summary object and nothing else.',
   ].join('\n')
@@ -1270,7 +1207,12 @@ async function runAgent(prompt, opts) {
 // ------------------------------------------------------------------- batch
 
 const results = []
-const withIssues = []
+// How many equivalence concerns this batch added to emit_issues.json. Counted,
+// not collected: nothing in this run reads them back, and the closing sweep
+// over the whole file (ticket 22.1) picks them up off disk when every function
+// has landed. A number that climbs faster than the batch size is the signal
+// that the convergence rule in RULES is not biting.
+let concernsLogged = 0
 const splits = []
 // Set when the run finished tidily but early -- currently only a routing
 // change under its feet. Unlike `stopped` it does not suppress the closing
@@ -1483,10 +1425,12 @@ for (let i = 0; i < fns.length && !stopped && !endedEarly; i++) {
           if (book.problems) {
             log('  out of band: ' + book.problems)
           }
-          if ((book.issues_logged || 0) > 0
-              || (verdict.open_issues || 0) > 0
-              || (emitted.open_issues || 0) > 0) {
-            withIssues.push(fn)
+          // The bookkeeper's own count is the one that matters: it counts what
+          // reached emit_issues.json, where the closing sweep will look, rather
+          // than what the emitter and the reviewer each claim to have raised.
+          if ((book.issues_logged || 0) > 0) {
+            concernsLogged += book.issues_logged
+            log('  ' + book.issues_logged + ' concern(s) recorded for the closing sweep')
           }
 
           // A target file that has outgrown the budget is split now, while the
@@ -1599,74 +1543,6 @@ for (let i = 0; i < fns.length && !stopped && !endedEarly; i++) {
   }
 }
 
-// ------------------------------------------------------------------ rescan
-//
-// Everything recorded as an unsettled equivalence concern gets one more look,
-// now that the functions around it have verdict files of their own.
-//
-// The list is not just this batch's functions. A concern is unanswerable alone
-// and obvious once the neighbour has been read (ADR-0007 4), so the run that
-// can settle it is the run that lands the NEIGHBOUR -- which is a later batch,
-// by which time this batch's `withIssues` is long gone. Selecting on it alone
-// gives every concern exactly one second look, taken in the batch least likely
-// to be able to answer it, after which the entry is never read again and the
-// file becomes write-only. So a stage picks the list off disk instead: still
-// open, and a caller or callee of something that landed just now.
-//
-// Not "every still-open entry": that grows without bound and would re-ask
-// hundreds of unanswerable questions every batch. The neighbour is what
-// changed, so the neighbour is the filter.
-const landedAddrs = results.filter((r) => r.status === 'committed')
-  .map((r) => r.addr)
-let rescanList = withIssues.map((f) => ({ addr: f.addr, name: f.name }))
-if (!stopped && landedAddrs.length > 0) {
-  const picked = await agent(rescanWorklistPrompt(landedAddrs),
-    { label: 'rescan-worklist', phase: 'Rescan', schema: RESCAN_WORKLIST })
-  if (picked && picked.functions) {
-    const seen = new Set(rescanList.map((f) => f.addr))
-    for (const f of picked.functions) {
-      if (f.addr && !seen.has(f.addr)) {
-        seen.add(f.addr)
-        rescanList.push({ addr: f.addr, name: f.name, why: f.why })
-      }
-    }
-    if (picked.functions.length) {
-      log('rescan: ' + picked.functions.length + ' older function(s) whose '
-        + 'neighbours landed this batch are worth re-asking')
-    }
-  } else {
-    log('rescan: the worklist stage returned nothing; only this batch\'s own '
-      + 'concerns get a second look')
-  }
-}
-
-const rescanLog = []
-if (!stopped && rescanList.length > 0) {
-  phase('Rescan')
-  log('rescan: ' + rescanList.length + ' function(s) with recorded concerns')
-  for (const fn of rescanList) {
-    try {
-      const r = await runAgent(rescanPrompt(fn),
-        { label: 'rescan:' + fn.addr, phase: 'Rescan', schema: RESCAN_SUMMARY })
-      if (r) {
-        rescanLog.push({
-          addr: fn.addr, name: fn.name, changed: r.changed,
-          resolved: r.resolved || 0, still_open: r.still_open, note: r.note,
-        })
-        log('  ' + fn.addr + ': resolved ' + (r.resolved || 0)
-          + ', still open ' + r.still_open + (r.note ? ' -- ' + r.note : ''))
-      }
-    } catch (e) {
-      stopped = (e instanceof Stop) ? e.kind : 'interrupted'
-      stopDetail = (e instanceof Stop) ? e.detail : String((e && e.message) || e)
-      log('rescan stopped: ' + stopDetail)
-      break
-    }
-  }
-} else if (!stopped) {
-  log('rescan: nothing recorded as unsettled')
-}
-
 // ------------------------------------------------------------------ report
 
 const landed = results.filter((r) => r.status === 'committed')
@@ -1701,7 +1577,10 @@ const stats = {
   // `landed.length` of it, so the next run has roughly that much less to go --
   // roughly, because a function can be retired and come back.
   remaining_at_start: remainingTotal,
-  rescan: rescanLog,
+  // Concerns this batch added to emit_issues.json. They are not settled here --
+  // the closing sweep over the whole file does that once every function has
+  // landed (ticket 22.1).
+  concerns_logged: concernsLogged,
   results: results,
   out_tok_k: spentK(batchStart),
 }

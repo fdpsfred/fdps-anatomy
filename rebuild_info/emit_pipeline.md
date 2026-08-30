@@ -11,8 +11,9 @@
 | Emitter | 讀三源（plate comment、disassembly、decompiled C），寫 `src/` 的 C 與 `tests/` 的測試，自己跑一次建置 | 不寫 Ghidra；不碰別的 function |
 | Reviewer | 從 assembly 獨立驗證，並讀本輪的工作區 diff | 不信 emitter、不信 decompiled C；不寫 Ghidra、不改程式碼 |
 | Gate | 跑 build gate 的 `emittest` 目標 | 不修任何東西——修了下一輪的 emitter 就不知道壞在哪 |
-| Bookkeeper | 套用兩份判定檔裡提出的 Ghidra 修正、更新工作狀態、commit | 不下任何判斷 |
-| Rescan | 該批結束前重讀所有未決的等價性疑慮，此時可引用鄰居的判定檔 | 不改程式碼；不替鄰居下判斷 |
+| Bookkeeper | 套用兩份判定檔裡提出的 Ghidra 修正、更新工作狀態、把兩份判定檔的 `open_issues` 併進 `emit_issues.json`、commit | 不下任何判斷 |
+
+回掃不是每批的角色，是整件工作結束後的一次總掃，見下節。
 
 **併行度是 1，而且這是設計不是限制。** Reviewer 判斷「本輪改了什麼」的依據是工作區相對 `HEAD` 的 diff，所以同時只能有一個 function 在飛；兩個的話彼此的改動會出現在對方的審查範圍裡。要提高併行度必須先解決 reviewer 的檢視範圍問題（例如 worktree 隔離），那是獨立的決定。
 
@@ -24,12 +25,27 @@
 
 **判定寫檔，只回傳摘要。** 完整的判定寫進 `workspace/code_emit/verdicts/<addr>.emit.json` 與 `.review.json`，回傳給 workflow 的只有約 200 byte。「這一項做完了沒」由讀得到檔案的下一個角色回報，不採信寫檔者自己的宣稱。
 
-**Rescan 自己 commit，而且要挑對名單。** 兩件事都是這一段最容易寫錯的地方：
+## 疑慮在 emit 當下收斂，剩下的等總掃
 
-- **它跑在落地 commit 之後**，所以它對 `emit_issues.json` 的更新是未 commit 的，而 `tools/code_emit/data/` 正是收拾段會還原的路徑之一——不自己 commit 掉，下一批一開跑整輪回掃的結論就沒了，而證據在 `workspace/` 底下不進版控，重建不回來。
-- **名單不能只取本批落地的 function。** 一則疑慮之所以懸著，是因為它其實在問鄰居的契約，而那要等落地了鄰居的**那一批**才答得出來——記錄它的那一批恰好是最不可能答得出來的一批。只看本批等於每則疑慮只有一次機會、還用在最差的時機，之後檔案就變成唯寫。正確的名單是「仍 open，且鄰居剛落地」，從 `emit_issues.json` 與 call graph 挑。也不能取「全部仍 open 的」：那會無界成長，每批重問幾百個資訊量完全沒變的問題。
+**記一則疑慮的條件是「答案所需的證據還不存在」，不是「我還沒去查」。** 下面這些永遠拿得到，動手前要先用掉：Ghidra 唯讀查詢（`get_xrefs_to` 掃遍每個呼叫點、任何 caller／callee 的 disassembly、全域的 `search_instructions`）、出貨的遊戲檔與資源、知識庫、**以及本輪建置剛產出的 `.OBJ`**（`workspace/code_emit/out/objs/`，用 `WDISASM.EXE` 唯讀反組譯）。最後一項最常被忘記：剛寫好的那支 function 的目的檔就在磁碟上，拿它與原版的 byte 對照，「編譯器是不是真的那樣做」不必用猜的。
 
-`emit_issues.json` 的每一則都要有 `status`（`open`／`resolved`）與 `from`（`emit`／`review`），否則用狀態篩選未決疑慮的東西會靜默漏掉它們。**一個結論只記一次**：emitter 與 reviewer 記到同一件事時，settle emitter 那則，reviewer 那則用 `same_as` 指過去——兩份逐字複本的意思是將來發現其中一份錯了，只會改到一份，留下另一份繼續矛盾。
+理由是成本落點。掃描本身在哪一段做都一樣貴，省不掉；能省的是**重新建立上下文**——emitter 手上已經有三源、有剛建置出來的目的檔，換一個 agent 事後來問，得把這些從零讀回來一次。t22-01 量到的比例是每 30 筆結論有 21 筆用的證據 emit 當下就在手上。
+
+真的無解才記：callee 還沒 emit、資料符號要等票 23、只有實機跑得出來的行為。
+
+**判定檔記錄發現，不立法。** 不要在 `needs` 裡寫條件式義務（「若證實 X 就應改寫成 Y」）。下游會把它當指令執行，而中間沒有任何一關檢查那條規則本身站不站得住。實際發生過一次：emitter 寫下「若這是 inline 展開，此處就該改成真的呼叫」，後來確實證實是展開，而照做會在重建版裡放進一條原版沒有的 `CALL`。
+
+標準是 [ADR-0001](../docs/adr/0001-only-functional-equivalence.md) 的功能等價，明確不含暫存器配置、指令選擇這一層，**也不含還原原始碼的字面**。兩種拼法只要行為等價就都對，偏好其中一種是註記，永遠不是 blocking。
+
+## 回掃是一次總掃，不是每批一次
+
+[ADR-0007](../docs/adr/0007-workflow-automation-and-agent-context.md) 第四條要求的是「**工作結束前**」重讀所有未決判定。一批不是一項工作：全部 function 落地之後才做一次總掃，逐條處理 `emit_issues.json`。
+
+每批做一次的版本試過並且拆掉了。它的問題不是空轉——t22-01 那 30 個 rescan agent 有 22 個確實解掉了東西——而是三件事：七成的結論用的是 emit 當下就拿得到的證據；卡在票 23／24 的疑慮每批被重問一次而資訊量完全沒變；還有一次一支的形狀看不見共同根因，而未決疑慮明顯成族（同一個索引上界問題、同一個 inline 展開問題），總掃可以一次結掉一族。
+
+總掃的形狀：一次一則不批次、判定寫檔、先按根因分群再派工、需要改 code 的裁決交給獨立的落地階段、仍然無解且卡在票 23／24 的列成交接清單不混進「已處理」。
+
+**輸入全靠 `emit_issues.json`，所以每一則都要有 `status`（`open`／`resolved`）與 `from`（`emit`／`review`）。** 缺欄位的條目會從此後每一次「還有哪些未決」的篩選裡靜默消失，而 bookkeeper 是唯一寫它的人。**一個結論只記一次**：emitter 與 reviewer 記到同一件事時，settle emitter 那則，reviewer 那則用 `same_as` 指過去——兩份逐字複本的意思是將來發現其中一份錯了，只會改到一份，留下另一份繼續矛盾。
 
 ## 順序是 callee 先於 caller
 
