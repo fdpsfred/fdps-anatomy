@@ -7061,11 +7061,11 @@ Algorithm:
 Copies the 5-byte field-offset table at 0002b28e -- 0x23, 0x22, 0x24, 0x25, 0x27, the unit record's status-effect timer bytes in icon order -- onto the stack, and forms the record pointer as [00069cd8] + unit_index * 0x50. First pass: walks the five offsets and counts how many of those record bytes are non-zero; if none are, returns -1 at once. Second pass: replaces cycle with (cycle % count) + 1, walks the same five offsets again and decrements that counter at every non-zero byte, returning the table slot whose byte drives it to zero; if the walk ends without reaching zero it returns -1. Selecting modulo the number of active effects is what makes an advancing cycle rotate through the effects a unit is carrying. The unit record's sixth status timer, +0x26, has no entry in the table and is never shown.
 
 Parameters:
-  unit_index -- index into the 0x50-byte unit record array based at 00069cd8; FUN_0002cda0 passes the unit it is drawing. Not range-checked.
-  cycle -- rotation counter, reduced modulo the number of active effects to pick one of them. FUN_0002cda0 passes the global at 00060168, which it advances once every 25 unit-draw ticks. The modulo is signed, so a negative cycle yields -1 unless the remainder happens to be 0.
+  unit_index -- index into the 0x50-byte unit record array based at 00069cd8; fdps_draw_map_unit passes the unit it is drawing. Not range-checked.
+  cycle -- rotation counter, reduced modulo the number of active effects to pick one of them. fdps_draw_map_unit passes the global at 00060168, which it advances once every 25 unit-draw ticks. The modulo is signed, so a negative cycle yields -1 unless the remainder happens to be 0.
 
 Returns:
-  0..4 -- the slot of the effect to show, i.e. record offsets 0x23, 0x22, 0x24, 0x25 and 0x27 respectively. FUN_0002cda0 uses it directly as the frame index into the IconSts.cel sheet held at 000643d4 and blits a 0x18 x 0x0b strip 13 scanlines below the unit's cell.
+  0..4 -- the slot of the effect to show, i.e. record offsets 0x23, 0x22, 0x24, 0x25 and 0x27 respectively. fdps_draw_map_unit uses it directly as the frame index into the IconSts.cel sheet held at 000643d4 and blits a 0x18 x 0x0b strip 13 scanlines below the unit's cell.
   -1 -- the unit carries no active status effect, so no icon is drawn.
 
 Pool: fdps  [no Function ID hit in any library; game global array with 0x50-byte stride]

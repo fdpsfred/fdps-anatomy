@@ -351,6 +351,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x107"
+    },
+    "0002ccd0": {
+      "name": "fdps_unit_select_status_icon",
+      "target": "unit.c",
+      "body_size": "0xce",
+      "status": "committed",
+      "emitted_against": "0xce",
+      "rounds": 0
     }
   }
 }
