@@ -689,6 +689,14 @@
       "status": "committed",
       "emitted_against": "0x7f",
       "rounds": 0
+    },
+    "00019f80": {
+      "name": "fdps_combat_compute_hit_outcome",
+      "target": "combat.c",
+      "body_size": "0x3e2",
+      "status": "committed",
+      "emitted_against": "0x3e2",
+      "rounds": 1
     }
   }
 }
