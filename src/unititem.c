@@ -1,8 +1,9 @@
 /* unititem.c -- a unit's inventory and what it has equipped.
  *
  * See unititem.h.  Every function here reaches its record through
- * fdps_get_unit_record and works on the eight 2-byte inventory entries at
- * record offset 0x0a; the file owns no state.
+ * fdps_get_unit_record; four of them work on the eight 2-byte inventory
+ * entries at record offset 0x0a, and the fifth asks whether the unit's class
+ * is allowed to equip a given item at all.  The file owns no state.
  */
 #include <stddef.h>
 #include <string.h>
@@ -35,6 +36,12 @@
    consumable or a promotion badge and matches neither search. */
 #define WEAPON_TYPE_MAX 0x15
 #define ARMOR_TYPE_MAX 0x27
+
+/* How many item type codes one PROEQU.DAT class record holds: CMP dword ptr
+   [EBP-0xc],0x6 / JL at 00026032.  Six, which is the whole of struct
+   fdps_class_equip_record and the stride fdps_get_class_equip_record scales
+   by. */
+#define CLASS_EQUIP_TYPE_COUNT 6
 
 /* 00025140.  The equipped-slot search.  One counted loop over the eight
    inventory entries, i in [EBP-0xc] against the literal 8 with JL, and inside
@@ -257,4 +264,59 @@ int fdps_unit_add_item(int unit_index, int item_id)
     }
 
     return -1;
+}
+
+/* 00025fe0.  May this unit's class equip this item?  Three calls and then one
+   counted loop, with no branch of any kind before the loop is entered.
+
+   The three record calls happen in source order and each result goes to a
+   stack local of its own: MOV [EBP-0x18],EAX at 00025ff8 for the unit record,
+   MOV [EBP-0x10],EAX at 0002600f for the class equipment record, MOV
+   [EBP-0x14],EAX at 0002601e for the item record.  None of the three pointers
+   is tested for null and no argument is range checked.
+
+   The class code is byte +0x20 of the unit record, taken zero-extended: MOV
+   EAX,[EBP-0x18] / MOV AL,byte ptr [EAX+0x20] / AND EAX,0xff at 00025ffb, so
+   a class code of 0x80 or above asks for record 128..255 and not for a record
+   in front of the table.  It is pushed exactly as read -- the INC that every
+   caller of fdps_get_class_record applies is absent here, because PROEQU.DAT
+   has no leading default row (see table.h).
+
+   The item's type is byte +0x00 of its record, also zero-extended and kept as
+   an int: XOR EAX,EAX / MOV EDX,[EBP-0x14] / MOV AL,byte ptr [EDX] at
+   00026021.  No other field of the item record is read.
+
+   The loop is i in [EBP-0xc] against the literal 6 with JL at 00026032, and
+   the body is MOV EAX,[EBP-0x10] / ADD EAX,[EBP-0xc] / MOV AL,byte ptr [EAX] /
+   AND EAX,0xff / CMP EAX,[EBP-0x8] -- one byte per position, so the six
+   positions are the six bytes of the record and the stride is 1.  A match
+   stores 1 and jumps to the epilogue, so the scan stops at the first equal
+   position; falling out of all six stores 0.
+
+   There is no sentinel test anywhere in the loop: all six positions are
+   compared even though the unused ones hold 0xFF, and a position holding 0 is
+   compared like any other.  All four call sites use the answer as a plain
+   boolean, TEST EAX,EAX right after the ADD ESP,0x8. */
+int fdps_unit_can_equip_item(int unit_index, int item_id)
+{
+    struct fdps_unit_record *unit;
+    struct fdps_class_equip_record *class_equip;
+    struct fdps_item_effect *item;
+    int item_type;
+    int type_slot;
+
+    unit = fdps_get_unit_record(unit_index);
+    class_equip = fdps_get_class_equip_record((int) unit->clazz);
+    item = fdps_get_item_record(item_id);
+    item_type = (int) item->type;
+
+    for (type_slot = 0;
+         type_slot < CLASS_EQUIP_TYPE_COUNT;
+         type_slot++) {
+        if ((int) class_equip->allowed_item_type[type_slot] == item_type) {
+            return 1;
+        }
+    }
+
+    return 0;
 }

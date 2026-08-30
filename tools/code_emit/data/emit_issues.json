@@ -842,5 +842,19 @@
       "needs": "Ticket 23 owns both definitions and the choice is shared with the other two readers, so it is not this function's to settle. What is still out of reach from here is whether a unit can ever be standing on a class-6 cell in the first place -- that needs the chapter init handlers behind data_fdps_chapter_init_handler_table, none of which is emitted, or per-chapter placement data no chapter file has yet -- and what the def-table window at 00060070 holds during a battle, which is a run-time fact about data_fdps_village_mode_flag rather than anything a static read answers.",
       "status": "open"
     }
+  ],
+  "00025fe0": [
+    {
+      "what": "The scan reads all six positions of the class record with no bound of any kind, and PROEQU.DAT holds only 36 records (216 bytes) for class codes 0x00..0x23 while class codes run to 0x27. For a unit of class 0x24..0x27 the six bytes compared lie past the end of the loaded table, so the answer is decided by whatever the allocator left behind the file's buffer. The rebuild reproduces the unbounded read exactly, but it does not reproduce what lies there: its heap layout after the load is its own. I could establish from the assembly and from resource_info/data_tables.md that the read goes past the file, and from assets/tables/classes.md that codes above 0x23 exist; what the original reads there is not in the image.",
+      "needs": "Whether any unit in any chapter actually carries a class code of 0x24..0x27 -- a sweep of the deployment and character tables once ticket 23 has emitted them -- and, if one does, a side-by-side run of the original and the rebuild on that unit's equip screen on a real machine or in DOSBox-X to see whether the two agree on which items it may equip.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "For a unit whose class code is 0x24..0x27 the six bytes this function compares lie past the end of PROEQU.DAT: the file is 216 bytes, 36 records of 6, covering codes 0x00..0x23 (resource_info/data_tables.md), while PROMAP.DAT defines classes up to 0x27 (assets/classes.md: 24 ？？, 25 惡靈, 26 活屍, 27 （無名）). The rebuild reproduces the unbounded read faithfully -- there is no bound in the original and none was added -- but it cannot reproduce what those bytes hold, because that is whatever the allocator left behind the loaded file and the rebuild's heap layout is its own. Confirmed from the assembly (no CMP against any record count anywhere in 00025fe0 or in fdps_get_class_equip_record at 00018ba0) and from the two knowledge-base pages above; the residue itself is not in the image.",
+      "needs": "Whether any unit in any chapter actually carries a class code of 0x24..0x27. That is a sweep of the enemy and deployment tables, which cannot be done yet: data_fdps_battle_enemy_data_table_ptr is still on workspace/code_emit/undefined.json and the knowledge base has no unit-to-class listing (grep for 惡靈/活屍 over chapters/, assets/, resource_info/ and program_info/ finds only the two assets/classes.md rows). If a unit does carry one, the answer then needs the original and the rebuild run side by side on that unit's equip screen in DOSBox-X to see whether they agree on which items it may equip.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

@@ -54,10 +54,22 @@
  * at 00018683.  Those cases stage the unit block alone except where they check
  * that a filled slot stops being equipped, which needs an item record.
  *
- * The item block is published one record PAST the start of its storage, so
- * record -1 exists and is addressable.  That is what lets the unsigned read of
- * the id byte be told apart from a signed one: id 0xff must reach record 255
- * and not the record in front of the base.
+ * The fdps_unit_can_equip_item cases take theirs from the assembly at 00025fe0
+ * -- MOV AL,byte ptr [EAX+0x20] / AND EAX,0xff for the class code and the
+ * absence of an INC before the PUSH, XOR EAX,EAX / MOV AL,byte ptr [EDX] for
+ * the item's type byte at +0x00, CMP dword ptr [EBP-0xc],0x6 / JL for the six
+ * positions, MOV EAX,[EBP-0x10] / ADD EAX,[EBP-0xc] / MOV AL,byte ptr [EAX]
+ * for the one-byte stride across them, the single CMP EAX,[EBP-0x8] that is
+ * the whole of the loop body's test, and the two results 0x1 and 0x0 -- and
+ * from the 6-byte class equipment record ticket 17 settled, whose base is
+ * data_fdps_class_equip_table_ptr.  Those cases stage a third block for that
+ * table alongside the other two.
+ *
+ * Both the item block and the class block are published one record PAST the
+ * start of their storage, so record -1 exists and is addressable.  That is what
+ * lets an unsigned read be told apart from a signed one: an item id of 0xff
+ * must reach record 255 and not the record in front of the base, and so must a
+ * class code of 0xff.
  */
 #include <stddef.h>
 #include "testharn.h"
@@ -90,11 +102,29 @@
    array. */
 #define STAGE_ITEMS 256
 
+/* IMUL EAX,dword ptr [EBP+0x14],0x6 in fdps_get_class_equip_record, and CMP
+   dword ptr [EBP-0xc],0x6 / JL at 00026032 for the six positions of a
+   record. */
+#define CLASS_EQUIP_STRIDE 6
+#define CLASS_EQUIP_TYPE_COUNT 6
+
+/* MOV AL,byte ptr [EAX+0x20] at 00025ffe: the class code is byte +0x20 of the
+   unit record. */
+#define OFF_CLAZZ 0x20
+
+/* 256 class equipment records for codes 0x00..0xff, plus one in front of the
+   published base so that record -1 is real storage.  The file itself holds 36,
+   but the body bounds nothing, and the width of the class code read is what
+   decides which of 255 and -1 a code of 0xff reaches. */
+#define STAGE_CLASSES 256
+
 static unsigned char unit_block[STAGE_UNITS * UNIT_RECORD_STRIDE];
 static unsigned char item_block[(STAGE_ITEMS + 1) * ITEM_RECORD_STRIDE];
+static unsigned char class_block[(STAGE_CLASSES + 1) * CLASS_EQUIP_STRIDE];
 
-/* Only ever read for its field sizes and offsets. */
+/* Only ever read for their field sizes and offsets. */
 static struct fdps_unit_record layout_probe;
+static struct fdps_class_equip_record class_layout_probe;
 
 /* Zero both blocks and publish both bases.  A record staged this way has every
    inventory flag byte clear, which is the "nothing equipped" case, and every
@@ -109,8 +139,12 @@ static void stage(void)
     for (i = 0; i < (int) sizeof(item_block); i++) {
         item_block[i] = 0;
     }
+    for (i = 0; i < (int) sizeof(class_block); i++) {
+        class_block[i] = 0;
+    }
     data_fdps_map_unit_array_ptr = unit_block;
     data_fdps_item_effect_table_ptr = item_block + ITEM_RECORD_STRIDE;
+    data_fdps_class_equip_table_ptr = class_block + CLASS_EQUIP_STRIDE;
 }
 
 static unsigned char *unit_slot(int unit_index)
@@ -135,6 +169,33 @@ static void set_entry(int unit_index, int slot_index, int flags, int item_id)
 static void set_item_type(int item_id, int type)
 {
     item_block[(item_id + 1) * ITEM_RECORD_STRIDE] = (unsigned char) type;
+}
+
+/* Writes byte +0x20 of a unit record, the class code fdps_unit_can_equip_item
+   hands to fdps_get_class_equip_record. */
+static void set_class_code(int unit_index, int class_code)
+{
+    unit_slot(unit_index)[OFF_CLAZZ] = (unsigned char) class_code;
+}
+
+/* Writes one of the six type positions of one class equipment record.
+   class_code is signed on purpose: -1 addresses the record in front of the
+   published base, which is where a sign-extended class code would land. */
+static void set_class_equip(int class_code, int position, int type)
+{
+    class_block[(class_code + 1) * CLASS_EQUIP_STRIDE + position] =
+        (unsigned char) type;
+}
+
+/* Fills all six positions of a class equipment record with one value, so a
+   case can make every position that is not the one under test disagree. */
+static void fill_class_equip(int class_code, int type)
+{
+    int position;
+
+    for (position = 0; position < CLASS_EQUIP_TYPE_COUNT; position++) {
+        set_class_equip(class_code, position, type);
+    }
 }
 
 /* The offsets and strides the body relies on have to be the layouts' own, or
@@ -1199,6 +1260,285 @@ static void add_item_takes_the_slot_a_removal_freed(void)
     CHECK_EQ(fdps_unit_item_count(0), INVENTORY_ENTRY_COUNT);
 }
 
+/* fdps_unit_can_equip_item at 00025fe0.  The strides and offsets the body
+   addresses through: 6 for the class equipment record, IMUL EAX,dword ptr
+   [EBP+0x14],0x6 in fdps_get_class_equip_record, and +0x20 for the class code
+   byte, MOV AL,byte ptr [EAX+0x20] at 00025ffe. */
+static void can_equip_layouts_match_the_class_table_stride(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_class_equip_record), CLASS_EQUIP_STRIDE);
+    CHECK_EQ((int) sizeof(class_layout_probe.allowed_item_type),
+             CLASS_EQUIP_TYPE_COUNT);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, clazz), OFF_CLAZZ);
+}
+
+/* MOV EAX,[EBP-0x10] / ADD EAX,[EBP-0xc] / MOV AL,byte ptr [EAX]: the six
+   positions are the six consecutive bytes of the record, so a match in any one
+   of them answers 1.  Every other position is filled with 0xfe, a code no item
+   type takes, so only the position under test can be what answered. */
+static void can_equip_matches_at_every_one_of_the_six_positions(void)
+{
+    int position;
+
+    for (position = 0; position < CLASS_EQUIP_TYPE_COUNT; position++) {
+        stage();
+        set_class_code(0, 3);
+        fill_class_equip(3, 0xfe);
+        set_class_equip(3, position, 0x0a);
+        set_item_type(7, 0x0a);
+        CHECK_EQ(fdps_unit_can_equip_item(0, 7), 1);
+    }
+}
+
+/* Running the loop out stores 0 -- MOV dword ptr [EBP-0x4],0x0 at 0002605f --
+   and a match stores the literal 1.  The two answers differ by the comparison
+   alone: the same six positions and the same item, with one position changed
+   to the item's type, flip the answer. */
+static void can_equip_answers_zero_when_no_position_matches(void)
+{
+    stage();
+    set_class_code(0, 3);
+    set_class_equip(3, 0, 0x01);
+    set_class_equip(3, 1, 0x02);
+    set_class_equip(3, 2, 0x03);
+    set_class_equip(3, 3, 0x04);
+    set_class_equip(3, 4, 0x05);
+    set_class_equip(3, 5, 0x06);
+    set_item_type(7, 0x0a);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 0);
+
+    set_class_equip(3, 4, 0x0a);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 1);
+}
+
+/* AND EAX,0xff / PUSH EAX at 00026001: the class code is pushed exactly as it
+   was read, with no INC in between, so class code 5 is record 5 of PROEQU.DAT
+   and not record 6.  Staging the match in record 6 alone -- the record the
+   PROMAP.DAT bias would have reached -- answers 0. */
+static void can_equip_uses_the_class_code_without_the_promap_bias(void)
+{
+    stage();
+    set_class_code(0, 5);
+    fill_class_equip(5, 0xfe);
+    fill_class_equip(6, 0xfe);
+    set_class_equip(6, 0, 0x0a);
+    set_item_type(7, 0x0a);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 0);
+
+    set_class_equip(5, 2, 0x0a);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 1);
+}
+
+/* MOV AL,byte ptr [EAX+0x20] / AND EAX,0xff, so a class code of 0xff reaches
+   record 255 and not the record in front of the base, which is where a
+   sign-extended read would land.  The staged answers are the reverse of a
+   signed read's. */
+static void can_equip_widens_the_class_code_without_sign(void)
+{
+    stage();
+    set_class_code(0, 0xff);
+    fill_class_equip(255, 0xfe);
+    fill_class_equip(-1, 0xfe);
+    set_class_equip(-1, 0, 0x0a);
+    set_item_type(7, 0x0a);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 0);
+
+    set_class_equip(255, 5, 0x0a);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 1);
+}
+
+/* The unit index reaches fdps_get_unit_record and the class code comes out of
+   the record it named: two units of different classes and one item answer
+   differently. */
+static void can_equip_takes_the_class_from_the_unit_the_index_names(void)
+{
+    stage();
+    set_class_code(0, 1);
+    set_class_code(2, 2);
+    fill_class_equip(1, 0xfe);
+    fill_class_equip(2, 0xfe);
+    set_class_equip(2, 0, 0x0a);
+    set_item_type(7, 0x0a);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 0);
+    CHECK_EQ(fdps_unit_can_equip_item(2, 7), 1);
+}
+
+/* XOR EAX,EAX / MOV EDX,[EBP-0x14] / MOV AL,byte ptr [EDX] at 00026021: the
+   item's type is byte +0x00 of its record and no other byte of it is read.  An
+   item record whose every OTHER byte holds the allowed type still answers 0. */
+static void can_equip_reads_only_byte_zero_of_the_item_record(void)
+{
+    int i;
+
+    stage();
+    set_class_code(0, 3);
+    fill_class_equip(3, 0xfe);
+    set_class_equip(3, 1, 0x0a);
+    for (i = 0; i < ITEM_RECORD_STRIDE; i++) {
+        item_block[(7 + 1) * ITEM_RECORD_STRIDE + i] = 0x0a;
+    }
+    set_item_type(7, 0x20);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 0);
+
+    set_item_type(7, 0x0a);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 1);
+}
+
+/* CMP dword ptr [EBP-0xc],0x6 / JL: six positions and no seventh.  The byte
+   immediately past the record -- position 0 of the next class -- carries the
+   item's type and is not seen, while the same value in position 5 is. */
+static void can_equip_scans_six_positions_and_no_more(void)
+{
+    stage();
+    set_class_code(0, 4);
+    fill_class_equip(4, 0xfe);
+    fill_class_equip(5, 0xfe);
+    set_class_equip(5, 0, 0x0a);
+    set_item_type(7, 0x0a);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 0);
+
+    set_class_equip(4, 5, 0x0a);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 1);
+}
+
+/* There is no test against 0xff and none against 0 anywhere in the loop: the
+   only compare in the body is CMP EAX,[EBP-0x8] at 0002604f.  A record whose
+   unused middle positions hold 0xff is still scanned to the end, which a scan
+   that treated 0xff as a terminator would not do, and a position holding 0x00
+   is compared like any other, so a blank ITEM.DAT record -- type 0 -- matches
+   it. */
+static void can_equip_has_no_sentinel_test(void)
+{
+    stage();
+    set_class_code(0, 2);
+    set_class_equip(2, 0, 0x01);
+    set_class_equip(2, 1, 0xff);
+    set_class_equip(2, 2, 0xff);
+    set_class_equip(2, 3, 0xff);
+    set_class_equip(2, 4, 0xff);
+    set_class_equip(2, 5, 0x0a);
+    set_item_type(7, 0x0a);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 1);
+
+    stage();
+    set_class_code(0, 2);
+    fill_class_equip(2, 0xff);
+    set_class_equip(2, 3, 0x00);
+    set_item_type(7, 0x00);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 1);
+
+    stage();
+    set_class_code(0, 2);
+    fill_class_equip(2, 0xff);
+    set_item_type(7, 0x00);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 0);
+}
+
+/* MOV EAX,dword ptr [EBP+0x18] / PUSH EAX at 00026012: the item id is handed
+   to fdps_get_item_record as the full signed dword it arrived as, with no mask
+   and no bound, so -1 reaches the record in front of the table. */
+static void can_equip_hands_the_item_id_to_the_table_unchanged(void)
+{
+    stage();
+    set_class_code(0, 3);
+    fill_class_equip(3, 0xfe);
+    set_class_equip(3, 0, 0x16);
+    set_item_type(-1, 0x16);
+    CHECK_EQ(fdps_unit_can_equip_item(0, -1), 1);
+}
+
+/* Nothing is written: no byte of the unit block, the item table or the class
+   table differs afterwards, for a call that matches and for one that runs the
+   loop out. */
+static void can_equip_writes_nothing(void)
+{
+    static unsigned char unit_before[sizeof(unit_block)];
+    static unsigned char item_before[sizeof(item_block)];
+    static unsigned char class_before[sizeof(class_block)];
+    int i;
+    int unit_diffs;
+    int item_diffs;
+    int class_diffs;
+
+    stage();
+    set_class_code(0, 3);
+    fill_class_equip(3, 0xfe);
+    set_class_equip(3, 2, 0x0a);
+    set_item_type(7, 0x0a);
+    set_item_type(8, 0x20);
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        unit_before[i] = unit_block[i];
+    }
+    for (i = 0; i < (int) sizeof(item_block); i++) {
+        item_before[i] = item_block[i];
+    }
+    for (i = 0; i < (int) sizeof(class_block); i++) {
+        class_before[i] = class_block[i];
+    }
+
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 1);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 8), 0);
+
+    unit_diffs = 0;
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        if (unit_block[i] != unit_before[i]) {
+            unit_diffs++;
+        }
+    }
+    item_diffs = 0;
+    for (i = 0; i < (int) sizeof(item_block); i++) {
+        if (item_block[i] != item_before[i]) {
+            item_diffs++;
+        }
+    }
+    class_diffs = 0;
+    for (i = 0; i < (int) sizeof(class_block); i++) {
+        if (class_block[i] != class_before[i]) {
+            class_diffs++;
+        }
+    }
+    CHECK_EQ(unit_diffs, 0);
+    CHECK_EQ(item_diffs, 0);
+    CHECK_EQ(class_diffs, 0);
+}
+
+/* All three bases are re-read on every call, because each of the three
+   accessors reads its global each time: republishing any one of them between
+   two otherwise identical calls changes the answer. */
+static void can_equip_resolves_its_records_on_every_call(void)
+{
+    stage();
+    set_class_code(0, 2);
+    set_class_code(1, 3);
+    fill_class_equip(2, 0xfe);
+    fill_class_equip(3, 0xfe);
+    set_class_equip(3, 0, 0x0a);
+    set_item_type(7, 0x0a);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 0);
+    data_fdps_map_unit_array_ptr = unit_slot(1);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 1);
+
+    stage();
+    set_class_code(0, 2);
+    fill_class_equip(2, 0xfe);
+    fill_class_equip(3, 0xfe);
+    set_class_equip(3, 0, 0x0a);
+    set_item_type(7, 0x0a);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 0);
+    data_fdps_class_equip_table_ptr = class_block + CLASS_EQUIP_STRIDE * 2;
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 1);
+
+    stage();
+    set_class_code(0, 2);
+    fill_class_equip(2, 0xfe);
+    set_class_equip(2, 4, 0x0a);
+    set_item_type(7, 0x0a);
+    set_item_type(8, 0x20);
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 1);
+    data_fdps_item_effect_table_ptr = item_block + ITEM_RECORD_STRIDE * 2;
+    CHECK_EQ(fdps_unit_can_equip_item(0, 7), 0);
+}
+
 void run_unititem_tests(void)
 {
     RUN_TEST(the_two_record_layouts_match_the_strides);
@@ -1250,4 +1590,16 @@ void run_unititem_tests(void)
     RUN_TEST(add_item_writes_the_record_the_index_names);
     RUN_TEST(add_item_resolves_the_record_on_every_call);
     RUN_TEST(add_item_takes_the_slot_a_removal_freed);
+    RUN_TEST(can_equip_layouts_match_the_class_table_stride);
+    RUN_TEST(can_equip_matches_at_every_one_of_the_six_positions);
+    RUN_TEST(can_equip_answers_zero_when_no_position_matches);
+    RUN_TEST(can_equip_uses_the_class_code_without_the_promap_bias);
+    RUN_TEST(can_equip_widens_the_class_code_without_sign);
+    RUN_TEST(can_equip_takes_the_class_from_the_unit_the_index_names);
+    RUN_TEST(can_equip_reads_only_byte_zero_of_the_item_record);
+    RUN_TEST(can_equip_scans_six_positions_and_no_more);
+    RUN_TEST(can_equip_has_no_sentinel_test);
+    RUN_TEST(can_equip_hands_the_item_id_to_the_table_unchanged);
+    RUN_TEST(can_equip_writes_nothing);
+    RUN_TEST(can_equip_resolves_its_records_on_every_call);
 }

@@ -5210,7 +5210,7 @@ Alignment padding: 8b c0 (mov eax,eax), 2-byte nop aligning FUN_00025fe0 to 16 b
 Reports whether one unit's class is allowed to equip a given item.
 
 Algorithm:
-calls fdps_get_unit_record(unit_index) and reads the class code from byte +0x20 of the record; passes that code unchanged to fdps_get_class_equip_types, which returns the six permitted item-type codes of the class from PROEQU.DAT; calls fdps_get_item_record(item_id) and takes byte 0 of the record, the item's type code (weapon categories 0x01-0x15, armour 0x16-0x27, consumables and story items 0x28-0x2c). It then walks the six class entries in order and returns 1 as soon as one equals the item's type, or 0 once all six have been compared. The class code is used raw here, without the +1 that callers of fdps_get_class_record apply.
+calls fdps_get_unit_record(unit_index) and reads the class code from byte +0x20 of the record; passes that code unchanged to fdps_get_class_equip_record, which returns the six permitted item-type codes of the class from PROEQU.DAT; calls fdps_get_item_record(item_id) and takes byte 0 of the record, the item's type code (weapon categories 0x01-0x15, armour 0x16-0x27, consumables and story items 0x28-0x2c). It then walks the six class entries in order and returns 1 as soon as one equals the item's type, or 0 once all six have been compared. The class code is used raw here, without the +1 that callers of fdps_get_class_record apply.
 
 Parameters:
   unit_index -- index into the 0x50-byte unit array at DAT_00069cd8; the character being equipped, from the caller's own unit index or its character picker

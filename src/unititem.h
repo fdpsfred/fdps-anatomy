@@ -3,8 +3,11 @@
  * A unit record carries eight 2-byte inventory entries at record offset 0x0a,
  * struct fdps_unit_record's inventory_slots[16] in src/fdpstype.h: entry i is
  * inventory_slots[i * 2], a flag byte whose bit 0x40 means "equipped" and bit
- * 0x80 means "no item here", followed by the item id byte.  The functions here
- * read and edit that set; the records themselves live in the block reached
+ * 0x80 means "no item here", followed by the item id byte.  Four of the functions
+ * here read and edit that set; the fifth, fdps_unit_can_equip_item, is about
+ * the unit's class rather than its inventory and asks the PROEQU.DAT class
+ * equipment table whether an item's type is one the class may wear.  The
+ * records themselves live in the block reached
  * through data_fdps_map_unit_array_ptr (gamedata.h) and are resolved through
  * fdps_get_unit_record (unit.h).  The file owns no state of its own.
  */
@@ -158,5 +161,42 @@ extern void fdps_unit_remove_item(int unit_index, int slot);
    so a call after the array has moved writes into the new block. */
 extern int fdps_unit_add_item(int unit_index, int item_id);
 #pragma aux fdps_unit_add_item "*" parm caller [];
+
+/* Is unit `unit_index`'s class allowed to equip item `item_id`?  Returns 1
+   when the item's type code is one of the six the class's PROEQU.DAT record
+   lists, and 0 when it is not.  All four call sites use it as a plain boolean,
+   TEST EAX,EAX on the instruction after the call: fdps_unit_equip_window at
+   00025f2c performs the equip only on 1 and otherwise goes straight back round
+   its menu loop without a word; fdps_shop_buy_loop uses it twice, at 00033c4d
+   to set the byte flag it carries for the member under the cursor and at
+   00033cd0 to abandon the purchase; and fdps_shop_draw_member_entry at
+   00033382 branches past the member row it was about to draw.
+
+   The two inputs are read one byte each and the rest of both records is
+   ignored.  The class code is byte +0x20 of the unit record,
+   fdps_unit_record's clazz, and it goes to fdps_get_class_equip_record RAW --
+   without the +1 that callers of fdps_get_class_record apply, because
+   PROEQU.DAT has no leading default row (table.h).  The item's type is byte
+   +0x00 of its ITEM.DAT record, the same field fdps_unit_find_equipped_slot
+   classifies with: weapons 0x01..0x15, armour 0x16..0x27, consumables and
+   story items 0x28..0x2c (assets/items.md).
+
+   All six positions of the class record are compared, in order, and the scan
+   returns on the first equal one.  There is NO sentinel test: the unused
+   positions of a class record hold 0xFF and are compared like any other, and
+   so is a position holding 0x00.  Stopping the scan at the first 0xFF is the
+   shape an author writing this from the file format would reach for, and it
+   only agrees with the original because no item's type code is 0xFF; the
+   original's answer for a class record that is not shaped that way -- class
+   codes 0x24..0x27, whose records lie past the end of the 216-byte file -- is
+   whatever those six bytes happen to hold.
+
+   Neither argument is range checked and neither record pointer is tested for
+   null.  The records are resolved through fdps_get_unit_record,
+   fdps_get_class_equip_record and fdps_get_item_record on every call, so a
+   call after the unit array or a table has moved sees the new block.  Nothing
+   is written. */
+extern int fdps_unit_can_equip_item(int unit_index, int item_id);
+#pragma aux fdps_unit_can_equip_item "*" parm caller [];
 
 #endif
