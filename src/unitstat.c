@@ -359,3 +359,78 @@ int fdps_unit_apply_damage(int unit_index, int base_damage)
 
     return damage_rolled;
 }
+
+/* CMP dword ptr [EBP-0xc],0x19 / JZ at 000290b1 -- an equality of its own,
+   reached before either span is tried.  0x19 is 機兵 and 0x1a 魔神 is the
+   class immediately above it, which this equality deliberately leaves out. */
+#define IMMUNE_CLASS_MACHINE_SOLDIER 0x19
+
+/* CMP 0x21 / JL then CMP 0x22 / JLE at 000290b7: 守護獸 and 將軍. */
+#define FIRST_IMMUNE_CLASS_LOWER_SPAN 0x21
+#define LAST_IMMUNE_CLASS_LOWER_SPAN 0x22
+
+/* CMP 0x24 / JL then CMP 0x26 / JLE at 000290c7: ？？, 惡靈 and 活屍.  The
+   span stops at 0x26 and PROMAP.DAT carries a further class 0x27 whose contents
+   copy 0x24's, so that one is not immune either (assets/classes.md). */
+#define FIRST_IMMUNE_CLASS_UPPER_SPAN 0x24
+#define LAST_IMMUNE_CLASS_UPPER_SPAN 0x26
+
+/* CMP 0x3c / JL then CMP 0x44 / JLE at 000290d7, and this pair is on the
+   PORTRAIT ID at +0x7 rather than on the class at +0x20.  Portrait ids from
+   0x3c up index ENEMYDAT.DAT as id - 0x3c, so the span is that table's first
+   nine records. */
+#define FIRST_IMMUNE_ENEMY_PORTRAIT_ID 0x3c
+#define LAST_IMMUNE_ENEMY_PORTRAIT_ID 0x44
+
+/* 00029080.  The frame is the plain -4s one: PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP,
+   SUB ESP,0x10, the single argument read from [EBP+0x14], and all four call
+   sites -- 0001a194 and 0001a1e2 in fdps_combat_compute_hit_outcome, 00028f2e in
+   fdps_unit_inflict_random_ailments, 00029020 in fdps_unit_apply_status_effect
+   -- doing ADD ESP,0x4 after the CALL and then TEST EAX,EAX.
+
+   Two things about the shape are load-bearing.
+
+   The accepted class ids are NOT one range.  The assembly tests 0x19 on its own,
+   then 0x21..0x22, then 0x24..0x26, so 0x23 (傭兵) falls through all three and
+   is not immune even though it sits between the last two.  Folding them into
+   0x21..0x26, or into 0x19..0x26, hands mercenaries immunity to poison,
+   paralysis and 封魔咒術 that the original does not give them.
+
+   The fourth test is on a different field.  0x3c..0x44 is compared against the
+   portrait id at +0x7, not against the class at +0x20, so it is an alternative
+   route to immunity for the first nine ENEMYDAT.DAT records whatever class they
+   carry -- and conversely a roster unit with an immune class is immune with a
+   portrait id nowhere near that span.
+
+   Both bytes are loaded XOR EAX,EAX / MOV AL and widened into int locals before
+   any comparison runs, so both reads happen whichever way the tests go.  The
+   comparisons that follow are the signed JL/JLE, but a zero-extended byte is
+   never negative and every bound is positive, so nothing here can tell the two
+   widenings apart; the zero extension is stated by the field types rather than
+   demonstrated by behaviour. */
+int fdps_unit_is_ailment_immune(int unit_index)
+{
+    struct fdps_unit_record *unit;
+    int class_code;
+    int portrait_id;
+    int is_immune;
+
+    unit = fdps_get_unit_record(unit_index);
+
+    class_code = unit->clazz;
+    portrait_id = unit->portrait_id;
+
+    if (class_code == IMMUNE_CLASS_MACHINE_SOLDIER ||
+        (class_code >= FIRST_IMMUNE_CLASS_LOWER_SPAN &&
+         class_code <= LAST_IMMUNE_CLASS_LOWER_SPAN) ||
+        (class_code >= FIRST_IMMUNE_CLASS_UPPER_SPAN &&
+         class_code <= LAST_IMMUNE_CLASS_UPPER_SPAN) ||
+        (portrait_id >= FIRST_IMMUNE_ENEMY_PORTRAIT_ID &&
+         portrait_id <= LAST_IMMUNE_ENEMY_PORTRAIT_ID)) {
+        is_immune = 1;
+    } else {
+        is_immune = 0;
+    }
+
+    return is_immune;
+}

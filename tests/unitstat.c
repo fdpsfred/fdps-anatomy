@@ -1031,6 +1031,259 @@ static void each_index_selects_its_own_record_for_damage(void)
     CHECK_EQ(unit(3)->hp_current, 0);
 }
 
+/* The class ids fdps_unit_is_ailment_immune accepts, transcribed one at a time
+   off the four comparisons at 000290b1..000290d1 -- CMP 0x19 / JZ, CMP 0x21 /
+   JL with CMP 0x22 / JLE, CMP 0x24 / JL with CMP 0x26 / JLE -- and not derived
+   from the emitted C.  The names come from the PROMAP.DAT class table in
+   assets/classes.md. */
+#define CLASS_MACHINE_SOLDIER 0x19  /* 機兵 */
+#define CLASS_GUARDIAN_BEAST 0x21   /* 守護獸 */
+#define CLASS_GENERAL 0x22          /* 將軍 */
+#define CLASS_UNNAMED 0x24          /* ？？ */
+#define CLASS_EVIL_SPIRIT 0x25      /* 惡靈 */
+#define CLASS_LIVING_CORPSE 0x26    /* 活屍 */
+
+/* The class ids either side of each accepted run, which is where a range test
+   written one id too wide would show. */
+#define CLASS_MACHINE_COUNT_BELOW 0x18 /* 機械大師 */
+#define CLASS_DEMON_GOD 0x1a           /* 魔神, immediately above the 0x19 */
+#define CLASS_MONSTER 0x20             /* 妖魔, immediately below 0x21 */
+#define CLASS_MERCENARY 0x23           /* 傭兵, the hole between the two runs */
+#define CLASS_PAST_UPPER_SPAN 0x27     /* the unnamed 40th PROMAP.DAT class */
+
+/* PROMAP.DAT holds 0x28 classes; the sweep runs a little past the end of the
+   table so that a test written against the data rather than the code would
+   still be caught. */
+#define CLASS_SWEEP_END 0x30
+
+/* A class no test accepts, for the cases that are about the portrait id. */
+#define PLAIN_CLASS 0x00 /* 劍士 */
+
+/* CMP 0x3c / JL and CMP 0x44 / JLE at 000290d7, on the portrait id. */
+#define LAST_IMMUNE_PORTRAIT 0x44
+#define MID_IMMUNE_PORTRAIT 0x40
+#define FIRST_PORTRAIT_PAST_IMMUNE 0x45
+
+/* Sentinels in the three ailment bytes the callers write, status_timers[3..5]
+   at record offsets 0x25, 0x26 and 0x27. */
+#define POISON_TIMER 3
+#define PARALYSIS_TIMER 4
+#define SEAL_TIMER 5
+#define TIMER_SENTINEL 0x77
+
+static const unsigned char immune_class_ids[] = {
+    CLASS_MACHINE_SOLDIER,
+    CLASS_GUARDIAN_BEAST,
+    CLASS_GENERAL,
+    CLASS_UNNAMED,
+    CLASS_EVIL_SPIRIT,
+    CLASS_LIVING_CORPSE
+};
+
+#define IMMUNE_CLASS_COUNT 6
+
+static int class_is_in_the_transcribed_set(int class_code)
+{
+    int i;
+
+    for (i = 0; i < IMMUNE_CLASS_COUNT; i++) {
+        if ((int) immune_class_ids[i] == class_code) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+/* Record 1 as an ordinary roster unit: class 0 and portrait 5 are outside every
+   accepted run, so the fixture answers 0 until a test moves one of them. */
+static void stage_immunity(void)
+{
+    stage();
+
+    unit(PATIENT)->clazz = PLAIN_CLASS;
+    unit(PATIENT)->portrait_id = PLAIN_PORTRAIT;
+}
+
+/* MOV AL,byte ptr [EDX+0x20] for the class and MOV AL,byte ptr [EDX+0x7] for
+   the portrait id: two separate byte fields, and the whole point of the
+   function is that they are not the same one. */
+static void the_two_fields_sit_where_the_byte_loads_read(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, clazz), 0x20);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, portrait_id), 0x07);
+    CHECK_EQ((int) sizeof(layout_probe.clazz), 1);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers), 0x22);
+}
+
+static void an_ordinary_roster_unit_is_not_immune(void)
+{
+    stage_immunity();
+
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 0);
+}
+
+/* The 0x19 is an equality on its own rather than the bottom of a run, so both
+   neighbours have to answer 0. */
+static void the_machine_soldier_class_is_immune_on_its_own(void)
+{
+    stage_immunity();
+    unit(PATIENT)->clazz = CLASS_MACHINE_COUNT_BELOW;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 0);
+
+    unit(PATIENT)->clazz = CLASS_MACHINE_SOLDIER;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 1);
+
+    unit(PATIENT)->clazz = CLASS_DEMON_GOD;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 0);
+}
+
+/* CMP 0x21 / JL and CMP 0x22 / JLE: both ends are inclusive and 妖魔 below is
+   out. */
+static void the_lower_immune_class_run_is_0x21_through_0x22(void)
+{
+    stage_immunity();
+    unit(PATIENT)->clazz = CLASS_MONSTER;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 0);
+
+    unit(PATIENT)->clazz = CLASS_GUARDIAN_BEAST;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 1);
+
+    unit(PATIENT)->clazz = CLASS_GENERAL;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 1);
+}
+
+/* CMP 0x24 / JL and CMP 0x26 / JLE: both ends inclusive, and the class the data
+   file carries past the end of the run is out. */
+static void the_upper_immune_class_run_is_0x24_through_0x26(void)
+{
+    stage_immunity();
+    unit(PATIENT)->clazz = CLASS_UNNAMED;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 1);
+
+    unit(PATIENT)->clazz = CLASS_EVIL_SPIRIT;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 1);
+
+    unit(PATIENT)->clazz = CLASS_LIVING_CORPSE;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 1);
+
+    unit(PATIENT)->clazz = CLASS_PAST_UPPER_SPAN;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 0);
+}
+
+/* The hole.  0x23 傭兵 sits between the two runs and the assembly's two
+   separate range tests step straight over it; a single 0x21..0x26 test would
+   answer 1 here. */
+static void the_mercenary_class_between_the_two_runs_is_not_immune(void)
+{
+    stage_immunity();
+    unit(PATIENT)->clazz = CLASS_MERCENARY;
+
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 0);
+}
+
+/* Every class id from 0 to 0x2f against the set transcribed above, so no
+   accepted id is missing and no rejected one has crept in. */
+static void every_class_id_matches_the_transcribed_set(void)
+{
+    int class_code;
+
+    for (class_code = 0; class_code < CLASS_SWEEP_END; class_code++) {
+        stage_immunity();
+        unit(PATIENT)->clazz = (unsigned char) class_code;
+
+        CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT),
+                 class_is_in_the_transcribed_set(class_code));
+    }
+}
+
+/* CMP 0x3c / JL and CMP 0x44 / JLE on the portrait id: both ends inclusive,
+   which is ENEMYDAT.DAT records 0 through 8. */
+static void the_enemy_portrait_run_is_0x3c_through_0x44(void)
+{
+    stage_immunity();
+    unit(PATIENT)->portrait_id = LAST_ROSTER_PORTRAIT;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 0);
+
+    unit(PATIENT)->portrait_id = FIRST_ENEMY_PORTRAIT;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 1);
+
+    unit(PATIENT)->portrait_id = MID_IMMUNE_PORTRAIT;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 1);
+
+    unit(PATIENT)->portrait_id = LAST_IMMUNE_PORTRAIT;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 1);
+
+    unit(PATIENT)->portrait_id = FIRST_PORTRAIT_PAST_IMMUNE;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 0);
+}
+
+/* The two halves read different fields and neither value means anything in the
+   other's: a class byte holding 0x3c is not immune, and a portrait id holding
+   0x21 is not either. */
+static void neither_run_is_read_from_the_other_field(void)
+{
+    stage_immunity();
+    unit(PATIENT)->clazz = FIRST_ENEMY_PORTRAIT;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 0);
+
+    stage_immunity();
+    unit(PATIENT)->portrait_id = CLASS_GUARDIAN_BEAST;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 0);
+}
+
+/* The four tests are ORed, so an immune class with a roster portrait and a
+   roster class with an enemy portrait both answer 1. */
+static void either_test_alone_makes_the_unit_immune(void)
+{
+    stage_immunity();
+    unit(PATIENT)->clazz = CLASS_MACHINE_SOLDIER;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 1);
+
+    stage_immunity();
+    unit(PATIENT)->portrait_id = FIRST_ENEMY_PORTRAIT;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 1);
+
+    stage_immunity();
+    unit(PATIENT)->clazz = CLASS_MACHINE_SOLDIER;
+    unit(PATIENT)->portrait_id = FIRST_ENEMY_PORTRAIT;
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 1);
+}
+
+/* The function reads two bytes and writes nothing -- least of all the three
+   ailment bytes at +0x25..+0x27 that its callers write once it has answered. */
+static void the_immunity_test_writes_nothing(void)
+{
+    stage_immunity();
+    unit(PATIENT)->clazz = CLASS_LIVING_CORPSE;
+    unit(PATIENT)->status_timers[POISON_TIMER] = TIMER_SENTINEL;
+    unit(PATIENT)->status_timers[PARALYSIS_TIMER] = TIMER_SENTINEL;
+    unit(PATIENT)->status_timers[SEAL_TIMER] = TIMER_SENTINEL;
+
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 1);
+
+    CHECK_EQ(unit(PATIENT)->clazz, CLASS_LIVING_CORPSE);
+    CHECK_EQ(unit(PATIENT)->portrait_id, PLAIN_PORTRAIT);
+    CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER], TIMER_SENTINEL);
+    CHECK_EQ(unit(PATIENT)->status_timers[PARALYSIS_TIMER], TIMER_SENTINEL);
+    CHECK_EQ(unit(PATIENT)->status_timers[SEAL_TIMER], TIMER_SENTINEL);
+    CHECK_EQ(unit(PATIENT)->hp_current, 10);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED);
+}
+
+/* The index picks the record: only unit 2 carries an immune class and only
+   unit 2 answers 1. */
+static void each_index_selects_its_own_record_for_immunity(void)
+{
+    stage_immunity();
+    unit(2)->clazz = CLASS_GUARDIAN_BEAST;
+
+    CHECK_EQ(fdps_unit_is_ailment_immune(2), 1);
+    CHECK_EQ(fdps_unit_is_ailment_immune(0), 0);
+    CHECK_EQ(fdps_unit_is_ailment_immune(PATIENT), 0);
+    CHECK_EQ(fdps_unit_is_ailment_immune(3), 0);
+}
+
 void run_unitstat_tests(void)
 {
     RUN_TEST(the_record_layout_matches_the_offsets_read);
@@ -1089,4 +1342,17 @@ void run_unitstat_tests(void)
     RUN_TEST(only_side_zero_credits_experience);
     RUN_TEST(nothing_but_the_current_hp_is_written);
     RUN_TEST(each_index_selects_its_own_record_for_damage);
+
+    RUN_TEST(the_two_fields_sit_where_the_byte_loads_read);
+    RUN_TEST(an_ordinary_roster_unit_is_not_immune);
+    RUN_TEST(the_machine_soldier_class_is_immune_on_its_own);
+    RUN_TEST(the_lower_immune_class_run_is_0x21_through_0x22);
+    RUN_TEST(the_upper_immune_class_run_is_0x24_through_0x26);
+    RUN_TEST(the_mercenary_class_between_the_two_runs_is_not_immune);
+    RUN_TEST(every_class_id_matches_the_transcribed_set);
+    RUN_TEST(the_enemy_portrait_run_is_0x3c_through_0x44);
+    RUN_TEST(neither_run_is_read_from_the_other_field);
+    RUN_TEST(either_test_alone_makes_the_unit_immune);
+    RUN_TEST(the_immunity_test_writes_nothing);
+    RUN_TEST(each_index_selects_its_own_record_for_immunity);
 }

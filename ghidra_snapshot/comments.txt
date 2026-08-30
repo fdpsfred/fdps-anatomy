@@ -5926,13 +5926,13 @@ Alignment padding: lea eax,[eax+0] (6) + lea edx,[edx+eiz*1+0] (4), aligning FUN
 Reports whether one battle unit is immune to the three status ailments, so the code that inflicts them can skip it.
 
 Algorithm:
-Calls fdps_get_unit_record(unit_index) and reads two bytes out of the 0x50-byte record: the class code at +0x20 and the portrait/template id at +0x7. Returns 1 when the class code is 0x19 (機兵), 0x21-0x22 (守護獸, 將軍) or 0x24-0x26 (？？, 惡靈, 活尸), or when the template id falls in 0x3c-0x44; template ids of 0x3c and up index ENEMYDAT.DAT as id - 0x3c, so that range is the first nine enemy records. Anything else returns 0. The two class ranges are not contiguous: 0x23 (傭兵) sits between them and is not immune, and 0x1a (魔神) is below the first range and is not immune either.
+Calls fdps_get_unit_record(unit_index) and reads two bytes out of the 0x50-byte record: the class code at +0x20 and the portrait/template id at +0x7. Returns 1 when the class code is 0x19 (機兵), 0x21-0x22 (守護獸, 將軍) or 0x24-0x26 (？？, 惡靈, 活屍), or when the template id falls in 0x3c-0x44; template ids of 0x3c and up index ENEMYDAT.DAT as id - 0x3c, so that range is the first nine enemy records. Anything else returns 0. The two class ranges are not contiguous: 0x23 (傭兵) sits between them and is not immune, and 0x1a (魔神) is below the first range and is not immune either.
 
 Parameters:
   unit_index -- index into the 0x50-byte unit record array based at DAT_00069cd8; the callers pass the index of the unit that is about to be afflicted.
 
 Returns:
-  1 when the unit cannot be given a status ailment, 0 when it can. All three callers use it as a gate on a zero result: FUN_00019f80 writes the poison byte at record+0x25 for weapon effect 4 and the paralysis byte at +0x26 for weapon effect 1 only when this returns 0; FUN_00028f70 applies the same gate before writing any of the ailment bytes for spells 0x11-0x13 (封魔咒術 -> +0x27, 腐毒術 -> +0x25, 麻痺術 -> +0x26); FUN_00028ee0 checks it before seeding all three bytes at +0x25..+0x27.
+  1 when the unit cannot be given a status ailment, 0 when it can. All three callers use it as a gate on a zero result: fdps_combat_compute_hit_outcome writes the poison byte at record+0x25 for weapon effect 4 and the paralysis byte at +0x26 for weapon effect 1 only when this returns 0; fdps_unit_apply_status_effect applies the same gate before writing any of the ailment bytes for spells 0x11-0x13 (封魔咒術 -> +0x27, 腐毒術 -> +0x25, 麻痺術 -> +0x26); fdps_unit_inflict_random_ailments checks it before seeding all three bytes at +0x25..+0x27.
 
 Pool: fdps  [calls the game function fdps_get_unit_record and compares hard-coded ids at fixed offsets of the game's unit record; no Function ID hit in either library set]
 

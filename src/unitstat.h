@@ -165,4 +165,35 @@ extern int fdps_unit_collect_known_spells(int unit_index,
 extern int fdps_unit_apply_damage(int unit_index, int base_damage);
 #pragma aux fdps_unit_apply_damage "*" parm caller [];
 
+/* Can this unit be given a status ailment?  Returns 1 when it cannot and 0 when
+   it can, and every caller uses it the same way round: it is a gate that lets
+   the ailment through only on a 0.
+
+   Two fields of struct fdps_unit_record decide it, and either one on its own is
+   enough.  The class byte makes the unit immune when it is 0x19 (機兵), 0x21
+   or 0x22 (守護獸, 將軍), or 0x24 through 0x26 (？？, 惡靈, 活屍).  The
+   portrait id makes it immune when it lies in 0x3c..0x44, which is the first
+   nine records of ENEMYDAT.DAT -- portrait ids from 0x3c up index that table as
+   id - 0x3c.  Anything else is 0.
+
+   THE IMMUNE CLASS SET HAS A HOLE IN IT.  0x23 (傭兵) sits between the two
+   spans and is NOT immune, so writing the tidier 0x21..0x26 makes mercenaries
+   immune to poison, paralysis and 封魔咒術.  0x1a (魔神) is below the first
+   span and is likewise not immune, and neither is 0x27, the unnamed class the
+   data file carries past the end of the second span.  The portrait-id half is a
+   different field and cannot be folded into the class comparison at all.
+
+   The three ailment bytes this gates are struct fdps_unit_record's
+   status_timers: +0x25 poison, +0x26 paralysis, +0x27 封魔咒術.
+   fdps_combat_compute_hit_outcome checks it before a weapon inflicts poison or
+   paralysis, fdps_unit_apply_status_effect before a spell writes any one of the
+   three, and fdps_unit_inflict_random_ailments before it seeds all three.
+
+   unit_index is a position in the current battle's unit array and is not range
+   checked; the record is resolved through fdps_get_unit_record, so a call after
+   the array has moved reads the new block.  Nothing is written and no global is
+   touched. */
+extern int fdps_unit_is_ailment_immune(int unit_index);
+#pragma aux fdps_unit_is_ailment_immune "*" parm caller [];
+
 #endif

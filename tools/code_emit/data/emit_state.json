@@ -681,6 +681,14 @@
       "status": "committed",
       "rounds": 1,
       "emitted_against": "0x4f"
+    },
+    "00029080": {
+      "name": "fdps_unit_is_ailment_immune",
+      "target": "unitstat.c",
+      "body_size": "0x7f",
+      "status": "committed",
+      "emitted_against": "0x7f",
+      "rounds": 0
     }
   }
 }
