@@ -652,6 +652,14 @@
       "status": "committed",
       "emitted_against": "0x63",
       "rounds": 0
+    },
+    "00028460": {
+      "name": "fdps_unit_apply_damage",
+      "target": "unitstat.c",
+      "body_size": "0x101",
+      "status": "committed",
+      "emitted_against": "0x101",
+      "rounds": 0
     }
   }
 }

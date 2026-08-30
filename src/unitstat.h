@@ -115,4 +115,54 @@ extern int fdps_unit_collect_known_spells(int unit_index,
                                           unsigned char *out_ids);
 #pragma aux fdps_unit_collect_known_spells "*" parm caller [];
 
+/* Takes HP off one unit for a damaging effect, credits the experience a hit on
+   an enemy earns, and hands back THE DAMAGE THAT WAS ROLLED -- not the HP the
+   unit actually lost.
+
+   The roll is base_damage * 9 / 10 plus (rand() % 100) * base_damage / 1000, so
+   a nominal figure of N takes off between 0.900*N and 0.999*N and never the
+   whole of it; both divisions are the signed ones that truncate towards zero,
+   and folding the two terms into one expression changes the numbers because
+   each truncates on its own.  The roll is subtracted from struct
+   fdps_unit_record's hp_current, the result is clamped up to 0, and the clamped
+   result is written back as a 16-bit word.
+
+   The returned figure is the roll BEFORE that clamp, and all three callers
+   float it over the target: a unit on 5 HP hit for a rolled 9 is left on 0 and
+   shows a 9.  A caller that wants the HP actually lost has to read hp_current
+   before and after for itself.
+
+   Both HP fields are read UNSIGNED here, which the HP fields of
+   fdps_unit_apply_heal are not.  It shows on a unit whose hp_current has been
+   driven negative -- fdps_unit_apply_heal with a negative amount does that, and
+   nothing clamps at the bottom -- because this function reads that word back as
+   a number near 65535, so the clamp at zero never fires and the subtraction
+   leaves a negative word standing.
+
+   Experience is credited only when the unit's side byte is 0, the side an
+   ENEMYDAT.DAT unit is deployed with; a hit on the player's own units credits
+   nothing and leaves the accumulator holding whatever a previous effect put
+   there.  The award is the enemy record's exp_reward multiplied by the target's
+   level byte, prorated by damage_rolled / hp_max while the target is still
+   standing and paid IN FULL when the clamped HP is 0 -- so a kill pays the
+   whole record value however little of the damage was needed, and so does a hit
+   on a unit that was already at 0.  It is ADDED to
+   data_fdps_battle_pending_xp_credit rather than assigned, so several hits in
+   one action accumulate; fdps_unit_award_exp_and_level_up is what later clamps
+   the accumulator to 99 and pays it to the acting unit.
+
+   The enemy record is fdps_get_enemy_record(portrait_id - 0x3c) and neither the
+   index nor hp_max is checked: a side 0 unit carrying a roster portrait id
+   reads in front of the table, and a surviving target whose hp_max is 0 divides
+   by zero here in the original as much as in the rebuild.
+
+   unit_index is a position in the current battle's unit array and is not range
+   checked; the record is resolved through fdps_get_unit_record, so a call after
+   the array has moved works on the new block.
+
+   rand() is never seeded by the game (rebuild_info/pitfalls.md), so a given
+   battle rolls the same damage every time it is replayed. */
+extern int fdps_unit_apply_damage(int unit_index, int base_damage);
+#pragma aux fdps_unit_apply_damage "*" parm caller [];
+
 #endif

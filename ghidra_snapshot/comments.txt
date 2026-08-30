@@ -5725,7 +5725,7 @@ maximum HP (word +0x42). Rolls the damage actually dealt as base_damage * 9 / 10
 and 99.9% of base_damage. Subtracts the roll from current HP, clamps the result at 0, and stores it
 back into word +0x40.
 When the target is enemy-side (byte +0x6 == 0) it also credits experience. fdps_get_enemy_record is
-called with the target's class byte +0x7 biased down by 0x3c, and byte +0x9 of that EnemyDat.dat
+called with the target's portrait id byte +0x7 biased down by 0x3c, and byte +0x9 of that EnemyDat.dat
 record -- the enemy's base experience value -- is multiplied by the target's level (byte +0x21). A
 target still standing after the hit (clamped HP non-zero) has that award prorated by
 damage / maximum HP; a target just killed keeps the whole of it. The award is added into the pending

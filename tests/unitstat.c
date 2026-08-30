@@ -32,6 +32,17 @@
  * at 00027648.  That function has no divide by the maximum and no ADD into
  * the experience accumulator at all, and both absences are asserted.
  *
+ * The fdps_unit_apply_damage cases are read off 00028460 the same way: the
+ * same LEA/IDIV roll at 00028496 and 000284a8, the XOR EAX,EAX / MOV AX word
+ * loads at 0002847d and 00028489 that make BOTH HP reads unsigned where the
+ * heal's are MOVSX, the JGE clamp at 000284e1 that pins the stored HP at 0, the
+ * 16-bit store at 000284f0, the return rebuilt from [EBP-0x8] at 00028551, the
+ * CMP byte ptr [EAX+0x6],0x0 side equality at 000284f7, the SUB EAX,0x3c
+ * portrait bias at 00028508, byte +0x9 of the enemy record for the experience
+ * multiplier, the IMUL by the level byte at 0002852a, the CMP dword ptr
+ * [EBP-0x18],0x0 / JZ at 00028534 that skips the proration for a dead target,
+ * and ADD dword ptr [0x00069cec],EAX at 0002854b.
+ *
  * WHY THE EXPERIENCE ACCUMULATOR IS SEEDED WITH 1000.  The function ADDS to
  * data_fdps_battle_pending_xp_credit, so a seed of 0 could not tell an award
  * of 0 apart from an assignment of 0.  Seeding it with a value no award here
@@ -692,6 +703,334 @@ static void each_index_selects_its_own_record_for_spells(void)
     CHECK_EQ(spell_ids[2], OUT_SENTINEL);
 }
 
+/* The fdps_unit_apply_damage fixture.
+ *
+ * IMUL EAX,dword ptr [EBP+0x14],0xa in fdps_get_enemy_record: ENEMYDAT.DAT
+ * records are ten bytes.  Four are staged so that a wrong portrait bias lands
+ * on a neighbour that is visibly different rather than on nothing. */
+#define ENEMY_RECORD_STRIDE 0x0a
+#define STAGE_ENEMIES 4
+
+/* The victim's portrait id is 0x3c + 1, so the record the bias has to reach is
+   the second one and the three around it are wrong answers. */
+#define VICTIM_ENEMY_INDEX 1
+
+/* An exp_reward and a level whose product, 100, is the same as the fixture's
+   maximum HP, so a prorated award is exactly the damage rolled and an
+   unprorated one is exactly 100.  The two are impossible to confuse. */
+#define VICTIM_EXP_REWARD 20
+#define VICTIM_LEVEL 5
+#define VICTIM_AWARD_UNPRORATED 100
+
+/* What the neighbouring enemy records are filled with: a value that could not
+   be mistaken for VICTIM_EXP_REWARD in any award. */
+#define WRONG_EXP_REWARD 99
+
+/* CMP byte ptr [EAX+0x6],0x0: side 0 is the ENEMYDAT side that pays, and
+   deploy.c's PLAYER_SIDE is 2.  Side 1 is tested as well because the branch is
+   an equality on 0 and not a truth test of "player or not". */
+#define ENEMY_SIDE 0
+#define PLAYER_SIDE 2
+#define OTHER_NON_ENEMY_SIDE 1
+
+static unsigned char enemy_block[STAGE_ENEMIES * ENEMY_RECORD_STRIDE];
+
+/* Only ever read for its field offsets. */
+static struct fdps_enemy_data enemy_layout_probe;
+
+static struct fdps_enemy_data *enemy(int enemy_index)
+{
+    return (struct fdps_enemy_data *)
+        (enemy_block + enemy_index * ENEMY_RECORD_STRIDE);
+}
+
+/* A player-side target on 50 of 100 HP: far enough from both ends that neither
+   the clamp nor a wrap can fire unless a test asks for it, and on a side that
+   credits no experience so the accumulator stays at its seed. */
+static void stage_damage(void)
+{
+    int i;
+
+    stage();
+    for (i = 0; i < (int) sizeof(enemy_block); i++) {
+        enemy_block[i] = 0;
+    }
+    data_fdps_battle_enemy_data_table_ptr = enemy_block;
+
+    unit(PATIENT)->side = PLAYER_SIDE;
+    unit(PATIENT)->hp_current = 50;
+    unit(PATIENT)->hp_max = 100;
+}
+
+/* The same target moved to side 0 and given the enemy portrait id, level and
+   record the award is built out of, on full HP. */
+static void stage_damage_enemy(void)
+{
+    stage_damage();
+
+    unit(PATIENT)->side = ENEMY_SIDE;
+    unit(PATIENT)->portrait_id =
+        (unsigned char) (FIRST_ENEMY_PORTRAIT + VICTIM_ENEMY_INDEX);
+    unit(PATIENT)->level = VICTIM_LEVEL;
+    unit(PATIENT)->hp_current = 100;
+
+    enemy(VICTIM_ENEMY_INDEX)->exp_reward = VICTIM_EXP_REWARD;
+}
+
+static void the_enemy_record_layout_matches_the_offsets_read(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 0x06);
+    CHECK_EQ((int) sizeof(enemy_layout_probe), ENEMY_RECORD_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_enemy_data, exp_reward), 0x09);
+    CHECK_EQ((int) sizeof(enemy_layout_probe.exp_reward), 1);
+}
+
+/* base_damage * 9 / 10 with the bonus pinned to zero: 10 takes off exactly 9,
+   and a player-side target credits nothing. */
+static void a_hit_of_ten_rolls_nine_every_time(void)
+{
+    stage_damage();
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 41);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED);
+}
+
+/* 63 / 10 and 27 / 10: the base damage truncates, it does not round. */
+static void the_base_damage_truncates(void)
+{
+    stage_damage();
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_SEVEN), 6);
+    CHECK_EQ(unit(PATIENT)->hp_current, 44);
+
+    stage_damage();
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_THREE), 2);
+    CHECK_EQ(unit(PATIENT)->hp_current, 48);
+}
+
+/* IDIV on a sign-extended dividend truncates towards zero, so -7 gives -6 and
+   not -7, and the bonus term is still identically 0 because 99 * 7 is under a
+   thousand however the signs fall.  A negative nominal figure therefore RAISES
+   the HP, with no clamp at hp_max on the way up. */
+static void a_negative_nominal_figure_truncates_towards_zero_and_heals(void)
+{
+    stage_damage();
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, -AMOUNT_SEVEN), -6);
+    CHECK_EQ(unit(PATIENT)->hp_current, 56);
+}
+
+/* JGE at 000284e1: the stored HP is clamped up to 0, and the figure handed back
+   is still the whole 9 that was rolled.  This is the case every caller floats
+   over the target, so an overkill on a unit with 5 HP left shows a 9. */
+static void an_overkill_clamps_the_hp_but_returns_the_whole_roll(void)
+{
+    int rolled;
+
+    stage_damage();
+    unit(PATIENT)->hp_current = 5;
+
+    rolled = fdps_unit_apply_damage(PATIENT, AMOUNT_TEN);
+    CHECK_EQ(rolled, 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 0);
+    CHECK_EQ(5 - unit(PATIENT)->hp_current, 5);
+    CHECK_EQ(rolled != 5 - unit(PATIENT)->hp_current, 1);
+}
+
+/* At a nominal 100 the bonus is (rand() % 100) / 10, so the roll is 90..99 and
+   the HP moves down by exactly the roll.  Twenty draws, each checked against
+   the interval and against the record, with the starting HP lifted clear of the
+   clamp so the top of the band cannot hide itself. */
+static void the_damage_roll_spans_nine_tenths_to_the_full_figure(void)
+{
+    int draw;
+    int rolled;
+    int inside;
+    int matched;
+
+    inside = 0;
+    matched = 0;
+
+    for (draw = 0; draw < BAND_DRAWS; draw++) {
+        stage_damage();
+        unit(PATIENT)->hp_current = 200;
+        unit(PATIENT)->hp_max = 200;
+        rolled = fdps_unit_apply_damage(PATIENT, AMOUNT_HUNDRED);
+        if (rolled >= HUNDRED_ROLL_LOW && rolled <= HUNDRED_ROLL_HIGH) {
+            inside++;
+        }
+        if (unit(PATIENT)->hp_current == 200 - rolled) {
+            matched++;
+        }
+    }
+
+    CHECK_EQ(inside, BAND_DRAWS);
+    CHECK_EQ(matched, BAND_DRAWS);
+}
+
+/* The two word loads are XOR EAX,EAX / MOV AX and not MOVSX, so a unit whose
+   hp_current has been driven negative reads back as 65532 rather than -4.  The
+   clamp at zero therefore never fires and the subtraction is written back as
+   the negative word -13; a signed read would have clamped it to 0. */
+static void the_hp_fields_are_read_unsigned(void)
+{
+    stage_damage();
+    unit(PATIENT)->hp_current = -4;
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, -13);
+    CHECK_EQ(unit(PATIENT)->hp_current != 0, 1);
+}
+
+/* The same zero extension on hp_max: a negative maximum is 65532 in the divide,
+   so the award truncates to 0 rather than coming out as the -225 a signed read
+   would have produced.  The target survives, so the divide really does run. */
+static void a_negative_maximum_hp_divides_unsigned(void)
+{
+    stage_damage_enemy();
+    unit(PATIENT)->hp_max = -4;
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 91);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED);
+}
+
+/* A surviving enemy prorates: exp_reward 20 times level 5 is 100, scaled by the
+   9 rolled over the maximum of 100, so the award is 9. */
+static void a_surviving_enemy_prorates_the_award_by_the_damage(void)
+{
+    stage_damage_enemy();
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 91);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 9);
+}
+
+/* JZ at 00028534 jumps past the divide: a target the hit clamped to 0 keeps the
+   whole of exp_reward * level, however little of the roll was needed.  Five HP
+   taken off by a rolled 9 pays the full 100 rather than the 9 the proration
+   would have given. */
+static void a_killed_enemy_keeps_the_whole_award(void)
+{
+    stage_damage_enemy();
+    unit(PATIENT)->hp_current = 5;
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 0);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit,
+             XP_SEED + VICTIM_AWARD_UNPRORATED);
+}
+
+/* The test is on the CLAMPED HP and not on whether the hit did the killing, so
+   an enemy already lying at 0 pays in full again on every further hit. */
+static void an_enemy_already_at_zero_pays_in_full_again(void)
+{
+    stage_damage_enemy();
+    unit(PATIENT)->hp_current = 0;
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 0);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit,
+             XP_SEED + VICTIM_AWARD_UNPRORATED);
+}
+
+/* The divide is the LAST step, applied to the whole product.  exp_reward 3
+   times level 5 is 15, scaled by 9 over 100, which is 1; had the divide come
+   before the multiply it would have been 0. */
+static void the_award_divides_the_whole_product_last_for_damage(void)
+{
+    stage_damage_enemy();
+    enemy(VICTIM_ENEMY_INDEX)->exp_reward = 3;
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 1);
+}
+
+/* SUB EAX,0x3c: the record is picked by the portrait id minus 0x3c, so a
+   portrait of 0x3d reaches record 1 and not record 0 or 61.  Every other staged
+   record carries a reward that would be visible if the bias were wrong. */
+static void the_enemy_record_is_the_portrait_id_less_0x3c(void)
+{
+    int i;
+
+    stage_damage_enemy();
+    for (i = 0; i < STAGE_ENEMIES; i++) {
+        if (i != VICTIM_ENEMY_INDEX) {
+            enemy(i)->exp_reward = WRONG_EXP_REWARD;
+        }
+    }
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 9);
+}
+
+/* ADD dword ptr [0x00069cec],EAX: two hits in a row leave the sum of both
+   awards, not the second one.  Each hit here takes 9 off a full 100, so each
+   prorated award is 9. */
+static void the_damage_award_accumulates_rather_than_replacing(void)
+{
+    stage_damage_enemy();
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 9);
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 82);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 18);
+}
+
+/* The side test is an equality on 0, so neither the player's side 2 nor side 1
+   credits anything -- the accumulator keeps its seed rather than being cleared,
+   and the enemy record is never reached even though the portrait id would have
+   indexed one. */
+static void only_side_zero_credits_experience(void)
+{
+    stage_damage_enemy();
+    unit(PATIENT)->side = PLAYER_SIDE;
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 91);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED);
+
+    stage_damage_enemy();
+    unit(PATIENT)->side = OTHER_NON_ENEMY_SIDE;
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED);
+}
+
+/* +0x40 is the only field the function writes: the maximum, the level, the
+   portrait id and the side all read back as they were staged. */
+static void nothing_but_the_current_hp_is_written(void)
+{
+    stage_damage_enemy();
+
+    CHECK_EQ(fdps_unit_apply_damage(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->hp_current, 91);
+    CHECK_EQ(unit(PATIENT)->hp_max, 100);
+    CHECK_EQ(unit(PATIENT)->level, VICTIM_LEVEL);
+    CHECK_EQ(unit(PATIENT)->portrait_id,
+             FIRST_ENEMY_PORTRAIT + VICTIM_ENEMY_INDEX);
+    CHECK_EQ(unit(PATIENT)->side, ENEMY_SIDE);
+    CHECK_EQ(enemy(VICTIM_ENEMY_INDEX)->exp_reward, VICTIM_EXP_REWARD);
+}
+
+/* The index picks the record: unit 2 is hit and its three neighbours are left
+   exactly where they were. */
+static void each_index_selects_its_own_record_for_damage(void)
+{
+    stage_damage();
+    unit(2)->side = PLAYER_SIDE;
+    unit(2)->hp_current = 30;
+    unit(2)->hp_max = 100;
+
+    CHECK_EQ(fdps_unit_apply_damage(2, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(2)->hp_current, 21);
+    CHECK_EQ(unit(0)->hp_current, 0);
+    CHECK_EQ(unit(PATIENT)->hp_current, 50);
+    CHECK_EQ(unit(3)->hp_current, 0);
+}
+
 void run_unitstat_tests(void)
 {
     RUN_TEST(the_record_layout_matches_the_offsets_read);
@@ -732,4 +1071,22 @@ void run_unitstat_tests(void)
     RUN_TEST(neither_neighbouring_field_is_walked);
     RUN_TEST(the_record_is_only_read);
     RUN_TEST(each_index_selects_its_own_record_for_spells);
+
+    RUN_TEST(the_enemy_record_layout_matches_the_offsets_read);
+    RUN_TEST(a_hit_of_ten_rolls_nine_every_time);
+    RUN_TEST(the_base_damage_truncates);
+    RUN_TEST(a_negative_nominal_figure_truncates_towards_zero_and_heals);
+    RUN_TEST(an_overkill_clamps_the_hp_but_returns_the_whole_roll);
+    RUN_TEST(the_damage_roll_spans_nine_tenths_to_the_full_figure);
+    RUN_TEST(the_hp_fields_are_read_unsigned);
+    RUN_TEST(a_negative_maximum_hp_divides_unsigned);
+    RUN_TEST(a_surviving_enemy_prorates_the_award_by_the_damage);
+    RUN_TEST(a_killed_enemy_keeps_the_whole_award);
+    RUN_TEST(an_enemy_already_at_zero_pays_in_full_again);
+    RUN_TEST(the_award_divides_the_whole_product_last_for_damage);
+    RUN_TEST(the_enemy_record_is_the_portrait_id_less_0x3c);
+    RUN_TEST(the_damage_award_accumulates_rather_than_replacing);
+    RUN_TEST(only_side_zero_credits_experience);
+    RUN_TEST(nothing_but_the_current_hp_is_written);
+    RUN_TEST(each_index_selects_its_own_record_for_damage);
 }
