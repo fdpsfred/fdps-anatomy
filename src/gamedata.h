@@ -379,4 +379,63 @@ extern int data_fdps_battle_ai_best_attack_tile_y;
    globals. */
 extern unsigned char data_fdps_inverse_palette_cube[4096];
 
+/* 00060040 and 00060058.  What the ground under a combatant does to its attack
+   and to its defense, as a percentage indexed by the terrain class of the tile
+   the unit is standing on -- data_fdps_map_tile_terrain_type above, left there
+   by fdps_map_load_tile_info.  Both are applied the same way, as
+   stat += table[terrain] * stat / 100, so an entry is a signed percentage
+   delta and zero means the ground is neutral.
+
+   Signed, and both hold negative entries in the shipped image: the dword loads
+   feed IMUL and IDIV, and the terrain-modified totals are compared with the
+   signed jumps by everything downstream.  Three functions read them --
+   fdps_unit_resolve_attack_hit, fdps_combat_compute_hit_outcome and
+   fdps_draw_cursor_info_panel -- and all three index both tables with the same
+   terrain byte.
+
+   They are two tables and not one 2 x 6 array: each reader names each base by
+   its own absolute address, with the terrain index scaled by 4 against that
+   base (rebuild_info/pitfalls.md, contract B).
+
+   The declared width is six entries, which covers terrain classes 0..5, and
+   the shipped maps place cells above that.  Resolving every placed cell of all
+   68 M<map><layer>.MPL terrain layers through its own ATTR table -- width at
+   +7, tile ids from +0x0b, terrain class at byte +2 of the row at 0x11 + 4 *
+   tile id -- gives classes 0 (27398 cells), 1 (161), 2 (1018), 5 (7028) and 6
+   (3222), with class 6 on sixteen maps' layer 0 and the majority class on
+   several of them.  So a class of 6 indexes one entry past the end of either
+   table on shipped data and not merely in theory.  In the original the entry
+   it lands on is whatever follows the table: 00060058, which is the defense
+   table's own first entry and is 0 in the image, and 00060070, whose first
+   byte is the live global data_fdps_village_mode_flag.  Two tables linked as
+   separate objects reproduce neither read.
+
+   The two combat readers reach that index only for a unit standing on such a
+   cell, and PROMAP.DAT gives move_cost[6] as 0xFF -- impassable -- in all 40
+   class rows, so the movement flood fill cannot walk one onto one; the only
+   row that costs a class-6 tile less is the all-ones default row 0, which the
+   two range queries that are not asking about a particular unit pass a literal
+   0 for.  fdps_draw_cursor_info_panel has no such precondition: at 0002de20
+   and 0002de59 it indexes both tables with the terrain class of whatever cell
+   the cursor is over.  Ticket 23 owns what these definitions ultimately
+   are. */
+extern int data_fdps_battle_tile_attr_ap_modifier_table[6];
+extern int data_fdps_battle_tile_attr_def_modifier_table[6];
+
+/* 00069cec.  The experience one blow just earned, worked out by the physical
+   and magical damage resolvers and read back by the code that awards it.
+
+   Whether a writer assigns or accumulates is that writer's own contract, and
+   the image does both: fdps_unit_apply_heal, fdps_unit_apply_damage and
+   fdps_unit_apply_status_effect add to it, while fdps_unit_resolve_attack_hit
+   stores a fresh figure over whatever was there.  So a caller that wants the
+   total of several physical blows has to take a copy after each one, and a
+   blow that earns nothing -- a friendly-fire hit, or a target that is not an
+   enemy record -- leaves the previous blow's figure standing rather than
+   clearing it.
+
+   Signed: every writer forms it with IDIV on sign-extended operands and the
+   readers scale it with the signed multiply. */
+extern int data_fdps_battle_pending_xp_credit;
+
 #endif

@@ -540,6 +540,14 @@
       "status": "committed",
       "emitted_against": "0x101",
       "rounds": 0
+    },
+    "0001c520": {
+      "name": "fdps_unit_resolve_attack_hit",
+      "target": "unitatk.c",
+      "body_size": "0x57a",
+      "status": "committed",
+      "emitted_against": "0x57a",
+      "rounds": 1
     }
   }
 }
