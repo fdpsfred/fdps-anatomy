@@ -49,6 +49,8 @@
 
 **輸入全靠 `emit_issues.json`，所以每一則都要有 `status`（`open`／`resolved`）與 `from`（`emit`／`review`）。** 缺欄位的條目會從此後每一次「還有哪些未決」的篩選裡靜默消失，而 bookkeeper 是唯一寫它的人。**一個結論只記一次**：emitter 與 reviewer 記到同一件事時，settle emitter 那則，reviewer 那則用 `same_as` 指過去——兩份逐字複本的意思是將來發現其中一份錯了，只會改到一份，留下另一份繼續矛盾。
 
+「只記一次」約束的是**描述**，不是**查證**。reviewer 仍然要自己把疑慮重推一遍，那正是獨立 review 的意義（實例：`0001f510` 的 reviewer 自己掃了全 image 對該全域的 24 條參照，才確認游標真的沒有上界）；它只是不再重寫一次描述，`what` 裡只留自己這趟多出來的東西——確認了什麼、怎麼確認的、判讀哪裡不同、emitter 漏掉哪個位址；什麼都沒多出來就寫一行講明。
+
 ## 順序是 callee 先於 caller
 
 工作清單不照位址排，照 call graph 的拓樸序排：一支 function 的 callee 全部先 emit 完，才輪到它。順序由 `tools/code_emit/emit_order.py` 從 call graph 算出來，`next_batch.py` 照著發。
