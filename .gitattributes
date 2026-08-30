@@ -13,3 +13,10 @@ docs/guide/**/*.txt text eol=lf
 docs/guide/**/*.jpg binary
 docs/guide/**/*.png binary
 docs/guide/**/*.gif binary
+
+# Workflow scripts must stay LF: the Workflow tool reads the working copy and
+# rejects a script containing CR as "control characters", so with core.autocrlf
+# true a plain checkout on Windows produces a script it refuses to run. The
+# failure names neither the file nor the line ending, so it costs a while to
+# find.
+tools/**/*.js text eol=lf
