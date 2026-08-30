@@ -1600,6 +1600,415 @@ static void both_walks_follow_the_index_list(void)
              0x18 * 3);
 }
 
+/* ------------------------------------------------------------------
+ * fdps_map_actor_score_best_spell, 00013420.
+ *
+ * The spell search is built on the same 4x4 fixture the attack search above
+ * uses -- atk_stage() puts up the seven blocks the flood fill needs and points
+ * the unit, item and class globals at them -- with one block added, the
+ * MAGICDAT.DAT spell table, because this search resolves a record per learned
+ * spell.  Every class row costs 1 on all eight terrain types, so a cast
+ * distance of d covers exactly the tiles within Manhattan distance d of the
+ * caster and the candidate tiles come out of
+ * fdps_map_grid_collect_marked_tiles row by row.
+ *
+ * Every spell below carries an id outside the ranges fdps_score_targets_for_spell
+ * names, so its branch is the plain damaging one: 0x18 when the target's
+ * current HP is strictly below the spell's power word and 8 otherwise, with no
+ * flyer test and no protagonist weighting as long as char_id is not 0.  That
+ * keeps a case about the search's own ranking from turning on the scorer's
+ * arithmetic.
+ *
+ * Expected values come from the assembly at 00013420 -- PUSH 0x0 before the
+ * fdps_get_class_record call at 00013436, the TEST/JZ pair at 00013484 and
+ * CMP byte ptr [EAX+0x27],0x0 at 0001348d, the zero-extended MP cost against
+ * MOVSX word ptr [EAX+0x44] with CMP / JG at 000134ee, the raw distance byte
+ * pushed at 000134fa, the select_mode fork at 0001356a with its
+ * CMP byte ptr [EAX+0x6],0x0 / MOV 1 / MOV 0, the PUSH 0x0 min_dist at
+ * 0001359a, and the JG / JNZ / MOVSX word ptr [EAX] / JG ranking at
+ * 000135ee-0001360d -- and by walking that algorithm over the fixture by hand.
+ * None of them is read off the emitted C.
+ *
+ * Every case leaves the score global at 0x12 and the other three at a sentinel
+ * before the call, so a case that expects a score of 8 also proves the entry
+ * zeroing at 0001342c.
+ * ------------------------------------------------------------------ */
+
+#define BSP_SPELLS 12
+
+/* What the four globals hold going in: a score no result below could reach by
+   accident, and a value unlike every tile coordinate and spell id used here. */
+#define BSP_SENTINEL_SCORE 0x12
+#define BSP_SENTINEL 0x5a
+
+/* Any char_id other than 0, so the scorer's protagonist weighting stays out of
+   every expected value. */
+#define BSP_NOBODY 5
+
+static struct fdps_spell_effect bsp_spells[BSP_SPELLS];
+
+/* The attack search's battle, plus an all-zero spell table and the four spell
+   globals parked on their sentinels. */
+static void bsp_stage(void)
+{
+    atk_stage();
+    atk_zero((unsigned char *) bsp_spells, (int) sizeof(bsp_spells));
+    data_fdps_battle_spell_effect_table_ptr = (unsigned char *) bsp_spells;
+    data_fdps_battle_ai_best_spell_score = BSP_SENTINEL_SCORE;
+    data_fdps_map_ai_best_spell_id = BSP_SENTINEL;
+    data_fdps_battle_ai_best_spell_target_x = BSP_SENTINEL;
+    data_fdps_battle_ai_best_spell_target_y = BSP_SENTINEL;
+}
+
+static void bsp_spell(int spell_id, int power, int cast_range, int area,
+                      int mp_cost, int target_side)
+{
+    bsp_spells[spell_id].power = (short) power;
+    bsp_spells[spell_id].cast_range_flags = (unsigned char) cast_range;
+    bsp_spells[spell_id].area = (unsigned char) area;
+    bsp_spells[spell_id].mp_cost = (unsigned char) mp_cost;
+    bsp_spells[spell_id].target_side = (unsigned char) target_side;
+}
+
+/* Set one learned bit in the five-byte bitmap at record +0x1a, the way
+   fdps_unit_collect_known_spells reads it: byte spell_id / 8, bit
+   spell_id % 8. */
+static void bsp_learns(int unit_index, int spell_id)
+{
+    atk_units[unit_index].spells_known_bitmap[spell_id / 8] |=
+        (unsigned char) (1 << (spell_id % 8));
+}
+
+/* The caster: unit 0 at (0, 0) on side 0 with mp magic points and no spell
+   learned yet. */
+static void bsp_caster(int mp)
+{
+    atk_unit(0, 0, 0, 0, 10, 5, 100, BSP_NOBODY);
+    atk_units[0].mp_current = (short) mp;
+}
+
+/* One enemy-side target at (x, y) with 100 HP, which every spell below wounds
+   rather than kills unless its power says otherwise. */
+static void bsp_target(int unit_index, int x, int y)
+{
+    atk_unit(unit_index, x, y, 1, 0, 0, 100, BSP_NOBODY);
+}
+
+/* The literal record offsets the search reads: the caster's tile at +0x00 and
+   +0x01, its learned-spell bitmap at +0x1a, the seal timer at +0x27 -- element
+   5 of status_timers, which starts at +0x22 -- and its current MP as a signed
+   word at +0x44, plus the four spell record bytes at +0x03, +0x04, +0x05 and
+   +0x06 and the power word at +0x00.  If any of them moved, the search would
+   read a different field and every expected value below would be a
+   coincidence. */
+static void spell_search_reads_these_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0x00);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 0x01);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, spells_known_bitmap),
+             0x1a);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers), 0x22);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, mp_current), 0x44);
+    CHECK_EQ((int) sizeof(struct fdps_spell_effect), 7);
+    CHECK_EQ((int) offsetof(struct fdps_spell_effect, power), 0x00);
+    CHECK_EQ((int) offsetof(struct fdps_spell_effect, cast_range_flags), 0x03);
+    CHECK_EQ((int) offsetof(struct fdps_spell_effect, area), 0x04);
+    CHECK_EQ((int) offsetof(struct fdps_spell_effect, mp_cost), 0x05);
+    CHECK_EQ((int) offsetof(struct fdps_spell_effect, target_side), 0x06);
+}
+
+/* CMP dword ptr [EBP-0x38],0x0 / JZ at 00013484: an actor whose bitmap is
+   empty leaves at 00013493 with the score freshly zeroed and the other three
+   globals untouched, so the previous actor's decision is still standing in
+   them.  A target the spell would have caught is put in reach, so the case
+   fails if the search ran at all. */
+static void an_actor_that_knows_no_spell_returns_at_once(void)
+{
+    bsp_stage();
+    bsp_caster(10);
+    bsp_spell(1, 10, 3, 0, 0, 0);
+    bsp_target(1, 1, 0);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 0);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, BSP_SENTINEL);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_x, BSP_SENTINEL);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_y, BSP_SENTINEL);
+}
+
+/* CMP byte ptr [EAX+0x27],0x0 / JZ at 0001348d tests status_timers[5] alone,
+   so a caster carrying the magic seal is skipped however much magic it knows,
+   and one carrying the poison and paralysis timers instead is not.  The second
+   half of the case shows the same fixture publishing, so the first half is
+   about the seal byte and not about the search being unable to find
+   anything. */
+static void a_sealed_caster_is_skipped(void)
+{
+    bsp_stage();
+    bsp_caster(10);
+    bsp_learns(0, 1);
+    bsp_spell(1, 10, 3, 0, 0, 0);
+    bsp_target(1, 1, 0);
+    data_fdps_map_unit_count = 2;
+    atk_units[0].status_timers[5] = 1;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 0);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, BSP_SENTINEL);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_x, BSP_SENTINEL);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_y, BSP_SENTINEL);
+
+    atk_units[0].status_timers[5] = 0;
+    atk_units[0].status_timers[3] = 4;
+    atk_units[0].status_timers[4] = 4;
+    data_fdps_battle_ai_best_spell_score = BSP_SENTINEL_SCORE;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 8);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, 1);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_x, 1);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_y, 0);
+}
+
+/* The MP cost byte is zero extended and compared against the signed MP word
+   with CMP / JG at 000134ee, so a spell that costs exactly what is left is
+   still cast and one that costs a point more is passed over entirely -- no
+   flood fill, no candidate tile, nothing published.  Written as >= the first
+   half would publish. */
+static void an_unaffordable_spell_is_passed_over(void)
+{
+    bsp_stage();
+    bsp_caster(4);
+    bsp_learns(0, 1);
+    bsp_spell(1, 10, 3, 0, 5, 0);
+    bsp_target(1, 1, 0);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 0);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, BSP_SENTINEL);
+
+    bsp_stage();
+    bsp_caster(5);
+    bsp_learns(0, 1);
+    bsp_spell(1, 10, 3, 0, 5, 0);
+    bsp_target(1, 1, 0);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 8);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, 1);
+}
+
+/* The select_mode fork at 0001356a.  With the caster on side 0 at (0, 0) and
+   an enemy on side 1 at (1, 0), and a blast radius of 0 so a tile catches only
+   what stands on it, the tile that wins names which side was collected.
+
+   side_select 0 -- the enemy phase -- inverts the spell's target byte, so a
+   byte of 0 becomes select_mode 1 and finds the non-zero side at (1, 0), while
+   a byte of 1 becomes select_mode 0 and finds side 0, which is the caster's
+   own tile.  side_select 1 forwards the byte, so the two answers swap.  A
+   spelling that passed the byte through in both directions would give (1, 0)
+   in three of the four. */
+static void the_target_byte_is_inverted_for_an_enemy_caster(void)
+{
+    bsp_stage();
+    bsp_caster(10);
+    bsp_learns(0, 1);
+    bsp_spell(1, 10, 3, 0, 0, 0);
+    bsp_target(1, 1, 0);
+    data_fdps_map_unit_count = 2;
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_x, 1);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_y, 0);
+
+    data_fdps_battle_ai_best_spell_score = BSP_SENTINEL_SCORE;
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 1), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_x, 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_y, 0);
+
+    bsp_stage();
+    bsp_caster(10);
+    bsp_learns(0, 1);
+    bsp_spell(1, 10, 3, 0, 0, 1);
+    bsp_target(1, 1, 0);
+    data_fdps_map_unit_count = 2;
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_x, 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_y, 0);
+
+    data_fdps_battle_ai_best_spell_score = BSP_SENTINEL_SCORE;
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 1), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_x, 1);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_y, 0);
+}
+
+/* The distance byte at +0x03 is the flood fill's movement allowance over the
+   all-ones default class row, so it bounds the tiles the cast may be centred
+   on: with the target at (2, 0), a distance of 1 never reaches a tile that
+   catches it and a distance of 2 does.  Both runs are otherwise identical, so
+   the only thing separating them is which byte of the record the fill was
+   handed. */
+static void the_cast_distance_bounds_the_candidate_tiles(void)
+{
+    bsp_stage();
+    bsp_caster(10);
+    bsp_learns(0, 1);
+    bsp_spell(1, 10, 1, 0, 0, 0);
+    bsp_target(1, 2, 0);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 0);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, BSP_SENTINEL);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_x, BSP_SENTINEL);
+
+    bsp_stage();
+    bsp_caster(10);
+    bsp_learns(0, 1);
+    bsp_spell(1, 10, 2, 0, 0, 0);
+    bsp_target(1, 2, 0);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 8);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_x, 2);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_y, 0);
+}
+
+/* MOV AL,byte ptr [EAX+EBP*0x1-0x5c] / AND EAX,0xff at 00013629 publishes the
+   MAGICDAT.DAT id out of the list fdps_unit_collect_known_spells filled, not
+   the position in that list.  The caster learns spell 3 as well, priced out of
+   reach so it cannot win, which puts spell 9 in slot 1: publishing the slot
+   would leave a 1 behind. */
+static void the_published_spell_id_is_the_learned_id(void)
+{
+    bsp_stage();
+    bsp_caster(10);
+    bsp_learns(0, 3);
+    bsp_learns(0, 9);
+    bsp_spell(3, 10, 3, 0, 99, 0);
+    bsp_spell(9, 10, 3, 0, 0, 0);
+    bsp_target(1, 1, 0);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 8);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, 9);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_x, 1);
+}
+
+/* CMP EAX,[0x00063f88] / JG at 000135f1 ranks on the score before anything
+   else, so a later spell with a far larger power word does not displace a
+   better score and a later spell with a better score displaces whatever power
+   the incumbent had.  With the target on 100 HP a power of 200 kills and
+   scores 0x18 while a power of 10 wounds and scores 8. */
+static void a_higher_score_beats_a_bigger_power(void)
+{
+    bsp_stage();
+    bsp_caster(10);
+    bsp_learns(0, 1);
+    bsp_learns(0, 2);
+    bsp_spell(1, 10, 3, 0, 0, 0);
+    bsp_spell(2, 200, 3, 0, 0, 0);
+    bsp_target(1, 1, 0);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 0x18);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, 2);
+
+    bsp_stage();
+    bsp_caster(10);
+    bsp_learns(0, 1);
+    bsp_learns(0, 2);
+    bsp_spell(1, 200, 3, 0, 0, 0);
+    bsp_spell(2, 10, 3, 0, 0, 0);
+    bsp_target(1, 1, 0);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 0x18);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, 1);
+}
+
+/* MOVSX EAX,word ptr [EAX] / CMP EAX,[EBP-0x8] / JG at 00013607 is the
+   tie-break, and it reads power SIGNED.  Both spells wound the 100 HP target
+   for 8, so only the power separates them: a power of -1 does not displace an
+   incumbent of 10, while an incumbent of -1 is displaced by 10.  Read
+   unsigned, -1 would be 65535 and the first half would publish spell 2 --
+   which is exactly what would happen to the eight 絕招, whose power word is a
+   negative attack multiplier. */
+static void the_tie_break_reads_power_signed(void)
+{
+    bsp_stage();
+    bsp_caster(10);
+    bsp_learns(0, 1);
+    bsp_learns(0, 2);
+    bsp_spell(1, 10, 3, 0, 0, 0);
+    bsp_spell(2, -1, 3, 0, 0, 0);
+    bsp_target(1, 1, 0);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 8);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, 1);
+
+    bsp_stage();
+    bsp_caster(10);
+    bsp_learns(0, 1);
+    bsp_learns(0, 2);
+    bsp_spell(1, -1, 3, 0, 0, 0);
+    bsp_spell(2, 10, 3, 0, 0, 0);
+    bsp_target(1, 1, 0);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 8);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, 2);
+}
+
+/* The tie-break is JG and so strict: two spells that score the same and carry
+   the same power leave the first one found standing, and the ids come out of
+   the bitmap in ascending order, so that is the lower id. */
+static void an_equal_power_does_not_displace_the_incumbent(void)
+{
+    bsp_stage();
+    bsp_caster(10);
+    bsp_learns(0, 1);
+    bsp_learns(0, 2);
+    bsp_spell(1, 10, 3, 0, 0, 0);
+    bsp_spell(2, 10, 3, 0, 0, 0);
+    bsp_target(1, 1, 0);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 8);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, 1);
+}
+
+/* CMP dword ptr [EBP-0x14],0x0 / JZ at 000135c4 skips the scoring call for a
+   tile that caught nobody, so a caster alone on the map runs the whole search
+   -- every candidate tile of a distance-3 range -- and publishes nothing but
+   the zeroed score.  The three unpublished globals keep their sentinels, which
+   is why a reader has to look at the score first. */
+static void a_search_that_catches_nobody_publishes_nothing(void)
+{
+    bsp_stage();
+    bsp_caster(10);
+    bsp_learns(0, 1);
+    bsp_spell(1, 10, 3, 0, 0, 0);
+    data_fdps_map_unit_count = 1;
+
+    CHECK_EQ(fdps_map_actor_score_best_spell(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 0);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, BSP_SENTINEL);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_x, BSP_SENTINEL);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_target_y, BSP_SENTINEL);
+}
+
 void run_aiscore_tests(void)
 {
     RUN_TEST(attack_search_reads_these_offsets);
@@ -1651,4 +2060,15 @@ void run_aiscore_tests(void)
     RUN_TEST(only_the_two_quake_spells_skip_flyers);
     RUN_TEST(a_nonpositive_target_count_scores_zero_everywhere);
     RUN_TEST(both_walks_follow_the_index_list);
+    RUN_TEST(spell_search_reads_these_offsets);
+    RUN_TEST(an_actor_that_knows_no_spell_returns_at_once);
+    RUN_TEST(a_sealed_caster_is_skipped);
+    RUN_TEST(an_unaffordable_spell_is_passed_over);
+    RUN_TEST(the_target_byte_is_inverted_for_an_enemy_caster);
+    RUN_TEST(the_cast_distance_bounds_the_candidate_tiles);
+    RUN_TEST(the_published_spell_id_is_the_learned_id);
+    RUN_TEST(a_higher_score_beats_a_bigger_power);
+    RUN_TEST(the_tie_break_reads_power_signed);
+    RUN_TEST(an_equal_power_does_not_displace_the_incumbent);
+    RUN_TEST(a_search_that_catches_nobody_publishes_nothing);
 }

@@ -51,6 +51,48 @@
 extern int fdps_map_actor_score_best_attack(int unit_index, int side_select);
 #pragma aux fdps_map_actor_score_best_attack "*" parm caller [];
 
+/* Which spell should the actor at unit_index cast this turn, and where?  Walks
+   the spells the actor has learned, spreads each one's cast distance out of the
+   actor's own tile as a walkable range, collects the units the spell would
+   catch from every tile in that range, scores each (spell, tile) pair with
+   fdps_score_targets_for_spell below and publishes the best in the four AI
+   decision globals gamedata.h declares:
+   data_fdps_battle_ai_best_spell_score, data_fdps_map_ai_best_spell_id,
+   data_fdps_battle_ai_best_spell_target_x and ..._target_y.  Always returns 0.
+
+   Two early exits leave the score at a fresh 0 and the other three globals
+   untouched: an actor that has learned no spell, and an actor whose
+   status_timers[5] -- the timer 封魔咒術 leaves -- is still running.  A spell
+   whose MP cost exceeds the actor's current MP is passed over, an exact match
+   being affordable.
+
+   side_select says which side the actor is on and decides how the spell's own
+   target byte becomes fdps_collect_targets_in_range's select_mode: non-zero
+   forwards the byte unchanged, 0 -- the enemy phase -- replaces it with
+   (byte == 0).  That inversion is boolean, so the target byte of 3 that 0x16
+   神行術 alone carries comes out as 0 for an enemy caster, the same value a
+   byte of 1 gives.  Only 0, 1 and 3 occur in MAGICDAT.DAT, so this caller never
+   produces that collector's select_mode 2.
+
+   The cast distance is handed to the flood fill RAW, straight-line bit 0x10
+   included, which the player's own targeting path decodes and this one does not
+   (assets/tables/spells.md).  The range is spread over PROMAP.DAT row 0, whose
+   eight terrain costs are all 1, so it counts walkable tiles and walls cut it
+   short; a distance of 0 leaves the actor's own tile as the only candidate.
+
+   The score is on the same tier scale as the attack and item scorers, and the
+   ranking's tie-break is the spell's signed power word: on an equal score the
+   larger power wins, so an ordinary spell always outranks one of the eight
+   絕招, which store power as a negative attack multiplier.
+
+   The grid has to arrive as fdps_map_grid_reset (movegrid.h) leaves it and is
+   reset again after every fill.  Nothing is bounds checked: not the candidate
+   tiles against the 200-pair buffer, not the targets against the 32-index
+   buffer, not the learned spells against the 20-byte list, and not the malloc
+   against null. */
+extern int fdps_map_actor_score_best_spell(int unit_index, int side_select);
+#pragma aux fdps_map_actor_score_best_spell "*" parm caller [];
+
 /* How much is using item_id on these targets worth?  target_unit_indices is
    target_count battle unit indices, one byte each; the per-target scores are
    summed and the sum returned.

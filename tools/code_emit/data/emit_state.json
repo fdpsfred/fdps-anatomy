@@ -636,6 +636,14 @@
       "status": "committed",
       "emitted_against": "0x2fc",
       "rounds": 0
+    },
+    "00013420": {
+      "name": "fdps_map_actor_score_best_spell",
+      "target": "aiscore.c",
+      "body_size": "0x24a",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x24a"
     }
   }
 }

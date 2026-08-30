@@ -278,6 +278,168 @@ int fdps_score_targets_for_item(int item_id, int target_count,
     return total;
 }
 
+/* The three ailment timers as status_timers[] indices, for the branches that
+   read them through the field rather than through an offset argument.  [5] at
+   record +0x27 is the magic seal 封魔咒術 leaves. */
+#define POISON_TIMER_SLOT    3
+#define PARALYSIS_TIMER_SLOT 4
+#define SEAL_TIMER_SLOT      5
+
+/* The one heap block fdps_map_actor_score_best_spell takes for its search:
+   PUSH 0x190 at 0001349f, room for 200 (x, y) byte pairs.  The two stack
+   arrays are the frame slots at [EBP-0x5c] and [EBP-0x7c]: 20 bytes for the
+   spell-id list fdps_unit_collect_known_spells fills -- which is half the 40
+   ids that function can write -- and 32 bytes for the unit indices
+   fdps_collect_targets_in_range appends.  None of the three is bounds checked
+   against what is written into it. */
+#define SPELL_SEARCH_TILE_BYTES 0x190
+#define SPELL_SEARCH_KNOWN_SPELL_IDS 20
+#define SPELL_SEARCH_TARGET_BYTES 32
+
+/* PROMAP.DAT row 0, the default class row whose eight terrain costs are all 1
+   -- PUSH 0x0 at 00013436.  The cast range is therefore counted in walkable
+   tiles rather than in the acting class's own movement costs. */
+#define SPELL_SEARCH_DEFAULT_CLASS_ROW 0
+
+/* 00013420.  Picks the best spell the actor at unit_index could cast this turn
+   together with the tile to centre it on, and publishes that choice in the AI
+   decision globals.  Always returns 0; all three callers discard it and read
+   the globals instead.
+
+   The score global is zeroed at 0001342c, before anything else, so a caller
+   reads a fresh 0 even down the two early returns; the spell id and the two
+   tile coordinates are only written inside the winning branch and keep the
+   previous actor's decision otherwise.
+
+   The class record is fetched once, for row 0 rather than the actor's own row,
+   so the flood fill that spreads the cast range treats every walkable tile as
+   costing 1.  Both early returns are at 00013493: an actor that knows no
+   spells, and an actor whose status_timers[5] -- record +0x27, the timer
+   封魔咒術 leaves -- is still running.
+
+   Per known spell, the MP cost byte at record +0x05 is zero extended and
+   compared against the actor's current MP with JG at 000134f1, so a spell that
+   costs exactly what is left is still affordable.  The cast distance byte at
+   +0x03 goes into fdps_move_grid_flood_fill_range RAW, straight-line flag
+   0x10 and all (assets/tables/spells.md): the player's targeting path decodes
+   that byte and this one does not.
+
+   The select_mode handed to fdps_collect_targets_in_range comes from the
+   spell's target byte at +0x06 and from side_select, at 0001356a: forwarded
+   unchanged when side_select is non-zero, and inverted to (byte == 0) when it
+   is 0, which is what turns a spell authored from the player's side around for
+   an enemy caster.  The inversion is a boolean one, so the target byte of 3
+   that 0x16 神行術 carries comes out of it as 0.
+
+   The ranking at 000135ee is JG on the score, then, on an exact tie, JG on the
+   spell's signed power word at record +0x00.  Power is signed and the eight
+   絕招 store it as a negative attack multiplier, so on a tie an ordinary spell
+   always outranks one of those.
+
+   best_power is initialised here and is NOT in the original: [EBP-0x8] is only
+   written inside the winning branch, so the tie-break at 0001360a reads an
+   unwritten frame slot.  It cannot be observed.  The score global starts at 0
+   and never falls, the tie branch leaves it alone, and so the slot is only
+   ever consulted while the best score is still 0; the first candidate that
+   scores above 0 goes through the JG path, which writes the slot without
+   reading it.  Every consumer of the three published globals is gated on the
+   score reaching 6.
+
+   Nothing is bounds checked: not the tile count against the 200 pairs, not the
+   target count against the 32 indices, not the spell count against the 20-byte
+   list, and not the malloc against null. */
+int fdps_map_actor_score_best_spell(int unit_index, int side_select)
+{
+    struct fdps_unit_record *actor;
+    struct fdps_spell_effect *spell;
+    struct fdps_class_record *default_class_move_cost;
+    unsigned char *tile_coords;
+    unsigned char known_spell_ids[SPELL_SEARCH_KNOWN_SPELL_IDS];
+    unsigned char target_indices[SPELL_SEARCH_TARGET_BYTES];
+    int known_spell_count;
+    int spell_slot;
+    int spell_id;
+    int actor_x;
+    int actor_y;
+    int actor_mp;
+    int tile_count;
+    int tile_slot;
+    int tile_x;
+    int tile_y;
+    int target_select_mode;
+    int target_count;
+    int score_tier;
+    int best_power;
+
+    data_fdps_battle_ai_best_spell_score = 0;
+    default_class_move_cost =
+        fdps_get_class_record(SPELL_SEARCH_DEFAULT_CLASS_ROW);
+    actor = fdps_get_unit_record(unit_index);
+    actor_x = (int) actor->pos_x;
+    actor_y = (int) actor->pos_y;
+    actor_mp = actor->mp_current;
+
+    known_spell_count = fdps_unit_collect_known_spells(unit_index,
+                                                       known_spell_ids);
+    if (known_spell_count == 0 ||
+        actor->status_timers[SEAL_TIMER_SLOT] != 0) {
+        return 0;
+    }
+
+    best_power = 0;
+    tile_coords = malloc(SPELL_SEARCH_TILE_BYTES);
+
+    for (spell_slot = 0; spell_slot < known_spell_count; spell_slot++) {
+        spell_id = (int) known_spell_ids[spell_slot];
+        spell = fdps_get_spell_record(spell_id);
+        if ((int) spell->mp_cost > actor_mp) {
+            continue;
+        }
+
+        fdps_move_grid_flood_fill_range(default_class_move_cost,
+                                        actor_x, actor_y,
+                                        (int) spell->cast_range_flags);
+        tile_count = fdps_map_grid_collect_marked_tiles(tile_coords);
+        fdps_map_grid_reset();
+
+        for (tile_slot = 0; tile_slot < tile_count; tile_slot++) {
+            tile_x = (int) tile_coords[tile_slot * 2];
+            tile_y = (int) tile_coords[tile_slot * 2 + 1];
+            if (side_select == 0) {
+                target_select_mode = (spell->target_side == 0);
+            } else {
+                target_select_mode = (int) spell->target_side;
+            }
+            target_count = fdps_collect_targets_in_range(tile_x, tile_y,
+                                                         target_indices,
+                                                         (int) spell->area,
+                                                         0,
+                                                         target_select_mode);
+            fdps_map_grid_reset();
+            if (target_count == 0) {
+                continue;
+            }
+
+            score_tier = fdps_score_targets_for_spell(spell_id, target_count,
+                                                      target_indices);
+            if (score_tier > data_fdps_battle_ai_best_spell_score ||
+                (score_tier == data_fdps_battle_ai_best_spell_score &&
+                 spell->power > best_power)) {
+                data_fdps_battle_ai_best_spell_score = score_tier;
+                data_fdps_battle_ai_best_spell_target_x =
+                    (unsigned int) tile_x;
+                data_fdps_battle_ai_best_spell_target_y =
+                    (unsigned int) tile_y;
+                data_fdps_map_ai_best_spell_id = spell_id;
+                best_power = spell->power;
+            }
+        }
+    }
+
+    free(tile_coords);
+    return 0;
+}
+
 /* The MAGICDAT.DAT spell ids fdps_score_targets_for_spell weighs by name.  The
    healing span is a range test -- CMP 0xe / JL then CMP 0x10 / JLE at
    0001394b -- and every other id is an equality, so 0x0d and 0x11 are outside
@@ -306,13 +468,6 @@ int fdps_score_targets_for_item(int item_id, int target_count,
 #define STATUS_OFFSET_BLESS_DX  0x24
 #define STATUS_OFFSET_POISON    0x25
 #define STATUS_OFFSET_PARALYSIS 0x26
-
-/* The same three ailment timers as status_timers[] indices, for the two
-   branches that read them through the field rather than through an offset
-   argument.  [5] at record +0x27 is the magic seal 封魔咒術 leaves. */
-#define POISON_TIMER_SLOT    3
-#define PARALYSIS_TIMER_SLOT 4
-#define SEAL_TIMER_SLOT      5
 
 /* The per-target scores the spell branches pay, as the PUSHes and the ADD
    immediates spell them: 8 and 3 for the two heal tiers at 000139c3 and

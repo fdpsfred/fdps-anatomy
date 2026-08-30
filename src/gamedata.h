@@ -364,6 +364,42 @@ extern int data_fdps_battle_ai_best_physical_target_idx;
 extern int data_fdps_battle_ai_best_physical_target_x;
 extern int data_fdps_battle_ai_best_attack_tile_y;
 
+/* 00063f88, 00063f90, 00063f9c and 00063fa0.  What the map AI's spell search
+   decided: how good the best spell it found is, which spell that is and the
+   tile to centre the cast on.  fdps_map_actor_score_best_spell (src/aiscore.h)
+   is the only writer of all four, and a sweep of every reference to 00063f88
+   finds no other writer of the score anywhere in the image.
+
+   The score is a tier on the same scale as
+   data_fdps_battle_ai_best_physical_score above, which is what lets
+   fdps_map_actor_take_best_action compare the three searches with one
+   threshold.  It is signed: the search's own ranking compares it with JG at
+   000135f7.
+
+   The score is written on every call, zeroed before anything else so even the
+   two early returns leave a fresh 0.  The other three are written only inside
+   the winning branch and hold the previous actor's decision otherwise, so a
+   reader that has not looked at the score first is looking at a stale spell and
+   a stale tile.  Every reader in the image does look: fdps_map_actor_behavior_step
+   gates at 00010693, fdps_map_actor_cast_chosen_spell re-checks at 00013cd9,
+   and every arm of fdps_map_actor_take_best_action that reads the spell id has
+   already established that the score is the largest of the three and reaches 6.
+
+   The spell id receives a zero-extended MAGICDAT.DAT id and the two
+   coordinates zero-extended tile bytes, and both readers hand all three
+   straight on as call arguments, so none of them is ever compared or scaled.
+
+   They are four separate globals and not a record: every writer and every
+   reader names each one by its own absolute address, and
+   data_fdps_battle_ai_best_item_score at 00063f8c,
+   data_fdps_battle_ai_best_item_target_y at 00063f94 and
+   data_fdps_map_ai_best_item_target_x at 00063f98 are interleaved between them
+   (rebuild_info/pitfalls.md, contract B). */
+extern int data_fdps_battle_ai_best_spell_score;
+extern int data_fdps_map_ai_best_spell_id;
+extern unsigned int data_fdps_battle_ai_best_spell_target_x;
+extern unsigned int data_fdps_battle_ai_best_spell_target_y;
+
 /* 000643f0.  The inverse palette: which DAC entry is nearest to each of the
    4096 quantised colours, one byte per cell, built by
    fdps_build_palette_tables (src/palette.h) and read by the same eighteen
