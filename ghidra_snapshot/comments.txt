@@ -754,15 +754,15 @@ Passing all four returns 1. Nothing about the attacker beyond its tile position 
 
 Parameters:
   attacker_unit -- index into the 0x50-byte unit record array based at DAT_00069cd8, the unit that just attacked; only its x/y bytes are read.
-  defender_unit -- index into the same array, the unit that was attacked and the subject of every test but the adjacency one. FUN_00012e50 passes the map-AI's current target held in DAT_00063f74.
+  defender_unit -- index into the same array, the unit that was attacked and the subject of every test but the adjacency one. fdps_map_actor_move_and_attack passes the map-AI's current target held in DAT_00063f74.
 
 Returns:
-  1 when the defender may counterattack, -1 in every other case. All four call sites compare the result against 1 explicitly.
+  1 when the defender may counterattack, -1 in every other case. All six call sites, in four callers, compare the result against 1 explicitly.
 
 Pool: fdps  [calls fdps_get_unit_record twice and operates on game unit records; no Function ID hit in either library set]
 
 Rebuild note:
-The result is 1 or -1 and never 0, so the natural C test "if (fdps_check_can_counter_attack(a, b))" is true even when no counterattack is allowed; every caller has to compare against 1. The weapon test is also range_min == 1 exactly rather than the in-range test range_min <= 1 <= range_max: FUN_000125c0, which is otherwise the same rule stated against a tile instead of a second unit, writes it as range_min <= 1, and folding the two into one helper would let a weapon whose range_min is 0 (光束砲, item 0x63, range 0-0) counterattack.
+The result is 1 or -1 and never 0, so the natural C test "if (fdps_check_can_counter_attack(a, b))" is true even when no counterattack is allowed; every caller has to compare against 1. The weapon test is also range_min == 1 exactly rather than the in-range test range_min <= 1 <= range_max: fdps_check_can_counter_attack_from_tile, which is otherwise the same rule stated against a tile instead of a second unit, writes it as range_min <= 1, and folding the two into one helper would let a weapon whose range_min is 0 (光束砲, item 0x63, range 0-0) counterattack.
 
 === 000138e1 [EOL]
 Watcom alignment padding: lea eax,[eax+0] / lea edx,[edx+0] / lea eax,[eax+0]

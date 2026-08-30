@@ -90,4 +90,35 @@ extern int fdps_check_can_counter_attack_from_tile(int defender_unit,
                                                    int attacker_y);
 #pragma aux fdps_check_can_counter_attack_from_tile "*" parm caller [];
 
+/* Would unit defender_unit strike back at unit attacker_unit?  Returns 1 when
+   it would and -1 -- NOT 0 -- on every one of the four refusals, so the answer
+   must be compared against 1 and never used as a bare predicate; all six call
+   sites, in the attack exchange, the two attack displays and the map AI, do
+   CMP EAX,1.
+
+   The four tests, all of them on the DEFENDER except the second:
+     - struct fdps_unit_record's status_timers[4] at record offset 0x26, the
+       paralysis counter, must be zero;
+     - the Manhattan distance between the two units' tiles (pos_x, pos_y) must
+       be exactly 1, so a diagonal never counts and neither does the two of them
+       standing on one tile;
+     - the defender must have a weapon equipped, fdps_unit_find_equipped_slot
+       (unititem.h) with want_armor 0 answering something other than -1;
+     - that weapon's ITEM.DAT range_min at item record +0x0b must be exactly 1.
+
+   The last test is where this function and the tile-shaped twin
+   fdps_check_can_counter_attack_from_tile part company: this one requires
+   range_min to be exactly 1, that one accepts 0 as well.  The difference is
+   visible on item 0x63 光束砲, the one weapon-type ITEM.DAT entry whose range
+   is 0-0 (assets/items.md).  Folding the two functions into a shared helper
+   erases that.
+
+   Nothing about the attacker is read but its two tile bytes: its own weapon,
+   side and status timers do not enter, and the two arguments are therefore not
+   interchangeable.  Neither index is range checked; both records are resolved
+   through fdps_get_unit_record, so a call after the array has moved sees the
+   new block.  Nothing is written. */
+extern int fdps_check_can_counter_attack(int attacker_unit, int defender_unit);
+#pragma aux fdps_check_can_counter_attack "*" parm caller [];
+
 #endif

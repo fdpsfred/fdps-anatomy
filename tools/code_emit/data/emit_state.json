@@ -532,6 +532,14 @@
       "status": "committed",
       "emitted_against": "0x320",
       "rounds": 0
+    },
+    "000137e0": {
+      "name": "fdps_check_can_counter_attack",
+      "target": "aitarget.c",
+      "body_size": "0x101",
+      "status": "committed",
+      "emitted_against": "0x101",
+      "rounds": 0
     }
   }
 }

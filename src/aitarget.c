@@ -265,3 +265,90 @@ int fdps_check_can_counter_attack_from_tile(int defender_unit, int attacker_x,
     }
     return can_counter;
 }
+
+/* 000137e0.  The counterattack question asked about a second UNIT rather than
+   about a tile, which is the form the fight itself and the three display
+   routines need once both parties are on the map.
+
+   Both records are resolved before anything is tested: CALL 0x0002d210 at
+   000137f0 for the attacker and again at 000137ff for the defender, the two
+   pointers parked at [EBP-0x1c] and [EBP-0x18], and only then does the first
+   test run.  The attacker's record is fetched even on the path where the
+   defender is paralysed and the tile bytes are never looked at.
+
+   Four tests in the same order as the tile twin above, each failure storing -1
+   into the one result slot at [EBP-0x4] and jumping to the single epilogue at
+   000138d7; only the fall-through stores 1.  The result is 1 or -1 and never 0,
+   and all six call sites -- 00012f04, 00012f6c, 00018f7b, 000190f5, 0001cdee,
+   0001ef6c -- follow the CALL with CMP EAX,0x1.  A rewrite into a bool-shaped
+   predicate returning 0 for a refusal passes every one of those compares in the
+   same direction and is still wrong the moment somebody writes the natural
+   `if (fdps_check_can_counter_attack(a, b))`.
+
+   CMP byte ptr [EAX+0x26],0x0 / JZ at 0001380d is a plain zero test on the
+   DEFENDER's status_timers[4], the paralysis counter.  Nothing about the
+   attacker beyond its two tile bytes is examined anywhere in the body.
+
+   Each adjacency delta is formed as the attacker's byte minus the defender's,
+   both zero-extended -- XOR EDX,EDX / MOV DL,byte ptr [EAX] for the attacker
+   and MOV AL,byte ptr [EAX] / AND EAX,0xff for the defender at 00013822 --
+   so neither coordinate is ever signed and the order of subtraction does not
+   matter once abs has run.  CMP EAX,0x1 / JZ at 00013867 is on the sum: EQUAL
+   to one, so the defender's own tile at sum 0 and every diagonal at sum 2 are
+   refused alike.
+
+   CMP EAX,0x1 / JZ at 000138c2 is the range test and it is EQUALITY, where the
+   tile twin fdps_check_can_counter_attack_from_tile at 000125c0 writes the same
+   byte as CMP EAX,0x1 / JLE.  The pair therefore disagree about a defender
+   holding item 0x63 光束砲, whose range is 0-0 (assets/items.md): the map AI
+   predicts a counterattack that this function, the one the exchange actually
+   consults, refuses.  That divergence is the behaviour; the two must not be
+   folded into a shared helper.  range_max at item record +0x0c is not read.
+
+   The equipped-slot call is fdps_unit_find_equipped_slot(defender_unit, 0) --
+   PUSH 0x0 first at 00013875 -- so it is the weapon and not the armour, and -1
+   from it is a refusal.  The original reuses the one stack slot at [EBP-0x8]
+   for the slot number and then the item id, which is two values and is spelt as
+   two here.
+
+   abs is the CRT call the original makes (CALL 0x0003d364, twice).  The flag
+   set carries no -oi, so __INLINE_FUNCTIONS__ is not defined and stdlib.h
+   leaves abs a call here as it does in the three functions above. */
+int fdps_check_can_counter_attack(int attacker_unit, int defender_unit)
+{
+    struct fdps_unit_record *attacker;
+    struct fdps_unit_record *defender;
+    struct fdps_item_effect *weapon;
+    int dist_x;
+    int dist_y;
+    int weapon_slot;
+    int weapon_item_id;
+    int can_counter;
+
+    attacker = fdps_get_unit_record(attacker_unit);
+    defender = fdps_get_unit_record(defender_unit);
+    if (defender->status_timers[4] != 0) {
+        can_counter = -1;
+    } else {
+        dist_x = abs((int) attacker->pos_x - (int) defender->pos_x);
+        dist_y = abs((int) attacker->pos_y - (int) defender->pos_y);
+        if (dist_x + dist_y != 1) {
+            can_counter = -1;
+        } else {
+            weapon_slot = fdps_unit_find_equipped_slot(defender_unit, 0);
+            if (weapon_slot == -1) {
+                can_counter = -1;
+            } else {
+                weapon_item_id = fdps_unit_get_item_id(defender_unit,
+                                                       weapon_slot);
+                weapon = fdps_get_item_record(weapon_item_id);
+                if (weapon->range_min == 1) {
+                    can_counter = 1;
+                } else {
+                    can_counter = -1;
+                }
+            }
+        }
+    }
+    return can_counter;
+}
