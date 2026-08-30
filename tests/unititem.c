@@ -35,6 +35,14 @@
  * on are 8 (CMP EAX,0x8 / JNZ at 000388e7) and 0 (TEST EAX,EAX / JNZ at
  * 0003406e), and both are asserted directly.
  *
+ * The fdps_unit_remove_item cases take theirs from the assembly at 00025cc0 --
+ * MOV EAX,0x7 / SUB EAX,[EBP+0x18] / ADD EAX,EAX for the (7 - slot) * 2 byte
+ * count, ADD EAX,0xc for the source entry and ADD EAX,0xa for the destination,
+ * and MOV byte ptr [EAX+0x18],0x80 for the one-byte empty marker on the last
+ * entry -- and from the same record layouts.  The slot values exercised are
+ * 0 through 7, which is the whole range the callers reach; a slot above 7 hands
+ * memmove a negative and therefore huge byte count and is not staged here.
+ *
  * The item block is published one record PAST the start of its storage, so
  * record -1 exists and is addressable.  That is what lets the unsigned read of
  * the id byte be told apart from a signed one: id 0xff must reach record 255
@@ -684,6 +692,211 @@ static void item_count_resolves_the_record_on_every_call(void)
     CHECK_EQ(fdps_unit_item_count(0), 1);
 }
 
+/* fdps_unit_remove_item at 00025cc0.  MOV EAX,0x7 / SUB EAX,[EBP+0x18] / ADD
+   EAX,EAX for the byte count, then the source at record + 0x0c + slot * 2 and
+   the destination at record + 0x0a + slot * 2: entries slot+1..7 move down one
+   place.  The entries below the removed one keep their bytes, and entry 7 is
+   the source of the last move and is never a destination, so its own two bytes
+   are untouched by the copy. */
+static void remove_item_shifts_the_entries_above_it_down(void)
+{
+    unsigned char *record;
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, 0x40 + slot_index, 0x10 + slot_index);
+    }
+
+    fdps_unit_remove_item(0, 2);
+
+    record = unit_slot(0) + OFF_INVENTORY;
+    CHECK_EQ(record[0], 0x40);
+    CHECK_EQ(record[1], 0x10);
+    CHECK_EQ(record[2], 0x41);
+    CHECK_EQ(record[3], 0x11);
+    CHECK_EQ(record[4], 0x43);
+    CHECK_EQ(record[5], 0x13);
+    CHECK_EQ(record[6], 0x44);
+    CHECK_EQ(record[7], 0x14);
+    CHECK_EQ(record[8], 0x45);
+    CHECK_EQ(record[9], 0x15);
+    CHECK_EQ(record[10], 0x46);
+    CHECK_EQ(record[11], 0x16);
+    CHECK_EQ(record[12], 0x47);
+    CHECK_EQ(record[13], 0x17);
+}
+
+/* Removing entry 0 is the longest move -- count (7 - 0) * 2 = 14 -- and the
+   source and destination overlap by six of the seven entries, so a copy that
+   ran downward instead of upward would smear entry 1 across the field.  Every
+   entry below the last must end up holding its higher neighbour's pair. */
+static void remove_item_at_slot_zero_moves_all_seven_entries(void)
+{
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_CARRIED, 0x20 + slot_index);
+    }
+
+    fdps_unit_remove_item(0, 0);
+
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT - 1; slot_index++) {
+        CHECK_EQ(fdps_unit_get_item_id(0, slot_index), 0x21 + slot_index);
+    }
+}
+
+/* MOV byte ptr [EAX+0x18],0x80: the last entry is marked empty whichever slot
+   was removed, and the count that mark answers is the one the callers branch
+   on.  A full inventory becomes seven. */
+static void remove_item_always_marks_the_last_entry_empty(void)
+{
+    int removed_slot;
+    int slot_index;
+
+    for (removed_slot = 0;
+         removed_slot < INVENTORY_ENTRY_COUNT;
+         removed_slot++) {
+        stage();
+        for (slot_index = 0;
+             slot_index < INVENTORY_ENTRY_COUNT;
+             slot_index++) {
+            set_entry(0, slot_index, FLAG_CARRIED, 0x30 + slot_index);
+        }
+
+        fdps_unit_remove_item(0, removed_slot);
+
+        CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 14], FLAG_EMPTY);
+        CHECK_EQ(fdps_unit_item_count(0), INVENTORY_ENTRY_COUNT - 1);
+    }
+}
+
+/* The rebuild note.  The store is one byte wide, so the id byte at record
+   offset 0x19 keeps what the shift left in it.  Entry 7 is never a destination
+   of the move, so what it keeps is its own original id -- 0x37 here -- and
+   fdps_unit_get_item_id, which does not consult the flag byte, still answers
+   with it.  Clearing the whole 2-byte entry would answer 0. */
+static void remove_item_leaves_the_last_entrys_id_byte_alone(void)
+{
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_CARRIED, 0x30 + slot_index);
+    }
+
+    fdps_unit_remove_item(0, 3);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 15], 0x37);
+    CHECK_EQ(fdps_unit_get_item_id(0, 7), 0x37);
+}
+
+/* SUB EAX,[EBP+0x18] with slot 7 gives a count of zero: memmove copies nothing
+   and the only change to the record is the empty marker.  Both bytes of entry 6
+   and the id byte of entry 7 are exactly as they were. */
+static void remove_item_at_the_last_slot_moves_nothing(void)
+{
+    unsigned char *record;
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_EQUIPPED, 0x50 + slot_index);
+    }
+
+    fdps_unit_remove_item(0, INVENTORY_ENTRY_COUNT - 1);
+
+    record = unit_slot(0) + OFF_INVENTORY;
+    CHECK_EQ(record[12], FLAG_EQUIPPED);
+    CHECK_EQ(record[13], 0x56);
+    CHECK_EQ(record[14], FLAG_EMPTY);
+    CHECK_EQ(record[15], 0x57);
+}
+
+/* The three addresses are all record + 0x0a + something, and the widest write
+   is entry 0 through the marker at 0x18: nothing below record offset 0x0a and
+   nothing from 0x19 up is touched, and the neighbouring records are not
+   touched at all. */
+static void remove_item_writes_only_inside_the_inventory_field(void)
+{
+    static unsigned char block_before[sizeof(unit_block)];
+    int i;
+    int diffs;
+
+    stage();
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        unit_block[i] = (unsigned char) (i + 1);
+    }
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        block_before[i] = unit_block[i];
+    }
+
+    fdps_unit_remove_item(1, 0);
+
+    diffs = 0;
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        if (i >= UNIT_RECORD_STRIDE + OFF_INVENTORY &&
+            i <= UNIT_RECORD_STRIDE + OFF_INVENTORY + 14) {
+            continue;
+        }
+        if (unit_block[i] != block_before[i]) {
+            diffs++;
+        }
+    }
+    CHECK_EQ(diffs, 0);
+}
+
+/* MOV EAX,[EBP+0x14] / PUSH EAX / CALL fdps_get_unit_record: the first argument
+   picks the record that is edited, so a removal from one unit leaves its
+   neighbours' inventories exactly as they were. */
+static void remove_item_edits_the_record_the_index_names(void)
+{
+    int slot_index;
+    int unit_index;
+
+    stage();
+    for (unit_index = 0; unit_index < STAGE_UNITS; unit_index++) {
+        for (slot_index = 0;
+             slot_index < INVENTORY_ENTRY_COUNT;
+             slot_index++) {
+            set_entry(unit_index, slot_index, FLAG_CARRIED,
+                      0x60 + slot_index);
+        }
+    }
+
+    fdps_unit_remove_item(2, 0);
+
+    CHECK_EQ(fdps_unit_item_count(0), INVENTORY_ENTRY_COUNT);
+    CHECK_EQ(fdps_unit_item_count(1), INVENTORY_ENTRY_COUNT);
+    CHECK_EQ(fdps_unit_item_count(2), INVENTORY_ENTRY_COUNT - 1);
+    CHECK_EQ(fdps_unit_item_count(3), INVENTORY_ENTRY_COUNT);
+    CHECK_EQ(fdps_unit_get_item_id(2, 0), 0x61);
+    CHECK_EQ(fdps_unit_get_item_id(1, 0), 0x60);
+}
+
+/* The base is read through fdps_get_unit_record on every call, so republishing
+   it between two identical calls sends the second removal to a different
+   record. */
+static void remove_item_resolves_the_record_on_every_call(void)
+{
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_CARRIED, 0x70 + slot_index);
+        set_entry(1, slot_index, FLAG_CARRIED, 0x80 + slot_index);
+    }
+
+    fdps_unit_remove_item(0, 0);
+    CHECK_EQ(fdps_unit_get_item_id(0, 0), 0x71);
+    CHECK_EQ(fdps_unit_get_item_id(1, 0), 0x80);
+
+    data_fdps_map_unit_array_ptr = unit_slot(1);
+    fdps_unit_remove_item(0, 0);
+    CHECK_EQ(unit_block[UNIT_RECORD_STRIDE + OFF_INVENTORY + 1], 0x81);
+}
+
 void run_unititem_tests(void)
 {
     RUN_TEST(the_two_record_layouts_match_the_strides);
@@ -716,4 +929,12 @@ void run_unititem_tests(void)
     RUN_TEST(item_count_takes_its_record_from_the_index);
     RUN_TEST(item_count_writes_nothing);
     RUN_TEST(item_count_resolves_the_record_on_every_call);
+    RUN_TEST(remove_item_shifts_the_entries_above_it_down);
+    RUN_TEST(remove_item_at_slot_zero_moves_all_seven_entries);
+    RUN_TEST(remove_item_always_marks_the_last_entry_empty);
+    RUN_TEST(remove_item_leaves_the_last_entrys_id_byte_alone);
+    RUN_TEST(remove_item_at_the_last_slot_moves_nothing);
+    RUN_TEST(remove_item_writes_only_inside_the_inventory_field);
+    RUN_TEST(remove_item_edits_the_record_the_index_names);
+    RUN_TEST(remove_item_resolves_the_record_on_every_call);
 }

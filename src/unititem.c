@@ -4,6 +4,8 @@
  * fdps_get_unit_record and works on the eight 2-byte inventory entries at
  * record offset 0x0a; the file owns no state.
  */
+#include <stddef.h>
+#include <string.h>
 #include "fdpstype.h"
 #include "table.h"
 #include "unit.h"
@@ -166,4 +168,49 @@ int fdps_unit_item_count(int unit_index)
     }
 
     return occupied_count;
+}
+
+/* 00025cc0.  Drops one inventory entry and closes the gap.  Straight-line code
+   with no branch at all -- the whole body is the record call, one memmove and
+   one byte store.
+
+   The record comes back into the only local the function has, MOV dword ptr
+   [EBP-0x4],EAX at 00025cd8, and every one of the three addresses below is
+   built from it.
+
+   The three memmove arguments are pushed right to left and are computed in
+   that order.  The count first: MOV EAX,0x7 / SUB EAX,[EBP+0x18] / ADD EAX,EAX
+   at 00025cdb, which is (7 - slot) * 2 bytes, the entries above the removed one
+   at two bytes each.  Then the source, MOV EAX,[EBP+0x18] / ADD EAX,EAX / ADD
+   EAX,[EBP-0x4] / ADD EAX,0xc, which is entry slot+1; then the destination, the
+   same three instructions with ADD EAX,0xa, which is entry slot.  So entries
+   slot+1..7 become entries slot..6.  The two spans overlap by every entry but
+   one and the copy runs upward, which is what makes this memmove and not
+   memcpy.
+
+   The count is formed as a signed subtract and pushed as it stands, so it is
+   the signed value that reaches memmove's unsigned parameter: slot 7 makes it
+   zero and nothing moves, and any slot above 7 makes it negative and therefore
+   a huge byte count.  Neither argument is range checked anywhere in the body.
+
+   The last store is MOV byte ptr [EAX+0x18],0x80 at 00025d09 -- record offset
+   0x0a plus 7 * 2, the flag byte of the last entry -- and it is one byte wide.
+   The id byte beside it at record offset 0x19 keeps whatever the memmove left
+   there; see the header for why widening this store changes behaviour.
+
+   EAX still holds the record pointer at the RET, but the function is declared
+   void because no caller reads it: all 37 call sites push two arguments, CALL,
+   and ADD ESP,0x8. */
+void fdps_unit_remove_item(int unit_index, int slot)
+{
+    struct fdps_unit_record *unit;
+
+    unit = fdps_get_unit_record(unit_index);
+
+    memmove(&unit->inventory_slots[slot * 2],
+            &unit->inventory_slots[slot * 2 + 2],
+            (size_t) ((INVENTORY_ENTRY_COUNT - 1 - slot) * 2));
+
+    unit->inventory_slots[(INVENTORY_ENTRY_COUNT - 1) * 2] =
+        INVENTORY_FLAG_EMPTY;
 }

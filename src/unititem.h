@@ -92,4 +92,38 @@ extern int fdps_unit_get_item_id(int unit_index, int slot);
 extern int fdps_unit_item_count(int unit_index);
 #pragma aux fdps_unit_item_count "*" parm caller [];
 
+/* Take entry `slot` out of unit `unit_index`'s inventory and close the gap.
+   Entries slot+1..7 move down one place, so the entries that are left stay
+   packed at the front, and the last entry's flag byte is then set to the empty
+   bit 0x80.  Nothing is returned and nothing else in the record is touched.
+
+   The pairing with fdps_unit_add_item is what the callers rely on: the shop and
+   village loops, the eighteen consumable branches of
+   fdps_apply_item_effect_to_targets, and the chapter events that upgrade a
+   weapon all remove the old entry and add the new one, and the packed order is
+   what fdps_unit_item_count's 0-or-8 answers and
+   fdps_unit_find_item_slot's 0..count-1 sweep depend on.
+
+   Neither argument is range checked.  slot 7 is the no-op end of the range --
+   the move is zero bytes long and only the empty marker is written -- and a
+   slot above 7 hands memmove a negative and therefore huge byte count, so
+   every caller has already established the slot: fdps_chapter_27_end tests its
+   slot against -1 before calling, and the menu paths pass the slot the player
+   selected.  A guard added here changes what an out-of-range call does.
+
+   The empty marker is a ONE-BYTE store: only inventory_slots[14], the last
+   entry's flag byte, is written, and the item id byte beside it at
+   inventory_slots[15] keeps whatever the shift left there.  Clearing the whole
+   2-byte entry instead zeroes that id byte, and fdps_unit_get_item_id hands
+   back the id byte without consulting the flag byte, so any path that reads the
+   last slot without checking it first would then see 0 rather than the stale id
+   the original leaves.
+
+   unit_index is a position in the current battle's unit array on the battle
+   side and a party member index on the village and shop side; the record is
+   resolved through fdps_get_unit_record on every call, so a call after the
+   array has moved edits the new block. */
+extern void fdps_unit_remove_item(int unit_index, int slot);
+#pragma aux fdps_unit_remove_item "*" parm caller [];
+
 #endif
