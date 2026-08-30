@@ -47,10 +47,12 @@
 #define INDICATOR_WORD_FIRST_X 1
 
 /* Cell 1 alone is pushed a second pixel right, by a branch of its own.  The
-   glyphs are drawn from a proportional sheet: the M of MISS is the full six
-   pixels wide while the I is narrow, so without the nudge the I would sit
-   against the M.  Writing the uniform i * 6 + 1 for all four cells compiles and
-   looks right and moves the I one pixel left of where the original puts it
+   nudge is positional and not kerning: the branch is on the cell index, and the
+   CURE popup at 0001f7d0 is the same code with another word in it, so the same
+   second pixel lands on the narrow I of MISS and on the U of CURE alike.
+   Writing the uniform i * 6 + 1 for all four cells compiles and looks right and
+   moves that cell one pixel left of where the original puts it, and writing it
+   as a per-letter rule stops nudging CURE at all
    (rebuild_info/pitfalls.md). */
 #define INDICATOR_WORD_NUDGED_CELL 1
 #define INDICATOR_WORD_NUDGED_X 2
@@ -61,6 +63,15 @@
 #define MISS_GLYPH_M 0x34
 #define MISS_GLYPH_I 0x35
 #define MISS_GLYPH_S 0x36
+
+/* The Number.cel glyph ids the CURE popup queues, from the four-byte
+   initialiser image at 0001c2d6 -- the four bytes that follow MISS's own.  Like
+   MISS's they are ids into that sheet and not characters, even though the
+   values happen to be the ASCII 7, 8, 9 and colon. */
+#define CURE_GLYPH_C 0x37
+#define CURE_GLYPH_U 0x38
+#define CURE_GLYPH_R 0x39
+#define CURE_GLYPH_E 0x3a
 
 /* The glyph id that means "draw nothing here"; the player skips such a cell. */
 #define INDICATOR_BLANK_GLYPH 0xff
@@ -174,6 +185,71 @@ void fdps_show_miss_indicator(int unit_index)
 {
     unsigned char glyph_ids[INDICATOR_WORD_CELLS] = {
         MISS_GLYPH_M, MISS_GLYPH_I, MISS_GLYPH_S, MISS_GLYPH_S
+    };
+    struct fdps_unit_record *unit;
+    int tile_x;
+    int tile_y;
+    int cell_index;
+
+    unit = fdps_get_unit_record(unit_index);
+    tile_x = unit->pos_x;
+    tile_y = unit->pos_y;
+
+    if (data_fdps_battle_view_window_origin_x / INDICATOR_TILE_SIZE - 1
+            < tile_x
+        && tile_x < data_fdps_battle_view_window_origin_x / INDICATOR_TILE_SIZE
+                        + INDICATOR_VIEW_COLUMNS
+        && data_fdps_battle_view_window_origin_y / INDICATOR_TILE_SIZE - 1
+            <= tile_y
+        && tile_y <= data_fdps_battle_view_window_origin_y / INDICATOR_TILE_SIZE
+                        + INDICATOR_VIEW_LAST_ROW) {
+        for (cell_index = 0; cell_index < INDICATOR_WORD_CELLS; cell_index++) {
+            if (cell_index == INDICATOR_WORD_NUDGED_CELL) {
+                data_fdps_indicator_queue_cell_x_offset[
+                    data_fdps_indicator_queue_count + cell_index] =
+                        (unsigned char) (cell_index * INDICATOR_WORD_PITCH
+                                         + INDICATOR_WORD_NUDGED_X);
+            } else {
+                data_fdps_indicator_queue_cell_x_offset[
+                    data_fdps_indicator_queue_count + cell_index] =
+                        (unsigned char) (cell_index * INDICATOR_WORD_PITCH
+                                         + INDICATOR_WORD_FIRST_X);
+            }
+
+            data_fdps_battle_indicator_queue_unit_idx[
+                data_fdps_indicator_queue_count + cell_index] =
+                    (unsigned char) unit_index;
+            data_fdps_indicator_queue_glyph_ids[
+                data_fdps_indicator_queue_count + cell_index] =
+                    glyph_ids[cell_index];
+        }
+
+        data_fdps_indicator_queue_count += INDICATOR_WORD_CELLS;
+    }
+}
+
+/* 0001f7d0.  The CURE popup.  Instruction for instruction the same body as
+   fdps_show_miss_indicator above with one difference, the dword of glyph ids it
+   starts from: MOV EAX,[0x0001c2d6] at 0001f7dc against MOV EAX,[0x0001c2d2] at
+   0001f69c, four bytes further into the same initialiser image.  Everything
+   else -- the four cull compares each with its own IDIV by 24 (0001f81b,
+   0001f836, 0001f855, 0001f872), the cell 1 branch, the three stores per cell
+   and the ADD [0x00064378],0x4 -- is the same code at the same shape, so the
+   two are kept as two functions here rather than folded into one helper taking
+   the glyph ids: the image really does hold both bodies, and the caller-supplied
+   variant it would collapse into already exists as fdps_show_sprite_indicator.
+
+   The cull is the same asymmetric window (rebuild_info/pitfalls.md): x
+   exclusive at both ends, y inclusive at both, both origins signed and divided
+   by 24 with the signed divide.  A culled request queues nothing and leaves the
+   cursor where it was.
+
+   The cell x offsets are MISS's, 1, 8, 13 and 19, because the nudge is on the
+   cell index and not on the letter -- here the extra pixel lands on the U. */
+void fdps_show_cure_indicator(int unit_index)
+{
+    unsigned char glyph_ids[INDICATOR_WORD_CELLS] = {
+        CURE_GLYPH_C, CURE_GLYPH_U, CURE_GLYPH_R, CURE_GLYPH_E
     };
     struct fdps_unit_record *unit;
     int tile_x;

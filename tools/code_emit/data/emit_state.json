@@ -463,6 +463,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x138"
+    },
+    "0001f7d0": {
+      "name": "fdps_show_cure_indicator",
+      "target": "indicat.c",
+      "body_size": "0x138",
+      "status": "committed",
+      "emitted_against": "0x138",
+      "rounds": 0
     }
   }
 }

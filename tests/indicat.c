@@ -568,6 +568,248 @@ static void miss_does_not_touch_the_record(void)
     CHECK_EQ(stage_units[0].hp_current, 25);
 }
 
+/* ---- fdps_show_cure_indicator @ 0001f7d0 -------------------------------- */
+
+/* Stand unit 0 on (tile_x, tile_y) with the view scrolled to those pixel
+   origins, ask for a CURE over it and hand back how many cells the queue took:
+   4 when the unit was inside the window, 0 when it was culled. */
+static int cure_cells_queued(int scroll_x, int scroll_y, int tile_x, int tile_y)
+{
+    stage();
+    data_fdps_battle_view_window_origin_x = scroll_x;
+    data_fdps_battle_view_window_origin_y = scroll_y;
+    place(0, tile_x, tile_y);
+    fdps_show_cure_indicator(0);
+    return data_fdps_indicator_queue_count;
+}
+
+/* MOV EAX,[0x0001c2d6] / MOV [EBP-0x4],EAX at 0001f7dc, over the four bytes
+   37 38 39 3a that live there -- the four that follow MISS's own 34 35 36 36.
+   The word is fixed in the function and all four ids differ, so a rebuild that
+   took the address four bytes early would queue MISS out of this function and
+   nothing else about it would look wrong. */
+static void cure_glyphs_are_the_four_fixed_ids(void)
+{
+    stage();
+    place(0, 3, 3);
+    fdps_show_cure_indicator(0);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[0], 0x37);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[1], 0x38);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[2], 0x39);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[3], 0x3a);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[4], FILLER);
+}
+
+/* The two fixed-word popups are separate functions over separate glyph dwords:
+   queueing one after the other puts two different words in the queue rather
+   than the same one twice. */
+static void cure_and_miss_queue_different_words(void)
+{
+    stage();
+    place(0, 3, 3);
+    fdps_show_cure_indicator(0);
+    fdps_show_miss_indicator(0);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[0], 0x37);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[3], 0x3a);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[4], 0x34);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[7], 0x36);
+    CHECK_EQ(data_fdps_indicator_queue_count, 8);
+}
+
+/* MOV AH,0x6 / MUL AH / INC AL at 0001f8bf for every cell but one, and the
+   branch at 0001f89c that sends cell 1 to ADD AL,0x2 at 0001f8a5 instead: the
+   offsets are 1, 8, 13, 19 here as well.  The branch is on the cell index, so
+   the extra pixel lands on the U of CURE just as it lands on the I of MISS --
+   a rebuild that turned the nudge into a narrow-letter rule would leave this
+   popup at 1, 7, 13, 19 (rebuild_info/pitfalls.md). */
+static void cure_cell_one_is_nudged_a_pixel_right(void)
+{
+    stage();
+    place(0, 3, 3);
+    fdps_show_cure_indicator(0);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[0], 1);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[1], 8);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[2], 13);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[3], 19);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[4], FILLER);
+}
+
+/* MOV AL,byte ptr [EBP+0x14] / MOV byte ptr [EDX+0x641e8],AL at 0001f8d9: the
+   argument goes into all four cells as a byte, and it is the index that was
+   passed rather than anything read out of the record. */
+static void cure_unit_index_goes_into_every_cell(void)
+{
+    stage();
+    place(2, 3, 3);
+    fdps_show_cure_indicator(2);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[0], 2);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[1], 2);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[2], 2);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[3], 2);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[4], FILLER);
+}
+
+/* DEC EAX / CMP EAX,[EBP-0x10] / JGE at 0001f821: the left edge is exclusive
+   against origin_tx - 1, so the first column kept is the origin column and the
+   one before it is culled. */
+static void cure_x_window_starts_at_the_origin_column(void)
+{
+    CHECK_EQ(cure_cells_queued(0, 0, 0, 0), 4);
+    CHECK_EQ(cure_cells_queued(240, 0, 9, 0), 0);
+    CHECK_EQ(cure_cells_queued(240, 0, 10, 0), 4);
+}
+
+/* ADD EAX,0xd / CMP EAX,[EBP-0x10] / JG at 0001f83e: the right edge is
+   exclusive against origin_tx + 13, so the last column kept is twelve right of
+   the origin. */
+static void cure_x_window_is_thirteen_columns(void)
+{
+    CHECK_EQ(cure_cells_queued(0, 0, 12, 0), 4);
+    CHECK_EQ(cure_cells_queued(0, 0, 13, 0), 0);
+    CHECK_EQ(cure_cells_queued(240, 0, 22, 0), 4);
+    CHECK_EQ(cure_cells_queued(240, 0, 23, 0), 0);
+}
+
+/* DEC EAX / CMP EAX,[EBP-0xc] / JLE at 0001f85b is INCLUSIVE where the x test
+   at 0001f821 is exclusive: the row one above the origin row still queues a
+   popup.  Writing the two axes alike changes which units get a CURE at the map
+   edge (rebuild_info/pitfalls.md). */
+static void cure_y_window_starts_one_row_above_the_origin(void)
+{
+    CHECK_EQ(cure_cells_queued(0, 240, 0, 8), 0);
+    CHECK_EQ(cure_cells_queued(0, 240, 0, 9), 4);
+    CHECK_EQ(cure_cells_queued(0, 240, 0, 10), 4);
+}
+
+/* ADD EAX,0x8 / CMP EAX,[EBP-0xc] / JGE at 0001f87a: the bottom edge is
+   inclusive against origin_ty + 8, so ten rows are kept against the x test's
+   thirteen columns. */
+static void cure_y_window_ends_eight_rows_below(void)
+{
+    CHECK_EQ(cure_cells_queued(0, 0, 0, 8), 4);
+    CHECK_EQ(cure_cells_queued(0, 0, 0, 9), 0);
+    CHECK_EQ(cure_cells_queued(0, 240, 0, 18), 4);
+    CHECK_EQ(cure_cells_queued(0, 240, 0, 19), 0);
+}
+
+/* MOV EBX,0x18 / IDIV EBX before each of the four compares (0001f81b, 0001f836,
+   0001f855, 0001f872): the origins are pixels and the window is tiles, and the
+   division truncates, so a view scrolled 23 pixels is still standing on column
+   0 and one scrolled 24 has moved a whole column. */
+static void cure_view_origin_is_divided_by_the_tile_size(void)
+{
+    CHECK_EQ(cure_cells_queued(23, 0, 0, 0), 4);
+    CHECK_EQ(cure_cells_queued(23, 0, 12, 0), 4);
+    CHECK_EQ(cure_cells_queued(24, 0, 0, 0), 0);
+    CHECK_EQ(cure_cells_queued(24, 0, 13, 0), 4);
+    CHECK_EQ(cure_cells_queued(0, 23, 0, 8), 4);
+    CHECK_EQ(cure_cells_queued(0, 23, 0, 9), 0);
+    CHECK_EQ(cure_cells_queued(0, 24, 0, 9), 4);
+    CHECK_EQ(cure_cells_queued(0, 24, 0, 10), 0);
+}
+
+/* SAR EDX,0x1f before each IDIV: the origins are signed and the divide is the
+   signed one, truncating toward zero, so a scroll of -24 puts the origin on
+   column -1, which keeps tile 0 and culls tile 12.  Reading either origin as
+   unsigned would divide -24 into an enormous column and cull every unit. */
+static void cure_negative_scroll_divides_signed(void)
+{
+    CHECK_EQ(cure_cells_queued(-24, 0, 0, 0), 4);
+    CHECK_EQ(cure_cells_queued(-24, 0, 11, 0), 4);
+    CHECK_EQ(cure_cells_queued(-24, 0, 12, 0), 0);
+    CHECK_EQ(cure_cells_queued(0, -24, 0, 7), 4);
+    CHECK_EQ(cure_cells_queued(0, -24, 0, 8), 0);
+}
+
+/* Every branch of the cull jumps to 0001f901, past both the append and the
+   ADD [0x00064378],0x4 at 0001f8fa: a culled request writes nothing at all and
+   leaves the cursor exactly where it found it. */
+static void cure_culled_request_leaves_the_queue_untouched(void)
+{
+    stage();
+    data_fdps_indicator_queue_count = 8;
+    place(0, 40, 40);
+    fdps_show_cure_indicator(0);
+    CHECK_EQ(data_fdps_indicator_queue_count, 8);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[8], FILLER);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[8], FILLER);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[8], FILLER);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[11], FILLER);
+}
+
+/* Every store is indexed [0x00064378] + cell (0001f8ad, 0001f8c7, 0001f8d6,
+   0001f8e8) and the cursor moves by exactly four at 0001f8fa: the popup is
+   appended AT the cursor, so a CURE queued after another popup lands beside it
+   and not over it. */
+static void cure_appends_at_the_cursor(void)
+{
+    stage();
+    data_fdps_indicator_queue_count = 8;
+    place(0, 3, 3);
+    fdps_show_cure_indicator(0);
+    CHECK_EQ(data_fdps_indicator_queue_count, 12);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[7], FILLER);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[8], 1);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[11], 19);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[8], 0x37);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[11], 0x3a);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[12], FILLER);
+
+    place(1, 3, 3);
+    fdps_show_cure_indicator(1);
+    CHECK_EQ(data_fdps_indicator_queue_count, 16);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[11], 0);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[12], 1);
+}
+
+/* The record the cull reads is the one fdps_get_unit_record resolves from the
+   argument at 0001f7e8, so which unit is on screen is decided by the unit the
+   CURE is for and not by any other. */
+static void cure_culls_against_the_named_units_record(void)
+{
+    stage();
+    place(0, 40, 40);
+    place(1, 3, 3);
+    fdps_show_cure_indicator(1);
+    CHECK_EQ(data_fdps_indicator_queue_count, 4);
+    stage();
+    place(0, 40, 40);
+    place(1, 3, 3);
+    fdps_show_cure_indicator(0);
+    CHECK_EQ(data_fdps_indicator_queue_count, 0);
+}
+
+/* XOR EAX,EAX before each of MOV AL,[EBX] and MOV AL,[EBX+1] at 0001f7f3 and
+   0001f7fd: the two record bytes are ZERO extended into the signed compare, so
+   a tile of 200 is 200 and not -56.  Scrolling the view onto column and row 200
+   is what tells the two apart. */
+static void cure_tile_bytes_are_zero_extended(void)
+{
+    CHECK_EQ(cure_cells_queued(4800, 0, 200, 0), 4);
+    CHECK_EQ(cure_cells_queued(0, 4800, 0, 200), 4);
+    CHECK_EQ(cure_cells_queued(0, 0, 200, 0), 0);
+    CHECK_EQ(cure_cells_queued(0, 0, 0, 200), 0);
+}
+
+/* Nothing in the function writes through the record pointer.  The callers clear
+   the status-ailment bytes themselves AFTER this call returns -- MOV byte ptr
+   [EAX+0x25],0x0 at 000268a4, which is status_timers[3], and the memset in
+   fdps_cast_spell_on_targets over +0x25..+0x27 --
+   so a rebuild that cleared them here would clear them twice and, worse, would
+   clear them on the path where the popup was culled. */
+static void cure_does_not_touch_the_record(void)
+{
+    stage();
+    place(0, 3, 4);
+    stage_units[0].hp_current = 25;
+    stage_units[0].status_timers[3] = 3;
+    fdps_show_cure_indicator(0);
+    CHECK_EQ(stage_units[0].pos_x, 3);
+    CHECK_EQ(stage_units[0].pos_y, 4);
+    CHECK_EQ(stage_units[0].hp_current, 25);
+    CHECK_EQ(stage_units[0].status_timers[3], 3);
+}
+
 void run_indicat_tests(void)
 {
     RUN_TEST(number_position_is_the_first_two_record_bytes);
@@ -604,6 +846,22 @@ void run_indicat_tests(void)
     RUN_TEST(miss_culls_against_the_named_units_record);
     RUN_TEST(miss_tile_bytes_are_zero_extended);
     RUN_TEST(miss_does_not_touch_the_record);
+
+    RUN_TEST(cure_glyphs_are_the_four_fixed_ids);
+    RUN_TEST(cure_and_miss_queue_different_words);
+    RUN_TEST(cure_cell_one_is_nudged_a_pixel_right);
+    RUN_TEST(cure_unit_index_goes_into_every_cell);
+    RUN_TEST(cure_x_window_starts_at_the_origin_column);
+    RUN_TEST(cure_x_window_is_thirteen_columns);
+    RUN_TEST(cure_y_window_starts_one_row_above_the_origin);
+    RUN_TEST(cure_y_window_ends_eight_rows_below);
+    RUN_TEST(cure_view_origin_is_divided_by_the_tile_size);
+    RUN_TEST(cure_negative_scroll_divides_signed);
+    RUN_TEST(cure_culled_request_leaves_the_queue_untouched);
+    RUN_TEST(cure_appends_at_the_cursor);
+    RUN_TEST(cure_culls_against_the_named_units_record);
+    RUN_TEST(cure_tile_bytes_are_zero_extended);
+    RUN_TEST(cure_does_not_touch_the_record);
 
     /* Put the globals back before leaving.  The runners share one process, and
        a later unit that expects an empty battle or an empty queue would

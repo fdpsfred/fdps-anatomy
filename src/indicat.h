@@ -100,4 +100,41 @@ extern void fdps_show_number_indicator(int value, unsigned char glyph_base,
 extern void fdps_show_miss_indicator(int unit_index);
 #pragma aux fdps_show_miss_indicator "*" parm caller [];
 
+/* 0001f7d0.  Floats the word CURE over one battle unit, to report that a status
+   ailment has just been lifted from it, by appending four cells to the shared
+   queue -- one per glyph of C, U, R, E.  Nothing is drawn here and nothing
+   waits; the caller drains the queue with fdps_play_indicator_queue once it has
+   queued every popup of the batch.
+
+   The glyph ids are fixed at 0x37, 0x38, 0x39, 0x3a in the Number.cel sheet and
+   there is no way to ask for a different word, exactly as with
+   fdps_show_miss_indicator; the caller-supplied variant is
+   fdps_show_sprite_indicator.
+
+   The three shipped call sites all fire on the same shape: the caller has found
+   at least one of the target's three status-ailment bytes set, calls here, and
+   only then clears them.  fdps_apply_item_effect_to_targets calls it for item
+   effect 0x16 when the byte at record +0x25 is set and for effect 0x18 when
+   +0x26 is set; fdps_cast_spell_on_targets calls it when any of the three is
+   set.  So the popup marks a cure that actually took effect and never one
+   applied to a unit that was not ailing -- a rebuild that queued it before
+   testing the bytes would show CURE over every target of a curing spell.
+
+   The request is culled against the same asymmetric tile window
+   fdps_show_number_indicator uses (rebuild_info/pitfalls.md): with the view
+   origins divided by the 24-pixel tile size into origin_tx and origin_ty, the
+   unit is shown when its tile x is in origin_tx .. origin_tx + 12 and its tile
+   y is in origin_ty - 1 .. origin_ty + 8.  A culled request queues nothing and
+   leaves the cursor where it was.
+
+   The four cells sit 1, 8, 13 and 19 pixels into the popup, the same offsets
+   the MISS popup uses: the extra pixel on cell 1 is on the cell index and not
+   on the letter, so here it moves the U.
+
+   unit_index is a position in the current battle's unit array, resolved through
+   fdps_get_unit_record and not range checked; it is also what goes into the
+   queue, as a byte, so the popup follows that unit while it plays. */
+extern void fdps_show_cure_indicator(int unit_index);
+#pragma aux fdps_show_cure_indicator "*" parm caller [];
+
 #endif
