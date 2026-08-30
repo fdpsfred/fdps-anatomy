@@ -251,6 +251,430 @@ static void area_combined_filter(void)
     CHECK_EQ(fdps_collect_targets_in_area(4, 4, 3, NULL, 0), 3);
 }
 
+/* ------------------------------------------------------------------
+ * 00011e50 fdps_collect_targets_in_range
+ *
+ * This one needs five blocks live rather than one.  It reads the movement grid
+ * through data_fdps_battle_move_grid_ptr, and on the flood-filled branch it
+ * calls fdps_get_class_record (which reads data_fdps_class_table_ptr) and
+ * fdps_move_grid_flood_fill_range, which in turn calls fdps_map_load_tile_info
+ * over the terrain layer, the attribute table and the event-code layer.  All
+ * five are staged here for the same reason the unit array is above: the
+ * function takes its whole input from those globals plus its six arguments.
+ * Nothing below asserts what any global holds on its own; ticket 23 owns that.
+ *
+ * The grid always arrives as fdps_map_grid_reset leaves it -- every flags byte
+ * 0x00 and every marker 0xff -- because that is the state the function is
+ * documented to expect and every call site in the image supplies.  Cells past
+ * width*height get marker 0xdd instead, so "the routine wrote here" and "the
+ * routine never reached here" stay distinguishable from "this is off the map".
+ *
+ * Every attribute row is terrain type 0 and every movement cost in the staged
+ * class record is 1, so a flood of n points reaches exactly n tiles of open
+ * ground and the terrain plays no part unless a case sets a flags byte.
+ *
+ * Expected values come from the assembly at 00011e50 -- CMP [EBP+0x20],0x10 /
+ * JGE at 00011e7a, PUSH 0x0 / CALL 0x00018b70 at 00011e90, CMP EAX,[EBP+0x24] /
+ * JGE at 00011f0f, CMP EAX,[EBP+0x20] / JG at 00011f56 and 00011f9d, ADD
+ * [EBP+0x20],-0x10 at 00011f2a, the marker store MOV byte ptr [EAX+0x5],0x0,
+ * CMP EAX,0xff at 00012038 and the four side tests at 00012044-00012094 -- and
+ * by walking the flood fill over the fixture by hand.  None of them is read off
+ * the emitted C.
+ * ------------------------------------------------------------------ */
+
+#define RANGE_CELLS 64
+#define RANGE_ATTR_ROWS 64
+#define RANGE_TILES_AT 0x0b
+#define RANGE_ATTR_AT 0x11
+#define RANGE_EVENT_AT 0x10
+
+static unsigned char range_grid[4 + RANGE_CELLS * 2];
+static unsigned char range_tile_map[RANGE_TILES_AT + RANGE_CELLS * 2];
+static unsigned char range_attr[RANGE_ATTR_AT + RANGE_ATTR_ROWS * 4];
+static unsigned char range_event[RANGE_EVENT_AT + RANGE_CELLS];
+static struct fdps_class_record range_class;
+
+/* Build all five blocks and hang the five globals off them.  The class table
+   base points straight at the one record, because fdps_get_class_record(0) --
+   the literal the function pushes -- resolves to base + 0. */
+static void stage_range(int width, int height)
+{
+    int i;
+    int in_grid_cells;
+
+    in_grid_cells = width * height;
+    if (in_grid_cells < 0) {
+        in_grid_cells = 0;
+    }
+    if (in_grid_cells > RANGE_CELLS) {
+        in_grid_cells = RANGE_CELLS;
+    }
+
+    *(short *) range_grid = (short) width;
+    *(short *) (range_grid + 2) = (short) height;
+    for (i = 0; i < RANGE_CELLS; i++) {
+        range_grid[4 + i * 2] = 0x00;
+        if (i < in_grid_cells) {
+            range_grid[4 + i * 2 + 1] = 0xff;
+        } else {
+            range_grid[4 + i * 2 + 1] = 0xdd;
+        }
+    }
+
+    for (i = 0; i < RANGE_TILES_AT; i++) {
+        range_tile_map[i] = 0xaa;
+    }
+    *(short *) (range_tile_map + 7) = (short) width;
+    for (i = 0; i < RANGE_CELLS; i++) {
+        *(short *) (range_tile_map + RANGE_TILES_AT + i * 2) = (short) i;
+    }
+
+    for (i = 0; i < RANGE_ATTR_AT; i++) {
+        range_attr[i] = 0xaa;
+    }
+    for (i = 0; i < RANGE_ATTR_ROWS * 4; i++) {
+        range_attr[RANGE_ATTR_AT + i] = 0x00;
+    }
+
+    for (i = 0; i < RANGE_EVENT_AT; i++) {
+        range_event[i] = 0xaa;
+    }
+    *(short *) (range_event + 7) = (short) width;
+    for (i = 0; i < RANGE_CELLS; i++) {
+        range_event[RANGE_EVENT_AT + i] = 0x00;
+    }
+
+    for (i = 0; i < 8; i++) {
+        range_class.move_cost[i] = 1;
+    }
+    range_class.critical = 0;
+    range_class.magic_resist_complement = 0;
+
+    data_fdps_battle_move_grid_ptr = range_grid;
+    data_fdps_scene_layer_tile_map_ptrs[0] = range_tile_map;
+    data_fdps_scene_layer_tile_attr_ptr[0] = range_attr;
+    data_fdps_map_cell_event_code_layer_ptr = range_event;
+    data_fdps_class_table_ptr = (unsigned char *) &range_class;
+}
+
+static int range_marker(int index)
+{
+    return (int) range_grid[4 + index * 2 + 1];
+}
+
+static void set_range_cell_flags(int index, int flags)
+{
+    range_grid[4 + index * 2] = (unsigned char) flags;
+}
+
+/* The cell address is formed as grid + 5 + 2 * index -- MOV byte ptr
+   [EAX+0x5],0x0 at 00011f6f over EAX = base + 2 * index -- so the marker has to
+   be the second byte of a two-byte cell for the C to land on the same byte. */
+static void range_cell_is_two_bytes_marker_second(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_move_grid_cell), 2);
+    CHECK_EQ((int) offsetof(struct fdps_move_grid_cell, marker), 1);
+}
+
+/* ADD [EBP+0x20],-0x10 at 00011f2a: range_code 0x10 is a cross with arms of
+   zero, so the centre tile alone is marked and its neighbour is left at the
+   0xff sentinel. */
+static void range_line_reach_is_code_minus_0x10(void)
+{
+    stage_range(5, 5);
+    stage(2);
+    place(0, 2, 2, 0, 0);
+    place(1, 3, 2, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 0, 0), 1);
+    CHECK_EQ(range_marker(2 * 5 + 2), 0);
+    CHECK_EQ(range_marker(2 * 5 + 3), 0xff);
+}
+
+/* CMP EAX,[EBP+0x20] / JG at 00011f56 and 00011f9d is the inclusive test, so
+   arms of one reach exactly one tile out along the row and the column and stop.
+   The two loops write nothing off those two lines, so a diagonal neighbour
+   keeps the sentinel. */
+static void range_line_arms_are_inclusive(void)
+{
+    stage_range(7, 7);
+    stage(0);
+    CHECK_EQ(fdps_collect_targets_in_range(3, 3, NULL, 0x11, 0, 0), 0);
+    CHECK_EQ(range_marker(3 * 7 + 2), 0);
+    CHECK_EQ(range_marker(3 * 7 + 4), 0);
+    CHECK_EQ(range_marker(3 * 7 + 1), 0xff);
+    CHECK_EQ(range_marker(3 * 7 + 5), 0xff);
+    CHECK_EQ(range_marker(2 * 7 + 3), 0);
+    CHECK_EQ(range_marker(4 * 7 + 3), 0);
+    CHECK_EQ(range_marker(1 * 7 + 3), 0xff);
+    CHECK_EQ(range_marker(5 * 7 + 3), 0xff);
+    CHECK_EQ(range_marker(2 * 7 + 2), 0xff);
+}
+
+/* The straight-line branch is a cross and not a square: only the centre's own
+   row and column are painted, so a unit one tile diagonally away is refused
+   however long the arms are. */
+static void range_line_is_a_cross_not_a_square(void)
+{
+    unsigned char out[4];
+
+    stage_range(5, 5);
+    stage(4);
+    place(0, 0, 2, 0, 0);   /* on the row    */
+    place(1, 1, 1, 0, 0);   /* diagonal      */
+    place(2, 2, 4, 0, 0);   /* on the column */
+    place(3, 4, 4, 0, 0);   /* corner        */
+    out[0] = 0xee;
+    out[1] = 0xee;
+    out[2] = 0xee;
+    out[3] = 0xee;
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, out, 0x12, 0, 0), 2);
+    CHECK_EQ(out[0], 0);
+    CHECK_EQ(out[1], 2);
+    CHECK_EQ(out[2], 0xee);
+}
+
+/* The min_dist sweep lives under the range_code < 0x10 arm alone -- JMP
+   0x00011fbc at 00011f25 leaves the straight-line branch before it -- so a
+   cross keeps its own centre tile whatever min_dist says. */
+static void range_line_ignores_min_dist(void)
+{
+    stage_range(5, 5);
+    stage(1);
+    place(0, 2, 2, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 99, 0), 1);
+}
+
+/* Below 0x10 the reach comes from fdps_move_grid_flood_fill_range over the
+   default class row, whose eight terrain costs are all 1, so range_code buys
+   that many tiles of open ground and a unit one tile further out is refused. */
+static void range_flood_reach_is_the_movement_points(void)
+{
+    stage_range(5, 5);
+    stage(4);
+    place(0, 2, 2, 0, 0);   /* distance 0 */
+    place(1, 3, 2, 0, 0);   /* distance 1 */
+    place(2, 4, 2, 0, 0);   /* distance 2 */
+    place(3, 4, 3, 0, 0);   /* distance 3 */
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 2, 0, 0), 3);
+    stage_range(5, 5);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 1, 0, 0), 2);
+    stage_range(5, 5);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0, 0, 0), 1);
+}
+
+/* CMP EAX,[EBP+0x24] / JGE at 00011f0f: the Manhattan cut is strictly
+   less-than, so min_dist 1 drops the centre tile alone and min_dist 2 drops the
+   centre and its four neighbours. */
+static void range_min_dist_is_exclusive(void)
+{
+    stage_range(5, 5);
+    stage(3);
+    place(0, 2, 2, 0, 0);   /* distance 0 */
+    place(1, 3, 2, 0, 0);   /* distance 1 */
+    place(2, 4, 2, 0, 0);   /* distance 2 */
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 2, 0, 0), 3);
+    stage_range(5, 5);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 2, 1, 0), 2);
+    stage_range(5, 5);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 2, 2, 0), 1);
+    stage_range(5, 5);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 2, 3, 0), 0);
+}
+
+/* Two CALLs to the CRT abs at 00011ef1 and 00011f02, added at 00011f0a: the cut
+   is Manhattan and each axis is taken absolutely, so a unit above and to the
+   left of the centre is cut at the same min_dist as one below and to the
+   right. */
+static void range_min_dist_is_manhattan_and_absolute(void)
+{
+    stage_range(5, 5);
+    stage(4);
+    place(0, 1, 1, 0, 0);   /* dx -1, dy -1 -> 2 */
+    place(1, 3, 3, 0, 0);   /* dx +1, dy +1 -> 2 */
+    place(2, 1, 2, 0, 0);   /* dx -1, dy  0 -> 1 */
+    place(3, 3, 2, 0, 0);   /* dx +1, dy  0 -> 1 */
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 2, 2, 0), 2);
+}
+
+/* The maximum reach is a flood fill and NOT a Manhattan disc
+   (rebuild_info/pitfalls.md): the only two-step route from (2,2) to (4,2) runs
+   through (3,2), so marking that cell impassable with flag bit 0x40 puts the
+   unit at (4,2) out of range even though its Manhattan distance is still 2. */
+static void range_flood_is_blocked_by_impassable_cells(void)
+{
+    stage_range(5, 5);
+    stage(1);
+    place(0, 4, 2, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 2, 0, 0), 1);
+    stage_range(5, 5);
+    set_range_cell_flags(2 * 5 + 3, 0x40);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 2, 0, 0), 0);
+}
+
+/* CMP EAX,0xff / JNZ at 00012038: a unit whose cell still holds the
+   unreachable sentinel is dropped, and that is the only thing the range shape
+   contributes to the answer. */
+static void range_unreached_cell_drops_the_unit(void)
+{
+    stage_range(5, 5);
+    stage(2);
+    place(0, 2, 2, 0, 0);
+    place(1, 0, 0, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 0, 0), 1);
+}
+
+/* The routine does not reset the grid, it paints over what it is handed
+   (00011e63 reads the header and the first write follows immediately).  A grid
+   arriving with every marker already relaxed therefore accepts every unit on
+   the map, whatever the range says -- which is why every call site resets it
+   again on the way out. */
+static void range_does_not_reset_the_grid(void)
+{
+    int i;
+
+    stage_range(5, 5);
+    for (i = 0; i < 25; i++) {
+        range_grid[4 + i * 2 + 1] = 0x00;
+    }
+    stage(1);
+    place(0, 4, 4, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_range(0, 0, NULL, 0x10, 0, 0), 1);
+}
+
+/* AND AL,0x1 / JNZ at 00012023: bit 0 of the status byte drops the record
+   before the cell or the side is considered, and it is bit 0 alone. */
+static void range_retired_bit_drops_the_unit(void)
+{
+    stage_range(5, 5);
+    stage(1);
+    place(0, 2, 2, 0, 0x01);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 0, 0), 0);
+    stage_range(5, 5);
+    place(0, 2, 2, 0, 0x02);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 0, 0), 1);
+}
+
+/* The four side tests at 00012044-00012094.  Mode 2 is CMP EAX,0x1 at 00012077
+   -- side 1, no state test -- which is NOT what fdps_collect_targets_in_area
+   reads from the same ITEM.DAT byte, and mode 3 is CMP EAX,0x2 with no state
+   test either. */
+static void range_side_filter_table(void)
+{
+    stage_range(5, 5);
+    stage(3);
+    place(0, 2, 2, 0, 0);
+    place(1, 2, 2, 1, 0);
+    place(2, 2, 2, 2, 0x80);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 0, 0), 1);
+    stage_range(5, 5);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 0, 1), 2);
+    stage_range(5, 5);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 0, 2), 1);
+    stage_range(5, 5);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 0, 3), 1);
+}
+
+/* Mode 2 takes side 1 and refuses side 2, mode 3 the other way round: the two
+   have to be told apart on the same field, because reading either as the other
+   collector's table would swap them. */
+static void range_mode2_is_side1_and_mode3_is_side2(void)
+{
+    unsigned char out[2];
+
+    stage_range(5, 5);
+    stage(2);
+    place(0, 2, 2, 1, 0);
+    place(1, 2, 2, 2, 0);
+    out[0] = 0xee;
+    out[1] = 0xee;
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, out, 0x10, 0, 2), 1);
+    CHECK_EQ(out[0], 0);
+    stage_range(5, 5);
+    out[0] = 0xee;
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, out, 0x10, 0, 3), 1);
+    CHECK_EQ(out[0], 1);
+}
+
+/* The chain ends with JMP 0x000120af at 00012096: a mode outside 0..3 accepts
+   nothing, so the ITEM.DAT select_mode values 4 and 5 come back with a count of
+   zero even with units standing on the centre tile. */
+static void range_unknown_mode_matches_nothing(void)
+{
+    stage_range(5, 5);
+    stage(3);
+    place(0, 2, 2, 0, 0);
+    place(1, 2, 2, 1, 0);
+    place(2, 2, 2, 2, 0);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 0, 4), 0);
+    stage_range(5, 5);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 0, 5), 0);
+    stage_range(5, 5);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 0, -1), 0);
+}
+
+/* CMP [EBP+0x1c],0x0 / JZ 0x000120a9 at 00012098 skips the store only: the
+   increment at 000120ac is outside the guard, so a probing call that passes
+   NULL still gets a real count back. */
+static void range_null_out_still_counts(void)
+{
+    stage_range(5, 5);
+    stage(2);
+    place(0, 2, 2, 0, 0);
+    place(1, 2, 2, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 0, 0), 2);
+}
+
+/* MOV AL,byte ptr [EBP-0x2c] / MOV byte ptr [EDX],AL at 000120a4: the loop
+   index, not a serial number of the match, is stored one byte per match at
+   out_indices[count], and nothing is written past the last match. */
+static void range_appends_unit_indices(void)
+{
+    unsigned char out[4];
+
+    stage_range(5, 5);
+    stage(4);
+    place(0, 0, 0, 0, 0);
+    place(1, 2, 2, 0, 0);
+    place(2, 0, 0, 0, 0);
+    place(3, 2, 2, 0, 0);
+    out[0] = 0xee;
+    out[1] = 0xee;
+    out[2] = 0xee;
+    out[3] = 0xee;
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, out, 0x10, 0, 0), 2);
+    CHECK_EQ(out[0], 1);
+    CHECK_EQ(out[1], 3);
+    CHECK_EQ(out[2], 0xee);
+    CHECK_EQ(out[3], 0xee);
+}
+
+/* CMP EAX,[0x00060150] / JL at 00011fc3: the scan stops at the unit count and
+   not at the end of whatever block the pointer names. */
+static void range_scan_stops_at_the_unit_count(void)
+{
+    stage_range(5, 5);
+    stage(2);
+    place(0, 2, 2, 0, 0);
+    place(1, 2, 2, 0, 0);
+    place(2, 2, 2, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_range(2, 2, NULL, 0x10, 0, 0), 2);
+}
+
+/* IMUL EAX,[EBP-0xc] at 00012002 scales the unit's row by the MOVEMENT GRID's
+   width, and nothing checks either coordinate against the header (the plate at
+   00011e50 says so in as many words).  On a grid four columns wide the unit at
+   (5, 0) therefore reads the very cell the unit at (1, 1) stands on and is
+   accepted with it. */
+static void range_unit_cell_uses_the_grid_width_unchecked(void)
+{
+    stage_range(4, 4);
+    stage(2);
+    place(0, 1, 1, 0, 0);
+    place(1, 5, 0, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_range(1, 1, NULL, 0x10, 0, 0), 2);
+    CHECK_EQ(range_marker(1 * 4 + 1), 0);
+}
+
 void run_aitarget_tests(void)
 {
     RUN_TEST(area_record_stride_is_0x50);
@@ -269,4 +693,36 @@ void run_aitarget_tests(void)
     RUN_TEST(area_null_out_still_counts);
     RUN_TEST(area_does_not_touch_the_records);
     RUN_TEST(area_combined_filter);
+
+    RUN_TEST(range_cell_is_two_bytes_marker_second);
+    RUN_TEST(range_line_reach_is_code_minus_0x10);
+    RUN_TEST(range_line_arms_are_inclusive);
+    RUN_TEST(range_line_is_a_cross_not_a_square);
+    RUN_TEST(range_line_ignores_min_dist);
+    RUN_TEST(range_flood_reach_is_the_movement_points);
+    RUN_TEST(range_min_dist_is_exclusive);
+    RUN_TEST(range_min_dist_is_manhattan_and_absolute);
+    RUN_TEST(range_flood_is_blocked_by_impassable_cells);
+    RUN_TEST(range_unreached_cell_drops_the_unit);
+    RUN_TEST(range_does_not_reset_the_grid);
+    RUN_TEST(range_retired_bit_drops_the_unit);
+    RUN_TEST(range_side_filter_table);
+    RUN_TEST(range_mode2_is_side1_and_mode3_is_side2);
+    RUN_TEST(range_unknown_mode_matches_nothing);
+    RUN_TEST(range_null_out_still_counts);
+    RUN_TEST(range_appends_unit_indices);
+    RUN_TEST(range_scan_stops_at_the_unit_count);
+    RUN_TEST(range_unit_cell_uses_the_grid_width_unchecked);
+
+    /* Put the globals back before leaving.  The runners share one process and
+       every block above is this translation unit's own fixture: a later unit
+       that expects an unallocated grid or an empty battle would otherwise
+       inherit a live pointer into it and pass or fail for the wrong reason. */
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_map_unit_count = 0;
+    data_fdps_battle_move_grid_ptr = NULL;
+    data_fdps_scene_layer_tile_map_ptrs[0] = NULL;
+    data_fdps_scene_layer_tile_attr_ptr[0] = NULL;
+    data_fdps_map_cell_event_code_layer_ptr = NULL;
+    data_fdps_class_table_ptr = NULL;
 }

@@ -383,6 +383,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x489"
+    },
+    "00011e50": {
+      "name": "fdps_collect_targets_in_range",
+      "target": "aitarget.c",
+      "body_size": "0x274",
+      "status": "committed",
+      "emitted_against": "0x274",
+      "rounds": 0
     }
   }
 }
