@@ -94,3 +94,27 @@ int fdps_unit_find_equipped_slot(int unit_index, int want_armor)
 
     return -1;
 }
+
+/* 00025200.  The inventory entry's id byte, read straight out.  Straight-line
+   code with no branch at all: MOV EAX,[EBP+0x14] / PUSH EAX / CALL
+   fdps_get_unit_record / ADD ESP,0x4 for the record, then MOV EAX,[EBP+0x18] /
+   ADD EAX,EAX / ADD EDX,EAX for twice the slot and MOV AL,byte ptr [EDX+0xb]
+   for the byte.  0x0b is 0x0a, the offset of inventory_slots, plus the 1 that
+   picks the id byte of the entry rather than its flag byte.
+
+   XOR EAX,EAX before the MOV AL, so the byte is widened without sign: a slot
+   holding id 0xff answers 255, which is the id fdps_get_item_record then
+   indexes with, and not -1.
+
+   Neither argument is tested and the entry's flag byte is not read, so an
+   empty entry answers with whatever id byte was last left in it.  slot is
+   multiplied and added with nothing in between -- keeping that unguarded is
+   the point; see the header. */
+int fdps_unit_get_item_id(int unit_index, int slot)
+{
+    struct fdps_unit_record *unit;
+
+    unit = fdps_get_unit_record(unit_index);
+
+    return (int) unit->inventory_slots[slot * 2 + 1];
+}

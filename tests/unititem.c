@@ -17,6 +17,14 @@
  * globals at local blocks is the only way to reach the loop.  Nothing below
  * asserts what either global holds on its own -- ticket 23 owns that.
  *
+ * The fdps_unit_get_item_id cases take theirs from the assembly at 00025200 --
+ * ADD EAX,EAX for the two-byte entry stride, MOV EAX,[EBP+0x14] / CALL
+ * fdps_get_unit_record for the record, XOR EAX,EAX / MOV AL,byte ptr [EDX+0xb]
+ * for the unsigned id byte, and the complete absence of any compare or branch
+ * in the body -- and from the same record layouts.  That function touches
+ * neither the item table nor the entry's flag byte, so its cases stage the
+ * unit block alone.
+ *
  * The item block is published one record PAST the start of its storage, so
  * record -1 exists and is addressable.  That is what lets the unsigned read of
  * the id byte be told apart from a signed one: id 0xff must reach record 255
@@ -354,6 +362,145 @@ static void the_record_is_resolved_on_every_call(void)
     CHECK_EQ(fdps_unit_find_equipped_slot(0, 0), 7);
 }
 
+/* fdps_unit_get_item_id at 00025200.  MOV AL,byte ptr [EDX+0xb] after ADD
+   EAX,EAX: the byte the function hands back is the SECOND byte of the entry,
+   the id, and never the flag byte at +0x0a + 2 * slot. */
+static void get_item_id_returns_the_entrys_second_byte(void)
+{
+    stage();
+    set_entry(0, 3, FLAG_CARRIED, 0x2a);
+    CHECK_EQ(fdps_unit_get_item_id(0, 3), 0x2a);
+
+    set_entry(0, 3, 0x77, 0x2a);
+    CHECK_EQ(fdps_unit_get_item_id(0, 3), 0x2a);
+}
+
+/* ADD EAX,EAX before the record base is added: the stride between entries is
+   two bytes, so each of the eight slots answers with its own id and no slot
+   reads its neighbour's. */
+static void get_item_id_reads_each_of_the_eight_slots(void)
+{
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_EQUIPPED, 0x10 + slot_index);
+    }
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        CHECK_EQ(fdps_unit_get_item_id(0, slot_index), 0x10 + slot_index);
+    }
+}
+
+/* XOR EAX,EAX / MOV AL,byte ptr [EDX+0xb]: the byte is widened with no sign,
+   so the two ids a sign-extending read would turn negative come back as 255
+   and 128.  This is the width fdps_get_item_record is then indexed with. */
+static void get_item_id_widens_the_byte_without_sign(void)
+{
+    stage();
+    set_entry(0, 0, FLAG_EQUIPPED, 0xff);
+    set_entry(0, 1, FLAG_EQUIPPED, 0x80);
+    set_entry(0, 2, FLAG_EQUIPPED, 0x7f);
+    CHECK_EQ(fdps_unit_get_item_id(0, 0), 255);
+    CHECK_EQ(fdps_unit_get_item_id(0, 1), 128);
+    CHECK_EQ(fdps_unit_get_item_id(0, 2), 127);
+}
+
+/* There is no test of the flag byte anywhere in the body -- no AND, no TEST,
+   no branch of any kind.  An entry marked empty (0x80) or merely carried
+   answers with its id byte exactly as an equipped one does, so the answer says
+   nothing about whether the slot holds anything. */
+static void get_item_id_ignores_the_entry_flag_byte(void)
+{
+    stage();
+    set_entry(0, 5, FLAG_EMPTY, 0x63);
+    CHECK_EQ(fdps_unit_get_item_id(0, 5), 0x63);
+
+    set_entry(0, 5, FLAG_CARRIED, 0x63);
+    CHECK_EQ(fdps_unit_get_item_id(0, 5), 0x63);
+
+    set_entry(0, 5, FLAG_EQUIPPED, 0x63);
+    CHECK_EQ(fdps_unit_get_item_id(0, 5), 0x63);
+}
+
+/* The rebuild note.  slot goes into the address as slot * 2 with nothing in
+   between, so slot -1 -- which is what fdps_unit_resolve_attack_hit passes
+   when fdps_unit_find_equipped_slot found nothing -- reads record offset 0x09,
+   the reserved_09 byte in front of the inventory, and slot 8 reads 0x1b, the
+   second byte of spells_known_bitmap.  A bounds check or an early return of 0
+   or -1 would answer differently on both. */
+static void get_item_id_does_not_range_check_the_slot(void)
+{
+    unsigned char *record;
+
+    stage();
+    record = unit_slot(0);
+    record[0x09] = 0x5c;
+    record[0x1b] = 0x3d;
+    CHECK_EQ(fdps_unit_get_item_id(0, -1), 0x5c);
+    CHECK_EQ(fdps_unit_get_item_id(0, 8), 0x3d);
+}
+
+/* MOV EAX,[EBP+0x14] / PUSH EAX / CALL fdps_get_unit_record: the first
+   argument picks the record, so the same slot answers differently in different
+   records.  The multiply inside fdps_get_unit_record is signed, so index -1
+   reaches the record in front of the published base. */
+static void get_item_id_takes_its_record_from_the_index(void)
+{
+    stage();
+    set_entry(0, 2, FLAG_EQUIPPED, 0x11);
+    set_entry(1, 2, FLAG_EQUIPPED, 0x22);
+    set_entry(2, 2, FLAG_EQUIPPED, 0x33);
+    CHECK_EQ(fdps_unit_get_item_id(0, 2), 0x11);
+    CHECK_EQ(fdps_unit_get_item_id(1, 2), 0x22);
+    CHECK_EQ(fdps_unit_get_item_id(2, 2), 0x33);
+
+    data_fdps_map_unit_array_ptr = unit_slot(1);
+    CHECK_EQ(fdps_unit_get_item_id(-1, 2), 0x11);
+}
+
+/* The body has no store to the record: the unit block is byte-for-byte the
+   same after a read of an occupied slot, an empty one and an out-of-range
+   one. */
+static void get_item_id_writes_nothing(void)
+{
+    static unsigned char block_before[sizeof(unit_block)];
+    int i;
+    int diffs;
+
+    stage();
+    set_entry(0, 0, FLAG_EQUIPPED, 0x44);
+    set_entry(1, 7, FLAG_EMPTY, 0x55);
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        block_before[i] = unit_block[i];
+    }
+
+    CHECK_EQ(fdps_unit_get_item_id(0, 0), 0x44);
+    CHECK_EQ(fdps_unit_get_item_id(1, 7), 0x55);
+    CHECK_EQ(fdps_unit_get_item_id(2, 9), 0);
+
+    diffs = 0;
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        if (unit_block[i] != block_before[i]) {
+            diffs++;
+        }
+    }
+    CHECK_EQ(diffs, 0);
+}
+
+/* The base global is read through fdps_get_unit_record on every call rather
+   than cached, so republishing it between two identical calls changes the
+   answer. */
+static void get_item_id_resolves_the_record_on_every_call(void)
+{
+    stage();
+    set_entry(0, 6, FLAG_EQUIPPED, 0x66);
+    set_entry(1, 6, FLAG_EQUIPPED, 0x77);
+    CHECK_EQ(fdps_unit_get_item_id(0, 6), 0x66);
+
+    data_fdps_map_unit_array_ptr = unit_slot(1);
+    CHECK_EQ(fdps_unit_get_item_id(0, 6), 0x77);
+}
+
 void run_unititem_tests(void)
 {
     RUN_TEST(the_two_record_layouts_match_the_strides);
@@ -370,4 +517,12 @@ void run_unititem_tests(void)
     RUN_TEST(the_index_selects_its_own_unit_record);
     RUN_TEST(the_search_writes_nothing);
     RUN_TEST(the_record_is_resolved_on_every_call);
+    RUN_TEST(get_item_id_returns_the_entrys_second_byte);
+    RUN_TEST(get_item_id_reads_each_of_the_eight_slots);
+    RUN_TEST(get_item_id_widens_the_byte_without_sign);
+    RUN_TEST(get_item_id_ignores_the_entry_flag_byte);
+    RUN_TEST(get_item_id_does_not_range_check_the_slot);
+    RUN_TEST(get_item_id_takes_its_record_from_the_index);
+    RUN_TEST(get_item_id_writes_nothing);
+    RUN_TEST(get_item_id_resolves_the_record_on_every_call);
 }

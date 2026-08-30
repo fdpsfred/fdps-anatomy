@@ -511,6 +511,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0xbb"
+    },
+    "00025200": {
+      "name": "fdps_unit_get_item_id",
+      "target": "unititem.c",
+      "body_size": "0x37",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x37"
     }
   }
 }

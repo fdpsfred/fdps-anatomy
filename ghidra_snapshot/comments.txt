@@ -5026,11 +5026,11 @@ Alignment padding: lea eax,[eax+0] + mov ecx,ecx, aligning FUN_00025200 to 16 by
 Returns the item id held in one inventory slot of a unit.
 
 Algorithm:
-Calls fdps_get_unit_record(unit_index) to resolve the 0x50-byte unit record in the array based at DAT_00069cd8, then returns the unsigned byte at record + slot*2 + 0x0b. The unit's inventory is eight 2-byte entries starting at record offset 0x0a: byte 0 of an entry is its flag byte (bit 7 set means the slot holds nothing, bit 6 means the item is equipped -- see FUN_00025240 and FUN_00025140) and byte 1, the byte this function returns, is the item id that fdps_get_item_record indexes with. Neither the unit index nor the slot is range-checked.
+Calls fdps_get_unit_record(unit_index) to resolve the 0x50-byte unit record in the array based at DAT_00069cd8, then returns the unsigned byte at record + slot*2 + 0x0b. The unit's inventory is eight 2-byte entries starting at record offset 0x0a: byte 0 of an entry is its flag byte (bit 7 set means the slot holds nothing, bit 6 means the item is equipped -- see fdps_unit_item_count and fdps_unit_find_equipped_slot) and byte 1, the byte this function returns, is the item id that fdps_get_item_record indexes with. Neither the unit index nor the slot is range-checked.
 
 Parameters:
   unit_index -- index into the unit record array at DAT_00069cd8; the same index the callers use with fdps_get_unit_record.
-  slot -- inventory slot, 0..7; usually the slot FUN_00025140 found or a loop counter bounded by the count FUN_00025240 returns.
+  slot -- inventory slot, 0..7; usually the slot fdps_unit_find_equipped_slot found or a loop counter bounded by the count fdps_unit_item_count returns.
 
 Returns:
 The slot's item id, zero-extended to 32 bits. The value is meaningful only when the slot's flag byte says it is occupied; the caller is expected to have established that.
@@ -5038,7 +5038,7 @@ The slot's item id, zero-extended to 32 bits. The value is meaningful only when 
 Pool: fdps  [no Function ID hit in any library; its only callee is the game routine fdps_get_unit_record and all 14 references are direct calls from game code]
 
 Rebuild note:
-The slot index is not validated, and FUN_0001c520 at 0001c5d4 passes the result of FUN_00025140 straight in without testing it for -1, so a unit with no equipped weapon reads record+0x09 -- one byte before the inventory -- and hands that to fdps_get_item_record. Writing the obvious C here, a bounds check on slot or an early return of 0/-1, changes what that path does. Keep the read unguarded.
+The slot index is not validated, and fdps_unit_resolve_attack_hit at 0001c5d4 passes the result of fdps_unit_find_equipped_slot straight in without testing it for -1, so a unit with no equipped weapon reads record+0x09 -- one byte before the inventory -- and hands that to fdps_get_item_record. Writing the obvious C here, a bounds check on slot or an early return of 0/-1, changes what that path does. Keep the read unguarded.
 
 === 00025237 [EOL]
 Alignment padding: 8d 80 00 00 00 00 + 8d 52 00, aligning next function entry to 0x25240.

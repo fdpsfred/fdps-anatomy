@@ -41,4 +41,32 @@
 extern int fdps_unit_find_equipped_slot(int unit_index, int want_armor);
 #pragma aux fdps_unit_find_equipped_slot "*" parm caller [];
 
+/* What item is in this inventory slot?  Returns the id byte of entry `slot` of
+   unit `unit_index` -- struct fdps_unit_record's inventory_slots[slot * 2 + 1]
+   -- widened without sign, so the answer is 0..255 and an entry holding 0xff
+   answers 255.  That is the id the callers hand to fdps_get_item_record, and
+   every one of the fourteen call sites does exactly that with it.
+
+   The entry's flag byte is NOT consulted.  An entry marked empty (bit 0x80) or
+   merely carried rather than equipped answers with its id byte just the same,
+   so the answer is only meaningful once the caller has established that the
+   slot holds something.  Nothing is written and no other byte of the record is
+   read.
+
+   Neither argument is range checked, and that is load-bearing rather than an
+   omission.  slot goes into the address as slot * 2 with nothing in between,
+   so a slot outside 0..7 addresses bytes outside the inventory field:
+   fdps_unit_resolve_attack_hit passes the result of
+   fdps_unit_find_equipped_slot straight in without testing it for -1, and a
+   unit with no equipped weapon therefore reads record offset 0x09 -- the
+   reserved_09 byte in front of the inventory -- and hands that to
+   fdps_get_item_record.  A bounds check on slot, or an early return of 0 or
+   -1, changes what that path does.
+
+   unit_index is a position in the current battle's unit array; the record is
+   resolved through fdps_get_unit_record on every call, so a call after the
+   array has moved sees the new block. */
+extern int fdps_unit_get_item_id(int unit_index, int slot);
+#pragma aux fdps_unit_get_item_id "*" parm caller [];
+
 #endif
