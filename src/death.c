@@ -101,7 +101,7 @@ int fdps_collect_death_scripts(unsigned char *out_scripts)
    at 000274fd, signed and tested before the body, so a count of 0 or below
    returns 0 without resolving a record.
 
-   The three rejections all branch to the loop's increment at 0002750a, which
+   The four rejections all branch to the loop's increment at 0002750a, which
    is what the four continues below are.  In assembly order: AND AL,0x1 / TEST
    EAX,EAX / JNZ at 00027527 on bit 0 of the flags byte at record offset 5 --
    bit 0 alone, so bit 7, the acted-this-turn flag, disqualifies nobody; CMP
