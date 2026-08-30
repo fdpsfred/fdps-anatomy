@@ -1578,6 +1578,386 @@ static void fill_header_height_word_is_signed(void)
     CHECK_EQ(fill_marker(1), 0xdd);
 }
 
+/* fdps_move_path_trace, 00011460.
+ *
+ * Expected values come from the assembly: the direction codes and their scan
+ * order (00011641-000116e1 for mode 0, 000116f4-00011820 for mode 1), the four
+ * edge guards (CMP dword ptr [EBP+0x24],0x0 / JZ at 00011645 and the DEC/JLE
+ * pairs at 00011670 and 0001169a), the strict JL of mode 0 against the JLE plus
+ * tie rule of mode 1, the threshold reload MOV EAX,[EBP-0x28] / MOV
+ * [EBP-0x20],EAX at 00011631 against the single write of [EBP-0x28] at
+ * 00011600, the coordinate updates at 00011824-00011863, the goal test at
+ * 00011866, the reversed copy at 000118bf and, for mode 2, the two side tests
+ * at 000114dd-000114f9, the AND AL,0x1 at 00011532, the JGE at 00011580 and the
+ * CMP ...,0xff at 00011593.  None of them is read off the emitted C.
+ *
+ * Grid, unit array and output buffer are all staged here: the function takes
+ * its entire input from data_fdps_battle_move_grid_ptr,
+ * data_fdps_map_unit_array_ptr and data_fdps_map_unit_count, so pointing those
+ * at local blocks is the only way to reach the body.  Nothing below asserts
+ * what any of the three holds on its own, which is ticket 23's.
+ *
+ * Every grid below is built so the walk provably reaches its goal.  That is not
+ * decoration: the loop's only exit is standing on the goal, so a fixture whose
+ * costs lead nowhere does not fail, it hangs.
+ */
+
+#define TRACE_OUT_BYTES 16
+
+/* 0xee is neither a direction code nor a tile index in any fixture here, so a
+   byte still holding it was not written. */
+static unsigned char trace_out[TRACE_OUT_BYTES];
+
+/* The grid as the flood fill leaves an unreached map: every marker byte holds
+   the 0xff sentinel, and mark_cell() above relaxes the ones a case needs. */
+static void stage_trace(int width, int height)
+{
+    int i;
+
+    for (i = 0; i < STAGE_CELLS; i++) {
+        stage_grid[4 + i * 2] = 0x00;
+        stage_grid[4 + i * 2 + 1] = 0xff;
+    }
+    *(short *) stage_grid = (short) width;
+    *(short *) (stage_grid + 2) = (short) height;
+    data_fdps_battle_move_grid_ptr = stage_grid;
+    for (i = 0; i < TRACE_OUT_BYTES; i++) {
+        trace_out[i] = 0xee;
+    }
+}
+
+static int trace_byte(int index)
+{
+    return (int) trace_out[index];
+}
+
+/* CMP dword ptr [EBP-0x28],0xff / JNZ at 00011603: a start tile the fill never
+   reached is refused before the walk begins, and out_path is not touched. */
+static void trace_unreachable_start_returns_minus_one(void)
+{
+    stage_trace(4, 4);
+    CHECK_EQ(fdps_move_path_trace(0, 0, trace_out, 2, 2, 0), -1);
+    CHECK_EQ(trace_byte(0), 0xee);
+    CHECK_EQ(trace_byte(1), 0xee);
+}
+
+/* The whole of modes 0 and 1's contract in one walk: costs 3,2,1,0 laid out
+   west along row 2 and then north up column 0, so the walk steps west once
+   (code 3) and north twice (code 0).  The count comes back and the codes land
+   REVERSED -- the walk records 3,0,0 and out_path reads 0,0,3 (000118bf:
+   out_path[step_count-1-i]).  The fourth output byte is untouched. */
+static void trace_walks_downhill_and_writes_the_path_reversed(void)
+{
+    stage_trace(4, 4);
+    mark_cell(0, 0);
+    mark_cell(4, 1);
+    mark_cell(8, 2);
+    mark_cell(9, 3);
+    CHECK_EQ(fdps_move_path_trace(0, 0, trace_out, 1, 2, 0), 3);
+    CHECK_EQ(trace_byte(0), 0);
+    CHECK_EQ(trace_byte(1), 0);
+    CHECK_EQ(trace_byte(2), 3);
+    CHECK_EQ(trace_byte(3), 0xee);
+}
+
+/* The other two codes, and the coordinate each one moves: INC dword ptr
+   [EBP+0x20] for code 1 at 00011860 and INC dword ptr [EBP+0x24] for code 2 at
+   00011831.  Costs 2,1,0 run east along row 0 and then south, so the walk
+   records 1 then 2 and out_path reads 2,1. */
+static void trace_direction_codes_one_and_two(void)
+{
+    stage_trace(4, 4);
+    mark_cell(0, 2);
+    mark_cell(1, 1);
+    mark_cell(5, 0);
+    CHECK_EQ(fdps_move_path_trace(1, 1, trace_out, 0, 0, 0), 2);
+    CHECK_EQ(trace_byte(0), 2);
+    CHECK_EQ(trace_byte(1), 1);
+    CHECK_EQ(trace_byte(2), 0xee);
+}
+
+/* The threshold every step compares against is the START tile's cost, taken
+   once at 00011600, and not the cost of the tile the walk is standing on.
+   Costs 5,2,3 run east along row 0: the second step stands on 2 and the only
+   neighbour it can take costs 3, which is dearer than where it is and cheaper
+   than where it started.  The original takes it and reaches the goal; a walk
+   that reseeded the threshold from the current cell would find nothing, move
+   nothing and never leave the loop. */
+static void trace_threshold_is_the_start_tile_cost(void)
+{
+    stage_trace(4, 4);
+    mark_cell(0, 5);
+    mark_cell(1, 2);
+    mark_cell(2, 3);
+    CHECK_EQ(fdps_move_path_trace(2, 0, trace_out, 0, 0, 0), 2);
+    CHECK_EQ(trace_byte(0), 1);
+    CHECK_EQ(trace_byte(1), 1);
+}
+
+/* Mode 0's four compares are JL, so an equal-cost neighbour later in the scan
+   order never displaces one already accepted.  Costs 5,4,3 run east along row 0
+   with a second 3 south of (1,0): the second step sees east 3 and south 3, and
+   mode 0 keeps east.  The mode 1 case below is the same grid. */
+static void trace_mode_zero_keeps_the_heading_on_a_tie(void)
+{
+    stage_trace(4, 4);
+    mark_cell(0, 5);
+    mark_cell(1, 4);
+    mark_cell(2, 3);
+    mark_cell(5, 3);
+    CHECK_EQ(fdps_move_path_trace(2, 0, trace_out, 0, 0, 0), 2);
+    CHECK_EQ(trace_byte(0), 1);
+    CHECK_EQ(trace_byte(1), 1);
+}
+
+/* Mode 1 on the same grid takes the equal cost instead, because a direction has
+   already been chosen this step (step_dir 1, not 4), one step has been recorded
+   and that step's code was 1, not the 2 this branch would write -- the three
+   conditions at 0001174f, 00011751 and 00011768.  So the walk turns south where
+   mode 0 ran east, and the goal it reaches is a different tile. */
+static void trace_mode_one_turns_on_a_tie(void)
+{
+    stage_trace(4, 4);
+    mark_cell(0, 5);
+    mark_cell(1, 4);
+    mark_cell(2, 3);
+    mark_cell(5, 3);
+    CHECK_EQ(fdps_move_path_trace(1, 1, trace_out, 0, 0, 1), 2);
+    CHECK_EQ(trace_byte(0), 2);
+    CHECK_EQ(trace_byte(1), 1);
+}
+
+/* The tie is refused when the last RECORDED step already used the code this
+   branch would write: MOV AL,byte ptr [EAX+EBP*0x1+0xffffff5f] / CMP EAX,0x2 at
+   000117b3.  The walk steps south first (code 2), then meets east 3 and south 3
+   -- the same tie as above, with the previous code now 2 -- and keeps east. */
+static void trace_mode_one_refuses_a_tie_repeating_the_last_step(void)
+{
+    stage_trace(4, 4);
+    mark_cell(0, 5);
+    mark_cell(4, 4);
+    mark_cell(5, 3);
+    mark_cell(8, 3);
+    CHECK_EQ(fdps_move_path_trace(1, 1, trace_out, 0, 0, 1), 2);
+    CHECK_EQ(trace_byte(0), 1);
+    CHECK_EQ(trace_byte(1), 2);
+}
+
+/* CMP dword ptr [EBP-0x3c],0x0 / JNZ at 00011751: with nothing recorded yet
+   there is no previous code to differ from, so the first step of a mode 1 walk
+   refuses an equal cost exactly as mode 0 would.  East 4 and south 4 tie on the
+   opening step; east, which got there first, keeps it. */
+static void trace_mode_one_refuses_a_tie_on_the_first_step(void)
+{
+    stage_trace(4, 4);
+    mark_cell(0, 5);
+    mark_cell(1, 4);
+    mark_cell(4, 4);
+    CHECK_EQ(fdps_move_path_trace(1, 0, trace_out, 0, 0, 1), 1);
+    CHECK_EQ(trace_byte(0), 1);
+    CHECK_EQ(trace_byte(1), 0xee);
+}
+
+/* Code 4 is a step that moves nothing and records nothing (CMP EAX,0x4 / JZ
+   past the store at 00011884), and the goal test at 00011866 runs after the
+   move rather than before it.  Starting on the goal with every neighbour
+   unreachable therefore costs one pass of the loop, writes no output and
+   returns a count of zero. */
+static void trace_no_move_records_nothing_and_returns_zero(void)
+{
+    stage_trace(4, 4);
+    mark_cell(5, 4);
+    CHECK_EQ(fdps_move_path_trace(1, 1, trace_out, 1, 1, 0), 0);
+    CHECK_EQ(trace_byte(0), 0xee);
+}
+
+/* MOV EAX,[EBP-0x38] / DEC / CMP EAX,[EBP+0x20] / JLE at 00011670 skips the
+   east neighbour on the last column.  Without it the read runs past the end of
+   the row into the next one: cell 4 is (0,1), it holds the cheapest cost on the
+   grid, and taking it would step to column 4. */
+static void trace_last_column_skips_the_east_neighbour(void)
+{
+    stage_trace(4, 4);
+    mark_cell(3, 2);
+    mark_cell(2, 1);
+    mark_cell(4, 0);
+    CHECK_EQ(fdps_move_path_trace(2, 0, trace_out, 3, 0, 0), 1);
+    CHECK_EQ(trace_byte(0), 3);
+    CHECK_EQ(trace_byte(1), 0xee);
+}
+
+/* CMP dword ptr [EBP+0x20],0x0 / JZ at 000116c0 skips the west neighbour on
+   column 0.  Without it the read lands on the last cell of the previous row --
+   cell 3 from cell 4 -- which holds the cheapest cost here. */
+static void trace_column_zero_skips_the_west_neighbour(void)
+{
+    stage_trace(4, 4);
+    mark_cell(4, 2);
+    mark_cell(5, 1);
+    mark_cell(3, 0);
+    CHECK_EQ(fdps_move_path_trace(1, 1, trace_out, 0, 1, 0), 1);
+    CHECK_EQ(trace_byte(0), 1);
+    CHECK_EQ(trace_byte(1), 0xee);
+}
+
+/* MOV EAX,[EBP-0x34] / DEC / CMP EAX,[EBP+0x24] / JLE at 0001169a skips the
+   south neighbour on the last row.  Cell 16 is past the 4x4 grid's last cell
+   and holds the cheapest cost, so a missing guard reads a cell the header does
+   not cover. */
+static void trace_last_row_skips_the_south_neighbour(void)
+{
+    stage_trace(4, 4);
+    mark_cell(12, 2);
+    mark_cell(13, 1);
+    mark_cell(16, 0);
+    CHECK_EQ(fdps_move_path_trace(1, 3, trace_out, 0, 3, 0), 1);
+    CHECK_EQ(trace_byte(0), 1);
+    CHECK_EQ(trace_byte(1), 0xee);
+}
+
+/* CMP dword ptr [EBP+0x24],0x0 / JZ at 00011645 skips the north neighbour on
+   row 0.  Without it the read lands inside the four-byte header: from cell 2 it
+   is stage_grid[1], the high byte of the width word, which is 0 for every width
+   this game has and would look like the cheapest cell on the grid. */
+static void trace_row_zero_skips_the_north_neighbour(void)
+{
+    stage_trace(4, 4);
+    mark_cell(2, 2);
+    mark_cell(3, 1);
+    CHECK_EQ((int) stage_grid[1], 0);
+    CHECK_EQ(fdps_move_path_trace(3, 0, trace_out, 2, 0, 0), 1);
+    CHECK_EQ(trace_byte(0), 1);
+    CHECK_EQ(trace_byte(1), 0xee);
+}
+
+/* Mode 2 with start_x zero keeps the units whose side byte is non-zero (the JNZ
+   at 000114ea), walks them all and answers with the lowest marker byte it saw
+   and that unit's own tile bytes.  The side-0 unit sits on the cheapest cell of
+   the three and is not considered.  goal_x, goal_y and start_y are read nowhere
+   on this path, so the nonsense passed for them cannot show up in the answer. */
+static void trace_mode_two_finds_the_cheapest_unit_of_the_other_side(void)
+{
+    stage_trace(4, 4);
+    mark_cell(5, 5);
+    mark_cell(10, 3);
+    mark_cell(15, 1);
+    units_reset(3);
+    put_unit(0, 1, 1, 1, 0);
+    put_unit(1, 2, 2, 2, 0);
+    put_unit(2, 3, 3, 0, 0);
+    CHECK_EQ(fdps_move_path_trace(99, 99, trace_out, 0, 77, 2), 3);
+    CHECK_EQ(trace_byte(0), 2);
+    CHECK_EQ(trace_byte(1), 2);
+    CHECK_EQ(trace_byte(2), 0xee);
+}
+
+/* The mirror, through the JZ at 000114f9: any non-zero start_x keeps the units
+   whose side byte is 0.  Same three units, and the answer is the one the case
+   above threw away.  side_select is a truth value, not a side number -- the
+   value 1 does not mean "side 1", which is the unit it does not pick. */
+static void trace_mode_two_side_select_is_a_truth_value(void)
+{
+    stage_trace(4, 4);
+    mark_cell(5, 5);
+    mark_cell(10, 3);
+    mark_cell(15, 1);
+    units_reset(3);
+    put_unit(0, 1, 1, 1, 0);
+    put_unit(1, 2, 2, 2, 0);
+    put_unit(2, 3, 3, 0, 0);
+    CHECK_EQ(fdps_move_path_trace(0, 0, trace_out, 1, 0, 2), 1);
+    CHECK_EQ(trace_byte(0), 3);
+    CHECK_EQ(trace_byte(1), 3);
+}
+
+/* AND AL,0x1 at 00011532 is bit 0 alone: the retired unit on the cheaper cell
+   is passed over, while the unit carrying the unrelated 0x80 of the same byte
+   still counts. */
+static void trace_mode_two_retired_bit_is_bit_zero_only(void)
+{
+    stage_trace(4, 4);
+    mark_cell(5, 2);
+    mark_cell(10, 4);
+    units_reset(2);
+    put_unit(0, 1, 1, 1, 0x01);
+    put_unit(1, 2, 2, 1, 0x80);
+    CHECK_EQ(fdps_move_path_trace(0, 0, trace_out, 0, 0, 2), 4);
+    CHECK_EQ(trace_byte(0), 2);
+    CHECK_EQ(trace_byte(1), 2);
+}
+
+/* CMP dword ptr [EBP-0x3c],0xff / JNZ at 00011593: the running minimum starts
+   at the same 0xff a cell holds when the fill never reached it, and the compare
+   at 00011580 is strict, so a unit standing on an unreachable cell can never
+   become the answer.  Both arms of "no answer" come back as -1 with out_path
+   untouched -- no unit passed the side filter, and one did but had nowhere
+   reachable to stand. */
+static void trace_mode_two_returns_minus_one_when_nothing_matched(void)
+{
+    stage_trace(4, 4);
+    mark_cell(5, 2);
+    units_reset(2);
+    put_unit(0, 1, 1, 0, 0);
+    put_unit(1, 2, 2, 0, 0);
+    CHECK_EQ(fdps_move_path_trace(0, 0, trace_out, 0, 0, 2), -1);
+    CHECK_EQ(trace_byte(0), 0xee);
+
+    stage_trace(4, 4);
+    units_reset(1);
+    put_unit(0, 1, 1, 1, 0);
+    CHECK_EQ(fdps_move_path_trace(0, 0, trace_out, 0, 0, 2), -1);
+    CHECK_EQ(trace_byte(0), 0xee);
+}
+
+/* JGE at 00011580 skips the store, so of two units on equally cheap cells the
+   one the walk met first keeps the answer.  A JG there would hand it to the
+   later index instead. */
+static void trace_mode_two_ties_go_to_the_lower_index(void)
+{
+    stage_trace(4, 4);
+    mark_cell(5, 3);
+    mark_cell(10, 3);
+    units_reset(2);
+    put_unit(0, 1, 1, 1, 0);
+    put_unit(1, 2, 2, 1, 0);
+    CHECK_EQ(fdps_move_path_trace(0, 0, trace_out, 0, 0, 2), 3);
+    CHECK_EQ(trace_byte(0), 1);
+    CHECK_EQ(trace_byte(1), 1);
+}
+
+/* CMP EAX,dword ptr [0x00060150] / JL at 000114b9 bounds the scan by the unit
+   count and nothing else: the record past the count is staged, sits on the
+   cheapest cell and passes every filter, and the answer ignores it. */
+static void trace_mode_two_scan_stops_at_the_unit_count(void)
+{
+    stage_trace(4, 4);
+    mark_cell(5, 5);
+    mark_cell(10, 1);
+    units_reset(1);
+    put_unit(0, 1, 1, 1, 0);
+    put_unit(1, 2, 2, 1, 0);
+    CHECK_EQ(fdps_move_path_trace(0, 0, trace_out, 0, 0, 2), 5);
+    CHECK_EQ(trace_byte(0), 1);
+    CHECK_EQ(trace_byte(1), 1);
+}
+
+/* IMUL EAX,[EBP-0x30] on record byte +0 and IMUL EAX,[EBP-0x2c] on record byte
+   +1 at 00011552 and 00011566: the column scales by the cell stride and the row
+   by the row stride, never the other way round.  The unit stands at (3,1),
+   which is cell 7; cell 13 is (1,3), the cell the swapped arithmetic would
+   read, and it is cheaper. */
+static void trace_mode_two_cell_is_column_times_two_plus_row_stride(void)
+{
+    stage_trace(4, 4);
+    mark_cell(7, 6);
+    mark_cell(13, 0);
+    units_reset(1);
+    put_unit(0, 3, 1, 1, 0);
+    CHECK_EQ(fdps_move_path_trace(0, 0, trace_out, 0, 0, 2), 6);
+    CHECK_EQ(trace_byte(0), 3);
+    CHECK_EQ(trace_byte(1), 1);
+}
+
 void run_movegrid_tests(void)
 {
     RUN_TEST(grid_cell_stride_is_two);
@@ -1658,6 +2038,27 @@ void run_movegrid_tests(void)
     RUN_TEST(fill_writes_only_the_marker_byte);
     RUN_TEST(fill_header_width_word_is_signed);
     RUN_TEST(fill_header_height_word_is_signed);
+
+    RUN_TEST(trace_unreachable_start_returns_minus_one);
+    RUN_TEST(trace_walks_downhill_and_writes_the_path_reversed);
+    RUN_TEST(trace_direction_codes_one_and_two);
+    RUN_TEST(trace_threshold_is_the_start_tile_cost);
+    RUN_TEST(trace_mode_zero_keeps_the_heading_on_a_tie);
+    RUN_TEST(trace_mode_one_turns_on_a_tie);
+    RUN_TEST(trace_mode_one_refuses_a_tie_repeating_the_last_step);
+    RUN_TEST(trace_mode_one_refuses_a_tie_on_the_first_step);
+    RUN_TEST(trace_no_move_records_nothing_and_returns_zero);
+    RUN_TEST(trace_last_column_skips_the_east_neighbour);
+    RUN_TEST(trace_column_zero_skips_the_west_neighbour);
+    RUN_TEST(trace_last_row_skips_the_south_neighbour);
+    RUN_TEST(trace_row_zero_skips_the_north_neighbour);
+    RUN_TEST(trace_mode_two_finds_the_cheapest_unit_of_the_other_side);
+    RUN_TEST(trace_mode_two_side_select_is_a_truth_value);
+    RUN_TEST(trace_mode_two_retired_bit_is_bit_zero_only);
+    RUN_TEST(trace_mode_two_returns_minus_one_when_nothing_matched);
+    RUN_TEST(trace_mode_two_ties_go_to_the_lower_index);
+    RUN_TEST(trace_mode_two_scan_stops_at_the_unit_count);
+    RUN_TEST(trace_mode_two_cell_is_column_times_two_plus_row_stride);
 
 
     /* Put the global back before leaving.  stage() points it at this file's

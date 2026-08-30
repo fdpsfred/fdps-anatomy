@@ -127,4 +127,37 @@ extern void fdps_move_grid_block_occupied_tiles(int exclude_unit_index,
 extern int fdps_map_grid_collect_marked_tiles(unsigned char *out_coords);
 #pragma aux fdps_map_grid_collect_marked_tiles "*" parm caller [];
 
+/* Reads a route back out of the costs the flood fill left in byte 1 of every
+   cell.  Three jobs behind one entry, selected by mode, which is read as one
+   byte and is 0, 1 or 2 at every call site in the image:
+
+   Modes 0 and 1 walk from (start_x, start_y) to (goal_x, goal_y), one
+   orthogonal step at a time, taking the cheapest of the four neighbours that
+   exist.  Each step appends a direction code -- 0 = y-1, 1 = x+1, 2 = y+1,
+   3 = x-1 -- and the codes land in out_path in REVERSE order, last step first;
+   the return is how many there are.  The two modes differ only over ties: mode
+   0 takes a neighbour on a strictly lower cost alone, while mode 1 also takes
+   an equal one as long as the previously recorded step used a different code,
+   so its ties turn where mode 0's run straight.  Returns -1 without touching
+   out_path when the start tile holds the 0xff unreachable sentinel.  The walk
+   ends only by standing on the goal, so a grid whose costs do not lead there
+   never terminates, and out_path has to have room for every step: the
+   direction codes are staged in a 100-byte frame buffer with no bound.
+
+   Mode 2 ignores goal_x, goal_y and start_y, and start_x is a TRUTH VALUE
+   selecting a side rather than a coordinate: 0 keeps the units whose side byte
+   is non-zero, any non-zero value keeps the units whose side byte is 0.  Of
+   those, skipping the retired (flags bit 0), it finds the one standing on the
+   lowest-cost cell -- ties going to the lower unit index -- writes that unit's
+   tile column and row into out_path[0] and out_path[1] and returns the cost.
+   A unit on an unreachable cell never matches, and -1 comes back when none
+   did.
+
+   The grid pointer is not checked for null and neither start coordinate is
+   checked against the header. */
+extern int fdps_move_path_trace(int goal_x, int goal_y,
+                                unsigned char *out_path,
+                                int start_x, int start_y, unsigned char mode);
+#pragma aux fdps_move_path_trace "*" parm caller [];
+
 #endif

@@ -375,6 +375,14 @@
       "status": "committed",
       "emitted_against": "0x35",
       "rounds": 0
+    },
+    "00011460": {
+      "name": "fdps_move_path_trace",
+      "target": "movegrid.c",
+      "body_size": "0x489",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x489"
     }
   }
 }

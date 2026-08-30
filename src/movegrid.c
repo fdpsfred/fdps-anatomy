@@ -9,6 +9,7 @@
 #include "gamedata.h"
 #include "maptile.h"
 #include "movegrid.h"
+#include "unit.h"
 
 /* 00010b20.  CMP dword ptr [0x00060144],0 / JZ to the epilogue: an unallocated
    grid is not an error here, it is a silent return.  Which of the fourteen
@@ -672,4 +673,253 @@ int fdps_map_grid_collect_marked_tiles(unsigned char *out_coords)
     }
 
     return marked_count;
+}
+
+/* 00011460.  The route back out of the grid, and the reason the fill above
+   wrote a cost into every reachable cell: modes 0 and 1 step from
+   (start_x, start_y) to (goal_x, goal_y) over falling costs and hand the
+   caller one direction code per step.  Mode 2 is a second job sharing the
+   frame -- it ignores the goal entirely, scans the unit array and answers
+   which unit of the selected side stands on the cheapest cell.
+
+   mode is read as a byte and never as the dword the caller pushes: XOR EAX,EAX
+   / MOV AL,byte ptr [EBP+0x28] at 0001149a and 000116e6, CMP byte ptr
+   [EBP+0x28],0x0 at 00011637.  The zero extension rather than MOVSX is what
+   makes it unsigned.  All five call sites pass a literal -- 0 at 00011a95,
+   00011d2f and 00015609, 1 at 00011adf, 2 at 0001272d -- and a mode that is
+   none of the three leaves the direction byte at [EBP-0x4] unwritten, which is
+   reproduced here as the uninitialised step_dir rather than papered over.
+
+   There is no null-grid guard, unlike fdps_map_grid_reset and
+   fdps_move_grid_mark_zone_of_control: MOV EAX,[0x00060144] / MOVSX EAX,word
+   ptr [EAX] at 0001146c is the first thing the body does.  Both header words
+   arrive through MOVSX, the signed read, and both edge guards are signed
+   compares (MOV EAX,[EBP-0x38] / DEC / CMP EAX,[EBP+0x20] / JLE at 00011670,
+   and the same shape at 0001169a), so a width of 0xffff is -1 and no column
+   passes the guard; read unsigned it is 65535 and the walk leaves the block.
+
+   The direction codes are 0 = y-1, 1 = x+1, 2 = y+1, 3 = x-1 and 4 = no move,
+   and the four neighbours are tried in that order.  Code 4 records nothing and
+   moves nothing, so a step that finds no neighbour spins: the only way out of
+   the loop is standing on the goal.  The codes are collected into a 100-byte
+   frame buffer -- the gap between [EBP-0xa0] and the named slots at [EBP-0x3c]
+   -- and copied into out_path REVERSED at 000118bf, so the caller reads the
+   last step of the walk first.  Nothing bounds the buffer; a walk longer than
+   100 steps writes over the rest of the frame.
+
+   Rebuild note: the acceptance threshold is reseeded from the START tile's
+   cost at the top of every step, not from the cost of the tile the walk is
+   standing on.  MOV EAX,[EBP-0x28] / MOV [EBP-0x20],EAX at 00011631 opens the
+   loop and [EBP-0x28] is written exactly once, at 00011600, before the loop is
+   entered.  The obvious C -- reseeding from the current cell's marker -- is a
+   different function: where no neighbour undercuts the tile it is standing on,
+   the original still steps to any neighbour cheaper than the START tile, while
+   the tightened form leaves the direction at 4, moves nothing, records nothing
+   and never reaches the goal.
+
+   Mode 0 takes a neighbour only on a strictly lower cost (JL at 0001165e,
+   00011688, 000116b2 and 000116d9), so a tie leaves the heading the scan order
+   has already chosen.  Mode 1 also accepts an equal cost (JLE at 0001173b,
+   00011795 and 000117ec) provided a direction has already been chosen this
+   step, at least one step has been recorded, and the last RECORDED step used a
+   different code -- MOV AL,byte ptr [EAX + EBP*0x1 + 0xffffff5f] at 00011759
+   reads walk_dirs[step_count - 1].  That is what makes mode 1 turn on a tie
+   where mode 0 runs straight.  The north neighbour is exempt in both modes: it
+   is the strict compare either way.
+
+   The last of the four neighbours does not store the cost it accepted, in
+   either mode -- 000116dd and 00011820 write the direction byte alone.  The
+   build is -od, which does not delete a dead store (rebuild_info/
+   build_flags.md), so that is what the source said and not what the optimiser
+   did; the value is dead regardless, because the next step reseeds from
+   start_cost.
+
+   In mode 2 start_x is a TRUTH VALUE selecting a side and not a coordinate:
+   CMP dword ptr [EBP+0x20],0x0 against CMP byte ptr [EAX+0x6],0x0, twice, at
+   000114dd-000114f9, so 0 keeps the units whose side byte is non-zero and any
+   non-zero value keeps the units whose side byte is 0.  start_y and both goal
+   arguments are not read at all on this path.  The retired test re-resolves
+   the record with a SECOND call to fdps_get_unit_record at 0001151b rather
+   than reusing the pointer the side test just took, and carries four frame
+   temporaries of its own at [EBP-0xa4] down to [EBP-0xb0]: it is an expansion
+   of fdps_unit_is_retired's body, not a call to it.  Emitting the call would
+   put a CALL in the rebuild that the original does not have, and dropping the
+   second lookup would remove one the original performs.  The mask is AND
+   AL,0x1, bit 0 alone, so a unit that has merely acted this turn still counts.
+
+   The cost compare is JGE at 00011580, so of two units on equally cheap cells
+   the lower index wins, and the sentinel test at 00011593 is against the same
+   0xff a cell holds when the fill never reached it -- a unit standing on an
+   unreachable cell therefore never matches, and -1 comes back for "no unit"
+   and for nothing else.  out_path receives that unit's two tile bytes and
+   nothing more: the caller at 0001272d hands over a four-byte stack local. */
+int fdps_move_path_trace(int goal_x, int goal_y, unsigned char *out_path,
+                         int start_x, int start_y, unsigned char mode)
+{
+    unsigned char walk_dirs[100];
+    struct fdps_unit_record *unit;
+    struct fdps_move_grid_cell *cell;
+    unsigned char *grid_cells;
+    unsigned char *marker_ptr;
+    unsigned char step_dir;
+    int grid_width;
+    int grid_height;
+    int cell_stride;
+    int row_stride;
+    int unit_index;
+    int nearest_unit_index;
+    int lowest_cost;
+    int unit_cost;
+    int start_cost;
+    int best_cost;
+    int neighbour_cost;
+    int step_count;
+    int reached_goal;
+    int path_index;
+
+    grid_cells = data_fdps_battle_move_grid_ptr;
+    grid_width = (int) *(short *) grid_cells;
+    grid_height = (int) *(short *) (grid_cells + 2);
+    cell_stride = 2;
+    row_stride = grid_width * 2;
+    grid_cells += 4;
+
+    if (mode == 2) {
+        lowest_cost = 0xff;
+        for (unit_index = 0;
+             unit_index < data_fdps_map_unit_count;
+             unit_index++) {
+            unit = fdps_get_unit_record(unit_index);
+            if (((start_x == 0) && (unit->side != 0)) ||
+                ((start_x != 0) && (unit->side == 0))) {
+                if ((fdps_get_unit_record(unit_index)->flags & 1) == 0) {
+                    cell = (struct fdps_move_grid_cell *)
+                           (grid_cells + (int) unit->pos_x * cell_stride +
+                            (int) unit->pos_y * row_stride);
+                    unit_cost = (int) cell->marker;
+                    if (unit_cost < lowest_cost) {
+                        lowest_cost = unit_cost;
+                        nearest_unit_index = unit_index;
+                    }
+                }
+            }
+        }
+        if (lowest_cost == 0xff) {
+            return -1;
+        }
+        unit = fdps_get_unit_record(nearest_unit_index);
+        out_path[0] = unit->pos_x;
+        out_path[1] = unit->pos_y;
+        return lowest_cost;
+    }
+
+    step_count = 0;
+    reached_goal = 0;
+    cell = (struct fdps_move_grid_cell *)
+           (grid_cells + start_x * cell_stride + start_y * row_stride);
+    start_cost = (int) cell->marker;
+    if (start_cost == 0xff) {
+        return -1;
+    }
+
+    do {
+        cell = (struct fdps_move_grid_cell *)
+               (grid_cells + start_x * cell_stride + start_y * row_stride);
+        marker_ptr = &cell->marker;
+        best_cost = start_cost;
+
+        if (mode == 0) {
+            step_dir = 4;
+            if (start_y != 0) {
+                neighbour_cost = (int) *(marker_ptr - row_stride);
+                if (neighbour_cost < best_cost) {
+                    best_cost = neighbour_cost;
+                    step_dir = 0;
+                }
+            }
+            if (grid_width - 1 > start_x) {
+                neighbour_cost = (int) *(marker_ptr + cell_stride);
+                if (neighbour_cost < best_cost) {
+                    best_cost = neighbour_cost;
+                    step_dir = 1;
+                }
+            }
+            if (grid_height - 1 > start_y) {
+                neighbour_cost = (int) *(marker_ptr + row_stride);
+                if (neighbour_cost < best_cost) {
+                    best_cost = neighbour_cost;
+                    step_dir = 2;
+                }
+            }
+            if (start_x != 0) {
+                neighbour_cost = (int) *(marker_ptr - cell_stride);
+                if (neighbour_cost < best_cost) {
+                    step_dir = 3;
+                }
+            }
+        } else if (mode == 1) {
+            step_dir = 4;
+            if (start_y != 0) {
+                neighbour_cost = (int) *(marker_ptr - row_stride);
+                if (neighbour_cost < best_cost) {
+                    best_cost = neighbour_cost;
+                    step_dir = 0;
+                }
+            }
+            if (grid_width - 1 > start_x) {
+                neighbour_cost = (int) *(marker_ptr + cell_stride);
+                if ((neighbour_cost <= best_cost) &&
+                    ((neighbour_cost < best_cost) ||
+                     ((step_dir != 4) && (step_count != 0) &&
+                      (walk_dirs[step_count - 1] != 1)))) {
+                    best_cost = neighbour_cost;
+                    step_dir = 1;
+                }
+            }
+            if (grid_height - 1 > start_y) {
+                neighbour_cost = (int) *(marker_ptr + row_stride);
+                if ((neighbour_cost <= best_cost) &&
+                    ((neighbour_cost < best_cost) ||
+                     ((step_dir != 4) && (step_count != 0) &&
+                      (walk_dirs[step_count - 1] != 2)))) {
+                    best_cost = neighbour_cost;
+                    step_dir = 2;
+                }
+            }
+            if (start_x != 0) {
+                neighbour_cost = (int) *(marker_ptr - cell_stride);
+                if ((neighbour_cost <= best_cost) &&
+                    ((neighbour_cost < best_cost) ||
+                     ((step_dir != 4) && (step_count != 0) &&
+                      (walk_dirs[step_count - 1] != 3)))) {
+                    step_dir = 3;
+                }
+            }
+        }
+
+        if (step_dir == 2) {
+            start_y++;
+        } else if (step_dir == 3) {
+            start_x--;
+        } else if (step_dir == 0) {
+            start_y--;
+        } else if (step_dir == 1) {
+            start_x++;
+        }
+
+        if ((start_x == goal_x) && (start_y == goal_y)) {
+            reached_goal = 1;
+        }
+
+        if (step_dir != 4) {
+            walk_dirs[step_count] = step_dir;
+            step_count++;
+        }
+    } while (reached_goal == 0);
+
+    for (path_index = 0; path_index < step_count; path_index++) {
+        out_path[(step_count - 1) - path_index] = walk_dirs[path_index];
+    }
+
+    return step_count;
 }
