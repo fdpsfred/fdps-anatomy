@@ -41,6 +41,7 @@
 | 建立我方單位時，`FRIAPRDA.DAT` 前兩個物品槽無條件標成「裝備中」，不看值是不是 `FF` | 依值判斷空槽再決定狀態 | [`assets/tables/characters.md`](../assets/tables/characters.md) |
 | 數值條的 clamp 是**單邊**的：下界壓到 0，上界不壓，而呼叫端算出的 `(cur * width + max - 1) / max` 在 `cur > max` 時會超出 | 補上對稱的 `min(width, fill)`。原版的滿溢數值條有的整條不畫、有的畫成超長的糊塊，補了 clamp 就變成乾淨的滿格 | plate comment 的 `Rebuild note` |
 | 視野裁切在兩軸上不對稱（x 兩邊都是嚴格不等式、y 兩邊都含端點），格子繪製的四邊界則全部嚴格，不合格的格子整塊丟掉而不是裁切 | 寫成對稱的、或寫成「超出就裁切」。貼齊畫面邊緣的那一row/column 會出現在原版沒有畫的地方 | plate comment 的 `Rebuild note` |
+| 固定字彙浮動指示的四個格子 x 偏移是 `i * 6 + 1`，但第 1 格單獨是 8 而不是 7，而且那是**位置**不是字距：`fdps_show_miss_indicator` 與 `fdps_show_cure_indicator` 是同一段程式，同一個第 1 格在 MISS 上是窄的 I、在 CURE 上是 U，一樣往右推 | 折成統一的 `i * 6 + 1`，或寫成「窄字母才往右推」的字距規則。前者把第 1 格往左移一像素，後者在 CURE 上根本不推 | plate comment 的 `Rebuild note` |
 | 音效索引 `-1` 是活的輸入值：配置器在音效關閉或八個聲道全忙時回 `-1`，呼叫端不檢查就往下送，原版於是讀到 handle 表前面那個 dword | 加上 `if (index < 0) return;`。這個保護只有在確認過每個呼叫端之後才安全 | plate comment 的 `Rebuild note` |
 | WAV header 的解析結果被忽略，非 RIFF 的緩衝區會以未初始化的 14-byte 堆疊描述子播放出去；chunk 走訪也沒有 RIFF 的偶數對齊與邊界檢查 | 補上「解析失敗就回 -1」與正確的 RIFF 走訪 | plate comment 的 `Rebuild note` |
 
