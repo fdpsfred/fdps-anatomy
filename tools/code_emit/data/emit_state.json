@@ -503,6 +503,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x577"
+    },
+    "00025140": {
+      "name": "fdps_unit_find_equipped_slot",
+      "target": "unititem.c",
+      "body_size": "0xbb",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0xbb"
     }
   }
 }
