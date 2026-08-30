@@ -48,6 +48,23 @@ extern struct fdps_unit_record *fdps_get_unit_record(int unit_index);
 extern int fdps_unit_is_retired(int unit_index);
 #pragma aux fdps_unit_is_retired "*" parm caller [];
 
+/* Takes this unit out of the battle for good.  ASSIGNS the whole flags byte --
+   struct fdps_unit_record's flags at record offset 5 -- the value 1, so the
+   retired flag ends up set and every other bit of that byte ends up clear,
+   including bit 7, the acted-this-turn flag fdps_battle_mark_unit_done raises.
+   It is not an OR of bit 0 and the difference is visible: a unit retired part
+   way through its own turn keeps that flag under an OR.
+
+   No other field of the record is touched, nothing is returned, and unit_index
+   is a position in the current battle's unit array that is not range checked;
+   the record is resolved through fdps_get_unit_record, so a call after the
+   array has moved writes into the new block.
+
+   Nothing in the shipped image calls this: the ten places that retire a unit
+   all spell the same two steps out inline. */
+extern void fdps_unit_mark_retired(int unit_index);
+#pragma aux fdps_unit_mark_retired "*" parm caller [];
+
 /* Does this unit travel above the terrain instead of on it?  Returns 1 when
    the unit's class -- struct fdps_unit_record's clazz at record offset 0x20 --
    is one of the five flying classes 0x16 技師, 0x17 機械伯爵, 0x18 機械大師,

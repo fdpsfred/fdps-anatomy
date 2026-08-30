@@ -75,6 +75,44 @@ int fdps_unit_is_retired(int unit_index)
     return record->flags & 1;
 }
 
+/* 000138f0.  The retiring half of the pair above, and the body is straight-line
+   with no compare and no branch in it: MOV EAX,dword ptr [EBP + 0x14] / PUSH
+   EAX / CALL 0x0002d210 / ADD ESP,0x4 resolves the record, then MOV byte ptr
+   [EAX + 0x5],0x1 (bytes c6 40 05 01) stores into the flags byte.  Nothing is
+   read back and nothing is returned.
+
+   The store is a whole-byte ASSIGNMENT of the literal 1, not a bit set: the
+   encoding is the immediate move c6 40 05 01, an OR would be 80 48 05 01.  So
+   retiring a unit also clears bit 7 of the same byte, the acted-this-turn flag
+   that fdps_battle_mark_unit_done raises, along with every other bit that was
+   standing.  Writing record->flags |= 1 by analogy with that function reads
+   more carefully and is wrong: it would leave a retired unit carrying the
+   per-turn flag.  The identical four bytes appear at ten further sites -- the
+   inline retire in fdps_map_actor_behavior_step at 000104b8,
+   fdps_play_death_animation_and_mark_dead at 0001d7f9, the initial state
+   fdps_build_map_unit_array writes at 00022d36, and the chapter scene handlers
+   at 00037724, 00037c69, 00037c7f, 00038c5b, 0003b064, 0003b39f and 0003b5b9
+   -- so the idiom is the game's, not this function's.
+
+   The record offset is the literal 0x5, which is struct fdps_unit_record's
+   flags, and the record is resolved through fdps_get_unit_record on every call,
+   so the same re-resolution rule applies here as there.  unit_index is not
+   range checked at either end -- data_fdps_map_unit_count is not read in the
+   body -- and the accessor's signed multiply carries a negative index
+   backwards off the front of the array and stores there.
+
+   Nothing in the image calls this function or takes its address: get_xrefs_to
+   at 000138f0 finds no reference at all.  It is compiled in and unreferenced,
+   which is why every one of the ten sites above spells the two steps out
+   inline instead. */
+void fdps_unit_mark_retired(int unit_index)
+{
+    struct fdps_unit_record *record;
+
+    record = fdps_get_unit_record(unit_index);
+    record->flags = 1;
+}
+
 /* 00012550.  The flying predicate.  PUSH EAX / CALL 0x0002d210 / ADD ESP,0x4
    resolves the record, then XOR EAX,EAX / MOV AL,byte ptr [EDX + 0x20] reads
    the class code and spills it to the frame local at [EBP-0x8], and five

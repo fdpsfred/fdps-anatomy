@@ -507,6 +507,142 @@ static void the_record_is_resolved_on_every_call(void)
     CHECK_EQ(fdps_unit_is_retired(LOOKUP_BASE_UNIT), 1);
 }
 
+/* fdps_unit_mark_retired @ 000138f0.  Expected values come from the four
+   instructions that are the whole body -- MOV EAX,dword ptr [EBP + 0x14] /
+   PUSH EAX / CALL 0x0002d210 / ADD ESP,0x4 at 000138fc, then MOV byte ptr
+   [EAX + 0x5],0x1 at 0001390e, whose encoding c6 40 05 01 is the immediate
+   move and not the 80 48 05 01 an OR would be -- and from the record layout
+   ticket 17 settled, which puts flags at +5.  The lookup_block staging above is
+   reused because this writer reaches its record through the same accessor;
+   each case republishes the base it wants first. */
+
+/* Read one record's flags byte back out of the staged block by its index there,
+   so a case can inspect a record the call was not aimed at. */
+static int flags_of(int block_slot)
+{
+    return (int) lookup_block[block_slot * UNIT_RECORD_STRIDE + 5];
+}
+
+/* The store is an assignment of the literal 1 to the whole byte, so whatever
+   the byte held beforehand is gone: 0x80, the acted-this-turn flag, comes out
+   as 1 and not as 0x81.  This is the case that separates the emitted
+   record->flags = 1 from the record->flags |= 1 that the neighbouring
+   fdps_battle_mark_unit_done invites -- every other assertion in this block
+   passes under either spelling. */
+static void retiring_assigns_the_whole_flags_byte(void)
+{
+    stage_lookup();
+
+    set_flags(LOOKUP_BASE_UNIT, 0x80);
+    fdps_unit_mark_retired(0);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT), 1);
+
+    set_flags(LOOKUP_BASE_UNIT, 0xff);
+    fdps_unit_mark_retired(0);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT), 1);
+
+    set_flags(LOOKUP_BASE_UNIT, 0x00);
+    fdps_unit_mark_retired(0);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT), 1);
+
+    set_flags(LOOKUP_BASE_UNIT, 0x01);
+    fdps_unit_mark_retired(0);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT), 1);
+}
+
+/* One byte is written and it is the one at +5.  The bytes on either side of it
+   -- walk_step at +4 and side at +6, which stage_lookup gives a distinct value
+   per record -- are untouched, and so is the class byte further in.  A store
+   through a mistyped pointer, or an offset one out, would show up here. */
+static void nothing_but_the_flags_byte_is_written(void)
+{
+    stage_lookup();
+    lookup_block[LOOKUP_BASE_UNIT * UNIT_RECORD_STRIDE + 4] = 0x33;
+    lookup_block[LOOKUP_BASE_UNIT * UNIT_RECORD_STRIDE + 0x20] = 0x1f;
+
+    fdps_unit_mark_retired(0);
+
+    CHECK_EQ((int) lookup_block[LOOKUP_BASE_UNIT * UNIT_RECORD_STRIDE + 4],
+             0x33);
+    CHECK_EQ((int) lookup_block[LOOKUP_BASE_UNIT * UNIT_RECORD_STRIDE + 6],
+             0x12);
+    CHECK_EQ((int) lookup_block[LOOKUP_BASE_UNIT * UNIT_RECORD_STRIDE + 0x20],
+             0x1f);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT), 1);
+}
+
+/* The record written is base + unit_index * 0x50: each index retires its own
+   unit and leaves its neighbours alone.  A stride or base one record out would
+   retire the wrong unit while still passing the byte-value cases above. */
+static void the_index_picks_the_record_to_retire(void)
+{
+    stage_lookup();
+
+    fdps_unit_mark_retired(1);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT + 0), 0);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT + 1), 1);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT + 2), 0);
+
+    fdps_unit_mark_retired(3);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT + 2), 0);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT + 3), 1);
+}
+
+/* No compare appears in the body at all, so nothing bounds unit_index, and the
+   accessor's signed IMUL carries a negative index backwards off the front of
+   the array -- where the store lands like any other.  Asserted so a guard added
+   on the way past would fail here rather than quietly drop the write. */
+static void a_negative_index_retires_the_record_in_front(void)
+{
+    stage_lookup();
+    data_fdps_map_unit_count = 1;
+
+    fdps_unit_mark_retired(-1);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT - 1), 1);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT), 0);
+
+    fdps_unit_mark_retired(4);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT + 4), 1);
+
+    data_fdps_map_unit_count = 0;
+}
+
+/* The record is resolved through the accessor on every call, so the write
+   follows the array when fdps_relocate_unit_array moves it: republishing the
+   base under an unchanged index puts the 1 in a different record.  A base or a
+   record pointer cached anywhere between the two would keep writing into the
+   old block. */
+static void the_written_record_is_resolved_on_every_call(void)
+{
+    stage_lookup();
+
+    fdps_unit_mark_retired(0);
+    CHECK_EQ(flags_of(LOOKUP_BASE_UNIT), 1);
+
+    data_fdps_map_unit_array_ptr = lookup_block;
+    fdps_unit_mark_retired(0);
+    CHECK_EQ(flags_of(0), 1);
+    CHECK_EQ(flags_of(1), 0);
+}
+
+/* The two halves of the pair agree: what this function writes is exactly what
+   fdps_unit_is_retired reads back, on the same index and through the same
+   accessor.  Bit 0 is the retired flag both ways round. */
+static void the_predicate_reads_back_what_this_wrote(void)
+{
+    stage_lookup();
+
+    CHECK_EQ(fdps_unit_is_retired(2), 0);
+    fdps_unit_mark_retired(2);
+    CHECK_EQ(fdps_unit_is_retired(2), 1);
+    CHECK_EQ(fdps_unit_is_retired(1), 0);
+
+    set_flags(LOOKUP_BASE_UNIT + 1, 0x80);
+    CHECK_EQ(fdps_unit_is_retired(1), 0);
+    fdps_unit_mark_retired(1);
+    CHECK_EQ(fdps_unit_is_retired(1), 1);
+}
+
 /* fdps_unit_is_flying @ 00012550.  Expected values come from the body itself --
    MOV AL,byte ptr [EDX + 0x20] at 00012570 for the record byte, and the five
    immediates of the comparison chain, CMP dword ptr [EBP + -0x8],0x16 at
@@ -711,6 +847,12 @@ void run_unit_tests(void)
     RUN_TEST(the_index_picks_its_own_record);
     RUN_TEST(a_negative_index_reads_the_record_in_front);
     RUN_TEST(the_record_is_resolved_on_every_call);
+    RUN_TEST(retiring_assigns_the_whole_flags_byte);
+    RUN_TEST(nothing_but_the_flags_byte_is_written);
+    RUN_TEST(the_index_picks_the_record_to_retire);
+    RUN_TEST(a_negative_index_retires_the_record_in_front);
+    RUN_TEST(the_written_record_is_resolved_on_every_call);
+    RUN_TEST(the_predicate_reads_back_what_this_wrote);
     RUN_TEST(the_class_byte_is_at_record_offset_twenty);
     RUN_TEST(every_flying_class_code_returns_one);
     RUN_TEST(the_flying_set_is_exactly_five_codes);
