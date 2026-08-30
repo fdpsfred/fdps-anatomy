@@ -1985,7 +1985,7 @@ Alignment padding: 11-byte multi-byte NOP run aligning FUN_00018350 to a 16-byte
 Counts how many units of one side are still in the battle.
 
 Algorithm:
-Walks unit indices 0 through DAT_00060150-1 (the battle unit count). For each index it takes the 0x50-byte record with fdps_get_unit_record and reads the side byte at record offset +6; when that byte equals side and fdps_unit_is_retired reports the unit has not left the battle, it bumps a local counter. The counter is returned. Known side codes: 2 is the player side, 0 is the enemy side. Retired units are skipped, so the result is a survivor tally rather than a roster size.
+Walks unit indices 0 through data_fdps_map_unit_count-1 (the battle unit count). For each index it takes the 0x50-byte record with fdps_get_unit_record and reads the side byte at record offset +6; when that byte equals side and fdps_unit_is_retired reports the unit has not left the battle, it bumps a local counter. The counter is returned. Known side codes: 2 is the player side, 0 is the enemy side. Retired units are skipped, so the result is a survivor tally rather than a roster size.
 
 Parameters:
   side -- side code to match against unit record byte +6, compared as a zero-extended byte. The only caller passes 0, 2 and 1.
@@ -1993,7 +1993,7 @@ Parameters:
 Returns:
   The number of non-retired units whose side byte equals side; 0 when there are none.
 
-Pool: fdps  [no library hit; reads the game unit-count global DAT_00060150 and calls fdps_get_unit_record and fdps_unit_is_retired, symbols a separately compiled CRT or Miles object could not reference]
+Pool: fdps  [no library hit; reads the game unit-count global data_fdps_map_unit_count (00060150) and calls fdps_get_unit_record and fdps_unit_is_retired, symbols a separately compiled CRT or Miles object could not reference]
 
 === 000183c8 [EOL]
 Watcom alignment padding: 6-byte NOP (lea eax,[eax+0]) + 2-byte NOP (mov edx,edx), aligning fdps_options_menu to 16 bytes.

@@ -423,6 +423,14 @@
       "status": "committed",
       "emitted_against": "0x68",
       "rounds": 0
+    },
+    "00018350": {
+      "name": "fdps_battle_count_remaining_units_on_side",
+      "target": "btlend.c",
+      "body_size": "0x78",
+      "status": "committed",
+      "emitted_against": "0x78",
+      "rounds": 0
     }
   }
 }
