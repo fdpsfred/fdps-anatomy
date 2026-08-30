@@ -4,10 +4,201 @@
  * Nothing here owns state: every scorer reads the data tables through the
  * accessors in table.h and the battle units through unit.h, and reports.
  */
+#include <stdlib.h>
 #include "fdpstype.h"
+#include "gamedata.h"
+#include "aitarget.h"
+#include "movegrid.h"
 #include "table.h"
 #include "unit.h"
+#include "unititem.h"
 #include "aiscore.h"
+
+/* The three heap blocks fdps_map_actor_score_best_attack takes for the search:
+   PUSH 0x64 at 00012310, PUSH 0x1900 at 0001231d and PUSH 0x64 at 00012385.
+   The tile buffer is 3200 (x, y) byte pairs, which is the whole map and more;
+   the index buffer has room for 100 unit indices and nothing compares that
+   against the number of targets a tile turns up.  The first 0x64 block is
+   allocated, never read and freed again -- the only trace of it in the
+   original is the malloc/free pair. */
+#define ATTACK_SEARCH_UNUSED_BYTES 100
+#define ATTACK_SEARCH_TILE_BYTES 0x1900
+#define ATTACK_SEARCH_TARGET_BYTES 100
+
+/* 00012230.  Picks the best physical attack the actor could make this turn --
+   which tile to move to and which unit to hit -- and publishes the choice in
+   the four AI decision globals.  The returned value is 0 down both paths;
+   fdps_map_actor_behavior_step still tests it (TEST EAX,EAX / JNZ at 0001014c)
+   and so always takes the fall-through.
+
+   The score global is zeroed at 0001226d, before the equipped-weapon test, so
+   the early return leaves a fresh 0 there; the other three globals are not
+   touched on that path and keep whatever the previous actor left in them.
+
+   fdps_get_class_record is asked for the actor's class byte PLUS ONE at
+   000122fd -- INC EAX between the load and the PUSH -- because PROMAP.DAT's
+   row 0 is the default terrain-cost row that fdps_collect_targets_in_range
+   uses for its own reach flood.  Dropping the +1 hands the fill the wrong
+   class's costs and changes which tiles the actor is judged able to reach.
+
+   Every branch in the ranking is signed and each one is behaviour:
+
+     - the wound tier is CMP dword ptr [EBP-0x30],0x2 / JLE at 00012462, so an
+       estimate of exactly 2 scores tier 0 and 3 scores tier 8;
+     - the lethal test is MOVSX word ptr [EAX+0x40] / CMP / JGE at 00012478, so
+       it is strictly target HP < estimate: a blow that exactly matches the
+       target's remaining HP is a wound, not a kill;
+     - the counter-attack penalty is gated on CMP EAX,0x1 / JNZ at 000124a2.
+       fdps_check_can_counter_attack_from_tile answers 1 or -1 and never 0, so
+       using its result as a bare predicate would apply the penalty to every
+       target;
+     - the protagonist bonus is LEA EDX,[EDX+EDX*2] then the SAR 0x1f /
+       SUB / SAR 0x1 halving at 000124bc, which is the signed divide that
+       truncates toward zero: an estimate of 5 becomes 7, not 8.
+
+   What is published as the score is the coarse tier -- 0, 8 or 0x12 -- and not
+   the estimate the search actually ranks on; the estimate never leaves the
+   frame.  fdps_map_actor_take_best_action weighs that number against the spell
+   and item scores on the same 8 / 18 scale, so publishing the estimate instead
+   would make the AI attack in preference to everything else it could do.
+
+   The tile and the target are published together at 000124f1-0001250c: x from
+   byte 0 of the candidate pair, y from byte 1, then the target's unit index
+   and the tier.  The estimate copies at [EBP-0x14] and [EBP-0x18] that the
+   original refreshes from the actor's two stats at the top of every tile pass
+   are not reproduced -- neither is ever written again, so they hold the values
+   read once at 0001225c and 00012266.
+
+   Nothing is bounds checked: not the tile count against the 3200 pairs the
+   buffer holds, not the target count against the 100 indices, and neither
+   malloc result against null. */
+int fdps_map_actor_score_best_attack(int unit_index, int side_select)
+{
+    struct fdps_unit_record *actor;
+    struct fdps_unit_record *target;
+    struct fdps_item_effect *weapon;
+    struct fdps_class_record *class_move_cost;
+    void *unused_block;
+    unsigned char *tile_coords;
+    unsigned char *target_indices;
+    int actor_attack;
+    int actor_defence;
+    int actor_x;
+    int actor_y;
+    int actor_class;
+    int move_points;
+    int weapon_slot;
+    int weapon_item_id;
+    int weapon_range_min;
+    int weapon_range_max;
+    int target_select_mode;
+    int tile_count;
+    int tile_slot;
+    int tile_x;
+    int tile_y;
+    int target_count;
+    int target_slot;
+    int target_index;
+    int target_attack;
+    int target_defence;
+    int damage_estimate;
+    int score_tier;
+    int best_estimate;
+
+    best_estimate = 0;
+    target_select_mode = 0;
+
+    actor = fdps_get_unit_record(unit_index);
+    actor_attack = actor->ap;
+    actor_defence = actor->dp;
+    data_fdps_battle_ai_best_physical_score = 0;
+
+    weapon_slot = fdps_unit_find_equipped_slot(unit_index, 0);
+    if (weapon_slot == -1) {
+        return 0;
+    }
+
+    weapon_item_id = fdps_unit_get_item_id(unit_index, weapon_slot);
+    weapon = fdps_get_item_record(weapon_item_id);
+    weapon_range_min = weapon->range_min;
+    weapon_range_max = weapon->range_max;
+    move_points = actor->move;
+    actor_x = actor->pos_x;
+    actor_y = actor->pos_y;
+    actor_class = actor->clazz;
+    class_move_cost = fdps_get_class_record(actor_class + 1);
+
+    unused_block = malloc(ATTACK_SEARCH_UNUSED_BYTES);
+    tile_coords = malloc(ATTACK_SEARCH_TILE_BYTES);
+    if (side_select == 0) {
+        target_select_mode = 1;
+    }
+
+    fdps_move_grid_mark_opposing_zones_of_control(side_select);
+    fdps_move_grid_flood_fill_range(class_move_cost, actor_x, actor_y,
+                                    move_points);
+    fdps_move_grid_block_occupied_tiles(unit_index, side_select);
+    tile_count = fdps_map_grid_collect_marked_tiles(tile_coords);
+    fdps_map_grid_reset();
+
+    target_indices = malloc(ATTACK_SEARCH_TARGET_BYTES);
+
+    for (tile_slot = 0; tile_slot < tile_count; tile_slot++) {
+        tile_x = (int) tile_coords[tile_slot * 2];
+        tile_y = (int) tile_coords[tile_slot * 2 + 1];
+        target_count = fdps_collect_targets_in_range(tile_x, tile_y,
+                                                     target_indices,
+                                                     weapon_range_max,
+                                                     weapon_range_min,
+                                                     target_select_mode);
+        fdps_map_grid_reset();
+        if (target_count != 0) {
+            for (target_slot = 0;
+                 target_slot < target_count;
+                 target_slot++) {
+                target_index = (int) target_indices[target_slot];
+                target = fdps_get_unit_record(target_index);
+                target_attack = target->ap;
+                target_defence = target->dp;
+                damage_estimate = actor_attack - target_defence;
+                if (damage_estimate > 2) {
+                    score_tier = 8;
+                } else {
+                    score_tier = 0;
+                }
+                if (target->hp_current < damage_estimate) {
+                    damage_estimate = damage_estimate * 2;
+                    score_tier = 0x12;
+                }
+                if (fdps_check_can_counter_attack_from_tile(target_index,
+                                                           tile_x,
+                                                           tile_y) == 1) {
+                    damage_estimate = damage_estimate +
+                                      (actor_defence - target_attack);
+                }
+                if (target->char_id == 0) {
+                    damage_estimate = damage_estimate * 3 / 2;
+                }
+                if (data_fdps_battle_ai_best_physical_score < score_tier ||
+                    (score_tier ==
+                         data_fdps_battle_ai_best_physical_score &&
+                     best_estimate < damage_estimate)) {
+                    best_estimate = damage_estimate;
+                    data_fdps_battle_ai_best_physical_target_x = tile_x;
+                    data_fdps_battle_ai_best_attack_tile_y = tile_y;
+                    data_fdps_battle_ai_best_physical_target_idx =
+                        target_index;
+                    data_fdps_battle_ai_best_physical_score = score_tier;
+                }
+            }
+        }
+    }
+
+    free(target_indices);
+    free(unused_block);
+    free(tile_coords);
+    return 0;
+}
 
 /* 000132b0.  Fetches the ITEM.DAT record once, keeps use_amount and the
    use_effect code, and runs one of two target walks or neither.

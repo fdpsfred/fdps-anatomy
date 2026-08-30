@@ -333,6 +333,37 @@ extern unsigned int data_fdps_palette_shade_ramp_table[4608];
    interrupted playback cannot leak into an item's. */
 extern int data_fdps_indicator_queue_count;
 
+/* 00063f78, 00063f74, 00063f80 and 00063f84.  What the map AI's physical
+   attack search decided: how good the best attack it found is, which unit it
+   would hit, and the tile it would attack from.  fdps_map_actor_score_best_attack
+   (src/aiscore.h) is the only writer of all four; fdps_map_actor_behavior_step
+   and fdps_map_actor_take_best_action read the score, and
+   fdps_map_actor_move_and_attack reads the other three back to carry the attack
+   out.
+
+   The score is a tier and not a damage figure -- 0, 8 or 0x12 -- on the same
+   scale as data_fdps_battle_ai_best_spell_score and
+   data_fdps_battle_ai_best_item_score below, which is what lets
+   fdps_map_actor_take_best_action compare the three with one threshold.  It is
+   signed: the search's own ranking compares it with JG at 000124d4.
+
+   The two tile coordinates receive zero-extended tile bytes and the target
+   index a zero-extended unit index, and every reader hands all three straight
+   on as call arguments, so none of the three is ever compared or scaled.
+
+   They are four separate globals and not a record: every writer and every
+   reader names each one by its own absolute address, and
+   data_fdps_map_ai_best_item_bag_slot sits between the score and the x
+   coordinate at 00063f7c (rebuild_info/pitfalls.md, contract B).
+
+   Only the score is written on every call.  The other three keep the previous
+   actor's decision when the search finds nothing, so a reader that has not
+   checked the score first is looking at a stale tile and a stale target. */
+extern int data_fdps_battle_ai_best_physical_score;
+extern int data_fdps_battle_ai_best_physical_target_idx;
+extern int data_fdps_battle_ai_best_physical_target_x;
+extern int data_fdps_battle_ai_best_attack_tile_y;
+
 /* 000643f0.  The inverse palette: which DAC entry is nearest to each of the
    4096 quantised colours, one byte per cell, built by
    fdps_build_palette_tables (src/palette.h) and read by the same eighteen
