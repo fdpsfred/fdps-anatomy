@@ -1,9 +1,10 @@
 /* tests/spell.c -- cover for src/spell.c.
  *
- * The file covers two functions and is in two halves: fdps_spell_damage_unit
- * first, then fdps_spell_heal_unit from the banner comment further down, which
- * carries its own account of where its figures come from.  The fixture, the
- * three staged tables and the helpers are shared.
+ * The file covers three functions and is in three parts, each starting at its
+ * own banner: fdps_spell_damage_unit first, then fdps_spell_heal_unit, then
+ * fdps_spell_deduct_mp_cost.  Each banner carries its own account of where that
+ * part's figures come from.  The fixture, the three staged tables and the
+ * helpers are shared.
  *
  * Every expected value in the damage half is read off the assembly of
  * fdps_spell_damage_unit at 00028320 -- the XOR EAX,EAX / MOV AL byte loads at 0002833d, 00028358 and
@@ -675,6 +676,218 @@ static void a_heal_consumes_exactly_one_draw(void)
     CHECK_EQ(after_call, by_hand);
 }
 
+/* ---- fdps_spell_deduct_mp_cost @ 000285c0 --------------------------------
+ *
+ * The function has no branches either: fetch the spell record at 000285d0,
+ * fetch the unit record at 000285df, MOVSX the current MP word at 000285ed,
+ * take the cost byte zero-extended with XOR EDX,EDX / MOV DL,byte ptr [EAX+0x5]
+ * at 000285f7, SUB and store the low 16 bits back with MOV word ptr
+ * [EAX+0x44],BX at 00028604.  Every figure below is that subtraction, and the
+ * cases are about which value reaches it, how each is widened, and what is left
+ * alone.
+ *
+ * No PRNG is involved on this path -- there is no call in the body but the two
+ * accessors -- so no case here has anything to take the randomness out of, and
+ * the staged records carry hit rates that would never land in
+ * fdps_spell_damage_unit to say that this function does not roll.
+ *
+ * The MOVSX at 000285ed is not separately observable: only the low 16 bits of
+ * the difference are stored, and a sign-extended and a zero-extended MP agree
+ * modulo 65536, so the same word comes out either way.  What the cases below
+ * do pin is the half that is observable -- that the cost byte is unsigned, that
+ * the field takes a negative value rather than being floored, and that the
+ * store is a word. */
+
+/* The MP the acting unit starts a case with, and a cost that leaves a round
+   remainder. */
+#define MP_START 20
+#define MP_COST 5
+
+/* A cost byte of 0xff: 255 unsigned, -1 read signed. */
+#define MP_COST_MAX_BYTE 0xff
+
+/* The most negative signed word, for the wrap case. */
+#define MP_MOST_NEGATIVE (-32768)
+
+/* Two adjacent ids again, so a record index off by one is visible. */
+#define COST_SPELL 0x07
+#define COST_NEXT_SPELL 0x08
+
+static void stage_cost(int spell_id, int mp_cost)
+{
+    spell_rec(spell_id)->mp_cost = (unsigned char) mp_cost;
+}
+
+/* The two offsets the deduction addresses, +0x44 in the unit record and +0x05
+   in the spell record, against the layouts ticket 17 settled. */
+static void the_mp_offsets_the_deduction_reaches_are_where_ticket_17_puts_them(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, mp_current), 0x44);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, mp_max), 0x46);
+    CHECK_EQ((int) offsetof(struct fdps_spell_effect, mp_cost), 0x05);
+}
+
+/* SUB EBX,EDX at 00028602: the cost comes straight off the current MP. */
+static void a_cast_takes_the_records_cost_off_the_casters_mp(void)
+{
+    stage();
+    unit(CASTER)->mp_current = MP_START;
+    unit(CASTER)->mp_max = MP_START;
+    stage_spell(COST_SPELL, 10, NEVER_HITS);
+    stage_cost(COST_SPELL, MP_COST);
+
+    fdps_spell_deduct_mp_cost(CASTER, COST_SPELL);
+    CHECK_EQ(unit(CASTER)->mp_current, MP_START - MP_COST);
+    CHECK_EQ(unit(CASTER)->mp_max, MP_START);
+}
+
+/* There is no CMP anywhere in the body, so the SUB at 00028602 is
+   unconditional: a cost byte of zero still runs it and takes nothing off,
+   rather than the lookup being skipped.  No MAGICDAT.DAT record actually
+   carries a zero cost -- the smallest is 4 (assets/spells.md) -- so what this
+   pins is the shape of the arithmetic, not a case the game reaches. */
+static void a_zero_cost_record_leaves_the_mp_where_it_was(void)
+{
+    stage();
+    unit(CASTER)->mp_current = MP_START;
+    stage_spell(COST_SPELL, 10, NEVER_HITS);
+    stage_cost(COST_SPELL, 0);
+
+    fdps_spell_deduct_mp_cost(CASTER, COST_SPELL);
+    CHECK_EQ(unit(CASTER)->mp_current, MP_START);
+}
+
+/* XOR EDX,EDX before MOV DL,byte ptr [EAX + 0x5]: a cost byte of 0xff is 255
+   and takes 255 off.  Read signed it would be -1 and ADD one MP instead. */
+static void the_mp_cost_byte_is_read_unsigned(void)
+{
+    stage();
+    unit(CASTER)->mp_current = 10;
+    stage_spell(COST_SPELL, 10, NEVER_HITS);
+    stage_cost(COST_SPELL, MP_COST_MAX_BYTE);
+
+    fdps_spell_deduct_mp_cost(CASTER, COST_SPELL);
+    CHECK_EQ(unit(CASTER)->mp_current, 10 - 255);
+}
+
+/* There is no test of the current MP against the cost and no clamp after the
+   subtraction: a cost above the MP leaves the field negative. */
+static void a_cost_above_the_current_mp_leaves_the_field_negative(void)
+{
+    stage();
+    unit(CASTER)->mp_current = 3;
+    stage_spell(COST_SPELL, 10, NEVER_HITS);
+    stage_cost(COST_SPELL, 10);
+
+    fdps_spell_deduct_mp_cost(CASTER, COST_SPELL);
+    CHECK_EQ(unit(CASTER)->mp_current, -7);
+
+    /* And a second charge takes it further down rather than stopping. */
+    fdps_spell_deduct_mp_cost(CASTER, COST_SPELL);
+    CHECK_EQ(unit(CASTER)->mp_current, -17);
+}
+
+/* MOV word ptr [EAX + 0x44],BX stores the low 16 bits of an int-width
+   difference: one MP off the most negative word wraps to the most positive one
+   rather than saturating. */
+static void the_difference_is_stored_as_a_word_and_wraps(void)
+{
+    stage();
+    unit(CASTER)->mp_current = (short) MP_MOST_NEGATIVE;
+    stage_spell(COST_SPELL, 10, NEVER_HITS);
+    stage_cost(COST_SPELL, 1);
+
+    fdps_spell_deduct_mp_cost(CASTER, COST_SPELL);
+    CHECK_EQ(unit(CASTER)->mp_current, 32767);
+}
+
+/* Nothing reads record +0x46, so an MP already above the unit's maximum is not
+   pulled down to it and the maximum itself is not touched. */
+static void the_maximum_mp_is_not_consulted(void)
+{
+    stage();
+    unit(CASTER)->mp_current = 40;
+    unit(CASTER)->mp_max = 10;
+    stage_spell(COST_SPELL, 10, NEVER_HITS);
+    stage_cost(COST_SPELL, MP_COST);
+
+    fdps_spell_deduct_mp_cost(CASTER, COST_SPELL);
+    CHECK_EQ(unit(CASTER)->mp_current, 35);
+    CHECK_EQ(unit(CASTER)->mp_max, 10);
+}
+
+/* The current MP word is the only thing written: the caster's other fields, the
+   neighbouring unit records and the spell record all come through unchanged. */
+static void nothing_but_the_casters_mp_word_is_written(void)
+{
+    stage();
+    unit(CASTER)->mp_current = MP_START;
+    unit(CASTER)->mp_max = MP_START;
+    unit(CASTER)->hp_current = FULL_HP;
+    unit(CASTER)->ap = 33;
+    unit(CASTER)->level = 7;
+    unit(TARGET)->mp_current = MP_START;
+    unit(BYSTANDER)->mp_current = MP_START;
+    unit(0)->mp_current = MP_START;
+    stage_spell(COST_SPELL, 10, NEVER_HITS);
+    stage_cost(COST_SPELL, MP_COST);
+    spell_rec(COST_SPELL)->target_side = 0xff;
+
+    fdps_spell_deduct_mp_cost(CASTER, COST_SPELL);
+    CHECK_EQ(unit(CASTER)->mp_current, MP_START - MP_COST);
+    CHECK_EQ(unit(CASTER)->mp_max, MP_START);
+    CHECK_EQ(unit(CASTER)->hp_current, FULL_HP);
+    CHECK_EQ(unit(CASTER)->ap, 33);
+    CHECK_EQ(unit(CASTER)->level, 7);
+    CHECK_EQ(unit(TARGET)->mp_current, MP_START);
+    CHECK_EQ(unit(BYSTANDER)->mp_current, MP_START);
+    CHECK_EQ(unit(0)->mp_current, MP_START);
+    CHECK_EQ(spell_rec(COST_SPELL)->mp_cost, MP_COST);
+    CHECK_EQ(spell_rec(COST_SPELL)->power, 10);
+    CHECK_EQ(spell_rec(COST_SPELL)->target_side, 0xff);
+}
+
+/* The first argument selects the unit and the second the spell, in that order:
+   the call site at 0001ad6c pushes the spell id first and the unit index
+   second, so the unit index is parameter one.  Swapping them would charge the
+   wrong record with the wrong cost, and the fixture makes both halves of that
+   visible -- the two units carry different MP and the two adjacent spell
+   records different costs. */
+static void each_argument_selects_its_own_record(void)
+{
+    stage();
+    unit(CASTER)->mp_current = MP_START;
+    unit(BYSTANDER)->mp_current = MP_START;
+    stage_spell(COST_SPELL, 10, NEVER_HITS);
+    stage_spell(COST_NEXT_SPELL, 10, NEVER_HITS);
+    stage_cost(COST_SPELL, MP_COST);
+    stage_cost(COST_NEXT_SPELL, MP_COST * 2);
+
+    fdps_spell_deduct_mp_cost(BYSTANDER, COST_SPELL);
+    CHECK_EQ(unit(BYSTANDER)->mp_current, MP_START - MP_COST);
+    CHECK_EQ(unit(CASTER)->mp_current, MP_START);
+
+    fdps_spell_deduct_mp_cost(BYSTANDER, COST_NEXT_SPELL);
+    CHECK_EQ(unit(BYSTANDER)->mp_current, MP_START - MP_COST - MP_COST * 2);
+    CHECK_EQ(unit(CASTER)->mp_current, MP_START);
+}
+
+/* IMUL EAX,[EBP+0x14],0x7 in fdps_get_spell_record with no INC after it: the
+   record is the spell id's own, not the biased lookup the class table uses.
+   The records either side hold costs that would show an index off by one in
+   either direction. */
+static void the_cost_record_is_the_spell_id_itself_with_no_bias(void)
+{
+    stage();
+    unit(CASTER)->mp_current = MP_START;
+    stage_cost(COST_SPELL - 1, 1);
+    stage_cost(COST_SPELL, MP_COST);
+    stage_cost(COST_SPELL + 1, 100);
+
+    fdps_spell_deduct_mp_cost(CASTER, COST_SPELL);
+    CHECK_EQ(unit(CASTER)->mp_current, MP_START - MP_COST);
+}
+
 void run_spell_tests(void)
 {
     RUN_TEST(the_record_layouts_match_the_offsets_read);
@@ -706,4 +919,15 @@ void run_spell_tests(void)
     RUN_TEST(the_heal_credits_battle_experience_through_the_shared_routine);
     RUN_TEST(nothing_of_the_record_but_the_power_is_consulted);
     RUN_TEST(a_heal_consumes_exactly_one_draw);
+
+    RUN_TEST(the_mp_offsets_the_deduction_reaches_are_where_ticket_17_puts_them);
+    RUN_TEST(a_cast_takes_the_records_cost_off_the_casters_mp);
+    RUN_TEST(a_zero_cost_record_leaves_the_mp_where_it_was);
+    RUN_TEST(the_mp_cost_byte_is_read_unsigned);
+    RUN_TEST(a_cost_above_the_current_mp_leaves_the_field_negative);
+    RUN_TEST(the_difference_is_stored_as_a_word_and_wraps);
+    RUN_TEST(the_maximum_mp_is_not_consulted);
+    RUN_TEST(nothing_but_the_casters_mp_word_is_written);
+    RUN_TEST(each_argument_selects_its_own_record);
+    RUN_TEST(the_cost_record_is_the_spell_id_itself_with_no_bias);
 }

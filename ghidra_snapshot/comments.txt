@@ -5781,7 +5781,7 @@ Deducts a spell's MP cost from the caster's current MP.
 Algorithm:
 Calls fdps_get_spell_record(spell_id) for the 7-byte MAGICDAT.DAT record and fdps_get_unit_record(unit_index) for the caster's 0x50-byte record in the array based at the global 0x00069cd8. Sign-extends the caster's current MP out of the signed 16-bit field at record+0x44, subtracts the record's MP cost byte at spell+0x05 (read unsigned) from it, and stores the low 16 bits back into record+0x44. That is the whole body: there is no test that the caster can afford the cost, no floor at zero, and no reference to the maximum MP at record+0x46, so a cost larger than the current MP leaves the field negative.
 
-The one caller, FUN_0001a4c0, runs this once after the action's animation loop has finished and does so for every action it animates, not only for spells; a plain attack costs nothing because its MAGICDAT record carries a zero cost byte.
+The one caller, fdps_combat_play_spell_on_targets, runs this once after the action's animation loop has finished. It is reached only through fdps_combat_play_spell_on_targets, whose own callers are fdps_battle_spell_command @ 00027c20 (call site 00028083) and fdps_map_actor_cast_chosen_spell @ 00013c90 (call site 00013d89), so every action that gets here is a cast.
 
 Parameters:
   unit_index -- index into the 0x50-byte unit record array based at the global 0x00069cd8, identifying the unit that just acted. Forwarded unchanged to fdps_get_unit_record, which bounds-checks nothing.

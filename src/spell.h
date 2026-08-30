@@ -76,4 +76,30 @@ extern int fdps_spell_damage_unit(int caster_unit_index, int target_unit_index,
 extern int fdps_spell_heal_unit(int unit_index, int spell_id);
 #pragma aux fdps_spell_heal_unit "*" parm caller [];
 
+/* Charges the MP cost of one action to the unit that performed it: subtracts
+   the MP cost byte of MAGICDAT.DAT record spell_id from struct
+   fdps_unit_record's mp_current at record offset 0x44 of unit unit_index, and
+   writes the difference back as a word.  Nothing is returned and no other field
+   of either record is read or written -- in particular the maximum MP at
+   offset 0x46 is not.
+
+   The cost byte is unsigned, so the whole 0..255 range is a cost, and the
+   current MP is signed.  There is no affordability test and no floor: a cost
+   larger than the unit's MP leaves the field negative, and a difference outside
+   a signed word wraps into it rather than saturating.  A caller that wants a
+   cast refused for want of MP has to refuse it before calling.
+
+   The caller does this once per action, after the action's animation loop has
+   finished.  Every action that gets here is a cast: the only caller is
+   fdps_combat_play_spell_on_targets, which is itself reached only from
+   fdps_battle_spell_command and fdps_map_actor_cast_chosen_spell, and no
+   plain-attack path leads into it.
+
+   unit_index is a position in the current battle's unit array and is not range
+   checked; the record is resolved through fdps_get_unit_record (unit.h), so a
+   call after the array has moved writes into the new block.  spell_id is a
+   MAGICDAT.DAT record index, 0..0x27, and is not checked either. */
+extern void fdps_spell_deduct_mp_cost(int unit_index, int spell_id);
+#pragma aux fdps_spell_deduct_mp_cost "*" parm caller [];
+
 #endif

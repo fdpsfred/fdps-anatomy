@@ -673,6 +673,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x41"
+    },
+    "000285c0": {
+      "name": "fdps_spell_deduct_mp_cost",
+      "target": "spell.c",
+      "body_size": "0x4f",
+      "status": "committed",
+      "rounds": 1,
+      "emitted_against": "0x4f"
     }
   }
 }

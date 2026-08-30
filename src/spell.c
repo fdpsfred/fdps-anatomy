@@ -151,3 +151,55 @@ int fdps_spell_heal_unit(int unit_index, int spell_id)
 
     return fdps_unit_apply_heal(unit_index, heal_power);
 }
+
+/* 000285c0.  Charging one action's MP cost to the unit that performed it.
+ *
+ * The frame is the plain -4s one -- PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP,
+ * SUB ESP,0xc -- with the two arguments read from [EBP+0x14] and [EBP+0x18]
+ * and a bare RET, so the caller cleans up.  The one call site at 0001ad6c
+ * pushes [EBP+0x18] then [EBP+0x14] and follows the CALL with ADD ESP,0x8,
+ * which is the same convention seen from the other side, and the instruction
+ * after it loads [EBP-0x20] rather than EAX, so nothing is returned.
+ *
+ * There are no branches: two record lookups, one read, one subtract, one store.
+ * The order of the two calls is the assembly's -- the spell record at 000285d0
+ * before the unit record at 000285df -- and neither has an effect the other can
+ * see, so the two pointers are independent.
+ *
+ * The two field widths are the whole of the arithmetic.  MOVSX word ptr
+ * [EAX+0x44] at 000285ed widens the caster's current MP as a signed word, and
+ * XOR EDX,EDX / MOV DL,byte ptr [EAX+0x5] at 000285f7 takes the record's cost
+ * byte zero-extended, so a cost byte of 0xff is 255 and not -1.  Both
+ * signednesses are already carried by struct fdps_unit_record's mp_current and
+ * struct fdps_spell_effect's mp_cost, so the field types are all that is
+ * needed.  MOV word ptr [EAX+0x44],BX stores the low 16 bits of the int-width
+ * difference back.
+ *
+ * Rebuild note: nothing here tests whether the caster can afford the cost, and
+ * there is no floor at zero -- a cost above the current MP leaves the field
+ * negative, and a difference outside 16 bits wraps into the word rather than
+ * saturating.  The maximum MP at record +0x46 is never read.  Adding the
+ * affordability test that the shape of the function invites would change what
+ * the game does; the caller does not make it either.
+ *
+ * The one caller, fdps_combat_play_spell_on_targets, runs this once after the
+ * action's animation loop has finished -- the loop's back edge is the JMP to
+ * 0001abc1 at 0001ad5f and the argument setup at 0001ad64 is where it lands on
+ * exit.  Everything that reaches this function is a cast: that caller is
+ * itself reached only from fdps_battle_spell_command (00027c20, call site
+ * 00028083) and fdps_map_actor_cast_chosen_spell (00013c90, call site
+ * 00013d89), and no plain-attack path leads into it.  Nor is a free action
+ * expressible here -- the smallest MP cost in MAGICDAT.DAT is 4
+ * (assets/spells.md), so the subtraction always takes something off. */
+void fdps_spell_deduct_mp_cost(int unit_index, int spell_id)
+{
+    struct fdps_spell_effect *spell;
+    struct fdps_unit_record *caster;
+    int current_mp;
+
+    spell = fdps_get_spell_record(spell_id);
+    caster = fdps_get_unit_record(unit_index);
+    current_mp = caster->mp_current;
+
+    caster->mp_current = (short) (current_mp - spell->mp_cost);
+}
