@@ -24,6 +24,14 @@
  * bonus is (rand() % 100) / 10 and therefore 0..9, and asserts the roll
  * against the interval rather than a value.
  *
+ * The fdps_unit_restore_mp cases below are read off 000275a0 the same way:
+ * the same LEA/IDIV roll, the XOR EAX,EAX / MOV AX,word ptr [EDX+0x44] and
+ * MOV AX / AND EAX,0xffff loads at 000275bd and 0002762d that make both MP
+ * reads UNSIGNED where the heal's are MOVSX, the JLE clamp at 00027622, the
+ * 16-bit store at 00027644, and the return rebuilt from the two roll locals
+ * at 00027648.  That function has no divide by the maximum and no ADD into
+ * the experience accumulator at all, and both absences are asserted.
+ *
  * WHY THE EXPERIENCE ACCUMULATOR IS SEEDED WITH 1000.  The function ADDS to
  * data_fdps_battle_pending_xp_credit, so a seed of 0 could not tell an award
  * of 0 apart from an assignment of 0.  Seeding it with a value no award here
@@ -337,6 +345,170 @@ static void each_index_selects_its_own_record(void)
     CHECK_EQ(unit(3)->hp_current, 0);
 }
 
+/* The MP twin's patient: the same record 1, on 10 of 100 MP, with the HP
+   fields stage() set left alone so that a stray write into them shows up. */
+static void stage_mp(void)
+{
+    stage();
+    unit(PATIENT)->mp_current = 10;
+    unit(PATIENT)->mp_max = 100;
+}
+
+static void the_mp_fields_sit_where_the_word_loads_read(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, mp_current), 0x44);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, mp_max), 0x46);
+    CHECK_EQ((int) sizeof(layout_probe.mp_current), 2);
+    CHECK_EQ((int) sizeof(layout_probe.mp_max), 2);
+}
+
+/* The same roll as the heal: 10 gives exactly 9 with the bonus pinned to 0. */
+static void a_restore_of_ten_rolls_nine_every_time(void)
+{
+    stage_mp();
+    CHECK_EQ(fdps_unit_restore_mp(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->mp_current, 19);
+}
+
+/* 63 / 10 and 27 / 10 again: the base restore truncates. */
+static void the_base_restore_truncates(void)
+{
+    stage_mp();
+    CHECK_EQ(fdps_unit_restore_mp(PATIENT, AMOUNT_SEVEN), 6);
+    CHECK_EQ(unit(PATIENT)->mp_current, 16);
+
+    stage_mp();
+    CHECK_EQ(fdps_unit_restore_mp(PATIENT, AMOUNT_THREE), 2);
+    CHECK_EQ(unit(PATIENT)->mp_current, 12);
+}
+
+/* JLE at 00027622, and the return the whole function exists to get wrong: the
+   clamped record gained 2 and the figure handed back is still the 9 rolled. */
+static void the_total_is_clamped_and_the_roll_is_still_returned(void)
+{
+    int rolled;
+
+    stage_mp();
+    unit(PATIENT)->mp_current = 38;
+    unit(PATIENT)->mp_max = 40;
+
+    rolled = fdps_unit_restore_mp(PATIENT, AMOUNT_TEN);
+    CHECK_EQ(rolled, 9);
+    CHECK_EQ(unit(PATIENT)->mp_current, 40);
+    CHECK_EQ(unit(PATIENT)->mp_current - 38, 2);
+    CHECK_EQ(rolled != unit(PATIENT)->mp_current - 38, 1);
+}
+
+/* A unit already at full MP gains nothing and still hands back its roll --
+   the case fdps_apply_item_effect_to_targets does not filter out. */
+static void a_full_unit_gains_nothing_but_still_returns_its_roll(void)
+{
+    stage_mp();
+    unit(PATIENT)->mp_current = 100;
+
+    CHECK_EQ(fdps_unit_restore_mp(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->mp_current, 100);
+}
+
+/* No divide by the maximum anywhere in this function: a maximum of 0 pins the
+   MP at 0 instead of faulting the way the heal's award would. */
+static void a_maximum_of_zero_pins_the_mp_rather_than_faulting(void)
+{
+    stage_mp();
+    unit(PATIENT)->mp_current = 0;
+    unit(PATIENT)->mp_max = 0;
+
+    CHECK_EQ(fdps_unit_restore_mp(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->mp_current, 0);
+}
+
+/* IDIV on a sign-extended dividend truncates towards zero, so -7 gives -6, and
+   nothing clamps the MP at the bottom: the drained total is written back as a
+   negative word. */
+static void a_negative_amount_drains_mp_with_no_bottom_clamp(void)
+{
+    stage_mp();
+    unit(PATIENT)->mp_current = 2;
+
+    CHECK_EQ(fdps_unit_restore_mp(PATIENT, -AMOUNT_SEVEN), -6);
+    CHECK_EQ(unit(PATIENT)->mp_current, -4);
+}
+
+/* The load at 000275bd is XOR EAX,EAX / MOV AX and not MOVSX, so the negative
+   word the test above can leave behind reads back as 65532 rather than -4.
+   The restore therefore lands far above the maximum and is clamped to it in
+   one step; a signed read would have given 5. */
+static void the_mp_fields_are_read_unsigned(void)
+{
+    stage_mp();
+    unit(PATIENT)->mp_current = -4;
+
+    CHECK_EQ(fdps_unit_restore_mp(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->mp_current, 100);
+    CHECK_EQ(unit(PATIENT)->mp_current != 5, 1);
+}
+
+/* At an amount of 100 the bonus is (rand() % 100) / 10, so the roll is 90..99
+   and the MP moves by exactly the roll.  Twenty draws against the interval and
+   against the record, with the maximum lifted clear of the clamp. */
+static void the_restore_spans_nine_tenths_to_the_full_amount(void)
+{
+    int draw;
+    int rolled;
+    int inside;
+    int matched;
+
+    inside = 0;
+    matched = 0;
+
+    for (draw = 0; draw < BAND_DRAWS; draw++) {
+        stage_mp();
+        unit(PATIENT)->mp_max = 200;
+        rolled = fdps_unit_restore_mp(PATIENT, AMOUNT_HUNDRED);
+        if (rolled >= HUNDRED_ROLL_LOW && rolled <= HUNDRED_ROLL_HIGH) {
+            inside++;
+        }
+        if (unit(PATIENT)->mp_current == 10 + rolled) {
+            matched++;
+        }
+    }
+
+    CHECK_EQ(inside, BAND_DRAWS);
+    CHECK_EQ(matched, BAND_DRAWS);
+}
+
+/* +0x44 is the only field the function writes: the HP pair the heal works on
+   is untouched, and the experience accumulator -- which the heal ADDs to on
+   exactly this fixture -- keeps its seed, because no ADD into it exists here
+   at all. */
+static void nothing_but_the_current_mp_is_touched(void)
+{
+    stage_mp();
+
+    CHECK_EQ(fdps_unit_restore_mp(PATIENT, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(PATIENT)->mp_current, 19);
+    CHECK_EQ(unit(PATIENT)->mp_max, 100);
+    CHECK_EQ(unit(PATIENT)->hp_current, 10);
+    CHECK_EQ(unit(PATIENT)->hp_max, 100);
+    CHECK_EQ(unit(PATIENT)->level, 4);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED);
+}
+
+/* The index picks the record: unit 2 is restored and its three neighbours are
+   left where they were. */
+static void each_index_selects_its_own_record_for_mp(void)
+{
+    stage_mp();
+    unit(2)->mp_current = 30;
+    unit(2)->mp_max = 100;
+
+    CHECK_EQ(fdps_unit_restore_mp(2, AMOUNT_TEN), 9);
+    CHECK_EQ(unit(2)->mp_current, 39);
+    CHECK_EQ(unit(0)->mp_current, 0);
+    CHECK_EQ(unit(PATIENT)->mp_current, 10);
+    CHECK_EQ(unit(3)->mp_current, 0);
+}
+
 void run_unitstat_tests(void)
 {
     RUN_TEST(the_record_layout_matches_the_offsets_read);
@@ -354,4 +526,16 @@ void run_unitstat_tests(void)
     RUN_TEST(the_promotion_span_is_0x0f_through_0x21);
     RUN_TEST(an_enemy_portrait_is_healed_but_credits_nothing);
     RUN_TEST(each_index_selects_its_own_record);
+
+    RUN_TEST(the_mp_fields_sit_where_the_word_loads_read);
+    RUN_TEST(a_restore_of_ten_rolls_nine_every_time);
+    RUN_TEST(the_base_restore_truncates);
+    RUN_TEST(the_total_is_clamped_and_the_roll_is_still_returned);
+    RUN_TEST(a_full_unit_gains_nothing_but_still_returns_its_roll);
+    RUN_TEST(a_maximum_of_zero_pins_the_mp_rather_than_faulting);
+    RUN_TEST(a_negative_amount_drains_mp_with_no_bottom_clamp);
+    RUN_TEST(the_mp_fields_are_read_unsigned);
+    RUN_TEST(the_restore_spans_nine_tenths_to_the_full_amount);
+    RUN_TEST(nothing_but_the_current_mp_is_touched);
+    RUN_TEST(each_index_selects_its_own_record_for_mp);
 }

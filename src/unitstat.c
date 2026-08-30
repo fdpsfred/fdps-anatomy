@@ -122,3 +122,69 @@ int fdps_unit_apply_heal(int unit_index, int amount)
 
     return base_heal + random_bonus;
 }
+
+/* 000275a0.  The frame is the plain -4s one: PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP, SUB ESP,0x1c, the two arguments read from [EBP+0x14] and
+   [EBP+0x18], and all four call sites -- 0001e6bc, 0001e746 and 0001e7d7 in
+   fdps_battle_advance_turn, 00026a1b in fdps_apply_item_effect_to_targets --
+   doing ADD ESP,0x8 after the CALL.
+
+   The roll is built from the same three constants as the HP twin above and by
+   the same three divides; what differs is everything around it.
+
+   The returned figure is the ROLL and not the MP the record gained, exactly as
+   in the twin: 00027648 rebuilds it from the two locals the restore was built
+   out of instead of reading the clamped total back.  Every call site passes
+   the returned value straight to fdps_show_number_indicator, so returning the
+   real gain would float a smaller number than the original over a unit near
+   full MP -- and a 0 where the original shows the full roll, because
+   fdps_apply_item_effect_to_targets does not filter out a target that is
+   already at full MP.
+
+   Both MP fields are read ZERO-extended -- XOR EAX,EAX / MOV AX,word ptr
+   [EDX+0x44] at 000275bd and again for +0x46, then MOV AX / AND EAX,0xffff at
+   0002762d -- where the twin uses MOVSX on its two HP fields.  The casts below
+   are that difference and it is observable: nothing clamps the MP at the
+   bottom, so a drained unit can hold a negative word, and this function reads
+   that word back as a number near 65535 and clamps it straight up to mp_max
+   rather than climbing out of the negative.  Every other reader of the same
+   field -- 0001346a, 00013075's neighbour in the item scorer, 0002826d,
+   000285ed, 0002895b -- uses MOVSX, so the width is this function's own and
+   not the record's type.
+
+   The MP the restore actually applied is computed at 0002763b into a stack
+   local that is never read again.  It is kept because it is precisely the
+   difference between what the record gets and what the player is shown.
+
+   Unlike the twin there is no divide by the maximum, so a unit whose maximum
+   MP is 0 is clamped to 0 here rather than faulting, and no experience is
+   credited at all: this function touches nothing but +0x44. */
+int fdps_unit_restore_mp(int unit_index, int amount)
+{
+    struct fdps_unit_record *unit;
+    int max_mp;
+    int mp_after_restore;
+    int base_restore;
+    int random_bonus;
+    int mp_gained;
+
+    unit = fdps_get_unit_record(unit_index);
+
+    mp_after_restore = (unsigned short) unit->mp_current;
+    max_mp = (unsigned short) unit->mp_max;
+
+    base_restore = amount * HEAL_NUMERATOR / HEAL_DENOMINATOR;
+    random_bonus = (rand() % PERCENT) * amount / HEAL_SPREAD_DIVISOR;
+
+    mp_after_restore += base_restore + random_bonus;
+    if (mp_after_restore > max_mp) {
+        mp_after_restore = max_mp;
+    }
+
+    /* Stored at 0002763b and never loaded again; the record still holds the
+       pre-restore MP here, because the store is the next statement. */
+    mp_gained = mp_after_restore - (unsigned short) unit->mp_current;
+    unit->mp_current = (short) mp_after_restore;
+
+    return base_restore + random_bonus;
+}

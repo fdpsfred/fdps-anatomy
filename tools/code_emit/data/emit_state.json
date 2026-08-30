@@ -612,6 +612,14 @@
       "status": "committed",
       "emitted_against": "0xb5",
       "rounds": 0
+    },
+    "000275a0": {
+      "name": "fdps_unit_restore_mp",
+      "target": "unitstat.c",
+      "body_size": "0xbb",
+      "status": "committed",
+      "emitted_against": "0xbb",
+      "rounds": 0
     }
   }
 }
