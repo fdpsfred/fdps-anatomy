@@ -188,3 +188,69 @@ int fdps_unit_restore_mp(int unit_index, int amount)
 
     return base_restore + random_bonus;
 }
+
+/* CMP dword ptr [EBP-0xc],0x5: the outer walk is over the five bytes of
+   struct fdps_unit_record's spells_known_bitmap, and the byte is reached as
+   record + byte_index then byte ptr [that + 0x1a], which is the field's own
+   offset. */
+#define SPELL_BITMAP_BYTES 5
+
+/* CMP dword ptr [EBP-0x14],0x8 for the inner walk, and SHL AL,0x3 for the id
+   the outer index contributes -- the same 8, so the ids run 0..39 with no
+   gap between one byte's block and the next. */
+#define SPELL_BITMAP_BITS_PER_BYTE 8
+
+/* 00027840.  The frame is the plain -4s one: PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP, SUB ESP,0x18, the two arguments read from [EBP+0x14] and
+   [EBP+0x18], and all eight call sites -- 00013479, 00013a5a, 00015df5,
+   00016c07, 00027704, 000278f4, 00027d87, 00028144 -- doing ADD ESP,0x8 after
+   the CALL.
+
+   Three things about the shape are worth stating.
+
+   The counter is advanced only inside the `if`, at 000278c1, and is what both
+   indexes out_ids and becomes the return value.  So the buffer is a packed
+   list of the ids that are set and not a bitmap-shaped array: a unit knowing
+   only spell 39 gets that id at out_ids[0], not at out_ids[39].
+
+   The out_ids test is inside the bit test rather than around the whole walk --
+   CMP dword ptr [EBP+0x18],0x0 at 000278aa, once per set bit -- so a NULL
+   buffer still runs the full count.  That is the mode three of the call sites
+   use, and it is the only reason the function is reachable with no buffer at
+   all.
+
+   The mask byte is loaded XOR EAX,EAX / MOV AL, so it widens UNSIGNED into an
+   int, and the shift that tests it is the signed SAR at 000278a4.  The two
+   agree here because a zero-extended byte is never negative; the widening is
+   the half that matters, since a sign-extended 0x80 would make every bit above
+   7 of the shifted value set and the `& 1` would still be reading bit 7 of the
+   original byte -- the same answer, reached by accident.  The zero extension is
+   what makes it not an accident. */
+int fdps_unit_collect_known_spells(int unit_index, unsigned char *out_ids)
+{
+    struct fdps_unit_record *unit;
+    int byte_index;
+    int bit;
+    int mask_byte;
+    int spells_found;
+
+    /* Zeroed at 0002784c, before the record lookup rather than after it. */
+    spells_found = 0;
+    unit = fdps_get_unit_record(unit_index);
+
+    for (byte_index = 0; byte_index < SPELL_BITMAP_BYTES; byte_index++) {
+        mask_byte = unit->spells_known_bitmap[byte_index];
+
+        for (bit = 0; bit < SPELL_BITMAP_BITS_PER_BYTE; bit++) {
+            if ((mask_byte >> bit) & 1) {
+                if (out_ids != NULL) {
+                    out_ids[spells_found] = (unsigned char)
+                        (byte_index * SPELL_BITMAP_BITS_PER_BYTE + bit);
+                }
+                spells_found++;
+            }
+        }
+    }
+
+    return spells_found;
+}

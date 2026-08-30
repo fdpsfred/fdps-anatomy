@@ -620,6 +620,14 @@
       "status": "committed",
       "emitted_against": "0xbb",
       "rounds": 0
+    },
+    "00027840": {
+      "name": "fdps_unit_collect_known_spells",
+      "target": "unitstat.c",
+      "body_size": "0x9b",
+      "status": "committed",
+      "rounds": 1,
+      "emitted_against": "0x9b"
     }
   }
 }

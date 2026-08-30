@@ -509,6 +509,189 @@ static void each_index_selects_its_own_record_for_mp(void)
     CHECK_EQ(unit(3)->mp_current, 0);
 }
 
+/* The fdps_unit_collect_known_spells cases below are read off 00027840: CMP
+   dword ptr [EBP-0xc],0x5 for the five bytes walked, byte ptr [EDX+0x1a] for
+   where they are, CMP dword ptr [EBP-0x14],0x8 with SAR EAX,CL / TEST AL,0x1
+   for the bit order inside each byte, SHL AL,0x3 / ADD AL for the id a set bit
+   stands for, the counter at [EBP-0x10] that is advanced only inside the bit
+   test and indexes the buffer as well as being returned, and CMP dword ptr
+   [EBP+0x18],0x0 at 000278aa for the NULL buffer mode.  The five bytes and
+   nothing on either side of them is what the outer walk covers, and both
+   neighbours are staged with 0xff below to prove it. */
+
+/* CMP dword ptr [EBP-0xc],0x5 -- and 5 * 8 ids, so the span is 0..39. */
+#define SPELL_BITMAP_BYTES 5
+#define SPELL_ID_COUNT 40
+
+/* The buffer is given more room than the 40 the function can write so that a
+   write past the count is visible; every byte starts as a value no spell id
+   can be. */
+#define OUT_ROOM 48
+#define OUT_SENTINEL 0xee
+
+static unsigned char spell_ids[OUT_ROOM];
+
+static void stage_spells(void)
+{
+    int i;
+
+    stage();
+    for (i = 0; i < OUT_ROOM; i++) {
+        spell_ids[i] = OUT_SENTINEL;
+    }
+}
+
+static void the_spell_bitmap_sits_where_the_byte_loads_read(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, spells_known_bitmap),
+             0x1a);
+    CHECK_EQ((int) sizeof(layout_probe.spells_known_bitmap),
+             SPELL_BITMAP_BYTES);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, race), 0x1f);
+}
+
+/* A unit that knows nothing counts nothing and writes nothing. */
+static void an_empty_bitmap_collects_no_ids(void)
+{
+    stage_spells();
+
+    CHECK_EQ(fdps_unit_collect_known_spells(PATIENT, spell_ids), 0);
+    CHECK_EQ(spell_ids[0], OUT_SENTINEL);
+}
+
+/* Bit 0 of byte 0 is id 0 and bit 7 of byte 0 is id 7: the walk inside a byte
+   runs from the least significant bit upwards, so the id is the bit number and
+   not 7 minus it. */
+static void the_bits_of_a_byte_are_walked_least_significant_first(void)
+{
+    stage_spells();
+    unit(PATIENT)->spells_known_bitmap[0] = 0x01;
+    CHECK_EQ(fdps_unit_collect_known_spells(PATIENT, spell_ids), 1);
+    CHECK_EQ(spell_ids[0], 0);
+
+    stage_spells();
+    unit(PATIENT)->spells_known_bitmap[0] = 0x80;
+    CHECK_EQ(fdps_unit_collect_known_spells(PATIENT, spell_ids), 1);
+    CHECK_EQ(spell_ids[0], 7);
+}
+
+/* SHL AL,0x3: each byte contributes 8 to the id, so bit 0 of byte 1 is id 8
+   and bit 7 of byte 4 is id 39 -- the top of the whole span. */
+static void each_byte_contributes_eight_to_the_id(void)
+{
+    stage_spells();
+    unit(PATIENT)->spells_known_bitmap[1] = 0x01;
+    CHECK_EQ(fdps_unit_collect_known_spells(PATIENT, spell_ids), 1);
+    CHECK_EQ(spell_ids[0], 8);
+
+    stage_spells();
+    unit(PATIENT)->spells_known_bitmap[4] = 0x80;
+    CHECK_EQ(fdps_unit_collect_known_spells(PATIENT, spell_ids), 1);
+    CHECK_EQ(spell_ids[0], SPELL_ID_COUNT - 1);
+}
+
+/* The counter advances only on a set bit, so the ids land packed from element
+   0 in ascending order -- the buffer is a list, not an array indexed by spell
+   id.  Bits 1 and 3 of byte 0 and bit 0 of byte 2 give 1, 3 and 16 in the
+   first three elements, and the fourth is still the sentinel. */
+static void the_ids_are_packed_in_ascending_order(void)
+{
+    stage_spells();
+    unit(PATIENT)->spells_known_bitmap[0] = 0x0a;
+    unit(PATIENT)->spells_known_bitmap[2] = 0x01;
+
+    CHECK_EQ(fdps_unit_collect_known_spells(PATIENT, spell_ids), 3);
+    CHECK_EQ(spell_ids[0], 1);
+    CHECK_EQ(spell_ids[1], 3);
+    CHECK_EQ(spell_ids[2], 16);
+    CHECK_EQ(spell_ids[3], OUT_SENTINEL);
+}
+
+/* All forty bits set: forty ids, each equal to its own position, and nothing
+   written at element 40. */
+static void every_bit_set_yields_all_forty_ids_in_order(void)
+{
+    int i;
+    int in_order;
+
+    stage_spells();
+    for (i = 0; i < SPELL_BITMAP_BYTES; i++) {
+        unit(PATIENT)->spells_known_bitmap[i] = 0xff;
+    }
+
+    CHECK_EQ(fdps_unit_collect_known_spells(PATIENT, spell_ids),
+             SPELL_ID_COUNT);
+
+    in_order = 0;
+    for (i = 0; i < SPELL_ID_COUNT; i++) {
+        if (spell_ids[i] == (unsigned char) i) {
+            in_order++;
+        }
+    }
+    CHECK_EQ(in_order, SPELL_ID_COUNT);
+    CHECK_EQ(spell_ids[SPELL_ID_COUNT], OUT_SENTINEL);
+}
+
+/* CMP dword ptr [EBP+0x18],0x0 sits inside the bit test, not around the walk:
+   a NULL buffer counts every set bit exactly as a real one does and writes
+   nothing at all. */
+static void a_null_buffer_still_counts_every_set_bit(void)
+{
+    stage_spells();
+    unit(PATIENT)->spells_known_bitmap[0] = 0x0a;
+    unit(PATIENT)->spells_known_bitmap[2] = 0x01;
+    unit(PATIENT)->spells_known_bitmap[4] = 0x80;
+
+    CHECK_EQ(fdps_unit_collect_known_spells(PATIENT, (unsigned char *) 0), 4);
+    CHECK_EQ(spell_ids[0], OUT_SENTINEL);
+    CHECK_EQ(spell_ids[1], OUT_SENTINEL);
+}
+
+/* The walk covers record offsets 0x1a through 0x1e and neither neighbour:
+   inventory_slots[15] at 0x19 and race at 0x1f are both filled with 0xff, and
+   the answer is still the one bit that is inside the bitmap. */
+static void neither_neighbouring_field_is_walked(void)
+{
+    stage_spells();
+    unit(PATIENT)->inventory_slots[15] = 0xff;
+    unit(PATIENT)->race = 0xff;
+    unit(PATIENT)->spells_known_bitmap[0] = 0x04;
+
+    CHECK_EQ(fdps_unit_collect_known_spells(PATIENT, spell_ids), 1);
+    CHECK_EQ(spell_ids[0], 2);
+    CHECK_EQ(spell_ids[1], OUT_SENTINEL);
+}
+
+/* Nothing in the record is written and no global is touched: the bitmap reads
+   back unchanged and the experience accumulator, which the heal on this same
+   fixture ADDs to, keeps its seed. */
+static void the_record_is_only_read(void)
+{
+    stage_spells();
+    unit(PATIENT)->spells_known_bitmap[0] = 0x0a;
+    unit(PATIENT)->spells_known_bitmap[3] = 0x40;
+
+    CHECK_EQ(fdps_unit_collect_known_spells(PATIENT, spell_ids), 3);
+    CHECK_EQ(unit(PATIENT)->spells_known_bitmap[0], 0x0a);
+    CHECK_EQ(unit(PATIENT)->spells_known_bitmap[3], 0x40);
+    CHECK_EQ(unit(PATIENT)->hp_current, 10);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED);
+}
+
+/* The index picks the record: unit 2's bitmap is the one read, and unit 1's,
+   which holds a different pattern, is not. */
+static void each_index_selects_its_own_record_for_spells(void)
+{
+    stage_spells();
+    unit(PATIENT)->spells_known_bitmap[0] = 0xff;
+    unit(2)->spells_known_bitmap[1] = 0x03;
+
+    CHECK_EQ(fdps_unit_collect_known_spells(2, spell_ids), 2);
+    CHECK_EQ(spell_ids[0], 8);
+    CHECK_EQ(spell_ids[1], 9);
+    CHECK_EQ(spell_ids[2], OUT_SENTINEL);
+}
+
 void run_unitstat_tests(void)
 {
     RUN_TEST(the_record_layout_matches_the_offsets_read);
@@ -538,4 +721,15 @@ void run_unitstat_tests(void)
     RUN_TEST(the_restore_spans_nine_tenths_to_the_full_amount);
     RUN_TEST(nothing_but_the_current_mp_is_touched);
     RUN_TEST(each_index_selects_its_own_record_for_mp);
+
+    RUN_TEST(the_spell_bitmap_sits_where_the_byte_loads_read);
+    RUN_TEST(an_empty_bitmap_collects_no_ids);
+    RUN_TEST(the_bits_of_a_byte_are_walked_least_significant_first);
+    RUN_TEST(each_byte_contributes_eight_to_the_id);
+    RUN_TEST(the_ids_are_packed_in_ascending_order);
+    RUN_TEST(every_bit_set_yields_all_forty_ids_in_order);
+    RUN_TEST(a_null_buffer_still_counts_every_set_bit);
+    RUN_TEST(neither_neighbouring_field_is_walked);
+    RUN_TEST(the_record_is_only_read);
+    RUN_TEST(each_index_selects_its_own_record_for_spells);
 }

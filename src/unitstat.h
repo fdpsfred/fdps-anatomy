@@ -86,4 +86,33 @@ extern int fdps_unit_apply_heal(int unit_index, int amount);
 extern int fdps_unit_restore_mp(int unit_index, int amount);
 #pragma aux fdps_unit_restore_mp "*" parm caller [];
 
+/* Expands one unit's learned-spell bitmap into a list of spell ids and returns
+   how many there are.  The bitmap is struct fdps_unit_record's
+   spells_known_bitmap, the five bytes at record offset 0x1a, and it is walked
+   byte 0 first and, within each byte, from bit 0 upwards, so the ids come out
+   in ascending order.  The id a set bit stands for is byte_index * 8 + bit,
+   which puts the whole span at 0..39.
+
+   out_ids is filled from its element 0 with exactly the ids that are set, one
+   byte each, packed with no gaps -- it is a list, not a copy of the bitmap
+   indexed by spell id.  Nothing bounds checks it, so the caller supplies
+   whatever room it needs, and the six callers that pass a buffer do not all
+   give room for the 40 ids this can write: fdps_draw_spell_list_page's stack
+   array is exactly 40 bytes, while fdps_map_actor_score_best_spell's is 20.
+   Elements past the returned count are left as the caller had them.
+
+   out_ids may be NULL, and then nothing is written and the function is a plain
+   population count of the bitmap.  Two call sites use it that way, both asking
+   only whether the unit knows any spell at all: fdps_battle_action_menu marks
+   the spell command unavailable in its menu state when the answer is 0, and
+   fdps_score_targets_for_spell skips the scoring step that would follow.
+
+   unit_index is a position in the current battle's unit array and is not range
+   checked; the record is resolved through fdps_get_unit_record, so a call after
+   the array has moved reads the new block.  Nothing in the record is written
+   and no global is touched. */
+extern int fdps_unit_collect_known_spells(int unit_index,
+                                          unsigned char *out_ids);
+#pragma aux fdps_unit_collect_known_spells "*" parm caller [];
+
 #endif
