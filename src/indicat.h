@@ -72,4 +72,32 @@ extern void fdps_show_number_indicator(int value, unsigned char glyph_base,
                                        int unit_index);
 #pragma aux fdps_show_number_indicator "*" parm caller [];
 
+/* 0001f690.  Floats the word MISS over one battle unit, to report that a spell
+   or an item did nothing to that target, by appending four cells to the shared
+   queue -- one per glyph of M, I, S, S.  Nothing is drawn here and nothing
+   waits; the caller drains the queue with fdps_play_indicator_queue once it has
+   queued every popup of the batch.
+
+   The glyph ids are fixed at 0x34, 0x35, 0x36, 0x36 in the Number.cel sheet and
+   there is no way to ask for a different word: the CURE popup at 0001f7d0 is a
+   separate function with its own four ids, and the caller-supplied variant is
+   fdps_show_sprite_indicator.
+
+   The request is culled against the same asymmetric tile window
+   fdps_show_number_indicator uses (rebuild_info/pitfalls.md): with the view
+   origins divided by the 24-pixel tile size into origin_tx and origin_ty, the
+   unit is shown when its tile x is in origin_tx .. origin_tx + 12 and its tile
+   y is in origin_ty - 1 .. origin_ty + 8.  A culled request queues nothing and
+   leaves the cursor where it was.
+
+   The four cells sit 1, 8, 13 and 19 pixels into the popup -- i * 6 + 1 with
+   cell 1 alone nudged a pixel right -- rather than the number popup's 2, 8, 14
+   and 20.
+
+   unit_index is a position in the current battle's unit array, resolved through
+   fdps_get_unit_record and not range checked; it is also what goes into the
+   queue, as a byte, so the popup follows that unit while it plays. */
+extern void fdps_show_miss_indicator(int unit_index);
+#pragma aux fdps_show_miss_indicator "*" parm caller [];
+
 #endif

@@ -335,6 +335,239 @@ static void number_does_not_touch_the_record(void)
     CHECK_EQ(stage_units[0].hp_current, 25);
 }
 
+/* ---- fdps_show_miss_indicator @ 0001f690 -------------------------------- */
+
+/* Stand unit 0 on (tile_x, tile_y) with the view scrolled to those pixel
+   origins, ask for a MISS over it and hand back how many cells the queue took:
+   4 when the unit was inside the window, 0 when it was culled. */
+static int miss_cells_queued(int scroll_x, int scroll_y, int tile_x, int tile_y)
+{
+    stage();
+    data_fdps_battle_view_window_origin_x = scroll_x;
+    data_fdps_battle_view_window_origin_y = scroll_y;
+    place(0, tile_x, tile_y);
+    fdps_show_miss_indicator(0);
+    return data_fdps_indicator_queue_count;
+}
+
+/* MOV EAX,[0x0001c2d2] / MOV [EBP-0x4],EAX at 0001f69c, over the four bytes
+   34 35 36 36 that live there: the word is fixed in the function and the two S
+   cells really do repeat the same glyph id rather than taking a second one. */
+static void miss_glyphs_are_the_four_fixed_ids(void)
+{
+    stage();
+    place(0, 3, 3);
+    fdps_show_miss_indicator(0);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[0], 0x34);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[1], 0x35);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[2], 0x36);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[3], 0x36);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[4], FILLER);
+}
+
+/* MOV AH,0x6 / MUL AH / INC AL at 0001f778 for every cell but one, and the
+   branch at 0001f758 that sends cell 1 to ADD AL,0x2 instead: the offsets are
+   1, 8, 13, 19 and NOT the uniform 1, 7, 13, 19.  Cell 1 is the only one that
+   differs, so a rebuild that nudged the wrong cell or nudged them all lands
+   here (rebuild_info/pitfalls.md). */
+static void miss_cell_one_is_nudged_a_pixel_right(void)
+{
+    stage();
+    place(0, 3, 3);
+    fdps_show_miss_indicator(0);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[0], 1);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[1], 8);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[2], 13);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[3], 19);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[4], FILLER);
+}
+
+/* The word popup and the number popup do NOT share their cell x offsets: the
+   same four cells come out 1, 8, 13, 19 here and 2, 8, 14, 20 at 0001f510, so
+   folding the two producers together would move one of them. */
+static void miss_offsets_differ_from_the_number_popups(void)
+{
+    stage();
+    place(0, 3, 3);
+    fdps_show_miss_indicator(0);
+    fdps_show_number_indicator(7, MP_GLYPH_BASE, 0);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[0], 1);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[2], 13);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[4], 2);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[6], 14);
+}
+
+/* MOV AL,byte ptr [EBP+0x14] / MOV byte ptr [EDX+0x641e8],AL at 0001f799: the
+   argument goes into all four cells as a byte, and it is the index that was
+   passed rather than anything read out of the record. */
+static void miss_unit_index_goes_into_every_cell(void)
+{
+    stage();
+    place(2, 3, 3);
+    fdps_show_miss_indicator(2);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[0], 2);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[1], 2);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[2], 2);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[3], 2);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[4], FILLER);
+}
+
+/* DEC EAX / CMP EAX,[EBP-0x10] / JGE at 0001f6e1: the left edge is exclusive
+   against origin_tx - 1, so the first column kept is the origin column and the
+   one before it is culled. */
+static void miss_x_window_starts_at_the_origin_column(void)
+{
+    CHECK_EQ(miss_cells_queued(0, 0, 0, 0), 4);
+    CHECK_EQ(miss_cells_queued(240, 0, 9, 0), 0);
+    CHECK_EQ(miss_cells_queued(240, 0, 10, 0), 4);
+}
+
+/* ADD EAX,0xd / CMP EAX,[EBP-0x10] / JG at 0001f6fe: the right edge is
+   exclusive against origin_tx + 13, so the last column kept is twelve right of
+   the origin. */
+static void miss_x_window_is_thirteen_columns(void)
+{
+    CHECK_EQ(miss_cells_queued(0, 0, 12, 0), 4);
+    CHECK_EQ(miss_cells_queued(0, 0, 13, 0), 0);
+    CHECK_EQ(miss_cells_queued(240, 0, 22, 0), 4);
+    CHECK_EQ(miss_cells_queued(240, 0, 23, 0), 0);
+}
+
+/* DEC EAX / CMP EAX,[EBP-0xc] / JLE at 0001f71b is INCLUSIVE where the x test
+   at 0001f6e1 is exclusive: the row one above the origin row still queues a
+   popup.  Writing the two axes alike changes which units get a MISS at the map
+   edge (rebuild_info/pitfalls.md). */
+static void miss_y_window_starts_one_row_above_the_origin(void)
+{
+    CHECK_EQ(miss_cells_queued(0, 240, 0, 8), 0);
+    CHECK_EQ(miss_cells_queued(0, 240, 0, 9), 4);
+    CHECK_EQ(miss_cells_queued(0, 240, 0, 10), 4);
+}
+
+/* ADD EAX,0x8 / CMP EAX,[EBP-0xc] / JGE at 0001f73a: the bottom edge is
+   inclusive against origin_ty + 8, so ten rows are kept against the x test's
+   thirteen columns. */
+static void miss_y_window_ends_eight_rows_below(void)
+{
+    CHECK_EQ(miss_cells_queued(0, 0, 0, 8), 4);
+    CHECK_EQ(miss_cells_queued(0, 0, 0, 9), 0);
+    CHECK_EQ(miss_cells_queued(0, 240, 0, 18), 4);
+    CHECK_EQ(miss_cells_queued(0, 240, 0, 19), 0);
+}
+
+/* MOV EBX,0x18 / IDIV EBX before each of the four compares: the origins are
+   pixels and the window is tiles, and the signed division truncates, so a view
+   scrolled 23 pixels is still standing on column 0 and one scrolled 24 has
+   moved a whole column. */
+static void miss_view_origin_is_divided_by_the_tile_size(void)
+{
+    CHECK_EQ(miss_cells_queued(23, 0, 0, 0), 4);
+    CHECK_EQ(miss_cells_queued(23, 0, 12, 0), 4);
+    CHECK_EQ(miss_cells_queued(24, 0, 0, 0), 0);
+    CHECK_EQ(miss_cells_queued(24, 0, 13, 0), 4);
+    CHECK_EQ(miss_cells_queued(0, 23, 0, 8), 4);
+    CHECK_EQ(miss_cells_queued(0, 23, 0, 9), 0);
+    CHECK_EQ(miss_cells_queued(0, 24, 0, 9), 4);
+    CHECK_EQ(miss_cells_queued(0, 24, 0, 10), 0);
+}
+
+/* The origins are signed and IDIV is the signed divide, truncating toward zero:
+   a scroll of -24 puts the origin on column -1, which keeps tile 0 and culls
+   tile 12.  Reading either origin as unsigned would divide -24 into an enormous
+   column and cull every unit on the map. */
+static void miss_negative_scroll_divides_signed(void)
+{
+    CHECK_EQ(miss_cells_queued(-24, 0, 0, 0), 4);
+    CHECK_EQ(miss_cells_queued(-24, 0, 11, 0), 4);
+    CHECK_EQ(miss_cells_queued(-24, 0, 12, 0), 0);
+    CHECK_EQ(miss_cells_queued(0, -24, 0, 7), 4);
+    CHECK_EQ(miss_cells_queued(0, -24, 0, 8), 0);
+}
+
+/* Every branch of the cull jumps to 0001f7c1, past both the append and the
+   ADD [0x00064378],0x4: a culled request writes nothing at all and leaves the
+   cursor exactly where it found it. */
+static void miss_culled_request_leaves_the_queue_untouched(void)
+{
+    stage();
+    data_fdps_indicator_queue_count = 8;
+    place(0, 40, 40);
+    fdps_show_miss_indicator(0);
+    CHECK_EQ(data_fdps_indicator_queue_count, 8);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[8], FILLER);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[8], FILLER);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[8], FILLER);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[11], FILLER);
+}
+
+/* Every store is indexed [0x00064378] + cell (0001f76d, 0001f787, 0001f796,
+   0001f7a8) and the cursor moves by exactly four at 0001f7ba: the popup is
+   appended AT the cursor, so a MISS queued after a number lands beside it and
+   not over it. */
+static void miss_appends_at_the_cursor(void)
+{
+    stage();
+    data_fdps_indicator_queue_count = 8;
+    place(0, 3, 3);
+    fdps_show_miss_indicator(0);
+    CHECK_EQ(data_fdps_indicator_queue_count, 12);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[7], FILLER);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[8], 1);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[11], 19);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[8], 0x34);
+    CHECK_EQ(data_fdps_indicator_queue_glyph_ids[11], 0x36);
+    CHECK_EQ(data_fdps_indicator_queue_cell_x_offset[12], FILLER);
+
+    place(1, 3, 3);
+    fdps_show_miss_indicator(1);
+    CHECK_EQ(data_fdps_indicator_queue_count, 16);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[11], 0);
+    CHECK_EQ(data_fdps_battle_indicator_queue_unit_idx[12], 1);
+}
+
+/* The record the cull reads is the one fdps_get_unit_record resolves from the
+   argument at 0001f6a8, so which unit is on screen is decided by the unit the
+   MISS is for and not by any other. */
+static void miss_culls_against_the_named_units_record(void)
+{
+    stage();
+    place(0, 40, 40);
+    place(1, 3, 3);
+    fdps_show_miss_indicator(1);
+    CHECK_EQ(data_fdps_indicator_queue_count, 4);
+    stage();
+    place(0, 40, 40);
+    place(1, 3, 3);
+    fdps_show_miss_indicator(0);
+    CHECK_EQ(data_fdps_indicator_queue_count, 0);
+}
+
+/* XOR EAX,EAX before each of MOV AL,[EBX] and MOV AL,[EBX+1] at 0001f6b3 and
+   0001f6bd: the two record bytes are ZERO extended into the signed compare, so
+   a tile of 200 is 200 and not -56.  Scrolling the view onto column and row 200
+   is what tells the two apart: a zero-extended 200 is inside that window and a
+   sign-extended one is 256 tiles to the left of it and culled. */
+static void miss_tile_bytes_are_zero_extended(void)
+{
+    CHECK_EQ(miss_cells_queued(4800, 0, 200, 0), 4);
+    CHECK_EQ(miss_cells_queued(0, 4800, 0, 200), 4);
+    CHECK_EQ(miss_cells_queued(0, 0, 200, 0), 0);
+    CHECK_EQ(miss_cells_queued(0, 0, 0, 200), 0);
+}
+
+/* Nothing in the function writes through the record pointer: the unit it floats
+   the word over is left exactly as it was found. */
+static void miss_does_not_touch_the_record(void)
+{
+    stage();
+    place(0, 3, 4);
+    stage_units[0].hp_current = 25;
+    fdps_show_miss_indicator(0);
+    CHECK_EQ(stage_units[0].pos_x, 3);
+    CHECK_EQ(stage_units[0].pos_y, 4);
+    CHECK_EQ(stage_units[0].hp_current, 25);
+}
+
 void run_indicat_tests(void)
 {
     RUN_TEST(number_position_is_the_first_two_record_bytes);
@@ -355,6 +588,22 @@ void run_indicat_tests(void)
     RUN_TEST(number_appends_at_the_cursor);
     RUN_TEST(number_culls_against_the_named_units_record);
     RUN_TEST(number_does_not_touch_the_record);
+
+    RUN_TEST(miss_glyphs_are_the_four_fixed_ids);
+    RUN_TEST(miss_cell_one_is_nudged_a_pixel_right);
+    RUN_TEST(miss_offsets_differ_from_the_number_popups);
+    RUN_TEST(miss_unit_index_goes_into_every_cell);
+    RUN_TEST(miss_x_window_starts_at_the_origin_column);
+    RUN_TEST(miss_x_window_is_thirteen_columns);
+    RUN_TEST(miss_y_window_starts_one_row_above_the_origin);
+    RUN_TEST(miss_y_window_ends_eight_rows_below);
+    RUN_TEST(miss_view_origin_is_divided_by_the_tile_size);
+    RUN_TEST(miss_negative_scroll_divides_signed);
+    RUN_TEST(miss_culled_request_leaves_the_queue_untouched);
+    RUN_TEST(miss_appends_at_the_cursor);
+    RUN_TEST(miss_culls_against_the_named_units_record);
+    RUN_TEST(miss_tile_bytes_are_zero_extended);
+    RUN_TEST(miss_does_not_touch_the_record);
 
     /* Put the globals back before leaving.  The runners share one process, and
        a later unit that expects an empty battle or an empty queue would

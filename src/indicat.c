@@ -40,6 +40,28 @@
 #define INDICATOR_DIGIT_PITCH 6
 #define INDICATOR_DIGIT_FIRST_X 2
 
+/* A fixed-word popup is four cells wide too, one glyph per cell, and its cells
+   sit six pixels apart starting ONE pixel in rather than two. */
+#define INDICATOR_WORD_CELLS 4
+#define INDICATOR_WORD_PITCH 6
+#define INDICATOR_WORD_FIRST_X 1
+
+/* Cell 1 alone is pushed a second pixel right, by a branch of its own.  The
+   glyphs are drawn from a proportional sheet: the M of MISS is the full six
+   pixels wide while the I is narrow, so without the nudge the I would sit
+   against the M.  Writing the uniform i * 6 + 1 for all four cells compiles and
+   looks right and moves the I one pixel left of where the original puts it
+   (rebuild_info/pitfalls.md). */
+#define INDICATOR_WORD_NUDGED_CELL 1
+#define INDICATOR_WORD_NUDGED_X 2
+
+/* The Number.cel glyph ids the MISS popup queues, from the four-byte initialiser
+   image at 0001c2d2.  They are ids into that sheet and not characters, even
+   though the values happen to be the ASCII digits 4, 5 and 6. */
+#define MISS_GLYPH_M 0x34
+#define MISS_GLYPH_I 0x35
+#define MISS_GLYPH_S 0x36
+
 /* The glyph id that means "draw nothing here"; the player skips such a cell. */
 #define INDICATOR_BLANK_GLYPH 0xff
 
@@ -123,5 +145,74 @@ void fdps_show_number_indicator(int value, unsigned char glyph_base,
         }
 
         data_fdps_indicator_queue_count += INDICATOR_NUMBER_CELLS;
+    }
+}
+
+/* 0001f690.  The MISS popup, four cells of one fixed word, appended to the same
+   shared queue fdps_show_number_indicator appends its digits to.  Nothing is
+   drawn here; fdps_play_indicator_queue drains the queue later.
+
+   The four glyph ids are copied into a stack buffer before anything else --
+   MOV EAX,[0x0001c2d2] / MOV [EBP-0x4],EAX at 0001f69c, one dword move out of
+   the initialiser image, which is what a four-byte initialised local array
+   compiles to and not a memcpy call.  They are then read back one cell at a
+   time out of that buffer rather than being written as four constants, which is
+   why the buffer is here at all.
+
+   The cull is the same asymmetric window fdps_show_number_indicator uses and it
+   is spelled out afresh here rather than shared: four separate compares against
+   the two view origins, each with its own IDIV by 24 (0001f6cd, 0001f6e8,
+   0001f707, 0001f724).  x is exclusive at both ends and y is inclusive at both,
+   so a unit one row off the top of the view still gets its MISS and one a
+   column off the left does not.  Both origins are signed and the division is
+   the signed one; reading either as unsigned would turn a negative scroll into
+   an enormous positive column and cull every unit on the map.
+
+   The cells are appended at the cursor and the cursor is advanced by four only
+   on the path that queued them, so a culled request costs the queue nothing. */
+void fdps_show_miss_indicator(int unit_index)
+{
+    unsigned char glyph_ids[INDICATOR_WORD_CELLS] = {
+        MISS_GLYPH_M, MISS_GLYPH_I, MISS_GLYPH_S, MISS_GLYPH_S
+    };
+    struct fdps_unit_record *unit;
+    int tile_x;
+    int tile_y;
+    int cell_index;
+
+    unit = fdps_get_unit_record(unit_index);
+    tile_x = unit->pos_x;
+    tile_y = unit->pos_y;
+
+    if (data_fdps_battle_view_window_origin_x / INDICATOR_TILE_SIZE - 1
+            < tile_x
+        && tile_x < data_fdps_battle_view_window_origin_x / INDICATOR_TILE_SIZE
+                        + INDICATOR_VIEW_COLUMNS
+        && data_fdps_battle_view_window_origin_y / INDICATOR_TILE_SIZE - 1
+            <= tile_y
+        && tile_y <= data_fdps_battle_view_window_origin_y / INDICATOR_TILE_SIZE
+                        + INDICATOR_VIEW_LAST_ROW) {
+        for (cell_index = 0; cell_index < INDICATOR_WORD_CELLS; cell_index++) {
+            if (cell_index == INDICATOR_WORD_NUDGED_CELL) {
+                data_fdps_indicator_queue_cell_x_offset[
+                    data_fdps_indicator_queue_count + cell_index] =
+                        (unsigned char) (cell_index * INDICATOR_WORD_PITCH
+                                         + INDICATOR_WORD_NUDGED_X);
+            } else {
+                data_fdps_indicator_queue_cell_x_offset[
+                    data_fdps_indicator_queue_count + cell_index] =
+                        (unsigned char) (cell_index * INDICATOR_WORD_PITCH
+                                         + INDICATOR_WORD_FIRST_X);
+            }
+
+            data_fdps_battle_indicator_queue_unit_idx[
+                data_fdps_indicator_queue_count + cell_index] =
+                    (unsigned char) unit_index;
+            data_fdps_indicator_queue_glyph_ids[
+                data_fdps_indicator_queue_count + cell_index] =
+                    glyph_ids[cell_index];
+        }
+
+        data_fdps_indicator_queue_count += INDICATOR_WORD_CELLS;
     }
 }
