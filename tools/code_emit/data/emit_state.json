@@ -588,6 +588,14 @@
       "status": "committed",
       "emitted_against": "0x104",
       "rounds": 0
+    },
+    "00026180": {
+      "name": "fdps_collect_death_scripts",
+      "target": "death.c",
+      "body_size": "0xa5",
+      "status": "committed",
+      "emitted_against": "0xa5",
+      "rounds": 0
     }
   }
 }
