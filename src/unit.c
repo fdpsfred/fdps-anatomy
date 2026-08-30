@@ -44,6 +44,37 @@ struct fdps_unit_record *fdps_get_unit_record(int unit_index)
     return record;
 }
 
+/* 000109b0.  The retired predicate, and the body is straight-line: PUSH EAX /
+   CALL 0x0002d210 / ADD ESP,0x4 resolves the record, then MOV AL,byte ptr
+   [EAX + 0x5] / AND AL,0x1 / AND EAX,0xff reads the flag byte and hands back
+   bit 0.  No compare and no branch anywhere in it.
+
+   The record offset is the literal 0x5, which is struct fdps_unit_record's
+   flags byte, and bit 0 of that byte is the retired flag.  Bit 7 of the same
+   byte is a different, shorter-lived per-turn redraw flag -- masking the byte
+   with anything wider than 1, or testing it for non-zero, would report a unit
+   as retired whenever that other bit happened to be set.
+
+   The two ANDs are both load-bearing as a pair: AND AL,0x1 isolates the bit
+   and AND EAX,0xff clears the upper three bytes of EAX, which at that point
+   still hold the top of the record POINTER the CALL returned rather than
+   anything derived from the flags.  The value the function returns is
+   therefore exactly 0 or 1 and never the flag byte itself, and callers rely on
+   the narrowing both ways round: fdps_battle_count_remaining_units_on_side at
+   000183aa does TEST EAX,EAX / JZ to count the units this returns zero for.
+
+   The record is resolved through fdps_get_unit_record on every call rather
+   than taken as a pointer, so the same re-resolution rule applies here as
+   there; unit_index is not range checked at either end and the bound is the
+   caller's. */
+int fdps_unit_is_retired(int unit_index)
+{
+    struct fdps_unit_record *record;
+
+    record = fdps_get_unit_record(unit_index);
+    return record->flags & 1;
+}
+
 /* 0002ccd0.  Two passes over the same five record bytes: count how many status
    timers are running, then walk them again and hand back the one the rotation
    counter has come round to.

@@ -380,6 +380,133 @@ static void a_null_unit_array_base_is_not_guarded(void)
     stage_lookup();
 }
 
+/* fdps_unit_is_retired @ 000109b0.  Expected values come from the six
+   instructions that are the whole body -- PUSH EAX / CALL 0x0002d210 / ADD
+   ESP,0x4 at 000109bf, then MOV AL,byte ptr [EAX + 0x5] at 000109ce, AND
+   AL,0x1 at 000109d1 and AND EAX,0xff at 000109d3 -- and from the record
+   layout ticket 17 settled, which puts flags at +5.  The lookup_block staging
+   above is reused because the predicate reaches its record through the same
+   accessor; each case republishes the base it wants first. */
+#define RETIRED_BIT 0x01
+
+/* Set one record's flags byte outright, by its index into the staged lookup
+   block rather than relative to the published base, so a case can put a value
+   in the record on either side of the one it asks about. */
+static void set_flags(int block_slot, int value)
+{
+    lookup_block[block_slot * UNIT_RECORD_STRIDE + 5] =
+        (unsigned char) value;
+}
+
+/* MOV AL,byte ptr [EAX + 0x5]: the byte read is the record's flags byte, at
+   +5 of the record fdps_get_unit_record hands back and not at +5 of the array
+   base.  Asserted against the layout so a field moving under this function
+   would fail here rather than silently read the side byte next door. */
+static void the_flag_byte_is_at_record_offset_five(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 5);
+
+    stage_lookup();
+    set_flags(LOOKUP_BASE_UNIT, RETIRED_BIT);
+    CHECK_EQ(fdps_unit_is_retired(0), 1);
+
+    set_flags(LOOKUP_BASE_UNIT, 0);
+    CHECK_EQ(fdps_unit_is_retired(0), 0);
+}
+
+/* AND AL,0x1 isolates bit 0 alone.  Bit 7 is the separate per-turn redraw
+   flag and every other bit is somebody else's: a unit carrying 0xfe is NOT
+   retired, and one carrying 0x01 is, whatever else is set alongside it.  A
+   plain non-zero test on the byte would call all four of these retired. */
+static void only_bit_zero_decides(void)
+{
+    stage_lookup();
+
+    set_flags(LOOKUP_BASE_UNIT, 0x01);
+    CHECK_EQ(fdps_unit_is_retired(0), 1);
+
+    set_flags(LOOKUP_BASE_UNIT, 0x80);
+    CHECK_EQ(fdps_unit_is_retired(0), 0);
+
+    set_flags(LOOKUP_BASE_UNIT, 0xfe);
+    CHECK_EQ(fdps_unit_is_retired(0), 0);
+
+    set_flags(LOOKUP_BASE_UNIT, 0x81);
+    CHECK_EQ(fdps_unit_is_retired(0), 1);
+}
+
+/* AND EAX,0xff after AND AL,0x1 narrows the answer to 0 or 1: the upper three
+   bytes of EAX at that point still hold the top of the record pointer the CALL
+   returned, so without the second mask the function would return an address
+   fragment.  The result is compared for equality with 1 here, not merely for
+   truth, which is what pins the narrowing -- callers such as
+   fdps_battle_count_remaining_units_on_side test it with TEST EAX,EAX / JZ at
+   000183aa, and a caller that took the flag byte whole would count wrongly. */
+static void the_result_is_narrowed_to_zero_or_one(void)
+{
+    stage_lookup();
+
+    set_flags(LOOKUP_BASE_UNIT, 0xff);
+    CHECK_EQ(fdps_unit_is_retired(0), 1);
+
+    set_flags(LOOKUP_BASE_UNIT, 0x03);
+    CHECK_EQ(fdps_unit_is_retired(0), 1);
+
+    set_flags(LOOKUP_BASE_UNIT, 0x0f);
+    CHECK_EQ(fdps_unit_is_retired(0), 1);
+}
+
+/* The record is the one fdps_get_unit_record names, so the index scales by the
+   0x50 stride and each unit answers for its own flags byte.  Staged with the
+   retired bit set on alternate records, so a stride or base that was one
+   record out would invert every answer. */
+static void the_index_picks_its_own_record(void)
+{
+    stage_lookup();
+    set_flags(LOOKUP_BASE_UNIT + 0, RETIRED_BIT);
+    set_flags(LOOKUP_BASE_UNIT + 1, 0);
+    set_flags(LOOKUP_BASE_UNIT + 2, RETIRED_BIT);
+    set_flags(LOOKUP_BASE_UNIT + 3, 0);
+
+    CHECK_EQ(fdps_unit_is_retired(0), 1);
+    CHECK_EQ(fdps_unit_is_retired(1), 0);
+    CHECK_EQ(fdps_unit_is_retired(2), 1);
+    CHECK_EQ(fdps_unit_is_retired(3), 0);
+}
+
+/* Nothing here bounds unit_index -- there is no compare in the body at all --
+   and the signed multiply inside the accessor carries a negative index
+   backwards off the front of the array, where it reads a flags byte like any
+   other.  Asserted so a guard added on the way past would fail rather than
+   quietly change what the predicate answers. */
+static void a_negative_index_reads_the_record_in_front(void)
+{
+    stage_lookup();
+    set_flags(LOOKUP_BASE_UNIT - 1, RETIRED_BIT);
+    set_flags(LOOKUP_BASE_UNIT - 2, 0);
+    set_flags(LOOKUP_BASE_UNIT, 0);
+
+    CHECK_EQ(fdps_unit_is_retired(-1), 1);
+    CHECK_EQ(fdps_unit_is_retired(-2), 0);
+    CHECK_EQ(fdps_unit_is_retired(0), 0);
+}
+
+/* The record is resolved through the accessor on every call, so the predicate
+   follows the array when fdps_relocate_unit_array moves it: republishing the
+   base under an unchanged index changes the answer.  A record pointer cached
+   anywhere between the two would keep reading the old block. */
+static void the_record_is_resolved_on_every_call(void)
+{
+    stage_lookup();
+    set_flags(LOOKUP_BASE_UNIT, RETIRED_BIT);
+    set_flags(0, 0);
+    CHECK_EQ(fdps_unit_is_retired(0), 1);
+
+    data_fdps_map_unit_array_ptr = lookup_block;
+    CHECK_EQ(fdps_unit_is_retired(0), 0);
+    CHECK_EQ(fdps_unit_is_retired(LOOKUP_BASE_UNIT), 1);
+}
+
 void run_unit_tests(void)
 {
     RUN_TEST(the_record_is_base_plus_index_times_stride);
@@ -398,4 +525,10 @@ void run_unit_tests(void)
     RUN_TEST(negative_cycle_follows_the_signed_modulo);
     RUN_TEST(any_non_zero_timer_counts);
     RUN_TEST(index_selects_its_own_record);
+    RUN_TEST(the_flag_byte_is_at_record_offset_five);
+    RUN_TEST(only_bit_zero_decides);
+    RUN_TEST(the_result_is_narrowed_to_zero_or_one);
+    RUN_TEST(the_index_picks_its_own_record);
+    RUN_TEST(a_negative_index_reads_the_record_in_front);
+    RUN_TEST(the_record_is_resolved_on_every_call);
 }

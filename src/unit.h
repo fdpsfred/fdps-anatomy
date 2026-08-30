@@ -31,6 +31,23 @@
 extern struct fdps_unit_record *fdps_get_unit_record(int unit_index);
 #pragma aux fdps_get_unit_record "*" parm caller [];
 
+/* Has this unit left the battle for good?  Returns 1 when bit 0 of the unit's
+   flags byte -- struct fdps_unit_record's flags at record offset 5 -- is set,
+   and 0 when it is clear; the result is narrowed to those two values and is
+   never the flag byte itself, so it may be compared against 1 as well as
+   tested for truth.
+
+   Bit 0 is the retired flag proper: fdps_map_actor_behavior_step returns at
+   once for an actor carrying it and sets it when a scripted walk ends.  Bit 7
+   of the same byte is the short-lived per-turn redraw flag and is not part of
+   this answer.
+
+   unit_index is a position in the current battle's unit array and is not range
+   checked; the record is resolved through fdps_get_unit_record, so a call
+   after the array has moved sees the new block. */
+extern int fdps_unit_is_retired(int unit_index);
+#pragma aux fdps_unit_is_retired "*" parm caller [];
+
 /* Picks which of the unit's status-effect timers gets its icon drawn over the
    unit this cycle.  Returns the icon slot 0..4 -- which is the frame index
    into the IconSts.cel sheet, and corresponds to record offsets 0x23, 0x22,
