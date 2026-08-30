@@ -471,6 +471,14 @@
       "status": "committed",
       "emitted_against": "0x138",
       "rounds": 0
+    },
+    "0001fc00": {
+      "name": "fdps_show_sprite_indicator",
+      "target": "indicat.c",
+      "body_size": "0x14e",
+      "status": "committed",
+      "emitted_against": "0x14e",
+      "rounds": 0
     }
   }
 }

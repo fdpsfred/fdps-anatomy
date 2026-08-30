@@ -137,4 +137,43 @@ extern void fdps_show_miss_indicator(int unit_index);
 extern void fdps_show_cure_indicator(int unit_index);
 #pragma aux fdps_show_cure_indicator "*" parm caller [];
 
+/* 0001fc00.  Floats a caller-supplied word over one battle unit by appending
+   one cell per glyph to the shared queue.  This is the only producer of the
+   family whose message is an argument: fdps_show_miss_indicator and
+   fdps_show_cure_indicator each carry one fixed word, and
+   fdps_show_number_indicator formats digits.  Nothing is drawn here and nothing
+   waits; the caller drains the queue with fdps_play_indicator_queue.
+
+   sprite_ids points at four Number.cel glyph ids, one per cell, and an id of 0
+   means the cell is unused.  An unused cell is NOT queued blank -- the queue's
+   blank marker is 0xff and this function never writes it; the cell is simply
+   left out.  A zero in the middle of the four is skipped and the cells after it
+   are still queued, at their own cell positions.
+
+   The cursor therefore moves by the number of cells actually queued, not by
+   four, while each cell is stored at cursor + its cell index.  The two agree
+   only while the non-zero ids form a prefix of the four, which holds for every
+   label the shipped caller passes and is not checked here
+   (rebuild_info/pitfalls.md).  The one shipped caller,
+   fdps_cast_spell_on_targets, passes a row of a three-row table that spells
+   Att, Def and Dex, each row three ids followed by a zero.
+
+   The request is culled against the same asymmetric tile window
+   fdps_show_number_indicator uses: with the view origins divided by the
+   24-pixel tile size into origin_tx and origin_ty, the unit is shown when its
+   tile x is in origin_tx .. origin_tx + 12 and its tile y is in
+   origin_ty - 1 .. origin_ty + 8.  A culled request queues nothing and leaves
+   the cursor where it was.
+
+   The cells sit 1, 8, 13 and 19 pixels into the popup, the fixed-word offsets
+   rather than the number popup's, with cell 1 nudged a pixel right whether or
+   not the cells before it were used.
+
+   unit_index is a position in the current battle's unit array, resolved through
+   fdps_get_unit_record and not range checked; it is also what goes into the
+   queue, as a byte, so the popup follows that unit while it plays. */
+extern void fdps_show_sprite_indicator(int unit_index,
+                                       unsigned char *sprite_ids);
+#pragma aux fdps_show_sprite_indicator "*" parm caller [];
+
 #endif

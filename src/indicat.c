@@ -76,6 +76,12 @@
 /* The glyph id that means "draw nothing here"; the player skips such a cell. */
 #define INDICATOR_BLANK_GLYPH 0xff
 
+/* What marks an unused cell in the four-byte label a caller hands to
+   fdps_show_sprite_indicator: id 0, which is NOT the queue's own blank marker
+   INDICATOR_BLANK_GLYPH.  A cell with this id is left out of the queue
+   entirely rather than being queued blank. */
+#define INDICATOR_SPRITE_UNUSED_ID 0
+
 /* The right-alignment countdown's starting value: cells per popup minus one, so
    cell i emits a digit only while the formatted number is longer than
    INDICATOR_NUMBER_CELLS - 1 - i characters. */
@@ -290,5 +296,88 @@ void fdps_show_cure_indicator(int unit_index)
         }
 
         data_fdps_indicator_queue_count += INDICATOR_WORD_CELLS;
+    }
+}
+
+/* 0001fc00.  The caller-supplied popup: the one producer of this family whose
+   word is an argument rather than a constant.  sprite_ids points at up to four
+   Number.cel glyph ids and each non-zero one is appended to the shared queue as
+   its own cell; the only shipped caller, fdps_cast_spell_on_targets, passes one
+   four-byte row of a three-row label table (0x00027668: 3b 3c 3c 00, 3d 3e 3f
+   00, 3d 3e 40 00) that spells Att, Def and Dex -- the three buff slots
+   fdps_unit_apply_status_effect writes to record bytes +0x22, +0x23 and +0x24.
+   Nothing in this body depends on that; the ids are copied unread.
+
+   Two things here are NOT what the sibling producers do and both are load
+   bearing (rebuild_info/pitfalls.md).
+
+   First, a zero id SKIPS its cell and the loop carries straight on to the next
+   one -- JZ at 0001fcd3 jumps to the increment at 0001fcc2, not out of the loop
+   -- and the skipped cell is not queued blank either.  Queueing it with
+   INDICATOR_BLANK_GLYPH instead would put a cell in the queue that the player
+   then skips at draw time, which looks the same on screen but moves every
+   later popup along by one cell.
+
+   Second, the cursor is advanced by the number of cells actually written and
+   not by four (MOV EAX,[EBP-0x4] / ADD [0x00064378],EAX at 0001fd3e), while the
+   cells themselves are stored at cursor + cell_index -- the loop counter.  The
+   two only agree while the non-zero ids form a prefix of the label, which is
+   true of every row of the shipped table but is not enforced here.  Writing the
+   siblings' += 4 leaves a stale cell inside the drawn range for a three-id
+   label; writing the stores at cursor + cells_written instead would pack the
+   cells and change where a hypothetical gapped label lands.
+
+   Everything else is the fixed-word popup's code: the same four cull compares,
+   each with its own signed IDIV by 24 (0001fc4a, 0001fc65, 0001fc84, 0001fca1),
+   x exclusive at both ends and y inclusive at both; and the same cell x offsets
+   1, 8, 13, 19, with cell 1 alone nudged by the branch at 0001fcd5.  A culled
+   request writes nothing and leaves the cursor where it was. */
+void fdps_show_sprite_indicator(int unit_index, unsigned char *sprite_ids)
+{
+    struct fdps_unit_record *unit;
+    int tile_x;
+    int tile_y;
+    int cell_index;
+    int cells_written;
+
+    cells_written = 0;
+
+    unit = fdps_get_unit_record(unit_index);
+    tile_x = unit->pos_x;
+    tile_y = unit->pos_y;
+
+    if (data_fdps_battle_view_window_origin_x / INDICATOR_TILE_SIZE - 1
+            < tile_x
+        && tile_x < data_fdps_battle_view_window_origin_x / INDICATOR_TILE_SIZE
+                        + INDICATOR_VIEW_COLUMNS
+        && data_fdps_battle_view_window_origin_y / INDICATOR_TILE_SIZE - 1
+            <= tile_y
+        && tile_y <= data_fdps_battle_view_window_origin_y / INDICATOR_TILE_SIZE
+                        + INDICATOR_VIEW_LAST_ROW) {
+        for (cell_index = 0; cell_index < INDICATOR_WORD_CELLS; cell_index++) {
+            if (sprite_ids[cell_index] != INDICATOR_SPRITE_UNUSED_ID) {
+                if (cell_index == INDICATOR_WORD_NUDGED_CELL) {
+                    data_fdps_indicator_queue_cell_x_offset[
+                        data_fdps_indicator_queue_count + cell_index] =
+                            (unsigned char) (cell_index * INDICATOR_WORD_PITCH
+                                             + INDICATOR_WORD_NUDGED_X);
+                } else {
+                    data_fdps_indicator_queue_cell_x_offset[
+                        data_fdps_indicator_queue_count + cell_index] =
+                            (unsigned char) (cell_index * INDICATOR_WORD_PITCH
+                                             + INDICATOR_WORD_FIRST_X);
+                }
+
+                data_fdps_battle_indicator_queue_unit_idx[
+                    data_fdps_indicator_queue_count + cell_index] =
+                        (unsigned char) unit_index;
+                data_fdps_indicator_queue_glyph_ids[
+                    data_fdps_indicator_queue_count + cell_index] =
+                        sprite_ids[cell_index];
+                cells_written++;
+            }
+        }
+
+        data_fdps_indicator_queue_count += cells_written;
     }
 }

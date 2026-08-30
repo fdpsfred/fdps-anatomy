@@ -3319,7 +3319,7 @@ Finally it adds the number of cells it actually wrote, not 4, to the queue curso
 
 fdps_play_indicator_queue drains the queue: for 22 frames it blits each entry's sprite out of Number.cel (pointer in DAT_000643d8, loaded by fdps_load_global_resources) with fdps_cel_blit_sprite at (tile_x*24 - DAT_00069ce4 + x_offset + 24, tile_y*24 - DAT_00069ce0 + bounce offset + 21), skipping any entry whose sprite id is 0xff, then zeroes the cursor. The sibling plates call the DAT_000642b0 bytes glyph ids -- Number.cel is a 65-sprite 6x8 font sheet of digits and letters, and each of those producers knows which word its own ids spell -- but they are the same bytes as this function's sprite_ids.
 
-The other three producers sharing the queue are fdps_show_number_indicator, which formats digits into the cells, and fdps_show_miss_indicator and fdps_queue_status_cured_popup, which push the fixed words at 0x0001c2d2 and 0x0001c2d6.
+The other three producers sharing the queue are fdps_show_number_indicator, which formats digits into the cells, and fdps_show_miss_indicator and fdps_show_cure_indicator, which push the fixed words at 0x0001c2d2 and 0x0001c2d6.
 
 Parameters:
   unit_index -- index of the unit the indicator floats over, into the 0x50-byte record array behind DAT_00069cd8; passed straight to fdps_get_unit_record and stored as a byte in DAT_000641e8. Its one caller fdps_cast_spell_on_targets passes an id out of its target list.
