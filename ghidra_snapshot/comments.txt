@@ -5700,12 +5700,12 @@ fdps_get_unit_record(target_unit_index) resolves the target's 0x50-byte record, 
 Byte +0x02 of the spell record is the hit rate in percent. rand() % 100 is drawn and compared against it; a draw that is not below the rate returns 0 with the target untouched. On a draw that lands, spell ids 0x0a (裂地術) and 0x0b (封神裂震), the two ground-shaking spells, also return 0 when fdps_unit_is_flying says the target travels above the terrain. Every other case hands the figure to fdps_unit_apply_damage(target_unit_index, damage), which rolls the final 90.0%-99.9% of it into the target's HP word and credits the battle experience.
 
 Parameters:
-  caster_unit_index -- index of the acting unit in the 0x50-byte unit record array based at DAT_00069cd8. Read only on the power < 0 path, and only for the attack word at +0x48. FUN_0001a4c0 and FUN_000288f0 both pass the unit that is casting.
+  caster_unit_index -- index of the acting unit in the 0x50-byte unit record array based at DAT_00069cd8. Read only on the power < 0 path, and only for the attack word at +0x48. fdps_combat_play_spell_on_targets and fdps_cast_spell_on_targets both pass the unit that is casting.
   target_unit_index -- index of the unit being hit, in the same array. Both callers pass one entry of their target id list.
   spell_id -- MAGICDAT.DAT record index, 0..0x27; the spell being cast. 0x0a and 0x0b additionally select the flying-target immunity.
 
 Returns:
-  The damage fdps_unit_apply_damage rolled, or 0 -- 0 covering all three of a failed hit roll, a flying target under spell 0x0a/0x0b, and a computed damage floored at 0. FUN_000288f0 floats a non-zero return over the target as the damage number through fdps_show_number_indicator and paints fdps_show_miss_indicator on 0. FUN_0001a4c0 takes the target's HP word +0x40 before the call and puts that old value back afterwards, keeping only the two endpoints, so its combat animation can interpolate the drop frame by frame -- the HP write this function makes through fdps_unit_apply_damage is real and has to happen here for that to work.
+  The damage fdps_unit_apply_damage rolled, or 0 -- 0 covering all three of a failed hit roll, a flying target under spell 0x0a/0x0b, and a computed damage floored at 0. fdps_cast_spell_on_targets floats a non-zero return over the target as the damage number through fdps_show_number_indicator and paints fdps_show_miss_indicator on 0. fdps_combat_play_spell_on_targets takes the target's HP word +0x40 before the call and puts that old value back afterwards, keeping only the two endpoints, so its combat animation can interpolate the drop frame by frame -- the HP write this function makes through fdps_unit_apply_damage is real and has to happen here for that to work.
 
 Pool: fdps  [game logic over the unit, class and spell records with a literal 0x64 percent divisor; no Function ID candidate in either the Watcom or the ail set and the body hash is unique in the image]
 
