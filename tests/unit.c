@@ -507,6 +507,186 @@ static void the_record_is_resolved_on_every_call(void)
     CHECK_EQ(fdps_unit_is_retired(LOOKUP_BASE_UNIT), 1);
 }
 
+/* fdps_unit_is_flying @ 00012550.  Expected values come from the body itself --
+   MOV AL,byte ptr [EDX + 0x20] at 00012570 for the record byte, and the five
+   immediates of the comparison chain, CMP dword ptr [EBP + -0x8],0x16 at
+   00012576, 0x17 at 0001257c, 0x18 at 00012584, 0x1f at 0001258c and 0x25 at
+   00012594, against MOV dword ptr [EBP + -0x4],0x1 at 0001259a and the same
+   store of 0 at 000125a3 -- plus the class code table in assets/classes.md,
+   which names those five 技師, 機械伯爵, 機械大師, 飛兵 and 惡靈 and is where
+   活屍 being 0x26 comes from.  The lookup_block staging above is reused: the
+   predicate reaches its record through the same accessor, and each case
+   republishes the base it wants first. */
+
+/* The five immediates of the comparison chain, in the order the chain tests
+   them.  Written out here from the CMP instructions above so the sweep below
+   has a statement of the set that does not come from the emitted C. */
+static unsigned char flying_class_codes[5] = { 0x16, 0x17, 0x18, 0x1f, 0x25 };
+
+/* Set one record's class byte outright, by its index into the staged lookup
+   block rather than relative to the published base, so a case can put a value
+   in the record on either side of the one it asks about. */
+static void set_clazz(int block_slot, int value)
+{
+    lookup_block[block_slot * UNIT_RECORD_STRIDE + 0x20] =
+        (unsigned char) value;
+}
+
+/* MOV AL,byte ptr [EDX + 0x20]: the byte read is the record's class byte at
+   +0x20 of the record fdps_get_unit_record hands back.  Its neighbours are
+   race at +0x1f and level at +0x21, both of which take class codes as values
+   in their own right, so an offset one either way would answer from a field
+   that looks exactly like the right one.  Staged with a flying code in both
+   neighbours and a non-flying code in clazz to separate them. */
+static void the_class_byte_is_at_record_offset_twenty(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, clazz), 0x20);
+
+    stage_lookup();
+    set_clazz(LOOKUP_BASE_UNIT, 0x1f);
+    CHECK_EQ(fdps_unit_is_flying(0), 1);
+
+    set_clazz(LOOKUP_BASE_UNIT, 0x1e);
+    CHECK_EQ(fdps_unit_is_flying(0), 0);
+
+    stage_lookup();
+    lookup_block[LOOKUP_BASE_UNIT * UNIT_RECORD_STRIDE + 0x1f] = 0x16;
+    lookup_block[LOOKUP_BASE_UNIT * UNIT_RECORD_STRIDE + 0x21] = 0x16;
+    set_clazz(LOOKUP_BASE_UNIT, 0x00);
+    CHECK_EQ(fdps_unit_is_flying(0), 0);
+}
+
+/* Each of the five codes the chain compares against, one arm at a time, and
+   each checked for the value 1 rather than for truth -- the function stores the
+   literal 1, so a caller may compare against it as well as TEST it. */
+static void every_flying_class_code_returns_one(void)
+{
+    stage_lookup();
+
+    set_clazz(LOOKUP_BASE_UNIT, 0x16);
+    CHECK_EQ(fdps_unit_is_flying(0), 1);
+
+    set_clazz(LOOKUP_BASE_UNIT, 0x17);
+    CHECK_EQ(fdps_unit_is_flying(0), 1);
+
+    set_clazz(LOOKUP_BASE_UNIT, 0x18);
+    CHECK_EQ(fdps_unit_is_flying(0), 1);
+
+    set_clazz(LOOKUP_BASE_UNIT, 0x1f);
+    CHECK_EQ(fdps_unit_is_flying(0), 1);
+
+    set_clazz(LOOKUP_BASE_UNIT, 0x25);
+    CHECK_EQ(fdps_unit_is_flying(0), 1);
+}
+
+/* The chain is five equality tests and nothing else, so the whole 0..0xff
+   domain of the class byte is settled: exactly those five codes answer 1 and
+   every other one answers 0.  A range test, a bitmask, or a sixth code slipped
+   into the set would show up here rather than in whichever of the 40 class
+   codes a spot check happened to name.  The byte load is zero-extended (XOR
+   EAX,EAX at 0001256b), so 0x80..0xff are as much a part of the domain as the
+   low half. */
+static void the_flying_set_is_exactly_five_codes(void)
+{
+    int code;
+    int entry;
+    int expected;
+    int flying_count;
+    int disagreements;
+
+    stage_lookup();
+    flying_count = 0;
+    disagreements = 0;
+
+    for (code = 0; code <= 0xff; code++) {
+        expected = 0;
+        for (entry = 0; entry < 5; entry++) {
+            if ((int) flying_class_codes[entry] == code) {
+                expected = 1;
+            }
+        }
+
+        set_clazz(LOOKUP_BASE_UNIT, code);
+        if (fdps_unit_is_flying(0) != expected) {
+            disagreements++;
+        }
+        if (fdps_unit_is_flying(0) == 1) {
+            flying_count++;
+        }
+    }
+
+    CHECK_EQ(disagreements, 0);
+    CHECK_EQ(flying_count, 5);
+}
+
+/* 0x26 活屍 is next to 0x25 惡靈 in the class table and is the class the set
+   most obviously invites: its PROMAP.DAT record leaves five terrain columns
+   passable where the five flying classes leave six (assets/classes.md), and no
+   CMP in the body names it.  0x19 機兵 is the other near miss -- a mechanical
+   class sitting one past 0x18 機械大師.  Both answer 0, and the flying
+   neighbours on either side answer 1, which is what makes the boundary the
+   value and not the neighbourhood. */
+static void the_classes_next_to_the_set_do_not_fly(void)
+{
+    stage_lookup();
+
+    set_clazz(LOOKUP_BASE_UNIT, 0x25);
+    CHECK_EQ(fdps_unit_is_flying(0), 1);
+
+    set_clazz(LOOKUP_BASE_UNIT, 0x26);
+    CHECK_EQ(fdps_unit_is_flying(0), 0);
+
+    set_clazz(LOOKUP_BASE_UNIT, 0x27);
+    CHECK_EQ(fdps_unit_is_flying(0), 0);
+
+    set_clazz(LOOKUP_BASE_UNIT, 0x18);
+    CHECK_EQ(fdps_unit_is_flying(0), 1);
+
+    set_clazz(LOOKUP_BASE_UNIT, 0x19);
+    CHECK_EQ(fdps_unit_is_flying(0), 0);
+
+    set_clazz(LOOKUP_BASE_UNIT, 0x15);
+    CHECK_EQ(fdps_unit_is_flying(0), 0);
+}
+
+/* The record is the one fdps_get_unit_record names, so the index scales by the
+   0x50 stride and each unit answers for its own class byte.  The signed
+   multiply inside the accessor carries a negative index backwards off the front
+   of the array, where it reads a class byte like any other -- nothing in this
+   body bounds unit_index, there is no compare against the unit count in it at
+   all. */
+static void the_index_picks_its_own_record_class(void)
+{
+    stage_lookup();
+    set_clazz(LOOKUP_BASE_UNIT - 1, 0x1f);
+    set_clazz(LOOKUP_BASE_UNIT + 0, 0x00);
+    set_clazz(LOOKUP_BASE_UNIT + 1, 0x16);
+    set_clazz(LOOKUP_BASE_UNIT + 2, 0x26);
+    set_clazz(LOOKUP_BASE_UNIT + 3, 0x25);
+
+    CHECK_EQ(fdps_unit_is_flying(-1), 1);
+    CHECK_EQ(fdps_unit_is_flying(0), 0);
+    CHECK_EQ(fdps_unit_is_flying(1), 1);
+    CHECK_EQ(fdps_unit_is_flying(2), 0);
+    CHECK_EQ(fdps_unit_is_flying(3), 1);
+}
+
+/* The record is resolved through the accessor on every call, so the predicate
+   follows the array when fdps_relocate_unit_array moves it: republishing the
+   base under an unchanged index changes the answer.  A record pointer cached
+   anywhere between the two would keep reading the old block. */
+static void the_flying_record_is_resolved_on_every_call(void)
+{
+    stage_lookup();
+    set_clazz(LOOKUP_BASE_UNIT, 0x17);
+    set_clazz(0, 0x00);
+    CHECK_EQ(fdps_unit_is_flying(0), 1);
+
+    data_fdps_map_unit_array_ptr = lookup_block;
+    CHECK_EQ(fdps_unit_is_flying(0), 0);
+    CHECK_EQ(fdps_unit_is_flying(LOOKUP_BASE_UNIT), 1);
+}
+
 void run_unit_tests(void)
 {
     RUN_TEST(the_record_is_base_plus_index_times_stride);
@@ -531,4 +711,10 @@ void run_unit_tests(void)
     RUN_TEST(the_index_picks_its_own_record);
     RUN_TEST(a_negative_index_reads_the_record_in_front);
     RUN_TEST(the_record_is_resolved_on_every_call);
+    RUN_TEST(the_class_byte_is_at_record_offset_twenty);
+    RUN_TEST(every_flying_class_code_returns_one);
+    RUN_TEST(the_flying_set_is_exactly_five_codes);
+    RUN_TEST(the_classes_next_to_the_set_do_not_fly);
+    RUN_TEST(the_index_picks_its_own_record_class);
+    RUN_TEST(the_flying_record_is_resolved_on_every_call);
 }

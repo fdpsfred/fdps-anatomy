@@ -414,7 +414,7 @@ Is this unit a flying unit -- one that travels above the terrain instead of on i
 Algorithm:
 Resolves the unit record with fdps_get_unit_record(unit_index), reads the class code from the byte at record+0x20, and returns 1 when it is one of 0x16 (技師), 0x17 (機械伯爵), 0x18 (機械大師), 0x1f (飛兵) or 0x25 (惡靈), otherwise 0. The list is hard-coded here as a comparison chain, not read from the class table: those five are the same classes whose PROMAP.DAT record leaves the sixth terrain column passable, the terrain that can only be flown over. 0x26 (活屍) is deliberately not in the set.
 
-Callers use the answer two ways. The combat resolvers at 0001c520 and 00019f80 skip the attacker's or defender's terrain modifier entirely when it is 1, so a flying unit gets neither the attack nor the defense percentage that fdps_map_load_tile_info's terrain type would select out of DAT_00060040 and DAT_00060058. FUN_00028320 and FUN_00013920 consult it only for spell ids 0x0a and 0x0b, the two ground-shock spells, which fail outright against a flying target.
+Callers use the answer two ways. The combat resolvers at 0001c520 and 00019f80 skip the attacker's or defender's terrain modifier entirely when it is 1, so a flying unit gets neither the attack nor the defense percentage that fdps_map_load_tile_info's terrain type would select out of DAT_00060040 and DAT_00060058. fdps_spell_damage_unit and fdps_score_targets_for_spell consult it only for spell ids 0x0a and 0x0b, the two ground-shock spells, which fail outright against a flying target.
 
 Parameters:
   unit_index -- index into the 0x50-byte unit record array based at DAT_00069cd8; whatever fdps_get_unit_record accepts, unchecked here as it is there

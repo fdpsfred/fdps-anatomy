@@ -48,6 +48,24 @@ extern struct fdps_unit_record *fdps_get_unit_record(int unit_index);
 extern int fdps_unit_is_retired(int unit_index);
 #pragma aux fdps_unit_is_retired "*" parm caller [];
 
+/* Does this unit travel above the terrain instead of on it?  Returns 1 when
+   the unit's class -- struct fdps_unit_record's clazz at record offset 0x20 --
+   is one of the five flying classes 0x16 技師, 0x17 機械伯爵, 0x18 機械大師,
+   0x1f 飛兵 and 0x25 惡靈, and 0 for every other class code, 0x26 活屍
+   included.  The set is a hard-coded list of those five values in the function
+   and is not read from PROMAP.DAT.
+
+   The answer gates two things: the combat resolvers give a flying unit neither
+   the attack nor the defence percentage its tile's terrain type would select,
+   and the two ground-shock spells 裂地術 and 封神裂震 fail against a flying
+   target.
+
+   unit_index is a position in the current battle's unit array and is not range
+   checked; the record is resolved through fdps_get_unit_record, so a call
+   after the array has moved sees the new block. */
+extern int fdps_unit_is_flying(int unit_index);
+#pragma aux fdps_unit_is_flying "*" parm caller [];
+
 /* Picks which of the unit's status-effect timers gets its icon drawn over the
    unit this cycle.  Returns the icon slot 0..4 -- which is the frame index
    into the IconSts.cel sheet, and corresponds to record offsets 0x23, 0x22,

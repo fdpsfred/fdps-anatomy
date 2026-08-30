@@ -75,6 +75,56 @@ int fdps_unit_is_retired(int unit_index)
     return record->flags & 1;
 }
 
+/* 00012550.  The flying predicate.  PUSH EAX / CALL 0x0002d210 / ADD ESP,0x4
+   resolves the record, then XOR EAX,EAX / MOV AL,byte ptr [EDX + 0x20] reads
+   the class code and spills it to the frame local at [EBP-0x8], and five
+   CMP dword ptr [EBP + -0x8],<code> with JZ/JNZ pick between MOV dword ptr
+   [EBP + -0x4],0x1 and the same store of 0.
+
+   The record offset is the literal 0x20, which is struct fdps_unit_record's
+   clazz, and the five codes are 0x16 技師, 0x17 機械伯爵, 0x18 機械大師,
+   0x1f 飛兵 and 0x25 惡靈.  0x26 活屍 is NOT one of them, and neither is
+   0x19 機兵: the chain compares against exactly those five values and against
+   nothing else.
+
+   The widening is XOR EAX,EAX before the byte load, so the class code is
+   zero-extended and the comparisons are made on a full dword.  Every
+   comparison is an equality, so the byte's signedness cannot reach the answer
+   for the five codes involved, but the field is unsigned and is read as such.
+
+   Callers take the answer as a plain truth value: all six call sites --
+   00013ba6, 0001a0b9, 0001a10f, 0001c61b, 0001c671 and 00028416 -- follow the
+   CALL with ADD ESP,0x4 / TEST EAX,EAX / JNZ, so the two combat resolvers skip
+   the terrain modifier on 1 and the two spell paths fail 裂地術 and 封神裂震
+   outright against a flying target.
+
+   Rebuild note: the flying set is this hard-coded list of five class codes and
+   is not derived from PROMAP.DAT.  The same five are the classes whose class
+   record leaves the sixth terrain column passable (assets/classes.md), so a
+   lookup of that column agrees with the chain on the shipped data file and
+   reads cleaner -- and it silently makes the data file able to change which
+   classes ignore terrain modifiers and which ones the two ground-shock spells
+   can hit, which the original binary cannot do.
+
+   The record is resolved through fdps_get_unit_record on every call, so the
+   same re-resolution rule applies here as there; unit_index is not range
+   checked at either end and the bound is the caller's. */
+int fdps_unit_is_flying(int unit_index)
+{
+    struct fdps_unit_record *record;
+    int unit_class;
+
+    record = fdps_get_unit_record(unit_index);
+    unit_class = record->clazz;
+
+    if (unit_class == 0x16 || unit_class == 0x17 || unit_class == 0x18 ||
+        unit_class == 0x1f || unit_class == 0x25) {
+        return 1;
+    }
+
+    return 0;
+}
+
 /* 0002ccd0.  Two passes over the same five record bytes: count how many status
    timers are running, then walk them again and hand back the one the rotation
    counter has come round to.

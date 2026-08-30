@@ -391,6 +391,14 @@
       "status": "committed",
       "emitted_against": "0x274",
       "rounds": 0
+    },
+    "00012550": {
+      "name": "fdps_unit_is_flying",
+      "target": "unit.c",
+      "body_size": "0x64",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x64"
     }
   }
 }
