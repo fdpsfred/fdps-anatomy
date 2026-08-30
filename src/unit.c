@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "table.h"
 #include "unit.h"
 
 /* 0002d210.  The map unit array's element accessor, and the whole body is one
@@ -314,4 +315,119 @@ void fdps_unit_face_target(int unit_index, int target_unit_index)
             unit->facing = 0;
         }
     }
+}
+
+/* How many inventory entries the equipment scan covers: CMP dword ptr
+   [EBP-0x24],0x8 at 00024dc3.  All eight of the 2-byte entries at record
+   +0x0a, not just the two an enrolled character carries flagged equipped. */
+#define EQUIPMENT_SCAN_ENTRY_COUNT 8
+
+/* The dexterity the +0x24 timer is worth while it runs: ADD dword ptr
+   [EBP-0x18],0xf at 00024db2, applied to the seed BEFORE it is copied, so it
+   lifts hit and evade alike. */
+#define DEXTERITY_BUFF_BONUS 15
+
+/* The attack and defense buff multiplier, held as two separate doubles at
+   00061b1c and 00061b24 that hold the same value.  It is a DOUBLE multiply
+   followed by a truncation toward zero (FILD / FMUL qword / CALL __CHP /
+   FISTP), not percentage arithmetic on integers: the nearest double to 1.15
+   is a shade below it, so a total of 100 comes out 114 and one of 200 comes
+   out 229, where total * 115 / 100 would give 115 and 230
+   (rebuild_info/pitfalls.md). */
+#define STAT_BUFF_MULTIPLIER 1.15
+
+/* 00024d70.  The battle side's stat recompute: base stats, plus every equipped
+   item's four modifiers, plus whatever the three stat buffs are worth right
+   now, stored back over the record's four derived stat words.
+
+   The record is resolved through fdps_get_unit_record -- PUSH EAX / CALL
+   0x0002d210 / ADD ESP,0x4 at 00024d80, a real call here where the roster half
+   spells the same multiply out inline -- and is not re-resolved afterwards,
+   because nothing in the body can move the array.
+
+   Hit and evade are seeded from the ONE dexterity word.  MOVSX EAX,word ptr
+   [EAX+0x3e] at 00024da2 lands in [EBP-0x18] and 00024db6 copies that same
+   value into [EBP-0x14]; there is no second base field.  Reaching for +0x40
+   for evade because the other stats are consecutive would read hp_current
+   (rebuild_info/pitfalls.md).  The +15 goes on before the copy, so the
+   dexterity buff raises both.
+
+   Which item field goes where does not follow field order: [EBP-0x14] takes
+   the item's +0x03 (hit) and is stored to record +0x4c, [EBP-0x18] takes +0x07
+   (ev) and is stored to record +0x4e.
+
+   All four accumulators are 32-bit and everything entering them arrives
+   through MOVSX -- the three base stats and all four item modifiers (contract
+   C) -- while the equipped flag byte, the item id byte and the three timer
+   bytes are all read unsigned.  The four stores are word stores (MOV word ptr
+   [EDX+0x48],AX), so a total outside 16 bits is truncated on the way into the
+   record rather than saturated.
+
+   The equipped test is bit 0x40 alone (AND AL,0x40 at 00024de6), so an entry's
+   other flag bits decide nothing, and the id is zero-extended out of the
+   entry's second byte (XOR EAX,EAX / MOV AL,byte ptr [EDX+0x1] at 00024df1),
+   so ids run 0..255 and item 0xff reads past the end of ITEM.DAT unchecked.
+
+   The three timer tests are CMP byte ptr [EAX+0x2x],0x0 / JZ -- a buff counts
+   as running on any non-zero count, never on a particular one -- and the two
+   multiplies happen AFTER the equipment sum, so a buff scales the equipped
+   total and not the base.
+
+   The loop counter is post-incremented: 00024dcb is MOV EAX,dword ptr
+   [EBP-0x24] followed by INC dword ptr [EBP-0x24], the shape i++ produces at
+   -od, where i = i + 1 would load, increment in EAX and store back.  The id
+   goes through a frame slot of its own before the push (MOV dword ptr
+   [EBP-0x10],EAX / MOV EAX,dword ptr [EBP-0x10] / PUSH EAX at 00024df9), which
+   is the extra local the original's SUB ESP,0x24 pays for.
+
+   unit_index is not bounded and no total is clamped.  This is the battle half
+   of a pair: fdps_roster_recompute_combat_stats runs the identical base and
+   equipment sum over a roster record and applies NONE of the three buffs. */
+void fdps_unit_recompute_combat_stats(int unit_index)
+{
+    struct fdps_unit_record *unit;
+    struct fdps_item_effect *item;
+    unsigned char *inventory_entry;
+    int equipped_item_id;
+    int attack_total;
+    int defense_total;
+    int hit_total;
+    int evade_total;
+    int entry_index;
+
+    unit = fdps_get_unit_record(unit_index);
+
+    attack_total = (int) unit->ap_base;
+    defense_total = (int) unit->dp_base;
+    evade_total = (int) unit->dx_base;
+    if (unit->status_timers[2] != 0) {
+        evade_total += DEXTERITY_BUFF_BONUS;
+    }
+    hit_total = evade_total;
+
+    for (entry_index = 0;
+         entry_index < EQUIPMENT_SCAN_ENTRY_COUNT;
+         entry_index++) {
+        inventory_entry = &unit->inventory_slots[entry_index * 2];
+        if ((inventory_entry[0] & 0x40) != 0) {
+            equipped_item_id = (int) inventory_entry[1];
+            item = fdps_get_item_record(equipped_item_id);
+            attack_total += (int) item->ap;
+            defense_total += (int) item->dp;
+            hit_total += (int) item->hit;
+            evade_total += (int) item->ev;
+        }
+    }
+
+    if (unit->status_timers[0] != 0) {
+        attack_total = (int) (attack_total * STAT_BUFF_MULTIPLIER);
+    }
+    if (unit->status_timers[1] != 0) {
+        defense_total = (int) (defense_total * STAT_BUFF_MULTIPLIER);
+    }
+
+    unit->ap = (short) attack_total;
+    unit->dp = (short) defense_total;
+    unit->hit = (short) hit_total;
+    unit->ev = (short) evade_total;
 }

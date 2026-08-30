@@ -487,6 +487,14 @@
       "status": "committed",
       "emitted_against": "0x13d",
       "rounds": 0
+    },
+    "00024d70": {
+      "name": "fdps_unit_recompute_combat_stats",
+      "target": "unit.c",
+      "body_size": "0x128",
+      "status": "committed",
+      "emitted_against": "0x128",
+      "rounds": 0
     }
   }
 }

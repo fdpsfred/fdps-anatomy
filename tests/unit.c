@@ -1113,6 +1113,467 @@ static void the_faced_records_are_resolved_on_every_call(void)
     CHECK_EQ(facing_of(LOOKUP_BASE_UNIT), FACING_LEFT);
 }
 
+/* fdps_unit_recompute_combat_stats @ 00024d70.  Expected values come from that
+   body's assembly and from the two layouts ticket 17 settled; none of them is
+   read off the emitted C.  The facts the cases below are aimed at:
+
+     00024d8e  MOVSX from +0x37, +0x39 and +0x3e seeds attack, defense and BOTH
+               hit and evade, and 00024db6 copies the one dexterity value into
+               the second of them -- there is no evade base field.
+     00024dac  CMP byte ptr [EAX+0x24],0x0 / JZ then ADD dword ptr
+               [EBP-0x18],0xf -- the +15 goes on BEFORE that copy.
+     00024dc3  the scan runs entry 0..7 over the 2-byte entries at +0x0a, tests
+               AND AL,0x40 on the flag byte and zero-extends the id byte.
+     00024e0e  the item modifiers go +0x01 to attack, +0x05 to defense, +0x03
+               to hit and +0x07 to evade -- an order that does not match the
+               order of the four destination fields at +0x48..+0x4e.
+     00024e3e  FILD / FMUL double ptr [0x00061b1c] / CALL __CHP / FISTP, under
+               CMP byte ptr [EAX+0x22],0x0, and the same again at 00024e58 for
+               defense against [0x00061b24].  Both constants hold 1.15.
+     00024e6f  four word stores at +0x48, +0x4a, +0x4c and +0x4e.
+
+   The lookup_block staging above is reused because this function reaches its
+   record through the same accessor.  The item table is a second staged block:
+   the lookup runs through the real fdps_get_item_record in src/table.c, so the
+   fixture is laid out at that accessor's own 0x17 stride.  Nothing below
+   asserts what a real unit array or a real ITEM.DAT holds -- every byte read
+   back is one these cases wrote -- because ticket 23 owns those globals.
+
+   Stat words are written and read a byte at a time, little-endian, because
+   every one of them sits at an ODD offset in the record and this fixture must
+   not assume the layout it is checking. */
+#define ITEM_RECORD_STRIDE 0x17
+
+/* Sized for every id a byte can hold rather than for ITEM.DAT's 251 records,
+   because the id arrives zero-extended out of an inventory entry: ids 251..255
+   are reachable and land past the end of the real table. */
+#define ITEM_IMAGE_RECORDS 257
+
+/* Field offsets inside a unit record, from struct fdps_unit_record. */
+#define OFF_INVENTORY 0x0a
+#define OFF_STATUS_TIMERS 0x22
+#define OFF_AP_BASE 0x37
+#define OFF_DP_BASE 0x39
+#define OFF_DX_BASE 0x3e
+#define OFF_HP_CURRENT 0x40
+#define OFF_MP_MAX 0x46
+#define OFF_AP 0x48
+#define OFF_DP 0x4a
+#define OFF_HIT 0x4c
+#define OFF_EV 0x4e
+
+/* Field offsets inside an item record, from struct fdps_item_effect. */
+#define ITEM_OFF_AP 0x01
+#define ITEM_OFF_HIT 0x03
+#define ITEM_OFF_DP 0x05
+#define ITEM_OFF_EV 0x07
+
+static unsigned char item_image[ITEM_IMAGE_RECORDS * ITEM_RECORD_STRIDE];
+
+static void put_stat_word(unsigned char *field, int value)
+{
+    field[0] = (unsigned char) (value & 0xff);
+    field[1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+/* Read back signed, because every one of these fields is a short and a
+   negative total is a case below. */
+static short get_stat_word(unsigned char *field)
+{
+    return (short) (unsigned short) (field[0] | (field[1] << 8));
+}
+
+static unsigned char *unit_slot(int block_slot)
+{
+    return lookup_block + block_slot * UNIT_RECORD_STRIDE;
+}
+
+static short stat_of(int block_slot, int offset)
+{
+    return get_stat_word(unit_slot(block_slot) + offset);
+}
+
+/* Zero both blocks and publish both bases.  stage_lookup leaves every timer
+   byte and every inventory flag zero, which is the unbuffed, unequipped
+   unit. */
+static void stage_recompute(void)
+{
+    int i;
+
+    stage_lookup();
+    for (i = 0; i < (int) sizeof(item_image); i++) {
+        item_image[i] = 0;
+    }
+    data_fdps_item_effect_table_ptr = item_image;
+}
+
+static void set_bases(int block_slot, int ap_base, int dp_base, int dx_base)
+{
+    unsigned char *record;
+
+    record = unit_slot(block_slot);
+    put_stat_word(record + OFF_AP_BASE, ap_base);
+    put_stat_word(record + OFF_DP_BASE, dp_base);
+    put_stat_word(record + OFF_DX_BASE, dx_base);
+}
+
+/* Fills one of the eight 2-byte inventory entries: flag byte first, id byte
+   second, which is the pair the scan reads at +0x0a + 2 * entry. */
+static void set_entry(int block_slot, int entry_index, int flags, int item_id)
+{
+    unsigned char *entry;
+
+    entry = unit_slot(block_slot) + OFF_INVENTORY + entry_index * 2;
+    entry[0] = (unsigned char) flags;
+    entry[1] = (unsigned char) item_id;
+}
+
+static void set_item(int item_id, int ap, int hit, int dp, int ev)
+{
+    unsigned char *record;
+
+    record = item_image + item_id * ITEM_RECORD_STRIDE;
+    put_stat_word(record + ITEM_OFF_AP, ap);
+    put_stat_word(record + ITEM_OFF_HIT, hit);
+    put_stat_word(record + ITEM_OFF_DP, dp);
+    put_stat_word(record + ITEM_OFF_EV, ev);
+}
+
+/* Set one status timer by its slot in status_timers[], the record layout's own
+   numbering: [0] is +0x22, the attack buff, [1] is +0x23, defense, and [2] is
+   +0x24, dexterity. */
+static void set_status(int block_slot, int timer_index, int value)
+{
+    unit_slot(block_slot)[OFF_STATUS_TIMERS + timer_index] =
+        (unsigned char) value;
+}
+
+/* The offsets the body writes as literals have to be the layout's own fields,
+   or the C addresses different bytes from the original.  The item record's
+   0x17 stride is fdps_get_item_record's IMUL and is what makes the modifier
+   fixture land where that accessor looks. */
+static void the_stat_offsets_match_the_two_layouts(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ap_base), 0x37);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, dp_base), 0x39);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, dx_base), 0x3e);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, inventory_slots), 0x0a);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ap), 0x48);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, dp), 0x4a);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hit), 0x4c);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ev), 0x4e);
+    CHECK_EQ((int) sizeof(struct fdps_item_effect), ITEM_RECORD_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, ap), ITEM_OFF_AP);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, hit), ITEM_OFF_HIT);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, dp), ITEM_OFF_DP);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, ev), ITEM_OFF_EV);
+}
+
+/* With nothing equipped and no timer running the four totals are the three
+   base stats and nothing else: MOVSX word ptr [EAX+0x37] into the attack
+   accumulator, [EAX+0x39] into defense, [EAX+0x3e] into the other two. */
+static void the_base_stats_seed_the_four_totals(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 40, 25, 17);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 40);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_DP), 25);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_HIT), 17);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_EV), 17);
+}
+
+/* The rebuild note's first trap.  Both hit and evade seed from the one
+   dexterity word at +0x3e; +0x40 is hp_current and is a base stat for nothing.
+   hp_current is staged to a value that would show if evade reached for it. */
+static void hit_and_evade_seed_from_one_dexterity_word(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 40, 25, 17);
+    put_stat_word(unit_slot(LOOKUP_BASE_UNIT) + OFF_HP_CURRENT, 99);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_HIT), 17);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_EV), 17);
+}
+
+/* Each item modifier reaches its own destination, and the mapping is the one
+   the assembly makes rather than field order: item +0x01 to record +0x48,
+   +0x05 to +0x4a, +0x03 to +0x4c and +0x07 to +0x4e.  The four modifiers are
+   distinct so a swapped pair shows as a wrong number rather than a
+   coincidence, and hit and evade differ so the two accumulators that started
+   equal are seen to part company. */
+static void an_equipped_item_adds_its_four_modifiers(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 40, 25, 17);
+    set_item(3, 7, 5, 3, 9);
+    set_entry(LOOKUP_BASE_UNIT, 0, 0x40, 3);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 47);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_DP), 28);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_HIT), 22);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_EV), 26);
+}
+
+/* AND AL,0x40 tests that one bit.  A carried entry with flags 0, an entry
+   flagged empty with 0x80 and one holding every bit but 0x40 all contribute
+   nothing, and an entry with 0x40 set alongside other bits contributes. */
+static void only_bit_0x40_equips_an_entry(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 40, 25, 17);
+    set_item(3, 7, 5, 3, 9);
+    set_entry(LOOKUP_BASE_UNIT, 0, 0x00, 3);
+    set_entry(LOOKUP_BASE_UNIT, 1, 0x80, 3);
+    set_entry(LOOKUP_BASE_UNIT, 2, 0xbf, 3);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 40);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_EV), 17);
+
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 40, 25, 17);
+    set_item(3, 7, 5, 3, 9);
+    set_entry(LOOKUP_BASE_UNIT, 0, 0xc1, 3);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 47);
+}
+
+/* The scan covers all eight entries at +0x0a: an equipped item in the last one
+   counts, and a ninth entry's worth of bytes -- +0x1a, which is
+   spells_known_bitmap -- is past the end of the scan and counts for nothing
+   however it is flagged. */
+static void all_eight_inventory_entries_are_scanned(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 40, 25, 17);
+    set_item(3, 7, 5, 3, 9);
+    set_entry(LOOKUP_BASE_UNIT, 7, 0x40, 3);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 47);
+
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 40, 25, 17);
+    set_item(3, 7, 5, 3, 9);
+    set_entry(LOOKUP_BASE_UNIT, 8, 0x40, 3);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 40);
+}
+
+/* The +0x24 timer is worth 15 dexterity, it reaches hit and evade alike, and
+   it reaches neither attack nor defense.  Because the +15 lands on the seed
+   before the copy, hit gets it too -- adding it only to the accumulator the
+   assembly names second would leave hit short by 15. */
+static void the_dexterity_buff_lifts_hit_and_evade_by_fifteen(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 40, 25, 17);
+    set_status(LOOKUP_BASE_UNIT, 2, 1);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_HIT), 32);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_EV), 32);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 40);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_DP), 25);
+
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 40, 25, 17);
+    set_item(3, 7, 5, 3, 9);
+    set_entry(LOOKUP_BASE_UNIT, 0, 0x40, 3);
+    set_status(LOOKUP_BASE_UNIT, 2, 200);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_HIT), 37);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_EV), 41);
+}
+
+/* The rebuild note's second trap.  While +0x22 runs the attack total is a
+   DOUBLE multiply by 1.15 truncated toward zero, and the nearest double to
+   1.15 is a shade below it: 100 comes out 114 and 200 comes out 229, where the
+   obvious total * 115 / 100 gives 115 and 230.  Both values are named in the
+   rebuild note at 00024d70, and both hold whether the x87 multiplies at
+   extended or at double precision.  Defense is untouched by this timer. */
+static void the_attack_buff_multiplies_by_a_truncated_double(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 100, 25, 17);
+    set_status(LOOKUP_BASE_UNIT, 0, 1);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 114);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_DP), 25);
+
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 200, 25, 17);
+    set_status(LOOKUP_BASE_UNIT, 0, 1);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 229);
+}
+
+/* +0x23 is the defense timer and scales defense the same way, by the second
+   1.15 at 00061b24, leaving attack alone; the two timers are independent and
+   both together scale both. */
+static void the_defense_buff_scales_defense_alone(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 40, 100, 17);
+    set_status(LOOKUP_BASE_UNIT, 1, 1);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_DP), 114);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 40);
+
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 200, 100, 17);
+    set_status(LOOKUP_BASE_UNIT, 0, 1);
+    set_status(LOOKUP_BASE_UNIT, 1, 1);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 229);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_DP), 114);
+}
+
+/* Both multiplies happen after the equipment loop, so a buff scales the
+   equipped total and not the base: a base of 90 with a +10 item buffs from 100
+   and gives 114, where scaling the base first would give 103 + 10. */
+static void the_buffs_scale_the_total_after_equipment(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 90, 90, 17);
+    set_item(3, 10, 0, 10, 0);
+    set_entry(LOOKUP_BASE_UNIT, 0, 0x40, 3);
+    set_status(LOOKUP_BASE_UNIT, 0, 1);
+    set_status(LOOKUP_BASE_UNIT, 1, 1);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 114);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_DP), 114);
+}
+
+/* Any non-zero count runs a buff -- CMP byte ptr [EAX+0x22],0x0 / JZ, not a
+   comparison against a particular value -- and the three timers the body never
+   reads, status_timers[3], [4] and [5] at +0x25..+0x27, change nothing. */
+static void only_the_first_three_timers_reach_the_stats(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 100, 100, 17);
+    set_status(LOOKUP_BASE_UNIT, 0, 255);
+    set_status(LOOKUP_BASE_UNIT, 1, 255);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 114);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_DP), 114);
+
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 100, 100, 17);
+    set_status(LOOKUP_BASE_UNIT, 3, 9);
+    set_status(LOOKUP_BASE_UNIT, 4, 9);
+    set_status(LOOKUP_BASE_UNIT, 5, 9);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 100);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_DP), 100);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_HIT), 17);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_EV), 17);
+}
+
+/* Contract C.  Every value entering the accumulators arrives through MOVSX: a
+   base stat word of 0xffce is -50 and an item modifier of 0xfff6 is -10, so a
+   cursed item lowers the stat instead of adding 65526 to it. */
+static void base_stats_and_modifiers_are_signed(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 0xffce, 0xffff, 0xfffb);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), -50);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_DP), -1);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_HIT), -5);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_EV), -5);
+
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 40, 25, 17);
+    set_item(3, 0xfff6, 0xffff, 0xfffe, 0xfffd);
+    set_entry(LOOKUP_BASE_UNIT, 0, 0x40, 3);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 30);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_DP), 23);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_HIT), 16);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_EV), 14);
+}
+
+/* XOR EAX,EAX / MOV AL,byte ptr [EDX+0x1]: the id is zero-extended, so 0xff is
+   255 and indexes forwards.  Item 0xff is reachable in play and its record
+   lies past the end of ITEM.DAT's 251 records; the fixture stages storage
+   there so the case measures the index and not whatever memory follows the
+   real table. */
+static void the_item_id_byte_is_unsigned(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 40, 25, 17);
+    set_item(0xff, 7, 5, 3, 9);
+    set_entry(LOOKUP_BASE_UNIT, 0, 0x40, 0xff);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 47);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_EV), 26);
+}
+
+/* The store narrows and does not saturate: MOV word ptr [EDX+0x48],AX takes
+   the low 16 bits of a total accumulated as a dword.  Two items of +20000 on a
+   base of 30000 make 70000, which lands as 4464 and not as 32767.  This pins
+   the store rather than the accumulator's width -- addition agrees on the low
+   16 bits whatever width it is done in -- and the width itself is taken from
+   00024e12's ADD dword ptr [EBP-0x20],EAX. */
+static void the_totals_are_truncated_by_the_word_store(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 30000, 0, 0);
+    set_item(3, 20000, 0, 0, 0);
+    set_entry(LOOKUP_BASE_UNIT, 0, 0x40, 3);
+    set_entry(LOOKUP_BASE_UNIT, 1, 0x40, 3);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 4464);
+
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 0x8ad0, 0, 0);
+    set_item(3, 0xb1e0, 0, 0, 0);
+    set_entry(LOOKUP_BASE_UNIT, 0, 0x40, 3);
+    set_entry(LOOKUP_BASE_UNIT, 1, 0x40, 3);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), -4464);
+}
+
+/* The record comes from fdps_get_unit_record, so unit_index picks it by the
+   0x50 stride from the published base and the neighbours on either side are
+   neither read nor written.  Both neighbours are staged with equipment that
+   would move their totals if the wrong record were addressed. */
+static void the_index_selects_its_own_unit_record(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 11, 11, 11);
+    set_bases(LOOKUP_BASE_UNIT + 1, 40, 25, 17);
+    set_bases(LOOKUP_BASE_UNIT + 2, 33, 33, 33);
+    set_item(3, 7, 5, 3, 9);
+    set_entry(LOOKUP_BASE_UNIT, 0, 0x40, 3);
+    set_entry(LOOKUP_BASE_UNIT + 1, 0, 0x40, 3);
+    set_entry(LOOKUP_BASE_UNIT + 2, 0, 0x40, 3);
+    fdps_unit_recompute_combat_stats(1);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT + 1, OFF_AP), 47);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT + 1, OFF_EV), 26);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_AP), 0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT + 2, OFF_AP), 0);
+}
+
+/* Only the four stat words are written.  The record's other fields -- here
+   hp_current at +0x40 and mp_max at +0x46 -- and the timer bytes the body read
+   keep the values staged into them, and the record behind is not reached at
+   all. */
+static void only_the_four_stat_words_are_written(void)
+{
+    stage_recompute();
+    set_bases(LOOKUP_BASE_UNIT, 40, 25, 17);
+    set_item(3, 7, 5, 3, 9);
+    set_entry(LOOKUP_BASE_UNIT, 0, 0x40, 3);
+    set_status(LOOKUP_BASE_UNIT, 0, 6);
+    put_stat_word(unit_slot(LOOKUP_BASE_UNIT) + OFF_HP_CURRENT, 99);
+    put_stat_word(unit_slot(LOOKUP_BASE_UNIT) + OFF_MP_MAX, 77);
+    fdps_unit_recompute_combat_stats(0);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_HP_CURRENT), 99);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT, OFF_MP_MAX), 77);
+    CHECK_EQ((int) unit_slot(LOOKUP_BASE_UNIT)[OFF_STATUS_TIMERS], 6);
+    CHECK_EQ(stat_of(LOOKUP_BASE_UNIT + 1, OFF_AP), 0);
+}
+
 void run_unit_tests(void)
 {
     RUN_TEST(the_record_is_base_plus_index_times_stride);
@@ -1160,4 +1621,21 @@ void run_unit_tests(void)
     RUN_TEST(only_the_acting_unit_is_written);
     RUN_TEST(each_index_picks_its_own_record);
     RUN_TEST(the_faced_records_are_resolved_on_every_call);
+
+    RUN_TEST(the_stat_offsets_match_the_two_layouts);
+    RUN_TEST(the_base_stats_seed_the_four_totals);
+    RUN_TEST(hit_and_evade_seed_from_one_dexterity_word);
+    RUN_TEST(an_equipped_item_adds_its_four_modifiers);
+    RUN_TEST(only_bit_0x40_equips_an_entry);
+    RUN_TEST(all_eight_inventory_entries_are_scanned);
+    RUN_TEST(the_dexterity_buff_lifts_hit_and_evade_by_fifteen);
+    RUN_TEST(the_attack_buff_multiplies_by_a_truncated_double);
+    RUN_TEST(the_defense_buff_scales_defense_alone);
+    RUN_TEST(the_buffs_scale_the_total_after_equipment);
+    RUN_TEST(only_the_first_three_timers_reach_the_stats);
+    RUN_TEST(base_stats_and_modifiers_are_signed);
+    RUN_TEST(the_item_id_byte_is_unsigned);
+    RUN_TEST(the_totals_are_truncated_by_the_word_store);
+    RUN_TEST(the_index_selects_its_own_unit_record);
+    RUN_TEST(only_the_four_stat_words_are_written);
 }

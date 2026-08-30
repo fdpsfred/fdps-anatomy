@@ -114,4 +114,42 @@ extern int fdps_unit_select_status_icon(int unit_index, int cycle);
 extern void fdps_unit_face_target(int unit_index, int target_unit_index);
 #pragma aux fdps_unit_face_target "*" parm caller [];
 
+/* Recomputes the four derived combat stats of one battle-map unit -- struct
+   fdps_unit_record's ap, dp, hit and ev at record offsets 0x48, 0x4a, 0x4c and
+   0x4e -- from the unit's base stats, the items it currently has equipped and
+   the stat buffs currently running on it, and writes all four back into the
+   record.  Nothing is returned and no other field is touched.
+
+   The sum is: attack from ap_base at +0x37, defense from dp_base at +0x39, and
+   BOTH hit and evade from the one dexterity word dx_base at +0x3e -- there is
+   no separate evade base.  Every one of the eight 2-byte inventory entries at
+   +0x0a whose flag byte carries bit 0x40 then contributes its item's four
+   modifiers, ap to attack, dp to defense, hit to hit and ev to evade, the item
+   being fetched with fdps_get_item_record on the entry's unsigned id byte.
+
+   Three of the unit's six status timers reach the result, each on any non-zero
+   count: status_timers[2] at +0x24 adds 15 to the dexterity seed before it is
+   shared, so it lifts hit and evade together; status_timers[0] at +0x22 scales
+   the finished attack total and status_timers[1] at +0x23 the finished defense
+   total, both by 1.15 as a double multiply truncated toward zero, so a total
+   of 100 becomes 114 and one of 200 becomes 229.  The other three timers do
+   not enter the stats.
+
+   The totals are accumulated at int width and stored as words, so one outside
+   16 bits wraps into the record rather than saturating, and nothing is
+   clamped.  unit_index is a position in the current battle's unit array and is
+   not range checked; the record is resolved through fdps_get_unit_record, so a
+   call after the array has moved works on the new block.
+
+   Callers run it after anything that can change a unit's equipment or status:
+   the equip, shop, sell, transfer and church screens, the item and spell
+   effects, the level-up, the unit build and deploy paths, and the per-turn
+   status tick as each timer reaches zero.
+
+   The roster-side counterpart fdps_roster_recompute_combat_stats (roster.h)
+   does the base and equipment half of this and none of the three buffs; the
+   two are not interchangeable. */
+extern void fdps_unit_recompute_combat_stats(int unit_index);
+#pragma aux fdps_unit_recompute_combat_stats "*" parm caller [];
+
 #endif
