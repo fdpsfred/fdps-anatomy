@@ -3,3 +3,5 @@ workspace/
 fdps_game_files/
 **/__pycache__/
 .claude/settings.local.json
+# Watcom's DOS tools drop this crash-dump stub wherever they are run from.
+_watcom_.dmp
