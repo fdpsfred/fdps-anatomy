@@ -856,5 +856,19 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00013920": [
+    {
+      "what": "What the bit-0 test on the behaviour byte at record +0x34 means. The byte is packed and each reader takes a different piece of it: AND AL,0xf at 00010065 in fdps_map_actor_behavior_step treats the low nibble as an AI mode code and 0001039a assigns the whole byte the literal 7, AND AL,0x40 at 00012c72 in fdps_map_actor_take_best_action and AND AL,0x80 at 0001337d in fdps_score_targets_for_item each take a single flag, and this function's AND AL,0x1 at 000139f4 doubles the heal score. So bit 0 is the bottom bit of the mode nibble rather than a flag of its own, and 'the AI doubles a heal for the odd-numbered modes' is as far as the assembly goes. The mask constant is therefore named AI_BEHAVIOR_MODE_BIT_0 -- for the bit it is -- and no meaning is claimed. Behaviour is unaffected either way: the mask is emitted as the literal the assembly tests.",
+      "needs": "The mode nibble's enumeration. fdps_map_actor_behavior_step at 00010000 dispatches on it at 00010090 onward and is the function that would name the modes; assets/ or chapters/ deployment data giving each spawned unit's +0x34 value would confirm which units the game actually gives an odd mode to. Neither is emitted or written up yet.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "What bit 0 of the behaviour byte at unit record +0x34 means, which is why the heal score is doubled for some targets. The byte is packed and every reader takes a different piece: AND AL,0xf at 00010065 in fdps_map_actor_behavior_step reads the low nibble as an AI mode code and dispatches on it from 00010090, 0001039a assigns the whole byte the literal 7, AND AL,0x40 at 00012c72 and AND AL,0x80 at 0001337d each take a single flag, and this function's AND AL,0x1 at 000139f4 doubles the per-target heal score. So bit 0 is the bottom bit of the mode nibble rather than a flag of its own, and 'the AI doubles a heal for odd-numbered modes' is as far as the assembly goes. Behaviour is unaffected: the mask is emitted as the literal the assembly tests, under the neutral name AI_BEHAVIOR_MODE_BIT_0.",
+      "needs": "The mode nibble's enumeration, which means fdps_map_actor_behavior_step at 00010000 emitted and its dispatch from 00010090 read through; and deployment data in assets/ or chapters/ giving each spawned unit's +0x34 value, to confirm which units the game actually gives an odd mode to. Neither exists yet.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

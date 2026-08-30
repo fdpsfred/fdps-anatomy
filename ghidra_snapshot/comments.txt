@@ -804,17 +804,19 @@ Fetches the spell's MAGICDAT.DAT record with fdps_get_spell_record and keeps the
 The accumulated total is returned.
 
 Parameters:
-  spell_id -- MAGICDAT.DAT spell id, 0x00-0x27. FUN_00013420 passes each id of the caster's known-spell candidate list in turn.
-  target_count -- how many entries of target_unit_indices to score, 0 or more. FUN_00013420 passes the count fdps_collect_targets_in_range returned for this spell.
+  spell_id -- MAGICDAT.DAT spell id, 0x00-0x27. fdps_map_actor_score_best_spell passes each id of the caster's known-spell candidate list in turn.
+  target_count -- how many entries of target_unit_indices to score, 0 or more. fdps_map_actor_score_best_spell passes the count fdps_collect_targets_in_range returned for this spell.
   target_unit_indices -- array of target_count byte unit indices into the 0x50-byte unit record array based at DAT_00069cd8, filled by fdps_collect_targets_in_range.
 
 Returns:
-  The summed desirability of casting this spell over that target set. Higher is better and 0 means there is nothing worth hitting; FUN_00013420 keeps the highest score it has seen in DAT_00063f88 and records the winning spell id in DAT_00063f90.
+  The summed desirability of casting this spell over that target set. Higher is better and 0 means there is nothing worth hitting; fdps_map_actor_score_best_spell keeps the highest score it has seen in DAT_00063f88 and records the winning spell id in DAT_00063f90.
 
 Pool: fdps  [calls the game symbols fdps_get_spell_record, fdps_get_unit_record and fdps_unit_collect_known_spells and reads unit-record fields defined only by the game's own layout; no Function ID hit in either library set]
 
 Rebuild note:
 The 0x14 神之祝福 branch assigns the result of each of its three fdps_score_targets_without_status calls to the same total, so the +0x22 and +0x23 passes are computed and thrown away and only the +0x24 pass counts. Writing the obvious total += ... for the three calls trebles that spell's score and changes which spell the map AI picks; keep the three plain assignments.
+
+The current-HP word at record +0x40 is widened with OPPOSITE signedness in the two arms that read it: the healing arm zero extends it -- XOR EAX,EAX / MOV AX at 00013996 -- while the damaging arm sign extends it -- MOVSX at 00013bce. Maximum HP at +0x42 is zero extended alongside the first, at 000139a4. Reading hp_current as the signed short the unit record declares in both places reproduces the damaging arm and breaks the healing one: a unit whose HP word had gone negative would look like the most hurt thing on the map to a healer, where the original sees 65535 and scores it 0. Keep the healing arm's unsigned cast.
 
 === 00013c1c [EOL]
 4-byte Watcom alignment filler (8d 44 20 00, lea eax,[eax+eiz*1+0x0]) aligning FUN_00013c20 to 4/16.

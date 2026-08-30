@@ -628,6 +628,14 @@
       "status": "committed",
       "rounds": 1,
       "emitted_against": "0x9b"
+    },
+    "00013920": {
+      "name": "fdps_score_targets_for_spell",
+      "target": "aiscore.c",
+      "body_size": "0x2fc",
+      "status": "committed",
+      "emitted_against": "0x2fc",
+      "rounds": 0
     }
   }
 }

@@ -12,6 +12,7 @@
 #include "table.h"
 #include "unit.h"
 #include "unititem.h"
+#include "unitstat.h"
 #include "aiscore.h"
 
 /* The three heap blocks fdps_map_actor_score_best_attack takes for the search:
@@ -274,6 +275,230 @@ int fdps_score_targets_for_item(int item_id, int target_count,
             total = total + score;
         }
     }
+    return total;
+}
+
+/* The MAGICDAT.DAT spell ids fdps_score_targets_for_spell weighs by name.  The
+   healing span is a range test -- CMP 0xe / JL then CMP 0x10 / JLE at
+   0001394b -- and every other id is an equality, so 0x0d and 0x11 are outside
+   the span and only the exact ids below take their own branch.  Names from
+   assets/spells.md. */
+#define SPELL_QUAKE            0x0a  /* 裂地術 */
+#define SPELL_GREAT_QUAKE      0x0b  /* 封神裂震 */
+#define SPELL_HEAL_FIRST       0x0e  /* 恢復之光 */
+#define SPELL_HEAL_LAST        0x10  /* 痊癒之泉 */
+#define SPELL_SEAL_MAGIC       0x11  /* 封魔咒術 */
+#define SPELL_POISON           0x12  /* 腐毒術 */
+#define SPELL_PARALYSE         0x13  /* 麻痺術 */
+#define SPELL_BLESSING         0x14  /* 神之祝福 */
+#define SPELL_CURE_AILMENTS    0x18  /* 甦癒術 */
+#define SPELL_REQUIEM          0x21  /* 鎮魂之歌 */
+
+/* The record offsets fdps_score_targets_for_spell hands
+   fdps_score_targets_without_status, which takes the timer as an offset and not
+   as a field.  All five are inside struct fdps_unit_record's status_timers[]:
+   [0] scales ap at 00024e38, [1] scales dp at 00024e52 and [2] adds 15 to the
+   dx figure at 00024dac, all three inside fdps_unit_recompute_combat_stats, so
+   they are 神之祝福's attack, defence and dexterity blessings in that order;
+   [3] and [4] are the poison and paralysis counters unitatk.c writes. */
+#define STATUS_OFFSET_BLESS_AP  0x22
+#define STATUS_OFFSET_BLESS_DP  0x23
+#define STATUS_OFFSET_BLESS_DX  0x24
+#define STATUS_OFFSET_POISON    0x25
+#define STATUS_OFFSET_PARALYSIS 0x26
+
+/* The same three ailment timers as status_timers[] indices, for the two
+   branches that read them through the field rather than through an offset
+   argument.  [5] at record +0x27 is the magic seal 封魔咒術 leaves. */
+#define POISON_TIMER_SLOT    3
+#define PARALYSIS_TIMER_SLOT 4
+#define SEAL_TIMER_SLOT      5
+
+/* The per-target scores the spell branches pay, as the PUSHes and the ADD
+   immediates spell them: 8 and 3 for the two heal tiers at 000139c3 and
+   000139de, 6 at 00013a71 and 00013af3, 0x0a and 4 in the PUSH pairs at
+   00013a82 and 00013b26, and 0x18 against 8 for the kill and the wound at
+   00013bd7 and 00013be0. */
+#define SPELL_SCORE_BADLY_HURT   8
+#define SPELL_SCORE_HURT         3
+#define SPELL_SCORE_STATUS       6
+#define SPELL_SCORE_AILMENT      0x0a
+#define SPELL_SCORE_BLESSING     4
+#define SPELL_SCORE_KILL         0x18
+#define SPELL_SCORE_WOUND        8
+
+/* Bit 0 of the behaviour byte, which is what the heal branch tests with
+   AND AL,0x1 at 000139f4.
+
+   That byte is packed and each reader takes its own piece of it: AND AL,0xf at
+   00010065 in fdps_map_actor_behavior_step takes the low nibble as an AI mode
+   code, AND AL,0x40 at 00012c72 in fdps_map_actor_take_best_action and
+   AND AL,0x80 at 0001337d in fdps_score_targets_for_item take single flags, and
+   fdps_map_actor_behavior_step assigns the whole byte the literal 7 at 0001039a.
+   So this bit is the bottom bit of the mode nibble and not a flag of its own,
+   and what the mode it belongs to means is not settled here -- the mask is named
+   for the bit it is rather than for a meaning that has not been established. */
+#define AI_BEHAVIOR_MODE_BIT_0 0x01
+
+/* FMUL double ptr [0x00061571] at 00013bf3, whose eight bytes are
+   00 00 00 00 00 00 f8 3f -- 1.5 exactly. */
+#define PROTAGONIST_WEIGHT 1.5
+
+/* The character index of 蘭迪斯, tested as a byte at 00013bea. */
+#define PROTAGONIST_CHAR_ID 0
+
+/* 00013920.  Scores casting one spell over one candidate target list, so
+   fdps_map_actor_score_best_spell can rank that spell against the others the
+   caster knows.  Each branch sums a per-target score and the sum is returned.
+
+   The spell record is fetched and its power word kept before the dispatch,
+   MOVSX word ptr [EAX] at 00013945, so the figure is signed: MAGICDAT.DAT holds
+   the eight attack-multiplier spells as a negated percentage (assets/spells.md)
+   and a negative power can never be above a target's current HP, so every
+   target of one of those scores the flat wound value.  The fetch happens even
+   for the branches that never look at the power.
+
+   The dispatch is an if / else-if chain in the id order 0x0e-0x10 and 0x21,
+   then 0x11, 0x12, 0x18, 0x13, 0x14, then everything else -- the compare chain
+   at 0001394b, 00013a12, 00013a7c, 00013a9e, 00013afe and 00013b20 in that
+   order.  Only the first test is a range; the rest are equalities.
+
+   The current-HP word at +0x40 is read with a DIFFERENT signedness in the two
+   branches that read it, and that is behaviour and not spelling: XOR EAX,EAX /
+   MOV AX at 00013996 in the healing branch against MOVSX at 00013bce in the
+   damaging one.  A unit whose HP word had gone negative is therefore the most
+   hurt thing on the map to a healer -- 0xffff is far above hp_max/2 unsigned,
+   so it would score 0 read the other way -- and is already dead to an attacker.
+   hp_max at +0x42 is zero extended alongside it.
+
+   Both healing thresholds are signed divisions compared with JLE at 000139c1
+   and 000139dc, so they are strictly greater-than against the current HP: a
+   unit sitting on exactly a third of its maximum takes the 3 and not the 8.
+   IDIV EBX with EBX = 3 and the SAR 0x1f / SUB / SAR 0x1 halving both truncate
+   toward zero.
+
+   The 0x11 branch resolves the record BEFORE it asks the count, and asks with a
+   NULL buffer, which is fdps_unit_collect_known_spells' count-only mode; the
+   test is that count against zero AND the seal timer against zero, short
+   circuited at 00013a64, so a sealed target is worth nothing however many
+   spells it knows.
+
+   The 0x14 branch calls fdps_score_targets_without_status three times and
+   STORES each answer over the last -- MOV dword ptr [EBP-0x14],EAX at 00013b3a,
+   00013b51 and 00013b68, never ADD -- so the attack and defence blessing passes
+   are computed and discarded and only the dexterity pass reaches the total.
+   Writing the obvious += trebles 神之祝福's score and changes which spell the
+   map AI picks.  The three plain assignments are the point.
+
+   The flying test guards only the two ground-shock spells and it skips the
+   target outright, accumulator untouched: CMP 0xb / JZ then CMP 0xa / JNZ at
+   00013b8c short circuits to the body for every other id, and a nonzero answer
+   jumps straight to the loop increment at 00013bb0.
+
+   The protagonist weighting is FILD / FMUL 1.5 / CALL __CHP / FISTP, so it is a
+   double multiply truncated back to an int and not the integer 3/2 the physical
+   attack scorer uses at 000124bc.  The two agree on every value the branch can
+   produce -- 8 becomes 12 and 0x18 becomes 0x24 either way -- but the operation
+   is the one written here.
+
+   Nothing is bounds checked: not spell_id against MAGICDAT.DAT's 40 records,
+   not the index bytes against the unit array, and the record pointer is
+   re-resolved on every pass rather than held across the loop. */
+int fdps_score_targets_for_spell(int spell_id, int target_count,
+                                 unsigned char *target_unit_indices)
+{
+    struct fdps_spell_effect *spell;
+    struct fdps_unit_record *target;
+    int spell_power;
+    int target_slot;
+    int hp_current;
+    int hp_max;
+    int score;
+    int total;
+
+    total = 0;
+    spell = fdps_get_spell_record(spell_id);
+    spell_power = spell->power;
+
+    if ((spell_id >= SPELL_HEAL_FIRST && spell_id <= SPELL_HEAL_LAST) ||
+        spell_id == SPELL_REQUIEM) {
+        for (target_slot = 0; target_slot < target_count; target_slot++) {
+            target = fdps_get_unit_record(target_unit_indices[target_slot]);
+            hp_current = (int) (unsigned short) target->hp_current;
+            hp_max = (int) (unsigned short) target->hp_max;
+            if (hp_max / 3 > hp_current) {
+                score = SPELL_SCORE_BADLY_HURT;
+            } else if (hp_max / 2 > hp_current) {
+                score = SPELL_SCORE_HURT;
+            } else {
+                score = 0;
+            }
+            if ((target->ai_behavior & AI_BEHAVIOR_MODE_BIT_0) != 0) {
+                score = score * 2;
+            }
+            total = total + score;
+        }
+    } else if (spell_id == SPELL_SEAL_MAGIC) {
+        for (target_slot = 0; target_slot < target_count; target_slot++) {
+            target = fdps_get_unit_record(target_unit_indices[target_slot]);
+            if (fdps_unit_collect_known_spells(
+                    target_unit_indices[target_slot], NULL) != 0 &&
+                target->status_timers[SEAL_TIMER_SLOT] == 0) {
+                total = total + SPELL_SCORE_STATUS;
+            }
+        }
+    } else if (spell_id == SPELL_POISON) {
+        total = fdps_score_targets_without_status(target_count,
+                                                  target_unit_indices,
+                                                  STATUS_OFFSET_POISON,
+                                                  SPELL_SCORE_AILMENT);
+    } else if (spell_id == SPELL_CURE_AILMENTS) {
+        for (target_slot = 0; target_slot < target_count; target_slot++) {
+            target = fdps_get_unit_record(target_unit_indices[target_slot]);
+            if (target->status_timers[POISON_TIMER_SLOT] != 0 ||
+                target->status_timers[PARALYSIS_TIMER_SLOT] != 0 ||
+                target->status_timers[SEAL_TIMER_SLOT] != 0) {
+                total = total + SPELL_SCORE_STATUS;
+            }
+        }
+    } else if (spell_id == SPELL_PARALYSE) {
+        total = fdps_score_targets_without_status(target_count,
+                                                  target_unit_indices,
+                                                  STATUS_OFFSET_PARALYSIS,
+                                                  SPELL_SCORE_AILMENT);
+    } else if (spell_id == SPELL_BLESSING) {
+        total = fdps_score_targets_without_status(target_count,
+                                                  target_unit_indices,
+                                                  STATUS_OFFSET_BLESS_AP,
+                                                  SPELL_SCORE_BLESSING);
+        total = fdps_score_targets_without_status(target_count,
+                                                  target_unit_indices,
+                                                  STATUS_OFFSET_BLESS_DP,
+                                                  SPELL_SCORE_BLESSING);
+        total = fdps_score_targets_without_status(target_count,
+                                                  target_unit_indices,
+                                                  STATUS_OFFSET_BLESS_DX,
+                                                  SPELL_SCORE_BLESSING);
+    } else {
+        for (target_slot = 0; target_slot < target_count; target_slot++) {
+            if ((spell_id == SPELL_GREAT_QUAKE ||
+                 spell_id == SPELL_QUAKE) &&
+                fdps_unit_is_flying(target_unit_indices[target_slot]) != 0) {
+                continue;
+            }
+            target = fdps_get_unit_record(target_unit_indices[target_slot]);
+            if (target->hp_current < spell_power) {
+                score = SPELL_SCORE_KILL;
+            } else {
+                score = SPELL_SCORE_WOUND;
+            }
+            if (target->char_id == PROTAGONIST_CHAR_ID) {
+                score = (int) (score * PROTAGONIST_WEIGHT);
+            }
+            total = total + score;
+        }
+    }
+
     return total;
 }
 

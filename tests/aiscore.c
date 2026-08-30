@@ -1040,6 +1040,566 @@ static void the_stat_words_are_read_signed(void)
     CHECK_EQ(data_fdps_battle_ai_best_physical_target_idx, 1);
 }
 
+/* ------------------------------------------------------------------
+ * 00013920 fdps_score_targets_for_spell
+ *
+ * The spell table and the unit array are both staged here: the function takes
+ * its whole input from its three arguments and from the two records the
+ * accessors resolve, so pointing those two globals at local blocks is the only
+ * way to reach the branches.  Nothing below asserts what either global holds on
+ * its own -- ticket 23 owns that.
+ *
+ * Expected values come from the assembly at 00013920: the CMP 0xe / JL, CMP
+ * 0x10 / JLE and CMP 0x21 / JNZ range test at 0001394b and the five equality
+ * tests after it, the XOR EAX,EAX / MOV AX widening at 00013996 and 000139a4
+ * against the MOVSX at 00013bce, the IDIV EBX with EBX = 3 at 000139bc and the
+ * SAR 0x1f / SUB / SAR 0x1 halving at 000139cf with their two JLE at 000139c1
+ * and 000139dc, the AND AL,0x1 / SHL 0x1 at 000139f4, the PUSH 0x0 /
+ * fdps_unit_collect_known_spells / TEST / CMP byte ptr [EAX+0x27] pair at
+ * 00013a4a, the three-way ailment test at 00013ad9, the five PUSH pairs at
+ * 00013a82, 00013b04, 00013b26, 00013b3d and 00013b54 with the MOV -- not ADD
+ * -- that lands each answer, the CMP 0xb / JZ, CMP 0xa / JNZ flying guard at
+ * 00013b8c, the CMP / JGE kill test at 00013bd2, and the FILD / FMUL double ptr
+ * [0x00061571] / __CHP / FISTP at 00013bf0 over the 1.5 whose eight bytes read
+ * 00 00 00 00 00 00 f8 3f.  None of them is read off the emitted C.
+ * ------------------------------------------------------------------ */
+
+/* MAGICDAT.DAT holds 40 records, ids 0x00-0x27 with no gap (assets/spells.md),
+   so the table is staged full length and the highest id the dispatch names --
+   0x21 鎮魂之歌 -- has a record of its own to be fetched from. */
+#define SPL_SPELLS 0x28
+#define SPL_UNITS 8
+
+/* A character index that is not the protagonist's, so the 1.5 weighting cannot
+   reach a case that is not about it. */
+#define SPL_NOBODY 5
+
+/* status_timers[] slots, as indices rather than as the record offsets the
+   delegating branches push: [0] [1] [2] are 神之祝福's attack, defence and
+   dexterity blessings, [3] poison, [4] paralysis, [5] the magic seal. */
+#define SPL_SLOT_BLESS_AP  0
+#define SPL_SLOT_BLESS_DP  1
+#define SPL_SLOT_BLESS_DX  2
+#define SPL_SLOT_POISON    3
+#define SPL_SLOT_PARALYSIS 4
+#define SPL_SLOT_SEAL      5
+
+/* The ids the dispatch names, and two that it does not: 0x0d sits one below the
+   healing span and 0x0c is an ordinary damaging spell. */
+#define SPL_ID_QUAKE         0x0a
+#define SPL_ID_GREAT_QUAKE   0x0b
+#define SPL_ID_PLAIN_DAMAGE  0x0c
+#define SPL_ID_BELOW_HEAL    0x0d
+#define SPL_ID_HEAL_FIRST    0x0e
+#define SPL_ID_HEAL_MID      0x0f
+#define SPL_ID_HEAL_LAST     0x10
+#define SPL_ID_SEAL_MAGIC    0x11
+#define SPL_ID_POISON        0x12
+#define SPL_ID_PARALYSE      0x13
+#define SPL_ID_BLESSING      0x14
+#define SPL_ID_CURE          0x18
+#define SPL_ID_REQUIEM       0x21
+
+/* Class codes fdps_unit_is_flying answers 1 and 0 for: 0x1f 飛兵 is in its
+   five-code list and 0x19 機兵 is deliberately not. */
+#define SPL_CLASS_FLYING     0x1f
+#define SPL_CLASS_NOT_FLYING 0x19
+
+static struct fdps_spell_effect spl_spells[SPL_SPELLS];
+static struct fdps_unit_record spl_units[SPL_UNITS];
+static unsigned char spl_targets[4];
+
+/* Zero both tables, publish them, and give every unit a character index that is
+   not the protagonist's so the weighting has to be asked for.  Every spell then
+   has power 0 and every unit is an unhurt nobody who knows no spells and
+   carries no timer. */
+static void spl_stage(void)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) spl_spells;
+    for (i = 0; i < (int) sizeof(spl_spells); i++) {
+        bytes[i] = 0;
+    }
+    bytes = (unsigned char *) spl_units;
+    for (i = 0; i < (int) sizeof(spl_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < SPL_UNITS; i++) {
+        spl_units[i].char_id = SPL_NOBODY;
+    }
+    for (i = 0; i < 4; i++) {
+        spl_targets[i] = (unsigned char) i;
+    }
+    data_fdps_battle_spell_effect_table_ptr = (unsigned char *) spl_spells;
+    data_fdps_map_unit_array_ptr = (unsigned char *) spl_units;
+}
+
+static void spl_power(int spell_id, int power)
+{
+    spl_spells[spell_id].power = (short) power;
+}
+
+static void spl_unit(int unit_index, int hp_current, int hp_max)
+{
+    spl_units[unit_index].hp_current = (short) hp_current;
+    spl_units[unit_index].hp_max = (short) hp_max;
+}
+
+static void spl_timer(int unit_index, int slot, int turns)
+{
+    spl_units[unit_index].status_timers[slot] = (unsigned char) turns;
+}
+
+/* Set one bit of the known-spell bitmap, which is what
+   fdps_unit_collect_known_spells counts: byte spell_id / 8, bit spell_id % 8. */
+static void spl_knows(int unit_index, int spell_id)
+{
+    spl_units[unit_index].spells_known_bitmap[spell_id / 8] |=
+        (unsigned char) (1 << (spell_id % 8));
+}
+
+/* Write an HP word as a bit pattern, so a case about how that word is widened
+   does not itself rest on how a short takes an out-of-range assignment. */
+static void spl_hp_bits(int unit_index, unsigned int raw)
+{
+    unsigned char *word;
+
+    word = (unsigned char *) &spl_units[unit_index].hp_current;
+    word[0] = (unsigned char) (raw & 0xff);
+    word[1] = (unsigned char) ((raw >> 8) & 0xff);
+}
+
+static void spl_hp_max_bits(int unit_index, unsigned int raw)
+{
+    unsigned char *word;
+
+    word = (unsigned char *) &spl_units[unit_index].hp_max;
+    word[0] = (unsigned char) (raw & 0xff);
+    word[1] = (unsigned char) ((raw >> 8) & 0xff);
+}
+
+/* The literal offsets the scorer reads: the spell's power word at +0x00 of a
+   seven-byte record, and the unit's current HP, maximum HP, behaviour byte,
+   character index and seal timer at +0x40, +0x42, +0x34, +0x08 and +0x27.  The
+   record stride matters as much as the offsets: fdps_get_spell_record multiplies
+   the id by a literal 7, so an id past 0 would land somewhere else if the record
+   measured anything different. */
+static void spell_scorer_reads_these_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_spell_effect), 7);
+    CHECK_EQ((int) offsetof(struct fdps_spell_effect, power), 0x00);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, char_id), 0x08);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ai_behavior), 0x34);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_current), 0x40);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_max), 0x42);
+    CHECK_EQ((int) (offsetof(struct fdps_unit_record, status_timers) +
+                    SPL_SLOT_SEAL), 0x27);
+}
+
+/* CMP 0xe / JL then CMP 0x10 / JLE is a range and CMP 0x21 / JNZ is an
+   equality, so 0x0e, 0x0f, 0x10 and 0x21 are the whole healing family and 0x0d
+   just below the span is not in it.  An unhurt target scores 0 as a heal and 8
+   as a damaging spell, so the two branches are told apart by the answer.  0x11
+   is checked in the same case because it is the id immediately above the span
+   and has a branch of its own: its target knows no spells, so it scores 0 for a
+   reason that is not the healing rule. */
+static void the_healing_span_is_a_range_and_stops_where_it_stops(void)
+{
+    spl_stage();
+    spl_unit(0, 100, 100);
+
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             0);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_MID, 1, spl_targets), 0);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_LAST, 1, spl_targets), 0);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_REQUIEM, 1, spl_targets), 0);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_BELOW_HEAL, 1, spl_targets),
+             8);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_SEAL_MAGIC, 1, spl_targets),
+             0);
+}
+
+/* Both heal comparisons are JLE against the current HP, so the score changes
+   strictly ABOVE the threshold: with hp_max 30 the thresholds are 10 and 15,
+   a unit sitting on exactly 10 takes the 3 and one on exactly 15 takes the 0.
+   That is the opposite boundary from the item scorer's two JL, which is why
+   neither can be spelled from the other. */
+static void heal_thresholds_change_above_the_boundary(void)
+{
+    spl_stage();
+
+    spl_unit(0, 9, 30);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             8);
+    spl_unit(0, 10, 30);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             3);
+    spl_unit(0, 14, 30);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             3);
+    spl_unit(0, 15, 30);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             0);
+    spl_unit(0, 30, 30);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             0);
+}
+
+/* IDIV and the SAR-plus-sign-correction halving both truncate toward zero, so
+   with hp_max 5 the thresholds are 1 and 2 and not 1.67 and 2.5.  A rounding
+   divide would move the 1 case. */
+static void heal_thresholds_truncate(void)
+{
+    spl_stage();
+
+    spl_unit(0, 0, 5);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             8);
+    spl_unit(0, 1, 5);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             3);
+    spl_unit(0, 2, 5);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             0);
+}
+
+/* XOR EAX,EAX / MOV AX at 00013996 and 000139a4 widen both HP words WITHOUT
+   their sign, which is the reverse of the damaging branch's MOVSX.  An HP word
+   of 0xffff therefore reads as 65535, far above hp_max/2, and the target is not
+   worth healing at all -- read signed it would be -1 and the most hurt thing on
+   the map, scoring 8.  A maximum of 0xffff reads as 65535 and puts its third at
+   21845, so an unhurt-looking target scores 8; read signed the maximum would be
+   -1, both thresholds would truncate to 0 and the score would be 0. */
+static void heal_reads_both_hp_words_unsigned(void)
+{
+    spl_stage();
+
+    spl_unit(0, 0, 30);
+    spl_hp_bits(0, 0xffff);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             0);
+
+    spl_unit(0, 0, 0);
+    spl_hp_max_bits(0, 0xffff);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             8);
+}
+
+/* AND AL,0x1 / TEST / SHL 0x1 doubles the per-target score and tests that one
+   bit alone, so 0x80 -- the bit the item scorer's restorative walk reads out of
+   the same byte -- leaves a heal score untouched, and doubling 0 is still 0. */
+static void behavior_bit_zero_doubles_the_heal_score(void)
+{
+    spl_stage();
+
+    spl_unit(0, 1, 30);
+    spl_units[0].ai_behavior = 0x01;
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             16);
+    spl_unit(0, 12, 30);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             6);
+    spl_unit(0, 30, 30);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             0);
+
+    spl_unit(0, 1, 30);
+    spl_units[0].ai_behavior = 0x80;
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             8);
+    spl_units[0].ai_behavior = 0xfe;
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             8);
+    spl_units[0].ai_behavior = 0xff;
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             16);
+}
+
+/* TEST EAX,EAX / JZ on the spell count and CMP byte ptr [EAX+0x27],0x0 on the
+   seal timer are both required and the pair is short circuited, so a target
+   pays 6 only when it has magic to lose and has not already lost it.  The
+   poison and paralysis timers are set in the same case to show the test is on
+   the seal byte alone and not on "any status". */
+static void seal_needs_a_spell_and_a_clear_seal_timer(void)
+{
+    spl_stage();
+
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_SEAL_MAGIC, 1, spl_targets),
+             0);
+    spl_knows(0, 0x27);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_SEAL_MAGIC, 1, spl_targets),
+             6);
+    spl_timer(0, SPL_SLOT_POISON, 3);
+    spl_timer(0, SPL_SLOT_PARALYSIS, 3);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_SEAL_MAGIC, 1, spl_targets),
+             6);
+    spl_timer(0, SPL_SLOT_SEAL, 1);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_SEAL_MAGIC, 1, spl_targets),
+             0);
+
+    spl_stage();
+    spl_knows(0, 0);
+    spl_knows(1, 5);
+    spl_timer(1, SPL_SLOT_SEAL, 1);
+    spl_knows(2, 9);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_SEAL_MAGIC, 3, spl_targets),
+             12);
+}
+
+/* The three CMP byte ptr [EAX+0x25 / 0x26 / 0x27],0x0 are OR-ed and the 6 is
+   added once, so a target carrying all three ailments is worth the same as one
+   carrying a single ailment, and the three blessing timers next door do not
+   count as ailments at all. */
+static void cure_pays_once_for_any_ailment(void)
+{
+    spl_stage();
+
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_CURE, 1, spl_targets), 0);
+    spl_timer(0, SPL_SLOT_POISON, 1);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_CURE, 1, spl_targets), 6);
+    spl_timer(0, SPL_SLOT_POISON, 0);
+    spl_timer(0, SPL_SLOT_PARALYSIS, 1);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_CURE, 1, spl_targets), 6);
+    spl_timer(0, SPL_SLOT_PARALYSIS, 0);
+    spl_timer(0, SPL_SLOT_SEAL, 1);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_CURE, 1, spl_targets), 6);
+    spl_timer(0, SPL_SLOT_POISON, 4);
+    spl_timer(0, SPL_SLOT_PARALYSIS, 4);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_CURE, 1, spl_targets), 6);
+
+    spl_stage();
+    spl_timer(0, SPL_SLOT_BLESS_AP, 5);
+    spl_timer(0, SPL_SLOT_BLESS_DP, 5);
+    spl_timer(0, SPL_SLOT_BLESS_DX, 5);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_CURE, 1, spl_targets), 0);
+}
+
+/* PUSH 0xa / PUSH 0x25 for 腐毒術 and PUSH 0xa / PUSH 0x26 for 麻痺術: each
+   ailment spell consults its own timer at 10 a clear target and ignores the
+   other.  Two targets, one already poisoned, separates them -- 10 against 20. */
+static void the_two_ailment_spells_read_their_own_timer(void)
+{
+    spl_stage();
+    spl_timer(0, SPL_SLOT_POISON, 2);
+
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_POISON, 2, spl_targets), 10);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PARALYSE, 2, spl_targets), 20);
+    spl_timer(1, SPL_SLOT_PARALYSIS, 2);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_POISON, 2, spl_targets), 10);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PARALYSE, 2, spl_targets), 10);
+}
+
+/* MOV dword ptr [EBP-0x14],EAX at 00013b3a, 00013b51 and 00013b68: each of
+   神之祝福's three passes STORES over the last, so only the dexterity pass at
+   record +0x24 reaches the answer.
+
+   Three targets, all clear of the attack and defence blessings and two of them
+   already carrying the dexterity one: the attack and defence passes are each 12
+   and the dexterity pass is 4, and 4 is the answer.  Written with += it would be
+   28.  The second arrangement is the other way round -- all three carry the
+   attack blessing and none the dexterity one -- so the discarded pass is 0 and
+   the answer is the full 12; += would give 24 there. */
+static void the_blessing_branch_keeps_only_the_last_pass(void)
+{
+    spl_stage();
+    spl_timer(0, SPL_SLOT_BLESS_DX, 1);
+    spl_timer(1, SPL_SLOT_BLESS_DX, 1);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_BLESSING, 3, spl_targets), 4);
+
+    spl_stage();
+    spl_timer(0, SPL_SLOT_BLESS_AP, 1);
+    spl_timer(1, SPL_SLOT_BLESS_AP, 1);
+    spl_timer(2, SPL_SLOT_BLESS_AP, 1);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_BLESSING, 3, spl_targets), 12);
+}
+
+/* MOVSX word ptr [EAX+0x40] / CMP / JGE at 00013bd2: the kill needs the
+   target's current HP strictly BELOW the spell's power, so a cast that exactly
+   matches the remaining HP scores the wound.  The HP word is signed here, the
+   reverse of the healing branch, so 0xffff is -1 and dies to a power of 100;
+   read unsigned it would be 65535 and merely be wounded.  火焰's power is not
+   what is staged -- the numbers are chosen to sit on the boundary. */
+static void the_kill_test_is_strict_and_reads_hp_signed(void)
+{
+    spl_stage();
+    spl_power(SPL_ID_PLAIN_DAMAGE, 100);
+
+    spl_unit(0, 101, 500);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 1, spl_targets),
+             8);
+    spl_unit(0, 100, 500);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 1, spl_targets),
+             8);
+    spl_unit(0, 99, 500);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 1, spl_targets),
+             0x18);
+
+    spl_unit(0, 0, 500);
+    spl_hp_bits(0, 0xffff);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 1, spl_targets),
+             0x18);
+    spl_hp_bits(0, 0x8000);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 1, spl_targets),
+             0x18);
+}
+
+/* MOVSX word ptr [EAX] at 00013945 takes the power word signed, and
+ * MAGICDAT.DAT stores the attack-multiplier spells as a negated percentage
+ * (assets/spells.md), so nothing can be below one of them: a target at 0 HP and
+ * one whose HP word is 0xffff both score the flat wound.  Read the power
+ * unsigned and -50 would be 65486 and every target of those spells would look
+ * like a kill. */
+static void a_negative_power_can_never_kill(void)
+{
+    spl_stage();
+    spl_power(SPL_ID_PLAIN_DAMAGE, -50);
+
+    spl_unit(0, 0, 500);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 1, spl_targets),
+             8);
+    spl_hp_bits(0, 0xffff);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 1, spl_targets),
+             8);
+}
+
+/* IMUL EAX,[EBP+0x14],0x7 inside fdps_get_spell_record: the power comes from
+   the record the id selects, so two ids with different powers rank the same
+   target differently -- one kills it and the other does not. */
+static void the_power_comes_from_the_id_s_own_record(void)
+{
+    spl_stage();
+    spl_power(SPL_ID_PLAIN_DAMAGE, 100);
+    spl_power(SPL_ID_BELOW_HEAL, 10);
+    spl_unit(0, 50, 500);
+
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 1, spl_targets),
+             0x18);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_BELOW_HEAL, 1, spl_targets),
+             8);
+}
+
+/* CMP byte ptr [EAX+0x8],0x0 then FILD / FMUL 1.5 / __CHP / FISTP: the
+   protagonist's two possible scores are weighted to 12 and 36, and every other
+   character index is left alone.  The multiply is over the whole per-target
+   score and not over the total, so two protagonists are 24 and not one
+   weighting applied twice. */
+static void the_protagonist_is_weighted_by_one_and_a_half(void)
+{
+    spl_stage();
+    spl_power(SPL_ID_PLAIN_DAMAGE, 100);
+    spl_unit(0, 500, 500);
+    spl_unit(1, 500, 500);
+
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 1, spl_targets),
+             8);
+    spl_units[0].char_id = 0;
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 1, spl_targets),
+             12);
+    spl_unit(0, 50, 500);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 1, spl_targets),
+             36);
+
+    spl_unit(0, 500, 500);
+    spl_units[1].char_id = 0;
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 2, spl_targets),
+             24);
+    spl_units[1].char_id = 1;
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 2, spl_targets),
+             20);
+}
+
+/* CMP 0xb / JZ then CMP 0xa / JNZ at 00013b8c guards the flying test, and a
+   flying target is skipped with the accumulator untouched rather than scored
+   0 -- which is the same number here, so the case proves it by leaving a second
+   target that does score.  Class 0x1f 飛兵 is in fdps_unit_is_flying's list and
+   0x19 機兵 is not, and an ordinary damaging spell hits both. */
+static void only_the_two_quake_spells_skip_flyers(void)
+{
+    spl_stage();
+    spl_power(SPL_ID_QUAKE, 0);
+    spl_power(SPL_ID_GREAT_QUAKE, 0);
+    spl_power(SPL_ID_PLAIN_DAMAGE, 0);
+    spl_units[0].clazz = SPL_CLASS_FLYING;
+    spl_units[1].clazz = SPL_CLASS_NOT_FLYING;
+
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_QUAKE, 2, spl_targets), 8);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_GREAT_QUAKE, 2, spl_targets),
+             8);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 2, spl_targets),
+             16);
+
+    spl_units[1].clazz = SPL_CLASS_FLYING;
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_QUAKE, 2, spl_targets), 0);
+    spl_units[0].clazz = 0;
+    spl_units[1].clazz = 0;
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_QUAKE, 2, spl_targets), 16);
+}
+
+/* Every loop test is CMP / JL placed before its body, so a count of 0 or below
+   scores 0 in every branch without reading the index list, and the delegating
+   branches inherit the same shape from fdps_score_targets_without_status.  A
+   do/while spelling would score the first entry, which is staged to be worth
+   something in each branch. */
+static void a_nonpositive_target_count_scores_zero_everywhere(void)
+{
+    spl_stage();
+    spl_power(SPL_ID_PLAIN_DAMAGE, 100);
+    spl_unit(0, 1, 30);
+    spl_knows(0, 3);
+    spl_timer(0, SPL_SLOT_SEAL, 0);
+
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 0, spl_targets),
+             0);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, -1, spl_targets),
+             0);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_SEAL_MAGIC, 0, spl_targets),
+             0);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_SEAL_MAGIC, -1, spl_targets),
+             0);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_CURE, 0, spl_targets), 0);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_POISON, 0, spl_targets), 0);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_BLESSING, 0, spl_targets), 0);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 0, spl_targets),
+             0);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, -1,
+                                          spl_targets),
+             0);
+}
+
+/* MOV AL,byte ptr [EAX] / AND EAX,0xff reads the list one byte at a time in the
+   order given and the bound is exclusive, so the entries past target_count are
+   not visited however much they would pay.  Both walking branches are checked:
+   the list starts at unit 3 while unit 0 is the one staged to score, so a walk
+   that ignored the list and counted units from zero would answer differently. */
+static void both_walks_follow_the_index_list(void)
+{
+    spl_stage();
+    spl_power(SPL_ID_PLAIN_DAMAGE, 100);
+    spl_targets[0] = 3;
+    spl_targets[1] = 1;
+    spl_targets[2] = 5;
+
+    spl_unit(0, 1, 30);
+    spl_unit(1, 30, 30);
+    spl_unit(3, 1, 30);
+    spl_unit(5, 1, 30);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 1, spl_targets),
+             8);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 2, spl_targets),
+             8);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_HEAL_FIRST, 3, spl_targets),
+             16);
+
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 1, spl_targets),
+             0x18);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 2, spl_targets),
+             0x18 + 0x18);
+    CHECK_EQ(fdps_score_targets_for_spell(SPL_ID_PLAIN_DAMAGE, 3, spl_targets),
+             0x18 * 3);
+}
+
 void run_aiscore_tests(void)
 {
     RUN_TEST(attack_search_reads_these_offsets);
@@ -1074,4 +1634,21 @@ void run_aiscore_tests(void)
     RUN_TEST(score_per_target_multiplies_the_clear_targets);
     RUN_TEST(the_walk_follows_the_index_list);
     RUN_TEST(the_index_byte_is_zero_extended);
+    RUN_TEST(spell_scorer_reads_these_offsets);
+    RUN_TEST(the_healing_span_is_a_range_and_stops_where_it_stops);
+    RUN_TEST(heal_thresholds_change_above_the_boundary);
+    RUN_TEST(heal_thresholds_truncate);
+    RUN_TEST(heal_reads_both_hp_words_unsigned);
+    RUN_TEST(behavior_bit_zero_doubles_the_heal_score);
+    RUN_TEST(seal_needs_a_spell_and_a_clear_seal_timer);
+    RUN_TEST(cure_pays_once_for_any_ailment);
+    RUN_TEST(the_two_ailment_spells_read_their_own_timer);
+    RUN_TEST(the_blessing_branch_keeps_only_the_last_pass);
+    RUN_TEST(the_kill_test_is_strict_and_reads_hp_signed);
+    RUN_TEST(a_negative_power_can_never_kill);
+    RUN_TEST(the_power_comes_from_the_id_s_own_record);
+    RUN_TEST(the_protagonist_is_weighted_by_one_and_a_half);
+    RUN_TEST(only_the_two_quake_spells_skip_flyers);
+    RUN_TEST(a_nonpositive_target_count_scores_zero_everywhere);
+    RUN_TEST(both_walks_follow_the_index_list);
 }

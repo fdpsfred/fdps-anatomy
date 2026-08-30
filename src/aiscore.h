@@ -73,6 +73,48 @@ extern int fdps_score_targets_for_item(int item_id, int target_count,
                                        unsigned char *target_unit_indices);
 #pragma aux fdps_score_targets_for_item "*" parm caller [];
 
+/* How much is casting spell_id on these targets worth?  target_unit_indices is
+   target_count battle unit indices, one byte each; the per-target scores are
+   summed and the sum returned.  Higher is better and 0 means there is nothing
+   there worth hitting.
+
+   One branch per spell family, by MAGICDAT.DAT id (assets/spells.md):
+
+     - 0x0e-0x10 恢復之光 / 治癒之風 / 痊癒之泉 and 0x21 鎮魂之歌, the heals:
+       8 for a target below a third of its maximum HP, 3 for one below half, 0
+       otherwise, doubled when bit 0 of the target's ai_behavior is set.  Both
+       thresholds are strict and both divisions truncate toward zero.  Current
+       HP and maximum HP are read UNSIGNED here, so a target whose HP word has
+       gone negative reads as the most hurt unit on the map.
+     - 0x11 封魔咒術: 6 for every target that knows at least one spell and
+       whose seal timer, status_timers[5], is clear.
+     - 0x12 腐毒術 and 0x13 麻痺術: 10 for every target not already carrying
+       that ailment, through fdps_score_targets_without_status.
+     - 0x14 神之祝福: three fdps_score_targets_without_status passes at 4 a
+       target over the three blessing timers, of which only the last -- the
+       dexterity one at record +0x24 -- reaches the total, because the original
+       stores each answer over the previous rather than adding it.
+     - 0x18 甦癒術: 6 for every target already carrying poison, paralysis or
+       the magic seal.
+     - every other id, the damaging spells: 0x18 when the target's current HP
+       is strictly below the spell's power word, 8 otherwise, multiplied by 1.5
+       as a double and truncated back to an int when the target's char_id is 0,
+       the protagonist 蘭迪斯.  Current HP is read SIGNED here.  The power word
+       is signed too and is negative for the attack-multiplier spells, so every
+       target of one of those scores the flat 8.  Targets of 0x0a 裂地術 and
+       0x0b 封神裂震 that fdps_unit_is_flying (unit.h) calls airborne are
+       skipped and contribute nothing.
+
+   The spell record is resolved through fdps_get_spell_record (table.h) on entry
+   whether or not the branch taken reads it, and each target index through
+   fdps_get_unit_record (unit.h) as the walk reaches it.  Nothing is range
+   checked: not spell_id, not the index bytes.  A target_count of 0 or below
+   scores 0 without reading the list, every loop test being signed and placed
+   before its body. */
+extern int fdps_score_targets_for_spell(int spell_id, int target_count,
+                                        unsigned char *target_unit_indices);
+#pragma aux fdps_score_targets_for_spell "*" parm caller [];
+
 /* How much is putting a status effect on these targets worth?  target_ids is
    target_count battle unit indices, one byte each; status_offset is the byte
    offset of the effect's timer inside struct fdps_unit_record -- 0x22, 0x23 and
