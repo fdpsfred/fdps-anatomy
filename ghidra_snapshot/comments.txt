@@ -5680,7 +5680,7 @@ Pool: fdps  [calls fdps_unit_collect_known_spells, fdps_get_unit_record and fdps
 Alignment padding: lea eax,[eax+0] / lea edx,[edx+0] / mov ebx,ebx multi-byte NOPs before 000282b0
 
 === 000282b0 [PLATE]
-Sets one bit in a per-unit flag bitfield: resolves a record from the handle and ORs mask[bit_index % 8] into the byte at record + 0x1a + bit_index / 8.
+Marks one spell as known by one unit: resolves a record from the unit index and ORs mask[spell_id % 8] into byte spell_id / 8 of struct fdps_unit_record's spells_known_bitmap, the five bytes at record +0x1a..0x1e (ticket 17). The second argument is a MAGICDAT.DAT spell id in 0x00..0x27, not an opaque bit number.
 Pool: fdps  [no Function ID hit in any library; calls and is called only by game code]
 Evidence: fid.watcom and fid.ail are both empty with zero candidates and the full hash is unique in the image. The only callee is fdps_get_unit_record at 0002d210, and all five call sites are game functions (one already named fdps_title_demo), so a third-party library object could not contain it. It reads the game-owned 8-byte mask table at 00027660 (01 02 04 08 10 20 40 80) and writes a fixed field offset inside a game record; it touches no CRT state, no FPU, no DOS service and no AIL data, and a 99-byte body with a full stack frame is not a linker island or shim.
 Name: fdps_ + snake_case for game code, describing the observed effect record[0x1a + n/8] |= 1 << (n % 8); no vendor symbol is involved.

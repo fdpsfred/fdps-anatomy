@@ -1574,6 +1574,213 @@ static void only_the_four_stat_words_are_written(void)
     CHECK_EQ(stat_of(LOOKUP_BASE_UNIT + 1, OFF_AP), 0);
 }
 
+/* fdps_set_flag_bit @ 000282b0.  Expected values come from the assembly -- the
+   OR byte ptr [EAX+0x1a],DL at 00028309 for the field, the signed /8 at
+   000282db and the IDIV by 8 at 000282f7 for the split, and the eight mask
+   bytes at 00027660 (01 02 04 08 10 20 40 80) -- from the ids the five call
+   sites pass (0x27 and 0x0b at 0002acdf and 0002aceb, 0x1d at 00026b85, 0x00
+   at 0003a41c), and from the record layout ticket 17 settled.  None of them is
+   read off the emitted C. */
+#define SPELL_BITMAP_OFFSET 0x1a
+#define SPELL_BITMAP_LEN 5
+
+/* Four records with the published base parked at the second of them, so an
+   index of -1 has a real record in front of it to land on. */
+#define FLAG_UNITS 4
+#define FLAG_BASE_UNIT 1
+
+static struct fdps_unit_record flag_units[FLAG_UNITS];
+
+/* Zero every record, including all five bitmap bytes, and publish the base at
+   the second record.  A record staged this way knows no spell at all. */
+static void stage_flags(void)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) flag_units;
+    for (i = 0; i < (int) sizeof(flag_units); i++) {
+        bytes[i] = 0;
+    }
+    data_fdps_map_unit_array_ptr =
+        (unsigned char *) &flag_units[FLAG_BASE_UNIT];
+}
+
+/* One bitmap byte of the record the given index names, reached through the
+   staged block rather than through the function under test. */
+static int bitmap_byte(int unit_index, int byte_index)
+{
+    return (int) flag_units[FLAG_BASE_UNIT + unit_index]
+        .spells_known_bitmap[byte_index];
+}
+
+/* The OR's displacement is the literal 0x1a and the ids reach 0x27, so the
+   field has to be the five bytes at record offset 0x1a for the C to write the
+   bytes the original writes.  A bitmap one byte shorter would leave spell 0x20
+   and up addressing the class and level bytes in C as well as in the original,
+   but for a different reason. */
+static void the_spell_bitmap_is_five_bytes_at_record_offset_0x1a(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, spells_known_bitmap),
+             SPELL_BITMAP_OFFSET);
+    CHECK_EQ((int) sizeof(flag_units[0].spells_known_bitmap),
+             SPELL_BITMAP_LEN);
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+}
+
+/* fdps_chapter_01_end passes 0 and 0 at 0003a41c: spell id 0 is bit 0 of the
+   first bitmap byte, and no other byte of the bitmap is touched. */
+static void spell_zero_sets_bit_zero_of_the_first_byte(void)
+{
+    stage_flags();
+    fdps_set_flag_bit(0, 0);
+
+    CHECK_EQ(bitmap_byte(0, 0), 0x01);
+    CHECK_EQ(bitmap_byte(0, 1), 0);
+    CHECK_EQ(bitmap_byte(0, 2), 0);
+    CHECK_EQ(bitmap_byte(0, 3), 0);
+    CHECK_EQ(bitmap_byte(0, 4), 0);
+}
+
+/* The eight bytes at 00027660 are 01 02 04 08 10 20 40 80, so the table is one
+   bit per entry in ascending order and entry n is the mask for bit n.  A table
+   in descending order, or one starting at 0x80, would set a different spell for
+   every id whose remainder is not 0 or 7. */
+static void the_mask_table_is_one_ascending_bit_per_entry(void)
+{
+    static unsigned char expected[8] = {
+        0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80
+    };
+    int spell_id;
+
+    for (spell_id = 0; spell_id < 8; spell_id++) {
+        stage_flags();
+        fdps_set_flag_bit(0, spell_id);
+        CHECK_EQ(bitmap_byte(0, 0), (int) expected[spell_id]);
+    }
+}
+
+/* The id splits at eight: the byte is id / 8 and the bit is id % 8, with no gap
+   between one byte's block and the next.  Spell 8 is bit 0 of the second byte
+   rather than anything in the first; 0x0b 封神裂震 and 0x27 萬神降臨 are the
+   two the title demo grants and 0x1d 轟神砲 is the one the item effect
+   teaches, and 0x27 is the last id the five bytes can hold. */
+static void the_byte_index_is_the_id_over_eight(void)
+{
+    stage_flags();
+    fdps_set_flag_bit(0, 8);
+    CHECK_EQ(bitmap_byte(0, 0), 0);
+    CHECK_EQ(bitmap_byte(0, 1), 0x01);
+
+    stage_flags();
+    fdps_set_flag_bit(0, 0x0b);
+    CHECK_EQ(bitmap_byte(0, 1), 0x08);
+
+    stage_flags();
+    fdps_set_flag_bit(0, 0x1d);
+    CHECK_EQ(bitmap_byte(0, 3), 0x20);
+
+    stage_flags();
+    fdps_set_flag_bit(0, 0x27);
+    CHECK_EQ(bitmap_byte(0, 0), 0);
+    CHECK_EQ(bitmap_byte(0, 1), 0);
+    CHECK_EQ(bitmap_byte(0, 2), 0);
+    CHECK_EQ(bitmap_byte(0, 3), 0);
+    CHECK_EQ(bitmap_byte(0, 4), 0x80);
+}
+
+/* The instruction is an OR, not a store: the spells the unit already knows in
+   that byte survive, and setting one it already knows leaves the byte alone.
+   A MOV of the mask would clear every other bit of the byte, which would cost
+   the unit up to seven spells each time it learnt one. */
+static void the_bit_is_ored_into_the_byte(void)
+{
+    stage_flags();
+    flag_units[FLAG_BASE_UNIT].spells_known_bitmap[0] = 0x0a;
+
+    fdps_set_flag_bit(0, 0);
+    CHECK_EQ(bitmap_byte(0, 0), 0x0b);
+
+    fdps_set_flag_bit(0, 1);
+    CHECK_EQ(bitmap_byte(0, 0), 0x0b);
+
+    fdps_set_flag_bit(0, 4);
+    CHECK_EQ(bitmap_byte(0, 0), 0x1b);
+}
+
+/* One byte of one record changes and nothing else in the block does: the whole
+   staged block is filled with a pattern, one spell is granted, and the scan
+   below finds exactly one byte that moved and it is at
+   record + 0x1a + id / 8.  This is the case that would catch a stride other
+   than 0x50, a field offset other than 0x1a and any write to a neighbouring
+   field. */
+static void only_the_one_bitmap_byte_is_written(void)
+{
+    unsigned char *bytes;
+    int changed_count;
+    int changed_offset;
+    int i;
+
+    stage_flags();
+    bytes = (unsigned char *) flag_units;
+    for (i = 0; i < (int) sizeof(flag_units); i++) {
+        bytes[i] = 0x11;
+    }
+
+    fdps_set_flag_bit(0, 0x0b);
+
+    changed_count = 0;
+    changed_offset = -1;
+    for (i = 0; i < (int) sizeof(flag_units); i++) {
+        if (bytes[i] != 0x11) {
+            changed_count++;
+            changed_offset = i;
+        }
+    }
+
+    CHECK_EQ(changed_count, 1);
+    CHECK_EQ(changed_offset,
+             FLAG_BASE_UNIT * 0x50 + SPELL_BITMAP_OFFSET + 1);
+    CHECK_EQ((int) bytes[changed_offset], 0x11 | 0x08);
+}
+
+/* The record is base + unit_index * 0x50, so each index grants its spell to its
+   own record and the signed multiply carries -1 to the record in front of the
+   published base.  Three units, three different ids, each landing in one place
+   only. */
+static void the_index_picks_the_record_that_learns(void)
+{
+    stage_flags();
+    fdps_set_flag_bit(0, 0);
+    fdps_set_flag_bit(1, 8);
+    fdps_set_flag_bit(-1, 3);
+
+    CHECK_EQ(bitmap_byte(0, 0), 0x01);
+    CHECK_EQ(bitmap_byte(0, 1), 0);
+    CHECK_EQ(bitmap_byte(1, 0), 0);
+    CHECK_EQ(bitmap_byte(1, 1), 0x01);
+    CHECK_EQ(bitmap_byte(-1, 0), 0x08);
+    CHECK_EQ(bitmap_byte(2, 0), 0);
+}
+
+/* The base is re-read through fdps_get_unit_record on every call rather than
+   cached, so a call made after the unit array has moved writes into the new
+   block and leaves the old one as it was. */
+static void the_learning_record_is_resolved_on_every_call(void)
+{
+    stage_flags();
+    fdps_set_flag_bit(0, 0);
+    CHECK_EQ(bitmap_byte(0, 0), 0x01);
+
+    data_fdps_map_unit_array_ptr =
+        (unsigned char *) &flag_units[FLAG_BASE_UNIT + 1];
+    fdps_set_flag_bit(0, 2);
+
+    CHECK_EQ((int) flag_units[FLAG_BASE_UNIT + 1].spells_known_bitmap[0],
+             0x04);
+    CHECK_EQ(bitmap_byte(0, 0), 0x01);
+}
+
 void run_unit_tests(void)
 {
     RUN_TEST(the_record_is_base_plus_index_times_stride);
@@ -1638,4 +1845,13 @@ void run_unit_tests(void)
     RUN_TEST(the_totals_are_truncated_by_the_word_store);
     RUN_TEST(the_index_selects_its_own_unit_record);
     RUN_TEST(only_the_four_stat_words_are_written);
+
+    RUN_TEST(the_spell_bitmap_is_five_bytes_at_record_offset_0x1a);
+    RUN_TEST(spell_zero_sets_bit_zero_of_the_first_byte);
+    RUN_TEST(the_mask_table_is_one_ascending_bit_per_entry);
+    RUN_TEST(the_byte_index_is_the_id_over_eight);
+    RUN_TEST(the_bit_is_ored_into_the_byte);
+    RUN_TEST(only_the_one_bitmap_byte_is_written);
+    RUN_TEST(the_index_picks_the_record_that_learns);
+    RUN_TEST(the_learning_record_is_resolved_on_every_call);
 }

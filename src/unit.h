@@ -152,4 +152,31 @@ extern void fdps_unit_face_target(int unit_index, int target_unit_index);
 extern void fdps_unit_recompute_combat_stats(int unit_index);
 #pragma aux fdps_unit_recompute_combat_stats "*" parm caller [];
 
+/* Marks one spell as known by one unit.  The bit it sets is bit spell_id % 8 of
+   struct fdps_unit_record's spells_known_bitmap[spell_id / 8] -- the five bytes
+   at record offset 0x1a -- which is the same id encoding
+   fdps_unit_collect_known_spells (unitstat.h) reads back, so an id set here
+   comes out of that walk unchanged.  spell_id is a MAGICDAT.DAT spell number,
+   0x00..0x27 (assets/spells.md), and those forty ids are exactly the bits the
+   five bytes hold.
+
+   The bit is ORed in: setting a spell the unit already knows changes nothing,
+   the unit's other spells are left standing, and no other field of the record
+   is written.  Nothing is returned.
+
+   Neither argument is checked.  unit_index is a position in the current
+   battle's unit array, resolved through fdps_get_unit_record on every call, so
+   a call after the array has moved writes into the new block; a spell_id of 40
+   or more writes past the bitmap into the record's race, class, level and
+   status timer bytes, and a negative one takes its mask from in front of the
+   function's own eight-entry table.  Every id the game passes is a literal or a
+   zero-extended table byte, so neither case arises in the shipped image.
+
+   The callers are the four ways a unit learns a spell: the level-up when the
+   class's level/spell table names one, the spell-teaching item effect, and the
+   two scripted grants -- the title demo's showcase party and the end of chapter
+   one. */
+extern void fdps_set_flag_bit(int unit_index, int spell_id);
+#pragma aux fdps_set_flag_bit "*" parm caller [];
+
 #endif

@@ -431,3 +431,68 @@ void fdps_unit_recompute_combat_stats(int unit_index)
     unit->hit = (short) hit_total;
     unit->ev = (short) evade_total;
 }
+
+/* Both halves of the split are the same 8, and the assembly spells them
+   differently: the byte is SAR EDX,0x1f / SHL EDX,0x3 / SBB EAX,EDX / SAR
+   EAX,0x3 at 000282db, the compiler's signed divide by eight, and the bit is
+   MOV EBX,0x8 / CDQ / IDIV EBX at 000282e9.  Eight is the bits in a bitmap
+   byte, so an id's block and its position inside that block come out of one
+   number and the ids run on across a byte boundary with no gap -- which is the
+   same arithmetic fdps_unit_collect_known_spells inverts when it turns a set
+   bit back into an id. */
+#define SPELL_BITS_PER_BITMAP_BYTE 8
+
+/* 000282b0.  Sets one bit of a unit's learned-spell bitmap.  Straight-line, no
+   compare and no branch: the record is resolved through fdps_get_unit_record
+   (PUSH EAX / CALL 0x0002d210 / ADD ESP,0x4 at 000282ca), the id is split into
+   a byte and a bit, and OR byte ptr [EAX + 0x1a],DL at 00028309 puts the bit
+   in.  Nothing is returned; EAX is left holding the record pointer and no
+   caller reads it -- all five call sites do ADD ESP,0x8 and then overwrite it.
+
+   The field is struct fdps_unit_record's spells_known_bitmap, the five bytes at
+   record offset 0x1a, which is the literal displacement on that OR.  The id
+   space it covers is therefore 0..39, and MAGICDAT.DAT holds exactly forty
+   spells numbered 0x00..0x27 with no gap (assets/spells.md).  The four literal
+   ids the image passes fill that span out: 0x27 萬神降臨 and 0x0b 封神裂震 in
+   fdps_title_demo at 0002acdf and 0002aceb, 0x1d 轟神砲 in
+   fdps_apply_item_effect_to_targets at 00026b85, and 0x00 業火 in
+   fdps_chapter_01_end at 0003a41c.  The fifth site,
+   fdps_unit_award_exp_and_level_up at 0001e0bd, passes an id it zero-extends
+   out of the second byte of a two-byte level/spell table entry after matching
+   the first byte against the unit's new level.
+
+   The eight mask values are a local array initialiser, not a global table: the
+   compiler expands it into the read-only eight bytes at 00027660 (01 02 04 08
+   10 20 40 80) and the MOVSD pair at 000282c4 that copies them onto the frame,
+   which is the same treatment the offsets table in
+   fdps_unit_select_status_icon gets.  Writing the mask as 1 << (id % 8)
+   computes the same value with a variable shift and no table.
+
+   It ORs one bit and touches nothing else, so an id already known stays known
+   and the unit's other spells survive.  Nothing bounds the id: an id of 40 or
+   more indexes past the five bitmap bytes into race, clazz, level and the
+   status timers, and a negative one reads the mask table off its front.
+   Neither is reachable through the five call sites -- four are non-negative
+   literals and the fifth is a zero-extended byte -- and a guard added here
+   would be behaviour the original does not have.
+
+   unit_index is a position in the current battle's unit array and is not range
+   checked; the record is resolved through fdps_get_unit_record, so a call after
+   the array has moved writes into the new block. */
+void fdps_set_flag_bit(int unit_index, int spell_id)
+{
+    /* 01 02 04 08 10 20 40 80 at 00027660, ascending bit order, so index n is
+       the mask for bit n. */
+    unsigned char bit_mask[8] = {
+        0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80
+    };
+    int bit_in_byte;
+    int byte_index;
+    struct fdps_unit_record *unit;
+
+    unit = fdps_get_unit_record(unit_index);
+    byte_index = spell_id / SPELL_BITS_PER_BITMAP_BYTE;
+    bit_in_byte = spell_id % SPELL_BITS_PER_BITMAP_BYTE;
+
+    unit->spells_known_bitmap[byte_index] |= bit_mask[bit_in_byte];
+}
