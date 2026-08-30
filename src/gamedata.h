@@ -59,6 +59,27 @@ extern int data_fdps_roster_member_count;
    does the header and cell arithmetic itself, so a reader casts. */
 extern unsigned char *data_fdps_battle_move_grid_ptr;
 
+/* 00069ce4 and 00069ce0.  Where the visible view window sits in the map's
+   world pixels: the world-pixel coordinate of the left edge and of the top
+   edge.  Everything that draws a map object converts its tile position with
+   tile * 0x18 - origin, so these two are the scroll position and the only
+   thing that moves the map under the camera.
+
+   Both are signed.  fdps_map_cursor_move_to clamps each one up to zero after
+   scrolling -- CMP dword ptr [0x00069ce0],0x0 / JGE at 0002d99a and the same
+   pair for x at 0002da15 -- and fdps_map_cursor_select_loop compares them
+   against 0x18 with JL at 0002b967; both are the signed jumps, and a reader
+   that widened them as unsigned would take the wrong branch the moment a
+   scroll subtraction went below zero.
+
+   They are written together but they are two globals, not a pair: every
+   writer names each one by its own absolute address and nothing indexes
+   across them (rebuild_info/pitfalls.md, contract B).  fdps_chapter_state_reset
+   zeroes both at 00022790 and 0002279a, and the cursor, cut-scene, item and
+   spell code moves them from there. */
+extern int data_fdps_battle_view_window_origin_x;
+extern int data_fdps_battle_view_window_origin_y;
+
 /* 00069c98 and 00069cb0.  The loaded scene's six layers, held as two parallel
    arrays of six byte pointers each: the tile map of layer n and the tileset
    attribute table of layer n.  The battle map is layer 0 and is the only one

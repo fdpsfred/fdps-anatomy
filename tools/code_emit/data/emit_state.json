@@ -439,6 +439,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0xb9"
+    },
+    "0001d5d0": {
+      "name": "fdps_battle_compute_unit_gauge_position",
+      "target": "gauge.c",
+      "body_size": "0xe3",
+      "status": "committed",
+      "emitted_against": "0xe3",
+      "rounds": 0
     }
   }
 }
