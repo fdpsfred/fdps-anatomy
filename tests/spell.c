@@ -1,7 +1,12 @@
 /* tests/spell.c -- cover for src/spell.c.
  *
- * Every expected value below is read off the assembly of fdps_spell_damage_unit
- * at 00028320 -- the XOR EAX,EAX / MOV AL byte loads at 0002833d, 00028358 and
+ * The file covers two functions and is in two halves: fdps_spell_damage_unit
+ * first, then fdps_spell_heal_unit from the banner comment further down, which
+ * carries its own account of where its figures come from.  The fixture, the
+ * three staged tables and the helpers are shared.
+ *
+ * Every expected value in the damage half is read off the assembly of
+ * fdps_spell_damage_unit at 00028320 -- the XOR EAX,EAX / MOV AL byte loads at 0002833d, 00028358 and
  * 000283e8 that zero extend the class code, the magic resistance complement
  * and the hit rate, the MOVSX word ptr [EAX] at 00028373 for the signed power,
  * the INC EAX at 00028349 that biases the class record index, the two
@@ -496,6 +501,180 @@ static void each_index_selects_its_own_record(void)
     CHECK_EQ(unit(TARGET)->hp_current, FULL_HP);
 }
 
+/* ---- fdps_spell_heal_unit @ 00028570 -------------------------------------
+ *
+ * The function has no branches: fetch the record at 00018bd0, MOVSX its power
+ * word at 0002858e, hand that to fdps_unit_apply_heal at 0002709c, return that
+ * call's own EAX.  So every figure below is the roll fdps_unit_apply_heal
+ * makes -- amount * 9 / 10 + (rand() % 100) * amount / 1000 -- and the cases
+ * are about which value reaches it and what comes back.
+ *
+ * A power of 10 or -10 keeps that roll deterministic for the same reason the
+ * damage cases above are deterministic: the spread term's numerator tops out
+ * at 990, which the signed divide by 1000 truncates towards zero whatever
+ * rand() returned.  So 10 rolls exactly 9 and -10 rolls exactly -9.
+ *
+ * Every heal case stages its spell with a hit rate of 0.  This function draws
+ * no hit roll at all -- there is no PRNG call in its body -- so a rate that
+ * would never land in fdps_spell_damage_unit changes nothing here, and using
+ * it says so. */
+
+/* A heal power that rolls to a whole number, and what it rolls to. */
+#define HEAL_POWER 10
+#define HEAL_ROLL 9
+
+/* A level that pays a round experience figure at a maximum HP of 100:
+   4 * 25 * 9 / 100 is 9. */
+#define HEALED_LEVEL 4
+#define EXPECTED_XP_CREDIT 9
+
+/* Portrait ids below 0x3c are the roster, the only ones that pay experience. */
+#define ROSTER_PORTRAIT_ID 0x00
+
+/* Two adjacent spell ids, so a record index off by one would be seen. */
+#define HEAL_SPELL 0x05
+#define NEXT_SPELL 0x06
+
+/* Half HP, so a heal has room to land without reaching the clamp. */
+#define WOUNDED_HP 50
+
+/* The power word goes to fdps_unit_apply_heal and the HP goes up by the nine
+   tenths of it that rolls. */
+static void a_heal_adds_the_rolled_power_to_the_units_hp(void)
+{
+    stage();
+    unit(TARGET)->hp_current = WOUNDED_HP;
+    stage_spell(HEAL_SPELL, HEAL_POWER, NEVER_HITS);
+
+    CHECK_EQ(fdps_spell_heal_unit(TARGET, HEAL_SPELL), HEAL_ROLL);
+    CHECK_EQ(unit(TARGET)->hp_current, WOUNDED_HP + HEAL_ROLL);
+    CHECK_EQ(unit(TARGET)->hp_max, FULL_HP);
+}
+
+/* MOVSX word ptr [EAX] at 0002858e, and no sign test between there and the
+   call.  A power of -10 takes HP off.  Read as an unsigned word it would be
+   65526, roll tens of thousands and clamp the unit to its maximum instead. */
+static void the_power_word_is_read_signed_on_the_heal_path(void)
+{
+    stage();
+    unit(TARGET)->hp_current = WOUNDED_HP;
+    stage_spell(HEAL_SPELL, -HEAL_POWER, NEVER_HITS);
+
+    CHECK_EQ(fdps_spell_heal_unit(TARGET, HEAL_SPELL), -HEAL_ROLL);
+    CHECK_EQ(unit(TARGET)->hp_current, WOUNDED_HP - HEAL_ROLL);
+}
+
+/* IMUL EAX,[EBP+0x14],0x7 at 00018bdc with no INC after it: the record is the
+   spell id's own, unlike the class table's biased lookup.  The neighbouring
+   record holds the negated power, so an index off by one in either direction
+   shows up as a heal that ran backwards. */
+static void the_spell_record_is_the_id_itself_with_no_bias(void)
+{
+    stage();
+    unit(TARGET)->hp_current = WOUNDED_HP;
+    stage_spell(HEAL_SPELL, HEAL_POWER, NEVER_HITS);
+    stage_spell(NEXT_SPELL, -HEAL_POWER, NEVER_HITS);
+
+    CHECK_EQ(fdps_spell_heal_unit(TARGET, HEAL_SPELL), HEAL_ROLL);
+    CHECK_EQ(unit(TARGET)->hp_current, WOUNDED_HP + HEAL_ROLL);
+    CHECK_EQ(fdps_spell_heal_unit(TARGET, NEXT_SPELL), -HEAL_ROLL);
+    CHECK_EQ(unit(TARGET)->hp_current, WOUNDED_HP);
+}
+
+/* MOV dword ptr [EBP + -0x4],EAX at 000285a4 stores the call's own answer and
+   the epilogue loads it straight back: the return is the roll
+   fdps_unit_apply_heal made, not the HP the record gained.  A unit two short
+   of its maximum gains two and still reports nine. */
+static void the_return_is_the_roll_and_not_the_hp_restored(void)
+{
+    stage();
+    unit(TARGET)->hp_current = FULL_HP - 2;
+    stage_spell(HEAL_SPELL, HEAL_POWER, NEVER_HITS);
+
+    CHECK_EQ(fdps_spell_heal_unit(TARGET, HEAL_SPELL), HEAL_ROLL);
+    CHECK_EQ(unit(TARGET)->hp_current, FULL_HP);
+}
+
+/* The unit index is forwarded unchanged: the heal lands on the record it names
+   and on no other. */
+static void the_heal_lands_on_the_unit_the_index_names(void)
+{
+    stage();
+    unit(TARGET)->hp_current = WOUNDED_HP;
+    unit(BYSTANDER)->hp_current = WOUNDED_HP;
+    unit(BYSTANDER)->hp_max = FULL_HP;
+    unit(CASTER)->hp_current = WOUNDED_HP;
+    unit(CASTER)->hp_max = FULL_HP;
+    stage_spell(HEAL_SPELL, HEAL_POWER, NEVER_HITS);
+
+    CHECK_EQ(fdps_spell_heal_unit(BYSTANDER, HEAL_SPELL), HEAL_ROLL);
+    CHECK_EQ(unit(BYSTANDER)->hp_current, WOUNDED_HP + HEAL_ROLL);
+    CHECK_EQ(unit(TARGET)->hp_current, WOUNDED_HP);
+    CHECK_EQ(unit(CASTER)->hp_current, WOUNDED_HP);
+}
+
+/* The forward really is to fdps_unit_apply_heal and not to a bare HP add: that
+   routine credits (level * 25 * HP restored) / maximum HP into the pending
+   battle-experience accumulator for a roster portrait id, and the figure
+   arrives.  4 * 25 * 9 / 100 is 9, from the IMUL,0x19 at 0002714b and the
+   IDIV by the maximum HP at 00027158. */
+static void the_heal_credits_battle_experience_through_the_shared_routine(void)
+{
+    stage();
+    unit(TARGET)->hp_current = WOUNDED_HP;
+    unit(TARGET)->level = HEALED_LEVEL;
+    unit(TARGET)->portrait_id = ROSTER_PORTRAIT_ID;
+    stage_spell(HEAL_SPELL, HEAL_POWER, NEVER_HITS);
+
+    data_fdps_battle_pending_xp_credit = 0;
+    CHECK_EQ(fdps_spell_heal_unit(TARGET, HEAL_SPELL), HEAL_ROLL);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, EXPECTED_XP_CREDIT);
+}
+
+/* Only the power word at record +0x00 is read.  The hit rate at +0x02, the
+   cast range flags at +0x03, the area at +0x04, the MP cost at +0x05 and the
+   target side at +0x06 all carry values that would block or divert the heal if
+   any of them were consulted, and the heal lands unchanged with the caster's
+   MP untouched. */
+static void nothing_of_the_record_but_the_power_is_consulted(void)
+{
+    stage();
+    unit(TARGET)->hp_current = WOUNDED_HP;
+    unit(TARGET)->mp_current = 30;
+    stage_spell(HEAL_SPELL, HEAL_POWER, NEVER_HITS);
+    spell_rec(HEAL_SPELL)->cast_range_flags = 0xff;
+    spell_rec(HEAL_SPELL)->area = 0xff;
+    spell_rec(HEAL_SPELL)->mp_cost = 0xff;
+    spell_rec(HEAL_SPELL)->target_side = 0xff;
+
+    CHECK_EQ(fdps_spell_heal_unit(TARGET, HEAL_SPELL), HEAL_ROLL);
+    CHECK_EQ(unit(TARGET)->hp_current, WOUNDED_HP + HEAL_ROLL);
+    CHECK_EQ(unit(TARGET)->mp_current, 30);
+    CHECK_EQ(spell_rec(HEAL_SPELL)->mp_cost, 0xff);
+}
+
+/* There is no PRNG call in this body, so the only draw a heal takes is the
+   spread term inside fdps_unit_apply_heal: exactly one, against the two a
+   landing fdps_spell_damage_unit takes. */
+static void a_heal_consumes_exactly_one_draw(void)
+{
+    int after_call;
+    int by_hand;
+
+    stage();
+    unit(TARGET)->hp_current = WOUNDED_HP;
+    stage_spell(HEAL_SPELL, HEAL_POWER, NEVER_HITS);
+
+    srand(PRNG_SEED);
+    fdps_spell_heal_unit(TARGET, HEAL_SPELL);
+    after_call = rand();
+
+    srand(PRNG_SEED);
+    rand();
+    by_hand = rand();
+    CHECK_EQ(after_call, by_hand);
+}
+
 void run_spell_tests(void)
 {
     RUN_TEST(the_record_layouts_match_the_offsets_read);
@@ -518,4 +697,13 @@ void run_spell_tests(void)
     RUN_TEST(each_exit_consumes_its_own_number_of_draws);
     RUN_TEST(nothing_but_the_targets_hp_is_written);
     RUN_TEST(each_index_selects_its_own_record);
+
+    RUN_TEST(a_heal_adds_the_rolled_power_to_the_units_hp);
+    RUN_TEST(the_power_word_is_read_signed_on_the_heal_path);
+    RUN_TEST(the_spell_record_is_the_id_itself_with_no_bias);
+    RUN_TEST(the_return_is_the_roll_and_not_the_hp_restored);
+    RUN_TEST(the_heal_lands_on_the_unit_the_index_names);
+    RUN_TEST(the_heal_credits_battle_experience_through_the_shared_routine);
+    RUN_TEST(nothing_of_the_record_but_the_power_is_consulted);
+    RUN_TEST(a_heal_consumes_exactly_one_draw);
 }

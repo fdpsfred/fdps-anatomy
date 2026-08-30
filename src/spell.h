@@ -50,4 +50,30 @@ extern int fdps_spell_damage_unit(int caster_unit_index, int target_unit_index,
                                   int spell_id);
 #pragma aux fdps_spell_damage_unit "*" parm caller [];
 
+/* Heals one battle unit by the power word of one spell record, and returns
+   what fdps_unit_apply_heal (unitstat.h) returned: the heal it rolled, which
+   is 90.0%-99.9% of the power and is NOT the HP actually restored -- a unit
+   near its maximum gains less than the number that comes back.
+
+   The whole of the function is that forward.  There is no hit roll against the
+   record's hit rate, no MP charged for the cast, and no check of which side
+   the record says the spell is aimed at, so a caller that wants any of those
+   has to do them itself.  The heal is unconditional and lands on whatever unit
+   index it is given.
+
+   The power word is signed and is passed through unchanged.  A spell whose
+   power is negative -- the eight special attacks store an attack-power
+   multiplier there as a negative percentage -- therefore takes HP off the unit
+   rather than putting it on, and fdps_unit_apply_heal has no lower clamp, so
+   the HP can go through zero.
+
+   unit_index is not range checked at either end and the bound is the caller's;
+   spell_id is a MAGICDAT.DAT record index, 0..0x27.
+
+   Nothing in the shipped image calls this.  Both live heal paths --
+   fdps_cast_spell_on_targets for a cast and fdps_apply_heal_to_targets for an
+   item -- call fdps_unit_apply_heal directly instead. */
+extern int fdps_spell_heal_unit(int unit_index, int spell_id);
+#pragma aux fdps_spell_heal_unit "*" parm caller [];
+
 #endif

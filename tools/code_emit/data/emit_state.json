@@ -665,6 +665,14 @@
       "status": "committed",
       "emitted_against": "0x133",
       "rounds": 0
+    },
+    "00028570": {
+      "name": "fdps_spell_heal_unit",
+      "target": "spell.c",
+      "body_size": "0x41",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x41"
     }
   }
 }

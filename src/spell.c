@@ -111,3 +111,43 @@ int fdps_spell_damage_unit(int caster_unit_index, int target_unit_index,
 
     return 0;
 }
+
+/* 00028570.  A spell's power fed straight into a unit as a heal.
+ *
+ * The frame is the plain -4s one: PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP,
+ * SUB ESP,0xc, the two arguments read from [EBP+0x14] and [EBP+0x18], and a
+ * bare RET, so the caller cleans up and the answer comes back in EAX.  This
+ * function's own two calls confirm the same convention from the other side --
+ * ADD ESP,0x4 after 00018bd0 and ADD ESP,0x8 after 00027070.
+ *
+ * There are no branches at all: fetch the record, widen its power word, hand
+ * that to fdps_unit_apply_heal, return what that returned.  The value at
+ * [EBP-0x4] that the epilogue loads into EAX is the CALL's own EAX stored at
+ * 000285a4, so the return really is the callee's and not a recomputation.
+ *
+ * The power word is read with MOVSX word ptr [EAX] at 0002858e and passed
+ * through with no sign test.  Eight spells store that field negative -- it
+ * doubles as an attack-power multiplier in percent for the special attacks
+ * (assets/tables/spells.md) -- and fdps_unit_apply_heal has no floor, so one
+ * of those ids arriving here takes HP off instead of putting it on.  That is
+ * what the original does; there is no guard to restore.
+ *
+ * Nothing else of the record is looked at: not the hit rate at +0x02, not the
+ * MP cost at +0x05 (fdps_spell_deduct_mp_cost is the one that spends it) and
+ * not the target side at +0x06.  spell_id is used for nothing but selecting
+ * the record.
+ *
+ * Nothing in the image reaches this entry -- no call, no data word, no other
+ * reference.  The two live heal paths call fdps_unit_apply_heal themselves, so
+ * this is an unused packaged form of that step; its damage counterpart
+ * fdps_spell_damage_unit above has two callers. */
+int fdps_spell_heal_unit(int unit_index, int spell_id)
+{
+    struct fdps_spell_effect *spell;
+    int heal_power;
+
+    spell = fdps_get_spell_record(spell_id);
+    heal_power = spell->power;
+
+    return fdps_unit_apply_heal(unit_index, heal_power);
+}
