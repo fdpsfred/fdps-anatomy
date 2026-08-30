@@ -399,6 +399,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x64"
+    },
+    "000132b0": {
+      "name": "fdps_score_targets_for_item",
+      "target": "aiscore.c",
+      "body_size": "0x162",
+      "status": "committed",
+      "rounds": 1,
+      "emitted_against": "0x162"
     }
   }
 }

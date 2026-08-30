@@ -670,7 +670,7 @@ Returns:
 Pool: fdps  [calls the game routines fdps_get_item_record and fdps_get_unit_record and indexes game item/unit record fields; no Function ID hit in either library set]
 
 Rebuild note:
-The two branches read the same current-HP word at unit record+0x40 with different signedness -- MOVSX in the heal branch (00013329), MOV AX + AND 0xffff in the damage branch (000133dc) -- while the item's use_amount at +0x0e is always sign-extended (MOVSX at 000132d5). Declaring HP once as a signed short and writing both comparisons as plain field accesses reproduces the heal branch but not the damage branch: a negative HP would score 8 (wounded) instead of 0x12 (killed). The damage branch has to compare (unsigned short)hp against the signed use_amount.
+The two branches read the same current-HP word at unit record+0x40 with different signedness -- MOVSX in the heal branch (00013329), MOV AX + AND 0xffff in the damage branch (000133dc) -- while the item's use_amount at +0x0e is always sign-extended (MOVSX at 000132d5). Declaring HP once as a signed short and writing both comparisons as plain field accesses reproduces the heal branch but not the damage branch: a negative HP would score 0x12 (killed) instead of 8 (wounded). The damage branch has to compare (unsigned short)hp against the signed use_amount.
 
 === 00013412 [EOL]
 Watcom alignment padding: lea eax,[eax+0] / lea edx,[edx+0] / mov eax,eax (14 bytes to 16-byte boundary)
