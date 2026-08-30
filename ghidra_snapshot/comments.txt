@@ -5165,19 +5165,19 @@ Alignment padding: two 6-byte lea-form NOPs aligning FUN_00025d20 to 32 bytes.
 Adds one item to a unit's inventory, filling the first empty slot.
 
 Algorithm:
-Calls fdps_get_unit_record(unit_index) to resolve the 0x50-byte unit record in the array based at DAT_00069cd8, then walks the eight 2-byte inventory entries that start at record offset 0x0a, i from 0 to 7. For each entry it forms the address record + i*2 + 0x0a and tests bit 7 of that flag byte; bit 7 set means the slot holds nothing, the same test fdps_unit_item_count uses. At the first such entry it stores 0 over the whole flag byte -- clearing bit 7 so the slot counts as occupied and bit 6 so the item is not marked equipped -- writes item_id into the entry's second byte, the byte fdps_unit_get_item_id returns, and returns 1. If all eight entries are occupied the loop runs out and it returns -1 without touching the record. Neither the unit index nor the item id is range-checked, and the slot is taken as found: nothing is shifted or compacted (removal is the side that compacts, in FUN_00025cc0).
+Calls fdps_get_unit_record(unit_index) to resolve the 0x50-byte unit record in the array based at DAT_00069cd8, then walks the eight 2-byte inventory entries that start at record offset 0x0a, i from 0 to 7. For each entry it forms the address record + i*2 + 0x0a and tests bit 7 of that flag byte; bit 7 set means the slot holds nothing, the same test fdps_unit_item_count uses. At the first such entry it stores 0 over the whole flag byte -- clearing bit 7 so the slot counts as occupied and bit 6 so the item is not marked equipped -- writes item_id into the entry's second byte, the byte fdps_unit_get_item_id returns, and returns 1. If all eight entries are occupied the loop runs out and it returns -1 without touching the record. Neither the unit index nor the item id is range-checked, and the slot is taken as found: nothing is shifted or compacted (removal is the side that compacts, in fdps_unit_remove_item).
 
 Parameters:
   unit_index -- index into the unit record array at DAT_00069cd8, the same index fdps_get_unit_record takes; the unit that is to receive the item.
-  item_id -- item id to store, 0..0xff; only the low byte of the pushed argument is read. Comes from a shop line (FUN_00033b80), another unit's inventory slot (FUN_00034210), a map cell's contents (FUN_000184f0) or a script record's operand (FUN_0001d990).
+  item_id -- item id to store, 0..0xff; only the low byte of the pushed argument is read. Comes from a shop line (fdps_shop_buy_loop), another unit's inventory slot (fdps_village_item_transfer_loop), a map cell's contents (fdps_battle_search_cell_at_cursor) or a script record's operand (fdps_run_death_scripts).
 
 Returns:
-1 when the item was stored, -1 when all eight inventory slots were already full. FUN_000184f0 and FUN_0001d990 branch on -1 to withhold the reward or to offer the player a replacement; the other callers ignore the result.
+1 when the item was stored, -1 when all eight inventory slots were already full. fdps_battle_search_cell_at_cursor and fdps_run_death_scripts branch on -1 to withhold the reward or to offer the player a replacement; the other callers ignore the result.
 
-Pool: fdps  [no Function ID hit in either library set; its only callee is the game routine fdps_get_unit_record and all 21 references are direct calls from game code]
+Pool: fdps  [no Function ID hit in either library set; its only callee is the game routine fdps_get_unit_record and its references are 27 direct calls from 21 distinct functions in game code]
 
 Rebuild note:
-Filling a slot means writing 0 over the entry's flag byte, not just storing the id: the obvious C, record[0x0a + i*2 + 1] = item_id with the flag byte left alone, leaves bit 7 set, so fdps_unit_item_count keeps counting the slot as empty and the next add overwrites the item. Two more things a rewrite must copy verbatim: the empty test is flags & 0x80, not flags == 0x80, and the failure return is -1, not 0 -- FUN_000184f0 tests the result with CMP EAX,-1.
+Filling a slot means writing 0 over the entry's flag byte, not just storing the id: the obvious C, record[0x0a + i*2 + 1] = item_id with the flag byte left alone, leaves bit 7 set, so fdps_unit_item_count keeps counting the slot as empty and the next add overwrites the item. Two more things a rewrite must copy verbatim: the empty test is flags & 0x80, not flags == 0x80, and the failure return is -1, not 0 -- fdps_battle_search_cell_at_cursor tests the result with CMP EAX,-1.
 
 === 00025d9b [EOL]
 Alignment padding: lea eax,[eax+0] + mov ecx,ecx, aligning FUN_00025da0 to 16 bytes.

@@ -126,4 +126,37 @@ extern int fdps_unit_item_count(int unit_index);
 extern void fdps_unit_remove_item(int unit_index, int slot);
 #pragma aux fdps_unit_remove_item "*" parm caller [];
 
+/* Give unit `unit_index` the item `item_id`, in the first of its eight
+   inventory entries that is empty.  Returns 1 when the item was stored and -1
+   when all eight entries were already occupied, in which case not a byte of the
+   record is written and the item is simply lost.  Both answers are acted on:
+   fdps_battle_search_cell_at_cursor tests the result with CMP EAX,-0x1 before
+   it declares the cell's contents picked up, and fdps_run_death_scripts does
+   the same before it hands over a dead unit's bequest; the shop, the village
+   transfer and the chapter events ignore the result, having already asked
+   fdps_unit_item_count whether there was room.
+
+   "Empty" is the flag bit 0x80 of the entry, tested as a mask -- an entry
+   carrying any other bits alongside 0x80 is still empty, and one carrying only
+   0x40 or nothing at all is occupied.  The scan does not stop at the first
+   occupied entry, so an item lands in a hole left in the middle of an
+   inventory rather than at the end.
+
+   Taking the slot writes 0 over the WHOLE flag byte and then the id byte
+   beside it.  Zeroing the flag byte is what makes the slot count as occupied
+   (bit 0x80 goes) and the item unequipped (bit 0x40 goes); the entry's previous
+   flags are not preserved in any part.  Nothing is shifted or compacted --
+   fdps_unit_remove_item is the side that keeps the entries packed.
+
+   Only the low byte of item_id reaches the record: the body reads the argument
+   with MOV AL,byte ptr [EBP+0x18], so an id of 0x1ff stores 0xff.  Every call
+   site pushes a full dword, five of them a literal item id.
+
+   Neither argument is range checked.  unit_index is a position in the current
+   battle's unit array on the battle side and a party member index on the
+   village and shop side; the record is resolved through fdps_get_unit_record,
+   so a call after the array has moved writes into the new block. */
+extern int fdps_unit_add_item(int unit_index, int item_id);
+#pragma aux fdps_unit_add_item "*" parm caller [];
+
 #endif

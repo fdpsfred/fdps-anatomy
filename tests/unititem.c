@@ -43,6 +43,17 @@
  * 0 through 7, which is the whole range the callers reach; a slot above 7 hands
  * memmove a negative and therefore huge byte count and is not staged here.
  *
+ * The fdps_unit_add_item cases take theirs from the assembly at 00025d20 --
+ * CMP dword ptr [EBP-0x8],0x8 / JL for the eight entries, ADD EAX,EAX / ADD
+ * EAX,[EBP-0x10] / ADD EAX,0xa for the entry address, AND AL,0x80 / AND
+ * EAX,0xff / TEST EAX,EAX / JZ for the empty test with the JZ going to the
+ * increment at 00025d4a, MOV byte ptr [EDX],0x0 for the flag store and MOV
+ * AL,byte ptr [EBP+0x18] / MOV byte ptr [EDX+0x1],AL for the id store, and the
+ * two results 0x1 and 0xffffffff -- and from the same record layouts.  The -1
+ * answer is the one fdps_battle_search_cell_at_cursor tests with CMP EAX,-0x1
+ * at 00018683.  Those cases stage the unit block alone except where they check
+ * that a filled slot stops being equipped, which needs an item record.
+ *
  * The item block is published one record PAST the start of its storage, so
  * record -1 exists and is addressable.  That is what lets the unsigned read of
  * the id byte be told apart from a signed one: id 0xff must reach record 255
@@ -897,6 +908,297 @@ static void remove_item_resolves_the_record_on_every_call(void)
     CHECK_EQ(unit_block[UNIT_RECORD_STRIDE + OFF_INVENTORY + 1], 0x81);
 }
 
+/* Marks all eight entries of one unit empty.  stage() leaves every flag byte
+   zero, which is eight OCCUPIED entries as far as the 0x80 test is concerned,
+   so the add cases have to raise the empty bit themselves. */
+static void empty_inventory(int unit_index)
+{
+    int slot_index;
+
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(unit_index, slot_index, FLAG_EMPTY, 0);
+    }
+}
+
+/* fdps_unit_add_item at 00025d20.  The first entry whose flag byte carries
+   0x80 takes the item: with entries 0 and 1 occupied the item lands in entry 2,
+   the answer is 1, and the entries above it are left empty -- the scan stops at
+   the first one it fills, MOV [EBP-0x4],0x1 / JMP to the epilogue. */
+static void add_item_fills_the_first_empty_entry(void)
+{
+    stage();
+    empty_inventory(0);
+    set_entry(0, 0, FLAG_CARRIED, 0x11);
+    set_entry(0, 1, FLAG_EQUIPPED, 0x12);
+
+    CHECK_EQ(fdps_unit_add_item(0, 0x2a), 1);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 4], 0);
+    CHECK_EQ(fdps_unit_get_item_id(0, 2), 0x2a);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], FLAG_CARRIED);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 2], FLAG_EQUIPPED);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 6], FLAG_EMPTY);
+    CHECK_EQ(fdps_unit_item_count(0), 3);
+}
+
+/* The rebuild note.  MOV byte ptr [EDX],0x0 puts a plain zero over the WHOLE
+   flag byte, so both the empty bit and the equipped bit go: an entry staged
+   0xc0 -- empty and equipped at once -- comes out at 0, which is what makes
+   fdps_unit_item_count count the slot and fdps_unit_find_equipped_slot pass it
+   over.  Writing only the id byte and leaving the flags alone, which is the
+   obvious C, would leave 0xc0 there and count zero items. */
+static void add_item_zeroes_the_whole_flag_byte(void)
+{
+    stage();
+    empty_inventory(0);
+    set_item_type(10, 0x01);
+    set_entry(0, 0, 0xc0, 0);
+
+    CHECK_EQ(fdps_unit_add_item(0, 10), 1);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 0], 0);
+    CHECK_EQ(fdps_unit_item_count(0), 1);
+    CHECK_EQ(fdps_unit_find_equipped_slot(0, 0), -1);
+}
+
+/* AND AL,0x80 is a mask and not a compare.  Entries carrying 0x40, 0x00 and
+   0x7f are all occupied and are passed over; the first entry carrying 0x80 in
+   among other bits -- 0x81 here -- is the one that takes the item, and the
+   entries below it keep their bytes. */
+static void add_item_tests_bit_0x80_as_a_mask(void)
+{
+    stage();
+    set_entry(0, 0, FLAG_EQUIPPED, 0x11);
+    set_entry(0, 1, FLAG_CARRIED, 0x12);
+    set_entry(0, 2, 0x7f, 0x13);
+    set_entry(0, 3, 0x81, 0x14);
+    set_entry(0, 4, 0xff, 0x15);
+    set_entry(0, 5, FLAG_EMPTY, 0x16);
+    set_entry(0, 6, FLAG_EMPTY, 0x17);
+    set_entry(0, 7, FLAG_EMPTY, 0x18);
+
+    CHECK_EQ(fdps_unit_add_item(0, 0x33), 1);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 6], 0);
+    CHECK_EQ(fdps_unit_get_item_id(0, 3), 0x33);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 4], 0x7f);
+    CHECK_EQ(fdps_unit_get_item_id(0, 2), 0x13);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 8], 0xff);
+}
+
+/* The JZ at 00025d6e goes to the increment and not out of the loop, so an
+   occupied entry does not end the scan: an item dropped into an inventory whose
+   only free entry is a hole in the middle lands in the hole, and the entries
+   above the hole keep their own ids.  Nothing is shifted. */
+static void add_item_fills_a_hole_rather_than_the_end(void)
+{
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_CARRIED, 0x40 + slot_index);
+    }
+    set_entry(0, 5, FLAG_EMPTY, 0x45);
+
+    CHECK_EQ(fdps_unit_add_item(0, 0x99), 1);
+
+    CHECK_EQ(fdps_unit_get_item_id(0, 5), 0x99);
+    CHECK_EQ(fdps_unit_get_item_id(0, 4), 0x44);
+    CHECK_EQ(fdps_unit_get_item_id(0, 6), 0x46);
+    CHECK_EQ(fdps_unit_get_item_id(0, 7), 0x47);
+    CHECK_EQ(fdps_unit_item_count(0), INVENTORY_ENTRY_COUNT);
+}
+
+/* Falling out of the loop stores 0xffffffff and nothing else happens: a unit
+   whose eight entries are all occupied answers -1 -- the value
+   fdps_battle_search_cell_at_cursor tests with CMP EAX,-0x1 -- and not one byte
+   of the block differs afterwards.  A staged record is exactly this case, since
+   every flag byte is zero. */
+static void add_item_answers_minus_one_when_full_and_writes_nothing(void)
+{
+    static unsigned char block_before[sizeof(unit_block)];
+    int i;
+    int diffs;
+
+    stage();
+    for (i = 0; i < INVENTORY_ENTRY_COUNT; i++) {
+        set_entry(0, i, FLAG_CARRIED, 0x50 + i);
+    }
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        block_before[i] = unit_block[i];
+    }
+
+    CHECK_EQ(fdps_unit_add_item(0, 0x55), -1);
+
+    diffs = 0;
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        if (unit_block[i] != block_before[i]) {
+            diffs++;
+        }
+    }
+    CHECK_EQ(diffs, 0);
+}
+
+/* MOV AL,byte ptr [EBP+0x18]: one byte of the pushed argument reaches the
+   record and no more, so 0x1ff stores 0xff and -1 stores 0xff as well, while
+   0x100 stores 0.  Every call site pushes a full dword, so the truncation is
+   the callee's. */
+static void add_item_stores_only_the_low_byte_of_the_id(void)
+{
+    stage();
+    empty_inventory(0);
+
+    CHECK_EQ(fdps_unit_add_item(0, 0x1ff), 1);
+    CHECK_EQ(fdps_unit_add_item(0, -1), 1);
+    CHECK_EQ(fdps_unit_add_item(0, 0x100), 1);
+    CHECK_EQ(fdps_unit_add_item(0, 0x2a), 1);
+
+    CHECK_EQ(fdps_unit_get_item_id(0, 0), 0xff);
+    CHECK_EQ(fdps_unit_get_item_id(0, 1), 0xff);
+    CHECK_EQ(fdps_unit_get_item_id(0, 2), 0x00);
+    CHECK_EQ(fdps_unit_get_item_id(0, 3), 0x2a);
+}
+
+/* CMP dword ptr [EBP-0x8],0x8 / JL: eight entries and no more.  The last entry
+   is inside the scan and takes the item; an empty pair written two entries past
+   the end of the field -- record offsets 0x1a and 0x1c, inside the record and
+   past the inventory -- is not reached, so the call answers -1 and leaves those
+   bytes as they were. */
+static void add_item_scans_eight_entries_and_no_more(void)
+{
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_CARRIED, 0x60 + slot_index);
+    }
+    set_entry(0, 7, FLAG_EMPTY, 0x67);
+    CHECK_EQ(fdps_unit_add_item(0, 0x77), 1);
+    CHECK_EQ(fdps_unit_get_item_id(0, 7), 0x77);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 14], 0);
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_CARRIED, 0x60 + slot_index);
+    }
+    set_entry(0, 8, FLAG_EMPTY, 0);
+    set_entry(0, 9, FLAG_EMPTY, 0);
+    CHECK_EQ(fdps_unit_add_item(0, 0x77), -1);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 16], FLAG_EMPTY);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 18], FLAG_EMPTY);
+}
+
+/* The two stores are the entry's own two bytes and nothing else: with the whole
+   block filled with a pattern and one entry of unit 1 marked empty, exactly
+   record offsets 0x12 and 0x13 of that record differ afterwards. */
+static void add_item_writes_only_the_two_bytes_of_the_slot(void)
+{
+    static unsigned char block_before[sizeof(unit_block)];
+    int i;
+    int diffs;
+    int flag_byte;
+    int id_byte;
+
+    stage();
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        unit_block[i] = (unsigned char) (i + 1);
+    }
+    set_entry(1, 4, FLAG_EMPTY, 0);
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        block_before[i] = unit_block[i];
+    }
+
+    CHECK_EQ(fdps_unit_add_item(1, 0x99), 1);
+
+    flag_byte = UNIT_RECORD_STRIDE + OFF_INVENTORY + 8;
+    id_byte = flag_byte + 1;
+    CHECK_EQ(unit_block[flag_byte], 0);
+    CHECK_EQ(unit_block[id_byte], 0x99);
+
+    diffs = 0;
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        if (i == flag_byte || i == id_byte) {
+            continue;
+        }
+        if (unit_block[i] != block_before[i]) {
+            diffs++;
+        }
+    }
+    CHECK_EQ(diffs, 0);
+}
+
+/* MOV EAX,[EBP+0x14] / PUSH EAX / CALL fdps_get_unit_record: the first argument
+   picks the record that is written, so the neighbouring units keep their empty
+   inventories.  The multiply inside fdps_get_unit_record is signed, so index -1
+   reaches the record in front of the published base. */
+static void add_item_writes_the_record_the_index_names(void)
+{
+    int unit_index;
+
+    stage();
+    for (unit_index = 0; unit_index < STAGE_UNITS; unit_index++) {
+        empty_inventory(unit_index);
+    }
+
+    CHECK_EQ(fdps_unit_add_item(1, 0x61), 1);
+    CHECK_EQ(fdps_unit_item_count(0), 0);
+    CHECK_EQ(fdps_unit_item_count(1), 1);
+    CHECK_EQ(fdps_unit_item_count(2), 0);
+    CHECK_EQ(fdps_unit_get_item_id(1, 0), 0x61);
+
+    data_fdps_map_unit_array_ptr = unit_slot(2);
+    CHECK_EQ(fdps_unit_add_item(-1, 0x62), 1);
+    data_fdps_map_unit_array_ptr = unit_block;
+    CHECK_EQ(fdps_unit_get_item_id(1, 1), 0x62);
+    CHECK_EQ(fdps_unit_item_count(1), 2);
+}
+
+/* The base global is read through fdps_get_unit_record on every call rather
+   than cached, so republishing it between two identical calls sends the second
+   item to a different record. */
+static void add_item_resolves_the_record_on_every_call(void)
+{
+    stage();
+    empty_inventory(0);
+    empty_inventory(1);
+
+    CHECK_EQ(fdps_unit_add_item(0, 0x71), 1);
+
+    data_fdps_map_unit_array_ptr = unit_slot(1);
+    CHECK_EQ(fdps_unit_add_item(0, 0x72), 1);
+
+    data_fdps_map_unit_array_ptr = unit_block;
+    CHECK_EQ(fdps_unit_get_item_id(0, 0), 0x71);
+    CHECK_EQ(fdps_unit_get_item_id(1, 0), 0x72);
+    CHECK_EQ(fdps_unit_item_count(0), 1);
+    CHECK_EQ(fdps_unit_item_count(1), 1);
+}
+
+/* The pairing the callers rely on: a full inventory refuses, one removal makes
+   room, and the item then lands in the entry the removal marked empty -- the
+   last one, since fdps_unit_remove_item packs the survivors down.  The eight
+   entries are occupied again afterwards, which is the count the shop and the
+   chapter events branch on. */
+static void add_item_takes_the_slot_a_removal_freed(void)
+{
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_CARRIED, 0x30 + slot_index);
+    }
+
+    CHECK_EQ(fdps_unit_add_item(0, 0x99), -1);
+
+    fdps_unit_remove_item(0, 2);
+    CHECK_EQ(fdps_unit_item_count(0), INVENTORY_ENTRY_COUNT - 1);
+
+    CHECK_EQ(fdps_unit_add_item(0, 0x99), 1);
+    CHECK_EQ(fdps_unit_get_item_id(0, 7), 0x99);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 14], 0);
+    CHECK_EQ(fdps_unit_item_count(0), INVENTORY_ENTRY_COUNT);
+}
+
 void run_unititem_tests(void)
 {
     RUN_TEST(the_two_record_layouts_match_the_strides);
@@ -937,4 +1239,15 @@ void run_unititem_tests(void)
     RUN_TEST(remove_item_writes_only_inside_the_inventory_field);
     RUN_TEST(remove_item_edits_the_record_the_index_names);
     RUN_TEST(remove_item_resolves_the_record_on_every_call);
+    RUN_TEST(add_item_fills_the_first_empty_entry);
+    RUN_TEST(add_item_zeroes_the_whole_flag_byte);
+    RUN_TEST(add_item_tests_bit_0x80_as_a_mask);
+    RUN_TEST(add_item_fills_a_hole_rather_than_the_end);
+    RUN_TEST(add_item_answers_minus_one_when_full_and_writes_nothing);
+    RUN_TEST(add_item_stores_only_the_low_byte_of_the_id);
+    RUN_TEST(add_item_scans_eight_entries_and_no_more);
+    RUN_TEST(add_item_writes_only_the_two_bytes_of_the_slot);
+    RUN_TEST(add_item_writes_the_record_the_index_names);
+    RUN_TEST(add_item_resolves_the_record_on_every_call);
+    RUN_TEST(add_item_takes_the_slot_a_removal_freed);
 }

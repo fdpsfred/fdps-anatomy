@@ -214,3 +214,47 @@ void fdps_unit_remove_item(int unit_index, int slot)
     unit->inventory_slots[(INVENTORY_ENTRY_COUNT - 1) * 2] =
         INVENTORY_FLAG_EMPTY;
 }
+
+/* 00025d20.  Puts one item in the first empty inventory entry.  One counted
+   loop, i in [EBP-0x8] against the literal 8 with JL at 00025d42, and the
+   record resolved once into [EBP-0x10] before it starts.
+
+   The entry address is formed exactly as the other three scans form it -- MOV
+   EAX,[EBP-0x8] / ADD EAX,EAX / ADD EAX,[EBP-0x10] / ADD EAX,0xa at 00025d52 --
+   so the entries are the 2-byte pairs of inventory_slots[] again.
+
+   The empty test is AND AL,0x80 / AND EAX,0xff / TEST EAX,EAX / JZ, the same
+   mask fdps_unit_item_count uses and not a compare: an entry carrying other
+   bits alongside 0x80 is still empty, and the JZ falls through to the increment
+   at 00025d4a, so an occupied entry in the middle does not end the scan.
+
+   Taking the slot is two stores.  MOV byte ptr [EDX],0x0 at 00025d73 puts a
+   plain zero over the whole flag byte -- that is what clears the empty bit so
+   the slot counts, and the equipped bit with it -- and MOV AL,byte ptr
+   [EBP+0x18] / MOV byte ptr [EDX+0x1],AL at 00025d76 writes the id beside it,
+   reading one byte of the pushed argument and no more.  Then MOV [EBP-0x4],0x1
+   and out; nothing else in the record is touched and no entry is moved.
+
+   Falling out of the loop stores 0xffffffff instead, and that path writes
+   nothing at all.  Neither argument is range checked. */
+int fdps_unit_add_item(int unit_index, int item_id)
+{
+    struct fdps_unit_record *unit;
+    unsigned char *inventory_entry;
+    int slot_index;
+
+    unit = fdps_get_unit_record(unit_index);
+
+    for (slot_index = 0;
+         slot_index < INVENTORY_ENTRY_COUNT;
+         slot_index++) {
+        inventory_entry = &unit->inventory_slots[slot_index * 2];
+        if ((inventory_entry[0] & INVENTORY_FLAG_EMPTY) != 0) {
+            inventory_entry[0] = 0;
+            inventory_entry[1] = (unsigned char) item_id;
+            return 1;
+        }
+    }
+
+    return -1;
+}
