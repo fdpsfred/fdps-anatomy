@@ -79,6 +79,51 @@ emitter 沒錯。reviewer 也沒錯。錯的是那個 BLOCKING 標籤。ADR-0001
 
 沒有 node 可以做語法檢查（PATH 上沒有，常見安裝位置也翻過了），只好做結構檢查代替：`phase()` 呼叫與 meta 宣告的 phase 集合完全一致、六個已刪識別字沒有殘留參照、括號平衡與 HEAD 版本一模一樣（braces -1 是既有的，字串裡有個 `}`）。這不等於 parse，真正的驗證要靠實跑一批。
 
+## 實跑撞到的兩層行尾問題
+
+拆完之後送出 5 支的驗證批次，第一次被擋在 parse error：`Unexpected token (425:17)`，指著我新加的那條「判定檔記錄發現不立法」。RULES 是 template literal，而我在裡面寫了 `` `needs` ``——反引號在那裡是結束符號。改成 the needs field 就過了。補了一支反引號平衡檢查當代用品，因為這台沒有 node 可以在送出前 parse。
+
+第二次被擋在更莫名其妙的地方：
+
+```
+script contains control characters that would be hidden in the approval dialog
+```
+
+掃了一遍，檔案裡連一個 `< 0x20` 的字元都沒有（除了 `\r\n\t`）。卡了一下才想到去比對行尾：工作區是 1678 個 CRLF、0 個 LF，而版本庫裡是 0 個 CRLF、1678 個 LF。`core.autocrlf` 是 true，我前面為了復原編碼事故跑了一次 `git checkout --`，checkout 就把它寫成 CRLF 了；我的 Python 腳本用 `newline=''` 忠實保留，所以一路帶著。Workflow 讀的是工作區那份，`\r` 就是它說的 control character。
+
+換句話說：**同一份 commit 過的腳本，在磁碟上跑不動。** 而且錯誤訊息不指檔案、不提行尾，跟原因之間隔了兩層。
+
+轉成 LF 之後 `git status` 還是顯示 modified，`git diff` 卻是空的——那只是 index 的 stat 過期。真正該做的是在 `.gitattributes` 釘住 `tools/**/*.js text eol=lf`，比照那個檔裡既有的三條（Ghidra 快照、fdps-data、攻略站鏡像）的同一個理由。不釘的話，任何人在 Windows 上 clone 這個 repo，拿到的 workflow 腳本都是跑不動的。
+
+## code review 抓到我兩則寫錯的判讀
+
+跑完 review，六項發現，其中兩項就在標題寫著「更正錯誤判讀」的那個 commit 裡：
+
+**因果寫反。** `src/saf.c` 我寫成「宣告 `_inline` 來追原始碼字面會有產出 CALL 的風險」。相反：宣告 `_inline` 正是讓它不產生 CALL 的東西，呼叫而**不**宣告才會多一條 CALL。同一批的 `movegrid.c` 反而寫對了，兩個檔互相矛盾。
+
+**測試過度一般化。** 我把「寬度不符」寫成三處展開共通的決定性證據。reviewer 去查了 `000144e0`，說它的參數是指標。自己驗一次，確實：
+
+```
+000144ec: MOV EAX,dword ptr [EBP + 0x14]    <- 完整 dword
+000144ef: MOV AL,byte ptr [EAX]             <- 讀的是指標指向的內容
+```
+
+那個 byte 讀根本不是讀參數槽。寬度不符只在形參型別比 dword 窄的時候才看得到，也就是只有 `fdps_pack_rgb` 那一列。我拿一個特例當通則寫進了「後面 471 支要照著讀」的那一節——照它去測一支形參是指標或 `int` 的 function，會把真的展開判成不是。改成以「完整框架重放」為主要判別，寬度不符降級成 `pack_rgb` 的附帶觀察。
+
+值得記的是這兩則的性質：不是分析不夠深，是**寫下結論時把手上那個案例的細節當成了普遍規則**。跟這一整輪在追的那個洞（emitter 在 `needs` 裡發明準則、下游忠實執行）是同一個形狀，只是這次發明者是我。
+
+reviewer 另外四項也都成立：`issues_logged` 沒進 `required`（bookkeeper 漏填就靜默記成 0，而現在沒有任何下游會重讀 verdict 檔）、ENV 的 ToolSearch 清單沒有我新規則叫 agent 去用的 `search_instructions`、WDISASM 給了相對路徑沒給根、`emit_pipeline.md` 標題還寫「五個角色」但只剩四個、以及總掃只篩 `status: open` 的話永遠看不到 `0002af60` 那筆待撤銷的 BLOCKING（它是 `resolved`）。都修了。
+
+## 驗證批次的結果不能算數
+
+`t22-02` 跑完：5 支全數落地、gate 全綠、**rescan agent 0 個**（23 個 agent 恰好是 recover 1 ＋ worklist 1 ＋ 5×4 ＋ report 1，沒有多餘階段）。拆除本身確認有效。
+
+但收斂門檻**沒驗到**：那 5 支一則疑慮都沒記，`emit_issues.json` 停在 30 個位址／97 筆，跟 `t22-01` 結束時一模一樣。
+
+這個 0 有兩種相反的讀法，n=5 分不出來——門檻生效了，或者門檻寫太緊、emitter 為了不違規而不記該記的。`t22-01` 的比率是每支約 2.4 筆，連續 5 支掛零不是可以直接當好消息收下的數字。後一種可能比拆除前的狀況嚴重，所以那一項的驗收留著沒勾，判準改成「明顯低於 2.4／支但不是 0」。
+
+順帶：因為完全沒有寫入發生，「bookkeeper 累積那一段沒被一起拆掉」這件事其實也只有 bookkeeper 的自述佐證（5 支都回報讀寫該檔且逐 byte 相同），真正的寫入路徑一次都沒走到。這是補上 `issues_logged` 交叉檢查的直接動機。
+
 ## 沒做的事
 
 `same_as` 鏡像 21／51 偏高——emitter 跟 reviewer 大量記到同一件事，本身就是重複工。票裡列了「決定 reviewer 是否改為只註記而不重寫」，但這一輪沒動：改 reviewer 的產出格式會影響 bookkeeper 併檔的邏輯，而 bookkeeper 那段正是總掃唯一的輸入來源，不想在同一批改動裡動兩個相依的東西。留在票裡。
