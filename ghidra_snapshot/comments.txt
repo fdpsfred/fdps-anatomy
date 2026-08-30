@@ -6958,18 +6958,18 @@ Alignment padding: three Watcom multi-byte NOP forms (lea reg,[reg+0]) filling 1
 Builds the draw-order list for the scrolling scene layer table: the layer slot indices sorted by ascending depth key.
 
 Algorithm:
-Fills draw_order[0 .. DAT_00069cdc-1] with the identity permutation 0,1,2,..., where DAT_00069cdc is the number of active layer slots. Then bubble-sorts that index list in place: the outer index i runs while i < DAT_00069cdc-1, the inner index j while j < DAT_00069cdc-i-1, and each step compares the depth bytes DAT_00069cfe[draw_order[j]] and DAT_00069cfe[draw_order[j+1]] as unsigned and exchanges the two entries when the first is the greater. The result is ascending by depth. The sort is a bubble sort, so slots that share a depth value keep their slot-index order. There are no callees.
+Fills draw_order[0 .. data_fdps_scene_layer_count-1] with the identity permutation 0,1,2,..., where data_fdps_scene_layer_count is the number of active layer slots. Then bubble-sorts that index list in place: the outer index i runs while i < data_fdps_scene_layer_count-1, the inner index j while j < data_fdps_scene_layer_count-i-1, and each step compares the depth bytes data_fdps_scene_layer_draw_depth[draw_order[j]] and data_fdps_scene_layer_draw_depth[draw_order[j+1]] as unsigned and exchanges the two entries when the first is the greater. The result is ascending by depth. The sort is a bubble sort, so slots that share a depth value keep their slot-index order. There are no callees.
 
 Parameters:
-  draw_order -- out; base of an int array with room for at least DAT_00069cdc entries, receiving the layer slot indices in draw order. No bound is checked; fdps_draw_scene_layers passes a 6-element stack array, matching the 6-slot width of the layer table.
+  draw_order -- out; base of an int array with room for at least data_fdps_scene_layer_count entries, receiving the layer slot indices in draw order. No bound is checked; fdps_draw_scene_layers passes a 6-element stack array, matching the 6-slot width of the layer table.
 
 Returns:
   Nothing. The sorted list is the caller's array.
 
-Pool: fdps  [hard-coded game globals DAT_00069cdc and DAT_00069cfe; no Function ID candidate in either the Watcom or the ail set, and the only caller is game rendering code]
+Pool: fdps  [hard-coded game globals data_fdps_scene_layer_count and data_fdps_scene_layer_draw_depth; no Function ID candidate in either the Watcom or the ail set, and the only caller is game rendering code]
 
 Rebuild note:
-The sort is a hand-written bubble sort and is therefore stable: scene layer slots that share the same depth byte at DAT_00069cfe stay in slot-index order, and fdps_draw_scene_layers blits them in exactly that order, so equal-depth layers overlap in a fixed way. Rewriting this as a call to qsort (unstable) would silently reorder equal-depth layers and change what covers what.
+The sort is a hand-written bubble sort and is therefore stable: scene layer slots that share the same depth byte at data_fdps_scene_layer_draw_depth stay in slot-index order, and fdps_draw_scene_layers blits them in exactly that order, so equal-depth layers overlap in a fixed way. Rewriting this as a call to qsort (unstable) would silently reorder equal-depth layers and change what covers what.
 
 === 0002c327 [EOL]
 Alignment padding: lea eax,[eax+0] (6-byte) + lea edx,[edx+0] (3-byte) filling to 16-byte boundary at 0002c330

@@ -343,6 +343,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0xb6"
+    },
+    "0002c220": {
+      "name": "fdps_build_scene_layer_draw_order",
+      "target": "mapdraw.c",
+      "body_size": "0x107",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x107"
     }
   }
 }

@@ -76,6 +76,36 @@ extern unsigned char *data_fdps_battle_move_grid_ptr;
 extern unsigned char *data_fdps_scene_layer_tile_attr_ptr[6];
 extern unsigned char *data_fdps_scene_layer_tile_map_ptrs[6];
 
+/* 00069cdc.  How many of the scene's six layer slots the loaded chapter
+   actually filled, and the bound of every walk over the parallel layer arrays
+   above.  Signed: each of those walks compares it with JL.
+
+   It is not a constant and it is not derived from the arrays: the chapter
+   resource loader takes it straight out of the first dword of the layer
+   descriptor file -- MOV EAX,[EAX] / MOV [0x00069cdc],EAX at 00022979 -- and
+   nothing between there and the readers clamps it.  Six is the width the
+   arrays are declared at and the size of the stack array
+   fdps_draw_scene_layers hands to fdps_build_scene_layer_draw_order (SUB
+   ESP,0x28 then LEA EAX,[EBP-0x28] at 0002bfe1, six ints), so the shipped
+   descriptor files are what keeps it in range. */
+extern int data_fdps_scene_layer_count;
+
+/* 00069cfe.  The depth key of each of the six scene layer slots, one byte per
+   slot, written by the chapter resource loader out of byte +0x18 of the
+   layer's descriptor record (00022a79).  It decides two things and both are
+   read as UNSIGNED bytes.
+
+   fdps_build_scene_layer_draw_order sorts the slot indices by it ascending,
+   comparing with CMP AL,byte ptr [EDX+0x69cfe] / JBE at 0002c2c4 -- unsigned,
+   so a depth of 0x80 sorts after 0x01 and not before it.
+   fdps_draw_scene_layers then splits the sorted list at 10: it draws the
+   slots whose depth is below 10 before the map units and those above 10 after
+   them, and both tests widen the byte with AND EAX,0xff first (0002c026,
+   0002c142).  A depth of exactly 10 is drawn in neither pass -- JGE skips it
+   in the first loop and JLE skips it in the second -- so 10 is the sentinel
+   that parks a layer, not a boundary value one of the two passes takes. */
+extern unsigned char data_fdps_scene_layer_draw_depth[6];
+
 /* 00060148.  The battle map's per-cell event-code layer, a struct
    fdps_map_cell_code_layer: its own signed 16-bit width at +7 and one byte per
    cell at +0x10.  It carries its own width and readers use that rather than
