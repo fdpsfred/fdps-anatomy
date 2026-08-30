@@ -1,0 +1,74 @@
+{
+  "batch": "t22-02",
+  "attempted": 5,
+  "committed": 5,
+  "skipped": 0,
+  "unfinished": 0,
+  "never_reached": 0,
+  "cut_short": [],
+  "recovered": [],
+  "stopped": null,
+  "stop_detail": "",
+  "ended_early": null,
+  "splits": [],
+  "remaining_at_start": 471,
+  "concerns_logged": 0,
+  "results": [
+    {
+      "addr": "0002c220",
+      "name": "fdps_build_scene_layer_draw_order",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "337eb8d fdps_build_scene_layer_draw_order @ 0002c220",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 59,
+      "problems": "無阻礙。三點記錄：\n\n1. Plate fix 的計數與實際不符，但意圖明確，照「body text and the Pool line both」全部替換。review.json 寫「four occurrences of DAT_00069cdc and three of DAT_00069cfe」，實際 plate 裡 DAT_00069cdc 出現 5 次（Algorithm 段 4 次 + Pool 行 1 次），DAT_00069cfe 出現 4 次（Algorithm 段 2 次 + Pool 行 1 次 + Rebuild note 1 次）。我把兩個符號的全部出現處都換成 data_fdps_scene_layer_count / data_fdps_scene_layer_draw_depth，沒有改動任何其他字句。沒有調整決定去遷就計數，只是把「全部」照字面執行。\n\n2. 沒有 stray。git status --porcelain 在動手前只有 src/gamedata.h、src/mapdraw.c、src/mapdraw.h、tests/mapdraw.c、tools/code_emit/data/emit_state.json，全部落在允許的路徑內，所以沒有需要單獨先 commit 的檔案。ghidra_snapshot/comments.txt 是我重新匯出後才出現的變更（只有 plate comment 那一處，8 行增減）。\n\n3. emit_issues.json 兩份 verdict 的 open_issues 都是空陣列，appended 0 筆。檔案原本就存在（215,868 bytes），我用 UTF-8 讀出再寫回，git diff 對該檔為空 — 也就是逐 byte 相同，編碼往返無損，等於通過了 mojibake 檢查。\n\nemit_state.json 的 0002c220 entry 已為 {name, target, body_size \"0x107\", status \"committed\", rounds 0, emitted_against \"0x107\"}，欄位順序比照相鄰已 committed 的 entry，in_flight_since 已移除，未動其他 entry。"
+    },
+    {
+      "addr": "0002ccd0",
+      "name": "fdps_unit_select_status_icon",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "e34bdc0 fdps_unit_select_status_icon @ 0002ccd0",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 60,
+      "problems": "No strays: git status before staging showed only src/unit.c, src/unit.h, tests/unit.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Ghidra: both verdict files carried the same single fix (kind \"plate\", 0002ccd0) — the emit file said four occurrences of FUN_0002cda0, the review file said three; the plate in fact contained three (unit_index description, cycle description, Returns section) and all three were replaced with fdps_draw_map_unit, which is the whole of what both entries asked for, so it is counted as one applied fix. No rename or prototype fix was requested. Baseline audit Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0; program saved; snapshot re-exported (diff limited to 3 changed lines in ghidra_snapshot/comments.txt). Both verdict files had empty open_issues, so nothing was appended to emit_issues.json; the file was read and rewritten byte-identically, confirming the UTF-8 round trip left it unchanged (git reports it unmodified). emit_state.json entry 0002ccd0 now status committed, emitted_against 0xce, rounds 0, in_flight_since dropped; no other entry or field touched."
+    },
+    {
+      "addr": "0002d210",
+      "name": "fdps_get_unit_record",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "2b075ba fdps_get_unit_record @ 0002d210",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 57,
+      "problems": "No strays: git status --porcelain before staging listed only src/unit.c, src/unit.h, tests/unit.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was made and none was needed.\n\nGhidra: both verdict files carry the same single fix (kind \"plate\" at 0002d210) and no rename or prototype fix, so exactly one set_plate_comment was applied — FUN_00022be0 -> fdps_build_map_unit_array, FUN_0002df90 -> fdps_relocate_unit_array, \"16 static callers / 228 references\" replaced with \"at least 100 distinct static callers -- a get_function_callers query returns a full page and is still at its own limit of 100\", and a new \"Lifetime:\" line recording that the returned pointer does not survive fdps_relocate_unit_array. set_plate_comment returned success with three advisory warnings (\"missing Algorithm / Parameters / Returns section\") — those are the MCP server's generic template nags, not a failure, and the plate follows this project's own Pool/Evidence/Name/Boundary/Signature template, so nothing was changed to satisfy them. Baseline audit Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved, snapshot re-exported; the staged ghidra_snapshot diff is confined to the 0002d210 plate block in comments.txt.\n\nemit_issues.json: both verdict files have open_issues: [], so there was nothing to append and the file (30 existing keys) was left untouched — no 0002d210 key was created. issues_logged 0.\n\nemit_state.json: the 0002d210 entry went in_flight -> committed, emitted_against \"0x25\", in_flight_since dropped, rounds kept at 0 verbatim. The file is nested under a \"functions\" object rather than keyed at top level, so the edit was made inside that; the diff is that one entry and nothing else.\n\ntarget_lines is from wc -l (126). PowerShell's Measure-Object -Line reports 109 for the same file because it skips blank lines — the wc figure is the one reported."
+    },
+    {
+      "addr": "000109b0",
+      "name": "fdps_unit_is_retired",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "975aa99 fdps_unit_is_retired @ 000109b0",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 34,
+      "problems": "無。ghidra_fixes 在 emit 與 review 兩份 verdict 中都是空陣列，因此完全沒有動 Ghidra；連帶不需要跑 baseline audit、不需要 save_program、不需要重匯出 snapshot（ghidra_gate_clean 因此未評估，故未回報）。open_issues 兩份也都是空的，emit_issues.json 原本就存在且格式正確，本次沒有新增任何項目（issues_logged=0），檔案未被寫入。git status 在 stage 之前只有四個路徑：src/unit.c、src/unit.h、tests/unit.c、tools/code_emit/data/emit_state.json，全部落在 src/、tests/、tools/code_emit/data/ 之內，沒有任何 stray 需要單獨 commit。emit_state.json 的 000109b0 entry 已由 in_flight 推進為 committed、emitted_against \"0x35\"、rounds 0、移除 in_flight_since，diff 確認只新增這一筆、沒有動到其他 entry 或欄位。staged diff 為 4 檔 189 行新增，範圍就是本 function。commit 後 git status 無輸出。"
+    },
+    {
+      "addr": "00011460",
+      "name": "fdps_move_path_trace",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "3b277e5 fdps_move_path_trace @ 00011460",
+      "ghidra_applied": 4,
+      "issues": 0,
+      "out_tok_k": 148,
+      "problems": "No strays: git status --porcelain before staging showed only src/movegrid.c, src/movegrid.h, tests/movegrid.c, tools/code_emit/data/emit_state.json and the two ghidra_snapshot files, so no separate stray commit was needed.\n\nGhidra fixes: all four applied (1 plate from emit, 2 plate + 1 prototype from review). The two plate fixes were folded into one set_plate_comment call because they touch the same comment; the review's second plate fix is explicitly a seconding of the emitter's Rebuild note, so the appended paragraph is the emitter's wording verbatim. Prototype set to `int fdps_move_path_trace(int goal_x, int goal_y, uchar *out_path, int start_x, int start_y, uchar mode)` with __cdecl kept.\n\nTwo transcription notes, neither a change of decision:\n1. The mode-2 reword was inserted literally, but the replacement text ends mid-sentence where the original continued \"and whose record byte +0x05 bit 0 is clear\". I closed the inserted clause with a trailing \" -- \" so the original tail still attaches to \"keeps only units whose ...\", rather than reading as part of the side-byte clause. Punctuation only; no word of either text changed.\n2. The plate's own \"Signature:\" line still reads `int mode`. No fix asked for it to change and I did not touch it, so the plate line and the database prototype now disagree on that one parameter. Flagging it rather than deciding it.\n\nemit_issues.json: both verdict files have \"open_issues\": [], so nothing was appended and the file was left byte-identical (it already exists with 30 keys). issues_logged = 0.\n\nBaseline audit Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved and snapshot re-exported (comments.txt and functions.txt both moved, and are in the commit).\n\nCommit message was written to a UTF-8 file and applied with git commit -F --cleanup=verbatim; the stored commit object was checked for the ASCII portions and for mojibake markers without printing the Traditional Chinese back through the console."
+    }
+  ],
+  "out_tok_k": 362
+}
