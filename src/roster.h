@@ -15,6 +15,29 @@
 #ifndef ROSTER_H
 #define ROSTER_H
 
+/* Banks the party at the end of a battle.  Walks every battle unit index
+   0..data_fdps_map_unit_count-1, resolves the record through
+   fdps_get_unit_record (unit.h), and for every roster slot
+   0..data_fdps_roster_member_count-1 whose char_id byte matches copies the
+   whole 0x50-byte record over the slot and then resets what must not survive
+   the chapter: the six status timers are cleared, the flags byte is masked
+   down to bit 0, every member who is not retired is restored to full HP, every
+   member including the dead is restored to full MP, an experience count above
+   99 is zeroed, and the slot's derived combat stats are recomputed by the
+   function below.
+
+   There is no break on a match, so a character id held by two slots is written
+   into both.  One case is exempt: character id 0 -- Randis -- whose unit
+   fdps_unit_is_retired reports has left the field is skipped and his roster
+   record is left as it was.  A retired unit of any other id is banked
+   normally.
+
+   Neither count is bounded against the roster block's 32 slots and neither
+   base pointer is null-checked.  Takes nothing and returns nothing; the result
+   is the rewritten roster array. */
+extern void fdps_roster_write_back_battle_units(void);
+#pragma aux fdps_roster_write_back_battle_units "*" parm caller [];
+
 /* Recomputes roster member roster_index's four derived combat stats in place
    from that record alone: attack from base ap plus the ap modifier of every
    equipped item, defense likewise from base dp, and hit and evade both from

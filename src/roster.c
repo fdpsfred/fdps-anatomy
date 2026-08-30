@@ -12,16 +12,130 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "table.h"
+#include "unit.h"
 #include "roster.h"
 
 /* The stride of one roster record, as the original writes it: IMUL
-   EAX,dword ptr [EBP-0x2c],0x50 at 00023ad8, the same literal
-   fdps_get_roster_record uses.  A literal and not sizeof(struct
-   fdps_unit_record) for the same reason table.c gives for the file tables --
-   0x50 is the block's own layout and the struct agrees with it only while it
-   stays byte-packed, so a lost pack pragma would silently move every record
-   past the first (rebuild_info/pitfalls.md). */
+   EAX,dword ptr [EBP-0x2c],0x50 at 00023ad8 and IMUL EAX,dword ptr
+   [EBP-0x18],0x50 at 000239ed, the same literal fdps_get_roster_record uses.
+   A literal and not sizeof(struct fdps_unit_record) for the same reason
+   table.c gives for the file tables -- 0x50 is the block's own layout and the
+   struct agrees with it only while it stays byte-packed, so a lost pack pragma
+   would silently move every record past the first
+   (rebuild_info/pitfalls.md). */
 #define ROSTER_RECORD_STRIDE 0x50
+
+/* How many status-effect timer bytes the write-back clears: PUSH 0x6 at
+   00023a43, the six bytes at record +0x22..+0x27. */
+#define STATUS_TIMER_COUNT 6
+
+/* The highest experience count a banked record may carry: CMP EAX,0x63 / JLE
+   at 00023a94.  Anything above it is reset to 0. */
+#define EXP_CARRY_MAX 99
+
+/* The value the flags byte holds once it has been masked down to bit 0, i.e.
+   the member is retired: CMP EAX,0x1 / JZ at 00023a68. */
+#define UNIT_FLAG_RETIRED 1
+
+/* The character id the exemption below is written for: CMP byte ptr
+   [EAX + 0x8],0x0 at 00023a17.  Id 0 is Randis, the one character whose
+   leaving the field must not overwrite his roster record. */
+#define CHAR_ID_RANDIS 0
+
+/* 00023980.  Banks the party at the end of a battle: every battle unit's
+   record is copied back over the roster record of the same character, and the
+   fields that must not survive the chapter are reset.
+
+   Both loop bounds are re-read from their globals on every iteration -- CMP
+   EAX,dword ptr [0x00060150] at 0002399e and CMP EAX,dword ptr [0x00064114]
+   at 000239cc are inside the loops, not hoisted -- so a callee that moved
+   either count would be obeyed from the next iteration on.  Neither of the
+   three callees does.
+
+   The roster slot address is formed inline -- the argument is copied into a
+   parameter-shaped slot at [EBP-0x18], IMUL by 0x50, MOV EDX,[0x00064108],
+   ADD, and the result lands in [EBP-0x14] before being copied into the slot
+   variable.  That is the inline-expansion fingerprint rebuild_info/
+   build_flags.md describes, of fdps_get_roster_record at 00023950; the open
+   arithmetic here reproduces it, whereas calling the accessor would put a CALL
+   where the original has none.
+
+   There is no break when a slot matches.  The inner loop runs to the end of
+   the roster every time, so a character id sitting in two slots has both of
+   them written, and the last one written is simply the last one scanned.
+
+   The exemption is narrow and its two halves are both load-bearing: the slot
+   is skipped only when the unit's character id is 0 AND fdps_unit_is_retired
+   says the unit has left the field.  A retired unit of any other id is banked
+   like every other, and an id-0 unit that is still standing is banked too.
+
+   The order of the resets after the copy matters.  memmove brings the whole
+   0x50-byte record over first, so every field below is written on top of the
+   unit's own value and not on top of the roster's previous one; in particular
+   hp_current arrives from the battle before the full heal decides whether to
+   replace it.
+
+   The full heal is skipped for the dead and the MP restore is not: the test at
+   00023a6b guards only the HP pair, and the MP store at 00023a85 sits after
+   the join.  Moving the MP store inside that branch is the obvious tidy-up and
+   leaves every fallen member's MP at whatever the battle left.
+
+   The experience byte is read UNSIGNED -- MOV AL,[EAX+0x3c] / AND EAX,0xff /
+   CMP EAX,0x63 -- which is what catches the 0xff sentinel the deployment path
+   writes for a unit that is not a roster character.  Typed signed, 0xff
+   compares as -1, survives into the roster and makes the status panel print
+   1000 (rebuild_info/pitfalls.md, contract C).
+
+   Nothing is bounded and nothing is checked: neither count is compared against
+   the roster block's 32 slots and neither base pointer is tested for null. */
+void fdps_roster_write_back_battle_units(void)
+{
+    struct fdps_unit_record *unit;
+    struct fdps_unit_record *slot;
+    int unit_index;
+    int roster_index;
+
+    /* The slot pointer is seeded with the bare roster base before the walk
+       starts -- MOV EAX,[0x00064108] / MOV [EBP-0x10],EAX at 0002398c -- and
+       the value is never read: every path that reads the slot has assigned it
+       the record address first.  It is kept because it is what the original
+       does, not because anything depends on it. */
+    slot = (struct fdps_unit_record *) data_fdps_roster_array_ptr;
+
+    for (unit_index = 0;
+         unit_index < data_fdps_map_unit_count;
+         unit_index++) {
+        unit = fdps_get_unit_record(unit_index);
+
+        for (roster_index = 0;
+             roster_index < data_fdps_roster_member_count;
+             roster_index++) {
+            slot = (struct fdps_unit_record *)
+                   (data_fdps_roster_array_ptr +
+                    roster_index * ROSTER_RECORD_STRIDE);
+
+            if (unit->char_id != slot->char_id) {
+                continue;
+            }
+            if (unit->char_id == CHAR_ID_RANDIS &&
+                fdps_unit_is_retired(unit_index) != 0) {
+                continue;
+            }
+
+            memmove(slot, unit, ROSTER_RECORD_STRIDE);
+            memset(slot->status_timers, 0, STATUS_TIMER_COUNT);
+            slot->flags &= 1;
+            if (slot->flags != UNIT_FLAG_RETIRED) {
+                slot->hp_current = slot->hp_max;
+            }
+            slot->mp_current = slot->mp_max;
+            if (slot->exp_carry > EXP_CARRY_MAX) {
+                slot->exp_carry = 0;
+            }
+            fdps_roster_recompute_combat_stats(roster_index);
+        }
+    }
+}
 
 /* How many inventory entries the scan below covers: CMP dword ptr
    [EBP-0x18],0x8 at 00023b18.  All eight, not the two slots

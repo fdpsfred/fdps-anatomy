@@ -479,6 +479,14 @@
       "status": "committed",
       "emitted_against": "0x14e",
       "rounds": 0
+    },
+    "00023980": {
+      "name": "fdps_roster_write_back_battle_units",
+      "target": "roster.c",
+      "body_size": "0x13d",
+      "status": "committed",
+      "emitted_against": "0x13d",
+      "rounds": 0
     }
   }
 }

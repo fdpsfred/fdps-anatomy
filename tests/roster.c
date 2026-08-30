@@ -917,6 +917,444 @@ static void the_argument_selects_both_table_records(void)
     CHECK_EQ(stat_of(0, OFF_AP_BASE), 21);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_roster_write_back_battle_units @ 00023980
+ *
+ * Expected values come from the assembly of that body and from ticket 17's
+ * struct fdps_unit_record.  The facts the cases below are aimed at:
+ *
+ *   000239ed  the slot is roster base + roster_index * 0x50, and the scan
+ *             runs the whole roster with no break on a match, so two slots
+ *             carrying one id are both written.
+ *   00023a0b  the match is the char_id byte at +0x08 on both records.
+ *   00023a17  the exemption needs BOTH halves: char id 0 and
+ *             fdps_unit_is_retired reporting the unit has left.
+ *   00023a3b  memmove of the whole 0x50 bytes lands first, so every reset
+ *             below overwrites a value that came from the battle record.
+ *   00023a4e  memset clears exactly the six timer bytes at +0x22.
+ *   00023a6b  the HP restore is guarded by the masked flags byte while the MP
+ *             store at 00023a85 sits after the join and runs for the dead too.
+ *   00023a8f  the experience byte is zero-extended before CMP EAX,0x63, so
+ *             0xff is 255 and is reset, not -1 and kept.
+ *   00023aa4  the recompute is passed the ROSTER index of the matched slot.
+ *
+ * Both arrays run through the real accessors: the roster through the same
+ * inline stride the body uses and the unit through fdps_get_unit_record in
+ * src/unit.c.  Neither is a loaded file -- the roster is the heap block
+ * allocated at 000296b8 and the unit array is the battle's own block -- so
+ * staged byte buffers are the shape both globals hold at run time.  The roster
+ * is filled with 0xa5 rather than zeroed because half of what these cases pin
+ * down is which slots and which bytes are left alone, and a zeroed block
+ * cannot tell an untouched byte from one written with 0.
+ */
+
+/* The unit record stride, which is the same 0x50 as the roster's:
+   fdps_get_unit_record scales by sizeof(struct fdps_unit_record) and the
+   record is that size.  Eight units is more than any case here needs, plus a
+   spare record behind them. */
+#define UNIT_STRIDE 0x50
+#define UNIT_CAPACITY 8
+
+/* The battle unit ids these cases use.  Id 0 is Randis, the one the exemption
+   is written for; 5 and 6 are ordinary members, and neither is 0xa5, so a
+   filler slot cannot match one by accident. */
+#define WB_CHAR_RANDIS 0
+#define WB_CHAR_A 5
+#define WB_CHAR_B 6
+
+static unsigned char unit_image[(UNIT_CAPACITY + 1) * UNIT_STRIDE];
+
+static unsigned char *unit_at(int unit_index)
+{
+    return unit_image + unit_index * UNIT_STRIDE;
+}
+
+/* Roster to filler, unit and item blocks to zero, all four globals pointed at
+   this file's buffers and both counts to 0; each case sets the two counts it
+   wants. */
+static void stage_writeback_fixture(void)
+{
+    int byte_index;
+
+    for (byte_index = 0;
+         byte_index < (ROSTER_CAPACITY + 1) * ROSTER_STRIDE;
+         byte_index++) {
+        roster_image[byte_index] = ROSTER_FILLER;
+    }
+    for (byte_index = 0;
+         byte_index < (UNIT_CAPACITY + 1) * UNIT_STRIDE;
+         byte_index++) {
+        unit_image[byte_index] = 0;
+    }
+    for (byte_index = 0;
+         byte_index < ITEM_IMAGE_RECORDS * ITEM_STRIDE;
+         byte_index++) {
+        item_image[byte_index] = 0;
+    }
+
+    data_fdps_roster_array_ptr = roster_image;
+    data_fdps_map_unit_array_ptr = unit_image;
+    data_fdps_item_effect_table_ptr = item_image;
+    data_fdps_roster_member_count = 0;
+    data_fdps_map_unit_count = 0;
+}
+
+static void stage_unit(int unit_index, int char_id, int flags)
+{
+    unsigned char *record;
+
+    record = unit_at(unit_index);
+    record[OFF_CHAR_ID] = (unsigned char) char_id;
+    record[OFF_FLAGS] = (unsigned char) flags;
+}
+
+static void stage_slot_id(int roster_index, int char_id)
+{
+    member_at(roster_index)[OFF_CHAR_ID] = (unsigned char) char_id;
+}
+
+static unsigned char unit_byte_of(int unit_index, int offset)
+{
+    return unit_at(unit_index)[offset];
+}
+
+/* The whole record crosses, not a chosen handful of fields: bytes from the
+   front, the middle and the back of the battle record all appear in the slot,
+   and the slot's filler is gone from every one of them. */
+static void the_whole_battle_record_is_copied_over_the_slot(void)
+{
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_A, 0);
+    unit_at(0)[0x00] = 3;
+    unit_at(0)[0x01] = 4;
+    unit_at(0)[OFF_RACE] = 9;
+    unit_at(0)[OFF_LEVEL] = 7;
+    put_word(unit_at(0) + OFF_AP_BASE, 40);
+    stage_slot_id(0, WB_CHAR_A);
+
+    fdps_roster_write_back_battle_units();
+
+    CHECK_EQ(byte_of(0, 0x00), 3);
+    CHECK_EQ(byte_of(0, 0x01), 4);
+    CHECK_EQ(byte_of(0, OFF_RACE), 9);
+    CHECK_EQ(byte_of(0, OFF_LEVEL), 7);
+    CHECK_EQ(stat_of(0, OFF_AP_BASE), 40);
+    CHECK_EQ(byte_of(0, OFF_CHAR_ID), WB_CHAR_A);
+}
+
+/* memset takes exactly six bytes at +0x22.  The byte in front of the run
+   (+0x21, level) and the first byte behind it (+0x28) both carry values the
+   battle record supplied and must still be there. */
+static void the_six_status_timers_are_cleared_and_nothing_else_is(void)
+{
+    int timer_index;
+
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_A, 0);
+    for (timer_index = 0; timer_index < 6; timer_index++) {
+        unit_at(0)[OFF_STATUS_TIMERS + timer_index] = 9;
+    }
+    unit_at(0)[OFF_LEVEL] = 0x33;
+    unit_at(0)[OFF_GAP_028] = 0x77;
+    stage_slot_id(0, WB_CHAR_A);
+
+    fdps_roster_write_back_battle_units();
+
+    CHECK_EQ(byte_of(0, OFF_STATUS_TIMERS + 0), 0);
+    CHECK_EQ(byte_of(0, OFF_STATUS_TIMERS + 1), 0);
+    CHECK_EQ(byte_of(0, OFF_STATUS_TIMERS + 2), 0);
+    CHECK_EQ(byte_of(0, OFF_STATUS_TIMERS + 3), 0);
+    CHECK_EQ(byte_of(0, OFF_STATUS_TIMERS + 4), 0);
+    CHECK_EQ(byte_of(0, OFF_STATUS_TIMERS + 5), 0);
+    CHECK_EQ(byte_of(0, OFF_LEVEL), 0x33);
+    CHECK_EQ(byte_of(0, OFF_GAP_028), 0x77);
+}
+
+/* AND byte ptr [EAX+0x5],0x1 keeps bit 0 and drops the rest, so every battle
+   status bit is gone from the banked record and only the retired flag is
+   carried out of the chapter. */
+static void the_flags_byte_keeps_only_bit_zero(void)
+{
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_A, 0xf6);
+    stage_slot_id(0, WB_CHAR_A);
+    fdps_roster_write_back_battle_units();
+    CHECK_EQ(byte_of(0, OFF_FLAGS), 0);
+
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_A, 0xf7);
+    stage_slot_id(0, WB_CHAR_A);
+    fdps_roster_write_back_battle_units();
+    CHECK_EQ(byte_of(0, OFF_FLAGS), 1);
+}
+
+/* A survivor comes out of the battle at full HP and full MP whatever the
+   battle left him on, and the maxima are untouched. */
+static void a_survivor_is_restored_to_full_hp_and_mp(void)
+{
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_A, 0);
+    put_word(unit_at(0) + OFF_HP_CURRENT, 3);
+    put_word(unit_at(0) + OFF_HP_MAX, 50);
+    put_word(unit_at(0) + OFF_MP_CURRENT, 1);
+    put_word(unit_at(0) + OFF_MP_MAX, 20);
+    stage_slot_id(0, WB_CHAR_A);
+
+    fdps_roster_write_back_battle_units();
+
+    CHECK_EQ(stat_of(0, OFF_HP_CURRENT), 50);
+    CHECK_EQ(stat_of(0, OFF_HP_MAX), 50);
+    CHECK_EQ(stat_of(0, OFF_MP_CURRENT), 20);
+    CHECK_EQ(stat_of(0, OFF_MP_MAX), 20);
+}
+
+/* The asymmetry between the two restores, and it is the point of them: a
+   retired member keeps the HP the battle left him -- 3, the value memmove
+   brought across -- while his MP is topped up all the same, because the MP
+   store is past the join at 00023a7b.  Pulling the MP store inside the guard
+   is the obvious tidy-up and leaves every fallen member on his battle MP. */
+static void a_retired_member_keeps_his_hp_and_still_gets_his_mp(void)
+{
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_A, 1);
+    put_word(unit_at(0) + OFF_HP_CURRENT, 3);
+    put_word(unit_at(0) + OFF_HP_MAX, 50);
+    put_word(unit_at(0) + OFF_MP_CURRENT, 1);
+    put_word(unit_at(0) + OFF_MP_MAX, 20);
+    stage_slot_id(0, WB_CHAR_A);
+
+    fdps_roster_write_back_battle_units();
+
+    CHECK_EQ(byte_of(0, OFF_FLAGS), 1);
+    CHECK_EQ(stat_of(0, OFF_HP_CURRENT), 3);
+    CHECK_EQ(stat_of(0, OFF_HP_MAX), 50);
+    CHECK_EQ(stat_of(0, OFF_MP_CURRENT), 20);
+}
+
+/* The masked flags byte and not the raw one decides the heal: a battle record
+   whose flags are 0xfe has bit 0 clear, so once the mask has run the member is
+   a survivor and is healed even though the raw byte was far from zero. */
+static void the_heal_is_decided_after_the_flags_are_masked(void)
+{
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_A, 0xfe);
+    put_word(unit_at(0) + OFF_HP_CURRENT, 3);
+    put_word(unit_at(0) + OFF_HP_MAX, 50);
+    stage_slot_id(0, WB_CHAR_A);
+
+    fdps_roster_write_back_battle_units();
+
+    CHECK_EQ(byte_of(0, OFF_FLAGS), 0);
+    CHECK_EQ(stat_of(0, OFF_HP_CURRENT), 50);
+}
+
+/* Contract C, and the rebuild note the plate comment carries.  99 is the
+   highest count that survives, 100 is reset, and 0xff -- the sentinel the
+   deployment path writes for a unit that is not a roster character -- is 255
+   and is reset too.  Read as a signed char it would be -1, would pass the
+   test and would reach the status panel. */
+static void an_experience_count_above_ninety_nine_is_reset(void)
+{
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_A, 0);
+    unit_at(0)[OFF_EXP_CARRY] = 99;
+    stage_slot_id(0, WB_CHAR_A);
+    fdps_roster_write_back_battle_units();
+    CHECK_EQ(byte_of(0, OFF_EXP_CARRY), 99);
+
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_A, 0);
+    unit_at(0)[OFF_EXP_CARRY] = 100;
+    stage_slot_id(0, WB_CHAR_A);
+    fdps_roster_write_back_battle_units();
+    CHECK_EQ(byte_of(0, OFF_EXP_CARRY), 0);
+
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_A, 0);
+    unit_at(0)[OFF_EXP_CARRY] = 0xff;
+    stage_slot_id(0, WB_CHAR_A);
+    fdps_roster_write_back_battle_units();
+    CHECK_EQ(byte_of(0, OFF_EXP_CARRY), 0);
+}
+
+/* A slot whose char_id is not the unit's is passed over untouched: its filler
+   is still there afterwards, front and back. */
+static void a_slot_with_another_char_id_is_left_alone(void)
+{
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_A, 0);
+    unit_at(0)[0x00] = 3;
+    stage_slot_id(0, WB_CHAR_B);
+
+    fdps_roster_write_back_battle_units();
+
+    CHECK_EQ(byte_of(0, 0x00), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, OFF_FLAGS), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, OFF_CHAR_ID), WB_CHAR_B);
+    CHECK_EQ(byte_of(0, OFF_HP_CURRENT), ROSTER_FILLER);
+}
+
+/* The exemption needs both halves.  Randis retired is skipped and his slot
+   keeps its filler; Randis still standing is banked like anybody else. */
+static void randis_is_exempt_only_while_he_is_retired(void)
+{
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_RANDIS, 1);
+    unit_at(0)[0x00] = 3;
+    stage_slot_id(0, WB_CHAR_RANDIS);
+    fdps_roster_write_back_battle_units();
+    CHECK_EQ(byte_of(0, 0x00), ROSTER_FILLER);
+    CHECK_EQ(byte_of(0, OFF_FLAGS), ROSTER_FILLER);
+
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_RANDIS, 0);
+    unit_at(0)[0x00] = 3;
+    stage_slot_id(0, WB_CHAR_RANDIS);
+    fdps_roster_write_back_battle_units();
+    CHECK_EQ(byte_of(0, 0x00), 3);
+    CHECK_EQ(byte_of(0, OFF_FLAGS), 0);
+}
+
+/* The other half of the exemption: the id must be 0.  A retired unit of any
+   other character is banked, flag and all, so the roster learns that he fell.
+   Skipping every retired unit is the obvious reading and would lose the
+   death. */
+static void a_retired_unit_of_another_id_is_still_banked(void)
+{
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_A, 1);
+    unit_at(0)[0x00] = 3;
+    stage_slot_id(0, WB_CHAR_A);
+
+    fdps_roster_write_back_battle_units();
+
+    CHECK_EQ(byte_of(0, 0x00), 3);
+    CHECK_EQ(byte_of(0, OFF_FLAGS), 1);
+}
+
+/* There is no break on a match: the inner loop runs to the end of the roster,
+   so a character id sitting in three slots is written into all three. */
+static void every_slot_carrying_the_id_is_written(void)
+{
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 3;
+    stage_unit(0, WB_CHAR_A, 0);
+    unit_at(0)[0x00] = 3;
+    stage_slot_id(0, WB_CHAR_A);
+    stage_slot_id(1, WB_CHAR_A);
+    stage_slot_id(2, WB_CHAR_A);
+
+    fdps_roster_write_back_battle_units();
+
+    CHECK_EQ(byte_of(0, 0x00), 3);
+    CHECK_EQ(byte_of(1, 0x00), 3);
+    CHECK_EQ(byte_of(2, 0x00), 3);
+}
+
+/* The recompute is handed the matched slot's ROSTER index, not the unit's.
+   Unit 0 matches slot 2 only, so slot 2's four derived stats come out of the
+   record just installed -- attack 40 + item 3's 7 -- while slot 0's stay
+   filler.  The battle record's own attack word is staged to 999, so a missing
+   recompute would leave that value in the slot and not 47. */
+static void the_recompute_runs_on_the_matched_roster_index(void)
+{
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 3;
+    stage_item(3, 7, 5, 3, 9);
+    stage_unit(0, WB_CHAR_A, 0);
+    put_word(unit_at(0) + OFF_AP_BASE, 40);
+    put_word(unit_at(0) + OFF_DX_BASE, 17);
+    put_word(unit_at(0) + OFF_AP, 999);
+    unit_at(0)[OFF_INVENTORY + 0] = 0x40;
+    unit_at(0)[OFF_INVENTORY + 1] = 3;
+    stage_slot_id(0, WB_CHAR_B);
+    stage_slot_id(1, WB_CHAR_B);
+    stage_slot_id(2, WB_CHAR_A);
+
+    fdps_roster_write_back_battle_units();
+
+    CHECK_EQ(stat_of(2, OFF_AP), 47);
+    CHECK_EQ(stat_of(2, OFF_EV), 26);
+    CHECK_EQ(byte_of(0, OFF_AP), ROSTER_FILLER);
+    CHECK_EQ(byte_of(1, OFF_AP), ROSTER_FILLER);
+}
+
+/* Every battle unit is walked and each finds its own slot, in whatever order
+   the two arrays happen to hold them: unit 0 is character 5 and lands in slot
+   1, unit 1 is character 6 and lands in slot 0. */
+static void every_unit_is_walked_and_each_finds_its_own_slot(void)
+{
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 2;
+    data_fdps_roster_member_count = 2;
+    stage_unit(0, WB_CHAR_A, 0);
+    unit_at(0)[0x00] = 3;
+    stage_unit(1, WB_CHAR_B, 0);
+    unit_at(1)[0x00] = 4;
+    stage_slot_id(0, WB_CHAR_B);
+    stage_slot_id(1, WB_CHAR_A);
+
+    fdps_roster_write_back_battle_units();
+
+    CHECK_EQ(byte_of(0, 0x00), 4);
+    CHECK_EQ(byte_of(1, 0x00), 3);
+}
+
+/* Both bounds are tested before their bodies run, so a battle with no units
+   writes nothing and a roster with no members takes nothing, even when the ids
+   would have matched.  The unit array is left alone either way. */
+static void a_zero_count_on_either_side_writes_nothing(void)
+{
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 0;
+    data_fdps_roster_member_count = 1;
+    stage_unit(0, WB_CHAR_A, 0);
+    unit_at(0)[0x00] = 3;
+    stage_slot_id(0, WB_CHAR_A);
+    fdps_roster_write_back_battle_units();
+    CHECK_EQ(byte_of(0, 0x00), ROSTER_FILLER);
+
+    stage_writeback_fixture();
+    data_fdps_map_unit_count = 1;
+    data_fdps_roster_member_count = 0;
+    stage_unit(0, WB_CHAR_A, 0);
+    unit_at(0)[0x00] = 3;
+    stage_slot_id(0, WB_CHAR_A);
+    fdps_roster_write_back_battle_units();
+    CHECK_EQ(byte_of(0, 0x00), ROSTER_FILLER);
+    CHECK_EQ(unit_byte_of(0, 0x00), 3);
+}
+
 void run_roster_tests(void)
 {
     RUN_TEST(the_base_stats_seed_the_totals);
@@ -952,14 +1390,31 @@ void run_roster_tests(void)
     RUN_TEST(consecutive_adds_fill_consecutive_records);
     RUN_TEST(the_argument_selects_both_table_records);
 
+    RUN_TEST(the_whole_battle_record_is_copied_over_the_slot);
+    RUN_TEST(the_six_status_timers_are_cleared_and_nothing_else_is);
+    RUN_TEST(the_flags_byte_keeps_only_bit_zero);
+    RUN_TEST(a_survivor_is_restored_to_full_hp_and_mp);
+    RUN_TEST(a_retired_member_keeps_his_hp_and_still_gets_his_mp);
+    RUN_TEST(the_heal_is_decided_after_the_flags_are_masked);
+    RUN_TEST(an_experience_count_above_ninety_nine_is_reset);
+    RUN_TEST(a_slot_with_another_char_id_is_left_alone);
+    RUN_TEST(randis_is_exempt_only_while_he_is_retired);
+    RUN_TEST(a_retired_unit_of_another_id_is_still_banked);
+    RUN_TEST(every_slot_carrying_the_id_is_written);
+    RUN_TEST(the_recompute_runs_on_the_matched_roster_index);
+    RUN_TEST(every_unit_is_walked_and_each_finds_its_own_slot);
+    RUN_TEST(a_zero_count_on_either_side_writes_nothing);
+
     /* Put every global this file wrote back where it found it.  Ticket 23 has
-       yet to define the four pointers, and leaving a pointer to this file's
+       yet to define the five pointers, and leaving a pointer to this file's
        static buffers in any of them would hand the next unit an address it has
-       no business holding; the member count goes back to 0 for the same
-       reason, since the adds above moved it. */
+       no business holding; the two counts go back to 0 for the same reason,
+       since the cases above moved them. */
     data_fdps_roster_array_ptr = (unsigned char *) 0;
+    data_fdps_map_unit_array_ptr = (unsigned char *) 0;
     data_fdps_item_effect_table_ptr = (unsigned char *) 0;
     data_fdps_battle_character_base_table_ptr = (unsigned char *) 0;
     data_fdps_battle_character_growth_table_ptr = (unsigned char *) 0;
     data_fdps_roster_member_count = 0;
+    data_fdps_map_unit_count = 0;
 }
