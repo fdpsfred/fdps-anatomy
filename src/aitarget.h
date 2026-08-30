@@ -55,4 +55,39 @@ extern int fdps_collect_targets_in_range(int tile_x, int tile_y,
                                          int select_mode);
 #pragma aux fdps_collect_targets_in_range "*" parm caller [];
 
+/* Would unit defender_unit strike back at an attacker standing on tile
+   (attacker_x, attacker_y)?  Returns 1 when it would and -1 -- NOT 0 -- on
+   every one of the four refusals, so the answer must be compared against 1 and
+   never used as a bare predicate: `if (fdps_check_can_counter_attack_from_tile
+   (...))` is true in both directions.  The sole caller,
+   fdps_map_actor_score_best_attack, does CMP EAX,1.
+
+   The four tests, all of them on the DEFENDER except the second:
+     - struct fdps_unit_record's status_timers[4] at record offset 0x26, the
+       paralysis counter, must be zero;
+     - the Manhattan distance between the defender's own tile (pos_x, pos_y)
+       and the passed tile must be exactly 1, so a diagonal never counts and
+       neither does the defender's own tile;
+     - the defender must have a weapon equipped, fdps_unit_find_equipped_slot
+       (unititem.h) with want_armor 0 answering something other than -1;
+     - that weapon's ITEM.DAT range_min at item record +0x0b must be below 2.
+
+   The last test is where this function and the unit-index twin
+   fdps_check_can_counter_attack part company: that one requires range_min to
+   be exactly 1, this one accepts 0 as well.  The difference is visible on item
+   0x63 光束砲, the one weapon-type ITEM.DAT entry whose range is 0-0
+   (assets/items.md): the map AI predicts a counterattack from a unit holding
+   it that the fight itself will not deliver.  Folding the two functions into a
+   shared helper erases that.
+
+   attacker_x and attacker_y are tile coordinates in the same 0-based units as
+   the record's own pos_x and pos_y.  defender_unit is a position in the
+   current battle's unit array and is not range checked; the record is resolved
+   through fdps_get_unit_record, so a call after the array has moved sees the
+   new block.  Nothing is written. */
+extern int fdps_check_can_counter_attack_from_tile(int defender_unit,
+                                                   int attacker_x,
+                                                   int attacker_y);
+#pragma aux fdps_check_can_counter_attack_from_tile "*" parm caller [];
+
 #endif

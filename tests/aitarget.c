@@ -675,6 +675,321 @@ static void range_unit_cell_uses_the_grid_width_unchecked(void)
     CHECK_EQ(range_marker(1 * 4 + 1), 0);
 }
 
+/* ------------------------------------------------------------------
+ * 000125c0 fdps_check_can_counter_attack_from_tile
+ *
+ * Two blocks live: the map unit array, staged by stage() above, and the
+ * ITEM.DAT table, because the range test reaches it through
+ * fdps_unit_find_equipped_slot -> fdps_get_item_record.  Both are staged here
+ * for the same reason as everything above -- the function takes its whole
+ * input from those two globals plus its three arguments.  Nothing below
+ * asserts what either global holds on its own; ticket 23 owns that.
+ *
+ * The item block is published one record PAST the start of its storage so
+ * record -1 is real addressable memory, the same arrangement tests/unititem.c
+ * uses, because fdps_unit_get_item_id widens the id byte without sign and an
+ * id of 0xff must reach record 255.
+ *
+ * Expected values come from the assembly at 000125c0 -- CMP byte ptr
+ * [EAX+0x26],0x0 / JZ at 000125de, the two CALL 0x0003d364 abs pairs at
+ * 00012602 and 00012620 with CMP EAX,0x1 / JZ at 00012631, PUSH 0x0 / CALL
+ * 0x00025140 at 0001263f with CMP [EBP-0x10],-0x1 / JNZ at 00012650, MOV AL,
+ * byte ptr [EAX+0xb] / AND EAX,0xff / CMP EAX,0x1 / JLE at 00012684, and the
+ * four MOV [EBP-0x4],0xffffffff stores against the single MOV [EBP-0x4],0x1 at
+ * 0001269a -- from the record layouts ticket 17 settled (status_timers at
+ * +0x22, item record 0x17 with range_min at +0x0b) and from assets/items.md
+ * for item 0x63.  None of them is read off the emitted C.
+ * ------------------------------------------------------------------ */
+
+/* IMUL EAX,dword ptr [EBP+0x14],0x17 in fdps_get_item_record. */
+#define ITEM_RECORD_STRIDE 0x17
+#define COUNTER_ITEM_COUNT 256
+
+/* AND AL,0x40 in fdps_unit_find_equipped_slot: bit 0x40 of an inventory
+   entry's flag byte is what marks the entry equipped. */
+#define INVENTORY_FLAG_EQUIPPED 0x40
+#define INVENTORY_FLAG_CARRIED 0x00
+
+/* Item type 1 is a plain weapon and 0x16 the lowest armour type
+   (assets/items.md); fdps_unit_find_equipped_slot with want_armor 0 accepts
+   the first and refuses the second. */
+#define ITEM_TYPE_WEAPON 0x01
+#define ITEM_TYPE_ARMOR 0x16
+
+static unsigned char counter_items[(COUNTER_ITEM_COUNT + 1) * ITEM_RECORD_STRIDE];
+
+static struct fdps_item_effect *counter_item(int item_id)
+{
+    return (struct fdps_item_effect *)
+           (counter_items + (item_id + 1) * ITEM_RECORD_STRIDE);
+}
+
+/* Zero both blocks, publish both bases, and give the battle `units` records.
+   A unit staged this way has every inventory flag byte clear -- nothing
+   equipped -- and every status timer at zero. */
+static void stage_counter(int units)
+{
+    int i;
+
+    for (i = 0; i < (int) sizeof(counter_items); i++) {
+        counter_items[i] = 0;
+    }
+    stage(units);
+    data_fdps_item_effect_table_ptr = counter_items + ITEM_RECORD_STRIDE;
+}
+
+/* Put item_id in slot `slot` of unit `unit_index` with the equipped bit set,
+   and give that item record the type and the two range bytes asked for. */
+static void arm(int unit_index, int slot, int item_id, int item_type,
+                int range_min, int range_max)
+{
+    struct fdps_item_effect *item;
+
+    stage_units[unit_index].inventory_slots[slot * 2] =
+        (unsigned char) INVENTORY_FLAG_EQUIPPED;
+    stage_units[unit_index].inventory_slots[slot * 2 + 1] =
+        (unsigned char) item_id;
+    item = counter_item(item_id);
+    item->type = (unsigned char) item_type;
+    item->range_min = (unsigned char) range_min;
+    item->range_max = (unsigned char) range_max;
+}
+
+/* The three record bytes the body addresses by literal displacement: +0x26 for
+   the paralysis counter, +0x0b for range_min and +0x0c for the range_max it
+   pointedly does not read.  If the layout moved, every case below would still
+   pass while reading the wrong bytes. */
+static void counter_reads_the_measured_offsets(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers) + 4, 0x26);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, range_min), 0x0b);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, range_max), 0x0c);
+    CHECK_EQ((int) sizeof(struct fdps_item_effect), ITEM_RECORD_STRIDE);
+}
+
+/* Four MOV dword ptr [EBP-0x4],0xffffffff against one MOV [EBP-0x4],0x1: the
+   refusal is -1 and never 0, which is what makes the bare-predicate spelling
+   wrong (rebuild_info/pitfalls.md).  All four refusals answer the same value.
+ */
+static void counter_refusal_is_minus_one(void)
+{
+    stage_counter(1);
+    place(0, 4, 4, 0, 0);
+
+    /* paralysed, everything else in order */
+    arm(0, 0, 0x10, ITEM_TYPE_WEAPON, 1, 1);
+    stage_units[0].status_timers[4] = 1;
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+    stage_units[0].status_timers[4] = 0;
+
+    /* not adjacent */
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 6, 4), -1);
+
+    /* nothing equipped */
+    stage_units[0].inventory_slots[0] = (unsigned char) INVENTORY_FLAG_CARRIED;
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+
+    /* equipped, but the weapon cannot reach the next tile */
+    stage_units[0].inventory_slots[0] = (unsigned char) INVENTORY_FLAG_EQUIPPED;
+    counter_item(0x10)->range_min = 2;
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+
+    /* and the one acceptance is exactly 1 */
+    counter_item(0x10)->range_min = 1;
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), 1);
+}
+
+/* CMP EAX,0x1 / JZ at 00012631 on the sum of the two abs calls: the sum must
+   EQUAL one, so all four orthogonal neighbours count and nothing else does --
+   the defender's own tile at sum 0 and every diagonal at sum 2 are refused
+   just as a tile two away is. */
+static void counter_adjacency_is_exactly_one_tile(void)
+{
+    stage_counter(1);
+    place(0, 4, 4, 0, 0);
+    arm(0, 0, 0x10, ITEM_TYPE_WEAPON, 1, 1);
+
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), 1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 3, 4), 1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 4, 5), 1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 4, 3), 1);
+
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 4, 4), -1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 5), -1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 3, 3), -1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 3), -1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 6, 4), -1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 4, 6), -1);
+}
+
+/* The tile bytes are read from record offsets +0 and +1 and zero-extended
+   (AND EAX,0xff at 000125f5 and 00012613), so a defender standing on a high
+   tile number is as reachable as one near the origin and neither delta is ever
+   negative on the way into abs. */
+static void counter_position_bytes_are_unsigned(void)
+{
+    stage_counter(1);
+    place(0, 200, 250, 0, 0);
+    arm(0, 0, 0x10, ITEM_TYPE_WEAPON, 1, 1);
+
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 201, 250), 1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 199, 250), 1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 200, 249), 1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 200, 252), -1);
+}
+
+/* CMP byte ptr [EAX+0x26],0x0 / JZ at 000125de: the paralysis counter is the
+   only timer consulted, and it blocks on any non-zero count rather than on a
+   particular one.  The other five timers at +0x22..+0x25 and +0x27 leave the
+   answer alone. */
+static void counter_paralysis_timer_blocks(void)
+{
+    stage_counter(1);
+    place(0, 4, 4, 0, 0);
+    arm(0, 0, 0x10, ITEM_TYPE_WEAPON, 1, 1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), 1);
+
+    stage_units[0].status_timers[4] = 1;
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+    stage_units[0].status_timers[4] = 2;
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+    stage_units[0].status_timers[4] = 0xff;
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+
+    stage_units[0].status_timers[4] = 0;
+    stage_units[0].status_timers[0] = 3;
+    stage_units[0].status_timers[1] = 3;
+    stage_units[0].status_timers[2] = 3;
+    stage_units[0].status_timers[3] = 3;
+    stage_units[0].status_timers[5] = 3;
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), 1);
+}
+
+/* CMP dword ptr [EBP-0x10],-0x1 / JNZ at 00012650, over a call that passes
+   PUSH 0x0 for want_armor at 0001263f: a defender with nothing equipped, or
+   carrying its weapon without the 0x40 bit, or wearing armour and no weapon,
+   does not strike back. */
+static void counter_needs_an_equipped_weapon(void)
+{
+    stage_counter(1);
+    place(0, 4, 4, 0, 0);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+
+    arm(0, 0, 0x10, ITEM_TYPE_WEAPON, 1, 1);
+    stage_units[0].inventory_slots[0] = (unsigned char) INVENTORY_FLAG_CARRIED;
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+
+    stage_counter(1);
+    place(0, 4, 4, 0, 0);
+    arm(0, 0, 0x40, ITEM_TYPE_ARMOR, 1, 1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+
+    stage_counter(1);
+    place(0, 4, 4, 0, 0);
+    arm(0, 0, 0x10, ITEM_TYPE_WEAPON, 1, 1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), 1);
+}
+
+/* CMP EAX,0x1 / JLE at 0001268c: the reach test is range_min BELOW 2, so 0 and
+   1 both pass and 2 upwards fails.  The twin at 000137e0 tests the same byte
+   for equality with 1, which is why 0 has to be pinned here separately
+   (rebuild_info/pitfalls.md). */
+static void counter_range_min_below_two(void)
+{
+    stage_counter(1);
+    place(0, 4, 4, 0, 0);
+    arm(0, 0, 0x10, ITEM_TYPE_WEAPON, 0, 0);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), 1);
+
+    counter_item(0x10)->range_min = 1;
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), 1);
+    counter_item(0x10)->range_min = 2;
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+    counter_item(0x10)->range_min = 3;
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+    counter_item(0x10)->range_min = 0xff;
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+}
+
+/* Item 0x63 光束砲 is type 0x15 -- a weapon type, so the equipped-slot search
+   accepts it -- with range 0-0 (assets/items.md).  This function says its
+   holder counterattacks; that is the one item on which it and the unit-index
+   twin disagree, and it is the reason the two may not share a helper. */
+static void counter_accepts_the_zero_range_weapon(void)
+{
+    stage_counter(1);
+    place(0, 4, 4, 0, 0);
+    arm(0, 0, 0x63, 0x15, 0, 0);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), 1);
+}
+
+/* range_max at +0x0c is never loaded: a weapon whose minimum reach is one
+   answers 1 with a maximum of zero behind it, and one whose minimum is five
+   answers -1 however far its maximum stretches. */
+static void counter_ignores_range_max(void)
+{
+    stage_counter(1);
+    place(0, 4, 4, 0, 0);
+    arm(0, 0, 0x10, ITEM_TYPE_WEAPON, 1, 0);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), 1);
+
+    arm(0, 0, 0x11, ITEM_TYPE_WEAPON, 5, 9);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+}
+
+/* The item whose range decides the answer is the one in the slot
+   fdps_unit_find_equipped_slot returned, and that search stops at the FIRST
+   equipped weapon.  With a short-ranged weapon equipped in slot 1 and a
+   melee one in slot 4, the answer is the slot 1 weapon's. */
+static void counter_uses_the_first_equipped_weapon(void)
+{
+    stage_counter(1);
+    place(0, 4, 4, 0, 0);
+    arm(0, 4, 0x21, ITEM_TYPE_WEAPON, 1, 1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), 1);
+
+    arm(0, 1, 0x20, ITEM_TYPE_WEAPON, 3, 5);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), -1);
+}
+
+/* Every record read goes through fdps_get_unit_record(defender_unit), so the
+   subject is the unit the index names and not the first one: unit 2's tile and
+   unit 2's weapon decide the answer while unit 0 stands adjacent with a
+   perfectly good sword. */
+static void counter_subject_is_the_named_unit(void)
+{
+    stage_counter(3);
+    place(0, 4, 4, 0, 0);
+    place(1, 9, 9, 0, 0);
+    place(2, 1, 1, 0, 0);
+    arm(0, 0, 0x10, ITEM_TYPE_WEAPON, 1, 1);
+    arm(2, 0, 0x11, ITEM_TYPE_WEAPON, 1, 1);
+
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(2, 1, 2), 1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(2, 5, 4), -1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(1, 9, 8), -1);
+}
+
+/* Nothing in the body writes: the four fields it reads come back unchanged
+   after an accepting call and a refusing one. */
+static void counter_does_not_touch_the_records(void)
+{
+    stage_counter(1);
+    place(0, 4, 4, 0, 0);
+    arm(0, 0, 0x10, ITEM_TYPE_WEAPON, 1, 7);
+    stage_units[0].status_timers[4] = 0;
+
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 5, 4), 1);
+    CHECK_EQ(fdps_check_can_counter_attack_from_tile(0, 7, 4), -1);
+    CHECK_EQ(stage_units[0].pos_x, 4);
+    CHECK_EQ(stage_units[0].pos_y, 4);
+    CHECK_EQ(stage_units[0].status_timers[4], 0);
+    CHECK_EQ(stage_units[0].inventory_slots[0], INVENTORY_FLAG_EQUIPPED);
+    CHECK_EQ(stage_units[0].inventory_slots[1], 0x10);
+    CHECK_EQ(counter_item(0x10)->range_min, 1);
+    CHECK_EQ(counter_item(0x10)->range_max, 7);
+}
+
 void run_aitarget_tests(void)
 {
     RUN_TEST(area_record_stride_is_0x50);
@@ -714,6 +1029,19 @@ void run_aitarget_tests(void)
     RUN_TEST(range_scan_stops_at_the_unit_count);
     RUN_TEST(range_unit_cell_uses_the_grid_width_unchecked);
 
+    RUN_TEST(counter_reads_the_measured_offsets);
+    RUN_TEST(counter_refusal_is_minus_one);
+    RUN_TEST(counter_adjacency_is_exactly_one_tile);
+    RUN_TEST(counter_position_bytes_are_unsigned);
+    RUN_TEST(counter_paralysis_timer_blocks);
+    RUN_TEST(counter_needs_an_equipped_weapon);
+    RUN_TEST(counter_range_min_below_two);
+    RUN_TEST(counter_accepts_the_zero_range_weapon);
+    RUN_TEST(counter_ignores_range_max);
+    RUN_TEST(counter_uses_the_first_equipped_weapon);
+    RUN_TEST(counter_subject_is_the_named_unit);
+    RUN_TEST(counter_does_not_touch_the_records);
+
     /* Put the globals back before leaving.  The runners share one process and
        every block above is this translation unit's own fixture: a later unit
        that expects an unallocated grid or an empty battle would otherwise
@@ -725,4 +1053,5 @@ void run_aitarget_tests(void)
     data_fdps_scene_layer_tile_attr_ptr[0] = NULL;
     data_fdps_map_cell_event_code_layer_ptr = NULL;
     data_fdps_class_table_ptr = NULL;
+    data_fdps_item_effect_table_ptr = NULL;
 }

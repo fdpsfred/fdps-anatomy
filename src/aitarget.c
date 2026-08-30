@@ -11,6 +11,7 @@
 #include "movegrid.h"
 #include "table.h"
 #include "unit.h"
+#include "unititem.h"
 #include "aitarget.h"
 
 /* 000109f0.  Walks all data_fdps_map_unit_count records with stride 0x50 and
@@ -183,4 +184,84 @@ int fdps_collect_targets_in_range(int tile_x, int tile_y,
         }
     }
     return match_count;
+}
+
+/* 000125c0.  The counterattack question asked about a TILE rather than about a
+   second unit, which is the form the map AI needs while it is still deciding
+   where to stand.
+
+   Four tests in this order, each failure storing -1 into the one result slot
+   at [EBP-0x4] and jumping to the single epilogue at 000126a1: the paralysis
+   counter, orthogonal adjacency, an equipped weapon, and that weapon's minimum
+   range.  Only the fall-through stores 1.  The result is therefore 1 or -1 and
+   never 0, and the caller at 000124a2 compares it with CMP EAX,1
+   (rebuild_info/pitfalls.md); returning 0 for a refusal, which is what a
+   rewrite into a bool-shaped predicate produces, is accepted by every `if` in
+   sight and changes nothing until the AI starts counting counterattacks it was
+   told would not happen.
+
+   CMP byte ptr [EAX+0x26],0x0 / JZ at 000125de is a plain zero test on
+   status_timers[4], the paralysis counter, and not a compare against any
+   particular count.
+
+   The adjacency test is CMP EAX,0x1 / JZ at 00012631 on the sum of the two
+   CRT abs calls -- EQUAL to one, not at most one -- so the defender's own tile
+   (sum 0) is refused along with every diagonal (sum 2).  Each delta is formed
+   as the passed coordinate minus the record byte, the byte zero-extended by
+   AND EAX,0xff, and handed to abs, so the two orders of subtraction are the
+   same answer and the byte is never signed.
+
+   CMP EAX,0x1 / JLE at 0001268c is the range test, so range_min 0 and 1 both
+   pass.  The unit-index twin fdps_check_can_counter_attack at 000137e0 tests
+   the same byte for equality with 1 instead, and the pair disagree about a
+   unit carrying item 0x63 光束砲, whose range is 0-0 (assets/items.md).  The
+   two are not one function with two argument shapes and must not be folded.
+   range_max at item record +0x0c is not read here at all.
+
+   The equipped-slot call is fdps_unit_find_equipped_slot(defender_unit, 0) --
+   PUSH 0x0 first at 0001263f -- so it is the weapon and not the armour, and
+   -1 from it is a refusal.  The slot then goes through fdps_unit_get_item_id
+   and fdps_get_item_record; the original reuses the one stack slot at
+   [EBP-0x10] for the slot number and then the item id, which is two values and
+   is spelt as two here.
+
+   abs is the CRT call the original makes (CALL 0x0003d364, twice).  The flag
+   set carries no -oi, so __INLINE_FUNCTIONS__ is not defined and stdlib.h
+   leaves abs a call here as it does in the two collectors above. */
+int fdps_check_can_counter_attack_from_tile(int defender_unit, int attacker_x,
+                                            int attacker_y)
+{
+    struct fdps_unit_record *defender;
+    struct fdps_item_effect *weapon;
+    int dist_x;
+    int dist_y;
+    int weapon_slot;
+    int weapon_item_id;
+    int can_counter;
+
+    defender = fdps_get_unit_record(defender_unit);
+    if (defender->status_timers[4] != 0) {
+        can_counter = -1;
+    } else {
+        dist_x = abs(attacker_x - (int) defender->pos_x);
+        dist_y = abs(attacker_y - (int) defender->pos_y);
+        if (dist_x + dist_y != 1) {
+            can_counter = -1;
+        } else {
+            weapon_slot = fdps_unit_find_equipped_slot(defender_unit, 0);
+            if (weapon_slot == -1) {
+                can_counter = -1;
+            } else {
+                weapon_item_id = fdps_unit_get_item_id(defender_unit,
+                                                       weapon_slot);
+                weapon = fdps_get_item_record(weapon_item_id);
+                if (weapon->range_min < 2) {
+                    can_counter = 1;
+                } else {
+                    can_counter = -1;
+                }
+            }
+        }
+    }
+    return can_counter;
 }

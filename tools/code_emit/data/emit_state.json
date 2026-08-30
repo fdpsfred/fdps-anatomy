@@ -519,6 +519,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x37"
+    },
+    "000125c0": {
+      "name": "fdps_check_can_counter_attack_from_tile",
+      "target": "aitarget.c",
+      "body_size": "0xeb",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0xeb"
     }
   }
 }
