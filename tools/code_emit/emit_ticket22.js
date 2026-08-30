@@ -202,7 +202,7 @@ const GATE_SUMMARY = {
 const BOOK_SUMMARY = {
   type: 'object',
   additionalProperties: false,
-  required: ['addr', 'committed'],
+  required: ['addr', 'committed', 'issues_logged'],
   properties: withStops({
     addr: { type: 'string' },
     committed: { type: 'boolean' },
@@ -210,7 +210,15 @@ const BOOK_SUMMARY = {
     ghidra_applied: { type: 'integer' },
     ghidra_gate_clean: { type: 'boolean', description: 'Orphan ranges and error bookmarks both 0' },
     snapshot_exported: { type: 'boolean' },
-    issues_logged: { type: 'integer' },
+    // Required, and zero is a real answer. emit_issues.json is the only input
+    // the closing sweep gets, this stage is the only writer, and no later stage
+    // re-reads the verdict files -- so an omitted count is indistinguishable
+    // from concerns that were raised and then dropped on the floor.
+    issues_logged: {
+      type: 'integer',
+      description: 'How many open_issues entries you appended to emit_issues.json, '
+        + 'across BOTH verdict files. 0 when both were empty.',
+    },
     tree_clean: { type: 'boolean', description: 'git status is clean afterwards' },
     target_lines: {
       type: 'integer',
@@ -331,7 +339,18 @@ module) being rebuilt into functionally equivalent C. Ghidra has it open as the
 only program, so leave the \`program\` parameter empty on every MCP call.
 
 Load the Ghidra tools you need in ONE ToolSearch call:
-  ToolSearch "select:mcp__ghidra__get_plate_comment,mcp__ghidra__disassemble_function,mcp__ghidra__decompile_function,mcp__ghidra__get_function_callers,mcp__ghidra__get_function_callees,mcp__ghidra__get_xrefs_to,mcp__ghidra__get_function_signature,mcp__ghidra__read_memory"
+  ToolSearch "select:mcp__ghidra__get_plate_comment,mcp__ghidra__disassemble_function,mcp__ghidra__decompile_function,mcp__ghidra__get_function_callers,mcp__ghidra__get_function_callees,mcp__ghidra__get_xrefs_to,mcp__ghidra__get_function_signature,mcp__ghidra__read_memory,mcp__ghidra__search_instructions,mcp__ghidra__get_assembly_context"
+
+The last two are in that list because the convergence rule below tells you to go
+and settle what is settleable: search_instructions is how you sweep the whole
+image for every read of a field, and get_assembly_context is how you look at a
+call site without pulling a whole caller.
+
+The Watcom install is at
+  C:\\Users\\fdpsf\\Documents\\WATCOM_10_series\\WATCOM_10.0a
+so its disassembler, for reading the object files your own build produced, is
+  C:\\Users\\fdpsf\\Documents\\WATCOM_10_series\\WATCOM_10.0a\\BINNT\\WDISASM.EXE
+It is a native Windows binary; run it directly, no DOSBox.
 
 If a Ghidra call fails or times out, retry it ONCE. If the retry works, carry on
 and set no flags. If it fails again, stop work on this function, set
@@ -402,8 +421,8 @@ that thing is reachable from where you are sitting. These are, always:
     the knowledge base -- program_info/, resource_info/, assets/, chapters/,
       rebuild_info/
     THE .OBJ YOUR OWN BUILD JUST PRODUCED, under
-      workspace/code_emit/out/objs/, disassembled read-only with
-      WATCOM_10.0a/BINNT/WDISASM.EXE
+      workspace/code_emit/out/objs/, disassembled read-only with the WDISASM.EXE
+      whose full path is in the environment note above
 
 That last one is the one people forget: the object file holding the function you
 just wrote is sitting on disk, and comparing it against the original's bytes
@@ -1213,6 +1232,11 @@ const results = []
 // has landed. A number that climbs faster than the batch size is the signal
 // that the convergence rule in RULES is not biting.
 let concernsLogged = 0
+// Functions where the verdicts' own count and the bookkeeper's disagree. Not
+// fatal to the batch -- the function is emitted, reviewed and gated either way
+// -- but it names exactly which verdict files still hold something that never
+// reached the file the closing sweep reads.
+const concernMismatches = []
 const splits = []
 // Set when the run finished tidily but early -- currently only a routing
 // change under its feet. Unlike `stopped` it does not suppress the closing
@@ -1425,12 +1449,25 @@ for (let i = 0; i < fns.length && !stopped && !endedEarly; i++) {
           if (book.problems) {
             log('  out of band: ' + book.problems)
           }
-          // The bookkeeper's own count is the one that matters: it counts what
-          // reached emit_issues.json, where the closing sweep will look, rather
-          // than what the emitter and the reviewer each claim to have raised.
-          if ((book.issues_logged || 0) > 0) {
-            concernsLogged += book.issues_logged
-            log('  ' + book.issues_logged + ' concern(s) recorded for the closing sweep')
+          // Two counts of the same thing, from either side of the handover:
+          // what the emitter and the reviewer say they raised, and what the
+          // bookkeeper says reached emit_issues.json. Cross-checking them is
+          // the only guard left now that nothing downstream re-reads the
+          // verdict files -- a bookkeeper that skipped step 4 would otherwise
+          // report a clean function and take its concerns with it.
+          const claimed = (emitted.open_issues || 0) + (verdict.open_issues || 0)
+          const logged = book.issues_logged || 0
+          concernsLogged += logged
+          if (logged > 0) {
+            log('  ' + logged + ' concern(s) recorded for the closing sweep')
+          }
+          if (claimed !== logged) {
+            log('  MISMATCH: verdicts raised ' + claimed + ' concern(s) but '
+              + logged + ' reached emit_issues.json -- the difference is lost '
+              + 'unless somebody reads ' + VERDICTS + '\\' + fn.addr + '.*.json')
+            concernMismatches.push({
+              addr: fn.addr, name: fn.name, claimed: claimed, logged: logged,
+            })
           }
 
           // A target file that has outgrown the budget is split now, while the
@@ -1581,6 +1618,9 @@ const stats = {
   // the closing sweep over the whole file does that once every function has
   // landed (ticket 22.1).
   concerns_logged: concernsLogged,
+  // Empty is the expected value. A non-empty list means concerns exist in
+  // workspace/code_emit/verdicts/ that emit_issues.json does not know about.
+  concern_mismatches: concernMismatches,
   results: results,
   out_tok_k: spentK(batchStart),
 }

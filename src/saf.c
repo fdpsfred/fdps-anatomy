@@ -91,9 +91,11 @@ int fdps_saf_frame_count(void *saf)
    replayed under a uniform slot substitution, the result copied back out -- and
    -oe is not in the flag set, so the expansion was asked for in the source with
    _inline (rebuild_info/build_flags.md).  Writing the bodies out is still
-   correct: ADR-0001 is functional equivalence, the two spellings compile to the
-   same behaviour, and declaring _inline here to chase the original's wording
-   would risk a CALL the original does not have.  Both copies are read the same
+   correct: ADR-0001 is functional equivalence and the two spellings compile to
+   the same behaviour.  Chasing the original's wording is the riskier of the
+   two, because the call spelling only stays equivalent while the _inline
+   declaration is there to expand it -- a call without it puts a CALL here that
+   the original does not have.  Both copies are read the same
    way -- the count word at +0x0c zero-extended, the three magic bytes joined
    with OR, the frame offset rebased on the image base -- so the notes on
    fdps_saf_frame_count and fdps_saf_get_frame above apply here unchanged.
