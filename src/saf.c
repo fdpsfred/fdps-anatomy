@@ -84,12 +84,19 @@ int fdps_saf_frame_count(void *saf)
    byte-wide unsigned argument however wide the dword the caller pushed.
 
    The magic test and the frame lookup are written out here rather than called,
-   because the assembly has no CALL in it at all and the build is -od, which
-   does not inline: what the original compiled from held this code textually,
-   the same shape fdps_saf_frame_count and fdps_saf_get_frame above hold.  Both
-   copies are read the same way -- the count word at +0x0c zero-extended, the
-   three magic bytes joined with OR, the frame offset rebased on the image base
-   -- so the notes on those two apply here unchanged.
+   because the assembly has no CALL in it at all.  What the original source said
+   is a separate question from what to write here, and the evidence says it
+   called them: both expansions carry a full copy of the callee's frame --
+   argument temps copied into consecutive parameter-shaped slots, the body
+   replayed under a uniform slot substitution, the result copied back out -- and
+   -oe is not in the flag set, so the expansion was asked for in the source with
+   _inline (rebuild_info/build_flags.md).  Writing the bodies out is still
+   correct: ADR-0001 is functional equivalence, the two spellings compile to the
+   same behaviour, and declaring _inline here to chase the original's wording
+   would risk a CALL the original does not have.  Both copies are read the same
+   way -- the count word at +0x0c zero-extended, the three magic bytes joined
+   with OR, the frame offset rebased on the image base -- so the notes on
+   fdps_saf_frame_count and fdps_saf_get_frame above apply here unchanged.
 
    Three things in the tick arithmetic are decided by the assembly and not by
    what reads naturally:

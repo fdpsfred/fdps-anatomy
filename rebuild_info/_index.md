@@ -8,7 +8,7 @@
 
 | 文件 | 內容 |
 | --- | --- |
-| [`build_flags.md`](build_flags.md) | 工具鏈版本、`wcc386` 與 `wlink` 的旗標組與逐項判定依據、預設 calling convention 與偏離者的辨識法 |
+| [`build_flags.md`](build_flags.md) | 工具鏈版本、`wcc386` 與 `wlink` 的旗標組與逐項判定依據、`-od` 之下 inline 展開的指紋與辨識法、預設 calling convention 與偏離者的辨識法 |
 | [`build_pipeline.md`](build_pipeline.md) | 自動化建置流程：DOS 版工具的落點、掛載配置、旗標的送入方式、三訊號結束偵測、前置檢查，以及最小驗證程式證明了什麼 |
 | [`build_gate.md`](build_gate.md) | 自我回歸閘：通過的條件、五種等價判定的意義、基準值的推進規則與更新流程、閘門看不到的東西 |
 | [`emit_pipeline.md`](emit_pipeline.md) | 一個 function 怎麼變成 C：五個角色的分工與序列的理由、emit 的 gate、calling convention 的宣告寫法、八類隱性契約檢查表、測試的組織方式、工作狀態與續跑、中斷復原的時機與界線、批次大小歸誰決定 |

@@ -68,10 +68,20 @@ void fdps_map_grid_reset(void)
 
    The four neighbour marks are written out here rather than calling
    fdps_move_grid_set_stop_flag, which is the same three lines as a standalone
-   function at 00010da0.  The binary keeps that copy but nothing calls it: the
-   build used -od, so the compiler did no inlining and the expansion is in the
-   original source, whichever way it was spelled there.  Emitting a call would
-   put a CALL where the original has none.
+   function at 00010da0.  The binary keeps that copy but nothing calls it.  Note
+   that -od does NOT mean the compiler did no inlining -- _inline in the source
+   is honoured under it, and three expansion sites in this image are the
+   measurement (rebuild_info/build_flags.md) -- so the assembly does not settle
+   how the original spelled this.  It does not need to: emitting a call would
+   put a CALL where the original has none, and under ADR-0001 writing the marks
+   out reproduces the behaviour either way.
+
+   What the shape here does say is that this is not 00010da0's body with its
+   parameters bound once: each of the four sites gets its own five-dword group
+   in the frame, two more than a single binding needs.  That is recorded as an
+   open concern rather than resolved, because macro and four hand-written copies
+   are the same token stream after preprocessing and no reading of the binary
+   can separate them.
 
    Each neighbour re-reads the width word out of the header instead of using
    the copy taken above, and only the centre uses the copy (MOVSX word ptr
