@@ -9,6 +9,15 @@
  * against 0x12.  The loop bound is CMP EAX,[EBP+0x18] / JL at 000132fb, so it
  * is exclusive.  None of them is read off the emitted C.
  *
+ * For 00013c20 they come from the CMP EAX,[EBP+0x14] / JL at 00013c3d that
+ * bounds the walk before the body runs, the MOV AL / AND EAX,0xff at 00013c52
+ * that zero extends the index byte, the ADD EAX,[EBP+0x1c] / CMP byte ptr
+ * [EAX],0x0 at 00013c68 that picks the timer byte out of the record and tests
+ * it against zero alone, and the ADD dword ptr [EBP-0xc],EAX at 00013c73 that
+ * adds score_per_target once per clear target.  The five offsets and the two
+ * score values the only caller passes are the PUSH pairs at 00013a82,
+ * 00013b04, 00013b26, 00013b3d and 00013b54.
+ *
  * Both tables are staged here rather than read from a game file: the function
  * takes its whole input from its three arguments and from the two records the
  * accessors resolve, so pointing the table globals at local blocks is the only
@@ -31,6 +40,16 @@
    line-shaped damage items.  Every other code falls through both branches. */
 #define USE_EFFECT_HEAL   0x0b
 #define USE_EFFECT_DAMAGE 0x1e
+
+/* The status-effect timer offsets fdps_score_targets_for_spell pushes, with
+   the per-target score it pairs each with: 4 for the three 神之祝福 buff slots
+   and 0x0a for the two ailments. */
+#define STATUS_OFF_BLESS_AP  0x22
+#define STATUS_OFF_BLESS_DP  0x23
+#define STATUS_OFF_POISON    0x25
+#define STATUS_OFF_PARALYSIS 0x26
+#define SCORE_BLESS   4
+#define SCORE_AILMENT 0x0a
 
 static struct fdps_item_effect stage_items[STAGE_ITEMS];
 
@@ -68,6 +87,17 @@ static void stage_unit(int unit_index, int hp_current, int hp_max,
     stage_units[unit_index].hp_current = (short) hp_current;
     stage_units[unit_index].hp_max = (short) hp_max;
     stage_units[unit_index].ai_behavior = (unsigned char) ai_behavior;
+}
+
+/* Sets one status-effect timer on a staged unit, addressed the way the scorer
+   addresses it -- record base plus a byte offset -- so a case about which byte
+   is read is not routed through the field name it is trying to pin down. */
+static void stage_status(int unit_index, int status_offset, int turns)
+{
+    unsigned char *record;
+
+    record = (unsigned char *) &stage_units[unit_index];
+    record[status_offset] = (unsigned char) turns;
 }
 
 /* Writes the current-HP word as a bit pattern rather than as a number, so a
@@ -313,6 +343,176 @@ static void damage_ignores_the_behavior_bit_and_sums(void)
     CHECK_EQ(fdps_score_targets_for_item(0, 2, targets), 0x12 + 8);
 }
 
+/* A unit array long enough to hold an index with the top bit of its byte set,
+   so the case about how that byte is widened has a real record to land on
+   instead of reading in front of the array. */
+#define WIDE_UNITS 0x82
+
+static struct fdps_unit_record wide_units[WIDE_UNITS];
+
+static void stage_wide(void)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) wide_units;
+    for (i = 0; i < (int) sizeof(wide_units); i++) {
+        bytes[i] = 0;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) wide_units;
+}
+
+/* The scorer indexes the record by the literal offsets its caller pushes --
+   0x22, 0x23, 0x24, 0x25 and 0x26 -- so all five have to fall inside
+   status_timers, which starts at 0x22 and runs six bytes.  If the field moved,
+   every one of those calls would read some other unit field instead. */
+static void status_timers_sit_where_the_caller_indexes(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers), 0x22);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, gap_028), 0x28);
+}
+
+/* CMP EAX,[EBP+0x14] / JL at 00013c3d is a signed test placed before the body,
+   so 0 and a negative count both return the accumulator untouched and neither
+   reads target_ids.  An unsigned compare would make -1 a huge count and walk
+   the array; a do/while spelling would score the first entry either way.  The
+   third check shows that entry would have scored had the walk run. */
+static void nonpositive_target_count_scores_zero(void)
+{
+    stage();
+    targets[0] = 0;
+
+    CHECK_EQ(fdps_score_targets_without_status(0, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), 0);
+    CHECK_EQ(fdps_score_targets_without_status(-1, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), 0);
+    CHECK_EQ(fdps_score_targets_without_status(1, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), SCORE_AILMENT);
+}
+
+/* CMP byte ptr [EAX],0x0 / JNZ at 00013c6b tests the whole byte against zero,
+   so the timer's remaining turn count is not compared with anything and any
+   nonzero value suppresses the score alike -- 1, 2 and 0xff included.  A test
+   of a single bit, or one of "more than one turn left", would let some of
+   these through. */
+static void a_running_timer_scores_nothing(void)
+{
+    stage();
+    targets[0] = 0;
+
+    CHECK_EQ(fdps_score_targets_without_status(1, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), SCORE_AILMENT);
+    stage_status(0, STATUS_OFF_POISON, 1);
+    CHECK_EQ(fdps_score_targets_without_status(1, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), 0);
+    stage_status(0, STATUS_OFF_POISON, 2);
+    CHECK_EQ(fdps_score_targets_without_status(1, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), 0);
+    stage_status(0, STATUS_OFF_POISON, 0xff);
+    CHECK_EQ(fdps_score_targets_without_status(1, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), 0);
+    stage_status(0, STATUS_OFF_POISON, 0);
+    CHECK_EQ(fdps_score_targets_without_status(1, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), SCORE_AILMENT);
+}
+
+/* ADD EAX,[EBP+0x1c] at 00013c68 adds the argument to the record base, so the
+   offset selects which one of the six timers is consulted and the neighbouring
+   five are not: a unit carrying the attack buff is still a full-value target
+   for the defence buff, for poison and for paralysis.  A scorer that tested a
+   fixed field, or that OR-ed the timers together, would score 0 for all of
+   them. */
+static void status_offset_picks_one_timer(void)
+{
+    stage();
+    targets[0] = 0;
+    stage_status(0, STATUS_OFF_BLESS_AP, 3);
+
+    CHECK_EQ(fdps_score_targets_without_status(1, targets,
+                                               STATUS_OFF_BLESS_AP,
+                                               SCORE_BLESS), 0);
+    CHECK_EQ(fdps_score_targets_without_status(1, targets,
+                                               STATUS_OFF_BLESS_DP,
+                                               SCORE_BLESS), SCORE_BLESS);
+    CHECK_EQ(fdps_score_targets_without_status(1, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), SCORE_AILMENT);
+    stage_status(0, STATUS_OFF_PARALYSIS, 1);
+    CHECK_EQ(fdps_score_targets_without_status(1, targets,
+                                               STATUS_OFF_PARALYSIS,
+                                               SCORE_AILMENT), 0);
+    CHECK_EQ(fdps_score_targets_without_status(1, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), SCORE_AILMENT);
+}
+
+/* ADD dword ptr [EBP-0xc],EAX at 00013c73 adds the argument once per clear
+   target, so the answer is score_per_target times the number of clear targets
+   and nothing else scales it: three clear targets are 30 at the ailment rate
+   and 12 at the blessing rate, a score of 0 stays 0 however many targets there
+   are, and one target that already carries the effect drops exactly its own
+   share. */
+static void score_per_target_multiplies_the_clear_targets(void)
+{
+    stage();
+    targets[0] = 0;
+    targets[1] = 1;
+    targets[2] = 2;
+
+    CHECK_EQ(fdps_score_targets_without_status(3, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), 30);
+    CHECK_EQ(fdps_score_targets_without_status(3, targets, STATUS_OFF_POISON,
+                                               SCORE_BLESS), 12);
+    CHECK_EQ(fdps_score_targets_without_status(3, targets, STATUS_OFF_POISON,
+                                               0), 0);
+    stage_status(1, STATUS_OFF_POISON, 1);
+    CHECK_EQ(fdps_score_targets_without_status(3, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), 20);
+}
+
+/* MOV EAX,[EBP+0x18] / ADD EAX,[EBP-0x10] / MOV AL,byte ptr [EAX] at 00013c4c
+   reads the list one byte at a time in the order given, and the bound is
+   exclusive.  Unit 0 is made to carry the effect while the list starts at unit
+   3, so a walk that ignored the list and counted units from zero would score 0
+   where this one scores 10; entries past target_count are not visited even
+   though unit 5 would pay. */
+static void the_walk_follows_the_index_list(void)
+{
+    stage();
+    targets[0] = 3;
+    targets[1] = 1;
+    targets[2] = 5;
+    stage_status(0, STATUS_OFF_POISON, 1);
+    stage_status(1, STATUS_OFF_POISON, 1);
+
+    CHECK_EQ(fdps_score_targets_without_status(1, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), SCORE_AILMENT);
+    CHECK_EQ(fdps_score_targets_without_status(2, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), SCORE_AILMENT);
+    CHECK_EQ(fdps_score_targets_without_status(3, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT),
+             SCORE_AILMENT * 2);
+}
+
+/* MOV AL,byte ptr [EAX] / AND EAX,0xff at 00013c52 widens the index byte
+   without a sign, so 0x81 is unit 129.  Unit 0 is staged carrying the effect
+   so a truncated or sign-extended index cannot score by accident, and unit 129
+   is then given the effect to prove the record actually being read is that
+   one. */
+static void the_index_byte_is_zero_extended(void)
+{
+    unsigned char *record;
+
+    stage_wide();
+    targets[0] = 0x81;
+    ((unsigned char *) &wide_units[0])[STATUS_OFF_POISON] = 1;
+
+    CHECK_EQ(fdps_score_targets_without_status(1, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), SCORE_AILMENT);
+    record = (unsigned char *) &wide_units[0x81];
+    record[STATUS_OFF_POISON] = 1;
+    CHECK_EQ(fdps_score_targets_without_status(1, targets, STATUS_OFF_POISON,
+                                               SCORE_AILMENT), 0);
+}
+
 void run_aiscore_tests(void)
 {
     RUN_TEST(record_layout_matches_the_offsets);
@@ -327,4 +527,11 @@ void run_aiscore_tests(void)
     RUN_TEST(damage_scores_the_kill_above_the_wound);
     RUN_TEST(damage_current_hp_is_unsigned);
     RUN_TEST(damage_ignores_the_behavior_bit_and_sums);
+    RUN_TEST(status_timers_sit_where_the_caller_indexes);
+    RUN_TEST(nonpositive_target_count_scores_zero);
+    RUN_TEST(a_running_timer_scores_nothing);
+    RUN_TEST(status_offset_picks_one_timer);
+    RUN_TEST(score_per_target_multiplies_the_clear_targets);
+    RUN_TEST(the_walk_follows_the_index_list);
+    RUN_TEST(the_index_byte_is_zero_extended);
 }

@@ -85,3 +85,45 @@ int fdps_score_targets_for_item(int item_id, int target_count,
     }
     return total;
 }
+
+/* 00013c20.  One walk over the target list, one byte tested per target.
+
+   The status byte is reached as record + status_offset rather than through a
+   named field because the offset is an argument: MOV EAX,[EBP-0x8] / ADD
+   EAX,[EBP+0x1c] / CMP byte ptr [EAX],0x0 at 00013c65.  The five offsets the
+   caller passes -- 0x22, 0x23 and 0x24 for 神之祝福's three buff slots, 0x25
+   for 腐毒術 and 0x26 for 麻痺術 -- are all inside struct fdps_unit_record's
+   status_timers, and each byte is a count of turns the effect still has to
+   run, so any nonzero value means the effect is already on the unit and that
+   target contributes nothing.
+
+   The loop test is CMP EAX,[EBP+0x14] / JL at 00013c3d: it runs before the
+   body and it is signed, so a target_count of 0 or below returns the untouched
+   accumulator without reading target_ids at all.
+
+   The index is loaded MOV AL / AND EAX,0xff at 00013c52, so it is zero
+   extended -- an index byte of 0x81 is unit 129.  Neither that index nor the
+   record pointer is range checked, because fdps_get_unit_record checks
+   neither, and the record is re-resolved on every pass rather than held.
+
+   fdps_score_targets_for_spell stores the result of all five of its calls with
+   MOV, not ADD -- 00013a96, 00013b18, 00013b3a, 00013b51 and 00013b68 all
+   write the same accumulator at [EBP-0x14] -- so in the 神之祝福 branch the
+   0x22 and 0x23 totals are computed and then overwritten by the 0x24 one. */
+int fdps_score_targets_without_status(int target_count,
+                                      unsigned char *target_ids,
+                                      int status_offset, int score_per_target)
+{
+    struct fdps_unit_record *target;
+    int target_index;
+    int total;
+
+    total = 0;
+    for (target_index = 0; target_index < target_count; target_index++) {
+        target = fdps_get_unit_record(target_ids[target_index]);
+        if (*((unsigned char *) target + status_offset) == 0) {
+            total = total + score_per_target;
+        }
+    }
+    return total;
+}
