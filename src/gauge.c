@@ -90,6 +90,64 @@ void fdps_draw_gauge_bar(unsigned char *dst, int dst_stride, int bar_index,
     }
 }
 
+/* The combat gauge's fill strip is 125 pixels wide and 5 rows tall, and the
+   four strips of the scratch sheet are that many bytes apart at that row
+   pitch: PUSH 0x7d for the source stride and PUSH 0x5 for the row count at
+   000192ab and 0001929d, and IMUL EAX,dword ptr [EBP+0x1c],0x271 at 0001925c
+   for the strip stride.  0x271 is 0x7d * 5, so the four strips are one packed
+   0x9c4-byte surface with nothing between them. */
+#define GAUGE_FILL_WIDTH 0x7d
+#define GAUGE_FILL_HEIGHT 5
+#define GAUGE_FILL_STRIP_STRIDE 0x271
+
+/* CMP dword ptr [EBP+0x1c],0x2 / JGE at 0001927b: strips 0 and 1 fill
+   right-to-left, 2 and upwards fill left-to-right. */
+#define GAUGE_FILL_LEFT_ALIGNED_FROM 2
+
+/* See gauge.h.  The three compares are in this order in the original and the
+   order is behaviour, not layout: CMP dword ptr [EBP+0x20],0x0 / JGE at
+   0001926e clamps first and writes the parameter slot itself at 00019274, so
+   the alignment shift and the blit width both read the clamped value; then
+   CMP ...,0x2 / JGE at 0001927b picks the alignment; then CMP ...,0x7d / JG
+   at 00019297 decides whether anything is drawn at all.  All three are signed
+   compares, so a negative fill_width and a negative gauge_index take the
+   branch a value that had been read as unsigned would not.
+
+   The strip base is worked out before the clamp, at 0001925c, and so is
+   computed on the path that never blits.  That is codegen and not behaviour:
+   the multiply cannot trap and the pointer is only dereferenced inside
+   fdps_blit_transparent_rect.
+
+   The original recomputes 0x7d - fill_width once for the strip at 00019286
+   and again for dest at 00019291 rather than keeping it; the same value is
+   added to both either way. */
+void fdps_draw_gauge_fill(unsigned char *dest, int dest_stride,
+                          int gauge_index, int fill_width)
+{
+    /* [EBP-4]: where in the sheet the run to copy starts -- strip
+       gauge_index, advanced within that strip's own row when the gauge fills
+       from the right. */
+    unsigned char *fill_strip;
+
+    fill_strip = data_fdps_gauge_fill_sheet_ptr
+                 + gauge_index * GAUGE_FILL_STRIP_STRIDE;
+
+    if (fill_width < 0) {
+        fill_width = 0;
+    }
+
+    if (gauge_index < GAUGE_FILL_LEFT_ALIGNED_FROM) {
+        fill_strip += GAUGE_FILL_WIDTH - fill_width;
+        dest += GAUGE_FILL_WIDTH - fill_width;
+    }
+
+    if (fill_width <= GAUGE_FILL_WIDTH) {
+        fdps_blit_transparent_rect(fill_strip, GAUGE_FILL_WIDTH, dest,
+                                   dest_stride, fill_width,
+                                   GAUGE_FILL_HEIGHT);
+    }
+}
+
 /* One map tile is 24 pixels square, and a map object's view position is its
    tile times this minus the view window origin.  IMUL EAX,EAX,0x18 at
    0001d5f5 and 0001d613. */

@@ -23,6 +23,16 @@
  * of graphic 0 rather than out of the filled one.  They stage a sheet of
  * their own and point data_fdps_status_gauge_bar_sheet_ptr at it, for the
  * same reason: ticket 23 owns what the real sheet holds.
+ *
+ * The combat gauge fill cases come from the assembly at 00019250 -- IMUL
+ * EAX,dword ptr [EBP+0x1c],0x271 at 0001925c for the strip stride, the signed
+ * CMP/JGE pair at 0001926e for the clamp, the CMP ...,0x2 / JGE at 0001927b
+ * for the alignment split, the two MOV EAX,0x7d / SUB EAX,[EBP+0x20] shifts at
+ * 00019281 and 0001928c, the CMP ...,0x7d / JG at 00019297 that drops an
+ * overfull gauge, and PUSH 0x7d / PUSH 0x5 at the call -- together with the
+ * 0x9c4 the two builders malloc at 00018e15 and 0001a603.  They stage a sheet
+ * of their own and point data_fdps_gauge_fill_sheet_ptr at it as well, since
+ * in the shipped game that global is only live inside a combat animation.
  */
 #include <stddef.h>
 #include "testharn.h"
@@ -704,6 +714,256 @@ static void current_above_max_is_not_capped(void)
     CHECK_EQ(drawn(0, 129), DST_GUARD);
 }
 
+/* The combat gauge fill sheet's geometry, again spelled out from the assembly
+   at 00019250 rather than taken from a header: IMUL EAX,dword ptr
+   [EBP+0x1c],0x271 at 0001925c for the strip stride, PUSH 0x7d at 000192ab
+   for the source row pitch and the span width, PUSH 0x5 at 0001929d for the
+   row count, and 4 * 0x271 = 0x9c4 for the whole sheet -- which is the size
+   the builders at 00018e15 and 0001a603 malloc. */
+#define FILL_STRIP_STRIDE 0x271
+#define FILL_ROW_PITCH 0x7d
+#define FILL_SPAN 0x7d
+#define FILL_ROWS 5
+#define FILL_SHEET_BYTES 0x9c4
+
+/* A destination with a row above and below the five the fill occupies, and
+   columns either side of the 125 the span occupies, so a blit that ran past
+   any edge lands on a guard byte instead of off the array. */
+#define FILL_DST_PITCH 0x90
+#define FILL_DST_ROWS 9
+#define FILL_ORIGIN_ROW 2
+#define FILL_ORIGIN_COLUMN 8
+#define FILL_GUARD 0xd7
+
+static unsigned char fill_sheet[FILL_SHEET_BYTES];
+static unsigned char fill_canvas[FILL_DST_ROWS * FILL_DST_PITCH];
+
+/* Distinct neighbours and distinct values a row pitch or a strip stride
+   apart, so an assertion can tell strip 1 column 115 from strip 1 column 0
+   and from strip 0 column 115.  1..251, so nothing is the transparency key by
+   accident; the transparency case plants its own zeroes. */
+static void stage_fill(void)
+{
+    int offset;
+
+    for (offset = 0; offset < FILL_SHEET_BYTES; offset++) {
+        fill_sheet[offset] = (unsigned char) (offset % 251 + 1);
+    }
+    for (offset = 0; offset < FILL_DST_ROWS * FILL_DST_PITCH; offset++) {
+        fill_canvas[offset] = FILL_GUARD;
+    }
+    data_fdps_gauge_fill_sheet_ptr = fill_sheet;
+}
+
+/* The left end of the gauge's 125-pixel span, which is what the caller hands
+   over whichever way the gauge fills. */
+static unsigned char *fill_dest(void)
+{
+    return fill_canvas + FILL_ORIGIN_ROW * FILL_DST_PITCH
+           + FILL_ORIGIN_COLUMN;
+}
+
+/* One destination pixel, in the span's own coordinates. */
+static int fill_drawn(int row, int column)
+{
+    return (int) fill_canvas[(FILL_ORIGIN_ROW + row) * FILL_DST_PITCH
+                             + FILL_ORIGIN_COLUMN + column];
+}
+
+/* One source pixel, addressed the way the assembly addresses it: strip base
+   at a 0x271 stride, rows at a 0x7d pitch within it. */
+static int fill_art(int strip, int row, int column)
+{
+    return (int) fill_sheet[strip * FILL_STRIP_STRIDE + row * FILL_ROW_PITCH
+                            + column];
+}
+
+/* CMP dword ptr [EBP+0x1c],0x2 / JGE at 0001927f: strip 2 skips the shift, so
+   the run starts at the left end of the span and takes the strip's own
+   leftmost columns.  Five rows, ten columns, and nothing outside them. */
+static void index_two_fills_from_the_left(void)
+{
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 2, 10);
+
+    CHECK_EQ(fill_drawn(0, 0), fill_art(2, 0, 0));
+    CHECK_EQ(fill_drawn(0, 9), fill_art(2, 0, 9));
+    CHECK_EQ(fill_drawn(4, 0), fill_art(2, 4, 0));
+    CHECK_EQ(fill_drawn(4, 9), fill_art(2, 4, 9));
+
+    CHECK_EQ(fill_drawn(0, 10), FILL_GUARD);
+    CHECK_EQ(fill_drawn(0, -1), FILL_GUARD);
+    CHECK_EQ(fill_drawn(-1, 0), FILL_GUARD);
+    CHECK_EQ(fill_drawn(FILL_ROWS, 0), FILL_GUARD);
+}
+
+/* MOV EAX,0x7d / SUB EAX,[EBP+0x20] / ADD [EBP-0x4],EAX at 00019281-00019289
+   and the same again into [EBP+0x14] at 0001928c-00019294: for strip 1 the
+   run sits at the RIGHT end of the span AND comes out of the right end of the
+   strip.  The two arts differing at column 115 is what makes the second half
+   of that mean anything, so it is asserted rather than assumed. */
+static void index_below_two_shifts_dest_and_strip_together(void)
+{
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 1, 10);
+
+    CHECK_EQ(fill_art(1, 0, 115) != fill_art(1, 0, 0), 1);
+    CHECK_EQ(fill_drawn(0, 115), fill_art(1, 0, 115));
+    CHECK_EQ(fill_drawn(0, 124), fill_art(1, 0, 124));
+    CHECK_EQ(fill_drawn(4, 115), fill_art(1, 4, 115));
+
+    CHECK_EQ(fill_drawn(0, 114), FILL_GUARD);
+    CHECK_EQ(fill_drawn(0, 125), FILL_GUARD);
+    CHECK_EQ(fill_drawn(0, 0), FILL_GUARD);
+}
+
+/* The alignment split is at exactly 2, not at 1 or 3: strip 1 lands at the
+   right end and strip 2, the very next value, lands at the left. */
+static void the_alignment_split_is_at_index_two(void)
+{
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 1, 20);
+    CHECK_EQ(fill_drawn(0, 105), fill_art(1, 0, 105));
+    CHECK_EQ(fill_drawn(0, 0), FILL_GUARD);
+
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 2, 20);
+    CHECK_EQ(fill_drawn(0, 0), fill_art(2, 0, 0));
+    CHECK_EQ(fill_drawn(0, 105), FILL_GUARD);
+}
+
+/* Strip 0 is right-aligned like strip 1 and is a different strip, which the
+   two arts differing at the same column shows. */
+static void index_zero_uses_strip_zero_right_aligned(void)
+{
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 0, 10);
+
+    CHECK_EQ(fill_art(0, 0, 115) != fill_art(1, 0, 115), 1);
+    CHECK_EQ(fill_drawn(0, 115), fill_art(0, 0, 115));
+    CHECK_EQ(fill_drawn(0, 114), FILL_GUARD);
+}
+
+/* Strip 3 starts 0x753 bytes in and its rows are 0x7d apart, and the last
+   byte it reads is sheet byte 0x9c3 -- the last byte of the 0x9c4 the
+   builders allocate, which is what pins the four-strips-in-one-buffer
+   geometry.  The offsets are literals here so a wrong stride cannot hide
+   behind the helper. */
+static void strip_and_row_strides_are_0x271_and_0x7d(void)
+{
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 3, FILL_SPAN);
+
+    CHECK_EQ(fill_drawn(0, 0), (int) fill_sheet[0x753]);
+    CHECK_EQ(fill_drawn(2, 0), (int) fill_sheet[0x753 + 2 * 0x7d]);
+    CHECK_EQ(fill_drawn(2, 6), (int) fill_sheet[0x753 + 2 * 0x7d + 6]);
+    CHECK_EQ(fill_drawn(4, 0x7c), (int) fill_sheet[0x9c3]);
+}
+
+/* CMP dword ptr [EBP+0x20],0x7d / JG at 00019297: 0x7d is drawn and 0x7e is
+   not, so the boundary is tested from both sides.  A full span leaves nothing
+   for the guard column at 125. */
+static void a_full_span_is_still_drawn(void)
+{
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 2, FILL_SPAN);
+
+    CHECK_EQ(fill_drawn(0, 0), fill_art(2, 0, 0));
+    CHECK_EQ(fill_drawn(0, FILL_SPAN - 1), fill_art(2, 0, FILL_SPAN - 1));
+    CHECK_EQ(fill_drawn(4, FILL_SPAN - 1), fill_art(2, 4, FILL_SPAN - 1));
+    CHECK_EQ(fill_drawn(0, FILL_SPAN), FILL_GUARD);
+}
+
+/* THE OVERFULL CASE DRAWS NOTHING, which is the whole point of the JG: one
+   pixel past a full span and the frame is left empty rather than reading
+   full.  Both alignments are checked, because the right-aligned one would
+   shift the destination to a NEGATIVE offset if it drew at all. */
+static void an_overfull_span_draws_nothing(void)
+{
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 2, FILL_SPAN + 1);
+    CHECK_EQ(fill_drawn(0, 0), FILL_GUARD);
+    CHECK_EQ(fill_drawn(0, FILL_SPAN - 1), FILL_GUARD);
+    CHECK_EQ(fill_drawn(4, 0), FILL_GUARD);
+
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 1, FILL_SPAN + 1);
+    CHECK_EQ(fill_drawn(0, -1), FILL_GUARD);
+    CHECK_EQ(fill_drawn(0, 0), FILL_GUARD);
+    CHECK_EQ(fill_drawn(0, FILL_SPAN - 1), FILL_GUARD);
+}
+
+/* A full span shifts by 0x7d - 0x7d = 0, so a right-aligned gauge at full
+   draws over exactly the same 125 columns a left-aligned one would, and does
+   not run off the left of the span. */
+static void a_full_right_aligned_span_does_not_shift(void)
+{
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 0, FILL_SPAN);
+
+    CHECK_EQ(fill_drawn(0, 0), fill_art(0, 0, 0));
+    CHECK_EQ(fill_drawn(0, FILL_SPAN - 1), fill_art(0, 0, FILL_SPAN - 1));
+    CHECK_EQ(fill_drawn(0, -1), FILL_GUARD);
+}
+
+/* CMP dword ptr [EBP+0x20],0x0 / JGE at 0001926e clamps a negative width up
+   to 0, and a width of 0 hands fdps_blit_transparent_rect a rectangle whose
+   signed column test fails immediately, so nothing is transferred.  0 and a
+   negative therefore look identical on screen, and both alignments are
+   checked because the right-aligned one still moves its pointers. */
+static void zero_and_negative_widths_draw_nothing(void)
+{
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 2, 0);
+    CHECK_EQ(fill_drawn(0, 0), FILL_GUARD);
+    CHECK_EQ(fill_drawn(0, FILL_SPAN - 1), FILL_GUARD);
+
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 2, -5);
+    CHECK_EQ(fill_drawn(0, 0), FILL_GUARD);
+    CHECK_EQ(fill_drawn(0, FILL_SPAN - 1), FILL_GUARD);
+
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 1, -5);
+    CHECK_EQ(fill_drawn(0, FILL_SPAN - 1), FILL_GUARD);
+    CHECK_EQ(fill_drawn(0, 0), FILL_GUARD);
+    CHECK_EQ(fill_drawn(4, FILL_SPAN - 1), FILL_GUARD);
+}
+
+/* The blit is the transparent one, so a source byte of 0 leaves the frame
+   pixel underneath alone -- that is what lets the bar's shaped ends show the
+   frame through them.  A zero is planted in two different rows so a
+   single-row special case could not pass. */
+static void palette_index_zero_leaves_the_frame_alone(void)
+{
+    stage_fill();
+    fill_sheet[2 * FILL_STRIP_STRIDE + 3] = 0;
+    fill_sheet[2 * FILL_STRIP_STRIDE + FILL_ROW_PITCH] = 0;
+    fdps_draw_gauge_fill(fill_dest(), FILL_DST_PITCH, 2, 10);
+
+    CHECK_EQ(fill_drawn(0, 3), FILL_GUARD);
+    CHECK_EQ(fill_drawn(1, 0), FILL_GUARD);
+    CHECK_EQ(fill_drawn(0, 4), fill_art(2, 0, 4));
+    CHECK_EQ(fill_drawn(1, 1), fill_art(2, 1, 1));
+}
+
+/* dest_stride is passed through to the blit untouched and is what steps the
+   destination between rows, so a stride that is not the canvas pitch puts row
+   1 exactly 0x80 bytes past row 0 rather than a canvas row later. */
+static void dest_stride_is_passed_through_untouched(void)
+{
+    int base;
+
+    stage_fill();
+    fdps_draw_gauge_fill(fill_dest(), 0x80, 2, 4);
+
+    base = FILL_ORIGIN_ROW * FILL_DST_PITCH + FILL_ORIGIN_COLUMN;
+    CHECK_EQ((int) fill_canvas[base], fill_art(2, 0, 0));
+    CHECK_EQ((int) fill_canvas[base + 0x80], fill_art(2, 1, 0));
+    CHECK_EQ((int) fill_canvas[base + 4 * 0x80 + 3], fill_art(2, 4, 3));
+    CHECK_EQ((int) fill_canvas[base + FILL_DST_PITCH], FILL_GUARD);
+}
+
 void run_gauge_tests(void)
 {
     RUN_TEST(zero_max_draws_an_empty_bar);
@@ -725,6 +985,19 @@ void run_gauge_tests(void)
     RUN_TEST(overfull_fill_is_not_capped);
     RUN_TEST(palette_index_zero_is_transparent_in_both_halves);
     RUN_TEST(destination_rows_step_by_dst_stride);
+
+    RUN_TEST(index_two_fills_from_the_left);
+    RUN_TEST(index_below_two_shifts_dest_and_strip_together);
+    RUN_TEST(the_alignment_split_is_at_index_two);
+    RUN_TEST(index_zero_uses_strip_zero_right_aligned);
+    RUN_TEST(strip_and_row_strides_are_0x271_and_0x7d);
+    RUN_TEST(a_full_span_is_still_drawn);
+    RUN_TEST(an_overfull_span_draws_nothing);
+    RUN_TEST(a_full_right_aligned_span_does_not_shift);
+    RUN_TEST(zero_and_negative_widths_draw_nothing);
+    RUN_TEST(palette_index_zero_leaves_the_frame_alone);
+    RUN_TEST(dest_stride_is_passed_through_untouched);
+
     RUN_TEST(unit_record_shape_matches_the_offsets);
     RUN_TEST(anchor_is_the_tile_times_24_plus_4);
     RUN_TEST(scroll_origin_is_subtracted_and_the_index_scales);

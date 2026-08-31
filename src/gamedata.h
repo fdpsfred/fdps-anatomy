@@ -590,4 +590,24 @@ extern int data_fdps_map_cursor_world_y;
    as 0 -- transparent -- rather than as rubbish. */
 extern unsigned char *data_fdps_status_gauge_bar_sheet_ptr;
 
+/* 00064000.  Base of the combat gauge fill sheet: ONE 0x9c4-byte surface
+   holding four 125x5 fill strips stacked five rows apart at a row pitch of
+   0x7d, so strip N begins N * 0x271 bytes in and 4 * 0x271 is exactly the
+   whole 0x9c4.  The four strips are one contiguous surface and not four
+   separate images -- a reader walks a strip's rows with a stride of 0x7d,
+   which is only the strip's own width because they share the buffer.
+
+   Unlike the sheets at 0x643xx this one is not loaded once at startup.  Both
+   combat presenters build it for themselves and free it again:
+   fdps_combat_play_attack_exchange has PUSH 0x9c4 / CALL malloc /
+   MOV [0x00064000],EAX at 00018e15, then a four-iteration loop at
+   00018e2e-00018e68 decoding sprites 4..7 of the FigBar.cel that
+   data_fdps_combat_gauge_sprite_sheet_ptr holds into the buffer at pitch 0x7d
+   and y = i * 5, and frees it at 00019192.
+   fdps_combat_play_spell_on_targets does the identical thing at
+   0001a603-0001a653 and frees it at 0001b8f4.  Neither stores to the global
+   again after the free, so outside a combat animation it holds a stale
+   pointer and nothing reads it. */
+extern unsigned char *data_fdps_gauge_fill_sheet_ptr;
+
 #endif

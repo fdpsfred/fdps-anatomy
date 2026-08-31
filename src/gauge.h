@@ -68,6 +68,47 @@ extern void fdps_draw_gauge_bar(unsigned char *dst, int dst_stride,
                                 int bar_index, int fill_width);
 #pragma aux fdps_draw_gauge_bar "*" parm caller [];
 
+/* Paints the filled run of one combat status gauge, fill_width pixels of it,
+   into a gauge frame the caller has already blitted at dest.
+
+   This is the combat panel's gauge and not the status panel's: the art is one
+   of the four 125x5 fill strips of the scratch sheet
+   data_fdps_gauge_fill_sheet_ptr points at (gamedata.h), strip gauge_index at
+   a stride of 0x271, and the blit goes through fdps_blit_transparent_rect so
+   palette index 0 lets the frame underneath show through the bar's shaped
+   ends.
+
+   ONLY THE FILLED RUN IS DRAWN.  Nothing paints the empty remainder of the
+   125-pixel span and nothing erases it, so a gauge that has shortened since
+   the last frame only reads correctly because the caller redraws the frame
+   cel first.  Its two cousins above and in unit gauge drawing do paint the
+   remainder; this one does not.
+
+   AN OVERFULL GAUGE DRAWS NOTHING AT ALL.  fill_width above 125 skips the
+   blit entirely rather than being capped at a full bar, and both callers hand
+   over an unclamped ceiling that exceeds 125 whenever current exceeds max.
+   Adding the natural min(125, fill_width) makes an overfull gauge read full
+   where the original leaves the frame empty.  A fill_width below 0 is clamped
+   up to 0, and the clamp happens before everything else, so the alignment
+   below sees the clamped value.
+
+   gauge_index BELOW 2 ALSO MEANS RIGHT-TO-LEFT.  For those two the run is
+   pushed right by (125 - fill_width) and the SOURCE POINTER IS PUSHED BY THE
+   SAME AMOUNT, so the bar shows the rightmost fill_width pixels of the strip
+   at the right end of the span; 2 and above fill from the left as drawn.
+   Right-aligning the destination while still taking the strip's leftmost
+   pixels puts the wrong artwork in the mirrored panel's gauges.  The source
+   pointer may be walked that way only because the four strips share one
+   125-pitch buffer.  fdps_draw_unit_hp_mp_gauges picks the base index 0 or 2
+   from the unit record, which is what mirrors the two panel layouts.
+
+   dest points at the top-left pixel of the span's LEFT end in an 8bpp
+   surface, before any right-alignment shift, and dest_stride is that
+   surface's pitch in bytes.  Neither is clipped or bounded. */
+extern void fdps_draw_gauge_fill(unsigned char *dest, int dest_stride,
+                                 int gauge_index, int fill_width);
+#pragma aux fdps_draw_gauge_fill "*" parm caller [];
+
 /* Works out where one battle unit's HP gauge goes on screen while a combat
    animation is playing, and writes the position through out_position.
 
