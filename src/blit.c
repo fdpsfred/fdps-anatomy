@@ -105,3 +105,56 @@ void fdps_blit_rect(unsigned int src_or_fill, int src_stride, void *dst,
         }
     }
 }
+
+/* 0002f390.  One shape, no mode branch: the arguments are copied into the two
+   cursors at 0002f39c and 0002f3a2 and then the row loop runs unconditionally.
+   Both loop tests are signed -- CMP EAX,[EBP+0x28] / JL at 0002f3b2 for the
+   rows and CMP EAX,[EBP+0x24] / JL at 0002f3cb for the columns -- so a width
+   or a height of 0 or less transfers nothing at all.
+
+   The inner body is the whole point of the routine.  XOR EAX,EAX / MOV AL,
+   byte ptr [EDX] at 0002f3e0 loads one source byte zero-extended into the
+   pixel slot, CMP dword ptr [EBP-0x10],0x0 / JZ at 0002f3e7 skips the store
+   when it is zero, and only the surviving byte is written through
+   MOV byte ptr [EDX],AL at 0002f3f6.  There is no per-row transfer and no
+   call of any kind: the destination is read-modify-write, and the pixels a
+   zero source byte passes over keep whatever the previous blits left there.
+
+   Both cursors are indexed by the same column counter and are advanced by
+   their own stride once per row (0002f3fd and 0002f403), which is what lets
+   the source sheet and the destination page have different pitches -- 0x75
+   and 0x7d for the two gauge sheets, 0x138 for the offscreen pages.  A
+   src_stride of 0 is not a fill mode here as it is in fdps_blit_rect above;
+   it just points every row at the same source row.
+
+   Nothing is clipped and no extent is checked. */
+void fdps_blit_transparent_rect(unsigned char *src, int src_stride,
+                                unsigned char *dst, int dst_stride,
+                                int width, int height)
+{
+    /* Declared in the order the original's frame is laid out, as in
+       fdps_blit_rect above: [EBP-4] the destination cursor, [EBP-8] the
+       source cursor, [EBP-0xc] the column counter, [EBP-0x10] the pixel and
+       [EBP-0x14] the row counter.  Codegen, not behaviour. */
+    unsigned char *dst_cursor;
+    unsigned char *src_cursor;
+    int column;
+    unsigned int pixel;
+    int row;
+
+    src_cursor = src;
+    dst_cursor = dst;
+
+    for (row = 0; row < height; row++) {
+        for (column = 0; column < width; column++) {
+            pixel = (unsigned int) src_cursor[column];
+
+            if (pixel != 0) {
+                dst_cursor[column] = (unsigned char) pixel;
+            }
+        }
+
+        src_cursor += src_stride;
+        dst_cursor += dst_stride;
+    }
+}

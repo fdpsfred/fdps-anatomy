@@ -398,6 +398,184 @@ static void a_zero_row_length_transfers_nothing(void)
     CHECK_EQ(rect_dst_byte(6), RECT_GUARD);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_blit_transparent_rect @ 0002f390
+ *
+ * Expected values come from the assembly: the two signed CMP / JL loop
+ * tests at 0002f3b2 and 0002f3cb that count height and width, the
+ * XOR EAX,EAX / MOV AL,[EDX] load at 0002f3e0 followed by
+ * CMP dword ptr [EBP-0x10],0x0 / JZ at 0002f3e7 that skips the store for a
+ * zero source byte, the single MOV byte ptr [EDX],AL at 0002f3f6 that is
+ * the only write in the routine, and the separate ADD [EBP-0x8],[EBP+0x18]
+ * and ADD [EBP-0x4],[EBP+0x20] at 0002f3fd and 0002f403 that advance the
+ * two cursors.  The routine has no CALL in it at all, so nothing below
+ * depends on what a library routine hands back.
+ * ------------------------------------------------------------------ */
+
+#define TKEY_DST_BYTES 128
+#define TKEY_SRC_BYTES 64
+
+/* Outside 0x40..0x7f, the range the source is filled with, so a byte still
+   holding it was never written. */
+#define TKEY_GUARD 0x9c
+
+static unsigned char tkey_dst[TKEY_DST_BYTES];
+static unsigned char tkey_src[TKEY_SRC_BYTES];
+
+/* Every source byte distinct and every one non-zero, so an assertion says
+   which source byte arrived and no byte is skipped by accident.  Cases that
+   want a transparent pixel poke a zero in themselves. */
+static void prepare_tkey_buffers(void)
+{
+    int i;
+
+    memset(tkey_dst, TKEY_GUARD, (size_t) TKEY_DST_BYTES);
+    for (i = 0; i < TKEY_SRC_BYTES; i++) {
+        tkey_src[i] = (unsigned char) (0x40 + i);
+    }
+}
+
+static int tkey_dst_byte(int offset)
+{
+    return (int) tkey_dst[offset];
+}
+
+/* The defining property: a source byte of 0 is the transparency key, so the
+   destination pixel under it is left exactly as it was rather than being
+   painted with colour 0.  A per-row memmove -- what the sibling
+   fdps_blit_rect does -- would put 0 into every one of those four gaps. */
+static void a_zero_source_byte_leaves_the_destination_pixel_alone(void)
+{
+    prepare_tkey_buffers();
+    tkey_src[1] = 0;
+    tkey_src[3] = 0;
+    tkey_src[4] = 0;
+
+    fdps_blit_transparent_rect(tkey_src, 8, tkey_dst, 8, 6, 1);
+
+    CHECK_EQ(tkey_dst_byte(0), 0x40);
+    CHECK_EQ(tkey_dst_byte(1), TKEY_GUARD);
+    CHECK_EQ(tkey_dst_byte(2), 0x42);
+    CHECK_EQ(tkey_dst_byte(3), TKEY_GUARD);
+    CHECK_EQ(tkey_dst_byte(4), TKEY_GUARD);
+    CHECK_EQ(tkey_dst_byte(5), 0x45);
+}
+
+/* Every non-zero value passes through unchanged, including the two ends of
+   the byte range: only equality with 0 is tested, and the byte written is
+   the byte read. */
+static void every_non_zero_byte_is_stored_verbatim(void)
+{
+    prepare_tkey_buffers();
+    tkey_src[0] = 0x01;
+    tkey_src[1] = 0x80;
+    tkey_src[2] = 0xff;
+    tkey_src[3] = 0x00;
+
+    fdps_blit_transparent_rect(tkey_src, 8, tkey_dst, 8, 4, 1);
+
+    CHECK_EQ(tkey_dst_byte(0), 0x01);
+    CHECK_EQ(tkey_dst_byte(1), 0x80);
+    CHECK_EQ(tkey_dst_byte(2), 0xff);
+    CHECK_EQ(tkey_dst_byte(3), TKEY_GUARD);
+}
+
+/* The two strides are read from different arguments and applied to different
+   cursors, so the source sheet's pitch and the destination page's pitch are
+   independent: three rows of four bytes gathered every 8 source bytes and
+   laid down every 6 destination bytes.  Rows starting 0x40, 0x48 and 0x50 are
+   what says the source pitch was 8 and not 4 or 6. */
+static void independent_strides_are_applied_to_their_own_cursors(void)
+{
+    prepare_tkey_buffers();
+    fdps_blit_transparent_rect(tkey_src, 8, tkey_dst, 6, 4, 3);
+
+    CHECK_EQ(tkey_dst_byte(0), 0x40);
+    CHECK_EQ(tkey_dst_byte(3), 0x43);
+    CHECK_EQ(tkey_dst_byte(6), 0x48);
+    CHECK_EQ(tkey_dst_byte(9), 0x4b);
+    CHECK_EQ(tkey_dst_byte(12), 0x50);
+    CHECK_EQ(tkey_dst_byte(15), 0x53);
+
+    /* Exactly width bytes are considered on each row, so the two bytes the
+       destination stride leaves between rows are never looked at. */
+    CHECK_EQ(tkey_dst_byte(4), TKEY_GUARD);
+    CHECK_EQ(tkey_dst_byte(5), TKEY_GUARD);
+    CHECK_EQ(tkey_dst_byte(10), TKEY_GUARD);
+    CHECK_EQ(tkey_dst_byte(11), TKEY_GUARD);
+    CHECK_EQ(tkey_dst_byte(16), TKEY_GUARD);
+}
+
+/* Both extents are compared with JL, a signed test, so 0 or below on either
+   transfers nothing.  Read as unsigned, -1 would be four billion rows or
+   columns and would walk the copy off the end of memory. */
+static void both_extents_are_signed_counts(void)
+{
+    prepare_tkey_buffers();
+    fdps_blit_transparent_rect(tkey_src, 8, tkey_dst, 6, 4, 0);
+    CHECK_EQ(tkey_dst_byte(0), TKEY_GUARD);
+
+    prepare_tkey_buffers();
+    fdps_blit_transparent_rect(tkey_src, 8, tkey_dst, 6, 4, -1);
+    CHECK_EQ(tkey_dst_byte(0), TKEY_GUARD);
+
+    prepare_tkey_buffers();
+    fdps_blit_transparent_rect(tkey_src, 8, tkey_dst, 6, 0, 3);
+    CHECK_EQ(tkey_dst_byte(0), TKEY_GUARD);
+    CHECK_EQ(tkey_dst_byte(6), TKEY_GUARD);
+
+    prepare_tkey_buffers();
+    fdps_blit_transparent_rect(tkey_src, 8, tkey_dst, 6, -1, 3);
+    CHECK_EQ(tkey_dst_byte(0), TKEY_GUARD);
+
+    /* One row means one row: the second row's destination is untouched. */
+    prepare_tkey_buffers();
+    fdps_blit_transparent_rect(tkey_src, 8, tkey_dst, 6, 4, 1);
+    CHECK_EQ(tkey_dst_byte(0), 0x40);
+    CHECK_EQ(tkey_dst_byte(3), 0x43);
+    CHECK_EQ(tkey_dst_byte(6), TKEY_GUARD);
+}
+
+/* A source stride of zero is NOT the fill mode fdps_blit_rect switches into:
+   there is no such branch here, src stays a pointer and is dereferenced on
+   every row, so all three destination rows come out holding the same two
+   source bytes.  In fill mode the low byte of the source argument -- an
+   address -- would have been painted instead, which is neither 0x40 nor
+   0x41. */
+static void a_zero_source_stride_repeats_one_source_row(void)
+{
+    prepare_tkey_buffers();
+    fdps_blit_transparent_rect(tkey_src, 0, tkey_dst, 4, 2, 3);
+
+    CHECK_EQ(tkey_dst_byte(0), 0x40);
+    CHECK_EQ(tkey_dst_byte(1), 0x41);
+    CHECK_EQ(tkey_dst_byte(4), 0x40);
+    CHECK_EQ(tkey_dst_byte(5), 0x41);
+    CHECK_EQ(tkey_dst_byte(8), 0x40);
+    CHECK_EQ(tkey_dst_byte(9), 0x41);
+    CHECK_EQ(tkey_dst_byte(2), TKEY_GUARD);
+    CHECK_EQ(tkey_dst_byte(12), TKEY_GUARD);
+}
+
+/* Each cursor is advanced by adding its stride, nothing is scaled and nothing
+   is made unsigned, so a negative stride walks that side of the transfer
+   backwards up memory: the source rows are read at 16, 8 and 0 while the
+   destination rows land at 40, 30 and 20. */
+static void negative_strides_walk_both_cursors_backwards(void)
+{
+    prepare_tkey_buffers();
+    fdps_blit_transparent_rect(tkey_src + 16, -8, tkey_dst + 40, -10, 2, 3);
+
+    CHECK_EQ(tkey_dst_byte(40), 0x50);
+    CHECK_EQ(tkey_dst_byte(41), 0x51);
+    CHECK_EQ(tkey_dst_byte(30), 0x48);
+    CHECK_EQ(tkey_dst_byte(31), 0x49);
+    CHECK_EQ(tkey_dst_byte(20), 0x40);
+    CHECK_EQ(tkey_dst_byte(21), 0x41);
+    CHECK_EQ(tkey_dst_byte(42), TKEY_GUARD);
+    CHECK_EQ(tkey_dst_byte(50), TKEY_GUARD);
+}
+
 void run_blit_tests(void)
 {
     RUN_TEST(pitch_four_paints_a_three_by_three_square);
@@ -417,4 +595,11 @@ void run_blit_tests(void)
     RUN_TEST(a_row_that_overlaps_itself_is_moved_not_smeared);
     RUN_TEST(a_negative_destination_stride_walks_backwards);
     RUN_TEST(a_zero_row_length_transfers_nothing);
+
+    RUN_TEST(a_zero_source_byte_leaves_the_destination_pixel_alone);
+    RUN_TEST(every_non_zero_byte_is_stored_verbatim);
+    RUN_TEST(independent_strides_are_applied_to_their_own_cursors);
+    RUN_TEST(both_extents_are_signed_counts);
+    RUN_TEST(a_zero_source_stride_repeats_one_source_row);
+    RUN_TEST(negative_strides_walk_both_cursors_backwards);
 }

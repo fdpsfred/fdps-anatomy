@@ -65,4 +65,30 @@ extern void fdps_blit_rect(unsigned int src_or_fill, int src_stride, void *dst,
                            int dst_stride, int bytes_per_row, int rows);
 #pragma aux fdps_blit_rect "*" parm caller [];
 
+/* The colour-keyed counterpart of fdps_blit_rect: the same rectangle of 8bpp
+   pixels with the same pair of independent strides, except that every source
+   byte is examined and only a non-zero one is stored.  Palette index 0 is the
+   transparency key, so it is the sprite blit every unit portrait, gauge cap
+   and window ornament goes through.
+
+   THE DESTINATION IS READ-MODIFY-WRITE.  A source byte of 0 is skipped
+   entirely and the destination pixel underneath survives; the routine never
+   writes a 0.  Turning the row loop into the per-row memmove its sibling uses
+   would paint colour 0 over whatever was already composed there.
+
+   SRC_STRIDE 0 IS NOT FILL MODE HERE.  There is no second branch: src is
+   always a pointer and is always dereferenced, and a stride of 0 simply makes
+   every destination row read the same source row.  Handing this routine the
+   palette index that fdps_blit_rect would have taken as a fill value
+   dereferences it as an address.
+
+   width and height are signed and are compared with JL, so either at 0 or
+   below transfers nothing.  Nothing is clipped and no bound is checked: the
+   callers clamp, as fdps_draw_gauge_fill does when it refuses a coordinate
+   past 0x7d. */
+extern void fdps_blit_transparent_rect(unsigned char *src, int src_stride,
+                                       unsigned char *dst, int dst_stride,
+                                       int width, int height);
+#pragma aux fdps_blit_transparent_rect "*" parm caller [];
+
 #endif
