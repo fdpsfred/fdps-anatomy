@@ -1011,6 +1011,14 @@
       "status": "committed",
       "emitted_against": "0x1e4",
       "rounds": 1
+    },
+    "00031700": {
+      "name": "fdps_shop_collect_stock_items",
+      "target": "shop.c",
+      "body_size": "0x75",
+      "status": "committed",
+      "emitted_against": "0x75",
+      "rounds": 0
     }
   }
 }

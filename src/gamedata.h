@@ -628,4 +628,27 @@ extern unsigned char *data_fdps_status_gauge_bar_sheet_ptr;
    pointer and nothing reads it. */
 extern unsigned char *data_fdps_gauge_fill_sheet_ptr;
 
+/* 00069d80.  Base of the loaded chapter's SHOP%02d.DAT image: three rows of
+   twelve item-id bytes, 36 bytes in all, with row 0 the item shop, row 1 the
+   weapon shop and row 2 the secret shop.  The row is the whole record -- there
+   is no count byte and no header -- so a reader walks all twelve.
+
+   0xff marks an EMPTY SLOT and not the end of the row, and the shipped members
+   put stock after one: SHOP01.DAT's weapon row is 02 71 FF FF 72 73 FF FF FF
+   FF FF FF and SHOP03.DAT's begins with the empty slot, FF 03 FF 1E 1F 30 64
+   65 74 75 82 83 (rebuild_info/pitfalls.md).
+
+   Unsigned, and that is behaviour rather than spelling: the read is XOR EAX,
+   EAX / MOV AL,byte ptr [EDX] at 0003173b, and ids above 0x7f are ordinary
+   stock -- SHOP01.DAT's item row is B4 DE.  Through a signed char pointer the
+   0xff compares as -1, the empty-slot test never fires, and every high id
+   arrives negative.
+
+   fdps_load_field_chapter_resources loads the member out of "Field.vfs" and
+   stores the block here, MOV [0x00069d80],EAX at 000315bd;
+   fdps_run_village_phase frees it, PUSH dword ptr [0x00069d80] / CALL free at
+   000314ac, and does not clear the global, so outside a village visit this
+   holds a stale pointer. */
+extern unsigned char *data_fdps_shop_stock_table_ptr;
+
 #endif
