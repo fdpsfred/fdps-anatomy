@@ -6,6 +6,7 @@
  * state.
  */
 #include <stdlib.h>
+#include <string.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "table.h"
@@ -697,4 +698,83 @@ int fdps_battle_find_unit_by_character_id(int character_id,
     }
 
     return -1;
+}
+
+/* The stride of one unit record as this routine writes it: IMUL EAX,EAX,0x50 at
+   0002dfc2 sizes the new block and SUB EAX,0x50 at 0002dff0 takes one record
+   back off it for the wipe.  A literal and not sizeof(struct fdps_unit_record)
+   for the reason deploy.c gives: 0x50 is the block's own layout and the struct
+   agrees with it only while it stays byte-packed (rebuild_info/pitfalls.md). */
+#define UNIT_RECORD_STRIDE 0x50
+
+/* MOV EBX,0x400 at 0002dfa3, the divisor of the IDIV that sizes the spacer
+   block.  Nothing ever reads that block; only its being held across the array's
+   own malloc matters, so the size is a displacement and not a capacity. */
+#define SPACER_SIZE_MODULUS 0x400
+
+/* 0002df90.  Moves the whole unit-record array to a fresh heap block and
+   destroys the copy left behind, so no record keeps one address for longer than
+   a single unit's turn.  Takes nothing and reports nothing: the new base is
+   published through data_fdps_map_unit_array_ptr, and the three callers --
+   fdps_battle_unit_turn at 000154e0, fdps_battle_enemy_turn_phase at 00012995
+   and fdps_battle_npc_turn_phase at 00012b5f -- each overwrite EAX with their
+   own loop counter on the instruction after the CALL and then re-resolve their
+   record through fdps_get_unit_record.  EAX does still hold the new block at
+   the RET, but nothing reads it and the function is void.
+
+   Two mechanisms run at once and only make sense together.  The spacer block is
+   malloc'd first and freed last, so it is still held when the array's new block
+   is taken: the new block therefore lands a random distance from wherever the
+   old one sat instead of being handed straight back the storage just released.
+   And the old storage is wiped before it is freed, so the stale copy of the
+   records does not survive in the free list.  Reordering either -- freeing the
+   spacer early, or freeing the old block before the memset -- undoes one of
+   them without changing anything a unit test can see.
+
+   The two lengths deliberately disagree by one record and NEITHER may be
+   "corrected" (rebuild_info/pitfalls.md):
+
+     - the memmove length is the length of the NEW block, (count + 1) * 0x50,
+       and not the length of the source: the size stored for the malloc at
+       0002dfc5 is the same local pushed as the copy length at 0002dfd7.  Both
+       fdps_deploy_unit and fdps_build_map_unit_array leave the old block at
+       exactly count * 0x50 bytes, so after either of them the copy reads 0x50
+       bytes past the end of that allocation and the spare tail record of the
+       new block comes up holding whatever the heap had there.  (After
+       fdps_load_savegame the old block is a flat 0x1e00 bytes and the same read
+       lands inside it.)
+     - the memset length is count * 0x50, one record short of the block this
+       routine itself hands out, so on the second and every later call the old
+       block's final record is the one record the wipe does not reach.
+
+   The count at 0x00060150 is neither written nor checked.  Not written, so the
+   array does not gain an entry and the spare record at the top of the new block
+   stays outside every walk's bound: this is a move, not a resize.
+
+   The scratch size is rand() % 0x400 + 1 taken with the signed IDIV at
+   0002dfad, so over the 0..0x7fff that rand() returns it is 1..0x400 and never
+   zero.  Neither malloc result is tested against null.
+
+   A record pointer, or a cached array base, held across this call addresses
+   freed and zeroed memory; every caller re-resolves through
+   fdps_get_unit_record immediately afterwards. */
+void fdps_relocate_unit_array(void)
+{
+    void *spacer_block;
+    unsigned char *new_array;
+    int new_block_bytes;
+
+    spacer_block = malloc(rand() % SPACER_SIZE_MODULUS + 1);
+
+    new_block_bytes = (data_fdps_map_unit_count + 1) * UNIT_RECORD_STRIDE;
+    new_array = malloc(new_block_bytes);
+
+    memmove(new_array, data_fdps_map_unit_array_ptr, new_block_bytes);
+    memset(data_fdps_map_unit_array_ptr, 0,
+           new_block_bytes - UNIT_RECORD_STRIDE);
+
+    free(data_fdps_map_unit_array_ptr);
+    free(spacer_block);
+
+    data_fdps_map_unit_array_ptr = new_array;
 }

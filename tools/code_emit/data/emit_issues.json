@@ -884,5 +884,20 @@
       "status": "open",
       "from": "emit"
     }
+  ],
+  "0002df90": [
+    {
+      "from": "emit",
+      "what": "The memmove reads one 0x50-byte record past the end of the old allocation whenever that block was last sized by fdps_deploy_unit or fdps_build_map_unit_array, both of which leave it at exactly count*0x50 bytes. The read is emitted exactly as the original has it and its result is harmless in the game's own terms -- the bytes land in the new block's spare tail record, which sits above data_fdps_map_unit_count and which no walk in the image ever visits. What cannot be settled from here is whether the read is always safe: it steps into whatever the Watcom heap has after that block, and the rebuild's heap layout is not the original's, so a block that happens to sit at the top of the heap's committed region could fault in one build where it does not in the other. Everything about the emitted code is settled; the exposure is a property of where the allocator puts things.",
+      "needs": "A DOSBox-X playtest of the rebuilt executable through a long battle -- the call runs once per unit iteration of all three turn-phase loops, so a chapter with a full deployment exercises it hundreds of times. A fault would appear at the first unit iteration after a deployment or a battle build, never after a savegame load (that path allocates a flat 0x1e00 bytes and the same read lands inside it). If it does fault, the finding is about the rebuild's heap placement and not about this function's C, which must not be changed to shorten the copy.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached the same concern independently and my pass adds two things. First, the over-read is not confined to the deployment path: fdps_build_map_unit_array also leaves the block at exactly count*0x50 (IMUL EAX,dword ptr [0x00064118],0x50 / CALL malloc at 00022c9b..00022ca3), so a playtest that only watches the deployment path would under-exercise it. Second, the savegame path is not unconditionally exempt the way the emitter's note reads: its flat 0x1e00 allocation is 96 records while the count it stores comes from an unmasked-range byte (AND EAX,0xff at 00023ffb), so a saved count of 96 or more would over-read there too. Whether such a count is reachable is a savegame-format question, not an equivalence question about this function, and the emitted C is exactly the original either way.",
+      "needs": "Same DOSBox-X playtest the emitter describes, plus a look at whether any shipped or achievable savegame carries a unit count of 96 or more when resource_info's savegame layout is settled.",
+      "status": "open",
+      "same_as": "emit#0"
+    }
   ]
 }

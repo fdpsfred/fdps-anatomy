@@ -747,6 +747,14 @@
       "status": "committed",
       "emitted_against": "0xc8",
       "rounds": 0
+    },
+    "0002df90": {
+      "name": "fdps_relocate_unit_array",
+      "target": "unit.c",
+      "body_size": "0x9d",
+      "status": "committed",
+      "emitted_against": "0x9d",
+      "rounds": 0
     }
   }
 }

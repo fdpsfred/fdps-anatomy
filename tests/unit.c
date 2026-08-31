@@ -18,6 +18,7 @@
  * ticket 23 owns that.
  */
 #include <stddef.h>
+#include <stdlib.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -2548,6 +2549,215 @@ static void nothing_in_the_unit_array_is_written(void)
     CHECK_EQ(changed_count, 0);
 }
 
+/* fdps_relocate_unit_array @ 0002df90.
+ *
+ * Expected values come from the assembly: CALL 0x00042cf8 at 0002df9c for the
+ * single rand(), MOV EAX,[0x00060150] / INC EAX / IMUL EAX,EAX,0x50 at
+ * 0002dfbc..0002dfc2 for the new block's size, the same local pushed again at
+ * 0002dfd7 as the memmove length, SUB EAX,0x50 at 0002dff0 for the memset
+ * length, the CALL order rand / malloc / malloc / memmove / memset / free / free
+ * across 0002df9c..0002e01b, and MOV [0x00069cd8],EAX at 0002e021 for the
+ * publish with no write to 0x00060150 anywhere in the body.  The record stride
+ * is the image's own literal 0x50.
+ *
+ * The old block is malloc'd here rather than taken from a static array: the
+ * function frees it, so it has to be real heap storage.  It is staged at
+ * (count + 1) * 0x50 bytes -- the size this routine itself hands out -- because
+ * the deliberate one-record over-read the plate comment describes is a read past
+ * the end of a smaller allocation, and reproducing that inside the test process
+ * would be a real out-of-bounds read rather than an assertion about anything.
+ *
+ * Two things the assembly settles are not observable from here and are not
+ * asserted: the spacer block's size, which nothing ever reads, and the wipe of
+ * the old block, which happens after the copy is taken and immediately before
+ * that block is handed back to the heap.  What the wipe's placement DOES leave
+ * visible is asserted -- a memset moved in front of the memmove would empty the
+ * new block, so every case that finds the records intact rules it out.
+ */
+#define RELOCATE_UNITS 4
+
+static unsigned char *relocate_old_block;
+
+/* A per-byte pattern rather than a per-record marker, so a copy that ran short,
+   started from the wrong record or stepped by the wrong stride mismatches at
+   the exact byte where it went wrong. */
+static unsigned char relocate_byte(int byte_index)
+{
+    return (unsigned char) (byte_index * 7 + 3);
+}
+
+static void stage_relocate(int unit_count)
+{
+    int block_bytes;
+    int i;
+
+    block_bytes = (unit_count + 1) * UNIT_RECORD_STRIDE;
+    relocate_old_block = (unsigned char *) malloc((size_t) block_bytes);
+    for (i = 0; i < block_bytes; i++) {
+        relocate_old_block[i] = relocate_byte(i);
+    }
+    data_fdps_map_unit_array_ptr = relocate_old_block;
+    data_fdps_map_unit_count = unit_count;
+}
+
+/* The block the function published belongs to the test once the case is over:
+   the routine frees what it was given and hands its own allocation on. */
+static void unstage_relocate(void)
+{
+    free(data_fdps_map_unit_array_ptr);
+    data_fdps_map_unit_array_ptr = (unsigned char *) 0;
+    data_fdps_map_unit_count = 0;
+    relocate_old_block = (unsigned char *) 0;
+}
+
+/* How many bytes of the published block over [first_byte, last_byte) differ
+   from what was staged at that offset. */
+static int relocate_mismatches(int first_byte, int last_byte)
+{
+    int mismatches;
+    int i;
+
+    mismatches = 0;
+    for (i = first_byte; i < last_byte; i++) {
+        if (data_fdps_map_unit_array_ptr[i] != relocate_byte(i)) {
+            mismatches++;
+        }
+    }
+    return mismatches;
+}
+
+/* The new block is taken while the old one is still allocated -- malloc at
+   0002dfcc, free at 0002e00a -- so the two cannot be the same storage.  A
+   version that freed first and allocated afterwards would be free to hand the
+   same address straight back, which is exactly the reuse the spacer block and
+   the wipe exist to prevent. */
+static void the_moved_block_is_not_the_block_it_came_from(void)
+{
+    unsigned long old_address;
+
+    stage_relocate(RELOCATE_UNITS);
+    old_address = (unsigned long) relocate_old_block;
+    fdps_relocate_unit_array();
+    CHECK_EQ(data_fdps_map_unit_array_ptr == (unsigned char *) 0, 0);
+    CHECK_EQ((unsigned long) data_fdps_map_unit_array_ptr == old_address, 0);
+    unstage_relocate();
+}
+
+/* PUSH dword ptr [0x00069cd8] as the memmove source at 0002dfdb: every live
+   record arrives byte for byte.  This is also what rules out a memset that had
+   been moved in front of the copy -- the new block would read back as zeros. */
+static void every_live_record_survives_the_move(void)
+{
+    stage_relocate(RELOCATE_UNITS);
+    fdps_relocate_unit_array();
+    CHECK_EQ(relocate_mismatches(0, RELOCATE_UNITS * UNIT_RECORD_STRIDE), 0);
+    unstage_relocate();
+}
+
+/* The load-bearing one.  The copy length pushed at 0002dfd7 is the NEW block's
+   size, (count + 1) * 0x50, not the live array's count * 0x50, so the spare
+   record above the live ones is copied too.  Writing the obvious
+   memmove(new, old, count * 0x50) leaves that record untouched and is a
+   behaviour change (rebuild_info/pitfalls.md). */
+static void the_copy_runs_one_record_past_the_live_count(void)
+{
+    stage_relocate(RELOCATE_UNITS);
+    fdps_relocate_unit_array();
+    CHECK_EQ(relocate_mismatches(RELOCATE_UNITS * UNIT_RECORD_STRIDE,
+                                 (RELOCATE_UNITS + 1) * UNIT_RECORD_STRIDE),
+             0);
+    unstage_relocate();
+}
+
+/* 0x00060150 is read at 0002dfbc and written nowhere in the body: the array
+   gains a record of storage and not a record of units. */
+static void the_unit_count_is_left_alone(void)
+{
+    stage_relocate(RELOCATE_UNITS);
+    fdps_relocate_unit_array();
+    CHECK_EQ(data_fdps_map_unit_count, RELOCATE_UNITS);
+    unstage_relocate();
+}
+
+/* INC EAX at 0002dfc1 before the multiply: with no units at all the size is
+   still one whole record, so the move happens and one record is copied.  A
+   count of zero is the state fdps_build_map_unit_array leaves behind before the
+   first deployment. */
+static void an_empty_array_still_moves_one_record(void)
+{
+    unsigned long old_address;
+
+    stage_relocate(0);
+    old_address = (unsigned long) relocate_old_block;
+    fdps_relocate_unit_array();
+    CHECK_EQ(data_fdps_map_unit_array_ptr == (unsigned char *) 0, 0);
+    CHECK_EQ((unsigned long) data_fdps_map_unit_array_ptr == old_address, 0);
+    CHECK_EQ(relocate_mismatches(0, UNIT_RECORD_STRIDE), 0);
+    CHECK_EQ(data_fdps_map_unit_count, 0);
+    unstage_relocate();
+}
+
+/* The contract every caller obeys: a record pointer taken before the call does
+   not name the same storage afterwards, and the record has to be resolved again
+   through fdps_get_unit_record.  The second check confirms the re-resolved
+   pointer sits at its own index in the block that was just published, rather
+   than anywhere in the block that was freed. */
+static void a_record_pointer_does_not_survive_the_call(void)
+{
+    struct fdps_unit_record *before;
+    struct fdps_unit_record *after;
+
+    stage_relocate(RELOCATE_UNITS);
+    before = fdps_get_unit_record(1);
+    fdps_relocate_unit_array();
+    after = fdps_get_unit_record(1);
+    CHECK_EQ(before == after, 0);
+    CHECK_EQ((unsigned char *) after - data_fdps_map_unit_array_ptr,
+             UNIT_RECORD_STRIDE);
+    unstage_relocate();
+}
+
+/* One CALL 0x00042cf8 in the whole body, at 0002df9c.  The stream is seeded
+   twice from the same value: after the call the next number out has to be the
+   stream's second, so a body that drew no random number, or two, is visible.
+   The expected values are read from the stream itself, not written down. */
+static void exactly_one_random_number_is_consumed(void)
+{
+    int first;
+    int second;
+
+    srand(1);
+    first = rand();
+    second = rand();
+
+    /* If the stream ever repeated a value the check below would pass for the
+       wrong reason, so say out loud that it does not. */
+    CHECK_EQ(first == second, 0);
+
+    srand(1);
+    stage_relocate(RELOCATE_UNITS);
+    fdps_relocate_unit_array();
+    CHECK_EQ(rand(), second);
+    unstage_relocate();
+}
+
+/* The second call's source is the block the first call handed out, which is one
+   record longer than the live array, so nothing is read past its end and every
+   record -- the spare one included -- comes through again.  This is the shape
+   the plate comment's memset note describes: the wipe covers count records and
+   leaves that block's last record standing, which the copy has already taken a
+   copy of by then. */
+static void a_second_move_carries_the_records_again(void)
+{
+    stage_relocate(RELOCATE_UNITS);
+    fdps_relocate_unit_array();
+    fdps_relocate_unit_array();
+    CHECK_EQ(relocate_mismatches(0,
+                                 (RELOCATE_UNITS + 1) * UNIT_RECORD_STRIDE),
+             0);
+    unstage_relocate();
+}
+
 void run_unit_tests(void)
 {
     RUN_TEST(the_record_is_base_plus_index_times_stride);
@@ -2650,4 +2860,13 @@ void run_unit_tests(void)
     RUN_TEST(the_find_starts_from_the_published_base);
     RUN_TEST(the_roster_fallback_stays_dead);
     RUN_TEST(nothing_in_the_unit_array_is_written);
+
+    RUN_TEST(the_moved_block_is_not_the_block_it_came_from);
+    RUN_TEST(every_live_record_survives_the_move);
+    RUN_TEST(the_copy_runs_one_record_past_the_live_count);
+    RUN_TEST(the_unit_count_is_left_alone);
+    RUN_TEST(an_empty_array_still_moves_one_record);
+    RUN_TEST(a_record_pointer_does_not_survive_the_call);
+    RUN_TEST(exactly_one_random_number_is_consumed);
+    RUN_TEST(a_second_move_carries_the_records_again);
 }

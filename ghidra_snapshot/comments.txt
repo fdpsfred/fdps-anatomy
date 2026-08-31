@@ -7356,7 +7356,7 @@ Algorithm:
 5. free(DAT_00069cd8), then free(scratch).
 6. Publishes the new block in DAT_00069cd8. The count at 0x00060150 is never written, so the array does not gain an entry: this is a move, not a resize.
 
-The two mechanisms only make sense together -- holding a randomly sized block across the allocation moves the array on every call, and zeroing the old storage destroys the stale copy that would otherwise survive in the freed block. fdps_battle_unit_turn, fdps_battle_npc_turn_phase and FUN_00012960 all call it at the top of each unit iteration and immediately re-resolve their record pointer through fdps_get_unit_record, so the array never sits at one address for long.
+The two mechanisms only make sense together -- holding a randomly sized block across the allocation moves the array on every call, and zeroing the old storage destroys the stale copy that would otherwise survive in the freed block. fdps_battle_unit_turn, fdps_battle_npc_turn_phase and fdps_battle_enemy_turn_phase all call it at the top of each unit iteration and immediately re-resolve their record pointer through fdps_get_unit_record, so the array never sits at one address for long.
 
 Parameters:
   none
@@ -7367,7 +7367,7 @@ Returns:
 Pool: fdps  [no Function ID candidate in either library and the body hash is unique in the image; the whole body is bookkeeping over two FDPS globals -- the unit count at 0x00060150 and the unit array pointer at 0x00069cd8 -- with the game's hard-coded 0x50-byte record stride, consuming malloc/memmove/memset/free/rand as a stack-convention client]
 
 Rebuild note:
-The copy length and the wipe length deliberately disagree by one record, and neither may be "corrected". When FUN_000232b0 sized the old block last it is exactly count * 0x50 bytes, so the memmove reads 0x50 bytes past the end of that allocation and fills the spare tail slot with heap garbage; when this routine itself sized it, the old block is (count + 1) * 0x50 and the memset leaves its final record unzeroed. Writing memmove(new, old, count * 0x50) or memset over the whole allocation is the obvious C and is a behaviour change. Callers must also re-read every unit record pointer after this call: a pointer held across it points into freed, zeroed memory.
+The copy length and the wipe length deliberately disagree by one record, and neither may be "corrected". When fdps_deploy_unit or fdps_build_map_unit_array sized the old block last it is exactly count * 0x50 bytes, so the memmove reads 0x50 bytes past the end of that allocation and fills the spare tail slot with heap garbage; after fdps_load_savegame the block is instead a flat 0x1e00 bytes, which is 96 records, so the over-read stays inside it for any saved count below 96; when this routine itself sized it, the old block is (count + 1) * 0x50 and the memset leaves its final record unzeroed. Writing memmove(new, old, count * 0x50) or memset over the whole allocation is the obvious C and is a behaviour change. Callers must also re-read every unit record pointer after this call: a pointer held across it points into freed, zeroed memory.
 
 === 0002e02d [EOL]
 Alignment padding: 3-byte NOP form 8d 40 00 (lea eax,[eax+0])

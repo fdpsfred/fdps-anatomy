@@ -250,4 +250,24 @@ extern int fdps_battle_find_unit_by_character_id(
     int character_id, struct fdps_unit_record **out_record);
 #pragma aux fdps_battle_find_unit_by_character_id "*" parm caller [];
 
+/* Moves the current battle's whole unit-record array to a fresh heap block,
+   wipes the storage it came from and frees it, then publishes the new base in
+   data_fdps_map_unit_array_ptr (gamedata.h).  Takes nothing, returns nothing,
+   and does not touch data_fdps_map_unit_count: this is a move, not a resize.
+
+   Every record pointer, and every cached copy of the array base, is invalid the
+   moment this returns -- the old block has been zeroed and handed back to the
+   heap.  The three callers (fdps_battle_unit_turn, fdps_battle_enemy_turn_phase
+   and fdps_battle_npc_turn_phase) call it once per unit iteration and re-resolve
+   through fdps_get_unit_record on the next line, which is the only safe shape.
+
+   The new block is one 0x50-byte record LONGER than the live array and the copy
+   runs the new block's full length, so the spare tail record is filled from
+   whatever sat past the end of the old allocation; the wipe of the old block
+   covers count records and so is one record shorter than the copy.  Both
+   lengths are as the original has them and neither may be evened up -- see the
+   comment on the definition and rebuild_info/pitfalls.md. */
+extern void fdps_relocate_unit_array(void);
+#pragma aux fdps_relocate_unit_array "*" parm caller [];
+
 #endif
