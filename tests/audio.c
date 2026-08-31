@@ -1216,6 +1216,172 @@ static void install_needs_neither_audio_flag_and_moves_nothing_else(void)
     fdps_audio_shutdown();
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_audio_init @ 000304e0
+ *
+ * Expected values come from 000304e0 -- the three unconditional byte stores at
+ * 000304f1/000304f8/000304ff, MOV [0x00069d6c],EAX and MOV [0x00069d68],EAX for
+ * the two install results, the CMP dword ptr [...],0x0 / JZ that guards each
+ * half, MOV dword ptr [EDX + 0x69d30],EAX for the allocation loop, and the two
+ * JZ targets both being 00030584, the argument load for the timer install --
+ * and from the two call sites, 0002930e and 00031028, which PUSH 0x19.
+ *
+ * WHICH BRANCH THIS ENVIRONMENT TAKES, AND WHY IT IS NOT A GUESS.  The test
+ * executable runs under DOSBox-X with -silent (tools/fdps_build/build_min.py),
+ * which turns the Sound Blaster emulation off with everything else, so a driver
+ * probe finds no hardware and AIL_install_DIG_INI answers NULL --
+ * rebuild_info/pitfalls.md records that, together with the trap that
+ * AIL_get_last_error_code stays 0 while it happens.  No DIG.INI or MDI.INI is
+ * staged next to the executable either (tests/gamefile.lst), so both installs
+ * fail one step earlier still, in AIL_API_read_INI: the worker at 000470c0
+ * copies "Unable to open file DIG.INI" into AIL's error buffer and returns
+ * NULL without touching a port.  Both halves therefore take their NULL arm,
+ * every time, and that is the arm a machine with no sound card takes too.
+ *
+ * The driver-present arm cannot be reached from here at all, for the same
+ * reason, so what it does is read out of the disassembly rather than asserted:
+ * it is recorded as an open issue against a real machine, not left implied by
+ * a test that quietly never ran it.
+ *
+ * WHAT A STORE IS OBSERVED THROUGH.  Every global the function writes is parked
+ * with a distinguishable value first, so that "the marker is gone" is what
+ * proves a store happened.  Without that, a NULL handle after the call would
+ * look the same whether the install ran and answered NULL or the call was never
+ * made at all -- which is exactly the value-after-a-CALL question these cases
+ * exist to settle.
+ * ------------------------------------------------------------------ */
+
+/* The rate both call sites pass, forwarded to the timer installer unchanged.
+   Nothing in AIL reads a registered timer's frequency back, so what the
+   argument does with it is pinned by the disassembly in src/audio.c; what is
+   asserted here is that the install happened at all. */
+#define INIT_TEST_RATE_HZ 25
+
+/* Markers for the four handle globals.  They are the addresses of real objects
+   rather than invented numbers, so nothing here depends on a made-up pointer
+   being valid: the assertions only ever compare them for equality. */
+static unsigned int init_marker_bgm_driver;
+static unsigned int init_marker_bgm_sequence;
+static unsigned int init_marker_dig_driver;
+static unsigned int init_slot_markers[SFX_SAMPLE_SLOT_COUNT];
+
+/* Empties AIL's timer table, so that a handle of 0 afterwards can only be
+   init's own registration taking the first slot, and parks a marker in every
+   global fdps_audio_init writes.  The two flags start at the opposite of what
+   the function sets them to and the enabled flag starts clear, so each of the
+   three unconditional stores is visible as a change. */
+static void stage_init(void)
+{
+    int slot;
+
+    AIL_startup();
+    fdps_audio_shutdown();
+
+    data_fdps_audio_bgm_driver_available_flag = 1;
+    data_fdps_audio_sfx_driver_available_flag = 1;
+    data_fdps_audio_sfx_enabled_flag = 0;
+    data_fdps_audio_bgm_driver_handle = &init_marker_bgm_driver;
+    data_fdps_audio_bgm_sequence_handle = &init_marker_bgm_sequence;
+    data_fdps_audio_sfx_dig_driver_handle = &init_marker_dig_driver;
+    data_fdps_audio_timer_handle = TIMER_HANDLE_MARKER;
+    data_fdps_audio_sample_playback_rate = TIMER_RATE_MARKER;
+    for (slot = 0; slot < SFX_SAMPLE_SLOT_COUNT; slot++) {
+        data_fdps_audio_sample_handle_table[slot] = &init_slot_markers[slot];
+    }
+}
+
+/* Both installs are really called and both answers are really stored: the
+   markers are gone, replaced by the NULL the two INI readers return.  A
+   version that only zeroed the flags and skipped the calls would leave both
+   markers standing. */
+static void init_stores_what_each_install_answered(void)
+{
+    stage_init();
+    fdps_audio_init(INIT_TEST_RATE_HZ);
+    CHECK_EQ((unsigned int) data_fdps_audio_bgm_driver_handle, 0);
+    CHECK_EQ((unsigned int) data_fdps_audio_sfx_dig_driver_handle, 0);
+    fdps_audio_shutdown();
+}
+
+/* The three byte stores, and what each of them means.  The two available flags
+   are cleared and then set only by the arm the install result chooses, so with
+   no driver they stay 0.  The enabled flag is the player's own sound-effects
+   toggle -- the one the options menu writes and a save file carries -- and
+   start-up turns it back on whatever the last session left it at: it goes into
+   this test clear and comes out set. */
+static void init_forces_sound_effects_on_and_clears_both_driver_flags(void)
+{
+    stage_init();
+    fdps_audio_init(INIT_TEST_RATE_HZ);
+    CHECK_EQ(data_fdps_audio_sfx_enabled_flag, 1);
+    CHECK_EQ((unsigned int) data_fdps_audio_bgm_driver_handle, 0);
+    CHECK_EQ(data_fdps_audio_bgm_driver_available_flag, 0);
+    CHECK_EQ((unsigned int) data_fdps_audio_sfx_dig_driver_handle, 0);
+    CHECK_EQ(data_fdps_audio_sfx_driver_available_flag, 0);
+    fdps_audio_shutdown();
+}
+
+/* Both allocations sit inside their branch, which is the reading an intuitive
+   rewrite would most plausibly lose: allocating eight sample handles off a NULL
+   driver is a call AIL tolerates, so nothing would crash and the table would
+   quietly fill with whatever the vendor answered.  All eight markers are
+   asserted separately rather than spot-checked, because a loop that ran on the
+   wrong side of the branch would replace every one of them. */
+static void no_driver_allocates_no_handles(void)
+{
+    int slot;
+
+    stage_init();
+    fdps_audio_init(INIT_TEST_RATE_HZ);
+    CHECK_EQ((unsigned int) data_fdps_audio_bgm_driver_handle, 0);
+    CHECK_EQ((unsigned int) data_fdps_audio_sfx_dig_driver_handle, 0);
+    CHECK_EQ((unsigned int) data_fdps_audio_bgm_sequence_handle,
+             (unsigned int) &init_marker_bgm_sequence);
+    for (slot = 0; slot < SFX_SAMPLE_SLOT_COUNT; slot++) {
+        CHECK_EQ((unsigned int) data_fdps_audio_sample_handle_table[slot],
+                 (unsigned int) &init_slot_markers[slot]);
+    }
+    fdps_audio_shutdown();
+}
+
+/* Both JZ arms land on the argument load, not on the epilogue, so the clock
+   goes on the air on a machine with no sound card -- which is what keeps every
+   wait, animation step and blink in the game independent of the audio
+   hardware.  Handle 0 and a next registration of 4 are AIL's own record that
+   exactly one timer was taken.  The playback rate is checked by name because
+   storing the argument there is the plausible wrong reading of a function whose
+   one argument is a rate. */
+static void init_starts_the_clock_with_no_driver_installed(void)
+{
+    stage_init();
+    fdps_audio_init(INIT_TEST_RATE_HZ);
+    CHECK_EQ(data_fdps_audio_sfx_driver_available_flag, 0);
+    CHECK_EQ(data_fdps_audio_timer_handle, 0);
+    CHECK_EQ(AIL_register_timer(NO_TIMER_CALLBACK), TIMER_SLOT_STRIDE);
+    CHECK_EQ(data_fdps_audio_sample_playback_rate, TIMER_RATE_MARKER);
+    fdps_audio_shutdown();
+}
+
+/* The two flags are separate answers and the pair start-up leaves behind on a
+   driverless machine is "the player wants effects, there is nothing to play
+   them on".  Read end to end: after a bring-up that installed nothing, a sound
+   effect is dropped even though the enabled flag was just switched on.  The
+   handles are staged after the call, because the point is the flags rather than
+   the table -- the case above is what pins the table. */
+static void with_no_driver_an_effect_is_still_dropped(void)
+{
+    stage_init();
+    fdps_audio_init(INIT_TEST_RATE_HZ);
+    CHECK_EQ(data_fdps_audio_sfx_enabled_flag, 1);
+    CHECK_EQ(data_fdps_audio_sfx_driver_available_flag, 0);
+
+    stage_default_image();
+    stage_slots(2);
+    fdps_sfx_play(stage_image, 1);
+    CHECK_EQ(played_offset(), -1);
+    fdps_audio_shutdown();
+}
+
 void run_audio_tests(void)
 {
     RUN_TEST(the_fixture_looks_like_a_handle_to_ail);
@@ -1262,4 +1428,9 @@ void run_audio_tests(void)
     RUN_TEST(install_claims_one_timer_and_keeps_its_handle);
     RUN_TEST(a_second_install_takes_the_next_slot);
     RUN_TEST(install_needs_neither_audio_flag_and_moves_nothing_else);
+    RUN_TEST(init_stores_what_each_install_answered);
+    RUN_TEST(init_forces_sound_effects_on_and_clears_both_driver_flags);
+    RUN_TEST(no_driver_allocates_no_handles);
+    RUN_TEST(init_starts_the_clock_with_no_driver_installed);
+    RUN_TEST(with_no_driver_an_effect_is_still_dropped);
 }

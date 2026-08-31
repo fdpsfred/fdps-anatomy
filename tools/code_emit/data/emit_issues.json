@@ -944,5 +944,20 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "000304e0": [
+    {
+      "from": "emit",
+      "what": "The driver-present arm of both halves is never executed by the test suite, so what the function does when a driver actually installs -- set the available flag to 1, allocate one sequence handle off the MDI driver, allocate eight sample handles off the DIG driver -- is read out of the disassembly and never observed. The cause is environmental and settled, not a gap in the staging: the test executable runs under DOSBox-X with -silent, which turns the Sound Blaster emulation off, so a driver probe finds no hardware and AIL_install_DIG_INI answers NULL (rebuild_info/pitfalls.md). Staging DIG.INI and SB16.DIG from fdps_game_files would move the failure from AIL_API_read_INI to the probe without changing the answer. Everything that is observable from the NULL arm is asserted, including that both arms rejoin at the timer install.",
+      "needs": "A run of the emit test suite, or of the rebuilt game, with DOSBox-X launched without -silent and DIG.INI plus the driver it names staged next to the executable; then the eight sample handles are non-null and distinct, data_fdps_audio_sfx_driver_available_flag is 1, and a sound effect actually plays. tools/fdps_build/build_min.py already carries a silent=False path for exactly this case.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached the same gap independently and confirmed its cause rather than restating it. What my pass adds: the environmental claim is not just plausible, it is recorded -- rebuild_info/pitfalls.md line 122 says in terms that -silent turns the Sound Blaster emulation off so AIL_install_DIG_INI answers NULL while AIL_get_last_error_code stays 0 -- and tests/gamefile.lst stages only ICON.CEL, so no DIG.INI or MDI.INI is beside the test executable and neither install can reach a probe in the first place. Both halves therefore take the NULL arm every time, which is also the arm a machine with no sound card takes, and everything observable from it is asserted. Nothing the emitter could have read would have settled the other arm.",
+      "needs": "A run with DOSBox-X started without -silent and DIG.INI plus the driver it names staged next to the executable, or the rebuilt game on real hardware: then data_fdps_audio_sfx_driver_available_flag is 1, the eight sample handles are non-null and distinct, and a sound effect is audible.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

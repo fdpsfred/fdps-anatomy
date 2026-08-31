@@ -150,6 +150,91 @@ void fdps_sfx_play(void *saf, int sound_index)
     AIL_start_sample(data_fdps_audio_sample_handle_table[slot]);
 }
 
+/* 000304e0.  Straight-line bring-up with two optional halves, each an
+   `if (handle != 0)` off what an install answered, and a tail call that is
+   outside both: the JZ at 00030517 skips the sequence allocation, the JZ at
+   00030544 skips the flag and the eight-slot loop, and both land on 00030584,
+   which is MOV EAX,dword ptr [EBP+0x14] -- the argument load for the timer
+   install.  So the clock goes on the air on a machine with no sound card at
+   all, which is what makes every wait, animation step and blink in the game
+   independent of the audio hardware.
+
+   Four values come back from a CALL and every one of them is stored:
+   AIL_install_MDI_INI's EAX into 0x69d6c at 0003050b, AIL_allocate_sequence_-
+   handle's into 0x69d60 at 0003052e, AIL_install_DIG_INI's into 0x69d68 at
+   00030538, and AIL_allocate_sample_handle's into [EDX+0x69d30] at 0003057c.
+   AIL_startup returns nothing and fdps_audio_timer_install returns nothing;
+   EAX is dead at the RET, and neither caller reads it (both do PUSH 0x19 /
+   CALL / ADD ESP,0x4 and go straight on).
+
+   Each handle is re-read out of its global for the test and for the argument
+   that follows -- CMP dword ptr [0x00069d6c],0x0 then PUSH dword ptr
+   [0x00069d6c] -- rather than kept in a register, which is what -od does with
+   a plain assignment to a global.
+
+   The three flag stores are unconditional and come before either install.
+   Setting data_fdps_audio_sfx_enabled_flag to 1 here is a real effect and not
+   an initialisation of something the caller has not written yet: it is the
+   player's own "sound effects on" toggle, which the options menu writes and a
+   save file carries (gamedata.h), and start-up turns it back on whatever the
+   last session left it at.
+
+   The MDI half is write-only state.  0x69d72, 0x69d60 and 0x69d6c have two,
+   one and three references in the whole image and every one of them is in this
+   function, so nothing ever asks whether a music driver installed, nothing
+   ever plays the sequence handle, and nothing uninstalls the driver by name --
+   the game's music comes off the CD (program_info/cd_audio.md) and this half
+   of the bring-up leaves nothing behind that the rest of the program reads.
+   The DIG driver handle at 0x69d68 is the same: its three references are the
+   store, the test and the PUSH below, and the eight sample handles are what
+   the rest of the file works with.
+
+   The loop is the ordinary -od for-statement shape -- MOV [EBP-0x4],0x0 / CMP
+   with 0x8 / JL to the body / JMP to the exit, with the increment block at
+   0003055c reached by a JMP from the bottom of the body -- and the emitted
+   object reproduces that layout branch for branch (WDISASM over the AUDIO.OBJ
+   this file compiles to).  One instruction differs and it is a dead one: the
+   original's increment block is MOV EAX,dword ptr [EBP-0x4] followed by INC
+   dword ptr [EBP-0x4], where wcc386 gives the bare INC here.  The loaded value
+   is discarded in the original -- EAX is overwritten by the next call before
+   anything reads it -- so what spelling of the third clause makes 10.0a
+   materialise it is not settled by this function, and it is register
+   allocation either way (ADR-0001).  It is not the volatile case the tick
+   handler below documents: slot is a plain local.
+
+   The bound is a signed compare over the array's real extent, and the index
+   reaches the table as LEA EDX,[EDX*0x4+0x0] / MOV dword ptr [EDX + 0x69d30],
+   EAX -- base 0x69d30 with nothing folded into it, last slot 0x69d4c, and the
+   next global at 0x69d50. */
+void fdps_audio_init(int tick_rate_hz)
+{
+    int slot;
+
+    AIL_startup();
+    data_fdps_audio_bgm_driver_available_flag = 0;
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    data_fdps_audio_sfx_enabled_flag = 1;
+
+    data_fdps_audio_bgm_driver_handle = AIL_install_MDI_INI();
+    if (data_fdps_audio_bgm_driver_handle != 0) {
+        data_fdps_audio_bgm_driver_available_flag = 1;
+        data_fdps_audio_bgm_sequence_handle =
+            AIL_allocate_sequence_handle(data_fdps_audio_bgm_driver_handle);
+    }
+
+    data_fdps_audio_sfx_dig_driver_handle = AIL_install_DIG_INI();
+    if (data_fdps_audio_sfx_dig_driver_handle != 0) {
+        data_fdps_audio_sfx_driver_available_flag = 1;
+        for (slot = 0; slot < SFX_SAMPLE_SLOT_COUNT; slot++) {
+            data_fdps_audio_sample_handle_table[slot] =
+                AIL_allocate_sample_handle(
+                    data_fdps_audio_sfx_dig_driver_handle);
+        }
+    }
+
+    fdps_audio_timer_install(tick_rate_hz);
+}
+
 /* 000305a0.  A Watcom frame around one call and nothing else: PUSH
    EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0, CALL AIL_shutdown, the mirrored
    POP sequence, RET.  There is no argument, no local, no branch and not one

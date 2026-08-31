@@ -59,6 +59,52 @@ extern int data_fdps_audio_sample_playback_rate;
    Read as a boolean; nothing compares it against a particular value. */
 extern unsigned char data_fdps_audio_sfx_driver_available_flag;
 
+/* 00069d72.  The music-side twin of the flag above, set when the MDI driver
+   installed at start-up.  It is write-only state: both of its references in
+   the image are the two stores in fdps_audio_init, so nothing in the game ever
+   asks whether a music driver is there.  Music comes off the CD
+   (program_info/cd_audio.md), which is why the answer is never wanted. */
+extern unsigned char data_fdps_audio_bgm_driver_available_flag;
+
+/* 00069d6c.  The MDI driver handle AIL_install_MDI_INI answered with, or NULL
+   when no MDI.INI could be read.  All three of its references are inside
+   fdps_audio_init -- the store, the test that guards the sequence allocation,
+   and the argument of that allocation -- so it is never used to play anything
+   and never handed to an uninstall call. */
+extern void *data_fdps_audio_bgm_driver_handle;
+
+/* 00069d60.  The one sequence handle the music driver is asked for at
+   start-up.  The image holds exactly one reference to it, the store in
+   fdps_audio_init, so nothing is ever loaded into it or started on it. */
+extern void *data_fdps_audio_bgm_sequence_handle;
+
+/* 00069d68.  The DIG driver handle AIL_install_DIG_INI answered with, or NULL
+   when no DIG.INI could be read or the driver it names found no hardware.  It
+   is what the eight sample handles are allocated from, and all three of its
+   references are inside fdps_audio_init: the rest of the file works with the
+   sample handles instead, and AIL_shutdown is what releases the driver. */
+extern void *data_fdps_audio_sfx_dig_driver_handle;
+
+/* Brings the Miles audio stack up and puts the game's clock on the air:
+   AIL_startup, then each of the two drivers installed from its .INI, then the
+   timer at `tick_rate_hz` ticks a second.  Both call sites pass 25.
+
+   Both driver halves are optional and independent.  A driver that did not
+   install leaves its available-flag at 0 and its handles untouched, and the
+   timer is installed either way, so the game runs -- silently -- on a machine
+   with no sound card.  Sound effects are switched on unconditionally here,
+   whatever the last session's saved options said.
+
+   The function itself releases nothing and has no "already up" test, so it is
+   a bring-up and not an idempotent reset: pairing it with a teardown is the
+   caller's job.  Both callers do pair it.  main@00029220 opens the session
+   with it and closes with fdps_audio_shutdown, and fdps_play_movie@00030f40
+   calls AIL_shutdown before it hands the machine to the external movie player
+   and this on the way back, so the second bring-up of a session always follows
+   a shutdown. */
+extern void fdps_audio_init(int tick_rate_hz);
+#pragma aux fdps_audio_init "*" parm caller [];
+
 /* Plays item `sound_index` of the sound section of the loaded .SAF image at
    `saf` on the first of the eight sample handles that is not already playing.
    Silently does nothing when either audio flag is clear, when sound_index is
