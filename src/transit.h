@@ -112,4 +112,57 @@ extern void fdps_transition_slide(unsigned char *src, int src_pitch,
                                   int step, int frame_delay, int style);
 #pragma aux fdps_transition_slide "*" parm caller [];
 
+
+/* Brings the picture in src_or_fill up in random mosaic patches: the
+   rectangle is cut into block_w x block_h blocks, each block belongs to the
+   cell of a grid_cols x grid_rows phase grid that its position modulo the grid
+   names, and the cells are shuffled and then played out one at a time with a
+   delay() between them.
+
+   THE SOURCE PAIR COMES FIRST HERE AND THE DESTINATION PAIR SECOND, WHICH IS
+   THE OTHER WAY ROUND FROM THE TWO ROUTINES ABOVE.  src_or_fill with
+   src_pitch is what is read, dst with dst_pitch is what is written; all four
+   call sites in fdps_save_game_screen and fdps_load_game_screen pass the
+   loaded picture first and the 0xa0000 screen third.
+
+   src_pitch 0 IS FILL MODE, and it reaches fdps_blit_rect's own fill mode
+   intact: with a stride of 0 the block's byte offset is not added, so
+   src_or_fill arrives at every block exactly as it was handed in and is taken
+   as a palette index.  That is why the argument is an unsigned int and not a
+   pointer, exactly as in blit.h, and why a copy-mode caller casts.
+
+   NOTHING IS CLIPPED TO THE RECTANGLE AND THE TWO AXES ARE NOT BOUNDED THE
+   SAME WAY.  A block is drawn when its block column index is below width --
+   an index against a pixel extent, so on the game's geometry it is always
+   true -- and when its pixel row is below height.  A width that does not
+   divide into whole bands therefore has its last band drawn past the right
+   edge, while the equivalent row is dropped.  Both are load-bearing: bounding
+   the horizontal axis in pixels stops those columns being drawn at all.
+
+   THE VERTICAL BAND INDEX IS MULTIPLIED BY grid_cols WHILE THE VERTICAL BAND
+   COUNT IS DIVIDED BY grid_rows.  On the 16x16 grid every caller uses the two
+   are the same number and nothing shows; on any other grid the pixel rows a
+   cell reaches skip whole bands, and rows of the rectangle are never drawn and
+   keep whatever the destination was carrying.  Writing grid_rows there covers
+   them.
+
+   grid_cols and grid_rows must both be positive -- they are divisors and
+   rand() moduli -- and so must block_w and block_h.  The malloc of the cell
+   table is not checked.
+
+   THERE IS NO CLOSING BLIT.  Unlike the box and slide transitions above, this
+   one leaves the destination holding exactly what its blocks drew: whatever
+   the bounds dropped stays as it was.
+
+   frame_delay is handed to the CRT's delay() once per phase cell, after all of
+   that cell's blocks. */
+extern void fdps_transition_random_blocks(unsigned int src_or_fill,
+                                          int src_pitch,
+                                          unsigned char *dst, int dst_pitch,
+                                          int width, int height,
+                                          int grid_cols, int grid_rows,
+                                          int block_w, int block_h,
+                                          int frame_delay);
+#pragma aux fdps_transition_random_blocks "*" parm caller [];
+
 #endif

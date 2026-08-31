@@ -37,6 +37,7 @@
  * destination holding exactly the bytes checked here.  delay() is in the same
  * position, and every case passes 0.
  */
+#include <stdlib.h>
 #include <string.h>
 #include "testharn.h"
 #include "transit.h"
@@ -630,6 +631,430 @@ static void slide_a_step_that_fills_the_extent_draws_no_frame(void)
     CHECK_EQ(slide_outside_bad(SLIDE_OUT_A, 1, 0), 0);
 }
 
+/* fdps_transition_random_blocks, 0002fb80.
+ *
+ * WHAT IS OBSERVABLE FROM OUTSIDE THE CALL.  There is no closing blit here:
+ * the destination ends up holding exactly the blocks the routine drew and
+ * nothing else, so unlike its two neighbours above every one of its bounds,
+ * band counts and offsets is visible in the final content of the destination
+ * buffer.  The cell table is malloc'd and freed inside the call and never
+ * handed out, and the order the blocks are drawn in is the one thing that is
+ * not observable, because the shuffle is a permutation and every cell is drawn
+ * exactly once whatever order it lands in.
+ *
+ * THAT IS WHY THE SEEDS ARE VARIED RATHER THAN PINNED.  rand() is the CRT's
+ * and its sequence is not this rebuild's to define; what the cases below rely
+ * on is the property the assembly guarantees for any sequence -- both draws
+ * are taken modulo an extent and recombined into grid_cols * row + col, which
+ * cannot exceed cell_count - 1, so the swap at 0002fc7b never leaves the table
+ * and never loses a cell.  A shuffle that could drop one would leave that
+ * cell's blocks carrying the outgoing fill, and the coverage check would count
+ * them.
+ *
+ * Expected values come from the assembly: the six pushes at 0002fdc5 onward,
+ * which put [EBP+0x14] and [EBP+0x18] in fdps_blit_rect's source pair and
+ * [EBP+0x1c] and [EBP+0x20] in its destination pair; the two IDIV at 0002fcb3
+ * and 0002fcc2 with the TEST EDX,EDX / INC pairs at 0002fcdd and 0002fcf3 that
+ * round both band counts up; the IMUL EAX,[EBP+0x2c] at 0002fd5f that scales
+ * the vertical band index by the COLUMN count; the CMP EAX,[EBP+0x24] at
+ * 0002fd9d that bounds a block index by a pixel width; and the CMP
+ * [EBP+0x18],0x0 at 0002fdac that drops the block offset in fill mode.
+ *
+ * WHAT IS LEFT TO THE PLAYTEST.  In what order the patches appear, and the
+ * pacing delay() gives them.  Every case passes 0 for frame_delay.
+ */
+
+/* Chosen so that neither axis divides evenly into whole bands, which is what
+   makes both roundings and both bounds visible:
+
+     cols_total = 14 / 2 = 7, over 2 grid columns -> 4 bands, so the block
+       column index runs 0..7 and the last band draws at pixel columns 14 and
+       15 -- past the width of 14, which the index-against-width test lets
+       through;
+     rows_total = 9 / 3 = 3, over 2 grid rows -> 2 bands, so the vertical band
+       index runs 0..3 and the pixel rows are 0, 3, 6 and 9 -- and 9 is
+       dropped by the row-against-height test.
+
+   The strides are both larger than the width and different from each other, so
+   neither can stand in for the width or for the other. */
+#define MOS_W 14
+#define MOS_H 9
+#define MOS_SP 18
+#define MOS_DP 20
+#define MOS_BW 2
+#define MOS_BH 3
+#define MOS_GC 2
+#define MOS_GR 2
+
+/* Pixel columns 0..15 and pixel rows 0..8 are what the blocks cover: two
+   columns more than the width, and exactly the height. */
+#define MOS_COVER_W 16
+#define MOS_COVER_H 9
+
+/* Eight rows of slack past the rectangle in both buffers.  A build that lost
+   either bound would draw the dropped band at pixel row 9 and the two rows
+   under it, and the slack is what keeps that inside the buffer where the guard
+   check can see it instead of past the end of it. */
+#define MOS_SRC_BYTES (MOS_SP * (MOS_H + 8))
+#define MOS_DST_BYTES (MOS_DP * (MOS_H + 8))
+
+/* The source is a ramp: mos_src[i] == 0x20 + i.  The rectangle and everything
+   a mis-bounded build could reach lie in the first 200 bytes, where the ramp
+   has not wrapped, so every byte a block could pick up names exactly where it
+   came from. */
+#define MOS_RAMP 0x20
+
+/* What the destination is carrying on entry.  Neither value appears in the
+   part of the ramp any block can reach. */
+#define MOS_OUT_A 0xf1
+#define MOS_OUT_B 0xf2
+
+/* The palette index the fill-mode case hands over in place of an address. */
+#define MOS_FILL 0x5a
+
+/* Both rectangles start one whole row into their buffer. */
+#define MOS_SRC_ORIGIN MOS_SP
+#define MOS_DST_ORIGIN MOS_DP
+
+static unsigned char mos_src[MOS_SRC_BYTES];
+static unsigned char mos_dstbuf[MOS_DST_BYTES];
+
+static void mos_stage(int outgoing)
+{
+    int i;
+
+    for (i = 0; i < MOS_SRC_BYTES; i++) {
+        mos_src[i] = (unsigned char) (MOS_RAMP + i);
+    }
+    memset(mos_dstbuf, outgoing, (size_t) MOS_DST_BYTES);
+}
+
+static void run_mosaic(unsigned int src_or_fill, int src_pitch)
+{
+    fdps_transition_random_blocks(src_or_fill, src_pitch,
+                                  &mos_dstbuf[MOS_DST_ORIGIN], MOS_DP,
+                                  MOS_W, MOS_H, MOS_GC, MOS_GR,
+                                  MOS_BW, MOS_BH, 0);
+}
+
+static void run_mosaic_copy(void)
+{
+    run_mosaic((unsigned int) &mos_src[MOS_SRC_ORIGIN], MOS_SP);
+}
+
+/* The source byte that belongs at (row, col) of the destination, spelled out
+   as ramp arithmetic rather than read back through the same pointer arithmetic
+   the code under test uses. */
+static int mos_expected(int row, int col)
+{
+    return (MOS_RAMP + MOS_SRC_ORIGIN + row * MOS_SP + col) & 0xff;
+}
+
+static int mos_dst(int row, int col)
+{
+    return (int) mos_dstbuf[MOS_DST_ORIGIN + row * MOS_DP + col];
+}
+
+/* Bytes of the covered area -- pixel rows 0..8, pixel columns 0..15 -- that
+   are not the source byte the blocks should have put there. */
+static int mos_covered_bad(void)
+{
+    int row;
+    int col;
+    int bad;
+
+    bad = 0;
+    for (row = 0; row < MOS_COVER_H; row++) {
+        for (col = 0; col < MOS_COVER_W; col++) {
+            if (mos_dst(row, col) != mos_expected(row, col)) {
+                bad++;
+            }
+        }
+    }
+    return bad;
+}
+
+/* Bytes of the destination buffer outside the covered area that no longer hold
+   the fill the destination was carrying: the columns from MOS_COVER_W to the
+   pitch on the covered rows, and every byte of the guard row above and the
+   seven rows below. */
+static int mos_outside_bad(int outgoing)
+{
+    int i;
+    int row;
+    int col;
+    int bad;
+
+    bad = 0;
+    for (i = 0; i < MOS_DST_BYTES; i++) {
+        row = (i / MOS_DP) - 1;
+        col = i % MOS_DP;
+        if (row >= 0 && row < MOS_COVER_H && col < MOS_COVER_W) {
+            continue;
+        }
+        if ((int) mos_dstbuf[i] != outgoing) {
+            bad++;
+        }
+    }
+    return bad;
+}
+
+static int mos_src_bad(void)
+{
+    int i;
+    int bad;
+
+    bad = 0;
+    for (i = 0; i < MOS_SRC_BYTES; i++) {
+        if ((int) mos_src[i] != ((MOS_RAMP + i) & 0xff)) {
+            bad++;
+        }
+    }
+    return bad;
+}
+
+/* Every block the two bounds admit is drawn, and drawn once: the covered area
+   ends up holding the incoming picture read at src_pitch and written at
+   dst_pitch, and nothing outside it is touched.  Six different rand() states
+   give six different permutations of the four phase cells, and the end state
+   is the same under all of them -- which is what the swap staying inside the
+   table buys.  A shuffle that could lose a cell would leave four of the
+   sixteen columns, or three of the nine rows, still carrying the fill. */
+static void mosaic_covers_every_block_whatever_the_shuffle(void)
+{
+    int seed;
+
+    for (seed = 1; seed <= 6; seed++) {
+        srand((unsigned int) seed);
+        mos_stage(MOS_OUT_A);
+        run_mosaic_copy();
+        CHECK_EQ(mos_covered_bad(), 0);
+        CHECK_EQ(mos_outside_bad(MOS_OUT_A), 0);
+    }
+
+    /* And a second outgoing fill, so no byte of what the destination was
+       carrying can be passing for a source byte. */
+    srand(7);
+    mos_stage(MOS_OUT_B);
+    run_mosaic_copy();
+    CHECK_EQ(mos_covered_bad(), 0);
+    CHECK_EQ(mos_outside_bad(MOS_OUT_B), 0);
+}
+
+/* The source is read at src_pitch and the destination written at dst_pitch,
+   and neither is the width.  The three expected values are written out as ramp
+   arithmetic rather than through the helpers, so this case fails if the
+   helpers and the code under test ever agree on the wrong stride. */
+static void mosaic_the_two_strides_are_independent_of_the_width(void)
+{
+    srand(3);
+    mos_stage(MOS_OUT_A);
+    run_mosaic_copy();
+
+    CHECK_EQ(mos_dst(0, 0), MOS_RAMP + MOS_SP);
+    CHECK_EQ(mos_dst(1, 0), MOS_RAMP + MOS_SP * 2);
+    CHECK_EQ(mos_dst(8, 13), MOS_RAMP + MOS_SP * 9 + 13);
+    CHECK_EQ((int) mos_dstbuf[MOS_DST_ORIGIN + MOS_DP - 1], MOS_OUT_A);
+    CHECK_EQ((int) mos_dstbuf[MOS_DST_ORIGIN + MOS_DP],
+             MOS_RAMP + MOS_SP * 2);
+}
+
+/* The horizontal bound is the block column index against the pixel width, so
+   the fourth band -- block columns 6 and 7, pixel columns 12 to 15 -- is drawn
+   in full even though its right half is past the width of 14.  Those two
+   columns are the whole difference between this test and a
+   block_x * block_w < width one, which would leave them at the outgoing fill.
+   The band count is what really bounds the axis, and it stops at column 15:
+   columns 16 to 19 are untouched. */
+static void mosaic_the_last_band_is_drawn_past_the_width(void)
+{
+    int row;
+
+    srand(11);
+    mos_stage(MOS_OUT_A);
+    run_mosaic_copy();
+
+    for (row = 0; row < MOS_COVER_H; row++) {
+        CHECK_EQ(mos_dst(row, MOS_W), mos_expected(row, MOS_W));
+        CHECK_EQ(mos_dst(row, MOS_W + 1), mos_expected(row, MOS_W + 1));
+        CHECK_EQ(mos_dst(row, MOS_COVER_W), MOS_OUT_A);
+        CHECK_EQ(mos_dst(row, MOS_DP - 1), MOS_OUT_A);
+    }
+}
+
+/* The vertical bound is a pixel row against the pixel height, and the band
+   count is rounded up, so the four vertical band indices give pixel rows 0, 3,
+   6 and 9 and the last one is dropped.  Rows 6 to 8 being the incoming picture
+   is the rounding: without the INC at 0002fcf3 the second band would not exist
+   and they would still hold the fill.  Rows 9 to 11 being the fill is the
+   bound: without the test at 0002fda5 the dropped band would be drawn there.
+   The two are checked together because each one alone is ambiguous. */
+static void mosaic_the_band_past_the_height_is_dropped(void)
+{
+    int col;
+    int row;
+
+    srand(5);
+    mos_stage(MOS_OUT_A);
+    run_mosaic_copy();
+
+    for (col = 0; col < MOS_COVER_W; col++) {
+        CHECK_EQ(mos_dst(6, col), mos_expected(6, col));
+        CHECK_EQ(mos_dst(8, col), mos_expected(8, col));
+    }
+    for (row = MOS_H; row < MOS_H + 3; row++) {
+        CHECK_EQ(mos_dst(row, 0), MOS_OUT_A);
+        CHECK_EQ(mos_dst(row, MOS_COVER_W - 1), MOS_OUT_A);
+    }
+}
+
+/* src_pitch 0 puts fdps_blit_rect in fill mode, and the first argument then
+   has to arrive at every block exactly as it was handed in: the test at
+   0002fdac drops the block's byte offset, and the row term is zero because it
+   is multiplied by the stride.  So every covered byte is the one palette index
+   MOS_FILL.  A build that added the block offset in fill mode would paint
+   MOS_FILL + 0, + 2, + 4 ... across the bands, which is what the per-column
+   checks below would catch; one that added the row term would step the colour
+   down the rows. */
+static void mosaic_a_zero_source_stride_fills_one_colour(void)
+{
+    int row;
+    int col;
+    int bad;
+
+    srand(13);
+    mos_stage(MOS_OUT_A);
+    run_mosaic(MOS_FILL, 0);
+
+    bad = 0;
+    for (row = 0; row < MOS_COVER_H; row++) {
+        for (col = 0; col < MOS_COVER_W; col++) {
+            if (mos_dst(row, col) != MOS_FILL) {
+                bad++;
+            }
+        }
+    }
+
+    CHECK_EQ(bad, 0);
+    CHECK_EQ(mos_dst(0, 0), MOS_FILL);
+    CHECK_EQ(mos_dst(0, MOS_COVER_W - 1), MOS_FILL);
+    CHECK_EQ(mos_dst(MOS_COVER_H - 1, 0), MOS_FILL);
+    CHECK_EQ(mos_dst(MOS_COVER_H - 1, MOS_COVER_W - 1), MOS_FILL);
+    CHECK_EQ(mos_outside_bad(MOS_OUT_A), 0);
+
+    /* Fill mode never dereferences the first argument, so the ramp buffer is
+       not even read; it is certainly not written. */
+    CHECK_EQ(mos_src_bad(), 0);
+}
+
+/* The incoming picture is a source on the only blit this routine makes. */
+static void mosaic_the_source_is_never_written(void)
+{
+    srand(17);
+    mos_stage(MOS_OUT_A);
+    run_mosaic_copy();
+    CHECK_EQ(mos_src_bad(), 0);
+}
+
+/* A grid that is not square, which is the only geometry where the vertical
+   band index scaling by grid_cols can be told from scaling by grid_rows.
+   3 columns by 2 rows, 2x2 blocks, on a 12 x 10 rectangle:
+
+     cols_total = 12 / 2 = 6, over 3 grid columns -> 2 bands, block columns
+       0..5, pixel columns 0..11 -- the full width;
+     rows_total = 10 / 2 = 5, over 2 grid rows -> 3 bands, and the vertical
+       index is band * 3 + cell_row with cell_row in {0, 1}, so it takes the
+       values 0, 1, 3, 4, 6 and 7 and never 2 or 5.  Pixel rows 0, 2, 6, 8, 12
+       and 14; the last two are dropped by the height, and pixel rows 4 and 5
+       are never covered by any cell at all.
+
+   Scaling by grid_rows instead would give indices 0..5 and cover every row.
+   So the two rows that keep the outgoing fill are the whole assertion. */
+#define QW 12
+#define QH 10
+#define QSP 16
+#define QDP 18
+#define QBW 2
+#define QBH 2
+#define QGC 3
+#define QGR 2
+#define QSRC_BYTES (QSP * (QH + 8))
+#define QDST_BYTES (QDP * (QH + 8))
+#define QSRC_ORIGIN QSP
+#define QDST_ORIGIN QDP
+
+/* The two pixel rows the vertical index skips over. */
+#define QSKIP_LO 4
+#define QSKIP_HI 5
+
+static unsigned char q_src[QSRC_BYTES];
+static unsigned char q_dstbuf[QDST_BYTES];
+
+static int q_expected(int row, int col)
+{
+    return (MOS_RAMP + QSRC_ORIGIN + row * QSP + col) & 0xff;
+}
+
+static int q_dst(int row, int col)
+{
+    return (int) q_dstbuf[QDST_ORIGIN + row * QDP + col];
+}
+
+static void mosaic_a_non_square_grid_skips_whole_rows(void)
+{
+    int i;
+    int row;
+    int col;
+    int drawn_bad;
+    int skipped_bad;
+    int outside_bad;
+
+    for (i = 0; i < QSRC_BYTES; i++) {
+        q_src[i] = (unsigned char) (MOS_RAMP + i);
+    }
+    memset(q_dstbuf, MOS_OUT_A, (size_t) QDST_BYTES);
+
+    srand(23);
+    fdps_transition_random_blocks((unsigned int) &q_src[QSRC_ORIGIN], QSP,
+                                  &q_dstbuf[QDST_ORIGIN], QDP,
+                                  QW, QH, QGC, QGR, QBW, QBH, 0);
+
+    drawn_bad = 0;
+    skipped_bad = 0;
+    for (row = 0; row < QH; row++) {
+        for (col = 0; col < QW; col++) {
+            if (row >= QSKIP_LO && row <= QSKIP_HI) {
+                if (q_dst(row, col) != MOS_OUT_A) {
+                    skipped_bad++;
+                }
+            } else if (q_dst(row, col) != q_expected(row, col)) {
+                drawn_bad++;
+            }
+        }
+    }
+
+    outside_bad = 0;
+    for (i = 0; i < QDST_BYTES; i++) {
+        row = (i / QDP) - 1;
+        col = i % QDP;
+        if (row >= 0 && row < QH && col < QW) {
+            continue;
+        }
+        if ((int) q_dstbuf[i] != MOS_OUT_A) {
+            outside_bad++;
+        }
+    }
+
+    CHECK_EQ(drawn_bad, 0);
+    CHECK_EQ(skipped_bad, 0);
+    CHECK_EQ(outside_bad, 0);
+    CHECK_EQ(q_dst(3, 0), q_expected(3, 0));
+    CHECK_EQ(q_dst(4, 0), MOS_OUT_A);
+    CHECK_EQ(q_dst(5, QW - 1), MOS_OUT_A);
+    CHECK_EQ(q_dst(6, 0), q_expected(6, 0));
+    CHECK_EQ(q_dst(QH - 1, QW - 1), q_expected(QH - 1, QW - 1));
+}
+
 void run_transit_tests(void)
 {
     RUN_TEST(the_closing_path_ends_on_the_incoming_picture);
@@ -645,4 +1070,11 @@ void run_transit_tests(void)
     RUN_TEST(slide_style_six_anchors_on_the_height);
     RUN_TEST(slide_a_style_outside_the_table_still_lands);
     RUN_TEST(slide_a_step_that_fills_the_extent_draws_no_frame);
+    RUN_TEST(mosaic_covers_every_block_whatever_the_shuffle);
+    RUN_TEST(mosaic_the_two_strides_are_independent_of_the_width);
+    RUN_TEST(mosaic_the_last_band_is_drawn_past_the_width);
+    RUN_TEST(mosaic_the_band_past_the_height_is_dropped);
+    RUN_TEST(mosaic_a_zero_source_stride_fills_one_colour);
+    RUN_TEST(mosaic_the_source_is_never_written);
+    RUN_TEST(mosaic_a_non_square_grid_skips_whole_rows);
 }
