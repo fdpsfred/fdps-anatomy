@@ -360,6 +360,69 @@ int fdps_unit_apply_damage(int unit_index, int base_damage)
     return damage_rolled;
 }
 
+/* CMP dword ptr [EBP-0x4],0x3 at 00028f02: three passes, and the byte each one
+   stores into is record + i + 0x25 -- MOV EBX,[EBP-0x8] / ADD EBX,[EBP-0x4] /
+   MOV byte ptr [EBX+0x25],DL at 00028f52.  status_timers starts at record
+   +0x22, so those are slots 3, 4 and 5: poison, paralysis and 封魔咒術. */
+#define AILMENT_SLOT_COUNT 3
+#define FIRST_AILMENT_TIMER_SLOT 3
+
+/* CMP EDX,0x14 / JGE at 00028f25 -- a flat 20 out of the rand() % 100, written
+   as a literal.  No MAGICDAT.DAT record is read anywhere in this function, so
+   there is no hit rate for the spell to lower or raise. */
+#define AILMENT_CHANCE 0x14
+
+/* MOV EBX,0x2 / IDIV / ADD EDX,0x2 at 00028f43: two or three turns, the same
+   spread the paralysis a weapon inflicts uses. */
+#define AILMENT_TURNS_SPREAD 2
+#define AILMENT_TURNS_BASE 2
+
+/* 00028ee0.  The frame is the plain -4s one: PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP,
+   SUB ESP,0x8, the single argument read from [EBP+0x14], and both call sites --
+   0001aea5 in fdps_combat_play_spell_on_targets and 00028e90 in
+   fdps_cast_spell_on_targets -- pushing one zero-extended byte and doing ADD
+   ESP,0x4 after the CALL.  Nothing is left in EAX on the exit path and neither
+   caller reads one.
+
+   Three things about the shape are load-bearing and none of them reads that
+   way.
+
+   THE IMMUNITY TEST STAYS INSIDE THE LOOP AND STAYS SECOND.  It depends only on
+   unit_index and on record fields this loop never writes, so it is
+   loop-invariant and asks to be hoisted out or moved in front of the chance
+   roll.  Either move skips rand() calls the original makes: the CALL at
+   00028f12 runs on all three passes whatever the unit is, and the CALL at
+   00028f2e is reached only once a pass has already rolled under 20.  rand() is
+   one stream shared by every roll in the battle, so a call this function does
+   not make is a value some later roll takes instead.
+
+   THERE IS NO ALREADY-AFFLICTED TEST.  The store is unconditional once the two
+   tests pass, so a slot that is already counting down is overwritten and its
+   duration refreshed.  fdps_unit_apply_status_effect, which lands one named
+   effect, does check -- the difference between the two is deliberate.
+
+   NO GLOBAL IS TOUCHED.  data_fdps_battle_pending_xp_credit is not added to,
+   which fdps_unit_apply_status_effect does do, so the ailments this seeds earn
+   the party nothing. */
+void fdps_unit_inflict_random_ailments(int unit_index)
+{
+    struct fdps_unit_record *unit;
+    int slot;
+
+    unit = fdps_get_unit_record(unit_index);
+
+    for (slot = 0; slot < AILMENT_SLOT_COUNT; slot++) {
+        /* Both divides are the signed IDIV with the dividend sign extended by
+           SAR EDX,0x1f, and both remainders are taken from EDX. */
+        if (rand() % PERCENT < AILMENT_CHANCE &&
+            fdps_unit_is_ailment_immune(unit_index) == 0) {
+            unit->status_timers[FIRST_AILMENT_TIMER_SLOT + slot] =
+                (unsigned char) (rand() % AILMENT_TURNS_SPREAD +
+                                 AILMENT_TURNS_BASE);
+        }
+    }
+}
+
 /* CMP dword ptr [EBP-0xc],0x19 / JZ at 000290b1 -- an equality of its own,
    reached before either span is tried.  0x19 is 機兵 and 0x1a 魔神 is the
    class immediately above it, which this equality deliberately leaves out. */

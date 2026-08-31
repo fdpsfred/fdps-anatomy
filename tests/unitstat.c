@@ -49,6 +49,7 @@
  * could produce makes both the accumulate and the untouched cases visible.
  */
 #include <stddef.h>
+#include <stdlib.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -1284,6 +1285,403 @@ static void each_index_selects_its_own_record_for_immunity(void)
     CHECK_EQ(fdps_unit_is_ailment_immune(3), 0);
 }
 
+/* fdps_unit_inflict_random_ailments at 00028ee0, read off CMP dword ptr
+   [EBP-0x4],0x3 for the three passes, MOV byte ptr [EBX+0x25],DL with EBX =
+   record + i for the slot each pass writes, CMP EDX,0x14 / JGE for the chance,
+   the CALL 0x00029080 that sits after that JGE rather than in front of it, and
+   MOV EBX,0x2 / IDIV / ADD EDX,0x2 for the duration.  None of it is read off
+   the emitted C.
+
+   HOW THE RANDOMNESS IS TAKEN OUT.  Nothing here divides the roll away the way
+   the heal band does, so the cases below pin the function three other ways.
+   Two of them need no seed at all: an immune unit can never be written to
+   whatever comes out of the stream, and a duration that is written is 2 or 3
+   however the stream fell.  The third reseeds with srand and either walks the
+   seeds until one produces the exact remainder a boundary needs, or advances
+   the same stream by hand and compares -- which is how the draw count, and so
+   the position of the immunity call, is pinned. */
+#define AILMENT_SLOTS 3
+
+/* CMP EDX,0x14: the remainder that just misses and the one that just lands. */
+#define AILMENT_CHANCE 0x14
+#define REMAINDER_THAT_LANDS 0x13
+#define REMAINDER_THAT_MISSES 0x14
+
+/* ADD EDX,0x2 onto rand() % 2. */
+#define TURNS_LOW 2
+#define TURNS_HIGH 3
+
+/* Enough calls that a 20% roll landing on none of 3 * 200 chances is not a
+   thing that happens. */
+#define AILMENT_TRIALS 200
+
+/* Seeds walked when a case needs one whose first draw has a chosen remainder,
+   and the arbitrary seed the hand-advanced comparisons start from. */
+#define SEED_SEARCH_LIMIT 20000
+#define AILMENT_SEED 4177
+
+/* Seeds compared against the hand-built model. */
+#define MODEL_SEEDS 20
+
+static unsigned char ailment_snapshot[STAGE_UNITS * UNIT_RECORD_STRIDE];
+
+/* Record 1 with an ordinary class and portrait, so nothing about it is immune,
+   and all six timers clear. */
+static void stage_ailment(void)
+{
+    stage_immunity();
+    unit(PATIENT)->status_timers[POISON_TIMER] = 0;
+    unit(PATIENT)->status_timers[PARALYSIS_TIMER] = 0;
+    unit(PATIENT)->status_timers[SEAL_TIMER] = 0;
+}
+
+/* The first seed at or after 1 whose first draw leaves the wanted remainder
+   modulo 100, or 0 when the walk found none. */
+static int seed_whose_first_draw_leaves(int remainder)
+{
+    int seed;
+
+    for (seed = 1; seed < SEED_SEARCH_LIMIT; seed++) {
+        srand(seed);
+        if (rand() % 100 == remainder) {
+            return seed;
+        }
+    }
+
+    return 0;
+}
+
+/* MOV EBX,[EBP-0x8] / ADD EBX,[EBP-0x4] / MOV byte ptr [EBX+0x25],DL: the
+   three bytes the loop stores into are record +0x25, +0x26 and +0x27, and
+   status_timers starts at +0x22. */
+static void the_three_ailment_slots_sit_where_the_stores_land(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers) +
+             POISON_TIMER, 0x25);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers) +
+             PARALYSIS_TIMER, 0x26);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers) +
+             SEAL_TIMER, 0x27);
+    CHECK_EQ((int) sizeof(layout_probe.status_timers), 6);
+}
+
+/* TEST EAX,EAX / JZ at 00028f36: the store is reached only on a 0 from
+   fdps_unit_is_ailment_immune.  Either route into immunity blocks all three
+   slots, for as many calls as are made. */
+static void an_immune_unit_is_never_given_an_ailment(void)
+{
+    int trial;
+
+    stage_ailment();
+    unit(PATIENT)->clazz = CLASS_MACHINE_SOLDIER;
+    unit(PATIENT)->status_timers[POISON_TIMER] = TIMER_SENTINEL;
+    unit(PATIENT)->status_timers[PARALYSIS_TIMER] = TIMER_SENTINEL;
+    unit(PATIENT)->status_timers[SEAL_TIMER] = TIMER_SENTINEL;
+
+    for (trial = 0; trial < AILMENT_TRIALS; trial++) {
+        fdps_unit_inflict_random_ailments(PATIENT);
+    }
+
+    CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER], TIMER_SENTINEL);
+    CHECK_EQ(unit(PATIENT)->status_timers[PARALYSIS_TIMER], TIMER_SENTINEL);
+    CHECK_EQ(unit(PATIENT)->status_timers[SEAL_TIMER], TIMER_SENTINEL);
+
+    stage_ailment();
+    unit(PATIENT)->portrait_id = FIRST_ENEMY_PORTRAIT;
+
+    for (trial = 0; trial < AILMENT_TRIALS; trial++) {
+        fdps_unit_inflict_random_ailments(PATIENT);
+    }
+
+    CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER], 0);
+    CHECK_EQ(unit(PATIENT)->status_timers[PARALYSIS_TIMER], 0);
+    CHECK_EQ(unit(PATIENT)->status_timers[SEAL_TIMER], 0);
+}
+
+/* The CALL to rand at 00028f12 is at the top of every pass and the CALL to
+   fdps_unit_is_ailment_immune at 00028f2e is behind the JGE, so an immune unit
+   takes exactly three draws and never a fourth: three because the chance roll
+   is made whatever the unit is, and never four because the duration draw is
+   past the immunity test.  Hoisting the immunity test out of the loop would
+   take none, and putting it in front of the chance roll would take none
+   either. */
+static void an_immune_unit_still_draws_three_numbers(void)
+{
+    int after_call;
+    int by_hand;
+    int first;
+    int second;
+
+    /* The stream has to advance for any of this to mean anything. */
+    srand(AILMENT_SEED);
+    first = rand();
+    second = rand();
+    CHECK_EQ(first == second, 0);
+
+    stage_ailment();
+    unit(PATIENT)->clazz = CLASS_MACHINE_SOLDIER;
+
+    srand(AILMENT_SEED);
+    fdps_unit_inflict_random_ailments(PATIENT);
+    after_call = rand();
+
+    srand(AILMENT_SEED);
+    rand();
+    rand();
+    rand();
+    by_hand = rand();
+
+    CHECK_EQ(after_call, by_hand);
+}
+
+/* CMP EDX,0x14 / JGE skips the slot, so remainder 19 lands and remainder 20
+   does not.  The seeds are walked for rather than assumed, so the case says
+   which remainder it is testing and not which number the CRT happened to
+   produce. */
+static void the_chance_is_the_remainder_under_twenty(void)
+{
+    int seed_that_lands;
+    int seed_that_misses;
+
+    seed_that_lands = seed_whose_first_draw_leaves(REMAINDER_THAT_LANDS);
+    seed_that_misses = seed_whose_first_draw_leaves(REMAINDER_THAT_MISSES);
+
+    CHECK_EQ(seed_that_lands != 0, 1);
+    CHECK_EQ(seed_that_misses != 0, 1);
+
+    stage_ailment();
+    srand(seed_that_lands);
+    fdps_unit_inflict_random_ailments(PATIENT);
+    CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER] >= TURNS_LOW, 1);
+
+    stage_ailment();
+    srand(seed_that_misses);
+    fdps_unit_inflict_random_ailments(PATIENT);
+    CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER], 0);
+
+    /* Remainder 0 is inside the run as well, so the test is a < and not a
+       window. */
+    seed_that_lands = seed_whose_first_draw_leaves(0);
+    CHECK_EQ(seed_that_lands != 0, 1);
+
+    stage_ailment();
+    srand(seed_that_lands);
+    fdps_unit_inflict_random_ailments(PATIENT);
+    CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER] >= TURNS_LOW, 1);
+}
+
+/* rand() % 2 + 2: a slot is left at 0 or holds 2 or 3, and never 1 and never a
+   count above 3.  Two hundred calls, each on a cleared record, and the writes
+   are counted so the case cannot pass by never landing a roll. */
+static void every_landed_roll_writes_two_or_three_turns(void)
+{
+    int trial;
+    int slot;
+    int value;
+    int writes;
+    int out_of_range;
+
+    writes = 0;
+    out_of_range = 0;
+
+    for (trial = 0; trial < AILMENT_TRIALS; trial++) {
+        stage_ailment();
+        fdps_unit_inflict_random_ailments(PATIENT);
+
+        for (slot = POISON_TIMER; slot <= SEAL_TIMER; slot++) {
+            value = unit(PATIENT)->status_timers[slot];
+            if (value != 0) {
+                writes++;
+                if (value != TURNS_LOW && value != TURNS_HIGH) {
+                    out_of_range++;
+                }
+            }
+        }
+    }
+
+    CHECK_EQ(out_of_range, 0);
+    CHECK_EQ(writes > 0, 1);
+}
+
+/* The whole loop, rebuilt from the assembly and run against the same seeded
+   stream: one draw per pass, a second draw only when that pass rolled under
+   0x14, the remainder of that second draw plus 2 stored into slot 3 + i, and a
+   pass that missed leaving its slot alone.  Twenty seeds, and the number of
+   draws each one should have consumed is checked as well by comparing the next
+   value out of the stream against the same stream advanced by hand. */
+static void the_record_matches_the_loop_read_off_the_assembly(void)
+{
+    unsigned char expected[AILMENT_SLOTS];
+    int seed;
+    int slot;
+    int draws;
+    int step;
+    int after_call;
+    int by_hand;
+    int mismatches;
+    int modelled_writes;
+
+    mismatches = 0;
+    modelled_writes = 0;
+
+    for (seed = 1; seed <= MODEL_SEEDS; seed++) {
+        srand(seed);
+        draws = 0;
+
+        for (slot = 0; slot < AILMENT_SLOTS; slot++) {
+            expected[slot] = 0;
+        }
+
+        for (slot = 0; slot < AILMENT_SLOTS; slot++) {
+            draws++;
+            if (rand() % 100 < AILMENT_CHANCE) {
+                draws++;
+                expected[slot] = (unsigned char) (rand() % 2 + 2);
+                modelled_writes++;
+            }
+        }
+
+        stage_ailment();
+        srand(seed);
+        fdps_unit_inflict_random_ailments(PATIENT);
+        after_call = rand();
+
+        for (slot = 0; slot < AILMENT_SLOTS; slot++) {
+            if (unit(PATIENT)->status_timers[POISON_TIMER + slot] !=
+                expected[slot]) {
+                mismatches++;
+            }
+        }
+
+        srand(seed);
+        for (step = 0; step < draws; step++) {
+            rand();
+        }
+        by_hand = rand();
+
+        if (after_call != by_hand) {
+            mismatches++;
+        }
+    }
+
+    CHECK_EQ(mismatches, 0);
+    CHECK_EQ(modelled_writes > 0, 1);
+}
+
+/* There is no test for a timer that is already running, so a landed roll
+   overwrites the count that was there.  Every trial re-seeds all three slots
+   with a sentinel no duration can produce, so a slot holding anything else
+   afterwards was written over an occupied slot -- and the value it holds is
+   still the plain 2 or 3, never a 0 and never an extension of the sentinel. */
+static void an_ailment_already_running_is_overwritten(void)
+{
+    int trial;
+    int slot;
+    int value;
+    int overwrites;
+    int wrong_value;
+
+    overwrites = 0;
+    wrong_value = 0;
+
+    for (trial = 0; trial < AILMENT_TRIALS; trial++) {
+        stage_ailment();
+        for (slot = POISON_TIMER; slot <= SEAL_TIMER; slot++) {
+            unit(PATIENT)->status_timers[slot] = TIMER_SENTINEL;
+        }
+
+        fdps_unit_inflict_random_ailments(PATIENT);
+
+        for (slot = POISON_TIMER; slot <= SEAL_TIMER; slot++) {
+            value = unit(PATIENT)->status_timers[slot];
+            if (value != TIMER_SENTINEL) {
+                overwrites++;
+                if (value != TURNS_LOW && value != TURNS_HIGH) {
+                    wrong_value++;
+                }
+            }
+        }
+    }
+
+    CHECK_EQ(wrong_value, 0);
+    CHECK_EQ(overwrites > 0, 1);
+}
+
+/* The function reads one record and writes three bytes of it.  The whole
+   staged block is compared byte for byte against a snapshot taken before the
+   calls, with only those three offsets of record 1 exempt, so a stray write
+   anywhere -- another field, another record, the experience accumulator --
+   would show. */
+static void nothing_outside_the_three_ailment_bytes_is_written(void)
+{
+    int trial;
+    int index;
+    int first_exempt;
+    int last_exempt;
+    int differences;
+
+    stage_ailment();
+    unit(PATIENT)->status_timers[0] = TIMER_SENTINEL;
+    unit(PATIENT)->status_timers[1] = TIMER_SENTINEL;
+    unit(PATIENT)->status_timers[2] = TIMER_SENTINEL;
+    unit(PATIENT)->mp_current = 33;
+    unit(PATIENT)->mp_max = 44;
+    unit(0)->hp_current = 88;
+    unit(2)->hp_current = 77;
+    unit(3)->level = 9;
+
+    for (index = 0; index < (int) sizeof(unit_block); index++) {
+        ailment_snapshot[index] = unit_block[index];
+    }
+
+    for (trial = 0; trial < AILMENT_TRIALS; trial++) {
+        fdps_unit_inflict_random_ailments(PATIENT);
+    }
+
+    first_exempt = PATIENT * UNIT_RECORD_STRIDE + 0x25;
+    last_exempt = PATIENT * UNIT_RECORD_STRIDE + 0x27;
+    differences = 0;
+
+    for (index = 0; index < (int) sizeof(unit_block); index++) {
+        if (index >= first_exempt && index <= last_exempt) {
+            continue;
+        }
+        if (unit_block[index] != ailment_snapshot[index]) {
+            differences++;
+        }
+    }
+
+    CHECK_EQ(differences, 0);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED);
+}
+
+/* The index picks the record: two hundred calls naming unit 2 write inside
+   unit 2 and nowhere else. */
+static void each_index_selects_its_own_record_for_ailments(void)
+{
+    int trial;
+    int slot;
+    int writes;
+
+    stage_ailment();
+
+    for (trial = 0; trial < AILMENT_TRIALS; trial++) {
+        fdps_unit_inflict_random_ailments(2);
+    }
+
+    writes = 0;
+    for (slot = POISON_TIMER; slot <= SEAL_TIMER; slot++) {
+        if (unit(2)->status_timers[slot] != 0) {
+            writes++;
+        }
+        CHECK_EQ(unit(0)->status_timers[slot], 0);
+        CHECK_EQ(unit(PATIENT)->status_timers[slot], 0);
+        CHECK_EQ(unit(3)->status_timers[slot], 0);
+    }
+
+    CHECK_EQ(writes > 0, 1);
+}
+
 void run_unitstat_tests(void)
 {
     RUN_TEST(the_record_layout_matches_the_offsets_read);
@@ -1355,4 +1753,14 @@ void run_unitstat_tests(void)
     RUN_TEST(either_test_alone_makes_the_unit_immune);
     RUN_TEST(the_immunity_test_writes_nothing);
     RUN_TEST(each_index_selects_its_own_record_for_immunity);
+
+    RUN_TEST(the_three_ailment_slots_sit_where_the_stores_land);
+    RUN_TEST(an_immune_unit_is_never_given_an_ailment);
+    RUN_TEST(an_immune_unit_still_draws_three_numbers);
+    RUN_TEST(the_chance_is_the_remainder_under_twenty);
+    RUN_TEST(every_landed_roll_writes_two_or_three_turns);
+    RUN_TEST(the_record_matches_the_loop_read_off_the_assembly);
+    RUN_TEST(an_ailment_already_running_is_overwritten);
+    RUN_TEST(nothing_outside_the_three_ailment_bytes_is_written);
+    RUN_TEST(each_index_selects_its_own_record_for_ailments);
 }

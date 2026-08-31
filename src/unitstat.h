@@ -165,6 +165,41 @@ extern int fdps_unit_collect_known_spells(int unit_index,
 extern int fdps_unit_apply_damage(int unit_index, int base_damage);
 #pragma aux fdps_unit_apply_damage "*" parm caller [];
 
+/* Rolls all three status ailments onto one unit at a flat 20% each, which is
+   what 鬼動死靈陣 (spell id 0x0d) does on top of its damage.  Both callers
+   reach it only for that spell id and only once the spell has landed.
+
+   The three slots are struct fdps_unit_record's status_timers[3], [4] and [5]
+   -- record offsets 0x25, 0x26 and 0x27, poison, paralysis and 封魔咒術 --
+   and each is rolled on its own: rand() % 100 under 20 lands it, and the
+   duration written is rand() % 2 + 2, so two or three turns.  A slot the roll
+   misses is left exactly as it was.
+
+   THE UNIT IS ASKED FOR ITS IMMUNITY ONCE PER LANDED ROLL, NOT ONCE PER CALL.
+   fdps_unit_is_ailment_immune is consulted only after the chance roll has
+   already succeeded, and an immune unit therefore still burns three draws out
+   of the shared rand() stream and gets nothing.  The order matters to every
+   later roll in the battle, not to this unit.
+
+   A SLOT THAT IS ALREADY AFFLICTED IS REFRESHED.  There is no test for a
+   running timer, so a landed roll overwrites whatever count was there --
+   upwards or downwards -- where fdps_unit_apply_status_effect leaves an
+   existing ailment alone.
+
+   Nothing else is written: no HP, no MP, and no experience.  Ailments seeded
+   this way credit data_fdps_battle_pending_xp_credit nothing, which is the
+   whole of what separates the accounting here from
+   fdps_unit_apply_status_effect's.
+
+   unit_index is a position in the current battle's unit array and is not range
+   checked; the record is resolved through fdps_get_unit_record, so a call after
+   the array has moved works on the new block.
+
+   rand() is never seeded by the game (rebuild_info/pitfalls.md), so a given
+   battle rolls the same ailments every time it is replayed. */
+extern void fdps_unit_inflict_random_ailments(int unit_index);
+#pragma aux fdps_unit_inflict_random_ailments "*" parm caller [];
+
 /* Can this unit be given a status ailment?  Returns 1 when it cannot and 0 when
    it can, and every caller uses it the same way round: it is a gate that lets
    the ailment through only on a 0.
