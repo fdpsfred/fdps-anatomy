@@ -459,3 +459,101 @@ void fdps_blit_tint_transparent_rect(unsigned char *src, int src_stride,
         dst += dst_stride;
     }
 }
+
+/* 00030230.  The two-source member of the family: the same ramp, the same
+   shift, mask and fold as the two tinting blits above, with the constant
+   colour replaced by a second rectangle that is read pixel for pixel alongside
+   the first.
+
+   THE FOLD SWAPS THE ARGUMENTS, NOT THE ROW OFFSETS.  CMP dword ptr
+   [EBP+0x3c],0x8 / JLE at 0003023c is the signed test, and the branch it
+   guards is six MOVs through two scratch slots: 00030242..00030251 exchange
+   the two source POINTERS in [EBP+0x14] and [EBP+0x1c], and
+   00030254..00030263 exchange the two STRIDES in [EBP+0x18] and [EBP+0x20],
+   before MOV EAX,0x10 / SUB EAX,[EBP+0x3c] at 00030266 rewrites alpha.  Both
+   halves matter.  The pointer swap is what puts the heavier-weighted
+   rectangle on the row-alpha lookup; the stride swap is what keeps each
+   cursor advancing by the pitch of the rectangle it is now walking.  Leaving
+   the strides behind agrees with the original for a single row and diverges
+   from the second row on, and the callers' two pitches really do differ --
+   0x97 or 0x12e for the panel against 0x140 for the screen.
+
+   After the fold there is only one pair of lookups and no second branch:
+   00030274 SHL EAX,0xa scales the folded alpha into the byte offset of its
+   row and [EBP-0x8] holds that base for the whole run, 000302d4
+   LEA EAX,[EAX*0x4+0x0] / ADD [EBP-0x8] reads the fg pixel at offset 0, and
+   000302f0 MOV EAX,[EAX+0x2400] reads the bg pixel nine rows on.  0x2400 is a
+   BYTE displacement applied after the scale, so it is 0x900 entries -- the
+   same nine rows the tinting blits reach with a 0x900 added before their own
+   LEA.
+
+   Both loop tests are signed: CMP EAX,[EBP+0x30] / JL at 00030289 counts the
+   rows and CMP EAX,[EBP+0x2c] / JL at 000302a5 the columns.  Both source
+   loads are XOR EAX,EAX / MOV AL,byte ptr [EDX], at 000302bd and 000302ca, so
+   a pixel of 0xff indexes entry 255 of its row and not entry -1.
+
+   There is no test of any kind inside the inner loop: MOV byte ptr [EDX],AL at
+   0003032e is reached unconditionally, so a source pixel of 0 on either side
+   is blended and stored like any other.  That is the whole difference from
+   fdps_blit_blend_transparent_rect at 00030360.
+
+   SAR EAX,0x4 at 000302ff and SAR EAX,0xc at 00030318 are arithmetic while the
+   entries are unsigned here, and as with the tinting blits no operand can tell
+   the two apart: the AND 0xf0f0f between them keeps only bits 0..19, and a
+   ramp entry is one nibble per byte times a weight of at most 16, so no byte
+   of the sum exceeds 0xf0 and bits 24..31 are always clear.
+
+   The three row advances at 00030335..00030344 add each stride to its own
+   argument slot, so all three cursors are walked directly and no separate
+   cursor is kept.  The store happens before the next column is read, which is
+   what lets fdps_message_window_open pass one address as both bg and dst.
+
+   Nothing is clipped and no extent is checked against any of the three
+   surfaces. */
+void fdps_blit_blend_rect(unsigned char *fg, int fg_stride, unsigned char *bg,
+                          int bg_stride, unsigned char *dst, int dst_stride,
+                          int width, int height, unsigned int *shade_ramp,
+                          unsigned char *inverse_palette_cube, int alpha)
+{
+    unsigned char *swapped_source;
+    int swapped_stride;
+    unsigned int *weight_row;
+    int foreground_pixel;
+    int background_pixel;
+    unsigned int blended;
+    unsigned int cube_index;
+    int row;
+    int column;
+
+    if (alpha > 8) {
+        swapped_source = fg;
+        fg = bg;
+        bg = swapped_source;
+
+        swapped_stride = fg_stride;
+        fg_stride = bg_stride;
+        bg_stride = swapped_stride;
+
+        alpha = 16 - alpha;
+    }
+
+    weight_row = shade_ramp + alpha * SHADE_RAMP_ROW_ENTRIES;
+
+    for (row = 0; row < height; row++) {
+        for (column = 0; column < width; column++) {
+            foreground_pixel = (int) fg[column];
+            background_pixel = (int) bg[column];
+
+            blended = (weight_row[foreground_pixel]
+                       + weight_row[background_pixel
+                                    + SHADE_RAMP_COMPLEMENT_ROWS]) >> 4;
+            blended &= 0x000f0f0fu;
+            cube_index = (blended & 0xffffu) | (blended >> 12);
+            dst[column] = inverse_palette_cube[cube_index];
+        }
+
+        fg += fg_stride;
+        bg += bg_stride;
+        dst += dst_stride;
+    }
+}

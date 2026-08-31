@@ -215,4 +215,52 @@ extern void fdps_blit_tint_transparent_rect(unsigned char *src, int src_stride,
                                             int tint_color, int alpha);
 #pragma aux fdps_blit_tint_transparent_rect "*" parm caller [];
 
+/* Alpha-blends TWO 8bpp rectangles into a third, resolving every blended
+   colour back to a palette index through the same inverse-palette cube
+   fdps_blit_tint_rect uses.  Where that routine weighs one constant colour
+   against the source pixel, this one weighs two source pixels against each
+   other: fg carries weight alpha out of 16 and bg carries 16 - alpha.  It is
+   what slides the message window and the unit status panel in and out --
+   fdps_message_window_open, fdps_message_window_close and
+   fdps_battle_show_unit_status_window each ramp alpha a step per retrace and
+   call this once per step.
+
+   All three surfaces are a base pointer plus a byte stride, and ALL THREE
+   POINTERS ARE THE RECTANGLE'S TOP-LEFT PIXEL.  The three strides are
+   genuinely independent: the two window callers hand over a packed panel of
+   pitch 0x97 or 0x12e against a 0x140 screen.
+
+   THE FOLD SWAPS THE TWO SOURCES, NOT THE TWO ROW OFFSETS.  This is where it
+   parts company with fdps_blit_tint_rect.  For alpha > 8 both source pointers
+   AND both source strides exchange places and alpha becomes 16 - alpha, after
+   which fg is always read from ramp row alpha and bg always from row 9 + alpha.
+   Swapping only the pointers leaves each cursor advancing by the other
+   rectangle's pitch, which is invisible at height 1 and wrong from the second
+   row on -- and the callers' pitches differ, so it is wrong in the game.  The
+   ramp rows carry weights 0..8 and 16..8, so folding is what keeps both
+   lookups inside the 18 rows fdps_build_palette_tables fills.
+
+   THE CUBE INDEX IS g:r:b, NOT r:g:b, exactly as in fdps_blit_tint_rect above:
+   the sum of the two weighted entries is shifted right by four, masked with
+   0x000F0F0F and folded as (v & 0xFFFF) | (v >> 12).  The paragraph on
+   fdps_blit_tint_rect says what the obvious r:g:b packing costs.
+
+   NOTHING IS KEYED OUT AND NOTHING IS CLIPPED.  Unlike
+   fdps_blit_blend_transparent_rect, which is this routine plus one index-0
+   test, every pixel of the rectangle is read from both sources and written,
+   palette index 0 included.  width, height and alpha are all signed, so either
+   extent at 0 or below blends nothing.
+
+   BG AND DST MAY BE THE SAME ADDRESS AND THE TWO WINDOW CALLERS MAKE THEM SO.
+   Each pixel is read from bg and stored to dst before the next column is
+   touched, so an in-place blend consumes the pre-blend byte at every pixel;
+   any rewrite that stages a row must not read bg back out of dst. */
+extern void fdps_blit_blend_rect(unsigned char *fg, int fg_stride,
+                                 unsigned char *bg, int bg_stride,
+                                 unsigned char *dst, int dst_stride, int width,
+                                 int height, unsigned int *shade_ramp,
+                                 unsigned char *inverse_palette_cube,
+                                 int alpha);
+#pragma aux fdps_blit_blend_rect "*" parm caller [];
+
 #endif

@@ -1612,6 +1612,566 @@ static void keyed_alpha_is_a_signed_value(void)
     CHECK_EQ(tint_dst_byte(0), tint_pass_byte(5));
 }
 
+/* ------------------------------------------------------------------
+ * fdps_blit_blend_rect at 00030230.
+ *
+ * Expected values come from the assembly: the signed CMP [EBP+0x3c],0x8 / JLE
+ * at 0003023c, the six MOVs at 00030242..00030263 that exchange the two source
+ * pointers in [EBP+0x14] / [EBP+0x1c] AND the two strides in [EBP+0x18] /
+ * [EBP+0x20], the MOV EAX,0x10 / SUB EAX,[EBP+0x3c] at 00030266, the
+ * SHL EAX,0xa at 00030274 that scales the folded alpha into a row base, the
+ * LEA EAX,[EAX*0x4+0x0] at 000302d4 that reads the fg pixel at offset 0 and
+ * the MOV EAX,[EAX+0x2400] at 000302f0 that reads the bg pixel a byte
+ * displacement of nine rows on, the two signed CMP / JL loop tests at 00030289
+ * and 000302a5, the two XOR EAX,EAX / MOV AL,[EDX] loads at 000302bd and
+ * 000302ca, the ADD / SAR 0x4 / AND 0xf0f0f / (AND 0xffff | SAR 0xc) sequence
+ * at 000302fc..0003031b, the unconditional MOV byte ptr [EDX],AL at 0003032e,
+ * and the three row advances at 00030335..00030344.  The routine has no CALL
+ * in it at all, so nothing below depends on what a library routine hands back.
+ *
+ * HOW A CASE NAMES THE EXACT CUBE ENTRY THAT WAS READ.  Both tables are
+ * arguments here rather than globals, so each case builds its own.  The cube is
+ * filled with a guard byte and only the entries a case expects are marked, so a
+ * routine that computed any other index reads the guard and the assertion fails
+ * with it.
+ *
+ * WHERE THE INDICES COME FROM.  0x537 is what the assembly's own sequence makes
+ * of the scaled sum 0x00305070: SAR 4 gives 0x00030507, AND 0xf0f0f leaves it
+ * alone, AND 0xffff gives 0x0507 and SAR 0xc gives 0x30, so the OR is 0x537.
+ * 0xaf3 is the same sequence over 0x00f5a73b -> 0x000f5a73 -> 0x000f0a03 ->
+ * 0x0a03 | 0xf0.  0x213 is 0x00102030 -> 0x00010203 -> 0x0203 | 0x10.  None is
+ * read off the emitted C.
+ * ------------------------------------------------------------------ */
+
+#define BLEND_TABLE_ROWS 18
+#define BLEND_ROW_ENTRIES 256
+#define BLEND_TABLE_SIZE (BLEND_TABLE_ROWS * BLEND_ROW_ENTRIES)
+
+#define BLEND_CUBE_SIZE 4096
+
+/* No palette index any case marks, so a destination byte holding it was read
+   from an unmarked cube entry. */
+#define BLEND_CUBE_GUARD 0xff
+
+/* Not a value any cube entry is marked with either, so a destination byte
+   holding it was never written at all. */
+#define BLEND_DST_GUARD 0xd3
+
+/* Three different pitches, because the three strides are three separate
+   arguments and the fold exchanges two of them. */
+#define BLEND_FG_PITCH 16
+#define BLEND_BG_PITCH 10
+#define BLEND_DST_PITCH 12
+#define BLEND_ROWS 8
+
+#define BLEND_FG_BYTES (BLEND_FG_PITCH * BLEND_ROWS)
+#define BLEND_BG_BYTES (BLEND_BG_PITCH * BLEND_ROWS)
+#define BLEND_DST_BYTES (BLEND_DST_PITCH * BLEND_ROWS)
+
+static unsigned int blend_ramp[BLEND_TABLE_SIZE];
+static unsigned char blend_cube[BLEND_CUBE_SIZE];
+static unsigned char blend_fg[BLEND_FG_BYTES];
+static unsigned char blend_bg[BLEND_BG_BYTES];
+static unsigned char blend_dst[BLEND_DST_BYTES];
+
+static void prepare_blend(void)
+{
+    int i;
+
+    for (i = 0; i < BLEND_TABLE_SIZE; i++) {
+        blend_ramp[i] = 0;
+    }
+
+    memset(blend_cube, BLEND_CUBE_GUARD, (size_t) BLEND_CUBE_SIZE);
+    memset(blend_fg, 0, (size_t) BLEND_FG_BYTES);
+    memset(blend_bg, 0, (size_t) BLEND_BG_BYTES);
+    memset(blend_dst, BLEND_DST_GUARD, (size_t) BLEND_DST_BYTES);
+}
+
+static void set_blend_ramp(int weight_row, int entry, unsigned int scaled_color)
+{
+    blend_ramp[weight_row * BLEND_ROW_ENTRIES + entry] = scaled_color;
+}
+
+static int blend_dst_byte(int offset)
+{
+    return (int) blend_dst[offset];
+}
+
+static int blend_bg_byte(int offset)
+{
+    return (int) blend_bg[offset];
+}
+
+/* A call with alpha 0 reads its foreground pixels from row 0 and its background
+   pixels from row 9.  Filling row 0 with p << 20 and row 9 with q << 4 puts the
+   two pixels in channels that cannot carry into each other: the sum is
+   p << 20 | q << 4, the SAR 4 and the AND 0xf0f0f leave red = p and blue = q,
+   and the fold lands them at index p << 4 | q.  Marking that entry 0x40 + the
+   index turns the routine into a lookup that names BOTH source pixels, which is
+   what lets the geometry cases below say which foreground pixel met which
+   background pixel at which destination byte instead of only that something
+   arrived.  Only pixels 0..7 are marked, so a case that read a pixel it did not
+   mean to still lands on the guard. */
+#define BLEND_PAIR_LIMIT 8
+
+static int blend_pair_index(int fg_pixel, int bg_pixel)
+{
+    return (fg_pixel << 4) | bg_pixel;
+}
+
+static int blend_pair_byte(int fg_pixel, int bg_pixel)
+{
+    return 0x40 + blend_pair_index(fg_pixel, bg_pixel);
+}
+
+static void prepare_blend_pair(void)
+{
+    int fg_pixel;
+    int bg_pixel;
+
+    prepare_blend();
+
+    for (fg_pixel = 0; fg_pixel < BLEND_PAIR_LIMIT; fg_pixel++) {
+        set_blend_ramp(0, fg_pixel, (unsigned int) fg_pixel << 20);
+        set_blend_ramp(9, fg_pixel, (unsigned int) fg_pixel << 4);
+    }
+
+    for (fg_pixel = 0; fg_pixel < BLEND_PAIR_LIMIT; fg_pixel++) {
+        for (bg_pixel = 0; bg_pixel < BLEND_PAIR_LIMIT; bg_pixel++) {
+            blend_cube[blend_pair_index(fg_pixel, bg_pixel)] =
+                (unsigned char) blend_pair_byte(fg_pixel, bg_pixel);
+        }
+    }
+}
+
+/* alpha 8 or below leaves alpha alone and takes no swap, so the foreground
+   pixel is read from row alpha itself.  Row 9 + alpha carries a decoy for the
+   same entry, so a routine that took the foreground term from the
+   complementary block reaches 0xaf3 instead.  The second call moves alpha by
+   one and the entry moves a row with it. */
+static void the_foreground_pixel_is_read_from_the_alpha_row(void)
+{
+    prepare_blend();
+    blend_fg[0] = 0x11;
+    set_blend_ramp(3, 0x11, 0x00305070);
+    set_blend_ramp(12, 0x11, 0x00f5a73b);
+    blend_cube[0x537] = 0x2a;
+    blend_cube[0xaf3] = 0x2b;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 3);
+    CHECK_EQ(blend_dst_byte(0), 0x2a);
+
+    prepare_blend();
+    blend_fg[0] = 0x11;
+    set_blend_ramp(4, 0x11, 0x00f5a73b);
+    blend_cube[0xaf3] = 0x2c;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 4);
+    CHECK_EQ(blend_dst_byte(0), 0x2c);
+}
+
+/* MOV EAX,[EAX+0x2400] at 000302f0 is a byte displacement applied after the
+   LEA EAX,[EAX*0x4+0x0], so it is 0x900 entries and lands nine rows on.  The
+   decoy sits at row alpha for the same entry: a routine that read the
+   background term from the foreground's row reaches 0xaf3. */
+static void the_background_pixel_is_read_nine_rows_past_the_alpha_row(void)
+{
+    prepare_blend();
+    blend_bg[0] = 0x22;
+    set_blend_ramp(12, 0x22, 0x00305070);
+    set_blend_ramp(3, 0x22, 0x00f5a73b);
+    blend_cube[0x537] = 0x3b;
+    blend_cube[0xaf3] = 0x3c;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 3);
+    CHECK_EQ(blend_dst_byte(0), 0x3b);
+}
+
+/* alpha 12 fails the JLE, so the two source pointers change places and alpha
+   becomes 4: the pixel that arrived as bg is read from row 4 and the one that
+   arrived as fg from row 13.  The decoy is row 4 for the fg pixel -- what a
+   routine that folded alpha but left the pointers alone would read. */
+static void alpha_above_eight_swaps_the_two_sources(void)
+{
+    prepare_blend();
+    blend_fg[0] = 0x11;
+    blend_bg[0] = 0x22;
+    set_blend_ramp(4, 0x22, 0x00305070);
+    set_blend_ramp(4, 0x11, 0x00f5a73b);
+    blend_cube[0x537] = 0x4c;
+    blend_cube[0xaf3] = 0x4d;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 12);
+    CHECK_EQ(blend_dst_byte(0), 0x4c);
+}
+
+/* 00030254..00030263 exchange the strides as well as the pointers, and only a
+   call taller than one row can tell.  With alpha 16 the fold swaps, so the
+   pixels named by the pair table come out of blend_bg walking by
+   BLEND_BG_PITCH and out of blend_fg walking by BLEND_FG_PITCH -- each
+   rectangle by its own pitch, not by the argument slot it landed in.  Both
+   arrays carry a 7 at the offset the other pitch would have reached, so a
+   routine that swapped only the pointers reads 7 from the second row on. */
+static void the_swap_carries_the_strides_with_the_pointers(void)
+{
+    prepare_blend_pair();
+
+    blend_bg[0] = 1;
+    blend_bg[BLEND_BG_PITCH] = 2;
+    blend_bg[BLEND_BG_PITCH * 2] = 3;
+    blend_bg[BLEND_FG_PITCH] = 7;
+    blend_bg[BLEND_FG_PITCH * 2] = 7;
+
+    blend_fg[0] = 4;
+    blend_fg[BLEND_FG_PITCH] = 5;
+    blend_fg[BLEND_FG_PITCH * 2] = 6;
+    blend_fg[BLEND_BG_PITCH] = 7;
+    blend_fg[BLEND_BG_PITCH * 2] = 7;
+
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 3, blend_ramp,
+                         blend_cube, 16);
+
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(1, 4));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH), blend_pair_byte(2, 5));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH * 2), blend_pair_byte(3, 6));
+}
+
+/* The JLE at 0003023c puts 8 on the unfolded side: alpha 8 reads fg from row 8
+   and bg from row 17, while alpha 9 swaps and folds to 7, reading the bg pixel
+   from row 7. */
+static void the_blend_fold_turns_over_between_eight_and_nine(void)
+{
+    prepare_blend();
+    blend_fg[0] = 0x11;
+    blend_bg[0] = 0x22;
+    set_blend_ramp(8, 0x11, 0x00305070);
+    blend_cube[0x537] = 0x61;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 8);
+    CHECK_EQ(blend_dst_byte(0), 0x61);
+
+    prepare_blend();
+    blend_fg[0] = 0x11;
+    blend_bg[0] = 0x22;
+    set_blend_ramp(7, 0x22, 0x00305070);
+    blend_cube[0x537] = 0x62;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 9);
+    CHECK_EQ(blend_dst_byte(0), 0x62);
+}
+
+/* Both ends of the range fold to row 0, and which rectangle lands on it is the
+   whole difference: alpha 0 reads fg from row 0, alpha 16 reads bg from it. */
+static void alpha_zero_and_alpha_sixteen_swap_the_two_sources(void)
+{
+    prepare_blend();
+    blend_fg[0] = 0x11;
+    blend_bg[0] = 0x22;
+    set_blend_ramp(0, 0x11, 0x00305070);
+    set_blend_ramp(0, 0x22, 0x00f5a73b);
+    blend_cube[0x537] = 0x71;
+    blend_cube[0xaf3] = 0x7f;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), 0x71);
+
+    prepare_blend();
+    blend_fg[0] = 0x11;
+    blend_bg[0] = 0x22;
+    set_blend_ramp(0, 0x22, 0x00305070);
+    set_blend_ramp(0, 0x11, 0x00f5a73b);
+    blend_cube[0x537] = 0x72;
+    blend_cube[0xaf3] = 0x7f;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 16);
+    CHECK_EQ(blend_dst_byte(0), 0x72);
+}
+
+/* SAR EAX,0x4 then AND 0xf0f0f discard the low nibble of every byte and
+   everything above bit 19.  0x00f5a73b and 0x0ff5a730 differ only in bits the
+   pair throws away, so both must reach the same cube entry. */
+static void the_blend_shift_and_mask_keep_one_nibble_per_channel(void)
+{
+    prepare_blend();
+    set_blend_ramp(0, 1, 0x00f5a73b);
+    set_blend_ramp(0, 2, 0x0ff5a730);
+    blend_cube[0xaf3] = 0x5d;
+
+    blend_fg[0] = 1;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), 0x5d);
+
+    memset(blend_dst, BLEND_DST_GUARD, (size_t) BLEND_DST_BYTES);
+    blend_fg[0] = 2;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), 0x5d);
+}
+
+/* (v & 0xffff) | (v >> 12) lands green above red, so the packed colour
+   0x00102030 indexes 0x213 and not the 0x123 an r:g:b cube would be read at.
+   Both entries are marked with different bytes, so the case says which
+   ordering was used rather than merely that something was found. */
+static void the_blend_index_transposes_the_middle_two_channels(void)
+{
+    prepare_blend();
+    set_blend_ramp(0, 1, 0x00102030);
+    blend_cube[0x213] = 0x6e;
+    blend_cube[0x123] = 0x6f;
+
+    blend_fg[0] = 1;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), 0x6e);
+}
+
+/* XOR EAX,EAX / MOV AL,byte ptr [EDX] at 000302bd and 000302ca load both source
+   bytes zero-extended, so 0xff is entry 255 of its row.  Sign-extended it would
+   be entry -1, an entry before the row that no case marks. */
+static void both_source_pixels_are_zero_extended(void)
+{
+    prepare_blend();
+    blend_fg[0] = 0xff;
+    set_blend_ramp(0, 0xff, 0x00305070);
+    blend_cube[0x537] = 0x5f;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), 0x5f);
+
+    prepare_blend();
+    blend_bg[0] = 0xff;
+    set_blend_ramp(9, 0xff, 0x00305070);
+    blend_cube[0x537] = 0x5e;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), 0x5e);
+}
+
+/* MOV byte ptr [EDX],AL at 0003032e is reached unconditionally and there is no
+   CMP against 0 anywhere in the inner loop: a pixel of 0 on either side, or on
+   both, is looked up and stored like any other.  This is the whole difference
+   from fdps_blit_blend_transparent_rect at 00030360. */
+static void neither_source_pixel_is_keyed_out(void)
+{
+    prepare_blend_pair();
+
+    blend_fg[0] = 0;
+    blend_bg[0] = 0;
+    blend_fg[1] = 0;
+    blend_bg[1] = 5;
+    blend_fg[2] = 6;
+    blend_bg[2] = 0;
+
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 3, 1, blend_ramp,
+                         blend_cube, 0);
+
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(0, 0));
+    CHECK_EQ(blend_dst_byte(1), blend_pair_byte(0, 5));
+    CHECK_EQ(blend_dst_byte(2), blend_pair_byte(6, 0));
+}
+
+/* Every pixel of the rectangle and no pixel outside it, with the pair table
+   naming which fg pixel met which bg pixel at each destination byte. */
+static void every_pixel_of_the_blend_rectangle_is_written(void)
+{
+    prepare_blend_pair();
+
+    blend_fg[0] = 1;
+    blend_fg[1] = 2;
+    blend_fg[2] = 3;
+    blend_fg[BLEND_FG_PITCH + 0] = 4;
+    blend_fg[BLEND_FG_PITCH + 1] = 5;
+    blend_fg[BLEND_FG_PITCH + 2] = 6;
+
+    blend_bg[0] = 7;
+    blend_bg[1] = 0;
+    blend_bg[2] = 1;
+    blend_bg[BLEND_BG_PITCH + 0] = 2;
+    blend_bg[BLEND_BG_PITCH + 1] = 3;
+    blend_bg[BLEND_BG_PITCH + 2] = 4;
+
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 3, 2, blend_ramp,
+                         blend_cube, 0);
+
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(1, 7));
+    CHECK_EQ(blend_dst_byte(1), blend_pair_byte(2, 0));
+    CHECK_EQ(blend_dst_byte(2), blend_pair_byte(3, 1));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH + 0), blend_pair_byte(4, 2));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH + 1), blend_pair_byte(5, 3));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH + 2), blend_pair_byte(6, 4));
+
+    CHECK_EQ(blend_dst_byte(3), BLEND_DST_GUARD);
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH - 1), BLEND_DST_GUARD);
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH + 3), BLEND_DST_GUARD);
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH * 2), BLEND_DST_GUARD);
+}
+
+/* 00030335..00030344 add three different arguments to three different cursors.
+   Each array carries a 7 at the offset one of the other two pitches would have
+   reached, so a cursor advanced by the wrong stride lands on it. */
+static void the_three_strides_are_applied_to_their_own_cursors(void)
+{
+    prepare_blend_pair();
+
+    blend_fg[0] = 1;
+    blend_fg[BLEND_FG_PITCH] = 2;
+    blend_fg[BLEND_FG_PITCH * 2] = 3;
+    blend_fg[BLEND_BG_PITCH] = 7;
+    blend_fg[BLEND_BG_PITCH * 2] = 7;
+
+    blend_bg[0] = 4;
+    blend_bg[BLEND_BG_PITCH] = 5;
+    blend_bg[BLEND_BG_PITCH * 2] = 6;
+    blend_bg[BLEND_FG_PITCH] = 7;
+    blend_bg[BLEND_FG_PITCH * 2] = 7;
+
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 3, blend_ramp,
+                         blend_cube, 0);
+
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(1, 4));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH), blend_pair_byte(2, 5));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH * 2), blend_pair_byte(3, 6));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH * 3), BLEND_DST_GUARD);
+}
+
+/* All three strides are signed and are added, not subtracted, so a negative one
+   walks that cursor up memory.  Read as unsigned the first advance would leave
+   every array. */
+static void negative_blend_strides_walk_all_three_cursors_backwards(void)
+{
+    prepare_blend_pair();
+
+    blend_fg[0] = 1;
+    blend_fg[BLEND_FG_PITCH] = 2;
+    blend_fg[BLEND_FG_PITCH * 2] = 3;
+
+    blend_bg[0] = 4;
+    blend_bg[BLEND_BG_PITCH] = 5;
+    blend_bg[BLEND_BG_PITCH * 2] = 6;
+
+    fdps_blit_blend_rect(blend_fg + BLEND_FG_PITCH * 2, -BLEND_FG_PITCH,
+                         blend_bg + BLEND_BG_PITCH * 2, -BLEND_BG_PITCH,
+                         blend_dst + BLEND_DST_PITCH * 3, -BLEND_DST_PITCH, 1,
+                         3, blend_ramp, blend_cube, 0);
+
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH * 3), blend_pair_byte(3, 6));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH * 2), blend_pair_byte(2, 5));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH), blend_pair_byte(1, 4));
+    CHECK_EQ(blend_dst_byte(0), BLEND_DST_GUARD);
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH * 4), BLEND_DST_GUARD);
+}
+
+/* Both extents are compared with JL at 00030289 and 000302a5, a signed test, so
+   0 or below on either writes nothing.  Read as unsigned, -1 would be four
+   billion rows or columns. */
+static void the_blend_extents_are_signed_counts(void)
+{
+    prepare_blend_pair();
+    blend_fg[0] = 1;
+    blend_bg[0] = 1;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 0, blend_ramp,
+                         blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), BLEND_DST_GUARD);
+
+    prepare_blend_pair();
+    blend_fg[0] = 1;
+    blend_bg[0] = 1;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, -1, blend_ramp,
+                         blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), BLEND_DST_GUARD);
+
+    prepare_blend_pair();
+    blend_fg[0] = 1;
+    blend_bg[0] = 1;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 0, 2, blend_ramp,
+                         blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), BLEND_DST_GUARD);
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH), BLEND_DST_GUARD);
+
+    prepare_blend_pair();
+    blend_fg[0] = 1;
+    blend_bg[0] = 1;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, -1, 2, blend_ramp,
+                         blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), BLEND_DST_GUARD);
+
+    /* One row of one pixel means exactly that. */
+    prepare_blend_pair();
+    blend_fg[0] = 1;
+    blend_fg[1] = 2;
+    blend_bg[0] = 1;
+    blend_bg[1] = 2;
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1, blend_ramp,
+                         blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(1, 1));
+    CHECK_EQ(blend_dst_byte(1), BLEND_DST_GUARD);
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH), BLEND_DST_GUARD);
+}
+
+/* CMP dword ptr [EBP+0x3c],0x8 / JLE at 0003023c is a signed compare, so a
+   negative alpha takes the unswapped side and SHL EAX,0xa scales it into a row
+   BEFORE the table's own base.  The pointer handed over is one row in so that
+   row -1 is a real row: alpha -1 reads fg from array row 0 and bg from array
+   row 9, which is exactly the pair table.  Read as unsigned, alpha would fail
+   the JLE, swap the two sources and fold to 0x10 - 0xffffffff. */
+static void the_blend_alpha_is_a_signed_value(void)
+{
+    prepare_blend_pair();
+    blend_fg[0] = 5;
+    blend_bg[0] = 3;
+
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_dst, BLEND_DST_PITCH, 1, 1,
+                         blend_ramp + BLEND_ROW_ENTRIES, blend_cube, -1);
+
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(5, 3));
+}
+
+/* fdps_message_window_open and fdps_message_window_close pass one address as
+   both bg and dst.  Each pixel is read and stored before the next column is
+   touched, so every pixel sees its own pre-blend background byte: column 1
+   still reads the 5 that was there, not whatever column 0 just wrote. */
+static void the_background_may_be_the_destination_in_place(void)
+{
+    prepare_blend_pair();
+
+    blend_fg[0] = 1;
+    blend_fg[1] = 2;
+    blend_bg[0] = 4;
+    blend_bg[1] = 5;
+
+    fdps_blit_blend_rect(blend_fg, BLEND_FG_PITCH, blend_bg, BLEND_BG_PITCH,
+                         blend_bg, BLEND_BG_PITCH, 2, 1, blend_ramp,
+                         blend_cube, 0);
+
+    CHECK_EQ(blend_bg_byte(0), blend_pair_byte(1, 4));
+    CHECK_EQ(blend_bg_byte(1), blend_pair_byte(2, 5));
+}
+
 void run_blit_tests(void)
 {
     RUN_TEST(pitch_four_paints_a_three_by_three_square);
@@ -1675,4 +2235,21 @@ void run_blit_tests(void)
     RUN_TEST(keyed_negative_strides_walk_both_cursors_backwards);
     RUN_TEST(keyed_extents_are_signed_counts);
     RUN_TEST(keyed_alpha_is_a_signed_value);
+
+    RUN_TEST(the_foreground_pixel_is_read_from_the_alpha_row);
+    RUN_TEST(the_background_pixel_is_read_nine_rows_past_the_alpha_row);
+    RUN_TEST(alpha_above_eight_swaps_the_two_sources);
+    RUN_TEST(the_swap_carries_the_strides_with_the_pointers);
+    RUN_TEST(the_blend_fold_turns_over_between_eight_and_nine);
+    RUN_TEST(alpha_zero_and_alpha_sixteen_swap_the_two_sources);
+    RUN_TEST(the_blend_shift_and_mask_keep_one_nibble_per_channel);
+    RUN_TEST(the_blend_index_transposes_the_middle_two_channels);
+    RUN_TEST(both_source_pixels_are_zero_extended);
+    RUN_TEST(neither_source_pixel_is_keyed_out);
+    RUN_TEST(every_pixel_of_the_blend_rectangle_is_written);
+    RUN_TEST(the_three_strides_are_applied_to_their_own_cursors);
+    RUN_TEST(negative_blend_strides_walk_all_three_cursors_backwards);
+    RUN_TEST(the_blend_extents_are_signed_counts);
+    RUN_TEST(the_blend_alpha_is_a_signed_value);
+    RUN_TEST(the_background_may_be_the_destination_in_place);
 }
