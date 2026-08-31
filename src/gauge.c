@@ -22,6 +22,33 @@
 #define GAUGE_BAR_HEIGHT 8
 #define GAUGE_BAR_GRAPHIC_STRIDE 0x3a8
 
+/* See gauge.h.  The zero case is written first because that is the order the
+   original has its blocks in: CMP dword ptr [EBP+0x20],0x0 / JG at 00017700
+   jumps forward to the division and falls through to the empty bar.  The
+   division itself is signed -- MOV EAX,EDX / SAR EDX,0x1f / IDIV at 00017713
+   -- so the numerator is sign extended and a negative result truncates toward
+   zero, which the callee's own clamp then turns into an empty bar.
+
+   The rounding is up, not down: ADD EDX,[EBP+0x20] / DEC EDX at 0001770f adds
+   max - 1 to the product before the divide.  That is what keeps one filled
+   pixel on screen for any current of 1 or more, however large max is. */
+void fdps_draw_gauge_bar_proportional(unsigned char *dst, int dst_stride,
+                                      int bar_index, int max, int current)
+{
+    /* [EBP-4]: how many of the bar's 117 columns the filled graphic supplies.
+       The original stages it in this local and reads it back to push it, so it
+       is a named local here rather than an expression in the call. */
+    int fill_width;
+
+    if (max <= 0) {
+        fill_width = 0;
+    } else {
+        fill_width = (current * GAUGE_BAR_WIDTH + max - 1) / max;
+    }
+
+    fdps_draw_gauge_bar(dst, dst_stride, bar_index, fill_width);
+}
+
 /* See gauge.h.  The three compares are separate and in this order -- CMP
    dword ptr [EBP+0x20],0x0 / JLE at 00017762 guarding the filled blit, then
    CMP ...,0x0 / JGE at 00017784 doing the clamp, then CMP ...,0x75 / JGE at

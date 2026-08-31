@@ -563,8 +563,159 @@ static void destination_rows_step_by_dst_stride(void)
     CHECK_EQ(drawn(BAR_ROWS, 0), DST_GUARD);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_draw_gauge_bar_proportional @ 000176f0
+ * ------------------------------------------------------------------ */
+
+/* Every width below is (current * 0x75 + max - 1) / max in signed 32-bit
+   arithmetic, read off IMUL EDX,dword ptr [EBP+0x24],0x75 / ADD EDX,dword ptr
+   [EBP+0x20] / DEC EDX / SAR EDX,0x1f / IDIV dword ptr [EBP+0x20] at
+   0001770b..0001771b, with the zero path taken when CMP dword ptr
+   [EBP+0x20],0x0 / JG at 000176fc falls through.  The width is not observable
+   on its own -- the function returns nothing -- so each case reads it back off
+   the canvas, where the seam between the filled graphic and the track sits at
+   exactly that column. */
+
+/* Where the seam has to be for a given width: the last filled column comes
+   from the filled graphic and the next one from the track. */
+static void seam_is_at(int bar_index, int fill_width)
+{
+    CHECK_EQ(drawn(0, fill_width - 1), art(bar_index, 0, fill_width - 1));
+    CHECK_EQ(drawn(0, fill_width), art(0, 0, fill_width));
+}
+
+/* Nothing of the filled graphic reached the canvas: every column is the track
+   at its own column. */
+static void whole_bar_is_the_track(void)
+{
+    CHECK_EQ(art(0, 0, 0) != art(1, 0, 0), 1);
+    CHECK_EQ(drawn(0, 0), art(0, 0, 0));
+    CHECK_EQ(drawn(0, 1), art(0, 0, 1));
+    CHECK_EQ(drawn(0, BAR_WIDTH - 1), art(0, 0, BAR_WIDTH - 1));
+    CHECK_EQ(drawn(0, -1), DST_GUARD);
+    CHECK_EQ(drawn(0, BAR_WIDTH), DST_GUARD);
+}
+
+/* CMP dword ptr [EBP+0x20],0x0 / JG at 000176fc..00017700 falls through to
+   MOV dword ptr [EBP+-0x4],0x0, so a max of 0 never reaches the IDIV and the
+   bar is drawn empty however large current is.  A current of 50 against it
+   would be a division by zero if the guard were not there. */
+static void zero_max_draws_an_empty_bar(void)
+{
+    stage_bar();
+    fdps_draw_gauge_bar_proportional(bar_dst(), DST_PITCH, 1, 0, 50);
+    whole_bar_is_the_track();
+}
+
+/* The same branch is JG and not JNE, so a negative max takes the empty path
+   too rather than dividing by it.  Read as unsigned, -10 is above 0 and the
+   divide would be reached instead. */
+static void negative_max_draws_an_empty_bar(void)
+{
+    stage_bar();
+    fdps_draw_gauge_bar_proportional(bar_dst(), DST_PITCH, 1, -10, 5);
+    whole_bar_is_the_track();
+}
+
+/* DEC EDX after ADD EDX,max rounds the width up: 1 out of 1000 is
+   (117 + 999) / 1000 = 1 filled column, where the truncating 117 / 1000 would
+   be 0 and the bar would read as empty.  This is the one-hit-point sliver. */
+static void one_unit_of_current_still_fills_one_column(void)
+{
+    stage_bar();
+    fdps_draw_gauge_bar_proportional(bar_dst(), DST_PITCH, 1, 1000, 1);
+    CHECK_EQ(art(0, 0, 0) != art(1, 0, 0), 1);
+    seam_is_at(1, 1);
+}
+
+/* The rounding up stops at 0: (0 * 0x75 + 999) / 1000 is 0, so a current of 0
+   against a positive max draws the empty bar and not a one-column sliver. */
+static void zero_current_draws_an_empty_bar(void)
+{
+    stage_bar();
+    fdps_draw_gauge_bar_proportional(bar_dst(), DST_PITCH, 1, 1000, 0);
+    whole_bar_is_the_track();
+}
+
+/* Half of 234 is (117 * 0x75 + 233) / 234 = 13922 / 234 = 59, the ceiling of
+   58.5 and not the 58 a truncating divide gives.  Row 7 is checked as well,
+   which is what shows dst_stride reached the blits as the destination pitch:
+   the fourth argument of the call is the width and the second is the stride,
+   and swapping them would put row 7 nowhere near here. */
+static void half_full_rounds_the_odd_column_up(void)
+{
+    stage_bar();
+    fdps_draw_gauge_bar_proportional(bar_dst(), DST_PITCH, 1, 234, 117);
+    seam_is_at(1, 59);
+    CHECK_EQ(drawn(7, 58), art(1, 7, 58));
+    CHECK_EQ(drawn(7, 59), art(0, 7, 59));
+    CHECK_EQ(drawn(BAR_ROWS, 0), DST_GUARD);
+}
+
+/* current == max gives (50 * 0x75 + 49) / 50 = 5899 / 50 = 117 exactly, which
+   is the whole bar, and 0x75 is the value at which fdps_draw_gauge_bar skips
+   the track altogether -- so a full gauge has no track column at all. */
+static void current_equal_to_max_fills_the_whole_bar(void)
+{
+    stage_bar();
+    fdps_draw_gauge_bar_proportional(bar_dst(), DST_PITCH, 1, 50, 50);
+    CHECK_EQ(art(0, 0, BAR_WIDTH - 1) != art(1, 0, BAR_WIDTH - 1), 1);
+    CHECK_EQ(drawn(0, 0), art(1, 0, 0));
+    CHECK_EQ(drawn(0, BAR_WIDTH - 1), art(1, 0, BAR_WIDTH - 1));
+    CHECK_EQ(drawn(0, BAR_WIDTH), DST_GUARD);
+}
+
+/* bar_index is passed through untouched -- MOV EAX,dword ptr [EBP+0x1c] /
+   PUSH EAX at 00017722 is the third argument of the call -- so the filled half
+   of a 1-of-2 bar comes out of graphic 2 while the track still comes out of
+   graphic 0.  The width is (117 + 1) / 2 = 59. */
+static void bar_index_reaches_the_filled_half(void)
+{
+    stage_bar();
+    fdps_draw_gauge_bar_proportional(bar_dst(), DST_PITCH, 2, 2, 1);
+    CHECK_EQ(art(0, 0, 0) != art(2, 0, 0), 1);
+    CHECK_EQ(drawn(0, 0), art(2, 0, 0));
+    seam_is_at(2, 59);
+}
+
+/* SAR EDX,0x1f before the IDIV makes the division signed: -10 out of 100 is
+   (-1170 + 99) / 100 = -1071 / 100 = -10, truncated toward zero, and
+   fdps_draw_gauge_bar's own clamp then draws the empty bar.  Unsigned, the
+   numerator would be a value near 2^32 and the width would be enormous. */
+static void negative_current_draws_an_empty_bar(void)
+{
+    stage_bar();
+    fdps_draw_gauge_bar_proportional(bar_dst(), DST_PITCH, 1, 100, -10);
+    whole_bar_is_the_track();
+}
+
+/* Nothing here caps the width at the bar's own 0x75: 110 out of 100 is
+   (12870 + 99) / 100 = 129 columns, so the filled blit runs 12 columns past
+   the end of the bar and, its source pitch being 0x75, wraps into the next row
+   of the art.  Clamping current to max would draw a clean full bar instead,
+   which is not what the original does. */
+static void current_above_max_is_not_capped(void)
+{
+    stage_bar();
+    fdps_draw_gauge_bar_proportional(bar_dst(), DST_PITCH, 1, 100, 110);
+    CHECK_EQ(drawn(0, BAR_WIDTH - 1), art(1, 0, BAR_WIDTH - 1));
+    CHECK_EQ(drawn(0, 0x75), art(1, 1, 0));
+    CHECK_EQ(drawn(0, 128), art(1, 1, 11));
+    CHECK_EQ(drawn(0, 129), DST_GUARD);
+}
+
 void run_gauge_tests(void)
 {
+    RUN_TEST(zero_max_draws_an_empty_bar);
+    RUN_TEST(negative_max_draws_an_empty_bar);
+    RUN_TEST(one_unit_of_current_still_fills_one_column);
+    RUN_TEST(zero_current_draws_an_empty_bar);
+    RUN_TEST(half_full_rounds_the_odd_column_up);
+    RUN_TEST(current_equal_to_max_fills_the_whole_bar);
+    RUN_TEST(bar_index_reaches_the_filled_half);
+    RUN_TEST(negative_current_draws_an_empty_bar);
+    RUN_TEST(current_above_max_is_not_capped);
+
     RUN_TEST(filled_half_and_track_meet_at_fill_width);
     RUN_TEST(track_comes_from_graphic_zero_whatever_the_index);
     RUN_TEST(graphic_and_row_strides_are_0x3a8_and_0x75);

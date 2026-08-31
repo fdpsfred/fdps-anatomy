@@ -15,6 +15,29 @@
 #ifndef GAUGE_H
 #define GAUGE_H
 
+/* Draws one 117x8 status gauge bar at dst, filled in proportion to current
+   against max, for a caller that holds a stat pair rather than a pixel width.
+
+   The fill is a CEILING over the bar's 117 columns, (current * 117 + max - 1)
+   / max, so a unit down to its last hit point still shows a one-pixel sliver
+   where the truncating current * 117 / max would show an empty bar.  Only max
+   greater than 0 reaches the division: 0 draws an empty bar rather than
+   dividing, and so does a negative max.
+
+   Everything is signed.  A negative current produces a negative width, which
+   fdps_draw_gauge_bar's own clamp turns into an empty bar, and a current above
+   max produces a width above 117, which nothing caps -- see the note on that
+   function below for what an overfull bar then draws.
+
+   dst, dst_stride and bar_index are passed straight through to
+   fdps_draw_gauge_bar and mean exactly what they mean there.  In the shipped
+   game the callers are the HP and MP bars of the unit status panel, with
+   bar_index 1 and 2 and a stride of 320. */
+extern void fdps_draw_gauge_bar_proportional(unsigned char *dst,
+                                             int dst_stride, int bar_index,
+                                             int max, int current);
+#pragma aux fdps_draw_gauge_bar_proportional "*" parm caller [];
+
 /* Draws one 117x8 status gauge bar, filled to fill_width pixels, at dst.
 
    The art is the three 117x8 graphics of the sheet
