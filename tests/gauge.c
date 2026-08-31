@@ -33,6 +33,17 @@
  * 0x9c4 the two builders malloc at 00018e15 and 0001a603.  They stage a sheet
  * of their own and point data_fdps_gauge_fill_sheet_ptr at it as well, since
  * in the shipped game that global is only live inside a combat animation.
+ *
+ * The stat gauge cases at the very end come from the assembly at 000192c0 --
+ * CMP dword ptr [EBP+0x20],0x0 / JG at 000192cc..000192d0 for the empty path,
+ * IMUL EDX,dword ptr [EBP+0x24],0x7d / ADD EDX,dword ptr [EBP+0x20] / DEC EDX
+ * / MOV EAX,EDX / SAR EDX,0x1f / IDIV dword ptr [EBP+0x20] at
+ * 000192db..000192eb for the signed ceiling, and the four pushes at
+ * 000192f1..000192fd for what reaches fdps_draw_gauge_fill.  The width itself
+ * is not observable -- the function returns nothing -- so every case reads it
+ * back off the fill canvas, where the run's far edge sits at exactly that
+ * column.  They reuse the fill sheet staging above, since the width is only
+ * visible through the real fdps_draw_gauge_fill.
  */
 #include <stddef.h>
 #include "testharn.h"
@@ -964,6 +975,168 @@ static void dest_stride_is_passed_through_untouched(void)
     CHECK_EQ((int) fill_canvas[base + FILL_DST_PITCH], FILL_GUARD);
 }
 
+/* Every width below is (current * 0x7d + max - 1) / max in signed 32-bit
+   arithmetic, with the zero path taken when CMP dword ptr [EBP+0x20],0x0 / JG
+   at 000192cc falls through.  Index 2 or 3 is used wherever a case only cares
+   about the width, because those fill from the left and the run's far edge is
+   then the width itself; the right-aligned cases say so in their comment. */
+
+/* Nothing of the fill strip reached the canvas anywhere along the span. */
+static void span_is_empty(void)
+{
+    CHECK_EQ(fill_drawn(0, 0), FILL_GUARD);
+    CHECK_EQ(fill_drawn(0, FILL_SPAN / 2), FILL_GUARD);
+    CHECK_EQ(fill_drawn(0, FILL_SPAN - 1), FILL_GUARD);
+    CHECK_EQ(fill_drawn(4, 0), FILL_GUARD);
+    CHECK_EQ(fill_drawn(4, FILL_SPAN - 1), FILL_GUARD);
+}
+
+/* CMP dword ptr [EBP+0x20],0x0 / JG at 000192cc..000192d0 falls through to
+   MOV dword ptr [EBP+-0x4],0x0, so a max of 0 never reaches the IDIV and the
+   gauge is drawn empty however large current is.  A current of 50 against it
+   would be a division by zero if the guard were not there. */
+static void stat_gauge_zero_max_draws_nothing(void)
+{
+    stage_fill();
+    fdps_draw_stat_gauge(fill_dest(), FILL_DST_PITCH, 2, 0, 50);
+    span_is_empty();
+}
+
+/* The same branch is JG and not JNE, so a negative max takes the empty path
+   too rather than dividing by it and producing a negative width. */
+static void stat_gauge_negative_max_draws_nothing(void)
+{
+    stage_fill();
+    fdps_draw_stat_gauge(fill_dest(), FILL_DST_PITCH, 2, -3, 50);
+    span_is_empty();
+}
+
+/* ADD EDX,dword ptr [EBP+0x20] / DEC EDX at 000192df..000192e2 is what makes
+   the divide a ceiling: 1 out of 200 is (125 + 199) / 200 = 1 column, where
+   the truncating 125 / 200 would be 0 and the gauge would read empty for a
+   unit that is still alive. */
+static void stat_gauge_one_current_still_lights_one_column(void)
+{
+    stage_fill();
+    fdps_draw_stat_gauge(fill_dest(), FILL_DST_PITCH, 2, 200, 1);
+    CHECK_EQ(fill_drawn(0, 0), fill_art(2, 0, 0));
+    CHECK_EQ(fill_drawn(4, 0), fill_art(2, 4, 0));
+    CHECK_EQ(fill_drawn(0, 1), FILL_GUARD);
+}
+
+/* The ceiling does not add a column that is not owed: 0 out of 200 is
+   (0 + 199) / 200 = 0, so a dead unit's gauge is blank. */
+static void stat_gauge_zero_current_draws_nothing(void)
+{
+    stage_fill();
+    fdps_draw_stat_gauge(fill_dest(), FILL_DST_PITCH, 2, 200, 0);
+    span_is_empty();
+}
+
+/* Half of 125 is 62.5 and the odd column goes to the fill: 2 out of 4 is
+   (250 + 3) / 4 = 63 columns, not the 62 a truncating divide would give. */
+static void stat_gauge_half_full_rounds_the_odd_column_up(void)
+{
+    stage_fill();
+    fdps_draw_stat_gauge(fill_dest(), FILL_DST_PITCH, 2, 4, 2);
+    CHECK_EQ(fill_drawn(0, 62), fill_art(2, 0, 62));
+    CHECK_EQ(fill_drawn(0, 63), FILL_GUARD);
+}
+
+/* A ratio that divides badly rounds up as well: 1 out of 3 is (125 + 2) / 3 =
+   42 columns where 125 / 3 would be 41. */
+static void stat_gauge_a_third_rounds_up_to_42(void)
+{
+    stage_fill();
+    fdps_draw_stat_gauge(fill_dest(), FILL_DST_PITCH, 2, 3, 1);
+    CHECK_EQ(fill_drawn(0, 41), fill_art(2, 0, 41));
+    CHECK_EQ(fill_drawn(0, 42), FILL_GUARD);
+}
+
+/* current == max comes out at exactly the span and not one past it, which is
+   what keeps a full gauge on the drawn side of fdps_draw_gauge_fill's
+   CMP ...,0x7d / JG: 37 out of 37 is (4625 + 36) / 37 = 125, since 37 * 126 =
+   4662 is already past 4661. */
+static void stat_gauge_current_equal_to_max_fills_the_span(void)
+{
+    stage_fill();
+    fdps_draw_stat_gauge(fill_dest(), FILL_DST_PITCH, 2, 37, 37);
+    CHECK_EQ(fill_drawn(0, 0), fill_art(2, 0, 0));
+    CHECK_EQ(fill_drawn(0, FILL_SPAN - 1), fill_art(2, 0, FILL_SPAN - 1));
+    CHECK_EQ(fill_drawn(4, FILL_SPAN - 1), fill_art(2, 4, FILL_SPAN - 1));
+    CHECK_EQ(fill_drawn(0, FILL_SPAN), FILL_GUARD);
+}
+
+/* Nothing here caps the width at the span's own 0x7d, and the consequence is
+   not a smear but a blank gauge: 110 out of 100 is (13750 + 99) / 100 = 138,
+   which fdps_draw_gauge_fill's CMP ...,0x7d / JG at 00019297 drops outright.
+   Adding min(125, width) here would draw a clean full gauge instead, which is
+   not what the original puts on screen. */
+static void stat_gauge_current_above_max_draws_nothing(void)
+{
+    stage_fill();
+    fdps_draw_stat_gauge(fill_dest(), FILL_DST_PITCH, 2, 100, 110);
+    span_is_empty();
+}
+
+/* The IDIV is signed and the numerator is sign extended by SAR EDX,0x1f at
+   000192e5, so -10 out of 100 is (-1250 + 99) / 100 = -11 truncated toward
+   zero, and fdps_draw_gauge_fill's own clamp turns that into an empty gauge
+   rather than a run of 11 columns. */
+static void stat_gauge_negative_current_draws_nothing(void)
+{
+    stage_fill();
+    fdps_draw_stat_gauge(fill_dest(), FILL_DST_PITCH, 2, 100, -10);
+    span_is_empty();
+}
+
+/* PUSH dword ptr [EBP+0x1c] at 000192f2 hands gauge_index through untouched,
+   so it still picks the strip: 1 out of 4 is (125 + 3) / 4 = 32 columns, and
+   strip 3 supplies them from its own leftmost column.  The two strips
+   differing at column 0 is what makes that mean anything, so it is asserted
+   rather than assumed. */
+static void stat_gauge_index_reaches_the_strip(void)
+{
+    stage_fill();
+    fdps_draw_stat_gauge(fill_dest(), FILL_DST_PITCH, 3, 4, 1);
+    CHECK_EQ(fill_art(3, 0, 0) != fill_art(2, 0, 0), 1);
+    CHECK_EQ(fill_drawn(0, 0), fill_art(3, 0, 0));
+    CHECK_EQ(fill_drawn(0, 31), fill_art(3, 0, 31));
+    CHECK_EQ(fill_drawn(0, 32), FILL_GUARD);
+}
+
+/* An index below 2 is passed through just as unchanged, so the same 32-column
+   width lands at the RIGHT end of the span and comes out of the right end of
+   the strip -- 125 - 32 = 93 onwards -- and the left end of the span is left
+   showing the frame. */
+static void stat_gauge_index_below_two_fills_from_the_right(void)
+{
+    stage_fill();
+    fdps_draw_stat_gauge(fill_dest(), FILL_DST_PITCH, 1, 4, 1);
+    CHECK_EQ(fill_drawn(0, 93), fill_art(1, 0, 93));
+    CHECK_EQ(fill_drawn(0, FILL_SPAN - 1), fill_art(1, 0, FILL_SPAN - 1));
+    CHECK_EQ(fill_drawn(4, 93), fill_art(1, 4, 93));
+    CHECK_EQ(fill_drawn(0, 92), FILL_GUARD);
+    CHECK_EQ(fill_drawn(0, 0), FILL_GUARD);
+}
+
+/* PUSH dword ptr [EBP+0x18] at 000192f6 hands dest_stride through untouched
+   as well, so a stride that is not the canvas pitch puts row 1 exactly 0x80
+   bytes past row 0.  4 out of 125 is (500 + 124) / 125 = 4 columns. */
+static void stat_gauge_dest_and_stride_pass_through(void)
+{
+    int base;
+
+    stage_fill();
+    fdps_draw_stat_gauge(fill_dest(), 0x80, 2, 125, 4);
+
+    base = FILL_ORIGIN_ROW * FILL_DST_PITCH + FILL_ORIGIN_COLUMN;
+    CHECK_EQ((int) fill_canvas[base], fill_art(2, 0, 0));
+    CHECK_EQ((int) fill_canvas[base + 0x80], fill_art(2, 1, 0));
+    CHECK_EQ((int) fill_canvas[base + 4 * 0x80 + 3], fill_art(2, 4, 3));
+    CHECK_EQ((int) fill_canvas[base + 4 * 0x80 + 4], FILL_GUARD);
+}
+
 void run_gauge_tests(void)
 {
     RUN_TEST(zero_max_draws_an_empty_bar);
@@ -997,6 +1170,19 @@ void run_gauge_tests(void)
     RUN_TEST(zero_and_negative_widths_draw_nothing);
     RUN_TEST(palette_index_zero_leaves_the_frame_alone);
     RUN_TEST(dest_stride_is_passed_through_untouched);
+
+    RUN_TEST(stat_gauge_zero_max_draws_nothing);
+    RUN_TEST(stat_gauge_negative_max_draws_nothing);
+    RUN_TEST(stat_gauge_one_current_still_lights_one_column);
+    RUN_TEST(stat_gauge_zero_current_draws_nothing);
+    RUN_TEST(stat_gauge_half_full_rounds_the_odd_column_up);
+    RUN_TEST(stat_gauge_a_third_rounds_up_to_42);
+    RUN_TEST(stat_gauge_current_equal_to_max_fills_the_span);
+    RUN_TEST(stat_gauge_current_above_max_draws_nothing);
+    RUN_TEST(stat_gauge_negative_current_draws_nothing);
+    RUN_TEST(stat_gauge_index_reaches_the_strip);
+    RUN_TEST(stat_gauge_index_below_two_fills_from_the_right);
+    RUN_TEST(stat_gauge_dest_and_stride_pass_through);
 
     RUN_TEST(unit_record_shape_matches_the_offsets);
     RUN_TEST(anchor_is_the_tile_times_24_plus_4);

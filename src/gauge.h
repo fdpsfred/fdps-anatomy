@@ -109,6 +109,37 @@ extern void fdps_draw_gauge_fill(unsigned char *dest, int dest_stride,
                                  int gauge_index, int fill_width);
 #pragma aux fdps_draw_gauge_fill "*" parm caller [];
 
+/* Draws one combat status gauge filled in proportion to current against max,
+   for a caller that holds a stat pair rather than a pixel width.
+
+   This is fdps_draw_gauge_fill's stat-pair front end, exactly as
+   fdps_draw_gauge_bar_proportional is fdps_draw_gauge_bar's: dest,
+   dest_stride and gauge_index are passed straight through and mean exactly
+   what they mean there, including gauge_index below 2 meaning right-to-left.
+
+   The fill is a CEILING over the span's 125 columns, (current * 125 + max - 1)
+   / max, so a unit down to its last hit point still shows a one-pixel sliver
+   where the truncating current * 125 / max would show nothing.  Only max
+   greater than 0 reaches the division: 0 draws an empty gauge rather than
+   dividing, and so does a negative max.
+
+   Everything is signed.  A negative current produces a negative width, which
+   fdps_draw_gauge_fill's own clamp turns into an empty gauge, and a current
+   above max produces a width above 125, which nothing caps -- so an overfull
+   gauge draws NOTHING AT ALL, because that is what fdps_draw_gauge_fill does
+   with a width past the span.  min(125, width) here would make it read full.
+
+   The art the gauge is drawn from lives only while a combat exchange is on
+   screen: fdps_combat_play_attack_exchange allocates the fill sheet on the
+   way in and frees it at teardown, so this is not callable outside one.
+
+   The shipped image has no call site of its own for this function -- the same
+   scaling and call are inlined twice inside fdps_draw_unit_hp_mp_gauges, from
+   the unit record's current/maximum HP and MP pairs. */
+extern void fdps_draw_stat_gauge(unsigned char *dest, int dest_stride,
+                                 int gauge_index, int max, int current);
+#pragma aux fdps_draw_stat_gauge "*" parm caller [];
+
 /* Works out where one battle unit's HP gauge goes on screen while a combat
    animation is playing, and writes the position through out_position.
 

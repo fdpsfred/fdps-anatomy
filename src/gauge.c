@@ -148,6 +148,37 @@ void fdps_draw_gauge_fill(unsigned char *dest, int dest_stride,
     }
 }
 
+/* See gauge.h.  The zero case is written first because that is the order the
+   original has its blocks in: CMP dword ptr [EBP+0x20],0x0 / JG at 000192cc
+   jumps forward to the division and falls through to the empty gauge, so a
+   max of 0 and every negative max never reach the IDIV.
+
+   The division is signed throughout -- IMUL EDX,dword ptr [EBP+0x24],0x7d /
+   ADD EDX,dword ptr [EBP+0x20] / DEC EDX / MOV EAX,EDX / SAR EDX,0x1f / IDIV
+   dword ptr [EBP+0x20] at 000192db..000192eb -- and the ADD/DEC pair is what
+   makes it a ceiling rather than the obvious current * 0x7d / max, so any
+   current of 1 or more keeps one lit pixel on screen however large max is.
+
+   Nothing caps the width at the span's own 0x7d, and that is behaviour:
+   fdps_draw_gauge_fill drops its blit outright above 0x7d, so a current above
+   max leaves the gauge blank where an added min() would fill it. */
+void fdps_draw_stat_gauge(unsigned char *dest, int dest_stride,
+                          int gauge_index, int max, int current)
+{
+    /* [EBP-4]: how many of the span's 125 columns the fill strip supplies.
+       The original stages it in this local and reads it back to push it, so
+       it is a named local here rather than an expression in the call. */
+    int fill_width;
+
+    if (max <= 0) {
+        fill_width = 0;
+    } else {
+        fill_width = (current * GAUGE_FILL_WIDTH + max - 1) / max;
+    }
+
+    fdps_draw_gauge_fill(dest, dest_stride, gauge_index, fill_width);
+}
+
 /* One map tile is 24 pixels square, and a map object's view position is its
    tile times this minus the view window origin.  IMUL EAX,EAX,0x18 at
    0001d5f5 and 0001d613. */
