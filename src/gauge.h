@@ -140,6 +140,38 @@ extern void fdps_draw_stat_gauge(unsigned char *dest, int dest_stride,
                                  int gauge_index, int max, int current);
 #pragma aux fdps_draw_stat_gauge "*" parm caller [];
 
+/* Draws one battle unit's 43x6 gauge bar at dst, filled in proportion to
+   cur_value against max_value, for a caller that holds a stat pair rather than
+   a pixel width.
+
+   NOTE THE ORDER OF THE PAIR: the maximum is the fourth argument and the
+   current value the fifth.
+
+   dst, dst_stride, gfx_index, blit_mode and alpha are passed straight through
+   to fdps_draw_unit_gauge and mean exactly what they mean there, including any
+   blit_mode other than 0 and 1 being itself the tint colour index.
+
+   The fill is a CEILING over the bar's 41-pixel interior, (cur_value * 41 +
+   max_value - 1) / max_value, so a unit down to its last hit point still shows
+   a one-pixel sliver where the truncating cur_value * 41 / max_value would
+   show an empty bar.  Only a max_value greater than 0 reaches the division: 0
+   draws an empty bar rather than dividing, and so does a negative max_value.
+
+   Everything is signed.  A negative cur_value produces a negative width, which
+   fdps_draw_unit_gauge's own clamp turns into an empty bar, and a cur_value
+   above max_value produces a width above 41, which nothing caps -- see the
+   note on that function below for the smear that then draws.
+
+   The shipped image has no call site of its own for this function: the
+   compiler inlined it at all eight of them, six in
+   fdps_battle_show_combat_gauges and two in fdps_play_attack_animation, and
+   every one passes the unit record's current and maximum HP as the pair. */
+extern void fdps_draw_unit_gauge_proportional(unsigned char *dst,
+                                              int dst_stride, int gfx_index,
+                                              int max_value, int cur_value,
+                                              int blit_mode, int alpha);
+#pragma aux fdps_draw_unit_gauge_proportional "*" parm caller [];
+
 /* Draws one battle unit's 43x6 gauge bar at dst, filled to fill_width pixels,
    in one of three painting modes.
 

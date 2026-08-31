@@ -204,6 +204,57 @@ void fdps_draw_stat_gauge(unsigned char *dest, int dest_stride,
 #define UNIT_GAUGE_MODE_PLAIN 0
 #define UNIT_GAUGE_MODE_BLEND 1
 
+/* The interior the fill and the remainder divide between them is 41 columns
+   wide, and that is what a proportion is taken over: IMUL EDX,dword ptr
+   [EBP+0x24],0x29 at 0001cabb.  It is the same 0x29 as
+   UNIT_GAUGE_RIGHT_CAP_COLUMN above because the right cap begins exactly where
+   the interior ends, but the two are different facts about the bar and the
+   proportional entry only knows the first one. */
+#define UNIT_GAUGE_INTERIOR_WIDTH 0x29
+
+/* See gauge.h.  The empty case is written first because that is the order the
+   original has its blocks in: CMP dword ptr [EBP+0x20],0x0 / JG at 0001caac
+   jumps forward to the division and falls through to the empty bar, so a
+   max_value of 0 and every negative max_value never reach the IDIV.
+
+   The division is signed throughout -- IMUL EDX,dword ptr [EBP+0x24],0x29 /
+   ADD EDX,dword ptr [EBP+0x20] / DEC EDX / MOV EAX,EDX / SAR EDX,0x1f / IDIV
+   dword ptr [EBP+0x20] at 0001cabb..0001cac8 -- and the ADD/DEC pair is what
+   makes it a ceiling rather than the obvious cur_value * 0x29 / max_value, so
+   any cur_value of 1 or more keeps one lit pixel on screen however large
+   max_value is.
+
+   Nothing caps the width at the interior's own 0x29, and the consequence is a
+   smear rather than a full bar: fdps_draw_unit_gauge blits the run out of a
+   0x2b-pitch source with no upper clamp of its own, so a cur_value above
+   max_value drags the art's next row across the bar where an added min() would
+   draw a clean full one.
+
+   The shipped image reaches this code only through the compiler's eight
+   inline expansions of it, so nothing here can be checked against a CALL; the
+   argument order is the one the body's own stack slots fix, with the divisor
+   and the guard both reading [EBP+0x20]. */
+void fdps_draw_unit_gauge_proportional(unsigned char *dst, int dst_stride,
+                                       int gfx_index, int max_value,
+                                       int cur_value, int blit_mode, int alpha)
+{
+    /* [EBP-4]: how many of the interior's 41 columns the filled graphic
+       supplies.  The original stages it in this local and reads it back to
+       push it, so it is a named local here rather than an expression in the
+       call. */
+    int fill_width;
+
+    if (max_value <= 0) {
+        fill_width = 0;
+    } else {
+        fill_width = (cur_value * UNIT_GAUGE_INTERIOR_WIDTH + max_value - 1)
+                     / max_value;
+    }
+
+    fdps_draw_unit_gauge(dst, dst_stride, gfx_index, fill_width, blit_mode,
+                         alpha);
+}
+
 /* See gauge.h.  The clamp is at 0001cb1e, before the mode test, so all three
    painters see the clamped value; the graphic base is worked out before it, at
    0001cb0c, and so is computed even in the modes and on the paths that never

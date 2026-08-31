@@ -56,6 +56,20 @@
  * back off the fill canvas, where the run's far edge sits at exactly that
  * column.  They reuse the fill sheet staging above, since the width is only
  * visible through the real fdps_draw_gauge_fill.
+ *
+ * The proportional unit gauge cases after those come from the assembly at
+ * 0001caa0 -- CMP dword ptr [EBP+0x20],0x0 / JG at 0001caac..0001cab0 for the
+ * empty path, IMUL EDX,dword ptr [EBP+0x24],0x29 / ADD EDX,dword ptr
+ * [EBP+0x20] / DEC EDX / MOV EAX,EDX / SAR EDX,0x1f / IDIV dword ptr
+ * [EBP+0x20] at 0001cabb..0001cac8 for the signed ceiling over the bar's
+ * 41-column interior, and the six pushes at 0001cace..0001cae5 for what
+ * reaches fdps_draw_unit_gauge.  The width itself is not observable either, so
+ * every case reads it back off the unit canvas at the seam between the filled
+ * graphic and the track, and the reading is only sharp out to column 0x28:
+ * the right cap paints back over the interior's last two columns, so a full
+ * bar is told from a nearly full one the way the remainder case above is, by
+ * planting a transparent cap and seeing whether anything is left underneath.
+ * They reuse the unit sheet and table staging above.
  */
 #include <stddef.h>
 #include "testharn.h"
@@ -1545,6 +1559,232 @@ static void unit_dst_stride_is_passed_through_untouched(void)
     CHECK_EQ((int) unit_canvas[base + UNIT_BAR_WIDTH], UNIT_GUARD);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_draw_unit_gauge_proportional @ 0001caa0
+ * ------------------------------------------------------------------ */
+
+/* Every width below is (cur_value * 0x29 + max_value - 1) / max_value in
+   signed 32-bit arithmetic, with the zero path taken when CMP dword ptr
+   [EBP+0x20],0x0 / JG at 0001caac falls through.  The seam between the filled
+   graphic and the track sits at column 2 + width, so a case that only cares
+   about the width asserts the two columns either side of it and the fact that
+   the two graphics differ there. */
+
+/* Nothing of the filled graphic reached the bar's interior: the whole of it,
+   from the first column past the left cap to the last one the right cap does
+   not cover, came out of graphic 0. */
+static void interior_is_all_track(void)
+{
+    CHECK_EQ(unit_art(0, 0, 2) != unit_art(2, 0, 2), 1);
+    CHECK_EQ(unit_drawn(0, 2), unit_art(0, 0, 2));
+    CHECK_EQ(unit_drawn(0, 3), unit_art(0, 0, 3));
+    CHECK_EQ(unit_drawn(0, 0x28), unit_art(0, 0, 0x28));
+    CHECK_EQ(unit_drawn(5, 0x28), unit_art(0, 5, 0x28));
+}
+
+/* CMP dword ptr [EBP+0x20],0x0 / JG at 0001caac..0001cab0 falls through to
+   MOV dword ptr [EBP+-0x4],0x0, so a max_value of 0 never reaches the IDIV and
+   the bar is drawn empty however large cur_value is.  A cur_value of 50
+   against it would be a division by zero if the guard were not there.  The
+   caps still come out of the filled graphic, which is what says the bar was
+   drawn at all rather than skipped. */
+static void prop_zero_max_draws_an_empty_bar(void)
+{
+    stage_unit();
+    fdps_draw_unit_gauge_proportional(unit_dst(), UNIT_DST_PITCH, 2, 0, 50, 0,
+                                      0);
+
+    interior_is_all_track();
+    CHECK_EQ(unit_drawn(0, 0), unit_art(2, 0, 0));
+    CHECK_EQ(unit_drawn(0, 1), unit_art(2, 0, 1));
+}
+
+/* The same branch is JG and not JNZ, so a negative max_value takes the empty
+   path too rather than dividing by it and producing a negative width. */
+static void prop_negative_max_draws_an_empty_bar(void)
+{
+    stage_unit();
+    fdps_draw_unit_gauge_proportional(unit_dst(), UNIT_DST_PITCH, 2, -3, 50, 0,
+                                      0);
+
+    interior_is_all_track();
+}
+
+/* ADD EDX,dword ptr [EBP+0x20] / DEC EDX at 0001cabf..0001cac2 is what makes
+   the divide a ceiling: 1 out of 200 is (41 + 199) / 200 = 1 column, where the
+   truncating 41 / 200 would be 0 and the bar would read empty for a unit that
+   is still alive. */
+static void prop_one_current_still_lights_one_column(void)
+{
+    stage_unit();
+    fdps_draw_unit_gauge_proportional(unit_dst(), UNIT_DST_PITCH, 2, 200, 1, 0,
+                                      0);
+
+    CHECK_EQ(unit_art(0, 0, 2) != unit_art(2, 0, 2), 1);
+    CHECK_EQ(unit_drawn(0, 2), unit_art(2, 0, 2));
+    CHECK_EQ(unit_drawn(5, 2), unit_art(2, 5, 2));
+    CHECK_EQ(unit_drawn(0, 3), unit_art(0, 0, 3));
+}
+
+/* The ceiling does not add a column that is not owed: 0 out of 200 is
+   (0 + 199) / 200 = 0, so a dead unit's bar is blank. */
+static void prop_zero_current_draws_an_empty_bar(void)
+{
+    stage_unit();
+    fdps_draw_unit_gauge_proportional(unit_dst(), UNIT_DST_PITCH, 2, 200, 0, 0,
+                                      0);
+
+    interior_is_all_track();
+}
+
+/* Half of 41 is 20.5 and the odd column goes to the fill: 2 out of 4 is
+   (82 + 3) / 4 = 21 columns, not the 20 a truncating divide would give, so the
+   seam is at column 23 and not at 22. */
+static void prop_half_full_rounds_the_odd_column_up(void)
+{
+    stage_unit();
+    fdps_draw_unit_gauge_proportional(unit_dst(), UNIT_DST_PITCH, 2, 4, 2, 0,
+                                      0);
+
+    CHECK_EQ(unit_art(0, 0, 22) != unit_art(2, 0, 22), 1);
+    CHECK_EQ(unit_drawn(0, 22), unit_art(2, 0, 22));
+    CHECK_EQ(unit_drawn(0, 23), unit_art(0, 0, 23));
+}
+
+/* A ratio that divides badly rounds up as well: 1 out of 3 is (41 + 2) / 3 =
+   14 columns where 41 / 3 would be 13, so the seam is at column 16. */
+static void prop_a_third_rounds_up_to_14(void)
+{
+    stage_unit();
+    fdps_draw_unit_gauge_proportional(unit_dst(), UNIT_DST_PITCH, 2, 3, 1, 0,
+                                      0);
+
+    CHECK_EQ(unit_drawn(0, 15), unit_art(2, 0, 15));
+    CHECK_EQ(unit_drawn(0, 16), unit_art(0, 0, 16));
+}
+
+/* cur_value == max_value comes out at exactly the interior's 41 and not one
+   past it: 37 out of 37 is (1517 + 36) / 37 = 41, since 37 * 42 = 1554 is
+   already past 1553.  41 rather than 40 is not readable at the seam -- the
+   right cap paints over the interior's last two columns either way -- so the
+   cap's own two pixels are planted transparent and what shows through decides
+   it: at 41 the remainder is zero columns wide and draws nothing, at 40 it
+   would have left graphic 0 under the cap.  The guard at column 0x2b is what
+   rules out a width past 41, which would carry the run on into the art's next
+   row. */
+static void prop_current_equal_to_max_fills_the_interior(void)
+{
+    stage_unit();
+    unit_sheet[2 * UNIT_ART_GRAPHIC_STRIDE + UNIT_INTERIOR] = 0;
+    unit_sheet[2 * UNIT_ART_GRAPHIC_STRIDE + UNIT_BAR_WIDTH - 1] = 0;
+    fdps_draw_unit_gauge_proportional(unit_dst(), UNIT_DST_PITCH, 2, 37, 37, 0,
+                                      0);
+
+    CHECK_EQ(unit_art(0, 0, 0x28) != unit_art(2, 0, 0x28), 1);
+    CHECK_EQ(unit_drawn(0, 0x28), unit_art(2, 0, 0x28));
+    CHECK_EQ(unit_drawn(0, UNIT_INTERIOR), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, UNIT_BAR_WIDTH - 1), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, UNIT_BAR_WIDTH), UNIT_GUARD);
+}
+
+/* Nothing here caps the width at the interior's own 0x29: 110 out of 100 is
+   (4510 + 99) / 100 = 46 columns, and fdps_draw_unit_gauge blits all 46 out of
+   a source whose row pitch is 0x2b, so the run passes the right cap and reads
+   on into the art's NEXT ROW -- destination column 0x2b is graphic 2 row 1
+   column 0 -- while the remainder, 0x29 - 46 wide, draws nothing.  Adding
+   min(0x29, width) here would stop the bar at column 0x2a and put a clean full
+   bar on screen, which is not what the original draws. */
+static void prop_current_above_max_smears_past_the_bar(void)
+{
+    stage_unit();
+    fdps_draw_unit_gauge_proportional(unit_dst(), UNIT_DST_PITCH, 2, 100, 110,
+                                      0, 0);
+
+    CHECK_EQ(unit_drawn(0, 0x2b), unit_art(2, 1, 0));
+    CHECK_EQ(unit_drawn(0, 0x2f), unit_art(2, 1, 4));
+    CHECK_EQ(unit_drawn(0, 0x30), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(1, 0x2b), unit_art(2, 2, 0));
+}
+
+/* The IDIV is signed and the numerator is sign extended by SAR EDX,0x1f at
+   0001cac5, so -10 out of 100 is (-410 + 99) / 100 = -3 truncated toward zero,
+   and fdps_draw_unit_gauge's own clamp turns that into an empty bar.  An
+   unsigned divide of the same numerator would be a width of some forty million
+   columns, so the guards on both sides of the bar are what say which one ran:
+   an unclamped negative width would also have started the remainder three
+   columns to the LEFT of the bar. */
+static void prop_negative_current_draws_an_empty_bar(void)
+{
+    stage_unit();
+    fdps_draw_unit_gauge_proportional(unit_dst(), UNIT_DST_PITCH, 2, 100, -10,
+                                      0, 0);
+
+    interior_is_all_track();
+    CHECK_EQ(unit_drawn(0, -1), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, -3), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, UNIT_BAR_WIDTH), UNIT_GUARD);
+}
+
+/* MOV EAX,dword ptr [EBP+0x1c] / PUSH EAX at 0001cada hands gfx_index through
+   untouched, so it still picks the filled graphic: 1 out of 4 is (41 + 3) / 4
+   = 11 columns out of graphic 1 here, and the track after the seam is graphic
+   0 whatever the index says. */
+static void prop_gfx_index_reaches_the_filled_run(void)
+{
+    stage_unit();
+    fdps_draw_unit_gauge_proportional(unit_dst(), UNIT_DST_PITCH, 1, 4, 1, 0,
+                                      0);
+
+    CHECK_EQ(unit_art(1, 0, 12) != unit_art(0, 0, 12), 1);
+    CHECK_EQ(unit_drawn(0, 2), unit_art(1, 0, 2));
+    CHECK_EQ(unit_drawn(0, 12), unit_art(1, 0, 12));
+    CHECK_EQ(unit_drawn(0, 13), unit_art(0, 0, 13));
+}
+
+/* The last two pushes, MOV EAX,dword ptr [EBP+0x28] at 0001cad2 and MOV
+   EAX,dword ptr [EBP+0x2c] at 0001cace, hand blit_mode and alpha through
+   untouched and in that order, so the same 11-column bar comes out of the
+   blending painter in mode 1 and out of the tint painter in mode 5 with 5
+   itself as the colour, and alpha picks the ramp row in both. */
+static void prop_mode_and_alpha_pass_through(void)
+{
+    stage_unit();
+    stage_tables();
+    fdps_draw_unit_gauge_proportional(unit_dst(), UNIT_DST_PITCH, 2, 4, 1, 1,
+                                      0);
+
+    CHECK_EQ(unit_drawn(0, 2), table_blend(unit_art(2, 0, 2), UNIT_GUARD, 0));
+    CHECK_EQ(unit_drawn(0, 13), table_blend(unit_art(0, 0, 13), UNIT_GUARD, 0));
+
+    stage_unit();
+    stage_tables();
+    fdps_draw_unit_gauge_proportional(unit_dst(), UNIT_DST_PITCH, 2, 4, 1, 5,
+                                      3);
+
+    CHECK_EQ(unit_drawn(0, 2), table_blend(5, unit_art(2, 0, 2), 3));
+    CHECK_EQ(table_blend(5, unit_art(2, 0, 2), 3)
+             != table_blend(5, unit_art(2, 0, 2), 0), 1);
+}
+
+/* dst and dst_stride are pushed unchanged as well -- MOV EAX,dword ptr
+   [EBP+0x14] at 0001cae2 and MOV EAX,dword ptr [EBP+0x18] at 0001cade -- so a
+   stride that is not the canvas pitch puts row 1 exactly 0x50 bytes past row 0
+   and the seam of the same 11-column bar is still at column 13. */
+static void prop_dst_and_stride_pass_through(void)
+{
+    int base;
+
+    stage_unit();
+    fdps_draw_unit_gauge_proportional(unit_dst(), 0x50, 2, 4, 1, 0, 0);
+
+    base = UNIT_ORIGIN_ROW * UNIT_DST_PITCH + UNIT_ORIGIN_COLUMN;
+    CHECK_EQ((int) unit_canvas[base], unit_art(2, 0, 0));
+    CHECK_EQ((int) unit_canvas[base + 0x50], unit_art(2, 1, 0));
+    CHECK_EQ((int) unit_canvas[base + 5 * 0x50 + 12], unit_art(2, 5, 12));
+    CHECK_EQ((int) unit_canvas[base + 5 * 0x50 + 13], unit_art(0, 5, 13));
+    CHECK_EQ((int) unit_canvas[base + UNIT_BAR_WIDTH], UNIT_GUARD);
+}
+
 void run_gauge_tests(void)
 {
     RUN_TEST(zero_max_draws_an_empty_bar);
@@ -1603,6 +1843,19 @@ void run_gauge_tests(void)
     RUN_TEST(unit_alpha_reaches_both_blended_painters);
     RUN_TEST(unit_palette_index_zero_is_transparent_in_every_mode);
     RUN_TEST(unit_dst_stride_is_passed_through_untouched);
+
+    RUN_TEST(prop_zero_max_draws_an_empty_bar);
+    RUN_TEST(prop_negative_max_draws_an_empty_bar);
+    RUN_TEST(prop_one_current_still_lights_one_column);
+    RUN_TEST(prop_zero_current_draws_an_empty_bar);
+    RUN_TEST(prop_half_full_rounds_the_odd_column_up);
+    RUN_TEST(prop_a_third_rounds_up_to_14);
+    RUN_TEST(prop_current_equal_to_max_fills_the_interior);
+    RUN_TEST(prop_current_above_max_smears_past_the_bar);
+    RUN_TEST(prop_negative_current_draws_an_empty_bar);
+    RUN_TEST(prop_gfx_index_reaches_the_filled_run);
+    RUN_TEST(prop_mode_and_alpha_pass_through);
+    RUN_TEST(prop_dst_and_stride_pass_through);
 
     RUN_TEST(unit_record_shape_matches_the_offsets);
     RUN_TEST(anchor_is_the_tile_times_24_plus_4);
