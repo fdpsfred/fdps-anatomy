@@ -1075,6 +1075,14 @@
       "status": "committed",
       "emitted_against": "0x50",
       "rounds": 0
+    },
+    "00036cd0": {
+      "name": "fdps_chapter_event_set_game_over",
+      "target": "chevt1.c",
+      "body_size": "0x22",
+      "status": "committed",
+      "emitted_against": "0x22",
+      "rounds": 0
     }
   }
 }

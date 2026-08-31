@@ -663,4 +663,26 @@ extern unsigned char *data_fdps_shop_stock_table_ptr;
    1, the chapter the player sees as chapter 2. */
 extern int data_fdps_chapter_current_chapter_id;
 
+/* 00069da0.  How the current battle is to end, and until then that it is not:
+   0 is still running, 1 is defeat and 2 is the chapter cleared.  Ten files
+   write it and the battle loops read it; nothing else in the image touches it.
+
+   It is a flag and not a stop: a handler that decides the battle is over just
+   stores its code here and returns, and the phase loops -- the player phase,
+   the enemy phase and the NPC phase -- each test it against 0 at the top of an
+   iteration and return when it is anything else.  The caller of the battle
+   loop then reads it once, dispatches on 0 / 1 / 2, and stores 0 back before
+   the next chapter starts.  The chapter state reset installs 0 as well.
+
+   Unsigned, and that is behaviour rather than spelling: the dispatch on the
+   value loads it and compares with JC at 00029377 and JBE at 0002937d, which
+   are unsigned branches, so a code the compare treats as huge falls out of the
+   handled range instead of landing on the low side of it.  Every other test in
+   the image is an equality against 0 or 2, so nothing else can see the
+   difference.
+
+   Every store in the image writes a literal 0, 1 or 2; there is no
+   accumulation and no bit in it. */
+extern unsigned int data_fdps_chapter_event_or_battle_end_code;
+
 #endif
