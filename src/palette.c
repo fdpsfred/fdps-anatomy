@@ -6,11 +6,11 @@
  * lookup tables fdps_build_palette_tables fills, and those live in
  * gamedata.h because eighteen other files read them.
  *
- * outp comes from <conio.h> as an ordinary library call, which is what the
- * original has: 00022f40 issues CALL 00042cb8 rather than an OUT instruction.
- * Watcom only turns it into an instruction when __INLINE_FUNCTIONS__ is
- * defined, and the flag that defines it, -oi, is not in this build's set
- * (rebuild_info/build_flags.md).
+ * inp and outp come from <conio.h> as ordinary library calls, which is what
+ * the original has: 00022f40 issues CALL 00042cb8 and 0002f240 issues CALL
+ * 0003d4e4 rather than OUT and IN instructions.  Watcom only turns them into
+ * instructions when __INLINE_FUNCTIONS__ is defined, and the flag that
+ * defines it, -oi, is not in this build's set (rebuild_info/build_flags.md).
  */
 #include <conio.h>
 #include "fdpstype.h"
@@ -25,6 +25,11 @@
 /* A DAC component is six bits, so 63 is the brightest value the hardware
    takes and the value the bias is clamped up against. */
 #define VGA_DAC_MAX_COMPONENT 0x3f
+
+/* VGA input status register 1.  Bit 3 is set while the vertical retrace is in
+   progress, and it is the only bit anyone here looks at. */
+#define VGA_INPUT_STATUS_1 0x3da
+#define VGA_STATUS_VERTICAL_RETRACE 0x08
 
 /* 00022f40.  One entry per iteration, three components per entry, and the
    index register rewritten every time.
@@ -391,4 +396,65 @@ int fdps_palette_find_nearest_color(int target_red, int target_green,
     }
 
     return best_index;
+}
+
+/* 0002f240.  The other DAC upload in this file, and the differences from
+   fdps_set_palette_range above are all deliberate.
+
+   THE SOURCE IS THREE ARRAYS, NOT ONE ARRAY OF RECORDS.  The three loads are
+   MOV EAX,[EBP+0x18] / ADD EAX,[EBP-0x4] / MOV AL,byte ptr [EAX] and the same
+   again off [EBP+0x1c] and [EBP+0x20], so each channel has its own base and
+   each is indexed by the loop counter with a stride of one byte.  Nothing here
+   walks a three-byte record.  fdps_cycle_scene_palette, the only caller, holds
+   its colours as three per-channel ramps and slides a rotating phase offset
+   along them, which is why they arrive split.
+
+   THERE IS NO BIAS AND NO CLAMP.  AND EAX,0xff and then straight to the PUSH:
+   the byte is zero-extended and uploaded whole, with none of the sibling's
+   compare-and-clamp pair between the load and the port write.  A byte above 63
+   is not clamped to 63; it reaches the DAC, which drops its top two bits, so
+   200 shows as 8.  Adding a clamp here to match the sibling would change what
+   such a byte displays (rebuild_info/pitfalls.md).
+
+   THE COUNT IS A COUNT, NOT AN INCLUSIVE LAST ENTRY.  The bound is
+   CMP EAX,[EBP+0x24] / JL, tested before the first upload, so count entries are
+   written and a count of zero or less writes none.  JL is signed: a negative
+   count falls straight through rather than running away as an unsigned bound
+   would.
+
+   THE RETRACE WAIT HAPPENS ONCE, BEFORE THE LOOP, and it is not a frame
+   counter the caller could hoist or drop.  PUSH 0x3da / CALL inp /
+   TEST AL,0x8 / JZ back to the PUSH sits above the loop's initialiser, so the
+   whole run is written inside one blanking interval; per entry it would tear
+   the run across frames, and omitted it would tear the picture.  It is also
+   the only place this function blocks, and it blocks for at most one frame per
+   call: fdps_cycle_scene_palette has nine call sites, but they are the arms of
+   one scene-id dispatch -- each arm calls once and then JMPs to the shared
+   tail at 0002f221, and the caller contains no loop at all -- so one
+   invocation of the caller is one call here and one wait.  The animation's
+   speed is set elsewhere in the caller, by its timer-tick gate and by the
+   arm's own phase modulus (0x14, 0x1c, 0x24, 0x28, 0x2c or 0x3c invocations
+   to a full cycle).
+
+   The index register is rewritten for every entry -- PUSH 0x3c8 inside the
+   loop, not before it -- so the DAC's auto-increment is not relied on, exactly
+   as in the sibling.  The entry number is the loop counter added to
+   first_index, ADD EAX,[EBP+0x14], so the run is ascending and contiguous. */
+void fdps_set_palette_range_on_retrace(int first_index, unsigned char *red,
+                                       unsigned char *green,
+                                       unsigned char *blue, int count)
+{
+    int entry_offset;
+
+    while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+        /* Spin until the retrace begins, so the whole run lands during
+           blanking. */
+    }
+
+    for (entry_offset = 0; entry_offset < count; entry_offset++) {
+        outp(VGA_DAC_WRITE_INDEX, entry_offset + first_index);
+        outp(VGA_DAC_DATA, red[entry_offset]);
+        outp(VGA_DAC_DATA, green[entry_offset]);
+        outp(VGA_DAC_DATA, blue[entry_offset]);
+    }
 }

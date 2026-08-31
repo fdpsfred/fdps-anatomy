@@ -1131,6 +1131,210 @@ static void a_second_build_replaces_both_tables(void)
     build_stage_ready = 0;
 }
 
+/* --- fdps_set_palette_range_on_retrace, 0002f240 ------------------------
+ *
+ * Expected values come from that function's assembly: PUSH 0x3da / CALL inp /
+ * TEST AL,0x8 / JZ once above the loop, MOV EAX,[EBP-0x4] / CMP against
+ * [EBP+0x24] with JL, ADD EAX,[EBP+0x14] into the PUSH 0x3c8, and three
+ * repetitions of MOV EAX,[EBP+0x18] (then 0x1c, then 0x20) / ADD EAX,[EBP-0x4]
+ * / MOV AL,byte ptr [EAX] / AND EAX,0xff / PUSH / PUSH 0x3c9.  Each channel
+ * has its own base and a stride of one byte, and there is no compare-and-clamp
+ * pair anywhere between the load and the port write.
+ *
+ * The retrace wait is not asserted.  Its only observable is the time it takes,
+ * and a test that timed it would be measuring the emulator rather than the
+ * function.  What the tests below do establish is that it terminates: every
+ * one of them would hang instead of failing if it did not.
+ */
+
+/* One byte per entry per channel, plus two past the longest run
+   (STAGE_ENTRIES is 6 against a SCRATCH_COUNT of 4) so a walk that runs long
+   has somewhere to be caught doing it. */
+static unsigned char stage_red[STAGE_ENTRIES];
+static unsigned char stage_green[STAGE_ENTRIES];
+static unsigned char stage_blue[STAGE_ENTRIES];
+
+/* Loads element n of the three channel arrays. */
+static void stage_channels(int n, int red, int green, int blue)
+{
+    stage_red[n] = (unsigned char) red;
+    stage_green[n] = (unsigned char) green;
+    stage_blue[n] = (unsigned char) blue;
+}
+
+/* Fills every element of all three arrays, the ones past the run included, so
+   an over-long walk shows up as a wrong colour rather than as whatever the
+   previous test happened to leave there. */
+static void poison_channels(void)
+{
+    int n;
+
+    for (n = 0; n < STAGE_ENTRIES; n++) {
+        stage_channels(n, 60, 61, 62);
+    }
+}
+
+/* Three separate bases at [EBP+0x18], [EBP+0x1c] and [EBP+0x20], pushed to the
+   data port in that order: element 0 of the red array is the first byte the
+   DAC gets, element 0 of the green array the second, element 0 of the blue
+   array the third. */
+static void on_retrace_takes_each_channel_from_its_own_array(void)
+{
+    int components[3];
+
+    mark_scratch_block();
+    poison_channels();
+    stage_channels(0, 5, 40, 63);
+
+    fdps_set_palette_range_on_retrace(SCRATCH_FIRST, stage_red, stage_green,
+                                      stage_blue, 1);
+
+    read_dac_entry(SCRATCH_FIRST, components);
+    CHECK_EQ(components[0], 5);
+    CHECK_EQ(components[1], 40);
+    CHECK_EQ(components[2], 63);
+}
+
+/* ADD EAX,[EBP-0x4] on each channel base with no scaling: the step is one byte
+   per entry, not the three bytes fdps_set_palette_range walks, and entry n of
+   the run takes element n of every array.  The entries come out ascending. */
+static void on_retrace_steps_each_array_one_byte_per_entry(void)
+{
+    int components[3];
+    int n;
+
+    mark_scratch_block();
+    poison_channels();
+    for (n = 0; n < SCRATCH_COUNT; n++) {
+        stage_channels(n, n, n + 10, n + 20);
+    }
+
+    fdps_set_palette_range_on_retrace(SCRATCH_FIRST, stage_red, stage_green,
+                                      stage_blue, SCRATCH_COUNT);
+
+    for (n = 0; n < SCRATCH_COUNT; n++) {
+        read_dac_entry(SCRATCH_FIRST + n, components);
+        CHECK_EQ(components[0], n);
+        CHECK_EQ(components[1], n + 10);
+        CHECK_EQ(components[2], n + 20);
+    }
+}
+
+/* The entry number is [EBP-0x4] added to [EBP+0x14] while the array index is
+   [EBP-0x4] alone: the run starts at first_index but the arrays are always
+   read from their own element 0.  The entry below the run is untouched. */
+static void on_retrace_offsets_the_entry_but_not_the_array(void)
+{
+    int components[3];
+
+    mark_scratch_block();
+    poison_channels();
+    stage_channels(0, 7, 8, 9);
+    stage_channels(1, 17, 18, 19);
+
+    fdps_set_palette_range_on_retrace(SCRATCH_FIRST + 1, stage_red,
+                                      stage_green, stage_blue, 2);
+
+    read_dac_entry(SCRATCH_FIRST, components);
+    CHECK_EQ(components[0], 1);
+    CHECK_EQ(components[1], 2);
+    CHECK_EQ(components[2], 3);
+    read_dac_entry(SCRATCH_FIRST + 1, components);
+    CHECK_EQ(components[0], 7);
+    CHECK_EQ(components[1], 8);
+    CHECK_EQ(components[2], 9);
+    read_dac_entry(SCRATCH_FIRST + 2, components);
+    CHECK_EQ(components[0], 17);
+    CHECK_EQ(components[1], 18);
+    CHECK_EQ(components[2], 19);
+}
+
+/* CMP EAX,[EBP+0x24] / JL: the fifth argument is a count, so a count of two
+   writes two entries and stops.  fdps_set_palette_range's last argument in the
+   same position is an inclusive end instead, and a count read as one would
+   write one entry too many here. */
+static void on_retrace_uploads_exactly_count_entries(void)
+{
+    int components[3];
+
+    mark_scratch_block();
+    poison_channels();
+    stage_channels(0, 21, 22, 23);
+    stage_channels(1, 31, 32, 33);
+    stage_channels(2, 41, 42, 43);
+
+    fdps_set_palette_range_on_retrace(SCRATCH_FIRST, stage_red, stage_green,
+                                      stage_blue, 2);
+
+    read_dac_entry(SCRATCH_FIRST + 1, components);
+    CHECK_EQ(components[0], 31);
+    CHECK_EQ(components[1], 32);
+    CHECK_EQ(components[2], 33);
+    read_dac_entry(SCRATCH_FIRST + 2, components);
+    CHECK_EQ(components[0], 1);
+    CHECK_EQ(components[1], 2);
+    CHECK_EQ(components[2], 3);
+}
+
+/* AND EAX,0xff straight into the PUSH, with no CMP against 0x3f anywhere: the
+   byte is uploaded whole and the DAC drops its top two bits, so 200 shows as
+   8, 64 as 0 and 70 as 6.  The sibling's clamp would make all three 63. */
+static void on_retrace_does_not_clamp_the_source_byte(void)
+{
+    int components[3];
+
+    mark_scratch_block();
+    poison_channels();
+    stage_channels(0, 200, 64, 70);
+
+    fdps_set_palette_range_on_retrace(SCRATCH_FIRST, stage_red, stage_green,
+                                      stage_blue, 1);
+
+    read_dac_entry(SCRATCH_FIRST, components);
+    CHECK_EQ(components[0], 200 & 0x3f);
+    CHECK_EQ(components[1], 64 & 0x3f);
+    CHECK_EQ(components[2], 70 & 0x3f);
+}
+
+/* The bound is tested before the first upload, so a count of zero writes
+   nothing and the retrace wait is all the call does. */
+static void a_count_of_zero_uploads_nothing(void)
+{
+    int components[3];
+
+    mark_scratch_block();
+    poison_channels();
+    stage_channels(0, 50, 51, 52);
+
+    fdps_set_palette_range_on_retrace(SCRATCH_FIRST, stage_red, stage_green,
+                                      stage_blue, 0);
+
+    read_dac_entry(SCRATCH_FIRST, components);
+    CHECK_EQ(components[0], 1);
+    CHECK_EQ(components[1], 2);
+    CHECK_EQ(components[2], 3);
+}
+
+/* JL and not JB: the count is signed, so a negative one is below zero and the
+   loop does not run.  Taken unsigned it would be a huge bound and the call
+   would walk the whole DAC and then keep going. */
+static void a_negative_count_uploads_nothing(void)
+{
+    int components[3];
+
+    mark_scratch_block();
+    poison_channels();
+    stage_channels(0, 50, 51, 52);
+
+    fdps_set_palette_range_on_retrace(SCRATCH_FIRST, stage_red, stage_green,
+                                      stage_blue, -1);
+
+    read_dac_entry(SCRATCH_FIRST, components);
+    CHECK_EQ(components[0], 1);
+    CHECK_EQ(components[1], 2);
+    CHECK_EQ(components[2], 3);
+}
+
 void run_palette_tests(void)
 {
     RUN_TEST(the_dac_reads_back_what_was_written);
@@ -1195,4 +1399,11 @@ void run_palette_tests(void)
     RUN_TEST(a_cube_cell_is_the_nearest_entry_to_its_quantised_colour);
     RUN_TEST(every_cell_of_the_cube_is_written);
     RUN_TEST(a_second_build_replaces_both_tables);
+    RUN_TEST(on_retrace_takes_each_channel_from_its_own_array);
+    RUN_TEST(on_retrace_steps_each_array_one_byte_per_entry);
+    RUN_TEST(on_retrace_offsets_the_entry_but_not_the_array);
+    RUN_TEST(on_retrace_uploads_exactly_count_entries);
+    RUN_TEST(on_retrace_does_not_clamp_the_source_byte);
+    RUN_TEST(a_count_of_zero_uploads_nothing);
+    RUN_TEST(a_negative_count_uploads_nothing);
 }

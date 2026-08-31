@@ -7521,11 +7521,11 @@ Algorithm:
 Spins on inp(0x3da) -- the VGA Input Status #1 register -- until bit 3, the vertical-retrace-active flag, reads as set; the wait happens once, before any entry is written, so a call made while retrace is already active proceeds immediately. Then for i from 0 while i < count: writes i + first_index to the DAC write-index port 0x3c8 through outp, then writes red[i], green[i] and blue[i] to the DAC data port 0x3c9 in that order. The index port is rewritten for every entry instead of relying on the DAC's own auto-increment. The channel bytes are passed through unchanged: unlike fdps_set_palette_range there is no per-channel bias and no clamp to 0x3f, and the DAC simply ignores the top two bits of each byte. The loop bound is a signed JL, so a count of zero or less writes nothing and the retrace wait is the call's only effect.
 
 Parameters:
-  first_index -- DAC entry the run starts at, 0..255. fdps_cycle_scene_palette passes fixed high indices such as 0xf0 and 0xf6.
+  first_index -- DAC entry the run starts at, 0..255. fdps_cycle_scene_palette passes fixed high indices: 0xf0, 0xf5, 0xf6 and 0xf8.
   red -- pointer to count consecutive red bytes, one per DAC entry.
   green -- pointer to count consecutive green bytes, one per DAC entry.
   blue -- pointer to count consecutive blue bytes, one per DAC entry. The caller aims all three at per-channel ramp arrays it copied onto its own stack, displaced by a rotating phase offset, which is what makes the colours cycle.
-  count -- how many consecutive DAC entries to program; the caller passes 5, 9 and 15.
+  count -- how many consecutive DAC entries to program; the caller passes 5, 7, 9, 10, 11 and 15.
 
 Returns:
   Nothing.

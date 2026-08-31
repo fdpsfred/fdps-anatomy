@@ -159,4 +159,39 @@ extern int fdps_palette_find_nearest_color(int target_red, int target_green,
 extern void fdps_build_palette_tables(struct fdps_palette_entry *palette);
 #pragma aux fdps_build_palette_tables "*" parm caller [];
 
+/* Uploads count consecutive DAC entries starting at first_index, taking each
+   entry's three components from three separate per-channel byte arrays rather
+   than from one array of records: entry first_index + n gets red[n], green[n]
+   and blue[n].  Each array must hold at least count bytes; nothing here
+   bounds-checks them and nothing tests them for null.
+
+   The call first busy-waits for the VGA vertical retrace to begin, once,
+   before any entry is written, so the whole run lands inside one blanking
+   interval and the screen never shows a half-changed palette.  The wait is not
+   repeated per entry.  A call made while the retrace is already in progress
+   proceeds immediately, and a call made outside one blocks for up to a frame:
+   that pause is this function's contribution to the pace of any loop that
+   calls it, and removing it changes the loop's speed as much as it changes its
+   appearance.
+
+   The channel bytes are uploaded exactly as they are found.  Unlike
+   fdps_set_palette_range there is no bias and no clamp: a byte above 63
+   reaches the DAC whole, and the DAC ignores its top two bits, so 200 shows as
+   8 rather than as the 63 a clamp would give.  Callers are expected to hand
+   over values already inside 0..63.
+
+   count of zero or less uploads nothing -- the bound is signed and is tested
+   before the first entry -- and then the retrace wait is the call's only
+   effect.  The DAC's own auto-increment is not relied on; every entry rewrites
+   the index register.
+
+   Reads no global, writes no global, and its only callees are the CRT's inp
+   and outp. */
+extern void fdps_set_palette_range_on_retrace(int first_index,
+                                              unsigned char *red,
+                                              unsigned char *green,
+                                              unsigned char *blue,
+                                              int count);
+#pragma aux fdps_set_palette_range_on_retrace "*" parm caller [];
+
 #endif
