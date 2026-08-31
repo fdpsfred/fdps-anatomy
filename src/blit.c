@@ -1,8 +1,9 @@
-/* blit.c -- rectangle blit primitives.
+/* blit.c -- rectangle blit primitives, plus the rotate-and-scale blit.
  *
  * See blit.h for the destination convention.  Nothing here owns state: every
  * routine works entirely on the surface and the coordinates it is handed.
  */
+#include <math.h>
 #include <string.h>
 #include "blit.h"
 
@@ -676,5 +677,166 @@ void fdps_blit_blend_transparent_rect(unsigned char *fg, int fg_stride,
         bg += bg_stride;
         mask_row += mask_stride;
         dst += dst_stride;
+    }
+}
+
+/* 00031920.  The rotate-and-scale blit, and the only routine in this file with
+   an FPU in it.  The projection is worked out in floating point once per
+   destination row; everything inside the column loop is plain fixed-point
+   integer sampling.
+
+   THE sin AND cos CALLS ARE THE ORDINARY LIBRARY ONES, NOT AN INTRINSIC.
+   0003193e..00031958 is FLD float / SUB ESP,0x8 / FSTP qword ptr [ESP] / CALL /
+   the double coming back in EDX:EAX -- the stack-convention library call --
+   four times over, for sin(tilt), cos(tilt), sin(rotation) and cos(rotation)
+   in that order.  math.h in 10.0a carries an unguarded
+   #pragma intrinsic(log,cos,sin,...), but that pragma only bites once the
+   optimiser is on: under -od wcc386 emits this same call sequence with the
+   pragma in force, measured byte for byte against the original.  Each result is
+   stored down to a FLOAT local (FSTP dword ptr), so every product below is
+   taken against a single-precision sine or cosine and not a double one.
+
+   EVERY DIVIDE IN THE SAMPLING PATH TRUNCATES TOWARD ZERO, WHICH IS NOT A
+   SHIFT.  The SAR 0x1f / SHL / SBB / SAR idiom appears four times -- at
+   00031a28 and 00031a44 for center_y / 4 and center_x / 4, and at 00031b45 and
+   00031b61 for sample_y / 128 and sample_x / 128.  Writing >> 7 for the last
+   two, which is the obvious thing to write in a fixed-point sampler, floors
+   instead, and both offsets are negative for every pixel left of or above the
+   centre: the whole left half and top half of the picture move a source pixel.
+   The tell is visible at the middle itself -- with truncation the seven
+   destination rows whose offset lies between -128 and 128 all read the same
+   source row, and with a shift only four do.  The multiplications by 32 at
+   000319ba and by 32 and 5088 at 00031a73 and 00031a84 are shifts and IMULs in
+   the original and are left as multiplications here, where the two forms agree.
+
+   THE SAMPLE BASE CARRIES AN UNCONDITIONAL + 4 (ADD EAX,0x4 at 00031a57).  The
+   picture is therefore drawn four bytes off its nominal centre: at 1:1 the
+   destination is exactly the source shifted four bytes, so the top-left
+   destination pixel is source byte 4 and the rightmost column of each row reads
+   into the start of the following source row.  It is not a rounding term and
+   there is nothing to correct.
+
+   THE LOOPS ARE 318 COLUMNS AND 198 ROWS, NOT 320 AND 200.  MOV [EBP-0x34],
+   0xffffff9d / CMP ...,0x63 counts rows -99..98 and MOV [EBP-0x38],0xffffff61 /
+   CMP ...,0x9f counts columns -159..158.  The destination cursor is then
+   stepped twice more at 00031b9a and 00031ba0, which is what makes the walk a
+   320-byte stride, and the destination's last two columns and bottom two rows
+   are never written at all.
+
+   THE CLIP TEST IS FOUR SIGNED COMPARES AND ITS FAILING SIDE COMES FIRST.
+   00031b1e JL, 00031b26 JLE, 00031b30 JGE and 00031b3a JLE are all signed, and
+   the branch they guard puts MOV dword ptr [EBP-0x40],0x0 at 00031b3c -- ahead
+   of the sampling block at 00031b45 -- which is the layout of an || chain whose
+   body is the transparent case.  Both bounds are inclusive: a sample exactly on
+   the window's far edge is read, not keyed out.
+
+   The sample base is recomputed on every row (00031a28..00031a5a) although
+   nothing in it varies; it is left inside the loop because that is where the
+   original computes it.
+
+   Neither surface is bounds-checked and neither pointer is advanced by a
+   stride: the source is addressed at a fixed 0x140 pitch and the destination is
+   walked byte by byte. */
+void fdps_blit_rotated_scaled(unsigned char *dst, unsigned char *src,
+                              int camera_height, float tilt, int center_x,
+                              int center_y, float rotation)
+{
+    /* Declared in the order the original's frame is laid out, as everywhere
+       else in this file: [EBP-4] the sample base down to [EBP-0x40] the pixel,
+       then the four float locals at [EBP-0x44]..[EBP-0x50].  Codegen, not
+       behaviour. */
+    unsigned char *sample_base;
+    int clip_y_min;
+    int clip_y_max;
+    int clip_x_min;
+    int clip_x_max;
+    int sample_y;
+    int column_step_y;
+    int row_origin_x;
+    int row_source_y;
+    int projection_distance;
+    int column_step_x;
+    int sample_x;
+    int row;
+    int column;
+    int row_camera_height;
+    int pixel;
+    float cos_rotation;
+    float sin_rotation;
+    float sin_tilt;
+    float cos_tilt;
+
+    /* The first store is dead in the original too: MOV dword ptr [EBP-0x28],
+       0x190 at 0003192c is overwritten three instructions later by
+       MOV EAX,0x7d0 / SUB EAX,camera_height / MOV [EBP-0x28],EAX.  400 never
+       reaches any of the arithmetic below; it is kept because it is what the
+       original's frame does and it costs nothing to keep. */
+    projection_distance = 400;
+    projection_distance = 2000 - camera_height;
+
+    sin_tilt = (float) sin(tilt);
+    cos_tilt = (float) cos(tilt);
+    sin_rotation = (float) sin(rotation);
+    cos_rotation = (float) cos(rotation);
+
+    /* The reachable source area as offsets from the centre, in 1/128 pixels:
+       center_x and center_y are quarter pixels, 0x4f8 is 318 * 4 and 0x318 is
+       198 * 4, and the * 32 turns a quarter pixel into 1/128 pixels. */
+    clip_x_max = (0x4f8 - center_x) * 32;
+    clip_x_min = -center_x * 32;
+    clip_y_max = (0x318 - center_y) * 32;
+    clip_y_min = -center_y * 32;
+
+    for (row = -99; row < 99; row++) {
+        /* The perspective divide.  projection_distance + camera_height is 2000
+           by construction and the original really does add the two back
+           together (MOV EAX,[EBP-0x28] / ADD EAX,[EBP+0x1c] at 00031a0c)
+           rather than using the constant. */
+        row_source_y = (int) (row * (projection_distance + camera_height)
+                              / (projection_distance * cos_tilt
+                                 + row * sin_tilt));
+
+        sample_base = src + (center_y / 4) * VGA_SCREEN_PITCH + center_x / 4 + 4;
+
+        /* The camera height this row projects from.  With tilt 0 the sine is
+           zero and every row shares the argument's own height, which is what
+           makes an untilted picture a uniform scale. */
+        row_camera_height = (int) (camera_height - row_source_y * sin_tilt);
+
+        column_step_x = row_camera_height * 32 / projection_distance + 32;
+        row_origin_x = -5088 - row_camera_height * 5088 / projection_distance;
+
+        /* Quarter pixels into 1/128 pixels, so the row's y offset is in the
+           same units as row_origin_x before the pair is rotated. */
+        row_source_y *= 32;
+
+        sample_x = (int) (row_origin_x * cos_rotation
+                          + row_source_y * sin_rotation);
+        sample_y = (int) (-row_origin_x * sin_rotation
+                          + row_source_y * cos_rotation);
+
+        /* This pair must stay in this order: the y delta is taken from the
+           unrotated step and the next line then overwrites that step with the
+           x delta, in the one slot [EBP-0x2c] the original keeps them in. */
+        column_step_y = (int) (-column_step_x * sin_rotation);
+        column_step_x = (int) (column_step_x * cos_rotation);
+
+        for (column = -159; column < 159; column++) {
+            if (sample_x < clip_x_min || sample_x > clip_x_max
+                || sample_y < clip_y_min || sample_y > clip_y_max) {
+                pixel = 0;
+            } else {
+                pixel = *(sample_base + (sample_y / 128) * VGA_SCREEN_PITCH
+                          + sample_x / 128);
+            }
+
+            *dst = (unsigned char) pixel;
+            sample_x += column_step_x;
+            sample_y += column_step_y;
+            dst++;
+        }
+
+        dst++;
+        dst++;
     }
 }

@@ -311,4 +311,69 @@ extern void fdps_blit_blend_transparent_rect(unsigned char *fg, int fg_stride,
                                              int alpha);
 #pragma aux fdps_blit_blend_transparent_rect "*" parm caller [];
 
+/* Redraws one 320x200 8bpp image into another, scaled about a chosen point of
+   the source and, when either angle is non-zero, rotated and tilted into
+   perspective.  It is the zoom the screen transition runs through:
+   fdps_transition_zoom walks a nine-entry height ramp and calls this once per
+   step with the mode 13h screen as the destination and its own saved copy of
+   the frame as the source, so every step redraws the whole picture from the
+   untouched original rather than from the previous step's output.
+
+   THE TWO SURFACES ARE 320-BYTE-PITCH PAGES AND NEITHER IS AN ARGUMENT'S
+   WORTH OF CHOICE.  There is no stride argument: the source is addressed at a
+   fixed 0x140 pitch and the destination is walked byte by byte, 318 bytes per
+   row and then two more, which comes to the same 0x140.  Handing it a page of
+   any other pitch tears the picture.
+
+   ONLY 318 x 198 OF THE DESTINATION IS WRITTEN.  The loops cover rows -99..98
+   and columns -159..158, so the last two columns of every row and the bottom
+   two rows of the page keep whatever was there before.  The caller relies on
+   it in the other direction as well: at the ramp's 1:1 step it does not call
+   this routine at all but memmoves the whole 0xfa00 bytes instead, which is
+   the only step that fills the screen edge to edge.
+
+   camera_height IS AN INVERSE SCALE, 0..1999.  The view covers
+   500 / (2000 - camera_height) source pixels per destination pixel: 0
+   magnifies four times, 1500 is 1:1 and anything larger shrinks the picture
+   and leaves palette index 0 around it.  2000 or above divides by zero or
+   turns the projection inside out; the caller's table stays inside the range.
+
+   center_x AND center_y ARE QUARTER PIXELS, NOT PIXELS.  They name the source
+   point that lands on the middle of the destination, and their usable ranges
+   are 0..0x4f8 and 0..0x318 -- 318 * 4 and 198 * 4.  Passing plain pixel
+   coordinates zooms about a point a quarter of the way in.
+
+   THE PICTURE IS DRAWN FOUR BYTES OFF ITS NOMINAL CENTRE.  The sample base
+   carries an unconditional + 4, so at 1:1 the destination is the source
+   shifted four bytes: the top-left destination pixel is source byte 4, and the
+   rightmost column of each row reads the start of the next source row.  It is
+   not a rounding term and it is not compensated for anywhere -- a rewrite that
+   drops it moves the whole picture four pixels against the memmove the caller
+   uses for the 1:1 step, and the seam shows as the ramp crosses it.
+
+   EVERY DIVISION IN THE SAMPLING PATH TRUNCATES TOWARD ZERO.  The source
+   offsets are 1/128-pixel fixed point and are negative for everything left of
+   or above the centre, so writing the obvious offset >> 7 floors instead and
+   shifts the whole left and top of the picture by a source pixel.  The
+   difference is plainest at the middle: truncation makes the seven destination
+   rows nearest the centre read one source row, a shift makes it four.
+
+   A SAMPLE OUTSIDE THE SOURCE IS PALETTE INDEX 0, AND BOTH BOUNDS ARE
+   INCLUSIVE.  There is no clamp and no wrap: a shrunk picture is surrounded by
+   index 0 and a centre near an edge simply loses that side.  The destination
+   is written unconditionally, so nothing underneath survives -- this is not a
+   keyed blit.
+
+   tilt AND rotation ARE RADIANS AND GO STRAIGHT TO THE LIBRARY sin AND cos,
+   whose results are kept as floats.  tilt makes the scale and the row origin
+   vary from row to row; rotation turns the sampling grid about the centre.
+   The only caller passes 0.0 for both, so neither path runs in the shipped
+   game, but both are reachable and neither is a no-op for a non-zero angle. */
+extern void fdps_blit_rotated_scaled(unsigned char *dst, unsigned char *src,
+                                     int camera_height, float tilt,
+                                     int center_x, int center_y,
+                                     float rotation);
+#pragma aux fdps_blit_rotated_scaled "*" parm caller [];
+
+
 #endif

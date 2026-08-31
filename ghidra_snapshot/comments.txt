@@ -8411,18 +8411,18 @@ pixels. Then for each destination row `row` from -99 to 98:
 
 Parameters:
   dst -- destination 8bpp surface walked at a 320-byte stride; only the first 318 bytes of each of
-    the first 198 rows are written. FUN_00031780 passes the mode-13h screen at 0xa0000.
-  src -- source 8bpp image, 320 bytes per row, of which 318x198 is reachable. FUN_00031780 passes
+    the first 198 rows are written. fdps_transition_zoom passes the mode-13h screen at 0xa0000.
+  src -- source 8bpp image, 320 bytes per row, of which 318x198 is reachable. fdps_transition_zoom passes
     the 0xfa00-byte screen image it also memmoves to 0xa0000 at full size.
   camera_height -- projection height, 0..1999. The view covers 500/(2000-camera_height) source
     pixels per destination pixel, so 0 magnifies four times, 1500 is 1:1, and larger values shrink.
-    FUN_00031780 reads it out of the nine-entry ramp table at 0x00031040.
+    fdps_transition_zoom reads it out of the nine-entry ramp table at 0x00031040.
   tilt -- perspective tilt angle in radians, handed to sin and cos; it is what makes the source step
-    and the row origin vary from row to row. FUN_00031780 passes 0.0.
+    and the row origin vary from row to row. fdps_transition_zoom passes 0.0.
   center_x -- the source x that lands on the middle destination column, in quarter pixels, 0..0x4f8.
   center_y -- the source y that lands on the middle destination row, in quarter pixels, 0..0x318.
   rotation -- rotation angle in radians about (center_x, center_y), handed to sin and cos.
-    FUN_00031780 passes 0.0.
+    fdps_transition_zoom passes 0.0.
 
 Returns:
   Nothing; the result is the destination buffer.

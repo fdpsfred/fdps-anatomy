@@ -2626,6 +2626,320 @@ static void the_keyed_background_may_be_the_destination_in_place(void)
     CHECK_EQ(blend_bg_byte(1), blend_pair_byte(2, 5));
 }
 
+
+/* ------------------------------------------------------------------ *
+ * fdps_blit_rotated_scaled @ 00031920
+ *
+ * Expected values come from the assembly: the four library sin/cos calls
+ * at 00031947..0003199e whose doubles are stored down to float locals, the
+ * MOV EAX,0x7d0 / SUB EAX,camera_height at 00031933 that sets the
+ * projection distance, the SHL EAX,0x5 pairs at 000319ba..000319e1 that
+ * build the clip window, the FILD / FMUL / FADDP / FDIVRP / CALL __CHP
+ * sequence at 000319fe..00031a25 for the row's source y, the
+ * SAR 0x1f / SHL / SBB / SAR division idioms at 00031a28, 00031a44,
+ * 00031b45 and 00031b61, the unconditional ADD EAX,0x4 at 00031a57, the
+ * IDIVs at 00031a7b and 00031a90 for the column step and the row origin,
+ * the four signed compares at 00031b1e, 00031b26, 00031b30 and 00031b3a,
+ * and the three INC dword ptr [EBP+0x14] at 00031b92, 00031b9d and
+ * 00031ba3 that make the destination walk a 320-byte stride.
+ *
+ * WHY THERE IS NO CALL WHOSE RETURN VALUE AN ASSERTION DEPENDS ON.  The
+ * routine's only calls are sin, cos and __CHP.  Every case below fixes
+ * both angles at 0 except the last two, and sin(0) and cos(0) are exactly
+ * 0 and 1, so those cases are pure integer arithmetic with no rounding to
+ * argue about.  The two angle cases are placed where the truncation is far
+ * from an integer boundary -- the smallest margin any of them leaves is
+ * 0.2 of a unit, against a single-precision sine whose error is nearer
+ * 1e-7 -- so a library sine that differs in its last bits does not move
+ * them.
+ *
+ * WHY THE SOURCE IS 1 + offset % 251.  It is never 0, so a pixel the clip
+ * test rejected is always distinguishable from a pixel that was sampled,
+ * and any two source offsets less than 251 apart hold different bytes, so
+ * an assertion naming a source offset really does pin that offset and not
+ * merely "something arrived".  251 is coprime with the 320 pitch, so two
+ * offsets a whole number of rows apart differ as well.
+ *
+ * The guard is 0xff, which is neither 0 nor any byte the source pattern
+ * produces, so an untouched destination byte is distinguishable from both
+ * a sampled pixel and a keyed-out one.
+ * ------------------------------------------------------------------ */
+
+#define ZOOM_PITCH 320
+#define ZOOM_ROWS 200
+#define ZOOM_BYTES (ZOOM_PITCH * ZOOM_ROWS)
+
+#define ZOOM_GUARD 0xff
+
+/* The two extents the routine actually covers, from the loop bounds at
+   000319e4 and 00031afb: rows -99..98 and columns -159..158. */
+#define ZOOM_DRAWN_ROWS 198
+#define ZOOM_DRAWN_COLS 318
+
+/* asin(0.6), so the sine of it is 0.6 and the cosine 0.8 to well inside
+   the margins the cases below leave.  Passed as a double literal and
+   narrowed to float by the prototype, exactly as the caller's own 0.0 is. */
+#define ZOOM_ANGLE 0.6435011087932844
+
+static unsigned char zoom_src[ZOOM_BYTES];
+static unsigned char zoom_dst[ZOOM_BYTES];
+
+static void prepare_zoom(void)
+{
+    int i;
+
+    memset(zoom_dst, ZOOM_GUARD, (size_t) ZOOM_BYTES);
+
+    for (i = 0; i < ZOOM_BYTES; i++) {
+        zoom_src[i] = (unsigned char) (1 + i % 251);
+    }
+}
+
+static int zoom_src_byte(int offset)
+{
+    return (int) zoom_src[offset];
+}
+
+static int zoom_dst_byte(int row, int col)
+{
+    return (int) zoom_dst[row * ZOOM_PITCH + col];
+}
+
+/* camera_height 1500 makes the projection distance 500 and the view
+   500/500 source pixels per destination pixel, so the whole frame is a
+   straight copy -- and the copy is offset by the four bytes the sample
+   base adds unconditionally.  Every one of the 198 x 318 bytes the routine
+   writes is compared, not a sample of them, because at 1:1 the expected
+   value of every one of them is known exactly.
+
+   The two spot checks name what the offset costs at the edges: the very
+   first destination byte is source byte 4 rather than source byte 0, and
+   the last column of destination row 0 reads source byte 321, which is
+   column 1 of the NEXT source row. */
+static void at_one_to_one_the_frame_is_the_source_shifted_four_bytes(void)
+{
+    int row;
+    int col;
+    int wrong;
+
+    prepare_zoom();
+    fdps_blit_rotated_scaled(zoom_dst, zoom_src, 1500, 0.0, 636, 396, 0.0);
+
+    wrong = 0;
+    for (row = 0; row < ZOOM_DRAWN_ROWS; row++) {
+        for (col = 0; col < ZOOM_DRAWN_COLS; col++) {
+            if (zoom_dst[row * ZOOM_PITCH + col]
+                != zoom_src[row * ZOOM_PITCH + col + 4]) {
+                wrong++;
+            }
+        }
+    }
+    CHECK_EQ(wrong, 0);
+
+    CHECK_EQ(zoom_dst_byte(0, 0), zoom_src_byte(4));
+    CHECK_EQ(zoom_dst_byte(0, 317), zoom_src_byte(321));
+    CHECK_EQ(zoom_dst_byte(1, 0), zoom_src_byte(324));
+    CHECK_EQ(zoom_dst_byte(197, 0), zoom_src_byte(63044));
+}
+
+/* The column loop stops at 318 and the row loop at 198, and the two extra
+   INCs after the columns are what turn that into a 320-byte stride.  So
+   the last two columns of every row and the whole of the bottom two rows
+   keep their guard byte -- which is also what says the stride is 320 and
+   not 318: a routine that walked contiguously would have written into
+   both regions. */
+static void the_last_two_columns_and_bottom_two_rows_are_never_written(void)
+{
+    int row;
+    int col;
+    int touched;
+
+    prepare_zoom();
+    fdps_blit_rotated_scaled(zoom_dst, zoom_src, 1500, 0.0, 636, 396, 0.0);
+
+    touched = 0;
+    for (row = 0; row < ZOOM_DRAWN_ROWS; row++) {
+        if (zoom_dst[row * ZOOM_PITCH + 318] != ZOOM_GUARD) {
+            touched++;
+        }
+        if (zoom_dst[row * ZOOM_PITCH + 319] != ZOOM_GUARD) {
+            touched++;
+        }
+    }
+    for (col = 0; col < ZOOM_PITCH; col++) {
+        if (zoom_dst[198 * ZOOM_PITCH + col] != ZOOM_GUARD) {
+            touched++;
+        }
+        if (zoom_dst[199 * ZOOM_PITCH + col] != ZOOM_GUARD) {
+            touched++;
+        }
+    }
+    CHECK_EQ(touched, 0);
+
+    CHECK_EQ(zoom_dst_byte(0, 318), ZOOM_GUARD);
+    CHECK_EQ(zoom_dst_byte(0, 319), ZOOM_GUARD);
+    CHECK_EQ(zoom_dst_byte(198, 0), ZOOM_GUARD);
+    CHECK_EQ(zoom_dst_byte(199, 319), ZOOM_GUARD);
+}
+
+/* camera_height 0 makes the projection distance 2000 and the column step
+   32, a quarter of a source pixel per destination pixel: four times
+   magnification.  With the centre at the middle of the source
+   (636, 396 quarter pixels = source pixel 159, 99) the sample base is
+   31843 and destination row 99 column 159 reads it.
+
+   THE BAND ROUND THE CENTRE IS SEVEN PIXELS WIDE, NOT FOUR, AND THAT IS
+   THE WHOLE POINT.  The row's offset is 32 * row and the column's 32 * c,
+   both divided by 128 truncating toward zero, so offsets -96, -64, -32, 0,
+   32, 64 and 96 all give 0.  Under the >> 7 a fixed-point sampler would
+   naturally be written with, the three negative ones would give -1 and the
+   band would be four wide with the whole left and top of the picture moved
+   a source pixel: destination row 98 would read source offset 31523
+   instead of 31843, which is exactly what the fifth assertion here
+   forbids. */
+static void camera_height_zero_magnifies_four_times_truncating_toward_zero(void)
+{
+    prepare_zoom();
+    fdps_blit_rotated_scaled(zoom_dst, zoom_src, 0, 0.0, 636, 396, 0.0);
+
+    CHECK_EQ(zoom_dst_byte(96, 159), zoom_src_byte(31843));
+    CHECK_EQ(zoom_dst_byte(98, 159), zoom_src_byte(31843));
+    CHECK_EQ(zoom_dst_byte(99, 159), zoom_src_byte(31843));
+    CHECK_EQ(zoom_dst_byte(102, 159), zoom_src_byte(31843));
+    CHECK_EQ(zoom_dst_byte(95, 159), zoom_src_byte(31523));
+    CHECK_EQ(zoom_dst_byte(103, 159), zoom_src_byte(32163));
+
+    CHECK_EQ(zoom_dst_byte(99, 156), zoom_src_byte(31843));
+    CHECK_EQ(zoom_dst_byte(99, 162), zoom_src_byte(31843));
+    CHECK_EQ(zoom_dst_byte(99, 155), zoom_src_byte(31842));
+    CHECK_EQ(zoom_dst_byte(99, 163), zoom_src_byte(31844));
+}
+
+/* camera_height 1900 makes the projection distance 100, the column step
+   640 and the row's own offset 640 per destination row: five source pixels
+   per destination pixel, the shrinking half of the ramp.  Five columns on
+   is source offset 31848 and five rows on is 33443.
+
+   The picture no longer fills the frame, and what surrounds it is palette
+   index 0 rather than a clamped edge pixel.  The x window is
+   +/- 636 * 32 = 20352, so column offset 640 * 31 = 19840 is still inside
+   it and 640 * 32 = 20480 is not; the y window is +/- 396 * 32 = 12672, so
+   row offset 640 * 19 = 12160 is inside and 640 * 20 = 12800 is not.  The
+   four pairs below sit on both sides of both edges. */
+static void a_large_camera_height_shrinks_and_keys_the_surround_to_zero(void)
+{
+    prepare_zoom();
+    fdps_blit_rotated_scaled(zoom_dst, zoom_src, 1900, 0.0, 636, 396, 0.0);
+
+    CHECK_EQ(zoom_dst_byte(99, 159), zoom_src_byte(31843));
+    CHECK_EQ(zoom_dst_byte(99, 160), zoom_src_byte(31848));
+    CHECK_EQ(zoom_dst_byte(100, 159), zoom_src_byte(33443));
+
+    CHECK_EQ(zoom_dst_byte(99, 128), zoom_src_byte(31688));
+    CHECK_EQ(zoom_dst_byte(99, 127), 0);
+    CHECK_EQ(zoom_dst_byte(99, 190), zoom_src_byte(31998));
+    CHECK_EQ(zoom_dst_byte(99, 191), 0);
+    CHECK_EQ(zoom_dst_byte(118, 159), zoom_src_byte(62243));
+    CHECK_EQ(zoom_dst_byte(119, 159), 0);
+}
+
+/* A centre of (0, 0) puts both near bounds at 0, so at 1:1 every offset
+   left of or above the middle of the destination is below the window and
+   comes out index 0 while the middle itself, offset 0, is inside it: the
+   test is >= and not >.  The sample base is 0 + 0 + 4, so the first
+   surviving pixel is source byte 4.
+
+   Nothing is clamped and nothing wraps -- the rejected half is index 0
+   rather than a repeat of the source's first row or column. */
+static void a_sample_below_the_clip_window_is_palette_index_zero(void)
+{
+    prepare_zoom();
+    fdps_blit_rotated_scaled(zoom_dst, zoom_src, 1500, 0.0, 0, 0, 0.0);
+
+    CHECK_EQ(zoom_dst_byte(0, 0), 0);
+    CHECK_EQ(zoom_dst_byte(98, 159), 0);
+    CHECK_EQ(zoom_dst_byte(99, 158), 0);
+    CHECK_EQ(zoom_dst_byte(99, 159), zoom_src_byte(4));
+    CHECK_EQ(zoom_dst_byte(99, 160), zoom_src_byte(5));
+    CHECK_EQ(zoom_dst_byte(100, 159), zoom_src_byte(324));
+}
+
+/* The mirror of the case above, and the one that pins the far bound as
+   inclusive.  A centre of (0x4f8, 0x318) puts both far bounds at 0, so the
+   middle of the destination -- offset 0 on both axes -- is still sampled
+   (JLE, not JL) while one step past it is keyed out.  The sample base is
+   198 * 320 + 318 + 4 = 63682, the last byte the routine can reach. */
+static void the_clip_window_includes_its_far_edge(void)
+{
+    prepare_zoom();
+    fdps_blit_rotated_scaled(zoom_dst, zoom_src, 1500, 0.0, 0x4f8, 0x318, 0.0);
+
+    CHECK_EQ(zoom_dst_byte(99, 159), zoom_src_byte(63682));
+    CHECK_EQ(zoom_dst_byte(99, 158), zoom_src_byte(63681));
+    CHECK_EQ(zoom_dst_byte(98, 159), zoom_src_byte(63362));
+    CHECK_EQ(zoom_dst_byte(99, 160), 0);
+    CHECK_EQ(zoom_dst_byte(100, 159), 0);
+}
+
+/* rotation goes to sin and cos and both results are used four times over:
+   the row origin is turned into (x0*cos, -x0*sin) and the column step into
+   (step*cos, -step*sin), each truncated to an int BEFORE the columns
+   accumulate it.  At 1:1 and this angle the row origin -20352 becomes
+   sample_x -16281 and sample_y 12211, and the step 128 becomes dx 102 and
+   dy -76; the margins there are 0.6, 0.2, 0.4 and 0.2 of a unit, far wider
+   than a single-precision sine can move them.
+
+   Column 100 and column 317 are named as well as column 0 because they
+   only come out right if the two deltas are accumulated as the truncated
+   integers 102 and -76.  Recomputing each column's position in floating
+   point instead -- the obvious tidy-up -- drifts by 0.4 of a unit per
+   column and lands on a different source pixel long before column 317. */
+static void rotation_turns_the_row_origin_and_the_column_step(void)
+{
+    prepare_zoom();
+    fdps_blit_rotated_scaled(zoom_dst, zoom_src, 1500, 0.0, 636, 396,
+                             ZOOM_ANGLE);
+
+    CHECK_EQ(zoom_dst_byte(99, 0), zoom_src_byte(62116));
+    CHECK_EQ(zoom_dst_byte(99, 100), zoom_src_byte(43316));
+    CHECK_EQ(zoom_dst_byte(99, 317), zoom_src_byte(2528));
+}
+
+/* tilt is what makes the projection vary from row to row: it enters the
+   perspective divide as projection_distance * cos(tilt) + row * sin(tilt)
+   and again as camera_height - row_source_y * sin(tilt), and the column
+   step and row origin are then derived from that per-row height rather
+   than from the argument.
+
+   Destination row 99 is row 0, whose source y is 0, so the tilt cancels
+   out of both terms and that row is identical to the untilted case: this
+   is the assertion that says the tilt is applied through the row and not
+   as a flat offset.
+
+   Destination row 109 is row 10.  The divide gives 20000 / 406.0 = 49
+   (margin 0.26), the per-row height 1500 - 49*0.6 = 1470 (margin 0.6), the
+   column step 1470*32/500 + 32 = 126 and the row origin
+   -5088 - 1470*5088/500 = -20046 -- against 128 and -20352 with no tilt,
+   so an implementation that ignored tilt would land on source offset 34884
+   here rather than 35527.  Column 40 pins the step at 126 rather than 128.
+
+   Destination row 89 is row -10, where the tilt widens the row past the
+   clip window: its row origin is -20657 against a near bound of -20352, so
+   its first column is keyed out.  Without tilt that column sits exactly ON
+   the bound and is sampled, so the zero is a statement about the tilt and
+   not only about the clip. */
+static void tilt_varies_the_scale_and_the_origin_from_row_to_row(void)
+{
+    prepare_zoom();
+    fdps_blit_rotated_scaled(zoom_dst, zoom_src, 1500, ZOOM_ANGLE, 636, 396,
+                             0.0);
+
+    CHECK_EQ(zoom_dst_byte(99, 159), zoom_src_byte(31843));
+    CHECK_EQ(zoom_dst_byte(109, 0), zoom_src_byte(35527));
+    CHECK_EQ(zoom_dst_byte(109, 40), zoom_src_byte(35566));
+    CHECK_EQ(zoom_dst_byte(89, 0), 0);
+}
+
 void run_blit_tests(void)
 {
     RUN_TEST(pitch_four_paints_a_three_by_three_square);
@@ -2723,4 +3037,13 @@ void run_blit_tests(void)
     RUN_TEST(the_keyed_extents_are_signed_counts);
     RUN_TEST(the_keyed_alpha_is_a_signed_value);
     RUN_TEST(the_keyed_background_may_be_the_destination_in_place);
+
+    RUN_TEST(at_one_to_one_the_frame_is_the_source_shifted_four_bytes);
+    RUN_TEST(the_last_two_columns_and_bottom_two_rows_are_never_written);
+    RUN_TEST(camera_height_zero_magnifies_four_times_truncating_toward_zero);
+    RUN_TEST(a_large_camera_height_shrinks_and_keys_the_surround_to_zero);
+    RUN_TEST(a_sample_below_the_clip_window_is_palette_index_zero);
+    RUN_TEST(the_clip_window_includes_its_far_edge);
+    RUN_TEST(rotation_turns_the_row_origin_and_the_column_step);
+    RUN_TEST(tilt_varies_the_scale_and_the_origin_from_row_to_row);
 }
