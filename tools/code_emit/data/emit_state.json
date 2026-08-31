@@ -803,6 +803,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x9d"
+    },
+    "00016e80": {
+      "name": "fdps_draw_status_window_anim_frame",
+      "target": "statwin.c",
+      "body_size": "0x23c",
+      "status": "committed",
+      "emitted_against": "0x23c",
+      "rounds": 0
     }
   }
 }
