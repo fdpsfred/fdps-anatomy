@@ -24,6 +24,13 @@
  * effect through data_fdps_map_unit_array_ptr -- pointing that global at a
  * local block is the only way to see the stores.  What the global itself holds
  * is ticket 23's and is not asserted.
+ *
+ * The chapter 5 handler at 000370e0 is the same shape with one range instead of
+ * four and a one-shot latch in front of it, and is covered the same way: its
+ * two bounds, the inclusive compare between them and the 0xf0 mask are literals
+ * in its instruction stream, and the latch is element 0x10 of the cell-event
+ * flag array, which the cases below write before every call because it is a
+ * ticket 23 symbol whose starting value nothing here may assume.
  */
 #include <stddef.h>
 #include "testharn.h"
@@ -276,6 +283,201 @@ static void advance_run_twice_changes_nothing_more(void)
     CHECK_EQ(advance_units[0x0a].ai_behavior, 0xc2);
 }
 
+/* ---- fdps_chapter_05_event_enemies_advance, 000370e0 -------------------- */
+
+/* The single inclusive range the one inline loop covers, read off the
+   constants at 00037103 (6) and 0003710a (0x22) with the signed JLE at
+   00037136. */
+#define CH05_FIRST_INDEX 6
+#define CH05_LAST_INDEX  0x22
+
+/* Three records past the last index the handler writes, so an off-by-one at
+   the top end of the range has somewhere visible to land. */
+#define CH05_STAGE_UNITS 0x26
+
+/* Element 0x10 of the cell-event flag array, the slot the CMP and MOV at
+   000370f3 and 000370fc name as byte ptr [0x000640e8]. */
+#define CH05_LATCH_SLOT 0x10
+
+static struct fdps_unit_record ch05_units[CH05_STAGE_UNITS];
+
+/* Give every record the same AI byte, point the array global at the block and
+   put the latch in the state this case wants.  The staged AI value carries a
+   high nibble as well as a behaviour code, because the whole point of the
+   merge is that only one of the two moves.  What the flag array holds outside
+   the latch slot is ticket 23's and is not asserted anywhere below. */
+static void stage_ch05_units(int ai_behavior, int latch)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) ch05_units;
+    for (i = 0; i < (int) sizeof(ch05_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < CH05_STAGE_UNITS; i++) {
+        ch05_units[i].ai_behavior = (unsigned char) ai_behavior;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch05_units;
+    data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT] =
+        (unsigned char) latch;
+}
+
+/* Exactly indices 6..0x22 are rewritten and every record either side of the
+   range is left as it was.  The staged 0x52 is behaviour code 2 -- hold
+   position, which is what map04.dat deploys these units in -- under a high
+   nibble of 0x50; the range comes out 0x50 because the mode ORed in is 0, and
+   the rest keep 0x52.  Indices 0..5 are the five party slots and the guest
+   hero, which the range deliberately starts above, and 0x23..0x25 are past the
+   last deployed unit: both ends have to be untouched, and 0x22 itself has to
+   be written, which is what makes the JLE inclusive rather than a bound one
+   short. */
+static void ch05_advance_clears_exactly_the_range(void)
+{
+    int i;
+
+    stage_ch05_units(0x52, 0);
+    fdps_chapter_05_event_enemies_advance(0);
+
+    for (i = 0; i < CH05_STAGE_UNITS; i++) {
+        if (i >= CH05_FIRST_INDEX && i <= CH05_LAST_INDEX) {
+            CHECK_EQ(ch05_units[i].ai_behavior, 0x50);
+        } else {
+            CHECK_EQ(ch05_units[i].ai_behavior, 0x52);
+        }
+    }
+}
+
+/* The high nibble is carried across untouched by the AND 0xf0 at 00037153 and
+   the low nibble ends at 0 whatever it held.  0x40 and 0x80 are the two AI
+   flags read elsewhere, so a merge that assigned the mode whole -- or that
+   masked with anything wider -- would drop them.  Expected values are the
+   staged byte ANDed with 0xf0. */
+static void ch05_advance_keeps_the_high_nibble(void)
+{
+    stage_ch05_units(0, 0);
+    ch05_units[6].ai_behavior = 0xc2;
+    ch05_units[7].ai_behavior = 0x02;
+    ch05_units[0x11].ai_behavior = 0xff;
+    ch05_units[0x20].ai_behavior = 0x40;
+    ch05_units[0x22].ai_behavior = 0x8b;
+
+    fdps_chapter_05_event_enemies_advance(0);
+
+    CHECK_EQ(ch05_units[6].ai_behavior, 0xc0);
+    CHECK_EQ(ch05_units[7].ai_behavior, 0x00);
+    CHECK_EQ(ch05_units[0x11].ai_behavior, 0xf0);
+    CHECK_EQ(ch05_units[0x20].ai_behavior, 0x40);
+    CHECK_EQ(ch05_units[0x22].ai_behavior, 0x80);
+}
+
+/* The latch is raised by the run, and the run is what raises it: the store at
+   000370fc is inside the guarded body, so a handler that returned early leaves
+   the slot alone.  Nothing else in the array moves -- the store names one byte
+   -- so the neighbouring cell-event flags a map cell would set are asserted
+   unchanged. */
+static void ch05_advance_raises_the_latch(void)
+{
+    stage_ch05_units(0x52, 0);
+    data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT - 1] = 0;
+    data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT + 1] = 0;
+
+    fdps_chapter_05_event_enemies_advance(0);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT - 1], 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT + 1], 0);
+}
+
+/* Once the latch is up the handler does nothing at all, which is what makes it
+   one-shot: the trigger tile can be walked over again on a later turn, and the
+   enemies that have since been put back into another behaviour mode by their
+   own AI must not be pushed to mode 0 a second time.  The units are restaged
+   to 0x52 between the two calls so a second run would be visible. */
+static void ch05_advance_runs_once_per_chapter(void)
+{
+    stage_ch05_units(0x52, 0);
+    fdps_chapter_05_event_enemies_advance(0);
+    CHECK_EQ(ch05_units[6].ai_behavior, 0x50);
+
+    stage_ch05_units(0x52, 1);
+    fdps_chapter_05_event_enemies_advance(0);
+    CHECK_EQ(ch05_units[6].ai_behavior, 0x52);
+    CHECK_EQ(ch05_units[0x22].ai_behavior, 0x52);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT], 1);
+}
+
+/* The guard compares against 0, not against 1, so any non-zero value in the
+   slot blocks the body and the slot is not overwritten on the way out.  This
+   is the case that would come out differently if the emitted C had tested for
+   equality with 1. */
+static void ch05_advance_latch_tests_against_zero(void)
+{
+    stage_ch05_units(0x52, 2);
+    fdps_chapter_05_event_enemies_advance(0);
+
+    CHECK_EQ(ch05_units[6].ai_behavior, 0x52);
+    CHECK_EQ(ch05_units[0x22].ai_behavior, 0x52);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT], 2);
+}
+
+/* One byte of one record moves and nothing either side of it does.  Every byte
+   of the block is stamped 0x55 first, so a store that landed at +0x33 or +0x35
+   -- the death-script operand's high byte and ai_dest_x -- is visible; 0x55 is
+   also a value whose low nibble is not already 0, so the write that should
+   happen is visible too.  Both ends of the range are checked, because the
+   stride the store is indexed by is the IMUL 0x50 inside
+   fdps_get_unit_record and an error in it shows up furthest from the base. */
+static void ch05_advance_touches_no_neighbouring_byte(void)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) ch05_units;
+    for (i = 0; i < (int) sizeof(ch05_units); i++) {
+        bytes[i] = 0x55;
+    }
+    data_fdps_map_unit_array_ptr = bytes;
+    data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT] = 0;
+
+    fdps_chapter_05_event_enemies_advance(0);
+
+    CHECK_EQ(bytes[6 * 0x50 + 0x34], 0x50);
+    CHECK_EQ(bytes[6 * 0x50 + 0x33], 0x55);
+    CHECK_EQ(bytes[6 * 0x50 + 0x35], 0x55);
+    CHECK_EQ(bytes[0x22 * 0x50 + 0x34], 0x50);
+    CHECK_EQ(bytes[0x22 * 0x50 + 0x33], 0x55);
+    CHECK_EQ(bytes[0x22 * 0x50 + 0x35], 0x55);
+    CHECK_EQ(bytes[5 * 0x50 + 0x34], 0x55);
+    CHECK_EQ(bytes[0x23 * 0x50 + 0x34], 0x55);
+}
+
+/* The incoming argument slot is overwritten with 0 at 000370ec, before the
+   latch is even tested, and never read, so the index of the unit that walked
+   onto the trigger tile cannot reach the result.  This handler is reached
+   through the four movement-step routines, which latch the pending event with
+   phase 0 and then let the turn driver push the acting unit's real index, so
+   the argument is a live value here rather than the literal 0 the turn-event
+   dispatcher passes.  Index 3 is asserted unchanged because it is one an
+   argument-driven handler would have written. */
+static void ch05_advance_ignores_the_unit_index_argument(void)
+{
+    stage_ch05_units(0x52, 0);
+    fdps_chapter_05_event_enemies_advance(3);
+    CHECK_EQ(ch05_units[3].ai_behavior, 0x52);
+    CHECK_EQ(ch05_units[6].ai_behavior, 0x50);
+
+    stage_ch05_units(0x52, 0);
+    fdps_chapter_05_event_enemies_advance(-1);
+    CHECK_EQ(ch05_units[0x22].ai_behavior, 0x50);
+    CHECK_EQ(ch05_units[0x23].ai_behavior, 0x52);
+
+    stage_ch05_units(0x52, 0);
+    fdps_chapter_05_event_enemies_advance(30000);
+    CHECK_EQ(ch05_units[6].ai_behavior, 0x50);
+    CHECK_EQ(ch05_units[5].ai_behavior, 0x52);
+}
+
 void run_chevt1_tests(void)
 {
     RUN_TEST(set_game_over_from_running);
@@ -289,4 +491,11 @@ void run_chevt1_tests(void)
     RUN_TEST(advance_touches_no_neighbouring_byte);
     RUN_TEST(advance_ignores_the_unit_index_argument);
     RUN_TEST(advance_run_twice_changes_nothing_more);
+    RUN_TEST(ch05_advance_clears_exactly_the_range);
+    RUN_TEST(ch05_advance_keeps_the_high_nibble);
+    RUN_TEST(ch05_advance_raises_the_latch);
+    RUN_TEST(ch05_advance_runs_once_per_chapter);
+    RUN_TEST(ch05_advance_latch_tests_against_zero);
+    RUN_TEST(ch05_advance_touches_no_neighbouring_byte);
+    RUN_TEST(ch05_advance_ignores_the_unit_index_argument);
 }

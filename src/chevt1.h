@@ -58,4 +58,37 @@ extern void fdps_chapter_event_set_game_over(int unit_index);
 extern void fdps_chapter_02_event_enemies_advance(int unit_index);
 #pragma aux fdps_chapter_02_event_enemies_advance "*" parm caller [];
 
+/* Chapter 5's ambush: takes unit indices 6 through 0x22 inclusive off the
+   hold-position behaviour the map deploys them in and puts them on the default
+   one, which paths a unit toward the nearest opposing unit, so the whole
+   imperial army starts advancing at once.
+
+   It rewrites the low nibble -- the behaviour code -- of the ai_behavior byte
+   at record offset 0x34 to 0 across that range and leaves the high nibble
+   alone, because bits 0x40 and 0x80 of it are independent AI flags other code
+   reads on their own.  The two bounds are literals; nothing is range checked
+   and data_fdps_map_unit_count is not consulted, so they are only correct
+   against chapter 5's own deployment, which puts 5 party records at indices
+   0..4, the guest hero at 5 and everything the opening script deploys at
+   6..0x22.  Each record is resolved through fdps_get_unit_record per
+   iteration, so the array base is re-read.
+
+   It fires at most once per chapter.  Element 0x10 of
+   data_fdps_map_cell_event_triggered_flags (gamedata.h) is the latch: the
+   handler returns without touching anything when it is already non-zero, and
+   sets it to 1 before running the loop.  The chapter state reset clears that
+   array, so a later chapter's handler starts from a clean latch; the save
+   image carries it, so a chapter reloaded after the ambush fired does not fire
+   it again.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with 0 before the latch is even tested and is
+   never read, so any index, in range or not, behaves the same.
+
+   Table slot 7, and chapter 5's map04.dat is the only shipped file that names
+   it -- one tile trigger, phase 0, so the event fires the moment a unit walks
+   onto that tile. */
+extern void fdps_chapter_05_event_enemies_advance(int unit_index);
+#pragma aux fdps_chapter_05_event_enemies_advance "*" parm caller [];
+
 #endif

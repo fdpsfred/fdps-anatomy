@@ -147,3 +147,91 @@ void fdps_chapter_02_event_enemies_advance(int unit_index)
              AI_BEHAVIOR_MODE_ADVANCE);
     }
 }
+
+/* The slot of data_fdps_map_cell_event_triggered_flags (gamedata.h) that the
+   one-shot handlers latch: byte ptr [0x000640e8], which is element 0x10 of the
+   32-entry array based at 0x000640d8.
+
+   The array's own indexer is a cell's raw event code and the shipped M%02d.DTL
+   event planes only ever use codes 0 to 15, so element 0x10 is the first slot
+   no map cell can reach and the handlers use it as private storage.  It is one
+   slot shared by all of them -- fdps_chapter_03_event_deploy_wave_1 at
+   00036c83, this handler, the chapter 8, 10, 15, 16, 19, 21, 23, 25, 26 and 30
+   handlers, and the chapter 15 and 26 post-action checks all name the same
+   address -- which is safe only because one chapter is loaded at a time and
+   fdps_chapter_state_reset memsets the whole array when a chapter starts.
+
+   Being inside the array is also what makes the latch survive a save: the save
+   and load paths move all 0x20 bytes to and from offset 0x30a3 of the slot
+   image, so a chapter reloaded after its event fired does not fire it again. */
+#define CHAPTER_EVENT_ONE_SHOT_SLOT 0x10
+
+/* 000370e0.  Chapter 5's ambush: every unit the map has deployed beyond the
+   player's own five and the guest hero stops holding position and starts
+   advancing, so the imperial army attacks all at once.
+
+   The guard is the one-shot latch, CMP byte ptr [0x000640e8],0x0 / JNZ to the
+   epilogue at 000370f3, then MOV byte ptr [0x000640e8],0x1 at 000370fc.  The
+   test is against 0 and not against 1, so any non-zero value in the slot blocks
+   the body; the latch is written before the loop rather than after it, so a
+   handler re-entered from inside the loop could not run it twice either.
+
+   The loop is fdps_object_set_field34_low_nibble_range (00036b60) expanded
+   inline with the constant argument triple (6, 0x22, 0), the same expansion the
+   chapter 2 handler above carries four copies of and with the same fingerprint:
+   the three constants are parked at [EBP-0x20], [EBP-0x1c] and [EBP-0x18]
+   (00037103..00037111), copied into a second set of slots at [EBP-0xc],
+   [EBP-0x10] and [EBP-0x14] (00037118..00037127), and only then is the counter
+   seeded from the first of them.  There is no CALL to that helper in the body;
+   the only CALL is fdps_get_unit_record, once per iteration, so writing the
+   range as a call to the helper would put a CALL in the rebuild that the
+   original does not make.
+
+   The compare at 00037133 -- CMP EAX,dword ptr [EBP-0x10] / JLE -- is signed
+   and inclusive, so the range is unit indices 6 through 0x22 and 0x22 is the
+   last index written, not one past the end.  Chapter 5's map04.dat deploys 33
+   records behind the 5 party slots and the opening script has all of them on
+   the field before a unit can reach the trigger tile, so the walk stays inside
+   the unit array; nothing here reads data_fdps_map_unit_count and nothing
+   bounds the index.
+
+   The merge is the same read-modify-write of the one byte as the chapter 2
+   handler's -- MOV DL,[EAX+0x34] / AND DL,0xf0 / MOV DH,[EBP-0x14] / OR DH,DL /
+   MOV [EAX+0x34],DH at 00037150..0003715e -- so the behaviour code goes to 0
+   and the two AI flag bits in the high nibble are carried across untouched.
+
+   The record pointer comes back in EAX from the CALL at 00037142 and is stored
+   to [EBP-0x4] at 0003714a, then re-read for the load and again for the store,
+   so both halves of the merge address the record fetched by that iteration.
+
+   unit_index is the handler table's shared parameter.  MOV dword ptr
+   [EBP+0x14],0x0 at 000370ec writes zero over the incoming slot before the
+   guard and nothing ever reads it back, so which unit walked onto the trigger
+   tile cannot reach anything this handler does; the store has no observable
+   effect, because the slot belongs to the caller's outgoing argument area and
+   the caller drops it with ADD ESP,0x4.
+
+   Nothing sets EAX before the RET at 00037169 and no dispatcher reads what
+   comes back, so the result is void. */
+void fdps_chapter_05_event_enemies_advance(int unit_index)
+{
+    struct fdps_unit_record *unit;
+    int advancing_unit_index;
+
+    unit_index = 0;
+
+    if (data_fdps_map_cell_event_triggered_flags[
+            CHAPTER_EVENT_ONE_SHOT_SLOT] != 0) {
+        return;
+    }
+    data_fdps_map_cell_event_triggered_flags[CHAPTER_EVENT_ONE_SHOT_SLOT] = 1;
+
+    for (advancing_unit_index = 6;
+         advancing_unit_index <= 0x22;
+         advancing_unit_index++) {
+        unit = fdps_get_unit_record(advancing_unit_index);
+        unit->ai_behavior = (unsigned char)
+            ((unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+             AI_BEHAVIOR_MODE_ADVANCE);
+    }
+}

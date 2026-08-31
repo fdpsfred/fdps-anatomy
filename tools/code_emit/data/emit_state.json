@@ -1091,6 +1091,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x19a"
+    },
+    "000370e0": {
+      "name": "fdps_chapter_05_event_enemies_advance",
+      "target": "chevt1.c",
+      "body_size": "0x8a",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x8a"
     }
   }
 }
