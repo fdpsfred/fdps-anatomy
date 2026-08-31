@@ -763,6 +763,14 @@
       "status": "committed",
       "emitted_against": "0x8a",
       "rounds": 0
+    },
+    "0002e5e0": {
+      "name": "fdps_fill_screen_square",
+      "target": "blit.c",
+      "body_size": "0x5f",
+      "status": "committed",
+      "emitted_against": "0x5f",
+      "rounds": 0
     }
   }
 }
