@@ -15,6 +15,15 @@
  * What the global itself holds is ticket 23's and is not asserted, so every
  * case writes the state it wants to see changed.
  *
+ * The chapter 16 handler at 00038020 is the same expansion twice over behind an
+ * equality on data_fdps_battle_turn_counter, so it is covered the same way with
+ * one thing added: which branch a turn number reaches.  That test is what pins
+ * the fall-through down as a fall-through -- the map schedules turns 5 and 15
+ * and only 5 is compared for -- so several other turns are put through it and
+ * all of them have to land on the lower range.  The counter is set by the test
+ * because it is a global ticket 23 has not written yet; what it holds outside a
+ * battle is not asserted.
+ *
  * Which indices the range means comes from map14.dat: 9 player records are laid
  * down first at 0..8 and the file's wave-0 deployment records 1..43 follow in
  * file order, so unit index = deployment record index + 8 and 0x1d..0x25 are
@@ -259,6 +268,306 @@ static void ch15_activate_ignores_the_unit_index_argument(void)
     CHECK_EQ(ch15_units[0].ai_behavior, 0x52);
 }
 
+/* The two inclusive ranges the chapter 16 handler's two inline loops cover,
+   read off the constants at 0003803c (0x19) and 00038043 (0x22) for the turn-5
+   branch and 0003809e (0x0a) and 000380a5 (0x19) for the fall-through, each
+   with a signed JLE. */
+#define CH16_TURN5_FIRST_INDEX 0x19
+#define CH16_TURN5_LAST_INDEX  0x22
+#define CH16_OTHER_FIRST_INDEX 0x0a
+#define CH16_OTHER_LAST_INDEX  0x19
+
+/* How many records each range covers: 0x22 - 0x19 + 1 and 0x19 - 0x0a + 1. */
+#define CH16_TURN5_UNITS 10
+#define CH16_OTHER_UNITS 16
+
+/* The one turn number the equality at 00038033 singles out.  Every other value
+   falls through to the second loop, which is why the second is exercised with
+   several turns and not just the 15 the map schedules. */
+#define CH16_RELEASE_TURN 5
+
+/* The other turn map15.dat's turn-event table names for this slot.  It reaches
+   the same fall-through branch as any other non-5 turn; it is used here
+   because it is what the shipped data actually fires. */
+#define CH16_SHIPPED_SECOND_TURN 15
+
+/* Enough records to hold chapter 16's whole deployment -- 10 player records at
+   0..9 and 25 enemy records at 0x0a..0x22 -- and five past the top, so an
+   off-by-one at either end of either range has somewhere visible to land. */
+#define CH16_STAGE_UNITS 0x28
+
+static struct fdps_unit_record ch16_units[CH16_STAGE_UNITS];
+
+/* Stage the array the same way the chapter 15 cases do, and set the turn the
+   handler is to read.  The staged AI byte carries a high nibble as well as a
+   behaviour code, because the whole point of the merge is that only one of the
+   two moves. */
+static void stage_ch16_units(int battle_turn, int ai_behavior)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) ch16_units;
+    for (i = 0; i < (int) sizeof(ch16_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < CH16_STAGE_UNITS; i++) {
+        ch16_units[i].ai_behavior = (unsigned char) ai_behavior;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch16_units;
+    data_fdps_battle_turn_counter = battle_turn;
+}
+
+/* On turn 5 exactly indices 0x19..0x22 are rewritten and everything either
+   side of them keeps what the map gave it.  The staged 0x52 is behaviour code
+   2 -- hold position, which is what byte 0x11 of map15.dat's deployment
+   records gives these units -- under a high nibble of 0x50; the range comes out
+   0x50 because the mode ORed in is 0.  Indices 0..0x18 are the ten player
+   records and waves 0 and 1, which this branch must not touch, and 0x23..0x27
+   run past the last deployed unit at 0x22. */
+static void ch16_turn5_clears_the_second_wave_block(void)
+{
+    int i;
+
+    stage_ch16_units(CH16_RELEASE_TURN, 0x52);
+    fdps_chapter_16_event_enemies_advance_for_turn(0);
+
+    for (i = 0; i < CH16_STAGE_UNITS; i++) {
+        if (i >= CH16_TURN5_FIRST_INDEX && i <= CH16_TURN5_LAST_INDEX) {
+            CHECK_EQ(ch16_units[i].ai_behavior, 0x50);
+        } else {
+            CHECK_EQ(ch16_units[i].ai_behavior, 0x52);
+        }
+    }
+}
+
+/* On the turn the map schedules second, 15, the fall-through loop runs and
+   exactly indices 0x0a..0x19 are rewritten: waves 0 and 1 plus the first
+   wave-2 flyer.  The ten player records at 0..9 sit below the range and
+   0x1a..0x27 above it, and both have to be untouched. */
+static void ch16_other_turn_clears_the_opening_block(void)
+{
+    int i;
+
+    stage_ch16_units(CH16_SHIPPED_SECOND_TURN, 0x52);
+    fdps_chapter_16_event_enemies_advance_for_turn(0);
+
+    for (i = 0; i < CH16_STAGE_UNITS; i++) {
+        if (i >= CH16_OTHER_FIRST_INDEX && i <= CH16_OTHER_LAST_INDEX) {
+            CHECK_EQ(ch16_units[i].ai_behavior, 0x50);
+        } else {
+            CHECK_EQ(ch16_units[i].ai_behavior, 0x52);
+        }
+    }
+}
+
+/* Both top bounds are inclusive, because both compares are JLE -- 0003806c for
+   the turn-5 loop and 000380ce for the other -- so each range is one record
+   longer than a rewrite with < would make it.  The counts are asserted by
+   counting the records that moved and both boundary records of each range are
+   named on their own: for turn 5 that is 0x22 moving and 0x23 not, and for the
+   fall-through 0x19 moving and 0x1a not.  Index 0x19 is checked in both, since
+   it is the top of one range and the bottom of the other. */
+static void ch16_both_ranges_include_their_last_index(void)
+{
+    int i;
+    int moved;
+
+    stage_ch16_units(CH16_RELEASE_TURN, 0x52);
+    fdps_chapter_16_event_enemies_advance_for_turn(0);
+
+    moved = 0;
+    for (i = 0; i < CH16_STAGE_UNITS; i++) {
+        if (ch16_units[i].ai_behavior == 0x50) {
+            moved++;
+        }
+    }
+    CHECK_EQ(moved, CH16_TURN5_UNITS);
+    CHECK_EQ(ch16_units[CH16_TURN5_FIRST_INDEX - 1].ai_behavior, 0x52);
+    CHECK_EQ(ch16_units[CH16_TURN5_FIRST_INDEX].ai_behavior, 0x50);
+    CHECK_EQ(ch16_units[CH16_TURN5_LAST_INDEX].ai_behavior, 0x50);
+    CHECK_EQ(ch16_units[CH16_TURN5_LAST_INDEX + 1].ai_behavior, 0x52);
+
+    stage_ch16_units(CH16_SHIPPED_SECOND_TURN, 0x52);
+    fdps_chapter_16_event_enemies_advance_for_turn(0);
+
+    moved = 0;
+    for (i = 0; i < CH16_STAGE_UNITS; i++) {
+        if (ch16_units[i].ai_behavior == 0x50) {
+            moved++;
+        }
+    }
+    CHECK_EQ(moved, CH16_OTHER_UNITS);
+    CHECK_EQ(ch16_units[CH16_OTHER_FIRST_INDEX - 1].ai_behavior, 0x52);
+    CHECK_EQ(ch16_units[CH16_OTHER_FIRST_INDEX].ai_behavior, 0x50);
+    CHECK_EQ(ch16_units[CH16_OTHER_LAST_INDEX].ai_behavior, 0x50);
+    CHECK_EQ(ch16_units[CH16_OTHER_LAST_INDEX + 1].ai_behavior, 0x52);
+}
+
+/* The branch is an equality on the turn counter, not a range test and not a
+   test for turn 15: CMP dword ptr [0x00069ce8],0x5 / JNZ 0003809e at 00038033.
+   So 5 is the only value that reaches the upper range and every other value --
+   below it, just above it, the 15 the map schedules, and values no battle can
+   reach -- lands on the lower one.  Each turn is checked at both ranges' first
+   index, which is the pair that separates the branches. */
+static void ch16_only_turn_five_takes_the_upper_range(void)
+{
+    static int other_turns[6] = {0, 1, 4, 6, 15, 30000};
+    int i;
+
+    stage_ch16_units(CH16_RELEASE_TURN, 0x52);
+    fdps_chapter_16_event_enemies_advance_for_turn(0);
+    CHECK_EQ(ch16_units[CH16_TURN5_LAST_INDEX].ai_behavior, 0x50);
+    CHECK_EQ(ch16_units[CH16_OTHER_FIRST_INDEX].ai_behavior, 0x52);
+
+    for (i = 0; i < 6; i++) {
+        stage_ch16_units(other_turns[i], 0x52);
+        fdps_chapter_16_event_enemies_advance_for_turn(0);
+        CHECK_EQ(ch16_units[CH16_OTHER_FIRST_INDEX].ai_behavior, 0x50);
+        CHECK_EQ(ch16_units[CH16_TURN5_LAST_INDEX].ai_behavior, 0x52);
+    }
+
+    stage_ch16_units(-1, 0x52);
+    fdps_chapter_16_event_enemies_advance_for_turn(0);
+    CHECK_EQ(ch16_units[CH16_OTHER_FIRST_INDEX].ai_behavior, 0x50);
+    CHECK_EQ(ch16_units[CH16_TURN5_LAST_INDEX].ai_behavior, 0x52);
+}
+
+/* The high nibble is carried across untouched by the AND 0xf0 at 0003808c and
+   000380ee, and the low nibble ends at 0 whatever it held.  0x40 and 0x80 are
+   the two AI flags read elsewhere, so a merge that assigned the mode whole, or
+   masked with anything wider, would drop them.  Expected values are the staged
+   byte ANDed with 0xf0, and both loops are checked because they are two
+   separate copies of the merge in the instruction stream. */
+static void ch16_keeps_the_high_nibble(void)
+{
+    stage_ch16_units(CH16_RELEASE_TURN, 0);
+    ch16_units[0x19].ai_behavior = 0xc2;
+    ch16_units[0x1a].ai_behavior = 0x02;
+    ch16_units[0x1f].ai_behavior = 0xff;
+    ch16_units[0x21].ai_behavior = 0x40;
+    ch16_units[0x22].ai_behavior = 0x8b;
+    fdps_chapter_16_event_enemies_advance_for_turn(0);
+    CHECK_EQ(ch16_units[0x19].ai_behavior, 0xc0);
+    CHECK_EQ(ch16_units[0x1a].ai_behavior, 0x00);
+    CHECK_EQ(ch16_units[0x1f].ai_behavior, 0xf0);
+    CHECK_EQ(ch16_units[0x21].ai_behavior, 0x40);
+    CHECK_EQ(ch16_units[0x22].ai_behavior, 0x80);
+
+    stage_ch16_units(CH16_SHIPPED_SECOND_TURN, 0);
+    ch16_units[0x0a].ai_behavior = 0xc2;
+    ch16_units[0x11].ai_behavior = 0xff;
+    ch16_units[0x18].ai_behavior = 0x40;
+    ch16_units[0x19].ai_behavior = 0x8b;
+    fdps_chapter_16_event_enemies_advance_for_turn(0);
+    CHECK_EQ(ch16_units[0x0a].ai_behavior, 0xc0);
+    CHECK_EQ(ch16_units[0x11].ai_behavior, 0xf0);
+    CHECK_EQ(ch16_units[0x18].ai_behavior, 0x40);
+    CHECK_EQ(ch16_units[0x19].ai_behavior, 0x80);
+}
+
+/* One byte of one record moves and nothing either side of it does.  Every byte
+   of the block is stamped 0x55 first, so a store that landed at +0x33 or +0x35
+   is visible, and 0x55's low nibble is not already 0, so the write that should
+   happen is visible too.  Both ends of the running range are checked, because
+   the stride the store is indexed by is the IMUL 0x50 inside
+   fdps_get_unit_record and an error in it shows up furthest from the base. */
+static void ch16_touches_no_neighbouring_byte(void)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) ch16_units;
+    for (i = 0; i < (int) sizeof(ch16_units); i++) {
+        bytes[i] = 0x55;
+    }
+    data_fdps_map_unit_array_ptr = bytes;
+    data_fdps_battle_turn_counter = CH16_RELEASE_TURN;
+
+    fdps_chapter_16_event_enemies_advance_for_turn(0);
+
+    CHECK_EQ(bytes[0x19 * 0x50 + 0x34], 0x50);
+    CHECK_EQ(bytes[0x19 * 0x50 + 0x33], 0x55);
+    CHECK_EQ(bytes[0x19 * 0x50 + 0x35], 0x55);
+    CHECK_EQ(bytes[0x22 * 0x50 + 0x34], 0x50);
+    CHECK_EQ(bytes[0x22 * 0x50 + 0x33], 0x55);
+    CHECK_EQ(bytes[0x22 * 0x50 + 0x35], 0x55);
+    CHECK_EQ(bytes[0x18 * 0x50 + 0x34], 0x55);
+    CHECK_EQ(bytes[0x23 * 0x50 + 0x34], 0x55);
+
+    for (i = 0; i < (int) sizeof(ch16_units); i++) {
+        bytes[i] = 0x55;
+    }
+    data_fdps_battle_turn_counter = CH16_SHIPPED_SECOND_TURN;
+
+    fdps_chapter_16_event_enemies_advance_for_turn(0);
+
+    CHECK_EQ(bytes[0x0a * 0x50 + 0x34], 0x50);
+    CHECK_EQ(bytes[0x0a * 0x50 + 0x33], 0x55);
+    CHECK_EQ(bytes[0x0a * 0x50 + 0x35], 0x55);
+    CHECK_EQ(bytes[0x19 * 0x50 + 0x34], 0x50);
+    CHECK_EQ(bytes[0x19 * 0x50 + 0x33], 0x55);
+    CHECK_EQ(bytes[0x19 * 0x50 + 0x35], 0x55);
+    CHECK_EQ(bytes[0x09 * 0x50 + 0x34], 0x55);
+    CHECK_EQ(bytes[0x1a * 0x50 + 0x34], 0x55);
+}
+
+/* Nothing guards either loop -- the only compare in the body is the one on the
+   turn counter -- so the handler has no one-shot latch and runs its loop every
+   time it is called.  The latch slot the one-shot handlers of this family use
+   is put up before the call and the range still moves, and the slot is
+   asserted unchanged because a handler that had grown a latch would have
+   written it.  A second call on the same turn is made too: the merge is
+   idempotent, so it must leave the same values. */
+static void ch16_has_no_one_shot_latch(void)
+{
+    stage_ch16_units(CH16_RELEASE_TURN, 0x52);
+    data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT] = 1;
+
+    fdps_chapter_16_event_enemies_advance_for_turn(0);
+    CHECK_EQ(ch16_units[CH16_TURN5_FIRST_INDEX].ai_behavior, 0x50);
+    CHECK_EQ(ch16_units[CH16_TURN5_LAST_INDEX].ai_behavior, 0x50);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT], 1);
+
+    stage_ch16_units(CH16_RELEASE_TURN, 0x52);
+    fdps_chapter_16_event_enemies_advance_for_turn(0);
+    CHECK_EQ(ch16_units[CH16_TURN5_FIRST_INDEX].ai_behavior, 0x50);
+    CHECK_EQ(ch16_units[CH16_TURN5_LAST_INDEX].ai_behavior, 0x50);
+
+    fdps_chapter_16_event_enemies_advance_for_turn(0);
+    CHECK_EQ(ch16_units[CH16_TURN5_FIRST_INDEX].ai_behavior, 0x50);
+    CHECK_EQ(ch16_units[CH16_TURN5_LAST_INDEX].ai_behavior, 0x50);
+    CHECK_EQ(ch16_units[CH16_TURN5_LAST_INDEX + 1].ai_behavior, 0x52);
+}
+
+/* The incoming argument slot is overwritten with 0 at 0003802c before the turn
+   counter is even read, and never read back, so the index the dispatcher
+   passes cannot reach the result and cannot pick a branch either.  The
+   turn-event runner is the only path this slot is reached by in the shipped
+   data and it pushes a literal 0 at 0002e13e; the values passed here are that
+   0, an index inside each range, one just past the upper range, and -1 and
+   30000, which are the ones an argument-driven handler would betray itself
+   on. */
+static void ch16_ignores_the_unit_index_argument(void)
+{
+    static int arguments[6] = {0, 0x0a, 0x19, 0x23, -1, 30000};
+    int i;
+
+    for (i = 0; i < 6; i++) {
+        stage_ch16_units(CH16_RELEASE_TURN, 0x52);
+        fdps_chapter_16_event_enemies_advance_for_turn(arguments[i]);
+        CHECK_EQ(ch16_units[CH16_TURN5_FIRST_INDEX].ai_behavior, 0x50);
+        CHECK_EQ(ch16_units[CH16_TURN5_LAST_INDEX].ai_behavior, 0x50);
+        CHECK_EQ(ch16_units[CH16_OTHER_FIRST_INDEX].ai_behavior, 0x52);
+
+        stage_ch16_units(CH16_SHIPPED_SECOND_TURN, 0x52);
+        fdps_chapter_16_event_enemies_advance_for_turn(arguments[i]);
+        CHECK_EQ(ch16_units[CH16_OTHER_FIRST_INDEX].ai_behavior, 0x50);
+        CHECK_EQ(ch16_units[CH16_OTHER_LAST_INDEX].ai_behavior, 0x50);
+        CHECK_EQ(ch16_units[CH16_TURN5_LAST_INDEX].ai_behavior, 0x52);
+    }
+}
+
 void run_chevt3_tests(void)
 {
     RUN_TEST(ch15_record_shape_matches_the_offsets);
@@ -268,4 +577,12 @@ void run_chevt3_tests(void)
     RUN_TEST(ch15_activate_has_no_one_shot_latch);
     RUN_TEST(ch15_activate_touches_no_neighbouring_byte);
     RUN_TEST(ch15_activate_ignores_the_unit_index_argument);
+    RUN_TEST(ch16_turn5_clears_the_second_wave_block);
+    RUN_TEST(ch16_other_turn_clears_the_opening_block);
+    RUN_TEST(ch16_both_ranges_include_their_last_index);
+    RUN_TEST(ch16_only_turn_five_takes_the_upper_range);
+    RUN_TEST(ch16_keeps_the_high_nibble);
+    RUN_TEST(ch16_touches_no_neighbouring_byte);
+    RUN_TEST(ch16_has_no_one_shot_latch);
+    RUN_TEST(ch16_ignores_the_unit_index_argument);
 }

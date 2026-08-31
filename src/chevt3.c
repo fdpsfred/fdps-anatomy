@@ -9,6 +9,7 @@
  * chapters 2 to 7 and chevt2.c for chapters 8 to 14.  Nothing here owns state.
  */
 #include "fdpstype.h"
+#include "gamedata.h"
 #include "unit.h"
 #include "chevt3.h"
 
@@ -97,5 +98,90 @@ void fdps_chapter_15_event_activate_enemy_group(int unit_index)
         unit->ai_behavior = (unsigned char)
             ((unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
              AI_BEHAVIOR_MODE_ADVANCE);
+    }
+}
+
+/* 00038020.  Chapter 16's turn-scheduled event: one block of the map's enemies
+   stops holding position and starts advancing on the party, and which block
+   depends on the turn the counter is standing at.
+
+   The whole body is a test on data_fdps_battle_turn_counter followed by one of
+   two copies of the same inline expansion the chapter 15 handler above carries
+   -- fdps_object_set_field34_low_nibble_range (00036b60) with a constant
+   argument triple.  The turn-5 copy stages (0x19, 0x22, 0) at [EBP-0x20],
+   [EBP-0x1c] and [EBP-0x18] (0003803c..0003804a) and the other stages
+   (0x0a, 0x19, 0) at [EBP-0x24], [EBP-0x28] and [EBP-0x2c]
+   (0003809e..000380ac); each then copies its triple into a second set of slots
+   before seeding the counter from the first of them, which is that helper's
+   fingerprint.  There is no CALL to the helper in the body -- the only CALL in
+   either loop is fdps_get_unit_record, at 0003807b and 000380dd, once per
+   iteration -- so writing either range as a call to it would put a CALL in the
+   rebuild that the original does not make.
+
+   The test at 00038033 is CMP dword ptr [0x00069ce8],0x5 / JNZ 0003809e, an
+   equality on the turn counter with the second range as the fall-through, so
+   only turn 5 reaches the first loop and every other turn reaches the second.
+   Both compares between the counter and the top bound -- CMP EAX,[EBP-0x10] /
+   JLE at 0003806c and CMP EAX,[EBP-0x34] / JLE at 000380ce -- are signed and
+   inclusive, so 0x22 and 0x19 are the last indices written in their loops, not
+   one past the end.  Index 0x19 is the top of one range and the bottom of the
+   other and is released by whichever branch runs.
+
+   Chapter 16's map15.dat lays 10 player records down at 0..9 and its 25 enemy
+   deployment records at 0x0a..0x22, so unit index = deployment record index +
+   10 and the two ranges are records 15..24 and 0..15.  Nothing is range
+   checked and data_fdps_map_unit_count is not consulted; all four bounds are
+   literals in the instruction stream.
+
+   Each merge is the same read-modify-write of the one byte as the chapter 15
+   handler's -- MOV DL,[EAX+0x34] / AND DL,0xf0 / MOV DH,[EBP-0x14] / OR DH,DL
+   / MOV [EAX+0x34],DH at 00038089..00038097, and the same five at
+   000380eb..000380f9 -- so the behaviour code goes to 0 and the two AI flag
+   bits in the high nibble are carried across untouched.
+
+   The record pointer comes back in EAX from each CALL and is stored to
+   [EBP-0x4] (00038083) or [EBP-0x40] (000380e5), then re-read for the load and
+   again for the store, so both halves of each merge address the record that
+   iteration fetched.
+
+   There is no one-shot latch: the only compare in the body is the one on the
+   turn counter, and nothing records that a branch has run.  The map's own turn
+   table is what makes each branch happen once.
+
+   unit_index is the handler table's shared parameter.  MOV dword ptr
+   [EBP+0x14],0x0 at 0003802c writes zero over the incoming slot before the
+   counter is read and nothing ever reads it back, so which unit the event
+   fired for cannot reach anything this handler does; the store has no
+   observable effect, because the slot belongs to the caller's outgoing
+   argument area and the turn-event runner drops it with ADD ESP,0x4 at
+   0002e146.
+
+   Nothing sets EAX before the RET at 00038104 and no dispatcher reads what
+   comes back, so the result is void. */
+void fdps_chapter_16_event_enemies_advance_for_turn(int unit_index)
+{
+    struct fdps_unit_record *unit;
+    int advancing_unit_index;
+
+    unit_index = 0;
+
+    if (data_fdps_battle_turn_counter == 5) {
+        for (advancing_unit_index = 0x19;
+             advancing_unit_index <= 0x22;
+             advancing_unit_index++) {
+            unit = fdps_get_unit_record(advancing_unit_index);
+            unit->ai_behavior = (unsigned char)
+                ((unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+                 AI_BEHAVIOR_MODE_ADVANCE);
+        }
+    } else {
+        for (advancing_unit_index = 0x0a;
+             advancing_unit_index <= 0x19;
+             advancing_unit_index++) {
+            unit = fdps_get_unit_record(advancing_unit_index);
+            unit->ai_behavior = (unsigned char)
+                ((unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+                 AI_BEHAVIOR_MODE_ADVANCE);
+        }
     }
 }

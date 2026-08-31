@@ -56,4 +56,53 @@
 extern void fdps_chapter_15_event_activate_enemy_group(int unit_index);
 #pragma aux fdps_chapter_15_event_activate_enemy_group "*" parm caller [];
 
+/* Chapter 16's turn-scheduled release event: it takes one block of the map's
+   enemies off the hold-position behaviour the map deployed them in and puts
+   them on the default one, which paths a unit toward the nearest opposing
+   unit, and which block it releases depends on the battle turn counter.
+
+   The counter is tested for equality against 5 and there are only two
+   outcomes: 5 releases unit indices 0x19 through 0x22 inclusive, and anything
+   else releases 0x0a through 0x19 inclusive.  The second is the fall-through,
+   not a test for a second turn number, so a firing on any turn other than 5
+   lands there.  The two ranges overlap at index 0x19, which is released by
+   both.
+
+   Like the chapter 15 handler above it rewrites only the low nibble -- the
+   behaviour code -- of the ai_behavior byte at record offset 0x34 to 0, and
+   leaves the high nibble alone, because bits 0x40 and 0x80 of it are
+   independent AI flags other code reads on their own.  The bounds are
+   literals; nothing is range checked and data_fdps_map_unit_count is not
+   consulted.  Each record is resolved through fdps_get_unit_record per
+   iteration, so the array base is re-read.
+
+   The indices are only meaningful against chapter 16's own deployment.
+   map15.dat lays 10 player records down at 0..9 and its 25 enemy deployment
+   records follow in file order at 0x0a..0x22, wave by wave: 0x0a..0x16 the
+   thirteen wave-0 samurai, archers and knights, 0x17..0x18 the two wave-1 dark
+   mages, 0x19..0x1c the four wave-2 flying units, 0x1d..0x20 the four wave-3
+   samurai and 0x21..0x22 the two wave-4 dark mages.  So the turn-5 branch
+   releases the whole second half of the deployment -- waves 2, 3 and 4, ten
+   units, all of them deployed holding position -- and the other branch
+   releases the units that opened the battle plus the first wave-2 flyer.
+
+   Table slot 23, and the turn-event table of chapter 16's map15.dat is the
+   only shipped thing that names it, with the two records {turn 5, slot 23,
+   phase 0} and {turn 15, slot 23, phase 0}; no tile trigger and no death
+   script in any MAP*.DAT reaches the slot.  The turn-event dispatcher fires a
+   record while the counter still holds the turn whose phase has just ended, so
+   the first firing sees 5 and the second sees 15: in the shipped data the two
+   branches are the turn-5 release and the turn-15 release.
+
+   There is no one-shot latch: nothing guards either loop and nothing records
+   that it ran.  The merge is idempotent, so a repeat firing on the same turn
+   changes nothing, but a unit the AI has since moved into another behaviour
+   mode would be pushed back to mode 0.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with 0 before the counter is even read, and
+   never read back, so any index behaves the same. */
+extern void fdps_chapter_16_event_enemies_advance_for_turn(int unit_index);
+#pragma aux fdps_chapter_16_event_enemies_advance_for_turn "*" parm caller [];
+
 #endif

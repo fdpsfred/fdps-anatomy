@@ -685,4 +685,32 @@ extern int data_fdps_chapter_current_chapter_id;
    accumulation and no bit in it. */
 extern unsigned int data_fdps_chapter_event_or_battle_end_code;
 
+/* 00069ce8.  Which turn of the current battle is being played, counted from 1.
+   fdps_chapter_state_reset installs 1 at 000227c2, fdps_battle_advance_turn
+   raises it once per turn cycle -- INC dword ptr [0x00069ce8] at 0001e5fd,
+   reached only after the battle-end code at 00069da0 has tested 0 -- and
+   fdps_load_savegame restores it out of the save image at 0002410c.  Nothing
+   else writes it, so it only ever counts up within one battle.
+
+   Signed, and that is behaviour rather than spelling.  Nine chapter handlers
+   order it with a signed branch: JG at 000377d7, 00037b88, 00038a4a, 0003af5b,
+   0003b163 and 0003b4ab, JLE at 00037cfb, 0003831d and 0003a73b.  On top of
+   those, fdps_chapter_28_event_deploy_wave_for_turn halves it at
+   00039564..0003956f with SAR EDX,0x1f / SUB EAX,EDX / SAR EAX,0x1, the
+   round-toward-zero correction wcc386 emits only for a signed operand.  The
+   remaining reads are equalities or small additions, which cannot see the
+   difference.
+
+   fdps_battle_run_turn_events fires a turn-event record while the counter
+   still holds the turn whose phase has just ended, so a handler dispatched
+   from that table reads the turn number the record was scheduled for, not the
+   next one.  The chapter-event handlers that branch on it therefore compare
+   against the very turn numbers the map files' turn-event tables carry.
+
+   fdps_draw_turn_number pushes the value itself into the formatted string at
+   0001ea8c, so the number the player is shown is this one unadjusted;
+   fdps_battle_system_submenu copies only its low byte into a byte buffer at
+   000151c8..000151d0. */
+extern int data_fdps_battle_turn_counter;
+
 #endif
