@@ -201,6 +201,179 @@ int fdps_map_actor_score_best_attack(int unit_index, int side_select)
     return 0;
 }
 
+/* The two scratch areas fdps_map_actor_score_best_item searches through: PUSH
+   0x190 at 00013091 for the candidate aim tiles, and the 0x20 bytes between
+   [EBP-0x70] and the next local for the unit indices a collector reports.  The
+   tile block is 200 (x, y) byte pairs and the index block 32 indices, and
+   nothing compares either against what actually arrives. */
+#define ITEM_SEARCH_TILE_BYTES 0x190
+#define ITEM_SEARCH_TARGET_BYTES 32
+
+/* PUSH 0x0 before the fdps_get_class_record call at 00013056: PROMAP.DAT's
+   leading default row, the row whose eight terrain costs are all 1.  The
+   record it answers with is never read here -- see the note on the function
+   below. */
+#define ITEM_SEARCH_DEFAULT_CLASS_ROW 0
+
+/* MOV byte ptr [EBP-0x4],0x1 / MOV byte ptr [EBP-0x8],0x1 at 00013114: the
+   reach and the minimum distance a line item's aim search runs with.  A
+   minimum distance of 1 is exclusive and drops the actor's own tile alone, so
+   the candidate aim tiles of a line item are its passable neighbours. */
+#define ITEM_SEARCH_LINE_AIM_REACH 1
+#define ITEM_SEARCH_LINE_AIM_MIN_DIST 1
+
+/* CMP EAX,0xf / JLE at 0001310f and again at 000131d6.  Bit 0x10 of the
+   ITEM.DAT use_distance byte marks the straight-line shape and the low nibble
+   is the reach, so 0x10 is the lowest line-shaped value and a line's length is
+   the byte less 0x10. */
+#define ITEM_USE_DISTANCE_LINE_BIT 0x10
+
+/* 00013040.  Picks the best item use the actor could make this turn -- which
+   bag entry to spend and which tile to aim it at -- and publishes the choice
+   in the four AI decision globals.  The returned value is 0 down both paths
+   and no caller looks at it.
+
+   The score global is zeroed at 0001304c, before anything else, so the
+   empty-bag return leaves a fresh 0 there; the other three are not touched on
+   that path and keep whatever the previous actor left in them.
+
+   The class record and the actor's current MP are fetched and never read
+   again.  They are the opening of fdps_map_actor_score_best_spell below, which
+   uses both -- the class-0 record as the all-costs-1 movement table it hands
+   to the flood fill, the MP word as what each spell's cost is weighed against.
+   Items cost no MP and this search gets its candidate tiles from a target
+   sweep rather than a flood fill of its own, so neither has any work left to do
+   here.  Both are kept because both are calls or reads the original makes.
+
+   The bag walk uses its loop counter directly as the entry index -- item id at
+   unit record +0xb + slot*2, which is inventory_slots[slot * 2 + 1] -- and
+   never re-tests the flag byte at +0xa that fdps_unit_item_count counted with.
+   The obvious defensive loop, walk all eight entries and skip the empty ones,
+   picks a different item set and publishes a different bag slot the moment a
+   bag has a hole in it (rebuild_info/pitfalls.md).
+
+   use_distance is read twice, and the two reads are not the same value.  The
+   aim search at 00013101 takes the byte and clamps a line item down to reach 1
+   with minimum distance 1; the shape test at 000131c8 reloads the byte RAW
+   from the record.  Keeping the clamped value in one variable sends every line
+   item down the radius branch.
+
+   The side filter is worked out before that reload, once per aim tile, from
+   the item's use_target byte: CMP dword ptr [EBP+0x18],0x0 / JNZ at 0001319c
+   forwards the byte unchanged on the NPC phase and replaces it with
+   (byte == 0) on the enemy phase.  The inversion is a boolean one, so a
+   use_target of 3 comes out as 0 for an enemy actor, the same value a byte of
+   1 gives.
+
+   The ranking is CMP EAX,[0x00063f8c] / JLE at 0001325d, so it is strictly
+   greater and signed: on an equal score the incumbent stands, and the first
+   bag entry and the first aim tile that reach a score keep it.
+
+   Nothing is bounds checked: not the candidate tiles against the 200 pairs,
+   not the targets against the 32 indices, and not the malloc against null.
+   The block is also leaked on the empty-bag path, because the early return at
+   000130bd sits between the malloc at 00013096 and the free at 0001328d. */
+int fdps_map_actor_score_best_item(int unit_index, int side_select)
+{
+    struct fdps_unit_record *actor;
+    struct fdps_item_effect *item;
+    struct fdps_class_record *default_class_move_cost;
+    unsigned char *tile_coords;
+    unsigned char target_indices[ITEM_SEARCH_TARGET_BYTES];
+    int actor_x;
+    int actor_y;
+    int actor_mp;
+    int bag_item_count;
+    int bag_slot;
+    int item_id;
+    int aim_reach;
+    int aim_min_dist;
+    int use_distance;
+    int tile_count;
+    int tile_slot;
+    int aim_x;
+    int aim_y;
+    int target_select_mode;
+    int target_count;
+    int score_tier;
+
+    data_fdps_battle_ai_best_item_score = 0;
+    default_class_move_cost =
+        fdps_get_class_record(ITEM_SEARCH_DEFAULT_CLASS_ROW);
+    actor = fdps_get_unit_record(unit_index);
+    actor_mp = actor->mp_current;
+    actor_x = (int) actor->pos_x;
+    actor_y = (int) actor->pos_y;
+
+    tile_coords = malloc(ITEM_SEARCH_TILE_BYTES);
+    bag_item_count = fdps_unit_item_count(unit_index);
+    if (bag_item_count == 0) {
+        return 0;
+    }
+
+    for (bag_slot = 0; bag_slot < bag_item_count; bag_slot++) {
+        item_id = (int) actor->inventory_slots[bag_slot * 2 + 1];
+        item = fdps_get_item_record(item_id);
+
+        aim_min_dist = 0;
+        aim_reach = (int) item->use_distance;
+        if (aim_reach >= ITEM_USE_DISTANCE_LINE_BIT) {
+            aim_reach = ITEM_SEARCH_LINE_AIM_REACH;
+            aim_min_dist = ITEM_SEARCH_LINE_AIM_MIN_DIST;
+        }
+        if (item->use_effect == 0) {
+            continue;
+        }
+
+        fdps_collect_targets_in_range(actor_x, actor_y, NULL, aim_reach,
+                                      aim_min_dist, 0);
+        tile_count = fdps_map_grid_collect_marked_tiles(tile_coords);
+        fdps_map_grid_reset();
+
+        for (tile_slot = 0; tile_slot < tile_count; tile_slot++) {
+            aim_x = (int) tile_coords[tile_slot * 2];
+            aim_y = (int) tile_coords[tile_slot * 2 + 1];
+            if (side_select == 0) {
+                target_select_mode = (item->use_target == 0);
+            } else {
+                target_select_mode = (int) item->use_target;
+            }
+
+            use_distance = (int) item->use_distance;
+            if (use_distance < ITEM_USE_DISTANCE_LINE_BIT) {
+                target_count =
+                    fdps_collect_targets_in_range(aim_x, aim_y,
+                                                  target_indices,
+                                                  (int) item->use_radius, 0,
+                                                  target_select_mode);
+            } else {
+                target_count =
+                    fdps_collect_targets_in_line(aim_x, aim_y, target_indices,
+                                                 actor_x, actor_y,
+                                                 use_distance -
+                                                 ITEM_USE_DISTANCE_LINE_BIT,
+                                                 target_select_mode);
+            }
+            fdps_map_grid_reset();
+            if (target_count == 0) {
+                continue;
+            }
+
+            score_tier = fdps_score_targets_for_item(item_id, target_count,
+                                                     target_indices);
+            if (score_tier > data_fdps_battle_ai_best_item_score) {
+                data_fdps_battle_ai_best_item_score = score_tier;
+                data_fdps_map_ai_best_item_target_x = aim_x;
+                data_fdps_battle_ai_best_item_target_y = aim_y;
+                data_fdps_map_ai_best_item_bag_slot = bag_slot;
+            }
+        }
+    }
+
+    free(tile_coords);
+    return 0;
+}
+
 /* 000132b0.  Fetches the ITEM.DAT record once, keeps use_amount and the
    use_effect code, and runs one of two target walks or neither.
 

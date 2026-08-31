@@ -2009,6 +2009,397 @@ static void a_search_that_catches_nobody_publishes_nothing(void)
     CHECK_EQ(data_fdps_battle_ai_best_spell_target_y, BSP_SENTINEL);
 }
 
+/* ------------------------------------------------------------------
+ * fdps_map_actor_score_best_item, 00013040.
+ *
+ * The item search is built on the same 4x4 fixture the attack search above
+ * uses -- atk_stage() puts up the seven blocks the flood fill needs and points
+ * the unit, item and class globals at them.  No block is added: the item table
+ * is already one of the seven.  Every class row costs 1 on all eight terrain
+ * types, so a reach of r covers exactly the tiles within Manhattan distance r
+ * of the centre and the candidate tiles come out of
+ * fdps_map_grid_collect_marked_tiles row by row, y outer and x inner.
+ *
+ * Every item below carries use_effect 0x1e, the line-damage code, because it
+ * is the one code fdps_score_targets_for_item weighs without reading anything
+ * but the target's current HP: 0x12 when that HP is at or below the item's
+ * use_amount and 8 when it is above.  With use_amount 0 and a target on 100 HP
+ * every catch is worth exactly 8, which keeps a case about the search's own
+ * ranking from turning on the scorer's arithmetic.
+ *
+ * The two collectors read their side filter with OPPOSITE polarities and the
+ * cases below depend on both: fdps_collect_targets_in_range's select_mode is
+ * 0 = side 0, 1 = every non-zero side, 2 = side 1, 3 = side 2, while
+ * fdps_collect_targets_in_line's select_enemy_side is 0 = every non-zero side
+ * and non-zero = side 0.
+ *
+ * Expected values come from the assembly at 00013040 -- PUSH 0x0 before the
+ * fdps_get_class_record call at 00013056, the CMP dword ptr [EBP-0x20],0x0 /
+ * JNZ empty-bag exit at 000130b0, the MOV AL,byte ptr [EDX+0xb] entry read at
+ * 000130e8 with the ADD EDX,EDX that makes the loop counter the entry index,
+ * the CMP EAX,0xf / JLE at 0001310f with the MOV 0x1 / MOV 0x1 clamp at
+ * 00013114, the CMP byte ptr [EAX+0xd],0x0 / JZ at 0001311f, the six PUSHes of
+ * the aim search at 00013129, the select_mode fork at 0001319c, the reload of
+ * the raw distance byte at 000131c8 with the second CMP EAX,0xf / JLE at
+ * 000131d6, the SUB EAX,0x10 at 000131e4, and the CMP EAX,[0x00063f8c] / JLE
+ * ranking at 00013257 -- and by walking that algorithm over the fixture by
+ * hand.  None of them is read off the emitted C.
+ *
+ * Every case leaves the score global at 0x12 and the other three at a sentinel
+ * before the call, so a case that expects a score of 8 also proves the entry
+ * zeroing at 0001304c.
+ * ------------------------------------------------------------------ */
+
+/* What the four globals hold going in: a score no result below could reach by
+   accident, and a value unlike every tile coordinate and bag slot used here. */
+#define BIT_SENTINEL_SCORE 0x12
+#define BIT_SENTINEL 0x5a
+
+/* Any char_id other than 0, so nothing below can be reached by the
+   protagonist's own weighting in a neighbouring scorer. */
+#define BIT_NOBODY 5
+
+/* Bit 0x80 of a bag entry's flag byte, the empty marker fdps_unit_item_count
+   counts by.  A zeroed record therefore reads as eight FULL entries, which is
+   why every actor below has its bag emptied explicitly. */
+#define BIT_SLOT_EMPTY 0x80
+
+/* The eight bag entries of a unit record's inventory_slots[16]. */
+#define BIT_BAG_ENTRIES 8
+
+/* ITEM.DAT use_distance values: 0x00 reaches the actor's own tile alone, 0x0f
+   is the largest non-line reach, 0x10 is the shortest line -- length 0, which
+   examines nothing -- and 0x11 is a line one tile long. */
+#define BIT_DIST_SELF      0x00
+#define BIT_DIST_WIDE      0x0f
+#define BIT_DIST_LINE_ZERO 0x10
+#define BIT_DIST_LINE_ONE  0x11
+
+/* A use_amount above any HP the fixture gives a unit, so the damage branch
+   answers 0x12 instead of 8. */
+#define BIT_LETHAL_AMOUNT 200
+
+/* A use_radius that covers the whole 4x4 map from any tile on it: the largest
+   Manhattan distance between two of its tiles is 6. */
+#define BIT_RADIUS_WHOLE_MAP 7
+
+/* The attack search's battle with the four item globals parked on their
+   sentinels.  atk_stage has already zeroed the item table and every unit. */
+static void bit_stage(void)
+{
+    atk_stage();
+    data_fdps_battle_ai_best_item_score = BIT_SENTINEL_SCORE;
+    data_fdps_map_ai_best_item_bag_slot = BIT_SENTINEL;
+    data_fdps_map_ai_best_item_target_x = BIT_SENTINEL;
+    data_fdps_battle_ai_best_item_target_y = BIT_SENTINEL;
+}
+
+/* Mark all eight bag entries empty and clear their id bytes. */
+static void bit_empty_bag(int unit_index)
+{
+    int slot;
+
+    for (slot = 0; slot < BIT_BAG_ENTRIES; slot++) {
+        atk_units[unit_index].inventory_slots[slot * 2] = BIT_SLOT_EMPTY;
+        atk_units[unit_index].inventory_slots[slot * 2 + 1] = 0;
+    }
+}
+
+/* Occupy bag entry `slot` with item_id: flag byte clear of the empty bit, id
+   byte beside it. */
+static void bit_carry(int unit_index, int slot, int item_id)
+{
+    atk_units[unit_index].inventory_slots[slot * 2] = 0;
+    atk_units[unit_index].inventory_slots[slot * 2 + 1] =
+        (unsigned char) item_id;
+}
+
+/* The five ITEM.DAT bytes this search and its scorer read. */
+static void bit_item(int item_id, int use_effect, int use_amount,
+                     int use_distance, int use_target, int use_radius)
+{
+    atk_items[item_id].use_effect = (unsigned char) use_effect;
+    atk_items[item_id].use_amount = (short) use_amount;
+    atk_items[item_id].use_distance = (unsigned char) use_distance;
+    atk_items[item_id].use_target = (unsigned char) use_target;
+    atk_items[item_id].use_radius = (unsigned char) use_radius;
+}
+
+/* The actor: unit 0 at (x, y) on side `side` with 100 HP and an empty bag. */
+static void bit_actor(int x, int y, int side)
+{
+    atk_unit(0, x, y, side, 10, 5, 100, BIT_NOBODY);
+    bit_empty_bag(0);
+}
+
+/* The literal record offsets the search reads: the actor's tile at +0x00 and
+   +0x01, its bag at +0x0a -- the entry read is +0xb + slot*2, which is
+   inventory_slots[slot * 2 + 1] -- and its current MP as a signed word at
+   +0x44, plus the item's use_effect, use_distance, use_target and use_radius
+   bytes at +0x0d, +0x10, +0x11 and +0x12.  The item stride matters as much as
+   the offsets: fdps_get_item_record multiplies the id by a literal 0x17, so an
+   id past 0 would land somewhere else if the record measured anything
+   different. */
+static void item_search_reads_these_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0x00);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 0x01);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, inventory_slots), 0x0a);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, mp_current), 0x44);
+    CHECK_EQ((int) sizeof(struct fdps_item_effect), 0x17);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, use_effect), 0x0d);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, use_distance), 0x10);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, use_target), 0x11);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, use_radius), 0x12);
+}
+
+/* CMP dword ptr [EBP-0x20],0x0 / JNZ at 000130b0: an actor carrying nothing
+   leaves at 000130bd with the score freshly zeroed and the other three globals
+   untouched, so the previous actor's decision is still standing in them.  A
+   usable item is staged in the table and the actor is standing where its own
+   radius would catch it, so the case fails if the walk ran at all. */
+static void an_empty_bag_returns_at_once(void)
+{
+    bit_stage();
+    bit_actor(1, 1, 0);
+    bit_item(1, USE_EFFECT_DAMAGE, 0, BIT_DIST_SELF, 3, 0);
+    data_fdps_map_unit_count = 1;
+
+    CHECK_EQ(fdps_map_actor_score_best_item(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
+    CHECK_EQ(data_fdps_map_ai_best_item_bag_slot, BIT_SENTINEL);
+    CHECK_EQ(data_fdps_map_ai_best_item_target_x, BIT_SENTINEL);
+    CHECK_EQ(data_fdps_battle_ai_best_item_target_y, BIT_SENTINEL);
+}
+
+/* CMP byte ptr [EAX+0xd],0x0 / JZ at 0001311f skips to the next bag entry, so
+   an item with no use effect costs the walk nothing and the entry after it is
+   still examined.  Entry 0 holds the unusable item and entry 1 the usable one,
+   and the published slot says which was scored. */
+static void an_item_that_cannot_be_used_is_passed_over(void)
+{
+    bit_stage();
+    bit_actor(1, 1, 0);
+    bit_carry(0, 0, 1);
+    bit_carry(0, 1, 2);
+    bit_item(1, 0, 0, BIT_DIST_SELF, 3, 0);
+    bit_item(2, USE_EFFECT_DAMAGE, 0, BIT_DIST_SELF, 3, 0);
+    data_fdps_map_unit_count = 1;
+
+    CHECK_EQ(fdps_map_actor_score_best_item(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 8);
+    CHECK_EQ(data_fdps_map_ai_best_item_bag_slot, 1);
+    CHECK_EQ(data_fdps_map_ai_best_item_target_x, 1);
+    CHECK_EQ(data_fdps_battle_ai_best_item_target_y, 1);
+}
+
+/* MOV EDX,[EBP-0x1c] / ADD EDX,EDX / ADD EDX,[EBP-0x48] / MOV AL,[EDX+0xb] at
+   000130de: the loop counter IS the entry index, and the flag byte
+   fdps_unit_item_count counted with is never looked at again.  Here the only
+   OCCUPIED entry is 7 and it holds an item with no use effect, while entry 0
+   is marked empty and its id byte still names a usable item.  The count is
+   therefore 1, the walk reads entry 0, and the empty entry's item is the one
+   scored and published.  A loop that walked all eight entries and skipped the
+   empty ones would find only the unusable item in entry 7 and publish nothing
+   (rebuild_info/pitfalls.md). */
+static void the_bag_walk_uses_its_counter_as_the_entry_index(void)
+{
+    bit_stage();
+    bit_actor(1, 1, 0);
+    atk_units[0].inventory_slots[1] = 1;
+    bit_carry(0, 7, 2);
+    bit_item(1, USE_EFFECT_DAMAGE, 0, BIT_DIST_SELF, 3, 0);
+    bit_item(2, 0, 0, BIT_DIST_SELF, 3, 0);
+    data_fdps_map_unit_count = 1;
+
+    CHECK_EQ(fdps_map_actor_score_best_item(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 8);
+    CHECK_EQ(data_fdps_map_ai_best_item_bag_slot, 0);
+    CHECK_EQ(data_fdps_map_ai_best_item_target_x, 1);
+    CHECK_EQ(data_fdps_battle_ai_best_item_target_y, 1);
+}
+
+/* MOV EAX,[EBP-0x1c] / MOV [0x00063f7c],EAX at 00013277 publishes the loop
+   counter, so the slot the winner is announced under is the entry it was read
+   from.  Entry 0's item wounds for 8 and entry 1's kills for 0x12, so the
+   later entry takes the decision. */
+static void the_published_slot_is_the_winning_entry(void)
+{
+    bit_stage();
+    bit_actor(1, 1, 0);
+    bit_carry(0, 0, 1);
+    bit_carry(0, 1, 2);
+    bit_item(1, USE_EFFECT_DAMAGE, 0, BIT_DIST_SELF, 3, 0);
+    bit_item(2, USE_EFFECT_DAMAGE, BIT_LETHAL_AMOUNT, BIT_DIST_SELF, 3, 0);
+    data_fdps_map_unit_count = 1;
+
+    CHECK_EQ(fdps_map_actor_score_best_item(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 0x12);
+    CHECK_EQ(data_fdps_map_ai_best_item_bag_slot, 1);
+    CHECK_EQ(data_fdps_map_ai_best_item_target_x, 1);
+    CHECK_EQ(data_fdps_battle_ai_best_item_target_y, 1);
+}
+
+/* CMP EAX,[0x00063f8c] / JLE at 00013257 is strictly greater, so an equal
+   score leaves the incumbent standing and the earliest entry that reached it
+   keeps the decision.  Both entries hold the same item, so both score 8 and
+   only the first may be published.  The 8 also has to beat the 0x12 the
+   fixture parked in the score global, which it can only do because the entry
+   zeroing at 0001304c ran first. */
+static void an_equal_score_does_not_displace_the_incumbent(void)
+{
+    bit_stage();
+    bit_actor(1, 1, 0);
+    bit_carry(0, 0, 1);
+    bit_carry(0, 1, 1);
+    bit_item(1, USE_EFFECT_DAMAGE, 0, BIT_DIST_SELF, 3, 0);
+    data_fdps_map_unit_count = 1;
+
+    CHECK_EQ(fdps_map_actor_score_best_item(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 8);
+    CHECK_EQ(data_fdps_map_ai_best_item_bag_slot, 0);
+}
+
+/* CMP dword ptr [EBP+0x18],0x0 / JNZ at 0001319c forks the side filter.  On
+   the enemy phase the item's use_target byte is replaced by (byte == 0), so a
+   byte of 0 becomes the collector's select_mode 1 -- every non-zero side --
+   and a byte of 3 becomes select_mode 0, side 0.  On the NPC phase the byte
+   goes through as it stands, so 0 selects side 0 and 3 selects side 2.
+   Everything here reaches out of the actor's own tile with reach 0 and radius
+   0, so the actor is the only unit any collector can see and it is on side 0:
+   the two arrangements that select side 0 publish, the two that do not publish
+   nothing.  That the actor's own tile is a candidate at all is the aim
+   search's min_dist of 0, PUSH of [EBP-0x8] left at its 000130fd zero. */
+static void the_use_target_byte_is_inverted_on_the_enemy_phase(void)
+{
+    bit_stage();
+    bit_actor(1, 1, 0);
+    bit_carry(0, 0, 1);
+    bit_item(1, USE_EFFECT_DAMAGE, 0, BIT_DIST_SELF, 0, 0);
+    data_fdps_map_unit_count = 1;
+    CHECK_EQ(fdps_map_actor_score_best_item(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
+    CHECK_EQ(data_fdps_map_ai_best_item_bag_slot, BIT_SENTINEL);
+
+    bit_stage();
+    bit_actor(1, 1, 0);
+    bit_carry(0, 0, 1);
+    bit_item(1, USE_EFFECT_DAMAGE, 0, BIT_DIST_SELF, 3, 0);
+    data_fdps_map_unit_count = 1;
+    CHECK_EQ(fdps_map_actor_score_best_item(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 8);
+    CHECK_EQ(data_fdps_map_ai_best_item_bag_slot, 0);
+
+    bit_stage();
+    bit_actor(1, 1, 0);
+    bit_carry(0, 0, 1);
+    bit_item(1, USE_EFFECT_DAMAGE, 0, BIT_DIST_SELF, 0, 0);
+    data_fdps_map_unit_count = 1;
+    CHECK_EQ(fdps_map_actor_score_best_item(0, 1), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 8);
+    CHECK_EQ(data_fdps_map_ai_best_item_bag_slot, 0);
+
+    bit_stage();
+    bit_actor(1, 1, 0);
+    bit_carry(0, 0, 1);
+    bit_item(1, USE_EFFECT_DAMAGE, 0, BIT_DIST_SELF, 3, 0);
+    data_fdps_map_unit_count = 1;
+    CHECK_EQ(fdps_map_actor_score_best_item(0, 1), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
+    CHECK_EQ(data_fdps_map_ai_best_item_bag_slot, BIT_SENTINEL);
+}
+
+/* MOV 0x1 into both [EBP-0x4] and [EBP-0x8] at 00013114, and SUB EAX,0x10 at
+   000131e4.  A line item aims at its neighbours -- reach 1 with an exclusive
+   minimum distance of 1 drops the actor's own tile -- and the line then sweeps
+   from the actor toward the aim tile for use_distance - 0x10 tiles, the first
+   tile examined being the one next to the actor.
+
+   The actor stands at (1, 1) and a side-0 unit at (1, 0), one of the four
+   neighbours.  select_enemy_side is the line collector's own polarity and a
+   non-zero value there keeps side 0, so use_target 1 on the NPC phase catches
+   it.  The candidate tiles arrive row by row, so (1, 0) is the first of the
+   four and the one published.
+
+   With use_distance 0x10 the same item sweeps 0 tiles and catches nothing: the
+   subtraction is what makes 0x11 reach one tile, and a length taken from the
+   raw byte would sweep sixteen and seventeen instead. */
+static void a_line_item_aims_at_its_neighbours(void)
+{
+    bit_stage();
+    bit_actor(1, 1, 0);
+    bit_carry(0, 0, 1);
+    bit_item(1, USE_EFFECT_DAMAGE, 0, BIT_DIST_LINE_ONE, 1, 0);
+    atk_unit(1, 1, 0, 0, 0, 0, 100, BIT_NOBODY);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_item(0, 1), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 8);
+    CHECK_EQ(data_fdps_map_ai_best_item_bag_slot, 0);
+    CHECK_EQ(data_fdps_map_ai_best_item_target_x, 1);
+    CHECK_EQ(data_fdps_battle_ai_best_item_target_y, 0);
+
+    bit_stage();
+    bit_actor(1, 1, 0);
+    bit_carry(0, 0, 1);
+    bit_item(1, USE_EFFECT_DAMAGE, 0, BIT_DIST_LINE_ZERO, 1, 0);
+    atk_unit(1, 1, 0, 0, 0, 0, 100, BIT_NOBODY);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_item(0, 1), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
+    CHECK_EQ(data_fdps_map_ai_best_item_bag_slot, BIT_SENTINEL);
+    CHECK_EQ(data_fdps_map_ai_best_item_target_x, BIT_SENTINEL);
+    CHECK_EQ(data_fdps_battle_ai_best_item_target_y, BIT_SENTINEL);
+}
+
+/* MOV EAX,[EBP-0x50] / MOV AL,byte ptr [EAX+0x10] at 000131c8 reloads the
+   distance byte from the record before the shape test, so the value the clamp
+   at 00013114 left behind is not the value that picks the branch.
+
+   Both halves carry the same item but for its distance byte, both aim on the
+   NPC phase with use_target 1, and the only other unit is on side 1 at (3, 3),
+   the far corner.  The line collector reads a non-zero side filter as side 0,
+   so it can never see that unit; the radius collector reads select_mode 1 as
+   every non-zero side, and a radius of 7 covers the whole map from any tile on
+   it, so it always can.
+
+   With use_distance 0x11 the search must take the line branch and publish
+   nothing.  A search that kept the clamped reach of 1 would compare 1 against
+   0x10, take the radius branch instead and publish 8 -- which is exactly what
+   the second half shows the radius branch doing when the distance byte really
+   is below 0x10 (rebuild_info/pitfalls.md). */
+static void the_shape_test_reloads_the_raw_distance_byte(void)
+{
+    bit_stage();
+    bit_actor(1, 1, 0);
+    bit_carry(0, 0, 1);
+    bit_item(1, USE_EFFECT_DAMAGE, 0, BIT_DIST_LINE_ONE, 1,
+             BIT_RADIUS_WHOLE_MAP);
+    atk_unit(1, 3, 3, 1, 0, 0, 100, BIT_NOBODY);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_item(0, 1), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
+    CHECK_EQ(data_fdps_map_ai_best_item_bag_slot, BIT_SENTINEL);
+    CHECK_EQ(data_fdps_map_ai_best_item_target_x, BIT_SENTINEL);
+    CHECK_EQ(data_fdps_battle_ai_best_item_target_y, BIT_SENTINEL);
+
+    bit_stage();
+    bit_actor(1, 1, 0);
+    bit_carry(0, 0, 1);
+    bit_item(1, USE_EFFECT_DAMAGE, 0, BIT_DIST_WIDE, 1, BIT_RADIUS_WHOLE_MAP);
+    atk_unit(1, 3, 3, 1, 0, 0, 100, BIT_NOBODY);
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_map_actor_score_best_item(0, 1), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 8);
+    CHECK_EQ(data_fdps_map_ai_best_item_bag_slot, 0);
+    CHECK_EQ(data_fdps_map_ai_best_item_target_x, 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_target_y, 0);
+}
+
 void run_aiscore_tests(void)
 {
     RUN_TEST(attack_search_reads_these_offsets);
@@ -2071,4 +2462,13 @@ void run_aiscore_tests(void)
     RUN_TEST(the_tie_break_reads_power_signed);
     RUN_TEST(an_equal_power_does_not_displace_the_incumbent);
     RUN_TEST(a_search_that_catches_nobody_publishes_nothing);
+    RUN_TEST(item_search_reads_these_offsets);
+    RUN_TEST(an_empty_bag_returns_at_once);
+    RUN_TEST(an_item_that_cannot_be_used_is_passed_over);
+    RUN_TEST(the_bag_walk_uses_its_counter_as_the_entry_index);
+    RUN_TEST(the_published_slot_is_the_winning_entry);
+    RUN_TEST(an_equal_score_does_not_displace_the_incumbent);
+    RUN_TEST(the_use_target_byte_is_inverted_on_the_enemy_phase);
+    RUN_TEST(a_line_item_aims_at_its_neighbours);
+    RUN_TEST(the_shape_test_reloads_the_raw_distance_byte);
 }

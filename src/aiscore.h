@@ -93,6 +93,50 @@ extern int fdps_map_actor_score_best_attack(int unit_index, int side_select);
 extern int fdps_map_actor_score_best_spell(int unit_index, int side_select);
 #pragma aux fdps_map_actor_score_best_spell "*" parm caller [];
 
+/* Which item in the actor's bag should it use this turn, and where?  Walks the
+   entries fdps_unit_item_count says the actor is carrying, spreads each usable
+   item's reach out of the actor's own tile as a set of candidate aim tiles,
+   collects the units the item would catch from every one of them, scores each
+   (item, aim tile) pair with fdps_score_targets_for_item below and publishes
+   the best in the four AI decision globals gamedata.h declares:
+   data_fdps_battle_ai_best_item_score, data_fdps_map_ai_best_item_bag_slot,
+   data_fdps_map_ai_best_item_target_x and ..._target_y.  Always returns 0.
+
+   An actor with an empty bag returns at once with the score at a fresh 0 and
+   the other three globals untouched, so the previous actor's decision is still
+   standing in them.  An item whose ITEM.DAT use_effect byte is 0 cannot be
+   used and is passed over.
+
+   The bag walk uses its counter directly as the entry index and never re-tests
+   the flag byte fdps_unit_item_count counted with, so it reads entries
+   0..count-1 and assumes the eight are packed (rebuild_info/pitfalls.md).
+
+   The item's use_distance byte carries the reach in its low nibble and the
+   straight-line shape in bit 0x10, and the two halves of the search read it
+   differently.  The aim search takes the byte as the reach with a minimum
+   distance of 0, which keeps the actor's own tile among the candidates; a line
+   item instead searches with reach 1 and minimum distance 1, so its aim tiles
+   are its passable orthogonal neighbours.  The shape test then reads the byte
+   again RAW: below 0x10 the units the item catches come from
+   fdps_collect_targets_in_range over the item's use_radius centred on the aim
+   tile, at 0x10 and above from fdps_collect_targets_in_line swept from the
+   actor's own tile toward the aim tile for use_distance - 0x10 tiles.
+
+   side_select says which side the actor is on and decides how the item's
+   use_target byte becomes the collector's side filter: non-zero -- the NPC
+   phase -- forwards the byte unchanged, 0 -- the enemy phase -- replaces it
+   with (byte == 0).  fdps_map_actor_use_item repeats the same inversion when
+   it carries the choice out.
+
+   The reach is spread over PROMAP.DAT row 0, whose eight terrain costs are all
+   1, so it counts walkable tiles and walls cut it short.  The grid has to
+   arrive as fdps_map_grid_reset (movegrid.h) leaves it and is reset again after
+   every collection.  Nothing is bounds checked: not the candidate tiles against
+   the 200-pair buffer, not the targets against the 32-index buffer, and not the
+   malloc against null; that buffer is also leaked on the empty-bag path. */
+extern int fdps_map_actor_score_best_item(int unit_index, int side_select);
+#pragma aux fdps_map_actor_score_best_item "*" parm caller [];
+
 /* How much is using item_id on these targets worth?  target_unit_indices is
    target_count battle unit indices, one byte each; the per-target scores are
    summed and the sum returned.

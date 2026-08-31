@@ -400,6 +400,43 @@ extern int data_fdps_map_ai_best_spell_id;
 extern unsigned int data_fdps_battle_ai_best_spell_target_x;
 extern unsigned int data_fdps_battle_ai_best_spell_target_y;
 
+/* 00063f7c, 00063f8c, 00063f94 and 00063f98.  What the map AI's item search
+   decided: how good the best use it found is, which of the acting unit's eight
+   bag entries that use spends, and the tile to aim it at.
+   fdps_map_actor_score_best_item (src/aiscore.h) writes all four, and a sweep
+   of every reference to 00063f8c and 00063f7c finds no other writer of the
+   score or of the bag slot anywhere in the image.  The two coordinates have a
+   second writer: fdps_map_actor_use_item reads all four to carry the choice
+   out and then rewrites the pair at 000273b5-00027443 as it walks the aim
+   cursor onto the tile.
+
+   The score is a tier on the same scale as
+   data_fdps_battle_ai_best_physical_score and
+   data_fdps_battle_ai_best_spell_score above, which is what lets
+   fdps_map_actor_take_best_action compare the three searches with one
+   threshold of 6.  It is signed: the search's own ranking compares it with JLE
+   at 0001325d, and fdps_battle_enemy_turn_phase, fdps_map_actor_behavior_step
+   and fdps_map_actor_take_best_action all read it back with JL / JGE.
+
+   The score is written on every call, zeroed before anything else so even the
+   empty-bag return leaves a fresh 0.  The other three are written only inside
+   the winning branch and hold the previous actor's decision otherwise, so a
+   reader that has not looked at the score first is looking at a stale slot and
+   a stale tile.
+
+   The bag slot receives the search's own loop counter, the two coordinates
+   zero-extended tile bytes, and every reader hands all three straight on as
+   call arguments, so none of them is ever compared or scaled.
+
+   They are four separate globals and not a record, and they are not even
+   contiguous: 00063f80 through 00063f88 belong to the physical and spell
+   searches and sit between the bag slot and the score
+   (rebuild_info/pitfalls.md, contract B). */
+extern int data_fdps_map_ai_best_item_bag_slot;
+extern int data_fdps_battle_ai_best_item_score;
+extern int data_fdps_battle_ai_best_item_target_y;
+extern int data_fdps_map_ai_best_item_target_x;
+
 /* 000643f0.  The inverse palette: which DAC entry is nearest to each of the
    4096 quantised colours, one byte per cell, built by
    fdps_build_palette_tables (src/palette.h) and read by the same eighteen
