@@ -771,6 +771,14 @@
       "status": "committed",
       "emitted_against": "0x5f",
       "rounds": 0
+    },
+    "0002e710": {
+      "name": "fdps_render_map_overview_scaled",
+      "target": "overview.c",
+      "body_size": "0x1fc",
+      "status": "committed",
+      "emitted_against": "0x1fc",
+      "rounds": 0
     }
   }
 }

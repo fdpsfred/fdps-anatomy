@@ -96,11 +96,14 @@ extern int data_fdps_battle_view_window_origin_y;
    attribute table of layer n.  The battle map is layer 0 and is the only one
    src/maptile.c reads.
 
-   A tile map opens with a header whose signed 16-bit tile width sits at +7,
-   and its 16-bit tile ids follow at +0xb in row-major order.  An attribute
-   table's 4-byte rows -- struct fdps_tile_attr_entry -- start at +0x11, one
-   row per tile id.  The original types both as byte pointers and does that
-   arithmetic itself, so a reader casts.
+   A tile map opens with a header whose signed 16-bit tile width sits at +7
+   and whose signed 16-bit tile height sits at +9, and its 16-bit tile ids
+   follow at +0xb in row-major order.  Both dimensions are read MOVSX and are
+   compared with JL wherever they bound a walk, so a header word of 0xffff has
+   to come out as -1.  An attribute table's 4-byte rows -- struct
+   fdps_tile_attr_entry -- start at +0x11, one row per tile id.  The original
+   types both as byte pointers and does that arithmetic itself, so a reader
+   casts.
 
    The two arrays are adjacent -- 00069c98 + 24 is 00069cb0 -- and are declared
    as two because that is how ticket 17 settled them; nothing emitted so far
