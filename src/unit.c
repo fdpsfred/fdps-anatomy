@@ -563,3 +563,44 @@ int fdps_battle_find_unit_at_cursor(void)
 
     return -1;
 }
+
+/* 0002db50.  Clears the acted-this-turn flag on every unit in the battle, so
+   that whatever raised it is forgotten and all of them may act again.  Takes
+   no arguments and returns nothing: all seven call sites -- 0002adcb and
+   0002adea in fdps_title_demo, 00014d58 in fdps_battle_system_menu, 0001e5b5
+   and 0001e61b in fdps_battle_advance_turn, 0002166e in fdps_icon_script_run
+   and 0002126e in fdps_chapter_15_init -- push nothing before the CALL, clean
+   nothing off the stack after it and read no result out of EAX.
+
+   The record address is formed inline, IMUL EAX,dword ptr [EBP-0x8],0x50 / MOV
+   EDX,dword ptr [0x00069cd8] / ADD EDX,EAX at 0002db78, and not by a call to
+   fdps_get_unit_record: there is no CALL anywhere in the body.  The base is
+   therefore re-read from the global on every iteration, so a relocation of the
+   array between two passes would be picked up -- the same property the
+   accessor has, spelled out here rather than borrowed.
+
+   The bound is data_fdps_map_unit_count, re-read from 0x00060150 on every pass
+   (CMP EAX,dword ptr [0x00060150] / JL at 0002db66), and the compare is the
+   signed JL, so a count of zero or a negative one leaves every record alone
+   instead of walking the whole address space.
+
+   AND byte ptr [EAX + 0x5],0x7f at 0002db8a is the whole of the work.  The
+   flags byte at record offset 5 keeps bits 0 to 6 and loses bit 7 only, and
+   both halves of that matter: bit 7 is the acted-this-turn flag
+   fdps_battle_mark_unit_done raises, while bit 0 of the same byte is the
+   retired flag.  A store of 0 here, or any wider mask, would put every unit
+   that has left the battle back on the field. */
+void fdps_units_clear_status_bit7(void)
+{
+    struct fdps_unit_record *unit;
+    int unit_index;
+
+    for (unit_index = 0;
+         unit_index < data_fdps_map_unit_count;
+         unit_index++) {
+        unit = (struct fdps_unit_record *)
+               (data_fdps_map_unit_array_ptr +
+                unit_index * (int) sizeof(struct fdps_unit_record));
+        unit->flags = (unsigned char) (unit->flags & 0x7f);
+    }
+}

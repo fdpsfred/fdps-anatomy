@@ -2023,6 +2023,171 @@ static void the_walk_starts_from_the_published_base(void)
     CHECK_EQ(fdps_battle_find_unit_at_cursor(), 0);
 }
 
+/* fdps_units_clear_status_bit7 @ 0002db50.
+ *
+ * Expected values come from the assembly: MOV dword ptr [EBP-0x8],0x0 at
+ * 0002db5c for the start index, CMP EAX,dword ptr [0x00060150] / JL at
+ * 0002db66 for the signed bound re-read every pass, IMUL EAX,dword ptr
+ * [EBP-0x8],0x50 / MOV EDX,dword ptr [0x00069cd8] / ADD EDX,EAX at 0002db78
+ * for the record address formed inline from the re-read base, and AND byte ptr
+ * [EAX + 0x5],0x7f at 0002db8a for the one byte it writes.  The record layout
+ * is ticket 17's: flags at +0x05, record size 0x50.
+ *
+ * The array is staged here rather than read from a game file: the function
+ * takes its whole input from two globals, so publishing a local block through
+ * data_fdps_map_unit_array_ptr is the only way to reach the loop.  Nothing
+ * below asserts what either global holds on its own -- ticket 23 owns that.
+ */
+#define CLEAR_UNITS 5
+#define CLEAR_ACTED_BIT 0x80
+#define CLEAR_RETIRED_BIT 0x01
+
+static struct fdps_unit_record clear_units[CLEAR_UNITS];
+
+/* Every record starts with every bit of its flags byte standing, so a pass
+   that cleared more than bit 7 -- or that missed a record -- shows up as a
+   value other than 0x7f. */
+static void stage_clear(void)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) clear_units;
+    for (i = 0; i < (int) sizeof(clear_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < CLEAR_UNITS; i++) {
+        clear_units[i].flags = 0xff;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) clear_units;
+    data_fdps_map_unit_count = CLEAR_UNITS;
+}
+
+static int clear_flags(int block_slot)
+{
+    return (int) clear_units[block_slot].flags;
+}
+
+/* The byte the AND addresses is record + 0x5 stepped by 0x50, so the layout
+   has to put flags there for the C to write the byte the original writes. */
+static void the_cleared_byte_is_the_flags_byte_at_offset_five(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 5);
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+}
+
+/* The loop runs from index 0 to the count, so every record in the battle is
+   visited and each one loses bit 7 -- 0xff becomes 0x7f. */
+static void every_unit_in_range_loses_bit_seven(void)
+{
+    int i;
+
+    stage_clear();
+    fdps_units_clear_status_bit7();
+
+    for (i = 0; i < CLEAR_UNITS; i++) {
+        CHECK_EQ(clear_flags(i), 0x7f);
+    }
+}
+
+/* AND 0x7f, not a store of zero and not a wider mask: bit 0 is the retired
+   flag and bits 1..6 are the rest of the byte, and all seven survive.  A
+   record with bit 7 already clear is left exactly as it was. */
+static void only_bit_seven_is_cleared(void)
+{
+    stage_clear();
+    clear_units[0].flags = (unsigned char) (CLEAR_ACTED_BIT
+                                            | CLEAR_RETIRED_BIT);
+    clear_units[1].flags = CLEAR_ACTED_BIT;
+    clear_units[2].flags = 0x00;
+    clear_units[3].flags = 0x7f;
+    clear_units[4].flags = 0x3c;
+
+    fdps_units_clear_status_bit7();
+
+    CHECK_EQ(clear_flags(0), CLEAR_RETIRED_BIT);
+    CHECK_EQ(clear_flags(1), 0x00);
+    CHECK_EQ(clear_flags(2), 0x00);
+    CHECK_EQ(clear_flags(3), 0x7f);
+    CHECK_EQ(clear_flags(4), 0x3c);
+}
+
+/* One byte per record changes and nothing else in the block does.  The whole
+   staged block is filled with a pattern that has bit 7 standing, so a stride
+   other than 0x50, an offset other than 0x5 or a write that spilled into a
+   neighbouring field would show up as an extra changed byte. */
+static void nothing_but_each_flags_byte_is_written(void)
+{
+    unsigned char *bytes;
+    int changed_count;
+    int expected_offset;
+    int i;
+
+    stage_clear();
+    bytes = (unsigned char *) clear_units;
+    for (i = 0; i < (int) sizeof(clear_units); i++) {
+        bytes[i] = 0x99;
+    }
+
+    fdps_units_clear_status_bit7();
+
+    changed_count = 0;
+    for (i = 0; i < (int) sizeof(clear_units); i++) {
+        if (bytes[i] != 0x99) {
+            changed_count++;
+        }
+    }
+    CHECK_EQ(changed_count, CLEAR_UNITS);
+
+    for (i = 0; i < CLEAR_UNITS; i++) {
+        expected_offset = i * 0x50 + 5;
+        CHECK_EQ((int) bytes[expected_offset], 0x19);
+    }
+}
+
+/* CMP EAX,dword ptr [0x00060150] / JL at 0002db66 is a signed compare against
+   the live count.  Records past the count are not in the battle and are not
+   touched; a count of zero looks at nothing, and a negative count stops before
+   the first record too rather than running away, which is what an unsigned JB
+   there would do. */
+static void the_signed_unit_count_bounds_the_sweep(void)
+{
+    stage_clear();
+    data_fdps_map_unit_count = 3;
+    fdps_units_clear_status_bit7();
+    CHECK_EQ(clear_flags(2), 0x7f);
+    CHECK_EQ(clear_flags(3), 0xff);
+    CHECK_EQ(clear_flags(4), 0xff);
+
+    stage_clear();
+    data_fdps_map_unit_count = 0;
+    fdps_units_clear_status_bit7();
+    CHECK_EQ(clear_flags(0), 0xff);
+
+    stage_clear();
+    data_fdps_map_unit_count = -1;
+    fdps_units_clear_status_bit7();
+    CHECK_EQ(clear_flags(0), 0xff);
+}
+
+/* The base comes out of data_fdps_map_unit_array_ptr inside the loop, so
+   republishing the global shifts what index 0 means: the sweep starts at the
+   record the global names and the ones in front of it are left alone. */
+static void the_sweep_starts_from_the_published_base(void)
+{
+    stage_clear();
+    data_fdps_map_unit_array_ptr = (unsigned char *) &clear_units[2];
+    data_fdps_map_unit_count = 2;
+
+    fdps_units_clear_status_bit7();
+
+    CHECK_EQ(clear_flags(0), 0xff);
+    CHECK_EQ(clear_flags(1), 0xff);
+    CHECK_EQ(clear_flags(2), 0x7f);
+    CHECK_EQ(clear_flags(3), 0x7f);
+    CHECK_EQ(clear_flags(4), 0xff);
+}
+
 void run_unit_tests(void)
 {
     RUN_TEST(the_record_is_base_plus_index_times_stride);
@@ -2106,4 +2271,11 @@ void run_unit_tests(void)
     RUN_TEST(only_the_retired_bit_removes_a_unit_from_the_answer);
     RUN_TEST(the_signed_unit_count_bounds_the_walk);
     RUN_TEST(the_walk_starts_from_the_published_base);
+
+    RUN_TEST(the_cleared_byte_is_the_flags_byte_at_offset_five);
+    RUN_TEST(every_unit_in_range_loses_bit_seven);
+    RUN_TEST(only_bit_seven_is_cleared);
+    RUN_TEST(nothing_but_each_flags_byte_is_written);
+    RUN_TEST(the_signed_unit_count_bounds_the_sweep);
+    RUN_TEST(the_sweep_starts_from_the_published_base);
 }

@@ -731,6 +731,14 @@
       "status": "committed",
       "emitted_against": "0x266",
       "rounds": 0
+    },
+    "0002db50": {
+      "name": "fdps_units_clear_status_bit7",
+      "target": "unit.c",
+      "body_size": "0x47",
+      "status": "committed",
+      "emitted_against": "0x47",
+      "rounds": 0
     }
   }
 }

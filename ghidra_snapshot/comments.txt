@@ -7292,10 +7292,10 @@ Single 0x90 NOP aligning fdps_units_clear_status_bit7 entry to a 16-byte boundar
 === 0002db50 [PLATE]
 Clears status bit 7 (0x80) on every battle unit: iterates i from 0 while i < the unit count global at 0x00060150, forms the record pointer as (*(char **)0x00069cd8) + i * 0x50, and applies AND 0x7f to the byte at unit offset +5, leaving the other status bits and all other fields untouched.
 Pool: fdps  [no library match; game-owned unit table]
-Evidence: All seven references are calls from game code (fdps_title_demo, fdps_battle_system_menu, fdps_battle_advance_turn, FUN_00021650, FUN_00021240) and it calls nothing. It reads only the battle unit count and unit array base globals and walks them with the 0x50 stride used across the battle code. Function ID finds no candidate in the Watcom 10.0x libraries or in ailv3.lib, and the body hash is unique in the image, ruling out crt and ail; a full prologue, stack frame and loop rule out binary_artifact.
+Evidence: Seven call sites in five game functions - fdps_title_demo (calls at 0002adcb and 0002adea), fdps_battle_system_menu (00014d58), fdps_battle_advance_turn (calls at 0001e5b5 and 0001e61b), fdps_icon_script_run (00021650) and fdps_chapter_15_init (00021240) - and it calls nothing. It reads only the battle unit count and unit array base globals and walks them with the 0x50 stride used across the battle code. Function ID finds no candidate in the Watcom 10.0x libraries or in ailv3.lib, and the body hash is unique in the image, ruling out crt and ail; a full prologue, stack frame and loop rule out binary_artifact.
 Name: behaviour of the body, fdps_ + snake_case per naming.md; no vendor symbol is involved.
 Boundary: 0002db50-0002db96, Watcom prologue 53 56 57 55 89 e5 at the entry and the matching epilogue plus RET at 0002db90-0002db96; all branch targets fall inside, and the 9 bytes that follow are lea-form alignment padding before the next function at 0002dba0.
-Signature: __watcall, no parameters, void return - confirmed by the assembly, which reads no incoming register or stack slot and sets no return value.
+Signature: stack convention (-4s, caller cleans), no parameters, void return - confirmed by the assembly, which reads no incoming register or stack slot and sets no return value.
 
 === 0002db97 [EOL]
 Alignment padding: lea eax,[eax+0] / lea edx,[edx+0] filling to the 16-byte entry of fdps_cel_blit_sprite.

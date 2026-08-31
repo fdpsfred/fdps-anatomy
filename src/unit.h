@@ -203,4 +203,22 @@ extern void fdps_set_flag_bit(int unit_index, int spell_id);
 extern int fdps_battle_find_unit_at_cursor(void);
 #pragma aux fdps_battle_find_unit_at_cursor "*" parm caller [];
 
+/* Lets every unit in the battle act again.  Walks the whole current unit
+   array -- indices 0 to data_fdps_map_unit_count-1 (gamedata.h) -- and clears
+   bit 7, and only bit 7, of each record's flags byte at offset 5: the
+   acted-this-turn flag fdps_battle_mark_unit_done raises.  Bit 0 of that byte
+   is the retired flag and every other bit standing in it survives untouched,
+   so this is a turn reset and not a reinstatement of units that have left.
+
+   Takes no arguments and reports nothing.  The bound is read signed, so a
+   count of zero or less touches no record, and the array base is re-read from
+   data_fdps_map_unit_array_ptr for each record rather than cached.
+
+   The three callers that reset a turn -- fdps_battle_advance_turn,
+   fdps_battle_system_menu and fdps_chapter_15_init -- want exactly that; the
+   title demo and the icon script call it for the same reason after driving
+   units around outside a real turn. */
+extern void fdps_units_clear_status_bit7(void);
+#pragma aux fdps_units_clear_status_bit7 "*" parm caller [];
+
 #endif
