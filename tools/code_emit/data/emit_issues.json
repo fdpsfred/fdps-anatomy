@@ -961,5 +961,20 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "00031780": [
+    {
+      "from": "emit",
+      "what": "The first of the nine steps is unpaced because last_tick is read at 000318bd before anything writes it, and that is preserved deliberately (the local is left uninitialised and the emitted .OBJ reads slot -0x14 with no prior store). What the slot actually holds on entry is stack garbage from whatever ran before, and the original's frame puts that local at [EBP-0x4] while the rebuild's puts it at [EBP-0x14] -- both frames are 0x3c bytes with the ramp at -0x3c and the pass counter at -0x18, but the six locals are assigned to different slots. So the two builds read different leftover bytes. In both, the wait ends immediately unless the leftover happens to equal the free-running tick counter, which is why the behaviour is the same in kind; what cannot be shown from here is that neither build ever hits the coincidence, because the value depends on what the caller left below its own stack pointer and all six callers (fdps_run_village_phase, fdps_village_item_menu, fdps_run_church_screen, fdps_run_bar_shop, fdps_run_weapon_shop, fdps_run_secret_menu) are still unemitted stubs in the rebuild. Worst case either way is one extra timer tick, about 55 ms, before the first frame of one transition.",
+      "needs": "The six callers emitted, and then a trace of the slot's value on entry to fdps_transition_zoom in both builds -- the original under an emulator breakpoint at 000318bd, the rebuild at the matching instruction -- compared against data_fdps_timer_tick_counter at that moment, over all twelve call sites.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed independently from the two objects rather than from the emitter's description. In the original, last_tick is [EBP-0x4] and 000318bd reads it with no store to that slot anywhere earlier in the function; in the rebuild it is -14H[ebp] and 0b13 reads it with no earlier store either. So both builds read leftover stack, but not the same leftover -- the frames agree on size (0x3c), on the ramp at -0x3c and on the pass counter at -0x18, and disagree on the other six slots. What my pass adds beyond the emitter's entry: I checked all twelve call sites, and each of the six callers reaches the call with its own frame still up (ADD ESP,0x10 follows every one), so the bytes below the pushed arguments are that caller's locals in both builds -- which is why the question cannot close until those six are emitted, and why it is a genuine gap rather than a lookup either of us skipped.",
+      "needs": "The six callers emitted, then the slot's value on entry traced in both builds and compared against data_fdps_timer_tick_counter at that moment, over all twelve call sites.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

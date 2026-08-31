@@ -37,9 +37,13 @@
  * destination holding exactly the bytes checked here.  delay() is in the same
  * position, and every case passes 0.
  */
+#include <conio.h>
+#include <dos.h>
+#include <i86.h>
 #include <stdlib.h>
 #include <string.h>
 #include "testharn.h"
+#include "gamedata.h"
 #include "transit.h"
 
 /* The rectangle under test, and two strides that are both larger than it and
@@ -1055,6 +1059,363 @@ static void mosaic_a_non_square_grid_skips_whole_rows(void)
     CHECK_EQ(q_dst(QH - 1, QW - 1), q_expected(QH - 1, QW - 1));
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_transition_zoom @ 00031780
+ *
+ * Expected values come from the assembly: the CMP 0x9 / JL at 000317a2 that
+ * makes it nine passes; the CMP byte ptr [EBP+0x20],0x0 at 000317b5 that
+ * derives the step from the pass, so that a non-zero direction ends on step 8
+ * and a zero one starts there; the CMP [EBP-0x8],0x8 / JNZ at 00031874 that
+ * sends step 8 to memmove and every other step to fdps_blit_rotated_scaled;
+ * the PUSH 0xa0000 / PUSH 0xfa00 pairs at 0003187a and 000318db that fix both
+ * the destination and the length of that memmove and of the closing memset;
+ * the CMP byte ptr [EBP+0x20],0x0 / JNZ at 000318d5 that guards the memset;
+ * and the six pushes at 000318ef -- 0, 0, 0, 0xff, 0, [0x000643bc] -- that
+ * make the last palette upload an unbiased one covering the whole DAC.  None
+ * of them is read off the emitted C.
+ *
+ * WHAT THE RUN IS OBSERVED THROUGH.  This routine takes no destination: it
+ * draws into the VGA aperture at 0xa0000 and it rewrites the DAC, and those
+ * two are its whole output.  A VGA in text mode does not decode 0xa0000 at
+ * all, so every case here puts the adapter into mode 13h -- the mode the game
+ * runs this transition in -- reads what it needs back out of the aperture and
+ * out of the DAC, and only then returns the console to text mode, which is
+ * also what reloads a palette the report can be read on.  The first case
+ * establishes the premise: an aperture that did not read back would make the
+ * later assertions meaningless rather than false.
+ *
+ * WHY A TIMER INTERRUPT IS INSTALLED.  Each step waits for
+ * data_fdps_timer_tick_counter to change, and in the game that counter is
+ * advanced by fdps_timer_tick_handler off AIL's timer.  Nothing advances it
+ * in a test image, so the wait after the first step would never end.  Each
+ * case therefore hooks IRQ0 for the duration of the call with a handler that
+ * increments the counter and chains to the one that was there -- the counter
+ * is a real global written by a real interrupt, which is the arrangement the
+ * routine is written against, and not a value poked in from the test.
+ *
+ * WHAT IS NOT ASSERTED.  Only the last of the nine steps is observable: every
+ * step redraws the whole picture over the one before it and the palette
+ * upload of every step is overwritten by the unbiased one at the end.  So the
+ * centre interpolation, the -3-per-step bias ramp and the camera-height ramp
+ * itself have no unit-observable of their own -- what the transition looks
+ * like on the way through is a playtest contract (rebuild_info/pitfalls.md).
+ * The two retrace waits and the tick pacing are in the same position: timing
+ * them would measure the emulator's cycle setting.  The first step being
+ * unpaced is likewise invisible from outside, and it is recorded on the
+ * definition rather than here.
+ * ------------------------------------------------------------------ */
+#define ZOOM_BASE 0x000a0000
+#define ZOOM_PITCH 0x140
+#define ZOOM_ROWS 0xc8
+#define ZOOM_FRAME_BYTES (ZOOM_PITCH * ZOOM_ROWS)
+
+/* The aperture is a 64K window and the frame stops at 64000, so the bytes
+   above it are where a memmove or a memset that ran long would land. */
+#define ZOOM_WINDOW_BYTES 0x10000
+#define ZOOM_TAIL_FIRST ZOOM_FRAME_BYTES
+#define ZOOM_TAIL_LAST (ZOOM_WINDOW_BYTES - 1)
+
+#define ZOOM_MODE_TEXT 0x03
+#define ZOOM_MODE_320X200X256 0x13
+
+/* IRQ0.  DOS/4GW reflects a hardware interrupt taken in protected mode to the
+   protected-mode vector, so the handler installed here is the one that runs
+   while the routine spins on the counter. */
+#define ZOOM_TIMER_VECTOR 8
+
+#define ZOOM_DAC_READ_INDEX 0x3c7
+#define ZOOM_DAC_DATA 0x3c9
+#define ZOOM_DAC_ENTRIES 256
+
+/* What the aperture is filled with before each run.  Every byte of the staged
+   picture has bit 7 set, so this value cannot come out of the picture and a
+   byte still carrying it is a byte the run never wrote. */
+#define ZOOM_SENTINEL 0x5a
+
+/* The screen centre the five shop screens pass, and the direction values:
+   1 is what every caller passes to open a screen and 0 what it passes to
+   close one.  -1 is not a value any caller passes; it is here because the
+   direction is tested against zero and not against one. */
+#define ZOOM_CENTER_X 0x9f
+#define ZOOM_CENTER_Y 0x63
+#define ZOOM_DIR_OPEN 1
+#define ZOOM_DIR_CLOSE 0
+#define ZOOM_DIR_OTHER (-1)
+
+static unsigned char zoom_src[ZOOM_FRAME_BYTES];
+static unsigned char zoom_shot[ZOOM_FRAME_BYTES];
+static unsigned char zoom_pal[ZOOM_DAC_ENTRIES * 3];
+
+/* What was read back out of the DAC while the faded palette was still up. */
+static int zoom_dac_shot[ZOOM_DAC_ENTRIES * 3];
+
+/* The two bytes of the aperture past the end of the frame, read back with the
+   frame. */
+static int zoom_tail_first;
+static int zoom_tail_last;
+
+static void (__interrupt __far *zoom_saved_timer)();
+
+/* The picture's byte at a position.  Bit 7 is always set, so no byte of it can
+   be mistaken for the sentinel or for the zero the closing direction leaves,
+   and both the row and the column term change it, so a picture landing one row
+   or one column out is caught rather than matching anyway. */
+static int zoom_pixel(int row, int col)
+{
+    return ((row * 31 + col * 17) & 0x7f) | 0x80;
+}
+
+static void __interrupt __far zoom_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(zoom_saved_timer);
+}
+
+static void zoom_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* Fills the whole 64K window with the sentinel, so that both the frame and the
+   bytes past it start out as something no run should produce. */
+static void zoom_fill_window(void)
+{
+    memset((void *) ZOOM_BASE, ZOOM_SENTINEL, (size_t) ZOOM_WINDOW_BYTES);
+}
+
+static void zoom_stage(void)
+{
+    int row;
+    int col;
+    int entry;
+
+    for (row = 0; row < ZOOM_ROWS; row++) {
+        for (col = 0; col < ZOOM_PITCH; col++) {
+            zoom_src[row * ZOOM_PITCH + col] =
+                (unsigned char) zoom_pixel(row, col);
+        }
+    }
+
+    /* A palette whose three channels disagree with each other and with the
+       entry number, all inside the DAC's six bits so that nothing is clamped
+       and the unbiased upload is the identity. */
+    for (entry = 0; entry < ZOOM_DAC_ENTRIES; entry++) {
+        zoom_pal[entry * 3] = (unsigned char) (entry & 0x3f);
+        zoom_pal[entry * 3 + 1] = (unsigned char) ((entry + 21) & 0x3f);
+        zoom_pal[entry * 3 + 2] = (unsigned char) ((entry + 42) & 0x3f);
+    }
+    data_fdps_vga_main_palette_ptr = zoom_pal;
+}
+
+static void zoom_read_dac(void)
+{
+    int entry;
+
+    for (entry = 0; entry < ZOOM_DAC_ENTRIES; entry++) {
+        outp(ZOOM_DAC_READ_INDEX, entry);
+        zoom_dac_shot[entry * 3] = (int) (inp(ZOOM_DAC_DATA) & 0x3f);
+        zoom_dac_shot[entry * 3 + 1] = (int) (inp(ZOOM_DAC_DATA) & 0x3f);
+        zoom_dac_shot[entry * 3 + 2] = (int) (inp(ZOOM_DAC_DATA) & 0x3f);
+    }
+}
+
+/* One whole transition, with the adapter in the mode the game draws it in and
+   with a timer interrupt running, leaving the frame in zoom_shot[], the two
+   bytes past it in zoom_tail_first and zoom_tail_last, and the DAC in
+   zoom_dac_shot[]. */
+static void run_zoom(int center_x, int center_y, int zoom_out)
+{
+    zoom_stage();
+    zoom_set_mode(ZOOM_MODE_320X200X256);
+    zoom_fill_window();
+
+    zoom_saved_timer = _dos_getvect(ZOOM_TIMER_VECTOR);
+    _dos_setvect(ZOOM_TIMER_VECTOR, zoom_timer_isr);
+    fdps_transition_zoom(zoom_src, center_x, center_y, (char) zoom_out);
+    _dos_setvect(ZOOM_TIMER_VECTOR, zoom_saved_timer);
+
+    memmove(zoom_shot, (void *) ZOOM_BASE, (size_t) ZOOM_FRAME_BYTES);
+    zoom_tail_first = (int) ((unsigned char *) ZOOM_BASE)[ZOOM_TAIL_FIRST];
+    zoom_tail_last = (int) ((unsigned char *) ZOOM_BASE)[ZOOM_TAIL_LAST];
+    zoom_read_dac();
+
+    zoom_set_mode(ZOOM_MODE_TEXT);
+}
+
+static int zoom_shot_pixel(int row, int col)
+{
+    return (int) zoom_shot[row * ZOOM_PITCH + col];
+}
+
+/* How many bytes of the captured frame are not the picture. */
+static int zoom_frame_mismatches(void)
+{
+    int i;
+    int bad;
+
+    bad = 0;
+    for (i = 0; i < ZOOM_FRAME_BYTES; i++) {
+        if (zoom_shot[i] != zoom_src[i]) {
+            bad++;
+        }
+    }
+    return bad;
+}
+
+/* How many bytes of the captured frame are not zero. */
+static int zoom_frame_non_zero(void)
+{
+    int i;
+    int bad;
+
+    bad = 0;
+    for (i = 0; i < ZOOM_FRAME_BYTES; i++) {
+        if (zoom_shot[i] != 0) {
+            bad++;
+        }
+    }
+    return bad;
+}
+
+/* How many DAC components disagree with the staged master palette. */
+static int zoom_dac_mismatches(void)
+{
+    int i;
+    int bad;
+
+    bad = 0;
+    for (i = 0; i < ZOOM_DAC_ENTRIES * 3; i++) {
+        if (zoom_dac_shot[i] != (int) zoom_pal[i]) {
+            bad++;
+        }
+    }
+    return bad;
+}
+
+/* The premise every case below rests on: in mode 13h the aperture is a plain
+   linear window that reads back what was written to it, at the first byte of
+   the frame, at its last byte, and at both ends of the tail past the frame
+   that the two length assertions are made against. */
+static void zoom_the_aperture_reads_back_in_mode_13h(void)
+{
+    unsigned char *aperture;
+    int first;
+    int last;
+    int tail_first;
+    int tail_last;
+
+    zoom_set_mode(ZOOM_MODE_320X200X256);
+    aperture = (unsigned char *) ZOOM_BASE;
+    aperture[0] = 0x5a;
+    aperture[ZOOM_FRAME_BYTES - 1] = 0xa5;
+    aperture[ZOOM_TAIL_FIRST] = 0x3c;
+    aperture[ZOOM_TAIL_LAST] = 0xc3;
+    first = (int) aperture[0];
+    last = (int) aperture[ZOOM_FRAME_BYTES - 1];
+    tail_first = (int) aperture[ZOOM_TAIL_FIRST];
+    tail_last = (int) aperture[ZOOM_TAIL_LAST];
+    zoom_set_mode(ZOOM_MODE_TEXT);
+
+    CHECK_EQ(first, 0x5a);
+    CHECK_EQ(last, 0xa5);
+    CHECK_EQ(tail_first, 0x3c);
+    CHECK_EQ(tail_last, 0xc3);
+}
+
+/* The opening direction runs the steps 0..8, so the pass that draws step 8
+   is the last one and what it leaves is what stays on screen.  Step 8 is the
+   memmove and not a blit, and that is exactly what this case separates:
+   fdps_blit_rotated_scaled writes only 318 x 198 of the page, so the last two
+   columns of every row and the bottom two rows would still be carrying the
+   sentinel if step 8 had gone through it -- or if the direction had been read
+   the other way round, since then step 8 would have run first and seven blits
+   would have painted over its interior.  Every one of the 64000 bytes is the
+   picture instead.
+
+   The two bytes past the frame are the memmove's length: 0xfa00 stops at
+   64000, so a copy sized from the 64K window rather than from the frame would
+   have overwritten them.
+
+   The DAC is asserted on the same run rather than on one of its own: the
+   capture happens before the console goes back to text mode, and a second run
+   would cost another nine ticks to observe the same upload.  All 256 entries
+   come back as staged, which is the unbiased upload at 000318ef; the picture
+   is checked afterwards to be still what was staged, since a comparison
+   against a source the routine had itself overwritten would agree either
+   way. */
+static void zoom_out_settles_on_the_whole_picture(void)
+{
+    int row;
+    int col;
+    int src_bad;
+
+    run_zoom(ZOOM_CENTER_X, ZOOM_CENTER_Y, ZOOM_DIR_OPEN);
+
+    src_bad = 0;
+    for (row = 0; row < ZOOM_ROWS; row++) {
+        for (col = 0; col < ZOOM_PITCH; col++) {
+            if ((int) zoom_src[row * ZOOM_PITCH + col]
+                != zoom_pixel(row, col)) {
+                src_bad++;
+            }
+        }
+    }
+
+    CHECK_EQ(src_bad, 0);
+    CHECK_EQ(zoom_frame_mismatches(), 0);
+    CHECK_EQ(zoom_dac_mismatches(), 0);
+    CHECK_EQ(zoom_dac_shot[0], (int) zoom_pal[0]);
+    CHECK_EQ(zoom_dac_shot[255 * 3 + 2], (int) zoom_pal[255 * 3 + 2]);
+    CHECK_EQ(zoom_shot_pixel(0, 0), zoom_pixel(0, 0));
+    CHECK_EQ(zoom_shot_pixel(0, ZOOM_PITCH - 1), zoom_pixel(0, ZOOM_PITCH - 1));
+    CHECK_EQ(zoom_shot_pixel(ZOOM_ROWS - 1, 0), zoom_pixel(ZOOM_ROWS - 1, 0));
+    CHECK_EQ(zoom_shot_pixel(ZOOM_ROWS - 1, ZOOM_PITCH - 1),
+             zoom_pixel(ZOOM_ROWS - 1, ZOOM_PITCH - 1));
+    CHECK_EQ(zoom_shot_pixel(ZOOM_ROWS - 2, ZOOM_PITCH - 2),
+             zoom_pixel(ZOOM_ROWS - 2, ZOOM_PITCH - 2));
+    CHECK_EQ(zoom_tail_first, ZOOM_SENTINEL);
+    CHECK_EQ(zoom_tail_last, ZOOM_SENTINEL);
+}
+
+/* The direction is a byte tested against zero -- CMP byte ptr [EBP+0x20],0x0
+   -- and not against one, so any non-zero value opens.  -1 is a value no
+   caller passes and every bit of it is set. */
+static void zoom_any_non_zero_direction_opens(void)
+{
+    run_zoom(ZOOM_CENTER_X, ZOOM_CENTER_Y, ZOOM_DIR_OTHER);
+
+    CHECK_EQ(zoom_frame_mismatches(), 0);
+    CHECK_EQ(zoom_tail_first, ZOOM_SENTINEL);
+}
+
+/* The closing direction runs the steps 8..0, so it ends on the magnified step
+   with the picture still up, and then the memset at 000318e7 blanks it.  Every
+   byte of the frame is palette index 0 and neither byte past it is touched,
+   which is the memset's 0xfa00 length.
+
+   This is also the direction that proves the closing palette upload is
+   unconditional: the last step inside the loop uploaded at a bias of -24, so
+   without the upload at 000318ef the DAC would come back 24 units dark on
+   every channel instead of holding the staged palette. */
+static void zoom_in_leaves_the_screen_blank(void)
+{
+    run_zoom(ZOOM_CENTER_X, ZOOM_CENTER_Y, ZOOM_DIR_CLOSE);
+
+    CHECK_EQ(zoom_frame_non_zero(), 0);
+    CHECK_EQ(zoom_shot_pixel(0, 0), 0);
+    CHECK_EQ(zoom_shot_pixel(ZOOM_ROWS - 1, ZOOM_PITCH - 1), 0);
+    CHECK_EQ(zoom_tail_first, ZOOM_SENTINEL);
+    CHECK_EQ(zoom_tail_last, ZOOM_SENTINEL);
+    CHECK_EQ(zoom_dac_mismatches(), 0);
+    CHECK_EQ(zoom_dac_shot[0], (int) zoom_pal[0]);
+    CHECK_EQ(zoom_dac_shot[1], (int) zoom_pal[1]);
+    CHECK_EQ(zoom_dac_shot[2], (int) zoom_pal[2]);
+}
+
 void run_transit_tests(void)
 {
     RUN_TEST(the_closing_path_ends_on_the_incoming_picture);
@@ -1077,4 +1438,8 @@ void run_transit_tests(void)
     RUN_TEST(mosaic_a_zero_source_stride_fills_one_colour);
     RUN_TEST(mosaic_the_source_is_never_written);
     RUN_TEST(mosaic_a_non_square_grid_skips_whole_rows);
+    RUN_TEST(zoom_the_aperture_reads_back_in_mode_13h);
+    RUN_TEST(zoom_out_settles_on_the_whole_picture);
+    RUN_TEST(zoom_any_non_zero_direction_opens);
+    RUN_TEST(zoom_in_leaves_the_screen_blank);
 }

@@ -1027,6 +1027,14 @@
       "status": "committed",
       "emitted_against": "0x292",
       "rounds": 0
+    },
+    "00031780": {
+      "name": "fdps_transition_zoom",
+      "target": "transit.c",
+      "body_size": "0x191",
+      "status": "committed",
+      "emitted_against": "0x191",
+      "rounds": 0
     }
   }
 }

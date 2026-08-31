@@ -12,10 +12,14 @@
  * (rebuild_info/build_flags.md).  malloc, free and rand come from <stdlib.h>
  * and are calls as well: CALL 0003d375, CALL 0003d478 and CALL 00042cf8.
  */
+#include <conio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <i86.h>
+#include "fdpstype.h"
+#include "gamedata.h"
 #include "blit.h"
+#include "palette.h"
 #include "transit.h"
 
 /* 0002f410.  The frame is composed in one scratch buffer and the outgoing
@@ -523,4 +527,165 @@ void fdps_transition_random_blocks(unsigned int src_or_fill, int src_pitch,
     }
 
     free(cell_table);
+}
+
+/* The VGA graphics aperture as a flat linear address and the size of one whole
+   mode 13h frame.  Both are hard-coded in the original -- PUSH 0xa0000 at
+   00031883, 000318b0 and 000318e2, PUSH 0xfa00 at 0003187a and 000318db -- and
+   stay literals here: 0xa0000 is where the display adapter answers, not the
+   address of anything the linker places, so there is no symbol to reference
+   instead. */
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_BYTES 0xfa00
+
+/* VGA input status register 1.  Bit 3 is set while the vertical retrace is in
+   progress, and it is the only bit the zoom looks at: TEST AL,0x8 at 000317db
+   and 0003181d. */
+#define VGA_INPUT_STATUS_1 0x3da
+#define VGA_STATUS_VERTICAL_RETRACE 0x08
+
+/* How many steps the zoom has, and the index of the one that is 1:1.  CMP
+   dword ptr [EBP-0x18],0x9 / JL at 000317a2 bounds the pass counter, and 8 is
+   the last step in four separate roles: the subtrahend that reverses the order
+   at 000317c3, the subtrahend of the palette bias at 000317df, the divisor of
+   the centre interpolation at 00031838 and 00031860, and the value the 1:1
+   test compares against at 00031874. */
+#define ZOOM_STEP_COUNT 9
+#define ZOOM_LAST_STEP 8
+
+/* How much darker each step still to come leaves the palette: NEG EAX then
+   LEA EAX,[EAX + EAX*0x2] at 000317e7 on the distance from the last step, so
+   step 0 uploads at -24 and step 8 at 0. */
+#define ZOOM_BIAS_PER_STEP 3
+
+/* The point the centre interpolation walks toward, in pixels: SUB EDX,0x9f at
+   00031824 and SUB EDX,0x63 at 0003184f.  It is the middle of the 320x200
+   screen. */
+#define SCREEN_CENTER_X 0x9f
+#define SCREEN_CENTER_Y 0x63
+
+/* fdps_blit_rotated_scaled takes its centre in quarter pixels rather than
+   pixels (blit.h), which is what the LEA EAX,[EAX*0x4 + 0x0] at 00031842 and
+   0003186a converts to. */
+#define QUARTER_PIXELS_PER_PIXEL 4
+
+/* 00031780.  The zoom the village and the five shop screens open and close
+   with.  Nine steps, each one a palette upload sandwiched between the two
+   halves of a retrace wait, then one redraw of the whole picture, then a wait
+   for the timer tick to move.
+
+   THE STEP INDEX IS NOT THE LOOP COUNTER.  The counter always runs 0..8 (CMP
+   0x9 / JL at 000317a2); the direction is applied by deriving the step from it
+   at 000317b5, so the loop body is written once and read forwards or
+   backwards.  zoom_out is tested as a byte -- CMP byte ptr [EBP+0x20],0x0 at
+   000317b5 and 000318d5 -- which is why it is a char here and not an int; the
+   callers all push a whole dword holding 0 or 1.
+
+   THE 1:1 STEP IS A memmove AND NOT A BLIT, AND THAT IS VISIBLE.
+   fdps_blit_rotated_scaled writes only 318 x 198 of the page (blit.h), so the
+   last two columns of every row and the bottom two rows would keep whatever
+   was on screen before; the memmove at 00031888 is what makes the settled
+   picture reach the edges.  It is the last step in the opening direction and
+   the first in the closing one.
+
+   BOTH CENTRE DIVISIONS TRUNCATE TOWARD ZERO.  0003182e onward is the
+   SAR EDX,0x1f / SHL EDX,0x3 / SBB EAX,EDX / SAR EAX,0x3 idiom, which is a
+   signed divide by 8 that rounds toward zero, not an arithmetic shift.  It
+   only shows for a centre left of or above the screen centre, where the
+   numerator is negative -- the village's signboard table has entries on both
+   sides of it -- and writing the obvious >> 3 moves that step's centre by a
+   quarter pixel.
+
+   THE TICK THE FIRST STEP WAITS FOR IS WHATEVER WAS ON THE STACK.  last_tick
+   is read at 000318bd before anything has written it, so the first step's wait
+   ends immediately unless the garbage happens to equal the counter, and only
+   the eight steps after it are tick-paced.  Latching the counter before the
+   loop -- which is what writing this loop cleanly leads to -- adds a tick to
+   every transition in the game.
+
+   data_fdps_timer_tick_counter is volatile at its declaration (gamedata.h)
+   because of this loop: nothing inside it writes the counter, so a build that
+   was allowed to hoist the load would spin here forever. */
+void fdps_transition_zoom(unsigned char *src_image, int center_x,
+                          int center_y, char zoom_out)
+{
+    /* The camera heights the nine steps are drawn at, low to high.  In the
+       original this is a nine-dword template at 0x00031040 copied onto the
+       frame with REP MOVSD at 00031799, which is what an initialised
+       automatic array compiles to; it is not a global and has no other
+       reader.  fdps_blit_rotated_scaled reads a camera height as an inverse
+       scale, so 50 is the four-times magnification the transition starts from
+       and 1500 is 1:1 (blit.h). */
+    int camera_height_ramp[ZOOM_STEP_COUNT] = {50, 200, 500, 800, 1000,
+                                               1200, 1300, 1400, 1500};
+    /* Which of the nine steps has been reached, always counting up. */
+    int pass;
+    /* Which step to draw, 0 at the magnified end and 8 at 1:1.  This is what
+       the direction is expressed in. */
+    int step;
+    /* The per-channel darkening this step's palette upload carries. */
+    int palette_bias;
+    /* The point the picture is magnified about, in quarter pixels, which is
+       what fdps_blit_rotated_scaled wants. */
+    int blit_center_x;
+    int blit_center_y;
+    /* The tick the previous step ended on.  Deliberately not initialised --
+       see the note above. */
+    unsigned int last_tick;
+
+    for (pass = 0; pass < ZOOM_STEP_COUNT; pass++) {
+        if (zoom_out != 0) {
+            step = pass;
+        } else {
+            step = ZOOM_LAST_STEP - pass;
+        }
+
+        /* The upload straddles the retrace: wait for it to start, rewrite the
+           whole DAC while the beam is off the picture, then wait for it to
+           end so that the redraw below does not begin inside the same
+           retrace. */
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+        }
+        palette_bias = -(ZOOM_LAST_STEP - step) * ZOOM_BIAS_PER_STEP;
+        fdps_set_palette_range(
+            (struct fdps_palette_entry *) data_fdps_vga_main_palette_ptr,
+            0, 0xff, palette_bias, palette_bias, palette_bias);
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+        }
+
+        blit_center_x = (center_x - (center_x - SCREEN_CENTER_X) * step
+                                        / ZOOM_LAST_STEP)
+                        * QUARTER_PIXELS_PER_PIXEL;
+        blit_center_y = (center_y - (center_y - SCREEN_CENTER_Y) * step
+                                        / ZOOM_LAST_STEP)
+                        * QUARTER_PIXELS_PER_PIXEL;
+
+        if (step == ZOOM_LAST_STEP) {
+            memmove((void *) VGA_SCREEN_BASE, src_image,
+                    (size_t) VGA_SCREEN_BYTES);
+        } else {
+            fdps_blit_rotated_scaled((unsigned char *) VGA_SCREEN_BASE,
+                                     src_image, camera_height_ramp[step],
+                                     0.0, blit_center_x, blit_center_y, 0.0);
+        }
+
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
+
+    /* The closing direction ends on the magnified step, so the picture is
+       still on screen when the loop stops; this is what leaves the screen
+       blank for whatever the caller draws next.  The opening direction ended
+       on the memmove and keeps it. */
+    if (zoom_out == 0) {
+        memset((void *) VGA_SCREEN_BASE, 0, (size_t) VGA_SCREEN_BYTES);
+    }
+
+    /* Whichever direction ran, the DAC is left holding the master palette
+       unbiased: the closing direction's last upload was at -24 and would
+       otherwise leave the next screen dark. */
+    fdps_set_palette_range(
+        (struct fdps_palette_entry *) data_fdps_vga_main_palette_ptr,
+        0, 0xff, 0, 0, 0);
 }

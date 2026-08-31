@@ -165,4 +165,46 @@ extern void fdps_transition_random_blocks(unsigned int src_or_fill,
                                           int frame_delay);
 #pragma aux fdps_transition_random_blocks "*" parm caller [];
 
+/* Plays the zoom transition the village and the five shop screens open and
+   close with: a 320x200 picture is brought out of a roughly four-times
+   magnification centred on a chosen point up to the normal 1:1 view while the
+   palette brightens out of black, or the same nine steps are run backwards
+   and the screen is left blank.
+
+   THIS ONE DOES NOT TAKE A DESTINATION.  Unlike everything above it, it draws
+   straight to the mode 13h aperture at 0xa0000 with a 320-byte pitch --
+   PUSH 0xa0000 at 00031883, 000318b0, 000318e2 -- so the adapter has to be in
+   that mode before the call.  src_image is a whole 320x200 8bpp page and is
+   only read.
+
+   center_x and center_y are the screen point, in pixels, that the magnified
+   view is centred on at the magnified end of the ramp.  The centre slides
+   from there to the screen centre (159, 99) as the ramp reaches 1:1, so the
+   picture appears to swing across as it pulls back.  The five shop screens
+   pass 159 and 99 and get a straight pull-back; the village passes the
+   signboard the player chose and gets the swing.
+
+   zoom_out is the direction and is read as a byte: non-zero runs the ramp
+   forward, which is the pull-back a screen opens with, and zero runs it
+   backwards, which is the zoom-in a screen closes with.  The closing
+   direction clears the aperture to palette index 0 when it is done; the
+   opening direction leaves the picture up.
+
+   THE PALETTE IS PART OF THE EFFECT AND IT IS THE GAME'S MASTER PALETTE.
+   Every step uploads data_fdps_vga_main_palette_ptr (gamedata.h) over the
+   whole DAC with a per-channel bias of -3 per remaining step, so the ramp
+   darkens by 24 units at its magnified end and is unbiased at 1:1, and the
+   call returns with the DAC holding that palette unbiased whichever direction
+   ran.  A caller that had its own palette up loses it.
+
+   ONE STEP PER TIMER TICK, EXCEPT THE FIRST.  Each step waits for
+   data_fdps_timer_tick_counter to move before the next one starts, so the
+   whole transition takes about eight ticks -- roughly half a second.  Nothing
+   paces the first step: the local the counter is compared against is not
+   initialised (see the comment on the definition).  Without the game's timer
+   interrupt running, the wait after the first step never ends. */
+extern void fdps_transition_zoom(unsigned char *src_image, int center_x,
+                                 int center_y, char zoom_out);
+#pragma aux fdps_transition_zoom "*" parm caller [];
+
 #endif
