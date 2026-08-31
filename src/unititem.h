@@ -241,4 +241,55 @@ extern int fdps_unit_can_equip_item(int unit_index, int item_id);
 extern void fdps_unit_equip_slot(int unit_index, int slot);
 #pragma aux fdps_unit_equip_slot "*" parm caller [];
 
+/* Which of unit `unit_index`'s inventory entries holds item id `item_id`?
+   Returns the index of the LOWEST entry whose id byte equals item_id, and -1
+   both when the unit is carrying nothing and when no entry holds that id.  The
+   answer goes straight to fdps_unit_remove_item at most call sites, so the two
+   ways of getting -1 are not told apart by anybody.
+
+   Twenty-five call sites in twelve functions ask this, and every one of them is
+   "does this unit have X, and where": fdps_apply_item_effect_to_targets asks
+   twice for `A3` 金屬礦, fdps_battle_advance_turn asks for the four items whose
+   effect is a per-turn recovery -- `A6` 妖刀村正, `A7` 妖刀正宗, `B1` 形見指環
+   and `B3` 魔精石碎片 (assets/items.md), each against a fixed unit index --
+   fdps_church_promote_loop for the promotion badges `DB` 勇者徽章, `E0` 光之徽章
+   and `E1` 暗之徽章, and the chapter events for the story items they take back
+   or upgrade, among them `58` 修佩魯, `A0` 灼烈之劍 and `DC` 反禁制器.
+
+   Most call sites compare the answer with -1 before acting -- CMP EAX,-0x1
+   straight after the ADD ESP,0x8, or a store to a local and a CMP against -0x1
+   on the next instruction -- but not all of them do:
+   fdps_apply_item_effect_to_targets's second ask at 00026d7d goes straight into
+   fdps_unit_remove_item at 00026d97 with no compare in between, so a -1 from
+   here can reach that function as a slot index.
+
+   The scan is bounded by fdps_unit_item_count(unit_index) -- the number of
+   entries whose flag byte does NOT carry the empty bit 0x80 -- and NOT by the
+   eight physical entries.  So the function only ever looks at entries
+   0..count-1, and it depends on the inventory being packed at the front, which
+   is the invariant fdps_unit_add_item and fdps_unit_remove_item maintain
+   between them.  Writing the obvious `for (slot = 0; slot < 8; slot++)`
+   instead changes the answer in both directions the moment an empty entry sits
+   below an occupied one:
+     - an entry ABOVE a hole is outside the bound and is not found at all, so
+       the original answers -1 for an item the unit is really holding;
+     - an EMPTY entry below the bound is still read, because
+       fdps_unit_get_item_id never consults the flag byte, so the original can
+       answer with the index of an empty entry whose stale id byte happens to
+       match -- and the caller then removes an item that is not there.
+   Neither is a bug the rebuild may fix: the bound is the count and nothing
+   else.
+
+   The comparison is a full 32-bit equality test against item_id as the caller
+   pushed it, and fdps_unit_get_item_id answers 0..255, so an item_id outside
+   that range -- 0x100, or -1 for an entry holding 0xff -- matches nothing.
+
+   unit_index is not range checked here and neither callee checks it either.  No
+   record is resolved in this body at all: both accessors go through
+   fdps_get_unit_record on every call of their own, so the count and each id
+   read see whatever data_fdps_map_unit_array_ptr points at when they run.
+   Nothing is written. */
+extern int fdps_unit_find_item_slot(int unit_index, int item_id);
+#pragma aux fdps_unit_find_item_slot "*" parm caller [];
+
 #endif

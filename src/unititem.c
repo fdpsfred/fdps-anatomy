@@ -1,9 +1,11 @@
 /* unititem.c -- a unit's inventory and what it has equipped.
  *
- * See unititem.h.  Every function here reaches its record through
- * fdps_get_unit_record; five of them work on the eight 2-byte inventory
- * entries at record offset 0x0a, and the sixth asks whether the unit's class
- * is allowed to equip a given item at all.  The file owns no state.
+ * See unititem.h.  Six of the functions here reach a record through
+ * fdps_get_unit_record and work on the eight 2-byte inventory entries at
+ * record offset 0x0a; fdps_unit_can_equip_item asks instead whether the unit's
+ * class is allowed to equip a given item at all, and fdps_unit_find_item_slot
+ * touches no record of its own -- it searches an inventory entirely through
+ * the other two accessors.  The file owns no state.
  */
 #include <stddef.h>
 #include <string.h>
@@ -413,4 +415,54 @@ void fdps_unit_equip_slot(int unit_index, int slot)
     }
 
     unit->inventory_slots[slot * 2] = INVENTORY_FLAG_EQUIPPED;
+}
+
+/* 00034520.  Which inventory entry holds this item?  One call for the bound, a
+   guard on it, and one counted loop over fdps_unit_get_item_id.  The body
+   resolves no record itself and reads no byte of one.
+
+   The bound comes first -- MOV EAX,[EBP+0x14] / PUSH EAX / CALL
+   fdps_unit_item_count / ADD ESP,0x4 / MOV [EBP-0xc],EAX at 0003452c -- and is
+   then guarded on its own: CMP dword ptr [EBP-0xc],0x0 / JNZ at 0003453b, with
+   the zero side storing 0xffffffff and jumping straight to the epilogue.  That
+   guard decides nothing the loop test would not decide anyway, since a bound of
+   zero runs no iterations; it is a branch the original has and the loop below is
+   entered only through it.
+
+   The loop test is MOV EAX,[EBP-0x8] / CMP EAX,[EBP-0xc] / JL at 00034551, the
+   signed form, and the value it compares against is the OCCUPIED-ENTRY COUNT and
+   not the eight physical entries.  That is the whole behaviour of this function
+   and it is not the loop an author would write; see the header.
+
+   The body pushes its two arguments right to left -- MOV EAX,[EBP-0x8] / PUSH
+   EAX for the entry index, then MOV EAX,[EBP+0x14] / PUSH EAX for the unit index
+   at 00034563 -- so the call is fdps_unit_get_item_id(unit_index, slot).  Its
+   result is used once and straight out of EAX: CMP EAX,dword ptr [EBP+0x18] /
+   JNZ at 00034573.  That is a full 32-bit equality compare against the argument
+   exactly as the caller pushed it, so the id is neither masked nor widened here
+   and an item_id above 0xff matches nothing -- fdps_unit_get_item_id answers
+   0..255.
+
+   A match stores the entry index and jumps to the epilogue, MOV [EBP-0x4],EAX /
+   JMP at 00034578, so the LOWEST matching entry is the answer and the scan does
+   not run on.  Falling out of the loop stores 0xffffffff at 00034582, the same
+   value the empty-inventory guard stores.  Neither argument is range checked and
+   nothing is written. */
+int fdps_unit_find_item_slot(int unit_index, int item_id)
+{
+    int occupied_count;
+    int slot_index;
+
+    occupied_count = fdps_unit_item_count(unit_index);
+    if (occupied_count == 0) {
+        return -1;
+    }
+
+    for (slot_index = 0; slot_index < occupied_count; slot_index++) {
+        if (fdps_unit_get_item_id(unit_index, slot_index) == item_id) {
+            return slot_index;
+        }
+    }
+
+    return -1;
 }

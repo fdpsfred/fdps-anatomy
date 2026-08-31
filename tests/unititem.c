@@ -83,6 +83,19 @@
  * span (0x01 and 0x15), the two ends of the armour span (0x16 and 0x27), a
  * consumable above both (0x2a) and the blank record's 0, which is what pins the
  * category test to the single 0x15 split rather than to the two named spans.
+ *
+ * The fdps_unit_find_item_slot cases take theirs from the assembly at 00034520
+ * -- CMP dword ptr [EBP-0xc],0x0 / JNZ at 0003453b for the empty-inventory
+ * guard, CMP EAX,[EBP-0xc] / JL at 00034554 for a loop bounded by the
+ * OCCUPIED-ENTRY COUNT rather than by the eight entries, CMP EAX,dword ptr
+ * [EBP+0x18] / JNZ at 00034573 for the full-width equality test on the value
+ * fdps_unit_get_item_id left in EAX, MOV [EBP-0x4],EAX / JMP at 00034578 for
+ * the immediate return on the first match, and the two 0xffffffff stores at
+ * 00034541 and 00034582.  Its fixtures stage the unit block alone, since
+ * neither of the two accessors it calls touches the item table.  The pair of
+ * cases that hold the bound against a hole in the inventory are the ones the
+ * plate comment's rebuild note is about: they fail for a body written as a
+ * sweep over all eight entries, in both directions.
  */
 #include <stddef.h>
 #include "testharn.h"
@@ -2044,6 +2057,198 @@ static void equip_slot_equips_the_entry_an_add_just_filled(void)
     CHECK_EQ(fdps_unit_get_item_id(0, 1), 2);
 }
 
+/* fdps_unit_find_item_slot at 00034520.  CMP dword ptr [EBP-0xc],0x0 / JNZ at
+   0003453b: a count of zero leaves through the guard and never reaches the
+   loop.  The fixture makes that visible rather than merely true -- entry 0 is
+   marked empty but still carries the id being looked for, so a body that
+   entered the loop anyway, or that swept all eight entries, would answer 0. */
+static void find_item_slot_answers_minus_one_for_an_empty_inventory(void)
+{
+    stage();
+    empty_inventory(0);
+    set_entry(0, 0, FLAG_EMPTY, 0x5a);
+    CHECK_EQ(fdps_unit_item_count(0), 0);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x5a), -1);
+}
+
+/* The plain case.  A packed inventory of four items answers with each id's own
+   entry index, and an id nobody holds answers -1 through the store at
+   00034582. */
+static void find_item_slot_finds_the_id_of_a_packed_entry(void)
+{
+    stage();
+    empty_inventory(0);
+    set_entry(0, 0, FLAG_CARRIED, 0x10);
+    set_entry(0, 1, FLAG_EQUIPPED, 0x11);
+    set_entry(0, 2, FLAG_CARRIED, 0x12);
+    set_entry(0, 3, FLAG_CARRIED, 0x13);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x10), 0);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x11), 1);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x12), 2);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x13), 3);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x14), -1);
+}
+
+/* MOV [EBP-0x4],EAX / JMP to the epilogue at 00034578: the scan returns on the
+   first match and does not run on, so a unit holding two of the same item
+   answers with the lower entry. */
+static void find_item_slot_answers_the_lowest_matching_entry(void)
+{
+    stage();
+    empty_inventory(0);
+    set_entry(0, 0, FLAG_CARRIED, 0x20);
+    set_entry(0, 1, FLAG_CARRIED, 0x33);
+    set_entry(0, 2, FLAG_CARRIED, 0x33);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x33), 1);
+}
+
+/* The rebuild note, first direction.  CMP EAX,[EBP-0xc] / JL at 00034554 bounds
+   the scan by fdps_unit_item_count and not by the eight entries, so the stale
+   id bytes of the empty entries above the count are never compared.  The
+   fixture puts 0x99 in every one of them: the original answers -1, and a body
+   written as `for (slot = 0; slot < 8; slot++)` would answer 3. */
+static void find_item_slot_stops_at_the_occupied_count(void)
+{
+    int slot_index;
+
+    stage();
+    empty_inventory(0);
+    set_entry(0, 0, FLAG_CARRIED, 0x10);
+    set_entry(0, 1, FLAG_CARRIED, 0x11);
+    set_entry(0, 2, FLAG_CARRIED, 0x12);
+    for (slot_index = 3; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_EMPTY, 0x99);
+    }
+
+    CHECK_EQ(fdps_unit_item_count(0), 3);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x99), -1);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x12), 2);
+}
+
+/* The rebuild note, second direction.  The bound is a COUNT and the entries it
+   walks are the first count of them, so an inventory with a hole at the front
+   is walked wrongly on purpose: entry 0 is empty and entry 1 holds the item,
+   the count is 1, and the single entry the scan reads is the empty one.
+   fdps_unit_get_item_id does not consult the flag byte, so the stale id of that
+   empty entry is what gets compared -- the original answers 0 for it, which is
+   an entry holding nothing, and -1 for the item the unit really has. */
+static void find_item_slot_reads_an_empty_entry_inside_the_bound(void)
+{
+    int slot_index;
+
+    stage();
+    empty_inventory(0);
+    set_entry(0, 0, FLAG_EMPTY, 0x55);
+    set_entry(0, 1, FLAG_CARRIED, 0x77);
+    for (slot_index = 2; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_EMPTY, 0);
+    }
+
+    CHECK_EQ(fdps_unit_item_count(0), 1);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x55), 0);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x77), -1);
+}
+
+/* The other end of the bound: with all eight entries occupied the count is 8
+   and the last entry is inside the scan.  stage() leaves every flag byte zero,
+   which is exactly that case. */
+static void find_item_slot_reaches_the_last_entry_of_a_full_inventory(void)
+{
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_CARRIED, 0x30 + slot_index);
+    }
+
+    CHECK_EQ(fdps_unit_item_count(0), INVENTORY_ENTRY_COUNT);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x37), 7);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x38), -1);
+}
+
+/* CMP EAX,dword ptr [EBP+0x18] is a full 32-bit compare against the argument as
+   it was pushed, and fdps_unit_get_item_id answers 0..255, so an item_id
+   outside that range matches nothing: 0x100 does not find the entry holding
+   0x00 and -1 does not find the one holding 0xff.  A body that compared only
+   the low byte would answer 0 for 0x100, and one that sign-extended the id byte
+   would answer 1 for -1. */
+static void find_item_slot_compares_the_id_at_full_width(void)
+{
+    int slot_index;
+
+    stage();
+    for (slot_index = 0; slot_index < INVENTORY_ENTRY_COUNT; slot_index++) {
+        set_entry(0, slot_index, FLAG_CARRIED, 0x40 + slot_index);
+    }
+    set_entry(0, 0, FLAG_CARRIED, 0x00);
+    set_entry(0, 1, FLAG_CARRIED, 0xff);
+
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x00), 0);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x100), -1);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0xff), 1);
+    CHECK_EQ(fdps_unit_find_item_slot(0, -1), -1);
+}
+
+/* MOV EAX,[EBP+0x14] / PUSH EAX ahead of both calls: the unit index is what
+   both the bound and every id read are taken from, so the same search answers
+   differently per record.  The multiply inside fdps_get_unit_record is signed,
+   so index -1 reaches the record in front of the published base. */
+static void find_item_slot_takes_its_unit_from_the_index(void)
+{
+    stage();
+    set_entry(0, 3, FLAG_CARRIED, 0x61);
+    set_entry(1, 5, FLAG_CARRIED, 0x61);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x61), 3);
+    CHECK_EQ(fdps_unit_find_item_slot(1, 0x61), 5);
+    CHECK_EQ(fdps_unit_find_item_slot(2, 0x61), -1);
+
+    data_fdps_map_unit_array_ptr = unit_slot(1);
+    CHECK_EQ(fdps_unit_find_item_slot(-1, 0x61), 3);
+}
+
+/* Neither callee writes and this body has no store of its own, so the unit
+   block is byte-for-byte the same after a search that matches, one that runs
+   the loop out and one that leaves through the empty-inventory guard. */
+static void find_item_slot_writes_nothing(void)
+{
+    static unsigned char block_before[sizeof(unit_block)];
+    int i;
+    int diffs;
+
+    stage();
+    set_entry(0, 2, FLAG_CARRIED, 0x62);
+    empty_inventory(1);
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        block_before[i] = unit_block[i];
+    }
+
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x62), 2);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x63), -1);
+    CHECK_EQ(fdps_unit_find_item_slot(1, 0x62), -1);
+
+    diffs = 0;
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        if (unit_block[i] != block_before[i]) {
+            diffs++;
+        }
+    }
+    CHECK_EQ(diffs, 0);
+}
+
+/* Nothing is cached across the two calls this body makes: both accessors go
+   through fdps_get_unit_record themselves, so republishing the base between two
+   identical searches changes the answer. */
+static void find_item_slot_resolves_the_record_on_every_call(void)
+{
+    stage();
+    set_entry(0, 2, FLAG_CARRIED, 0x66);
+    set_entry(1, 6, FLAG_CARRIED, 0x66);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x66), 2);
+
+    data_fdps_map_unit_array_ptr = unit_slot(1);
+    CHECK_EQ(fdps_unit_find_item_slot(0, 0x66), 6);
+}
+
 void run_unititem_tests(void)
 {
     RUN_TEST(the_two_record_layouts_match_the_strides);
@@ -2127,4 +2332,14 @@ void run_unititem_tests(void)
     RUN_TEST(equip_slot_edits_the_record_the_index_names);
     RUN_TEST(equip_slot_resolves_the_record_on_every_call);
     RUN_TEST(equip_slot_equips_the_entry_an_add_just_filled);
+    RUN_TEST(find_item_slot_answers_minus_one_for_an_empty_inventory);
+    RUN_TEST(find_item_slot_finds_the_id_of_a_packed_entry);
+    RUN_TEST(find_item_slot_answers_the_lowest_matching_entry);
+    RUN_TEST(find_item_slot_stops_at_the_occupied_count);
+    RUN_TEST(find_item_slot_reads_an_empty_entry_inside_the_bound);
+    RUN_TEST(find_item_slot_reaches_the_last_entry_of_a_full_inventory);
+    RUN_TEST(find_item_slot_compares_the_id_at_full_width);
+    RUN_TEST(find_item_slot_takes_its_unit_from_the_index);
+    RUN_TEST(find_item_slot_writes_nothing);
+    RUN_TEST(find_item_slot_resolves_the_record_on_every_call);
 }

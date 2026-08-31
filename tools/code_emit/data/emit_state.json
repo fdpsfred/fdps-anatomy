@@ -1043,6 +1043,14 @@
       "status": "committed",
       "emitted_against": "0x159",
       "rounds": 0
+    },
+    "00034520": {
+      "name": "fdps_unit_find_item_slot",
+      "target": "unititem.c",
+      "body_size": "0x73",
+      "status": "committed",
+      "emitted_against": "0x73",
+      "rounds": 0
     }
   }
 }
