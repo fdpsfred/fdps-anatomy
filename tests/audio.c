@@ -864,6 +864,134 @@ static void start_sample_sets_neither_type_nor_volume(void)
              sample_field(init_only_sample, SAMPLE_VOLUME));
 }
 
+/* ---- fdps_audio_sample_is_playing @ 00030740 -----------------------------
+ *
+ * Expected values come from 00030740 -- LEA EAX,[EAX*0x4+0x0] / PUSH dword ptr
+ * [EAX+0x69d30] for the indexing, CALL AIL_sample_status, CMP EAX,0x4 / JNZ for
+ * the test, and the literal 1 and 0 the two arms write into [EBP-0x4] -- and
+ * from AIL_sample_status's worker at 00047290, which is MOV EAX,dword ptr
+ * [ESP+0x4] / TEST EAX,EAX / JZ RET / MOV EAX,dword ptr [EAX+0x4]: a null
+ * handle answers 0 and any other handle answers the word at +0x04.
+ *
+ * The out-of-range slot number both callers can pass is not exercised with a
+ * literal -1 here.  In FDPS.LE that index reads 0x00069d2c, and no instruction
+ * in the image writes 0x00069d28 or 0x00069d2c, so what the original fetches is
+ * a null handle; the dword below the table in this executable is some other
+ * symbol chosen by this build's link, so a -1 here would measure the test
+ * build's layout rather than the game's.  What the path turns on -- that a null
+ * handle answers 0 -- is asserted directly instead.
+ *
+ * The status word is written into the fixture by hand rather than reached
+ * through AIL_init_sample, because these cases need states the library has no
+ * call that produces, 4 among them.
+ */
+#define IS_PLAYING_TEST_SLOT 3
+
+static unsigned int status_sample[SAMPLE_WORDS];
+
+/* Every slot null except `slot`, which gets the fixture in state `status`.  A
+   null everywhere else is what makes an answer of 1 attributable to that one
+   slot: AIL reports 0 for all the others whatever the indexing did. */
+static void stage_status_slot(int slot, unsigned int status)
+{
+    int i;
+
+    for (i = 0; i < SAMPLE_WORDS; i++) {
+        status_sample[i] = 0;
+    }
+    status_sample[SAMPLE_STATUS / 4] = status;
+    for (i = 0; i < SFX_SAMPLE_SLOT_COUNT; i++) {
+        data_fdps_audio_sample_handle_table[i] = 0;
+    }
+    data_fdps_audio_sample_handle_table[slot] = status_sample;
+}
+
+/* The one state that answers 1, and the answer is the literal the JNZ's taken
+   arm writes, not merely a non-zero value. */
+static void is_playing_reports_the_playing_state(void)
+{
+    stage_status_slot(IS_PLAYING_TEST_SLOT, STATUS_PLAYING);
+    CHECK_EQ(fdps_audio_sample_is_playing(IS_PLAYING_TEST_SLOT), 1);
+}
+
+/* CMP EAX,0x4 / JNZ is an equality against 4 and nothing else, so a status
+   above it is as much a 0 as a status below it.  0 is the state a handle that
+   AIL has never been given holds, 2 is the state AIL_init_sample leaves a
+   finished one in, and 5..7 are there to rule out a >= 4 reading. */
+static void is_playing_reports_every_other_state_as_zero(void)
+{
+    static unsigned int other_states[7] = {0, 1, 2, 3, 5, 6, 7};
+    int i;
+
+    for (i = 0; i < 7; i++) {
+        stage_status_slot(IS_PLAYING_TEST_SLOT, other_states[i]);
+        CHECK_EQ(fdps_audio_sample_is_playing(IS_PLAYING_TEST_SLOT), 0);
+    }
+}
+
+/* LEA EAX,[EAX*0x4+0x0] scales by the entry size and the base is the table
+   itself, so both ends of the eight entries answer for themselves and no
+   neighbour answers for them. */
+static void is_playing_addresses_both_ends_of_the_table(void)
+{
+    stage_status_slot(0, STATUS_PLAYING);
+    CHECK_EQ(fdps_audio_sample_is_playing(0), 1);
+    CHECK_EQ(fdps_audio_sample_is_playing(1), 0);
+    CHECK_EQ(fdps_audio_sample_is_playing(SFX_SAMPLE_SLOT_COUNT - 1), 0);
+
+    stage_status_slot(SFX_SAMPLE_SLOT_COUNT - 1, STATUS_PLAYING);
+    CHECK_EQ(fdps_audio_sample_is_playing(SFX_SAMPLE_SLOT_COUNT - 1), 1);
+    CHECK_EQ(fdps_audio_sample_is_playing(0), 0);
+    CHECK_EQ(fdps_audio_sample_is_playing(SFX_SAMPLE_SLOT_COUNT - 2), 0);
+}
+
+/* A slot still holding its BSS zero -- what the whole table looks like when the
+   DIG driver never installed -- answers 0 rather than crashing or reporting a
+   voice.  This is also the answer the game's out-of-range index depends on, for
+   the reason in the block comment above. */
+static void is_playing_answers_zero_for_a_null_handle(void)
+{
+    int slot;
+
+    stage_status_slot(IS_PLAYING_TEST_SLOT, STATUS_PLAYING);
+    data_fdps_audio_sample_handle_table[IS_PLAYING_TEST_SLOT] = 0;
+    for (slot = 0; slot < SFX_SAMPLE_SLOT_COUNT; slot++) {
+        CHECK_EQ(fdps_audio_sample_is_playing(slot), 0);
+    }
+}
+
+/* Neither 0x00069d71 nor 0x00069d70 is compared anywhere in the function, so
+   the answer is about the voice and not about whether audio is switched on.
+   fdps_sfx_play and fdps_audio_start_sample both open with those two guards;
+   this one does not have them. */
+static void is_playing_consults_neither_audio_flag(void)
+{
+    stage_status_slot(IS_PLAYING_TEST_SLOT, STATUS_PLAYING);
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    data_fdps_audio_sfx_enabled_flag = 0;
+    CHECK_EQ(fdps_audio_sample_is_playing(IS_PLAYING_TEST_SLOT), 1);
+
+    stage_status_slot(IS_PLAYING_TEST_SLOT, STATUS_DONE);
+    data_fdps_audio_sfx_driver_available_flag = 1;
+    data_fdps_audio_sfx_enabled_flag = 1;
+    CHECK_EQ(fdps_audio_sample_is_playing(IS_PLAYING_TEST_SLOT), 0);
+}
+
+/* The function stores nothing: the only memory operands are the PUSH of the
+   handle and the frame slot the answer goes through.  Asking twice is what a
+   spinning caller does, and it gets the same answer both times with the handle
+   left as it stood. */
+static void is_playing_only_reads_the_handle(void)
+{
+    stage_status_slot(IS_PLAYING_TEST_SLOT, STATUS_PLAYING);
+    CHECK_EQ(fdps_audio_sample_is_playing(IS_PLAYING_TEST_SLOT), 1);
+    CHECK_EQ(fdps_audio_sample_is_playing(IS_PLAYING_TEST_SLOT), 1);
+    CHECK_EQ(sample_field(status_sample, SAMPLE_STATUS), STATUS_PLAYING);
+    CHECK_EQ((unsigned int) data_fdps_audio_sample_handle_table
+                 [IS_PLAYING_TEST_SLOT],
+             (unsigned int) status_sample);
+}
+
 void run_audio_tests(void)
 {
     RUN_TEST(the_fixture_looks_like_a_handle_to_ail);
@@ -897,4 +1025,10 @@ void run_audio_tests(void)
     RUN_TEST(start_sample_forwards_the_loop_count);
     RUN_TEST(start_sample_rate_comes_from_the_global);
     RUN_TEST(start_sample_sets_neither_type_nor_volume);
+    RUN_TEST(is_playing_reports_the_playing_state);
+    RUN_TEST(is_playing_reports_every_other_state_as_zero);
+    RUN_TEST(is_playing_addresses_both_ends_of_the_table);
+    RUN_TEST(is_playing_answers_zero_for_a_null_handle);
+    RUN_TEST(is_playing_consults_neither_audio_flag);
+    RUN_TEST(is_playing_only_reads_the_handle);
 }

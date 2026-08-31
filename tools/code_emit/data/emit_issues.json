@@ -929,5 +929,20 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "00030740": [
+    {
+      "from": "emit",
+      "what": "What the rebuild hands AIL when a caller passes SFX_NO_SAMPLE_SLOT. This is contract B. The index is unchecked in the original and -1 is a live input: 0001dfe4 CALLs fdps_audio_start_wav@00030a00 and stores its answer in [EBP-0x1c], and 0001e324 loads that same slot straight into the PUSH at 0001e327, with 00036967/0003696f the same shape in fdps_run_bonus_lottery. In FDPS.LE the resulting read is settled: the dword at 0x00069d2c is BSS padding that nothing in the image writes (checked with a program-wide search for both 0x00069d28 and 0x00069d2c), so the handle is null, AIL_sample_status's worker at 00047290 answers 0 for it, and the caller falls out of its spin loop immediately. In the rebuild the four bytes below data_fdps_audio_sample_handle_table are whichever symbol this build's link happens to place there, and Watcom promises nothing about the order or adjacency of tentative definitions. If that neighbour holds a value that AIL reads a 4 out of, the level-up and bonus-game wait loops spin for ever. The emitted C reproduces the unchecked index as the assembly has it and invents no guard.",
+      "needs": "The BSS neighbour cannot be known until ticket 23 has emitted the data_fdps_* definitions and the final link exists. Once it does: read the link map for what precedes data_fdps_audio_sample_handle_table, and follow it with a playtest of a level-up with sound effects switched off in the options -- that is the path where fdps_audio_start_wav returns -1 and the wait loop is entered with no voice to wait for. A hang there is this issue and nothing else.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached the same concern independently and confirmed it, with two things to add. First, the -1 input is not merely possible but plainly wired: fdps_audio_start_wav@00030a00 returns 0xffffffff at 00030a1e when either audio flag is clear and again at 00030a64 when its 0..7 scan found all eight voices playing, and both callers store that answer straight into the slot they later pass -- 0001dfe4 CALL 0x00030a00 / 0001dfec MOV dword ptr [EBP+-0x1c],EAX feeding 0001e324, and 00036941 CALL 0x00030a00 / 00036949 MOV dword ptr [EBP+-0x1c],EAX feeding 0003696f. Second, I widened the emptiness check: besides the instruction-operand search the emitter ran, get_xrefs_to on 00069d28 and on 00069d2c returns no references of any kind, which also covers data references that an operand search would not see. The one thing neither search can exclude is a computed access reaching 00069d2c through a negative index into some other array, and the only such access in the image is this function's own -1 path.",
+      "needs": "Nothing further is reachable now; it is settled for FDPS.LE and open only for the rebuild. It waits on ticket 23's data definitions and the final link, and then on the link map plus a playtest of a level-up with sound effects switched off, which is the path that enters the wait loop with no voice to wait for.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

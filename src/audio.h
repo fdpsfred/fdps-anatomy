@@ -89,4 +89,18 @@ extern int fdps_audio_start_sample(void *pcm_data, unsigned int pcm_len,
                                    unsigned int loop_count);
 #pragma aux fdps_audio_start_sample "*" parm caller [];
 
+/* Answers 1 while the voice in slot `sample_index` is still playing and 0 for
+   every other AIL status, so that a caller can hold a battle animation until
+   the sound effect it started has run out.  Both callers in the game spin on
+   it, and nothing else in the program is read or written.
+
+   The slot number is not range-checked and SFX_NO_SAMPLE_SLOT is a value the
+   callers really pass, because it is what fdps_audio_start_wav answers with
+   when it started nothing.  In FDPS.LE that index reaches BSS padding that no
+   instruction in the image ever writes, so the handle it fetches is null, and
+   AIL answers 0 for a null handle -- which is what lets the waiting caller
+   stop waiting for a sound that was never started. */
+extern int fdps_audio_sample_is_playing(int sample_index);
+#pragma aux fdps_audio_sample_is_playing "*" parm caller [];
+
 #endif

@@ -7911,10 +7911,10 @@ alignment padding: 8d80 00000000 (lea eax,[eax+0]) after the RET, up to the next
 Reports whether the sound started on one of the game's eight AIL sample voices is still playing.
 
 Algorithm:
-Indexes the eight-entry AIL sample handle table at DAT_00069d30 with sample_index, passes that handle to AIL_sample_status, and returns 1 when the status word is 4 -- AIL's playing state, the same value fdps_sfx_play and 0x00030a00 test for when they look for a free voice -- and 0 for every other status. sample_index is not range-checked.
+Indexes the eight-entry AIL sample handle table data_fdps_audio_sample_handle_table (at 00069d30) with sample_index, passes that handle to AIL_sample_status, and returns 1 when the status word is 4 -- AIL's playing state, the same value fdps_sfx_play and 0x00030a00 test for when they look for a free voice -- and 0 for every other status. sample_index is not range-checked.
 
 Parameters:
-  sample_index -- slot in the AIL sample handle table at DAT_00069d30, 0..7. Both callers pass it straight through from 0x00030a00, which returns the slot it started a sample on, or -1 when audio is disabled or all eight slots are already playing.
+  sample_index -- slot in the AIL sample handle table data_fdps_audio_sample_handle_table (at 00069d30), 0..7. Both callers pass it straight through from 0x00030a00, which returns the slot it started a sample on, or -1 when audio is disabled or all eight slots are already playing.
 
 Returns:
   1 while that voice is still playing, 0 otherwise. Callers spin on it to wait for a sound effect to run to its end before continuing.
@@ -7922,7 +7922,7 @@ Returns:
 Pool: fdps  [no library match in either Watcom or ailv3 Function ID sets; its only callee is the public AIL entry AIL_sample_status, which is how game code consumes the library, and the handle table it indexes is game-owned BSS]
 
 Rebuild note:
-sample_index is used unchecked and -1 is a live input: 0x00030a00 returns -1 when audio is disabled or all eight voices are busy, and both callers (0001e324, 0003696f) feed that straight into this function, so the original reads the dword just below the handle table at 0x00069d2c and asks AIL about it. Writing the obvious guard is only safe in one direction -- a rewritten guard must return 0 for an out-of-range index, since returning nonzero (or the equally obvious 'wait until it is playing, then wait until it stops') hangs the level-up and bonus-game wait loops forever when there was no voice to start the sound on.
+sample_index is used unchecked and -1 is a live input: 0x00030a00 returns -1 when audio is disabled or all eight voices are busy, and both callers (0001e324, 0003696f) feed that straight into this function, so the original reads the dword just below the handle table at 0x00069d2c and asks AIL about it. No instruction in the image references 0x00069d28 or 0x00069d2c and no data reference reaches either address -- they are padding between data_fdps_scene_palette_cycle_phase at 00069d24 and the table -- so that dword holds its BSS zero for the whole of a session; AIL_sample_status's worker at 00047290 opens with TEST EAX,EAX and answers 0 for a null handle. The original therefore answers 0 for an out-of-range slot, reached with no guard at all, and the rebuild reproduces the unchecked index rather than adding one.
 
 === 00030783 [EOL]
 Watcom alignment padding: lea eax,[eax+0] / lea edx,[edx+0] / nop, 13 bytes to 16-byte align next entry.

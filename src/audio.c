@@ -253,3 +253,29 @@ int fdps_audio_start_sample(void *pcm_data, unsigned int pcm_len,
     AIL_start_sample(data_fdps_audio_sample_handle_table[slot]);
     return slot;
 }
+
+/* 00030740.  One AIL call and one equality test on what it answered: MOV EAX,
+   dword ptr [EBP+0x14] / LEA EAX,[EAX*0x4+0x0] / PUSH dword ptr [EAX+0x69d30]
+   at 00030756 for the indexed handle, CALL AIL_sample_status at 0003075c, then
+   CMP EAX,0x4 / JNZ at 00030764 with the two arms writing 1 and 0 into the
+   shared return slot at [EBP-0x4].  The single return below is that slot, read
+   at 00030779.  The test is an equality, so the status word's signedness never
+   comes into it.
+
+   One value comes back from a CALL and that is the whole body: EAX from
+   AIL_sample_status, used only by the CMP.
+
+   sample_index is used with no bound of any kind, and that is a live path
+   rather than an oversight.  Both callers hand over whatever
+   fdps_audio_start_wav@00030a00 answered with, and that is SFX_NO_SAMPLE_SLOT
+   when it started nothing, so in FDPS.LE the PUSH really does read the dword at
+   0x00069d2c.  Nothing in the image writes 0x00069d28 or 0x00069d2c -- they are
+   the padding between the palette-cycle phase at 0x00069d24 and this table --
+   so a -1 index fetches a null handle, and AIL_sample_status's worker at
+   00047290 opens with TEST EAX,EAX / JZ and answers 0 for one.  The spinning
+   caller therefore leaves its wait loop at once. */
+int fdps_audio_sample_is_playing(int sample_index)
+{
+    return AIL_sample_status(data_fdps_audio_sample_handle_table[sample_index])
+           == AIL_SAMPLE_STATUS_PLAYING;
+}
