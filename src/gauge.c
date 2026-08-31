@@ -1,14 +1,67 @@
 /* gauge.c -- the game's gauge bars and where a combat gauge is placed.
  *
  * See gauge.h for what a caller has to know.  Nothing in this file holds
- * state: the unit record comes from fdps_get_unit_record (unit.h) and the
- * scroll position from the two view window origin globals gamedata.h
- * declares, and the only thing written is the caller's own pair of ints.
+ * state: the unit record comes from fdps_get_unit_record (unit.h), the scroll
+ * position from the two view window origin globals and the bar art from the
+ * gauge sheet pointers gamedata.h declares, and the only thing written is the
+ * caller's own memory -- a pair of ints, or a destination surface.
  */
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "blit.h"
 #include "unit.h"
 #include "gauge.h"
+
+/* The status gauge bar is 117 pixels wide and 8 rows tall, and the sheet holds
+   its three graphics that many bytes apart at that row pitch: PUSH 0x75 for
+   the source stride and PUSH 0x8 for the row count at both blits, and
+   IMUL EAX,dword ptr [EBP+0x1c],0x3a8 at 0001774c for the graphic stride.
+   0x3a8 is 0x75 * 8, so the sheet is three tightly packed frames and nothing
+   pads between them. */
+#define GAUGE_BAR_WIDTH 0x75
+#define GAUGE_BAR_HEIGHT 8
+#define GAUGE_BAR_GRAPHIC_STRIDE 0x3a8
+
+/* See gauge.h.  The three compares are separate and in this order -- CMP
+   dword ptr [EBP+0x20],0x0 / JLE at 00017762 guarding the filled blit, then
+   CMP ...,0x0 / JGE at 00017784 doing the clamp, then CMP ...,0x75 / JGE at
+   0001778d guarding the remainder -- so a fill_width of exactly 0 skips the
+   first blit and still draws the whole track, and a negative one is clamped
+   only after the first blit has already been skipped.  The clamp writes the
+   parameter slot itself at 00017786 and the remainder blit reads it back, so
+   the clamped value is what positions and sizes the second half.
+
+   The graphic base is worked out before the first compare, at 0001774c, and
+   so is computed even on the path that never blits from it.  That is codegen
+   and not behaviour: bar_index is only ever 0 to 2 here and the multiply
+   cannot trap. */
+void fdps_draw_gauge_bar(unsigned char *dst, int dst_stride, int bar_index,
+                         int fill_width)
+{
+    /* [EBP-4]: the filled colour's graphic within the sheet.  The remainder
+       deliberately does not go through it. */
+    unsigned char *filled_graphic;
+
+    filled_graphic = data_fdps_status_gauge_bar_sheet_ptr
+                     + bar_index * GAUGE_BAR_GRAPHIC_STRIDE;
+
+    if (fill_width > 0) {
+        fdps_blit_transparent_rect(filled_graphic, GAUGE_BAR_WIDTH, dst,
+                                   dst_stride, fill_width, GAUGE_BAR_HEIGHT);
+    }
+
+    if (fill_width < 0) {
+        fill_width = 0;
+    }
+
+    if (fill_width < GAUGE_BAR_WIDTH) {
+        fdps_blit_transparent_rect(data_fdps_status_gauge_bar_sheet_ptr
+                                       + fill_width,
+                                   GAUGE_BAR_WIDTH, dst + fill_width,
+                                   dst_stride, GAUGE_BAR_WIDTH - fill_width,
+                                   GAUGE_BAR_HEIGHT);
+    }
+}
 
 /* One map tile is 24 pixels square, and a map object's view position is its
    tile times this minus the view window origin.  IMUL EAX,EAX,0x18 at

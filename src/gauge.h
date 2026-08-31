@@ -8,10 +8,42 @@
  * Nothing in gauge.c owns state.  The placement routine reads the unit record
  * through fdps_get_unit_record (unit.h) and the view scroll position through
  * the two window-origin globals gamedata.h declares, and writes nothing but
- * the caller's own two ints.
+ * the caller's own two ints; the drawing routines read the gauge art through
+ * the sheet pointers gamedata.h declares and write only into the destination
+ * surface the caller hands them.
  */
 #ifndef GAUGE_H
 #define GAUGE_H
+
+/* Draws one 117x8 status gauge bar, filled to fill_width pixels, at dst.
+
+   The art is the three 117x8 graphics of the sheet
+   data_fdps_status_gauge_bar_sheet_ptr points at (gamedata.h): graphic 0 is
+   the empty track and graphics 1 and 2 are the filled colours, HP and MP.
+   The filled part is drawn first, fill_width columns wide taken from graphic
+   bar_index, and the remainder is then drawn from graphic 0 -- from the same
+   column onwards, so the empty track's own pixels line up with where they
+   would have been.  Both halves go through fdps_blit_transparent_rect, so
+   palette index 0 in the art leaves the destination pixel underneath alone
+   and the bar's rounded ends do not carry a background with them.
+
+   ONLY THE FILLED HALF HONOURS bar_index.  The remainder is always graphic 0,
+   never bar_index advanced by fill_width columns; drawing the obvious "same
+   graphic, later columns" paints the whole bar in the filled colour.
+
+   THE CLAMP IS ONE-SIDED.  fill_width below 0 is forced to 0 and an empty bar
+   is drawn, but nothing caps it at 117: a caller whose current exceeds its
+   maximum blits more than 117 columns out of a 117-pitch source, which reads
+   on into the next row of the art, and no remainder is drawn at all.  Adding
+   the symmetric upper clamp turns that smear into a clean full bar, which is
+   not what the original draws.
+
+   dst points at the bar's top-left pixel in an 8bpp surface and dst_stride is
+   that surface's pitch in bytes; both are used exactly as given, with no
+   clipping and no bound of any kind. */
+extern void fdps_draw_gauge_bar(unsigned char *dst, int dst_stride,
+                                int bar_index, int fill_width);
+#pragma aux fdps_draw_gauge_bar "*" parm caller [];
 
 /* Works out where one battle unit's HP gauge goes on screen while a combat
    animation is playing, and writes the position through out_position.

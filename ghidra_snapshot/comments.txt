@@ -1845,21 +1845,21 @@ alignment padding: 8d 40 00 (lea eax,[eax]) after the RET, aligning FUN_00017740
 Draws one 117x8 gauge bar filled to a caller-supplied pixel width, for callers that already hold a width rather than a stat pair.
 
 Algorithm:
-The bar art is the three 117x8 graphics fdps_load_global_resources decodes out of "Bar.cel" into the 0xaf8-byte buffer pointed to by DAT_000643c8, 0x3a8 (117*8) bytes apart; graphic 0 is the empty track and the others are the filled colours (fdps_draw_unit_status_panel uses 1 for HP and 2 for MP). The filled part is drawn first: when fill_width is positive, fdps_blit_transparent_rect copies fill_width columns by 8 rows from DAT_000643c8 + bar_index * 0x3a8 at source pitch 0x75 to dst at pitch dst_stride. fill_width is then clamped up to 0, and if it is still below 0x75 the remainder is drawn from graphic 0: source DAT_000643c8 + fill_width, that is the empty track advanced by the same number of columns, into dst + fill_width for 0x75 - fill_width columns by 8 rows, again through fdps_blit_transparent_rect, so palette index 0 in the art reads as transparent in both halves. There is no upper clamp: a fill_width above 0x75 draws only the first blit, at that oversized width.
+The bar art is the three 117x8 graphics fdps_load_global_resources decodes out of "Bar.cel" into the 0xaf8-byte buffer pointed to by data_fdps_status_gauge_bar_sheet_ptr, 0x3a8 (117*8) bytes apart; graphic 0 is the empty track and the others are the filled colours (fdps_draw_unit_status_panel uses 1 for HP and 2 for MP). The filled part is drawn first: when fill_width is positive, fdps_blit_transparent_rect copies fill_width columns by 8 rows from data_fdps_status_gauge_bar_sheet_ptr + bar_index * 0x3a8 at source pitch 0x75 to dst at pitch dst_stride. fill_width is then clamped up to 0, and if it is still below 0x75 the remainder is drawn from graphic 0: source data_fdps_status_gauge_bar_sheet_ptr + fill_width, that is the empty track advanced by the same number of columns, into dst + fill_width for 0x75 - fill_width columns by 8 rows, again through fdps_blit_transparent_rect, so palette index 0 in the art reads as transparent in both halves. There is no upper clamp: a fill_width above 0x75 draws only the first blit, at that oversized width.
 
 Parameters:
   dst -- pointer to the top-left pixel of the bar in the destination surface. fdps_draw_unit_status_panel passes its 320x200 panel page plus a fixed byte offset, dest + 0x9396 for HP and dest + 0xab56 for MP.
   dst_stride -- destination pitch in bytes, added to the destination cursor once per row; 0x140 (320) at every call site.
-  bar_index -- which 0x3a8-byte graphic in the sheet at DAT_000643c8 supplies the filled part, 0 to 2; only the filled half honours it, the remainder always comes from graphic 0.
+  bar_index -- which 0x3a8-byte graphic in the sheet at data_fdps_status_gauge_bar_sheet_ptr supplies the filled part, 0 to 2; only the filled half honours it, the remainder always comes from graphic 0.
   fill_width -- filled width in pixels out of the bar's 0x75 (117). Zero or less draws an empty bar, 0x75 or more draws no remainder.
 
 Returns:
   Nothing.
 
-Pool: fdps  [no Function ID hit in either library set and a unique hash in the image; it reads the game's own Bar.cel sheet global at DAT_000643c8 and hard-codes this game's UI geometry (117 wide, 8 high)]
+Pool: fdps  [no Function ID hit in either library set and a unique hash in the image; it reads the game's own Bar.cel sheet global at data_fdps_status_gauge_bar_sheet_ptr and hard-codes this game's UI geometry (117 wide, 8 high)]
 
 Rebuild note:
-The clamping is deliberately one-sided: fill_width below 0 is forced to 0, but nothing caps it at 0x75, so an over-full gauge (current > max at the caller) blits more than 117 columns from a 117-byte-pitch source and skips the remainder entirely -- adding the symmetric if (fill_width > 0x75) fill_width = 0x75 makes an over-full bar draw as a clean full bar where the original draws a smeared oversized one. Also, only the filled half is taken from bar_index: the unfilled remainder is always DAT_000643c8 + fill_width, i.e. graphic 0, so writing the obvious "same graphic, later columns" for the second blit paints the whole bar in the filled colour.
+The clamping is deliberately one-sided: fill_width below 0 is forced to 0, but nothing caps it at 0x75, so an over-full gauge (current > max at the caller) blits more than 117 columns from a 117-byte-pitch source and skips the remainder entirely -- adding the symmetric if (fill_width > 0x75) fill_width = 0x75 makes an over-full bar draw as a clean full bar where the original draws a smeared oversized one. Also, only the filled half is taken from bar_index: the unfilled remainder is always data_fdps_status_gauge_bar_sheet_ptr + fill_width, i.e. graphic 0, so writing the obvious "same graphic, later columns" for the second blit paints the whole bar in the filled colour.
 
 === 000177c3 [EOL]
 Watcom alignment padding: lea eax,[eax+0] / lea edx,[edx+0] / nop, 13 bytes to align 000177d0
