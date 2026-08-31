@@ -195,6 +195,180 @@ static void reads_layer_width_signed(void)
     CHECK_EQ(data_fdps_map_tile_terrain_type, 0x34);
 }
 
+/* fdps_map_set_pending_tile_event takes no input of its own: it calls
+   fdps_map_load_tile_info and then works entirely off the tile-info block that
+   call leaves behind, so the four layers above have to be staged for it too and
+   a cell is chosen by what the staging puts there.
+
+   Cell (3, 2) is the one used below.  With terrain width 5 its tile id is
+   2 * 5 + 3 = 13 and its attribute flags are 0x1d, which has both of the 0x60
+   bits clear so the searchable-cell gate lets it through; with the event
+   layer's own width of 3 its event code is 0x60 + (2 * 3 + 3) = 0x69.
+
+   Every offset into the staged MAP%02d.DAT block below is written as a literal,
+   never as base + code * 2 + 0x31 evaluated by the test.  An entry for event
+   code 0x69 is at 0x69 * 2 + 0x31 = 0x103 and 0x104, and writing 0x103 rather
+   than recomputing the formula is what makes the offset an expectation instead
+   of a restatement of the code under test.
+
+   The block is filled with 0xaa first, so an entry the function should not have
+   reached reads back handler 0xaa and occasion 0xaa: not the 0xff sentinel, and
+   matching neither of the two trigger kinds. */
+#define STAGE_MAP_DAT_BYTES 0x300
+
+/* 0x69's entry, and the two neighbours a wrong index would land on. */
+#define ENTRY_69_HANDLER  0x103
+#define ENTRY_69_TRIGGER  0x104
+#define ENTRY_01_HANDLER  0x33
+#define ENTRY_01_TRIGGER  0x34
+#define ENTRY_00_HANDLER  0x31
+#define ENTRY_00_TRIGGER  0x32
+#define ENTRY_FF_HANDLER  0x22f
+#define ENTRY_FF_TRIGGER  0x230
+
+/* Row 13 of the staged attribute table, whose byte 0 is the flags the
+   searchable-cell gate reads: 0x11 + 13 * 4. */
+#define ATTR_ROW_13_FLAGS (ATTR_ROWS_AT + 13 * 4)
+
+/* Cell 9 of the staged event layer -- the cell (3, 2) reaches at width 3. */
+#define EVENT_CELL_9 (EVENT_CELLS_AT + 9)
+
+/* The value the pending slot is seeded with.  Not 0xff, which is what a real
+   caller seeds it with: 0xff is also the entry's "no handler" byte, so seeding
+   with something the function can never write is what tells "left alone" apart
+   from "wrote the sentinel". */
+#define PENDING_SEED 0x5a
+
+static unsigned char stage_map_dat[STAGE_MAP_DAT_BYTES];
+
+/* Stage the four layers, hang an all-0xaa MAP%02d.DAT block off the chapter
+   pointer with one live entry for cell (3, 2) -- handler 7, occasion 1 -- and
+   seed the pending slot. */
+static void stage_events(void)
+{
+    int i;
+
+    stage();
+
+    for (i = 0; i < STAGE_MAP_DAT_BYTES; i++) {
+        stage_map_dat[i] = 0xaa;
+    }
+    stage_map_dat[ENTRY_69_HANDLER] = 0x07;
+    stage_map_dat[ENTRY_69_TRIGGER] = 0x01;
+
+    data_fdps_tile_event_data_table_ptr = stage_map_dat;
+    data_fdps_chapter_pending_event_idx = PENDING_SEED;
+}
+
+/* Byte 1 of the entry is matched against trigger_kind for equality -- MOV
+   EAX,[EBP-0x4] / CMP EAX,[EBP+0x1c] / JZ at 0002e0a1 -- and byte 0 is what
+   lands in the slot.  Both trigger kinds the image passes are exercised, and
+   the mismatch leaves the slot exactly as the caller seeded it: the function
+   has no "clear it" path. */
+static void stores_handler_when_occasion_matches(void)
+{
+    stage_events();
+    fdps_map_set_pending_tile_event(3, 2, 1);
+    CHECK_EQ(data_fdps_chapter_pending_event_idx, 0x07);
+
+    stage_events();
+    fdps_map_set_pending_tile_event(3, 2, 0);
+    CHECK_EQ(data_fdps_chapter_pending_event_idx, PENDING_SEED);
+
+    stage_events();
+    stage_map_dat[ENTRY_69_HANDLER] = 0x0c;
+    stage_map_dat[ENTRY_69_TRIGGER] = 0x00;
+    fdps_map_set_pending_tile_event(3, 2, 0);
+    CHECK_EQ(data_fdps_chapter_pending_event_idx, 0x0c);
+}
+
+/* CMP dword ptr [EBP + -0x8],0xff / JZ at 0002e098: handler 0xff means the cell
+   has no handler and the slot is not touched, even though the occasion matches
+   and would otherwise fire. */
+static void ignores_entry_whose_handler_is_ff(void)
+{
+    stage_events();
+    stage_map_dat[ENTRY_69_HANDLER] = 0xff;
+    stage_map_dat[ENTRY_69_TRIGGER] = 0x01;
+
+    fdps_map_set_pending_tile_event(3, 2, 1);
+    CHECK_EQ(data_fdps_chapter_pending_event_idx, PENDING_SEED);
+}
+
+/* AND AL,0x60 at 0002e051 rejects the cell if EITHER bit is set, so all three
+   of 0x20, 0x40 and 0x60 suppress the event.  The fourth case is the other
+   half of the same instruction: 0x9f sets every bit the mask does not cover,
+   and the event still fires, so the gate is two bits and not a comparison
+   against a whole attribute value. */
+static void searchable_cell_bits_suppress_the_event(void)
+{
+    stage_events();
+    stage_attr[ATTR_ROW_13_FLAGS] = 0x20;
+    fdps_map_set_pending_tile_event(3, 2, 1);
+    CHECK_EQ(data_fdps_chapter_pending_event_idx, PENDING_SEED);
+
+    stage_events();
+    stage_attr[ATTR_ROW_13_FLAGS] = 0x40;
+    fdps_map_set_pending_tile_event(3, 2, 1);
+    CHECK_EQ(data_fdps_chapter_pending_event_idx, PENDING_SEED);
+
+    stage_events();
+    stage_attr[ATTR_ROW_13_FLAGS] = 0x60;
+    fdps_map_set_pending_tile_event(3, 2, 1);
+    CHECK_EQ(data_fdps_chapter_pending_event_idx, PENDING_SEED);
+
+    stage_events();
+    stage_attr[ATTR_ROW_13_FLAGS] = 0x9f;
+    fdps_map_set_pending_tile_event(3, 2, 1);
+    CHECK_EQ(data_fdps_chapter_pending_event_idx, 0x07);
+}
+
+/* CMP word ptr [0x00069d06],0x0 / JZ at 0002e05c: event code 0 is the "no
+   event" sentinel and the table is never touched.  The entry the code-0
+   arithmetic would reach, at 0 * 2 + 0x31, is loaded with a handler and an
+   occasion that would fire if it were read. */
+static void event_code_zero_reads_no_entry(void)
+{
+    stage_events();
+    stage_event[EVENT_CELL_9] = 0x00;
+    stage_map_dat[ENTRY_00_HANDLER] = 0x03;
+    stage_map_dat[ENTRY_00_TRIGGER] = 0x01;
+
+    fdps_map_set_pending_tile_event(3, 2, 1);
+    CHECK_EQ(data_fdps_chapter_pending_event_idx, PENDING_SEED);
+}
+
+/* The table begins at image offset 0x33 and is indexed by the event code minus
+   one, which the original spells as code * 2 + 0x31.  Code 1 therefore reads
+   0x33 and 0x34, not 0x31 and 0x32: both pairs are loaded here and only the
+   one at 0x33 may be the one that lands in the slot.
+
+   The second half runs the largest code the event layer can hold.  The layer's
+   byte is zero-extended into a signed 16-bit global, so 0xff arrives as 255 and
+   its entry is at 255 * 2 + 0x31 = 0x22f; read as -1 the entry would be at
+   0x2f, in front of the table, and read as -1 scaled it would be off the block
+   entirely. */
+static void entry_is_indexed_from_code_minus_one(void)
+{
+    stage_events();
+    stage_event[EVENT_CELL_9] = 0x01;
+    stage_map_dat[ENTRY_00_HANDLER] = 0x11;
+    stage_map_dat[ENTRY_00_TRIGGER] = 0x00;
+    stage_map_dat[ENTRY_01_HANDLER] = 0x22;
+    stage_map_dat[ENTRY_01_TRIGGER] = 0x00;
+
+    fdps_map_set_pending_tile_event(3, 2, 0);
+    CHECK_EQ(data_fdps_chapter_pending_event_idx, 0x22);
+
+    stage_events();
+    stage_event[EVENT_CELL_9] = 0xff;
+    stage_map_dat[ENTRY_FF_HANDLER] = 0x33;
+    stage_map_dat[ENTRY_FF_TRIGGER] = 0x00;
+
+    fdps_map_set_pending_tile_event(3, 2, 0);
+    CHECK_EQ(data_fdps_chapter_pending_event_idx, 0x33);
+}
+
 void run_maptile_tests(void)
 {
     RUN_TEST(reads_one_cell_from_each_layer);
@@ -202,4 +376,9 @@ void run_maptile_tests(void)
     RUN_TEST(zero_extends_event_code);
     RUN_TEST(scales_tile_id_signed);
     RUN_TEST(reads_layer_width_signed);
+    RUN_TEST(stores_handler_when_occasion_matches);
+    RUN_TEST(ignores_entry_whose_handler_is_ff);
+    RUN_TEST(searchable_cell_bits_suppress_the_event);
+    RUN_TEST(event_code_zero_reads_no_entry);
+    RUN_TEST(entry_is_indexed_from_code_minus_one);
 }

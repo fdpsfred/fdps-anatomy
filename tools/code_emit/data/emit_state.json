@@ -755,6 +755,14 @@
       "status": "committed",
       "emitted_against": "0x9d",
       "rounds": 0
+    },
+    "0002e030": {
+      "name": "fdps_map_set_pending_tile_event",
+      "target": "maptile.c",
+      "body_size": "0x8a",
+      "status": "committed",
+      "emitted_against": "0x8a",
+      "rounds": 0
     }
   }
 }

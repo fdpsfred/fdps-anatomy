@@ -166,6 +166,26 @@ extern unsigned char data_fdps_map_tile_terrain_type;
 extern unsigned char data_fdps_map_tile_combat_backdrop_id;
 extern unsigned char data_fdps_map_current_move_grid_marker;
 
+/* 00069d90.  Which chapter-event handler the battle loop still owes a call to:
+   an index into the chapter-event handler pointer table at 000601c4, with 0xff
+   meaning nothing is pending.
+
+   It is a hand-off slot between two pieces of code and not a state flag.  The
+   four turn drivers -- fdps_battle_system_menu, fdps_battle_unit_turn,
+   fdps_battle_enemy_turn_phase and fdps_battle_npc_turn_phase -- each seed it
+   with 0xff before letting a unit act, and once the unit is done read it back
+   and, if it is no longer 0xff, call table[slot](unit_index).
+   fdps_map_set_pending_tile_event (src/maptile.h) is the only other writer in
+   the image: it fills the slot when the tile a unit is standing on carries an
+   event for the occasion being reported.
+
+   A full dword even though every value it ever receives is a zero-extended
+   byte, and never compared for order: every reader tests it against 0xff for
+   equality -- CMP dword ptr [0x00069d90],0xff at 0001581c, 00012a16, 00012acd,
+   00012bb9 and 00014d0b -- and otherwise scales it by 4 into the pointer table
+   with LEA EDX,[EDX*0x4 + 0x0]. */
+extern unsigned int data_fdps_chapter_pending_event_idx;
+
 /* 00069d64.  The free-running tick counter fdps_timer_tick_handler increments
    from the timer interrupt, and the game's only clock: 31 files read it, for
    animation pacing, input repeat and every "once per tick" guard.  Unsigned.

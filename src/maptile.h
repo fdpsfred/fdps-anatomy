@@ -44,4 +44,28 @@ extern unsigned char data_fdps_map_current_tile_attr_reserved;
 extern void fdps_map_load_tile_info(int tile_x, int tile_y);
 #pragma aux fdps_map_load_tile_info "*" parm caller [];
 
+/* Reports that a unit is on the cell at (tile_x, tile_y) and, if that cell
+   carries a scripted chapter event which fires on the occasion being reported,
+   leaves the event's handler index in data_fdps_chapter_pending_event_idx
+   (gamedata.h) for the caller to dispatch.  Nothing else is written, no handler
+   is called from here, and the slot is left alone when the cell has no event to
+   report -- the caller seeded it with 0xff before the unit acted.
+
+   The cell's own two-byte entry lives in the resident MAP%02d.DAT block, in the
+   table that begins at image offset 0x33 and is indexed by the cell's event
+   code minus one.  Byte 0 of the entry is the handler index, 0xff meaning the
+   cell has no handler; byte 1 is the occasion the entry fires on.
+
+   trigger_kind is the occasion being reported and is matched against that byte
+   for equality: 0 as a unit finishes stepping onto the cell during movement, 1
+   when a unit ends its turn on it.  Those are the only two values passed
+   anywhere in the image.
+
+   A cell whose attribute flags carry either of the bits 0x60 is a searchable
+   cell, investigated from the action menu through a different table, and is
+   reported as carrying nothing here whatever its event code says. */
+extern void fdps_map_set_pending_tile_event(int tile_x, int tile_y,
+                                            int trigger_kind);
+#pragma aux fdps_map_set_pending_tile_event "*" parm caller [];
+
 #endif

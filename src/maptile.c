@@ -77,3 +77,51 @@ void fdps_map_load_tile_info(int tile_x, int tile_y)
     data_fdps_map_current_cell_event_code =
         (short) event_layer->cells[tile_y * event_layer_width + tile_x];
 }
+
+/* 0002e030.  Everything this decides comes out of the tile-info block that the
+   call above republishes, so the two functions are read together.
+
+   Three things are behaviour rather than style.
+
+   The attribute gate tests two bits and not a value.  MOV AL,[0x00069d08] /
+   AND AL,0x60 / TEST EAX,EAX at 0002e04c rejects a cell whose 0x60 field holds
+   0x20, 0x40 or 0x60 alike, and lets every other bit of the byte through
+   untouched; a rebuild that compared the field against one searchable-cell
+   constant would let the other one report an event.
+
+   The entry offset is 0x31 and not 0x33.  The table starts at image offset
+   0x33 and is indexed by the event code minus one, and the original spends
+   neither instruction on that: it scales the raw code by two and folds the
+   -1 into the displacement (ADD EAX,EAX / MOV AL,byte ptr [EDX + 0x31] at
+   0002e06d).  Code 0 never reaches the arithmetic because it is the "no event"
+   sentinel the gate above rejects, so the byte pair at 0x31 is never read.
+
+   The two entry bytes are both loaded before either is tested, and each of the
+   two loads re-reads the base pointer out of 0006013c (0002e06f and 0002e088).
+   Neither costs anything to reproduce and both are kept: the loads are of a
+   block nothing here writes, so the order and the count are unobservable, and
+   two locals is what the original's own stack slots at [EBP-8] and [EBP-4]
+   say it was written as. */
+void fdps_map_set_pending_tile_event(int tile_x, int tile_y, int trigger_kind)
+{
+    int handler_index;
+    int entry_trigger_kind;
+
+    fdps_map_load_tile_info(tile_x, tile_y);
+
+    if ((data_fdps_map_current_tile_attr_flags & 0x60) != 0) {
+        return;
+    }
+    if (data_fdps_map_current_cell_event_code == 0) {
+        return;
+    }
+
+    handler_index = data_fdps_tile_event_data_table_ptr
+                    [data_fdps_map_current_cell_event_code * 2 + 0x31];
+    entry_trigger_kind = data_fdps_tile_event_data_table_ptr
+                         [data_fdps_map_current_cell_event_code * 2 + 0x32];
+
+    if (handler_index != 0xff && entry_trigger_kind == trigger_kind) {
+        data_fdps_chapter_pending_event_idx = (unsigned int) handler_index;
+    }
+}
