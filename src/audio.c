@@ -156,3 +156,39 @@ void fdps_audio_shutdown(void)
 {
     AIL_shutdown();
 }
+
+/* 000305c0.  Two paths off one equality test, CMP dword ptr [EBP+0x14],-0x1 /
+   JZ: not the sentinel means one AIL_stop_sample on that slot and a jump
+   straight to the epilogue, the sentinel means the walk.  The walk's bound is
+   a signed compare, CMP dword ptr [EBP-0x4],0x8 / JL, over the array's real
+   extent rather than a count somebody passed in.
+
+   The index is scaled and folded into the displacement -- LEA EAX,[EAX*0x4+0x0]
+   then PUSH dword ptr [EAX+0x69d30] -- so 0x69d30 is the base of the
+   eight-entry handle table this file owns, not a neighbour's address reached
+   by a fixed offset: index 7 lands on 0x69d4c, and the next global begins at
+   0x69d50.
+
+   There is no bounds check on sample_index, and neither audio flag is looked
+   at, which is what separates this from its siblings: fdps_sfx_play and the
+   voice allocator at 00030a00 both return early when the DIG driver did not
+   install, and this one hands the eight table slots over whatever they hold.
+   Handing AIL a handle that is still its BSS zero is harmless -- the vendor's
+   worker at 00047470 opens with TEST EAX,EAX / JZ to its RET -- so adding the
+   guard would be a judgement about what the original meant, and the emitted
+   code does what it does instead.
+
+   Nothing here uses a value that came back from a CALL: AIL_stop_sample
+   returns void, and EAX is dead at every one of the three exits. */
+void fdps_audio_stop_sample(int sample_index)
+{
+    int slot;
+
+    if (sample_index != SFX_STOP_ALL_SLOTS) {
+        AIL_stop_sample(data_fdps_audio_sample_handle_table[sample_index]);
+        return;
+    }
+    for (slot = 0; slot < SFX_SAMPLE_SLOT_COUNT; slot++) {
+        AIL_stop_sample(data_fdps_audio_sample_handle_table[slot]);
+    }
+}

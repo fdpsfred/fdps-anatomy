@@ -7868,10 +7868,10 @@ Alignment padding: 8d 80 00 00 00 00 + 8d 54 22 00, aligning FUN_000305c0 to 16 
 Stops the sound playing on one of the game's eight digital sample voices, or on all of them.
 
 Algorithm:
-When sample_index is -1, loops i from 0 to 7 and passes each handle of the eight-entry AIL sample handle table at DAT_00069d30 to AIL_stop_sample. Otherwise passes only DAT_00069d30[sample_index] to AIL_stop_sample and returns. The table is the one fdps_audio_init fills with AIL_allocate_sample_handle results, and the one fdps_audio_sample_is_playing and FUN_00030a00 read. No bounds check on sample_index, and no test of the digital-driver-present flag DAT_00069d71 or the sound-enabled flag DAT_00069d70 that FUN_00030a00 checks before it starts a sample -- when the DIG driver failed to install, the table still holds its BSS zeros and those zero handles are handed to AIL_stop_sample anyway.
+When sample_index is -1, loops i from 0 to 7 and passes each handle of the eight-entry AIL sample handle table at DAT_00069d30 to AIL_stop_sample. Otherwise passes only DAT_00069d30[sample_index] to AIL_stop_sample and returns. The table is the one fdps_audio_init fills with AIL_allocate_sample_handle results, and the one fdps_audio_sample_is_playing and fdps_audio_start_wav read. No bounds check on sample_index, and no test of the digital-driver-present flag DAT_00069d71 or the sound-enabled flag DAT_00069d70 that FUN_00030a00 checks before it starts a sample -- when the DIG driver failed to install, the table still holds its BSS zeros and those zero handles are handed to AIL_stop_sample anyway.
 
 Parameters:
-  sample_index -- voice slot in the AIL sample handle table at DAT_00069d30, 0..7, or -1 to stop every slot. Both callers, FUN_00018d60 and FUN_0001a4c0, pass -1 as the audio-cleanup step at the end of a battle attack animation.
+  sample_index -- voice slot in the AIL sample handle table at DAT_00069d30, 0..7, or -1 to stop every slot. Both callers, fdps_combat_play_attack_exchange and fdps_combat_play_spell_on_targets, pass -1 as the audio-cleanup step at the end of a battle attack animation.
 
 Returns:
   Nothing.

@@ -485,6 +485,159 @@ static void shutdown_leaves_the_game_audio_state_alone(void)
     CHECK_EQ(sample_field(free_sample, SAMPLE_ADDRESS), 0);
 }
 
+/* ---- fdps_audio_stop_sample @ 000305c0 -----------------------------------
+ *
+ * Expected values come from 000305c0 -- CMP dword ptr [EBP+0x14],-0x1 / JZ for
+ * the sentinel, CMP dword ptr [EBP-0x4],0x8 / JL for the walk's bound, and
+ * LEA EAX,[EAX*0x4+0x0] / PUSH dword ptr [EAX+0x69d30] for how a slot number
+ * reaches a handle -- and from the two call sites, 00019122 and 0001b8c6, both
+ * of which PUSH -0x1.
+ *
+ * WHAT SILENCE IS OBSERVED THROUGH.  The function's whole effect is which
+ * handles it hands to AIL_stop_sample, and the real library is linked in, so
+ * the answer is read back out of the handles themselves.  AIL_stop_sample at
+ * 0003f1df does its logging test against a flag the image leaves zero and then
+ * tail-calls the worker at 00047470, which is seven instructions long:
+ *
+ *   MOV EAX,[ESP+0x4] / TEST EAX,EAX / JZ ret   -- a null handle is tolerated
+ *   CMP [EAX+0x4],0x4 / JNZ ret                 -- only a playing sample moves
+ *   MOV [EAX+0x4],0x8                           -- and it moves to state 8
+ *
+ * So a handle that was stopped reads 8 at +0x04 and one that was not still
+ * reads what it held.  Nothing on that path touches any other field, which is
+ * why these fixtures are two words rather than the 0x854 the play tests need.
+ */
+#define STATUS_STOPPED 8
+#define STOP_HANDLE_WORDS 2
+
+static unsigned int stop_handles[SFX_SAMPLE_SLOT_COUNT][STOP_HANDLE_WORDS];
+
+/* Eight distinct handles, all playing, one per slot -- distinct because every
+   assertion below is about which slot moved, and a table whose entries all
+   point at one structure cannot tell them apart.  Both audio flags are set so
+   that a test which clears one is clearing it from a known state. */
+static void stage_stop_slots(void)
+{
+    int slot;
+    int word;
+
+    for (slot = 0; slot < SFX_SAMPLE_SLOT_COUNT; slot++) {
+        for (word = 0; word < STOP_HANDLE_WORDS; word++) {
+            stop_handles[slot][word] = 0;
+        }
+        stop_handles[slot][SAMPLE_STATUS / 4] = STATUS_PLAYING;
+        data_fdps_audio_sample_handle_table[slot] = stop_handles[slot];
+    }
+    data_fdps_audio_sfx_driver_available_flag = 1;
+    data_fdps_audio_sfx_enabled_flag = 1;
+}
+
+static unsigned int stop_status(int slot)
+{
+    return stop_handles[slot][SAMPLE_STATUS / 4];
+}
+
+/* The sentinel walks the whole table: every one of the eight is asserted
+   separately, because the bound is the one number in the function that a
+   rewrite could plausibly get wrong and a spot check at slot 0 would not
+   notice a walk that stopped at 4. */
+static void the_sentinel_stops_all_eight_slots(void)
+{
+    stage_stop_slots();
+    fdps_audio_stop_sample(SFX_STOP_ALL_SLOTS);
+    CHECK_EQ(stop_status(0), STATUS_STOPPED);
+    CHECK_EQ(stop_status(1), STATUS_STOPPED);
+    CHECK_EQ(stop_status(2), STATUS_STOPPED);
+    CHECK_EQ(stop_status(3), STATUS_STOPPED);
+    CHECK_EQ(stop_status(4), STATUS_STOPPED);
+    CHECK_EQ(stop_status(5), STATUS_STOPPED);
+    CHECK_EQ(stop_status(6), STATUS_STOPPED);
+    CHECK_EQ(stop_status(7), STATUS_STOPPED);
+}
+
+/* Any other value silences that slot and only that slot: the neighbours on
+   both sides are checked, so an index scaled by the wrong stride or folded
+   onto the wrong base lands on one of them and says so. */
+static void an_index_stops_only_that_slot(void)
+{
+    stage_stop_slots();
+    fdps_audio_stop_sample(3);
+    CHECK_EQ(stop_status(3), STATUS_STOPPED);
+    CHECK_EQ(stop_status(0), STATUS_PLAYING);
+    CHECK_EQ(stop_status(1), STATUS_PLAYING);
+    CHECK_EQ(stop_status(2), STATUS_PLAYING);
+    CHECK_EQ(stop_status(4), STATUS_PLAYING);
+    CHECK_EQ(stop_status(7), STATUS_PLAYING);
+}
+
+/* Both ends of the table are reachable through the index path, which pins the
+   base and the stride together: slot 0 needs the base right, slot 7 needs the
+   stride right as well. */
+static void the_first_and_last_slots_are_both_addressable(void)
+{
+    stage_stop_slots();
+    fdps_audio_stop_sample(0);
+    CHECK_EQ(stop_status(0), STATUS_STOPPED);
+    CHECK_EQ(stop_status(1), STATUS_PLAYING);
+
+    stage_stop_slots();
+    fdps_audio_stop_sample(SFX_SAMPLE_SLOT_COUNT - 1);
+    CHECK_EQ(stop_status(SFX_SAMPLE_SLOT_COUNT - 1), STATUS_STOPPED);
+    CHECK_EQ(stop_status(SFX_SAMPLE_SLOT_COUNT - 2), STATUS_PLAYING);
+}
+
+/* Neither audio flag is tested, on either path.  This is the assertion that
+   separates the emitted routine from the guarded shape its siblings have: with
+   both flags clear, fdps_sfx_play does nothing at all and this one still
+   silences all eight. */
+static void neither_audio_flag_is_consulted(void)
+{
+    stage_stop_slots();
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    data_fdps_audio_sfx_enabled_flag = 0;
+    fdps_audio_stop_sample(SFX_STOP_ALL_SLOTS);
+    CHECK_EQ(stop_status(0), STATUS_STOPPED);
+    CHECK_EQ(stop_status(7), STATUS_STOPPED);
+
+    stage_stop_slots();
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    data_fdps_audio_sfx_enabled_flag = 0;
+    fdps_audio_stop_sample(5);
+    CHECK_EQ(stop_status(5), STATUS_STOPPED);
+    CHECK_EQ(stop_status(4), STATUS_PLAYING);
+}
+
+/* A slot still holding its BSS zero is what the table looks like when the DIG
+   driver never installed, and the walk goes through it rather than stopping
+   there: slot 5 is the only live handle and it is behind five null ones. */
+static void a_null_slot_does_not_end_the_walk(void)
+{
+    int slot;
+
+    stage_stop_slots();
+    for (slot = 0; slot < SFX_SAMPLE_SLOT_COUNT; slot++) {
+        if (slot != 5) {
+            data_fdps_audio_sample_handle_table[slot] = 0;
+        }
+    }
+    fdps_audio_stop_sample(SFX_STOP_ALL_SLOTS);
+    CHECK_EQ(stop_status(5), STATUS_STOPPED);
+}
+
+/* Deciding whether a sample is in a state that can be stopped belongs to AIL,
+   not here: a slot that is not playing comes back exactly as it went in, and
+   the walk carries on past it to the slots after. */
+static void a_slot_that_is_not_playing_is_left_as_it_stands(void)
+{
+    stage_stop_slots();
+    stop_handles[4][SAMPLE_STATUS / 4] = STATUS_DONE;
+    fdps_audio_stop_sample(SFX_STOP_ALL_SLOTS);
+    CHECK_EQ(stop_status(4), STATUS_DONE);
+    CHECK_EQ(stop_status(3), STATUS_STOPPED);
+    CHECK_EQ(stop_status(5), STATUS_STOPPED);
+    CHECK_EQ(stop_status(7), STATUS_STOPPED);
+}
+
 void run_audio_tests(void)
 {
     RUN_TEST(the_fixture_looks_like_a_handle_to_ail);
@@ -503,4 +656,10 @@ void run_audio_tests(void)
     RUN_TEST(the_section_start_is_a_full_32_bit_field);
     RUN_TEST(shutdown_releases_the_ail_timer_handles);
     RUN_TEST(shutdown_leaves_the_game_audio_state_alone);
+    RUN_TEST(the_sentinel_stops_all_eight_slots);
+    RUN_TEST(an_index_stops_only_that_slot);
+    RUN_TEST(the_first_and_last_slots_are_both_addressable);
+    RUN_TEST(neither_audio_flag_is_consulted);
+    RUN_TEST(a_null_slot_does_not_end_the_walk);
+    RUN_TEST(a_slot_that_is_not_playing_is_left_as_it_stands);
 }

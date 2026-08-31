@@ -939,6 +939,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x16"
+    },
+    "000305c0": {
+      "name": "fdps_audio_stop_sample",
+      "target": "audio.c",
+      "body_size": "0x64",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x64"
     }
   }
 }

@@ -20,6 +20,11 @@
 #define SFX_SAMPLE_SLOT_COUNT 8
 extern void *data_fdps_audio_sample_handle_table[SFX_SAMPLE_SLOT_COUNT];
 
+/* The slot argument that means "every slot" rather than one of them, tested as
+   an equality against -1.  It is the only value either caller of
+   fdps_audio_stop_sample ever passes. */
+#define SFX_STOP_ALL_SLOTS (-1)
+
 /* 00069d71.  Set when the DIG driver installed successfully at start-up, so
    that "the user wants sound effects" (data_fdps_audio_sfx_enabled_flag, in
    gamedata.h) and "there is anything to play them on" stay separate answers.
@@ -45,5 +50,15 @@ extern void fdps_sfx_play(void *saf, int sound_index);
    releases its own driver slots. */
 extern void fdps_audio_shutdown(void);
 #pragma aux fdps_audio_shutdown "*" parm caller [];
+
+/* Silences one of the eight sample slots, or every one of them when
+   sample_index is SFX_STOP_ALL_SLOTS.  Any other value is used as an index
+   with no bounds check of any kind; both callers in the game pass the sentinel,
+   as the audio-cleanup step at the end of a battle animation.  Neither audio
+   flag is consulted, so a slot is handed to AIL whether or not a driver ever
+   installed, and a slot that is not playing is left as it stands -- deciding
+   that is the vendor's job, not this function's. */
+extern void fdps_audio_stop_sample(int sample_index);
+#pragma aux fdps_audio_stop_sample "*" parm caller [];
 
 #endif
