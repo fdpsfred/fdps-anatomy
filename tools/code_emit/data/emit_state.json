@@ -1115,6 +1115,11 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x7a"
+    },
+    "00037af0": {
+      "status": "committed",
+      "emitted_against": "0x7a",
+      "rounds": 0
     }
   }
 }
