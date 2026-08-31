@@ -79,4 +79,28 @@ extern void fdps_roster_recompute_combat_stats(int roster_index);
 extern void fdps_roster_add_character(int char_id);
 #pragma aux fdps_roster_add_character "*" parm caller [];
 
+/* Works out the four combat stats roster member roster_index would have while
+   wearing item item_id, without changing anything, and writes them through
+   out_stats as four ints in the order attack, defense, hit, evade -- the order
+   of the record's own four stat fields at +0x48..+0x4e.  All four are always
+   written.
+
+   The seeds are the member's three base stats, hit and evade sharing the one
+   dexterity word exactly as fdps_roster_recompute_combat_stats seeds them, and
+   the candidate item's own four modifiers are added on top unconditionally.
+   Every one of the eight inventory entries is then scanned, and an entry adds
+   its modifiers only when it is flagged equipped AND its item type sits on the
+   opposite side of the 0x15 weapon/armour split from the candidate's: a
+   same-category item would be taken off to make room, so its contribution is
+   left out of the total.
+
+   The totals are not narrowed to the record's 16-bit stat fields, and the
+   caller's class-restriction check is not made here -- the numbers come out
+   whether or not the member could wear the item.  Neither the roster index nor
+   either item id is range-checked. */
+extern void fdps_roster_preview_combat_stats_with_item(int roster_index,
+                                                       int item_id,
+                                                       int *out_stats);
+#pragma aux fdps_roster_preview_combat_stats_with_item "*" parm caller [];
+
 #endif

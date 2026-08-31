@@ -352,3 +352,109 @@ void fdps_roster_add_character(int char_id)
     fdps_roster_recompute_combat_stats(data_fdps_roster_member_count);
     data_fdps_roster_member_count = data_fdps_roster_member_count + 1;
 }
+
+/* The type code that divides the item table into its two equipment
+   categories: CMP dword ptr [EBP-0x4],0x15 at 00033642 on the candidate's
+   type and CMP EAX,0x15 at 00033652 on the entry's.  Codes 0x01..0x15 are the
+   weapon kinds and 0x16 upwards the armour and the non-weapon items.  The same
+   literal is the same split everywhere it appears -- fdps_unit_equip_slot
+   compares the two types against it at 0002613f and 00026145, and clears the
+   old entry's flag byte at 0002615c when they land on the SAME side. */
+#define ITEM_TYPE_LAST_WEAPON 0x15
+
+/* 00033570.  What the four combat stats would come to if this roster member
+   put this item on, for the status panel that shows the prospective figures
+   beside the current ones.  Nothing is written into the record; the four
+   totals go out through the caller's array.
+
+   The four seeds are the same three base stats fdps_roster_recompute_combat_
+   stats uses, and the same trap: hit and evade both come off the ONE dexterity
+   word at +0x3e -- MOVSX EDX,word ptr [EAX+0x3e] at 000335cd for hit and again
+   at 000335e0 for evade.  Reaching for +0x40 as an evade base gives a number
+   that disagrees with the one the recompute stores at record +0x4e, so the
+   panel would light an arrow on a stat the item did not change
+   (rebuild_info/pitfalls.md).
+
+   The candidate's own four modifiers are added into the seeds unconditionally,
+   before the scan and regardless of its type or of whether the member's class
+   may wear it: fdps_unit_can_equip_item is a separate check the caller runs
+   before it prints the numbers.
+
+   The scan is what makes this function more than the recompute plus one item.
+   An equipped entry contributes only when its type sits on the OPPOSITE side
+   of the threshold from the candidate's, because equipping the candidate would
+   displace a same-category item and that item's modifiers would go with it.
+   Both halves of that condition are spelled out in the assembly as two
+   compares each, 00033642/00033652 for the weapon-candidate case and
+   00033657/00033667 for the armour-candidate case, and the entry is skipped
+   whenever the two sides agree.
+
+   Every entry's item record is fetched BEFORE the flag byte is tested -- the
+   CALL at 00033627 sits above the AND AL,0x40 at 00033637 -- so all eight
+   lookups happen whatever the flags hold.  Hoisting the call into the
+   condition is the obvious tidy-up and is only invisible because
+   fdps_get_item_record is pure arithmetic on the table base.
+
+   Both bytes taken out of the record are zero-extended: the type through XOR
+   EAX,EAX / MOV AL at 00033618-0003361d for the candidate and AND EAX,0xff at
+   0003364d for an entry, and the id likewise at 00033618.  A type of 0xff is
+   255 and lands on the armour side of the threshold, never -1 on the weapon
+   side, and an id of 0xff indexes 255 records forward (contract C).
+
+   The four totals leave as 32-bit ints -- MOV dword ptr [EDX],EAX at 000336a5
+   and the three stores behind it -- and are NOT narrowed the way the
+   recompute's word stores narrow its own.  Nothing is range-checked: neither
+   the roster index nor either item id, and the caller's array is written
+   through unexamined. */
+void fdps_roster_preview_combat_stats_with_item(int roster_index, int item_id,
+                                                int *out_stats)
+{
+    struct fdps_unit_record *member;
+    unsigned char *inventory_entry;
+    /* One slot, as the original has: [EBP-0x20] holds the candidate's record
+       until the scan starts and then each entry's in turn.  The candidate's
+       type is the one thing that has to outlive it, which is why it is copied
+       out to its own variable before the loop. */
+    struct fdps_item_effect *item_record;
+    int candidate_type;
+    int entry_item_id;
+    int attack_total;
+    int defense_total;
+    int hit_total;
+    int evade_total;
+    int entry_index;
+
+    item_record = fdps_get_item_record(item_id);
+    candidate_type = (int) item_record->type;
+
+    member = fdps_get_roster_record(roster_index);
+
+    attack_total = (int) member->ap_base + (int) item_record->ap;
+    defense_total = (int) member->dp_base + (int) item_record->dp;
+    hit_total = (int) member->dx_base + (int) item_record->hit;
+    evade_total = (int) member->dx_base + (int) item_record->ev;
+
+    for (entry_index = 0;
+         entry_index < INVENTORY_ENTRY_COUNT;
+         entry_index++) {
+        inventory_entry = &member->inventory_slots[entry_index * 2];
+        entry_item_id = (int) inventory_entry[1];
+        item_record = fdps_get_item_record(entry_item_id);
+
+        if ((inventory_entry[0] & INVENTORY_FLAG_EQUIPPED) != 0 &&
+            ((candidate_type <= ITEM_TYPE_LAST_WEAPON &&
+              (int) item_record->type > ITEM_TYPE_LAST_WEAPON) ||
+             (candidate_type > ITEM_TYPE_LAST_WEAPON &&
+              (int) item_record->type <= ITEM_TYPE_LAST_WEAPON))) {
+            attack_total += (int) item_record->ap;
+            defense_total += (int) item_record->dp;
+            hit_total += (int) item_record->hit;
+            evade_total += (int) item_record->ev;
+        }
+    }
+
+    out_stats[0] = attack_total;
+    out_stats[1] = defense_total;
+    out_stats[2] = hit_total;
+    out_stats[3] = evade_total;
+}

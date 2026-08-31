@@ -1355,6 +1355,412 @@ static void a_zero_count_on_either_side_writes_nothing(void)
     CHECK_EQ(unit_byte_of(0, 0x00), 3);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_roster_preview_combat_stats_with_item @ 00033570
+ *
+ * Expected values come from the assembly of that body and from ticket 17's
+ * struct fdps_unit_record and struct fdps_item_effect.  The facts the cases
+ * below are aimed at:
+ *
+ *   000335a7  the seeds are +0x37, +0x39 and +0x3e, with +0x3e read TWICE --
+ *             000335cd for hit and 000335e0 for evade -- and the candidate's
+ *             own +0x01, +0x05, +0x03 and +0x07 added on top with no test of
+ *             any kind in front of them.
+ *   00033618  the candidate's type byte and every entry's id byte leave the
+ *             records zero-extended, and 0003364d does the same for an entry's
+ *             type byte.
+ *   00033642  the four compares: an entry counts only when its type is on the
+ *             opposite side of 0x15 from the candidate's, both directions
+ *             spelled out separately, and 00033637 tests bit 0x40 first.
+ *   00033627  the lookup for every entry happens before that flag test, for
+ *             all eight entries at +0x0a.
+ *   000336a5  the four totals are stored as dwords through the caller's
+ *             pointer, in the order attack, defense, hit, evade.
+ *
+ * The fixture is the one the recompute cases above use -- the same roster and
+ * item blocks behind the same two globals, staged through the real accessors
+ * in src/table.c -- with the item type byte, which the recompute never reads,
+ * now staged as well.  Nothing here asserts what a real ITEM.DAT holds.
+ */
+
+/* The type byte's offset in an item record, and two type codes either side of
+   the 0x15 split the body compares against: 0x01..0x15 are the weapon kinds
+   and 0x16 upwards the armour and non-weapon items.  0x10 and 0x20 are
+   ordinary members of the two groups, chosen away from the boundary so the
+   boundary case below is the only one testing it. */
+#define ITEM_OFF_TYPE 0x00
+#define PREVIEW_TYPE_WEAPON 0x10
+#define PREVIEW_TYPE_ARMOUR 0x20
+
+/* The two item ids the cases use: the candidate being tried on, and the item
+   sitting in an inventory entry.  Distinct so a lookup that resolved the wrong
+   id reads modifiers that are nowhere near the expected total. */
+#define PREVIEW_CANDIDATE_ID 3
+#define PREVIEW_ENTRY_ID 4
+
+/* Written into all four output slots before every call, so a case can tell a
+   slot the body wrote from one it left alone.  Chosen negative and far from
+   any total below. */
+#define PREVIEW_SENTINEL (-12345)
+
+/* The caller's buffer: FUN_00033230 hands over LEA EAX,[EBP-0x2c], sixteen
+   bytes of its own stack. */
+static int preview_stats[4];
+
+static void preview(int roster_index, int item_id)
+{
+    int slot_index;
+
+    for (slot_index = 0; slot_index < 4; slot_index++) {
+        preview_stats[slot_index] = PREVIEW_SENTINEL;
+    }
+    fdps_roster_preview_combat_stats_with_item(roster_index, item_id,
+                                               preview_stats);
+}
+
+static void stage_item_type(int item_id, int type)
+{
+    item_at(item_id)[ITEM_OFF_TYPE] = (unsigned char) type;
+}
+
+/* Member 0 on bases 40/25/17 and a candidate weapon carrying four distinct
+   modifiers, so a pair swapped on the way out shows as a wrong number rather
+   than a coincidence. */
+static void stage_preview_fixture(void)
+{
+    clear_fixture();
+    stage_member(0, 40, 25, 17);
+    stage_item(PREVIEW_CANDIDATE_ID, 7, 5, 3, 9);
+    stage_item_type(PREVIEW_CANDIDATE_ID, PREVIEW_TYPE_WEAPON);
+}
+
+/* The item an inventory entry holds, with modifiers an order of magnitude
+   above the candidate's so its contribution cannot be confused with one of the
+   seeds. */
+static void stage_preview_entry_item(int type)
+{
+    stage_item(PREVIEW_ENTRY_ID, 100, 200, 300, 400);
+    stage_item_type(PREVIEW_ENTRY_ID, type);
+}
+
+/* With an empty bag the four totals are the three base stats plus the
+   candidate's own four modifiers, and each modifier reaches its own
+   destination: item +0x01 to out[0], +0x05 to out[1], +0x03 to out[2] and
+   +0x07 to out[3] -- the same crossed mapping the recompute makes. */
+static void the_candidate_modifiers_seed_the_four_totals(void)
+{
+    stage_preview_fixture();
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 47);
+    CHECK_EQ(preview_stats[1], 28);
+    CHECK_EQ(preview_stats[2], 22);
+    CHECK_EQ(preview_stats[3], 26);
+}
+
+/* The same trap the recompute carries.  Hit and evade are both seeded from the
+   dexterity word at +0x3e, which 000335cd and 000335e0 read twice; +0x40 is
+   hp_current and is staged to a value that would show if evade reached for it.
+   With both item modifiers zeroed the two totals are the one base. */
+static void the_preview_hit_and_evade_share_the_dexterity_seed(void)
+{
+    stage_preview_fixture();
+    stage_item(PREVIEW_CANDIDATE_ID, 7, 0, 3, 0);
+    put_word(member_at(0) + OFF_HP_CURRENT, 99);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[2], 17);
+    CHECK_EQ(preview_stats[3], 17);
+}
+
+/* There is no test in front of the candidate's four adds: its modifiers go in
+   whichever side of the split its type is on, and whether or not the member
+   could wear it.  A weapon candidate and an armour candidate with the same
+   modifiers produce the same totals. */
+static void the_candidate_counts_whatever_its_category(void)
+{
+    stage_preview_fixture();
+    stage_item_type(PREVIEW_CANDIDATE_ID, 0x05);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 47);
+    CHECK_EQ(preview_stats[3], 26);
+
+    stage_preview_fixture();
+    stage_item_type(PREVIEW_CANDIDATE_ID, 0x30);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 47);
+    CHECK_EQ(preview_stats[3], 26);
+}
+
+/* An equipped item of the other category stays on when the candidate goes on,
+   so its four modifiers join the totals -- and they join through the same
+   crossed mapping as the candidate's. */
+static void an_equipped_item_of_the_other_category_is_added(void)
+{
+    stage_preview_fixture();
+    stage_preview_entry_item(PREVIEW_TYPE_ARMOUR);
+    stage_entry(0, 0, 0x40, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 147);
+    CHECK_EQ(preview_stats[1], 328);
+    CHECK_EQ(preview_stats[2], 222);
+    CHECK_EQ(preview_stats[3], 426);
+}
+
+/* An equipped item of the SAME category would be taken off to make room --
+   fdps_unit_equip_slot clears that entry's flag byte at 0002615c on exactly
+   this comparison -- so it contributes nothing here.  Both directions of the
+   split are checked: a weapon candidate drops an equipped weapon, and an
+   armour candidate drops equipped armour. */
+static void an_equipped_item_of_the_same_category_is_dropped(void)
+{
+    stage_preview_fixture();
+    stage_preview_entry_item(0x05);
+    stage_entry(0, 0, 0x40, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 47);
+    CHECK_EQ(preview_stats[1], 28);
+    CHECK_EQ(preview_stats[2], 22);
+    CHECK_EQ(preview_stats[3], 26);
+
+    stage_preview_fixture();
+    stage_item_type(PREVIEW_CANDIDATE_ID, 0x30);
+    stage_preview_entry_item(PREVIEW_TYPE_ARMOUR);
+    stage_entry(0, 0, 0x40, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 47);
+}
+
+/* The split is exactly at 0x15: that code is the last weapon and 0x16 the
+   first of everything else.  All four combinations of the two boundary codes
+   are checked, so a threshold written one off in either direction fails two of
+   them. */
+static void the_category_split_falls_between_0x15_and_0x16(void)
+{
+    stage_preview_fixture();
+    stage_item_type(PREVIEW_CANDIDATE_ID, 0x15);
+    stage_preview_entry_item(0x16);
+    stage_entry(0, 0, 0x40, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 147);
+
+    stage_preview_fixture();
+    stage_item_type(PREVIEW_CANDIDATE_ID, 0x15);
+    stage_preview_entry_item(0x15);
+    stage_entry(0, 0, 0x40, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 47);
+
+    stage_preview_fixture();
+    stage_item_type(PREVIEW_CANDIDATE_ID, 0x16);
+    stage_preview_entry_item(0x15);
+    stage_entry(0, 0, 0x40, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 147);
+
+    stage_preview_fixture();
+    stage_item_type(PREVIEW_CANDIDATE_ID, 0x16);
+    stage_preview_entry_item(0x16);
+    stage_entry(0, 0, 0x40, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 47);
+}
+
+/* AND AL,0x40 at 00033637 is tested before the category pair, and it is that
+   one bit: a carried entry, an entry flagged empty, and an entry carrying
+   every other bit but 0x40 all contribute nothing, while 0x40 alongside other
+   bits contributes. */
+static void only_bit_0x40_makes_an_entry_count_in_the_preview(void)
+{
+    stage_preview_fixture();
+    stage_preview_entry_item(PREVIEW_TYPE_ARMOUR);
+    stage_entry(0, 0, 0x00, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 47);
+
+    stage_preview_fixture();
+    stage_preview_entry_item(PREVIEW_TYPE_ARMOUR);
+    stage_entry(0, 0, 0x80, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 47);
+
+    stage_preview_fixture();
+    stage_preview_entry_item(PREVIEW_TYPE_ARMOUR);
+    stage_entry(0, 0, 0xbf, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 47);
+
+    stage_preview_fixture();
+    stage_preview_entry_item(PREVIEW_TYPE_ARMOUR);
+    stage_entry(0, 0, 0xc1, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 147);
+}
+
+/* The scan covers all eight entries at +0x0a, not the two equipment slots: an
+   equipped armour item in the last entry counts, and a ninth entry's worth of
+   bytes -- +0x1a, the spell bitmap -- is past the end of the scan and counts
+   for nothing however it is flagged. */
+static void every_one_of_the_eight_entries_is_previewed(void)
+{
+    stage_preview_fixture();
+    stage_preview_entry_item(PREVIEW_TYPE_ARMOUR);
+    stage_entry(0, 7, 0x40, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 147);
+
+    stage_preview_fixture();
+    stage_preview_entry_item(PREVIEW_TYPE_ARMOUR);
+    stage_entry(0, 8, 0x40, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 47);
+}
+
+/* The accumulators run across the whole loop and are not reset per entry, so
+   eight equipped items of the other category add eight times. */
+static void all_eight_cross_category_entries_accumulate(void)
+{
+    int entry_index;
+
+    stage_preview_fixture();
+    stage_preview_entry_item(PREVIEW_TYPE_ARMOUR);
+    for (entry_index = 0; entry_index < 8; entry_index++) {
+        stage_entry(0, entry_index, 0x40, PREVIEW_ENTRY_ID);
+    }
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 47 + 8 * 100);
+    CHECK_EQ(preview_stats[1], 28 + 8 * 300);
+    CHECK_EQ(preview_stats[2], 22 + 8 * 200);
+    CHECK_EQ(preview_stats[3], 26 + 8 * 400);
+}
+
+/* Contract C on the two type bytes and the id byte.  A type of 0xff is 255 and
+   lands on the armour side of the split; read signed it would be -1 and land
+   on the weapon side, which flips both of these cases the other way.  The id
+   byte is zero-extended too, so an entry holding 0xff indexes 255 records
+   forward and reads the record staged there. */
+static void the_preview_type_and_id_bytes_are_unsigned(void)
+{
+    stage_preview_fixture();
+    stage_item(0xff, 100, 200, 300, 400);
+    stage_item_type(0xff, 0xff);
+    stage_entry(0, 0, 0x40, 0xff);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 147);
+
+    stage_preview_fixture();
+    stage_item_type(PREVIEW_CANDIDATE_ID, 0xff);
+    stage_preview_entry_item(0x05);
+    stage_entry(0, 0, 0x40, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 147);
+}
+
+/* Contract C on the arithmetic.  Every base stat and every item modifier
+   arrives through MOVSX, so a base word of 0xffce is -50 and a modifier of
+   0xfff6 is -10: a cursed item lowers the previewed stat instead of adding
+   65526 to it. */
+static void the_preview_bases_and_modifiers_are_signed(void)
+{
+    stage_preview_fixture();
+    stage_member(0, 0xffce, 0xffff, 0xfffb);
+    stage_item(PREVIEW_CANDIDATE_ID, 0xfff6, 0xffff, 0xfffe, 0xfffd);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], -60);
+    CHECK_EQ(preview_stats[1], -3);
+    CHECK_EQ(preview_stats[2], -6);
+    CHECK_EQ(preview_stats[3], -8);
+
+    stage_preview_fixture();
+    stage_item(PREVIEW_ENTRY_ID, 0xfff6, 0, 0, 0);
+    stage_item_type(PREVIEW_ENTRY_ID, PREVIEW_TYPE_ARMOUR);
+    stage_entry(0, 0, 0x40, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 37);
+}
+
+/* The four stores are dword stores through the caller's pointer, so a total
+   past 16 bits leaves whole.  This is where the preview and the recompute
+   differ: the recompute's word stores would turn 70000 into 4464 and -70000
+   into -4464, and a preview that narrowed the same way would print a panel
+   figure the record never held. */
+static void the_preview_totals_are_not_narrowed_to_sixteen_bits(void)
+{
+    stage_preview_fixture();
+    stage_member(0, 30000, 0, 0);
+    stage_item(PREVIEW_CANDIDATE_ID, 20000, 0, 0, 0);
+    stage_item(PREVIEW_ENTRY_ID, 20000, 0, 0, 0);
+    stage_item_type(PREVIEW_ENTRY_ID, PREVIEW_TYPE_ARMOUR);
+    stage_entry(0, 0, 0x40, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 70000);
+
+    stage_preview_fixture();
+    stage_member(0, 0x8ad0, 0, 0);
+    stage_item(PREVIEW_CANDIDATE_ID, 0xb1e0, 0, 0, 0);
+    stage_item(PREVIEW_ENTRY_ID, 0xb1e0, 0, 0, 0);
+    stage_item_type(PREVIEW_ENTRY_ID, PREVIEW_TYPE_ARMOUR);
+    stage_entry(0, 0, 0x40, PREVIEW_ENTRY_ID);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], -70000);
+}
+
+/* The member is resolved through fdps_get_roster_record, base + index * 0x50
+   with no bias and no bound, so the index picks that record's own bases and
+   that record's own bag.  Members either side are staged with numbers that
+   would be visible if the wrong record were read, and an index one past the
+   roster's 32 slots is answered rather than clamped. */
+static void the_preview_index_selects_the_record_by_eighty_byte_stride(void)
+{
+    stage_preview_fixture();
+    stage_member(1, 11, 11, 11);
+    stage_member(2, 40, 25, 17);
+    stage_member(3, 33, 33, 33);
+    stage_preview_entry_item(PREVIEW_TYPE_ARMOUR);
+    stage_entry(2, 0, 0x40, PREVIEW_ENTRY_ID);
+    preview(2, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 147);
+
+    preview(1, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 18);
+
+    stage_preview_fixture();
+    stage_member(ROSTER_CAPACITY, 40, 25, 17);
+    preview(ROSTER_CAPACITY, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(preview_stats[0], 47);
+    CHECK_EQ(preview_stats[2], 22);
+}
+
+/* All four slots are written on every call, whatever the numbers come to: with
+   an all-zero member and an all-zero candidate the four totals are 0, and none
+   of the four keeps the sentinel the caller's buffer went in with. */
+static void all_four_preview_slots_are_always_written(void)
+{
+    clear_fixture();
+    preview(0, 0);
+    CHECK_EQ(preview_stats[0], 0);
+    CHECK_EQ(preview_stats[1], 0);
+    CHECK_EQ(preview_stats[2], 0);
+    CHECK_EQ(preview_stats[3], 0);
+}
+
+/* The preview only reads the record.  The four derived stat fields at
+   +0x48..+0x4e keep the values staged into them -- a body that recomputed into
+   the record as well would overwrite them -- and so do the three bases and the
+   inventory entry it walked. */
+static void the_preview_does_not_write_the_record(void)
+{
+    stage_preview_fixture();
+    stage_preview_entry_item(PREVIEW_TYPE_ARMOUR);
+    stage_entry(0, 0, 0x40, PREVIEW_ENTRY_ID);
+    put_word(member_at(0) + OFF_AP, 500);
+    put_word(member_at(0) + OFF_EV, 500);
+    preview(0, PREVIEW_CANDIDATE_ID);
+    CHECK_EQ(stat_of(0, OFF_AP), 500);
+    CHECK_EQ(stat_of(0, OFF_EV), 500);
+    CHECK_EQ(stat_of(0, OFF_AP_BASE), 40);
+    CHECK_EQ(stat_of(0, OFF_DX_BASE), 17);
+    CHECK_EQ(byte_of(0, OFF_INVENTORY + 0), 0x40);
+}
+
 void run_roster_tests(void)
 {
     RUN_TEST(the_base_stats_seed_the_totals);
@@ -1404,6 +1810,22 @@ void run_roster_tests(void)
     RUN_TEST(the_recompute_runs_on_the_matched_roster_index);
     RUN_TEST(every_unit_is_walked_and_each_finds_its_own_slot);
     RUN_TEST(a_zero_count_on_either_side_writes_nothing);
+
+    RUN_TEST(the_candidate_modifiers_seed_the_four_totals);
+    RUN_TEST(the_preview_hit_and_evade_share_the_dexterity_seed);
+    RUN_TEST(the_candidate_counts_whatever_its_category);
+    RUN_TEST(an_equipped_item_of_the_other_category_is_added);
+    RUN_TEST(an_equipped_item_of_the_same_category_is_dropped);
+    RUN_TEST(the_category_split_falls_between_0x15_and_0x16);
+    RUN_TEST(only_bit_0x40_makes_an_entry_count_in_the_preview);
+    RUN_TEST(every_one_of_the_eight_entries_is_previewed);
+    RUN_TEST(all_eight_cross_category_entries_accumulate);
+    RUN_TEST(the_preview_type_and_id_bytes_are_unsigned);
+    RUN_TEST(the_preview_bases_and_modifiers_are_signed);
+    RUN_TEST(the_preview_totals_are_not_narrowed_to_sixteen_bits);
+    RUN_TEST(the_preview_index_selects_the_record_by_eighty_byte_stride);
+    RUN_TEST(all_four_preview_slots_are_always_written);
+    RUN_TEST(the_preview_does_not_write_the_record);
 
     /* Put every global this file wrote back where it found it.  Ticket 23 has
        yet to define the five pointers, and leaving a pointer to this file's

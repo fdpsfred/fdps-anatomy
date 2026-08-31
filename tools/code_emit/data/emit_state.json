@@ -1035,6 +1035,14 @@
       "status": "committed",
       "emitted_against": "0x191",
       "rounds": 0
+    },
+    "00033570": {
+      "name": "fdps_roster_preview_combat_stats_with_item",
+      "target": "roster.c",
+      "body_size": "0x159",
+      "status": "committed",
+      "emitted_against": "0x159",
+      "rounds": 0
     }
   }
 }
