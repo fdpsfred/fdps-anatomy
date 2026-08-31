@@ -1133,6 +1133,14 @@
       "status": "committed",
       "emitted_against": "0x92",
       "rounds": 0
+    },
+    "00039670": {
+      "name": "fdps_chapter_29_event_activate_all_enemies",
+      "target": "chevt6.c",
+      "body_size": "0xf6",
+      "status": "committed",
+      "emitted_against": "0xf6",
+      "rounds": 1
     }
   }
 }

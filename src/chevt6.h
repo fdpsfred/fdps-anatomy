@@ -66,4 +66,63 @@
 extern void fdps_chapter_29_event_activate_enemy_groups(int unit_index);
 #pragma aux fdps_chapter_29_event_activate_enemy_groups "*" parm caller [];
 
+/* Chapter 29's final ambush trigger, and the companion of the handler above: it
+   releases every unit map28.dat deploys, and it does not release them all the
+   same way.  Unit indices 0x0c through 0x59 inclusive go on the behaviour code
+   that paths a unit toward the nearest opposing unit from anywhere on the map,
+   and unit indices 0x5a and 0x5b -- the two level 30 Guardian Dragons the
+   handler above deliberately leaves out of its range -- go on behaviour code
+   0x0a instead, which scores an item and uses it when the score reaches 6 and
+   then still takes an attack in the same step, and which never reaches the
+   raw-distance pathing, so a unit in it works from where it stands.  The two
+   ranges are disjoint -- 0x0c..0x59 and 0x5a..0x5b share no index -- so every
+   record is written exactly once and the order the two loops run in carries no
+   meaning.
+
+   Like the handler above it runs only for a unit on the player side.  The
+   record named by unit_index is fetched first and its side byte at record
+   offset 6 compared for equality with 2 -- the player side, against 0 for the
+   enemy and 1 for the neutral one -- and anything else returns having changed
+   nothing, so an enemy or neutral unit crossing the same trigger tile does not
+   spring the ambush.  This is the only place the argument reaches: it is not
+   range checked and the record is resolved through fdps_get_unit_record, so an
+   index outside the live array reads whatever lies at that stride.
+
+   Both ranges rewrite only the low nibble -- the behaviour code -- of the
+   ai_behavior byte at record offset 0x34 and leave the high nibble alone,
+   because bits 0x40 and 0x80 of it are independent AI flags
+   fdps_map_actor_take_best_action and fdps_score_targets_for_item read on their
+   own.  All four bounds are literals; nothing is range checked and
+   data_fdps_map_unit_count is not consulted, and each record is resolved
+   through fdps_get_unit_record per iteration, so the array base is re-read.
+
+   The indices are only meaningful against chapter 29's own deployment.
+   map28.dat declares 12 player slots and 80 scenario units, so unit indices
+   0x00..0x0b are the party and 0x0c..0x5b are deployment records 0..79: the
+   first range is records 0..77 and the second is records 78 and 79, so between
+   them they cover all 80 with each record written exactly once.  Records
+   0..59 and 78..79 carry behaviour code 2, hold position, at deployment record
+   offset 0x11, and records 60..77 already carry 0 and have been advancing since
+   the first turn, so the first range covers them without changing anything.
+   Together
+   with slot 45, which releases records 24..77 alone, this is what holds the 24
+   units of records 0..23 and both dragons until a party unit reaches this
+   handler's tile.
+
+   There is no one-shot latch: nothing in the body guards the loops and nothing
+   records that they ran, so calling it again runs them again.  Both merges are
+   idempotent, so a second firing changes nothing, but a unit the AI has since
+   moved into another behaviour mode would be pushed back.  What makes it fire
+   once in play is the hand-off slot: fdps_map_set_pending_tile_event arms it and
+   the turn driver resets it to 0xff before the next unit acts.
+
+   Table slot 46, and chapter 29's map28.dat is the only shipped file that names
+   it -- as tile-trigger entry 2, the two bytes at file offset 0x35, {slot 46,
+   pass-mode 0}.  Pass-mode 0 is what the four single-tile movement steppers
+   report, while fdps_battle_unit_turn and fdps_map_actor_behavior_step report 1,
+   so the trigger fires as a unit walks across the tile rather than when it comes
+   to rest on it. */
+extern void fdps_chapter_29_event_activate_all_enemies(int unit_index);
+#pragma aux fdps_chapter_29_event_activate_all_enemies "*" parm caller [];
+
 #endif
