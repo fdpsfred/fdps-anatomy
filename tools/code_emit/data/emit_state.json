@@ -851,6 +851,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x4d"
+    },
+    "0002f410": {
+      "name": "fdps_transition_box",
+      "target": "transit.c",
+      "body_size": "0x2b7",
+      "status": "committed",
+      "emitted_against": "0x2b7",
+      "rounds": 0
     }
   }
 }

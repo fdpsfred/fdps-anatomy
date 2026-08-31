@@ -7589,8 +7589,8 @@ Parameters:
   dst_pitch -- row stride of dst in bytes
   width -- rectangle width in pixels; also the stride of both scratch buffers and, times height, their malloc size
   height -- rectangle height in pixels
-  step_x -- how far each vertical edge of the rectangle moves per frame; the rectangle's width changes by twice this. Must not be 0: style 0 would loop forever and style != 0 divides by 2*step_x
-  step_y -- the same for the horizontal edges, with the same restriction
+  step_x -- how far each vertical edge of the rectangle moves per frame; the rectangle's width changes by twice this. Must not be 0 for style != 0, which divides by 2*step_x. For style 0 a zero step_x alone does not hang -- cur_w simply never shrinks and the loop still ends when cur_h falls below 2*step_y -- but step_x and step_y both 0 loops forever
+  step_y -- the same for the horizontal edges. Must not be 0 for style != 0, which divides by 2*step_y. For style 0 a zero step_y alone does not hang -- cur_h simply never shrinks and the loop still ends when cur_w falls below 2*step_x -- but step_x and step_y both 0 loops forever
   frame_delay -- handed straight to the CRT delay() between frames
   style -- 0 shrinks the outgoing picture toward the centre; any other value grows the incoming picture out of the centre
 
