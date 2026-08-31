@@ -163,3 +163,183 @@ void fdps_transition_box(unsigned char *src, int src_pitch,
     free(frame_buf);
     free(saved_rect);
 }
+
+/* 0002f6d0.  Eight effects out of one body.  The dispatch at 0002f746 is
+   CMP [EBP+0x34],0x7 followed by JA and then a jump through the eight-entry
+   table at 0002f6e0, so the range check is unsigned: a style of 8, or a
+   negative one, animates nothing and drops straight to the closing blit.
+
+   Both scratch buffers are allocated and the snapshot is taken before the
+   dispatch (0002f708, 0002f71b and the blit at 0002f73e), so the four styles
+   that never read either one still pay for both, and neither malloc result is
+   tested before it is used as a blit destination.
+
+   All eight branches run the same loop: the position starts at step, the test
+   is JL -- signed -- against height for styles 0-3 and against width for
+   styles 4-7, and the increment is step.  The position that would reach or
+   pass the extent ends the loop instead of being clamped, so the last partial
+   step is never drawn and the frame that would show the whole incoming
+   picture is never composed.  What completes the transition is the blit at
+   0002fb38, which is outside every branch and outside the switch.
+
+   THE FOUR ODD STYLES COMPOSE OFF-SCREEN, THE FOUR EVEN ONES DRAW STRAIGHT
+   ONTO dst.  Styles 1, 3, 5 and 7 build a whole frame in frame_buf from two
+   blits -- one rectangle of the incoming picture, one of the snapshot -- and
+   present the whole of it, so every byte of the destination rectangle is
+   rewritten each frame.  Styles 0, 2, 4 and 6 blit their partial rectangle
+   onto dst and leave the rest of what is already there alone.
+
+   STYLE 6 ANCHORS ON dst + (height - position) WHILE ITS LOOP COUNTS TO
+   width.  0002fa76 is ADD EAX,[EBP+0x28] and then SUB EAX,[EBP-0x10]: the
+   height, where the other three horizontal branches work in columns of width.
+   It is a bug in the original and it has to stay -- see transit.h. */
+void fdps_transition_slide(unsigned char *src, int src_pitch,
+                           unsigned char *dst, int dst_pitch,
+                           int width, int height,
+                           int step, int frame_delay, int style)
+{
+    /* The original's frame, in slot order: [EBP-0x4] the snapshot of the
+       outgoing picture, [EBP-0x8] the frame buffer, [EBP-0xc] the extent of
+       the rectangle the incoming picture has not covered yet, [EBP-0x10] how
+       far the slide has advanced.  The last two are rows for styles 0-3 and
+       columns for styles 4-7; the assembly reuses one slot for each of them
+       across all eight branches, and so does this. */
+    unsigned char *saved_rect;
+    unsigned char *frame_buf;
+    int remaining_extent;
+    int slide_pos;
+
+    frame_buf = (unsigned char *) malloc((size_t) (width * height));
+    saved_rect = (unsigned char *) malloc((size_t) (width * height));
+
+    /* The picture that is on the destination surface right now.  dst_pitch on
+       the way out, width on the way in: the snapshot is packed. */
+    fdps_blit_rect((unsigned int) dst, dst_pitch, saved_rect, width,
+                   width, height);
+
+    switch (style) {
+    case 0:
+        /* The incoming picture descends from the top edge: its bottom
+           slide_pos rows land on the top slide_pos rows of dst, and the
+           outgoing picture below them is left where it is. */
+        for (slide_pos = step; slide_pos < height; slide_pos += step) {
+            fdps_blit_rect((unsigned int) (src + (height - slide_pos)
+                                                     * src_pitch),
+                           src_pitch, dst, dst_pitch, width, slide_pos);
+            delay((unsigned int) frame_delay);
+        }
+        break;
+
+    case 1:
+        /* The outgoing picture slides off the top edge and uncovers the
+           incoming one: the snapshot is composed slide_pos rows higher than
+           it was, and the bottom slide_pos rows of the incoming picture fill
+           the gap it leaves at the bottom -- at the rows they will finally
+           occupy, not shifted. */
+        for (slide_pos = step; slide_pos < height; slide_pos += step) {
+            remaining_extent = height - slide_pos;
+            fdps_blit_rect((unsigned int) (src + remaining_extent * src_pitch),
+                           src_pitch, frame_buf + remaining_extent * width,
+                           width, width, slide_pos);
+            fdps_blit_rect((unsigned int) (saved_rect + slide_pos * width),
+                           width, frame_buf, width, width, remaining_extent);
+            fdps_blit_rect((unsigned int) frame_buf, width, dst, dst_pitch,
+                           width, height);
+            delay((unsigned int) frame_delay);
+        }
+        break;
+
+    case 2:
+        /* The incoming picture rises from the bottom edge: its top slide_pos
+           rows land on the bottom slide_pos rows of dst. */
+        for (slide_pos = step; slide_pos < height; slide_pos += step) {
+            fdps_blit_rect((unsigned int) src, src_pitch,
+                           dst + (height - slide_pos) * dst_pitch, dst_pitch,
+                           width, slide_pos);
+            delay((unsigned int) frame_delay);
+        }
+        break;
+
+    case 3:
+        /* The outgoing picture slides off the bottom edge: the top slide_pos
+           rows of the incoming picture stay where they belong and the
+           snapshot is composed slide_pos rows lower. */
+        for (slide_pos = step; slide_pos < height; slide_pos += step) {
+            remaining_extent = height - slide_pos;
+            fdps_blit_rect((unsigned int) src, src_pitch, frame_buf, width,
+                           width, slide_pos);
+            fdps_blit_rect((unsigned int) saved_rect, width,
+                           frame_buf + slide_pos * width, width,
+                           width, remaining_extent);
+            fdps_blit_rect((unsigned int) frame_buf, width, dst, dst_pitch,
+                           width, height);
+            delay((unsigned int) frame_delay);
+        }
+        break;
+
+    case 4:
+        /* The incoming picture arrives from the left edge: its rightmost
+           slide_pos columns land on the leftmost slide_pos columns of dst. */
+        for (slide_pos = step; slide_pos < width; slide_pos += step) {
+            fdps_blit_rect((unsigned int) (src + (width - slide_pos)),
+                           src_pitch, dst, dst_pitch, slide_pos, height);
+            delay((unsigned int) frame_delay);
+        }
+        break;
+
+    case 5:
+        /* The outgoing picture slides off the left edge: the snapshot is
+           composed slide_pos columns further left, and the rightmost
+           slide_pos columns of the incoming picture fill the gap in place. */
+        for (slide_pos = step; slide_pos < width; slide_pos += step) {
+            remaining_extent = width - slide_pos;
+            fdps_blit_rect((unsigned int) (src + remaining_extent), src_pitch,
+                           frame_buf + remaining_extent, width,
+                           slide_pos, height);
+            fdps_blit_rect((unsigned int) (saved_rect + slide_pos), width,
+                           frame_buf, width, remaining_extent, height);
+            fdps_blit_rect((unsigned int) frame_buf, width, dst, dst_pitch,
+                           width, height);
+            delay((unsigned int) frame_delay);
+        }
+        break;
+
+    case 6:
+        /* The incoming picture arrives from the right edge -- and the anchor
+           is height, not width.  Keep it: transit.h says what writing the
+           obvious width here would change. */
+        for (slide_pos = step; slide_pos < width; slide_pos += step) {
+            fdps_blit_rect((unsigned int) src, src_pitch,
+                           dst + (height - slide_pos), dst_pitch,
+                           slide_pos, height);
+            delay((unsigned int) frame_delay);
+        }
+        break;
+
+    case 7:
+        /* The outgoing picture slides off the right edge: the leftmost
+           slide_pos columns of the incoming picture stay where they belong
+           and the snapshot is composed slide_pos columns further right. */
+        for (slide_pos = step; slide_pos < width; slide_pos += step) {
+            remaining_extent = width - slide_pos;
+            fdps_blit_rect((unsigned int) src, src_pitch, frame_buf, width,
+                           slide_pos, height);
+            fdps_blit_rect((unsigned int) saved_rect, width,
+                           frame_buf + slide_pos, width,
+                           remaining_extent, height);
+            fdps_blit_rect((unsigned int) frame_buf, width, dst, dst_pitch,
+                           width, height);
+            delay((unsigned int) frame_delay);
+        }
+        break;
+    }
+
+    /* Outside the switch, and the only thing that guarantees the destination
+       holds the whole incoming picture -- whatever style ran, and whether it
+       drew a frame or not. */
+    fdps_blit_rect((unsigned int) src, src_pitch, dst, dst_pitch,
+                   width, height);
+
+    free(frame_buf);
+    free(saved_rect);
+}

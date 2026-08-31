@@ -57,4 +57,59 @@ extern void fdps_transition_box(unsigned char *src, int src_pitch,
                                 int frame_delay, int style);
 #pragma aux fdps_transition_box "*" parm caller [];
 
+
+/* Slides the picture already on dst and the one in src past each other, one
+   delayed frame at a time, in whichever of eight directions style names.
+
+   src is the incoming picture, at least width x height pixels with a row
+   stride of src_pitch.  dst is the target surface with a row stride of
+   dst_pitch, and it must already be carrying the outgoing picture: the
+   routine reads that rectangle back off dst before it draws anything,
+   because the four odd styles compose every frame against it.
+
+   THE EIGHT STYLES ARE FOUR DIRECTIONS TIMES TWO WAYS ROUND.  An even style
+   slides the incoming picture in over an outgoing picture that stays put; the
+   odd style above it slides the outgoing picture away and uncovers the
+   incoming one, which does not move.  0 and 1 work along the top edge, 2 and
+   3 along the bottom, 4 and 5 along the left, 6 and 7 along the right.  The
+   style is range-checked unsigned, so 8 and above -- and any negative value
+   -- animate nothing at all.
+
+   step is how many rows (styles 0-3) or columns (styles 4-7) the slide
+   advances per frame, and also where the first frame starts: the animation
+   runs at step, 2 * step, ... and stops at the last position strictly below
+   the extent, so the frame that would show the whole incoming picture is
+   never drawn.  STEP 0 NEVER TERMINATES, and a step at or above the extent
+   draws no frame at all.
+
+   frame_delay is handed straight to the CRT's delay() after each frame.
+
+   BOTH SCRATCH BUFFERS ARE PACKED, WHATEVER dst_pitch IS, and both are
+   allocated on every call.  They are two malloc blocks of width * height
+   bytes, and the four even styles that never look at either one still
+   allocate both and still take the snapshot.  NEITHER malloc RESULT IS
+   CHECKED.
+
+   THE TRANSITION IS COMPLETED BY A BLIT OUTSIDE THE ANIMATION.  Whatever
+   style ran, and whether it drew a frame or none, the call ends with one full
+   fdps_blit_rect of src onto dst, so the destination always holds the whole
+   incoming picture on return.
+
+   STYLE 6 WRITES OUTSIDE THE RECTANGLE AND IS MEANT TO.  Its loop counts
+   columns up to width like its three horizontal siblings, but it anchors each
+   frame at dst + (height - position) instead of dst + (width - position).
+   On any rectangle that is not square that draws a different picture, and on
+   a rectangle taller than it is wide it writes past the right-hand edge --
+   on the game's 320x200 the position runs past 200 and the anchor goes in
+   front of dst.  Writing the obvious width here, or adding a bounds guard,
+   changes what the player sees.
+
+   Nothing is clipped anywhere else either: the extents and both strides are
+   used exactly as handed over. */
+extern void fdps_transition_slide(unsigned char *src, int src_pitch,
+                                  unsigned char *dst, int dst_pitch,
+                                  int width, int height,
+                                  int step, int frame_delay, int style);
+#pragma aux fdps_transition_slide "*" parm caller [];
+
 #endif

@@ -914,5 +914,20 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "0002f6d0": [
+    {
+      "from": "emit",
+      "what": "Nothing in the image calls fdps_transition_slide. get_xrefs_to 0002f6d0 returns no references of any kind, code or data, so there is no call site to corroborate the nine-argument signature against and no way to establish which styles and which geometries the game ever asks for. That matters for one thing in particular: style 6's anchor at dst + (height - position) writes outside the destination rectangle on any rectangle taller than it is wide, and in front of dst once the position passes the height, and whether that ever happens on a real run depends entirely on the arguments a caller would pass. The body's own behaviour is settled and is reproduced exactly, including the spill; what is not settled is whether it is ever executed.",
+      "needs": "A call site. Either a function still to be emitted that reaches this address -- most likely through a pointer table, since no direct reference exists today -- or a live trace of the shipped executable showing the transition running with its actual width, height, step and style.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "I reached the same gap independently: get_xrefs_to 0002f6d0 returns 'No references found' -- no code reference, no data reference, nothing in a pointer table. So the nine-parameter signature rests entirely on the callee-side frame (slots 0x14 through 0x34 read, nothing above 0x34 touched) and there is no way to know which styles or which geometries the game ever asks for, which is what decides whether style 6's spill ever happens on a real run. Nothing my pass could read would settle it; the emitter's entry is the rule working.",
+      "needs": "A call site: a not-yet-emitted function that reaches this address, most likely through a pointer table since no direct reference exists today, or a live trace of the shipped executable showing the transition running with its actual arguments.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

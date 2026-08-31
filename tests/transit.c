@@ -332,6 +332,304 @@ static void the_incoming_picture_is_never_written(void)
     CHECK_EQ(src_mismatches(), 0);
 }
 
+/* fdps_transition_slide, 0002f6d0.
+ *
+ * WHAT IS OBSERVABLE FROM OUTSIDE THE CALL.  Seven of the eight styles write
+ * only inside the width x height destination rectangle, and the blit at
+ * 0002fb38 -- outside the switch, unconditional, last -- rewrites every byte
+ * of that rectangle with the incoming picture.  So for those seven the whole
+ * unit-observable surface is the destination's final content, the fact that
+ * the source is untouched, and the fact that the call ends.  The two scratch
+ * buffers are malloc'd and freed inside the call and never handed out, and
+ * every frame in between is painted over.
+ *
+ * STYLE 6 IS THE EXCEPTION AND THAT IS WHY THE GEOMETRY HERE IS TALLER THAN
+ * IT IS WIDE.  Its loop counts columns to width but it anchors each frame at
+ * dst + (height - position): 0002fa76 is ADD EAX,[EBP+0x28], the height, then
+ * SUB EAX,[EBP-0x10].  With a rectangle 6 wide and 10 tall the last frame
+ * lands at dst + 6 and is 4 columns wide, so it writes columns 6 to 9 -- past
+ * the right-hand edge, where the closing blit never reaches and the check can
+ * see it.  Anchoring on width instead would put every frame inside the
+ * rectangle and leave nothing behind at all, so the two spellings are told
+ * apart here rather than left to the playtest.
+ *
+ * WHAT IS LEFT TO THE PLAYTEST.  Which direction each style slides, how many
+ * frames it takes and what the screen holds part-way through are visible only
+ * while the animation is running: for styles 0-5 and 7 a build that slid the
+ * wrong way would still leave the destination holding exactly the bytes
+ * checked below.  delay() is in the same position and every case passes 0.
+ *
+ * Expected values come from the assembly: the six pushes of the closing blit
+ * at 0002fb38 (height, width, dst_pitch, dst, src_pitch, src), the CMP
+ * against 7 with JA at 0002f746 that makes the style range check unsigned,
+ * the JL loop tests at 0002f76a and 0002f964 against height and width
+ * respectively, and the eight-entry jump table at 0002f6e0.
+ */
+
+/* Deliberately taller than it is wide, with two strides that are both larger
+   than the width and different from each other, so neither stride can stand
+   in for the width or for the other, and a height/width mix-up is visible. */
+#define SLIDE_W 6
+#define SLIDE_H 10
+#define SLIDE_SP 9
+#define SLIDE_DP 16
+
+/* One guard row above the rectangle and one below it in each buffer. */
+#define SLIDE_SRC_BYTES (SLIDE_SP * (SLIDE_H + 2))
+#define SLIDE_DST_BYTES (SLIDE_DP * (SLIDE_H + 2))
+
+/* The source is a ramp over its whole buffer: slide_src[i] == 0x40 + i.  The
+   buffer is 108 bytes, so every byte in it is distinct and a transfer that
+   used the wrong stride or started at the wrong offset lands on a value that
+   names where it came from. */
+#define SLIDE_RAMP_BASE 0x40
+
+/* Two fills for what the destination is carrying on entry.  Neither can be
+   produced by the ramp, which runs from 0x40 to 0xab. */
+#define SLIDE_OUT_A 0x11
+#define SLIDE_OUT_B 0x22
+
+/* Both rectangles start one whole row into their buffer. */
+#define SLIDE_SRC_ORIGIN SLIDE_SP
+#define SLIDE_DST_ORIGIN SLIDE_DP
+
+/* The columns style 6 leaves behind with this geometry: the last frame runs
+   at position 4, anchors at dst + (10 - 4) and is 4 columns wide. */
+#define SLIDE_SPILL_LO 6
+#define SLIDE_SPILL_HI 9
+
+static unsigned char slide_src[SLIDE_SRC_BYTES];
+static unsigned char slide_dstbuf[SLIDE_DST_BYTES];
+
+static void slide_stage(int outgoing)
+{
+    int i;
+
+    for (i = 0; i < SLIDE_SRC_BYTES; i++) {
+        slide_src[i] = (unsigned char) (SLIDE_RAMP_BASE + i);
+    }
+    memset(slide_dstbuf, outgoing, (size_t) SLIDE_DST_BYTES);
+}
+
+static void run_slide(int step, int style)
+{
+    fdps_transition_slide(&slide_src[SLIDE_SRC_ORIGIN], SLIDE_SP,
+                          &slide_dstbuf[SLIDE_DST_ORIGIN], SLIDE_DP,
+                          SLIDE_W, SLIDE_H, step, 0, style);
+}
+
+/* The source byte that belongs at (row, col), spelled out as ramp arithmetic
+   rather than read back through the same pointer arithmetic the code under
+   test uses. */
+static int slide_expected(int row, int col)
+{
+    return (SLIDE_RAMP_BASE + SLIDE_SRC_ORIGIN + row * SLIDE_SP + col) & 0xff;
+}
+
+static int slide_dst(int row, int col)
+{
+    return (int) slide_dstbuf[SLIDE_DST_ORIGIN + row * SLIDE_DP + col];
+}
+
+/* Bytes of the destination rectangle that are not the incoming picture. */
+static int slide_rect_bad(void)
+{
+    int row;
+    int col;
+    int bad;
+
+    bad = 0;
+    for (row = 0; row < SLIDE_H; row++) {
+        for (col = 0; col < SLIDE_W; col++) {
+            if (slide_dst(row, col) != slide_expected(row, col)) {
+                bad++;
+            }
+        }
+    }
+    return bad;
+}
+
+/* Bytes of the destination buffer outside the rectangle -- the padding
+   columns on every row and the two guard rows -- that no longer hold the
+   fill the destination was carrying.  Columns skip_lo to skip_hi of the
+   rectangle's own rows are left out of the count, which is how style 6's
+   spill is excluded; pass a range that is empty to count everything. */
+static int slide_outside_bad(int outgoing, int skip_lo, int skip_hi)
+{
+    int i;
+    int row;
+    int col;
+    int bad;
+
+    bad = 0;
+    for (i = 0; i < SLIDE_DST_BYTES; i++) {
+        row = (i / SLIDE_DP) - 1;
+        col = i % SLIDE_DP;
+        if (row >= 0 && row < SLIDE_H) {
+            if (col < SLIDE_W) {
+                continue;
+            }
+            if (col >= skip_lo && col <= skip_hi) {
+                continue;
+            }
+        }
+        if ((int) slide_dstbuf[i] != outgoing) {
+            bad++;
+        }
+    }
+    return bad;
+}
+
+/* Bytes of the source that are no longer their ramp value.  The routine reads
+   src on every path and writes it on none. */
+static int slide_src_bad(void)
+{
+    int i;
+    int bad;
+
+    bad = 0;
+    for (i = 0; i < SLIDE_SRC_BYTES; i++) {
+        if ((int) slide_src[i] != ((SLIDE_RAMP_BASE + i) & 0xff)) {
+            bad++;
+        }
+    }
+    return bad;
+}
+
+/* Bytes of style 6's spill that are not the source column the height anchor
+   selects: the last frame copies source columns 0 to 3 of every row to
+   destination columns 6 to 9 of the same row. */
+static int slide_spill_bad(void)
+{
+    int row;
+    int col;
+    int bad;
+
+    bad = 0;
+    for (row = 0; row < SLIDE_H; row++) {
+        for (col = SLIDE_SPILL_LO; col <= SLIDE_SPILL_HI; col++) {
+            if (slide_dst(row, col)
+                != slide_expected(row, col - SLIDE_SPILL_LO)) {
+                bad++;
+            }
+        }
+    }
+    return bad;
+}
+
+/* Whatever the style, the destination holds the whole incoming picture when
+   the call returns, read at src_pitch and written at dst_pitch, and the
+   source is unchanged.  What puts it there is the blit at 0002fb38, which is
+   outside the switch: no branch can be responsible for this. */
+static void slide_every_style_lands_the_new_picture(void)
+{
+    int style;
+
+    for (style = 0; style <= 7; style++) {
+        slide_stage(SLIDE_OUT_A);
+        run_slide(2, style);
+        CHECK_EQ(slide_rect_bad(), 0);
+        CHECK_EQ(slide_src_bad(), 0);
+
+        /* A second fill, so nothing of what the destination was carrying can
+           be passing for a source byte. */
+        slide_stage(SLIDE_OUT_B);
+        run_slide(2, style);
+        CHECK_EQ(slide_rect_bad(), 0);
+    }
+}
+
+/* Seven of the eight styles keep every write inside the rectangle: the four
+   odd ones compose in a packed scratch buffer and present the whole of it at
+   dst_pitch, and styles 0, 2 and 4 anchor their partial rectangle inside it.
+   A wrong stride or a wrong anchor in any of them lands in the padding
+   columns or the guard rows, where the closing blit never reaches. */
+static void slide_seven_styles_stay_inside_the_rectangle(void)
+{
+    static int inside_styles[7] = {0, 1, 2, 3, 4, 5, 7};
+    int i;
+
+    for (i = 0; i < 7; i++) {
+        slide_stage(SLIDE_OUT_A);
+        run_slide(2, inside_styles[i]);
+        CHECK_EQ(slide_outside_bad(SLIDE_OUT_A, 1, 0), 0);
+    }
+}
+
+/* Style 6 anchors on dst + (height - position) while its loop counts columns
+   to width, so on this 6 x 10 rectangle its last frame writes columns 6 to 9
+   -- outside the rectangle, where nothing overwrites it.  The spill is
+   exactly source columns 0 to 3 of each row.  Anchoring on width instead
+   would put every frame inside the rectangle and leave the padding columns
+   untouched, so slide_spill_bad would count all forty. */
+static void slide_style_six_anchors_on_the_height(void)
+{
+    slide_stage(SLIDE_OUT_A);
+    run_slide(2, 6);
+
+    CHECK_EQ(slide_rect_bad(), 0);
+    CHECK_EQ(slide_spill_bad(), 0);
+    CHECK_EQ(slide_dst(0, SLIDE_SPILL_LO), SLIDE_RAMP_BASE + SLIDE_SP);
+    CHECK_EQ(slide_dst(0, SLIDE_SPILL_HI), SLIDE_RAMP_BASE + SLIDE_SP + 3);
+    CHECK_EQ(slide_dst(SLIDE_H - 1, SLIDE_SPILL_LO),
+             SLIDE_RAMP_BASE + SLIDE_SP * SLIDE_H);
+    CHECK_EQ(slide_dst(SLIDE_H - 1, SLIDE_SPILL_HI),
+             SLIDE_RAMP_BASE + SLIDE_SP * SLIDE_H + 3);
+
+    /* And nothing outside the rectangle other than that spill was touched. */
+    CHECK_EQ(slide_outside_bad(SLIDE_OUT_A, SLIDE_SPILL_LO, SLIDE_SPILL_HI),
+             0);
+}
+
+/* The style is range-checked with CMP 7 / JA, an unsigned compare, so 8 and
+   -1 both miss the jump table.  Neither animates anything, and both still
+   complete the transition, because the blit that completes it is outside the
+   switch. */
+static void slide_a_style_outside_the_table_still_lands(void)
+{
+    slide_stage(SLIDE_OUT_A);
+    run_slide(2, 8);
+    CHECK_EQ(slide_rect_bad(), 0);
+    CHECK_EQ(slide_outside_bad(SLIDE_OUT_A, 1, 0), 0);
+
+    slide_stage(SLIDE_OUT_A);
+    run_slide(2, -1);
+    CHECK_EQ(slide_rect_bad(), 0);
+    CHECK_EQ(slide_outside_bad(SLIDE_OUT_A, 1, 0), 0);
+}
+
+/* The loop test is at the top and is strict, and styles 0-3 test against the
+   height while styles 4-7 test against the width.  A step that already fills
+   its extent draws no frame at all and the transition still completes.
+
+   The style 6 run is the one that pins which extent that branch bounds: a
+   step of 6 is not below the width, so no frame runs and nothing spills.  Had
+   the branch bounded itself by the height instead, 6 would be below 10, one
+   frame would run at dst + (10 - 6) and four columns of spill would be
+   sitting outside the rectangle. */
+static void slide_a_step_that_fills_the_extent_draws_no_frame(void)
+{
+    slide_stage(SLIDE_OUT_A);
+    run_slide(SLIDE_H, 0);
+    CHECK_EQ(slide_rect_bad(), 0);
+    CHECK_EQ(slide_outside_bad(SLIDE_OUT_A, 1, 0), 0);
+
+    slide_stage(SLIDE_OUT_A);
+    run_slide(SLIDE_H + 2, 1);
+    CHECK_EQ(slide_rect_bad(), 0);
+    CHECK_EQ(slide_outside_bad(SLIDE_OUT_A, 1, 0), 0);
+
+    slide_stage(SLIDE_OUT_A);
+    run_slide(SLIDE_W, 4);
+    CHECK_EQ(slide_rect_bad(), 0);
+    CHECK_EQ(slide_outside_bad(SLIDE_OUT_A, 1, 0), 0);
+
+    slide_stage(SLIDE_OUT_A);
+    run_slide(SLIDE_W, 6);
+    CHECK_EQ(slide_rect_bad(), 0);
+    CHECK_EQ(slide_outside_bad(SLIDE_OUT_A, 1, 0), 0);
+}
+
 void run_transit_tests(void)
 {
     RUN_TEST(the_closing_path_ends_on_the_incoming_picture);
@@ -342,4 +640,9 @@ void run_transit_tests(void)
     RUN_TEST(unequal_steps_end_on_the_incoming_picture);
     RUN_TEST(what_the_destination_carried_does_not_survive);
     RUN_TEST(the_incoming_picture_is_never_written);
+    RUN_TEST(slide_every_style_lands_the_new_picture);
+    RUN_TEST(slide_seven_styles_stay_inside_the_rectangle);
+    RUN_TEST(slide_style_six_anchors_on_the_height);
+    RUN_TEST(slide_a_style_outside_the_table_still_lands);
+    RUN_TEST(slide_a_step_that_fills_the_extent_draws_no_frame);
 }
