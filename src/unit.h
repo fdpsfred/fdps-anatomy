@@ -221,4 +221,33 @@ extern int fdps_battle_find_unit_at_cursor(void);
 extern void fdps_units_clear_status_bit7(void);
 #pragma aux fdps_units_clear_status_bit7 "*" parm caller [];
 
+/* Which unit on the map is this character?  Returns the zero-based index into
+   the current battle's unit array of the first unit whose char_id -- struct
+   fdps_unit_record's byte at record offset 8, the id
+   fdps_roster_add_character stamps in when the character joins -- equals
+   character_id and which has not been retired, or -1 when there is no such
+   unit.  The index is usable with fdps_get_unit_record.
+
+   out_record is the address of a caller pointer and MUST NOT be null: it is
+   written before anything else is done, so a null faults rather than being
+   rejected.  What it is left holding is part of the answer:
+
+     - null when no record carried the id at all;
+     - the returned unit's record on a successful lookup;
+     - on a -1 return after matches that were all retired, the LAST matching
+       record -- retired units publish their record and let the scan carry on,
+       so the pointer survives the miss.
+
+   fdps_draw_text relies on that third case: it tests the pointer for null and
+   reads the record's portrait_id before it looks at the return value at all.
+
+   The id compare is on the zero-extended byte, so the domain is 0..255 and a
+   negative character_id matches nothing.  The walk is bounded by
+   data_fdps_map_unit_count (gamedata.h) with a signed compare, so a count of
+   zero or less finds nothing, and the array base is read once at entry -- safe
+   here because nothing the scan calls can move the array. */
+extern int fdps_battle_find_unit_by_character_id(
+    int character_id, struct fdps_unit_record **out_record);
+#pragma aux fdps_battle_find_unit_by_character_id "*" parm caller [];
+
 #endif

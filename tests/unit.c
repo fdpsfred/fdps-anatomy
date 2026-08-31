@@ -2188,6 +2188,366 @@ static void the_sweep_starts_from_the_published_base(void)
     CHECK_EQ(clear_flags(4), 0xff);
 }
 
+/* fdps_battle_find_unit_by_character_id @ 0002dc20.
+ *
+ * Expected values come from the assembly: MOV dword ptr [EAX],0x0 at 0002dc37
+ * for the clear of *out_record before anything else, CMP EAX,dword ptr
+ * [0x00060150] / JL at 0002dc47 for the signed bound, MOV AL,byte ptr [EAX +
+ * 0x8] / AND EAX,0xff / CMP EAX,dword ptr [EBP + 0x14] / JNZ at 0002dc5c for
+ * the zero-extended equality on the record's ninth byte, MOV dword ptr
+ * [EDX],EAX at 0002dc6f for the publish that happens BEFORE the retired test,
+ * PUSH EAX / CALL 0x000109b0 / TEST EAX,EAX / JNZ at 0002dc75 for that test,
+ * ADD dword ptr [EBP-0xc],0x50 at 0002dc89 for the stride, CMP dword ptr [EBP
+ * + 0x18],0x0 at 0002dc8f for the guard on the roster fallback and MOV dword
+ * ptr [EBP-0x4],0xffffffff at 0002dcd7 for the miss.  What the caller does with
+ * the published pointer comes from fdps_draw_text at 00020277: CMP dword ptr
+ * [EBP-0x10],0x0 / JZ, then MOV AL,byte ptr [EDX + 0x7], and only then CMP
+ * dword ptr [EBP-0x1c],-0x1.  The record layout is ticket 17's, which puts
+ * char_id at +8 and portrait_id at +7.
+ *
+ * The unit array and the roster are staged here rather than read from a game
+ * file: the function's whole input is its two arguments and four globals, so
+ * publishing local blocks through them is the only way to reach either loop.
+ * Nothing below asserts what any of those globals holds on its own -- ticket 23
+ * owns that.
+ */
+#define FIND_UNITS 6
+#define FIND_ROSTER_UNITS 2
+
+/* Distinct ids, none of them zero, so a record left blank by a scan that walked
+   the wrong stride cannot answer for one of them by accident. */
+#define FIND_FIRST_CHAR_ID 0x30
+
+/* The absent id every miss case asks for.  It is not FIND_FIRST_CHAR_ID + n for
+   any staged n. */
+#define FIND_ABSENT_CHAR_ID 0x7e
+
+static struct fdps_unit_record find_units[FIND_UNITS];
+static struct fdps_unit_record find_roster[FIND_ROSTER_UNITS];
+
+static void set_char_id(int block_slot, int char_id)
+{
+    find_units[block_slot].char_id = (unsigned char) char_id;
+}
+
+/* Six live units carrying six consecutive ids, the whole array in range. */
+static void stage_find(void)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) find_units;
+    for (i = 0; i < (int) sizeof(find_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < FIND_UNITS; i++) {
+        set_char_id(i, FIND_FIRST_CHAR_ID + i);
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) find_units;
+    data_fdps_map_unit_count = FIND_UNITS;
+}
+
+static void retire_find(int block_slot)
+{
+    find_units[block_slot].flags = (unsigned char) RETIRED_BIT;
+}
+
+/* Which staged record the function published, counted in whole records from the
+   front of the block, or -1 when it left the pointer null.  A pointer that had
+   come from anywhere but this block -- the roster, say -- lands on neither. */
+static long find_slot_of(struct fdps_unit_record *record)
+{
+    if (record == (struct fdps_unit_record *) 0) {
+        return -1;
+    }
+    return (long) ((unsigned char *) record - (unsigned char *) find_units) /
+           UNIT_RECORD_STRIDE;
+}
+
+/* MOV AL,byte ptr [EAX + 0x8] reads the ninth byte of the record and the walk
+   advances by 0x50.  portrait_id at +7 is the byte fdps_draw_text reads back
+   through the very pointer this function publishes, and reserved_09 at +9 is
+   its other neighbour, so both are staged with the sought id here: an offset one
+   either way would find a unit where the original finds none. */
+static void the_character_id_byte_is_at_record_offset_eight(void)
+{
+    struct fdps_unit_record *found;
+
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, char_id), 8);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, portrait_id), 7);
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), UNIT_RECORD_STRIDE);
+
+    stage_find();
+    find_units[2].portrait_id = (unsigned char) FIND_ABSENT_CHAR_ID;
+    find_units[2].reserved_09 = (unsigned char) FIND_ABSENT_CHAR_ID;
+
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_ABSENT_CHAR_ID,
+                                                   &found), -1);
+    CHECK_EQ(find_slot_of(found), -1);
+}
+
+/* The whole staged block, one id at a time: each returns its own index and
+   publishes its own record.  A stride other than 0x50, or a base one record
+   out, would shift every answer. */
+static void each_character_id_finds_its_own_unit(void)
+{
+    struct fdps_unit_record *found;
+    int i;
+
+    stage_find();
+    for (i = 0; i < FIND_UNITS; i++) {
+        CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID + i,
+                                                       &found), i);
+        CHECK_EQ(find_slot_of(found), (long) i);
+    }
+}
+
+/* MOV dword ptr [EAX],0x0 at 0002dc37 clears the caller's pointer before the
+   scan starts, so a miss leaves it null whatever it held on the way in -- which
+   is what makes fdps_draw_text's CMP dword ptr [EBP-0x10],0x0 a usable test.
+   The miss itself falls off the end of the walk to the -1 at 0002dcd7. */
+static void an_absent_id_returns_minus_one_and_a_null_record(void)
+{
+    struct fdps_unit_record *found;
+
+    stage_find();
+    found = &find_units[3];
+
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_ABSENT_CHAR_ID,
+                                                   &found), -1);
+    CHECK_EQ((long) (unsigned long) found, 0);
+    CHECK_EQ(find_slot_of(found), -1);
+}
+
+/* The first match returns, so among several live units carrying one id the
+   lowest index wins and the records behind it are never looked at. */
+static void the_lowest_matching_index_wins(void)
+{
+    struct fdps_unit_record *found;
+
+    stage_find();
+    set_char_id(1, FIND_FIRST_CHAR_ID);
+    set_char_id(4, FIND_FIRST_CHAR_ID);
+
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID,
+                                                   &found), 0);
+    CHECK_EQ(find_slot_of(found), 0);
+
+    retire_find(0);
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID,
+                                                   &found), 1);
+    CHECK_EQ(find_slot_of(found), 1);
+}
+
+/* The publish at 0002dc6f happens BEFORE the CALL to fdps_unit_is_retired and
+   is not undone when that answer is non-zero, so a retired match is skipped for
+   the return value while its record stays published.  The -1 exit therefore
+   names the LAST matching record rather than null, which is the state
+   fdps_draw_text reads a portrait out of.  Publishing only for the unit that is
+   finally returned would pass every other case here and hand that caller a null
+   pointer on this one. */
+static void a_retired_match_is_skipped_but_stays_published(void)
+{
+    struct fdps_unit_record *found;
+
+    stage_find();
+    set_char_id(1, FIND_FIRST_CHAR_ID);
+    set_char_id(4, FIND_FIRST_CHAR_ID);
+    retire_find(0);
+    retire_find(1);
+
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID,
+                                                   &found), 4);
+    CHECK_EQ(find_slot_of(found), 4);
+
+    retire_find(4);
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID,
+                                                   &found), -1);
+    CHECK_EQ(find_slot_of(found), 4);
+
+    stage_find();
+    retire_find(3);
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID + 3,
+                                                   &found), -1);
+    CHECK_EQ(find_slot_of(found), 3);
+}
+
+/* TEST EAX,EAX / JNZ on fdps_unit_is_retired's answer, and that answer is bit 0
+   of the flags byte alone.  A unit carrying the acted-this-turn bit 0x80, or
+   every bit but bit 0, is still on the field and is still returned; only bit 0
+   takes it out of the answer. */
+static void only_the_retired_bit_removes_a_match(void)
+{
+    struct fdps_unit_record *found;
+
+    stage_find();
+
+    find_units[2].flags = 0x80;
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID + 2,
+                                                   &found), 2);
+
+    find_units[2].flags = 0xfe;
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID + 2,
+                                                   &found), 2);
+
+    find_units[2].flags = 0x81;
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID + 2,
+                                                   &found), -1);
+}
+
+/* CMP EAX,dword ptr [0x00060150] / JL is a signed compare against the live
+   count, so records past the count are not in the battle and are not looked at,
+   and a count of zero or a negative one ends the scan before the first record
+   -- where an unsigned JB on a negative count would walk the whole block. */
+static void the_signed_unit_count_bounds_the_find(void)
+{
+    struct fdps_unit_record *found;
+
+    stage_find();
+    data_fdps_map_unit_count = 3;
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID + 2,
+                                                   &found), 2);
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID + 3,
+                                                   &found), -1);
+    CHECK_EQ(find_slot_of(found), -1);
+
+    data_fdps_map_unit_count = 0;
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID,
+                                                   &found), -1);
+    CHECK_EQ(find_slot_of(found), -1);
+
+    data_fdps_map_unit_count = -1;
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID,
+                                                   &found), -1);
+
+    stage_find();
+}
+
+/* AND EAX,0xff widens the record byte with zero extension, so the id space the
+   compare can ever match is 0..255: a record byte of 0xff answers to 255 and
+   NOT to -1, and 0x80 answers to 128 and not to -128.  Read through a signed
+   char the two negative calls would find a unit, and the two positive ones
+   would not.  Nothing above 255 matches either -- the argument is compared
+   whole. */
+static void the_id_compare_is_the_zero_extended_byte(void)
+{
+    struct fdps_unit_record *found;
+
+    stage_find();
+    set_char_id(1, 0xff);
+    set_char_id(2, 0x80);
+
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(0xff, &found), 1);
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(-1, &found), -1);
+    CHECK_EQ(find_slot_of(found), -1);
+
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(0x80, &found), 2);
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(-128, &found), -1);
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(0x1ff, &found), -1);
+}
+
+/* The base comes out of data_fdps_map_unit_array_ptr at 0002dc2c, so
+   republishing the global moves what index 0 means: the scan starts at the
+   record the global names and the records in front of it are outside it
+   entirely. */
+static void the_find_starts_from_the_published_base(void)
+{
+    struct fdps_unit_record *found;
+
+    stage_find();
+    data_fdps_map_unit_array_ptr = (unsigned char *) &find_units[2];
+    data_fdps_map_unit_count = 2;
+
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID + 2,
+                                                   &found), 0);
+    CHECK_EQ(find_slot_of(found), 2);
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID + 3,
+                                                   &found), 1);
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID,
+                                                   &found), -1);
+    CHECK_EQ(find_slot_of(found), -1);
+
+    stage_find();
+}
+
+/* CMP dword ptr [EBP + 0x18],0x0 at 0002dc8f tests the out POINTER, which the
+   function dereferenced at 0002dc34 and which is therefore never null, so the
+   roster scan behind it is dead code.  The roster is staged here with a member
+   carrying the very id being asked for and a non-zero member count: a miss on
+   the map still comes back -1 with a NULL record, not with the roster's.
+   Emitting the condition the author plainly meant -- *out_record == 0 -- would
+   publish find_roster[1] here and fdps_draw_text would print a portrait for a
+   character who is not on the field. */
+static void the_roster_fallback_stays_dead(void)
+{
+    struct fdps_unit_record *found;
+    unsigned char *saved_roster_ptr;
+    int saved_roster_count;
+    int i;
+
+    saved_roster_ptr = data_fdps_roster_array_ptr;
+    saved_roster_count = data_fdps_roster_member_count;
+
+    for (i = 0; i < (int) sizeof(find_roster); i++) {
+        ((unsigned char *) find_roster)[i] = 0;
+    }
+    find_roster[0].char_id = (unsigned char) (FIND_ABSENT_CHAR_ID + 1);
+    find_roster[1].char_id = (unsigned char) FIND_ABSENT_CHAR_ID;
+    data_fdps_roster_array_ptr = (unsigned char *) find_roster;
+    data_fdps_roster_member_count = FIND_ROSTER_UNITS;
+
+    stage_find();
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_ABSENT_CHAR_ID,
+                                                   &found), -1);
+    CHECK_EQ((long) (unsigned long) found, 0);
+
+    data_fdps_map_unit_count = 0;
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_ABSENT_CHAR_ID,
+                                                   &found), -1);
+    CHECK_EQ((long) (unsigned long) found, 0);
+
+    data_fdps_roster_array_ptr = saved_roster_ptr;
+    data_fdps_roster_member_count = saved_roster_count;
+    stage_find();
+}
+
+/* Nothing in the body writes through the record pointer -- the only store is
+   the one into the caller's own pointer -- so a hit and a miss both leave every
+   staged byte exactly as it was, retired flags included. */
+static void nothing_in_the_unit_array_is_written(void)
+{
+    struct fdps_unit_record *found;
+    unsigned char *bytes;
+    int changed_count;
+    int i;
+
+    stage_find();
+    retire_find(5);
+    bytes = (unsigned char *) find_units;
+
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_FIRST_CHAR_ID + 2,
+                                                   &found), 2);
+    CHECK_EQ(fdps_battle_find_unit_by_character_id(FIND_ABSENT_CHAR_ID,
+                                                   &found), -1);
+
+    changed_count = 0;
+    for (i = 0; i < (int) sizeof(find_units); i++) {
+        if (i % UNIT_RECORD_STRIDE == 8) {
+            if (bytes[i] != (unsigned char) (FIND_FIRST_CHAR_ID +
+                                             i / UNIT_RECORD_STRIDE)) {
+                changed_count++;
+            }
+        } else if (i == 5 * UNIT_RECORD_STRIDE + 5) {
+            if (bytes[i] != (unsigned char) RETIRED_BIT) {
+                changed_count++;
+            }
+        } else if (bytes[i] != 0) {
+            changed_count++;
+        }
+    }
+    CHECK_EQ(changed_count, 0);
+}
+
 void run_unit_tests(void)
 {
     RUN_TEST(the_record_is_base_plus_index_times_stride);
@@ -2278,4 +2638,16 @@ void run_unit_tests(void)
     RUN_TEST(nothing_but_each_flags_byte_is_written);
     RUN_TEST(the_signed_unit_count_bounds_the_sweep);
     RUN_TEST(the_sweep_starts_from_the_published_base);
+
+    RUN_TEST(the_character_id_byte_is_at_record_offset_eight);
+    RUN_TEST(each_character_id_finds_its_own_unit);
+    RUN_TEST(an_absent_id_returns_minus_one_and_a_null_record);
+    RUN_TEST(the_lowest_matching_index_wins);
+    RUN_TEST(a_retired_match_is_skipped_but_stays_published);
+    RUN_TEST(only_the_retired_bit_removes_a_match);
+    RUN_TEST(the_signed_unit_count_bounds_the_find);
+    RUN_TEST(the_id_compare_is_the_zero_extended_byte);
+    RUN_TEST(the_find_starts_from_the_published_base);
+    RUN_TEST(the_roster_fallback_stays_dead);
+    RUN_TEST(nothing_in_the_unit_array_is_written);
 }

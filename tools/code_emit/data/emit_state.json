@@ -739,6 +739,14 @@
       "status": "committed",
       "emitted_against": "0x47",
       "rounds": 0
+    },
+    "0002dc20": {
+      "name": "fdps_battle_find_unit_by_character_id",
+      "target": "unit.c",
+      "body_size": "0xc8",
+      "status": "committed",
+      "emitted_against": "0xc8",
+      "rounds": 0
     }
   }
 }

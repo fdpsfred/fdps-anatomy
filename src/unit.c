@@ -604,3 +604,97 @@ void fdps_units_clear_status_bit7(void)
         unit->flags = (unsigned char) (unit->flags & 0x7f);
     }
 }
+
+/* 0002dc20.  Finds the unit standing on the map for one character id, and hands
+   back two things: the index as the return value and the record itself through
+   the caller's pointer.
+
+   The two arguments are stack slots [EBP+0x14] and [EBP+0x18] under a PUSH EBX
+   / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP prologue, and both call sites
+   push the out pointer first and clean 8 bytes off themselves afterwards (LEA
+   EAX,[EBP-0x10] / PUSH EAX / PUSH the id / CALL / ADD ESP,0x8 at 00020264 and
+   the same shape at 00010183 and 000104d5), so character_id is the first
+   argument and out_record the second.
+
+   *out_record is cleared at 0002dc37, before the scan and before anything else,
+   and the caller in fdps_draw_text reads it back on BOTH exits: CMP dword ptr
+   [EBP-0x10],0x0 / JZ at 00020277 guards a read of the record's portrait_id at
+   +7, and only after that does it compare the return value against -1.  So what
+   the pointer is left holding is part of the answer and not a by-product.
+
+   The walk is a plain linear scan from index 0.  The base is taken from
+   data_fdps_map_unit_array_ptr once, at 0002dc2c, and the record is then stepped
+   by ADD dword ptr [EBP-0xc],0x50 at 0002dc89 rather than re-multiplied; nothing
+   the loop calls relocates the array, so the held pointer stays valid for the
+   length of the scan.  The bound is data_fdps_map_unit_count, re-read from
+   0x00060150 every iteration, and the compare is JL at 0002dc4d: signed, so a
+   count of zero or a negative one leaves *out_record null and returns -1 without
+   looking at a record.
+
+   The match is on the record's char_id at +8, zero-extended (MOV AL,byte ptr
+   [EAX + 0x8] / AND EAX,0xff at 0002dc5c) and compared for equality against the
+   whole argument.  The zero extension is what keeps the domain 0..255: a
+   character_id of -1 or of 0x100 matches nothing, where a sign-extended byte
+   would make 0xff answer to -1 instead of to 255.  It is the id
+   fdps_roster_add_character stamps into the record when the character joins,
+   not the unit index and not the portrait id at +7 next door.
+
+   A match publishes its record through out_record FIRST and only then asks
+   fdps_unit_is_retired(record_index) -- PUSH EAX / CALL 0x000109b0 / ADD ESP,0x4
+   / TEST EAX,EAX / JNZ at 0002dc75, so the value tested is that function's
+   answer in EAX -- and a non-zero answer falls through to the pointer advance
+   and carries the scan on.  The order matters at the -1 exit: a character whose
+   every unit has retired returns -1 with *out_record still naming the LAST of
+   them, which is the record fdps_draw_text then prints a portrait for.  Storing
+   the pointer only for the unit that is finally returned would hand that caller
+   a null instead.
+
+   The guard after the scan tests the POINTER out_record against 0 (CMP dword
+   ptr [EBP + 0x18],0x0 at 0002dc8f), not *out_record, so the roster scan behind
+   it cannot run: 0002dc34 dereferenced that same pointer on entry and a null
+   would have faulted there.  It is emitted as written because writing the
+   condition the author plainly meant, *out_record == 0, revives the scan and
+   changes what the callers see -- see the comment at the branch itself. */
+int fdps_battle_find_unit_by_character_id(int character_id,
+                                          struct fdps_unit_record **out_record)
+{
+    struct fdps_unit_record *record;
+    int record_index;
+
+    record = (struct fdps_unit_record *) data_fdps_map_unit_array_ptr;
+    *out_record = (struct fdps_unit_record *) 0;
+
+    for (record_index = 0;
+         record_index < data_fdps_map_unit_count;
+         record_index++) {
+        if ((int) record->char_id == character_id) {
+            *out_record = record;
+            if (fdps_unit_is_retired(record_index) == 0) {
+                return record_index;
+            }
+        }
+        record++;
+    }
+
+    /* Unreachable, and reproduced unreachable.  The original compares the out
+       pointer itself with zero here; every caller passes the address of one of
+       its own locals and the pointer was dereferenced at the top of this
+       function, so the branch is never taken.  Rewriting the test as
+       *out_record == 0 -- the condition this roster scan was plainly meant to
+       have -- would make a character who is not on the map come back with a
+       party-roster record instead of a null pointer, and fdps_draw_text reads
+       the record it is given on exactly that path. */
+    if (out_record == (struct fdps_unit_record **) 0) {
+        record = (struct fdps_unit_record *) data_fdps_roster_array_ptr;
+        for (record_index = 0;
+             record_index < data_fdps_roster_member_count;
+             record_index++) {
+            if ((int) record->char_id == character_id) {
+                *out_record = record;
+            }
+            record++;
+        }
+    }
+
+    return -1;
+}
