@@ -718,6 +718,14 @@
       "status": "committed",
       "emitted_against": "0xaf",
       "rounds": 0
+    },
+    "00013670": {
+      "name": "fdps_collect_targets_in_line",
+      "target": "aitarget.c",
+      "body_size": "0x16e",
+      "status": "committed",
+      "emitted_against": "0x16e",
+      "rounds": 0
     }
   }
 }

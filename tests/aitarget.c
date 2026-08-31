@@ -252,6 +252,236 @@ static void area_combined_filter(void)
 }
 
 /* ------------------------------------------------------------------
+ * 00013670 fdps_collect_targets_in_line
+ *
+ * This one owns no scan of its own: it drives the two map cursor globals one
+ * tile at a time and asks fdps_battle_find_unit_at_cursor (src/unit.c, real
+ * emitted code) what is standing there, so the fixture is the unit array the
+ * finder walks plus the movement grid's four header bytes, which is all this
+ * function reads of the grid.
+ *
+ * Expected values come from the assembly at 00013670 -- the step selection at
+ * 000136b5-000136ef, IMUL EAX,EAX,0x18 over both header words at 000136a0 and
+ * 000136af, the four signed bounds tests at 00013747-00013767, the two side
+ * tests at 00013788 and 00013797, the one-byte append at 000137a8 and the
+ * cursor restore at 000137be -- and from the plate comment's reading of the
+ * four call sites.  None of them is read off the emitted C.
+ * ------------------------------------------------------------------ */
+
+#define LINE_CURSOR_MARK_X 0x1234
+#define LINE_CURSOR_MARK_Y 0x5678
+#define LINE_OUT_FILL 0xee
+#define LINE_OUT_CELLS 16
+
+static unsigned char line_grid[4];
+static unsigned char line_out[LINE_OUT_CELLS];
+
+/* Hand the function a map of width x height TILES, an empty out buffer filled
+   with a byte no unit index can be, and cursor globals parked on two values no
+   walk can produce so that the restore at 000137be is visible. */
+static void stage_line(int width, int height, int units)
+{
+    int i;
+
+    *(short *) line_grid = (short) width;
+    *(short *) (line_grid + 2) = (short) height;
+    data_fdps_battle_move_grid_ptr = line_grid;
+    data_fdps_map_cursor_world_x = LINE_CURSOR_MARK_X;
+    data_fdps_map_cursor_world_y = LINE_CURSOR_MARK_Y;
+    for (i = 0; i < LINE_OUT_CELLS; i++) {
+        line_out[i] = LINE_OUT_FILL;
+    }
+    stage(units);
+}
+
+/* CMP [EBP+0x20],[EBP+0x14] / JNZ at 000136bb takes the horizontal branch on
+   any x difference and the y difference is then never read, so a diagonal aim
+   still sweeps the origin's own row. */
+static void line_walk_is_horizontal_unless_x_matches(void)
+{
+    stage_line(8, 8, 2);
+    place(0, 3, 2, 0, 0);   /* on the origin's row      */
+    place(1, 3, 3, 0, 0);   /* on the diagonal          */
+    CHECK_EQ(fdps_collect_targets_in_line(5, 5, line_out, 2, 2, 3, 1), 1);
+    CHECK_EQ(line_out[0], 0);
+}
+
+/* The vertical step is taken only on the equal-x branch at 000136bd. */
+static void line_walk_is_vertical_when_x_matches(void)
+{
+    stage_line(8, 8, 2);
+    place(0, 2, 3, 0, 0);   /* on the origin's column   */
+    place(1, 3, 3, 0, 0);   /* off it                   */
+    CHECK_EQ(fdps_collect_targets_in_line(2, 5, line_out, 2, 2, 3, 1), 1);
+    CHECK_EQ(line_out[0], 0);
+}
+
+/* JLE at 000136c3 and at 000136dd pick the sign: the step is negative only
+   when the aim is strictly below the origin on the axis being walked. */
+static void line_step_sign_follows_the_aim(void)
+{
+    stage_line(8, 8, 1);
+    place(0, 4, 2, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_line(0, 2, line_out, 5, 2, 3, 1), 1);
+
+    stage_line(8, 8, 1);
+    place(0, 2, 4, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_line(2, 0, line_out, 2, 5, 3, 1), 1);
+
+    /* The other direction on each axis, so neither case passes by accident. */
+    stage_line(8, 8, 1);
+    place(0, 4, 2, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 5, 2, 3, 1), 0);
+}
+
+/* Aiming at the origin tile takes the equal-x branch and then JLE at 000136c3
+   is taken, so the walk goes DOWN the column rather than nowhere. */
+static void line_aim_at_the_origin_walks_down(void)
+{
+    stage_line(8, 8, 2);
+    place(0, 2, 3, 0, 0);
+    place(1, 2, 1, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_line(2, 2, line_out, 2, 2, 3, 1), 1);
+    CHECK_EQ(line_out[0], 0);
+}
+
+/* The step is added at 0001372d before the bounds test and the finder call, so
+   the origin tile is never examined however the line is aimed. */
+static void line_origin_tile_is_never_examined(void)
+{
+    stage_line(8, 8, 1);
+    place(0, 2, 2, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_line(5, 2, line_out, 2, 2, 3, 1), 0);
+    CHECK_EQ(fdps_collect_targets_in_line(2, 5, line_out, 2, 2, 3, 1), 0);
+}
+
+/* CMP [EBP-0x24],[EBP+0x28] / JL at 0001371b: line_length is a count of tiles
+   starting one step beyond the origin, so 0 examines nothing. */
+static void line_length_counts_tiles_beyond_the_origin(void)
+{
+    stage_line(8, 8, 3);
+    place(0, 3, 2, 0, 0);
+    place(1, 4, 2, 0, 0);
+    place(2, 5, 2, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 2, 2, 0, 1), 0);
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 2, 2, 1, 1), 1);
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 2, 2, 3, 1), 3);
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 2, 2, 9, 1), 3);
+}
+
+/* The bounds are the grid header's two tile words times 0x18, x against the
+   word at +0 and y against the word at +2, so a map narrower or shorter than
+   the walk cuts it off. */
+static void line_bounds_come_from_the_grid_header(void)
+{
+    stage_line(4, 8, 2);
+    place(0, 3, 2, 0, 0);   /* last column of a 4-wide map */
+    place(1, 5, 2, 0, 0);   /* past the right edge         */
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 2, 2, 5, 1), 1);
+    CHECK_EQ(line_out[0], 0);
+
+    stage_line(8, 3, 2);
+    place(0, 2, 2, 0, 0);   /* last row of a 3-tall map    */
+    place(1, 2, 5, 0, 0);   /* past the bottom edge        */
+    CHECK_EQ(fdps_collect_targets_in_line(2, 7, line_out, 2, 1, 5, 1), 1);
+    CHECK_EQ(line_out[0], 0);
+}
+
+/* CMP [0x00069cd4],0x0 / JGE at 00013750 and the same on y at 00013767: a
+   negative cursor is skipped rather than divided into tile -1, and a skipped
+   tile does not end the walk. */
+static void line_walk_off_the_left_edge_is_skipped(void)
+{
+    stage_line(8, 8, 1);
+    place(0, 0, 2, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_line(0, 2, line_out, 1, 2, 3, 1), 1);
+    CHECK_EQ(line_out[0], 0);
+    CHECK_EQ(line_out[1], LINE_OUT_FILL);
+}
+
+/* The two side tests at 00013788 and 00013797 run the OPPOSITE way round from
+   the select_mode of the two collectors above: zero keeps the non-zero sides
+   and non-zero keeps side 0.  The reachable values are 0, 1 and 5. */
+static void line_side_filter_is_inverted(void)
+{
+    stage_line(8, 8, 3);
+    place(0, 3, 2, 0, 0);   /* enemy side 0     */
+    place(1, 4, 2, 1, 0);   /* guest NPC side 1 */
+    place(2, 5, 2, 2, 0);   /* party side 2     */
+
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 2, 2, 3, 0), 2);
+    CHECK_EQ(line_out[0], 1);
+    CHECK_EQ(line_out[1], 2);
+
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 2, 2, 3, 1), 1);
+    CHECK_EQ(line_out[0], 0);
+
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 2, 2, 3, 5), 1);
+    CHECK_EQ(line_out[0], 0);
+}
+
+/* MOV AL,byte ptr [EBP-0x18] / MOV byte ptr [EDX],AL at 000137ae writes ONE
+   byte per match at the running count, so the buffer past the count is
+   untouched and the indices arrive in walk order. */
+static void line_appends_one_byte_per_match(void)
+{
+    stage_line(8, 8, 3);
+    place(0, 5, 2, 0, 0);
+    place(1, 4, 2, 0, 0);
+    place(2, 3, 2, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 2, 2, 3, 1), 3);
+    CHECK_EQ(line_out[0], 2);
+    CHECK_EQ(line_out[1], 1);
+    CHECK_EQ(line_out[2], 0);
+    CHECK_EQ(line_out[3], LINE_OUT_FILL);
+}
+
+/* The retired filter is inside fdps_battle_find_unit_at_cursor -- PUSH EAX /
+   CALL 0x000109b0 / TEST EAX,EAX / JZ at 0002db1e -- and this body repeats no
+   test of its own, so a retired unit on the line is never reported. */
+static void line_retired_unit_is_never_reported(void)
+{
+    stage_line(8, 8, 2);
+    place(0, 3, 2, 0, 1);   /* retired enemy */
+    place(1, 4, 2, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 2, 2, 3, 1), 1);
+    CHECK_EQ(line_out[0], 1);
+}
+
+/* MOV [0x00069cd4],EAX at 000137c1 and the same on y at 000137c9 put the
+   caller's cursor back, whatever the walk did to it and whether or not it
+   found anything. */
+static void line_restores_the_cursor_globals(void)
+{
+    stage_line(8, 8, 1);
+    place(0, 3, 2, 0, 0);
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 2, 2, 3, 1), 1);
+    CHECK_EQ(data_fdps_map_cursor_world_x, LINE_CURSOR_MARK_X);
+    CHECK_EQ(data_fdps_map_cursor_world_y, LINE_CURSOR_MARK_Y);
+
+    stage_line(8, 8, 0);
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 2, 2, 3, 1), 0);
+    CHECK_EQ(data_fdps_map_cursor_world_x, LINE_CURSOR_MARK_X);
+    CHECK_EQ(data_fdps_map_cursor_world_y, LINE_CURSOR_MARK_Y);
+}
+
+/* Nothing in the body writes through the record pointer: it reads byte +6 and
+   that is all. */
+static void line_does_not_touch_the_records(void)
+{
+    stage_line(8, 8, 2);
+    place(0, 3, 2, 0, 0);
+    place(1, 4, 2, 2, 0x80);
+    CHECK_EQ(fdps_collect_targets_in_line(7, 2, line_out, 2, 2, 3, 1), 1);
+    CHECK_EQ(stage_units[0].pos_x, 3);
+    CHECK_EQ(stage_units[0].pos_y, 2);
+    CHECK_EQ(stage_units[0].side, 0);
+    CHECK_EQ(stage_units[0].flags, 0);
+    CHECK_EQ(stage_units[1].side, 2);
+    CHECK_EQ(stage_units[1].flags, 0x80);
+}
+
+/* ------------------------------------------------------------------
  * 00011e50 fdps_collect_targets_in_range
  *
  * This one needs five blocks live rather than one.  It reads the movement grid
@@ -1304,6 +1534,20 @@ void run_aitarget_tests(void)
     RUN_TEST(area_does_not_touch_the_records);
     RUN_TEST(area_combined_filter);
 
+    RUN_TEST(line_walk_is_horizontal_unless_x_matches);
+    RUN_TEST(line_walk_is_vertical_when_x_matches);
+    RUN_TEST(line_step_sign_follows_the_aim);
+    RUN_TEST(line_aim_at_the_origin_walks_down);
+    RUN_TEST(line_origin_tile_is_never_examined);
+    RUN_TEST(line_length_counts_tiles_beyond_the_origin);
+    RUN_TEST(line_bounds_come_from_the_grid_header);
+    RUN_TEST(line_walk_off_the_left_edge_is_skipped);
+    RUN_TEST(line_side_filter_is_inverted);
+    RUN_TEST(line_appends_one_byte_per_match);
+    RUN_TEST(line_retired_unit_is_never_reported);
+    RUN_TEST(line_restores_the_cursor_globals);
+    RUN_TEST(line_does_not_touch_the_records);
+
     RUN_TEST(range_cell_is_two_bytes_marker_second);
     RUN_TEST(range_line_reach_is_code_minus_0x10);
     RUN_TEST(range_line_arms_are_inclusive);
@@ -1362,4 +1606,6 @@ void run_aitarget_tests(void)
     data_fdps_map_cell_event_code_layer_ptr = NULL;
     data_fdps_class_table_ptr = NULL;
     data_fdps_item_effect_table_ptr = NULL;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
 }

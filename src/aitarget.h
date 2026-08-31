@@ -24,6 +24,46 @@ extern int fdps_collect_targets_in_area(int tile_x, int tile_y, int max_dist,
                                         int select_mode);
 #pragma aux fdps_collect_targets_in_area "*" parm caller [];
 
+/* Collects the units standing on the straight line a line-shaped item or spell
+   sweeps out from tile (origin_x, origin_y) toward tile (aim_x, aim_y),
+   appending each match's unit index to out_indices as one byte, and returns
+   how many were written.  out_indices is written unconditionally: NULL is not
+   a "count only" request here and is not checked, and neither is the buffer
+   length against line_length.
+
+   Only the direction of the aim tile is used, never its distance, and the walk
+   is strictly axis-priority: when origin_x == aim_x it steps one tile per
+   iteration along y toward aim_y, and otherwise it steps along x toward aim_x
+   and discards the y difference entirely.  It is therefore never diagonal even
+   though the player's two call sites pass a freely placed map cursor.
+
+   line_length is how many tiles the line covers counted from the tile NEXT TO
+   the origin: the step is applied before the tile is examined, so the origin
+   tile itself is never looked at, and 0 examines nothing at all.  It is the
+   ITEM.DAT use_distance byte at +0x10, or the MAGICDAT.DAT distance byte at
+   +0x03, minus 0x10; bit 0x10 of that byte is what marks the line shape and
+   the low nibble is the reach.
+
+   A tile outside the map -- the grid header's tile extents at
+   data_fdps_battle_move_grid_ptr, times 0x18 -- is skipped rather than ending
+   the walk.
+
+   select_enemy_side is NOT the select_mode of the two collectors above and on
+   the values they share it runs the opposite way round: zero keeps the
+   non-zero sides (guest NPC side 1 and the player's party side 2), and
+   non-zero keeps side 0, the enemy side.  The reachable values are 0, 1 and 5.
+
+   The map cursor globals data_fdps_map_cursor_world_x and
+   data_fdps_map_cursor_world_y are driven across the walk, because they are
+   the only channel into fdps_battle_find_unit_at_cursor (unit.h), and restored
+   before the return.  Retired units are already filtered out inside that
+   finder and are never reported here. */
+extern int fdps_collect_targets_in_line(int aim_x, int aim_y,
+                                        unsigned char *out_indices,
+                                        int origin_x, int origin_y,
+                                        int line_length, int select_enemy_side);
+#pragma aux fdps_collect_targets_in_line "*" parm caller [];
+
 /* Marks the tiles an action used from (tile_x, tile_y) can reach into the
    marker byte of every movement grid cell, then counts the units standing on a
    marked tile that select_mode accepts, appending each match's unit index to

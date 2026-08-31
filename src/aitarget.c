@@ -67,6 +67,115 @@ int fdps_collect_targets_in_area(int tile_x, int tile_y, int max_dist,
     return count;
 }
 
+#define AITARGET_MAP_TILE_SIZE 0x18
+
+/* 00013670.  Walks the straight line a line-shaped item or spell sweeps out
+   from the acting unit's tile toward the aimed tile and collects the units
+   standing on it.
+
+   The side test is this function's own and runs the OPPOSITE way round from
+   the select_mode of the two collectors above, which the same callers feed
+   from the same ITEM.DAT and MAGICDAT.DAT bytes: CMP [EBP+0x2c],0x0 / JNZ at
+   00013788 keeps a NON-zero side byte when select_enemy_side is zero, and the
+   second pair at 00013797 keeps side 0 when it is non-zero.  Writing the
+   family's "0 means side 0" test here makes every line-shaped attack sweep the
+   caster's own side (rebuild_info/pitfalls.md).
+
+   The step is one orthogonal direction and never a diagonal: CMP at 000136b8
+   compares origin_x with aim_x and only when they are equal is the vertical
+   step taken; otherwise the horizontal step is taken and the y difference is
+   discarded entirely.  Deriving the step from the sign of both deltas draws a
+   line the original never draws, and that is reachable in play because the
+   player's two call sites pass the free-moving map cursor as the aim tile.
+
+   The two cursor globals are the whole channel into
+   fdps_battle_find_unit_at_cursor (unit.h), which takes no arguments and reads
+   them itself, so this routine points them at each tile in turn and puts the
+   caller's values back at 000137be before returning.
+
+   The step is added before the bounds test at 0001372d, so the origin tile is
+   never examined; the four bounds tests are signed (JGE/JL at 00013747,
+   00013750, 0001375c, 00013767) against the grid header's tile extents times
+   0x18, and a tile outside them is skipped rather than ending the loop.
+
+   The retired-unit filter the two collectors above apply for themselves is not
+   repeated here: fdps_battle_find_unit_at_cursor already calls
+   fdps_unit_is_retired and never reports a retired unit to this body.
+
+   out_indices is written unconditionally -- there is no NULL branch, unlike
+   the two collectors above -- and neither it nor line_length is bounds
+   checked. */
+int fdps_collect_targets_in_line(int aim_x, int aim_y,
+                                 unsigned char *out_indices, int origin_x,
+                                 int origin_y, int line_length,
+                                 int select_enemy_side)
+{
+    struct fdps_unit_record *unit;
+    int step_x;
+    int step_y;
+    int step_index;
+    int found_count;
+    int map_width_px;
+    int map_height_px;
+    int saved_cursor_x;
+    int saved_cursor_y;
+    int unit_index;
+
+    /* All four are cleared up front at 0001367c-00013691 and step_index is
+       cleared again at the loop head. */
+    step_x = 0;
+    step_y = 0;
+    step_index = 0;
+    found_count = 0;
+
+    map_width_px = (int) *(short *) data_fdps_battle_move_grid_ptr
+                 * AITARGET_MAP_TILE_SIZE;
+    map_height_px = (int) *(short *) (data_fdps_battle_move_grid_ptr + 2)
+                  * AITARGET_MAP_TILE_SIZE;
+
+    if (origin_x == aim_x) {
+        if (aim_y < origin_y) {
+            step_y = -AITARGET_MAP_TILE_SIZE;
+        } else {
+            step_y = AITARGET_MAP_TILE_SIZE;
+        }
+    } else if (aim_x < origin_x) {
+        step_x = -AITARGET_MAP_TILE_SIZE;
+    } else {
+        step_x = AITARGET_MAP_TILE_SIZE;
+    }
+
+    saved_cursor_x = data_fdps_map_cursor_world_x;
+    saved_cursor_y = data_fdps_map_cursor_world_y;
+    data_fdps_map_cursor_world_x = origin_x * AITARGET_MAP_TILE_SIZE;
+    data_fdps_map_cursor_world_y = origin_y * AITARGET_MAP_TILE_SIZE;
+
+    for (step_index = 0; step_index < line_length; step_index++) {
+        data_fdps_map_cursor_world_x = data_fdps_map_cursor_world_x + step_x;
+        data_fdps_map_cursor_world_y = data_fdps_map_cursor_world_y + step_y;
+        if (data_fdps_map_cursor_world_x >= map_width_px ||
+            data_fdps_map_cursor_world_x < 0 ||
+            data_fdps_map_cursor_world_y >= map_height_px ||
+            data_fdps_map_cursor_world_y < 0) {
+            continue;
+        }
+        unit_index = fdps_battle_find_unit_at_cursor();
+        if (unit_index == -1) {
+            continue;
+        }
+        unit = fdps_get_unit_record(unit_index);
+        if (((select_enemy_side == 0) && (unit->side != 0)) ||
+            ((select_enemy_side != 0) && (unit->side == 0))) {
+            out_indices[found_count] = (unsigned char) unit_index;
+            found_count++;
+        }
+    }
+
+    data_fdps_map_cursor_world_x = saved_cursor_x;
+    data_fdps_map_cursor_world_y = saved_cursor_y;
+    return found_count;
+}
+
 /* 00011e50.  Paints the reachable set into the movement grid's marker bytes and
    then reports the units standing on a marked cell that select_mode accepts.
 
