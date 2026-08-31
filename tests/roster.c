@@ -1761,6 +1761,265 @@ static void the_preview_does_not_write_the_record(void)
     CHECK_EQ(byte_of(0, OFF_INVENTORY + 0), 0x40);
 }
 
+/* The fdps_roster_add_item_to_all cases take theirs from the assembly at
+   00036af0 -- MOV EAX,[EBP-0x4] / CMP EAX,dword ptr [0x00064114] / JL at
+   00036b03 for the signed bound, CMP EAX,0x8 / JZ at 00036b24 for the
+   full-inventory skip, CMP dword ptr [0x00069cf4],0x17 / JL at 00036b29 and
+   CMP dword ptr [EBP-0x4],0x3 / JZ at 00036b32 for the chapter gate, and MOV
+   EAX,[EBP+0x14] / PUSH EAX for the item id going out whole -- and from the
+   item ids the only caller pushes, 0xb4 (藥草) and 0xb9 (水晶粒) at 0003699e
+   and 000369c1.  None of them is read off the emitted C.
+
+   These cases stage the UNIT block and not the roster block: both accessors go
+   through fdps_get_unit_record, so data_fdps_map_unit_array_ptr is the pointer
+   the loop follows.  That is what the running game has too -- during the field
+   and village phase the global points at the roster array -- and staging the
+   roster pointer instead would leave every case reading zeroes.
+
+   The full-inventory skip is not separately observable and no case here claims
+   it is: fdps_unit_item_count counts entries whose 0x80 bit is clear and
+   fdps_unit_add_item takes the first entry whose 0x80 bit is set, so a member
+   the count test removes is exactly a member the insertion would have failed
+   on.  What the cases below assert is the outcome -- the member's entries come
+   out untouched -- which is the whole of the observable behaviour. */
+
+/* The two literal ids the lottery hands out, and a third value that is those
+   ids with a ninth bit set, for the width case. */
+#define HANDOUT_ITEM_HERB 0xb4
+#define HANDOUT_ITEM_CRYSTAL 0xb9
+#define HANDOUT_ITEM_WIDE 0x1b4
+
+/* The id byte an untouched empty entry carries here, so an entry that was
+   written can be told from one that never was.  Empty is bit 0x80 of the flag
+   byte and a taken entry's flag byte is a plain 0. */
+#define HANDOUT_FILLER_ID 0xee
+#define HANDOUT_FLAG_EMPTY 0x80
+
+/* The chapter indices either side of the gate: 0x16 is the last one that still
+   serves slot 3, 0x17 is the first that does not, and 0x1b is chapter 28 as
+   the player counts -- the chapter the departed character rejoins in, where
+   the original still refuses the slot. */
+#define CHAPTER_BEFORE_GATE 0x16
+#define CHAPTER_AT_GATE 0x17
+#define CHAPTER_AFTER_REJOIN 0x1b
+
+static unsigned char *unit_entry(int unit_index, int entry_index)
+{
+    return unit_at(unit_index) + OFF_INVENTORY + entry_index * 2;
+}
+
+/* Every record in the block, spare included, to eight empty entries carrying
+   filler ids; both globals the loop reads back to 0, since each case sets the
+   count and the chapter it wants. */
+static void stage_handout_fixture(void)
+{
+    int byte_index;
+    int unit_index;
+    int entry_index;
+
+    for (byte_index = 0;
+         byte_index < (UNIT_CAPACITY + 1) * UNIT_STRIDE;
+         byte_index++) {
+        unit_image[byte_index] = 0;
+    }
+    for (unit_index = 0; unit_index <= UNIT_CAPACITY; unit_index++) {
+        for (entry_index = 0; entry_index < 8; entry_index++) {
+            unit_entry(unit_index, entry_index)[0] = HANDOUT_FLAG_EMPTY;
+            unit_entry(unit_index, entry_index)[1] = HANDOUT_FILLER_ID;
+        }
+    }
+    data_fdps_map_unit_array_ptr = unit_image;
+    data_fdps_roster_member_count = 0;
+    data_fdps_chapter_current_chapter_id = 0;
+}
+
+/* Fills one entry, which is what makes fdps_unit_item_count count it. */
+static void occupy_entry(int unit_index, int entry_index, int item_id)
+{
+    unit_entry(unit_index, entry_index)[0] = 0;
+    unit_entry(unit_index, entry_index)[1] = (unsigned char) item_id;
+}
+
+/* Every member below the count is served, each in his own record and each
+   exactly once: the taken entry's flag byte goes to 0 and its id byte to the
+   argument, and the entry behind it is still the empty filler. */
+static void every_member_below_the_count_gets_one_copy(void)
+{
+    stage_handout_fixture();
+    data_fdps_roster_member_count = 3;
+
+    fdps_roster_add_item_to_all(HANDOUT_ITEM_HERB);
+
+    CHECK_EQ(unit_entry(0, 0)[0], 0);
+    CHECK_EQ(unit_entry(0, 0)[1], HANDOUT_ITEM_HERB);
+    CHECK_EQ(unit_entry(1, 0)[1], HANDOUT_ITEM_HERB);
+    CHECK_EQ(unit_entry(2, 0)[1], HANDOUT_ITEM_HERB);
+    CHECK_EQ(unit_entry(0, 1)[0], HANDOUT_FLAG_EMPTY);
+    CHECK_EQ(unit_entry(0, 1)[1], HANDOUT_FILLER_ID);
+}
+
+/* data_fdps_roster_member_count is the bound and nothing else is: the member
+   at the count is not served, and a count of 0 serves nobody at all. */
+static void the_member_count_is_the_bound(void)
+{
+    stage_handout_fixture();
+    data_fdps_roster_member_count = 3;
+    fdps_roster_add_item_to_all(HANDOUT_ITEM_CRYSTAL);
+    CHECK_EQ(unit_entry(2, 0)[1], HANDOUT_ITEM_CRYSTAL);
+    CHECK_EQ(unit_entry(3, 0)[1], HANDOUT_FILLER_ID);
+    CHECK_EQ(unit_entry(4, 0)[1], HANDOUT_FILLER_ID);
+
+    stage_handout_fixture();
+    data_fdps_roster_member_count = 0;
+    fdps_roster_add_item_to_all(HANDOUT_ITEM_CRYSTAL);
+    CHECK_EQ(unit_entry(0, 0)[1], HANDOUT_FILLER_ID);
+}
+
+/* The bound is a SIGNED compare, JL and not JB, so a negative count fails the
+   very first test and hands out nothing.  An unsigned compare would read -1 as
+   4294967295 and walk the whole block. */
+static void a_negative_member_count_hands_out_nothing(void)
+{
+    stage_handout_fixture();
+    data_fdps_roster_member_count = -1;
+    fdps_roster_add_item_to_all(HANDOUT_ITEM_HERB);
+    CHECK_EQ(unit_entry(0, 0)[1], HANDOUT_FILLER_ID);
+    CHECK_EQ(unit_entry(0, 0)[0], HANDOUT_FLAG_EMPTY);
+}
+
+/* A member with all eight entries occupied comes out exactly as he went in,
+   while the members either side of him are served -- the skip does not end the
+   loop. */
+static void a_member_with_no_room_is_left_untouched(void)
+{
+    int entry_index;
+
+    stage_handout_fixture();
+    data_fdps_roster_member_count = 3;
+    for (entry_index = 0; entry_index < 8; entry_index++) {
+        occupy_entry(1, entry_index, 0x10 + entry_index);
+    }
+
+    fdps_roster_add_item_to_all(HANDOUT_ITEM_HERB);
+
+    CHECK_EQ(unit_entry(1, 0)[1], 0x10);
+    CHECK_EQ(unit_entry(1, 7)[1], 0x17);
+    CHECK_EQ(unit_entry(1, 7)[0], 0);
+    CHECK_EQ(unit_entry(0, 0)[1], HANDOUT_ITEM_HERB);
+    CHECK_EQ(unit_entry(2, 0)[1], HANDOUT_ITEM_HERB);
+}
+
+/* Seven occupied entries is not eight: the test is CMP EAX,0x8 / JZ, so the
+   member is served and the item lands in the one entry left. */
+static void a_member_with_seven_entries_occupied_is_served(void)
+{
+    int entry_index;
+
+    stage_handout_fixture();
+    data_fdps_roster_member_count = 1;
+    for (entry_index = 0; entry_index < 7; entry_index++) {
+        occupy_entry(0, entry_index, 0x10 + entry_index);
+    }
+
+    fdps_roster_add_item_to_all(HANDOUT_ITEM_HERB);
+
+    CHECK_EQ(unit_entry(0, 7)[1], HANDOUT_ITEM_HERB);
+    CHECK_EQ(unit_entry(0, 7)[0], 0);
+    CHECK_EQ(unit_entry(0, 6)[1], 0x16);
+}
+
+/* The insertion is fdps_unit_add_item's and keeps its behaviour: the item goes
+   into the first EMPTY entry wherever it sits, so a hole in the middle of a
+   bag is filled rather than the item being appended behind the last one. */
+static void the_item_lands_in_the_first_empty_entry(void)
+{
+    int entry_index;
+
+    stage_handout_fixture();
+    data_fdps_roster_member_count = 1;
+    for (entry_index = 0; entry_index < 8; entry_index++) {
+        if (entry_index != 2) {
+            occupy_entry(0, entry_index, 0x10 + entry_index);
+        }
+    }
+
+    fdps_roster_add_item_to_all(HANDOUT_ITEM_CRYSTAL);
+
+    CHECK_EQ(unit_entry(0, 2)[1], HANDOUT_ITEM_CRYSTAL);
+    CHECK_EQ(unit_entry(0, 2)[0], 0);
+    CHECK_EQ(unit_entry(0, 7)[1], 0x17);
+}
+
+/* Below chapter index 0x17 slot 3 is an ordinary member.  The compare is
+   signed -- CMP dword ptr [0x00069cf4],0x17 / JL -- so a negative chapter id
+   is below the gate as well, where an unsigned test would put it above. */
+static void slot_three_is_served_below_the_gate_chapter(void)
+{
+    stage_handout_fixture();
+    data_fdps_roster_member_count = 5;
+    data_fdps_chapter_current_chapter_id = CHAPTER_BEFORE_GATE;
+    fdps_roster_add_item_to_all(HANDOUT_ITEM_HERB);
+    CHECK_EQ(unit_entry(3, 0)[1], HANDOUT_ITEM_HERB);
+
+    stage_handout_fixture();
+    data_fdps_roster_member_count = 5;
+    data_fdps_chapter_current_chapter_id = -1;
+    fdps_roster_add_item_to_all(HANDOUT_ITEM_HERB);
+    CHECK_EQ(unit_entry(3, 0)[1], HANDOUT_ITEM_HERB);
+}
+
+/* The rebuild note's trap.  From chapter index 0x17 slot 3 gets nothing, and
+   there is no upper bound on the chapter: at 0x1b -- chapter 28, where the
+   character who held the slot has rejoined the party -- the original still
+   refuses it.  A general test that re-enabled the slot on his return would
+   pass the first half of this case and fail the second. */
+static void slot_three_is_refused_from_the_gate_chapter_onwards(void)
+{
+    stage_handout_fixture();
+    data_fdps_roster_member_count = 5;
+    data_fdps_chapter_current_chapter_id = CHAPTER_AT_GATE;
+    fdps_roster_add_item_to_all(HANDOUT_ITEM_HERB);
+    CHECK_EQ(unit_entry(3, 0)[1], HANDOUT_FILLER_ID);
+    CHECK_EQ(unit_entry(3, 0)[0], HANDOUT_FLAG_EMPTY);
+
+    stage_handout_fixture();
+    data_fdps_roster_member_count = 5;
+    data_fdps_chapter_current_chapter_id = CHAPTER_AFTER_REJOIN;
+    fdps_roster_add_item_to_all(HANDOUT_ITEM_HERB);
+    CHECK_EQ(unit_entry(3, 0)[1], HANDOUT_FILLER_ID);
+}
+
+/* The gate is the literal index 3 and no other: every other member is served
+   in the same chapter, the neighbours at 2 and 4 included. */
+static void the_gate_takes_slot_three_and_no_other(void)
+{
+    stage_handout_fixture();
+    data_fdps_roster_member_count = 6;
+    data_fdps_chapter_current_chapter_id = CHAPTER_AT_GATE;
+
+    fdps_roster_add_item_to_all(HANDOUT_ITEM_CRYSTAL);
+
+    CHECK_EQ(unit_entry(0, 0)[1], HANDOUT_ITEM_CRYSTAL);
+    CHECK_EQ(unit_entry(1, 0)[1], HANDOUT_ITEM_CRYSTAL);
+    CHECK_EQ(unit_entry(2, 0)[1], HANDOUT_ITEM_CRYSTAL);
+    CHECK_EQ(unit_entry(3, 0)[1], HANDOUT_FILLER_ID);
+    CHECK_EQ(unit_entry(4, 0)[1], HANDOUT_ITEM_CRYSTAL);
+    CHECK_EQ(unit_entry(5, 0)[1], HANDOUT_ITEM_CRYSTAL);
+}
+
+/* The argument goes out whole -- the caller pushes the full dword -- and only
+   its low byte reaches the entry, because fdps_unit_add_item stores one byte.
+   0x1b4 must therefore land as 0xb4 and not be rejected or truncated to
+   nothing on the way. */
+static void only_the_low_byte_of_the_item_id_is_stored(void)
+{
+    stage_handout_fixture();
+    data_fdps_roster_member_count = 2;
+    fdps_roster_add_item_to_all(HANDOUT_ITEM_WIDE);
+    CHECK_EQ(unit_entry(0, 0)[1], HANDOUT_ITEM_HERB);
+    CHECK_EQ(unit_entry(1, 0)[1], HANDOUT_ITEM_HERB);
+}
+
 void run_roster_tests(void)
 {
     RUN_TEST(the_base_stats_seed_the_totals);
@@ -1827,11 +2086,23 @@ void run_roster_tests(void)
     RUN_TEST(all_four_preview_slots_are_always_written);
     RUN_TEST(the_preview_does_not_write_the_record);
 
+    RUN_TEST(every_member_below_the_count_gets_one_copy);
+    RUN_TEST(the_member_count_is_the_bound);
+    RUN_TEST(a_negative_member_count_hands_out_nothing);
+    RUN_TEST(a_member_with_no_room_is_left_untouched);
+    RUN_TEST(a_member_with_seven_entries_occupied_is_served);
+    RUN_TEST(the_item_lands_in_the_first_empty_entry);
+    RUN_TEST(slot_three_is_served_below_the_gate_chapter);
+    RUN_TEST(slot_three_is_refused_from_the_gate_chapter_onwards);
+    RUN_TEST(the_gate_takes_slot_three_and_no_other);
+    RUN_TEST(only_the_low_byte_of_the_item_id_is_stored);
+
     /* Put every global this file wrote back where it found it.  Ticket 23 has
        yet to define the five pointers, and leaving a pointer to this file's
        static buffers in any of them would hand the next unit an address it has
        no business holding; the two counts go back to 0 for the same reason,
-       since the cases above moved them. */
+       since the cases above moved them, and so does the chapter index the
+       handout cases set. */
     data_fdps_roster_array_ptr = (unsigned char *) 0;
     data_fdps_map_unit_array_ptr = (unsigned char *) 0;
     data_fdps_item_effect_table_ptr = (unsigned char *) 0;
@@ -1839,4 +2110,5 @@ void run_roster_tests(void)
     data_fdps_battle_character_growth_table_ptr = (unsigned char *) 0;
     data_fdps_roster_member_count = 0;
     data_fdps_map_unit_count = 0;
+    data_fdps_chapter_current_chapter_id = 0;
 }

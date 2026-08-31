@@ -13,6 +13,7 @@
 #include "gamedata.h"
 #include "table.h"
 #include "unit.h"
+#include "unititem.h"
 #include "roster.h"
 
 /* The stride of one roster record, as the original writes it: IMUL
@@ -457,4 +458,74 @@ void fdps_roster_preview_combat_stats_with_item(int roster_index, int item_id,
     out_stats[1] = defense_total;
     out_stats[2] = hit_total;
     out_stats[3] = evade_total;
+}
+
+/* The answer from fdps_unit_item_count that means the member has no room:
+   CMP EAX,0x8 / JZ at 00036b24.  It is an equality test against the count of
+   occupied entries and not a >= on a free-slot index, so the only value that
+   skips a member is exactly 8. */
+#define INVENTORY_FULL_COUNT 8
+
+/* The chapter gate, both halves of it as literals: CMP dword ptr
+   [0x00069cf4],0x17 / JL at 00036b29 and CMP dword ptr [EBP-0x4],0x3 / JZ at
+   00036b32.  From chapter index 0x17 onwards -- chapter 24 as the player
+   counts them -- roster slot 3 gets nothing.  There is no upper bound on the
+   chapter and no test of who is actually in the slot. */
+#define CHAPTER_INDEX_SLOT_3_LEAVES 0x17
+#define ROSTER_SLOT_THAT_LEAVES 3
+
+/* 00036af0.  Hands one item to every roster member that still has room for it.
+   The bonus lottery at 00036460 is the only caller and reaches this three
+   times, with 0xb4, 0xb9 and one of the three 斬鐵劍 tiers.
+
+   The bound is data_fdps_roster_member_count read afresh at the top of every
+   pass -- MOV EAX,[EBP-0x4] / CMP EAX,dword ptr [0x00064114] / JL at
+   00036b03 -- and the compare is signed, so a negative count hands out
+   nothing rather than running away (contract C).
+
+   Both accessors reach the record through fdps_get_unit_record and therefore
+   through data_fdps_map_unit_array_ptr, not through the roster pointer.  That
+   is not a slip: this runs in the field/village phase, where
+   fdps_load_field_chapter_resources has pointed that global straight at the
+   roster block, so the loop is walking roster records with the index the count
+   bounds.  Resolving the record through fdps_get_roster_record instead would
+   read the right block today and the wrong one from any caller reached during
+   a battle.
+
+   The two skips are separate tests and are made in this order: a member whose
+   eight inventory entries are all occupied is passed over, and then slot 3 is
+   passed over outright once the chapter index has reached 0x17.  Every member
+   that survives both gets fdps_unit_add_item, whose 1-or-(-1) result is
+   discarded -- ADD ESP,0x8 and straight to the increment at 00036b49 -- so a
+   failed insertion is silent.  It cannot arise here anyway: the only way
+   fdps_unit_add_item returns -1 is a full inventory, which is the case the
+   count test has already removed.
+
+   The chapter gate must be written out as the pair of literals it is.  The
+   obvious general form -- skipping members flagged retired, or letting slot 3
+   back in when its character rejoins the party in chapter 28 -- changes who
+   receives the lottery item from chapter 28 on, because the original has no
+   upper bound on the chapter and never looks at the record
+   (rebuild_info/pitfalls.md).
+
+   Neither the index nor the item id is range checked, no result is reported,
+   and members that were skipped are not recorded anywhere. */
+void fdps_roster_add_item_to_all(int item_id)
+{
+    /* The one local the original has: [EBP-0x4], and the frame is SUB ESP,0x4.
+       The item count is not kept anywhere -- CMP EAX,0x8 compares the call's
+       result where it lands -- so it is tested where it is fetched rather than
+       through a variable of its own. */
+    int roster_index;
+
+    for (roster_index = 0;
+         roster_index < data_fdps_roster_member_count;
+         roster_index++) {
+        if (fdps_unit_item_count(roster_index) != INVENTORY_FULL_COUNT &&
+            (data_fdps_chapter_current_chapter_id <
+                 CHAPTER_INDEX_SLOT_3_LEAVES ||
+             roster_index != ROSTER_SLOT_THAT_LEAVES)) {
+            fdps_unit_add_item(roster_index, item_id);
+        }
+    }
 }

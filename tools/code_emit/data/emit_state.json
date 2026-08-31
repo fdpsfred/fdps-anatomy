@@ -1059,6 +1059,14 @@
       "status": "committed",
       "emitted_against": "0xb9",
       "rounds": 0
+    },
+    "00036af0": {
+      "name": "fdps_roster_add_item_to_all",
+      "target": "roster.c",
+      "body_size": "0x65",
+      "status": "committed",
+      "emitted_against": "0x65",
+      "rounds": 0
     }
   }
 }

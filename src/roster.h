@@ -103,4 +103,28 @@ extern void fdps_roster_preview_combat_stats_with_item(int roster_index,
                                                        int *out_stats);
 #pragma aux fdps_roster_preview_combat_stats_with_item "*" parm caller [];
 
+/* Hands item item_id to every roster member that still has room for it.  Walks
+   the indices 0..data_fdps_roster_member_count-1 and gives each survivor of
+   two tests one copy of the item through fdps_unit_add_item (unititem.h),
+   whose result is discarded; nothing is returned and nothing says which
+   members were served.
+
+   The two tests are, in order: a member whose eight inventory entries are all
+   occupied -- fdps_unit_item_count answers exactly 8 -- is passed over, and
+   roster slot 3 is passed over outright once
+   data_fdps_chapter_current_chapter_id has reached 0x17, chapter 24 as the
+   player counts them.  That second test is a hardcoded pair of literals, not a
+   lookup of who is in the party, and it has no upper bound: slot 3 stays cut
+   out for the rest of the game even after the character who was in it rejoins.
+
+   The records are resolved through fdps_get_unit_record and so through
+   data_fdps_map_unit_array_ptr, which during the field and village phase
+   points at the roster block; the roster pointer itself is not read here.
+
+   item_id is passed on whole and only its low byte reaches the record.  The
+   bound is a signed compare, so a negative member count hands out nothing.
+   Neither the index nor the id is range checked. */
+extern void fdps_roster_add_item_to_all(int item_id);
+#pragma aux fdps_roster_add_item_to_all "*" parm caller [];
+
 #endif
