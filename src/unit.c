@@ -496,3 +496,70 @@ void fdps_set_flag_bit(int unit_index, int spell_id)
 
     unit->spells_known_bitmap[byte_index] |= bit_mask[bit_in_byte];
 }
+
+/* One map tile is 24 pixels square and the cursor globals are in pixels, so a
+   division by this recovers the tile the cursor is on.  The literal is loaded
+   into the divisor register twice, MOV EBX,0x18 at 0002dae8 and again at
+   0002db02, once for each axis. */
+#define UNIT_MAP_TILE_SIZE 0x18
+
+/* 0002daa0.  Finds the unit standing under the map cursor.  Takes no
+   arguments -- the six call sites push nothing and do no stack cleanup after
+   the CALL, they just read EAX and compare it against -1 (MOV dword ptr
+   [EBP-0x18],EAX / CMP dword ptr [EBP-0x18],-0x1 / JZ at 00013770 in
+   fdps_collect_targets_in_line, and the same three at 0002bd2c, 0002de81 and
+   the rest) -- and every input is a global.
+
+   The walk is a plain linear scan of the map unit array from index 0.  The
+   base is taken from data_fdps_map_unit_array_ptr once, at 0002daac, into the
+   frame slot at [EBP-0x14], and from then on the record is stepped by ADD
+   dword ptr [EBP-0x14],0x50 at 0002db38 rather than re-multiplied through
+   fdps_get_unit_record.  Nothing the loop calls relocates the array, so the
+   held pointer stays valid for the length of the scan.
+
+   The bound is data_fdps_map_unit_count, re-read from 0x00060150 on every
+   iteration, and the compare is JL at 0002dac4: signed, so a count of zero or
+   a negative one ends the scan before the first record is looked at.
+
+   The tile test is the cursor pixel divided by 24 against the record's own
+   tile bytes: pos_x at record offset 0 (XOR EAX,EAX / MOV AL,byte ptr [EBX] at
+   0002dad5) against data_fdps_map_cursor_world_x, then pos_y at offset 1
+   against data_fdps_map_cursor_world_y.  Both record bytes are zero-extended,
+   so they are the unsigned 0..255 the layout declares, while both cursor
+   globals are divided with SAR EDX,0x1f / IDIV -- signed, truncating towards
+   zero, so a negative cursor pixel down to -23 still names tile 0.  Both axes
+   have to match; the x mismatch at 0002db00 jumps straight past the y test.
+
+   A unit whose tile matches is only accepted when fdps_unit_is_retired says it
+   has not left the battle: PUSH EAX / CALL 0x000109b0 / ADD ESP,0x4 / TEST
+   EAX,EAX / JZ at 0002db1e, so a non-zero answer falls through to the pointer
+   advance and the scan carries on.  Two units can therefore share a tile with
+   only the live one found, and among several live ones the lowest index wins
+   because the first match returns.
+
+   Falling off the end stores -1 (0002db3e).  Every caller tests for exactly
+   that value, so the result is an index or the sentinel and never a count. */
+int fdps_battle_find_unit_at_cursor(void)
+{
+    struct fdps_unit_record *unit;
+    int unit_index;
+    int unit_tile_x;
+    int unit_tile_y;
+
+    unit = (struct fdps_unit_record *) data_fdps_map_unit_array_ptr;
+    for (unit_index = 0;
+         unit_index < data_fdps_map_unit_count;
+         unit_index++) {
+        unit_tile_x = (int) unit->pos_x;
+        unit_tile_y = (int) unit->pos_y;
+        if (data_fdps_map_cursor_world_x / UNIT_MAP_TILE_SIZE == unit_tile_x
+            && data_fdps_map_cursor_world_y / UNIT_MAP_TILE_SIZE
+               == unit_tile_y
+            && fdps_unit_is_retired(unit_index) == 0) {
+            return unit_index;
+        }
+        unit++;
+    }
+
+    return -1;
+}

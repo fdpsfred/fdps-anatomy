@@ -179,4 +179,28 @@ extern void fdps_unit_recompute_combat_stats(int unit_index);
 extern void fdps_set_flag_bit(int unit_index, int spell_id);
 #pragma aux fdps_set_flag_bit "*" parm caller [];
 
+/* Which unit is standing under the map cursor?  Returns the zero-based index
+   into the current battle's unit array of the first unit whose tile is the
+   cursor's tile and which has not been retired, or -1 when there is none.
+   Takes no arguments: the cursor position and the unit array both come from
+   globals (gamedata.h), so a caller moves the cursor and then asks.
+
+   The cursor globals hold map pixels and the record holds tiles, so the
+   comparison is cursor pixel / 24 against struct fdps_unit_record's pos_x at
+   record offset 0 and pos_y at offset 1.  The division is signed and truncates
+   towards zero.
+
+   "Retired" is fdps_unit_is_retired's answer, so a unit that has left the
+   battle is passed over and a second unit standing on the same tile is
+   returned in its place; when several live units share the tile the lowest
+   index wins.  The walk is bounded by data_fdps_map_unit_count and the compare
+   is signed, so a count of zero or less finds nothing.
+
+   The array base is read once, at entry, and the record pointer is then walked
+   by the 0x50 stride; nothing in the loop can move the array, so that is safe
+   here and is not a licence to cache the base across a call that relocates it
+   (see fdps_get_unit_record above). */
+extern int fdps_battle_find_unit_at_cursor(void);
+#pragma aux fdps_battle_find_unit_at_cursor "*" parm caller [];
+
 #endif

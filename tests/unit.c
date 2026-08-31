@@ -1781,6 +1781,248 @@ static void the_learning_record_is_resolved_on_every_call(void)
     CHECK_EQ(bitmap_byte(0, 0), 0x01);
 }
 
+/* fdps_battle_find_unit_at_cursor @ 0002daa0.
+ *
+ * Expected values come from the assembly: CMP EAX,dword ptr [0x00060150] / JL
+ * at 0002dabe for the signed bound, XOR EAX,EAX / MOV AL,byte ptr [EBX] and
+ * MOV AL,byte ptr [EBX+0x1] at 0002dad5 and 0002dadf for the two tile bytes,
+ * MOV EBX,0x18 / SAR EDX,0x1f / IDIV EBX at 0002dae8 and 0002db02 for the
+ * signed pixel-to-tile division, PUSH EAX / CALL 0x000109b0 / TEST EAX,EAX /
+ * JZ at 0002db1e for the retired filter, ADD dword ptr [EBP-0x14],0x50 at
+ * 0002db38 for the stride and MOV dword ptr [EBP-0x4],0xffffffff at 0002db3e
+ * for the miss.
+ *
+ * The array is staged here rather than read from a game file: the function's
+ * whole input is three globals, so publishing a local block through
+ * data_fdps_map_unit_array_ptr is the only way to reach the loop.  Nothing
+ * below asserts what any of those globals holds on its own -- ticket 23 owns
+ * that.
+ */
+#define CURSOR_TILE_SIZE 0x18
+#define CURSOR_UNITS 5
+
+/* Every staged record starts on a tile of its own so that a scan which walked
+   by the wrong stride, or compared the wrong byte, lands on nothing. */
+#define CURSOR_FIRST_TILE_X 10
+#define CURSOR_FIRST_TILE_Y 20
+
+static struct fdps_unit_record cursor_units[CURSOR_UNITS];
+
+static void place_at_tile(int block_slot, int tile_x, int tile_y)
+{
+    cursor_units[block_slot].pos_x = (unsigned char) tile_x;
+    cursor_units[block_slot].pos_y = (unsigned char) tile_y;
+}
+
+/* The cursor globals are in pixels, so a tile is put there multiplied out --
+   the same thing every writer in the image does. */
+static void put_cursor_on_tile(int tile_x, int tile_y)
+{
+    data_fdps_map_cursor_world_x = tile_x * CURSOR_TILE_SIZE;
+    data_fdps_map_cursor_world_y = tile_y * CURSOR_TILE_SIZE;
+}
+
+/* Five live units on five distinct tiles, the whole array in range, and the
+   cursor parked on a tile no unit is on. */
+static void stage_cursor(void)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) cursor_units;
+    for (i = 0; i < (int) sizeof(cursor_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < CURSOR_UNITS; i++) {
+        place_at_tile(i, CURSOR_FIRST_TILE_X + i, CURSOR_FIRST_TILE_Y + i);
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) cursor_units;
+    data_fdps_map_unit_count = CURSOR_UNITS;
+    put_cursor_on_tile(1, 1);
+}
+
+static void retire(int block_slot)
+{
+    cursor_units[block_slot].flags = (unsigned char) RETIRED_BIT;
+}
+
+/* The two tile bytes are the record's first and second, and the walk advances
+   by 0x50: [EBX] and [EBX+0x1] against ADD [EBP-0x14],0x50.  If the layout put
+   pos_x anywhere else the C would read a different byte than the original. */
+static void the_cursor_tile_bytes_are_the_first_two_of_the_record(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 1);
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+}
+
+/* Falling off the end of the walk stores -1 at 0002db3e.  The cursor is on a
+   tile no staged unit occupies, so every record is looked at and rejected. */
+static void an_empty_cursor_tile_returns_minus_one(void)
+{
+    stage_cursor();
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), -1);
+}
+
+/* The index returned is the record's position in the array, and the walk steps
+   0x50 bytes at a time: each of the five staged tiles finds its own unit.  A
+   stride other than 0x50, or a cached first record, would fail every case but
+   the first. */
+static void each_staged_tile_finds_its_own_unit(void)
+{
+    stage_cursor();
+    put_cursor_on_tile(CURSOR_FIRST_TILE_X, CURSOR_FIRST_TILE_Y);
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 0);
+
+    put_cursor_on_tile(CURSOR_FIRST_TILE_X + 2, CURSOR_FIRST_TILE_Y + 2);
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 2);
+
+    put_cursor_on_tile(CURSOR_FIRST_TILE_X + 4, CURSOR_FIRST_TILE_Y + 4);
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 4);
+}
+
+/* Both axes have to agree: JNZ 0x0002db1c at 0002db00 leaves on an x mismatch
+   before the y test runs, and the y test's own JZ at 0002db1a is the only way
+   through to the call.  The staged tiles have tile_x != tile_y throughout, so
+   a cursor whose axes were crossed -- x compared against pos_y -- finds
+   nothing here either. */
+static void both_axes_have_to_match(void)
+{
+    stage_cursor();
+    put_cursor_on_tile(CURSOR_FIRST_TILE_X, CURSOR_FIRST_TILE_Y + 1);
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), -1);
+
+    put_cursor_on_tile(CURSOR_FIRST_TILE_X + 1, CURSOR_FIRST_TILE_Y);
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), -1);
+
+    put_cursor_on_tile(CURSOR_FIRST_TILE_Y, CURSOR_FIRST_TILE_X);
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), -1);
+}
+
+/* The cursor is in pixels and the tile is the quotient, so every pixel inside
+   a tile's 24-wide span names that tile and the pixel one past the span names
+   the next one.  A comparison made against the raw pixel would match none of
+   these. */
+static void any_pixel_inside_the_tile_selects_it(void)
+{
+    stage_cursor();
+
+    data_fdps_map_cursor_world_x = CURSOR_FIRST_TILE_X * CURSOR_TILE_SIZE;
+    data_fdps_map_cursor_world_y = CURSOR_FIRST_TILE_Y * CURSOR_TILE_SIZE;
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 0);
+
+    data_fdps_map_cursor_world_x =
+        CURSOR_FIRST_TILE_X * CURSOR_TILE_SIZE + 23;
+    data_fdps_map_cursor_world_y =
+        CURSOR_FIRST_TILE_Y * CURSOR_TILE_SIZE + 23;
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 0);
+
+    data_fdps_map_cursor_world_x =
+        CURSOR_FIRST_TILE_X * CURSOR_TILE_SIZE + 24;
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), -1);
+
+    data_fdps_map_cursor_world_x =
+        CURSOR_FIRST_TILE_X * CURSOR_TILE_SIZE - 1;
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), -1);
+}
+
+/* SAR EDX,0x1f before IDIV makes the division signed and it truncates towards
+   zero, so pixels -1 through -23 all name tile 0 and a unit standing on tile
+   (0,0) is found from them.  An unsigned divide would turn -1 into 178956970
+   and find nothing; -24 names tile -1, which no unsigned record byte can
+   equal, so that one finds nothing under either reading. */
+static void a_negative_cursor_pixel_truncates_towards_zero(void)
+{
+    stage_cursor();
+    place_at_tile(3, 0, 0);
+
+    data_fdps_map_cursor_world_x = -1;
+    data_fdps_map_cursor_world_y = -1;
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 3);
+
+    data_fdps_map_cursor_world_x = -23;
+    data_fdps_map_cursor_world_y = -23;
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 3);
+
+    data_fdps_map_cursor_world_x = -24;
+    data_fdps_map_cursor_world_y = -1;
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), -1);
+}
+
+/* TEST EAX,EAX / JZ at 0002db2a: the unit is accepted only when
+   fdps_unit_is_retired answers zero.  Three units share one tile here, so the
+   scan has to pass over each retired one and go on rather than stopping at the
+   first tile match, and returns -1 only when all three have left. */
+static void a_retired_unit_on_the_tile_is_passed_over(void)
+{
+    stage_cursor();
+    place_at_tile(1, CURSOR_FIRST_TILE_X, CURSOR_FIRST_TILE_Y);
+    place_at_tile(2, CURSOR_FIRST_TILE_X, CURSOR_FIRST_TILE_Y);
+    put_cursor_on_tile(CURSOR_FIRST_TILE_X, CURSOR_FIRST_TILE_Y);
+
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 0);
+
+    retire(0);
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 1);
+
+    retire(1);
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 2);
+
+    retire(2);
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), -1);
+}
+
+/* Only bit 0 of the flags byte retires a unit -- bit 7 is the acted-this-turn
+   flag -- so a unit carrying 0xfe is still on the field and is still the
+   answer.  A truth test on the whole byte would drop it. */
+static void only_the_retired_bit_removes_a_unit_from_the_answer(void)
+{
+    stage_cursor();
+    put_cursor_on_tile(CURSOR_FIRST_TILE_X, CURSOR_FIRST_TILE_Y);
+
+    cursor_units[0].flags = 0xfe;
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 0);
+
+    cursor_units[0].flags = 0xff;
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), -1);
+}
+
+/* CMP EAX,dword ptr [0x00060150] / JL at 0002dabe is a signed compare against
+   the live count, re-read on every iteration.  A unit sitting past the count
+   is not in the battle and is not found; a count of zero looks at nothing, and
+   a negative count ends the scan too rather than running away, which is what
+   an unsigned JB there would do. */
+static void the_signed_unit_count_bounds_the_walk(void)
+{
+    stage_cursor();
+    put_cursor_on_tile(CURSOR_FIRST_TILE_X + 4, CURSOR_FIRST_TILE_Y + 4);
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 4);
+
+    data_fdps_map_unit_count = 4;
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), -1);
+
+    data_fdps_map_unit_count = 0;
+    put_cursor_on_tile(CURSOR_FIRST_TILE_X, CURSOR_FIRST_TILE_Y);
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), -1);
+
+    data_fdps_map_unit_count = -1;
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), -1);
+}
+
+/* The base comes out of data_fdps_map_unit_array_ptr at 0002daac on every
+   call, so republishing the global shifts what index 0 means: the unit that
+   was index 1 becomes index 0 and the same cursor tile now answers 0. */
+static void the_walk_starts_from_the_published_base(void)
+{
+    stage_cursor();
+    put_cursor_on_tile(CURSOR_FIRST_TILE_X + 1, CURSOR_FIRST_TILE_Y + 1);
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 1);
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) &cursor_units[1];
+    data_fdps_map_unit_count = 2;
+    CHECK_EQ(fdps_battle_find_unit_at_cursor(), 0);
+}
+
 void run_unit_tests(void)
 {
     RUN_TEST(the_record_is_base_plus_index_times_stride);
@@ -1854,4 +2096,14 @@ void run_unit_tests(void)
     RUN_TEST(only_the_one_bitmap_byte_is_written);
     RUN_TEST(the_index_picks_the_record_that_learns);
     RUN_TEST(the_learning_record_is_resolved_on_every_call);
+    RUN_TEST(the_cursor_tile_bytes_are_the_first_two_of_the_record);
+    RUN_TEST(an_empty_cursor_tile_returns_minus_one);
+    RUN_TEST(each_staged_tile_finds_its_own_unit);
+    RUN_TEST(both_axes_have_to_match);
+    RUN_TEST(any_pixel_inside_the_tile_selects_it);
+    RUN_TEST(a_negative_cursor_pixel_truncates_towards_zero);
+    RUN_TEST(a_retired_unit_on_the_tile_is_passed_over);
+    RUN_TEST(only_the_retired_bit_removes_a_unit_from_the_answer);
+    RUN_TEST(the_signed_unit_count_bounds_the_walk);
+    RUN_TEST(the_walk_starts_from_the_published_base);
 }

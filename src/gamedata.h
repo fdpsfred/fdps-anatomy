@@ -474,4 +474,21 @@ extern int data_fdps_battle_tile_attr_def_modifier_table[6];
    readers scale it with the signed multiply. */
 extern int data_fdps_battle_pending_xp_credit;
 
+/* 00069cd4 and 00069ccc.  Where the map cursor sits, held in map PIXELS and
+   not in tiles: every writer stores the tile multiplied by the 24-pixel tile
+   size -- IMUL EAX,dword ptr [EBP+0x20],0x18 / MOV [0x00069cd4],EAX at
+   000136ff in fdps_collect_targets_in_line, and MOV EAX,dword ptr [EBP-0x24] /
+   ADD EAX,0x18 / MOV [0x00069cd4],EAX at 00021f1e in
+   fdps_icon_script_scroll_view_to_tile -- so a reader that wants the tile
+   divides by 24.  fdps_chapter_state_reset zeroes both at 000227a4.
+
+   Note the pair is stored with y at the LOWER address; they are two separate
+   globals and nothing in the image indexes across them as a two-element array.
+
+   Signed: every division of them is SAR EDX,0x1f / IDIV, so a cursor pixel
+   left of or above the map origin truncates towards zero -- -1 gives tile 0 --
+   rather than becoming a very large positive tile number. */
+extern int data_fdps_map_cursor_world_x;
+extern int data_fdps_map_cursor_world_y;
+
 #endif

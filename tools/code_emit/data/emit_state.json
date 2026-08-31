@@ -710,6 +710,14 @@
       "status": "committed",
       "emitted_against": "0x106",
       "rounds": 1
+    },
+    "0002daa0": {
+      "name": "fdps_battle_find_unit_at_cursor",
+      "target": "unit.c",
+      "body_size": "0xaf",
+      "status": "committed",
+      "emitted_against": "0xaf",
+      "rounds": 0
     }
   }
 }

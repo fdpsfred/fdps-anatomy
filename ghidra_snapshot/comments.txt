@@ -7279,12 +7279,12 @@ Alignment padding: lea eax,[eax+0] (6-byte nop) + lea edx,[edx+0] (3-byte nop), 
 
 === 0002daa0 [PLATE]
 Finds the index of the battle unit standing on the cursor tile, or -1 when there is none.
-Pool: fdps  [game unit array at 0x69cd8, stride 0x50; 24-pixel tile grid; no library match, fid empty on both sides]
-Evidence: Reads only game-owned state -- unit array base 0x69cd8, unit count 0x60150, cursor pixels 0x69cd4/0x69ccc converted to tiles by IDIV 0x18 -- and every one of its six callers is battle-side game code, with its single callee another game function. No string, memory or maths primitive, no DOS path, no AIL driver state; too large and too data-structure-specific for a linker island or shim.
+Pool: fdps  [unit array base pointer data_fdps_map_unit_array_ptr at 0x69cd8, records of stride 0x50; 24-pixel tile grid; no library match, fid empty on both sides]
+Evidence: Reads only game-owned state -- unit array base pointer data_fdps_map_unit_array_ptr at 0x69cd8, records of stride 0x50, unit count 0x60150, cursor pixels 0x69cd4/0x69ccc converted to tiles by IDIV 0x18 -- and every one of its six callers is battle-side game code, with its single callee another game function. No string, memory or maths primitive, no DOS path, no AIL driver state; too large and too data-structure-specific for a linker island or shim.
 Name: fdps_ + snake_case from behaviour, no library symbol involved; there is no Function ID hit and none is expected for game code.
 Boundary: 0002daa0-0002db4e, Watcom prologue at the entry and the matching pop/RET epilogue at the end; the following byte 0x90 is alignment padding and 0002db50 opens the next function's own prologue.
 Signature: __cdecl, no parameters -- all inputs are globals -- returning the zero-based unit index in EAX or -1. Confirmed by the caller-cleanup call at 0002db1e (PUSH EAX / CALL / ADD ESP,0x4), which shows this translation unit uses stack calling rather than register calling.
-Detail: For each record it takes byte [0] as the tile column and byte [1] as the tile row; when both match the cursor tile it calls FUN_000109b0(i) and accepts the unit only when that predicate returns zero, otherwise advancing the record pointer by 0x50.
+Detail: For each record it takes byte [0] as the tile column and byte [1] as the tile row; when both match the cursor tile it calls fdps_unit_is_retired(i) and accepts the unit only when that predicate returns zero, otherwise advancing the record pointer by 0x50.
 
 === 0002db4f [EOL]
 Single 0x90 NOP aligning fdps_units_clear_status_bit7 entry to a 16-byte boundary.
