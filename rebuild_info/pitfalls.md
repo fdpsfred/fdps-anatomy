@@ -46,6 +46,7 @@
 | 音效索引 `-1` 是活的輸入值：配置器在音效關閉或八個聲道全忙時回 `-1`，呼叫端不檢查就往下送，原版於是讀到 handle 表前面那個 dword | 加上 `if (index < 0) return;`。這個保護只有在確認過每個呼叫端之後才安全 | plate comment 的 `Rebuild note` |
 | WAV header 的解析結果被忽略，非 RIFF 的緩衝區會以未初始化的 14-byte 堆疊描述子播放出去；chunk 走訪也沒有 RIFF 的偶數對齊與邊界檢查 | 補上「解析失敗就回 -1」與正確的 RIFF 走訪 | plate comment 的 `Rebuild note` |
 | `PROEQU.DAT` 的職業可裝備表是變長集合，用到的類型碼由小到大排在前面、空位填 `0xFF`，而 `fdps_unit_can_equip_item` **六格全掃、完全不測 sentinel** | 看到「變長集合」就補一個終止判斷。用 `0x00` 當終止值會提早收手——`0x00` 本身就是一個活的物品類型碼；用 `0xFF` 終止則會讓類型碼剛好是 `0xFF` 的物品不再撞上空位。原版兩種都不做 | [`assets/tables/classes.md`](../assets/tables/classes.md) |
+| `SHOP%02d.DAT` 每列十二格的 `0xFF` 是**空位**不是列尾，兩者之間還會再有貨：`SHOP01.DAT` 的武器列是 `02 71 FF FF 72 73 FF …`、`SHOP03.DAT` 的是 `FF 03 FF 1E 1F 30 …`，`fdps_shop_collect_stock_items` 固定跑滿十二格、遇到就跳過 | 寫成 `for (i = 0; i < 12 && row[i] != 0xff; i++)`。多數商店的貨會被砍掉，`SHOP03.DAT` 那種第一格就是空位的整間店變成沒東西賣 | plate comment 的 `Rebuild note` |
 
 ## 不能換的型別與寫法
 
@@ -53,6 +54,7 @@
 | --- | --- | --- |
 | `.VFS` 成員查找是**單向**轉大寫：把傳入的名稱就地轉大寫，entry 名稱原樣取用，兩者 `strcmp` | 寫成 `stricmp(entry, query)`。遇到非全大寫的 entry 名稱行為就不同，而且原版會就地改寫呼叫端的緩衝區，這個副作用是可見的 | [`resource_info/vfs.md`](../resource_info/vfs.md) |
 | `.VFS` 的 entry 筆數以 8-bit 讀入，第 256 筆以後走不到；entry table 偏移以帶號 16-bit seek，上限 `0x7FFF` | 用 `u32` 讀筆數、用 `long` seek。容器沒有踩到上限，但這是原版的硬限制 | [`resource_info/vfs.md`](../resource_info/vfs.md) |
+| `SHOP%02d.DAT` 的商品編號列必須以 `unsigned char` 取值——原版是 `XOR EAX,EAX` / `MOV AL,[EDX]` 的零延伸，而 `0x80` 以上的編號是正常的貨（`SHOP01.DAT` 的道具列是 `B4 DE`） | 宣告成 `char *`。`0xFF` 變成 `-1`、跳過空位的判斷永遠不成立，空位會被當成物品編號 255 擺上架，`0x80` 以上的貨也全部變成負數編號 | plate comment 的 `Rebuild note` |
 | `.SAF` 的 tilemap 格子編號是 `i16`（`short *` 取值、`-1 < index` 擋下界），但 layer 的 tilemap 編號是零延伸的 `u16` | 兩個都寫成同一種索引型別 | [`resource_info/saf.md`](../resource_info/saf.md) |
 | `.SAF` 的 layer 半透明程度以 16-bit `MOVSX` 讀 `+0x07`，連 `+0x08` 的保留 byte 一起讀進來 | 宣告成 `u8`。保留 byte 恆為 0，所以目前無差別，但欄位的實際寬度是 2 | [`resource_info/saf.md`](../resource_info/saf.md) |
 | 章節音軌表的位元組要 **+1** 才是 MSCDEX 音軌編號，加法由呼叫端在起播前做，不在表裡 | 直接把表值當音軌編號送出去，整首曲子會差一軌 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
