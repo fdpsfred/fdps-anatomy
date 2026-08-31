@@ -35,4 +35,15 @@ extern unsigned char data_fdps_audio_sfx_driver_available_flag;
 extern void fdps_sfx_play(void *saf, int sound_index);
 #pragma aux fdps_sfx_play "*" parm caller [];
 
+/* Tears the Miles audio stack down on the way out of the game, by calling
+   AIL_shutdown and doing nothing else.  It is the counterpart of the
+   AIL_startup that opens the audio system, and the two have to be paired: the
+   real-mode timer vector AIL_shutdown puts back is the one AIL_startup saved,
+   so shutting down a stack that was never started restores a vector that was
+   never taken.  Neither the sample handles nor the two audio flags are
+   touched, and the DIG driver handle is never uninstalled by name -- AIL
+   releases its own driver slots. */
+extern void fdps_audio_shutdown(void);
+#pragma aux fdps_audio_shutdown "*" parm caller [];
+
 #endif

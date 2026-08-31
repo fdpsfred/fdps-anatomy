@@ -931,6 +931,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x55"
+    },
+    "000305a0": {
+      "name": "fdps_audio_shutdown",
+      "target": "audio.c",
+      "body_size": "0x16",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x16"
     }
   }
 }

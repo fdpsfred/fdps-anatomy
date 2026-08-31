@@ -407,6 +407,84 @@ static void the_section_start_is_a_full_32_bit_field(void)
     CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), 11025);
 }
 
+/* ---- fdps_audio_shutdown @ 000305a0 --------------------------------------
+ *
+ * The body is a Watcom frame around one CALL to AIL_shutdown and holds no
+ * other instruction, so there are exactly two things to establish: that the
+ * call really happens, and that nothing else does.  Both are read out of the
+ * linked library and out of the game state the file owns, never off the
+ * emitted C.
+ *
+ * WHY EVERY CASE HERE STARTS WITH AIL_startup.  AIL_shutdown finishes by
+ * putting the timer vector back with INT 21h AH=25h at 00044a96, from the
+ * copy at 0x000605e0 -- and that copy is written on the startup path, at
+ * 00044a2e.  The image holds zero there, so a library that was never started
+ * would have the timer vector pointed at nothing.  The game pairs the two the
+ * same way round: fdps_audio_init@000304e0 opens with CALL AIL_startup at
+ * 000304ec, and this function is the other end of that pair.  With AIL_DEBUG
+ * unset -- the string is at 0x0006227b, read at 0003d731 -- startup takes its
+ * short path and no log file is opened.
+ *
+ * WHAT PROVES THE CALL HAPPENED.  AIL's timer table is fifteen four-byte
+ * slots at 0x000604a0: the allocator at 00044f4e hands back the byte offset
+ * of the lowest free slot, or -1 when all fifteen are taken, and the shared
+ * exit at 0003eb4a returns it.  AIL_shutdown reaches AIL_release_all_timers
+ * at 0003e7be, whose loop at 00044ff1 frees handles 0x38 down to 0.  So a
+ * handle number that drops back to the bottom of the table across the call is
+ * the library's own record that the shutdown ran.  Nothing here ever starts a
+ * timer, so the registered callback is never entered and a null one is all
+ * the allocator needs: it only stores the value at 0x00060460 + handle.
+ */
+#define TIMER_SLOT_STRIDE 4
+#define NO_TIMER_CALLBACK 0
+
+/* Registering twice, shutting down, then registering again: the third handle
+   is the first slot of the table, which it can only be if AIL_shutdown
+   released the two that were out. */
+static void shutdown_releases_the_ail_timer_handles(void)
+{
+    HTIMER first;
+    HTIMER second;
+    HTIMER after_shutdown;
+
+    AIL_startup();
+    first = AIL_register_timer(NO_TIMER_CALLBACK);
+    second = AIL_register_timer(NO_TIMER_CALLBACK);
+    CHECK_EQ(first, 0);
+    CHECK_EQ(second, TIMER_SLOT_STRIDE);
+
+    fdps_audio_shutdown();
+
+    after_shutdown = AIL_register_timer(NO_TIMER_CALLBACK);
+    CHECK_EQ(after_shutdown, 0);
+    AIL_release_timer_handle(after_shutdown);
+}
+
+/* The body has no memory access at all, so tearing the audio system down
+   leaves every piece of state this file owns exactly as it stood: the two
+   flags keep their values, the eight handle-table entries keep their
+   pointers, and the sample structures themselves are neither stopped nor
+   re-initialised -- AIL_shutdown is never handed one.  Each of those is
+   something an intuitive rewrite would plausibly add. */
+static void shutdown_leaves_the_game_audio_state_alone(void)
+{
+    stage_ready(2);
+    AIL_startup();
+    fdps_audio_shutdown();
+    CHECK_EQ(data_fdps_audio_sfx_driver_available_flag, 1);
+    CHECK_EQ(data_fdps_audio_sfx_enabled_flag, 1);
+    CHECK_EQ((unsigned int) data_fdps_audio_sample_handle_table[0],
+             (unsigned int) busy_sample);
+    CHECK_EQ((unsigned int) data_fdps_audio_sample_handle_table[2],
+             (unsigned int) free_sample);
+    CHECK_EQ((unsigned int)
+             data_fdps_audio_sample_handle_table[SFX_SAMPLE_SLOT_COUNT - 1],
+             (unsigned int) busy_sample);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_STATUS), STATUS_PLAYING);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_STATUS), STATUS_DONE);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_ADDRESS), 0);
+}
+
 void run_audio_tests(void)
 {
     RUN_TEST(the_fixture_looks_like_a_handle_to_ail);
@@ -423,4 +501,6 @@ void run_audio_tests(void)
     RUN_TEST(either_audio_flag_clear_plays_nothing);
     RUN_TEST(the_stored_offset_is_rebased_on_the_image_base);
     RUN_TEST(the_section_start_is_a_full_32_bit_field);
+    RUN_TEST(shutdown_releases_the_ail_timer_handles);
+    RUN_TEST(shutdown_leaves_the_game_audio_state_alone);
 }

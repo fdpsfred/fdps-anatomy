@@ -141,3 +141,18 @@ void fdps_sfx_play(void *saf, int sound_index)
                                  (clip + SFX_CLIP_RATE_OFFSET));
     AIL_start_sample(data_fdps_audio_sample_handle_table[slot]);
 }
+
+/* 000305a0.  A Watcom frame around one call and nothing else: PUSH
+   EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0, CALL AIL_shutdown, the mirrored
+   POP sequence, RET.  There is no argument, no local, no branch and not one
+   memory access in the body, so nothing the file owns changes: the eight
+   sample handles keep the values fdps_audio_init put in them, both audio flags
+   keep theirs, and the DIG driver handle is never passed to an uninstall call
+   -- AIL_shutdown walks its own driver slots at 00045af9 and releases whatever
+   is installed.  Nothing uses a value that came back from the CALL: EAX is
+   dead at the RET, and the sole caller main@000293bd goes straight into the
+   next CALL without reading it. */
+void fdps_audio_shutdown(void)
+{
+    AIL_shutdown();
+}
