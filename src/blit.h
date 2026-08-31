@@ -35,4 +35,34 @@
 extern void fdps_fill_screen_square(int x, int y, int color, int cell_pitch);
 #pragma aux fdps_fill_screen_square "*" parm caller [];
 
+/* Moves a rectangle of bytes row by row, with a source stride and a
+   destination stride that are independent of each other and of
+   bytes_per_row.  This is the workhorse the whole presentation layer goes
+   through: whole-screen presents (0x140 wide, 0xc8 rows, from a 0x170-pitch
+   page to 0xa0000), window backdrops saved and restored between the 0x138
+   offscreen pages, and every transition wipe.
+
+   ONE CALL PER ROW, AND IT IS memmove.  A rectangle whose rows happen to be
+   contiguous at both ends is still transferred one row at a time, and the
+   per-row transfer is memmove rather than memcpy, so a row that overlaps its
+   own destination comes out shifted and not smeared.  Both of those are
+   relied on: the transition routines slide a page across itself.
+
+   rows and the two strides are signed.  rows <= 0 transfers nothing, and a
+   negative stride walks that side of the transfer backwards up memory.
+
+   SRC_STRIDE 0 IS NOT "REPEAT ONE SOURCE ROW", IT IS FILL MODE.  With
+   src_stride 0 the source pointer is never read: src_or_fill is taken as a
+   byte value and memset across bytes_per_row bytes of every row instead, and
+   only its low 8 bits reach the destination.  That is why src_or_fill is
+   declared as an unsigned int rather than a pointer -- it is a source address
+   in one mode and a palette index in the other -- and why a caller in copy
+   mode casts its pointer to pass it.
+
+   Nothing is clipped and no length is checked; dst, the strides and the
+   extents are used exactly as handed over. */
+extern void fdps_blit_rect(unsigned int src_or_fill, int src_stride, void *dst,
+                           int dst_stride, int bytes_per_row, int rows);
+#pragma aux fdps_blit_rect "*" parm caller [];
+
 #endif

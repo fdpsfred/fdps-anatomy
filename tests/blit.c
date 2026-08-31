@@ -212,6 +212,192 @@ static void pitch_zero_paints_nothing(void)
     CHECK_EQ(canvas_byte(ORIGIN - 1), GUARD);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_blit_rect @ 0002f2f0
+ *
+ * This one takes its destination as an argument, so unlike the routine
+ * above it can simply be pointed at a buffer here and the buffer read
+ * back.  Expected values come from the assembly: the JNZ at 0002f308 that
+ * makes a zero src_stride mean fill rather than copy, the two
+ * CMP EAX,[EBP+0x28] / JL loop tests that count rows signed, the separate
+ * ADD [EBP-0x8],[EBP+0x18] and ADD [EBP-0x4],[EBP+0x20] that advance the
+ * two cursors independently, and CALL 0x0003d514 -- memmove, not memcpy --
+ * for the per-row transfer.
+ * ------------------------------------------------------------------ */
+
+/* Room for every offset the cases below name, with slack past the end so an
+   over-long row lands in the buffer and is seen rather than corrupting
+   something else. */
+#define RECT_DST_BYTES 128
+#define RECT_SRC_BYTES 64
+
+/* Outside the range the source is filled with, so a byte holding it was not
+   written. */
+#define RECT_GUARD 0xd7
+
+static unsigned char rect_dst[RECT_DST_BYTES];
+static unsigned char rect_src[RECT_SRC_BYTES];
+
+/* The source bytes are all distinct, so an assertion says which source byte
+   arrived and not merely that something did. */
+static void prepare_rect_buffers(void)
+{
+    int i;
+
+    memset(rect_dst, RECT_GUARD, (size_t) RECT_DST_BYTES);
+    for (i = 0; i < RECT_SRC_BYTES; i++) {
+        rect_src[i] = (unsigned char) (0x40 + i);
+    }
+}
+
+static int rect_dst_byte(int offset)
+{
+    return (int) rect_dst[offset];
+}
+
+/* The two strides are read from different arguments and applied to different
+   cursors, so a rectangle can be gathered at one pitch and laid down at
+   another: three rows of four bytes taken every 8 source bytes and written
+   every 6 destination bytes.  Source rows 0, 8 and 16 are 0x40, 0x48 and
+   0x50, which is what says the source pitch was 8 and not 4 or 6. */
+static void copy_mode_uses_independent_strides(void)
+{
+    prepare_rect_buffers();
+    fdps_blit_rect((unsigned int) rect_src, 8, rect_dst, 6, 4, 3);
+
+    CHECK_EQ(rect_dst_byte(0), 0x40);
+    CHECK_EQ(rect_dst_byte(1), 0x41);
+    CHECK_EQ(rect_dst_byte(2), 0x42);
+    CHECK_EQ(rect_dst_byte(3), 0x43);
+    CHECK_EQ(rect_dst_byte(6), 0x48);
+    CHECK_EQ(rect_dst_byte(9), 0x4b);
+    CHECK_EQ(rect_dst_byte(12), 0x50);
+    CHECK_EQ(rect_dst_byte(15), 0x53);
+
+    /* The gaps the two strides leave behind stay as they were: a row is
+       exactly bytes_per_row long and the next one starts a whole dst_stride
+       on, so the four bytes between them are never touched. */
+    CHECK_EQ(rect_dst_byte(4), RECT_GUARD);
+    CHECK_EQ(rect_dst_byte(5), RECT_GUARD);
+    CHECK_EQ(rect_dst_byte(10), RECT_GUARD);
+    CHECK_EQ(rect_dst_byte(11), RECT_GUARD);
+    CHECK_EQ(rect_dst_byte(16), RECT_GUARD);
+}
+
+/* rows is compared with JL, a signed test, so a count of zero or below
+   transfers nothing at all.  Read as unsigned, -1 would be four billion rows
+   and would walk the copy off the end of memory. */
+static void rows_is_a_signed_count(void)
+{
+    prepare_rect_buffers();
+    fdps_blit_rect((unsigned int) rect_src, 8, rect_dst, 6, 4, 0);
+    CHECK_EQ(rect_dst_byte(0), RECT_GUARD);
+
+    prepare_rect_buffers();
+    fdps_blit_rect((unsigned int) rect_src, 8, rect_dst, 6, 4, -1);
+    CHECK_EQ(rect_dst_byte(0), RECT_GUARD);
+
+    /* One row means one row: the second row's destination is untouched. */
+    prepare_rect_buffers();
+    fdps_blit_rect((unsigned int) rect_src, 8, rect_dst, 6, 4, 1);
+    CHECK_EQ(rect_dst_byte(0), 0x40);
+    CHECK_EQ(rect_dst_byte(3), 0x43);
+    CHECK_EQ(rect_dst_byte(6), RECT_GUARD);
+}
+
+/* A src_stride of zero switches to fill mode instead of repeating one source
+   row: src_or_fill is 0xab here, which is not an address anything could be
+   read from, and the destination comes out full of 0xab.  The destination
+   stride still applies, so the two rows are five bytes apart with the gap
+   left alone. */
+static void zero_src_stride_fills_instead_of_copying(void)
+{
+    prepare_rect_buffers();
+    fdps_blit_rect(0xab, 0, rect_dst, 5, 3, 2);
+
+    CHECK_EQ(rect_dst_byte(0), 0xab);
+    CHECK_EQ(rect_dst_byte(1), 0xab);
+    CHECK_EQ(rect_dst_byte(2), 0xab);
+    CHECK_EQ(rect_dst_byte(3), RECT_GUARD);
+    CHECK_EQ(rect_dst_byte(4), RECT_GUARD);
+    CHECK_EQ(rect_dst_byte(5), 0xab);
+    CHECK_EQ(rect_dst_byte(7), 0xab);
+    CHECK_EQ(rect_dst_byte(8), RECT_GUARD);
+}
+
+/* The fill value goes through memset, which paints with the low byte of its
+   int argument, so the upper 24 bits of src_or_fill are dropped. */
+static void fill_mode_writes_only_the_low_byte(void)
+{
+    prepare_rect_buffers();
+    fdps_blit_rect(0x12345678u, 0, rect_dst, 4, 2, 1);
+
+    CHECK_EQ(rect_dst_byte(0), 0x78);
+    CHECK_EQ(rect_dst_byte(1), 0x78);
+    CHECK_EQ(rect_dst_byte(2), RECT_GUARD);
+}
+
+/* The per-row transfer is memmove, so a row copied one byte along itself
+   comes out shifted, not smeared: the five bytes 1..5 at offset 0 become the
+   five bytes 1..5 at offset 1.  A memcpy that copied forwards would leave
+   1,1,1,1,1 there, and the transitions that slide a page across itself would
+   streak. */
+static void a_row_that_overlaps_itself_is_moved_not_smeared(void)
+{
+    prepare_rect_buffers();
+    rect_dst[0] = 1;
+    rect_dst[1] = 2;
+    rect_dst[2] = 3;
+    rect_dst[3] = 4;
+    rect_dst[4] = 5;
+
+    fdps_blit_rect((unsigned int) rect_dst, 16, rect_dst + 1, 16, 5, 1);
+
+    CHECK_EQ(rect_dst_byte(0), 1);
+    CHECK_EQ(rect_dst_byte(1), 1);
+    CHECK_EQ(rect_dst_byte(2), 2);
+    CHECK_EQ(rect_dst_byte(3), 3);
+    CHECK_EQ(rect_dst_byte(4), 4);
+    CHECK_EQ(rect_dst_byte(5), 5);
+    CHECK_EQ(rect_dst_byte(6), RECT_GUARD);
+}
+
+/* The cursor is advanced by adding the stride, not by scaling anything, so a
+   negative stride walks the rows backwards up memory: rows land at 40, 30 and
+   20 rather than 40, 50 and 60. */
+static void a_negative_destination_stride_walks_backwards(void)
+{
+    prepare_rect_buffers();
+    fdps_blit_rect(0x33, 0, rect_dst + 40, -10, 2, 3);
+
+    CHECK_EQ(rect_dst_byte(40), 0x33);
+    CHECK_EQ(rect_dst_byte(41), 0x33);
+    CHECK_EQ(rect_dst_byte(30), 0x33);
+    CHECK_EQ(rect_dst_byte(31), 0x33);
+    CHECK_EQ(rect_dst_byte(20), 0x33);
+    CHECK_EQ(rect_dst_byte(21), 0x33);
+    CHECK_EQ(rect_dst_byte(42), RECT_GUARD);
+    CHECK_EQ(rect_dst_byte(39), RECT_GUARD);
+    CHECK_EQ(rect_dst_byte(50), RECT_GUARD);
+}
+
+/* bytes_per_row is passed straight through as the transfer length and is not
+   checked, so zero runs the loop the full rows times and writes nothing.
+   Both modes behave the same way. */
+static void a_zero_row_length_transfers_nothing(void)
+{
+    prepare_rect_buffers();
+    fdps_blit_rect((unsigned int) rect_src, 8, rect_dst, 6, 0, 3);
+    CHECK_EQ(rect_dst_byte(0), RECT_GUARD);
+    CHECK_EQ(rect_dst_byte(6), RECT_GUARD);
+    CHECK_EQ(rect_dst_byte(12), RECT_GUARD);
+
+    prepare_rect_buffers();
+    fdps_blit_rect(0x33, 0, rect_dst, 6, 0, 3);
+    CHECK_EQ(rect_dst_byte(0), RECT_GUARD);
+    CHECK_EQ(rect_dst_byte(6), RECT_GUARD);
+}
+
 void run_blit_tests(void)
 {
     RUN_TEST(pitch_four_paints_a_three_by_three_square);
@@ -223,4 +409,12 @@ void run_blit_tests(void)
     RUN_TEST(only_the_low_byte_of_color_is_painted);
     RUN_TEST(pitch_one_paints_nothing_and_pitch_two_paints_one_byte);
     RUN_TEST(pitch_zero_paints_nothing);
+
+    RUN_TEST(copy_mode_uses_independent_strides);
+    RUN_TEST(rows_is_a_signed_count);
+    RUN_TEST(zero_src_stride_fills_instead_of_copying);
+    RUN_TEST(fill_mode_writes_only_the_low_byte);
+    RUN_TEST(a_row_that_overlaps_itself_is_moved_not_smeared);
+    RUN_TEST(a_negative_destination_stride_walks_backwards);
+    RUN_TEST(a_zero_row_length_transfers_nothing);
 }
