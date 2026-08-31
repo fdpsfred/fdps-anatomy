@@ -1216,6 +1216,96 @@ static void install_needs_neither_audio_flag_and_moves_nothing_else(void)
     fdps_audio_shutdown();
 }
 
+/* ---- fdps_audio_set_sample_playback_rate @ 00030810 ----------------------
+ *
+ * Expected values come from 00030810 itself, which is two instructions long:
+ * MOV EAX,dword ptr [EBP+0x14] at 0003081c and MOV [0x00069d5c],EAX at
+ * 0003081f.  There is no CMP in the body, so nothing here may be clamped,
+ * rejected or sign-tested; the global is not read before it is written, so a
+ * second call may not combine with the first; and 0x00069d5c is the only data
+ * operand in the body, so every other global this file owns has to come out of
+ * the call untouched.
+ *
+ * The values below avoid AIL's own 0x2b11 default and START_TEST_RATE, so that
+ * a rate seen in a handle can only have come through this setter.
+ */
+#define SET_RATE_FIRST 16000
+#define SET_RATE_SECOND 32000
+
+/* Parked in the timer handle so that "nothing else moved" is a store that would
+   have been visible rather than a value that happened to match. */
+#define SET_RATE_HANDLE_MARKER 0x5eef
+
+/* The store is unconditional and the argument reaches it unchanged, so the
+   global reads back as exactly what was passed; and because nothing reads the
+   old contents, the second call replaces the first rather than adding to or
+   filtering against it. */
+static void set_rate_stores_its_argument(void)
+{
+    data_fdps_audio_sample_playback_rate = TIMER_RATE_MARKER;
+
+    fdps_audio_set_sample_playback_rate(SET_RATE_FIRST);
+    CHECK_EQ(data_fdps_audio_sample_playback_rate, SET_RATE_FIRST);
+
+    fdps_audio_set_sample_playback_rate(SET_RATE_SECOND);
+    CHECK_EQ(data_fdps_audio_sample_playback_rate, SET_RATE_SECOND);
+}
+
+/* No CMP means no floor and no sign test: zero -- the value a real session's
+   BSS slot already holds -- and a negative rate are stored as readily as a
+   sensible one.  Writing the two back to back also pins that a zero argument
+   still performs the store, which a rewrite that skipped a falsy value would
+   turn into "the previous rate stays". */
+static void set_rate_neither_clamps_nor_rejects(void)
+{
+    fdps_audio_set_sample_playback_rate(SET_RATE_FIRST);
+    fdps_audio_set_sample_playback_rate(0);
+    CHECK_EQ(data_fdps_audio_sample_playback_rate, 0);
+
+    fdps_audio_set_sample_playback_rate(-1);
+    CHECK_EQ(data_fdps_audio_sample_playback_rate, -1);
+}
+
+/* The slot written here is the one fdps_audio_start_sample PUSHes at 000306f4,
+   checked through the library rather than by reading the global back: the rate
+   this setter stored is what lands at +0x3c of the handle the next call claims.
+   stage_start_ready leaves START_TEST_RATE in the global, so the assertion also
+   shows the setter overwrote a rate that was already there. */
+static void set_rate_is_the_rate_start_sample_hands_ail(void)
+{
+    stage_start_ready(0);
+    fdps_audio_set_sample_playback_rate(SET_RATE_FIRST);
+    CHECK_EQ(fdps_audio_start_sample(pcm_block, PCM_TEST_LENGTH,
+                                     PCM_TEST_LOOPS), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), SET_RATE_FIRST);
+}
+
+/* 0x00069d5c is the body's only data operand, and there is no CALL either, so
+   neither audio flag, neither end of the sample handle table nor the timer
+   handle can move -- and no AIL work is done, so the claimed handle is left
+   exactly as the staging put it. */
+static void set_rate_moves_nothing_else(void)
+{
+    stage_ready(2);
+    data_fdps_audio_timer_handle = SET_RATE_HANDLE_MARKER;
+
+    fdps_audio_set_sample_playback_rate(SET_RATE_SECOND);
+
+    CHECK_EQ(data_fdps_audio_sample_playback_rate, SET_RATE_SECOND);
+    CHECK_EQ(data_fdps_audio_sfx_driver_available_flag, 1);
+    CHECK_EQ(data_fdps_audio_sfx_enabled_flag, 1);
+    CHECK_EQ(data_fdps_audio_timer_handle, SET_RATE_HANDLE_MARKER);
+    CHECK_EQ((unsigned int) data_fdps_audio_sample_handle_table[0],
+             (unsigned int) busy_sample);
+    CHECK_EQ((unsigned int) data_fdps_audio_sample_handle_table[2],
+             (unsigned int) free_sample);
+    CHECK_EQ((unsigned int)
+             data_fdps_audio_sample_handle_table[SFX_SAMPLE_SLOT_COUNT - 1],
+             (unsigned int) busy_sample);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_STATUS), STATUS_DONE);
+}
+
 /* ------------------------------------------------------------------ *
  * fdps_audio_init @ 000304e0
  *
@@ -1428,6 +1518,10 @@ void run_audio_tests(void)
     RUN_TEST(install_claims_one_timer_and_keeps_its_handle);
     RUN_TEST(a_second_install_takes_the_next_slot);
     RUN_TEST(install_needs_neither_audio_flag_and_moves_nothing_else);
+    RUN_TEST(set_rate_stores_its_argument);
+    RUN_TEST(set_rate_neither_clamps_nor_rejects);
+    RUN_TEST(set_rate_is_the_rate_start_sample_hands_ail);
+    RUN_TEST(set_rate_moves_nothing_else);
     RUN_TEST(init_stores_what_each_install_answered);
     RUN_TEST(init_forces_sound_effects_on_and_clears_both_driver_flags);
     RUN_TEST(no_driver_allocates_no_handles);

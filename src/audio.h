@@ -195,4 +195,17 @@ extern void fdps_timer_tick_handler(void);
 extern void fdps_audio_timer_install(int tick_rate_hz);
 #pragma aux fdps_audio_timer_install "*" parm caller [];
 
+/* Stores `samples_per_sec` in data_fdps_audio_sample_playback_rate and does
+   nothing else -- one MOV out of the argument slot and one MOV into the global.
+   The rate is not checked, not clamped and not scaled, so the value the caller
+   passes is the one fdps_audio_start_sample hands AIL_set_sample_playback_rate
+   on its next call; a later call replaces an earlier one and the old value is
+   never read.
+
+   Nothing in the shipped image calls it, which is why the global holds its BSS
+   zero for a whole real session and every effect started by
+   fdps_audio_start_sample plays at a rate of zero. */
+extern void fdps_audio_set_sample_playback_rate(int samples_per_sec);
+#pragma aux fdps_audio_set_sample_playback_rate "*" parm caller [];
+
 #endif

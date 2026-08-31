@@ -7953,7 +7953,7 @@ Signature: __cdecl void fdps_audio_timer_install(int rate) - the single argument
 Sets the playback rate the game applies to every PCM sample voice it starts.
 
 Algorithm:
-Stores its single argument into the global at 0x00069d5c and returns. Nothing else happens here: the value takes effect later, in FUN_00030630, which reads 0x00069d5c and passes it to AIL_set_sample_playback_rate on the sample handle it just claimed out of the table at 0x00069d30, immediately before AIL_start_sample. 0x00069d5c is the only global this function touches, and FUN_00030630 is its only reader.
+Stores its single argument into the global at 0x00069d5c and returns. Nothing else happens here: the value takes effect later, in fdps_audio_start_sample, which reads 0x00069d5c and passes it to AIL_set_sample_playback_rate on the sample handle it just claimed out of the table at 0x00069d30, immediately before AIL_start_sample. 0x00069d5c is the only global this function touches, and fdps_audio_start_sample is its only reader.
 
 Parameters:
   playback_rate -- the rate handed straight to AIL_set_sample_playback_rate as its playback_rate argument; stored unmodified, so its units and range are AIL's. No call site exists in the image to show a concrete value.
@@ -7963,7 +7963,7 @@ Nothing.
 
 Pool: fdps  [game-owned audio state, no Function ID hit in either the Watcom or the AIL set; a real compiled Watcom frame, not a thunk]
 
-Nothing in the image calls this function and nothing else writes 0x00069d5c, so at run time the rate FUN_00030630 reads is whatever the BSS slot starts out as.
+Nothing in the image calls this function and nothing else writes 0x00069d5c, so at run time the rate fdps_audio_start_sample reads is whatever the BSS slot starts out as.
 
 === 00030829 [EOL]
 alignment filler after the ret: 8d 80 00 00 00 00 + 90, aligns next function entry 00030830 to 16

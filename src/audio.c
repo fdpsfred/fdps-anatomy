@@ -457,3 +457,26 @@ void fdps_audio_timer_install(int tick_rate_hz)
     AIL_set_timer_frequency(data_fdps_audio_timer_handle, tick_rate_hz);
     AIL_start_timer(data_fdps_audio_timer_handle);
 }
+
+/* 00030810.  The whole body is MOV EAX,dword ptr [EBP+0x14] at 0003081c and MOV
+   [0x00069d5c],EAX at 0003081f: one argument read, one store, no branch, no
+   CALL and no second data operand.  The frame is the plain -od one -- PUSH
+   EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 -- so the argument sits at
+   [EBP+0x14], the first slot above the four saved registers and the return
+   address, and the RET at 00030828 carries no immediate: the caller clears it.
+
+   Nothing between the load and the store touches the value.  There is no CMP
+   anywhere in the body, so no range is enforced and no sign is tested; the old
+   contents of the global are not read, so a second call simply replaces the
+   first.  The store is a dword and the global is the same int
+   AIL_set_sample_playback_rate takes.
+
+   The reader is fdps_audio_start_sample, which PUSHes [0x00069d5c] at 000306f4
+   on every call it gets past its guards.  Those two instructions are the only
+   references to the global in the image, and no instruction anywhere calls this
+   function -- so in a real session the rate stays the BSS zero and this setter
+   is dead code that the game shipped with. */
+void fdps_audio_set_sample_playback_rate(int samples_per_sec)
+{
+    data_fdps_audio_sample_playback_rate = samples_per_sec;
+}
