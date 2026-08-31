@@ -14,7 +14,7 @@
 #define VGA_SCREEN_BASE 0x000a0000
 #define VGA_SCREEN_PITCH 0x140
 
-/* The shape of the shade ramp fdps_blit_tint_rect is handed: one row per
+/* The shape of the shade ramp the two tinting blits are handed: one row per
    weight, one word per palette entry, and a second block of nine rows holding
    the complementary weights.  SHL EAX,0xa at 00030051 scales the weight by
    0x100 words and the 0x900 at 00030029 is the nine-row step to the
@@ -367,6 +367,92 @@ void fdps_blit_tint_rect(unsigned char *src, int src_stride, unsigned char *dst,
             blended &= 0x000f0f0fu;
             cube_index = (blended & 0xffffu) | (blended >> 12);
             dst[column] = inverse_palette_cube[cube_index];
+        }
+
+        src += src_stride;
+        dst += dst_stride;
+    }
+}
+
+/* 00030120.  fdps_blit_tint_rect's colour-keyed twin, instruction for
+   instruction, with one test added inside the inner loop.
+
+   Everything above the loops is the same shape as at 00030010.  CMP dword ptr
+   [EBP+0x38],0x8 / JG at 0003012c is the signed fold and the two branches
+   differ only in which row offset gets 0 and which gets 0x900, plus the
+   MOV EAX,0x10 / SUB EAX,[EBP+0x38] at 00030150 that rewrites alpha in place.
+   Both offsets are dword counts: 0003016f and 000301cc are both
+   LEA EAX,[EAX*0x4 + 0x0] applied after the offset has already been added.
+   SHL EAX,0xa at 0003015e turns the folded alpha into the byte offset of its
+   row, that base is kept in [EBP-0x4] for the whole run, and the tint's scaled
+   colour is read once at 00030179 -- before either loop, so a source rectangle
+   that is entirely transparent still costs that one fetch and nothing else.
+
+   Both loop tests are signed: CMP EAX,[EBP+0x28] / JL at 0003018b counts the
+   rows and CMP EAX,[EBP+0x24] / JL at 000301a7 the columns.
+
+   THE KEY IS THE WHOLE DIFFERENCE.  XOR EAX,EAX / MOV AL,byte ptr [EDX] at
+   000301b9 loads the source byte zero-extended, and CMP dword ptr [EBP-0x8],
+   0x0 / JZ 0x00030212 at 000301c0 jumps over the entire blend -- the second
+   table read, the addition, the shift, the mask, the fold and the store alike.
+   A source pixel of 0 costs no lookup and leaves the destination byte exactly
+   as the previous blits left it, which is what fdps_blit_tint_rect does not do.
+
+   The blend itself is byte for byte the sibling's: SAR EAX,0x4 at 000301e1,
+   AND 0xf0f0f at 000301e7, then (v & 0xffff) | (v >> 12) at 000301ee-000301ff
+   with green ending up above red.  Both shifts are arithmetic in the original
+   and come out logical here, which no operand can tell apart -- the mask
+   between them keeps only bits 0..19 and a ramp entry is a nibble per byte
+   times a weight of at most 16, so bits 24..31 are always clear.
+
+   ADD dword ptr [EBP+0x14],EAX at 00030217 and ADD dword ptr [EBP+0x1c],EAX at
+   0003021d advance the argument slots themselves, and they sit outside the key,
+   so a row whose pixels are all transparent still steps both cursors.  The
+   original holds the source pixel and the blended value in the one slot
+   [EBP-0x8]; splitting them into two named locals here is codegen, not
+   behaviour.
+
+   Nothing is clipped and no extent is checked against either surface. */
+void fdps_blit_tint_transparent_rect(unsigned char *src, int src_stride,
+                                     unsigned char *dst, int dst_stride,
+                                     int width, int height,
+                                     unsigned int *shade_ramp,
+                                     unsigned char *inverse_palette_cube,
+                                     int tint_color, int alpha)
+{
+    unsigned int *weight_row;
+    unsigned int scaled_tint;
+    int tint_row_offset;
+    int source_row_offset;
+    int source_pixel;
+    unsigned int blended;
+    unsigned int cube_index;
+    int row;
+    int column;
+
+    if (alpha <= 8) {
+        tint_row_offset = 0;
+        source_row_offset = SHADE_RAMP_COMPLEMENT_ROWS;
+    } else {
+        tint_row_offset = SHADE_RAMP_COMPLEMENT_ROWS;
+        source_row_offset = 0;
+        alpha = 16 - alpha;
+    }
+
+    weight_row = shade_ramp + alpha * SHADE_RAMP_ROW_ENTRIES;
+    scaled_tint = weight_row[tint_color + tint_row_offset];
+
+    for (row = 0; row < height; row++) {
+        for (column = 0; column < width; column++) {
+            source_pixel = (int) src[column];
+
+            if (source_pixel != 0) {
+                blended = (scaled_tint
+                           + weight_row[source_pixel + source_row_offset]) >> 4;
+                blended &= 0x000f0f0fu;
+                cube_index = (blended & 0xffffu) | (blended >> 12);
+                dst[column] = inverse_palette_cube[cube_index];
+            }
         }
 
         src += src_stride;

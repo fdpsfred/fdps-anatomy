@@ -1262,6 +1262,356 @@ static void alpha_is_a_signed_value(void)
     CHECK_EQ(tint_dst_byte(0), tint_pass_byte(5));
 }
 
+/* ------------------------------------------------------------------
+ * fdps_blit_tint_transparent_rect, 00030120.
+ *
+ * The same ramp, cube, source and destination fixtures as the tinting blit
+ * above -- the routine reads its two tables exactly the same way, so the same
+ * marked entries name the same indices -- with one thing changed in every case:
+ * a source pixel that must survive the key is non-zero.  Where a case above
+ * left the source byte at 0 because the blend ran anyway, the case below sets
+ * it to 0x22 and leaves that entry of the source row unmarked, so the source
+ * term is still 0 and the sum, the index and the expected byte are unchanged
+ * while the pixel is no longer keyed out.
+ *
+ * The indices 0x537, 0xaf3 and 0x213 are the ones derived in the section
+ * header above, from the assembly's own SAR 4 / AND 0xf0f0f / (v & 0xffff) |
+ * (v >> 12) sequence at 000301e1-000301ff.  None is read off the emitted C.
+ * ------------------------------------------------------------------ */
+
+/* CMP dword ptr [EBP+0x38],0x8 / JG at 0003012c gives the tint row offset 0 for
+   alpha 8 or below, so the constant colour comes from row alpha itself.  Row
+   9+alpha carries a decoy indexing 0x777, an entry never marked, so taking the
+   tint from the complementary block lands on the cube guard.  The second call
+   moves alpha by one and the tint entry moves a row with it. */
+static void keyed_tint_is_read_from_the_alpha_row(void)
+{
+    prepare_tint();
+    tint_src[0] = 0x22;
+    set_ramp(3, 0x11, 0x00305070);
+    set_ramp(12, 0x11, 0x00707070);
+    tint_cube[0x537] = 0x2a;
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, 1, tint_ramp, tint_cube,
+                                    0x11, 3);
+    CHECK_EQ(tint_dst_byte(0), 0x2a);
+
+    prepare_tint();
+    tint_src[0] = 0x22;
+    set_ramp(3, 0x11, 0x00305070);
+    set_ramp(4, 0x11, 0x00f5a73b);
+    tint_cube[0x537] = 0x2a;
+    tint_cube[0xaf3] = 0x2b;
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, 1, tint_ramp, tint_cube,
+                                    0x11, 4);
+    CHECK_EQ(tint_dst_byte(0), 0x2b);
+}
+
+/* The other half of the fold: with alpha 8 or below the source pixels carry
+   offset 0x900, which is nine rows and not 0x900 bytes, so pixel 0x22 is read
+   from row 12 rather than row 3.  The decoy sits at row 3 entry 0x22, where a
+   routine that gave the source pixels the tint's offset would look. */
+static void keyed_source_pixel_is_read_from_nine_rows_past_the_alpha_row(void)
+{
+    prepare_tint();
+    tint_src[0] = 0x22;
+    set_ramp(12, 0x22, 0x00305070);
+    set_ramp(3, 0x22, 0x00808080);
+    tint_cube[0x537] = 0x3b;
+
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, 1, tint_ramp, tint_cube,
+                                    0x00, 3);
+
+    CHECK_EQ(tint_dst_byte(0), 0x3b);
+}
+
+/* alpha above 8 becomes 16-alpha and the two offsets change places, so alpha 12
+   reads its tint from row 13 and its source pixels from row 4.  Both
+   contributions are non-zero and neither alone reaches 0x537 -- 0x00102030 on
+   its own indexes 0x213 and 0x00203040 indexes 0x324, neither of them marked --
+   so this also pins that the two scaled colours are added rather than one being
+   dropped now that the key stands between them. */
+static void keyed_alpha_above_eight_folds_and_swaps_the_two_rows(void)
+{
+    prepare_tint();
+    tint_src[0] = 0x22;
+    set_ramp(13, 0x11, 0x00102030);
+    set_ramp(4, 0x22, 0x00203040);
+    set_ramp(4, 0x11, 0x00808080);
+    set_ramp(13, 0x22, 0x00808080);
+    tint_cube[0x537] = 0x4c;
+
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, 1, tint_ramp, tint_cube,
+                                    0x11, 12);
+
+    CHECK_EQ(tint_dst_byte(0), 0x4c);
+}
+
+/* The fold's test is JG against 8, so 8 itself takes the unfolded side and 9 is
+   the first value that folds: at alpha 8 the tint is row 8, at alpha 9 it folds
+   to 7 and the tint moves to row 16.  Each call carries the other branch's row
+   as a decoy.  The source pixel is 0x22 in both and neither source row has that
+   entry marked, so the sum is the tint's alone. */
+static void keyed_fold_turns_over_between_eight_and_nine(void)
+{
+    prepare_tint();
+    tint_src[0] = 0x22;
+    set_ramp(8, 0x11, 0x00305070);
+    set_ramp(17, 0x11, 0x00707070);
+    tint_cube[0x537] = 0x61;
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, 1, tint_ramp, tint_cube,
+                                    0x11, 8);
+    CHECK_EQ(tint_dst_byte(0), 0x61);
+
+    prepare_tint();
+    tint_src[0] = 0x22;
+    set_ramp(16, 0x11, 0x00f5a73b);
+    set_ramp(9, 0x11, 0x00707070);
+    tint_cube[0xaf3] = 0x62;
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, 1, tint_ramp, tint_cube,
+                                    0x11, 9);
+    CHECK_EQ(tint_dst_byte(0), 0x62);
+}
+
+/* The sum is shifted right by four and then masked to one nibble per channel,
+   so the low nibble of each byte and the high nibble of each byte after the
+   shift are both thrown away.  0x00f5a73b and 0x00f0a030 differ in exactly
+   those discarded bits and reach the same entry, 0xaf3; masking before shifting
+   or keeping a whole byte per channel would separate them. */
+static void keyed_shift_and_mask_keep_one_nibble_per_channel(void)
+{
+    prepare_tint();
+    tint_src[0] = 0x22;
+    set_ramp(0, 1, 0x00f5a73b);
+    set_ramp(0, 2, 0x00f0a030);
+    tint_cube[0xaf3] = 0x5d;
+
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, 1, tint_ramp, tint_cube,
+                                    1, 0);
+    CHECK_EQ(tint_dst_byte(0), 0x5d);
+
+    memset(tint_dst, TINT_DST_GUARD, (size_t) TINT_DST_BYTES);
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, 1, tint_ramp, tint_cube,
+                                    2, 0);
+    CHECK_EQ(tint_dst_byte(0), 0x5d);
+}
+
+/* The fold (v & 0xffff) | (v >> 12) puts green above red: the masked value
+   0x00010203 -- red 1, green 2, blue 3 in the ramp's 0x000R0G0B layout --
+   produces 0x213 and not the straightforward 0x123, and both entries are marked
+   with different bytes so the two packings are told apart. */
+static void keyed_index_transposes_the_middle_two_channels(void)
+{
+    prepare_tint();
+    tint_src[0] = 0x22;
+    set_ramp(0, 1, 0x00102030);
+    tint_cube[0x213] = 0x6e;
+    tint_cube[0x123] = 0x6f;
+
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, 1, tint_ramp, tint_cube,
+                                    1, 0);
+
+    CHECK_EQ(tint_dst_byte(0), 0x6e);
+}
+
+/* XOR EAX,EAX / MOV AL at 000301b9 loads the source byte zero-extended, so
+   pixel 0xff is entry 255 of the source row and passes the key.  Sign-extended
+   it would be -1, one entry before the row -- row 8 entry 255 -- and that is
+   where the decoy sits. */
+static void keyed_source_pixel_is_zero_extended(void)
+{
+    prepare_tint();
+    tint_src[0] = 0xff;
+    set_ramp(9, 255, 0x00305070);
+    set_ramp(8, 255, 0x00707070);
+    tint_cube[0x537] = 0x5f;
+
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, 1, tint_ramp, tint_cube,
+                                    0, 0);
+
+    CHECK_EQ(tint_dst_byte(0), 0x5f);
+}
+
+/* The whole difference from fdps_blit_tint_rect.  The tint here is non-zero and
+   on its own indexes 0x213, which is marked: a routine that blended every pixel
+   and stored the result would put 0x33 under the transparent pixel, and one
+   that stored the tint alone would put it there too.  The destination guard
+   surviving is what says the store never happened.  The neighbouring pixel is
+   0x22 and reaches 0x537, so the same call proves the blend still runs for a
+   pixel that passes the key. */
+static void a_zero_source_pixel_is_keyed_out_and_the_destination_survives(void)
+{
+    prepare_tint();
+    tint_src[0] = 0;
+    tint_src[1] = 0x22;
+    set_ramp(0, 0x11, 0x00102030);
+    set_ramp(9, 0x22, 0x00203040);
+    tint_cube[0x213] = 0x33;
+    tint_cube[0x537] = 0x34;
+
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 2, 1, tint_ramp, tint_cube,
+                                    0x11, 0);
+
+    CHECK_EQ(tint_dst_byte(0), TINT_DST_GUARD);
+    CHECK_EQ(tint_dst_byte(1), 0x34);
+}
+
+/* Every non-zero pixel of the rectangle is blended and nothing else is written:
+   three columns on each of two rows, with a transparent pixel in the middle of
+   the second row.  Both pitches differ from each other and from the width, and
+   the row advance sits outside the key, so the third pixel of the second row
+   still lands where it should even though the pixel before it was skipped. */
+static void every_non_zero_pixel_of_the_rectangle_is_blended(void)
+{
+    prepare_tint_passthrough();
+    tint_src[0] = 1;
+    tint_src[1] = 2;
+    tint_src[2] = 3;
+    tint_src[TINT_SRC_PITCH + 0] = 4;
+    tint_src[TINT_SRC_PITCH + 1] = 0;
+    tint_src[TINT_SRC_PITCH + 2] = 6;
+
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 3, 2, tint_ramp, tint_cube,
+                                    0, 0);
+
+    CHECK_EQ(tint_dst_byte(0), tint_pass_byte(1));
+    CHECK_EQ(tint_dst_byte(1), tint_pass_byte(2));
+    CHECK_EQ(tint_dst_byte(2), tint_pass_byte(3));
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH + 0), tint_pass_byte(4));
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH + 1), TINT_DST_GUARD);
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH + 2), tint_pass_byte(6));
+
+    /* Exactly width bytes on exactly height rows: the gap the destination pitch
+       leaves between the rows and the row past the last are untouched. */
+    CHECK_EQ(tint_dst_byte(3), TINT_DST_GUARD);
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH - 1), TINT_DST_GUARD);
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH + 3), TINT_DST_GUARD);
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH * 2), TINT_DST_GUARD);
+}
+
+/* A row with no surviving pixel in it still steps both cursors: ADD dword ptr
+   [EBP+0x14],EAX and ADD dword ptr [EBP+0x1c],EAX at 00030217 and 0003021d are
+   reached from the column loop's exit, not from inside the key.  The first
+   source row is entirely transparent and the second is not, so an advance that
+   ran only when something was stored would put the second row's pixel on the
+   first destination row. */
+static void a_fully_transparent_row_still_advances_both_cursors(void)
+{
+    prepare_tint_passthrough();
+    tint_src[0] = 0;
+    tint_src[1] = 0;
+    tint_src[TINT_SRC_PITCH + 0] = 7;
+    tint_src[TINT_SRC_PITCH + 1] = 8;
+
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 2, 2, tint_ramp, tint_cube,
+                                    0, 0);
+
+    CHECK_EQ(tint_dst_byte(0), TINT_DST_GUARD);
+    CHECK_EQ(tint_dst_byte(1), TINT_DST_GUARD);
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH + 0), tint_pass_byte(7));
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH + 1), tint_pass_byte(8));
+}
+
+/* Each cursor is advanced by adding its own stride and nothing is made
+   unsigned, so a negative stride walks that side backwards: the source rows are
+   read at 32, 16 and 0 while the destination rows land at 36, 24 and 12. */
+static void keyed_negative_strides_walk_both_cursors_backwards(void)
+{
+    prepare_tint_passthrough();
+    tint_src[0] = 1;
+    tint_src[TINT_SRC_PITCH] = 2;
+    tint_src[TINT_SRC_PITCH * 2] = 3;
+
+    fdps_blit_tint_transparent_rect(tint_src + TINT_SRC_PITCH * 2,
+                                    -TINT_SRC_PITCH,
+                                    tint_dst + TINT_DST_PITCH * 3,
+                                    -TINT_DST_PITCH, 1, 3, tint_ramp, tint_cube,
+                                    0, 0);
+
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH * 3), tint_pass_byte(3));
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH * 2), tint_pass_byte(2));
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH * 1), tint_pass_byte(1));
+    CHECK_EQ(tint_dst_byte(0), TINT_DST_GUARD);
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH * 4), TINT_DST_GUARD);
+}
+
+/* Both extents are compared with JL at 0003018b and 000301a7, a signed test, so
+   0 or below on either writes nothing.  Read as unsigned, -1 would be four
+   billion rows or columns. */
+static void keyed_extents_are_signed_counts(void)
+{
+    prepare_tint_passthrough();
+    tint_src[0] = 1;
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, 0, tint_ramp, tint_cube,
+                                    0, 0);
+    CHECK_EQ(tint_dst_byte(0), TINT_DST_GUARD);
+
+    prepare_tint_passthrough();
+    tint_src[0] = 1;
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, -1, tint_ramp, tint_cube,
+                                    0, 0);
+    CHECK_EQ(tint_dst_byte(0), TINT_DST_GUARD);
+
+    prepare_tint_passthrough();
+    tint_src[0] = 1;
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 0, 2, tint_ramp, tint_cube,
+                                    0, 0);
+    CHECK_EQ(tint_dst_byte(0), TINT_DST_GUARD);
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH), TINT_DST_GUARD);
+
+    prepare_tint_passthrough();
+    tint_src[0] = 1;
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, -1, 2, tint_ramp, tint_cube,
+                                    0, 0);
+    CHECK_EQ(tint_dst_byte(0), TINT_DST_GUARD);
+
+    /* One row of one pixel means exactly that. */
+    prepare_tint_passthrough();
+    tint_src[0] = 1;
+    tint_src[1] = 2;
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, 1, tint_ramp, tint_cube,
+                                    0, 0);
+    CHECK_EQ(tint_dst_byte(0), tint_pass_byte(1));
+    CHECK_EQ(tint_dst_byte(1), TINT_DST_GUARD);
+    CHECK_EQ(tint_dst_byte(TINT_DST_PITCH), TINT_DST_GUARD);
+}
+
+/* CMP dword ptr [EBP+0x38],0x8 / JG at 0003012c is a signed compare, so a
+   negative alpha takes the unfolded side and scales into a row BEFORE the
+   table's own base.  The pointer handed over is one row in so that row -1 is a
+   real row: alpha -1 reads its tint from array row 0 and its source pixels from
+   array row 9, the passthrough row.  Read as unsigned, alpha would fail the JG,
+   become 17 and index 0x1100 entries past the pointer. */
+static void keyed_alpha_is_a_signed_value(void)
+{
+    prepare_tint_passthrough();
+    tint_src[0] = 5;
+
+    fdps_blit_tint_transparent_rect(tint_src, TINT_SRC_PITCH, tint_dst,
+                                    TINT_DST_PITCH, 1, 1,
+                                    tint_ramp + TINT_ROW_ENTRIES, tint_cube, 0,
+                                    -1);
+
+    CHECK_EQ(tint_dst_byte(0), tint_pass_byte(5));
+}
+
 void run_blit_tests(void)
 {
     RUN_TEST(pitch_four_paints_a_three_by_three_square);
@@ -1311,4 +1661,18 @@ void run_blit_tests(void)
     RUN_TEST(negative_tint_strides_walk_both_cursors_backwards);
     RUN_TEST(both_tint_extents_are_signed_counts);
     RUN_TEST(alpha_is_a_signed_value);
+
+    RUN_TEST(keyed_tint_is_read_from_the_alpha_row);
+    RUN_TEST(keyed_source_pixel_is_read_from_nine_rows_past_the_alpha_row);
+    RUN_TEST(keyed_alpha_above_eight_folds_and_swaps_the_two_rows);
+    RUN_TEST(keyed_fold_turns_over_between_eight_and_nine);
+    RUN_TEST(keyed_shift_and_mask_keep_one_nibble_per_channel);
+    RUN_TEST(keyed_index_transposes_the_middle_two_channels);
+    RUN_TEST(keyed_source_pixel_is_zero_extended);
+    RUN_TEST(a_zero_source_pixel_is_keyed_out_and_the_destination_survives);
+    RUN_TEST(every_non_zero_pixel_of_the_rectangle_is_blended);
+    RUN_TEST(a_fully_transparent_row_still_advances_both_cursors);
+    RUN_TEST(keyed_negative_strides_walk_both_cursors_backwards);
+    RUN_TEST(keyed_extents_are_signed_counts);
+    RUN_TEST(keyed_alpha_is_a_signed_value);
 }

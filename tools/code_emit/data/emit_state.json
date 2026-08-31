@@ -891,6 +891,14 @@
       "status": "committed",
       "emitted_against": "0x106",
       "rounds": 0
+    },
+    "00030120": {
+      "name": "fdps_blit_tint_transparent_rect",
+      "target": "blit.c",
+      "body_size": "0x10c",
+      "status": "committed",
+      "emitted_against": "0x10c",
+      "rounds": 0
     }
   }
 }

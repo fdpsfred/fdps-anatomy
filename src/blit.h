@@ -181,4 +181,38 @@ extern void fdps_blit_tint_rect(unsigned char *src, int src_stride,
                                 int tint_color, int alpha);
 #pragma aux fdps_blit_tint_rect "*" parm caller [];
 
+/* The colour-keyed counterpart of fdps_blit_tint_rect: the same fold, the same
+   two table reads, the same blend and the same cube index, except that a source
+   byte of 0 is passed over.  It is what draws a unit's gauge bar tinted --
+   fdps_draw_unit_gauge hands it one 0x2b-wide record of the gauge sheet and
+   forwards its own blit mode as tint_color -- so the bar's rounded caps let the
+   window behind them through while the bar itself is tinted.
+
+   EVERYTHING ABOVE THE LOOPS IS fdps_blit_tint_rect'S, INCLUDING THE TRAPS.
+   alpha is folded into 0..8 with the two rows swapping, so the ramp is read at
+   rows alpha and 9+alpha and never at 16-alpha; the cube index is g:r:b and not
+   r:g:b; the source byte is zero-extended, so pixel 0xff is entry 255 of its
+   row; and width, height and alpha are all signed.  The two paragraphs on
+   fdps_blit_tint_rect above say what each of those costs to get wrong.
+
+   THE KEY SKIPS THE BLEND, NOT JUST THE STORE.  A source pixel of 0 jumps over
+   both the second table read and the arithmetic, so the destination byte
+   underneath survives untouched and the tint is never painted on its own.  A
+   rewrite that blended every pixel and stored only the non-zero SOURCE ones
+   would agree; one that stored every pixel and merely skipped the source term
+   would paint the tint colour over the transparent parts of the sprite.
+
+   THE ROW ADVANCE IS OUTSIDE THE KEY.  Both cursors move by their own stride at
+   the end of every row whether or not any pixel in it was written, so a fully
+   transparent row still steps the destination.
+
+   Nothing is clipped and no extent is checked. */
+extern void fdps_blit_tint_transparent_rect(unsigned char *src, int src_stride,
+                                            unsigned char *dst, int dst_stride,
+                                            int width, int height,
+                                            unsigned int *shade_ramp,
+                                            unsigned char *inverse_palette_cube,
+                                            int tint_color, int alpha);
+#pragma aux fdps_blit_tint_transparent_rect "*" parm caller [];
+
 #endif
