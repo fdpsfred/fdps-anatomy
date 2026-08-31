@@ -270,4 +270,32 @@ extern int fdps_battle_find_unit_by_character_id(
 extern void fdps_relocate_unit_array(void);
 #pragma aux fdps_relocate_unit_array "*" parm caller [];
 
+/* Rewrites the low nibble of struct fdps_unit_record's ai_behavior byte at
+   record offset 0x34 for every unit in the INCLUSIVE index range
+   first_unit_index..last_unit_index, keeping the high nibble of each byte.
+   Returns nothing.
+
+   The low nibble is the actor behaviour code fdps_map_actor_behavior_step
+   dispatches on -- it masks the byte with 0x0f and compares the result against
+   0x0 through 0xb -- and the high nibble carries AI flags the scorers read: bit
+   0x40 in fdps_map_actor_take_best_action and bit 0x80 in
+   fdps_score_targets_for_item.  Hence the merge: assigning the whole byte, the
+   way the behaviour step does when it parks an actor on code 7, would clear
+   those flags.
+
+   behavior_mode is ORed in unmasked, so a value above 0x0f sets high-nibble
+   bits as well; every call in the shipped image passes 0, which resets the
+   behaviour code and leaves the flags standing.
+
+   The range test is signed and inclusive, so a first index greater than the
+   last writes no record at all and a negative index is walked.  Neither end is
+   checked against data_fdps_map_unit_count, and each record is resolved through
+   fdps_get_unit_record, so a call after the array has moved works on the new
+   block. */
+extern void fdps_object_set_field34_low_nibble_range(int first_unit_index,
+                                                     int last_unit_index,
+                                                     unsigned char
+                                                         behavior_mode);
+#pragma aux fdps_object_set_field34_low_nibble_range "*" parm caller [];
+
 #endif

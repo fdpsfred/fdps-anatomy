@@ -2758,6 +2758,223 @@ static void a_second_move_carries_the_records_again(void)
     unstage_relocate();
 }
 
+/* Four records again, so a range that ran one record too far at either end has
+   somewhere to be seen doing it. */
+#define NIB_UNITS 4
+
+static struct fdps_unit_record nib_units[NIB_UNITS];
+
+/* Zero the block, publish it and set the live count to its length.  The count
+   is staged only so the case that drops it to zero has something to change:
+   nothing in the function reads it. */
+static void stage_nib(void)
+{
+    int i;
+
+    for (i = 0; i < (int) sizeof(nib_units); i++) {
+        ((unsigned char *) nib_units)[i] = 0;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) nib_units;
+    data_fdps_map_unit_count = NIB_UNITS;
+}
+
+/* Give every staged record the same AI byte, so a record the range should not
+   have reached is recognisable by still holding it. */
+static void set_nib_all(int ai_byte)
+{
+    int i;
+
+    for (i = 0; i < NIB_UNITS; i++) {
+        nib_units[i].ai_behavior = (unsigned char) ai_byte;
+    }
+}
+
+/* MOV DL,byte ptr [EAX + 0x34] at 00036b96 is the byte the merge works on, so
+   the record has to be 0x50 bytes with ai_behavior at +0x34 for the field the C
+   names to be the byte the original writes. */
+static void the_ai_byte_is_at_record_offset_0x34(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ai_behavior), 0x34);
+}
+
+/* AND DL,0xf0 / OR DH,DL / MOV byte ptr [EAX + 0x34],DH at 00036b99..00036ba4:
+   the four high bits of the record byte survive and the four low ones are
+   replaced.  An assignment of the whole byte -- what 0001039a does when it
+   parks an actor on code 7 -- would give 0x03, 0x0b and 0x00 here instead, and
+   would drop the 0x40 and 0x80 AI flags the scorers read. */
+static void the_low_nibble_is_replaced_and_the_high_kept(void)
+{
+    stage_nib();
+
+    nib_units[0].ai_behavior = 0xa5;
+    fdps_object_set_field34_low_nibble_range(0, 0, 3);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0xa3);
+
+    nib_units[0].ai_behavior = 0xc0;
+    fdps_object_set_field34_low_nibble_range(0, 0, 0x0b);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0xcb);
+
+    nib_units[0].ai_behavior = 0xff;
+    fdps_object_set_field34_low_nibble_range(0, 0, 0);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0xf0);
+
+    nib_units[0].ai_behavior = 0x0f;
+    fdps_object_set_field34_low_nibble_range(0, 0, 0);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0x00);
+}
+
+/* CMP EAX,dword ptr [EBP + 0x18] / JLE at 00036b75: the last index is inside
+   the range, and the first one is the record the counter starts on.  A loop
+   written with < would leave record 2 alone here. */
+static void the_range_is_inclusive_at_both_ends(void)
+{
+    stage_nib();
+    set_nib_all(0x15);
+
+    fdps_object_set_field34_low_nibble_range(1, 2, 4);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0x15);
+    CHECK_EQ((int) nib_units[1].ai_behavior, 0x14);
+    CHECK_EQ((int) nib_units[2].ai_behavior, 0x14);
+    CHECK_EQ((int) nib_units[3].ai_behavior, 0x15);
+}
+
+/* The three call sites in fdps_chapter_20_post_action push the same index twice
+   (MOV EAX,[0x00069ce8] / ADD EAX,0xc / PUSH EAX, done twice, at 0003b167 and
+   0003b16c), so a one-record range is the shape the game uses most and it has
+   to write exactly that record. */
+static void a_range_of_one_writes_that_record_alone(void)
+{
+    stage_nib();
+    set_nib_all(0x71);
+
+    fdps_object_set_field34_low_nibble_range(2, 2, 6);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0x71);
+    CHECK_EQ((int) nib_units[1].ai_behavior, 0x71);
+    CHECK_EQ((int) nib_units[2].ai_behavior, 0x76);
+    CHECK_EQ((int) nib_units[3].ai_behavior, 0x71);
+}
+
+/* The first test at 00036b78 fails straight into JMP 0x00036ba9, the epilogue,
+   so an empty range touches nothing -- and the compare is the SIGNED JLE, so a
+   negative last index really is below a first index of 0 rather than being the
+   huge unsigned value a JBE would make of it. */
+static void a_first_index_past_the_last_writes_nothing(void)
+{
+    stage_nib();
+    set_nib_all(0x27);
+
+    fdps_object_set_field34_low_nibble_range(2, 1, 9);
+    CHECK_EQ((int) nib_units[1].ai_behavior, 0x27);
+    CHECK_EQ((int) nib_units[2].ai_behavior, 0x27);
+
+    fdps_object_set_field34_low_nibble_range(0, -1, 9);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0x27);
+    CHECK_EQ((int) nib_units[1].ai_behavior, 0x27);
+    CHECK_EQ((int) nib_units[2].ai_behavior, 0x27);
+    CHECK_EQ((int) nib_units[3].ai_behavior, 0x27);
+}
+
+/* There is no AND with 0x0f anywhere in the body: MOV DH,byte ptr [EBP + 0x1c]
+   / OR DH,DL takes the caller's byte whole, so bits above the low nibble go
+   into the record on top of the ones the mask kept.  A masked emit would give
+   0x80, 0x0f and 0x31 here.  Every call in the image passes 0, so this is the
+   shape of the code rather than a path the game walks. */
+static void the_value_is_ored_in_unmasked(void)
+{
+    stage_nib();
+
+    nib_units[0].ai_behavior = 0x8c;
+    fdps_object_set_field34_low_nibble_range(0, 0, 0x30);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0xb0);
+
+    nib_units[0].ai_behavior = 0x05;
+    fdps_object_set_field34_low_nibble_range(0, 0, 0xff);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0xff);
+
+    nib_units[0].ai_behavior = 0x36;
+    fdps_object_set_field34_low_nibble_range(0, 0, 0x41);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0x71);
+}
+
+/* The one store in the body is the byte at +0x34.  The short at +0x32 is the
+   witness a wider store would break, and the flag byte, the two AI destination
+   bytes and the neighbouring records pin that nothing else in the record or in
+   the block is reached. */
+static void nothing_but_the_ai_byte_is_written(void)
+{
+    stage_nib();
+    set_nib_all(0x99);
+    nib_units[1].death_script_opcode = 0x5a;
+    nib_units[1].death_script_operand = 0x1234;
+    nib_units[1].ai_dest_x = 0x3c;
+    nib_units[1].ai_dest_y = 0x4d;
+    nib_units[1].flags = 0x81;
+
+    fdps_object_set_field34_low_nibble_range(0, 3, 2);
+    CHECK_EQ((int) nib_units[1].ai_behavior, 0x92);
+    CHECK_EQ((int) nib_units[1].death_script_opcode, 0x5a);
+    CHECK_EQ((int) nib_units[1].death_script_operand, 0x1234);
+    CHECK_EQ((int) nib_units[1].ai_dest_x, 0x3c);
+    CHECK_EQ((int) nib_units[1].ai_dest_y, 0x4d);
+    CHECK_EQ((int) nib_units[1].flags, 0x81);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0x92);
+    CHECK_EQ((int) nib_units[3].ai_behavior, 0x92);
+}
+
+/* Each record is resolved by PUSH EAX / CALL 0x0002d210 at 00036b88, so index 0
+   is whatever data_fdps_map_unit_array_ptr names at the moment of the call and
+   the records in front of it are outside the range entirely. */
+static void the_range_starts_from_the_published_base(void)
+{
+    stage_nib();
+    set_nib_all(0x50);
+    data_fdps_map_unit_array_ptr = (unsigned char *) &nib_units[1];
+
+    fdps_object_set_field34_low_nibble_range(0, 1, 7);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0x50);
+    CHECK_EQ((int) nib_units[1].ai_behavior, 0x57);
+    CHECK_EQ((int) nib_units[2].ai_behavior, 0x57);
+    CHECK_EQ((int) nib_units[3].ai_behavior, 0x50);
+
+    stage_nib();
+}
+
+/* The accessor's multiply is the signed IMUL, and the loop's compare is signed
+   too, so a range that runs below zero steps backwards off the front of the
+   published base and writes there.  Nothing guards it, and the two records
+   behind the base are exactly what the original's arithmetic reaches. */
+static void a_negative_range_reaches_the_records_in_front(void)
+{
+    stage_nib();
+    set_nib_all(0x60);
+    data_fdps_map_unit_array_ptr = (unsigned char *) &nib_units[2];
+
+    fdps_object_set_field34_low_nibble_range(-2, -1, 5);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0x65);
+    CHECK_EQ((int) nib_units[1].ai_behavior, 0x65);
+    CHECK_EQ((int) nib_units[2].ai_behavior, 0x60);
+    CHECK_EQ((int) nib_units[3].ai_behavior, 0x60);
+
+    stage_nib();
+}
+
+/* data_fdps_map_unit_count is not read anywhere in the body -- the only bound
+   is the caller's last index -- so a count of zero does not stop the range, and
+   a guard added here would be behaviour the original does not have. */
+static void the_unit_count_does_not_bound_the_range(void)
+{
+    stage_nib();
+    set_nib_all(0x30);
+    data_fdps_map_unit_count = 0;
+
+    fdps_object_set_field34_low_nibble_range(0, 3, 6);
+    CHECK_EQ((int) nib_units[0].ai_behavior, 0x36);
+    CHECK_EQ((int) nib_units[3].ai_behavior, 0x36);
+
+    stage_nib();
+}
+
 void run_unit_tests(void)
 {
     RUN_TEST(the_record_is_base_plus_index_times_stride);
@@ -2869,4 +3086,15 @@ void run_unit_tests(void)
     RUN_TEST(a_record_pointer_does_not_survive_the_call);
     RUN_TEST(exactly_one_random_number_is_consumed);
     RUN_TEST(a_second_move_carries_the_records_again);
+
+    RUN_TEST(the_ai_byte_is_at_record_offset_0x34);
+    RUN_TEST(the_low_nibble_is_replaced_and_the_high_kept);
+    RUN_TEST(the_range_is_inclusive_at_both_ends);
+    RUN_TEST(a_range_of_one_writes_that_record_alone);
+    RUN_TEST(a_first_index_past_the_last_writes_nothing);
+    RUN_TEST(the_value_is_ored_in_unmasked);
+    RUN_TEST(nothing_but_the_ai_byte_is_written);
+    RUN_TEST(the_range_starts_from_the_published_base);
+    RUN_TEST(a_negative_range_reaches_the_records_in_front);
+    RUN_TEST(the_unit_count_does_not_bound_the_range);
 }

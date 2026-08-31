@@ -1067,6 +1067,14 @@
       "status": "committed",
       "emitted_against": "0x65",
       "rounds": 0
+    },
+    "00036b60": {
+      "name": "fdps_object_set_field34_low_nibble_range",
+      "target": "unit.c",
+      "body_size": "0x50",
+      "status": "committed",
+      "emitted_against": "0x50",
+      "rounds": 0
     }
   }
 }

@@ -778,3 +778,61 @@ void fdps_relocate_unit_array(void)
 
     data_fdps_map_unit_array_ptr = new_array;
 }
+
+/* The half of the AI byte this routine keeps: AND DL,0xf0 at 00036b99, applied
+   to the record byte before the caller's value is ORed over it.  The four bits
+   it preserves are read as flags elsewhere -- bit 0x40 in
+   fdps_map_actor_take_best_action at 00012c72 and bit 0x80 in
+   fdps_score_targets_for_item at 00013380 -- while the four it drops are the
+   behaviour code fdps_map_actor_behavior_step takes with AND AL,0xf at 00010065
+   and dispatches on against 0x0..0xb. */
+#define AI_BEHAVIOR_FLAG_NIBBLE 0xf0
+
+/* 00036b60.  Walks the inclusive unit index range and rewrites the low nibble
+   of each record's ai_behavior byte at record offset 0x34, leaving the high
+   nibble as it found it.
+
+   The loop is the plain -od for-shape: [EBP-0x8] is seeded from the first
+   argument at 00036b6c, the test at 00036b72 is CMP EAX,dword ptr [EBP+0x18] /
+   JLE, and the increment block at 00036b7c is MOV EAX,dword ptr [EBP-0x8] /
+   INC dword ptr [EBP-0x8], the shape index++ produces.  The compare is the
+   SIGNED JLE and the bound is inclusive, so a range whose first index is
+   greater than its last writes nothing at all (the JMP to the epilogue at
+   00036b7a) and a negative first index is walked rather than treated as huge.
+
+   The record is resolved through fdps_get_unit_record on every iteration --
+   PUSH EAX / CALL 0x0002d210 / ADD ESP,0x4 at 00036b88, the pointer spilled to
+   [EBP-0x4] -- so the array base is re-read per record and nothing bounds the
+   index: data_fdps_map_unit_count is not read here and the accessor's multiply
+   is signed.
+
+   The merge is a read-modify-write of the one byte and NOT an assignment: MOV
+   DL,byte ptr [EAX+0x34] / AND DL,0xf0 / MOV DH,byte ptr [EBP+0x1c] / OR DH,DL
+   / MOV byte ptr [EAX+0x34],DH.  Storing behavior_mode whole -- which is what
+   fdps_map_actor_behavior_step itself does at 0001039a with MOV byte ptr
+   [EAX+0x34],0x7 -- would clear the two AI flag bits the scorers read out of
+   the high nibble.
+
+   The caller's value is ORed in UNMASKED: there is no AND with 0x0f anywhere in
+   the body, so a value above 0x0f sets high-nibble bits too and the "low
+   nibble" in the name is a property of the values the game passes rather than
+   of the code.  All four call sites pass the literal 0, so what the shipped
+   image ever does with this is clear the behaviour code back to 0 -- the title
+   demo over units 0..0xb at 0002acd1, and fdps_chapter_20_post_action over
+   three one-unit ranges at 0003b165, 0003b181 and 0003b19d, each of them the
+   same index pushed twice. */
+void fdps_object_set_field34_low_nibble_range(int first_unit_index,
+                                              int last_unit_index,
+                                              unsigned char behavior_mode)
+{
+    struct fdps_unit_record *unit;
+    int unit_index;
+
+    for (unit_index = first_unit_index;
+         unit_index <= last_unit_index;
+         unit_index++) {
+        unit = fdps_get_unit_record(unit_index);
+        unit->ai_behavior = (unsigned char)
+            ((unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) | behavior_mode);
+    }
+}
