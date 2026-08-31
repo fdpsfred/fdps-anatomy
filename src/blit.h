@@ -1,5 +1,5 @@
 /* blit.h -- rectangle blit primitives: solid fills, transparent and inlaid
- * copies, tinted and blended copies, rotate-and-scale.
+ * copies, mosaic pixelation, tinted and blended copies, rotate-and-scale.
  *
  * Destinations in this file are 8bpp surfaces addressed by a byte pointer and
  * a pitch in bytes, the same convention text.c uses: 0x140 for the visible
@@ -90,5 +90,44 @@ extern void fdps_blit_transparent_rect(unsigned char *src, int src_stride,
                                        unsigned char *dst, int dst_stride,
                                        int width, int height);
 #pragma aux fdps_blit_transparent_rect "*" parm caller [];
+
+/* Redraws a width x height region of one 8bpp surface into another as a
+   mosaic: the region is cut into block_w x block_h cells and each cell is
+   flooded with a single colour, the source pixel nearest the middle of that
+   cell.  fdps_battle_show_unit_status_window runs it over the portrait pane
+   with block sizes 2,4,6,8,10 to dissolve a portrait away and 11,9,7,5,3,1
+   to bring the next one in, one call per step with a retrace wait between, so
+   the step sizes and the sampling are what the animation looks like.
+
+   Both surfaces are addressed as a base pointer plus a byte pitch, and BOTH
+   POINTERS ARE THE REGION'S TOP-LEFT PIXEL, not the surface's origin: the
+   caller has already added the region's offset into each.
+
+   THE SAMPLE POSITION IS AN ACCUMULATOR THAT IS SNAPPED, NOT A CLAMP.  It
+   starts at block/2, advances by a whole block per cell, and the moment it
+   reaches the far edge it is set to extent - extent%block -- the FIRST pixel
+   of the trailing partial cell, not its middle and not the last pixel of the
+   region.  Writing the obvious src[min(row*block_h + block_h/2, height-1)]
+   [min(col*block_w + block_w/2, width-1)] agrees everywhere except that
+   trailing partial row or column, and there only when the remainder is 2 or
+   more but no larger than half the block; the portrait pane is 149 rows and
+   the 7-pixel step leaves a 2-row band that the original takes from source row
+   147 while the clamped form takes it from 148.
+
+   NOTHING IS CLAMPED ANYWHERE ELSE EITHER.  A block bigger than the region
+   still starts its sample at block/2, which is outside the region, and reads
+   it: the region is one cell wide, flooded with a pixel from beyond its own
+   right edge.  Both extents are signed and a region of 0 or less in either
+   direction paints nothing, but a negative one hands memset a negative length.
+
+   The cell interior is filled one memset per destination row, never as one
+   long run, and the destination is only written -- no source pixel is read
+   back out of it, so a surface may be its own source only if a cell's own
+   output is not wanted as a later cell's input. */
+extern void fdps_blit_mosaic_rect(unsigned char *src, int src_stride,
+                                  unsigned char *dst, int dst_stride,
+                                  int width, int height, int block_w,
+                                  int block_h);
+#pragma aux fdps_blit_mosaic_rect "*" parm caller [];
 
 #endif

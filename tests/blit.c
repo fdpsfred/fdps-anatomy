@@ -576,6 +576,269 @@ static void negative_strides_walk_both_cursors_backwards(void)
     CHECK_EQ(tkey_dst_byte(50), TKEY_GUARD);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_blit_mosaic_rect @ 0002fe40
+ *
+ * Expected values come from the assembly: the IDIV plus TEST EDX,EDX / JZ
+ * pairs at 0002fe4c and 0002fe71 that make both cell counts ceilings, the
+ * SUB EAX,EDX / SAR EAX,1 at 0002fe96 and 0002feea that start each sample
+ * position at block/2, the JLE overrun tests at 0002ff10 and 0002ff40 that
+ * shorten the last band and the last cell, the ADD / CMP / JL pairs at
+ * 0002ff9f and 0002ffda that snap the sample position to
+ * extent - extent%block once it reaches the extent, the memset at 0002ff83
+ * with band_row + dest_x and the ADD [EBP-0x4],[EBP+0x20] that follows it,
+ * and IMUL EAX,[EBP+0x30] at 0002ffcd for the band advance.
+ *
+ * The routine's one call is memset, whose return value the assembly
+ * discards (ADD ESP,0xc and nothing else at 0002ff88), so no assertion
+ * below depends on what the CRT hands back.
+ *
+ * WHY THE SOURCE IS A GRADIENT AND NOT A PATTERN.  Every source byte is
+ * mos_pixel(row, col) = row * 16 + col + 1, distinct over the whole area
+ * any case samples, so an assertion names the exact source pixel a cell was
+ * flooded from rather than merely showing that a colour arrived.  That is
+ * what lets the trailing-cell cases tell the original's snapped sample
+ * apart from the clamped sample the obvious rewrite would take: the two
+ * differ by one row or one column, which is a difference of 16 or 1 here.
+ *
+ * The two pitches are deliberately different from each other and from every
+ * extent passed, so a routine that confused one for the other would land
+ * somewhere the guard byte still is.
+ * ------------------------------------------------------------------ */
+
+#define MOS_SRC_PITCH 32
+#define MOS_SRC_ROWS 20
+#define MOS_SRC_BYTES (MOS_SRC_PITCH * MOS_SRC_ROWS)
+
+#define MOS_DST_PITCH 24
+#define MOS_DST_ROWS 20
+#define MOS_DST_BYTES (MOS_DST_PITCH * MOS_DST_ROWS)
+
+/* Above every value mos_pixel produces in the sampled area, so a byte still
+   holding it was never written. */
+#define MOS_GUARD 0xff
+
+static unsigned char mos_src[MOS_SRC_BYTES];
+static unsigned char mos_dst[MOS_DST_BYTES];
+
+static int mos_pixel(int row, int col)
+{
+    return row * 16 + col + 1;
+}
+
+static void prepare_mosaic(void)
+{
+    int row;
+    int col;
+
+    memset(mos_dst, MOS_GUARD, (size_t) MOS_DST_BYTES);
+
+    for (row = 0; row < MOS_SRC_ROWS; row++) {
+        for (col = 0; col < MOS_SRC_PITCH; col++) {
+            mos_src[row * MOS_SRC_PITCH + col] =
+                (unsigned char) mos_pixel(row, col);
+        }
+    }
+}
+
+static int mos_dst_byte(int row, int col)
+{
+    return (int) mos_dst[row * MOS_DST_PITCH + col];
+}
+
+static int mos_dst_flat(int offset)
+{
+    return (int) mos_dst[offset];
+}
+
+/* An extent that divides exactly gives cell_cols = width / block_w with no
+   extra cell, and each cell is flooded from the pixel at its own middle:
+   block 2 over a 4x4 region samples (1,1), (1,3), (3,1) and (3,3), which is
+   block/2 plus a whole block per step and nothing else.  A cell is flat --
+   both corners checked hold the same byte -- and the region's own edges are
+   respected. */
+static void exact_division_floods_each_cell_from_its_middle_pixel(void)
+{
+    prepare_mosaic();
+    fdps_blit_mosaic_rect(mos_src, MOS_SRC_PITCH, mos_dst, MOS_DST_PITCH,
+                          4, 4, 2, 2);
+
+    CHECK_EQ(mos_dst_byte(0, 0), mos_pixel(1, 1));
+    CHECK_EQ(mos_dst_byte(1, 1), mos_pixel(1, 1));
+    CHECK_EQ(mos_dst_byte(0, 2), mos_pixel(1, 3));
+    CHECK_EQ(mos_dst_byte(1, 3), mos_pixel(1, 3));
+    CHECK_EQ(mos_dst_byte(2, 0), mos_pixel(3, 1));
+    CHECK_EQ(mos_dst_byte(3, 1), mos_pixel(3, 1));
+    CHECK_EQ(mos_dst_byte(2, 2), mos_pixel(3, 3));
+    CHECK_EQ(mos_dst_byte(3, 3), mos_pixel(3, 3));
+
+    CHECK_EQ(mos_dst_byte(0, 4), MOS_GUARD);
+    CHECK_EQ(mos_dst_byte(4, 0), MOS_GUARD);
+}
+
+/* Width 14 over blocks of 4 is three whole cells and a 2-pixel remainder, so
+   the ceiling gives a fourth cell that is 2 wide.  Its colour is the crux:
+   sample_col reaches 14 after the third cell and is snapped to
+   14 - 14%4 = 12, so the last two columns are flooded from source column 12.
+   The clamped rewrite would compute min(3*4 + 2, 13) = 13 and take column 13
+   instead, which is mos_pixel(1,13) -- one greater than what is asserted
+   here. */
+static void a_trailing_partial_column_is_sampled_at_its_first_pixel(void)
+{
+    prepare_mosaic();
+    fdps_blit_mosaic_rect(mos_src, MOS_SRC_PITCH, mos_dst, MOS_DST_PITCH,
+                          14, 2, 4, 2);
+
+    CHECK_EQ(mos_dst_byte(0, 0), mos_pixel(1, 2));
+    CHECK_EQ(mos_dst_byte(1, 3), mos_pixel(1, 2));
+    CHECK_EQ(mos_dst_byte(0, 4), mos_pixel(1, 6));
+    CHECK_EQ(mos_dst_byte(0, 8), mos_pixel(1, 10));
+    CHECK_EQ(mos_dst_byte(0, 12), mos_pixel(1, 12));
+    CHECK_EQ(mos_dst_byte(1, 13), mos_pixel(1, 12));
+
+    /* The short cell is 2 wide, not 4: nothing is written past column 13. */
+    CHECK_EQ(mos_dst_byte(0, 14), MOS_GUARD);
+    CHECK_EQ(mos_dst_byte(2, 0), MOS_GUARD);
+}
+
+/* The same snap in the other direction, and the same disagreement: height 14
+   over blocks of 4 leaves a 2-row band whose source row is
+   14 - 14%4 = 12, not the min(3*4 + 2, 13) = 13 the clamped rewrite would
+   use.  This is the case the portrait pane actually hits -- 149 rows with a
+   block of 7 -- reduced to numbers a buffer can hold. */
+static void a_trailing_partial_band_is_sampled_at_its_first_row(void)
+{
+    prepare_mosaic();
+    fdps_blit_mosaic_rect(mos_src, MOS_SRC_PITCH, mos_dst, MOS_DST_PITCH,
+                          2, 14, 2, 4);
+
+    CHECK_EQ(mos_dst_byte(0, 0), mos_pixel(2, 1));
+    CHECK_EQ(mos_dst_byte(3, 1), mos_pixel(2, 1));
+    CHECK_EQ(mos_dst_byte(4, 0), mos_pixel(6, 1));
+    CHECK_EQ(mos_dst_byte(8, 0), mos_pixel(10, 1));
+    CHECK_EQ(mos_dst_byte(12, 0), mos_pixel(12, 1));
+    CHECK_EQ(mos_dst_byte(13, 1), mos_pixel(12, 1));
+
+    /* The short band is 2 rows, not 4. */
+    CHECK_EQ(mos_dst_byte(14, 0), MOS_GUARD);
+    CHECK_EQ(mos_dst_byte(0, 2), MOS_GUARD);
+}
+
+/* Both remainders at once, which is the shape every real call has: 7 over
+   blocks of 3 is two whole cells and a 1-pixel remainder in each direction.
+   The last band is one row and the last cell one column, and the three
+   sample rows are 1, 4 and 6 -- the accumulator's 1 and 4, then the snap to
+   7 - 7%3 = 6.  Cell interiors are checked away from their corners so a
+   routine that painted only the sampled pixel would be seen. */
+static void both_extents_partial_at_once(void)
+{
+    prepare_mosaic();
+    fdps_blit_mosaic_rect(mos_src, MOS_SRC_PITCH, mos_dst, MOS_DST_PITCH,
+                          7, 7, 3, 3);
+
+    CHECK_EQ(mos_dst_byte(0, 0), mos_pixel(1, 1));
+    CHECK_EQ(mos_dst_byte(2, 2), mos_pixel(1, 1));
+    CHECK_EQ(mos_dst_byte(0, 3), mos_pixel(1, 4));
+    CHECK_EQ(mos_dst_byte(0, 6), mos_pixel(1, 6));
+    CHECK_EQ(mos_dst_byte(3, 0), mos_pixel(4, 1));
+    CHECK_EQ(mos_dst_byte(5, 5), mos_pixel(4, 4));
+    CHECK_EQ(mos_dst_byte(6, 0), mos_pixel(6, 1));
+    CHECK_EQ(mos_dst_byte(6, 6), mos_pixel(6, 6));
+
+    CHECK_EQ(mos_dst_byte(0, 7), MOS_GUARD);
+    CHECK_EQ(mos_dst_byte(7, 0), MOS_GUARD);
+}
+
+/* A block of 1 leaves both sample positions at 0 and both run lengths at 1,
+   so the mosaic degenerates into a plain pixel-for-pixel copy.  That is the
+   last step of the caller's fade-in sequence and the frame the portrait has
+   to arrive undistorted in, so every pixel of the region is checked rather
+   than a sample of them. */
+static void a_block_of_one_copies_the_region_pixel_for_pixel(void)
+{
+    int row;
+    int col;
+
+    prepare_mosaic();
+    fdps_blit_mosaic_rect(mos_src, MOS_SRC_PITCH, mos_dst, MOS_DST_PITCH,
+                          3, 3, 1, 1);
+
+    for (row = 0; row < 3; row++) {
+        for (col = 0; col < 3; col++) {
+            CHECK_EQ(mos_dst_byte(row, col), mos_pixel(row, col));
+        }
+    }
+
+    CHECK_EQ(mos_dst_byte(0, 3), MOS_GUARD);
+    CHECK_EQ(mos_dst_byte(3, 0), MOS_GUARD);
+}
+
+/* A block bigger than the region is one cell that is shortened to the
+   region's own extents -- but the sample position is NOT shortened with it.
+   block 9 over a 3x3 region leaves both sample positions at 9/2 = 4, so the
+   whole region is flooded from source pixel (4,4), which lies outside the
+   region on both axes.  A rewrite that clamped the sample to the region
+   would flood from (2,2) instead. */
+static void the_sample_position_is_not_clamped_to_the_region(void)
+{
+    prepare_mosaic();
+    fdps_blit_mosaic_rect(mos_src, MOS_SRC_PITCH, mos_dst, MOS_DST_PITCH,
+                          3, 3, 9, 9);
+
+    CHECK_EQ(mos_dst_byte(0, 0), mos_pixel(4, 4));
+    CHECK_EQ(mos_dst_byte(2, 2), mos_pixel(4, 4));
+    CHECK_EQ(mos_dst_byte(0, 3), MOS_GUARD);
+    CHECK_EQ(mos_dst_byte(3, 0), MOS_GUARD);
+}
+
+/* The source pitch scales the sample row and nothing else, and the
+   destination pitch spaces the written scanlines and nothing else: neither
+   is derived from the other or from an extent.  Doubling the source pitch
+   makes sample row 1 land on source row 2, and a destination pitch of 5 puts
+   the second written row five bytes on with the gap untouched. */
+static void the_two_pitches_are_read_from_their_own_arguments(void)
+{
+    prepare_mosaic();
+    fdps_blit_mosaic_rect(mos_src, MOS_SRC_PITCH * 2, mos_dst, MOS_DST_PITCH,
+                          2, 2, 2, 2);
+
+    CHECK_EQ(mos_dst_byte(0, 0), mos_pixel(2, 1));
+    CHECK_EQ(mos_dst_byte(1, 1), mos_pixel(2, 1));
+    CHECK_EQ(mos_dst_byte(0, 2), MOS_GUARD);
+    CHECK_EQ(mos_dst_byte(2, 0), MOS_GUARD);
+
+    prepare_mosaic();
+    fdps_blit_mosaic_rect(mos_src, MOS_SRC_PITCH, mos_dst, 5, 2, 2, 2, 2);
+
+    CHECK_EQ(mos_dst_flat(0), mos_pixel(1, 1));
+    CHECK_EQ(mos_dst_flat(1), mos_pixel(1, 1));
+    CHECK_EQ(mos_dst_flat(2), MOS_GUARD);
+    CHECK_EQ(mos_dst_flat(4), MOS_GUARD);
+    CHECK_EQ(mos_dst_flat(5), mos_pixel(1, 1));
+    CHECK_EQ(mos_dst_flat(6), mos_pixel(1, 1));
+    CHECK_EQ(mos_dst_flat(7), MOS_GUARD);
+}
+
+/* An extent of 0 divides exactly, so the ceiling adds no cell and that
+   loop's count is 0.  A width of 0 leaves the cell-column loop unentered on
+   every band and a height of 0 leaves the cell-row loop unentered outright;
+   either way nothing is written.  The extents are signed, so this is the
+   guard that a zero region does not become four billion cells. */
+static void a_zero_extent_paints_nothing(void)
+{
+    prepare_mosaic();
+    fdps_blit_mosaic_rect(mos_src, MOS_SRC_PITCH, mos_dst, MOS_DST_PITCH,
+                          0, 4, 2, 2);
+    CHECK_EQ(mos_dst_byte(0, 0), MOS_GUARD);
+    CHECK_EQ(mos_dst_byte(3, 0), MOS_GUARD);
+
+    prepare_mosaic();
+    fdps_blit_mosaic_rect(mos_src, MOS_SRC_PITCH, mos_dst, MOS_DST_PITCH,
+                          4, 0, 2, 2);
+    CHECK_EQ(mos_dst_byte(0, 0), MOS_GUARD);
+    CHECK_EQ(mos_dst_byte(0, 3), MOS_GUARD);
+}
+
 void run_blit_tests(void)
 {
     RUN_TEST(pitch_four_paints_a_three_by_three_square);
@@ -602,4 +865,13 @@ void run_blit_tests(void)
     RUN_TEST(both_extents_are_signed_counts);
     RUN_TEST(a_zero_source_stride_repeats_one_source_row);
     RUN_TEST(negative_strides_walk_both_cursors_backwards);
+
+    RUN_TEST(exact_division_floods_each_cell_from_its_middle_pixel);
+    RUN_TEST(a_trailing_partial_column_is_sampled_at_its_first_pixel);
+    RUN_TEST(a_trailing_partial_band_is_sampled_at_its_first_row);
+    RUN_TEST(both_extents_partial_at_once);
+    RUN_TEST(a_block_of_one_copies_the_region_pixel_for_pixel);
+    RUN_TEST(the_sample_position_is_not_clamped_to_the_region);
+    RUN_TEST(the_two_pitches_are_read_from_their_own_arguments);
+    RUN_TEST(a_zero_extent_paints_nothing);
 }

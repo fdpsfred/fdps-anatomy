@@ -158,3 +158,127 @@ void fdps_blit_transparent_rect(unsigned char *src, int src_stride,
         dst_cursor += dst_stride;
     }
 }
+
+/* 0002fe40.  Three nested loops -- cell rows, cell columns, then destination
+   scanlines inside one cell -- with a clamp at the top of each of the outer
+   two and a snap at the bottom.
+
+   THE CELL COUNTS ARE CEILINGS.  0002fe4c and 0002fe71 each divide, then
+   divide a second time and TEST EDX,EDX / JZ to add one when the remainder is
+   non-zero, so a region that does not fill its last cell still gets that cell.
+   Both are IDIV, not DIV, and every loop test in the routine is JL while every
+   overrun test is JLE against a signed operand: width, height, block_w and
+   block_h are all signed ints.
+
+   THE TWO SAMPLE POSITIONS ARE ACCUMULATORS THAT ARE SNAPPED, NOT CLAMPED.
+   sample_col starts at block_w/2 and grows by block_w; the moment it reaches
+   width (CMP EAX,[EBP+0x24] / JL at 0002ff9f, so the snap runs on >=) it is
+   set to width - width%block_w and run_width to that remainder.  sample_row
+   does the same against height at 0002ffda.  That lands on the FIRST pixel of
+   the trailing partial cell rather than its middle, which is not what
+   min(col*block_w + block_w/2, width-1) produces -- blit.h says exactly where
+   the two disagree and what it costs.
+
+   Nothing else is clamped either.  A block wider than the region leaves
+   sample_col at block_w/2, outside the region, and that byte is read and
+   flooded across the one cell the region has.  The final snap of each loop
+   leaves run_width or band_height at 0 whenever the extent divides exactly;
+   that value is never used only because the loop that would use it has just
+   ended, so a rewrite that iterated once more would read a pixel past the
+   region and write a zero-length run.
+
+   ONE memset PER DESTINATION ROW.  0002ff83 calls memset once per scanline of
+   the cell with band_row + dest_x, the sampled byte and run_width, then adds
+   dst_stride (0002ff8b).  The cell is never one long run even when the rows
+   are contiguous, and the caller wraps each whole call in a 0x3da retrace
+   wait, so the animation's pace comes from the retrace and not from here.  The
+   sampled byte is loaded MOV AL,[EAX] / AND EAX,0xff -- zero-extended, so the
+   pixel is unsigned.
+
+   The destination band pointer advances by dst_stride * block_h (0002ffca)
+   while dest_y advances by band_height, which differ only on the last band --
+   after which the cell-row loop is over.  Nothing is read back from the
+   destination.  Neither surface is bounds-checked. */
+void fdps_blit_mosaic_rect(unsigned char *src, int src_stride,
+                           unsigned char *dst, int dst_stride, int width,
+                           int height, int block_w, int block_h)
+{
+    /* Declared in the order the original's frame is laid out, as in the two
+       routines above: [EBP-4] the scanline cursor inside a cell, [EBP-8] the
+       band's first row, [EBP-0xc] the band pointer, [EBP-0x10] the sampled
+       source row, then the six counters and extents down to [EBP-0x3c].
+       Codegen, not behaviour. */
+    unsigned char *band_row;
+    unsigned char *band_top;
+    unsigned char *dst_band;
+    unsigned char *src_row;
+    int dest_y;
+    int dest_x;
+    int sample_row;
+    int sample_col;
+    int band_height;
+    int run_width;
+    int cell_rows;
+    int cell_cols;
+    int cell_row;
+    int cell_col;
+    int fill_row;
+
+    cell_cols = width / block_w;
+    if (width % block_w != 0) {
+        cell_cols++;
+    }
+
+    cell_rows = height / block_h;
+    if (height % block_h != 0) {
+        cell_rows++;
+    }
+
+    sample_row = block_h / 2;
+    band_height = block_h;
+    dst_band = dst;
+    dest_y = 0;
+
+    for (cell_row = 0; cell_row < cell_rows; cell_row++) {
+        src_row = src + sample_row * src_stride;
+        run_width = block_w;
+        sample_col = block_w / 2;
+        band_top = dst_band;
+        dest_x = 0;
+
+        if (dest_y + block_h > height) {
+            band_height = height - dest_y;
+        }
+
+        for (cell_col = 0; cell_col < cell_cols; cell_col++) {
+            if (dest_x + block_w > width) {
+                run_width = width - dest_x;
+            }
+
+            band_row = band_top;
+
+            for (fill_row = 0; fill_row < band_height; fill_row++) {
+                memset(band_row + dest_x, (int) src_row[sample_col],
+                       (size_t) run_width);
+                band_row += dst_stride;
+            }
+
+            dest_x += run_width;
+            sample_col += block_w;
+
+            if (sample_col >= width) {
+                run_width = width % block_w;
+                sample_col = width - run_width;
+            }
+        }
+
+        dest_y += band_height;
+        dst_band += dst_stride * block_h;
+        sample_row += block_h;
+
+        if (sample_row >= height) {
+            band_height = height % block_h;
+            sample_row = height - band_height;
+        }
+    }
+}
