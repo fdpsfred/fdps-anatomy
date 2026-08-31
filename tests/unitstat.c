@@ -1682,6 +1682,471 @@ static void each_index_selects_its_own_record_for_ailments(void)
     CHECK_EQ(writes > 0, 1);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_unit_apply_status_effect @ 00028f70
+ *
+ * The expected values below are read off its assembly: the CMP 0x11 / MOV 0x27,
+ * CMP 0x12 / MOV 0x25, CMP 0x13 / MOV 0x26 chain at 00028f92..00028fbd for
+ * which timer each id picks, ADD EAX,0x22 at 00028fc2 for the slot a blessing
+ * index picks, MOV dword ptr [EBP+0x14],0x14 at 00028fc8 for the id rewrite,
+ * XOR EAX,EAX / MOV AL,byte ptr [EDX+0x2] at 00028fe3 for the hit rate, the
+ * IDIV by 0x64 and signed JGE at 00028ffa..00028fff for the roll, CMP byte ptr
+ * [EAX],0x0 / JZ at 00029007 for the already-running test, the CMP 0x11 / JL and
+ * CMP 0x13 / JLE pair at 0002900e that spans the immunity call, the IDIV by 2
+ * with ADD EDX,0x2 at 00029033..0002903f for the duration, and MOV DL,byte ptr
+ * [EDX+0x21] / AND EDX,0xff / IMUL EDX,EDX,0xa / ADD dword ptr [0x00069cec],EDX
+ * at 00029051..00029060 for the award.  The hit rates the real spells carry come
+ * from assets/spells.md.
+ *
+ * HOW THE RANDOMNESS IS TAKEN OUT.  The hit rate is a staged byte, so a rate of
+ * 100 makes the roll pass whatever rand() returned and a rate of 0 makes it fail
+ * whatever it returned; every case about the branch structure is written at one
+ * of those two ends and needs no seed.  The two that are about the roll itself
+ * walk the seeds for a chosen remainder, and the four that are about how far the
+ * stream advanced re-seed and compare against the same stream advanced by hand.
+ * ------------------------------------------------------------------ */
+
+/* IMUL EAX,[EBP+0x14],0x7 inside fdps_get_spell_record, and byte +2 of the
+   record is the hit rate (src/fdpstype.h, assets/tables/spells.md). */
+#define SPELL_STRIDE 0x07
+#define SPELL_HIT_RATE_BYTE 0x02
+
+/* MAGICDAT.DAT holds ids 0x00..0x27; one spare record past the end so a staged
+   write for the top id has room. */
+#define SPELL_TABLE_RECORDS 41
+
+/* The three ailment spell ids and the blessing the other ids are rewritten
+   into. */
+#define EFFECT_SEAL 0x11
+#define EFFECT_POISON 0x12
+#define EFFECT_PARALYSIS 0x13
+#define EFFECT_BLESSING 0x14
+
+/* The three 神之祝福 slots fdps_cast_spell_on_targets passes at 00028dc4,
+   which are also the status_timers slots +0x22 reaches. */
+#define BLESSING_SLOTS 3
+
+/* struct fdps_unit_record's status_timers is six bytes. */
+#define STATUS_TIMER_SLOTS 6
+
+/* Rates that decide the roll without a seed, and 封魔咒術's real rate of 50
+   for the boundary case. */
+#define RATE_ALWAYS 100
+#define RATE_NEVER 0
+#define SEAL_REAL_RATE 50
+
+/* stage() puts the patient on level 4, and the award is ten times that. */
+#define PATIENT_LEVEL 4
+#define STATUS_AWARD 40
+
+/* Enough calls that a duration outside 2..3 would have shown. */
+#define STATUS_TRIALS 200
+
+/* An arbitrary seed for the cases that count draws by hand. */
+#define STATUS_SEED 271
+
+static unsigned char spell_table[SPELL_TABLE_RECORDS * SPELL_STRIDE];
+static unsigned char status_snapshot[STAGE_UNITS * UNIT_RECORD_STRIDE];
+
+static void set_spell_hit_rate(int spell_id, int rate)
+{
+    spell_table[spell_id * SPELL_STRIDE + SPELL_HIT_RATE_BYTE] =
+        (unsigned char) rate;
+}
+
+/* The immunity fixture, plus an all-zero spell table published as the base
+   fdps_get_spell_record reads.  Every rate therefore starts at 0 -- refusing
+   everything -- and a case opens exactly the ids it means to test. */
+static void stage_status(void)
+{
+    int i;
+
+    stage_immunity();
+
+    for (i = 0; i < (int) sizeof(spell_table); i++) {
+        spell_table[i] = 0;
+    }
+    data_fdps_battle_spell_effect_table_ptr = spell_table;
+}
+
+/* The value the seeded stream yields after exactly `draws` calls have been
+   taken out of it. */
+static int stream_value_after(int seed, int draws)
+{
+    int step;
+
+    srand(seed);
+    for (step = 0; step < draws; step++) {
+        rand();
+    }
+
+    return rand();
+}
+
+/* MOV 0x27 for id 0x11, MOV 0x25 for 0x12, MOV 0x26 for 0x13, and ADD EAX,0x22
+   for everything else: the four offsets the assembly names, measured against
+   the field ticket 17 settled. */
+static void the_status_timer_offsets_match_the_assembly(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers), 0x22);
+    CHECK_EQ((int) sizeof(layout_probe.status_timers), STATUS_TIMER_SLOTS);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers) +
+             SEAL_TIMER, 0x27);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers) +
+             POISON_TIMER, 0x25);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers) +
+             PARALYSIS_TIMER, 0x26);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers) +
+             BLESSING_SLOTS - 1, 0x24);
+}
+
+/* Each of the three ailment ids lands in the slot its own CMP/MOV pair names
+   and in no other, which is the case a sequential 0x11->+0x25 mapping fails on
+   two ids out of three. */
+static void each_ailment_id_writes_the_timer_the_assembly_names(void)
+{
+    stage_status();
+    set_spell_hit_rate(EFFECT_SEAL, RATE_ALWAYS);
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_SEAL, PATIENT), 1);
+    CHECK_EQ(unit(PATIENT)->status_timers[SEAL_TIMER] >= TURNS_LOW, 1);
+    CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER], 0);
+    CHECK_EQ(unit(PATIENT)->status_timers[PARALYSIS_TIMER], 0);
+
+    stage_status();
+    set_spell_hit_rate(EFFECT_POISON, RATE_ALWAYS);
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_POISON, PATIENT), 1);
+    CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER] >= TURNS_LOW, 1);
+    CHECK_EQ(unit(PATIENT)->status_timers[SEAL_TIMER], 0);
+    CHECK_EQ(unit(PATIENT)->status_timers[PARALYSIS_TIMER], 0);
+
+    stage_status();
+    set_spell_hit_rate(EFFECT_PARALYSIS, RATE_ALWAYS);
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_PARALYSIS, PATIENT), 1);
+    CHECK_EQ(unit(PATIENT)->status_timers[PARALYSIS_TIMER] >= TURNS_LOW, 1);
+    CHECK_EQ(unit(PATIENT)->status_timers[SEAL_TIMER], 0);
+    CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER], 0);
+}
+
+/* ADD EAX,0x22: a blessing index of 0, 1 or 2 lands in status_timers slot 0, 1
+   or 2 -- the three fdps_unit_recompute_combat_stats reads -- and never in one
+   of the three ailment slots above them. */
+static void a_blessing_index_writes_its_own_slot(void)
+{
+    int slot;
+
+    for (slot = 0; slot < BLESSING_SLOTS; slot++) {
+        stage_status();
+        set_spell_hit_rate(EFFECT_BLESSING, RATE_ALWAYS);
+
+        CHECK_EQ(fdps_unit_apply_status_effect(slot, PATIENT), 1);
+        CHECK_EQ(unit(PATIENT)->status_timers[slot] >= TURNS_LOW, 1);
+        CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER], 0);
+        CHECK_EQ(unit(PATIENT)->status_timers[PARALYSIS_TIMER], 0);
+        CHECK_EQ(unit(PATIENT)->status_timers[SEAL_TIMER], 0);
+    }
+}
+
+/* MOV dword ptr [EBP+0x14],0x14 before the fdps_get_spell_record call: the rate
+   a blessing rolls against is spell 0x14's and never spell 0's, 1's or 2's.
+   Both directions are asserted, so neither table can be the one being read by
+   accident: spells 0..2 wide open with 0x14 shut refuses every blessing, and
+   0x14 open with 0..2 shut lands every one. */
+static void the_blessing_rolls_against_spell_fourteen(void)
+{
+    int slot;
+
+    stage_status();
+    for (slot = 0; slot < BLESSING_SLOTS; slot++) {
+        set_spell_hit_rate(slot, RATE_ALWAYS);
+    }
+    set_spell_hit_rate(EFFECT_BLESSING, RATE_NEVER);
+
+    for (slot = 0; slot < BLESSING_SLOTS; slot++) {
+        CHECK_EQ(fdps_unit_apply_status_effect(slot, PATIENT), 0);
+        CHECK_EQ(unit(PATIENT)->status_timers[slot], 0);
+    }
+
+    stage_status();
+    for (slot = 0; slot < BLESSING_SLOTS; slot++) {
+        set_spell_hit_rate(slot, RATE_NEVER);
+    }
+    set_spell_hit_rate(EFFECT_BLESSING, RATE_ALWAYS);
+
+    for (slot = 0; slot < BLESSING_SLOTS; slot++) {
+        CHECK_EQ(fdps_unit_apply_status_effect(slot, PATIENT), 1);
+        CHECK_EQ(unit(PATIENT)->status_timers[slot] >= TURNS_LOW, 1);
+    }
+}
+
+/* The signed JGE at 00028fff is a strict `remainder < rate`, so a rate of 0
+   refuses every draw and a rate of 100 accepts every one.  Two hundred calls at
+   each end, and the accumulator is checked so a refusal cannot be crediting
+   anything. */
+static void the_rate_bounds_the_roll_at_both_ends(void)
+{
+    int trial;
+    int lands;
+
+    stage_status();
+    set_spell_hit_rate(EFFECT_POISON, RATE_NEVER);
+    lands = 0;
+    for (trial = 0; trial < STATUS_TRIALS; trial++) {
+        lands += fdps_unit_apply_status_effect(EFFECT_POISON, PATIENT);
+    }
+    CHECK_EQ(lands, 0);
+    CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER], 0);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED);
+
+    lands = 0;
+    for (trial = 0; trial < STATUS_TRIALS; trial++) {
+        stage_status();
+        set_spell_hit_rate(EFFECT_POISON, RATE_ALWAYS);
+        lands += fdps_unit_apply_status_effect(EFFECT_POISON, PATIENT);
+    }
+    CHECK_EQ(lands, STATUS_TRIALS);
+}
+
+/* The boundary itself, on 封魔咒術's real rate of 50: remainder 49 lands and
+   remainder 50 does not.  The seeds are walked for rather than assumed. */
+static void the_roll_lands_strictly_under_the_rate(void)
+{
+    int seed_that_lands;
+    int seed_that_misses;
+
+    seed_that_lands = seed_whose_first_draw_leaves(SEAL_REAL_RATE - 1);
+    seed_that_misses = seed_whose_first_draw_leaves(SEAL_REAL_RATE);
+
+    CHECK_EQ(seed_that_lands != 0, 1);
+    CHECK_EQ(seed_that_misses != 0, 1);
+
+    stage_status();
+    set_spell_hit_rate(EFFECT_SEAL, SEAL_REAL_RATE);
+    srand(seed_that_lands);
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_SEAL, PATIENT), 1);
+
+    stage_status();
+    set_spell_hit_rate(EFFECT_SEAL, SEAL_REAL_RATE);
+    srand(seed_that_misses);
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_SEAL, PATIENT), 0);
+    CHECK_EQ(unit(PATIENT)->status_timers[SEAL_TIMER], 0);
+}
+
+/* rand() % 2 + 2 -- two or three turns and never 1, never 0 on a landed roll,
+   and never a count above 3. */
+static void a_landed_effect_runs_two_or_three_turns(void)
+{
+    int trial;
+    int value;
+    int out_of_range;
+
+    out_of_range = 0;
+
+    for (trial = 0; trial < STATUS_TRIALS; trial++) {
+        stage_status();
+        set_spell_hit_rate(EFFECT_PARALYSIS, RATE_ALWAYS);
+        CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_PARALYSIS, PATIENT), 1);
+
+        value = unit(PATIENT)->status_timers[PARALYSIS_TIMER];
+        if (value != TURNS_LOW && value != TURNS_HIGH) {
+            out_of_range++;
+        }
+    }
+
+    CHECK_EQ(out_of_range, 0);
+}
+
+/* CMP byte ptr [EAX],0x0 / JZ: a timer already counting down refuses the effect
+   outright, and the count it holds is left exactly as it was -- not refreshed,
+   not extended -- with nothing credited.  This is the whole of what separates
+   the accounting here from fdps_unit_inflict_random_ailments, which has no such
+   test. */
+static void an_effect_already_running_is_refused_and_not_refreshed(void)
+{
+    int trial;
+
+    stage_status();
+    set_spell_hit_rate(EFFECT_POISON, RATE_ALWAYS);
+    unit(PATIENT)->status_timers[POISON_TIMER] = TIMER_SENTINEL;
+
+    for (trial = 0; trial < STATUS_TRIALS; trial++) {
+        CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_POISON, PATIENT), 0);
+    }
+
+    CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER], TIMER_SENTINEL);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED);
+}
+
+/* CMP 0x11 / JL and CMP 0x13 / JLE on the REWRITTEN id: the three ailments
+   consult fdps_unit_is_ailment_immune and a blessing does not.  The same immune
+   unit therefore refuses all three ailments and takes all three blessings. */
+static void immunity_gates_the_ailments_and_not_the_blessings(void)
+{
+    int slot;
+
+    stage_status();
+    unit(PATIENT)->clazz = CLASS_MACHINE_SOLDIER;
+    set_spell_hit_rate(EFFECT_SEAL, RATE_ALWAYS);
+    set_spell_hit_rate(EFFECT_POISON, RATE_ALWAYS);
+    set_spell_hit_rate(EFFECT_PARALYSIS, RATE_ALWAYS);
+    set_spell_hit_rate(EFFECT_BLESSING, RATE_ALWAYS);
+
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_SEAL, PATIENT), 0);
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_POISON, PATIENT), 0);
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_PARALYSIS, PATIENT), 0);
+    CHECK_EQ(unit(PATIENT)->status_timers[SEAL_TIMER], 0);
+    CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER], 0);
+    CHECK_EQ(unit(PATIENT)->status_timers[PARALYSIS_TIMER], 0);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED);
+
+    for (slot = 0; slot < BLESSING_SLOTS; slot++) {
+        CHECK_EQ(fdps_unit_apply_status_effect(slot, PATIENT), 1);
+        CHECK_EQ(unit(PATIENT)->status_timers[slot] >= TURNS_LOW, 1);
+    }
+}
+
+/* The immune portrait run reaches the same gate through the other field, so an
+   ordinary class carrying an ENEMYDAT portrait id refuses an ailment too. */
+static void an_immune_portrait_id_also_refuses_an_ailment(void)
+{
+    stage_status();
+    unit(PATIENT)->portrait_id = MID_IMMUNE_PORTRAIT;
+    set_spell_hit_rate(EFFECT_POISON, RATE_ALWAYS);
+
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_POISON, PATIENT), 0);
+    CHECK_EQ(unit(PATIENT)->status_timers[POISON_TIMER], 0);
+}
+
+/* IMUL EDX,EDX,0xa on the zero-extended level byte, ADDED to the accumulator:
+   a level 4 target is worth 40 and three landings are worth 120.  Neither the
+   side byte nor the portrait id is looked at, so a landing on a roster unit
+   credits exactly as one on an enemy does. */
+static void a_landed_effect_credits_ten_times_the_level(void)
+{
+    stage_status();
+    set_spell_hit_rate(EFFECT_SEAL, RATE_ALWAYS);
+    set_spell_hit_rate(EFFECT_POISON, RATE_ALWAYS);
+    set_spell_hit_rate(EFFECT_PARALYSIS, RATE_ALWAYS);
+
+    CHECK_EQ(unit(PATIENT)->level, PATIENT_LEVEL);
+
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_SEAL, PATIENT), 1);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + STATUS_AWARD);
+
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_POISON, PATIENT), 1);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + STATUS_AWARD * 2);
+
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_PARALYSIS, PATIENT), 1);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + STATUS_AWARD * 3);
+
+    /* A level of 0x80 is above the signed byte's top: AND EDX,0xff makes it
+       128 and the award 1280, not a negative figure. */
+    stage_status();
+    set_spell_hit_rate(EFFECT_POISON, RATE_ALWAYS);
+    unit(PATIENT)->level = 0x80;
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_POISON, PATIENT), 1);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 0x80 * 10);
+}
+
+/* THE ORDER OF THE THREE TESTS, measured by how far the shared rand() stream
+   has moved.  The hit roll always draws; the duration draws only after all
+   three tests passed; and neither the already-running test nor the immunity
+   call draws anything of its own.  So a landing is two draws and each of the
+   three ways of failing is exactly one -- which is what pins the immunity call
+   to its place BEHIND the roll and the timer test rather than in front of
+   them. */
+static void the_stream_advances_by_one_draw_per_failure_and_two_on_a_landing(void)
+{
+    int after_call;
+
+    stage_status();
+    set_spell_hit_rate(EFFECT_POISON, RATE_ALWAYS);
+    srand(STATUS_SEED);
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_POISON, PATIENT), 1);
+    after_call = rand();
+    CHECK_EQ(after_call, stream_value_after(STATUS_SEED, 2));
+
+    stage_status();
+    set_spell_hit_rate(EFFECT_POISON, RATE_NEVER);
+    srand(STATUS_SEED);
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_POISON, PATIENT), 0);
+    after_call = rand();
+    CHECK_EQ(after_call, stream_value_after(STATUS_SEED, 1));
+
+    stage_status();
+    set_spell_hit_rate(EFFECT_POISON, RATE_ALWAYS);
+    unit(PATIENT)->status_timers[POISON_TIMER] = TIMER_SENTINEL;
+    srand(STATUS_SEED);
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_POISON, PATIENT), 0);
+    after_call = rand();
+    CHECK_EQ(after_call, stream_value_after(STATUS_SEED, 1));
+
+    stage_status();
+    set_spell_hit_rate(EFFECT_POISON, RATE_ALWAYS);
+    unit(PATIENT)->clazz = CLASS_MACHINE_SOLDIER;
+    srand(STATUS_SEED);
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_POISON, PATIENT), 0);
+    after_call = rand();
+    CHECK_EQ(after_call, stream_value_after(STATUS_SEED, 1));
+}
+
+/* The function reads one record and writes one byte of it.  The whole staged
+   block is compared byte for byte against a snapshot, with only that one offset
+   exempt, so a stray write anywhere -- a neighbouring timer, another field,
+   another record -- would show. */
+static void nothing_outside_the_one_timer_byte_is_written(void)
+{
+    int index;
+    int exempt;
+    int differences;
+
+    stage_status();
+    set_spell_hit_rate(EFFECT_SEAL, RATE_ALWAYS);
+    unit(PATIENT)->mp_current = 33;
+    unit(PATIENT)->mp_max = 44;
+    unit(PATIENT)->status_timers[0] = TIMER_SENTINEL;
+    unit(PATIENT)->status_timers[POISON_TIMER] = TIMER_SENTINEL;
+    unit(0)->hp_current = 88;
+    unit(2)->hp_current = 77;
+    unit(3)->level = 9;
+
+    for (index = 0; index < (int) sizeof(unit_block); index++) {
+        status_snapshot[index] = unit_block[index];
+    }
+
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_SEAL, PATIENT), 1);
+
+    exempt = PATIENT * UNIT_RECORD_STRIDE + 0x27;
+    differences = 0;
+    for (index = 0; index < (int) sizeof(unit_block); index++) {
+        if (index == exempt) {
+            continue;
+        }
+        if (unit_block[index] != status_snapshot[index]) {
+            differences++;
+        }
+    }
+
+    CHECK_EQ(differences, 0);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + STATUS_AWARD);
+}
+
+/* The index picks the record: naming unit 2 writes inside unit 2 and nowhere
+   else, and the award follows unit 2's own level. */
+static void each_index_selects_its_own_record_for_status(void)
+{
+    stage_status();
+    set_spell_hit_rate(EFFECT_PARALYSIS, RATE_ALWAYS);
+    unit(2)->level = 7;
+
+    CHECK_EQ(fdps_unit_apply_status_effect(EFFECT_PARALYSIS, 2), 1);
+
+    CHECK_EQ(unit(2)->status_timers[PARALYSIS_TIMER] >= TURNS_LOW, 1);
+    CHECK_EQ(unit(0)->status_timers[PARALYSIS_TIMER], 0);
+    CHECK_EQ(unit(PATIENT)->status_timers[PARALYSIS_TIMER], 0);
+    CHECK_EQ(unit(3)->status_timers[PARALYSIS_TIMER], 0);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 70);
+}
+
 void run_unitstat_tests(void)
 {
     RUN_TEST(the_record_layout_matches_the_offsets_read);
@@ -1763,4 +2228,19 @@ void run_unitstat_tests(void)
     RUN_TEST(an_ailment_already_running_is_overwritten);
     RUN_TEST(nothing_outside_the_three_ailment_bytes_is_written);
     RUN_TEST(each_index_selects_its_own_record_for_ailments);
+
+    RUN_TEST(the_status_timer_offsets_match_the_assembly);
+    RUN_TEST(each_ailment_id_writes_the_timer_the_assembly_names);
+    RUN_TEST(a_blessing_index_writes_its_own_slot);
+    RUN_TEST(the_blessing_rolls_against_spell_fourteen);
+    RUN_TEST(the_rate_bounds_the_roll_at_both_ends);
+    RUN_TEST(the_roll_lands_strictly_under_the_rate);
+    RUN_TEST(a_landed_effect_runs_two_or_three_turns);
+    RUN_TEST(an_effect_already_running_is_refused_and_not_refreshed);
+    RUN_TEST(immunity_gates_the_ailments_and_not_the_blessings);
+    RUN_TEST(an_immune_portrait_id_also_refuses_an_ailment);
+    RUN_TEST(a_landed_effect_credits_ten_times_the_level);
+    RUN_TEST(the_stream_advances_by_one_draw_per_failure_and_two_on_a_landing);
+    RUN_TEST(nothing_outside_the_one_timer_byte_is_written);
+    RUN_TEST(each_index_selects_its_own_record_for_status);
 }

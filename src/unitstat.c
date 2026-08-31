@@ -423,6 +423,115 @@ void fdps_unit_inflict_random_ailments(int unit_index)
     }
 }
 
+/* CMP 0x11 / MOV 0x27, CMP 0x12 / MOV 0x25, CMP 0x13 / MOV 0x26 at
+   00028f92..00028fbd.  The three ids are the MAGICDAT.DAT indexes of the three
+   ailment spells (assets/spells.md), and the offset each one selects is NOT the
+   one its position in that run suggests: status_timers starts at record +0x22,
+   so 0x27, 0x25 and 0x26 are slots 5, 3 and 4 -- 封魔咒術 first, then the
+   poison and paralysis pair. */
+#define SPELL_ID_SEAL 0x11
+#define SPELL_ID_POISON 0x12
+#define SPELL_ID_PARALYSIS 0x13
+#define SEAL_TIMER_SLOT 5
+#define POISON_TIMER_SLOT 3
+#define PARALYSIS_TIMER_SLOT 4
+
+/* MOV dword ptr [EBP+0x14],0x14 at 00028fc8: an id outside those three is
+   REPLACED by 0x14, 神之祝福, before the hit rate is fetched and before the
+   0x11..0x13 span that gates the immunity test is measured. */
+#define SPELL_ID_BLESSING 0x14
+
+/* IMUL EDX,EDX,0xa at 0002905d, on the zero-extended level byte. */
+#define STATUS_EXP_PER_LEVEL 0xa
+
+/* 00028f70.  The frame is the plain -4s one: PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP,
+   SUB ESP,0x18, the two arguments read from [EBP+0x14] and [EBP+0x18], and all
+   three call sites -- 00028cec, 00028d4c and 00028dc4, every one of them in
+   fdps_cast_spell_on_targets -- pushing the unit id first and the effect id
+   second, doing ADD ESP,0x8 after the CALL and then TEST EAX,EAX.
+
+   Four things about the shape are load-bearing and none of them reads that way.
+
+   THE ID IS REWRITTEN BEFORE THE HIT RATE IS LOOKED UP.  Only 0x11, 0x12 and
+   0x13 reach fdps_get_spell_record as themselves; every other value is replaced
+   by 0x14 at 00028fc8, so the three 神之祝福 slots the one caller passes as 0,
+   1 and 2 all roll against spell 0x14's hit rate of 100 and land every time.
+   Writing the obvious fdps_get_spell_record(effect_id) reads spells 0, 1 and 2
+   -- 業火, 狂暴巨燄, 烈獄之火, hit rate 95 (assets/spells.md) -- and makes
+   the blessing miss one time in twenty.
+
+   THE OFFSET TABLE IS NOT SEQUENTIAL.  0x11 selects +0x27 and 0x12 selects
+   +0x25, so the ailment ids and the timer slots run in different orders.
+
+   THE IMMUNITY TEST IS SPANNED ON THE REWRITTEN ID.  CMP 0x11 / JL and CMP 0x13
+   / JLE at 0002900e are read from [EBP+0x14] after the rewrite, which is why the
+   blessing slots skip fdps_unit_is_ailment_immune entirely: 0x14 is past the top
+   of the span.  A unit that is immune to poison still takes all three buffs.
+
+   THE THREE TESTS ARE SHORT-CIRCUITED IN THIS ORDER and each one costs draws out
+   of the shared rand() stream.  The hit roll at 00028fe9 always runs; the
+   timer-is-clear test at 00029007 runs only after it passed; the immunity call at
+   00029020 runs only after both; and the duration draw at 0002902c only after all
+   three.  Hoisting the immunity call, or testing the timer first, changes how far
+   the stream has advanced when the next roll in the battle takes its value.
+
+   Unlike fdps_unit_inflict_random_ailments this one refuses a slot that is
+   already counting down rather than refreshing it, and it credits experience:
+   ADD dword ptr [0x00069cec],EDX at 00029060, ten times the target's level and
+   an accumulate rather than an assignment. */
+int fdps_unit_apply_status_effect(int effect_id, int unit_index)
+{
+    struct fdps_unit_record *unit;
+    struct fdps_spell_effect *spell;
+    int timer_slot;
+    int hit_rate;
+    int landed;
+
+    /* Zeroed at 00028f7c, before the record lookup rather than after it. */
+    landed = 0;
+    unit = fdps_get_unit_record(unit_index);
+
+    if (effect_id == SPELL_ID_SEAL) {
+        timer_slot = SEAL_TIMER_SLOT;
+    } else if (effect_id == SPELL_ID_POISON) {
+        timer_slot = POISON_TIMER_SLOT;
+    } else if (effect_id == SPELL_ID_PARALYSIS) {
+        timer_slot = PARALYSIS_TIMER_SLOT;
+    } else {
+        /* ADD EAX,0x22 on the id itself, and status_timers is the field at
+           +0x22, so the id arrives already being the slot index. */
+        timer_slot = effect_id;
+        effect_id = SPELL_ID_BLESSING;
+    }
+
+    spell = fdps_get_spell_record(effect_id);
+
+    /* XOR EAX,EAX / MOV AL,byte ptr [EDX+0x2] at 00028fe3: the hit rate widens
+       UNSIGNED into an int, and the comparison that follows is the signed JGE
+       at 00028fff on the remainder.  A rate of 0 therefore refuses everything
+       and no rate can be read as negative. */
+    hit_rate = spell->hit_rate;
+
+    /* Both divides are the signed IDIV with the dividend sign extended by SAR
+       EDX,0x1f, and both remainders are taken from EDX. */
+    if (rand() % PERCENT < hit_rate &&
+        unit->status_timers[timer_slot] == 0 &&
+        (effect_id < SPELL_ID_SEAL || effect_id > SPELL_ID_PARALYSIS ||
+         fdps_unit_is_ailment_immune(unit_index) == 0)) {
+        unit->status_timers[timer_slot] =
+            (unsigned char) (rand() % AILMENT_TURNS_SPREAD +
+                             AILMENT_TURNS_BASE);
+        landed = 1;
+
+        /* XOR EDX,EDX is absent here -- MOV DL,byte ptr [EDX+0x21] followed by
+           AND EDX,0xff -- so the level is still a zero-extended byte. */
+        data_fdps_battle_pending_xp_credit +=
+            unit->level * STATUS_EXP_PER_LEVEL;
+    }
+
+    return landed;
+}
+
 /* CMP dword ptr [EBP-0xc],0x19 / JZ at 000290b1 -- an equality of its own,
    reached before either span is tried.  0x19 is 機兵 and 0x1a 魔神 is the
    class immediately above it, which this equality deliberately leaves out. */

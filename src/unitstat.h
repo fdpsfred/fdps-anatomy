@@ -200,6 +200,61 @@ extern int fdps_unit_apply_damage(int unit_index, int base_damage);
 extern void fdps_unit_inflict_random_ailments(int unit_index);
 #pragma aux fdps_unit_inflict_random_ailments "*" parm caller [];
 
+/* Lands one named status effect on one unit and returns whether it took: 1 when
+   the effect is now running, 0 when it is not.  fdps_cast_spell_on_targets is
+   the only caller and its three call sites do not read the answer the same way.
+   The two ailment sites -- id 0x11, and 0x12 or 0x13 -- draw the miss indicator
+   through fdps_show_miss_indicator on a 0 and do nothing on a 1.  The 神之祝福
+   loop is the other polarity: it draws nothing at all on a 0 and on a 1 shows
+   the buff sprite through fdps_show_sprite_indicator and then rebuilds the
+   target's derived numbers through fdps_unit_recompute_combat_stats.
+
+   effect_id IS NOT ALWAYS A SPELL ID.  0x11, 0x12 and 0x13 are the ids of
+   封魔咒術, 腐毒術 and 麻痺術 and are used as themselves; anything else is
+   a 神之祝福 buff slot, and the caller passes 0, 1 or 2 there.  The id a buff
+   slot carries is REPLACED by 0x14 before anything else happens, so all three
+   buffs roll against 神之祝福's own hit rate of 100 rather than against
+   spells 0, 1 and 2 (assets/spells.md).
+
+   The byte written is one of struct fdps_unit_record's six status_timers, and
+   which one is not the order the ids are in: 0x11 selects slot 5 (record
+   +0x27), 0x12 slot 3 (+0x25), 0x13 slot 4 (+0x26), and a buff slot n selects
+   slot n (+0x22 + n) -- the three fdps_unit_recompute_combat_stats reads as a
+   1.15x attack multiplier, a 1.15x defence multiplier and a flat +15.  The
+   value stored is rand() % 2 + 2, so every effect runs for two or three turns.
+
+   Three tests gate the write and they are asked IN THIS ORDER, each only if the
+   one before it passed.  The effect's hit rate out of MAGICDAT.DAT beats
+   rand() % 100; the chosen timer is still 0; and, FOR THE THREE AILMENT IDS
+   ONLY, fdps_unit_is_ailment_immune says the unit is not immune.  A buff slot
+   skips the immunity test outright, so a unit immune to poison still takes all
+   three blessings.  The order is observable beyond this unit: rand() is one
+   stream shared by every roll in the battle, so a draw this function does not
+   make is a value some later roll takes instead.
+
+   A TIMER THAT IS ALREADY RUNNING IS LEFT ALONE.  The effect simply fails and
+   returns 0, where fdps_unit_inflict_random_ailments has no such test and
+   refreshes whatever count it finds.
+
+   When it lands, ten times the target's level byte is ADDED to
+   data_fdps_battle_pending_xp_credit rather than assigned, so several targets
+   in one cast accumulate; fdps_unit_award_exp_and_level_up is what later clamps
+   the accumulator to 99 and pays it to the acting unit.  Nothing is credited
+   when the effect misses, and the target's side and portrait id are not looked
+   at at all -- a status effect landed on one of the player's own units credits
+   the party exactly as an enemy does.
+
+   unit_index is a position in the current battle's unit array and is not range
+   checked; the record is resolved through fdps_get_unit_record, so a call after
+   the array has moved works on the new block.  Neither the effect id nor the
+   slot it picks is bounded either: a buff slot of 6 or more writes past
+   status_timers into the record's own fields.
+
+   rand() is never seeded by the game (rebuild_info/pitfalls.md), so a given
+   battle rolls the same effects every time it is replayed. */
+extern int fdps_unit_apply_status_effect(int effect_id, int unit_index);
+#pragma aux fdps_unit_apply_status_effect "*" parm caller [];
+
 /* Can this unit be given a status ailment?  Returns 1 when it cannot and 0 when
    it can, and every caller uses it the same way round: it is a gate that lets
    the ailment through only on a 0.

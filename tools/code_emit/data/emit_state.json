@@ -702,6 +702,14 @@
       "status": "committed",
       "emitted_against": "0x84",
       "rounds": 0
+    },
+    "00028f70": {
+      "name": "fdps_unit_apply_status_effect",
+      "target": "unitstat.c",
+      "body_size": "0x106",
+      "status": "committed",
+      "emitted_against": "0x106",
+      "rounds": 1
     }
   }
 }
