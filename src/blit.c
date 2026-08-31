@@ -14,6 +14,15 @@
 #define VGA_SCREEN_BASE 0x000a0000
 #define VGA_SCREEN_PITCH 0x140
 
+/* The shape of the shade ramp fdps_blit_tint_rect is handed: one row per
+   weight, one word per palette entry, and a second block of nine rows holding
+   the complementary weights.  SHL EAX,0xa at 00030051 scales the weight by
+   0x100 words and the 0x900 at 00030029 is the nine-row step to the
+   complementary block.  Both agree with the table fdps_build_palette_tables
+   fills -- 4608 words, 18 rows of 0x100. */
+#define SHADE_RAMP_ROW_ENTRIES 0x100
+#define SHADE_RAMP_COMPLEMENT_ROWS (9 * SHADE_RAMP_ROW_ENTRIES)
+
 /* 0002e5e0.  The square's side is cell_pitch - 1 in both directions: the loop
    bound at 0002e60a and the memset length at 0002e61d are the same DEC EAX on
    the same argument.  That is deliberate -- it is what spaces the battle map
@@ -280,5 +289,87 @@ void fdps_blit_mosaic_rect(unsigned char *src, int src_stride,
             band_height = height % block_h;
             sample_row = height - band_height;
         }
+    }
+}
+
+/* 00030010.  Two nested loops with no call in them at all, over a frame set up
+   by four instructions at the top.
+
+   CMP dword ptr [EBP+0x38],0x8 / JG at 0003001c is the fold, and it is a
+   SIGNED test.  The two branches differ only in which of the two row offsets
+   gets 0 and which gets 0x900, plus the MOV EAX,0x10 / SUB EAX,[EBP+0x38] at
+   00030040 that rewrites alpha in place on the greater-than side.  Both offsets
+   are dword counts, not byte counts: 0003005f and 000300b6 are both
+   LEA EAX,[EAX*0x4 + 0x0] applied after the offset has already been added, so
+   0x900 is 0x900 entries and lands nine rows on.
+
+   SHL EAX,0xa at 00030051 turns the folded alpha into the byte offset of its
+   row -- 0x100 dwords -- and that base is held in [EBP-0x4] for the whole run.
+   The tint's scaled colour is read once, before either loop, at 00030069.
+
+   Both loop tests are signed: CMP EAX,[EBP+0x28] / JL at 00030078 counts the
+   rows and CMP EAX,[EBP+0x24] / JL at 00030094 counts the columns, so either
+   extent at 0 or below transfers nothing.
+
+   The inner body has no test in it.  XOR EAX,EAX / MOV AL,byte ptr [EDX] at
+   000300a9 loads the source byte zero-extended -- so pixel 0xff indexes entry
+   255 of the row and not entry -1 -- and MOV byte ptr [EDX],AL at 000300fa is
+   reached unconditionally.  There is no transparency key here: unlike
+   fdps_blit_transparent_rect above, a source pixel of 0 is blended and written
+   like any other.
+
+   SAR EAX,0x4 at 000300cb and SAR EAX,0xc at 000300e4 are arithmetic shifts
+   while the entries are unsigned here, so both come out as SHR.  Neither shift
+   can tell the two forms apart: the AND 0xf0f0f between them keeps only bits
+   0..19, and no bit the two disagree about survives.  Nor can the operand
+   reach them -- a ramp entry is a nibble per byte times a weight of at most
+   16, so no byte of the sum exceeds 0xf0 and bits 24..31 are always clear.
+
+   ADD dword ptr [EBP+0x14],EAX and ADD dword ptr [EBP+0x1c],EAX at 00030101
+   and 00030107 advance the argument slots themselves rather than a pair of
+   local cursors, so src and dst are walked directly here and no separate
+   cursor is kept.
+
+   Nothing is clipped and no extent is checked against either surface. */
+void fdps_blit_tint_rect(unsigned char *src, int src_stride, unsigned char *dst,
+                         int dst_stride, int width, int height,
+                         unsigned int *shade_ramp,
+                         unsigned char *inverse_palette_cube, int tint_color,
+                         int alpha)
+{
+    unsigned int *weight_row;
+    unsigned int scaled_tint;
+    int tint_row_offset;
+    int source_row_offset;
+    int source_pixel;
+    unsigned int blended;
+    unsigned int cube_index;
+    int row;
+    int column;
+
+    if (alpha <= 8) {
+        tint_row_offset = 0;
+        source_row_offset = SHADE_RAMP_COMPLEMENT_ROWS;
+    } else {
+        tint_row_offset = SHADE_RAMP_COMPLEMENT_ROWS;
+        source_row_offset = 0;
+        alpha = 16 - alpha;
+    }
+
+    weight_row = shade_ramp + alpha * SHADE_RAMP_ROW_ENTRIES;
+    scaled_tint = weight_row[tint_color + tint_row_offset];
+
+    for (row = 0; row < height; row++) {
+        for (column = 0; column < width; column++) {
+            source_pixel = (int) src[column];
+            blended = (scaled_tint
+                       + weight_row[source_pixel + source_row_offset]) >> 4;
+            blended &= 0x000f0f0fu;
+            cube_index = (blended & 0xffffu) | (blended >> 12);
+            dst[column] = inverse_palette_cube[cube_index];
+        }
+
+        src += src_stride;
+        dst += dst_stride;
     }
 }

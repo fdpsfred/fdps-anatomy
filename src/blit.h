@@ -130,4 +130,55 @@ extern void fdps_blit_mosaic_rect(unsigned char *src, int src_stride,
                                   int block_h);
 #pragma aux fdps_blit_mosaic_rect "*" parm caller [];
 
+/* Copies a rectangle of 8bpp pixels with one constant palette colour blended
+   over every pixel, resolving each blended colour back to a palette index
+   through an inverse-palette lookup table.  This is what dims the screen for
+   the game-over fade and for the VFS animation player's fade in and out: the
+   caller walks alpha 0..0x10 one step per retrace and calls this once per
+   step.
+
+   Both surfaces are a base pointer plus a byte stride, as everywhere else in
+   this file, and BOTH POINTERS ARE THE RECTANGLE'S TOP-LEFT PIXEL.
+
+   THE TWO TABLES ARE THE CALLER'S, NOT THIS ROUTINE'S.  Both are the globals
+   fdps_build_palette_tables fills -- data_fdps_palette_shade_ramp_table and
+   data_fdps_inverse_palette_cube, declared in gamedata.h -- passed in as
+   arguments, so this routine reads no global at all and the caller decides
+   which tables it composites through.
+
+   ALPHA IS FOLDED INTO 0..8 AND THE TWO ROWS SWAP, WHICH IS WHY THE RAMP HAS
+   18 ROWS AND NOT 17.  Rows 0..8 carry weights 0..8 and rows 9..17 carry the
+   complementary weights 16..8, which is exactly the multiplier table
+   fdps_build_palette_tables scales each row by.  For alpha <= 8 the tint reads
+   row alpha and each source pixel reads row 9+alpha; for alpha > 8 alpha
+   becomes 16-alpha, the tint reads row 9+alpha' and the source pixel reads row
+   alpha'.  Either way the tint ends up weighted by the caller's alpha and the
+   source pixel by 16-alpha -- writing the obvious shade_ramp[alpha] for the
+   tint and shade_ramp[16-alpha] for the source indexes rows that are not
+   there.
+
+   THE CUBE INDEX IS NOT THE PACKED COLOUR IN CHANNEL ORDER.  A ramp entry is
+   0x000R0G0B, one nibble per channel sitting in the low nibble of its own
+   byte, so the two weighted entries can be added with no channel carrying into
+   the next.  The sum is shifted right by four -- which drops the remainder of
+   each channel's division by 16 into the byte's low nibble -- and masked with
+   0x000F0F0F, leaving red in bits 16..19, green in 8..11 and blue in 0..3.
+   The fold (v & 0xFFFF) | (v >> 12) then lands GREEN in bits 8..11, RED in
+   bits 4..7 and BLUE in bits 0..3.  Green above red is not a slip: the cube is
+   filled green-outermost, red, then blue, so its index really is g:r:b and the
+   obvious r:g:b packing reads the wrong entry for every colour whose red and
+   green differ.
+
+   NOTHING IS CLIPPED, NOTHING IS KEYED OUT AND NOTHING IS SKIPPED.  Unlike
+   fdps_blit_transparent_rect above there is no test on the source byte: every
+   pixel of the rectangle is written, palette index 0 included.  width and
+   height are signed and compared with JL, so either at 0 or below transfers
+   nothing.  alpha is signed too, and the fold's own test is signed. */
+extern void fdps_blit_tint_rect(unsigned char *src, int src_stride,
+                                unsigned char *dst, int dst_stride, int width,
+                                int height, unsigned int *shade_ramp,
+                                unsigned char *inverse_palette_cube,
+                                int tint_color, int alpha);
+#pragma aux fdps_blit_tint_rect "*" parm caller [];
+
 #endif

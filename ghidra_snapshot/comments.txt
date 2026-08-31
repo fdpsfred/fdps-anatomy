@@ -7701,21 +7701,21 @@ Boundary: 00030010-00030115, entry on the Watcom prologue 53 56 57 55 89 e5 / su
 Signature: __cdecl, confirmed by the assembly - all ten arguments are read from [EBP+0x14] through [EBP+0x38], EAX/EDX/EBX/ECX are written before ever being read so nothing arrives in registers, and the plain RET leaves the caller to clean up. Returns nothing.
 
 Algorithm:
-blend_table is a [18][256] array of dwords holding each palette entry pre-scaled by a weight, with the three colour channels packed one per byte (channel n in bits 8n+4..8n+7 before the shift below). Rows 0..8 hold weights 0..8; rows 9..17 (dword offset 0x900 = 9*256) hold the complementary weights. To keep the row index inside 0..8 the function folds alpha: for alpha <= 8 the constant colour reads row alpha and the source pixels read row 9+alpha; for alpha > 8 alpha is replaced by 16-alpha, the constant colour reads row 9+alpha' and the source pixels read row alpha'. Either way the constant colour ends up weighted by the caller's alpha and the source pixel by 16-alpha.
-The scaled constant colour is fetched once before the loops. For each pixel the scaled source colour is added to it, the sum is shifted right by 4 (dividing out the /16 of the weights) and masked with 0x000F0F0F, leaving 4 bits per channel at bits 0..3, 8..11 and 16..19. Those are folded into a 12-bit index by (v & 0xFFFF) | (v >> 12), giving channel0 in bits 0..3, channel2 in bits 4..7 and channel1 in bits 8..11. That index selects a palette byte from the 4096-entry inverse-palette table rgb444_lut, which is stored to the destination.
+shade_ramp is a [18][256] array of dwords holding each palette entry pre-scaled by a weight, with the three colour channels packed one per byte as 0x000R0G0B - blue in byte 0, green in byte 1, red in byte 2, each channel's nibble sitting at bits 8n+4..8n+7 before the shift below. Rows 0..8 hold weights 0..8; rows 9..17 (dword offset 0x900 = 9*256) hold the complementary weights. To keep the row index inside 0..8 the function folds alpha: for alpha <= 8 the constant colour reads row alpha and the source pixels read row 9+alpha; for alpha > 8 alpha is replaced by 16-alpha, the constant colour reads row 9+alpha' and the source pixels read row alpha'. Either way the constant colour ends up weighted by the caller's alpha and the source pixel by 16-alpha.
+The scaled constant colour is fetched once before the loops. For each pixel the scaled source colour is added to it, the sum is shifted right by 4 (dividing out the /16 of the weights) and masked with 0x000F0F0F, leaving 4 bits per channel: blue at bits 0..3, green at bits 8..11 and red at bits 16..19. Those are folded into a 12-bit index by (v & 0xFFFF) | (v >> 12), giving green in bits 8..11, red in bits 4..7 and blue in bits 0..3. That index selects a palette byte from the 4096-entry inverse-palette table inverse_palette_cube, which is stored to the destination.
 Rows advance by src_stride and dst_stride; no clipping, no transparency test, every pixel in the rectangle is written.
 
 Parameters:
-src         - source 8bpp pixels, top-left of the rectangle
-src_stride  - bytes to add to src per row
-dst         - destination 8bpp pixels, top-left of the rectangle
-dst_stride  - bytes to add to dst per row
-width       - pixels per row
-height      - number of rows
-blend_table - base of the [18][256] dword weighted-colour table
-rgb444_lut  - base of the 4096-entry packed-RGB to palette-index table
-tint_color  - palette index of the constant colour being blended in
-alpha       - blend weight of tint_color, 0..16 (0 = source only, 16 = tint only)
+src                  - source 8bpp pixels, top-left of the rectangle
+src_stride           - bytes to add to src per row
+dst                  - destination 8bpp pixels, top-left of the rectangle
+dst_stride           - bytes to add to dst per row
+width                - pixels per row
+height               - number of rows
+shade_ramp           - base of the [18][256] dword weighted-colour table
+inverse_palette_cube - base of the 4096-entry packed-RGB to palette-index table
+tint_color           - palette index of the constant colour being blended in
+alpha                - blend weight of tint_color, 0..16 (0 = source only, 16 = tint only)
 
 Returns:
 Nothing.
