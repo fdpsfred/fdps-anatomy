@@ -35,4 +35,27 @@
 extern void fdps_chapter_event_set_game_over(int unit_index);
 #pragma aux fdps_chapter_event_set_game_over "*" parm caller [];
 
+/* Chapter 2's turn-10 event: takes seven of the cave's enemies off the
+   hold-position behaviour the map deploys them in and puts them on the default
+   one, which paths a unit toward the nearest opposing unit.
+
+   It rewrites the low nibble -- the behaviour code -- of the ai_behavior byte
+   at record offset 0x34 to 0 for unit indices 8, 9, 0x0d, 0x11, 0x13, 0x14 and
+   0x15, and leaves the high nibble of that byte alone, because bits 0x40 and
+   0x80 of it are independent AI flags other code reads on their own.  The
+   seven indices are literals; nothing is range checked and
+   data_fdps_map_unit_count is not consulted, so the indices are only correct
+   against chapter 2's own deployment.  Each record is resolved through
+   fdps_get_unit_record per iteration, so the array base is re-read.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with 0 before anything else and never read, so
+   any index, in range or not, behaves the same.
+
+   Table slot 3, and chapter 2's map01.dat is the only shipped file that names
+   it -- one turn-event record, turn 10, so the event fires once per playthrough
+   of that chapter. */
+extern void fdps_chapter_02_event_enemies_advance(int unit_index);
+#pragma aux fdps_chapter_02_event_enemies_advance "*" parm caller [];
+
 #endif
