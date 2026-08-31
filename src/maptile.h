@@ -68,4 +68,22 @@ extern void fdps_map_set_pending_tile_event(int tile_x, int tile_y,
                                             int trigger_kind);
 #pragma aux fdps_map_set_pending_tile_event "*" parm caller [];
 
+/* Makes the trigger table, data_fdps_map_cell_event_triggered_flags
+   (gamedata.h), visible on the map.  It walks every cell of the loaded battle
+   map and, on each cell that is a searchable cell of kind 0x20 or 0x60 and
+   whose event code is already flagged in that table, bumps the cell's tile id
+   by one in the terrain layer and clears the cell's byte in the event-code
+   layer.  It takes no argument, returns nothing and reads its whole input from
+   globals.
+
+   Every writer of the table calls it straight after the write, and
+   fdps_load_savegame calls it once after refilling the whole table from the
+   slot: the table is the state that persists, and the two edits per cell are
+   the view of it.  Nothing here writes the table back.
+
+   Like the two above it dereferences the layer pointers without a null test,
+   and it walks the map with the terrain header's own width and height. */
+extern void fdps_map_apply_triggered_cell_changes(void);
+#pragma aux fdps_map_apply_triggered_cell_changes "*" parm caller [];
+
 #endif

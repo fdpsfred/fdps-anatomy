@@ -169,6 +169,27 @@ extern unsigned char data_fdps_map_tile_terrain_type;
 extern unsigned char data_fdps_map_tile_combat_backdrop_id;
 extern unsigned char data_fdps_map_current_move_grid_marker;
 
+/* 000640d8.  One byte per map-cell event code, non-zero once that code's event
+   has fired on the current map: the per-cell event state of the chapter, and
+   part of the savegame.
+
+   Thirty-two entries.  fdps_chapter_state_reset memsets 0x20 bytes of it when
+   a chapter starts (00022782), the save and load paths memmove the same 0x20
+   bytes to and from offset 0x30a3 of the slot (000151a6, 00024062), and the
+   next global begins at 000640f8.
+
+   It is indexed by a cell's raw event code and nothing in the image bounds that
+   index, so the declared size is the only thing keeping a read inside it.  The
+   code is a layer byte widened to 0..255 while the table is 32 entries; every
+   event plane in the shipped M%02d.DTL layers uses codes 0 to 15, so no read
+   reaches the neighbouring global (rebuild_info/pitfalls.md, contract B).
+
+   The writers each set one entry to 1 and then call
+   fdps_map_apply_triggered_cell_changes (src/maptile.h) to make the map show
+   it: the chest and search paths at 0001038b, 0001868b and 000188aa, the icon
+   script at 00021c8f and the chapter 30 wave event at 00039876. */
+extern unsigned char data_fdps_map_cell_event_triggered_flags[32];
+
 /* 00069d90.  Which chapter-event handler the battle loop still owes a call to:
    an index into the chapter-event handler pointer table at 000601c4, with 0xff
    meaning nothing is pending.

@@ -6,7 +6,11 @@
  * ADD EAX,0x11 for the attribute row, the four byte stores from +2, +0, +1 and
  * +3, MOV AL,byte ptr [EAX+1] on the grid cell, and MOV AL,byte ptr [EAX+0x10]
  * / XOR AH,AH on the event layer -- and from the record layouts ticket 17
- * settled.  None of them is read off the emitted C.
+ * settled.  None of them is read off the emitted C.  The cases for
+ * fdps_map_apply_triggered_cell_changes come the same way off 0002e910: the
+ * two IMULs that pick which width indexes which layer, the two equality tests
+ * on the masked attribute byte, INC word ptr on the tile id and the byte store
+ * that clears the event code.
  *
  * The four blocks are staged here rather than read from a game file: the
  * function takes its entire input from the four layer pointers, so pointing
@@ -369,6 +373,185 @@ static void entry_is_indexed_from_code_minus_one(void)
     CHECK_EQ(data_fdps_chapter_pending_event_idx, 0x33);
 }
 
+/* fdps_map_apply_triggered_cell_changes walks the whole map, so the staging
+   below adds the one header field the cases above never needed -- the terrain
+   layer's height at +9 -- and replaces the event codes with values the 32-entry
+   trigger table can hold.  stage() leaves the header filled with 0xaa, which is
+   -21846 as a height and would end the walk before its first row.
+
+   The map is 5 wide and 3 high, so the cells walked are terrain 0 through 14,
+   and the event layer keeps its own width of 3: cell (x, y) is terrain
+   y * 5 + x and event y * 3 + x, and the two indices differ from (1, 1) on.
+   Terrain cell c starts out holding tile id c, so the attribute row a cell
+   reaches is row c and one row can be aimed at one cell.
+
+   Event code at event index e is e + 1, never 0 and never above 12, and the
+   trigger table is flagged at the codes named below.  Which cells that leaves
+   acting, row by row, and why each of the others does not:
+
+     (0,0) c0  e0 code1  flags 0x20  code 1 not flagged   -- no
+     (1,0) c1  e1 code2  flags 0x2f  flagged              -- ACTS
+     (2,0) c2  e2 code3  flags 0xff  flagged              -- ACTS
+     (3,0) c3  e3 code4  flags 0x13  kind 0x00            -- no
+     (4,0) c4  e4 code5  flags 0x14  kind 0x00            -- no
+     (0,1) c5  e3 code4  flags 0x20  flagged              -- ACTS
+     (1,1) c6  e4 code5  flags 0x20  flagged              -- ACTS
+     (2,1) c7  e5 code6  flags 0x60  flagged              -- ACTS
+     (3,1) c8  e6 code7  flags 0x40  kind 0x40            -- no
+     (4,1) c9  e7 code8  flags 0x00  kind 0x00            -- no
+     (0,2) c10 e6 code7  flags 0x1a  kind 0x00            -- no
+     (1,2) c11 e7 code8  flags 0x1b  kind 0x00            -- no
+     (2,2) c12 e8 code9  flags 0x1c  kind 0x00            -- no
+     (3,2) c13 e9 code10 flags 0x1d  kind 0x00            -- no
+     (4,2) c14 e10 code11 flags 0x1e kind 0x00            -- no
+
+   Row 3 is outside the height and is loaded so that it would act if it were
+   ever reached: terrain cell 15 has attribute row 15 and event index 9.
+
+   0x2f and 0xff are there because the gate reads the 0x60 field and nothing
+   else: both are kind 0x20 with every other bit of the byte set one way or the
+   other. */
+#define TRIG_WIDTH  5
+#define TRIG_HEIGHT 3
+
+/* Attribute row r, byte 0 -- the flags the gate reads. */
+#define ATTR_FLAGS_OF(r) (ATTR_ROWS_AT + (r) * 4)
+
+/* Terrain cell c's tile id, and event cell e's code. */
+#define TILE_AT(c)  (*(short *) (stage_tile_map + TERRAIN_CELLS_AT + (c) * 2))
+#define EVENT_AT(e) (stage_event[EVENT_CELLS_AT + (e)])
+
+static void stage_triggers(void)
+{
+    int i;
+
+    stage();
+
+    *(short *) (stage_tile_map + 9) = (short) TRIG_HEIGHT;
+
+    for (i = 0; i < STAGE_CELLS; i++) {
+        EVENT_AT(i) = (unsigned char) (1 + i % 12);
+    }
+
+    for (i = 0; i < 32; i++) {
+        data_fdps_map_cell_event_triggered_flags[i] = 0;
+    }
+    data_fdps_map_cell_event_triggered_flags[2] = 1;
+    data_fdps_map_cell_event_triggered_flags[3] = 1;
+    data_fdps_map_cell_event_triggered_flags[4] = 1;
+    data_fdps_map_cell_event_triggered_flags[5] = 1;
+    data_fdps_map_cell_event_triggered_flags[6] = 1;
+    data_fdps_map_cell_event_triggered_flags[7] = 1;
+    data_fdps_map_cell_event_triggered_flags[8] = 1;
+    data_fdps_map_cell_event_triggered_flags[10] = 1;
+
+    stage_attr[ATTR_FLAGS_OF(0)] = 0x20;
+    stage_attr[ATTR_FLAGS_OF(1)] = 0x2f;
+    stage_attr[ATTR_FLAGS_OF(2)] = 0xff;
+    stage_attr[ATTR_FLAGS_OF(5)] = 0x20;
+    stage_attr[ATTR_FLAGS_OF(6)] = 0x20;
+    stage_attr[ATTR_FLAGS_OF(7)] = 0x60;
+    stage_attr[ATTR_FLAGS_OF(8)] = 0x40;
+    stage_attr[ATTR_FLAGS_OF(9)] = 0x00;
+    stage_attr[ATTR_FLAGS_OF(15)] = 0x20;
+}
+
+/* The five acting cells get both stores: INC word ptr [EAX] at 0002e9d8 on the
+   tile id, so cell c comes back holding c + 1, and MOV byte ptr [EAX+0x10],0x0
+   at 0002e9ed on the event byte the cell reached. */
+static void bumps_tile_and_clears_code_on_triggered_cells(void)
+{
+    stage_triggers();
+    fdps_map_apply_triggered_cell_changes();
+
+    CHECK_EQ(TILE_AT(1), 2);
+    CHECK_EQ(TILE_AT(2), 3);
+    CHECK_EQ(TILE_AT(5), 6);
+    CHECK_EQ(TILE_AT(6), 7);
+    CHECK_EQ(TILE_AT(7), 8);
+
+    CHECK_EQ(EVENT_AT(1), 0);
+    CHECK_EQ(EVENT_AT(2), 0);
+    CHECK_EQ(EVENT_AT(3), 0);
+    CHECK_EQ(EVENT_AT(4), 0);
+    CHECK_EQ(EVENT_AT(5), 0);
+}
+
+/* The three ways a cell fails the gate, each with the other half of the
+   condition satisfied so that only the tested half can be what stopped it.
+
+   Kind 0x40 is the case the two equality tests at 0002e9a1 and 0002e9a7 exist
+   for: it is flagged in the table and it is a non-zero 0x60 field, and it is
+   still left alone.  Kind 0x00 is flagged too.  Cell (0,0) is kind 0x20 and
+   fails only because code 1 is not flagged. */
+static void leaves_cells_that_fail_the_gate_alone(void)
+{
+    stage_triggers();
+    fdps_map_apply_triggered_cell_changes();
+
+    CHECK_EQ(TILE_AT(8), 8);
+    CHECK_EQ(EVENT_AT(6), 7);
+
+    CHECK_EQ(TILE_AT(9), 9);
+    CHECK_EQ(EVENT_AT(7), 8);
+
+    CHECK_EQ(TILE_AT(0), 0);
+    CHECK_EQ(EVENT_AT(0), 1);
+}
+
+/* Cell (1,1) is terrain cell 6 at the terrain width and event cell 4 at the
+   event layer's own width, and each store must use the width of the layer it
+   writes.  Both wrong pairings are visible: bumping at the event width would
+   hit terrain cell 4, clearing at the terrain width would hit event cell 6, and
+   both of those belong to cells that must come through unchanged. */
+static void indexes_each_layer_with_its_own_width(void)
+{
+    stage_triggers();
+    fdps_map_apply_triggered_cell_changes();
+
+    CHECK_EQ(TILE_AT(6), 7);
+    CHECK_EQ(TILE_AT(4), 4);
+
+    CHECK_EQ(EVENT_AT(4), 0);
+    CHECK_EQ(EVENT_AT(6), 7);
+}
+
+/* The walk is bounded by the terrain header's own width and height.
+
+   Terrain cell 5 is (0,1) and it acts once, so it comes back holding 6.  An x
+   loop that ran one column past the width would visit (5,0), which is the same
+   terrain cell 5 -- attribute row 5 is kind 0x20 and event cell 5 carries the
+   flagged code 6 -- and would leave it holding 7.
+
+   Row 3 is past the height and is the row that would act if it were walked:
+   terrain cell 15 would become 16 and event cell 9 would be cleared. */
+static void walks_only_the_header_width_and_height(void)
+{
+    stage_triggers();
+    fdps_map_apply_triggered_cell_changes();
+
+    CHECK_EQ(TILE_AT(5), 6);
+
+    CHECK_EQ(TILE_AT(15), 15);
+    CHECK_EQ(EVENT_AT(9), 10);
+}
+
+/* INC word ptr [EAX] increments two bytes and not four.  Terrain cell 2 acts,
+   and it is loaded with 0xffff first: a tile id of -1 reaches attribute row -1,
+   four bytes of the 0xaa header fill, whose byte 0 is kind 0x20, so the cell
+   still passes the gate.  The word wraps to 0 and cell 3, which does not act,
+   keeps its id; a 32-bit increment would carry into it and leave 4 there. */
+static void increments_the_tile_id_as_a_16_bit_word(void)
+{
+    stage_triggers();
+    TILE_AT(2) = (short) -1;
+
+    fdps_map_apply_triggered_cell_changes();
+
+    CHECK_EQ(TILE_AT(2), 0);
+    CHECK_EQ(TILE_AT(3), 3);
+}
+
 void run_maptile_tests(void)
 {
     RUN_TEST(reads_one_cell_from_each_layer);
@@ -381,4 +564,9 @@ void run_maptile_tests(void)
     RUN_TEST(searchable_cell_bits_suppress_the_event);
     RUN_TEST(event_code_zero_reads_no_entry);
     RUN_TEST(entry_is_indexed_from_code_minus_one);
+    RUN_TEST(bumps_tile_and_clears_code_on_triggered_cells);
+    RUN_TEST(leaves_cells_that_fail_the_gate_alone);
+    RUN_TEST(indexes_each_layer_with_its_own_width);
+    RUN_TEST(walks_only_the_header_width_and_height);
+    RUN_TEST(increments_the_tile_id_as_a_16_bit_word);
 }

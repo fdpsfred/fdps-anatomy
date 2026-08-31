@@ -779,6 +779,14 @@
       "status": "committed",
       "emitted_against": "0x1fc",
       "rounds": 0
+    },
+    "0002e910": {
+      "name": "fdps_map_apply_triggered_cell_changes",
+      "target": "maptile.c",
+      "body_size": "0xf2",
+      "status": "committed",
+      "emitted_against": "0xf2",
+      "rounds": 0
     }
   }
 }

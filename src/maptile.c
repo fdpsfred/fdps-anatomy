@@ -125,3 +125,73 @@ void fdps_map_set_pending_tile_event(int tile_x, int tile_y, int trigger_kind)
         data_fdps_chapter_pending_event_idx = (unsigned int) handler_index;
     }
 }
+
+/* 0002e910.  Two nested walks over the map, one call to the reader above per
+   cell, and two stores on the cells that pass the gate.  No argument is read,
+   nothing is returned and the epilogue purges nothing.
+
+   Five things here are behaviour rather than style.
+
+   The 0x60 field of the attribute byte is a four-value enumeration and not two
+   independent bits, which is how its other readers treat it:
+   fdps_map_find_chest_cell wants exactly 0x20 (CMP EAX,0x20 at 00013e84) and
+   fdps_battle_search_cell_at_cursor wants non-zero but not 0x60 (00018550 and
+   00018556).  This pass takes 0x20 and 0x60 and leaves 0x00 and 0x40 alone,
+   which the assembly spells as the two equality tests at 0002e9a1 and 0002e9a7
+   and which is written the same way below.  A single (kind & 0x20) test selects
+   the same two values out of the four the field can hold, so the two spellings
+   are equivalent (ADR-0001).
+
+   The two widths are two variables.  The tile id is bumped at the terrain
+   layer's width, from [EBP-0x10] (IMUL at 0002e9be), and the event-code byte is
+   cleared at the event layer's own width, from [EBP-8] (IMUL at 0002e9de).  The
+   two layers agree on a real map, so a rebuild that used one width for both
+   would pass a playthrough and still be a different program.
+
+   The bump is a 16-bit increment, INC word ptr [EAX] at 0002e9d8: a cell
+   holding 0xffff wraps to 0 and the neighbouring cell's id is untouched.
+
+   Both header dimensions are MOVSX and both loop bounds are JL, so a dimension
+   of 0xffff is -1 and the walk does nothing; read unsigned it would run 65535
+   rows off the end of the block.
+
+   The table index is the cell's event code with no bound test on it -- see
+   data_fdps_map_cell_event_triggered_flags in gamedata.h for why the shipped
+   maps keep it inside the 32 entries. */
+void fdps_map_apply_triggered_cell_changes(void)
+{
+    struct fdps_map_cell_code_layer *event_layer;
+    short *tile_cell;
+    int map_width;
+    int map_height;
+    int event_layer_width;
+    int searchable_kind;
+    int cell_event_code;
+    int tile_x;
+    int tile_y;
+
+    map_width = (int) *(short *) (data_fdps_scene_layer_tile_map_ptrs[0] + 7);
+    map_height = (int) *(short *) (data_fdps_scene_layer_tile_map_ptrs[0] + 9);
+    event_layer = (struct fdps_map_cell_code_layer *)
+                  data_fdps_map_cell_event_code_layer_ptr;
+    event_layer_width = (int) event_layer->width;
+
+    for (tile_y = 0; tile_y < map_height; tile_y++) {
+        for (tile_x = 0; tile_x < map_width; tile_x++) {
+            fdps_map_load_tile_info(tile_x, tile_y);
+
+            searchable_kind = data_fdps_map_current_tile_attr_flags & 0x60;
+            cell_event_code = data_fdps_map_current_cell_event_code;
+
+            if ((searchable_kind == 0x20 || searchable_kind == 0x60) &&
+                data_fdps_map_cell_event_triggered_flags[cell_event_code]
+                    != 0) {
+                tile_cell = (short *) (data_fdps_scene_layer_tile_map_ptrs[0] +
+                                       0xb +
+                                       2 * (tile_y * map_width + tile_x));
+                (*tile_cell)++;
+                event_layer->cells[tile_y * event_layer_width + tile_x] = 0;
+            }
+        }
+    }
+}
