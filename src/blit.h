@@ -263,4 +263,52 @@ extern void fdps_blit_blend_rect(unsigned char *fg, int fg_stride,
                                  int alpha);
 #pragma aux fdps_blit_blend_rect "*" parm caller [];
 
+/* The colour-keyed counterpart of fdps_blit_blend_rect: the same fold, the same
+   two ramp reads, the same blend and the same g:r:b cube index, with palette
+   index 0 keying the pixel out.  It is what draws a unit's gauge bar and the
+   floating experience number translucently over the surface underneath them --
+   fdps_draw_unit_gauge and fdps_unit_award_exp_and_level_up both pass one
+   address as bg and as dst, so the sprite is blended onto what it reads.
+
+   THE KEY IS READ FROM THE ORIGINAL fg, WHICH ABOVE ALPHA 8 IS NO LONGER THE
+   FOREGROUND.  This is the one thing this routine does that none of the other
+   five blend blits does, and it is invisible in the obvious rewrite.  fg and
+   fg_stride are copied aside before the fold; the fold then exchanges the two
+   rectangles and the two strides exactly as fdps_blit_blend_rect does, and the
+   inner loop keys on the SAVED pointer -- so for alpha > 8 the mask is the
+   rectangle the blend is reading as its background.  Testing the post-swap fg
+   instead keys on the wrong rectangle for the whole upper half of the alpha
+   range, which paints the sprite's transparent pixels; the callers ramp alpha
+   across 8 while the same sprite is on screen, so it shows.
+
+   THE MASK HAS ITS OWN STRIDE AS WELL AS ITS OWN POINTER.  It is advanced by
+   the ORIGINAL fg_stride at the end of every row, which above the fold differs
+   from the stride fg is being walked by.  Keeping the saved pointer but
+   advancing it with fg agrees for a single row and diverges from the second on,
+   and the two callers' pitches genuinely differ -- 0x2b and 0x28 for the source
+   graphics against 0x140 or 0x168 for the pages.
+
+   THE KEY SKIPS THE BLEND, NOT JUST THE STORE, and it is the only test in the
+   loop: a masked-out column costs neither ramp read, and the pixel underneath
+   survives.  bg is not keyed -- a background pixel of 0 is blended and stored
+   like any other.
+
+   THE ROW ADVANCE IS OUTSIDE THE KEY.  All four cursors step at the end of
+   every row whether or not any pixel in it survived.
+
+   Everything the paragraphs on fdps_blit_tint_rect and fdps_blit_blend_rect say
+   about the shared machinery holds here unchanged: the ramp is read at rows
+   alpha and 9 + alpha and never at 16 - alpha, the cube index is g:r:b and not
+   r:g:b, both source bytes are zero-extended so 0xff is entry 255 of its row,
+   and width, height and alpha are all signed.  Nothing is clipped and no extent
+   is checked against any of the four surfaces. */
+extern void fdps_blit_blend_transparent_rect(unsigned char *fg, int fg_stride,
+                                             unsigned char *bg, int bg_stride,
+                                             unsigned char *dst, int dst_stride,
+                                             int width, int height,
+                                             unsigned int *shade_ramp,
+                                             unsigned char *inverse_palette_cube,
+                                             int alpha);
+#pragma aux fdps_blit_blend_transparent_rect "*" parm caller [];
+
 #endif

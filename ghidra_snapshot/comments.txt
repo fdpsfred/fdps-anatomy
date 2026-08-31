@@ -7797,7 +7797,7 @@ Algorithm:
 4. For each row y < height, for each column x < width: leaves dst[x] untouched when the mask byte at that column is 0; otherwise adds the row-alpha entry for src[x] to the row-alpha+9 entry for back[x], shifts the sum right by 4 and masks 0x0f0f0f, which leaves the three blended 4-bit channels one per byte with no carry between them, folds them into the 12-bit key green<<8 | red<<4 | blue, and stores inverse_palette[key] into dst[x].
 5. At the end of each row advances src, back and dst by their own pitches, and the mask pointer by the original src pitch.
 
-This is the index-0-transparent member of the blend pair; fdps_blit_blend_rects at 00030230 is the same blend with no mask test.
+This is the index-0-transparent member of the blend pair; fdps_blit_blend_rect at 00030230 is the same blend with no mask test.
 
 Both callers, fdps_draw_unit_gauge and fdps_unit_award_exp_and_level_up, pass the same pointer for back and for dst, so the visible effect is a translucent sprite drawn onto the surface it reads through.
 

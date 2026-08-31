@@ -2172,6 +2172,460 @@ static void the_background_may_be_the_destination_in_place(void)
     CHECK_EQ(blend_bg_byte(1), blend_pair_byte(2, 5));
 }
 
+/* ------------------------------------------------------------------
+ * fdps_blit_blend_transparent_rect -- 00030360
+ *
+ * The blend fixtures above are reused unchanged: the arithmetic, the fold and
+ * the cube index are fdps_blit_blend_rect's, so the cases below spend their
+ * effort on the one thing that is not -- the key, which reads a fourth cursor
+ * with its own pointer and its own stride saved from the fg arguments BEFORE
+ * the fold at 0003036c and 00030372.
+ *
+ * WHY THE PAIR TABLE IS PARAMETERISED BY ROW HERE.  prepare_blend_pair above
+ * marks rows 0 and 9, which is what alpha 0 reads.  Several cases below have to
+ * cross the fold, where the rows are alpha' and 9 + alpha' for the folded
+ * alpha', so prepare_keyed_blend_pair takes the row.  It marks the same
+ * fg << 20 / bg << 4 pattern, so blend_pair_byte still names BOTH pixels that
+ * met at a destination byte and a case can say which rectangle was read as the
+ * foreground rather than only that something arrived.
+ *
+ * Expected values come from the assembly: CMP byte ptr [EAX],0x0 / JZ at
+ * 00030406 reading [EBP-0x4] + column for the key, ADD [EBP-0x4],[EBP-0x10] at
+ * 00030488 for the mask's own advance, CMP [EBP+0x3c],0x8 / JLE at 00030378 for
+ * the signed fold, and the 0x2400 byte displacement at 00030437 for the nine
+ * rows.  The cube indices 0x537, 0xaf3 and 0x213 are the ones the shift, mask
+ * and fold produce from the sums, worked out in the fdps_blit_blend_rect
+ * section's header above.
+ * ------------------------------------------------------------------ */
+
+static void prepare_keyed_blend_pair(int weight_row)
+{
+    int fg_pixel;
+    int bg_pixel;
+
+    prepare_blend();
+
+    for (fg_pixel = 0; fg_pixel < BLEND_PAIR_LIMIT; fg_pixel++) {
+        set_blend_ramp(weight_row, fg_pixel, (unsigned int) fg_pixel << 20);
+        set_blend_ramp(weight_row + 9, fg_pixel, (unsigned int) fg_pixel << 4);
+    }
+
+    for (fg_pixel = 0; fg_pixel < BLEND_PAIR_LIMIT; fg_pixel++) {
+        for (bg_pixel = 0; bg_pixel < BLEND_PAIR_LIMIT; bg_pixel++) {
+            blend_cube[blend_pair_index(fg_pixel, bg_pixel)] =
+                (unsigned char) blend_pair_byte(fg_pixel, bg_pixel);
+        }
+    }
+}
+
+/* alpha 3 fails nothing, so no swap: the foreground term is row 3.  Row 12
+   carries a decoy for the same entry, which is what a routine that took the
+   foreground term from the complementary block would reach. */
+static void keyed_blend_foreground_is_read_from_the_alpha_row(void)
+{
+    prepare_blend();
+    blend_fg[0] = 0x11;
+    set_blend_ramp(3, 0x11, 0x00305070);
+    set_blend_ramp(12, 0x11, 0x00f5a73b);
+    blend_cube[0x537] = 0x2a;
+    blend_cube[0xaf3] = 0x2b;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 1, blend_ramp,
+                                     blend_cube, 3);
+
+    CHECK_EQ(blend_dst_byte(0), 0x2a);
+}
+
+/* MOV EAX,[EAX+0x2400] at 00030437 is a byte displacement applied after the
+   LEA EAX,[EAX*0x4+0x0], so it is 0x900 entries and lands nine rows on.  The
+   foreground byte is 1, whose entry in row 3 is zero, so the sum is the
+   background term alone; the decoy sits at row 3 for the same entry. */
+static void keyed_blend_background_is_read_nine_rows_past_the_alpha_row(void)
+{
+    prepare_blend();
+    blend_fg[0] = 1;
+    blend_bg[0] = 0x22;
+    set_blend_ramp(12, 0x22, 0x00305070);
+    set_blend_ramp(3, 0x22, 0x00f5a73b);
+    blend_cube[0x537] = 0x3b;
+    blend_cube[0xaf3] = 0x3c;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 1, blend_ramp,
+                                     blend_cube, 3);
+
+    CHECK_EQ(blend_dst_byte(0), 0x3b);
+}
+
+/* THE CASE THE WHOLE ROUTINE TURNS ON.  alpha 12 takes the swap, so the
+   rectangle handed over as bg is read as the foreground -- but the key still
+   reads the rectangle handed over as fg, saved at 00030372 before the swap.
+   The two rectangles are keyed opposite ways round: fg is 0 at column 0 and 3
+   at column 1, bg is 5 at column 0 and 0 at column 1.  Keying on the saved
+   pointer suppresses column 0 and writes column 1; keying on the post-swap
+   foreground does exactly the reverse and lands 0x90 at column 0, so the two
+   readings cannot both pass. */
+static void the_key_reads_the_original_foreground_not_the_swapped_one(void)
+{
+    prepare_keyed_blend_pair(4);
+
+    blend_fg[0] = 0;
+    blend_fg[1] = 3;
+    blend_bg[0] = 5;
+    blend_bg[1] = 0;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 2, 1, blend_ramp,
+                                     blend_cube, 12);
+
+    CHECK_EQ(blend_dst_byte(0), BLEND_DST_GUARD);
+    CHECK_EQ(blend_dst_byte(1), blend_pair_byte(0, 3));
+}
+
+/* ADD [EBP-0x4],[EBP-0x10] at 00030488 advances the mask by the stride saved at
+   0003036c, which above the fold is not the stride fg is walking by.  alpha 12
+   swaps, so the foreground cursor moves by 10 and the mask by 16.  Row 1 of the
+   mask is zero at offset 16 and 7 at offset 10, so a mask advanced by the
+   swapped stride finds a live pixel where the original finds none. */
+static void the_key_cursor_advances_by_the_original_foreground_stride(void)
+{
+    prepare_keyed_blend_pair(4);
+
+    blend_fg[0] = 1;
+    blend_fg[BLEND_FG_PITCH] = 0;
+    blend_fg[BLEND_BG_PITCH] = 7;
+
+    blend_bg[0] = 2;
+    blend_bg[BLEND_BG_PITCH] = 4;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 2, blend_ramp,
+                                     blend_cube, 12);
+
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(2, 1));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH), BLEND_DST_GUARD);
+}
+
+/* The fold itself, with the key out of the way: alpha 12 becomes 4 and the two
+   rectangles change places, so the pixel that arrived as bg is read from row 4
+   and the one that arrived as fg from row 13.  A routine that folded alpha but
+   left the rectangles alone reaches blend_pair_byte(3, 5) instead. */
+static void keyed_blend_alpha_above_eight_swaps_the_two_sources(void)
+{
+    prepare_keyed_blend_pair(4);
+
+    blend_fg[0] = 3;
+    blend_bg[0] = 5;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 1, blend_ramp,
+                                     blend_cube, 12);
+
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(5, 3));
+}
+
+/* JLE at 0003037c: alpha 8 takes the fall-through and reads rows 8 and 17 with
+   no swap, alpha 9 takes the fold to 7 and reads rows 7 and 16 with the two
+   rectangles exchanged.  The same two pixels therefore come out in the opposite
+   order across a single step of alpha, which is what a JL instead of a JLE
+   would move by one. */
+static void the_keyed_fold_turns_over_between_eight_and_nine(void)
+{
+    prepare_keyed_blend_pair(8);
+    blend_fg[0] = 3;
+    blend_bg[0] = 5;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 1, blend_ramp,
+                                     blend_cube, 8);
+
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(3, 5));
+
+    prepare_keyed_blend_pair(7);
+    blend_fg[0] = 3;
+    blend_bg[0] = 5;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 1, blend_ramp,
+                                     blend_cube, 9);
+
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(5, 3));
+}
+
+/* SAR EAX,0x4 at 00030446 then AND 0xf0f0f at 0003044c discard the low nibble
+   of every byte and everything above bit 19.  0x00f5a73b and 0x0ff5a730 differ
+   only in bits the pair throws away, so both must reach cube entry 0xaf3. */
+static void the_keyed_shift_and_mask_keep_one_nibble_per_channel(void)
+{
+    prepare_blend();
+    set_blend_ramp(0, 1, 0x00f5a73b);
+    set_blend_ramp(0, 2, 0x0ff5a730);
+    blend_cube[0xaf3] = 0x5d;
+
+    blend_fg[0] = 1;
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 1, blend_ramp,
+                                     blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), 0x5d);
+
+    memset(blend_dst, BLEND_DST_GUARD, (size_t) BLEND_DST_BYTES);
+    blend_fg[0] = 2;
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 1, blend_ramp,
+                                     blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), 0x5d);
+}
+
+/* AND EDX,0xffff at 00030456 with SAR EAX,0xc at 0003045f lands green above
+   red, so the packed colour 0x00102030 indexes 0x213 and not the 0x123 an r:g:b
+   cube would be read at.  Both entries are marked with different bytes. */
+static void the_keyed_index_transposes_the_middle_two_channels(void)
+{
+    prepare_blend();
+    set_blend_ramp(0, 1, 0x00102030);
+    blend_cube[0x213] = 0x6e;
+    blend_cube[0x123] = 0x6f;
+
+    blend_fg[0] = 1;
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 1, blend_ramp,
+                                     blend_cube, 0);
+
+    CHECK_EQ(blend_dst_byte(0), 0x6e);
+}
+
+/* XOR EAX,EAX / MOV AL,byte ptr [EDX] at 000303fb and 00030413 load both source
+   bytes zero-extended, so 0xff is entry 255 of its row and not the entry before
+   it.  The second half keys on a foreground byte of 1, whose row-0 entry is
+   zero, so only the background term reaches the sum. */
+static void the_keyed_source_pixels_are_zero_extended(void)
+{
+    prepare_blend();
+    blend_fg[0] = 0xff;
+    set_blend_ramp(0, 0xff, 0x00305070);
+    blend_cube[0x537] = 0x5f;
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 1, blend_ramp,
+                                     blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), 0x5f);
+
+    prepare_blend();
+    blend_fg[0] = 1;
+    blend_bg[0] = 0xff;
+    set_blend_ramp(9, 0xff, 0x00305070);
+    blend_cube[0x537] = 0x5e;
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 1, blend_ramp,
+                                     blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), 0x5e);
+}
+
+/* JZ 0x00030477 at 00030409 jumps over the second ramp read, the arithmetic and
+   the store alike, so the destination byte under a keyed-out column keeps its
+   guard.  The key is on the first rectangle only: column 1 has a background
+   pixel of 0 and is blended and stored like any other. */
+static void a_zero_key_byte_leaves_the_destination_byte_alone(void)
+{
+    prepare_keyed_blend_pair(0);
+
+    blend_fg[0] = 0;
+    blend_bg[0] = 5;
+    blend_fg[1] = 6;
+    blend_bg[1] = 0;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 2, 1, blend_ramp,
+                                     blend_cube, 0);
+
+    CHECK_EQ(blend_dst_byte(0), BLEND_DST_GUARD);
+    CHECK_EQ(blend_dst_byte(1), blend_pair_byte(6, 0));
+}
+
+/* Every surviving pixel of the rectangle and no byte outside it, with a
+   keyed-out column in each row so the geometry is checked with the key in play
+   rather than only on a solid rectangle. */
+static void every_surviving_pixel_of_the_keyed_rectangle_is_written(void)
+{
+    prepare_keyed_blend_pair(0);
+
+    blend_fg[0] = 1;
+    blend_fg[1] = 0;
+    blend_fg[2] = 3;
+    blend_fg[BLEND_FG_PITCH + 0] = 4;
+    blend_fg[BLEND_FG_PITCH + 1] = 5;
+    blend_fg[BLEND_FG_PITCH + 2] = 0;
+
+    blend_bg[0] = 7;
+    blend_bg[1] = 2;
+    blend_bg[2] = 1;
+    blend_bg[BLEND_BG_PITCH + 0] = 2;
+    blend_bg[BLEND_BG_PITCH + 1] = 3;
+    blend_bg[BLEND_BG_PITCH + 2] = 4;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 3, 2, blend_ramp,
+                                     blend_cube, 0);
+
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(1, 7));
+    CHECK_EQ(blend_dst_byte(1), BLEND_DST_GUARD);
+    CHECK_EQ(blend_dst_byte(2), blend_pair_byte(3, 1));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH + 0), blend_pair_byte(4, 2));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH + 1), blend_pair_byte(5, 3));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH + 2), BLEND_DST_GUARD);
+
+    CHECK_EQ(blend_dst_byte(3), BLEND_DST_GUARD);
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH * 2), BLEND_DST_GUARD);
+}
+
+/* 0003047c..00030494 add three different arguments to three different cursors,
+   with the mask's own advance between them.  Each array carries a 7 at the
+   offset one of the other pitches would have reached, so a cursor advanced by
+   the wrong stride lands on it.  alpha 0, so the mask and the foreground are
+   the same rectangle here and the case is about the other three. */
+static void the_keyed_strides_are_applied_to_their_own_cursors(void)
+{
+    prepare_keyed_blend_pair(0);
+
+    blend_fg[0] = 1;
+    blend_fg[BLEND_FG_PITCH] = 2;
+    blend_fg[BLEND_FG_PITCH * 2] = 3;
+    blend_fg[BLEND_BG_PITCH] = 7;
+    blend_fg[BLEND_BG_PITCH * 2] = 7;
+
+    blend_bg[0] = 4;
+    blend_bg[BLEND_BG_PITCH] = 5;
+    blend_bg[BLEND_BG_PITCH * 2] = 6;
+    blend_bg[BLEND_FG_PITCH] = 7;
+    blend_bg[BLEND_FG_PITCH * 2] = 7;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 3, blend_ramp,
+                                     blend_cube, 0);
+
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(1, 4));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH), blend_pair_byte(2, 5));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH * 2), blend_pair_byte(3, 6));
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH * 3), BLEND_DST_GUARD);
+}
+
+/* The four advances sit after the column loop and outside the key, so a row
+   whose every pixel was keyed out still steps all four cursors.  Row 0 here is
+   entirely keyed out; if the advances were inside the key, row 1 would read
+   column 0 of both rectangles again and write the first destination byte. */
+static void a_fully_keyed_out_row_still_advances_every_cursor(void)
+{
+    prepare_keyed_blend_pair(0);
+
+    blend_fg[0] = 0;
+    blend_fg[BLEND_FG_PITCH] = 2;
+    blend_bg[0] = 4;
+    blend_bg[BLEND_BG_PITCH] = 5;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 2, blend_ramp,
+                                     blend_cube, 0);
+
+    CHECK_EQ(blend_dst_byte(0), BLEND_DST_GUARD);
+    CHECK_EQ(blend_dst_byte(BLEND_DST_PITCH), blend_pair_byte(2, 5));
+}
+
+/* CMP EAX,[EBP+0x30] / JL at 000303c5 and CMP EAX,[EBP+0x2c] / JL at 000303e1
+   are signed, so either extent at 0 or below blends nothing at all.  Read as
+   unsigned, -1 would be four billion columns. */
+static void the_keyed_extents_are_signed_counts(void)
+{
+    prepare_keyed_blend_pair(0);
+    blend_fg[0] = 1;
+    blend_bg[0] = 4;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 0, 1, blend_ramp,
+                                     blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), BLEND_DST_GUARD);
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, -1, 1, blend_ramp,
+                                     blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), BLEND_DST_GUARD);
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 0, blend_ramp,
+                                     blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), BLEND_DST_GUARD);
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, -1, blend_ramp,
+                                     blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), BLEND_DST_GUARD);
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 1, blend_ramp,
+                                     blend_cube, 0);
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(1, 4));
+}
+
+/* CMP dword ptr [EBP+0x3c],0x8 / JLE at 00030378 is signed, so a negative alpha
+   takes no swap and indexes the ramp at a negative row.  The call hands over a
+   base one row in so that row -1 is row 0 of the array, and rows 0 and 9 are
+   the marked pair.  Read as unsigned, alpha would fold to 17 and read past the
+   end of the table. */
+static void the_keyed_alpha_is_a_signed_value(void)
+{
+    prepare_keyed_blend_pair(0);
+    blend_fg[0] = 5;
+    blend_bg[0] = 3;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_dst,
+                                     BLEND_DST_PITCH, 1, 1,
+                                     blend_ramp + BLEND_ROW_ENTRIES,
+                                     blend_cube, -1);
+
+    CHECK_EQ(blend_dst_byte(0), blend_pair_byte(5, 3));
+}
+
+/* Both callers pass one address as bg and as dst.  Each pixel is read and
+   stored before the next column is touched, so column 1 still sees the 5 that
+   was there rather than what column 0 has just written. */
+static void the_keyed_background_may_be_the_destination_in_place(void)
+{
+    prepare_keyed_blend_pair(0);
+
+    blend_fg[0] = 1;
+    blend_fg[1] = 2;
+    blend_bg[0] = 4;
+    blend_bg[1] = 5;
+
+    fdps_blit_blend_transparent_rect(blend_fg, BLEND_FG_PITCH, blend_bg,
+                                     BLEND_BG_PITCH, blend_bg, BLEND_BG_PITCH,
+                                     2, 1, blend_ramp, blend_cube, 0);
+
+    CHECK_EQ(blend_bg_byte(0), blend_pair_byte(1, 4));
+    CHECK_EQ(blend_bg_byte(1), blend_pair_byte(2, 5));
+}
+
 void run_blit_tests(void)
 {
     RUN_TEST(pitch_four_paints_a_three_by_three_square);
@@ -2252,4 +2706,21 @@ void run_blit_tests(void)
     RUN_TEST(the_blend_extents_are_signed_counts);
     RUN_TEST(the_blend_alpha_is_a_signed_value);
     RUN_TEST(the_background_may_be_the_destination_in_place);
+
+    RUN_TEST(keyed_blend_foreground_is_read_from_the_alpha_row);
+    RUN_TEST(keyed_blend_background_is_read_nine_rows_past_the_alpha_row);
+    RUN_TEST(the_key_reads_the_original_foreground_not_the_swapped_one);
+    RUN_TEST(the_key_cursor_advances_by_the_original_foreground_stride);
+    RUN_TEST(keyed_blend_alpha_above_eight_swaps_the_two_sources);
+    RUN_TEST(the_keyed_fold_turns_over_between_eight_and_nine);
+    RUN_TEST(the_keyed_shift_and_mask_keep_one_nibble_per_channel);
+    RUN_TEST(the_keyed_index_transposes_the_middle_two_channels);
+    RUN_TEST(the_keyed_source_pixels_are_zero_extended);
+    RUN_TEST(a_zero_key_byte_leaves_the_destination_byte_alone);
+    RUN_TEST(every_surviving_pixel_of_the_keyed_rectangle_is_written);
+    RUN_TEST(the_keyed_strides_are_applied_to_their_own_cursors);
+    RUN_TEST(a_fully_keyed_out_row_still_advances_every_cursor);
+    RUN_TEST(the_keyed_extents_are_signed_counts);
+    RUN_TEST(the_keyed_alpha_is_a_signed_value);
+    RUN_TEST(the_keyed_background_may_be_the_destination_in_place);
 }

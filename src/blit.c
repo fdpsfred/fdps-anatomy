@@ -557,3 +557,124 @@ void fdps_blit_blend_rect(unsigned char *fg, int fg_stride, unsigned char *bg,
         dst += dst_stride;
     }
 }
+
+/* 00030360.  fdps_blit_blend_rect at 00030230 with one test added inside the
+   inner loop -- and the whole difficulty of the routine is that the test does
+   not read the rectangle the blend reads.
+
+   THE KEY IS THE ORIGINAL FIRST RECTANGLE, NOT THE POST-SWAP FOREGROUND.  The
+   two instructions before the fold are MOV EAX,[EBP+0x18] / MOV [EBP-0x10],EAX
+   at 0003036c and MOV EAX,[EBP+0x14] / MOV [EBP-0x4],EAX at 00030372: the
+   stride first, then the pointer, both taken from the fg arguments while they
+   still hold what the caller passed.  Those two slots are what the inner loop
+   reads at 00030400 (MOV EAX,[EBP-0x4] / ADD EAX,[EBP-0x1c] / CMP byte ptr
+   [EAX],0x0 / JZ) and what the row advance steps at 00030488 (ADD [EBP-0x4],
+   [EBP-0x10]).  Neither is touched by the swap at 0003037e..000303a2, which
+   exchanges only the argument slots.
+
+   So the mask is a FOURTH cursor with its own pointer and its own stride, and
+   for every alpha above 8 it is the rectangle that is being read as the
+   BACKGROUND term by then.  Writing the obvious form -- swap the two operands,
+   then test fg[column] -- keys on the background instead of the sprite, and the
+   sprite's transparent pixels come out painted.  That path is live:
+   fdps_unit_award_exp_and_level_up feeds alpha = n / 3 + 8, which crosses 8 as
+   the floating experience number ramps up, so the same sprite is drawn keyed
+   correctly below the crossing and wrongly above it.
+
+   THE MASK STRIDE IS THE ORIGINAL FOREGROUND STRIDE TOO.  ADD [EBP-0x4],
+   [EBP-0x10] adds the saved stride, not the possibly-swapped [EBP+0x18], so
+   above the fold the mask walks by the sprite's pitch while the foreground
+   cursor walks by the background's.  Keeping the mask pointer but letting it
+   advance with fg agrees for one row and diverges from the second on, and the
+   callers' pitches do differ: fdps_draw_unit_gauge passes 0x2b for the gauge
+   sheet against the page's own pitch, fdps_unit_award_exp_and_level_up 0x28
+   against 0x168.
+
+   Everything else is the sibling's, instruction for instruction.  CMP dword ptr
+   [EBP+0x3c],0x8 / JLE at 00030378 is the signed fold and it exchanges both the
+   pointers (0003037e..0003038d) and the strides (00030390..0003039f) before
+   MOV EAX,0x10 / SUB EAX,[EBP+0x3c] rewrites alpha.  SHL EAX,0xa at 000303b0
+   scales the folded alpha into the byte offset of its ramp row and [EBP-0xc]
+   holds that base for the whole run; 0003041b LEA EAX,[EAX*0x4+0x0] reads the
+   foreground entry at offset 0 and 00030437 MOV EAX,[EAX+0x2400] the background
+   entry nine rows on, 0x2400 being a byte displacement applied after the scale.
+   Both loop tests are signed -- CMP EAX,[EBP+0x30] / JL at 000303c5 for the rows
+   and CMP EAX,[EBP+0x2c] / JL at 000303e1 for the columns.
+
+   THE FOREGROUND PIXEL IS FETCHED BEFORE THE KEY IS TESTED.  000303f3..000303fd
+   load fg[column] zero-extended, and only then does 00030406 test the mask; the
+   background pixel at 0003040b is inside the branch.  Nothing observable turns
+   on it -- the load has no side effect -- but it is what the original does and
+   it is why a fully keyed-out row still touches the foreground rectangle.
+
+   SAR EAX,0x4 at 00030446 and SAR EAX,0xc at 0003045f are arithmetic while the
+   entries are unsigned here, and as everywhere else in this family no operand
+   can tell the two apart: the AND 0xf0f0f between them keeps only bits 0..19,
+   and a ramp entry is one nibble per byte times a weight of at most 16, so no
+   byte of the sum exceeds 0xf0 and bits 24..31 are always clear.
+
+   The three remaining row advances at 0003047c..00030494 add each stride to its
+   own argument slot, and all four sit outside the key, so a row with no
+   surviving pixel still steps every cursor.  Nothing is clipped and no extent is
+   checked against any of the four surfaces. */
+void fdps_blit_blend_transparent_rect(unsigned char *fg, int fg_stride,
+                                      unsigned char *bg, int bg_stride,
+                                      unsigned char *dst, int dst_stride,
+                                      int width, int height,
+                                      unsigned int *shade_ramp,
+                                      unsigned char *inverse_palette_cube,
+                                      int alpha)
+{
+    unsigned char *mask_row;
+    int mask_stride;
+    unsigned char *swapped_source;
+    int swapped_stride;
+    unsigned int *weight_row;
+    int foreground_pixel;
+    int background_pixel;
+    unsigned int blended;
+    unsigned int cube_index;
+    int row;
+    int column;
+
+    /* Saved before the fold, in this order, and never swapped: these two are
+       the key's own cursor for the whole run. */
+    mask_stride = fg_stride;
+    mask_row = fg;
+
+    if (alpha > 8) {
+        swapped_source = fg;
+        fg = bg;
+        bg = swapped_source;
+
+        swapped_stride = fg_stride;
+        fg_stride = bg_stride;
+        bg_stride = swapped_stride;
+
+        alpha = 16 - alpha;
+    }
+
+    weight_row = shade_ramp + alpha * SHADE_RAMP_ROW_ENTRIES;
+
+    for (row = 0; row < height; row++) {
+        for (column = 0; column < width; column++) {
+            foreground_pixel = (int) fg[column];
+
+            if (mask_row[column] != 0) {
+                background_pixel = (int) bg[column];
+
+                blended = (weight_row[foreground_pixel]
+                           + weight_row[background_pixel
+                                        + SHADE_RAMP_COMPLEMENT_ROWS]) >> 4;
+                blended &= 0x000f0f0fu;
+                cube_index = (blended & 0xffffu) | (blended >> 12);
+                dst[column] = inverse_palette_cube[cube_index];
+            }
+        }
+
+        fg += fg_stride;
+        bg += bg_stride;
+        mask_row += mask_stride;
+        dst += dst_stride;
+    }
+}
