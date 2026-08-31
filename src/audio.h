@@ -25,6 +25,18 @@ extern void *data_fdps_audio_sample_handle_table[SFX_SAMPLE_SLOT_COUNT];
    fdps_audio_stop_sample ever passes. */
 #define SFX_STOP_ALL_SLOTS (-1)
 
+/* The answer a voice allocator gives when it has no slot to give: not an index
+   into the table above, and the only negative value any of them returns. */
+#define SFX_NO_SAMPLE_SLOT (-1)
+
+/* 00069d5c.  The rate, in samples per second, that fdps_audio_start_sample
+   hands AIL for every block it starts.  It is a single global rather than a
+   per-clip figure because that function is given raw PCM and no header to read
+   a rate out of; fdps_audio_set_sample_playback_rate@00030810 is what writes
+   it.  Nothing in the shipped image calls either of the two, so the slot holds
+   its BSS zero for the whole of a real session. */
+extern int data_fdps_audio_sample_playback_rate;
+
 /* 00069d71.  Set when the DIG driver installed successfully at start-up, so
    that "the user wants sound effects" (data_fdps_audio_sfx_enabled_flag, in
    gamedata.h) and "there is anything to play them on" stay separate answers.
@@ -60,5 +72,21 @@ extern void fdps_audio_shutdown(void);
    that is the vendor's job, not this function's. */
 extern void fdps_audio_stop_sample(int sample_index);
 #pragma aux fdps_audio_stop_sample "*" parm caller [];
+
+/* Starts the raw PCM block at `pcm_data`, `pcm_len` bytes long, on the first of
+   the eight sample handles that is not already playing, and answers with the
+   slot it used or SFX_NO_SAMPLE_SLOT when it started nothing -- the DIG driver
+   is absent, sound effects are switched off, or all eight voices are busy.
+   `loop_count` goes to AIL unchanged: 1 plays the block once, 0 loops it for
+   ever.
+
+   Unlike fdps_sfx_play this one is handed the samples themselves, not a
+   container to find them in: no header of any kind is parsed, so neither the
+   format nor the volume is set and the block plays in whatever the handle was
+   left holding.  The rate is the global above rather than anything derived from
+   the block.  Nothing in the shipped image calls it. */
+extern int fdps_audio_start_sample(void *pcm_data, unsigned int pcm_len,
+                                   unsigned int loop_count);
+#pragma aux fdps_audio_start_sample "*" parm caller [];
 
 #endif

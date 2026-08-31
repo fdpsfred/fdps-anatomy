@@ -638,6 +638,232 @@ static void a_slot_that_is_not_playing_is_left_as_it_stands(void)
     CHECK_EQ(stop_status(7), STATUS_STOPPED);
 }
 
+/* ---- fdps_audio_start_sample @ 00030630 ----------------------------------
+ *
+ * Expected values come from 00030630 -- the two CMP byte ptr
+ * [0x00069d71]/[0x00069d70] guards onto the shared -1, the CMP dword ptr
+ * [EBP-0x8],0x8 / JL scan bound with CMP EAX,0x4 on what AIL_sample_status
+ * returned, the PUSH order of the five AIL calls between 000306b0 and 00030722,
+ * PUSH dword ptr [0x00069d5c] at 000306f4, and MOV EAX,dword ptr [EBP-0x8] at
+ * 0003072a for the answer -- and from AIL_init_sample's worker at 000471e0,
+ * which is what decides whether a field the function never writes can be told
+ * apart from one it does:
+ *
+ *   +0x04 status      2      +0x30 loop count 1
+ *   +0x08 address     0      +0x34 format     0
+ *   +0x10 length      0      +0x38 flags      0
+ *   +0x3c rate    0x2b11     +0x40 volume     the library's master volume
+ *
+ * So a loop count of 1 and a rate of 11025 are AIL's own defaults and prove
+ * nothing; every case below picks values that are not them.  The volume is the
+ * one default with no fixed number, and it is compared against a second handle
+ * that only AIL_init_sample has touched rather than against a literal.
+ *
+ * The block is a plain byte array because that is exactly what the function
+ * takes -- it parses no header and does no arithmetic on the pointer, which is
+ * what separates it from fdps_sfx_play above.
+ */
+#define AIL_DEFAULT_RATE 0x2b11 /* 11025 */
+#define AIL_DEFAULT_LOOP_COUNT 1
+#define START_TEST_RATE 22050
+#define PCM_BLOCK_SIZE 0x40
+#define PCM_TEST_LENGTH 0x2d
+#define PCM_TEST_LOOPS 3
+
+static unsigned char pcm_block[PCM_BLOCK_SIZE];
+
+/* A handle that has been through AIL_init_sample and nothing else, so that a
+   field this function leaves alone can be checked against what the library
+   itself put there. */
+static unsigned int init_only_sample[SAMPLE_WORDS];
+
+static void stage_init_only_sample(void)
+{
+    int i;
+
+    for (i = 0; i < SAMPLE_WORDS; i++) {
+        init_only_sample[i] = 0;
+    }
+    init_only_sample[SAMPLE_DRIVER / 4] = (unsigned int) fake_driver;
+    AIL_init_sample(init_only_sample);
+}
+
+/* Both flags open, one free slot, a rate in the global that is not AIL's
+   default, and a block whose bytes are distinguishable from zero. */
+static void stage_start_ready(int free_slot)
+{
+    int i;
+
+    stage_slots(free_slot);
+    data_fdps_audio_sfx_driver_available_flag = 1;
+    data_fdps_audio_sfx_enabled_flag = 1;
+    data_fdps_audio_sample_playback_rate = START_TEST_RATE;
+    for (i = 0; i < PCM_BLOCK_SIZE; i++) {
+        pcm_block[i] = (unsigned char) (i + 1);
+    }
+}
+
+/* The premise the cases below rest on, checked against the linked library
+   rather than assumed: the values AIL_init_sample leaves behind are the ones
+   every assertion has to be distinguishable from, so a loop count of 3 or 0 and
+   a rate of 22050, 8000 or 0 say something and a loop count of 1 or a rate of
+   11025 would not. */
+static void ail_init_sample_leaves_its_own_defaults(void)
+{
+    stage_start_ready(0);
+    stage_init_only_sample();
+    CHECK_EQ(sample_field(init_only_sample, SAMPLE_STATUS), STATUS_DONE);
+    CHECK_EQ(sample_field(init_only_sample, SAMPLE_RATE), AIL_DEFAULT_RATE);
+    CHECK_EQ(sample_field(init_only_sample, SAMPLE_LOOP_COUNT),
+             AIL_DEFAULT_LOOP_COUNT);
+    CHECK_EQ(sample_field(init_only_sample, SAMPLE_FORMAT), 0);
+    CHECK_EQ(sample_field(init_only_sample, SAMPLE_FLAGS), 0);
+    CHECK_EQ(sample_field(init_only_sample, SAMPLE_ADDRESS), 0);
+}
+
+/* The whole started-a-voice path: the scan skips the two playing slots, the
+   answer is the slot it stopped on, and all four arguments AIL was given are
+   read back out of that handle.  Status 4 is AIL_start_sample's own write at
+   00047423, so it is what says the last of the five calls happened. */
+static void start_sample_claims_the_first_free_slot(void)
+{
+    stage_start_ready(2);
+    CHECK_EQ(fdps_audio_start_sample(pcm_block, PCM_TEST_LENGTH,
+                                     PCM_TEST_LOOPS), 2);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_ADDRESS),
+             (unsigned int) pcm_block);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LENGTH), PCM_TEST_LENGTH);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LOOP_COUNT), PCM_TEST_LOOPS);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), START_TEST_RATE);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_STATUS), STATUS_PLAYING);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_ADDRESS), 0);
+}
+
+/* The scan runs 0..7, so the answer can be the last slot as readily as the
+   first.  Both ends are asserted because the bound and the base are separate
+   mistakes. */
+static void start_sample_reaches_both_ends_of_the_table(void)
+{
+    stage_start_ready(0);
+    CHECK_EQ(fdps_audio_start_sample(pcm_block, PCM_TEST_LENGTH,
+                                     PCM_TEST_LOOPS), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LENGTH), PCM_TEST_LENGTH);
+
+    stage_start_ready(SFX_SAMPLE_SLOT_COUNT - 1);
+    CHECK_EQ(fdps_audio_start_sample(pcm_block, PCM_TEST_LENGTH,
+                                     PCM_TEST_LOOPS),
+             SFX_SAMPLE_SLOT_COUNT - 1);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LENGTH), PCM_TEST_LENGTH);
+}
+
+/* All eight playing: -1, and nothing handed to AIL.  A scan whose compare went
+   the other way would claim slot 0 and the busy handle would come back holding
+   the block and AIL's default rate. */
+static void start_sample_with_every_voice_busy_answers_minus_one(void)
+{
+    stage_start_ready(-1);
+    CHECK_EQ(fdps_audio_start_sample(pcm_block, PCM_TEST_LENGTH,
+                                     PCM_TEST_LOOPS), SFX_NO_SAMPLE_SLOT);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_ADDRESS), 0);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_LENGTH), 0);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_RATE), 0);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_STATUS), STATUS_PLAYING);
+}
+
+/* Either flag clear is the same -1 as a full table, and it is returned before
+   anything is touched: a free handle that had been through AIL_init_sample
+   would read 0x2b11 at +0x3c, so a rate still at zero is what says the function
+   left without calling anything at all. */
+static void start_sample_needs_both_audio_flags(void)
+{
+    stage_start_ready(0);
+    data_fdps_audio_sfx_enabled_flag = 0;
+    CHECK_EQ(fdps_audio_start_sample(pcm_block, PCM_TEST_LENGTH,
+                                     PCM_TEST_LOOPS), SFX_NO_SAMPLE_SLOT);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_ADDRESS), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), 0);
+
+    stage_start_ready(0);
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    CHECK_EQ(fdps_audio_start_sample(pcm_block, PCM_TEST_LENGTH,
+                                     PCM_TEST_LOOPS), SFX_NO_SAMPLE_SLOT);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_ADDRESS), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), 0);
+
+    stage_start_ready(0);
+    data_fdps_audio_sfx_enabled_flag = 0;
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    CHECK_EQ(fdps_audio_start_sample(pcm_block, PCM_TEST_LENGTH,
+                                     PCM_TEST_LOOPS), SFX_NO_SAMPLE_SLOT);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_ADDRESS), 0);
+}
+
+/* PUSH dword ptr [EBP+0x14] with no arithmetic on it: the pointer reaches AIL
+   as it was passed, and the length is the caller's number and not the block's
+   size.  A pointer eight bytes into the block is what tells this apart from
+   fdps_sfx_play, which adds 8 to step over a .SAF item header. */
+static void start_sample_forwards_the_block_unchanged(void)
+{
+    stage_start_ready(0);
+    CHECK_EQ(fdps_audio_start_sample(pcm_block + 8, 1, PCM_TEST_LOOPS), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_ADDRESS),
+             (unsigned int) (pcm_block + 8));
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LENGTH), 1);
+}
+
+/* The loop count is the caller's, forwarded unchanged.  Three is not AIL's
+   default of 1, and zero -- Miles' "loop for ever" -- is the value an
+   implementation that quietly substituted the default would lose. */
+static void start_sample_forwards_the_loop_count(void)
+{
+    stage_start_ready(0);
+    CHECK_EQ(fdps_audio_start_sample(pcm_block, PCM_TEST_LENGTH, 3), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LOOP_COUNT), 3);
+
+    stage_start_ready(0);
+    CHECK_EQ(fdps_audio_start_sample(pcm_block, PCM_TEST_LENGTH, 0), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LOOP_COUNT), 0);
+}
+
+/* The rate is the global at 00069d5c and nothing else: it is read on every
+   call, so a later value replaces an earlier one, and it is pushed
+   unconditionally -- the worker at 00047310 writes +0x3c without testing it --
+   so a zero global is a zero rate rather than AIL's 0x2b11 default.  That case
+   is not hypothetical: nothing in the shipped image ever writes the global, so
+   zero is what a real session would hand over. */
+static void start_sample_rate_comes_from_the_global(void)
+{
+    stage_start_ready(0);
+    data_fdps_audio_sample_playback_rate = 8000;
+    CHECK_EQ(fdps_audio_start_sample(pcm_block, PCM_TEST_LENGTH,
+                                     PCM_TEST_LOOPS), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), 8000);
+
+    stage_start_ready(0);
+    data_fdps_audio_sample_playback_rate = 0;
+    CHECK_EQ(fdps_audio_start_sample(pcm_block, PCM_TEST_LENGTH,
+                                     PCM_TEST_LOOPS), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), 0);
+}
+
+/* Neither AIL_set_sample_type nor AIL_set_sample_volume is called, which is the
+   whole difference between this routine and fdps_sfx_play.  Format and flags
+   are checked against the zeroes AIL_init_sample writes; the volume has no
+   fixed default, so it is checked against a handle that only AIL_init_sample
+   has been through.  fdps_sfx_play would leave 0x28 in it and 2 in the flags
+   word. */
+static void start_sample_sets_neither_type_nor_volume(void)
+{
+    stage_start_ready(0);
+    stage_init_only_sample();
+    CHECK_EQ(fdps_audio_start_sample(pcm_block, PCM_TEST_LENGTH,
+                                     PCM_TEST_LOOPS), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_FORMAT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_FLAGS), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_VOLUME),
+             sample_field(init_only_sample, SAMPLE_VOLUME));
+}
+
 void run_audio_tests(void)
 {
     RUN_TEST(the_fixture_looks_like_a_handle_to_ail);
@@ -662,4 +888,13 @@ void run_audio_tests(void)
     RUN_TEST(neither_audio_flag_is_consulted);
     RUN_TEST(a_null_slot_does_not_end_the_walk);
     RUN_TEST(a_slot_that_is_not_playing_is_left_as_it_stands);
+    RUN_TEST(ail_init_sample_leaves_its_own_defaults);
+    RUN_TEST(start_sample_claims_the_first_free_slot);
+    RUN_TEST(start_sample_reaches_both_ends_of_the_table);
+    RUN_TEST(start_sample_with_every_voice_busy_answers_minus_one);
+    RUN_TEST(start_sample_needs_both_audio_flags);
+    RUN_TEST(start_sample_forwards_the_block_unchanged);
+    RUN_TEST(start_sample_forwards_the_loop_count);
+    RUN_TEST(start_sample_rate_comes_from_the_global);
+    RUN_TEST(start_sample_sets_neither_type_nor_volume);
 }

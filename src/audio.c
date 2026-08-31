@@ -192,3 +192,64 @@ void fdps_audio_stop_sample(int sample_index)
         AIL_stop_sample(data_fdps_audio_sample_handle_table[slot]);
     }
 }
+
+/* 00030630.  The same voice allocator as fdps_sfx_play, with the container
+   reading taken away: both audio flags, then the scan for a slot whose
+   AIL_sample_status is not 4, then the AIL calls that load the handle.  Both
+   failures leave through the same MOV dword ptr [EBP-0x4],0xffffffff, so a
+   silenced audio system and eight busy voices are one answer, not two.
+   [EBP-0x4] is the shared return slot -od gives a function with three exits;
+   the returns below are that slot read at 00030730.
+
+   Which AIL calls are absent is the point of the function.  fdps_sfx_play makes
+   seven calls on the handle it claimed and this one makes five: there is no
+   AIL_set_sample_type and no AIL_set_sample_volume between 000306b0 and
+   00030722, so the format, the flags word and the volume stay as
+   AIL_init_sample's worker at 000471e0 left them -- 0 at +0x34, 0 at +0x38, and
+   the library's master volume at +0x40.  Nor is there any arithmetic on
+   pcm_data: 000306bc PUSHes [EBP+0x14] itself, where the sibling adds 8 to step
+   over a .SAF item header.  The caller hands over samples, not a file.
+
+   The rate is the only argument that does not come from the caller: PUSH dword
+   ptr [0x00069d5c] at 000306f4 reads the global unconditionally, so whatever it
+   holds is what AIL is told, zero included.
+
+   The scan's bound is a signed compare, CMP dword ptr [EBP-0x8],0x8 / JL, and
+   the index is folded into the displacement as LEA EAX,[EAX*0x4+0x0] / PUSH
+   dword ptr [EAX+0x69d30] -- the same eight-entry table this file owns, whose
+   last slot is 0x69d4c with the next global at 0x69d50.
+
+   One value comes back from a CALL: EAX from AIL_sample_status at 00030681, and
+   the CMP EAX,0x4 at 00030689 is the whole use of it.  Every other CALL here
+   returns void and EAX is dead after each one; the slot index the function
+   returns comes from [EBP-0x8], not from AIL_start_sample. */
+int fdps_audio_start_sample(void *pcm_data, unsigned int pcm_len,
+                            unsigned int loop_count)
+{
+    int slot;
+
+    if (data_fdps_audio_sfx_driver_available_flag == 0
+        || data_fdps_audio_sfx_enabled_flag == 0) {
+        return SFX_NO_SAMPLE_SLOT;
+    }
+
+    slot = 0;
+    while (slot < SFX_SAMPLE_SLOT_COUNT
+           && AIL_sample_status(data_fdps_audio_sample_handle_table[slot])
+              == AIL_SAMPLE_STATUS_PLAYING) {
+        slot++;
+    }
+    if (slot == SFX_SAMPLE_SLOT_COUNT) {
+        return SFX_NO_SAMPLE_SLOT;
+    }
+
+    AIL_init_sample(data_fdps_audio_sample_handle_table[slot]);
+    AIL_set_sample_address(data_fdps_audio_sample_handle_table[slot],
+                           (unsigned int) pcm_data, pcm_len);
+    AIL_set_sample_loop_count(data_fdps_audio_sample_handle_table[slot],
+                              loop_count);
+    AIL_set_sample_playback_rate(data_fdps_audio_sample_handle_table[slot],
+                                 data_fdps_audio_sample_playback_rate);
+    AIL_start_sample(data_fdps_audio_sample_handle_table[slot]);
+    return slot;
+}

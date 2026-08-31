@@ -947,6 +947,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x64"
+    },
+    "00030630": {
+      "name": "fdps_audio_start_sample",
+      "target": "audio.c",
+      "body_size": "0x10a",
+      "status": "committed",
+      "emitted_against": "0x10a",
+      "rounds": 0
     }
   }
 }
