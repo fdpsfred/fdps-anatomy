@@ -58,6 +58,24 @@
 #define SFX_SAMPLE_LOOP_COUNT 1
 #define SFX_SAMPLE_VOLUME 0x28
 
+/* A .WAV image opens with the 12-byte RIFF wrapper -- the four id bytes, the
+   32-bit size of everything after them, and the "WAVE" form type -- and the
+   chunk list starts right behind it.  Every chunk is an 8-byte header, four id
+   bytes and a 32-bit payload size, followed by that many payload bytes. */
+#define RIFF_WRAPPER_SIZE 0x0c
+#define RIFF_CHUNK_SIZE_OFFSET 4
+#define RIFF_CHUNK_PAYLOAD_OFFSET 8
+
+/* The three fields the header parser lifts out of a 'fmt ' chunk, as byte
+   offsets from the chunk header rather than from the WAVEFORMATEX payload the
+   standard describes: the assembly addresses them straight off the chunk
+   pointer it kept, so payload+2, +4 and +0xe read as +0xa, +0xc and +0x16.
+   Channels is taken as the low byte of the 16-bit nChannels field and the
+   sample rate as the full 32-bit nSamplesPerSec. */
+#define WAV_FMT_CHANNELS_OFFSET 0x0a
+#define WAV_FMT_RATE_OFFSET 0x0c
+#define WAV_FMT_BITS_OFFSET 0x16
+
 /* 000142d0.  Three guards in the order the assembly has them, all of them
    plain returns to the shared epilogue rather than an error path.
 
@@ -479,4 +497,97 @@ void fdps_audio_timer_install(int tick_rate_hz)
 void fdps_audio_set_sample_playback_rate(int samples_per_sec)
 {
     data_fdps_audio_sample_playback_rate = samples_per_sec;
+}
+
+/* 00030830.  Two tag tests, one unbounded chunk walk and five stores, with no
+   CALL anywhere in the body and no global touched: everything it reads comes
+   through its two arguments and everything it writes goes into the caller's
+   descriptor.
+
+   The frame is the plain -od one -- PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB
+   ESP,0x14 -- so the two arguments sit at [EBP+0x14] and [EBP+0x18] and the RET
+   at 000309fb carries no immediate.  The sole caller pushes them right to left
+   and clears them itself: LEA EAX,[EBP-0x1c] / PUSH EAX for the descriptor,
+   PUSH [EBP+0x14] for the image, CALL, ADD ESP,0x8 at 00030a7d.
+
+   Both tag tests are chains of four zero-extended byte compares (MOV AL,byte
+   ptr [EAX+n] / AND EAX,0xff / CMP EAX,imm) that fall into a shared store of
+   -1 at 00030885 and 000308d5; only the first four bytes and bytes 8..0xb are
+   looked at, so the RIFF size field at +4 is never read and never used to bound
+   anything.  Neither pointer is checked against NULL.
+
+   The walk keeps two slots, [EBP-0xc] for 'fmt ' and [EBP-0x8] for 'data',
+   both cleared at 000308e5/000308ec before the first pass.  Each pass runs both
+   id tests -- so a later chunk of the same id overwrites the slot an earlier
+   one filled -- and only then asks whether both slots are non-NULL: CMP
+   [EBP-0xc],0x0 / JZ to the advance at 0003099f, CMP [EBP-0x8],0x0 / JNZ to the
+   stores at 000309b0.  The advance is ADD EAX,0x8 onto the payload size read at
+   [cursor+4] and nothing else.
+
+   That advance is the part a correct RIFF reader gets differently, and it must
+   not be corrected here (rebuild_info/pitfalls.md).  There is no pad-to-even
+   step, so an odd-sized chunk leaves the cursor one byte short of the next
+   header and the walk reads ids out of the middle of the file from then on;
+   there is no end-of-buffer test and no RIFF-size bound, so a .WAV missing
+   either chunk walks off the end of the buffer instead of failing.  Both are
+   safe for the images the game actually plays and neither can be guarded
+   without changing what the function does.
+
+   The five stores are the descriptor, in the assembly's order, and the three
+   dwords land on odd offsets 2, 6 and 0xa -- the caller reads them back from
+   [EBP-0x1a], [EBP-0x16] and [EBP-0x12] -- so it is a byte-packed record and
+   not a naturally aligned one.  The last of them is not a field of the file at
+   all: it is the address of the data chunk's payload, data+8, computed here and
+   handed to AIL_set_sample_address by the caller.
+
+   The answer is 0 on the store path and -1 from either tag test, and the caller
+   throws it away -- XOR EAX,EAX at 00030a80 overwrites it before anything reads
+   it, and it decides nothing there. */
+int fdps_wav_parse_header(void *wav_data, void *info_out)
+{
+    unsigned char *riff_image;
+    unsigned char *chunk;
+    unsigned char *fmt_chunk;
+    unsigned char *data_chunk;
+    unsigned char *info;
+
+    riff_image = (unsigned char *) wav_data;
+    if (riff_image[0] != 'R' || riff_image[1] != 'I' || riff_image[2] != 'F'
+        || riff_image[3] != 'F') {
+        return -1;
+    }
+    if (riff_image[8] != 'W' || riff_image[9] != 'A' || riff_image[10] != 'V'
+        || riff_image[11] != 'E') {
+        return -1;
+    }
+
+    chunk = riff_image + RIFF_WRAPPER_SIZE;
+    fmt_chunk = 0;
+    data_chunk = 0;
+    for (;;) {
+        if (chunk[0] == 'f' && chunk[1] == 'm' && chunk[2] == 't'
+            && chunk[3] == ' ') {
+            fmt_chunk = chunk;
+        }
+        if (chunk[0] == 'd' && chunk[1] == 'a' && chunk[2] == 't'
+            && chunk[3] == 'a') {
+            data_chunk = chunk;
+        }
+        if (fmt_chunk != 0 && data_chunk != 0) {
+            break;
+        }
+        chunk += *(unsigned int *) (chunk + RIFF_CHUNK_SIZE_OFFSET)
+                 + RIFF_CHUNK_PAYLOAD_OFFSET;
+    }
+
+    info = (unsigned char *) info_out;
+    info[WAV_INFO_CHANNELS_OFFSET] = fmt_chunk[WAV_FMT_CHANNELS_OFFSET];
+    info[WAV_INFO_BITS_OFFSET] = fmt_chunk[WAV_FMT_BITS_OFFSET];
+    *(unsigned int *) (info + WAV_INFO_RATE_OFFSET) =
+        *(unsigned int *) (fmt_chunk + WAV_FMT_RATE_OFFSET);
+    *(unsigned int *) (info + WAV_INFO_PCM_LENGTH_OFFSET) =
+        *(unsigned int *) (data_chunk + RIFF_CHUNK_SIZE_OFFSET);
+    *(unsigned char **) (info + WAV_INFO_PCM_DATA_OFFSET) =
+        data_chunk + RIFF_CHUNK_PAYLOAD_OFFSET;
+    return 0;
 }

@@ -995,6 +995,14 @@
       "status": "committed",
       "emitted_against": "0x19",
       "rounds": 0
+    },
+    "00030830": {
+      "name": "fdps_wav_parse_header",
+      "target": "audio.c",
+      "body_size": "0x1cc",
+      "status": "committed",
+      "emitted_against": "0x1cc",
+      "rounds": 0
     }
   }
 }

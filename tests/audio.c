@@ -1472,6 +1472,394 @@ static void with_no_driver_an_effect_is_still_dropped(void)
     fdps_audio_shutdown();
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_wav_parse_header @ 00030830
+ *
+ * Expected values come from the assembly alone: the four CMP EAX,0x52/0x49/
+ * 0x46/0x46 tag bytes at 0003084c..00030880 and the four CMP EAX,0x57/0x41/
+ * 0x56/0x45 at 0003089c..000308d0, the two stores of -1 at 00030885 and
+ * 000308d5, ADD dword ptr [EBP+0x14],0xc at 000308e1 for where the chunk list
+ * starts, the two id chains against 'fmt ' and 'data', the CMP [EBP-0xc],0x0 /
+ * JZ and CMP [EBP-0x8],0x0 / JNZ pair at 0003098f that decides when the walk
+ * stops, the MOV EAX,[EAX+0x4] / ADD EAX,0x8 advance at 0003099f, and the five
+ * stores at 000309b0..000309e8 with their offsets 0xa, 0x16 and 0xc on the fmt
+ * chunk and 0x4 and 0x8 on the data chunk.  The descriptor offsets are the ones
+ * the caller reads back at [EBP-0x1c], [EBP-0x1b], [EBP-0x1a], [EBP-0x16] and
+ * [EBP-0x12].
+ *
+ * A .WAV is staged as a byte buffer rather than read from a game file because
+ * that is the shape the function is handed: the game's .WAV images live inside
+ * .VFS containers and reach this parser only as a block already unpacked into
+ * memory, and the buffer is built out of the RIFF layout, not out of anything
+ * the emitted C says.
+ *
+ * EVERY STAGED IMAGE HAS TO TERMINATE THE WALK.  There is no end-of-buffer test
+ * in the original, so a fixture whose chunk sizes do not lead to both a 'fmt '
+ * and a 'data' would walk off the end of the array instead of failing a check.
+ * Each case below therefore lays its chunks out so that the pair completes, and
+ * the sizes it declares are the real distances between them.
+ * ------------------------------------------------------------------ */
+
+#define WAV_STAGE_SIZE 0x200
+#define WAV_FIRST_CHUNK 0x0c
+#define WAV_CHUNK_HEADER_SIZE 8
+#define WAV_FMT_PAYLOAD_SIZE 16
+
+/* The channel and bit-depth fields are 16-bit in the file and one byte in the
+   descriptor, so both are staged with a non-zero high half: what comes back
+   pins that the store is the byte read (MOV DL,byte ptr [EAX+0xa]) and not a
+   truncated word. */
+#define WAV_TEST_CHANNELS 0x0102
+#define WAV_TEST_BITS 0x0110
+
+/* Both dwords are staged above 0xffff so that a 16-bit read would lose the top
+   half of the answer. */
+#define WAV_TEST_RATE 0x00012345
+#define WAV_TEST_LENGTH 0x00023456
+#define WAV_SECOND_RATE 0x00054321
+
+#define WAV_FORMAT_TAG_PCM 1
+#define WAV_PCM_MARKER 0xa5
+#define WAV_SECOND_PCM_MARKER 0x5b
+#define WAV_INFO_MARKER 0x5a
+#define WAV_INFO_MARKER_DWORD 0x5a5a5a5a
+
+/* Two bytes past the fourteen the function writes, so "nothing ran over the
+   end of the descriptor" is an assertion rather than an assumption. */
+#define WAV_INFO_GUARD_SIZE (WAV_INFO_SIZE + 2)
+
+static unsigned char wav_stage[WAV_STAGE_SIZE];
+static unsigned char wav_info[WAV_INFO_GUARD_SIZE];
+
+static void wav_put_u16(unsigned char *at, unsigned int value)
+{
+    at[0] = (unsigned char) (value & 0xff);
+    at[1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void wav_put_u32(unsigned char *at, unsigned int value)
+{
+    at[0] = (unsigned char) (value & 0xff);
+    at[1] = (unsigned char) ((value >> 8) & 0xff);
+    at[2] = (unsigned char) ((value >> 16) & 0xff);
+    at[3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+/* The descriptor's dwords sit on odd offsets, so they are read back a byte at a
+   time here too: an aligned read would be asserting the compiler's idea of the
+   layout rather than the function's. */
+static unsigned int wav_get_u32(unsigned char *at)
+{
+    return (unsigned int) at[0] | ((unsigned int) at[1] << 8)
+           | ((unsigned int) at[2] << 16) | ((unsigned int) at[3] << 24);
+}
+
+/* Where the PCM pointer the function stored lands inside the staged image, or
+   -1 when it is null.  Reporting an offset keeps the expected values readable
+   and independent of where the loader put the fixture. */
+static long wav_pcm_offset(void)
+{
+    unsigned int address;
+
+    address = wav_get_u32(wav_info + WAV_INFO_PCM_DATA_OFFSET);
+    if (address == 0) {
+        return -1;
+    }
+    return (long) (address - (unsigned int) wav_stage);
+}
+
+/* The first PCM byte as reached through the stored pointer, which is what the
+   caller hands AIL_set_sample_address. */
+static int wav_first_pcm_byte(void)
+{
+    unsigned char *pcm;
+
+    pcm = (unsigned char *) wav_get_u32(wav_info + WAV_INFO_PCM_DATA_OFFSET);
+    return (int) *pcm;
+}
+
+static void wav_reset(void)
+{
+    int i;
+
+    for (i = 0; i < WAV_STAGE_SIZE; i++) {
+        wav_stage[i] = 0;
+    }
+    for (i = 0; i < WAV_INFO_GUARD_SIZE; i++) {
+        wav_info[i] = WAV_INFO_MARKER;
+    }
+}
+
+static void wav_put_wrapper(unsigned int riff_size)
+{
+    wav_stage[0] = 'R';
+    wav_stage[1] = 'I';
+    wav_stage[2] = 'F';
+    wav_stage[3] = 'F';
+    wav_put_u32(wav_stage + 4, riff_size);
+    wav_stage[8] = 'W';
+    wav_stage[9] = 'A';
+    wav_stage[10] = 'V';
+    wav_stage[11] = 'E';
+}
+
+/* Writes a chunk header and answers where the original's walk lands next:
+   the payload size plus eight, with no pad to an even boundary. */
+static int wav_put_chunk(int offset, char *id, unsigned int payload_size)
+{
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        wav_stage[offset + i] = (unsigned char) id[i];
+    }
+    wav_put_u32(wav_stage + offset + 4, payload_size);
+    return offset + WAV_CHUNK_HEADER_SIZE + (int) payload_size;
+}
+
+/* A PCM 'fmt ' chunk: tag, channels, sample rate, average bytes, block align
+   and bit depth, in the WAVEFORMATEX order the file has them. */
+static int wav_put_fmt(int offset, unsigned int channels, unsigned int rate,
+                       unsigned int bits)
+{
+    int next;
+    unsigned char *payload;
+
+    next = wav_put_chunk(offset, "fmt ", WAV_FMT_PAYLOAD_SIZE);
+    payload = wav_stage + offset + WAV_CHUNK_HEADER_SIZE;
+    wav_put_u16(payload + 0, WAV_FORMAT_TAG_PCM);
+    wav_put_u16(payload + 2, channels);
+    wav_put_u32(payload + 4, rate);
+    wav_put_u32(payload + 8, rate);
+    wav_put_u16(payload + 12, 1);
+    wav_put_u16(payload + 14, bits);
+    return next;
+}
+
+/* A 'data' chunk whose declared size is what the walk will step over, with its
+   first payload byte set to `marker` so the stored pointer can be told from
+   any other chunk's payload. */
+static int wav_put_data(int offset, unsigned int payload_size,
+                        unsigned int marker)
+{
+    int next;
+
+    next = wav_put_chunk(offset, "data", payload_size);
+    wav_stage[offset + WAV_CHUNK_HEADER_SIZE] = (unsigned char) marker;
+    return next;
+}
+
+/* The ordinary image every negative case starts from: wrapper, 'fmt ', 'data'.
+   Answers the offset of the data chunk header. */
+static int wav_stage_image(void)
+{
+    int data_offset;
+
+    wav_reset();
+    wav_put_wrapper(WAV_STAGE_SIZE - 8);
+    data_offset = wav_put_fmt(WAV_FIRST_CHUNK, WAV_TEST_CHANNELS,
+                              WAV_TEST_RATE, WAV_TEST_BITS);
+    wav_put_data(data_offset, WAV_TEST_LENGTH, WAV_PCM_MARKER);
+    return data_offset;
+}
+
+/* All five stores, in one pass over a well-formed image.  The channel byte is
+   fmt+0xa and the bit-depth byte fmt+0x16, so each answers with the low half of
+   the 16-bit field staged there; the rate is the full dword at fmt+0xc; the
+   length is the data chunk's own size field at data+4; and the last store is
+   not a field of the file at all but the address data+8, which is why it is
+   checked both as an offset and by reading the byte it points at. */
+static void wav_fills_every_field_of_the_descriptor(void)
+{
+    int data_offset;
+
+    data_offset = wav_stage_image();
+
+    CHECK_EQ(fdps_wav_parse_header(wav_stage, wav_info), 0);
+    CHECK_EQ(wav_info[WAV_INFO_CHANNELS_OFFSET], WAV_TEST_CHANNELS & 0xff);
+    CHECK_EQ(wav_info[WAV_INFO_BITS_OFFSET], WAV_TEST_BITS & 0xff);
+    CHECK_EQ(wav_get_u32(wav_info + WAV_INFO_RATE_OFFSET), WAV_TEST_RATE);
+    CHECK_EQ(wav_get_u32(wav_info + WAV_INFO_PCM_LENGTH_OFFSET),
+             WAV_TEST_LENGTH);
+    CHECK_EQ(wav_pcm_offset(), data_offset + WAV_CHUNK_HEADER_SIZE);
+    CHECK_EQ(wav_first_pcm_byte(), WAV_PCM_MARKER);
+}
+
+/* Each of the four "RIFF" bytes is compared on its own and any one of them
+   failing lands on the same store of -1, with nothing written to the caller's
+   buffer: the descriptor still holds the marker it was filled with. */
+static void wav_rejects_a_bad_riff_tag(void)
+{
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        wav_stage_image();
+        wav_stage[i] = 'X';
+        CHECK_EQ(fdps_wav_parse_header(wav_stage, wav_info), -1);
+        CHECK_EQ(wav_info[WAV_INFO_CHANNELS_OFFSET], WAV_INFO_MARKER);
+        CHECK_EQ(wav_get_u32(wav_info + WAV_INFO_RATE_OFFSET),
+                 WAV_INFO_MARKER_DWORD);
+    }
+}
+
+/* The same for the four form-type bytes at 8..0xb, which are tested after the
+   RIFF tag and reject just as completely. */
+static void wav_rejects_a_bad_wave_tag(void)
+{
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        wav_stage_image();
+        wav_stage[8 + i] = 'X';
+        CHECK_EQ(fdps_wav_parse_header(wav_stage, wav_info), -1);
+        CHECK_EQ(wav_info[WAV_INFO_BITS_OFFSET], WAV_INFO_MARKER);
+        CHECK_EQ(wav_get_u32(wav_info + WAV_INFO_PCM_LENGTH_OFFSET),
+                 WAV_INFO_MARKER_DWORD);
+    }
+}
+
+/* Bytes 4..7 are the RIFF size and no instruction in the body reads them, so a
+   zero one and an impossible one both parse exactly like a truthful one.  A
+   rewrite that bounded the walk by that field would fail the first of these. */
+static void wav_never_reads_the_riff_size(void)
+{
+    wav_stage_image();
+    wav_put_u32(wav_stage + 4, 0);
+    CHECK_EQ(fdps_wav_parse_header(wav_stage, wav_info), 0);
+    CHECK_EQ(wav_get_u32(wav_info + WAV_INFO_RATE_OFFSET), WAV_TEST_RATE);
+
+    wav_stage_image();
+    wav_put_u32(wav_stage + 4, 0xffffffff);
+    CHECK_EQ(fdps_wav_parse_header(wav_stage, wav_info), 0);
+    CHECK_EQ(wav_get_u32(wav_info + WAV_INFO_PCM_LENGTH_OFFSET),
+             WAV_TEST_LENGTH);
+}
+
+/* A chunk that is neither of the two wanted ids is stepped over by its own
+   payload size, which is the only use the function makes of that field. */
+static void wav_walks_past_an_unrelated_chunk(void)
+{
+    int fmt_offset;
+    int data_offset;
+
+    wav_reset();
+    wav_put_wrapper(WAV_STAGE_SIZE - 8);
+    fmt_offset = wav_put_chunk(WAV_FIRST_CHUNK, "LIST", 0x30);
+    data_offset = wav_put_fmt(fmt_offset, WAV_TEST_CHANNELS, WAV_TEST_RATE,
+                              WAV_TEST_BITS);
+    wav_put_data(data_offset, WAV_TEST_LENGTH, WAV_PCM_MARKER);
+
+    CHECK_EQ(fdps_wav_parse_header(wav_stage, wav_info), 0);
+    CHECK_EQ(wav_get_u32(wav_info + WAV_INFO_RATE_OFFSET), WAV_TEST_RATE);
+    CHECK_EQ(wav_pcm_offset(), data_offset + WAV_CHUNK_HEADER_SIZE);
+}
+
+/* The advance is payload size plus eight with no rounding, so an odd-sized
+   chunk leaves the next header on an odd offset and the walk finds it there.
+   The RIFF specification pads such a chunk to an even boundary; a reader that
+   did that would look one byte further on and never see this 'fmt '. */
+static void wav_advances_without_padding_an_odd_chunk(void)
+{
+    int fmt_offset;
+    int data_offset;
+
+    wav_reset();
+    wav_put_wrapper(WAV_STAGE_SIZE - 8);
+    fmt_offset = wav_put_chunk(WAV_FIRST_CHUNK, "LIST", 5);
+    CHECK_EQ(fmt_offset, WAV_FIRST_CHUNK + WAV_CHUNK_HEADER_SIZE + 5);
+    data_offset = wav_put_fmt(fmt_offset, WAV_TEST_CHANNELS, WAV_TEST_RATE,
+                              WAV_TEST_BITS);
+    wav_put_data(data_offset, WAV_TEST_LENGTH, WAV_PCM_MARKER);
+
+    CHECK_EQ(fdps_wav_parse_header(wav_stage, wav_info), 0);
+    CHECK_EQ(wav_get_u32(wav_info + WAV_INFO_RATE_OFFSET), WAV_TEST_RATE);
+}
+
+/* The walk stops only once both slots are filled, so the chunks may come in
+   either order: with 'data' first the pair is not complete until the 'fmt '
+   pass, and both descriptors are filled from the chunks that were remembered.
+   The data chunk's declared size is the real distance to the 'fmt ' header
+   here, because the walk steps over it. */
+static void wav_needs_both_chunks_before_it_stops(void)
+{
+    int fmt_offset;
+    int data_offset;
+
+    wav_reset();
+    wav_put_wrapper(WAV_STAGE_SIZE - 8);
+    data_offset = WAV_FIRST_CHUNK;
+    fmt_offset = wav_put_data(data_offset, 4, WAV_PCM_MARKER);
+    wav_put_fmt(fmt_offset, WAV_TEST_CHANNELS, WAV_TEST_RATE, WAV_TEST_BITS);
+
+    CHECK_EQ(fdps_wav_parse_header(wav_stage, wav_info), 0);
+    CHECK_EQ(wav_info[WAV_INFO_CHANNELS_OFFSET], WAV_TEST_CHANNELS & 0xff);
+    CHECK_EQ(wav_info[WAV_INFO_BITS_OFFSET], WAV_TEST_BITS & 0xff);
+    CHECK_EQ(wav_get_u32(wav_info + WAV_INFO_RATE_OFFSET), WAV_TEST_RATE);
+    CHECK_EQ(wav_get_u32(wav_info + WAV_INFO_PCM_LENGTH_OFFSET), 4);
+    CHECK_EQ(wav_pcm_offset(), data_offset + WAV_CHUNK_HEADER_SIZE);
+}
+
+/* Both id tests run on every pass and each one overwrites its slot, so while
+   the pair is still incomplete a second chunk of the same id replaces the one
+   already remembered.  Two 'data' chunks ahead of the 'fmt ' therefore leave
+   the second one in the descriptor. */
+static void wav_a_repeated_chunk_replaces_the_one_remembered(void)
+{
+    int second_data_offset;
+    int fmt_offset;
+
+    wav_reset();
+    wav_put_wrapper(WAV_STAGE_SIZE - 8);
+    second_data_offset = wav_put_data(WAV_FIRST_CHUNK, 4, WAV_PCM_MARKER);
+    fmt_offset = wav_put_data(second_data_offset, 8, WAV_SECOND_PCM_MARKER);
+    wav_put_fmt(fmt_offset, WAV_TEST_CHANNELS, WAV_SECOND_RATE,
+                WAV_TEST_BITS);
+
+    CHECK_EQ(fdps_wav_parse_header(wav_stage, wav_info), 0);
+    CHECK_EQ(wav_get_u32(wav_info + WAV_INFO_PCM_LENGTH_OFFSET), 8);
+    CHECK_EQ(wav_pcm_offset(), second_data_offset + WAV_CHUNK_HEADER_SIZE);
+    CHECK_EQ(wav_first_pcm_byte(), WAV_SECOND_PCM_MARKER);
+    CHECK_EQ(wav_get_u32(wav_info + WAV_INFO_RATE_OFFSET), WAV_SECOND_RATE);
+}
+
+/* The mirror of the case above on the other slot, and the boundary of it: the
+   pair completes on the pass that fills the second slot, so anything after that
+   pass is never looked at.  A 'data' chunk behind the one that completed the
+   pair leaves the descriptor pointing at the first. */
+static void wav_stops_at_the_first_complete_pair(void)
+{
+    int data_offset;
+    int second_data_offset;
+
+    wav_reset();
+    wav_put_wrapper(WAV_STAGE_SIZE - 8);
+    data_offset = wav_put_fmt(WAV_FIRST_CHUNK, WAV_TEST_CHANNELS,
+                              WAV_TEST_RATE, WAV_TEST_BITS);
+    second_data_offset = wav_put_data(data_offset, 4, WAV_PCM_MARKER);
+    wav_put_data(second_data_offset, 0x20, WAV_SECOND_PCM_MARKER);
+
+    CHECK_EQ(fdps_wav_parse_header(wav_stage, wav_info), 0);
+    CHECK_EQ(wav_get_u32(wav_info + WAV_INFO_PCM_LENGTH_OFFSET), 4);
+    CHECK_EQ(wav_pcm_offset(), data_offset + WAV_CHUNK_HEADER_SIZE);
+    CHECK_EQ(wav_first_pcm_byte(), WAV_PCM_MARKER);
+}
+
+/* The descriptor is fourteen byte-packed bytes: the rate really does start at
+   offset 2 rather than at the aligned 4, and nothing is written past offset
+   0xd.  Both halves matter to the caller, which reads the three dwords out of
+   an unaligned stack local and keeps its own data next to it. */
+static void wav_writes_a_fourteen_byte_packed_descriptor(void)
+{
+    wav_stage_image();
+
+    CHECK_EQ(fdps_wav_parse_header(wav_stage, wav_info), 0);
+    CHECK_EQ(wav_info[WAV_INFO_RATE_OFFSET], WAV_TEST_RATE & 0xff);
+    CHECK_EQ(wav_info[WAV_INFO_RATE_OFFSET + 3],
+             (WAV_TEST_RATE >> 24) & 0xff);
+    CHECK_EQ(wav_info[WAV_INFO_PCM_LENGTH_OFFSET], WAV_TEST_LENGTH & 0xff);
+    CHECK_EQ(wav_info[WAV_INFO_SIZE], WAV_INFO_MARKER);
+    CHECK_EQ(wav_info[WAV_INFO_SIZE + 1], WAV_INFO_MARKER);
+}
+
 void run_audio_tests(void)
 {
     RUN_TEST(the_fixture_looks_like_a_handle_to_ail);
@@ -1527,4 +1915,14 @@ void run_audio_tests(void)
     RUN_TEST(no_driver_allocates_no_handles);
     RUN_TEST(init_starts_the_clock_with_no_driver_installed);
     RUN_TEST(with_no_driver_an_effect_is_still_dropped);
+    RUN_TEST(wav_fills_every_field_of_the_descriptor);
+    RUN_TEST(wav_rejects_a_bad_riff_tag);
+    RUN_TEST(wav_rejects_a_bad_wave_tag);
+    RUN_TEST(wav_never_reads_the_riff_size);
+    RUN_TEST(wav_walks_past_an_unrelated_chunk);
+    RUN_TEST(wav_advances_without_padding_an_odd_chunk);
+    RUN_TEST(wav_needs_both_chunks_before_it_stops);
+    RUN_TEST(wav_a_repeated_chunk_replaces_the_one_remembered);
+    RUN_TEST(wav_stops_at_the_first_complete_pair);
+    RUN_TEST(wav_writes_a_fourteen_byte_packed_descriptor);
 }

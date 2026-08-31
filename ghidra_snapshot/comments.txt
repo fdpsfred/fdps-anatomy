@@ -7976,10 +7976,10 @@ Checks the four bytes at wav_data for 'R','I','F','F' (0x52/0x49/0x46/0x46) and 
 
 Parameters:
   wav_data -- pointer to a whole .WAV file already read into memory; in practice a MISC.VFS/IconAni.vfs entry such as Levup.wav loaded by the caller. Never NULL-checked.
-  info_out -- pointer to a 14-byte packed descriptor the caller owns (FUN_00030a00 passes a stack local): channels (byte), bits per sample (byte), sample rate (dword at +2), PCM byte count (dword at +6), PCM data pointer (dword at +0xa). Written only on success.
+  info_out -- pointer to a 14-byte packed descriptor the caller owns (fdps_audio_start_wav passes a stack local): channels (byte), bits per sample (byte), sample rate (dword at +2), PCM byte count (dword at +6), PCM data pointer (dword at +0xa). Written only on success.
 
 Returns:
-  0 when both the RIFF/WAVE tags matched and the descriptor was filled; -1 when either tag check failed, in which case info_out is left untouched. The sole caller, FUN_00030a00, discards the value and reads the descriptor's channel byte immediately.
+  0 when both the RIFF/WAVE tags matched and the descriptor was filled; -1 when either tag check failed, in which case info_out is left untouched. The sole caller, fdps_audio_start_wav, discards the value and reads the descriptor's channel byte immediately.
 
 Pool: fdps  [no Function ID candidate in either the Watcom or the ailv3 set; sole caller is game code that drives AIL through its public entry points and reads this descriptor at exactly these packed offsets]
 

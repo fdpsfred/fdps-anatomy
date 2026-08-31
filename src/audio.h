@@ -208,4 +208,38 @@ extern void fdps_audio_timer_install(int tick_rate_hz);
 extern void fdps_audio_set_sample_playback_rate(int samples_per_sec);
 #pragma aux fdps_audio_set_sample_playback_rate "*" parm caller [];
 
+/* The descriptor fdps_wav_parse_header fills, as byte offsets into the caller's
+   buffer.  It is fourteen bytes and byte-packed: the three dwords sit on odd
+   offsets, because the writer stores them straight off the chunk pointers and
+   the reader -- fdps_audio_start_wav, which owns the buffer as a stack local --
+   reads them back from the same offsets.  It is a layout and not a record of
+   the game's own, so it is not one of ticket 17's structs in fdpstype.h.
+
+   The last field is not a field of the .WAV file: it is the address of the data
+   chunk's payload inside the image the caller handed over, so it is only valid
+   while that image stays where it was parsed. */
+#define WAV_INFO_CHANNELS_OFFSET 0
+#define WAV_INFO_BITS_OFFSET 1
+#define WAV_INFO_RATE_OFFSET 2
+#define WAV_INFO_PCM_LENGTH_OFFSET 6
+#define WAV_INFO_PCM_DATA_OFFSET 0x0a
+#define WAV_INFO_SIZE 14
+
+/* Reads the RIFF/WAVE image at `wav_data` -- a whole .WAV file already in
+   memory, never a file handle and never NULL-checked -- and fills the
+   WAV_INFO_SIZE descriptor at `info_out` with the channel count, the bit depth,
+   the sample rate, the PCM byte count and the address of the PCM bytes
+   themselves.  Answers 0 when it filled the descriptor and -1 when either the
+   "RIFF" or the "WAVE" tag did not match, in which case the descriptor is left
+   exactly as the caller had it.
+
+   The chunk walk is not a defensive one and must not be made into one.  It
+   advances by the chunk's payload size plus eight with no pad to an even
+   boundary, it has no end-of-buffer test, and it only stops once it has seen
+   both 'fmt ' and 'data' -- so an odd-sized chunk desynchronises it and an
+   image missing either chunk runs off the end.  Nothing but the descriptor is
+   written; no global, no AIL state and no sound. */
+extern int fdps_wav_parse_header(void *wav_data, void *info_out);
+#pragma aux fdps_wav_parse_header "*" parm caller [];
+
 #endif
