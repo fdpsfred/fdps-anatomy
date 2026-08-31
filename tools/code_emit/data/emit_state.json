@@ -1125,6 +1125,14 @@
       "status": "committed",
       "emitted_against": "0xe5",
       "rounds": 1
+    },
+    "000395d0": {
+      "name": "fdps_chapter_29_event_activate_enemy_groups",
+      "target": "chevt6.c",
+      "body_size": "0x92",
+      "status": "committed",
+      "emitted_against": "0x92",
+      "rounds": 0
     }
   }
 }
