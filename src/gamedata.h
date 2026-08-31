@@ -651,4 +651,16 @@ extern unsigned char *data_fdps_gauge_fill_sheet_ptr;
    holds a stale pointer. */
 extern unsigned char *data_fdps_shop_stock_table_ptr;
 
+/* 00069cf4.  Which chapter is loaded, counted from 0: the chapter the player
+   is told is chapter 1 is id 0.  Twenty-seven files read it, most of them to
+   build a per-chapter resource file name or to pick a chapter's row out of a
+   table, and the two conventions do not agree -- fdetxt%02d.txt is formatted
+   from the value plus one while map%02d.dat and its neighbours take it raw --
+   so a reader has to say which numbering it wants.
+
+   fdps_check_secret_code_key indexes its 24-row table with the value minus
+   one, which is the same 0-based reading: the table's first row belongs to id
+   1, the chapter the player sees as chapter 2. */
+extern int data_fdps_chapter_current_chapter_id;
+
 #endif

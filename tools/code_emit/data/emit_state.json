@@ -1051,6 +1051,14 @@
       "status": "committed",
       "emitted_against": "0x73",
       "rounds": 0
+    },
+    "000357a0": {
+      "name": "fdps_check_secret_code_key",
+      "target": "village.c",
+      "body_size": "0xb9",
+      "status": "committed",
+      "emitted_against": "0xb9",
+      "rounds": 0
     }
   }
 }

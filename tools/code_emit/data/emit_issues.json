@@ -976,5 +976,20 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "000357a0": [
+    {
+      "from": "emit",
+      "what": "What the six chapters outside the table's range actually do on a real machine, and whether the signboard is reachable in them at all. Established here: the game has thirty chapters with a 0-based id (chapters/_index.md), the table answers for ids 1..24, and the address arithmetic puts the other six on frame slots -- id 0 eight bytes below the buffer, ids 25..29 on the return-value slot, the saved EBP/EDI/ESI/EBX, the return address, the scancode parameter at EBP+0x14 and the caller's stack. The emit reproduces this rather than guarding against it, and the object file's frame is identical to the original's (same SUB ESP,0xc4, same -0xc4 buffer, same -0xcc base, same +0x14 parameter, checked with WDISASM), so every one of those reads lands on the same slot as the original's. What cannot be equal is the CONTENT of the slots that are not fixed by the ABI: the uninitialised result slot, the saved register values and the return address differ between the original and any rebuild. Id 28 is decided by the ABI alone and so is equivalent (any keystroke completes the code); ids 0 and 25..27 and 29 are not.",
+      "needs": "Whether fdps_village_signboard_menu is reachable with a chapter id outside 1..24 -- the village phase is entered from main's phase dispatch at 000293a7 and from fdps_title_screen at 0002a8d5, neither of which fixes the chapter id, so it is settled by emitting the phase sequencing those two run. If it is reachable, a DOSBox-X playtest of the signboard in the player's chapters 1 and 26..30 against the original executable, comparing whether a keystroke opens the secret shop.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached independently while working item 7 and confirmed rather than restated. I recomputed the frame from the prologue: with EBP set after PUSH EBX/ESI/EDI/EBP, the row address EBP-0xcc+id*8 puts id 25 on EBP-4 (the result slot and the saved EBP), id 26 on EBP+4 (saved EDI and ESI), id 27 on EBP+0xc (saved EBX and the return address), id 28 on EBP+0x14 and id 29 on EBP+0x1c. Id 28 is the one that is fixed by the ABI rather than by chance and so is equivalent between original and rebuild: EBP+0x14 IS the scancode dword the function is testing, its first byte always equals the value compared and its second byte is zero for a make code, so the compare holds and the terminator test on the next byte holds too -- the code reports complete on any single keystroke. Id 0 and ids 25..27 and 29 read content no rebuild can match. What I add to the emitter's entry: the emitted object reads those slots at the same displacements as the original (WDISASM on VILLAGE.OBJ, -0xcc base against a -0xc4 buffer), so the divergence is confined to slot content and is not widened by the emit.",
+      "needs": "Whether fdps_village_signboard_menu can run with a chapter id outside 1..24, which the village phase's callers will settle once they are emitted, and failing that a DOSBox-X comparison against the original executable in the player's chapters 1 and 26..30.",
+      "status": "open",
+      "same_as": "emit#0"
+    }
   ]
 }
