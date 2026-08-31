@@ -1860,6 +1860,389 @@ static void wav_writes_a_fourteen_byte_packed_descriptor(void)
     CHECK_EQ(wav_info[WAV_INFO_SIZE + 1], WAV_INFO_MARKER);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_audio_start_wav @ 00030a00
+ *
+ * Expected values come from the assembly at 00030a00 -- the two CMP byte ptr
+ * [0x00069d71]/[0x00069d70] guards onto the shared -1 at 00030a1e, the CMP
+ * dword ptr [EBP-0xc],0x8 / JL scan bound with CMP EAX,0x4 on what
+ * AIL_sample_status answered, the four-arm ladder over the zero-extended bytes
+ * at [EBP-0x1c] and [EBP-0x1b], CMP dword ptr [EBP+0x1c],-0x1 / JNZ at 00030ae4
+ * for the rate sentinel, the PUSH order of the seven AIL calls between 00030af0
+ * and 00030bd1, PUSH 0x3c at 00030bba for the default volume, and MOV EAX,dword
+ * ptr [EBP-0xc] at 00030bd4 for the answer -- and from the descriptor offsets
+ * this function reads back, [EBP-0x1a], [EBP-0x16] and [EBP-0x12], which are
+ * WAV_INFO_RATE_OFFSET, WAV_INFO_PCM_LENGTH_OFFSET and WAV_INFO_PCM_DATA_OFFSET.
+ *
+ * The .WAV images are staged with the helpers the parser's own cases use, for
+ * the same reason: the game's .WAV files live inside .VFS containers and reach
+ * this function only as a block already unpacked into memory.  The voices are
+ * the same fixtures the other play paths use, and the values AIL was given are
+ * read back out of the sample structure the real linked library wrote them into.
+ *
+ * AIL's own defaults after AIL_init_sample are the ones every assertion has to
+ * be distinguishable from -- rate 0x2b11, loop count 1, format 0, flags 0 --
+ * so the numbers below avoid them wherever the point is that a value arrived.
+ * ------------------------------------------------------------------ */
+
+/* Above 0xffff, so a 16-bit read of the descriptor's dword at offset 2 would
+   lose the top half, and not AIL's 0x2b11 default. */
+#define START_WAV_HEADER_RATE 0x00012345
+
+/* Likewise for the byte count, which is the data chunk's own size field. */
+#define START_WAV_PCM_LENGTH 0x00023456
+
+/* A rate the caller asks for by name; not the header's and not AIL's default. */
+#define START_WAV_EXPLICIT_RATE 8000
+
+/* Not AIL_init_sample's loop count of 1. */
+#define START_WAV_LOOPS 3
+
+/* The literal PUSHed at 00030bba when the caller passes the sentinel, and a
+   caller-chosen volume that is neither it nor zero. */
+#define START_WAV_DEFAULT_VOLUME 0x3c
+#define START_WAV_EXPLICIT_VOLUME 0x14
+
+/* Both 16-bit fmt fields staged with a non-zero high half: the descriptor holds
+   only the low byte of each, so a ladder reading a wider field sees 0x0101 and
+   0x0208 and falls through to format 3. */
+#define START_WAV_WIDE_CHANNELS 0x0101
+#define START_WAV_WIDE_BITS 0x0208
+
+/* Lays out wrapper, 'fmt ' and 'data' and answers the data chunk's offset. */
+static int stage_wav_file(unsigned int channels, unsigned int rate,
+                          unsigned int bits, unsigned int pcm_length)
+{
+    int data_offset;
+
+    wav_reset();
+    wav_put_wrapper(WAV_STAGE_SIZE - 8);
+    data_offset = wav_put_fmt(WAV_FIRST_CHUNK, channels, rate, bits);
+    wav_put_data(data_offset, pcm_length, WAV_PCM_MARKER);
+    return data_offset;
+}
+
+/* Both flags open, one free voice, and a mono 8-bit image with a rate and a
+   length that are nobody's default.  Answers the data chunk's offset. */
+static int stage_wav_ready(int free_slot)
+{
+    stage_slots(free_slot);
+    data_fdps_audio_sfx_driver_available_flag = 1;
+    data_fdps_audio_sfx_enabled_flag = 1;
+    return stage_wav_file(1, START_WAV_HEADER_RATE, 8, START_WAV_PCM_LENGTH);
+}
+
+/* Where the address AIL was given lands inside the staged .WAV, or -1 when
+   nothing was handed over at all. */
+static long wav_played_offset(void)
+{
+    unsigned int address;
+
+    address = sample_field(free_sample, SAMPLE_ADDRESS);
+    if (address == 0) {
+        return -1;
+    }
+    return (long) (address - (unsigned int) wav_stage);
+}
+
+/* The whole started-a-voice path: the scan skips the two playing slots, the
+   answer is the slot it stopped on, and all six values AIL was given are read
+   back out of that handle.  The address is the data chunk's payload and the
+   length its size field, which the parser put in the descriptor at offsets 0xa
+   and 6; the rate came out of offset 2; the volume is the 0x3c the sentinel
+   asks for; flags 2 is what says AIL_set_sample_type ran at all, since format 0
+   is also AIL_init_sample's own; and status 4 is AIL_start_sample's write. */
+static void start_wav_claims_the_first_free_slot(void)
+{
+    int data_offset;
+
+    data_offset = stage_wav_ready(2);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 2);
+    CHECK_EQ(wav_played_offset(), data_offset + WAV_CHUNK_HEADER_SIZE);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LENGTH), START_WAV_PCM_LENGTH);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), START_WAV_HEADER_RATE);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LOOP_COUNT), 1);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_VOLUME), START_WAV_DEFAULT_VOLUME);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_FORMAT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_FLAGS), 2);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_STATUS), STATUS_PLAYING);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_ADDRESS), 0);
+}
+
+/* The scan runs 0..7, so the answer can be either end of the table.  Both are
+   asserted because the bound and the base are separate mistakes. */
+static void start_wav_reaches_both_ends_of_the_table(void)
+{
+    stage_wav_ready(0);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LENGTH), START_WAV_PCM_LENGTH);
+
+    stage_wav_ready(SFX_SAMPLE_SLOT_COUNT - 1);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT),
+             SFX_SAMPLE_SLOT_COUNT - 1);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LENGTH), START_WAV_PCM_LENGTH);
+}
+
+/* All eight playing: -1, and nothing handed to AIL.  A scan whose compare went
+   the other way would claim slot 0 and the busy handle would come back holding
+   the clip. */
+static void start_wav_with_every_voice_busy_answers_minus_one(void)
+{
+    stage_wav_ready(-1);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT),
+             SFX_NO_SAMPLE_SLOT);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_ADDRESS), 0);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_LENGTH), 0);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_RATE), 0);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_STATUS), STATUS_PLAYING);
+}
+
+/* Either flag clear is the same -1 as a full table, and it is answered before
+   anything is touched: a handle that had been through AIL_init_sample would
+   read 0x2b11 at +0x3c, so a rate still at zero is what says nothing ran. */
+static void start_wav_needs_both_audio_flags(void)
+{
+    stage_wav_ready(0);
+    data_fdps_audio_sfx_enabled_flag = 0;
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT),
+             SFX_NO_SAMPLE_SLOT);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_ADDRESS), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), 0);
+
+    stage_wav_ready(0);
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT),
+             SFX_NO_SAMPLE_SLOT);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_ADDRESS), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), 0);
+
+    stage_wav_ready(0);
+    data_fdps_audio_sfx_enabled_flag = 0;
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT),
+             SFX_NO_SAMPLE_SLOT);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_ADDRESS), 0);
+}
+
+/* (1,8) -> 0, (1,16) -> 1, (2,8) -> 2, (2,16) -> 3.  The pair comes out of the
+   .WAV's own 'fmt ' chunk by way of the descriptor, so this also says the
+   channel and bit-depth bytes were read from offsets 0 and 1 of it rather than
+   from anywhere in the file directly.  Flags 2 goes with format 0 because
+   AIL_init_sample zeroes the format field too. */
+static void start_wav_format_comes_from_the_wav_header(void)
+{
+    stage_wav_ready(0);
+    stage_wav_file(1, START_WAV_HEADER_RATE, 8, START_WAV_PCM_LENGTH);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_FORMAT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_FLAGS), 2);
+
+    stage_wav_ready(0);
+    stage_wav_file(1, START_WAV_HEADER_RATE, 16, START_WAV_PCM_LENGTH);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_FORMAT), 1);
+
+    stage_wav_ready(0);
+    stage_wav_file(2, START_WAV_HEADER_RATE, 8, START_WAV_PCM_LENGTH);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_FORMAT), 2);
+
+    stage_wav_ready(0);
+    stage_wav_file(2, START_WAV_HEADER_RATE, 16, START_WAV_PCM_LENGTH);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_FORMAT), 3);
+}
+
+/* An unlisted pair is not rejected and not treated as mono 8-bit: it falls
+   through to 3, which is the ladder's last arm and not a default anyone chose.
+   Both a bit depth nothing uses and a channel count of zero take that arm, and
+   the sound still starts. */
+static void start_wav_an_unknown_channel_bit_pair_falls_through_to_three(void)
+{
+    stage_wav_ready(0);
+    stage_wav_file(1, START_WAV_HEADER_RATE, 4, START_WAV_PCM_LENGTH);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_FORMAT), 3);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_STATUS), STATUS_PLAYING);
+
+    stage_wav_ready(0);
+    stage_wav_file(0, START_WAV_HEADER_RATE, 8, START_WAV_PCM_LENGTH);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_FORMAT), 3);
+}
+
+/* XOR EAX,EAX / MOV AL,byte ptr [EBP-0x1c]: the ladder reads one byte of the
+   descriptor, and the descriptor holds only the low byte of each 16-bit fmt
+   field.  Staged with a non-zero high half on both, the pair is still (1,8) and
+   the format is still 0; a wider read would see 0x0101 and 0x0208 and answer 3. */
+static void start_wav_reads_one_byte_of_each_descriptor_field(void)
+{
+    stage_wav_ready(0);
+    stage_wav_file(START_WAV_WIDE_CHANNELS, START_WAV_HEADER_RATE,
+                   START_WAV_WIDE_BITS, START_WAV_PCM_LENGTH);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_FORMAT), 0);
+}
+
+/* CMP dword ptr [EBP+0x1c],-0x1 / JNZ: the sentinel and nothing else takes the
+   header's rate, and the header's rate is the full dword at descriptor offset 2.
+   Any other value is forwarded untouched, zero included -- zero is not the
+   sentinel, so a rewrite that treated "no rate" as falsy would substitute here
+   and be caught. */
+static void start_wav_rate_sentinel_takes_the_header_rate(void)
+{
+    stage_wav_ready(0);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), START_WAV_HEADER_RATE);
+
+    stage_wav_ready(0);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, START_WAV_EXPLICIT_RATE,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), START_WAV_EXPLICIT_RATE);
+
+    stage_wav_ready(0);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, 0,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), 0);
+}
+
+/* CMP dword ptr [EBP+0x20],-0x1 / JZ 0x00030bba, where the taken arm is PUSH
+   0x3c: the sentinel means 60 and any other value is forwarded, zero included.
+   60 is this path's own number and not the 0x28 fdps_sfx_play uses, so a shared
+   constant would show up here. */
+static void start_wav_volume_sentinel_means_sixty(void)
+{
+    stage_wav_ready(0);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_VOLUME), START_WAV_DEFAULT_VOLUME);
+
+    stage_wav_ready(0);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  START_WAV_EXPLICIT_VOLUME), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_VOLUME),
+             START_WAV_EXPLICIT_VOLUME);
+
+    stage_wav_ready(0);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER, 0), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_VOLUME), 0);
+}
+
+/* The loop count is the caller's, forwarded with no sentinel of its own: 3 is
+   not AIL_init_sample's 1, and 0 -- Miles' "loop for ever" -- is the value an
+   implementation that quietly substituted the default would lose. */
+static void start_wav_forwards_the_loop_count(void)
+{
+    stage_wav_ready(0);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, START_WAV_LOOPS,
+                                  SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LOOP_COUNT), START_WAV_LOOPS);
+
+    stage_wav_ready(0);
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 0, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LOOP_COUNT), 0);
+}
+
+/* The PCM pointer is the data chunk's payload wherever that chunk sits, not a
+   fixed distance into the image: with a 'LIST' chunk ahead of the pair, the
+   address moves with it and the length is still the data chunk's own size
+   field.  The RIFF size at byte 4 is left truthful here and contradicted in the
+   parser's own cases; what this pins is that neither number is derived from the
+   wrapper. */
+static void start_wav_pcm_address_follows_the_data_chunk(void)
+{
+    int fmt_offset;
+    int data_offset;
+
+    stage_wav_ready(0);
+    wav_reset();
+    wav_put_wrapper(WAV_STAGE_SIZE - 8);
+    fmt_offset = wav_put_chunk(WAV_FIRST_CHUNK, "LIST", 0x30);
+    data_offset = wav_put_fmt(fmt_offset, 1, START_WAV_HEADER_RATE, 8);
+    wav_put_data(data_offset, START_WAV_PCM_LENGTH, WAV_PCM_MARKER);
+
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                  SFX_WAV_VOLUME_FROM_DEFAULT), 0);
+    CHECK_EQ(wav_played_offset(), data_offset + WAV_CHUNK_HEADER_SIZE);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LENGTH), START_WAV_PCM_LENGTH);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), START_WAV_HEADER_RATE);
+}
+
+/* The parser's answer is discarded (XOR EAX,EAX at 00030a80 overwrites it), so
+   a buffer that is not RIFF/WAVE is not rejected: the voice is still claimed
+   and still configured, and the descriptor AIL is handed is whatever the stack
+   slots held.  A rewrite that added the obvious `if the parse failed, return
+   -1` guard answers SFX_NO_SAMPLE_SLOT here instead, so this case passes an
+   explicit rate and volume and asserts only what is independent of the
+   untouched descriptor: the slot was claimed, AIL_set_sample_type ran (flags 2
+   is PUSH 0x2 at 00030b28 and is written whatever the format arm was), and the
+   caller's own rate and volume arrived.
+
+   Nothing is asserted about the sample's status, and deliberately so.
+   AIL_start_sample's worker at 000473f0 reaches its MOV dword ptr [ESI+0x4],0x4
+   only past CMP dword ptr [EAX+0x10],0x0 / JZ 00047462 at 00047410 and CMP
+   dword ptr [EAX+0x8],0x0 / JZ 00047462 at 00047416 -- the sample's length and
+   address, which AIL_set_sample_address stored straight out of descriptor
+   offsets 6 and 0xa (MOV [EAX+0x10],EDX at 000472c1, MOV [EAX+0x8],EDX at
+   000472ba).  On this path both are uninitialised stack, so whether the voice
+   really starts is not something this test can know. */
+static void start_wav_plays_a_buffer_that_is_not_a_wav_at_all(void)
+{
+    stage_wav_ready(0);
+    wav_stage[0] = 'X';
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, START_WAV_EXPLICIT_RATE,
+                                  START_WAV_EXPLICIT_VOLUME), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_FLAGS), 2);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), START_WAV_EXPLICIT_RATE);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_VOLUME),
+             START_WAV_EXPLICIT_VOLUME);
+
+    stage_wav_ready(0);
+    wav_stage[8] = 'X';
+    CHECK_EQ(fdps_audio_start_wav(wav_stage, 1, START_WAV_EXPLICIT_RATE,
+                                  START_WAV_EXPLICIT_VOLUME), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_VOLUME),
+             START_WAV_EXPLICIT_VOLUME);
+}
+
+/* The answer is the slot the scan stopped on and not what AIL_start_sample left
+   in EAX, and it is the slot the caller can then hand to
+   fdps_audio_sample_is_playing -- which is what both of this function's own
+   callers do with it.  Read end to end so the two functions are pinned as a
+   pair rather than separately. */
+static void start_wav_answers_the_slot_the_caller_can_wait_on(void)
+{
+    int slot;
+
+    stage_wav_ready(5);
+    slot = fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                SFX_WAV_VOLUME_FROM_DEFAULT);
+    CHECK_EQ(slot, 5);
+    CHECK_EQ(fdps_audio_sample_is_playing(slot), 1);
+
+    stage_wav_ready(-1);
+    slot = fdps_audio_start_wav(wav_stage, 1, SFX_WAV_RATE_FROM_HEADER,
+                                SFX_WAV_VOLUME_FROM_DEFAULT);
+    CHECK_EQ(slot, SFX_NO_SAMPLE_SLOT);
+}
+
 void run_audio_tests(void)
 {
     RUN_TEST(the_fixture_looks_like_a_handle_to_ail);
@@ -1925,4 +2308,17 @@ void run_audio_tests(void)
     RUN_TEST(wav_a_repeated_chunk_replaces_the_one_remembered);
     RUN_TEST(wav_stops_at_the_first_complete_pair);
     RUN_TEST(wav_writes_a_fourteen_byte_packed_descriptor);
+    RUN_TEST(start_wav_claims_the_first_free_slot);
+    RUN_TEST(start_wav_reaches_both_ends_of_the_table);
+    RUN_TEST(start_wav_with_every_voice_busy_answers_minus_one);
+    RUN_TEST(start_wav_needs_both_audio_flags);
+    RUN_TEST(start_wav_format_comes_from_the_wav_header);
+    RUN_TEST(start_wav_an_unknown_channel_bit_pair_falls_through_to_three);
+    RUN_TEST(start_wav_reads_one_byte_of_each_descriptor_field);
+    RUN_TEST(start_wav_rate_sentinel_takes_the_header_rate);
+    RUN_TEST(start_wav_volume_sentinel_means_sixty);
+    RUN_TEST(start_wav_forwards_the_loop_count);
+    RUN_TEST(start_wav_pcm_address_follows_the_data_chunk);
+    RUN_TEST(start_wav_plays_a_buffer_that_is_not_a_wav_at_all);
+    RUN_TEST(start_wav_answers_the_slot_the_caller_can_wait_on);
 }

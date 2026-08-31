@@ -58,6 +58,13 @@
 #define SFX_SAMPLE_LOOP_COUNT 1
 #define SFX_SAMPLE_VOLUME 0x28
 
+/* The volume the .WAV path substitutes when the caller asked for the default
+   with SFX_WAV_VOLUME_FROM_DEFAULT.  It is louder than the .SAF path's fixed
+   0x28 above, and it is a separate literal in the image (PUSH 0x3c at
+   00030bba) rather than a shared constant: the two paths are not required to
+   agree and in the shipped game they do not. */
+#define SFX_WAV_SAMPLE_VOLUME 0x3c
+
 /* A .WAV image opens with the 12-byte RIFF wrapper -- the four id bytes, the
    32-bit size of everything after them, and the "WAVE" form type -- and the
    chunk list starts right behind it.  Every chunk is an 8-byte header, four id
@@ -590,4 +597,125 @@ int fdps_wav_parse_header(void *wav_data, void *info_out)
     *(unsigned char **) (info + WAV_INFO_PCM_DATA_OFFSET) =
         data_chunk + RIFF_CHUNK_PAYLOAD_OFFSET;
     return 0;
+}
+
+/* 00030a00.  The .WAV twin of fdps_sfx_play: the same two flag guards onto a
+   shared -1, the same scan for the first slot whose AIL_sample_status is not 4,
+   and the same four-arm format ladder -- with a header parse in place of the
+   .SAF item lookup, and with three of the six values AIL is given coming from
+   the caller instead of from the file.
+
+   The frame is the plain -od one, PUSH EBX/ESI/EDI/EBP / MOV EBP,ESP / SUB
+   ESP,0x1c, so the four arguments sit at [EBP+0x14], [EBP+0x18], [EBP+0x1c] and
+   [EBP+0x20] and the caller clears them: all six call sites in the image push
+   right to left and follow the CALL with ADD ESP,0x10 (0002a22a, 0001dfe9,
+   0002648d, 00028a23, 00036946, 00021a4f).  Every one of the six pushes the same
+   triple -- PUSH -0x1 for the volume, PUSH -0x1 for the rate, PUSH 0x1 for the
+   loop count -- so the only argument that varies in the shipped game is the
+   image itself, and the two default paths below are the ones that always run.
+   Two callers keep the answer (MOV dword ptr [EBP-0x1c],EAX at 0001dfec and at
+   00036949); the other four drop it.
+
+   The 14-byte descriptor is this function's own stack local at [EBP-0x1c], and
+   the three dwords are read back from the odd offsets fdps_wav_parse_header
+   wrote them to -- [EBP-0x1a] for the rate, [EBP-0x16] for the byte count and
+   [EBP-0x12] for the PCM address -- which is why it is a byte array here and not
+   a struct.  The two byte fields are read zero-extended (XOR EAX,EAX / MOV AL,
+   byte ptr [EBP-0x1c] / CMP EAX,0x1), so the ladder's comparisons are unsigned
+   and every pair the first three tests miss falls into the last arm rather than
+   being rejected.
+
+   The parse's answer is thrown away, and it must stay thrown away
+   (rebuild_info/pitfalls.md).  XOR EAX,EAX at 00030a80 overwrites it before
+   anything reads it, so on a buffer that is not RIFF/WAVE -- where the parser
+   returns -1 without writing a byte of the descriptor -- this function goes on
+   to hand AIL whatever the stack slots happened to hold as the format, the
+   address and the length.  Adding the obvious `if (parse failed) return -1`
+   would make the rebuild behave differently from the original.
+
+   Two arguments carry a -1 sentinel and each is tested exactly once, before any
+   AIL call: CMP dword ptr [EBP+0x1c],-0x1 / JNZ at 00030ae4 replaces the rate
+   with the descriptor's, and CMP dword ptr [EBP+0x20],-0x1 / JZ at 00030b96
+   picks between the caller's volume and 0x3c.  The rate substitution writes back
+   into the argument slot, so the value that reaches AIL is the same variable
+   either way.
+
+   The call order is the point of comparison with fdps_sfx_play.  Both make seven
+   calls on the claimed handle, but this one puts AIL_set_sample_volume last, at
+   00030bb0/00030bcc -- after AIL_start_sample at 00030b8e -- where the .SAF path
+   sets it before the start.  The sound is therefore already running when its
+   volume is set, and AIL's worker at 00047330 rebuilds the voice's volume table
+   on a live sample.
+
+   One value comes back from a CALL and it is used once: EAX from
+   AIL_sample_status at 00030a51, compared with 4 at 00030a59.  Every other CALL
+   here returns void or has its answer discarded, and the slot number the
+   function returns comes from [EBP-0xc] via the shared return slot at
+   [EBP-0x4], not from AIL_start_sample.
+
+   The index reaches the table as LEA EAX,[EAX*0x4+0x0] / PUSH dword ptr
+   [EAX+0x69d30] at all seven call sites -- base 0x69d30 with nothing folded into
+   it, last slot 0x69d4c, next global at 0x69d50. */
+int fdps_audio_start_wav(void *wav_data, int loop_count, int playback_rate,
+                         int volume)
+{
+    unsigned char wav_info[WAV_INFO_SIZE];
+    int sample_format;
+    int slot;
+
+    if (data_fdps_audio_sfx_driver_available_flag == 0
+        || data_fdps_audio_sfx_enabled_flag == 0) {
+        return SFX_NO_SAMPLE_SLOT;
+    }
+
+    slot = 0;
+    while (slot < SFX_SAMPLE_SLOT_COUNT
+           && AIL_sample_status(data_fdps_audio_sample_handle_table[slot])
+              == AIL_SAMPLE_STATUS_PLAYING) {
+        slot++;
+    }
+    if (slot == SFX_SAMPLE_SLOT_COUNT) {
+        return SFX_NO_SAMPLE_SLOT;
+    }
+
+    fdps_wav_parse_header(wav_data, wav_info);
+
+    if (wav_info[WAV_INFO_CHANNELS_OFFSET] == 1
+        && wav_info[WAV_INFO_BITS_OFFSET] == 8) {
+        sample_format = AIL_SAMPLE_FORMAT_MONO_8;
+    } else if (wav_info[WAV_INFO_CHANNELS_OFFSET] == 1
+               && wav_info[WAV_INFO_BITS_OFFSET] == 16) {
+        sample_format = AIL_SAMPLE_FORMAT_MONO_16;
+    } else if (wav_info[WAV_INFO_CHANNELS_OFFSET] == 2
+               && wav_info[WAV_INFO_BITS_OFFSET] == 8) {
+        sample_format = AIL_SAMPLE_FORMAT_STEREO_8;
+    } else {
+        sample_format = AIL_SAMPLE_FORMAT_STEREO_16;
+    }
+
+    if (playback_rate == SFX_WAV_RATE_FROM_HEADER) {
+        playback_rate = *(int *) (wav_info + WAV_INFO_RATE_OFFSET);
+    }
+
+    AIL_init_sample(data_fdps_audio_sample_handle_table[slot]);
+    AIL_set_sample_address(data_fdps_audio_sample_handle_table[slot],
+                           *(unsigned int *)
+                           (wav_info + WAV_INFO_PCM_DATA_OFFSET),
+                           *(unsigned int *)
+                           (wav_info + WAV_INFO_PCM_LENGTH_OFFSET));
+    AIL_set_sample_type(data_fdps_audio_sample_handle_table[slot],
+                        sample_format, AIL_SAMPLE_TYPE_FLAGS);
+    AIL_set_sample_loop_count(data_fdps_audio_sample_handle_table[slot],
+                              loop_count);
+    AIL_set_sample_playback_rate(data_fdps_audio_sample_handle_table[slot],
+                                 playback_rate);
+    AIL_start_sample(data_fdps_audio_sample_handle_table[slot]);
+    if (volume != SFX_WAV_VOLUME_FROM_DEFAULT) {
+        AIL_set_sample_volume(data_fdps_audio_sample_handle_table[slot],
+                              volume);
+    } else {
+        AIL_set_sample_volume(data_fdps_audio_sample_handle_table[slot],
+                              SFX_WAV_SAMPLE_VOLUME);
+    }
+    return slot;
 }

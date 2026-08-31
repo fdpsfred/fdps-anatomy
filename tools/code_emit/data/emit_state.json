@@ -1003,6 +1003,14 @@
       "status": "committed",
       "emitted_against": "0x1cc",
       "rounds": 0
+    },
+    "00030a00": {
+      "name": "fdps_audio_start_wav",
+      "target": "audio.c",
+      "body_size": "0x1e4",
+      "status": "committed",
+      "emitted_against": "0x1e4",
+      "rounds": 1
     }
   }
 }

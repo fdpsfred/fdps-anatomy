@@ -242,4 +242,33 @@ extern void fdps_audio_set_sample_playback_rate(int samples_per_sec);
 extern int fdps_wav_parse_header(void *wav_data, void *info_out);
 #pragma aux fdps_wav_parse_header "*" parm caller [];
 
+/* The two "let the function decide" sentinels of fdps_audio_start_wav, each
+   tested as an equality against -1.  Both are what all six call sites in the
+   game pass, so the two default paths are the only ones a real session takes:
+   the rate then comes out of the .WAV's own header and the volume is the fixed
+   one the .WAV path uses. */
+#define SFX_WAV_RATE_FROM_HEADER (-1)
+#define SFX_WAV_VOLUME_FROM_DEFAULT (-1)
+
+/* Starts the whole .WAV file image at `wav_data` -- already read into memory,
+   never a file handle -- on the first of the eight sample handles that is not
+   already playing, and answers with the slot it used or SFX_NO_SAMPLE_SLOT when
+   it started nothing: sound effects switched off, no DIG driver, or all eight
+   voices busy.  The answer is what fdps_audio_sample_is_playing and
+   fdps_audio_stop_sample are then given.
+
+   `loop_count` goes to AIL unchanged, 1 for one playthrough.  `playback_rate`
+   is a rate in Hz, or SFX_WAV_RATE_FROM_HEADER to take the rate the file
+   declares.  `volume` is an AIL sample volume, or SFX_WAV_VOLUME_FROM_DEFAULT
+   to take the .WAV path's own fixed one.  All six callers pass 1, the rate
+   sentinel and the volume sentinel.
+
+   The image is neither NULL-checked nor validated: a buffer that is not
+   RIFF/WAVE is not rejected, and the voice is configured and started from
+   whatever the unparsed descriptor held.  That is the original's behaviour and
+   not an oversight to guard against (rebuild_info/pitfalls.md). */
+extern int fdps_audio_start_wav(void *wav_data, int loop_count,
+                                int playback_rate, int volume);
+#pragma aux fdps_audio_start_wav "*" parm caller [];
+
 #endif
