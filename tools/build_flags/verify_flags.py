@@ -77,6 +77,10 @@ CHECKS = [
      r"mov\s+dword ptr -4H\[ebp\],eax\n\s+mov\s+eax,dword ptr -4H\[ebp\]", None,
      "0002f723 mov [ebp-4],eax then 0002f732 mov eax,[ebp-4]"),
 ]
+# Deliberately not a check: the argument push form.  The original uses BOTH
+# MOV EAX,slot / PUSH EAX and PUSH slot, so no single flag reproduces it and
+# there is nothing here for a pass/fail row to assert.  push_form.py measures
+# it; rebuild_info/build_flags.md records where that got to.
 
 # (label, source, line pattern identifying the datum, expected segment, evidence)
 # Data items are matched by their bytes, not by label name: wdisasm numbers
@@ -166,6 +170,9 @@ def compile_all():
 
 
 def main():
+    global CFLAGS
+    if len(sys.argv) > 1:
+        CFLAGS = " ".join(sys.argv[1:])
     print("flags: %s   (DOS hosted wcc386, Watcom 10.0a, in DOSBox-X)\n" % CFLAGS)
     listings = compile_all()
     failed = 0

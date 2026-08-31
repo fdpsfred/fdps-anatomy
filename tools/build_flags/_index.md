@@ -16,7 +16,8 @@
 | `lib_bytematch.py` | 拿 `FDPS.LE` 裡沒有重定位的位元組串去搜每個版本的 `LIB386`，判定連的是哪個 lib 變體（`3S` 還是 `3R`）與哪一版。純檔案比對，不執行任何工具 |
 | `dosbox_link.py` | 編譯並連結探針，比對 MZ stub、object 佈局、堆疊大小與模擬器是否被連進去 |
 | `link_defaults.py` | 分別在有／沒有 `option stack` 與 `name` 的情況下各連一次，量出 wlink 的預設堆疊大小，以及 LE 的 resident name 究竟取自輸出檔名還是第一個 `.obj` |
-| `verify_flags.py` | **回歸閘**：用定案的旗標組編譯全部探針，逐項比對 13 個原版特徵，全過才回 0 |
+| `push_form.py` | 找出什麼會讓 `wcc386` 把記憶體運算元經 EAX 中轉再推成引數。兩軸：`--flags` 在定案旗標上逐一多加一個旗標，`--versions` 用定案旗標跑遍每個安裝版本。結論是沒有任何一組產出原版那種混用 |
+| `verify_flags.py` | **回歸閘**：用定案的旗標組編譯全部探針，逐項比對 15 個原版特徵，全過才回 0。可用 `python verify_flags.py <旗標...>` 換一組旗標跑，用來證明某個旗標差異在這 15 項上分不出來 |
 
 ## 探針原始碼
 
@@ -29,6 +30,7 @@
 | `shorts.c` | 16-bit 載入的處理方式，分辨 `-4s` 與 `-5s` |
 | `locinit.c` | const 物件與區域陣列初值影像的落點，分辨 `-mf` 與 `-ms` |
 | `scale.c` | 索引縮放形式（`lea` 還是 `shl`），四種來源寫法各一個 function。這是目前沒有任何安裝版本能重現原版的那一項 |
+| `pusharg.c` | 引數是直接 `PUSH` 記憶體還是先 `MOV EAX` 再推。兩個 function 分別推區域變數與推傳入參數 |
 
 ## 注意
 
