@@ -4,7 +4,13 @@
  * container the clips come out of, and rebuild_info/ail_link.md for how the
  * vendor library is linked.  This file owns the sample-handle table and the
  * driver-available flag; it holds no other state.
+ *
+ * rand comes from <stdlib.h>.  It is a real call in the original -- CALL
+ * 0x00042cf8 from the timer handler at 000307a1 -- because the flag set
+ * carries no -oi, so __INLINE_FUNCTIONS__ is not defined and the header leaves
+ * rand a call.
  */
+#include <stdlib.h>
 #include "ailv3.h"
 #include "gamedata.h"
 #include "audio.h"
@@ -278,4 +284,41 @@ int fdps_audio_sample_is_playing(int sample_index)
 {
     return AIL_sample_status(data_fdps_audio_sample_handle_table[sample_index])
            == AIL_SAMPLE_STATUS_PLAYING;
+}
+
+/* 00030790.  Straight-line, no argument, no local and no branch: a Watcom
+   frame (PUSH ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 -- the original leaves EBX
+   out of the save set, where the rebuild's prologue keeps it, which is
+   register allocation and outside ADR-0001) around exactly two effects, then
+   the mirrored POP sequence and RET.
+
+   The increment is written ++x rather than x++ on purpose.  The counter is
+   volatile, so post-increment makes the compiler materialise the old value it
+   then throws away: wcc386 emits a dead MOV EAX,[counter] ahead of the INC for
+   x++ and the bare INC for ++x, which is the original's single instruction.
+
+   INC dword ptr [0x00069d64] at 0003079b is the whole of the first effect and
+   the only memory operand anywhere in the body: nothing else this file owns is
+   read or written, no audio flag is consulted and no AIL entry point is
+   reached.  It is also the only write to that counter in the image -- one
+   READ_WRITE among its references, against some fifty routines that only read
+   it -- so the game's clock advances here and nowhere else, and it advances by
+   exactly one per tick with a 32-bit wrap and no reset path.
+
+   CALL rand at 000307a1 is the second effect and its result is thrown away:
+   EAX still holds it at the RET but the function is reached through a pointer
+   AIL calls from its timer interrupt, so there is no caller to read it.  The
+   draw is the point -- one turn of the CRT's LCG per tick, which is what keeps
+   the game's rolls from repeating between two runs that press the same keys.
+   Removing the call would compile, and would change every random outcome in
+   the game.
+
+   Stack probes have to stay off in this translation unit.  The original's
+   prologue is SUB ESP,0x0 with no CALL __CHK, which is the -s the game code is
+   built with (rebuild_info/build_flags.md); a probe here would run on the
+   interrupt's own stack, which is exactly the case the all-on setting kills. */
+void fdps_timer_tick_handler(void)
+{
+    ++data_fdps_timer_tick_counter;
+    rand();
 }

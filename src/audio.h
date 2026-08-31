@@ -103,4 +103,17 @@ extern int fdps_audio_start_sample(void *pcm_data, unsigned int pcm_len,
 extern int fdps_audio_sample_is_playing(int sample_index);
 #pragma aux fdps_audio_sample_is_playing "*" parm caller [];
 
+/* The timer tick callback.  Nothing in the game calls it by name: its address
+   is handed to AIL_register_timer by fdps_audio_timer_install@000307b0, and
+   from then on AIL's timer interrupt calls it at the registered frequency.  It
+   advances data_fdps_timer_tick_counter (gamedata.h) by one -- it is the only
+   writer of the game's clock -- and draws one rand() to churn the CRT's
+   generator, discarding the value.  It reads no argument, touches neither
+   audio flag nor any sample handle, and cannot fail.
+
+   It is declared here so that the installer can take its address; a caller
+   that invokes it directly would be doing something the original never does. */
+extern void fdps_timer_tick_handler(void);
+#pragma aux fdps_timer_tick_handler "*" parm caller [];
+
 #endif

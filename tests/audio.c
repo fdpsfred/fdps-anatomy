@@ -41,6 +41,7 @@
  * DMA is programmed, and nothing here needs a real sound card.  The first test
  * checks that premise against the linked library instead of assuming it.
  */
+#include <stdlib.h>
 #include "testharn.h"
 #include "ailv3.h"
 #include "gamedata.h"
@@ -992,6 +993,120 @@ static void is_playing_only_reads_the_handle(void)
              (unsigned int) status_sample);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_timer_tick_handler @ 00030790
+ *
+ * The whole body is INC dword ptr [0x00069d64] and CALL rand, so there are
+ * exactly two things to observe and both are global: the counter's value, and
+ * how far the CRT generator has been wound on.  The second is observed by
+ * reseeding and comparing against the sequence the same seed gives with no
+ * tick in the middle -- the real rand is linked in, so the numbers come out of
+ * the library rather than out of this file.
+ *
+ * There is no return value to check: EAX holds rand()'s answer at the RET and
+ * nothing reads it, because AIL's timer interrupt is what calls this through
+ * the pointer fdps_audio_timer_install registered.
+ * ------------------------------------------------------------------ */
+
+/* Any seed does; 1 is the value the CRT starts at, so a run that never seeds
+   sees the same stream the first assertion below pins. */
+#define TICK_RAND_SEED 1
+
+/* Arbitrary starting counts, chosen only to be far from zero and from each
+   other so that an increment cannot be confused with a store. */
+#define TICK_START_COUNT 0x1234
+#define TICK_MARKER_RATE 0x5a5a
+
+/* INC on a 32-bit destination, so the counter advances by exactly one and
+   nothing in the body can reset it or skip a tick. */
+static void a_tick_advances_the_clock_by_one(void)
+{
+    data_fdps_timer_tick_counter = 0;
+    fdps_timer_tick_handler();
+    CHECK_EQ(data_fdps_timer_tick_counter, 1);
+    fdps_timer_tick_handler();
+    CHECK_EQ(data_fdps_timer_tick_counter, 2);
+
+    data_fdps_timer_tick_counter = TICK_START_COUNT;
+    fdps_timer_tick_handler();
+    CHECK_EQ(data_fdps_timer_tick_counter, TICK_START_COUNT + 1);
+}
+
+/* The counter is a full unsigned dword and the increment is a plain INC, so
+   the tick after 0xffffffff is 0 -- there is no saturation and no guard.  The
+   readers that latch a copy and test it for equality are unaffected by that;
+   a reader that ordered two samples would not be, which is why the wrap is
+   pinned here rather than assumed away. */
+static void the_counter_wraps_at_32_bits(void)
+{
+    data_fdps_timer_tick_counter = 0xffffffffu;
+    CHECK_EQ(data_fdps_timer_tick_counter == 0xffffffffu, 1);
+    fdps_timer_tick_handler();
+    CHECK_EQ(data_fdps_timer_tick_counter, 0);
+}
+
+/* One CALL rand per tick, in straight-line code with no branch, so a tick
+   consumes exactly one value from the generator: after reseeding, a tick
+   followed by rand() gives what the second rand() of that seed gives, and two
+   ticks give the third. */
+static void a_tick_draws_exactly_one_rand(void)
+{
+    int first;
+    int second;
+    int third;
+
+    srand(TICK_RAND_SEED);
+    first = rand();
+    second = rand();
+    third = rand();
+
+    /* The premise the two checks below rest on: this seed's first three
+       values are not all the same number. */
+    CHECK_EQ(first == second, 0);
+    CHECK_EQ(second == third, 0);
+
+    srand(TICK_RAND_SEED);
+    fdps_timer_tick_handler();
+    CHECK_EQ(rand(), second);
+
+    srand(TICK_RAND_SEED);
+    fdps_timer_tick_handler();
+    fdps_timer_tick_handler();
+    CHECK_EQ(rand(), third);
+}
+
+/* The counter is the only memory operand in the body, so a tick leaves every
+   other piece of audio state exactly as it stood: neither flag is read or
+   written, the playback rate is untouched, and no sample handle is disturbed.
+   Both flags are staged clear here on purpose -- a tick has to run whether or
+   not the DIG driver ever installed, because the clock is what the whole game
+   paces on and not just the sound. */
+static void a_tick_touches_nothing_but_the_counter(void)
+{
+    int slot;
+
+    stage_status_slot(IS_PLAYING_TEST_SLOT, STATUS_PLAYING);
+    for (slot = 0; slot < SFX_SAMPLE_SLOT_COUNT; slot++) {
+        data_fdps_audio_sample_handle_table[slot] = (void *) status_sample;
+    }
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    data_fdps_audio_sfx_enabled_flag = 0;
+    data_fdps_audio_sample_playback_rate = TICK_MARKER_RATE;
+    data_fdps_timer_tick_counter = TICK_START_COUNT;
+
+    fdps_timer_tick_handler();
+
+    CHECK_EQ(data_fdps_timer_tick_counter, TICK_START_COUNT + 1);
+    CHECK_EQ(data_fdps_audio_sfx_driver_available_flag, 0);
+    CHECK_EQ(data_fdps_audio_sfx_enabled_flag, 0);
+    CHECK_EQ(data_fdps_audio_sample_playback_rate, TICK_MARKER_RATE);
+    for (slot = 0; slot < SFX_SAMPLE_SLOT_COUNT; slot++) {
+        CHECK_EQ((unsigned int) data_fdps_audio_sample_handle_table[slot],
+                 (unsigned int) status_sample);
+    }
+    CHECK_EQ(sample_field(status_sample, SAMPLE_STATUS), STATUS_PLAYING);
+}
+
 void run_audio_tests(void)
 {
     RUN_TEST(the_fixture_looks_like_a_handle_to_ail);
@@ -1031,4 +1146,8 @@ void run_audio_tests(void)
     RUN_TEST(is_playing_answers_zero_for_a_null_handle);
     RUN_TEST(is_playing_consults_neither_audio_flag);
     RUN_TEST(is_playing_only_reads_the_handle);
+    RUN_TEST(a_tick_advances_the_clock_by_one);
+    RUN_TEST(the_counter_wraps_at_32_bits);
+    RUN_TEST(a_tick_draws_exactly_one_rand);
+    RUN_TEST(a_tick_touches_nothing_but_the_counter);
 }

@@ -963,6 +963,14 @@
       "status": "committed",
       "emitted_against": "0x43",
       "rounds": 0
+    },
+    "00030790": {
+      "name": "fdps_timer_tick_handler",
+      "target": "audio.c",
+      "body_size": "0x1a",
+      "status": "committed",
+      "emitted_against": "0x1a",
+      "rounds": 0
     }
   }
 }
