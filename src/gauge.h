@@ -140,6 +140,56 @@ extern void fdps_draw_stat_gauge(unsigned char *dest, int dest_stride,
                                  int gauge_index, int max, int current);
 #pragma aux fdps_draw_stat_gauge "*" parm caller [];
 
+/* Draws one battle unit's 43x6 gauge bar at dst, filled to fill_width pixels,
+   in one of three painting modes.
+
+   The art is the three 43x6 graphics of the sheet
+   data_fdps_unit_gauge_sheet_ptr points at (gamedata.h): graphic 0 is the
+   empty track and graphics 1 and 2 are the two filled colours, one per side of
+   the battle.  The bar is painted as four segments, always in this order: the
+   two-pixel left cap out of graphic gfx_index, the fill_width-wide run out of
+   the same graphic, the remainder of the 41-pixel interior out of GRAPHIC 0,
+   and last the two-pixel right cap out of graphic gfx_index again.  The fill
+   run is skipped entirely at a fill_width of 0 or below.
+
+   ONLY THE FILLED RUN HONOURS gfx_index.  The remainder is always graphic 0 at
+   its own columns, never gfx_index advanced by fill_width; drawing the obvious
+   "same graphic, later columns" paints the whole bar in the filled colour.
+
+   THE REMAINDER RUNS UNDER THE RIGHT CAP AND THAT IS LOAD-BEARING.  It is
+   41 - fill_width wide starting at column 2, so it reaches column 42 and
+   covers the right cap's two columns, which the fourth blit then paints back
+   over.  Trimming it to 39 - fill_width, or drawing the caps first, changes
+   the picture twice over: wherever the cap's own art is transparent the
+   remainder's graphic-0 pixels are what shows through, and in blit_mode 1
+   those two columns are blended against a destination that already carries the
+   remainder rather than against the surface underneath.
+
+   THE CLAMP IS ONE-SIDED.  fill_width below 0 is forced to 0, but nothing caps
+   it at 41: a caller whose current exceeds its maximum blits more than 41
+   columns out of a 43-pitch source, which reads on into the next row of the
+   art and past the right cap, and the remainder -- a negative width -- draws
+   nothing.  Adding the symmetric upper clamp turns that smear into a clean
+   full bar, which is not what the original draws.
+
+   blit_mode picks the painter for all four segments and is not an enumeration
+   with a default: 0 is fdps_blit_transparent_rect, 1 is
+   fdps_blit_blend_transparent_rect with the destination handed over as its own
+   background, and ANY OTHER VALUE is fdps_blit_tint_transparent_rect with
+   blit_mode ITSELF as the tint colour index.  alpha is the blend strength the
+   two blended painters take and is never read when blit_mode is 0.  Both
+   blended painters composite through data_fdps_palette_shade_ramp_table and
+   data_fdps_inverse_palette_cube (gamedata.h), which this function passes in
+   as arguments the way every other caller of that family does.
+
+   dst points at the bar's top-left pixel in an 8bpp surface and dst_stride is
+   that surface's pitch in bytes; both are used exactly as given, with no
+   clipping and no bound of any kind. */
+extern void fdps_draw_unit_gauge(unsigned char *dst, int dst_stride,
+                                 int gfx_index, int fill_width, int blit_mode,
+                                 int alpha);
+#pragma aux fdps_draw_unit_gauge "*" parm caller [];
+
 /* Works out where one battle unit's HP gauge goes on screen while a combat
    animation is playing, and writes the position through out_position.
 

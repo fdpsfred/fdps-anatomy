@@ -34,6 +34,18 @@
  * of their own and point data_fdps_gauge_fill_sheet_ptr at it as well, since
  * in the shipped game that global is only live inside a combat animation.
  *
+ * The unit gauge cases come from the assembly at 0001cb00 -- IMUL EAX,dword
+ * ptr [EBP+0x1c],0x102 at 0001cb0c for the graphic stride, the signed CMP/JGE
+ * clamp at 0001cb1e, the CMP ...,0x0 / JNZ at 0001cb2b and CMP ...,0x1 / JNZ at
+ * 0001cbcb that pick the painter, PUSH 0x2b and PUSH 0x6 at every blit, PUSH
+ * 0x2 for the two caps, MOV EAX,0x29 / SUB EAX,[EBP+0x20] at 0001cb79 for the
+ * remainder's width, and MOV EAX,[0x000643b4] at 0001cb92 -- which is what
+ * makes the remainder come out of graphic 0 -- together with the 0x306 the
+ * loader mallocs at 00029cd5.  They stage a sheet of their own and point
+ * data_fdps_unit_gauge_sheet_ptr at it, and the blended cases stage the two
+ * blending tables as well, for the same reason: ticket 23 owns what any of the
+ * three really holds.
+ *
  * The stat gauge cases at the very end come from the assembly at 000192c0 --
  * CMP dword ptr [EBP+0x20],0x0 / JG at 000192cc..000192d0 for the empty path,
  * IMUL EDX,dword ptr [EBP+0x24],0x7d / ADD EDX,dword ptr [EBP+0x20] / DEC EDX
@@ -1137,6 +1149,402 @@ static void stat_gauge_dest_and_stride_pass_through(void)
     CHECK_EQ((int) fill_canvas[base + 4 * 0x80 + 4], FILL_GUARD);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_draw_unit_gauge @ 0001cb00
+ * ------------------------------------------------------------------ */
+
+/* The unit gauge sheet's geometry, again written out from the assembly rather
+   than taken from a header: IMUL EAX,dword ptr [EBP+0x1c],0x102 at 0001cb0c
+   for the graphic stride, PUSH 0x2b for the source row pitch and PUSH 0x6 for
+   the row count at every blit, PUSH 0x2 for each cap and 0x29 for the interior
+   and for the right cap's column -- and 3 * 0x102 = 0x306, which is the size
+   the loader mallocs at 00029cd5. */
+#define UNIT_ART_GRAPHIC_STRIDE 0x102
+#define UNIT_ART_ROW_PITCH 0x2b
+#define UNIT_BAR_WIDTH 0x2b
+#define UNIT_BAR_ROWS 6
+#define UNIT_CAP_WIDTH 2
+#define UNIT_INTERIOR 0x29
+#define UNIT_SHEET_BYTES 0x306
+
+/* Room for a bar that runs well past its own right edge -- the overfull case
+   blits 0x30 columns starting at column 2 -- with rows above and below and
+   columns either side, so an overrun lands on a guard byte and not off the
+   array.  0xff is a value the staged art cannot hold: the sheet is filled
+   1..251. */
+#define UNIT_DST_PITCH 0x60
+#define UNIT_DST_ROWS 10
+#define UNIT_ORIGIN_ROW 2
+#define UNIT_ORIGIN_COLUMN 8
+#define UNIT_GUARD 0xff
+
+/* The ramp's 18 rows of 256 entries and the cube's 16x16x16. */
+#define RAMP_ROW_ENTRIES 256
+#define RAMP_WEIGHT_ROWS 9
+#define CUBE_ENTRIES 4096
+
+static unsigned char unit_sheet[UNIT_SHEET_BYTES];
+static unsigned char unit_canvas[UNIT_DST_ROWS * UNIT_DST_PITCH];
+
+/* Distinct neighbours and distinct values a row pitch or a graphic stride
+   apart, so an assertion can tell graphic 2 column 12 from graphic 0 column 12
+   and from graphic 2 row 1 column 0.  1..251, so nothing is the transparency
+   key by accident; the cases that want a transparent pixel plant one. */
+static void stage_unit(void)
+{
+    int offset;
+
+    for (offset = 0; offset < UNIT_SHEET_BYTES; offset++) {
+        unit_sheet[offset] = (unsigned char) (offset % 251 + 1);
+    }
+    for (offset = 0; offset < UNIT_DST_ROWS * UNIT_DST_PITCH; offset++) {
+        unit_canvas[offset] = UNIT_GUARD;
+    }
+    data_fdps_unit_gauge_sheet_ptr = unit_sheet;
+}
+
+/* The two blending tables the blended painters composite through, staged so
+   that what they write is a readable function of the two pixels that went into
+   it.  The real tables would make every expected value below the outcome of a
+   colour match, and ticket 23 owns what they hold anyway.
+
+   Row r of the ramp, for r up to 8, holds ((pixel + r) & 0xf) << 4, which after
+   the painters' shift by four and mask with 0x0f0f0f is the BLUE nibble; row
+   9 + r holds ((pixel + r) & 0xf) << 12, which is the GREEN nibble.  The fold
+   (v & 0xffff) | (v >> 12) leaves green above red above blue, so with red
+   always 0 the cube index is just those two nibbles, and the cube entry at that
+   index is the same two nibbles side by side in one byte. */
+static void stage_tables(void)
+{
+    int row;
+    int pixel;
+    int index;
+
+    for (row = 0; row < RAMP_WEIGHT_ROWS; row++) {
+        for (pixel = 0; pixel < RAMP_ROW_ENTRIES; pixel++) {
+            data_fdps_palette_shade_ramp_table[row * RAMP_ROW_ENTRIES + pixel] =
+                (unsigned int) (((pixel + row) & 0x0f) << 4);
+            data_fdps_palette_shade_ramp_table[(row + RAMP_WEIGHT_ROWS)
+                                               * RAMP_ROW_ENTRIES + pixel] =
+                (unsigned int) (((pixel + row) & 0x0f) << 12);
+        }
+    }
+    for (index = 0; index < CUBE_ENTRIES; index++) {
+        data_fdps_inverse_palette_cube[index] =
+            (unsigned char) ((((index >> 8) & 0x0f) << 4) | (index & 0x0f));
+    }
+}
+
+/* What the staged tables make a blended painter write.  low_pixel is whichever
+   pixel the painter reads at ramp row alpha -- the foreground for
+   fdps_blit_blend_transparent_rect, the tint colour for
+   fdps_blit_tint_transparent_rect -- and high_pixel is the one it reads nine
+   rows on: the background for the first, the source pixel for the second.
+   Only alpha 0..8 is spelled this way; above 8 the painters fold and swap. */
+static int table_blend(int low_pixel, int high_pixel, int alpha)
+{
+    return (((high_pixel + alpha) & 0x0f) << 4) | ((low_pixel + alpha) & 0x0f);
+}
+
+/* Where the caller says the bar's top-left pixel is. */
+static unsigned char *unit_dst(void)
+{
+    return unit_canvas + UNIT_ORIGIN_ROW * UNIT_DST_PITCH + UNIT_ORIGIN_COLUMN;
+}
+
+/* One destination pixel, in the bar's own coordinates. */
+static int unit_drawn(int row, int column)
+{
+    return (int) unit_canvas[(UNIT_ORIGIN_ROW + row) * UNIT_DST_PITCH
+                             + UNIT_ORIGIN_COLUMN + column];
+}
+
+/* One source pixel, addressed the way the assembly addresses it. */
+static int unit_art(int graphic, int row, int column)
+{
+    return (int) unit_sheet[graphic * UNIT_ART_GRAPHIC_STRIDE
+                            + row * UNIT_ART_ROW_PITCH + column];
+}
+
+/* The four segments and where each one's pixels come from: the 2-wide cap out
+   of graphic 2, ten filled columns out of the same graphic, the rest of the
+   interior out of GRAPHIC 0 at its own columns, and the right cap out of
+   graphic 2 again.  Row 5 is checked alongside row 0 because every blit is
+   handed 6 as its row count and steps the destination by dst_stride. */
+static void unit_gauge_paints_cap_fill_track_cap(void)
+{
+    stage_unit();
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 2, 10, 0, 0);
+
+    CHECK_EQ(unit_drawn(0, 0), unit_art(2, 0, 0));
+    CHECK_EQ(unit_drawn(0, 1), unit_art(2, 0, 1));
+    CHECK_EQ(unit_drawn(5, 1), unit_art(2, 5, 1));
+
+    CHECK_EQ(unit_drawn(0, 2), unit_art(2, 0, 2));
+    CHECK_EQ(unit_drawn(0, 11), unit_art(2, 0, 11));
+    CHECK_EQ(unit_drawn(5, 11), unit_art(2, 5, 11));
+
+    CHECK_EQ(unit_art(0, 0, 12) != unit_art(2, 0, 12), 1);
+    CHECK_EQ(unit_drawn(0, 12), unit_art(0, 0, 12));
+    CHECK_EQ(unit_drawn(0, 0x28), unit_art(0, 0, 0x28));
+    CHECK_EQ(unit_drawn(5, 12), unit_art(0, 5, 12));
+
+    CHECK_EQ(unit_art(0, 0, UNIT_INTERIOR) != unit_art(2, 0, UNIT_INTERIOR), 1);
+    CHECK_EQ(unit_drawn(0, UNIT_INTERIOR), unit_art(2, 0, UNIT_INTERIOR));
+    CHECK_EQ(unit_drawn(0, UNIT_BAR_WIDTH - 1),
+             unit_art(2, 0, UNIT_BAR_WIDTH - 1));
+    CHECK_EQ(unit_drawn(5, UNIT_BAR_WIDTH - 1),
+             unit_art(2, 5, UNIT_BAR_WIDTH - 1));
+
+    CHECK_EQ(unit_drawn(0, -1), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, UNIT_BAR_WIDTH), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(-1, 0), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(UNIT_BAR_ROWS, 0), UNIT_GUARD);
+}
+
+/* IMUL EAX,dword ptr [EBP+0x1c],0x102 at 0001cb0c: graphic 2 starts 0x204
+   bytes into the sheet and its rows are 0x2b apart, so the bar's bottom-right
+   pixel is sheet byte 0x305 -- the last byte of the 0x306 the loader
+   allocates.  The offsets are literals here so a wrong stride cannot hide
+   behind the helper. */
+static void unit_graphic_and_row_strides_are_0x102_and_0x2b(void)
+{
+    stage_unit();
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 2, UNIT_INTERIOR, 0, 0);
+
+    CHECK_EQ(unit_drawn(0, 0), (int) unit_sheet[0x204]);
+    CHECK_EQ(unit_drawn(3, 0), (int) unit_sheet[0x204 + 3 * 0x2b]);
+    CHECK_EQ(unit_drawn(3, 6), (int) unit_sheet[0x204 + 3 * 0x2b + 6]);
+    CHECK_EQ(unit_drawn(5, UNIT_BAR_WIDTH - 1), (int) unit_sheet[0x305]);
+}
+
+/* THE REMAINDER RUNS UNDER THE RIGHT CAP.  Its width is 0x29 - fill_width from
+   column 2, so it reaches column 0x2a, and the cap is then painted back over
+   those two columns -- which only shows where the cap's own art is
+   transparent.  With the cap's two pixels planted at 0 and a fill of 0 the
+   remainder's graphic-0 pixels survive underneath; with a full fill there is no
+   remainder left to run under it and the same transparent cap leaves the
+   surface alone.  Trimming the remainder to 0x27 - fill_width would make the
+   first half read like the second. */
+static void unit_remainder_runs_under_the_right_cap(void)
+{
+    stage_unit();
+    unit_sheet[UNIT_ART_GRAPHIC_STRIDE + UNIT_INTERIOR] = 0;
+    unit_sheet[UNIT_ART_GRAPHIC_STRIDE + UNIT_BAR_WIDTH - 1] = 0;
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 1, 0, 0, 0);
+
+    CHECK_EQ(unit_drawn(0, UNIT_INTERIOR), unit_art(0, 0, UNIT_INTERIOR));
+    CHECK_EQ(unit_drawn(0, UNIT_BAR_WIDTH - 1),
+             unit_art(0, 0, UNIT_BAR_WIDTH - 1));
+
+    stage_unit();
+    unit_sheet[UNIT_ART_GRAPHIC_STRIDE + UNIT_INTERIOR] = 0;
+    unit_sheet[UNIT_ART_GRAPHIC_STRIDE + UNIT_BAR_WIDTH - 1] = 0;
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 1, UNIT_INTERIOR, 0, 0);
+
+    CHECK_EQ(unit_drawn(0, UNIT_INTERIOR), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, UNIT_BAR_WIDTH - 1), UNIT_GUARD);
+}
+
+/* CMP dword ptr [EBP+0x20],0x0 / JLE at 0001cb4f skips the fill run at 0, and
+   CMP ...,0x0 / JGE at 0001cb1e with MOV dword ptr [EBP+0x20],0x0 at 0001cb24
+   clamps a negative one up to it BEFORE the painter is even chosen, so the two
+   draw exactly the same bar.  Without the clamp the remainder would start
+   three columns to the left of the bar, take its source from three bytes
+   before the sheet and run 0x2e columns wide, so the guards on both sides are
+   checked. */
+static void unit_zero_and_negative_fill_draw_the_same_bar(void)
+{
+    stage_unit();
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 1, 0, 0, 0);
+
+    CHECK_EQ(unit_art(0, 0, 2) != unit_art(1, 0, 2), 1);
+    CHECK_EQ(unit_drawn(0, 0), unit_art(1, 0, 0));
+    CHECK_EQ(unit_drawn(0, 2), unit_art(0, 0, 2));
+    CHECK_EQ(unit_drawn(0, 0x28), unit_art(0, 0, 0x28));
+    CHECK_EQ(unit_drawn(0, -1), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, UNIT_BAR_WIDTH), UNIT_GUARD);
+
+    stage_unit();
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 1, -5, 0, 0);
+
+    CHECK_EQ(unit_drawn(0, 0), unit_art(1, 0, 0));
+    CHECK_EQ(unit_drawn(0, 2), unit_art(0, 0, 2));
+    CHECK_EQ(unit_drawn(0, 0x28), unit_art(0, 0, 0x28));
+    CHECK_EQ(unit_drawn(0, -1), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, -3), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, UNIT_BAR_WIDTH), UNIT_GUARD);
+}
+
+/* There is no upper clamp.  0x30 columns are blitted out of a source whose row
+   pitch is 0x2b, so the run passes the right cap and reads on into the art's
+   NEXT ROW -- destination column 0x2b is graphic 1 row 1 column 0 -- and the
+   remainder, 0x29 - 0x30 wide, draws nothing.  Adding the symmetric clamp
+   would stop the bar at column 0x2a and put the track back on screen. */
+static void unit_overfull_fill_is_not_capped(void)
+{
+    stage_unit();
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 1, 0x30, 0, 0);
+
+    CHECK_EQ(unit_drawn(0, UNIT_BAR_WIDTH - 1),
+             unit_art(1, 0, UNIT_BAR_WIDTH - 1));
+    CHECK_EQ(unit_drawn(0, 0x2b), unit_art(1, 1, 0));
+    CHECK_EQ(unit_drawn(0, 0x31), unit_art(1, 1, 6));
+    CHECK_EQ(unit_drawn(0, 0x32), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(1, 0x2b), unit_art(1, 2, 0));
+}
+
+/* Mode 1 is fdps_blit_blend_transparent_rect with the DESTINATION handed over
+   as its own background -- PUSH [EBP+0x18] / PUSH [EBP+0x14] twice at
+   0001cbe9..0001cbf8 -- so every pixel is blended against what was already
+   there.  That is what makes the overlap visible in this mode: the right cap
+   blends against the remainder's own output rather than against the surface
+   underneath, so those two columns come out different from a cap painted onto
+   an untouched destination. */
+static void unit_blend_mode_reads_the_destination_as_background(void)
+{
+    stage_unit();
+    stage_tables();
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 2, 10, 1, 0);
+
+    CHECK_EQ(unit_drawn(0, 0), table_blend(unit_art(2, 0, 0), UNIT_GUARD, 0));
+    CHECK_EQ(unit_drawn(0, 2), table_blend(unit_art(2, 0, 2), UNIT_GUARD, 0));
+    CHECK_EQ(unit_drawn(0, 12), table_blend(unit_art(0, 0, 12), UNIT_GUARD, 0));
+    CHECK_EQ(unit_drawn(5, 12), table_blend(unit_art(0, 5, 12), UNIT_GUARD, 0));
+
+    CHECK_EQ(unit_drawn(0, UNIT_INTERIOR),
+             table_blend(unit_art(2, 0, UNIT_INTERIOR),
+                         table_blend(unit_art(0, 0, UNIT_INTERIOR),
+                                     UNIT_GUARD, 0),
+                         0));
+    CHECK_EQ(unit_drawn(0, UNIT_INTERIOR)
+             != table_blend(unit_art(2, 0, UNIT_INTERIOR), UNIT_GUARD, 0), 1);
+
+    CHECK_EQ(unit_drawn(0, UNIT_BAR_WIDTH), UNIT_GUARD);
+}
+
+/* Any mode other than 0 and 1 falls through to
+   fdps_blit_tint_transparent_rect with MOV EAX,dword ptr [EBP+0x24] / PUSH EAX
+   at 0001ccdb: blit_mode ITSELF is the tint colour index, so 5 and 6 paint the
+   same bar in two different colours.  The painter never reads the destination,
+   so the two overlap columns are simply written twice and the cap's own value
+   is what stays. */
+static void unit_tint_mode_uses_the_mode_value_as_the_colour(void)
+{
+    stage_unit();
+    stage_tables();
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 2, 10, 5, 0);
+
+    CHECK_EQ(unit_drawn(0, 0), table_blend(5, unit_art(2, 0, 0), 0));
+    CHECK_EQ(unit_drawn(0, 2), table_blend(5, unit_art(2, 0, 2), 0));
+    CHECK_EQ(unit_drawn(0, 12), table_blend(5, unit_art(0, 0, 12), 0));
+    CHECK_EQ(unit_drawn(0, UNIT_INTERIOR),
+             table_blend(5, unit_art(2, 0, UNIT_INTERIOR), 0));
+    CHECK_EQ(unit_drawn(0, UNIT_BAR_WIDTH), UNIT_GUARD);
+
+    stage_unit();
+    stage_tables();
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 2, 10, 6, 0);
+
+    CHECK_EQ(unit_drawn(0, 0), table_blend(6, unit_art(2, 0, 0), 0));
+    CHECK_EQ(table_blend(6, unit_art(2, 0, 0), 0)
+             != table_blend(5, unit_art(2, 0, 0), 0), 1);
+}
+
+/* CMP dword ptr [EBP+0x24],0x1 / JNZ at 0001cbcb puts the split at exactly 1:
+   mode 2, the very next value, is already a tint colour and not a third
+   painting mode.  The two painters' results differ in shape as well as in
+   value -- the blend's low nibble is the source pixel and its high nibble the
+   destination, the tint's the other way about -- so the assertion says which
+   painter ran and not merely that something was drawn. */
+static void unit_mode_two_is_already_a_tint_colour(void)
+{
+    stage_unit();
+    stage_tables();
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 2, 10, 2, 0);
+
+    CHECK_EQ(unit_drawn(0, 2), table_blend(2, unit_art(2, 0, 2), 0));
+    CHECK_EQ(table_blend(2, unit_art(2, 0, 2), 0)
+             != table_blend(unit_art(2, 0, 2), UNIT_GUARD, 0), 1);
+}
+
+/* alpha is the last argument of both blended calls -- MOV EAX,dword ptr
+   [EBP+0x28] / PUSH EAX at 0001cbd5 and 0001ccd7 -- and it picks the ramp row
+   the painter weighs with, so the same bar at alpha 3 comes out a different
+   colour from the same bar at alpha 0 in both modes. */
+static void unit_alpha_reaches_both_blended_painters(void)
+{
+    stage_unit();
+    stage_tables();
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 2, 10, 1, 3);
+
+    CHECK_EQ(unit_drawn(0, 2), table_blend(unit_art(2, 0, 2), UNIT_GUARD, 3));
+    CHECK_EQ(table_blend(unit_art(2, 0, 2), UNIT_GUARD, 3)
+             != table_blend(unit_art(2, 0, 2), UNIT_GUARD, 0), 1);
+
+    stage_unit();
+    stage_tables();
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 2, 10, 5, 3);
+
+    CHECK_EQ(unit_drawn(0, 2), table_blend(5, unit_art(2, 0, 2), 3));
+    CHECK_EQ(table_blend(5, unit_art(2, 0, 2), 3)
+             != table_blend(5, unit_art(2, 0, 2), 0), 1);
+}
+
+/* All three painters are the colour-keyed members of their families, so a
+   source byte of 0 leaves the destination pixel alone in every mode -- which
+   is what lets the bar's rounded ends show the window behind them.  A zero is
+   planted in the filled graphic and another in the track, one on each side of
+   the seam. */
+static void unit_palette_index_zero_is_transparent_in_every_mode(void)
+{
+    stage_unit();
+    unit_sheet[2 * UNIT_ART_GRAPHIC_STRIDE + 2] = 0;
+    unit_sheet[12] = 0;
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 2, 10, 0, 0);
+    CHECK_EQ(unit_drawn(0, 2), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, 12), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, 3), unit_art(2, 0, 3));
+
+    stage_unit();
+    stage_tables();
+    unit_sheet[2 * UNIT_ART_GRAPHIC_STRIDE + 2] = 0;
+    unit_sheet[12] = 0;
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 2, 10, 1, 0);
+    CHECK_EQ(unit_drawn(0, 2), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, 12), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, 3), table_blend(unit_art(2, 0, 3), UNIT_GUARD, 0));
+
+    stage_unit();
+    stage_tables();
+    unit_sheet[2 * UNIT_ART_GRAPHIC_STRIDE + 2] = 0;
+    unit_sheet[12] = 0;
+    fdps_draw_unit_gauge(unit_dst(), UNIT_DST_PITCH, 2, 10, 5, 0);
+    CHECK_EQ(unit_drawn(0, 2), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, 12), UNIT_GUARD);
+    CHECK_EQ(unit_drawn(0, 3), table_blend(5, unit_art(2, 0, 3), 0));
+}
+
+/* dst_stride is passed to every blit exactly as handed over and is the only
+   thing that steps the destination between rows, so a stride that is not the
+   canvas pitch puts row 1 exactly 0x50 bytes past row 0 rather than a canvas
+   row later.  With that stride the six rows do not line up with the canvas at
+   all; what stays guarded is the gap between the end of one bar row and the
+   start of the next, which the byte just past row 0's last column sits in. */
+static void unit_dst_stride_is_passed_through_untouched(void)
+{
+    int base;
+
+    stage_unit();
+    fdps_draw_unit_gauge(unit_dst(), 0x50, 2, 10, 0, 0);
+
+    base = UNIT_ORIGIN_ROW * UNIT_DST_PITCH + UNIT_ORIGIN_COLUMN;
+    CHECK_EQ((int) unit_canvas[base], unit_art(2, 0, 0));
+    CHECK_EQ((int) unit_canvas[base + 0x50], unit_art(2, 1, 0));
+    CHECK_EQ((int) unit_canvas[base + 5 * 0x50 + 12], unit_art(0, 5, 12));
+    CHECK_EQ((int) unit_canvas[base + UNIT_BAR_WIDTH], UNIT_GUARD);
+}
+
 void run_gauge_tests(void)
 {
     RUN_TEST(zero_max_draws_an_empty_bar);
@@ -1183,6 +1591,18 @@ void run_gauge_tests(void)
     RUN_TEST(stat_gauge_index_reaches_the_strip);
     RUN_TEST(stat_gauge_index_below_two_fills_from_the_right);
     RUN_TEST(stat_gauge_dest_and_stride_pass_through);
+
+    RUN_TEST(unit_gauge_paints_cap_fill_track_cap);
+    RUN_TEST(unit_graphic_and_row_strides_are_0x102_and_0x2b);
+    RUN_TEST(unit_remainder_runs_under_the_right_cap);
+    RUN_TEST(unit_zero_and_negative_fill_draw_the_same_bar);
+    RUN_TEST(unit_overfull_fill_is_not_capped);
+    RUN_TEST(unit_blend_mode_reads_the_destination_as_background);
+    RUN_TEST(unit_tint_mode_uses_the_mode_value_as_the_colour);
+    RUN_TEST(unit_mode_two_is_already_a_tint_colour);
+    RUN_TEST(unit_alpha_reaches_both_blended_painters);
+    RUN_TEST(unit_palette_index_zero_is_transparent_in_every_mode);
+    RUN_TEST(unit_dst_stride_is_passed_through_untouched);
 
     RUN_TEST(unit_record_shape_matches_the_offsets);
     RUN_TEST(anchor_is_the_tile_times_24_plus_4);

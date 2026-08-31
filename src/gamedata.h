@@ -572,6 +572,24 @@ extern int data_fdps_battle_pending_xp_credit;
 extern int data_fdps_map_cursor_world_x;
 extern int data_fdps_map_cursor_world_y;
 
+/* 000643b4.  Base of the battle unit gauge sheet: three 43x6 8bpp graphics
+   laid end to end, 0x102 (43 * 6) bytes apart, at a row pitch of 0x2b.
+   Graphic 0 is the empty track and graphics 1 and 2 are the two filled
+   colours, one per side of the battle.
+
+   fdps_load_global_resources builds it once at startup and it never moves:
+   PUSH 0x306 / CALL malloc / MOV [0x000643b4],EAX at 00029cd5, the whole 0x306
+   bytes memset to 0 at 00029cf4, then a three-iteration loop -- CMP dword ptr
+   [EBP-0x8],0x3 / JL at 00029d03 -- decoding the three frames of "EasyBar.cel"
+   (the string at 00061d64) into base + i * 0x102 at 0x2b by 6.
+   fdps_shutdown_free_resources frees it at 00029502.
+
+   The original types it as a byte pointer and does the frame arithmetic at
+   every use, so a reader casts nothing and just adds.  Because the memset
+   covers the buffer before the decode, a frame the .cel does not supply reads
+   as 0 -- transparent -- rather than as rubbish. */
+extern unsigned char *data_fdps_unit_gauge_sheet_ptr;
+
 /* 000643c8.  Base of the status panel's gauge bar sheet: three 117x8 8bpp
    graphics laid end to end, 0x3a8 (117 * 8) bytes apart, at a row pitch of
    0x75.  Graphic 0 is the empty track and graphics 1 and 2 are the two filled

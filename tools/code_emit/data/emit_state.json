@@ -915,6 +915,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x140"
+    },
+    "0001cb00": {
+      "name": "fdps_draw_unit_gauge",
+      "target": "gauge.c",
+      "body_size": "0x2bf",
+      "status": "committed",
+      "emitted_against": "0x2bf",
+      "rounds": 0
     }
   }
 }

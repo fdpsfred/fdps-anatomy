@@ -179,6 +179,143 @@ void fdps_draw_stat_gauge(unsigned char *dest, int dest_stride,
     fdps_draw_gauge_fill(dest, dest_stride, gauge_index, fill_width);
 }
 
+/* The unit gauge bar is 43 pixels wide and 6 rows tall, and the sheet holds
+   its three graphics that many bytes apart at that row pitch: PUSH 0x2b for
+   the source stride and PUSH 0x6 for the row count at every one of the twelve
+   blits, and IMUL EAX,dword ptr [EBP+0x1c],0x102 at 0001cb0c for the graphic
+   stride.  0x102 is 0x2b * 6, so the sheet is three tightly packed frames and
+   nothing pads between them. */
+#define UNIT_GAUGE_WIDTH 0x2b
+#define UNIT_GAUGE_HEIGHT 6
+#define UNIT_GAUGE_GRAPHIC_STRIDE 0x102
+
+/* The rounded cap at each end is two pixels wide -- PUSH 0x2 at the first and
+   the last blit of every mode -- and the right one begins at column 0x29,
+   which is also the width of the interior the fill and the remainder divide
+   between them: MOV EAX,0x29 / SUB EAX,dword ptr [EBP+0x20] at 0001cb79.
+   0x29 + 2 is the bar's own 0x2b, so the remainder reaches the last column of
+   the bar and the right cap is painted back over its last two. */
+#define UNIT_GAUGE_CAP_WIDTH 2
+#define UNIT_GAUGE_RIGHT_CAP_COLUMN 0x29
+
+/* CMP dword ptr [EBP+0x24],0x0 / JNZ at 0001cb2b and CMP ...,0x1 / JNZ at
+   0001cbcb.  These two are the only values with a meaning of their own;
+   everything else falls through to the tint painter and is the tint colour. */
+#define UNIT_GAUGE_MODE_PLAIN 0
+#define UNIT_GAUGE_MODE_BLEND 1
+
+/* See gauge.h.  The clamp is at 0001cb1e, before the mode test, so all three
+   painters see the clamped value; the graphic base is worked out before it, at
+   0001cb0c, and so is computed even in the modes and on the paths that never
+   read from it.  That is codegen and not behaviour: the multiply cannot trap
+   and the pointer is only dereferenced inside the blits.
+
+   The four segments are written out once per mode rather than through a
+   per-segment helper because that is the shape of the original -- three blocks
+   of four calls, each block reached by its own branch -- and because the three
+   painters take three different argument lists.  Within a block the guard on
+   the fill run is CMP dword ptr [EBP+0x20],0x0 / JLE, so a fill_width of
+   exactly 0 skips it and the whole interior still comes out of graphic 0.
+
+   The two tables reach the blended painters as arguments and not as globals
+   the painters read for themselves: MOV EAX,0x653f0 / PUSH EAX and
+   MOV EAX,0x643f0 / PUSH EAX at every one of the eight blended calls. */
+void fdps_draw_unit_gauge(unsigned char *dst, int dst_stride, int gfx_index,
+                          int fill_width, int blit_mode, int alpha)
+{
+    /* [EBP-4]: the filled colour's graphic within the sheet.  The remainder
+       deliberately does not go through it. */
+    unsigned char *filled_graphic;
+
+    filled_graphic = data_fdps_unit_gauge_sheet_ptr
+                     + gfx_index * UNIT_GAUGE_GRAPHIC_STRIDE;
+
+    if (fill_width < 0) {
+        fill_width = 0;
+    }
+
+    if (blit_mode == UNIT_GAUGE_MODE_PLAIN) {
+        fdps_blit_transparent_rect(filled_graphic, UNIT_GAUGE_WIDTH, dst,
+                                   dst_stride, UNIT_GAUGE_CAP_WIDTH,
+                                   UNIT_GAUGE_HEIGHT);
+        if (fill_width > 0) {
+            fdps_blit_transparent_rect(filled_graphic + UNIT_GAUGE_CAP_WIDTH,
+                                       UNIT_GAUGE_WIDTH,
+                                       dst + UNIT_GAUGE_CAP_WIDTH, dst_stride,
+                                       fill_width, UNIT_GAUGE_HEIGHT);
+        }
+        fdps_blit_transparent_rect(data_fdps_unit_gauge_sheet_ptr
+                                       + UNIT_GAUGE_CAP_WIDTH + fill_width,
+                                   UNIT_GAUGE_WIDTH,
+                                   dst + UNIT_GAUGE_CAP_WIDTH + fill_width,
+                                   dst_stride,
+                                   UNIT_GAUGE_RIGHT_CAP_COLUMN - fill_width,
+                                   UNIT_GAUGE_HEIGHT);
+        fdps_blit_transparent_rect(filled_graphic
+                                       + UNIT_GAUGE_RIGHT_CAP_COLUMN,
+                                   UNIT_GAUGE_WIDTH,
+                                   dst + UNIT_GAUGE_RIGHT_CAP_COLUMN,
+                                   dst_stride, UNIT_GAUGE_CAP_WIDTH,
+                                   UNIT_GAUGE_HEIGHT);
+    } else if (blit_mode == UNIT_GAUGE_MODE_BLEND) {
+        fdps_blit_blend_transparent_rect(filled_graphic, UNIT_GAUGE_WIDTH, dst,
+                                         dst_stride, dst, dst_stride,
+                                         UNIT_GAUGE_CAP_WIDTH,
+                                         UNIT_GAUGE_HEIGHT,
+                                         data_fdps_palette_shade_ramp_table,
+                                         data_fdps_inverse_palette_cube,
+                                         alpha);
+        if (fill_width > 0) {
+            fdps_blit_blend_transparent_rect(
+                filled_graphic + UNIT_GAUGE_CAP_WIDTH, UNIT_GAUGE_WIDTH,
+                dst + UNIT_GAUGE_CAP_WIDTH, dst_stride,
+                dst + UNIT_GAUGE_CAP_WIDTH, dst_stride, fill_width,
+                UNIT_GAUGE_HEIGHT, data_fdps_palette_shade_ramp_table,
+                data_fdps_inverse_palette_cube, alpha);
+        }
+        fdps_blit_blend_transparent_rect(
+            data_fdps_unit_gauge_sheet_ptr + UNIT_GAUGE_CAP_WIDTH + fill_width,
+            UNIT_GAUGE_WIDTH, dst + UNIT_GAUGE_CAP_WIDTH + fill_width,
+            dst_stride, dst + UNIT_GAUGE_CAP_WIDTH + fill_width, dst_stride,
+            UNIT_GAUGE_RIGHT_CAP_COLUMN - fill_width, UNIT_GAUGE_HEIGHT,
+            data_fdps_palette_shade_ramp_table, data_fdps_inverse_palette_cube,
+            alpha);
+        fdps_blit_blend_transparent_rect(
+            filled_graphic + UNIT_GAUGE_RIGHT_CAP_COLUMN, UNIT_GAUGE_WIDTH,
+            dst + UNIT_GAUGE_RIGHT_CAP_COLUMN, dst_stride,
+            dst + UNIT_GAUGE_RIGHT_CAP_COLUMN, dst_stride,
+            UNIT_GAUGE_CAP_WIDTH, UNIT_GAUGE_HEIGHT,
+            data_fdps_palette_shade_ramp_table, data_fdps_inverse_palette_cube,
+            alpha);
+    } else {
+        fdps_blit_tint_transparent_rect(filled_graphic, UNIT_GAUGE_WIDTH, dst,
+                                        dst_stride, UNIT_GAUGE_CAP_WIDTH,
+                                        UNIT_GAUGE_HEIGHT,
+                                        data_fdps_palette_shade_ramp_table,
+                                        data_fdps_inverse_palette_cube,
+                                        blit_mode, alpha);
+        if (fill_width > 0) {
+            fdps_blit_tint_transparent_rect(
+                filled_graphic + UNIT_GAUGE_CAP_WIDTH, UNIT_GAUGE_WIDTH,
+                dst + UNIT_GAUGE_CAP_WIDTH, dst_stride, fill_width,
+                UNIT_GAUGE_HEIGHT, data_fdps_palette_shade_ramp_table,
+                data_fdps_inverse_palette_cube, blit_mode, alpha);
+        }
+        fdps_blit_tint_transparent_rect(
+            data_fdps_unit_gauge_sheet_ptr + UNIT_GAUGE_CAP_WIDTH + fill_width,
+            UNIT_GAUGE_WIDTH, dst + UNIT_GAUGE_CAP_WIDTH + fill_width,
+            dst_stride, UNIT_GAUGE_RIGHT_CAP_COLUMN - fill_width,
+            UNIT_GAUGE_HEIGHT, data_fdps_palette_shade_ramp_table,
+            data_fdps_inverse_palette_cube, blit_mode, alpha);
+        fdps_blit_tint_transparent_rect(
+            filled_graphic + UNIT_GAUGE_RIGHT_CAP_COLUMN, UNIT_GAUGE_WIDTH,
+            dst + UNIT_GAUGE_RIGHT_CAP_COLUMN, dst_stride,
+            UNIT_GAUGE_CAP_WIDTH, UNIT_GAUGE_HEIGHT,
+            data_fdps_palette_shade_ramp_table, data_fdps_inverse_palette_cube,
+            blit_mode, alpha);
+    }
+}
+
 /* One map tile is 24 pixels square, and a map object's view position is its
    tile times this minus the view window origin.  IMUL EAX,EAX,0x18 at
    0001d5f5 and 0001d613. */
