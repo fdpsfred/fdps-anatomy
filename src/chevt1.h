@@ -91,4 +91,39 @@ extern void fdps_chapter_02_event_enemies_advance(int unit_index);
 extern void fdps_chapter_05_event_enemies_advance(int unit_index);
 #pragma aux fdps_chapter_05_event_enemies_advance "*" parm caller [];
 
+/* Chapter 7's turn-2 event: takes unit indices 4 through 8 inclusive off the
+   hold-position behaviour and puts them on the default one, which paths a unit
+   toward the nearest opposing unit, so the arena's champion stops holding her
+   ground.
+
+   It rewrites the low nibble -- the behaviour code -- of the ai_behavior byte
+   at record offset 0x34 to 0 across that range and leaves the high nibble
+   alone, because bits 0x40 and 0x80 of it are independent AI flags other code
+   reads on their own.  The two bounds are literals; nothing is range checked
+   and data_fdps_map_unit_count is not consulted, so they are only correct
+   against chapter 7's own deployment, which puts 4 party records at indices
+   0..3 and the five enemies at 4..8.  Each record is resolved through
+   fdps_get_unit_record per iteration, so the array base is re-read.
+
+   Four of the five are deployed in behaviour code 0 already and the loop is a
+   no-op for them; index 8, the champion, is the one deployed holding position
+   and the one the event is for.  The range covers the whole enemy force because
+   that is how the shared helper is called, not because the other four need it.
+
+   There is no one-shot latch, unlike the chapter 5 handler: nothing in the body
+   guards the loop and nothing records that it ran, so calling it again runs it
+   again.  The merge is idempotent, so a second firing changes nothing, but a
+   unit the AI has since moved into another behaviour mode would be pushed back
+   to mode 0.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with 0 before anything else and never read, so
+   any index, in range or not, behaves the same.
+
+   Table slot 9, and chapter 7's map06.dat is the only shipped file that names
+   it -- one turn-event record, turn 2, phase 0, so the event fires once per
+   playthrough of that chapter. */
+extern void fdps_chapter_07_event_enemies_advance(int unit_index);
+#pragma aux fdps_chapter_07_event_enemies_advance "*" parm caller [];
+
 #endif

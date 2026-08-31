@@ -235,3 +235,69 @@ void fdps_chapter_05_event_enemies_advance(int unit_index)
              AI_BEHAVIOR_MODE_ADVANCE);
     }
 }
+
+/* 00037250.  Chapter 7's turn-2 event: the arena's five opponents stop holding
+   position and start advancing on the player.
+
+   The body is one copy of the same inline expansion the two handlers above
+   carry -- fdps_object_set_field34_low_nibble_range (00036b60) with the
+   constant argument triple (4, 8, 0) -- and it has the same fingerprint: the
+   three constants are parked at [EBP-0x20], [EBP-0x1c] and [EBP-0x18]
+   (00037263..00037271), copied into a second set of slots at [EBP-0xc],
+   [EBP-0x10] and [EBP-0x14] (00037278..00037287), and only then is the counter
+   at [EBP-0x8] seeded from the first of them.  There is no CALL to that helper
+   in the body; the only CALL is fdps_get_unit_record at 000372a2, once per
+   iteration, so writing the range as a call to the helper would put a CALL in
+   the rebuild that the original does not make.
+
+   The compare at 00037293 -- CMP EAX,dword ptr [EBP-0x10] / JLE 0003729f -- is
+   signed and inclusive, so the range is unit indices 4 through 8 and 8 is the
+   last index written, not one past the end.  That last index is the one the
+   event exists for: chapter 7's map06.dat puts 4 party records at indices 0..3,
+   and Icon06.dat's two deploy opcodes place the four mercenaries at 4..7 with
+   behaviour byte 0 and the champion at 8 with behaviour byte 2.  Only she is in
+   the hold-position mode when this fires; the other four are already in mode 0
+   and the loop is a no-op for them.  Nothing is range checked and
+   data_fdps_map_unit_count is not consulted.
+
+   The merge is the same read-modify-write of the one byte -- MOV DL,[EAX+0x34]
+   / AND DL,0xf0 / MOV DH,[EBP-0x14] / OR DH,DL / MOV [EAX+0x34],DH at
+   000372b0..000372be -- so the behaviour code goes to 0 and the two AI flag
+   bits in the high nibble are carried across untouched.
+
+   The record pointer comes back in EAX from the CALL and is stored to [EBP-0x4]
+   at 000372aa, then re-read at 000372ad for the load and again at 000372b6 for
+   the store, so both halves of the merge address the record fetched by that
+   iteration.
+
+   There is no one-shot latch here, unlike the chapter 5 handler: the first
+   instruction after the frame is the argument-slot store and the loop follows
+   it with no compare in between.  The event is fired by a turn-event record
+   rather than a tile trigger, and map06.dat holds exactly one -- turn 2, phase
+   0 -- so the data, not the code, is what makes it happen once.
+
+   unit_index is the handler table's shared parameter.  MOV dword ptr
+   [EBP+0x14],0x0 at 0003725c writes zero over the incoming slot and nothing
+   ever reads it back, so which unit the event fired for cannot reach anything
+   this handler does; the store has no observable effect, because the slot
+   belongs to the caller's outgoing argument area and the caller drops it with
+   ADD ESP,0x4 at 0002e146.
+
+   Nothing sets EAX before the RET at 000372c9 and the dispatcher at 0002e140
+   ignores what comes back, so the result is void. */
+void fdps_chapter_07_event_enemies_advance(int unit_index)
+{
+    struct fdps_unit_record *unit;
+    int advancing_unit_index;
+
+    unit_index = 0;
+
+    for (advancing_unit_index = 4;
+         advancing_unit_index <= 8;
+         advancing_unit_index++) {
+        unit = fdps_get_unit_record(advancing_unit_index);
+        unit->ai_behavior = (unsigned char)
+            ((unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+             AI_BEHAVIOR_MODE_ADVANCE);
+    }
+}

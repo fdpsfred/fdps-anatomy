@@ -31,6 +31,12 @@
  * in its instruction stream, and the latch is element 0x10 of the cell-event
  * flag array, which the cases below write before every call because it is a
  * ticket 23 symbol whose starting value nothing here may assume.
+ *
+ * The chapter 7 handler at 00037250 is the chapter 5 shape with the latch taken
+ * away and the range 4..8 in place of 6..0x22, and is covered the same way: its
+ * two bounds, the inclusive compare between them and the 0xf0 mask are literals
+ * in its instruction stream, and the absence of a guard in front of its loop is
+ * asserted by putting the latch slot up and watching it run anyway.
  */
 #include <stddef.h>
 #include "testharn.h"
@@ -478,6 +484,164 @@ static void ch05_advance_ignores_the_unit_index_argument(void)
     CHECK_EQ(ch05_units[5].ai_behavior, 0x52);
 }
 
+/* ---- fdps_chapter_07_event_enemies_advance, 00037250 -------------------- */
+
+/* The single inclusive range the one inline loop covers, read off the
+   constants at 00037263 (4) and 0003726a (8) with the signed JLE at
+   00037296. */
+#define CH07_FIRST_INDEX 4
+#define CH07_LAST_INDEX  8
+
+/* Three records past the last index the handler writes, so an off-by-one at
+   the top end of the range has somewhere visible to land. */
+#define CH07_STAGE_UNITS 12
+
+static struct fdps_unit_record ch07_units[CH07_STAGE_UNITS];
+
+/* Give every record the same AI byte and point the array global at the block.
+   The staged value carries a high nibble as well as a behaviour code, because
+   the whole point of the merge is that only one of the two moves. */
+static void stage_ch07_units(int ai_behavior)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) ch07_units;
+    for (i = 0; i < (int) sizeof(ch07_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < CH07_STAGE_UNITS; i++) {
+        ch07_units[i].ai_behavior = (unsigned char) ai_behavior;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch07_units;
+}
+
+/* Exactly indices 4..8 are rewritten and every record either side of the range
+   is left as it was.  The staged 0x52 is behaviour code 2 -- hold position,
+   which is what Icon06.dat's second deploy opcode gives the champion -- under a
+   high nibble of 0x50; the range comes out 0x50 because the mode ORed in is 0,
+   and the rest keep 0x52.  Indices 0..3 are chapter 7's four party records,
+   which the range deliberately starts above, and 9..11 are past the last
+   deployed unit: both ends have to be untouched.  Index 8 itself has to be
+   written, which is what makes the JLE inclusive rather than a bound one short,
+   and it is the only one of the five whose mode the event really changes. */
+static void ch07_advance_clears_exactly_the_range(void)
+{
+    int i;
+
+    stage_ch07_units(0x52);
+    fdps_chapter_07_event_enemies_advance(0);
+
+    for (i = 0; i < CH07_STAGE_UNITS; i++) {
+        if (i >= CH07_FIRST_INDEX && i <= CH07_LAST_INDEX) {
+            CHECK_EQ(ch07_units[i].ai_behavior, 0x50);
+        } else {
+            CHECK_EQ(ch07_units[i].ai_behavior, 0x52);
+        }
+    }
+}
+
+/* The high nibble is carried across untouched by the AND 0xf0 at 000372b3 and
+   the low nibble ends at 0 whatever it held.  0x40 and 0x80 are the two AI
+   flags read elsewhere, so a merge that assigned the mode whole -- or that
+   masked with anything wider -- would drop them.  Expected values are the
+   staged byte ANDed with 0xf0. */
+static void ch07_advance_keeps_the_high_nibble(void)
+{
+    stage_ch07_units(0);
+    ch07_units[4].ai_behavior = 0xc2;
+    ch07_units[5].ai_behavior = 0x02;
+    ch07_units[6].ai_behavior = 0xff;
+    ch07_units[7].ai_behavior = 0x40;
+    ch07_units[8].ai_behavior = 0x8b;
+
+    fdps_chapter_07_event_enemies_advance(0);
+
+    CHECK_EQ(ch07_units[4].ai_behavior, 0xc0);
+    CHECK_EQ(ch07_units[5].ai_behavior, 0x00);
+    CHECK_EQ(ch07_units[6].ai_behavior, 0xf0);
+    CHECK_EQ(ch07_units[7].ai_behavior, 0x40);
+    CHECK_EQ(ch07_units[8].ai_behavior, 0x80);
+}
+
+/* Nothing guards the loop: the instruction after the argument-slot store at
+   0003725c is the first of the three constant stores, with no compare between
+   them, so unlike the chapter 5 handler this one has no one-shot latch and runs
+   its loop every time it is called.  The latch slot is put up before the call
+   and the range still moves; the slot is also asserted unchanged, because a
+   handler that had grown a latch would have written it. */
+static void ch07_advance_has_no_one_shot_latch(void)
+{
+    stage_ch07_units(0x52);
+    data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT] = 1;
+
+    fdps_chapter_07_event_enemies_advance(0);
+
+    CHECK_EQ(ch07_units[4].ai_behavior, 0x50);
+    CHECK_EQ(ch07_units[8].ai_behavior, 0x50);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT], 1);
+
+    stage_ch07_units(0x52);
+    fdps_chapter_07_event_enemies_advance(0);
+    CHECK_EQ(ch07_units[4].ai_behavior, 0x50);
+    CHECK_EQ(ch07_units[8].ai_behavior, 0x50);
+}
+
+/* One byte of one record moves and nothing either side of it does.  Every byte
+   of the block is stamped 0x55 first, so a store that landed at +0x33 or +0x35
+   -- the death-script operand's high byte and ai_dest_x -- is visible; 0x55 is
+   also a value whose low nibble is not already 0, so the write that should
+   happen is visible too.  Both ends of the range are checked, because the
+   stride the store is indexed by is the IMUL 0x50 inside fdps_get_unit_record
+   and an error in it shows up furthest from the base. */
+static void ch07_advance_touches_no_neighbouring_byte(void)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) ch07_units;
+    for (i = 0; i < (int) sizeof(ch07_units); i++) {
+        bytes[i] = 0x55;
+    }
+    data_fdps_map_unit_array_ptr = bytes;
+
+    fdps_chapter_07_event_enemies_advance(0);
+
+    CHECK_EQ(bytes[4 * 0x50 + 0x34], 0x50);
+    CHECK_EQ(bytes[4 * 0x50 + 0x33], 0x55);
+    CHECK_EQ(bytes[4 * 0x50 + 0x35], 0x55);
+    CHECK_EQ(bytes[8 * 0x50 + 0x34], 0x50);
+    CHECK_EQ(bytes[8 * 0x50 + 0x33], 0x55);
+    CHECK_EQ(bytes[8 * 0x50 + 0x35], 0x55);
+    CHECK_EQ(bytes[3 * 0x50 + 0x34], 0x55);
+    CHECK_EQ(bytes[9 * 0x50 + 0x34], 0x55);
+}
+
+/* The incoming argument slot is overwritten with 0 at 0003725c and never read,
+   and no loop bound comes from it, so the index the dispatcher passes cannot
+   reach the result.  The turn-event dispatcher pushes a literal 0 at 0002e13e,
+   which is the only path this slot is reached by in the shipped data; the cell
+   search and the death-script runner push a real, unchecked unit index.  Index
+   3 is asserted unchanged because it is one an argument-driven handler would
+   have written. */
+static void ch07_advance_ignores_the_unit_index_argument(void)
+{
+    stage_ch07_units(0x52);
+    fdps_chapter_07_event_enemies_advance(3);
+    CHECK_EQ(ch07_units[3].ai_behavior, 0x52);
+    CHECK_EQ(ch07_units[4].ai_behavior, 0x50);
+
+    stage_ch07_units(0x52);
+    fdps_chapter_07_event_enemies_advance(-1);
+    CHECK_EQ(ch07_units[8].ai_behavior, 0x50);
+    CHECK_EQ(ch07_units[9].ai_behavior, 0x52);
+
+    stage_ch07_units(0x52);
+    fdps_chapter_07_event_enemies_advance(30000);
+    CHECK_EQ(ch07_units[4].ai_behavior, 0x50);
+    CHECK_EQ(ch07_units[0].ai_behavior, 0x52);
+}
+
 void run_chevt1_tests(void)
 {
     RUN_TEST(set_game_over_from_running);
@@ -498,4 +662,9 @@ void run_chevt1_tests(void)
     RUN_TEST(ch05_advance_latch_tests_against_zero);
     RUN_TEST(ch05_advance_touches_no_neighbouring_byte);
     RUN_TEST(ch05_advance_ignores_the_unit_index_argument);
+    RUN_TEST(ch07_advance_clears_exactly_the_range);
+    RUN_TEST(ch07_advance_keeps_the_high_nibble);
+    RUN_TEST(ch07_advance_has_no_one_shot_latch);
+    RUN_TEST(ch07_advance_touches_no_neighbouring_byte);
+    RUN_TEST(ch07_advance_ignores_the_unit_index_argument);
 }
