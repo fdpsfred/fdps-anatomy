@@ -1107,6 +1107,115 @@ static void a_tick_touches_nothing_but_the_counter(void)
     CHECK_EQ(sample_field(status_sample, SAMPLE_STATUS), STATUS_PLAYING);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_audio_timer_install @ 000307b0
+ *
+ * Expected values come from 000307b0 -- MOV EAX,0x30790 / PUSH EAX for the
+ * callback, MOV [0x00069d50],EAX for the store, CMP dword ptr
+ * [0x00069d50],-0x1 / JNZ for the message guard, and the two PUSHes of the
+ * global that follow -- and from the library's own timer allocator at
+ * 00044f4e, which hands out 0, 4, 8 ... up to 0x38 (MOV EAX,0x0 / ADD EAX,0x4
+ * / CMP EAX,0x3c) and answers -1 once all fifteen slots are taken.  The rate
+ * is the 25 both call sites push at 0002930c and 00031026.
+ *
+ * WHAT INSTALLATION IS OBSERVED THROUGH.  The real library is linked in
+ * (rebuild_info/ail_link.md), so what the function did is read back out of
+ * AIL's own timer table by asking it for the next handle: a slot that install
+ * claimed is a slot the library will not hand out again, and a handle of 0
+ * after a fresh AIL_startup can only mean the first slot was still free when
+ * install asked for it.  There is no library call that reads a timer's
+ * callback, frequency or running state back, so those three are pinned by the
+ * disassembly in src/audio.c and not here.
+ *
+ * WHY THE -1 ARM IS NOT EXERCISED.  Reaching it means taking all fifteen slots
+ * first, and the function then hands -1 to AIL_set_timer_frequency, whose
+ * worker at 000450b0 writes a dword through [handle + 0x60520] with no test --
+ * a misaligned store into the library's own data, inside this test process.
+ * Forcing that would be staging a vendor bug the game never reaches, and it
+ * would corrupt the timer table every test after it uses.  What the arm does
+ * is settled by reading it instead: the JNZ at 000307d6 skips the printf and
+ * nothing else, and both arms continue into the same two calls.
+ * ------------------------------------------------------------------ */
+
+/* 25 ticks a second, the value fdps_audio_init is called with from both of its
+   call sites and passes straight through. */
+#define TIMER_TEST_RATE_HZ 25
+
+/* Written into the handle global before install runs, so that the store at
+   000307ca is visible as a store: it is neither a slot number nor -1. */
+#define TIMER_HANDLE_MARKER 0x5eed
+
+/* Parked in the sample playback rate so that a rewrite which mistook the
+   argument for that global would be caught.  Distinct from TICK_MARKER_RATE so
+   a leftover from the tick tests cannot pass for it. */
+#define TIMER_RATE_MARKER 0x5a5b
+
+/* The first slot of an empty table is 0, and the handle install stored is the
+   one the library handed it: after install the next registration gets slot 4,
+   which it can only do if install took slot 0 and took it exactly once. */
+static void install_claims_one_timer_and_keeps_its_handle(void)
+{
+    AIL_startup();
+    data_fdps_audio_timer_handle = TIMER_HANDLE_MARKER;
+
+    fdps_audio_timer_install(TIMER_TEST_RATE_HZ);
+
+    CHECK_EQ(data_fdps_audio_timer_handle, 0);
+    CHECK_EQ(AIL_register_timer(NO_TIMER_CALLBACK), TIMER_SLOT_STRIDE);
+    fdps_audio_shutdown();
+}
+
+/* The store is unconditional and there is no "already installed" test anywhere
+   in the body, so calling twice registers twice and the global ends up holding
+   the second handle rather than the first.  The third install, after a
+   shutdown, starts from slot 0 again -- the same evidence the shutdown test
+   reads, seen from this side. */
+static void a_second_install_takes_the_next_slot(void)
+{
+    AIL_startup();
+    fdps_audio_timer_install(TIMER_TEST_RATE_HZ);
+    CHECK_EQ(data_fdps_audio_timer_handle, 0);
+    fdps_audio_timer_install(TIMER_TEST_RATE_HZ);
+    CHECK_EQ(data_fdps_audio_timer_handle, TIMER_SLOT_STRIDE);
+    fdps_audio_shutdown();
+
+    AIL_startup();
+    fdps_audio_timer_install(TIMER_TEST_RATE_HZ);
+    CHECK_EQ(data_fdps_audio_timer_handle, 0);
+    fdps_audio_shutdown();
+}
+
+/* 0x00069d50 is the only data operand in the body, so the clock goes on the
+   air whatever the audio flags say -- the caller reaches this on the way out
+   whether or not the DIG driver installed -- and nothing else this file owns
+   moves.  The playback rate is checked by name because storing the argument
+   there is the plausible wrong reading of a function whose one argument is
+   called a rate. */
+static void install_needs_neither_audio_flag_and_moves_nothing_else(void)
+{
+    stage_ready(2);
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    data_fdps_audio_sfx_enabled_flag = 0;
+    data_fdps_audio_sample_playback_rate = TIMER_RATE_MARKER;
+    AIL_startup();
+
+    fdps_audio_timer_install(TIMER_TEST_RATE_HZ);
+
+    CHECK_EQ(data_fdps_audio_timer_handle, 0);
+    CHECK_EQ(data_fdps_audio_sfx_driver_available_flag, 0);
+    CHECK_EQ(data_fdps_audio_sfx_enabled_flag, 0);
+    CHECK_EQ(data_fdps_audio_sample_playback_rate, TIMER_RATE_MARKER);
+    CHECK_EQ((unsigned int) data_fdps_audio_sample_handle_table[0],
+             (unsigned int) busy_sample);
+    CHECK_EQ((unsigned int) data_fdps_audio_sample_handle_table[2],
+             (unsigned int) free_sample);
+    CHECK_EQ((unsigned int)
+             data_fdps_audio_sample_handle_table[SFX_SAMPLE_SLOT_COUNT - 1],
+             (unsigned int) busy_sample);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_ADDRESS), 0);
+    fdps_audio_shutdown();
+}
+
 void run_audio_tests(void)
 {
     RUN_TEST(the_fixture_looks_like_a_handle_to_ail);
@@ -1150,4 +1259,7 @@ void run_audio_tests(void)
     RUN_TEST(the_counter_wraps_at_32_bits);
     RUN_TEST(a_tick_draws_exactly_one_rand);
     RUN_TEST(a_tick_touches_nothing_but_the_counter);
+    RUN_TEST(install_claims_one_timer_and_keeps_its_handle);
+    RUN_TEST(a_second_install_takes_the_next_slot);
+    RUN_TEST(install_needs_neither_audio_flag_and_moves_nothing_else);
 }

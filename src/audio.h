@@ -29,6 +29,22 @@ extern void *data_fdps_audio_sample_handle_table[SFX_SAMPLE_SLOT_COUNT];
    into the table above, and the only negative value any of them returns. */
 #define SFX_NO_SAMPLE_SLOT (-1)
 
+/* 00069d50.  The AIL timer slot the audio service runs on, as
+   AIL_register_timer handed it back, or -1 when the library had no slot to
+   give.  It is a record of the registration and not a handle the rest of the
+   game passes around: the image holds four references to it and all four are
+   inside fdps_audio_timer_install, so nothing stops, re-programs or releases
+   the timer by name -- AIL_shutdown is what lets it go.  It sits immediately
+   after the eight-entry sample table above, and no walk over that table
+   reaches it. */
+extern int data_fdps_audio_timer_handle;
+
+/* The answer AIL_register_timer gives when its timer table is full.  Every
+   slot of that table is in use, so there is nothing to register on; the
+   library's own allocator at 00044f4e returns it after walking all fifteen
+   slots. */
+#define AIL_TIMER_REGISTER_FAILED (-1)
+
 /* 00069d5c.  The rate, in samples per second, that fdps_audio_start_sample
    hands AIL for every block it starts.  It is a single global rather than a
    per-clip figure because that function is given raw PCM and no header to read
@@ -115,5 +131,22 @@ extern int fdps_audio_sample_is_playing(int sample_index);
    that invokes it directly would be doing something the original never does. */
 extern void fdps_timer_tick_handler(void);
 #pragma aux fdps_timer_tick_handler "*" parm caller [];
+
+/* Puts the game's clock on the air: hands AIL the address of the tick handler
+   above, asks for `tick_rate_hz` ticks a second and starts the timer.  Both
+   call sites reach it through fdps_audio_init with 25 (PUSH 0x19 at 0002930c
+   and at 00031026), so a tick is 40 ms, and every wait, animation step and
+   blink the game counts is counted in those.
+
+   Neither audio flag is consulted and the DIG driver is not required: the
+   caller reaches this on the way out whether or not the driver installed, so
+   the clock runs on a machine with no sound card.  The one piece of state it
+   leaves behind is data_fdps_audio_timer_handle.
+
+   A registration that fails is reported on stdout and then carried on with --
+   the failed handle goes to AIL_set_timer_frequency and AIL_start_timer just
+   as a good one would, and the function returns normally either way. */
+extern void fdps_audio_timer_install(int tick_rate_hz);
+#pragma aux fdps_audio_timer_install "*" parm caller [];
 
 #endif

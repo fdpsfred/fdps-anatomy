@@ -8,8 +8,10 @@
  * rand comes from <stdlib.h>.  It is a real call in the original -- CALL
  * 0x00042cf8 from the timer handler at 000307a1 -- because the flag set
  * carries no -oi, so __INLINE_FUNCTIONS__ is not defined and the header leaves
- * rand a call.
+ * rand a call.  printf comes from <stdio.h> and is a real call too, CALL
+ * 0x00042deb from the timer installer at 000307de.
  */
+#include <stdio.h>
 #include <stdlib.h>
 #include "ailv3.h"
 #include "gamedata.h"
@@ -321,4 +323,52 @@ void fdps_timer_tick_handler(void)
 {
     ++data_fdps_timer_tick_counter;
     rand();
+}
+
+/* 000307b0.  One branch and three vendor calls, with no local and no answer.
+   The branch is CMP dword ptr [0x00069d50],-0x1 / JNZ 0x000307e6 at 000307cf
+   and it guards the message alone: both arms land on the same PUSH at 000307e6,
+   so a registration that failed is announced and then used, and the function
+   returns normally either way.  There is no exit path, no retry and no second
+   answer for the caller to read.
+
+   One value comes back from a CALL and it is the whole of the state this
+   function leaves behind: EAX from AIL_register_timer at 000307c2, stored into
+   the global at 000307ca.  The two calls after it return void and EAX is dead
+   at each of them.  The handle is then re-read out of memory for all three of
+   its uses -- CMP dword ptr [0x00069d50] at 000307cf, PUSH dword ptr
+   [0x00069d50] at 000307ea and again at 000307f8 -- rather than kept in a
+   register, and that global is the only data operand anywhere in the body:
+   neither audio flag is looked at and no sample handle is touched.
+
+   What gets registered is the address of the tick handler above, MOV EAX,
+   0x30790 / PUSH EAX at 000307bc with a fixup to it -- a number here would
+   register whatever happened to sit at that address in the rebuild.  AIL files
+   it in its own timer table and calls it from the timer interrupt from
+   AIL_start_timer onwards, so the clock the whole game paces on starts on the
+   last line of this function.
+
+   The rate is the caller's argument handed straight to the library, [EBP+0x14]
+   PUSHed at 000307e9 as AIL_set_timer_frequency's second argument with no
+   arithmetic on it.  The library divides into it -- MOV EAX,0xf4240 / DIV EBX
+   at 000450f0 -- so the period is 1000000/rate microseconds and a rate of zero
+   would fault there; 25 is the only value the image ever passes.
+
+   The failed handle really is passed on, and the vendor is not uniform about
+   it: AIL_start_timer's worker tolerates -1 (CMP EBX,-0x1 / JZ at 00045016)
+   while AIL_set_timer_period's does not (000450b0 writes through
+   [handle + 0x60520] with no test at all), so that path puts one dword a byte
+   below the library's period table.  It is a latent vendor bug on a path this
+   game never reaches -- FDPS registers one timer out of the fifteen slots at
+   00044f5e -- and guarding it here would be a judgement about what the original
+   meant instead of what it does. */
+void fdps_audio_timer_install(int tick_rate_hz)
+{
+    data_fdps_audio_timer_handle =
+        (int) AIL_register_timer((unsigned int) fdps_timer_tick_handler);
+    if (data_fdps_audio_timer_handle == AIL_TIMER_REGISTER_FAILED) {
+        printf(" Timer fail !!!\n");
+    }
+    AIL_set_timer_frequency(data_fdps_audio_timer_handle, tick_rate_hz);
+    AIL_start_timer(data_fdps_audio_timer_handle);
 }
