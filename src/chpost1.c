@@ -442,3 +442,45 @@ void fdps_chapter_12_post_action(void)
 {
     fdps_battle_check_default_end_conditions();
 }
+
+/* 0003aa70.  One CALL and a return, with no branch in the body at all --
+   instruction for instruction the chapter 2, 7 and 12 handlers above, reached
+   through a fourth table slot.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003aa70..0003aa76 -- and
+   nothing in it is ever read, so there is no local to name.  The epilogue is
+   the four bare POPs at 0003aa81..0003aa84 with no MOV ESP,EBP in front of
+   them, which is what an empty local area leaves behind.
+
+   CALL 0x0003a2e0 at 0003aa7c is the whole body.  Nothing is pushed in front
+   of it and nothing adjusts ESP after it, so the callee takes no argument;
+   nothing reads EAX between the CALL and the POPs, so its result is not used
+   and this handler returns nothing of its own.  The verdict the callee leaves
+   in data_fdps_chapter_event_or_battle_end_code is the answer, and the
+   dispatchers read that global directly -- CMP dword ptr [0x00069da0],0x0 at
+   00012a4e, immediately after the indirect call.
+
+   There is nothing else: no store, no test of the chapter id, no unit lookup.
+   Chapter 13 is 地獄三鬥神, and the guide gives it 勝利條件 敵人全滅 and
+   失敗條件 蘭迪斯死亡 -- one win condition and one lose condition, both of them
+   the shared test's already.  The three 鬥神 the chapter is named for,
+   薩達特, 席拉 and 巴魯, are enemy deployments and so are covered by
+   敵人全滅; the guide lists no guest on the player side for this chapter, so
+   there is no one for an extra defeat test to be about either.  The table slot
+   two before this one, chapter 11's, does follow the shared test with a defeat
+   test of its own -- PUSH 0x8 / CALL 0x000109b0 at 0003a9b1, then a MOV dword
+   ptr [0x00069da0],0x1 at 0003a9bf that is gated on that test alone and not on
+   the code's current value -- and by this chapter the roster is long enough for
+   a slot at that index to exist, so carrying that shape further along the table
+   is the natural mistake and would end the battle on paths the original does
+   not.  It is not carried here: a search of the whole image for CALL
+   0x000109b0 lists 62 sites, and none of them falls between 0003aa70 and the
+   RET at 0003aa85.
+
+   Table slot 12: the dword at 000602bc, twelve entries into the table based at
+   0006028c, is 0003aa70, and that table entry is the function's only xref. */
+void fdps_chapter_13_post_action(void)
+{
+    fdps_battle_check_default_end_conditions();
+}

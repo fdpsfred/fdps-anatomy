@@ -245,4 +245,27 @@ extern void fdps_chapter_11_post_action(void);
 extern void fdps_chapter_12_post_action(void);
 #pragma aux fdps_chapter_12_post_action "*" parm caller [];
 
+/* Chapter 13's post-action test: applies the game's standard end conditions
+   and nothing else.  Takes nothing, returns nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h) exactly as
+   fdps_battle_check_default_end_conditions (btlend.h) left it -- every enemy
+   retired clears the chapter, a retired unit slot 0 is a defeat that outranks
+   that clear, and a verdict already recorded is not recomputed.
+
+   Chapter 13 adds no condition of its own, which is the whole content of this
+   handler: it is a bare forward to the shared test, the same shape as chapters
+   2's, 7's and 12's.  地獄三鬥神 is given one win condition and one lose
+   condition, 敵人全滅 and 蘭迪斯死亡, and the shared test is both of them.
+   The three 鬥神 薩達特, 席拉 and 巴魯 are enemy deployments covered by
+   敵人全滅, and the chapter fields no guest, so nothing is left over for a
+   slot test here or for a map death script.  Chapter 11's handler, two table
+   slots before this one, does add a slot-8 defeat test, and by this chapter
+   the roster is long enough to have a slot at that index, so writing that
+   shape here is the natural mistake and would end the battle on paths the
+   original does not.
+
+   Table slot 12. */
+extern void fdps_chapter_13_post_action(void);
+#pragma aux fdps_chapter_13_post_action "*" parm caller [];
+
 #endif
