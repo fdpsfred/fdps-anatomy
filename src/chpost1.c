@@ -180,3 +180,37 @@ void fdps_chapter_06_post_action(void)
         data_fdps_chapter_event_or_battle_end_code = 1;
     }
 }
+
+/* 0003a6b0.  One CALL and a return, with no branch in the body at all --
+   instruction for instruction chapter 2's handler above, reached through a
+   different table slot.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003a6b0..0003a6b6 --
+   and nothing in it is ever read, so there is no local to name.
+
+   CALL 0x0003a2e0 at 0003a6bc is the whole body.  Nothing is pushed in front
+   of it and nothing adjusts ESP after it, so the callee takes no argument;
+   nothing reads EAX between the CALL and the four POPs at
+   0003a6c1..0003a6c4, so its result is not used and this handler returns
+   nothing of its own.  The verdict the callee leaves in
+   data_fdps_chapter_event_or_battle_end_code is the answer, and the
+   dispatchers read that global directly -- CMP dword ptr [0x00069da0],0x0 at
+   00012a4e, immediately after the indirect call.
+
+   There is nothing else: no store, no test of the chapter id, no unit lookup.
+   The three handlers immediately before this one in the table all follow the
+   shared test with fdps_unit_is_retired(3) and a store of 1, and this
+   chapter's roster still holds 法蓮娜, so that shape is the natural thing to
+   carry over and it is not here.  Chapter 7 is the arena: the guide gives
+   勝利條件 敵人全滅 and 失敗條件 蘭迪斯死亡, one lose condition and it is
+   slot 0, which is exactly what the shared test already watches for every
+   chapter id but 0x10 and 0x15.  Adding a second test would end the battle on
+   paths the original does not.
+
+   Table slot 6: the dword at 000602a4, six entries into the table based at
+   0006028c, is 0003a6b0. */
+void fdps_chapter_07_post_action(void)
+{
+    fdps_battle_check_default_end_conditions();
+}

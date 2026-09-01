@@ -118,4 +118,24 @@ extern void fdps_chapter_05_post_action(void);
 extern void fdps_chapter_06_post_action(void);
 #pragma aux fdps_chapter_06_post_action "*" parm caller [];
 
+/* Chapter 7's post-action test: applies the game's standard end conditions
+   and nothing else.  Takes nothing, returns nothing, and leaves the verdict
+   in data_fdps_chapter_event_or_battle_end_code (gamedata.h) exactly as
+   fdps_battle_check_default_end_conditions (btlend.h) left it -- every enemy
+   retired clears the chapter, a retired unit slot 0 is a defeat that outranks
+   that clear, and a verdict already recorded is not recomputed.
+
+   Chapter 7 adds no condition of its own, which is the whole content of this
+   handler: it is a bare forward to the shared test, the same shape as chapter
+   2's.  The arena chapter has one win condition and one lose condition,
+   敵人全滅 and 蘭迪斯死亡, and both are the shared test's already.  The three
+   handlers in the table slots just before this one do add a slot-3 defeat
+   test, and this chapter's roster still holds 法蓮娜 at a slot the sweep
+   would reach, so writing that shape here is the natural mistake and would
+   end the battle on paths the original does not.
+
+   Table slot 6. */
+extern void fdps_chapter_07_post_action(void);
+#pragma aux fdps_chapter_07_post_action "*" parm caller [];
+
 #endif
