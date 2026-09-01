@@ -51,3 +51,28 @@ int fdps_vfs_read_entry_count(char *path)
     }
     return entry_count;
 }
+
+/* 00039960.  Straight line, no branch and no call: XOR EAX,EAX / MOV EDX,[EBP
+   + 0x14] / MOV AL,[EDX + 0x7] / MOV [EBP + -0x4],EAX / MOV EAX,[EBP + -0x4].
+
+   The load is MOV AL, one byte, although offset 7 is the header's 32-bit entry
+   count and fdps_vfs_image_get_entry reads that same field off that same kind
+   of pointer with a full dword move.  Writing the obvious `return
+   image->entry_count;` therefore changes behaviour for any container of 256 or
+   more members -- the original reports that container's count modulo 256,
+   0 for exactly 256 -- so the byte load is taken through the field rather than
+   over it (rebuild_info/pitfalls.md).  The XOR EAX,EAX ahead of the MOV AL is
+   a zero extension, not a sign extension, which is what makes the result
+   0..255 rather than -128..127.
+
+   The frame is four bytes and holds no named local.  The spill to [EBP-4] and
+   the reload are what -od does to the returned expression itself: writing the
+   body as a bare return reproduces SUB ESP,0x4 and that one spill exactly,
+   while giving the value a local of its own adds a second slot and a second
+   spill (SUB ESP,0x8, verified against the emitted VFS.OBJ).  There is
+   therefore nothing here to name -- the original's [EBP-4] is a compiler
+   temporary, not a variable the author declared. */
+unsigned int fdps_vfs_image_entry_count(struct fdps_vfs_image_header *image)
+{
+    return *(unsigned char *)&image->entry_count;
+}

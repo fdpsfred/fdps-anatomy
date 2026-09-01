@@ -19,6 +19,7 @@
  * be asserting against bytes this test wrote rather than against a file the
  * game ships.
  */
+#include <stdio.h>
 #include "testharn.h"
 #include "vfs.h"
 
@@ -37,6 +38,10 @@
    words are 0x00180018. */
 #define NON_VFS_NAME "ICON.CEL"
 #define NON_VFS_HEADER_DWORD 0x00180018L
+
+/* The low byte of that same dword, which is all fdps_vfs_image_entry_count
+   sees: the low half of the sprite width's 24. */
+#define NON_VFS_HEADER_BYTE 0x18
 
 /* A name no staged file has, so fopen fails and the branch at 00039918 is
    taken.  It ends in .VFS on purpose: the function does not care what a file
@@ -80,9 +85,85 @@ static void non_container_is_read_unchecked(void)
     CHECK_EQ(fdps_vfs_read_entry_count(NON_VFS_NAME) >> 16, 0x18);
 }
 
+/* fdps_vfs_image_entry_count takes an image already in memory rather than a
+   path, so the file cases below have to bring the header in themselves.  Eleven
+   bytes is the whole of what the program models of a .VFS header
+   (src/fdpstype.h), and it is more than the one byte at offset 7 that is under
+   test.  A short read leaves the struct half-filled, so every caller checks
+   this returned 1 before it asserts anything about the contents. */
+static int read_image_header(char *name, struct fdps_vfs_image_header *header)
+{
+    FILE *fp;
+    size_t got;
+
+    fp = fopen(name, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    got = fread(header, sizeof(struct fdps_vfs_image_header), 1, fp);
+    fclose(fp);
+    return got == 1;
+}
+
+/* The same shipped container the path reader is checked against, so the two
+   halves of the family are pinned to one number: FIELD2.VFS records 131 at
+   offset 7 and 131 is below the 256 where the byte load starts to differ, so
+   the in-memory reader has to agree with the on-disk one here. */
+static void image_entry_count_real_container(void)
+{
+    struct fdps_vfs_image_header header;
+
+    CHECK_EQ(read_image_header(VFS_NAME, &header), 1);
+    CHECK_EQ(fdps_vfs_image_entry_count(&header), VFS_ENTRY_COUNT);
+}
+
+/* The one thing that separates this function from every dword reader in the
+   module, and the reason the pitfall exists.  MOV AL,[EDX + 0x7] at 00039971
+   takes one byte of a four-byte field, so what comes back is the count modulo
+   256; no shipped container reaches 256 -- Field.vfs is the largest at 223 --
+   so these three values are stated rather than read off a game file.
+
+   255 is the last count that survives intact.  256 is the first that does not
+   and it reports 0, which is the case a struct-field read of the u32 would get
+   wrong by answering 256.  388 shows it is truncation and not saturation:
+   388 - 256 is 132.
+
+   The 255 case is doing second duty on the XOR EAX,EAX at 0003996c.  That zero
+   extension is what makes a 0xff byte 255; a sign-extending load would make it
+   -1, and CHECK_EQ widens both sides to long so the two do not compare
+   equal. */
+static void image_entry_count_truncates_to_low_byte(void)
+{
+    struct fdps_vfs_image_header header;
+
+    header.entry_count = 255;
+    CHECK_EQ(fdps_vfs_image_entry_count(&header), 255);
+    header.entry_count = 256;
+    CHECK_EQ(fdps_vfs_image_entry_count(&header), 0);
+    header.entry_count = 388;
+    CHECK_EQ(fdps_vfs_image_entry_count(&header), 132);
+}
+
+/* No format check, and offset 7 rather than 6 or 8.  ICON.CEL is not a
+   container: it has neither the "VFS" magic nor the version nor the
+   entry-table offset a container's header carries, and it is read anyway.
+   resource_info/cel.md puts the sheet's shared sprite width at offset 7 as a
+   16-bit 24, so the byte this function loads is 0x18, while the bytes at
+   offsets 6 and 8 are both zero -- an off-by-one either way would report 0. */
+static void image_entry_count_reads_offset_seven(void)
+{
+    struct fdps_vfs_image_header header;
+
+    CHECK_EQ(read_image_header(NON_VFS_NAME, &header), 1);
+    CHECK_EQ(fdps_vfs_image_entry_count(&header), NON_VFS_HEADER_BYTE);
+}
+
 void run_vfs_tests(void)
 {
     RUN_TEST(missing_file_returns_zero);
     RUN_TEST(real_container_entry_count);
     RUN_TEST(non_container_is_read_unchecked);
+    RUN_TEST(image_entry_count_real_container);
+    RUN_TEST(image_entry_count_truncates_to_low_byte);
+    RUN_TEST(image_entry_count_reads_offset_seven);
 }

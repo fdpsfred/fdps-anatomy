@@ -13,6 +13,8 @@
 #ifndef VFS_H
 #define VFS_H
 
+#include "fdpstype.h"
+
 /* Reads a container's entry count straight off disk, without opening the
    container or building a handle for it.
 
@@ -40,5 +42,30 @@
    no caller in the original has to tell those apart. */
 extern int fdps_vfs_read_entry_count(char *path);
 #pragma aux fdps_vfs_read_entry_count "*" parm caller [];
+
+/* Reads a container's entry count out of an image already resident in memory,
+   as the in-memory counterpart of fdps_vfs_read_entry_count above.
+
+   image is the base of a whole container -- the 35-byte header, then one
+   26-byte entry per member, then the members' bytes -- and not a handle from
+   fdps_vfs_open: offset 7 of a handle lands inside the archive path it keeps
+   at handle+4.  The nested BaseAni.vfs and BaseWav.vfs images the game holds
+   resident are the shape this takes.
+
+   Only the low byte of the header's u32 entry count comes back, so the result
+   is 0..255 and a container of 256 members reports 0.  The truncation is this
+   function's own rather than the format's: fdps_vfs_image_get_entry reads the
+   same field off the same kind of pointer as a whole dword.  It is what caps a
+   container at 255 usable members, and no shipped container comes near the
+   cap -- the largest is Field.vfs at 223.
+
+   Nothing is validated: the "VFS" magic at offset 0, the version at 3 and the
+   entry-table offset at 5 are never looked at, so any image at all is read and
+   a non-container comes back holding whatever its own byte 7 is.
+
+   Nothing in the image calls this function or takes its address; it reaches
+   the link as part of the VFS module object. */
+extern unsigned int fdps_vfs_image_entry_count(struct fdps_vfs_image_header *image);
+#pragma aux fdps_vfs_image_entry_count "*" parm caller [];
 
 #endif
