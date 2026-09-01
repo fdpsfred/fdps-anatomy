@@ -2540,6 +2540,169 @@ static void chapter_29_an_open_battle_stays_open(void)
     CHECK_EQ(end_code(), 0);
 }
 
+/* --------------------------------------------------------------------------
+ * Chapter 30, 最終聖戰 -- fdps_chapter_30_post_action at 0003ba50.
+ *
+ * The fifth handler in this file with no CALL 0x0003a2e0 -- chapters 22, 25, 26
+ * and 27 are the others -- and the last slot of the table.  PUSH 0x0 / CALL
+ * 0x000109b0 / ADD ESP,0x4 at 0003ba5c..0003ba65,
+ * TEST EAX,EAX / JZ 0003ba74 at 0003ba66 and MOV dword ptr [0x00069da0],0x1 at
+ * 0003ba6a are the entire body, so there are exactly two verdicts it can leave:
+ * a 1 when unit slot 0 is retired, and whatever it was handed when slot 0 is
+ * standing.
+ *
+ * That the shared default end test is absent is what most of the cases below
+ * pin, because it is the one thing a plausible wrong emit would restore -- every
+ * other handler after chapter 27 in the table forwards to it, and unlike
+ * chapter 22 this one watches the very slot the shared test watches, so the
+ * index alone would not give the mistake away.  The guide gives 第30章
+ * 最終聖戰 勝利條件 擊倒平衡之神 and 失敗條件 蘭迪斯死亡, and its
+ * reinforcements are 永遠清不完 -- two ghosts and two 白骨戰士 are put back as
+ * fast as they are killed -- so 敵人全滅 is not a way to win this chapter and
+ * a 2 must never come out of this handler.
+ *
+ * The chapter id staged below is 29, the 0-based id whose table slot -- the
+ * dword at 00060300, twenty-nine entries into the table based at 0006028c --
+ * holds 0003ba50.  Nothing in the body reads it, and the last case here asserts
+ * exactly that, staging the two ids the shared test singles out.
+ *
+ * Unit slot 0 is 蘭迪斯: unit slot i is roster slot i and the roster is in join
+ * order, and chapter 30 names no exclusion from its 己方.
+ * ------------------------------------------------------------------------ */
+
+/* Chapter 30 is chapter id 29 (0x1d). */
+#define CHAPTER_30_ID 29
+
+static void stage30(int live_unit_count, int battle_end_code)
+{
+    stage(live_unit_count, battle_end_code);
+    data_fdps_chapter_current_chapter_id = CHAPTER_30_ID;
+}
+
+/* 失敗條件：蘭迪斯死亡.  A retired slot 0 puts a 1 in the code: the TEST/JZ
+   at 0003ba66 falls through and 0003ba6a stores it. */
+static void chapter_30_a_retired_randis_is_a_defeat(void)
+{
+    stage30(3, 0);
+    stage_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(2, SIDE_ENEMY, 0);
+    fdps_chapter_30_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The case that separates this handler from the forwarding ones: with every
+   enemy retired and slot 0 standing, the code stays 0.  A body that called the
+   shared test at 0003a2e0 would answer 2 here, because that test's sweep is
+   precisely 敵人全滅 -- and chapter 30 is not won that way, the guide's
+   敵方援軍是永遠清不完 saying the sweep could not empty in the first place. */
+static void chapter_30_wiping_the_enemy_out_does_not_clear_the_chapter(void)
+{
+    stage30(3, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_30_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* The ordinary path: a live enemy, a standing slot 0, nothing decided.  The JZ
+   at 0003ba66 is taken and the body writes nothing at all.  It is called twice
+   because the dispatchers run it after every unit action, and a handler that
+   only behaved on its first call would still pass every other case here. */
+static void chapter_30_an_open_battle_stays_open(void)
+{
+    stage30(3, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, 0);
+    fdps_chapter_30_post_action();
+    CHECK_EQ(end_code(), 0);
+    fdps_chapter_30_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* No slot but 0 ends this battle, and the sweep also catches an argument that
+   drifted by one.  Every other slot is retired in turn with slot 0 left
+   standing, and the code has to stay 0 each time -- slot 3 above all, the index
+   the shared test would substitute under a chapter id this handler never
+   reads. */
+static void chapter_30_no_slot_but_randis_ends_the_battle(void)
+{
+    int retired_slot;
+    int other_slot;
+
+    for (retired_slot = 1; retired_slot < STAGE_UNITS; retired_slot++) {
+        stage30(STAGE_UNITS, 0);
+        for (other_slot = 0; other_slot < STAGE_UNITS; other_slot++) {
+            stage_unit(other_slot, SIDE_PLAYER, 0);
+        }
+        stage_units[retired_slot].flags = FLAG_RETIRED;
+        fdps_chapter_30_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
+/* The store consults nothing, so a clear the death script already recorded --
+   the third 平衡之神 falling, which is this chapter's only victory -- loses to a
+   defeat detected on the same action.  Gating the store on the code still being
+   0, the guard the shared test puts on its own writes, would leave the 2
+   standing here and clear a chapter the original ends with a Game Over. */
+static void chapter_30_a_recorded_clear_still_loses_to_a_retired_randis(void)
+{
+    stage30(3, 2);
+    stage_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(2, SIDE_ENEMY, 0);
+    fdps_chapter_30_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* With slot 0 standing there is no store on any path, so a verdict already in
+   the code survives whatever else the map looks like -- including the wiped out
+   enemy side that would have made the shared test recompute a 2 rather than
+   leave the 1 below. */
+static void chapter_30_a_recorded_verdict_survives_a_standing_randis(void)
+{
+    stage30(3, 2);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(2, SIDE_ENEMY, 0);
+    fdps_chapter_30_post_action();
+    CHECK_EQ(end_code(), 2);
+
+    stage30(3, 1);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_30_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The body contains no CMP against data_fdps_chapter_current_chapter_id, so the
+   answer cannot depend on it.  Staging chapter 17's id and then chapter 22's --
+   0x10 and 0x15, the two the shared test's own comparison singles out -- changes
+   neither answer, and the wiped out enemy side in each half would have come back
+   as a 2 from a handler that reached the shared test at all. */
+static void chapter_30_the_chapter_id_is_never_consulted(void)
+{
+    stage30(3, 0);
+    data_fdps_chapter_current_chapter_id = CHAPTER_17_ID;
+    stage_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_30_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage30(3, 0);
+    data_fdps_chapter_current_chapter_id = CHAPTER_22_ID;
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_30_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
 void run_chpost2_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -2642,4 +2805,11 @@ void run_chpost2_tests(void)
     RUN_TEST(chapter_29_no_other_slot_ends_the_battle);
     RUN_TEST(chapter_29_a_recorded_verdict_is_left_alone);
     RUN_TEST(chapter_29_an_open_battle_stays_open);
+    RUN_TEST(chapter_30_a_retired_randis_is_a_defeat);
+    RUN_TEST(chapter_30_wiping_the_enemy_out_does_not_clear_the_chapter);
+    RUN_TEST(chapter_30_an_open_battle_stays_open);
+    RUN_TEST(chapter_30_no_slot_but_randis_ends_the_battle);
+    RUN_TEST(chapter_30_a_recorded_clear_still_loses_to_a_retired_randis);
+    RUN_TEST(chapter_30_a_recorded_verdict_survives_a_standing_randis);
+    RUN_TEST(chapter_30_the_chapter_id_is_never_consulted);
 }

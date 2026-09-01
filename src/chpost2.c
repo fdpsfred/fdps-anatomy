@@ -778,3 +778,76 @@ void fdps_chapter_29_post_action(void)
 {
     fdps_battle_check_default_end_conditions();
 }
+
+/* 0003ba50.  One CALL, one branch, one store and no forward to the shared end
+   test.  Nine of the thirty post-action handlers never call 0x0003a2e0 --
+   chapters 03, 08, 10, 22, 23, 25, 26, 27 and 30, the twenty-one that do being
+   the complete caller list of 0003a2e0 -- and of those nine, chapters 22
+   (0003b270), 23 (0003b2e0) and 30 are the three that also never store a 2, so
+   defeat is the only verdict any of the three can produce.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP at 0003ba50..0003ba53 (53 56 57 55), MOV EBP,ESP at
+   0003ba54, SUB ESP,0x0 at 0003ba56 in the six-byte imm32 form 81 EC 00 00 00
+   00 -- and nothing in it is ever read, so there is no local to name.  The
+   epilogue is the four bare POPs at 0003ba74..0003ba77 with no MOV ESP,EBP in
+   front of them, which is what an empty local area leaves behind, and the RET
+   at 0003ba78 is the one-byte C3: the caller cleans, and there is nothing to
+   clean.
+
+   PUSH 0x0 / CALL 0x000109b0 / ADD ESP,0x4 at 0003ba5c..0003ba65 is
+   fdps_unit_is_retired(0) with the caller clearing its one argument, and its
+   EAX is used at once: TEST EAX,EAX / JZ 0003ba74 at 0003ba66 is the only
+   branch in the body, skipping the MOV dword ptr [0x00069da0],0x1 at 0003ba6a.
+   That store is the whole of the rest of the function -- the code is never read
+   before it is written and no other value is ever stored -- so this handler can
+   turn the code into a 1 and can do nothing else with it.  EAX is left holding
+   the callee's answer at the RET, but the table's slots are called as void
+   f(void) and no dispatch site reads a result, so the handler returns nothing.
+
+   Unit index 0 is 蘭迪斯: unit slot i is roster slot i, the roster is in join
+   order and is never permuted, so slot 0 is his on every map that deploys him,
+   and chapter 30 names no exclusion from its 己方.
+
+   There is no CALL 0x0003a2e0 here, and that is the chapter's rules rather than
+   a missing line.  The shared test declares its victory by sweeping the unit
+   list for a live enemy, and the guide gives 第30章 最終聖戰 勝利條件 擊倒平衡
+   之神 -- three named bosses, the third of which has to be beaten to end the
+   chapter -- against reinforcements it describes as 敵方援軍是永遠清不完.  Two
+   ghosts and two 白骨戰士 are put back on the map as fast as they are killed, so
+   the sweep for a live enemy can never come up empty and forwarding to the
+   shared test would be dead weight on every action rather than a second way to
+   win.  The clear is written elsewhere, and the sweep of every instruction
+   naming 0x00069da0 -- 59 in the image, none of them a write in any form but
+   MOV with an immediate -- says where it can come from.  The fifteen stores of
+   2 are the shared test's own at 0003a2f9; one in each of nine other
+   post-action handlers, chapters 03 at 0003a507, 08 at 0003a7f0, 10 at
+   0003a941, 15 at 0003ac06, 19 at 0003af4a, 24 at 0003b49a, 25 at 0003b6ea, 26
+   at 0003b7aa and 27 at 0003b8ba; the three named boss-defeat events, chapter
+   15's at 00037caf and 00037cbb, 22's at 00038936 and 23's at 00038a12; and
+   the opcode-4 arm of fdps_run_death_scripts at 0001dcfb.  Chapter 30 owns
+   none of the first fourteen -- a handler and the shared test are reached only
+   through the table slot of the chapter being played, and the boss-defeat
+   events are chapters 15's, 22's and 23's -- which leaves 0001dcfb as the only
+   store of 2 a chapter-30 battle can execute.  So the third 平衡之神's death
+   reaches the code as a death-script record, and this handler must not be able
+   to raise a 2 at all.
+
+   The store carries no "only while the code is still 0" guard, unlike the two
+   the shared test puts around its own writes, and copying that guard here by
+   analogy changes behaviour: a defeat that lands on the same action as the
+   scripted clear overwrites the 2 with a 1 in the original, and the player gets
+   a Game Over where the guarded version would clear the last chapter.  The
+   value read back is the value this handler last wrote.
+
+   The address reaches the dispatchers only as the dword at 00060300, twenty-nine
+   entries into the table based at 0006028c, which is why the function has no
+   static caller: slot 29 is chapter 30, and it is the table's last slot -- the
+   dword at 00060304 is 0003a410, fdps_chapter_01_end, the first entry of the
+   separate chapter-end table. */
+void fdps_chapter_30_post_action(void)
+{
+    if (fdps_unit_is_retired(0) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+}

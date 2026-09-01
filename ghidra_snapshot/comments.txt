@@ -11991,7 +11991,7 @@ Alignment padding: lea eax,[eax+0x0] + mov edx,edx, aligning next function entry
 Chapter 30's post-action handler: the end-condition test the battle loop runs after a unit has acted, reached through slot 29 of the per-chapter handler table based at 0x0006028c.
 
 Algorithm:
-Builds the standard four-push Watcom frame with an empty local area, then calls fdps_unit_is_retired with unit index 0 -- Randis -- and, when it returns non-zero, stores 1 (defeat) into the chapter-event/battle-end code at DAT_00069da0. Nothing else is tested. Unlike the other chapters' handlers this one does not call the shared default end-condition check at 0x0003a2e0, so it never raises the victory code 2 and never clears DAT_00069da0 back to 0: the only outcome this handler can produce is defeat, and chapter 30's victory comes from the chapter script instead.
+Builds the standard four-push Watcom frame with an empty local area, then calls fdps_unit_is_retired with unit index 0 -- Randis -- and, when it returns non-zero, stores 1 (defeat) into the chapter-event/battle-end code at DAT_00069da0. Nothing else is tested. This handler does not call the shared default end-condition check at 0x0003a2e0, and it is not alone in that: nine of the thirty table slots do not call it -- chapters 03 (0003a4b0), 08 (0003a710), 10 (0003a8c0), 22 (0003b270), 23 (0003b2e0), 25 (0003b6b0), 26 (0003b760), 27 (0003b8a0) and 30 (0003ba50). What is special about chapter 30 is narrower: of those nine, only chapters 22, 23 and 30 also never store a 2, so defeat is the only verdict any of the three can produce. This handler therefore never raises the victory code 2 and never clears DAT_00069da0 back to 0: the only outcome it can produce is defeat, and chapter 30's victory comes from the chapter script instead.
 
 Parameters:
   none -- the dispatch sites call through the table with nothing pushed and no stack cleanup.
@@ -12002,7 +12002,7 @@ Returns:
 Pool: fdps  [no Function ID hit in either the Watcom or the ail library set; it calls game code and is reached only from a game function-pointer table, symbols no separately compiled vendor object could reference]
 
 Rebuild note:
-Chapter 30 is the one entry of the per-chapter post-action table at 0x0006028c that does not fall back to the shared default end-condition check at 0x0003a2e0; it tests only whether unit 0 (Randis) is retired. Filling the table in by the family pattern -- calling the shared check first, the way FUN_0003b9f0 and fdps_chapter_02_post_action do -- would give the final chapter an automatic wipe-out victory it does not have in the original.
+Chapter 30 is one of the nine entries of the per-chapter post-action table at 0x0006028c that do not fall back to the shared default end-condition check at 0x0003a2e0 -- chapters 03, 08, 10, 22, 23, 25, 26, 27 and 30 -- and one of the only three of those nine, chapters 22, 23 and 30, that also never store a 2, so defeat is the only verdict it can produce; it tests only whether unit 0 (Randis) is retired. Filling the table in by the family pattern -- calling the shared check first, the way fdps_chapter_29_post_action and fdps_chapter_02_post_action do -- would give the final chapter an automatic wipe-out victory it does not have in the original.
 
 === 0003ba79 [EOL]
 Alignment padding: 8d 80 00 00 00 00 (lea eax,[eax+0x0]) + 90 (nop), aligning 0003ba80 to 16 bytes.

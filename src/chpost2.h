@@ -364,4 +364,42 @@ extern void fdps_chapter_28_post_action(void);
 extern void fdps_chapter_29_post_action(void);
 #pragma aux fdps_chapter_29_post_action "*" parm caller [];
 
+/* Chapter 30's post-action test: one defeat condition and nothing else -- unit
+   slot 0 having left the battle.  Takes nothing, returns nothing, and leaves
+   the verdict in data_fdps_chapter_event_or_battle_end_code (gamedata.h).
+
+   One of the nine handlers that do not forward to
+   fdps_battle_check_default_end_conditions (btlend.h) -- chapters 03, 08, 10,
+   22, 23, 25, 26 and 27 are the others -- and the last slot of the table.  It
+   can put a 1 in the code and can do nothing else with it: it never writes 2
+   and never clears the code back to 0, which among those nine it shares only
+   with chapters 22 and 23.
+
+   The guide gives 第30章 最終聖戰 勝利條件 擊倒平衡之神 and 失敗條件 蘭迪斯死亡.
+   The defeat is this handler's whole content; the clear is not, and cannot be,
+   because the chapter's reinforcements are 永遠清不完 -- two ghosts and two
+   白骨戰士 reappear as fast as they are killed -- so the shared test's 敵人全滅
+   sweep would never come up empty even if it were called.  Beating the third
+   平衡之神 records the clear from the death-script side instead, and
+   fdps_chapter_30_end then plays the ending.
+
+   The store carries no guard on the code still being 0, so a defeat on the same
+   action as a recorded clear overwrites the 2 with a 1.
+
+   Unit slot 0 is 蘭迪斯 and chapter 30 excludes nobody from its 己方, so unlike
+   chapters 22 and 25 this handler watches the slot the shared test would have
+   watched anyway -- the difference between it and a bare forward is the absent
+   victory, not the index.
+
+   The chapter's own scripted business is elsewhere and is not missing from
+   here: the two reinforcement pairs that appear at lower right and lower left
+   the moment a unit enters a 平衡之神's attack range, and the wave that keeps
+   being restocked, are position- and death-triggered chapter-script events, so
+   putting either here would fire it after every unit action instead of on the
+   trigger.
+
+   Table slot 29, the last of the thirty. */
+extern void fdps_chapter_30_post_action(void);
+#pragma aux fdps_chapter_30_post_action "*" parm caller [];
+
 #endif
