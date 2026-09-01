@@ -7,3 +7,9 @@
 # needs a real sheet -- a fabricated one large enough to survive that read
 # would be a copy of this file with different numbers in it.
 ICON.CEL
+#
+# FIELD2.VFS is the smallest .VFS the game ships at 112,350 bytes, read by
+# tests/vfs.c's cover for fdps_vfs_read_entry_count.  That reader takes the
+# entry count straight out of a container's header, so the assertion is only
+# worth anything against a container whose header the game actually wrote.
+FIELD2.VFS

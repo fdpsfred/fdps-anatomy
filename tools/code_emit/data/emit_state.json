@@ -1141,6 +1141,14 @@
       "status": "committed",
       "emitted_against": "0xf6",
       "rounds": 1
+    },
+    "000398f0": {
+      "name": "fdps_vfs_read_entry_count",
+      "target": "vfs.c",
+      "body_size": "0x6e",
+      "status": "committed",
+      "emitted_against": "0x6e",
+      "rounds": 1
     }
   }
 }
