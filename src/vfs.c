@@ -6,9 +6,10 @@
  * validates a container: the readers take the two header fields they need and
  * trust everything else, so a file that is not a .VFS is never rejected.
  *
- * fopen, fseek, fread and fclose come from <stdio.h>; memcpy, memset, strcmp,
- * strlen and strupr from <string.h>; malloc from <stdlib.h>.  All ten are real
- * library calls in the original -- CALL 0x000435bc, 0x000435f3 and 0x00042fe0
+ * fopen, fseek, fread, fclose and printf come from <stdio.h>; memcpy, memset,
+ * strcmp, strlen and strupr from <string.h>; malloc from <stdlib.h>.  All
+ * eleven are real library calls in the original -- CALL 0x000435bc, 0x000435f3
+ * and 0x00042fe0
  * at 000399d4, 000399e0 and 000399ed for three of the string routines, and
  * CALL 0x0003d375, 0x00042cd0, 0x00042dd2 and 0x000435bc at 00039b32,
  * 00039b4b, 00039b5f and 00039b73 for malloc, memset, strlen and memcpy.
@@ -313,4 +314,123 @@ void *fdps_vfs_open(char *path)
         }
     }
     return handle;
+}
+
+/* Where an entry keeps the member's start in the container, counted from the
+   start of the entry.  The original never spells it out either: MOV EAX,[EAX +
+   0x27] at 00039c5d reads it off a base that already has the table's own 0x11
+   folded in, and 0x27 minus 0x11 is 0x16.  resource_info/vfs.md has the same
+   0x16 for the member start, behind the size at 0x0d, the duplicate size at
+   0x11 and the reserved byte at 0x15. */
+#define VFS_ENTRY_START_FIELD_OFFSET 0x16
+
+/* How much of a handle's archive-path field is copied back out of it: PUSH 0xd
+   at 00039c00, the memcpy count.  It is the whole field -- the 13 bytes
+   between VFS_HANDLE_ARCHIVE_PATH_OFFSET and VFS_HANDLE_ENTRY_TABLE_OFFSET --
+   and not a length measured off the string, so the copy is terminated only if
+   fdps_vfs_open left a zero somewhere inside those 13 bytes. */
+#define VFS_HANDLE_ARCHIVE_PATH_BYTES 0xd
+
+/* 00039bd0.  Three nested ifs, each with an else that prints a diagnostic and
+   leaves the preset NULL standing.
+
+   All three tests are written in the positive form -- the index is not the
+   miss marker, the file opened, the allocation worked -- because that is what
+   the original's block order says they were.  Each condition is a CMP followed
+   by a JZ to a handler placed AFTER the body it guards (JZ 0x00039cc5 at
+   00039bfa, JZ 0x00039cb1 at 00039c2e, JZ 0x00039c8d at 00039c54), and each
+   body ends by jumping over its own handler (JMP 0x00039ca3 at 00039c8b, JMP
+   0x00039cc3 at 00039caf, JMP 0x00039cd7 at 00039cc3, the last two nested one
+   inside the other).  Writing the tests the other way round is the same
+   behaviour with the handlers laid out in front of the bodies instead
+   (ADR-0001).
+
+   The outer test is an equality against the -1 fdps_vfs_find_entry returns and
+   not an ordering test, so nothing here depends on the index's signedness.
+
+   The innermost handler is the one that carries weight: its body jumps to the
+   fclose at 00039ca3 rather than to the exit, so the two arms rejoin ahead of
+   the close and an allocation that failed still closes the file it opened.
+   The reopen failure is the only path with no fclose, and it is also the only
+   one that never opened a file.
+
+   Nothing checks a result on the way through.  Both the fseek and the fread
+   discard what they return (ADD ESP,0xc at 00039c72 and ADD ESP,0x10 at
+   00039c88, EAX untouched), so a container too short to hold the member the
+   directory describes hands back a buffer that was only partly filled and
+   nothing in the function notices.
+
+   The result is preset to NULL at 00039bdc and is the malloc's own slot, so
+   the three failures all return it without a second store: the value that
+   reaches the caller is either the buffer or the preset.  The last three
+   instructions before the epilogue are the -od return spill through a
+   compiler temporary, not a local of the author's, exactly as in
+   fdps_vfs_image_entry_count above.
+
+   The two entry fields are reached through a base with the table offset folded
+   into it -- 0x1e for the size and 0x27 for the start -- and both are written
+   out here as the table offset plus the field offset so that neither constant
+   reads as something it is not.
+
+   The archive path is copied to the stack before it is opened rather than
+   being handed to fopen where it lies, and the copy is a fixed 13 bytes.  The
+   16-byte buffer is what the frame gives it, and the frame comes out at the
+   original's SUB ESP,0x28.  Two of its slots are not where the original put
+   them: the original keeps all five locals at -0x8 through -0x18 with the
+   return temporary at -0x4, while this source compiles to entry_index at -0x4
+   and the temporary at -0x18, the other four and the path buffer unmoved
+   (verified against the emitted VFS.OBJ).  The declarations are in the order
+   that puts those four where the original has them, which is the same order
+   that reproduces fdps_vfs_find_entry's frame exactly; what changes with the
+   fifth slot is which of entry_index and the temporary the compiler hoists,
+   and that is allocation rather than behaviour (ADR-0001).  Everything else
+   the object file holds does line up, down to the order the three format
+   strings and the "rb" land in the literal pool.
+
+   entry_length is spent twice, on the malloc and on the fread, and is never
+   compared, so its signedness is not observable; unsigned is what the u32 in
+   resource_info/vfs.md and both of its consumers make it.  file_offset is what
+   MOV EAX,[EAX + 0x27] loads and PUSH hands to fseek, a whole dword either
+   way, and the seek's own parameter is long. */
+void *fdps_vfs_load_file(char *name, void *vfs)
+{
+    char archive_path[16];
+    FILE *fp;
+    void *buffer;
+    long file_offset;
+    unsigned int entry_length;
+    int entry_index;
+
+    buffer = NULL;
+    entry_index = fdps_vfs_find_entry(name, vfs);
+    if (entry_index != -1) {
+        memcpy(archive_path,
+               (char *)vfs + VFS_HANDLE_ARCHIVE_PATH_OFFSET,
+               VFS_HANDLE_ARCHIVE_PATH_BYTES);
+        fp = fopen(archive_path, "rb");
+        if (fp != NULL) {
+            entry_length = *(unsigned int *)((char *)vfs
+                                             + entry_index * VFS_ENTRY_SIZE
+                                             + VFS_HANDLE_ENTRY_TABLE_OFFSET
+                                             + VFS_ENTRY_SIZE_FIELD_OFFSET);
+            buffer = malloc(entry_length);
+            if (buffer != NULL) {
+                file_offset = *(long *)((char *)vfs
+                                        + entry_index * VFS_ENTRY_SIZE
+                                        + VFS_HANDLE_ENTRY_TABLE_OFFSET
+                                        + VFS_ENTRY_START_FIELD_OFFSET);
+                fseek(fp, file_offset, SEEK_SET);
+                fread(buffer, entry_length, 1, fp);
+            } else {
+                printf("Can't allocate memory for VFS_file: %s(%dbytes)\n",
+                       name, entry_length);
+            }
+            fclose(fp);
+        } else {
+            printf("Can't open the source VFS_file: %s\n", archive_path);
+        }
+    } else {
+        printf("Can't find the string: %s\n", name);
+    }
+    return buffer;
 }

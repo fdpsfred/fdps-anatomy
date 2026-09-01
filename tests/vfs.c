@@ -403,21 +403,30 @@ static void find_entry_stops_at_the_first_match(void)
 #define ENTRY_SIZE_DUP_FIELD 0x11
 #define ENTRY_START_FIELD 0x16
 
-/* Writes one little-endian dword into a field of a synthetic entry.  Explicit
-   bytes rather than a cast, for the same reason synthetic_handle_reset uses
-   them: the values under test are chosen to be distinguishable, and a stored
-   dword has to be exactly the bytes the test meant. */
-static void synthetic_handle_set_dword(int index, int field_offset,
-                                       unsigned long value)
+/* Writes one little-endian dword into a field of one entry of any handle,
+   synthetic or real.  Explicit bytes rather than a cast, for the same reason
+   synthetic_handle_reset uses them: the values under test are chosen to be
+   distinguishable, and a stored dword has to be exactly the bytes the test
+   meant.  This is the only place the entry-field address is computed, so the
+   fdps_vfs_load_file cases at the bottom of the file and the
+   fdps_vfs_find_entry_size cases here cannot drift apart about the layout. */
+static void handle_set_entry_dword(char *handle, int index, int field_offset,
+                                   unsigned long value)
 {
     char *field;
 
-    field = synthetic_handle + HANDLE_ENTRY_TABLE_OFFSET
-            + index * HANDLE_ENTRY_SIZE + field_offset;
+    field = handle + HANDLE_ENTRY_TABLE_OFFSET + index * HANDLE_ENTRY_SIZE
+            + field_offset;
     field[0] = (char)(value & 0xffUL);
     field[1] = (char)((value >> 8) & 0xffUL);
     field[2] = (char)((value >> 16) & 0xffUL);
     field[3] = (char)((value >> 24) & 0xffUL);
+}
+
+static void synthetic_handle_set_dword(int index, int field_offset,
+                                       unsigned long value)
+{
+    handle_set_entry_dword(synthetic_handle, index, field_offset, value);
 }
 
 /* The sizes the packer wrote for four members of the shipped FIELD2.VFS, read
@@ -774,6 +783,304 @@ static void open_handle_drives_the_searches(void)
     free(handle);
 }
 
+/* fdps_vfs_load_file is the only reader that uses both halves of a handle: it
+   searches the directory through fdps_vfs_find_entry and then reopens the
+   container by the archive path the handle keeps at +4.  So every case below
+   drives a handle fdps_vfs_open really built over a shipped container, and the
+   file the loader reopens is the staged FIELD2.VFS itself.
+
+   The member starts pair with the sizes and indices the cases above already
+   use, and both come out of FIELD2.VFS's own entry table at the offset its
+   header names, read with resource_info/vfs.md's layout: entry 0 is
+   ATTR000.DAT at 3,441, entry 64 is ATTR610.DAT at 104,429 and entry 130 is
+   DSC64.DAT at 112,314.  DSC64.DAT is the last of the 131 and its start plus
+   its size is exactly the container's 112,350 bytes, which is what makes it
+   the case that a start read one field too far cannot survive. */
+#define ATTR000_INDEX 0
+#define ATTR610_START 104429L
+#define DSC64_INDEX 130
+#define DSC64_START 112314L
+
+/* A byte count no DOS/4GW image can satisfy, so malloc returns NULL and the
+   branch at 00039c54 is taken.  It has to come from a directory the test wrote
+   -- every shipped member fits easily, the largest anywhere being
+   CHAPTER.SAF in MISC.VFS at 1,857,775 bytes. */
+#define UNALLOCATABLE_SIZE 0x7FF00000UL
+
+/* Big enough for the largest member used here, ATTR000.DAT at 1,553 bytes. */
+#define MEMBER_MAX 2048
+static char member_expected[MEMBER_MAX];
+
+/* Reads a span of the container with plain library calls, so the bytes a case
+   compares against are the file's own and not anything src/vfs.c produced.
+   Returns 0 rather than asserting, and every caller checks. */
+static int read_member_bytes(char *archive_name, long start,
+                             unsigned int length)
+{
+    FILE *fp;
+    size_t got;
+
+    if (length > (unsigned int)MEMBER_MAX) {
+        return 0;
+    }
+    fp = fopen(archive_name, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    fseek(fp, start, SEEK_SET);
+    got = fread(member_expected, length, 1, fp);
+    fclose(fp);
+    return got == 1;
+}
+
+/* Loads one member through the function under test and holds it against the
+   same span of the container read independently.  Three checks: the load
+   produced a buffer, the reference read worked, and the two agree byte for
+   byte.  Every query goes through a writable buffer because the search folds
+   it to upper case in place. */
+static void check_member(char *handle, char *member_name, long start,
+                         unsigned int length)
+{
+    char query[QUERY_MAX];
+    char *member;
+
+    strcpy(query, member_name);
+    member = (char *)fdps_vfs_load_file(query, handle);
+    CHECK_EQ(member != NULL, 1);
+    CHECK_EQ(read_member_bytes(VFS_NAME, start, length), 1);
+    if (member == NULL) {
+        return;
+    }
+    CHECK_EQ(memcmp(member, member_expected, length), 0);
+    free(member);
+}
+
+/* Three members of the shipped container, whole, out of a handle the module
+   built for itself.  This is the function's ordinary path end to end: the
+   search, the reopen through the handle's stored path, the size taken from the
+   entry's field at 0x0d and the seek to the start at its 0x16.
+
+   The three indices are what make it an assertion about the arithmetic and not
+   just about entry 0.  Entry 0 begins where the table begins, so a wrong
+   stride still finds it; entry 64 and entry 130 land on a different record
+   under any stride but 26, and a record that is not the matched one holds a
+   different start and a different length, which shows up as bytes that do not
+   compare equal rather than as a near miss.  Entry 130 is also the last of the
+   131 -- its 36 bytes end exactly at the container's 112,350 -- so a start
+   read from a neighbouring field would run off the end of the file and leave
+   the buffer holding whatever the short read did not fill. */
+static void load_file_returns_whole_members(void)
+{
+    char *handle;
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    check_member(handle, "ATTR000.DAT", ATTR000_START, ATTR000_SIZE);
+    check_member(handle, "ATTR610.DAT", ATTR610_START, ATTR610_SIZE);
+    check_member(handle, "DSC64.DAT", DSC64_START, DSC64_SIZE);
+    free(handle);
+}
+
+/* The first of the three failures: fdps_vfs_find_entry answers -1, the
+   equality at 00039bf6 takes its branch, and what comes back is the NULL
+   preset from 00039bdc.  The second check is the evidence that the query
+   really did reach the search -- strupr rewrote the caller's buffer on the way
+   through -- so a NULL that came from somewhere else would not look like this
+   one. */
+static void load_file_missing_member_returns_null(void)
+{
+    char *handle;
+    char query[QUERY_MAX];
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    strcpy(query, "nosuch.dat");
+    CHECK_EQ(fdps_vfs_load_file(query, handle) == NULL, 1);
+    CHECK_EQ(strcmp(query, "NOSUCH.DAT"), 0);
+    free(handle);
+}
+
+/* The query is handed to the search untouched, so everything the search does
+   to it is this function's behaviour too: a lower-case name finds an
+   upper-case entry and the caller's buffer comes back upper-cased.  It is also
+   what pins the argument order -- the two pointers the other way round would
+   have the search reading a member name as a handle and would find nothing. */
+static void load_file_folds_the_query_like_the_search(void)
+{
+    char *handle;
+    char query[QUERY_MAX];
+    char *member;
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    strcpy(query, "dsc64.dat");
+    member = (char *)fdps_vfs_load_file(query, handle);
+    CHECK_EQ(member != NULL, 1);
+    CHECK_EQ(strcmp(query, "DSC64.DAT"), 0);
+    free(member);
+    free(handle);
+}
+
+/* Which file is reopened.  The memcpy at 00039c00 takes 13 bytes from the
+   handle's +4 and fopen is given that copy, so the container the bytes come
+   out of is named by the handle and not by the query and not by anything the
+   caller passes twice.  Pointing the field at a name nothing staged is the
+   only way to see it: the search still succeeds, the entry is still found, and
+   the answer is still NULL because the second open failed.
+
+   The second half puts a lower-case spelling of the same container in the
+   field.  DOS matches a filename without regard to case, so it opens, which
+   says the path is used exactly as it was stored -- there is no strupr on this
+   side, unlike the member name. */
+static void load_file_reopens_the_path_out_of_the_handle(void)
+{
+    char *handle;
+    char query[QUERY_MAX];
+    char *member;
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    strcpy(handle + HANDLE_ARCHIVE_PATH_OFFSET, MISSING_NAME);
+    strcpy(query, "DSC64.DAT");
+    CHECK_EQ(fdps_vfs_load_file(query, handle) == NULL, 1);
+
+    strcpy(handle + HANDLE_ARCHIVE_PATH_OFFSET, VFS_NAME_LOWER);
+    strcpy(query, "DSC64.DAT");
+    member = (char *)fdps_vfs_load_file(query, handle);
+    CHECK_EQ(member != NULL, 1);
+    free(member);
+    free(handle);
+}
+
+/* Which of the entry's two identical size fields is read, and the malloc
+   failure at the same time.  Every shipped container has 0x0d and 0x11 holding
+   the same number, so the only way to separate them is to make them disagree
+   in a handle already in memory -- and a byte count no allocation can satisfy
+   turns the disagreement into an answer, because the field that is read
+   decides whether malloc succeeds.
+
+   0x0d unallocatable and 0x11 real answers NULL; 0x0d real and 0x11
+   unallocatable loads the member whole.  A read of 0x11 gives exactly the
+   opposite pair, so neither half can pass by accident.
+
+   The NULL half is also the only coverage of the branch at 00039c54: nothing a
+   shipped container can hold makes malloc fail. */
+static void load_file_reads_the_size_field_not_its_duplicate(void)
+{
+    char *handle;
+    char query[QUERY_MAX];
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    handle_set_entry_dword(handle, ATTR000_INDEX, ENTRY_SIZE_FIELD,
+                           UNALLOCATABLE_SIZE);
+    strcpy(query, "ATTR000.DAT");
+    CHECK_EQ(fdps_vfs_load_file(query, handle) == NULL, 1);
+
+    handle_set_entry_dword(handle, ATTR000_INDEX, ENTRY_SIZE_FIELD,
+                           ATTR000_SIZE);
+    handle_set_entry_dword(handle, ATTR000_INDEX, ENTRY_SIZE_DUP_FIELD,
+                           UNALLOCATABLE_SIZE);
+    check_member(handle, "ATTR000.DAT", ATTR000_START, ATTR000_SIZE);
+    free(handle);
+}
+
+/* Where in the container the read begins.  Entry 130's start and size are
+   rewritten to entry 0's, and the member that comes back under the name
+   DSC64.DAT is ATTR000.DAT's 1,553 bytes -- so both numbers are taken from the
+   entry the search matched, at 0x16 for the start and 0x0d for the size, and
+   neither is recovered from anywhere else.
+
+   The redirect is what separates the start field from the two dwords in front
+   of it: reading 0x0d or 0x11 as the start would seek to 1,553 rather than to
+   3,441, and the container's bytes there are header and directory rather than
+   the member. */
+static void load_file_seeks_to_the_entry_start_field(void)
+{
+    char *handle;
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    handle_set_entry_dword(handle, DSC64_INDEX, ENTRY_START_FIELD,
+                           (unsigned long)ATTR000_START);
+    handle_set_entry_dword(handle, DSC64_INDEX, ENTRY_SIZE_FIELD,
+                           ATTR000_SIZE);
+    check_member(handle, "DSC64.DAT", ATTR000_START, ATTR000_SIZE);
+    free(handle);
+}
+
+/* Enough loads to run a DOS process out of stream slots if the fclose at
+   00039ca7 were not reached.  Each buffer is freed, so what is being counted
+   is open files and not memory. */
+#define LOAD_REPEATS 40
+
+/* The fclose is on the shared tail at 00039ca3, which the malloc failure
+   rejoins rather than jumping, so a load that allocated nothing still closes
+   what it opened.  Neither loop can see that on its own -- a leaked stream
+   makes fopen fail and the function answers NULL through its middle branch
+   instead, which looks the same from outside.  The assertion is the load
+   afterwards: forty refusals followed by a member that still comes back whole
+   is only possible if all forty closed. */
+static void load_file_closes_the_container_on_both_paths(void)
+{
+    char *handle;
+    char *member;
+    char query[QUERY_MAX];
+    int repeat;
+    int loaded;
+    int refused;
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+
+    loaded = 0;
+    for (repeat = 0; repeat < LOAD_REPEATS; repeat++) {
+        strcpy(query, "DSC64.DAT");
+        member = (char *)fdps_vfs_load_file(query, handle);
+        if (member != NULL) {
+            loaded++;
+            free(member);
+        }
+    }
+    CHECK_EQ(loaded, LOAD_REPEATS);
+
+    handle_set_entry_dword(handle, DSC64_INDEX, ENTRY_SIZE_FIELD,
+                           UNALLOCATABLE_SIZE);
+    refused = 0;
+    for (repeat = 0; repeat < LOAD_REPEATS; repeat++) {
+        strcpy(query, "DSC64.DAT");
+        if (fdps_vfs_load_file(query, handle) == NULL) {
+            refused++;
+        }
+    }
+    CHECK_EQ(refused, LOAD_REPEATS);
+
+    handle_set_entry_dword(handle, DSC64_INDEX, ENTRY_SIZE_FIELD, DSC64_SIZE);
+    check_member(handle, "DSC64.DAT", DSC64_START, DSC64_SIZE);
+    free(handle);
+}
+
 void run_vfs_tests(void)
 {
     RUN_TEST(missing_file_returns_zero);
@@ -799,4 +1106,11 @@ void run_vfs_tests(void)
     RUN_TEST(open_missing_file_returns_null);
     RUN_TEST(open_closes_the_container);
     RUN_TEST(open_handle_drives_the_searches);
+    RUN_TEST(load_file_returns_whole_members);
+    RUN_TEST(load_file_missing_member_returns_null);
+    RUN_TEST(load_file_folds_the_query_like_the_search);
+    RUN_TEST(load_file_reopens_the_path_out_of_the_handle);
+    RUN_TEST(load_file_reads_the_size_field_not_its_duplicate);
+    RUN_TEST(load_file_seeks_to_the_entry_start_field);
+    RUN_TEST(load_file_closes_the_container_on_both_paths);
 }

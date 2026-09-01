@@ -10658,7 +10658,7 @@ Algorithm:
 4. Takes the entry file offset from [vfs + index*0x1a + 0x27], fseek(fp, offset, 0), fread(buf, length, 1, fp), fclose(fp).
 5. Returns the allocated buffer, which the caller owns.
 
-Directory layout implied by the arithmetic: a 0x1e byte header (archive path string at +4, at most 13 bytes copied) followed by 0x1a byte records holding the entry length at +0 and the entry offset at +9.
+Handle layout: a 0x11 byte header (u32 member count at 0, 13-byte archive path at 4) followed by 26-byte directory entries starting at 0x11, each holding the 13-byte name at +0, the member size at +0x0d, a duplicate size at +0x11, a reserved byte at +0x15 and the member start at +0x16. The 0x1e at 00039c3b and the 0x27 at 00039c5d are folded bases: 0x11 + 0x0d and 0x11 + 0x16.
 
 === 00039ce7 [EOL]
 Watcom multi-byte NOP alignment padding to 16-byte boundary at 00039cf0

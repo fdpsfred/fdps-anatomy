@@ -1181,6 +1181,14 @@
       "status": "committed",
       "rounds": 1,
       "emitted_against": "0x11a"
+    },
+    "00039bd0": {
+      "name": "fdps_vfs_load_file",
+      "target": "vfs.c",
+      "body_size": "0x117",
+      "status": "committed",
+      "emitted_against": "0x117",
+      "rounds": 0
     }
   }
 }

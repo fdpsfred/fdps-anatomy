@@ -194,4 +194,48 @@ extern int fdps_vfs_find_entry_size(char *name, void *dir);
 extern void *fdps_vfs_open(char *path);
 #pragma aux fdps_vfs_open "*" parm caller [];
 
+/* Pulls one member called name out of the open container vfs into a buffer of
+   its own, or returns NULL when the member is not there, the container will
+   not reopen or the buffer will not fit in memory.
+
+   vfs is a handle from fdps_vfs_open, and this function is the only reader
+   that uses both halves of one: the directory, which it searches through
+   fdps_vfs_find_entry, and the archive path at +4, which it copies out and
+   hands to a fresh fopen.  The container is therefore opened a second time
+   here -- fdps_vfs_open closed its own FILE before it returned -- and it is
+   that stored path, not name and not anything global, that says which file is
+   read.  Exactly 13 bytes of the field are copied, the whole of it, so a
+   handle whose path filled all 13 hands fopen a string with no terminator in
+   it (see fdps_vfs_open above for how a path that long would get there).
+
+   Everything fdps_vfs_find_entry does to the query happens here: name is
+   upper-cased IN PLACE before the compare, the entry's own name is taken raw,
+   and the entry count is read one byte wide so only members 0..254 are
+   reachable.  A caller that passes a string literal has that literal
+   permanently upper-cased.
+
+   The member's byte count comes from the entry's field at +0x0d and its start
+   in the container from the field at +0x16; the duplicate size at +0x11 and
+   the reserved byte at +0x15 are not read (resource_info/vfs.md).  The count
+   is what the buffer is allocated to and what the read is asked for, both
+   unbounded and both believed: a container whose directory disagrees with its
+   own length allocates and reads what the directory claims.  Neither the seek
+   nor the read is checked, so a member the file is too short to hold comes
+   back as a buffer that was only partly filled, and the caller cannot tell.
+
+   The buffer is malloc'd and belongs to the caller, who must free it.  The
+   FILE is closed on every path that opened one, including the malloc failure
+   that returns NULL, so a NULL answer has leaked nothing.  The handle itself
+   is untouched and is never freed here.
+
+   Each of the three failures prints its own diagnostic to stdout before it
+   returns NULL -- "Can't find the string: %s" with the query, "Can't open the
+   source VFS_file: %s" with the path out of the handle, and "Can't allocate
+   memory for VFS_file: %s(%dbytes)" with the query and the byte count -- so
+   the answer is a bare NULL that says which of the three went wrong only in
+   the transcript.  fdps_vfs_load_file_or_exit is the wrapper that turns that
+   NULL into fdps_wait_any_key followed by exit(1). */
+extern void *fdps_vfs_load_file(char *name, void *vfs);
+#pragma aux fdps_vfs_load_file "*" parm caller [];
+
 #endif
