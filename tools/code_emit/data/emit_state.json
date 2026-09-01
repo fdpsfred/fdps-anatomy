@@ -1538,6 +1538,14 @@
       "status": "committed",
       "emitted_against": "0x55",
       "rounds": 0
+    },
+    "0003c4a7": {
+      "name": "fdps_cd_stop_audio",
+      "target": "cdaudio.c",
+      "body_size": "0x58",
+      "status": "committed",
+      "emitted_against": "0x58",
+      "rounds": 0
     }
   }
 }

@@ -123,3 +123,49 @@ void fdps_cd_play_audio_range(unsigned int start_sector,
 
     data_fdps_cd_last_request_status = request_header.status;
 }
+
+/* 0003c4a7.  The MSCDEX Stop Audio request -- command 0x85 -- that halts
+   CD-DA playback.  It is the shortest request the module builds: the header
+   declares itself 13 bytes long, which is the bare DOS device request header
+   and nothing else -- length, subunit, command, the status word the driver
+   writes back, and the eight reserved bytes.  There is no addressing-mode
+   byte, no transfer address and no sector range, because the command takes no
+   parameters at all; the drive is simply told to stop wherever it is.
+
+   Three stores is the whole of the request: MOV byte ptr [ESP],0xd, MOV byte
+   ptr [ESP+0x1],0x0 and MOV byte ptr [ESP+0x2],0x85 at 0003c4b4-0003c4c2.
+   Offsets 3 to 0x0c -- the status word and the eight reserved bytes -- are
+   never initialised, here as in the original: they go out to the driver
+   holding whatever the stack frame held, and the driver overwrites the status
+   word with its answer.  That is why the local is a whole struct rather than
+   three bytes: the read-back at 0003c4f1 takes a word from offset 3, so the
+   thirteen bytes have to be one object even though only three of them are
+   written.
+
+   Because the header stops at 13 bytes, none of the fields the struct declares
+   from media_descriptor onwards is part of this request -- the copy in both
+   directions is the literal 0xd pushed at 0003c4c2 and 0003c4dc, and the bytes
+   above it in the DOS block are left holding whatever the previous request put
+   there.  Nothing here needs the casts the seek and the play request need,
+   since every field it does touch is a plain byte at its declared offset.
+
+   The status word is the word at header offset 3 -- MOV EAX,[ESP+3] / MOV
+   [0x00069e20],AX, a dword load of which only the low half is stored.  This
+   function never looks at that word itself, and neither does any of its eight
+   callers: every one of them calls this and moves straight on, so stopping
+   playback is unconditional and a drive that refuses the command is not
+   noticed. */
+void fdps_cd_stop_audio(void)
+{
+    struct fdps_cd_request_header request_header;
+
+    request_header.header_length = 0xd;
+    request_header.subunit = 0;
+    request_header.command = 0x85;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0xd);
+    fdps_cd_device_request();
+    memcpy(&request_header, data_fdps_cd_request_header_buffer, 0xd);
+
+    data_fdps_cd_last_request_status = request_header.status;
+}

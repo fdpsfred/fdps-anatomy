@@ -56,4 +56,21 @@ extern void fdps_cd_play_audio_range(unsigned int start_sector,
                                      unsigned int end_sector);
 #pragma aux fdps_cd_play_audio_range "*" parm caller [];
 
+/* 0003c4a7.  Stops CD-DA playback -- MSCDEX device command 0x85, Stop Audio --
+   in the bare 13-byte device request header, the shortest request the module
+   builds.  The command takes no parameters: there is no addressing mode, no
+   sector and no range, so the drive is told to stop wherever it currently is.
+
+   Takes nothing and returns nothing.  Every one of the eight callers -- main,
+   fdps_title_screen, fdps_play_movie, fdps_cd_set_music_track,
+   fdps_cd_verify_disc_and_play_track, fdps_cd_play_track,
+   fdps_cd_play_track_range and fdps_cd_play_whole_disc -- calls it
+   unconditionally and moves straight on, so it is safe to issue when nothing
+   is playing and the game never learns whether the drive obeyed.  Whether the
+   drive accepted the request is visible only in
+   data_fdps_cd_last_request_status, which this leaves holding the status word
+   the driver wrote into the request header -- bit 15 is error. */
+extern void fdps_cd_stop_audio(void);
+#pragma aux fdps_cd_stop_audio "*" parm caller [];
+
 #endif

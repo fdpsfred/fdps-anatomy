@@ -1,7 +1,7 @@
 /* tests/cdaudio.c -- cover for src/cdaudio.c.
  *
- * So far this covers fdps_cd_seek at 0003c3fa and fdps_cd_play_audio_range at
- * 0003c452.
+ * So far this covers fdps_cd_seek at 0003c3fa, fdps_cd_play_audio_range at
+ * 0003c452 and fdps_cd_stop_audio at 0003c4a7.
  *
  * Every expected value below comes from the instructions of those functions,
  * never from the emitted C.  For fdps_cd_seek:
@@ -24,6 +24,16 @@
  *     MOV dword ptr [ESP+0x12], EAX
  *   PUSH 0x16 / LEA EAX,[ESP+0x4] / PUSH EAX / PUSH dword ptr [0x00069de8]
  *   PUSH 0x16 / JMP 0003bea0, the same shared epilogue
+ *
+ * and for fdps_cd_stop_audio, whose whole body this is:
+ *
+ *   MOV byte  ptr [ESP],     0xd    MOV byte  ptr [ESP+0x1],  0x0
+ *   MOV byte  ptr [ESP+0x2], 0x85
+ *   PUSH 0xd / LEA EAX,[ESP+0x4] / PUSH EAX / PUSH dword ptr [0x00069de8] /
+ *     CALL memcpy / ADD ESP,0xc / CALL 0003bb7d
+ *   PUSH 0xd / PUSH dword ptr [0x00069de8] / LEA EAX,[ESP+0x8] / PUSH EAX /
+ *     CALL memcpy / ADD ESP,0xc
+ *   MOV EAX,dword ptr [ESP+0x3] / MOV [0x00069e20],AX
  *
  * The request is issued for real, exactly as tests/cd.c issues its own: the
  * test executable runs under DOS/4GW inside DOSBox-X, which is the same DPMI
@@ -318,6 +328,112 @@ static void cdaudio_play_publishes_the_driver_status_word(void)
     CHECK_EQ(data_fdps_cd_last_request_status, staged_word(header, 3));
 }
 
+/* The stop request is staged the same way the other two are, and for the same
+   reason.  The block is poisoned across the whole 0x20 so that everything
+   above the thirteen bytes this request declares shows up as untouched. */
+static unsigned char *stop_with_a_poisoned_header(void)
+{
+    int i;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    for (i = 0; i < 0x20; i++) {
+        data_fdps_cd_request_header_buffer[i] = HEADER_POISON;
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    fdps_cd_stop_audio();
+    return data_fdps_cd_request_header_buffer;
+}
+
+/* The three stores the body makes are byte stores at ESP displacements 0, 1
+   and 2, and the read-back is a word at displacement 3, so those four offsets
+   are what the emitted C's field accesses have to land on (contract H).  The
+   sizes matter as much as the offsets: header_length, subunit and command are
+   each one byte, and status is two, which is what makes the fields the C names
+   cover exactly the bytes the ESP displacements do. */
+static void cdaudio_stop_header_fields_sit_where_the_stores_land(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, header_length), 0);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, subunit), 1);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, command), 2);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, status), 3);
+    CHECK_EQ((int) sizeof(((struct fdps_cd_request_header *) 0)->
+                          header_length), 1);
+    CHECK_EQ((int) sizeof(((struct fdps_cd_request_header *) 0)->subunit), 1);
+    CHECK_EQ((int) sizeof(((struct fdps_cd_request_header *) 0)->command), 1);
+    CHECK_EQ((int) sizeof(((struct fdps_cd_request_header *) 0)->status), 2);
+}
+
+/* Command code 0x85 is Stop Audio and the header declares itself 13 bytes
+   long, the bare device request header with no command block after it -- the
+   shortest of the three lengths this file's requests use, against the seek's
+   0x18 and the play's 0x16.  Subunit 0 is the module's only drive.
+
+   There is deliberately no assertion on offset 0x0d here, unlike the seek and
+   the play: this request has no addressing-mode byte, because 13 bytes is
+   where its header ends. */
+static void cdaudio_stop_stages_a_stop_audio_command(void)
+{
+    unsigned char *header;
+
+    header = stop_with_a_poisoned_header();
+    CHECK_EQ(header[0], 0xd);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 0x85);
+}
+
+/* PUSH 0xd is the copy length in both directions, so the request ends at
+   offset 0x0d and everything above it is left as it was.  0x0d is where the
+   play request's addressing-mode byte sits and 0x0e where its start sector
+   begins: a stop staged at either of the other two lengths this file uses
+   would have reached across them. */
+static void cdaudio_stop_copies_exactly_the_declared_header(void)
+{
+    unsigned char *header;
+
+    header = stop_with_a_poisoned_header();
+    CHECK_EQ(header[0xd], HEADER_POISON);
+    CHECK_EQ(header[0xe], HEADER_POISON);
+    CHECK_EQ(header[0x15], HEADER_POISON);
+    CHECK_EQ(header[0x17], HEADER_POISON);
+    CHECK_EQ(header[0x1f], HEADER_POISON);
+}
+
+/* The same boundary again, but pinned against a real longer request instead of
+   against poison, so it holds even if the poison fill were ever to change: a
+   play request stages 0x16 bytes and puts its start sector as a full dword at
+   offset 0x0e, and a stop issued straight afterwards must leave that dword
+   standing.  0x00012345 is the same start sector the play tests above use. */
+static void cdaudio_stop_leaves_the_previous_requests_tail_alone(void)
+{
+    unsigned char *header;
+
+    header = play_with_a_poisoned_header(0x00012345u, 0x00051234u);
+    CHECK_EQ((long) staged_dword(header, 0xe), 0x00012345L);
+
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    fdps_cd_stop_audio();
+    CHECK_EQ(header[0], 0xd);
+    CHECK_EQ(header[2], 0x85);
+    CHECK_EQ((long) staged_dword(header, 0xe), 0x00012345L);
+}
+
+/* The header is copied back out of the DOS block before the status word is
+   read out of it, so the published word has to agree with the word still at
+   header offset 3.  What the driver leaves there is not the test's to decide
+   -- offsets 3 to 0x0c are never initialised -- so what is pinned is the
+   displacement and the width: MOV EAX,[ESP+3] / MOV [0x00069e20],AX stores
+   only the low half of the dword it loads, so a store of the whole dword, or a
+   read from a different displacement, would break this. */
+static void cdaudio_stop_publishes_the_driver_status_word(void)
+{
+    unsigned char *header;
+
+    header = stop_with_a_poisoned_header();
+    CHECK_EQ(data_fdps_cd_last_request_status, staged_word(header, 3));
+}
+
 void run_cdaudio_tests(void)
 {
     RUN_TEST(cdaudio_seek_header_fields_sit_where_the_stores_land);
@@ -332,4 +448,9 @@ void run_cdaudio_tests(void)
     RUN_TEST(cdaudio_play_subtracts_without_checking_the_range);
     RUN_TEST(cdaudio_play_copies_exactly_the_declared_header);
     RUN_TEST(cdaudio_play_publishes_the_driver_status_word);
+    RUN_TEST(cdaudio_stop_header_fields_sit_where_the_stores_land);
+    RUN_TEST(cdaudio_stop_stages_a_stop_audio_command);
+    RUN_TEST(cdaudio_stop_copies_exactly_the_declared_header);
+    RUN_TEST(cdaudio_stop_leaves_the_previous_requests_tail_alone);
+    RUN_TEST(cdaudio_stop_publishes_the_driver_status_word);
 }
