@@ -10672,7 +10672,7 @@ Copies the container's 0x0b-byte header onto the stack with memmove, then walks 
 This is the memory-image counterpart of fdps_vfs_find_entry, which scans the directory handle fdps_vfs_open builds and returns an index instead.
 
 Parameters:
-  image -- base of a whole VFS container image already resident in memory. fdps_play_sfx passes the sound pack held in DAT_000643a0; fdps_baseani_get_entry_or_exit and the routines at 0001d6c0 and 0001ef40 pass the BaseAni.vfs image held in DAT_000643a8.
+  image -- base of a whole VFS container image already resident in memory. fdps_play_sfx passes the sound pack held in DAT_000643a0; fdps_baseani_get_entry_or_exit, fdps_play_death_animation_and_mark_dead and fdps_play_attack_animation pass the BaseAni.vfs image held in DAT_000643a8.
   name -- name of the member to look up, in the container's 8.3 form. It is uppercased in place before every comparison, so the buffer behind it must be writable and it stays uppercased after the call returns.
   out_size -- receives the member's size in bytes when the member is found; left untouched when it is not. All four call sites pass a stack slot and discard it.
 

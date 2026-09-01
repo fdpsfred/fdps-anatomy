@@ -1081,6 +1081,381 @@ static void load_file_closes_the_container_on_both_paths(void)
     free(handle);
 }
 
+/* fdps_vfs_image_get_entry is handed a whole container resident in memory, so
+   the file cases below bring the container in whole rather than building a
+   handle over its directory.  112,350 is the shipped FIELD2.VFS's own length
+   (resource_info/vfs.md); it is asserted rather than assumed so a staged file
+   that is not that container fails here instead of failing as arithmetic. */
+#define VFS_IMAGE_BYTES 112350L
+
+/* Reads a container into one block with plain library calls, exactly as the
+   game holds its resident images.  Returns NULL rather than asserting, and
+   every caller checks; the block is the caller's to free. */
+static char *read_whole_container(char *archive_name, long *out_bytes)
+{
+    FILE *fp;
+    char *image;
+    long bytes;
+
+    fp = fopen(archive_name, "rb");
+    if (fp == NULL) {
+        return NULL;
+    }
+    fseek(fp, 0L, SEEK_END);
+    bytes = ftell(fp);
+    fseek(fp, 0L, SEEK_SET);
+    image = (char *)malloc((size_t)bytes);
+    if (image == NULL) {
+        fclose(fp);
+        return NULL;
+    }
+    if (fread(image, (size_t)bytes, 1, fp) != 1) {
+        free(image);
+        fclose(fp);
+        return NULL;
+    }
+    fclose(fp);
+    *out_bytes = bytes;
+    return image;
+}
+
+/* The real container, through the image reader: three members' starts and
+   sizes as the shipped file records them.  The starts are the same numbers
+   fdps_vfs_load_file seeks to, which is what makes this an assertion about one
+   container read two ways rather than about this function's own arithmetic.
+
+   The answer is checked as a distance from the image base, because that is
+   what the function computes: ADD EAX,[EBP + -0x36] onto the image pointer at
+   00039d83.  Entry 0 begins where the table begins so a wrong stride still
+   finds it; entries 64 and 130 land on a different record under any stride but
+   26, and every member of FIELD2.VFS has a different start and a different
+   size.  Entry 130 is the last of the 131 and its 36 bytes end exactly at the
+   container's 112,350, so a start read a field too far runs off the end. */
+static void image_get_entry_returns_member_pointers(void)
+{
+    char *image;
+    char *member;
+    char query[QUERY_MAX];
+    unsigned int size;
+    long bytes;
+
+    bytes = 0;
+    image = read_whole_container(VFS_NAME, &bytes);
+    CHECK_EQ(image != NULL, 1);
+    if (image == NULL) {
+        return;
+    }
+    CHECK_EQ(bytes, VFS_IMAGE_BYTES);
+
+    size = 0;
+    strcpy(query, "ATTR000.DAT");
+    member = (char *)fdps_vfs_image_get_entry(
+        (struct fdps_vfs_image_header *)image, query, &size);
+    CHECK_EQ(member != NULL, 1);
+    if (member != NULL) {
+        CHECK_EQ(member - image, ATTR000_START);
+    }
+    CHECK_EQ(size, ATTR000_SIZE);
+
+    size = 0;
+    strcpy(query, "ATTR610.DAT");
+    member = (char *)fdps_vfs_image_get_entry(
+        (struct fdps_vfs_image_header *)image, query, &size);
+    CHECK_EQ(member != NULL, 1);
+    if (member != NULL) {
+        CHECK_EQ(member - image, ATTR610_START);
+    }
+    CHECK_EQ(size, ATTR610_SIZE);
+
+    size = 0;
+    strcpy(query, "DSC64.DAT");
+    member = (char *)fdps_vfs_image_get_entry(
+        (struct fdps_vfs_image_header *)image, query, &size);
+    CHECK_EQ(member != NULL, 1);
+    if (member != NULL) {
+        CHECK_EQ(member - image, DSC64_START);
+    }
+    CHECK_EQ(size, DSC64_SIZE);
+
+    free(image);
+}
+
+/* A value no member size can be, so the slot says whether anything wrote to
+   it.  The store at 00039d7e is inside the matched branch and there is no
+   other store to out_size in the body, so a miss has to leave this standing --
+   which is what makes the bare NULL the whole of the failure signal. */
+#define SIZE_SENTINEL 0x5A5A5A5AL
+
+static void image_get_entry_missing_member_leaves_the_size_alone(void)
+{
+    char *image;
+    char query[QUERY_MAX];
+    unsigned int size;
+    long bytes;
+
+    bytes = 0;
+    image = read_whole_container(VFS_NAME, &bytes);
+    CHECK_EQ(image != NULL, 1);
+    if (image == NULL) {
+        return;
+    }
+    size = (unsigned int)SIZE_SENTINEL;
+    strcpy(query, "NOSUCH.DAT");
+    CHECK_EQ(fdps_vfs_image_get_entry((struct fdps_vfs_image_header *)image,
+                                      query, &size) == NULL,
+             1);
+    CHECK_EQ(size, SIZE_SENTINEL);
+    free(image);
+}
+
+/* strupr is called on the caller's buffer inside the loop (CALL 0x000435f3 at
+   00039d5f), so a mixed-case query finds the upper-case member and the
+   caller's own string is upper-case afterwards.  Both halves are asserted: the
+   second is not a side effect nobody depends on -- it is what
+   fdps_baseani_get_entry_or_exit prints in its miss message. */
+static void image_get_entry_uppercases_the_query_in_place(void)
+{
+    char *image;
+    char *member;
+    char query[QUERY_MAX];
+    unsigned int size;
+    long bytes;
+
+    bytes = 0;
+    image = read_whole_container(VFS_NAME, &bytes);
+    CHECK_EQ(image != NULL, 1);
+    if (image == NULL) {
+        return;
+    }
+    size = 0;
+    strcpy(query, "attr000.dat");
+    member = (char *)fdps_vfs_image_get_entry(
+        (struct fdps_vfs_image_header *)image, query, &size);
+    CHECK_EQ(member != NULL, 1);
+    if (member != NULL) {
+        CHECK_EQ(member - image, ATTR000_START);
+    }
+    CHECK_EQ(size, ATTR000_SIZE);
+    CHECK_EQ(strcmp(query, "ATTR000.DAT"), 0);
+    free(image);
+}
+
+/* A container image the test writes, for the four things no shipped container
+   can show: a table that does not start at 35, an entry count above 255, a
+   lower-case member name, and a size field that disagrees with its own
+   duplicate.  There is no file behind it and it is not pretending to be one.
+
+   Its header fields go in as explicit little-endian bytes at offsets 5 and 7
+   rather than through struct fdps_vfs_image_header, so that a wrong offset in
+   that struct would show up here rather than cancelling out.  Entries are the
+   same 26 bytes a container's are -- IMUL EDX,[EBP + -0xc],0x1a at 00039d2d --
+   and the tail past the table is where the members would be, so a returned
+   pointer stays inside the array. */
+#define IMAGE_TABLE_OFFSET_FIELD 5
+#define IMAGE_ENTRY_COUNT_FIELD 7
+#define SYNTH_TABLE_OFFSET 0x40
+#define SYNTH_ENTRIES 3
+#define SYNTH_MEMBER_BYTES 64
+#define SYNTH_MEMBER_START (SYNTH_TABLE_OFFSET + SYNTH_ENTRIES * HANDLE_ENTRY_SIZE)
+static char synthetic_image[SYNTH_MEMBER_START + SYNTH_MEMBER_BYTES];
+
+static void synthetic_image_reset(unsigned int table_offset,
+                                  unsigned long entry_count)
+{
+    memset(synthetic_image, 0, sizeof(synthetic_image));
+    synthetic_image[IMAGE_TABLE_OFFSET_FIELD] = (char)(table_offset & 0xffU);
+    synthetic_image[IMAGE_TABLE_OFFSET_FIELD + 1] =
+        (char)((table_offset >> 8) & 0xffU);
+    synthetic_image[IMAGE_ENTRY_COUNT_FIELD] = (char)(entry_count & 0xffUL);
+    synthetic_image[IMAGE_ENTRY_COUNT_FIELD + 1] =
+        (char)((entry_count >> 8) & 0xffUL);
+    synthetic_image[IMAGE_ENTRY_COUNT_FIELD + 2] =
+        (char)((entry_count >> 16) & 0xffUL);
+    synthetic_image[IMAGE_ENTRY_COUNT_FIELD + 3] =
+        (char)((entry_count >> 24) & 0xffUL);
+}
+
+/* Both writers take the table offset as an argument rather than reading the
+   header back, so a case that moves the table cannot silently write its
+   entries where the old table was. */
+static void synthetic_image_set_name(unsigned int table_offset, int index,
+                                     char *entry_name)
+{
+    strcpy(synthetic_image + table_offset + index * HANDLE_ENTRY_SIZE,
+           entry_name);
+}
+
+static void synthetic_image_set_dword(unsigned int table_offset, int index,
+                                      int field_offset, unsigned long value)
+{
+    char *field;
+
+    field = synthetic_image + table_offset + index * HANDLE_ENTRY_SIZE
+            + field_offset;
+    field[0] = (char)(value & 0xffUL);
+    field[1] = (char)((value >> 8) & 0xffUL);
+    field[2] = (char)((value >> 16) & 0xffUL);
+    field[3] = (char)((value >> 24) & 0xffUL);
+}
+
+/* Fills the synthetic image with one findable member at index 2, leaving
+   entries 0 and 1 zeroed -- their names are empty strings, which match
+   nothing.  Index 2 rather than 0 is what makes the stride load-bearing: entry
+   0 begins where the table begins whatever the stride is. */
+#define SYNTH_MEMBER_INDEX 2
+#define SYNTH_MEMBER_SIZE 111L
+#define SYNTH_MEMBER_SIZE_DUP 222L
+static void synthetic_image_build(unsigned int table_offset,
+                                  unsigned long entry_count, char *entry_name)
+{
+    synthetic_image_reset(table_offset, entry_count);
+    synthetic_image_set_name(table_offset, SYNTH_MEMBER_INDEX, entry_name);
+    synthetic_image_set_dword(table_offset, SYNTH_MEMBER_INDEX,
+                              ENTRY_SIZE_FIELD, SYNTH_MEMBER_SIZE);
+    synthetic_image_set_dword(table_offset, SYNTH_MEMBER_INDEX,
+                              ENTRY_SIZE_DUP_FIELD, SYNTH_MEMBER_SIZE_DUP);
+    synthetic_image_set_dword(table_offset, SYNTH_MEMBER_INDEX,
+                              ENTRY_START_FIELD, SYNTH_MEMBER_START);
+}
+
+/* Runs the function over the synthetic image and returns the distance from its
+   base, or -1 for a miss, so the cases below read as one number each. */
+static long synthetic_image_lookup(char *member_name, unsigned int *out_size)
+{
+    char query[QUERY_MAX];
+    char *member;
+
+    strcpy(query, member_name);
+    member = (char *)fdps_vfs_image_get_entry(
+        (struct fdps_vfs_image_header *)synthetic_image, query, out_size);
+    if (member == NULL) {
+        return -1L;
+    }
+    return member - synthetic_image;
+}
+
+/* Where the directory is comes out of the header's field at 5, zero-extended:
+   XOR EAX,EAX / MOV AX,[EBP + -0x1b] at 00039d34.  Every shipped container has
+   35 there, so a reader that had the 35 built into it would pass every case
+   above; these two tables are at 0x40 and 0x20 and the same member is found
+   through both. */
+static void image_get_entry_reads_the_table_offset_from_the_header(void)
+{
+    unsigned int size;
+
+    size = 0;
+    synthetic_image_build(SYNTH_TABLE_OFFSET, SYNTH_ENTRIES, "MEMBER.DAT");
+    CHECK_EQ(synthetic_image_lookup("MEMBER.DAT", &size), SYNTH_MEMBER_START);
+    CHECK_EQ(size, SYNTH_MEMBER_SIZE);
+
+    size = 0;
+    synthetic_image_build(0x20, SYNTH_ENTRIES, "MEMBER.DAT");
+    CHECK_EQ(synthetic_image_lookup("MEMBER.DAT", &size), SYNTH_MEMBER_START);
+    CHECK_EQ(size, SYNTH_MEMBER_SIZE);
+}
+
+/* The size comes from the entry's field at 0x0d and not from the copy of it at
+   0x11: MOV EAX,[EBP + -0x3f] at 00039d78, which is 0x0d into the entry copy
+   at [EBP + -0x4c].  Every shipped container has the two fields agreeing, so
+   only a directory the test wrote can tell them apart.  The start is read from
+   0x16 the same way, MOV EAX,[EBP + -0x36] at 00039d83. */
+static void image_get_entry_reads_the_size_field_not_its_duplicate(void)
+{
+    unsigned int size;
+
+    size = 0;
+    synthetic_image_build(SYNTH_TABLE_OFFSET, SYNTH_ENTRIES, "MEMBER.DAT");
+    CHECK_EQ(synthetic_image_lookup("MEMBER.DAT", &size), SYNTH_MEMBER_START);
+    CHECK_EQ(size, SYNTH_MEMBER_SIZE);
+    CHECK_EQ(size != (unsigned int)SYNTH_MEMBER_SIZE_DUP, 1);
+}
+
+/* The loop bound is the header's whole 32-bit count, compared unsigned: CMP
+   EAX,[EBP + -0x19] / JC at 00039d1f.  This is the one reader in the module
+   that does either, and both halves are visible from outside.
+
+   256 is the first count a byte-wide read gets wrong, and the contrast is
+   asserted in the same case: fdps_vfs_image_entry_count reports 0 for this
+   very image while the search still walks it.  0x80000000 is what separates
+   JC from JL -- a signed compare makes the bound negative and the loop body
+   never runs.  0 is the control: the count really is the bound, and an entry
+   that is there is not found when the header does not admit to it. */
+static void image_get_entry_reads_the_entry_count_as_a_whole_dword(void)
+{
+    unsigned int size;
+
+    size = 0;
+    synthetic_image_build(SYNTH_TABLE_OFFSET, 0x100UL, "MEMBER.DAT");
+    CHECK_EQ(fdps_vfs_image_entry_count(
+                 (struct fdps_vfs_image_header *)synthetic_image),
+             0);
+    CHECK_EQ(synthetic_image_lookup("MEMBER.DAT", &size), SYNTH_MEMBER_START);
+    CHECK_EQ(size, SYNTH_MEMBER_SIZE);
+
+    size = 0;
+    synthetic_image_build(SYNTH_TABLE_OFFSET, 0x80000000UL, "MEMBER.DAT");
+    CHECK_EQ(synthetic_image_lookup("MEMBER.DAT", &size), SYNTH_MEMBER_START);
+    CHECK_EQ(size, SYNTH_MEMBER_SIZE);
+
+    size = (unsigned int)SIZE_SENTINEL;
+    synthetic_image_build(SYNTH_TABLE_OFFSET, 0UL, "MEMBER.DAT");
+    CHECK_EQ(synthetic_image_lookup("MEMBER.DAT", &size), -1L);
+    CHECK_EQ(size, SIZE_SENTINEL);
+}
+
+/* The fold is one-way.  strupr rewrites the query and the entry's own name is
+   compared as it lies, so a lower-case member is unreachable however the query
+   is spelled -- and the query is upper-case afterwards either way, which is
+   how this case tells "not folded" from "not looked at".  No shipped container
+   holds a lower-case name, so only a directory the test wrote can show it. */
+static void image_get_entry_does_not_fold_the_entry_name(void)
+{
+    unsigned int size;
+    char query[QUERY_MAX];
+
+    size = (unsigned int)SIZE_SENTINEL;
+    synthetic_image_build(SYNTH_TABLE_OFFSET, SYNTH_ENTRIES, "lower.dat");
+    CHECK_EQ(synthetic_image_lookup("lower.dat", &size), -1L);
+    CHECK_EQ(size, SIZE_SENTINEL);
+    CHECK_EQ(synthetic_image_lookup("LOWER.DAT", &size), -1L);
+
+    strcpy(query, "lower.dat");
+    CHECK_EQ(fdps_vfs_image_get_entry(
+                 (struct fdps_vfs_image_header *)synthetic_image, query,
+                 &size) == NULL,
+             1);
+    CHECK_EQ(strcmp(query, "LOWER.DAT"), 0);
+
+    size = 0;
+    synthetic_image_build(SYNTH_TABLE_OFFSET, SYNTH_ENTRIES, "UPPER.DAT");
+    CHECK_EQ(synthetic_image_lookup("upper.dat", &size), SYNTH_MEMBER_START);
+    CHECK_EQ(size, SYNTH_MEMBER_SIZE);
+}
+
+/* The match breaks out of the loop (JMP 0x00039d8d at 00039d89), so a
+   container holding one name twice always resolves to the earlier entry.  The
+   duplicate goes in at index 0, ahead of the one the builder puts at index 2,
+   and carries a different size and a different start -- so a walk that ran on
+   to the last match would be caught by both numbers rather than by neither. */
+#define SYNTH_FIRST_INDEX 0
+#define SYNTH_FIRST_SIZE 333L
+#define SYNTH_FIRST_START (SYNTH_MEMBER_START + 16)
+static void image_get_entry_stops_at_the_first_match(void)
+{
+    unsigned int size;
+
+    size = 0;
+    synthetic_image_build(SYNTH_TABLE_OFFSET, SYNTH_ENTRIES, "MEMBER.DAT");
+    synthetic_image_set_name(SYNTH_TABLE_OFFSET, SYNTH_FIRST_INDEX,
+                             "MEMBER.DAT");
+    synthetic_image_set_dword(SYNTH_TABLE_OFFSET, SYNTH_FIRST_INDEX,
+                              ENTRY_SIZE_FIELD, SYNTH_FIRST_SIZE);
+    synthetic_image_set_dword(SYNTH_TABLE_OFFSET, SYNTH_FIRST_INDEX,
+                              ENTRY_START_FIELD, SYNTH_FIRST_START);
+    CHECK_EQ(synthetic_image_lookup("MEMBER.DAT", &size), SYNTH_FIRST_START);
+    CHECK_EQ(size, SYNTH_FIRST_SIZE);
+}
+
 void run_vfs_tests(void)
 {
     RUN_TEST(missing_file_returns_zero);
@@ -1113,4 +1488,12 @@ void run_vfs_tests(void)
     RUN_TEST(load_file_reads_the_size_field_not_its_duplicate);
     RUN_TEST(load_file_seeks_to_the_entry_start_field);
     RUN_TEST(load_file_closes_the_container_on_both_paths);
+    RUN_TEST(image_get_entry_returns_member_pointers);
+    RUN_TEST(image_get_entry_missing_member_leaves_the_size_alone);
+    RUN_TEST(image_get_entry_uppercases_the_query_in_place);
+    RUN_TEST(image_get_entry_reads_the_table_offset_from_the_header);
+    RUN_TEST(image_get_entry_reads_the_size_field_not_its_duplicate);
+    RUN_TEST(image_get_entry_reads_the_entry_count_as_a_whole_dword);
+    RUN_TEST(image_get_entry_does_not_fold_the_entry_name);
+    RUN_TEST(image_get_entry_stops_at_the_first_match);
 }

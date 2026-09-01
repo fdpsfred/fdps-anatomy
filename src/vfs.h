@@ -238,4 +238,49 @@ extern void *fdps_vfs_open(char *path);
 extern void *fdps_vfs_load_file(char *name, void *vfs);
 #pragma aux fdps_vfs_load_file "*" parm caller [];
 
+/* Finds the member called name inside a container image already resident in
+   memory and hands back a pointer INTO that image, with the member's size
+   written through out_size, or NULL when the container holds no such member.
+
+   image is a whole container -- the header, then the directory, then every
+   member's bytes -- and not a handle from fdps_vfs_open, so this is the
+   in-memory counterpart of fdps_vfs_load_file rather than of anything that
+   walks a handle.  Nothing is allocated and nothing is copied out: the pointer
+   aims at the member where it already lies, so it costs nothing, must not be
+   freed, and stops being valid the moment the caller releases the image.  The
+   game uses it on two images it keeps resident, the sound pack and BaseAni.vfs,
+   and all four call sites discard the size.
+
+   Everything fdps_vfs_find_entry does to the query happens here too: name is
+   upper-cased IN PLACE by strupr before every comparison while the entry's own
+   name is compared as the packer stored it, so the folding is one-way -- a
+   mixed-case query finds an upper-case member, and a member whose name is not
+   upper-case can never be found however the query is spelled.  The caller's
+   buffer stays upper-cased afterwards, and fdps_baseani_get_entry_or_exit
+   depends on it: the "File not found: %s" it prints on the miss is the same
+   buffer, so the name in that message is the folded one.  A name handed to this
+   function therefore has to live in writable storage
+   (rebuild_info/pitfalls.md).
+
+   Two things separate it from every other reader in this file.  The entry count
+   is read as the whole 32-bit field, so this is the only search in the module
+   that can reach a member past the 255th; fdps_vfs_image_entry_count reads the
+   same field of the same kind of header one byte wide.  And the count is
+   compared unsigned, where the handle searches compare theirs signed.
+
+   The entry-table offset comes out of the header at 5 as an unsigned 16-bit
+   value, so an image whose table began past 0x7fff would still be walked
+   forwards here although fdps_vfs_open's seek would run backwards on the same
+   number.  Every shipped container has 35 there.
+
+   Nothing is validated -- not the "VFS" magic, not the version -- and nothing
+   is bounded: a directory claiming more members than the image holds is walked
+   into whatever follows it, and a matched entry's start is added to the image
+   base whatever it says.  A miss is a bare NULL with no diagnostic, and
+   out_size is not touched on that path, so a caller that wants to tell "not
+   there" from "there and empty" has only the NULL to go on. */
+extern void *fdps_vfs_image_get_entry(struct fdps_vfs_image_header *image,
+                                      char *name, unsigned int *out_size);
+#pragma aux fdps_vfs_image_get_entry "*" parm caller [];
+
 #endif

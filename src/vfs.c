@@ -6,13 +6,15 @@
  * validates a container: the readers take the two header fields they need and
  * trust everything else, so a file that is not a .VFS is never rejected.
  *
- * fopen, fseek, fread, fclose and printf come from <stdio.h>; memcpy, memset,
- * strcmp, strlen and strupr from <string.h>; malloc from <stdlib.h>.  All
- * eleven are real library calls in the original -- CALL 0x000435bc, 0x000435f3
- * and 0x00042fe0
+ * fopen, fseek, fread, fclose and printf come from <stdio.h>; memcpy, memmove,
+ * memset, strcmp, strlen and strupr from <string.h>; malloc from <stdlib.h>.
+ * All twelve are real library calls in the original -- CALL 0x000435bc,
+ * 0x000435f3 and 0x00042fe0
  * at 000399d4, 000399e0 and 000399ed for three of the string routines, and
  * CALL 0x0003d375, 0x00042cd0, 0x00042dd2 and 0x000435bc at 00039b32,
  * 00039b4b, 00039b5f and 00039b73 for malloc, memset, strlen and memcpy.
+ * memmove is a fourth entry point of its own, CALL 0x0003d514 at 00039d0d,
+ * 00039d41 and 00039d53, and only fdps_vfs_image_get_entry uses it.
  * Watcom 10.0a only expands memcpy, memset, strlen and strcmp into
  * instructions when the intrinsics are asked for, and -oi is not in this
  * build's flag set (rebuild_info/build_flags.md), so the plain declarations
@@ -433,4 +435,103 @@ void *fdps_vfs_load_file(char *name, void *vfs)
         printf("Can't find the string: %s\n", name);
     }
     return buffer;
+}
+
+/* How much of a container's header is copied to the stack before either of the
+   two fields is read: PUSH 0xb at 00039d03, the memmove count.  It is the 11
+   bytes src/fdpstype.h models of a .VFS header and not the 35 the file gives
+   it -- the 24-byte packer signature at 0x0b is past everything any
+   instruction in the program reads (resource_info/vfs.md). */
+#define VFS_IMAGE_HEADER_BYTES sizeof(struct fdps_vfs_image_header)
+
+/* 00039cf0.  One loop with one branch inside it, in the same -od shape as
+   fdps_vfs_find_entry above: the test at 00039d1c, the increment at 00039d26
+   sitting ahead of the body, and the body from 00039d2b jumping back over it.
+   The body's branch is TEST EAX,EAX / JNZ 0x00039d8b at 00039d74, whose taken
+   side rejoins that increment and whose fall-through fills in both answers and
+   jumps to the single exit -- so the match is a break out of the loop, not a
+   second return, and the NULL written to [EBP + -0x8] at 00039cfc, before the
+   header is even copied, is what survives a loop that runs out.
+
+   What this reader is handed is a whole container resident in memory -- header,
+   directory and members in one block -- and not a handle from fdps_vfs_open, so
+   both fields it needs come off the header at the front of the image itself and
+   the answer it returns aims back into that same block.  See vfs.h.
+
+   Everything it reads it reads out of a copy.  The header goes to the stack at
+   00039d0d, the 26-byte directory entry at 00039d41 and the entry's 13-byte
+   name at 00039d53, and all three copies are memmove -- CALL 0x0003d514 three
+   times -- where fdps_vfs_open and fdps_vfs_load_file copy with memcpy at
+   0x000435bc.  None of the three regions can overlap its source, so which of
+   the two is called is not observable; it is what the original calls, and
+   spelling it memcpy would put a different symbol in the link.
+
+   The entry count is read as a whole dword and compared UNSIGNED: CMP EAX,[EBP
+   + -0x19] / JC 0x00039d2b at 00039d1f.  Both halves of that are the opposite
+   of what the rest of the module does with the same field --
+   fdps_vfs_image_entry_count takes one byte of it off the same kind of header,
+   and fdps_vfs_find_entry takes the handle's copy a byte at a time -- so this
+   is the one reader that can reach a member past 255.  Writing the compare
+   signed would search nothing at all in a container claiming 0x80000000 or more
+   (rebuild_info/pitfalls.md).
+
+   The entry-table offset is read UNSIGNED too, XOR EAX,EAX / MOV AX,[EBP +
+   -0x1b] at 00039d34, where fdps_vfs_open sign-extends the same header field
+   into its seek (MOVSX at 00039b7d).  Every shipped container has 35 there
+   (resource_info/vfs.md), so the two disagree only about a container no packer
+   wrote.
+
+   strupr sits inside the loop and rewrites the caller's own buffer while the
+   entry's name is compared raw, exactly as in the two handle searches; vfs.h
+   has what that costs the caller.
+
+   out_size is written only on the match, MOV [EDX],EAX at 00039d7e, and there
+   is no other store to it anywhere in the body, so a miss leaves the caller's
+   slot holding whatever it held.
+
+   The address of the entry is formed from the loop counter every iteration --
+   IMUL EDX,[EBP + -0xc],0x1a at 00039d2d -- and the member's own address is
+   formed a second time from the entry's field rather than from anything the
+   loop kept, which is what -od does with the two expressions written out
+   separately.
+
+   The emitted body is the original's instruction for instruction: the three
+   memmoves in that order with 0xb, 0x1a and 0xd, the IMUL by 0x1a, the
+   zero-extended word load of the table offset, strupr on the argument and
+   strcmp against the copy, the dword 0x0d into the entry copy stored through
+   out_size and the dword at 0x16 added to the image pointer, and the same two
+   jumps out of the loop.  What differs is the frame, SUB ESP,0x44 against the
+   original's 0x4c, and it differs only in space nothing reads: the buffers come
+   out 28 + 16 + 12 bytes deep followed by three dword slots, where the original
+   leaves the header copy 16 bytes and has a fourth dword slot it never touches.
+   Every offset into a buffer is the same offset into the same buffer -- the
+   size field is 13 into the entry copy either way (verified against the emitted
+   VFS.OBJ).  Frame allocation is not part of the standard (ADR-0001), and there
+   is no declaration order that recovers those eight bytes without inventing a
+   local the function does not have. */
+void *fdps_vfs_image_get_entry(struct fdps_vfs_image_header *image, char *name,
+                               unsigned int *out_size)
+{
+    char entry[VFS_ENTRY_SIZE];
+    char entry_name[16];
+    struct fdps_vfs_image_header header;
+    unsigned int index;
+    void *member;
+
+    member = NULL;
+    memmove(&header, image, VFS_IMAGE_HEADER_BYTES);
+    for (index = 0; index < header.entry_count; index++) {
+        memmove(entry,
+                (char *)image + index * VFS_ENTRY_SIZE
+                    + header.entry_table_offset,
+                VFS_ENTRY_SIZE);
+        memmove(entry_name, entry, VFS_ENTRY_NAME_BYTES);
+        if (strcmp(entry_name, strupr(name)) == 0) {
+            *out_size = *(unsigned int *)(entry + VFS_ENTRY_SIZE_FIELD_OFFSET);
+            member = (char *)image
+                     + *(unsigned int *)(entry + VFS_ENTRY_START_FIELD_OFFSET);
+            break;
+        }
+    }
+    return member;
 }
