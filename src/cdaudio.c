@@ -72,3 +72,54 @@ void fdps_cd_seek(unsigned int sector)
 
     data_fdps_cd_last_request_status = request_header.status;
 }
+
+/* 0003c452.  The MSCDEX Play Audio request -- command 0x84 -- that starts
+   CD-DA playback over one range of disc sectors.  Like the seek above it
+   carries nothing through the IOCTL block: the whole request is the header,
+   and the header is the 22-byte Play Audio shape, shorter than either of the
+   two shapes the rest of the module builds.
+
+   That shape overlaps struct fdps_cd_request_header at three of its fields
+   rather than matching it.  Play Audio has the addressing mode where the IOCTL
+   shape has the media descriptor, at offset 0x0d; the starting sector as a
+   full 32 bits at 0x0e, where the IOCTL shape has its 32-bit transfer address;
+   and the sector count as a full 32 bits at 0x12, where the IOCTL shape has a
+   16-bit byte count followed by a 16-bit starting sector.  The count is
+   therefore written through the address of transfer_byte_count with a 32-bit
+   store -- MOV dword ptr [ESP+0x12],EAX at 0003c482 -- which covers exactly
+   those two 16-bit fields and stops short of volume_id_ptr.  Writing the
+   16-bit field on its own would send the drive a two-byte count with two bytes
+   of stack garbage above it: a track longer than 65535 sectors, which is
+   anything past 14:33, would play the wrong length, and shorter ones would
+   still be wrong whenever the garbage was not zero.  The offsets the two casts
+   depend on are asserted in tests/cdaudio.c.
+
+   Offsets 3 to 0x0c -- the status word and the eight reserved bytes -- are
+   never initialised, here as in the original.
+
+   There is no comparison and no branch: the count is end_sector minus
+   start_sector, stored whole, with nothing checking that the range runs
+   forwards.  The staged and read-back lengths are both the literal 0x16 the
+   body pushes at 0003c486 and 0003c4a0, and the status word is the word at
+   header offset 3.  This function never looks at that word itself; playback is
+   asynchronous, so a caller learns nothing from it beyond whether the driver
+   took the request. */
+void fdps_cd_play_audio_range(unsigned int start_sector,
+                              unsigned int end_sector)
+{
+    struct fdps_cd_request_header request_header;
+
+    request_header.header_length = 0x16;
+    request_header.subunit = 0;
+    request_header.command = 0x84;
+    request_header.media_descriptor = 0;
+    request_header.transfer_address = start_sector;
+    *(unsigned int *) &request_header.transfer_byte_count =
+        end_sector - start_sector;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0x16);
+    fdps_cd_device_request();
+    memcpy(&request_header, data_fdps_cd_request_header_buffer, 0x16);
+
+    data_fdps_cd_last_request_status = request_header.status;
+}

@@ -1530,6 +1530,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x58"
+    },
+    "0003c452": {
+      "name": "fdps_cd_play_audio_range",
+      "target": "cdaudio.c",
+      "body_size": "0x55",
+      "status": "committed",
+      "emitted_against": "0x55",
+      "rounds": 0
     }
   }
 }
