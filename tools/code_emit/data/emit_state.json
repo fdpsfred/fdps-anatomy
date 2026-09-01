@@ -1572,6 +1572,14 @@
       "status": "committed",
       "emitted_against": "0x86",
       "rounds": 0
+    },
+    "0003c6bc": {
+      "name": "fdps_cd_close_tray",
+      "target": "cd.c",
+      "body_size": "0x14",
+      "status": "committed",
+      "emitted_against": "0x14",
+      "rounds": 0
     }
   }
 }

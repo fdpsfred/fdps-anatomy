@@ -502,3 +502,37 @@ short fdps_cdrom_detect(void)
     }
     return 1;
 }
+
+/* 0003c6bc.  Tells the drive to close its tray -- MSCDEX IOCTL Output, control
+   block 05h Close Tray -- and answers with whether the drive came back not
+   busy.
+
+   Takes nothing.  The drive is the module's one drive letter index and the
+   staging blocks are its two DOS blocks, so the only thing this routine
+   contributes to the request is the control block code: PUSH 0x5 at 0003c6c6,
+   the single byte fdps_cd_ioctl_output_command wraps into a bare order.
+
+   The answer is not its own work either.  The twenty bytes at 0003c6bc have no
+   RET: they end in ADD ESP,0x4 at 0003c6cd and run straight into
+   fdps_cd_status_is_not_busy at 0003c6d0.  That run-on is a tail call with the
+   JMP left out because the predicate happens to be the next function --
+   fdps_cd_audio_is_idle reaches the same predicate from further away and does
+   carry an explicit JMP 0003c6d0 -- so the value handed back is the
+   predicate's: 1 when bit 0x0200 of the status word, the DOS device driver
+   request header's busy bit, is clear, and 0 when it is still set.  Written as
+   a call, the result is the same value by the same test (ADR-0001); written as
+   a void body it would be nothing at all.
+
+   That word is the one the Close Tray request itself left in
+   data_fdps_cd_last_request_status, read straight away, so the result reports
+   on how the driver took the order rather than on a tray that has had time to
+   finish moving.
+
+   Nothing in the image calls this, which is the norm for this layer rather
+   than a sign of misidentification: most of the CD module's entry points are
+   equally unreferenced and it was linked whole. */
+unsigned short fdps_cd_close_tray(void)
+{
+    fdps_cd_ioctl_output_command(5);
+    return fdps_cd_status_is_not_busy();
+}

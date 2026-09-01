@@ -229,4 +229,27 @@ extern void fdps_cd_ioctl_output_command(int command_code);
 extern short fdps_cdrom_detect(void);
 #pragma aux fdps_cdrom_detect "*" parm caller [];
 
+/* Orders the drive to close its tray -- MSCDEX IOCTL Output control block 05h,
+   sent as the bare one-byte order fdps_cd_ioctl_output_command builds -- and
+   returns fdps_cd_status_is_not_busy's reading of the status word that request
+   left behind: 1 when the request header's busy bit is clear, 0 when it is
+   still set.  The original reaches that predicate by running off the end of
+   its own body into it.
+
+   Takes nothing; the drive and the staging buffers are the module's globals.
+   Nothing in the image calls it. */
+extern unsigned short fdps_cd_close_tray(void);
+#pragma aux fdps_cd_close_tray "*" parm caller [];
+
+/* 0003c6d0.  Reads data_fdps_cd_last_request_status -- the status word the
+   module's last MSCDEX device request left in the request header -- and
+   returns 1 when bit 0x0200 of it, the DOS device driver request header's busy
+   bit, is clear, 0 when it is set.  Takes nothing and looks at nothing else,
+   so it reports on whatever request ran last.
+
+   The two routines that end in it, fdps_cd_close_tray and
+   fdps_cd_audio_is_idle, both reach it as a tail call. */
+extern unsigned short fdps_cd_status_is_not_busy(void);
+#pragma aux fdps_cd_status_is_not_busy "*" parm caller [];
+
 #endif

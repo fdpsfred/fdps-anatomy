@@ -1056,6 +1056,86 @@ static void cd_detect_compares_the_status_word_zero_extended(void)
     CHECK_EQ((long) (data_fdps_cd_last_request_status + 0), 0x810cL);
 }
 
+/* fdps_cd_close_tray, 0003c6bc.
+ *
+ * The order goes out for real, at drive letter index 0xff, on the same
+ * reasoning as the fdps_cd_ioctl_output_command cases above: MSCDEX rejects
+ * the drive number before it follows ES:BX, and on a host with no CD-ROM
+ * mounted nothing answers INT 2Fh at all.  No tray anywhere moves, and the two
+ * DOS blocks come back holding exactly what the call staged in them.
+ *
+ * The expected value that belongs to this function and to no other is the
+ * control block code: PUSH 0x5 at 0003c6c6, Close Tray in the MSCDEX IOCTL
+ * Output table.  The request shape around it is fdps_cd_ioctl_output_command's
+ * -- MOV byte ptr [ESP],0x18, [ESP+1],0, [ESP+2],0xc at 0003c531..0003c53a,
+ * MOV word ptr [ESP+0x12],1, PUSH 0x1 at 0003c569 -- and is asserted here to
+ * pin that CALL 0x0003c51c at 0003c6c8 is the builder this routine reaches the
+ * drive through, rather than one of the other four in the module.
+ *
+ * The return value is not asserted.  The body has no RET: it runs off its own
+ * end at 0003c6d0 into fdps_cd_status_is_not_busy, which this batch has not
+ * emitted, so what a call to it answers today is the generated stub module's
+ * zero and asserting on that would be testing the stub.
+ */
+static void close_tray_on_a_rejected_drive(void)
+{
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    data_fdps_cd_ioctl_buffer[0] = 0x71;
+    data_fdps_cd_ioctl_buffer[1] = 0x72;
+    data_fdps_cd_last_request_status = 0x7373;
+    fdps_cd_close_tray();
+}
+
+/* PUSH 0x5 is the whole of the control block, and PUSH 0x1 is the count the
+   staging memcpy runs with, so the second byte of the DOS block still holds the
+   poison: a code of anything but 5 would be a different order to the drive --
+   0 is Eject Disk and 2 is Reset Drive -- and a copy even one byte long would
+   have taken the poison with it. */
+static void cd_close_tray_sends_the_close_tray_code(void)
+{
+    close_tray_on_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 5);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 0x72);
+}
+
+/* Command code 0x0c is IOCTL Output, the field that makes this the write
+   direction, and the transfer it describes is one byte out of the second DOS
+   block addressed by the packed real-mode far pointer.  That is
+   fdps_cd_ioctl_output_command's request shape and no other builder in the
+   module stages it, so these five fields are what say which CALL the body
+   makes. */
+static void cd_close_tray_goes_out_as_an_ioctl_output_request(void)
+{
+    unsigned char *header;
+
+    close_tray_on_a_rejected_drive();
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x18);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 0xc);
+    CHECK_EQ(header[0xd], 0);
+    CHECK_EQ((long) staged_dword(header, 0xe),
+             (long) data_fdps_cd_ioctl_buffer_real_mode_ptr);
+    CHECK_EQ(staged_word(header, 0x12), 1);
+}
+
+/* The status word the tail call at 0003c6d0 goes on to test is the one this
+   request published, not a leftover: MOV EAX,[ESP+3] / MOV [0x00069e20],AX
+   overwrites it out of the header the driver was handed back, so the word in
+   the global has to be the word still sitting at header+3.  The setup poisons
+   the global first, so a body that never reached the builder at all would have
+   to leave 0x7373 there and fail.  Nothing here asserts what that word says -- the driver's answer is the driver's, and on a
+   host with no MSCDEX at all the field is never written by anybody. */
+static void cd_close_tray_publishes_the_request_status(void)
+{
+    close_tray_on_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_last_request_status,
+             staged_word(data_fdps_cd_request_header_buffer, 3));
+}
+
 /* The fdps_cdrom_detect cases come first, and deliberately: the allocation
    guard at 0003c68e is only observable on a call made before the module's DOS
    buffers exist, and every other test in this file allocates them in its own
@@ -1101,4 +1181,7 @@ void run_cd_tests(void)
     RUN_TEST(cd_ioctl_output_sends_the_code_as_a_one_byte_block);
     RUN_TEST(cd_ioctl_output_uses_only_the_low_byte_of_the_argument);
     RUN_TEST(cd_ioctl_output_publishes_the_request_status);
+    RUN_TEST(cd_close_tray_sends_the_close_tray_code);
+    RUN_TEST(cd_close_tray_goes_out_as_an_ioctl_output_request);
+    RUN_TEST(cd_close_tray_publishes_the_request_status);
 }
