@@ -215,4 +215,26 @@ extern void fdps_cd_get_disk_info_msf(unsigned char *highest_track_out,
                                       unsigned char *frames_out);
 #pragma aux fdps_cd_get_disk_info_msf "*" parm caller [];
 
+/* 0003c2e8.  An arbitrary CD sector count restated as a Red Book
+   minute/second/frame triple, and the inverse of fdps_cd_msf_to_sector.  Takes
+   the count and the three destinations, returns nothing, and stores each result
+   as a single byte through its own pointer, so the three may be three adjacent
+   bytes.  It reads no global, writes none and calls nothing, so a call has no
+   effect a caller cannot see in its own three bytes.
+
+   The count is unsigned and so is every step of the conversion.  Below 150 the
+   subtraction wraps rather than going negative and the answer is a huge triple;
+   nothing in the body refuses such an input.
+
+   The 150 frames come off a count that already had the lead-in cancelled out of
+   it -- the pregap-corrected number fdps_cd_msf_to_sector returns is the unit
+   this whole module passes around -- so an answer is two seconds earlier than a
+   plain decomposition of the same count.  That is the module's convention and
+   not a defect to correct here; see the note on the definition.
+
+   Nothing in the image calls this function. */
+extern void fdps_cd_sector_to_msf(unsigned int sector, unsigned char *minute,
+                                  unsigned char *second, unsigned char *frame);
+#pragma aux fdps_cd_sector_to_msf "*" parm caller [];
+
 #endif

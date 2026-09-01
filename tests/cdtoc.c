@@ -4,8 +4,8 @@
  * fdps_cd_msf_to_sector at 0003bc78, fdps_cdrom_read_upc at 0003bec1,
  * fdps_cdrom_read_disk_info at 0003bfa5, fdps_cdrom_read_track_info at
  * 0003c0c8, fdps_cd_get_track_length_sectors at 0003c1a1,
- * fdps_cd_get_track_length_msf at 0003c217 and fdps_cd_get_disk_info_msf at
- * 0003c27c.
+ * fdps_cd_get_track_length_msf at 0003c217, fdps_cd_get_disk_info_msf at
+ * 0003c27c and fdps_cd_sector_to_msf at 0003c2e8.
  *
  * Every expected value below comes from the sixteen instructions of that
  * function and from its two call sites, never from the emitted C:
@@ -1049,6 +1049,145 @@ static void cdtoc_disk_info_msf_refreshes_the_disc_summary(void)
     CHECK_EQ(data_fdps_cd_leadout_sector == 0xffffff6aUL, 1);
 }
 
+/* fdps_cd_sector_to_msf at 0003c2e8.  Nothing in the image calls it and it
+ * reads no global, so every expected value below is computed from its
+ * thirty-two instructions alone:
+ *
+ *   MOV EBX,[ESP+0x10] / SUB EBX,0x96
+ *                               -- the first argument, less 150, unsigned from
+ *                                  here on: SUB with no test, then DIV and
+ *                                  never IDIV
+ *   MOV dword [ESP],0x4b / XOR EDX,EDX / MOV EAX,EBX / DIV dword ptr [ESP]
+ *   MOV byte ptr [ECX],DL       -- ECX is [ESP+0x1c], the fourth argument, and
+ *                                  DL is the frame remainder
+ *   MOVZX EDX,DL / MOV EAX,EBX / SUB EAX,EDX / MOV ECX,0x4b / DIV ECX
+ *                               -- whole seconds, the quotient recomputed from
+ *                                  (value - remainder)
+ *   MOV ECX,0x3c / XOR EDX,EDX / DIV ECX
+ *   MOV byte ptr [ESI],DL       -- ESI is [ESP+0x18], the third argument
+ *   MOVZX EDX,DL / SUB EAX,EDX / DIV ECX again
+ *   MOV EDX,[ESP+0x14] / MOV byte ptr [EDX],BL
+ *                               -- the second argument, low byte of the minute
+ *                                  quotient, no clamp
+ *
+ * The displacements are [ESP+0x10], [ESP+0x14], [ESP+0x18] and [ESP+0x1c] after
+ * PUSH EBX / PUSH ESI / SUB ESP,0x4, and __CHK pops its own argument (RET 0x4
+ * at 00043627), so they are the first, second, third and fourth arguments in
+ * that order: sector, minute, second, frame -- and the stores run frame,
+ * second, minute, the reverse of the parameter order.
+ *
+ * All three stores are byte-wide, so the poison guards on either side of the
+ * three destinations must survive every case.
+ */
+static unsigned char sector_msf_bytes[5];
+
+static void sector_to_msf_into_poisoned_bytes(unsigned int sector)
+{
+    int i;
+
+    for (i = 0; i < 5; i++) {
+        sector_msf_bytes[i] = 0x5a;
+    }
+    fdps_cd_sector_to_msf(sector, &sector_msf_bytes[1], &sector_msf_bytes[2],
+                          &sector_msf_bytes[3]);
+}
+
+/* Sector 150 is exactly the 0x96 the body takes off, so the dividend is 0 and
+   every field is 0.  The guards distinguish three stores of zero from three
+   stores that never happened. */
+static void cdtoc_sector_to_msf_lead_in_is_all_zero(void)
+{
+    sector_to_msf_into_poisoned_bytes(150);
+    CHECK_EQ(sector_msf_bytes[1], 0);
+    CHECK_EQ(sector_msf_bytes[2], 0);
+    CHECK_EQ(sector_msf_bytes[3], 0);
+    CHECK_EQ(sector_msf_bytes[0], 0x5a);
+    CHECK_EQ(sector_msf_bytes[4], 0x5a);
+}
+
+/* SUB EBX,0x96 and not ADD: 300 - 150 is 150 frames, two seconds.  A body that
+   dropped the adjustment would answer four seconds and one that added the
+   pregap the textbook way would answer six. */
+static void cdtoc_sector_to_msf_subtracts_the_pregap(void)
+{
+    sector_to_msf_into_poisoned_bytes(300);
+    CHECK_EQ(sector_msf_bytes[1], 0);
+    CHECK_EQ(sector_msf_bytes[2], 2);
+    CHECK_EQ(sector_msf_bytes[3], 0);
+}
+
+/* The frame field is the remainder of the first DIV, so it runs 0 to 74 and the
+   75th frame is the first second: the divisor is 0x4b and not 0x4a or 0x50. */
+static void cdtoc_sector_to_msf_frames_roll_over_at_75(void)
+{
+    sector_to_msf_into_poisoned_bytes(150 + 74);
+    CHECK_EQ(sector_msf_bytes[3], 74);
+    CHECK_EQ(sector_msf_bytes[2], 0);
+    sector_to_msf_into_poisoned_bytes(150 + 75);
+    CHECK_EQ(sector_msf_bytes[3], 0);
+    CHECK_EQ(sector_msf_bytes[2], 1);
+}
+
+/* The second divisor is 0x3c, so a minute is 60 seconds and 4500 frames. */
+static void cdtoc_sector_to_msf_seconds_roll_over_at_60(void)
+{
+    sector_to_msf_into_poisoned_bytes(150 + 4500);
+    CHECK_EQ(sector_msf_bytes[1], 1);
+    CHECK_EQ(sector_msf_bytes[2], 0);
+    CHECK_EQ(sector_msf_bytes[3], 0);
+}
+
+/* The whole chain at once on three fields that are all different from each
+   other and from the poison: 15716 - 150 = 15566 = 3*4500 + 27*75 + 41.  This
+   is also what pins the parameter order, since the stores run in the opposite
+   order to the parameters -- swapping the minute and frame pointers swaps 3 and
+   41 here. */
+static void cdtoc_sector_to_msf_splits_all_three_fields(void)
+{
+    sector_to_msf_into_poisoned_bytes(15716);
+    CHECK_EQ(sector_msf_bytes[1], 3);
+    CHECK_EQ(sector_msf_bytes[2], 27);
+    CHECK_EQ(sector_msf_bytes[3], 41);
+}
+
+/* Every store is byte-wide -- MOV byte ptr [ECX],DL, MOV byte ptr [ESI],DL and
+   MOV byte ptr [EDX],BL -- which is what a caller aiming the three at three
+   adjacent bytes relies on.  The guards keep their poison and none of the three
+   destinations does. */
+static void cdtoc_sector_to_msf_writes_one_byte_per_pointer(void)
+{
+    sector_to_msf_into_poisoned_bytes(15716);
+    CHECK_EQ(sector_msf_bytes[0], 0x5a);
+    CHECK_EQ(sector_msf_bytes[4], 0x5a);
+    CHECK_EQ(sector_msf_bytes[1] == 0x5a, 0);
+    CHECK_EQ(sector_msf_bytes[2] == 0x5a, 0);
+    CHECK_EQ(sector_msf_bytes[3] == 0x5a, 0);
+}
+
+/* Sector 0 wraps: 0 - 150 as an unsigned 32-bit value is 4294967146, which is
+   57266228*75 + 46 and 57266228 seconds is 954437*60 + 8, so the triple is
+   0x45, 8, 46 -- 954437 is 0xe9045 and only its low byte is stored.  A signed
+   intermediate would divide -150 instead and answer 0, -2, 0 in all three
+   fields.  This is the same wrap fdps_cd_get_track_length_msf reaches from a
+   zero-length track, and it lands on the same three bytes. */
+static void cdtoc_sector_to_msf_wraps_below_the_pregap(void)
+{
+    sector_to_msf_into_poisoned_bytes(0);
+    CHECK_EQ(sector_msf_bytes[1], 0x45);
+    CHECK_EQ(sector_msf_bytes[2], 8);
+    CHECK_EQ(sector_msf_bytes[3], 46);
+}
+
+/* The minute quotient is stored with MOV byte ptr [EDX],BL and no clamp, so 257
+   minutes comes back as 1.  1156880 - 150 = 257*4500 + 3*75 + 5. */
+static void cdtoc_sector_to_msf_minutes_wrap_at_256(void)
+{
+    sector_to_msf_into_poisoned_bytes(1156880);
+    CHECK_EQ(sector_msf_bytes[1], 1);
+    CHECK_EQ(sector_msf_bytes[2], 3);
+    CHECK_EQ(sector_msf_bytes[3], 5);
+}
+
 void run_cdtoc_tests(void)
 {
     RUN_TEST(cdtoc_unpack_splits_the_three_fields);
@@ -1092,4 +1231,12 @@ void run_cdtoc_tests(void)
     RUN_TEST(cdtoc_disk_info_msf_converts_the_playing_time);
     RUN_TEST(cdtoc_disk_info_msf_writes_one_byte_per_pointer);
     RUN_TEST(cdtoc_disk_info_msf_refreshes_the_disc_summary);
+    RUN_TEST(cdtoc_sector_to_msf_lead_in_is_all_zero);
+    RUN_TEST(cdtoc_sector_to_msf_subtracts_the_pregap);
+    RUN_TEST(cdtoc_sector_to_msf_frames_roll_over_at_75);
+    RUN_TEST(cdtoc_sector_to_msf_seconds_roll_over_at_60);
+    RUN_TEST(cdtoc_sector_to_msf_splits_all_three_fields);
+    RUN_TEST(cdtoc_sector_to_msf_writes_one_byte_per_pointer);
+    RUN_TEST(cdtoc_sector_to_msf_wraps_below_the_pregap);
+    RUN_TEST(cdtoc_sector_to_msf_minutes_wrap_at_256);
 }

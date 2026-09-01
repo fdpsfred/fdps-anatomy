@@ -446,3 +446,58 @@ void fdps_cd_get_disk_info_msf(unsigned char *highest_track_out,
     *seconds_out = (unsigned char) seconds_in_minute;
     *minutes_out = (unsigned char) ((total_seconds - seconds_in_minute) / 60);
 }
+
+/* 0003c2e8.  The general form of the conversion the two functions above inline:
+   an arbitrary sector count in, a Red Book minute/second/frame triple out, and
+   the inverse of fdps_cd_msf_to_sector.  There is no branch in the body and no
+   call other than the stack probe; it reads no global and writes none, so the
+   only things it touches are its argument and its three destinations.
+
+   The three stores are byte-wide -- MOV byte ptr [ECX],DL for the frame field,
+   MOV byte ptr [ESI],DL for the second and MOV byte ptr [EDX],BL for the minute
+   -- so a caller may aim the three at three adjacent bytes without a store
+   reaching past its own.
+
+   Every step is unsigned: SUB EBX,0x96 with no test of the result, then four
+   DIVs and never an IDIV.  A sector below 150 therefore wraps to just under
+   2^32 and comes out as a huge triple rather than as a negative one, which is
+   the reason the parameter and the intermediate are unsigned int and not int --
+   a signed intermediate answers differently in all three bytes for exactly
+   those inputs.
+
+   The 0x96 is subtracted, not added, and it comes off a value that has already
+   had the lead-in cancelled: this routine's input is the pregap-corrected count
+   fdps_cd_msf_to_sector returns, which fdps_cdrom_read_disk_info and
+   fdps_cdrom_read_track_info are what store.  The textbook conversion
+   decomposes sector + 150 and a plain duration conversion decomposes sector
+   untouched; either spelling shifts every answer by two or four seconds against
+   the original.  It is the module's fixed convention -- the identical SUB 0x96
+   opens the same /75, /60 chain in fdps_cd_get_track_length_msf and in
+   fdps_cd_get_disk_info_msf -- so it stays exactly where it is.
+
+   Each division is written as (value - remainder) / divisor and each quotient is
+   so computed twice, because that is what the body does: MOVZX EDX,DL then SUB
+   EAX,EDX before the second DIV of each pair.  It cannot change the value, since
+   the remainder is exactly what truncation drops and it is below 75 and below 60
+   respectively, so the byte it is carried through is wide enough for it.
+
+   The minute quotient is stored as a byte with no clamp, so a playing time past
+   255 minutes -- which the wrapped case above reaches -- wraps in the minute
+   field alone.  No call site in the image reaches this function and no data
+   reference points at it. */
+void fdps_cd_sector_to_msf(unsigned int sector, unsigned char *minute,
+                           unsigned char *second, unsigned char *frame)
+{
+    unsigned int adjusted_sector;
+    unsigned int frames_in_second;
+    unsigned int total_seconds;
+    unsigned int seconds_in_minute;
+
+    adjusted_sector = sector - 0x96;
+    frames_in_second = adjusted_sector % 75;
+    *frame = (unsigned char) frames_in_second;
+    total_seconds = (adjusted_sector - frames_in_second) / 75;
+    seconds_in_minute = total_seconds % 60;
+    *second = (unsigned char) seconds_in_minute;
+    *minute = (unsigned char) ((total_seconds - seconds_in_minute) / 60);
+}

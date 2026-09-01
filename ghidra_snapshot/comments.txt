@@ -12242,7 +12242,7 @@ Nothing. All four results come back through the caller's pointers.
 Pool: fdps  [calls fdps_cdrom_read_disk_info and reads the CD globals that routine fills; no Function ID hit in any library, and a compiled vendor object could not call a symbol defined in the game's own source]
 
 === 0003c2e8 [PLATE]
-Converts a CD sector count into a minute/second/frame triple, writing the three fields as separate bytes through caller-supplied pointers. The inverse of fdps_cd_msf_to_sector.
+Converts a CD sector count into a minute/second/frame triple, writing the three fields as separate bytes through caller-supplied pointers. The reverse-direction conversion of fdps_cd_msf_to_sector, but not its exact inverse: fdps_cd_msf_to_sector returns 4500*m + 75*s + f - 150 and this routine decomposes sector - 150, so composing the two yields a triple four seconds earlier than the one that went in. An exact inverse would decompose sector + 150.
 
 Algorithm:
 Subtracts 0x96 (150 frames, the two-second lead-in pregap) from sector, then decomposes what is left with unsigned 32-bit divisions: value % 0x4b (75 frames per second) is stored through frame, (value - frame) / 0x4b is the total second count, that count % 0x3c (60 seconds per minute) is stored through second, and (count - second) / 0x3c is stored through minute. Each division is written as (value - remainder) / divisor rather than as a bare quotient, which is why the same quotient is computed twice; the first divisor is spilled to a stack local and read back by DIV dword ptr [ESP]. Calls __CHK(0x10) on entry for the Watcom stack probe, reads no global and writes none.
