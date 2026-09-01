@@ -214,3 +214,63 @@ void fdps_chapter_07_post_action(void)
 {
     fdps_battle_check_default_end_conditions();
 }
+
+/* 0003a840.  The shared test, then two defeat tests of this chapter's own,
+   the first one short circuiting the second.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003a840..0003a846 --
+   and nothing in it is ever read, so there is no local to name.
+
+   CALL 0x0003a2e0 at 0003a84c has nothing pushed in front of it and no ESP
+   adjustment behind it, so the shared test takes no argument, and the very
+   next instruction is PUSH 0x6: EAX is not consulted between the two calls,
+   so that call's result is not used here.
+
+   The two own tests are PUSH 0x6 / CALL 0x000109b0 / ADD ESP,0x4 at
+   0003a851..0003a858 and PUSH 0x7 / CALL 0x000109b0 / ADD ESP,0x4 at
+   0003a85f..0003a866, the caller clearing the one argument each time, and
+   both EAX values are used.  TEST EAX,EAX / JNZ 0003a86d at 0003a85b jumps
+   the slot-7 call ENTIRELY and lands on the store, and TEST EAX,EAX / JZ
+   0003a877 at 0003a869 skips the store.  So the shape is a short-circuiting
+   or: slot 7 is asked about only when slot 6 answered 0, and either non-zero
+   answer reaches the one MOV dword ptr [0x00069da0],0x1 at 0003a86d.  Both
+   arms share that single store; there is not one store per condition.
+
+   That store is guarded by nothing but the predicate: it does not consult the
+   code's current value, and it runs after the shared test rather than as an
+   alternative to it.  So it overrides a 2 the shared test wrote moments
+   earlier, and an action that empties the enemy side and retires either guest
+   at once is a defeat and not a clear.  It also fires on the path where the
+   shared test returned at its own gate because a chapter event had already
+   recorded a verdict.  Gating the store on the code still being 0, or hanging
+   it off an else of the victory, changes both of those outcomes.
+
+   Unit indices 6 and 7 are positions in this map's unit array, and on this
+   chapter they are the two guests 布蘭多 and 蓋亞 in that order.  map08.dat's
+   header byte +1 fields eight player slots, and the roster standing at the
+   start of the chapter holds six: fdps_roster_add_character is called exactly
+   once from each of the chapter 1, 2, 3, 4, 7 and 8 init handlers, so the
+   permanent party is 蘭迪斯, 尤利安, 亞克, 法蓮娜, 裘娜, 費塔加 at indices
+   0..5.  fdps_chapter_09_init then appends two more before the battle -- PUSH
+   0x8 / CALL 0x00023bc0 then PUSH 0x9 / CALL 0x00023bc0 at
+   000210bc..000210cd, character ids 8 布蘭多 and 9 蓋亞 -- and the roster is
+   appended to at data_fdps_roster_member_count, so they land at 6 and 7 in
+   that order and fill the map's last two player slots.  All 31 of map08.dat's
+   deployment records are side 0, so no enemy record can reach either index.
+
+   The chapter's three stated lose conditions are 蘭迪斯, 布蘭多 or 蓋亞
+   dying.  The first is the shared test's slot 0 -- chapter id 8 is neither
+   0x10 nor 0x15, so the arm it takes is PUSH 0x0 at 0003a382 -- and the other
+   two are this store.  Nothing here is carried as a map death script: every
+   deployment record in map08.dat has a zero death-script opcode.
+
+   Table slot 8: the dword at 000602ac, eight entries into the table based at
+   0006028c, is 0003a840. */
+void fdps_chapter_09_post_action(void)
+{
+    fdps_battle_check_default_end_conditions();
+    if (fdps_unit_is_retired(6) != 0 || fdps_unit_is_retired(7) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+}

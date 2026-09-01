@@ -84,6 +84,18 @@
    into the table based at 0006028c, is 0003a6b0. */
 #define CHAPTER_07_ID 6
 
+/* Chapter 9 is chapter id 8, table slot 8: the dword at 000602ac, eight
+   entries into the table based at 0006028c, is 0003a840. */
+#define CHAPTER_09_ID 8
+
+/* The two slots chapter 9's own defeat tests ask about -- PUSH 0x6 at
+   0003a851 and PUSH 0x7 at 0003a85f.  map08.dat fields eight player slots and
+   the party standing at the start of the chapter is six, so the two character
+   ids fdps_chapter_09_init appends to the roster before the battle, 8 布蘭多
+   then 9 蓋亞, fill the last two in that order. */
+#define BRANDO_SLOT 6
+#define GAIA_SLOT 7
+
 static struct fdps_unit_record stage_units[STAGE_UNITS];
 
 /* Zero every slot and publish the block, then set the chapter id and the
@@ -791,6 +803,199 @@ static void ch07_an_open_battle_stays_open(void)
     CHECK_EQ(end_code(), 0);
 }
 
+/* ------------------------------------------------------------------ *
+ * Chapter 9's handler, 0003a840.  The shared test and then TWO defeat
+ * tests sharing one store: CALL 0x0003a2e0, then PUSH 0x6 / CALL
+ * 0x000109b0 / ADD ESP,0x4 / TEST EAX,EAX / JNZ 0003a86d, then PUSH 0x7 /
+ * CALL 0x000109b0 / ADD ESP,0x4 / TEST EAX,EAX / JZ 0003a877, with the one
+ * MOV dword ptr [0x00069da0],0x1 at 0003a86d that both arms reach.
+ *
+ * The JNZ jumps the slot-7 call entirely, so the two conditions are a
+ * short-circuiting or and not two independent tests, and there is one store
+ * and not one per condition.  What that makes worth pinning is the same risk
+ * set as the single-guest handlers above -- the order of the tests against
+ * the shared one, the absence of a guard on the store -- plus the second
+ * literal: a handler written with only the 6, or with the 7 unreachable,
+ * passes every case that touches slot 6 alone.
+ *
+ * map08.dat's header byte +1 fields eight player slots.  The permanent party
+ * at the start of the chapter is six: fdps_roster_add_character is called
+ * exactly once from each of the chapter 1, 2, 3, 4, 7 and 8 init handlers,
+ * giving 蘭迪斯, 尤利安, 亞克, 法蓮娜, 裘娜, 費塔加 at 0..5.
+ * fdps_chapter_09_init then appends character ids 8 and 9 -- PUSH 0x8 / CALL
+ * 0x00023bc0 then PUSH 0x9 / CALL 0x00023bc0 at 000210bc..000210cd -- and the
+ * roster appends at its member count, so 布蘭多 is slot 6 and 蓋亞 slot 7.
+ * The strategy guide's chapter 9 entry gives 勝利條件 敵人全滅 and
+ * 失敗條件 蘭迪斯、布蘭多或蓋亞其中一人死亡, and those three are
+ * exactly slot 0's shared test and these two stores: all 31 of the map's
+ * deployment records carry a zero death-script opcode, so nothing is left for
+ * the script runner and no other slot may end this battle from code.
+ *
+ * Chapter id 8 is neither 0x10 nor 0x15, so inside the shared test the arm
+ * taken is PUSH 0x0 at 0003a382 -- slot 0, 蘭迪斯.
+ * ------------------------------------------------------------------ */
+
+/* Same staging as above with the chapter id moved to chapter 9's. */
+static void stage_ch09(int live_unit_count, int battle_end_code)
+{
+    stage(live_unit_count, battle_end_code);
+    data_fdps_chapter_current_chapter_id = CHAPTER_09_ID;
+}
+
+/* Both guests are ordinary player-side roster members here, not the side-1
+   deployment guest of chapter 4: the chapter's init handler appended them to
+   the roster, so they fill player slots like the rest of the party.
+
+   Slot 5 is deliberately left as the zeroed record stage() wrote, which is a
+   live unit on side 0, so a case that wants the battle still open has an
+   enemy without needing a ninth staged slot.  A case that wants the field
+   cleared overwrites slot 5 itself. */
+static void stage_ch09_party(void)
+{
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_PLAYER, 0);
+    stage_unit(2, SIDE_PLAYER, 0);
+    stage_unit(3, SIDE_PLAYER, 0);
+    stage_unit(4, SIDE_PLAYER, 0);
+    stage_unit(BRANDO_SLOT, SIDE_PLAYER, 0);
+    stage_unit(GAIA_SLOT, SIDE_PLAYER, 0);
+}
+
+/* The whole point of the store being unguarded and last: the same action
+   empties the enemy side and retires 布蘭多.  The shared test writes 2 at
+   0003a2f9 and nothing puts it back to 0, then this handler overwrites it
+   with 1.  An else, or a store gated on the code still being 0, would answer
+   2 here. */
+static void ch09_a_retired_brando_outranks_a_cleared_field(void)
+{
+    stage_ch09(8, 0);
+    stage_ch09_party();
+    stage_unit(5, SIDE_ENEMY, FLAG_RETIRED);
+    stage_units[BRANDO_SLOT].flags = FLAG_RETIRED;
+    fdps_chapter_09_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The same for 蓋亞, reached only through the fall-through of the JNZ at
+   0003a85d: slot 6 answers 0, so the second call is made and its non-zero
+   answer takes the same store.  A handler that stopped at the first test
+   would answer 2 here. */
+static void ch09_a_retired_gaia_outranks_a_cleared_field(void)
+{
+    stage_ch09(8, 0);
+    stage_ch09_party();
+    stage_unit(5, SIDE_ENEMY, FLAG_RETIRED);
+    stage_units[GAIA_SLOT].flags = FLAG_RETIRED;
+    fdps_chapter_09_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The ordinary defeats: the battle is still going -- a live enemy settles the
+   shared test at 0 -- and either retired guest on its own turns that into 1,
+   as does both of them at once. */
+static void ch09_either_retired_guest_is_a_defeat(void)
+{
+    stage_ch09(8, 0);
+    stage_ch09_party();
+    stage_unit(5, SIDE_ENEMY, 0);
+    stage_units[BRANDO_SLOT].flags = FLAG_RETIRED;
+    fdps_chapter_09_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch09(8, 0);
+    stage_ch09_party();
+    stage_unit(5, SIDE_ENEMY, 0);
+    stage_units[GAIA_SLOT].flags = FLAG_RETIRED;
+    fdps_chapter_09_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch09(8, 0);
+    stage_ch09_party();
+    stage_unit(5, SIDE_ENEMY, 0);
+    stage_units[BRANDO_SLOT].flags = FLAG_RETIRED;
+    stage_units[GAIA_SLOT].flags = FLAG_RETIRED;
+    fdps_chapter_09_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* With both guests in play the handler adds nothing at all, so both of the
+   shared test's own answers come through unchanged. */
+static void ch09_two_live_guests_leave_the_shared_verdict_alone(void)
+{
+    stage_ch09(8, 0);
+    stage_ch09_party();
+    stage_unit(5, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_09_post_action();
+    CHECK_EQ(end_code(), 2);
+
+    stage_ch09(8, 0);
+    stage_ch09_party();
+    stage_unit(5, SIDE_ENEMY, 0);
+    fdps_chapter_09_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* The CALL to the shared test is really made and chapter 9 takes its ordinary
+   arm: chapter id 8 is not 0x10 or 0x15, so the watched slot in there is 0,
+   and a retired slot 0 is a defeat with both guests untouched. */
+static void ch09_the_shared_slot_zero_test_still_runs(void)
+{
+    stage_ch09(8, 0);
+    stage_ch09_party();
+    stage_unit(5, SIDE_ENEMY, 0);
+    stage_units[0].flags = FLAG_RETIRED;
+    fdps_chapter_09_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The guest tests sit outside the shared test's gate.  A verdict a chapter
+   event already recorded makes the shared test return at 0003a2ec without
+   examining anything, and either retired guest still overwrites it with 1;
+   with both in play the recorded verdict survives. */
+static void ch09_the_guest_tests_survive_a_recorded_verdict(void)
+{
+    stage_ch09(8, 2);
+    stage_ch09_party();
+    stage_unit(5, SIDE_ENEMY, 0);
+    stage_units[BRANDO_SLOT].flags = FLAG_RETIRED;
+    fdps_chapter_09_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch09(8, 2);
+    stage_ch09_party();
+    stage_unit(5, SIDE_ENEMY, 0);
+    stage_units[GAIA_SLOT].flags = FLAG_RETIRED;
+    fdps_chapter_09_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch09(8, 2);
+    stage_ch09_party();
+    stage_unit(5, SIDE_ENEMY, 0);
+    fdps_chapter_09_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* Only slots 0, 6 and 7 end this battle from code.  All eight slots are the
+   party here -- which is the real shape of this map, whose 31 deployment
+   records all begin at index 8 -- so the shared test finds no live enemy and
+   its verdict is 2, and each of slots 1..5 retires in turn against that.  A
+   defeat test the handler does not have would answer 1: either literal in the
+   two PUSHes having drifted, or a third test having been invented for one of
+   the party members the guide does not list. */
+static void ch09_no_slot_but_zero_six_and_seven_ends_the_battle(void)
+{
+    int retired_slot;
+
+    for (retired_slot = 1; retired_slot < BRANDO_SLOT; retired_slot++) {
+        stage_ch09(8, 0);
+        stage_ch09_party();
+        stage_unit(5, SIDE_PLAYER, 0);
+        stage_units[retired_slot].flags = FLAG_RETIRED;
+        fdps_chapter_09_post_action();
+        CHECK_EQ(end_code(), 2);
+    }
+}
+
 void run_chpost1_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -823,4 +1028,11 @@ void run_chpost1_tests(void)
     RUN_TEST(ch07_no_other_slot_ends_the_battle);
     RUN_TEST(ch07_a_recorded_verdict_is_left_alone);
     RUN_TEST(ch07_an_open_battle_stays_open);
+    RUN_TEST(ch09_a_retired_brando_outranks_a_cleared_field);
+    RUN_TEST(ch09_a_retired_gaia_outranks_a_cleared_field);
+    RUN_TEST(ch09_either_retired_guest_is_a_defeat);
+    RUN_TEST(ch09_two_live_guests_leave_the_shared_verdict_alone);
+    RUN_TEST(ch09_the_shared_slot_zero_test_still_runs);
+    RUN_TEST(ch09_the_guest_tests_survive_a_recorded_verdict);
+    RUN_TEST(ch09_no_slot_but_zero_six_and_seven_ends_the_battle);
 }

@@ -138,4 +138,29 @@ extern void fdps_chapter_06_post_action(void);
 extern void fdps_chapter_07_post_action(void);
 #pragma aux fdps_chapter_07_post_action "*" parm caller [];
 
+/* Chapter 9's post-action test: the game's standard end conditions, and then
+   two defeat conditions of its own -- unit slot 6 or unit slot 7 having left
+   the battle.  Takes nothing, returns nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h).
+
+   The two own tests share one store and short circuit: slot 7 is asked about
+   only when slot 6 answered 0, and either non-zero answer writes the same 1.
+   They run after fdps_battle_check_default_end_conditions (btlend.h) and not
+   as an alternative to it, and the store is unguarded, so a defeat found here
+   outranks a clear the shared test settled in the same call and fires even
+   when the shared test returned early because a chapter event had already
+   recorded a verdict.
+
+   Slots 6 and 7 on this chapter's map are the two guests 布蘭多 and 蓋亞, in
+   that order.  map08.dat fields eight player slots; the permanent party at
+   the start of the chapter is six -- 蘭迪斯, 尤利安, 亞克, 法蓮娜, 裘娜,
+   費塔加 -- and chapter 9's init handler appends character ids 8 and 9 to the
+   roster before the battle, so they occupy the last two slots.  Slot 0,
+   蘭迪斯, is the shared test's business, which completes the guide's three
+   lose conditions with nothing left over for a map death script.
+
+   Table slot 8. */
+extern void fdps_chapter_09_post_action(void);
+#pragma aux fdps_chapter_09_post_action "*" parm caller [];
+
 #endif
