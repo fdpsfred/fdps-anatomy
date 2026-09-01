@@ -1580,6 +1580,14 @@
       "status": "committed",
       "emitted_against": "0x14",
       "rounds": 0
+    },
+    "0003c6d0": {
+      "name": "fdps_cd_status_is_not_busy",
+      "target": "cd.c",
+      "body_size": "0x18",
+      "status": "committed",
+      "emitted_against": "0x18",
+      "rounds": 0
     }
   }
 }

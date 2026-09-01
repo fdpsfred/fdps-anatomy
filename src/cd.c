@@ -536,3 +536,38 @@ unsigned short fdps_cd_close_tray(void)
     fdps_cd_ioctl_output_command(5);
     return fdps_cd_status_is_not_busy();
 }
+
+/* 0003c6d0.  Answers whether the module's last MSCDEX device request came back
+   with its busy bit clear: 1 when bit 0x0200 of the saved request-header
+   status word is zero, 0 when it is set.
+
+   Takes nothing and reads one word, data_fdps_cd_last_request_status, so what
+   it reports on is whichever request ran last rather than a request of its
+   own.  0x0200 is bit 9 of the DOS device driver request header's status word,
+   the busy bit; bit 15 is the error flag and the low byte the driver's error
+   code, and neither is looked at here.  A request that failed with the busy
+   bit clear -- 0x810c, the no-readable-disc failure fdps_cdrom_detect tests
+   for -- still answers 1.
+
+   The mask is written against the whole word because that is what the two
+   instructions do: XOR AL,AL at 0003c6d6 discards the error code byte and AND
+   AH,0x2 keeps bit 9 of the high byte alone, which together are 0x0200 of the
+   16-bit word.  The word is read unsigned -- MOV AX,[0x00069e20] with no sign
+   extension anywhere in the body -- and the mask makes the comparison
+   bit-for-bit either way, so no branch here turns on signedness (contract C).
+
+   The result is 16 bits wide.  MOVZX EAX,AX at 0003c6db has already cleared
+   the top half of EAX by the time SETZ AL writes the answer, and MOVZX AX,AL
+   at 0003c6e3 clears AH, so what comes back is 0 or 1 in a zero-extended
+   16-bit register: the unsigned short the two routines that end in this
+   predicate hand on to their own callers.
+
+   Neither of those routines reaches this body with a CALL.  fdps_cd_close_tray
+   has no RET and runs off its own end at 0003c6cf into this one, and
+   fdps_cd_audio_is_idle jumps here at 0003c6f7.  Both are the same test on the
+   same word, so both are written as a call to it: the value handed back is
+   identical and only the instruction that gets there differs (ADR-0001). */
+unsigned short fdps_cd_status_is_not_busy(void)
+{
+    return (data_fdps_cd_last_request_status & 0x0200) == 0;
+}

@@ -1136,6 +1136,60 @@ static void cd_close_tray_publishes_the_request_status(void)
              staged_word(data_fdps_cd_request_header_buffer, 3));
 }
 
+/* fdps_cd_status_is_not_busy at 0003c6d0 reads one word and returns a
+ * predicate on one bit of it, so every case below is the same shape: put a
+ * status word in data_fdps_cd_last_request_status, call, and check the answer.
+ *
+ * The expected answers come from the four instructions that compute them --
+ * XOR AL,AL at 0003c6d6, AND AH,0x2 at 0003c6d8, TEST EAX,EAX and SETZ AL at
+ * 0003c6de -- which mask the word down to 0x0200 alone and return the
+ * inversion of it.  The status words fed in are the test's own: 0x0200 is the
+ * DOS device driver request header's busy bit, 0x0100 its done bit, 0x8000 its
+ * error flag and the low byte the driver's error code, and 0x810c is the
+ * no-readable-disc failure fdps_cdrom_detect compares against.  Nothing here
+ * asserts what the global holds on its own -- each case writes the word it
+ * tests and puts the previous one back.
+ */
+static unsigned short not_busy_for(unsigned short status_word)
+{
+    unsigned short saved_status;
+    unsigned short answer;
+
+    saved_status = data_fdps_cd_last_request_status;
+    data_fdps_cd_last_request_status = status_word;
+    answer = fdps_cd_status_is_not_busy();
+    data_fdps_cd_last_request_status = saved_status;
+    return answer;
+}
+
+/* The busy bit alone decides the answer, and the answer is the inversion of
+   it: SETZ on the masked word gives 1 for clear and 0 for set.  A word with
+   the done bit up and busy down is the ordinary finished request and still
+   answers 1, and the two together still answer 0, so nothing here reads as a
+   test of "the request completed". */
+static void cd_status_not_busy_inverts_the_busy_bit(void)
+{
+    CHECK_EQ(not_busy_for(0x0000), 1);
+    CHECK_EQ(not_busy_for(0x0200), 0);
+    CHECK_EQ(not_busy_for(0x0100), 1);
+    CHECK_EQ(not_busy_for(0x0300), 0);
+}
+
+/* The mask is exactly 0x0200 and no wider.  XOR AL,AL throws the whole error
+   code byte away before the AND, and AND AH,0x2 keeps one bit of the high
+   byte, so a word with every other bit in it set is still not busy -- 0xfdff
+   is that word -- and the failure status 0x810c, error flag and device error
+   12 and all, reports not busy too.  Set the busy bit under a full error byte
+   and the answer goes back to 0, which pins that the low byte is discarded
+   rather than folded in. */
+static void cd_status_not_busy_ignores_every_other_bit(void)
+{
+    CHECK_EQ(not_busy_for(0xfdff), 1);
+    CHECK_EQ(not_busy_for(0x00ff), 1);
+    CHECK_EQ(not_busy_for(0x810c), 1);
+    CHECK_EQ(not_busy_for(0x02ff), 0);
+}
+
 /* The fdps_cdrom_detect cases come first, and deliberately: the allocation
    guard at 0003c68e is only observable on a call made before the module's DOS
    buffers exist, and every other test in this file allocates them in its own
@@ -1184,4 +1238,6 @@ void run_cd_tests(void)
     RUN_TEST(cd_close_tray_sends_the_close_tray_code);
     RUN_TEST(cd_close_tray_goes_out_as_an_ioctl_output_request);
     RUN_TEST(cd_close_tray_publishes_the_request_status);
+    RUN_TEST(cd_status_not_busy_inverts_the_busy_bit);
+    RUN_TEST(cd_status_not_busy_ignores_every_other_bit);
 }

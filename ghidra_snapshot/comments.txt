@@ -12409,9 +12409,9 @@ This function has no RET of its own -- the 20 bytes at 0003c6bc end in ADD ESP,4
 Predicate on the CD-ROM driver's last request: returns 1 when the BUSY bit of the saved MSCDEX request-header status word is clear.
 
 Algorithm:
-Loads the 16-bit status word that the CD request routines saved at DAT_00069e20, masks it down to bit 9 alone (XOR AL,AL drops the error-code byte, AND AH,0x2 keeps 0x0200, the BUSY bit of the DOS device-driver request-header status word), and returns SETZ of that mask: 1 when the bit is clear, 0 when it is set. It touches no other memory and calls nothing.
+Loads the 16-bit status word that the CD request routines saved at data_fdps_cd_last_request_status, masks it down to bit 9 alone (XOR AL,AL drops the error-code byte, AND AH,0x2 keeps 0x0200, the BUSY bit of the DOS device-driver request-header status word), and returns SETZ of that mask: 1 when the bit is clear, 0 when it is set. It touches no other memory and calls nothing.
 
-The body is also the shared tail of the two routines that lead into it, both of which end with this same test in their C source. FUN_0003c6bc issues its IOCTL Output request through FUN_0003c51c and then falls straight through at 0003c6cf, having no RET of its own; fdps_cd_audio_is_idle calls FUN_0003c34f for the device-status IOCTL and tail-jumps here at 0003c6f7. DAT_00069e20 itself is written by FUN_0003c51c at 0003c59c and on the path out of FUN_0003c34f, in each case from the request header copied back out of the real-mode transfer buffer at DAT_00069de8 after fdps_cd_device_request.
+The body is also the shared tail of the two routines that lead into it, both of which end with this same test in their C source. fdps_cd_close_tray issues its IOCTL Output request through fdps_cd_ioctl_output_command and then falls straight through at 0003c6d0, having no RET of its own; fdps_cd_audio_is_idle calls fdps_cdrom_read_device_status for the device-status IOCTL and tail-jumps here at 0003c6f7. data_fdps_cd_last_request_status itself is written by fdps_cd_ioctl_output_command at 0003c59c and on the path out of fdps_cdrom_read_device_status, in each case from the request header copied back out of the real-mode transfer buffer at data_fdps_cd_request_header_buffer after fdps_cd_device_request.
 
 Parameters:
   none
