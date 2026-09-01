@@ -1269,5 +1269,13 @@
       "status": "open",
       "same_as": "emit#1"
     }
+  ],
+  "0003c6e8": [
+    {
+      "what": "rebuild_info/build_flags.md line 127 justifies -s with 'the game segment's 414 standard-frame functions contain not one call to __CHK; all 17 call sites are library functions', and line 246 counts 18 push-imm/call prologues in the whole image. get_xrefs_to on 0004361a returns 34 call sites, and 32 of them are game functions in the CD block 0003bade-0003c96x -- fdps_cd_alloc_dos_buffers, fdps_cd_device_request, fdps_cdrom_read_device_status, fdps_cd_audio_is_idle at 0003c6ed and 28 more; only spawnvpe and spawnve are library. So that block was compiled without -s while the rest of the game was compiled with it, and the counts in build_flags.md do not account for it. The consequence is real but confined: the rebuild uses one flag set for every unit, so this module loses a stack-overflow guard the original had, which by pitfalls.md line 111 is an observable difference in the exhaustion case (original prints Stack Overflow! and exits, rebuild writes through) -- here in the direction opposite to the one pitfalls.md describes. Not blocking and not this function's to settle: src/cdaudio.c's file header already records the deviation, every previously landed function in cd.c and cdaudio.c was emitted under the same decision, and changing it would mean changing the build rather than this function.",
+      "needs": "A pass over build_flags.md and pitfalls.md that reconciles the 17/18 counts with the 32 game-side __CHK call sites, records the CD block as a translation unit built without -s, and states what the single-flag-set rebuild gives up there. Evidence is entirely in hand -- the xref list above plus the prologues -- so this is a knowledge-base correction, not an investigation.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

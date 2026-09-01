@@ -110,4 +110,25 @@ extern void fdps_cd_resume_audio(void);
 extern void fdps_cd_read_q_channel(struct fdps_cd_q_channel_block *q_channel);
 #pragma aux fdps_cd_read_q_channel "*" parm caller [];
 
+/* 0003c6e8.  Says whether CD-DA playback has finished: issues an MSCDEX Device
+   Status request through fdps_cdrom_read_device_status and returns
+   fdps_cd_status_is_not_busy's reading of the status word that request leaves
+   in data_fdps_cd_last_request_status -- 1 when the request header's busy bit
+   0x0200 is clear, 0 when it is still set.
+
+   Takes nothing; the drive and the staging blocks are the module's globals.
+   The order is the point: the request goes out first so that the word the
+   predicate reads is this call's own and not the previous request's.
+
+   Every call costs a real device request, so it is not a free poll.  Its one
+   caller, fdps_cd_music_repeat_poll, asks once every 0x4b ticks and takes a 1
+   as the cue to issue its next play command.  The answer is only meaningful
+   where a
+   driver answered: a request that never reached one leaves the status word
+   holding uninitialised frame bytes, and a request the driver refused sets its
+   error bit 0x8000 without necessarily setting the busy bit, which this does
+   not distinguish from idle. */
+extern unsigned short fdps_cd_audio_is_idle(void);
+#pragma aux fdps_cd_audio_is_idle "*" parm caller [];
+
 #endif

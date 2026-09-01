@@ -278,3 +278,49 @@ void fdps_cd_read_q_channel(struct fdps_cd_q_channel_block *q_channel)
 
     data_fdps_cd_last_request_status = request_header.status;
 }
+
+/* 0003c6e8.  Answers whether the CD-DA the game started has finished playing:
+   ask the drive for its device status, then report whether the busy bit of the
+   status word that request left behind is clear.  1 is idle, 0 is still
+   playing.
+
+   The whole body after the stack probe is two instructions -- CALL 0003c34f
+   then JMP 0003c6d0 -- so it takes nothing, keeps nothing, and branches
+   nowhere.  Its work is entirely in the order of the two: the question has to
+   go out to the driver before the answer is read, because what is read is the
+   status word the request itself deposits.
+
+   Neither call hands a value back through a register.  The device status
+   request is declared void and the value it does leave in EAX is dead the
+   moment the predicate starts, whose first instruction is MOV AX,[0x00069e20]
+   -- a reload of data_fdps_cd_last_request_status.  So the link between the
+   two calls is that global and nothing else: fdps_cdrom_read_device_status
+   refreshes it as a side effect of the request, and the four-byte device
+   status the same routine publishes in data_fdps_cdrom_device_status, the
+   answer the request was nominally asking for, is never looked at by anybody.
+   The request is issued for the status word alone.
+
+   The busy bit is bit 9, 0x0200, of the DOS device driver request header's
+   status word.  A request the driver refused sets bit 15 instead and is not
+   distinguished here -- see fdps_cd_status_is_not_busy -- and a request that
+   never reached a driver at all leaves the word holding whatever the caller's
+   frame had in it, since nothing in this module initialises the header's
+   status field.  So the answer means "not busy" only where an MSCDEX driver
+   answered.
+
+   The result is 16 bits: the predicate zero-extends 0 or 1 into AX, and the
+   one caller, fdps_cd_music_repeat_poll at 00030c8c, reads it as a word --
+   TEST AX,AX / JNZ.  That caller polls this once every 0x4b of its own ticks,
+   and only while a track is selected and its enable byte is set, which is what
+   keeps a real device request off the per-frame path: every call here issues
+   one.
+
+   The tail jump is a call written out.  fdps_cd_close_tray reaches the same
+   predicate the same way, by running off its own end into it, and both hand
+   back the value the predicate computes, so both are written as a call to it
+   (ADR-0001). */
+unsigned short fdps_cd_audio_is_idle(void)
+{
+    fdps_cdrom_read_device_status();
+    return fdps_cd_status_is_not_busy();
+}

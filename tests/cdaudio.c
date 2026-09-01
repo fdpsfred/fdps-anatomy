@@ -1,8 +1,8 @@
 /* tests/cdaudio.c -- cover for src/cdaudio.c.
  *
  * So far this covers fdps_cd_seek at 0003c3fa, fdps_cd_play_audio_range at
- * 0003c452, fdps_cd_stop_audio at 0003c4a7, fdps_cd_resume_audio at 0003c4ff
- * and fdps_cd_read_q_channel at 0003c5a6.
+ * 0003c452, fdps_cd_stop_audio at 0003c4a7, fdps_cd_resume_audio at 0003c4ff,
+ * fdps_cd_read_q_channel at 0003c5a6 and fdps_cd_audio_is_idle at 0003c6e8.
  *
  * Every expected value below comes from the instructions of those functions,
  * never from the emitted C.  For fdps_cd_seek:
@@ -766,6 +766,172 @@ static void cdaudio_q_channel_publishes_the_driver_status_word(void)
     CHECK_EQ(data_fdps_cd_last_request_status, staged_word(header, 3));
 }
 
+/* fdps_cd_audio_is_idle at 0003c6e8 has no body of its own -- after the stack
+ * probe it is
+ *
+ *   CALL 0003c34f / JMP 0003c6d0
+ *
+ * so what there is to pin is which request goes out, that it goes out before
+ * the answer is read, and that the answer is the busy-bit predicate applied to
+ * the word that request published.  The immediates quoted below are the
+ * callee's, fdps_cdrom_read_device_status at 0003c34f:
+ *
+ *   MOV byte ptr [ESP],      0x1a   MOV byte ptr [ESP+0x2],  0x3
+ *   MOV byte ptr [ESP+0x1c], 0x6
+ *
+ * and the predicate is fdps_cd_status_is_not_busy at 0003c6d0, whose whole body
+ * is
+ *
+ *   MOV AX,[0x00069e20] / XOR AL,AL / AND AH,0x2 / MOVZX EAX,AX /
+ *     TEST EAX,EAX / SETZ AL / MOVZX AX,AL / RET
+ *
+ * The drive named is 0xff for the same reason as everywhere above, so nothing
+ * outside the module writes the request header and the status word that comes
+ * back is whatever the callee's frame held at header offset 3 -- offsets 3 to
+ * 0x0c are never initialised by anything in the module.  That word is not the
+ * test's to predict, so nothing here asserts which way the answer comes out;
+ * what is asserted is that the answer is the predicate of the word this call
+ * itself published.  Which branch of the predicate runs for a given word is
+ * settled in tests/cd.c, which reaches fdps_cd_status_is_not_busy directly and
+ * can hand it a status word of its choosing.  From here it cannot: the only
+ * route to the predicate goes through a request that overwrites the word first,
+ * which is the whole behaviour under test.
+ */
+
+/* The block is poisoned across 0x20 the way the other helpers poison it, and a
+   stop request is issued first so that the header the assertions read has a
+   real earlier request in it rather than only poison: a stop declares 0x0d and
+   carries command 0x85, neither of which the device status request uses.  The
+   IOCTL block's first byte is poisoned separately, because the control block
+   code is the one byte that says which IOCTL question was asked. */
+static void audio_is_idle_after_a_stop_request(void)
+{
+    int i;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    fdps_cd_stop_audio();
+    for (i = 0; i < 0x20; i++) {
+        data_fdps_cd_request_header_buffer[i] = HEADER_POISON;
+    }
+    data_fdps_cd_ioctl_buffer[0] = HEADER_POISON;
+}
+
+/* The request that goes out is the Device Status IOCTL and not one of the four
+   audio commands this file sends: header length 0x1a, command 3 -- IOCTL Input,
+   against the 0x83, 0x84, 0x85 and 0x88 the others carry -- and control block
+   code 6.  All three have to be there together, because the length alone is
+   shared with the Q-channel request in this file and the command byte alone is
+   shared with every IOCTL request in the module; the control code is what
+   separates Device Status from them.
+
+   The header was poisoned after the stop, so these bytes can only have got
+   there through the call under test. */
+static void cdaudio_audio_is_idle_issues_a_device_status_request(void)
+{
+    unsigned char *header;
+
+    audio_is_idle_after_a_stop_request();
+    fdps_cd_audio_is_idle();
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x1a);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 3);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 6);
+}
+
+/* The request runs before the answer is read, so the word the call leaves in
+   data_fdps_cd_last_request_status is the one sitting at header offset 3 when
+   it returns -- the same relationship the four request functions above are held
+   to, and here it is what says a request ran at all.  The global is set to a
+   value the poison cannot produce first: a call that answered from the previous
+   request's word without issuing one of its own would leave 0x1234 standing
+   against the 0xa5a5 in the header. */
+static void cdaudio_audio_is_idle_publishes_a_fresh_status_word(void)
+{
+    unsigned char *header;
+
+    audio_is_idle_after_a_stop_request();
+    data_fdps_cd_last_request_status = 0x1234;
+    fdps_cd_audio_is_idle();
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(data_fdps_cd_last_request_status, staged_word(header, 3));
+}
+
+/* The answer is the inversion of bit 0x0200 of that word and of nothing else.
+   AND AH,0x2 over XOR AL,AL is the mask, SETZ the inversion, so whichever way
+   the driver left the word the returned flag has to agree with the test written
+   out here.  Reading the global after the call rather than before is the point:
+   it is this call's word, not the stop request's. */
+static void cdaudio_audio_is_idle_answers_the_busy_bit_of_that_word(void)
+{
+    unsigned short idle_flag;
+
+    audio_is_idle_after_a_stop_request();
+    idle_flag = fdps_cd_audio_is_idle();
+
+    CHECK_EQ(idle_flag, (data_fdps_cd_last_request_status & 0x0200) == 0);
+}
+
+/* Nothing touches the status word between the two calls, so the tail jump's
+   target has to hand back what a direct call to it hands back.  This is what
+   says the JMP 0003c6d0 was written out as the predicate it names and not as a
+   test of its own that happens to agree on the value the driver left. */
+static void cdaudio_audio_is_idle_returns_what_the_predicate_returns(void)
+{
+    unsigned short idle_flag;
+
+    audio_is_idle_after_a_stop_request();
+    idle_flag = fdps_cd_audio_is_idle();
+
+    CHECK_EQ(idle_flag, fdps_cd_status_is_not_busy());
+}
+
+/* MOVZX AX,AL over SETZ AL is a zero-extended 0 or 1 in a 16-bit register, and
+   the only caller, fdps_cd_music_repeat_poll at 00030c91, reads it as a word --
+   TEST AX,AX.  So the flag is one of exactly two values and the return type is
+   two bytes wide; anything else would hand that caller a value it only half
+   looks at. */
+static void cdaudio_audio_is_idle_returns_a_zero_or_one_word(void)
+{
+    unsigned short idle_flag;
+
+    audio_is_idle_after_a_stop_request();
+    idle_flag = fdps_cd_audio_is_idle();
+
+    CHECK_EQ(idle_flag == 0 || idle_flag == 1, 1);
+    CHECK_EQ((int) sizeof(fdps_cd_audio_is_idle()), 2);
+}
+
+/* Every call issues its own request: there is no caching and no guard in the
+   body, so a second call after the header has been poisoned again has to put
+   the same three bytes back.  This is what the caller's 0x4b-tick throttle
+   exists for, and a body that asked once and then answered from the stored word
+   would pass every assertion above. */
+static void cdaudio_audio_is_idle_asks_the_drive_again_on_every_call(void)
+{
+    unsigned char *header;
+    int i;
+
+    audio_is_idle_after_a_stop_request();
+    fdps_cd_audio_is_idle();
+
+    for (i = 0; i < 0x20; i++) {
+        data_fdps_cd_request_header_buffer[i] = HEADER_POISON;
+    }
+    data_fdps_cd_ioctl_buffer[0] = HEADER_POISON;
+    fdps_cd_audio_is_idle();
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x1a);
+    CHECK_EQ(header[2], 3);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 6);
+}
+
 void run_cdaudio_tests(void)
 {
     RUN_TEST(cdaudio_seek_header_fields_sit_where_the_stores_land);
@@ -798,4 +964,10 @@ void run_cdaudio_tests(void)
     RUN_TEST(cdaudio_q_channel_copies_eleven_bytes_back_to_the_caller);
     RUN_TEST(cdaudio_q_channel_copies_exactly_the_declared_header);
     RUN_TEST(cdaudio_q_channel_publishes_the_driver_status_word);
+    RUN_TEST(cdaudio_audio_is_idle_issues_a_device_status_request);
+    RUN_TEST(cdaudio_audio_is_idle_publishes_a_fresh_status_word);
+    RUN_TEST(cdaudio_audio_is_idle_answers_the_busy_bit_of_that_word);
+    RUN_TEST(cdaudio_audio_is_idle_returns_what_the_predicate_returns);
+    RUN_TEST(cdaudio_audio_is_idle_returns_a_zero_or_one_word);
+    RUN_TEST(cdaudio_audio_is_idle_asks_the_drive_again_on_every_call);
 }
