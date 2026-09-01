@@ -9,6 +9,9 @@
  * shared default test is btlend.c's and the battle-end code it settles is
  * gamedata.h's.
  */
+#include "fdpstype.h"
+#include "gamedata.h"
+#include "unit.h"
 #include "btlend.h"
 #include "chpost2.h"
 
@@ -41,4 +44,65 @@
 void fdps_chapter_16_post_action(void)
 {
     fdps_battle_check_default_end_conditions();
+}
+
+/* 0003ad10.  The shared test, then one defeat test of this chapter's own.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003ad10..0003ad16 --
+   and nothing in it is ever read, so there is no local to name.  The epilogue
+   is the four bare POPs at 0003ad39..0003ad3c with no MOV ESP,EBP in front of
+   them, which is what an empty local area leaves behind, and the RET at
+   0003ad3d carries no immediate.
+
+   CALL 0x0003a2e0 at 0003ad1c has nothing pushed in front of it and no ESP
+   adjustment behind it, so the shared test takes no argument, and the very
+   next instruction is PUSH 0x3: EAX is not consulted between the two calls,
+   so that call's result is not used here.  PUSH 0x3 / CALL 0x000109b0 / ADD
+   ESP,0x4 at 0003ad21..0003ad28 is fdps_unit_is_retired(3), the caller
+   clearing its one argument, and its EAX is used -- TEST EAX,EAX / JZ
+   0003ad39 at 0003ad2b is the only branch in the body, skipping the MOV
+   dword ptr [0x00069da0],0x1 at 0003ad2f.
+
+   That store looks like a duplicate and is not one.  Chapter 17's id is 0x10,
+   which is one of the two ids the shared test singles out at its own CMP dword
+   ptr [0x00069cf4],0x10 / JZ 0003a368, so the shared test has already asked
+   fdps_unit_is_retired(3) and already stored the 1 -- but only on the path
+   where the code was still 0 when it was entered.  When a chapter event has
+   already recorded a verdict the shared test returns at its gate having
+   examined nothing, and this store, which consults neither the code's current
+   value nor what the shared test found, is then the only thing that reports
+   the defeat.  So deleting it as dead, folding the two tests into an if/else,
+   or copying the shared test's "only while the code is 0" guard onto it all
+   change behaviour on exactly that path.  What the store does not do is
+   outrank a 2 written earlier in this same call: with the code 0 on entry the
+   shared test runs its whole body, and its own 0x10 arm at 0003a368 has
+   already replaced that 2 with the 1 at 0003a376 before control comes back
+   here, so the store then writes a 1 over a 1.  The store is distinguishable
+   only when the code was already non-zero when this handler was entered.
+
+   There is no victory test of the chapter's own, and that is not an omission:
+   the guide gives 第17章 人質的危機 勝利條件 敵人全滅, which is precisely the
+   sweep the shared test performs, and 失敗條件 法蓮娜死亡, which is this
+   store.
+
+   Unit index 3 is a position in this map's unit array, not a character id, and
+   here it is 法蓮娜.  fdps_build_map_unit_array rebuilds unit slot i from
+   roster slot i, and the roster is in join order and is never permuted, so the
+   roster the chapter handlers have built by chapter 17 -- 蘭迪斯, 尤利安,
+   亞克, 法蓮娜, 裘娜, 費塔加, 布蘭多, 蓋亞, 琴琴, 瑪麗安 -- puts her at 3.
+   fdps_chapter_17_init parks the map cursor on the same unit 3 where
+   twenty-seven of the thirty entry handlers pass 0.  Writing the argument as a
+   character id, or carrying the shared test's usual slot 0 here, both reach
+   蘭迪斯 instead.
+
+   Table slot 16: the dword at 000602cc, sixteen entries into the table based
+   at 0006028c, is 0003ad10, and that table entry is the function's only
+   xref. */
+void fdps_chapter_17_post_action(void)
+{
+    fdps_battle_check_default_end_conditions();
+    if (fdps_unit_is_retired(3) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
 }

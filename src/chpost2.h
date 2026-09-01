@@ -51,4 +51,34 @@
 extern void fdps_chapter_16_post_action(void);
 #pragma aux fdps_chapter_16_post_action "*" parm caller [];
 
+/* Chapter 17's post-action test: the game's standard end conditions, then one
+   defeat condition of its own -- unit slot 3 having left the battle.  Takes
+   nothing, returns nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h).
+
+   The chapter's stated rules are 勝利條件 敵人全滅 and 失敗條件 法蓮娜死亡,
+   and both are covered: the win is the sweep inside
+   fdps_battle_check_default_end_conditions (btlend.h) and the loss is this
+   handler's own test, which stores 1 with no regard for what the code already
+   holds.  That is what records the defeat on the path where the shared test
+   returned at its gate because a verdict was already in the code -- a clear
+   put there by a chapter event loses to a retired slot 3.  Within one call the
+   two tests never disagree: whenever the shared test runs its body it reaches
+   its own chapter-0x10 arm and stores the same 1.
+
+   Slot 3 is 法蓮娜: unit slot i is roster slot i and the roster is in join
+   order, which by chapter 17 reads 蘭迪斯, 尤利安, 亞克, 法蓮娜, 裘娜,
+   費塔加, 布蘭多, 蓋亞, 琴琴, 瑪麗安.
+
+   Chapter 17 is chapter id 16, which is one of the two ids -- 0x10 and 0x15 --
+   the shared test itself singles out, so the slot the shared test watches for
+   the defeat is 3 here rather than the usual 0, and this handler's test asks
+   about the same unit the shared test just asked about.  The repetition is
+   load-bearing, not redundant: only the shared test's copy is gated on the
+   code still being 0.
+
+   Table slot 16. */
+extern void fdps_chapter_17_post_action(void);
+#pragma aux fdps_chapter_17_post_action "*" parm caller [];
+
 #endif
