@@ -12,7 +12,17 @@
  * The rebuild has one flag set for every unit (rebuild_info/build_flags.md),
  * so what it builds from this file is the same code without the probe, and
  * the probe is not written out below.
+ *
+ * memcpy and memset come from <string.h> and are real calls in the image; the
+ * request header layout comes from fdpstype.h, the two DOS block pointers and
+ * the published status word from gamedata.h, and the driver request path
+ * itself from cd.h.
  */
+#include <string.h>
+
+#include "fdpstype.h"
+#include "gamedata.h"
+#include "cd.h"
 #include "cdtoc.h"
 
 /* 0003bc3f.  Three byte stores straight out of the packed argument, in
@@ -62,4 +72,69 @@ int fdps_cd_msf_to_sector(unsigned int msf_packed)
 
     fdps_cd_unpack_msf(msf_packed, &minute, &second, &frame);
     return minute * 4500 + second * 75 + frame - 150;
+}
+
+/* 0003bec1.  An MSCDEX IOCTL Input request -- command code 3 -- carrying the
+   eleven-byte control block 0Eh, UPC Code, which asks the drive for the disc's
+   media catalog number.
+
+   Only two bytes of the control block are initialised.  Byte 0 is the control
+   block code and byte 1 is the CONTROL/ADR nibble pair, preset here to 2 --
+   ADR = media catalog number -- and that preset is what the branch after the
+   request tests against: the driver answers by overwriting that byte, and a
+   driver that reports "this disc carries no catalog number" writes 0 there.
+   Clearing the whole block before the request would make the zero test fire on
+   every drive that leaves the byte alone, and blank the published catalog
+   number that a drive had actually answered with.  Bytes 2..10 go out to the
+   driver as whatever the frame held, exactly as in the original.
+
+   The two DOS block pointers are two views of the same second block: the
+   memcpy pair stages through the flat linear address in
+   data_fdps_cd_ioctl_buffer, while the header's transfer address field carries
+   the packed real-mode far pointer in data_fdps_cd_ioctl_buffer_real_mode_ptr,
+   because the driver that follows it runs in real mode.
+
+   The read-back header length is the local header's own declared 0x1a --
+   MOVZX EAX,byte ptr [ESP] at 0003bf4e, zero-extended -- and not anything the
+   driver wrote, since the local is read before it is overwritten.
+
+   The single branch in the body is the CONTROL/ADR test at 0003bf70.  The
+   status word is published but never tested, so the catalog number global is
+   rewritten whether or not the driver accepted the request, and a refused
+   request leaves it holding whatever the staged block came back with.
+
+   Returns 1 unconditionally -- MOV EAX,0x1 with nothing else reaching the RET
+   -- so the value says nothing about whether the request worked.  What the
+   routine produces is data_fdps_cd_media_catalog_number and
+   data_fdps_cd_last_request_status.  Nothing in the image calls it and nothing
+   in the image reads the catalog number it publishes. */
+int fdps_cdrom_read_upc(void)
+{
+    struct fdps_cd_request_header request_header;
+    unsigned char control_block[11];
+
+    request_header.header_length = 0x1a;
+    request_header.subunit = 0;
+    request_header.command = 3;
+    request_header.volume_id_ptr = 0;
+    request_header.start_sector = 0;
+    request_header.media_descriptor = 0;
+    request_header.transfer_address = data_fdps_cd_ioctl_buffer_real_mode_ptr;
+    request_header.transfer_byte_count = 0xb;
+    control_block[0] = 0xe;
+    control_block[1] = 2;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0x1a);
+    memcpy(data_fdps_cd_ioctl_buffer, control_block, 0xb);
+    fdps_cd_device_request();
+    memcpy(control_block, data_fdps_cd_ioctl_buffer, 0xb);
+    memcpy(&request_header, data_fdps_cd_request_header_buffer,
+           request_header.header_length);
+
+    data_fdps_cd_last_request_status = request_header.status;
+    if (control_block[1] == 0) {
+        memset(&control_block[2], 0, 7);
+    }
+    memcpy(data_fdps_cd_media_catalog_number, &control_block[2], 7);
+    return 1;
 }

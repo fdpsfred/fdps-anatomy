@@ -40,4 +40,30 @@ extern void fdps_cd_unpack_msf(unsigned int msf_packed, unsigned char *minute,
 extern int fdps_cd_msf_to_sector(unsigned int msf_packed);
 #pragma aux fdps_cd_msf_to_sector "*" parm caller [];
 
+/* 00069e0f.  The seven-byte packed UPC/EAN field the CD-ROM driver answered
+   the UPC Code control block with, all zero when the driver reported that the
+   disc carries no media catalog number.  fdps_cdrom_read_upc writes it and
+   nothing in the image ever reads it, so it is a published fact with no
+   consumer; it is declared here rather than in gamedata.h for that reason. */
+extern unsigned char data_fdps_cd_media_catalog_number[7];
+
+/* 0003bec1.  Asks the CD-ROM driver for the disc's media catalog number --
+   MSCDEX IOCTL Input, control block 0Eh UPC Code -- and publishes the seven
+   packed UPC/EAN bytes it gets back in data_fdps_cd_media_catalog_number.
+
+   Takes nothing: the drive it asks and the two DOS blocks it stages through
+   are the module's globals.  Returns 1 always, so the return value cannot tell
+   a refused request from an accepted one; what the driver said about the
+   request is in data_fdps_cd_last_request_status, whose bit 15 is error, and
+   this routine records that word without testing it.  The catalog number is
+   therefore rewritten on every call, including one the driver refused.
+
+   The control block's CONTROL/ADR byte goes out preset to 2 and is tested for
+   zero on the way back, so the "no catalog number" case is one the driver has
+   to assert; sending that byte as zero instead would make every drive that
+   leaves it alone look like a disc without a catalog number.  Nothing in the
+   image calls this function. */
+extern int fdps_cdrom_read_upc(void);
+#pragma aux fdps_cdrom_read_upc "*" parm caller [];
+
 #endif

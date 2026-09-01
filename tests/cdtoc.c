@@ -20,7 +20,12 @@
  * The function reads and writes no global, so nothing here depends on data
  * ticket 23 has not emitted yet.
  */
+#include <stddef.h>
+#include <string.h>
 #include "testharn.h"
+#include "fdpstype.h"
+#include "gamedata.h"
+#include "cd.h"
 #include "cdtoc.h"
 
 /* Poison bytes on both sides of the three destinations.  0x5a is a value no
@@ -192,6 +197,150 @@ static void cdtoc_sector_carries_full_width_fields(void)
     CHECK_EQ(fdps_cd_msf_to_sector(0x00ffffffu), 1166730L);
 }
 
+/* fdps_cdrom_read_upc, 0003bec1.
+ *
+ * Same arrangement as tests/cd.c uses for the other three request builders in
+ * this module: the request is issued for real through fdps_cd_device_request,
+ * which is emitted code and not a stub, at drive letter index 0xff.  That is
+ * past every drive letter there is, so MSCDEX rejects the request on the drive
+ * number before it ever follows ES:BX into the request header, and on a
+ * machine with no CD-ROM mounted at all there is no MSCDEX handler on INT 2Fh
+ * and the multiplex returns untouched.  Either way nothing writes into the two
+ * DOS blocks, so what is sitting in them after the call is exactly what the
+ * function staged there.
+ *
+ * The expected values are the immediates in the body: MOV byte ptr [ESP],0x1a,
+ * [ESP+1],0 and [ESP+2],3 at 0003bece..0003bed7, MOV dword ptr [ESP+0x16],0
+ * and word ptr [ESP+0x14],0, MOV byte ptr [ESP+0xd],0, the transfer address
+ * loaded from [0x00069da8], MOV word ptr [ESP+0x12],0xb, and MOV byte ptr
+ * [ESP+0x1c],0xe / [ESP+0x1d],0x2 for the control block.  The four staging
+ * copies are PUSH 0x1a, PUSH 0xb, PUSH 0xb and MOVZX EAX,byte ptr [ESP].
+ *
+ * The published status word and the published catalog number are checked
+ * against the bytes they were read out of rather than against fixed values,
+ * because what a driver leaves in those fields is not the test's to decide:
+ * what is being pinned is the displacement and the width -- MOV EAX,[ESP+0x3]
+ * / MOV [0x00069e20],AX for the status, and LEA EAX,[ESP+0x22] / PUSH 0x69e0f
+ * / PUSH 0x7 for the seven bytes at control block +2.
+ *
+ * The memset arm at 0003bf77 is not reachable from here.  It fires only when
+ * the driver writes 0 over the CONTROL/ADR byte, and a request the driver
+ * never looked at comes back holding the 2 the function itself staged -- which
+ * is the assertion below, and is the same fact from the other side: the arm
+ * stays shut unless a driver actively reports "no catalog number".
+ */
+static unsigned int upc_staged_dword(unsigned char *block, int offset)
+{
+    unsigned int value;
+
+    memcpy(&value, block + offset, 4);
+    return value;
+}
+
+static unsigned short upc_staged_word(unsigned char *block, int offset)
+{
+    unsigned short value;
+
+    memcpy(&value, block + offset, 2);
+    return value;
+}
+
+/* The DOS blocks are allocated the way the module allocates them, and only if
+   they are not there yet -- data_fdps_cd_request_header_real_mode_seg is the
+   module's own "already allocated" flag.  Allocating again would work but
+   would leak the previous pair, which nothing in the module can free. */
+static int read_upc_from_a_rejected_drive(void)
+{
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    return fdps_cdrom_read_upc();
+}
+
+/* Every store the body makes into the request header is an ESP displacement,
+   so the struct's offsets are what decides which field each one lands on
+   (contract H).  Twenty-six is also the length the header declares itself to
+   be here and the length both header copies run for, so a struct that had
+   grown would stage bytes this request does not send. */
+static void cdtoc_upc_header_fields_sit_where_the_stores_land(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_cd_request_header), 26);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, header_length), 0);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, subunit), 1);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, command), 2);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, status), 3);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, media_descriptor),
+             0xd);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, transfer_address),
+             0xe);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header,
+                            transfer_byte_count), 0x12);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, start_sector), 0x14);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, volume_id_ptr),
+             0x16);
+}
+
+/* Command code 3 is IOCTL Input, and the transfer it describes is eleven bytes
+   into the second DOS block -- the same 0xb both control block copies run for.
+   The address field carries the packed real-mode far pointer the module keeps
+   for exactly this and not the flat pointer, because the driver that follows
+   it runs in real mode; using the flat one would send the driver somewhere
+   above the first megabyte.  Start sector and volume-ID pointer are zero
+   because an IOCTL request transfers no disc data. */
+static void cdtoc_upc_stages_an_ioctl_input_request(void)
+{
+    unsigned char *header;
+
+    read_upc_from_a_rejected_drive();
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x1a);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 3);
+    CHECK_EQ(header[0xd], 0);
+    CHECK_EQ((long) upc_staged_dword(header, 0xe),
+             (long) data_fdps_cd_ioctl_buffer_real_mode_ptr);
+    CHECK_EQ(upc_staged_word(header, 0x12), 0xb);
+    CHECK_EQ(upc_staged_word(header, 0x14), 0);
+    CHECK_EQ((long) upc_staged_dword(header, 0x16), 0L);
+}
+
+/* Control block code 0x0e is UPC Code, and the byte after it is CONTROL/ADR.
+   It goes out as 2 -- ADR = media catalog number -- and not as 0, which is the
+   whole reason the zero test after the request means "the driver says there is
+   no catalog number" rather than "nobody wrote anything here".  A body that
+   cleared the block before sending it would leave a 0 in this byte instead. */
+static void cdtoc_upc_asks_for_the_catalog_number(void)
+{
+    read_upc_from_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 0xe);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 2);
+}
+
+/* Both blocks are copied back out of the DOS memory before anything is read
+   out of them, so the two values the function publishes have to agree with the
+   bytes still sitting in those blocks: the status with the word at header+3,
+   and the seven catalog bytes with the block's bytes 2 to 8.  Reading the
+   status one byte later, or copying the catalog field from the block's start,
+   would break one or the other. */
+static void cdtoc_upc_publishes_status_and_the_block_field(void)
+{
+    read_upc_from_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_last_request_status,
+             upc_staged_word(data_fdps_cd_request_header_buffer, 3));
+    CHECK_EQ(memcmp(data_fdps_cd_media_catalog_number,
+                    data_fdps_cd_ioctl_buffer + 2, 7), 0);
+}
+
+/* MOV EAX,0x1 is the only thing that reaches the RET, so the answer is 1 on a
+   request the driver refused exactly as on one it answered -- there is no
+   branch anywhere between the status store and the return.  A caller cannot
+   learn anything from it. */
+static void cdtoc_upc_always_returns_one(void)
+{
+    CHECK_EQ(read_upc_from_a_rejected_drive(), 1);
+}
+
 void run_cdtoc_tests(void)
 {
     RUN_TEST(cdtoc_unpack_splits_the_three_fields);
@@ -207,4 +356,9 @@ void run_cdtoc_tests(void)
     RUN_TEST(cdtoc_sector_goes_negative_below_the_lead_in);
     RUN_TEST(cdtoc_sector_ignores_the_top_byte);
     RUN_TEST(cdtoc_sector_carries_full_width_fields);
+    RUN_TEST(cdtoc_upc_header_fields_sit_where_the_stores_land);
+    RUN_TEST(cdtoc_upc_stages_an_ioctl_input_request);
+    RUN_TEST(cdtoc_upc_asks_for_the_catalog_number);
+    RUN_TEST(cdtoc_upc_publishes_status_and_the_block_field);
+    RUN_TEST(cdtoc_upc_always_returns_one);
 }
