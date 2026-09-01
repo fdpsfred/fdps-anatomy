@@ -199,4 +199,31 @@ extern void fdps_chapter_21_post_action(void);
 extern void fdps_chapter_22_post_action(void);
 #pragma aux fdps_chapter_22_post_action "*" parm caller [];
 
+/* Chapter 25's post-action test: a victory condition and a defeat condition of
+   its own, and no shared test at all.  Takes nothing, returns nothing, and
+   leaves the verdict in data_fdps_chapter_event_or_battle_end_code
+   (gamedata.h).
+
+   The victory is unit slots 12, 13 and 14 all having left the battle, tested in
+   that order and short-circuiting on the first one still standing; those three
+   are the chapter's three 魔戰將軍, its 勝利條件 魔戰將軍死亡, and they are the
+   map's first three enemy slots because the roster is twelve deep by this
+   chapter.  The defeat is unit slot 0, 蘭迪斯, its 失敗條件 蘭迪斯死亡; slot 3
+   is the one absent from this map, since 己方 is 法蓮娜以外的所有人.
+
+   Neither store is guarded on what the code already holds and the defeat test
+   is not the victory's else branch: it runs on every call and its store is the
+   later of the two, so an action that retires the last warlord and 蘭迪斯 at
+   once ends in a Game Over, while an action that retires the last warlord after
+   a chapter event has recorded a defeat clears the chapter.
+
+   Like chapter 22's handler and unlike the rest of this file, it never calls
+   fdps_battle_check_default_end_conditions (btlend.h).  It cannot: that test
+   declares its victory by sweeping for a live enemy, and this chapter is won by
+   killing three named units while the rest of the map still stands.
+
+   Table slot 24. */
+extern void fdps_chapter_25_post_action(void);
+#pragma aux fdps_chapter_25_post_action "*" parm caller [];
+
 #endif

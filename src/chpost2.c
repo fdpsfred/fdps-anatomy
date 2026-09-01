@@ -351,3 +351,97 @@ void fdps_chapter_22_post_action(void)
         data_fdps_chapter_event_or_battle_end_code = 1;
     }
 }
+
+/* The three unit slots chapter 25's victory test asks about, the PUSH 0xc,
+   PUSH 0xd and PUSH 0xe immediates at 0003b6bc, 0003b6ca and 0003b6da.  They
+   are the map's first three enemy slots and they hold the chapter's three
+   魔戰將軍.
+
+   MAP24.DAT is a 131-byte header followed by 59 deployment records of 26 bytes,
+   which is the guide's enemy list for this chapter to the unit: 3 + 1 黑暗祭司
+   + 11 神箭手 + 18 鎧甲武士 + 8 地獄騎士 + 18 天空騎士.  Its header byte +1
+   fields twelve player slots -- the same field the chapter 4, 5, 6, 9 and 11
+   handlers in chpost1.c are read for, and the field that gives map19.dat
+   eleven -- and byte +2 is the record count, 59.  fdps_build_map_unit_array lays those twelve player
+   slots down first and fdps_deploy_wave appends the records whose wave byte
+   (+0x15) matches the wave being deployed, so the first record of wave 0 is
+   unit slot 12.  Records 0, 1 and 2 are wave 0, are the file's only level-30
+   units -- character ids 64, 65 and 66 -- and the guide gives exactly three
+   level-30 enemies, 塞克斯, 布魯森 and 汎拉沛.  The roster is twelve deep for
+   the same count: the ten of chapter 17 plus 蘭斯洛特, who arrives on chapter
+   19's sixth turn, plus 珊, who joins in chapter 24.
+
+   The map is not deployed in one go, but the split does not move these three:
+   41 of the 59 records are wave 0 and land at slots 12..52 when the map opens,
+   and the other 18 are wave 1 -- all character id 97, the LV16 天空騎士x18 the
+   chapter's reinforcement event brings on -- appended at slots 53..70 when that
+   event fires.  The chapter's eighteen 鎧甲武士 are a different group, character
+   id 100, and every one of them is wave 0.  Which of the two 18-strong groups is
+   which is settled by chapter 24, where their counts differ: MAP23.DAT holds id
+   95 x4, id 100 x6 and id 97 x15 against that chapter's guide list 神箭手x4 /
+   鎧甲武士x6 / 天空騎士x15.  The warlords are wave-0 records 0, 1 and 2 either
+   way. */
+#define CHAPTER_25_WARLORD_SLOT_1 0x0c
+#define CHAPTER_25_WARLORD_SLOT_2 0x0d
+#define CHAPTER_25_WARLORD_SLOT_3 0x0e
+
+/* 0003b6b0.  Two end conditions of the chapter's own and no forward to the
+   shared test, like chapter 22's handler and unlike every other one in this
+   file -- but this one declares a victory as well as a defeat.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003b6b0..0003b6b6 -- and
+   nothing in it is ever read, so there is no local to name.  The epilogue is
+   the four bare POPs at 0003b70c..0003b70f with no MOV ESP,EBP in front of
+   them, which is what an empty local area leaves behind, and the RET at
+   0003b710 carries no immediate.
+
+   The victory test is three calls chained by their zero tests.  PUSH 0xc /
+   CALL 0x000109b0 / ADD ESP,0x4 at 0003b6bc..0003b6c3 is
+   fdps_unit_is_retired(0x0c) with the caller clearing its one argument, and its
+   EAX is used at once: TEST EAX,EAX / JZ 0003b6d8 at 0003b6c6 leaves for the
+   JMP 0x0003b6e8 that skips the store the moment a warlord is still standing.
+   The 0xd call at 0003b6ca and the 0xe call at 0003b6dc repeat the shape with
+   JNZ into the next test and a fall-through onto the same skip, so the three
+   calls are a short-circuiting && chain in source order and no call after a
+   live warlord is made at all.  Only when all three report retired does control
+   reach MOV dword ptr [0x00069da0],0x2 at 0003b6ea.
+
+   The defeat test then runs unconditionally: the store's own successor and the
+   skip path's target are both 0003b6f4, where PUSH 0x0 / CALL 0x000109b0 / ADD
+   ESP,0x4 asks about unit slot 0 and TEST EAX,EAX / JZ 0003b70c at 0003b6fe
+   guards MOV dword ptr [0x00069da0],0x1 at 0003b702.  Neither store consults
+   the code's current value and neither is the other's else branch, so the last
+   write wins and the defeat is last: 蘭迪斯 falling on the same action that
+   retires the final warlord is a Game Over in the original, where an if/else,
+   an else-if, or the shared test's "only while the code is still 0" guard
+   copied onto either store would clear the chapter instead.  In the other
+   direction the same absence of a guard is what lets the victory overwrite a
+   defeat a chapter event recorded earlier in the action.
+
+   There is no CALL 0x0003a2e0 here, and that is the chapter's rules rather
+   than a missing line: the guide gives 第25章 魔戰將軍 勝利條件 魔戰將軍死亡,
+   three named bosses and not 敵人全滅, so the shared test's sweep would clear
+   the chapter as soon as the last minion fell with all three warlords still
+   alive.  Because that test never runs, this handler has to carry the defeat
+   itself, which is the slot-0 store -- 失敗條件 蘭迪斯死亡, and slot 0 is
+   蘭迪斯 because unit slot i is roster slot i and the roster is in join order.
+   Chapter 25's 己方 is 法蓮娜以外的所有人, so it is 法蓮娜 at slot 3 and not
+   蘭迪斯 at slot 0 who goes undeployed here, the mirror image of chapter 22.
+   Her slot is still reserved -- the map fields twelve player slots, not eleven
+   -- which is what keeps the warlords at 12, 13 and 14.
+
+   Chapter 25 is chapter id 24 and the dword at 000602ec, twenty-four entries
+   into the table based at 0006028c, is 0003b6b0; that table entry is the
+   function's only xref, which is why it has no static caller. */
+void fdps_chapter_25_post_action(void)
+{
+    if (fdps_unit_is_retired(CHAPTER_25_WARLORD_SLOT_1) != 0 &&
+        fdps_unit_is_retired(CHAPTER_25_WARLORD_SLOT_2) != 0 &&
+        fdps_unit_is_retired(CHAPTER_25_WARLORD_SLOT_3) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 2;
+    }
+    if (fdps_unit_is_retired(0) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+}
