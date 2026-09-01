@@ -1986,6 +1986,262 @@ static void chapter_26_the_chapter_id_is_never_consulted(void)
     CHECK_EQ(end_code(), 0);
 }
 
+/* --------------------------------------------------------------------------
+ * Chapter 27, 魔導士的野望 -- fdps_chapter_27_post_action at 0003b8a0.
+ *
+ * The fourth handler in this file with no CALL 0x0003a2e0, and the narrowest:
+ * the body is PUSH 0xc / CALL 0x000109b0 / ADD ESP,0x4 / TEST EAX,EAX / JZ
+ * 0003b8c4 at 0003b8ac, the MOV dword ptr [0x00069da0],0x2 at 0003b8ba that
+ * guards, then PUSH 0x0 / CALL 0x000109b0 / ADD ESP,0x4 / TEST EAX,EAX / JZ
+ * 0003b8dc at 0003b8c4 and the MOV dword ptr [0x00069da0],0x1 at 0003b8d2.
+ *
+ * So four things are worth pinning: that slot 12 alone clears the chapter, that
+ * the clear does not need the rest of the map dead -- there is no sweep here at
+ * all -- that both stores are unguarded, and that the defeat store runs after
+ * the victory store rather than as its else, which is what makes a 蘭迪斯 who
+ * falls on the same action outrank the clear.
+ *
+ * The expected verdicts come from those instructions and from the guide's
+ * chapter 27 entry, 魔導士的野望: 勝利條件：魔導王死亡 and 失敗條件：蘭迪斯死亡,
+ * with 己方：法蓮娜以外的所有人.  The 0/1/2 meanings of the code are
+ * program_info/architecture.md.
+ *
+ * The array is staged at its widest: twelve player slots at 0..11, then all 55
+ * of MAP26.DAT's deployment records at 12..66.  Twelve is the map's own
+ * player-slot count, its header byte +1, and 55 is the record count at byte +2,
+ * the file being a 131-byte header and 26 bytes each; 55 matches the guide's
+ * enemy list exactly -- one LV40, four LV30 and fifty LV18, which is the level
+ * byte's own histogram.  The map does not reach that width in one step: 25 of
+ * the records are wave 0 and land at slots 12..36 when the map opens, and the
+ * other 30 are wave 1, the reinforcements the guide says arrive once the four
+ * 魔戰將軍 are down, appended at 37..66.  Both are real states of the array and
+ * the staging is the later one, which is why the sweep case below retires 54 of
+ * 55.  魔導王吉歐 is wave-0 record 0, the file's only level-40 unit, so he
+ * stands at slot 12 in either state.
+ *
+ * Slots 13..16 are the four 魔戰將軍, wave-0 records 1..4.  They matter here
+ * only because nothing in this handler asks about them: the sweep case retires
+ * each of them on its own and requires the code to stay 0, which is what catches
+ * chapter 26's four-slot victory chain copied into this chapter.
+ *
+ * The chapter id staged below is 26, the 0-based id whose table slot -- the
+ * dword at 000602f4, twenty-six entries into the table based at 0006028c --
+ * holds 0003b8a0, and that table entry is the function's only xref.  Nothing in
+ * the body reads it, and one case below asserts exactly that.
+ * ------------------------------------------------------------------------ */
+
+/* Chapter 27 is chapter id 26 (0x1a). */
+#define CHAPTER_27_ID 26
+
+/* Twelve player slots then all 55 of MAP26.DAT's deployment records: the 25 of
+   wave 0 at 12..36 and the 30 of wave 1 at 37..66. */
+#define CH27_PARTY_SLOTS 12
+#define CH27_SPAWN_RECORDS 55
+#define CH27_UNITS (CH27_PARTY_SLOTS + CH27_SPAWN_RECORDS)
+
+/* LV40魔導王吉歐: wave-0 deployment record 0, so slot 12. */
+#define CH27_MAGE_KING 12
+
+/* The four 魔戰將軍, wave-0 records 1..4.  Not tested by this handler. */
+#define CH27_WARLORD_FIRST 13
+#define CH27_WARLORD_LAST 16
+
+/* 蘭迪斯 is roster slot 0, as in every chapter that deploys him. */
+#define CH27_RANDIS_SLOT 0
+
+static struct fdps_unit_record stage27_units[CH27_UNITS];
+
+/* Zero the block and publish it: the roster on side 2, the deployment records on
+   side 0, nobody retired.  Each case then retires only the slots it is about, so
+   unless a case says otherwise the map is full of live enemies -- which is what
+   makes the clear cases discriminating, because a body that swept for one would
+   answer 0 instead. */
+static void stage27(int battle_end_code)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) stage27_units;
+    for (i = 0; i < (int) sizeof(stage27_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < CH27_UNITS; i++) {
+        stage27_units[i].side =
+            (unsigned char) (i < CH27_PARTY_SLOTS ? SIDE_PLAYER : SIDE_ENEMY);
+    }
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) stage27_units;
+    data_fdps_map_unit_count = CH27_UNITS;
+    data_fdps_chapter_current_chapter_id = CHAPTER_27_ID;
+    data_fdps_chapter_event_or_battle_end_code = (unsigned int) battle_end_code;
+}
+
+static void retire27(int unit_index)
+{
+    stage27_units[unit_index].flags = FLAG_RETIRED;
+}
+
+/* 勝利條件：魔導王死亡.  A retired slot 12 writes the 2 at 0003b8ba with the
+   other 54 enemies still standing, which is the case that separates this
+   handler from every forwarding one in the file: the shared test's sweep would
+   answer 0 on this map. */
+static void chapter_27_the_mage_king_falling_clears_the_chapter(void)
+{
+    stage27(0);
+    retire27(CH27_MAGE_KING);
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* The rest of the map dying settles nothing.  Every deployment record but 吉歐
+   is retired here -- 54 of the 55, the map after its wave-1 reinforcement -- and
+   the code stays 0, because there is no 敵人全滅 sweep in this handler and
+   chapter 27 is not won that way.  The four 魔戰將軍 are in that sweep, so a
+   victory test carried over from chapter 26 fails here. */
+static void chapter_27_killing_everything_but_the_mage_king_settles_nothing(void)
+{
+    int slot;
+
+    stage27(0);
+    for (slot = CH27_PARTY_SLOTS; slot < CH27_UNITS; slot++) {
+        if (slot == CH27_MAGE_KING) {
+            continue;
+        }
+        retire27(slot);
+    }
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* 失敗條件：蘭迪斯死亡.  With 吉歐 standing the victory test writes nothing and
+   the slot-0 test at 0003b8c4 is what answers. */
+static void chapter_27_a_retired_randis_is_a_defeat(void)
+{
+    stage27(0);
+    retire27(CH27_RANDIS_SLOT);
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The case the rebuild note is about.  Both stores run on this staging and the
+   defeat's is the later one, so the answer is 1: writing the two tests as
+   if/else, as an else-if, or with the shared test's "only while the code is
+   still 0" guard on the defeat store would leave the 2 here and clear a chapter
+   the original ends with a Game Over. */
+static void chapter_27_randis_falling_with_the_mage_king_is_a_defeat(void)
+{
+    stage27(0);
+    retire27(CH27_MAGE_KING);
+    retire27(CH27_RANDIS_SLOT);
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The other unguarded store, seen from the other side: a defeat a chapter event
+   recorded before this handler ran is overwritten by the clear, because the
+   victory store consults nothing either.  Guarding it on the code still being 0
+   would leave the 1 standing. */
+static void chapter_27_a_recorded_defeat_is_overwritten_by_the_clear(void)
+{
+    stage27(1);
+    retire27(CH27_MAGE_KING);
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* With 吉歐 standing and 蘭迪斯 alive neither store is reached, so a verdict
+   already in the code comes back untouched -- including on a map whose enemies
+   are all dead but for 吉歐, which a body that swept would have recomputed. */
+static void chapter_27_a_recorded_verdict_survives_an_undecided_action(void)
+{
+    int slot;
+
+    stage27(2);
+    for (slot = CH27_WARLORD_FIRST; slot <= CH27_WARLORD_LAST; slot++) {
+        retire27(slot);
+    }
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 2);
+
+    stage27(1);
+    for (slot = CH27_WARLORD_FIRST; slot <= CH27_WARLORD_LAST; slot++) {
+        retire27(slot);
+    }
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* No slot but 0 and 12 is consulted at all.  Every other slot of the 67 is
+   retired on its own with those two left standing, and the code has to stay 0
+   each time.  Slot 3 is in that sweep and is the one worth naming: it is
+   法蓮娜's, the index chapters 17 and 22 pass, and she is not even deployed here
+   -- 己方：法蓮娜以外的所有人.  Slots 11 and 13 are in it too, so a boss index
+   that drifted either way is caught. */
+static void chapter_27_no_other_slot_ends_the_battle(void)
+{
+    int retired_slot;
+
+    for (retired_slot = 1; retired_slot < CH27_UNITS; retired_slot++) {
+        if (retired_slot == CH27_MAGE_KING) {
+            continue;
+        }
+        stage27(0);
+        retire27(retired_slot);
+        fdps_chapter_27_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
+/* An undecided action leaves the code alone on both sides: nothing is stored
+   before the first CALL and nothing after the last one.  It is called twice
+   because the dispatchers run it after every unit action, and a handler that
+   only behaved on its first call would still pass every case above. */
+static void chapter_27_an_open_battle_stays_open(void)
+{
+    stage27(0);
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 0);
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* The verdict is stable across calls on the decided paths as well. */
+static void chapter_27_the_verdict_is_stable_across_calls(void)
+{
+    stage27(0);
+    retire27(CH27_MAGE_KING);
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 2);
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 2);
+
+    stage27(0);
+    retire27(CH27_RANDIS_SLOT);
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 1);
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The body contains no CMP against data_fdps_chapter_current_chapter_id, so the
+   answer cannot depend on it.  Staging chapter 17's id and then chapter 22's --
+   the two the shared test singles out, and the two that would change the answer
+   had this handler forwarded to it -- changes nothing. */
+static void chapter_27_the_chapter_id_is_never_consulted(void)
+{
+    stage27(0);
+    data_fdps_chapter_current_chapter_id = CHAPTER_17_ID;
+    retire27(CH27_MAGE_KING);
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 2);
+
+    stage27(0);
+    data_fdps_chapter_current_chapter_id = CHAPTER_22_ID;
+    retire27(FARLENA_SLOT);
+    fdps_chapter_27_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
 void run_chpost2_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -2066,4 +2322,14 @@ void run_chpost2_tests(void)
     RUN_TEST(chapter_26_an_open_battle_stays_open);
     RUN_TEST(chapter_26_the_verdict_is_stable_across_calls);
     RUN_TEST(chapter_26_the_chapter_id_is_never_consulted);
+    RUN_TEST(chapter_27_the_mage_king_falling_clears_the_chapter);
+    RUN_TEST(chapter_27_killing_everything_but_the_mage_king_settles_nothing);
+    RUN_TEST(chapter_27_a_retired_randis_is_a_defeat);
+    RUN_TEST(chapter_27_randis_falling_with_the_mage_king_is_a_defeat);
+    RUN_TEST(chapter_27_a_recorded_defeat_is_overwritten_by_the_clear);
+    RUN_TEST(chapter_27_a_recorded_verdict_survives_an_undecided_action);
+    RUN_TEST(chapter_27_no_other_slot_ends_the_battle);
+    RUN_TEST(chapter_27_an_open_battle_stays_open);
+    RUN_TEST(chapter_27_the_verdict_is_stable_across_calls);
+    RUN_TEST(chapter_27_the_chapter_id_is_never_consulted);
 }

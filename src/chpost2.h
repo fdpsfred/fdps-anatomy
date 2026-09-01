@@ -268,4 +268,38 @@ extern void fdps_chapter_25_post_action(void);
 extern void fdps_chapter_26_post_action(void);
 #pragma aux fdps_chapter_26_post_action "*" parm caller [];
 
+/* Chapter 27's post-action test: one victory condition and one defeat condition
+   of its own, and no shared test at all.  Takes nothing, returns nothing, and
+   leaves the verdict in data_fdps_chapter_event_or_battle_end_code
+   (gamedata.h).
+
+   The victory is unit slot 12 having left the battle -- LV40魔導王吉歐, the
+   chapter's 勝利條件 魔導王死亡 -- and the defeat is unit slot 0, 蘭迪斯, its
+   失敗條件 蘭迪斯死亡.  Slot 12 is the map's first enemy slot because the
+   roster is twelve deep by this chapter and 己方 is 法蓮娜以外的所有人, so slot
+   3 is reserved and empty; 吉歐 is MAP26.DAT's first deployment record and its
+   only level-40 one, and he is deployed in wave 0, so the slot is occupied from
+   the moment the map opens.
+
+   The four 魔戰將軍 stand at slots 13 to 16 and none of them is tested.  Killing
+   them is what brings the chapter's reinforcements on, which is a separate
+   event handler's business; this chapter is not the four-warlord victory
+   chapter 26 is, and testing them here would clear it with the boss alive.
+
+   Neither store is guarded on what the code already holds and the defeat test is
+   not the victory's else branch: it runs on every call and its store is the later
+   of the two, so an action that kills 吉歐 and 蘭迪斯 at once ends in a Game
+   Over, while an action that kills 吉歐 after a chapter event has recorded a
+   defeat clears the chapter.
+
+   Like chapters 22's, 25's and 26's handlers and unlike the rest of this file,
+   it never calls fdps_battle_check_default_end_conditions (btlend.h).  It
+   cannot: that test declares its victory by sweeping for a live enemy, and this
+   chapter is won by killing one named unit while the rest of the map still
+   stands.
+
+   Table slot 26. */
+extern void fdps_chapter_27_post_action(void);
+#pragma aux fdps_chapter_27_post_action "*" parm caller [];
+
 #endif

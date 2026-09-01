@@ -604,3 +604,92 @@ void fdps_chapter_26_post_action(void)
         data_fdps_chapter_event_or_battle_end_code = 1;
     }
 }
+
+/* The one unit slot chapter 27's victory test asks about, the PUSH 0xc at
+   0003b8ac.  It is the map's first enemy slot and it holds LV40 魔導王吉歐,
+   the boss whose death is the chapter's 勝利條件.
+
+   MAP26.DAT is a 131-byte header followed by 55 deployment records of 26 bytes
+   -- 0x83 + 55 * 0x1a is 1561, the whole file.  Its header byte +1 fields twelve
+   player slots, the same count chapters 25 and 26 field, and byte +2 is the
+   record count, 55.  fdps_build_map_unit_array lays the twelve player slots down
+   first and fdps_deploy_wave appends, in file order, the records whose wave byte
+   (+0x15) equals the wave being deployed, so record 0 becomes unit slot 12.
+
+   Record 0 is wave 0 -- so the slot exists from the moment the map opens and
+   needs no latch of the kind chapter 26's second defeat test carries -- and it
+   is the file's ONLY level-40 record: the level byte (+4) reads 0x28 once, 0x1e
+   on four records and 0x12 on the other fifty.  That histogram is the guide's
+   enemy list for this chapter to the unit -- LV40魔導王吉歐, four LV30 魔戰將軍,
+   and LV18 神箭手x8 + 鎧甲武士x12 + 地獄騎士x10 + 天空騎士x20, fifty of them --
+   so the single level-40 record is 吉歐 and it is the first record in the file.
+
+   Its character id is 0x3f, which is over 60 and so indexes ENEMYDAT.DAT rather
+   than FRIAPRDA.DAT, at row 0x3f - 60.  That table's field layout is not decoded
+   (resource_info/data_tables.md), so this is a numeric match and not a field
+   read: taking the little-endian word at +2 and the byte at +4 of a row as the
+   HP and MP bases and multiplying each by the unit's level reproduces the
+   guide's numbers for all five of this map's named enemies at once -- 300 and
+   250 at level 40 give 吉歐's HP12000 and MP10000, and rows 0x40..0x43 at level
+   30 give 5400/0, 4500/3000, 3900/6000 and 6300/4500, which are 塞克斯,
+   布魯森, 汎拉沛 and 凱因巴.
+
+   The four 魔戰將軍 stand at slots 13, 14, 15 and 16 here and none of them is
+   tested: this chapter is won by killing 吉歐 alone.  Their defeat is what
+   triggers the reinforcement event instead -- the thirty wave-1 records, which
+   land at slots 0x25..0x42 when it fires -- and that event is a separate
+   handler.  Carrying chapter 26's four-warlord && chain over to this chapter
+   would clear it while the boss still stands. */
+#define CHAPTER_27_MAGE_KING_SLOT 0x0c
+
+/* 0003b8a0.  A victory condition and a defeat condition of the chapter's own
+   and no forward to the shared test, the same shape as chapter 25's handler
+   with a one-slot victory test in place of its three-slot chain.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003b8a0..0003b8a6 -- and
+   nothing in it is ever read, so there is no local to name.  The epilogue is the
+   four bare POPs at 0003b8dc..0003b8df with no MOV ESP,EBP in front of them,
+   which is what an empty local area leaves behind, and the RET at 0003b8e0
+   carries no immediate.
+
+   The victory test is one call.  PUSH 0xc / CALL 0x000109b0 / ADD ESP,0x4 at
+   0003b8ac..0003b8b3 is fdps_unit_is_retired(0x0c) with the caller clearing its
+   one argument, and its EAX is used at once: TEST EAX,EAX / JZ 0003b8c4 at
+   0003b8b6 guards MOV dword ptr [0x00069da0],0x2 at 0003b8ba.
+
+   The defeat test then runs unconditionally: the store's own successor and the
+   skip path's target are both 0003b8c4, where PUSH 0x0 / CALL 0x000109b0 / ADD
+   ESP,0x4 asks about unit slot 0 and TEST EAX,EAX / JZ 0003b8dc at 0003b8ce
+   guards MOV dword ptr [0x00069da0],0x1 at 0003b8d2.  Slot 0 is 蘭迪斯 -- unit
+   slot i is roster slot i and the roster is in join order -- and his death is
+   the chapter's 失敗條件.  Chapter 27's 己方 is 法蓮娜以外的所有人, so it is
+   slot 3 that is reserved and empty here, which is what keeps 吉歐 at 12.
+
+   Neither store consults the code's current value and neither is the other's
+   else branch, so the last write wins and the defeat is last: 蘭迪斯 falling on
+   the same action that kills 吉歐 is a Game Over in the original, where an
+   if/else, an else-if, or the shared test's "only while the code is still 0"
+   guard copied onto either store would clear the chapter instead.  In the other
+   direction the same absence of a guard is what lets the victory overwrite a
+   defeat a chapter event recorded earlier in the action.
+
+   There is no CALL 0x0003a2e0 here, and that is the chapter's rules rather than
+   a missing line: the guide gives 第27章 魔導士的野望 勝利條件 魔導王死亡, one
+   named boss and not 敵人全滅, so the shared test's sweep would clear the
+   chapter as soon as the last of the fifty-odd garrison fell with 吉歐 still
+   alive.  Because that test never runs, this handler has to carry the defeat
+   itself.
+
+   Chapter 27 is chapter id 26 (0x1a) and the dword at 000602f4, twenty-six
+   entries into the table based at 0006028c, is 0003b8a0; that table entry is the
+   function's only xref, which is why it has no static caller. */
+void fdps_chapter_27_post_action(void)
+{
+    if (fdps_unit_is_retired(CHAPTER_27_MAGE_KING_SLOT) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 2;
+    }
+    if (fdps_unit_is_retired(0) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+}
