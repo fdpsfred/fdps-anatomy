@@ -122,4 +122,22 @@ extern void fdps_cd_device_request(void);
 extern unsigned int fdps_cd_read_head_sector(void);
 #pragma aux fdps_cd_read_head_sector "*" parm caller [];
 
+/* Asks the CD-ROM driver how it has routed and mixed its audio output and
+   fills the caller's nine-byte control block with the answer -- MSCDEX IOCTL
+   Input, control block 04h Audio Channel Info, whose reply is four (input
+   channel, volume) pairs, one pair per output channel.
+
+   channel_info points at nine bytes the caller owns.  Byte 0 is stamped with
+   the function code here, so the caller need not set it, but bytes 1..8 are
+   sent to the driver exactly as the caller left them and are overwritten with
+   the driver's answer on the way back; this routine never clears them.
+
+   Returns nothing.  Whether the driver accepted the request is visible only in
+   data_fdps_cd_last_request_status, which this leaves holding the status word
+   the driver wrote into the request header -- bit 15 is error.  Without it a
+   refused request is indistinguishable from a drive reporting every channel
+   muted.  Nothing in the image calls it. */
+extern void fdps_cd_read_audio_channel_info(unsigned char *channel_info);
+#pragma aux fdps_cd_read_audio_channel_info "*" parm caller [];
+
 #endif

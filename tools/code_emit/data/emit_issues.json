@@ -1102,5 +1102,13 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "0003bd99": [
+    {
+      "what": "Whether the read-back leg of this function -- memcpy(channel_info, data_fdps_cd_ioctl_buffer, 9) at 0003be25-0003be31, in the shared epilogue -- actually delivers the driver's answer is not observable in the test environment. Every case runs against drive letter index 0xff, which MSCDEX rejects before following ES:BX, so the driver writes nothing and the block still holds the question the send put there; the send and the read-back become indistinguishable. The same limitation applies to the status word: what is published is whatever the frame held, not a driver status. Nothing about the emitted code is in doubt -- the copy direction, the length 9 and the destination are settled from the assembly at 0003be25-0003be2d and reproduced in the built object -- only the end-to-end behaviour is unwitnessed.",
+      "needs": "A machine (or a DOSBox-X configuration) with a real CD-ROM drive and MSCDEX loaded, where the request is accepted and the four (input channel, volume) pairs come back, so the answer can be seen to differ from the question that was sent. This is the same gap the already-committed fdps_cd_read_head_sector cover has, and it is evidence a real drive supplies rather than a lookup that was skipped.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

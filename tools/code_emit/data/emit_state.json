@@ -1445,6 +1445,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0xb7"
+    },
+    "0003bd99": {
+      "name": "fdps_cd_read_audio_channel_info",
+      "target": "cd.c",
+      "body_size": "0x9d",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x9d"
     }
   }
 }

@@ -181,3 +181,64 @@ unsigned int fdps_cd_read_head_sector(void)
     data_fdps_cd_last_request_status = request_header.status;
     return *(unsigned int *) &control_block[2];
 }
+
+/* 0003bd99.  An MSCDEX IOCTL Input request -- command code 3 -- carrying the
+   nine-byte control block 04h, Audio Channel Info, which asks the drive which
+   input channel and what volume it has routed to each of its four output
+   channels.
+
+   The control block is the caller's, not a local: byte 0 is stamped with the
+   function code here and bytes 1..8 are whatever the caller left in them.  All
+   nine go out to the driver and all nine come back overwritten, so a caller
+   that wants a clean question has to clear its own buffer first -- nothing
+   here does.
+
+   No branch in the body: build the header, stage both blocks into the two DOS
+   blocks, send, read both back.  The header is built as a local and copied so
+   the driver never sees a half-built one, and the declared length is 0x1a --
+   26 bytes, exactly the record -- which is also the length the staging memcpy
+   copies (MOV byte ptr [ESP],0x1a and PUSH 0x1a at 0003bddf), so unlike
+   fdps_cd_read_head_sector nothing goes out past the end of it.  The status
+   word and the eight reserved bytes are still never initialised and reach the
+   driver as whatever the frame held; the driver overwrites the first and
+   ignores the rest.
+
+   The read-back of the header is for as many bytes as the header's own length
+   byte says -- MOVZX EAX,byte ptr [ESP] at 0003be0d, zero extended, and that
+   byte is the local's own 0x1a rather than anything the driver wrote, because
+   the driver wrote into the DOS block and not into this frame.  The control
+   block comes back for a flat 9.
+
+   The status word is published in data_fdps_cd_last_request_status because
+   this function returns nothing at all: the only way a caller can tell a
+   refused request from a drive that really has all four channels muted is to
+   read that word, where bit 15 is the driver's error flag.  Nothing in the
+   image calls this function.
+
+   The transfer-address field carries data_fdps_cd_ioctl_buffer_real_mode_ptr,
+   the packed real-mode far pointer, while the two memcpy's go through
+   data_fdps_cd_ioctl_buffer, the flat linear address of that same DOS block.
+   The two are not interchangeable (rebuild_info/pitfalls.md). */
+void fdps_cd_read_audio_channel_info(unsigned char *channel_info)
+{
+    struct fdps_cd_request_header request_header;
+
+    request_header.header_length = 0x1a;
+    request_header.subunit = 0;
+    request_header.command = 3;
+    request_header.volume_id_ptr = 0;
+    request_header.start_sector = 0;
+    request_header.media_descriptor = 0;
+    request_header.transfer_address = data_fdps_cd_ioctl_buffer_real_mode_ptr;
+    request_header.transfer_byte_count = 9;
+    channel_info[0] = 4;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0x1a);
+    memcpy(data_fdps_cd_ioctl_buffer, channel_info, 9);
+    fdps_cd_device_request();
+    memcpy(&request_header, data_fdps_cd_request_header_buffer,
+           request_header.header_length);
+    memcpy(channel_info, data_fdps_cd_ioctl_buffer, 9);
+
+    data_fdps_cd_last_request_status = request_header.status;
+}
