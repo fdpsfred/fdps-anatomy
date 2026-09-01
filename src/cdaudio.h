@@ -178,4 +178,24 @@ extern unsigned int data_fdps_cd_play_range_end_sector;
 extern void fdps_cd_resolve_track_range(void);
 #pragma aux fdps_cd_resolve_track_range "*" parm caller [];
 
+/* 0003c85b.  Plays one CD-DA track whole: stops whatever the drive is doing,
+   points the CD layer's track-info globals at the requested track, resolves
+   that track's sector range and issues the Play Audio request for it.
+
+   track is a signed word -- the only read of the argument is a MOVSX of
+   [ESP+4] -- and nothing along the chain range checks it: a number past the
+   disc's highest track is queried for anyway and comes back with whatever the
+   driver answers, which fdps_cd_resolve_track_range then ends at the lead-out.
+   The three callers, fdps_cd_set_music_track, fdps_cd_music_repeat_poll and
+   fdps_cd_verify_disc_and_play_track, all pass a small positive track number.
+
+   Returns nothing, and reports nothing: every callee is void and none of the
+   four requests it costs is tested.  Playback is asynchronous, so this returns
+   as soon as the driver has taken the play request and the track then runs on
+   until it ends or a stop arrives; fdps_cd_audio_is_idle is what says it has
+   finished.  It also leaves the track-info globals naming the requested track
+   and the play-range globals holding the range that was sent. */
+extern void fdps_cd_play_track(short track);
+#pragma aux fdps_cd_play_track "*" parm caller [];
+
 #endif

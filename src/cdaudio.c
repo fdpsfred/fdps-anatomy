@@ -392,3 +392,42 @@ void fdps_cd_resolve_track_range(void)
     data_fdps_cd_play_range_end_sector = data_fdps_cd_track_start_sector;
     fdps_cdrom_read_track_info(selected_track);
 }
+
+/* 0003c85b.  Plays one CD-DA track from its beginning to its end: four calls
+   in a row, no branch, no local and nothing tested.
+
+   The order is the whole of it.  The stop at 0003c865 comes first because the
+   drive may still be playing the previous track and Play Audio does not
+   replace a range in progress.  The query at 0003c870 is what points the CD
+   layer's track-info globals at the requested track, and
+   fdps_cd_resolve_track_range at 0003c878 reads exactly those globals to
+   decide the range, so the query cannot be moved after it -- it also
+   republishes data_fdps_cd_track_start_sector, which is the range start the
+   resolve then copies.  The play request at 0003c889 comes last and takes the
+   pair the resolve published.
+
+   The argument is a signed word: MOVSX EAX,word ptr [ESP + 0x4] at 0003c86a is
+   the only read of it, so the sixteen bits it is fetched at are the width the
+   track number travels in even though every call site pushes a full dword.
+   fdps_cdrom_read_track_info takes an int, and the sign extension is what the
+   cast to it is.
+
+   The two globals go out in the order the pushes name them -- PUSH dword ptr
+   [0x00069de4] at 0003c87d, then PUSH dword ptr [0x00069dec] at 0003c883, so
+   the last pushed is the first argument and the start sector is the one
+   fdps_cd_play_audio_range receives first.
+
+   Nothing here reports anything.  All four callees are void, EAX is never set
+   deliberately and the RET at 0003c891 follows the ADD ESP,0x8 that cleans the
+   play request's arguments, so this returns nothing.  A track number past the
+   disc is not refused anywhere along the chain: the query answers with
+   whatever the driver says, the resolve sends it down its lead-out arm, and
+   the play request goes out on the range that produces. */
+void fdps_cd_play_track(short track)
+{
+    fdps_cd_stop_audio();
+    fdps_cdrom_read_track_info(track);
+    fdps_cd_resolve_track_range();
+    fdps_cd_play_audio_range(data_fdps_cd_play_range_start_sector,
+                             data_fdps_cd_play_range_end_sector);
+}

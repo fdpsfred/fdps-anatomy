@@ -2,7 +2,8 @@
  *
  * So far this covers fdps_cd_seek at 0003c3fa, fdps_cd_play_audio_range at
  * 0003c452, fdps_cd_stop_audio at 0003c4a7, fdps_cd_resume_audio at 0003c4ff,
- * fdps_cd_read_q_channel at 0003c5a6 and fdps_cd_audio_is_idle at 0003c6e8.
+ * fdps_cd_read_q_channel at 0003c5a6, fdps_cd_audio_is_idle at 0003c6e8,
+ * fdps_cd_resolve_track_range at 0003c803 and fdps_cd_play_track at 0003c85b.
  *
  * Every expected value below comes from the instructions of those functions,
  * never from the emitted C.  For fdps_cd_seek:
@@ -1184,6 +1185,227 @@ static void cdaudio_resolve_range_restores_the_track_it_was_entered_on(void)
     CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 5);
 }
 
+/* fdps_cd_play_track at 0003c85b is four calls and nothing else:
+ *
+ *   CALL 0003c4a7                     fdps_cd_stop_audio
+ *   MOVSX EAX,word ptr [ESP + 0x4] / PUSH EAX / CALL 0003c0c8 / ADD ESP,0x4
+ *   CALL 0003c803                     fdps_cd_resolve_track_range
+ *   PUSH dword ptr [0x00069de4] / PUSH dword ptr [0x00069dec] /
+ *     CALL 0003c452 / ADD ESP,0x8     fdps_cd_play_audio_range
+ *
+ * so what there is to pin down is the order of those four and which global
+ * reaches which argument.  Three of them leave a mark: the query stages a
+ * 0x1a-byte request header and stamps the IOCTL block, the resolve writes the
+ * two play-range globals, and the play request stages a 0x16-byte header over
+ * the top of the query's.  The stop request leaves none -- it stages thirteen
+ * bytes into the same header block that the two later requests then overwrite
+ * whole, and its status word is the same rejected-request word every other
+ * request here publishes -- so no assertion below distinguishes it, and its
+ * place at the head of the body rests on the disassembly alone.
+ *
+ * The sentinels and the poison are the ones the resolve tests above set up,
+ * and for the same reasons: RESOLVE_TRACK_START_SECTOR, RESOLVE_LEADOUT_SECTOR
+ * and RANGE_POISON all sit outside the 0..1166730 and 0xffffff6a..0xffffffff
+ * that fdps_cd_msf_to_sector can produce, so a global holding one of them
+ * cannot have come out of a query.  Every request here goes out for real to
+ * drive index 0xff, which MSCDEX refuses on the drive number before it follows
+ * ES:BX, so the bytes left in both DOS blocks are exactly the ones the module
+ * staged.
+ *
+ * Header offsets 0x16 to 0x19 are the lever the ordering rests on.  They are
+ * the volume_id_ptr field, which fdps_cdrom_read_track_info sets to zero
+ * inside its 0x1a-byte request and which fdps_cd_play_audio_range's 0x16-byte
+ * request does not reach: poisoned before the call, they say afterwards both
+ * that a query ran and that the play request came after it.
+ */
+
+/* Puts the globals the chain reads into a known state and calls.
+   preset_track_number is what data_fdps_cd_track_info_track_number holds on
+   the way in: the query inside the function is what replaces it with track, so
+   choosing the two to disagree is how the tests below tell whether the query
+   really ran before fdps_cd_resolve_track_range read that global. */
+static void play_the_track(short track, short preset_track_number,
+                           unsigned char highest_track)
+{
+    int i;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    for (i = 0; i < 0x20; i++) {
+        data_fdps_cd_request_header_buffer[i] = HEADER_POISON;
+    }
+    data_fdps_cd_ioctl_buffer[0] = HEADER_POISON;
+    data_fdps_cd_ioctl_buffer[1] = HEADER_POISON;
+
+    data_fdps_cd_track_info_track_number = preset_track_number;
+    data_fdps_cd_highest_track_number = highest_track;
+    data_fdps_cd_track_start_sector = (unsigned int) RESOLVE_TRACK_START_SECTOR;
+    data_fdps_cd_leadout_sector = (unsigned int) RESOLVE_LEADOUT_SECTOR;
+    data_fdps_cd_play_range_start_sector = (unsigned int) RANGE_POISON;
+    data_fdps_cd_play_range_end_sector = (unsigned int) RANGE_POISON;
+
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    fdps_cd_play_track(track);
+}
+
+/* The last CALL in the body is fdps_cd_play_audio_range at 0003c889, so the
+   header block is left holding its request and not the query's or the stop's.
+   The four immediates are that function's own -- MOV byte ptr [ESP],0x16,
+   MOV byte ptr [ESP+0x1],0x0, MOV byte ptr [ESP+0x2],0x84 and
+   MOV byte ptr [ESP+0xd],0x0 -- and 0x16 rather than 0x1a is what says the
+   0x1a-byte query did not come last. */
+static void cdaudio_play_track_leaves_a_play_request_in_the_header(void)
+{
+    unsigned char *header;
+
+    play_the_track(20, 20, 20);
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x16);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 0x84);
+    CHECK_EQ(header[0xd], 0);
+}
+
+/* CALL 0003c0c8 at 0003c870 is a Read Audio Track Info query, header length
+   0x1a with volume_id_ptr zero at offset 0x16 and control block code 0x0b in
+   the IOCTL block.  Those four zeroes stand where the poison was, which says
+   the query ran; the poison still standing at 0x1a and 0x1f says nothing
+   longer than 0x1a bytes was ever staged. */
+static void cdaudio_play_track_queries_before_it_plays(void)
+{
+    unsigned char *header;
+
+    play_the_track(20, 20, 20);
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0x16], 0);
+    CHECK_EQ(header[0x17], 0);
+    CHECK_EQ(header[0x18], 0);
+    CHECK_EQ(header[0x19], 0);
+    CHECK_EQ(header[0x1a], HEADER_POISON);
+    CHECK_EQ(header[0x1f], HEADER_POISON);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 0xb);
+}
+
+/* MOVSX EAX,word ptr [ESP + 0x4] / PUSH EAX is the argument going into that
+   query, so the track the CD layer is left pointing at is the one this
+   function was handed.  fdps_cdrom_read_track_info publishes the low sixteen
+   bits of it and stages the low byte of it as the control block's track
+   field. */
+static void cdaudio_play_track_selects_the_track_it_was_given(void)
+{
+    play_the_track(20, 20, 20);
+
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 20);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 20);
+}
+
+/* PUSH dword ptr [0x00069de4] at 0003c87d comes before
+   PUSH dword ptr [0x00069dec] at 0003c883, so the start sector is the last
+   pushed and therefore fdps_cd_play_audio_range's first argument.  That
+   function puts its first argument at header offset 0x0e and the difference of
+   the pair at 0x12, so a swapped pair would show up as the lead-out sentinel
+   sitting in the transfer address.  Track 20 of a 20-track disc takes the
+   lead-out arm of the resolve, which is what makes the two ends differ by a
+   known amount here. */
+static void cdaudio_play_track_sends_the_range_start_first(void)
+{
+    unsigned char *header;
+
+    play_the_track(20, 20, 20);
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ((long) staged_dword(header, 0x0e),
+             (long) data_fdps_cd_play_range_start_sector);
+    CHECK_EQ((long) staged_dword(header, 0x0e) ==
+             (long) RESOLVE_LEADOUT_SECTOR, 0);
+    CHECK_EQ((long) staged_dword(header, 0x12),
+             (long) (data_fdps_cd_play_range_end_sector -
+                     data_fdps_cd_play_range_start_sector));
+}
+
+/* CALL 0003c803 at 0003c878 is what fills the pair in, and on the lead-out arm
+   the end it publishes is data_fdps_cd_leadout_sector copied whole.  The
+   preset track number is 5 and the track asked for is 20, so only the query at
+   0003c870 running first can put the disc's last track in front of the
+   resolve; the sentinel arriving in the play request's count field is what
+   says the resolve ran between the query and the play. */
+static void cdaudio_play_track_ends_the_last_track_at_the_lead_out(void)
+{
+    unsigned char *header;
+
+    play_the_track(20, 5, 20);
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ((long) data_fdps_cd_play_range_end_sector,
+             (long) RESOLVE_LEADOUT_SECTOR);
+    CHECK_EQ((long) staged_dword(header, 0x12),
+             (long) ((unsigned int) RESOLVE_LEADOUT_SECTOR -
+                     data_fdps_cd_play_range_start_sector));
+}
+
+/* The range start the resolve copies is data_fdps_cd_track_start_sector, which
+   the query at 0003c870 republishes on its way past.  The sentinel that global
+   was loaded with cannot survive that, and the poison in the play-range global
+   cannot survive the copy, so what is left has to be a query's answer -- and a
+   query's answer is fdps_cd_msf_to_sector over three zero-extended bytes,
+   minute * 4500 + second * 75 + frame - 150, which is bounded by -150 below
+   and 255 * 4500 + 255 * 75 + 255 - 150 = 1166730 above.  On the lead-out arm
+   no later query runs, so the global it was copied from still holds the same
+   value afterwards. */
+static void cdaudio_play_track_resolves_the_range_from_its_own_query(void)
+{
+    unsigned int start_sector;
+
+    play_the_track(20, 20, 20);
+
+    start_sector = data_fdps_cd_play_range_start_sector;
+    CHECK_EQ((long) start_sector == (long) RESOLVE_TRACK_START_SECTOR, 0);
+    CHECK_EQ((long) start_sector == (long) RANGE_POISON, 0);
+    CHECK_EQ((long) start_sector, (long) data_fdps_cd_track_start_sector);
+    CHECK_EQ(start_sector <= 1166730UL || start_sector >= 0xffffff6aUL, 1);
+}
+
+/* The other direction of the same ordering.  The preset track number is 20,
+   which on a 20-track disc would send the resolve down its lead-out arm; the
+   track asked for is 5, which has a track after it and takes the query arm
+   instead.  So an end that is neither the lead-out sentinel nor the poison
+   says the resolve read the query's track number and not the one that was
+   standing there before the call, and the restore inside the resolve leaves
+   the layer naming track 5. */
+static void cdaudio_play_track_points_the_layer_before_it_resolves(void)
+{
+    play_the_track(5, 20, 20);
+
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 5);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 5);
+    CHECK_EQ((long) data_fdps_cd_play_range_end_sector ==
+             (long) RESOLVE_LEADOUT_SECTOR, 0);
+    CHECK_EQ((long) data_fdps_cd_play_range_end_sector ==
+             (long) RANGE_POISON, 0);
+}
+
+/* There is no compare and no branch anywhere in the body, and none of the four
+   callees refuses a track number either: track 25 of a 20-track disc is
+   queried for like any other, ends at the lead-out because 26 > 20, and the
+   play request goes out on that range.  A body that guarded the track number
+   would leave the header holding the query rather than the play request. */
+static void cdaudio_play_track_does_not_refuse_a_track_past_the_disc(void)
+{
+    unsigned char *header;
+
+    play_the_track(25, 5, 20);
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 25);
+    CHECK_EQ((long) data_fdps_cd_play_range_end_sector,
+             (long) RESOLVE_LEADOUT_SECTOR);
+    CHECK_EQ(header[0], 0x16);
+    CHECK_EQ(header[2], 0x84);
+}
+
 void run_cdaudio_tests(void)
 {
     RUN_TEST(cdaudio_seek_header_fields_sit_where_the_stores_land);
@@ -1231,4 +1453,12 @@ void run_cdaudio_tests(void)
     RUN_TEST(cdaudio_resolve_range_copies_the_start_before_it_queries);
     RUN_TEST(cdaudio_resolve_range_ends_a_queried_track_where_the_next_starts);
     RUN_TEST(cdaudio_resolve_range_restores_the_track_it_was_entered_on);
+    RUN_TEST(cdaudio_play_track_leaves_a_play_request_in_the_header);
+    RUN_TEST(cdaudio_play_track_queries_before_it_plays);
+    RUN_TEST(cdaudio_play_track_selects_the_track_it_was_given);
+    RUN_TEST(cdaudio_play_track_sends_the_range_start_first);
+    RUN_TEST(cdaudio_play_track_ends_the_last_track_at_the_lead_out);
+    RUN_TEST(cdaudio_play_track_resolves_the_range_from_its_own_query);
+    RUN_TEST(cdaudio_play_track_points_the_layer_before_it_resolves);
+    RUN_TEST(cdaudio_play_track_does_not_refuse_a_track_past_the_disc);
 }
