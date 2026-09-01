@@ -1522,6 +1522,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0xab"
+    },
+    "0003c3fa": {
+      "name": "fdps_cd_seek",
+      "target": "cdaudio.c",
+      "body_size": "0x58",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x58"
     }
   }
 }
