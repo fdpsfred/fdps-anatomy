@@ -6120,10 +6120,10 @@ Alignment padding: two 6-byte lea-form NOPs aligning the next function entry to 
 Returns a pointer to one named entry of the resident BaseAni.vfs archive, and ends the program when the archive does not hold that entry.
 
 Algorithm:
-Calls FUN_00039cf0 with three arguments: the archive image held in the global at 0x000643a8 -- the BaseAni.vfs image fdps_load_global_resources reads in at startup -- the caller's name, and a stack slot for the entry's size, which this function then discards. Stores whatever FUN_00039cf0 returns in the global at 0x000643ec; when that is non-null it is the address of the entry's data inside the archive image and the function returns it. When it is null the entry is not in the archive: the function prints "File not found: %s" with the name and calls exit(1), so it does not come back to the caller. Nothing is allocated and nothing is copied -- the returned pointer aims into the archive image itself, which stays alive until fdps_shutdown_free_resources frees the global at 0x000643a8.
+Calls fdps_vfs_image_get_entry with three arguments: the archive image held in the global at 0x000643a8 -- the BaseAni.vfs image fdps_load_global_resources reads in at startup -- the caller's name, and a stack slot for the entry's size, which this function then discards. Stores whatever fdps_vfs_image_get_entry returns in the global at 0x000643ec; when that is non-null it is the address of the entry's data inside the archive image and the function returns it. When it is null the entry is not in the archive: the function prints "File not found: %s" with the name and calls exit(1), so it does not come back to the caller. Nothing is allocated and nothing is copied -- the returned pointer aims into the archive image itself, which stays alive until fdps_shutdown_free_resources frees the global at 0x000643a8.
 
 Parameters:
-  name -- name of the entry to look up in BaseAni.vfs, in the archive's 8.3 form. The only call site passes the literal "Turn.saf". FUN_00039cf0 uppercases this string in place before comparing it, so the buffer behind it must be writable.
+  name -- name of the entry to look up in BaseAni.vfs, in the archive's 8.3 form. The only call site passes the literal "Turn.saf". fdps_vfs_image_get_entry uppercases this string in place before comparing it, so the buffer behind it must be writable.
 
 Returns:
   Pointer to the entry's data inside the BaseAni.vfs image. Never null: the not-found path exits the process instead of returning.

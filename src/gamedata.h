@@ -246,6 +246,20 @@ extern unsigned char data_fdps_audio_sfx_enabled_flag;
    use. */
 extern unsigned char *data_fdps_audio_basewav_sfx_bank_buf_ptr;
 
+/* 000643a8.  BaseAni.vfs, the animation pack, held whole in one heap block the
+   same way the sound pack above is: header, directory and every member's .SAF
+   bytes in the one image.  fdps_load_global_resources fills it through
+   fdps_vfs_load_file at 00029bbe and fdps_shutdown_free_resources frees it at
+   0002945a, one slot before the sound pack's.  Null before the loader has run,
+   and not cleared by the free.
+
+   Three readers take the base from here and all three address it as a resident
+   container image rather than as a handle: fdps_baseani_get_entry_or_exit,
+   which is the only one that reports a miss, and the death and attack
+   animations.  Typed as a byte pointer like the other resource blocks, and
+   cast to the container header at each use. */
+extern unsigned char *data_fdps_animation_baseani_archive_ptr;
+
 /* 00063fd0..00063ff0.  The nine static game data tables, each a heap block
    holding one file read whole out of the VFS container.  fdps_load_data_tables
    at 00018930 fills all nine at startup -- one loader call per table, each

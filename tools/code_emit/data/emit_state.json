@@ -1205,6 +1205,14 @@
       "status": "committed",
       "emitted_against": "0x44",
       "rounds": 0
+    },
+    "0002a240": {
+      "name": "fdps_baseani_get_entry_or_exit",
+      "target": "anim.c",
+      "body_size": "0x67",
+      "status": "committed",
+      "emitted_against": "0x67",
+      "rounds": 0
     }
   }
 }
