@@ -373,3 +373,68 @@ void fdps_cdrom_read_device_status(void)
     data_fdps_cdrom_device_status = *(unsigned int *) &control_block[1];
     data_fdps_cd_last_request_status = request_header.status;
 }
+
+/* 0003c51c.  An MSCDEX IOCTL Output request -- command code 0x0c -- whose
+   control block is one single byte: the function code alone, for the drive
+   orders that carry no data of their own.  Its only caller, fdps_cd_close_tray,
+   pushes 5, Close Tray; the same request shape is what 0 (Eject Disk) and 2
+   (Reset Drive) would go out as.
+
+   No branch in the body at all: stamp the command byte into a one-byte local,
+   build the header, stage both into the two DOS blocks, send, read the header
+   back, publish the status word.  The command byte is stamped first, before any
+   header field is written -- MOV AL,byte ptr [ESP+0x20] / MOV byte ptr
+   [ESP+0x18],AL at 0003c529 -- and only the low byte of the pushed argument is
+   ever looked at.
+
+   The declared header length is 0x18, two short of the twenty-six the record
+   actually is, and 0x18 is also what the staging memcpy copies (MOV byte ptr
+   [ESP],0x18 at 0003c531 and PUSH 0x18 at 0003c554).  So start_sector and the
+   low half of volume_id_ptr go out holding whatever the frame held, and this
+   body never writes either of them: there is no store at [ESP+0x14] or
+   [ESP+0x16] anywhere in it.  Zeroing them to make the request look tidy would
+   send two bytes the original does not.  The status word and the eight reserved
+   bytes are uninitialised for the same reason as in the siblings -- the driver
+   writes the first and ignores the rest.
+
+   The read-back is a flat literal, PUSH 0x18 at 0003c583, not the header's own
+   length byte the way fdps_cd_set_audio_channel_control reads it back; the two
+   come to the same twenty-four here, because the driver wrote into the DOS
+   block and never into this frame, but the literal is what this body was
+   compiled from.  The control block is not read back at all: this is an order
+   to the drive, not a question.
+
+   From the control-block staging onward the code is shared with
+   fdps_cd_set_door_lock, which builds its own two-byte block, pushes a count of
+   2 and jumps to 0003c56b.  That is Watcom folding two identical tails
+   together, not a routine either of them calls.
+
+   The status word is published in data_fdps_cd_last_request_status because the
+   function returns nothing: a drive that refused the order and a drive that
+   carried it out are otherwise indistinguishable to the caller, and that word
+   is what fdps_cd_status_is_not_busy reads.
+
+   The transfer-address field carries data_fdps_cd_ioctl_buffer_real_mode_ptr,
+   the packed real-mode far pointer, while the memcpy that fills the block goes
+   through data_fdps_cd_ioctl_buffer, the flat linear address of that same DOS
+   block.  The two are not interchangeable (rebuild_info/pitfalls.md). */
+void fdps_cd_ioctl_output_command(int command_code)
+{
+    struct fdps_cd_request_header request_header;
+    unsigned char control_block[1];
+
+    control_block[0] = (unsigned char) command_code;
+    request_header.header_length = 0x18;
+    request_header.subunit = 0;
+    request_header.command = 0xc;
+    request_header.media_descriptor = 0;
+    request_header.transfer_address = data_fdps_cd_ioctl_buffer_real_mode_ptr;
+    request_header.transfer_byte_count = 1;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0x18);
+    memcpy(data_fdps_cd_ioctl_buffer, control_block, 1);
+    fdps_cd_device_request();
+    memcpy(&request_header, data_fdps_cd_request_header_buffer, 0x18);
+
+    data_fdps_cd_last_request_status = request_header.status;
+}

@@ -1198,5 +1198,33 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003c51c": [
+    {
+      "what": "Contract G, and only the stack probe. The original opens PUSH 0x2c / CALL 0x0004361a and 0004361a is the Watcom probe __CHK; the rebuild's own CD.OBJ, read with WDISASM at offset 0440, has no probe, because build_emit.py compiles every unit with the one pinned set and that set carries -s. This adds no new evidence to the module-wide finding already recorded against 0003bade -- that -bt=dos4g -mf -4s -fpi -os reproduces the CD block byte for byte while the pinned set does not, and that 32 of the 34 __CHK call sites in the image are the fdps_cd* block from 0003bade to 0003c96x -- it is one more instance of it, recorded so the closing sweep sees the extent rather than a sample. Everything else WDISASM shows differing between the two is the pinned set's four-register plus EBP frame against the original's flat ESP frame, which ADR-0001 excludes as register allocation; the instruction sequence, the immediates, the memcpy lengths, the call order and the 16-bit status store are the same. The behavioural loss is the overflow guard alone: a stack overflow inside this call writes through in the rebuild where the original would stop with Stack Overflow!.",
+      "needs": "A canon decision, not a measurement. build_flags.md line 127 and pitfalls.md line 111 both still read the __CHK-prologue call sites as library functions, which predates this module being routed as pool_fdps, and build_emit.py has one flag set for all units. Settling it means either teaching the build a per-unit flag set so cd.c, cdaudio.c and cdtoc.c can be built without -s, or recording in build_flags.md that the rebuild accepts the loss of the probe in this module. Both are outside what an emit round decides.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "The staged request header declares itself 0x18 bytes -- MOV byte ptr [ESP],0x18 at 0003c531 and PUSH 0x18 at 0003c554 -- while struct fdps_cd_request_header is 26 bytes, and the body never writes struct offsets 0x14..0x17: there is no store at [ESP+0x14] or [ESP+0x16] anywhere in it. So start_sector in full and the low half of volume_id_ptr are inside the twenty-four bytes that reach the CD-ROM driver and are pure uninitialised frame. Same shape as the finding already recorded against 0003be36, and the two are consistent: original and rebuild are the same in kind, each sending whatever its own stack held, with the byte values differing between them. Established here rather than assumed: WDISASM on workspace/code_emit/out/objs/CD.OBJ shows the rebuilt body at 0440..04c0 has no store at -0cH[ebp] or -0aH[ebp] either, which are struct offsets 0x14 and 0x16 in a frame whose header local sits at ebp-0x20, and the only other thing in that 0x20-byte frame is the one-byte control block at ebp-4, so nothing else writes there. Also established: the two IOCTL Input builders in this same file do zero both fields (0003bdb4 and 0003bdbc in 0003bd99), so the omission is specific to the IOCTL Output shape and is not a property of the module. And the whole chain is unreachable in the shipped image -- get_xrefs_to 0003c51c gives one caller, fdps_cd_close_tray at 0003c6bc, and get_xrefs_to 0003c6bc gives nothing at all, so no game path reaches this function.",
+      "needs": "A real machine, and only if the chain ever becomes reachable. What is unknown is whether any MSCDEX implementation looks past the header's declared length for an IOCTL Output request; the spec says it reads the declared length and no more, and nothing here can test what a particular drive's driver does with bytes it was told not to read. Since nothing calls fdps_cd_close_tray the question has no live consequence, so the resolution may well be to record it as observed-and-harmless rather than to change anything.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed independently rather than restated: I ran WDISASM over the CD.OBJ this build produced and the rebuilt body at 0440 opens push ebx / push esi / push edi / push ebp / mov ebp,esp with no probe, against PUSH 0x2c / CALL 0x0004361a at 0003c51c. So the loss is real in the object on disk, not inferred from the flag set. I add nothing to the extent of the finding or to what would settle it.",
+      "needs": "Nothing beyond what the emitter recorded; this is the module-wide contract G decision against 0003bade.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Reached the same place from the assembly: the listing 0003c51c..0003c5a5 contains no store at [ESP+0x14] or [ESP+0x16], and the staging copy is PUSH 0x18 at 0003c554 against a 0x1a record, so struct offsets 0x14..0x17 go to the driver as frame residue. What my pass adds is the rebuild side read off CD.LST myself -- no store at -0cH[ebp] or -0aH[ebp] in 0440..04c0, whose header local is at ebp-0x20 -- so original and rebuild are the same in kind, each sending its own stack. I also confirmed the reachability claim: get_xrefs_to 0003c51c gives only fdps_cd_close_tray at 0003c6bc, and get_xrefs_to on that function gives nothing, so no game path reaches this request today.",
+      "needs": "Nothing an emit or review round can supply; as the emitter says, a real drive's driver is the only thing that answers whether anything reads past the declared length.",
+      "same_as": "emit#1",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

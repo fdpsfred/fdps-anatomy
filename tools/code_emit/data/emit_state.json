@@ -1554,6 +1554,14 @@
       "status": "committed",
       "emitted_against": "0x1d",
       "rounds": 0
+    },
+    "0003c51c": {
+      "name": "fdps_cd_ioctl_output_command",
+      "target": "cd.c",
+      "body_size": "0x8a",
+      "status": "committed",
+      "emitted_against": "0x8a",
+      "rounds": 0
     }
   }
 }

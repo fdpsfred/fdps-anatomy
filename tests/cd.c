@@ -741,6 +741,108 @@ static void cd_device_status_publishes_both_answers(void)
              staged_word(data_fdps_cd_request_header_buffer, 3));
 }
 
+/* fdps_cd_ioctl_output_command, 0003c51c.
+ *
+ * Same arrangement as the four request builders above: the request is issued
+ * for real at drive letter index 0xff, which MSCDEX rejects on the drive number
+ * before it follows ES:BX, and where no CD-ROM drive is mounted there is no
+ * MSCDEX handler on INT 2Fh at all.  Neither case touches the two DOS blocks,
+ * so what is in them afterwards is exactly what the function staged.
+ *
+ * Expected values are the immediates in the body -- MOV byte ptr [ESP],0x18,
+ * [ESP+1],0 and [ESP+2],0xc at 0003c531..0003c53a, MOV byte ptr [ESP+0xd],0,
+ * the transfer address loaded from [0x00069da8], MOV word ptr [ESP+0x12],1, the
+ * MOV AL,byte ptr [ESP+0x20] / MOV byte ptr [ESP+0x18],AL pair at 0003c529 that
+ * takes the argument a byte at a time, and the three lengths PUSH 0x18 at
+ * 0003c554, PUSH 0x1 at 0003c569 and PUSH 0x18 at 0003c583.  The code 5 is what
+ * the one caller pushes: PUSH 0x5 at 0003c6c6 in fdps_cd_close_tray.
+ *
+ * Nothing below asserts what the driver answered.  The status word is checked
+ * against the bytes it was read out of, which is what pins the displacement and
+ * the width: MOV EAX,[ESP+3] / MOV [0x00069e20],AX.
+ */
+static void ioctl_output_command_on_a_rejected_drive(int command_code)
+{
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    data_fdps_cd_ioctl_buffer[1] = 0x5a;
+    data_fdps_cd_request_header_buffer[0x18] = 0x5b;
+    data_fdps_cd_request_header_buffer[0x19] = 0x5c;
+    fdps_cd_ioctl_output_command(command_code);
+}
+
+/* Command code 0x0c is IOCTL Output -- the field that makes this the write
+   direction -- and the transfer it describes is one byte out of the second DOS
+   block, addressed by the packed real-mode far pointer and not by the flat one.
+   A byte count of anything but 1 would be a different request. */
+static void cd_ioctl_output_stages_an_ioctl_output_request(void)
+{
+    unsigned char *header;
+
+    ioctl_output_command_on_a_rejected_drive(5);
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x18);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 0xc);
+    CHECK_EQ(header[0xd], 0);
+    CHECK_EQ((long) staged_dword(header, 0xe),
+             (long) data_fdps_cd_ioctl_buffer_real_mode_ptr);
+    CHECK_EQ(staged_word(header, 0x12), 1);
+}
+
+/* The declared length is two short of the record, and the send copies that
+   declared length: PUSH 0x18 at 0003c554, against a struct of 0x1a.  So the two
+   bytes at the end of the record are never staged, and the poison the setup put
+   at 0x18 and 0x19 is still there -- which is the only way to see the
+   under-declaration from outside, since what does get sent in start_sector is
+   uninitialised stack and cannot be asserted at all. */
+static void cd_ioctl_output_sends_two_bytes_short_of_the_record(void)
+{
+    ioctl_output_command_on_a_rejected_drive(5);
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0] + 2,
+             (int) sizeof(struct fdps_cd_request_header));
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0x18], 0x5b);
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0x19], 0x5c);
+}
+
+/* The whole control block is the one function-code byte, and PUSH 0x1 at
+   0003c569 is the count the staging memcpy runs with, so the second byte of the
+   DOS block keeps the poison the setup put there: a copy that ran even one byte
+   long would take it with it. */
+static void cd_ioctl_output_sends_the_code_as_a_one_byte_block(void)
+{
+    ioctl_output_command_on_a_rejected_drive(5);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 5);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 0x5a);
+}
+
+/* MOV AL,byte ptr [ESP+0x20] reads one byte of the pushed dword, so the block
+   carries the argument's low eight bits and nothing else.  0x7f02 and 2 are the
+   same order to the drive, Reset Drive, and 0x100 stamps a zero, Eject Disk --
+   an argument taken as a full int would put a nonzero byte there for both. */
+static void cd_ioctl_output_uses_only_the_low_byte_of_the_argument(void)
+{
+    ioctl_output_command_on_a_rejected_drive(0x7f02);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 2);
+    ioctl_output_command_on_a_rejected_drive(0x100);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 0);
+}
+
+/* The header is copied back out of the DOS block before the status is read --
+   PUSH 0x18 at 0003c583, a flat literal that covers offset 3 -- so the
+   published word has to be the word still sitting at header+3.  MOV EAX,[ESP+3]
+   / MOV [0x00069e20],AX is a 16-bit store out of a dword load, so a status read
+   a byte early or late, or one that let the high half through, would break the
+   equality whatever the driver left there. */
+static void cd_ioctl_output_publishes_the_request_status(void)
+{
+    ioctl_output_command_on_a_rejected_drive(5);
+    CHECK_EQ(data_fdps_cd_last_request_status,
+             staged_word(data_fdps_cd_request_header_buffer, 3));
+}
+
 void run_cd_tests(void)
 {
     RUN_TEST(cd_register_blocks_have_the_image_layout);
@@ -771,4 +873,9 @@ void run_cd_tests(void)
     RUN_TEST(cd_device_status_stages_an_ioctl_input_request);
     RUN_TEST(cd_device_status_asks_for_the_device_status_block);
     RUN_TEST(cd_device_status_publishes_both_answers);
+    RUN_TEST(cd_ioctl_output_stages_an_ioctl_output_request);
+    RUN_TEST(cd_ioctl_output_sends_two_bytes_short_of_the_record);
+    RUN_TEST(cd_ioctl_output_sends_the_code_as_a_one_byte_block);
+    RUN_TEST(cd_ioctl_output_uses_only_the_low_byte_of_the_argument);
+    RUN_TEST(cd_ioctl_output_publishes_the_request_status);
 }

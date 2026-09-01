@@ -184,4 +184,21 @@ extern void fdps_cd_set_audio_channel_control(unsigned char *control_block);
 extern void fdps_cdrom_read_device_status(void);
 #pragma aux fdps_cdrom_read_device_status "*" parm caller [];
 
+/* Sends the CD-ROM driver one bare order -- MSCDEX IOCTL Output whose whole
+   control block is the single function-code byte, for the drive commands that
+   carry no data of their own.
+
+   command_code is that byte.  Only its low eight bits are used; the argument is
+   pushed as a dword and read back as MOV AL,byte ptr [ESP+0x20].
+   fdps_cd_close_tray passes 5, Close Tray, and it is the only caller in the
+   image; 0 (Eject Disk) and 2 (Reset Drive) are the other codes this request
+   shape carries.
+
+   Returns nothing.  Whether the drive accepted the order is visible only in
+   data_fdps_cd_last_request_status, which this leaves holding the status word
+   the driver wrote into the request header -- the word fdps_cd_status_is_not_
+   busy tests. */
+extern void fdps_cd_ioctl_output_command(int command_code);
+#pragma aux fdps_cd_ioctl_output_command "*" parm caller [];
+
 #endif
