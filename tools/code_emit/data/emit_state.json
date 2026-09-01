@@ -1429,6 +1429,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x39"
+    },
+    "0003bc78": {
+      "name": "fdps_cd_msf_to_sector",
+      "target": "cdtoc.c",
+      "body_size": "0x6a",
+      "status": "committed",
+      "emitted_against": "0x6a",
+      "rounds": 0
     }
   }
 }

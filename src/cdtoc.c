@@ -35,3 +35,31 @@ void fdps_cd_unpack_msf(unsigned int msf_packed, unsigned char *minute,
     *second = (unsigned char) ((msf_packed & 0xff00) >> 8);
     *minute = (unsigned char) ((msf_packed & 0xff0000) >> 16);
 }
+
+/* 0003bc78.  Straight-line arithmetic on the three fields fdps_cd_unpack_msf
+   writes out; there is no branch in the body at all.  The three destinations
+   are three separate stack bytes and the call cleans four dwords off the stack
+   at 0003bc9f, so the pointers go out in the same most-significant-first order
+   the callee declares.
+
+   The frame counts come out of MOVZX loads -- MOVZX EDX,byte ptr [ESP] for the
+   minute, MOVZX EBX,byte ptr [ESP+0x8] for the second, MOVZX EAX,byte ptr
+   [ESP+0x4] for the frame -- so every field is zero-extended and none of the
+   three can carry a sign into the sum.  The sum itself is signed: the result
+   goes back as EAX with nothing clamping it, and the two constants are folded
+   as shift chains, 4500 as ((m*31)*4+m)*4 plus that times 8 and 75 as
+   (s*5)*16-(s*5).
+
+   The 150 at the end is what makes this a sector number rather than a frame
+   count: Red Book puts a two-second lead-in ahead of logical sector 0, so
+   00:02:00 is sector 0 and anything earlier is a negative sector.  Both call
+   sites store the result into a dword global and neither tests its sign. */
+int fdps_cd_msf_to_sector(unsigned int msf_packed)
+{
+    unsigned char minute;
+    unsigned char second;
+    unsigned char frame;
+
+    fdps_cd_unpack_msf(msf_packed, &minute, &second, &frame);
+    return minute * 4500 + second * 75 + frame - 150;
+}

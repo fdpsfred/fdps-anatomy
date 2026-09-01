@@ -25,4 +25,19 @@ extern void fdps_cd_unpack_msf(unsigned int msf_packed, unsigned char *minute,
                                unsigned char *second, unsigned char *frame);
 #pragma aux fdps_cd_unpack_msf "*" parm caller [];
 
+/* 0003bc78.  Turns a packed Red Book address, the same 0x00MMSSFF the MSCDEX
+   driver reports, into the logical sector number of that position: minutes
+   times 4500 plus seconds times 75 plus frames, less the 150 frames of
+   lead-in that Red Book addressing puts before logical sector 0.
+
+   The result is signed and is not clamped.  00:02:00 is sector 0, and an
+   address below it -- 00:00:00 among them, which is what an unanswered driver
+   query leaves in the reply block -- comes back negative.  Both callers store
+   what they get straight into a dword global without looking at the sign.
+
+   Writing the arithmetic without the 150, as a plain frame count, gives every
+   caller a sector number 150 too large. */
+extern int fdps_cd_msf_to_sector(unsigned int msf_packed);
+#pragma aux fdps_cd_msf_to_sector "*" parm caller [];
+
 #endif

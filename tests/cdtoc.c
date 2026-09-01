@@ -1,6 +1,7 @@
 /* tests/cdtoc.c -- cover for src/cdtoc.c.
  *
- * So far this covers fdps_cd_unpack_msf at 0003bc3f alone.
+ * So far this covers fdps_cd_unpack_msf at 0003bc3f and
+ * fdps_cd_msf_to_sector at 0003bc78.
  *
  * Every expected value below comes from the sixteen instructions of that
  * function and from its two call sites, never from the emitted C:
@@ -107,6 +108,90 @@ static void cdtoc_unpack_always_writes_all_three(void)
     CHECK_EQ(msf_bytes[3], 0);
 }
 
+/* fdps_cd_msf_to_sector at 0003bc78.  Every number below is read off the
+   thirty-one instructions of that body, never off the C:
+
+     MOVZX EDX,byte ptr [ESP]      -- the minute byte
+     SHL/SUB/SHL/ADD/SHL/MOV/SHL/ADD folds it to EDX = minute * 4500:
+       (((m<<5)-m)<<2)+m  = 125m, <<2 = 500m, plus (500m<<3) = 4000m
+     MOVZX EBX,byte ptr [ESP+0x8]  -- the second byte
+     SHL/ADD/MOV/SHL/SUB folds it to EAX = second * 75:
+       ((s<<2)+s) = 5s, (5s<<4) - 5s = 75s
+     MOVZX EAX,byte ptr [ESP+0x4]  -- the frame byte, added unscaled
+     SUB EAX,0x96                  -- less 150, then RET with EAX
+
+   The three MOVZX loads are what make every field unsigned, and the ADD ESP,4
+   after each of the two call sites (0003c0b2 and 0003c180) is what makes the
+   argument a single stack dword.  The address 00:02:00 mapping to sector 0 is
+   the Red Book lead-in that the 0x96 encodes.
+
+   fdps_cd_unpack_msf is emitted in this same file, so these assertions run
+   against real code and not against a stub. */
+
+/* The lead-in itself: 00:02:00 is logical sector 0.  This is the single value
+   that fixes the 0x96 -- a body without the SUB would answer 150 here. */
+static void cdtoc_sector_of_lead_in_is_zero(void)
+{
+    CHECK_EQ(fdps_cd_msf_to_sector(0x00000200u), 0);
+}
+
+/* The minute scale, on its own: 01:00:00 is 4500 frames from 00:00:00, so 4350
+   sectors from 00:02:00.  This pins the whole shift chain, since any other
+   multiplier lands somewhere else entirely. */
+static void cdtoc_sector_scales_minutes_by_4500(void)
+{
+    CHECK_EQ(fdps_cd_msf_to_sector(0x00010000u), 4350);
+}
+
+/* The second scale, on its own: 00:03:00 is one second past the lead-in, and
+   one second is the 75 frames the second chain multiplies by. */
+static void cdtoc_sector_scales_seconds_by_75(void)
+{
+    CHECK_EQ(fdps_cd_msf_to_sector(0x00000300u), 75);
+}
+
+/* The frame field is added unscaled, and 74 is the largest a real address
+   carries: 00:02:74 is 74 sectors past the lead-in. */
+static void cdtoc_sector_adds_frames_unscaled(void)
+{
+    CHECK_EQ(fdps_cd_msf_to_sector(0x0000024au), 74);
+}
+
+/* All three fields at once, none of them a plausible copy of another:
+   0x00332c1f is 51 minutes 44 seconds 31 frames, so
+   51*4500 + 44*75 + 31 - 150 = 229500 + 3300 + 31 - 150. */
+static void cdtoc_sector_sums_all_three_fields(void)
+{
+    CHECK_EQ(fdps_cd_msf_to_sector(0x00332c1fu), 232681);
+}
+
+/* Below the lead-in the result is negative and is not clamped: there is no
+   branch anywhere in the body and no CDQ or AND after the SUB.  00:00:00 is
+   the case the game can actually reach, because it is what an unanswered
+   driver query leaves in the reply block, and 00:01:00 shows the sign is not
+   a special case of zero. */
+static void cdtoc_sector_goes_negative_below_the_lead_in(void)
+{
+    CHECK_EQ(fdps_cd_msf_to_sector(0x00000000u), -150);
+    CHECK_EQ(fdps_cd_msf_to_sector(0x00000100u), -75);
+}
+
+/* Bits 24-31 of the argument reach nothing, because fdps_cd_unpack_msf masks
+   the minute field with AND 0xff0000 before it stores it.  MSCDEX leaves that
+   byte undefined in the replies both callers pass through. */
+static void cdtoc_sector_ignores_the_top_byte(void)
+{
+    CHECK_EQ(fdps_cd_msf_to_sector(0xff000200u), 0);
+}
+
+/* Full-width fields, well past anything a real disc carries: the three MOVZX
+   loads zero-extend, so 0xff arrives as 255 and not as -1, and the sum stays
+   in the 32-bit EAX the function returns.  255*4500 + 255*75 + 255 - 150. */
+static void cdtoc_sector_carries_full_width_fields(void)
+{
+    CHECK_EQ(fdps_cd_msf_to_sector(0x00ffffffu), 1166730L);
+}
+
 void run_cdtoc_tests(void)
 {
     RUN_TEST(cdtoc_unpack_splits_the_three_fields);
@@ -114,4 +199,12 @@ void run_cdtoc_tests(void)
     RUN_TEST(cdtoc_unpack_carries_full_width_fields);
     RUN_TEST(cdtoc_unpack_writes_one_byte_per_pointer);
     RUN_TEST(cdtoc_unpack_always_writes_all_three);
+    RUN_TEST(cdtoc_sector_of_lead_in_is_zero);
+    RUN_TEST(cdtoc_sector_scales_minutes_by_4500);
+    RUN_TEST(cdtoc_sector_scales_seconds_by_75);
+    RUN_TEST(cdtoc_sector_adds_frames_unscaled);
+    RUN_TEST(cdtoc_sector_sums_all_three_fields);
+    RUN_TEST(cdtoc_sector_goes_negative_below_the_lead_in);
+    RUN_TEST(cdtoc_sector_ignores_the_top_byte);
+    RUN_TEST(cdtoc_sector_carries_full_width_fields);
 }

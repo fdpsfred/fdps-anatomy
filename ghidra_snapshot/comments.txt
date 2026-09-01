@@ -12080,7 +12080,7 @@ Algorithm:
 Calls fdps_cd_unpack_msf to split the packed argument into its minute, second and frame bytes, written into three separate stack bytes. Then forms minute * 4500 + second * 75 + frame; both multiplies are open-coded shift/add chains, 4500 being 75 frames per second times 60 seconds per minute and 75 being frames per second. Finally subtracts 0x96 = 150 frames, the two-second lead-in that Red Book addressing places before logical sector 0, and returns the result.
 
 Parameters:
-  msf_packed -- a Red Book disc address packed as 0x00MMSSFF, minutes in bits 16-23, seconds in bits 8-15, frames in bits 0-7. fdps_cdrom_read_disk_info passes the lead-out address out of the MSCDEX disk-information reply; FUN_0003c0c8 passes the start address of the audio track it queried.
+  msf_packed -- a Red Book disc address packed as 0x00MMSSFF, minutes in bits 16-23, seconds in bits 8-15, frames in bits 0-7. fdps_cdrom_read_disk_info passes the lead-out address out of the MSCDEX disk-information reply; fdps_cdrom_read_track_info passes the start address of the audio track it queried.
 
 Returns:
   The logical sector number of that address, counted with 00:02:00 as sector 0. An address below 00:02:00 yields a negative value; neither caller checks for it.
@@ -12088,7 +12088,7 @@ Returns:
 Pool: fdps  [no Function ID hit in either library set; called only by game CD-ROM code]
 
 Rebuild note:
-The routine subtracts 150 frames before returning, so it yields a logical sector number and not the plain frame count of the address; writing the obvious minute*60*75 + second*75 + frame gives a value 150 too large, which would shift every CD-DA track start and the lead-out that fdps_cdrom_read_disk_info and FUN_0003c0c8 publish. It also returns a signed value that goes negative for addresses under 00:02:00, and the callers rely on that not being clamped.
+The routine subtracts 150 frames before returning, so it yields a logical sector number and not the plain frame count of the address; writing the obvious minute*60*75 + second*75 + frame gives a value 150 too large, which would shift every CD-DA track start and the lead-out that fdps_cdrom_read_disk_info and fdps_cdrom_read_track_info publish. It also returns a signed value that goes negative for addresses under 00:02:00, and the callers rely on that not being clamped.
 
 === 0003bce2 [PLATE]
 Reports where the CD-ROM drive's head is sitting, as a logical (HSG) sector number on the disc.
