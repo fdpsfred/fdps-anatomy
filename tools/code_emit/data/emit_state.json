@@ -1421,6 +1421,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0xc2"
+    },
+    "0003bc3f": {
+      "name": "fdps_cd_unpack_msf",
+      "target": "cdtoc.c",
+      "body_size": "0x39",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x39"
     }
   }
 }

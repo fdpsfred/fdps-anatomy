@@ -1072,5 +1072,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003bc3f": [
+    {
+      "what": "This translation unit was originally built with a different flag set from the rest of the game, and the rebuild cannot express that, so the emitted fdps_cd_unpack_msf loses the stack probe the original has (contract G). Established here: the original opens PUSH 0x4 / CALL 0x0004361a, and 0004361a is __CHK -- XCHG [ESP+4],EAX / CALL 0004362d / MOV EAX,[ESP+4] / RET 0x4. WDISASM of the rebuild's own workspace/code_emit/out/objs/CDTOC.OBJ shows the emitted function is otherwise the same three extract-and-store sequences with the same masks, the same logical shifts, the same byte-wide stores in the same order, the same undecorated symbol and the same bare RET; what differs is the probe's absence and the pinned set's four-register frame plus EBP, the second of which ADR-0001 excludes as register allocation. The measurement that this is module-wide, not per-function, was made against 0003bade and is recorded in that function's verdict: -bt=dos4g -mf -4s -fpi -os reproduces it byte for byte while the pinned -s -ot -od set does not, and 32 of the 34 __CHK call sites in the image are fdps_cd* functions spanning 0003bade to 0003c96x. This entry exists so the sweep sees that the same finding covers cdtoc.c and is not confined to cd.c.",
+      "needs": "The same decision 0003bade's entry asks for -- whether the rebuild's build carries per-translation-unit flags at all, which belongs to build_pipeline.md and build_flags.md rather than to any one function. If it does, the byte comparison already run on 0003bade repeated across the rest of the module, cdtoc.c included, to confirm -os covers all 33 functions. Nothing in this function can settle it: with no probe the emitted code is equivalent for every input, and the difference is only what happens when the stack is already exhausted, which a real machine under DOS/4GW decides.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed for myself and added two things. Confirmed: 0003bc3f opens PUSH 0x4 / CALL 0x0004361a and 0004361a is the Watcom stack probe (XCHG [ESP+4],EAX / CALL 0004362d / MOV EAX,[ESP+4] / RET 0x4), while my own WDISASM run on the rebuild's CDTOC.OBJ shows the emitted function has no probe and is otherwise the same masks, shifts, byte stores and store order. Added: the sweep of get_xrefs_to on 0004361a gives the exact extent -- 34 call sites, 32 of them the fdps_cd* block from 0003bade (fdps_cd_alloc_dos_buffers) to 0003c93f (fdps_cd_read_audio_position), the other two being CRT spawnvpe and spawnve. So the flag difference is a contiguous module property, not a per-function one, and this function contributes no new evidence beyond widening the same finding to cdtoc.c. The behavioural loss is the overflow guard alone; for every input the emitted code is equivalent.",
+      "needs": "The build-level decision recorded against 0003bade -- whether the rebuild carries per-translation-unit flags at all -- which belongs to build_pipeline.md and build_flags.md. Nothing reachable from this function settles it: with no probe the code is equivalent for every argument, and what differs only shows on an already-exhausted stack under DOS/4GW on real hardware.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

@@ -12057,7 +12057,7 @@ Note on 0x00069dfe: its only writer is 0003c689, MOV [0x00069dfe],AL with AL fro
 Splits a packed Red Book CD-ROM address (0x00MMSSFF) into its three separate byte fields, for callers that need minutes, seconds and frames one at a time.
 
 Algorithm:
-After the Watcom stack probe __CHK(4) the whole body is three byte stores taken straight out of the packed argument: the low byte of msf_packed to *frame, bits 8-15 to *second, bits 16-23 to *minute. Bits 24-31 are ignored. No globals are read or written and nothing is returned; the two callers own the results. FUN_0003bc78 turns them into a logical sector number (minute*4500 + second*75 + frame - 150, the 75-frames-per-second Red Book rate less the 150-frame pregap); fdps_cdrom_read_disk_info drops them into the CD lead-out globals DAT_00069e08 (minute), DAT_00069e09 (second) and DAT_00069e0a (frame).
+After the Watcom stack probe __CHK(4) the whole body is three byte stores taken straight out of the packed argument: the low byte of msf_packed to *frame, bits 8-15 to *second, bits 16-23 to *minute. Bits 24-31 are ignored. No globals are read or written and nothing is returned; the two callers own the results. fdps_cd_msf_to_sector turns them into a logical sector number (minute*4500 + second*75 + frame - 150, the 75-frames-per-second Red Book rate less the 150-frame pregap); fdps_cdrom_read_disk_info drops them into the CD lead-out globals DAT_00069e08 (minute), DAT_00069e09 (second) and DAT_00069e0a (frame).
 
 Parameters:
   msf_packed -- packed Red Book address, 0x00MMSSFF, as the MSCDEX device driver reports track and lead-out positions; only the low 24 bits are used
