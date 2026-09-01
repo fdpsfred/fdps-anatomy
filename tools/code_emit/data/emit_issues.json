@@ -1168,5 +1168,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003c217": [
+    {
+      "what": "Only a track length of 0 can be driven through this function in the unit tests, so the arithmetic is asserted on the wrapped path alone. On the rejected drive the tests use, fdps_cd_get_track_length_sectors always answers 0, the subtraction wraps to 4294967146 and the triple is 0x45/8/46. The ordinary path -- a real track of, say, three minutes, where the subtraction does not wrap and the minute quotient fits in a byte -- executes exactly the same eighteen instructions with no branch between them, and the emitted object was checked with WDISASM to issue the same four unsigned DIVs on both, so there is no second code path to be wrong; what is untested is only the value. The function has no caller and no data reference anywhere in the image (confirmed: get_function_callers returns none, and the plate records the same for fdps_cd_sector_to_msf and fdps_cd_get_disk_info_msf), so nothing in the game observes either path.",
+      "needs": "A run on a machine with a real CD-ROM drive and an audio disc mounted, calling the function for a track whose length is known from the disc's own TOC, and checking that the triple is that length less two seconds -- the pre-gap the module subtracts a second time. Alternatively a DOSBox-X session with an audio CD image mounted through imgmount, which would let the driver answer the Read Audio Track Info queries instead of refusing them.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same limit independently and confirmed it is real, so this is a note on the emitter's entry rather than a second copy. What my pass adds: I verified from the disassembly that the untested path and the tested path are not two paths at all -- there is no Jcc or JMP between 0003c217 and 0003c27b, so a three-minute track and the wrapped zero-length case execute the identical 34 instructions and differ only in the values in EAX and EBX. I also confirmed the emitter's supporting reads rather than accepting them: get_xrefs_to 0003c217 returns no references of any kind, so nothing in the image observes either path, and WDISASM on the built CDTOC.OBJ shows the same four unsigned divs and no 64-bit helper on any input. So what is unmeasured here is one value, not one branch.",
+      "needs": "Same as the emitter's: a run where the MSCDEX driver actually answers Read Disk Info and Read Audio Track Info -- a real drive with an audio disc, or a DOSBox-X session with an audio CD image mounted through imgmount -- calling the function for a track whose length the disc's own TOC gives, and checking the triple is that length less the two seconds this module subtracts a second time.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

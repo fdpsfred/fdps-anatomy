@@ -339,3 +339,48 @@ unsigned int fdps_cd_get_track_length_sectors(unsigned char track)
     fdps_cdrom_read_track_info(saved_track_number);
     return track_end_sector - track_start_sector;
 }
+
+/* 0003c217.  The same track length as above, restated as a Red Book
+   minute/second/frame triple.  There is no branch anywhere in the body: one
+   call, a subtraction and two divide-and-remainder pairs, and all three results
+   leave through the out-pointers as single bytes -- MOV byte ptr [ESI],DL, MOV
+   byte ptr [EDI],DL and MOV byte ptr [EAX],BL, so a caller may aim the three at
+   three adjacent bytes without the stores reaching past them.
+
+   Every division is DIV and never IDIV, and the value they divide arrives as
+   LEA EBX,[EAX + 0xffffff6a] -- the length less 150 -- with no test of the
+   result.  That matters because the 150 is taken off a value that is already a
+   duration: fdps_cd_msf_to_sector has removed the lead-in from both endpoints
+   before fdps_cd_get_track_length_sectors subtracts them, so the offset has
+   already cancelled and this second subtraction takes off two seconds that are
+   not there.  It is the module's fixed convention rather than a correction --
+   the identical SUB 0x96 opens the same /75, /60 chain in fdps_cd_sector_to_msf
+   and in fdps_cd_get_disk_info_msf -- so it stays, and the intermediate stays
+   unsigned: a length below 150 frames wraps to just under 2^32 here and comes
+   out as a huge triple, where a signed intermediate would give a small negative
+   one and a different answer in all three bytes.
+
+   The original writes each division as (value - remainder) / divisor and so
+   computes each quotient twice; that is written out below because it is what
+   the body does, and it cannot change the value, since the remainder is exactly
+   what truncation drops.
+
+   The quotient of the last division is stored as a byte with no clamp, so a
+   playing time past 255 minutes -- which the wrapped case above reaches -- wraps
+   in the minute field alone. */
+void fdps_cd_get_track_length_msf(unsigned char track, unsigned char *minutes,
+                                  unsigned char *seconds, unsigned char *frames)
+{
+    unsigned int adjusted_length_frames;
+    unsigned int frames_in_second;
+    unsigned int total_seconds;
+    unsigned int seconds_in_minute;
+
+    adjusted_length_frames = fdps_cd_get_track_length_sectors(track) - 0x96;
+    frames_in_second = adjusted_length_frames % 75;
+    *frames = (unsigned char) frames_in_second;
+    total_seconds = (adjusted_length_frames - frames_in_second) / 75;
+    seconds_in_minute = total_seconds % 60;
+    *seconds = (unsigned char) seconds_in_minute;
+    *minutes = (unsigned char) ((total_seconds - seconds_in_minute) / 60);
+}

@@ -3,7 +3,8 @@
  * So far this covers fdps_cd_unpack_msf at 0003bc3f,
  * fdps_cd_msf_to_sector at 0003bc78, fdps_cdrom_read_upc at 0003bec1,
  * fdps_cdrom_read_disk_info at 0003bfa5, fdps_cdrom_read_track_info at
- * 0003c0c8 and fdps_cd_get_track_length_sectors at 0003c1a1.
+ * 0003c0c8, fdps_cd_get_track_length_sectors at 0003c1a1 and
+ * fdps_cd_get_track_length_msf at 0003c217.
  *
  * Every expected value below comes from the sixteen instructions of that
  * function and from its two call sites, never from the emitted C:
@@ -800,6 +801,127 @@ static void cdtoc_track_length_restores_the_selected_track(void)
     CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 0xfe);
 }
 
+/* fdps_cd_get_track_length_msf, 0003c217.
+ *
+ * Driven through the same rejected drive as everything above, and here that
+ * arrangement is not a limitation but the one case that pins the whole chain.
+ * The case immediately above establishes that on this drive
+ * fdps_cd_get_track_length_sectors answers exactly 0 -- both endpoints are the
+ * refused query's 00:00:00 and the subtraction cancels them -- so the input to
+ * the arithmetic below is a known number and not whatever a disc happens to
+ * hold.  Nothing here rests on a stub: the length query is emitted in the file
+ * under test and so is everything it calls except fdps_cd_device_request, which
+ * is emitted in src/cd.c.
+ *
+ * From that 0 the eighteen instructions between 0003c23a and 0003c276 decide
+ * every byte, and this is what they compute, read off them and not off the C:
+ *
+ *   LEA EBX,[EAX + 0xffffff6a]  -- 0 - 150, and EBX is an unsigned dividend
+ *                                  from here on, so this is 4294967146
+ *   MOV ECX,0x4b / XOR EDX,EDX / DIV ECX
+ *                               -- 4294967146 = 57266228*75 + 46, so DL is 46
+ *   MOV byte ptr [ESI],DL       -- ESI is [ESP+0x1c], the fourth argument
+ *   SUB EBX,EAX (the remainder) / DIV ECX again
+ *                               -- 57266228 whole seconds
+ *   MOV ESI,0x3c / XOR EDX,EDX / DIV ESI
+ *                               -- 57266228 = 954437*60 + 8, so DL is 8
+ *   MOV byte ptr [EDI],DL       -- EDI is [ESP+0x18], the third argument
+ *   SUB EBX,EAX / DIV ESI again -- 954437 minutes
+ *   MOV EAX,[ESP+0x14] / MOV byte ptr [EAX],BL
+ *                               -- the second argument, and BL is the low byte
+ *                                  of 954437 = 0xe9045, so 0x45
+ *
+ * That triple is what makes the two facts in the rebuild note visible.  Written
+ * with a signed intermediate the subtraction would give -150 and the answer
+ * would be a small negative triple instead of this one, and written without the
+ * SUB 0x96 at all the length of 0 would convert to 0/0/0.  The minute byte is
+ * the third: 954437 does not fit in a byte and nothing clamps it, so 0x45 is
+ * what a plain byte store leaves.
+ *
+ * The three values are also all different from each other, which is what pins
+ * the parameter order -- the fourth pointer takes the frames and the second the
+ * minutes -- and different from the 0x5a poison, which is what shows each store
+ * happened at all.
+ *
+ * What this cannot see is a track whose length is not zero, because that needs
+ * a drive that answers; the emit verdict records it as an open issue.
+ */
+static unsigned char msf_out[5];
+
+static void track_length_msf_from_a_rejected_drive(unsigned char track)
+{
+    int i;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    poison_the_disk_info_globals();
+    poison_the_track_info_globals();
+    scribble_the_stack_below();
+    for (i = 0; i < 5; i++) {
+        msf_out[i] = 0x5a;
+    }
+    fdps_cd_get_track_length_msf(track, &msf_out[1], &msf_out[2],
+                                 &msf_out[3]);
+}
+
+/* The whole chain at once, on the one input this drive makes knowable.  Any of
+   the four things the rebuild note warns about -- dropping the 0x96, using a
+   signed intermediate, dividing by anything but 75 then 60, or clamping the
+   minute field -- moves at least one of these three bytes. */
+static void cdtoc_track_length_msf_converts_the_wrapped_length(void)
+{
+    track_length_msf_from_a_rejected_drive(1);
+    CHECK_EQ(msf_out[1], 0x45);
+    CHECK_EQ(msf_out[2], 8);
+    CHECK_EQ(msf_out[3], 46);
+}
+
+/* The input the triple above was computed from, asserted separately so that a
+   failure says which half moved: the length query answering something other
+   than 0 on this drive, or the arithmetic converting the 0 differently. */
+static void cdtoc_track_length_msf_starts_from_a_zero_length(void)
+{
+    unsigned int length;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    scribble_the_stack_below();
+    length = fdps_cd_get_track_length_sectors(1);
+    CHECK_EQ(length == 0, 1);
+}
+
+/* Three byte-wide stores and no branch: each guard on either side of the three
+   destinations keeps its poison, and none of the three destinations keeps it.
+   A store wider than a byte would carry one field over its neighbour, which is
+   what a caller aiming the three at three adjacent bytes relies on not
+   happening. */
+static void cdtoc_track_length_msf_writes_one_byte_per_pointer(void)
+{
+    track_length_msf_from_a_rejected_drive(1);
+    CHECK_EQ(msf_out[0], 0x5a);
+    CHECK_EQ(msf_out[4], 0x5a);
+    CHECK_EQ(msf_out[1] == 0x5a, 0);
+    CHECK_EQ(msf_out[2] == 0x5a, 0);
+    CHECK_EQ(msf_out[3] == 0x5a, 0);
+}
+
+/* The length comes from the query and not from a global this function reads
+   itself: the query refreshes the disc summary on its way in, so the poison in
+   both of those globals is gone afterwards and the lead-out sector holds the
+   -150 a refused Read Disk Info converts to.  A body that skipped the CALL at
+   0003c232 would leave both holding 0x5a. */
+static void cdtoc_track_length_msf_delegates_to_the_sector_query(void)
+{
+    track_length_msf_from_a_rejected_drive(1);
+    CHECK_EQ(data_fdps_cd_highest_track_number, 0);
+    CHECK_EQ(data_fdps_cd_leadout_sector == 0xffffff6aUL, 1);
+    CHECK_EQ(data_fdps_cd_track_start_sector == 0xffffff6aUL, 1);
+}
+
 void run_cdtoc_tests(void)
 {
     RUN_TEST(cdtoc_unpack_splits_the_three_fields);
@@ -835,4 +957,8 @@ void run_cdtoc_tests(void)
     RUN_TEST(cdtoc_track_length_refreshes_the_disc_summary);
     RUN_TEST(cdtoc_track_length_subtracts_the_two_endpoints);
     RUN_TEST(cdtoc_track_length_restores_the_selected_track);
+    RUN_TEST(cdtoc_track_length_msf_starts_from_a_zero_length);
+    RUN_TEST(cdtoc_track_length_msf_converts_the_wrapped_length);
+    RUN_TEST(cdtoc_track_length_msf_writes_one_byte_per_pointer);
+    RUN_TEST(cdtoc_track_length_msf_delegates_to_the_sector_query);
 }

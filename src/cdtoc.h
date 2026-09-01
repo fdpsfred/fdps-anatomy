@@ -165,4 +165,26 @@ extern void fdps_cdrom_read_track_info(int track);
 extern unsigned int fdps_cd_get_track_length_sectors(unsigned char track);
 #pragma aux fdps_cd_get_track_length_sectors "*" parm caller [];
 
+/* 0003c217.  The playing time of one track as a Red Book minute/second/frame
+   triple, taken from the frame count the function above returns.  Returns
+   nothing and touches no global of its own; the three results leave through the
+   out-pointers, one byte each, and the caller owns them.  It is not free of
+   side effects for all that, because the length query it delegates to rewrites
+   every disc-info and track-info global on its way.
+
+   Only the low byte of the track argument is read, and it is handed to the
+   length query unchanged; nothing range checks it there either.
+
+   The conversion subtracts 150 frames from a value that already had the lead-in
+   cancelled out of it, so every answer is two seconds short of the track's real
+   playing time.  That is the module's convention and not a defect to correct
+   here -- see the note on the definition -- and the intermediate is unsigned,
+   so a length below 150 frames wraps rather than going negative.  Nothing in
+   the image calls this function. */
+extern void fdps_cd_get_track_length_msf(unsigned char track,
+                                         unsigned char *minutes,
+                                         unsigned char *seconds,
+                                         unsigned char *frames);
+#pragma aux fdps_cd_get_track_length_msf "*" parm caller [];
+
 #endif
