@@ -86,4 +86,28 @@ extern void fdps_cd_stop_audio(void);
 extern void fdps_cd_resume_audio(void);
 #pragma aux fdps_cd_resume_audio "*" parm caller [];
 
+/* 0003c5a6.  Asks the drive where it is in the CD-DA track it is playing --
+   MSCDEX IOCTL Input, device command 3, control block code 0x0c, Audio
+   Q-Channel Info -- and leaves the driver's answer in the caller's own block.
+
+   q_channel points at an eleven-byte struct fdps_cd_q_channel_block the caller
+   owns.  Its control_code byte is stamped with 0x0c on the way in; every other
+   field comes back filled by the driver, of which the caller wants
+   track_number, the track now playing, and minute / second / frame, how far
+   into that track the head has got.  The request itself declares a transfer of
+   only six bytes even though eleven are staged and eleven read back, so the
+   frame byte at offset 6 is one past what the drive was asked for -- see the
+   note in cdaudio.c.  The only caller, fdps_cd_read_audio_position, passes the
+   game's own fixed block.
+
+   Nothing here validates the reply.  A refused request leaves the block holding
+   the bytes that were sent, so a caller that treats the answer as live will
+   read its own question back as a position; whether the drive answered at all
+   is visible only in data_fdps_cd_last_request_status, where bit 15 is the
+   driver's error flag.
+
+   Returns nothing. */
+extern void fdps_cd_read_q_channel(struct fdps_cd_q_channel_block *q_channel);
+#pragma aux fdps_cd_read_q_channel "*" parm caller [];
+
 #endif

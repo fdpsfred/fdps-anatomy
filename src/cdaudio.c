@@ -213,3 +213,68 @@ void fdps_cd_resume_audio(void)
 
     data_fdps_cd_last_request_status = request_header.status;
 }
+
+/* 0003c5a6.  The one request in this file that asks the drive a question
+   instead of ordering it about: MSCDEX IOCTL Input -- device command 3 -- with
+   control code 0x0c, Audio Q-Channel Info, which comes back saying which CD-DA
+   track is playing and how far into that track the head has got.
+
+   Because it carries data both ways it is built in the 26-byte IOCTL shape
+   struct fdps_cd_request_header describes -- the full record, so the declared
+   length and the struct size agree here and no field of it is reached through a
+   cast, unlike the seek and the play request above.  The transfer address is
+   data_fdps_cd_ioctl_buffer_real_mode_ptr, the packed real-mode far pointer of
+   the second DOS block, while the two memcpy's that fill and drain that block
+   go through data_fdps_cd_ioctl_buffer, the flat linear address of the same
+   memory.  The two are not interchangeable (rebuild_info/pitfalls.md).
+
+   Offsets 3 to 0x0c -- the status word and the eight reserved bytes -- are
+   never initialised, here as everywhere else in the module.
+
+   The declared transfer is six bytes -- MOV word ptr [ESP+0x12],0x6 at
+   0003c5de -- while the control block staged and drained around it is eleven,
+   the PUSH 0xb at 0003c601 and 0003c62f.  That is not a slip to be tidied up:
+   fdps_cd_read_audio_position, the only caller, reads the frame field at block
+   offset 6, one byte past what the request declares, and it works because a
+   real MSCDEX driver fills the whole Q-channel block regardless.  Setting the
+   count to sizeof the block, or to the 0x0b both memcpy's use, changes what the
+   game asks the driver for.
+
+   Both read-back lengths are literals rather than the header's own length byte
+   -- PUSH 0x1a at 0003c61a, where fdps_cd_read_audio_channel_info reads that
+   byte back instead -- which comes to the same 0x1a either way.
+
+   The body ends in a tail jump: PUSH 0xb / JMP 0003be27, into the middle of
+   fdps_cd_read_audio_channel_info, which pushes the two remaining memcpy
+   arguments and jumps on into 0003c590 inside fdps_cd_ioctl_output_command,
+   where the drain, the status store and the RET live.  Three routines building
+   the same request with different control codes share one epilogue; the merge
+   is codegen rather than behaviour (ADR-0001), so what is written here is the
+   whole of what this address does.
+
+   The status word is published in data_fdps_cd_last_request_status because the
+   function returns nothing: a drive that refused the request and a drive that
+   really is sitting at track 1 minute 0 are otherwise indistinguishable, and
+   bit 15 of that word is the driver's error flag. */
+void fdps_cd_read_q_channel(struct fdps_cd_q_channel_block *q_channel)
+{
+    struct fdps_cd_request_header request_header;
+
+    request_header.header_length = 0x1a;
+    request_header.subunit = 0;
+    request_header.command = 3;
+    request_header.volume_id_ptr = 0;
+    request_header.start_sector = 0;
+    request_header.media_descriptor = 0;
+    request_header.transfer_address = data_fdps_cd_ioctl_buffer_real_mode_ptr;
+    request_header.transfer_byte_count = 6;
+    q_channel->control_code = 0xc;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0x1a);
+    memcpy(data_fdps_cd_ioctl_buffer, q_channel, 0xb);
+    fdps_cd_device_request();
+    memcpy(&request_header, data_fdps_cd_request_header_buffer, 0x1a);
+    memcpy(q_channel, data_fdps_cd_ioctl_buffer, 0xb);
+
+    data_fdps_cd_last_request_status = request_header.status;
+}

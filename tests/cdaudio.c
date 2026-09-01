@@ -1,8 +1,8 @@
 /* tests/cdaudio.c -- cover for src/cdaudio.c.
  *
  * So far this covers fdps_cd_seek at 0003c3fa, fdps_cd_play_audio_range at
- * 0003c452, fdps_cd_stop_audio at 0003c4a7 and fdps_cd_resume_audio at
- * 0003c4ff.
+ * 0003c452, fdps_cd_stop_audio at 0003c4a7, fdps_cd_resume_audio at 0003c4ff
+ * and fdps_cd_read_q_channel at 0003c5a6.
  *
  * Every expected value below comes from the instructions of those functions,
  * never from the emitted C.  For fdps_cd_seek:
@@ -549,6 +549,223 @@ static void cdaudio_resume_and_stop_differ_only_in_the_command_byte(void)
     CHECK_EQ(header[2] - stop_header[2], 0x88 - 0x85);
 }
 
+/* fdps_cd_read_q_channel at 0003c5a6 is the only request in this file that
+ * carries data in both directions, so unlike the four above it stages a control
+ * block through the second DOS block as well as a header through the first.
+ * Its immediates are
+ *
+ *   MOV byte  ptr [ESP],     0x1a   MOV byte  ptr [ESP+0x1],  0x0
+ *   MOV byte  ptr [ESP+0x2], 0x3    MOV dword ptr [ESP+0x16], 0x0
+ *   MOV word  ptr [ESP+0x14],0x0    MOV byte  ptr [ESP+0xd],  0x0
+ *   MOV EAX,[0x00069da8] / MOV dword ptr [ESP+0xe],EAX
+ *   MOV word  ptr [ESP+0x12],0x6
+ *   MOV EAX,dword ptr [ESP+0x20] /  MOV byte ptr [EAX],0xc
+ *   PUSH 0x1a / ... / CALL memcpy   PUSH 0xb / ... / CALL memcpy
+ *   CALL 0003bb7d
+ *   PUSH 0x1a / ... / CALL memcpy   PUSH 0xb / JMP 0003be27, which pushes the
+ *     block pointers and jumps on to 0003c590 for the second copy and
+ *     MOV EAX,dword ptr [ESP+0x3] / MOV [0x00069e20],AX
+ *
+ * The drive named is data_fdps_cdrom_drive_letter_index 0xff for the same
+ * reason it is above: MSCDEX rejects the request on the drive number before it
+ * follows ES:BX, so neither DOS block is written by anything outside the
+ * module and what is sitting in them afterwards is exactly what the function
+ * staged.  That is also why nothing below asserts a track or a position -- the
+ * reply is the question coming back.
+ *
+ * One thing this cannot pin from outside: with no driver writing the IOCTL
+ * block, the eleven bytes copied back into the caller's block are the eleven
+ * that were just copied out of it, so the read-back direction is invisible
+ * except at its far edge.  What is asserted is that edge -- the guard byte
+ * after the caller's block is untouched, and the poison byte after the DOS
+ * block's eleven is untouched -- which is what catches a copy that ran for the
+ * struct's size or for one of the other lengths in this family.
+ */
+
+/* The caller's block with five guard bytes welded to it, so a copy that
+   overran the eleven has somewhere to show up.  They are one object rather
+   than two globals because Watcom promises nothing about the order or the
+   neighbourliness of separate uninitialised globals (contract B). */
+struct q_channel_probe_block {
+    struct fdps_cd_q_channel_block block;
+    unsigned char guard[5];
+};
+
+static struct q_channel_probe_block q_channel_probe;
+
+/* The ramp starts at 0xa0 so every byte of the block is distinct and none of
+   them is 0x0c, the control code the function stamps into byte 0 -- otherwise
+   the stamp would be invisible.  Byte 0x0b of the IOCTL block is poisoned
+   separately because it is the first byte the send memcpy must not reach. */
+static void read_q_channel_from_a_rejected_drive(void)
+{
+    int i;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    for (i = 0; i < 0x20; i++) {
+        data_fdps_cd_request_header_buffer[i] = HEADER_POISON;
+    }
+    q_channel_probe.block.control_code = 0xa0;
+    q_channel_probe.block.control_adr = 0xa1;
+    q_channel_probe.block.track_number = 0xa2;
+    q_channel_probe.block.point_index = 0xa3;
+    q_channel_probe.block.minute = 0xa4;
+    q_channel_probe.block.second = 0xa5;
+    q_channel_probe.block.frame = 0xa6;
+    q_channel_probe.block.zero = 0xa7;
+    q_channel_probe.block.absolute_minute = 0xa8;
+    q_channel_probe.block.absolute_second = 0xa9;
+    q_channel_probe.block.absolute_frame = 0xaa;
+    for (i = 0; i < 5; i++) {
+        q_channel_probe.guard[i] = (unsigned char) (0xab + i);
+    }
+    data_fdps_cd_ioctl_buffer[0xb] = 0x5a;
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    fdps_cd_read_q_channel(&q_channel_probe.block);
+}
+
+/* Every field the caller reads out of the reply is a byte at a fixed offset in
+   the block the driver filled, and the two memcpy lengths are the flat 0xb the
+   body pushes, so the struct's size and its offsets are what decides which
+   byte means what (contract H).  fdps_cd_read_audio_position takes the track
+   from offset 2 -- MOV AL,[0x00069e58] against the block based at 0x00069e56 --
+   and the position from 4, 5 and 6.
+
+   The guard offset is asserted alongside them because the overrun checks below
+   are worthless if the guard is not sitting immediately past the eleven. */
+static void cdaudio_q_channel_block_fields_sit_where_the_driver_writes_them(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_cd_q_channel_block), 11);
+    CHECK_EQ((int) offsetof(struct fdps_cd_q_channel_block, control_code), 0);
+    CHECK_EQ((int) offsetof(struct fdps_cd_q_channel_block, track_number), 2);
+    CHECK_EQ((int) offsetof(struct fdps_cd_q_channel_block, minute), 4);
+    CHECK_EQ((int) offsetof(struct fdps_cd_q_channel_block, second), 5);
+    CHECK_EQ((int) offsetof(struct fdps_cd_q_channel_block, frame), 6);
+    CHECK_EQ((int) offsetof(struct q_channel_probe_block, guard), 11);
+}
+
+/* Command code 3 is IOCTL Input and the header declares itself 0x1a bytes, the
+   full record -- this is the one request in the file whose declared length and
+   struct size agree, so a struct that had grown or shrunk would break that
+   equality rather than silently sending live stack or truncating the request.
+
+   The addressing byte at 0x0d, the starting sector at 0x14 and the volume-ID
+   pointer at 0x16 are all zero because an IOCTL request moves no disc data.
+   The transfer address is the packed real-mode far pointer of the IOCTL block,
+   not its flat linear address -- the driver runs in real mode and cannot use
+   the flat one. */
+static void cdaudio_q_channel_stages_an_ioctl_input_request(void)
+{
+    unsigned char *header;
+
+    read_q_channel_from_a_rejected_drive();
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x1a);
+    CHECK_EQ(header[0], (int) sizeof(struct fdps_cd_request_header));
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 3);
+    CHECK_EQ(header[0xd], 0);
+    CHECK_EQ((long) staged_dword(header, 0xe),
+             (long) data_fdps_cd_ioctl_buffer_real_mode_ptr);
+    CHECK_EQ(staged_word(header, 0x14), 0);
+    CHECK_EQ((long) staged_dword(header, 0x16), 0L);
+}
+
+/* MOV word ptr [ESP+0x12],0x6 asks the driver for six bytes while the block
+   staged around it is eleven, and fdps_cd_read_audio_position then reads the
+   frame byte at offset 6 -- one past the last byte the request declared.  The
+   count is therefore neither sizeof the block nor the 0xb the two memcpy's use,
+   and this is the assertion that says so: writing either of those instead would
+   send the drive a different request and nothing else in the body would look
+   wrong. */
+static void cdaudio_q_channel_asks_for_six_bytes_of_an_eleven_byte_block(void)
+{
+    unsigned char *header;
+
+    read_q_channel_from_a_rejected_drive();
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(staged_word(header, 0x12), 6);
+    CHECK_EQ((int) sizeof(struct fdps_cd_q_channel_block), 11);
+    CHECK_EQ((int) offsetof(struct fdps_cd_q_channel_block, frame), 6);
+}
+
+/* MOV EAX,dword ptr [ESP+0x20] / MOV byte ptr [EAX],0xc stamps the control
+   block code into the caller's own block before anything is copied, so the 0x0c
+   has to be visible in both places afterwards -- in the caller's block because
+   that is where the store landed, and in the staged block because the stamp is
+   what was sent.  The ramp put 0xa0 in that byte, so an unstamped block would
+   read back as 0xa0. */
+static void cdaudio_q_channel_stamps_the_control_block_code(void)
+{
+    read_q_channel_from_a_rejected_drive();
+    CHECK_EQ(q_channel_probe.block.control_code, 0xc);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 0xc);
+}
+
+/* PUSH 0xb / PUSH [ESP+0x24] / PUSH [0x00069da4] / CALL memcpy sends the
+   caller's block as it stands: bytes 1..10 are never cleared or rewritten, so
+   the ramp the test put there is what reaches the driver.  Byte 0x0b of the
+   IOCTL block keeps its own poison, which is what pins the length at eleven
+   rather than at the nine or the one the sibling requests in cd.c stage. */
+static void cdaudio_q_channel_sends_the_callers_own_eleven_bytes(void)
+{
+    int i;
+
+    read_q_channel_from_a_rejected_drive();
+    for (i = 1; i < 0xb; i++) {
+        CHECK_EQ(data_fdps_cd_ioctl_buffer[i], 0xa0 + i);
+    }
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0xb], 0x5a);
+}
+
+/* PUSH 0xb / PUSH [0x00069da4] / PUSH [ESP+0x28] in the shared epilogue copies
+   the block back the other way, into the caller's block and nowhere else.  All
+   eleven bytes have to match the block they came from, and the caller's guard
+   bytes have to still hold their ramp values: a read-back of the struct's size,
+   or of anything past eleven, would reach into them. */
+static void cdaudio_q_channel_copies_eleven_bytes_back_to_the_caller(void)
+{
+    int i;
+
+    read_q_channel_from_a_rejected_drive();
+    CHECK_EQ(memcmp(&q_channel_probe.block, data_fdps_cd_ioctl_buffer, 0xb), 0);
+    for (i = 0; i < 5; i++) {
+        CHECK_EQ(q_channel_probe.guard[i], 0xab + i);
+    }
+}
+
+/* PUSH 0x1a is the header copy length in both directions -- a literal, not the
+   header's own length byte, though here the two agree -- so the six bytes above
+   the record are left as the test poisoned them.  This is the longest header
+   the file stages, so nothing else in it could have reached them either. */
+static void cdaudio_q_channel_copies_exactly_the_declared_header(void)
+{
+    unsigned char *header;
+
+    read_q_channel_from_a_rejected_drive();
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0x1a], HEADER_POISON);
+    CHECK_EQ(header[0x1b], HEADER_POISON);
+    CHECK_EQ(header[0x1f], HEADER_POISON);
+}
+
+/* The header is copied back out of the DOS block before the status word is read
+   out of it, so the published word has to agree with the word still at header
+   offset 3.  What the driver leaves there is not the test's to decide --
+   offsets 3 to 0x0c are never initialised -- so what is pinned is the
+   displacement and the width: MOV EAX,[ESP+3] / MOV [0x00069e20],AX stores only
+   the low half of the dword it loads. */
+static void cdaudio_q_channel_publishes_the_driver_status_word(void)
+{
+    unsigned char *header;
+
+    read_q_channel_from_a_rejected_drive();
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(data_fdps_cd_last_request_status, staged_word(header, 3));
+}
+
 void run_cdaudio_tests(void)
 {
     RUN_TEST(cdaudio_seek_header_fields_sit_where_the_stores_land);
@@ -573,4 +790,12 @@ void run_cdaudio_tests(void)
     RUN_TEST(cdaudio_resume_leaves_the_previous_requests_tail_alone);
     RUN_TEST(cdaudio_resume_publishes_the_driver_status_word);
     RUN_TEST(cdaudio_resume_and_stop_differ_only_in_the_command_byte);
+    RUN_TEST(cdaudio_q_channel_block_fields_sit_where_the_driver_writes_them);
+    RUN_TEST(cdaudio_q_channel_stages_an_ioctl_input_request);
+    RUN_TEST(cdaudio_q_channel_asks_for_six_bytes_of_an_eleven_byte_block);
+    RUN_TEST(cdaudio_q_channel_stamps_the_control_block_code);
+    RUN_TEST(cdaudio_q_channel_sends_the_callers_own_eleven_bytes);
+    RUN_TEST(cdaudio_q_channel_copies_eleven_bytes_back_to_the_caller);
+    RUN_TEST(cdaudio_q_channel_copies_exactly_the_declared_header);
+    RUN_TEST(cdaudio_q_channel_publishes_the_driver_status_word);
 }

@@ -1226,5 +1226,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003c5a6": [
+    {
+      "from": "emit",
+      "what": "The read-back half of the exchange -- memcpy(q_channel, data_fdps_cd_ioctl_buffer, 0xb) -- cannot be observed from a unit test on a machine with no CD-ROM drive. The test names data_fdps_cdrom_drive_letter_index 0xff so MSCDEX rejects the request on the drive number and never writes the DOS block, which means the eleven bytes copied back into the caller's block are the same eleven that were copied out of it a moment earlier: the copy is invisible except at its far edge. What is pinned is that edge (the caller's guard bytes and the DOS block's poison byte past 0x0b are both untouched, so the copy is not longer than 0xb) and that the two blocks agree afterwards. What is NOT pinned is that the copy happens at all, or that it is not shorter than 0xb -- a body that omitted it, or copied only the first byte, would pass every assertion in tests/cdaudio.c. The emitted C matches the assembly instruction for instruction, so this is a coverage gap rather than a suspicion, but it is a gap no amount of test writing closes from here.",
+      "needs": "One run of the test executable under DOSBox-X with a real CD-ROM drive mounted (imgmount e -t cdrom on FDPS_DISC_1.cue) and data_fdps_cdrom_drive_letter_index set to that drive's index instead of 0xff, with an audio track playing so the Q-channel reply is non-trivial. With a driver actually filling the DOS block, the caller's block after the call would differ from the ramp the test staged, and a comparison of the two would pin the read-back's length and its direction. That is a real-machine check, outside what the emit build can do.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached the same coverage gap independently and confirmed its boundary from the object file, which the emitter did not use for this. WDISASM on workspace/code_emit/out/objs/CDAUDIO.OBJ shows the read-back really is emitted and really is eleven bytes -- 021d push 0000000bH / 021f push data_fdps_cd_ioctl_buffer / 0225 push +14H[ebp] / 0228 call memcpy -- so the two things the emitter lists as unpinned (that the copy happens at all, and that it is not shorter than 0xb) are in fact settled against the built code, and only against the built code. What remains genuinely open is narrower than the emitter states: the unit test cannot observe the copy because with data_fdps_cdrom_drive_letter_index 0xff nothing outside the module writes the DOS block, so the eleven bytes read back are the eleven just written out. The far edge is pinned by the caller's guard bytes and the block's poison byte past 0xb. Nothing here suggests the emitted C is wrong, and the emitter's own framing of it as a coverage gap rather than a suspicion is right.",
+      "needs": "One run of the test executable under DOSBox-X with a real CD-ROM drive mounted (imgmount e -t cdrom on FDPS_DISC_1.cue), data_fdps_cdrom_drive_letter_index set to that drive's index, and an audio track playing, so the driver fills the block with something other than what the test staged. That is a real-machine check and outside what the emit build can reach.",
+      "status": "open",
+      "same_as": "emit#0"
+    }
   ]
 }
