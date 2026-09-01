@@ -70,6 +70,14 @@ extern unsigned char data_fdps_cdrom_drive_letter_index;
    [0x00069e54],0x0 / JNZ at 0003c68e. */
 extern unsigned short data_fdps_cd_request_header_real_mode_seg;
 
+/* 00069e1c.  The four-byte device status the CD-ROM driver returned to the last
+   MSCDEX Device Status request -- control block 06h's reply, taken from control
+   block offset 1 and stored whole, unmasked and not sign extended.
+   fdps_cdrom_read_device_status is the only code in the image that touches it,
+   and it only writes: its one caller wants the request header's status word
+   instead, so nothing ever reads this back. */
+extern unsigned int data_fdps_cdrom_device_status;
+
 /* Allocates the module's two 512-byte DOS real-mode blocks through DPMI INT
    31h function 0100h and publishes each one twice: as a real-mode segment (or
    a packed seg:0000 far pointer) for the MSCDEX request header to carry, and
@@ -158,5 +166,22 @@ extern void fdps_cd_read_audio_channel_info(unsigned char *channel_info);
    image calls it. */
 extern void fdps_cd_set_audio_channel_control(unsigned char *control_block);
 #pragma aux fdps_cd_set_audio_channel_control "*" parm caller [];
+
+/* Asks the CD-ROM driver what kind of device it is and what state it is in --
+   MSCDEX IOCTL Input, control block 06h Device Status -- and leaves the
+   four-byte answer in data_fdps_cdrom_device_status.
+
+   Takes nothing and returns nothing: the drive it asks is the module's one
+   drive letter index, the buffers it stages through are the module's two DOS
+   blocks, and both answers leave through globals.
+
+   The answer its only caller actually uses is the other one.
+   data_fdps_cd_last_request_status is left holding the status word the driver
+   wrote into the request header, and fdps_cd_audio_is_idle calls this routine
+   purely to refresh that word before testing its busy bit -- so the device
+   status dword is written and never read, while the status word is what makes
+   the call worth making. */
+extern void fdps_cdrom_read_device_status(void);
+#pragma aux fdps_cdrom_read_device_status "*" parm caller [];
 
 #endif

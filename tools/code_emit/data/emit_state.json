@@ -1514,6 +1514,14 @@
       "status": "committed",
       "emitted_against": "0x67",
       "rounds": 0
+    },
+    "0003c34f": {
+      "name": "fdps_cdrom_read_device_status",
+      "target": "cd.c",
+      "body_size": "0xab",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0xab"
     }
   }
 }

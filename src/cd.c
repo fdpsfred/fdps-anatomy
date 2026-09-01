@@ -308,3 +308,68 @@ void fdps_cd_set_audio_channel_control(unsigned char *control_block)
 
     data_fdps_cd_last_request_status = request_header.status;
 }
+
+/* 0003c34f.  An MSCDEX IOCTL Input request -- command code 3 -- carrying the
+   five-byte control block 06h, Device Status, whose reply is a four-byte device
+   status dword saying what kind of drive answered and what state it is in.
+
+   No branch in the body: build the header, stage both blocks into the two DOS
+   blocks, send, read both back, publish the two answers.
+
+   The declared header length is 0x1a -- 26 bytes, exactly the record -- and
+   0x1a is also what the staging memcpy copies (MOV byte ptr [ESP],0x1a at
+   0003c35c and PUSH 0x1a at 0003c393), so nothing goes out past the end of it.
+   Unlike its two IOCTL Input siblings the read-back length is a literal rather
+   than the header's own length byte: PUSH 0x1a at 0003c3c2, against MOVZX
+   EAX,byte ptr [ESP] at 0003bd5a and 0003be0d.  The two come to the same 26
+   here, because the driver writes into the DOS block and never into this frame,
+   but the literal is what this body was compiled from.
+
+   Only byte 0 of the control block is written -- MOV byte ptr [ESP+0x1c],0x6 is
+   the body's only store into it -- so bytes 1..4 go out to the driver holding
+   whatever the frame held.  Those four are the ones the driver overwrites with
+   its answer, so clearing them here to make the question look tidy would send
+   four bytes the original does not.  The header's status word and its eight
+   reserved bytes are uninitialised for the same reason as in the siblings: the
+   driver writes the first and ignores the rest.
+
+   The answer is the dword at control block +1, read straight out of the five
+   bytes at 0003c3ec with nothing masking or sign extending it, and published in
+   data_fdps_cdrom_device_status -- which nothing in the image reads back.  The
+   status word is published in data_fdps_cd_last_request_status, and that one
+   does have a reader: fdps_cd_audio_is_idle calls this function and then falls
+   straight into fdps_cd_status_is_not_busy, which tests that word's busy bit
+   0x0200.  Its store is the epilogue at 0003c0ba, which Watcom folded together
+   with fdps_cdrom_read_disk_info's tail; the fold is codegen and the store is
+   this function's own, so a body that stopped at the device status dword would
+   leave the idle test answering from the previous request's word.
+
+   The transfer-address field carries data_fdps_cd_ioctl_buffer_real_mode_ptr,
+   the packed real-mode far pointer, while the four memcpy's go through
+   data_fdps_cd_ioctl_buffer and data_fdps_cd_request_header_buffer, the flat
+   linear addresses of the same two DOS blocks.  The two forms are not
+   interchangeable (rebuild_info/pitfalls.md). */
+void fdps_cdrom_read_device_status(void)
+{
+    struct fdps_cd_request_header request_header;
+    unsigned char control_block[5];
+
+    request_header.header_length = 0x1a;
+    request_header.subunit = 0;
+    request_header.command = 3;
+    request_header.volume_id_ptr = 0;
+    request_header.start_sector = 0;
+    request_header.media_descriptor = 0;
+    request_header.transfer_address = data_fdps_cd_ioctl_buffer_real_mode_ptr;
+    request_header.transfer_byte_count = 5;
+    control_block[0] = 6;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0x1a);
+    memcpy(data_fdps_cd_ioctl_buffer, control_block, 5);
+    fdps_cd_device_request();
+    memcpy(&request_header, data_fdps_cd_request_header_buffer, 0x1a);
+    memcpy(control_block, data_fdps_cd_ioctl_buffer, 5);
+
+    data_fdps_cdrom_device_status = *(unsigned int *) &control_block[1];
+    data_fdps_cd_last_request_status = request_header.status;
+}

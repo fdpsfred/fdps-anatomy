@@ -642,6 +642,105 @@ static void cd_set_audio_channel_publishes_the_request_status(void)
              staged_word(data_fdps_cd_request_header_buffer, 3));
 }
 
+/* fdps_cdrom_read_device_status, 0003c34f.
+ *
+ * Same arrangement as the three request builders above: the request is issued
+ * for real at drive letter index 0xff, which MSCDEX rejects on the drive number
+ * before it follows ES:BX, and where no CD-ROM drive is mounted there is no
+ * MSCDEX handler on INT 2Fh at all.  Neither case touches the two DOS blocks,
+ * so what is in them afterwards is exactly what the function staged.
+ *
+ * Expected values are the immediates in the body -- MOV byte ptr [ESP],0x1a,
+ * [ESP+1],0 and [ESP+2],3 at 0003c35c..0003c365, MOV dword ptr [ESP+0x16],0 and
+ * word ptr [ESP+0x14],0, MOV byte ptr [ESP+0xd],0, the transfer address loaded
+ * from [0x00069da8], MOV word ptr [ESP+0x12],5, MOV byte ptr [ESP+0x1c],0x6 for
+ * the control block code, and the four PUSH 0x1a / PUSH 0x5 lengths at
+ * 0003c393, 0003c3a8, 0003c3c2 and 0003c3d7.
+ *
+ * Nothing below asserts what the driver answered.  Bytes 1..4 of the control
+ * block are never initialised by the body, so on a rejected request they hold
+ * whatever the frame held, and on a machine with a real drive they hold that
+ * drive's own device status.  The two answers are therefore checked against the
+ * bytes they were read out of: what is pinned is the displacement and the
+ * width, MOV EAX,[ESP+0x1d] / MOV [0x00069e1c],EAX for the device status and
+ * MOV EAX,[ESP+3] / MOV [0x00069e20],AX for the request status.
+ */
+static void read_device_status_from_a_rejected_drive(void)
+{
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    data_fdps_cd_ioctl_buffer[5] = 0x5a;
+    data_fdps_cd_request_header_buffer[0x1a] = 0x5b;
+    fdps_cdrom_read_device_status();
+}
+
+/* Command code 3 is IOCTL Input and the transfer it describes is five bytes
+   into the second DOS block, addressed by the packed real-mode far pointer and
+   not by the flat one.  Start sector and volume-ID pointer are zero because an
+   IOCTL request moves no disc data.
+
+   The declared length is 0x1a, exactly the record, so the length byte and the
+   struct size have to agree; and the byte just past the record keeps the poison
+   the setup put there, which is what pins the staging copy at twenty-six rather
+   than at the 0x1e fdps_cd_read_head_sector sends. */
+static void cd_device_status_stages_an_ioctl_input_request(void)
+{
+    unsigned char *header;
+
+    read_device_status_from_a_rejected_drive();
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x1a);
+    CHECK_EQ(header[0], (int) sizeof(struct fdps_cd_request_header));
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 3);
+    CHECK_EQ(header[0xd], 0);
+    CHECK_EQ((long) staged_dword(header, 0xe),
+             (long) data_fdps_cd_ioctl_buffer_real_mode_ptr);
+    CHECK_EQ(staged_word(header, 0x12), 5);
+    CHECK_EQ(staged_word(header, 0x14), 0);
+    CHECK_EQ((long) staged_dword(header, 0x16), 0L);
+    CHECK_EQ(header[0x1a], 0x5b);
+}
+
+/* Control block code 6 is Device Status.  MOV byte ptr [ESP+0x1c],0x6 is the
+   body's only store into the block, so nothing may be asserted about bytes
+   1..4 on the way out; the sixth byte of the DOS block is what pins the send
+   length at five, because a copy that ran one byte long would take the poison
+   with it. */
+static void cd_device_status_asks_for_the_device_status_block(void)
+{
+    read_device_status_from_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 6);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[5], 0x5a);
+}
+
+/* Both blocks are copied back out of the DOS memory before anything is read out
+   of them, so the two published values have to agree with the bytes still
+   sitting in those blocks: the device status with the dword at control block +1
+   -- the last four of the five bytes, not the first four, which would start on
+   the request code -- and the request status with the word at header+3.  The
+   status store is a 16-bit store out of a dword load, so a read a byte early or
+   late, or one that let the high half through, would break that equality
+   whatever the driver left there.
+
+   The request status is the one this function exists to refresh: its caller
+   fdps_cd_audio_is_idle tests bit 0x0200 of it, so a body that stopped at the
+   device status dword would leave it holding the previous request's word. */
+static void cd_device_status_publishes_both_answers(void)
+{
+    read_device_status_from_a_rejected_drive();
+    CHECK_EQ((long) data_fdps_cdrom_device_status,
+             (long) staged_dword(data_fdps_cd_ioctl_buffer, 1));
+    CHECK_EQ((int) (data_fdps_cdrom_device_status & 0xff),
+             data_fdps_cd_ioctl_buffer[1]);
+    CHECK_EQ((int) (data_fdps_cdrom_device_status >> 24),
+             data_fdps_cd_ioctl_buffer[4]);
+    CHECK_EQ(data_fdps_cd_last_request_status,
+             staged_word(data_fdps_cd_request_header_buffer, 3));
+}
+
 void run_cd_tests(void)
 {
     RUN_TEST(cd_register_blocks_have_the_image_layout);
@@ -669,4 +768,7 @@ void run_cd_tests(void)
     RUN_TEST(cd_set_audio_channel_sends_the_callers_own_nine_bytes);
     RUN_TEST(cd_set_audio_channel_leaves_the_callers_block_alone);
     RUN_TEST(cd_set_audio_channel_publishes_the_request_status);
+    RUN_TEST(cd_device_status_stages_an_ioctl_input_request);
+    RUN_TEST(cd_device_status_asks_for_the_device_status_block);
+    RUN_TEST(cd_device_status_publishes_both_answers);
 }
