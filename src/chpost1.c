@@ -9,6 +9,9 @@
  * shared default test is btlend.c's and the battle-end code it settles is
  * gamedata.h's.
  */
+#include "fdpstype.h"
+#include "gamedata.h"
+#include "unit.h"
 #include "btlend.h"
 #include "chpost1.h"
 
@@ -35,4 +38,42 @@
 void fdps_chapter_02_post_action(void)
 {
     fdps_battle_check_default_end_conditions();
+}
+
+/* 0003a560.  The shared test, then one defeat test of this chapter's own.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003a560..0003a566 --
+   and nothing in it is ever read, so there is no local to name.
+
+   CALL 0x0003a2e0 at 0003a56c has nothing pushed in front of it and no ESP
+   adjustment behind it, so the shared test takes no argument, and the very
+   next instruction is PUSH 0x3: EAX is not consulted between the two calls,
+   so that call's result is not used here.  PUSH 0x3 / CALL 0x000109b0 / ADD
+   ESP,0x4 at 0003a571..0003a578 is fdps_unit_is_retired(3), the caller
+   clearing its one argument, and its EAX is used -- TEST EAX,EAX / JZ
+   0003a589 at 0003a57b is the only branch in the body, skipping the MOV
+   dword ptr [0x00069da0],0x1 at 0003a57f.
+
+   That store is guarded by nothing but the predicate: it does not consult the
+   code's current value, and it runs after the shared test rather than as an
+   alternative to it.  So it overrides a 2 the shared test wrote moments
+   earlier, and an action that empties the enemy side and retires unit 3 at
+   once is a defeat and not a clear.  Gating the store on the code still being
+   0, or hanging it off an else of the victory, inverts exactly that case.
+
+   Unit index 3 is a position in this map's unit array, not a character id.
+   map03.dat fields three player slots, so the roster fills indices 0..2 and
+   the deploy that ends the array build appends the map's one wave-0 record at
+   index 3: the guest 索爾.  The same index 3 on the maps of chapters 5 and 6
+   is 法蓮娜, so writing this argument as a per-character constant would be
+   wrong in both directions.
+
+   Table slot 3. */
+void fdps_chapter_04_post_action(void)
+{
+    fdps_battle_check_default_end_conditions();
+    if (fdps_unit_is_retired(3) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
 }

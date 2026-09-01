@@ -53,6 +53,16 @@
 /* Chapter 2 is chapter id 1: the table slot number is the 0-based id. */
 #define CHAPTER_02_ID 1
 
+/* Chapter 4 is chapter id 3, table slot 3: the dword at 00060298, three
+   entries into the table based at 0006028c, is 0003a560. */
+#define CHAPTER_04_ID 3
+
+/* The guest side, from the deployment record chapter 4's slot 3 comes from. */
+#define SIDE_GUEST 1
+
+/* The slot chapter 4's own defeat test asks about -- PUSH 0x3 at 0003a571. */
+#define GUEST_SLOT 3
+
 static struct fdps_unit_record stage_units[STAGE_UNITS];
 
 /* Zero every slot and publish the block, then set the chapter id and the
@@ -188,6 +198,141 @@ static void an_open_battle_stays_open(void)
     CHECK_EQ(end_code(), 0);
 }
 
+/* ------------------------------------------------------------------ *
+ * Chapter 4's handler, 0003a560.  It is the shared test followed by one
+ * defeat test of its own: PUSH 0x3 / CALL 0x000109b0 / ADD ESP,0x4 /
+ * TEST EAX,EAX / JZ, and the MOV dword ptr [0x00069da0],0x1 at 0003a57f
+ * the JZ skips.  What that shape makes worth pinning is the ORDER and the
+ * absence of a guard, because both are easy to write away: the store runs
+ * after the shared test and consults nothing, so it beats a clear the
+ * shared test recorded in the same call and it fires even on the path
+ * where the shared test returned at its gate without examining anything.
+ *
+ * Chapter id 3 is neither 0x10 nor 0x15, so inside the shared test the
+ * arm taken is PUSH 0x0 at 0003a382 -- slot 0, not slot 3.  Slots 0 and 3
+ * are therefore the only two that can end this battle from code, and the
+ * sweep below holds every other slot to that.
+ * ------------------------------------------------------------------ */
+
+/* Same staging as above with the chapter id moved to chapter 4's. */
+static void stage_ch04(int live_unit_count, int battle_end_code)
+{
+    stage(live_unit_count, battle_end_code);
+    data_fdps_chapter_current_chapter_id = CHAPTER_04_ID;
+}
+
+/* The whole point of the store being unguarded and last: the same action
+   empties the enemy side and retires the guest.  The shared test writes 2 at
+   0003a2f9 and nothing puts it back to 0, then this handler overwrites it
+   with 1.  An else, or a store gated on the code still being 0, would answer
+   2 here. */
+static void a_retired_guest_outranks_a_cleared_field(void)
+{
+    stage_ch04(4, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(GUEST_SLOT, SIDE_GUEST, FLAG_RETIRED);
+    fdps_chapter_04_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The ordinary defeat: the battle is still going -- a live enemy settles the
+   shared test at 0 -- and the retired guest turns that into 1. */
+static void a_retired_guest_is_a_defeat(void)
+{
+    stage_ch04(4, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(2, SIDE_ENEMY, 0);
+    stage_unit(GUEST_SLOT, SIDE_GUEST, FLAG_RETIRED);
+    fdps_chapter_04_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* With the guest still in play the handler adds nothing at all, so both of
+   the shared test's own answers come through unchanged. */
+static void a_live_guest_leaves_the_shared_verdict_alone(void)
+{
+    stage_ch04(4, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(GUEST_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_04_post_action();
+    CHECK_EQ(end_code(), 2);
+
+    stage_ch04(4, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(GUEST_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_04_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* The CALL to the shared test is really made and chapter 4 takes its ordinary
+   arm: chapter id 3 is not 0x10 or 0x15, so the watched slot in there is 0,
+   and a retired slot 0 is a defeat with the guest untouched. */
+static void the_shared_slot_zero_test_still_runs(void)
+{
+    stage_ch04(4, 0);
+    stage_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(2, SIDE_ENEMY, 0);
+    stage_unit(GUEST_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_04_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The guest test sits outside the shared test's gate.  A verdict a chapter
+   event already recorded makes the shared test return at 0003a2ec without
+   examining anything, and the retired guest still overwrites it with 1;
+   with the guest in play the recorded verdict survives. */
+static void the_guest_test_survives_a_recorded_verdict(void)
+{
+    stage_ch04(4, 2);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(2, SIDE_ENEMY, 0);
+    stage_unit(GUEST_SLOT, SIDE_GUEST, FLAG_RETIRED);
+    fdps_chapter_04_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch04(4, 2);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(2, SIDE_ENEMY, 0);
+    stage_unit(GUEST_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_04_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* Only slots 0 and 3 end this battle from code.  Every other slot retires in
+   turn with a live enemy at slot 7 holding the shared test's answer at 0, so
+   anything but 0 would be a defeat test the handler does not have -- the
+   literal in the PUSH having drifted, or a second one having been invented
+   for 法蓮娜, whose death this chapter carries as a map death script. */
+static void no_slot_but_zero_and_three_ends_the_battle(void)
+{
+    int retired_slot;
+    int player_slot;
+
+    for (retired_slot = 1; retired_slot < STAGE_UNITS - 1; retired_slot++) {
+        if (retired_slot == GUEST_SLOT) {
+            continue;
+        }
+        stage_ch04(STAGE_UNITS, 0);
+        for (player_slot = 0; player_slot < STAGE_UNITS - 1; player_slot++) {
+            stage_unit(player_slot, SIDE_PLAYER, 0);
+        }
+        stage_unit(STAGE_UNITS - 1, SIDE_ENEMY, 0);
+        stage_units[retired_slot].flags = FLAG_RETIRED;
+        fdps_chapter_04_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
 void run_chpost1_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -196,4 +341,10 @@ void run_chpost1_tests(void)
     RUN_TEST(no_other_slot_ends_the_battle);
     RUN_TEST(a_recorded_verdict_is_left_alone);
     RUN_TEST(an_open_battle_stays_open);
+    RUN_TEST(a_retired_guest_outranks_a_cleared_field);
+    RUN_TEST(a_retired_guest_is_a_defeat);
+    RUN_TEST(a_live_guest_leaves_the_shared_verdict_alone);
+    RUN_TEST(the_shared_slot_zero_test_still_runs);
+    RUN_TEST(the_guest_test_survives_a_recorded_verdict);
+    RUN_TEST(no_slot_but_zero_and_three_ends_the_battle);
 }
