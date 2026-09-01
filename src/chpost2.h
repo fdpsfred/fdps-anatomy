@@ -108,4 +108,40 @@ extern void fdps_chapter_17_post_action(void);
 extern void fdps_chapter_18_post_action(void);
 #pragma aux fdps_chapter_18_post_action "*" parm caller [];
 
+/* Chapter 20's post-action test: releases three of the map's held enemies on
+   each of the first seventeen turns, then applies the game's standard end
+   conditions.  Takes nothing, returns nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h) exactly as
+   fdps_battle_check_default_end_conditions (btlend.h) left it.
+
+   The release is this handler's whole content beyond the shared test.  While
+   data_fdps_battle_turn_counter (gamedata.h) is 17 or less -- a SIGNED
+   ordering -- it clears the behaviour code of unit slots turn+12, turn+29 and
+   turn+46 through fdps_object_set_field34_low_nibble_range (unit.h), each as a
+   one-slot inclusive range with a value of 0.  Behaviour code 0 walks a unit
+   at the nearest enemy; the map deploys these units in code 2, which fights
+   what reaches them but never advances.  So turns 1 to 17 send slots 13..29,
+   30..46 and 47..63 at the party, three per turn and 51 in all, and from turn
+   18 the whole block is loose and the calls are skipped.  The merge keeps each
+   unit's high-nibble AI flags.
+
+   Slots 11 and 12 are never released and that is the point of the bases: slot
+   11 is the map's scripted event walker, deployed in behaviour code 5 to leave
+   its chest and fetch a treasure, and code 0 written over it would cancel that
+   walk.  Slot 64 is past the arithmetic's reach.  63 is the highest slot the
+   schedule reaches, inside the map's 65 live units.
+
+   Chapter 20 adds no end condition of its own.  Its id is 0x13, neither of the
+   two ids the shared test singles out, so the slot that test watches for the
+   defeat is 0, 蘭迪斯 -- which is the chapter's stated 失敗條件, its 勝利條件
+   being the 敵人全滅 the shared test sweeps for.
+
+   The chapter's other scripted business is elsewhere and is not missing from
+   here: the sword upgrade is a tile trigger and the wave-1 arrival is the
+   opening IconAni script's, neither of them keyed on a unit having acted.
+
+   Table slot 19. */
+extern void fdps_chapter_20_post_action(void);
+#pragma aux fdps_chapter_20_post_action "*" parm caller [];
+
 #endif

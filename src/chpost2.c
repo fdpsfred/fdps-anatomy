@@ -149,3 +149,98 @@ void fdps_chapter_18_post_action(void)
 {
     fdps_battle_check_default_end_conditions();
 }
+
+/* The three unit indices chapter 20's handler releases on each of the first
+   seventeen turns are turn + one of these bases: 12, 29 and 46, the three ADD
+   immediates at 0003b16c, 0003b188 and 0003b1ad.  Each base is one below the
+   first index of its run, since the earliest turn that adds to it is turn 1;
+   the three runs are 17 units apart and are consecutive stretches of the map's
+   enemy block, which the schedule walks three abreast from index 13 to index
+   63. */
+#define CHAPTER_20_RELEASE_BASE_1 0x0c
+#define CHAPTER_20_RELEASE_BASE_2 0x1d
+#define CHAPTER_20_RELEASE_BASE_3 0x2e
+
+/* The last turn on which chapter 20 releases anything, straight off the CMP
+   dword ptr [0x00069ce8],0x11 / JG 0x0003b1b9 at 0003b15c: the branch that
+   skips the three calls is taken only for a turn counter strictly greater than
+   0x11, so turn 17 still releases and turn 18 does not.  JG and not JA, so the
+   comparison is signed. */
+#define CHAPTER_20_LAST_RELEASE_TURN 0x11
+
+/* 0003b150.  A turn-scheduled release of three held units, then the shared
+   test.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003b150..0003b156 -- and
+   nothing in it is ever read, so there is no local to name.  The epilogue is
+   the four bare POPs at 0003b1be..0003b1c1 with no MOV ESP,EBP in front of
+   them, which is what an empty local area leaves behind, and the RET at
+   0003b1c2 carries no immediate.
+
+   CMP dword ptr [0x00069ce8],0x11 / JG 0x0003b1b9 at 0003b15c is the only
+   branch in the body and it guards all three calls at once; the target is the
+   CALL 0x0003a2e0 at 0003b1b9, so the shared test runs on every turn whichever
+   way the branch goes.  The comparison is JG rather than JA, which is the
+   signed ordering data_fdps_battle_turn_counter is declared with in
+   gamedata.h.
+
+   Each of the three calls is PUSH 0x0 / MOV EAX,[0x00069ce8] / ADD EAX,<base>
+   / PUSH EAX / MOV EAX,[0x00069ce8] / ADD EAX,<base> / PUSH EAX / CALL
+   0x00036b60 / ADD ESP,0xc -- 0003b165, 0003b181 and 0003b19d.  The counter is
+   re-loaded for each push rather than kept in a register, which is what -od
+   emits and carries no meaning of its own; the two pushed indices are
+   therefore always equal, so each call is an INCLUSIVE range of exactly one
+   unit and no loop of the callee's runs more than once.  ADD ESP,0xc after
+   each is the caller clearing three dword arguments, and nothing reads EAX
+   between the CALL and the next PUSH, so none of the three results is used.
+
+   Value 0 in the low nibble of the unit record's ai_behavior byte is the
+   behaviour code that walks the unit at the nearest opposing unit; map19.dat
+   deploys this map's enemies in mode 2, which fights what comes into reach but
+   never advances.  So the schedule releases three held enemies per turn over
+   turns 1 to 17 -- indices 13..29, 30..46 and 47..63, 51 units in all -- which
+   is the batch-by-batch advance the strategy guide describes for this map.
+   The callee merges rather than assigns, so the high-nibble AI flags each
+   released unit carries survive.
+
+   The three bases skip index 11 deliberately.  That index is map19.dat's
+   deployment record 0, the map's only unit in behaviour mode 5, the scripted
+   event walker that leaves the bottom-left chest to take the treasure at the
+   top of the map; writing mode 0 over it would cancel that script, so the
+   first column starts at 13 -- one above it and one above index 12 as well.
+   Index 64, the last deployment record, is simply past the arithmetic's reach.
+   Starting the first column at 11 or 12 to make the three columns cover the
+   block evenly is the mistake this constant exists to prevent.
+
+   The highest index the schedule ever writes is 17 + 0x2e = 63, and the map
+   has 65 live units, so nothing here runs off the array.  Neither this handler
+   nor the callee bounds an index against data_fdps_map_unit_count, and neither
+   has to.
+
+   CALL 0x0003a2e0 at 0003b1b9 is the shared end test, unconditional and
+   argument-free, and nothing reads EAX between it and the RET, so this handler
+   returns nothing of its own and adds no end condition either: chapter 20 is
+   chapter id 0x13, which is neither of the two ids -- 0x10 and 0x15 -- the
+   shared test singles out, so the slot it watches for the defeat is 0,
+   蘭迪斯.  That matches the chapter's stated rules exactly, 勝利條件 敵人全滅
+   and 失敗條件 蘭迪斯死亡.
+
+   Table slot 19: the dword at 000602d8, nineteen entries into the table based
+   at 0006028c, is 0003b150, and that table entry is the function's only
+   xref. */
+void fdps_chapter_20_post_action(void)
+{
+    if (data_fdps_battle_turn_counter <= CHAPTER_20_LAST_RELEASE_TURN) {
+        fdps_object_set_field34_low_nibble_range(
+            data_fdps_battle_turn_counter + CHAPTER_20_RELEASE_BASE_1,
+            data_fdps_battle_turn_counter + CHAPTER_20_RELEASE_BASE_1, 0);
+        fdps_object_set_field34_low_nibble_range(
+            data_fdps_battle_turn_counter + CHAPTER_20_RELEASE_BASE_2,
+            data_fdps_battle_turn_counter + CHAPTER_20_RELEASE_BASE_2, 0);
+        fdps_object_set_field34_low_nibble_range(
+            data_fdps_battle_turn_counter + CHAPTER_20_RELEASE_BASE_3,
+            data_fdps_battle_turn_counter + CHAPTER_20_RELEASE_BASE_3, 0);
+    }
+    fdps_battle_check_default_end_conditions();
+}

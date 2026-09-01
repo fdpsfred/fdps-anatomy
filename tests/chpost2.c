@@ -529,6 +529,364 @@ static void chapter_18_an_open_battle_stays_open(void)
     CHECK_EQ(end_code(), 0);
 }
 
+/* ------------------------------------------------------------------------
+ * Chapter 20's handler, 0003b150: CMP dword ptr [0x00069ce8],0x11 / JG
+ * 0x0003b1b9 at 0003b15c guarding three copies of PUSH 0x0 / MOV
+ * EAX,[0x00069ce8] / ADD EAX,<base> / PUSH EAX / MOV EAX,[0x00069ce8] / ADD
+ * EAX,<base> / PUSH EAX / CALL 0x00036b60 / ADD ESP,0xc at 0003b165, 0003b181
+ * and 0003b19d with bases 0xc, 0x1d and 0x2e, then the unconditional CALL
+ * 0x0003a2e0 at 0003b1b9 the branch jumps to.
+ *
+ * So there are four things worth pinning: which slots each turn releases, that
+ * the guard's boundary is 0x11 inclusive and its ordering signed, that the two
+ * pushed indices being equal makes each call a one-slot range rather than a
+ * run, and that the shared end test runs on every turn either way.
+ *
+ * The expected slot numbers are the assembly's three bases added to the turn
+ * counter, and the expected value written is the PUSH 0x0 -- behaviour code 0
+ * merged into the low nibble by fdps_object_set_field34_low_nibble_range
+ * (00036b60), whose AND 0xf0 / OR keeps the high nibble.  The staged records
+ * therefore start at 0x42: low nibble 2 is the hold-position code map19.dat
+ * deploys this map's enemies in, and 0x40 is one of the AI flag bits the
+ * scorers read, so a release shows up as 0x42 becoming 0x40 and an assignment
+ * that clobbered the flags would show up as 0x00.
+ *
+ * The chapter id staged throughout is 19, because the table slot number is the
+ * 0-based chapter id and the dword at 000602d8, nineteen entries into the
+ * table based at 0006028c, is 0003b150, and that table entry is the function's
+ * only xref.  That id is neither 0x10 nor 0x15, so the slot the shared test
+ * watches for the defeat is 0.
+ *
+ * The chapter's own conditions really are the shared test's two and nothing
+ * more: the guide's chapter 20 entry states 勝利條件：敵人全滅 and 失敗條件：
+ * 蘭迪斯死亡.  Its scripted business -- the sword upgrade and the wave-1
+ * arrival -- is a tile trigger and an opening script, so neither may show up
+ * as a verdict from this handler.
+ *
+ * The unit array is staged rather than read from map19.dat: the handler takes
+ * no arguments, so the array, the unit count, the turn counter and the chapter
+ * id are its entire input.  Nothing below asserts what any of those globals
+ * holds on its own -- ticket 23 owns that.
+ * ------------------------------------------------------------------------ */
+
+/* Chapter 20 is chapter id 19 (0x13). */
+#define CHAPTER_20_ID 19
+
+/* 65 is the live unit count map19.dat produces -- 11 party slots plus the 54
+   wave-0 deployment records -- and one slot past it is staged as well so a
+   schedule that overran the array by one would be visible rather than
+   corrupting the harness. */
+#define MAP19_UNITS 65
+#define STAGE20_UNITS (MAP19_UNITS + 1)
+
+/* The held enemy block: slot 11 is the scripted event walker the schedule must
+   not touch, 12 is below the first base, and 13..63 is what the seventeen
+   turns release. */
+#define WALKER_SLOT    11
+#define FIRST_RELEASED 13
+#define LAST_RELEASED  63
+
+/* The behaviour byte a held mode-2 enemy carries here: low nibble 2 is the
+   hold code, 0x40 an AI flag bit the release must preserve. */
+#define HELD_BEHAVIOR     0x42
+#define RELEASED_BEHAVIOR 0x40
+
+/* The last turn that releases anything, from the CMP ...,0x11 / JG. */
+#define LAST_RELEASE_TURN 0x11
+
+static struct fdps_unit_record stage20_units[STAGE20_UNITS];
+
+/* The array laid out the way fdps_build_map_unit_array and fdps_deploy_wave
+   leave it for this map: the 11 party slots at 0..10 and the 54 wave-0 enemies
+   at 11..64, every one of the enemies a held mode-2 unit carrying the AI flag
+   bit.  Nothing is retired, so the enemy block holds the shared test's verdict
+   at 0 unless a case says otherwise. */
+#define MAP19_PARTY_SLOTS 11
+
+static void stage20(int turn)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) stage20_units;
+    for (i = 0; i < (int) sizeof(stage20_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < STAGE20_UNITS; i++) {
+        stage20_units[i].side =
+            (unsigned char) (i < MAP19_PARTY_SLOTS ? SIDE_PLAYER : SIDE_ENEMY);
+        stage20_units[i].ai_behavior = HELD_BEHAVIOR;
+    }
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) stage20_units;
+    data_fdps_map_unit_count = MAP19_UNITS;
+    data_fdps_chapter_current_chapter_id = CHAPTER_20_ID;
+    data_fdps_chapter_event_or_battle_end_code = 0;
+    data_fdps_battle_turn_counter = turn;
+}
+
+/* How many staged slots are no longer holding.  Every release writes the same
+   value, so a count and a per-slot check together say both how many moved and
+   which. */
+static int released_count(void)
+{
+    int slot;
+    int count;
+
+    count = 0;
+    for (slot = 0; slot < STAGE20_UNITS; slot++) {
+        if (stage20_units[slot].ai_behavior != HELD_BEHAVIOR) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/* Turn 1 releases the three bases themselves: 1+0xc, 1+0x1d and 1+0x2e.  The
+   released value is 0x40 and not 0x00, which is the callee's merge keeping the
+   high nibble. */
+static void chapter_20_turn_1_releases_slots_13_30_47(void)
+{
+    stage20(1);
+    fdps_chapter_20_post_action();
+    CHECK_EQ(stage20_units[13].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(stage20_units[30].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(stage20_units[47].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(released_count(), 3);
+}
+
+/* Turn 17 is the last turn the guard admits -- CMP ...,0x11 / JG jumps only
+   above 0x11 -- and it releases the top of each column: 17+0xc, 17+0x1d and
+   17+0x2e, the highest of them slot 63, two below the map's 65 units. */
+static void chapter_20_turn_17_still_releases(void)
+{
+    stage20(LAST_RELEASE_TURN);
+    fdps_chapter_20_post_action();
+    CHECK_EQ(stage20_units[29].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(stage20_units[46].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(stage20_units[LAST_RELEASED].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(released_count(), 3);
+}
+
+/* Turn 18 releases nothing: the whole block is loose by then and the branch is
+   taken.  This is the case that separates JG from JGE -- a JGE would still be
+   releasing slots 30, 47 and 64 here, and slot 64 is a unit the original never
+   writes at all. */
+static void chapter_20_turn_18_releases_nothing(void)
+{
+    stage20(LAST_RELEASE_TURN + 1);
+    fdps_chapter_20_post_action();
+    CHECK_EQ(released_count(), 0);
+    CHECK_EQ(stage20_units[MAP19_UNITS - 1].ai_behavior, HELD_BEHAVIOR);
+}
+
+/* Later turns keep releasing nothing, so the guard is an upper bound and not a
+   window that reopens. */
+static void chapter_20_late_turns_release_nothing(void)
+{
+    int turn;
+
+    for (turn = LAST_RELEASE_TURN + 1; turn <= 40; turn++) {
+        stage20(turn);
+        fdps_chapter_20_post_action();
+        CHECK_EQ(released_count(), 0);
+    }
+}
+
+/* Three slots a turn and never a run.  Both indices pushed at each call site
+   are the same value, so each call is a one-slot inclusive range; had the
+   second been the column's other end the first turn alone would have released
+   the whole block. */
+static void chapter_20_releases_exactly_three_a_turn(void)
+{
+    int turn;
+
+    for (turn = 1; turn <= LAST_RELEASE_TURN; turn++) {
+        stage20(turn);
+        fdps_chapter_20_post_action();
+        CHECK_EQ(released_count(), 3);
+        CHECK_EQ(stage20_units[turn + 0x0c].ai_behavior, RELEASED_BEHAVIOR);
+        CHECK_EQ(stage20_units[turn + 0x1d].ai_behavior, RELEASED_BEHAVIOR);
+        CHECK_EQ(stage20_units[turn + 0x2e].ai_behavior, RELEASED_BEHAVIOR);
+    }
+}
+
+/* The seventeen turns run end to end cover slots 13 to 63 exactly once each,
+   which is what the three bases being 17 apart means, and they leave slots 11
+   and 12 and slot 64 holding.  Slot 11 is the load-bearing one: it is the
+   map's only behaviour-code-5 unit, the event walker that leaves the
+   bottom-left chest for the treasure at the top, and code 0 written over it
+   would cancel that walk -- which is exactly what a first base of 0xa or 0xb,
+   chosen to make the three columns cover the block evenly, would do. */
+static void chapter_20_seventeen_turns_cover_13_to_63(void)
+{
+    int turn;
+    int slot;
+
+    stage20(1);
+    for (turn = 1; turn <= LAST_RELEASE_TURN; turn++) {
+        data_fdps_battle_turn_counter = turn;
+        fdps_chapter_20_post_action();
+    }
+    CHECK_EQ(released_count(), LAST_RELEASED - FIRST_RELEASED + 1);
+    for (slot = FIRST_RELEASED; slot <= LAST_RELEASED; slot++) {
+        CHECK_EQ(stage20_units[slot].ai_behavior, RELEASED_BEHAVIOR);
+    }
+    CHECK_EQ(stage20_units[WALKER_SLOT].ai_behavior, HELD_BEHAVIOR);
+    CHECK_EQ(stage20_units[12].ai_behavior, HELD_BEHAVIOR);
+    CHECK_EQ(stage20_units[MAP19_UNITS - 1].ai_behavior, HELD_BEHAVIOR);
+    CHECK_EQ(stage20_units[MAP19_UNITS].ai_behavior, HELD_BEHAVIOR);
+}
+
+/* The turn counter is ordered signed: JG at 0003b163, not JA.  A negative
+   counter is not a state a battle reaches -- fdps_chapter_state_reset installs
+   1 and only fdps_battle_advance_turn raises it -- so this pins the emitted
+   comparison rather than a game behaviour, and the slots it reaches with a
+   counter of -1 are 11, 28 and 45, all inside the staged array.  Comparing the
+   counter as unsigned would jump instead and release nothing. */
+static void chapter_20_the_turn_test_is_signed(void)
+{
+    stage20(-1);
+    fdps_chapter_20_post_action();
+    CHECK_EQ(released_count(), 3);
+    CHECK_EQ(stage20_units[11].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(stage20_units[28].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(stage20_units[45].ai_behavior, RELEASED_BEHAVIOR);
+}
+
+/* Only the low nibble moves.  A released slot keeps the 0x40 flag bit, and
+   every neighbour of a released slot keeps its whole byte, so the callee's
+   inclusive range really did end where it started. */
+static void chapter_20_a_release_keeps_the_ai_flags(void)
+{
+    stage20(5);
+    fdps_chapter_20_post_action();
+    CHECK_EQ(stage20_units[17].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(stage20_units[16].ai_behavior, HELD_BEHAVIOR);
+    CHECK_EQ(stage20_units[18].ai_behavior, HELD_BEHAVIOR);
+    CHECK_EQ(stage20_units[34].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(stage20_units[33].ai_behavior, HELD_BEHAVIOR);
+    CHECK_EQ(stage20_units[35].ai_behavior, HELD_BEHAVIOR);
+    CHECK_EQ(stage20_units[51].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(stage20_units[50].ai_behavior, HELD_BEHAVIOR);
+    CHECK_EQ(stage20_units[52].ai_behavior, HELD_BEHAVIOR);
+}
+
+/* 勝利條件：敵人全滅, on a turn that also releases.  The CALL at 0003b1b9 is
+   the branch's target as well as its fall-through, so the shared test runs
+   whichever way the guard goes; with every enemy retired its up-front 2
+   survives. */
+static void chapter_20_clears_when_every_enemy_is_retired(void)
+{
+    int slot;
+
+    stage20(1);
+    for (slot = MAP19_PARTY_SLOTS; slot < MAP19_UNITS; slot++) {
+        stage20_units[slot].flags = FLAG_RETIRED;
+    }
+    fdps_chapter_20_post_action();
+    CHECK_EQ(end_code(), 2);
+    CHECK_EQ(released_count(), 3);
+}
+
+/* The same clear on a turn past the schedule, which is the path that reaches
+   the CALL through the JG rather than by falling into it. */
+static void chapter_20_clears_after_the_schedule_is_over(void)
+{
+    int slot;
+
+    stage20(LAST_RELEASE_TURN + 1);
+    for (slot = MAP19_PARTY_SLOTS; slot < MAP19_UNITS; slot++) {
+        stage20_units[slot].flags = FLAG_RETIRED;
+    }
+    fdps_chapter_20_post_action();
+    CHECK_EQ(end_code(), 2);
+    CHECK_EQ(released_count(), 0);
+}
+
+/* A live enemy puts the code back to 0, so the sweep inside the shared test is
+   reached and not short circuited by the release in front of it. */
+static void chapter_20_a_live_enemy_keeps_the_battle_going(void)
+{
+    stage20(3);
+    fdps_chapter_20_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* 失敗條件：蘭迪斯死亡.  Chapter id 19 is neither 0x10 nor 0x15, so the shared
+   test watches unit slot 0 and its store carries no guard: the defeat stands
+   even in the call that emptied the enemy side.  A handler that had carried
+   chapter 17's slot 3 here would answer 2. */
+static void chapter_20_a_retired_randis_is_a_defeat(void)
+{
+    int slot;
+
+    stage20(3);
+    stage20_units[0].flags = FLAG_RETIRED;
+    fdps_chapter_20_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage20(3);
+    for (slot = 0; slot < MAP19_UNITS; slot++) {
+        stage20_units[slot].flags = FLAG_RETIRED;
+    }
+    fdps_chapter_20_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* No slot but 0 ends this battle, slot 3 included -- the slot the shared test
+   would watch had chapter 20's id been one of the two it singles out.  Each of
+   the party's other slots, 1 to 10, is retired in turn with the enemy block
+   left standing to hold the battle open. */
+static void chapter_20_no_other_slot_ends_the_battle(void)
+{
+    int retired_slot;
+
+    for (retired_slot = 1; retired_slot < MAP19_PARTY_SLOTS; retired_slot++) {
+        stage20(3);
+        stage20_units[retired_slot].flags = FLAG_RETIRED;
+        fdps_chapter_20_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
+/* A verdict already recorded by a chapter event survives untouched -- the
+   shared test returns at its gate -- but the release does NOT: it sits in
+   front of the CALL and is guarded only by the turn counter, so it runs on a
+   turn whose battle has already been decided. */
+static void chapter_20_a_recorded_verdict_is_left_alone(void)
+{
+    stage20(1);
+    data_fdps_chapter_event_or_battle_end_code = 2;
+    fdps_chapter_20_post_action();
+    CHECK_EQ(end_code(), 2);
+    CHECK_EQ(released_count(), 3);
+
+    stage20(1);
+    data_fdps_chapter_event_or_battle_end_code = 1;
+    fdps_chapter_20_post_action();
+    CHECK_EQ(end_code(), 1);
+    CHECK_EQ(released_count(), 3);
+}
+
+/* The dispatchers run this after every unit action, so a turn on which several
+   units act calls it several times -- and it releases the same three slots each
+   time rather than advancing through the block.  Nothing in the body reads or
+   writes the turn counter; only fdps_battle_advance_turn moves it. */
+static void chapter_20_repeats_within_one_turn(void)
+{
+    stage20(4);
+    fdps_chapter_20_post_action();
+    fdps_chapter_20_post_action();
+    fdps_chapter_20_post_action();
+    CHECK_EQ(released_count(), 3);
+    CHECK_EQ(data_fdps_battle_turn_counter, 4);
+    CHECK_EQ(stage20_units[16].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(stage20_units[33].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(stage20_units[50].ai_behavior, RELEASED_BEHAVIOR);
+    CHECK_EQ(end_code(), 0);
+}
+
 void run_chpost2_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -551,4 +909,19 @@ void run_chpost2_tests(void)
     RUN_TEST(chapter_18_no_other_slot_ends_the_battle);
     RUN_TEST(chapter_18_a_recorded_verdict_is_left_alone);
     RUN_TEST(chapter_18_an_open_battle_stays_open);
+    RUN_TEST(chapter_20_turn_1_releases_slots_13_30_47);
+    RUN_TEST(chapter_20_turn_17_still_releases);
+    RUN_TEST(chapter_20_turn_18_releases_nothing);
+    RUN_TEST(chapter_20_late_turns_release_nothing);
+    RUN_TEST(chapter_20_releases_exactly_three_a_turn);
+    RUN_TEST(chapter_20_seventeen_turns_cover_13_to_63);
+    RUN_TEST(chapter_20_the_turn_test_is_signed);
+    RUN_TEST(chapter_20_a_release_keeps_the_ai_flags);
+    RUN_TEST(chapter_20_clears_when_every_enemy_is_retired);
+    RUN_TEST(chapter_20_clears_after_the_schedule_is_over);
+    RUN_TEST(chapter_20_a_live_enemy_keeps_the_battle_going);
+    RUN_TEST(chapter_20_a_retired_randis_is_a_defeat);
+    RUN_TEST(chapter_20_no_other_slot_ends_the_battle);
+    RUN_TEST(chapter_20_a_recorded_verdict_is_left_alone);
+    RUN_TEST(chapter_20_repeats_within_one_turn);
 }
