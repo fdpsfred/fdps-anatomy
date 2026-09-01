@@ -226,4 +226,46 @@ extern void fdps_chapter_22_post_action(void);
 extern void fdps_chapter_25_post_action(void);
 #pragma aux fdps_chapter_25_post_action "*" parm caller [];
 
+/* Chapter 26's post-action test: a victory condition and two defeat conditions
+   of its own, and no shared test at all.  Takes nothing, returns nothing, and
+   leaves the verdict in data_fdps_chapter_event_or_battle_end_code
+   (gamedata.h).
+
+   The victory is unit slots 12, 13, 14 and 15 all having left the battle, tested
+   in that order and short-circuiting on the first one still standing; those four
+   are the chapter's four 魔戰將軍 -- its 勝利條件 擊倒魔戰將軍 -- and they are
+   the map's first four enemy slots because the roster is twelve deep by this
+   chapter, 己方 being 法蓮娜以外的所有人.
+
+   The first defeat is unit slot 0, 蘭迪斯.  The second is unit slot 0x5b, and it
+   is asked only while data_fdps_map_cell_event_triggered_flags[0x10]
+   (gamedata.h) holds exactly 1 -- the one-shot latch
+   fdps_chapter_26_event_deploy_waves_2_and_3 (chevt5.h) sets when it brings the
+   map's reinforcements on.  Slot 0x5b does not exist before that event runs, so
+   the gate is what keeps the test inside the unit array rather than a redundant
+   guard, and it is an equality against 1 and not a non-zero test.
+
+   Slot 0x5b is the LAST of 索爾's four 侍衛 and not 索爾, who stands at 0x57:
+   the event deploys the map's wave 2 before its wave 3, so the seven wave-2
+   enemies take 0x50..0x56 and the five wave-3 allies take 0x57..0x5b in file
+   order, 索爾 first.  The chapter's stated 失敗條件 索爾死亡 is therefore not
+   what the code watches, and writing it as a test on 索爾's own slot ends the
+   battle on a different unit's death.
+
+   None of the three stores is guarded on what the code already holds and none is
+   another's else branch: they run in the order victory, 蘭迪斯, escort, and the
+   last write wins.  So an action that retires the final warlord together with
+   蘭迪斯 -- or, once the latch is set, together with slot 0x5b -- ends in a Game
+   Over, while an action that retires the final warlord after a chapter event has
+   recorded a defeat clears the chapter.
+
+   Like chapters 22's and 25's handlers and unlike the rest of this file, it never
+   calls fdps_battle_check_default_end_conditions (btlend.h).  It cannot: that
+   test declares its victory by sweeping for a live enemy, and this chapter is won
+   by killing four named units while the tower garrison still stands.
+
+   Table slot 25. */
+extern void fdps_chapter_26_post_action(void);
+#pragma aux fdps_chapter_26_post_action "*" parm caller [];
+
 #endif

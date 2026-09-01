@@ -445,3 +445,162 @@ void fdps_chapter_25_post_action(void)
         data_fdps_chapter_event_or_battle_end_code = 1;
     }
 }
+
+/* The four unit slots chapter 26's victory test asks about, the PUSH 0xc, PUSH
+   0xd, PUSH 0xe and PUSH 0xf immediates at 0003b76c, 0003b77a, 0003b78a and
+   0003b79a.  They are the map's first four enemy slots and they hold the
+   chapter's four 魔戰將軍.
+
+   MAP25.DAT is a 131-byte header followed by 80 deployment records of 26 bytes
+   -- 0x83 + 80 * 0x1a is 2211, the whole file.  Its header byte +1 fields
+   twelve player slots, the same field chapter 25's map sets to twelve, and byte
+   +2 is the record count, 80.  fdps_build_map_unit_array lays the twelve player
+   slots down first and fdps_deploy_wave appends, in file order, the records
+   whose wave byte (+0x15) equals the wave being deployed, so the 68 wave-0
+   records become unit slots 0x0c..0x4f the moment the map opens.  Records 0, 1,
+   2 and 3 are wave 0, are the file's only level-30 units -- their level byte
+   (+4) is 0x1e where every other record on the map is 0x12 or 0x28 -- and carry
+   character ids 0x40, 0x41, 0x42 and 0x43.  The guide's enemy list for this
+   chapter gives exactly four level-30 enemies, 凱因巴, 塞克斯, 布魯森 and
+   汎拉沛, against LV18 for the whole garrison behind them.
+
+   The roster is twelve deep for the same count as chapter 25's: the ten of
+   chapter 17 plus 蘭斯洛特, who arrives on chapter 19's sixth turn, plus 珊, who
+   joins in chapter 24.  Chapter 26's 己方 is 法蓮娜以外的所有人, so slot 3 is
+   reserved and empty here, which is what keeps the four warlords at 12..15
+   rather than 11..14. */
+#define CHAPTER_26_WARLORD_SLOT_1 0x0c
+#define CHAPTER_26_WARLORD_SLOT_2 0x0d
+#define CHAPTER_26_WARLORD_SLOT_3 0x0e
+#define CHAPTER_26_WARLORD_SLOT_4 0x0f
+
+/* The slot of data_fdps_map_cell_event_triggered_flags (gamedata.h) that the
+   one-shot chapter-event handlers latch: byte ptr [0x000640e8], element 0x10 of
+   the 32-entry array based at 0x000640d8.
+
+   The array's own indexer is a cell's raw event code and the shipped M%02d.DTL
+   event planes only ever use codes 0 to 15, so element 0x10 is the first slot no
+   map cell can reach and the event handlers use it as private storage.  It is
+   one slot shared by all of them, which is safe only because one chapter is
+   loaded at a time and fdps_chapter_state_reset memsets the whole array when a
+   chapter starts.  For this chapter the writer is
+   fdps_chapter_26_event_deploy_waves_2_and_3 at 00039230, which sets it to 1 at
+   0003939c as the last thing it does.
+
+   Element 0x10 is inside the declared 32 and not past it, so this is not a
+   folded base the decompiler has attributed to the wrong symbol; the array is
+   the owner of that byte. */
+#define CHAPTER_EVENT_ONE_SHOT_SLOT 0x10
+
+/* The unit slot chapter 26's second defeat test asks about, the PUSH 0x5b at
+   0003b7d8.  It is the LAST unit slot the map ever holds and it is the fourth
+   and last of 索爾's 侍衛 -- NOT 索爾 himself, who is at 0x57.
+
+   MAP25.DAT's 80 deployment records split 68 / 7 / 5 across waves 0, 2 and 3;
+   there are no wave-1 records.  fdps_chapter_26_event_deploy_waves_2_and_3
+   deploys wave 2 first (its FUN_00023830(map, 2, 0) at the top of the body) and
+   wave 3 afterwards, so the seven wave-2 records -- file records 73..79, all
+   side 0, character id 0x64 -- land at slots 0x50..0x56, and the five wave-3
+   records -- file records 62..66, all side 1 -- land at 0x57..0x5b.  Record 62
+   is character id 0x0c at level 40 and records 63..66 are four copies of
+   character id 0x3b at level 40, which is the guide's 友方 LV40英雄索爾 plus
+   LV40侍衛x4.  Character id 0x0c is 索爾: FRIAPRDA.DAT's row 0x0c is the
+   HP960 / MP480 / AP300 / DP100 / DX160 / MV6 template and FRILEVUP.DAT's row
+   0x0c grows every field by 1, so at level 40 the unit builder's
+   HP = hp_base + (LV-1) * hp_min gives 999 and MP gives 519, while
+   AP = ap_base + LV * ap_min gives 340 and DP 140 -- 740 and 310 once 炎龍劍
+   and 大地鎧甲 are counted, and DX 200.  That is the guide's 索爾 in all six
+   fields.
+
+   So the chapter's stated 失敗條件 索爾死亡 is NOT what the code tests: it
+   watches the last of his four escorts.  Writing the guide's rule as a test on
+   索爾's own slot reaches 0x57 and ends the battle on a different unit's death.
+   Nothing here corrects that; the original's rule is the rule.
+
+   0x5b is also the highest slot the map ever reaches -- twelve party slots plus
+   all 80 deployment records is 92 units, 0x00..0x5b -- which is why the read is
+   in bounds only once the relief force has landed, and why the latch above
+   guards it. */
+#define CHAPTER_26_ALLIED_GUARD_LAST_SLOT 0x5b
+
+/* 0003b760.  Three end conditions of the chapter's own and no forward to the
+   shared test: a victory, a defeat, and a second defeat that only becomes
+   reachable part-way through the map.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003b760..0003b766 -- and
+   nothing in it is ever read, so there is no local to name.  The epilogue is the
+   four bare POPs at 0003b7f2..0003b7f5 with no MOV ESP,EBP in front of them,
+   which is what an empty local area leaves behind, and the RET at 0003b7f6
+   carries no immediate.
+
+   The victory test is four calls chained by their zero tests.  PUSH 0xc / CALL
+   0x000109b0 / ADD ESP,0x4 at 0003b76c..0003b773 is fdps_unit_is_retired(0x0c)
+   with the caller clearing its one argument, and its EAX is used at once: TEST
+   EAX,EAX / JZ 0003b788 at 0003b776 leaves for the JMP 0x0003b798 that skips the
+   store the moment a warlord is still standing.  The 0xd call at 0003b77a, the
+   0xe call at 0003b78a and the 0xf call at 0003b79a repeat the shape with JNZ
+   into the next test and a fall-through onto the same skip chain, so the four
+   calls are a short-circuiting && chain in source order and no call after a live
+   warlord is made at all.  Only when all four report retired does control reach
+   MOV dword ptr [0x00069da0],0x2 at 0003b7aa.
+
+   The first defeat test then runs unconditionally: the store's own successor and
+   the skip chain's target are both 0003b7b4, where PUSH 0x0 / CALL 0x000109b0 /
+   ADD ESP,0x4 asks about unit slot 0 and TEST EAX,EAX / JZ 0003b7cc at 0003b7be
+   guards MOV dword ptr [0x00069da0],0x1 at 0003b7c2.  Slot 0 is 蘭迪斯, the
+   first half of the chapter's 失敗條件.
+
+   The second defeat test is gated on the chapter's one-shot event latch: XOR
+   EAX,EAX / MOV AL,byte ptr [0x000640e8] / CMP EAX,0x1 / JNZ 0003b7e6 at
+   0003b7cc..0003b7d6 zero-extends the byte and compares it for EQUALITY with 1,
+   so any other value -- including a non-zero one -- skips the test rather than
+   admitting it.  Only on the equal path does PUSH 0x5b / CALL 0x000109b0 / ADD
+   ESP,0x4 at 0003b7d8 run, and a retired slot 0x5b reaches MOV dword ptr
+   [0x00069da0],0x1 at 0003b7e8 through the JNZ at 0003b7e4.
+
+   That gate is load-bearing rather than defensive.  Slot 0x5b does not exist
+   until fdps_chapter_26_event_deploy_waves_2_and_3 has run, and that handler
+   sets the latch as the last thing it does, so the latch reading 1 is exactly
+   the condition "the relief force is on the map".  fdps_unit_is_retired does not
+   bound its index, so an ungated test would read the retirement bit of a record
+   the map has not built yet and could end the battle before the ally ever
+   appears.
+
+   None of the three stores consults the code's current value and none is
+   another's else branch, so the last write wins and the order is victory,
+   蘭迪斯, escort.  An action that retires the final warlord and 蘭迪斯 together
+   is a Game Over in the original, and so is one that retires the final warlord
+   and slot 0x5b together once the latch is set; an if/else, an else-if, or the
+   shared test's "only while the code is still 0" guard copied onto any of the
+   three would clear the chapter instead.  In the other direction the same
+   absence of a guard is what lets the victory overwrite a defeat a chapter event
+   recorded earlier in the action.
+
+   There is no CALL 0x0003a2e0 here, and that is the chapter's rules rather than
+   a missing line: the guide gives 第26章 狂信人之塔 勝利條件 擊倒魔戰將軍, four
+   named bosses and not 敵人全滅, so the shared test's sweep would clear the
+   chapter as soon as the last of the seventy-odd garrison fell with all four
+   warlords alive.  Because that test never runs, this handler has to carry both
+   defeats itself.
+
+   Chapter 26 is chapter id 25 and the dword at 000602f0, twenty-five entries
+   into the table based at 0006028c, is 0003b760; that table entry is the
+   function's only xref, which is why it has no static caller. */
+void fdps_chapter_26_post_action(void)
+{
+    if (fdps_unit_is_retired(CHAPTER_26_WARLORD_SLOT_1) != 0 &&
+        fdps_unit_is_retired(CHAPTER_26_WARLORD_SLOT_2) != 0 &&
+        fdps_unit_is_retired(CHAPTER_26_WARLORD_SLOT_3) != 0 &&
+        fdps_unit_is_retired(CHAPTER_26_WARLORD_SLOT_4) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 2;
+    }
+    if (fdps_unit_is_retired(0) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+    if (data_fdps_map_cell_event_triggered_flags[CHAPTER_EVENT_ONE_SHOT_SLOT] ==
+            1 &&
+        fdps_unit_is_retired(CHAPTER_26_ALLIED_GUARD_LAST_SLOT) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+}
