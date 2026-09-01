@@ -484,3 +484,51 @@ void fdps_chapter_13_post_action(void)
 {
     fdps_battle_check_default_end_conditions();
 }
+
+/* 0003aad0.  One CALL and a return, with no branch in the body at all --
+   instruction for instruction the chapter 2, 7, 12 and 13 handlers above,
+   reached through a fifth table slot.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003aad0..0003aad6 -- and
+   nothing in it is ever read, so there is no local to name.  The epilogue is
+   the four bare POPs at 0003aae1..0003aae4 with no MOV ESP,EBP in front of
+   them, which is what an empty local area leaves behind.
+
+   CALL 0x0003a2e0 at 0003aadc is the whole body.  Nothing is pushed in front
+   of it and nothing adjusts ESP after it, so the callee takes no argument;
+   nothing reads EAX between the CALL and the POPs, so its result is not used
+   and this handler returns nothing of its own.  The verdict the callee leaves
+   in data_fdps_chapter_event_or_battle_end_code is the answer, and the
+   dispatchers read that global directly -- CMP dword ptr [0x00069da0],0x0 at
+   00012a4e, immediately after the indirect call.
+
+   There is nothing else: no store, no test of the chapter id, no unit lookup.
+   Chapter 14 is 天空之騎士, and the guide gives it
+   勝利條件 敵人全滅 and 失敗條件
+   蘭迪斯或法蓮娜死亡 -- two lose
+   conditions, one more than the four handlers of the same shape above have.
+   The first of them is the shared test's slot 0; the second is not in this
+   function, and not by omission that could be read as an oversight in the
+   reading: no instruction between 0003aad0 and the RET at 0003aae5 examines a
+   unit at all.  A search of the whole image for CALL 0x000109b0,
+   fdps_unit_is_retired, lists 62 sites, and the two nearest this function are
+   0003a9b3 in chapter 11's handler and 0003ab51 in chapter 15's, one on
+   either side of it.  Chapters 4, 5 and 6 do follow the shared test with
+   exactly that test on unit slot 3, and on chapters 5 and 6 slot 3 is
+   法蓮娜 herself, so carrying their shape here is the natural
+   mistake and would end the battle on paths the original does not.  Where
+   法蓮娜's condition is enforced instead is not readable from
+   here: the per-unit death_script_opcode the record layout carries (struct
+   fdps_unit_record, fdpstype.h) and fdps_run_death_scripts are the route the
+   other chapters' casualty conditions take when no handler tests them, but
+   which record carries it on this chapter's map is a question for the map
+   data and not for this function.
+
+   Table slot 13: the dword at 000602c0, thirteen entries into the table based
+   at 0006028c, is 0003aad0, and that table entry is the function's only
+   xref. */
+void fdps_chapter_14_post_action(void)
+{
+    fdps_battle_check_default_end_conditions();
+}

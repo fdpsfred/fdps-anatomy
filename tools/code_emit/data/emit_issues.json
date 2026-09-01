@@ -1014,5 +1014,20 @@
       "needs": "The map deployment-record layout from whichever ticket settles the MAPnn.DAT format, after which record 20 of map01.dat can be read directly to confirm or correct the plate's claim.",
       "status": "open"
     }
+  ],
+  "0003aad0": [
+    {
+      "what": "The strategy guide gives chapter 14 (天空之騎士) two lose conditions, 蘭迪斯或法蓮娜死亡, and this handler implements only the first: it is a bare forward to fdps_battle_check_default_end_conditions, whose defeat arm watches unit slot 0, and no instruction between 0003aad0 and 0003aae5 examines a unit. So the rebuild reproduces this function exactly, but where the original enforces 法蓮娜's half of the condition is not established. The record layout carries a per-unit death_script_opcode/death_script_operand (struct fdps_unit_record, src/fdpstype.h) and fdps_run_death_scripts calls fdps_unit_is_retired at 0001da16 and 0001dc26, which is the route earlier chapters' unenforced casualty conditions were found to take (chapters 2, 4, 5, 6 in src/chpost1.h), but that route was verified there from map file contents and no such reading was done for this chapter's map.",
+      "needs": "The chapter 14 map's deployment records, read out of the map container with the map loader's on-disk layout (no map format is documented in resource_info/ yet), checking whether the record standing for 法蓮娜 carries a death script; or chapter 14's own event/init handlers once they are emitted, in case the condition is enforced there instead.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same gap independently and confirm it. My addition: the guide half is now pinned to the mirror rather than to memory -- 失敗條件：蘭迪斯或法蓮娜死亡 is fdps/walkthrough line 884, bracketed by the 第14章 天空之騎士 heading at line 838 and 第15章 要塞砲危機 at line 899, so it is chapter 14's. The code half needs no search to settle: the whole function is twelve instructions with exactly one CALL, to 0003a2e0, so nothing here can consult a unit, and 法蓮娜's half of the condition is enforced outside this handler. I did not extend the search to chapter 14's event or init handlers; I agree with the emitter that the map container's on-disk layout is undocumented in resource_info/ and that this is not settleable from where the emitter sat.",
+      "needs": "chapter 14's deployment records once a map reader exists, or chapter 14's own event/init handlers once they are emitted",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

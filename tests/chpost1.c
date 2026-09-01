@@ -1748,6 +1748,197 @@ static void ch13_an_open_battle_stays_open(void)
     CHECK_EQ(end_code(), 0);
 }
 
+/* ------------------------------------------------------------------ *
+ * Chapter 14's handler, 0003aad0.  Instruction for instruction chapters 2, 7,
+ * 12 and 13's: PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0, CALL
+ * 0x0003a2e0 at 0003aadc, then the four bare POPs and RET at
+ * 0003aae1..0003aae5.  No store, no compare, no second call, so the two things
+ * worth pinning are that the shared default end test really runs and that
+ * nothing else does.
+ *
+ * The second half carries more weight here than it does for the four handlers
+ * of the same shape above.  The guide's chapter 14 entry,
+ * 天空之騎士, gives 勝利條件
+ * 敵人全滅 and 失敗條件
+ * 蘭迪斯或法蓮娜死亡: a second lose
+ * condition, and this handler does not implement it.  The neighbouring
+ * handlers show exactly what implementing it would look like -- PUSH 0x3 at
+ * 0003a571, 0003a5e1 and 0003a653 for chapters 4, 5 and 6, slot 3 being
+ * 法蓮娜 herself on the last two of those, and PUSH 0x4 at
+ * 0003ab4f with PUSH 0x35 at 0003ab5d for chapter 15 in the very next table
+ * slot -- so a copied slot test is the concrete way this function goes wrong.
+ *
+ * That there is no such test is settled directly from the image: a search for
+ * CALL 0x000109b0, fdps_unit_is_retired, returns 62 sites and not one of them
+ * lies between 0003aad0 and the RET at 0003aae5; the two nearest are 0003a9b3
+ * in chapter 11's handler and 0003ab51 in chapter 15's.  The sweep below
+ * states the same thing behaviourally, and over every slot rather than a
+ * chosen few: 55 slots are staged and each of 1 through 53 retires in turn,
+ * which covers every literal any post-action handler in the table pushes,
+ * chapter 15's 0x35 included.
+ *
+ * Chapter id 13 is neither 0x10 nor 0x15, so inside the shared test the arm
+ * taken is PUSH 0x0 at 0003a382 -- slot 0, 蘭迪斯.
+ * ------------------------------------------------------------------ */
+
+/* Chapter 14 is chapter id 13, table slot 13: the dword at 000602c0, thirteen
+   entries into the table based at 0006028c, is 0003aad0. */
+#define CHAPTER_14_ID 13
+
+/* Fifty-five slots, so that the sweep can retire every index a post-action
+   handler anywhere in the table names -- 3 from chapters 4, 5 and 6, 4 and
+   0x35 from chapter 15, 6 and 7 from chapter 9, 8 from chapter 11 -- and still
+   leave a live enemy standing past the highest of them.  An
+   fdps_unit_is_retired staged over a shorter array would read past its end and
+   constrain nothing. */
+#define CH14_STAGE_UNITS 55
+
+/* The last slot, kept out of the sweep as the live enemy that holds the shared
+   test's answer at 0 while each of the others retires in turn. */
+#define CH14_ENEMY_SLOT 54
+
+static struct fdps_unit_record ch14_units[CH14_STAGE_UNITS];
+
+/* The same staging as stage(), over the fifty-five-slot array and with the
+   chapter id moved to chapter 14's. */
+static void stage_ch14(int live_unit_count, int battle_end_code)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) ch14_units;
+    for (i = 0; i < (int) sizeof(ch14_units); i++) {
+        bytes[i] = 0;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch14_units;
+    data_fdps_map_unit_count = live_unit_count;
+    data_fdps_chapter_current_chapter_id = CHAPTER_14_ID;
+    data_fdps_chapter_event_or_battle_end_code = (unsigned int) battle_end_code;
+}
+
+static void stage_ch14_unit(int unit_index, int side, int flags)
+{
+    ch14_units[unit_index].side = (unsigned char) side;
+    ch14_units[unit_index].flags = (unsigned char) flags;
+}
+
+/* The CALL is really taken: with every enemy retired the shared test's up
+   front 2 at 0003a2f9 survives, and a handler whose body did nothing would
+   leave the 0 it was given.  This is the chapter's stated win condition,
+   敵人全滅. */
+static void ch14_the_shared_end_test_runs(void)
+{
+    stage_ch14(5, 0);
+    stage_ch14_unit(0, SIDE_PLAYER, 0);
+    stage_ch14_unit(1, SIDE_PLAYER, 0);
+    stage_ch14_unit(2, SIDE_PLAYER, 0);
+    stage_ch14_unit(3, SIDE_ENEMY, FLAG_RETIRED);
+    stage_ch14_unit(4, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_14_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* One live enemy puts the code back to 0 at 0003a34a, so the walk inside the
+   shared test is reached through this handler and not short circuited by
+   anything in front of the CALL. */
+static void ch14_a_live_enemy_keeps_the_battle_going(void)
+{
+    stage_ch14(5, 0);
+    stage_ch14_unit(0, SIDE_PLAYER, 0);
+    stage_ch14_unit(1, SIDE_PLAYER, 0);
+    stage_ch14_unit(2, SIDE_PLAYER, 0);
+    stage_ch14_unit(3, SIDE_ENEMY, FLAG_RETIRED);
+    stage_ch14_unit(4, SIDE_ENEMY, 0);
+    fdps_chapter_14_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* The first of the chapter's two stated lose conditions,
+   蘭迪斯死亡, and it comes entirely from the shared test:
+   chapter id 13 is not 0x10 or 0x15, so the watched slot in there is 0, and its
+   store at 0003a390 is gated on the retirement alone and not on the code's
+   current value -- the defeat stands even in the call that emptied the enemy
+   side and wrote 2 moments earlier. */
+static void ch14_a_retired_randis_is_a_defeat(void)
+{
+    stage_ch14(5, 0);
+    stage_ch14_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_ch14_unit(1, SIDE_PLAYER, 0);
+    stage_ch14_unit(2, SIDE_PLAYER, 0);
+    stage_ch14_unit(3, SIDE_ENEMY, 0);
+    stage_ch14_unit(4, SIDE_ENEMY, 0);
+    fdps_chapter_14_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch14(5, 0);
+    stage_ch14_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_ch14_unit(1, SIDE_PLAYER, 0);
+    stage_ch14_unit(2, SIDE_PLAYER, 0);
+    stage_ch14_unit(3, SIDE_ENEMY, FLAG_RETIRED);
+    stage_ch14_unit(4, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_14_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* No unit slot but 0 ends this battle from code, and here that has to hold for
+   the chapter's second stated lose condition too: 法蓮娜 is on the
+   player side throughout chapter 14 and the handler still asks about no slot at
+   all, so whichever index she stands at, retiring her leaves the battle open.
+   Slots 1 through 53 retire in turn against a live enemy at slot 54 that holds
+   the shared test's answer at 0, so a defeat test this handler does not have
+   would show up as a 1.  The range is every slot up to and including the
+   highest literal any handler in the table pushes, chapter 15's 0x35. */
+static void ch14_no_other_slot_ends_the_battle(void)
+{
+    int retired_slot;
+    int player_slot;
+
+    for (retired_slot = 1; retired_slot < CH14_ENEMY_SLOT; retired_slot++) {
+        stage_ch14(CH14_STAGE_UNITS, 0);
+        for (player_slot = 0; player_slot < CH14_ENEMY_SLOT; player_slot++) {
+            stage_ch14_unit(player_slot, SIDE_PLAYER, 0);
+        }
+        stage_ch14_unit(CH14_ENEMY_SLOT, SIDE_ENEMY, 0);
+        ch14_units[retired_slot].flags = FLAG_RETIRED;
+        fdps_chapter_14_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
+/* A verdict already recorded survives the handler untouched: the shared test's
+   gate at 0003a2ec returns before anything is examined, and this handler adds
+   no store of its own on either side of the CALL.  Each value below would be
+   overwritten by a body that ran -- the array holds a live enemy, which would
+   settle the code at 0. */
+static void ch14_a_recorded_verdict_is_left_alone(void)
+{
+    stage_ch14(2, 1);
+    stage_ch14_unit(0, SIDE_PLAYER, 0);
+    stage_ch14_unit(1, SIDE_ENEMY, 0);
+    fdps_chapter_14_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch14(2, 2);
+    stage_ch14_unit(0, SIDE_PLAYER, 0);
+    stage_ch14_unit(1, SIDE_ENEMY, 0);
+    fdps_chapter_14_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* The handler stores nothing of its own before the CALL either: a battle that
+   is still open and has nothing to decide comes back still open, rather than
+   being reset or cleared by an initialisation the frame does not have. */
+static void ch14_an_open_battle_stays_open(void)
+{
+    stage_ch14(2, 0);
+    stage_ch14_unit(0, SIDE_PLAYER, 0);
+    stage_ch14_unit(1, SIDE_ENEMY, 0);
+    fdps_chapter_14_post_action();
+    CHECK_EQ(end_code(), 0);
+    fdps_chapter_14_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
 void run_chpost1_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -1813,4 +2004,10 @@ void run_chpost1_tests(void)
     RUN_TEST(ch13_no_other_slot_ends_the_battle);
     RUN_TEST(ch13_a_recorded_verdict_is_left_alone);
     RUN_TEST(ch13_an_open_battle_stays_open);
+    RUN_TEST(ch14_the_shared_end_test_runs);
+    RUN_TEST(ch14_a_live_enemy_keeps_the_battle_going);
+    RUN_TEST(ch14_a_retired_randis_is_a_defeat);
+    RUN_TEST(ch14_no_other_slot_ends_the_battle);
+    RUN_TEST(ch14_a_recorded_verdict_is_left_alone);
+    RUN_TEST(ch14_an_open_battle_stays_open);
 }

@@ -268,4 +268,28 @@ extern void fdps_chapter_12_post_action(void);
 extern void fdps_chapter_13_post_action(void);
 #pragma aux fdps_chapter_13_post_action "*" parm caller [];
 
+/* Chapter 14's post-action test: applies the game's standard end conditions
+   and nothing else.  Takes nothing, returns nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h) exactly as
+   fdps_battle_check_default_end_conditions (btlend.h) left it -- every enemy
+   retired clears the chapter, a retired unit slot 0 is a defeat that outranks
+   that clear, and a verdict already recorded is not recomputed.
+
+   Chapter 14 adds no condition of its own, which is the whole content of this
+   handler: it is a bare forward to the shared test, the same shape as chapters
+   2's, 7's, 12's and 13's.  天空之騎士 is given
+   勝利條件 敵人全滅 and 失敗條件
+   蘭迪斯或法蓮娜死亡, so unlike those four
+   it has a stated lose condition the shared test does not cover -- and it is
+   still not here.  The handlers of chapters 4, 5 and 6 do add a defeat test on
+   unit slot 3, which on chapters 5 and 6 is 法蓮娜, and chapter
+   15's, the very next table slot, adds one on slot 4; by chapter 14 the roster
+   is long enough for a slot at either index to exist, so writing that shape
+   here is the natural mistake and would end the battle on paths the original
+   does not.
+
+   Table slot 13. */
+extern void fdps_chapter_14_post_action(void);
+#pragma aux fdps_chapter_14_post_action "*" parm caller [];
+
 #endif
