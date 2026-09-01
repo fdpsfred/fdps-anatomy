@@ -1029,5 +1029,33 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003bade": [
+    {
+      "what": "The CD-ROM translation unit was built with different compiler flags from the rest of the game, and the rebuild cannot express that. Measured, not inferred: compiling the emitted src/cd.c body with -bt=dos4g -mf -4s -fpi -os reproduces 0003bade instruction for instruction and byte for byte, all 0x9f of them -- PUSH 0x14 / CALL __CHK with no register frame, PUSH imm32 for each argument address, MOVZX EAX,word ptr at 0003bb5b, bare RET. The pinned set (-s -ot -od) compiles the same source into 0xad bytes: a four-push frame, MOV EAX,offset / PUSH EAX argument pushes, XOR EAX,EAX / MOV AX in place of the MOVZX, and no stack probe. So this unit was compiled without -s and with -os rather than -ot -od. The scope is the whole module: 34 call sites reference __CHK at 0004361a and 32 of them are fdps_cd* functions spanning 0003bade to 0003c96x (the other two are the CRT's spawnve and spawnvpe), while build_flags.md measures zero __CHK calls among the 414 standard-frame game functions below 0x3b000. PUSH imm32 of a data address likewise appears nowhere in the image except that same block, and MOV EAX,<data address immediate> appears nowhere at all. The consequence is contract G and it is only the stack probe: build_emit.py compiles every unit with the one pinned set, so the rebuilt cd.c, cdaudio.c and cdtoc.c lose a guard the original has, and a stack overflow inside CD code writes through in the rebuild where the original would stop with Stack Overflow!. Everything else the flags change is instruction selection and register allocation, which ADR-0001 excludes. build_flags.md line 127 currently reads the 17 __CHK-prologue call sites as library functions, and pitfalls.md line 111 repeats it; both predate this module being routed as pool_fdps, and neither has been updated -- that is a canon question, not something an emit round settles.",
+      "needs": "A decision about whether the rebuild's build carries per-translation-unit flags at all, which is build_pipeline.md's and build_flags.md's to make and not one function's; plus, if it does, the same byte comparison run over the rest of the module (cdaudio.c and cdtoc.c) to confirm -os covers all 33 functions and not just this one.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "src/cd.h declares the three shared register blocks with the Watcom types the CRT call requires -- union REGS for data_fdps_cd_int_regs_in and data_fdps_cdrom_int_out_regs, struct SREGS for data_fdps_cd_int_sregs -- while routing.json records their types as byte[28], byte[28] and byte[12]. The sizes agree exactly, which is what contract B needs, and the generated stub module defines them from routing's types, so the current build links and runs correctly. What is not settled is what ticket 23 will emit as their definitions: if it emits byte arrays, the definition and this declaration will describe the same 28 or 12 bytes under two different types in two translation units, which no Watcom diagnostic reports.",
+      "needs": "Ticket 23's emitted definitions for 00069dac, 00069dc8 and 00069df0, compared against the declarations in src/cd.h.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed independently rather than restated: I ran WDISASM over the CD.OBJ this build produced and the emitted source compiles under the pinned flag set to 0xad bytes with no CALL __CHK, against an original that opens PUSH 0x14 / CALL 0x0004361a. So the divergence is real and it is exactly the stack probe -- the rest of the delta (register frame, mov-offset/push against PUSH imm32, xor/mov ax against MOVZX) is instruction selection and register allocation, which ADR-0001 excludes. I did not re-derive the module-wide scope claim about the other 32 functions; that part still rests on the emitter's call-site count.",
+      "needs": "A decision on whether the rebuild's build carries per-translation-unit flags at all -- build_pipeline.md's and build_flags.md's to make.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Nothing to add to the emitter's reading; I confirmed the mismatch is live rather than hypothetical. undefined.json currently defines the three blocks as unsigned char[28], unsigned char[28] and unsigned char[12] while src/cd.h declares them union REGS, union REGS and struct SREGS. Sizes agree exactly, which is what contract B needs, and the suite runs green against the real DPMI host, so nothing is wrong today.",
+      "needs": "Ticket 23's emitted definitions for 00069dac, 00069dc8 and 00069df0, compared against the declarations in src/cd.h.",
+      "same_as": "emit#1",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

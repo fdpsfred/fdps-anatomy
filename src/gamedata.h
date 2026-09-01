@@ -741,4 +741,25 @@ extern unsigned int data_fdps_chapter_event_or_battle_end_code;
    000151c8..000151d0. */
 extern int data_fdps_battle_turn_counter;
 
+/* 00069de8.  Flat linear address of the 512-byte DOS real-mode block the
+   MSCDEX request header is built in.  It is the real-mode segment
+   fdps_cd_alloc_dos_buffers got back from DPMI, shifted left four: DOS/4GW
+   identity maps the first megabyte, so the same bytes the real-mode driver
+   sees through data_fdps_cd_request_header_real_mode_seg are reachable through
+   this pointer directly.  Zero until fdps_cdrom_detect runs. */
+extern unsigned char *data_fdps_cd_request_header_buffer;
+
+/* 00069da4.  Flat linear address of the second 512-byte DOS real-mode block,
+   the one the driver transfers IOCTL replies and audio status into.  Same
+   segment-shifted-left-four relationship as the header block above, and the
+   same lifetime: allocated once, never freed. */
+extern unsigned char *data_fdps_cd_ioctl_buffer;
+
+/* 00069da8.  The same IOCTL block as a real-mode far pointer already packed
+   into one dword, segment in the high half and offset zero in the low half,
+   which is the form the MSCDEX request header's transfer address field wants.
+   fdps_cd_alloc_dos_buffers stores it that way at 0003bb5b-0003bb65 so that no
+   later call has to build it; the low half is therefore always zero. */
+extern unsigned int data_fdps_cd_ioctl_buffer_real_mode_ptr;
+
 #endif

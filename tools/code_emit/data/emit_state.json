@@ -1405,6 +1405,14 @@
       "status": "committed",
       "emitted_against": "0x29",
       "rounds": 1
+    },
+    "0003bade": {
+      "name": "fdps_cd_alloc_dos_buffers",
+      "target": "cd.c",
+      "body_size": "0x9f",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x9f"
     }
   }
 }
