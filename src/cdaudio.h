@@ -73,4 +73,17 @@ extern void fdps_cd_play_audio_range(unsigned int start_sector,
 extern void fdps_cd_stop_audio(void);
 #pragma aux fdps_cd_stop_audio "*" parm caller [];
 
+/* 0003c4ff.  Resumes CD-DA playback the drive was told to hold -- MSCDEX
+   device command 0x88, Resume Audio Play -- in the same bare 13-byte device
+   request header the stop command uses, and with the same three stores.  The
+   command takes no parameters: playback picks up where the pause left it.
+
+   Takes nothing and returns nothing.  Nothing in the image calls it, so no
+   caller pins its behaviour.  Whether the drive accepted the request is
+   visible only in data_fdps_cd_last_request_status, which this leaves holding
+   the status word the driver wrote into the request header -- bit 15 is
+   error. */
+extern void fdps_cd_resume_audio(void);
+#pragma aux fdps_cd_resume_audio "*" parm caller [];
+
 #endif

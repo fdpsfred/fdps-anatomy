@@ -1546,6 +1546,14 @@
       "status": "committed",
       "emitted_against": "0x58",
       "rounds": 0
+    },
+    "0003c4ff": {
+      "name": "fdps_cd_resume_audio",
+      "target": "cdaudio.c",
+      "body_size": "0x1d",
+      "status": "committed",
+      "emitted_against": "0x1d",
+      "rounds": 0
     }
   }
 }

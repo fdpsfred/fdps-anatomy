@@ -169,3 +169,47 @@ void fdps_cd_stop_audio(void)
 
     data_fdps_cd_last_request_status = request_header.status;
 }
+
+/* 0003c4ff.  The MSCDEX Resume Audio Play request -- command 0x88 -- that
+   restarts playback the drive was told to hold.  It is the stop request with
+   one byte changed: the same bare 13-byte device request header, the same
+   three stores, the same absence of any addressing mode, transfer address or
+   sector range, because this command takes no parameters either -- the drive
+   resumes from wherever its own pause left it.
+
+   The whole body is MOV byte ptr [ESP],0xd, MOV byte ptr [ESP+0x1],0x0 and MOV
+   byte ptr [ESP+0x2],0x88 at 0003c50c-0003c51a, and then JMP 0003c4c2 into the
+   middle of fdps_cd_stop_audio: the two routines differ only in that command
+   byte, so the compiler tail-merged everything from the outbound memcpy
+   onwards and the resume body owns no epilogue of its own.  What follows the
+   jump is therefore literally the stop request's trailer, and the two are
+   written here as two whole functions because the merge is codegen rather than
+   behaviour (ADR-0001).
+
+   Offsets 3 to 0x0c -- the status word and the eight reserved bytes -- are
+   never initialised here either: they go out to the driver holding whatever
+   the frame held.  The local is a whole struct for the same reason it is one
+   in the stop request, because the read-back at 0003c4f1 takes a word from
+   offset 3 and the thirteen bytes have to be one object.
+
+   Nothing in the image calls this.  A sweep for the entry address -- xrefs,
+   an operand search over all 89,420 instructions and a byte search for the
+   little-endian pointer -- finds it referenced from nowhere, so the pause it
+   pairs with is not issued anywhere either and no caller pins its behaviour
+   further.  Whether the drive accepted the request is visible only in
+   data_fdps_cd_last_request_status, which this leaves holding the status word
+   the driver wrote back. */
+void fdps_cd_resume_audio(void)
+{
+    struct fdps_cd_request_header request_header;
+
+    request_header.header_length = 0xd;
+    request_header.subunit = 0;
+    request_header.command = 0x88;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0xd);
+    fdps_cd_device_request();
+    memcpy(&request_header, data_fdps_cd_request_header_buffer, 0xd);
+
+    data_fdps_cd_last_request_status = request_header.status;
+}

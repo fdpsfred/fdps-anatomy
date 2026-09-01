@@ -1,7 +1,8 @@
 /* tests/cdaudio.c -- cover for src/cdaudio.c.
  *
  * So far this covers fdps_cd_seek at 0003c3fa, fdps_cd_play_audio_range at
- * 0003c452 and fdps_cd_stop_audio at 0003c4a7.
+ * 0003c452, fdps_cd_stop_audio at 0003c4a7 and fdps_cd_resume_audio at
+ * 0003c4ff.
  *
  * Every expected value below comes from the instructions of those functions,
  * never from the emitted C.  For fdps_cd_seek:
@@ -34,6 +35,12 @@
  *   PUSH 0xd / PUSH dword ptr [0x00069de8] / LEA EAX,[ESP+0x8] / PUSH EAX /
  *     CALL memcpy / ADD ESP,0xc
  *   MOV EAX,dword ptr [ESP+0x3] / MOV [0x00069e20],AX
+ *
+ * and for fdps_cd_resume_audio, whose whole body is three stores and a jump
+ * into the trailer just quoted:
+ *
+ *   MOV byte  ptr [ESP],     0xd    MOV byte  ptr [ESP+0x1],  0x0
+ *   MOV byte  ptr [ESP+0x2], 0x88   JMP 0003c4c2
  *
  * The request is issued for real, exactly as tests/cd.c issues its own: the
  * test executable runs under DOS/4GW inside DOSBox-X, which is the same DPMI
@@ -434,6 +441,114 @@ static void cdaudio_stop_publishes_the_driver_status_word(void)
     CHECK_EQ(data_fdps_cd_last_request_status, staged_word(header, 3));
 }
 
+/* The resume request stages through the same block as the other three, and is
+   poisoned across the whole 0x20 for the same reason the stop request is. */
+static unsigned char *resume_with_a_poisoned_header(void)
+{
+    int i;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    for (i = 0; i < 0x20; i++) {
+        data_fdps_cd_request_header_buffer[i] = HEADER_POISON;
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    fdps_cd_resume_audio();
+    return data_fdps_cd_request_header_buffer;
+}
+
+/* Command code 0x88 is Resume Audio Play and the header declares itself 13
+   bytes long -- the same bare device request header the stop command uses, so
+   the only thing separating the two requests on the wire is this one byte.
+   Subunit 0 is the module's only drive.
+
+   0x88 rather than 0x85 is the whole point of the assertion: the two functions
+   share every instruction from 0003c4c2 onwards, so a resume that reached the
+   driver carrying 0x85 would stop the music instead of restarting it and
+   nothing else in either body would look wrong.
+
+   As with the stop request there is deliberately no assertion on offset 0x0d:
+   13 bytes is where this header ends, and it has no addressing-mode byte. */
+static void cdaudio_resume_stages_a_resume_audio_command(void)
+{
+    unsigned char *header;
+
+    header = resume_with_a_poisoned_header();
+    CHECK_EQ(header[0], 0xd);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 0x88);
+}
+
+/* PUSH 0xd is the copy length in both directions in the shared trailer, so the
+   resume request ends at offset 0x0d exactly as the stop request does and
+   everything above it is left as it was. */
+static void cdaudio_resume_copies_exactly_the_declared_header(void)
+{
+    unsigned char *header;
+
+    header = resume_with_a_poisoned_header();
+    CHECK_EQ(header[0xd], HEADER_POISON);
+    CHECK_EQ(header[0xe], HEADER_POISON);
+    CHECK_EQ(header[0x15], HEADER_POISON);
+    CHECK_EQ(header[0x17], HEADER_POISON);
+    CHECK_EQ(header[0x1f], HEADER_POISON);
+}
+
+/* The same boundary pinned against a real longer request instead of against
+   poison: a play request stages 0x16 bytes with its start sector as a full
+   dword at offset 0x0e, and a resume issued straight afterwards must leave
+   that dword standing.  0x00012345 is the start sector the play tests use. */
+static void cdaudio_resume_leaves_the_previous_requests_tail_alone(void)
+{
+    unsigned char *header;
+
+    header = play_with_a_poisoned_header(0x00012345u, 0x00051234u);
+    CHECK_EQ((long) staged_dword(header, 0xe), 0x00012345L);
+
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    fdps_cd_resume_audio();
+    CHECK_EQ(header[0], 0xd);
+    CHECK_EQ(header[2], 0x88);
+    CHECK_EQ((long) staged_dword(header, 0xe), 0x00012345L);
+}
+
+/* The header is copied back out of the DOS block before the status word is
+   read out of it, so the published word has to agree with the word still at
+   header offset 3.  What the driver leaves there is not the test's to decide
+   -- offsets 3 to 0x0c are never initialised -- so what is pinned is the
+   displacement and the width: MOV EAX,[ESP+3] / MOV [0x00069e20],AX stores
+   only the low half of the dword it loads. */
+static void cdaudio_resume_publishes_the_driver_status_word(void)
+{
+    unsigned char *header;
+
+    header = resume_with_a_poisoned_header();
+    CHECK_EQ(data_fdps_cd_last_request_status, staged_word(header, 3));
+}
+
+/* A stop and a resume issued back to back reach the driver as the same
+   thirteen bytes apart from the command: the tail merge means everything else
+   about them is literally the same instructions, and this is what says the two
+   emitted bodies did not collapse into one behaviour.  Only the fields the
+   bodies actually write are compared -- offsets 3 to 0x0c hold whatever the
+   frame held and are not the test's to predict. */
+static void cdaudio_resume_and_stop_differ_only_in_the_command_byte(void)
+{
+    unsigned char stop_header[3];
+    unsigned char *header;
+
+    header = stop_with_a_poisoned_header();
+    stop_header[0] = header[0];
+    stop_header[1] = header[1];
+    stop_header[2] = header[2];
+
+    header = resume_with_a_poisoned_header();
+    CHECK_EQ(header[0], stop_header[0]);
+    CHECK_EQ(header[1], stop_header[1]);
+    CHECK_EQ(header[2] - stop_header[2], 0x88 - 0x85);
+}
+
 void run_cdaudio_tests(void)
 {
     RUN_TEST(cdaudio_seek_header_fields_sit_where_the_stores_land);
@@ -453,4 +568,9 @@ void run_cdaudio_tests(void)
     RUN_TEST(cdaudio_stop_copies_exactly_the_declared_header);
     RUN_TEST(cdaudio_stop_leaves_the_previous_requests_tail_alone);
     RUN_TEST(cdaudio_stop_publishes_the_driver_status_word);
+    RUN_TEST(cdaudio_resume_stages_a_resume_audio_command);
+    RUN_TEST(cdaudio_resume_copies_exactly_the_declared_header);
+    RUN_TEST(cdaudio_resume_leaves_the_previous_requests_tail_alone);
+    RUN_TEST(cdaudio_resume_publishes_the_driver_status_word);
+    RUN_TEST(cdaudio_resume_and_stop_differ_only_in_the_command_byte);
 }
