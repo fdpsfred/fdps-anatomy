@@ -1302,6 +1302,132 @@ static void cd_media_change_returns_the_answer_byte_zero_extended(void)
     CHECK_EQ(media_change_byte, media_change_byte & 0xff);
 }
 
+/* fdps_cd_set_door_lock, 0003c7aa.
+ *
+ * Same arrangement as the request builders above: the request is issued for
+ * real at drive letter index 0xff, which MSCDEX rejects on the drive number
+ * before it follows ES:BX, and where no CD-ROM drive is mounted there is no
+ * MSCDEX handler on INT 2Fh at all.  Neither case touches the two DOS blocks,
+ * so what is in them afterwards is exactly what the function staged -- which
+ * is what makes it safe to lock a door here without leaving a real drive
+ * locked.
+ *
+ * Expected values are the immediates in the body -- MOV byte ptr [ESP],0x18,
+ * [ESP+1],0 and [ESP+2],0xc at 0003c7b7..0003c7c0, MOV byte ptr [ESP+0xd],0,
+ * the transfer address loaded from [0x00069da8], MOV word ptr [ESP+0x12],0x2,
+ * MOV byte ptr [ESP+0x18],0x1 at 0003c7da, the MOV AL,byte ptr [ESP+0x20] /
+ * MOV byte ptr [ESP+0x19],AL pair at 0003c7df that takes the argument a byte
+ * at a time, and the three lengths PUSH 0x18 at 0003c7e7, PUSH 0x2 at 0003c7fc
+ * and PUSH 0x18 at 0003c583 in the shared tail.
+ *
+ * Nothing below asserts what the driver answered.  The status word is checked
+ * against the bytes it was read out of, which is what pins the displacement
+ * and the width: MOV EAX,[ESP+3] / MOV [0x00069e20],AX.
+ */
+static void set_door_lock_on_a_rejected_drive(int lock)
+{
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    data_fdps_cd_ioctl_buffer[2] = 0x5a;
+    data_fdps_cd_request_header_buffer[0x18] = 0x5b;
+    data_fdps_cd_request_header_buffer[0x19] = 0x5c;
+    fdps_cd_set_door_lock(lock);
+}
+
+/* Command code 0x0c is IOCTL Output -- the field that makes this the write
+   direction -- and the transfer it describes is two bytes out of the second
+   DOS block, addressed by the packed real-mode far pointer and not by the flat
+   one.  A byte count of anything but 2 would be a different request. */
+static void cd_door_lock_stages_an_ioctl_output_request(void)
+{
+    unsigned char *header;
+
+    set_door_lock_on_a_rejected_drive(1);
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x18);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 0xc);
+    CHECK_EQ(header[0xd], 0);
+    CHECK_EQ((long) staged_dword(header, 0xe),
+             (long) data_fdps_cd_ioctl_buffer_real_mode_ptr);
+    CHECK_EQ(staged_word(header, 0x12), 2);
+}
+
+/* The declared length is two short of the record, and the send copies that
+   declared length: PUSH 0x18 at 0003c7e7, against a struct of 0x1a.  So the two
+   bytes at the end of the record are never staged, and the poison the setup put
+   at 0x18 and 0x19 is still there -- which is the only way to see the
+   under-declaration from outside, since what does get sent in start_sector is
+   uninitialised stack and cannot be asserted at all. */
+static void cd_door_lock_sends_two_bytes_short_of_the_record(void)
+{
+    set_door_lock_on_a_rejected_drive(1);
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0] + 2,
+             (int) sizeof(struct fdps_cd_request_header));
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0x18], 0x5b);
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0x19], 0x5c);
+}
+
+/* The control block is the two bytes { 1, lock }: function code 01h,
+   Lock/Unlock Door, and the state behind it.  PUSH 0x2 at 0003c7fc is the count
+   the staging memcpy runs with, so the third byte of the DOS block keeps the
+   poison the setup put there -- a copy that ran even one byte long would take
+   it with it.  Two is also what the header's transfer byte count says, so a
+   request that staged more bytes than it told the driver about would show as a
+   disagreement between these two assertions. */
+static void cd_door_lock_sends_the_lock_door_control_block(void)
+{
+    set_door_lock_on_a_rejected_drive(1);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 1);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 1);
+    CHECK_EQ(staged_word(data_fdps_cd_request_header_buffer, 0x12), 2);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[2], 0x5a);
+}
+
+/* The state byte is the argument and nothing else: 0 has to reach the driver as
+   0, the unlock order, and not be folded into the function code or into any
+   truth value.  The function code beside it is a constant and stays 1 either
+   way. */
+static void cd_door_lock_sends_the_unlock_state_through(void)
+{
+    set_door_lock_on_a_rejected_drive(0);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 1);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 0);
+}
+
+/* MOV AL,byte ptr [ESP+0x20] reads one byte of the pushed dword, so the block
+   carries the argument's low eight bits and nothing else.  0x7f01 and 1 are the
+   same order to the drive, and 0x100 stamps a zero, unlock -- an argument taken
+   as a full int, or reduced to a boolean, would put a nonzero byte there for
+   both. */
+static void cd_door_lock_uses_only_the_low_byte_of_the_argument(void)
+{
+    set_door_lock_on_a_rejected_drive(0x7f01);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 1);
+    set_door_lock_on_a_rejected_drive(0x100);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 0);
+}
+
+/* The header is copied back out of the DOS block before the status is read --
+   PUSH 0x18 at 0003c583, a flat literal that covers offset 3 -- so the
+   published word has to be the word still sitting at header+3.  MOV EAX,[ESP+3]
+   / MOV [0x00069e20],AX is a 16-bit store out of a dword load, so a status read
+   a byte early or late, or one that let the high half through, would break the
+   equality whatever the driver left there.
+
+   This is the half of the shared tail that a rewrite is most likely to lose,
+   because the JMP at 0003c7fe makes it look like somebody else's code: without
+   it fdps_cd_status_is_not_busy would afterwards report on whatever request ran
+   before this one. */
+static void cd_door_lock_publishes_the_request_status(void)
+{
+    set_door_lock_on_a_rejected_drive(1);
+    CHECK_EQ(data_fdps_cd_last_request_status,
+             staged_word(data_fdps_cd_request_header_buffer, 3));
+}
+
 /* The fdps_cdrom_detect cases come first, and deliberately: the allocation
    guard at 0003c68e is only observable on a call made before the module's DOS
    buffers exist, and every other test in this file allocates them in its own
@@ -1356,4 +1482,10 @@ void run_cd_tests(void)
     RUN_TEST(cd_media_change_asks_for_the_media_changed_block);
     RUN_TEST(cd_media_change_publishes_status_and_returns_the_answer_byte);
     RUN_TEST(cd_media_change_returns_the_answer_byte_zero_extended);
+    RUN_TEST(cd_door_lock_stages_an_ioctl_output_request);
+    RUN_TEST(cd_door_lock_sends_two_bytes_short_of_the_record);
+    RUN_TEST(cd_door_lock_sends_the_lock_door_control_block);
+    RUN_TEST(cd_door_lock_sends_the_unlock_state_through);
+    RUN_TEST(cd_door_lock_uses_only_the_low_byte_of_the_argument);
+    RUN_TEST(cd_door_lock_publishes_the_request_status);
 }

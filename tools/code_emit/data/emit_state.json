@@ -1604,6 +1604,14 @@
       "status": "committed",
       "emitted_against": "0xb1",
       "rounds": 0
+    },
+    "0003c7aa": {
+      "name": "fdps_cd_set_door_lock",
+      "target": "cd.c",
+      "body_size": "0x59",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x59"
     }
   }
 }

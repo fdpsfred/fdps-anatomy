@@ -1277,5 +1277,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003c7aa": [
+    {
+      "what": "The door state this routine is meant to be called with cannot be established, because nothing in the image calls it: get_xrefs_to 0003c7aa returns no references and get_function_callers returns none, so there is no call site to read a constant off. The emitted code is therefore complete and correct as a request builder -- both states go out exactly as the assembly stamps them -- but which state the game would have asked for, and at what point in the disc-swap flow, is not recoverable from the binary. This is a note about the function's role, not a doubt about its behaviour: nothing in the equivalence of the emitted C depends on it.",
+      "needs": "Nothing in the binary settles it, since the call site does not exist. It would be settled by an original-source or design artefact for the CD module, or by the disc-swap prompt in the shipped game turning out to lock the door through some other path that names this routine's state -- neither of which is reachable from the image.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same place independently and added a stronger negative: besides get_xrefs_to and get_function_callers both returning nothing, I swept the whole image with search_instructions (89,420 instructions scanned, operand pattern '3c7aa') and found zero matches, so there is no code reference and no address-taking instruction anywhere -- the routine is unreachable in the shipped binary, not merely uncalled by a known caller. That closes the 'maybe an indirect call table' reading the emitter's entry left open, and it leaves the entry itself exactly as it stands: which door state the game would have asked for is a question about intent, and nothing about the emitted code's equivalence depends on the answer.",
+      "needs": "Unchanged from the emitter's entry: no artefact in the binary can settle it, since the call site does not exist.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

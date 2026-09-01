@@ -272,4 +272,19 @@ extern unsigned short fdps_cd_status_is_not_busy(void);
 extern unsigned short fdps_cd_read_media_change_status(void);
 #pragma aux fdps_cd_read_media_change_status "*" parm caller [];
 
+/* Locks or unlocks the CD-ROM drive door, so the disc cannot be swapped while
+   the game is using it -- MSCDEX IOCTL Output, control block 01h Lock/Unlock
+   Door, whose payload is the function code and the door state behind it.
+
+   lock is that state: 1 locks the drive door, 0 unlocks it.  Only its low eight
+   bits are used; the argument is pushed as a dword and read back as MOV
+   AL,byte ptr [ESP+0x20].
+
+   Returns nothing.  Whether the drive accepted the order is visible only in
+   data_fdps_cd_last_request_status, which this leaves holding the status word
+   the driver wrote into the request header -- the word fdps_cd_status_is_not_
+   busy tests.  Nothing in the image calls it. */
+extern void fdps_cd_set_door_lock(int lock);
+#pragma aux fdps_cd_set_door_lock "*" parm caller [];
+
 #endif

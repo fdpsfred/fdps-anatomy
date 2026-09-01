@@ -645,3 +645,65 @@ unsigned short fdps_cd_read_media_change_status(void)
     data_fdps_cd_last_request_status = request_header.status;
     return control_block[1];
 }
+
+/* 0003c7aa.  An MSCDEX IOCTL Output request -- command code 0x0c -- whose
+   control block is the two-byte Lock/Unlock Door order: function code 1 and
+   the door state behind it.  Locking the door is what stops the disc being
+   swapped while the game is reading from it.
+
+   No branch in the body at all: build the header, stamp the two-byte block,
+   stage both into the two DOS blocks, send, read the header back, publish the
+   status word.  The order here is the other way round from
+   fdps_cd_ioctl_output_command's: the header fields are written first and the
+   control block after them, MOV byte ptr [ESP+0x18],0x1 / MOV AL,byte ptr
+   [ESP+0x20] / MOV byte ptr [ESP+0x19],AL at 0003c7da..0003c7e3.  Only the low
+   byte of the pushed argument is ever looked at.
+
+   The declared header length is 0x18, two short of the twenty-six the record
+   actually is, and 0x18 is also what the staging memcpy copies (MOV byte ptr
+   [ESP],0x18 at 0003c7b7 and PUSH 0x18 at 0003c7e7).  So start_sector and the
+   low half of volume_id_ptr go out holding whatever the frame held, and this
+   body never writes either of them: there is no store at [ESP+0x14] or
+   [ESP+0x16] anywhere in it.  Zeroing them to make the request look tidy would
+   send two bytes the original does not.  The status word and the eight
+   reserved bytes are uninitialised for the same reason as in the siblings --
+   the driver writes the first and ignores the rest.
+
+   The read-back is a flat literal, PUSH 0x18 at 0003c583, not the header's own
+   length byte.  The control block is not read back at all: this is an order to
+   the drive, not a question.
+
+   From the control-block staging onward the code is shared with
+   fdps_cd_ioctl_output_command: this body ends PUSH 0x2 / JMP 0x0003c56b, a
+   label inside that function's tail, which is Watcom folding two identical
+   tails together and not a routine either of them calls.  Both C functions
+   therefore carry their own copy of it, including the store into
+   data_fdps_cd_last_request_status -- drop that from either one and
+   fdps_cd_status_is_not_busy afterwards reports on whatever request ran
+   before, silently.
+
+   The transfer-address field carries data_fdps_cd_ioctl_buffer_real_mode_ptr,
+   the packed real-mode far pointer, while the memcpy that fills the block goes
+   through data_fdps_cd_ioctl_buffer, the flat linear address of that same DOS
+   block.  The two are not interchangeable (rebuild_info/pitfalls.md). */
+void fdps_cd_set_door_lock(int lock)
+{
+    struct fdps_cd_request_header request_header;
+    unsigned char control_block[2];
+
+    request_header.header_length = 0x18;
+    request_header.subunit = 0;
+    request_header.command = 0xc;
+    request_header.media_descriptor = 0;
+    request_header.transfer_address = data_fdps_cd_ioctl_buffer_real_mode_ptr;
+    request_header.transfer_byte_count = 2;
+    control_block[0] = 1;
+    control_block[1] = (unsigned char) lock;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0x18);
+    memcpy(data_fdps_cd_ioctl_buffer, control_block, 2);
+    fdps_cd_device_request();
+    memcpy(&request_header, data_fdps_cd_request_header_buffer, 0x18);
+
+    data_fdps_cd_last_request_status = request_header.status;
+}
