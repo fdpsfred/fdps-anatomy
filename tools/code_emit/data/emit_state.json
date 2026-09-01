@@ -1165,6 +1165,14 @@
       "status": "committed",
       "emitted_against": "0x83",
       "rounds": 0
+    },
+    "00039a20": {
+      "name": "fdps_vfs_find_entry_size",
+      "target": "vfs.c",
+      "body_size": "0x8a",
+      "status": "committed",
+      "emitted_against": "0x8a",
+      "rounds": 0
     }
   }
 }

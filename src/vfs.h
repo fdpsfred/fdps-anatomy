@@ -103,4 +103,34 @@ extern unsigned int fdps_vfs_image_entry_count(struct fdps_vfs_image_header *ima
 extern int fdps_vfs_find_entry(char *name, void *handle);
 #pragma aux fdps_vfs_find_entry "*" parm caller [];
 
+/* Searches the same directory the same way and answers with the member's size
+   in bytes instead of its index, or -1 when no entry matches.
+
+   dir is what fdps_vfs_open hands back, exactly as for fdps_vfs_find_entry
+   above, and every caller-visible property of that search holds here
+   unchanged: the walk is front to back so a duplicated name resolves to the
+   earlier entry, the query is upper-cased IN PLACE while the entry's own name
+   is taken raw, the entry count is read one byte wide so only members 0..254
+   are reachable and a container of exactly 256 searches nothing, and nothing
+   about the handle is validated.
+
+   The size it reports is the field at offset 0x0d of the entry -- the one
+   fdps_vfs_load_file passes to malloc and to fread as the member's byte count.
+   The entry carries the same number a second time at offset 0x11 and every
+   shipped container has the two agreeing (resource_info/vfs.md), so no game
+   file can tell the two fields apart; the assembly can, and 0x0d is the one
+   that is read.
+
+   -1 is unambiguous here in a way that fdps_vfs_read_entry_count's 0 is not:
+   no member has a negative size, so the miss is distinguishable from any real
+   answer.  A zero-byte member would report 0, and no shipped container holds
+   one -- the smallest of the 1,202 members is Map41.cod in Field.vfs at 15
+   bytes and the largest is Chapter.saf in Misc.vfs at 1,857,775.
+
+   Nothing in the image calls this function or takes its address.  It is the
+   unused member of the VFS reader's interface: the size a caller would want is
+   already handed over by fdps_vfs_load_file, which finds the entry itself. */
+extern int fdps_vfs_find_entry_size(char *name, void *dir);
+#pragma aux fdps_vfs_find_entry_size "*" parm caller [];
+
 #endif

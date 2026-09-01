@@ -381,6 +381,240 @@ static void find_entry_stops_at_the_first_match(void)
     CHECK_EQ(fdps_vfs_find_entry(query, synthetic_handle), 1);
 }
 
+/* fdps_vfs_find_entry_size walks the same directory as fdps_vfs_find_entry and
+   differs only in what a match hands back, so the cases below re-run the four
+   behaviours that search is pinned on -- the stride, the byte-wide count, the
+   one-way fold and the first-match break -- through the size answer instead of
+   the index answer.  They are not duplicates of those cases: an index search
+   that is right and a size read that is off by a field would still agree on
+   every index, and none of the assertions above would move.
+
+   Three offsets inside a 26-byte entry, from resource_info/vfs.md and from the
+   folded 0x1e at 00039a90 (0x1e minus the table's own 0x11 is 0x0d):
+
+     0x0d  the member's size, the field this function reads
+     0x11  a second copy of the same size, which the program never reads
+     0x16  the member's start in the container, which it never reads either
+
+   Every shipped container has 0x0d and 0x11 holding the same number, so no
+   game file can separate them; the synthetic directory below can. */
+#define ENTRY_SIZE_FIELD 0x0d
+#define ENTRY_SIZE_DUP_FIELD 0x11
+#define ENTRY_START_FIELD 0x16
+
+/* Writes one little-endian dword into a field of a synthetic entry.  Explicit
+   bytes rather than a cast, for the same reason synthetic_handle_reset uses
+   them: the values under test are chosen to be distinguishable, and a stored
+   dword has to be exactly the bytes the test meant. */
+static void synthetic_handle_set_dword(int index, int field_offset,
+                                       unsigned long value)
+{
+    char *field;
+
+    field = synthetic_handle + HANDLE_ENTRY_TABLE_OFFSET
+            + index * HANDLE_ENTRY_SIZE + field_offset;
+    field[0] = (char)(value & 0xffUL);
+    field[1] = (char)((value >> 8) & 0xffUL);
+    field[2] = (char)((value >> 16) & 0xffUL);
+    field[3] = (char)((value >> 24) & 0xffUL);
+}
+
+/* The sizes the packer wrote for four members of the shipped FIELD2.VFS, read
+   out of its own entry table at the offset its header names.  They pair with
+   the indices the fdps_vfs_find_entry cases use, so the two searches are
+   pinned to the same three entries: ATTR000.DAT is entry 0, ATTR610.DAT entry
+   64, DSC64.DAT entry 130 and last of the 131.
+
+   None of the 1,202 shipped members is zero bytes -- the smallest is
+   MAP41.COD in FIELD.VFS at 15 -- which is why -1 is a safe miss marker for
+   this function in a way that fdps_vfs_read_entry_count's 0 is not. */
+#define ATTR000_SIZE 1553
+#define ATTR610_SIZE 917
+#define DSC64_SIZE 36
+
+/* Entry 0's member start, 3441, which is where the entry table ends: 35 bytes
+   of header plus 26 * 131.  It is here as the value a read of the wrong field
+   would produce -- the field at 0x16 rather than 0x0d -- and it is nowhere
+   near 1553, so an off-by-a-field is not a near miss. */
+#define ATTR000_START 3441
+
+/* The real container, through the size answer: three members' sizes as the
+   shipped file records them, and a name that is not in it.
+
+   The two interior entries pin the 0x1a stride the same way the index cases
+   do, and harder: a wrong stride still finds entry 0 but now has to land on
+   the size field of the wrong record, and every member of FIELD2.VFS has a
+   different size.  Entry 130 is only reachable if the loop bound walked all
+   131.  NOSUCH.DAT pins the loop-exhausted exit and the -1 written at
+   00039a2c, which for this function is the whole of the failure signal. */
+static void find_entry_size_reports_real_member_sizes(void)
+{
+    char *handle;
+    char query[QUERY_MAX];
+
+    handle = open_real_handle(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    strcpy(query, "ATTR000.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, handle), ATTR000_SIZE);
+    strcpy(query, "ATTR610.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, handle), ATTR610_SIZE);
+    strcpy(query, "DSC64.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, handle), DSC64_SIZE);
+    strcpy(query, "NOSUCH.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, handle), -1);
+    free(handle);
+}
+
+/* Which of the entry's three dwords is read.  Against a real container this is
+   untestable for the first two: 0x0d and 0x11 always agree there.  So the
+   synthetic directory states three deliberately different values in the one
+   entry and the answer says which field the load at 00039a90 landed on --
+   0x0d, not the duplicate at 0x11 and not the member start at 0x16.
+
+   The second half re-states it from the real file: entry 0 of FIELD2.VFS holds
+   1553 at 0x0d and 3441 at 0x16, so the shipped container agrees with the
+   synthetic one about which field is not being read. */
+static void find_entry_size_reads_the_size_field(void)
+{
+    char *handle;
+    char query[QUERY_MAX];
+
+    synthetic_handle_reset(1);
+    synthetic_handle_set_name(0, "A.DAT");
+    synthetic_handle_set_dword(0, ENTRY_SIZE_FIELD, 111);
+    synthetic_handle_set_dword(0, ENTRY_SIZE_DUP_FIELD, 222);
+    synthetic_handle_set_dword(0, ENTRY_START_FIELD, 333);
+    strcpy(query, "A.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, synthetic_handle), 111);
+
+    handle = open_real_handle(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    strcpy(query, "ATTR000.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, handle), ATTR000_SIZE);
+    CHECK_EQ(ATTR000_SIZE == ATTR000_START, 0);
+    free(handle);
+}
+
+/* The whole dword survives.  MOV EAX,[EAX + 0x1e] at 00039a90 is a full 32-bit
+   load, unlike the MOV AL that takes the entry count, so a size above 255 and
+   a size above 65535 both come back intact.  0x00010001 is chosen so a load
+   truncated to a byte or to a word would answer 1 rather than something
+   obviously wrong.  No shipped member needs the top half of the dword -- the
+   largest is CHAPTER.SAF in MISC.VFS at 1,857,775 -- so these two values are
+   stated from the instruction, not read off a container. */
+static void find_entry_size_reads_a_whole_dword(void)
+{
+    char query[QUERY_MAX];
+
+    synthetic_handle_reset(1);
+    synthetic_handle_set_name(0, "A.DAT");
+    synthetic_handle_set_dword(0, ENTRY_SIZE_FIELD, 0x00010001UL);
+    strcpy(query, "A.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, synthetic_handle), 0x00010001L);
+
+    synthetic_handle_set_dword(0, ENTRY_SIZE_FIELD, 0UL);
+    strcpy(query, "A.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, synthetic_handle), 0);
+}
+
+/* The one-way fold, both halves, through the size answer.  strupr at 00039a70
+   rewrites the query in place so a lower-case query finds an upper-case entry
+   and the caller's buffer is upper-case afterwards; the entry's own name is
+   memcpy'd out raw at 00039a64 and compared byte for byte at 00039a7d, so a
+   lower-case entry name is unreachable however the query is spelled.  A
+   stricmp would find it both ways round, which is the divergence
+   resource_info/vfs.md and rebuild_info/pitfalls.md both name.
+
+   The miss answer here is -1 and not the entry's size, which is the assertion
+   that separates "not found" from "found and read wrong" -- the lower-case
+   entry is given a size of 777 precisely so a fold on the table side would
+   show up as 777 rather than as a plausible-looking failure. */
+static void find_entry_size_folds_only_the_query(void)
+{
+    char query[QUERY_MAX];
+
+    synthetic_handle_reset(2);
+    synthetic_handle_set_name(0, "lower.dat");
+    synthetic_handle_set_dword(0, ENTRY_SIZE_FIELD, 777);
+    synthetic_handle_set_name(1, "UPPER.DAT");
+    synthetic_handle_set_dword(1, ENTRY_SIZE_FIELD, 888);
+
+    strcpy(query, "lower.dat");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, synthetic_handle), -1);
+    strcpy(query, "LOWER.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, synthetic_handle), -1);
+    strcpy(query, "upper.dat");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, synthetic_handle), 888);
+    CHECK_EQ(strcmp(query, "UPPER.DAT"), 0);
+}
+
+/* The loop bound, taken one byte wide by MOV AL,[EDX] at 00039a38 out of the
+   dword fdps_vfs_open stored.  The matching entry is entry 0 every time and
+   only the count changes: 1 finds it, 256 does not because the low byte is 0
+   and the loop runs no iterations, 257 finds it again so it is truncation
+   rather than saturation, and 0 is the empty container.
+
+   The size answer sharpens the 256 case over the index one.  A dword read of
+   the count would answer 0 there, and 0 is also a legitimate size for a
+   zero-byte member -- so the entry is given a size of 999, which makes the two
+   outcomes 999 and -1 rather than 0 and -1.
+
+   No shipped container reaches 256; Field.vfs is the largest at 223. */
+static void find_entry_size_reads_the_entry_count_as_one_byte(void)
+{
+    char query[QUERY_MAX];
+
+    synthetic_handle_reset(1);
+    synthetic_handle_set_name(0, "A.DAT");
+    synthetic_handle_set_dword(0, ENTRY_SIZE_FIELD, 999);
+    strcpy(query, "A.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, synthetic_handle), 999);
+
+    synthetic_handle_reset(256);
+    synthetic_handle_set_name(0, "A.DAT");
+    synthetic_handle_set_dword(0, ENTRY_SIZE_FIELD, 999);
+    strcpy(query, "A.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, synthetic_handle), -1);
+
+    synthetic_handle_reset(257);
+    synthetic_handle_set_name(0, "A.DAT");
+    synthetic_handle_set_dword(0, ENTRY_SIZE_FIELD, 999);
+    strcpy(query, "A.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, synthetic_handle), 999);
+
+    synthetic_handle_reset(0);
+    synthetic_handle_set_name(0, "A.DAT");
+    synthetic_handle_set_dword(0, ENTRY_SIZE_FIELD, 999);
+    strcpy(query, "A.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, synthetic_handle), -1);
+}
+
+/* The store at 00039a93 is followed by a JMP to the exit rather than by the
+   increment, so the first match wins.  Two entries carry the same name with
+   different sizes, which is what makes the answer say which of them the loop
+   stopped on -- a search that ran to the end would report 20 instead of 10. */
+static void find_entry_size_stops_at_the_first_match(void)
+{
+    char query[QUERY_MAX];
+
+    synthetic_handle_reset(3);
+    synthetic_handle_set_name(0, "OTHER.DAT");
+    synthetic_handle_set_dword(0, ENTRY_SIZE_FIELD, 5);
+    synthetic_handle_set_name(1, "SAME.DAT");
+    synthetic_handle_set_dword(1, ENTRY_SIZE_FIELD, 10);
+    synthetic_handle_set_name(2, "SAME.DAT");
+    synthetic_handle_set_dword(2, ENTRY_SIZE_FIELD, 20);
+
+    strcpy(query, "SAME.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, synthetic_handle), 10);
+}
+
 void run_vfs_tests(void)
 {
     RUN_TEST(missing_file_returns_zero);
@@ -394,4 +628,10 @@ void run_vfs_tests(void)
     RUN_TEST(find_entry_does_not_fold_the_table_side);
     RUN_TEST(find_entry_reads_the_entry_count_as_one_byte);
     RUN_TEST(find_entry_stops_at_the_first_match);
+    RUN_TEST(find_entry_size_reports_real_member_sizes);
+    RUN_TEST(find_entry_size_reads_the_size_field);
+    RUN_TEST(find_entry_size_reads_a_whole_dword);
+    RUN_TEST(find_entry_size_folds_only_the_query);
+    RUN_TEST(find_entry_size_reads_the_entry_count_as_one_byte);
+    RUN_TEST(find_entry_size_stops_at_the_first_match);
 }

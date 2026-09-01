@@ -161,3 +161,61 @@ int fdps_vfs_find_entry(char *name, void *handle)
     }
     return found_index;
 }
+
+/* Where an entry keeps the member's size, counted from the start of the entry.
+   The original never spells it out: MOV EAX,[EAX + 0x1e] at 00039a90 reads it
+   off a base that already has the 0x11 table offset folded into it, and 0x1e -
+   0x11 is 0xd -- the first byte past the 13-byte name field.
+   resource_info/vfs.md has the same 0x0d for the member size, with a second
+   copy of it at 0x11 and the member's start at 0x16. */
+#define VFS_ENTRY_SIZE_FIELD_OFFSET 0xd
+
+/* 00039a20.  The same loop as fdps_vfs_find_entry above, instruction for
+   instruction, up to what the match stores: the preset of -1 at 00039a2c, the
+   byte-wide count at 00039a38, the -od loop with its test at 00039a44 and its
+   increment ahead of the body at 00039a4e, the 13-byte memcpy, strupr on the
+   query and strcmp against the raw entry name, and TEST EAX,EAX / JNZ
+   0x00039a98 at 00039a85 whose taken side rejoins the increment.  Everything
+   vfs.h says about that search applies here word for word.
+
+   The one difference is the fall-through.  Where the index search stores the
+   loop counter, this one re-forms the record address and loads a dword out of
+   it -- IMUL EAX,[EBP + -0x8],0x1a / ADD EAX,[EBP + 0x18] / MOV EAX,[EAX +
+   0x1e] at 00039a89 -- before storing that into the same result slot and
+   jumping to the same single exit.  So the match is still a break and the -1
+   still survives a loop that runs out.
+
+   0x1e is a folded constant and not a field offset: it is the 0x11 the entry
+   table starts at plus the 0xd the size field sits at inside the entry, and
+   the two are written separately here so neither reads as the other.  The
+   arithmetic is done a second time rather than reusing the address the memcpy
+   was given, which is what the original does and what -od leaves alone.
+
+   The load is a full dword, MOV EAX rather than MOVZX or MOV AL, so unlike the
+   entry count nothing is truncated on the way out.  The value is never
+   compared inside the function -- it is stored and returned -- so its
+   signedness is not observable here; int is what the -1 preset in the same
+   slot makes it. */
+int fdps_vfs_find_entry_size(char *name, void *dir)
+{
+    char entry_name[16];
+    int index;
+    int found_size;
+    int entry_count;
+
+    found_size = -1;
+    entry_count = *(unsigned char *)dir;
+    for (index = 0; index < entry_count; index++) {
+        memcpy(entry_name,
+               (char *)dir + index * VFS_ENTRY_SIZE
+                   + VFS_HANDLE_ENTRY_TABLE_OFFSET,
+               VFS_ENTRY_NAME_BYTES);
+        if (strcmp(entry_name, strupr(name)) == 0) {
+            found_size = *(int *)((char *)dir + index * VFS_ENTRY_SIZE
+                                  + VFS_HANDLE_ENTRY_TABLE_OFFSET
+                                  + VFS_ENTRY_SIZE_FIELD_OFFSET);
+            break;
+        }
+    }
+    return found_size;
+}
