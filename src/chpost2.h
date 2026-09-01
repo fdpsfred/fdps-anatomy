@@ -330,4 +330,38 @@ extern void fdps_chapter_27_post_action(void);
 extern void fdps_chapter_28_post_action(void);
 #pragma aux fdps_chapter_28_post_action "*" parm caller [];
 
+/* Chapter 29's post-action test: applies the game's standard end conditions
+   and nothing else.  Takes nothing, returns nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h) exactly as
+   fdps_battle_check_default_end_conditions (btlend.h) left it -- every enemy
+   retired clears the chapter, a retired unit slot 0 is a defeat that outranks
+   that clear, and a verdict already recorded is not recomputed.
+
+   Chapter 29 adds no condition of its own, which is the whole content of this
+   handler: it is a bare forward to the shared test, the same shape chapters
+   16, 18, 21 and 28 have.  That matches the chapter's stated rules, which are
+   the shared test's two exactly -- 勝利條件 敵人全滅 and 失敗條件 蘭迪斯死亡.
+
+   Chapter 29 is chapter id 28 (0x1c), which is neither of the two ids -- 0x10
+   and 0x15 -- the shared test singles out, so the slot it watches for the
+   defeat is 0, 蘭迪斯, and not 3.
+
+   The two 守護魔龍 are not tested and neither is any other named unit: killing
+   the pair is not the chapter's victory, wiping the map is, and the dragons are
+   simply the last two of the deployment because they hold position until the
+   final trigger releases them.
+
+   The chapter's own scripted business is elsewhere and is not missing from
+   here: the right, lower-right and upper-middle enemy groups break cover when a
+   player unit crosses the vertical line before the central junction, and the
+   whole map attacks once one reaches the upper room's entrance.  Both are
+   tile-triggered position events -- fdps_chapter_29_event_activate_enemy_groups
+   and fdps_chapter_29_event_activate_all_enemies (chevt6.h) -- so putting
+   either here would release a wave after every unit action instead of when a
+   unit steps on the tile.
+
+   Table slot 28. */
+extern void fdps_chapter_29_post_action(void);
+#pragma aux fdps_chapter_29_post_action "*" parm caller [];
+
 #endif

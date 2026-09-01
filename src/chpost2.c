@@ -733,3 +733,48 @@ void fdps_chapter_28_post_action(void)
 {
     fdps_battle_check_default_end_conditions();
 }
+
+/* 0003b9f0.  One CALL and a return, with no branch in the body at all -- the
+   same bare forward chapters 16, 18, 21 and 28 have.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP at 0003b9f0..0003b9f3 (53 56 57 55), MOV EBP,ESP at
+   0003b9f4, SUB ESP,0x0 at 0003b9f6 in the six-byte imm32 form 81 EC 00 00 00
+   00 -- and nothing in it is ever read, so there is no local to name.  The
+   epilogue is the four bare POPs at 0003ba01..0003ba04 with no MOV ESP,EBP in
+   front of them, which is what an empty local area leaves behind, and the RET
+   at 0003ba05 is the one-byte C3: the caller cleans, and there is nothing to
+   clean.
+
+   CALL 0x0003a2e0 at 0003b9fc is the whole body.  Nothing is pushed in front
+   of it and nothing adjusts ESP after it, so the callee takes no argument;
+   nothing reads EAX between the CALL and the RET, so its result is not used
+   and this handler returns nothing of its own.  The verdict the callee leaves
+   in data_fdps_chapter_event_or_battle_end_code is the answer, and the
+   dispatchers read that global directly after the indirect call.
+
+   There is nothing else: no store, no test of the chapter id, no unit lookup.
+   The chapter's two stated conditions -- 勝利條件 敵人全滅 and 失敗條件
+   蘭迪斯死亡 -- are both the shared test's own, so a handler that adds nothing
+   is the complete rule and not an omission.  Chapter 29 is chapter id 28
+   (0x1c), which is neither of the ids -- 0x10 and 0x15 -- the shared test
+   singles out, so the slot it watches for the defeat is 0, 蘭迪斯.
+
+   The chapter's scripted business is elsewhere and is not missing from here:
+   the right, lower-right and upper-middle enemy groups that break cover once a
+   player unit crosses the vertical line before the central junction, and the
+   general attack that starts once one reaches the upper room's entrance, are
+   fdps_chapter_29_event_activate_enemy_groups and
+   fdps_chapter_29_event_activate_all_enemies (chevt6.h), the dwords 000395d0
+   and 00039670 at 00060278 and 0006027c -- slots 45 and 46 of the
+   chapter-script event vector based at 000601c4.  Both are keyed on where a
+   unit stands and are armed by map28.dat's tile triggers, so neither can be
+   reached from a postlude that runs after every action.
+
+   The dword at 000602fc, twenty-eight entries into the table based at
+   0006028c, is 0003b9f0; that table entry is the function's only xref, which
+   is why it has no static caller. */
+void fdps_chapter_29_post_action(void)
+{
+    fdps_battle_check_default_end_conditions();
+}
