@@ -20,6 +20,8 @@
  * game ships.
  */
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "testharn.h"
 #include "vfs.h"
 
@@ -158,6 +160,227 @@ static void image_entry_count_reads_offset_seven(void)
     CHECK_EQ(fdps_vfs_image_entry_count(&header), NON_VFS_HEADER_BYTE);
 }
 
+/* fdps_vfs_find_entry walks an open handle rather than a container image, and
+   the function that builds one -- fdps_vfs_open -- is not emitted yet, so the
+   cases below build the handle the way 00039ab0 does.  The two offsets are the
+   handle's own layout, and both sides of the module agree on them:
+
+     0x11  where the directory table starts.  ADD EAX,0x11 at 000399cc is the
+           search reading it; memset(handle, 0, 0x11) at 00039b43 and the fread
+           into handle + 0x11 at 00039b9c are fdps_vfs_open writing it.
+     0x1a  one directory entry.  IMUL EAX,[EBP + -0x8],0x1a at 000399c5, and 26
+           bytes per entry in resource_info/vfs.md.
+
+   Ahead of the table sit the dword entry count at 0 (MOV [EDX],EAX at
+   00039b59) and the archive path at 4 (the memcpy into handle + 4 at
+   00039b73).  The search reads only the count, so the path is left zeroed. */
+#define HANDLE_ENTRY_TABLE_OFFSET 0x11
+#define HANDLE_ENTRY_SIZE 0x1a
+
+/* Builds a handle over the real directory of a shipped container: the count as
+   fdps_vfs_open stores it, then the container's own entry table read in
+   verbatim from the file offset its header names.  Nothing is fabricated --
+   the names the search matches against are the names the packer wrote.
+   Returns NULL if anything went wrong, and every caller checks. */
+static char *open_real_handle(char *archive_name)
+{
+    struct fdps_vfs_image_header header;
+    FILE *fp;
+    char *handle;
+    unsigned int table_bytes;
+
+    if (!read_image_header(archive_name, &header)) {
+        return NULL;
+    }
+    table_bytes = header.entry_count * HANDLE_ENTRY_SIZE;
+    handle = (char *)malloc(HANDLE_ENTRY_TABLE_OFFSET + table_bytes);
+    if (handle == NULL) {
+        return NULL;
+    }
+    memset(handle, 0, HANDLE_ENTRY_TABLE_OFFSET);
+    memcpy(handle, &header.entry_count, 4);
+    fp = fopen(archive_name, "rb");
+    if (fp == NULL) {
+        free(handle);
+        return NULL;
+    }
+    fseek(fp, (long)header.entry_table_offset, SEEK_SET);
+    if (fread(handle + HANDLE_ENTRY_TABLE_OFFSET, table_bytes, 1, fp) != 1) {
+        fclose(fp);
+        free(handle);
+        return NULL;
+    }
+    fclose(fp);
+    return handle;
+}
+
+/* A handle with room for three entries, for the two cases no shipped container
+   can show: a lower-case entry name, and an entry count above 255.  This one
+   is memory the test writes, not a file it invents -- there is no container
+   behind it and it is not pretending to be one. */
+#define SYNTHETIC_ENTRIES 3
+static char synthetic_handle[HANDLE_ENTRY_TABLE_OFFSET
+                             + SYNTHETIC_ENTRIES * HANDLE_ENTRY_SIZE];
+
+/* The count goes in as four explicit bytes so the case that matters -- a value
+   that does not fit in one -- is stated rather than left to a cast. */
+static void synthetic_handle_reset(unsigned long entry_count)
+{
+    memset(synthetic_handle, 0, sizeof(synthetic_handle));
+    synthetic_handle[0] = (char)(entry_count & 0xffUL);
+    synthetic_handle[1] = (char)((entry_count >> 8) & 0xffUL);
+    synthetic_handle[2] = (char)((entry_count >> 16) & 0xffUL);
+    synthetic_handle[3] = (char)((entry_count >> 24) & 0xffUL);
+}
+
+static void synthetic_handle_set_name(int index, char *entry_name)
+{
+    strcpy(synthetic_handle + HANDLE_ENTRY_TABLE_OFFSET
+               + index * HANDLE_ENTRY_SIZE,
+           entry_name);
+}
+
+/* Every query goes through a writable buffer.  That is not tidiness: strupr
+   rewrites what it is handed, so passing a string literal would have the test
+   modifying its own literal pool. */
+#define QUERY_MAX 16
+
+/* Four names out of FIELD2.VFS's real directory and one that is not in it.
+   The indices are read off the shipped file's entry table, which
+   resource_info/vfs.md's layout says starts at the offset in the header at 5
+   and runs 26 bytes per entry: ATTR000.DAT is entry 0, ATTR010.DAT entry 1,
+   ATTR610.DAT entry 64 and DSC64.DAT entry 130, the last of the 131.
+
+   The two interior indices are what pin the stride.  A stride of 25 or 27
+   would still find entry 0, because entry 0 begins where the table begins; it
+   would land nowhere at all on entries 64 and 130.
+
+   130 is doing second duty on the entry count: the loop bound is the count
+   taken off the handle, so an index of 130 is only reachable if all 131 got
+   there.  NOSUCH.DAT pins the other exit -- the -1 written at 0003999c
+   survives when the loop runs out. */
+static void find_entry_matches_real_container_names(void)
+{
+    char *handle;
+    char query[QUERY_MAX];
+
+    handle = open_real_handle(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    strcpy(query, "ATTR000.DAT");
+    CHECK_EQ(fdps_vfs_find_entry(query, handle), 0);
+    strcpy(query, "ATTR610.DAT");
+    CHECK_EQ(fdps_vfs_find_entry(query, handle), 64);
+    strcpy(query, "DSC64.DAT");
+    CHECK_EQ(fdps_vfs_find_entry(query, handle), 130);
+    strcpy(query, "NOSUCH.DAT");
+    CHECK_EQ(fdps_vfs_find_entry(query, handle), -1);
+    free(handle);
+}
+
+/* The half of the one-way folding that works, and the side effect that comes
+   with it.  strupr at 000399e0 is applied to the query, so a lower-case query
+   finds an upper-case entry; and because it works in place, the caller's
+   buffer is upper-case afterwards.  The image's callers pass string literals,
+   which is why that second assertion is about behaviour a caller can see and
+   not about an implementation detail (rebuild_info/pitfalls.md). */
+static void find_entry_uppercases_the_query_in_place(void)
+{
+    char *handle;
+    char query[QUERY_MAX];
+
+    handle = open_real_handle(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    strcpy(query, "attr010.dat");
+    CHECK_EQ(fdps_vfs_find_entry(query, handle), 1);
+    CHECK_EQ(strcmp(query, "ATTR010.DAT"), 0);
+    free(handle);
+}
+
+/* The other half: the entry's own name is taken raw.  memcpy at 000399d4
+   copies the 13 bytes out and strcmp at 000399ed compares them byte for byte,
+   with no fold on that side, so an entry whose name is not upper-case cannot
+   be found however the query is spelled.  A stricmp would find "lower.dat"
+   both ways round and is the divergence the pitfall entry names.  All 1,202
+   shipped member names are upper-case, so this case has to state its own
+   directory. */
+static void find_entry_does_not_fold_the_table_side(void)
+{
+    char query[QUERY_MAX];
+
+    synthetic_handle_reset(2);
+    synthetic_handle_set_name(0, "lower.dat");
+    synthetic_handle_set_name(1, "UPPER.DAT");
+
+    strcpy(query, "lower.dat");
+    CHECK_EQ(fdps_vfs_find_entry(query, synthetic_handle), -1);
+    strcpy(query, "LOWER.DAT");
+    CHECK_EQ(fdps_vfs_find_entry(query, synthetic_handle), -1);
+    strcpy(query, "upper.dat");
+    CHECK_EQ(fdps_vfs_find_entry(query, synthetic_handle), 1);
+}
+
+/* MOV AL,[EDX] at 000399a8 takes one byte of the dword count fdps_vfs_open
+   wrote, so the loop bound is the count modulo 256.  The entry that matches is
+   entry 0 in all four cases and only the count changes, which is what makes
+   this an assertion about the load and not about the search.
+
+   1 finds it.  256 does not -- the low byte is 0, the loop runs no iterations
+   and the -1 preset comes back, which is exactly what a dword read would get
+   wrong by answering 0.  257 finds it again, so it is truncation and not
+   saturation or a clamp.  0 is the empty container, the same answer as no
+   match, and it is here because it is the one value where -1 is right for two
+   different reasons.
+
+   No shipped container reaches 256 -- Field.vfs is the largest at 223 -- so
+   these counts are stated from the assembly, not read off a game file. */
+static void find_entry_reads_the_entry_count_as_one_byte(void)
+{
+    char query[QUERY_MAX];
+
+    synthetic_handle_reset(1);
+    synthetic_handle_set_name(0, "A.DAT");
+    strcpy(query, "A.DAT");
+    CHECK_EQ(fdps_vfs_find_entry(query, synthetic_handle), 0);
+
+    synthetic_handle_reset(256);
+    synthetic_handle_set_name(0, "A.DAT");
+    strcpy(query, "A.DAT");
+    CHECK_EQ(fdps_vfs_find_entry(query, synthetic_handle), -1);
+
+    synthetic_handle_reset(257);
+    synthetic_handle_set_name(0, "A.DAT");
+    strcpy(query, "A.DAT");
+    CHECK_EQ(fdps_vfs_find_entry(query, synthetic_handle), 0);
+
+    synthetic_handle_reset(0);
+    synthetic_handle_set_name(0, "A.DAT");
+    strcpy(query, "A.DAT");
+    CHECK_EQ(fdps_vfs_find_entry(query, synthetic_handle), -1);
+}
+
+/* The loop stops at the first match rather than the last: the store at
+   000399f9 is followed by JMP to the exit, not by the increment.  Two entries
+   with the same name is not something the shipped containers do, so this is
+   the branch structure being asserted directly. */
+static void find_entry_stops_at_the_first_match(void)
+{
+    char query[QUERY_MAX];
+
+    synthetic_handle_reset(3);
+    synthetic_handle_set_name(0, "OTHER.DAT");
+    synthetic_handle_set_name(1, "SAME.DAT");
+    synthetic_handle_set_name(2, "SAME.DAT");
+
+    strcpy(query, "SAME.DAT");
+    CHECK_EQ(fdps_vfs_find_entry(query, synthetic_handle), 1);
+}
+
 void run_vfs_tests(void)
 {
     RUN_TEST(missing_file_returns_zero);
@@ -166,4 +389,9 @@ void run_vfs_tests(void)
     RUN_TEST(image_entry_count_real_container);
     RUN_TEST(image_entry_count_truncates_to_low_byte);
     RUN_TEST(image_entry_count_reads_offset_seven);
+    RUN_TEST(find_entry_matches_real_container_names);
+    RUN_TEST(find_entry_uppercases_the_query_in_place);
+    RUN_TEST(find_entry_does_not_fold_the_table_side);
+    RUN_TEST(find_entry_reads_the_entry_count_as_one_byte);
+    RUN_TEST(find_entry_stops_at_the_first_match);
 }

@@ -68,4 +68,39 @@ extern int fdps_vfs_read_entry_count(char *path);
 extern unsigned int fdps_vfs_image_entry_count(struct fdps_vfs_image_header *image);
 #pragma aux fdps_vfs_image_entry_count "*" parm caller [];
 
+/* Searches an open container's directory for a member called name and returns
+   the entry's index, or -1 when no entry matches.
+
+   handle is what fdps_vfs_open hands back, not a container image: the entry
+   count as a dword at offset 0, the 13-byte archive path at 4, then one
+   26-byte directory entry per member from offset 0x11 onwards.  The search
+   walks that table from the front and stops at the first match, so a container
+   holding the same name twice always resolves to the earlier entry.
+
+   Two things about it are visible to the caller and neither is optional.
+
+   The query is upper-cased IN PLACE.  strupr is applied to name and the
+   entry's own name is taken raw, so the folding is one-way: a mixed-case query
+   such as "Turn.saf" matches an upper-case entry, while an entry whose name is
+   not upper-case can never be found however the query is spelled.  Writing the
+   comparison as stricmp would change both halves of that.  The in-place
+   rewrite reaches the caller's buffer, and the callers in the image pass
+   string literals, so a literal in the image is permanently upper-cased by the
+   first lookup that uses it -- which is why name cannot be const and why those
+   literals cannot live in read-only storage (rebuild_info/pitfalls.md).
+
+   The entry count is taken from the handle one byte wide although fdps_vfs_open
+   stored a whole dword there, so only members 0..254 of a container are ever
+   reachable and a container of exactly 256 members searches nothing at all.
+   That is the same 255-member cap fdps_vfs_image_entry_count imposes from the
+   image side; no shipped container comes near it, the largest being Field.vfs
+   at 223.
+
+   Nothing validates the handle: a pointer that is not one is walked just as
+   willingly, with whatever its byte 0 holds taken as the member count.
+
+   Its only caller is fdps_vfs_load_file. */
+extern int fdps_vfs_find_entry(char *name, void *handle);
+#pragma aux fdps_vfs_find_entry "*" parm caller [];
+
 #endif

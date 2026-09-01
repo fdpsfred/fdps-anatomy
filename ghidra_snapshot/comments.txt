@@ -10596,12 +10596,12 @@ The container's entry count is a u32 at header offset 7, and this routine return
 Alignment padding: three multi-byte LEA NOP forms filling 15 bytes to the 16-byte entry boundary of fdps_vfs_find_entry.
 
 === 00039990 [PLATE]
-Look up a named entry in a VFS archive directory table and return its index.
+Look up a named entry in an open VFS archive handle's entry table and return its index.
 Pool: fdps  [no fid hit in either library set; private helper of fdps_vfs_load_file]
-Evidence: Its sole caller is fdps_vfs_load_file@00039bd0 (game code) and it calls only C runtime helpers (memcpy, strupr, strcmp), so the link direction makes it game code, not library. It walks a game-defined container layout -- entry count in dir[0], 0x1a-byte records, 13-byte name field at +0x11 -- copies each name into a 16-byte stack buffer and strcmp's it against strupr(name), returning the matching index or leaving the -1 initialiser. No Watcom or AIL byte match (0 candidates both sets, hash unique in image); too large and too domain-specific for a linker or compiler product. Note the side effect: strupr upper-cases the caller's name buffer in place, and the table side is compared raw with no case folding.
+Evidence: Its sole caller is fdps_vfs_load_file@00039bd0 (game code) and it calls only C runtime helpers (memcpy, strupr, strcmp), so the link direction makes it game code, not library. The second argument is not a bare directory table but the handle fdps_vfs_open returns: the entry count as a dword at offset 0, the 13-byte archive path at 4, and the entry table from 0x11 onwards. It walks a game-defined container layout -- entry count in handle[0], entry table beginning at handle + 0x11, 0x1a-byte records, 13-byte name field at offset 0 of each entry -- copies each name into a 16-byte stack buffer and strcmp's it against strupr(name), returning the matching index or leaving the -1 initialiser. No Watcom or AIL byte match (0 candidates both sets, hash unique in image); too large and too domain-specific for a linker or compiler product. Note the side effect: strupr upper-cases the caller's name buffer in place, and the table side is compared raw with no case folding.
 Name: fdps_ + snake_case for game code; no vendor symbol claimed or available.
 Boundary: 00039990-00039a12, Watcom prologue 53 56 57 55 89 e5 / SUB ESP,0x20 to the matching MOV ESP,EBP + POP EBP/EDI/ESI/EBX + RET; the 13 bytes that follow are LEA/NOP alignment padding up to FUN_00039a20.
-Signature: __cdecl, int fdps_vfs_find_entry(char *name, void *dir) -- both arguments read from EBP+0x14 and EBP+0x18, bare RET with caller-side ADD ESP after every call, result in EAX.
+Signature: __cdecl, int fdps_vfs_find_entry(char *name, void *handle) -- both arguments read from EBP+0x14 and EBP+0x18, bare RET with caller-side ADD ESP after every call, result in EAX.
 
 === 00039a13 [EOL]
 Watcom alignment padding: lea eax,[eax+0] / lea edx,[edx+0] / nop, 13 bytes to 16-byte boundary

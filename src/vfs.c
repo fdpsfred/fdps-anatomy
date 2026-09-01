@@ -5,9 +5,18 @@
  * resource_info/vfs.md for the container layout itself.  Nothing in this file
  * validates a container: the readers take the two header fields they need and
  * trust everything else, so a file that is not a .VFS is never rejected.
+ *
+ * fopen, fseek, fread and fclose come from <stdio.h>; memcpy, strcmp and
+ * strupr from <string.h>.  All seven are real library calls in the original --
+ * CALL 0x000435bc, 0x000435f3 and 0x00042fe0 at 000399d4, 000399e0 and
+ * 000399ed for the three string routines.  Watcom 10.0a only expands memcpy
+ * and strcmp into instructions when the intrinsics are asked for, and -oi is
+ * not in this build's flag set (rebuild_info/build_flags.md), so the plain
+ * declarations are what reproduce the calls.
  */
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 #include "vfs.h"
 
 /* Where the header keeps the entry count: PUSH 0x7 at 00039920, the middle
@@ -75,4 +84,80 @@ int fdps_vfs_read_entry_count(char *path)
 unsigned int fdps_vfs_image_entry_count(struct fdps_vfs_image_header *image)
 {
     return *(unsigned char *)&image->entry_count;
+}
+
+/* Where the directory table starts inside an open handle: ADD EAX,0x11 at
+   000399cc.  It is the far side of the same 0x11 fdps_vfs_open lays out --
+   memset(handle, 0, 0x11) at 00039b43 and fread into handle + 0x11 at
+   00039b9c -- so ahead of the table sit the dword entry count at 0 and the
+   13-byte archive path at 4. */
+#define VFS_HANDLE_ENTRY_TABLE_OFFSET 0x11
+
+/* One directory entry: IMUL EAX,[EBP + -0x8],0x1a at 000399c5.
+   resource_info/vfs.md has the same 26 bytes, of which this function reads
+   only the leading name. */
+#define VFS_ENTRY_SIZE 0x1a
+
+/* The width of an entry's name field, and the whole of what is copied out of
+   it: PUSH 0xd at 000399c3, the memcpy count.  resource_info/vfs.md has the
+   same 13 bytes, NUL-terminated with zero fill behind the terminator, which is
+   what lets the copy be compared with strcmp at all. */
+#define VFS_ENTRY_NAME_BYTES 0xd
+
+/* 00039990.  One loop and one branch inside it.
+
+   The loop is the ordinary -od shape: the test at 000399b4 (CMP EAX,[EBP +
+   -0x10] / JL), the increment at 000399be ahead of the body, and the body
+   from 000399c3 jumping back over it.  The body's own branch is TEST EAX,EAX
+   / JNZ 0x00039a01 at 000399f5, where the fall-through stores the index into
+   the result slot and jumps to the single exit -- so the match is a break out
+   of the loop, not a second return, and the -1 that was written to [EBP + -0xc]
+   at 0003999c before the loop is what survives when no entry matches.
+
+   The count comes off the handle a byte at a time: XOR EAX,EAX / MOV AL,[EDX]
+   at 000399a3, zero-extended into the full dword slot at [EBP + -0x10], even
+   though fdps_vfs_open stored a whole dword there (MOV [EDX],EAX at 00039b59).
+   Reading the field as the dword it is would let this search reach a 256th
+   member the original cannot (rebuild_info/pitfalls.md), so the byte load is
+   taken through the handle rather than over it.  The comparison against it is
+   signed, JL rather than JB, which is why the count is held in an int; the
+   zero-extended byte can never be negative, so the choice is not observable
+   here, only faithful.
+
+   strupr sits inside the loop rather than ahead of it, which is where the
+   original calls it (CALL 0x000435f3 at 000399e0, between the memcpy and the
+   strcmp of every iteration).  It rewrites the caller's buffer in place and
+   the entry's own name is compared raw, so the case folding is one-way -- see
+   vfs.h for what that costs the caller.
+
+   The name is copied out to the stack before it is compared instead of being
+   compared where it lies.  Thirteen bytes is the whole field, and the buffer
+   is the 16 bytes the frame gives it: SUB ESP,0x20 covers the buffer at
+   [EBP + -0x20] plus the three slots at -0x10, -0xc and -0x8 plus the -od
+   return spill at -0x4.  The declarations are in the order that reproduces
+   that assignment -- index at -0x8, found_index at -0xc, entry_count at -0x10
+   -- verified against the emitted VFS.OBJ.  Any other order compiles to the
+   same 0x20 frame with two of the three slots swapped, which is allocation
+   rather than behaviour (ADR-0001); this order is simply the one that lines
+   the two listings up for whoever reads them side by side. */
+int fdps_vfs_find_entry(char *name, void *handle)
+{
+    char entry_name[16];
+    int index;
+    int found_index;
+    int entry_count;
+
+    found_index = -1;
+    entry_count = *(unsigned char *)handle;
+    for (index = 0; index < entry_count; index++) {
+        memcpy(entry_name,
+               (char *)handle + index * VFS_ENTRY_SIZE
+                   + VFS_HANDLE_ENTRY_TABLE_OFFSET,
+               VFS_ENTRY_NAME_BYTES);
+        if (strcmp(entry_name, strupr(name)) == 0) {
+            found_index = index;
+            break;
+        }
+    }
+    return found_index;
 }
