@@ -1224,6 +1224,190 @@ static void ch10_a_verdict_the_handler_does_not_settle_is_left_alone(void)
     CHECK_EQ(end_code(), 0);
 }
 
+/* ------------------------------------------------------------------ *
+ * Chapter 11's handler, 0003a9a0.  The shared test and then one defeat
+ * test of its own: CALL 0x0003a2e0 at 0003a9ac, then PUSH 0x8 / CALL
+ * 0x000109b0 / ADD ESP,0x4 / TEST EAX,EAX / JZ 0003a9c9, with the
+ * unguarded MOV dword ptr [0x00069da0],0x1 at 0003a9bf the JZ skips.
+ *
+ * The risk set is the one the chapter 4, 5 and 6 handlers share -- the
+ * order of the two tests, the absence of a guard on the store, and the
+ * literal in the PUSH -- so the cases below are the same shape, moved to
+ * slot 8.
+ *
+ * map10.dat's header byte +1 fields nine player slots.
+ * fdps_roster_add_character is called once from each of the chapter 1, 2,
+ * 3, 4, 7 and 8 init handlers and twice from chapter 9's, so eight members
+ * stand at 0..7 going into this chapter; fdps_chapter_11_init then appends
+ * character id 7 -- 琴琴, the level 15 武道家 -- and the roster appends at
+ * its member count, so she is slot 8.  The strategy guide's chapter 11
+ * entry gives 勝利條件 敵人全滅 and 失敗條件 蘭迪斯或琴琴死亡, and those
+ * two are exactly slot 0's shared test and this store: all 49 of
+ * map10.dat's deployment records are side 0, and the only death-script
+ * opcodes among them are the gold drops on two enemies, so nothing is left
+ * for the script runner and no other slot may end this battle from code.
+ *
+ * Chapter id 10 is neither 0x10 nor 0x15, so inside the shared test the arm
+ * taken is PUSH 0x0 at 0003a382 -- slot 0, 蘭迪斯.
+ *
+ * The nine-slot array below is this chapter's own: the shared stage_units
+ * has eight slots and slot 8 is past its end.
+ * ------------------------------------------------------------------ */
+
+/* Chapter 11 is chapter id 10, table slot 10: the dword at 000602b4, ten
+   entries into the table based at 0006028c, is 0003a9a0. */
+#define CHAPTER_11_ID 10
+
+/* The slot chapter 11's own defeat test asks about -- PUSH 0x8 at 0003a9b1. */
+#define CHINCHIN_SLOT 8
+
+/* One more slot than the shared array holds, because the map fields nine
+   player slots and the watched one is the last of them. */
+#define CH11_STAGE_UNITS 9
+
+static struct fdps_unit_record ch11_units[CH11_STAGE_UNITS];
+
+/* The same staging as stage(), over the nine-slot array and with the chapter
+   id moved to chapter 11's. */
+static void stage_ch11(int live_unit_count, int battle_end_code)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) ch11_units;
+    for (i = 0; i < (int) sizeof(ch11_units); i++) {
+        bytes[i] = 0;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch11_units;
+    data_fdps_map_unit_count = live_unit_count;
+    data_fdps_chapter_current_chapter_id = CHAPTER_11_ID;
+    data_fdps_chapter_event_or_battle_end_code = (unsigned int) battle_end_code;
+}
+
+static void stage_ch11_unit(int unit_index, int side, int flags)
+{
+    ch11_units[unit_index].side = (unsigned char) side;
+    ch11_units[unit_index].flags = (unsigned char) flags;
+}
+
+/* 琴琴 is an ordinary player-side roster member here, not the side-1
+   deployment guest of chapter 4: the chapter's init handler appended her to
+   the roster, so she fills a player slot like the rest of the party.
+
+   Slot 7 is deliberately left as the zeroed record stage_ch11() wrote, which
+   is a live unit on side 0, so a case that wants the battle still open has an
+   enemy without needing a tenth staged slot.  A case that wants the field
+   cleared overwrites slot 7 itself. */
+static void stage_ch11_party(void)
+{
+    stage_ch11_unit(0, SIDE_PLAYER, 0);
+    stage_ch11_unit(1, SIDE_PLAYER, 0);
+    stage_ch11_unit(2, SIDE_PLAYER, 0);
+    stage_ch11_unit(3, SIDE_PLAYER, 0);
+    stage_ch11_unit(4, SIDE_PLAYER, 0);
+    stage_ch11_unit(5, SIDE_PLAYER, 0);
+    stage_ch11_unit(6, SIDE_PLAYER, 0);
+    stage_ch11_unit(CHINCHIN_SLOT, SIDE_PLAYER, 0);
+}
+
+/* The whole point of the store being unguarded and last: the same action
+   empties the enemy side and retires 琴琴.  The shared test writes 2 at
+   0003a2f9 and nothing puts it back to 0, then this handler overwrites it
+   with 1.  An else, or a store gated on the code still being 0, would answer
+   2 here. */
+static void ch11_a_retired_chinchin_outranks_a_cleared_field(void)
+{
+    stage_ch11(CH11_STAGE_UNITS, 0);
+    stage_ch11_party();
+    stage_ch11_unit(7, SIDE_ENEMY, FLAG_RETIRED);
+    ch11_units[CHINCHIN_SLOT].flags = FLAG_RETIRED;
+    fdps_chapter_11_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The ordinary defeat: the battle is still going -- a live enemy settles the
+   shared test at 0 -- and a retired 琴琴 turns that into 1. */
+static void ch11_a_retired_chinchin_is_a_defeat(void)
+{
+    stage_ch11(CH11_STAGE_UNITS, 0);
+    stage_ch11_party();
+    stage_ch11_unit(7, SIDE_ENEMY, 0);
+    ch11_units[CHINCHIN_SLOT].flags = FLAG_RETIRED;
+    fdps_chapter_11_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* With 琴琴 still in play the handler adds nothing at all, so both of the
+   shared test's own answers come through unchanged. */
+static void ch11_a_live_chinchin_leaves_the_shared_verdict_alone(void)
+{
+    stage_ch11(CH11_STAGE_UNITS, 0);
+    stage_ch11_party();
+    stage_ch11_unit(7, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_11_post_action();
+    CHECK_EQ(end_code(), 2);
+
+    stage_ch11(CH11_STAGE_UNITS, 0);
+    stage_ch11_party();
+    stage_ch11_unit(7, SIDE_ENEMY, 0);
+    fdps_chapter_11_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* The CALL to the shared test is really made and chapter 11 takes its
+   ordinary arm: chapter id 10 is not 0x10 or 0x15, so the watched slot in
+   there is 0, and a retired slot 0 is a defeat with 琴琴 untouched. */
+static void ch11_the_shared_slot_zero_test_still_runs(void)
+{
+    stage_ch11(CH11_STAGE_UNITS, 0);
+    stage_ch11_party();
+    stage_ch11_unit(7, SIDE_ENEMY, 0);
+    ch11_units[0].flags = FLAG_RETIRED;
+    fdps_chapter_11_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The 琴琴 test sits outside the shared test's gate.  A verdict a chapter
+   event already recorded makes the shared test return at 0003a2ec without
+   examining anything, and a retired 琴琴 still overwrites it with 1; with her
+   in play the recorded verdict survives. */
+static void ch11_the_chinchin_test_survives_a_recorded_verdict(void)
+{
+    stage_ch11(CH11_STAGE_UNITS, 2);
+    stage_ch11_party();
+    stage_ch11_unit(7, SIDE_ENEMY, 0);
+    ch11_units[CHINCHIN_SLOT].flags = FLAG_RETIRED;
+    fdps_chapter_11_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch11(CH11_STAGE_UNITS, 2);
+    stage_ch11_party();
+    stage_ch11_unit(7, SIDE_ENEMY, 0);
+    fdps_chapter_11_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* Only slots 0 and 8 end this battle from code.  All nine slots are the party
+   here -- which is the real shape of this map, whose 49 deployment records
+   all begin at index 9 -- so the shared test finds no live enemy and its
+   verdict is 2, and each of slots 1..7 retires in turn against that.  A
+   defeat test the handler does not have would answer 1: the literal in the
+   PUSH having drifted to a neighbouring slot, or a second test having been
+   invented by analogy with chapter 9's pair. */
+static void ch11_no_slot_but_zero_and_eight_ends_the_battle(void)
+{
+    int retired_slot;
+
+    for (retired_slot = 1; retired_slot < CHINCHIN_SLOT; retired_slot++) {
+        stage_ch11(CH11_STAGE_UNITS, 0);
+        stage_ch11_party();
+        stage_ch11_unit(7, SIDE_PLAYER, 0);
+        ch11_units[retired_slot].flags = FLAG_RETIRED;
+        fdps_chapter_11_post_action();
+        CHECK_EQ(end_code(), 2);
+    }
+}
+
 void run_chpost1_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -1271,4 +1455,10 @@ void run_chpost1_tests(void)
     RUN_TEST(ch10_only_slot_zero_can_lose_the_chapter);
     RUN_TEST(ch10_the_shared_end_test_is_not_run);
     RUN_TEST(ch10_a_verdict_the_handler_does_not_settle_is_left_alone);
+    RUN_TEST(ch11_a_retired_chinchin_outranks_a_cleared_field);
+    RUN_TEST(ch11_a_retired_chinchin_is_a_defeat);
+    RUN_TEST(ch11_a_live_chinchin_leaves_the_shared_verdict_alone);
+    RUN_TEST(ch11_the_shared_slot_zero_test_still_runs);
+    RUN_TEST(ch11_the_chinchin_test_survives_a_recorded_verdict);
+    RUN_TEST(ch11_no_slot_but_zero_and_eight_ends_the_battle);
 }

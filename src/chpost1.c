@@ -350,3 +350,56 @@ void fdps_chapter_10_post_action(void)
         data_fdps_chapter_event_or_battle_end_code = 2;
     }
 }
+
+/* 0003a9a0.  The shared test, then one defeat test of this chapter's own --
+   the same seventeen instructions as chapters 4 and 5 above, reached through
+   a different table slot and meaning a different unit by its literal.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003a9a0..0003a9a6 --
+   and nothing in it is ever read, so there is no local to name.
+
+   CALL 0x0003a2e0 at 0003a9ac has nothing pushed in front of it and no ESP
+   adjustment behind it, so the shared test takes no argument, and the very
+   next instruction is PUSH 0x8: EAX is not consulted between the two calls,
+   so that call's result is not used here.  PUSH 0x8 / CALL 0x000109b0 / ADD
+   ESP,0x4 at 0003a9b1..0003a9b8 is fdps_unit_is_retired(8), the caller
+   clearing its one argument, and its EAX is used -- TEST EAX,EAX / JZ
+   0003a9c9 at 0003a9bb is the only branch in the body, skipping the MOV
+   dword ptr [0x00069da0],0x1 at 0003a9bf.
+
+   That store is guarded by nothing but the predicate: it does not consult the
+   code's current value, and it runs after the shared test rather than as an
+   alternative to it.  So it overrides a 2 the shared test wrote moments
+   earlier, and an action that empties the enemy side and retires unit 8 at
+   once is a defeat and not a clear.  It also fires on the path where the
+   shared test returned at its own gate because a chapter event had already
+   recorded a verdict.  Gating the store on the code still being 0, or hanging
+   it off an else of the victory, changes both of those outcomes.
+
+   Unit index 8 is a position in this map's unit array, not a character id.
+   map10.dat's header byte +1 fields nine player slots, and the roster fills
+   them exactly: fdps_roster_add_character is called once from each of the
+   chapter 1, 2, 3, 4, 7 and 8 init handlers and twice from chapter 9's, so
+   eight members stand at 0..7 going into this chapter, and
+   fdps_chapter_11_init appends character id 7 -- 琴琴, the level 15 武道家 --
+   at index 8 before the battle is built.  All 49 of map10.dat's deployment
+   records are side 0 with character ids 79 and above, so no enemy record can
+   reach that index and no friendly one competes for it.
+
+   The chapter's two stated lose conditions are 蘭迪斯 or 琴琴 dying.  The
+   first is the shared test's slot 0 -- chapter id 10 is neither 0x10 nor
+   0x15, so the arm it takes is PUSH 0x0 at 0003a382 -- and the second is this
+   store.  Nothing here is carried as a map death script: the only non-255
+   death-script opcodes in map10.dat are the 1s on the two enemies that drop
+   2000 and 2500 gold.
+
+   Table slot 10: the dword at 000602b4, ten entries into the table based at
+   0006028c, is 0003a9a0. */
+void fdps_chapter_11_post_action(void)
+{
+    fdps_battle_check_default_end_conditions();
+    if (fdps_unit_is_retired(8) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+}

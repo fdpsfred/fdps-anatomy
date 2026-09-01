@@ -196,4 +196,30 @@ extern void fdps_chapter_09_post_action(void);
 extern void fdps_chapter_10_post_action(void);
 #pragma aux fdps_chapter_10_post_action "*" parm caller [];
 
+/* Chapter 11's post-action test: the game's standard end conditions, and then
+   one defeat condition of its own -- unit slot 8 having left the battle.
+   Takes nothing, returns nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h).
+
+   The two tests are sequential and not alternatives, and the slot-8 store is
+   unguarded: it overwrites whatever
+   fdps_battle_check_default_end_conditions (btlend.h) just recorded, so a
+   defeat outranks a clear settled in the same call, and it fires even when
+   the shared test returned early because a chapter event had already recorded
+   a verdict.
+
+   Slot 8 on this chapter's map is 琴琴, the guest the chapter brings in.
+   map10.dat fields nine player slots; eight roster members stand at 0..7
+   going into the chapter, and fdps_chapter_11_init appends character id 7,
+   琴琴, at index 8 before the battle is built.  Slot 0, 蘭迪斯, is the shared
+   test's business, and those two are the whole of the chapter's stated lose
+   conditions -- every one of map10.dat's 49 deployment records is an enemy,
+   so nothing is left for a map death script.  The index is a position in the
+   map's unit array and nothing more: the identically shaped handlers of
+   chapters 4, 5 and 6 test slot 3 and mean three different people by it.
+
+   Table slot 10. */
+extern void fdps_chapter_11_post_action(void);
+#pragma aux fdps_chapter_11_post_action "*" parm caller [];
+
 #endif

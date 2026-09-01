@@ -11186,18 +11186,18 @@ Watcom alignment padding: lea eax,[eax+0] + mov edx,edx, aligns 0003a9a0 to 16 b
 Chapter 11's post-action handler: the win/lose test the battle loop runs after a unit has acted, reached through slot 10 of the per-chapter handler table based at 0x0006028c.
 
 Algorithm:
-Builds the standard four-push Watcom frame with an empty local area, then calls FUN_0003a2e0, the shared default end-condition check. FUN_0003a2e0 refreshes the chapter-event/battle-end code at DAT_00069da0 only while it is still 0: it writes 2 (victory) and then clears it back to 0 if any unit record still has byte +6 == 0 with bit 0 of byte +5 clear, so 2 survives only when every such unit has been retired, and it forces 1 (defeat) when unit 0, Randis, is retired. On top of that this handler calls fdps_unit_is_retired(8) and, when that reports the unit gone, stores 1 into DAT_00069da0 unconditionally -- overwriting a victory the shared check may just have written. Unit index 8 is the guest fighter the chapter brings in; her death is the chapter's second defeat condition, matching its stated rules of win when all enemies are wiped out, lose when Randis or the guest dies.
+Builds the standard four-push Watcom frame with an empty local area, then calls fdps_battle_check_default_end_conditions, the shared default end-condition check. fdps_battle_check_default_end_conditions refreshes the chapter-event/battle-end code at data_fdps_chapter_event_or_battle_end_code only while it is still 0: it writes 2 (victory) and then clears it back to 0 if any unit record still has byte +6 == 0 with bit 0 of byte +5 clear, so 2 survives only when every such unit has been retired, and it forces 1 (defeat) when unit 0, Randis, is retired. On top of that this handler calls fdps_unit_is_retired(8) and, when that reports the unit gone, stores 1 into data_fdps_chapter_event_or_battle_end_code unconditionally -- overwriting a victory the shared check may just have written. Unit index 8 is the guest fighter the chapter brings in; her death is the chapter's second defeat condition, matching its stated rules of win when all enemies are wiped out, lose when Randis or the guest dies.
 
 Parameters:
   none -- every dispatch site computes DAT_00069cf4 * 4 and calls through the table at 0x0006028c with nothing pushed and no stack cleanup.
 
 Returns:
-  nothing; the outcome is left in DAT_00069da0, which the callers compare against 0 to decide whether to break out of the phase loop.
+  nothing; the outcome is left in data_fdps_chapter_event_or_battle_end_code, which the callers compare against 0 to decide whether to break out of the phase loop.
 
-Pool: fdps  [no Function ID hit against CLIB3S/MATH387S/EMU387 or ailv3.lib; it writes the chapter/battle-state global DAT_00069da0 and calls fdps_unit_is_retired and FUN_0003a2e0, game symbols no separately compiled vendor object could reference]
+Pool: fdps  [no Function ID hit against CLIB3S/MATH387S/EMU387 or ailv3.lib; it writes the chapter/battle-state global data_fdps_chapter_event_or_battle_end_code and calls fdps_unit_is_retired and fdps_battle_check_default_end_conditions, game symbols no separately compiled vendor object could reference]
 
 Rebuild note:
-The extra defeat test runs after the shared check and overwrites its result, so an action that retires the last enemy and the guest unit at once ends the chapter in defeat, not victory. Writing the guide's "lose if Randis or the guest dies" as a test placed before, or folded into, the shared check would flip that case to victory, because FUN_0003a2e0 does nothing at all once DAT_00069da0 is already non-zero.
+The extra defeat test runs after the shared check and overwrites its result, so an action that retires the last enemy and the guest unit at once ends the chapter in defeat, not victory. Writing the guide's "lose if Randis or the guest dies" as a test placed before, or folded into, the shared check would flip that case to victory, because fdps_battle_check_default_end_conditions does nothing at all once data_fdps_chapter_event_or_battle_end_code is already non-zero.
 
 === 0003a9ce [EOL]
 Alignment padding: 8b c0 (mov eax,eax), 2-byte NOP form aligning 0003a9d0 to 16.
