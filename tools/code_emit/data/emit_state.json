@@ -1469,6 +1469,11 @@
       "status": "committed",
       "emitted_against": "0xe4",
       "rounds": 0
+    },
+    "0003bfa5": {
+      "status": "committed",
+      "emitted_against": "0x123",
+      "rounds": 0
     }
   }
 }

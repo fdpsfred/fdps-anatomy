@@ -771,4 +771,30 @@ extern unsigned int data_fdps_cd_ioctl_buffer_real_mode_ptr;
    fdps_cd_status_is_not_busy at 0003c6d0 is what reads it. */
 extern unsigned short data_fdps_cd_last_request_status;
 
+/* 00069e07.  The disc's last track number, from the Read Disk Info reply
+   fdps_cdrom_read_disk_info publishes.  It is the module's bound on every
+   track walk: fdps_cd_get_track_length_sectors compares the track it was asked
+   about against it at 0003c1d8 to decide whether the next track's start or the
+   lead-out is the end of that track, and fdps_cd_resolve_track_range does the
+   same at 0003c821.
+
+   Unsigned: the compare at 0003c1d8 is followed by JNC and the load at
+   0003c821 is a MOVZX.  Zero when no driver answered the query, which the
+   readers do not distinguish from a disc whose last track is 0. */
+extern unsigned char data_fdps_cd_highest_track_number;
+
+/* 00069e0b.  Where the disc's lead-out starts, as a logical sector number:
+   the packed lead-out address from the Read Disk Info reply run through
+   fdps_cd_msf_to_sector.  It is the end of the last track for every caller
+   that needs one -- the play range fdps_cd_play_whole_disc hands the drive
+   ends here, and the two track-length routines fall back to it for the last
+   track on the disc.
+
+   Unsigned, on its readers: fdps_cd_get_disk_info_msf subtracts the 150-frame
+   lead-in at 0003c2a8 and then divides by 75 with DIV, the unsigned divide.
+   The value it is given is signed arithmetic that is not clamped, so a disc
+   the driver never answered for leaves 00:00:00 here and the -150 that comes
+   out of the conversion arrives as 0xffffff6a. */
+extern unsigned int data_fdps_cd_leadout_sector;
+
 #endif

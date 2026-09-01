@@ -138,3 +138,79 @@ int fdps_cdrom_read_upc(void)
     memcpy(data_fdps_cd_media_catalog_number, &control_block[2], 7);
     return 1;
 }
+
+/* 0003bfa5.  An MSCDEX IOCTL Input request -- command code 3 again -- carrying
+   the seven-byte control block 0Ah, Read Disk Info, which asks the drive for
+   the first and last track numbers on the disc and where the lead-out starts.
+
+   Unlike the UPC request above, the control block is cleared whole before the
+   code byte is written -- MOV byte ptr [ESP+0x1c],0xa comes after the memset
+   at 0003bfed -- so the six reply bytes go out to the driver as zero.  That is
+   what makes every value this routine publishes deterministic when no driver
+   answers: the block comes back as it went out, the two track numbers read 0
+   and the lead-out address reads 00:00:00, which fdps_cd_msf_to_sector turns
+   into -150.
+
+   The control block is staged into the DOS block and immediately copied back
+   before the request is sent (0003c00f and 0003c024, the same seven bytes in
+   each direction).  The round trip cannot change anything -- nothing else runs
+   between the two copies -- and it is written out here because it is what the
+   original does, not because the value depends on it.
+
+   The read-back header length is the literal 0x1a at 0003c053 rather than the
+   header's own length byte, so the copy back is fixed at the size the request
+   went out as whatever the driver wrote into byte 0.
+
+   There is no branch anywhere in the body: every one of the seven destinations
+   is written on every call, including a call the driver refused, and the
+   status word is published without being tested.  What the routine produces is
+   data_fdps_cd_disk_info_reply (the six reply bytes verbatim),
+   data_fdps_cd_lowest_track_number, data_fdps_cd_highest_track_number, the
+   three lead-out MSF bytes, data_fdps_cd_leadout_sector and
+   data_fdps_cd_last_request_status.
+
+   The lead-out address is read twice out of the same four bytes at control
+   block +3, once for the MSF split and once for the sector conversion
+   (0003c09d and 0003c0a9); fdps_cd_unpack_msf writes only through the three
+   pointers it is given, so the second read cannot see anything the first call
+   changed, and one local below stands for both reads.
+
+   That read is a plain dword load in the original -- PUSH dword ptr [ESP+0x1f]
+   -- off an offset that is three bytes into the block and so not aligned; the
+   386 does not care and neither does the cast below, which is what keeps this
+   from becoming a memcpy call the original does not make. */
+void fdps_cdrom_read_disk_info(void)
+{
+    struct fdps_cd_request_header request_header;
+    unsigned char control_block[7];
+    unsigned int leadout_msf_packed;
+
+    request_header.header_length = 0x1a;
+    request_header.subunit = 0;
+    request_header.command = 3;
+    request_header.media_descriptor = 0;
+    request_header.start_sector = 0;
+    request_header.volume_id_ptr = 0;
+    request_header.transfer_address = data_fdps_cd_ioctl_buffer_real_mode_ptr;
+    request_header.transfer_byte_count = 7;
+    memset(control_block, 0, 7);
+    control_block[0] = 0xa;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0x1a);
+    memcpy(data_fdps_cd_ioctl_buffer, control_block, 7);
+    memcpy(control_block, data_fdps_cd_ioctl_buffer, 7);
+    fdps_cd_device_request();
+    memcpy(control_block, data_fdps_cd_ioctl_buffer, 7);
+    memcpy(&request_header, data_fdps_cd_request_header_buffer, 0x1a);
+
+    memcpy(data_fdps_cd_disk_info_reply, &control_block[1], 6);
+    data_fdps_cd_lowest_track_number = control_block[1];
+    data_fdps_cd_highest_track_number = control_block[2];
+    leadout_msf_packed = *(unsigned int *) &control_block[3];
+    fdps_cd_unpack_msf(leadout_msf_packed, &data_fdps_cd_leadout_msf_minute,
+                       &data_fdps_cd_leadout_second,
+                       &data_fdps_cd_leadout_frame);
+    data_fdps_cd_leadout_sector =
+        (unsigned int) fdps_cd_msf_to_sector(leadout_msf_packed);
+    data_fdps_cd_last_request_status = request_header.status;
+}

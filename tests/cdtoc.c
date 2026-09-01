@@ -341,6 +341,168 @@ static void cdtoc_upc_always_returns_one(void)
     CHECK_EQ(read_upc_from_a_rejected_drive(), 1);
 }
 
+/* fdps_cdrom_read_disk_info, 0003bfa5.
+ *
+ * Issued for real through the same rejected drive the UPC cases above use, and
+ * for the same reason: MSCDEX turns the request away on the drive number, or
+ * there is no MSCDEX at all, and either way nothing writes into the two DOS
+ * blocks.  What is in them after the call is what the function staged there.
+ *
+ * This function is the one case in the module where that makes every published
+ * value known rather than merely self-consistent.  It clears its whole control
+ * block before stamping the code byte -- memset(...,0,7) at 0003bfed, then MOV
+ * byte ptr [ESP+0x1c],0xa -- so the six reply bytes go out as zero and come
+ * back as zero, which fixes both track numbers at 0, all three lead-out MSF
+ * bytes at 0, and the lead-out sector at 0 - 150.
+ *
+ * Every destination is poisoned with 0x5a before the call, because zero is
+ * also what an unwritten bss global holds: without the poison a store that
+ * never happened and a store of the driver's zero look identical.  There is no
+ * branch anywhere in the body, so all seven destinations must lose their
+ * poison on every call.
+ *
+ * The expected header bytes are the immediates at 0003bfb2..0003bfe4: 0x1a, 0,
+ * 3, media descriptor 0 at +0xd, start sector 0 at +0x14, volume ID 0 at
+ * +0x16, the transfer address loaded from [0x00069da8] and byte count 7 at
+ * +0x12.  The staging copies are PUSH 0x1a and three PUSH 0x7, and the
+ * read-back header length is the literal PUSH 0x1a at 0003c053.
+ *
+ * What this arrangement cannot separate is which byte of an all-zero reply
+ * each published field was taken from; the displacements themselves are read
+ * off the assembly -- LEA EAX,[ESP+0x21] for the six-byte copy, MOV
+ * AL,[ESP+0x1d] and [ESP+0x1e] for the two track numbers, and the dword at
+ * [ESP+0x1f] for the lead-out address -- and only a driver that answers with
+ * distinguishable bytes would let a test tell them apart.
+ *
+ * fdps_cd_device_request is emitted in src/cd.c and fdps_cd_unpack_msf and
+ * fdps_cd_msf_to_sector in the file under test, so none of the three is a
+ * stub and nothing below rests on a stubbed return.
+ */
+static void poison_the_disk_info_globals(void)
+{
+    int i;
+
+    for (i = 0; i < 6; i++) {
+        data_fdps_cd_disk_info_reply[i] = 0x5a;
+    }
+    data_fdps_cd_lowest_track_number = 0x5a;
+    data_fdps_cd_highest_track_number = 0x5a;
+    data_fdps_cd_leadout_msf_minute = 0x5a;
+    data_fdps_cd_leadout_second = 0x5a;
+    data_fdps_cd_leadout_frame = 0x5a;
+    data_fdps_cd_leadout_sector = 0x5a5a5a5aUL;
+    data_fdps_cd_last_request_status = 0x5a5a;
+}
+
+static void read_disk_info_from_a_rejected_drive(void)
+{
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    poison_the_disk_info_globals();
+    fdps_cdrom_read_disk_info();
+}
+
+/* Command code 3 is IOCTL Input again, and the transfer it describes is the
+   seven bytes of the Read Disk Info block -- the same 7 all three control
+   block copies run for, and the length the header's byte count field carries.
+   The address field is the packed real-mode far pointer, not the flat one, for
+   the same reason as in the UPC request: the driver that follows it runs in
+   real mode. */
+static void cdtoc_disk_info_stages_an_ioctl_input_request(void)
+{
+    unsigned char *header;
+
+    read_disk_info_from_a_rejected_drive();
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x1a);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 3);
+    CHECK_EQ(header[0xd], 0);
+    CHECK_EQ((long) upc_staged_dword(header, 0xe),
+             (long) data_fdps_cd_ioctl_buffer_real_mode_ptr);
+    CHECK_EQ(upc_staged_word(header, 0x12), 7);
+    CHECK_EQ(upc_staged_word(header, 0x14), 0);
+    CHECK_EQ((long) upc_staged_dword(header, 0x16), 0L);
+}
+
+/* Control block code 0x0a is Read Disk Info, and the six bytes behind it are
+   the reply area, sent as zero.  This is the difference from the UPC block
+   next door, which presets its second byte and relies on the driver having to
+   overwrite it: here the memset runs first and the code byte is written after
+   it, so a body that stamped the code before clearing would send the driver a
+   block whose first byte is 0. */
+static void cdtoc_disk_info_asks_for_read_disk_info(void)
+{
+    int i;
+
+    read_disk_info_from_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 0xa);
+    for (i = 1; i < 7; i++) {
+        CHECK_EQ(data_fdps_cd_ioctl_buffer[i], 0);
+    }
+}
+
+/* The six reply bytes are published whole and then the first two of them again
+   as the track numbers, so all three have to agree with the block that came
+   back out of DOS memory.  The copy starts at the block's byte 1, past the
+   code byte: a copy from the block's start would put 0x0a into the reply's
+   first byte and shift every field along one. */
+static void cdtoc_disk_info_publishes_the_reply_block(void)
+{
+    read_disk_info_from_a_rejected_drive();
+    CHECK_EQ(memcmp(data_fdps_cd_disk_info_reply,
+                    data_fdps_cd_ioctl_buffer + 1, 6), 0);
+    CHECK_EQ(data_fdps_cd_disk_info_reply[0], 0);
+    CHECK_EQ(data_fdps_cd_lowest_track_number, data_fdps_cd_ioctl_buffer[1]);
+    CHECK_EQ(data_fdps_cd_highest_track_number, data_fdps_cd_ioctl_buffer[2]);
+    CHECK_EQ(data_fdps_cd_lowest_track_number, 0);
+    CHECK_EQ(data_fdps_cd_highest_track_number, 0);
+}
+
+/* The lead-out address is split into its three fields on every call, so all
+   three lose the poison even when every field is zero -- fdps_cd_unpack_msf
+   has no branch either.  The bytes they are split out of are the block's 3 to
+   6, which the rejected request left at zero. */
+static void cdtoc_disk_info_splits_the_leadout_address(void)
+{
+    read_disk_info_from_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_leadout_msf_minute, data_fdps_cd_ioctl_buffer[5]);
+    CHECK_EQ(data_fdps_cd_leadout_second, data_fdps_cd_ioctl_buffer[4]);
+    CHECK_EQ(data_fdps_cd_leadout_frame, data_fdps_cd_ioctl_buffer[3]);
+    CHECK_EQ(data_fdps_cd_leadout_msf_minute, 0);
+    CHECK_EQ(data_fdps_cd_leadout_second, 0);
+    CHECK_EQ(data_fdps_cd_leadout_frame, 0);
+}
+
+/* The same four bytes go through fdps_cd_msf_to_sector as well, and its result
+   is stored into an unsigned global without being clamped or tested: 00:00:00
+   is 150 frames before logical sector 0, so what lands in the global is the
+   bit pattern of -150.  A body that clamped, or that published the frame count
+   without the SUB EAX,0x96, would put 0 or 150 here instead.  The comparison
+   is written against the unsigned value rather than through the harness's long
+   because the global is what carries the sign, and it is unsigned. */
+static void cdtoc_disk_info_converts_the_leadout_to_a_sector(void)
+{
+    read_disk_info_from_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_leadout_sector == 0xffffff6aUL, 1);
+}
+
+/* MOV EAX,dword ptr [ESP+0x3] / MOV [0x00069e20],AX: the status is the word at
+   the header's offset 3 and only the word, so it has to agree with the two
+   bytes still sitting at that displacement in the DOS block.  What a refused
+   request leaves there is not the test's to decide -- the header goes out with
+   that field uninitialised -- so this pins the displacement and the width and
+   not a value.  It also has to differ from the poison for the store to have
+   happened at all, which the block's own bytes decide. */
+static void cdtoc_disk_info_publishes_the_status_word(void)
+{
+    read_disk_info_from_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_last_request_status,
+             upc_staged_word(data_fdps_cd_request_header_buffer, 3));
+}
+
 void run_cdtoc_tests(void)
 {
     RUN_TEST(cdtoc_unpack_splits_the_three_fields);
@@ -361,4 +523,10 @@ void run_cdtoc_tests(void)
     RUN_TEST(cdtoc_upc_asks_for_the_catalog_number);
     RUN_TEST(cdtoc_upc_publishes_status_and_the_block_field);
     RUN_TEST(cdtoc_upc_always_returns_one);
+    RUN_TEST(cdtoc_disk_info_stages_an_ioctl_input_request);
+    RUN_TEST(cdtoc_disk_info_asks_for_read_disk_info);
+    RUN_TEST(cdtoc_disk_info_publishes_the_reply_block);
+    RUN_TEST(cdtoc_disk_info_splits_the_leadout_address);
+    RUN_TEST(cdtoc_disk_info_converts_the_leadout_to_a_sector);
+    RUN_TEST(cdtoc_disk_info_publishes_the_status_word);
 }

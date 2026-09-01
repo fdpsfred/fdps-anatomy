@@ -66,4 +66,52 @@ extern unsigned char data_fdps_cd_media_catalog_number[7];
 extern int fdps_cdrom_read_upc(void);
 #pragma aux fdps_cdrom_read_upc "*" parm caller [];
 
+/* 00069e16.  The six reply bytes of the last Read Disk Info control block,
+   copied out verbatim: lowest track, highest track, then the four bytes of the
+   lead-out address.  Every field in it is also published separately in the
+   globals below, so this is the undivided copy and nothing in the image reads
+   it; it is declared here rather than in gamedata.h for that reason. */
+extern unsigned char data_fdps_cd_disk_info_reply[6];
+
+/* 00069e06.  The disc's first track number, as the CD-ROM driver reported it
+   in the Read Disk Info reply.  fdps_cdrom_read_disk_info writes it and
+   nothing in the image reads it -- the module's track walks start from
+   data_fdps_cd_track_info_track_number instead -- so it is another published
+   fact with no consumer.  Unsigned: a track number is a BCD-free byte count
+   from 1, and the highest-track counterpart is compared with JNC. */
+extern unsigned char data_fdps_cd_lowest_track_number;
+
+/* 00069e08, 00069e09, 00069e0a.  The lead-out position as three separate
+   fields, minute, second and frame, split out of the packed address in the
+   Read Disk Info reply by fdps_cd_unpack_msf.  They are three adjacent bytes
+   and the split writes them through three separate pointers, one byte each, so
+   nothing here depends on them staying neighbours.  Nothing in the image reads
+   them; what the rest of the module seeks with is the sector number in
+   data_fdps_cd_leadout_sector. */
+extern unsigned char data_fdps_cd_leadout_msf_minute;
+extern unsigned char data_fdps_cd_leadout_second;
+extern unsigned char data_fdps_cd_leadout_frame;
+
+/* 0003bfa5.  Asks the CD-ROM driver for the disc's table-of-contents summary
+   -- MSCDEX IOCTL Input, control block 0Ah Read Disk Info -- and publishes the
+   first and last track numbers and the lead-out position, the last of these
+   three times over: as the raw packed bytes, as minute/second/frame, and as
+   the logical sector number the rest of the module seeks with.
+
+   Takes nothing and returns nothing: the drive it asks and the two DOS blocks
+   it stages through are the module's globals, and every answer leaves through
+   a global too.  Whether the driver accepted the request is visible only in
+   data_fdps_cd_last_request_status, whose bit 15 is error, and this routine
+   records that word without testing it -- so every one of its outputs is
+   rewritten on a refused request as well, and a refused request rewrites them
+   with the zeroes the control block went out carrying.  That makes an
+   unanswered query indistinguishable from a disc reporting track 0 to track 0,
+   and it puts -150 -- 0x0a is cleared to 00:00:00, and 00:02:00 is sector 0 --
+   into data_fdps_cd_leadout_sector, which is an unsigned global.
+
+   Its four callers all discard the return value and read what they need out of
+   the globals afterwards. */
+extern void fdps_cdrom_read_disk_info(void);
+#pragma aux fdps_cdrom_read_disk_info "*" parm caller [];
+
 #endif
