@@ -762,4 +762,13 @@ extern unsigned char *data_fdps_cd_ioctl_buffer;
    later call has to build it; the low half is therefore always zero. */
 extern unsigned int data_fdps_cd_ioctl_buffer_real_mode_ptr;
 
+/* 00069e20.  The request status word the CD-ROM device driver left in the last
+   request header the module sent, published here by every function that sends
+   one so that the answer outlives the stack frame the header was built in.  It
+   is the word at header+3 -- the DOS device-driver status word, whose bit 15 is
+   error, bit 9 busy and bit 8 done -- copied out whole and unmasked; the
+   senders store it and never look at it themselves.
+   fdps_cd_status_is_not_busy at 0003c6d0 is what reads it. */
+extern unsigned short data_fdps_cd_last_request_status;
+
 #endif

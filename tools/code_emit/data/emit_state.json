@@ -1437,6 +1437,14 @@
       "status": "committed",
       "emitted_against": "0x6a",
       "rounds": 0
+    },
+    "0003bce2": {
+      "name": "fdps_cd_read_head_sector",
+      "target": "cd.c",
+      "body_size": "0xb7",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0xb7"
     }
   }
 }

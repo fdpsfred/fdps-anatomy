@@ -1087,5 +1087,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003bce2": [
+    {
+      "from": "emit",
+      "what": "The staged request header declares itself 0x1e bytes long and the memcpy that stages it copies that declared 0x1e (MOV byte ptr [ESP],0x1e, PUSH 0x1e at 0003bd2b), but the record is 26 bytes, so four bytes past its end go to the CD-ROM driver. What those four bytes hold differs between original and rebuild: in the original the header sits at ESP+0 and the control block at ESP+0x20, so the four are pure uninitialised frame; in the rebuild the compiler places the control block at ebp-0x0c, immediately after the 26-byte header at ebp-0x28, so the last two of the four are control_block[0] and [1], the constants 1 and 0. Established: the MSCDEX IOCTL Input request header for command code 3 is 26 bytes and a conforming driver reads nothing past it, which is why the original's over-declaration is harmless in the first place; the status and reserved fields inside the record are equally uninitialised in both builds. Also established: this function is unreferenced -- no xrefs and no CALL to 0003bce2 anywhere in the image -- so no game path reaches it.",
+      "needs": "A real MSCDEX driver on hardware (or a DOSBox-X run with a mounted disc) issuing this request and showing the answer does not depend on bytes 26..29 of the header. Nothing in the image, in the resource files or in the knowledge base can decide what a particular driver implementation does with undocumented header bytes.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed independently from the built object, not just from the source: the frame layout in CD.OBJ (header at ebp-0x28, control block at ebp-0x0c) makes the last two of the four over-copied bytes the control block's 1 and 0, where the original sends four bytes of uninitialised frame. I also confirmed the two facts that bound the risk -- the documented MSCDEX IOCTL Input request header is 26 bytes, and this function has no caller anywhere in the image (get_xrefs_to empty, and a CALL-operand sweep over all 89420 instructions finds zero), so no game path executes it. Nothing to add beyond that.",
+      "needs": "A real MSCDEX driver, on hardware or in DOSBox-X with a disc mounted, issuing this request and showing the answer does not depend on bytes 26..29 of the header.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

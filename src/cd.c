@@ -6,10 +6,11 @@
  * blocks the rest of the CD code writes into, and the register blocks the INT
  * calls share.  See cd.h for what each global holds.
  *
- * memset comes from <string.h>, int386x and the FP_SEG/FP_OFF pair from
- * <i86.h>, and printf from <stdio.h>; memset, int386x and printf are real
- * calls in the image, while FP_SEG is the compiler's own inline expansion of a
- * near-to-far pointer conversion and FP_OFF is a cast that costs nothing.
+ * memset and memcpy come from <string.h>, int386x and the FP_SEG/FP_OFF pair
+ * from <i86.h>, and printf from <stdio.h>; memset, memcpy, int386x and printf
+ * are real calls in the image, while FP_SEG is the compiler's own inline
+ * expansion of a near-to-far pointer conversion and FP_OFF is a cast that costs
+ * nothing.
  *
  * Note on this module's original build flags: it was not compiled with the
  * flag set the rest of the game was.  Every function in the block from
@@ -120,4 +121,63 @@ void fdps_cd_device_request(void)
     if (data_fdps_cdrom_int_out_regs.x.cflag != 0) {
         printf("DEVICE REQUEST FAILED!!!\n");
     }
+}
+
+/* 0003bce2.  An MSCDEX IOCTL Input request -- command code 3 -- carrying the
+   one-byte control block 01h, Location of Head, with its addressing-mode byte
+   set to 0 so the driver answers in HSG logical sectors instead of Red Book
+   minute/second/frame.
+
+   There is no branch in the body at all: the header and the control block are
+   built, staged into the two DOS blocks, sent, and read back, in a straight
+   line.  Both blocks are built as locals and copied, rather than being written
+   into the DOS blocks in place, so the driver never sees a half-built header.
+
+   The staged header declares itself 0x1e bytes long while only the 26
+   documented ones are filled in, and the memcpy that stages it copies that
+   declared 0x1e -- MOV byte ptr [ESP],0x1e and PUSH 0x1e at 0003bd2b -- so four
+   bytes of live stack go out past the end of the record.  MSCDEX reads 26 for
+   an IOCTL Input request and never looks at them; the over-declaration is in
+   the original and is left alone.  The status and reserved fields are likewise
+   never initialised, and reach the driver as whatever the frame held.
+
+   The read-back lengths differ from the send: the header comes back for as many
+   bytes as its own length byte says -- MOVZX EAX,byte ptr [ESP] at 0003bd5a,
+   zero-extended, and that byte is the local's own 0x1e, not anything the driver
+   wrote -- while the control block comes back for a flat 6.  What the driver
+   answered with is therefore the dword at control block +2, read straight out
+   of the six bytes as a dword at 0003bd91 with nothing masking or sign
+   extending it.
+
+   The status word is published before the answer is picked up, in
+   data_fdps_cd_last_request_status, because this function does not fold success
+   into the sector it returns: nothing about the value distinguishes a head at
+   sector 0 from a request the driver refused, so a caller that cares has to
+   read that word.  No caller does -- nothing in the image calls this function
+   at all, so the return's signedness is not observable anywhere. */
+unsigned int fdps_cd_read_head_sector(void)
+{
+    struct fdps_cd_request_header request_header;
+    unsigned char control_block[6];
+
+    request_header.header_length = 0x1e;
+    request_header.subunit = 0;
+    request_header.command = 3;
+    request_header.volume_id_ptr = 0;
+    request_header.start_sector = 0;
+    request_header.media_descriptor = 0;
+    request_header.transfer_address = data_fdps_cd_ioctl_buffer_real_mode_ptr;
+    request_header.transfer_byte_count = 6;
+    control_block[0] = 1;
+    control_block[1] = 0;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0x1e);
+    memcpy(data_fdps_cd_ioctl_buffer, control_block, 6);
+    fdps_cd_device_request();
+    memcpy(&request_header, data_fdps_cd_request_header_buffer,
+           request_header.header_length);
+    memcpy(control_block, data_fdps_cd_ioctl_buffer, 6);
+
+    data_fdps_cd_last_request_status = request_header.status;
+    return *(unsigned int *) &control_block[2];
 }

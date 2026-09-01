@@ -106,4 +106,20 @@ extern void fdps_cd_alloc_dos_buffers(void);
 extern void fdps_cd_device_request(void);
 #pragma aux fdps_cd_device_request "*" parm caller [];
 
+/* Asks the CD-ROM driver where its head is sitting and returns the answer as an
+   HSG logical sector number -- MSCDEX IOCTL Input, control block 01h Location
+   of Head, with the addressing-mode byte 0 that selects sector numbers over
+   minute/second/frame.
+
+   Takes nothing: the drive it asks is the module's one drive letter index and
+   the buffers it stages through are the module's two DOS blocks, so everything
+   it needs is already global.
+
+   Success is not folded into the return value -- a refused request and a head
+   parked at sector 0 come back the same -- so a caller that needs to know reads
+   data_fdps_cd_last_request_status, which this leaves holding the status word
+   the driver wrote into the request header.  Nothing in the image calls it. */
+extern unsigned int fdps_cd_read_head_sector(void);
+#pragma aux fdps_cd_read_head_sector "*" parm caller [];
+
 #endif

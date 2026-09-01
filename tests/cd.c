@@ -1,8 +1,8 @@
 /* tests/cd.c -- cover for src/cd.c.
  *
- * The first half covers fdps_cd_alloc_dos_buffers at 0003bade, the second
- * fdps_cd_device_request at 0003bb7d; each half says where its own expected
- * values come from.
+ * One section per function -- fdps_cd_alloc_dos_buffers at 0003bade,
+ * fdps_cd_device_request at 0003bb7d, fdps_cd_read_head_sector at 0003bce2 --
+ * and each says where its own expected values come from.
  *
  * Expected values come from the assembly at 0003bade -- MOV word ptr
  * [0x00069dc8],0x100 and MOV word ptr [0x00069dcc],0x20 into the input
@@ -25,6 +25,7 @@
  * values the function itself wrote, or a poison value the test put there.
  */
 #include <stddef.h>
+#include <string.h>
 #include <i86.h>
 #include "testharn.h"
 #include "gamedata.h"
@@ -251,6 +252,132 @@ static void cd_device_request_reports_only_a_failed_dpmi_call(void)
     CHECK_EQ(data_fdps_cdrom_int_out_regs.x.cflag, 0);
 }
 
+/* fdps_cd_read_head_sector, 0003bce2.
+ *
+ * The request goes out for real, at the same drive letter index 0xff the
+ * device-request tests above use, so MSCDEX rejects it on the drive number and
+ * never follows ES:BX into the request header.  That is what makes the staged
+ * bytes readable afterwards: the two DOS blocks still hold exactly what the
+ * function put there, and the function's own read-back copied them into its
+ * locals unchanged.
+ *
+ * So the assertions are of two kinds.  The staged bytes are checked against the
+ * immediates in the body -- MOV byte ptr [ESP],0x1e, [ESP+1],0 and [ESP+2],3
+ * at 0003bcef..0003bcf8, MOV dword ptr [ESP+0x16],0 and word ptr [ESP+0x14],0,
+ * MOV byte ptr [ESP+0xd],0, the transfer address loaded from [0x00069da8],
+ * MOV word ptr [ESP+0x12],6, and MOV byte ptr [ESP+0x20],1 / [ESP+0x21],0 for
+ * the control block.  The published status and the returned sector are checked
+ * against the bytes they were read out of, because what the driver leaves in
+ * those two fields is not the test's to decide: the point being pinned is the
+ * displacement and the width, MOV EAX,[ESP+3] / MOV [0x00069e20],AX for the
+ * status and MOV EAX,[ESP+0x22] for the answer.
+ *
+ * Nothing here asserts a particular sector number.  A rejected request leaves
+ * the field holding whatever the stack held, and a machine with a real disc
+ * would put its own head position there.
+ */
+static unsigned int staged_dword(unsigned char *block, int offset)
+{
+    unsigned int value;
+
+    memcpy(&value, block + offset, 4);
+    return value;
+}
+
+static unsigned short staged_word(unsigned char *block, int offset)
+{
+    unsigned short value;
+
+    memcpy(&value, block + offset, 2);
+    return value;
+}
+
+/* The DOS blocks are allocated the way the module allocates them, and only if
+   they are not there yet -- data_fdps_cd_request_header_real_mode_seg is the
+   module's own "already allocated" flag.  Allocating again would work but would
+   leak the previous pair, which nothing in the module can free. */
+static unsigned int read_head_sector_from_a_rejected_drive(void)
+{
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    return fdps_cd_read_head_sector();
+}
+
+/* Every store the body makes into the request header is an ESP displacement,
+   so the struct's offsets are what decides which field each one lands on
+   (contract H).  The nine below are the displacements at 0003bcef..0003bd1a
+   plus the status read at 0003bd87, and the size is the 26 documented bytes --
+   which is four short of the 0x1e the header declares itself to be, so a struct
+   that had grown to 30 would silently swallow the over-declaration this
+   function is supposed to reproduce. */
+static void cd_head_sector_header_fields_sit_where_the_stores_land(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_cd_request_header), 26);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, header_length), 0);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, subunit), 1);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, command), 2);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, status), 3);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, media_descriptor),
+             0xd);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, transfer_address),
+             0xe);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header,
+                            transfer_byte_count), 0x12);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, start_sector), 0x14);
+    CHECK_EQ((int) offsetof(struct fdps_cd_request_header, volume_id_ptr),
+             0x16);
+}
+
+/* Command code 3 is IOCTL Input, and the transfer it describes is six bytes
+   into the second DOS block: the address field carries the packed real-mode far
+   pointer the module keeps for exactly this, not the flat pointer, because the
+   driver runs in real mode.  Start sector and volume-ID pointer are zero
+   because an IOCTL request transfers no disc data. */
+static void cd_head_sector_stages_an_ioctl_input_request(void)
+{
+    unsigned char *header;
+
+    read_head_sector_from_a_rejected_drive();
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x1e);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 3);
+    CHECK_EQ(header[0xd], 0);
+    CHECK_EQ((long) staged_dword(header, 0xe),
+             (long) data_fdps_cd_ioctl_buffer_real_mode_ptr);
+    CHECK_EQ(staged_word(header, 0x12), 6);
+    CHECK_EQ(staged_word(header, 0x14), 0);
+    CHECK_EQ((long) staged_dword(header, 0x16), 0L);
+}
+
+/* Control block code 1 is Location of Head and the byte after it is the
+   addressing mode, 0 for HSG -- which is the whole reason this function returns
+   a sector number instead of a minute/second/frame triple. */
+static void cd_head_sector_asks_for_the_head_location_in_hsg(void)
+{
+    read_head_sector_from_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 1);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 0);
+}
+
+/* Both blocks are copied back out of the DOS memory before anything is read out
+   of them, so the two values the function produces have to agree with the bytes
+   still sitting in those blocks: the status with the word at header+3, and the
+   returned sector with the dword at control block +2.  Reading the status one
+   byte later, or the answer from the block's start, would break both. */
+static void cd_head_sector_publishes_status_and_returns_the_block_dword(void)
+{
+    unsigned int head_sector;
+
+    head_sector = read_head_sector_from_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_last_request_status,
+             staged_word(data_fdps_cd_request_header_buffer, 3));
+    CHECK_EQ((long) head_sector,
+             (long) staged_dword(data_fdps_cd_ioctl_buffer, 2));
+}
+
 void run_cd_tests(void)
 {
     RUN_TEST(cd_register_blocks_have_the_image_layout);
@@ -263,4 +390,8 @@ void run_cd_tests(void)
     RUN_TEST(cd_device_request_points_dpmi_at_the_call_block);
     RUN_TEST(cd_device_request_clears_the_segment_registers);
     RUN_TEST(cd_device_request_reports_only_a_failed_dpmi_call);
+    RUN_TEST(cd_head_sector_header_fields_sit_where_the_stores_land);
+    RUN_TEST(cd_head_sector_stages_an_ioctl_input_request);
+    RUN_TEST(cd_head_sector_asks_for_the_head_location_in_hsg);
+    RUN_TEST(cd_head_sector_publishes_status_and_returns_the_block_dword);
 }
