@@ -6,16 +6,20 @@
  * validates a container: the readers take the two header fields they need and
  * trust everything else, so a file that is not a .VFS is never rejected.
  *
- * fopen, fseek, fread and fclose come from <stdio.h>; memcpy, strcmp and
- * strupr from <string.h>.  All seven are real library calls in the original --
- * CALL 0x000435bc, 0x000435f3 and 0x00042fe0 at 000399d4, 000399e0 and
- * 000399ed for the three string routines.  Watcom 10.0a only expands memcpy
- * and strcmp into instructions when the intrinsics are asked for, and -oi is
- * not in this build's flag set (rebuild_info/build_flags.md), so the plain
- * declarations are what reproduce the calls.
+ * fopen, fseek, fread and fclose come from <stdio.h>; memcpy, memset, strcmp,
+ * strlen and strupr from <string.h>; malloc from <stdlib.h>.  All ten are real
+ * library calls in the original -- CALL 0x000435bc, 0x000435f3 and 0x00042fe0
+ * at 000399d4, 000399e0 and 000399ed for three of the string routines, and
+ * CALL 0x0003d375, 0x00042cd0, 0x00042dd2 and 0x000435bc at 00039b32,
+ * 00039b4b, 00039b5f and 00039b73 for malloc, memset, strlen and memcpy.
+ * Watcom 10.0a only expands memcpy, memset, strlen and strcmp into
+ * instructions when the intrinsics are asked for, and -oi is not in this
+ * build's flag set (rebuild_info/build_flags.md), so the plain declarations
+ * are what reproduce the calls.
  */
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "vfs.h"
 
@@ -218,4 +222,95 @@ int fdps_vfs_find_entry_size(char *name, void *dir)
         }
     }
     return found_size;
+}
+
+/* Where the header keeps the entry table's own file offset: PUSH 0x5 at
+   00039b08, the middle argument of the second fseek.  resource_info/vfs.md has
+   the same 0x05, and 35 in it for every shipped container. */
+#define VFS_HEADER_TABLE_OFFSET_FIELD 5
+
+/* How much of that field is read: PUSH 0x2 / PUSH 0x1 at 00039b1a.  Two bytes
+   of what the format calls a u16 -- and read into a signed short here, which
+   is what MOVSX at 00039b7d says about the value that reaches the seek. */
+#define VFS_HEADER_TABLE_OFFSET_BYTES 2
+
+/* Where a handle keeps the archive path it was opened with: ADD EAX,0x4 at
+   00039b6f, the memcpy destination.  It sits between the dword member count at
+   0 and the entry table at VFS_HANDLE_ENTRY_TABLE_OFFSET, so the field is the
+   13 bytes 4..0x10. */
+#define VFS_HANDLE_ARCHIVE_PATH_OFFSET 4
+
+/* 00039ab0.  Two nested branches and a third that cannot fail.
+
+   The outer one is CMP [EBP + -0x14],0x0 / JZ 0x00039bba at 00039ad8: a file
+   that will not open jumps the whole body and lands on the return of the
+   preset NULL from 00039abc.  The inner one is CMP [EBP + -0x8],0x0 / JZ
+   0x00039ba8 at 00039b3d, which jumps the eight instructions that fill the
+   handle and lands on the close, so a malloc that fails still closes the file
+   and still returns NULL.  The third is CMP [EBP + -0x14],0x0 / JZ 0x00039bba
+   at 00039ba8, guarding the fclose against a fp that the outer branch has
+   already proved non-NULL.  It is written out here because it is in the
+   original; the compiler does not fold it and neither does this.
+
+   Nothing checks a result on the way through.  Both freads discard what they
+   return (ADD ESP,0x10 with EAX untouched at 00039b03 and 00039b27), so a file
+   too short to hold either field leaves that field as whatever the frame slot
+   held; both fseeks discard theirs; and no field of the header but the two
+   that are read is looked at, so there is no format check to fail.
+
+   The entry count is stored into the handle as a whole dword, MOV [EDX],EAX at
+   00039b59, and that is the only reader or writer in the module that treats it
+   as 32 bits -- fdps_vfs_find_entry and fdps_vfs_find_entry_size take it back
+   out one byte wide.  Writing it as a byte here would agree with them and be
+   wrong: what the searches cannot reach is bytes 1..3 of a field this function
+   really does fill (rebuild_info/pitfalls.md).
+
+   The seek to the table sign-extends: MOVSX EAX,word ptr [EBP + -0x4].  The
+   field is a u16 in the format, so the width the value is held at is
+   behaviour, not spelling -- an offset of 0x8000 or more seeks backwards
+   rather than forwards.  Nothing shipped has more than 35 there.
+
+   malloc is asked for the count the header claims, and the directory read is
+   given the same product a second time (IMUL at 00039b2a and again at
+   00039b94) rather than the sum being kept, which is what -od does with the
+   expression written twice.  Neither is bounded by the file's real size.
+
+   The path copy is strlen bytes and not the field's 13 (CALL strlen at
+   00039b5f feeding the memcpy count at 00039b67), so the terminator a caller
+   sees is the zero the memset left, and a path longer than 12 characters
+   overruns the header into the first directory entry.  See vfs.h.  The length
+   is spent where it is produced rather than kept: PUSH EAX at 00039b67 hands
+   strlen's return straight to the memcpy, and giving it a local of its own
+   adds a frame slot and a store-and-reload that the original does not have
+   (SUB ESP,0x18 instead of 0x14, verified against the emitted VFS.OBJ). */
+void *fdps_vfs_open(char *path)
+{
+    FILE *fp;
+    unsigned int entry_count;
+    short table_offset;
+    char *handle;
+
+    handle = NULL;
+    fp = fopen(path, "rb");
+    if (fp != NULL) {
+        fseek(fp, VFS_HEADER_ENTRY_COUNT_OFFSET, SEEK_SET);
+        fread(&entry_count, VFS_HEADER_ENTRY_COUNT_BYTES, 1, fp);
+        fseek(fp, VFS_HEADER_TABLE_OFFSET_FIELD, SEEK_SET);
+        fread(&table_offset, VFS_HEADER_TABLE_OFFSET_BYTES, 1, fp);
+        handle = (char *)malloc(entry_count * VFS_ENTRY_SIZE
+                                + VFS_HANDLE_ENTRY_TABLE_OFFSET);
+        if (handle != NULL) {
+            memset(handle, 0, VFS_HANDLE_ENTRY_TABLE_OFFSET);
+            *(unsigned int *)handle = entry_count;
+            memcpy(handle + VFS_HANDLE_ARCHIVE_PATH_OFFSET, path,
+                   strlen(path));
+            fseek(fp, table_offset, SEEK_SET);
+            fread(handle + VFS_HANDLE_ENTRY_TABLE_OFFSET,
+                  entry_count * VFS_ENTRY_SIZE, 1, fp);
+        }
+        if (fp != NULL) {
+            fclose(fp);
+        }
+    }
+    return handle;
 }

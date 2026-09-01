@@ -991,5 +991,20 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "00039ab0": [
+    {
+      "from": "emit",
+      "what": "The entry count is stored into the handle as a full dword (MOV [EDX],EAX at 00039b59) while every reader emitted so far takes it back one byte wide, so bytes 1..3 of the field are written and never read. Round 2 narrowed this as far as it goes from here: the reviewer swept all seven call sites and no immediate caller dereferences the handle at all -- each does MOV [EBP-N],EAX / CMP against 0 and then only passes the pointer onward, to fdps_vfs_load_file at 00039bd0 (00016867, 000216b3), to 0x00018930 (000296fd, 00017d33), or to free at 0x0003d478 (00016886, 00029e57, 00029e63). fdps_vfs_load_file itself is now read and it touches the handle only at +4 (13 bytes, PUSH 0xd at 00039c00) and at +0x11 + index*0x1a, never at +0. So the width is unobservable in everything reachable today; what remains is the deeper consumers, which are not emitted. The lifetime half of this entry is settled in the other direction and needs nothing further: the handle IS freed by its callers, CALL 0x0003d478 with the handle at 00016886 and at 0002a1cf.",
+      "needs": "The emitted bodies of 0x00018930 and of fdps_vfs_load_file's own callers downstream of the handle, read for any load from a handle base wider than a byte.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Settled, and recorded here so the emitter's entry can be collapsed rather than carried forward. My pass finished the sweep the emitter left one read short of, entirely in Ghidra: nothing in the image reads a handle base wider than one byte, so bytes 1..3 of the dword written at 00039b59 are unobservable image-wide, not merely in what is emitted. Evidence: (a) the last unread immediate consumer, fdps_load_data_tables at 0x00018930, is 83 instructions in one basic block that do nothing with [EBP+0x14] but MOV/PUSH it into nine calls to 0x00029400; (b) 0x00029400, fdps_vfs_load_file_or_exit, pushes it straight to fdps_vfs_load_file at 00039bd0 and stores that function's return through a caller pointer; (c) fdps_vfs_load_file touches the handle only at +4 (PUSH 0xd, 00039c00) and at +0x11+i*0x1a folded as 0x1e and 0x27 (00039c3b, 00039c5d), and calls fdps_vfs_find_entry, which reads +0 with MOV AL; (d) fdps_vfs_load_entry at 0002a140 passes the handle to 00039bd0 and then frees it at 0002a1cf, dereferencing nothing; (e) searching each of the seven callers for its handle frame slot returns only 32-bit pointer loads and CMP-against-0 -- 24 uses of [EBP-0x14] in fdps_load_global_resources, 3 of [EBP-0x14] in fdps_load_status_cel_image, 5 of [EBP-0x24] in fdps_battle_show_win_fail_window, 6 of [EBP-0x2c] in fdps_icon_script_run, 4 of [EBP-0x10] in fdps_deploy_wave -- with no byte or displaced load among them. The dword store stays as emitted; what changes is only that the concern no longer has anything outstanding.",
+      "needs": "Nothing. The graph of handle consumers is closed and every one of them is read.",
+      "status": "open",
+      "same_as": "emit#0"
+    }
   ]
 }

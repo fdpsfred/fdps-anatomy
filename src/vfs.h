@@ -133,4 +133,65 @@ extern int fdps_vfs_find_entry(char *name, void *handle);
 extern int fdps_vfs_find_entry_size(char *name, void *dir);
 #pragma aux fdps_vfs_find_entry_size "*" parm caller [];
 
+/* Opens the container at path and builds the handle the two searches above and
+   fdps_vfs_load_file walk, or returns NULL when the container will not open or
+   the handle will not fit in memory.
+
+   The handle is one malloc block holding a 17-byte header and then the
+   container's whole directory read in verbatim:
+
+     +0x00  u32   the member count, as the header's field at file offset 7 has
+                  it -- the full 32 bits, although every reader that takes it
+                  back out of a handle reads only the low byte
+     +0x04  char  the path this handle was opened with, copied strlen bytes
+                  long out of the caller's string
+     +0x11  ...   one 26-byte directory entry per member, read from the file
+                  offset the header's field at 5 names
+
+   Two consequences of how the path is stored.  It is copied raw, so a path
+   spelled in lower case is kept in lower case -- unlike a member name, which
+   the searches fold.  And the 13 bytes between +4 and the table hold a
+   terminator only because the header was zeroed first, which means a path of
+   12 characters or fewer is terminated and a longer one runs over the start of
+   the directory: the 13th character lands on the header's last byte and the
+   14th on the first entry's name.  The width of the field is not merely the
+   gap before the table -- fdps_vfs_load_file copies exactly 13 bytes back out
+   of +4 (PUSH 0xd at 00039c00) into a stack buffer and hands that to fopen, so
+   an unterminated field is what the reopen reads.
+
+   No path the shipped game builds is long enough to reach that, but the margin
+   is not a property of the image.  The containers installed on the hard disk
+   are named by literals the call sites push -- "MISC.VFS" at 0x60128 and
+   "IconAni.vfs", "Field.vfs", "Field1.vfs" and "Field2.vfs" in the block at
+   0x600ec -- bare 8.3 names whose longest, BACKGRND.VFS, is exactly 12
+   (resource_info/vfs.md), which uses the margin up without spending it.  The
+   container on the CD is reached by a path composed at run time instead:
+   fdps_cd_verify_disc_and_play_track formats "%s\Pack.vfs" (0x61ebc) into a
+   stack buffer and passes it to fdps_vfs_load_entry, which hands its own
+   argument straight to this function, and the "%s" is data_fdps_cdrom_path --
+   the third whitespace token of Disk.no, which the installer writes as
+   "CDROM at e:" so the token is a bare drive letter (program_info/cd_audio.md).
+   That makes the path "e:\Pack.vfs" at 11 characters, and those two characters
+   of headroom come from a text file on the player's disk rather than from
+   anything in the executable.
+
+   Nothing about the file is validated -- not the "VFS" magic, not the version,
+   not the signature -- so any file at all is opened and the numbers at offsets
+   5 and 7 are believed whatever they are.  The entry-table offset is read as a
+   SIGNED 16-bit value and sign-extended into the seek, so a container whose
+   table began past 0x7fff would seek backwards; every shipped container has 35
+   there (resource_info/vfs.md).
+
+   The size the member count implies is trusted twice over: it is what the
+   malloc is asked for and what the directory read is told to fetch, both
+   without a bound, so a header claiming more members than the file holds
+   allocates for them and reads what there is.  Neither fread result is
+   examined.
+
+   The file is always closed, including on the malloc failure that returns
+   NULL, so a caller that gets NULL has leaked nothing.  Freeing the handle is
+   the caller's business; nothing here or in fdps_vfs_load_file frees it. */
+extern void *fdps_vfs_open(char *path);
+#pragma aux fdps_vfs_open "*" parm caller [];
+
 #endif

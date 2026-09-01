@@ -161,9 +161,10 @@ static void image_entry_count_reads_offset_seven(void)
 }
 
 /* fdps_vfs_find_entry walks an open handle rather than a container image, and
-   the function that builds one -- fdps_vfs_open -- is not emitted yet, so the
-   cases below build the handle the way 00039ab0 does.  The two offsets are the
-   handle's own layout, and both sides of the module agree on them:
+   the cases below build the handle the way 00039ab0 does rather than calling
+   fdps_vfs_open to build it: a search checked against a handle its own module
+   wrote would pass just as happily if both sides had the layout wrong.  The
+   two offsets are that layout, and both sides of the module agree on them:
 
      0x11  where the directory table starts.  ADD EAX,0x11 at 000399cc is the
            search reading it; memset(handle, 0, 0x11) at 00039b43 and the fread
@@ -615,6 +616,164 @@ static void find_entry_size_stops_at_the_first_match(void)
     CHECK_EQ(fdps_vfs_find_entry_size(query, synthetic_handle), 10);
 }
 
+/* fdps_vfs_open is the writer of the handle the two searches above read, and
+   open_real_handle at the top of this file is a second, independent writer of
+   the same thing: it builds the handle out of the container's own bytes with
+   plain library calls, from the layout in resource_info/vfs.md rather than
+   from src/vfs.c.  The cases below hold the two against each other, which is
+   what makes them an assertion about the container on disk and not about the
+   emitted code agreeing with itself.
+
+   The path a handle keeps sits between the count and the table:
+
+     +0x04  the path, strlen bytes of it, terminated only by the zero the
+            memset at 00039b43 left behind (memcpy at 00039b73)
+     +0x11  the directory (fread at 00039ba0)
+
+   VFS_NAME is ten characters, so its terminator lands at +0x0e and the two
+   bytes after it stay zero -- that is the margin a path of 12 characters uses
+   up exactly and a longer one spends. */
+#define HANDLE_ARCHIVE_PATH_OFFSET 4
+
+/* The same container in lower case.  DOS matches a filename without regard to
+   case, so this opens the same file; what it separates is the path copy from
+   the name search, which folds its query to upper case in place. */
+#define VFS_NAME_LOWER "field2.vfs"
+
+/* Enough repeats to run a DOS process out of file handles if the fclose at
+   00039bb2 were not there.  Each handle is freed, so what is being counted is
+   open files and not memory. */
+#define OPEN_REPEATS 40
+
+/* The handle the function builds against the handle the test builds: the same
+   count in the same dword slot, and the container's whole directory, byte for
+   byte, at the same offset.
+
+   The directory comparison is what pins the second header field.  The table is
+   fetched from the offset the header at +5 names (PUSH 0x5 at 00039b08), and
+   FIELD2.VFS puts its table at 35 -- so a seek to a hard-coded 0 or to the
+   entry count's own 7 would fill the handle with header and signature bytes
+   instead of names, and 3,406 bytes of directory is not something two
+   different wrong offsets could agree on.
+
+   The count is asserted as a full dword.  FIELD2.VFS's 131 fits in a byte, so
+   this case cannot separate the dword store at 00039b59 from a byte one; what
+   it does establish is that the field the searches read one byte wide is the
+   field this function wrote. */
+static void open_real_container_matches_a_hand_built_handle(void)
+{
+    char *handle;
+    char *reference;
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    reference = open_real_handle(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    CHECK_EQ(reference != NULL, 1);
+    if (handle == NULL || reference == NULL) {
+        free(handle);
+        free(reference);
+        return;
+    }
+    CHECK_EQ(*(unsigned int *)handle, VFS_ENTRY_COUNT);
+    CHECK_EQ(memcmp(handle + HANDLE_ENTRY_TABLE_OFFSET,
+                    reference + HANDLE_ENTRY_TABLE_OFFSET,
+                    VFS_ENTRY_COUNT * HANDLE_ENTRY_SIZE),
+             0);
+    free(handle);
+    free(reference);
+}
+
+/* The path the handle keeps, and the zeroed tail behind it.  The memcpy is
+   strlen bytes long, so nothing writes the terminator: the byte at +0x0e is
+   the memset's, and if the header were not zeroed first, or the copy were 13
+   bytes wide, the string would run on into the two bytes after it.  Those two
+   are asserted separately so a failure says which of the two writes went
+   wrong. */
+static void open_stores_the_archive_path(void)
+{
+    char *handle;
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    CHECK_EQ(strcmp(handle + HANDLE_ARCHIVE_PATH_OFFSET, VFS_NAME), 0);
+    CHECK_EQ(handle[HANDLE_ARCHIVE_PATH_OFFSET + strlen(VFS_NAME)], 0);
+    CHECK_EQ(handle[HANDLE_ENTRY_TABLE_OFFSET - 1], 0);
+    free(handle);
+}
+
+/* The path is copied raw.  strupr is the search's business and not this
+   function's -- there is no call to it anywhere in 00039ab0 -- so a container
+   opened by a lower-case path keeps a lower-case path in its handle, while a
+   member looked up by a lower-case name is folded before the compare. */
+static void open_copies_the_path_without_folding_case(void)
+{
+    char *handle;
+
+    handle = (char *)fdps_vfs_open(VFS_NAME_LOWER);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    CHECK_EQ(strcmp(handle + HANDLE_ARCHIVE_PATH_OFFSET, VFS_NAME_LOWER), 0);
+    free(handle);
+}
+
+/* The failed-open exit: JZ 0x00039bba at 00039adc jumps everything and returns
+   the NULL preset from 00039abc.  Unlike fdps_vfs_read_entry_count's 0, this
+   answer is unambiguous -- a container that opens always produces a handle
+   unless malloc fails. */
+static void open_missing_file_returns_null(void)
+{
+    CHECK_EQ(fdps_vfs_open(MISSING_NAME) == NULL, 1);
+}
+
+/* The file is closed before the handle is handed back (CALL 0x000428be at
+   00039bb2).  Nothing about a single handle can show that, so the container is
+   opened forty times over: a function that left its FILE open would run the
+   process out of stream slots long before the fortieth and start returning
+   NULL from fopen. */
+static void open_closes_the_container(void)
+{
+    char *handle;
+    int repeat;
+    int opened;
+
+    opened = 0;
+    for (repeat = 0; repeat < OPEN_REPEATS; repeat++) {
+        handle = (char *)fdps_vfs_open(VFS_NAME);
+        if (handle != NULL) {
+            opened++;
+            free(handle);
+        }
+    }
+    CHECK_EQ(opened, OPEN_REPEATS);
+}
+
+/* The handle is the searches' input, so the two halves of the module are run
+   end to end once: an interior entry to pin the stride the fread laid down,
+   and the size of the last of the 131 to pin that the whole directory arrived.
+   Both expected values are the shipped file's own, already used above against
+   a hand-built handle. */
+static void open_handle_drives_the_searches(void)
+{
+    char *handle;
+    char query[QUERY_MAX];
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    strcpy(query, "ATTR610.DAT");
+    CHECK_EQ(fdps_vfs_find_entry(query, handle), 64);
+    strcpy(query, "DSC64.DAT");
+    CHECK_EQ(fdps_vfs_find_entry_size(query, handle), DSC64_SIZE);
+    free(handle);
+}
+
 void run_vfs_tests(void)
 {
     RUN_TEST(missing_file_returns_zero);
@@ -634,4 +793,10 @@ void run_vfs_tests(void)
     RUN_TEST(find_entry_size_folds_only_the_query);
     RUN_TEST(find_entry_size_reads_the_entry_count_as_one_byte);
     RUN_TEST(find_entry_size_stops_at_the_first_match);
+    RUN_TEST(open_real_container_matches_a_hand_built_handle);
+    RUN_TEST(open_stores_the_archive_path);
+    RUN_TEST(open_copies_the_path_without_folding_case);
+    RUN_TEST(open_missing_file_returns_null);
+    RUN_TEST(open_closes_the_container);
+    RUN_TEST(open_handle_drives_the_searches);
 }
