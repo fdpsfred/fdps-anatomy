@@ -106,3 +106,46 @@ void fdps_chapter_17_post_action(void)
         data_fdps_chapter_event_or_battle_end_code = 1;
     }
 }
+
+/* 0003ad80.  One CALL and a return, with no branch in the body at all.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003ad80..0003ad86 -- and
+   nothing in it is ever read, so there is no local to name.  The epilogue is
+   the four bare POPs at 0003ad91..0003ad94 with no MOV ESP,EBP in front of
+   them, which is what an empty local area leaves behind, and the RET at
+   0003ad95 carries no immediate.  Twenty-two bytes end to end, the whole body
+   size.
+
+   CALL 0x0003a2e0 at 0003ad8c is the entire body.  Nothing is pushed in front
+   of it and nothing adjusts ESP behind it, so the shared test takes no
+   argument; nothing reads EAX between the CALL and the RET, so its result is
+   not used and this handler returns nothing of its own.  The verdict the callee
+   leaves in data_fdps_chapter_event_or_battle_end_code is the answer, and the
+   dispatchers read that global directly after the indirect call.
+
+   Chapter 18's id is 17, which is neither of the two ids -- 0x10 and 0x15 --
+   the shared test singles out at its own CMP dword ptr [0x00069cf4],0x10 /
+   CMP ...,0x15, so the slot the shared test watches for the defeat is 0,
+   蘭迪斯, and not 3.  That is the whole reason this chapter needs no test of
+   its own: the guide gives 第18章 咆哮的獅王 勝利條件 敵人全滅, which is the
+   sweep the shared test performs, and 失敗條件 蘭迪斯死亡, which is the shared
+   test's own slot-0 store.  A store here would be a second, ungated copy of a
+   decision the callee has already made -- which is what chapter 17 needs and
+   this chapter does not have.
+
+   The chapter's scripted business is elsewhere and is not missing from here:
+   the flyers that appear from the four upper windows on the player's fourth,
+   sixth, eighth and tenth turns, the knights from the two doors on the fifth,
+   seventh, tenth and eleventh, and the reinforcements from below on the
+   thirteenth are all keyed on the turn counter, so they belong to turn-event
+   handlers; putting any of them here would fire it once per unit action
+   instead of once per turn.
+
+   The address reaches the dispatchers only as the dword at 000602d0, seventeen
+   entries into the table based at 0006028c, which is why the function has no
+   static caller: slot 17 is chapter 18. */
+void fdps_chapter_18_post_action(void)
+{
+    fdps_battle_check_default_end_conditions();
+}

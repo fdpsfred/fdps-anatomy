@@ -81,4 +81,31 @@ extern void fdps_chapter_16_post_action(void);
 extern void fdps_chapter_17_post_action(void);
 #pragma aux fdps_chapter_17_post_action "*" parm caller [];
 
+/* Chapter 18's post-action test: applies the game's standard end conditions
+   and nothing else.  Takes nothing, returns nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h) exactly as
+   fdps_battle_check_default_end_conditions (btlend.h) left it -- every enemy
+   retired clears the chapter, a retired unit slot 0 is a defeat that outranks
+   that clear, and a verdict already recorded is not recomputed.
+
+   Chapter 18 adds no condition of its own, which is the whole content of this
+   handler: it is a bare forward to the shared test.  That matches the
+   chapter's stated rules, which are the shared test's two exactly -- 勝利條件
+   敵人全滅 and 失敗條件 蘭迪斯死亡.
+
+   Chapter 18 is chapter id 17, which is neither of the two ids -- 0x10 and
+   0x15 -- the shared test singles out, so the slot it watches for the defeat
+   is 0, 蘭迪斯, and not 3.  This is the difference from the handler above it:
+   chapter 17 has to name its own unit because its loss is 法蓮娜's, chapter 18
+   does not because its loss is the one the shared test already watches.
+
+   The chapter's own scripted business is elsewhere and is not missing from
+   here: the flyers from the four upper windows, the knights from the two doors
+   and the reinforcements from below are all turn events, keyed on the turn
+   counter rather than on a unit having acted.
+
+   Table slot 17. */
+extern void fdps_chapter_18_post_action(void);
+#pragma aux fdps_chapter_18_post_action "*" parm caller [];
+
 #endif
