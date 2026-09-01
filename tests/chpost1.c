@@ -63,6 +63,19 @@
 /* The slot chapter 4's own defeat test asks about -- PUSH 0x3 at 0003a571. */
 #define GUEST_SLOT 3
 
+/* Chapter 5 is chapter id 4, table slot 4: the dword at 0006029c, four
+   entries into the table based at 0006028c, is 0003a5d0. */
+#define CHAPTER_05_ID 4
+
+/* The slot chapter 5's own defeat test asks about -- PUSH 0x3 at 0003a5e1.
+   On map04.dat that slot is 法蓮娜: the map fields five player slots, so the
+   roster fills 0..4 and she is the fourth member appended. */
+#define FARLENA_SLOT 3
+
+/* 索爾 on this chapter's map: the one wave-0 deployment record, appended
+   after the five player slots. */
+#define CH05_SOL_SLOT 5
+
 static struct fdps_unit_record stage_units[STAGE_UNITS];
 
 /* Zero every slot and publish the block, then set the chapter id and the
@@ -333,6 +346,154 @@ static void no_slot_but_zero_and_three_ends_the_battle(void)
     }
 }
 
+/* ------------------------------------------------------------------ *
+ * Chapter 5's handler, 0003a5d0.  Instruction for instruction chapter 4's:
+ * PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0, CALL 0x0003a2e0, then
+ * PUSH 0x3 / CALL 0x000109b0 / ADD ESP,0x4 / TEST EAX,EAX / JZ 0003a5f9
+ * and the MOV dword ptr [0x00069da0],0x1 at 0003a5ef that the JZ skips.
+ *
+ * The cases below are the same risk set as chapter 4's, restaged on this
+ * chapter's map: the order of the two tests, the absence of a guard on the
+ * store, and the literal 3 in the PUSH.  What differs is who slot 3 is.
+ * map04.dat fields five player slots, so the roster fills 0..4 and slot 3
+ * is 法蓮娜, while the guest 索爾 -- appended after them as the map's one
+ * wave-0 deployment -- is slot 5.  The strategy guide's chapter 5 entry
+ * lists three lose conditions, 蘭迪斯, 法蓮娜 or 索爾 dying; only the
+ * first two can come from this code, so slot 5 retiring must leave the
+ * battle open here and the sweep at the end holds it to that.
+ *
+ * Chapter id 4 is neither 0x10 nor 0x15, so inside the shared test the arm
+ * taken is PUSH 0x0 at 0003a382 -- slot 0, 蘭迪斯.
+ * ------------------------------------------------------------------ */
+
+/* Same staging as above with the chapter id moved to chapter 5's. */
+static void stage_ch05(int live_unit_count, int battle_end_code)
+{
+    stage(live_unit_count, battle_end_code);
+    data_fdps_chapter_current_chapter_id = CHAPTER_05_ID;
+}
+
+/* The whole point of the store being unguarded and last: the same action
+   empties the enemy side and kills 法蓮娜.  The shared test writes 2 at
+   0003a2f9 and nothing puts it back to 0, then this handler overwrites it
+   with 1.  An else, or a store gated on the code still being 0, would answer
+   2 here. */
+static void ch05_a_retired_farlena_outranks_a_cleared_field(void)
+{
+    stage_ch05(6, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_PLAYER, 0);
+    stage_unit(2, SIDE_PLAYER, 0);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(4, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(CH05_SOL_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_05_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The ordinary defeat: the battle is still going -- a live enemy settles the
+   shared test at 0 -- and the retired 法蓮娜 turns that into 1. */
+static void ch05_a_retired_farlena_is_a_defeat(void)
+{
+    stage_ch05(6, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_PLAYER, 0);
+    stage_unit(2, SIDE_PLAYER, 0);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(4, SIDE_ENEMY, 0);
+    stage_unit(CH05_SOL_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_05_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* With 法蓮娜 still in play the handler adds nothing at all, so both of the
+   shared test's own answers come through unchanged. */
+static void ch05_a_live_farlena_leaves_the_shared_verdict_alone(void)
+{
+    stage_ch05(6, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_PLAYER, 0);
+    stage_unit(2, SIDE_PLAYER, 0);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage_unit(4, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(CH05_SOL_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_05_post_action();
+    CHECK_EQ(end_code(), 2);
+
+    stage_ch05(6, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_PLAYER, 0);
+    stage_unit(2, SIDE_PLAYER, 0);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage_unit(4, SIDE_ENEMY, 0);
+    stage_unit(CH05_SOL_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_05_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* The CALL to the shared test is really made and chapter 5 takes its ordinary
+   arm: chapter id 4 is not 0x10 or 0x15, so the watched slot in there is 0,
+   蘭迪斯, and a retired slot 0 is a defeat with 法蓮娜 untouched. */
+static void ch05_the_shared_slot_zero_test_still_runs(void)
+{
+    stage_ch05(6, 0);
+    stage_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(1, SIDE_PLAYER, 0);
+    stage_unit(2, SIDE_PLAYER, 0);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage_unit(4, SIDE_ENEMY, 0);
+    stage_unit(CH05_SOL_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_05_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The 法蓮娜 test sits outside the shared test's gate.  A verdict a chapter
+   event already recorded makes the shared test return at 0003a2ec without
+   examining anything, and the retired 法蓮娜 still overwrites it with 1;
+   with her in play the recorded verdict survives. */
+static void ch05_the_farlena_test_survives_a_recorded_verdict(void)
+{
+    stage_ch05(6, 2);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(4, SIDE_ENEMY, 0);
+    fdps_chapter_05_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch05(6, 2);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage_unit(4, SIDE_ENEMY, 0);
+    fdps_chapter_05_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* Only slots 0 and 3 end this battle from code.  Every other slot retires in
+   turn with a live enemy at slot 7 holding the shared test's answer at 0, so
+   anything but 0 would be a defeat test the handler does not have -- the
+   literal in the PUSH having drifted, or a second one having been invented
+   for 索爾, whose death this chapter carries as a death script on his
+   deployment record.  Slot 5 in the sweep is that 索爾. */
+static void ch05_no_slot_but_zero_and_three_ends_the_battle(void)
+{
+    int retired_slot;
+    int player_slot;
+
+    for (retired_slot = 1; retired_slot < STAGE_UNITS - 1; retired_slot++) {
+        if (retired_slot == FARLENA_SLOT) {
+            continue;
+        }
+        stage_ch05(STAGE_UNITS, 0);
+        for (player_slot = 0; player_slot < STAGE_UNITS - 1; player_slot++) {
+            stage_unit(player_slot, SIDE_PLAYER, 0);
+        }
+        stage_unit(STAGE_UNITS - 1, SIDE_ENEMY, 0);
+        stage_units[retired_slot].flags = FLAG_RETIRED;
+        fdps_chapter_05_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
 void run_chpost1_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -347,4 +508,10 @@ void run_chpost1_tests(void)
     RUN_TEST(the_shared_slot_zero_test_still_runs);
     RUN_TEST(the_guest_test_survives_a_recorded_verdict);
     RUN_TEST(no_slot_but_zero_and_three_ends_the_battle);
+    RUN_TEST(ch05_a_retired_farlena_outranks_a_cleared_field);
+    RUN_TEST(ch05_a_retired_farlena_is_a_defeat);
+    RUN_TEST(ch05_a_live_farlena_leaves_the_shared_verdict_alone);
+    RUN_TEST(ch05_the_shared_slot_zero_test_still_runs);
+    RUN_TEST(ch05_the_farlena_test_survives_a_recorded_verdict);
+    RUN_TEST(ch05_no_slot_but_zero_and_three_ends_the_battle);
 }
