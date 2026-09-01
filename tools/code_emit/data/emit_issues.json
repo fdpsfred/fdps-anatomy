@@ -1006,5 +1006,13 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "0003a450": [
+    {
+      "from": "review",
+      "what": "The data half of the plate's Sol explanation is still unverified from this seat: that deployment record 20 of map01.dat is Sol (side 1, character id 0x0c, level 10) carrying death-script opcode 5 with operand 0xff at record byte +0x16. The code half I did confirm independently -- fdps_run_death_scripts stores 1 into 0x00069da0 at 0001dd0d, so the mechanism the plate names exists. What I could not check is the record itself: resource_info documents no map deployment-record layout (grep of resource_info for a deployment or death-script record format returns nothing; vfs.md lists MAP01.DAT at 833 bytes and stops there), and record byte +0x16 is not struct fdps_unit_record's death_script_opcode offset -- that struct puts +0x16 inside inventory_slots -- so the map file's on-disk record is a different layout that has not been settled anywhere I can read. This is explicitly NOT load-bearing for the emit: the body is one CALL and nothing else, so the C is correct whatever map01.dat holds, and I approved on that basis.",
+      "needs": "The map deployment-record layout from whichever ticket settles the MAPnn.DAT format, after which record 20 of map01.dat can be read directly to confirm or correct the plate's claim.",
+      "status": "open"
+    }
   ]
 }
