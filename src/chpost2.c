@@ -244,3 +244,47 @@ void fdps_chapter_20_post_action(void)
     }
     fdps_battle_check_default_end_conditions();
 }
+
+/* 0003b210.  One CALL and a return, with no branch in the body at all.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003b210..0003b216 -- and
+   nothing in it is ever read, so there is no local to name.  The epilogue is
+   the four bare POPs at 0003b221..0003b224 with no MOV ESP,EBP in front of
+   them, which is what an empty local area leaves behind, and the RET at
+   0003b225 carries no immediate.  Twenty-two bytes end to end, the whole body
+   size.
+
+   CALL 0x0003a2e0 at 0003b21c is the entire body.  Nothing is pushed in front
+   of it and nothing adjusts ESP behind it, so the shared test takes no
+   argument; nothing reads EAX between the CALL and the RET, so its result is
+   not used and this handler returns nothing of its own.  The verdict the callee
+   leaves in data_fdps_chapter_event_or_battle_end_code is the answer, and the
+   dispatchers read that global directly after the indirect call.
+
+   Chapter 21's id is 20 (0x14), which is neither of the two ids -- 0x10 and
+   0x15 -- the shared test singles out at its own CMP dword ptr [0x00069cf4],
+   0x10 / CMP ...,0x15 at 0003a356 and 0003a35f, so the slot the shared test
+   watches for the defeat is 0, 蘭迪斯, and not 3.  That is the whole reason
+   this chapter needs no test of its own: the guide gives 第21章 地底神殿
+   勝利條件 敵人全滅, which is the sweep the shared test performs, and
+   失敗條件 蘭迪斯死亡, which is the shared test's own slot-0 store.  A store
+   here would be a second, ungated copy of a decision the callee has already
+   made -- which is what chapter 17 needs and this chapter does not have.
+
+   The chapter's scripted business is elsewhere and is not missing from here:
+   both reinforcement waves are position triggers -- the first when a unit
+   reaches the junction two squares past the turn, the second when a unit
+   reaches any of the standing enemy groups, which also switches the map to a
+   general assault -- and they are carried by fdps_chapter_21_event_deploy_wave_1
+   and fdps_chapter_21_event_deploy_wave_2.  Neither is keyed on a unit having
+   acted, and putting either here would fire it after every action regardless
+   of where anybody stood.
+
+   The address reaches the dispatchers only as the dword at 000602dc, twenty
+   entries into the table based at 0006028c, which is why the function has no
+   static caller: slot 20 is chapter 21. */
+void fdps_chapter_21_post_action(void)
+{
+    fdps_battle_check_default_end_conditions();
+}

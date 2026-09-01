@@ -144,4 +144,33 @@ extern void fdps_chapter_18_post_action(void);
 extern void fdps_chapter_20_post_action(void);
 #pragma aux fdps_chapter_20_post_action "*" parm caller [];
 
+/* Chapter 21's post-action test: applies the game's standard end conditions
+   and nothing else.  Takes nothing, returns nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h) exactly as
+   fdps_battle_check_default_end_conditions (btlend.h) left it -- every enemy
+   retired clears the chapter, a retired unit slot 0 is a defeat that outranks
+   that clear, and a verdict already recorded is not recomputed.
+
+   Chapter 21 adds no condition of its own, which is the whole content of this
+   handler: it is a bare forward to the shared test.  That matches the
+   chapter's stated rules, which are the shared test's two exactly -- 勝利條件
+   敵人全滅 and 失敗條件 蘭迪斯死亡.
+
+   Chapter 21 is chapter id 20 (0x14), which is neither of the two ids -- 0x10
+   and 0x15 -- the shared test singles out, so the slot it watches for the
+   defeat is 0, 蘭迪斯, and not 3.  It sits directly below the second of those
+   two ids, chapter 22's 0x15, which is the neighbour an off-by-one in the
+   shared test's second comparison would hand this chapter's defeat to.
+
+   The chapter's own scripted business is elsewhere and is not missing from
+   here: both reinforcement waves are position triggers -- the junction two
+   squares past the turn for the first, reaching any standing enemy group for
+   the second, which also starts the general assault -- and both are chapter
+   event handlers, keyed on where a unit stands rather than on a unit having
+   acted.
+
+   Table slot 20. */
+extern void fdps_chapter_21_post_action(void);
+#pragma aux fdps_chapter_21_post_action "*" parm caller [];
+
 #endif
