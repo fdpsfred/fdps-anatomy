@@ -465,7 +465,7 @@
 0003bec1 | 0xe4 | __cdecl | USER_DEFINED | 0x0 | - | orphan_block,pool_fdps | int __cdecl fdps_cdrom_read_upc(void)
 0003bfa5 | 0x123 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_cd | void __cdecl fdps_cdrom_read_disk_info(void)
 0003c0c8 | 0xd9 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_cdrom_read_track_info(int track)
-0003c1a1 | 0x76 | __cdecl | USER_DEFINED | 0x0 | - | orphan_block,pool_fdps | int __cdecl fdps_cd_get_track_length_sectors(byte track)
+0003c1a1 | 0x76 | __cdecl | USER_DEFINED | 0x0 | - | orphan_block,pool_fdps | uint __cdecl fdps_cd_get_track_length_sectors(byte track)
 0003c217 | 0x65 | __cdecl | USER_DEFINED | 0x0 | - | orphan_block,pool_fdps | void __cdecl fdps_cd_get_track_length_msf(byte track, byte * minutes, byte * seconds, byte * frames)
 0003c27c | 0x6c | __cdecl | USER_DEFINED | 0x0 | - | orphan_block,pool_fdps | void __cdecl fdps_cd_get_disk_info_msf(uchar * highest_track_out, uchar * minutes_out, uchar * seconds_out, uchar * frames_out)
 0003c2e8 | 0x67 | __cdecl | USER_DEFINED | 0x0 | - | orphan_block,pool_fdps | void __cdecl fdps_cd_sector_to_msf(uint sector, uchar * minute, uchar * second, uchar * frame)

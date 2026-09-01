@@ -281,3 +281,61 @@ void fdps_cdrom_read_track_info(int track)
     data_fdps_cd_track_info_control_flags =
         (unsigned char) (control_block[6] & 0xd0);
 }
+
+/* 0003c1a1.  How long one track plays, counted in CD frames: the sector the
+   track after it starts at -- or, for the last track on the disc, the sector
+   the lead-out starts at -- less the sector this track starts at.  Both
+   endpoints come out of fdps_cd_msf_to_sector, which takes the 150-frame
+   lead-in off each of them, so the offset cancels in the subtraction and what
+   is left is a plain frame count at the Red Book's 75 frames per second.
+
+   The disc summary is refreshed first, so the highest track number the branch
+   below tests against and the lead-out sector the last track ends at are both
+   this call's answers and not whatever an earlier query left behind.
+
+   The branch is unsigned -- CMP AL,byte ptr [0x00069e07] then JNC at 0003c1d8
+   -- and both sides of it are unsigned bytes anyway.  Falling through, the
+   track is not the last one and the end point is where track + 1 starts;
+   taking the jump, it is the last one and the end point is the lead-out.  A
+   track number above the disc's highest takes the lead-out arm too, and the
+   length it gets back is meaningless rather than refused: nothing here range
+   checks the argument.
+
+   Three queries, not two.  The third one at 0003c205 re-asks for the track
+   the track-info globals described when this function was entered, saved off
+   the word at 0003c1b4 before the first query overwrote it, so
+   data_fdps_cd_track_info_track_number, data_fdps_cd_track_start_sector and
+   data_fdps_cd_track_info_control_flags are left naming the same track they
+   named before the call.  fdps_cd_resolve_track_range reads exactly those
+   globals to decide which track's range to publish, so writing the obvious
+   two-query version leaves the CD layer pointing at the next track and a
+   following play or seek addresses the wrong one.
+
+   The saved track number is sixteen bits wide and sign-extended when it is
+   passed back -- MOVSX EAX,word ptr [ESP+0x4] -- matching the width the global
+   is stored at; the next track's number is computed sixteen bits wide as well,
+   MOVZX BX,AL / INC EBX / MOVSX EAX,BX, which for a track number that arrived
+   as a byte cannot differ from the full-width sum.
+
+   The result is unsigned: it is the difference of two unsigned globals, and
+   the one caller, fdps_cd_get_track_length_msf, divides what it gets back by
+   75 with DIV rather than IDIV. */
+unsigned int fdps_cd_get_track_length_sectors(unsigned char track)
+{
+    short saved_track_number;
+    unsigned int track_start_sector;
+    unsigned int track_end_sector;
+
+    fdps_cdrom_read_disk_info();
+    saved_track_number = data_fdps_cd_track_info_track_number;
+    fdps_cdrom_read_track_info(track);
+    track_start_sector = data_fdps_cd_track_start_sector;
+    if (track < data_fdps_cd_highest_track_number) {
+        fdps_cdrom_read_track_info((short) (track + 1));
+        track_end_sector = data_fdps_cd_track_start_sector;
+    } else {
+        track_end_sector = data_fdps_cd_leadout_sector;
+    }
+    fdps_cdrom_read_track_info(saved_track_number);
+    return track_end_sector - track_start_sector;
+}

@@ -2,8 +2,8 @@
  *
  * So far this covers fdps_cd_unpack_msf at 0003bc3f,
  * fdps_cd_msf_to_sector at 0003bc78, fdps_cdrom_read_upc at 0003bec1,
- * fdps_cdrom_read_disk_info at 0003bfa5 and fdps_cdrom_read_track_info at
- * 0003c0c8.
+ * fdps_cdrom_read_disk_info at 0003bfa5, fdps_cdrom_read_track_info at
+ * 0003c0c8 and fdps_cd_get_track_length_sectors at 0003c1a1.
  *
  * Every expected value below comes from the sixteen instructions of that
  * function and from its two call sites, never from the emitted C:
@@ -692,6 +692,114 @@ static void cdtoc_track_info_publishes_the_status_word(void)
              upc_staged_word(data_fdps_cd_request_header_buffer, 3));
 }
 
+/* fdps_cd_get_track_length_sectors, 0003c1a1.
+ *
+ * Driven through the same rejected drive as everything above, which decides
+ * the whole shape of what can be seen here.  The function opens with
+ * fdps_cdrom_read_disk_info, and a refused Read Disk Info clears its control
+ * block before sending it, so on this drive the refresh always publishes
+ * highest track 0 and lead-out sector 0 - 150.  A track number is an unsigned
+ * byte, so nothing is ever below 0: only the lead-out arm of the branch at
+ * 0003c1de runs here, and the next-track arm needs a drive that answers.
+ *
+ * Both endpoints then collapse onto the same number, and it is worth being
+ * exact about why, because it is what the assertions below can and cannot see.
+ * The Read Audio Track Info block is the one in the module that is not cleared,
+ * so bytes 2..6 of its reply are whatever the frame it was staged in already
+ * held.  The frame it is staged in here is the one fdps_cdrom_read_disk_info
+ * used a moment earlier, from the same ESP -- and that function memsets its own
+ * seven-byte block to zero and gets it back from the refused request unchanged.
+ * So the start address the track query reports is 00:00:00, the same address
+ * the refused disc query reported for the lead-out, and both convert to the
+ * same 0 - 150.  The length is therefore 0 on this drive whichever arm of the
+ * branch runs, which is what makes the arm itself, and the direction of the
+ * subtraction at 0003c20f, invisible from here; separating them needs a drive
+ * that answers, and the emit verdict records that as an open issue.  What the
+ * length being exactly 0 does pin is that the answer is a difference of the two
+ * endpoints and not either endpoint on its own, since either alone is
+ * 0xffffff6a.
+ *
+ * The restoring third query at 0003c205 is what the rest pins.  The track
+ * number it re-asks for is the word this function saved at 0003c1b4, before
+ * the first query overwrote it, sign-extended by MOVSX EAX,word ptr [ESP+0x4];
+ * so the value left in data_fdps_cd_track_info_track_number after the call has
+ * to be the one that was there before it, and the low byte of that value has to
+ * be what the control block came to rest holding.  0x1234 separates the two
+ * widths -- sixteen bits reach the global, eight the block -- and -2 fixes the
+ * sign of the word load.
+ *
+ * fdps_cdrom_read_disk_info and fdps_cdrom_read_track_info are both emitted in
+ * the file under test, so neither is a stub and nothing below rests on a
+ * stubbed return.
+ */
+static unsigned int track_length_from_a_rejected_drive(unsigned char track,
+                                                       short selected_track)
+{
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    poison_the_disk_info_globals();
+    poison_the_track_info_globals();
+    data_fdps_cd_track_info_track_number = selected_track;
+    scribble_the_stack_below();
+    return fdps_cd_get_track_length_sectors(track);
+}
+
+/* CALL 0x0003bfa5 at 0003c1af, before anything else: both globals the branch
+   and the lead-out arm read are this call's answers.  The poison is 0x5a in
+   both, so a body that skipped the refresh would leave them holding it. */
+static void cdtoc_track_length_refreshes_the_disc_summary(void)
+{
+    track_length_from_a_rejected_drive(1, 1);
+    CHECK_EQ(data_fdps_cd_highest_track_number, 0);
+    CHECK_EQ(data_fdps_cd_leadout_sector == 0xffffff6aUL, 1);
+}
+
+/* SUB EAX,dword ptr [ESP] at 0003c20f: the answer is one endpoint less the
+   other and not an endpoint on its own.  The two middle assertions are what
+   make the last one mean that -- both endpoints are pinned at 0xffffff6a
+   first, against their poison and against the value a refused query converts
+   to, so a body that returned either of them, or that dropped the subtraction,
+   would answer 0xffffff6a where 0 is required.  An off-by-150 anywhere in the
+   two conversions would show here as well, since the lead-in is what has to
+   cancel for a length of zero to come out. */
+static void cdtoc_track_length_subtracts_the_two_endpoints(void)
+{
+    unsigned int length;
+
+    length = track_length_from_a_rejected_drive(1, 1);
+    CHECK_EQ(data_fdps_cd_highest_track_number, 0);
+    CHECK_EQ(data_fdps_cd_track_start_sector == 0x5a5a5a5aUL, 0);
+    CHECK_EQ(data_fdps_cd_track_start_sector == 0xffffff6aUL, 1);
+    CHECK_EQ(data_fdps_cd_leadout_sector == 0xffffff6aUL, 1);
+    CHECK_EQ(length == data_fdps_cd_leadout_sector
+                       - data_fdps_cd_track_start_sector, 1);
+    CHECK_EQ(length == 0, 1);
+}
+
+/* The third query re-asks for the track the globals described on entry, so the
+   track number survives a call that queried a different track: 7 goes in, 3 is
+   asked about, 7 is what is left.  The control block's track byte is the same
+   fact from the driver's side -- the last request the driver saw named 7 and
+   not 3, which is what keeps fdps_cd_resolve_track_range reading the right
+   track's globals afterwards.  0x1234 shows the two widths apart and -2 shows
+   the word is sign-extended on the way back out. */
+static void cdtoc_track_length_restores_the_selected_track(void)
+{
+    track_length_from_a_rejected_drive(3, 7);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 7);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 7);
+
+    track_length_from_a_rejected_drive(3, 0x1234);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 0x1234);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 0x34);
+
+    track_length_from_a_rejected_drive(3, -2);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, -2);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 0xfe);
+}
+
 void run_cdtoc_tests(void)
 {
     RUN_TEST(cdtoc_unpack_splits_the_three_fields);
@@ -724,4 +832,7 @@ void run_cdtoc_tests(void)
     RUN_TEST(cdtoc_track_info_publishes_the_start_sector);
     RUN_TEST(cdtoc_track_info_masks_the_control_byte);
     RUN_TEST(cdtoc_track_info_publishes_the_status_word);
+    RUN_TEST(cdtoc_track_length_refreshes_the_disc_summary);
+    RUN_TEST(cdtoc_track_length_subtracts_the_two_endpoints);
+    RUN_TEST(cdtoc_track_length_restores_the_selected_track);
 }

@@ -142,4 +142,27 @@ extern unsigned char data_fdps_cd_track_info_control_flags;
 extern void fdps_cdrom_read_track_info(int track);
 #pragma aux fdps_cdrom_read_track_info "*" parm caller [];
 
+/* 0003c1a1.  How long one track plays, in CD frames: the sector the next track
+   starts at, or the lead-out sector for the last track on the disc, less the
+   sector this track starts at.  The 150-frame lead-in both endpoints have had
+   taken off them cancels in the subtraction.
+
+   Only the low byte of the argument is read, and it is compared against
+   data_fdps_cd_highest_track_number unsigned; nothing range checks it, so a
+   track number the disc does not have is answered rather than refused.  The
+   result is unsigned -- the difference of two unsigned globals, and its one
+   caller divides it with DIV.
+
+   It refreshes the disc summary on the way in and, on the way out, re-queries
+   the track the track-info globals described when it was entered.  That last
+   query is not redundant: fdps_cd_resolve_track_range decides which track's
+   range to publish from exactly those globals, so a version that queries this
+   track and the next one and stops leaves the CD layer naming the next track.
+
+   It is not free of side effects for either reason: it rewrites every global
+   fdps_cdrom_read_disk_info publishes, and it leaves the track-info globals
+   holding a fresh answer for the track they already described. */
+extern unsigned int fdps_cd_get_track_length_sectors(unsigned char track);
+#pragma aux fdps_cd_get_track_length_sectors "*" parm caller [];
+
 #endif

@@ -1140,5 +1140,33 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003c1a1": [
+    {
+      "what": "Which arm of the branch at 0003c1de ran, and the direction of the subtraction at 0003c20f, are not separable by the unit test. The test harness drives the CD layer at drive letter index 0xff so that MSCDEX refuses every request, and a refused Read Disk Info publishes highest track 0 -- so an unsigned byte track number is never below it and only the lead-out arm ever runs. Worse, the refused Read Audio Track Info inherits the zeroed control block fdps_cdrom_read_disk_info left in the same stack frame, so the track's start sector converts to the same 0xffffff6a as the lead-out: both arms would return 0 and so would the reversed subtraction. The emitted C matches the assembly on all three points (JNC unsigned, MOV EBX,[0x00069e01] on the fall-through arm, MOV EBX,[0x00069e0b] on the taken arm, SUB EAX,dword ptr [ESP]); what is missing is a check that can fail.",
+      "needs": "A run with a real answering drive: FDPS_DISC_1 mounted as a CD-ROM under DOSBox-X with MSCDEX present and data_fdps_cdrom_drive_letter_index pointing at it, on a disc whose highest track is above the track being asked about. The length of a non-final track must then equal the next track's start sector less that track's, and must not be 0 or negative; the final track's must reach the lead-out. This cannot become a gate assertion, because build_emit.py deliberately mounts the disc only when the machine happens to have it and nothing linked into the test image may depend on it.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "That the FIRST query at 0003c1c4 asks about the caller's track, rather than about the track the globals already described, is unpinned by the unit test for the same reason. The start sector it captures comes from a control block that carries no track-dependent content on a refused request, and the third query overwrites the published track number before the test can look at it, so passing the wrong value to the first query would produce an identical run. The assembly is unambiguous -- MOVZX EAX,byte ptr [ESP+0x10] at 0003c1be is the parameter slot, not the saved word at [ESP+4] -- and the emitted C passes the parameter; there is simply no observation that would fail.",
+      "needs": "The same answering drive as above. With a disc whose tracks start at different sectors, asking about track N while the globals describe track M (M != N) must return N's length, and the value must change with N.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same gap independently and add only this: the arm that ran and the direction of the subtraction are settled in the code by the object dump I took myself (WDISASM on workspace/code_emit/out/objs/CDTOC.OBJ, offset 0370: JAE at 03a9, data_fdps_cd_leadout_sector loaded only at L2, SUB eax,-8H[ebp] end-minus-start), so what is missing is strictly a unit-test observation that can fail, not knowledge of the behaviour. Nothing reachable from here closes that half.",
+      "needs": "As emit#0: a run against an answering MSCDEX drive with a disc whose highest track is above the track asked about.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Same gap, and my pass adds only that the code side is likewise settled: the emitted object pushes +14H[ebp], the parameter slot, to the first query (038c mov al,+14H[ebp] / 038f push eax), matching MOVZX EAX,byte ptr [ESP+0x10] at 0003c1be rather than the saved word at [ESP+4]. The unobservable part is the test's, not the code's.",
+      "needs": "As emit#1: the same answering drive, with a disc whose tracks start at different sectors.",
+      "same_as": "emit#1",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

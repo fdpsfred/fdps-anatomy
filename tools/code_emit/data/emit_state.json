@@ -1482,6 +1482,14 @@
       "status": "committed",
       "emitted_against": "0xd9",
       "rounds": 1
+    },
+    "0003c1a1": {
+      "name": "fdps_cd_get_track_length_sectors",
+      "target": "cdtoc.c",
+      "body_size": "0x76",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x76"
     }
   }
 }
