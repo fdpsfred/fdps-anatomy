@@ -1213,6 +1213,14 @@
       "status": "committed",
       "emitted_against": "0x67",
       "rounds": 0
+    },
+    "0003a2e0": {
+      "name": "fdps_battle_check_default_end_conditions",
+      "target": "btlend.c",
+      "body_size": "0xc1",
+      "status": "committed",
+      "emitted_against": "0xc1",
+      "rounds": 0
     }
   }
 }
