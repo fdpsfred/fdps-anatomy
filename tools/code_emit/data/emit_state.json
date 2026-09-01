@@ -1453,6 +1453,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x9d"
+    },
+    "0003be36": {
+      "name": "fdps_cd_set_audio_channel_control",
+      "target": "cd.c",
+      "body_size": "0x8b",
+      "status": "committed",
+      "emitted_against": "0x8b",
+      "rounds": 0
     }
   }
 }

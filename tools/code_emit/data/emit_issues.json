@@ -1110,5 +1110,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003be36": [
+    {
+      "what": "The staged request header declares itself 0x18 bytes long -- MOV byte ptr [ESP],0x18 at 0003be4a and PUSH 0x18 at 0003be6d -- while the MSCDEX IOCTL request header record is 26 bytes, and the body never writes struct offsets 0x14..0x17. So start_sector and the low half of volume_id_ptr are inside the twenty-four bytes that reach the CD-ROM driver and are pure uninitialised frame. This is the opposite shape from fdps_cd_read_head_sector's over-declaration at 0003bce2: there the garbage is past the end of the record, here it is inside it, in two documented fields. Established: the original and the rebuild are the same in kind -- WDISASM on workspace/code_emit/out/objs/CD.OBJ shows the rebuilt body has no store at those offsets either, and the rebuilt frame holds nothing else there (28 bytes of frame, the 26-byte header at ebp-0x1c and control_block a parameter at ebp+0x14), so both builds send whatever their own stack happened to hold and the byte values differ between them. Also established: the two IOCTL Input builders in this same file DO zero both fields, so the omission is specific to this function and is not a general property of the module; and this function is unreferenced -- get_function_callers and get_xrefs_to 0003be36 are both empty, and nothing in the image CALLs it -- so no game path reaches it.",
+      "needs": "A real MSCDEX driver -- on hardware, or a DOSBox-X run with a disc mounted -- issuing an IOCTL Output request whose header declares length 0x18, showing whether the driver reads the start-sector and volume-ID fields for command code 0x0c or stops at the declared length. Nothing in the image, in the resource files or in the knowledge base can decide what a particular driver implementation does with header bytes the request says are not there.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached independently and I confirm the emitter's reading, with nothing to add to the description. What my pass adds is the confirmation itself and one narrowing: I checked the whole listing of 0003be36 for a store to [ESP+0x14] or [ESP+0x16] and there is none, I checked the sibling 0003bd99 and it does have both (0003bdb4, 0003bdbc), and I checked the rebuilt CD.OBJ at 0300-0383 and it has no store at -08H[ebp] or -06H[ebp] either -- so original and rebuild are the same in kind, each sending its own frame's leftovers, and the byte values differ between them. I also independently confirmed the function is unreferenced: get_xrefs_to 0003be36 returns no references, so no game path reaches the question at all. The narrowing is that all four bytes 0x14..0x17 are inside the declared 0x18, not two: start_sector in full and the low half of volume_id_ptr.",
+      "needs": "A real MSCDEX driver -- on hardware, or a DOSBox-X run with a disc mounted -- answering an IOCTL Output request whose header declares length 0x18, to show whether it reads header bytes 0x14..0x17 for command code 0x0c or stops at the declared length. Nothing in the image, the resource files or the knowledge base decides what a particular driver implementation does with bytes the request says are not there.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

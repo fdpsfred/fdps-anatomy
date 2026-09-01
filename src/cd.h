@@ -140,4 +140,23 @@ extern unsigned int fdps_cd_read_head_sector(void);
 extern void fdps_cd_read_audio_channel_info(unsigned char *channel_info);
 #pragma aux fdps_cd_read_audio_channel_info "*" parm caller [];
 
+/* Tells the CD-ROM driver how to route and mix its audio output, from the
+   caller's nine-byte control block -- MSCDEX IOCTL Output, control block 03h
+   Audio Channel Control, whose payload is four (input channel, volume) pairs,
+   one pair per output channel.  The write-direction counterpart of
+   fdps_cd_read_audio_channel_info.
+
+   control_block points at nine bytes the caller owns.  Byte 0 is stamped with
+   the control block code here, so the caller need not set it; bytes 1..8 are
+   the four pairs and are sent exactly as the caller left them.  Nothing is
+   copied back into the block -- this is an order to the drive, not a question,
+   so the caller's buffer is unchanged apart from that first byte.
+
+   Returns nothing.  Whether the driver accepted the order is visible only in
+   data_fdps_cd_last_request_status, which this leaves holding the status word
+   the driver wrote into the request header -- bit 15 is error.  Nothing in the
+   image calls it. */
+extern void fdps_cd_set_audio_channel_control(unsigned char *control_block);
+#pragma aux fdps_cd_set_audio_channel_control "*" parm caller [];
+
 #endif

@@ -507,6 +507,141 @@ static void cd_audio_channel_publishes_the_request_status(void)
              staged_word(data_fdps_cd_request_header_buffer, 3));
 }
 
+/* fdps_cd_set_audio_channel_control, 0003be36.
+ *
+ * Same arrangement again: the request is issued for real at drive letter index
+ * 0xff, which MSCDEX rejects on the drive number before it follows ES:BX, and
+ * where no CD-ROM drive is mounted there is no MSCDEX handler on INT 2Fh at
+ * all.  Neither case touches the two DOS blocks, so what is in them afterwards
+ * is exactly what the function staged.
+ *
+ * Expected values are the immediates in the body -- MOV byte ptr [ESP],0x18,
+ * [ESP+1],0 and [ESP+2],0xc at 0003be4a..0003be58, MOV byte ptr [ESP+0xd],0,
+ * the transfer address loaded from [0x00069da8], MOV word ptr [ESP+0x12],9,
+ * MOV byte ptr [EAX],0x3 for the control block code at 0003be47, and the PUSH
+ * 0x18 / PUSH 0x9 pair that gives the two send lengths.
+ *
+ * Two things separate this function from the IOCTL Input builders above and
+ * both are asserted below.  It declares 0x18 where the record is 0x1a, and it
+ * never stores to [ESP+0x14] or [ESP+0x16], so the two fields the siblings zero
+ * go out holding live stack -- the poison at the far end of the DOS block is
+ * what pins the send length at twenty-four rather than twenty-six, and nothing
+ * asserts what lands in start_sector itself, because nothing may.  And it makes
+ * no read-back of the control block: there are three CALL memcpy in the body,
+ * not four.
+ */
+static unsigned char audio_control_probe[16];
+
+/* The ramp starts at 0xa0 so every byte is distinct and none is 3, the code
+   the function stamps into byte 0.  Byte 9 of the IOCTL block and bytes 0x18
+   and 0x19 of the request-header block are poisoned separately: they are the
+   two bytes just past the end of each send, so they are what shows a copy that
+   ran one record too long. */
+static void set_audio_channel_control_on_a_rejected_drive(void)
+{
+    int i;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    for (i = 0; i < 16; i++) {
+        audio_control_probe[i] = (unsigned char) (0xa0 + i);
+    }
+    data_fdps_cd_ioctl_buffer[9] = 0x5a;
+    data_fdps_cd_request_header_buffer[0x18] = 0x5b;
+    data_fdps_cd_request_header_buffer[0x19] = 0x5c;
+    fdps_cd_set_audio_channel_control(audio_control_probe);
+}
+
+/* Command code 0x0c is IOCTL Output -- the one field that makes this the write
+   direction -- and the transfer it describes is nine bytes out of the second
+   DOS block, addressed by the packed real-mode far pointer and not by the flat
+   one. */
+static void cd_set_audio_channel_stages_an_ioctl_output_request(void)
+{
+    unsigned char *header;
+
+    set_audio_channel_control_on_a_rejected_drive();
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x18);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 0xc);
+    CHECK_EQ(header[0xd], 0);
+    CHECK_EQ((long) staged_dword(header, 0xe),
+             (long) data_fdps_cd_ioctl_buffer_real_mode_ptr);
+    CHECK_EQ(staged_word(header, 0x12), 9);
+}
+
+/* The declared length is two short of the record, and the send copies that
+   declared length: PUSH 0x18 at 0003be6d, against a struct of 0x1a.  So the
+   two bytes at the end of the record are never staged, and the poison the setup
+   put at 0x18 and 0x19 is still there -- which is the only way to see the
+   under-declaration from outside, since what does get sent in start_sector is
+   uninitialised stack and cannot be asserted at all. */
+static void cd_set_audio_channel_sends_two_bytes_short_of_the_record(void)
+{
+    set_audio_channel_control_on_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0] + 2,
+             (int) sizeof(struct fdps_cd_request_header));
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0x18], 0x5b);
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0x19], 0x5c);
+}
+
+/* MOV EAX,dword ptr [ESP+0x1c] / MOV byte ptr [EAX],0x3 stamps the control
+   block code into the caller's own buffer before anything is copied, so the 3
+   is visible in both the caller's buffer and the staged block. */
+static void cd_set_audio_channel_stamps_the_control_block_code(void)
+{
+    set_audio_channel_control_on_a_rejected_drive();
+    CHECK_EQ(audio_control_probe[0], 3);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 3);
+}
+
+/* PUSH 0x9 / PUSH [ESP+0x20] / PUSH [0x00069da4] / CALL memcpy sends the
+   caller's block as it stands: bytes 1..8 are never cleared or rewritten, so
+   the ramp the test put there is what reaches the driver, and the tenth byte
+   of the IOCTL block keeps its own poison. */
+static void cd_set_audio_channel_sends_the_callers_own_nine_bytes(void)
+{
+    int i;
+
+    set_audio_channel_control_on_a_rejected_drive();
+    for (i = 1; i < 9; i++) {
+        CHECK_EQ(data_fdps_cd_ioctl_buffer[i], 0xa0 + i);
+    }
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[9], 0x5a);
+}
+
+/* There is no fourth memcpy: the body's three CALL 0x000435bc are the header
+   out, the control block out, and the header back, and the control block is
+   never read back.  So the caller's bytes 1..8 still hold the ramp afterwards,
+   where fdps_cd_read_audio_channel_info would have overwritten all nine with
+   whatever the DOS block held.  This is the assertion that tells the two
+   directions apart. */
+static void cd_set_audio_channel_leaves_the_callers_block_alone(void)
+{
+    int i;
+
+    set_audio_channel_control_on_a_rejected_drive();
+    for (i = 1; i < 16; i++) {
+        CHECK_EQ(audio_control_probe[i], 0xa0 + i);
+    }
+}
+
+/* The header is copied back out of the DOS block before the status is read --
+   for its own length byte's worth of bytes, which covers offset 3 -- so the
+   published word has to be the word still sitting at header+3.  MOV EAX,[ESP+3]
+   / MOV [0x00069e20],AX is a 16-bit store out of a dword load, so a status read
+   a byte early or late, or one that let the high half through, would break the
+   equality whatever the driver left there. */
+static void cd_set_audio_channel_publishes_the_request_status(void)
+{
+    set_audio_channel_control_on_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_last_request_status,
+             staged_word(data_fdps_cd_request_header_buffer, 3));
+}
+
 void run_cd_tests(void)
 {
     RUN_TEST(cd_register_blocks_have_the_image_layout);
@@ -528,4 +663,10 @@ void run_cd_tests(void)
     RUN_TEST(cd_audio_channel_sends_the_callers_own_nine_bytes);
     RUN_TEST(cd_audio_channel_copies_nine_bytes_back_to_the_caller);
     RUN_TEST(cd_audio_channel_publishes_the_request_status);
+    RUN_TEST(cd_set_audio_channel_stages_an_ioctl_output_request);
+    RUN_TEST(cd_set_audio_channel_sends_two_bytes_short_of_the_record);
+    RUN_TEST(cd_set_audio_channel_stamps_the_control_block_code);
+    RUN_TEST(cd_set_audio_channel_sends_the_callers_own_nine_bytes);
+    RUN_TEST(cd_set_audio_channel_leaves_the_callers_block_alone);
+    RUN_TEST(cd_set_audio_channel_publishes_the_request_status);
 }

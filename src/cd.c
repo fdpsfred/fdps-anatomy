@@ -242,3 +242,69 @@ void fdps_cd_read_audio_channel_info(unsigned char *channel_info)
 
     data_fdps_cd_last_request_status = request_header.status;
 }
+
+/* 0003be36.  An MSCDEX IOCTL Output request -- command code 0x0c -- carrying
+   the nine-byte control block 03h, Audio Channel Control, which tells the drive
+   which input channel and what volume to route to each of its four output
+   channels.
+
+   The mirror image of fdps_cd_read_audio_channel_info: same nine-byte block,
+   same four (input channel, volume) pairs, but going the other way.  That is
+   the whole reason the command byte is 0x0c rather than 3 and the reason
+   nothing is copied back out of the IOCTL block afterwards -- the caller asked
+   a question of the drive in the read direction and is issuing an order in this
+   one, so the reply half of the exchange is only the request header's status
+   word.  Byte 0 of the caller's block is stamped with the control block code
+   here; bytes 1..8 go to the driver exactly as the caller left them.
+
+   No branch in the body: stamp, build the header, stage both blocks, send, read
+   the header back.
+
+   The declared header length is 0x18 -- twenty-four bytes, two short of the
+   twenty-six the record actually is -- and 0x18 is also what the staging memcpy
+   copies (MOV byte ptr [ESP],0x18 at 0003be4a and PUSH 0x18 at 0003be6d).  So
+   the request goes out with start_sector and the low half of volume_id_ptr
+   holding whatever the frame held, and unlike the two IOCTL Input builders
+   above this body never writes either of them: there is no store at [ESP+0x14]
+   or [ESP+0x16] anywhere in it.  Zeroing them here to make the request look
+   tidy would send two bytes the original does not.  The status word and the
+   eight reserved bytes are uninitialised for the same reason they are in the
+   siblings -- the driver writes the first and ignores the rest.
+
+   The read-back is for as many bytes as the header's own length byte says --
+   MOVZX EAX,byte ptr [ESP] at 0003be9b, zero extended, and that byte is the
+   local's own 0x18, because the driver wrote into the DOS block and not into
+   this frame.  From the PUSH of that length onwards the code is shared: both
+   fdps_cd_seek and fdps_cd_play_audio_range push their own length and jump
+   straight to 0003bea0.  That is the compiler folding three identical tails
+   together, not a routine any of them calls.
+
+   The status word is published in data_fdps_cd_last_request_status because the
+   function returns nothing: a drive that refused the request and a drive that
+   accepted it are otherwise indistinguishable to the caller, and bit 15 of that
+   word is the driver's error flag.  Nothing in the image calls this function.
+
+   The transfer-address field carries data_fdps_cd_ioctl_buffer_real_mode_ptr,
+   the packed real-mode far pointer, while the memcpy that fills the block goes
+   through data_fdps_cd_ioctl_buffer, the flat linear address of that same DOS
+   block.  The two are not interchangeable (rebuild_info/pitfalls.md). */
+void fdps_cd_set_audio_channel_control(unsigned char *control_block)
+{
+    struct fdps_cd_request_header request_header;
+
+    control_block[0] = 3;
+    request_header.header_length = 0x18;
+    request_header.subunit = 0;
+    request_header.command = 0xc;
+    request_header.media_descriptor = 0;
+    request_header.transfer_address = data_fdps_cd_ioctl_buffer_real_mode_ptr;
+    request_header.transfer_byte_count = 9;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0x18);
+    memcpy(data_fdps_cd_ioctl_buffer, control_block, 9);
+    fdps_cd_device_request();
+    memcpy(&request_header, data_fdps_cd_request_header_buffer,
+           request_header.header_length);
+
+    data_fdps_cd_last_request_status = request_header.status;
+}
