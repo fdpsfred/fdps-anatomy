@@ -996,6 +996,234 @@ static void ch09_no_slot_but_zero_six_and_seven_ends_the_battle(void)
     }
 }
 
+/* ------------------------------------------------------------------ *
+ * Chapter 10's handler, 0003a8c0.  The one handler in this file with no
+ * CALL 0x0003a2e0 in it: an eight-slot escape count, then a defeat test,
+ * then the clear, and nothing else.
+ *
+ * The loop is CMP dword ptr [EBP-0x8],0x8 / JL over indices 0..7, and its
+ * body is CALL 0x0002d210 / MOV AL,byte ptr [EAX+0x1] / AND EAX,0xff / CMP
+ * EAX,0x17 / JZ 0003a919 with PUSH EAX / CALL 0x000109b0 / TEST EAX,EAX /
+ * JZ 0003a91f reached only when that compare fails, both arms landing on
+ * the one INC dword ptr [EBP-0x4] at 0003a91c.  The tail is PUSH 0x0 /
+ * CALL 0x000109b0 / TEST EAX,EAX / JZ 0003a93b, choosing between MOV dword
+ * ptr [0x00069da0],0x1 at 0003a92f and the CMP dword ptr [EBP-0x4],0x8 /
+ * JNZ 0003a94b guarding MOV dword ptr [0x00069da0],0x2 at 0003a941.
+ *
+ * So four things carry the whole behaviour and each is easy to write away:
+ * the count reaching all eight rather than a threshold, 0x17 being an
+ * equality on the record's pos_y rather than a floor, the retired test
+ * being ORed INTO the count so a casualty counts as escaped, and the
+ * absence of the shared end test that every other handler in this file
+ * calls.  The expected verdicts below come from that assembly, and the
+ * 0/1/2 meanings of the code are program_info/architecture.md.
+ *
+ * The guide's chapter 10 entry, 宗教法庭, gives 勝利條件 戰場底部脫離
+ * （所有人到達戰場底部）and 失敗條件 蘭迪斯死亡 -- no 敵人全滅 win at
+ * all, which is exactly the missing shared test -- and its closing advice
+ * sets 己方八位人員 out on the last two stair rows, the eight player slots
+ * the loop bound counts.
+ *
+ * Chapter 10 is chapter id 9, table slot 9: the dword at 000602b0, nine
+ * entries into the table based at 0006028c, is 0003a8c0.
+ * ------------------------------------------------------------------ */
+
+#define CHAPTER_10_ID 9
+
+/* The map's bottom row, from the CMP EAX,0x17 at 0003a904. */
+#define BOTTOM_ROW 0x17
+
+/* Same staging as above with the chapter id moved to chapter 10's. */
+static void stage_ch10(int live_unit_count, int battle_end_code)
+{
+    stage(live_unit_count, battle_end_code);
+    data_fdps_chapter_current_chapter_id = CHAPTER_10_ID;
+}
+
+/* All eight player slots, live, standing on one row.  The handler reads only
+   pos_y at record offset 1 and the flags byte at offset 5, so those two and
+   the array base are its entire input. */
+static void stage_ch10_party_at_row(int row)
+{
+    int slot;
+
+    for (slot = 0; slot < STAGE_UNITS; slot++) {
+        stage_unit(slot, SIDE_PLAYER, 0);
+        stage_units[slot].pos_y = (unsigned char) row;
+    }
+}
+
+/* The chapter's stated win condition, 所有人到達戰場底部: every one of the
+   eight slots on row 0x17 with 蘭迪斯 in play settles the code at 2. */
+static void ch10_all_eight_on_the_bottom_row_is_a_clear(void)
+{
+    stage_ch10(STAGE_UNITS, 0);
+    stage_ch10_party_at_row(BOTTOM_ROW);
+    fdps_chapter_10_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* The count is compared for equality with 8 and nothing less will do: each
+   slot in turn is held one row short while the other seven have escaped, and
+   the battle is still open every time.  A threshold, or a bound that stopped
+   at 7, would clear the chapter on one of these. */
+static void ch10_one_slot_short_leaves_the_battle_open(void)
+{
+    int held_back_slot;
+
+    for (held_back_slot = 0; held_back_slot < STAGE_UNITS; held_back_slot++) {
+        stage_ch10(STAGE_UNITS, 0);
+        stage_ch10_party_at_row(BOTTOM_ROW);
+        stage_units[held_back_slot].pos_y = (unsigned char) (BOTTOM_ROW - 1);
+        fdps_chapter_10_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
+/* The row test is an equality, not a floor: a slot sitting past 0x17 is no
+   more escaped than one short of it.  Writing pos_y >= 0x17 passes the case
+   above and fails this one. */
+static void ch10_the_bottom_row_test_is_an_equality(void)
+{
+    stage_ch10(STAGE_UNITS, 0);
+    stage_ch10_party_at_row(BOTTOM_ROW);
+    stage_units[4].pos_y = (unsigned char) (BOTTOM_ROW + 1);
+    fdps_chapter_10_post_action();
+    CHECK_EQ(end_code(), 0);
+
+    stage_ch10(STAGE_UNITS, 0);
+    stage_ch10_party_at_row(BOTTOM_ROW);
+    stage_units[4].pos_y = 0;
+    fdps_chapter_10_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* The retired test is ORed into the count, so a casualty is accounted for and
+   the chapter stays winnable after losses.  First: nobody but 蘭迪斯 has
+   reached the bottom row and the other seven are all gone, which still clears
+   the chapter.  Then the mixed case, four escaped and four dead.  Counting
+   only units standing on row 0x17 answers 0 to both. */
+static void ch10_a_retired_unit_counts_as_escaped(void)
+{
+    int slot;
+
+    stage_ch10(STAGE_UNITS, 0);
+    stage_ch10_party_at_row(0);
+    stage_units[0].pos_y = (unsigned char) BOTTOM_ROW;
+    for (slot = 1; slot < STAGE_UNITS; slot++) {
+        stage_units[slot].flags = FLAG_RETIRED;
+    }
+    fdps_chapter_10_post_action();
+    CHECK_EQ(end_code(), 2);
+
+    stage_ch10(STAGE_UNITS, 0);
+    stage_ch10_party_at_row(0);
+    for (slot = 0; slot < 4; slot++) {
+        stage_units[slot].pos_y = (unsigned char) BOTTOM_ROW;
+    }
+    for (slot = 4; slot < STAGE_UNITS; slot++) {
+        stage_units[slot].flags = FLAG_RETIRED;
+    }
+    fdps_chapter_10_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* The chapter's one stated lose condition, 蘭迪斯死亡, and the defeat arm is
+   taken before the count is looked at: the second case has all eight slots
+   accounted for -- 蘭迪斯 counts himself, being retired -- and the answer is
+   still 1.  Testing the count first, or hanging the defeat off an else of the
+   clear, answers 2 there. */
+static void ch10_a_retired_randis_is_a_defeat(void)
+{
+    stage_ch10(STAGE_UNITS, 0);
+    stage_ch10_party_at_row(0);
+    stage_units[0].flags = FLAG_RETIRED;
+    fdps_chapter_10_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch10(STAGE_UNITS, 0);
+    stage_ch10_party_at_row(BOTTOM_ROW);
+    stage_units[0].flags = FLAG_RETIRED;
+    fdps_chapter_10_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* Only slot 0 can lose the chapter.  The tail asks fdps_unit_is_retired about
+   the literal 0 at 0003a921 and about nothing else, so each of the other seven
+   slots retires in turn on an escaped field and the chapter still clears, and
+   a lone casualty on an unescaped field leaves the battle open rather than
+   ending it.  A defeat test written as "any unit retired" fails all eight. */
+static void ch10_only_slot_zero_can_lose_the_chapter(void)
+{
+    int retired_slot;
+
+    for (retired_slot = 1; retired_slot < STAGE_UNITS; retired_slot++) {
+        stage_ch10(STAGE_UNITS, 0);
+        stage_ch10_party_at_row(BOTTOM_ROW);
+        stage_units[retired_slot].flags = FLAG_RETIRED;
+        fdps_chapter_10_post_action();
+        CHECK_EQ(end_code(), 2);
+    }
+
+    stage_ch10(STAGE_UNITS, 0);
+    stage_ch10_party_at_row(0);
+    stage_units[3].flags = FLAG_RETIRED;
+    fdps_chapter_10_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* The shared default end test is not called, on either side of the body.
+   First: eight live units and not one of them on side 0, so the walk inside
+   fdps_battle_check_default_end_conditions would find no live enemy and leave
+   its own up front 2 at 0003a2f9 standing -- and nobody has escaped, so the
+   answer here must be 0.  Then the other direction: eight live side-0 units
+   that have all reached the bottom row, where that test would put the code
+   back to 0 at 0003a34a and this handler must still answer 2.  Copying the
+   sibling handlers' CALL 0x0003a2e0 fails one or the other whichever end of
+   the body it is written at. */
+static void ch10_the_shared_end_test_is_not_run(void)
+{
+    int slot;
+
+    stage_ch10(STAGE_UNITS, 0);
+    stage_ch10_party_at_row(0);
+    fdps_chapter_10_post_action();
+    CHECK_EQ(end_code(), 0);
+
+    stage_ch10(STAGE_UNITS, 0);
+    stage_ch10_party_at_row(BOTTOM_ROW);
+    for (slot = 0; slot < STAGE_UNITS; slot++) {
+        stage_units[slot].side = (unsigned char) SIDE_ENEMY;
+    }
+    fdps_chapter_10_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* Both stores are conditional and there is no unconditional write anywhere in
+   the body, so with neither end condition met the code keeps whatever the
+   battle loop gave it: a verdict a chapter event already recorded survives,
+   and an open battle stays open. */
+static void ch10_a_verdict_the_handler_does_not_settle_is_left_alone(void)
+{
+    stage_ch10(STAGE_UNITS, 1);
+    stage_ch10_party_at_row(BOTTOM_ROW);
+    stage_units[6].pos_y = 0;
+    fdps_chapter_10_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch10(STAGE_UNITS, 2);
+    stage_ch10_party_at_row(BOTTOM_ROW);
+    stage_units[6].pos_y = 0;
+    fdps_chapter_10_post_action();
+    CHECK_EQ(end_code(), 2);
+
+    stage_ch10(STAGE_UNITS, 0);
+    stage_ch10_party_at_row(BOTTOM_ROW);
+    stage_units[6].pos_y = 0;
+    fdps_chapter_10_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
 void run_chpost1_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -1035,4 +1263,12 @@ void run_chpost1_tests(void)
     RUN_TEST(ch09_the_shared_slot_zero_test_still_runs);
     RUN_TEST(ch09_the_guest_tests_survive_a_recorded_verdict);
     RUN_TEST(ch09_no_slot_but_zero_six_and_seven_ends_the_battle);
+    RUN_TEST(ch10_all_eight_on_the_bottom_row_is_a_clear);
+    RUN_TEST(ch10_one_slot_short_leaves_the_battle_open);
+    RUN_TEST(ch10_the_bottom_row_test_is_an_equality);
+    RUN_TEST(ch10_a_retired_unit_counts_as_escaped);
+    RUN_TEST(ch10_a_retired_randis_is_a_defeat);
+    RUN_TEST(ch10_only_slot_zero_can_lose_the_chapter);
+    RUN_TEST(ch10_the_shared_end_test_is_not_run);
+    RUN_TEST(ch10_a_verdict_the_handler_does_not_settle_is_left_alone);
 }

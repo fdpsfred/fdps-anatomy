@@ -274,3 +274,79 @@ void fdps_chapter_09_post_action(void)
         data_fdps_chapter_event_or_battle_end_code = 1;
     }
 }
+
+/* 0003a8c0.  The only handler in this file that does not call the shared test:
+   an eight-slot escape count, then a defeat test, then the clear.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 0003a8c0..0003a8c4 -- over SUB ESP,0xc, and all three dwords of
+   that local area are live.  [EBP-0x4] is zeroed at 0003a8cc and incremented
+   at 0003a91c, so it is the running count; [EBP-0x8] is zeroed at 0003a8d3,
+   compared against 8 at 0003a8da and incremented at 0003a8e5, so it is the
+   loop index; [EBP-0xc] takes EAX straight off the record lookup at 0003a8f6
+   and is dereferenced at 0003a8f9, so it is the record pointer.
+
+   The loop is the ordinary -od for shape with the increment block ahead of the
+   test in address order: CMP dword ptr [EBP-0x8],0x8 / JL 0003a8ea / JMP
+   0003a921 at 0003a8da is the guard, the body runs 0003a8ea..0003a91f, and the
+   JMP 0003a8e2 at 0003a91f lands on the MOV EAX,[EBP-0x8] / INC dword ptr
+   [EBP-0x8] pair that falls back into the test.  The compare is JL, signed,
+   over an int index, and the bound is the literal 8 -- the eight player slots
+   map09.dat fields, which is the party the guide sets out on the last two
+   stair rows for this chapter's final wave.
+
+   Body.  MOV EAX,[EBP-0x8] / PUSH EAX / CALL 0x0002d210 / ADD ESP,0x4 at
+   0003a8ea is fdps_get_unit_record(unit_index), the caller clearing its one
+   argument, and its EAX IS used: it is stored to [EBP-0xc] and reloaded at
+   0003a8f9.  MOV AL,byte ptr [EAX+0x1] / AND EAX,0xff / CMP EAX,0x17 at
+   0003a8fc reads the record's pos_y at offset 1 as an unsigned byte and tests
+   it for equality against 0x17, and JZ 0003a919 skips straight to the
+   increment.  Only when that fails is PUSH EAX / CALL 0x000109b0 / ADD ESP,0x4
+   at 0003a90c reached -- fdps_unit_is_retired(unit_index), its EAX used by
+   TEST EAX,EAX / JZ 0003a91f at 0003a915.  So the two conditions are a
+   short-circuiting or over one shared increment, not two counts.
+
+   Tail.  PUSH 0x0 / CALL 0x000109b0 / ADD ESP,0x4 at 0003a921 is
+   fdps_unit_is_retired(0), and its EAX is used: TEST EAX,EAX / JZ 0003a93b at
+   0003a92b picks between MOV dword ptr [0x00069da0],0x1 at 0003a92f and the
+   CMP dword ptr [EBP-0x4],0x8 / JNZ 0003a94b at 0003a93b guarding MOV dword
+   ptr [0x00069da0],0x2 at 0003a941.  The JMP 0003a94b at 0003a939 takes the
+   defeat arm past the count entirely, so the two are an if/else and the defeat
+   wins over a completed escape decided in the same call.  The count compare is
+   an equality on the JNZ, not a threshold.
+
+   Both stores are conditional and there is no unconditional write anywhere in
+   the body, so a battle that has neither ended leaves
+   data_fdps_chapter_event_or_battle_end_code holding whatever the battle loop
+   gave it, and a verdict a chapter event already recorded survives untouched.
+
+   Two things here are not what the siblings above would suggest.  The escape
+   count ORs the bottom-row test with fdps_unit_is_retired, so a casualty
+   counts as accounted for and the chapter stays winnable after losses;
+   counting only units standing on row 0x17 makes it unwinnable the moment
+   anyone but 蘭迪斯 dies.  And there is no CALL 0x0003a2e0 in this function at
+   all: emptying the enemy side is not a clear here, which matches the guide's
+   勝利條件 戰場底部脫離（所有人到達戰場底部）against 失敗條件 蘭迪斯死亡.
+
+   Table slot 9: the dword at 000602b0, nine entries into the table based at
+   0006028c, is 0003a8c0. */
+void fdps_chapter_10_post_action(void)
+{
+    int escaped_or_retired_count;
+    int unit_index;
+    struct fdps_unit_record *unit_record;
+
+    escaped_or_retired_count = 0;
+    for (unit_index = 0; unit_index < 8; unit_index++) {
+        unit_record = fdps_get_unit_record(unit_index);
+        if (unit_record->pos_y == 0x17 ||
+            fdps_unit_is_retired(unit_index) != 0) {
+            escaped_or_retired_count++;
+        }
+    }
+    if (fdps_unit_is_retired(0) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    } else if (escaped_or_retired_count == 8) {
+        data_fdps_chapter_event_or_battle_end_code = 2;
+    }
+}

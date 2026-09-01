@@ -163,4 +163,37 @@ extern void fdps_chapter_07_post_action(void);
 extern void fdps_chapter_09_post_action(void);
 #pragma aux fdps_chapter_09_post_action "*" parm caller [];
 
+/* Chapter 10's post-action test: the escape chapter.  Takes nothing, returns
+   nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h).
+
+   Alone among the handlers in this file it does NOT call
+   fdps_battle_check_default_end_conditions (btlend.h), so emptying the enemy
+   side is not a clear on this chapter and a defeat is not inherited from the
+   shared test either.  Both conditions are its own:
+
+     - a defeat, code 1, when unit slot 0 -- 蘭迪斯 -- has left the battle;
+     - a clear, code 2, when all eight of the map's player slots, 0 through 7,
+       are accounted for and slot 0 is still in play.
+
+   The two are an if/else with the defeat first, so a call that completes the
+   escape and retires 蘭迪斯 at once is a defeat.  A slot counts as accounted
+   for when its record's pos_y (struct fdps_unit_record, unit.h) is 0x17, the
+   map's bottom row, OR when fdps_unit_is_retired says it is gone: a casualty
+   counts as having escaped, so the chapter stays winnable after losses.  The
+   count must reach exactly eight; nothing else is examined and
+   data_fdps_map_unit_count is not consulted, so enemies and any slot past 7
+   have no bearing on the answer.
+
+   Neither store is unconditional: with neither end condition met the code
+   keeps the value the battle loop gave it, so a verdict a chapter event
+   already recorded survives the call.
+
+   These are the guide's chapter 10 (宗教法庭) rules, 勝利條件 戰場底部脫離
+   （所有人到達戰場底部）and 失敗條件 蘭迪斯死亡.
+
+   Table slot 9. */
+extern void fdps_chapter_10_post_action(void);
+#pragma aux fdps_chapter_10_post_action "*" parm caller [];
+
 #endif
