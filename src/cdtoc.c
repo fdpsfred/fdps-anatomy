@@ -384,3 +384,65 @@ void fdps_cd_get_track_length_msf(unsigned char track, unsigned char *minutes,
     *seconds = (unsigned char) seconds_in_minute;
     *minutes = (unsigned char) ((total_seconds - seconds_in_minute) / 60);
 }
+
+/* 0003c27c.  The two facts about the disc as a whole: how many tracks it has
+   and how long it plays.  There is no branch in the body -- one call, a byte
+   copy, a subtraction and the same two divide-and-remainder pairs as the
+   function above -- and all four results leave through the out-pointers as
+   single bytes: MOV byte ptr [EBX],DL, MOV byte ptr [EDI],DL, MOV byte ptr
+   [ESI],DL and MOV byte ptr [EDX],AL, so a caller may aim the four at four
+   adjacent bytes without the stores reaching past them.
+
+   The disc summary is refreshed first, at 0003c291, so both globals read
+   below are this call's answers rather than whatever an earlier query left
+   behind.  Both are also rewritten on a refused request, which is what makes
+   the answer on a drive that did not respond track 0 and a playing time
+   converted from the -150 that a 00:00:00 lead-out becomes.
+
+   The highest-track byte is copied out first, before any of the arithmetic,
+   and it is copied whole: MOV DL,byte ptr [0x00069e07] then a byte store, with
+   no mask and no range check, so whatever the driver put in that field is what
+   the caller gets.
+
+   The playing length is the lead-out sector less 0x96, and both DIVs are
+   unsigned and never IDIV.  As in the function above the 150 comes off a value
+   that has already had the lead-in removed -- fdps_cd_msf_to_sector took it off
+   the lead-out address before fdps_cdrom_read_disk_info stored the sector
+   number -- so this subtraction takes off two seconds that are not there and
+   every answer is two seconds short of the disc's real playing time.  It is
+   the module's fixed convention rather than a correction, the same SUB 0x96
+   that opens the same /75, /60 chain in fdps_cd_get_track_length_msf and in
+   fdps_cd_sector_to_msf, and the intermediate stays unsigned: a lead-out
+   sector below 150 wraps to just under 2^32 and comes out as a huge triple,
+   where a signed intermediate would give a small negative one and a different
+   answer in all three bytes.
+
+   Each division is written as (value - remainder) / divisor, computing each
+   quotient twice, because that is what the body does -- MOVZX EDX,DL then SUB
+   EAX,EDX before the second DIV of each pair.  It cannot change the value: the
+   remainder is exactly what truncation drops, and it is below 75 and below 60
+   respectively, so the byte it is carried through is wide enough for it.
+
+   The minute quotient is stored as a byte with no clamp, so a playing time
+   past 255 minutes -- which the wrapped case above reaches -- wraps in the
+   minute field alone.  Nothing in the image calls this function. */
+void fdps_cd_get_disk_info_msf(unsigned char *highest_track_out,
+                               unsigned char *minutes_out,
+                               unsigned char *seconds_out,
+                               unsigned char *frames_out)
+{
+    unsigned int playing_length_frames;
+    unsigned int frames_in_second;
+    unsigned int total_seconds;
+    unsigned int seconds_in_minute;
+
+    fdps_cdrom_read_disk_info();
+    *highest_track_out = data_fdps_cd_highest_track_number;
+    playing_length_frames = data_fdps_cd_leadout_sector - 0x96;
+    frames_in_second = playing_length_frames % 75;
+    *frames_out = (unsigned char) frames_in_second;
+    total_seconds = (playing_length_frames - frames_in_second) / 75;
+    seconds_in_minute = total_seconds % 60;
+    *seconds_out = (unsigned char) seconds_in_minute;
+    *minutes_out = (unsigned char) ((total_seconds - seconds_in_minute) / 60);
+}

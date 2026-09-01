@@ -3,8 +3,9 @@
  * So far this covers fdps_cd_unpack_msf at 0003bc3f,
  * fdps_cd_msf_to_sector at 0003bc78, fdps_cdrom_read_upc at 0003bec1,
  * fdps_cdrom_read_disk_info at 0003bfa5, fdps_cdrom_read_track_info at
- * 0003c0c8, fdps_cd_get_track_length_sectors at 0003c1a1 and
- * fdps_cd_get_track_length_msf at 0003c217.
+ * 0003c0c8, fdps_cd_get_track_length_sectors at 0003c1a1,
+ * fdps_cd_get_track_length_msf at 0003c217 and fdps_cd_get_disk_info_msf at
+ * 0003c27c.
  *
  * Every expected value below comes from the sixteen instructions of that
  * function and from its two call sites, never from the emitted C:
@@ -922,6 +923,132 @@ static void cdtoc_track_length_msf_delegates_to_the_sector_query(void)
     CHECK_EQ(data_fdps_cd_track_start_sector == 0xffffff6aUL, 1);
 }
 
+/* fdps_cd_get_disk_info_msf, 0003c27c.
+ *
+ * Driven through the same rejected drive as everything above, and for the same
+ * reason it is the one case that makes the arithmetic knowable: a refused Read
+ * Disk Info clears its control block before sending it and gets it back
+ * unchanged, so after the refresh at 0003c291 the highest-track byte at
+ * 00069e07 is 0 and the lead-out sector at 00069e0b is 0 - 150.  Those two are
+ * the function's only inputs, and the cases above have already pinned both of
+ * them against this drive.
+ *
+ * From there the twenty-two instructions between 0003c296 and 0003c2e2 decide
+ * every byte, and this is what they compute, read off them and not off the C:
+ *
+ *   MOV DL,byte ptr [0x00069e07] / MOV EBX,[ESP+0x10] / MOV byte ptr [EBX],DL
+ *                               -- the highest track, whole, to the FIRST
+ *                                  argument, and before any arithmetic
+ *   MOV EBX,dword ptr [0x00069e0b] / SUB EBX,0x96
+ *                               -- 4294967146 - 150 = 4294966996, and EBX is
+ *                                  an unsigned dividend from here on
+ *   MOV ECX,0x4b / XOR EDX,EDX / DIV ECX
+ *                               -- 4294966996 = 57266226*75 + 46, so DL is 46
+ *   MOV byte ptr [EDI],DL       -- EDI is [ESP+0x1c], the fourth argument
+ *   MOVZX EDX,DL / SUB EAX,EDX / DIV ECX again
+ *                               -- 57266226 whole seconds
+ *   MOV ECX,0x3c / XOR EDX,EDX / DIV ECX
+ *                               -- 57266226 = 954437*60 + 6, so DL is 6
+ *   MOV byte ptr [ESI],DL       -- ESI is [ESP+0x18], the third argument
+ *   MOVZX EDX,DL / SUB EAX,EDX / DIV ECX again
+ *                               -- 954437 minutes
+ *   MOV EDX,[ESP+0x14] / MOV byte ptr [EDX],AL
+ *                               -- the second argument, and AL is the low byte
+ *                                  of 954437 = 0xe9045, so 0x45
+ *
+ * The four displacements are [ESP+0x10], [ESP+0x14], [ESP+0x18] and [ESP+0x1c]
+ * after PUSH EBX / PUSH ESI / PUSH EDI, and __CHK pops its own argument (RET
+ * 0x4 at 00043627), so they are the first, second, third and fourth arguments
+ * in that order.
+ *
+ * The four expected bytes are all different from each other and all different
+ * from the 0x5a poison, which is what lets one arrangement pin the parameter
+ * order and the fact that every store happened.  The triple also differs from
+ * the one fdps_cd_get_track_length_msf produces on this drive -- 0x45, 8, 46 --
+ * in its seconds field, because the input differs by exactly the 150 that
+ * function's own SUB 0x96 has already taken off; a body that read the wrong
+ * global, or that dropped its own subtraction, lands on a different second.
+ *
+ * Nothing here rests on a stub: fdps_cdrom_read_disk_info is emitted in the
+ * file under test, and everything it calls except fdps_cd_device_request, which
+ * is emitted in src/cd.c.
+ *
+ * What this cannot see is a disc that reports a track count and a lead-out of
+ * its own, because that needs a drive that answers; the emit verdict records it
+ * as an open issue.
+ */
+static unsigned char disk_info_out[6];
+
+static void disk_info_msf_from_a_rejected_drive(void)
+{
+    int i;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    poison_the_disk_info_globals();
+    scribble_the_stack_below();
+    for (i = 0; i < 6; i++) {
+        disk_info_out[i] = 0x5a;
+    }
+    fdps_cd_get_disk_info_msf(&disk_info_out[1], &disk_info_out[2],
+                              &disk_info_out[3], &disk_info_out[4]);
+}
+
+/* The highest-track byte reaches the first pointer, unmasked and before the
+   arithmetic.  On this drive it is 0, which the poison of 0x5a distinguishes
+   from a store that never happened, and which no other destination holds. */
+static void cdtoc_disk_info_msf_reports_the_highest_track(void)
+{
+    disk_info_msf_from_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_highest_track_number, 0);
+    CHECK_EQ(disk_info_out[1], 0);
+}
+
+/* The whole chain at once, on the one input this drive makes knowable, and the
+   parameter order with it: minutes to the second pointer, seconds to the third,
+   frames to the fourth.  Any of the things the note on the definition warns
+   about -- dropping the 0x96, using a signed intermediate, dividing by anything
+   but 75 then 60, or clamping the minute field -- moves at least one of these
+   three bytes. */
+static void cdtoc_disk_info_msf_converts_the_playing_time(void)
+{
+    disk_info_msf_from_a_rejected_drive();
+    CHECK_EQ(disk_info_out[2], 0x45);
+    CHECK_EQ(disk_info_out[3], 6);
+    CHECK_EQ(disk_info_out[4], 46);
+}
+
+/* Four byte-wide stores and no branch: the guards on either side of the four
+   destinations keep their poison, and none of the four destinations keeps it.
+   A store wider than a byte would carry one field over its neighbour, which is
+   what a caller aiming the four at four adjacent bytes relies on not
+   happening. */
+static void cdtoc_disk_info_msf_writes_one_byte_per_pointer(void)
+{
+    disk_info_msf_from_a_rejected_drive();
+    CHECK_EQ(disk_info_out[0], 0x5a);
+    CHECK_EQ(disk_info_out[5], 0x5a);
+    CHECK_EQ(disk_info_out[1] == 0x5a, 0);
+    CHECK_EQ(disk_info_out[2] == 0x5a, 0);
+    CHECK_EQ(disk_info_out[3] == 0x5a, 0);
+    CHECK_EQ(disk_info_out[4] == 0x5a, 0);
+}
+
+/* CALL 0x0003bfa5 at 0003c291, before either global is read: both are this
+   call's answers.  The poison is 0x5a in both, so a body that skipped the
+   refresh would leave them holding it -- and this is also where the input the
+   triple above was computed from is asserted, so that a failure says which half
+   moved, the refresh or the arithmetic. */
+static void cdtoc_disk_info_msf_refreshes_the_disc_summary(void)
+{
+    disk_info_msf_from_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_highest_track_number == 0x5a, 0);
+    CHECK_EQ(data_fdps_cd_leadout_sector == 0x5a5a5a5aUL, 0);
+    CHECK_EQ(data_fdps_cd_leadout_sector == 0xffffff6aUL, 1);
+}
+
 void run_cdtoc_tests(void)
 {
     RUN_TEST(cdtoc_unpack_splits_the_three_fields);
@@ -961,4 +1088,8 @@ void run_cdtoc_tests(void)
     RUN_TEST(cdtoc_track_length_msf_converts_the_wrapped_length);
     RUN_TEST(cdtoc_track_length_msf_writes_one_byte_per_pointer);
     RUN_TEST(cdtoc_track_length_msf_delegates_to_the_sector_query);
+    RUN_TEST(cdtoc_disk_info_msf_reports_the_highest_track);
+    RUN_TEST(cdtoc_disk_info_msf_converts_the_playing_time);
+    RUN_TEST(cdtoc_disk_info_msf_writes_one_byte_per_pointer);
+    RUN_TEST(cdtoc_disk_info_msf_refreshes_the_disc_summary);
 }

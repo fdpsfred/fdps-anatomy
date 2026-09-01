@@ -1183,5 +1183,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003c27c": [
+    {
+      "what": "Only the refused-drive input is reachable from the unit tests, so both of this function's outputs are pinned for one input alone: highest track 0 and the triple 0x45/6/46 that 0 - 150 - 150 converts to. On the drive the harness uses (data_fdps_cdrom_drive_letter_index 0xff) MSCDEX refuses every request and fdps_cdrom_read_disk_info clears its control block before sending it, so data_fdps_cd_highest_track_number is always 0 and data_fdps_cd_leadout_sector always 0xffffff6a. What is untested is only the value, not a second code path: the body has no branch at all (one basic block, 0003c27c..0003c2e7), and WDISASM on the built CDTOC.OBJ shows the rebuild issues the same four unsigned DIVs and the same four byte-wide stores whatever the dividend is. Nothing in the game observes either case in any event -- the function has no caller and no data reference anywhere in the image, confirmed by get_function_callers, get_xrefs_to and two program-wide instruction searches.",
+      "needs": "A run against a drive that answers: a DOSBox-X session with an audio CD mounted through imgmount and MSCDEX present, with data_fdps_cdrom_drive_letter_index pointing at it, checking that the byte delivered through highest_track_out equals the last track number in the disc's own TOC and that the minute/second/frame triple equals the disc's total playing time less two seconds -- the pre-gap this module subtracts a second time. It cannot become a gate assertion: build_emit.py mounts a disc only when the machine happens to have one, and nothing linked into the test image may depend on that.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same limitation independently -- the rejected drive is the only input the harness can produce, so both outputs are pinned for one dividend. What my pass adds is a second, input-independent pin on the half of the behaviour that matters most: WDISASM on the built CDTOC.OBJ shows the four byte stores landing on +14H, +20H, +1cH and +18H[ebp], which map to argument slots 1, 4, 3, 2 exactly as the original's [ESP+0x10], [ESP+0x1c], [ESP+0x18], [ESP+0x14] do, so the parameter order and the one-byte width are established by codegen and do not rest on the single tested input at all. The body is one basic block (0003c27c..0003c2e7, no conditional jump), so the untested inputs exercise no second path -- only other values.",
+      "needs": "A run against a drive that answers: a DOSBox-X session with an audio CD mounted through imgmount and MSCDEX present, with data_fdps_cdrom_drive_letter_index pointing at it, checking the delivered track number against the disc's own TOC and the triple against its playing time less two seconds. Not reachable from anything the gate may depend on.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

@@ -1498,6 +1498,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x65"
+    },
+    "0003c27c": {
+      "name": "fdps_cd_get_disk_info_msf",
+      "target": "cdtoc.c",
+      "body_size": "0x6c",
+      "status": "committed",
+      "emitted_against": "0x6c",
+      "rounds": 0
     }
   }
 }

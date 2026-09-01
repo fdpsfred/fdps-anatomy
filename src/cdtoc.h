@@ -187,4 +187,32 @@ extern void fdps_cd_get_track_length_msf(unsigned char track,
                                          unsigned char *frames);
 #pragma aux fdps_cd_get_track_length_msf "*" parm caller [];
 
+/* 0003c27c.  The two facts about the disc as a whole: the number of the last
+   track on it, and its total playing time as a Red Book minute/second/frame
+   triple.  Takes nothing but the four destinations, returns nothing, and each
+   result is stored as a single byte through its own pointer.
+
+   It is not free of side effects: it refreshes the disc summary before reading
+   it, so every global fdps_cdrom_read_disk_info publishes is rewritten by a
+   call.  On a drive that refuses the request that refresh publishes zeroes,
+   and this function then reports track 0 and the triple that 0 - 150 converts
+   to, rather than reporting a failure -- nothing here looks at
+   data_fdps_cd_last_request_status.
+
+   The parameter order is track, minutes, seconds, frames, and the body stores
+   them track, frames, seconds, minutes; writing a call with the pointers in the
+   order the stores appear swaps minutes and frames.
+
+   Like the track-length conversion above it subtracts 150 frames from a value
+   that has already had the lead-in cancelled out of it, so every answer is two
+   seconds short of the disc's real playing time.  That is the module's
+   convention and not a defect to correct here -- see the note on the definition
+   -- and the intermediate is unsigned, so a lead-out sector below 150 wraps
+   rather than going negative.  Nothing in the image calls this function. */
+extern void fdps_cd_get_disk_info_msf(unsigned char *highest_track_out,
+                                      unsigned char *minutes_out,
+                                      unsigned char *seconds_out,
+                                      unsigned char *frames_out);
+#pragma aux fdps_cd_get_disk_info_msf "*" parm caller [];
+
 #endif
