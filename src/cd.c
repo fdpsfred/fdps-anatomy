@@ -571,3 +571,77 @@ unsigned short fdps_cd_status_is_not_busy(void)
 {
     return (data_fdps_cd_last_request_status & 0x0200) == 0;
 }
+
+/* 0003c6f9.  An MSCDEX IOCTL Input request -- command code 3 -- carrying the
+   two-byte control block 09h, Media Changed, which asks the drive whether the
+   disc has been swapped since the last time it was asked.
+
+   No branch in the body: build the header, stage both blocks into the two DOS
+   blocks, send, read both back, publish the status word, return the answer
+   byte.
+
+   The declared header length is 0x1a -- 26 bytes, exactly the record -- and
+   0x1a is also what the staging memcpy copies (MOV byte ptr [ESP],0x1a at
+   0003c706 and PUSH 0x1a at 0003c73d), so nothing goes out past the end of it.
+   Like fdps_cdrom_read_device_status and unlike the other two IOCTL Input
+   builders, the read-back length is a literal rather than the header's own
+   length byte: PUSH 0x1a at 0003c76c, against MOVZX EAX,byte ptr [ESP] at
+   0003bd5a and 0003be0d.  The two come to the same 26 here, because the driver
+   writes into the DOS block and never into this frame, but the literal is what
+   this body was compiled from.
+
+   Only byte 0 of the control block is written -- MOV byte ptr [ESP+0x1c],0x9 is
+   the body's only store into it -- so the answer byte goes out to the driver
+   holding whatever the frame held.  That is the byte the driver overwrites, so
+   clearing it here to make the question look tidy would send a byte the
+   original does not.  The header's status word and its eight reserved bytes are
+   uninitialised for the same reason as in the siblings: the driver writes the
+   first and ignores the rest.
+
+   The answer is byte 1 of the two, and it is MSCDEX's tri-state media-change
+   value rather than a predicate: 1 is "not changed", 0 is "cannot tell" and
+   0xff is "changed", so the obvious `return changed != 0` would report the
+   quiet case as a swap.  It is read with MOVZX AX,byte ptr [ESP+0x1d], a
+   16-bit zero extension, which is why the result is an unsigned short and not
+   an int -- the top half of EAX is left holding request-header bytes 5 and 6
+   from the status load two instructions earlier and means nothing.  Nothing in
+   the image calls this function, so that leftover half is not observable
+   anywhere; what the rebuild must keep is the width and the unsignedness
+   (contract C).
+
+   The status word is published before the answer is picked up, in
+   data_fdps_cd_last_request_status, because this function does not fold success
+   into the byte it returns: a driver that refused the request leaves the frame
+   byte in place, and nothing about it says so.  Its load is MOV EAX,dword ptr
+   [ESP+0x3] with only AX stored, so what reaches the global is the 16-bit
+   status field and not the two reserved bytes above it.
+
+   The transfer-address field carries data_fdps_cd_ioctl_buffer_real_mode_ptr,
+   the packed real-mode far pointer, while the four memcpy's go through
+   data_fdps_cd_ioctl_buffer and data_fdps_cd_request_header_buffer, the flat
+   linear addresses of the same two DOS blocks.  The two forms are not
+   interchangeable (rebuild_info/pitfalls.md). */
+unsigned short fdps_cd_read_media_change_status(void)
+{
+    struct fdps_cd_request_header request_header;
+    unsigned char control_block[2];
+
+    request_header.header_length = 0x1a;
+    request_header.subunit = 0;
+    request_header.command = 3;
+    request_header.volume_id_ptr = 0;
+    request_header.start_sector = 0;
+    request_header.media_descriptor = 0;
+    request_header.transfer_address = data_fdps_cd_ioctl_buffer_real_mode_ptr;
+    request_header.transfer_byte_count = 2;
+    control_block[0] = 9;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0x1a);
+    memcpy(data_fdps_cd_ioctl_buffer, control_block, 2);
+    fdps_cd_device_request();
+    memcpy(&request_header, data_fdps_cd_request_header_buffer, 0x1a);
+    memcpy(control_block, data_fdps_cd_ioctl_buffer, 2);
+
+    data_fdps_cd_last_request_status = request_header.status;
+    return control_block[1];
+}

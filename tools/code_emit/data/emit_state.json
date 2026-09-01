@@ -1596,6 +1596,14 @@
       "status": "committed",
       "emitted_against": "0x11",
       "rounds": 0
+    },
+    "0003c6f9": {
+      "name": "fdps_cd_read_media_change_status",
+      "target": "cd.c",
+      "body_size": "0xb1",
+      "status": "committed",
+      "emitted_against": "0xb1",
+      "rounds": 0
     }
   }
 }

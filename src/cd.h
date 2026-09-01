@@ -252,4 +252,24 @@ extern unsigned short fdps_cd_close_tray(void);
 extern unsigned short fdps_cd_status_is_not_busy(void);
 #pragma aux fdps_cd_status_is_not_busy "*" parm caller [];
 
+/* 0003c6f9.  Asks the CD-ROM driver whether the disc has been swapped since it
+   was last asked -- MSCDEX IOCTL Input, control block 09h Media Changed -- and
+   hands back the driver's answer byte.
+
+   Takes nothing; the drive is the module's one drive letter index and the
+   staging blocks are its two DOS blocks.
+
+   The answer is MSCDEX's tri-state media-change value and not a boolean: 1
+   means the disc has NOT been changed, 0 means the driver cannot tell, and
+   0xff means it has been changed.  Reading it as a truth value inverts the
+   common case (rebuild_info/pitfalls.md).
+
+   Whether the driver answered at all is visible only in
+   data_fdps_cd_last_request_status, which this leaves holding the status word
+   the driver wrote into the request header -- bit 15 is error.  A refused
+   request returns whatever byte the frame held.  Nothing in the image calls
+   it. */
+extern unsigned short fdps_cd_read_media_change_status(void);
+#pragma aux fdps_cd_read_media_change_status "*" parm caller [];
+
 #endif

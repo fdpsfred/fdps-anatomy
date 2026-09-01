@@ -1190,6 +1190,118 @@ static void cd_status_not_busy_ignores_every_other_bit(void)
     CHECK_EQ(not_busy_for(0x02ff), 0);
 }
 
+/* fdps_cd_read_media_change_status, 0003c6f9.
+ *
+ * Same arrangement as the four request builders above: the request is issued
+ * for real at drive letter index 0xff, which MSCDEX rejects on the drive number
+ * before it follows ES:BX, and where no CD-ROM drive is mounted there is no
+ * MSCDEX handler on INT 2Fh at all.  Neither case touches the two DOS blocks,
+ * so what is in them afterwards is exactly what the function staged.
+ *
+ * Expected values are the immediates in the body -- MOV byte ptr [ESP],0x1a,
+ * [ESP+1],0 and [ESP+2],3 at 0003c706..0003c70f, MOV dword ptr [ESP+0x16],0 and
+ * word ptr [ESP+0x14],0, MOV byte ptr [ESP+0xd],0, the transfer address loaded
+ * from [0x00069da8], MOV word ptr [ESP+0x12],2, MOV byte ptr [ESP+0x1c],0x9 for
+ * the control block code, and the four PUSH 0x1a / PUSH 0x2 lengths at
+ * 0003c73d, 0003c752, 0003c76c and 0003c781.
+ *
+ * Nothing below asserts what the driver answered.  Byte 1 of the control block
+ * is never initialised by the body, so on a rejected request it holds whatever
+ * the frame held, and on a machine with a real drive it holds that drive's own
+ * tri-state media-change value -- 1 not changed, 0 unknown, 0xff changed.  The
+ * two values the function produces are therefore checked against the bytes they
+ * were read out of: what is pinned is the displacement and the width, MOV
+ * EAX,[ESP+3] / MOV [0x00069e20],AX for the status and MOVZX AX,byte ptr
+ * [ESP+0x1d] for the answer.
+ */
+static unsigned short read_media_change_from_a_rejected_drive(void)
+{
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    data_fdps_cd_ioctl_buffer[2] = 0x5a;
+    data_fdps_cd_request_header_buffer[0x1a] = 0x5b;
+    return fdps_cd_read_media_change_status();
+}
+
+/* Command code 3 is IOCTL Input and the transfer it describes is two bytes into
+   the second DOS block, addressed by the packed real-mode far pointer and not
+   by the flat one.  Start sector and volume-ID pointer are zero because an
+   IOCTL request moves no disc data.
+
+   The declared length is 0x1a, exactly the record, so the length byte and the
+   struct size have to agree; and the byte just past the record keeps the poison
+   the setup put there, which is what pins the staging copy at twenty-six rather
+   than at the 0x1e fdps_cd_read_head_sector sends. */
+static void cd_media_change_stages_an_ioctl_input_request(void)
+{
+    unsigned char *header;
+
+    read_media_change_from_a_rejected_drive();
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x1a);
+    CHECK_EQ(header[0], (int) sizeof(struct fdps_cd_request_header));
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 3);
+    CHECK_EQ(header[0xd], 0);
+    CHECK_EQ((long) staged_dword(header, 0xe),
+             (long) data_fdps_cd_ioctl_buffer_real_mode_ptr);
+    CHECK_EQ(staged_word(header, 0x12), 2);
+    CHECK_EQ(staged_word(header, 0x14), 0);
+    CHECK_EQ((long) staged_dword(header, 0x16), 0L);
+    CHECK_EQ(header[0x1a], 0x5b);
+}
+
+/* Control block code 9 is Media Changed, and the byte after it is the driver's
+   answer slot.  MOV byte ptr [ESP+0x1c],0x9 is the body's only store into the
+   block, so nothing may be asserted about byte 1 on the way out; the third byte
+   of the DOS block is what pins the send length at two, because a copy that ran
+   one byte long would take the poison with it.
+
+   Two is also what the header's transfer byte count says, so a request that
+   staged more bytes than it told the driver about would show as a disagreement
+   between these two assertions. */
+static void cd_media_change_asks_for_the_media_changed_block(void)
+{
+    read_media_change_from_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 9);
+    CHECK_EQ(staged_word(data_fdps_cd_request_header_buffer, 0x12), 2);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[2], 0x5a);
+}
+
+/* Both blocks are copied back out of the DOS memory before anything is read out
+   of them, so the two values the function produces have to agree with the bytes
+   still sitting in those blocks: the status with the word at header+3, and the
+   answer with byte 1 of the control block -- not byte 0, which is the request
+   code the function itself stamped and would make the answer a constant 9.  The
+   status store is a 16-bit store out of a dword load, so a read a byte early or
+   late, or one that let the high half through, would break that equality
+   whatever the driver left there. */
+static void cd_media_change_publishes_status_and_returns_the_answer_byte(void)
+{
+    unsigned short media_change_byte;
+
+    media_change_byte = read_media_change_from_a_rejected_drive();
+    CHECK_EQ(data_fdps_cd_last_request_status,
+             staged_word(data_fdps_cd_request_header_buffer, 3));
+    CHECK_EQ(media_change_byte, data_fdps_cd_ioctl_buffer[1]);
+}
+
+/* The answer is zero extended into sixteen bits and never sign extended: MOVZX
+   AX,byte ptr [ESP+0x1d].  That is load bearing because the value is MSCDEX's
+   tri-state media-change byte and its "disc has been changed" case is 0xff --
+   read through a signed char it would come back as 0xffff and compare equal to
+   neither 0xff nor any of the other two states. */
+static void cd_media_change_returns_the_answer_byte_zero_extended(void)
+{
+    unsigned short media_change_byte;
+
+    media_change_byte = read_media_change_from_a_rejected_drive();
+    CHECK_EQ(media_change_byte & 0xff00, 0);
+    CHECK_EQ(media_change_byte, media_change_byte & 0xff);
+}
+
 /* The fdps_cdrom_detect cases come first, and deliberately: the allocation
    guard at 0003c68e is only observable on a call made before the module's DOS
    buffers exist, and every other test in this file allocates them in its own
@@ -1240,4 +1352,8 @@ void run_cd_tests(void)
     RUN_TEST(cd_close_tray_publishes_the_request_status);
     RUN_TEST(cd_status_not_busy_inverts_the_busy_bit);
     RUN_TEST(cd_status_not_busy_ignores_every_other_bit);
+    RUN_TEST(cd_media_change_stages_an_ioctl_input_request);
+    RUN_TEST(cd_media_change_asks_for_the_media_changed_block);
+    RUN_TEST(cd_media_change_publishes_status_and_returns_the_answer_byte);
+    RUN_TEST(cd_media_change_returns_the_answer_byte_zero_extended);
 }
