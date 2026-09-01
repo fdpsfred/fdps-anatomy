@@ -12476,7 +12476,7 @@ Parameters:
   none -- the track acted on is whichever one fdps_cdrom_read_track_info queried last, held in DAT_00069dff.
 
 Returns:
-  Nothing. The result is the pair DAT_00069dec (range start) and DAT_00069de4 (range end, exclusive); both callers read those globals immediately after the call.
+  Nothing. The result is the pair DAT_00069dec (range start) and DAT_00069de4 (range end, exclusive), and the two globals are read separately rather than consumed as a pair: fdps_cd_play_track reads both -- DAT_00069dec at 0003c883 as the range start and DAT_00069de4 at 0003c87d as the range end -- into fdps_cd_play_audio_range, while fdps_cd_play_track_range calls this routine twice and takes only the range start from the first call (0003c8b6) and only the range end from the second (0003c8cf).
 
 Pool: fdps  [no Function ID hit in either the Watcom libraries or ailv3.lib; shares the CD track-state globals with fdps_cd_play_track and fdps_cd_stop_audio, and carries the PUSH n / CALL __CHK prologue of compiled game code]
 

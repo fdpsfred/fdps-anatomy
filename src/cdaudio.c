@@ -18,13 +18,15 @@
  *
  * memcpy comes from <string.h> and is a real call in the image; the request
  * header layout comes from fdpstype.h, the DOS block pointer and the published
- * status word from gamedata.h, and the driver request path from cd.h.
+ * status word from gamedata.h, the driver request path from cd.h, and the
+ * table-of-contents query the play range is resolved out of from cdtoc.h.
  */
 #include <string.h>
 
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "cd.h"
+#include "cdtoc.h"
 #include "cdaudio.h"
 
 /* 0003c3fa.  A bare MSCDEX device request -- command 0x83, Seek -- with no
@@ -323,4 +325,70 @@ unsigned short fdps_cd_audio_is_idle(void)
 {
     fdps_cdrom_read_device_status();
     return fdps_cd_status_is_not_busy();
+}
+
+/* 0003c803.  Turns the track the CD layer is currently pointed at into the
+   pair of disc sectors a Play Audio request takes, and publishes it in
+   data_fdps_cd_play_range_start_sector and data_fdps_cd_play_range_end_sector.
+
+   There is no argument.  The track acted on is whichever one
+   fdps_cdrom_read_track_info queried last, which is why both callers --
+   fdps_cd_play_track at 0003c878 and fdps_cd_play_track_range at 0003c8b1 --
+   issue that query themselves and then call straight in.  The two globals read
+   to find that track, data_fdps_cd_track_info_track_number and
+   data_fdps_cd_track_start_sector, are that query's own answers.
+
+   The range start is copied first, at 0003c80e-0003c813, ahead of either query
+   below: those queries republish data_fdps_cd_track_start_sector, so a copy
+   made after one of them would name the wrong track's start.
+
+   The branch is the last-track test.  The track number is loaded as a signed
+   word -- MOV AX,[0x00069dff] / MOVSX EBX,AX -- and the disc's highest track
+   number as an unsigned byte -- MOVZX EDX,byte ptr [0x00069e07] -- and the
+   compare of track + 1 against it is signed, CMP ECX,EDX / JLE.  Taking the
+   jump, another track follows this one and the range ends where that one
+   starts; falling through, this is the last track -- or a track number past
+   the disc's highest, which nothing here refuses -- and the range ends at the
+   lead-out.  Reading the highest track number as a signed byte instead would
+   make a 255-track disc read as -1 and send every track down the lead-out arm.
+
+   The end sector is one past the last sector to play, not the last one:
+   fdps_cd_play_audio_range takes the pair and sends end - start as the sector
+   count of its request.
+
+   The last statement is a second query for the track this was entered on, and
+   it is not dead code.  Nothing in the image reads the globals it republishes
+   -- data_fdps_cd_track_start_sector, data_fdps_cd_track_info_track_number and
+   data_fdps_cd_track_info_control_flags each have a reader only inside a
+   routine that queries first -- but the call is a real MSCDEX IOCTL Input
+   request to the drive, so dropping it changes how many device requests a
+   track change costs.  fdps_cd_get_track_length_sectors carries the identical
+   restore at 0003c205 for the identical reason, and between them they are the
+   CD block's convention: the track-info globals are caller-owned state a
+   helper puts back.  It also makes the non-last-track path cost two device
+   requests that the last-track path does not.
+
+   Neither call hands anything back.  fdps_cdrom_read_track_info is void, and
+   the MOV EAX,[0x00069e01] at 0003c846 that follows the first one is a fresh
+   load of the global that call republished, not a value it left in EAX.
+
+   The argument of that first call is computed sixteen bits wide -- INC EAX /
+   CWDE over the word loaded into AX at 0003c818, rather than the
+   LEA ECX,[EBX + 0x1] the compare works from -- so the cast below is what
+   keeps the sum in the width the assembly does it in.  Every reachable caller
+   arrives with a small positive track number, where the two widths cannot
+   differ. */
+void fdps_cd_resolve_track_range(void)
+{
+    int selected_track;
+
+    data_fdps_cd_play_range_start_sector = data_fdps_cd_track_start_sector;
+    selected_track = data_fdps_cd_track_info_track_number;
+    if (selected_track + 1 > data_fdps_cd_highest_track_number) {
+        data_fdps_cd_play_range_end_sector = data_fdps_cd_leadout_sector;
+        return;
+    }
+    fdps_cdrom_read_track_info((short) (selected_track + 1));
+    data_fdps_cd_play_range_end_sector = data_fdps_cd_track_start_sector;
+    fdps_cdrom_read_track_info(selected_track);
 }

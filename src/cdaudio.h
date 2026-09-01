@@ -131,4 +131,51 @@ extern void fdps_cd_read_q_channel(struct fdps_cd_q_channel_block *q_channel);
 extern unsigned short fdps_cd_audio_is_idle(void);
 #pragma aux fdps_cd_audio_is_idle "*" parm caller [];
 
+/* 00069dec.  The first disc sector of the range the next Play Audio request
+   will name, published by fdps_cd_resolve_track_range out of
+   data_fdps_cd_track_start_sector.  Both readers, fdps_cd_play_track at
+   0003c883 and fdps_cd_play_track_range at 0003c8b6, take it straight into
+   fdps_cd_play_audio_range's first argument.
+
+   Unsigned, matching the sector globals it is copied from and the argument it
+   is handed to; a track whose start address the driver never answered for
+   leaves 0xffffff6a here, the -150 of an all-zero Red Book address. */
+extern unsigned int data_fdps_cd_play_range_start_sector;
+
+/* 00069de4.  One past the last disc sector of that range -- the sector the
+   next track starts at, or the lead-out for the last track on the disc.
+   fdps_cd_play_audio_range sends the difference of the pair as its sector
+   count, so this end is exclusive.
+
+   Unsigned for the same reason as the start sector.  It sits two globals below
+   the start in the original image, with data_fdps_cd_request_header_buffer
+   between them; nothing indexes across the three, so the rebuild is free to
+   place them wherever the linker likes (contract B). */
+extern unsigned int data_fdps_cd_play_range_end_sector;
+
+/* 0003c803.  Resolves the disc sector range of the track the CD layer is
+   currently pointed at and publishes it in the two globals above, ready for
+   fdps_cd_play_audio_range.
+
+   Takes nothing: the track acted on is whichever one
+   fdps_cdrom_read_track_info queried last, named by
+   data_fdps_cd_track_info_track_number, and the range start is that query's
+   own data_fdps_cd_track_start_sector.  Both callers,
+   fdps_cd_play_track and fdps_cd_play_track_range, issue that query
+   immediately before calling in.
+
+   The range end is where the next track starts, which costs a query of its
+   own, except for the last track on the disc -- and for any track number past
+   the disc's highest, which nothing here refuses -- where it is
+   data_fdps_cd_leadout_sector and no query is made.  The track-info globals
+   are left naming the track the caller had selected: the non-last-track path
+   re-queries the original track on the way out, so it costs two device
+   requests where the last-track path costs none.
+
+   Returns nothing, and reports nothing about the disc.  A track whose query no
+   driver answered resolves to a range built out of that query's undefined
+   reply, which the caller cannot tell from a real one. */
+extern void fdps_cd_resolve_track_range(void);
+#pragma aux fdps_cd_resolve_track_range "*" parm caller [];
+
 #endif
