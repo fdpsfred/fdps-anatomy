@@ -693,3 +693,43 @@ void fdps_chapter_27_post_action(void)
         data_fdps_chapter_event_or_battle_end_code = 1;
     }
 }
+
+/* 0003b990.  One CALL and a return, with no branch in the body at all -- the
+   same bare forward chapters 16, 18 and 21 have.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP at 0003b990..0003b993, MOV EBP,ESP at 0003b994, SUB
+   ESP,0x0 at 0003b996 -- and nothing in it is ever read, so there is no local
+   to name.  The epilogue is the four bare POPs at 0003b9a1..0003b9a4 with no
+   MOV ESP,EBP in front of them, which is what an empty local area leaves
+   behind, and the RET at 0003b9a5 carries no immediate: the caller cleans, and
+   there is nothing to clean.
+
+   CALL 0x0003a2e0 at 0003b99c is the whole body.  Nothing is pushed in front
+   of it and nothing adjusts ESP after it, so the callee takes no argument;
+   nothing reads EAX between the CALL and the RET, so its result is not used
+   and this handler returns nothing of its own.  The verdict the callee leaves
+   in data_fdps_chapter_event_or_battle_end_code is the answer, and the
+   dispatchers read that global directly after the indirect call.
+
+   There is nothing else: no store, no test of the chapter id, no unit lookup.
+   The chapter's two stated conditions -- 勝利條件 敵人全滅 and 失敗條件
+   蘭迪斯死亡 -- are both the shared test's own, so a handler that adds nothing
+   is the complete rule and not an omission.  Chapter 28 is chapter id 27
+   (0x1b), which is neither of the ids -- 0x10 and 0x15 -- the shared test
+   singles out, so the slot it watches for the defeat is 0, 蘭迪斯.
+
+   The chapter's scripted business, the three reinforcements that appear along
+   the top edge at the end of the player phase on each of the nine turns the
+   guide lists -- 2, 4, 6, 7, 10, 12, 14, 16, 18, which is not every even turn:
+   it includes 7 and skips 8 -- is carried by a turn-event handler keyed on the
+   turn counter; releasing a wave here would fire it once per unit action
+   instead of once per turn.
+
+   The dword at 000602f8, twenty-seven entries into the table based at
+   0006028c, is 0003b990; that table entry is the function's only xref, which
+   is why it has no static caller. */
+void fdps_chapter_28_post_action(void)
+{
+    fdps_battle_check_default_end_conditions();
+}

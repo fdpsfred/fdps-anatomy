@@ -2242,6 +2242,155 @@ static void chapter_27_the_chapter_id_is_never_consulted(void)
     CHECK_EQ(end_code(), 0);
 }
 
+/* ------------------------------------------------------------------------
+ * Chapter 28's handler, 0003b990: PUSH EBX/ESI/EDI/EBP at 0003b990..0003b993,
+ * MOV EBP,ESP at 0003b994, SUB ESP,0x0 at 0003b996, CALL 0x0003a2e0 at
+ * 0003b99c, then the four POPs at 0003b9a1..0003b9a4 and the RET at 0003b9a5.
+ * Like chapters 16's, 18's and 21's it has no store, no compare and no second
+ * call, so the two things worth pinning are that the shared default end test
+ * really runs and that nothing else does.
+ *
+ * The expected verdicts are the shared test's, read off its assembly at
+ * 0003a2e0: the CMP dword ptr [0x00069da0],0x0 / JNZ at 0003a2ec that abandons
+ * the body for a code that is already non-zero, the MOV dword ptr
+ * [0x00069da0],0x2 at 0003a2f9 that writes the cleared verdict up front, the
+ * CMP byte ptr [EAX+0x6],0x0 / JNZ at 0003a331 and MOV AL,byte ptr [EAX+0x5] /
+ * AND AL,0x1 at 0003a33a that put it back to 0 for a live enemy, and the PUSH
+ * 0x0 / unguarded MOV dword ptr [0x00069da0],0x1 at 0003a382..0003a390 that
+ * makes a retired unit slot 0 a defeat in every chapter but 0x10 and 0x15.
+ *
+ * The chapter id staged throughout is 27, because the table is indexed by the
+ * 0-based chapter id and this handler is slot 27: the dword at 000602f8,
+ * twenty-seven entries into the table based at 0006028c, is 0003b990, and that
+ * table entry is the function's only xref.
+ *
+ * The chapter's own conditions really are the shared test's two and nothing
+ * more: the guide's chapter 28 entry, 異界之封印, states 勝利條件：敵人全滅
+ * and 失敗條件：蘭迪斯死亡.  Its only scripted business is the three
+ * reinforcements that arrive along the top edge at the end of the player phase
+ * on the turns the same entry enumerates, 第二、四、六、七、十、十二、十四、
+ * 十六、十八回合 -- 2, 4, 6, 7, 10, 12, 14, 16, 18, an enumeration rather than
+ * the even turns, since 7 is in it and 8 is not.  That is a turn event, so none
+ * of it may show up as a verdict from this handler.
+ *
+ * The unit array is staged rather than read from the map file: the handler
+ * takes no arguments, so the array, the unit count and the chapter id are its
+ * entire input.  Nothing below asserts what any of those globals holds on its
+ * own -- ticket 23 owns that.
+ * ------------------------------------------------------------------------ */
+
+/* Chapter 28 is chapter id 27 (0x1b). */
+#define CHAPTER_28_ID 27
+
+static void stage28(int live_unit_count, int battle_end_code)
+{
+    stage(live_unit_count, battle_end_code);
+    data_fdps_chapter_current_chapter_id = CHAPTER_28_ID;
+}
+
+/* 勝利條件：敵人全滅.  The CALL is really taken: with every enemy retired the
+   shared test's up front 2 survives, and a handler whose body did nothing would
+   leave the 0 it was given. */
+static void chapter_28_clears_when_every_enemy_is_retired(void)
+{
+    stage28(3, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_28_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* One live enemy puts the code back to 0, so the walk inside the shared test is
+   reached through this handler and not short circuited by anything in front of
+   the CALL. */
+static void chapter_28_a_live_enemy_keeps_the_battle_going(void)
+{
+    stage28(3, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, 0);
+    fdps_chapter_28_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* 失敗條件：蘭迪斯死亡.  Chapter id 27 is neither 0x10 nor 0x15, so the shared
+   test watches unit slot 0, and its store carries no guard: the defeat stands
+   even in the same call that emptied the enemy side. */
+static void chapter_28_a_retired_randis_is_a_defeat(void)
+{
+    stage28(3, 0);
+    stage_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(2, SIDE_ENEMY, 0);
+    fdps_chapter_28_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage28(3, 0);
+    stage_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_28_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* No unit slot but 0 ends this battle from code.  Slots 1 to 6 are retired in
+   turn with slot 7 left as a live enemy holding the battle open, so the only
+   thing that could turn any of these into a non-zero code is a defeat test the
+   handler does not have -- slot 3 above all, which is what the shared test
+   would watch had this chapter's id been one of the two it singles out. */
+static void chapter_28_no_other_slot_ends_the_battle(void)
+{
+    int retired_slot;
+    int player_slot;
+
+    for (retired_slot = 1; retired_slot < STAGE_UNITS - 1; retired_slot++) {
+        stage28(STAGE_UNITS, 0);
+        for (player_slot = 0; player_slot < STAGE_UNITS - 1; player_slot++) {
+            stage_unit(player_slot, SIDE_PLAYER, 0);
+        }
+        stage_unit(STAGE_UNITS - 1, SIDE_ENEMY, 0);
+        stage_units[retired_slot].flags = FLAG_RETIRED;
+        fdps_chapter_28_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
+/* A verdict already recorded by a chapter event survives the handler untouched:
+   the shared test's gate returns before anything is examined, and this handler
+   adds no store of its own on either side of the CALL.  Each value below would
+   be overwritten by a body that ran -- the array holds a live enemy, which would
+   settle the code at 0. */
+static void chapter_28_a_recorded_verdict_is_left_alone(void)
+{
+    stage28(2, 1);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    fdps_chapter_28_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage28(2, 2);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    fdps_chapter_28_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* The handler stores nothing of its own before the CALL either: a battle that
+   is still open and has nothing to decide comes back still open.  It is called
+   twice because the dispatchers run it after every unit action, and a handler
+   that only behaved on its first call would still pass every case above. */
+static void chapter_28_an_open_battle_stays_open(void)
+{
+    stage28(2, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    fdps_chapter_28_post_action();
+    CHECK_EQ(end_code(), 0);
+    fdps_chapter_28_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
 void run_chpost2_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -2332,4 +2481,10 @@ void run_chpost2_tests(void)
     RUN_TEST(chapter_27_an_open_battle_stays_open);
     RUN_TEST(chapter_27_the_verdict_is_stable_across_calls);
     RUN_TEST(chapter_27_the_chapter_id_is_never_consulted);
+    RUN_TEST(chapter_28_clears_when_every_enemy_is_retired);
+    RUN_TEST(chapter_28_a_live_enemy_keeps_the_battle_going);
+    RUN_TEST(chapter_28_a_retired_randis_is_a_defeat);
+    RUN_TEST(chapter_28_no_other_slot_ends_the_battle);
+    RUN_TEST(chapter_28_a_recorded_verdict_is_left_alone);
+    RUN_TEST(chapter_28_an_open_battle_stays_open);
 }
