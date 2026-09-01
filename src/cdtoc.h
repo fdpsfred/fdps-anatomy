@@ -114,4 +114,32 @@ extern unsigned char data_fdps_cd_leadout_frame;
 extern void fdps_cdrom_read_disk_info(void);
 #pragma aux fdps_cdrom_read_disk_info "*" parm caller [];
 
+/* 00069e05.  The track control field of the track named in
+   data_fdps_cd_track_info_track_number, as the Read Audio Track Info reply
+   gave it and masked with 0xd0 on the way in.  Unsigned: its one reader,
+   fdps_cd_track_is_audio at 0003c929, loads it with MOVZX.
+
+   The mask keeps bit 6 -- the data-track bit -- along with bits 7 and 4, and
+   drops bit 5, the copy-permitted bit.  fdps_cd_track_is_audio then compares
+   the whole byte against 0x40 for equality rather than testing a bit, so what
+   the mask leaves standing is the entire test. */
+extern unsigned char data_fdps_cd_track_info_control_flags;
+
+/* 0003c0c8.  Asks the CD-ROM driver where one track starts and what kind of
+   track it is -- MSCDEX IOCTL Input, control block 0Bh Read Audio Track Info
+   -- and publishes the answer in three globals beside the request's status
+   word.
+
+   The track number goes out as its low byte only and comes back into
+   data_fdps_cd_track_info_track_number as its low sixteen bits, so the two are
+   not the same field of the argument; nothing in the image passes a value
+   where they differ.  Whether the driver accepted the request is visible only
+   in data_fdps_cd_last_request_status, which this routine records without
+   testing, so all three track globals are rewritten on a refused request too.
+
+   Every one of its six callers discards nothing -- the function returns
+   nothing -- and reads what it needs out of the globals afterwards. */
+extern void fdps_cdrom_read_track_info(int track);
+#pragma aux fdps_cdrom_read_track_info "*" parm caller [];
+
 #endif

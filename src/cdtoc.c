@@ -214,3 +214,70 @@ void fdps_cdrom_read_disk_info(void)
         (unsigned int) fdps_cd_msf_to_sector(leadout_msf_packed);
     data_fdps_cd_last_request_status = request_header.status;
 }
+
+/* 0003c0c8.  An MSCDEX IOCTL Input request -- command code 3 once more --
+   carrying the seven-byte control block 0Bh, Read Audio Track Info, which asks
+   the drive where one track starts and what its control field says.
+
+   The header is built exactly as the other two build theirs, and with the same
+   seven-byte transfer the Read Disk Info block uses.  The control block is not
+   cleared: only the code byte and the track byte are written, so bytes 2..6 go
+   out to the driver as whatever the frame held, and a request no driver
+   answers brings that same stack content back.  Every value published below a
+   refused request is therefore whatever was on the stack, and unlike
+   fdps_cdrom_read_disk_info next door nothing here makes it deterministic.
+   Adding a memset would change what the driver is sent.
+
+   The track number reaches two different places at two different widths.  Only
+   its low byte goes into the control block -- MOV AL,byte ptr [ESP+0x28] at
+   0003c10c, a byte load -- because that is all the field is; but the copy that
+   is published takes the low sixteen bits, MOV EAX,dword ptr [ESP+0x28] with
+   MOV [0x00069dff],AX at 0003c188.  The argument itself arrives as a full
+   dword: each of the ten call sites, spread over six callers, pushes one and
+   cleans four bytes afterwards, and between them they push a zero-extended
+   byte, a sign-extended word and the literal 1.
+
+   There is no branch anywhere in the body.  The status word is published
+   without being tested, so all three track globals are rewritten on a refused
+   request as well as an accepted one, and a caller reading them cannot tell
+   the two apart.
+
+   The start address is read out of the control block as a plain dword at
+   block+2 -- PUSH dword ptr [ESP+0x1e] -- an offset that is two bytes into the
+   block and so unaligned; as in fdps_cdrom_read_disk_info the cast below is
+   what keeps this from becoming a memcpy the original does not make.
+
+   The control byte is masked with 0xd0 and not with the 0xf0 that taking "the
+   control nibble" would suggest.  Bit 5 is copy-permitted, and
+   fdps_cd_track_is_audio compares the published byte against 0x40 exactly, so
+   masking with 0xf0 would make every audio track that permits copying read
+   back as 0x60 and be reported as a data track. */
+void fdps_cdrom_read_track_info(int track)
+{
+    struct fdps_cd_request_header request_header;
+    unsigned char control_block[7];
+
+    request_header.header_length = 0x1a;
+    request_header.subunit = 0;
+    request_header.command = 3;
+    request_header.volume_id_ptr = 0;
+    request_header.start_sector = 0;
+    request_header.media_descriptor = 0;
+    request_header.transfer_address = data_fdps_cd_ioctl_buffer_real_mode_ptr;
+    request_header.transfer_byte_count = 7;
+    control_block[0] = 0xb;
+    control_block[1] = (unsigned char) track;
+
+    memcpy(data_fdps_cd_request_header_buffer, &request_header, 0x1a);
+    memcpy(data_fdps_cd_ioctl_buffer, control_block, 7);
+    fdps_cd_device_request();
+    memcpy(&request_header, data_fdps_cd_request_header_buffer, 0x1a);
+    memcpy(control_block, data_fdps_cd_ioctl_buffer, 7);
+
+    data_fdps_cd_last_request_status = request_header.status;
+    data_fdps_cd_track_start_sector = (unsigned int)
+        fdps_cd_msf_to_sector(*(unsigned int *) &control_block[2]);
+    data_fdps_cd_track_info_track_number = (short) track;
+    data_fdps_cd_track_info_control_flags =
+        (unsigned char) (control_block[6] & 0xd0);
+}

@@ -1125,5 +1125,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003c0c8": [
+    {
+      "what": "Bytes 2..6 of the Read Audio Track Info control block are sent to the driver uninitialised -- there is no memset in the body, only the code byte and the track byte are written -- so what MSCDEX receives in the reply area is whatever the frame held. The rebuild reproduces the 'uninitialised' property exactly, but its frame content differs from the original's because the frame layout differs (the rebuild uses an EBP frame and saves four registers where the original does not). This is behaviour-identical only if no MSCDEX implementation reads the reply area of control block 0Bh before overwriting it, which the MSCDEX specification implies (the field is documented output-only) but which the assembly cannot establish. The same shape is present in fdps_cdrom_read_upc, whose block bytes 2..10 go out the same way.",
+      "needs": "A real DOS machine or an emulator with a genuine MSCDEX and a CD in the drive: call fdps_cdrom_read_track_info for a known track twice with deliberately different stack content behind the block, and check that data_fdps_cd_track_start_sector and data_fdps_cd_track_info_control_flags come back identical both times. Nothing reachable from Ghidra, the shipped game files or the built object can answer it, because the answer lives in the driver.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same concern independently and added one thing to it. Confirmed from the assembly that there is no memset in the body -- only MOV byte ptr [ESP+0x1c],0xb and the track byte at [ESP+0x1d] -- while the neighbouring fdps_cdrom_read_disk_info does call 0x00042cd0 at 0003bfed before writing its code byte, so the difference is deliberate in the original and not an artefact of reading. What my pass adds is that the rebuild's frame content provably differs from the original's: WDISASM on CDTOC.OBJ shows four register pushes and an EBP frame ahead of the block, which the original does not have, so the five bytes handed to the driver are different bytes even though the 'uninitialised' property is reproduced exactly. That makes the question sharper rather than answerable here.",
+      "needs": "The same experiment the emitter names: a genuine MSCDEX with a disc, calling for a known track twice with deliberately different stack content behind the block and checking that data_fdps_cd_track_start_sector and data_fdps_cd_track_info_control_flags come back identical. Nothing in Ghidra, the shipped files or the built object can answer it, because the answer is in the driver.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

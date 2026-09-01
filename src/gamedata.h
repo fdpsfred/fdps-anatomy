@@ -797,4 +797,33 @@ extern unsigned char data_fdps_cd_highest_track_number;
    out of the conversion arrives as 0xffffff6a. */
 extern unsigned int data_fdps_cd_leadout_sector;
 
+/* 00069dff.  The track number of the last Read Audio Track Info query --
+   whatever fdps_cdrom_read_track_info was asked about, not anything the driver
+   answered with, so it says which track the two globals beside it describe.
+   Sixteen bits wide: the store is MOV [0x00069dff],AX at 0003c18c and both
+   readers, fdps_cd_get_track_length_sectors at 0003c1b4 and
+   fdps_cd_resolve_track_range at 0003c818, load it back as AX.
+
+   Signed, on its readers: fdps_cd_resolve_track_range sign-extends the word it
+   loaded with MOVSX EBX,AX at 0003c81e, and fdps_cd_get_track_length_sectors
+   spills it at 0003c1ba and sign-extends it later with MOVSX EAX,word ptr
+   [ESP+0x4] at 0003c1ff.  Nothing in the image can reach a negative track
+   number through the
+   published callers, which all pass a track counter from 1 upward, but the
+   width and the sign are what the arithmetic downstream of those two loads
+   works in. */
+extern short data_fdps_cd_track_info_track_number;
+
+/* 00069e01.  Where the track named in data_fdps_cd_track_info_track_number
+   starts, as a logical sector number: the packed Red Book start address out of
+   the Read Audio Track Info reply run through fdps_cd_msf_to_sector.  It is
+   what both track-length routines and both play-range routines subtract and
+   hand to the drive.
+
+   Unsigned, matching data_fdps_cd_leadout_sector next door: the conversion is
+   signed arithmetic that nothing clamps, so a query no driver answered leaves
+   00:00:00 in the reply block and the -150 that comes out arrives here as
+   0xffffff6a. */
+extern unsigned int data_fdps_cd_track_start_sector;
+
 #endif

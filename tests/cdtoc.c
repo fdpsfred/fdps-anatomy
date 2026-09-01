@@ -1,7 +1,9 @@
 /* tests/cdtoc.c -- cover for src/cdtoc.c.
  *
- * So far this covers fdps_cd_unpack_msf at 0003bc3f and
- * fdps_cd_msf_to_sector at 0003bc78.
+ * So far this covers fdps_cd_unpack_msf at 0003bc3f,
+ * fdps_cd_msf_to_sector at 0003bc78, fdps_cdrom_read_upc at 0003bec1,
+ * fdps_cdrom_read_disk_info at 0003bfa5 and fdps_cdrom_read_track_info at
+ * 0003c0c8.
  *
  * Every expected value below comes from the sixteen instructions of that
  * function and from its two call sites, never from the emitted C:
@@ -503,6 +505,193 @@ static void cdtoc_disk_info_publishes_the_status_word(void)
              upc_staged_word(data_fdps_cd_request_header_buffer, 3));
 }
 
+/* fdps_cdrom_read_track_info, 0003c0c8.
+ *
+ * Issued for real through the same rejected drive the two cases above use, and
+ * for the same reason: nothing writes into the two DOS blocks, so what is in
+ * them after the call is what the function staged there.
+ *
+ * This request is the one in the module that does NOT clear its control block
+ * -- there is no memset anywhere in the body, only MOV byte ptr [ESP+0x1c],0xb
+ * and the track byte at [ESP+0x1d] -- so bytes 2..6 go out as stack content and
+ * come back as the same stack content.  Two of the three published values are
+ * therefore not knowable in advance here, and the assertions on them are
+ * written against the block that came back rather than against fixed numbers:
+ * what is being pinned is the displacement, the width and the mask.  The two
+ * values that ARE knowable, the track number in both of its widths, are pinned
+ * against fixed numbers.
+ *
+ * The expected header bytes are the immediates at 0003c0d5..0003c100: 0x1a, 0
+ * and 3 in the first three bytes, media descriptor 0 at +0xd, transfer address
+ * loaded from [0x00069da8] at +0xe, byte count 7 at +0x12, start sector 0 at
+ * +0x14 and volume ID 0 at +0x16.  The staging copies are PUSH 0x1a and PUSH
+ * 0x7 in each direction, and the read-back header length is the literal 0x1a at
+ * 0003c143 rather than the header's own length byte.
+ *
+ * fdps_cd_device_request is emitted in src/cd.c and fdps_cd_msf_to_sector in
+ * the file under test, so neither is a stub and nothing below rests on a
+ * stubbed return.
+ */
+static void poison_the_track_info_globals(void)
+{
+    data_fdps_cd_track_info_track_number = 0x5a5a;
+    data_fdps_cd_track_start_sector = 0x5a5a5a5aUL;
+    data_fdps_cd_track_info_control_flags = 0x5a;
+}
+
+/* Fills a stretch of stack below the current frame, so that the control block
+   bytes the request sends out are not left holding whatever happened to be
+   there.  The pattern is chosen, not arbitrary; it repeats every four bytes as
+   0xa3, 0xb3, 0xe3, 0xf3, and each of the three properties below is what makes
+   one of the assertions able to fail:
+
+     - bit 5 is set in every one of them.  Bit 5 is the ONLY bit by which the
+       0xd0 the body masks with and the 0xf0 an obvious rewrite would use
+       differ, so a fill byte with bit 5 clear makes both masks produce the same
+       answer and the mask assertions cannot see the difference.  A uniform 0x5a
+       fill was exactly such a byte: 0x5a & 0xd0 and 0x5a & 0xf0 are both 0x50.
+     - the low bits 0x03 are set in every one of them, so a mask that kept any
+       of the low nibble is caught by the & 0x2f assertion.
+     - all four differ from each other, and they differ inside the 0xd0 mask as
+       well as outside it (they mask to 0x80, 0x90, 0xc0 and 0xd0).  A uniform
+       fill makes every displacement into the block look alike, so the dword at
+       block+2 and the dword at block+3 -- the offset the Read Disk Info reply
+       uses -- would convert to the same sector, and the masked byte at block+6
+       would equal the one at block+5.  With these four, both displacements are
+       pinned.
+
+   Nothing asserted here depends on this landing on the request's frame: every
+   assertion is written against the block that actually came back, so a run
+   where the fill does not reach it still holds.  What the fill buys is that a
+   wrong mask or a wrong displacement is visible when it does. */
+static void scribble_the_stack_below(void)
+{
+    volatile unsigned char scratch[512];
+    int i;
+
+    for (i = 0; i < 512; i++) {
+        scratch[i] = (unsigned char) (0xa3 | ((i & 1) << 4) | ((i & 2) << 5));
+    }
+}
+
+static void read_track_info_from_a_rejected_drive(int track)
+{
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    poison_the_track_info_globals();
+    scribble_the_stack_below();
+    fdps_cdrom_read_track_info(track);
+}
+
+/* Command code 3 is IOCTL Input again, and the transfer it describes is the
+   seven bytes of the Read Audio Track Info block -- the same 7 both control
+   block copies run for.  The address field is the packed real-mode far pointer
+   and not the flat one, for the same reason as in the other two requests. */
+static void cdtoc_track_info_stages_an_ioctl_input_request(void)
+{
+    unsigned char *header;
+
+    read_track_info_from_a_rejected_drive(3);
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x1a);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 3);
+    CHECK_EQ(header[0xd], 0);
+    CHECK_EQ((long) upc_staged_dword(header, 0xe),
+             (long) data_fdps_cd_ioctl_buffer_real_mode_ptr);
+    CHECK_EQ(upc_staged_word(header, 0x12), 7);
+    CHECK_EQ(upc_staged_word(header, 0x14), 0);
+    CHECK_EQ((long) upc_staged_dword(header, 0x16), 0L);
+}
+
+/* Control block code 0x0b is Read Audio Track Info and the byte behind it is
+   the track being asked about.  Only the low byte of the argument gets there --
+   MOV AL,byte ptr [ESP+0x28], a byte load -- which 0x51234 shows: the driver is
+   asked for track 0x34.  A body that stored the whole argument would put 0x34
+   in the same place but would also walk over the reply area behind it. */
+static void cdtoc_track_info_asks_for_one_track(void)
+{
+    read_track_info_from_a_rejected_drive(3);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 0xb);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 3);
+    read_track_info_from_a_rejected_drive(0x51234);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 0xb);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 0x34);
+}
+
+/* The published track number is the caller's argument and not anything out of
+   the reply, and it is sixteen bits of it: MOV EAX,dword ptr [ESP+0x28] then
+   MOV [0x00069dff],AX.  0x51234 is the case that separates the two widths --
+   0x1234 reaches the global while only 0x34 reached the control block above --
+   and -2 is the case that fixes the sign, since both readers widen the loaded
+   word with CWDE. */
+static void cdtoc_track_info_publishes_the_track_number(void)
+{
+    read_track_info_from_a_rejected_drive(3);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 3);
+    read_track_info_from_a_rejected_drive(0x51234);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 0x1234);
+    read_track_info_from_a_rejected_drive(-2);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, -2);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 0xfe);
+}
+
+/* The start sector is the dword at the control block's byte 2 run through
+   fdps_cd_msf_to_sector -- PUSH dword ptr [ESP+0x1e] off a frame whose block
+   begins at +0x1c -- so it has to agree with the four bytes still sitting at
+   that offset in the block that came back.  Reading the address from the
+   block's start, or from +3 the way the Read Disk Info reply carries it, would
+   name a position elsewhere on the disc -- which this can see because the fill
+   above changes every four bytes, so the dword at +2 and the dword at +3 carry
+   different minute, second and frame bytes and convert to different sectors.
+   The poison is what shows the store happened at all: the conversion cannot
+   produce 0x5a5a5a5a, whose value is far past the 1166730 sectors the widest
+   possible address converts to. */
+static void cdtoc_track_info_publishes_the_start_sector(void)
+{
+    unsigned int staged_msf;
+
+    read_track_info_from_a_rejected_drive(3);
+    staged_msf = upc_staged_dword(data_fdps_cd_ioctl_buffer, 2);
+    CHECK_EQ((long) data_fdps_cd_track_start_sector,
+             (long) fdps_cd_msf_to_sector(staged_msf));
+    CHECK_EQ(data_fdps_cd_track_start_sector == 0x5a5a5a5aUL, 0);
+}
+
+/* AND AL,0xd0 on the byte at the control block's byte 6.  Two things are pinned
+   here: the byte it comes from, by comparing against the block that came back,
+   and the mask, by requiring every bit outside 0xd0 to be clear.  Bit 5 is the
+   one that matters -- it is copy-permitted, and the 0xf0 an obvious rewrite
+   would use keeps it, which would make fdps_cd_track_is_audio's exact compare
+   against 0x40 report a copyable audio track as data.  The fill above is what
+   lets that be seen: every byte it writes has bit 5 set, so under 0xf0 the
+   published byte would come back 0x20 higher and both the & 0x2f and the & 0x20
+   assertion would fail.  Its four values also mask to four different results,
+   so reading block+5 instead of block+6 breaks the first assertion.  The poison
+   cannot survive the mask either, since 0x5a has bits at 0x0a. */
+static void cdtoc_track_info_masks_the_control_byte(void)
+{
+    read_track_info_from_a_rejected_drive(3);
+    CHECK_EQ(data_fdps_cd_track_info_control_flags,
+             data_fdps_cd_ioctl_buffer[6] & 0xd0);
+    CHECK_EQ(data_fdps_cd_track_info_control_flags & 0x2f, 0);
+    CHECK_EQ(data_fdps_cd_track_info_control_flags & 0x20, 0);
+}
+
+/* MOV EAX,dword ptr [ESP+0x3] / MOV [0x00069e20],AX, exactly as in the other
+   two requests: the status is the word at the header's offset 3 and only the
+   word, so it has to agree with the two bytes still at that displacement in the
+   DOS block.  What a refused request leaves there is not the test's to decide,
+   so this pins the displacement and the width and not a value. */
+static void cdtoc_track_info_publishes_the_status_word(void)
+{
+    read_track_info_from_a_rejected_drive(3);
+    CHECK_EQ(data_fdps_cd_last_request_status,
+             upc_staged_word(data_fdps_cd_request_header_buffer, 3));
+}
+
 void run_cdtoc_tests(void)
 {
     RUN_TEST(cdtoc_unpack_splits_the_three_fields);
@@ -529,4 +718,10 @@ void run_cdtoc_tests(void)
     RUN_TEST(cdtoc_disk_info_splits_the_leadout_address);
     RUN_TEST(cdtoc_disk_info_converts_the_leadout_to_a_sector);
     RUN_TEST(cdtoc_disk_info_publishes_the_status_word);
+    RUN_TEST(cdtoc_track_info_stages_an_ioctl_input_request);
+    RUN_TEST(cdtoc_track_info_asks_for_one_track);
+    RUN_TEST(cdtoc_track_info_publishes_the_track_number);
+    RUN_TEST(cdtoc_track_info_publishes_the_start_sector);
+    RUN_TEST(cdtoc_track_info_masks_the_control_byte);
+    RUN_TEST(cdtoc_track_info_publishes_the_status_word);
 }

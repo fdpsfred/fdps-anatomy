@@ -1474,6 +1474,14 @@
       "status": "committed",
       "emitted_against": "0x123",
       "rounds": 0
+    },
+    "0003c0c8": {
+      "name": "fdps_cdrom_read_track_info",
+      "target": "cdtoc.c",
+      "body_size": "0xd9",
+      "status": "committed",
+      "emitted_against": "0xd9",
+      "rounds": 1
     }
   }
 }
