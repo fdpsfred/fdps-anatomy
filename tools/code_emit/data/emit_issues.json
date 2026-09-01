@@ -1241,5 +1241,33 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "0003c636": [
+    {
+      "from": "emit",
+      "what": "Contract G, and only the stack probe. The original opens PUSH 0x10 / CALL 0x0004361a and 0004361a is the Watcom probe __CHK; the rebuild's own CD.OBJ, read with WDISASM at offset 04d0, has no probe, because build_emit.py compiles every unit with the one pinned flag set and that set carries -s. This adds no new evidence to the module-wide finding already recorded against 0003bade, 0003be36 and 0003c51c -- that -bt=dos4g -mf -4s -fpi -os reproduces the CD block byte for byte while the pinned set does not -- it is one more instance of its extent, recorded so the closing sweep sees how far the block reaches rather than a sample. Everything else WDISASM shows differing is the pinned set's four-register plus EBP frame and its result local against the original's flat ESP frame and direct MOV EAX, plus XOR EAX,EAX / MOV AX,mem where the original has MOVZX -- all of which ADR-0001 excludes as register allocation and instruction selection; the branch structure, the immediates, the memory displacements and the call order are identical. The behavioural loss is the overflow guard alone.",
+      "needs": "A canon decision, not a measurement. Settling it means either teaching build_emit.py a per-unit flag set so cd.c, cdaudio.c and cdtoc.c can be built without -s, or recording in rebuild_info/build_flags.md that the rebuild accepts the loss of the probe in this module. Both are outside what an emit round decides.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "The `return 2` arm cannot be exercised by any test in this pipeline. It is taken only when fdps_cdrom_read_disk_info leaves data_fdps_cd_last_request_status holding exactly 0x810C -- the driver's error bit 0x8000, the done bit 0x0100 and device error 0x0C, general failure -- which is what a drive reports when it has no readable disc. The test executable runs with the game disc mounted whenever the image is on the host, so the status comes back as a successful read; and no test may dismount it mid-run. What the tests do pin is the mapping (result 2 exactly when the status is 0x810C) and the zero-extension that makes the comparison reachable at all; what is unpinned is that a real drive with the wrong disc, or an empty tray, actually produces 0x810C and not some other error word. That matters because the arm is not a test of the error bit: any other failure the driver could report comes back as 1, which main accepts as success and starts the game on.",
+      "needs": "A real machine, or a DOSBox-X session where the disc is swapped or ejected between the mount and the call, reading data_fdps_cd_last_request_status after fdps_cdrom_read_disk_info. This is a question about what MSCDEX reports, not about the emitted C: whatever the answer, the body's comparison is what it is and must stay a single equality against 0x810C.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed independently by disassembling the rebuild's own CD.OBJ with WDISASM: fdps_cdrom_detect in the rebuilt object opens push ebx/esi/edi/ebp with no PUSH 0x10 / CALL __CHK, where the original opens with the probe at 0003c636. This adds no new evidence, only one more instance of the module-wide extent -- the probe is missing from every function in the rebuilt CD.OBJ, not just this one, which the same listing shows for all eight publics in the unit. The behavioural loss is the stack-overflow guard alone; everything else in the object matches.",
+      "needs": "A canon decision about build_emit.py's single pinned flag set versus a per-unit set for cd.c, cdaudio.c and cdtoc.c, recorded in rebuild_info/build_flags.md. Outside what an emit or a review round settles.",
+      "status": "open",
+      "same_as": "emit#0"
+    },
+    {
+      "from": "review",
+      "what": "I reached the same gap from the other side: the 0x810C arm is the only path no test on this host can drive, and I could not settle from Ghidra or the knowledge base what an empty or unreadable tray actually leaves in data_fdps_cd_last_request_status. What I did settle is that it matters more than an unreachable arm usually would -- the compare is a single equality and not a test of bit 15, so any other error word the driver could return reaches main as 1, which main accepts and starts the game on (CMP [EBP-8],1 / JZ at 000292e0, with the failure path printing and exiting).",
+      "needs": "A real drive, or a DOSBox-X session where the disc is ejected or swapped between the mount and the call, reading data_fdps_cd_last_request_status after fdps_cdrom_read_disk_info returns.",
+      "status": "open",
+      "same_as": "emit#1"
+    }
   ]
 }

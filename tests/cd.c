@@ -843,8 +843,231 @@ static void cd_ioctl_output_publishes_the_request_status(void)
              staged_word(data_fdps_cd_request_header_buffer, 3));
 }
 
+/* fdps_cdrom_detect, 0003c636.
+ *
+ * The interrupt is issued for real.  INT 2Fh AX=1500h is the MSCDEX
+ * installation check, and the test executable runs under DOS/4GW inside
+ * DOSBox-X with the game disc mounted whenever the image is on the host, so it
+ * is answered by the same redirector the game asks -- or, on a host without the
+ * image, by nobody, which leaves the multiplex registers untouched and is
+ * exactly the case the function's first branch is for.
+ *
+ * Which of those two a run gets is not the test's to decide, so the tests ask
+ * MSCDEX the same question themselves, into their own register blocks, and
+ * every assertion below is a biconditional against that independent answer.
+ * Nothing asserts that a CD-ROM drive was found, and nothing asserts a
+ * particular drive count, drive letter or status word.
+ *
+ * Neither of the module's two shared register blocks can be read back for that
+ * purpose.  Past the no-driver branch the body calls fdps_cdrom_read_disk_info,
+ * which reaches fdps_cd_device_request, which builds its own DPMI request in
+ * the same input block and lets int386x fill the same output block -- so by the
+ * time the function returns, both hold the last device request and not the
+ * installation check.  That is why the witness here is a local union REGS the
+ * test filled itself.
+ *
+ * Expected values are the immediates and displacements in the body: MOV byte
+ * ptr [0x00069dc9],0x15 and [0x00069dc8],0x0 and MOV word ptr [0x00069dcc],0x0
+ * for the request, CMP word ptr [0x00069db0],0x0 for the no-driver branch, MOV
+ * AX,[0x00069db0] / MOV [0x00069dfc],AX and MOV AL,[0x00069db4] / MOV
+ * [0x00069dfe],AL for the two published values, CMP word ptr [0x00069e54],0x0
+ * for the allocation guard, and MOVZX EAX,word ptr [0x00069e20] / CMP
+ * EAX,0x810c for the result.  The control block code 0xa and the command byte 3
+ * the disc-info read stages come from fdps_cdrom_read_disk_info at 0003bfa5.
+ */
+
+/* The same question the body asks, asked independently: AH = 0x15, AL = 0 and
+   BX = 0 is the MSCDEX installation check, and it answers with the number of
+   CD-ROM drives in BX and the drive letter index of the first in CL.  It is a
+   pure query, so asking it again either side of a call changes nothing. */
+static void mscdex_installation_check(union REGS *answer)
+{
+    union REGS request;
+
+    memset(&request, 0, sizeof(union REGS));
+    request.h.ah = 0x15;
+    request.h.al = 0;
+    request.w.bx = 0;
+    int386(0x2f, &request, answer);
+}
+
+/* The module's input register block is poisoned in all four of its 32-bit
+   members before each call, because the body writes only AH, AL and BX and
+   writes each of them narrower than the register it lands in.  The two globals
+   the body publishes are poisoned too, so a call that returned at the no-driver
+   branch is visibly one that wrote neither. */
+static short detect_with_poisoned_state(void)
+{
+    data_fdps_cd_int_regs_in.x.eax = 0x99990999;
+    data_fdps_cd_int_regs_in.x.ebx = 0x88880777;
+    data_fdps_cd_int_regs_in.x.ecx = 0x12345678;
+    data_fdps_cd_int_regs_in.x.edx = 0x2468ace0;
+    data_fdps_cdrom_drive_count = 0x5a5a;
+    data_fdps_cdrom_drive_letter_index = 0x5b;
+    return fdps_cdrom_detect();
+}
+
+/* The allocation guard is CMP word ptr [0x00069e54],0x0 / JNZ, and it can only
+   be seen from outside on a call made while the DOS buffers are still
+   unallocated -- which is why this test is registered before every other test
+   in the file, and why it asserts that precondition rather than assuming it.
+   tests/cd.c is the first test unit in the build's alphabetical order that
+   touches any CD global, so the segment word really is the zero-filled bss it
+   starts as.
+
+   Allocation sits past the no-driver branch, so the buffers exist afterwards
+   exactly when the interrupt reported a drive.  A body that allocated before
+   testing BX would leak two DOS blocks on every machine with no CD-ROM
+   redirector, and nothing in this module can free them. */
+static void cd_detect_allocates_the_dos_buffers_on_the_first_call(void)
+{
+    union REGS answer;
+    int buffers_were_unallocated;
+
+    mscdex_installation_check(&answer);
+    buffers_were_unallocated = (data_fdps_cd_request_header_real_mode_seg == 0);
+    detect_with_poisoned_state();
+    CHECK_EQ(buffers_were_unallocated, 1);
+    CHECK_EQ(data_fdps_cd_request_header_real_mode_seg != 0, answer.w.bx != 0);
+}
+
+/* AH = 0x15 with AL = 0 is the MSCDEX installation check and BX = 0 is what it
+   requires on entry.  The two byte stores land at [0x00069dc9] and
+   [0x00069dc8], which are h.ah and h.al of the block that starts at 0x00069dc8
+   and nothing else (contract H), and each of the three stores is narrower than
+   the register it lands in -- byte, byte, word -- so the halves above them keep
+   the poison.
+
+   Those five facts are readable in the shared block afterwards exactly when the
+   call returned at the no-driver branch, because that is the only path on which
+   nothing runs after the interrupt; a call that found a drive leaves
+   fdps_cd_device_request's own DPMI request there instead.  The biconditional
+   says both halves of that at once.  On a machine that does have a drive, what
+   pins the request is the next test: an installation check built any other way
+   would not come back with the answer the test's own one did.
+
+   DX is never written by anything in the chain, so its poison survives on both
+   paths. */
+static void cd_detect_issues_the_mscdex_installation_check(void)
+{
+    union REGS answer;
+    union REGS probe;
+
+    mscdex_installation_check(&answer);
+    detect_with_poisoned_state();
+    CHECK_EQ((int) ((char *) &probe.h.al - (char *) &probe), 0);
+    CHECK_EQ((int) ((char *) &probe.h.ah - (char *) &probe), 1);
+    CHECK_EQ((long) data_fdps_cd_int_regs_in.x.edx, 0x2468ace0L);
+    CHECK_EQ(data_fdps_cd_int_regs_in.h.ah == 0x15
+             && data_fdps_cd_int_regs_in.h.al == 0
+             && data_fdps_cd_int_regs_in.w.bx == 0
+             && (data_fdps_cd_int_regs_in.x.eax >> 16) == 0x9999
+             && (data_fdps_cd_int_regs_in.x.ebx >> 16) == 0x8888,
+             answer.w.bx == 0);
+}
+
+/* The count is BX and the letter index is CL: MOV AX,[0x00069db0] is a word out
+   of the output block's +4 and MOV AL,[0x00069db4] is a byte out of its +8,
+   which is where the 32-bit union REGS puts w.bx and h.cl and nowhere else
+   (contract H).  Both stores sit past the no-driver branch, so on a machine
+   with no redirector the two globals keep whatever they held -- the test's
+   poison, here.
+
+   Nothing asserts what the count or the letter is.  A machine with two CD-ROM
+   drives and a machine with one both satisfy this; what is pinned is that the
+   two globals hold what an installation check the test issued for itself came
+   back with, in the two fields those two displacements name. */
+static void cd_detect_publishes_the_drive_count_and_first_letter(void)
+{
+    union REGS answer;
+    union REGS probe;
+
+    mscdex_installation_check(&answer);
+    detect_with_poisoned_state();
+    CHECK_EQ((int) ((char *) &probe.w.bx - (char *) &probe), 4);
+    CHECK_EQ((int) ((char *) &probe.h.cl - (char *) &probe), 8);
+    if (answer.w.bx == 0) {
+        CHECK_EQ(data_fdps_cdrom_drive_count, 0x5a5a);
+        CHECK_EQ(data_fdps_cdrom_drive_letter_index, 0x5b);
+    } else {
+        CHECK_EQ(data_fdps_cdrom_drive_count, answer.w.bx);
+        CHECK_EQ(data_fdps_cdrom_drive_letter_index, answer.h.cl);
+    }
+}
+
+/* The three results and the two branches that pick between them, as three
+   biconditionals: 0 exactly when the multiplex reported no drives, 2 exactly
+   when it reported a drive and the disc-info request came back 0x810C, and 1
+   exactly when it reported a drive and the request came back anything else.
+   Read together they also say the function returns nothing but 0, 1 and 2.
+
+   The 0x810C arm is a single equality and not a test of the driver's error bit
+   0x8000, so a drive that refused the request with any other device error is
+   reported as 1 -- the same answer as success.  That is in the original: main
+   accepts 1 and quits on 0 and 2, so a disc the driver could not read for some
+   other reason gets the game started. */
+static void cd_detect_maps_the_interrupt_and_status_onto_its_result(void)
+{
+    union REGS answer;
+    short result;
+
+    mscdex_installation_check(&answer);
+    result = detect_with_poisoned_state();
+    CHECK_EQ(result == 0, answer.w.bx == 0);
+    CHECK_EQ(result == 2,
+             answer.w.bx != 0 && data_fdps_cd_last_request_status == 0x810c);
+    CHECK_EQ(result == 1,
+             answer.w.bx != 0 && data_fdps_cd_last_request_status != 0x810c);
+}
+
+/* CALL 0x0003bfa5 is the disc-info read, and it too sits past the no-driver
+   branch.  Its own staging is what makes the call visible from outside: it
+   writes command byte 3, IOCTL Input, into the request header block and control
+   block code 0xa, Read Disk Info, into the IOCTL block.  Both are poisoned
+   first, so on a machine with no redirector the poison survives -- which is the
+   assertion that the call did not happen. */
+static void cd_detect_reads_the_disc_info_past_the_no_driver_gate(void)
+{
+    union REGS answer;
+
+    mscdex_installation_check(&answer);
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cd_ioctl_buffer[0] = 0x5a;
+    data_fdps_cd_request_header_buffer[2] = 0x5b;
+    detect_with_poisoned_state();
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0] == 0xa, answer.w.bx != 0);
+    CHECK_EQ(data_fdps_cd_request_header_buffer[2] == 3, answer.w.bx != 0);
+}
+
+/* MOVZX EAX,word ptr [0x00069e20] / CMP EAX,0x810c is a zero-extending compare,
+   which is what an unsigned short promotes to.  A signed short would sign
+   extend, giving -32500 where the comparison wants 33036, and the 0x810C arm
+   could never be taken on any machine -- the failure would be invisible to
+   every test that did not have a drive reporting exactly that status
+   (contract C).  So the promotion is asserted directly, on a value the test
+   put there. */
+static void cd_detect_compares_the_status_word_zero_extended(void)
+{
+    data_fdps_cd_last_request_status = 0x810c;
+    CHECK_EQ((int) sizeof(data_fdps_cd_last_request_status), 2);
+    CHECK_EQ(data_fdps_cd_last_request_status == 0x810c, 1);
+    CHECK_EQ((long) (data_fdps_cd_last_request_status + 0), 0x810cL);
+}
+
+/* The fdps_cdrom_detect cases come first, and deliberately: the allocation
+   guard at 0003c68e is only observable on a call made before the module's DOS
+   buffers exist, and every other test in this file allocates them in its own
+   setup. */
 void run_cd_tests(void)
 {
+    RUN_TEST(cd_detect_allocates_the_dos_buffers_on_the_first_call);
+    RUN_TEST(cd_detect_issues_the_mscdex_installation_check);
+    RUN_TEST(cd_detect_publishes_the_drive_count_and_first_letter);
+    RUN_TEST(cd_detect_maps_the_interrupt_and_status_onto_its_result);
+    RUN_TEST(cd_detect_reads_the_disc_info_past_the_no_driver_gate);
+    RUN_TEST(cd_detect_compares_the_status_word_zero_extended);
     RUN_TEST(cd_register_blocks_have_the_image_layout);
     RUN_TEST(cd_alloc_fills_the_dpmi_request);
     RUN_TEST(cd_alloc_clears_the_segment_registers);

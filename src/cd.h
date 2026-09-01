@@ -58,6 +58,13 @@ extern struct SREGS data_fdps_cd_int_sregs;
    returned back over it, so nothing the caller put in it survives the call. */
 extern struct fdps_dpmi_real_mode_call data_fdps_cd_real_mode_call;
 
+/* 00069dfc.  How many CD-ROM drives MSCDEX reported -- BX returned by INT 2Fh
+   AX=1500h, stored as a word at 0003c67e.  That store is the only instruction
+   in the image that names this address: nothing ever reads the count back, so
+   it records what the installation check found rather than steering anything.
+   The module addresses the first drive and only the first drive. */
+extern unsigned short data_fdps_cdrom_drive_count;
+
 /* 00069dfe.  Drive letter index of the first CD-ROM drive MSCDEX reports,
    0 for A: -- the low byte of CX returned by INT 2Fh AX=1500h, stored at
    0003c689.  It is what the module passes in CX to every MSCDEX call that
@@ -200,5 +207,26 @@ extern void fdps_cdrom_read_device_status(void);
    busy tests. */
 extern void fdps_cd_ioctl_output_command(int command_code);
 #pragma aux fdps_cd_ioctl_output_command "*" parm caller [];
+
+/* Finds out whether the game can talk to a CD-ROM drive at all, and brings the
+   whole module up on the way: the MSCDEX installation check INT 2Fh AX=1500h,
+   the drive count and first drive letter it answers with, the one-time DOS
+   buffer allocation, and a first Read Disk Info against the disc that is in
+   the drive.
+
+   Takes nothing.  Returns 0 when no CD-ROM redirector answered the multiplex
+   at all, 2 when the disc-info request came back with status 0x810C -- the
+   driver's error bit over device error 0x0C, general failure, which is what a
+   drive with no readable disc in it reports -- and 1 otherwise.  Its one
+   caller, main, treats 1 as the only acceptable answer and quits on the other
+   two.
+
+   Calling it a second time is not the same as calling it once: the DOS buffers
+   are allocated only while data_fdps_cd_request_header_real_mode_seg is still
+   zero, so a later call re-reads the disc without reallocating.  That makes it
+   the module's initialiser and its "is the right disc still in the drive"
+   probe at the same time. */
+extern short fdps_cdrom_detect(void);
+#pragma aux fdps_cdrom_detect "*" parm caller [];
 
 #endif

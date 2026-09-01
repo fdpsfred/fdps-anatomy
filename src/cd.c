@@ -6,11 +6,11 @@
  * blocks the rest of the CD code writes into, and the register blocks the INT
  * calls share.  See cd.h for what each global holds.
  *
- * memset and memcpy come from <string.h>, int386x and the FP_SEG/FP_OFF pair
- * from <i86.h>, and printf from <stdio.h>; memset, memcpy, int386x and printf
- * are real calls in the image, while FP_SEG is the compiler's own inline
- * expansion of a near-to-far pointer conversion and FP_OFF is a cast that costs
- * nothing.
+ * memset and memcpy come from <string.h>, int386, int386x and the FP_SEG/FP_OFF
+ * pair from <i86.h>, and printf from <stdio.h>; memset, memcpy, int386, int386x
+ * and printf are real calls in the image, while FP_SEG is the compiler's own
+ * inline expansion of a near-to-far pointer conversion and FP_OFF is a cast
+ * that costs nothing.
  *
  * Note on this module's original build flags: it was not compiled with the
  * flag set the rest of the game was.  Every function in the block from
@@ -28,6 +28,7 @@
 #include <i86.h>
 #include "gamedata.h"
 #include "cd.h"
+#include "cdtoc.h"
 
 /* 0003bade.  Two DPMI INT 31h function 0100h allocations of 0x20 paragraphs
    each, published into four globals.
@@ -437,4 +438,67 @@ void fdps_cd_ioctl_output_command(int command_code)
     memcpy(&request_header, data_fdps_cd_request_header_buffer, 0x18);
 
     data_fdps_cd_last_request_status = request_header.status;
+}
+
+/* 0003c636.  The module's entry point: the MSCDEX installation check, INT 2Fh
+   AX=1500h with BX=0, followed -- only if something answered it -- by the
+   one-time DOS buffer allocation and a first Read Disk Info.  It is both the
+   initialiser for everything else in this file and the answer to "is the game
+   disc in the drive", which is why main calls nothing else before it.
+
+   The interrupt is set up a byte at a time, AH then AL, and BX as a word: MOV
+   byte ptr [0x00069dc9],0x15 / MOV byte ptr [0x00069dc8],0x0 / MOV word ptr
+   [0x00069dcc],0x0.  Nothing clears the rest of the shared input block, so CX,
+   DX, SI and DI reach the interrupt holding whatever the module's previous INT
+   call left in them; BX is zeroed because the installation check requires it.
+   This is the file's one int386 -- three arguments and the caller's own
+   segment registers -- rather than the int386x every other request path here
+   uses, because no real-mode call structure is involved.
+
+   There are three branches and they are three different questions.
+
+   The first is on the interrupt's answer: CMP word ptr [0x00069db0],0x0 tests
+   BX, the number of CD-ROM drives, and the whole of the rest of the body hangs
+   off it.  BX comes back holding the zero that went in when no redirector is
+   loaded, because an unclaimed INT 2Fh returns with its registers untouched,
+   so this is the no-driver case and it returns 0 without allocating anything.
+
+   The second is the allocation guard: the request header's real-mode segment
+   doubles as the module's "buffers are already there" flag, so a second call
+   re-reads the disc without leaking another pair of DOS blocks (nothing in the
+   module can free them).
+
+   The third is on the status word fdps_cdrom_read_disk_info published, and it
+   is a single equality against 0x810C rather than a test of the driver's error
+   bit: 0x8000 is that bit, 0x0100 is done, and 0x0C is device error 12,
+   general failure -- what a drive with no readable disc in it reports.  Any
+   other failure the driver could report comes back as 1, indistinguishable
+   here from success.  The compare is MOVZX EAX,word ptr [0x00069e20] / CMP
+   EAX,0x810c, zero extended, which is the unsigned short the global is
+   declared as; a signed one would sign extend and never match (contract C).
+
+   The result is 16 bits wide: main sign-extends it with CWDE at 000292dc
+   before storing it, which the compiler emits only for a short return. */
+short fdps_cdrom_detect(void)
+{
+    data_fdps_cd_int_regs_in.h.ah = 0x15;
+    data_fdps_cd_int_regs_in.h.al = 0;
+    data_fdps_cd_int_regs_in.w.bx = 0;
+    int386(0x2f, &data_fdps_cd_int_regs_in, &data_fdps_cdrom_int_out_regs);
+    if (data_fdps_cdrom_int_out_regs.w.bx == 0) {
+        return 0;
+    }
+
+    data_fdps_cdrom_drive_count = data_fdps_cdrom_int_out_regs.w.bx;
+    data_fdps_cdrom_drive_letter_index = data_fdps_cdrom_int_out_regs.h.cl;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    fdps_cdrom_read_disk_info();
+
+    if (data_fdps_cd_last_request_status == 0x810c) {
+        return 2;
+    }
+    return 1;
 }
