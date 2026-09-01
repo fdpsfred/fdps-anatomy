@@ -17,6 +17,8 @@
 
 #include <i86.h>
 
+#include "fdpstype.h"
+
 /* 00069dc8.  The input register block the module fills in before handing it to
    int386x, and never a local: every INT call in this translation unit writes
    the fields it needs straight into these 28 bytes.  28 is sizeof(union REGS)
@@ -45,6 +47,23 @@ extern union REGS data_fdps_cdrom_int_out_regs;
    0004e276).  The other four members, cs ss fs gs, are never touched by it. */
 extern struct SREGS data_fdps_cd_int_sregs;
 
+/* 00069e22.  The 50-byte DPMI real mode call structure every real-mode
+   interrupt this module issues is described in.  50 is
+   sizeof(struct fdps_dpmi_real_mode_call) and the size the symbol has in the
+   image, so the module's clear of it covers the object exactly and stops at
+   its end (contract B).
+
+   It is an in-out block: DPMI function 0300h reads the real-mode register
+   state out of it, issues the interrupt, and writes the state the handler
+   returned back over it, so nothing the caller put in it survives the call. */
+extern struct fdps_dpmi_real_mode_call data_fdps_cd_real_mode_call;
+
+/* 00069dfe.  Drive letter index of the first CD-ROM drive MSCDEX reports,
+   0 for A: -- the low byte of CX returned by INT 2Fh AX=1500h, stored at
+   0003c689.  It is what the module passes in CX to every MSCDEX call that
+   names a drive, so the module only ever addresses the first CD-ROM drive. */
+extern unsigned char data_fdps_cdrom_drive_letter_index;
+
 /* 00069e54.  Real-mode segment of the 512-byte block the MSCDEX request header
    is built in.  It doubles as the module's "buffers are already allocated"
    flag: fdps_cdrom_detect allocates only when it is still zero -- CMP word ptr
@@ -69,5 +88,22 @@ extern unsigned short data_fdps_cd_request_header_real_mode_seg;
    failing. */
 extern void fdps_cd_alloc_dos_buffers(void);
 #pragma aux fdps_cd_alloc_dos_buffers "*" parm caller [];
+
+/* Hands whatever request header the module has already built in the DOS block
+   to the CD-ROM device driver, as real-mode INT 2Fh AX=1510h -- MSCDEX Send
+   Device Request -- issued through DPMI function 0300h.
+
+   Takes nothing and returns nothing: the header, the drive letter index and
+   the header's real-mode segment are all globals the caller has set up, and
+   the driver's answer is the status word the driver writes back into that same
+   header.  This function never looks at that status word, so every caller has
+   to read it for itself.
+
+   A failure it does report is a failure of the DPMI call rather than of the
+   device request: if INT 31h comes back with carry set it prints
+   "DEVICE REQUEST FAILED!!!" and returns anyway, leaving the caller to read a
+   header the driver never touched. */
+extern void fdps_cd_device_request(void);
+#pragma aux fdps_cd_device_request "*" parm caller [];
 
 #endif

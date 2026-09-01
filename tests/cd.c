@@ -1,5 +1,9 @@
 /* tests/cd.c -- cover for src/cd.c.
  *
+ * The first half covers fdps_cd_alloc_dos_buffers at 0003bade, the second
+ * fdps_cd_device_request at 0003bb7d; each half says where its own expected
+ * values come from.
+ *
  * Expected values come from the assembly at 0003bade -- MOV word ptr
  * [0x00069dc8],0x100 and MOV word ptr [0x00069dcc],0x20 into the input
  * register block that starts at 0x00069dc8, PUSH 0xc / PUSH 0 / PUSH 0x69df0 /
@@ -20,6 +24,8 @@
  * owns their contents.  Every expectation is either a relationship between two
  * values the function itself wrote, or a poison value the test put there.
  */
+#include <stddef.h>
+#include <i86.h>
 #include "testharn.h"
 #include "gamedata.h"
 #include "cd.h"
@@ -128,6 +134,123 @@ static void cd_alloc_publishes_the_ioctl_block(void)
              1);
 }
 
+/* fdps_cd_device_request, 0003bb7d.
+ *
+ * The interrupt is issued for real, as above, and the drive it names is the
+ * one the test puts in data_fdps_cdrom_drive_letter_index.  It is set to 0xff
+ * -- past every drive letter there is -- so MSCDEX rejects the request on the
+ * drive number before it ever follows ES:BX, and where no CD-ROM drive is
+ * mounted at all there is no MSCDEX handler on INT 2Fh and the multiplex
+ * returns untouched.  Either way nothing reads or writes the request header,
+ * which is what makes running this against a real DPMI host safe on a machine
+ * whose state the test does not control.
+ *
+ * What the function writes into the real mode call structure cannot be read
+ * back after the call: DPMI function 0300h writes the register state the
+ * real-mode handler returned back over the whole block, so every field of it
+ * holds the interrupt's answer by the time the function returns.  The input
+ * register block is the opposite -- int386x only reads it -- so the assertions
+ * below are on that block, plus on the two struct layouts that decide where
+ * the body's stores land.
+ */
+static void device_request_with_poisoned_state(void)
+{
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    data_fdps_cd_int_regs_in.x.eax = 0x99990999;
+    data_fdps_cd_int_regs_in.x.ebx = 0x12340888;
+    data_fdps_cd_int_regs_in.x.ecx = 0x43210777;
+    data_fdps_cd_int_regs_in.x.edx = 0x5678;
+    data_fdps_cd_int_sregs.cs = 0x1111;
+    data_fdps_cd_int_sregs.ss = 0x2222;
+    data_fdps_cd_int_sregs.fs = 0x3333;
+    data_fdps_cd_int_sregs.gs = 0x4444;
+    fdps_cd_device_request();
+}
+
+/* The four stores into the real mode call structure are at [0x69e3e],
+   [0x69e3a], [0x69e32] and [0x69e44], which are +0x1c, +0x18, +0x10 and +0x22
+   from the block's base at 0x69e22, and the block is cleared with a length of
+   0x32.  The stores into the input register block are at +0, +4, +5 and +8 and
+   the edi store at +0x14, all from 0x69dc8; the carry test reads [0x69dc4],
+   which is +0x18 from the output block at 0x69dac.  If any of those
+   displacements does not land on the member the C names, the emitted body
+   writes a different field of the same block (contract H). */
+static void cd_device_request_fields_sit_where_the_stores_land(void)
+{
+    union REGS probe;
+
+    CHECK_EQ((int) sizeof(struct fdps_dpmi_real_mode_call), 0x32);
+    CHECK_EQ((int) offsetof(struct fdps_dpmi_real_mode_call, eax), 0x1c);
+    CHECK_EQ((int) offsetof(struct fdps_dpmi_real_mode_call, ecx), 0x18);
+    CHECK_EQ((int) offsetof(struct fdps_dpmi_real_mode_call, ebx), 0x10);
+    CHECK_EQ((int) offsetof(struct fdps_dpmi_real_mode_call, es), 0x22);
+    CHECK_EQ((int) ((char *) &probe.h.bl - (char *) &probe), 4);
+    CHECK_EQ((int) ((char *) &probe.h.bh - (char *) &probe), 5);
+    CHECK_EQ((int) ((char *) &probe.w.cx - (char *) &probe), 8);
+    CHECK_EQ((int) ((char *) &probe.x.edi - (char *) &probe), 0x14);
+    CHECK_EQ((int) ((char *) &probe.x.cflag - (char *) &probe), 0x18);
+}
+
+/* MOV word ptr [0x69dc8],0x300 asks DPMI for Simulate Real Mode Interrupt, MOV
+   byte ptr [0x69dcc],0x2f names INT 2Fh and MOV byte ptr [0x69dcd],0x0 clears
+   the rest of BX, and MOV word ptr [0x69dd0],0x0 copies no words from the
+   protected-mode stack.  Each of the three is narrower than the register it
+   lands in -- word, byte, byte, word -- so the halves above them keep the
+   poison, which is what pins the widths.  EDX is never written at all. */
+static void cd_device_request_asks_dpmi_to_simulate_int_2f(void)
+{
+    device_request_with_poisoned_state();
+    CHECK_EQ(data_fdps_cd_int_regs_in.w.ax, 0x300);
+    CHECK_EQ((int) (data_fdps_cd_int_regs_in.x.eax >> 16), 0x9999);
+    CHECK_EQ(data_fdps_cd_int_regs_in.h.bl, 0x2f);
+    CHECK_EQ(data_fdps_cd_int_regs_in.h.bh, 0);
+    CHECK_EQ((int) (data_fdps_cd_int_regs_in.x.ebx >> 16), 0x1234);
+    CHECK_EQ(data_fdps_cd_int_regs_in.w.cx, 0);
+    CHECK_EQ((int) (data_fdps_cd_int_regs_in.x.ecx >> 16), 0x4321);
+    CHECK_EQ(data_fdps_cd_int_regs_in.x.edx, 0x5678);
+}
+
+/* MOV dword ptr [0x69ddc],0x69e22 hands DPMI the address of the real mode call
+   structure, as the address of the symbol and never as a literal (contract E),
+   and MOV DX,DS / MOV word ptr [0x69df0],DX puts the flat data selector beside
+   it in ES.  int386x writes the post-interrupt ES back over +0, so the
+   selector is asserted as the one the program is still running under rather
+   than against a captured value. */
+static void cd_device_request_points_dpmi_at_the_call_block(void)
+{
+    device_request_with_poisoned_state();
+    CHECK_EQ((long) data_fdps_cd_int_regs_in.x.edi,
+             (long) (unsigned long) &data_fdps_cd_real_mode_call);
+    CHECK_EQ(data_fdps_cd_int_sregs.es,
+             FP_SEG((void __far *) &data_fdps_cd_real_mode_call));
+}
+
+/* PUSH 0xc / PUSH 0x0 / PUSH 0x69df0 / CALL memset clears all twelve bytes of
+   the segment register block on the way in.  int386x writes back only ES at +0
+   and DS at +6, so cs, ss, fs and gs are the four the clear has to have
+   reached, and they show it only because the test poisoned them first. */
+static void cd_device_request_clears_the_segment_registers(void)
+{
+    device_request_with_poisoned_state();
+    CHECK_EQ(data_fdps_cd_int_sregs.cs, 0);
+    CHECK_EQ(data_fdps_cd_int_sregs.ss, 0);
+    CHECK_EQ(data_fdps_cd_int_sregs.fs, 0);
+    CHECK_EQ(data_fdps_cd_int_sregs.gs, 0);
+}
+
+/* CMP dword ptr [0x69dc4],0x0 / JZ is the body's only branch, and it is on the
+   DPMI call's carry rather than on anything the CD-ROM driver said.  DPMI
+   0300h returns with carry clear whenever it could issue the interrupt at all,
+   which it can here -- a valid interrupt number and a call block inside the
+   program's own data -- so the branch is taken and "DEVICE REQUEST FAILED!!!"
+   is not printed.  A non-zero cflag would mean the emitted C had handed DPMI
+   something the original does not. */
+static void cd_device_request_reports_only_a_failed_dpmi_call(void)
+{
+    device_request_with_poisoned_state();
+    CHECK_EQ(data_fdps_cdrom_int_out_regs.x.cflag, 0);
+}
+
 void run_cd_tests(void)
 {
     RUN_TEST(cd_register_blocks_have_the_image_layout);
@@ -135,4 +258,9 @@ void run_cd_tests(void)
     RUN_TEST(cd_alloc_clears_the_segment_registers);
     RUN_TEST(cd_alloc_publishes_the_request_header_block);
     RUN_TEST(cd_alloc_publishes_the_ioctl_block);
+    RUN_TEST(cd_device_request_fields_sit_where_the_stores_land);
+    RUN_TEST(cd_device_request_asks_dpmi_to_simulate_int_2f);
+    RUN_TEST(cd_device_request_points_dpmi_at_the_call_block);
+    RUN_TEST(cd_device_request_clears_the_segment_registers);
+    RUN_TEST(cd_device_request_reports_only_a_failed_dpmi_call);
 }

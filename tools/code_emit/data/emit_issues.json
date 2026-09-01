@@ -1057,5 +1057,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003bb7d": [
+    {
+      "what": "What the body writes into data_fdps_cd_real_mode_call cannot be observed after the call, so those four stores are checked against the emitted object rather than at run time. DPMI function 0300h writes the register state the real-mode handler returned back over the whole 50-byte block, so by the time fdps_cd_device_request returns every field holds the interrupt's answer, not the request. The emitted object listing shows the four stores landing at +0x1c, +0x18, +0x10 and +0x22 exactly as the original's do, and the test pins those displacements to the named members, but nothing asserts at run time that AX=0x1510, CX=the drive letter and ES=the header segment actually reached MSCDEX.",
+      "needs": "A caller that reads the driver's answer back out of the request header -- fdps_cdrom_read_disk_info at 0003bfa5 is the natural one -- emitted, plus the CD image mounted so MSCDEX answers. A device request whose status word comes back with the media descriptor the disc really has can only have been issued with the right AX, CX and ES:BX, which settles the fill end to end. Until such a caller exists there is nothing in the test image that can distinguish a correct fill from a fill that never reached the driver.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed independently and added the object-level half of the check the emitter describes. I disassembled workspace/code_emit/out/objs/CD.OBJ with WDISASM myself and read the four stores at 00e0, 00ea-00f2, 00f8 and 0102-0108: they land at data_fdps_cd_real_mode_call +1cH, +18H, +10H and +22H, with the same widths as the original's, so the fill is right in the shipped object even though no runtime assertion can see it. Nothing to add to the emitter's statement of why the runtime cannot: DPMI 0300h overwrites all 50 bytes before the function returns.",
+      "needs": "As emit#0 -- an emitted caller that reads the driver's answer back out of the request header, with the disc mounted so MSCDEX replies.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

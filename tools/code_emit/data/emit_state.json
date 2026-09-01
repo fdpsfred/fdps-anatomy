@@ -1413,6 +1413,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x9f"
+    },
+    "0003bb7d": {
+      "name": "fdps_cd_device_request",
+      "target": "cd.c",
+      "body_size": "0xc2",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0xc2"
     }
   }
 }
