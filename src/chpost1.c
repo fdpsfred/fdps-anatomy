@@ -127,3 +127,56 @@ void fdps_chapter_05_post_action(void)
         data_fdps_chapter_event_or_battle_end_code = 1;
     }
 }
+
+/* 0003a640.  The shared test, then one defeat test of this chapter's own --
+   the same seventeen instructions as the two handlers above, reached through
+   a third table slot.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003a640..0003a646 --
+   and nothing in it is ever read, so there is no local to name.
+
+   CALL 0x0003a2e0 at 0003a64c has nothing pushed in front of it and no ESP
+   adjustment behind it, so the shared test takes no argument, and the very
+   next instruction is PUSH 0x3: EAX is not consulted between the two calls,
+   so that call's result is not used here.  PUSH 0x3 / CALL 0x000109b0 / ADD
+   ESP,0x4 at 0003a651..0003a658 is fdps_unit_is_retired(3), the caller
+   clearing its one argument, and its EAX is used -- TEST EAX,EAX / JZ
+   0003a669 at 0003a65b is the only branch in the body, skipping the MOV
+   dword ptr [0x00069da0],0x1 at 0003a65f.
+
+   That store is guarded by nothing but the predicate: it does not consult the
+   code's current value, and it runs after the shared test rather than as an
+   alternative to it.  So it overrides a 2 the shared test wrote moments
+   earlier, and an action that empties the enemy side and retires unit 3 at
+   once is a defeat and not a clear.  It also fires on the path where the
+   shared test returned at its own gate because a chapter event had already
+   recorded a verdict.  Gating the store on the code still being 0, or hanging
+   it off an else of the victory, changes both of those outcomes.
+
+   Unit index 3 is a position in this map's unit array, not a character id.
+   map05.dat's header byte +1 fields four player slots, so the roster fills
+   indices 0..3 in the order it was appended -- 蘭迪斯, 尤利安, 亞克,
+   法蓮娜 -- and index 3 is 法蓮娜.  The roster is the same four it was in
+   chapter 5: fdps_chapter_05_init and fdps_chapter_06_init have no roster
+   append in them at all, where fdps_chapter_04_init still carries PUSH 0x1 /
+   CALL 0x00023bc0 at 00020f7c.  Chapter 4's identically shaped handler
+   reaches the guest 索爾 with the same 3, so writing this argument as a
+   per-character constant would be wrong in both directions.
+
+   The chapter's three stated lose conditions are 蘭迪斯, 法蓮娜 or 索爾
+   dying.  The first is the shared test's slot 0, the second is this store,
+   and the third is not this handler's business: 索爾 is one of the map's
+   wave-0 deployment records, appended after the four roster slots, and his
+   record carries a death script that the script runner fires.  Adding a third
+   test here would end the battle on paths the original does not.
+
+   Table slot 5: the dword at 000602a0, five entries into the table based at
+   0006028c, is 0003a640. */
+void fdps_chapter_06_post_action(void)
+{
+    fdps_battle_check_default_end_conditions();
+    if (fdps_unit_is_retired(3) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+}

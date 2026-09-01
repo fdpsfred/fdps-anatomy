@@ -90,4 +90,32 @@ extern void fdps_chapter_04_post_action(void);
 extern void fdps_chapter_05_post_action(void);
 #pragma aux fdps_chapter_05_post_action "*" parm caller [];
 
+/* Chapter 6's post-action test: the game's standard end conditions, and then
+   one defeat condition of its own -- unit slot 3 having left the battle.
+   Takes nothing, returns nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h).
+
+   The two tests are sequential and not alternatives, and the slot-3 store is
+   unguarded: it overwrites whatever
+   fdps_battle_check_default_end_conditions (btlend.h) just recorded, so a
+   defeat outranks a clear settled in the same call, and it fires even when
+   the shared test returned early because a chapter event had already recorded
+   a verdict.
+
+   Slot 3 on this chapter's map is 法蓮娜.  map05.dat fields four player
+   slots, so the roster -- 蘭迪斯, 尤利安, 亞克, 法蓮娜, unchanged since
+   chapter 4 appended her -- fills slots 0..3 exactly, and the map's wave-0
+   deployments, the guest 索爾 among them, follow after it.  Slot 0, 蘭迪斯,
+   is the shared test's business.  The index is a position in the map's unit
+   array and nothing more: chapter 4's identically shaped handler tests slot 3
+   as well and there it is 索爾.
+
+   The chapter's third stated lose condition, 索爾's death, is not here: he
+   carries a death script on his deployment record and the script runner fires
+   it.
+
+   Table slot 5. */
+extern void fdps_chapter_06_post_action(void);
+#pragma aux fdps_chapter_06_post_action "*" parm caller [];
+
 #endif
