@@ -42,6 +42,7 @@
  * checks that premise against the linked library instead of assuming it.
  */
 #include <stdlib.h>
+#include <string.h>
 #include "testharn.h"
 #include "ailv3.h"
 #include "gamedata.h"
@@ -2243,6 +2244,235 @@ static void start_wav_answers_the_slot_the_caller_can_wait_on(void)
     CHECK_EQ(slot, SFX_NO_SAMPLE_SLOT);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_play_sfx @ 0002a1f0
+ *
+ * Expected values come from the assembly at 0002a1f0 -- PUSH of the local's
+ * address, the argument and dword ptr [0x000643a0] before CALL 0x00039cf0 at
+ * 0002a20a, CMP dword ptr [EBP-0x4],0x0 / JZ 0x0002a22d over the play, and
+ * PUSH -0x1 / PUSH -0x1 / PUSH 0x1 with the looked-up pointer before CALL
+ * 0x00030a00 -- and from the .VFS layout in resource_info/vfs.md.
+ *
+ * The pack is staged in memory rather than read from a game file because
+ * BaseWav.vfs is not one of the files under fdps_game_files/: it ships on the
+ * CD, and this function is handed the container only as a block already read
+ * whole into memory.  The .WAV inside it is built with the same helpers the
+ * parser's and the player's own cases use, so the member really is a
+ * RIFF/WAVE image and not a stand-in; the directory around it is the test's
+ * own, and is not pretending to be a file.
+ *
+ * What playback is observed through is what the rest of this file uses: the
+ * arguments the real linked AIL library wrote into the sample handle.
+ * ------------------------------------------------------------------ */
+
+/* Container fields as byte offsets: the directory's own offset is the u16 at
+   5 and the member count the u32 at 7, an entry is 26 bytes, and inside an
+   entry the member's byte count is at 0x0d and its start at 0x16 -- the same
+   numbers src/vfs.c reads and tests/vfs.c stages. */
+#define PACK_TABLE_OFFSET_FIELD 5
+#define PACK_ENTRY_COUNT_FIELD 7
+#define PACK_ENTRY_SIZE 0x1a
+#define PACK_ENTRY_SIZE_FIELD 0x0d
+#define PACK_ENTRY_START_FIELD 0x16
+
+/* 35 is where every shipped container puts its directory.  The .WAV goes in at
+   index 2 rather than 0, so a lookup that lost the entry stride lands on a
+   zeroed entry and finds nothing instead of finding it anyway. */
+#define PACK_TABLE_OFFSET 35
+#define PACK_ENTRIES 3
+#define PACK_WAV_INDEX 2
+#define PACK_MEMBER_START (PACK_TABLE_OFFSET + PACK_ENTRIES * PACK_ENTRY_SIZE)
+#define PACK_SIZE (PACK_MEMBER_START + WAV_STAGE_SIZE)
+
+/* The name as a packer stores it -- upper case, because the entry's own name
+   is compared raw while the query is folded -- and the mixed-case spelling the
+   game's own call sites pass ("Beep.wav" at 0x61b04 is one of them). */
+#define PACK_WAV_NAME "BEEP.WAV"
+#define PACK_WAV_QUERY "Beep.wav"
+#define PACK_MISSING_QUERY "NoSuch.wav"
+#define PACK_QUERY_MAX 16
+
+/* A second length, so a case that plays out of the alternative pack cannot
+   pass on the first pack's numbers. */
+#define PACK_ALT_PCM_LENGTH 0x00034567
+
+static unsigned char sfx_pack[PACK_SIZE];
+static unsigned char sfx_pack_alt[PACK_SIZE];
+
+/* Lays a one-member container out around a freshly staged mono 8-bit .WAV and
+   answers the data chunk's offset inside that member.  The header fields go in
+   as explicit little-endian bytes so a wrong offset in struct
+   fdps_vfs_image_header shows up here rather than cancelling out. */
+static int sfx_pack_build(unsigned char *pack, unsigned int pcm_length)
+{
+    unsigned char *entry;
+    int data_offset;
+    int i;
+
+    for (i = 0; i < PACK_SIZE; i++) {
+        pack[i] = 0;
+    }
+    wav_put_u16(pack + PACK_TABLE_OFFSET_FIELD, PACK_TABLE_OFFSET);
+    wav_put_u32(pack + PACK_ENTRY_COUNT_FIELD, PACK_ENTRIES);
+    entry = pack + PACK_TABLE_OFFSET + PACK_WAV_INDEX * PACK_ENTRY_SIZE;
+    strcpy((char *) entry, PACK_WAV_NAME);
+    wav_put_u32(entry + PACK_ENTRY_SIZE_FIELD, WAV_STAGE_SIZE);
+    wav_put_u32(entry + PACK_ENTRY_START_FIELD, PACK_MEMBER_START);
+
+    data_offset = stage_wav_file(1, START_WAV_HEADER_RATE, 8, pcm_length);
+    for (i = 0; i < WAV_STAGE_SIZE; i++) {
+        pack[PACK_MEMBER_START + i] = wav_stage[i];
+    }
+    return data_offset;
+}
+
+/* Both flags open, one free voice, and the pack in place as the global the
+   function reads its base from.  Answers the data chunk's offset. */
+static int stage_sfx_ready(int free_slot, unsigned char *pack,
+                           unsigned int pcm_length)
+{
+    int data_offset;
+
+    stage_slots(free_slot);
+    data_fdps_audio_sfx_driver_available_flag = 1;
+    data_fdps_audio_sfx_enabled_flag = 1;
+    data_offset = sfx_pack_build(pack, pcm_length);
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = pack;
+    return data_offset;
+}
+
+/* Where the address AIL was given lands inside the given pack, or -1 when
+   nothing was handed over at all. */
+static long sfx_played_offset(unsigned char *pack)
+{
+    unsigned int address;
+
+    address = sample_field(free_sample, SAMPLE_ADDRESS);
+    if (address == 0) {
+        return -1;
+    }
+    return (long) (address - (unsigned int) pack);
+}
+
+/* The whole path in one go: the base came out of the global, the caller's name
+   found the member, and the pointer the lookup answered with was handed on as
+   the .WAV image -- the address AIL got is the data chunk's payload inside the
+   member, so it carries both the member start and the chunk walk.  The three
+   literals are read back too: loop count 1 is PUSH 0x1 at 0002a21f, and the
+   two -1 sentinels turn into the header's own rate and the .WAV path's volume
+   of 0x3c, which is not the 0x28 the .SAF path uses -- a shared volume
+   constant would show up here.  The busy handle is checked untouched so that a
+   scan starting anywhere but slot 0 is not read as success. */
+static void play_sfx_starts_the_named_member(void)
+{
+    char query[PACK_QUERY_MAX];
+    int data_offset;
+
+    data_offset = stage_sfx_ready(3, sfx_pack, START_WAV_PCM_LENGTH);
+    strcpy(query, PACK_WAV_QUERY);
+    fdps_play_sfx(query);
+
+    CHECK_EQ(sfx_played_offset(sfx_pack),
+             PACK_MEMBER_START + data_offset + WAV_CHUNK_HEADER_SIZE);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LENGTH), START_WAV_PCM_LENGTH);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), START_WAV_HEADER_RATE);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LOOP_COUNT), 1);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_VOLUME), START_WAV_DEFAULT_VOLUME);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_STATUS), STATUS_PLAYING);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_ADDRESS), 0);
+}
+
+/* The name is the caller's own buffer all the way down: the lookup folds it in
+   place, so a mixed-case spelling finds the upper-case member and the caller's
+   string is upper case afterwards.  A copy taken anywhere on the way would
+   leave the buffer as it was and the game's "File not found" paths with it. */
+static void play_sfx_folds_the_callers_name_in_place(void)
+{
+    char query[PACK_QUERY_MAX];
+
+    stage_sfx_ready(0, sfx_pack, START_WAV_PCM_LENGTH);
+    strcpy(query, PACK_WAV_QUERY);
+    fdps_play_sfx(query);
+    CHECK_EQ(strcmp(query, PACK_WAV_NAME), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_STATUS), STATUS_PLAYING);
+}
+
+/* A miss is silence and nothing else: JZ over the play at 0002a219.  Rate zero
+   is what says no AIL call ran at all -- AIL_init_sample would have left
+   0x2b11 there -- and the free handle is still in the state the fixture put it
+   in.  The name is still folded, because the fold happens inside the lookup. */
+static void play_sfx_ignores_a_name_the_pack_does_not_hold(void)
+{
+    char query[PACK_QUERY_MAX];
+
+    stage_sfx_ready(0, sfx_pack, START_WAV_PCM_LENGTH);
+    strcpy(query, PACK_MISSING_QUERY);
+    fdps_play_sfx(query);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_ADDRESS), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LENGTH), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_STATUS), STATUS_DONE);
+    CHECK_EQ(strcmp(query, "NOSUCH.WAV"), 0);
+}
+
+/* The base is loaded from the global on the call, PUSH dword ptr [0x000643a0],
+   so the same name plays out of whichever pack the pointer names.  Both the
+   address and the length move with the pack: an address folded to a fixed
+   place would still land in the first one. */
+static void play_sfx_reads_the_pack_base_from_the_global(void)
+{
+    char query[PACK_QUERY_MAX];
+    int data_offset;
+
+    data_offset = stage_sfx_ready(0, sfx_pack, START_WAV_PCM_LENGTH);
+    strcpy(query, PACK_WAV_QUERY);
+    fdps_play_sfx(query);
+    CHECK_EQ(sfx_played_offset(sfx_pack),
+             PACK_MEMBER_START + data_offset + WAV_CHUNK_HEADER_SIZE);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LENGTH), START_WAV_PCM_LENGTH);
+
+    data_offset = stage_sfx_ready(0, sfx_pack_alt, PACK_ALT_PCM_LENGTH);
+    strcpy(query, PACK_WAV_QUERY);
+    fdps_play_sfx(query);
+    CHECK_EQ(sfx_played_offset(sfx_pack_alt),
+             PACK_MEMBER_START + data_offset + WAV_CHUNK_HEADER_SIZE);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_LENGTH), PACK_ALT_PCM_LENGTH);
+}
+
+/* The lookup is unconditional -- the CALL at 0002a20a is the first thing the
+   body does -- so with sound switched off the container is still searched and
+   the caller's name still comes back folded, while nothing is played.  A guard
+   added ahead of the lookup would leave the buffer mixed case. */
+static void play_sfx_looks_the_name_up_before_the_sound_flags(void)
+{
+    char query[PACK_QUERY_MAX];
+
+    stage_sfx_ready(0, sfx_pack, START_WAV_PCM_LENGTH);
+    data_fdps_audio_sfx_enabled_flag = 0;
+    strcpy(query, PACK_WAV_QUERY);
+    fdps_play_sfx(query);
+    CHECK_EQ(strcmp(query, PACK_WAV_NAME), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_ADDRESS), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_RATE), 0);
+    CHECK_EQ(sample_field(free_sample, SAMPLE_STATUS), STATUS_DONE);
+}
+
+/* With every voice busy the effect is dropped by the player, not by anything
+   here: the function has no scan and no guard of its own, and the busy handle
+   is left exactly as it stands. */
+static void play_sfx_with_every_voice_busy_touches_nothing(void)
+{
+    char query[PACK_QUERY_MAX];
+
+    stage_sfx_ready(-1, sfx_pack, START_WAV_PCM_LENGTH);
+    strcpy(query, PACK_WAV_QUERY);
+    fdps_play_sfx(query);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_ADDRESS), 0);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_LENGTH), 0);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_RATE), 0);
+    CHECK_EQ(sample_field(busy_sample, SAMPLE_STATUS), STATUS_PLAYING);
+}
+
 void run_audio_tests(void)
 {
     RUN_TEST(the_fixture_looks_like_a_handle_to_ail);
@@ -2321,4 +2551,10 @@ void run_audio_tests(void)
     RUN_TEST(start_wav_pcm_address_follows_the_data_chunk);
     RUN_TEST(start_wav_plays_a_buffer_that_is_not_a_wav_at_all);
     RUN_TEST(start_wav_answers_the_slot_the_caller_can_wait_on);
+    RUN_TEST(play_sfx_starts_the_named_member);
+    RUN_TEST(play_sfx_folds_the_callers_name_in_place);
+    RUN_TEST(play_sfx_ignores_a_name_the_pack_does_not_hold);
+    RUN_TEST(play_sfx_reads_the_pack_base_from_the_global);
+    RUN_TEST(play_sfx_looks_the_name_up_before_the_sound_flags);
+    RUN_TEST(play_sfx_with_every_voice_busy_touches_nothing);
 }

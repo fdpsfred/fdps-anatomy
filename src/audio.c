@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include "ailv3.h"
 #include "gamedata.h"
+#include "vfs.h"
 #include "audio.h"
 
 /* Sound is section 3 of a .SAF, so its descriptor is the last of the four
@@ -718,4 +719,55 @@ int fdps_audio_start_wav(void *wav_data, int loop_count, int playback_rate,
                               SFX_WAV_SAMPLE_VOLUME);
     }
     return slot;
+}
+
+/* 0002a1f0.  The whole of the game's "play that sound" entry point, and the
+   only reader of the BaseWav.vfs image besides the loader that fills the
+   pointer and the shutdown that frees it: one lookup, one NULL test, one call.
+
+   The frame is the plain -od one, PUSH EBX/ESI/EDI/EBP / MOV EBP,ESP / SUB
+   ESP,0x8, so the single argument sits at [EBP+0x14]; all 49 call sites push
+   one pointer and follow the CALL with ADD ESP,0x4, so the caller clears it.
+   Nothing is returned -- EAX on exit is whatever the last call left there --
+   and every call site drops it.
+
+   The two stack dwords are the member pointer at [EBP-0x4] and the member's
+   byte count at [EBP-0x8].  The count exists only because the lookup insists
+   on somewhere to put it: no instruction in this function reads [EBP-0x8]
+   back, and fdps_audio_start_wav takes the length out of the .WAV's own data
+   chunk rather than from the container's directory.
+
+   The container base is loaded from the global every call, PUSH dword ptr
+   [0x000643a0] at 0002a204, so a name looked up before fdps_load_global_
+   resources has run is looked up through a null pointer.  Nothing here guards
+   that, and nothing needs to: the loader runs before the first effect.
+
+   The three literals handed to fdps_audio_start_wav are PUSH 0x1 for the loop
+   count at 0002a21f and PUSH -0x1 twice at 0002a21b and 0002a21d, which are
+   its rate and volume sentinels -- so a clip plays once, at the rate its own
+   header declares, at the .WAV path's fixed volume of 0x3c.  Neither -1 is a
+   pan or a slot.
+
+   A name that is not in the container is dropped in silence: TEST/JZ over the
+   call at 0002a219 and no diagnostic, no fallback and no return value to tell
+   a caller apart from one whose sound played.
+
+   The name reaches strupr inside the lookup and is upper-cased in the caller's
+   own storage (vfs.h), which is why every call site in the image passes a
+   pointer to a writable data-segment string -- "Beep.wav" at 0x61b04,
+   "Chess.wav" at 0x61550 -- and not a read-only literal
+   (rebuild_info/pitfalls.md). */
+void fdps_play_sfx(char *name)
+{
+    void *clip;
+    unsigned int clip_bytes;
+
+    clip = fdps_vfs_image_get_entry(
+        (struct fdps_vfs_image_header *) data_fdps_audio_basewav_sfx_bank_buf_ptr,
+        name, &clip_bytes);
+    if (clip != NULL) {
+        fdps_audio_start_wav(clip, SFX_SAMPLE_LOOP_COUNT,
+                             SFX_WAV_RATE_FROM_HEADER,
+                             SFX_WAV_VOLUME_FROM_DEFAULT);
+    }
 }

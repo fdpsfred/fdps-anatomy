@@ -271,4 +271,24 @@ extern int fdps_audio_start_wav(void *wav_data, int loop_count,
                                 int playback_rate, int volume);
 #pragma aux fdps_audio_start_wav "*" parm caller [];
 
+/* Plays the sound effect stored under `name` in the loaded BaseWav.vfs sound
+   pack, once, at the rate its own .WAV header declares and at the .WAV path's
+   fixed volume.  This is what the rest of the game calls -- 49 call sites, in
+   every menu, shop, battle and map subsystem -- and the only thing any of them
+   passes is the member's name.
+
+   The pack is data_fdps_audio_basewav_sfx_bank_buf_ptr, read fresh on every
+   call, and the member is found by fdps_vfs_image_get_entry, so a name the
+   pack does not hold plays nothing at all: there is no diagnostic, no
+   fallback, and no way for the caller to tell that from a sound that played.
+   The same silence covers sound effects switched off, no DIG driver and all
+   eight voices busy, which fdps_audio_start_wav answers for.
+
+   `name` must live in writable storage and it does not survive the call
+   unchanged: the lookup upper-cases the caller's own buffer in place
+   (vfs.h, rebuild_info/pitfalls.md).  A name whose member is stored under
+   anything but an upper-case name can never be found. */
+extern void fdps_play_sfx(char *name);
+#pragma aux fdps_play_sfx "*" parm caller [];
+
 #endif

@@ -1197,6 +1197,14 @@
       "status": "committed",
       "emitted_against": "0xad",
       "rounds": 0
+    },
+    "0002a1f0": {
+      "name": "fdps_play_sfx",
+      "target": "audio.c",
+      "body_size": "0x44",
+      "status": "committed",
+      "emitted_against": "0x44",
+      "rounds": 0
     }
   }
 }

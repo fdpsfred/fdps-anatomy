@@ -232,6 +232,20 @@ extern volatile unsigned int data_fdps_timer_tick_counter;
    data_fdps_audio_sfx_driver_available_flag, in audio.h. */
 extern unsigned char data_fdps_audio_sfx_enabled_flag;
 
+/* 000643a0.  BaseWav.vfs, the sound-effect pack, held whole in one heap block:
+   header, directory and every member's .WAV bytes in the one image.
+   fdps_load_global_resources loads it at startup -- the address of this
+   pointer and the name "BaseWav.vfs" at 0x61d40 go to the loader together at
+   00029b0d -- and fdps_shutdown_free_resources frees it at 00029468.  Null
+   before the loader has run, and not cleared by the free.
+
+   fdps_play_sfx is the only reader: it takes the base from here on every call
+   and hands it to fdps_vfs_image_get_entry, so the block is addressed as a
+   resident container image and never as a handle.  Typed as a byte pointer
+   like the other resource blocks, and cast to the container header at the one
+   use. */
+extern unsigned char *data_fdps_audio_basewav_sfx_bank_buf_ptr;
+
 /* 00063fd0..00063ff0.  The nine static game data tables, each a heap block
    holding one file read whole out of the VFS container.  fdps_load_data_tables
    at 00018930 fills all nine at startup -- one loader call per table, each
