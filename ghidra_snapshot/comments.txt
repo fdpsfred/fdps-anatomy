@@ -11659,7 +11659,7 @@ Returns:
 Pool: fdps  [slot of the game's per-chapter handler table at 0006028c; its one callee reaches fdps_get_unit_record and it writes the game's battle-end global, and no Function ID candidate exists in either the Watcom or the ailv3 set]
 
 Rebuild note:
-The handler writes DAT_00069da0 = 1 unconditionally once unit 3 is retired, without the "only while the code is still 0" guard that the shared checker at 0003a2e0 puts around its own writes. Adding that guard by analogy -- the obvious defensive rewrite -- changes behaviour: in the original a defeat detected on the same action that produced a victory overwrites the 2 with a 1, and the player gets a Game Over where the guarded version would clear the chapter.
+The handler writes DAT_00069da0 = 1 unconditionally once unit 3 is retired, without the "only while the code is still 0" guard that the shared checker at 0003a2e0 puts around its own writes. Adding that guard by analogy -- the obvious defensive rewrite -- changes behaviour: in the original a defeat detected on the same action that produced a victory overwrites the 2 with a 1, and the player gets a Game Over where the guarded version would clear the chapter. Note also that no handler reachable during chapter 22 calls 0003a2e0 -- this function is the sole entry for slot 21 and it does not forward there -- so the 0x15 arm of that function's CMP dword ptr [DAT_00069cf4],0x15 at 0003a35f is unreachable, and chapter 22's entire defeat rule is this handler's own store rather than two independent defeat tests.
 
 === 0003b299 [EOL]
 Alignment padding: 6-byte lea nop plus 0x90, aligning FUN_0003b2a0 to 0x10.

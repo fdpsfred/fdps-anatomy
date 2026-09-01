@@ -1041,6 +1041,186 @@ static void chapter_21_an_open_battle_stays_open(void)
     CHECK_EQ(end_code(), 0);
 }
 
+/* --------------------------------------------------------------------------
+ * Chapter 22, 巫湯婆婆 -- fdps_chapter_22_post_action at 0003b270.
+ *
+ * The odd one out in this file: PUSH 0x3 / CALL 0x000109b0 / ADD ESP,0x4 at
+ * 0003b27c..0003b283, TEST EAX,EAX / JZ 0003b294 at 0003b286 and MOV dword
+ * ptr [0x00069da0],0x1 at 0003b28a are the entire body.  There is no CALL
+ * 0x0003a2e0, so the shared default end test never runs and the sweep for a
+ * live enemy that every other handler here inherits is simply absent.
+ *
+ * That absence is what most of the cases below pin, because it is the one
+ * thing a plausible wrong emit would restore: the guide gives 第22章 巫湯婆婆
+ * 勝利條件 擊倒巫湯婆婆 and 失敗條件 法蓮娜死亡, so the clear belongs to the
+ * scripted boss-defeat event at 000388b0 and never to this handler, while the
+ * defeat is the store at 0003b28a and nothing else.
+ *
+ * Unit slot 3 is 法蓮娜 for the same reason as in chapter 17: unit slot i is
+ * roster slot i and the roster is in join order.  Chapter 22 deploys
+ * 蘭迪斯以外的所有人, so slot 0 is not on this map, which is why the handler
+ * names 3 rather than inheriting the shared test's usual 0.
+ *
+ * The chapter id staged below is 21, the 0-based id whose table slot -- the
+ * dword at 000602e0, twenty-one entries into the table based at 0006028c --
+ * holds 0003b270.  Nothing in the body reads it, and the last case here
+ * asserts exactly that.
+ * ------------------------------------------------------------------------ */
+
+/* Chapter 22 is chapter id 21 (0x15). */
+#define CHAPTER_22_ID 21
+
+static void stage22(int live_unit_count, int battle_end_code)
+{
+    stage(live_unit_count, battle_end_code);
+    data_fdps_chapter_current_chapter_id = CHAPTER_22_ID;
+}
+
+/* 失敗條件：法蓮娜死亡.  A retired slot 3 puts a 1 in the code: the TEST/JZ at
+   0003b286 falls through and 0003b28a stores it. */
+static void chapter_22_a_retired_farlena_is_a_defeat(void)
+{
+    stage22(4, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(2, SIDE_ENEMY, 0);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, FLAG_RETIRED);
+    fdps_chapter_22_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The case that separates this handler from every other one in the file: with
+   every enemy retired and slot 3 standing, the code stays 0.  A body that
+   forwarded to the shared test at 0003a2e0 would answer 2 here, because that
+   test's sweep is precisely 敵人全滅 -- and chapter 22 is not won that way. */
+static void chapter_22_wiping_the_enemy_out_does_not_clear_the_chapter(void)
+{
+    stage22(4, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    fdps_chapter_22_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* The ordinary path: a live enemy, a standing slot 3, nothing decided.  The JZ
+   at 0003b286 is taken and the body writes nothing at all.  It is called twice
+   because the dispatchers run it after every unit action, and a handler that
+   only behaved on its first call would still pass every other case here. */
+static void chapter_22_an_open_battle_stays_open(void)
+{
+    stage22(4, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, 0);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    fdps_chapter_22_post_action();
+    CHECK_EQ(end_code(), 0);
+    fdps_chapter_22_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* A retired slot 0 is not this chapter's defeat.  蘭迪斯 is not even deployed
+   here -- 己方：蘭迪斯以外的所有人 -- and the PUSH is 0x3, not 0x0, so a body
+   that carried the shared test's usual index would answer 1 below. */
+static void chapter_22_a_retired_slot_0_is_not_a_defeat(void)
+{
+    stage22(4, 0);
+    stage_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(2, SIDE_ENEMY, 0);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    fdps_chapter_22_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* No slot but 3 ends this battle, and the sweep also catches an argument that
+   drifted by one either way.  Every other slot is retired in turn with slot 3
+   left standing, and the code has to stay 0 each time. */
+static void chapter_22_no_slot_but_farlena_ends_the_battle(void)
+{
+    int retired_slot;
+    int other_slot;
+
+    for (retired_slot = 0; retired_slot < STAGE_UNITS; retired_slot++) {
+        if (retired_slot == FARLENA_SLOT) {
+            continue;
+        }
+        stage22(STAGE_UNITS, 0);
+        for (other_slot = 0; other_slot < STAGE_UNITS; other_slot++) {
+            stage_unit(other_slot, SIDE_PLAYER, 0);
+        }
+        stage_units[retired_slot].flags = FLAG_RETIRED;
+        fdps_chapter_22_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
+/* The store consults nothing, so a clear the boss-defeat event already
+   recorded loses to a defeat detected on the same action.  Gating the store on
+   the code still being 0 -- the guard the shared test puts on its own writes --
+   would leave the 2 standing here, and the player would clear a chapter the
+   original ends with a Game Over. */
+static void chapter_22_a_recorded_clear_still_loses_to_a_retired_farlena(void)
+{
+    stage22(4, 2);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(2, SIDE_ENEMY, 0);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, FLAG_RETIRED);
+    fdps_chapter_22_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* With slot 3 standing there is no store on any path, so a verdict already in
+   the code survives whatever else the map looks like -- including the wiped
+   out enemy side that would have made the shared test recompute a 2. */
+static void chapter_22_a_recorded_verdict_survives_a_standing_farlena(void)
+{
+    stage22(4, 2);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    fdps_chapter_22_post_action();
+    CHECK_EQ(end_code(), 2);
+
+    stage22(4, 1);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(2, SIDE_ENEMY, 0);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    fdps_chapter_22_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The body contains no CMP against data_fdps_chapter_current_chapter_id, so
+   the answer cannot depend on it.  Staging chapter 17's id and then chapter
+   21's -- the two ids either side of the shared test's chapter comparison --
+   changes nothing, which is the observable difference between this handler and
+   one that reached the shared test. */
+static void chapter_22_the_chapter_id_is_never_consulted(void)
+{
+    stage22(4, 0);
+    data_fdps_chapter_current_chapter_id = CHAPTER_17_ID;
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, FLAG_RETIRED);
+    fdps_chapter_22_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage22(4, 0);
+    data_fdps_chapter_current_chapter_id = CHAPTER_21_ID;
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    fdps_chapter_22_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
 void run_chpost2_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -1084,4 +1264,12 @@ void run_chpost2_tests(void)
     RUN_TEST(chapter_21_no_other_slot_ends_the_battle);
     RUN_TEST(chapter_21_a_recorded_verdict_is_left_alone);
     RUN_TEST(chapter_21_an_open_battle_stays_open);
+    RUN_TEST(chapter_22_a_retired_farlena_is_a_defeat);
+    RUN_TEST(chapter_22_wiping_the_enemy_out_does_not_clear_the_chapter);
+    RUN_TEST(chapter_22_an_open_battle_stays_open);
+    RUN_TEST(chapter_22_a_retired_slot_0_is_not_a_defeat);
+    RUN_TEST(chapter_22_no_slot_but_farlena_ends_the_battle);
+    RUN_TEST(chapter_22_a_recorded_clear_still_loses_to_a_retired_farlena);
+    RUN_TEST(chapter_22_a_recorded_verdict_survives_a_standing_farlena);
+    RUN_TEST(chapter_22_the_chapter_id_is_never_consulted);
 }

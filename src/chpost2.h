@@ -173,4 +173,30 @@ extern void fdps_chapter_20_post_action(void);
 extern void fdps_chapter_21_post_action(void);
 #pragma aux fdps_chapter_21_post_action "*" parm caller [];
 
+/* Chapter 22's post-action test: one defeat test of its own and no shared test
+   at all.  Takes nothing, returns nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h) -- a 1 when unit
+   slot 3 has retired, and whatever the code already held when it has not.
+
+   This is the only handler in this file that does not forward to
+   fdps_battle_check_default_end_conditions (btlend.h), so it declares no
+   victory: chapter 22's 勝利條件 is 擊倒巫湯婆婆, one named boss rather than
+   敵人全滅, and the clear is the scripted boss-defeat event's to write.  A
+   forward added here would clear the chapter as soon as the last minion fell.
+
+   The defeat store is unguarded, so it outranks a clear the boss event
+   recorded earlier in the same action: the code is written, never read.
+
+   Unit slot 3 is 法蓮娜, the chapter's 失敗條件 法蓮娜死亡.  Chapter 22 deploys
+   蘭迪斯以外的所有人, so the slot 0 the shared test would have watched is not
+   on the map at all.
+
+   Chapter 22's id is 0x15, the second of the two the shared test singles out,
+   but because nothing calls that test during this chapter its 0x15 arm never
+   runs; the whole defeat rule is this handler's own store.
+
+   Table slot 21. */
+extern void fdps_chapter_22_post_action(void);
+#pragma aux fdps_chapter_22_post_action "*" parm caller [];
+
 #endif

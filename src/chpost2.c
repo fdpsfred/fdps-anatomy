@@ -288,3 +288,66 @@ void fdps_chapter_21_post_action(void)
 {
     fdps_battle_check_default_end_conditions();
 }
+
+/* 0003b270.  One CALL, one branch, one store -- and no forward to the shared
+   end test at all, which is what makes this handler different from every one
+   above it in this file.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003b270..0003b276 -- and
+   nothing in it is ever read, so there is no local to name.  The epilogue is
+   the four bare POPs at 0003b294..0003b297 with no MOV ESP,EBP in front of
+   them, which is what an empty local area leaves behind, and the RET at
+   0003b298 carries no immediate.
+
+   PUSH 0x3 / CALL 0x000109b0 / ADD ESP,0x4 at 0003b27c..0003b283 is
+   fdps_unit_is_retired(3) with the caller clearing its one argument, and its
+   EAX is used at once: TEST EAX,EAX / JZ 0003b294 at 0003b286 is the only
+   branch in the body, skipping the MOV dword ptr [0x00069da0],0x1 at
+   0003b28a.  That store is the whole of the rest of the function -- the code
+   is never read before it is written and no other value is ever stored -- so
+   the handler can turn the code into a 1 and can do nothing else with it.
+
+   There is no CALL 0x0003a2e0 here, and that is deliberate rather than a
+   missing line.  The shared test declares its victory by sweeping the unit
+   list for a live enemy, and chapter 22 is not won that way: the guide gives
+   第22章 巫湯婆婆 勝利條件 擊倒巫湯婆婆, one named boss rather than 敵人全滅,
+   and the clear is written by the scripted fdps_chapter_22_event_boss_defeat
+   at 000388b0, whose MOV dword ptr [0x00069da0],0x2 at 00038936 sits on every
+   path out of that handler.  Adding the forward here would let the chapter
+   clear itself the moment the last minion fell, with the boss still standing.
+
+   The store carries no "only while the code is still 0" guard, unlike the two
+   the shared test puts around its own writes, and copying that guard here by
+   analogy changes behaviour: a defeat that lands on the same action as the
+   scripted boss-defeat clear overwrites the 2 with a 1 in the original, and
+   the player gets a Game Over where the guarded version would clear the
+   chapter.  The value read back is the value this handler last wrote.
+
+   Unit index 3 is 法蓮娜, and it is a position in this map's unit array rather
+   than a character id: unit slot i is roster slot i, the roster is in join
+   order and is never permuted, so slot 3 is hers from chapter 4 on regardless
+   of who the chapter deploys.  Chapter 22's 己方 is 蘭迪斯以外的所有人 and its
+   失敗條件 is 法蓮娜死亡, so slot 0 -- the slot the shared test watches in
+   every chapter but 0x10 and 0x15 -- belongs to a character who is not even on
+   this map, and carrying the shared test's usual index here would watch him
+   instead of her.
+
+   One consequence of there being no forward is worth recording: chapter 22's
+   id, 0x15, is the second of the two the shared test singles out at its own
+   CMP dword ptr [0x00069cf4],0x15, but that arm never runs.  The shared test
+   has exactly twenty-one xrefs in the image, all of them direct calls from
+   post-action handlers, and this handler is not one of them -- and the table
+   at 0006028c reaches this chapter through slot 21 alone.  So the substitution
+   the shared test makes for 0x15 is unreachable, and the whole of chapter 22's
+   defeat rule is the store below.
+
+   The address reaches the dispatchers only as the dword at 000602e0,
+   twenty-one entries into the table based at 0006028c, which is why the
+   function has no static caller: slot 21 is chapter 22. */
+void fdps_chapter_22_post_action(void)
+{
+    if (fdps_unit_is_retired(3) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+}
