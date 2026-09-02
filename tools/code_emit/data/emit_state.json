@@ -1950,6 +1950,14 @@
       "status": "committed",
       "emitted_against": "0x9e",
       "rounds": 0
+    },
+    "00056dc9": {
+      "name": "fdps_rle_skip_row",
+      "target": "rle.c",
+      "body_size": "0x61",
+      "status": "committed",
+      "rounds": 1,
+      "emitted_against": "0x61"
     }
   }
 }

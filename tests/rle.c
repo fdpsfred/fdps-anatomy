@@ -1,13 +1,15 @@
 /* tests/rle.c -- cover for src/rle.c.
  *
- * Every expected value is read off the assembly at 00056a0d: the op selector
- * is SHL CL,1 / JC taken twice, the length is SHR CL,2 / INC CL, the row ends
- * on OR BX,BX / JNZ and the row advance is the ADD EDI,EDX at 00056a81.  None
- * of them is taken from the emitted C.
+ * Every expected value is read off the assembly at 00056a0d and 00056dc9: the
+ * op selector is SHL CL,1 / JC taken twice, the length is SHR CL,2 / INC CL,
+ * the row ends on OR BX,BX / JNZ and the row advance is the ADD EDI,EDX at
+ * 00056a81.  None of them is taken from the emitted C.
  *
- * The destination is always pre-filled with 0x5a, so a byte the kernel is
- * meant to leave alone can be told apart from one it wrote.  That sentinel is
- * what the op 01 and op 11 cases actually test.
+ * For the drawing kernel the destination is always pre-filled with 0x5a, so a
+ * byte it is meant to leave alone can be told apart from one it wrote.  That
+ * sentinel is what the op 01 and op 11 cases actually test.  The row-skipping
+ * routine draws nothing, so its cases assert how far the stream cursor moved
+ * instead.
  */
 #include "testharn.h"
 #include "gamedata.h"
@@ -222,6 +224,206 @@ static void rle_negative_row_advance_walks_upward(void)
     CHECK_EQ(dest_surface[1], 0xbb);
 }
 
+/* --- fdps_rle_skip_row (00056dc9) -------------------------------------------
+ *
+ * The routine writes nothing, so what every case below pins is the two things
+ * it does produce: how far the stream cursor moved, and that the row ended
+ * where the width says it does.  A wrong per-op byte cost or a wrong width
+ * charge shows up as an advance that is not the expected one, because the
+ * padding after each stream is 0xc0 -- a length-1 skip -- which keeps a
+ * decoder that has not finished the row walking forward instead of running
+ * off into whatever follows.
+ *
+ * Expected advances are read off the assembly: LODSB plus INC ESI for fill
+ * (00056deb) and for stretched (00056df7), LODSB plus ADD ESI,ECX for a
+ * literal (00056e14), and LODSB alone for a skip.  The width charge is the
+ * SUB BX,CX in each arm, twice in the stretched one (00056df8, 00056dfb).
+ */
+
+/* A row-of-many-ops buffer for the two wrap cases below, which need over a
+   thousand command bytes to bring a wrapped sixteen-bit counter back to zero.
+   1026 is what the first of them uses exactly. */
+static unsigned char wrap_stream[1026];
+
+/* Op 00 (0x03, length 4): the command byte and the single pixel byte that
+   follows it, so the cursor lands two bytes on, and the run accounts for the
+   whole four-pixel row. */
+static void skip_fill_run_advances_two_bytes(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x03;
+    stream[1] = 0xaa;
+    stream[2] = 0xc0;
+    stream[3] = 0xc0;
+    data_fdps_graphics_rle_blit_src_width = 4;
+
+    CHECK_EQ((long) (fdps_rle_skip_row(stream) - stream), 2);
+}
+
+/* Op 01 (0x41, length 2): also two bytes, but the width it accounts for is
+   twice its length -- four columns, not two.  The row is four wide, so an arm
+   that subtracted the length once would leave two pixels owing and walk on
+   into the padding instead of stopping at 2. */
+static void skip_stretched_run_consumes_two_columns_per_unit(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x41;
+    stream[1] = 0x99;
+    stream[2] = 0xc0;
+    stream[3] = 0xc0;
+    data_fdps_graphics_rle_blit_src_width = 4;
+
+    CHECK_EQ((long) (fdps_rle_skip_row(stream) - stream), 2);
+}
+
+/* Op 10 (0x82, length 3): the command byte plus the three pixel bytes it
+   carries, so the cursor lands four bytes on. */
+static void skip_literal_run_advances_past_its_pixels(void)
+{
+    unsigned char stream[6];
+
+    stream[0] = 0x82;
+    stream[1] = 0x11;
+    stream[2] = 0x22;
+    stream[3] = 0x33;
+    stream[4] = 0xc0;
+    stream[5] = 0xc0;
+    data_fdps_graphics_rle_blit_src_width = 3;
+
+    CHECK_EQ((long) (fdps_rle_skip_row(stream) - stream), 4);
+}
+
+/* Op 11 (0xc1, length 2): nothing follows the command byte, so a two-pixel
+   run costs one byte. */
+static void skip_transparent_run_advances_one_byte(void)
+{
+    unsigned char stream[3];
+
+    stream[0] = 0xc1;
+    stream[1] = 0xc0;
+    stream[2] = 0xc0;
+    data_fdps_graphics_rle_blit_src_width = 2;
+
+    CHECK_EQ((long) (fdps_rle_skip_row(stream) - stream), 1);
+}
+
+/* All four ops at length 1 in one row: the widths they account for are 1, 2,
+   1 and 1, which is the five-pixel row, and the bytes they cost are 2, 2, 2
+   and 1, which is the seven-byte advance.  This is the same stream the
+   pass-through case above draws, so the two agree on where the row ends. */
+static void skip_row_walks_every_op_to_exact_width(void)
+{
+    unsigned char stream[9];
+
+    stream[0] = 0x00;
+    stream[1] = 0xa1;
+    stream[2] = 0x40;
+    stream[3] = 0xb2;
+    stream[4] = 0x80;
+    stream[5] = 0xc3;
+    stream[6] = 0xc0;
+    stream[7] = 0xc0;
+    stream[8] = 0xc0;
+    data_fdps_graphics_rle_blit_src_width = 5;
+
+    CHECK_EQ((long) (fdps_rle_skip_row(stream) - stream), 7);
+}
+
+/* SHR CL,2 / INC CL makes 0x3f a length of 64.  A row exactly 64 wide is
+   therefore one op, and a decoder that read the length as 63 would not end
+   the row here. */
+static void skip_run_length_tops_out_at_64(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x3f;
+    stream[1] = 0xcc;
+    stream[2] = 0xc0;
+    stream[3] = 0xc0;
+    data_fdps_graphics_rle_blit_src_width = 64;
+
+    CHECK_EQ((long) (fdps_rle_skip_row(stream) - stream), 2);
+}
+
+/* The widest literal, 0xbf: 64 pixel bytes after the command byte, so the
+   cursor lands 65 bytes on.  This is the arm that adds the length to the
+   pointer (ADD ESI,ECX at 00056e14) rather than stepping it by a constant,
+   and 64 is the largest step it can take. */
+static void skip_literal_run_at_max_length_advances_65(void)
+{
+    static unsigned char stream[68];
+    int byte_index;
+
+    for (byte_index = 0; byte_index < (int) sizeof stream; byte_index++) {
+        stream[byte_index] = 0xc0;
+    }
+    stream[0] = 0xbf;
+    data_fdps_graphics_rle_blit_src_width = 64;
+
+    CHECK_EQ((long) (fdps_rle_skip_row(stream) - stream), 65);
+}
+
+/* Neither global is written: the width is only read (MOV BX,[0x00070024]) and
+   there is no DEC word ptr [0x00070022] anywhere in the body, which is what
+   separates this from the drawing kernels -- the caller keeps its own row
+   count across all the rows this one walks. */
+static void skip_row_leaves_the_blit_globals_alone(void)
+{
+    unsigned char stream[6];
+
+    stream[0] = 0x82;
+    stream[1] = 0x11;
+    stream[2] = 0x22;
+    stream[3] = 0x33;
+    stream[4] = 0xc0;
+    stream[5] = 0xc0;
+    data_fdps_graphics_rle_blit_src_width = 3;
+    data_fdps_graphics_rle_blit_remaining_rows = 0x1234;
+
+    CHECK_EQ((long) (fdps_rle_skip_row(stream) - stream), 4);
+    CHECK_EQ(data_fdps_graphics_rle_blit_src_width, 3);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0x1234);
+}
+
+/* The exact-zero terminator, which is the whole reason the counter is an
+   unsigned short.  A length-4 fill on a two-pixel row leaves 2 - 4 = 0xfffe
+   rather than ending the row, and the decoder goes on until some later run
+   lands the counter on zero: 1023 length-64 skips take it to 62 and one
+   length-62 skip (0xc0 | 61) finishes it.  Under a `width <= 0` terminator
+   the advance would be 2. */
+static void skip_overshooting_run_wraps_the_width_counter(void)
+{
+    int op_index;
+
+    wrap_stream[0] = 0x03;
+    wrap_stream[1] = 0xaa;
+    for (op_index = 0; op_index < 1023; op_index++) {
+        wrap_stream[2 + op_index] = 0xff;
+    }
+    wrap_stream[1025] = 0xfd;
+    data_fdps_graphics_rle_blit_src_width = 2;
+
+    CHECK_EQ((long) (fdps_rle_skip_row(wrap_stream) - wrap_stream), 1026);
+}
+
+/* The terminator is also at the bottom of the loop -- the first op is decoded
+   before the width is ever tested -- so a width of zero is a row of 0x10000
+   pixels, not an empty one.  1024 length-64 skips bring the counter back to
+   zero. */
+static void skip_zero_width_walks_a_full_row(void)
+{
+    int op_index;
+
+    for (op_index = 0; op_index < 1024; op_index++) {
+        wrap_stream[op_index] = 0xff;
+    }
+    data_fdps_graphics_rle_blit_src_width = 0;
+
+    CHECK_EQ((long) (fdps_rle_skip_row(wrap_stream) - wrap_stream), 1024);
+}
+
 void run_rle_tests(void)
 {
     RUN_TEST(rle_fill_run_writes_len_bytes);
@@ -233,4 +435,14 @@ void run_rle_tests(void)
     RUN_TEST(rle_run_length_tops_out_at_64);
     RUN_TEST(rle_second_row_starts_after_row_advance);
     RUN_TEST(rle_negative_row_advance_walks_upward);
+    RUN_TEST(skip_fill_run_advances_two_bytes);
+    RUN_TEST(skip_stretched_run_consumes_two_columns_per_unit);
+    RUN_TEST(skip_literal_run_advances_past_its_pixels);
+    RUN_TEST(skip_transparent_run_advances_one_byte);
+    RUN_TEST(skip_row_walks_every_op_to_exact_width);
+    RUN_TEST(skip_run_length_tops_out_at_64);
+    RUN_TEST(skip_literal_run_at_max_length_advances_65);
+    RUN_TEST(skip_row_leaves_the_blit_globals_alone);
+    RUN_TEST(skip_overshooting_run_wraps_the_width_counter);
+    RUN_TEST(skip_zero_width_walks_a_full_row);
 }

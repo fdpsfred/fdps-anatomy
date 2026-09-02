@@ -20802,7 +20802,7 @@ Returns:
 Pool: fdps  [no Function ID hit in any library; shares the game's blit parameter globals at 0x00070022/0x00070024 with its two callers, and no runtime or Miles AIL routine takes a program global as an implicit argument]
 
 Rebuild note:
-This cannot be rewritten as the C function its prototype suggests: its argument and its result are both ESI, and it destroys ESI, BX and CL, which every Watcom convention requires a callee to preserve -- the callers depend on that, reloading BX at the top of each row and taking the advanced ESI as the return value. Give it a real C signature such as void fdps_rle_skip_row(unsigned char **p) and the two hand-written assembly blitters that call it stop working, so it has to stay in the assembly module with them.
+Register contract rather than a stack one: ESI is both the argument and the result, and BX and CL are destroyed. Emitted as unsigned char *fdps_rle_skip_row(unsigned char *rle_stream), the register that carries information both ways becoming the parameter and the return value; the register destruction is a property of the contract and not of what the routine does, so it does not carry over (ADR-0001). Both callers already treat ESI that way, restoring the row start with POP ESI at 00056d84 and 000574bc and never reloading it between calls.
 
 Second, the loop ends only when the 16-bit counter reaches exactly zero; writing the obvious while (width > 0) changes behaviour on a row whose runs overshoot its width, where the original wraps BX and keeps decoding. resource_info/cel.md records the same wrap on the drawing side, where it walks off the end of the destination instead.
 
