@@ -1,11 +1,13 @@
 /* tests/rsrc.c -- cover for src/rsrc.c.
  *
- * Three subjects, each starting at its own banner below: the file opens on
+ * Four subjects, each starting at its own banner below: the file opens on
  * fdps_load_indexed_archive_entry at 00022e30, then comes
  * fdps_cache_cel_sprite_group at 00023050, which reads the real ICON.CEL
- * instead of a fixture and says there why, and last
+ * instead of a fixture and says there why, then
  * fdps_field_load_chapter_resources at 000227e0, which reads the three real
- * field containers and says there why.
+ * field containers and says there why, and last
+ * fdps_load_field_chapter_resources at 00031540, the village side's reload,
+ * which needs only FIELD.VFS and the same real sheet.
  *
  * Expected values come from the assembly at 00022e30: ADD EAX,0x6 onto LEA
  * EAX,[EAX*0x4 + 0x0] for the seek to the table, PUSH 0x8 / PUSH 0x1 for the
@@ -35,6 +37,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <malloc.h>
 #include "testharn.h"
 #include "fdpstype.h"
@@ -1076,6 +1079,408 @@ static void field_frees_the_previous_chapters_layers(void)
     CHECK_EQ(_heapchk(), _HEAPOK);
 }
 
+
+/* ---------------------------------------------------------------------------
+   fdps_load_field_chapter_resources at 00031540.
+
+   The village side's reload.  It needs only one container, FIELD.VFS, and the
+   real ICON.CEL, both already staged by tests/gamefile.lst, and it cannot be
+   stood in for any more than the field loader above can: it takes no argument,
+   formats both member names out of a global, and a member it cannot find sends
+   fdps_vfs_load_entry into fdps_wait_any_key and then exit(1).  So every case
+   here skips itself unless both inputs are next to the executable.
+
+   The roster it walks IS supplied, because the roster block is a global
+   pointer and nothing here allocates it: the fixture below points it at a
+   static array of four records whose portrait_id, side and char_id are all
+   different, so a loop that read the record's neighbouring bytes instead of
+   +0x7 caches a different set of groups and the cache keys say so.
+
+   Every expected number below is a byte of a shipped resource, read out of
+   FIELD.VFS with tools/vfs_dump and quoted here as a literal, or the layout
+   the assembly at 00031540 imposes on it:
+
+     FDETXT01.TXT opens with the bytes 32 0 40 0 and FDETXT06.TXT with
+       28 0 36 0, so those four bytes say which member arrived
+     SHOP00.DAT is 36 bytes opening 0 1 2 3 4 5 6 100 200, SHOP05.DAT opens
+       180 181 255 ... with 3 and 4 at +12 and +13, and SHOP01.DAT -- the
+       member a chapter number wrongly incremented would have named -- opens
+       180 222
+     the record field the sprite loop reads is portrait_id at +0x7 of struct
+       fdps_unit_record, widened AND EAX,0xff at 000316d3
+     the roster stride is 0x50, IMUL EAX,dword ptr [EBP + -0x8],0x50 at
+       000316c4
+
+   The heap-block deltas are read off the same assembly rather than off the
+   emitted C.  One call from a clean state takes two blocks in (one per
+   fdps_vfs_load_entry), one for the sprite cache it seeds, and gives back
+   whatever the guarded frees release.  There is no free of the shop pointer
+   anywhere in the body, which is why a second call comes out one block up. */
+
+#define VILLAGE_ROSTER_SLOTS 4
+
+/* Four groups well apart from each other, one of them repeated, so the cache
+   has to dedupe: three distinct keys out of four members.  All four are inside
+   ICON.CEL's 160 groups. */
+#define VILLAGE_PORTRAIT_0 0
+#define VILLAGE_PORTRAIT_1 5
+#define VILLAGE_PORTRAIT_2 5
+#define VILLAGE_PORTRAIT_3 37
+
+/* A group nothing in the fixture roster asks for, seeded into the cache before
+   a call so that finding it gone proves the cache was emptied. */
+#define VILLAGE_STALE_GROUP 60
+
+/* The two chapters the cases load. */
+#define VILLAGE_CH_A 0
+#define VILLAGE_CH_B 5
+
+/* What chapter 0 and chapter 5 put in the two loaded blocks. */
+#define CH0_TEXT_BYTE_0 32
+#define CH0_TEXT_BYTE_2 40
+#define CH5_TEXT_BYTE_0 28
+#define CH5_TEXT_BYTE_2 36
+
+#define CH0_SHOP_BYTE_0 0
+#define CH0_SHOP_BYTE_1 1
+#define CH0_SHOP_BYTE_7 100
+#define CH0_SHOP_BYTE_8 200
+#define CH5_SHOP_BYTE_0 180
+#define CH5_SHOP_BYTE_1 181
+#define CH5_SHOP_BYTE_12 3
+#define CH5_SHOP_BYTE_13 4
+
+/* Comfortably more calls than the CRT has file handles for (_NFILES is 20), so
+   a body that leaked its ICON.CEL handle runs out during the loop. */
+#define VILLAGE_REPEATED_CALLS 24
+
+static struct fdps_unit_record village_roster[VILLAGE_ROSTER_SLOTS];
+static int village_ready = 0;
+static int village_checked = 0;
+
+static void ensure_village_inputs(void)
+{
+    if (village_checked) {
+        return;
+    }
+    village_checked = 1;
+    ensure_cel_sheet();
+    if (cel_ready && container_present(FIELD_CONTAINER)) {
+        village_ready = 1;
+    }
+}
+
+/* The party the loader walks.  side at +0x6 and char_id at +0x8 carry values
+   that are neither each other nor the portrait ids, so a loop reading either
+   neighbour caches four distinct groups instead of three and keys them
+   differently. */
+static void village_stage_roster(int chapter)
+{
+    int slot;
+    static unsigned char portraits[VILLAGE_ROSTER_SLOTS] = {
+        VILLAGE_PORTRAIT_0, VILLAGE_PORTRAIT_1,
+        VILLAGE_PORTRAIT_2, VILLAGE_PORTRAIT_3
+    };
+
+    for (slot = 0; slot < VILLAGE_ROSTER_SLOTS; slot++) {
+        memset(&village_roster[slot], 0, sizeof(struct fdps_unit_record));
+        village_roster[slot].side = (unsigned char) (100 + slot * 2);
+        village_roster[slot].portrait_id = portraits[slot];
+        village_roster[slot].char_id = (unsigned char) (101 + slot * 2);
+    }
+    data_fdps_roster_array_ptr = (unsigned char *) village_roster;
+    data_fdps_roster_member_count = VILLAGE_ROSTER_SLOTS;
+    data_fdps_chapter_current_chapter_id = chapter;
+}
+
+/* Back to the state a fresh process is in.  The map unit pointer is dropped
+   and not freed, because after a call it aliases the static roster above; the
+   layer slots are nulled because the loader frees them without nulling
+   them. */
+static void village_reset(void)
+{
+    int layer;
+
+    if (data_fdps_current_chapter_text_ptr != NULL) {
+        free(data_fdps_current_chapter_text_ptr);
+        data_fdps_current_chapter_text_ptr = NULL;
+    }
+    if (data_fdps_shop_stock_table_ptr != NULL) {
+        free(data_fdps_shop_stock_table_ptr);
+        data_fdps_shop_stock_table_ptr = NULL;
+    }
+    reset_cel_cache();
+    for (layer = 0; layer < 6; layer++) {
+        data_fdps_scene_layer_tile_map_ptrs[layer] = NULL;
+        data_fdps_scene_layer_tile_sheet_ptrs[layer] = NULL;
+        data_fdps_scene_layer_tile_attr_ptr[layer] = NULL;
+    }
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_map_unit_count = 0;
+    data_fdps_roster_array_ptr = NULL;
+    data_fdps_roster_member_count = 0;
+}
+
+/* INC EAX at 00031568 sits between the chapter counter and the sprintf, and it
+   is on this name only.  Chapter 0 must therefore come back holding
+   FDETXT01.TXT and chapter 5 FDETXT06.TXT; the members either side of those
+   open with different bytes. */
+static void village_takes_the_chapter_text_one_number_up(void)
+{
+    ensure_village_inputs();
+    CHECK_EQ(village_ready, 1);
+    if (!village_ready) {
+        return;
+    }
+    village_reset();
+    village_stage_roster(VILLAGE_CH_A);
+    fdps_load_field_chapter_resources();
+    CHECK_EQ(data_fdps_current_chapter_text_ptr[0], CH0_TEXT_BYTE_0);
+    CHECK_EQ(data_fdps_current_chapter_text_ptr[1], 0);
+    CHECK_EQ(data_fdps_current_chapter_text_ptr[2], CH0_TEXT_BYTE_2);
+    CHECK_EQ(data_fdps_current_chapter_text_ptr[3], 0);
+
+    village_stage_roster(VILLAGE_CH_B);
+    fdps_load_field_chapter_resources();
+    CHECK_EQ(data_fdps_current_chapter_text_ptr[0], CH5_TEXT_BYTE_0);
+    CHECK_EQ(data_fdps_current_chapter_text_ptr[2], CH5_TEXT_BYTE_2);
+    village_reset();
+}
+
+/* PUSH dword ptr [0x00069cf4] at 00031593 with no INC in front of it: the shop
+   table takes the chapter number as it stands.  Chapter 0's SHOP00.DAT is a
+   ramp starting at 0 and chapter 0 incremented would have named SHOP01.DAT,
+   which opens 180 222 -- so the first two bytes alone separate the two
+   readings, and chapter 5 pins that the name is formatted at all. */
+static void village_takes_the_shop_table_at_the_plain_number(void)
+{
+    ensure_village_inputs();
+    CHECK_EQ(village_ready, 1);
+    if (!village_ready) {
+        return;
+    }
+    village_reset();
+    village_stage_roster(VILLAGE_CH_A);
+    fdps_load_field_chapter_resources();
+    CHECK_EQ(data_fdps_shop_stock_table_ptr[0], CH0_SHOP_BYTE_0);
+    CHECK_EQ(data_fdps_shop_stock_table_ptr[1], CH0_SHOP_BYTE_1);
+    CHECK_EQ(data_fdps_shop_stock_table_ptr[7], CH0_SHOP_BYTE_7);
+    CHECK_EQ(data_fdps_shop_stock_table_ptr[8], CH0_SHOP_BYTE_8);
+
+    village_stage_roster(VILLAGE_CH_B);
+    fdps_load_field_chapter_resources();
+    CHECK_EQ(data_fdps_shop_stock_table_ptr[0], CH5_SHOP_BYTE_0);
+    CHECK_EQ(data_fdps_shop_stock_table_ptr[1], CH5_SHOP_BYTE_1);
+    CHECK_EQ(data_fdps_shop_stock_table_ptr[12], CH5_SHOP_BYTE_12);
+    CHECK_EQ(data_fdps_shop_stock_table_ptr[13], CH5_SHOP_BYTE_13);
+    village_reset();
+}
+
+/* MOV EAX,[0x00064114] / MOV [0x00060150],EAX and MOV EAX,[0x00064108] / MOV
+   [0x00069cd8],EAX at 000315e8: the roster block itself becomes the map's unit
+   array and the count follows it.  An alias, not a copy -- the two pointers
+   have to be equal afterwards, and the old array, which was a block of its
+   own, has to have been released. */
+static void village_hands_the_roster_block_to_the_map(void)
+{
+    int before;
+    int after;
+
+    ensure_village_inputs();
+    CHECK_EQ(village_ready, 1);
+    if (!village_ready) {
+        return;
+    }
+    village_reset();
+    village_stage_roster(VILLAGE_CH_A);
+    data_fdps_map_unit_array_ptr = malloc(3 * 0x50);
+    data_fdps_map_unit_count = 3;
+
+    before = used_heap_blocks();
+    fdps_load_field_chapter_resources();
+    after = used_heap_blocks();
+
+    CHECK_EQ(data_fdps_map_unit_count, VILLAGE_ROSTER_SLOTS);
+    CHECK_EQ(data_fdps_map_unit_array_ptr == data_fdps_roster_array_ptr, 1);
+    /* Two members loaded and one cache block seeded, against the old unit
+       array released. */
+    CHECK_EQ(after - before, 2);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    village_reset();
+}
+
+/* CMP EAX,dword ptr [0x00064108] / JNZ at 000315d0 is the second half of the
+   guard, and it is the half that matters: the first call leaves the two
+   pointers equal, so the second call must NOT free what they both point at.
+   The roster here is a static array, so a free of it is a heap corruption
+   rather than a leak, which _heapchk sees.
+
+   The block count is what says the shop pointer is still not freed before it
+   is replaced: the chapter text is released and reloaded for no change, the
+   cache is released and reseeded for no change, and the one block the second
+   call adds is the shop table the first call's is lost to. */
+static void village_keeps_the_roster_block_on_a_second_call(void)
+{
+    int before;
+    int after;
+
+    ensure_village_inputs();
+    CHECK_EQ(village_ready, 1);
+    if (!village_ready) {
+        return;
+    }
+    village_reset();
+    village_stage_roster(VILLAGE_CH_A);
+    fdps_load_field_chapter_resources();
+
+    before = used_heap_blocks();
+    fdps_load_field_chapter_resources();
+    after = used_heap_blocks();
+
+    CHECK_EQ(after - before, 1);
+    CHECK_EQ(data_fdps_map_unit_array_ptr == data_fdps_roster_array_ptr, 1);
+    CHECK_EQ(data_fdps_map_unit_count, VILLAGE_ROSTER_SLOTS);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    village_reset();
+}
+
+/* The layer loop at 00031603 frees three blocks per layer against the count it
+   finds, and MOV dword ptr [0x00069cdc],0x0 at 00031662 then zeroes it: a
+   village has no tile layers and nothing here reloads them.  Two staged layers
+   are six blocks released against the two loaded and the one cache block
+   seeded, so the count moves by minus three. */
+static void village_frees_the_layer_blocks_and_zeroes_the_count(void)
+{
+    int before;
+    int after;
+    int layer;
+
+    ensure_village_inputs();
+    CHECK_EQ(village_ready, 1);
+    if (!village_ready) {
+        return;
+    }
+    village_reset();
+    village_stage_roster(VILLAGE_CH_A);
+    for (layer = 0; layer < 2; layer++) {
+        data_fdps_scene_layer_tile_map_ptrs[layer] = malloc(STAGED_BLOCK_BYTES);
+        data_fdps_scene_layer_tile_sheet_ptrs[layer] =
+            malloc(STAGED_BLOCK_BYTES);
+        data_fdps_scene_layer_tile_attr_ptr[layer] = malloc(STAGED_BLOCK_BYTES);
+    }
+    data_fdps_scene_layer_count = 2;
+
+    before = used_heap_blocks();
+    fdps_load_field_chapter_resources();
+    after = used_heap_blocks();
+
+    CHECK_EQ(data_fdps_scene_layer_count, 0);
+    CHECK_EQ(after - before, -3);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    village_reset();
+}
+
+/* One fdps_cache_cel_sprite_group per roster member, keyed on the record's
+   portrait_id at +0x7.  Four members with three distinct portraits give three
+   cache slots in the order the members are walked; a loop that read side at
+   +0x6 or char_id at +0x8 would give four slots keyed 100 102 104 106 or
+   101 103 105 107, and a stride other than 0x50 would key them off other
+   records' bytes. */
+static void village_caches_one_group_per_roster_portrait(void)
+{
+    ensure_village_inputs();
+    CHECK_EQ(village_ready, 1);
+    if (!village_ready) {
+        return;
+    }
+    village_reset();
+    village_stage_roster(VILLAGE_CH_A);
+    fdps_load_field_chapter_resources();
+
+    CHECK_EQ(data_fdps_cel_sprite_cache_count, 3);
+    CHECK_EQ(data_fdps_cel_sprite_cache_group_ids[0], VILLAGE_PORTRAIT_0);
+    CHECK_EQ(data_fdps_cel_sprite_cache_group_ids[1], VILLAGE_PORTRAIT_1);
+    CHECK_EQ(data_fdps_cel_sprite_cache_group_ids[2], VILLAGE_PORTRAIT_3);
+    CHECK_EQ(data_fdps_cel_sprite_cache_ptr != NULL, 1);
+    village_reset();
+}
+
+/* CMP dword ptr [0x00069cf0],0x0 / JZ at 0003166c releases the cache block and
+   MOV dword ptr [0x00069cf0],0x0 at 00031683 zeroes the count, both before the
+   sheet is opened.  A group cached beforehand therefore cannot survive: the
+   first member's portrait has to land in slot 0.  With an empty roster nothing
+   refills it and the cache stays empty, which is the same reset seen on its
+   own. */
+static void village_empties_the_sprite_cache_first(void)
+{
+    ensure_village_inputs();
+    CHECK_EQ(village_ready, 1);
+    if (!village_ready) {
+        return;
+    }
+    village_reset();
+    village_stage_roster(VILLAGE_CH_A);
+    CHECK_EQ(cache_one_group(VILLAGE_STALE_GROUP), 0);
+    CHECK_EQ(data_fdps_cel_sprite_cache_count, 1);
+
+    fdps_load_field_chapter_resources();
+    CHECK_EQ(data_fdps_cel_sprite_cache_count, 3);
+    CHECK_EQ(data_fdps_cel_sprite_cache_group_ids[0], VILLAGE_PORTRAIT_0);
+
+    village_reset();
+    village_stage_roster(VILLAGE_CH_A);
+    CHECK_EQ(cache_one_group(VILLAGE_STALE_GROUP), 0);
+    data_fdps_roster_member_count = 0;
+    fdps_load_field_chapter_resources();
+    CHECK_EQ(data_fdps_cel_sprite_cache_count, 0);
+    /* PUSH dword ptr [0x00060138] / CALL free at 00031675 is followed by MOV
+       dword ptr [0x00069cf0],0x0 and by no store to 0x00060138 anywhere in the
+       function, so the count goes to zero and the POINTER is left at the block
+       that was just released.  With members to walk the loop's first
+       fdps_cache_cel_sprite_group replaces it on the empty-cache arm; with an
+       empty roster nothing does, and the pointer dangles.  That is the
+       original's behaviour and src/rsrc.c must keep it, so the case has to
+       drop the stale value itself -- the fixture's teardown frees a non-null
+       cache pointer, which on this one would be a second free of the same
+       block. */
+    CHECK_EQ(data_fdps_cel_sprite_cache_ptr != NULL, 1);
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    village_reset();
+}
+
+/* CALL fclose at 000316e7 gives the ICON.CEL handle back on every call, so the
+   village can be re-entered as often as the player likes.  A body that leaked
+   the handle does not fail a check, it takes the run down at its own fopen
+   past _NFILES; what survives to be asserted is that a file can still be
+   opened afterwards.  One roster member per call keeps the sheet reads down --
+   the handle is opened and closed whatever the member count is. */
+static void village_closes_the_icon_sheet_each_time(void)
+{
+    int call;
+    FILE *fp;
+
+    ensure_village_inputs();
+    CHECK_EQ(village_ready, 1);
+    if (!village_ready) {
+        return;
+    }
+    village_reset();
+    village_stage_roster(VILLAGE_CH_A);
+    data_fdps_roster_member_count = 1;
+    for (call = 0; call < VILLAGE_REPEATED_CALLS; call++) {
+        fdps_load_field_chapter_resources();
+    }
+    fp = fopen(CEL_NAME, "rb");
+    CHECK_EQ(fp != NULL, 1);
+    if (fp != NULL) {
+        fclose(fp);
+    }
+    CHECK_EQ(data_fdps_cel_sprite_cache_count, 1);
+    village_reset();
+}
+
 void run_rsrc_tests(void)
 {
     RUN_TEST(loads_entry_zero);
@@ -1109,6 +1514,19 @@ void run_rsrc_tests(void)
     if (field_loaded) {
         free_field_globals();
     }
+
+    /* The village cases run after that cleanup and not before it: they write
+       the same chapter-text and layer globals, and starting from the state a
+       fresh process is in is what makes their heap-block deltas mean
+       anything. */
+    RUN_TEST(village_takes_the_chapter_text_one_number_up);
+    RUN_TEST(village_takes_the_shop_table_at_the_plain_number);
+    RUN_TEST(village_hands_the_roster_block_to_the_map);
+    RUN_TEST(village_keeps_the_roster_block_on_a_second_call);
+    RUN_TEST(village_frees_the_layer_blocks_and_zeroes_the_count);
+    RUN_TEST(village_caches_one_group_per_roster_portrait);
+    RUN_TEST(village_empties_the_sprite_cache_first);
+    RUN_TEST(village_closes_the_icon_sheet_each_time);
 
     /* The fixture file belongs to this run and to nothing else; leaving it
        behind would let a later run pass on a stale archive even after the

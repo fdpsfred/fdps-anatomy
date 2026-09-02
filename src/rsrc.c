@@ -358,3 +358,102 @@ void fdps_field_load_chapter_resources(void)
     *(short *) (data_fdps_battle_move_grid_ptr + 2) = (short) map_tile_height;
     fdps_map_grid_reset();
 }
+
+/* Bytes of stack the village loader formats its two member names into.  SUB
+   ESP,0x1c at 00031546 with the counter at [EBP-0x8] and the sheet handle at
+   [EBP-0x4] leaves exactly 20 bytes at [EBP-0x1c], and the longer of the two
+   names, "fdetxt%02d.txt", is fifteen with its terminator. */
+#define VILLAGE_NAME_SIZE 20
+
+/* Stride of one record in the roster block: IMUL EAX,dword ptr [EBP + -0x8],
+   0x50 at 000316c4.  A literal and not sizeof(struct fdps_unit_record) for the
+   reason roster.c gives -- 0x50 is the block's own layout and the struct agrees
+   with it only while it stays byte-packed (rebuild_info/pitfalls.md). */
+#define UNIT_RECORD_STRIDE 0x50
+
+/* 00031540.  The village phase's reload of the chapter resources, called by
+   fdps_run_village_phase at 00031314 and fdps_run_bar_shop at 00035e78.
+   Neither pushes anything in front of the call, neither cleans a stack purge
+   after it and neither looks at EAX -- what is left in it is the fclose result
+   -- so this takes nothing and returns nothing.
+
+   Straight line apart from four branches, and every one of them is a guard
+   rather than a fork: the null test on the chapter text, the pair that decides
+   whether the old map unit array is a block of its own, the layer-freeing loop
+   and the null test on the sprite cache.  The two loops are the compiler's
+   -od shape, the body sitting below the increment with a JMP back to the test.
+
+   The order the two member names are formatted in is what separates them:
+   "fdetxt%02d.txt" takes the chapter number PLUS ONE (INC EAX at 00031568)
+   and "Shop%02d.dat" takes it as it stands (PUSH dword ptr [0x00069cf4] at
+   00031593).  Both come out of the same container and both go through the same
+   20-byte stack buffer.
+
+   The map unit array is taken over rather than copied: the roster's own block
+   becomes the map array and the count follows it.  The free in front of that
+   is guarded by BOTH a non-zero count and a pointer that differs from the
+   roster's, so the second call in a row finds the alias already in place and
+   frees nothing -- without that second test the roster block would be released
+   while data_fdps_roster_array_ptr still pointed at it.
+
+   The shop table has no such guard and no free of its own: the pointer is
+   overwritten with the new block and the old one is lost.  That is the
+   original's behaviour and not an omission here.
+
+   The sprite cache is emptied and refilled from the party, one group per
+   roster member keyed on the record's portrait_id -- MOV AL,byte ptr [EAX +
+   0x7] / AND EAX,0xff at 000316d0, so the field is widened unsigned (contract
+   C).  Each slot number that comes back is discarded; what the loop is for is
+   the side effect of the group being resident, and it is fdps_deploy_wave that
+   later stores slot numbers into the records.  Emptying the cache first is
+   what makes the first member's group land in slot 0. */
+void fdps_load_field_chapter_resources(void)
+{
+    char resource_name[VILLAGE_NAME_SIZE];
+    struct fdps_unit_record *roster_member;
+    FILE *icon_cel_fp;
+    int layer;
+    int member;
+
+    if (data_fdps_current_chapter_text_ptr != NULL) {
+        free(data_fdps_current_chapter_text_ptr);
+    }
+    sprintf(resource_name, "fdetxt%02d.txt",
+            data_fdps_chapter_current_chapter_id + 1);
+    data_fdps_current_chapter_text_ptr =
+        fdps_vfs_load_entry("Field.vfs", resource_name);
+
+    sprintf(resource_name, "Shop%02d.dat",
+            data_fdps_chapter_current_chapter_id);
+    data_fdps_shop_stock_table_ptr =
+        fdps_vfs_load_entry("Field.vfs", resource_name);
+
+    if (data_fdps_map_unit_count != 0
+        && data_fdps_map_unit_array_ptr != data_fdps_roster_array_ptr) {
+        free(data_fdps_map_unit_array_ptr);
+    }
+    data_fdps_map_unit_count = data_fdps_roster_member_count;
+    data_fdps_map_unit_array_ptr = data_fdps_roster_array_ptr;
+
+    for (layer = 0; layer < data_fdps_scene_layer_count; layer++) {
+        free(data_fdps_scene_layer_tile_map_ptrs[layer]);
+        free(data_fdps_scene_layer_tile_sheet_ptrs[layer]);
+        free(data_fdps_scene_layer_tile_attr_ptr[layer]);
+    }
+    data_fdps_scene_layer_count = 0;
+
+    if (data_fdps_cel_sprite_cache_count != 0) {
+        free(data_fdps_cel_sprite_cache_ptr);
+    }
+    data_fdps_cel_sprite_cache_count = 0;
+
+    icon_cel_fp = fopen("ICON.CEL", "rb");
+    for (member = 0; member < data_fdps_roster_member_count; member++) {
+        roster_member = (struct fdps_unit_record *)
+                        (data_fdps_roster_array_ptr
+                         + member * UNIT_RECORD_STRIDE);
+        fdps_cache_cel_sprite_group((int) roster_member->portrait_id,
+                                    icon_cel_fp);
+    }
+    fclose(icon_cel_fp);
+}

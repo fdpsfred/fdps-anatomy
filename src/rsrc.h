@@ -118,4 +118,60 @@ extern int fdps_cache_cel_sprite_group(int group_index, FILE *fp);
 extern void fdps_field_load_chapter_resources(void);
 #pragma aux fdps_field_load_chapter_resources "*" parm caller [];
 
+/* The village side's own reload of the chapter resources: the two members the
+   town phase reads, the roster taken over as the map's unit array, and the
+   sprite cache rebuilt from the party.  Takes nothing and returns nothing --
+   the chapter is data_fdps_chapter_current_chapter_id and everything it
+   produces is published through the globals in gamedata.h.
+
+   It is not a smaller fdps_field_load_chapter_resources above and does not
+   call it.  The two overlap only in the chapter text; what this one does that
+   the other does not is hand the roster to the map and refill the sprite
+   cache, and what the other does that this one does not is load the map, the
+   tile layers and the movement grid.  A village has no battlefield, so the
+   layer arrays are released here and never refilled -- the layer count comes
+   back zero and stays zero until a battle loads a map.
+
+   What it loads, and out of which container:
+
+     Field.vfs   fdetxt%02d.txt  -> data_fdps_current_chapter_text_ptr
+                                    (chapter number PLUS ONE, as in the field
+                                    loader)
+                 Shop%02d.dat    -> data_fdps_shop_stock_table_ptr (chapter
+                                    number as it stands)
+
+   Three things a caller has to know about the pointers afterwards.
+
+   data_fdps_map_unit_array_ptr is left ALIASING data_fdps_roster_array_ptr --
+   the roster block itself becomes the map's unit array, not a copy of it -- so
+   a writer that goes through the map array from here on is editing the party.
+   The old map array is released first, and only when it was a block of its own:
+   calling this twice in a row finds the alias already in place and frees
+   nothing, which is what keeps the roster block from being handed to free.
+
+   data_fdps_shop_stock_table_ptr is NOT freed before it is replaced, unlike
+   the chapter text beside it, so every call after the first leaks the previous
+   chapter's shop table.  It is 36 bytes a village visit and nothing here or
+   anywhere else releases it.
+
+   The three per-layer arrays are freed against the layer count as this
+   function finds it and the slots are not nulled, so between that loop and the
+   count going to zero they hold dangling pointers; nothing runs in between.
+
+   data_fdps_cel_sprite_cache_ptr is the same hazard one step further out.  The
+   cache block is released against a non-zero count and only the COUNT is put
+   back to zero, so the pointer is left at the released block; it is replaced
+   on the way out only because the first cached portrait allocates a new one.
+   A party with no members caches nothing, and the pointer is then still
+   pointing at freed memory with the count reading zero -- a caller that tests
+   the pointer rather than the count to decide whether the cache holds anything
+   is testing a value that outlived its block.
+
+   Nothing is validated.  No load result is tested -- fdps_vfs_load_entry ends
+   the process rather than returning null -- and the ICON.CEL handle is not
+   tested either: a missing sheet reaches fdps_cache_cel_sprite_group as a null
+   stream once per party member and fclose gets the same null. */
+extern void fdps_load_field_chapter_resources(void);
+#pragma aux fdps_load_field_chapter_resources "*" parm caller [];
+
 #endif
