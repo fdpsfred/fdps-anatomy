@@ -22,9 +22,9 @@
 | `fd2_dpmi_alloc_dos_memory` | `fdps_dpmi_alloc_dos_memory` | `0003ca49` | `src/dpmi.c` |
 | `fd2_dpmi_free_dos_memory` | `fdps_dpmi_free_dos_memory` | `0003cad2` | `src/dpmi.c` |
 | `fd2_dpmi_lock_region` | `fdps_dpmi_lock_region` | `0003cb01` | `src/dpmi.c` |
-| `fd2_dpmi_unlock_region` | `fdps_dpmi_unlock_region` | `0003cb6e` | `src/aildpmi.c` |
-| `fd2_dpmi_lock_size` | `fdps_dpmi_lock_size` | `0003cb93` | `src/aildpmi.c` |
-| `fd2_dpmi_unlock_size` | `fdps_dpmi_unlock_size` | `0003cbaa` | `src/aildpmi.c` |
+| `fd2_dpmi_unlock_region` | `fdps_dpmi_unlock_region` | `0003cb6e` | `src/dpmi.c` |
+| `fd2_dpmi_lock_size` | `fdps_dpmi_lock_size` | `0003cb93` | `src/dpmi.c` |
+| `fd2_dpmi_unlock_size` | `fdps_dpmi_unlock_size` | `0003cbaa` | `src/dpmi.c` |
 | `crt_equivalent_get_eflags_thunk` | `AIL_internal_isr_eflags_save_cli` | `00044dc0` | `src/ailflags.asm` |
 
 **左右兩欄的名字不同，靠 wlink 的 `alias` 指令接。** 庫是替 FD2 打包的，EXTDEF 裡寫的是 FD2 對這些常式的拼法；FDPS 這邊的符號依 [`naming.md`](naming.md) 的鐵則必須與 Ghidra 逐字相同。把任一側改名都會破壞那條鐵則，所以接點放在 `.lnk`：
