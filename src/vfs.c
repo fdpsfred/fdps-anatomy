@@ -22,7 +22,10 @@
  *
  * exit comes from <stdlib.h> too and is a real call as well, CALL 0x00042e0f
  * at 00029430 in the fatal wrapper at the bottom of this file; the key wait
- * that precedes it is the game's own, declared in keybd.h.
+ * that precedes it is the game's own, declared in keybd.h.  free is a real
+ * call as well, CALL 0x0003d478 at 0002a1cf, and it is the only place in this
+ * module that releases anything -- every other allocation here belongs to the
+ * caller.
  */
 #include <stddef.h>
 #include <stdio.h>
@@ -584,4 +587,72 @@ void fdps_vfs_load_file_or_exit(void *vfs, char *name, void **out)
         fdps_wait_any_key();
         exit(1);
     }
+}
+
+/* 0002a140.  Two branches, and the arm each one guards ends the process, so
+   the ADD ESP,0x4 that follows both exits -- 0002a17a and 0002a1c8 -- is stack
+   cleanup no execution reaches, and there is exactly one path out of the
+   function.
+
+   Which argument is which comes from the call sites.  fdps_title_screen pushes
+   the member name first and the container second, MOV EAX,0x61e24 / PUSH at
+   0002a3be followed by MOV EAX,0x60128 / PUSH at 0002a3c4, so the container
+   "MISC.VFS" lands at [EBP + 0x14] and the member name at [EBP + 0x18];
+   fdps_play_vfs_animation builds the same pair the other way round at 0001eb0c
+   and 0001eb10, its own argument as the member name and the same "MISC.VFS"
+   literal as the container.  Every one of the forty-odd call sites cleans with
+   ADD ESP,0x8 and takes the answer out of EAX.
+
+   The failure message belongs to the container and not to the member: PUSH
+   [EBP + 0x14] at 0002a161 is the container path, and the string at 0x61df8 is
+   "file not found: '%s'".  So a container that will not open names itself,
+   while a member that is not in the container prints nothing here at all --
+   fdps_vfs_load_file has already printed which of its three failures happened
+   and this function only adds the pause.  The two diagnostics therefore look
+   nothing alike, which is worth keeping: the first says the archive, the second
+   says the member.
+
+   The middle of the body is fdps_vfs_load_file_or_exit's, expanded where it
+   stands rather than called.  The original does the load, the store through a
+   pointer to the result slot and the NULL test inline -- CALL 0x00039bd0 at
+   0002a1a7 with no call to 00029400 anywhere in the body -- and the six frame
+   slots at [EBP - 0x10] through [EBP - 0x24] are that expansion's copies of the
+   three arguments it would otherwise have passed.  Writing a call to the
+   wrapper here would put a CALL in the rebuild the original does not have, so
+   the body stays expanded.  What the extra slots cost is frame size and
+   nothing else: the store at 0002a1b2 goes through the address of [EBP - 0x8]
+   and the test at 0002a1b7 reloads through the same address, which is the
+   local itself either way (ADR-0001).  The emitted VFS.OBJ carries the rest of
+   the body instruction for instruction, dead cleanup included, and differs in
+   three ways that are all allocation or instruction selection: the frame is SUB
+   ESP,0xc against the original's 0x24, the twenty-four bytes of difference
+   being the six argument copies and the twelve moves that fill them; the three
+   slots come out with loaded_block at -0x4, vfs at -0x8 and the -od return
+   temporary at -0xc, where the original has vfs at -0xc, loaded_block at -0x8
+   and the temporary at -0x4, and no declaration order recovers that layout
+   while the six copies are missing from between them; and each pushed argument
+   is reached with PUSH dword ptr [EBP + n] where the original loads it through
+   EAX first, which is the same difference fdps_vfs_load_file_or_exit above
+   shows.
+
+   free(vfs) is on the single exit path only.  Neither failure arm reaches it,
+   and neither needs to: both end the process.  The buffer that comes back is
+   the malloc fdps_vfs_load_file made and it belongs to the caller. */
+void *fdps_vfs_load_entry(char *vfs_path, char *entry_name)
+{
+    void *loaded_block;
+    void *vfs;
+
+    vfs = fdps_vfs_open(vfs_path);
+    if (vfs == NULL) {
+        printf("file not found: '%s'\n", vfs_path);
+        exit(1);
+    }
+    loaded_block = fdps_vfs_load_file(entry_name, vfs);
+    if (loaded_block == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+    free(vfs);
+    return loaded_block;
 }

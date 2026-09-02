@@ -317,4 +317,37 @@ extern void *fdps_vfs_image_get_entry(struct fdps_vfs_image_header *image,
 extern void fdps_vfs_load_file_or_exit(void *vfs, char *name, void **out);
 #pragma aux fdps_vfs_load_file_or_exit "*" parm caller [];
 
+/* Opens the container at vfs_path, pulls the member called entry_name out of
+   it, closes the container again and hands the member back -- or ends the
+   process, because it never returns anything else.
+
+   This is the whole-container-in-one-call form, and it is what most of the game
+   uses: forty-odd call sites across the title screen, the field loaders, the
+   save/load screens, the combat animations, the shops and the village phase,
+   nearly all of them naming "MISC.VFS" at 0x60128 and taking one member out of
+   it.  The container handle never reaches the caller.  fdps_vfs_open builds
+   one, the load runs against it, and free releases it before the return, so
+   what the caller ends up holding is exactly the member's own malloc'd buffer,
+   which it owns and must free.  A caller that wants several members out of one
+   container pays for a fresh open, a fresh directory read and a fresh reopen
+   each time; fdps_vfs_load_file_or_exit is the form that reuses a handle.
+
+   Two failures end the process instead of returning, and they are not
+   symmetrical.  A container that will not open prints "file not found: '%s'"
+   with vfs_path -- the archive, not the member -- and calls exit(1) with no
+   pause, so that line scrolls away.  A member that is not in a container that
+   did open prints nothing here: fdps_vfs_load_file has already said which of
+   its three failures happened, and this function adds fdps_wait_any_key so that
+   line stays on the screen until a key arrives, then exit(1).  So the result is
+   never NULL, and none of the call sites tests it.
+
+   Everything the load itself does is fdps_vfs_load_file's (see above).
+   entry_name is upper-cased IN PLACE before the compare, so a caller passing a
+   string literal has that literal permanently folded and the literal cannot
+   live in read-only storage (rebuild_info/pitfalls.md); vfs_path is not folded,
+   because fdps_vfs_open copies a path raw.  Nothing about the container is
+   validated and nothing is bounded. */
+extern void *fdps_vfs_load_entry(char *vfs_path, char *entry_name);
+#pragma aux fdps_vfs_load_entry "*" parm caller [];
+
 #endif

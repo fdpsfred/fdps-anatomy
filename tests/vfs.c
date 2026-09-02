@@ -1582,6 +1582,159 @@ static void load_or_exit_hands_back_what_the_loader_produced(void)
     free(handle);
 }
 
+/* fdps_vfs_load_entry is fdps_vfs_open, fdps_vfs_load_file and free in one
+   call, with the same fatal NULL check fdps_vfs_load_file_or_exit carries
+   expanded inline (0002a140).  Both of its failure arms end the process -- the
+   container that will not open at 0002a165 prints and exits, the member that is
+   not there at 0002a1bc waits for a key and exits -- so, exactly as for the
+   wrapper above, only the ordinary path can be exercised from a test at all.
+
+   What is left is where all of this function's own risk sits: which argument is
+   the container and which is the member, that the member's bytes are the
+   container's own, and that the handle it built for itself does not survive the
+   call.  Every expected value below is one the fdps_vfs_load_file cases already
+   pin against the shipped FIELD2.VFS.
+
+   One thing deliberately not asserted: that the free at 0002a1cf really
+   released the handle.  A leaked handle is 3,423 bytes for this container and a
+   DOS/4GW test process has megabytes, so no repeat count a test can afford
+   would notice.  The repeat case below covers the file handle rather than the
+   memory -- that one is exhaustible. */
+
+/* Loads one member through fdps_vfs_load_entry and holds it against the same
+   span of the container read independently, the way check_member does for
+   fdps_vfs_load_file.  The query goes through a writable buffer because the
+   search folds it to upper case in place. */
+static void check_entry(char *archive_name, char *member_name, long start,
+                        unsigned int length)
+{
+    char query[QUERY_MAX];
+    char *member;
+
+    strcpy(query, member_name);
+    member = (char *)fdps_vfs_load_entry(archive_name, query);
+    CHECK_EQ(member != NULL, 1);
+    CHECK_EQ(read_member_bytes(VFS_NAME, start, length), 1);
+    if (member == NULL) {
+        return;
+    }
+    CHECK_EQ(memcmp(member, member_expected, length), 0);
+    free(member);
+}
+
+/* The ordinary path end to end, three members deep.  The container is named by
+   the first argument and opened here rather than being handed over as a handle,
+   so this is the open, the search, the reopen through the path the handle
+   stored, the size from the entry's field at 0x0d and the seek to its 0x16, all
+   in one call.
+
+   The three indices are what make it an assertion about the arithmetic rather
+   than about entry 0: entry 0 begins where the table begins so a wrong stride
+   still finds it, while entries 64 and 130 land on a different record under any
+   stride but 26.  Entry 130 is the last of the 131 and its 36 bytes end exactly
+   at the container's 112,350, so a start read a field too far runs off the end
+   of the file instead of landing on a plausible member. */
+static void load_entry_loads_whole_members(void)
+{
+    check_entry(VFS_NAME, "ATTR000.DAT", ATTR000_START, ATTR000_SIZE);
+    check_entry(VFS_NAME, "ATTR610.DAT", ATTR610_START, ATTR610_SIZE);
+    check_entry(VFS_NAME, "DSC64.DAT", DSC64_START, DSC64_SIZE);
+}
+
+/* The argument order, and the asymmetry between the two strings.
+
+   The order is decided at the call sites and nowhere in the body: MOV
+   EAX,0x61e24 / PUSH at 0002a3be then MOV EAX,0x60128 / PUSH at 0002a3c4 in
+   fdps_title_screen put the container at [EBP + 0x14] and the member name at
+   [EBP + 0x18].  Both halves show here at once -- the member is found, which
+   only happens if the second argument reached the search, and the container
+   opened, which only happens if the first reached fopen.  Swapped, the open
+   would fail on "dsc64.dat" and the function would print and exit rather than
+   fail an assertion.
+
+   The container path is not folded and the member name is.  fdps_vfs_open
+   copies a path raw, so a lower-case spelling opens the same file under DOS and
+   comes back out of the call still lower-case; strupr inside the search
+   rewrites the member name in the caller's own buffer.  That is why the member
+   name a caller passes cannot be a read-only literal and the container path
+   can. */
+static void load_entry_folds_the_member_name_but_not_the_container_path(void)
+{
+    char archive[QUERY_MAX];
+    char query[QUERY_MAX];
+    char *member;
+
+    strcpy(archive, VFS_NAME_LOWER);
+    strcpy(query, "dsc64.dat");
+    member = (char *)fdps_vfs_load_entry(archive, query);
+    CHECK_EQ(member != NULL, 1);
+    CHECK_EQ(strcmp(query, "DSC64.DAT"), 0);
+    CHECK_EQ(strcmp(archive, VFS_NAME_LOWER), 0);
+    free(member);
+}
+
+/* Nothing of this function's own gets between the caller and the loader.  The
+   same member comes out both ways -- once through the one-call form and once
+   through fdps_vfs_open followed by fdps_vfs_load_file -- and the two buffers
+   agree byte for byte while being different blocks, so the answer is the
+   loader's own malloc handed straight back rather than a copy this function
+   made or the handle it built. */
+static void load_entry_matches_open_plus_load_file(void)
+{
+    char *handle;
+    char *direct;
+    char *member;
+    char query[QUERY_MAX];
+
+    strcpy(query, "ATTR000.DAT");
+    member = (char *)fdps_vfs_load_entry(VFS_NAME, query);
+    CHECK_EQ(member != NULL, 1);
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL || member == NULL) {
+        free(member);
+        free(handle);
+        return;
+    }
+    strcpy(query, "ATTR000.DAT");
+    direct = (char *)fdps_vfs_load_file(query, handle);
+    CHECK_EQ(direct != NULL, 1);
+    if (direct != NULL) {
+        CHECK_EQ(member != direct, 1);
+        CHECK_EQ(memcmp(member, direct, ATTR000_SIZE), 0);
+        free(direct);
+    }
+    free(member);
+    free(handle);
+}
+
+/* Every call opens the container twice -- once for the directory and once for
+   the member -- and both fcloses are inside the two functions this one calls.
+   Forty round trips is more streams than a DOS process has, so a path that left
+   either file open would have fopen failing long before the fortieth; and a
+   failed open here is not a NULL the assertion would catch, it is the printf
+   and exit(1) at 0002a165, which takes the harness down.  Either way the run
+   says so. */
+static void load_entry_can_be_run_repeatedly(void)
+{
+    char query[QUERY_MAX];
+    char *member;
+    int repeat;
+    int loaded;
+
+    loaded = 0;
+    for (repeat = 0; repeat < LOAD_REPEATS; repeat++) {
+        strcpy(query, "DSC64.DAT");
+        member = (char *)fdps_vfs_load_entry(VFS_NAME, query);
+        if (member != NULL) {
+            loaded++;
+            free(member);
+        }
+    }
+    CHECK_EQ(loaded, LOAD_REPEATS);
+}
+
 void run_vfs_tests(void)
 {
     RUN_TEST(missing_file_returns_zero);
@@ -1625,4 +1778,8 @@ void run_vfs_tests(void)
     RUN_TEST(load_or_exit_writes_the_member_through_out);
     RUN_TEST(load_or_exit_takes_the_handle_first_and_the_query_second);
     RUN_TEST(load_or_exit_hands_back_what_the_loader_produced);
+    RUN_TEST(load_entry_loads_whole_members);
+    RUN_TEST(load_entry_folds_the_member_name_but_not_the_container_path);
+    RUN_TEST(load_entry_matches_open_plus_load_file);
+    RUN_TEST(load_entry_can_be_run_repeatedly);
 }
