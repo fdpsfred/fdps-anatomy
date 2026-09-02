@@ -145,4 +145,45 @@ extern void fdps_chapter_16_event_enemies_advance_for_turn(int unit_index);
 extern void fdps_chapter_17_event_deploy_wave_for_turn(int unit_index);
 #pragma aux fdps_chapter_17_event_deploy_wave_for_turn "*" parm caller [];
 
+/* Chapter 18's turn-scheduled reinforcement event: it brings on the wave of
+   the current map's deployment table whose number is the turn just played, by
+   handing fdps_deploy_wave the map the chapter is playing, the battle turn
+   counter unchanged, and a placement flag of 0.
+
+   It is the chapter 17 handler with the subtraction taken out.  The wave key
+   is the counter itself: no offset, no test, no table and no bound on either
+   side of it, so the wave asked for is whatever the counter happens to hold,
+   negative and unscheduled values included.  A wave number that matches no
+   deployment record still opens the files and loads the placement table and
+   simply deploys nothing.
+
+   The map number is read from data_fdps_chapter_current_chapter_id, so it is
+   whatever chapter is loaded rather than anything this handler holds, and the
+   placement flag of 0 makes fdps_deploy_unit put each unit on the nearest free
+   walkable tile to the coordinates its MAP%02d.COD record names rather than on
+   those coordinates themselves.
+
+   There is no one-shot latch and nothing records that the handler has run.
+   Calling it twice on the same turn deploys the same wave twice, because the
+   wave walk appends and never checks whether those records are already on the
+   map; the map's own turn table naming a slot once per turn is what keeps that
+   from happening.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with 0 before either global is read, and never
+   read back, so any index behaves the same.
+
+   Table slot 25, and chapter 18's map17.dat is the only shipped MAP*.DAT whose
+   turn-event table names it, with the nine records {turn t, slot 25, phase 0}
+   for t in 4, 5, 6, 7, 8, 9, 10, 11 and 13.  Its 65 deployment records carry
+   four units tagged with each of waves 4 through 11 and fifteen tagged wave
+   13, so wave number and scheduled turn are the same nine values and each
+   firing brings on the group tagged with the turn it fires on -- four
+   reinforcements a turn for eight turns, then fifteen at once on turn 13.
+   (The map also carries fifteen records tagged wave 1 and one tagged wave 2,
+   which nothing in the shipped data ever asks for: the chapter opens on wave 0
+   and no turn 1 or 2 record names this slot.) */
+extern void fdps_chapter_18_event_deploy_wave_for_turn(int unit_index);
+#pragma aux fdps_chapter_18_event_deploy_wave_for_turn "*" parm caller [];
+
 #endif

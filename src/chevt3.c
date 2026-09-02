@@ -248,3 +248,60 @@ void fdps_chapter_17_event_deploy_wave_for_turn(int unit_index)
                      data_fdps_battle_turn_counter - CH17_WAVE_TURN_OFFSET,
                      CH17_PLACE_EXACT);
 }
+
+/* The place_exact argument the chapter 18 handler below hands
+   fdps_deploy_wave: XOR EAX,EAX / PUSH EAX at 00038163, so zero.  Zero is the
+   value that does NOT take the placement record's tile as given -- it sends
+   fdps_deploy_unit off to search the map for the nearest unoccupied walkable
+   tile to those coordinates and put the unit there instead. */
+#define CH18_PLACE_NEAREST_FREE_TILE 0
+
+/* 00038150.  Chapter 18's turn-scheduled reinforcement event: brings on the
+   wave of the current map's deployment table whose number is the battle turn
+   counter's own value.
+
+   The whole body is one call.  The frame is the standard Watcom four-push one
+   with an empty local area -- PUSH EBX / PUSH ESI / PUSH EDI / PUSH EBP /
+   MOV EBP,ESP / SUB ESP,0x0 at 00038150..00038156 -- so there is no local here
+   at all and the three arguments are computed straight into the pushes:
+   XOR EAX,EAX / PUSH EAX, then PUSH dword ptr [0x00069ce8], then PUSH dword
+   ptr [0x00069cf4], at 00038163..0003816c.  The caller-cleans ADD ESP,0xc at
+   00038177 is this function's own, which is what makes the convention the
+   stack one.
+
+   This is the chapter 17 handler above with the subtraction taken out, and the
+   absence of it is the whole difference: the turn counter is pushed as it
+   stands, with no offset, no compare, no table and no bound on either side of
+   it, so the wave asked for is exactly the number the counter holds.  The
+   shipped data is what that arrangement is built around.  map17.dat -- map
+   index 17, the player's chapter 18 -- schedules slot 25 for side 0, the enemy
+   phase, on turns 4, 5, 6, 7, 8, 9, 10, 11 and 13, and its 65 deployment
+   records carry four units tagged with each of waves 4, 5, 6, 7, 8, 9, 10 and
+   11 and fifteen tagged wave 13.  Wave number and turn number are the same set
+   of nine values, which is why no adjustment is wanted here and why putting
+   chapter 17's offset back in would deploy nothing on any of the nine.
+
+   The map number is data_fdps_chapter_current_chapter_id read at the call site
+   and not anything this handler holds, so it is whichever chapter is loaded.
+
+   Nothing guards the call and nothing records that it ran, so the handler
+   fires its wave every time it is reached; what makes each wave arrive once is
+   the map's turn table naming the slot once per turn.
+
+   unit_index is the handler table's shared parameter.  MOV dword ptr
+   [EBP+0x14],0x0 at 0003815c writes zero over the incoming slot before either
+   global is read and nothing ever reads it back, so which unit the event fired
+   for cannot reach anything this handler does; the store has no observable
+   effect, because the slot belongs to the caller's outgoing argument area and
+   the turn-event runner drops it with ADD ESP,0x4 at 0002e146.
+
+   Nothing sets EAX between the CALL's return and the RET at 0003817e, and no
+   dispatcher reads what comes back, so the result is void. */
+void fdps_chapter_18_event_deploy_wave_for_turn(int unit_index)
+{
+    unit_index = 0;
+
+    fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                     data_fdps_battle_turn_counter,
+                     CH18_PLACE_NEAREST_FREE_TILE);
+}

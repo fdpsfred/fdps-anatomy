@@ -1040,6 +1040,201 @@ static void ch17_ignores_the_unit_index_argument(void)
     }
 }
 
+/* The chapter 18 handler is the chapter 17 one with the subtraction taken out,
+   so the cases below stand on the same fixture: ch17_stage lays down three
+   deployment records tagged waves 0, 1 and 2 at table indices 0, 1 and 2 on a
+   blank walkable map with one unit already on it, and MAP00.COD's own records
+   0, 1 and 2 name (18, 0), (22, 12) and (8, 10).  What changes is which turn
+   reaches which record: chapter 17 subtracts seven and chapter 18 subtracts
+   nothing, so here the turn IS the wave.  Sharing the fixture is what makes
+   that the only difference these cases can be reading. */
+
+/* The turns that name the fixture's three records, being the wave numbers
+   themselves.  Chapter 18's own schedule runs 4..11 and 13; those waves are in
+   map17.dat rather than in this fixture, and CH18_SCHEDULED_TURN_NO_RECORD is
+   one of them, put through to show an unmatched key is carried rather than
+   caught. */
+#define CH18_WAVE0_TURN 0
+#define CH18_WAVE1_TURN 1
+#define CH18_WAVE2_TURN 2
+#define CH18_UNMATCHED_TURN 3
+#define CH18_SCHEDULED_TURN_NO_RECORD 13
+
+/* The wave asked for is the turn counter itself with nothing taken off it.
+   Turn 1 brings on the wave-1 record, table index 1, which lands on MAP00.COD
+   record 1 at (22, 12), and turn 2 the wave-2 record, index 2 at (8, 10).
+   This is the case chapter 17's offset would fail: subtracting seven from
+   either turn gives a negative key that matches no record and deploys nothing,
+   and any other offset would deploy the neighbouring record, which both the
+   character id and the tile would say. */
+static void ch18_deploys_the_wave_the_turn_names(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch17_stage(CH18_WAVE1_TURN);
+    fdps_chapter_18_event_deploy_wave_for_turn(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch17_unit(1)->char_id, CH17_WAVE1_CHAR_ID);
+    CHECK_EQ((int) ch17_unit(1)->pos_x, 22);
+    CHECK_EQ((int) ch17_unit(1)->pos_y, 12);
+
+    ch17_stage(CH18_WAVE2_TURN);
+    fdps_chapter_18_event_deploy_wave_for_turn(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch17_unit(1)->char_id, CH17_WAVE2_CHAR_ID);
+    CHECK_EQ((int) ch17_unit(1)->pos_x, 8);
+    CHECK_EQ((int) ch17_unit(1)->pos_y, 10);
+}
+
+/* The counter reaches the call unadjusted at the bottom of its range too: turn
+   0 asks for wave 0, the group a map opens with, and brings the wave-0 record
+   on -- MAP00.COD record 0 at (18, 0).  An off-by-one either way would reach
+   the wave-1 record or no record at all. */
+static void ch18_turn_zero_asks_for_wave_zero(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch17_stage(CH18_WAVE0_TURN);
+    fdps_chapter_18_event_deploy_wave_for_turn(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch17_unit(1)->char_id, CH17_WAVE0_CHAR_ID);
+    CHECK_EQ((int) ch17_unit(1)->pos_x, 18);
+    CHECK_EQ((int) ch17_unit(1)->pos_y, 0);
+}
+
+/* A key that matches nothing is carried through rather than caught or folded
+   onto a wave that does exist: turn 3 and turn 13 both walk the table, match
+   no record and deploy nobody.  A clamp or a fallback to wave 0 would put the
+   map's opening group down a second time and the count would say so.  Turn 13
+   is one of chapter 18's own nine scheduled turns, so the top of its real
+   range is unbounded here as well. */
+static void ch18_unmatched_turns_deploy_nothing(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch17_stage(CH18_UNMATCHED_TURN);
+    fdps_chapter_18_event_deploy_wave_for_turn(0);
+    CHECK_EQ(data_fdps_map_unit_count, 1);
+
+    ch17_stage(CH18_SCHEDULED_TURN_NO_RECORD);
+    fdps_chapter_18_event_deploy_wave_for_turn(0);
+    CHECK_EQ(data_fdps_map_unit_count, 1);
+}
+
+/* The map the wave is deployed under is read from
+   data_fdps_chapter_current_chapter_id at the call site and is not a literal:
+   the same wave-0 record placed while that global says 1 lands on MAP01.COD's
+   record 0 at (9, 4) instead of MAP00.COD's (18, 0). */
+static void ch18_map_number_comes_from_the_chapter_global(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch17_stage(CH18_WAVE0_TURN);
+    data_fdps_chapter_current_chapter_id = 1;
+
+    fdps_chapter_18_event_deploy_wave_for_turn(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch17_unit(1)->char_id, CH17_WAVE0_CHAR_ID);
+    CHECK_EQ((int) ch17_unit(1)->pos_x, 9);
+    CHECK_EQ((int) ch17_unit(1)->pos_y, 4);
+}
+
+/* The placement flag is 0 -- XOR EAX,EAX / PUSH EAX at 00038163 -- so the
+   reinforcements are put on the nearest free walkable tile to their placement
+   record rather than on the record's own tile.  MAP00.COD record 1 names
+   (22, 12); giving that one cell a tile id whose attribute row is terrain 5
+   takes it out of the search and the unit lands one tile away.  A flag of 1
+   would drop it on (22, 12) regardless of the terrain there.
+
+   (22, 13) is which of the four tiles at distance 1 it lands on, because the
+   scan is row-major over the whole grid and a tie is accepted, so the last
+   candidate at the best distance wins. */
+static void ch18_places_on_the_nearest_free_tile(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch17_stage(CH18_WAVE1_TURN);
+    ch17_set_tile_id(22, 12, 1);
+    ch17_set_terrain(1, CH17_TERRAIN_BLOCKED);
+
+    fdps_chapter_18_event_deploy_wave_for_turn(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch17_unit(1)->char_id, CH17_WAVE1_CHAR_ID);
+    CHECK_EQ((int) ch17_unit(1)->pos_x, 22);
+    CHECK_EQ((int) ch17_unit(1)->pos_y, 13);
+}
+
+/* Nothing guards the call: there is no compare anywhere in the body and no
+   latch is written, so a second firing on the same turn deploys the same wave
+   again rather than being refused.  The slot the one-shot handlers of this
+   family latch is also put up beforehand and the wave still arrives, and the
+   slot is asserted unchanged because a handler that had grown a latch would
+   have written it. */
+static void ch18_has_no_one_shot_latch(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch17_stage(CH18_WAVE1_TURN);
+    data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT] = 1;
+
+    fdps_chapter_18_event_deploy_wave_for_turn(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT], 1);
+
+    fdps_chapter_18_event_deploy_wave_for_turn(0);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ((int) ch17_unit(2)->char_id, CH17_WAVE1_CHAR_ID);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT], 1);
+}
+
+/* The incoming argument slot is overwritten with 0 at 0003815c before either
+   global is read, and never read back, so the index the dispatcher passes
+   cannot reach the wave asked for, the map asked for or the placement flag.
+   The turn-event runner is the only path this slot is reached by in the
+   shipped data and it pushes a literal 0; the values passed here are that 0,
+   an index that names the unit already on the map, one past the array, and -1
+   and 30000, which are the ones an argument-driven handler would betray itself
+   on. */
+static void ch18_ignores_the_unit_index_argument(void)
+{
+    static int arguments[5] = {0, 1, 2, -1, 30000};
+    int i;
+
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 5; i++) {
+        ch17_stage(CH18_WAVE1_TURN);
+        fdps_chapter_18_event_deploy_wave_for_turn(arguments[i]);
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch17_unit(1)->char_id, CH17_WAVE1_CHAR_ID);
+        CHECK_EQ((int) ch17_unit(1)->pos_x, 22);
+        CHECK_EQ((int) ch17_unit(1)->pos_y, 12);
+    }
+}
+
 void run_chevt3_tests(void)
 {
     RUN_TEST(ch15_record_shape_matches_the_offsets);
@@ -1065,4 +1260,11 @@ void run_chevt3_tests(void)
     RUN_TEST(ch17_places_on_the_nearest_free_tile);
     RUN_TEST(ch17_has_no_one_shot_latch);
     RUN_TEST(ch17_ignores_the_unit_index_argument);
+    RUN_TEST(ch18_deploys_the_wave_the_turn_names);
+    RUN_TEST(ch18_turn_zero_asks_for_wave_zero);
+    RUN_TEST(ch18_unmatched_turns_deploy_nothing);
+    RUN_TEST(ch18_map_number_comes_from_the_chapter_global);
+    RUN_TEST(ch18_places_on_the_nearest_free_tile);
+    RUN_TEST(ch18_has_no_one_shot_latch);
+    RUN_TEST(ch18_ignores_the_unit_index_argument);
 }
