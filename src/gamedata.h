@@ -984,4 +984,84 @@ extern unsigned int data_fdps_cd_track_start_sector;
    as a negative value rather than as a large unsigned one. */
 extern int data_fdps_audio_cd_current_music_index;
 
+/* The rest of the startup resource block at 0x643a0-0x643e4.
+ *
+ * Every one of the twelve below is filled once by fdps_load_global_resources
+ * out of a named member of one of the two containers it opens, and every one of
+ * those loads is followed by a null test whose failure arm calls
+ * fdps_wait_any_key and exit(1) -- so past startup each of them holds a live
+ * malloc'd block for the life of the process, and a reader needs no null test
+ * of its own.  fdps_shutdown_free_resources releases all twelve unguarded, at
+ * the addresses quoted, and stores nothing back, so they are left dangling.
+ *
+ * The block is not an array and must not be emitted as one: 0x643a4, in the
+ * middle of it, is data_fdps_shared_party_total_gold, an int, and
+ * fdps_shutdown_free_resources steps over it rather than freeing it
+ * (rebuild_info/pitfalls.md, contract B).
+ *
+ * The original types all twelve as byte pointers and does its own arithmetic,
+ * so a reader casts. */
+
+/* 000643e4.  "Fight.pal" out of Misc.vfs (the string at 00061cd4), the palette
+   the combat screens run in, as against data_fdps_vga_main_palette_ptr's
+   "Fde.pal" for the field.  fdps_load_global_resources hands this one to
+   fdps_build_palette_tables as a fdps_palette_entry * when the FMer1.tmp cache
+   is absent, which is what fixes its layout.  Freed at 00029484. */
+extern unsigned char *data_fdps_vga_fight_palette_ptr;
+
+/* 000643b8.  "Cusor.cel" out of Misc.vfs (00061ce0) -- the game's own
+   spelling, one s.  Freed at 00029492. */
+extern unsigned char *data_fdps_cursor_highlight_sprite_sheet_ptr;
+
+/* 000643ac.  "Command.cel" out of Misc.vfs (00061cec).  Freed at 000294ae. */
+extern unsigned char *data_fdps_command_sprite_sheet_ptr;
+
+/* 000643dc.  "Shadow.cel" out of Misc.vfs (00061cf8).  Freed at 000294a0. */
+extern unsigned char *data_fdps_shadow_sprite_sheet_ptr;
+
+/* 000643d4.  "IconSts.cel" out of Misc.vfs (00061d04).  Freed at 000294bc. */
+extern unsigned char *data_fdps_unit_status_icon_sheet_ptr;
+
+/* 000643d0.  "Message.cel" out of Misc.vfs (00061d10).  Freed at 00029510. */
+extern unsigned char *data_fdps_message_window_sheet_ptr;
+
+/* 000643d8.  "Number.cel" out of Misc.vfs (00061d1c).  Freed at 000294ca. */
+extern unsigned char *data_fdps_number_glyph_sheet_ptr;
+
+/* 000643c0.  "SelBar.cel" out of Misc.vfs (00061d28).  Freed at 0002951e. */
+extern unsigned char *data_fdps_selection_bar_sheet_ptr;
+
+/* 000643b0.  "LevUp.cel" out of Misc.vfs (00061d34).  Freed at 0002952c. */
+extern unsigned char *data_fdps_level_up_window_sheet_ptr;
+
+/* 000643e0.  "ADWin.cel" out of Misc.vfs (00061d58).  Freed at 0002953a. */
+extern unsigned char *data_fdps_ui_terrain_hud_panel_sheet_ptr;
+
+/* 000643cc.  "Fdetxt.fon" out of "Field.vfs" (00061da4) -- the second
+   container fdps_load_global_resources opens, after it has released the
+   Misc.vfs handle.  Freed at 000294e6. */
+extern unsigned char *data_fdps_font_sheet_ptr;
+
+/* 000643c4.  "Fdetxt00.txt" out of "Field.vfs" (00061db0), the text that is not
+   any one chapter's: data_fdps_current_chapter_text_ptr is the per-chapter
+   block and is loaded and released again with each chapter, while this one is
+   resident from startup to shutdown.  Freed at 000294f4. */
+extern unsigned char *data_fdps_all_game_text_ptr;
+
+/* 00060120.  The portrait surface: a malloc'd block holding the character
+   portrait a dialogue window is currently showing, and null whenever no
+   portrait is up.  It is not a startup resource -- nothing allocates it at
+   load time -- and its three writers all follow the same shape, CMP
+   [0x00060120],0x0 / JZ / PUSH / CALL free / MOV [0x00060120],0x0 before
+   allocating the next one (000177dc, 000207d7, 00032591), so it holds at most
+   one portrait at a time and is cleared when it holds none.
+
+   Its readers test it against 0 and skip when it is null -- fdps_draw_text at
+   0002008a, fdps_message_window_wait_key at 000204f6 -- so a null here is an
+   ordinary state and not a failure.
+
+   fdps_shutdown_free_resources is the one release that does NOT clear it: it
+   frees it under a guard at 00029568 and stores nothing back. */
+extern unsigned char *data_fdps_portrait_sprite_buf_ptr;
+
 #endif

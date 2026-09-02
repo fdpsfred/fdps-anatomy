@@ -37,4 +37,33 @@ extern void fdps_load_data_tables(void *vfs);
 extern void fdps_free_global_resource_buffers(void);
 #pragma aux fdps_free_global_resource_buffers "*" parm caller [];
 
+/* The whole of the program's teardown, called once from main and from nowhere
+   else: every globally held allocation goes back to free(), and then the
+   keyboard vector goes back to DOS.
+
+   Twenty-five individually named global pointers are released, followed by
+   three parallel scene-layer pointer arrays walked to
+   data_fdps_scene_layer_count, followed by the nine data tables
+   fdps_free_global_resource_buffers owns, and finally
+   fdps_uninstall_keyboard_isr.  Eighteen of the twenty-five are freed with no
+   null test and seven are guarded by one; the guard says which resources are
+   optional -- a chapter's text, the portrait buffer, the move grid, the cel
+   cache, the tile-event table, the event-code layer and the map unit array all
+   exist only once something has loaded them -- and not that the CRT needs it,
+   because free() returns at once on null either way.
+
+   Nothing is cleared: not one of the pointers is stored back to, so every one
+   of them is left dangling and a second call is a double free.  That is not a
+   hazard in the shipped program, where the sole call site is followed by the
+   process ending, but it is why this is a shutdown routine and not a general
+   "release everything" that a restart could use.
+
+   The keyboard hook comes down LAST, after every free.  A free() cannot be
+   interrupted into by the game's own INT 09h handler in a way that matters --
+   the handler only latches a scancode -- so the order is not a locking
+   discipline; it is simply the order the original runs in, and the two halves
+   are independent. */
+extern void fdps_shutdown_free_resources(void);
+#pragma aux fdps_shutdown_free_resources "*" parm caller [];
+
 #endif
