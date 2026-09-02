@@ -12514,7 +12514,7 @@ fdps_cd_resolve_track_range rewrites both data_fdps_cd_play_range_start_sector a
 Plays the whole game CD as audio: everything from the first sector of the disc through to the lead-out.
 
 Algorithm:
-Probes 12 bytes of stack with __CHK, then silences any playback in progress with fdps_cd_stop_audio. Asks the drive for track 1's audio track info through FUN_0003c0c8(1), which refreshes the track-info globals -- track number at 0x00069dff, track start sector at 0x00069e01, control byte at 0x00069e05 -- none of which this routine reads back. Calls fdps_cdrom_read_disk_info to refresh the disc summary; that leaves the highest track number in DAT_00069e07 and the lead-out address, converted to a logical sector number, in DAT_00069e0b. Finally hands (0, DAT_00069e0b) to fdps_cd_play_audio_range, which issues MSCDEX Play Audio (command code 0x84) starting at sector 0 for DAT_00069e0b sectors: the whole disc from its very first sector, not from where track 1's audio begins. That last call is reached by a JMP to 0x0003c889 -- the identical three-instruction tail of fdps_cd_play_track, which the compiler merged with this one. No code in the program calls this routine.
+Probes 12 bytes of stack with __CHK, then silences any playback in progress with fdps_cd_stop_audio. Asks the drive for track 1's audio track info through fdps_cdrom_read_track_info(1), which refreshes the track-info globals -- track number in data_fdps_cd_track_info_track_number, track start sector in data_fdps_cd_track_start_sector, control byte in data_fdps_cd_track_info_control_flags -- none of which this routine reads back. Calls fdps_cdrom_read_disk_info to refresh the disc summary; that leaves the highest track number in data_fdps_cd_highest_track_number and the lead-out address, converted to a logical sector number, in data_fdps_cd_leadout_sector. Finally hands (0, data_fdps_cd_leadout_sector) to fdps_cd_play_audio_range, which issues MSCDEX Play Audio (command code 0x84) starting at sector 0 for data_fdps_cd_leadout_sector sectors: the whole disc from its very first sector, not from where track 1's audio begins. That last call is reached by a JMP to 0x0003c889 -- the identical three-instruction tail of fdps_cd_play_track, which the compiler merged with this one. No code in the program calls this routine.
 
 Parameters:
   none
@@ -12525,7 +12525,7 @@ Returns:
 Pool: fdps  [no library match in either the watcom or the ail Function ID set; its callees, the CD state globals it shares and its merged tail are all game CD code]
 
 Rebuild note:
-The obvious C rewrite passes track 1's start sector as the beginning of the play range, because the call that resolves it sits two lines above; the original passes the literal 0, so playback starts at the very first sector of the disc (the data track on this game's mixed-mode CD) rather than where track 1's audio begins. Write the 0 literally and keep the FUN_0003c0c8(1) call whose result is discarded.
+The obvious C rewrite passes track 1's start sector as the beginning of the play range, because the call that resolves it sits two lines above; the original passes the literal 0, so playback starts at the very first sector of the disc (the data track on this game's mixed-mode CD) rather than where track 1's audio begins. Write the 0 literally and keep the fdps_cdrom_read_track_info(1) call whose result is discarded.
 
 === 0003c911 [PLATE]
 Reports whether one CD-ROM track holds CD-DA audio rather than data.

@@ -227,6 +227,31 @@ extern void fdps_cd_play_track(short track);
 extern int fdps_cd_play_track_range(short first_track, short last_track);
 #pragma aux fdps_cd_play_track_range "*" parm caller [];
 
+/* 0003c8e6.  Plays the whole CD as audio: stops whatever the drive is doing,
+   refreshes the disc summary and issues one Play Audio request that starts at
+   the disc's very first sector and runs for as many sectors as the lead-out
+   sits at.
+
+   Takes nothing and returns nothing.  It reports nothing about the drive
+   either: playback is asynchronous and no request status is looked at, so this
+   returns as soon as the driver has taken the play request.  It leaves the
+   track-info globals naming track 1, which the query it makes and discards puts
+   there, and data_fdps_cd_leadout_sector holding the summary it just refreshed;
+   the play-range globals fdps_cd_play_track publishes are not touched, because
+   no fdps_cd_resolve_track_range call is made here.
+
+   The range begins at sector 0 and not where track 1's audio begins, so on this
+   game's mixed-mode disc the data track is inside what is sent to the driver.
+   Nothing bounds the range at the other end either: on a drive that refuses the
+   summary query the lead-out reads as the bit pattern of -150 and the request
+   goes out with a sector count near 2^32.
+
+   Nothing in the image calls it.  A sweep for the entry address -- xrefs and an
+   operand search over all 89,420 instructions -- finds it referenced from
+   nowhere, so no caller pins its behaviour further. */
+extern void fdps_cd_play_whole_disc(void);
+#pragma aux fdps_cd_play_whole_disc "*" parm caller [];
+
 /* 00030bf0.  Sets the background music: settles which music the game should be
    playing, publishes that in data_fdps_audio_cd_current_music_index and makes
    the drive match it -- playing the corresponding CD track, or stopping the

@@ -499,6 +499,63 @@ int fdps_cd_play_track_range(short first_track, short last_track)
     return (int) (end_sector - start_sector);
 }
 
+/* 0003c8e6.  Plays the whole CD as audio: one Play Audio request that begins at
+   the disc's very first sector and runs for as many sectors as the lead-out
+   sits at.  Four calls, no local, no branch and nothing tested.
+
+   The start sector is the literal 0 the body pushes at 0003c90a -- PUSH 0x0 --
+   and not where track 1's audio begins.  This is the function's own trap and
+   the reason to read the pushes rather than the call order: the query two lines
+   above resolves track 1 and republishes data_fdps_cd_track_start_sector, which
+   is exactly the value the obvious rewrite reaches for, and on this game's
+   mixed-mode disc the two are not the same place -- sector 0 is the data track.
+   Writing the resolved start instead would move the beginning of playback.  It
+   is this function's own trap rather than a pattern that repeats, so it lives
+   here and in the plate comment rather than in rebuild_info/pitfalls.md.
+
+   The track query at 0003c8f7 is a call whose every result is discarded.
+   PUSH 0x1 / CALL 0003c0c8 / ADD ESP,0x4 asks fdps_cdrom_read_track_info about
+   track 1, which republishes data_fdps_cd_track_info_track_number,
+   data_fdps_cd_track_start_sector and data_fdps_cd_track_info_control_flags;
+   nothing below reads any of the three, and no fdps_cd_resolve_track_range
+   call follows to read them either.  Dropping it would still leave the play
+   request identical and would still change the program: it sends a real IOCTL
+   Input to the driver and it leaves the CD layer's track-info globals naming
+   track 1, which every later reader of them sees.
+
+   The stop at 0003c8f0 comes first for the reason it does in
+   fdps_cd_play_track: Play Audio does not replace a range already in progress.
+   The disc summary at 0003c8ff is what makes the count current -- it is the
+   call that writes data_fdps_cd_leadout_sector, so the push of that global at
+   0003c904 is a fresh load of what fdps_cdrom_read_disk_info just published
+   and not a value the call left in a register.
+
+   The two arguments go out as PUSH dword ptr [0x00069e0b] then PUSH 0x0, so
+   the last pushed is the first argument: 0 is the start sector and the lead-out
+   sector is the end.  fdps_cd_play_audio_range subtracts one from the other, so
+   what the driver is asked to play is data_fdps_cd_leadout_sector sectors from
+   sector 0.  Nothing checks that the lead-out is above 0, and on a drive that
+   refused the summary query it is not -- the reply block reads 00:00:00, which
+   fdps_cd_msf_to_sector turns into -150, and the count goes out near 2^32.
+
+   Returns nothing and reports nothing: all four callees are void, EAX is never
+   set deliberately, and the RET is reached through the tail
+   fdps_cd_play_track's body ends with -- the JMP 0x0003c889 at 0003c90c lands
+   on the CALL / ADD ESP,0x8 / RET the compiler merged between the two.  That
+   merge is instruction selection and not behaviour (ADR-0001), so what is
+   written below is the call itself.
+
+   Nothing in the image calls it.  A sweep for the entry address -- xrefs and an
+   operand search over all 89,420 instructions -- finds it referenced from
+   nowhere, so no caller pins its behaviour further. */
+void fdps_cd_play_whole_disc(void)
+{
+    fdps_cd_stop_audio();
+    fdps_cdrom_read_track_info(1);
+    fdps_cdrom_read_disk_info();
+    fdps_cd_play_audio_range(0, data_fdps_cd_leadout_sector);
+}
+
 
 /* 00030bf0.  Settles which background music the game should be playing and
    makes the drive match: the requested index goes into

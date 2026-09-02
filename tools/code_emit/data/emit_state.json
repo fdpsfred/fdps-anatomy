@@ -1657,6 +1657,14 @@
       "status": "committed",
       "emitted_against": "0x54",
       "rounds": 0
+    },
+    "0003c8e6": {
+      "name": "fdps_cd_play_whole_disc",
+      "target": "cdaudio.c",
+      "body_size": "0x2b",
+      "status": "committed",
+      "emitted_against": "0x2b",
+      "rounds": 0
     }
   }
 }

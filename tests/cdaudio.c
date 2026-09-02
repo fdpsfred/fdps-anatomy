@@ -4,8 +4,9 @@
  * 0003c452, fdps_cd_stop_audio at 0003c4a7, fdps_cd_resume_audio at 0003c4ff,
  * fdps_cd_read_q_channel at 0003c5a6, fdps_cd_audio_is_idle at 0003c6e8,
  * fdps_cd_resolve_track_range at 0003c803, fdps_cd_play_track at 0003c85b,
- * fdps_cd_play_track_range at 0003c892, fdps_cd_set_music_track at 00030bf0 and
- * fdps_cd_music_repeat_poll at 00030c50.
+ * fdps_cd_play_track_range at 0003c892, fdps_cd_play_whole_disc at 0003c8e6,
+ * fdps_cd_set_music_track at 00030bf0 and fdps_cd_music_repeat_poll at
+ * 00030c50.
  *
  * Every expected value below comes from the instructions of those functions,
  * never from the emitted C.  For fdps_cd_seek:
@@ -2317,6 +2318,196 @@ static void cdaudio_play_range_does_not_refuse_a_track_past_the_disc(void)
     CHECK_EQ((long) range_length, (long) staged_dword(header, 0x12));
 }
 
+/* fdps_cd_play_whole_disc at 0003c8e6 is four calls and nothing else:
+ *
+ *   CALL 0003c4a7                     fdps_cd_stop_audio
+ *   PUSH 0x1 / CALL 0003c0c8 / ADD ESP,0x4    fdps_cdrom_read_track_info(1)
+ *   CALL 0003bfa5                     fdps_cdrom_read_disk_info
+ *   PUSH dword ptr [0x00069e0b] / PUSH 0x0 /
+ *     JMP 0003c889 -> CALL 0003c452 / ADD ESP,0x8   fdps_cd_play_audio_range
+ *
+ * so what there is to pin down is the pair of immediates in the last two
+ * pushes, the order of the four calls, and the fact that the track query's
+ * three published globals reach nothing below it.
+ *
+ * The start sector is the literal 0 at 0003c90a.  That is the whole point of
+ * the function and the one thing the obvious rewrite gets wrong, since
+ * fdps_cdrom_read_track_info(1) two lines above republishes
+ * data_fdps_cd_track_start_sector and that is the value a resolved start would
+ * come from.  The assertions below take it from the transfer address the play
+ * request stages, which is where fdps_cd_play_audio_range puts its first
+ * argument.
+ *
+ * There is no fdps_cd_resolve_track_range call here, so the two play-range
+ * globals are untouched: the poison the helper puts in them is still there
+ * afterwards, which is what says the range was not resolved.
+ *
+ * The refused Read Disk Info is what makes the count checkable.  Every request
+ * below goes out for real to drive index 0xff, which MSCDEX refuses on the
+ * drive number before it follows ES:BX, and fdps_cdrom_read_disk_info clears
+ * its seven-byte control block before staging it -- so the reply it reads back
+ * is all zeroes, the lead-out address reads 00:00:00, and
+ * fdps_cd_msf_to_sector turns that into 0 - 150.  data_fdps_cd_leadout_sector
+ * therefore holds 0xffffff6a and the disc's highest track reads 0, the same
+ * pair tests/cdtoc.c pins on that function directly.
+ *
+ * Header offsets 0x16 to 0x19 are the ordering lever they are in the
+ * fdps_cd_play_track tests above: the volume_id_ptr field, zeroed inside the
+ * two 0x1a-byte queries and out of reach of the play request's 0x16 bytes.
+ */
+
+/* The track number the CD layer is left naming on the way in.  It has to differ
+   from 1 for the assertions to tell the query's answer from what was already
+   standing there, and 9 is inside the 20-track disc the helper describes so it
+   is a number the layer could plausibly have been holding. */
+#define WHOLE_DISC_PRESET_TRACK 9
+
+static void play_the_whole_disc(void)
+{
+    int i;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    for (i = 0; i < 0x20; i++) {
+        data_fdps_cd_request_header_buffer[i] = HEADER_POISON;
+    }
+    data_fdps_cd_ioctl_buffer[0] = HEADER_POISON;
+    data_fdps_cd_ioctl_buffer[1] = HEADER_POISON;
+
+    data_fdps_cd_track_info_track_number = WHOLE_DISC_PRESET_TRACK;
+    data_fdps_cd_highest_track_number = 20;
+    data_fdps_cd_track_start_sector = (unsigned int) RESOLVE_TRACK_START_SECTOR;
+    data_fdps_cd_leadout_sector = (unsigned int) RANGE_POISON;
+    data_fdps_cd_play_range_start_sector = (unsigned int) RANGE_POISON;
+    data_fdps_cd_play_range_end_sector = (unsigned int) RANGE_POISON;
+
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    fdps_cd_play_whole_disc();
+}
+
+/* The last CALL in the body is fdps_cd_play_audio_range, so the header block is
+   left holding its request and not either query's.  The four immediates are
+   that function's own -- MOV byte ptr [ESP],0x16, MOV byte ptr [ESP+0x1],0x0,
+   MOV byte ptr [ESP+0x2],0x84 and MOV byte ptr [ESP+0xd],0x0 -- and 0x16 rather
+   than 0x1a is what says neither 0x1a-byte query came last. */
+static void cdaudio_whole_disc_leaves_a_play_request_in_the_header(void)
+{
+    unsigned char *header;
+
+    play_the_whole_disc();
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x16);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 0x84);
+    CHECK_EQ(header[0xd], 0);
+}
+
+/* PUSH 0x0 at 0003c90a is the last push before the call, so 0 is
+   fdps_cd_play_audio_range's first argument and lands in the transfer address
+   at header offset 0x0e.  The query at 0003c8f7 has already overwritten
+   data_fdps_cd_track_start_sector by then -- the sentinel the helper loaded it
+   with is past everything fdps_cd_msf_to_sector can return, so its absence is
+   what says the query ran -- and a body that sent that republished start
+   instead of the literal would put it here. */
+static void cdaudio_whole_disc_starts_at_the_first_sector_of_the_disc(void)
+{
+    unsigned char *header;
+
+    play_the_whole_disc();
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ((long) staged_dword(header, 0x0e), 0);
+    CHECK_EQ((long) data_fdps_cd_track_start_sector ==
+             (long) RESOLVE_TRACK_START_SECTOR, 0);
+}
+
+/* PUSH dword ptr [0x00069e0b] at 0003c904 is the other argument, so the end of
+   the range is data_fdps_cd_leadout_sector whole.  fdps_cd_play_audio_range
+   stages end minus start at offset 0x12, and the start is 0, so the count field
+   is that global copied.  The poison it went in holding is past every sector
+   value a query can produce, so its absence says fdps_cdrom_read_disk_info
+   wrote it. */
+static void cdaudio_whole_disc_runs_to_the_lead_out(void)
+{
+    unsigned char *header;
+
+    play_the_whole_disc();
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ((long) data_fdps_cd_leadout_sector == (long) RANGE_POISON, 0);
+    CHECK_EQ((long) staged_dword(header, 0x12),
+             (long) data_fdps_cd_leadout_sector);
+}
+
+/* CALL 0003bfa5 at 0003c8ff is fdps_cdrom_read_disk_info, which clears its
+   control block before staging it, so a refused request brings back all zeroes:
+   the highest track reads 0 where the helper had put 20, and the lead-out
+   address reads 00:00:00, which fdps_cd_msf_to_sector turns into 0 - 150.  The
+   count the play request then carries is that same 0xffffff6a, because the
+   start it is measured from is 0. */
+static void cdaudio_whole_disc_refreshes_the_disc_summary_before_it_plays(void)
+{
+    unsigned char *header;
+
+    play_the_whole_disc();
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(data_fdps_cd_highest_track_number, 0);
+    CHECK_EQ(data_fdps_cd_leadout_sector == 0xffffff6aUL, 1);
+    CHECK_EQ(staged_dword(header, 0x12) == 0xffffff6aUL, 1);
+}
+
+/* PUSH 0x1 at 0003c8f5 is the query's whole argument, so the track the CD layer
+   is left naming is 1 and not the WHOLE_DISC_PRESET_TRACK it arrived holding.
+   Nothing below the query reads what it published: no fdps_cd_resolve_track_range
+   call is made, and the two play-range globals still hold the helper's poison
+   afterwards, which is what says the range was taken from the pushes and not
+   resolved. */
+static void cdaudio_whole_disc_queries_track_one_and_discards_it(void)
+{
+    play_the_whole_disc();
+
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 1);
+    CHECK_EQ((long) data_fdps_cd_play_range_start_sector,
+             (long) RANGE_POISON);
+    CHECK_EQ((long) data_fdps_cd_play_range_end_sector, (long) RANGE_POISON);
+}
+
+/* The two queries stage their control blocks into the same IOCTL block, so the
+   one left there is the one that ran last.  0x0a is fdps_cdrom_read_disk_info's
+   Read Disk Info code and the zero beside it is that function's memset; the
+   track query would have left 0x0b and the track number 1 instead, so this is
+   what fixes the disc summary after the track query rather than before it. */
+static void cdaudio_whole_disc_asks_for_the_disc_summary_last(void)
+{
+    play_the_whole_disc();
+
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 0xa);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 0);
+}
+
+/* Both queries are 0x1a-byte IOCTL requests that zero volume_id_ptr at header
+   offset 0x16; the play request is 0x16 bytes long and never reaches it.  Four
+   zeroes standing where the poison was therefore say a query ran before the
+   play request, and the poison still standing at 0x1a and 0x1f says nothing
+   longer than 0x1a bytes was ever staged. */
+static void cdaudio_whole_disc_queries_before_it_plays(void)
+{
+    unsigned char *header;
+
+    play_the_whole_disc();
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0x16], 0);
+    CHECK_EQ(header[0x17], 0);
+    CHECK_EQ(header[0x18], 0);
+    CHECK_EQ(header[0x19], 0);
+    CHECK_EQ(header[0x1a], HEADER_POISON);
+    CHECK_EQ(header[0x1f], HEADER_POISON);
+}
+
 void run_cdaudio_tests(void)
 {
     RUN_TEST(cdaudio_seek_header_fields_sit_where_the_stores_land);
@@ -2381,6 +2572,13 @@ void run_cdaudio_tests(void)
     RUN_TEST(cdaudio_play_range_length_goes_negative_below_the_start);
     RUN_TEST(cdaudio_play_range_latches_the_start_before_the_second_resolve);
     RUN_TEST(cdaudio_play_range_does_not_refuse_a_track_past_the_disc);
+    RUN_TEST(cdaudio_whole_disc_leaves_a_play_request_in_the_header);
+    RUN_TEST(cdaudio_whole_disc_starts_at_the_first_sector_of_the_disc);
+    RUN_TEST(cdaudio_whole_disc_runs_to_the_lead_out);
+    RUN_TEST(cdaudio_whole_disc_refreshes_the_disc_summary_before_it_plays);
+    RUN_TEST(cdaudio_whole_disc_queries_track_one_and_discards_it);
+    RUN_TEST(cdaudio_whole_disc_asks_for_the_disc_summary_last);
+    RUN_TEST(cdaudio_whole_disc_queries_before_it_plays);
     RUN_TEST(cdaudio_set_music_publishes_the_index_it_was_given);
     RUN_TEST(cdaudio_set_music_plays_when_the_music_is_on);
     RUN_TEST(cdaudio_set_music_plays_the_track_one_past_the_index);
