@@ -11,6 +11,7 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "unit.h"
+#include "deploy.h"
 #include "chevt3.h"
 
 /* The half of the AI byte the merge below keeps: AND DL,0xf0 at 00037b53.  The
@@ -184,4 +185,66 @@ void fdps_chapter_16_event_enemies_advance_for_turn(int unit_index)
                  AI_BEHAVIOR_MODE_ADVANCE);
         }
     }
+}
+
+/* What the chapter 17 handler below takes off the battle turn counter to get
+   the wave it asks for: SUB EAX,0x7 at 0003812b, on the dword loaded from
+   data_fdps_battle_turn_counter one instruction earlier.  The counter is
+   1-based and the turn-event runner fires while it still holds the turn whose
+   phase has just ended, so the map's turn 8 record asks for wave 1 and its
+   turn 9 record for wave 2. */
+#define CH17_WAVE_TURN_OFFSET 7
+
+/* How that wave is placed: XOR EAX,EAX / PUSH EAX at 00038123, so
+   fdps_deploy_wave passes 0 on to fdps_deploy_unit and each unit goes on the
+   nearest free walkable tile to its placement record's coordinates rather than
+   on the coordinates themselves.  Wave 0, the group a map opens with, is the
+   one deployed with this flag set. */
+#define CH17_PLACE_EXACT 0
+
+/* 00038110.  Chapter 17's turn-scheduled reinforcement event: brings on the
+   wave of the current map's deployment table that is due for the turn just
+   played.
+
+   The whole body is one call.  The frame is the standard Watcom four-push one
+   with an empty local area -- PUSH EBX / PUSH ESI / PUSH EDI / PUSH EBP /
+   MOV EBP,ESP / SUB ESP,0x0 at 00038110..00038116 -- so there is no local
+   here at all and the three arguments are computed straight into the pushes:
+   XOR EAX,EAX / PUSH EAX, then MOV EAX,[0x00069ce8] / SUB EAX,0x7 / PUSH EAX,
+   then PUSH dword ptr [0x00069cf4], at 00038123..0003812f.  The caller-cleans
+   ADD ESP,0xc at 0003813a is this function's own, which is what makes the
+   convention the stack one.
+
+   The map number is data_fdps_chapter_current_chapter_id read at the call site
+   and not anything this handler holds, so it is whichever chapter is loaded --
+   the same way the chapter 10 ambush in chevt2.c reads it.
+
+   The wave key is the raw subtraction with nothing on either side of it: no
+   compare, no table and no lower bound.  Adding the guard that looks obvious
+   would change behaviour rather than protect it, because a turn below 8 gives
+   a negative key, which matches no deployment record -- fdps_deploy_wave
+   compares an unsigned wave byte against this int -- while a key clamped to 0
+   would match the map's whole opening army and deploy it a second time.
+
+   Nothing guards the call and nothing records that it ran, so the handler
+   fires its wave every time it is reached; what makes each wave arrive once is
+   the map's turn table naming the slot once per turn.
+
+   unit_index is the handler table's shared parameter.  MOV dword ptr
+   [EBP+0x14],0x0 at 0003811c writes zero over the incoming slot before the
+   counter is read and nothing ever reads it back, so which unit the event
+   fired for cannot reach anything this handler does; the store has no
+   observable effect, because the slot belongs to the caller's outgoing
+   argument area and the turn-event runner drops it with ADD ESP,0x4 at
+   0002e146.
+
+   Nothing sets EAX between the CALL's return and the RET at 00038141, and no
+   dispatcher reads what comes back, so the result is void. */
+void fdps_chapter_17_event_deploy_wave_for_turn(int unit_index)
+{
+    unit_index = 0;
+
+    fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                     data_fdps_battle_turn_counter - CH17_WAVE_TURN_OFFSET,
+                     CH17_PLACE_EXACT);
 }

@@ -105,4 +105,44 @@ extern void fdps_chapter_15_event_activate_enemy_group(int unit_index);
 extern void fdps_chapter_16_event_enemies_advance_for_turn(int unit_index);
 #pragma aux fdps_chapter_16_event_enemies_advance_for_turn "*" parm caller [];
 
+/* Chapter 17's turn-scheduled reinforcement event: it brings on the wave of
+   the current map's deployment table that the turn just played is due, by
+   handing fdps_deploy_wave the map the chapter is playing, the battle turn
+   counter less seven, and a placement flag of 0.
+
+   The wave key is the raw subtraction and nothing else: there is no test, no
+   table and no bound on either side of it, so the wave asked for is whatever
+   the counter happens to hold minus seven.  On the two turns the map schedules
+   it that is wave 1 and wave 2; on any earlier turn it is a negative number,
+   which matches no deployment record because a record's wave byte is
+   unsigned, so the call opens its files, loads the placement table and deploys
+   nothing.
+
+   The map number is read from data_fdps_chapter_current_chapter_id, so it is
+   whatever chapter is loaded rather than anything this handler holds, and the
+   placement flag of 0 makes fdps_deploy_unit put each unit on the nearest free
+   walkable tile to the coordinates its MAP%02d.COD record names rather than on
+   those coordinates themselves.
+
+   There is no one-shot latch and nothing records that the handler has run.
+   Calling it twice on the same turn deploys the same wave twice, because the
+   wave walk appends and never checks whether those records are already on the
+   map; the map's own turn table naming a slot once per turn is what keeps that
+   from happening.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with 0 before the counter is read, and never
+   read back, so any index behaves the same.
+
+   Table slot 24, and the turn-event table of chapter 17's map16.dat is the
+   only shipped thing that names it, with the two records {turn 8, slot 24,
+   phase 0} and {turn 9, slot 24, phase 0}; no tile trigger and no death script
+   in any MAP*.DAT reaches the slot.  The turn-event dispatcher fires a record
+   while the counter still holds the turn whose phase has just ended, so the
+   first firing asks for wave 1 -- map16.dat's six level 15 records 23..28 --
+   and the second for wave 2, its single level 14 record 29.  All seven have
+   spawn points in the lower-left corner of the map, tiles (2..4, 22..24). */
+extern void fdps_chapter_17_event_deploy_wave_for_turn(int unit_index);
+#pragma aux fdps_chapter_17_event_deploy_wave_for_turn "*" parm caller [];
+
 #endif
