@@ -87,4 +87,31 @@ extern void fdps_deploy_wave(int map_no, int wave_no,
                              unsigned char place_exact);
 #pragma aux fdps_deploy_wave "*" parm caller [];
 
+/* 00022be0.  Builds a map's unit array from nothing: reloads the chapter's
+   resources, puts the party roster on the battlefield at the map's scripted
+   start tiles, and lets fdps_deploy_wave bring on wave 0 behind them.  This is
+   what a chapter starts from; fdps_deploy_wave alone is what a later turn adds
+   to.
+
+   map_no names the "map%02d.cod" placement table and is the map
+   fdps_deploy_wave deploys wave 0 of.  It does NOT choose the resources: the
+   fdps_field_load_chapter_resources call on the first line reads
+   data_fdps_chapter_current_chapter_id, and the one caller,
+   fdps_chapter_state_reset, passes that same global in.
+
+   Afterwards data_fdps_map_unit_count is the map's player-slot count plus
+   however many records wave 0 deployed, and data_fdps_map_unit_array_ptr is a
+   fresh block: whatever the previous map left is freed, not grown.  Slots
+   beyond the roster's own member count are zeroed and flagged retired, so a
+   map that fields more slots than the party has members carries empty ones.
+
+   Three resources have to be present, and none of the three is checked.  The
+   ICON.CEL stream is not tested and reaches fdps_cache_cel_sprite_group as it
+   is; Field.vfs and the members the chapter names are opened through
+   fdps_vfs_load_entry and fdps_field_load_chapter_resources, both of which end
+   the process rather than returning null.  The CEL sprite cache is emptied on
+   the way in, so the sprite slots this map hands out start at 0. */
+extern void fdps_build_map_unit_array(int map_no);
+#pragma aux fdps_build_map_unit_array "*" parm caller [];
+
 #endif

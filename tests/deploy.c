@@ -44,6 +44,7 @@
  */
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -1062,6 +1063,460 @@ static void place_exact_reaches_the_deployment(void)
     CHECK_EQ((int) deployed(0)->pos_y, 1);
 }
 
+/* fdps_build_map_unit_array at 00022be0, from here down.
+ *
+ * This one is run whole against the shipped containers, like the wave cases
+ * above and for the same reason: its first line is
+ * fdps_field_load_chapter_resources, which formats seven member names out of
+ * data_fdps_chapter_current_chapter_id and hands each to fdps_vfs_load_entry,
+ * and a member that is not there ends the process rather than failing a check.
+ * FIELD.VFS, FIELD1.VFS and FIELD2.VFS are all staged through
+ * tests/gamefile.lst; every case here skips itself unless all three, and
+ * ICON.CEL, are next to the executable.
+ *
+ * What the cases can control is the party: the roster block, the roster member
+ * count and the four static tables are published from here, so the two counts
+ * the loop runs on are the only inputs that come from the shipped files.
+ *
+ * Every expected number below is a byte of a shipped resource, read with
+ * tools/vfs_dump, or the layout the assembly at 00022be0 imposes on it:
+ *
+ *   MAP00.DAT bytes +1 and +2 are 1 and 22, MAP05.DAT's are 4 and 32 -- the
+ *     player slot count and the scripted deployment count of each map
+ *   MAP00.COD is 147 bytes: a 9-byte header and 23 six-byte records, which is
+ *     22 scripted deployments plus 1 player slot.  Read at +0xb + index * 6 as
+ *     two signed 16-bit values, record 0 is (18, 0) and record 22 is (16, 22)
+ *   MAP05.COD is 225 bytes: 36 records, 32 plus 4.  Records 32..35 are
+ *     (4, 8), (4, 10), (2, 10) and (3, 10)
+ *   MAP05.DAT tags exactly two of its 32 deployment records with wave 0 --
+ *     record 0, character 98 on MAP05.COD record 0 at (15, 4), and record 31,
+ *     character 12 at (3, 8).  MAP00.DAT tags none of its 22 with wave 0
+ *
+ * The chapter 0 cases are therefore the ones that isolate this function: with
+ * no wave-0 record in the map, nothing fdps_deploy_wave does can account for
+ * what ends up in the array.
+ */
+
+#define CH_ONE_SLOT 0
+#define CH_FOUR_SLOT 5
+
+#define CH0_PLAYER_SLOTS 1
+#define CH0_CHAR_SPAWNS 22
+#define CH0_PARTY_TILE_X 16
+#define CH0_PARTY_TILE_Y 22
+#define CH0_SCRIPTED_TILE_X 18
+#define CH0_SCRIPTED_TILE_Y 0
+
+#define CH5_PLAYER_SLOTS 4
+#define CH5_CHAR_SPAWNS 32
+#define CH5_WAVE0_UNITS 2
+#define CH5_PARTY0_TILE_X 4
+#define CH5_PARTY0_TILE_Y 8
+#define CH5_PARTY1_TILE_X 4
+#define CH5_PARTY1_TILE_Y 10
+#define CH5_WAVE0_CHAR_A 98
+#define CH5_WAVE0_TILE_A_X 15
+#define CH5_WAVE0_TILE_A_Y 4
+#define CH5_WAVE0_CHAR_B 12
+#define CH5_WAVE0_TILE_B_X 3
+#define CH5_WAVE0_TILE_B_Y 8
+
+#define FIELD1_NAME "FIELD1.VFS"
+#define FIELD2_NAME "FIELD2.VFS"
+
+/* The party the cases stage.  Every field carries a value the function either
+   has to keep or has to overwrite, so which of the two it did is visible in
+   the record afterwards:
+     char_id and the death-script operand are kept, and say the memmove ran
+     the position, facing, walk step, flags, side and script opcode are
+       overwritten with the map's own facts
+     hp_current and mp_current are below their maxima and come back equal to
+       them
+     the six status timers are non-zero and come back cleared, which the four
+       derived stats then measure a second time -- 0x3e7 is not any sum of the
+       staged bases, and a timer left running would scale the two totals
+   Both members share one portrait id and carry different character ids, which
+   is what separates record +7 from record +8. */
+#define PARTY_PORTRAIT 3
+#define PARTY_CHAR_ID_BASE 0x30
+#define PARTY_LEVEL_BASE 3
+#define PARTY_AP_BASE 11
+#define PARTY_DP_BASE 12
+#define PARTY_DX_BASE 13
+#define PARTY_HP_MAX_BASE 50
+#define PARTY_MP_MAX_BASE 20
+#define PARTY_STALE_DERIVED 0x3e7
+#define PARTY_STALE_TIMER 5
+#define PARTY_DEATH_OPERAND 0x2222
+#define DEATH_SCRIPT_NONE 0xff
+#define UNIT_FLAG_RETIRED 1
+#define PLAYER_SIDE 2
+
+/* Wide enough for every character and enemy id the two maps' wave-0 records
+   name: character 12 indexes the roster tables directly, character 98 indexes
+   the enemy table at 98 - 60. */
+#define BIG_TABLE_ROWS 64
+
+#define PARTY_SLOTS 8
+
+static struct fdps_unit_record stage_party[PARTY_SLOTS];
+static struct fdps_character_base_record stage_big_char[BIG_TABLE_ROWS];
+static struct fdps_character_growth stage_big_growth[BIG_TABLE_ROWS];
+static struct fdps_enemy_data stage_big_enemy[BIG_TABLE_ROWS];
+
+static int chapter_ready = 0;
+static int chapter_checked = 0;
+
+static void ensure_chapter_containers(void)
+{
+    FILE *fp;
+
+    if (chapter_checked) {
+        return;
+    }
+    chapter_checked = 1;
+    ensure_cel_sheet();
+    ensure_field_container();
+    if (!cel_ready || !field_ready) {
+        return;
+    }
+    fp = fopen(FIELD1_NAME, "rb");
+    if (fp == NULL) {
+        return;
+    }
+    fclose(fp);
+    fp = fopen(FIELD2_NAME, "rb");
+    if (fp == NULL) {
+        return;
+    }
+    fclose(fp);
+    chapter_ready = 1;
+}
+
+/* Nulling, not freeing.  Every case above this one points the scene layers,
+   the movement grid, the resident map block and the placement table at its own
+   static arrays, and fdps_field_load_chapter_resources frees all of them on
+   entry -- with a layer count of zero and null everywhere else it frees
+   nothing, which is the state a freshly started process is in.  Handing a
+   static array to free() is not something a later check would get to
+   report. */
+static void clear_chapter_globals(void)
+{
+    int layer;
+
+    for (layer = 0; layer < 6; layer++) {
+        data_fdps_scene_layer_tile_map_ptrs[layer] = NULL;
+        data_fdps_scene_layer_tile_sheet_ptrs[layer] = NULL;
+        data_fdps_scene_layer_tile_attr_ptr[layer] = NULL;
+    }
+    data_fdps_scene_layer_count = 0;
+    data_fdps_current_chapter_text_ptr = NULL;
+    data_fdps_tile_event_data_table_ptr = NULL;
+    data_fdps_map_cell_event_code_layer_ptr = NULL;
+    data_fdps_battle_move_grid_ptr = NULL;
+    data_fdps_map_spawn_pos_table_ptr = NULL;
+}
+
+/* The blocks the load left behind, released and the globals put back the way a
+   fresh process has them, so the cases that run after these see what they
+   would have seen if these had never run. */
+static void free_chapter_globals(void)
+{
+    int layer;
+
+    for (layer = 0; layer < data_fdps_scene_layer_count; layer++) {
+        free(data_fdps_scene_layer_tile_map_ptrs[layer]);
+        free(data_fdps_scene_layer_tile_sheet_ptrs[layer]);
+        free(data_fdps_scene_layer_tile_attr_ptr[layer]);
+    }
+    free(data_fdps_current_chapter_text_ptr);
+    free(data_fdps_tile_event_data_table_ptr);
+    free(data_fdps_map_cell_event_code_layer_ptr);
+    free(data_fdps_battle_move_grid_ptr);
+    clear_chapter_globals();
+}
+
+/* Blank staging for a whole-chapter build: the four data tables wide enough
+   for the wave-0 records the shipped maps carry, a party of roster_members
+   distinguishable records, an empty unit array, and the two counts the loop
+   runs on deliberately set to values the map does NOT have -- the resource
+   load on the function's first line has to replace both before anything reads
+   them. */
+static void stage_chapter(int roster_members)
+{
+    int member;
+    int timer;
+
+    stage();
+    clear_chapter_globals();
+
+    zero_bytes(stage_big_char, (int) sizeof(stage_big_char));
+    zero_bytes(stage_big_growth, (int) sizeof(stage_big_growth));
+    zero_bytes(stage_big_enemy, (int) sizeof(stage_big_enemy));
+    zero_bytes(stage_party, (int) sizeof(stage_party));
+
+    data_fdps_battle_character_base_table_ptr =
+        (unsigned char *) stage_big_char;
+    data_fdps_battle_character_growth_table_ptr =
+        (unsigned char *) stage_big_growth;
+    data_fdps_battle_enemy_data_table_ptr = (unsigned char *) stage_big_enemy;
+
+    for (member = 0; member < PARTY_SLOTS; member++) {
+        stage_party[member].pos_x = 0x55;
+        stage_party[member].pos_y = 0x66;
+        stage_party[member].sprite_cache_slot = 0x77;
+        stage_party[member].facing = 9;
+        stage_party[member].walk_step = 8;
+        stage_party[member].flags = 0x77;
+        stage_party[member].side = 9;
+        stage_party[member].portrait_id = PARTY_PORTRAIT;
+        stage_party[member].char_id =
+            (unsigned char) (PARTY_CHAR_ID_BASE + member);
+        stage_party[member].level = (unsigned char) (PARTY_LEVEL_BASE + member);
+        stage_party[member].death_script_opcode = 0x11;
+        stage_party[member].death_script_operand = PARTY_DEATH_OPERAND;
+        stage_party[member].ap_base = (short) (PARTY_AP_BASE + member);
+        stage_party[member].dp_base = (short) (PARTY_DP_BASE + member);
+        stage_party[member].dx_base = (short) (PARTY_DX_BASE + member);
+        stage_party[member].hp_max = (short) (PARTY_HP_MAX_BASE + member);
+        stage_party[member].hp_current = 1;
+        stage_party[member].mp_max = (short) (PARTY_MP_MAX_BASE + member);
+        stage_party[member].mp_current = 0;
+        stage_party[member].ap = PARTY_STALE_DERIVED;
+        stage_party[member].dp = PARTY_STALE_DERIVED;
+        stage_party[member].hit = PARTY_STALE_DERIVED;
+        stage_party[member].ev = PARTY_STALE_DERIVED;
+        for (timer = 0; timer < 6; timer++) {
+            stage_party[member].status_timers[timer] = PARTY_STALE_TIMER;
+        }
+    }
+
+    data_fdps_roster_array_ptr = (unsigned char *) stage_party;
+    data_fdps_roster_member_count = roster_members;
+
+    data_fdps_map_player_slot_count = 99;
+    data_fdps_map_char_spawn_count = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_cel_sprite_cache_count = 0;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+}
+
+/* The placement record a party slot stands on is the scripted deployment count
+ * PLUS the slot number, not the slot number.  Chapter 0 fields one player slot
+ * behind 22 scripted deployments, so slot 0 takes MAP00.COD record 22 at
+ * (16, 22); record 0, which indexing by the slot number alone would reach, is
+ * the scripted unit's tile (18, 0).
+ *
+ * Both counts are staged wrong on purpose beforehand -- 99 slots and 0
+ * scripted records -- so this also says the resource load on the first line
+ * really did republish them before the loop read them.  Cached across that
+ * call, the array would be 99 records long and slot 0 would land on (18, 0).
+ *
+ * MAP00.DAT tags none of its records with wave 0, so the count the array ends
+ * up with is the map's player slot count and nothing else. */
+static void build_places_the_party_past_the_scripted_records(void)
+{
+    ensure_chapter_containers();
+    CHECK_EQ(chapter_ready, 1);
+    if (!chapter_ready) {
+        return;
+    }
+    stage_chapter(1);
+    data_fdps_chapter_current_chapter_id = CH_ONE_SLOT;
+
+    fdps_build_map_unit_array(CH_ONE_SLOT);
+
+    CHECK_EQ(data_fdps_map_player_slot_count, CH0_PLAYER_SLOTS);
+    CHECK_EQ(data_fdps_map_char_spawn_count, CH0_CHAR_SPAWNS);
+    CHECK_EQ(data_fdps_map_unit_count, CH0_PLAYER_SLOTS);
+    CHECK_EQ((int) deployed(0)->pos_x, CH0_PARTY_TILE_X);
+    CHECK_EQ((int) deployed(0)->pos_y, CH0_PARTY_TILE_Y);
+    CHECK_EQ((int) deployed(0)->pos_x == CH0_SCRIPTED_TILE_X
+             && (int) deployed(0)->pos_y == CH0_SCRIPTED_TILE_Y, 0);
+    CHECK_EQ(data_fdps_map_spawn_pos_table_ptr == NULL, 1);
+
+    free_chapter_globals();
+}
+
+/* The roster record arrives whole and the map's own facts are written on top
+ * of it.  Kept: the character id and the death-script operand, neither of
+ * which the function touches.  Overwritten: the tile, the facing, the walk
+ * step, the flags, the side and the death-script opcode.
+ *
+ * The heal is unconditional -- hp_current comes back at hp_max and mp_current
+ * at mp_max for a member staged with 1 HP and no MP -- and the six status
+ * timers are cleared.  The four derived stats then say the clear happened
+ * BEFORE fdps_unit_recompute_combat_stats ran: with the timers still at 5 that
+ * routine scales attack and defense by 1.15 and adds 15 to both dexterity
+ * totals, so 11, 12, 13, 13 would read 12, 13, 28, 28 instead.  They also say
+ * the recompute ran at all: the staged records carry 0x3e7 in all four. */
+static void build_copies_the_roster_and_clears_the_map_fields(void)
+{
+    int timer;
+
+    ensure_chapter_containers();
+    if (!chapter_ready) {
+        return;
+    }
+    stage_chapter(1);
+    data_fdps_chapter_current_chapter_id = CH_ONE_SLOT;
+
+    fdps_build_map_unit_array(CH_ONE_SLOT);
+
+    CHECK_EQ((int) deployed(0)->char_id, PARTY_CHAR_ID_BASE);
+    CHECK_EQ((int) deployed(0)->level, PARTY_LEVEL_BASE);
+    CHECK_EQ((int) deployed(0)->death_script_operand, PARTY_DEATH_OPERAND);
+
+    CHECK_EQ((int) deployed(0)->facing, 0);
+    CHECK_EQ((int) deployed(0)->walk_step, 0);
+    CHECK_EQ((int) deployed(0)->flags, 0);
+    CHECK_EQ((int) deployed(0)->side, PLAYER_SIDE);
+    CHECK_EQ((int) deployed(0)->death_script_opcode, DEATH_SCRIPT_NONE);
+
+    CHECK_EQ((int) deployed(0)->hp_current, PARTY_HP_MAX_BASE);
+    CHECK_EQ((int) deployed(0)->hp_max, PARTY_HP_MAX_BASE);
+    CHECK_EQ((int) deployed(0)->mp_current, PARTY_MP_MAX_BASE);
+    CHECK_EQ((int) deployed(0)->mp_max, PARTY_MP_MAX_BASE);
+
+    for (timer = 0; timer < 6; timer++) {
+        CHECK_EQ((int) deployed(0)->status_timers[timer], 0);
+    }
+
+    CHECK_EQ((int) deployed(0)->ap, PARTY_AP_BASE);
+    CHECK_EQ((int) deployed(0)->dp, PARTY_DP_BASE);
+    CHECK_EQ((int) deployed(0)->hit, PARTY_DX_BASE);
+    CHECK_EQ((int) deployed(0)->ev, PARTY_DX_BASE);
+
+    free_chapter_globals();
+}
+
+/* A map that fields more player slots than the party has members fills the
+ * spare ones with a zeroed record whose flags byte is 1, the bit
+ * fdps_unit_is_retired reads.  Chapter 5 fields four slots; staged with two
+ * members, slots 2 and 3 are the spares.
+ *
+ * Zeroed means zeroed: the spare arm runs before anything else is written into
+ * the record, so the tile the placement table names for that slot does not
+ * reach it either -- MAP05.COD records 34 and 35 are (2, 10) and (3, 10), and
+ * a spare slot standing on one of them would be a unit on the map. */
+static void build_fills_slots_past_the_roster_as_retired(void)
+{
+    ensure_chapter_containers();
+    if (!chapter_ready) {
+        return;
+    }
+    stage_chapter(2);
+    data_fdps_chapter_current_chapter_id = CH_FOUR_SLOT;
+
+    fdps_build_map_unit_array(CH_FOUR_SLOT);
+
+    CHECK_EQ(data_fdps_map_player_slot_count, CH5_PLAYER_SLOTS);
+    CHECK_EQ(data_fdps_map_char_spawn_count, CH5_CHAR_SPAWNS);
+
+    CHECK_EQ((int) deployed(0)->pos_x, CH5_PARTY0_TILE_X);
+    CHECK_EQ((int) deployed(0)->pos_y, CH5_PARTY0_TILE_Y);
+    CHECK_EQ((int) deployed(1)->pos_x, CH5_PARTY1_TILE_X);
+    CHECK_EQ((int) deployed(1)->pos_y, CH5_PARTY1_TILE_Y);
+    CHECK_EQ((int) deployed(1)->char_id, PARTY_CHAR_ID_BASE + 1);
+
+    CHECK_EQ((int) deployed(2)->flags, UNIT_FLAG_RETIRED);
+    CHECK_EQ((int) deployed(2)->pos_x, 0);
+    CHECK_EQ((int) deployed(2)->pos_y, 0);
+    CHECK_EQ((int) deployed(2)->char_id, 0);
+    CHECK_EQ((int) deployed(2)->side, 0);
+    CHECK_EQ((int) deployed(2)->hp_max, 0);
+    CHECK_EQ((int) deployed(3)->flags, UNIT_FLAG_RETIRED);
+    CHECK_EQ((int) deployed(3)->pos_x, 0);
+    CHECK_EQ((int) deployed(3)->hp_max, 0);
+
+    free_chapter_globals();
+}
+
+/* The sprite group is the PORTRAIT id at record +7, not the character id at
+ * +8, and the cache it is looked up in is emptied first.
+ *
+ * The cache is primed with one group of its own before the build, so it holds
+ * one entry and its buffer is a real allocation.  Both party members then
+ * share portrait 3 and carry different character ids, so:
+ *
+ *   read from +7 on an emptied cache, both members get slot 0
+ *   read from +8, they are two different groups and land on slots 0 and 1
+ *   read from +7 on a cache that was NOT emptied, the primed group holds slot
+ *     0 and both members get slot 1
+ *
+ * Each of the three answers is distinct, so this one comparison separates all
+ * of them. */
+static void build_takes_the_sprite_group_from_the_portrait_id(void)
+{
+    FILE *fp;
+    int primed_slot;
+
+    ensure_chapter_containers();
+    if (!chapter_ready) {
+        return;
+    }
+    stage_chapter(2);
+    data_fdps_chapter_current_chapter_id = CH_FOUR_SLOT;
+
+    fp = fopen(CEL_NAME, "rb");
+    primed_slot = fdps_cache_cel_sprite_group(9, fp);
+    fclose(fp);
+    CHECK_EQ(primed_slot, 0);
+    CHECK_EQ(data_fdps_cel_sprite_cache_count, 1);
+
+    fdps_build_map_unit_array(CH_FOUR_SLOT);
+
+    CHECK_EQ((int) deployed(0)->sprite_cache_slot, 0);
+    CHECK_EQ((int) deployed(1)->sprite_cache_slot, 0);
+    CHECK_EQ((int) deployed(0)->char_id, PARTY_CHAR_ID_BASE);
+    CHECK_EQ((int) deployed(1)->char_id, PARTY_CHAR_ID_BASE + 1);
+
+    free_chapter_globals();
+}
+
+/* The array is started over, and wave 0 is appended to it.
+ *
+ * Chapter 5 tags two of its 32 deployment records with wave 0 -- record 0,
+ * character 98, and record 31, character 12 -- so a build leaves four player
+ * slots followed by those two, six records in all, on the tiles MAP05.COD
+ * names for records 0 and 31.  The wave number is what picks them: chapter 5's
+ * wave 1 carries 23 records, so any other wave gives a different count.
+ *
+ * Running the build a second time answers the other half.  Nothing is appended
+ * to what the first one left: the count comes back at six rather than twelve,
+ * and slot 0 is the party member again rather than a wave unit shifted along.
+ * The second run is also the one that takes the free path over a real
+ * allocation, the first having been staged with an empty array. */
+static void build_starts_the_array_over_and_appends_wave_zero(void)
+{
+    ensure_chapter_containers();
+    if (!chapter_ready) {
+        return;
+    }
+    stage_chapter(2);
+    data_fdps_chapter_current_chapter_id = CH_FOUR_SLOT;
+
+    fdps_build_map_unit_array(CH_FOUR_SLOT);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH5_PLAYER_SLOTS + CH5_WAVE0_UNITS);
+    CHECK_EQ((int) deployed(4)->char_id, CH5_WAVE0_CHAR_A);
+    CHECK_EQ((int) deployed(4)->pos_x, CH5_WAVE0_TILE_A_X);
+    CHECK_EQ((int) deployed(4)->pos_y, CH5_WAVE0_TILE_A_Y);
+    CHECK_EQ((int) deployed(5)->char_id, CH5_WAVE0_CHAR_B);
+    CHECK_EQ((int) deployed(5)->pos_x, CH5_WAVE0_TILE_B_X);
+    CHECK_EQ((int) deployed(5)->pos_y, CH5_WAVE0_TILE_B_Y);
+
+    fdps_build_map_unit_array(CH_FOUR_SLOT);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH5_PLAYER_SLOTS + CH5_WAVE0_UNITS);
+    CHECK_EQ((int) deployed(0)->char_id, PARTY_CHAR_ID_BASE);
+    CHECK_EQ((int) deployed(0)->pos_x, CH5_PARTY0_TILE_X);
+    CHECK_EQ((int) deployed(4)->char_id, CH5_WAVE0_CHAR_A);
+
+    free_chapter_globals();
+}
+
 void run_deploy_tests(void)
 {
     RUN_TEST(record_offsets_match_the_assembly);
@@ -1082,4 +1537,9 @@ void run_deploy_tests(void)
     RUN_TEST(a_wave_nothing_matches_still_releases_the_table);
     RUN_TEST(a_second_wave_appends_to_the_first);
     RUN_TEST(place_exact_reaches_the_deployment);
+    RUN_TEST(build_places_the_party_past_the_scripted_records);
+    RUN_TEST(build_copies_the_roster_and_clears_the_map_fields);
+    RUN_TEST(build_fills_slots_past_the_roster_as_retired);
+    RUN_TEST(build_takes_the_sprite_group_from_the_portrait_id);
+    RUN_TEST(build_starts_the_array_over_and_appends_wave_zero);
 }

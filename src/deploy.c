@@ -415,3 +415,163 @@ void fdps_deploy_wave(int map_no, int wave_no, unsigned char place_exact)
     data_fdps_map_spawn_pos_table_ptr = NULL;
     free(field_vfs);
 }
+
+/* The stack buffer fdps_build_map_unit_array formats the placement file's name
+   into.  SUB ESP,0x40 at 00022be6 with the buffer at [EBP-0x34] and the lowest
+   named local above it at [EBP-0x14] leaves 32 bytes -- a different size from
+   fdps_deploy_wave's own 20 above, and each is the frame that function really
+   has. */
+#define CHAPTER_PLACEMENT_NAME_SIZE 32
+
+/* What a slot's flags byte says when nobody is in it: MOV byte ptr
+   [EAX + 0x5],0x1 at 00022d36, the bit fdps_unit_is_retired reads. */
+#define UNIT_FLAG_RETIRED 1
+
+/* The death-script opcode that means "this unit runs no script when it dies":
+   MOV byte ptr [EAX + 0x31],0xff at 00022da4. */
+#define DEATH_SCRIPT_NONE 0xff
+
+/* Which wave the map opens with, and how its units are placed: PUSH 0x1 /
+   PUSH 0x0 at 00022e0c..00022e12, so wave 0 goes down on the tiles its
+   placement records name rather than on searched-for ones. */
+#define OPENING_WAVE 0
+#define OPENING_WAVE_PLACE_EXACT 1
+
+/* 00022be0.  See deploy.h for what map_no selects and what the array looks
+   like afterwards.
+
+   The two counts the loop runs on are not read from anything here: the call to
+   fdps_field_load_chapter_resources on the first line republishes
+   data_fdps_map_player_slot_count and data_fdps_map_char_spawn_count out of
+   the new map's MAP%02d.DAT header, and everything below reads what that call
+   left.  The chapter it loads is data_fdps_chapter_current_chapter_id and not
+   map_no, so the two are only the same because the one caller passes that
+   global.
+
+   The placement record a party slot is put on is NOT record slot_index.  It is
+   record data_fdps_map_char_spawn_count + slot_index -- ADD EAX,[EBP-0x8]
+   after MOV EAX,[0x0006410c] at 00022cff -- because the scripted deployments
+   own the front of the table and the party's start tiles follow them.  Every
+   shipped MAP%02d.COD is exactly that long: MAP00.COD is 147 bytes, 23 records
+   behind a 9-byte header, for 22 scripted deployments and 1 player slot
+   (resource_info/vfs.md).  Indexing by the slot number alone drops each party
+   member onto a scripted unit's tile, which is why it is in
+   rebuild_info/pitfalls.md.
+
+   The roster record's address is formed inline -- the index is copied through
+   two parameter-shaped frame slots, IMUL by 0x50, MOV EDX,[0x00064108], ADD --
+   which is the inline-expansion fingerprint rebuild_info/build_flags.md
+   describes, of fdps_get_roster_record at 00023950.  The open arithmetic
+   reproduces it; calling the accessor would put a CALL where the original has
+   none.  The unit record beside it really is a call (00022cd3), and is written
+   as one.
+
+   Both pointers are formed before the branch and the spare-slot arm uses
+   neither.  A spare slot therefore still forms an address into the placement
+   table for a record that may not exist -- for a map whose COD file stops at
+   the last party slot the address is one past the end -- and nothing reads
+   through it, so it stays harmless exactly as long as it stays unread.
+
+   Only the LOW byte of each 16-bit placement coordinate reaches the record:
+   MOV DL,byte ptr [EAX] and MOV DL,byte ptr [EAX + 0x2] at 00022d54 and
+   00022d5e, into two unsigned byte fields.  The negative anchors
+   fdps_deploy_unit's search understands cannot survive here and are not meant
+   to -- these tiles are taken as given.
+
+   The sprite group is the PORTRAIT id at record +7 and not the character id at
+   +8 (MOV AL,byte ptr [EAX + 0x7] / AND EAX,0xff at 00022d6e), which is what
+   makes a promoted character walk with the sprite set his new class was given.
+   It is read back out of the unit record after the memmove, so it is the
+   roster's own value.
+
+   The full heal is unconditional: hp_current takes hp_max and mp_current takes
+   mp_max for every party slot, so the party enters a map at full health
+   however the last one left it, and a member who ended the previous battle at
+   0 HP is standing again.  fdps_roster_write_back_battle_units at the other
+   end of the same round trip is the one that tests the retired bit before
+   healing; this one does not.
+
+   Contract C: all four counts -- the player slot count, the roster member
+   count, the scripted deployment count and the loop's own index -- are full
+   32-bit ints compared with JL (00022cc0 and 00022d21).  The two placement
+   coordinates never reach a comparison at all, and the portrait id arrives
+   zero-extended, so 0..255. */
+void fdps_build_map_unit_array(int map_no)
+{
+    char placement_file_name[CHAPTER_PLACEMENT_NAME_SIZE];
+    FILE *icon_cel_fp;
+    struct fdps_unit_record *unit;
+    struct fdps_unit_record *roster_member;
+    short *map_start_tile;
+    int slot_index;
+
+    fdps_field_load_chapter_resources();
+
+    /* Dropping the cache buffer and zeroing the count together is what makes
+       fdps_cache_cel_sprite_group take its seed branch on the next call, so
+       the sprite slots handed out below start at 0 for this map.  The count
+       is zeroed whether or not there was a buffer to free. */
+    if (data_fdps_cel_sprite_cache_count != 0) {
+        free(data_fdps_cel_sprite_cache_ptr);
+    }
+    data_fdps_cel_sprite_cache_count = 0;
+
+    icon_cel_fp = fopen("ICON.CEL", "rb");
+    sprintf(placement_file_name, "map%02d.cod", map_no);
+
+    if (data_fdps_map_spawn_pos_table_ptr != NULL) {
+        free(data_fdps_map_spawn_pos_table_ptr);
+    }
+    data_fdps_map_spawn_pos_table_ptr =
+        fdps_vfs_load_entry("Field.vfs", placement_file_name);
+
+    if (data_fdps_map_unit_count != 0) {
+        free(data_fdps_map_unit_array_ptr);
+    }
+    data_fdps_map_unit_count = data_fdps_map_player_slot_count;
+
+    if (data_fdps_map_player_slot_count != 0) {
+        data_fdps_map_unit_array_ptr =
+            malloc(data_fdps_map_player_slot_count * UNIT_RECORD_STRIDE);
+
+        for (slot_index = 0;
+             slot_index < data_fdps_map_player_slot_count;
+             slot_index++) {
+            unit = fdps_get_unit_record(slot_index);
+            roster_member = (struct fdps_unit_record *)
+                            (data_fdps_roster_array_ptr +
+                             slot_index * UNIT_RECORD_STRIDE);
+            map_start_tile = (short *)
+                             (data_fdps_map_spawn_pos_table_ptr +
+                              SPAWN_POS_COORD_BASE +
+                              (data_fdps_map_char_spawn_count + slot_index) *
+                                  SPAWN_POS_RECORD_STRIDE);
+
+            if (slot_index < data_fdps_roster_member_count) {
+                memmove(unit, roster_member, UNIT_RECORD_STRIDE);
+                unit->pos_x = (unsigned char) map_start_tile[0];
+                unit->pos_y = (unsigned char) map_start_tile[1];
+                unit->sprite_cache_slot = (unsigned char)
+                    fdps_cache_cel_sprite_group((int) unit->portrait_id,
+                                                icon_cel_fp);
+                unit->facing = 0;
+                unit->walk_step = 0;
+                unit->flags = 0;
+                unit->side = PLAYER_SIDE;
+                unit->death_script_opcode = DEATH_SCRIPT_NONE;
+                unit->hp_current = unit->hp_max;
+                unit->mp_current = unit->mp_max;
+                memset(unit->status_timers, 0, STATUS_TIMER_COUNT);
+                fdps_unit_recompute_combat_stats(slot_index);
+            } else {
+                memset(unit, 0, UNIT_RECORD_STRIDE);
+                unit->flags = UNIT_FLAG_RETIRED;
+            }
+        }
+    }
+
+    free(data_fdps_map_spawn_pos_table_ptr);
+    data_fdps_map_spawn_pos_table_ptr = NULL;
+    fclose(icon_cel_fp);
+    fdps_deploy_wave(map_no, OPENING_WAVE, OPENING_WAVE_PLACE_EXACT);
+}

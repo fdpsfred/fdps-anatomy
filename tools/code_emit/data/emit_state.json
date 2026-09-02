@@ -1782,6 +1782,14 @@
       "status": "committed",
       "emitted_against": "0x3fd",
       "rounds": 1
+    },
+    "00022be0": {
+      "name": "fdps_build_map_unit_array",
+      "target": "deploy.c",
+      "body_size": "0x247",
+      "status": "committed",
+      "emitted_against": "0x247",
+      "rounds": 0
     }
   }
 }
