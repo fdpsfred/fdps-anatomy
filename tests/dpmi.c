@@ -36,6 +36,19 @@
  * ptr [ESP+0x34],0 that skips all of them on a set carry, and MOV ESI,0x1 /
  * MOV EAX,ESI at the tail -- and from the DPMI 0.9 specification of functions
  * 0100h and 0006h.  Blocks these tests allocate are always freed again.
+ *
+ * Covers fdps_dpmi_unlock_region at 0003cb6e.  Expected values come from its
+ * assembly -- CMP EDX,EBX with the same two JNC arms, SUB EDX,EAX / INC EDX,
+ * MOV dword ptr [ESP],0x601 and the JMP into 0003cb24, the tail it shares with
+ * fdps_dpmi_lock_region, which stores base and count at [ESP+4], [ESP+8],
+ * [ESP+0x10] and [ESP+0x14] and turns the carry word at [ESP+0x34] into the
+ * return value with SETZ AL -- and from the DPMI 0.9 specification of function
+ * 0601h.  What no test here can see is the one instruction that distinguishes
+ * this function from the lock: DOS/4GW answers both 0600h and 0601h with the
+ * carry flag clear and keeps no lock count, so a body that stored 0x600 by
+ * mistake would pass every assertion below.  That single immediate is pinned
+ * instead by reading the compiled object, which is recorded in the emit
+ * verdict for 0003cb6e.
  */
 #include <i86.h>
 #include "testharn.h"
@@ -178,8 +191,9 @@ static char lock_probe_area[8192];
    range.  It takes its arguments exactly as the function under test does --
    two endpoints, the second being the last byte -- so the count it releases is
    the same count that was locked.  Deliberately not routed through
-   fdps_dpmi_unlock_region at 0003cb6e: that function is not emitted yet, and
-   what this file exercises must be only the function under test. */
+   fdps_dpmi_unlock_region: what a case exercises must be only the function it
+   names, so the cases for the lock reach the host directly and the cases for
+   the unlock use the mirror-image helper below. */
 static int dpmi_unlock_linear_range(unsigned base, unsigned last)
 {
     union REGS dpmi_in;
@@ -279,6 +293,117 @@ static void dpmi_lock_counts_both_endpoints(void)
     CHECK_EQ(fdps_dpmi_lock_region(base, base), 1);
     CHECK_EQ(dpmi_unlock_linear_range(base, base), 1);
 }
+
+/* ---- fdps_dpmi_unlock_region at 0003cb6e ------------------------------ */
+
+/* DPMI function 0600h, Lock Linear Region, written out here so that the cases
+   below have something genuinely pinned to release without calling
+   fdps_dpmi_lock_region and thereby testing two functions at once.  It takes
+   its endpoints the way both image functions do -- the second is the last byte
+   -- so the count it locks is the count the unlock is then asked for. */
+static int dpmi_lock_linear_range(unsigned base, unsigned last)
+{
+    union REGS dpmi_in;
+    union REGS dpmi_out;
+    unsigned length;
+
+    length = (last - base) + 1;
+    dpmi_in.x.eax = 0x0600;
+    dpmi_in.x.ebx = base >> 16;
+    dpmi_in.x.ecx = base & 0xffffu;
+    dpmi_in.x.esi = length >> 16;
+    dpmi_in.x.edi = length & 0xffffu;
+    int386(0x31, &dpmi_in, &dpmi_out);
+    return dpmi_out.x.cflag == 0;
+}
+
+/* The function code goes to offset 0 of the input set and the base and count
+   to offsets 4, 8, 0x10 and 0x14, and the answer is read from the second set's
+   carry word at ESP+0x34, which is offset 0x18 of a set beginning at ESP+0x1c.
+   A member landing anywhere else would issue INT 31h with the base or the
+   count in the wrong register, or read the carry flag out of a word the host
+   never wrote -- and because every AIL teardown wrapper discards the result,
+   the only symptom in the game would be pages that quietly stay locked. */
+static void dpmi_unlock_register_set_has_the_image_layout(void)
+{
+    union REGS probe;
+
+    CHECK_EQ((int) ((char *) &probe.x.eax - (char *) &probe), 0);
+    CHECK_EQ((int) ((char *) &probe.x.ebx - (char *) &probe), 0x4);
+    CHECK_EQ((int) ((char *) &probe.x.ecx - (char *) &probe), 0x8);
+    CHECK_EQ((int) ((char *) &probe.x.esi - (char *) &probe), 0x10);
+    CHECK_EQ((int) ((char *) &probe.x.edi - (char *) &probe), 0x14);
+    CHECK_EQ((int) ((char *) &probe.x.cflag - (char *) &probe), 0x18);
+    CHECK_EQ((int) (0x1c + 0x18), 0x34);
+}
+
+/* A range of this program's own data, locked directly through fn 0600h and
+   then released through the function under test with the endpoints the right
+   way round.  The host answers a request like this with the carry flag clear,
+   and the shared tail turns a clear carry into 1 (CMP [ESP+0x34],0 / SETZ AL)
+   -- so a spelling that handed the hardware flag back unchanged would report 0
+   here, and fdps_dpmi_unlock_size would pass that failure on to its caller for
+   an unlock that actually worked. */
+static void dpmi_unlock_returns_one_on_a_clear_carry(void)
+{
+    unsigned base;
+    unsigned last;
+
+    fill_lock_probe_area();
+    base = (unsigned) (char *) lock_probe_area;
+    last = base + sizeof(lock_probe_area) - 1;
+
+    CHECK_EQ(dpmi_lock_linear_range(base, last), 1);
+    CHECK_EQ(fdps_dpmi_unlock_region(base, last), 1);
+}
+
+/* The same range with the arguments exchanged.  CMP EDX,EBX and its two JNC
+   arms put the smaller endpoint in EAX and the larger in EDX whichever way
+   they arrived, so both spellings name the identical range and must answer
+   alike.  Without the normalisation the reversed call would compute a base
+   above the range and a count of (small - large) + 1, which wraps to nearly
+   4GB -- a request no host can honour.  The six AIL wrappers always pass low
+   then high, so this branch is reached only through argument order, never
+   through the values themselves. */
+static void dpmi_unlock_orders_its_endpoints(void)
+{
+    unsigned base;
+    unsigned last;
+
+    fill_lock_probe_area();
+    base = (unsigned) (char *) lock_probe_area;
+    last = base + sizeof(lock_probe_area) - 1;
+
+    CHECK_EQ(dpmi_lock_linear_range(base, last), 1);
+    CHECK_EQ(fdps_dpmi_unlock_region(last, base), 1);
+}
+
+/* Both endpoints on the same byte.  INC EDX makes the count 1, so this is a
+   one-byte request and the host releases the page holding it; dropping the INC
+   would make it a zero-byte request, which the DPMI specification does not
+   define.  Stated honestly: the case cannot read the byte count back, so it
+   catches the missing INC only on a host that refuses a zero-length unlock,
+   and it is the layout case above that pins where the count is written. */
+static void dpmi_unlock_counts_both_endpoints(void)
+{
+    unsigned base;
+
+    fill_lock_probe_area();
+    base = (unsigned) (char *) lock_probe_area;
+
+    CHECK_EQ(dpmi_lock_linear_range(base, base), 1);
+    CHECK_EQ(fdps_dpmi_unlock_region(base, base), 1);
+}
+
+/* There is no case here for the other arm of the return, the 0 a set carry
+   produces.  It was tried: an unlock of 0xf0000000..0xf0000fff, a linear range
+   no DOS/4GW program has mapped, comes back from this host with the carry flag
+   CLEAR and the function returns 1.  The host validates neither the address
+   nor the length of a 0601h request, so no argument reaches the set-carry
+   path, and an assertion written to expect 0 there would be asserting
+   something about the host rather than about this function.  That arm -- CMP
+   [ESP+0x34],0 with the JNE that yields 0 -- is pinned instead by reading the
+   compiled object, recorded in the emit verdict for 0003cb6e. */
 
 /* ---- fdps_dpmi_alloc_dos_memory at 0003ca49 -------------------------- */
 
@@ -419,6 +544,10 @@ void run_dpmi_tests(void)
     RUN_TEST(dpmi_lock_returns_one_on_a_clear_carry);
     RUN_TEST(dpmi_lock_orders_its_endpoints);
     RUN_TEST(dpmi_lock_counts_both_endpoints);
+    RUN_TEST(dpmi_unlock_register_set_has_the_image_layout);
+    RUN_TEST(dpmi_unlock_returns_one_on_a_clear_carry);
+    RUN_TEST(dpmi_unlock_orders_its_endpoints);
+    RUN_TEST(dpmi_unlock_counts_both_endpoints);
     RUN_TEST(dpmi_alloc_register_set_has_the_image_layout);
     RUN_TEST(dpmi_alloc_reports_the_block_three_ways);
     RUN_TEST(dpmi_alloc_locks_the_whole_block);

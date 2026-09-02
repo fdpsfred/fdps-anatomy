@@ -142,3 +142,58 @@ int fdps_dpmi_lock_region(unsigned start, unsigned end)
        value is discarded -- the assembly overwrites AL before reading it. */
     return dpmi_out.x.cflag == 0;
 }
+
+int fdps_dpmi_unlock_region(unsigned start, unsigned end)
+{
+    union REGS dpmi_in;
+    union REGS dpmi_out;
+    unsigned base;   /* lower endpoint -- the first byte of the range */
+    unsigned last;   /* upper endpoint -- the last byte of the range */
+    unsigned length; /* byte count handed to fn 0601h in SI:DI */
+
+    /* 0003cb79: CMP EDX,EBX, then two JNC arms reading the one set of flags --
+       EAX takes the smaller endpoint and EDX the larger -- so the two
+       arguments may arrive in either order.  Identical to the ordering in
+       fdps_dpmi_lock_region above, and for the same reason: the six AIL
+       teardown wrappers push a code extent low-then-high while
+       fdps_dpmi_unlock_size pushes base and base + size. */
+    if (start < end) {
+        base = start;
+        last = end;
+    } else {
+        base = end;
+        last = start;
+    }
+
+    /* SUB EDX,EAX / INC EDX.  `last` is the address of the final byte of the
+       range, not one past it, so both endpoints are counted; see
+       rebuild_info/pitfalls.md.  Dropping the INC releases one byte less than
+       the original, and through fdps_dpmi_unlock_size -- which passes
+       end = base + size -- that is a whole page left locked whenever
+       base + size falls on a page boundary. */
+    length = (last - base) + 1;
+
+    /* Fn 0601h takes the linear base in BX:CX and the byte count in SI:DI.
+       Only these five members are written: the original leaves the EDX slot
+       holding whatever the stack already contained, and fn 0601h does not read
+       DX, so clearing it here would be a behaviour the original does not have.
+
+       In the image this body ends at the 0x0601 store and jumps to 0003cb24,
+       the tail inside fdps_dpmi_lock_region, so the two functions share one
+       copy of everything below -- the tail's ADD ESP,0x38 and RET are the only
+       epilogue either of them has.  That is a codegen decision about identical
+       instruction sequences, not a difference in what the two functions do,
+       and ADR-0001 puts it outside the equivalence being reproduced. */
+    dpmi_in.x.eax = 0x0601;               /* DPMI Unlock Linear Region */
+    dpmi_in.x.ebx = base >> 16;
+    dpmi_in.x.ecx = base & 0xffffu;
+    dpmi_in.x.esi = length >> 16;
+    dpmi_in.x.edi = length & 0xffffu;
+    int386(0x31, &dpmi_in, &dpmi_out);
+
+    /* CMP dword ptr [ESP+0x34],0 / SETZ AL / AND EAX,0xff on the out set's
+       carry word: 1 means the host cleared carry, i.e. the range is unlocked.
+       int386's own return value is discarded -- the shared tail overwrites AL
+       before reading it. */
+    return dpmi_out.x.cflag == 0;
+}
