@@ -485,6 +485,7 @@
 0003c803 | 0x58 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_cd_resolve_track_range(void)
 0003c85b | 0x37 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_cd | void __cdecl fdps_cd_play_track(short track)
 0003c892 | 0x54 | __cdecl | USER_DEFINED | 0x0 | - | orphan_block,pool_fdps | int __cdecl fdps_cd_play_track_range(short first_track, short last_track)
+    var HASH:3f4406828c:4 | /undefined4 | end_sector
 0003c8e6 | 0x2b | __cdecl | USER_DEFINED | 0x0 | - | orphan_block,pool_fdps | void __cdecl fdps_cd_play_whole_disc(void)
 0003c911 | 0x29 | __cdecl | USER_DEFINED | 0x0 | - | orphan_block,pool_fdps | int __cdecl fdps_cd_track_is_audio(short track)
 0003c93a | 0x42 | __cdecl | USER_DEFINED | 0x0 | - | orphan_block,pool_fdps | void __cdecl fdps_cd_read_audio_position(uchar * track, uchar * minute, uchar * second, uchar * frame)

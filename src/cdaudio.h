@@ -198,6 +198,35 @@ extern void fdps_cd_resolve_track_range(void);
 extern void fdps_cd_play_track(short track);
 #pragma aux fdps_cd_play_track "*" parm caller [];
 
+/* 0003c892.  Plays a run of consecutive CD-DA tracks as one continuous range:
+   stops whatever the drive is doing, resolves where first_track begins and
+   where last_track ends, and issues a single Play Audio request spanning the
+   two.
+
+   first_track and last_track are 1-based CD track numbers in the same
+   numbering fdps_cd_play_track and fdps_cdrom_read_track_info take, both read
+   as signed words.  last_track is played in full, since what bounds the range
+   is the sector its own track ends at.  Neither is checked against the disc and
+   neither is checked against the other: a number past the disc's highest track
+   ends at the lead-out, and a last_track below first_track produces a range
+   that runs backwards, which fdps_cd_play_audio_range hands to the driver as a
+   sector count near 2^32.
+
+   Returns the length of the range in CD sectors -- the end sector less the
+   start sector, and therefore negative for a range that runs backwards.  It
+   reports nothing about the drive: playback is asynchronous and no request
+   status is looked at, so this returns as soon as the driver has taken the play
+   request.  Like fdps_cd_play_track it leaves the track-info globals naming
+   last_track and the play-range globals holding last_track's own range, which
+   is not the range that was sent.
+
+   Nothing in the image calls it.  A sweep for the entry address -- xrefs, an
+   operand search over all 89,420 instructions and a byte search for the
+   little-endian pointer -- finds it referenced from nowhere, so no caller pins
+   its behaviour further. */
+extern int fdps_cd_play_track_range(short first_track, short last_track);
+#pragma aux fdps_cd_play_track_range "*" parm caller [];
+
 /* 00030bf0.  Sets the background music: settles which music the game should be
    playing, publishes that in data_fdps_audio_cd_current_music_index and makes
    the drive match it -- playing the corresponding CD track, or stopping the

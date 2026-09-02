@@ -439,6 +439,66 @@ void fdps_cd_play_track(short track)
                              data_fdps_cd_play_range_end_sector);
 }
 
+/* 0003c892.  Plays a run of consecutive CD-DA tracks as one range -- from where
+   the first track starts through to where the last one ends -- and reports how
+   long that run is in disc sectors.
+
+   It is fdps_cd_play_track above with the range resolved twice instead of once.
+   The stop at 0003c89e comes first for the same reason it does there: Play
+   Audio does not replace a range already in progress.  Then the pair
+   fdps_cdrom_read_track_info / fdps_cd_resolve_track_range runs once for
+   first_track and once for last_track, because the resolve takes no argument
+   and acts on whichever track the query left the CD layer pointing at.
+
+   The order of the two loads is the whole of the function's difficulty.
+   fdps_cd_resolve_track_range rewrites both data_fdps_cd_play_range_start_sector
+   and data_fdps_cd_play_range_end_sector on every call, so the start sector is
+   taken at 0003c8b6, between the two resolves, and only the end sector is taken
+   after the second one at 0003c8cf.  Issuing both resolves and then reading the
+   two globals -- the shorter way to write it, and the one the pair of globals
+   invites -- would send last_track's start sector instead and play the wrong
+   range.  That is this function's own trap rather than a pattern that repeats,
+   so it lives here and in the plate comment rather than in
+   rebuild_info/pitfalls.md.
+
+   Both arguments are signed words: MOVSX EAX,word ptr [ESP + 0xc] at 0003c8a3
+   and MOVSX EAX,word ptr [ESP + 0x10] at 0003c8bc are the only reads of them,
+   and fdps_cdrom_read_track_info takes an int, so the sign extension is what
+   the promotion is.
+
+   There is no comparison and no branch anywhere in the body, so nothing checks
+   that last_track follows first_track and nothing checks either against the
+   disc.  A track number past the disc's highest goes down
+   fdps_cd_resolve_track_range's lead-out arm like any other, and a reversed
+   pair produces an end below the start: fdps_cd_play_audio_range then sends the
+   difference to the driver as a sector count near 2^32, and the length returned
+   here comes out negative.
+
+   Neither of the two loads is a value a CALL handed back.  All four callees are
+   void, and MOV ESI,dword ptr [0x00069dec] and MOV EBX,dword ptr [0x00069de4]
+   are fresh loads of the globals the resolve just published, not of anything
+   left in a register.  The returned length is the difference of those two
+   loads, SUB EAX,ESI at 0003c8e1, and not a value read back out of the globals
+   afterwards. */
+int fdps_cd_play_track_range(short first_track, short last_track)
+{
+    unsigned int start_sector;
+    unsigned int end_sector;
+
+    fdps_cd_stop_audio();
+
+    fdps_cdrom_read_track_info(first_track);
+    fdps_cd_resolve_track_range();
+    start_sector = data_fdps_cd_play_range_start_sector;
+
+    fdps_cdrom_read_track_info(last_track);
+    fdps_cd_resolve_track_range();
+    end_sector = data_fdps_cd_play_range_end_sector;
+
+    fdps_cd_play_audio_range(start_sector, end_sector);
+    return (int) (end_sector - start_sector);
+}
+
 
 /* 00030bf0.  Settles which background music the game should be playing and
    makes the drive match: the requested index goes into

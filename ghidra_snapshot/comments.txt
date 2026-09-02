@@ -12496,7 +12496,7 @@ Body: 1. PUSH 0xc; CALL __CHK, the stack-overflow probe for 12 bytes (it pops it
 Starts CD-DA playback of a run of consecutive CD tracks, from the start of the first track through to the end of the last, and reports how long that run is.
 
 Algorithm:
-Halts whatever is playing with fdps_cd_stop_audio. Selects first_track with fdps_cdrom_read_track_info and calls fdps_cd_resolve_track_range, which publishes the selected track's start sector in DAT_00069dec and its end sector in DAT_00069de4; the start sector is latched out of DAT_00069dec here, because the second resolve overwrites both globals. Repeats the same pair for last_track and keeps only the end sector from DAT_00069de4. Hands the two latched sector numbers to fdps_cd_play_audio_range(start_sector, end_sector) as one continuous play request, then returns end minus start.
+Halts whatever is playing with fdps_cd_stop_audio. Selects first_track with fdps_cdrom_read_track_info and calls fdps_cd_resolve_track_range, which publishes the selected track's start sector in data_fdps_cd_play_range_start_sector (00069dec) and its end sector in data_fdps_cd_play_range_end_sector (00069de4); the start sector is latched out of data_fdps_cd_play_range_start_sector here, because the second resolve overwrites both globals. Repeats the same pair for last_track and keeps only the end sector from data_fdps_cd_play_range_end_sector. Hands the two latched sector numbers to fdps_cd_play_audio_range(start_sector, end_sector) as one continuous play request, then returns end minus start.
 
 Parameters:
   first_track -- 1-based CD track number playback starts at, the same numbering fdps_cd_play_track and fdps_cdrom_read_track_info take; read sign-extended from a 16-bit stack slot.
@@ -12508,7 +12508,7 @@ Returns:
 Pool: fdps  [no Function ID hit in either the Watcom 10.0x or the ailv3.lib set; game-side CD audio sequencing over the CD state globals shared with fdps_cd_play_track]
 
 Rebuild note:
-fdps_cd_resolve_track_range rewrites both DAT_00069dec and DAT_00069de4 on every call, so the start sector has to be read after the first resolve and before the second. Issuing both resolve calls and then reading the two globals -- the obvious way to write it -- yields last_track's start sector and plays the wrong range.
+fdps_cd_resolve_track_range rewrites both data_fdps_cd_play_range_start_sector and data_fdps_cd_play_range_end_sector on every call, so the start sector has to be read after the first resolve and before the second. Issuing both resolve calls and then reading the two globals -- the obvious way to write it -- yields last_track's start sector and plays the wrong range.
 
 === 0003c8e6 [PLATE]
 Plays the whole game CD as audio: everything from the first sector of the disc through to the lead-out.

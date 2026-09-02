@@ -1649,6 +1649,14 @@
       "status": "committed",
       "emitted_against": "0x782",
       "rounds": 1
+    },
+    "0003c892": {
+      "name": "fdps_cd_play_track_range",
+      "target": "cdaudio.c",
+      "body_size": "0x54",
+      "status": "committed",
+      "emitted_against": "0x54",
+      "rounds": 0
     }
   }
 }
