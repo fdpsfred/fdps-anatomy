@@ -1758,6 +1758,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0xe9"
+    },
+    "00023830": {
+      "name": "fdps_deploy_wave",
+      "target": "deploy.c",
+      "body_size": "0x115",
+      "status": "committed",
+      "emitted_against": "0x115",
+      "rounds": 0
     }
   }
 }

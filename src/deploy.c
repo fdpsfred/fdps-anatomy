@@ -22,6 +22,8 @@
 #include "table.h"
 #include "unit.h"
 #include "rsrc.h"
+#include "vfs.h"
+#include "keybd.h"
 #include "deploy.h"
 
 /* The stride of one unit record, as the original writes it: IMUL EAX,EAX,0x50
@@ -36,6 +38,18 @@
    The width is struct fdps_char_spawn_record's, so the records are addressed
    through the struct and only the header offset is spelled out here. */
 #define SPAWN_TABLE_RECORD_BASE 0x83
+
+/* How many deployment records the MAP%02d.DAT block holds, and where that
+   number sits in its header: MOV AL,byte ptr [EAX+0x2] / AND EAX,0xff at
+   000238bb..000238be.  One unsigned byte, so a map can script at most 255
+   deployments and the count is never negative however the file reads. */
+#define SPAWN_TABLE_COUNT_OFFSET 2
+
+/* The stack buffer fdps_deploy_wave formats the placement file's name into:
+   the frame at SUB ESP,0x24 puts it at [EBP-0x24] with the first named local
+   above it at [EBP-0x10], so it is 20 bytes.  "map%02d.cod" fills 12 of them
+   for every map number the game has. */
+#define PLACEMENT_NAME_SIZE 20
 
 /* The placement table's first coordinate pair and the stride between pairs:
    IMUL EAX,[EBP+0x14],0x6 / ADD EAX,0xb at 0002330b..00023317.  Written as raw
@@ -329,4 +343,75 @@ void fdps_deploy_unit(int deploy_index, FILE *icon_cel_fp,
 
     fdps_unit_recompute_combat_stats(data_fdps_map_unit_count);
     data_fdps_map_unit_count = data_fdps_map_unit_count + 1;
+}
+
+/* 00023830.  See deploy.h for what the three arguments select.
+
+   The two resources the walk needs are opened here and released here, and
+   neither open is checked in a way that can keep the function from using it.
+   The ICON.CEL stream is not tested at all -- a missing sheet reaches
+   fdps_cache_cel_sprite_group as a null stream through every deployment, and
+   fclose gets the same null at the end.
+
+   The archive is tested, and the test is the trap.  A missing Field.vfs prints
+   a line and waits for a key, and then falls THROUGH to
+   fdps_vfs_load_file_or_exit holding the null handle: the JNZ at 00023868
+   jumps over the message, not over the load, and there is no second exit out
+   of the function.  That call ends the process either way, because the loader
+   it wraps cannot find a member in a container it has no handle for.  Writing
+   the return the message reads like would leave the game running with the wave
+   never deployed, which is the one outcome the original does not produce
+   (rebuild_info/pitfalls.md).
+
+   The loop bound is re-read from the block on every pass -- the assembly
+   reloads data_fdps_tile_event_data_table_ptr and its header byte at 000238b6
+   at the top of each iteration -- and it is written that way here.  It changes
+   nothing in practice: fdps_deploy_unit grows the unit array, never the
+   deployment table.
+
+   Contract C: the record count and the wave tag are both single unsigned
+   bytes, zero-extended with AND EAX,0xff before use, and both comparisons that
+   follow are 32-bit and signed (JG at 000238c6, JNZ at 000238f4).  Reading
+   either as a signed char would make a count or a tag of 0x80 and up negative,
+   which stops the walk before it starts and matches waves it must not match.
+
+   The placement table is published into a global rather than kept in a local,
+   because fdps_deploy_unit reads it from there, and it is freed and nulled
+   again before the return -- so it is live only for the span of this call. */
+void fdps_deploy_wave(int map_no, int wave_no, unsigned char place_exact)
+{
+    char placement_file_name[PLACEMENT_NAME_SIZE];
+    void *field_vfs;
+    FILE *icon_cel_fp;
+    struct fdps_char_spawn_record *spawn;
+    int deploy_index;
+
+    icon_cel_fp = fopen("ICON.CEL", "rb");
+
+    field_vfs = fdps_vfs_open("Field.vfs");
+    if (field_vfs == NULL) {
+        printf("file not found: '%s'\n", "Field.vfs");
+        fdps_wait_any_key();
+    }
+
+    sprintf(placement_file_name, "map%02d.cod", map_no);
+    fdps_vfs_load_file_or_exit(field_vfs, placement_file_name,
+                               (void **) &data_fdps_map_spawn_pos_table_ptr);
+
+    for (deploy_index = 0;
+         deploy_index <
+             data_fdps_tile_event_data_table_ptr[SPAWN_TABLE_COUNT_OFFSET];
+         deploy_index++) {
+        spawn = (struct fdps_char_spawn_record *)
+                (data_fdps_tile_event_data_table_ptr +
+                 SPAWN_TABLE_RECORD_BASE) + deploy_index;
+        if (spawn->wave_no == wave_no) {
+            fdps_deploy_unit(deploy_index, icon_cel_fp, place_exact);
+        }
+    }
+
+    fclose(icon_cel_fp);
+    free(data_fdps_map_spawn_pos_table_ptr);
+    data_fdps_map_spawn_pos_table_ptr = NULL;
+    free(field_vfs);
 }

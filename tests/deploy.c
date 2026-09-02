@@ -35,6 +35,12 @@
  * seeks and reads on the stream unconditionally, so these cases need the real
  * ICON.CEL staged through tests/gamefile.lst and skip themselves when it is
  * not there.
+ *
+ * fdps_deploy_wave's cases are at the bottom of the file and stage less,
+ * because that function opens its own two resources: they publish the
+ * deployment table and a map to stand on and let the real FIELD.VFS supply the
+ * placement table.  Their own note says where their expected coordinates come
+ * from.
  */
 #include <stddef.h>
 #include <stdio.h>
@@ -101,10 +107,32 @@ static struct fdps_character_growth stage_growth[CHAR_TABLE_ROWS];
 static struct fdps_enemy_data stage_enemy[ENEMY_TABLE_ROWS];
 static struct fdps_item_effect stage_items[ITEM_TABLE_ROWS];
 
+/* The map fdps_deploy_wave's cases are played on.  It cannot be the three by
+   three above: those cases take their tiles from the real MAP%02d.COD records
+   inside FIELD.VFS, which name tiles as far out as (24, 12), and the marking
+   pass fdps_deploy_unit runs writes the zone bits at a unit's own tile with no
+   bound of any kind -- a unit deployed on (18, 0) writes clean past a
+   three-wide grid rather than failing an assertion. */
+#define WAVE_W 32
+#define WAVE_H 16
+
+static unsigned char stage_wave_grid[4 + WAVE_W * WAVE_H * 2];
+static unsigned char stage_wave_tile_map[TILE_MAP_IDS_OFFSET +
+                                         WAVE_W * WAVE_H * 2];
+static unsigned char stage_wave_event_layer[EVENT_LAYER_CELLS_OFFSET +
+                                            WAVE_W * WAVE_H];
+
+/* Where the header of a MAP%02d.DAT block keeps the number of deployment
+   records: MOV AL,byte ptr [EAX+0x2] at 000238bb, one unsigned byte. */
+#define SPAWN_TABLE_COUNT_OFFSET 2
+
 static int cel_ready = 0;
 static int cel_checked = 0;
+static int field_ready = 0;
+static int field_checked = 0;
 
 #define CEL_NAME "ICON.CEL"
+#define FIELD_NAME "FIELD.VFS"
 
 static void zero_bytes(void *block, int count)
 {
@@ -139,6 +167,27 @@ static void ensure_cel_sheet(void)
     if (size >= (long) (15 + 0x2970)) {
         cel_ready = 1;
     }
+}
+
+/* fdps_deploy_wave opens the container itself and cannot be told not to, so a
+   run without FIELD.VFS next to the executable would not fail a check -- it
+   would hang in fdps_wait_any_key waiting for a keyboard interrupt the test
+   build never raises.  Every wave case therefore skips itself unless the file
+   is there to be opened. */
+static void ensure_field_container(void)
+{
+    FILE *fp;
+
+    if (field_checked) {
+        return;
+    }
+    field_checked = 1;
+    fp = fopen(FIELD_NAME, "rb");
+    if (fp == NULL) {
+        return;
+    }
+    fclose(fp);
+    field_ready = 1;
 }
 
 static struct fdps_char_spawn_record *spawn_at(int index)
@@ -218,6 +267,67 @@ static void stage(void)
     data_fdps_item_effect_table_ptr = (unsigned char *) stage_items;
 
     data_fdps_map_unit_count = 0;
+}
+
+/* The same blank staging on the larger map the wave cases need, with the
+   placement table left alone: fdps_deploy_wave loads that one itself out of
+   FIELD.VFS and frees it again, and whatever stage() published is overwritten
+   before anything reads it. */
+static void stage_wave(void)
+{
+    short *tile_ids;
+    int cell_index;
+
+    stage();
+
+    zero_bytes(stage_wave_grid, (int) sizeof(stage_wave_grid));
+    zero_bytes(stage_wave_tile_map, (int) sizeof(stage_wave_tile_map));
+    zero_bytes(stage_wave_event_layer, (int) sizeof(stage_wave_event_layer));
+
+    *(short *) stage_wave_grid = (short) WAVE_W;
+    *(short *) (stage_wave_grid + 2) = (short) WAVE_H;
+
+    *(short *) (stage_wave_tile_map + TILE_MAP_WIDTH_OFFSET) = (short) WAVE_W;
+    tile_ids = (short *) (stage_wave_tile_map + TILE_MAP_IDS_OFFSET);
+    for (cell_index = 0; cell_index < WAVE_W * WAVE_H; cell_index++) {
+        tile_ids[cell_index] = 0;
+    }
+
+    *(short *) (stage_wave_event_layer + EVENT_LAYER_WIDTH_OFFSET) =
+        (short) WAVE_W;
+
+    data_fdps_battle_move_grid_ptr = stage_wave_grid;
+    data_fdps_scene_layer_tile_map_ptrs[0] = stage_wave_tile_map;
+    data_fdps_map_cell_event_code_layer_ptr = stage_wave_event_layer;
+}
+
+/* Give one cell of the wave map a tile id of its own, so a case can hand that
+   id a terrain code the search rejects. */
+static void set_wave_tile(int tile_x, int tile_y, int tile_id)
+{
+    short *tile_ids;
+
+    tile_ids = (short *) (stage_wave_tile_map + TILE_MAP_IDS_OFFSET);
+    tile_ids[tile_y * WAVE_W + tile_x] = (short) tile_id;
+}
+
+/* One deployment record ready to be placed: a roster character with no
+   equipment, so nothing about it varies between the wave cases except the two
+   fields each case is actually about. */
+static void set_plain_spawn(int index, int char_id, int wave_no)
+{
+    spawn_at(index)->char_id = (unsigned char) char_id;
+    spawn_at(index)->level = 1;
+    spawn_at(index)->side = 2;
+    spawn_at(index)->equipped_item_0 = ITEM_ID_NONE;
+    spawn_at(index)->equipped_item_1 = ITEM_ID_NONE;
+    spawn_at(index)->carried_items[0] = ITEM_ID_NONE;
+    spawn_at(index)->carried_items[1] = ITEM_ID_NONE;
+    spawn_at(index)->carried_items[2] = ITEM_ID_NONE;
+    spawn_at(index)->carried_items[3] = ITEM_ID_NONE;
+    spawn_at(index)->carried_items[4] = ITEM_ID_NONE;
+    spawn_at(index)->carried_items[5] = ITEM_ID_NONE;
+    spawn_at(index)->wave_no = (unsigned char) wave_no;
 }
 
 /* The record the deployment at index unit_index landed in.  Read through the
@@ -718,6 +828,240 @@ static void anchor_coordinates_are_signed(void)
     CHECK_EQ((int) deployed(0)->pos_y, 0);
 }
 
+/* fdps_deploy_wave, from here down.
+ *
+ * These cases run the function whole -- it opens ICON.CEL and FIELD.VFS for
+ * itself, loads MAP%02d.COD out of the container and frees both again -- so the
+ * placement records they expect are the ones in the shipped container:
+ *
+ *   MAP00.COD  record 0 (18, 0)  record 1 (22, 12)  record 2 (8, 10)
+ *   MAP01.COD  record 0 (9, 4)
+ *
+ * read at base + 0xb + index * 6 as two signed 16-bit values, which is the
+ * arithmetic at 0002330b..00023320 in fdps_deploy_unit.
+ */
+
+/* The walk hands fdps_deploy_unit the record's OWN index, not a count of the
+ * ones that matched, and that index selects both tables at once.  Records
+ * tagged 0, 1, 0, 2 with the wave 0 asked for leave records 0 and 2 deployed,
+ * in that order, carrying record 0's and record 2's character ids AND record
+ * 0's and record 2's placement coordinates.  A walk that passed a compacted
+ * counter would put the second unit on record 1's tile with record 1's
+ * character.
+ *
+ * The placement table is nulled on the way out (MOV dword ptr [0x00060140],0x0
+ * at 00023928), after the free -- it is live only for the span of the call.
+ */
+static void wave_deploys_only_the_records_tagged_with_it(void)
+{
+    ensure_cel_sheet();
+    ensure_field_container();
+    if (!cel_ready || !field_ready) {
+        return;
+    }
+    stage_wave();
+    stage_spawn_table[SPAWN_TABLE_COUNT_OFFSET] = 4;
+    set_plain_spawn(0, 5, 0);
+    set_plain_spawn(1, 6, 1);
+    set_plain_spawn(2, 7, 0);
+    set_plain_spawn(3, 8, 2);
+
+    fdps_deploy_wave(0, 0, 1);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) deployed(0)->char_id, 5);
+    CHECK_EQ((int) deployed(1)->char_id, 7);
+    CHECK_EQ((int) deployed(0)->pos_x, 18);
+    CHECK_EQ((int) deployed(0)->pos_y, 0);
+    CHECK_EQ((int) deployed(1)->pos_x, 8);
+    CHECK_EQ((int) deployed(1)->pos_y, 10);
+    CHECK_EQ(data_fdps_map_spawn_pos_table_ptr == NULL, 1);
+}
+
+/* The header byte at +2 of the MAP%02d.DAT block is the whole bound on the
+ * walk: four records all tagged wave 0, a header saying two, and the last two
+ * are never looked at. */
+static void header_count_bounds_the_walk(void)
+{
+    ensure_cel_sheet();
+    ensure_field_container();
+    if (!cel_ready || !field_ready) {
+        return;
+    }
+    stage_wave();
+    stage_spawn_table[SPAWN_TABLE_COUNT_OFFSET] = 2;
+    set_plain_spawn(0, 5, 0);
+    set_plain_spawn(1, 6, 0);
+    set_plain_spawn(2, 7, 0);
+    set_plain_spawn(3, 8, 0);
+
+    fdps_deploy_wave(0, 0, 1);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) deployed(0)->char_id, 5);
+    CHECK_EQ((int) deployed(1)->char_id, 6);
+
+    /* And a header of zero walks nothing at all, without that being an error:
+       the container is still opened, the placement table still loaded and
+       still released. */
+    stage_wave();
+    stage_spawn_table[SPAWN_TABLE_COUNT_OFFSET] = 0;
+    set_plain_spawn(0, 5, 0);
+
+    fdps_deploy_wave(0, 0, 1);
+
+    CHECK_EQ(data_fdps_map_unit_count, 0);
+    CHECK_EQ(data_fdps_map_spawn_pos_table_ptr == NULL, 1);
+}
+
+/* Contract C on the wave tag, in both directions.
+ *
+ * The tag is one unsigned byte zero-extended into a full dword before the
+ * compare (MOV AL,byte ptr [EAX+0x15] / AND EAX,0xff / CMP EAX,[EBP+0x18] at
+ * 000238e9..000238f1), so a tag of 0x80 is 128 and matches a wave_no of 128 --
+ * read as a signed char it would be -128 and match nothing the callers pass.
+ *
+ * And the compare is 32 bits wide, so a wave_no of 256 matches no record at
+ * all.  Compared a byte at a time, 256 would truncate to 0 and deploy the
+ * whole opening wave. */
+static void wave_tag_is_an_unsigned_byte_compared_full_width(void)
+{
+    ensure_cel_sheet();
+    ensure_field_container();
+    if (!cel_ready || !field_ready) {
+        return;
+    }
+    stage_wave();
+    stage_spawn_table[SPAWN_TABLE_COUNT_OFFSET] = 2;
+    set_plain_spawn(0, 5, 0);
+    set_plain_spawn(1, 6, 0x80);
+
+    fdps_deploy_wave(0, 0x80, 1);
+
+    CHECK_EQ(data_fdps_map_unit_count, 1);
+    CHECK_EQ((int) deployed(0)->char_id, 6);
+
+    stage_wave();
+    stage_spawn_table[SPAWN_TABLE_COUNT_OFFSET] = 2;
+    set_plain_spawn(0, 5, 0);
+    set_plain_spawn(1, 6, 1);
+
+    fdps_deploy_wave(0, 256, 1);
+
+    CHECK_EQ(data_fdps_map_unit_count, 0);
+}
+
+/* map_no picks the placement file through "map%02d.cod", so the same
+ * deployment record placed under map 1 lands on MAP01.COD's coordinates and
+ * not on MAP00.COD's. */
+static void map_number_picks_the_placement_file(void)
+{
+    ensure_cel_sheet();
+    ensure_field_container();
+    if (!cel_ready || !field_ready) {
+        return;
+    }
+    stage_wave();
+    stage_spawn_table[SPAWN_TABLE_COUNT_OFFSET] = 1;
+    set_plain_spawn(0, 5, 0);
+
+    fdps_deploy_wave(1, 0, 1);
+
+    CHECK_EQ(data_fdps_map_unit_count, 1);
+    CHECK_EQ((int) deployed(0)->pos_x, 9);
+    CHECK_EQ((int) deployed(0)->pos_y, 4);
+}
+
+/* A wave number no record carries is not an error and not a short circuit: the
+ * walk runs the whole table, matches nothing, and the open, the load and the
+ * release all still happen. */
+static void a_wave_nothing_matches_still_releases_the_table(void)
+{
+    ensure_cel_sheet();
+    ensure_field_container();
+    if (!cel_ready || !field_ready) {
+        return;
+    }
+    stage_wave();
+    stage_spawn_table[SPAWN_TABLE_COUNT_OFFSET] = 2;
+    set_plain_spawn(0, 5, 1);
+    set_plain_spawn(1, 6, 2);
+
+    fdps_deploy_wave(0, 5, 1);
+
+    CHECK_EQ(data_fdps_map_unit_count, 0);
+    CHECK_EQ(data_fdps_map_spawn_pos_table_ptr == NULL, 1);
+}
+
+/* Waves accumulate.  Nothing here clears the unit array, so the second wave is
+ * appended behind the first and the count is the total.  The second call also
+ * proves the placement table is reloaded rather than remembered: the first call
+ * nulled the pointer, so a second wave that did not load again would place its
+ * unit through a null table. */
+static void a_second_wave_appends_to_the_first(void)
+{
+    ensure_cel_sheet();
+    ensure_field_container();
+    if (!cel_ready || !field_ready) {
+        return;
+    }
+    stage_wave();
+    stage_spawn_table[SPAWN_TABLE_COUNT_OFFSET] = 2;
+    set_plain_spawn(0, 5, 0);
+    set_plain_spawn(1, 6, 1);
+
+    fdps_deploy_wave(0, 0, 1);
+    CHECK_EQ(data_fdps_map_unit_count, 1);
+
+    fdps_deploy_wave(0, 1, 1);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) deployed(0)->char_id, 5);
+    CHECK_EQ((int) deployed(1)->char_id, 6);
+    CHECK_EQ((int) deployed(1)->pos_x, 22);
+    CHECK_EQ((int) deployed(1)->pos_y, 12);
+}
+
+/* place_exact reaches fdps_deploy_unit as it was handed in, which only shows
+ * on an anchor the search would refuse.  Record 0's tile in MAP00.COD is
+ * (18, 0); give that one cell a tile id whose terrain code is 5, the value the
+ * JGE at 00023404 rejects.
+ *
+ * Non-zero puts the unit on (18, 0) anyway, terrain and all.  Zero searches:
+ * the anchor is out, the three cells at distance 1 are (17, 0), (19, 0) and
+ * (18, 1), and the row-major scan with its accept-on-tie takes the last of
+ * them.  A pass-through replaced by a constant would answer the same in one of
+ * the two calls and not in both. */
+static void place_exact_reaches_the_deployment(void)
+{
+    ensure_cel_sheet();
+    ensure_field_container();
+    if (!cel_ready || !field_ready) {
+        return;
+    }
+    stage_wave();
+    stage_spawn_table[SPAWN_TABLE_COUNT_OFFSET] = 1;
+    set_plain_spawn(0, 5, 0);
+    set_wave_tile(18, 0, 1);
+    set_terrain(1, TERRAIN_BLOCKED);
+
+    fdps_deploy_wave(0, 0, 1);
+
+    CHECK_EQ((int) deployed(0)->pos_x, 18);
+    CHECK_EQ((int) deployed(0)->pos_y, 0);
+
+    stage_wave();
+    stage_spawn_table[SPAWN_TABLE_COUNT_OFFSET] = 1;
+    set_plain_spawn(0, 5, 0);
+    set_wave_tile(18, 0, 1);
+    set_terrain(1, TERRAIN_BLOCKED);
+
+    fdps_deploy_wave(0, 0, 0);
+
+    CHECK_EQ((int) deployed(0)->pos_x, 18);
+    CHECK_EQ((int) deployed(0)->pos_y, 1);
+}
+
 void run_deploy_tests(void)
 {
     RUN_TEST(record_offsets_match_the_assembly);
@@ -731,4 +1075,11 @@ void run_deploy_tests(void)
     RUN_TEST(search_keeps_the_last_tile_at_the_winning_distance);
     RUN_TEST(search_rejects_unwalkable_terrain);
     RUN_TEST(anchor_coordinates_are_signed);
+    RUN_TEST(wave_deploys_only_the_records_tagged_with_it);
+    RUN_TEST(header_count_bounds_the_walk);
+    RUN_TEST(wave_tag_is_an_unsigned_byte_compared_full_width);
+    RUN_TEST(map_number_picks_the_placement_file);
+    RUN_TEST(a_wave_nothing_matches_still_releases_the_table);
+    RUN_TEST(a_second_wave_appends_to_the_first);
+    RUN_TEST(place_exact_reaches_the_deployment);
 }

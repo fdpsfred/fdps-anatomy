@@ -21,3 +21,12 @@ FIELD2.VFS
 # process -- which is the other reason the real container is the only usable
 # input here.
 MISC.VFS
+#
+# FIELD.VFS is the container fdps_deploy_wave loads its MAP%02d.COD placement
+# table out of, and it cannot be stood in for.  A missing container sends that
+# function into fdps_wait_any_key, which spins until a keyboard interrupt that
+# never comes, and a container missing the member the map number names sends it
+# into exit(1) -- neither failure is one an assertion can catch.  The
+# coordinates the cases in tests/deploy.c expect are the placement records
+# inside this file's own MAP00.COD and MAP01.COD.
+FIELD.VFS

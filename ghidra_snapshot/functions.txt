@@ -174,7 +174,7 @@
 00022f40 | 0x107 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,shared_helper,subsys_graphics | void __cdecl fdps_set_palette_range(fdps_palette_entry * rgb, int start, int end, int r_bias, int g_bias, int b_bias)
 00023050 | 0x260 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_graphics | int __cdecl fdps_cache_cel_sprite_group(int group_index, void * fp)
 000232b0 | 0x577 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_deploy_unit(int deploy_index, void * fp, char place_exact)
-00023830 | 0x115 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps,shared_helper | void __cdecl fdps_deploy_wave(int map_no, int wave_no, char place_exact)
+00023830 | 0x115 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps,shared_helper | void __cdecl fdps_deploy_wave(int map_no, int wave_no, byte place_exact)
 00023950 | 0x25 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void * __cdecl fdps_get_roster_record(int roster_index)
 00023980 | 0x13d | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps,shared_helper | void __cdecl fdps_roster_write_back_battle_units(void)
 00023ac0 | 0xf9 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_roster_recompute_combat_stats(int roster_index)

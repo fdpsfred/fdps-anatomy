@@ -57,4 +57,34 @@ extern void fdps_deploy_unit(int deploy_index, FILE *icon_cel_fp,
                              unsigned char place_exact);
 #pragma aux fdps_deploy_unit "*" parm caller [];
 
+/* 00023830.  Deploys one wave: walks the resident MAP%02d.DAT deployment table
+   from the front and hands every record tagged wave_no to fdps_deploy_unit,
+   with the ICON.CEL stream and the MAP%02d.COD placement table it needs opened
+   and released around the walk.
+
+   map_no picks the placement file, "map%02d.cod" inside Field.vfs, and is the
+   map the chapter is playing rather than the chapter number.  wave_no is
+   matched against a deployment record's own wave byte: 0 is the group the map
+   opens with, and the chapters' turn handlers pass the battle turn counter
+   here so a record's wave byte doubles as the turn it arrives on.  place_exact
+   is passed straight through to fdps_deploy_unit and decides only whether the
+   placement record's tile is taken as given or searched around.
+
+   The units are appended to the array behind data_fdps_map_unit_array_ptr, so
+   the wave that is already on the map stays on it and the count grows by the
+   number of records that matched.  Calling this twice with the same wave
+   deploys that wave twice.
+
+   Nothing is returned and nothing says whether anything was deployed.  A wave
+   number no record carries is not an error: the walk simply matches nothing,
+   and the file open, load and release still happen.
+
+   The archive failing to open is NOT survivable, however much the message
+   looks like it.  The diagnostic and the keypress are followed by the load
+   attempt on the NULL handle regardless -- see the note on the emitted
+   function. */
+extern void fdps_deploy_wave(int map_no, int wave_no,
+                             unsigned char place_exact);
+#pragma aux fdps_deploy_wave "*" parm caller [];
+
 #endif
