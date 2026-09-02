@@ -1292,5 +1292,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00056799": [
+    {
+      "what": "The seven routines from 00056799 to 00056897 are hand-written assembly, not wcc386 output, and keybd.c is being built as C. Established from the code itself: 00056799 is LEA/RET with no frame at all; 000567b3 is two MOVs and a RET; 000567a0 spins on a global compare with no frame; 000567be carries its result in AL across three branches and saves only EBX; 00056837 is the INT 09h handler proper, with PUSH DS / MOV DS,AX / IN AL,0x60 / OUT / IRETD. wcc386 10.0a at the pinned flag set puts a PUSH EBX/ESI/EDI/EBP frame on every function it compiles -- the object this emit produced does exactly that for a body of `return &g;` (mov dword ptr -4H[ebp],offset ... / mov eax,-4H[ebp] around the same LEA). Nothing observable about THIS function depends on it: the C returns the address of the same byte, takes no arguments, cleans no stack and preserves the same registers, and ADR-0001 puts prologue shape and instruction selection outside the equivalence being reproduced. What is unsettled is the module: an IRETD handler that switches DS and talks to ports 0x60/0x61/0x20 has no C spelling, so how keybd.c's seven routines are finally expressed is not a question this function's emit can answer or is affected by.",
+      "needs": "The emit of fdps_keyboard_isr at 00056837, which is the routine that actually forces the question, together with the routing decision for keybd.c that it will require. src/ailflags.asm shows the build already carries a hand-written assembly translation unit, so the evidence needed is what that emit establishes about expressing an interrupt handler here -- not anything reachable from 00056799.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed the emitter's reading and added nothing that changes it. I checked the two neighbours it cited: 000567a0 and 000567be are both frameless, and 00056837 is a genuine IRETD handler switching DS and driving ports 0x60/0x61/0x20 -- so the module really does contain routines with no C spelling. What I can add is that this function is unaffected either way: its fifteen callers push nothing, adjust nothing, and use EAX as a byte pointer immediately, so the C form and the assembly form are indistinguishable from outside.",
+      "needs": "The emit of fdps_keyboard_isr at 00056837 and the routing decision for keybd.c it will force.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

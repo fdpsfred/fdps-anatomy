@@ -20454,7 +20454,7 @@ Signature: hand-written assembly with no C convention. Inputs are the caller's c
 Returns the address of the keyboard scancode byte the game's INT 09h handler writes, so input loops can read the current key and clear it.
 
 Algorithm:
-Loads the address of the byte at 0x00070006 into EAX and returns; it touches nothing else. That byte is written by fdps_keyboard_isr, which stores the raw scancode it read from port 0x60 there on every key event, break codes (>= 0x80) included, and by FUN_00056818, which sets it to 0xff when it restores the original INT 09h vector. 0xff is not a scancode; it is the no-key-pending value, and callers store it through this pointer themselves to discard a stale key -- fdps_battle_player_phase_loop and fdps_map_cursor_select_loop both do so before entering their loops.
+Loads the address of the byte at 0x00070006 into EAX and returns; it touches nothing else. That byte is written by fdps_keyboard_isr, which stores the raw scancode it read from port 0x60 there on every key event, break codes (>= 0x80) included, and by fdps_uninstall_keyboard_isr, which sets it to 0xff when it restores the original INT 09h vector. 0xff is not a scancode; it is the no-key-pending value, and callers store it through this pointer themselves to discard a stale key -- fdps_battle_player_phase_loop and fdps_map_cursor_select_loop both do so before entering their loops.
 
 Parameters:
   none.
