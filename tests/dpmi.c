@@ -20,6 +20,14 @@
  * spelling still links and still balances the stack while freeing whatever the
  * linear address happens to name.  Nothing but the third argument may decide
  * which block goes back.
+ *
+ * Covers fdps_dpmi_lock_region at 0003cb01.  Expected values come from its
+ * assembly -- CMP EDX,EBX with the two JNC arms that order the endpoints, SUB
+ * EDX,EAX / INC EDX for the inclusive byte count, the stores at [ESP+4],
+ * [ESP+8], [ESP+0x10] and [ESP+0x14], and CMP dword ptr [ESP+0x34],0 / SETZ AL
+ * for the inverted return sense -- and from the DPMI 0.9 specification of
+ * function 0600h, which pins a linear range named by BX:CX and SI:DI.  Ranges
+ * these tests lock are always unlocked again.
  */
 #include <i86.h>
 #include "testharn.h"
@@ -149,9 +157,128 @@ static void dpmi_free_reads_only_the_third_argument(void)
     CHECK_EQ(dpmi_selector_is_valid(kept_selector), 0);
 }
 
+/* ---- fdps_dpmi_lock_region at 0003cb01 ------------------------------- */
+
+/* Larger than one 4K page, so a locked range spans a page boundary the way the
+   code extents the AIL callers pin do.  It is written to before it is locked
+   because a page that has never been touched is a duller thing to ask a host
+   to make resident. */
+static char lock_probe_area[8192];
+
+/* DPMI function 0601h, Unlock Linear Region, written out here so that whatever
+   these tests lock is handed back and a later unit does not inherit a pinned
+   range.  It takes its arguments exactly as the function under test does --
+   two endpoints, the second being the last byte -- so the count it releases is
+   the same count that was locked.  Deliberately not routed through
+   fdps_dpmi_unlock_region at 0003cb6e: that function is not emitted yet, and
+   what this file exercises must be only the function under test. */
+static int dpmi_unlock_linear_range(unsigned base, unsigned last)
+{
+    union REGS dpmi_in;
+    union REGS dpmi_out;
+    unsigned length;
+
+    length = (last - base) + 1;
+    dpmi_in.x.eax = 0x0601;
+    dpmi_in.x.ebx = base >> 16;
+    dpmi_in.x.ecx = base & 0xffffu;
+    dpmi_in.x.esi = length >> 16;
+    dpmi_in.x.edi = length & 0xffffu;
+    int386(0x31, &dpmi_in, &dpmi_out);
+    return dpmi_out.x.cflag == 0;
+}
+
+static void fill_lock_probe_area(void)
+{
+    int byte_index;
+
+    for (byte_index = 0; byte_index < (int) sizeof(lock_probe_area);
+         byte_index++) {
+        lock_probe_area[byte_index] = (char) byte_index;
+    }
+}
+
+/* The body stores into the first register set at offsets 4, 8, 0x10 and 0x14
+   and reads the second set at ESP+0x34, which is offset 0x18 inside a set that
+   begins at ESP+0x1c.  Those are the BX:CX and SI:DI slots fn 0600h reads and
+   the carry word it answers in; a member landing anywhere else would issue the
+   interrupt with the base or the count in the wrong register, and the
+   behavioural tests below could only report that as a failed lock. */
+static void dpmi_lock_register_set_has_the_image_layout(void)
+{
+    union REGS probe;
+
+    CHECK_EQ((int) ((char *) &probe.x.ebx - (char *) &probe), 0x4);
+    CHECK_EQ((int) ((char *) &probe.x.ecx - (char *) &probe), 0x8);
+    CHECK_EQ((int) ((char *) &probe.x.esi - (char *) &probe), 0x10);
+    CHECK_EQ((int) ((char *) &probe.x.edi - (char *) &probe), 0x14);
+    CHECK_EQ((int) ((char *) &probe.x.cflag - (char *) &probe), 0x18);
+    CHECK_EQ((int) (0x1c + 0x18), 0x34);
+}
+
+/* A resident range of this program's own data, locked with the endpoints the
+   right way round.  The DPMI host answers a request like this with the carry
+   flag clear, and the assembly turns a clear carry into 1 (SETZ AL after CMP
+   [ESP+0x34],0) -- so a spelling that handed the hardware flag back unchanged
+   would return 0 here and every AIL caller would read a successful lock as a
+   failure. */
+static void dpmi_lock_returns_one_on_a_clear_carry(void)
+{
+    unsigned base;
+    unsigned last;
+
+    fill_lock_probe_area();
+    base = (unsigned) (char *) lock_probe_area;
+    last = base + sizeof(lock_probe_area) - 1;
+
+    CHECK_EQ(fdps_dpmi_lock_region(base, last), 1);
+    CHECK_EQ(dpmi_unlock_linear_range(base, last), 1);
+}
+
+/* The same range with the arguments exchanged.  CMP EDX,EBX and the two JNC
+   arms put the smaller endpoint in EAX and the larger in EDX whichever way
+   they arrived, so the two calls describe the identical range and must answer
+   alike.  Without the normalisation the reversed call computes a base above
+   the range and a count of (small - large) + 1, which wraps to nearly 4GB. */
+static void dpmi_lock_orders_its_endpoints(void)
+{
+    unsigned base;
+    unsigned last;
+
+    fill_lock_probe_area();
+    base = (unsigned) (char *) lock_probe_area;
+    last = base + sizeof(lock_probe_area) - 1;
+
+    CHECK_EQ(fdps_dpmi_lock_region(last, base), 1);
+    CHECK_EQ(dpmi_unlock_linear_range(base, last), 1);
+}
+
+/* Both endpoints on the same byte.  INC EDX makes the count 1, so this is a
+   one-byte request and the host locks the page holding it; dropping the INC
+   would make it a zero-byte request, which the DPMI specification does not
+   define and which no caller of this function ever intends.  The check is that
+   the call still describes a real range and succeeds -- it cannot see the byte
+   count directly, so it catches the missing INC only on a host that refuses a
+   zero-length lock, and the layout test above is what pins where the count is
+   written. */
+static void dpmi_lock_counts_both_endpoints(void)
+{
+    unsigned base;
+
+    fill_lock_probe_area();
+    base = (unsigned) (char *) lock_probe_area;
+
+    CHECK_EQ(fdps_dpmi_lock_region(base, base), 1);
+    CHECK_EQ(dpmi_unlock_linear_range(base, base), 1);
+}
+
 void run_dpmi_tests(void)
 {
     RUN_TEST(dpmi_free_register_set_has_the_image_layout);
     RUN_TEST(dpmi_free_releases_the_block);
     RUN_TEST(dpmi_free_reads_only_the_third_argument);
+    RUN_TEST(dpmi_lock_register_set_has_the_image_layout);
+    RUN_TEST(dpmi_lock_returns_one_on_a_clear_carry);
+    RUN_TEST(dpmi_lock_orders_its_endpoints);
+    RUN_TEST(dpmi_lock_counts_both_endpoints);
 }

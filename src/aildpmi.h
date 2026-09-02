@@ -3,7 +3,8 @@
  * These routines are FDPS's own code, not Miles AIL's: the vendor object
  * inside the AIL library references them with EXTDEF records, so the call
  * direction is library -> game. See program_info/code_pools.md.
- * fdps_dpmi_free_dos_memory is declared in src/dpmi.h.
+ * fdps_dpmi_free_dos_memory and fdps_dpmi_lock_region are declared in
+ * src/dpmi.h.
  */
 #ifndef AILDPMI_H
 #define AILDPMI_H
@@ -15,9 +16,6 @@ extern int  fdps_dpmi_alloc_dos_memory(unsigned paragraphs,
                                        unsigned *out_real_mode_ptr,
                                        unsigned *out_selector);
 #pragma aux fdps_dpmi_alloc_dos_memory "*";
-
-extern int  fdps_dpmi_lock_region(unsigned start, unsigned end);
-#pragma aux fdps_dpmi_lock_region "*";
 
 extern int  fdps_dpmi_unlock_region(unsigned start, unsigned end);
 #pragma aux fdps_dpmi_unlock_region "*";

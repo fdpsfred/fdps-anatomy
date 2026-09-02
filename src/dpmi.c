@@ -43,3 +43,45 @@ void fdps_dpmi_free_dos_memory(unsigned linear_unused, unsigned segment_unused,
        successful free -- that is the original's behaviour, and adding a return
        value here would give the vendor object a result it never reads. */
 }
+
+int fdps_dpmi_lock_region(unsigned start, unsigned end)
+{
+    union REGS dpmi_in;
+    union REGS dpmi_out;
+    unsigned base;   /* lower endpoint -- the first byte of the locked range */
+    unsigned last;   /* upper endpoint -- the last byte of the locked range */
+    unsigned length; /* byte count handed to fn 0600h in SI:DI */
+
+    /* CMP EDX,EBX with two JNC arms: the endpoints are ordered with an
+       unsigned compare and swapped when they arrive the wrong way round, so
+       either argument may be the larger one. */
+    if (start < end) {
+        base = start;
+        last = end;
+    } else {
+        base = end;
+        last = start;
+    }
+
+    /* INC EDX after the subtraction.  `last` is the address of the final byte
+       of the range, not one past it, so the count is inclusive of both
+       endpoints; see rebuild_info/pitfalls.md. */
+    length = (last - base) + 1;
+
+    /* Fn 0600h takes the linear base in BX:CX and the byte count in SI:DI.
+       The original leaves the EDX slot alone, so it reaches the interrupt
+       holding whatever the stack already contained; fn 0600h does not read
+       DX, and clearing it here would be a behaviour the original does not
+       have. */
+    dpmi_in.x.eax = 0x0600;               /* DPMI Lock Linear Region */
+    dpmi_in.x.ebx = base >> 16;
+    dpmi_in.x.ecx = base & 0xffffu;
+    dpmi_in.x.esi = length >> 16;
+    dpmi_in.x.edi = length & 0xffffu;
+    int386(0x31, &dpmi_in, &dpmi_out);
+
+    /* SETZ AL / AND EAX,0xff on the out set's carry word: the sense is
+       inverted from the hardware flag, so 1 is success.  int386's own return
+       value is discarded -- the assembly overwrites AL before reading it. */
+    return dpmi_out.x.cflag == 0;
+}

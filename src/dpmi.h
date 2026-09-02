@@ -29,4 +29,24 @@ extern void fdps_dpmi_free_dos_memory(unsigned linear_unused,
                                       unsigned selector);
 #pragma aux fdps_dpmi_free_dos_memory "*" parm caller [];
 
+/* Pins a linear byte range into physical memory with DPMI function 0600h, so
+   the pages stay resident while interrupt-time code touches them.  Issues INT
+   31h through int386 with AX = 0600h, the linear base in BX:CX and the byte
+   count in SI:DI.  Nothing else in the input register set is written, so the
+   remaining registers enter the interrupt holding whatever the stack already
+   contained; fn 0600h reads only AX, BX, CX, SI and DI.
+
+   `start` and `end` are the two endpoints of the range and may arrive in
+   either order: they are ordered with an unsigned compare, and the larger is
+   taken as the address of the LAST BYTE of the range, not one past it, so the
+   count sent to DPMI is (larger - smaller) + 1.  A caller that means "size"
+   therefore passes base + size and gets size + 1 bytes locked, which is what
+   fdps_dpmi_lock_size does.
+
+   Returns 1 when the host came back with the carry flag clear -- i.e. the
+   range is locked -- and 0 when the call failed.  The sense is inverted from
+   the hardware flag. */
+extern int fdps_dpmi_lock_region(unsigned start, unsigned end);
+#pragma aux fdps_dpmi_lock_region "*" parm caller [];
+
 #endif

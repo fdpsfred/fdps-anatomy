@@ -1689,6 +1689,14 @@
       "status": "committed",
       "emitted_against": "0x2f",
       "rounds": 0
+    },
+    "0003cb01": {
+      "name": "fdps_dpmi_lock_region",
+      "target": "dpmi.c",
+      "body_size": "0x6d",
+      "status": "committed",
+      "emitted_against": "0x6d",
+      "rounds": 0
     }
   }
 }

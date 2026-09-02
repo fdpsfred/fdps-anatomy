@@ -1,12 +1,14 @@
 /* aildpmi.c -- game-side DPMI service routines the Miles AIL library calls.
  *
  * DPMI INT 31h wrappers for DOS memory allocation (0100h) and linear region
- * locking (0600h/0601h). AIL's vendor object references each of them by
- * EXTDEF, so they must be defined and linked in; the library does not provide
- * them. Function 0101h, the DOS memory free, is in src/dpmi.c.
+ * locking (0601h). AIL's vendor object references each of them by EXTDEF, so
+ * they must be defined and linked in; the library does not provide them.
+ * Function 0101h, the DOS memory free, and function 0600h, the region lock,
+ * are in src/dpmi.c.
  */
 #include <i86.h>
 #include "aildpmi.h"
+#include "dpmi.h"
 
 /* Probe-free in the original: 0003ca49 and 0003cb01 open with a bare
  * PUSH/SUB ESP, no PUSH n / CALL __CHK. The pinned flag set has -s, so this
@@ -24,9 +26,9 @@
  * function that FDPS's does not have. */
 
 /* 0003cb01 and 0003cb6e are one routine each in the original, the second
-   jumping into the first's body after storing its own function code. The
-   shared tail is expressed here as a helper; the two entry points keep their
-   own symbols, which is what the callers and the vendor object see. */
+   jumping into the first's body after storing its own function code. 0003cb01
+   is emitted in src/dpmi.c; what is left here is the 0601h half, still going
+   through the shared helper. */
 static int fdps_dpmi_lock_call(unsigned func, unsigned start, unsigned end)
 {
     union REGS regs;
@@ -44,11 +46,6 @@ static int fdps_dpmi_lock_call(unsigned func, unsigned start, unsigned end)
     regs.x.edi = len & 0xffffu;
     int386(0x31, &regs, &regs);
     return regs.x.cflag == 0;
-}
-
-int fdps_dpmi_lock_region(unsigned start, unsigned end)
-{
-    return fdps_dpmi_lock_call(0x0600, start, end);
 }
 
 int fdps_dpmi_unlock_region(unsigned start, unsigned end)
