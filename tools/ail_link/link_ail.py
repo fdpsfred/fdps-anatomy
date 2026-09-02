@@ -10,7 +10,7 @@ tone through the real driver.
 Two things the game side must supply, because the library does not contain
 them and references them as externals:
 
-  * six DPMI service routines (src/aildpmi.c, src/dpmi.c) -- the call direction is
+  * six DPMI service routines (src/dpmi.c) -- the call direction is
     library -> game, so no amount of vendor library covers them
   * the four-byte EFLAGS-save routine (src/ailflags.asm)
 
@@ -78,10 +78,9 @@ ALIASES = [
 
 # C sources staged onto the guest's C: drive, and the objects they produce.
 C_SOURCES = [(CLIENT_DIR / "ailsmoke.c", "AILSMOKE"),
-             (SRC / "aildpmi.c", "AILDPMI"),
              (SRC / "dpmi.c", "DPMI")]
 ASM_SOURCES = [(SRC / "ailflags.asm", "AILFLAGS")]
-HEADERS = [SRC / "aildpmi.h", SRC / "dpmi.h", LIBS / "ailv3.h"]
+HEADERS = [SRC / "dpmi.h", LIBS / "ailv3.h"]
 
 # Staged next to the EXE so AIL finds them where the game would: DIG.INI names
 # the driver, and the driver image is what AIL loads and calls.
@@ -98,8 +97,7 @@ SB_HDMA = 5
 
 def preflight_extra(need_assets):
     for path in [LIBS / "ailv3.lib", LIBS / "ailv3.h", CLIENT_DIR / "ailsmoke.c",
-                 SRC / "aildpmi.c", SRC / "aildpmi.h", SRC / "dpmi.c",
-                 SRC / "dpmi.h", SRC / "ailflags.asm"]:
+                 SRC / "dpmi.c", SRC / "dpmi.h", SRC / "ailflags.asm"]:
         if not path.is_file():
             bm.fail("missing %s" % path)
     if not need_assets:
