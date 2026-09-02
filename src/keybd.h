@@ -29,6 +29,48 @@
  * build supplies it zero-filled. */
 extern unsigned char data_fdps_input_last_scancode;
 
+/* 00070019.  The scancode ring's read index: the entry fdps_read_keyboard_queue
+ * takes the next make code from, counted in entries rather than bytes and
+ * always in 0..9.  Its only writer is fdps_read_keyboard_queue, which bumps it
+ * past the entry it just took and wraps it at ten (INC dword ptr [0x00070019] /
+ * CMP dword ptr [0x00070019],0xa / MOV dword ptr [0x00070019],0x0 at 000567d5,
+ * 000567db and 000567e4).  The queue is empty when this equals the write index.
+ *
+ * NOT volatile, and that is a measurement rather than an omission: a sweep of
+ * the whole image for 0x00070019 finds six instructions, all of them in
+ * fdps_wait_any_key, fdps_flush_keyboard_queue and fdps_read_keyboard_queue.
+ * The INT 09h handler never touches it, so nothing changes it asynchronously
+ * and no reader has to re-read it.
+ *
+ * Signedness is not decided by anything in the image: every test on either
+ * index is an equality -- against the other index, or against 0xa -- so no
+ * signed-versus-unsigned branch exists to read.  int is what the layout carries.
+ *
+ * Defined by ticket 23 along with the rest of keybd.c's data; until then the
+ * build supplies it zero-filled. */
+extern int data_fdps_input_scancode_queue_head;
+
+/* 0007001d.  The scancode ring's write index: the entry the INT 09h handler
+ * will store the next make code into, in 0..9 like the read index, wrapped the
+ * same way (INC dword ptr [0x0007001d] / CMP dword ptr [0x0007001d],0xa /
+ * MOV dword ptr [0x0007001d],0x0 at 00056875, 0005687b and 00056884).
+ *
+ * volatile is load-bearing here.  fdps_keyboard_isr writes this one from the
+ * interrupt, and fdps_wait_any_key spins on it with nothing inside the loop
+ * writing anything -- an optimiser is entitled to hoist the load out and the
+ * game then waits for a key forever.  It is qualified at the one declaration
+ * rather than at the spinning reader so that no reader has to remember;
+ * ticket 23's definition has to carry the same qualifier.  Same reasoning as
+ * data_fdps_timer_tick_counter in gamedata.h (rebuild_info/pitfalls.md).
+ *
+ * Storing the read index into it is how both waiters throw the queue away:
+ * that single store, and not any clearing of the ring itself, is what "flush"
+ * means here.
+ *
+ * Defined by ticket 23 along with the rest of keybd.c's data; until then the
+ * build supplies it zero-filled. */
+extern volatile int data_fdps_input_scancode_queue_write_index;
+
 /* Hands back the address of that latched scancode byte, so an input loop can
    both read the current key and clear it.
 
@@ -44,5 +86,21 @@ extern unsigned char data_fdps_input_last_scancode;
    through it to discard a stale key before their loops begin. */
 extern unsigned char *fdps_keyboard_scancode_ptr(void);
 #pragma aux fdps_keyboard_scancode_ptr "*" parm caller [];
+
+/* Blocks until a key is pressed, then throws the whole queue away.
+
+   Spins while the two ring indices are equal -- the queue-empty condition --
+   and falls through the moment fdps_keyboard_isr advances the write index for
+   a make code.  It then stores the read index into the write index, which
+   discards the key that ended the wait along with anything else pending, so
+   the screen that follows does not inherit a keypress meant for this one.
+   That rewind is the same single store fdps_flush_keyboard_queue makes.
+
+   No arguments and no result: all 23 call sites push nothing before the CALL,
+   adjust nothing after it, and read EAX only after loading it again from
+   memory.  EAX is left holding the read index as a by-product of the compare
+   and is not a return value. */
+extern void fdps_wait_any_key(void);
+#pragma aux fdps_wait_any_key "*" parm caller [];
 
 #endif

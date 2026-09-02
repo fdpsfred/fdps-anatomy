@@ -22,3 +22,32 @@ unsigned char *fdps_keyboard_scancode_ptr(void)
        rebuild_info/pitfalls.md. */
     return &data_fdps_input_last_scancode;
 }
+
+void fdps_wait_any_key(void)
+{
+    /* 000567a0: MOV EAX,[0x70019] / CMP EAX,[0x7001d] / JZ back to the top /
+       MOV [0x7001d],EAX / RET.  Five instructions, no prologue and no frame,
+       so there is no local here either -- the value the store writes is the
+       one the compare loaded, and the read index cannot have moved between the
+       two: fdps_read_keyboard_queue is its only writer and it is not running.
+
+       The loop condition is the queue-empty test the whole ring is built on:
+       equal indices mean nothing is pending.  The wait ends because the INT
+       09h handler advances the write index for every make code it queues, and
+       that is why the write index is declared volatile at its extern -- with
+       nothing inside this loop writing anything, an unqualified read may be
+       hoisted out of it and the wait never ends. */
+    while (data_fdps_input_scancode_queue_head ==
+           data_fdps_input_scancode_queue_write_index) {
+        /* spin: only the keyboard interrupt can end this */
+    }
+
+    /* Rewind the queue to empty rather than dequeue: the key that ended the
+       wait and everything queued behind it are discarded, so whatever screen
+       follows starts with no keypress of this one's left in the ring.  The
+       ring's bytes are deliberately left alone -- the handler overwrites an
+       entry when it reaches it, and the read index alone decides what is
+       readable. */
+    data_fdps_input_scancode_queue_write_index =
+        data_fdps_input_scancode_queue_head;
+}

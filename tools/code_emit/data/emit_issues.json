@@ -1307,5 +1307,26 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "000567a0": [
+    {
+      "from": "emit",
+      "what": "The scancode ring's storage is a packed, unaligned run inside object 3 (0x70000-0x70053), which program_info/memory_layout.md establishes is the data segment of a hand-written assembly module holding both the keyboard ISR and the RLE blit kernels: queue[10] at 0x7000f, read index at 0x70019, write index at 0x7001d, prev scancode at 0x70021, with no padding and neither dword 4-aligned. Emitted as four independent C globals the rebuild's linker is free to order and align them any way it likes. Nothing in fdps_wait_any_key or fdps_keyboard_scancode_ptr indexes across them, so neither function can see the difference, and I could not find a reader that does: the sweeps for 0x00070019 and 0x0007001d account for all six and all eight instructions in the image, and every one names its symbol directly. What I cannot settle from here is whether the block has to stay one packed object for the sake of the module that owns it -- fdps_keyboard_isr runs at interrupt time against this storage, and rebuild_info/pitfalls.md already requires the blit kernels sharing this same object to be emitted as .ASM.",
+      "needs": "Ticket 23's placement of the 0x70000 block, and the emit of fdps_keyboard_isr (00056837) and fdps_install_keyboard_isr (000567f0), which together decide whether this storage is defined by an assembly module and therefore laid out by hand. fdps_install_keyboard_isr, read at 000567f0, only swaps the INT 09h vector -- it locks nothing -- so no page-locking requirement is visible from the keyboard side; whether one is imposed elsewhere would be answered by the emit of the DPMI lock calls.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "The 0x70000 block's adjacency, reached independently. I confirmed the emitter's reading of it and added one thing: the packing is tighter than 'unaligned' suggests -- the ring occupies 0x7000f..0x70018 and the read index starts at 0x70019, so the dword at 0x70019 begins in the byte immediately after the array's last element with no padding at all, and neither index is 4-aligned. I also confirmed no reader crosses the boundary: get_xrefs_to on both addresses returns fourteen instructions in total and every one names its own symbol, and the only folded base in the family, [EBX + 0x7000f] at 000567cf, is bounded at 9 by the wrap at 000567db and so cannot reach 0x70019. Nothing in fdps_wait_any_key can observe the difference; the question is whether the module that owns this storage can.",
+      "needs": "Ticket 23's placement of the 0x70000 block, and the emit of fdps_keyboard_isr (00056837) and fdps_install_keyboard_isr (000567f0), which together decide whether this storage is laid out by hand in an assembly module.",
+      "same_as": "emit#0",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "The volatile qualifier survives only on the declaration side of data_fdps_input_scancode_queue_write_index. keybd.h declares `extern volatile int`; the generated definition in workspace/code_emit/stage/STB/STUBS.C line 102 is plain `int`, because the stub generator takes its type from routing.json's /int and has no field for a qualifier. This is not specific to keybd: gamedata.h line 226 declares data_fdps_timer_tick_counter volatile against the same plain-int stub. Today it is harmless -- keybd.c's accesses go through the volatile declaration and the object file shows the load staying inside the spin loop -- and it becomes a live question only when the definitions stop being stubs.",
+      "needs": "Ticket 23's emit of the data definitions, which is the point at which a definition exists to carry or not carry the qualifier. Whether the stub generator should also carry it is a question for whoever owns routing.json's type field; nothing in this function's behaviour turns on it.",
+      "status": "open"
+    }
   ]
 }

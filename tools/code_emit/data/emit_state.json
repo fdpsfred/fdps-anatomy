@@ -1734,6 +1734,14 @@
       "status": "committed",
       "emitted_against": "0x7",
       "rounds": 0
+    },
+    "000567a0": {
+      "name": "fdps_wait_any_key",
+      "target": "keybd.c",
+      "body_size": "0x13",
+      "status": "committed",
+      "emitted_against": "0x13",
+      "rounds": 0
     }
   }
 }

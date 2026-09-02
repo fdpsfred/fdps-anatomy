@@ -1,6 +1,7 @@
 /* tests/keybd.c -- cover for src/keybd.c.
  *
- * Covers fdps_keyboard_scancode_ptr at 00056799.  Expected values come from its
+ * Covers fdps_keyboard_scancode_ptr at 00056799 and fdps_wait_any_key at
+ * 000567a0.  Expected values come from its
  * assembly -- LEA EAX,[0x70006] / RET, which is the whole function -- from the
  * two writers of that byte, fdps_keyboard_isr at 00056851 (MOV byte ptr
  * [0x00070006],BL, one byte, unconditional) and fdps_uninstall_keyboard_isr at
@@ -107,6 +108,104 @@ static void keybd_scancode_ptr_reads_high_codes_unsigned(void)
     data_fdps_input_last_scancode = saved_scancode;
 }
 
+/* fdps_wait_any_key at 000567a0.  Expected values come from its five
+   instructions -- MOV EAX,[0x70019] / CMP EAX,[0x7001d] / JZ to the top /
+   MOV [0x7001d],EAX / RET -- and from the ring's other two users:
+   fdps_keyboard_isr, which stores at the write index and bumps it with wrap at
+   ten (00056875..00056884), and fdps_read_keyboard_queue, which takes from the
+   read index and bumps that the same way (000567d5..000567e4).
+
+   Every case below sets up a NON-EMPTY queue, because the empty queue is the
+   blocking case: with the indices equal the function spins until an interrupt
+   moves one, and no unit test can supply that.  What the cases do pin down is
+   everything the function does once the wait is over, which is where its whole
+   effect lives.  One consequence of testing a blocking routine is that a wrong
+   emptiness test would hang here rather than report a failure -- an implementation
+   spelt with an order comparison instead of an equality would sit in the loop
+   forever on the case its comparison gets backwards.
+
+   Neither index is asserted before a case sets it: they are ticket 23's to
+   define and are zero-filled until then.  Every case puts both back to zero. */
+
+/* A queued code ends the wait, and the wait's price is the code itself: the
+   write index comes back to the read index, which is the queue-empty
+   condition, so nothing survives for the next screen to read.  The read index
+   must not move -- the function discards, it does not dequeue.  Had it
+   dequeued, the read index would read 1 here. */
+static void keybd_wait_any_key_empties_the_queue_it_waited_for(void)
+{
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 1;   /* one code pending */
+
+    fdps_wait_any_key();
+
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 0);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 0);
+    CHECK_EQ(data_fdps_input_scancode_queue_head ==
+             data_fdps_input_scancode_queue_write_index, 1);
+
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* Four codes queued while the previous screen was busy, and all four go.  The
+   single store at 000567ad rewinds the write index however far ahead it is, so
+   the count of discarded entries never enters into it. */
+static void keybd_wait_any_key_discards_every_pending_code(void)
+{
+    data_fdps_input_scancode_queue_head = 3;
+    data_fdps_input_scancode_queue_write_index = 7;   /* entries 3,4,5,6 */
+
+    fdps_wait_any_key();
+
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 3);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 3);
+
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The ring wraps, so the write index is routinely BELOW the read index and the
+   queue is still not empty: with the read index at 8 and the write index
+   wrapped round to 2, four entries are pending.  The assembly asks only
+   whether the two are equal (CMP / JZ), never which is larger, so this case
+   behaves exactly like the one above. */
+static void keybd_wait_any_key_handles_a_wrapped_write_index(void)
+{
+    data_fdps_input_scancode_queue_head = 8;
+    data_fdps_input_scancode_queue_write_index = 2;   /* 8,9,0,1 pending */
+
+    fdps_wait_any_key();
+
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 8);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 8);
+
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The rewind leaves both indices inside the ring, so the pair it hands back is
+   one fdps_read_keyboard_queue and fdps_keyboard_isr can go on using: both
+   index the ten-entry buffer with the value as it stands, and neither range
+   checks before it does.  A rewind that stored anything but the read index --
+   a zero, say -- would still leave the queue empty and still pass the two
+   cases above. */
+static void keybd_wait_any_key_leaves_indices_inside_the_ring(void)
+{
+    data_fdps_input_scancode_queue_head = 9;   /* the last entry */
+    data_fdps_input_scancode_queue_write_index = 0;   /* wrapped past it */
+
+    fdps_wait_any_key();
+
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 9);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index >= 0 &&
+             data_fdps_input_scancode_queue_write_index < 10, 1);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 9);
+
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
 void run_keybd_tests(void)
 {
     RUN_TEST(keybd_scancode_ptr_names_the_isr_slot);
@@ -114,4 +213,8 @@ void run_keybd_tests(void)
     RUN_TEST(keybd_scancode_ptr_reaches_the_byte_the_isr_writes);
     RUN_TEST(keybd_scancode_ptr_is_one_byte_wide);
     RUN_TEST(keybd_scancode_ptr_reads_high_codes_unsigned);
+    RUN_TEST(keybd_wait_any_key_empties_the_queue_it_waited_for);
+    RUN_TEST(keybd_wait_any_key_discards_every_pending_code);
+    RUN_TEST(keybd_wait_any_key_handles_a_wrapped_write_index);
+    RUN_TEST(keybd_wait_any_key_leaves_indices_inside_the_ring);
 }
