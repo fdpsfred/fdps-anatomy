@@ -133,6 +133,263 @@ void fdps_rle_blit_passthrough(unsigned char *rle_stream,
     } while (data_fdps_graphics_rle_blit_remaining_rows != 0);
 }
 
+/* 00056c5e.  Blit mode 4, the scaled sprite blit.  Hand-written assembly like
+   the kernel above and with the same kind of register contract -- ESI is the
+   stream, EDI the destination -- but with a third input that arrives in a way
+   the pass-through kernel has no equivalent of: the two scale words are read
+   straight out of fdps_blit_dispatch's own frame, MOV DX,[EBP+0x1c] at
+   00056c5e and MOV DX,[EBP+0x1e] at 00056c69, which are the low and high
+   halves of the dispatcher's sixth argument.  The kernel then zeroes EBP at
+   00056c74 and spends the whole routine using it as its Bresenham accumulator
+   without ever restoring it; fdps_blit_dispatch survives that only because its
+   epilogue pops EBP off ESP rather than relying on it.  Reaching into the
+   caller's frame and destroying its frame pointer are properties of the
+   register contract and not of what the routine draws, so the two words become
+   two parameters here the same way ESI and EDI do (ADR-0001).
+
+   After entry the parameters are not read again.  Everything below reads the
+   globals the routine has just published, because that is what the assembly
+   reads -- MOV BX,[0x00070028] at the top of every row, ADD BP,[0x00070028] in
+   all four ops, ADD BP,[0x0007002a] in the vertical step -- and the block is
+   shared with the caller and with fdps_rle_skip_row.
+
+   The row advance is the one place where the obvious C differs from what the
+   original stores.  It is computed sixteen bits wide, MOV BP,[0x0007002e] /
+   SUB BP,[0x00070028], and then written to the whole dword at 00056c99 with
+   EBP's top half still holding the zero from 00056c74.  So a destination wider
+   than the pitch does not give a negative advance here: 2 - 4 is stored as
+   65534, and the destination cursor walks forward by that.  The global itself
+   is signed and does hold negative advances -- fdps_rle_blit_translucent and
+   its neighbours store the dispatcher's full 32-bit pitch - width into it at
+   0005761b -- which is why the truncation has to be written out rather than
+   left to the compiler.
+
+   Both Bresenham steps are the same shape.  Horizontally the accumulator
+   starts at the destination width and each op runs one loop: while the
+   accumulator is below the source width it adds the destination width and
+   consumes one pixel of the run, and otherwise it subtracts the source width
+   and emits one destination pixel.  So a source pixel is emitted more than
+   once when scaling up and dropped when scaling down, and either exit can end
+   the op -- the run running out goes on to the next command byte, the
+   destination row filling ends the row with the run half-decoded.
+
+   Which is what makes the source cursor's push and pop load-bearing.  ESI is
+   pushed at the top of every destination row (00056cb0) and popped back at
+   00056d84, and the stream is only ever advanced to the next source row by
+   fdps_rle_skip_row.  Carrying the cursor on from wherever the decode stopped
+   would desynchronise the stream on the first row that fills early, and would
+   also break the vertical upscale, which re-decodes the same source row from
+   its start for as many destination rows as the accumulator calls for.
+
+   Three details that look like defects and are not, all of them inherited from
+   the same sixteen-bit exact-zero tests the pass-through kernel uses:
+
+   The destination row ends on DEC BX / JNZ, so a destination width of zero
+   gives a row of 0x10000 pixels rather than an empty one, and the row count
+   ends on DEC word ptr [0x0007002c] / JNZ, so a destination height of zero
+   asks for 0x10000 rows.  Neither is guarded here.
+
+   A destination height of zero also never leaves the vertical loop: the
+   accumulator is seeded with it and grows by it, so it stays at zero, which is
+   never above the source height, and the routine calls fdps_rle_skip_row for
+   ever.  That is the original's behaviour and fdps_blit_dispatch is the only
+   thing that reaches it.
+
+   The half-tone op's phase starts at zero (XOR AH,AH at 00056cf6) and flips
+   only when a source pixel is consumed, so the first destination pixel of the
+   run is stepped over unwritten -- the same one-pixel hole the pass-through
+   kernel's op 01 leaves, here spread by the scale.  Its length is doubled
+   before the loop (SHL CX,1 at 00056cf2), which is safe in eight bits because
+   the length is at most 64 and CH is provably zero: fdps_blit_dispatch clears
+   ECX at 0005690d and nothing in either kernel writes above CL.
+
+   The source width is read once, into DX at 00056c9f above the row loop's
+   entry at 00056ca6, and has to survive the calls to fdps_rle_skip_row inside
+   the loop; it does, because that routine touches only BX, CX, ESI and AL.
+   Ghidra's decompiler claims a value comes back from that call in DX
+   (extraout_DX) and there is no such thing -- it returns only the advanced
+   stream cursor. */
+void fdps_rle_blit_scaled(unsigned char *rle_stream,
+                          unsigned char *dest_pixel,
+                          unsigned short dest_width,
+                          unsigned short dest_height)
+{
+    unsigned char *stream_cursor;
+    unsigned char *row_stream_start;
+    unsigned char *dest_cursor;
+    unsigned short src_width;
+    unsigned short dest_pixels_remaining;
+    unsigned short hscale_accumulator;
+    unsigned short vscale_accumulator;
+    unsigned char command;
+    unsigned char run_pixel;
+    unsigned char run_length;
+    unsigned char halftone_phase;
+    int row_finished;
+    int run_finished;
+
+    data_fdps_graphics_rle_blit_dest_width = dest_width;
+    data_fdps_graphics_rle_blit_dest_height = dest_height;
+    data_fdps_graphics_rle_blit_dest_rows_remaining =
+        data_fdps_graphics_rle_blit_dest_height;
+    data_fdps_graphics_rle_blit_vscale_accumulator =
+        data_fdps_graphics_rle_blit_dest_height;
+    data_fdps_graphics_rle_blit_dst_row_advance =
+        (int) (unsigned short) (data_fdps_graphics_rle_blit_dst_pitch
+                                - data_fdps_graphics_rle_blit_dest_width);
+
+    stream_cursor = rle_stream;
+    dest_cursor = dest_pixel;
+    src_width = data_fdps_graphics_rle_blit_src_width;
+
+    do {
+        dest_pixels_remaining = data_fdps_graphics_rle_blit_dest_width;
+        hscale_accumulator = data_fdps_graphics_rle_blit_dest_width;
+        row_stream_start = stream_cursor;
+        row_finished = 0;
+
+        do {
+            command = *stream_cursor;
+            stream_cursor++;
+            run_length = (unsigned char) ((command & 0x3f) + 1);
+            run_finished = 0;
+
+            switch (command >> 6) {
+            case 0:
+                /* fill: one pixel byte follows and is the whole run */
+                run_pixel = *stream_cursor;
+                stream_cursor++;
+                while (run_finished == 0) {
+                    if (hscale_accumulator < src_width) {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator
+                             + data_fdps_graphics_rle_blit_dest_width);
+                        run_length--;
+                        if (run_length == 0) {
+                            run_finished = 1;
+                        }
+                    } else {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator - src_width);
+                        *dest_cursor = run_pixel;
+                        dest_cursor++;
+                        dest_pixels_remaining--;
+                        if (dest_pixels_remaining == 0) {
+                            run_finished = 1;
+                            row_finished = 1;
+                        }
+                    }
+                }
+                break;
+
+            case 1:
+                /* half-tone: the run covers twice its length, and only the
+                   pixels the phase marks are written */
+                run_length = (unsigned char) (run_length * 2);
+                run_pixel = *stream_cursor;
+                stream_cursor++;
+                halftone_phase = 0;
+                while (run_finished == 0) {
+                    if (hscale_accumulator < src_width) {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator
+                             + data_fdps_graphics_rle_blit_dest_width);
+                        halftone_phase = (unsigned char) (halftone_phase ^ 1);
+                        run_length--;
+                        if (run_length == 0) {
+                            run_finished = 1;
+                        }
+                    } else {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator - src_width);
+                        if (halftone_phase != 0) {
+                            *dest_cursor = run_pixel;
+                        }
+                        dest_cursor++;
+                        dest_pixels_remaining--;
+                        if (dest_pixels_remaining == 0) {
+                            run_finished = 1;
+                            row_finished = 1;
+                        }
+                    }
+                }
+                break;
+
+            case 2:
+                /* literal: the run's pixel bytes are in the stream, and the
+                   cursor steps over one only when a source pixel is consumed
+                   (INC ESI at 00056d45), never when one is emitted */
+                while (run_finished == 0) {
+                    if (hscale_accumulator < src_width) {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator
+                             + data_fdps_graphics_rle_blit_dest_width);
+                        stream_cursor++;
+                        run_length--;
+                        if (run_length == 0) {
+                            run_finished = 1;
+                        }
+                    } else {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator - src_width);
+                        *dest_cursor = *stream_cursor;
+                        dest_cursor++;
+                        dest_pixels_remaining--;
+                        if (dest_pixels_remaining == 0) {
+                            run_finished = 1;
+                            row_finished = 1;
+                        }
+                    }
+                }
+                break;
+
+            default:
+                /* skip: a transparent run, the destination stepped over */
+                while (run_finished == 0) {
+                    if (hscale_accumulator < src_width) {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator
+                             + data_fdps_graphics_rle_blit_dest_width);
+                        run_length--;
+                        if (run_length == 0) {
+                            run_finished = 1;
+                        }
+                    } else {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator - src_width);
+                        dest_cursor++;
+                        dest_pixels_remaining--;
+                        if (dest_pixels_remaining == 0) {
+                            run_finished = 1;
+                            row_finished = 1;
+                        }
+                    }
+                }
+                break;
+            }
+        } while (row_finished == 0);
+
+        /* Back to the start of the source row, then the vertical step: every
+           source row the accumulator passes over is walked by decoding it, and
+           the accumulator lives in the global between rows. */
+        stream_cursor = row_stream_start;
+        vscale_accumulator = data_fdps_graphics_rle_blit_vscale_accumulator;
+        while (vscale_accumulator
+               <= data_fdps_graphics_rle_blit_remaining_rows) {
+            stream_cursor = fdps_rle_skip_row(stream_cursor);
+            vscale_accumulator = (unsigned short)
+                (vscale_accumulator
+                 + data_fdps_graphics_rle_blit_dest_height);
+        }
+        data_fdps_graphics_rle_blit_vscale_accumulator = (unsigned short)
+            (vscale_accumulator
+             - data_fdps_graphics_rle_blit_remaining_rows);
+
+        dest_cursor += data_fdps_graphics_rle_blit_dst_row_advance;
+        data_fdps_graphics_rle_blit_dest_rows_remaining--;
+    } while (data_fdps_graphics_rle_blit_dest_rows_remaining != 0);
+}
+
 /* 00056dc9.  Hand-written assembly like the kernel above, and with the same
    kind of register contract: ESI is the stream on the way in and the advanced
    stream on the way out, BX is the width left in the row and CL the command

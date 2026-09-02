@@ -43,6 +43,35 @@ extern void fdps_rle_blit_passthrough(unsigned char *rle_stream,
                                       int dest_row_advance);
 #pragma aux fdps_rle_blit_passthrough "*" parm caller [];
 
+/* 00056c5e.  Blit mode 4, the scaled sprite blit: decodes the same four ops
+   into an 8bpp destination while rescaling the sprite to `dest_width` by
+   `dest_height`, by a Bresenham step in each axis.  Scaling up repeats a
+   source pixel or a source row, scaling down drops them, and a run whose
+   pixels are still owing when the destination row fills is abandoned there.
+
+   `rle_stream` is the command stream and `dest_pixel` the first pixel of the
+   top destination row, the same two the pass-through kernel takes.  The scale
+   is not a global on the way in: the original reads it out of
+   fdps_blit_dispatch's own frame as the two halves of the dispatcher's sixth
+   argument, so it becomes two parameters here (see the note in rle.c).
+
+   The source rectangle comes from the same two globals the pass-through kernel
+   reads -- data_fdps_graphics_rle_blit_src_width and
+   data_fdps_graphics_rle_blit_remaining_rows, the latter being the source
+   height here and never decremented -- and the destination pitch from
+   data_fdps_graphics_rle_blit_dst_pitch.  The routine publishes its own scale
+   and its working counters into the rest of that block (gamedata.h) and
+   consumes data_fdps_graphics_rle_blit_dest_rows_remaining down to zero.
+
+   Vertical stepping is done by calling fdps_rle_skip_row once per source row
+   the accumulator drops, which is why a shrunk sprite still reads every row of
+   its stream. */
+extern void fdps_rle_blit_scaled(unsigned char *rle_stream,
+                                 unsigned char *dest_pixel,
+                                 unsigned short dest_width,
+                                 unsigned short dest_height);
+#pragma aux fdps_rle_blit_scaled "*" parm caller [];
+
 /* 00056dc9.  Advances a stream cursor past one encoded row without drawing
    anything, and returns where the next row's first command byte starts.  The
    scaled blitters call it once per source row the vertical Bresenham step

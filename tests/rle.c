@@ -224,6 +224,274 @@ static void rle_negative_row_advance_walks_upward(void)
     CHECK_EQ(dest_surface[1], 0xbb);
 }
 
+/* --- fdps_rle_blit_scaled (00056c5e) ----------------------------------------
+ *
+ * The scaled kernel's inputs are split three ways: the source rectangle is the
+ * two globals the pass-through kernel reads (the row count is the source
+ * HEIGHT here and is not decremented), the destination pitch is a third
+ * global, and the destination width and height are parameters, because the
+ * original reads them out of fdps_blit_dispatch's frame.  scaled_setup below
+ * writes the three globals; every case then passes the two scale words.
+ *
+ * Expected values come from the Bresenham step at 00056cca and its three
+ * copies: the accumulator starts at the destination width, an accumulator
+ * below the source width consumes one source pixel and adds the destination
+ * width, and otherwise one destination pixel is emitted and the source width
+ * subtracted.  Every stream is padded with 0xc0, a length-1 skip, so a decoder
+ * that gets a length or a byte cost wrong walks forward through padding
+ * instead of off the end of the buffer.
+ */
+static void scaled_setup(unsigned short src_width, unsigned short src_height,
+                         unsigned short dst_pitch)
+{
+    int byte_index;
+
+    for (byte_index = 0; byte_index < (int) sizeof dest_surface; byte_index++) {
+        dest_surface[byte_index] = SENTINEL;
+    }
+    data_fdps_graphics_rle_blit_src_width = src_width;
+    data_fdps_graphics_rle_blit_remaining_rows = src_height;
+    data_fdps_graphics_rle_blit_dst_pitch = dst_pitch;
+}
+
+/* A 4x1 source drawn at 4x1: both accumulators divide out exactly and the row
+   is the same four pixels the pass-through kernel would draw.  This is also
+   where the parameter block the routine publishes is pinned -- the two scale
+   words into 00070028 and 0007002a, the row advance as pitch - width, and the
+   row counter consumed to zero -- and the vertical accumulator, which is
+   seeded with the destination height, ends at 1 + 1 - 1. */
+static void scaled_one_to_one_draws_the_source_row(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x03;
+    stream[1] = 0xaa;
+    stream[2] = 0xc0;
+    stream[3] = 0xc0;
+    scaled_setup(4, 1, 8);
+    fdps_rle_blit_scaled(stream, dest_surface, 4, 1);
+
+    CHECK_EQ(dest_surface[0], 0xaa);
+    CHECK_EQ(dest_surface[3], 0xaa);
+    CHECK_EQ(dest_surface[4], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dest_width, 4);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dest_height, 1);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_row_advance, 4);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dest_rows_remaining, 0);
+    CHECK_EQ(data_fdps_graphics_rle_blit_vscale_accumulator, 1);
+}
+
+/* Horizontal upscale, a 2-pixel source row drawn 4 wide: the accumulator
+   starts at 4, so each of the two literal bytes is emitted twice before the
+   next is consumed. */
+static void scaled_upscale_repeats_each_source_pixel(void)
+{
+    unsigned char stream[6];
+
+    stream[0] = 0x81;
+    stream[1] = 0x11;
+    stream[2] = 0x22;
+    stream[3] = 0xc0;
+    stream[4] = 0xc0;
+    stream[5] = 0xc0;
+    scaled_setup(2, 1, 4);
+    fdps_rle_blit_scaled(stream, dest_surface, 4, 1);
+
+    CHECK_EQ(dest_surface[0], 0x11);
+    CHECK_EQ(dest_surface[1], 0x11);
+    CHECK_EQ(dest_surface[2], 0x22);
+    CHECK_EQ(dest_surface[3], 0x22);
+    CHECK_EQ(dest_surface[4], SENTINEL);
+}
+
+/* Horizontal downscale, a 4-pixel source row drawn 2 wide.  The accumulator
+   starts at 2, below the source width of 4, so the FIRST thing the loop does
+   is consume a source pixel rather than emit one: 0x11 and 0x33 are dropped
+   and 0x22 and 0x44 are what land.  A decoder that emitted before consuming
+   would write 0x11 and 0x33 instead. */
+static void scaled_downscale_drops_source_pixels(void)
+{
+    unsigned char stream[7];
+
+    stream[0] = 0x83;
+    stream[1] = 0x11;
+    stream[2] = 0x22;
+    stream[3] = 0x33;
+    stream[4] = 0x44;
+    stream[5] = 0xc0;
+    stream[6] = 0xc0;
+    scaled_setup(4, 1, 2);
+    fdps_rle_blit_scaled(stream, dest_surface, 2, 1);
+
+    CHECK_EQ(dest_surface[0], 0x22);
+    CHECK_EQ(dest_surface[1], 0x44);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+}
+
+/* Op 11 at 1:1 -- INC EDI with no write at 00056d7f -- so the two pixels it
+   covers keep the surface's own content and the fill that follows lands two
+   bytes further on. */
+static void scaled_skip_run_leaves_destination_alone(void)
+{
+    unsigned char stream[5];
+
+    stream[0] = 0xc1;
+    stream[1] = 0x01;
+    stream[2] = 0x77;
+    stream[3] = 0xc0;
+    stream[4] = 0xc0;
+    scaled_setup(4, 1, 4);
+    fdps_rle_blit_scaled(stream, dest_surface, 4, 1);
+
+    CHECK_EQ(dest_surface[0], SENTINEL);
+    CHECK_EQ(dest_surface[1], SENTINEL);
+    CHECK_EQ(dest_surface[2], 0x77);
+    CHECK_EQ(dest_surface[3], 0x77);
+    CHECK_EQ(dest_surface[4], SENTINEL);
+}
+
+/* Op 01 at 1:1 (0x41, length 2 doubled to 4 by SHL CX,1): the phase starts at
+   zero and flips only when a source pixel is consumed, so the run covers four
+   columns and writes the second of each pair.  Without the doubling the run
+   would end after two columns and the next command byte would be read from the
+   padding. */
+static void scaled_halftone_run_writes_second_of_each_pair(void)
+{
+    unsigned char stream[5];
+
+    stream[0] = 0x41;
+    stream[1] = 0x99;
+    stream[2] = 0xc0;
+    stream[3] = 0xc0;
+    stream[4] = 0xc0;
+    scaled_setup(4, 1, 4);
+    fdps_rle_blit_scaled(stream, dest_surface, 4, 1);
+
+    CHECK_EQ(dest_surface[0], SENTINEL);
+    CHECK_EQ(dest_surface[1], 0x99);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+    CHECK_EQ(dest_surface[3], 0x99);
+    CHECK_EQ(dest_surface[4], SENTINEL);
+}
+
+/* Vertical upscale: one source row drawn as two destination rows.  The source
+   cursor is popped back to the row start, and the vertical accumulator --
+   seeded with the destination height of 2, which is above the source height of
+   1 -- skips no source row before the second pass, so the same encoded row is
+   decoded twice.  The accumulator ends at 2 - 1, then 1 + 2 - 1.
+
+   The advance is added to a cursor that already sits at the end of the row it
+   just drew (ADD EDI,[0x00070030] at 00056db5, after the row's own writes have
+   moved EDI), so a 2-wide destination in a pitch of 4 puts the second row at
+   byte 4 and leaves bytes 2 and 3 untouched. */
+static void scaled_vertical_upscale_redraws_the_source_row(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x01;
+    stream[1] = 0xaa;
+    stream[2] = 0xc0;
+    stream[3] = 0xc0;
+    scaled_setup(2, 1, 4);
+    fdps_rle_blit_scaled(stream, dest_surface, 2, 2);
+
+    CHECK_EQ(dest_surface[0], 0xaa);
+    CHECK_EQ(dest_surface[1], 0xaa);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+    CHECK_EQ(dest_surface[3], SENTINEL);
+    CHECK_EQ(dest_surface[4], 0xaa);
+    CHECK_EQ(dest_surface[5], 0xaa);
+    CHECK_EQ(dest_surface[6], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_vscale_accumulator, 2);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dest_rows_remaining, 0);
+}
+
+/* Vertical downscale: two source rows, one destination row.  The accumulator
+   starts at 1, which is at or below the source height of 2, so
+   fdps_rle_skip_row is called twice after the only row is drawn and the second
+   source row is never decoded for its pixels -- 0xbb reaches nothing. */
+static void scaled_vertical_downscale_drops_a_source_row(void)
+{
+    unsigned char stream[6];
+
+    stream[0] = 0x01;
+    stream[1] = 0xaa;
+    stream[2] = 0x01;
+    stream[3] = 0xbb;
+    stream[4] = 0xc0;
+    stream[5] = 0xc0;
+    scaled_setup(2, 2, 4);
+    fdps_rle_blit_scaled(stream, dest_surface, 2, 1);
+
+    CHECK_EQ(dest_surface[0], 0xaa);
+    CHECK_EQ(dest_surface[1], 0xaa);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+    CHECK_EQ(dest_surface[3], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dest_rows_remaining, 0);
+}
+
+/* The row advance is computed sixteen bits wide and stored zero-extended into
+   the dword (SUB BP,[0x00070028] then MOV [0x00070030],EBP with EBP's top half
+   zeroed at 00056c74).  A destination four wide in a pitch of two therefore
+   stores 65534, not -2, which is what the same subtraction written as a signed
+   int would give.  The four destination pixels come from the single source
+   pixel of a 1-wide row. */
+static void scaled_row_advance_is_zero_extended(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x00;
+    stream[1] = 0x77;
+    stream[2] = 0xc0;
+    stream[3] = 0xc0;
+    scaled_setup(1, 1, 2);
+    fdps_rle_blit_scaled(stream, dest_surface, 4, 1);
+
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_row_advance, 65534L);
+    CHECK_EQ(dest_surface[0], 0x77);
+    CHECK_EQ(dest_surface[3], 0x77);
+    CHECK_EQ(dest_surface[4], SENTINEL);
+}
+
+/* The case the push and pop of the source cursor exist for: a 4-wide source
+   drawn 2 wide leaves each row's literal run half decoded, with the cursor
+   sitting on the third of its four pixel bytes.  The row still ends at the
+   next row's first command byte, because the cursor is popped back to the row
+   start and fdps_rle_skip_row walks the whole encoded row.  A decoder that
+   carried the cursor on from where it stopped would read 0x44 as the second
+   row's command byte and draw something else entirely.
+
+   The second destination row starts at byte 4, not byte 2: the row advance of
+   pitch - width is added to a cursor already standing at the end of the row it
+   drew. */
+static void scaled_partial_row_resyncs_through_skip_row(void)
+{
+    unsigned char stream[12];
+
+    stream[0] = 0x83;
+    stream[1] = 0x11;
+    stream[2] = 0x22;
+    stream[3] = 0x33;
+    stream[4] = 0x44;
+    stream[5] = 0x83;
+    stream[6] = 0x55;
+    stream[7] = 0x66;
+    stream[8] = 0x77;
+    stream[9] = 0x88;
+    stream[10] = 0xc0;
+    stream[11] = 0xc0;
+    scaled_setup(4, 2, 4);
+    fdps_rle_blit_scaled(stream, dest_surface, 2, 2);
+
+    CHECK_EQ(dest_surface[0], 0x22);
+    CHECK_EQ(dest_surface[1], 0x44);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+    CHECK_EQ(dest_surface[3], SENTINEL);
+    CHECK_EQ(dest_surface[4], 0x66);
+    CHECK_EQ(dest_surface[5], 0x88);
+    CHECK_EQ(dest_surface[6], SENTINEL);
+}
+
 /* --- fdps_rle_skip_row (00056dc9) -------------------------------------------
  *
  * The routine writes nothing, so what every case below pins is the two things
@@ -435,6 +703,15 @@ void run_rle_tests(void)
     RUN_TEST(rle_run_length_tops_out_at_64);
     RUN_TEST(rle_second_row_starts_after_row_advance);
     RUN_TEST(rle_negative_row_advance_walks_upward);
+    RUN_TEST(scaled_one_to_one_draws_the_source_row);
+    RUN_TEST(scaled_upscale_repeats_each_source_pixel);
+    RUN_TEST(scaled_downscale_drops_source_pixels);
+    RUN_TEST(scaled_skip_run_leaves_destination_alone);
+    RUN_TEST(scaled_halftone_run_writes_second_of_each_pair);
+    RUN_TEST(scaled_vertical_upscale_redraws_the_source_row);
+    RUN_TEST(scaled_vertical_downscale_drops_a_source_row);
+    RUN_TEST(scaled_row_advance_is_zero_extended);
+    RUN_TEST(scaled_partial_row_resyncs_through_skip_row);
     RUN_TEST(skip_fill_run_advances_two_bytes);
     RUN_TEST(skip_stretched_run_consumes_two_columns_per_unit);
     RUN_TEST(skip_literal_run_advances_past_its_pixels);

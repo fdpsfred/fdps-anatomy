@@ -1399,5 +1399,33 @@
       "same_as": "emit#1",
       "status": "open"
     }
+  ],
+  "00056c5e": [
+    {
+      "from": "emit",
+      "what": "Whether the rebuilt program reaches this kernel with its two scale words in hand. The original takes none of its inputs on the stack: ESI and EDI are set by fdps_blit_dispatch immediately before the CALL (MOV ESI,[EBP+8] / MOV EDI,[EBP+0xc] at 000568e1), and the scale is read by the kernel itself out of the dispatcher's frame at [EBP+0x1c]/[EBP+0x1e], the two halves of the dispatcher's sixth argument. The emit makes all four an explicit parameter list, which is the treatment fdps_rle_blit_passthrough (00056a0d) and fdps_rle_skip_row (00056dc9) already received in this file and which ADR-0001 allows, since the register handoff is not observable behaviour. fdps_blit_dispatch (000568db, blit.c) is the sole caller (one xref) and is not emitted yet, so the handoff has not been seen from both ends. Noted alongside this: rebuild_info/pitfalls.md records the blit-kernel family as one that must be produced as an .ASM module or inline assembly; the three functions of the family emitted so far are plain C with the handoff made explicit.",
+      "needs": "fdps_blit_dispatch emitted, so that the sixth argument's unpacking and the two pointers can be read against this signature end to end.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "Contract D. This is a per-pixel drawing loop that the original wrote in assembly around STOSB and a register accumulator; the emitted C keeps the same arithmetic and the same global reloads but will be materially slower per destination pixel. Nothing inside the routine reads a timer, a retrace or a sound state, so there is no timing balance observable from within it, and every caller reaches it through fdps_blit_dispatch's mode 4. What cannot be established from the assembly is whether any animation that scales a sprite is paced by how long the blit takes rather than by a timer.",
+      "needs": "A playtest in DOSBox-X at the project's cycle setting of a sequence that uses blit mode 4 -- a scaled sprite animation -- against the original executable, watching for a pacing difference.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Independently confirmed the frame arithmetic the emitter's entry rests on, which it asserted but did not show: fdps_blit_dispatch's prologue is PUSH EBP / MOV EBP,ESP / PUSH EDI / PUSH ESI / PUSH EBX at 000568db-000568e0, so its arguments begin at [EBP+8] and [EBP+0x1c]/[EBP+0x1e] really are the low and high halves of the sixth. The rest of the frame reads the same way (+0x10 to 0x00070024, +0x14 to 0x00070022, +0x18 to 0x0007002e, +0x20 the mode into BH), so the dispatcher already unpacks five of this kernel's six inputs and only the packed scale word is left to split. My reading does not differ from the emitter's; the concern stands as recorded and is not settleable until the dispatcher is emitted.",
+      "needs": "fdps_blit_dispatch emitted, so the sixth argument's unpacking and the two pointers can be read against this signature from both ends.",
+      "status": "open",
+      "same_as": "emit#0"
+    },
+    {
+      "from": "review",
+      "what": "Nothing added. I checked the body for any timer, retrace or sound-state read that would make the kernel's own speed observable from inside it and found none, which is what the emitter reported.",
+      "needs": "A playtest in DOSBox-X at the project's cycle setting of a sequence that uses blit mode 4, against the original executable, watching for a pacing difference.",
+      "status": "open",
+      "same_as": "emit#1"
+    }
   ]
 }

@@ -1100,4 +1100,35 @@ extern unsigned char *data_fdps_portrait_sprite_buf_ptr;
 extern unsigned short data_fdps_graphics_rle_blit_remaining_rows;
 extern unsigned short data_fdps_graphics_rle_blit_src_width;
 
+/* 00070026 through 00070030.  The rest of the same blit parameter block, the
+   part only the scaling kernels use: fdps_rle_blit_scaled in rle.c and
+   fdps_rle_blit_rotated_scaled in rlerot.c write them out of their own inputs
+   on entry and then read them back as they run, and fdps_blit_dispatch fills
+   only the pitch (MOV [0x0007002e],DX at 000568ea).  They hold, in order:
+
+     00070026  the vertical Bresenham accumulator, carried from one destination
+               row to the next through this global rather than in a register
+     00070028  the destination width in pixels
+     0007002a  the destination height in rows
+     0007002c  how many destination rows are still to write, decremented in
+               place to zero the way the row count above is
+     0007002e  the destination surface's pitch in bytes
+     00070030  the advance from the end of one destination row to the start of
+               the next, pitch - width
+
+   The first five are sixteen bits wide at every one of their accesses across
+   the image (all carry the 0x66 operand-size prefix, and 0007002c is stepped
+   by DEC word ptr), so they wrap rather than going negative.  The row advance
+   is the one that is not: it is written and read as a dword everywhere, and it
+   is signed, because fdps_rle_blit_translucent and its three neighbours store
+   the dispatcher's full 32-bit pitch - width into it (MOV [0x00070030],EDX at
+   0005761b).  fdps_rle_blit_scaled is the exception that computes it sixteen
+   bits wide and stores it zero-extended; see the note in rle.c. */
+extern unsigned short data_fdps_graphics_rle_blit_vscale_accumulator;
+extern unsigned short data_fdps_graphics_rle_blit_dest_width;
+extern unsigned short data_fdps_graphics_rle_blit_dest_height;
+extern unsigned short data_fdps_graphics_rle_blit_dest_rows_remaining;
+extern unsigned short data_fdps_graphics_rle_blit_dst_pitch;
+extern int data_fdps_graphics_rle_blit_dst_row_advance;
+
 #endif
