@@ -1681,6 +1681,14 @@
       "status": "committed",
       "emitted_against": "0x42",
       "rounds": 0
+    },
+    "0003cad2": {
+      "name": "fdps_dpmi_free_dos_memory",
+      "target": "dpmi.c",
+      "body_size": "0x2f",
+      "status": "committed",
+      "emitted_against": "0x2f",
+      "rounds": 0
     }
   }
 }

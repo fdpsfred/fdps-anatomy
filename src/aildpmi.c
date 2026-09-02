@@ -1,9 +1,9 @@
 /* aildpmi.c -- game-side DPMI service routines the Miles AIL library calls.
  *
- * DPMI INT 31h wrappers for DOS memory allocation (0100h/0101h) and linear
- * region locking (0600h/0601h). AIL's vendor object references all six by
- * EXTDEF, so they must be defined here and linked in; the library does not
- * provide them.
+ * DPMI INT 31h wrappers for DOS memory allocation (0100h) and linear region
+ * locking (0600h/0601h). AIL's vendor object references each of them by
+ * EXTDEF, so they must be defined and linked in; the library does not provide
+ * them. Function 0101h, the DOS memory free, is in src/dpmi.c.
  */
 #include <i86.h>
 #include "aildpmi.h"
@@ -94,18 +94,4 @@ int fdps_dpmi_alloc_dos_memory(unsigned paragraphs, unsigned *out_linear,
     end = (paragraphs << 4) + linear - 1;
     fdps_dpmi_lock_region(linear, end);
     return 1;
-}
-
-/* Only the selector is used; the first two parameters are ignored, matching
-   the original -- callers pass the whole triple they got from the allocator. */
-void fdps_dpmi_free_dos_memory(unsigned linear_unused, unsigned segment_unused,
-                              unsigned selector)
-{
-    union REGS regs;
-
-    (void)linear_unused;
-    (void)segment_unused;
-    regs.x.eax = 0x0101;
-    regs.x.edx = selector & 0xffffu;
-    int386(0x31, &regs, &regs);
 }
