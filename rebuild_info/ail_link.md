@@ -19,7 +19,7 @@
 
 | 庫裡的 EXTDEF 名稱 | FDPS 的符號 | 位址 | 出處 |
 | --- | --- | --- | --- |
-| `fd2_dpmi_alloc_dos_memory` | `fdps_dpmi_alloc_dos_memory` | `0003ca49` | `src/aildpmi.c` |
+| `fd2_dpmi_alloc_dos_memory` | `fdps_dpmi_alloc_dos_memory` | `0003ca49` | `src/dpmi.c` |
 | `fd2_dpmi_free_dos_memory` | `fdps_dpmi_free_dos_memory` | `0003cad2` | `src/dpmi.c` |
 | `fd2_dpmi_lock_region` | `fdps_dpmi_lock_region` | `0003cb01` | `src/dpmi.c` |
 | `fd2_dpmi_unlock_region` | `fdps_dpmi_unlock_region` | `0003cb6e` | `src/aildpmi.c` |
