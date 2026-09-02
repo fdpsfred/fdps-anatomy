@@ -1838,6 +1838,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0xb"
+    },
+    "000178f0": {
+      "name": "fdps_read_scancode_auto_repeat",
+      "target": "keybd.c",
+      "body_size": "0x9d",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x9d"
     }
   }
 }

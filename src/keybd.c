@@ -6,8 +6,74 @@
  * single byte holding the last raw scancode the hardware produced.  This file
  * holds the accessors for both; the state itself is defined here once ticket 23
  * emits it.
+ *
+ * On top of those accessors sits the auto-repeat filter the modal input loops
+ * poll, which lives at 000178f0 -- far from the rest of this file in the image,
+ * but it is this file's three private globals it runs on.  It is the only user
+ * of the timer tick counter here, which is why gamedata.h is included.
  */
+#include "gamedata.h"
 #include "keybd.h"
+
+/* The latch's no-key value, and equally the filter's "nothing to report this
+   poll" answer.  The ISR never produces it as a scancode: 0xff is a break code
+   for a make code of 0x7f, which no key on the keyboard has. */
+#define SCANCODE_NONE 0xff
+
+/* The auto-repeat schedule, in timer ticks of the key being held.  Nothing is
+   reported until the hold has lasted REPEAT_DELAY_TICKS, and from there a
+   report goes out on every tick whose count divides by REPEAT_PERIOD_TICKS --
+   so the first repeat lands on tick 6, then 9, 12 and on. */
+#define REPEAT_DELAY_TICKS 5
+#define REPEAT_PERIOD_TICKS 3
+
+unsigned int fdps_read_scancode_auto_repeat(void)
+{
+    /* The scancode this poll will report, which starts as the raw latched byte
+       and is replaced by SCANCODE_NONE on every path that decides the caller
+       should hear nothing.  It is a full unsigned int holding a zero-extended
+       byte, exactly as the assembly widens it: XOR EAX,EAX / MOV AL,byte ptr
+       [EDX] at 00017903, so a break code arrives as 156 rather than -100. */
+    unsigned int scancode;
+
+    scancode = *fdps_keyboard_scancode_ptr();
+
+    if (scancode != data_fdps_input_key_repeat_prev_scancode) {
+        /* A different code from last time: a key went down, or the one that
+           was down came up (the latch goes to 0xff, which is a change like any
+           other).  Report it as it stands and start the hold count over.
+
+           data_fdps_input_key_repeat_last_tick is deliberately NOT touched
+           here.  Recording the current tick on this path is the obvious tidy-up
+           and it moves the start of the repeat delay by a tick, because the
+           first held poll of a new key is meant to compare against the tick
+           some earlier key left behind (rebuild_info/pitfalls.md). */
+        data_fdps_input_key_repeat_counter = 0;
+        data_fdps_input_key_repeat_prev_scancode = scancode;
+    } else if (data_fdps_input_key_repeat_last_tick ==
+               data_fdps_timer_tick_counter) {
+        /* Same key, and the timer has not moved since the last poll that acted:
+           say nothing and change nothing, so polling faster than the timer
+           cannot make the key repeat faster. */
+        scancode = SCANCODE_NONE;
+    } else {
+        /* Same key and a new tick: the hold is one tick longer.  The report
+           goes out only on the ticks the schedule allows; the rest are
+           silenced, but the count and the serviced tick advance either way. */
+        data_fdps_input_key_repeat_counter = data_fdps_input_key_repeat_counter + 1;
+        if (data_fdps_input_key_repeat_counter < REPEAT_DELAY_TICKS ||
+            data_fdps_input_key_repeat_counter % REPEAT_PERIOD_TICKS != 0) {
+            scancode = SCANCODE_NONE;
+        }
+        data_fdps_input_key_repeat_last_tick = data_fdps_timer_tick_counter;
+    }
+
+    /* Every path ends here.  Whatever the ISR queued since the last poll is
+       thrown away, so this reader answers from the latch alone; draining the
+       queue instead would hand callers presses the original never reports. */
+    fdps_flush_keyboard_queue();
+    return scancode;
+}
 
 unsigned char *fdps_keyboard_scancode_ptr(void)
 {

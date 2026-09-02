@@ -17,6 +17,7 @@
  * define and is zero-filled until then.
  */
 #include "testharn.h"
+#include "gamedata.h"
 #include "keybd.h"
 
 /* The returned pointer must name the byte the ISR writes and no other object.
@@ -326,6 +327,385 @@ static void keybd_flush_leaves_the_latched_scancode_alone(void)
     data_fdps_input_scancode_queue_write_index = 0;
 }
 
+/* fdps_read_scancode_auto_repeat at 000178f0.  Expected values come from its
+   assembly: the widening XOR EAX,EAX / MOV AL,byte ptr [EDX] at 00017903, the
+   CMP EAX,dword ptr [0x00063fc4] / JZ that separates a new key from a held one
+   at 0001790d, the CMP EAX,dword ptr [0x00069d64] / JNZ tick guard at 0001792e,
+   the INC dword ptr [0x00060018] at 0001793f, the CMP dword ptr
+   [0x00060018],0x5 / JL and the IDIV by 3 with TEST EDX,EDX / JZ that follow it
+   at 00017945..00017965, the MOV [0x00063fc8],EAX at 00017973 that is reached
+   from that one path only, and the CALL 0x000567b3 at 00017978 that every path
+   arrives at.  None of them is read off the emitted C.
+
+   THE FILTER'S STATE IS DRIVEN, NOT OBSERVED COLD.  All four globals involved
+   -- the latched scancode, the previous scancode, the hold counter and the
+   serviced tick -- are ticket 23's to define and are zero-filled until then, so
+   no case below reads one it has not written first, and every case restores
+   them.  The timer tick counter is written directly for the same reason: no
+   timer interrupt runs under the test harness, so the tick is whatever a case
+   sets, which is exactly the control the schedule cases need.
+
+   0x48 is the Up arrow's make code and 0x50 the Down arrow's -- the two keys
+   these menus repeat on -- and 0x9c is Enter's break code.  Nothing here
+   depends on which keys they are; they are distinct byte values, one of them
+   above 0x7f. */
+
+/* A scancode different from last poll's is a fresh press and comes back
+   unchanged, with the hold count started over and the new code remembered.
+   The tick is set EQUAL to the serviced tick here on purpose: on this path the
+   tick guard is not consulted at all, so a body that tested it first would
+   answer 0xff and fail.  The queue is flushed on the way out like every other
+   path. */
+static void keybd_repeat_reports_a_new_key_unchanged(void)
+{
+    unsigned char saved_scancode;
+    unsigned int reported_scancode;
+
+    saved_scancode = data_fdps_input_last_scancode;
+    data_fdps_input_last_scancode = 0x48;            /* Up pressed now */
+    data_fdps_input_key_repeat_prev_scancode = 0x50; /* Down was down before */
+    data_fdps_input_key_repeat_counter = 7;          /* mid-repeat on Down */
+    data_fdps_input_key_repeat_last_tick = 99;
+    data_fdps_timer_tick_counter = 99;               /* same tick, on purpose */
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 3;  /* three codes pending */
+
+    reported_scancode = fdps_read_scancode_auto_repeat();
+
+    CHECK_EQ(reported_scancode, 0x48);
+    CHECK_EQ(data_fdps_input_key_repeat_counter, 0);
+    CHECK_EQ(data_fdps_input_key_repeat_prev_scancode, 0x48);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 0);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_key_repeat_prev_scancode = 0;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The new-key path must NOT record the current tick.  The store at 00017973 is
+   reached only from the held-key branch that found the tick had moved, and
+   hoisting it out -- the obvious tidy-up -- shifts the whole repeat delay by a
+   tick.  The second poll below is what makes the difference visible: with the
+   serviced tick still the stale 99, that poll sees a moved tick and spends the
+   first of the six ticks of delay immediately.  Had the press recorded tick
+   200, the poll would have found nothing moved, answered without counting, and
+   the key would have repeated one tick later than the original's. */
+static void keybd_repeat_new_key_does_not_record_the_tick(void)
+{
+    unsigned char saved_scancode;
+    unsigned int reported_scancode;
+
+    saved_scancode = data_fdps_input_last_scancode;
+    data_fdps_input_last_scancode = 0x48;
+    data_fdps_input_key_repeat_prev_scancode = 0x50;
+    data_fdps_input_key_repeat_counter = 7;
+    data_fdps_input_key_repeat_last_tick = 99;       /* left by an older key */
+    data_fdps_timer_tick_counter = 200;
+
+    reported_scancode = fdps_read_scancode_auto_repeat();
+
+    CHECK_EQ(reported_scancode, 0x48);
+    CHECK_EQ(data_fdps_input_key_repeat_last_tick, 99);
+    CHECK_EQ(data_fdps_input_key_repeat_counter, 0);
+
+    /* Same key, same tick, and the hold count moves anyway. */
+    reported_scancode = fdps_read_scancode_auto_repeat();
+
+    CHECK_EQ(reported_scancode, 0xff);
+    CHECK_EQ(data_fdps_input_key_repeat_counter, 1);
+    CHECK_EQ(data_fdps_input_key_repeat_last_tick, 200);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_key_repeat_prev_scancode = 0;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 0;
+}
+
+/* A held key inside a tick reports nothing and changes nothing: the count does
+   not move, the serviced tick does not move, and the remembered code does not
+   move.  This is what stops a caller that polls twenty times a frame from
+   repeating twenty times faster than one that polls once. */
+static void keybd_repeat_stays_silent_within_one_tick(void)
+{
+    unsigned char saved_scancode;
+    unsigned int reported_scancode;
+
+    saved_scancode = data_fdps_input_last_scancode;
+    data_fdps_input_last_scancode = 0x48;
+    data_fdps_input_key_repeat_prev_scancode = 0x48; /* still held */
+    data_fdps_input_key_repeat_counter = 2;
+    data_fdps_input_key_repeat_last_tick = 77;
+    data_fdps_timer_tick_counter = 77;               /* timer has not moved */
+    data_fdps_input_scancode_queue_head = 1;
+    data_fdps_input_scancode_queue_write_index = 5;
+
+    reported_scancode = fdps_read_scancode_auto_repeat();
+
+    CHECK_EQ(reported_scancode, 0xff);
+    CHECK_EQ(data_fdps_input_key_repeat_counter, 2);
+    CHECK_EQ(data_fdps_input_key_repeat_last_tick, 77);
+    CHECK_EQ(data_fdps_input_key_repeat_prev_scancode, 0x48);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 1);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_key_repeat_prev_scancode = 0;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* One tick, one count, however many polls fall inside it.  The first poll of a
+   new tick counts and records the tick; every further poll of that tick is the
+   silent case above.  Both polls answer 0xff -- the count is one, far short of
+   the delay. */
+static void keybd_repeat_counts_one_tick_at_a_time(void)
+{
+    unsigned char saved_scancode;
+    unsigned int reported_scancode;
+
+    saved_scancode = data_fdps_input_last_scancode;
+    data_fdps_input_last_scancode = 0x48;
+    data_fdps_input_key_repeat_prev_scancode = 0x48;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 1;
+
+    reported_scancode = fdps_read_scancode_auto_repeat();
+    CHECK_EQ(reported_scancode, 0xff);
+    CHECK_EQ(data_fdps_input_key_repeat_counter, 1);
+    CHECK_EQ(data_fdps_input_key_repeat_last_tick, 1);
+
+    reported_scancode = fdps_read_scancode_auto_repeat();
+    CHECK_EQ(reported_scancode, 0xff);
+    CHECK_EQ(data_fdps_input_key_repeat_counter, 1);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_key_repeat_prev_scancode = 0;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 0;
+}
+
+/* The whole schedule, driven one tick at a time from a fresh press: the key is
+   reported again on the sixth tick of the hold and then every third tick.  The
+   expected pattern is read straight off CMP dword ptr [0x00060018],0x5 / JL
+   (silence below five) and the IDIV by three whose zero remainder is the only
+   thing that lets a report through -- so 3 is silenced by the delay although it
+   divides, 5 is silenced by the period although it clears the delay, and 6 and
+   9 are the first two repeats. */
+static void keybd_repeat_first_repeat_lands_on_the_sixth_tick(void)
+{
+    unsigned char saved_scancode;
+    unsigned int reported_scancode;
+    int tick;
+
+    saved_scancode = data_fdps_input_last_scancode;
+    data_fdps_input_last_scancode = 0x48;
+    data_fdps_input_key_repeat_prev_scancode = 0x48; /* already held */
+    data_fdps_input_key_repeat_counter = 0;          /* as the press left it */
+    data_fdps_input_key_repeat_last_tick = 0;
+
+    for (tick = 1; tick <= 9; tick++) {
+        data_fdps_timer_tick_counter = (unsigned int) tick;
+        reported_scancode = fdps_read_scancode_auto_repeat();
+
+        if (tick == 6 || tick == 9) {
+            CHECK_EQ(reported_scancode, 0x48);
+        } else {
+            CHECK_EQ(reported_scancode, 0xff);
+        }
+        CHECK_EQ(data_fdps_input_key_repeat_counter, tick);
+    }
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_key_repeat_prev_scancode = 0;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 0;
+}
+
+/* The two halves of the gate are independent, and each case here would pass if
+   the other half were missing.  Count 3 divides by three and is still silenced,
+   because the delay has not elapsed; count 5 has reached the delay and is still
+   silenced, because it is not on the period; count 6 satisfies both and is the
+   one that speaks. */
+static void keybd_repeat_needs_the_delay_and_the_period_together(void)
+{
+    unsigned char saved_scancode;
+    unsigned int reported_scancode;
+
+    saved_scancode = data_fdps_input_last_scancode;
+    data_fdps_input_last_scancode = 0x48;
+    data_fdps_input_key_repeat_prev_scancode = 0x48;
+    data_fdps_input_key_repeat_last_tick = 0;
+
+    data_fdps_input_key_repeat_counter = 2;          /* about to become 3 */
+    data_fdps_timer_tick_counter = 1;
+    reported_scancode = fdps_read_scancode_auto_repeat();
+    CHECK_EQ(reported_scancode, 0xff);
+    CHECK_EQ(data_fdps_input_key_repeat_counter, 3);
+
+    data_fdps_input_key_repeat_counter = 4;          /* about to become 5 */
+    data_fdps_timer_tick_counter = 2;
+    reported_scancode = fdps_read_scancode_auto_repeat();
+    CHECK_EQ(reported_scancode, 0xff);
+    CHECK_EQ(data_fdps_input_key_repeat_counter, 5);
+
+    data_fdps_timer_tick_counter = 3;                /* 5 becomes 6 */
+    reported_scancode = fdps_read_scancode_auto_repeat();
+    CHECK_EQ(reported_scancode, 0x48);
+    CHECK_EQ(data_fdps_input_key_repeat_counter, 6);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_key_repeat_prev_scancode = 0;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 0;
+}
+
+/* The latched byte is widened without sign, so a break code comes back as the
+   byte it is and is remembered as that.  Read through a signed char the 0x9c
+   below would be -100, would never equal the 156 the previous poll stored, and
+   every poll of a held key would look like a fresh press -- the repeat would
+   never start and the key would report on every single frame.  0xff, the
+   no-key value, is the same story at the top of the range. */
+static void keybd_repeat_widens_the_latch_unsigned(void)
+{
+    unsigned char saved_scancode;
+    unsigned int reported_scancode;
+
+    saved_scancode = data_fdps_input_last_scancode;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 0;
+
+    data_fdps_input_last_scancode = 0x9c;            /* Enter's break code */
+    data_fdps_input_key_repeat_prev_scancode = 0x48;
+    reported_scancode = fdps_read_scancode_auto_repeat();
+    CHECK_EQ(reported_scancode, 156);
+    CHECK_EQ(data_fdps_input_key_repeat_prev_scancode, 156);
+
+    data_fdps_input_last_scancode = 0xff;            /* the key came up */
+    reported_scancode = fdps_read_scancode_auto_repeat();
+    CHECK_EQ(reported_scancode, 255);
+    CHECK_EQ(data_fdps_input_key_repeat_prev_scancode, 255);
+    CHECK_EQ(data_fdps_input_key_repeat_counter, 0);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_key_repeat_prev_scancode = 0;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 0;
+}
+
+/* No key down is treated as a key held down -- 0xff goes through the counter
+   and the schedule like any scancode -- and that costs nothing, because the
+   value the schedule eventually lets through is 0xff itself.  So an idle input
+   loop can never be handed a keypress it did not get, and the function needs no
+   special case for the idle state.  The count below is set to 5 so the next
+   tick reaches 6, the first tick the gate opens on. */
+static void keybd_repeat_never_reports_the_no_key_value_as_a_key(void)
+{
+    unsigned char saved_scancode;
+    unsigned int reported_scancode;
+
+    saved_scancode = data_fdps_input_last_scancode;
+    data_fdps_input_last_scancode = 0xff;            /* nothing is down */
+    data_fdps_input_key_repeat_prev_scancode = 0xff;
+    data_fdps_input_key_repeat_counter = 5;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 1;
+
+    reported_scancode = fdps_read_scancode_auto_repeat();
+
+    CHECK_EQ(reported_scancode, 0xff);
+    CHECK_EQ(data_fdps_input_key_repeat_counter, 6);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_key_repeat_prev_scancode = 0;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 0;
+}
+
+/* The queue is flushed on all three paths, not just the one that reports.  The
+   CALL at 00017978 sits after the branches have joined, so a press, a silenced
+   poll inside a tick and a counted poll all leave the ring empty; keystrokes
+   the ISR buffered between polls are discarded by design.  A body that flushed
+   only where it reports would deliver those stale codes to whichever screen
+   read the queue next. */
+static void keybd_repeat_flushes_the_queue_on_every_path(void)
+{
+    unsigned char saved_scancode;
+
+    saved_scancode = data_fdps_input_last_scancode;
+    data_fdps_input_last_scancode = 0x48;
+
+    data_fdps_input_key_repeat_prev_scancode = 0x50; /* a fresh press */
+    data_fdps_input_key_repeat_last_tick = 4;
+    data_fdps_timer_tick_counter = 4;
+    data_fdps_input_scancode_queue_head = 2;
+    data_fdps_input_scancode_queue_write_index = 6;
+    fdps_read_scancode_auto_repeat();
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 2);
+
+    data_fdps_input_key_repeat_last_tick = 4;        /* held, tick unmoved */
+    data_fdps_input_scancode_queue_head = 3;
+    data_fdps_input_scancode_queue_write_index = 9;
+    fdps_read_scancode_auto_repeat();
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 3);
+
+    data_fdps_timer_tick_counter = 5;                /* held, tick moved */
+    data_fdps_input_scancode_queue_head = 7;
+    data_fdps_input_scancode_queue_write_index = 1;
+    fdps_read_scancode_auto_repeat();
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 7);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_key_repeat_prev_scancode = 0;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The latched byte is read and never written: the assembly loads through the
+   pointer at 00017905 and stores nothing back.  Clearing it here would look
+   like good housekeeping and would end the auto-repeat outright -- the next
+   poll would find 0xff, call it a new key, and no key could ever be held.  The
+   callers that do want it cleared write 0xff through
+   fdps_keyboard_scancode_ptr themselves before their loops start. */
+static void keybd_repeat_leaves_the_latched_scancode_alone(void)
+{
+    unsigned char saved_scancode;
+
+    saved_scancode = data_fdps_input_last_scancode;
+    data_fdps_input_last_scancode = 0x48;
+    data_fdps_input_key_repeat_prev_scancode = 0x50;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 0;
+
+    fdps_read_scancode_auto_repeat();                /* the press */
+    CHECK_EQ(data_fdps_input_last_scancode, 0x48);
+
+    data_fdps_timer_tick_counter = 1;
+    fdps_read_scancode_auto_repeat();                /* a counted poll */
+    CHECK_EQ(data_fdps_input_last_scancode, 0x48);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_key_repeat_prev_scancode = 0;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_timer_tick_counter = 0;
+}
+
 void run_keybd_tests(void)
 {
     RUN_TEST(keybd_scancode_ptr_names_the_isr_slot);
@@ -342,4 +722,14 @@ void run_keybd_tests(void)
     RUN_TEST(keybd_flush_handles_a_wrapped_write_index);
     RUN_TEST(keybd_flush_leaves_indices_inside_the_ring);
     RUN_TEST(keybd_flush_leaves_the_latched_scancode_alone);
+    RUN_TEST(keybd_repeat_reports_a_new_key_unchanged);
+    RUN_TEST(keybd_repeat_new_key_does_not_record_the_tick);
+    RUN_TEST(keybd_repeat_stays_silent_within_one_tick);
+    RUN_TEST(keybd_repeat_counts_one_tick_at_a_time);
+    RUN_TEST(keybd_repeat_first_repeat_lands_on_the_sixth_tick);
+    RUN_TEST(keybd_repeat_needs_the_delay_and_the_period_together);
+    RUN_TEST(keybd_repeat_widens_the_latch_unsigned);
+    RUN_TEST(keybd_repeat_never_reports_the_no_key_value_as_a_key);
+    RUN_TEST(keybd_repeat_flushes_the_queue_on_every_path);
+    RUN_TEST(keybd_repeat_leaves_the_latched_scancode_alone);
 }

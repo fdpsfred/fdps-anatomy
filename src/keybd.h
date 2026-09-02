@@ -71,6 +71,67 @@ extern int data_fdps_input_scancode_queue_head;
  * build supplies it zero-filled. */
 extern volatile int data_fdps_input_scancode_queue_write_index;
 
+/* 00063fc4.  The scancode fdps_read_scancode_auto_repeat saw on its previous
+ * poll, and the only thing that tells a new key press from a key still held
+ * down: the poll compares the latched byte with this and treats a difference
+ * as a fresh press.  0xff -- no key -- is stored here like any other value, so
+ * releasing a key is itself a change and rearms the filter.
+ *
+ * A full dword holding a zero-extended byte: the poll widens the latch with
+ * XOR EAX,EAX / MOV AL,byte ptr [EDX] at 00017903 and stores the whole
+ * register (MOV [0x00063fc4],EAX at 00017922), so 0x9c arrives here as 156 and
+ * never as -100.  Unsigned for that reason; nothing compares it for order --
+ * the one test on it is CMP EAX,dword ptr [0x00063fc4] / JZ at 0001790d.
+ *
+ * A sweep of the whole image for 0x00063fc4 finds two instructions, both in
+ * fdps_read_scancode_auto_repeat: this is that filter's private state and no
+ * other function can see it.
+ *
+ * Defined by ticket 23 along with the rest of keybd.c's data; until then the
+ * build supplies it zero-filled. */
+extern unsigned int data_fdps_input_key_repeat_prev_scancode;
+
+/* 00063fc8.  The value of data_fdps_timer_tick_counter at the last poll that
+ * actually advanced the repeat counter.  fdps_read_scancode_auto_repeat
+ * compares the current tick against it and does nothing when they are equal,
+ * which is what makes the auto-repeat run on the timer rather than on however
+ * often the caller polls.
+ *
+ * Written on one path only -- the held-key poll that found the tick had moved
+ * (MOV EAX,[0x00069d64] / MOV [0x00063fc8],EAX at 0001796e) -- and deliberately
+ * not on the new-key path, which is a divergence trap rather than an oversight
+ * (rebuild_info/pitfalls.md).
+ *
+ * Unsigned, to match the tick counter it holds a copy of, and only ever tested
+ * for equality against it (CMP EAX,dword ptr [0x00069d64] / JNZ at 0001792e),
+ * so the counter's wrap costs it nothing.
+ *
+ * A sweep of the whole image for 0x00063fc8 finds two instructions, both in
+ * fdps_read_scancode_auto_repeat.
+ *
+ * Defined by ticket 23 along with the rest of keybd.c's data; until then the
+ * build supplies it zero-filled. */
+extern unsigned int data_fdps_input_key_repeat_last_tick;
+
+/* 00060018.  How many timer ticks the key now held down has been held for,
+ * counted by fdps_read_scancode_auto_repeat: zeroed when a different scancode
+ * appears and incremented by at most one per tick while the same one stays.
+ * The repeat schedule is read off it -- a poll reports the key again when the
+ * count has reached 5 and is a multiple of 3.
+ *
+ * SIGNED, and that is a branch rather than a spelling: the delay test is
+ * CMP dword ptr [0x00060018],0x5 / JL at 00017945, and the multiple-of-three
+ * test divides with CDQ-style sign extension into IDIV (SAR EDX,0x1f / IDIV
+ * EBX at 0001795e).  Nothing can drive it negative in practice, but int is
+ * what the arithmetic in the image is.
+ *
+ * A sweep of the whole image for 0x00060018 finds five instructions, all in
+ * fdps_read_scancode_auto_repeat.
+ *
+ * Defined by ticket 23 along with the rest of keybd.c's data; until then the
+ * build supplies it zero-filled. */
+extern int data_fdps_input_key_repeat_counter;
+
 /* Hands back the address of that latched scancode byte, so an input loop can
    both read the current key and clear it.
 
@@ -120,5 +181,33 @@ extern void fdps_wait_any_key(void);
    read index only because that is where the load put it. */
 extern void fdps_flush_keyboard_queue(void);
 #pragma aux fdps_flush_keyboard_queue "*" parm caller [];
+
+/* Polls the latched scancode through the game's auto-repeat filter: one report
+   per key press, then a slow repeat while the key stays down.
+
+   Reads the byte behind fdps_keyboard_scancode_ptr and answers with it when it
+   differs from the previous poll's, which is what makes a press report exactly
+   once.  While the same code keeps coming back the answer is 0xff until the
+   key has been held for six timer ticks, then again every third tick after
+   that; the count advances at most once per tick however often a caller polls,
+   because the filter records the tick it last acted on.
+
+   The result is the raw scancode the caller should act on, or 0xff for
+   "nothing this poll" -- which covers both no key down and a held key still
+   inside its repeat delay.  Callers do not tell those apart: each tests the
+   result against the few codes it cares about (CMP dword ptr [EBP-0xc],0x1 for
+   Escape at 0003240a, 0x53 at 00032410, 0x1c for Enter at 0003277d) and
+   ignores everything else.  Two of them -- fdps_unit_status_window_wait_input
+   at 00017117 and fdps_spell_list_window_wait_input at 00027907 -- instead
+   reject the whole 0x80..0xff range with CMP ...,0x7f / JLE before looking.
+
+   No arguments: all seven call sites push nothing before the CALL and adjust
+   nothing after it, and take the result straight out of EAX.
+
+   Every call flushes the scancode queue as it leaves, so keystrokes that
+   arrived between polls are discarded rather than delivered -- this reader
+   works off the latch alone. */
+extern unsigned int fdps_read_scancode_auto_repeat(void);
+#pragma aux fdps_read_scancode_auto_repeat "*" parm caller [];
 
 #endif
