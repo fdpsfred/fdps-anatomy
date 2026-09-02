@@ -8019,7 +8019,7 @@ Algorithm:
 Copies the requested music index into the working slot, and when the music-enabled setting at DAT_00060008 is 0 forces that slot to -1, so a music-off setting discards whatever the caller asked for. Publishes the result in the current-music global DAT_00069d54, which fdps_cd_music_repeat_poll reads to restart the track when it runs out. If that value is -1 it calls fdps_cd_stop_audio and returns; otherwise (the music-enabled setting is retested, and is always non-zero on this path) it calls fdps_cd_play_track with DAT_00069d54 + 1 -- the CD track number is one more than the music index the game uses.
 
 Parameters:
-  music_index -- 0-based background-music index, or -1 to stop the music. fdps_title_screen and FUN_0001ba40 pass 1, fdps_run_village_phase passes 2 on entering the village and -1 on leaving it, and FUN_00021650 passes the byte operand of an IconAni script opcode, mapping the operand 0xff to -1.
+  music_index -- 0-based background-music index, or -1 to stop the music. fdps_title_screen and fdps_play_ending_credit_roll pass 1, fdps_run_village_phase passes 2 on entering the village and -1 on leaving it, and fdps_icon_script_run passes the byte operand of an IconAni script opcode, mapping the operand 0xff to -1.
 
 Returns:
   Nothing.

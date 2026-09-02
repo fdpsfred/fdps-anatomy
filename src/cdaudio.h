@@ -198,4 +198,30 @@ extern void fdps_cd_resolve_track_range(void);
 extern void fdps_cd_play_track(short track);
 #pragma aux fdps_cd_play_track "*" parm caller [];
 
+/* 00030bf0.  Sets the background music: settles which music the game should be
+   playing, publishes that in data_fdps_audio_cd_current_music_index and makes
+   the drive match it -- playing the corresponding CD track, or stopping the
+   drive when the answer is "none".
+
+   music_index is the game's own 0-based music index, or -1 for silence.  The
+   CD track is one more than it, which is where the +1 in the body comes from;
+   the disc's track 1 is the data track.  The six call sites pass 1
+   (fdps_title_screen at 0002a572 and fdps_play_ending_credit_roll at
+   0001ba53), 2 and -1 (fdps_run_village_phase) and a value the IconAni script
+   opcode carried (fdps_icon_script_run at 000219d7).  A full dword goes on the
+   stack at every one of them and the body stores it as a dword, so the index
+   travels as an int even though fdps_cd_play_track fetches the track number
+   below it as a word.
+
+   The music-enabled setting data_fdps_audio_bgm_enabled_flag overrides the
+   argument rather than short-circuiting around it: with music switched off
+   this publishes -1 and stops the drive whatever the caller asked for; see
+   the body's comment for why an early-out is not the same thing.
+
+   Returns nothing, and reports nothing: neither callee reports anything and
+   nothing here looks at the drive.  A music index whose track is not on the
+   disc is sent down fdps_cd_play_track like any other. */
+extern void fdps_cd_set_music_track(int music_index);
+#pragma aux fdps_cd_set_music_track "*" parm caller [];
+
 #endif

@@ -225,6 +225,25 @@ extern unsigned int data_fdps_chapter_pending_event_idx;
    remember; ticket 23's definition has to carry the same qualifier. */
 extern volatile unsigned int data_fdps_timer_tick_counter;
 
+/* 00060008.  The player's background-music toggle, the companion of the
+   sound-effect flag below: the same options menu writes both -- XOR byte ptr
+   [0x00060008],0x1 at 0001849e is the toggle -- and a save file carries both,
+   as the bgm_enabled_flag and sfx_enabled_flag fields of struct
+   fdps_save_slot.  fdps_load_savegame restores it with MOV [0x00060008],AL at
+   00024194 and fdps_title_screen forces it on with MOV byte ptr
+   [0x00060008],0x1 at 0002a56b.
+
+   One byte, and read as a boolean: every one of the fifteen accesses in the
+   image is a byte access and all but the toggle and the two stores are CMP
+   byte ptr [...],0x0, so no compare here is sign-sensitive.  It says what the
+   player asked for and nothing about whether a CD-ROM drive was found; the
+   music routines in cdaudio.c test it separately from the drive state.
+
+   The neighbouring globals at 00060004 and 0006000c are unrelated option and
+   drawing state of their own, and nothing indexes across them, so this is a
+   plain scalar and not one cell of an options array. */
+extern unsigned char data_fdps_audio_bgm_enabled_flag;
+
 /* 00069d70.  The player's sound-effect toggle, one of the four option flags
    the options menu writes and a save file carries (the sfx_enabled_flag field
    of struct fdps_save_slot).  Read as a boolean; it says what the player
@@ -825,5 +844,23 @@ extern short data_fdps_cd_track_info_track_number;
    00:00:00 in the reply block and the -150 that comes out arrives here as
    0xffffff6a. */
 extern unsigned int data_fdps_cd_track_start_sector;
+
+/* 00069d54.  Which background music the game wants playing, as the 0-based
+   music index the game counts in rather than the CD track number the drive
+   takes -- the track is one more than this, and fdps_cd_set_music_track is
+   where the +1 is applied.  -1 means no music: main seeds it with MOV dword
+   ptr [0x00069d54],0xffffffff at 000292cd, and both fdps_cd_set_music_track
+   and fdps_cd_verify_disc_and_play_track write -1 into it whenever the
+   music-enabled setting is off, so the value here is what the game settled on
+   and not what a caller asked for.
+
+   fdps_cd_music_repeat_poll is the reader that matters: it restarts this track
+   when the drive falls idle, which is why the setter has to publish -1 here
+   rather than leave a stale index behind.
+
+   A full dword, and signed: every access in the image is dword-wide and the
+   only compares are CMP dword ptr [0x00069d54],-0x1, so the -1 has to survive
+   as a negative value rather than as a large unsigned one. */
+extern int data_fdps_audio_cd_current_music_index;
 
 #endif

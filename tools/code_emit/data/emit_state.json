@@ -1625,6 +1625,14 @@
       "status": "committed",
       "emitted_against": "0x37",
       "rounds": 0
+    },
+    "00030bf0": {
+      "name": "fdps_cd_set_music_track",
+      "target": "cdaudio.c",
+      "body_size": "0x51",
+      "status": "committed",
+      "emitted_against": "0x51",
+      "rounds": 0
     }
   }
 }

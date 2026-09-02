@@ -8,13 +8,19 @@
  * and the Red Book arithmetic that turns a track number into the sector range
  * a play command takes.
  *
- * Note on this module's original build flags: like the rest of the block from
- * 0003bade to 0003c96x it was not compiled with the flag set the rest of the
- * game was -- every function in it opens with PUSH <frame size> / CALL __CHK,
- * the stack probe that -s removes and that no other game function carries.
- * The rebuild has one flag set for every unit (rebuild_info/build_flags.md),
- * so what it builds from this file is the same code without the probe, and
- * the probe is not written out below.
+ * Note on the original build flags: the request-staging routines here come
+ * from the block from 0003bade to 0003c96x, which was not compiled with the
+ * flag set the rest of the game was -- every function in that block opens with
+ * PUSH <frame size> / CALL __CHK, the stack probe that -s removes and that no
+ * other game function carries.  The rebuild has one flag set for every unit
+ * (rebuild_info/build_flags.md), so what it builds from this file is the same
+ * code without the probe, and the probe is not written out below.
+ *
+ * fdps_cd_set_music_track at 00030bf0 is the exception in the other
+ * direction: it sits outside that block, was built with the game's own flag
+ * set and carries no probe of its own.  Routing puts it here because it is the
+ * music layer's front door onto these commands, not because it shared a
+ * translation unit with them.
  *
  * memcpy comes from <string.h> and is a real call in the image; the request
  * header layout comes from fdpstype.h, the DOS block pointer and the published
@@ -430,4 +436,54 @@ void fdps_cd_play_track(short track)
     fdps_cd_resolve_track_range();
     fdps_cd_play_audio_range(data_fdps_cd_play_range_start_sector,
                              data_fdps_cd_play_range_end_sector);
+}
+
+
+/* 00030bf0.  Settles which background music the game should be playing and
+   makes the drive match: the requested index goes into
+   data_fdps_audio_cd_current_music_index, and the drive is then either sent to
+   the matching CD track or stopped.
+
+   The music-enabled setting is what makes this more than a two-line wrapper.
+   CMP byte ptr [0x00060008],0x0 / JNZ at 00030bfc-00030c03 is above the store,
+   not around the play call: with music off the argument is overwritten with -1
+   at 00030c05 and it is that -1 which is published, so the setting rewrites
+   the request rather than skipping it.  Writing the obvious early-out instead
+   would leave the previous index standing in the global, and
+   fdps_cd_music_repeat_poll -- which restarts whatever that global names when
+   the drive falls idle -- would go on restarting the old track after the
+   player switched music off.  This is the function's own trap and not a
+   pattern that repeats, so it lives here and in the plate comment's Rebuild
+   note rather than in rebuild_info/pitfalls.md.
+
+   The store at 00030c0f is what the two tests below it read: CMP dword ptr
+   [0x00069d54],-0x1 at 00030c14 and MOV EAX,[0x00069d54] at 00030c2d both go
+   back to the global rather than to the argument slot, which is why the body
+   below names the global on both.
+
+   The second test of the music-enabled setting at 00030c24 is in the original
+   and can never fail: reaching it means the global is not -1, and the only way
+   for it not to be -1 is for the first test to have found the setting on.  It
+   is kept because it is a branch the original executes; it costs one compare
+   and decides nothing.
+
+   The +1 at 00030c32 is the whole mapping between the two numbering schemes:
+   the game counts background music from 0 and the disc's audio tracks start at
+   2, track 1 being the data track.  fdps_cd_play_track fetches the number back
+   as a signed word.
+
+   Returns nothing, and reports nothing.  Both callees are void, no request
+   status is looked at here, and a music index whose track is not on the disc
+   goes out like any other -- nothing along the chain refuses it. */
+void fdps_cd_set_music_track(int music_index)
+{
+    if (data_fdps_audio_bgm_enabled_flag == 0) {
+        music_index = -1;
+    }
+    data_fdps_audio_cd_current_music_index = music_index;
+    if (data_fdps_audio_cd_current_music_index == -1) {
+        fdps_cd_stop_audio();
+    } else if (data_fdps_audio_bgm_enabled_flag != 0) {
+        fdps_cd_play_track(data_fdps_audio_cd_current_music_index + 1);
+    }
 }

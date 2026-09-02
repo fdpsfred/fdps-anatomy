@@ -3,7 +3,8 @@
  * So far this covers fdps_cd_seek at 0003c3fa, fdps_cd_play_audio_range at
  * 0003c452, fdps_cd_stop_audio at 0003c4a7, fdps_cd_resume_audio at 0003c4ff,
  * fdps_cd_read_q_channel at 0003c5a6, fdps_cd_audio_is_idle at 0003c6e8,
- * fdps_cd_resolve_track_range at 0003c803 and fdps_cd_play_track at 0003c85b.
+ * fdps_cd_resolve_track_range at 0003c803, fdps_cd_play_track at 0003c85b and
+ * fdps_cd_set_music_track at 00030bf0.
  *
  * Every expected value below comes from the instructions of those functions,
  * never from the emitted C.  For fdps_cd_seek:
@@ -1406,6 +1407,218 @@ static void cdaudio_play_track_does_not_refuse_a_track_past_the_disc(void)
     CHECK_EQ(header[2], 0x84);
 }
 
+/* fdps_cd_set_music_track at 00030bf0 is one store and two branches:
+ *
+ *   CMP byte ptr [0x00060008],0x0 / JNZ 00030c0c
+ *   MOV dword ptr [EBP+0x14],0xffffffff       the music-off override
+ *   MOV EAX,dword ptr [EBP+0x14] / MOV [0x00069d54],EAX
+ *   CMP dword ptr [0x00069d54],-0x1 / JNZ 00030c24
+ *   CALL 0003c4a7 / JMP 00030c3c              fdps_cd_stop_audio
+ *   CMP byte ptr [0x00060008],0x0 / JZ 00030c3c
+ *   MOV EAX,[0x00069d54] / INC EAX / PUSH EAX / CALL 0003c85b / ADD ESP,0x4
+ *
+ * so there are three things to pin down: which value reaches
+ * data_fdps_audio_cd_current_music_index, which of the two callees runs, and
+ * that the track handed to fdps_cd_play_track is one more than the index.
+ *
+ * The two callees leave different marks in the request header block, which is
+ * what the arms are told apart by.  fdps_cd_stop_audio stages thirteen bytes
+ * -- header[0] 0xd and header[2] 0x85 -- and touches nothing above offset
+ * 0x0c and nothing in the IOCTL block at all.  fdps_cd_play_track ends in a
+ * Play Audio request, header[0] 0x16 and header[2] 0x84, and on the way there
+ * runs fdps_cdrom_read_track_info at least twice, each of which stamps 0x0b
+ * into the IOCTL block and the track's low byte beside it.  So header[0]
+ * separates the arms, and a poisoned IOCTL block still holding its poison says
+ * no query ran -- which is the evidence that the stop arm did not fall through
+ * into the play arm.
+ *
+ * Which track was asked for is read back out of
+ * data_fdps_cd_track_info_track_number and data_fdps_cd_ioctl_buffer[1]:
+ * fdps_cd_resolve_track_range re-queries the track it was entered on as its
+ * last act, so after the chain both name the track fdps_cd_play_track was
+ * handed.  That is what makes the +1 visible from outside.
+ *
+ * Every request goes out for real to drive index 0xff, refused on the drive
+ * number before MSCDEX follows ES:BX, exactly as the tests above issue theirs.
+ */
+
+/* A music index nothing below expects and no arm can produce, so the global
+   still holding it afterwards would mean the store at 00030c0f never ran. */
+#define CURRENT_MUSIC_POISON 0x5a5a5a5aL
+
+/* What data_fdps_cd_track_info_track_number holds on the way in.  It is past
+   every track any case below asks for, so the global still holding it says no
+   query ran and the play arm was not taken. */
+#define MUSIC_PRESET_TRACK 20
+
+/* Puts the music setting, the published index and everything the chain under
+   fdps_cd_play_track reads into a known state, then calls. */
+static void set_the_music_track(int music_index, unsigned char music_enabled)
+{
+    int i;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    for (i = 0; i < 0x20; i++) {
+        data_fdps_cd_request_header_buffer[i] = HEADER_POISON;
+    }
+    data_fdps_cd_ioctl_buffer[0] = HEADER_POISON;
+    data_fdps_cd_ioctl_buffer[1] = HEADER_POISON;
+
+    data_fdps_cd_track_info_track_number = MUSIC_PRESET_TRACK;
+    data_fdps_cd_highest_track_number = 20;
+    data_fdps_cd_track_start_sector = (unsigned int) RESOLVE_TRACK_START_SECTOR;
+    data_fdps_cd_leadout_sector = (unsigned int) RESOLVE_LEADOUT_SECTOR;
+    data_fdps_cd_play_range_start_sector = (unsigned int) RANGE_POISON;
+    data_fdps_cd_play_range_end_sector = (unsigned int) RANGE_POISON;
+
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    data_fdps_audio_bgm_enabled_flag = music_enabled;
+    data_fdps_audio_cd_current_music_index = (int) CURRENT_MUSIC_POISON;
+
+    fdps_cd_set_music_track(music_index);
+}
+
+/* MOV EAX,dword ptr [EBP+0x14] / MOV [0x00069d54],EAX at 00030c0c is
+   unconditional on this arm, so the index the caller asked for is what gets
+   published; the poison standing afterwards would say nothing was stored.
+   fdps_title_screen and fdps_play_ending_credit_roll both push 1. */
+static void cdaudio_set_music_publishes_the_index_it_was_given(void)
+{
+    set_the_music_track(1, 1);
+
+    CHECK_EQ(data_fdps_audio_cd_current_music_index, 1);
+}
+
+/* The else arm ends in CALL 0003c85b, whose last request is a Play Audio --
+   MOV byte ptr [ESP],0x16 and MOV byte ptr [ESP+0x2],0x84 inside
+   fdps_cd_play_audio_range.  0x16 rather than 0xd is what says the stop arm
+   was not the one taken. */
+static void cdaudio_set_music_plays_when_the_music_is_on(void)
+{
+    unsigned char *header;
+
+    set_the_music_track(1, 1);
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x16);
+    CHECK_EQ(header[2], 0x84);
+}
+
+/* MOV EAX,[0x00069d54] / INC EAX / PUSH EAX at 00030c2d-00030c33: the track
+   number is one more than the music index, because the game counts its music
+   from 0 while the disc's audio tracks start at 2.  The chain leaves both
+   data_fdps_cd_track_info_track_number and the IOCTL block's track byte naming
+   the track it was handed, so index 1 has to come out as track 2 and index 2
+   as track 3 -- two points, which no fixed track number and no other offset
+   fits. */
+static void cdaudio_set_music_plays_the_track_one_past_the_index(void)
+{
+    set_the_music_track(1, 1);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 2);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 2);
+
+    set_the_music_track(2, 1);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 3);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 3);
+}
+
+/* CMP dword ptr [0x00069d54],-0x1 is the only comparison the published value
+   meets, so 0 is an ordinary music index and not a second way of saying "no
+   music": it plays track 1.  A body that tested for zero as well would take
+   the stop arm and leave a 0xd in the header. */
+static void cdaudio_set_music_treats_index_zero_as_a_real_track(void)
+{
+    unsigned char *header;
+
+    set_the_music_track(0, 1);
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(data_fdps_audio_cd_current_music_index, 0);
+    CHECK_EQ(header[0], 0x16);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 1);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 1);
+}
+
+/* CALL 0003c4a7 on the -1 arm is fdps_cd_stop_audio, whose whole request is
+   thirteen bytes: header[0] 0xd, header[1] 0 and header[2] 0x85, with offset
+   0x0d never written.  The poison still standing there says nothing longer was
+   staged over it, and the poison still in the IOCTL block says no
+   Read Audio Track Info query ran -- together, that the play arm was not
+   reached.  fdps_run_village_phase pushes -1 on leaving the village. */
+static void cdaudio_set_music_stops_the_drive_on_minus_one(void)
+{
+    unsigned char *header;
+
+    set_the_music_track(-1, 1);
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(data_fdps_audio_cd_current_music_index, -1);
+    CHECK_EQ(header[0], 0xd);
+    CHECK_EQ(header[1], 0);
+    CHECK_EQ(header[2], 0x85);
+    CHECK_EQ(header[0xd], HEADER_POISON);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], HEADER_POISON);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, MUSIC_PRESET_TRACK);
+}
+
+/* The music-off test at 00030bfc sits ABOVE the store, and what it does is
+   MOV dword ptr [EBP+0x14],0xffffffff -- it rewrites the request rather than
+   skipping it.  So with music off the published index is -1 and not the 2 the
+   caller asked for, and the drive is stopped.  This is the pitfall the whole
+   function turns on: an early-out would leave 2 standing here, and
+   fdps_cd_music_repeat_poll would keep restarting track 3 after the player
+   switched the music off. */
+static void cdaudio_set_music_off_discards_the_requested_index(void)
+{
+    unsigned char *header;
+
+    set_the_music_track(2, 0);
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(data_fdps_audio_cd_current_music_index, -1);
+    CHECK_EQ(header[0], 0xd);
+    CHECK_EQ(header[2], 0x85);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], HEADER_POISON);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, MUSIC_PRESET_TRACK);
+}
+
+/* Music off and -1 asked for is the same arm reached from the other side: the
+   override writes the -1 that was already there, and the stop request goes out
+   just the same. */
+static void cdaudio_set_music_off_with_minus_one_still_stops(void)
+{
+    unsigned char *header;
+
+    set_the_music_track(-1, 0);
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(data_fdps_audio_cd_current_music_index, -1);
+    CHECK_EQ(header[0], 0xd);
+    CHECK_EQ(header[2], 0x85);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], HEADER_POISON);
+}
+
+/* The override is applied to the argument slot and to nothing that outlives
+   the call, so a music-off call does not disable the next one: switching the
+   setting back on and asking again plays, and the second call's own reading of
+   the setting at 00030bfc is what decides it. */
+static void cdaudio_set_music_off_does_not_latch(void)
+{
+    unsigned char *header;
+
+    set_the_music_track(2, 0);
+    CHECK_EQ(data_fdps_audio_cd_current_music_index, -1);
+
+    set_the_music_track(2, 1);
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(data_fdps_audio_cd_current_music_index, 2);
+    CHECK_EQ(header[0], 0x16);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 3);
+}
+
 void run_cdaudio_tests(void)
 {
     RUN_TEST(cdaudio_seek_header_fields_sit_where_the_stores_land);
@@ -1461,4 +1674,12 @@ void run_cdaudio_tests(void)
     RUN_TEST(cdaudio_play_track_resolves_the_range_from_its_own_query);
     RUN_TEST(cdaudio_play_track_points_the_layer_before_it_resolves);
     RUN_TEST(cdaudio_play_track_does_not_refuse_a_track_past_the_disc);
+    RUN_TEST(cdaudio_set_music_publishes_the_index_it_was_given);
+    RUN_TEST(cdaudio_set_music_plays_when_the_music_is_on);
+    RUN_TEST(cdaudio_set_music_plays_the_track_one_past_the_index);
+    RUN_TEST(cdaudio_set_music_treats_index_zero_as_a_real_track);
+    RUN_TEST(cdaudio_set_music_stops_the_drive_on_minus_one);
+    RUN_TEST(cdaudio_set_music_off_discards_the_requested_index);
+    RUN_TEST(cdaudio_set_music_off_with_minus_one_still_stops);
+    RUN_TEST(cdaudio_set_music_off_does_not_latch);
 }
