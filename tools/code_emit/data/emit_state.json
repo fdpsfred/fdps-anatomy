@@ -1697,6 +1697,14 @@
       "status": "committed",
       "emitted_against": "0x6d",
       "rounds": 0
+    },
+    "0003ca49": {
+      "name": "fdps_dpmi_alloc_dos_memory",
+      "target": "dpmi.c",
+      "body_size": "0x89",
+      "status": "committed",
+      "emitted_against": "0x89",
+      "rounds": 0
     }
   }
 }

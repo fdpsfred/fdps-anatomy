@@ -28,6 +28,14 @@
  * for the inverted return sense -- and from the DPMI 0.9 specification of
  * function 0600h, which pins a linear range named by BX:CX and SI:DI.  Ranges
  * these tests lock are always unlocked again.
+ *
+ * Covers fdps_dpmi_alloc_dos_memory at 0003ca49.  Expected values come from its
+ * assembly -- MOV dword ptr [ESP],0x100 with the paragraph count into [ESP+4],
+ * the three stores SHL EAX,0x10 / AND EAX,0xffff+SHL EAX,4 / AND EAX,0xffff
+ * through the pointers at [ESP+0x48], [ESP+0x44] and [ESP+0x4c], the CMP dword
+ * ptr [ESP+0x34],0 that skips all of them on a set carry, and MOV ESI,0x1 /
+ * MOV EAX,ESI at the tail -- and from the DPMI 0.9 specification of functions
+ * 0100h and 0006h.  Blocks these tests allocate are always freed again.
  */
 #include <i86.h>
 #include "testharn.h"
@@ -272,6 +280,136 @@ static void dpmi_lock_counts_both_endpoints(void)
     CHECK_EQ(dpmi_unlock_linear_range(base, base), 1);
 }
 
+/* ---- fdps_dpmi_alloc_dos_memory at 0003ca49 -------------------------- */
+
+/* DPMI function 0006h again, this time for the answer rather than the carry
+   flag: CX:DX comes back with the selector's 32-bit linear base.  A DOS memory
+   block's selector describes the block, so its base is the block's linear
+   address -- which is what makes this the independent witness for both
+   `out_linear` and `out_selector`. */
+static unsigned dpmi_selector_base(unsigned selector)
+{
+    union REGS dpmi_in;
+    union REGS dpmi_out;
+
+    dpmi_in.x.eax = 0x0006;
+    dpmi_in.x.ebx = selector;
+    int386(0x31, &dpmi_in, &dpmi_out);
+    if (dpmi_out.x.cflag != 0) {
+        return 0xffffffffu;
+    }
+    return ((dpmi_out.x.ecx & 0xffffu) << 16) | (dpmi_out.x.edx & 0xffffu);
+}
+
+/* The body writes the function code at [ESP+0] and the paragraph count at
+   [ESP+4] of the input set, and reads the output set at ESP+0x1c (eax),
+   ESP+0x28 (edx) and ESP+0x34 (cflag), the set itself beginning at ESP+0x1c.
+   A member landing anywhere else would issue the interrupt with the paragraph
+   count in the wrong register, or read the segment where the selector belongs
+   -- and the block would then be reported at an address that is not its
+   own. */
+static void dpmi_alloc_register_set_has_the_image_layout(void)
+{
+    union REGS probe;
+
+    CHECK_EQ((int) ((char *) &probe.x.eax - (char *) &probe), 0);
+    CHECK_EQ((int) ((char *) &probe.x.ebx - (char *) &probe), 0x4);
+    CHECK_EQ((int) ((char *) &probe.x.edx - (char *) &probe), 0xc);
+    CHECK_EQ((int) ((char *) &probe.x.cflag - (char *) &probe), 0x18);
+    CHECK_EQ((int) (0x1c + 0xc), 0x28);
+    CHECK_EQ((int) (0x1c + 0x18), 0x34);
+}
+
+/* One real block from the real DPMI host, checked against what the three
+   stores say it must look like: the far pointer is the segment shifted left 16
+   so its offset half is zero, the linear address is the same segment shifted
+   left 4 -- which is the far pointer shifted right 12, exactly as the assembly
+   recomputes it -- and the selector is the one DPMI made for this block, whose
+   base fn 0006h reports as that same linear address.  Aiming the second and
+   third arguments at the wrong words is the failure this catches: the pair
+   would then disagree by a factor of 4096. */
+static void dpmi_alloc_reports_the_block_three_ways(void)
+{
+    unsigned linear;
+    unsigned real_mode_ptr;
+    unsigned selector;
+
+    linear = 0;
+    real_mode_ptr = 0;
+    selector = 0;
+    CHECK_EQ(fdps_dpmi_alloc_dos_memory(TEST_BLOCK_PARAGRAPHS, &linear,
+                                        &real_mode_ptr, &selector), 1);
+    if (selector == 0) {
+        CHECK_EQ(0, 1);   /* no DOS memory to test with; do not pass silently */
+        return;
+    }
+
+    CHECK_EQ(real_mode_ptr & 0xffffu, 0);
+    CHECK_EQ(linear, real_mode_ptr >> 12);
+    CHECK_EQ(linear & 0xfu, 0);
+    CHECK_EQ(linear < 0x100000u, 1);
+    CHECK_EQ(dpmi_selector_base(selector), linear);
+
+    fdps_dpmi_free_dos_memory(linear, real_mode_ptr, selector);
+    CHECK_EQ(dpmi_selector_is_valid(selector), 0);
+}
+
+/* The whole block, from its first byte to its last, is handed to
+   fdps_dpmi_lock_region before the function returns -- MOV EAX,[EBX] / SHR
+   EAX,0xc for the base and SHL EDX,4 / ADD EDX,EAX / DEC EDX for the last
+   byte.  Unlocking exactly that range afterwards must therefore succeed.
+   Stated honestly: on a host that does not count locks, an unlock answers
+   cleanly whether or not anything was locked, so this assertion is only as
+   strong as the host underneath it.  What it does pin unconditionally is the
+   range arithmetic -- an off-by-one or a base recomputed from the wrong
+   pointer names a range the host has no reason to accept. */
+static void dpmi_alloc_locks_the_whole_block(void)
+{
+    unsigned linear;
+    unsigned real_mode_ptr;
+    unsigned selector;
+
+    linear = 0;
+    real_mode_ptr = 0;
+    selector = 0;
+    CHECK_EQ(fdps_dpmi_alloc_dos_memory(TEST_BLOCK_PARAGRAPHS, &linear,
+                                        &real_mode_ptr, &selector), 1);
+    if (selector == 0) {
+        CHECK_EQ(0, 1);
+        return;
+    }
+
+    CHECK_EQ(dpmi_unlock_linear_range(linear,
+                                      linear + TEST_BLOCK_PARAGRAPHS * 16 - 1),
+             1);
+    fdps_dpmi_free_dos_memory(linear, real_mode_ptr, selector);
+}
+
+/* A request for 0xffff paragraphs is 1,048,560 bytes, more than the 640K of
+   conventional memory a DOS machine can ever hand back, so fn 0100h returns
+   with the carry flag set.  The assembly then jumps straight to XOR ESI,ESI
+   and out: not one of the three out-parameters is written.  The sentinels are
+   what says so -- the intuitive defensive spelling clears them, and the two
+   AIL loaders point all three at fields of the driver descriptor they are
+   filling in, so clearing them would blank fields on a path where the original
+   leaves them alone. */
+static void dpmi_alloc_writes_nothing_when_dpmi_refuses(void)
+{
+    unsigned linear;
+    unsigned real_mode_ptr;
+    unsigned selector;
+
+    linear = 0x11111111u;
+    real_mode_ptr = 0x22222222u;
+    selector = 0x33333333u;
+
+    CHECK_EQ(fdps_dpmi_alloc_dos_memory(0xffffu, &linear, &real_mode_ptr,
+                                        &selector), 0);
+    CHECK_EQ(linear, 0x11111111u);
+    CHECK_EQ(real_mode_ptr, 0x22222222u);
+    CHECK_EQ(selector, 0x33333333u);
+}
+
 void run_dpmi_tests(void)
 {
     RUN_TEST(dpmi_free_register_set_has_the_image_layout);
@@ -281,4 +419,8 @@ void run_dpmi_tests(void)
     RUN_TEST(dpmi_lock_returns_one_on_a_clear_carry);
     RUN_TEST(dpmi_lock_orders_its_endpoints);
     RUN_TEST(dpmi_lock_counts_both_endpoints);
+    RUN_TEST(dpmi_alloc_register_set_has_the_image_layout);
+    RUN_TEST(dpmi_alloc_reports_the_block_three_ways);
+    RUN_TEST(dpmi_alloc_locks_the_whole_block);
+    RUN_TEST(dpmi_alloc_writes_nothing_when_dpmi_refuses);
 }

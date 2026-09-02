@@ -18,6 +18,63 @@
  * build variant without -s would otherwise add one silently. */
 #pragma off (check_stack)
 
+int fdps_dpmi_alloc_dos_memory(unsigned paragraphs, unsigned *out_linear,
+                               unsigned *out_real_mode_ptr,
+                               unsigned *out_selector)
+{
+    /* Two distinct register sets, as the original's 0x38-byte frame holds:
+       the input block at ESP+0 and the output block at ESP+0x1c.  Neither is
+       cleared, so every member these two stores do not touch reaches the
+       interrupt holding whatever the stack already contained; DPMI function
+       0100h reads only AX and BX. */
+    union REGS dpmi_in;
+    union REGS dpmi_out;
+    unsigned block_linear; /* first byte of the block, as the lock call sees it */
+    unsigned block_last;   /* last byte of the block, inclusive */
+
+    dpmi_in.x.eax = 0x0100;      /* DPMI Allocate DOS Memory Block */
+    dpmi_in.x.ebx = paragraphs;  /* fn 0100h takes the paragraph count in BX */
+    int386(0x31, &dpmi_in, &dpmi_out);
+
+    /* CMP dword ptr [ESP+0x34],0 / JZ: on a set carry the routine falls
+       straight to XOR ESI,ESI and out through the tail, so not one of the
+       three out-parameters is written.  Zeroing them here -- the obvious
+       defensive spelling -- would write into the caller's storage on a path
+       where the original never touches it: both AIL loaders point all three
+       parameters at fields of the driver descriptor they are filling in
+       (000456db passes EBP, EBP+4 and EBP+8), and on failure those fields keep
+       whatever they held. */
+    if (dpmi_out.x.cflag != 0) {
+        return 0;
+    }
+
+    /* AX carries the real-mode segment of the block and DX the protected-mode
+       selector DPMI created alongside it.  The order of these three stores is
+       the original's and is observable: a caller that aims two of the pointers
+       at one word gets the last store, and the lock range below is recomputed
+       by reading *out_real_mode_ptr back rather than by keeping the segment in
+       a register. */
+    *out_real_mode_ptr = dpmi_out.x.eax << 16;             /* seg:0000 */
+    *out_linear = (dpmi_out.x.eax & 0xffffu) << 4;         /* seg * 16 */
+    *out_selector = dpmi_out.x.edx & 0xffffu;
+
+    /* MOV EAX,[EBX] / SHR EAX,0xc: the block's linear address, recovered from
+       the far pointer that was just stored rather than from the segment.  The
+       upper endpoint is inclusive -- SHL EDX,4 / ADD EDX,EAX / DEC EDX -- so
+       it is the last byte of the block, which is what fdps_dpmi_lock_region
+       expects; see rebuild_info/pitfalls.md. */
+    block_linear = *out_real_mode_ptr >> 12;
+    block_last = (paragraphs << 4) + block_linear - 1;
+
+    /* The lock's result is deliberately discarded: the original returns 1
+       whenever fn 0100h succeeded, whether or not the page lock did.  Writing
+       `return fdps_dpmi_lock_region(...)` would make a refused lock look like
+       a failed allocation to the AIL driver loaders, which then take their
+       error path over a block that really was allocated. */
+    fdps_dpmi_lock_region(block_linear, block_last);
+    return 1;
+}
+
 void fdps_dpmi_free_dos_memory(unsigned linear_unused, unsigned segment_unused,
                                unsigned selector)
 {

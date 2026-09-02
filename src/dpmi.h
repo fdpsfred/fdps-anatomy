@@ -8,6 +8,32 @@
 #ifndef DPMI_H
 #define DPMI_H
 
+/* Takes a block of DOS conventional memory from DPMI function 0100h and pins
+   it into physical memory, reporting the block three ways.  Issues INT 31h
+   with AX = 0100h and BX = `paragraphs` through int386.
+
+   On success AX comes back with the block's real-mode segment and DX with the
+   protected-mode selector DPMI created for it, and the three out-parameters
+   receive, in this order, *out_real_mode_ptr = segment << 16 (the far pointer
+   segment:0000), *out_linear = (segment & 0xffff) << 4 (the flat linear
+   address of the same byte) and *out_selector = the selector, which is the
+   argument fdps_dpmi_free_dos_memory takes to give the block back.  The whole
+   block is then locked with fdps_dpmi_lock_region over the inclusive range
+   [linear, linear + paragraphs * 16 - 1].
+
+   Returns 1 when fn 0100h succeeded, WHETHER OR NOT the page lock did -- the
+   lock's result is discarded -- and 0 when DPMI came back with the carry flag
+   set.  On that failure path none of the three out-parameters is written at
+   all: they are not cleared, so the caller's storage keeps whatever it held.
+   Both AIL loaders aim all three at fields of the driver descriptor they are
+   filling in, and both read only the returned int to decide whether the setup
+   worked. */
+extern int fdps_dpmi_alloc_dos_memory(unsigned paragraphs,
+                                      unsigned *out_linear,
+                                      unsigned *out_real_mode_ptr,
+                                      unsigned *out_selector);
+#pragma aux fdps_dpmi_alloc_dos_memory "*" parm caller [];
+
 /* Gives a DOS conventional-memory block back to DPMI by handing function
    0101h the block's selector.  Issues INT 31h with AX = 0101h and DX =
    selector & 0xffff through int386, and examines nothing that comes back: the
