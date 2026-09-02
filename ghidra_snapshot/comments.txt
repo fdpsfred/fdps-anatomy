@@ -12561,7 +12561,7 @@ Parameters:
 Returns:
   Nothing.
 
-Pool: fdps  [no Function ID hit in any library; it drives MSCDEX through fdps_cd_device_request, and no CRT or AIL routine does that, while its PUSH 0x8 / CALL __CHK prologue marks compiled project C]
+Pool: fdps  [no Function ID hit in any library; it drives MSCDEX through fdps_cd_device_request, and no CRT or AIL routine does that, and it is compiled project C: a standard-shape body reading its four arguments from the stack, calling fdps_cd_read_q_channel and touching only game globals. Separately, the PUSH 0x8 / CALL __CHK prologue records that this function belongs to the 0003bade-0003c96x block, the one part of the game code built without -s]
 
 Rebuild note:
 This routine reads the Q-channel FRAME field at block+6 even though the request its callee issues declares a 6-byte transfer, so block+6 is one byte past what the driver was asked to fill. Both halves of that mismatch have to survive a rebuild untouched: do not 'fix' the count on the fdps_cd_read_q_channel side (the owner of that literal 6), and do not drop or guard the frame read here on the grounds that the byte looks untransferred. Writing either the obvious count or the obvious validity check changes what the game asks the CD driver for and what it reports back.

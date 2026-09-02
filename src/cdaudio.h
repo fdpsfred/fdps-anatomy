@@ -252,6 +252,55 @@ extern int fdps_cd_play_track_range(short first_track, short last_track);
 extern void fdps_cd_play_whole_disc(void);
 #pragma aux fdps_cd_play_whole_disc "*" parm caller [];
 
+/* 00069e56.  The eleven-byte MSCDEX Audio Q-Channel control block that
+   fdps_cd_read_audio_position stages its one request in: byte 0 carries the
+   control code out to the driver and the driver's reply -- which CD-DA track
+   is playing and how far into it the drive has got -- comes back over the
+   whole block.
+
+   It is a block this file owns rather than a buffer the caller supplies:
+   0003c944 pushes its address as the literal 0x69e56 and the four loads that
+   follow read it back absolutely.  Nothing else in the image touches it -- an
+   operand sweep over all 89,420 instructions finds it named only from that
+   one function, at the base and at +2, +4, +5 and +6 -- so a call overwrites
+   whatever the previous one left in it and no other code can be reading it in
+   between.
+
+   Declared as the record and not as eleven loose bytes because fdpstype.h owns
+   that layout and the offsets are what decide which byte means what. */
+extern struct fdps_cd_q_channel_block data_fdps_cd_q_channel_block;
+
+/* 0003c93a.  Reads how far CD-DA playback has got: asks the drive for the
+   audio Q-channel through fdps_cd_read_q_channel and hands back the track
+   playing now together with the running time inside that track.
+
+   track receives the Q-channel TNO field, the number of the track playing now.
+   minute, second and frame receive the running time within that track --
+   seconds 0 to 59 and frames 0 to 74, a frame being 1/75 second.  That triple
+   is the position inside the track; the driver also reports the absolute
+   position on the disc, at block offsets 8 to 10, and this routine never looks
+   at it.
+
+   All four are written on every call and there is no branch and no error path
+   in the body.  The reply is staged in data_fdps_cd_q_channel_block, so a
+   request the driver refused leaves the block holding whatever was in it
+   before and those bytes are handed back as though they were an answer.  What
+   distinguishes the two is data_fdps_cd_last_request_status, which the callee
+   publishes and whose bit 15 is error; this routine returns nothing.
+
+   The stores go out in the order track, frame, second, minute, which is
+   observable: nothing stops a caller passing one address twice, and then the
+   last store is the one that survives.
+
+   Nothing in the image calls it.  A sweep for the entry address -- xrefs and
+   an operand search over all 89,420 instructions -- finds it referenced from
+   nowhere, so no caller pins its behaviour further. */
+extern void fdps_cd_read_audio_position(unsigned char *track,
+                                        unsigned char *minute,
+                                        unsigned char *second,
+                                        unsigned char *frame);
+#pragma aux fdps_cd_read_audio_position "*" parm caller [];
+
 /* 00030bf0.  Sets the background music: settles which music the game should be
    playing, publishes that in data_fdps_audio_cd_current_music_index and makes
    the drive match it -- playing the corresponding CD track, or stopping the

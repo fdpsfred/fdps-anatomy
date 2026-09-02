@@ -556,6 +556,56 @@ void fdps_cd_play_whole_disc(void)
     fdps_cd_play_audio_range(0, data_fdps_cd_leadout_sector);
 }
 
+/* 0003c93a.  Asks the drive for the audio Q-channel and copies four bytes of
+   the reply out through the caller's pointers: block+2, the TNO field, is the
+   track playing now, and block+4, +5 and +6 are the minutes, seconds and
+   frames of the running time inside that track.  The absolute position on the
+   disc, which the driver reports at block+8 to block+10, is not read.
+
+   The block is data_fdps_cd_q_channel_block, pushed as the literal 0x69e56 at
+   0003c944 -- a block this file owns rather than anything the caller supplies
+   -- so the four pointers are the whole of what a call hands back, and each
+   call overwrites what the previous one left there.
+
+   The order below is the order the body stores in -- track, frame, second,
+   minute -- and it is kept because it is observable: nothing stops a caller
+   passing one address twice, and then the last store is what survives.  The
+   minute store is not spelled out in this function's own instructions.
+   0003c972 loads AL from block+4 and 0003c977 jumps to 0003bc71, the
+   MOV EDX,[ESP+8] / MOV [EDX],AL / RET tail sitting inside
+   fdps_cd_unpack_msf, which stores through the same second-argument slot and
+   returns.  Sharing an epilogue is instruction selection and not behaviour
+   (ADR-0001), so what is written below is the store itself.
+
+   There is no branch and no error path.  fdps_cd_read_q_channel returns
+   nothing and nothing is read back from the CALL -- the reply is read out of
+   the block the callee filled -- so a request the driver refused is
+   indistinguishable here from a real answer: the block still holds whatever
+   was in it, and this routine copies those bytes out regardless.  Only
+   data_fdps_cd_last_request_status, which the callee publishes, says which of
+   the two happened.
+
+   The frame byte at offset 6 is read although the request the callee issues
+   declares a six-byte transfer, so it is one byte past what the driver was
+   asked to fill.  Neither half of that mismatch may be tidied up: a real
+   MSCDEX driver fills the whole Q-channel block, and changing the count on the
+   fdps_cd_read_q_channel side or guarding the read here changes what the game
+   asks the drive for and what it reports back.
+
+   Nothing in the image calls it.  A sweep for the entry address -- xrefs and
+   an operand search over all 89,420 instructions -- finds it referenced from
+   nowhere, so no caller pins its behaviour further. */
+void fdps_cd_read_audio_position(unsigned char *track, unsigned char *minute,
+                                 unsigned char *second, unsigned char *frame)
+{
+    fdps_cd_read_q_channel(&data_fdps_cd_q_channel_block);
+
+    *track = data_fdps_cd_q_channel_block.track_number;
+    *frame = data_fdps_cd_q_channel_block.frame;
+    *second = data_fdps_cd_q_channel_block.second;
+    *minute = data_fdps_cd_q_channel_block.minute;
+}
+
 
 /* 00030bf0.  Settles which background music the game should be playing and
    makes the drive match: the requested index goes into

@@ -5,8 +5,8 @@
  * fdps_cd_read_q_channel at 0003c5a6, fdps_cd_audio_is_idle at 0003c6e8,
  * fdps_cd_resolve_track_range at 0003c803, fdps_cd_play_track at 0003c85b,
  * fdps_cd_play_track_range at 0003c892, fdps_cd_play_whole_disc at 0003c8e6,
- * fdps_cd_set_music_track at 00030bf0 and fdps_cd_music_repeat_poll at
- * 00030c50.
+ * fdps_cd_read_audio_position at 0003c93a, fdps_cd_set_music_track at
+ * 00030bf0 and fdps_cd_music_repeat_poll at 00030c50.
  *
  * Every expected value below comes from the instructions of those functions,
  * never from the emitted C.  For fdps_cd_seek:
@@ -2508,6 +2508,228 @@ static void cdaudio_whole_disc_queries_before_it_plays(void)
     CHECK_EQ(header[0x1f], HEADER_POISON);
 }
 
+/* fdps_cd_read_audio_position at 0003c93a is the one routine in this file that
+ * issues no request of its own: its whole body is a call to
+ * fdps_cd_read_q_channel on the module's own block and four byte copies out of
+ * what came back.  Its instructions are
+ *
+ *   PUSH 0x69e56 / CALL 0003c5a6 / ADD ESP,0x4
+ *   MOV AL,[0x00069e58] / MOV EDX,dword ptr [ESP+0x4]  / MOV byte ptr [EDX],AL
+ *   MOV AL,[0x00069e5c] / MOV EDX,dword ptr [ESP+0x10] / MOV byte ptr [EDX],AL
+ *   MOV AL,[0x00069e5b] / MOV EDX,dword ptr [ESP+0xc]  / MOV byte ptr [EDX],AL
+ *   MOV AL,[0x00069e5a] / JMP 0003bc71, which is
+ *     MOV EDX,dword ptr [ESP+0x8] / MOV byte ptr [EDX],AL / RET
+ *
+ * so the block base is 0x00069e56, the four bytes taken out of it are at +2,
+ * +6, +5 and +4 in that order, and the four stack slots they go to are the
+ * first, fourth, third and second arguments in that order.  Both of those
+ * orders are what the assertions below pin.
+ *
+ * The drive named is data_fdps_cdrom_drive_letter_index 0xff for the same
+ * reason as everywhere above: MSCDEX rejects the request on the drive number
+ * before it follows ES:BX, so nothing outside the module writes the block and
+ * the bytes read back out of it are the ones the test put there.  That is what
+ * makes the read side testable at all -- a driver that answered would decide
+ * the values instead.
+ */
+
+/* 0x40 + the field's own offset, so a byte that arrives from the wrong place
+   arrives holding the offset it really came from.  None of the eleven is 0x0c,
+   the control code fdps_cd_read_q_channel stamps into byte 0, and none is
+   0x5a, the value the output bytes are poisoned with. */
+static void read_audio_position_from_a_rejected_drive(unsigned char *track,
+                                                      unsigned char *minute,
+                                                      unsigned char *second,
+                                                      unsigned char *frame)
+{
+    unsigned char *block;
+    int i;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    for (i = 0; i < 0x20; i++) {
+        data_fdps_cd_request_header_buffer[i] = HEADER_POISON;
+    }
+    block = (unsigned char *) &data_fdps_cd_q_channel_block;
+    for (i = 0; i < 0xb; i++) {
+        block[i] = (unsigned char) (0x40 + i);
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    fdps_cd_read_audio_position(track, minute, second, frame);
+}
+
+/* MOV AL,[0x00069e58] against the block based at 0x00069e56 is the track, and
+   [0x69e5a], [0x69e5b] and [0x69e5c] are the minute, second and frame -- so
+   with the ramp in place the four outputs are 0x42, 0x44, 0x45 and 0x46.  The
+   ramp is what makes a swapped pair visible: the absolute position sits at +8,
+   +9 and +10 and would arrive as 0x48, 0x49 and 0x4a. */
+static void cdaudio_read_position_hands_back_the_track_and_the_time(void)
+{
+    unsigned char track;
+    unsigned char minute;
+    unsigned char second;
+    unsigned char frame;
+
+    track = 0x5a;
+    minute = 0x5a;
+    second = 0x5a;
+    frame = 0x5a;
+    read_audio_position_from_a_rejected_drive(&track, &minute, &second,
+                                              &frame);
+    CHECK_EQ(track, 0x42);
+    CHECK_EQ(minute, 0x44);
+    CHECK_EQ(second, 0x45);
+    CHECK_EQ(frame, 0x46);
+}
+
+/* The four loads are absolute reads of the block at 0x00069e56, so which byte
+   is which is the struct's offsets and nothing else (contract H).  These are
+   the same offsets fdps_cd_read_q_channel's own cover asserts, restated here
+   because this is the function that acts on them: a struct whose fields moved
+   would keep both memcpy's correct and hand this caller the wrong four
+   bytes. */
+static void cdaudio_read_position_reads_the_offsets_the_loads_name(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_cd_q_channel_block, track_number), 2);
+    CHECK_EQ((int) offsetof(struct fdps_cd_q_channel_block, minute), 4);
+    CHECK_EQ((int) offsetof(struct fdps_cd_q_channel_block, second), 5);
+    CHECK_EQ((int) offsetof(struct fdps_cd_q_channel_block, frame), 6);
+    CHECK_EQ((int) sizeof(struct fdps_cd_q_channel_block), 11);
+}
+
+/* PUSH 0x69e56 hands the callee the module's own block and not a caller
+   buffer, so the eleven bytes the test seeded there are the eleven that reach
+   the driver -- byte 0 excepted, which the callee stamps with the Audio
+   Q-Channel control code 0x0c.  The stamp landing in the global as well is
+   what says the pointer that went out was this block's. */
+static void cdaudio_read_position_sends_the_modules_own_block(void)
+{
+    unsigned char track;
+    unsigned char minute;
+    unsigned char second;
+    unsigned char frame;
+    int i;
+
+    read_audio_position_from_a_rejected_drive(&track, &minute, &second,
+                                              &frame);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 0xc);
+    for (i = 1; i < 0xb; i++) {
+        CHECK_EQ(data_fdps_cd_ioctl_buffer[i], 0x40 + i);
+    }
+    CHECK_EQ(data_fdps_cd_q_channel_block.control_code, 0xc);
+}
+
+/* MOV word ptr [ESP+0x12],0x6 in the callee asks the driver for six bytes
+   while this caller reads the frame at offset 6 -- the seventh byte, one past
+   what the request declared.  The two halves are asserted together because
+   they only make sense together: raising the count or dropping the frame read
+   would each look like a tidy-up on its own. */
+static void cdaudio_read_position_reads_a_frame_past_the_transfer(void)
+{
+    unsigned char track;
+    unsigned char minute;
+    unsigned char second;
+    unsigned char frame;
+
+    read_audio_position_from_a_rejected_drive(&track, &minute, &second,
+                                              &frame);
+    CHECK_EQ(staged_word(data_fdps_cd_request_header_buffer, 0x12), 6);
+    CHECK_EQ((int) offsetof(struct fdps_cd_q_channel_block, frame), 6);
+    CHECK_EQ(frame, 0x46);
+}
+
+/* The body reads the block and never writes it, so what the callee left there
+   is still there afterwards.  With the drive rejecting the request that is the
+   ramp the test seeded, including the three absolute-position bytes at +8, +9
+   and +10 that this routine has no interest in. */
+static void cdaudio_read_position_leaves_the_block_as_it_found_it(void)
+{
+    unsigned char track;
+    unsigned char minute;
+    unsigned char second;
+    unsigned char frame;
+
+    read_audio_position_from_a_rejected_drive(&track, &minute, &second,
+                                              &frame);
+    CHECK_EQ(data_fdps_cd_q_channel_block.track_number, 0x42);
+    CHECK_EQ(data_fdps_cd_q_channel_block.minute, 0x44);
+    CHECK_EQ(data_fdps_cd_q_channel_block.second, 0x45);
+    CHECK_EQ(data_fdps_cd_q_channel_block.frame, 0x46);
+    CHECK_EQ(data_fdps_cd_q_channel_block.zero, 0x47);
+    CHECK_EQ(data_fdps_cd_q_channel_block.absolute_minute, 0x48);
+    CHECK_EQ(data_fdps_cd_q_channel_block.absolute_second, 0x49);
+    CHECK_EQ(data_fdps_cd_q_channel_block.absolute_frame, 0x4a);
+}
+
+/* The four stores go out in the order the loads do -- track from +2, then
+   frame from +6, then second from +5, then minute from +4 through the shared
+   tail at 0003bc71 -- and nothing in the signature stops a caller naming one
+   byte twice.  Aliasing every argument onto one byte therefore leaves the
+   minute there, the last of the four; aliasing them in pairs pins the two
+   inversions in between, frame after track and second after frame.  A body
+   written in the argument order would leave 0x46 in the first case and 0x42
+   and 0x46 in the other two. */
+static void cdaudio_read_position_stores_in_the_order_the_body_does(void)
+{
+    unsigned char shared;
+    unsigned char first_pair;
+    unsigned char second_pair;
+    unsigned char sink_a;
+    unsigned char sink_b;
+
+    shared = 0x5a;
+    read_audio_position_from_a_rejected_drive(&shared, &shared, &shared,
+                                              &shared);
+    CHECK_EQ(shared, 0x44);
+
+    first_pair = 0x5a;
+    sink_a = 0x5a;
+    sink_b = 0x5a;
+    read_audio_position_from_a_rejected_drive(&first_pair, &sink_a, &sink_b,
+                                              &first_pair);
+    CHECK_EQ(first_pair, 0x46);
+
+    second_pair = 0x5a;
+    sink_a = 0x5a;
+    sink_b = 0x5a;
+    read_audio_position_from_a_rejected_drive(&sink_a, &sink_b, &second_pair,
+                                              &second_pair);
+    CHECK_EQ(second_pair, 0x45);
+}
+
+/* Every call re-reads the block, which is a single module-wide staging area
+   rather than anything the caller owns: stirring it by hand between two calls
+   and getting the second set of bytes back is what catches a body that cached
+   the position or that skipped the request because the block already held an
+   answer. */
+static void cdaudio_read_position_re_reads_the_block_on_every_call(void)
+{
+    unsigned char track;
+    unsigned char minute;
+    unsigned char second;
+    unsigned char frame;
+
+    read_audio_position_from_a_rejected_drive(&track, &minute, &second,
+                                              &frame);
+    CHECK_EQ(track, 0x42);
+
+    data_fdps_cd_q_channel_block.track_number = 0x71;
+    data_fdps_cd_q_channel_block.minute = 0x72;
+    data_fdps_cd_q_channel_block.second = 0x73;
+    data_fdps_cd_q_channel_block.frame = 0x74;
+    track = 0x5a;
+    minute = 0x5a;
+    second = 0x5a;
+    frame = 0x5a;
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    fdps_cd_read_audio_position(&track, &minute, &second, &frame);
+    CHECK_EQ(track, 0x71);
+    CHECK_EQ(minute, 0x72);
+    CHECK_EQ(second, 0x73);
+    CHECK_EQ(frame, 0x74);
+}
+
 void run_cdaudio_tests(void)
 {
     RUN_TEST(cdaudio_seek_header_fields_sit_where_the_stores_land);
@@ -2579,6 +2801,13 @@ void run_cdaudio_tests(void)
     RUN_TEST(cdaudio_whole_disc_queries_track_one_and_discards_it);
     RUN_TEST(cdaudio_whole_disc_asks_for_the_disc_summary_last);
     RUN_TEST(cdaudio_whole_disc_queries_before_it_plays);
+    RUN_TEST(cdaudio_read_position_hands_back_the_track_and_the_time);
+    RUN_TEST(cdaudio_read_position_reads_the_offsets_the_loads_name);
+    RUN_TEST(cdaudio_read_position_sends_the_modules_own_block);
+    RUN_TEST(cdaudio_read_position_reads_a_frame_past_the_transfer);
+    RUN_TEST(cdaudio_read_position_leaves_the_block_as_it_found_it);
+    RUN_TEST(cdaudio_read_position_stores_in_the_order_the_body_does);
+    RUN_TEST(cdaudio_read_position_re_reads_the_block_on_every_call);
     RUN_TEST(cdaudio_set_music_publishes_the_index_it_was_given);
     RUN_TEST(cdaudio_set_music_plays_when_the_music_is_on);
     RUN_TEST(cdaudio_set_music_plays_the_track_one_past_the_index);
