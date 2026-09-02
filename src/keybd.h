@@ -353,4 +353,29 @@ extern void fdps_keyboard_isr(void);
 extern void fdps_install_keyboard_isr(void);
 #pragma aux fdps_install_keyboard_isr "*" parm caller [];
 
+/* Puts vector 09h back where fdps_install_keyboard_isr found it, and parks the
+   latched scancode byte at its no-key value.
+
+   Reads the selector and offset the installer filed in the two globals above
+   and hands that pair straight to INT 21h AH=25h for vector 09h, so from the
+   moment it returns the keyboard belongs to whoever owned it before -- the
+   BIOS at startup, or the extender's own stub.  The selector comes out of the
+   saved global and not out of CS: the vector being restored is somebody else's
+   handler, which the game's code selector does not address.
+
+   The scancode ring, its two indices and the auto-repeat filter's state are all
+   left exactly as they were, so codes queued before the hook came down are
+   still readable afterwards; only data_fdps_input_last_scancode is written, and
+   it is set to 0xff, the same no-key value fdps_read_keyboard_queue reports for
+   an empty ring.
+
+   No arguments and no result: all three call sites -- in
+   fdps_shutdown_free_resources, fdps_cd_verify_disc_and_play_track and
+   fdps_play_movie -- push nothing before the CALL and adjust nothing after it,
+   and none of them reads EAX before loading it again.  EAX does come back
+   holding 0x2509, the DOS function number, but that is where the call left it
+   rather than anything the function means to return. */
+extern void fdps_uninstall_keyboard_isr(void);
+#pragma aux fdps_uninstall_keyboard_isr "*" parm caller [];
+
 #endif

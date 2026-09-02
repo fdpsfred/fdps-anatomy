@@ -11,10 +11,11 @@
  * 0002d501, 00017905 and the rest, and MOV byte ptr [EAX],0xff at 0002bb13 and
  * 0002b5c8.  None of them is read off the emitted C.
  *
- * Also covers fdps_install_keyboard_isr at 000567f0, whose cases are at the end
- * of the file behind their own explanation: it is the only function here with
- * an effect outside the program's memory, so its cases move interrupt vector
- * 09h for real and put it back with IRQ1 masked throughout.
+ * Also covers fdps_install_keyboard_isr at 000567f0 and
+ * fdps_uninstall_keyboard_isr at 00056818, whose cases are at the end of the
+ * file behind their own explanation: they are the only functions here with an
+ * effect outside the program's memory, so their cases move interrupt vector 09h
+ * for real and put it back with IRQ1 masked throughout.
  *
  * The game's handler never actually runs during any of this -- vector 09h holds
  * it only inside the fenced window in keybd_probe_install, and IRQ1 is masked
@@ -1210,6 +1211,224 @@ static void keybd_install_vector_slots_are_the_widths_the_image_uses(void)
     CHECK_EQ((int) sizeof(data_fdps_prev_int9_handler_offset), 4);
 }
 
+/* --- fdps_uninstall_keyboard_isr at 00056818 -------------------------------
+ *
+ * The installer's mirror, fenced the same way and for the same reason.  A round
+ * trip has to put the game's handler on the vector before it can take it off,
+ * and that handler is the not-yet-emitted stub, so IRQ1 stays masked at the
+ * 8259 across every window below; the vector and the mask are put back exactly
+ * as they were found.
+ *
+ * The probes above are reused unchanged.  Their whole point applies here too:
+ * probe_read_int9_vector asks DOS what is on the vector through its own INT 21h
+ * AH=35h, so the function under test and the test have to agree about a value
+ * neither of them chose -- this machine's own vector 09h.
+ * -------------------------------------------------------------------------- */
+
+/* What one fenced install-then-uninstall round trip saw.  File-scope for the
+   same reason the installer's are: every case asserts about a different part of
+   one observation. */
+static unsigned short uninst_prev_selector;
+static unsigned int uninst_prev_offset;
+static unsigned short uninst_hooked_selector;
+static unsigned int uninst_hooked_offset;
+static unsigned short uninst_restored_selector;
+static unsigned int uninst_restored_offset;
+static unsigned short uninst_ds_before;
+static unsigned short uninst_ds_after;
+static unsigned short uninst_es_before;
+static unsigned short uninst_es_after;
+static unsigned char uninst_latch_after;
+static unsigned int uninst_saved_offset_after;
+static unsigned short uninst_saved_selector_after;
+
+/* Install for real and then uninstall for real, with IRQ1 masked throughout,
+   recording the vector as it was, as the install left it and as the uninstall
+   left it.  The vector and the mask are put back afterwards even though a
+   correct uninstall has already restored the vector itself -- if it has not,
+   the machine must still be handed back intact for the cases that follow. */
+static void keybd_probe_uninstall(void)
+{
+    unsigned char saved_irq_mask;
+    unsigned char saved_scancode;
+
+    saved_scancode = data_fdps_input_last_scancode;
+    saved_irq_mask = probe_mask_irq1();
+
+    uninst_prev_offset = probe_read_int9_vector(&uninst_prev_selector);
+    fdps_install_keyboard_isr();
+    uninst_hooked_offset = probe_read_int9_vector(&uninst_hooked_selector);
+
+    /* A key the handler might have latched a moment before the uninstall, so
+       that the 0xff the uninstall is meant to store cannot pass on a byte that
+       already held it. */
+    data_fdps_input_last_scancode = 0x39;   /* space */
+    uninst_ds_before = probe_current_ds();
+    uninst_es_before = probe_current_es();
+
+    fdps_uninstall_keyboard_isr();
+
+    uninst_ds_after = probe_current_ds();
+    uninst_es_after = probe_current_es();
+    uninst_latch_after = data_fdps_input_last_scancode;
+    uninst_restored_offset = probe_read_int9_vector(&uninst_restored_selector);
+    uninst_saved_offset_after = data_fdps_prev_int9_handler_offset;
+    uninst_saved_selector_after = data_fdps_input_prev_int9_handler_selector;
+
+    probe_write_int9_vector(uninst_prev_selector, uninst_prev_offset);
+    probe_restore_irq_mask(saved_irq_mask);
+
+    data_fdps_input_last_scancode = saved_scancode;
+}
+
+/* The pair the installer filed has to come back onto the vector in both halves:
+   MOV EDX,dword ptr [0x00070002] / MOV AX,[0x00070000] / MOV DS,AX / MOV
+   EAX,0x2509 / INT 0x21 at 00056819..0005682c is DS:EDX handed to AH=25h for
+   vector 09h.  The expected values are not constants -- they are whatever this
+   machine's vector 09h held before the install, read independently through the
+   test's own AH=35h. */
+static void keybd_uninstall_puts_the_saved_vector_back(void)
+{
+    keybd_probe_uninstall();
+
+    CHECK_EQ(uninst_restored_offset == uninst_prev_offset, 1);
+    CHECK_EQ(uninst_restored_selector == uninst_prev_selector, 1);
+}
+
+/* And it really does move the vector: the window it is undoing had the game's
+   own handler on it, and the address that comes back afterwards is a different
+   one.  Without this the case above would also pass on a function that did
+   nothing at all, since the vector would still hold what it held before. */
+static void keybd_uninstall_takes_the_game_handler_off_the_vector(void)
+{
+    keybd_probe_uninstall();
+
+    CHECK_EQ(uninst_hooked_offset == (unsigned int) fdps_keyboard_isr, 1);
+    CHECK_EQ(uninst_restored_offset != uninst_hooked_offset, 1);
+}
+
+/* MOV byte ptr [0x00070006],0xff at 0005682f: the latched scancode is parked at
+   the no-key value on the way out.  It is the one byte of the keyboard state
+   this function writes, and it has to be written -- with the game's handler off
+   the vector nothing will overwrite it again, so a key still latched from
+   before the uninstall would be reported by the next poll of it. */
+static void keybd_uninstall_parks_the_latched_scancode(void)
+{
+    keybd_probe_uninstall();
+
+    CHECK_EQ(uninst_latch_after, 0xff);
+}
+
+/* There is no store to 0x00070000 or 0x00070002 in the body: the two saved
+   halves are read and left as they are.  That is what lets
+   fdps_cd_verify_disc_and_play_track and fdps_play_movie uninstall, hand the
+   machine to the CD or the movie player and install again -- and it means a
+   second uninstall with no install between restores the same vector rather than
+   a cleared one. */
+static void keybd_uninstall_leaves_the_saved_vector_slots_alone(void)
+{
+    keybd_probe_uninstall();
+
+    CHECK_EQ(uninst_saved_offset_after == uninst_prev_offset, 1);
+    CHECK_EQ(uninst_saved_selector_after == uninst_prev_selector, 1);
+}
+
+/* PUSH DS at 00056818 and POP DS at 0005682e: DS is handed back as it was
+   found, and ES is never touched at all.  DS is left holding the restored
+   handler's selector across the INT, which is not a data selector on any
+   machine, so a missing restore would corrupt the caller rather than this
+   function -- and would do it on the very last thing the game does before it
+   exits, where it is hardest to attribute. */
+static void keybd_uninstall_leaves_the_segment_registers_alone(void)
+{
+    keybd_probe_uninstall();
+
+    CHECK_EQ(uninst_ds_after == uninst_ds_before, 1);
+    CHECK_EQ(uninst_es_after == uninst_es_before, 1);
+}
+
+/* The ring and both its indices survive the uninstall untouched -- the body
+   writes one byte and 0x0007000f, 0x00070019 and 0x0007001d are not it.  This
+   is behaviour the callers depend on rather than an accident: the queue is
+   still readable after the hook comes down, and clearing it here would be the
+   tidy-looking change that throws away codes queued before the uninstall. */
+static void keybd_uninstall_leaves_the_queue_alone(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+
+    keybd_ring_save(saved_ring);
+    data_fdps_input_scancode_queue[2] = 0x1c;   /* Return, queued and unread */
+    data_fdps_input_scancode_queue_head = 2;
+    data_fdps_input_scancode_queue_write_index = 3;
+
+    keybd_probe_uninstall();
+
+    CHECK_EQ(data_fdps_input_scancode_queue[2], 0x1c);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 2);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 3);
+
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The selector half comes out of the saved global, not out of CS, and that is
+   the one place this function must differ from the installer it mirrors.  The
+   installer loads DS from CS because it is installing its own handler; copying
+   that here would file somebody else's handler offset against the game's code
+   selector, and nothing would fault until the first key pressed after the game
+   let the keyboard go.
+
+   So the globals are pointed at a vector that differs from the installer's in
+   both halves -- the flat data selector, which is a valid selector this side of
+   the fence and is never the code selector -- and the vector is expected to
+   come back holding exactly that.  The handler on the vector is never entered:
+   IRQ1 is masked for the whole window and the machine's own vector goes back
+   before the mask does. */
+static void keybd_uninstall_uses_the_saved_selector_not_cs(void)
+{
+    unsigned char saved_irq_mask;
+    unsigned char saved_scancode;
+    unsigned short saved_globals_selector;
+    unsigned int saved_globals_offset;
+    unsigned short machine_selector;    /* vector 09h as this machine has it */
+    unsigned int machine_offset;
+    unsigned short data_selector;       /* the selector asked for, in DS */
+    unsigned short restored_selector;   /* what the vector ended up holding */
+    unsigned int restored_offset;
+
+    data_selector = probe_current_ds();
+    saved_scancode = data_fdps_input_last_scancode;
+    saved_globals_selector = data_fdps_input_prev_int9_handler_selector;
+    saved_globals_offset = data_fdps_prev_int9_handler_offset;
+
+    saved_irq_mask = probe_mask_irq1();
+    machine_offset = probe_read_int9_vector(&machine_selector);
+
+    probe_write_int9_vector(probe_current_cs(),
+                            (unsigned int) fdps_keyboard_isr);
+    data_fdps_input_prev_int9_handler_selector = data_selector;
+    data_fdps_prev_int9_handler_offset = (unsigned int) fdps_wait_any_key;
+
+    fdps_uninstall_keyboard_isr();
+
+    restored_offset = probe_read_int9_vector(&restored_selector);
+
+    probe_write_int9_vector(machine_selector, machine_offset);
+    probe_restore_irq_mask(saved_irq_mask);
+
+    data_fdps_input_prev_int9_handler_selector = saved_globals_selector;
+    data_fdps_prev_int9_handler_offset = saved_globals_offset;
+    data_fdps_input_last_scancode = saved_scancode;
+
+    /* The discrimination only means anything while the two selectors differ,
+       which under DOS/4GW they always do -- code and data are separate
+       descriptors -- so it is asserted rather than assumed. */
+    CHECK_EQ(data_selector != probe_current_cs(), 1);
+    CHECK_EQ(restored_selector == data_selector, 1);
+    CHECK_EQ(restored_offset == (unsigned int) fdps_wait_any_key, 1);
+}
+
 void run_keybd_tests(void)
 {
     RUN_TEST(keybd_scancode_ptr_names_the_isr_slot);
@@ -1252,4 +1471,11 @@ void run_keybd_tests(void)
     RUN_TEST(keybd_install_leaves_the_segment_registers_alone);
     RUN_TEST(keybd_install_leaves_the_queue_state_alone);
     RUN_TEST(keybd_install_vector_slots_are_the_widths_the_image_uses);
+    RUN_TEST(keybd_uninstall_puts_the_saved_vector_back);
+    RUN_TEST(keybd_uninstall_takes_the_game_handler_off_the_vector);
+    RUN_TEST(keybd_uninstall_parks_the_latched_scancode);
+    RUN_TEST(keybd_uninstall_leaves_the_saved_vector_slots_alone);
+    RUN_TEST(keybd_uninstall_leaves_the_segment_registers_alone);
+    RUN_TEST(keybd_uninstall_leaves_the_queue_alone);
+    RUN_TEST(keybd_uninstall_uses_the_saved_selector_not_cs);
 }

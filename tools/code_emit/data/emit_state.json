@@ -1870,6 +1870,14 @@
       "status": "committed",
       "emitted_against": "0x28",
       "rounds": 1
+    },
+    "00056818": {
+      "name": "fdps_uninstall_keyboard_isr",
+      "target": "keybd.c",
+      "body_size": "0x1f",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x1f"
     }
   }
 }

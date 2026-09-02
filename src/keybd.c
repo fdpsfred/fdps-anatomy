@@ -4,9 +4,9 @@
  * The game replaces the BIOS keyboard interrupt with a handler of its own and
  * keeps two pieces of state behind it: a ten-entry ring of make codes, and a
  * single byte holding the last raw scancode the hardware produced.  This file
- * holds the accessors for both, and the routine that puts the handler on
- * interrupt vector 09h in the first place; the state itself is defined here
- * once ticket 23 emits it.
+ * holds the accessors for both, and the pair of routines that put the handler
+ * on interrupt vector 09h and take it back off again; the state itself is
+ * defined here once ticket 23 emits it.
  *
  * On top of those accessors sits the auto-repeat filter the modal input loops
  * poll, which lives at 000178f0 -- far from the rest of this file in the image,
@@ -281,4 +281,69 @@ void fdps_install_keyboard_isr(void)
        and neither the compiler nor the build gate would say a word
        (rebuild_info/pitfalls.md). */
     fdps_keybd_set_int9_vector_asm(fdps_keyboard_isr);
+}
+
+/* The one DOS call fdps_uninstall_keyboard_isr is made of, and the reason it
+ * cannot share the installer's pragma above.
+ *
+ * AH=25h reads the handler address out of DS:EDX, so whichever routine issues
+ * it decides what goes into DS.  The installer is putting its OWN handler on
+ * the vector and so loads DS from CS; this one is putting SOMEBODY ELSE'S
+ * handler back, and that handler lives behind the selector DOS reported when
+ * the vector was taken.  Loading CS here instead would file the previous
+ * handler's offset against the game's code selector, which does not address it
+ * -- and nothing would go wrong until the first key pressed after the game let
+ * the keyboard go.
+ *
+ * The selector arrives in AX and the offset in EDX, which is where the image
+ * has them (MOV EDX,dword ptr [0x00070002] / MOV AX,[0x00070000] / MOV DS,AX
+ * at 00056819, 0005681f and 00056825).  Both are loaded before DS moves, and
+ * they have to be: they are globals, reachable only while DS still addresses
+ * the flat data segment.  Watcom loads every parm register before it expands
+ * the sequence, so the two reads land on the right side of the MOV DS,AX the
+ * same way the original's do.
+ *
+ * All four scratch registers are in `modify`, for the reason the installer's
+ * two pragmas give: what a DOS call destroys is its ABI, and a partial list
+ * moves the corruption rather than declaring it (rebuild_info/emit_pipeline.md,
+ * contract A).  DS is pushed and popped because the compiler generates every
+ * memory reference after this call assuming DS still addresses the flat data
+ * segment; the original spells it PUSH DS at 00056818 and POP DS at 0005682e.
+ */
+extern void fdps_keybd_restore_int9_vector_asm(unsigned short handler_selector,
+                                               unsigned int handler_offset);
+#pragma aux fdps_keybd_restore_int9_vector_asm = \
+    "push ds"                           \
+    "mov  ds,ax"                        \
+    "mov  eax,2509h"                    \
+    "int  21h"                          \
+    "pop  ds"                           \
+    parm [ax] [edx]                     \
+    modify [eax ebx ecx edx];
+
+void fdps_uninstall_keyboard_isr(void)
+{
+    /* 00056818.  Nine instructions, no prologue and no frame: one DOS call
+       against the two saved halves of the displaced vector, then one byte
+       store.  Nothing here outlives an instruction, so there is no local to
+       name.
+
+       The two globals are read and not cleared -- there is no store to
+       0x00070000 or 0x00070002 anywhere in the body -- so a second uninstall
+       with no install in between simply restores the same vector again, and
+       the three call sites rely on nothing else. */
+    fdps_keybd_restore_int9_vector_asm(
+        data_fdps_input_prev_int9_handler_selector,
+        data_fdps_prev_int9_handler_offset);
+
+    /* MOV byte ptr [0x00070006],0xff at 0005682f, after DS is back.  The latch
+       is parked at the no-key value so that a poll made after the hook came
+       down does not see whatever key was held when it did -- with the game's
+       handler off the vector nothing will ever overwrite it again.
+
+       Only this byte.  The ring at 0x0007000f, its two indices and the repeat
+       filter's own state are left alone, and clearing them here would look
+       tidier than the original and would throw away codes that were queued
+       before the uninstall and are still readable after it. */
+    data_fdps_input_last_scancode = SCANCODE_NONE;
 }
