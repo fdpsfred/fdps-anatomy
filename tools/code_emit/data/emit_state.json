@@ -1854,6 +1854,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x86"
+    },
+    "000567be": {
+      "name": "fdps_read_keyboard_queue",
+      "target": "keybd.c",
+      "body_size": "0x32",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x32"
     }
   }
 }

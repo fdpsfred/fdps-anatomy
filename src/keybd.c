@@ -142,3 +142,48 @@ void fdps_flush_keyboard_queue(void)
     data_fdps_input_scancode_queue_write_index =
         data_fdps_input_scancode_queue_head;
 }
+
+unsigned char fdps_read_keyboard_queue(void)
+{
+    /* The code this call hands back.  AL carries it through the whole of the
+       assembly: MOV AL,0xff at 000567bf puts the marker there before anything
+       is tested, and the single path that finds an entry overwrites AL with it
+       at 000567cf.  A byte and not a widened int, because only AL is ever set
+       -- the rest of EAX keeps whatever the caller left in it, which is why
+       every call site widens the answer itself with AND EAX,0xff. */
+    unsigned char scancode;
+
+    scancode = SCANCODE_NONE;
+
+    /* Equal indices mean the queue is empty, and that is the only emptiness
+       test the ring has: CMP EBX,dword ptr [0x0007001d] / JZ at 000567c7 to the
+       exit.  There is no count and no fullness test anywhere -- the handler
+       advances the write index unconditionally, so ten unread codes bring the
+       write index back round to the read index and this reads as empty with
+       the ring full.  Adding the pending count that would fix it changes which
+       keystrokes the game sees (rebuild_info/pitfalls.md). */
+    if (data_fdps_input_scancode_queue_head !=
+        data_fdps_input_scancode_queue_write_index) {
+        scancode = data_fdps_input_scancode_queue[
+                       data_fdps_input_scancode_queue_head];
+
+        /* Only the read index is written, and that is the contract with the
+           INT 09h handler: it owns the write index and the ring's bytes, this
+           owns the read index, and neither ever writes the other's state, so
+           an interrupt landing anywhere inside here cannot corrupt either
+           side.  The entry just taken is deliberately left in the ring -- the
+           handler overwrites it when the write index comes round again, and
+           the read index alone decides what is readable.
+
+           The wrap is an equality against the ring's length, not a modulus and
+           not a >= test, and it sits INSIDE this branch: the empty case at the
+           top returns without touching the index at all. */
+        data_fdps_input_scancode_queue_head =
+            data_fdps_input_scancode_queue_head + 1;
+        if (data_fdps_input_scancode_queue_head == SCANCODE_QUEUE_LEN) {
+            data_fdps_input_scancode_queue_head = 0;
+        }
+    }
+
+    return scancode;
+}

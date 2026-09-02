@@ -706,6 +706,278 @@ static void keybd_repeat_leaves_the_latched_scancode_alone(void)
     data_fdps_timer_tick_counter = 0;
 }
 
+/* fdps_read_keyboard_queue at 000567be.  Expected values come from its eleven
+   instructions -- MOV AL,0xff / MOV EBX,[0x70019] / CMP EBX,[0x7001d] / JZ to
+   the exit / MOV AL,byte ptr [EBX + 0x7000f] / INC dword ptr [0x70019] /
+   CMP dword ptr [0x70019],0xa / JNZ to the exit / MOV dword ptr [0x70019],0x0
+   -- from the handler that fills the ring, fdps_keyboard_isr, which stores at
+   the write index and wraps it at ten the same way (0005686f..00056884) and
+   drops everything with bit 7 set (CMP BL,0x80 / JNC at 00056865), and from the
+   thirteen call sites, every one of which widens the answer with AND EAX,0xff
+   and ten of which then compare it against 0x7f or 0x80.  None of them is read
+   off the emitted C.
+
+   The ring's bytes are ticket 23's to define and are zero-filled until then, so
+   no case reads an entry it has not written; each saves the whole ring and puts
+   it back, and puts both indices back to zero.  The ISR is not installed while
+   these run, so nothing but the cases themselves moves the write index. */
+
+static void keybd_ring_save(unsigned char *saved_ring)
+{
+    int entry;
+
+    for (entry = 0; entry < SCANCODE_QUEUE_LEN; entry++) {
+        saved_ring[entry] = data_fdps_input_scancode_queue[entry];
+    }
+}
+
+static void keybd_ring_restore(unsigned char *saved_ring)
+{
+    int entry;
+
+    for (entry = 0; entry < SCANCODE_QUEUE_LEN; entry++) {
+        data_fdps_input_scancode_queue[entry] = saved_ring[entry];
+    }
+}
+
+/* Equal indices are the empty queue, and then the answer is the marker the
+   function started AL with and nothing at all moves -- not the read index, not
+   the write index, and not the stale byte still sitting at the read index.
+   Reading that stale byte is what a body without the emptiness test would do,
+   and it would hand the game a keypress that was already consumed.
+
+   The first check calls the function inside CHECK_EQ rather than through a
+   local, and that is the point of it: the harness widens what the call returns,
+   so a signed return type would arrive as -1 here instead of 255 -- and would
+   then sign-extend in the callers, whose CMP EAX,0x7f tests sort the marker
+   from a real key. */
+static void keybd_read_queue_reports_the_marker_when_empty(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char taken_scancode;
+
+    keybd_ring_save(saved_ring);
+    data_fdps_input_scancode_queue[3] = 0x1c;   /* consumed on an earlier read */
+    data_fdps_input_scancode_queue_head = 3;
+    data_fdps_input_scancode_queue_write_index = 3;   /* nothing pending */
+
+    CHECK_EQ(fdps_read_keyboard_queue(), 255);
+
+    taken_scancode = fdps_read_keyboard_queue();
+
+    CHECK_EQ(taken_scancode, 0xff);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 3);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 3);
+    CHECK_EQ(data_fdps_input_scancode_queue[3], 0x1c);
+
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The advance and its wrap live inside the non-empty branch -- the JZ at
+   000567cd jumps past all three instructions.  With the read index at the last
+   entry and the queue empty, a body that advanced or wrapped unconditionally
+   would leave it at 0 and the next code the handler queued at 9 would be
+   skipped, with nothing to show for it but a lost keystroke. */
+static void keybd_read_queue_empty_does_not_advance_or_wrap_the_index(void)
+{
+    unsigned char taken_scancode;
+
+    data_fdps_input_scancode_queue_head = 9;   /* the last entry */
+    data_fdps_input_scancode_queue_write_index = 9;   /* nothing pending */
+
+    taken_scancode = fdps_read_keyboard_queue();
+
+    CHECK_EQ(taken_scancode, 0xff);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 9);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 9);
+
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The entry taken is the one AT the read index, and the read index moves on by
+   exactly one.  The write index must not move: this dequeues one code, where
+   fdps_flush_keyboard_queue at 000567b3 discards them all, and the two would be
+   indistinguishable on a queue holding a single code. */
+static void keybd_read_queue_takes_the_entry_at_the_read_index(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char taken_scancode;
+
+    keybd_ring_save(saved_ring);
+    data_fdps_input_scancode_queue[2] = 0x39;   /* Space */
+    data_fdps_input_scancode_queue[3] = 0x1c;   /* Enter, still pending */
+    data_fdps_input_scancode_queue_head = 2;
+    data_fdps_input_scancode_queue_write_index = 5;   /* entries 2,3,4 */
+
+    taken_scancode = fdps_read_keyboard_queue();
+
+    CHECK_EQ(taken_scancode, 0x39);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 3);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 5);
+    CHECK_EQ(data_fdps_input_scancode_queue[2], 0x39);   /* not erased */
+
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* Three codes queued by the handler come back in the order they were queued,
+   and the queue then reports itself empty -- the read index has caught the
+   write index up, which is the same condition the function started from in the
+   empty case above.  A body that read at the write index, or that took the
+   newest entry, would answer 0x1c first here. */
+static void keybd_read_queue_returns_the_codes_in_order(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+
+    keybd_ring_save(saved_ring);
+    data_fdps_input_scancode_queue[0] = 0x48;   /* Up, queued first */
+    data_fdps_input_scancode_queue[1] = 0x50;   /* Down */
+    data_fdps_input_scancode_queue[2] = 0x1c;   /* Enter, queued last */
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 3;
+
+    CHECK_EQ(fdps_read_keyboard_queue(), 0x48);
+    CHECK_EQ(fdps_read_keyboard_queue(), 0x50);
+    CHECK_EQ(fdps_read_keyboard_queue(), 0x1c);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 3);
+
+    CHECK_EQ(fdps_read_keyboard_queue(), 255);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 3);
+
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The read index wraps to zero after the tenth entry, which is what keeps it a
+   legal index into a ten-entry array: nothing range checks it, here or in the
+   handler.  The wrap is to 0 and not to anything else, so the code the handler
+   writes at 0 next is the one the following read takes. */
+static void keybd_read_queue_wraps_the_read_index_at_ten(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char taken_scancode;
+
+    keybd_ring_save(saved_ring);
+    data_fdps_input_scancode_queue[9] = 0x4b;   /* Left, in the last entry */
+    data_fdps_input_scancode_queue_head = 9;
+    data_fdps_input_scancode_queue_write_index = 0;   /* just entry 9 pending */
+
+    taken_scancode = fdps_read_keyboard_queue();
+
+    CHECK_EQ(taken_scancode, 0x4b);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 0);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 0);
+    CHECK_EQ(fdps_read_keyboard_queue(), 255);   /* and now empty */
+
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The wrap is CMP ...,0xa / JNZ -- an equality against the length -- so the
+   entry before the last does not wrap.  Spelt as a >= test against nine, or as
+   a wrap of the pre-increment value, this case would answer 0 and the ninth
+   entry of every lap round the ring would be skipped. */
+static void keybd_read_queue_does_not_wrap_before_ten(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char taken_scancode;
+
+    keybd_ring_save(saved_ring);
+    data_fdps_input_scancode_queue[8] = 0x4d;   /* Right */
+    data_fdps_input_scancode_queue_head = 8;
+    data_fdps_input_scancode_queue_write_index = 0;   /* entries 8 and 9 */
+
+    taken_scancode = fdps_read_keyboard_queue();
+
+    CHECK_EQ(taken_scancode, 0x4d);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 9);
+
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The write index is routinely BELOW the read index, because it wraps too, and
+   the queue is not empty then: read at 8 and write at 2 is four codes pending
+   across the seam.  The only test in the assembly is an equality (CMP EBX,
+   dword ptr [0x0007001d] / JZ), never an order comparison, so all four come
+   back and the fifth read is the empty one. */
+static void keybd_read_queue_handles_a_wrapped_write_index(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+
+    keybd_ring_save(saved_ring);
+    data_fdps_input_scancode_queue[8] = 0x11;
+    data_fdps_input_scancode_queue[9] = 0x22;
+    data_fdps_input_scancode_queue[0] = 0x33;
+    data_fdps_input_scancode_queue[1] = 0x44;
+    data_fdps_input_scancode_queue_head = 8;
+    data_fdps_input_scancode_queue_write_index = 2;   /* 8,9,0,1 pending */
+
+    CHECK_EQ(fdps_read_keyboard_queue(), 0x11);
+    CHECK_EQ(fdps_read_keyboard_queue(), 0x22);
+    CHECK_EQ(fdps_read_keyboard_queue(), 0x33);
+    CHECK_EQ(fdps_read_keyboard_queue(), 0x44);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 2);
+    CHECK_EQ(fdps_read_keyboard_queue(), 255);
+
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The read index is the only thing this function writes, and that is its side
+   of the arrangement with the INT 09h handler: the handler owns the ring's
+   bytes and the write index, and if this touched either -- clearing the entry
+   it took, say, or rewinding the write index the way its two siblings do -- an
+   interrupt arriving mid-call would lose whatever the handler had just stored.
+   The latched byte at 0x00070006 is separate state again and is not read here
+   at all: the queue readers and the latch readers are different callers. */
+static void keybd_read_queue_writes_only_the_read_index(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char saved_scancode;
+
+    keybd_ring_save(saved_ring);
+    saved_scancode = data_fdps_input_last_scancode;
+    data_fdps_input_last_scancode = 0x2a;   /* left Shift, latched */
+    data_fdps_input_scancode_queue[4] = 0x1c;
+    data_fdps_input_scancode_queue[5] = 0x39;
+    data_fdps_input_scancode_queue_head = 4;
+    data_fdps_input_scancode_queue_write_index = 6;
+
+    fdps_read_keyboard_queue();
+
+    CHECK_EQ(data_fdps_input_scancode_queue[4], 0x1c);
+    CHECK_EQ(data_fdps_input_scancode_queue[5], 0x39);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 6);
+    CHECK_EQ(data_fdps_input_last_scancode, 0x2a);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The ring is one object of exactly ten bytes.  Both users bound their index by
+   the same ten (CMP ...,0xa at 000567db and 0005687b) and both name the base
+   0x7000f in the instruction itself, so a shorter array would be indexed off
+   its end and a longer one would put the two indices somewhere other than
+   where the ring's users expect -- and neither the compiler nor the build gate
+   can see either mistake. */
+static void keybd_read_queue_ring_is_exactly_ten_entries(void)
+{
+    CHECK_EQ((int) sizeof(data_fdps_input_scancode_queue),
+             SCANCODE_QUEUE_LEN);
+    CHECK_EQ((int) sizeof(data_fdps_input_scancode_queue[0]), 1);
+}
+
 void run_keybd_tests(void)
 {
     RUN_TEST(keybd_scancode_ptr_names_the_isr_slot);
@@ -732,4 +1004,13 @@ void run_keybd_tests(void)
     RUN_TEST(keybd_repeat_never_reports_the_no_key_value_as_a_key);
     RUN_TEST(keybd_repeat_flushes_the_queue_on_every_path);
     RUN_TEST(keybd_repeat_leaves_the_latched_scancode_alone);
+    RUN_TEST(keybd_read_queue_reports_the_marker_when_empty);
+    RUN_TEST(keybd_read_queue_empty_does_not_advance_or_wrap_the_index);
+    RUN_TEST(keybd_read_queue_takes_the_entry_at_the_read_index);
+    RUN_TEST(keybd_read_queue_returns_the_codes_in_order);
+    RUN_TEST(keybd_read_queue_wraps_the_read_index_at_ten);
+    RUN_TEST(keybd_read_queue_does_not_wrap_before_ten);
+    RUN_TEST(keybd_read_queue_handles_a_wrapped_write_index);
+    RUN_TEST(keybd_read_queue_writes_only_the_read_index);
+    RUN_TEST(keybd_read_queue_ring_is_exactly_ten_entries);
 }

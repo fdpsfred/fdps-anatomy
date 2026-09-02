@@ -29,6 +29,40 @@
  * build supplies it zero-filled. */
 extern unsigned char data_fdps_input_last_scancode;
 
+/* The scancode ring's length in entries.  It is one constant rather than two
+ * because the array's size and the value both users wrap their index at have to
+ * agree: fdps_read_keyboard_queue wraps with CMP dword ptr [0x00070019],0xa at
+ * 000567db and fdps_keyboard_isr with CMP dword ptr [0x0007001d],0xa at
+ * 0005687b, so nine is the highest index either can reach and neither ever
+ * leaves the array. */
+#define SCANCODE_QUEUE_LEN 10
+
+/* 0007000f.  The ring of make codes itself: fdps_keyboard_isr stores into it at
+ * the write index and fdps_read_keyboard_queue takes from it at the read index,
+ * both indexing in entries.  Only make codes reach it -- the handler drops
+ * anything with bit 7 set (CMP BL,0x80 / JNC at 00056865) -- so an entry is
+ * always 0x01..0x7f and 0xff can serve as the reader's no-key marker without
+ * colliding with one.
+ *
+ * ONE ARRAY OF EXACTLY TEN, and both halves of that matter.  A sweep of the
+ * whole image for 0x7000f finds two instructions, the reader's MOV AL,byte ptr
+ * [EBX + 0x7000f] at 000567cf and the handler's MOV byte ptr [EAX + 0x7000f],BL
+ * at 0005686f; both name this base explicitly and both bound their index by the
+ * wrap above, so nothing indexes from here into the two indices that follow at
+ * 0x00070019 and 0x0007001d.  The eight bytes between the latched scancode at
+ * 0x00070006 and this base are referenced by nothing in the image.
+ *
+ * NOT volatile, and that is a measurement rather than an omission: the ring's
+ * bytes are written asynchronously by the INT 09h handler, but no function
+ * reads one twice -- fdps_read_keyboard_queue's single load is the only read in
+ * the image -- so no reader can cache a byte across the change.  The write
+ * index is the one that needed the qualifier, because fdps_wait_any_key spins
+ * on it.
+ *
+ * Defined by ticket 23 along with the rest of keybd.c's data; until then the
+ * build supplies it zero-filled. */
+extern unsigned char data_fdps_input_scancode_queue[SCANCODE_QUEUE_LEN];
+
 /* 00070019.  The scancode ring's read index: the entry fdps_read_keyboard_queue
  * takes the next make code from, counted in entries rather than bytes and
  * always in 0..9.  Its only writer is fdps_read_keyboard_queue, which bumps it
@@ -181,6 +215,36 @@ extern void fdps_wait_any_key(void);
    read index only because that is where the load put it. */
 extern void fdps_flush_keyboard_queue(void);
 #pragma aux fdps_flush_keyboard_queue "*" parm caller [];
+
+/* Takes the next make code out of the scancode ring, or reports it empty.
+
+   The queue is empty exactly when the two indices are equal, and then the
+   answer is the marker 0xff and nothing moves.  Otherwise the entry at the read
+   index is taken, the read index is advanced past it and wrapped at ten, and
+   nothing else in the ring's state is touched -- the write index and the ring's
+   bytes stay as fdps_keyboard_isr left them, so this reader never contends with
+   the interrupt that fills it.
+
+   The result is a make code, 0x01..0x7f, or 0xff when nothing was queued.  It
+   is a byte and not a widened int: the assembly sets AL alone (MOV AL,0xff at
+   000567bf, MOV AL,byte ptr [EBX + 0x7000f] at 000567cf) and leaves the rest of
+   EAX holding whatever the caller left there, which is why all thirteen call
+   sites widen the answer themselves with AND EAX,0xff before testing it.
+
+   Unsigned, and that decides a branch rather than a spelling.  Every call site
+   widens the byte with AND EAX,0xff -- an unsigned widening -- and ten of them
+   then sort a real key from the marker against that threshold: nine with
+   CMP EAX,0x7f (00020443, 00024691, 0002adda, 00017c1e, 0001e1b2, 00018079,
+   0002e37c, 0003678e, 00039fde) and fdps_title_screen with CMP EAX,0x80 at
+   0002a4b1.  Declared signed, the marker would sign-extend to -1 in the rebuilt
+   callers instead of widening to 255 and every one of those tests would take
+   the other arm on the value that means "no key".  Queued entries never reach
+   0x80, so the marker is the whole of the difference.
+
+   No arguments: all thirteen call sites push nothing before the CALL and adjust
+   nothing after it. */
+extern unsigned char fdps_read_keyboard_queue(void);
+#pragma aux fdps_read_keyboard_queue "*" parm caller [];
 
 /* Polls the latched scancode through the game's auto-repeat filter: one report
    per key press, then a slow repeat while the key stays down.
