@@ -1,9 +1,11 @@
 /* tests/rsrc.c -- cover for src/rsrc.c.
  *
- * Two subjects, and the second one starts at its own banner below: everything
- * down to run_rsrc_tests covers fdps_load_indexed_archive_entry at 00022e30,
- * and after the banner comes fdps_cache_cel_sprite_group at 00023050, which
- * reads the real ICON.CEL instead of a fixture and says there why.
+ * Three subjects, each starting at its own banner below: the file opens on
+ * fdps_load_indexed_archive_entry at 00022e30, then comes
+ * fdps_cache_cel_sprite_group at 00023050, which reads the real ICON.CEL
+ * instead of a fixture and says there why, and last
+ * fdps_field_load_chapter_resources at 000227e0, which reads the three real
+ * field containers and says there why.
  *
  * Expected values come from the assembly at 00022e30: ADD EAX,0x6 onto LEA
  * EAX,[EAX*0x4 + 0x0] for the seek to the table, PUSH 0x8 / PUSH 0x1 for the
@@ -719,6 +721,361 @@ static void cel_frees_the_offset_table_scratch(void)
     reset_cel_cache();
 }
 
+
+/* ---------------------------------------------------------------------------
+   fdps_field_load_chapter_resources at 000227e0.
+
+   This one is run whole against the three real containers, because there is
+   nothing in it to stand in for: it takes no argument, formats seven member
+   names out of a global and hands each to fdps_vfs_load_entry, and a
+   fabricated container would only be a copy of the shipped ones with the same
+   names in it.  A missing member does not fail an assertion either -- the
+   loader it calls waits for a key and then exits -- so every case here skips
+   itself unless all three containers are next to the executable
+   (tests/gamefile.lst stages FIELD.VFS, FIELD1.VFS and FIELD2.VFS).
+
+   Every expected number below is a byte of a shipped resource, read out of
+   the containers with tools/vfs_dump and quoted here as a literal, or the
+   layout the assembly at 000227e0 imposes on it:
+
+     MAP00.DAT bytes +1 and +2 are 1 and 22, MAP05.DAT's are 4 and 32
+     DSC00.DAT is 36 bytes -- one dword count of 1 and one 0x20-byte record
+     DSC05.DAT is 68 -- a count of 2 and two records
+     DSC00 record 0 dwords are 0, 0, 8, 8, 0, 0 with bytes 9 and 1 at +0x18
+       and +0x1c; DSC05 record 1 is 0, 0, 4, 2, 0, 0 with bytes 8 and 0
+     M000.MPL's header words at +7 and +9 are 30 and 24
+     M050.MPL's are 30 and 12, and M051.MPL's are 23 and 12
+     FDETXT01.TXT opens with the bytes 32 0 40 0; FDETXT02.TXT opens 30 0 38 0
+       and FDETXT06.TXT opens 28 0 36 0, so those four bytes say which member
+       was loaded
+     the four block kinds carry their own three-byte tags: "MPL", "CEL",
+       "ATR" and "DTL"
+
+   Chapter 5 is the second chapter tested because its DSC file is the only
+   shape in the game with two layers, so it is what tells a record stride of
+   0x20 apart from any other: layer 1's fields are read from dword index 9 and
+   from nowhere else.  It is also what separates the grid from the layer it is
+   sized by -- chapter 5's layer 0 is 30 tiles wide and its layer 1 is 23. */
+
+#define FIELD_CONTAINER "FIELD.VFS"
+#define FIELD1_CONTAINER "FIELD1.VFS"
+#define FIELD2_CONTAINER "FIELD2.VFS"
+
+/* The two chapters the cases load, and what the shipped files say about
+   them. */
+#define CH_ONE_LAYER 0
+#define CH_TWO_LAYER 5
+
+#define CH0_LAYER_COUNT 1
+#define CH0_PLAYER_SLOTS 1
+#define CH0_CHAR_SPAWNS 22
+#define CH0_MAP_WIDTH 30
+#define CH0_MAP_HEIGHT 24
+
+#define CH5_LAYER_COUNT 2
+#define CH5_PLAYER_SLOTS 4
+#define CH5_CHAR_SPAWNS 32
+#define CH5_LAYER0_WIDTH 30
+#define CH5_LAYER0_HEIGHT 12
+#define CH5_LAYER1_WIDTH 23
+
+/* The tile map header words the loader reads, and the movement grid header it
+   writes (src/movegrid.h). */
+#define MPL_WIDTH_OFFSET 7
+#define MPL_HEIGHT_OFFSET 9
+#define GRID_CELLS_OFFSET 4
+
+static int field_ready = 0;
+static int field_checked = 0;
+static int field_loaded = 0;
+
+static int container_present(char *name)
+{
+    FILE *fp;
+
+    fp = fopen(name, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    fclose(fp);
+    return 1;
+}
+
+static void ensure_field_containers(void)
+{
+    if (field_checked) {
+        return;
+    }
+    field_checked = 1;
+    if (container_present(FIELD_CONTAINER)
+        && container_present(FIELD1_CONTAINER)
+        && container_present(FIELD2_CONTAINER)) {
+        field_ready = 1;
+    }
+}
+
+/* Zeroing, not freeing.  Six of the globals this function frees on entry are
+   staged by earlier test units -- tests/aiscore.c, tests/aitarget.c,
+   tests/combat.c, tests/deploy.c and tests/mapai.c all point them at their own
+   static arrays, and every one of those files sorts before this one -- so the
+   first load of the run has to start from the state a fresh process is in,
+   which is null everywhere and a layer count of zero.  Handing a static array
+   to free() is not something a later assertion would get to report. */
+static void clear_field_globals(void)
+{
+    int layer;
+
+    for (layer = 0; layer < 6; layer++) {
+        data_fdps_scene_layer_tile_map_ptrs[layer] = NULL;
+        data_fdps_scene_layer_tile_sheet_ptrs[layer] = NULL;
+        data_fdps_scene_layer_tile_attr_ptr[layer] = NULL;
+    }
+    data_fdps_scene_layer_count = 0;
+    data_fdps_current_chapter_text_ptr = NULL;
+    data_fdps_tile_event_data_table_ptr = NULL;
+    data_fdps_map_cell_event_code_layer_ptr = NULL;
+    data_fdps_battle_move_grid_ptr = NULL;
+}
+
+/* The blocks the loads above left behind, released and the globals put back
+   the way a fresh process has them, so the test units that sort after this one
+   see what they would have seen if these cases had never run. */
+static void free_field_globals(void)
+{
+    int layer;
+
+    for (layer = 0; layer < data_fdps_scene_layer_count; layer++) {
+        free(data_fdps_scene_layer_tile_map_ptrs[layer]);
+        free(data_fdps_scene_layer_tile_sheet_ptrs[layer]);
+        free(data_fdps_scene_layer_tile_attr_ptr[layer]);
+    }
+    free(data_fdps_current_chapter_text_ptr);
+    free(data_fdps_tile_event_data_table_ptr);
+    free(data_fdps_map_cell_event_code_layer_ptr);
+    free(data_fdps_battle_move_grid_ptr);
+    clear_field_globals();
+    field_loaded = 0;
+}
+
+/* After the first load every later one goes through the function's own free
+   path, which is what the original does between chapters and what the reload
+   case below measures. */
+static void field_load(int chapter)
+{
+    if (!field_loaded) {
+        clear_field_globals();
+    }
+    data_fdps_chapter_current_chapter_id = chapter;
+    fdps_field_load_chapter_resources();
+    field_loaded = 1;
+}
+
+static int has_tag(unsigned char *block, char *tag)
+{
+    if (block == NULL) {
+        return 0;
+    }
+    return block[0] == (unsigned char) tag[0]
+        && block[1] == (unsigned char) tag[1]
+        && block[2] == (unsigned char) tag[2];
+}
+
+/* DSC00.DAT is 36 bytes: a dword count and one 0x20-byte record.  A loader
+   that scaled the record differently, or that took the count from anywhere but
+   the first dword, disagrees here before it disagrees anywhere else. */
+static void field_reads_the_layer_count_from_the_descriptor(void)
+{
+    ensure_field_containers();
+    CHECK_EQ(field_ready, 1);
+    if (!field_ready) {
+        return;
+    }
+    field_load(CH_ONE_LAYER);
+    CHECK_EQ(data_fdps_scene_layer_count, CH0_LAYER_COUNT);
+
+    field_load(CH_TWO_LAYER);
+    CHECK_EQ(data_fdps_scene_layer_count, CH5_LAYER_COUNT);
+}
+
+/* Each of the seven members has to land in its own global, and the three-byte
+   tag at the head of each block says which kind of file arrived: a tile map
+   written into the sheet slot, or the attribute table read out of Field1
+   instead of Field2, shows up as the wrong tag rather than as a null. */
+static void field_publishes_each_block_in_its_own_slot(void)
+{
+    ensure_field_containers();
+    CHECK_EQ(field_ready, 1);
+    if (!field_ready) {
+        return;
+    }
+    field_load(CH_ONE_LAYER);
+
+    CHECK_EQ(has_tag(data_fdps_map_cell_event_code_layer_ptr, "DTL"), 1);
+    CHECK_EQ(has_tag(data_fdps_scene_layer_tile_map_ptrs[0], "MPL"), 1);
+    CHECK_EQ(has_tag(data_fdps_scene_layer_tile_sheet_ptrs[0], "CEL"), 1);
+    CHECK_EQ(has_tag(data_fdps_scene_layer_tile_attr_ptr[0], "ATR"), 1);
+    CHECK_EQ(data_fdps_current_chapter_text_ptr != NULL, 1);
+    CHECK_EQ(data_fdps_tile_event_data_table_ptr != NULL, 1);
+    CHECK_EQ(data_fdps_battle_move_grid_ptr != NULL, 1);
+}
+
+/* The chapter text is the one member whose number is the chapter PLUS ONE, so
+   chapter 0 must come back holding FDETXT01.TXT.  Its first four bytes are
+   32 0 40 0; chapter 0's own number would have named a member that does not
+   exist, and the neighbouring chapters open with different bytes. */
+static void field_takes_the_chapter_text_one_number_up(void)
+{
+    ensure_field_containers();
+    CHECK_EQ(field_ready, 1);
+    if (!field_ready) {
+        return;
+    }
+    field_load(CH_ONE_LAYER);
+
+    CHECK_EQ(data_fdps_current_chapter_text_ptr[0], 32);
+    CHECK_EQ(data_fdps_current_chapter_text_ptr[1], 0);
+    CHECK_EQ(data_fdps_current_chapter_text_ptr[2], 40);
+    CHECK_EQ(data_fdps_current_chapter_text_ptr[3], 0);
+}
+
+/* Bytes +1 and +2 of the resident map block, cached into two separate ints.
+   Chapter 0's are 1 and 22 and chapter 5's are 4 and 32, so a reader that took
+   both from the same offset, or that started at +0, says so. */
+static void field_caches_the_map_header_counts(void)
+{
+    ensure_field_containers();
+    CHECK_EQ(field_ready, 1);
+    if (!field_ready) {
+        return;
+    }
+    field_load(CH_ONE_LAYER);
+    CHECK_EQ(data_fdps_map_player_slot_count, CH0_PLAYER_SLOTS);
+    CHECK_EQ(data_fdps_map_char_spawn_count, CH0_CHAR_SPAWNS);
+    CHECK_EQ(data_fdps_map_player_slot_count,
+             (int) data_fdps_tile_event_data_table_ptr[1]);
+    CHECK_EQ(data_fdps_map_char_spawn_count,
+             (int) data_fdps_tile_event_data_table_ptr[2]);
+
+    field_load(CH_TWO_LAYER);
+    CHECK_EQ(data_fdps_map_player_slot_count, CH5_PLAYER_SLOTS);
+    CHECK_EQ(data_fdps_map_char_spawn_count, CH5_CHAR_SPAWNS);
+}
+
+/* One 0x20-byte record scattered into eight parallel globals.  Chapter 0 pins
+   the six dword offsets and the two byte offsets against record 0; chapter 5
+   pins the stride, because its record 1 begins at dword index 9 and holds
+   different numbers in every field that is not zero. */
+static void field_scatters_the_layer_descriptor_record(void)
+{
+    ensure_field_containers();
+    CHECK_EQ(field_ready, 1);
+    if (!field_ready) {
+        return;
+    }
+    field_load(CH_ONE_LAYER);
+    CHECK_EQ(data_fdps_scene_layer_scroll_x_accumulator[0], 0);
+    CHECK_EQ(data_fdps_scene_layer_scroll_offset_y[0], 0);
+    CHECK_EQ(data_fdps_scene_layer_parallax_factor_x[0], 8);
+    CHECK_EQ(data_fdps_scene_layer_parallax_factor_y[0], 8);
+    CHECK_EQ(data_fdps_scene_layer_scroll_x_step[0], 0);
+    CHECK_EQ(data_fdps_scene_layer_scroll_step_y[0], 0);
+    CHECK_EQ(data_fdps_scene_layer_draw_depth[0], 9);
+    CHECK_EQ(data_fdps_scene_layer_tile_attr_mode[0], 1);
+
+    field_load(CH_TWO_LAYER);
+    CHECK_EQ(data_fdps_scene_layer_parallax_factor_x[0], 8);
+    CHECK_EQ(data_fdps_scene_layer_parallax_factor_y[0], 8);
+    CHECK_EQ(data_fdps_scene_layer_draw_depth[0], 9);
+    CHECK_EQ(data_fdps_scene_layer_tile_attr_mode[0], 1);
+    CHECK_EQ(data_fdps_scene_layer_scroll_x_accumulator[1], 0);
+    CHECK_EQ(data_fdps_scene_layer_scroll_offset_y[1], 0);
+    CHECK_EQ(data_fdps_scene_layer_parallax_factor_x[1], 4);
+    CHECK_EQ(data_fdps_scene_layer_parallax_factor_y[1], 2);
+    CHECK_EQ(data_fdps_scene_layer_scroll_x_step[1], 0);
+    CHECK_EQ(data_fdps_scene_layer_scroll_step_y[1], 0);
+    CHECK_EQ(data_fdps_scene_layer_draw_depth[1], 8);
+    CHECK_EQ(data_fdps_scene_layer_tile_attr_mode[1], 0);
+}
+
+/* The grid header is stamped from LAYER 0's tile map, not from the last layer
+   loaded.  Chapter 5 is where that is visible: its layer 0 is 30 tiles wide
+   and its layer 1 is 23, and the loop that loads them ends on layer 1. */
+static void field_sizes_the_grid_from_layer_zero(void)
+{
+    ensure_field_containers();
+    CHECK_EQ(field_ready, 1);
+    if (!field_ready) {
+        return;
+    }
+    field_load(CH_ONE_LAYER);
+    CHECK_EQ(*(short *) data_fdps_battle_move_grid_ptr, CH0_MAP_WIDTH);
+    CHECK_EQ(*(short *) (data_fdps_battle_move_grid_ptr + 2), CH0_MAP_HEIGHT);
+    CHECK_EQ((int) *(short *) (data_fdps_scene_layer_tile_map_ptrs[0]
+                               + MPL_WIDTH_OFFSET), CH0_MAP_WIDTH);
+    CHECK_EQ((int) *(short *) (data_fdps_scene_layer_tile_map_ptrs[0]
+                               + MPL_HEIGHT_OFFSET), CH0_MAP_HEIGHT);
+
+    field_load(CH_TWO_LAYER);
+    CHECK_EQ(*(short *) data_fdps_battle_move_grid_ptr, CH5_LAYER0_WIDTH);
+    CHECK_EQ(*(short *) (data_fdps_battle_move_grid_ptr + 2),
+             CH5_LAYER0_HEIGHT);
+    CHECK_EQ((int) *(short *) (data_fdps_scene_layer_tile_map_ptrs[1]
+                               + MPL_WIDTH_OFFSET), CH5_LAYER1_WIDTH);
+}
+
+/* fdps_map_grid_reset is the last thing the function does, and it reads its
+   bounds out of the header this function stamped.  So the cell at the far end
+   of a 30 by 24 grid carrying the 0xff sentinel says three things at once: the
+   block is big enough for width*height cells, the header went in before the
+   reset ran, and the reset ran at all.  Fresh malloc'd bytes are not 0xff. */
+static void field_blanks_the_grid_before_returning(void)
+{
+    struct fdps_move_grid_cell *cells;
+    int last;
+
+    ensure_field_containers();
+    CHECK_EQ(field_ready, 1);
+    if (!field_ready) {
+        return;
+    }
+    field_load(CH_ONE_LAYER);
+    cells = (struct fdps_move_grid_cell *)
+            (data_fdps_battle_move_grid_ptr + GRID_CELLS_OFFSET);
+    last = CH0_MAP_WIDTH * CH0_MAP_HEIGHT - 1;
+
+    CHECK_EQ(cells[0].marker, 0xff);
+    CHECK_EQ(cells[0].flags & 0xc0, 0);
+    CHECK_EQ(cells[last].marker, 0xff);
+    CHECK_EQ(cells[last].flags & 0xc0, 0);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+}
+
+/* The layer arrays are freed against the count the PREVIOUS chapter left, not
+   against the one the new descriptor file is about to publish.  Going from
+   chapter 5's two layers to chapter 0's one is therefore six blocks released
+   and three taken, while the four singletons and the grid are each freed and
+   reallocated -- a net loss of exactly three live blocks.  A loop that freed
+   against the new count would leak three and come out at zero. */
+static void field_frees_the_previous_chapters_layers(void)
+{
+    int before;
+    int after;
+
+    ensure_field_containers();
+    CHECK_EQ(field_ready, 1);
+    if (!field_ready) {
+        return;
+    }
+    field_load(CH_TWO_LAYER);
+    before = used_heap_blocks();
+    field_load(CH_ONE_LAYER);
+    after = used_heap_blocks();
+
+    CHECK_EQ(after - before, -3);
+    CHECK_EQ(data_fdps_scene_layer_count, CH0_LAYER_COUNT);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+}
+
 void run_rsrc_tests(void)
 {
     RUN_TEST(loads_entry_zero);
@@ -735,6 +1092,23 @@ void run_rsrc_tests(void)
     RUN_TEST(cel_appends_a_second_group);
     RUN_TEST(cel_finds_a_group_cached_earlier);
     RUN_TEST(cel_frees_the_offset_table_scratch);
+
+    RUN_TEST(field_reads_the_layer_count_from_the_descriptor);
+    RUN_TEST(field_publishes_each_block_in_its_own_slot);
+    RUN_TEST(field_takes_the_chapter_text_one_number_up);
+    RUN_TEST(field_caches_the_map_header_counts);
+    RUN_TEST(field_scatters_the_layer_descriptor_record);
+    RUN_TEST(field_sizes_the_grid_from_layer_zero);
+    RUN_TEST(field_blanks_the_grid_before_returning);
+    RUN_TEST(field_frees_the_previous_chapters_layers);
+
+    /* The chapter blocks belong to this file and to nothing after it: the
+       units that sort later stage these same globals with statics of their
+       own, and one of them left holding a heap block from here would be freed
+       by whatever loads a chapter next. */
+    if (field_loaded) {
+        free_field_globals();
+    }
 
     /* The fixture file belongs to this run and to nothing else; leaving it
        behind would let a later run pass on a stale archive even after the

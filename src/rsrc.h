@@ -81,4 +81,41 @@ extern void fdps_load_indexed_archive_entry(char *filename, void **buffer,
 extern int fdps_cache_cel_sprite_group(int group_index, FILE *fp);
 #pragma aux fdps_cache_cel_sprite_group "*" parm caller [];
 
+/* Frees whatever the previously loaded chapter left in the field resource
+   globals and reloads the whole set for data_fdps_chapter_current_chapter_id,
+   then allocates and blanks the battle movement grid.  Takes nothing and
+   returns nothing: the chapter number is the global, and everything it
+   produces is published through the globals in gamedata.h.
+
+   What it loads, and out of which container:
+
+     Field.vfs   fdetxt%02d.txt  -> data_fdps_current_chapter_text_ptr
+                                    (chapter number PLUS ONE, uniquely)
+                 map%02d.dat     -> data_fdps_tile_event_data_table_ptr, whose
+                                    bytes +1 and +2 it copies out into
+                                    data_fdps_map_player_slot_count and
+                                    data_fdps_map_char_spawn_count
+     Field1.vfs  M%02d.dtl       -> data_fdps_map_cell_event_code_layer_ptr
+     Field2.vfs  dsc%02d.dat     -> the layer count and the eight parallel
+                                    per-layer globals, then freed
+     Field1.vfs  m%02d%d.mpl     -> data_fdps_scene_layer_tile_map_ptrs[n]
+     Field1.vfs  m%02d%d.cel     -> data_fdps_scene_layer_tile_sheet_ptrs[n]
+     Field2.vfs  attr%02d%d.dat  -> data_fdps_scene_layer_tile_attr_ptr[n]
+
+   The order matters to a caller in one respect: the per-layer arrays are
+   freed against the OLD layer count before the new descriptor file replaces
+   it, so a caller that changes data_fdps_scene_layer_count itself between two
+   calls decides how many blocks this one releases.
+
+   The movement grid is sized and stamped from layer 0's tile map header
+   whatever the layer count turns out to be, and fdps_map_grid_reset blanks it
+   before the return, so the grid is usable the moment this comes back.
+
+   Nothing is validated.  No load result is tested -- fdps_vfs_load_entry ends
+   the process instead of returning null -- the malloc is not tested, and the
+   layer count read out of the descriptor file is not clamped against the six
+   slots the parallel arrays hold. */
+extern void fdps_field_load_chapter_resources(void);
+#pragma aux fdps_field_load_chapter_resources "*" parm caller [];
+
 #endif

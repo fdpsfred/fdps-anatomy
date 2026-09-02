@@ -1774,6 +1774,14 @@
       "status": "committed",
       "emitted_against": "0xa7",
       "rounds": 0
+    },
+    "000227e0": {
+      "name": "fdps_field_load_chapter_resources",
+      "target": "rsrc.c",
+      "body_size": "0x3fd",
+      "status": "committed",
+      "emitted_against": "0x3fd",
+      "rounds": 1
     }
   }
 }

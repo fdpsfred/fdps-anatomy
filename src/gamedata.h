@@ -141,6 +141,101 @@ extern int data_fdps_scene_layer_count;
    that parks a layer, not a boundary value one of the two passes takes. */
 extern unsigned char data_fdps_scene_layer_draw_depth[6];
 
+/* 00069c20.  The tileset sheet of each of the six scene layers, the third
+   parallel array beside the tile map and the attribute table above.  A layer's
+   sheet is the m%02d%d.cel block fdps_field_load_chapter_resources reads out
+   of Field1.vfs, and it is freed and replaced with them, slot for slot.  The
+   original types it as a byte pointer and does its own arithmetic, so a reader
+   casts. */
+extern unsigned char *data_fdps_scene_layer_tile_sheet_ptrs[6];
+
+/* 00069bf0, 00069c08, 00069c80, 00069c68, 00069c50 and 00069c38.  The six
+   int fields of a scene layer's descriptor record, held as six parallel
+   arrays of six rather than as one array of records: how far the layer has
+   scrolled in x and where it sits in y, the two parallax divisors that turn
+   the view window's origin into this layer's origin, and the two per-frame
+   scroll steps.
+
+   fdps_field_load_chapter_resources fills all six out of one 0x20-byte record
+   per layer in dsc%02d.dat, scattering the record's dwords 0..5 into them in
+   this order (000229c6, 000229e6, 00022a06, 00022a26, 00022a46, 00022a66),
+   and src/mapdraw.c is the only other reader.  They are six separate globals
+   and nothing indexes from one into the next, so the scatter is what keeps
+   them parallel and not their addresses (rebuild_info/pitfalls.md,
+   contract B).
+
+   All six are plain signed ints, and four of them are settled by one
+   instruction.  fdps_draw_scene_layers forms each layer's draw origin as
+   (view origin * parallax factor + scroll accumulator) >> 3 and closes it
+   with SAR EDX,0x3 -- 0002c05c and 0002c178 for x, 0002c08a and 0002c1a6
+   for y.  SAR is the ARITHMETIC shift: had any one of the three operands
+   been unsigned int the whole expression would have been unsigned and the
+   compiler would have emitted SHR, so that shift settles the accumulator
+   (00069bf0), the offset (00069c08) and both parallax factors (00069c80 and
+   00069c68) together (rebuild_info/pitfalls.md, contract C).
+
+   The two scroll steps (00069c50 and 00069c38) have no such witness and need
+   none.  Their only reader adds each into its signed accumulator -- MOV
+   EDX,dword ptr [EDX + 0x69c50] / ADD dword ptr [EAX + 0x69bf0],EDX at
+   0002bfa9, and the same shape for y at 0002bfc9 -- and a 32-bit ADD carries
+   the same bits whichever way the operand is declared, so nothing observable
+   distinguishes int from unsigned int for those two.  int is what keeps the
+   six consistent. */
+extern int data_fdps_scene_layer_scroll_x_accumulator[6];
+extern int data_fdps_scene_layer_scroll_offset_y[6];
+extern int data_fdps_scene_layer_parallax_factor_x[6];
+extern int data_fdps_scene_layer_parallax_factor_y[6];
+extern int data_fdps_scene_layer_scroll_x_step[6];
+extern int data_fdps_scene_layer_scroll_step_y[6];
+
+/* 00069cf8.  Which attribute mode each of the six scene layer slots draws in,
+   one byte per slot, taken by fdps_field_load_chapter_resources out of byte
+   +0x1c of the layer's descriptor record with a byte-wide load (MOV AL,byte
+   ptr [EAX + 0x1c] at 00022a92).  src/mapdraw.c is the only other reader and
+   widens it unsigned.  It sits directly below
+   data_fdps_scene_layer_draw_depth -- 00069cf8 + 6 is 00069cfe -- and the two
+   stay separate globals because every reader names each by its own address
+   (rebuild_info/pitfalls.md, contract B). */
+extern unsigned char data_fdps_scene_layer_tile_attr_mode[6];
+
+/* 00060124.  The loaded chapter's FDETXT%02d.TXT block: the chapter's script
+   text, read by seventeen files -- every cut-scene, the shops, the village
+   menus and the death and ending screens.  fdps_field_load_chapter_resources
+   is the only writer, and it is the one resource whose member name takes the
+   chapter number PLUS ONE, so chapter 0 reads FDETXT01.TXT.
+
+   Null until a chapter has been loaded.  The original types it as a byte
+   pointer, so a reader casts. */
+extern unsigned char *data_fdps_current_chapter_text_ptr;
+
+/* 00064118 and 0006410c.  Bytes +1 and +2 of the resident MAP%02d.DAT block,
+   copied out into two ints when the chapter loads.  Both are widened UNSIGNED
+   -- AND EAX,0xff at 000228e7 and 000228f9 -- so a count of 0x80 and up is
+   128 and up, not a negative number (rebuild_info/pitfalls.md, contract C).
+
+   Byte +2 is settled: it is how many struct fdps_char_spawn_record the block's
+   deployment table at +0x83 holds, which is what src/deploy.c walks -- and
+   deploy.c re-reads it out of the block rather than reading this cache, so
+   nothing keeps the two in step and nothing needs to.
+
+   Byte +1 is settled by the loader's own caller.  fdps_build_map_unit_array
+   seeds data_fdps_map_unit_count from it (MOV EAX,[0x00064118] / MOV
+   [0x00060150],EAX at 00022c84), treats zero as "no unit array at all" (CMP
+   dword ptr [0x00064118],0x0 / JZ at 00022c8e), sizes the array at 0x50 bytes
+   a record (IMUL EAX,dword ptr [0x00064118],0x50 at 00022c9b) and walks it
+   with the signed JL at 00022cba.  Inside that walk, a slot below
+   data_fdps_roster_member_count is copied 0x50 bytes straight out of
+   data_fdps_roster_array_ptr at the SAME index (IMUL by 0x50 onto
+   [0x00064108] at 00022cea, memcpy at 00022d49), and a slot at or above it is
+   zeroed and marked with flags = 1 instead (00022d23 to 00022d36).  So the
+   byte is how many unit slots the map opens with, filled from the player's
+   party in roster order and blanked where the roster is short -- which is
+   what the ticket 17 name says it is.
+
+   The chapter resource loader is the only writer of either. */
+extern int data_fdps_map_player_slot_count;
+extern int data_fdps_map_char_spawn_count;
+
 /* 00060148.  The battle map's per-cell event-code layer, a struct
    fdps_map_cell_code_layer: its own signed 16-bit width at +7 and one byte per
    cell at +0x10.  It carries its own width and readers use that rather than

@@ -11,7 +11,9 @@
 #include <stdlib.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "movegrid.h"
 #include "rsrc.h"
+#include "vfs.h"
 
 /* The archive's offset table starts at file offset 6, past a six-byte header
    the reader never looks at, and holds one u32 per entry.  ADD EAX,0x6 onto
@@ -190,4 +192,169 @@ int fdps_cache_cel_sprite_group(int group_index, FILE *fp)
         slot = data_fdps_cel_sprite_cache_count - 1;
     }
     return slot;
+}
+
+/* Bytes of stack the member names are formatted into.  SUB ESP,0x38 at
+   000227e6 with the six other locals occupying [EBP-0x18]..[EBP-0x4] leaves
+   exactly 32 bytes at [EBP-0x38], and every name built below is an 8.3 name
+   that fits several times over. */
+#define RESOURCE_NAME_SIZE 32
+
+/* DSC%02d.DAT is one dword layer count followed by one 0x20-byte descriptor
+   record per layer, so the record for layer n begins at dword index n * 8 + 1
+   -- LEA EAX,[EAX*0x8 + 0x0] / INC EAX at 000229a2, kept in its own local
+   because every one of the eight scatter statements re-forms the address from
+   it.  Six int fields follow at dword offsets 0..5 of the record and two byte
+   fields sit at byte offsets 0x18 and 0x1c of it.
+
+   Both byte fields are read a byte at a time -- MOV DL,byte ptr [EAX + 0x18]
+   at 00022a79 and MOV AL,byte ptr [EAX + 0x1c] at 00022a92 -- not as a dword
+   narrowed afterwards. */
+#define LAYER_RECORD_DWORDS 8
+#define LAYER_DRAW_DEPTH_OFFSET 0x18
+#define LAYER_TILE_ATTR_MODE_OFFSET 0x1c
+
+/* Byte +1 and byte +2 of the resident MAP%02d.DAT header, widened with
+   AND EAX,0xff at 000228e7 and 000228f9: unsigned, so a count of 0x80 and up
+   is 128 and up and not a negative number (contract C). */
+#define MAP_PLAYER_SLOT_COUNT_OFFSET 1
+#define MAP_CHAR_SPAWN_COUNT_OFFSET 2
+
+/* The tile map header's two signed 16-bit dimensions, both read MOVSX at
+   00022b85 and 00022b91 (gamedata.h). */
+#define TILE_MAP_WIDTH_OFFSET 7
+#define TILE_MAP_HEIGHT_OFFSET 9
+
+/* 000227e0.  Everything the chapter's field phase draws from, freed and
+   reloaded in one pass, and the only writer of data_fdps_scene_layer_count.
+   No argument and no result: the chapter it loads is
+   data_fdps_chapter_current_chapter_id, and both call sites push nothing and
+   look at nothing afterwards (00022bec and 00023f5d).
+
+   The layer-freeing loop at the top runs against the count the PREVIOUS
+   chapter left behind, because the count is not replaced until the new
+   descriptor file has been read.  The slots it frees are not nulled, so
+   between that loop and the reload the three arrays hold dangling pointers;
+   nothing runs in between.  On the first call of a run the count is zero and
+   the loop does nothing, which is the only reason a freshly started game does
+   not free six uninitialised pointers.
+
+   The four singleton blocks are each guarded by their own non-null test and
+   the descriptor blob is not -- it is a local, loaded and freed within the
+   call.  Nothing else here is guarded: no fdps_vfs_load_entry result is
+   tested (that function ends the process rather than returning null), the
+   malloc at the end is not tested, and the layer count taken out of the
+   descriptor file is not clamped against the six slots the arrays hold.
+   Every DSC file the game ships is 36 or 68 bytes, one or two layers
+   (resource_info/vfs.md), so the shipped data is what keeps it in range.
+
+   Only "fdetxt%02d.txt" is formatted with the chapter number PLUS ONE
+   (INC EAX at 0002286e); every other name below takes the chapter number as
+   it stands.  The containers are three: Field.vfs holds the chapter text and
+   the resident map block, Field1.vfs the event-code layer, the tile maps and
+   the tile sheets, and Field2.vfs the layer descriptors and the tile
+   attribute tables.
+
+   The working movement grid is sized from LAYER 0's tile map whatever the
+   layer count is, and both dimensions are read MOVSX -- a header word of
+   0xffff has to come out as -1, which makes the product negative and the
+   allocation four bytes (contract C).  The two dimensions are stamped into
+   the block's first two words before fdps_map_grid_reset is called, because
+   that function reads its bounds straight back out of them. */
+void fdps_field_load_chapter_resources(void)
+{
+    char resource_name[RESOURCE_NAME_SIZE];
+    int *layer_descriptors;
+    int layer_record_dword;
+    int map_tile_width;
+    int map_tile_height;
+    int grid_bytes;
+    int layer;
+
+    for (layer = 0; layer < data_fdps_scene_layer_count; layer++) {
+        free(data_fdps_scene_layer_tile_map_ptrs[layer]);
+        free(data_fdps_scene_layer_tile_sheet_ptrs[layer]);
+        free(data_fdps_scene_layer_tile_attr_ptr[layer]);
+    }
+
+    if (data_fdps_current_chapter_text_ptr != NULL) {
+        free(data_fdps_current_chapter_text_ptr);
+    }
+    sprintf(resource_name, "fdetxt%02d.txt",
+            data_fdps_chapter_current_chapter_id + 1);
+    data_fdps_current_chapter_text_ptr =
+        fdps_vfs_load_entry("Field.vfs", resource_name);
+
+    if (data_fdps_tile_event_data_table_ptr != NULL) {
+        free(data_fdps_tile_event_data_table_ptr);
+    }
+    sprintf(resource_name, "map%02d.dat",
+            data_fdps_chapter_current_chapter_id);
+    data_fdps_tile_event_data_table_ptr =
+        fdps_vfs_load_entry("Field.vfs", resource_name);
+    data_fdps_map_player_slot_count = (int)
+        data_fdps_tile_event_data_table_ptr[MAP_PLAYER_SLOT_COUNT_OFFSET];
+    data_fdps_map_char_spawn_count = (int)
+        data_fdps_tile_event_data_table_ptr[MAP_CHAR_SPAWN_COUNT_OFFSET];
+
+    if (data_fdps_map_cell_event_code_layer_ptr != NULL) {
+        free(data_fdps_map_cell_event_code_layer_ptr);
+    }
+    sprintf(resource_name, "M%02d.dtl", data_fdps_chapter_current_chapter_id);
+    data_fdps_map_cell_event_code_layer_ptr =
+        fdps_vfs_load_entry("Field1.vfs", resource_name);
+
+    sprintf(resource_name, "dsc%02d.dat",
+            data_fdps_chapter_current_chapter_id);
+    layer_descriptors = fdps_vfs_load_entry("Field2.vfs", resource_name);
+    data_fdps_scene_layer_count = *layer_descriptors;
+
+    for (layer = 0; layer < data_fdps_scene_layer_count; layer++) {
+        layer_record_dword = layer * LAYER_RECORD_DWORDS + 1;
+        data_fdps_scene_layer_scroll_x_accumulator[layer] =
+            layer_descriptors[layer_record_dword];
+        data_fdps_scene_layer_scroll_offset_y[layer] =
+            layer_descriptors[layer_record_dword + 1];
+        data_fdps_scene_layer_parallax_factor_x[layer] =
+            layer_descriptors[layer_record_dword + 2];
+        data_fdps_scene_layer_parallax_factor_y[layer] =
+            layer_descriptors[layer_record_dword + 3];
+        data_fdps_scene_layer_scroll_x_step[layer] =
+            layer_descriptors[layer_record_dword + 4];
+        data_fdps_scene_layer_scroll_step_y[layer] =
+            layer_descriptors[layer_record_dword + 5];
+        data_fdps_scene_layer_draw_depth[layer] =
+            ((unsigned char *) (layer_descriptors + layer_record_dword))
+                [LAYER_DRAW_DEPTH_OFFSET];
+        data_fdps_scene_layer_tile_attr_mode[layer] =
+            ((unsigned char *) (layer_descriptors + layer_record_dword))
+                [LAYER_TILE_ATTR_MODE_OFFSET];
+
+        sprintf(resource_name, "m%02d%d.mpl",
+                data_fdps_chapter_current_chapter_id, layer);
+        data_fdps_scene_layer_tile_map_ptrs[layer] =
+            fdps_vfs_load_entry("Field1.vfs", resource_name);
+        sprintf(resource_name, "m%02d%d.cel",
+                data_fdps_chapter_current_chapter_id, layer);
+        data_fdps_scene_layer_tile_sheet_ptrs[layer] =
+            fdps_vfs_load_entry("Field1.vfs", resource_name);
+        sprintf(resource_name, "attr%02d%d.dat",
+                data_fdps_chapter_current_chapter_id, layer);
+        data_fdps_scene_layer_tile_attr_ptr[layer] =
+            fdps_vfs_load_entry("Field2.vfs", resource_name);
+    }
+    free(layer_descriptors);
+
+    if (data_fdps_battle_move_grid_ptr != NULL) {
+        free(data_fdps_battle_move_grid_ptr);
+    }
+    map_tile_width = (int) *(short *)
+        (data_fdps_scene_layer_tile_map_ptrs[0] + TILE_MAP_WIDTH_OFFSET);
+    map_tile_height = (int) *(short *)
+        (data_fdps_scene_layer_tile_map_ptrs[0] + TILE_MAP_HEIGHT_OFFSET);
+    grid_bytes = map_tile_width * map_tile_height * 2 + 4;
+    data_fdps_battle_move_grid_ptr = malloc(grid_bytes);
+    *(short *) data_fdps_battle_move_grid_ptr = (short) map_tile_width;
+    *(short *) (data_fdps_battle_move_grid_ptr + 2) = (short) map_tile_height;
+    fdps_map_grid_reset();
 }

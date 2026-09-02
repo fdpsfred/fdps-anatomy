@@ -30,3 +30,15 @@ MISC.VFS
 # coordinates the cases in tests/deploy.c expect are the placement records
 # inside this file's own MAP00.COD and MAP01.COD.
 FIELD.VFS
+#
+# FIELD1.VFS holds the tile maps, the tile sheets and the per-cell event-code
+# layers, so it is the third of the three containers
+# fdps_field_load_chapter_resources opens.  That function takes no argument and
+# formats every member name itself, so there is nothing to point at a smaller
+# file, and a member it cannot find sends fdps_vfs_load_entry into
+# fdps_wait_any_key and then exit(1) -- neither of which an assertion can
+# catch.  The cases in tests/rsrc.c skip themselves unless all three
+# containers are present.  It is the largest file staged here at 8.9 MB, and it
+# is copied once: the staging step leaves a file whose size already matches
+# alone.
+FIELD1.VFS
