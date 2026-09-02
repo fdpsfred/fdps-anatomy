@@ -103,4 +103,22 @@ extern unsigned char *fdps_keyboard_scancode_ptr(void);
 extern void fdps_wait_any_key(void);
 #pragma aux fdps_wait_any_key "*" parm caller [];
 
+/* Throws every queued scancode away without waiting for one.
+
+   Stores the read index into the write index and returns -- the same single
+   store fdps_wait_any_key ends with, minus the spin, so this one returns at
+   once whether or not anything was pending.  Screens call it before they start
+   reading keys, to be sure the first key they see was pressed for them.
+
+   Only the write index changes.  The ring's bytes, the read index and the
+   latched byte data_fdps_input_last_scancode all keep their values; a caller
+   that also wants that byte cleared stores 0xff through
+   fdps_keyboard_scancode_ptr, which several of them do.
+
+   No arguments and no result: all 32 call sites push nothing before the CALL
+   and adjust nothing after it, and none reads EAX -- it is left holding the
+   read index only because that is where the load put it. */
+extern void fdps_flush_keyboard_queue(void);
+#pragma aux fdps_flush_keyboard_queue "*" parm caller [];
+
 #endif

@@ -51,3 +51,28 @@ void fdps_wait_any_key(void)
     data_fdps_input_scancode_queue_write_index =
         data_fdps_input_scancode_queue_head;
 }
+
+void fdps_flush_keyboard_queue(void)
+{
+    /* 000567b3: MOV EAX,[0x70019] / MOV [0x7001d],EAX / RET.  Eleven bytes,
+       three instructions, no prologue and no frame: the whole function is the
+       rewind fdps_wait_any_key above performs after its spin, without the
+       spin.  There is no local to name -- EAX is the load's landing place and
+       nothing else, and no caller reads it (all 32 call sites push nothing,
+       adjust nothing afterwards and either overwrite EAX from memory or call
+       something else before touching it).
+
+       Both operand addresses are dword references to the two ring indices, so
+       they are written as the symbols; 0x70019 and 0x7001d are where the
+       original linker put them and mean nothing in the rebuild
+       (rebuild_info/pitfalls.md).
+
+       Making the two indices equal is the queue-empty condition
+       fdps_read_keyboard_queue tests (CMP EBX,dword ptr [0x0007001d] / JZ to
+       its 0xff exit), so every scancode still in the ring becomes unreachable.
+       Nothing else is disturbed: the ring bytes stay as the handler left them,
+       and so does data_fdps_input_last_scancode -- callers that want that byte
+       cleared store 0xff through fdps_keyboard_scancode_ptr themselves. */
+    data_fdps_input_scancode_queue_write_index =
+        data_fdps_input_scancode_queue_head;
+}

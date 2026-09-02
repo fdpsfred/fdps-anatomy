@@ -1830,6 +1830,14 @@
       "status": "committed",
       "emitted_against": "0x2e",
       "rounds": 0
+    },
+    "000567b3": {
+      "name": "fdps_flush_keyboard_queue",
+      "target": "keybd.c",
+      "body_size": "0xb",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0xb"
     }
   }
 }
