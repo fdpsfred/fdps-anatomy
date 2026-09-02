@@ -10,6 +10,14 @@
 
 **要什麼才能收斂**：Phase E 實機遊玩走到地圖 31，看那張地圖畫出來是正常還是壞的。若正常，代表還有一條沒被找到的繪製路徑，Ghidra 那邊要重查；若是壞的，那就是原版本來就有的缺陷，重建版照原樣重現即可。
 
+## CD 模組的 stack probe 要補回來還是明文放棄
+
+`0x3bade`–`0x3c93f` 那 32 支 `fdps_cd*` 是用 `-os`（沒有 `-s`）編的，帶 stack probe；其餘遊戲段用定案旗標組，沒有 probe。事實與逐 byte 的判定依據見 [`rebuild_info/build_flags.md`](rebuild_info/build_flags.md)。
+
+`build_emit.py` 目前對每個 unit 用同一組旗標，所以重建的 CD 模組沒有 probe。**可觀察的行為差異只有一項**：CD 程式碼發生堆疊溢位時，原版印 `Stack Overflow!` 然後停，重建版直接寫過去。其餘差異是 register allocation 與 instruction selection，ADR-0001 排除在外。
+
+**要什麼才能收斂**：一個決定，不是更多證據。兩條路——(a) 教 `build_emit.py` 吃 per-unit 旗標，`build_pipeline.md` 要跟著改，好處是這個機制之後遇到別的模組還能用；(b) 在 `build_flags.md` 明文接受重建版的 CD 模組沒有 probe，理由是那條路徑要溢位才觀察得到，而觸發它本身就代表已經出事。決定歸 `build_pipeline.md` / `build_flags.md` 的擁有者，排在票 22 收尾或票 24 實機驗證時做。
+
 ## 遊戲段那 150 個直接推送的引數是什麼
 
 原版把記憶體運算元推成呼叫引數時，2,587 個推送點裡有 2,437 個走 `MOV EAX,槽位` / `PUSH EAX`，150 個直接 `PUSH dword ptr [EBP-n]`。分佈的規律已經量出來（見 [`rebuild_info/build_flags.md`](rebuild_info/build_flags.md)）：**傳入參數一次都沒有被直接推過，直接形式只出現在區域變數**，而且只佔區域變數的一成。「逐檔用不同旗標建」的假說已經死了——同一支 function 內部就混用，比例還可以懸殊到 1 比 87。
@@ -17,6 +25,8 @@
 定案旗標組（`-od`）產出的全是直接形式、`-d2` 全是中轉形式，兩者都產不出混用；`-o`／`-z`／處理器／浮點旗標各掃過一輪也沒有。
 
 這不影響等價性（ADR-0001 把指令選擇排除在外），也不擋任何 function 的 emit。
+
+（CD 模組確實是用另一組旗標編的，見上一條——但那不救這個假說：CD 那件事的邊界是整個 translation unit，`__CHK` 要嘛整支有要嘛整支沒有，而這裡的混用發生在同一支 function 內部。兩者是不同的軸。）
 
 **要什麼才能收斂**：找出那 150 個直接推送的呼叫在 C 層面有什麼共同點。已經注意到但還沒驗的線索是**它們常常成對出現在相鄰的槽位**（`fdps_load_global_resources` 的 `[EBP-0x18]`／`[EBP-0x1c]`、34 個直接推送剛好 17 對），形狀像是一個 8-byte 的值被拆成兩個 dword 推上去——`double` 或以值傳遞的小 struct 都是這個形狀。驗法是逐個看那 150 個推送點的 callee 原型與被推的槽位是否相鄰成組。做得到，只是還沒做，排在票 22 的疑慮總掃裡。
 

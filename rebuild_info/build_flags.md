@@ -124,11 +124,28 @@ wcc386 -bt=dos4g -mf -4s -fpi -s -ot -od
 | `-mf`（flat） | 具名 const 物件與區域陣列的初值影像放在 object 1（`0x146d2`、`0x2b27a`、`0x31037` 等夾在遊戲函式之間）；字串字面值與浮點常數放在 object 2 的 `CONST`；複製初值到堆疊前**不重載 ES** | `-ms` 會把 const 一起放進 DGROUP，且每次複製前多兩條 `mov ax,ss` / `mov es,ax` |
 | `-4s`（486，堆疊呼叫慣例） | 序幕固定 `53 56 57 55 89 e5`（推 EBX/ESI/EDI/EBP 後建 EBP 框架），第一個引數在 `[ebp+0x14]`；收尾用 `mov esp,ebp` / `pop ebp`，全 binary 遊戲段 **0 個 `LEAVE`**；16-bit 載入保留 `MOVSX`（208 處） | `-3s` 收尾用 `LEAVE`；`-5s` 把每個 `movsx eax,word ptr X` 換成 `mov eax,dword ptr X-2` + `sar eax,0x10`（遊戲段 0 處）；`-4r`／`-3r` 等 register 慣例不會無條件推四個暫存器 |
 | `-fpi`（內嵌 x87，含模擬） | 遊戲段有 70 條內嵌 x87 指令，且映像檔內含 `EMU387.LIB` 的 80x87 模擬器 | `-fpc` 完全不產 x87，改呼叫 `__I4FD`／`__FDM` 等；`-fpi87` 只差在不發出 `__init_387_emulator` 這個外部參照，**實測即使在 `.lnk` 明列 `emu387.lib`，`-fpi87` 產出的映像檔裡也沒有模擬器**——wlink 只抽出解得掉未定義符號的 lib 成員 |
-| `-s`（移除堆疊檢查） | 遊戲段 414 個標準框架的 function **沒有任何一個**呼叫 `__CHK`（`0x4361a`）；17 個呼叫端全部是序幕就是 `push imm` / `call __CHK` 的程式庫 function | 不加 `-s` 時每個有框架的 function 都會被插入 `push <框架大小>` / `call __CHK` |
+| `-s`（移除堆疊檢查） | 標準框架的遊戲 function **沒有任何一個**呼叫 `__CHK`（`0x4361a`）。**但 CD 模組例外**，見下節——`__CHK` 的 34 個呼叫端裡有 32 個是 `fdps_cd*` | 不加 `-s` 時每個有框架的 function 都會被插入 `push <框架大小>` / `call __CHK` |
 | `-ot`（以速度為優先） | 位址計算的索引縮放編成 `lea reg,[reg*N + 0]`：遊戲段 304 處，程式庫段 41 處。`shl reg,2` 只出現在除法常數展開之類的算術情境（37 處） | 不加 `-ot` 時位址縮放也用 `shl reg,N`；`-os`（以空間為優先）同樣是 `shl` |
 | `-od`（關閉最佳化） | 每個區域變數都寫回堆疊再讀出；switch 的跳躍表放在序幕之後、以 `jmp short` 跳過，分派拆成 `mov` + 縮放 + `jmp cs:[reg+表]` 兩三條指令 | 開最佳化後區域變數留在暫存器、跳躍表移到函式之前，分派收斂成單一條 `jmp cs:[reg*4+表]`——`FDPS.LE` 裡程式庫段的六張表正是這個形狀，遊戲段那張不是 |
 
 `-zq` 只影響訊息輸出，可加可不加。
+
+### 旗標組不是全域統一的：CD 模組用的是另一組
+
+上表那一組是**大部分**遊戲程式碼的旗標，不是全部。`0x3bade`–`0x3c93f` 這一段連續的 32 支 `fdps_cd*` 是用另一組編出來的：
+
+```
+CD 模組    wcc386 -bt=dos4g -mf -4s -fpi -os
+其餘遊戲段  wcc386 -bt=dos4g -mf -4s -fpi -s -ot -od
+```
+
+判定是逐 byte 的，不是推論：以 `-os` 編出來的 `src/cd.c` body 與原版 `0003bade` 逐條指令、逐 byte 相同（0x9f byte）；以定案旗標組編同一份原始碼得到 0xad byte，形狀處處不同——四推框架對上沒有框架、`MOV EAX,offset` / `PUSH EAX` 對上 `PUSH imm32`、`XOR EAX,EAX` / `MOV AX` 對上 `MOVZX`，而且沒有 stack probe。
+
+範圍由 `__CHK` 的呼叫端界定：`get_xrefs_to 0004361a` 回來 34 個，32 個是位址連續的 `fdps_cd*`，另外兩個是 CRT 的 `spawnve` / `spawnvpe`。「用 `PUSH imm32` 推資料位址」這個形式在整個 image 裡也只出現在同一個區塊。這個形狀只有「那是一個獨立的 translation unit，用不同旗標編」解釋得了——一支 function 的序幕不可能一半有 probe 一半沒有。
+
+**這與引數推送形式那一節是不同的軸，不要混。** 那一節講的混用發生在**同一支 function 內部**（比例可以懸殊到 1 比 87），per-file 的旗標差異解釋不了它；CD 這件事則是整個 translation unit 的邊界，兩者各自成立。
+
+**重建目前沒有跟上這件事。** `build_emit.py` 對每個 unit 用同一組旗標，所以重建的 `cd.c` / `cdaudio.c` / `cdtoc.c` 全部沒有 stack probe。行為差異只有一項：CD 程式碼發生堆疊溢位時原版會印 `Stack Overflow!` 然後停，重建版直接寫過去。其餘差異都是 register allocation 與 instruction selection，ADR-0001 排除在外。要收只有兩條路——教 `build_emit.py` 吃 per-unit 旗標，或明文接受這個模組放棄 probe。**尚未決定**，記在 [`open_issues.md`](../open_issues.md)。
 
 ### `-od` 之下仍然有 inline 展開
 
