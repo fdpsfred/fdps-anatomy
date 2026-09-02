@@ -28,4 +28,18 @@ extern unsigned int fdps_compute_save_checksum(unsigned char *save_image,
                                                unsigned int size);
 #pragma aux fdps_compute_save_checksum "*" parm caller [];
 
+/* 000568b7.  The FDE.SAV stream cipher, applied in place over `length` bytes
+   starting at `buffer`.  A sixteen-bit key seeded with 0xa5 is advanced once
+   per byte -- add 0x9014, rotate left by three, both modulo 0x10000 -- and its
+   low half is XORed into the byte.
+
+   The keystream is a function of the byte's index alone, so the routine is its
+   own inverse and there is no separate decryptor: the write path calls it
+   after computing the checksum, the read path calls it before verifying one.
+
+   `length` is a raw loop count and is not checked: a length of 0 wraps it and
+   walks 2^32 bytes.  All eight call sites pass the whole 0x59cb-byte image. */
+extern void fdps_xor_crypt_buffer(unsigned char *buffer, unsigned int length);
+#pragma aux fdps_xor_crypt_buffer "*" parm caller [];
+
 #endif

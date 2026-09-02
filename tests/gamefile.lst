@@ -42,3 +42,12 @@ FIELD.VFS
 # is copied once: the staging step leaves a file whose size already matches
 # alone.
 FIELD1.VFS
+#
+# FDE.SAV is the save file the game ships, 0x59cb bytes of ciphertext, read by
+# tests/save.c's cover for fdps_xor_crypt_buffer.  It is the only witness that
+# covers the whole keystream: decrypted in place it has to yield a plaintext
+# whose checksum equals the dword the file itself stores at +0x59c7, and all
+# 22,983 keystream bytes have to be right for that to hold.  A fabricated save
+# would be ciphertext this test produced with the code under test, which proves
+# nothing.
+FDE.SAV

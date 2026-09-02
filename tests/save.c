@@ -1,21 +1,21 @@
 /* tests/save.c -- cover for src/save.c.
  *
- * Expected values come from the assembly at 00056898 -- SUB ECX,0x4, XOR
- * EAX,EAX before a LODSB that writes only AL, ADD EBX,EAX, LOOP -- and from
- * one measurement against the shipped FDE.SAV, recorded below.  None of them
- * is read off the emitted C.
+ * Expected values come from the assembly at 00056898 and 000568b7 -- SUB
+ * ECX,0x4, XOR EAX,EAX before a LODSB that writes only AL, ADD EBX,EAX, and
+ * for the cipher MOV DX,0xa5 / ADD DX,0x9014 / ROL DX,3 / XOR AL,DL / STOSB,
+ * both loops closed by LOOP -- and from the shipped FDE.SAV itself.  None of
+ * them is read off the emitted C.
  *
- * The buffers are staged here rather than read from a game file because the
- * function takes its entire input from its two arguments: it reads no global
- * and opens nothing.  The real file would still be the better witness -- the
- * sum of the first 0x59c7 bytes of the decrypted fdps_game_files/FDE.SAV is
- * 0x2dedc4, which is exactly the dword stored at its +0x59c7 -- but reaching
- * that plaintext needs fdps_xor_crypt_buffer, which is not emitted yet, and
- * decrypting it a second time inside the test would prove nothing about the
- * function under test.  The three cases below pin the same three properties
- * that measurement confirms: the four-byte skip, zero extension, and a 32-bit
- * accumulator.
+ * The checksum's buffers are staged here rather than read from a game file
+ * because that function takes its entire input from its two arguments: it
+ * reads no global and opens nothing.  The cipher is the routine that makes the
+ * real file usable as a witness, and the last case does exactly that -- it
+ * decrypts the shipped FDE.SAV and hands the plaintext to the checksum, which
+ * has to agree with the dword the file itself stores at +0x59c7.  That single
+ * assertion exercises the whole keystream over 22,987 bytes against a file the
+ * game wrote, and neither routine can be wrong for it to hold.
  */
+#include <stdio.h>
 #include "testharn.h"
 #include "save.h"
 
@@ -132,6 +132,160 @@ static void the_image_is_not_written_to(void)
     CHECK_EQ(stage_small[11], (unsigned char) (0x11 * 12));
 }
 
+/* ------------------------------------------------------ fdps_xor_crypt_buffer
+
+   The first eight keystream bytes, worked out by hand from the four
+   instructions that make one and confirmed byte for byte against the shipped
+   file: FDE.SAV opens with cc 01 b7 53 on disc and 00 01 16 ff once decrypted,
+   so its first four keystream bytes are cc 00 a1 ac.
+
+   The very first byte is the load-bearing one.  0xcc is rol16(0xa5 + 0x9014,
+   3) & 0xff, and it pins two things at once that no later byte can separate:
+   that the key is advanced before the XOR rather than after -- the 0xa5 seed
+   is never applied to anything -- and that the rotate is sixteen bits wide.  A
+   32-bit key rotating a preserved carry would give 0xc8 here. */
+#define KEYSTREAM_LENGTH 8
+
+static const unsigned char keystream[KEYSTREAM_LENGTH] = {
+    0xcc, 0x00, 0xa1, 0xac, 0x06, 0xd1, 0x2c, 0x04
+};
+
+static unsigned char crypt_stage[16];
+
+/* Crypting a run of zeroes copies the keystream out where it can be read. */
+static void the_keystream_is_the_low_half_of_the_rotating_key(void)
+{
+    int i;
+
+    for (i = 0; i < KEYSTREAM_LENGTH; i++) {
+        crypt_stage[i] = 0x00;
+    }
+
+    fdps_xor_crypt_buffer(crypt_stage, KEYSTREAM_LENGTH);
+
+    for (i = 0; i < KEYSTREAM_LENGTH; i++) {
+        CHECK_EQ(crypt_stage[i], keystream[i]);
+    }
+}
+
+/* The keystream is a function of the byte index alone -- nothing in the loop
+   feeds a data byte back into DX.  A buffer of 0xff must therefore come out as
+   the same keystream inverted, byte for byte, as the buffer of zeroes above.
+   If the cipher were chained on its own output the two would diverge from the
+   second byte on. */
+static void the_keystream_does_not_depend_on_the_data(void)
+{
+    int i;
+
+    for (i = 0; i < KEYSTREAM_LENGTH; i++) {
+        crypt_stage[i] = 0xff;
+    }
+
+    fdps_xor_crypt_buffer(crypt_stage, KEYSTREAM_LENGTH);
+
+    for (i = 0; i < KEYSTREAM_LENGTH; i++) {
+        CHECK_EQ(crypt_stage[i], (unsigned char) (0xff ^ keystream[i]));
+    }
+}
+
+/* The one property the game depends on: the same routine encrypts and
+   decrypts, because the key is reseeded to 0xa5 on entry and the keystream
+   restarts with it.  Both save call sites and both load call sites call this
+   function and there is no second one. */
+static void crypting_twice_restores_the_buffer(void)
+{
+    int i;
+
+    for (i = 0; i < 16; i++) {
+        crypt_stage[i] = (unsigned char) (0x37 * i + 0x5a);
+    }
+
+    fdps_xor_crypt_buffer(crypt_stage, 16);
+    fdps_xor_crypt_buffer(crypt_stage, 16);
+
+    for (i = 0; i < 16; i++) {
+        CHECK_EQ(crypt_stage[i], (unsigned char) (0x37 * i + 0x5a));
+    }
+}
+
+/* ECX is the byte count, and STOSB writes one byte per pass: a length of 1
+   touches the first byte and stops.  The neighbour is checked because the
+   LOOP-after-body shape makes an off-by-one here write past the end rather
+   than fall short. */
+static void the_length_is_a_byte_count(void)
+{
+    crypt_stage[0] = 0x00;
+    crypt_stage[1] = 0x00;
+    crypt_stage[2] = 0x00;
+
+    fdps_xor_crypt_buffer(crypt_stage, 1);
+
+    CHECK_EQ(crypt_stage[0], keystream[0]);
+    CHECK_EQ(crypt_stage[1], 0x00);
+    CHECK_EQ(crypt_stage[2], 0x00);
+}
+
+/* The shipped save, and the only witness that covers the whole keystream.
+   FDE.SAV is 0x59cb bytes, which is the length all eight call sites push. */
+#define SAVE_NAME "FDE.SAV"
+#define SAVE_IMAGE_SIZE 0x59cbL
+#define SAVE_CHECKSUM_OFFSET 0x59c7L
+#define SAVE_STORED_CHECKSUM 0x002dedc4L
+
+static unsigned char save_image[0x59cb];
+
+static int load_shipped_save(void)
+{
+    FILE *fp;
+    size_t got;
+
+    fp = fopen(SAVE_NAME, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    got = fread(save_image, 1, (size_t) SAVE_IMAGE_SIZE, fp);
+    fclose(fp);
+    return got == (size_t) SAVE_IMAGE_SIZE;
+}
+
+/* Decrypt the file the game wrote and let it check itself.  The dword at
+   +0x59c7 is the checksum the game stored when it saved, and
+   fdps_compute_save_checksum over the plaintext has to reproduce it: 22,983
+   keystream bytes all have to be right for that sum to land, and the stored
+   dword is four more.  The opening bytes are asserted separately so that a
+   failure says whether the keystream went wrong at the start or somewhere in
+   the middle.
+
+   The case skips itself when the file is not staged, the way the container
+   cases in tests/rsrc.c do: there is nothing to assert against and a
+   fabricated stand-in would only be asserting against bytes this test
+   wrote. */
+static void the_shipped_save_decrypts_to_its_own_checksum(void)
+{
+    unsigned long stored_checksum;
+
+    if (!load_shipped_save()) {
+        return;
+    }
+
+    fdps_xor_crypt_buffer(save_image, (unsigned int) SAVE_IMAGE_SIZE);
+
+    stored_checksum =
+        (unsigned long) save_image[SAVE_CHECKSUM_OFFSET]
+        | ((unsigned long) save_image[SAVE_CHECKSUM_OFFSET + 1] << 8)
+        | ((unsigned long) save_image[SAVE_CHECKSUM_OFFSET + 2] << 16)
+        | ((unsigned long) save_image[SAVE_CHECKSUM_OFFSET + 3] << 24);
+
+    CHECK_EQ(save_image[0], 0x00);
+    CHECK_EQ(save_image[1], 0x01);
+    CHECK_EQ(save_image[2], 0x16);
+    CHECK_EQ(save_image[3], 0xff);
+    CHECK_EQ(stored_checksum, SAVE_STORED_CHECKSUM);
+    CHECK_EQ(fdps_compute_save_checksum(save_image,
+                                        (unsigned int) SAVE_IMAGE_SIZE),
+             stored_checksum);
+}
+
 void run_save_tests(void)
 {
     RUN_TEST(trailing_four_bytes_are_not_summed);
@@ -140,4 +294,9 @@ void run_save_tests(void)
     RUN_TEST(the_accumulator_is_thirty_two_bits_wide);
     RUN_TEST(size_five_sums_exactly_one_byte);
     RUN_TEST(the_image_is_not_written_to);
+    RUN_TEST(the_keystream_is_the_low_half_of_the_rotating_key);
+    RUN_TEST(the_keystream_does_not_depend_on_the_data);
+    RUN_TEST(crypting_twice_restores_the_buffer);
+    RUN_TEST(the_length_is_a_byte_count);
+    RUN_TEST(the_shipped_save_decrypts_to_its_own_checksum);
 }

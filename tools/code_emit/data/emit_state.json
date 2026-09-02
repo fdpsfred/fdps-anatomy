@@ -1910,6 +1910,14 @@
       "status": "committed",
       "emitted_against": "0x1f",
       "rounds": 0
+    },
+    "000568b7": {
+      "name": "fdps_xor_crypt_buffer",
+      "target": "save.c",
+      "body_size": "0x24",
+      "status": "committed",
+      "emitted_against": "0x24",
+      "rounds": 0
     }
   }
 }
