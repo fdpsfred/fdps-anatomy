@@ -49,6 +49,19 @@
  * mistake would pass every assertion below.  That single immediate is pinned
  * instead by reading the compiled object, which is recorded in the emit
  * verdict for 0003cb6e.
+ *
+ * Covers fdps_dpmi_lock_size at 0003cb93.  Expected values come from its
+ * assembly -- MOV EAX,[ESP+4] / ADD EAX,[ESP+8] for the far endpoint, PUSH EAX
+ * then PUSH of [ESP+8] re-read as `base` for the argument order, ADD ESP,8 for
+ * the caller-cleaned pair, and a RET with no epilogue, which leaves the
+ * primitive's EAX as the result -- together with the endpoint arithmetic of
+ * fdps_dpmi_lock_region at 0003cb01, whose (max - min) + 1 makes the extent
+ * size + 1 bytes.  What no case below can see is that byte count: DOS/4GW
+ * answers 0600h with the carry flag clear for any plausible range and keeps no
+ * lock count, so a body passing base + size - 1, or size where base + size
+ * belongs, would pass every assertion here.  The addition itself is pinned
+ * instead by reading the compiled object, recorded in the emit verdict for
+ * 0003cb93.
  */
 #include <i86.h>
 #include "testharn.h"
@@ -535,6 +548,68 @@ static void dpmi_alloc_writes_nothing_when_dpmi_refuses(void)
     CHECK_EQ(selector, 0x33333333u);
 }
 
+/* ---- fdps_dpmi_lock_size at 0003cb93 --------------------------------- */
+
+/* A resident range of this program's own data, named the way this function
+   takes it -- a base and a byte count -- with the count one short of the array
+   so the extent actually pinned, size + 1 bytes, is exactly the array.  The
+   assembly has no epilogue at all: CALL 0003cb01 / ADD ESP,8 / RET, so
+   whatever the primitive left in EAX is the answer.  A wrapper that computed a
+   result of its own, or returned a constant, would fail here.  The range is
+   released again through the helper above, which takes the same inclusive
+   endpoint pair the wrapper builds. */
+static void dpmi_lock_size_returns_the_primitives_flag(void)
+{
+    unsigned base;
+    unsigned size;
+
+    fill_lock_probe_area();
+    base = (unsigned) (char *) lock_probe_area;
+    size = sizeof(lock_probe_area) - 1;
+
+    CHECK_EQ(fdps_dpmi_lock_size(base, size), 1);
+    CHECK_EQ(dpmi_unlock_linear_range(base, base + size), 1);
+}
+
+/* The plain object size an AIL caller passes -- 0003d586 pushes 4, 0004521f
+   pushes 0x40, 0004523d pushes 0x100 -- with the far endpoint therefore one
+   byte past the block.  The range released afterwards is that same pair,
+   [base, base + size], which is size + 1 bytes: releasing [base, base + size -
+   1] instead would leave the last byte's page pinned.  Stated honestly, this
+   host neither counts locks nor refuses an unlock of a range it never locked,
+   so the assertion cannot see the byte count; what it does pin is that the call
+   is made over a range the host accepts and that its flag comes back.  The
+   arithmetic itself is pinned by the compiled object, in the verdict. */
+static void dpmi_lock_size_ends_at_base_plus_size(void)
+{
+    unsigned base;
+    unsigned size;
+
+    fill_lock_probe_area();
+    base = (unsigned) (char *) lock_probe_area;
+    size = sizeof(lock_probe_area);
+
+    CHECK_EQ(fdps_dpmi_lock_size(base, size), 1);
+    CHECK_EQ(dpmi_unlock_linear_range(base, base + size), 1);
+}
+
+/* A size of zero.  ADD EAX,0 leaves the endpoint on `base`, the primitive's
+   INC EDX makes the count 1, and the request is a one-byte lock of the page
+   holding `base` -- not the zero-byte request the DPMI specification does not
+   define.  This is also the one shape where a body that passed `size` itself as
+   the far endpoint is visibly different: it would ask the host to order 0
+   against `base` and lock everything from linear 0 upwards. */
+static void dpmi_lock_size_of_zero_locks_one_byte(void)
+{
+    unsigned base;
+
+    fill_lock_probe_area();
+    base = (unsigned) (char *) lock_probe_area;
+
+    CHECK_EQ(fdps_dpmi_lock_size(base, 0), 1);
+    CHECK_EQ(dpmi_unlock_linear_range(base, base), 1);
+}
+
 void run_dpmi_tests(void)
 {
     RUN_TEST(dpmi_free_register_set_has_the_image_layout);
@@ -552,4 +627,7 @@ void run_dpmi_tests(void)
     RUN_TEST(dpmi_alloc_reports_the_block_three_ways);
     RUN_TEST(dpmi_alloc_locks_the_whole_block);
     RUN_TEST(dpmi_alloc_writes_nothing_when_dpmi_refuses);
+    RUN_TEST(dpmi_lock_size_returns_the_primitives_flag);
+    RUN_TEST(dpmi_lock_size_ends_at_base_plus_size);
+    RUN_TEST(dpmi_lock_size_of_zero_locks_one_byte);
 }

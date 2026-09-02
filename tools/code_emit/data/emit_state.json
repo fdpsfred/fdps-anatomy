@@ -1713,6 +1713,14 @@
       "status": "committed",
       "emitted_against": "0x25",
       "rounds": 0
+    },
+    "0003cb93": {
+      "name": "fdps_dpmi_lock_size",
+      "target": "dpmi.c",
+      "body_size": "0x17",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x17"
     }
   }
 }

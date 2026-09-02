@@ -197,3 +197,26 @@ int fdps_dpmi_unlock_region(unsigned start, unsigned end)
        before reading it. */
     return dpmi_out.x.cflag == 0;
 }
+
+int fdps_dpmi_lock_size(unsigned base, unsigned size)
+{
+    /* The whole body is MOV EAX,[ESP+4] / ADD EAX,[ESP+8] / PUSH EAX / MOV
+       EBX,[ESP+8] / PUSH EBX / CALL 0003cb01 / ADD ESP,8 / RET.  The second
+       [ESP+8] is not the second argument again: the PUSH has moved ESP down
+       four bytes, so it re-reads `base`.  The pushes are right to left, so the
+       endpoint pair reaching fdps_dpmi_lock_region is (base, base + size).
+
+       base + size is the address of the byte one PAST the block, and
+       fdps_dpmi_lock_region treats its larger endpoint as the LAST byte of the
+       range -- so this locks size + 1 bytes, one more than the caller named.
+       Writing base + size - 1, the spelling that makes the extent come out at
+       `size`, locks one byte fewer than the original and can leave the final
+       byte of an interrupt-touched buffer pageable; see
+       rebuild_info/pitfalls.md.
+
+       No comparison and no local: the sum is unsigned and wraps modulo 2^32 the
+       way ADD does, and the ordering of the endpoints is the callee's job.
+       There is no epilogue beyond RET, so the primitive's EAX -- 1 for a clear
+       carry, 0 for a set one -- is this function's result untouched. */
+    return fdps_dpmi_lock_region(base, base + size);
+}
