@@ -48,4 +48,34 @@ extern void fdps_rle_blit_remap_sprite_and_backdrop(unsigned char *rle_stream,
                                                     unsigned char *palette_remap);
 #pragma aux fdps_rle_blit_remap_sprite_and_backdrop "*" parm caller [];
 
+/* 00056b25.  Blit mode 2: the sprite's own pixels end up as
+   palette_remap[pixel], and the transparent runs are stepped over the way the
+   plain blitter steps over them -- the backdrop showing through them is left
+   exactly as it was.  That is the only thing separating this kernel from
+   fdps_rle_blit_remap_sprite_and_backdrop above.
+
+   The parameters are that kernel's, and mean the same things: `rle_stream` the
+   command stream, `dest_pixel` the first pixel of the top row,
+   `dest_row_advance` the pitch - width the caller computed, and
+   `palette_remap` the 256-byte lookup table, 256 entries because the index is a
+   whole pixel byte (MOV AL,byte ptr [EAX + EBP*1] at 00056b4b with EAX holding
+   nothing but that byte).
+
+   The row width comes from data_fdps_graphics_rle_blit_src_width, re-read at
+   the top of every row, and the row count from
+   data_fdps_graphics_rle_blit_remaining_rows, which this routine decrements to
+   zero.  Nothing is bounds-checked; see the note in rlecolor.c on why the row
+   terminator must stay an exact-zero test.
+
+   Nothing in the shipped executable selects mode 2 either: the census in the
+   plate comment at 00056b25 resolves every path to the dispatcher's mode
+   argument and finds 0, 3, 4, 8, 9, 0xa and 0xb.  The kernel is compiled in and
+   unreachable, and is emitted because the rebuild is of the program, not of the
+   reachable part of it. */
+extern void fdps_rle_blit_with_palette_remap(unsigned char *rle_stream,
+                                             unsigned char *dest_pixel,
+                                             int dest_row_advance,
+                                             unsigned char *palette_remap);
+#pragma aux fdps_rle_blit_with_palette_remap "*" parm caller [];
+
 #endif

@@ -1934,6 +1934,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x8f"
+    },
+    "00056b25": {
+      "name": "fdps_rle_blit_with_palette_remap",
+      "target": "rlecolor.c",
+      "body_size": "0x89",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x89"
     }
   }
 }
