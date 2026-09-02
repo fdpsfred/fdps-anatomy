@@ -1846,6 +1846,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x9d"
+    },
+    "00022750": {
+      "name": "fdps_chapter_state_reset",
+      "target": "chapter.c",
+      "body_size": "0x86",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x86"
     }
   }
 }

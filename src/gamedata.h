@@ -714,6 +714,32 @@ extern int data_fdps_battle_pending_xp_credit;
 extern int data_fdps_map_cursor_world_x;
 extern int data_fdps_map_cursor_world_y;
 
+/* 00069cd0.  Which overlay fdps_draw_map_cursor paints at the cursor position
+   above, and 0 for none.  That function is a chain of CMP dword ptr
+   [0x00069cd0] against 1, 2, 3, 4, 5 and 6 at 0002c6ac, 0002c6d4, 0002c6fc,
+   0002c79c, 0002c930 and 0002cbc1, and each arm hands fdps_blit_cursor_tile
+   the two cursor coordinates and its own graphic index; a value the chain does
+   not name falls off the end of it and nothing is drawn.
+
+   It is a mode number and not a flag, and almost every reference to it is a
+   store: of the 96 references in the image, 87 are writes -- every battle
+   menu, AI action, icon script and chapter event that wants a different
+   overlay writes its number here and lets the next draw pass find it.  The
+   nine reads are the six dispatch arms, fdps_map_cursor_move_to's CMP against
+   0 at 0002da2f, fdps_map_cursor_select_loop, which takes a copy and
+   decrements it while it is above 1, and fdps_battle_spell_command, which
+   takes a copy less 2 at 00027f2a before installing 1 over it.
+
+   Signed, and that is behaviour rather than spelling: the select loop's
+   compare is CMP dword ptr [EBP-0x3c],0x1 / JLE at 0002b542, the signed
+   branch, so a mode below 1 leaves the copy alone where an unsigned read of a
+   negative value would decrement it.
+
+   fdps_chapter_state_reset writes it twice, 0 at 0002275c before the chapter's
+   unit array is rebuilt and 1 at 000227b8 after it, so a chapter opens in mode
+   1. */
+extern int data_fdps_map_cursor_draw_mode;
+
 /* 000643b4.  Base of the battle unit gauge sheet: three 43x6 8bpp graphics
    laid end to end, 0x102 (43 * 6) bytes apart, at a row pitch of 0x2b.
    Graphic 0 is the empty track and graphics 1 and 2 are the two filled
