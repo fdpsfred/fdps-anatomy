@@ -173,6 +173,23 @@ TEST_SUITES = [
 # "Error!" line per diagnostic.  Both are read: the summary catches a count the
 # text scan could miss, the text is what makes "no NEW warnings" decidable.
 SUMMARY_RX = re.compile(r"(\d+)\s+warnings?,\s*(\d+)\s+errors?", re.I)
+# wcc386 spells its warnings "Warning! W107: ..."; wlink puts the number in
+# parentheses instead.  Matching only the compiler's spelling made every linker
+# warning invisible here.
+WARNING_RX = re.compile(r"\bWarning[!(]", re.I)
+# Not a warning in any useful sense: the linker kept one definition and dropped
+# the other, so the image carries a body nobody reviewed under the name that was
+# just emitted, and every test still passes because something answers the call.
+# It is an error, and deliberately not routed through the baseline -- there is
+# no version of this a baseline should be able to accept.
+REDEFINITION_RX = re.compile(r"redefinition of .+ ignored", re.I)
+# The build links twice on purpose and the first link is SUPPOSED to name every
+# data global ticket 23 has not emitted yet -- that list is the point of it, and
+# the stub module built from it makes the second link resolve.  Those come back
+# as warnings as well as errors, so they are dropped here for the same reason
+# the errors are.  Nothing is lost: whether anything is still unresolved is
+# decided by the `undefined` check, which reads the LAST link.
+UNDEF_REF_RX = re.compile(r"is an undefined reference", re.I)
 
 
 def diagnostics(text):
@@ -182,8 +199,11 @@ def diagnostics(text):
         summary_w += int(m.group(1))
         summary_e += int(m.group(2))
     return {
-        "errors": [l for l in lines if "Error!" in l],
-        "warnings": [l for l in lines if "Warning!" in l],
+        "errors": ([l for l in lines if "Error!" in l]
+                   + [l for l in lines if REDEFINITION_RX.search(l)]),
+        "warnings": [l for l in lines if WARNING_RX.search(l)
+                     and not REDEFINITION_RX.search(l)
+                     and not UNDEF_REF_RX.search(l)],
         "summary_warnings": summary_w,
         "summary_errors": summary_e,
         "undefined": bm.parse_undefined(text),

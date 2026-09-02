@@ -156,7 +156,14 @@ const EMIT_SUMMARY = {
     test_cases: { type: 'integer', description: 'How many assertions the new test makes' },
     build_pass: { type: 'boolean', description: 'The emitter\'s own build_emit.py run came back clean' },
     build_detail: { type: 'string', description: 'One line: what failed, or empty when clean' },
-    open_issues: { type: 'integer', description: 'Equivalence concerns recorded in the verdict file' },
+    open_issues: {
+      type: 'integer',
+      description: 'How many entries the open_issues array of your verdict file holds AS YOU '
+        + 'LEAVE IT. On a fix round that settled a concern and removed it, this number goes '
+        + 'DOWN -- report what the file now says, never what you started the round with. The '
+        + 'workflow cross-checks this against what the bookkeeper writes and flags a '
+        + 'mismatch, so a stale count costs somebody an investigation.',
+    },
     status: { type: 'string', enum: ['done', 'skip', 'blocked'] },
     note: { type: 'string', description: 'At most one short line for the orchestrator' },
   }),
@@ -178,7 +185,13 @@ const REVIEW_SUMMARY = {
     three_source_done: { type: 'boolean', description: 'You read plate, disassembly and decompilation yourself' },
     diff_reviewed: { type: 'boolean', description: 'You read the working-tree diff against HEAD' },
     blocking_count: { type: 'integer' },
-    open_issues: { type: 'integer', description: 'Equivalence concerns you recorded in your verdict file' },
+    open_issues: {
+      type: 'integer',
+      description: 'How many entries the open_issues array of your verdict file holds as you '
+        + 'leave it. NOT blocking_count -- a blocking issue is something the emitter must fix '
+        + 'this round, an open issue is a concern nobody can settle yet. They are different '
+        + 'numbers and conflating them makes the workflow report a mismatch that is not real.',
+    },
     ghidra_fixes: { type: 'integer', description: 'Ghidra corrections proposed in your verdict file' },
     note: { type: 'string' },
   }),

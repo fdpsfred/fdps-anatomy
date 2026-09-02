@@ -689,6 +689,18 @@ def do_run(dosbox, watcom, disc, timeout, quiet=False):
 
 # ------------------------------------------------------------------- verdict
 
+# wcc386 writes "Warning! W107: ...", wlink writes its number in parentheses
+# instead.  Matching only the compiler's spelling made every linker warning
+# invisible to this verdict, which is how a redefinition once passed the build.
+WARNING_RX = re.compile(r"\bWarning[!(]", re.I)
+REDEFINITION_RX = re.compile(r"redefinition of .+ ignored", re.I)
+# The first link is supposed to name every symbol ticket 23 has not emitted
+# yet; it reports each one as a warning as well as an error, and both are
+# dropped for the same reason.  What must be empty is the SECOND link's
+# undefined list, which is gated separately.
+UNDEF_REF_RX = re.compile(r"is an undefined reference", re.I)
+
+
 def diagnostics(out_dir=None):
     """The compiler's and linker's own words, across both of the build's links.
 
@@ -721,8 +733,18 @@ def diagnostics(out_dir=None):
         return any(sym in line for sym in first_undef) and "undefined" in line
 
     errors = [l for l in lines if "Error!" in l and not expected_undef(l)]
+    # A redefinition the linker resolved by dropping one of the definitions is
+    # reported as an ordinary warning, and it is not one: it means the object
+    # carries somebody else's body under the name just emitted, so the build
+    # passes while the code under review is not in the executable at all.  Seen
+    # for real on 0003cb01/0003cb93, where an older hand-written stand-in in
+    # src/aildpmi.c won the link and the newly emitted definitions were dead.
+    # Promoted to an error so no baseline can ever accept it.
+    errors += [l for l in lines if REDEFINITION_RX.search(l)]
     return {"errors": errors,
-            "warnings": [l for l in lines if "Warning!" in l],
+            "warnings": [l for l in lines if WARNING_RX.search(l)
+                         and not REDEFINITION_RX.search(l)
+                         and not UNDEF_REF_RX.search(l)],
             "undefined": bm.parse_undefined(txt2) if second else
                          bm.parse_undefined(txt1),
             "stubbed": sorted(first_undef)}
