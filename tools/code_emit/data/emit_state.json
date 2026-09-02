@@ -1918,6 +1918,14 @@
       "status": "committed",
       "emitted_against": "0x24",
       "rounds": 0
+    },
+    "00056a0d": {
+      "name": "fdps_rle_blit_passthrough",
+      "target": "rle.c",
+      "body_size": "0x77",
+      "status": "committed",
+      "emitted_against": "0x77",
+      "rounds": 1
     }
   }
 }

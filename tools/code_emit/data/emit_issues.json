@@ -1371,5 +1371,33 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "00056a0d": [
+    {
+      "from": "emit",
+      "what": "Timing (contract D). The original moves each run with REP STOSB / REP MOVSB and steps a skip with a single ADD EDI,ECX; the emitted C compiled at -od writes one byte per iteration through ebp-relative locals, so the same sprite costs several times the instructions. This is blit mode 0, the plain sprite and tile blit -- the most frequently executed drawing loop in the game -- and the whole thirteen-kernel family will have the same shape. Behaviour per pixel is identical (42 assertions cover all four ops, both row directions and the row advance); what is not established is whether the slower blit is visible once the map, the sprites and the battle animations are all drawing through it at the emulator's cycle setting.",
+      "needs": "A DOSBox-X playtest of the rebuilt executable against the original at the same cycle setting once enough of the drawing path is emitted to put a battle map on screen -- specifically whether animation paced on the timer tick counter drops frames where the original does not.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "The knowledge base says this family must not be emitted as ordinary C. program_info/code_pools.md and rebuild_info/pitfalls.md both state that the thirteen RLE blit kernels have to be produced as .ASM modules or inline assembly, on the grounds that they take arguments in registers, share the caller's EBP frame and overwrite the caller's incoming parameter slots. Three of those were checked against this kernel and only the first holds: 00056a0d touches no stack slot of any kind, has no frame of its own and writes nothing into its caller's, so the only thing the C spelling gives up is the register handoff -- and both entries into it (fdps_blit_dispatch at 000568db and the mirrored-vertical thunk at 000575ed) are themselves being rebuilt in C, so no caller is left that would hand values over in ESI/EDI/EDX. Two further facts: wcc386 10.0a has no statement-level inline assembler at all -- both _asm and __asm are rejected as undeclared symbols (E1011), measured directly against the installed compiler -- so the inline-assembly half of that instruction is not available in this toolchain; and fdps_xor_crypt_buffer at 000568b7, named in the same code_pools.md paragraph as hand-written assembly, is already emitted, reviewed and committed as plain C with the default stack convention. This kernel follows that precedent.",
+      "needs": "A decision, once more of the family is emitted, on whether the remaining twelve kernels can all be spelled the same way -- which turns on whether any of them really does write into its caller's parameter slots, a per-kernel reading of assembly that has not been done yet -- and, if the answer is yes for all of them, a correction to the pitfalls.md and code_pools.md wording so it names the property that actually forces .ASM rather than the family.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "I reached the timing concern independently and confirmed it is measured rather than suspected. WDISASM of workspace/code_emit/out/objs/RLE.OBJ shows every arm running one byte per iteration through ebp-relative locals -- L4 for the fill where the original has REP STOSB at 00056a30, L7 for the stretched arm, L10 for the literal where the original has REP MOVSB at 00056a66 -- and even the skip arm, a single ADD EDI,ECX at 00056a77 in the original, became two dword memory operations at L12. The loop scaffolding itself reloads run_length from -18H[ebp] on every pass. So the per-pixel cost gap in the emitter's entry is real and is visible in the object file today. Nothing to add to what would settle it.",
+      "needs": "As emit#0.",
+      "same_as": "emit#0",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "I checked the knowledge base's own grounds against this body rather than taking the emitter's reading. rebuild_info/pitfalls.md line 68 gives four reasons the blit kernel family must be produced as .ASM or inline assembly: no prologue, arguments preplaced in ESI/EDI/ECX/EDX, sharing the caller's EBP frame, and overwriting the caller's incoming parameter slots. The first two hold for 00056a0d. The last two do not: I read all 57 instructions and there is no EBP-relative or ESP-relative memory operand anywhere in the body -- the only memory it touches is [ESI] and [EDI] implicitly through LODSB/STOSB/MOVSB, plus the two absolute globals -- so it has no frame of its own and cannot be writing into its caller's. program_info/code_pools.md line 197 names fdps_xor_crypt_buffer in the same breath as this family, and that one is already committed as plain C in src/save.c, so the wording is already out of step with settled practice independently of this ticket. My addition is that verification; the decision the emitter asks for is the right disposition and I do not read it as legislating a code change, since its subject is a documentation wording call put to a human after twelve more kernels are read.",
+      "needs": "As emit#1.",
+      "same_as": "emit#1",
+      "status": "open"
+    }
   ]
 }

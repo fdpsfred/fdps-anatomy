@@ -1,0 +1,134 @@
+/* rle.c -- the RLE sprite blitters: pass-through, scaled, row-skipping and the
+ * two mirrors.
+ *
+ * See rle.h for the stream format the whole family decodes and for where the
+ * row width and the row count come from.
+ */
+#include "gamedata.h"
+#include "rle.h"
+
+/* 00056a0d.  Hand-written assembly, not compiler output: no prologue, ESI is
+   the stream, EDI the destination, EDX the row advance, BX the width left in
+   the row and CL the command byte.  The C below is the same decode and the
+   same arithmetic, not the same registers (ADR-0001), the way
+   fdps_xor_crypt_buffer at 000568b7 is.
+
+   The three registers become three parameters.  In the original they are set
+   up by fdps_blit_dispatch immediately before the CALL (MOV ESI,[EBP+8], MOV
+   EDI,[EBP+0xc], and EDX as [EBP+0x18] - [EBP+0x10] at 000568e7), and nothing
+   is passed on the stack; the kernel touches no stack slot of its own and
+   never writes into its caller's frame, so making that handoff explicit is the
+   whole of the difference.  Two register facts of the original therefore do
+   not carry over and must not be reproduced: the caller's XOR ECX,ECX at
+   0005690d, which exists because the body writes only CL but then reads the
+   whole of CX in SUB BX,CX and the whole of ECX in REP STOSB / REP MOVSB /
+   LOOP, and the destruction of EBX, ESI and EDI, which the stack convention
+   says a callee preserves.  Both are properties of the register contract, not
+   of what the routine draws.
+
+   The four ops are selected by the top two bits, SHL CL,1 / JC twice, and the
+   length is the low six bits plus one -- SHR CL,2 / INC CL -- so a run is 1 to
+   64 pixels and a length of zero cannot be encoded.
+
+   Three things here look like defects and are not:
+
+   The row ends on OR BX,BX / JNZ, an exact-zero test.  A run that overshoots
+   the remaining width wraps the sixteen-bit counter to 0xff.. instead of
+   ending the row, and the decoder goes on consuming command bytes until some
+   later run happens to land the counter on zero.  Hardening this to
+   `width <= 0` changes what such a stream draws, so the counter is an
+   unsigned short here and the test stays an equality
+   (rebuild_info/pitfalls.md).
+
+   Op 01 writes only the second byte of each destination pair -- INC EDI then
+   STOSB at 00056a48 -- and leaves the first byte of every pair holding what
+   was already on the surface.  It is not a stretch or a half-tone: over the 99
+   .CEL sheets the game ships these runs are almost always one pixel long and
+   the untouched column is a deliberate one-pixel hole inside painted content,
+   so filling it changes what the game draws.
+
+   The row counter is decremented in memory, and the loop that reads it is a
+   do-while: DEC word ptr [0x00070022] / JNZ tests after the decrement, so a
+   caller that asks for zero rows gets 0x10000 of them rather than none.  That
+   is reproduced rather than guarded, and fdps_blit_dispatch is the only thing
+   that sets it.
+
+   The width is re-read from the global at the top of every row rather than
+   cached in a local, because that is where MOV BX,[0x00070024] sits -- at the
+   loop's entry, which is also the row-restart target. */
+void fdps_rle_blit_passthrough(unsigned char *rle_stream,
+                               unsigned char *dest_pixel,
+                               int dest_row_advance)
+{
+    unsigned char *stream_cursor;
+    unsigned char *dest_cursor;
+    unsigned short width_remaining;
+    unsigned char command;
+    unsigned char run_pixel;
+    unsigned int run_length;
+
+    stream_cursor = rle_stream;
+    dest_cursor = dest_pixel;
+
+    do {
+        width_remaining = data_fdps_graphics_rle_blit_src_width;
+
+        do {
+            command = *stream_cursor;
+            stream_cursor++;
+            run_length = (unsigned int) (command & 0x3f) + 1;
+
+            switch (command >> 6) {
+            case 0:
+                /* fill: one pixel byte over run_length destination bytes */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length);
+                run_pixel = *stream_cursor;
+                stream_cursor++;
+                while (run_length != 0) {
+                    *dest_cursor = run_pixel;
+                    dest_cursor++;
+                    run_length--;
+                }
+                break;
+
+            case 1:
+                /* stretched: one pixel byte into the second half of each of
+                   run_length destination pairs, first halves untouched */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length - run_length);
+                run_pixel = *stream_cursor;
+                stream_cursor++;
+                while (run_length != 0) {
+                    dest_cursor++;
+                    *dest_cursor = run_pixel;
+                    dest_cursor++;
+                    run_length--;
+                }
+                break;
+
+            case 2:
+                /* literal: run_length bytes copied straight out of the stream */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length);
+                while (run_length != 0) {
+                    *dest_cursor = *stream_cursor;
+                    dest_cursor++;
+                    stream_cursor++;
+                    run_length--;
+                }
+                break;
+
+            default:
+                /* skip: a transparent run, destination stepped over unwritten */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length);
+                dest_cursor += run_length;
+                break;
+            }
+        } while (width_remaining != 0);
+
+        dest_cursor += dest_row_advance;
+        data_fdps_graphics_rle_blit_remaining_rows--;
+    } while (data_fdps_graphics_rle_blit_remaining_rows != 0);
+}

@@ -1084,4 +1084,20 @@ extern unsigned char *data_fdps_all_game_text_ptr;
    frees it under a guard at 00029568 and stores nothing back. */
 extern unsigned char *data_fdps_portrait_sprite_buf_ptr;
 
+/* 00070022 and 00070024.  The two halves of the blit rectangle the RLE kernel
+   family in rle.c, rlerot.c, rlecolor.c and rleblend.c is currently drawing:
+   how many rows are still to come, and how many pixels wide a source row is.
+   They are not parameters -- fdps_blit_dispatch writes both out of its own
+   arguments before it calls the kernel (MOV [0x00070024],BX at 000568f8 and
+   MOV [0x00070022],BX at 00056903) and the kernel consumes the row count as it
+   runs, decrementing it in place to zero.
+
+   Both are sixteen bits wide everywhere they are touched: all 38 accesses
+   across the image carry the 0x66 operand-size prefix, and the kernels do
+   sixteen-bit arithmetic on the values (SUB BX,CX against the width, DEC word
+   ptr against the row count), which wraps rather than going negative.  Reading
+   either as an int would change where a row ends. */
+extern unsigned short data_fdps_graphics_rle_blit_remaining_rows;
+extern unsigned short data_fdps_graphics_rle_blit_src_width;
+
 #endif
