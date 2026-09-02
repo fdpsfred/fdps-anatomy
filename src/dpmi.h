@@ -116,4 +116,27 @@ extern int fdps_dpmi_unlock_region(unsigned start, unsigned end);
 extern int fdps_dpmi_lock_size(unsigned base, unsigned size);
 #pragma aux fdps_dpmi_lock_size "*" parm caller [];
 
+/* Releases a block named the other way round -- a base address and a byte size
+   -- by handing fdps_dpmi_unlock_region the endpoint pair (base, base + size).
+   The exact undo of fdps_dpmi_lock_size, and the mirror of it instruction for
+   instruction.
+
+   THE EXTENT RELEASED IS size + 1 BYTES, not size: the primitive counts both of
+   its endpoints, and base + size is the byte one past the block.  That is what
+   makes the pair symmetric -- the lock pinned size + 1 bytes from the same two
+   arguments -- so the intuitive base + size - 1 is wrong here and leaves the
+   block's last byte, and with it a page whenever base + size falls on a page
+   boundary, locked for the rest of the run.  See rebuild_info/pitfalls.md.
+
+   `base` is the linear address of the first byte -- an AIL static block, a heap
+   block about to be freed, or the first byte of a code range -- and `size` is a
+   plain object size (4, 0x18, 0x40, 0x48, 0x80 and 0x100 at the AIL teardown
+   call sites) or, at 0003ca31, the byte count that unlock-then-free wrapper was
+   itself handed.
+   Nothing is read back and nothing is written: the primitive's success flag is
+   returned unchanged, 1 for an unlock the host granted and 0 for one it
+   refused.  All four callers discard it. */
+extern int fdps_dpmi_unlock_size(unsigned base, unsigned size);
+#pragma aux fdps_dpmi_unlock_size "*" parm caller [];
+
 #endif

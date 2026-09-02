@@ -1721,6 +1721,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x17"
+    },
+    "0003cbaa": {
+      "name": "fdps_dpmi_unlock_size",
+      "target": "dpmi.c",
+      "body_size": "0x17",
+      "status": "committed",
+      "emitted_against": "0x17",
+      "rounds": 0
     }
   }
 }

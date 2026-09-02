@@ -62,6 +62,18 @@
  * belongs, would pass every assertion here.  The addition itself is pinned
  * instead by reading the compiled object, recorded in the emit verdict for
  * 0003cb93.
+ *
+ * Covers fdps_dpmi_unlock_size at 0003cbaa.  Expected values come from its
+ * assembly -- MOV EAX,[ESP+4] / ADD EAX,[ESP+8] for the far endpoint, PUSH EAX
+ * then PUSH of [ESP+8] re-read as `base` for the argument order, CALL 0003cb6e,
+ * ADD ESP,8 for the caller-cleaned pair, and a RET with no epilogue, which
+ * leaves the primitive's EAX as the result -- together with the endpoint
+ * arithmetic of fdps_dpmi_unlock_region at 0003cb6e, whose (max - min) + 1
+ * makes the extent size + 1 bytes.  The same blindness applies as for the lock
+ * wrapper: DOS/4GW answers 0601h cleanly for any plausible range and keeps no
+ * lock count, so the byte count is invisible to a run-time assertion and is
+ * pinned instead by reading the compiled object, recorded in the emit verdict
+ * for 0003cbaa.
  */
 #include <i86.h>
 #include "testharn.h"
@@ -610,6 +622,80 @@ static void dpmi_lock_size_of_zero_locks_one_byte(void)
     CHECK_EQ(dpmi_unlock_linear_range(base, base), 1);
 }
 
+/* ---- fdps_dpmi_unlock_size at 0003cbaa -------------------------------- */
+
+/* A range of this program's own data, pinned directly through fn 0600h over the
+   inclusive pair [base, base + size] and then released through the function
+   under test, which is handed the same block the other way round -- a base and
+   a byte count.  The count is one short of the array so that the extent the
+   wrapper actually releases, size + 1 bytes, is exactly the array that was
+   pinned.  The assembly has no epilogue at all: CALL 0003cb6e / ADD ESP,8 /
+   RET, so whatever the primitive left in EAX is the answer, and a wrapper that
+   computed a result of its own or returned a constant would fail here. */
+static void dpmi_unlock_size_returns_the_primitives_flag(void)
+{
+    unsigned base;
+    unsigned size;
+
+    fill_lock_probe_area();
+    base = (unsigned) (char *) lock_probe_area;
+    size = sizeof(lock_probe_area) - 1;
+
+    CHECK_EQ(dpmi_lock_linear_range(base, base + size), 1);
+    CHECK_EQ(fdps_dpmi_unlock_size(base, size), 1);
+}
+
+/* The plain object size an AIL teardown wrapper passes -- the run beginning at
+   00045b42 pushes 0x40, 0x48, 0x100, 0x18, 4 and 4 -- with the far endpoint
+   therefore one byte past the block.  The range pinned beforehand is that same pair,
+   [base, base + size], which is size + 1 bytes, so a body that released
+   [base, base + size - 1] would leave the last byte's page locked for the rest
+   of the run and never say so, because all four callers discard the result.
+   Stated honestly, this host neither counts locks nor refuses an unlock of a
+   range it never locked, so the assertion cannot see the byte count; what it
+   does pin is that the call is made over a range the host accepts and that its
+   flag comes back.  The arithmetic itself is pinned by the compiled object, in
+   the verdict. */
+static void dpmi_unlock_size_ends_at_base_plus_size(void)
+{
+    unsigned base;
+    unsigned size;
+
+    fill_lock_probe_area();
+    base = (unsigned) (char *) lock_probe_area;
+    size = sizeof(lock_probe_area);
+
+    CHECK_EQ(dpmi_lock_linear_range(base, base + size), 1);
+    CHECK_EQ(fdps_dpmi_unlock_size(base, size), 1);
+}
+
+/* A size of zero.  ADD EAX,0 leaves the endpoint on `base`, the primitive's
+   INC EDX makes the count 1, and the request is a one-byte unlock of the page
+   holding `base` -- not the zero-byte request the DPMI specification does not
+   define.  This is also the one shape where a body that passed `size` itself as
+   the far endpoint is visibly different: it would ask the host to order 0
+   against `base` and release everything from linear 0 upwards. */
+static void dpmi_unlock_size_of_zero_unlocks_one_byte(void)
+{
+    unsigned base;
+
+    fill_lock_probe_area();
+    base = (unsigned) (char *) lock_probe_area;
+
+    CHECK_EQ(dpmi_lock_linear_range(base, base), 1);
+    CHECK_EQ(fdps_dpmi_unlock_size(base, 0), 1);
+}
+
+/* There is no case here for the exchanged argument pair, the shape that would
+   pin `size` as the addend rather than as an endpoint to be ordered.  It was
+   written and then withdrawn: fdps_dpmi_unlock_size(0x40, base) names the range
+   [0x40, base + 0x40], nearly everything the program has mapped, and this host
+   validates neither the address nor the length of a 0601h request -- so the
+   call answers 1 exactly as the correct spelling does, proving nothing, while
+   actually unpinning whatever DOS/4GW and the AIL drivers had locked underneath
+   the rest of this executable.  The argument order is pinned instead by reading
+   the compiled object, recorded in the emit verdict for 0003cbaa. */
+
 void run_dpmi_tests(void)
 {
     RUN_TEST(dpmi_free_register_set_has_the_image_layout);
@@ -630,4 +716,7 @@ void run_dpmi_tests(void)
     RUN_TEST(dpmi_lock_size_returns_the_primitives_flag);
     RUN_TEST(dpmi_lock_size_ends_at_base_plus_size);
     RUN_TEST(dpmi_lock_size_of_zero_locks_one_byte);
+    RUN_TEST(dpmi_unlock_size_returns_the_primitives_flag);
+    RUN_TEST(dpmi_unlock_size_ends_at_base_plus_size);
+    RUN_TEST(dpmi_unlock_size_of_zero_unlocks_one_byte);
 }

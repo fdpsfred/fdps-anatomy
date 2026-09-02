@@ -220,3 +220,32 @@ int fdps_dpmi_lock_size(unsigned base, unsigned size)
        carry, 0 for a set one -- is this function's result untouched. */
     return fdps_dpmi_lock_region(base, base + size);
 }
+
+int fdps_dpmi_unlock_size(unsigned base, unsigned size)
+{
+    /* 0003cbaa, instruction for instruction the mirror of fdps_dpmi_lock_size
+       above with 0003cb01 swapped for 0003cb6e: MOV EAX,[ESP+4] / ADD
+       EAX,[ESP+8] / PUSH EAX / MOV EBX,[ESP+8] / PUSH EBX / CALL 0003cb6e /
+       ADD ESP,8 / RET.  The second [ESP+8] re-reads `base`, not `size`: the
+       PUSH before it moved ESP down four bytes.  The pushes are right to left,
+       so the endpoint pair reaching fdps_dpmi_unlock_region is
+       (base, base + size), and the caller drops both -- ADD ESP,8.
+
+       base + size is the address of the byte one PAST the block, and
+       fdps_dpmi_unlock_region treats its larger endpoint as the LAST byte of
+       the range, so this releases size + 1 bytes, one more than the caller
+       named.  It has to: fdps_dpmi_lock_size pinned exactly that extent from
+       the same pair, and the intuitive base + size - 1 leaves the block's final
+       byte -- and, when base + size lands on a page boundary, a whole page --
+       locked for the rest of the run.  See rebuild_info/pitfalls.md.
+
+       No comparison, no local and no epilogue: the sum is unsigned and wraps
+       modulo 2^32 the way ADD does, ordering the endpoints is the callee's job,
+       and EAX is not touched between the CALL and the RET, so the primitive's
+       flag is this function's result unchanged.  Twenty-nine call sites in four
+       callers, every one of them PUSH size / PUSH base / CALL / ADD ESP,8 with
+       the result dropped: 0003ca31 in the AIL unlock-then-free wrapper, and the
+       three AIL teardown routines, whose sizes are plain object sizes -- the
+       run at 00045b42 alone pushes 0x40, 0x48, 0x100, 0x18, 4 and 4. */
+    return fdps_dpmi_unlock_region(base, base + size);
+}
