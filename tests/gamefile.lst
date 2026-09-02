@@ -13,3 +13,11 @@ ICON.CEL
 # entry count straight out of a container's header, so the assertion is only
 # worth anything against a container whose header the game actually wrote.
 FIELD2.VFS
+#
+# MISC.VFS is the container fdps_load_data_tables reads: the nine .dat members
+# it names are in this file and in no other one the game ships, so tests/main.c
+# cannot pin filename-to-global pairing against anything smaller.  A load that
+# misses would not fail the assertion either -- the loader's wrapper ends the
+# process -- which is the other reason the real container is the only usable
+# input here.
+MISC.VFS

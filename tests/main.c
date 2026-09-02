@@ -1,6 +1,20 @@
 /* tests/main.c -- cover for src/main.c.
  *
- * Expected values come from the assembly at 00018a20 -- nine PUSH dword ptr
+ * Two functions, one pair of globals-shaped contracts.  fdps_load_data_tables
+ * fills the nine data-table pointers out of a container and
+ * fdps_free_global_resource_buffers releases them, and neither takes or returns
+ * anything that a test can look at directly, so both are measured through the
+ * nine globals and the heap.
+ *
+ * The loader's half is pinned against the shipped MISC.VFS, which is the
+ * container the game opens for these nine members; the sizes quoted below come
+ * out of that container's own entry table, read the same way tests/vfs.c reads
+ * FIELD2.VFS's.  A fabricated container would prove nothing here, and a
+ * container missing one of the nine would not fail an assertion at all: the
+ * loader's wrapper calls exit(1) on a miss rather than returning.
+ *
+ * The releaser's half: expected values come from the assembly at 00018a20 --
+ * nine PUSH dword ptr
  * [global] / CALL free / ADD ESP,4 groups, no branch anywhere in the body and
  * no store back into any of the nine globals -- and from the CRT's own free()
  * at 0003d478, whose near-heap worker begins OR EAX,EAX / JZ and so returns at
@@ -20,9 +34,11 @@
  */
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 #include <malloc.h>
 #include "testharn.h"
 #include "gamedata.h"
+#include "vfs.h"
 #include "main.h"
 
 /* How many table pointers the function frees.  Nine, from the nine CALL
@@ -219,8 +235,217 @@ static void passes_a_null_pointer_to_free_unguarded(void)
     CHECK_EQ(_heapchk(), _HEAPOK);
 }
 
+/* The container fdps_load_data_tables is always handed in the shipped program:
+   fdps_load_global_resources opens "MISC.VFS" at 000296d0 and passes what comes
+   back straight into the call at 000296fd. */
+#define CONTAINER_NAME "MISC.VFS"
+
+/* Longest member name is 12 characters; the loader upper-cases the query in
+   place, so it has to be a buffer and not a literal read out of this file. */
+#define QUERY_MAX 16
+
+/* The nine members, in the order the assembly loads them, with the byte count
+   MISC.VFS's own entry table records for each.  The nine counts are all
+   different, which is what lets a memcmp against an independently loaded copy
+   say "this global holds THIS member" rather than only "this global holds
+   something". */
+#define FRIAPRDA_BYTES 1440
+#define FRILEVUP_BYTES 660
+#define ITEM_BYTES 5773
+#define ENEMYDAT_BYTES 910
+#define PROMAP_BYTES 410
+#define PROEQU_BYTES 216
+#define MAGICDAT_BYTES 280
+#define GETMGTAB_BYTES 720
+#define RANKUP_BYTES 108
+
+/* The container the fixture opened, kept for the whole loader half: opening it
+   once and loading once is not an optimisation but the contract -- a second
+   fdps_load_data_tables over the same globals would overwrite nine live blocks
+   and leak them. */
+static void *container;
+
+/* Opens MISC.VFS and runs the loader over the nine globals, once.  Answers 1
+   when the tables are in place, so a test can say so and then stop instead of
+   dereferencing nothing. */
+static int tables_are_loaded(void)
+{
+    if (container != NULL) {
+        return 1;
+    }
+    clear_all();
+    container = fdps_vfs_open(CONTAINER_NAME);
+    if (container == NULL) {
+        return 0;
+    }
+    fdps_load_data_tables(container);
+    return 1;
+}
+
+/* Gives back everything the fixture took: the nine loaded blocks and the
+   handle.  free() on the globals rather than the function under test, so the
+   releaser's own tests still start from a heap this file controls. */
+static void release_loaded_tables(void)
+{
+    int i;
+
+    for (i = 0; i < TABLE_COUNT; i++) {
+        free(*table_slots[i]);
+    }
+    clear_all();
+    free(container);
+    container = NULL;
+}
+
+/* The one assertion each of the nine calls in the body makes: the global at
+   `index` came back holding the member called `name`.  The reference copy is
+   loaded through fdps_vfs_load_file directly from the same container, so the
+   comparison is against what that member's bytes are, and a call whose
+   filename and destination were paired up wrongly in the transcription puts
+   some other member's bytes in the slot and fails here. */
+static void check_slot_holds_member(int index, char *name, unsigned int bytes)
+{
+    char query[QUERY_MAX];
+    void *reference;
+
+    CHECK_EQ(tables_are_loaded(), 1);
+    if (container == NULL) {
+        return;
+    }
+    CHECK_EQ(*table_slots[index] != NULL, 1);
+    strcpy(query, name);
+    reference = fdps_vfs_load_file(query, container);
+    CHECK_EQ(reference != NULL, 1);
+    if (reference != NULL && *table_slots[index] != NULL) {
+        CHECK_EQ(memcmp(*table_slots[index], reference, bytes), 0);
+    }
+    free(reference);
+}
+
+/* Nine calls, nine globals written.  A slot still null would mean a group was
+   dropped or aimed at some other symbol -- the loader writes through every
+   destination it is given, and its wrapper does not return on a failed load. */
+static void fills_every_table_pointer(void)
+{
+    int i;
+
+    CHECK_EQ(tables_are_loaded(), 1);
+    if (container == NULL) {
+        return;
+    }
+    for (i = 0; i < TABLE_COUNT; i++) {
+        CHECK_EQ(*table_slots[i] != NULL, 1);
+    }
+}
+
+/* Nine separate loads, so nine separate malloc'd blocks: no two globals may
+   hold the same address.  This is what a body that passed one destination
+   twice would fail, whatever the filenames were. */
+static void fills_them_with_nine_distinct_blocks(void)
+{
+    int i;
+    int j;
+
+    CHECK_EQ(tables_are_loaded(), 1);
+    if (container == NULL) {
+        return;
+    }
+    for (i = 0; i < TABLE_COUNT; i++) {
+        for (j = i + 1; j < TABLE_COUNT; j++) {
+            CHECK_EQ(*table_slots[i] != *table_slots[j], 1);
+        }
+    }
+}
+
+/* One per call site, in the order of the calls: 0001893c Friaprda.dat into
+   00063fd8, 00018954 FriLevUp.dat into 00063fec, and so on to 000189fc
+   RankUp.dat into 00063fdc. */
+static void loads_friaprda_into_the_character_base_table(void)
+{
+    check_slot_holds_member(0, "FRIAPRDA.DAT", FRIAPRDA_BYTES);
+}
+
+static void loads_frilevup_into_the_character_growth_table(void)
+{
+    check_slot_holds_member(1, "FRILEVUP.DAT", FRILEVUP_BYTES);
+}
+
+static void loads_enemydat_into_the_enemy_data_table(void)
+{
+    check_slot_holds_member(2, "ENEMYDAT.DAT", ENEMYDAT_BYTES);
+}
+
+static void loads_promap_into_the_class_table(void)
+{
+    check_slot_holds_member(3, "PROMAP.DAT", PROMAP_BYTES);
+}
+
+static void loads_item_into_the_item_effect_table(void)
+{
+    check_slot_holds_member(4, "ITEM.DAT", ITEM_BYTES);
+}
+
+static void loads_proequ_into_the_class_equip_table(void)
+{
+    check_slot_holds_member(5, "PROEQU.DAT", PROEQU_BYTES);
+}
+
+static void loads_magicdat_into_the_spell_effect_table(void)
+{
+    check_slot_holds_member(6, "MAGICDAT.DAT", MAGICDAT_BYTES);
+}
+
+static void loads_getmgtab_into_the_spell_learning_table(void)
+{
+    check_slot_holds_member(7, "GETMGTAB.DAT", GETMGTAB_BYTES);
+}
+
+static void loads_rankup_into_the_promotion_table(void)
+{
+    check_slot_holds_member(8, "RANKUP.DAT", RANKUP_BYTES);
+}
+
+/* The argument is forwarded and not consumed: the handle the caller passed is
+   still a working container after all nine loads, which is what lets
+   fdps_load_global_resources go on using the same handle for another fourteen
+   members at 00029705 and after.  Nothing in the body writes through it -- it
+   is only ever pushed. */
+static void leaves_the_container_handle_usable(void)
+{
+    char query[QUERY_MAX];
+    void *again;
+
+    CHECK_EQ(tables_are_loaded(), 1);
+    if (container == NULL) {
+        return;
+    }
+    strcpy(query, "RANKUP.DAT");
+    again = fdps_vfs_load_file(query, container);
+    CHECK_EQ(again != NULL, 1);
+    free(again);
+}
+
 void run_main_tests(void)
 {
+    RUN_TEST(fills_every_table_pointer);
+    RUN_TEST(fills_them_with_nine_distinct_blocks);
+
+    RUN_TEST(loads_friaprda_into_the_character_base_table);
+    RUN_TEST(loads_frilevup_into_the_character_growth_table);
+    RUN_TEST(loads_enemydat_into_the_enemy_data_table);
+    RUN_TEST(loads_promap_into_the_class_table);
+    RUN_TEST(loads_item_into_the_item_effect_table);
+    RUN_TEST(loads_proequ_into_the_class_equip_table);
+    RUN_TEST(loads_magicdat_into_the_spell_effect_table);
+    RUN_TEST(loads_getmgtab_into_the_spell_learning_table);
+    RUN_TEST(loads_rankup_into_the_promotion_table);
+
+    RUN_TEST(leaves_the_container_handle_usable);
+
+    /* Everything the loader half put on the heap goes back before the releaser
+       half starts staging blocks of its own into the same nine globals. */
+    release_loaded_tables();
+
     RUN_TEST(releases_all_nine_table_buffers);
     RUN_TEST(heap_is_intact_after_the_release);
 

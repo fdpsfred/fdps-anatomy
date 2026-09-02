@@ -1,12 +1,62 @@
 /* main.c -- entry point and global resource lifecycle.
  *
  * See main.h.  Nothing here owns state of its own: the nine data-table
- * pointers it releases are gamedata.c's, filled by fdps_load_data_tables at
- * startup out of the VFS container.
+ * pointers it fills at startup and releases at shutdown are gamedata.c's, and
+ * the container they are read out of belongs to whoever opened it.
  */
 #include <stdlib.h>
 #include "gamedata.h"
+#include "vfs.h"
 #include "main.h"
+
+/* 00018930.  Nine identical groups, each MOV EAX,<destination global> / PUSH /
+   MOV EAX,<filename> / PUSH / MOV EAX,[EBP + 0x14] / PUSH / CALL 00029400 /
+   ADD ESP,0xc, and nothing else: one basic block, no compare, no jump and no
+   local.  The frame is the canonical Watcom one with SUB ESP,0x0, and the
+   argument is read fresh from [EBP + 0x14] before each of the nine calls
+   rather than being kept in a register, which is what -od does with a
+   parameter and not a sign that anything reassigns it.
+
+   The PUSH triples and the ADD ESP,0xc belong to the callee's stack
+   convention; this function's own is the same one, RET with no immediate.
+
+   Nothing is done with what the loader leaves behind.  fdps_vfs_load_file_or_exit
+   returns void and writes its answer through the third argument, so the
+   destination global is written by the callee and read by nobody here; and its
+   failure arm calls fdps_wait_any_key and exit(1) instead of coming back, which
+   is why nine unguarded loads in a row need no test between them.
+
+   The order of the nine calls is the order of the assembly, which is neither
+   the order of the globals in memory nor the order fdps_free_global_resource_buffers
+   frees them in.  Nothing observable depends on it -- the nine loads are
+   independent -- so it is reproduced because it is what the original does.
+
+   The names are passed as literals, exactly as the original passes pointers
+   into its own literal pool at 0x6160c..0x61680.  That matters here rather
+   than being a style choice: the loader upper-cases the name it is given IN
+   PLACE, so each of these nine literals is folded to upper case by the first
+   call and stays that way for the life of the process (see vfs.h). */
+void fdps_load_data_tables(void *vfs)
+{
+    fdps_vfs_load_file_or_exit(vfs, "Friaprda.dat",
+        (void **)&data_fdps_battle_character_base_table_ptr);
+    fdps_vfs_load_file_or_exit(vfs, "FriLevUp.dat",
+        (void **)&data_fdps_battle_character_growth_table_ptr);
+    fdps_vfs_load_file_or_exit(vfs, "Item.dat",
+        (void **)&data_fdps_item_effect_table_ptr);
+    fdps_vfs_load_file_or_exit(vfs, "EnemyDat.dat",
+        (void **)&data_fdps_battle_enemy_data_table_ptr);
+    fdps_vfs_load_file_or_exit(vfs, "ProMap.dat",
+        (void **)&data_fdps_class_table_ptr);
+    fdps_vfs_load_file_or_exit(vfs, "ProEqu.dat",
+        (void **)&data_fdps_class_equip_table_ptr);
+    fdps_vfs_load_file_or_exit(vfs, "MagicDat.dat",
+        (void **)&data_fdps_battle_spell_effect_table_ptr);
+    fdps_vfs_load_file_or_exit(vfs, "GetMgTab.dat",
+        (void **)&data_fdps_spell_learning_table_ptr);
+    fdps_vfs_load_file_or_exit(vfs, "RankUp.dat",
+        (void **)&data_fdps_promotion_table_ptr);
+}
 
 /* 00018a20.  Nine identical groups, PUSH dword ptr [global] / CALL free /
    ADD ESP,4, and nothing else: no branch, no compare, no local -- the frame is

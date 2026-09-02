@@ -70,7 +70,7 @@
 00018350 | 0x78 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | int __cdecl fdps_battle_count_remaining_units_on_side(int side)
 000183d0 | 0x118 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_menu | void __cdecl fdps_options_menu(void)
 000184f0 | 0x43e | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_battle_search_cell_at_cursor(int unit_index)
-00018930 | 0xe9 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_file_io | void __cdecl fdps_load_data_tables(int arg1)
+00018930 | 0xe9 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_file_io | void __cdecl fdps_load_data_tables(void * vfs)
 00018a20 | 0x8f | __watcall | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_memory | void __watcall fdps_free_global_resource_buffers(void)
 00018ab0 | 0x25 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | fdps_character_base_record * __cdecl fdps_get_character_base_record(int char_id)
 00018ae0 | 0x25 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | fdps_character_growth * __cdecl fdps_get_growth_record(int char_id)

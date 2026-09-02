@@ -943,7 +943,7 @@
 0006160c | 0xd | /string | s_Friaprda.dat_0006160c | DEFAULT
 0006161c | 0xd | /string | s_FriLevUp.dat_0006161c | DEFAULT
 0006162c | 0x9 | /string | s_Item.dat_0006162c | DEFAULT
-00061636 | 0xf | /string | - | -
+00061638 | 0xd | /string | s_EnemyDat.dat_00061638 | DEFAULT
 00061648 | 0xb | /string | s_ProMap.dat_00061648 | DEFAULT
 00061654 | 0xb | /string | s_ProEqu.dat_00061654 | DEFAULT
 00061660 | 0xd | /char[13] | s_MagicDat.dat_00061660 | DEFAULT
