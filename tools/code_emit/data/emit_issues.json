@@ -1356,5 +1356,20 @@
       "same_as": "emit#2",
       "status": "open"
     }
+  ],
+  "00056837": [
+    {
+      "from": "emit",
+      "what": "The STI moves. In the image it is the very first instruction of the handler (00056837), ahead of the register saves; in the rebuild it is the first statement of the body, so wcc386 places it after PUSHAD, the four segment pushes, the frame setup and the CALL __GETDS -- about ten instructions later. Interrupts are therefore off for that much longer at the start of every key event, and the handler's own body runs with them on either way, so nothing in the program's state can differ. What was established: the STI is reproduced rather than dropped, the EOI is still last, and IRQ1 cannot re-enter in either version because the 8259 holds it in service until that EOI.",
+      "needs": "A real machine, or DOSBox-X at period-accurate cycles, running the game while sound is playing: the only thing that could show it is IRQ0 being deferred by those extra instructions on a key press during a timing-sensitive moment. There is no way to settle it from the image, from the object file or from a unit test, because both versions produce identical program state.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed the STI displacement from the object file rather than from the emitter's description, and it is smaller than 'about ten instructions': KEYBD.OBJ puts `sti` at 0205, behind pushad (01f0), four segment pushes (01f1..01f5), mov ebp,esp / sub esp,8, cld and call __GETDS -- six instructions plus the body of __GETDS. The image has STI as instruction one at 00056837. Nothing in program state can differ, and I add one point the emitter did not make: the extra window is not merely short but bounded by code that touches no port and no game global, so the only quantity at stake is IRQ0 latency at the head of a key event. I could settle nothing further from the image, the object file or a unit test, which is the same place the emitter landed.",
+      "needs": "A real machine, or DOSBox-X at period-accurate cycles, running the game with sound while keys are pressed during a timing-sensitive moment. No static source can answer it because both versions produce identical program state.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

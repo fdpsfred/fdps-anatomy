@@ -17,9 +17,14 @@
  * effect outside the program's memory, so their cases move interrupt vector 09h
  * for real and put it back with IRQ1 masked throughout.
  *
- * The game's handler never actually runs during any of this -- vector 09h holds
- * it only inside the fenced window in keybd_probe_install, and IRQ1 is masked
- * for the whole of that window -- so nothing but the cases themselves writes
+ * And fdps_keyboard_isr at 00056837, whose cases are last and are the only ones
+ * that run the handler rather than fence it off: they stage a chosen scancode in
+ * the keyboard controller's output buffer and enter the handler through vector
+ * 09h with a software INT, again with IRQ1 masked and the vector put back.
+ *
+ * Outside those cases the game's handler never runs -- vector 09h holds it only
+ * inside the fenced windows in keybd_probe_install and keybd_isr_fire, and IRQ1
+ * is masked for the whole of each -- so nothing but the cases themselves writes
  * the latched byte or the ring, and each case puts back what it found.  No case
  * asserts what the byte holds to begin with: data_fdps_input_last_scancode is
  * ticket 23's to define and is zero-filled until then.
@@ -1429,6 +1434,567 @@ static void keybd_uninstall_uses_the_saved_selector_not_cs(void)
     CHECK_EQ(restored_offset == (unsigned int) fdps_wait_any_key, 1);
 }
 
+/* --- fdps_keyboard_isr at 00056837 ------------------------------------------
+ *
+ * The handler is entered through an interrupt gate and takes its one input from
+ * the keyboard controller, so a case that only sets globals and calls it proves
+ * nothing: it cannot be called at all, and the byte it acts on is the one port
+ * 0x60 hands over.  Both halves are therefore done for real.
+ *
+ * The byte is staged with the 8042's own "write to output buffer" command --
+ * 0xd2 to port 0x64, then the byte to port 0x60 -- which puts a chosen scancode
+ * in the output buffer exactly where a key press would leave it.  That is the
+ * only way to make the port deterministic from inside the program, and without
+ * it the make-code, break-code and wrap cases below would all be asserting
+ * against whatever key the machine last saw.  Every case checks the staging
+ * took, so a controller that ignored the command would fail here rather than
+ * quietly turning the cases into assertions about nothing.
+ *
+ * The handler is then entered with a software INT 09h, off the same vector the
+ * hardware would use, with the game's handler installed against CS the way
+ * fdps_install_keyboard_isr installs it.  IRQ1 is masked at the 8259 for the
+ * whole window -- otherwise the staged byte would raise a real interrupt and
+ * whichever handler happened to be on the vector would eat it -- and the
+ * vector and the mask are put back exactly as they were found, the same fence
+ * the install and uninstall cases above use.
+ *
+ * Expected values come from the handler's thirty instructions: IN AL,0x60 at
+ * 00056843, the unconditional MOV byte ptr [0x00070006],BL at 00056851, the
+ * repeat filter at 00056857..0005685f, the unsigned CMP BL,0x80 / JNC at
+ * 00056865, and the ring store and wrap at 0005686f..00056884.
+ * -------------------------------------------------------------------------- */
+
+/* The 8042's command/status port, the two status bits this file waits on, and
+   the command that drops a byte into the output buffer as though the keyboard
+   had sent it. */
+#define KBD_STATUS_PORT 0x64
+#define KBD_OUTPUT_FULL 0x01
+#define KBD_INPUT_FULL 0x02
+#define KBD_WRITE_OUTPUT_BUFFER 0xd2
+
+/* How long to wait on a status bit before giving up.  The controller answers in
+   microseconds; this is a bound that keeps a controller that never answers from
+   hanging the whole test run, not a timing figure. */
+#define KBD_STAGE_SPINS 20000
+
+/* A ring byte no case ever stages, so an entry still holding it is an entry the
+   handler did not write. */
+#define KBD_RING_SENTINEL 0x5a
+
+/* The BIOS keyboard buffer's head and tail, in the BIOS data area at segment
+   0x40, reachable as linear addresses under DOS/4GW.
+
+   Staging a scancode raises IRQ1 exactly as a key press does, and masking IRQ1
+   does not discard that interrupt, it holds it: it is delivered the moment the
+   mask goes back.  keybd_isr_fire therefore puts the mask back while the
+   handler under test is still on the vector, so the staged byte's own interrupt
+   is served by the handler this file is testing and never reaches the machine's
+   INT 09h handler.  Getting that order wrong hands the machine a phantom key
+   press per case, and the damage does not show up here -- it shows up in
+   tests/title.c, which stages this very buffer and asserts that fdps_play_movie
+   drains it.
+
+   The two words are saved and written back as well, so that the invariant "this
+   file leaks no keystroke" holds however the controller chooses to deliver. */
+#define BIOS_KBD_HEAD_ADDR 0x41a
+#define BIOS_KBD_TAIL_ADDR 0x41c
+
+extern unsigned char probe_kbd_status(void);
+#pragma aux probe_kbd_status = "in al,64h" value [al] modify [eax];
+
+extern void probe_kbd_command(unsigned char command);
+#pragma aux probe_kbd_command = "out 64h,al" parm [al] modify [eax];
+
+extern void probe_kbd_data(unsigned char data_byte);
+#pragma aux probe_kbd_data = "out 60h,al" parm [al] modify [eax];
+
+/* IN AL,0x60: the same read the handler under test opens with, used here only
+   to empty the controller after a case. */
+extern unsigned char probe_kbd_read_data(void);
+#pragma aux probe_kbd_read_data = "in al,60h" value [al] modify [eax];
+
+/* Enter whatever is on interrupt vector 09h, which is how the handler under
+   test is reached: it ends in IRETD and cannot be called.  All four scratch
+   registers are declared modified even though the handler saves everything it
+   touches -- what an interrupt gate leaves behind is not this file's to promise
+   (rebuild_info/emit_pipeline.md, contract A). */
+extern void probe_raise_int9(void);
+#pragma aux probe_raise_int9 = "int 09h" modify [eax ebx ecx edx];
+
+/* Put one byte in the keyboard controller's output buffer, and say whether it
+   arrived.  The answer is read off the controller's own output-full bit rather
+   than by reading port 0x60 back, because reading the port is what the handler
+   is about to do and a test that consumed the byte first would leave it
+   nothing. */
+static int keybd_stage_scancode(unsigned char code)
+{
+    int spins;
+
+    for (spins = 0; spins < KBD_STAGE_SPINS; spins++) {
+        if ((probe_kbd_status() & KBD_INPUT_FULL) == 0) {
+            break;
+        }
+    }
+    probe_kbd_command(KBD_WRITE_OUTPUT_BUFFER);
+
+    for (spins = 0; spins < KBD_STAGE_SPINS; spins++) {
+        if ((probe_kbd_status() & KBD_INPUT_FULL) == 0) {
+            break;
+        }
+    }
+    probe_kbd_data(code);
+
+    for (spins = 0; spins < KBD_STAGE_SPINS; spins++) {
+        if ((probe_kbd_status() & KBD_OUTPUT_FULL) != 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Stage one scancode and run the game's handler over it for real, with IRQ1
+   masked and vector 09h borrowed and put back.  Answers 1 when the byte was
+   staged, which every case asserts before it believes anything else.
+
+   The window closes in a particular order and the order is the whole of the
+   fence.  Staging raises IRQ1, and that interrupt is held by the mask rather
+   than lost, so the mask comes off while the handler under test is still on the
+   vector: the held interrupt is served by that handler, on a data port it has
+   already emptied, and the machine's own INT 09h handler never sees a key that
+   nobody pressed.  Its second run is the reason the state the case asserts on
+   is snapshotted first and written back after -- what the cases read is what
+   the ONE entry they staged produced, not what a second entry left. */
+static int keybd_isr_fire(unsigned char code)
+{
+    unsigned char saved_irq_mask;
+    unsigned short machine_selector;    /* vector 09h as this machine has it */
+    unsigned int machine_offset;
+    unsigned short saved_bios_head;
+    unsigned short saved_bios_tail;
+    unsigned char observed_ring[SCANCODE_QUEUE_LEN];
+    unsigned char observed_latch;
+    unsigned char observed_prev_scancode;
+    int observed_head;
+    int observed_write_index;
+    int drain;
+    int staged;
+
+    saved_bios_head = *(unsigned short *) BIOS_KBD_HEAD_ADDR;
+    saved_bios_tail = *(unsigned short *) BIOS_KBD_TAIL_ADDR;
+
+    saved_irq_mask = probe_mask_irq1();
+    machine_offset = probe_read_int9_vector(&machine_selector);
+
+    staged = keybd_stage_scancode(code);
+
+    /* Against CS, for the reason fdps_install_keyboard_isr installs against CS:
+       under DOS/4GW the flat data selector addresses the same bytes and is not
+       executable, so a vector installed through it faults on entry. */
+    probe_write_int9_vector(probe_current_cs(),
+                            (unsigned int) fdps_keyboard_isr);
+    probe_raise_int9();
+
+    keybd_ring_save(observed_ring);
+    observed_latch = data_fdps_input_last_scancode;
+    observed_prev_scancode = data_fdps_input_isr_prev_scancode;
+    observed_head = data_fdps_input_scancode_queue_head;
+    observed_write_index = data_fdps_input_scancode_queue_write_index;
+
+    /* Leave the controller with nothing in its output buffer.  The handler
+       under test takes one byte per entry and the cases stage one byte per
+       call, so in principle the two balance; in practice a fixture that stages
+       bytes into the controller has to check rather than assume, because an
+       unread byte is not a per-case failure -- it accumulates, and what it
+       eventually breaks is a later file's fixture rather than this one. */
+    for (drain = 0; drain < KBD_STAGE_SPINS; drain++) {
+        if ((probe_kbd_status() & KBD_OUTPUT_FULL) == 0) {
+            break;
+        }
+        (void) probe_kbd_read_data();
+    }
+
+    probe_restore_irq_mask(saved_irq_mask);
+    probe_write_int9_vector(machine_selector, machine_offset);
+
+    keybd_ring_restore(observed_ring);
+    data_fdps_input_last_scancode = observed_latch;
+    data_fdps_input_isr_prev_scancode = observed_prev_scancode;
+    data_fdps_input_scancode_queue_head = observed_head;
+    data_fdps_input_scancode_queue_write_index = observed_write_index;
+
+    *(unsigned short *) BIOS_KBD_HEAD_ADDR = saved_bios_head;
+    *(unsigned short *) BIOS_KBD_TAIL_ADDR = saved_bios_tail;
+    return staged;
+}
+
+/* MOV byte ptr [0x00070006],BL at 00056851 sits above every test in the
+   routine, so the latch takes the raw port byte whatever it is -- a make code,
+   and equally the break code the same key sends when it comes up.  That is what
+   fdps_read_scancode_auto_repeat polls, and it is why releasing a key registers
+   there as a change rather than as silence. */
+static void keybd_isr_latches_every_code_including_break_codes(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char saved_scancode;
+    unsigned char saved_prev;
+    int staged;
+
+    keybd_ring_save(saved_ring);
+    saved_scancode = data_fdps_input_last_scancode;
+    saved_prev = data_fdps_input_isr_prev_scancode;
+
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_input_isr_prev_scancode = 0x00;
+
+    staged = keybd_isr_fire(0x1c);          /* Return, going down */
+    CHECK_EQ(staged, 1);
+    CHECK_EQ(data_fdps_input_last_scancode, 0x1c);
+
+    data_fdps_input_isr_prev_scancode = 0x00;
+    staged = keybd_isr_fire(0x9c);          /* Return, coming back up */
+    CHECK_EQ(staged, 1);
+    CHECK_EQ(data_fdps_input_last_scancode, 0x9c);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_isr_prev_scancode = saved_prev;
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* MOV byte ptr [EAX + 0x7000f],BL / INC dword ptr [0x0007001d] at 0005686f and
+   00056875: a make code the filter lets through lands at the write index and
+   the write index moves on by one.  The read index is not the handler's to
+   touch. */
+static void keybd_isr_queues_a_make_code(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char saved_scancode;
+    unsigned char saved_prev;
+    int staged;
+
+    keybd_ring_save(saved_ring);
+    saved_scancode = data_fdps_input_last_scancode;
+    saved_prev = data_fdps_input_isr_prev_scancode;
+
+    data_fdps_input_scancode_queue[0] = KBD_RING_SENTINEL;
+    data_fdps_input_scancode_queue[1] = KBD_RING_SENTINEL;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_input_isr_prev_scancode = 0xff;
+
+    staged = keybd_isr_fire(0x1c);
+    CHECK_EQ(staged, 1);
+
+    CHECK_EQ(data_fdps_input_scancode_queue[0], 0x1c);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 1);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 0);
+    CHECK_EQ(data_fdps_input_scancode_queue[1], KBD_RING_SENTINEL);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_isr_prev_scancode = saved_prev;
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* CMP BL,0x80 / JNC at 00056865: a code with bit 7 set never reaches the ring,
+   so a key coming up costs the queue nothing.  The latch still takes it, which
+   is the difference between this and a code the filter dropped. */
+static void keybd_isr_drops_a_break_code(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char saved_scancode;
+    unsigned char saved_prev;
+    int staged;
+
+    keybd_ring_save(saved_ring);
+    saved_scancode = data_fdps_input_last_scancode;
+    saved_prev = data_fdps_input_isr_prev_scancode;
+
+    data_fdps_input_scancode_queue[0] = KBD_RING_SENTINEL;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_input_isr_prev_scancode = 0x00;
+
+    staged = keybd_isr_fire(0x9c);
+    CHECK_EQ(staged, 1);
+
+    CHECK_EQ(data_fdps_input_scancode_queue[0], KBD_RING_SENTINEL);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 0);
+    CHECK_EQ(data_fdps_input_last_scancode, 0x9c);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_isr_prev_scancode = saved_prev;
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* MOV byte ptr [0x00070021],BL at 0005685f comes BEFORE the CMP BL,0x80 at
+   00056865, so a break code rearms the filter although it is never queued.
+   That ordering is the whole reason a key can be pressed twice in a row: the
+   release between the two presses changes this byte, so the second press is a
+   different code from the previous event and gets queued.  Moved inside the
+   make-code test the store would still queue the first press of every key and
+   would silently swallow the second. */
+static void keybd_isr_records_a_break_code_as_the_previous_code(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char saved_scancode;
+    unsigned char saved_prev;
+    int staged;
+
+    keybd_ring_save(saved_ring);
+    saved_scancode = data_fdps_input_last_scancode;
+    saved_prev = data_fdps_input_isr_prev_scancode;
+
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_input_isr_prev_scancode = 0x00;
+
+    staged = keybd_isr_fire(0x9c);
+    CHECK_EQ(staged, 1);
+    CHECK_EQ(data_fdps_input_isr_prev_scancode, 0x9c);
+
+    /* And the press that follows the release is queued, because that release
+       left a different code behind. */
+    data_fdps_input_scancode_queue[0] = KBD_RING_SENTINEL;
+    staged = keybd_isr_fire(0x1c);
+    CHECK_EQ(staged, 1);
+    CHECK_EQ(data_fdps_input_scancode_queue[0], 0x1c);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 1);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_isr_prev_scancode = saved_prev;
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* CMP BL,byte ptr [0x00070021] / JZ at 00056857: the same code twice in a row
+   is queued once.  This is what keeps the keyboard's own typematic repeat from
+   filling the ring while a key is held -- the auto-repeat the game does report
+   is fdps_read_scancode_auto_repeat's, off the latch and off the timer, not the
+   controller's.  The latch is still written, because that store is above the
+   filter. */
+static void keybd_isr_ignores_a_repeat_of_the_same_code(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char saved_scancode;
+    unsigned char saved_prev;
+    int staged;
+
+    keybd_ring_save(saved_ring);
+    saved_scancode = data_fdps_input_last_scancode;
+    saved_prev = data_fdps_input_isr_prev_scancode;
+
+    data_fdps_input_scancode_queue[3] = KBD_RING_SENTINEL;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 3;
+    data_fdps_input_isr_prev_scancode = 0x1c;
+    data_fdps_input_last_scancode = 0x00;
+
+    staged = keybd_isr_fire(0x1c);
+    CHECK_EQ(staged, 1);
+
+    CHECK_EQ(data_fdps_input_scancode_queue[3], KBD_RING_SENTINEL);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 3);
+    CHECK_EQ(data_fdps_input_last_scancode, 0x1c);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_isr_prev_scancode = saved_prev;
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* JNC and not JL at 00056868: the make/break split is an UNSIGNED comparison
+   against 0x80, so 0x7f is the last code queued and 0x80 the first dropped.
+   Spelt with a signed char or a signed compare the branch inverts on exactly
+   the codes that mean "key released", and every release in the game would be
+   queued as a press -- which no case that stages only make codes can see. */
+static void keybd_isr_splits_make_from_break_unsigned(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char saved_scancode;
+    unsigned char saved_prev;
+    int staged;
+
+    keybd_ring_save(saved_ring);
+    saved_scancode = data_fdps_input_last_scancode;
+    saved_prev = data_fdps_input_isr_prev_scancode;
+
+    data_fdps_input_scancode_queue[0] = KBD_RING_SENTINEL;
+    data_fdps_input_scancode_queue[1] = KBD_RING_SENTINEL;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_input_isr_prev_scancode = 0x00;
+
+    staged = keybd_isr_fire(0x7f);          /* the highest make code there is */
+    CHECK_EQ(staged, 1);
+    CHECK_EQ(data_fdps_input_scancode_queue[0], 0x7f);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 1);
+
+    staged = keybd_isr_fire(0x80);          /* the lowest break code there is */
+    CHECK_EQ(staged, 1);
+    CHECK_EQ(data_fdps_input_scancode_queue[1], KBD_RING_SENTINEL);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 1);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_isr_prev_scancode = saved_prev;
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* CMP dword ptr [0x0007001d],0xa / JNZ / MOV dword ptr [0x0007001d],0x0 at
+   0005687b..00056884: the tenth entry is written at index 9 and the index comes
+   back to 0, so the handler never writes past the ring into the two indices
+   that follow it in the image.  The wrap is an equality against ten, and it is
+   tested after the increment, so index 9 is reachable and index 10 is not. */
+static void keybd_isr_wraps_the_write_index_at_ten(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char saved_scancode;
+    unsigned char saved_prev;
+    int staged;
+
+    keybd_ring_save(saved_ring);
+    saved_scancode = data_fdps_input_last_scancode;
+    saved_prev = data_fdps_input_isr_prev_scancode;
+
+    data_fdps_input_scancode_queue[9] = KBD_RING_SENTINEL;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 9;
+    data_fdps_input_isr_prev_scancode = 0xff;
+
+    staged = keybd_isr_fire(0x39);          /* space */
+    CHECK_EQ(staged, 1);
+
+    CHECK_EQ(data_fdps_input_scancode_queue[9], 0x39);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 0);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_isr_prev_scancode = saved_prev;
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* And it does not wrap early: from index 8 the index goes to 9 and stays there.
+   A wrap written as >= would agree with the case above and disagree here. */
+static void keybd_isr_does_not_wrap_before_ten(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char saved_scancode;
+    unsigned char saved_prev;
+    int staged;
+
+    keybd_ring_save(saved_ring);
+    saved_scancode = data_fdps_input_last_scancode;
+    saved_prev = data_fdps_input_isr_prev_scancode;
+
+    data_fdps_input_scancode_queue[8] = KBD_RING_SENTINEL;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 8;
+    data_fdps_input_isr_prev_scancode = 0xff;
+
+    staged = keybd_isr_fire(0x39);
+    CHECK_EQ(staged, 1);
+
+    CHECK_EQ(data_fdps_input_scancode_queue[8], 0x39);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 9);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_isr_prev_scancode = saved_prev;
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* There is no reference to 0x00070019 anywhere in 00056837..00056897 and no
+   fullness test either: the handler owns the write index and the ring's bytes,
+   fdps_read_keyboard_queue owns the read index, and neither writes the other's
+   state.  That split is what lets the reader drain the ring with interrupts on,
+   and it is also why the ring silently overruns -- ten unread codes bring the
+   write index back onto the read index and the queue reads as empty. */
+static void keybd_isr_leaves_the_read_index_alone(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char saved_scancode;
+    unsigned char saved_prev;
+    int staged;
+
+    keybd_ring_save(saved_ring);
+    saved_scancode = data_fdps_input_last_scancode;
+    saved_prev = data_fdps_input_isr_prev_scancode;
+
+    data_fdps_input_scancode_queue_head = 4;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_input_isr_prev_scancode = 0xff;
+
+    staged = keybd_isr_fire(0x39);
+    CHECK_EQ(staged, 1);
+
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 4);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 1);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_isr_prev_scancode = saved_prev;
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The handler's repeat filter at 0x00070021 and the poll's at 0x00063fc4 are
+   two different objects with two different jobs, and a sweep of the image finds
+   no instruction in 00056837..00056897 touching the poll's three globals.  Were
+   they the same byte the handler would reset the hold count on every typematic
+   repeat the controller sent and the game's own auto-repeat would never
+   reach its delay. */
+static void keybd_isr_leaves_the_auto_repeat_filter_alone(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char saved_scancode;
+    unsigned char saved_prev;
+    unsigned int saved_repeat_prev;
+    unsigned int saved_repeat_tick;
+    int saved_repeat_counter;
+    int staged;
+
+    keybd_ring_save(saved_ring);
+    saved_scancode = data_fdps_input_last_scancode;
+    saved_prev = data_fdps_input_isr_prev_scancode;
+    saved_repeat_prev = data_fdps_input_key_repeat_prev_scancode;
+    saved_repeat_tick = data_fdps_input_key_repeat_last_tick;
+    saved_repeat_counter = data_fdps_input_key_repeat_counter;
+
+    data_fdps_input_key_repeat_prev_scancode = 0x39;
+    data_fdps_input_key_repeat_last_tick = 11;
+    data_fdps_input_key_repeat_counter = 7;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_input_isr_prev_scancode = 0xff;
+
+    staged = keybd_isr_fire(0x1c);
+    CHECK_EQ(staged, 1);
+
+    CHECK_EQ(data_fdps_input_key_repeat_prev_scancode, 0x39);
+    CHECK_EQ(data_fdps_input_key_repeat_last_tick, 11);
+    CHECK_EQ(data_fdps_input_key_repeat_counter, 7);
+
+    data_fdps_input_key_repeat_prev_scancode = saved_repeat_prev;
+    data_fdps_input_key_repeat_last_tick = saved_repeat_tick;
+    data_fdps_input_key_repeat_counter = saved_repeat_counter;
+    data_fdps_input_last_scancode = saved_scancode;
+    data_fdps_input_isr_prev_scancode = saved_prev;
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
 void run_keybd_tests(void)
 {
     RUN_TEST(keybd_scancode_ptr_names_the_isr_slot);
@@ -1478,4 +2044,14 @@ void run_keybd_tests(void)
     RUN_TEST(keybd_uninstall_leaves_the_segment_registers_alone);
     RUN_TEST(keybd_uninstall_leaves_the_queue_alone);
     RUN_TEST(keybd_uninstall_uses_the_saved_selector_not_cs);
+    RUN_TEST(keybd_isr_latches_every_code_including_break_codes);
+    RUN_TEST(keybd_isr_queues_a_make_code);
+    RUN_TEST(keybd_isr_drops_a_break_code);
+    RUN_TEST(keybd_isr_records_a_break_code_as_the_previous_code);
+    RUN_TEST(keybd_isr_ignores_a_repeat_of_the_same_code);
+    RUN_TEST(keybd_isr_splits_make_from_break_unsigned);
+    RUN_TEST(keybd_isr_wraps_the_write_index_at_ten);
+    RUN_TEST(keybd_isr_does_not_wrap_before_ten);
+    RUN_TEST(keybd_isr_leaves_the_read_index_alone);
+    RUN_TEST(keybd_isr_leaves_the_auto_repeat_filter_alone);
 }

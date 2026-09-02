@@ -105,6 +105,33 @@ extern int data_fdps_input_scancode_queue_head;
  * build supplies it zero-filled. */
 extern volatile int data_fdps_input_scancode_queue_write_index;
 
+/* 00070021.  The scancode fdps_keyboard_isr saw on the previous key event, and
+ * the whole of its repeat filter: the handler queues a make code only when it
+ * differs from this byte, which is what stops the keyboard's own typematic
+ * repeat from filling the ring while a key is held down.
+ *
+ * Written on every event whose code differs from it, break codes included
+ * (MOV byte ptr [0x00070021],BL at 0005685f sits BEFORE the CMP BL,0x80 that
+ * drops break codes), so a press and its release each rearm the filter for the
+ * other.  Holding a key produces one queue entry however long the typematic
+ * runs; tapping the same key twice produces two, because the break code in
+ * between changes this byte.
+ *
+ * UNSIGNED and one byte, because the comparison it exists for is against BL --
+ * CMP BL,byte ptr [0x00070021] at 00056857, a byte compare of the raw port 0x60
+ * value, which the same routine then sorts against 0x80 with an unsigned JNC.
+ *
+ * A sweep of the whole image for 0x00070021 finds exactly those two
+ * instructions, both in fdps_keyboard_isr: this is the handler's private state
+ * and nothing else in the game can see it.  In particular it is NOT the byte
+ * fdps_read_scancode_auto_repeat filters on -- that one is
+ * data_fdps_input_key_repeat_prev_scancode at 0x00063fc4, a dword, and the two
+ * filters run independently.
+ *
+ * Defined by ticket 23 along with the rest of keybd.c's data; until then the
+ * build supplies it zero-filled. */
+extern unsigned char data_fdps_input_isr_prev_scancode;
+
 /* 00063fc4.  The scancode fdps_read_scancode_auto_repeat saw on its previous
  * poll, and the only thing that tells a new key press from a key still held
  * down: the poll compares the latched byte with this and treats a difference
@@ -313,23 +340,28 @@ extern unsigned short data_fdps_input_prev_int9_handler_selector;
  * build supplies it zero-filled. */
 extern unsigned int data_fdps_prev_int9_handler_offset;
 
-/* 00056837.  The game's own INT 09h handler: hand-written assembly that reads
-   the scancode out of port 0x60, latches it into
-   data_fdps_input_last_scancode, queues it when it is a make code, acknowledges
-   the 8259 and leaves through IRETD.
+/* 00056837.  The game's own INT 09h handler: reads the scancode out of port
+   0x60, latches it into data_fdps_input_last_scancode, queues it when it is a
+   make code the previous event did not already produce, acknowledges the
+   keyboard on port 0x61 and the 8259 on port 0x20, and leaves through IRETD.
 
-   Declared here so that fdps_install_keyboard_isr can name it, and for no other
-   reason.  It is never called: the single reference to it anywhere in the image
-   is MOV EDX,0x56837 at 0005680a, the address handed to INT 21h AH=25h, and a
-   sweep of the whole image for 0x56837 finds that one instruction.  The
-   `void (void)` shape and the pragma below say only "an undecorated symbol
-   whose address is a code address" -- an interrupt handler cannot be entered
-   through a CALL and this declaration does not claim it can.
+   __interrupt is the declaration, not a decoration.  The routine is entered
+   through an interrupt gate and never by a CALL: the single reference to it
+   anywhere in the image is MOV EDX,0x56837 at 0005680a, the address handed to
+   INT 21h AH=25h, and a sweep of the whole image for 0x56837 finds that one
+   instruction.  It saves the registers it uses and exits with IRETD rather than
+   RET (PUSH EDX/ECX/EBX/EAX and PUSH DS at 00056838..0005683c against the POPs
+   and the IRETD at 00056892..00056897), which is exactly what the keyword makes
+   wcc386 generate -- and it is why no `parm caller []` appears below: there is
+   no calling convention here to declare, only the undecorated symbol name that
+   lets fdps_install_keyboard_isr hand the address to DOS.
 
-   Not emitted yet, so the build stubs it and the address installed on the
-   vector is the stub's until it lands. */
-extern void fdps_keyboard_isr(void);
-#pragma aux fdps_keyboard_isr "*" parm caller [];
+   The handler is the only writer of data_fdps_input_isr_prev_scancode, the only
+   writer of the ring's bytes and the only writer of the ring's write index; it
+   never touches the read index.  That split is what lets
+   fdps_read_keyboard_queue drain the ring with interrupts enabled. */
+extern void __interrupt fdps_keyboard_isr(void);
+#pragma aux fdps_keyboard_isr "*";
 
 /* Hooks interrupt vector 09h, saving the handler it displaces.
 

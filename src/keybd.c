@@ -13,6 +13,7 @@
  * but it is this file's three private globals it runs on.  It is the only user
  * of the timer tick counter here, which is why gamedata.h is included.
  */
+#include <conio.h>
 #include "gamedata.h"
 #include "keybd.h"
 
@@ -27,6 +28,22 @@
    so the first repeat lands on tick 6, then 9, 12 and on. */
 #define REPEAT_DELAY_TICKS 5
 #define REPEAT_PERIOD_TICKS 3
+
+/* The keyboard controller's data port, which hands over one scancode per key
+   event, and system control port B, whose bit 7 is the acknowledge line the
+   handler pulses so the controller will produce the next one. */
+#define KEYBOARD_DATA_PORT 0x60
+#define SYSTEM_PORT_B 0x61
+#define KEYBOARD_ACK_BIT 0x80
+
+/* Bit 7 of a scancode: set on the code a key sends when it comes up, clear on
+   the one it sends when it goes down.  The handler queues make codes only. */
+#define SCANCODE_BREAK_BIT 0x80
+
+/* The master 8259's command port and the non-specific end-of-interrupt the
+   handler writes to it, which is what lets the chip deliver IRQ1 again. */
+#define PIC_MASTER_COMMAND 0x20
+#define PIC_END_OF_INTERRUPT 0x20
 
 unsigned int fdps_read_scancode_auto_repeat(void)
 {
@@ -246,7 +263,7 @@ extern unsigned int fdps_keybd_get_int9_vector_asm(
    in DS addresses the same bytes but is not executable, and a vector installed
    through it faults on the first key pressed.  The original spells it PUSH CS
    / POP DS at 00056808. */
-extern void fdps_keybd_set_int9_vector_asm(void (*handler)(void));
+extern void fdps_keybd_set_int9_vector_asm(void (__interrupt *handler)(void));
 #pragma aux fdps_keybd_set_int9_vector_asm = \
     "push ds"                           \
     "push cs"                           \
@@ -346,4 +363,113 @@ void fdps_uninstall_keyboard_isr(void)
        tidier than the original and would throw away codes that were queued
        before the uninstall and are still readable after it. */
     data_fdps_input_last_scancode = SCANCODE_NONE;
+}
+
+/* STI, as the handler's very first instruction (00056837).
+ *
+ * There is no C for it at this flag set: <i86.h> declares _enable, but the
+ * #pragma intrinsic that turns it into a bare STI is inside
+ * `#ifdef __INLINE_FUNCTIONS__`, and the build does not pass -oi
+ * (rebuild_info/build_flags.md), so _enable() would compile to a CALL into the
+ * CRT from inside an interrupt handler.  Written as an auxiliary pragma with a
+ * body instead, so wcc386 expands the single instruction at the point of call
+ * and no symbol of this name reaches the object file -- the same arrangement,
+ * and for the same reason, as the three INT 21h pragmas above.
+ *
+ * `modify []` and not the four scratch registers the DOS pragmas list: STI
+ * touches no register at all, and claiming otherwise here would make the
+ * compiler reload values across it inside the one routine in this file where
+ * the register traffic is the whole cost. */
+extern void fdps_keybd_enable_interrupts_asm(void);
+#pragma aux fdps_keybd_enable_interrupts_asm = "sti" modify [];
+
+void __interrupt fdps_keyboard_isr(void)
+{
+    /* The byte port 0x60 handed over for this key event: a make code when the
+       key went down, that code with bit 7 set when it came up, and whatever
+       the controller's own protocol produced in any other case.  It is read
+       once and every later test is against this copy, which is what the
+       assembly does -- BL holds it from 00056845 to the end and no branch
+       re-reads the port. */
+    unsigned char scancode;
+
+    /* System control port B as this handler found it, kept so that the
+       acknowledge pulse can be driven on bit 7 and taken off again without
+       disturbing the other six bits -- among them the two that gate the PC
+       speaker, which the sound code owns.  OR AL,0x80 / OUT / AND AL,0x7f /
+       OUT at 00056849..0005684f: the second write is the first value with bit 7
+       cleared, so a port B that arrived with bit 7 set does not get it back. */
+    unsigned char port_b_state;
+
+    /* STI before anything else, exactly as the image opens.  The interrupt gate
+       arrives with interrupts off, and the handler turns them back on for its
+       own body rather than for the code it interrupted -- IRETD restores the
+       caller's flags either way.  What it buys is the timer: the tick counter
+       the whole game's pacing runs off is IRQ0's, and a keystroke arriving
+       inside a redraw would otherwise hold IRQ0 off for the length of this
+       routine.  IRQ1 itself cannot re-enter, because the 8259 holds it in
+       service until the EOI at the bottom. */
+    fdps_keybd_enable_interrupts_asm();
+
+    scancode = (unsigned char) inp(KEYBOARD_DATA_PORT);
+
+    port_b_state = (unsigned char) inp(SYSTEM_PORT_B);
+    outp(SYSTEM_PORT_B, port_b_state | KEYBOARD_ACK_BIT);
+    outp(SYSTEM_PORT_B, port_b_state & ~KEYBOARD_ACK_BIT);
+
+    /* The latch is written unconditionally and before any filtering (MOV byte
+       ptr [0x00070006],BL at 00056851), so it holds break codes as well as
+       make codes and it is updated even for the repeats the filter below
+       throws away.  fdps_read_scancode_auto_repeat reads exactly this byte, and
+       that is how a key being held down keeps reporting itself while the ring
+       gets one entry for the whole hold. */
+    data_fdps_input_last_scancode = scancode;
+
+    if (scancode != data_fdps_input_isr_prev_scancode) {
+        /* The previous-code byte is written here, before the make-code test
+           and not inside it (MOV byte ptr [0x00070021],BL at 0005685f, CMP
+           BL,0x80 at 00056865).  Break codes therefore rearm the filter
+           although they are never queued, which is what makes a second tap of
+           the same key produce a second entry: the release in between changed
+           this byte.  Moving the store inside the test would compile, would
+           pass every queueing case below, and would silently drop the second
+           press of any key pressed twice in a row. */
+        data_fdps_input_isr_prev_scancode = scancode;
+
+        /* CMP BL,0x80 / JNC at 00056865: an UNSIGNED test, so 0x80 and above
+           are break codes and are dropped.  Read as signed the same comparison
+           would put every break code below the threshold and queue the lot,
+           and nothing but a real keystroke would say so
+           (rebuild_info/pitfalls.md). */
+        if (scancode < SCANCODE_BREAK_BIT) {
+            /* The ring is written at the write index and the write index alone
+               is advanced -- the read index is fdps_read_keyboard_queue's and
+               this routine never touches it, which is the whole of the
+               agreement that lets that reader run with interrupts on.
+
+               There is no fullness test.  The index wraps at ten whatever the
+               reader has taken, so ten unqueued codes bring it back onto the
+               read index and the queue reads as empty with the ring full.
+               That is the original's behaviour and adding the count that would
+               fix it changes which keystrokes the game sees. */
+            data_fdps_input_scancode_queue[
+                data_fdps_input_scancode_queue_write_index] = scancode;
+            data_fdps_input_scancode_queue_write_index =
+                data_fdps_input_scancode_queue_write_index + 1;
+
+            /* An equality against the ring's length, not a modulus and not a
+               >= test: CMP dword ptr [0x0007001d],0xa / JNZ at 0005687b. */
+            if (data_fdps_input_scancode_queue_write_index ==
+                SCANCODE_QUEUE_LEN) {
+                data_fdps_input_scancode_queue_write_index = 0;
+            }
+        }
+    }
+
+    /* MOV AL,0x20 / OUT 0x20,AL at 0005688e: the non-specific end-of-interrupt,
+       written on every path including the two that queue nothing, and written
+       last -- the 8259 holds IRQ1 in service until it arrives, so everything
+       above runs without a second key event landing on top of it even though
+       interrupts are on. */
+    outp(PIC_MASTER_COMMAND, PIC_END_OF_INTERRUPT);
 }

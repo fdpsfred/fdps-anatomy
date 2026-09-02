@@ -1894,6 +1894,14 @@
       "status": "committed",
       "emitted_against": "0xf7",
       "rounds": 0
+    },
+    "00056837": {
+      "name": "fdps_keyboard_isr",
+      "target": "keybd.c",
+      "body_size": "0x61",
+      "rounds": 0,
+      "status": "committed",
+      "emitted_against": "0x61"
     }
   }
 }

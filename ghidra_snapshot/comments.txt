@@ -20540,7 +20540,7 @@ Evidence: The only reference to the entry is the DATA reference at 0005680a insi
 Name: no library symbol identified; descriptive game-pool name for the routine fdps_install_keyboard_isr installs.
 Boundary: 00056837-00056897, entry is the vector target and the IRETD at 00056897 is the only exit; gap_after is empty and 00056898 opens a fresh standard frame.
 Signature: no C calling convention -- entered through an interrupt gate, takes no arguments, saves EDX/ECX/EBX/EAX and DS itself, loads DS with selector 0x0002 and exits with IRETD. The recorded void __watcall (void) is a nominal placeholder for a zero-argument void routine, not what the code implements.
-Open question: which code consumes the 0x7000f ring buffer and where its read cursor lives -- the write index at 0x7001d wraps unconditionally at 10 with no fullness check, so the reader tracks its own position elsewhere.
+Consumer: the consumer is fdps_read_keyboard_queue at 000567bb and its read cursor is the separate global at 0x00070019, which that routine owns entirely (MOV AL,byte ptr [EBX + 0x7000f] at 000567cf; INC dword ptr [0x00070019] / CMP dword ptr [0x00070019],0xa / MOV dword ptr [0x00070019],0x0 at 000567d5..000567e4). The queue is empty exactly when the two indices are equal, which is why the handler needs no fullness test -- and why ten unread codes bring the write index back onto the read index and make a full ring read as empty.
 
 === 00056898 [PLATE]
 Computes the FDE.SAV integrity checksum: the unsigned sum of every byte of the save image except its trailing 4-byte checksum field.
