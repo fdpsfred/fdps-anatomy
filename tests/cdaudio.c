@@ -3,8 +3,9 @@
  * So far this covers fdps_cd_seek at 0003c3fa, fdps_cd_play_audio_range at
  * 0003c452, fdps_cd_stop_audio at 0003c4a7, fdps_cd_resume_audio at 0003c4ff,
  * fdps_cd_read_q_channel at 0003c5a6, fdps_cd_audio_is_idle at 0003c6e8,
- * fdps_cd_resolve_track_range at 0003c803, fdps_cd_play_track at 0003c85b and
- * fdps_cd_set_music_track at 00030bf0.
+ * fdps_cd_resolve_track_range at 0003c803, fdps_cd_play_track at 0003c85b,
+ * fdps_cd_set_music_track at 00030bf0 and fdps_cd_music_repeat_poll at
+ * 00030c50.
  *
  * Every expected value below comes from the instructions of those functions,
  * never from the emitted C.  For fdps_cd_seek:
@@ -1619,6 +1620,403 @@ static void cdaudio_set_music_off_does_not_latch(void)
     CHECK_EQ(data_fdps_cd_track_info_track_number, 3);
 }
 
+/* ---------------------------------------------------------------------------
+ * fdps_cd_music_repeat_poll at 00030c50.
+ *
+ * The whole body, which every expectation below is read off:
+ *
+ *   MOV EAX,[0x00069d74] / CMP EAX,dword ptr [0x00069d64] / JZ 00030cbb
+ *   INC dword ptr [0x00060170]
+ *   CMP dword ptr [0x00060170],0x4b / JNZ 00030cb1
+ *   CMP dword ptr [0x00069d54],-0x1  / JZ  00030c8a
+ *   CMP byte  ptr [0x00060008],0x0   / JNZ 00030c8c
+ *   00030c8a: JMP 00030c96
+ *   00030c8c: CALL 0003c6e8 / TEST AX,AX / JNZ 00030c98
+ *   00030c96: JMP 00030ca7
+ *   00030c98: MOV EAX,[0x00069d54] / INC EAX / PUSH EAX / CALL 0003c85b /
+ *             ADD ESP,0x4
+ *   00030ca7: MOV dword ptr [0x00060170],0x0
+ *   00030cb1: MOV EAX,[0x00069d64] / MOV [0x00069d74],EAX
+ *   00030cbb: POP EBP / POP EDI / POP ESI / POP EBX / RET
+ *
+ * Two of the branches turn on a value that came back from a CALL, and the CALL
+ * is fdps_cd_audio_is_idle, whose answer is the busy bit 0x0200 of the status
+ * word its own device request leaves behind.  No driver answers that request
+ * here -- drive index 0xff is refused on the drive number, as everywhere above
+ * -- so the word that comes back is the one that went out, and the one that
+ * went out is fdps_cdrom_read_device_status's uninitialised local.  That local
+ * is stack, so painting the stack the poll's callees are about to use decides
+ * the answer: 0x00 leaves the busy bit clear and the drive reads as idle, 0xff
+ * sets it and the drive reads as still playing.  Both arms are therefore
+ * reachable on demand, and the paint is asserted to work before anything is
+ * built on it.
+ * ------------------------------------------------------------------------ */
+
+/* A tick number nothing else in the file uses.  The latch is armed one above it
+   so that the poll always sees a new tick unless a case says otherwise. */
+#define POLL_TICK 5u
+
+/* One short of the 0x4b the body fires on, so a single call reaches the
+   period. */
+#define POLL_PERIOD_MINUS_ONE 0x4a
+
+/* Fills the stack the poll's callees are about to run in with one byte, so
+   that fdps_cdrom_read_device_status's uninitialised status field -- the word
+   fdps_cd_audio_is_idle reads bit 0x0200 out of -- holds that byte repeated
+   rather than whatever the previous call chain left.  The array is far larger
+   than the four frames involved, so nothing here depends on where any of them
+   lands. */
+static void paint_the_request_frame(unsigned char value)
+{
+    unsigned char paint[2048];
+
+    memset(paint, value, sizeof(paint));
+}
+
+/* Puts the poll's five globals and everything the chain under it reads into a
+   known state, with the tick latch armed one above the counter so that the
+   outer guard lets the body through.  The request header and the IOCTL block
+   are poisoned, so anything found in them afterwards was staged by this call. */
+static void arm_the_music_poll(int counter_preset, int music_index,
+                               unsigned char music_enabled)
+{
+    int i;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    for (i = 0; i < 0x20; i++) {
+        data_fdps_cd_request_header_buffer[i] = HEADER_POISON;
+    }
+    data_fdps_cd_ioctl_buffer[0] = HEADER_POISON;
+    data_fdps_cd_ioctl_buffer[1] = HEADER_POISON;
+
+    data_fdps_cd_track_info_track_number = MUSIC_PRESET_TRACK;
+    data_fdps_cd_highest_track_number = 20;
+    data_fdps_cd_track_start_sector = (unsigned int) RESOLVE_TRACK_START_SECTOR;
+    data_fdps_cd_leadout_sector = (unsigned int) RESOLVE_LEADOUT_SECTOR;
+    data_fdps_cd_play_range_start_sector = (unsigned int) RANGE_POISON;
+    data_fdps_cd_play_range_end_sector = (unsigned int) RANGE_POISON;
+
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    data_fdps_audio_bgm_enabled_flag = music_enabled;
+    data_fdps_audio_cd_current_music_index = music_index;
+
+    data_fdps_audio_cd_repeat_tick_counter = counter_preset;
+    data_fdps_timer_tick_counter = POLL_TICK;
+    data_fdps_audio_cd_repeat_last_tick = POLL_TICK + 1u;
+}
+
+/* The paint has to decide the drive's answer for the two arms below to be
+   reachable on demand, so that is asserted on its own rather than assumed: a
+   frame painted 0x00 carries no busy bit and fdps_cd_status_is_not_busy's
+   (status & 0x0200) == 0 has to come out 1, a frame painted 0xff sets the bit
+   and it has to come out 0.  If this ever stops holding it is this test that
+   says so, instead of the play-arm tests quietly passing on the wrong arm. */
+static void cdaudio_repeat_poll_paint_decides_what_the_drive_says(void)
+{
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+
+    paint_the_request_frame(0x00);
+    CHECK_EQ(fdps_cd_audio_is_idle(), 1);
+
+    paint_the_request_frame(0xff);
+    CHECK_EQ(fdps_cd_audio_is_idle(), 0);
+}
+
+/* MOV EAX,[0x00069d74] / CMP EAX,dword ptr [0x00069d64] / JZ 00030cbb goes
+   straight to the epilogue, so a tick the poll has already finished on costs
+   nothing at all: the counter does not move, the latch does not move and no
+   request is staged.  This is what lets the game loops call this every pass. */
+static void cdaudio_repeat_poll_ignores_a_tick_it_has_already_seen(void)
+{
+    arm_the_music_poll(10, 1, 1);
+    data_fdps_timer_tick_counter = 1234;
+    data_fdps_audio_cd_repeat_last_tick = 1234;
+
+    paint_the_request_frame(0x00);
+    fdps_cd_music_repeat_poll();
+
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 10);
+    CHECK_EQ(data_fdps_audio_cd_repeat_last_tick, 1234);
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0], HEADER_POISON);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, MUSIC_PRESET_TRACK);
+}
+
+/* INC dword ptr [0x00060170] at 00030c69 and MOV EAX,[0x00069d64] /
+   MOV [0x00069d74],EAX at 00030cb1: a tick the poll has not seen steps the
+   counter by one and refreshes the latch onto the live counter. */
+static void cdaudio_repeat_poll_steps_the_counter_on_a_new_tick(void)
+{
+    arm_the_music_poll(10, -1, 0);
+
+    fdps_cd_music_repeat_poll();
+
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 11);
+    CHECK_EQ(data_fdps_audio_cd_repeat_last_tick, POLL_TICK);
+}
+
+/* The counter is inside the latch's arm, so it counts ticks and not calls:
+   three calls in one tick step it once, and it moves again only when the timer
+   does.  A body that stepped it per call would reach the period 75 times
+   sooner and put a real device request on the per-frame path. */
+static void cdaudio_repeat_poll_counts_ticks_and_not_calls(void)
+{
+    arm_the_music_poll(0, -1, 0);
+
+    fdps_cd_music_repeat_poll();
+    fdps_cd_music_repeat_poll();
+    fdps_cd_music_repeat_poll();
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 1);
+
+    data_fdps_timer_tick_counter = POLL_TICK + 1u;
+    fdps_cd_music_repeat_poll();
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 2);
+    CHECK_EQ(data_fdps_audio_cd_repeat_last_tick, POLL_TICK + 1u);
+}
+
+/* The guard is JZ and not a signed or unsigned order test, so a latch above the
+   live counter still services the tick.  That is what makes the tick counter's
+   wrap harmless here, the same as it is for fdps_cycle_ui_palette. */
+static void cdaudio_repeat_poll_latches_on_inequality_not_order(void)
+{
+    arm_the_music_poll(0, -1, 0);
+    data_fdps_timer_tick_counter = 10;
+    data_fdps_audio_cd_repeat_last_tick = 4000000000u;
+
+    fdps_cd_music_repeat_poll();
+
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 1);
+    CHECK_EQ(data_fdps_audio_cd_repeat_last_tick, 10);
+}
+
+/* CMP dword ptr [0x00060170],0x4b / JNZ 00030cb1 skips everything below it, so
+   a tick that leaves the counter short of the period asks the drive nothing --
+   the header is still poison and no track-info query has run -- while the latch
+   is still refreshed.  The frame is painted idle so that a body without the
+   period test would have played. */
+static void cdaudio_repeat_poll_asks_the_drive_nothing_before_the_period(void)
+{
+    arm_the_music_poll(0x49, 1, 1);
+
+    paint_the_request_frame(0x00);
+    fdps_cd_music_repeat_poll();
+
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 0x4a);
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0], HEADER_POISON);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], HEADER_POISON);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, MUSIC_PRESET_TRACK);
+    CHECK_EQ(data_fdps_audio_cd_repeat_last_tick, POLL_TICK);
+}
+
+/* The tick that carries the counter to 0x4b is the one that reaches the drive.
+   With the frame painted busy the chain stops at fdps_cd_audio_is_idle's own
+   request, so what stands in the header is the Device Status IOCTL -- length
+   0x1a, command 3, control block code 6 -- and nothing longer was staged over
+   it.  0x4b is 75 ticks, and the tick runs at the 25 Hz main asks
+   AIL_set_timer_frequency for, so the drive is asked once every three
+   seconds. */
+static void cdaudio_repeat_poll_asks_the_drive_on_the_seventy_fifth_tick(void)
+{
+    arm_the_music_poll(POLL_PERIOD_MINUS_ONE, 1, 1);
+
+    paint_the_request_frame(0xff);
+    fdps_cd_music_repeat_poll();
+
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0], 0x1a);
+    CHECK_EQ(data_fdps_cd_request_header_buffer[2], 3);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], 6);
+}
+
+/* The period test is equality and not order: a counter already standing at
+   0x4b steps to 0x4c, which the JNZ takes past everything, so it goes right
+   round rather than firing on the spot.  A body written with >= would have
+   fired here and reset -- two values apart, which no off-by-one in the
+   constant produces. */
+static void cdaudio_repeat_poll_tests_the_period_for_equality(void)
+{
+    arm_the_music_poll(0x4b, 1, 1);
+
+    paint_the_request_frame(0x00);
+    fdps_cd_music_repeat_poll();
+
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 0x4c);
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0], HEADER_POISON);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, MUSIC_PRESET_TRACK);
+}
+
+/* MOV dword ptr [0x00060170],0x0 at 00030ca7 is below the join of all three
+   inner arms, so the counter is cleared whether the drive was played, found
+   busy, or never asked at all.  A reset that only happened on the play arm
+   would leave a silent drive being asked once per tick from then on. */
+static void cdaudio_repeat_poll_clears_the_counter_on_every_arm(void)
+{
+    arm_the_music_poll(POLL_PERIOD_MINUS_ONE, -1, 1);
+    paint_the_request_frame(0x00);
+    fdps_cd_music_repeat_poll();
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 0);
+
+    arm_the_music_poll(POLL_PERIOD_MINUS_ONE, 1, 0);
+    paint_the_request_frame(0x00);
+    fdps_cd_music_repeat_poll();
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 0);
+
+    arm_the_music_poll(POLL_PERIOD_MINUS_ONE, 1, 1);
+    paint_the_request_frame(0xff);
+    fdps_cd_music_repeat_poll();
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 0);
+
+    arm_the_music_poll(POLL_PERIOD_MINUS_ONE, 1, 1);
+    paint_the_request_frame(0x00);
+    fdps_cd_music_repeat_poll();
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 0);
+}
+
+/* TEST AX,AX / JNZ 00030c98: a zero from fdps_cd_audio_is_idle means the busy
+   bit was set and the track is still playing, so nothing is restarted.  The
+   Device Status request is still standing in the header, the track-info
+   globals still name the track they were armed with and the play range is
+   still its poison, which together say the chain stopped at the query. */
+static void cdaudio_repeat_poll_leaves_a_playing_track_alone(void)
+{
+    arm_the_music_poll(POLL_PERIOD_MINUS_ONE, 1, 1);
+
+    paint_the_request_frame(0xff);
+    fdps_cd_music_repeat_poll();
+
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0], 0x1a);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, MUSIC_PRESET_TRACK);
+    CHECK_EQ(data_fdps_cd_play_range_start_sector,
+             (unsigned int) RANGE_POISON);
+}
+
+/* A non-zero answer takes the JNZ into CALL 0003c85b, whose last request is a
+   Play Audio -- header length 0x16 and command 0x84 -- staged over the Device
+   Status request that asked the question.  What the request carries is the
+   range fdps_cd_resolve_track_range published on the way: the sector at header
+   offset 0x0e is data_fdps_cd_play_range_start_sector and the count at 0x12 is
+   the width of the pair, which is what says the whole of fdps_cd_play_track
+   ran and not just its stop.  The range itself is not pinned to a number here
+   -- the track-info query the resolve reads is answered by no driver, so what
+   it publishes is the reply block's own leftovers. */
+static void cdaudio_repeat_poll_restarts_a_finished_track(void)
+{
+    unsigned char *header;
+
+    arm_the_music_poll(POLL_PERIOD_MINUS_ONE, 1, 1);
+
+    paint_the_request_frame(0x00);
+    fdps_cd_music_repeat_poll();
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x16);
+    CHECK_EQ(header[2], 0x84);
+    CHECK_EQ((long) staged_dword(header, 0x0e),
+             (long) data_fdps_cd_play_range_start_sector);
+    CHECK_EQ((long) staged_dword(header, 0x12),
+             (long) (data_fdps_cd_play_range_end_sector -
+                     data_fdps_cd_play_range_start_sector));
+}
+
+/* MOV EAX,[0x00069d54] / INC EAX / PUSH EAX at 00030c98: the track restarted is
+   one past the published music index, the same shift fdps_cd_set_music_track
+   applies, because the game counts music from 0 while the disc's audio tracks
+   start at 2.  Index 1 has to come out as track 2 and index 2 as track 3 --
+   two points, which no fixed track number and no other offset fits.  The index
+   is read back out of the global, not carried from anywhere. */
+static void cdaudio_repeat_poll_restarts_the_track_one_past_the_index(void)
+{
+    arm_the_music_poll(POLL_PERIOD_MINUS_ONE, 1, 1);
+    paint_the_request_frame(0x00);
+    fdps_cd_music_repeat_poll();
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 2);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 2);
+
+    arm_the_music_poll(POLL_PERIOD_MINUS_ONE, 2, 1);
+    paint_the_request_frame(0x00);
+    fdps_cd_music_repeat_poll();
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 3);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 3);
+}
+
+/* CMP dword ptr [0x00069d54],-0x1 is the only comparison the index meets, so 0
+   is an ordinary music index and not a second way of saying "no music": it
+   restarts track 1.  A body that tested for zero as well would have left the
+   header poisoned. */
+static void cdaudio_repeat_poll_treats_index_zero_as_a_real_track(void)
+{
+    arm_the_music_poll(POLL_PERIOD_MINUS_ONE, 0, 1);
+
+    paint_the_request_frame(0x00);
+    fdps_cd_music_repeat_poll();
+
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0], 0x16);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 1);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 1);
+}
+
+/* CMP dword ptr [0x00069d54],-0x1 / JZ 00030c8a jumps over the CALL, so with
+   no music selected the drive is not even asked: the header is still poison
+   although the frame is painted idle, which is what says the guard is above
+   the query and not below it.  Every device request costs real time, and this
+   is the state the game sits in whenever the music is off. */
+static void cdaudio_repeat_poll_asks_nothing_with_no_track_selected(void)
+{
+    arm_the_music_poll(POLL_PERIOD_MINUS_ONE, -1, 1);
+
+    paint_the_request_frame(0x00);
+    fdps_cd_music_repeat_poll();
+
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0], HEADER_POISON);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], HEADER_POISON);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, MUSIC_PRESET_TRACK);
+}
+
+/* CMP byte ptr [0x00060008],0x0 / JNZ 00030c8c is read each firing rather than
+   latched, so clearing the player's music setting stops the restarts from the
+   next firing on even with an index still published.  Nothing here is asked of
+   the drive either.  This is the second half of the pair that keeps a switched
+   off music setting from being undone by the poll -- the other half is
+   fdps_cd_set_music_track publishing -1. */
+static void cdaudio_repeat_poll_asks_nothing_with_the_music_switched_off(void)
+{
+    arm_the_music_poll(POLL_PERIOD_MINUS_ONE, 1, 0);
+
+    paint_the_request_frame(0x00);
+    fdps_cd_music_repeat_poll();
+
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0], HEADER_POISON);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[0], HEADER_POISON);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, MUSIC_PRESET_TRACK);
+}
+
+/* MOV EAX,[0x00069d64] / MOV [0x00069d74],EAX sits after the whole of the CD
+   work, so a pass that reached the drive still refreshes the latch, and the
+   next call in the same tick is refused by it: the counter that firing cleared
+   stays cleared and no second request is staged.  Without the refresh on this
+   arm every later call in the tick would step the counter again. */
+static void cdaudio_repeat_poll_latches_the_tick_it_finished_on(void)
+{
+    int i;
+
+    arm_the_music_poll(POLL_PERIOD_MINUS_ONE, 1, 1);
+
+    paint_the_request_frame(0x00);
+    fdps_cd_music_repeat_poll();
+    CHECK_EQ(data_fdps_audio_cd_repeat_last_tick, POLL_TICK);
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 0);
+
+    for (i = 0; i < 0x20; i++) {
+        data_fdps_cd_request_header_buffer[i] = HEADER_POISON;
+    }
+    fdps_cd_music_repeat_poll();
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 0);
+    CHECK_EQ(data_fdps_cd_request_header_buffer[0], HEADER_POISON);
+}
+
 void run_cdaudio_tests(void)
 {
     RUN_TEST(cdaudio_seek_header_fields_sit_where_the_stores_land);
@@ -1682,4 +2080,20 @@ void run_cdaudio_tests(void)
     RUN_TEST(cdaudio_set_music_off_discards_the_requested_index);
     RUN_TEST(cdaudio_set_music_off_with_minus_one_still_stops);
     RUN_TEST(cdaudio_set_music_off_does_not_latch);
+    RUN_TEST(cdaudio_repeat_poll_paint_decides_what_the_drive_says);
+    RUN_TEST(cdaudio_repeat_poll_ignores_a_tick_it_has_already_seen);
+    RUN_TEST(cdaudio_repeat_poll_steps_the_counter_on_a_new_tick);
+    RUN_TEST(cdaudio_repeat_poll_counts_ticks_and_not_calls);
+    RUN_TEST(cdaudio_repeat_poll_latches_on_inequality_not_order);
+    RUN_TEST(cdaudio_repeat_poll_asks_the_drive_nothing_before_the_period);
+    RUN_TEST(cdaudio_repeat_poll_asks_the_drive_on_the_seventy_fifth_tick);
+    RUN_TEST(cdaudio_repeat_poll_tests_the_period_for_equality);
+    RUN_TEST(cdaudio_repeat_poll_clears_the_counter_on_every_arm);
+    RUN_TEST(cdaudio_repeat_poll_leaves_a_playing_track_alone);
+    RUN_TEST(cdaudio_repeat_poll_restarts_a_finished_track);
+    RUN_TEST(cdaudio_repeat_poll_restarts_the_track_one_past_the_index);
+    RUN_TEST(cdaudio_repeat_poll_treats_index_zero_as_a_real_track);
+    RUN_TEST(cdaudio_repeat_poll_asks_nothing_with_no_track_selected);
+    RUN_TEST(cdaudio_repeat_poll_asks_nothing_with_the_music_switched_off);
+    RUN_TEST(cdaudio_repeat_poll_latches_the_tick_it_finished_on);
 }

@@ -16,11 +16,12 @@
  * (rebuild_info/build_flags.md), so what it builds from this file is the same
  * code without the probe, and the probe is not written out below.
  *
- * fdps_cd_set_music_track at 00030bf0 is the exception in the other
- * direction: it sits outside that block, was built with the game's own flag
- * set and carries no probe of its own.  Routing puts it here because it is the
- * music layer's front door onto these commands, not because it shared a
- * translation unit with them.
+ * fdps_cd_set_music_track at 00030bf0 and fdps_cd_music_repeat_poll at
+ * 00030c50 are the exceptions in the other direction: both sit outside that
+ * block, were built with the game's own flag set and carry no probe of their
+ * own.  Routing puts them here because they are the music layer's front door
+ * onto these commands -- the one that starts a track and the one that keeps it
+ * going -- not because they shared a translation unit with them.
  *
  * memcpy comes from <string.h> and is a real call in the image; the request
  * header layout comes from fdpstype.h, the DOS block pointer and the published
@@ -485,5 +486,86 @@ void fdps_cd_set_music_track(int music_index)
         fdps_cd_stop_audio();
     } else if (data_fdps_audio_bgm_enabled_flag != 0) {
         fdps_cd_play_track(data_fdps_audio_cd_current_music_index + 1);
+    }
+}
+
+
+/* 00030c50.  The background music's keep-alive: the game loops call this on
+   every pass and it restarts the selected CD track once the drive has run off
+   the end of it.  A CD-DA track plays once and stops -- nothing in the MSCDEX
+   command set loops one -- so the looping the player hears is this poll
+   noticing the silence and issuing the play command again.
+
+   Takes nothing and reports nothing.  Everything it works on is a global, no
+   argument register or stack slot is read, and SUB ESP,0x0 at 00030c56 says
+   the frame carries no local either.
+
+   Two throttles sit in front of the drive, and both are the point of the
+   function.  The outer one is the tick latch: CMP EAX,dword ptr [0x00069d64] /
+   JZ at 00030c61 returns at once unless the timer has moved since the last
+   pass, so the body runs at most once per tick however many times a loop spins
+   through it in that tick.  The inner one is the counter at 0x00060170, which
+   only the outer test's survivors reach, so it counts ticks and not calls; at
+   0x4b of them the drive is asked a question.  That is three seconds of wall
+   clock: main pushes 25 into fdps_audio_init at 0002930c, which hands it down
+   through fdps_audio_timer_install to AIL_set_timer_frequency, so the counter
+   advances 25 times a second and 75 of its ticks are three of them.  Without
+   both throttles, fdps_cd_audio_is_idle's real device request would go out on
+   every frame of every menu.
+
+   The counter is compared for equality and not for order: CMP dword ptr
+   [0x00060170],0x4b / JNZ at 00030c6f.  It is exact because the only path that
+   raises it is the INC directly above and the only path that clears it is
+   inside the arm the test guards, so it cannot step over 0x4b -- but a counter
+   that somehow started above it would count all the way round rather than fire
+   at once, which is what an order test would have done instead.  The image
+   ships it holding 0.
+
+   The reset at 00030ca7 is below the join of all three inner arms, so the
+   counter is cleared whether or not anything was played: a poll that found no
+   track selected, or the music switched off, or the drive still playing waits
+   another 0x4b ticks before asking again.
+
+   The three inner tests are ordered as the cheapest first.  CMP dword ptr
+   [0x00069d54],-0x1 asks whether any music is selected at all, CMP byte ptr
+   [0x00060008],0x0 asks whether the player has music on, and only if both
+   answer does the drive get a real device request -- both branches jump over
+   the CALL at 00030c8c to the reset, so a poll on those arms costs no request.
+   The two tests are not redundant with each other even though
+   fdps_cd_set_music_track publishes -1 whenever the setting is off: the
+   setting can be turned off between two polls without anybody republishing the
+   index, and it is this test that stops the drive being restarted after that.
+
+   TEST AX,AX / JNZ at 00030c91 is a 16-bit read of what fdps_cd_audio_is_idle
+   handed back, which is that routine's zero-extended 0 or 1 -- non-zero means
+   the drive is no longer busy, so the track has finished and is due to be
+   played again.  Nothing else is taken from the call.
+
+   The +1 at 00030c9d is the same numbering shift fdps_cd_set_music_track
+   applies: data_fdps_audio_cd_current_music_index is the game's 0-based music
+   index and the disc's audio tracks start at 2, track 1 being the data track.
+   The index is read back out of the global here rather than remembered from
+   anywhere, so what gets restarted is whatever the setter last published.
+
+   The latch is refreshed last, at 00030cb1, and from a second read of the live
+   counter rather than from the value the entry test compared -- the CD work in
+   between can take long enough for the timer to move, and what is latched is
+   the tick the pass finished on.  data_fdps_timer_tick_counter is volatile, so
+   both reads stay in the rebuild. */
+void fdps_cd_music_repeat_poll(void)
+{
+    if (data_fdps_audio_cd_repeat_last_tick != data_fdps_timer_tick_counter) {
+        data_fdps_audio_cd_repeat_tick_counter++;
+
+        if (data_fdps_audio_cd_repeat_tick_counter == 0x4b) {
+            if (data_fdps_audio_cd_current_music_index != -1 &&
+                data_fdps_audio_bgm_enabled_flag != 0 &&
+                fdps_cd_audio_is_idle() != 0) {
+                fdps_cd_play_track(data_fdps_audio_cd_current_music_index + 1);
+            }
+            data_fdps_audio_cd_repeat_tick_counter = 0;
+        }
+
+        data_fdps_audio_cd_repeat_last_tick = data_fdps_timer_tick_counter;
     }
 }

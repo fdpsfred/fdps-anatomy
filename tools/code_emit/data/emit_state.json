@@ -1633,6 +1633,14 @@
       "status": "committed",
       "emitted_against": "0x51",
       "rounds": 0
+    },
+    "00030c50": {
+      "name": "fdps_cd_music_repeat_poll",
+      "target": "cdaudio.c",
+      "body_size": "0x70",
+      "status": "committed",
+      "emitted_against": "0x70",
+      "rounds": 0
     }
   }
 }

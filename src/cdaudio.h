@@ -224,4 +224,48 @@ extern void fdps_cd_play_track(short track);
 extern void fdps_cd_set_music_track(int music_index);
 #pragma aux fdps_cd_set_music_track "*" parm caller [];
 
+/* 00060170.  How many timer ticks fdps_cd_music_repeat_poll has seen since it
+   last asked the drive anything.  It is stepped once per tick rather than once
+   per call -- the poll's own tick latch is above it -- and it is the throttle
+   that keeps fdps_cd_audio_is_idle's real MSCDEX device request off the
+   per-frame path: the drive is asked at 0x4b of them and the counter is then
+   cleared, whichever of the poll's arms was taken.
+
+   Signed, matching the dword accesses: the three in the image are an INC, a
+   CMP against 0x4b decided by JNZ and a store of 0, so no compare here is
+   sign-sensitive and nothing reads it as a byte.  Nothing outside
+   fdps_cd_music_repeat_poll touches it, and the image ships it holding 0. */
+extern int data_fdps_audio_cd_repeat_tick_counter;
+
+/* 00069d74.  The value of data_fdps_timer_tick_counter that
+   fdps_cd_music_repeat_poll finished its last pass on, which is what makes
+   that poll run at most once per tick however often a game loop calls it.
+
+   Unsigned, matching the counter it is a copy of, and compared for equality
+   only -- CMP EAX,dword ptr [0x00069d64] / JZ -- so a wrapped tick counter
+   costs it nothing.  Not volatile: the timer interrupt writes the counter,
+   never this latch, and the poll is the only reader and the only writer in the
+   image. */
+extern unsigned int data_fdps_audio_cd_repeat_last_tick;
+
+/* 00030c50.  The background music's keep-alive, called by every modal game
+   loop on every pass: once every 0x4b timer ticks it asks the drive whether
+   CD-DA playback has finished and, if it has, plays the selected track again.
+   A CD-DA track plays once and stops, so this poll is what makes the music
+   loop.
+
+   Takes nothing and returns nothing; everything it reads and writes is a
+   global, and it reports neither what the drive said nor whether it played
+   anything.  It is safe to call as often as a loop likes -- the tick latch
+   data_fdps_audio_cd_repeat_last_tick makes a second call in the same tick do
+   nothing at all -- but not free: on the pass that reaches the drive it costs
+   one MSCDEX device request, and four more if it restarts the track.
+
+   Nothing is restarted while data_fdps_audio_cd_current_music_index is -1 or
+   data_fdps_audio_bgm_enabled_flag is clear, and both are tested on every
+   firing rather than latched, so switching the music off stops the restarts
+   from the next firing on. */
+extern void fdps_cd_music_repeat_poll(void);
+#pragma aux fdps_cd_music_repeat_poll "*" parm caller [];
+
 #endif
