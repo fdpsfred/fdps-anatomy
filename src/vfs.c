@@ -19,11 +19,16 @@
  * instructions when the intrinsics are asked for, and -oi is not in this
  * build's flag set (rebuild_info/build_flags.md), so the plain declarations
  * are what reproduce the calls.
+ *
+ * exit comes from <stdlib.h> too and is a real call as well, CALL 0x00042e0f
+ * at 00029430 in the fatal wrapper at the bottom of this file; the key wait
+ * that precedes it is the game's own, declared in keybd.h.
  */
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "keybd.h"
 #include "vfs.h"
 
 /* Where the header keeps the entry count: PUSH 0x7 at 00039920, the middle
@@ -534,4 +539,49 @@ void *fdps_vfs_image_get_entry(struct fdps_vfs_image_header *image, char *name,
         }
     }
     return member;
+}
+
+/* 00029400.  One branch in the body, CMP dword ptr [EAX],0x0 / JNZ 0x00029438
+   at 00029424, and the arm it guards ends in exit, so the ADD ESP,0x4 that
+   follows the call at 00029435 is stack cleanup no execution reaches.  The
+   frame is SUB ESP,0x0: there is no local here, and the loader's answer goes
+   from EAX into the caller's slot without passing through one.
+
+   Which argument is which comes from the call sites rather than from anything
+   in the body, and all thirteen agree.  The three pushes are the out slot, the
+   query and the container handle in that order -- MOV EAX,0x63fd8 / PUSH, MOV
+   EAX,0x6160c / PUSH, MOV EAX,[EBP + 0x14] / PUSH at 0001893c through
+   0001894b, the first of the nine in fdps_load_data_tables, and the same shape
+   at the other four sites -- fdps_deploy_wave pushes a global there too, MOV
+   EAX,0x60140 / PUSH at 00023899, and only the remaining three pass a frame
+   local, LEA EAX,[EBP - 0x28] at 00017d3b, LEA EAX,[EBP - 0x10] at 00021981
+   and the indexed LEA at 00021a1a.  So [EBP + 0x14] is the handle, [EBP +
+   0x18] the query and [EBP + 0x1c] the slot.  The pair of pushes that builds the inner call then reverses the
+   first two, PUSH [EBP + 0x14] before PUSH [EBP + 0x18] at 0002940f and
+   00029413, which is what makes the handle fdps_vfs_load_file's second
+   argument and the query its first.
+
+   The pointer that gets tested is the one in the caller's slot, not the
+   register that produced it: MOV EDX,[EBP + 0x1c] / MOV [EDX],EAX stores it at
+   0002941c, and MOV EAX,[EBP + 0x1c] / CMP dword ptr [EAX],0x0 loads it back
+   at 00029421.  So the answer is published before it is known to be good, the
+   same way fdps_baseani_get_entry_or_exit publishes its global.
+
+   No diagnostic is printed here.  fdps_vfs_load_file has already said which of
+   its three failures happened, and what this function adds is the pause that
+   keeps that line readable -- fdps_wait_any_key spins until the next make code
+   arrives -- before exit(1) ends the process.
+
+   The emitted VFS.OBJ carries this function instruction for instruction as the
+   original has it, frame and dead cleanup included, differing only in that the
+   compiler reaches the two pushed arguments with PUSH dword ptr [EBP + n] where
+   the original loads each through EAX first.  That is instruction selection and
+   not behaviour (ADR-0001). */
+void fdps_vfs_load_file_or_exit(void *vfs, char *name, void **out)
+{
+    *out = fdps_vfs_load_file(name, vfs);
+    if (*out == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
 }

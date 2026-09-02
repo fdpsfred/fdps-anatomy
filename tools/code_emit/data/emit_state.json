@@ -1742,6 +1742,14 @@
       "status": "committed",
       "emitted_against": "0x13",
       "rounds": 0
+    },
+    "00029400": {
+      "name": "fdps_vfs_load_file_or_exit",
+      "target": "vfs.c",
+      "body_size": "0x3d",
+      "status": "committed",
+      "emitted_against": "0x3d",
+      "rounds": 1
     }
   }
 }

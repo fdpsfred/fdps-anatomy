@@ -224,7 +224,7 @@
 00029080 | 0x7f | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | int __cdecl fdps_unit_is_ailment_immune(int unit_index)
 00029100 | 0x102 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_play_spell_palette_flash(int spell_id)
 00029220 | 0x1d4 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_startup | int __cdecl main(int argc, char * * argv)
-00029400 | 0x3d | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_file_io | void __cdecl fdps_vfs_load_file_or_exit(void * dest, char * name, void * * out)
+00029400 | 0x3d | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_file_io | void __cdecl fdps_vfs_load_file_or_exit(void * vfs, char * name, void * * out)
 00029440 | 0x220 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_startup | void __cdecl fdps_shutdown_free_resources(void)
 00029660 | 0xad9 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_startup | void __cdecl fdps_load_global_resources(void)
 0002a140 | 0xa7 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,shared_helper,subsys_file_io | void * __cdecl fdps_vfs_load_entry(char * vfs_path, char * entry_name)

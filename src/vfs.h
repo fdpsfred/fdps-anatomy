@@ -283,4 +283,38 @@ extern void *fdps_vfs_image_get_entry(struct fdps_vfs_image_header *image,
                                       char *name, unsigned int *out_size);
 #pragma aux fdps_vfs_image_get_entry "*" parm caller [];
 
+/* Loads the member called name out of the open container vfs, writes the
+   buffer through out, and ends the process instead of returning when the load
+   fails.
+
+   It is fdps_vfs_load_file with the NULL check its callers would otherwise all
+   have to write, and it adds nothing else to the load: vfs goes over as the
+   container and name as the query, the pointer that comes back is stored
+   through out, and a caller left standing afterwards holds exactly the malloc'd
+   buffer the loader produced -- its own block, which it still owns and still
+   has to free.  Every property of the load is the loader's (see
+   fdps_vfs_load_file above): name is upper-cased IN PLACE so a caller passing a
+   literal has that literal permanently folded, the container is reopened
+   through the path stored in the handle rather than through anything named
+   here, and nothing is validated or bounded.
+
+   The failure arm does not come back.  fdps_vfs_load_file has already printed
+   which of its three failures happened -- the member is not in the directory,
+   the container will not reopen, or the buffer will not fit -- and this
+   function adds no message of its own: it calls fdps_wait_any_key, so that line
+   stays on the screen until a key arrives, and then exit(1).  out is therefore
+   written on every path that returns, and a caller testing it against NULL is
+   testing something that cannot happen; none of the thirteen call sites does.
+
+   Those thirteen are the loaders that have no way to carry on without the file:
+   nine in fdps_load_data_tables, which fills nine globals from one container in
+   a row, plus fdps_battle_show_win_fail_window, fdps_deploy_wave and two in
+   fdps_icon_script_run.  The out slot is a global at ten of them -- the nine
+   in fdps_load_data_tables plus the one fdps_deploy_wave fills -- and a frame
+   local at the remaining three, the one in fdps_battle_show_win_fail_window
+   and the two in fdps_icon_script_run; the container handle is always one the
+   caller already holds. */
+extern void fdps_vfs_load_file_or_exit(void *vfs, char *name, void **out);
+#pragma aux fdps_vfs_load_file_or_exit "*" parm caller [];
+
 #endif

@@ -1456,6 +1456,132 @@ static void image_get_entry_stops_at_the_first_match(void)
     CHECK_EQ(size, SYNTH_FIRST_SIZE);
 }
 
+/* fdps_vfs_load_file_or_exit is fdps_vfs_load_file plus the NULL check, and
+   the check ends the process, so only the ordinary path can be exercised from
+   a test at all: the miss arm runs fdps_wait_any_key and exit(1) (00029429 and
+   00029430), which would hang the run on a machine with no key coming and then
+   take the harness down with it.  What is left to assert is everything the
+   wrapper does on the way through, and that is where its whole risk sits --
+   the argument order, which is decided at the call sites and reversed again
+   for the inner call, and the fact that the answer reaches the caller through
+   a slot rather than as a return value.
+
+   Every expected value below is one the fdps_vfs_load_file cases above already
+   pin against the shipped FIELD2.VFS, which is the point: the wrapper is
+   correct exactly when it produces what the loader produces. */
+
+/* A non-null value to preset the out slot with, so "the slot was written" is
+   distinguishable from "the slot happened to start as what we wanted".  Its
+   address is all that is used; nothing reads the byte. */
+static char out_slot_sentinel;
+#define OUT_SENTINEL ((void *)&out_slot_sentinel)
+
+/* The ordinary path end to end.  MOV EDX,[EBP + 0x1c] / MOV [EDX],EAX at
+   0002941c is the only store the function makes, so the buffer arrives through
+   the third argument and nowhere else -- the wrapper returns void, and a caller
+   that took a return value would get the leftover slot pointer the epilogue
+   happens to leave in EAX.
+
+   ATTR000.DAT is entry 0 of FIELD2.VFS at 3,441 for 1,553 bytes, out of the
+   container's own entry table (resource_info/vfs.md), and the bytes are read a
+   second time here with plain library calls so the comparison is against the
+   file rather than against anything src/vfs.c produced. */
+static void load_or_exit_writes_the_member_through_out(void)
+{
+    char *handle;
+    char query[QUERY_MAX];
+    void *out;
+    char *member;
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    out = OUT_SENTINEL;
+    strcpy(query, "ATTR000.DAT");
+    fdps_vfs_load_file_or_exit(handle, query, &out);
+    CHECK_EQ(out != OUT_SENTINEL, 1);
+    CHECK_EQ(out != NULL, 1);
+    member = (char *)out;
+    CHECK_EQ(read_member_bytes(VFS_NAME, ATTR000_START, ATTR000_SIZE), 1);
+    if (member != NULL) {
+        CHECK_EQ(memcmp(member, member_expected, ATTR000_SIZE), 0);
+        free(member);
+    }
+    free(handle);
+}
+
+/* The argument order, which is the one thing about this function a reader
+   cannot get from its body: the call sites push the out slot, then the query,
+   then the handle (0001893c through 0001894b and the twelve like it), so the
+   handle is first and the query second; the inner call then pushes them back
+   the other way at 0002940f and 00029413, which makes the query
+   fdps_vfs_load_file's first argument and the handle its second.
+
+   Both halves show here at once.  The query goes in lower case and comes back
+   folded, which only happens if it reached the strupr inside the search, and
+   the member is found at all, which only happens if the handle reached the
+   search as the container.  Swap the two and neither holds. */
+static void load_or_exit_takes_the_handle_first_and_the_query_second(void)
+{
+    char *handle;
+    char query[QUERY_MAX];
+    void *out;
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    out = OUT_SENTINEL;
+    strcpy(query, "attr000.dat");
+    fdps_vfs_load_file_or_exit(handle, query, &out);
+    CHECK_EQ(strcmp(query, "ATTR000.DAT"), 0);
+    CHECK_EQ(out != NULL, 1);
+    free(out);
+    free(handle);
+}
+
+/* Nothing of the wrapper's own gets between the caller and the loader.  The
+   same member comes out both ways and the two buffers agree byte for byte
+   while being different blocks -- each load mallocs its own -- so the wrapper
+   neither copies the member anywhere nor hands back something it allocated.
+
+   DSC64.DAT rather than entry 0 on purpose: it is entry 130, the last of the
+   131, and its 36 bytes end exactly at the container's 112,350, so a start or
+   a size that came from a neighbouring field would run off the end of the file
+   instead of landing on a plausible-looking member. */
+static void load_or_exit_hands_back_what_the_loader_produced(void)
+{
+    char *handle;
+    char query[QUERY_MAX];
+    void *out;
+    char *direct;
+
+    handle = (char *)fdps_vfs_open(VFS_NAME);
+    CHECK_EQ(handle != NULL, 1);
+    if (handle == NULL) {
+        return;
+    }
+    out = OUT_SENTINEL;
+    strcpy(query, "DSC64.DAT");
+    fdps_vfs_load_file_or_exit(handle, query, &out);
+    strcpy(query, "DSC64.DAT");
+    direct = (char *)fdps_vfs_load_file(query, handle);
+    CHECK_EQ(out != NULL, 1);
+    CHECK_EQ(direct != NULL, 1);
+    if (out != NULL && direct != NULL) {
+        CHECK_EQ(out != (void *)direct, 1);
+        CHECK_EQ(memcmp(out, direct, DSC64_SIZE), 0);
+        CHECK_EQ(read_member_bytes(VFS_NAME, DSC64_START, DSC64_SIZE), 1);
+        CHECK_EQ(memcmp(out, member_expected, DSC64_SIZE), 0);
+    }
+    free(out);
+    free(direct);
+    free(handle);
+}
+
 void run_vfs_tests(void)
 {
     RUN_TEST(missing_file_returns_zero);
@@ -1496,4 +1622,7 @@ void run_vfs_tests(void)
     RUN_TEST(image_get_entry_reads_the_entry_count_as_a_whole_dword);
     RUN_TEST(image_get_entry_does_not_fold_the_entry_name);
     RUN_TEST(image_get_entry_stops_at_the_first_match);
+    RUN_TEST(load_or_exit_writes_the_member_through_out);
+    RUN_TEST(load_or_exit_takes_the_handle_first_and_the_query_second);
+    RUN_TEST(load_or_exit_hands_back_what_the_loader_produced);
 }
