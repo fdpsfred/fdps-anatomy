@@ -881,6 +881,26 @@ extern unsigned int data_fdps_chapter_event_or_battle_end_code;
    000151c8..000151d0. */
 extern int data_fdps_battle_turn_counter;
 
+/* 000643e8.  The prefix every path onto the CD is built from: the third
+   whitespace token of Disk.no, which main reads with three consecutive
+   fscanf(fp, "%s", ...) at startup and stores here raw.  The installer writes
+   the file as "CDROM at e:", so the token is a bare drive letter with its
+   colon and the field holds two characters and a terminator -- exactly the
+   three bytes declared here (program_info/cd_audio.md).
+
+   Every reader hands it to a "%s" and walks it to the terminator: "%s\Pack.vfs"
+   in fdps_cd_verify_disc_and_play_track, and "%s\fd.exe", "%s\%s.Vid" and
+   "%s\%s.Aud" in fdps_play_movie.  Nothing indexes it and nothing measures it,
+   so the three bytes are a bound on what Disk.no may say rather than on what
+   the code does: the fscanf that fills it is unbounded, and a longer third
+   token would run past the end of the field in the original too.  What sits
+   past the end differs between the image and the rebuild -- 000643eb is the
+   next global there and the linker chooses in the rebuild -- and that is a
+   difference no shipped Disk.no can reach (program_info/architecture.md).
+
+   Char and not unsigned char: it is a string, and every use is a %s. */
+extern char data_fdps_cdrom_path[3];
+
 /* 00069de8.  Flat linear address of the 512-byte DOS real-mode block the
    MSCDEX request header is built in.  It is the real-mode segment
    fdps_cd_alloc_dos_buffers got back from DPMI, shifted left four: DOS/4GW

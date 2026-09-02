@@ -1886,6 +1886,14 @@
       "status": "committed",
       "emitted_against": "0x220",
       "rounds": 0
+    },
+    "00030f40": {
+      "name": "fdps_play_movie",
+      "target": "title.c",
+      "body_size": "0xf7",
+      "status": "committed",
+      "emitted_against": "0xf7",
+      "rounds": 0
     }
   }
 }
