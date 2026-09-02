@@ -78,4 +78,40 @@ extern void fdps_rle_blit_with_palette_remap(unsigned char *rle_stream,
                                              unsigned char *palette_remap);
 #pragma aux fdps_rle_blit_with_palette_remap "*" parm caller [];
 
+/* 00056bb7.  Blit mode 3: every pixel the sprite writes comes out as
+   ((pixel + tint_offset) & band_mask) + color_base, each step wrapping in eight
+   bits, and the transparent runs are stepped over the way the plain blitter
+   steps over them.  There is no lookup table in this mode: the transform is
+   arithmetic on the palette index.
+
+   `rle_stream`, `dest_pixel` and `dest_row_advance` mean what they mean in the
+   two kernels above -- the command stream, the first pixel of the top row, and
+   the pitch - width the caller computed.  `recolor_operands` is the dispatcher's
+   sixth argument taken as a packed value rather than as a pointer, and this
+   kernel unpacks it the way the original's first three instructions do:
+
+     bits 0..7    tint_offset, added to the source pixel before the mask
+                  (MOV DH,byte ptr [EBP + 0x1c])
+     bits 8..15   color_base, added after it (MOV DL,byte ptr [EBP + 0x1d])
+     bits 16..23  band_mask (MOV AH,byte ptr [EBP + 0x1e])
+
+   so mask 7 folds the sprite into the eight-colour palette band anchored at
+   color_base and mask 0 collapses it to the single index color_base.  Bits
+   24..31 are never read.
+
+   The row width comes from data_fdps_graphics_rle_blit_src_width, re-read at the
+   top of every row, and the row count from
+   data_fdps_graphics_rle_blit_remaining_rows, which this routine decrements to
+   zero.  Nothing is bounds-checked; see the note in rlecolor.c on why the row
+   terminator must stay an exact-zero test.
+
+   The shipped program reaches mode 3 with 0x0000ff00 -- tint_offset 0,
+   color_base 0xff, band mask 0 -- through fdps_blit_unit_sprite, which paints
+   the unit as a flat silhouette in palette index 0xff for the rest flash. */
+extern void fdps_rle_blit_recolor(unsigned char *rle_stream,
+                                  unsigned char *dest_pixel,
+                                  int dest_row_advance,
+                                  unsigned int recolor_operands);
+#pragma aux fdps_rle_blit_recolor "*" parm caller [];
+
 #endif

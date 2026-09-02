@@ -268,3 +268,154 @@ void fdps_rle_blit_with_palette_remap(unsigned char *rle_stream,
         data_fdps_graphics_rle_blit_remaining_rows--;
     } while (data_fdps_graphics_rle_blit_remaining_rows != 0);
 }
+
+/* 00056bb7.  Blit mode 3, the same hand-written shape as the two kernels above
+   and the same handoff: ESI the stream, EDI the destination, EDX the row
+   advance, and the dispatcher's sixth argument reached through the dispatcher's
+   own live frame.  Here it is not a pointer.  The first three instructions read
+   three separate bytes out of that argument's slot -- MOV DH,[EBP+0x1c], MOV
+   DL,[EBP+0x1d], MOV AH,[EBP+0x1e] -- and only then does PUSH EDX / POP EBP
+   overwrite EBP with the row advance, which is why the reads come first.  The
+   slot is a 32-bit argument and the three bytes are its low three, so it comes
+   across as one unsigned parameter that this kernel unpacks itself, the way the
+   original does (rlecolor.h).  Nothing is passed on the stack, and the caller's
+   XOR ECX,ECX / XOR EAX,EAX at 0005690d and the destruction of EBX, ESI, EDI
+   and EBP are register-contract facts of the original that do not carry over.
+
+   Op selector and length are the family's: SHL CL,1 / JC at 00056bce and
+   00056bd6 (or 00056c19), then SHR CL,2 / INC CL, so a run is 1 to 64 pixels
+   and a length of zero cannot be encoded.
+
+   What makes this kernel the one it is, is that it has no table at all.  Every
+   pixel it writes is passed through three 8-bit steps before the store, at
+   00056be5 / 00056be7 / 00056be9 and again on each of the other two writing
+   paths:
+
+       pixel = ((source + tint_offset) & band_mask) + color_base
+
+   each step wrapping in eight bits, and the destination byte is never read, so
+   nothing here blends.  The band mask is what generalises the predecessor's
+   fixed ((src + offset) & 7) + base: with mask 7 the sprite is folded into the
+   eight-colour palette band anchored at color_base while tint_offset rotates
+   which colour of the band each pixel lands on, and with mask 0 the whole
+   sprite collapses to the single index color_base.  That collapsing case is the
+   one the shipped program uses -- fdps_blit_unit_sprite reaches mode 3 with
+   0x0000ff00, so tint_offset 0, color_base 0xff and mask 0, painting the unit
+   as a flat silhouette in index 0xff for the rest flash (MOV dword ptr
+   [EBP+-0x8],0xff00 in fdps_unit_rest at 000120dc and in
+   fdps_battle_advance_turn at 0001e400).
+
+   The packing is not the predecessor's and must not be carried over from it:
+   FD2 packs base in the low byte and offset in byte 1 with the mask hardcoded
+   to 7, FDPS packs tint_offset in the low byte (added before the mask),
+   color_base in byte 1 (added after it) and the band mask in byte 2.  Swapping
+   the two operands is not a crash: with the shipped constant it turns a flat
+   white silhouette into a scrambled sprite.
+
+   Op 11 here is the plain transparent skip -- ADD EDI,ECX / SUB BX,CX at
+   00056c40, no stream byte read and no destination byte touched -- so the
+   backdrop under those runs keeps exactly what it held, unrecoloured.
+
+   The three things that look like defects in the kernels above are here too,
+   and are not defects.  The row ends on OR BX,BX / JNZ at 00056bed, an exact-
+   zero test on a sixteen-bit counter, and op 01 subtracts the length twice (SUB
+   BX,CX at 00056bfc and 00056bff), so a run that overshoots the remaining width
+   wraps through 65535 and the decoder keeps consuming command bytes.  Op 01
+   writes only the second byte of each destination pair -- INC EDI then STOSB at
+   00056c09 -- so the first byte of every pair keeps the surface's own byte,
+   untouched and unrecoloured; the obvious dst[2*i] rewrite puts every pixel one
+   column to the left of the original.  And the row counter is decremented in
+   memory and tested after the decrement (DEC word ptr [0x00070022] / JNZ at
+   00056c50), so a request for zero rows draws 0x10000 of them.  The width is
+   re-read from the global at the top of every row because MOV BX,[0x00070024]
+   at 00056bc2 is where the JNZ at 00056c57 lands. */
+void fdps_rle_blit_recolor(unsigned char *rle_stream,
+                           unsigned char *dest_pixel,
+                           int dest_row_advance,
+                           unsigned int recolor_operands)
+{
+    unsigned char *stream_cursor;
+    unsigned char *dest_cursor;
+    unsigned char tint_offset;
+    unsigned char color_base;
+    unsigned char band_mask;
+    unsigned short width_remaining;
+    unsigned char command;
+    unsigned char run_pixel;
+    unsigned int run_length;
+
+    stream_cursor = rle_stream;
+    dest_cursor = dest_pixel;
+    tint_offset = (unsigned char) recolor_operands;
+    color_base = (unsigned char) (recolor_operands >> 8);
+    band_mask = (unsigned char) (recolor_operands >> 16);
+
+    do {
+        width_remaining = data_fdps_graphics_rle_blit_src_width;
+
+        do {
+            command = *stream_cursor;
+            stream_cursor++;
+            run_length = (unsigned int) (command & 0x3f) + 1;
+
+            switch (command >> 6) {
+            case 0:
+                /* fill: one pixel byte, recoloured once, over run_length bytes */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length);
+                run_pixel = (unsigned char)
+                            ((((unsigned int) *stream_cursor + tint_offset)
+                              & band_mask) + color_base);
+                stream_cursor++;
+                while (run_length != 0) {
+                    *dest_cursor = run_pixel;
+                    dest_cursor++;
+                    run_length--;
+                }
+                break;
+
+            case 1:
+                /* stretched: the recoloured byte into the second half of each
+                   of run_length destination pairs, first halves untouched */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length - run_length);
+                run_pixel = (unsigned char)
+                            ((((unsigned int) *stream_cursor + tint_offset)
+                              & band_mask) + color_base);
+                stream_cursor++;
+                while (run_length != 0) {
+                    dest_cursor++;
+                    *dest_cursor = run_pixel;
+                    dest_cursor++;
+                    run_length--;
+                }
+                break;
+
+            case 2:
+                /* literal: run_length stream bytes, each recoloured on its way */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length);
+                while (run_length != 0) {
+                    *dest_cursor = (unsigned char)
+                                   ((((unsigned int) *stream_cursor
+                                      + tint_offset) & band_mask) + color_base);
+                    dest_cursor++;
+                    stream_cursor++;
+                    run_length--;
+                }
+                break;
+
+            default:
+                /* skip: a transparent run, destination stepped over unwritten
+                   and unrecoloured, no stream byte consumed */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length);
+                dest_cursor += run_length;
+                break;
+            }
+        } while (width_remaining != 0);
+
+        dest_cursor += dest_row_advance;
+        data_fdps_graphics_rle_blit_remaining_rows--;
+    } while (data_fdps_graphics_rle_blit_remaining_rows != 0);
+}

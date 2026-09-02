@@ -1942,6 +1942,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x89"
+    },
+    "00056bb7": {
+      "name": "fdps_rle_blit_recolor",
+      "target": "rlecolor.c",
+      "body_size": "0x9e",
+      "status": "committed",
+      "emitted_against": "0x9e",
+      "rounds": 0
     }
   }
 }
