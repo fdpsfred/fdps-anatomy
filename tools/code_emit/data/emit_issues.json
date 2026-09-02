@@ -1328,5 +1328,33 @@
       "needs": "Ticket 23's emit of the data definitions, which is the point at which a definition exists to carry or not carry the qualifier. Whether the stub generator should also carry it is a question for whoever owns routing.json's type field; nothing in this function's behaviour turns on it.",
       "status": "open"
     }
+  ],
+  "000567f0": [
+    {
+      "from": "emit",
+      "what": "The vector this function installs points at the build's zero-filled stub for fdps_keyboard_isr, not at the real handler, because 00056837 has not been emitted yet. What the tests establish is that the address installed on vector 09h is that symbol's address and that the selector is CS -- which is everything this function decides -- but nothing here can show that the thing on the far end is a working IRQ1 handler. The handler is hand-written assembly ending in IRETD (STI / PUSH EDX..EAX / PUSH DS / MOV AX,0x2 / MOV DS,AX / IN AL,0x60 ... OUT 0x20,AL / POP DS / POP EAX..EDX / IRETD at 00056837-00056897), so its emitted form has to be an interrupt-shaped routine rather than an ordinary function; keybd.h declares it as void(void) purely so its address can be named, and says so. The exposure of that declaration is bounded and measured: a sweep for 0x56837 returns exactly one instruction in the image, MOV EDX,0x56837 at 0005680a, so this function is the sole consumer of the symbol's shape.",
+      "needs": "fdps_keyboard_isr at 00056837 emitted, after which a run with the vector actually live -- a real machine or DOSBox-X with keystrokes -- would show a key press reaching the ring through the vector this function set.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "The emitted routine saves and restores ESI across the DOS calls, which the original never needs to do because it stores to absolute addresses and holds no pointer in a register. Whether DOS/4GW's INT 21h AH=35h actually preserves ESI is therefore unmeasured here rather than assumed: the guard makes the question moot for this function, but it is the kind of thing the next in-line DOS call in this rebuild will face again, and no page of the knowledge base records an answer for it. Two bounds are already established. From the image, EBP survives in practice: fdps_play_movie reads MOV EAX,dword ptr [EBP + 0x14] at 00030e83, fourteen bytes after its CALL to this function, while the original body preserves nothing but DS and ES, and the shipped game works. That argument does not reach ESI, which is what the pragma guards, because no caller keeps a live value there under -od. And the exposure from this function is nil either way, since WDISASM shows the compiler's frame pushing and popping all four callee-saved registers around the whole body.",
+      "needs": "A measurement on a real DOS/4GW host (or DOSBox-X with a deliberate probe) of which registers survive INT 21h AH=35h and AH=25h under the extender, recorded in rebuild_info/ so the next emitter can drop or keep the guard on evidence. One cheaper partial source to try first: the register discipline Watcom's own int386/int386x declare in CLIB3S, readable with WDISASM, which at least records what the vendor assumed.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed for myself and nothing to add beyond one measurement: search_instructions for 0x56837 across the image returns exactly one instruction, MOV EDX,0x56837 at 0005680a, so this function is provably the sole consumer of the symbol's declared shape, and I read 00056837-00056897 myself -- STI, five pushes, MOV AX,0x2 / MOV DS,AX, IN AL,0x60, the port 0x61 acknowledge, the latch and ring updates, OUT 0x20,AL, IRETD -- which is an interrupt-shaped routine that the void(void) declaration does not claim can be entered by CALL.",
+      "needs": "fdps_keyboard_isr at 00056837 emitted, then a run with the vector live.",
+      "same_as": "emit#1",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "My pass adds evidence from the image that the emitter did not cite and that bears directly on the question. AIL_internal_get_real_vect_inner at 00044abd is this binary's other INT 21h AH=35h caller, and it saves ES across the interrupt (PUSH ES at 00044ada, POP ES at 00044ae0) and spills ECX to the stack across it (PUSH ECX / POP ECX at 00044ad7 / 00044ae1) while keeping EBP live through to the LEAVE. The CRT's read() at 000436df does the same in the other direction: EBP is used at 00043786 without reload after the INT 21h at 00043763. So the image itself says EBP survives and ECX is not trusted, which is exactly the shape of the emitted modify list. It still says nothing about ESI, because no site in the image keeps a live value there across INT 21h -- so the emitter's concern stands as written, and the pragma's save/restore makes it moot for this function either way.",
+      "needs": "A measurement on a real DOS/4GW host or DOSBox-X of which registers survive INT 21h AH=35h and AH=25h under the extender, recorded in rebuild_info/.",
+      "same_as": "emit#2",
+      "status": "open"
+    }
   ]
 }

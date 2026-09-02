@@ -4,8 +4,9 @@
  * The game replaces the BIOS keyboard interrupt with a handler of its own and
  * keeps two pieces of state behind it: a ten-entry ring of make codes, and a
  * single byte holding the last raw scancode the hardware produced.  This file
- * holds the accessors for both; the state itself is defined here once ticket 23
- * emits it.
+ * holds the accessors for both, and the routine that puts the handler on
+ * interrupt vector 09h in the first place; the state itself is defined here
+ * once ticket 23 emits it.
  *
  * On top of those accessors sits the auto-repeat filter the modal input loops
  * poll, which lives at 000178f0 -- far from the rest of this file in the image,
@@ -186,4 +187,98 @@ unsigned char fdps_read_keyboard_queue(void)
     }
 
     return scancode;
+}
+
+/* The two DOS calls fdps_install_keyboard_isr is made of.
+ *
+ * These are in-line assembly rather than C because there is no C for them:
+ * INT 21h takes its arguments in named registers, AH=35h answers in ES, and
+ * AH=25h wants DS pointing at the code segment so that DS:EDX is an executable
+ * address.  They are written as auxiliary pragmas with a body, so wcc386
+ * expands the instructions at the point of call and no symbol of either name
+ * reaches the object file -- which is why they are declared here, in the one
+ * translation unit that uses them, and not in keybd.h: there is no definition
+ * anywhere for a second declaration to drift from.  If a build ever reports
+ * either name as an undefined symbol, the pragma did not take and the compiler
+ * emitted a real call.
+ *
+ * Both keep all four scratch registers in `modify`.  What a DOS call really
+ * destroys is its ABI, the same contract a vendor library call has, and a
+ * partial list moves the corruption somewhere else instead of declaring it
+ * (rebuild_info/emit_pipeline.md, contract A).
+ *
+ * Both also put back every segment register they disturb, because the compiler
+ * generates code on the assumption that DS and ES still address the flat data
+ * segment.  The original does the same with the PUSH DS / PUSH ES pair that
+ * opens 000567f0 and the POP ES / POP DS that closes it.
+ */
+
+/* INT 21h AH=35h for vector 09h: the offset of the handler currently on it as
+   the result, its selector through the pointer.
+
+   ESI is saved across the INT rather than trusted to survive it.  The original
+   has no such problem -- it stores to absolute addresses (MOV dword ptr
+   [0x00070002],EBX at 000567f9) and needs no pointer register at all -- so
+   holding one across a DOS call is a cost of the rebuild, not something the
+   image says is safe.  ES is captured into AX before it is popped, since the
+   pop is what makes ES a data selector again. */
+extern unsigned int fdps_keybd_get_int9_vector_asm(
+    unsigned short *selector_out);
+#pragma aux fdps_keybd_get_int9_vector_asm = \
+    "push es"                           \
+    "push esi"                          \
+    "mov  eax,3509h"                    \
+    "int  21h"                          \
+    "mov  ax,es"                        \
+    "pop  esi"                          \
+    "mov  [esi],ax"                     \
+    "pop  es"                           \
+    parm [esi]                          \
+    value [ebx]                         \
+    modify [eax ebx ecx edx];
+
+/* INT 21h AH=25h for vector 09h: point it at the handler whose offset is
+   passed in.
+
+   DS is loaded from CS for the call and put back straight after, which is the
+   whole reason this cannot be C.  Vector 09h is served in protected mode, so
+   DS:EDX has to be a code address; the flat data selector the compiler keeps
+   in DS addresses the same bytes but is not executable, and a vector installed
+   through it faults on the first key pressed.  The original spells it PUSH CS
+   / POP DS at 00056808. */
+extern void fdps_keybd_set_int9_vector_asm(void (*handler)(void));
+#pragma aux fdps_keybd_set_int9_vector_asm = \
+    "push ds"                           \
+    "push cs"                           \
+    "pop  ds"                           \
+    "mov  eax,2509h"                    \
+    "int  21h"                          \
+    "pop  ds"                           \
+    parm [edx]                          \
+    modify [eax ebx ecx edx];
+
+void fdps_install_keyboard_isr(void)
+{
+    /* 000567f0.  Sixteen instructions, no prologue and no frame: two DOS calls
+       with two stores between them, so there is nothing here to name but the
+       values as they pass through.
+
+       The order of the two stores is the one thing that differs from the
+       image, which writes the offset first (MOV dword ptr [0x00070002],EBX at
+       000567f9) and the selector second (MOV AX,ES / MOV [0x00070000],AX at
+       000567ff and 00056802); here the selector lands inside the call that
+       produces it and the offset lands on the way out.  Nothing can observe
+       the difference: the only reader of either global is
+       fdps_uninstall_keyboard_isr, which is ordinary code and cannot run
+       between these two statements, and the INT 09h handler never looks at
+       them. */
+    data_fdps_prev_int9_handler_offset = fdps_keybd_get_int9_vector_asm(
+        &data_fdps_input_prev_int9_handler_selector);
+
+    /* The handler goes on the vector by name.  0x56837 is where the original
+       linker put fdps_keyboard_isr and means nothing in the rebuild; writing
+       the literal back would install whatever ends up at that address instead,
+       and neither the compiler nor the build gate would say a word
+       (rebuild_info/pitfalls.md). */
+    fdps_keybd_set_int9_vector_asm(fdps_keyboard_isr);
 }

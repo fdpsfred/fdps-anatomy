@@ -20515,7 +20515,7 @@ Pool: fdps  [no library match; installs the game's own ISR and is called only by
 Evidence: Hooks INT 09h with DOS INT 21h AH=35h (fetch old vector into ES:EBX, stored at 0x00070002 offset / 0x00070000 selector) and AH=25h with DS:EDX = CS:0x00056837 = fdps_keyboard_isr. Function ID finds no candidate in CLIB3S/MATH387S/EMU387 or in ailv3.lib, and full_hash 37eed09b8db1451d is unique in the image, so no shape collision. The Watcom CRT never hooks IRQ1 and AIL hooks the timer/driver chain, not the keyboard. All three callers are game code (fdps_load_global_resources, fdps_cd_verify_disc_and_play_track, fdps_play_movie), the pattern of an input hook re-armed around movie and CD playback. 40 bytes of real work with saved state, so not a jump island or shim.
 Name: fdps_ + snake_case for game code; no vendor symbol claimed.
 Boundary: 000567f0-00056817, the PUSH DS/PUSH ES at entry is unwound by POP ES/POP DS before the RET; gap_after is empty and 00056818 is the matching uninstaller that restores the saved vector.
-Signature: __watcall void(void). No incoming register or stack slot is read, the routine returns with a plain RET purging nothing, and DS/ES are preserved while only the Watcom scratch registers EAX/EBX are clobbered.
+Signature: __watcall void(void). No incoming register or stack slot is read, the routine returns with a plain RET purging nothing. DS/ES are preserved; EAX, EBX and EDX are written by the routine and ECX is whatever the two INT 21h calls leave behind.
 
 Hand-written assembly: it loads DS from CS and passes arguments to DOS in explicit registers, which the C compiler would not emit.
 

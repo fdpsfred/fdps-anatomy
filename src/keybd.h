@@ -274,4 +274,83 @@ extern unsigned char fdps_read_keyboard_queue(void);
 extern unsigned int fdps_read_scancode_auto_repeat(void);
 #pragma aux fdps_read_scancode_auto_repeat "*" parm caller [];
 
+/* 00070000.  The selector half of whatever handler was on interrupt vector 09h
+ * before the game hooked it -- the 16-bit protected-mode selector DOS hands
+ * back in ES from INT 21h AH=35h.
+ *
+ * Sixteen bits and not a padded dword: both instructions that touch it carry
+ * the 0x66 operand-size prefix and move AX, not EAX (MOV [0x00070000],AX at
+ * 00056802, MOV AX,[0x00070000] at 0005681f).  A sweep of the whole image for
+ * 0x00070000 finds exactly those two, so the installer writes it and the
+ * uninstaller reads it and nothing else in the game can see it.
+ *
+ * Unsigned, and that is not a free choice: a selector is a bit pattern that is
+ * loaded straight back into a segment register, and the DOS/4GW selectors this
+ * holds have the top bit clear only by luck of the descriptor table.  Nothing
+ * ever compares it for order, so the width is the whole of the contract.
+ *
+ * Its partner below holds the offset.  The two are NOT one far pointer as far
+ * as the code is concerned: the uninstaller loads them with two separate
+ * instructions (MOV EDX,dword ptr [0x00070002] then MOV AX,[0x00070000]) and
+ * nothing in the image reads six bytes from 0x00070000, so they are two
+ * globals and Watcom may lay them out in either order.
+ *
+ * Defined by ticket 23 along with the rest of keybd.c's data; until then the
+ * build supplies it zero-filled. */
+extern unsigned short data_fdps_input_prev_int9_handler_selector;
+
+/* 00070002.  The offset half of that saved vector: the 32-bit EBX DOS returns
+ * beside ES from INT 21h AH=35h, stored whole (MOV dword ptr
+ * [0x00070002],EBX at 000567f9) and loaded whole by the uninstaller (MOV
+ * EDX,dword ptr [0x00070002] at 00056819).  A sweep of the whole image for
+ * 0x00070002 finds those two instructions and no others.
+ *
+ * Unsigned for the same reason as the selector: it is an address that goes
+ * back into EDX for INT 21h AH=25h, never a quantity, and nothing compares it
+ * for order.
+ *
+ * Defined by ticket 23 along with the rest of keybd.c's data; until then the
+ * build supplies it zero-filled. */
+extern unsigned int data_fdps_prev_int9_handler_offset;
+
+/* 00056837.  The game's own INT 09h handler: hand-written assembly that reads
+   the scancode out of port 0x60, latches it into
+   data_fdps_input_last_scancode, queues it when it is a make code, acknowledges
+   the 8259 and leaves through IRETD.
+
+   Declared here so that fdps_install_keyboard_isr can name it, and for no other
+   reason.  It is never called: the single reference to it anywhere in the image
+   is MOV EDX,0x56837 at 0005680a, the address handed to INT 21h AH=25h, and a
+   sweep of the whole image for 0x56837 finds that one instruction.  The
+   `void (void)` shape and the pragma below say only "an undecorated symbol
+   whose address is a code address" -- an interrupt handler cannot be entered
+   through a CALL and this declaration does not claim it can.
+
+   Not emitted yet, so the build stubs it and the address installed on the
+   vector is the stub's until it lands. */
+extern void fdps_keyboard_isr(void);
+#pragma aux fdps_keyboard_isr "*" parm caller [];
+
+/* Hooks interrupt vector 09h, saving the handler it displaces.
+
+   Asks DOS for the current vector 09h handler (INT 21h AH=35h), files the
+   selector and offset it gets back in the two globals above, and then points
+   the vector at fdps_keyboard_isr (INT 21h AH=25h with DS:EDX naming it).
+   From the moment it returns, every key press and release runs the game's
+   handler instead of the BIOS's, which is what fills the scancode ring and the
+   latched byte the readers above work from.
+
+   There is no is-it-already-installed test, and adding one would change what
+   the uninstaller puts back: a second call with no uninstall in between files
+   the game's own handler as the "previous" one.  The three call sites do not
+   do that -- fdps_load_global_resources installs at startup against
+   fdps_shutdown_free_resources, and fdps_cd_verify_disc_and_play_track and
+   fdps_play_movie each uninstall before handing the machine to the CD or the
+   movie player and install again afterwards.
+
+   No arguments and no result: all three call sites push nothing before the
+   CALL, adjust nothing after it, and read EAX only after loading it again. */
+extern void fdps_install_keyboard_isr(void);
+#pragma aux fdps_install_keyboard_isr "*" parm caller [];
+
 #endif

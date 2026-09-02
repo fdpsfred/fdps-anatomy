@@ -11,10 +11,17 @@
  * 0002d501, 00017905 and the rest, and MOV byte ptr [EAX],0xff at 0002bb13 and
  * 0002b5c8.  None of them is read off the emitted C.
  *
- * The ISR is not installed while these run, so nothing but the cases themselves
- * writes the byte, and each case puts back what it found.  No case asserts what
- * the byte holds to begin with: data_fdps_input_last_scancode is ticket 23's to
- * define and is zero-filled until then.
+ * Also covers fdps_install_keyboard_isr at 000567f0, whose cases are at the end
+ * of the file behind their own explanation: it is the only function here with
+ * an effect outside the program's memory, so its cases move interrupt vector
+ * 09h for real and put it back with IRQ1 masked throughout.
+ *
+ * The game's handler never actually runs during any of this -- vector 09h holds
+ * it only inside the fenced window in keybd_probe_install, and IRQ1 is masked
+ * for the whole of that window -- so nothing but the cases themselves writes
+ * the latched byte or the ring, and each case puts back what it found.  No case
+ * asserts what the byte holds to begin with: data_fdps_input_last_scancode is
+ * ticket 23's to define and is zero-filled until then.
  */
 #include "testharn.h"
 #include "gamedata.h"
@@ -978,6 +985,231 @@ static void keybd_read_queue_ring_is_exactly_ten_entries(void)
     CHECK_EQ((int) sizeof(data_fdps_input_scancode_queue[0]), 1);
 }
 
+/* ---------------------------------------------------------------------------
+ * fdps_install_keyboard_isr at 000567f0.
+ *
+ * This is the one function covered here with an effect outside the program's
+ * own memory: it moves interrupt vector 09h.  Testing it means letting it move
+ * the vector for real and then putting the vector back, and while it is moved
+ * the vector points at whatever the build has for fdps_keyboard_isr -- which is
+ * the stub, `return 0`, a RET where the CPU will have pushed an interrupt frame.
+ * A key pressed inside that window would not return from it.
+ *
+ * So the window is fenced: IRQ1 is masked at the 8259 for the duration, which
+ * stops the interrupt being delivered at all rather than merely deferring it
+ * the way CLI would -- DOS re-enables interrupts inside the very INT 21h calls
+ * being tested, so CLI would not hold.  The mask is put back exactly as it was
+ * found, and so is the vector.
+ *
+ * The probes below are separate in-line assembly from the ones in src/keybd.c
+ * on purpose: this file reads the vector back through its own INT 21h AH=35h
+ * and compares that against what the function under test filed away, so the two
+ * have to agree about a value neither of them chose.
+ * ------------------------------------------------------------------------- */
+
+/* INT 21h AH=35h for vector 09h, straight: offset as the result, selector
+   through the pointer.  ESI is saved across the INT for the same reason the
+   production copy saves it -- nothing in the image says a DOS call preserves
+   it. */
+extern unsigned int probe_read_int9_vector(unsigned short *selector_out);
+#pragma aux probe_read_int9_vector =    \
+    "push es"                           \
+    "push esi"                          \
+    "mov  eax,3509h"                    \
+    "int  21h"                          \
+    "mov  ax,es"                        \
+    "pop  esi"                          \
+    "mov  [esi],ax"                     \
+    "pop  es"                           \
+    parm [esi]                          \
+    value [ebx]                         \
+    modify [eax ebx ecx edx];
+
+/* INT 21h AH=25h for vector 09h with an arbitrary selector:offset, which is
+   what putting the original handler back needs and what the production pair
+   deliberately cannot do: fdps_keybd_set_int9_vector_asm always installs into CS. */
+extern void probe_write_int9_vector(unsigned short selector,
+                                    unsigned int offset);
+#pragma aux probe_write_int9_vector =   \
+    "push ds"                           \
+    "mov  eax,2509h"                    \
+    "mov  ds,cx"                        \
+    "int  21h"                          \
+    "pop  ds"                           \
+    parm [cx] [edx]                     \
+    modify [eax ebx ecx edx];
+
+extern unsigned short probe_current_cs(void);
+#pragma aux probe_current_cs = "mov ax,cs" value [ax] modify [eax];
+
+extern unsigned short probe_current_ds(void);
+#pragma aux probe_current_ds = "mov ax,ds" value [ax] modify [eax];
+
+extern unsigned short probe_current_es(void);
+#pragma aux probe_current_es = "mov ax,es" value [ax] modify [eax];
+
+/* Set bit 1 of the master 8259's interrupt mask register, so IRQ1 cannot be
+   delivered, and hand back the mask as it was so it can be put back byte for
+   byte.  Port 0x21 is the master PIC's IMR; the game's own handler talks to
+   the same chip at port 0x20 (MOV AL,0x20 / OUT 0x20,AL at 0005688e), so the
+   program is entitled to this port in exactly the way it is entitled to that
+   one. */
+extern unsigned char probe_mask_irq1(void);
+#pragma aux probe_mask_irq1 =           \
+    "in   al,21h"                       \
+    "mov  ah,al"                        \
+    "or   al,2"                         \
+    "out  21h,al"                       \
+    "mov  al,ah"                        \
+    value [al]                          \
+    modify [eax];
+
+extern void probe_restore_irq_mask(unsigned char mask);
+#pragma aux probe_restore_irq_mask = "out 21h,al" parm [al] modify [eax];
+
+/* What one fenced install saw, filled in by keybd_probe_install below and read
+   by the cases after it.  They are file-scope rather than passed around because
+   each case asserts about a different part of the same single observation. */
+static unsigned short probe_prev_selector;
+static unsigned int probe_prev_offset;
+static unsigned short probe_new_selector;
+static unsigned int probe_new_offset;
+static unsigned short probe_ds_before;
+static unsigned short probe_ds_after;
+static unsigned short probe_es_before;
+static unsigned short probe_es_after;
+
+/* Call fdps_install_keyboard_isr for real with IRQ1 masked, record the vector
+   as it was and as the call left it, then put the vector and the mask back.
+   Every case below runs this first, so each one starts from the same machine
+   state and none of them leaves the stub handler on the vector. */
+static void keybd_probe_install(void)
+{
+    unsigned char saved_irq_mask;
+
+    saved_irq_mask = probe_mask_irq1();
+
+    probe_prev_offset = probe_read_int9_vector(&probe_prev_selector);
+    probe_ds_before = probe_current_ds();
+    probe_es_before = probe_current_es();
+
+    fdps_install_keyboard_isr();
+
+    probe_ds_after = probe_current_ds();
+    probe_es_after = probe_current_es();
+    probe_new_offset = probe_read_int9_vector(&probe_new_selector);
+
+    probe_write_int9_vector(probe_prev_selector, probe_prev_offset);
+    probe_restore_irq_mask(saved_irq_mask);
+}
+
+/* The vector that was there has to survive in the two globals, because those
+   two are the whole of what fdps_uninstall_keyboard_isr has to put back (MOV
+   EDX,dword ptr [0x00070002] / MOV AX,[0x00070000] / MOV DS,AX at 00056819,
+   0005681f and 00056825).  Expected values are not constants: they are whatever
+   this machine's vector 09h held a moment earlier, read independently. */
+static void keybd_install_saves_the_vector_it_replaced(void)
+{
+    keybd_probe_install();
+
+    CHECK_EQ(data_fdps_prev_int9_handler_offset == probe_prev_offset, 1);
+    CHECK_EQ(data_fdps_input_prev_int9_handler_selector == probe_prev_selector,
+             1);
+}
+
+/* Whatever was saved must be the handler that was actually displaced, not the
+   one just installed.  Reading the vector back after the call and finding it
+   equal to what was filed would mean the function saved its own handler, and
+   the uninstaller would then "restore" the game's ISR and leave it running
+   after shutdown with nothing failing to say so. */
+static void keybd_install_saves_the_old_handler_not_the_new_one(void)
+{
+    keybd_probe_install();
+
+    CHECK_EQ(data_fdps_prev_int9_handler_offset == probe_new_offset, 0);
+}
+
+/* MOV EDX,0x56837 / MOV AL,0x9 / MOV AH,0x25 / INT 0x21 at 0005680a..00056813:
+   the offset installed on vector 09h is the address of fdps_keyboard_isr.  The
+   literal in the image is where the original linker put the handler; here the
+   only right answer is the symbol's own address, and a rebuild that wrote the
+   constant back would install whatever happens to live at 0x56837. */
+static void keybd_install_points_int9_at_the_game_handler(void)
+{
+    keybd_probe_install();
+
+    CHECK_EQ(probe_new_offset == (unsigned int) fdps_keyboard_isr, 1);
+    CHECK_EQ(probe_new_offset != probe_prev_offset, 1);
+}
+
+/* PUSH CS / POP DS at 00056808 before AH=25h: the selector half of the
+   installed vector is the code selector, not the data selector the compiler
+   keeps in DS.  Both address the same bytes under DOS/4GW and only one of them
+   is executable, so this is the difference between a working hook and a fault
+   on the first key pressed -- and nothing in a link or a unit test other than
+   this one can see which was used. */
+static void keybd_install_uses_the_code_selector(void)
+{
+    keybd_probe_install();
+
+    CHECK_EQ(probe_new_selector == probe_current_cs(), 1);
+}
+
+/* PUSH DS / PUSH ES at 000567f0 and POP ES / POP DS at 00056815: the function
+   hands both segment registers back exactly as it found them.  It has to --
+   every memory reference the compiler generates after the call assumes DS and
+   ES still address the flat data segment -- and DS in particular is left
+   holding CS in the middle of the routine, so a missing restore would corrupt
+   the caller rather than this function. */
+static void keybd_install_leaves_the_segment_registers_alone(void)
+{
+    keybd_probe_install();
+
+    CHECK_EQ(probe_ds_after == probe_ds_before, 1);
+    CHECK_EQ(probe_es_after == probe_es_before, 1);
+}
+
+/* The installer writes the two vector slots and nothing else.  There is no
+   store to 0x00070006 anywhere in 000567f0 -- that is the uninstaller's move
+   (MOV byte ptr [0x00070006],0xff at 0005682f) -- and none to the ring or
+   either index either.  Clearing the latch here would look tidy and would
+   throw away a key the caller had not read yet. */
+static void keybd_install_leaves_the_queue_state_alone(void)
+{
+    unsigned char saved_ring[SCANCODE_QUEUE_LEN];
+    unsigned char saved_scancode;
+
+    keybd_ring_save(saved_ring);
+    saved_scancode = data_fdps_input_last_scancode;
+    data_fdps_input_last_scancode = 0x39;   /* space, latched and unread */
+    data_fdps_input_scancode_queue[2] = 0x1c;
+    data_fdps_input_scancode_queue_head = 2;
+    data_fdps_input_scancode_queue_write_index = 3;
+
+    keybd_probe_install();
+
+    CHECK_EQ(data_fdps_input_last_scancode, 0x39);
+    CHECK_EQ(data_fdps_input_scancode_queue[2], 0x1c);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 2);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 3);
+
+    data_fdps_input_last_scancode = saved_scancode;
+    keybd_ring_restore(saved_ring);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The saved selector is two bytes and the saved offset is four, which is what
+   the image's own instruction widths say: MOV [0x00070000],AX carries the
+   operand-size prefix and moves sixteen bits, MOV dword ptr [0x00070002],EBX
+   moves thirty-two.  A selector declared four bytes wide would swallow the
+   first two bytes of the offset if ticket 23 laid them out adjacent. */
+static void keybd_install_vector_slots_are_the_widths_the_image_uses(void)
+{
+    CHECK_EQ((int) sizeof(data_fdps_input_prev_int9_handler_selector), 2);
+    CHECK_EQ((int) sizeof(data_fdps_prev_int9_handler_offset), 4);
+}
+
 void run_keybd_tests(void)
 {
     RUN_TEST(keybd_scancode_ptr_names_the_isr_slot);
@@ -1013,4 +1245,11 @@ void run_keybd_tests(void)
     RUN_TEST(keybd_read_queue_handles_a_wrapped_write_index);
     RUN_TEST(keybd_read_queue_writes_only_the_read_index);
     RUN_TEST(keybd_read_queue_ring_is_exactly_ten_entries);
+    RUN_TEST(keybd_install_saves_the_vector_it_replaced);
+    RUN_TEST(keybd_install_saves_the_old_handler_not_the_new_one);
+    RUN_TEST(keybd_install_points_int9_at_the_game_handler);
+    RUN_TEST(keybd_install_uses_the_code_selector);
+    RUN_TEST(keybd_install_leaves_the_segment_registers_alone);
+    RUN_TEST(keybd_install_leaves_the_queue_state_alone);
+    RUN_TEST(keybd_install_vector_slots_are_the_widths_the_image_uses);
 }

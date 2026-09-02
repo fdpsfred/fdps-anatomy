@@ -1862,6 +1862,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x32"
+    },
+    "000567f0": {
+      "name": "fdps_install_keyboard_isr",
+      "target": "keybd.c",
+      "body_size": "0x28",
+      "status": "committed",
+      "emitted_against": "0x28",
+      "rounds": 1
     }
   }
 }
