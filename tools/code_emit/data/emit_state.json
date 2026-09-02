@@ -1966,6 +1966,14 @@
       "status": "committed",
       "rounds": 1,
       "emitted_against": "0x165"
+    },
+    "00056e2a": {
+      "name": "fdps_rle_blit_rotated",
+      "target": "rlerot.c",
+      "body_size": "0x2e1",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x2e1"
     }
   }
 }

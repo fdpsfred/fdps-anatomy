@@ -1427,5 +1427,20 @@
       "status": "open",
       "same_as": "emit#1"
     }
+  ],
+  "00056e2a": [
+    {
+      "from": "emit",
+      "what": "Nothing in FDPS.LE selects blit mode 5, so this kernel's output cannot be checked by playing the game and the build gate cannot see it either: its correctness rests entirely on the transcription of 00056e2a. The specific thing that would go wrong silently is the handoff, because the two rotation words are not a register pair in the original -- they are the low and high halves of fdps_blit_dispatch's sixth argument, read out of the dispatcher's live frame at 00056e3c (word [EBP+0x1c] = dx) and 00056e40 (word [EBP+0x1e] = dy), and they become the third and fourth parameters here. If the dispatcher's own emit resolves that argument differently, this kernel draws a different transform and nothing in the pipeline reports it.",
+      "needs": "The emit of fdps_blit_dispatch at 000568db, whose mode-5 arm at 00056979 is the only call site, read against 00056e3c/00056e40 to confirm which half is dx and which is dy. Failing that, a differential run of the original kernel -- driven through an emulator with ESI, EDI, a frame holding the packed word, ECX cleared and the blit parameter block at 0x00070022-0x0007002e filled -- against the rebuild on the same stream, comparing the destination surface byte for byte. Ghidra's emulate_function cannot do it on its own: it returns final register state only, and the evidence needed is the drawn memory.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached the same concern independently; adding only what my pass settled rather than restating it. Two of the three parts are now closed by evidence that was reachable from here. Which half is which is settled: Ghidra's own prototype for the caller is `void __cdecl fdps_blit_dispatch(void *src, void *dst, int width, int height, int pitch, int arg6, uchar mode)`, so [EBP+0x1c] is the sixth argument's low half (dx, read at 00056e3c) and [EBP+0x1e] its high half (dy, at 00056e40). The parameter shape is settled too: fdps_rle_blit_scaled in src/rle.h:69-72 has already landed the identical handoff as (stream, dest, low half, high half), so the dispatcher's emit has one unambiguous target and no discretion. What genuinely remains open is only that fdps_blit_dispatch @ 000568db is not emitted yet -- it has no entry in emit_state.json and no definition in src/ -- so no code exists that actually passes these four arguments, and the pairing stays unexercised until it does. Since nothing in the shipped image selects mode 5, that first call will also be the first and only thing that ever checks it.",
+      "needs": "The emit of fdps_blit_dispatch, whose mode-5 arm at 00056979 is the sole call site, passing (stream, dest, low half of arg6, high half of arg6) in that order.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }
