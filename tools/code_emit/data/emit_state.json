@@ -1641,6 +1641,14 @@
       "status": "committed",
       "emitted_against": "0x70",
       "rounds": 0
+    },
+    "0002eab0": {
+      "name": "fdps_cycle_scene_palette",
+      "target": "palcycle.c",
+      "body_size": "0x782",
+      "status": "committed",
+      "emitted_against": "0x782",
+      "rounds": 1
     }
   }
 }

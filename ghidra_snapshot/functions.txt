@@ -273,7 +273,7 @@
 0002e710 | 0x1fc | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_graphics | void __cdecl fdps_render_map_overview_scaled(uchar * dest, int world_x, int world_y, int step, uchar * * tile_table)
 0002e910 | 0xf2 | __watcall | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | void __watcall fdps_map_apply_triggered_cell_changes(void)
 0002ea10 | 0x99 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | void __cdecl fdps_battle_end_phase_if_all_units_done(void)
-0002eab0 | 0x782 | __watcall | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_graphics | void __watcall fdps_cycle_scene_palette(void)
+0002eab0 | 0x782 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_graphics | void __cdecl fdps_cycle_scene_palette(void)
 0002f240 | 0xa4 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_set_palette_range_on_retrace(int first_index, uchar * red, uchar * green, uchar * blue, int count)
 0002f2f0 | 0x9d | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,shared_helper,subsys_graphics | void __cdecl fdps_blit_rect(uint src_or_fill, int src_stride, void * dst, int dst_stride, int bytes_per_row, int rows)
 0002f390 | 0x7f | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_blit_transparent_rect(uchar * src, int src_stride, uchar * dst, int dst_stride, int width, int height)
