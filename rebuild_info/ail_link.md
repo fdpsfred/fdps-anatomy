@@ -21,7 +21,7 @@
 | --- | --- | --- | --- |
 | `fd2_dpmi_alloc_dos_memory` | `fdps_dpmi_alloc_dos_memory` | `0003ca49` | `src/aildpmi.c` |
 | `fd2_dpmi_free_dos_memory` | `fdps_dpmi_free_dos_memory` | `0003cad2` | `src/dpmi.c` |
-| `fd2_dpmi_lock_region` | `fdps_dpmi_lock_region` | `0003cb01` | `src/aildpmi.c` |
+| `fd2_dpmi_lock_region` | `fdps_dpmi_lock_region` | `0003cb01` | `src/dpmi.c` |
 | `fd2_dpmi_unlock_region` | `fdps_dpmi_unlock_region` | `0003cb6e` | `src/aildpmi.c` |
 | `fd2_dpmi_lock_size` | `fdps_dpmi_lock_size` | `0003cb93` | `src/aildpmi.c` |
 | `fd2_dpmi_unlock_size` | `fdps_dpmi_unlock_size` | `0003cbaa` | `src/aildpmi.c` |
