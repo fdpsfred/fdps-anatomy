@@ -237,4 +237,21 @@ extern void fdps_cd_sector_to_msf(unsigned int sector, unsigned char *minute,
                                   unsigned char *second, unsigned char *frame);
 #pragma aux fdps_cd_sector_to_msf "*" parm caller [];
 
+/* 0003c911.  Whether one track holds CD-DA audio rather than data.  It asks
+   fdps_cdrom_read_track_info about the track and then reads the answer out of
+   data_fdps_cd_track_info_control_flags, which that call publishes; it has no
+   result of its own and the callee returns nothing, so the query and the
+   global are both load-bearing and neither can be folded away.
+
+   The track number is sixteen bits wide and is passed on sign-extended.  The
+   answer is 1 for an audio track and 0 for a data track, and it is decided by
+   an exact inequality against 0x40 rather than by a test of bit 6 -- see the
+   note on the definition for what the two spellings disagree about.
+
+   It is not free of side effects: the call it makes rewrites all three
+   track-info globals and the published request status.  Nothing in the image
+   calls this function. */
+extern int fdps_cd_track_is_audio(short track);
+#pragma aux fdps_cd_track_is_audio "*" parm caller [];
+
 #endif

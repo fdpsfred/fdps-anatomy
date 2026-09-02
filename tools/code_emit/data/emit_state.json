@@ -1665,6 +1665,14 @@
       "status": "committed",
       "emitted_against": "0x2b",
       "rounds": 0
+    },
+    "0003c911": {
+      "name": "fdps_cd_track_is_audio",
+      "target": "cdtoc.c",
+      "body_size": "0x29",
+      "status": "committed",
+      "emitted_against": "0x29",
+      "rounds": 0
     }
   }
 }

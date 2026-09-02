@@ -5,7 +5,8 @@
  * fdps_cdrom_read_disk_info at 0003bfa5, fdps_cdrom_read_track_info at
  * 0003c0c8, fdps_cd_get_track_length_sectors at 0003c1a1,
  * fdps_cd_get_track_length_msf at 0003c217, fdps_cd_get_disk_info_msf at
- * 0003c27c and fdps_cd_sector_to_msf at 0003c2e8.
+ * 0003c27c, fdps_cd_sector_to_msf at 0003c2e8 and fdps_cd_track_is_audio at
+ * 0003c911.
  *
  * Every expected value below comes from the sixteen instructions of that
  * function and from its two call sites, never from the emitted C:
@@ -1188,6 +1189,161 @@ static void cdtoc_sector_to_msf_minutes_wrap_at_256(void)
     CHECK_EQ(sector_msf_bytes[3], 5);
 }
 
+/* fdps_cd_track_is_audio, 0003c911.
+ *
+ * Eleven instructions, and every expected value below is read off them:
+ *
+ *   PUSH 0x8 / CALL 0x0004361a   -- the stack probe, which pops its own
+ *                                   argument (RET 0x4 at 00043627), so the
+ *                                   load after it is off the entry frame
+ *   MOVSX EAX,word ptr [ESP+0x4] -- the first argument, sixteen bits wide and
+ *                                   sign-extended
+ *   PUSH EAX / CALL 0x0003c0c8 / ADD ESP,0x4
+ *                                -- fdps_cdrom_read_track_info, caller-cleaned
+ *   MOVZX EAX,byte ptr [0x00069e05] / CMP EAX,0x40 / SETNZ AL / MOVZX EAX,AL
+ *                                -- the answer, made from the published byte
+ *
+ * Two separate things are being pinned.  The first is that the query is what
+ * produces the byte: the callee returns nothing, so a body that read the global
+ * without calling would answer from whatever an earlier query left there.  That
+ * is checked by poisoning all three track-info globals and watching the call
+ * replace them, and by watching the track number reach both the driver's
+ * control block and the published global.
+ *
+ * The second is the comparison itself, and this is where the fill matters.  The
+ * Read Audio Track Info block is the one in the module that is not cleared, so
+ * on a drive that refuses the request bytes 2..6 come back holding whatever the
+ * frame held -- which means filling that stretch of stack with a chosen byte
+ * chooses the control byte the callee publishes, and with it which arm of the
+ * comparison runs.  Each case below asserts the published byte first and the
+ * answer second, so a run where the fill did not reach the request's frame says
+ * which of the two moved instead of failing silently.
+ *
+ * The fills are chosen against the callee's 0xd0 mask:
+ *
+ *   0x4b -> 0x40   the data track, and the only value that answers 0
+ *   0xff -> 0xd0   every bit the mask keeps
+ *   0x1b -> 0x10   bit 6 clear, plainly audio
+ *   0x5b -> 0x50   bit 6 set alongside a bit the mask also keeps
+ *   0xcb -> 0xc0   the same, with the other kept bit
+ *
+ * The last two are the whole reason the exact inequality is not interchangeable
+ * with a test of bit 6: both answer 1 here and both would answer 0 under
+ * `(control & 0x40) == 0`.  Every fill also has bits inside 0x0b, which the mask
+ * drops, so a body comparing an unmasked byte would answer 1 for all five.
+ *
+ * fdps_cdrom_read_track_info is emitted in the file under test and
+ * fdps_cd_device_request in src/cd.c, so neither is a stub and nothing below
+ * rests on a stubbed return.
+ */
+static void fill_the_stack_below(unsigned char value)
+{
+    volatile unsigned char scratch[512];
+    int i;
+
+    for (i = 0; i < 512; i++) {
+        scratch[i] = value;
+    }
+}
+
+static int track_is_audio_from_a_rejected_drive(short track,
+                                                unsigned char fill)
+{
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    poison_the_track_info_globals();
+    fill_the_stack_below(fill);
+    return fdps_cd_track_is_audio(track);
+}
+
+/* The answer comes from a query this call made and not from a global left over
+   from an earlier one: all three track-info globals go in holding 0x5a and none
+   of them still does afterwards.  The track number reaching both the control
+   block the driver was handed and the published global is the same fact from
+   the two sides the callee writes it to. */
+static void cdtoc_track_is_audio_queries_the_track(void)
+{
+    track_is_audio_from_a_rejected_drive(7, 0x4b);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 7);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 7);
+    CHECK_EQ(data_fdps_cd_track_info_control_flags == 0x5a, 0);
+    CHECK_EQ(data_fdps_cd_track_start_sector == 0x5a5a5a5aUL, 0);
+}
+
+/* MOVSX EAX,word ptr [ESP+0x4] then PUSH EAX: sixteen bits of the argument are
+   passed on, and the callee splits them again -- its low byte into the control
+   block, its low word into the published global.  0x1234 separates those two
+   widths and -2 shows the word arriving whole rather than as a byte. */
+static void cdtoc_track_is_audio_forwards_the_track_number(void)
+{
+    track_is_audio_from_a_rejected_drive(0x1234, 0x4b);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, 0x1234);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 0x34);
+    track_is_audio_from_a_rejected_drive(-2, 0x4b);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, -2);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], 0xfe);
+}
+
+/* CMP EAX,0x40 with the answer coming out of SETNZ: the one masked value that
+   answers 0 is 0x40 itself.  The fill of 0x4b is what puts it there, and the
+   first assertion is what says so. */
+static void cdtoc_track_is_audio_answers_zero_for_a_data_track(void)
+{
+    int is_audio;
+
+    is_audio = track_is_audio_from_a_rejected_drive(3, 0x4b);
+    CHECK_EQ(data_fdps_cd_track_info_control_flags, 0x40);
+    CHECK_EQ(is_audio, 0);
+}
+
+/* Every other masked value answers 1, and SETNZ fixes it at exactly 1 rather
+   than at the byte or at any other non-zero value: 0xd0 and 0x10 are the two
+   ends of what the mask can leave with bit 6 clear. */
+static void cdtoc_track_is_audio_answers_one_for_an_audio_track(void)
+{
+    int is_audio;
+
+    is_audio = track_is_audio_from_a_rejected_drive(3, 0xff);
+    CHECK_EQ(data_fdps_cd_track_info_control_flags, 0xd0);
+    CHECK_EQ(is_audio, 1);
+
+    is_audio = track_is_audio_from_a_rejected_drive(3, 0x1b);
+    CHECK_EQ(data_fdps_cd_track_info_control_flags, 0x10);
+    CHECK_EQ(is_audio, 1);
+}
+
+/* The test is an equality against the whole masked byte and not a test of bit
+   6.  0x50 and 0xc0 both have bit 6 set and both answer 1 here, where a body
+   written as `(control & 0x40) == 0` would answer 0 for each of them. */
+static void cdtoc_track_is_audio_compares_the_whole_byte(void)
+{
+    int is_audio;
+
+    is_audio = track_is_audio_from_a_rejected_drive(3, 0x5b);
+    CHECK_EQ(data_fdps_cd_track_info_control_flags, 0x50);
+    CHECK_EQ(is_audio, 1);
+
+    is_audio = track_is_audio_from_a_rejected_drive(3, 0xcb);
+    CHECK_EQ(data_fdps_cd_track_info_control_flags, 0xc0);
+    CHECK_EQ(is_audio, 1);
+}
+
+/* The same relation stated against whatever byte the query actually published,
+   so it holds on a run where the fill did not reach the request's frame and on
+   a machine whose drive answers for real: the answer is the published byte
+   differing from 0x40, and nothing else. */
+static void cdtoc_track_is_audio_answers_from_the_published_byte(void)
+{
+    int is_audio;
+
+    is_audio = track_is_audio_from_a_rejected_drive(3, 0x4b);
+    CHECK_EQ(is_audio, data_fdps_cd_track_info_control_flags != 0x40);
+    is_audio = track_is_audio_from_a_rejected_drive(3, 0x5b);
+    CHECK_EQ(is_audio, data_fdps_cd_track_info_control_flags != 0x40);
+}
+
 void run_cdtoc_tests(void)
 {
     RUN_TEST(cdtoc_unpack_splits_the_three_fields);
@@ -1239,4 +1395,10 @@ void run_cdtoc_tests(void)
     RUN_TEST(cdtoc_sector_to_msf_writes_one_byte_per_pointer);
     RUN_TEST(cdtoc_sector_to_msf_wraps_below_the_pregap);
     RUN_TEST(cdtoc_sector_to_msf_minutes_wrap_at_256);
+    RUN_TEST(cdtoc_track_is_audio_queries_the_track);
+    RUN_TEST(cdtoc_track_is_audio_forwards_the_track_number);
+    RUN_TEST(cdtoc_track_is_audio_answers_zero_for_a_data_track);
+    RUN_TEST(cdtoc_track_is_audio_answers_one_for_an_audio_track);
+    RUN_TEST(cdtoc_track_is_audio_compares_the_whole_byte);
+    RUN_TEST(cdtoc_track_is_audio_answers_from_the_published_byte);
 }

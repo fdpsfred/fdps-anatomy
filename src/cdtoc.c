@@ -501,3 +501,38 @@ void fdps_cd_sector_to_msf(unsigned int sector, unsigned char *minute,
     *second = (unsigned char) seconds_in_minute;
     *minute = (unsigned char) ((total_seconds - seconds_in_minute) / 60);
 }
+
+/* 0003c911.  One query and one comparison, with no branch anywhere in the
+   body.  The argument is read as MOVSX EAX,word ptr [ESP+0x4] and pushed as
+   the dword the callee takes, so it is sixteen bits wide and sign-extended on
+   the way through; the callee only ever uses its low byte and its low word, so
+   the sign cannot change what the driver is asked, but the width is what the
+   load says and it is written that way here.
+
+   Nothing comes back from the call -- fdps_cdrom_read_track_info returns
+   nothing, and the ADD ESP,0x4 at 0003c926 is the argument being cleaned off,
+   not a result being read.  The value the answer is made from arrives through
+   a global instead: MOVZX EAX,byte ptr [0x00069e05] at 0003c929, the track
+   control field the callee has just published with 0xd0 already masked into
+   it.  That is why the call and the global are both load-bearing: a version
+   that had the query hand the byte back would leave
+   fdps_cd_get_track_length_sectors and fdps_cd_resolve_track_range, which call
+   the same query and take different fields out of the same globals, with
+   nothing to read.
+
+   CMP EAX,0x40 / SETNZ AL / MOVZX EAX,AL is the whole test, so the answer is
+   an exact inequality against the masked byte and not a test of bit 6.  The
+   two spellings disagree on every masked value that has bit 6 set alongside
+   anything else the mask keeps: 0x50 and 0xc0 are answered here as audio,
+   where `(control & 0x40) == 0` answers data.  The mask is what makes the
+   equality reachable at all -- it drops the ADR nibble and the copy-permitted
+   bit -- so the two are equivalent only for the Red Book-legal control values
+   and only while the callee's mask stays 0xd0.
+
+   SETNZ is also what fixes the result at exactly 0 or 1 rather than at the
+   masked byte itself. */
+int fdps_cd_track_is_audio(short track)
+{
+    fdps_cdrom_read_track_info(track);
+    return data_fdps_cd_track_info_control_flags != 0x40;
+}
