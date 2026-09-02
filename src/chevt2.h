@@ -13,6 +13,41 @@
 #ifndef CHEVT2_H
 #define CHEVT2_H
 
+/* Chapter 10's stairway ambush: brings on the ten enemy reinforcements the
+   chapter's map tags as wave 10, once.
+
+   It fires only while both of two conditions hold: the shared one-shot latch,
+   element 0x10 of data_fdps_map_cell_event_triggered_flags (gamedata.h), is
+   still 0, and the record unit_index names is not on side 0.  The side test is
+   unsigned and is only a test against 0, and side 0 is the enemy, 1 the
+   guest/neutral one and 2 the player's roster -- so what it keeps out is an
+   enemy unit stopping on the trigger tile, and the player's units and the
+   guests spring it alike.  The
+   record is resolved through fdps_get_unit_record (unit.h) and is not range
+   checked, so an index outside the live unit array reads whatever lies at that
+   stride.
+
+   When it fires it puts the latch up first and then calls fdps_deploy_wave
+   (deploy.h) with wave 10 and place_exact 0, so the reinforcements land on the
+   nearest free walkable tile to their placement records rather than on the
+   records' own coordinates.  The map number it deploys under is read from
+   data_fdps_chapter_current_chapter_id at the call, not from anything the
+   handler holds.
+
+   The latch is one byte shared with a dozen other chapters' handlers and with
+   the chapter 14, 15 and 26 post-action checks.  fdps_chapter_state_reset
+   clears the whole array when a chapter starts, so a later chapter's handler
+   begins from a clean latch; the save-state block carries it, so a chapter
+   reloaded after its event fired does not fire it again.  Both halves are what
+   make one shared slot safe, and neither survives rewriting this as a
+   function-local static.
+
+   Table slot 16, named by MAP09.DAT's tile-event entry 1 and by no other
+   shipped map, which is what makes this chapter 10.  Chapter 10's other
+   handler, slot 15, covers the same map's turn-scheduled waves. */
+extern void fdps_chapter_10_event_deploy_wave_10(int unit_index);
+#pragma aux fdps_chapter_10_event_deploy_wave_10 "*" parm caller [];
+
 /* Chapter 13's death-triggered event: takes unit indices 9 through 0x2c
    inclusive off the hold-position behaviour the map deploys them in and puts
    them on the default one, which paths a unit toward the nearest opposing

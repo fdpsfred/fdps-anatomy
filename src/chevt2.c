@@ -11,7 +11,82 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "unit.h"
+#include "deploy.h"
 #include "chevt2.h"
+
+/* The slot of data_fdps_map_cell_event_triggered_flags (gamedata.h) the
+   one-shot handlers latch: byte ptr [0x000640e8], element 0x10 of the 32-entry
+   array based at 0x000640d8.  The array's own indexer is a cell's raw event
+   code and the shipped M%02d.DTL event planes only reach codes 0 to 15, so
+   element 0x10 is the first slot no map cell can name and the handlers keep
+   their latch in it -- one slot shared by all of them, which is safe only
+   because one chapter is loaded at a time and fdps_chapter_state_reset memsets
+   the whole array when a chapter starts.  Being inside that array is also what
+   makes the latch survive a save, because the save and load paths move all
+   0x20 bytes to and from the slot image.
+
+   src/chevt1.c and src/chpost2.c spell the same slot out for the same reason;
+   it stays file-local at all three ends because no header owns it. */
+#define CHAPTER_EVENT_ONE_SHOT_SLOT 0x10
+
+/* The wave the ambush brings on: PUSH 0xa at 000378d9, matched against byte
+   0x15 of each 0x1a-byte deployment record of the resident MAP%02d.DAT block.
+   Ten of MAP09.DAT's records carry it. */
+#define AMBUSH_WAVE 10
+
+/* How the ten are placed: XOR EAX,EAX / PUSH EAX at 000378d6, so
+   fdps_deploy_wave passes 0 on to fdps_deploy_unit and each unit goes on the
+   nearest free walkable tile to its placement record's coordinates rather than
+   on the coordinates themselves.  Wave 0, the group a map opens with, is the
+   one deployed with this flag set. */
+#define AMBUSH_PLACE_EXACT 0
+
+/* 000378a0.  Chapter 10's stairway ambush: the first unit that is not on side
+   0 to trigger the map's event tile brings on the ten reinforcements of wave
+   10.
+
+   fdps_get_unit_record is called before either test and unconditionally (CALL
+   at 000378b0, with the result stored to [EBP-0x4] at 000378b8), and the
+   record it hands back is read for one byte only, the side at record+6.  The
+   two tests are the JNZ at 000378c2 over the latch and the JA at 000378cb over
+   that byte, both jumping to the same epilogue, which is the short circuit
+   written here: a non-zero latch means the side byte is never loaded.
+
+   The side test is CMP byte ptr [EAX+0x6],0x0 / JA -- unsigned, so it is a
+   plain "not 0" over the whole byte range and not a sign test.  Side 0 is the
+   enemy, 1 the guest/neutral one and 2 the player's own roster, so what the
+   test really keeps out is an enemy unit walking over the tile: the player's
+   units and the guests spring the chapter's own ambush alike.
+
+   The latch is the shared one-shot slot and it is written before the deploy
+   call (MOV byte ptr [0x000640e8],0x1 at 000378cf), not after it, so a handler
+   re-entered from inside fdps_deploy_wave could not fire twice either.  It is
+   tested against 0 rather than against 1: any non-zero value in the slot
+   blocks the body.
+
+   The map number handed to fdps_deploy_wave is read out of
+   data_fdps_chapter_current_chapter_id at the call site (PUSH dword ptr
+   [0x00069cf4] at 000378db) and not out of anything this handler holds, so it
+   is whatever chapter is loaded -- 9 for this one, which is the map09 the
+   handler's table slot is only ever named from.
+
+   Nothing sets EAX before the RET at 000378ef and no dispatcher reads what
+   comes back, so the result is void. */
+void fdps_chapter_10_event_deploy_wave_10(int unit_index)
+{
+    struct fdps_unit_record *triggering_unit;
+
+    triggering_unit = fdps_get_unit_record(unit_index);
+
+    if ((data_fdps_map_cell_event_triggered_flags[
+             CHAPTER_EVENT_ONE_SHOT_SLOT] == 0) &&
+        (triggering_unit->side != 0)) {
+        data_fdps_map_cell_event_triggered_flags[
+            CHAPTER_EVENT_ONE_SHOT_SLOT] = 1;
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id, AMBUSH_WAVE,
+                         AMBUSH_PLACE_EXACT);
+    }
+}
 
 /* The half of the AI byte the merge below keeps: AND DL,0xf0 at 00037a33.  The
    four bits it preserves are flags other code reads on their own -- 0x40 in

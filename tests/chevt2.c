@@ -21,12 +21,20 @@
  * 37th of them is deliberately left in the behaviour the map gave it; that is
  * the boundary the cases below pin hardest, because every obvious rewrite of
  * the loop would sweep it in too.
+ *
+ * The chapter 10 cases in the second half of the file stage differently and
+ * say why in their own note: that handler's payload is a call into
+ * fdps_deploy_wave, which opens ICON.CEL and FIELD.VFS for itself, so the
+ * cases that let it fire need those files and skip themselves without them.
  */
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "unit.h"
+#include "deploy.h"
 #include "chevt2.h"
 
 /* The single inclusive range the one inline loop covers, read off the
@@ -238,6 +246,457 @@ static void ch13_advance_ignores_the_unit_index_argument(void)
     CHECK_EQ(ch13_units[0].ai_behavior, 0x52);
 }
 
+/* Chapter 10's stairway ambush at 000378a0, from here down.
+ *
+ * Three of its four decisions are cheap to see -- the latch guard, the side
+ * guard and which record the index names -- because refusing to fire leaves
+ * the map alone and needs nothing staged but a unit array.  The fourth is the
+ * argument triple it hands fdps_deploy_wave (PUSH dword ptr [0x00069cf4] /
+ * PUSH 0xa / PUSH EAX with EAX zeroed, at 000378d6..000378e1), and the only
+ * way to see any of those three values is to let the deployment happen: none
+ * of them is left anywhere afterwards.
+ *
+ * So the cases that fire run fdps_deploy_wave for real, which opens ICON.CEL
+ * and FIELD.VFS for itself, and they read back where the unit landed:
+ *
+ *   MAP00.COD  record 0 (18, 0)  record 1 (22, 12)  record 2 (8, 10)
+ *   MAP01.COD  record 0 (9, 4)
+ *
+ * -- the same records tests/deploy.c's own wave cases expect, staged through
+ * tests/gamefile.lst.  A run without those two files would not fail a check,
+ * it would hang in fdps_wait_any_key, so every firing case skips itself when
+ * they are not there.
+ *
+ * The unit array is malloc'd rather than staged into a static block, because a
+ * deployment reallocs it: a static block handed to realloc is not a smaller
+ * fixture, it is undefined behaviour.  It is never freed, for the same reason
+ * tests/deploy.c does not free it -- the block moves under the global on every
+ * deployment.
+ */
+
+/* The slot of data_fdps_map_cell_event_triggered_flags this handler latches --
+   element 0x10, the first the map's own event codes cannot reach, shared by
+   every one-shot chapter handler in the game.  Same slot the chapter 13 case
+   above puts up to prove that handler ignores it. */
+#define CH10_LATCH_SLOT 0x10
+
+/* The wave the handler asks for and the one either side of it, so a record
+   tagged 9 or 11 is present to be left behind. */
+#define CH10_WAVE 10
+
+/* A map big enough for MAP00.COD's records, which reach (22, 12).  The tile
+   search fdps_deploy_unit runs on a place_exact of 0 walks the whole grid, and
+   the marking pass writes at a unit's own tile with no bound, so the grid has
+   to cover the coordinates the real placement file names. */
+#define CH10_GRID_W 32
+#define CH10_GRID_H 16
+
+/* Where the deployment records start in the MAP%02d.DAT block and where its
+   header keeps their count: ADD EAX,0x83 at 00023463 and MOV AL,byte ptr
+   [EAX+0x2] at 000238bb. */
+#define CH10_SPAWN_TABLE_RECORD_BASE 0x83
+#define CH10_SPAWN_TABLE_COUNT_OFFSET 2
+
+/* The scene-layer offsets fdps_map_load_tile_info reads through: the tile
+   map's width word at +7 with its 16-bit ids from +0xb, the attribute table's
+   4-byte rows from +0x11, and the event layer's width at +7 with its cells
+   from +0x10 (src/maptile.c). */
+#define CH10_TILE_MAP_WIDTH_OFFSET 7
+#define CH10_TILE_MAP_IDS_OFFSET 0xb
+#define CH10_TILE_ATTR_ROWS_OFFSET 0x11
+#define CH10_EVENT_LAYER_WIDTH_OFFSET 7
+#define CH10_EVENT_LAYER_CELLS_OFFSET 0x10
+
+/* A terrain code the deployment search accepts and one it rejects, either side
+   of the CMP EAX,0x5 / JGE at 00023404. */
+#define CH10_TERRAIN_WALKABLE 1
+#define CH10_TERRAIN_BLOCKED 5
+
+#define CH10_TILE_ATTR_ROWS 16
+#define CH10_CHAR_TABLE_ROWS 8
+#define CH10_ENEMY_TABLE_ROWS 8
+
+/* Every item id is a valid index into the staged item table, 0xff included:
+   fdps_unit_recompute_combat_stats follows an equipped flag into
+   fdps_get_item_record without a bounds check. */
+#define CH10_ITEM_TABLE_ROWS 256
+#define CH10_ITEM_ID_NONE 0xff
+
+/* The unit array's stride, as the deployment path allocates it: PUSH 0x50 at
+   000232cc. */
+#define CH10_UNIT_STRIDE 0x50
+
+static unsigned char ch10_grid[4 + CH10_GRID_W * CH10_GRID_H * 2];
+static unsigned char ch10_spawn_table[CH10_SPAWN_TABLE_RECORD_BASE + 8 * 0x1a];
+static unsigned char ch10_tile_map[CH10_TILE_MAP_IDS_OFFSET +
+                                   CH10_GRID_W * CH10_GRID_H * 2];
+static unsigned char ch10_tile_attr[CH10_TILE_ATTR_ROWS_OFFSET +
+                                    CH10_TILE_ATTR_ROWS * 4];
+static unsigned char ch10_event_layer[CH10_EVENT_LAYER_CELLS_OFFSET +
+                                      CH10_GRID_W * CH10_GRID_H];
+static struct fdps_character_base_record ch10_char_base[CH10_CHAR_TABLE_ROWS];
+static struct fdps_character_growth ch10_growth[CH10_CHAR_TABLE_ROWS];
+static struct fdps_enemy_data ch10_enemy[CH10_ENEMY_TABLE_ROWS];
+static struct fdps_item_effect ch10_items[CH10_ITEM_TABLE_ROWS];
+
+static int ch10_files_checked = 0;
+static int ch10_files_ready = 0;
+
+/* ICON.CEL is read by fdps_cache_cel_sprite_group, which takes a fixed
+   0x2970-byte bite out of the sheet's offset table, so a shorter file is one
+   that reader runs off the end of rather than a smaller fixture.  FIELD.VFS
+   cannot be stood in for at all: a missing container sends fdps_deploy_wave
+   into fdps_wait_any_key and a missing member into exit(1). */
+static void ch10_ensure_game_files(void)
+{
+    FILE *fp;
+    long size;
+
+    if (ch10_files_checked) {
+        return;
+    }
+    ch10_files_checked = 1;
+
+    fp = fopen("ICON.CEL", "rb");
+    if (fp == NULL) {
+        return;
+    }
+    fseek(fp, 0, SEEK_END);
+    size = ftell(fp);
+    fclose(fp);
+    if (size < (long) (15 + 0x2970)) {
+        return;
+    }
+
+    fp = fopen("FIELD.VFS", "rb");
+    if (fp == NULL) {
+        return;
+    }
+    fclose(fp);
+    ch10_files_ready = 1;
+}
+
+static void ch10_zero_bytes(void *block, int count)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) block;
+    for (i = 0; i < count; i++) {
+        bytes[i] = 0;
+    }
+}
+
+static struct fdps_char_spawn_record *ch10_spawn_at(int index)
+{
+    return (struct fdps_char_spawn_record *)
+           (ch10_spawn_table + CH10_SPAWN_TABLE_RECORD_BASE) + index;
+}
+
+/* One deployment record with nothing equipped and nothing carried, tagged with
+   the wave it belongs to.  Side 2 is what the record gives the unit it
+   deploys and has nothing to do with the side the handler tests. */
+static void ch10_set_spawn(int index, int char_id, int wave_no)
+{
+    ch10_spawn_at(index)->char_id = (unsigned char) char_id;
+    ch10_spawn_at(index)->level = 1;
+    ch10_spawn_at(index)->side = 2;
+    ch10_spawn_at(index)->equipped_item_0 = CH10_ITEM_ID_NONE;
+    ch10_spawn_at(index)->equipped_item_1 = CH10_ITEM_ID_NONE;
+    ch10_spawn_at(index)->carried_items[0] = CH10_ITEM_ID_NONE;
+    ch10_spawn_at(index)->carried_items[1] = CH10_ITEM_ID_NONE;
+    ch10_spawn_at(index)->carried_items[2] = CH10_ITEM_ID_NONE;
+    ch10_spawn_at(index)->carried_items[3] = CH10_ITEM_ID_NONE;
+    ch10_spawn_at(index)->carried_items[4] = CH10_ITEM_ID_NONE;
+    ch10_spawn_at(index)->carried_items[5] = CH10_ITEM_ID_NONE;
+    ch10_spawn_at(index)->wave_no = (unsigned char) wave_no;
+}
+
+static void ch10_set_terrain(int tile_id, int terrain)
+{
+    struct fdps_tile_attr_entry *rows;
+
+    rows = (struct fdps_tile_attr_entry *)
+           (ch10_tile_attr + CH10_TILE_ATTR_ROWS_OFFSET);
+    rows[tile_id].terrain_type = (unsigned char) terrain;
+}
+
+/* The cell of the tile map at (tile_x, tile_y), so one tile can be given an id
+   whose attribute row says the deployment search must not use it. */
+static void ch10_set_tile_id(int tile_x, int tile_y, int tile_id)
+{
+    short *tile_ids;
+
+    tile_ids = (short *) (ch10_tile_map + CH10_TILE_MAP_IDS_OFFSET);
+    tile_ids[tile_y * CH10_GRID_W + tile_x] = (short) tile_id;
+}
+
+static struct fdps_unit_record *ch10_unit(int unit_index)
+{
+    return (struct fdps_unit_record *)
+           (data_fdps_map_unit_array_ptr + unit_index * CH10_UNIT_STRIDE);
+}
+
+/* A blank walkable map with unit_count units already on it, the latch down and
+   the chapter global on map 0.  Each staged unit stands on its own tile along
+   the top row, clear of every placement record these cases read back.  The
+   sides are left at 0 and each case sets the one it is about. */
+static void ch10_stage(int unit_count)
+{
+    int i;
+
+    ch10_zero_bytes(ch10_grid, (int) sizeof(ch10_grid));
+    ch10_zero_bytes(ch10_spawn_table, (int) sizeof(ch10_spawn_table));
+    ch10_zero_bytes(ch10_tile_map, (int) sizeof(ch10_tile_map));
+    ch10_zero_bytes(ch10_tile_attr, (int) sizeof(ch10_tile_attr));
+    ch10_zero_bytes(ch10_event_layer, (int) sizeof(ch10_event_layer));
+    ch10_zero_bytes(ch10_char_base, (int) sizeof(ch10_char_base));
+    ch10_zero_bytes(ch10_growth, (int) sizeof(ch10_growth));
+    ch10_zero_bytes(ch10_enemy, (int) sizeof(ch10_enemy));
+    ch10_zero_bytes(ch10_items, (int) sizeof(ch10_items));
+
+    *(short *) ch10_grid = (short) CH10_GRID_W;
+    *(short *) (ch10_grid + 2) = (short) CH10_GRID_H;
+
+    *(short *) (ch10_tile_map + CH10_TILE_MAP_WIDTH_OFFSET) =
+        (short) CH10_GRID_W;
+    for (i = 0; i < CH10_TILE_ATTR_ROWS; i++) {
+        ch10_set_terrain(i, CH10_TERRAIN_WALKABLE);
+    }
+
+    *(short *) (ch10_event_layer + CH10_EVENT_LAYER_WIDTH_OFFSET) =
+        (short) CH10_GRID_W;
+
+    data_fdps_battle_move_grid_ptr = ch10_grid;
+    data_fdps_tile_event_data_table_ptr = ch10_spawn_table;
+    data_fdps_scene_layer_tile_map_ptrs[0] = ch10_tile_map;
+    data_fdps_scene_layer_tile_attr_ptr[0] = ch10_tile_attr;
+    data_fdps_map_cell_event_code_layer_ptr = ch10_event_layer;
+    data_fdps_battle_character_base_table_ptr =
+        (unsigned char *) ch10_char_base;
+    data_fdps_battle_character_growth_table_ptr = (unsigned char *) ch10_growth;
+    data_fdps_battle_enemy_data_table_ptr = (unsigned char *) ch10_enemy;
+    data_fdps_item_effect_table_ptr = (unsigned char *) ch10_items;
+
+    data_fdps_map_unit_array_ptr =
+        (unsigned char *) malloc(unit_count * CH10_UNIT_STRIDE);
+    ch10_zero_bytes(data_fdps_map_unit_array_ptr,
+                    unit_count * CH10_UNIT_STRIDE);
+    data_fdps_map_unit_count = unit_count;
+    for (i = 0; i < unit_count; i++) {
+        ch10_unit(i)->pos_x = (unsigned char) i;
+        ch10_unit(i)->pos_y = 0;
+    }
+
+    data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT] = 0;
+    data_fdps_chapter_current_chapter_id = 0;
+}
+
+/* The side byte the JA at 000378cb tests is record +6, and the record is
+   0x50 bytes, which is the stride fdps_get_unit_record multiplies by.  Every
+   case below would agree with itself while addressing another byte if either
+   were wrong. */
+static void ch10_side_is_the_byte_at_record_six(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 6);
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+}
+
+/* A side of 0 fires nothing and, just as importantly, does not put the latch
+   up: the store at 000378cf is inside the branch both tests jump over, so a
+   unit that fails the side test leaves the event available to the next one. */
+static void ch10_side_zero_does_not_fire_or_latch(void)
+{
+    ch10_stage(2);
+    ch10_unit(0)->side = 0;
+    ch10_unit(1)->side = 2;
+
+    fdps_chapter_10_event_deploy_wave_10(0);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT], 0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+}
+
+/* The record read is the one unit_index names and not a fixed one: with only
+   index 2 on a firing side, the three indices either side of it all refuse,
+   and each refusal is visible in the latch staying down. */
+static void ch10_reads_the_record_the_index_names(void)
+{
+    ch10_stage(4);
+    ch10_unit(0)->side = 0;
+    ch10_unit(1)->side = 0;
+    ch10_unit(2)->side = 2;
+    ch10_unit(3)->side = 0;
+
+    fdps_chapter_10_event_deploy_wave_10(0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT], 0);
+    fdps_chapter_10_event_deploy_wave_10(1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT], 0);
+    fdps_chapter_10_event_deploy_wave_10(3);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT], 0);
+    CHECK_EQ(data_fdps_map_unit_count, 4);
+}
+
+/* The latch is tested against 0 and not against 1 -- CMP byte ptr
+   [0x000640e8],0x0 / JNZ at 000378bb -- so any non-zero value in the slot
+   blocks the body, and the slot keeps the value it had rather than being
+   normalised to 1.  A unit on a firing side is staged, so the only thing
+   holding the event back is the latch. */
+static void ch10_any_non_zero_latch_blocks(void)
+{
+    ch10_stage(1);
+    ch10_unit(0)->side = 2;
+    data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT] = 1;
+
+    fdps_chapter_10_event_deploy_wave_10(0);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_unit_count, 1);
+
+    ch10_stage(1);
+    ch10_unit(0)->side = 2;
+    data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT] = 0x7f;
+
+    fdps_chapter_10_event_deploy_wave_10(0);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT], 0x7f);
+    CHECK_EQ(data_fdps_map_unit_count, 1);
+}
+
+/* The wave asked for is 10 and nothing else: three records tagged 9, 10 and 11
+   leave exactly the middle one deployed, carrying record 1's character id and
+   record 1's placement coordinates out of MAP00.COD.  The latch goes up in the
+   same call.
+
+   Both halves matter -- a wave of 9 or 11 would deploy a different record onto
+   different coordinates, and a wave the table does not carry would deploy
+   nothing at all while still putting the latch up. */
+static void ch10_deploys_the_records_tagged_wave_10(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+    ch10_stage(2);
+    ch10_unit(0)->side = 0;
+    ch10_unit(1)->side = 2;
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 3;
+    ch10_set_spawn(0, 5, CH10_WAVE - 1);
+    ch10_set_spawn(1, 6, CH10_WAVE);
+    ch10_set_spawn(2, 7, CH10_WAVE + 1);
+
+    fdps_chapter_10_event_deploy_wave_10(1);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ((int) ch10_unit(2)->char_id, 6);
+    CHECK_EQ((int) ch10_unit(2)->pos_x, 22);
+    CHECK_EQ((int) ch10_unit(2)->pos_y, 12);
+}
+
+/* The map the wave is deployed under is read from
+   data_fdps_chapter_current_chapter_id at the call site and is not a literal:
+   the same deployment record placed while that global says 1 lands on
+   MAP01.COD's record 0 at (9, 4) instead of MAP00.COD's (18, 0). */
+static void ch10_map_number_comes_from_the_chapter_global(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+    ch10_stage(1);
+    ch10_unit(0)->side = 2;
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 1;
+    ch10_set_spawn(0, 5, CH10_WAVE);
+    data_fdps_chapter_current_chapter_id = 1;
+
+    fdps_chapter_10_event_deploy_wave_10(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch10_unit(1)->pos_x, 9);
+    CHECK_EQ((int) ch10_unit(1)->pos_y, 4);
+}
+
+/* The placement flag is 0 -- XOR EAX,EAX / PUSH EAX at 000378d6 -- so the
+   reinforcements are put on the nearest free walkable tile to their placement
+   record rather than on the record's own tile.  MAP00.COD record 1 names
+   (22, 12); giving that one cell a tile id whose attribute row is terrain 5
+   takes it out of the search, and the unit lands one tile away.  A flag of 1
+   would drop it on (22, 12) regardless of the terrain there.
+
+   (22, 13) is which of the four tiles at distance 1 it lands on, because the
+   scan is row-major over the whole grid and a tie is accepted (CMP EAX,
+   [EBP-0x14] / JLE at 000233e6), so the last candidate at the best distance
+   wins. */
+static void ch10_places_on_the_nearest_free_tile(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+    ch10_stage(1);
+    ch10_unit(0)->side = 2;
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 2;
+    ch10_set_spawn(0, 5, CH10_WAVE - 1);
+    ch10_set_spawn(1, 6, CH10_WAVE);
+    ch10_set_tile_id(22, 12, 1);
+    ch10_set_terrain(1, CH10_TERRAIN_BLOCKED);
+
+    fdps_chapter_10_event_deploy_wave_10(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch10_unit(1)->char_id, 6);
+    CHECK_EQ((int) ch10_unit(1)->pos_x, 22);
+    CHECK_EQ((int) ch10_unit(1)->pos_y, 13);
+}
+
+/* Contract C on the side byte: CMP byte ptr [EAX+0x6],0x0 / JA is unsigned, so
+   a side of 0xff is 255 and fires the event.  Read as a signed char with the
+   signed branch it would be -1 and the ambush would never happen for it.  The
+   sides the shipped data uses are 0, 1 and 2, so this is the direction the
+   rebuild can get wrong without any map showing it. */
+static void ch10_side_test_is_unsigned(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+    ch10_stage(1);
+    ch10_unit(0)->side = 0xff;
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 1;
+    ch10_set_spawn(0, 5, CH10_WAVE);
+
+    fdps_chapter_10_event_deploy_wave_10(0);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+}
+
+/* One shot, and the latch is what makes it one: the second call on the same
+   unit adds nothing, because the first left the slot up.  Deploying twice is
+   what the wave walk would otherwise do -- it appends and never checks whether
+   the wave is already on the map. */
+static void ch10_fires_once_only(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+    ch10_stage(1);
+    ch10_unit(0)->side = 2;
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 2;
+    ch10_set_spawn(0, 5, CH10_WAVE);
+    ch10_set_spawn(1, 6, CH10_WAVE);
+
+    fdps_chapter_10_event_deploy_wave_10(0);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT], 1);
+
+    fdps_chapter_10_event_deploy_wave_10(0);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT], 1);
+}
+
 void run_chevt2_tests(void)
 {
     RUN_TEST(ch13_record_shape_matches_the_offsets);
@@ -247,4 +706,13 @@ void run_chevt2_tests(void)
     RUN_TEST(ch13_advance_has_no_one_shot_latch);
     RUN_TEST(ch13_advance_touches_no_neighbouring_byte);
     RUN_TEST(ch13_advance_ignores_the_unit_index_argument);
+    RUN_TEST(ch10_side_is_the_byte_at_record_six);
+    RUN_TEST(ch10_side_zero_does_not_fire_or_latch);
+    RUN_TEST(ch10_reads_the_record_the_index_names);
+    RUN_TEST(ch10_any_non_zero_latch_blocks);
+    RUN_TEST(ch10_deploys_the_records_tagged_wave_10);
+    RUN_TEST(ch10_map_number_comes_from_the_chapter_global);
+    RUN_TEST(ch10_places_on_the_nearest_free_tile);
+    RUN_TEST(ch10_side_test_is_unsigned);
+    RUN_TEST(ch10_fires_once_only);
 }
