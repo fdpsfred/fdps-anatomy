@@ -20553,7 +20553,7 @@ Parameters:
   size -- total size of the image in bytes, counting the trailing 4-byte checksum field; 0x59cb at every call site.
 
 Returns:
-  The 32-bit sum of the first size-4 bytes. fdps_load_savegame and fdps_title_screen compare it with the dword stored at save_image+0x59c7 and treat a mismatch as a corrupt save; FUN_000241e0 and fdps_battle_system_submenu write it to that dword before scrambling the image with fdps_xor_crypt_buffer and writing the file out.
+  The 32-bit sum of the first size-4 bytes. fdps_load_savegame and fdps_title_screen compare it with the dword stored at save_image+0x59c7 and treat a mismatch as a corrupt save; fdps_save_game_screen and fdps_battle_system_submenu write it to that dword before scrambling the image with fdps_xor_crypt_buffer and writing the file out.
 
 Pool: fdps  [no Function ID candidate in any library, hash unique in the image, four game callers and no callees; the hardcoded 'length minus 4' skip is a game data-format detail no CRT routine has, and 31 bytes of loop logic is neither a thunk nor a linker island]
 

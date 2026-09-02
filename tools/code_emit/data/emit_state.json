@@ -1902,6 +1902,14 @@
       "rounds": 0,
       "status": "committed",
       "emitted_against": "0x61"
+    },
+    "00056898": {
+      "name": "fdps_compute_save_checksum",
+      "target": "save.c",
+      "body_size": "0x1f",
+      "status": "committed",
+      "emitted_against": "0x1f",
+      "rounds": 0
     }
   }
 }

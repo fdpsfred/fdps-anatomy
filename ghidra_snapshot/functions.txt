@@ -1332,7 +1332,7 @@
 000567f0 | 0x28 | __watcall | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_input | void __watcall fdps_install_keyboard_isr(void)
 00056818 | 0x1f | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_uninstall_keyboard_isr(void)
 00056837 | 0x61 | __watcall | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_input | void __watcall fdps_keyboard_isr(void)
-00056898 | 0x1f | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | int __cdecl fdps_compute_save_checksum(void * save_image, int size)
+00056898 | 0x1f | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | uint __cdecl fdps_compute_save_checksum(uchar * save_image, uint size)
 000568b7 | 0x24 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_file_io | void __cdecl fdps_xor_crypt_buffer(uchar * buf, uint len)
 000568db | 0x11d | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,shared_helper,subsys_graphics | void __cdecl fdps_blit_dispatch(void * src, void * dst, int width, int height, int pitch, int arg6, uchar mode)
 00056a0d | 0x77 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_rle_blit_passthrough(void)
