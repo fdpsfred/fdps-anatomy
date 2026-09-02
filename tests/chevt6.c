@@ -44,8 +44,15 @@
  * deployment records, and the two Guardian Dragons at 0x5a and 0x5b are the
  * pair that must come out at 0x0a rather than at the 0 everything below them
  * gets.
+ *
+ * The chapter 30 handler at 000398c0 shares none of that ground: its whole body
+ * is one deployment call, so the ch30w3_ cases run that deployment for real and
+ * read back which record landed on which tile.  They need ICON.CEL and FIELD.VFS
+ * next to the executable and skip themselves without them.
  */
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -594,6 +601,481 @@ static void ch29all_has_no_one_shot_latch(void)
     CHECK_EQ(ch29_units[CH29_LAST_DEPLOYED_INDEX + 1].ai_behavior, 0x52);
 }
 
+/* Chapter 30's "the second form has fallen" event at 000398c0, from here down.
+ *
+ * The handler's whole body is one call, and none of the three values it hands
+ * fdps_deploy_wave -- PUSH dword ptr [0x00069cf4], PUSH 0x3 and a EAX holding 1,
+ * at 000398d3..000398db -- is left anywhere afterwards.  So the only way to see
+ * any of them is to let the deployment happen, and these cases run
+ * fdps_deploy_wave for real, then read back what landed where:
+ *
+ *   MAP00.COD  record 0 (18, 0)  record 1 (22, 12)  record 2 (8, 10)
+ *   MAP01.COD  record 0 (9, 4)
+ *
+ * -- the same records tests/deploy.c's own wave cases and the chapter 17 and 18
+ * cases in tests/chevt3.c expect, staged through tests/gamefile.lst.  That
+ * function opens ICON.CEL and FIELD.VFS for itself and a run without them would
+ * not fail a check, it would hang in fdps_wait_any_key, so every case here skips
+ * itself when they are not there.
+ *
+ * Which wave the spawn table's records carry is staged rather than read from
+ * map29.dat, because what is under test is that the wave asked for is the
+ * literal 3 and not something derived: a record is planted at each of the waves
+ * either side of it, so asking for the wrong one is visible as a different
+ * character id on a different tile.  map29.dat's own wave 3 is one record, the
+ * boss's third form, and a fixture of one record could not tell "wave 3" from
+ * "every record" or from "the first record".
+ *
+ * The unit array is malloc'd rather than staged into a static block, because a
+ * deployment reallocs it: a static block handed to realloc is not a smaller
+ * fixture, it is undefined behaviour.  It is never freed, for the same reason
+ * tests/deploy.c does not free it -- the block moves under the global on every
+ * deployment.
+ */
+
+/* The wave the handler asks for: PUSH 0x3 at 000398d9. */
+#define CH30W3_WAVE_NO 3
+
+/* A map big enough for MAP00.COD's records, which reach (22, 12).  The tile
+   search a placement flag of 0 would run walks the whole grid, and the marking
+   pass writes at a unit's own tile with no bound, so the grid has to cover the
+   coordinates the real placement file names either way. */
+#define CH30W3_GRID_W 32
+#define CH30W3_GRID_H 16
+
+/* Where the deployment records start in the MAP%02d.DAT block and where its
+   header keeps their count: ADD EAX,0x83 at 00023463 and MOV AL,byte ptr
+   [EAX+0x2] at 000238bb. */
+#define CH30W3_SPAWN_TABLE_RECORD_BASE 0x83
+#define CH30W3_SPAWN_TABLE_COUNT_OFFSET 2
+
+/* The scene-layer offsets fdps_map_load_tile_info reads through: the tile map's
+   width word at +7 with its 16-bit ids from +0xb, the attribute table's 4-byte
+   rows from +0x11, and the event layer's width at +7 with its cells from +0x10
+   (src/maptile.c). */
+#define CH30W3_TILE_MAP_WIDTH_OFFSET 7
+#define CH30W3_TILE_MAP_IDS_OFFSET 0xb
+#define CH30W3_TILE_ATTR_ROWS_OFFSET 0x11
+#define CH30W3_EVENT_LAYER_WIDTH_OFFSET 7
+#define CH30W3_EVENT_LAYER_CELLS_OFFSET 0x10
+
+/* A terrain code the deployment search accepts and one it rejects, either side
+   of the CMP EAX,0x5 / JGE at 00023404. */
+#define CH30W3_TERRAIN_WALKABLE 1
+#define CH30W3_TERRAIN_BLOCKED 5
+
+#define CH30W3_TILE_ATTR_ROWS 16
+#define CH30W3_CHAR_TABLE_ROWS 8
+#define CH30W3_ENEMY_TABLE_ROWS 8
+
+/* Every item id is a valid index into the staged item table, 0xff included:
+   fdps_unit_recompute_combat_stats follows an equipped flag into
+   fdps_get_item_record without a bounds check. */
+#define CH30W3_ITEM_TABLE_ROWS 256
+#define CH30W3_ITEM_ID_NONE 0xff
+
+/* The unit array's stride, as the deployment path allocates it: PUSH 0x50 at
+   000232cc. */
+#define CH30W3_UNIT_STRIDE 0x50
+
+/* The three staged deployment records and the wave each is tagged with, one at
+   the wave the handler must ask for and one at each of its neighbours.  The
+   character ids are arbitrary and only have to differ, so that which record was
+   deployed is readable off the unit as well as off the tile. */
+#define CH30W3_WAVE2_RECORD 0
+#define CH30W3_WAVE3_RECORD 1
+#define CH30W3_WAVE4_RECORD 2
+#define CH30W3_WAVE2_CHAR_ID 5
+#define CH30W3_WAVE3_CHAR_ID 6
+#define CH30W3_WAVE4_CHAR_ID 7
+
+static unsigned char ch30w3_grid[4 + CH30W3_GRID_W * CH30W3_GRID_H * 2];
+static unsigned char ch30w3_spawn_table[CH30W3_SPAWN_TABLE_RECORD_BASE +
+                                        8 * 0x1a];
+static unsigned char ch30w3_tile_map[CH30W3_TILE_MAP_IDS_OFFSET +
+                                     CH30W3_GRID_W * CH30W3_GRID_H * 2];
+static unsigned char ch30w3_tile_attr[CH30W3_TILE_ATTR_ROWS_OFFSET +
+                                      CH30W3_TILE_ATTR_ROWS * 4];
+static unsigned char ch30w3_event_layer[CH30W3_EVENT_LAYER_CELLS_OFFSET +
+                                        CH30W3_GRID_W * CH30W3_GRID_H];
+static struct fdps_character_base_record ch30w3_char_base[
+    CH30W3_CHAR_TABLE_ROWS];
+static struct fdps_character_growth ch30w3_growth[CH30W3_CHAR_TABLE_ROWS];
+static struct fdps_enemy_data ch30w3_enemy[CH30W3_ENEMY_TABLE_ROWS];
+static struct fdps_item_effect ch30w3_items[CH30W3_ITEM_TABLE_ROWS];
+
+static int ch30w3_files_checked = 0;
+static int ch30w3_files_ready = 0;
+
+/* ICON.CEL is read by fdps_cache_cel_sprite_group, which takes a fixed
+   0x2970-byte bite out of the sheet's offset table, so a shorter file is one
+   that reader runs off the end of rather than a smaller fixture.  FIELD.VFS
+   cannot be stood in for at all: a missing container sends fdps_deploy_wave into
+   fdps_wait_any_key and a missing member into exit(1). */
+static void ch30w3_ensure_game_files(void)
+{
+    FILE *fp;
+    long size;
+
+    if (ch30w3_files_checked) {
+        return;
+    }
+    ch30w3_files_checked = 1;
+
+    fp = fopen("ICON.CEL", "rb");
+    if (fp == NULL) {
+        return;
+    }
+    fseek(fp, 0, SEEK_END);
+    size = ftell(fp);
+    fclose(fp);
+    if (size < (long) (15 + 0x2970)) {
+        return;
+    }
+
+    fp = fopen("FIELD.VFS", "rb");
+    if (fp == NULL) {
+        return;
+    }
+    fclose(fp);
+    ch30w3_files_ready = 1;
+}
+
+static void ch30w3_zero_bytes(void *block, int count)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) block;
+    for (i = 0; i < count; i++) {
+        bytes[i] = 0;
+    }
+}
+
+static struct fdps_char_spawn_record *ch30w3_spawn_at(int index)
+{
+    return (struct fdps_char_spawn_record *)
+           (ch30w3_spawn_table + CH30W3_SPAWN_TABLE_RECORD_BASE) + index;
+}
+
+/* One deployment record with nothing equipped and nothing carried, tagged with
+   the wave it belongs to. */
+static void ch30w3_set_spawn(int index, int char_id, int wave_no)
+{
+    ch30w3_spawn_at(index)->char_id = (unsigned char) char_id;
+    ch30w3_spawn_at(index)->level = 1;
+    ch30w3_spawn_at(index)->side = 0;
+    ch30w3_spawn_at(index)->equipped_item_0 = CH30W3_ITEM_ID_NONE;
+    ch30w3_spawn_at(index)->equipped_item_1 = CH30W3_ITEM_ID_NONE;
+    ch30w3_spawn_at(index)->carried_items[0] = CH30W3_ITEM_ID_NONE;
+    ch30w3_spawn_at(index)->carried_items[1] = CH30W3_ITEM_ID_NONE;
+    ch30w3_spawn_at(index)->carried_items[2] = CH30W3_ITEM_ID_NONE;
+    ch30w3_spawn_at(index)->carried_items[3] = CH30W3_ITEM_ID_NONE;
+    ch30w3_spawn_at(index)->carried_items[4] = CH30W3_ITEM_ID_NONE;
+    ch30w3_spawn_at(index)->carried_items[5] = CH30W3_ITEM_ID_NONE;
+    ch30w3_spawn_at(index)->wave_no = (unsigned char) wave_no;
+}
+
+static void ch30w3_set_terrain(int tile_id, int terrain)
+{
+    struct fdps_tile_attr_entry *rows;
+
+    rows = (struct fdps_tile_attr_entry *)
+           (ch30w3_tile_attr + CH30W3_TILE_ATTR_ROWS_OFFSET);
+    rows[tile_id].terrain_type = (unsigned char) terrain;
+}
+
+/* The cell of the tile map at (tile_x, tile_y), so one tile can be given an id
+   whose attribute row says a search must not use it. */
+static void ch30w3_set_tile_id(int tile_x, int tile_y, int tile_id)
+{
+    short *tile_ids;
+
+    tile_ids = (short *) (ch30w3_tile_map + CH30W3_TILE_MAP_IDS_OFFSET);
+    tile_ids[tile_y * CH30W3_GRID_W + tile_x] = (short) tile_id;
+}
+
+static struct fdps_unit_record *ch30w3_unit(int unit_index)
+{
+    return (struct fdps_unit_record *)
+           (data_fdps_map_unit_array_ptr + unit_index * CH30W3_UNIT_STRIDE);
+}
+
+/* A blank walkable map with one unit already on it, the chapter global on map 0
+   and the turn counter on the given turn, plus three deployment records tagged
+   waves 2, 3 and 4 at table indices 0, 1 and 2.  Placement record and table
+   index are the same number, so which record was deployed is readable twice
+   over: off the character id and off the tile it landed on.
+
+   The unit already on the map stands at (0, 0), clear of every placement record
+   these cases read back. */
+static void ch30w3_stage(int battle_turn)
+{
+    int i;
+
+    ch30w3_zero_bytes(ch30w3_grid, (int) sizeof(ch30w3_grid));
+    ch30w3_zero_bytes(ch30w3_spawn_table, (int) sizeof(ch30w3_spawn_table));
+    ch30w3_zero_bytes(ch30w3_tile_map, (int) sizeof(ch30w3_tile_map));
+    ch30w3_zero_bytes(ch30w3_tile_attr, (int) sizeof(ch30w3_tile_attr));
+    ch30w3_zero_bytes(ch30w3_event_layer, (int) sizeof(ch30w3_event_layer));
+    ch30w3_zero_bytes(ch30w3_char_base, (int) sizeof(ch30w3_char_base));
+    ch30w3_zero_bytes(ch30w3_growth, (int) sizeof(ch30w3_growth));
+    ch30w3_zero_bytes(ch30w3_enemy, (int) sizeof(ch30w3_enemy));
+    ch30w3_zero_bytes(ch30w3_items, (int) sizeof(ch30w3_items));
+
+    *(short *) ch30w3_grid = (short) CH30W3_GRID_W;
+    *(short *) (ch30w3_grid + 2) = (short) CH30W3_GRID_H;
+
+    *(short *) (ch30w3_tile_map + CH30W3_TILE_MAP_WIDTH_OFFSET) =
+        (short) CH30W3_GRID_W;
+    for (i = 0; i < CH30W3_TILE_ATTR_ROWS; i++) {
+        ch30w3_set_terrain(i, CH30W3_TERRAIN_WALKABLE);
+    }
+
+    *(short *) (ch30w3_event_layer + CH30W3_EVENT_LAYER_WIDTH_OFFSET) =
+        (short) CH30W3_GRID_W;
+
+    data_fdps_battle_move_grid_ptr = ch30w3_grid;
+    data_fdps_tile_event_data_table_ptr = ch30w3_spawn_table;
+    data_fdps_scene_layer_tile_map_ptrs[0] = ch30w3_tile_map;
+    data_fdps_scene_layer_tile_attr_ptr[0] = ch30w3_tile_attr;
+    data_fdps_map_cell_event_code_layer_ptr = ch30w3_event_layer;
+    data_fdps_battle_character_base_table_ptr =
+        (unsigned char *) ch30w3_char_base;
+    data_fdps_battle_character_growth_table_ptr =
+        (unsigned char *) ch30w3_growth;
+    data_fdps_battle_enemy_data_table_ptr = (unsigned char *) ch30w3_enemy;
+    data_fdps_item_effect_table_ptr = (unsigned char *) ch30w3_items;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) malloc(CH30W3_UNIT_STRIDE);
+    ch30w3_zero_bytes(data_fdps_map_unit_array_ptr, CH30W3_UNIT_STRIDE);
+    data_fdps_map_unit_count = 1;
+
+    ch30w3_spawn_table[CH30W3_SPAWN_TABLE_COUNT_OFFSET] = 3;
+    ch30w3_set_spawn(CH30W3_WAVE2_RECORD, CH30W3_WAVE2_CHAR_ID, 2);
+    ch30w3_set_spawn(CH30W3_WAVE3_RECORD, CH30W3_WAVE3_CHAR_ID, 3);
+    ch30w3_set_spawn(CH30W3_WAVE4_RECORD, CH30W3_WAVE4_CHAR_ID, 4);
+
+    data_fdps_chapter_current_chapter_id = 0;
+    data_fdps_battle_turn_counter = battle_turn;
+}
+
+/* Move the wave-3 tag down onto table index 0, so the record the handler
+   deploys is placement record 0 -- the one record of MAP01.COD these cases know
+   the coordinates of. */
+static void ch30w3_tag_first_record_as_the_wave(void)
+{
+    ch30w3_set_spawn(CH30W3_WAVE2_RECORD, CH30W3_WAVE2_CHAR_ID,
+                     CH30W3_WAVE_NO);
+    ch30w3_set_spawn(CH30W3_WAVE3_RECORD, CH30W3_WAVE3_CHAR_ID, 2);
+}
+
+/* The fields the cases below read back and the stride they are indexed by.
+   Every one of them would agree with itself while addressing another byte if the
+   layout were wrong. */
+static void ch30w3_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), CH30W3_UNIT_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 1);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, char_id), 8);
+    CHECK_EQ((int) offsetof(struct fdps_char_spawn_record, wave_no), 0x15);
+}
+
+/* The wave asked for is 3 and only the record tagged with it arrives: of the
+   three staged records exactly one deploys, it is table index 1, and it lands on
+   MAP00.COD record 1 at (22, 12) with the character id that record carries.  The
+   records at waves 2 and 4 sit either side of it, so an off-by-one in either
+   direction would put a different character on a different tile. */
+static void ch30w3_deploys_the_wave_three_record(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w3_stage(0);
+
+    fdps_chapter_30_event_deploy_wave_3(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE3_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_x, 22);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_y, 12);
+}
+
+/* The 3 is a literal and not the battle turn counter, which is what every
+   turn-scheduled handler of this family pushes instead: the counter is driven
+   through the wave numbers the fixture carries and one well above them, and the
+   same wave-3 record arrives every time.  A handler that read the counter would
+   deploy the wave-2 record on turn 2, the wave-4 record on turn 4 and nothing at
+   all on turn 0 or turn 11. */
+static void ch30w3_wave_number_is_a_literal(void)
+{
+    static int turns[4] = {0, 2, 4, 11};
+    int i;
+
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 4; i++) {
+        ch30w3_stage(turns[i]);
+        fdps_chapter_30_event_deploy_wave_3(0);
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE3_CHAR_ID);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_x, 22);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_y, 12);
+    }
+}
+
+/* It is the whole wave and not one unit: map29.dat tags a single record wave 3,
+   so nothing in the shipped data would tell a wave deploy from a single-unit
+   one, and the fixture tags all three records instead.  All three arrive, in
+   table order, on their own placement records -- (18, 0), (22, 12) and
+   (8, 10) -- and the count goes up by three. */
+static void ch30w3_deploys_every_record_of_the_wave(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w3_stage(0);
+    ch30w3_set_spawn(CH30W3_WAVE2_RECORD, CH30W3_WAVE2_CHAR_ID,
+                     CH30W3_WAVE_NO);
+    ch30w3_set_spawn(CH30W3_WAVE4_RECORD, CH30W3_WAVE4_CHAR_ID,
+                     CH30W3_WAVE_NO);
+
+    fdps_chapter_30_event_deploy_wave_3(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 4);
+    CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE2_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_x, 18);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_y, 0);
+    CHECK_EQ((int) ch30w3_unit(2)->char_id, CH30W3_WAVE3_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(2)->pos_x, 22);
+    CHECK_EQ((int) ch30w3_unit(2)->pos_y, 12);
+    CHECK_EQ((int) ch30w3_unit(3)->char_id, CH30W3_WAVE4_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(3)->pos_x, 8);
+    CHECK_EQ((int) ch30w3_unit(3)->pos_y, 10);
+}
+
+/* The placement flag is 1 -- MOV EAX,0x1 / PUSH EAX at 000398d3 -- so the unit
+   is put on the tile its placement record names and the terrain there is never
+   consulted.  MAP00.COD record 1 names (22, 12); giving that one cell a tile id
+   whose attribute row is terrain 5 is what takes a tile out of the search a flag
+   of 0 runs, and the unit still lands on (22, 12).  The chapter 17 and 18
+   handlers push 0 and their cases in tests/chevt3.c assert the same record
+   landing on (22, 13) off the same fixture, so this is the assertion that
+   separates the two flags. */
+static void ch30w3_places_on_the_scripted_tile(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w3_stage(0);
+    ch30w3_set_tile_id(22, 12, 1);
+    ch30w3_set_terrain(1, CH30W3_TERRAIN_BLOCKED);
+
+    fdps_chapter_30_event_deploy_wave_3(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE3_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_x, 22);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_y, 12);
+}
+
+/* The map the wave is deployed under is read from
+   data_fdps_chapter_current_chapter_id at the call site and is not a literal:
+   the wave-3 record is moved onto table index 0 and deployed twice, once with
+   that global on 0 and once on 1, and it lands on MAP00.COD's record 0 at
+   (18, 0) and then on MAP01.COD's record 0 at (9, 4). */
+static void ch30w3_map_number_comes_from_the_chapter_global(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w3_stage(0);
+    ch30w3_tag_first_record_as_the_wave();
+
+    fdps_chapter_30_event_deploy_wave_3(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE2_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_x, 18);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_y, 0);
+
+    ch30w3_stage(0);
+    ch30w3_tag_first_record_as_the_wave();
+    data_fdps_chapter_current_chapter_id = 1;
+
+    fdps_chapter_30_event_deploy_wave_3(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE2_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_x, 9);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_y, 4);
+}
+
+/* The incoming argument slot is overwritten with 0 at 000398cc before anything
+   else happens and never read back, so the index the dispatcher passes cannot
+   reach the wave asked for, the map asked for or the placement flag.  In the
+   shipped data this handler is reached from fdps_run_death_scripts, which passes
+   the index of the unit that just died; the values put through here are the 0
+   the turn-event runner would pass, an index that names the unit already on the
+   map, one past the array, and -1 and 30000, which are the ones an
+   argument-driven handler would betray itself on. */
+static void ch30w3_ignores_the_unit_index_argument(void)
+{
+    static int arguments[5] = {0, 1, 2, -1, 30000};
+    int i;
+
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 5; i++) {
+        ch30w3_stage(0);
+        fdps_chapter_30_event_deploy_wave_3(arguments[i]);
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE3_CHAR_ID);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_x, 22);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_y, 12);
+    }
+}
+
+/* Nothing guards the call: there is no compare anywhere in the body and no latch
+   is written, so a second firing appends a second copy of the wave rather than
+   being refused.  The slot the one-shot handlers of this family latch is put up
+   beforehand and the wave still arrives, and the slot is asserted unchanged
+   because a handler that had grown a latch would have written it. */
+static void ch30w3_has_no_one_shot_latch(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w3_stage(0);
+    data_fdps_map_cell_event_triggered_flags[CH29_LATCH_SLOT] = 1;
+
+    fdps_chapter_30_event_deploy_wave_3(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH29_LATCH_SLOT], 1);
+
+    fdps_chapter_30_event_deploy_wave_3(0);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ((int) ch30w3_unit(2)->char_id, CH30W3_WAVE3_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(2)->pos_x, 22);
+    CHECK_EQ((int) ch30w3_unit(2)->pos_y, 12);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH29_LATCH_SLOT], 1);
+}
+
 void run_chevt6_tests(void)
 {
     RUN_TEST(ch29_record_shape_matches_the_offsets);
@@ -613,4 +1095,12 @@ void run_chevt6_tests(void)
     RUN_TEST(ch29all_keeps_the_high_nibble);
     RUN_TEST(ch29all_touches_no_neighbouring_byte);
     RUN_TEST(ch29all_has_no_one_shot_latch);
+    RUN_TEST(ch30w3_record_shape_matches_the_offsets);
+    RUN_TEST(ch30w3_deploys_the_wave_three_record);
+    RUN_TEST(ch30w3_wave_number_is_a_literal);
+    RUN_TEST(ch30w3_deploys_every_record_of_the_wave);
+    RUN_TEST(ch30w3_places_on_the_scripted_tile);
+    RUN_TEST(ch30w3_map_number_comes_from_the_chapter_global);
+    RUN_TEST(ch30w3_ignores_the_unit_index_argument);
+    RUN_TEST(ch30w3_has_no_one_shot_latch);
 }

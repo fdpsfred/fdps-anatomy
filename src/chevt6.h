@@ -125,4 +125,34 @@ extern void fdps_chapter_29_event_activate_enemy_groups(int unit_index);
 extern void fdps_chapter_29_event_activate_all_enemies(int unit_index);
 #pragma aux fdps_chapter_29_event_activate_all_enemies "*" parm caller [];
 
+/* Chapter 30's "the second form has fallen" event: one call and nothing else.
+   It deploys wave 3 of the current map -- fdps_deploy_wave with the map number
+   read out of data_fdps_chapter_current_chapter_id, the wave number as the
+   literal 3 and the placement flag as 1 -- which brings the third and final form
+   of the chapter's boss onto the battle map.
+
+   The wave number being a literal is what separates this handler from the
+   turn-scheduled reinforcement handlers of the same family: they push the battle
+   turn counter, so the group they bring on depends on when they fire, and this
+   one always brings the same group.
+
+   The placement flag of 1 puts every unit of the wave on the tile its
+   MAP%02d.COD placement record names, exactly -- no search for a free walkable
+   tile and no test of what is standing there -- which is how a scripted arrival
+   lands where the script put it.
+
+   Nothing guards the call: it deploys the wave every time it is reached, and a
+   second firing would append a second copy of it.  What makes the form arrive
+   once in play is that a unit's death script is collected once, before the unit
+   is marked removed.
+
+   unit_index is the handler table's shared parameter and this handler ignores
+   it: the incoming slot is overwritten with 0 on entry and never read.  In the
+   shipped data the argument is the index of the unit whose death ran the script,
+   because the only thing that names this slot is a death script -- map29.dat's
+   deployment record 1, the second form of 平衡之神, whose wave 3 is the single
+   record holding its third form. */
+extern void fdps_chapter_30_event_deploy_wave_3(int unit_index);
+#pragma aux fdps_chapter_30_event_deploy_wave_3 "*" parm caller [];
+
 #endif

@@ -11,7 +11,9 @@
  * here owns state.
  */
 #include "fdpstype.h"
+#include "gamedata.h"
 #include "unit.h"
+#include "deploy.h"
 #include "chevt6.h"
 
 /* The half of the AI byte the merge below keeps: AND DL,0xf0 at 0003964b.  The
@@ -214,4 +216,73 @@ void fdps_chapter_29_event_activate_all_enemies(int unit_index)
                  AI_BEHAVIOR_MODE_ITEM_THEN_ATTACK);
         }
     }
+}
+
+/* The wave the chapter 30 handler below asks for: PUSH 0x3 at 000398d9, a
+   literal and not a value read from anywhere.  That is the whole difference
+   between this handler and the turn-scheduled ones of chapters 17, 18, 23 and
+   24, which push the battle turn counter instead, and it is what makes this one
+   deploy the same group whenever it is reached rather than a group that depends
+   on when it was reached. */
+#define CH30_WAVE3_WAVE_NO 3
+
+/* How that wave is placed: MOV EAX,0x1 / PUSH EAX at 000398d3, so
+   fdps_deploy_wave passes 1 on to fdps_deploy_unit and every unit is put on the
+   tile its MAP%02d.COD placement record names, exactly, with no search and no
+   test of what is standing there or what the terrain is.  A 0 here -- what the
+   turn-scheduled reinforcement handlers push -- would send each unit to the
+   nearest unoccupied walkable tile to those coordinates instead, which for a
+   scripted single-unit arrival is a different tile whenever the tile the script
+   picked is occupied or blocked. */
+#define CH30_WAVE3_PLACE_EXACT 1
+
+/* 000398c0.  Chapter 30's "the second form has fallen" event: brings on the
+   third and final form of the boss by deploying the current map's wave-3 units.
+
+   The whole body is one call.  The frame is the standard Watcom four-push one
+   with an empty local area -- PUSH EBX / PUSH ESI / PUSH EDI / PUSH EBP /
+   MOV EBP,ESP / SUB ESP,0x0 at 000398c0..000398c6 -- so there is no local here
+   at all and the three arguments go straight into the pushes: MOV EAX,0x1 /
+   PUSH EAX, PUSH 0x3, PUSH dword ptr [0x00069cf4] at 000398d3..000398db.  The
+   caller-cleans ADD ESP,0xc at 000398e6 is this function's own, which is what
+   makes the convention the stack one.
+
+   The map number is data_fdps_chapter_current_chapter_id read at the call site
+   and not anything this handler holds, so it is whichever chapter is loaded --
+   the same way the chapter 10 ambush in chevt2.c and the chapter 17 and 18
+   handlers in chevt3.c read it.
+
+   What wave 3 means comes from the shipped map: this slot is named exactly once
+   in the whole game, by the death script of map29.dat's deployment record 1 --
+   chapter 30, the level 40 character id 61 that is the second form of 平衡之神
+   -- and wave 3 of that same file is the single record carrying character id 62,
+   its third form.  So the event is the boss's second form dying and its third
+   arriving, and the placement flag of 1 is why that arrival lands on the tile
+   the script chose for it rather than beside it.  The third form's own death
+   script is opcode 4, the battle-cleared verdict, so nothing deploys after it.
+
+   Nothing guards the call and nothing records that it ran, so the handler
+   deploys wave 3 every time it is reached; what makes the form arrive once is
+   that fdps_collect_death_scripts takes a unit's death script off it before
+   fdps_play_death_animation_and_mark_dead marks it removed, so the record is
+   collected once per death.  Deploying twice would append a second copy of the
+   wave rather than being refused.
+
+   unit_index is the handler table's shared parameter, and here it is the index
+   of the unit whose death ran the script.  MOV dword ptr [EBP+0x14],0x0 at
+   000398cc writes zero over the incoming slot before anything else happens and
+   nothing ever reads it back, so which unit died cannot reach the wave asked
+   for, the map asked for or the placement flag; the store has no observable
+   effect, because the slot belongs to the caller's outgoing argument area and
+   fdps_run_death_scripts drops it with ADD ESP,0x4 at 0001dcb4.
+
+   Nothing sets EAX between the CALL's return and the RET at 000398ed, and no
+   dispatcher reads what comes back, so the result is void. */
+void fdps_chapter_30_event_deploy_wave_3(int unit_index)
+{
+    unit_index = 0;
+
+    fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                     CH30_WAVE3_WAVE_NO,
+                     CH30_WAVE3_PLACE_EXACT);
 }
