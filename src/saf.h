@@ -59,6 +59,7 @@ extern int fdps_saf_frame_count(void *saf);
 #define SAF_CURSOR_FRAME_INDEX 0
 #define SAF_CURSOR_TICKS_HELD 1
 #define SAF_CURSOR_IMAGE 2
+#define SAF_CURSOR_DWORDS 3
 
 /* Advances the playback cursor by one tick and says what happened: 0 while the
    clip is still running, 1 on the tick that steps past the last frame, -1 when
@@ -77,5 +78,30 @@ extern int fdps_saf_frame_count(void *saf);
    nothing is called. */
 extern int fdps_saf_advance_tick(int *cursor, unsigned char mode);
 #pragma aux fdps_saf_advance_tick "*" parm caller [];
+
+/* Plays the loaded .SAF image saf_image through once, full screen, over a
+   copy of background_page, and returns when the clip has run out.  Both
+   blocks stay the caller's: neither is freed here and neither is written to.
+
+   background_page is a 320x200 8bpp picture with 320 bytes to the row -- the
+   caller's snapshot of whatever was on the screen before the animation
+   started.  It is repainted under every single frame, so the animation
+   composites over a still picture rather than over its own previous frame.
+
+   Frames are composed on a private 368x248 page, 24 pixels of margin on every
+   side, and only its 320x200 window is put on the adapter: a frame whose
+   layers hang up to 24 pixels off any edge of the screen is drawn into the
+   margin instead of being clipped or wrapping onto the next row.  Playback is
+   paced by the timer tick counter, one frame per change of it, and each
+   frame's own sound effect is started as it is drawn.
+
+   THE FIRST FRAME IS NOT PACED.  The latch the wait loop compares the tick
+   counter against is deliberately never initialised, so the first frame goes
+   up and moves on without waiting for a tick (rebuild_info/pitfalls.md).
+   Seeding it -- with 0, or with the counter's current value -- adds one tick
+   to every playback in the game. */
+extern void fdps_saf_play_over_background(void *saf_image,
+                                          unsigned char *background_page);
+#pragma aux fdps_saf_play_over_background "*" parm caller [];
 
 #endif

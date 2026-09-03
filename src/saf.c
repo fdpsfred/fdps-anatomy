@@ -3,9 +3,16 @@
  *
  * See saf.h for the layout facts these readers depend on, and
  * resource_info/saf.md for the format itself.  Everything here works on a
- * caller-supplied image pointer; this file owns no state.
+ * caller-supplied image pointer; this file owns no state.  The player at the
+ * end is the one routine that reaches outside itself: it reads the timer tick
+ * counter to pace the clip and puts each finished frame straight on the
+ * adapter.
  */
 #include <stddef.h>
+#include <stdlib.h>
+#include "gamedata.h"
+#include "blit.h"
+#include "sprite.h"
 #include "saf.h"
 
 /* Section descriptor 0 is the frame section, and it is the first of the four,
@@ -172,4 +179,105 @@ int fdps_saf_advance_tick(int *cursor, unsigned char mode)
         }
     }
     return result;
+}
+
+/* The visible mode 13h screen: its linear aperture, its 320 bytes to the row
+   and its 200 rows.  The window the player moves is the whole screen, so its
+   width in bytes is the pitch itself and one macro serves for both. */
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_PITCH 0x140
+#define VGA_SCREEN_ROWS 0xc8
+
+/* The private page a frame is composed on: 368 by 248, which is the screen
+   with 24 pixels of margin added on every side, and the 0x16480 bytes that
+   comes to.  The margin is what a frame overhanging the screen is drawn into,
+   so nothing has to be clipped and nothing wraps onto the next row. */
+#define SAF_PAGE_PITCH 0x170
+#define SAF_PAGE_ROWS 0xf8
+#define SAF_PAGE_MARGIN 0x18
+#define SAF_PAGE_BYTES 0x16480
+
+/* Where the screen-sized window sits inside that page: 24 rows down and 24
+   bytes in, 0x18 * 0x170 + 0x18.  It is also where the request's origin points,
+   so a frame layer at offset 0,0 lands on screen pixel 0,0. */
+#define SAF_PAGE_WINDOW_AT 0x2298
+
+/* 0001ecf0.  One loop with its test at the top -- CMP dword ptr [EBP-0x4],0x0
+   / JNZ to the epilogue at 0001ed5b, and JMP back to that test at 0001edf5 --
+   so a clip fdps_saf_advance_tick refuses outright never draws a frame.  The
+   answer the test reads is fdps_saf_advance_tick's, and the reset call before
+   the loop is the one whose answer is thrown away.
+
+   THE WAIT'S LATCH IS DELIBERATELY LEFT UNINITIALISED, the same contract
+   fdps_animate_turn_banner carries (anim.c).  last_tick is read at 0001edd0
+   before anything has written it, so the first frame's wait ends at once
+   unless the stack happened to hold the counter's current value, and the clip
+   is one tick shorter than a clean reading of it would be.  Latching the
+   counter before the loop -- which is what writing this tidily leads to --
+   adds that tick back.  data_fdps_timer_tick_counter is volatile at its
+   declaration (gamedata.h) precisely so this loop keeps reloading it.
+
+   The two blits are the same function in its two directions: the caller's
+   background into the page's window, then the page's window onto the adapter.
+   Only the window travels, so the 24-pixel margin the frame may have spilled
+   into is never seen.
+
+   malloc's answer is used without a test, and there is no CALL in the function
+   whose value is read other than malloc's and fdps_saf_advance_tick's --
+   fdps_blit_rect and fdps_draw_composite_sprite both return void, and free's
+   answer is discarded by the original as it is here.
+
+   0xa0000 is written as a literal because it is the adapter's real linear
+   address under DOS/4GW and not a symbol the rebuild places anywhere
+   (rebuild_info/pitfalls.md, contract E). */
+void fdps_saf_play_over_background(void *saf_image,
+                                   unsigned char *background_page)
+{
+    /* The nine-dword draw request sprite.h describes, built once and with only
+       its frame number rewritten inside the loop. */
+    int request[DRAW_REQUEST_DWORDS];
+    /* The three-dword playback cursor saf.h describes: which frame the clip is
+       on, how long it has been there, and the image it lives in. */
+    int playback_cursor[SAF_CURSOR_DWORDS];
+    /* The 368x248 page every frame is composed on, so that a frame is never
+       seen half-drawn on the adapter. */
+    unsigned char *work_page;
+    /* The tick the previous frame ended on.  Deliberately not initialised --
+       see the note above. */
+    unsigned int last_tick;
+    /* fdps_saf_advance_tick's answer: 0 while the clip is still running, and
+       1 on the tick that steps past its last frame. */
+    int clip_ended;
+
+    clip_ended = 0;
+    work_page = (unsigned char *) malloc((size_t) SAF_PAGE_BYTES);
+    request[DRAW_REQUEST_DEST_BASE] = (int) work_page;
+    request[DRAW_REQUEST_DEST_PITCH] = SAF_PAGE_PITCH;
+    request[DRAW_REQUEST_DEST_ROWS] = SAF_PAGE_ROWS;
+    request[DRAW_REQUEST_X] = SAF_PAGE_MARGIN;
+    request[DRAW_REQUEST_Y] = SAF_PAGE_MARGIN;
+    request[DRAW_REQUEST_IMAGE] = (int) saf_image;
+    request[DRAW_REQUEST_BLIT_OPERAND] = 0;
+    request[DRAW_REQUEST_BLIT_MODE] = 0;
+
+    playback_cursor[SAF_CURSOR_IMAGE] = (int) saf_image;
+    fdps_saf_advance_tick(playback_cursor, 1);
+
+    while (clip_ended == 0) {
+        fdps_blit_rect((unsigned int) background_page, VGA_SCREEN_PITCH,
+                       work_page + SAF_PAGE_WINDOW_AT, SAF_PAGE_PITCH,
+                       VGA_SCREEN_PITCH, VGA_SCREEN_ROWS);
+        request[DRAW_REQUEST_ITEM_INDEX] =
+            playback_cursor[SAF_CURSOR_FRAME_INDEX];
+        fdps_draw_composite_sprite(request, 1);
+        fdps_blit_rect((unsigned int) (work_page + SAF_PAGE_WINDOW_AT),
+                       SAF_PAGE_PITCH, (void *) VGA_SCREEN_BASE,
+                       VGA_SCREEN_PITCH, VGA_SCREEN_PITCH, VGA_SCREEN_ROWS);
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+        clip_ended = fdps_saf_advance_tick(playback_cursor, 0);
+    }
+
+    free(work_page);
 }

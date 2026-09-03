@@ -2127,6 +2127,14 @@
       "status": "committed",
       "emitted_against": "0x237",
       "rounds": 1
+    },
+    "0001ecf0": {
+      "name": "fdps_saf_play_over_background",
+      "target": "saf.c",
+      "body_size": "0x11d",
+      "status": "committed",
+      "emitted_against": "0x11d",
+      "rounds": 0
     }
   }
 }

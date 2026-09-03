@@ -24,6 +24,10 @@
  * choice between restarting and stopping at the end.
  */
 #include <stddef.h>
+#include <string.h>
+#include <dos.h>
+#include <i86.h>
+#include "gamedata.h"
 #include "testharn.h"
 #include "saf.h"
 
@@ -474,6 +478,411 @@ static void any_other_mode_stops_on_the_last_frame(void)
     CHECK_EQ(play_cursor[SAF_CURSOR_FRAME_INDEX], 2);
 }
 
+/* --- fdps_saf_play_over_background @ 0001ecf0 --------------------------- */
+
+/* WHAT THE PLAYBACK CASES ASSERT AGAINST.  This routine draws on the real
+   adapter -- it copies the caller's background into a private page, composes
+   the frame on top of it and puts that page's 320x200 window at 0xa0000 -- so
+   the cases below put the machine in mode 13h, run one whole clip with a timer
+   interrupt going, and read the aperture back afterwards.  The interrupt is
+   not optional scaffolding: nothing else moves data_fdps_timer_tick_counter,
+   and the wait at 0001edd0 spins until it changes.  The premise that the
+   aperture reads back at all is asserted first, so a machine where it does not
+   fails there instead of failing every geometry case for the wrong reason.
+
+   WHERE THE EXPECTED POSITIONS COME FROM.  The request's x and y are both
+   0x18 -- MOV dword ptr [EBP-0x2c],0x18 and MOV dword ptr [EBP-0x28],0x18 --
+   and the window the two fdps_blit_rect calls move is at page + 0x2298, which
+   is row 0x18, column 0x18 of a 0x170-byte pitch.  The two 0x18s cancel, so a
+   frame layer carrying offset 0,0 lands on screen pixel 0,0 and one carrying
+   x,y lands on screen column x, row y.  A layer carrying a small negative
+   offset lands in the page's margin instead, which is the whole reason the
+   page is 48 pixels wider and taller than the screen.
+
+   WHAT IS NOT COVERED.  The sound flag is PUSH 0x1 at 0001ed94, so every frame
+   fires its own effect as it is drawn; the fixture frames all carry sound -1
+   and fdps_sfx_play does nothing at all while the audio flags are clear, so no
+   assertion here can see that argument.  It takes a machine with a driver. */
+
+/* The visible screen and the two BIOS modes the cases move between. */
+#define PLAY_VGA_BASE 0x000a0000
+#define PLAY_SCREEN_W 0x140
+#define PLAY_SCREEN_H 0xc8
+#define PLAY_SCREEN_BYTES (PLAY_SCREEN_W * PLAY_SCREEN_H)
+#define PLAY_MODE_TEXT 0x03
+#define PLAY_MODE_320X200X256 0x13
+
+/* The BIOS timer, the one interrupt that has to be running for the wait loop
+   to end. */
+#define PLAY_TIMER_VECTOR 8
+
+/* Painted over the whole aperture before every run.  The background pattern
+   never produces it and neither does any tile, so a byte still holding it
+   afterwards is a byte the routine did not reach. */
+#define PLAY_SENTINEL 0x5a
+
+/* The fixture .SAF: three 4x2 tiles of one pixel value each, a single-cell
+   tilemap naming each of them, and three frames each naming one tilemap at an
+   offset of its own.  Header offsets first -- the magic, the cell size, and
+   the count and start of each of the three sections the drawers read. */
+#define PSAF_BYTES 0x100
+#define PSAF_CELL_W_AT 0x07
+#define PSAF_CELL_H_AT 0x09
+#define PSAF_FRAME_COUNT_AT 0x0c
+#define PSAF_FRAME_TABLE_PTR_AT 0x0e
+#define PSAF_TILEMAP_COUNT_AT 0x16
+#define PSAF_TILEMAP_TABLE_PTR_AT 0x18
+#define PSAF_TILE_COUNT_AT 0x20
+#define PSAF_TILE_TABLE_PTR_AT 0x22
+
+/* Where the fixture puts each section.  The header ends at 0x34; then a
+   three-entry tile table and the streams, a three-entry tilemap table and the
+   records, and a three-entry frame table and the records. */
+#define PSAF_TILE_TABLE_AT 0x34
+#define PSAF_TILE0_AT 0x40
+#define PSAF_TILE_STRIDE 4
+#define PSAF_TILEMAP_TABLE_AT 0x4c
+#define PSAF_TILEMAP0_AT 0x58
+#define PSAF_TILEMAP_STRIDE 8
+#define PSAF_FRAME_TABLE_AT 0x70
+#define PSAF_FRAME0_AT 0x80
+#define PSAF_FRAME_STRIDE 0x20
+
+/* A frame record: i16 sound, i16 duration, i16 layer count at +8, then
+   13-byte layers of tilemap number, i16 x, i16 y and a blend flag.  Sound
+   0xffff is the -1 every real frame with no effect carries. */
+#define PSAF_FRAME_SOUND_AT 0x00
+#define PSAF_FRAME_DURATION_AT 0x02
+#define PSAF_FRAME_LAYER_COUNT_AT 0x08
+#define PSAF_LAYER_AT 0x0a
+#define PSAF_LAYER_TILEMAP_AT 0x00
+#define PSAF_LAYER_X_AT 0x02
+#define PSAF_LAYER_Y_AT 0x04
+#define PSAF_LAYER_BLEND_AT 0x06
+#define PSAF_NO_SOUND 0xffff
+
+/* The fixture's cell: four across and two down, small enough that no two
+   frames' marks can meet and tall enough that a draw one row out shows. */
+#define PLAY_CELL_W 4
+#define PLAY_CELL_H 2
+
+/* The three frames' layer offsets and pixel values.  Every offset is well
+   inside the screen and no two boxes touch; the pixel values are non-zero,
+   because zero is the drawer's transparency key, and all three are below 0x80,
+   which the background never is. */
+#define PLAY_F0_X 0
+#define PLAY_F0_Y 0
+#define PLAY_F0_PIXEL 0x11
+#define PLAY_F1_X 100
+#define PLAY_F1_Y 40
+#define PLAY_F1_PIXEL 0x22
+#define PLAY_F2_X 200
+#define PLAY_F2_Y 80
+#define PLAY_F2_PIXEL 0x33
+
+/* How far a one-frame clip is pushed off the left edge in the margin case:
+   two of the cell's four columns end up outside the window and so unseen. */
+#define PLAY_OVERHANG 2
+
+static unsigned char play_saf[PSAF_BYTES];
+static unsigned char play_background[PLAY_SCREEN_BYTES];
+static unsigned char play_screen[PLAY_SCREEN_BYTES];
+
+static void (__interrupt __far *play_saved_timer)();
+
+static void __interrupt __far play_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(play_saved_timer);
+}
+
+static void play_u16(int at, unsigned int value)
+{
+    play_saf[at] = (unsigned char) (value & 0xff);
+    play_saf[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void play_u32(int at, unsigned long value)
+{
+    play_saf[at] = (unsigned char) (value & 0xff);
+    play_saf[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    play_saf[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    play_saf[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+/* The background the clip plays over.  Every byte has bit 7 set, so no byte of
+   it can be mistaken for the sentinel or for any of the three marks. */
+static int play_pattern(int row, int col)
+{
+    return ((row * 23 + col * 13) & 0x7f) | 0x80;
+}
+
+static void play_stage_background(void)
+{
+    int row;
+    int col;
+
+    for (row = 0; row < PLAY_SCREEN_H; row++) {
+        for (col = 0; col < PLAY_SCREEN_W; col++) {
+            play_background[row * PLAY_SCREEN_W + col] =
+                (unsigned char) play_pattern(row, col);
+        }
+    }
+}
+
+/* One frame record: one layer, naming one tilemap and carrying the offset the
+   drawer adds to the request's own origin.  Every frame is held for one tick,
+   so a three-frame clip is three passes round the loop. */
+static void play_stage_frame(int index, int tilemap, int layer_x, int layer_y)
+{
+    int at;
+
+    at = PSAF_FRAME0_AT + index * PSAF_FRAME_STRIDE;
+    play_u16(at + PSAF_FRAME_SOUND_AT, PSAF_NO_SOUND);
+    play_u16(at + PSAF_FRAME_DURATION_AT, 1);
+    play_u16(at + PSAF_FRAME_LAYER_COUNT_AT, 1);
+    play_u16(at + PSAF_LAYER_AT + PSAF_LAYER_TILEMAP_AT,
+             (unsigned int) tilemap);
+    play_u16(at + PSAF_LAYER_AT + PSAF_LAYER_X_AT,
+             (unsigned int) (layer_x & 0xffff));
+    play_u16(at + PSAF_LAYER_AT + PSAF_LAYER_Y_AT,
+             (unsigned int) (layer_y & 0xffff));
+    play_saf[at + PSAF_LAYER_AT + PSAF_LAYER_BLEND_AT] = 0;
+}
+
+/* The fixture image, with `frame_count` of its three frames declared in the
+   header.  Command 0x03 is a fill run of four pixels (resource_info/cel.md),
+   so two of them make the two rows of one 4x2 cell. */
+static void play_stage_clip(int frame_count)
+{
+    int index;
+    int pixel[3];
+
+    pixel[0] = PLAY_F0_PIXEL;
+    pixel[1] = PLAY_F1_PIXEL;
+    pixel[2] = PLAY_F2_PIXEL;
+
+    memset(play_saf, 0, (size_t) PSAF_BYTES);
+    play_saf[0] = 'S';
+    play_saf[1] = 'A';
+    play_saf[2] = 'F';
+    play_u16(PSAF_CELL_W_AT, PLAY_CELL_W);
+    play_u16(PSAF_CELL_H_AT, PLAY_CELL_H);
+
+    play_u16(PSAF_TILE_COUNT_AT, 3);
+    play_u32(PSAF_TILE_TABLE_PTR_AT, (unsigned long) PSAF_TILE_TABLE_AT);
+    play_u16(PSAF_TILEMAP_COUNT_AT, 3);
+    play_u32(PSAF_TILEMAP_TABLE_PTR_AT, (unsigned long) PSAF_TILEMAP_TABLE_AT);
+    for (index = 0; index < 3; index++) {
+        play_u32(PSAF_TILE_TABLE_AT + index * 4,
+                 (unsigned long) (PSAF_TILE0_AT + index * PSAF_TILE_STRIDE));
+        play_saf[PSAF_TILE0_AT + index * PSAF_TILE_STRIDE] = 0x03;
+        play_saf[PSAF_TILE0_AT + index * PSAF_TILE_STRIDE + 1] =
+            (unsigned char) pixel[index];
+        play_saf[PSAF_TILE0_AT + index * PSAF_TILE_STRIDE + 2] = 0x03;
+        play_saf[PSAF_TILE0_AT + index * PSAF_TILE_STRIDE + 3] =
+            (unsigned char) pixel[index];
+        play_u32(PSAF_TILEMAP_TABLE_AT + index * 4,
+                 (unsigned long) (PSAF_TILEMAP0_AT
+                                  + index * PSAF_TILEMAP_STRIDE));
+        play_u16(PSAF_TILEMAP0_AT + index * PSAF_TILEMAP_STRIDE, 1);
+        play_u16(PSAF_TILEMAP0_AT + index * PSAF_TILEMAP_STRIDE + 2, 1);
+        play_u16(PSAF_TILEMAP0_AT + index * PSAF_TILEMAP_STRIDE + 4,
+                 (unsigned int) index);
+    }
+
+    play_u16(PSAF_FRAME_COUNT_AT, (unsigned int) frame_count);
+    play_u32(PSAF_FRAME_TABLE_PTR_AT, (unsigned long) PSAF_FRAME_TABLE_AT);
+    for (index = 0; index < 3; index++) {
+        play_u32(PSAF_FRAME_TABLE_AT + index * 4,
+                 (unsigned long) (PSAF_FRAME0_AT + index * PSAF_FRAME_STRIDE));
+    }
+    play_stage_frame(0, 0, PLAY_F0_X, PLAY_F0_Y);
+    play_stage_frame(1, 1, PLAY_F1_X, PLAY_F1_Y);
+    play_stage_frame(2, 2, PLAY_F2_X, PLAY_F2_Y);
+}
+
+static void play_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* One whole clip, with the adapter in the mode the game plays it in and a
+   timer interrupt running, leaving the finished screen in play_screen[]. */
+static void play_run(void)
+{
+    play_stage_background();
+
+    play_set_mode(PLAY_MODE_320X200X256);
+    memset((void *) PLAY_VGA_BASE, PLAY_SENTINEL, (size_t) PLAY_SCREEN_BYTES);
+
+    play_saved_timer = _dos_getvect(PLAY_TIMER_VECTOR);
+    _dos_setvect(PLAY_TIMER_VECTOR, play_timer_isr);
+    fdps_saf_play_over_background(play_saf, play_background);
+    _dos_setvect(PLAY_TIMER_VECTOR, play_saved_timer);
+
+    memmove(play_screen, (void *) PLAY_VGA_BASE, (size_t) PLAY_SCREEN_BYTES);
+    play_set_mode(PLAY_MODE_TEXT);
+}
+
+static int play_pixel(int row, int col)
+{
+    return (int) play_screen[row * PLAY_SCREEN_W + col];
+}
+
+/* How many bytes of the captured screen differ from the background they were
+   painted from while lying outside the given box. */
+static int play_mismatches_outside(int first_row, int last_row, int first_col,
+                                   int last_col)
+{
+    int row;
+    int col;
+    int bad;
+
+    bad = 0;
+    for (row = 0; row < PLAY_SCREEN_H; row++) {
+        for (col = 0; col < PLAY_SCREEN_W; col++) {
+            if (row >= first_row && row <= last_row && col >= first_col
+                && col <= last_col) {
+                continue;
+            }
+            if (play_screen[row * PLAY_SCREEN_W + col]
+                != play_background[row * PLAY_SCREEN_W + col]) {
+                bad++;
+            }
+        }
+    }
+    return bad;
+}
+
+/* How many bytes of the captured screen still hold the sentinel. */
+static int play_sentinel_left(void)
+{
+    long at;
+    int kept;
+
+    kept = 0;
+    for (at = 0; at < (long) PLAY_SCREEN_BYTES; at++) {
+        if (play_screen[at] == PLAY_SENTINEL) {
+            kept++;
+        }
+    }
+    return kept;
+}
+
+/* The premise every case below rests on: in mode 13h the aperture is a plain
+   linear window that reads back what was written to it, at the first byte of
+   the frame and at its last. */
+static void play_the_aperture_reads_back_in_mode_13h(void)
+{
+    unsigned char *aperture;
+
+    aperture = (unsigned char *) PLAY_VGA_BASE;
+    play_set_mode(PLAY_MODE_320X200X256);
+    memset(aperture, PLAY_SENTINEL, (size_t) PLAY_SCREEN_BYTES);
+    play_screen[0] = aperture[0];
+    play_screen[1] = aperture[PLAY_SCREEN_BYTES - 1];
+    play_set_mode(PLAY_MODE_TEXT);
+
+    CHECK_EQ(play_screen[0], PLAY_SENTINEL);
+    CHECK_EQ(play_screen[1], PLAY_SENTINEL);
+}
+
+/* The loop draws the frame the cursor names and only then advances it, and it
+   leaves on the advance that answers 1 -- CMP dword ptr [EBP-0x4],0x0 / JNZ at
+   the top with the answer stored at 0001edf2.  A three-frame clip therefore
+   ends with its LAST frame on the screen: frame 2's mark is there and frames 0
+   and 1 are not, because the background goes back down under every pass.  A
+   routine that advanced before drawing would end on frame 0's mark, one that
+   kept going after the wrap would too, and one that painted the background
+   only once would show all three at the same time. */
+static void play_ends_on_the_clips_last_frame(void)
+{
+    play_stage_clip(3);
+    play_run();
+
+    CHECK_EQ(play_pixel(PLAY_F2_Y, PLAY_F2_X), PLAY_F2_PIXEL);
+    CHECK_EQ(play_pixel(PLAY_F0_Y, PLAY_F0_X),
+             play_pattern(PLAY_F0_Y, PLAY_F0_X));
+    CHECK_EQ(play_pixel(PLAY_F1_Y, PLAY_F1_X),
+             play_pattern(PLAY_F1_Y, PLAY_F1_X));
+}
+
+/* PUSH 0xc8 / PUSH 0x140 / PUSH 0x140 for the second fdps_blit_rect: the whole
+   320x200 window travels to the adapter, so no byte of the screen is left
+   holding the sentinel the run started from.  A short row count or a narrow
+   row would leave some. */
+static void play_covers_the_whole_screen(void)
+{
+    play_stage_clip(3);
+    play_run();
+
+    CHECK_EQ(play_sentinel_left(), 0);
+}
+
+/* The first fdps_blit_rect copies the caller's own 320x200 background into the
+   page's window before every frame, so once the last frame is drawn the only
+   bytes on the screen that differ from that background are the last frame's
+   own 4x2 mark.  This is the assertion that the background is the caller's and
+   not the page's leftovers. */
+static void play_repaints_the_background_under_every_frame(void)
+{
+    play_stage_clip(3);
+    play_run();
+
+    CHECK_EQ(play_mismatches_outside(PLAY_F2_Y, PLAY_F2_Y + PLAY_CELL_H - 1,
+                                     PLAY_F2_X, PLAY_F2_X + PLAY_CELL_W - 1),
+             0);
+    CHECK_EQ(play_pixel(PLAY_F2_Y, PLAY_F2_X + PLAY_CELL_W - 1),
+             PLAY_F2_PIXEL);
+    CHECK_EQ(play_pixel(PLAY_F2_Y + PLAY_CELL_H - 1, PLAY_F2_X),
+             PLAY_F2_PIXEL);
+}
+
+/* The request's origin is 0x18,0x18 and the window it publishes starts at
+   0x2298 -- row 0x18, column 0x18 of the 0x170-pitch page -- so the two cancel
+   and a layer at offset 0,0 lands on screen pixel 0,0.  Dropping either 0x18
+   moves the frame 24 pixels; dropping the request's would also put the cell at
+   x = 0, which fdps_draw_tilemap_cell's strict x > 0 test refuses outright and
+   nothing would be drawn at all. */
+static void play_puts_a_zero_offset_layer_at_the_screen_origin(void)
+{
+    play_stage_clip(1);
+    play_run();
+
+    CHECK_EQ(play_pixel(0, 0), PLAY_F0_PIXEL);
+    CHECK_EQ(play_pixel(PLAY_CELL_H - 1, PLAY_CELL_W - 1), PLAY_F0_PIXEL);
+    CHECK_EQ(play_mismatches_outside(0, PLAY_CELL_H - 1, 0, PLAY_CELL_W - 1),
+             0);
+}
+
+/* THE 24-PIXEL MARGIN IS WHAT THE OVERSIZED PAGE IS FOR.  The page is 0x170 by
+   0xf8 -- 48 wider and taller than the screen -- and the frame is composed at
+   0x18,0x18 inside it, so a layer carrying a small negative offset is drawn
+   into the margin instead of being refused or wrapping onto the row above.
+   With the layer two pixels left of the origin the cell still starts at page
+   column 0x16, which clears the strict x > 0 test, and its first two columns
+   fall outside the published window: the screen shows the other two at columns
+   0 and 1 and nothing at all appears at the right-hand end of any row.  A page
+   the size of the screen would either drop the cell or smear it round. */
+static void play_draws_an_overhanging_layer_into_the_margin(void)
+{
+    play_stage_clip(1);
+    play_stage_frame(0, 0, PLAY_F0_X - PLAY_OVERHANG, PLAY_F0_Y);
+    play_run();
+
+    CHECK_EQ(play_pixel(0, 0), PLAY_F0_PIXEL);
+    CHECK_EQ(play_pixel(0, 1), PLAY_F0_PIXEL);
+    CHECK_EQ(play_pixel(PLAY_CELL_H - 1, 1), PLAY_F0_PIXEL);
+    CHECK_EQ(play_mismatches_outside(0, PLAY_CELL_H - 1, 0,
+                                     PLAY_CELL_W - PLAY_OVERHANG - 1),
+             0);
+}
+
 void run_saf_tests(void)
 {
     RUN_TEST(negative_index_is_rejected);
@@ -502,4 +911,10 @@ void run_saf_tests(void)
     RUN_TEST(the_duration_comes_from_the_frame_the_index_names);
     RUN_TEST(passing_the_last_frame_reports_one_and_wraps_in_mode_zero);
     RUN_TEST(any_other_mode_stops_on_the_last_frame);
+    RUN_TEST(play_the_aperture_reads_back_in_mode_13h);
+    RUN_TEST(play_ends_on_the_clips_last_frame);
+    RUN_TEST(play_covers_the_whole_screen);
+    RUN_TEST(play_repaints_the_background_under_every_frame);
+    RUN_TEST(play_puts_a_zero_offset_layer_at_the_screen_origin);
+    RUN_TEST(play_draws_an_overhanging_layer_into_the_margin);
 }
