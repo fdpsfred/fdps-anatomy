@@ -59,4 +59,35 @@ extern void fdps_draw_glyph(unsigned char *dst, int pitch,
                             int fg_color, int bg_color, int outline_color);
 #pragma aux fdps_draw_glyph "*" parm caller [];
 
+/* Draws a signed integer into an 8bpp surface as a run of 6x8 digit sprites out
+   of Number.cel, one sprite per character of the formatted figure, stepping six
+   pixels to the right for each.  This is the game's only number renderer: the
+   font above draws text, this draws figures, and the two share nothing.
+
+   dest points at the first digit cell -- callers form it themselves as
+   surface + row * pitch + column -- and pitch is the destination's row stride,
+   handed straight through to fdps_blit_dispatch.  The 6 by 8 cell is hardcoded
+   here and the sheet's own width and height fields are never read.  There is no
+   clipping: the caller owns keeping every cell inside its surface.
+
+   digit_count is a fixed field width in digits and its zero is a mode, not a
+   count: zero formats the figure at its natural width with no padding and with
+   no overflow guard at all, while one to nine zero-pads to that many digits and
+   replaces a figure too large for the field with that many '?' glyphs rather
+   than truncating it.  The two are separate format strings and folding them
+   into one "%.*d" is wrong -- a precision of zero prints value 0 as the empty
+   string, and fdps_draw_cursor_info_panel does call with digit_count 0.
+
+   show_plus draws a leading '+' in front of a value that is not negative; a
+   negative value already carries its '-' out of the format and show_plus is
+   ignored for it.
+
+   Which of Number.cel's five colour rows the sprites come from is not an
+   argument: it is data_fdps_number_glyph_color_row, which the caller sets
+   before the call and puts back to 0 afterwards.  See its declaration in
+   gamedata.h for why it must stay a global. */
+extern void fdps_draw_number(unsigned char *dest, int pitch, int value,
+                             int digit_count, char show_plus);
+#pragma aux fdps_draw_number "*" parm caller [];
+
 #endif

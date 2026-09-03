@@ -1131,4 +1131,25 @@ extern unsigned short data_fdps_graphics_rle_blit_dest_rows_remaining;
 extern unsigned short data_fdps_graphics_rle_blit_dst_pitch;
 extern int data_fdps_graphics_rle_blit_dst_row_advance;
 
+/* 0006000c.  Which of Number.cel's five colour rows fdps_draw_number takes its
+   digit sprites from.  The sheet holds sixty-five 6x8 sprites laid out as five
+   rows of the same thirteen glyphs -- '0'-'9', '+', '-', '?' -- in different
+   colours, and the sprite finally drawn is this times thirteen plus the glyph's
+   own index.  A full dword and signed: the only read is IMUL EAX,dword ptr
+   [0x0006000c],0xd at 00017693.
+
+   It is not an argument and it is not reset by the routine that reads it.  The
+   caller sets it before a call and puts it back to 0 afterwards, and the four
+   files that write it all follow that shape -- so a caller that draws a figure
+   without writing it inherits whatever the previous caller left, which
+   fdps_draw_save_slot_panel's first figure actually relies on: it draws the
+   leader's level without writing this global at all and takes the colour the
+   call before it left behind.  Turning it into a parameter of fdps_draw_number,
+   or zeroing it on entry, recolours that one figure.
+
+   Its neighbours at 00060008 and 00060010 are unrelated scalars; every access
+   across the image is at this absolute address and none is indexed, so it is
+   its own global and not part of an array. */
+extern int data_fdps_number_glyph_color_row;
+
 #endif

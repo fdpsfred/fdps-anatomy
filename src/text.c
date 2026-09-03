@@ -5,6 +5,10 @@
  * decoration style and its offsets all come from the font globals gamedata.c
  * owns, and everything else arrives as an argument.
  */
+#include <stdio.h>
+#include <string.h>
+
+#include "blit.h"
 #include "gamedata.h"
 #include "text.h"
 
@@ -134,5 +138,114 @@ void fdps_blit_glyph_1bpp(unsigned char *dst, int pitch,
             }
         }
         dst += pitch;
+    }
+}
+
+/* 00017530.  Five stack arguments, caller-cleaned: all forty-eight call sites
+   push five dwords right to left and follow the CALL with ADD ESP,0x14, the
+   body reads them at [EBP+0x14] through [EBP+0x24] behind PUSH EBX/ESI/EDI/EBP
+   and the return address, and RET carries no immediate.  Nothing reads EAX
+   afterwards, so it returns nothing.  show_plus is the one argument narrower
+   than a dword: callers push a whole one but the body tests only its low byte,
+   CMP byte ptr [EBP+0x24],0x0 at 000175e2.
+
+   The formatting is two format strings and not one, which is the whole reason
+   digit_count's zero is a separate branch (JZ at 00017551 to the "%d" call at
+   000175cc).  "%.*d" with a precision of zero prints value 0 as nothing at all,
+   and fdps_draw_cursor_info_panel calls with digit_count 0 -- so the tidy fold
+   loses a digit on screen wherever a natural-width zero is drawn.
+
+   The padded branch's format string is built per call: the template is a
+   five-byte automatic array copied out of the literal at 00014854 (LEA EDI,
+   [EBP-0x18] / MOV ESI,0x14854 / MOVSD / MOVSB, the inline expansion of the
+   initialiser) and its '3' is then overwritten in place with '0' + digit_count,
+   MOV AL,byte ptr [EBP+0x20] / ADD AL,0x30 / MOV [EBP-0x16],AL.  It has to be a
+   copy: patching a string literal would rewrite the image's own constant.  Both
+   character buffers are twenty bytes, which is what the widest thing the two
+   formats can produce -- a nine-digit negative with a '+' that cannot reach it
+   -- fits inside.
+
+   The overflow guard exists only on the padded branch: limit is built as
+   10^digit_count by repeated multiplication, and a value that reaches it is not
+   formatted at all but replaced with digit_count '?' glyphs.  The compare is
+   the signed JL at 0001757f, so a negative value never trips it however many
+   digits it needs -- -12345 through a 3-digit field draws its first three
+   characters and nothing guards that.
+
+   The '+' is prepended by writing over the head of the buffer rather than by
+   reformatting: the figure is copied aside, "+" is stored at the front, and the
+   copy is appended back.  The store the compiler emits is a single word move
+   out of the literal (MOV AX,[0x000615ac] / MOV [EBP-0x2c],AX at 00017600), an
+   inline expansion of the two-byte copy; the copy-aside and the append are real
+   CALLs to strcpy and strcat.  Which of the three the compiler chooses to
+   expand is codegen and not behaviour (ADR-0001).
+
+   strlen is called once per character rather than hoisted -- the CALL at
+   00017625 is inside the loop's condition block, re-entered from the increment
+   at 0001763d -- and the compare is JA, unsigned, which is why the index is
+   unsigned here and the digit counters are not.
+
+   The glyph mapping's default arm, anything that is not a digit or '+' or '-'
+   or '?', draws sprite 0.  Nothing the two format strings can produce reaches
+   it. */
+void fdps_draw_number(unsigned char *dest, int pitch, int value,
+                      int digit_count, char show_plus)
+{
+    char format_template[5] = "%.3d";
+    char figure_text[20];
+    char figure_text_copy[20];
+    int overflow_limit;
+    int digit_pos;
+    unsigned int char_index;
+    int glyph_index;
+    unsigned char *glyph_stream;
+
+    overflow_limit = 1;
+
+    if (digit_count != 0) {
+        for (digit_pos = 0; digit_pos < digit_count; digit_pos++) {
+            overflow_limit = overflow_limit * 10;
+        }
+
+        if (value >= overflow_limit) {
+            for (digit_pos = 0; digit_pos < digit_count; digit_pos++) {
+                figure_text[digit_pos] = '?';
+            }
+            figure_text[digit_count] = '\0';
+        } else {
+            format_template[2] = (char) (digit_count + '0');
+            sprintf(figure_text, format_template, value);
+        }
+    } else {
+        sprintf(figure_text, "%d", value);
+    }
+
+    if (show_plus != 0 && value >= 0) {
+        strcpy(figure_text_copy, figure_text);
+        strcpy(figure_text, "+");
+        strcat(figure_text, figure_text_copy);
+    }
+
+    for (char_index = 0; char_index < strlen(figure_text); char_index++) {
+        glyph_index = (unsigned char) figure_text[char_index];
+
+        if (glyph_index >= '0' && glyph_index <= '9') {
+            glyph_index = glyph_index - '0';
+        } else if (glyph_index == '-') {
+            glyph_index = 11;
+        } else if (glyph_index == '+') {
+            glyph_index = 10;
+        } else if (glyph_index == '?') {
+            glyph_index = 12;
+        } else {
+            glyph_index = 0;
+        }
+
+        glyph_stream = data_fdps_number_glyph_sheet_ptr +
+                       *(int *) (data_fdps_number_glyph_sheet_ptr +
+                                 (data_fdps_number_glyph_color_row * 13 +
+                                  glyph_index) * 4 + 0x0f);
+        fdps_blit_dispatch(glyph_stream, dest + char_index * 6, 6, 8, pitch,
+                           0, 0);
     }
 }

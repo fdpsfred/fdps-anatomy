@@ -554,6 +554,305 @@ static void all_five_blits_read_the_same_glyph(void)
     CHECK_EQ(cell_pixel(1, 9), BACKGROUND);
 }
 
+/* ---------------------------------------------------------------------------
+   fdps_draw_number at 00017530.
+
+   Every expected value below is the assembly's, read at the addresses quoted on
+   each test: the two format strings (the "%.3d" template at 00014854 patched at
+   000175b3, and the "%d" literal at 000615a8 reached by the JZ at 00017551),
+   the signed overflow compare at 0001757f, the '+' prepend guarded by CMP byte
+   ptr [EBP+0x24],0x0 / CMP dword ptr [EBP+0x1c],0x0 / JGE at 000175e2, the
+   glyph map at 0001764b-0001768c, the thirteen-glyph colour stride of IMUL
+   EAX,dword ptr [0x0006000c],0xd at 00017693, the offset table read at
+   000176b2, and the PUSH 0x8 / PUSH 0x6 / IMUL EAX,[EBP-0x8],0x6 blit call at
+   000176ba.  None of them is read off the emitted C.
+
+   The figure is observed through the pixels rather than by intercepting the
+   blit: the sheet staged below is a real .CEL-shaped block whose sprite n is a
+   flat 6x8 fill of colour n + 1, so the destination surface spells out which
+   sprite index each character selected and where it landed.  That runs the
+   whole path -- the format, the glyph map, the colour row, the offset table and
+   fdps_blit_dispatch's mode 0 -- against the same fdps_rle_blit_passthrough the
+   game draws through.
+
+   NUMBER.CEL itself is not read here.  Its sixty-five sprites are the game's
+   glyph artwork and this file asserts nothing about their appearance, only
+   about which of the sixty-five slots the routine picks; a staged sheet says
+   that in a way the real artwork cannot. */
+
+/* The sheet's shape, from resource_info/cel.md: the sprite offset table sits at
+   a fixed +0x0f and holds one dword per sprite, each the offset from the base
+   of the sheet to that sprite's RLE stream.  Sixty-five sprites, five colour
+   rows of the thirteen glyphs '0'-'9', '+', '-', '?'. */
+#define NUM_TABLE_AT     0x0f
+#define NUM_SPRITES      65
+#define NUM_STREAM_AT    (NUM_TABLE_AT + NUM_SPRITES * 4)
+#define NUM_STREAM_BYTES 16
+#define NUM_SHEET_BYTES  (NUM_STREAM_AT + NUM_SPRITES * NUM_STREAM_BYTES)
+
+/* Wide enough for ten 6-pixel cells on the widest pitch a test uses, and four
+   rows taller than the 8-row cell so an overrun past the bottom has somewhere
+   to show. */
+#define NUM_PITCH 64
+#define NUM_ROWS  12
+#define NUM_BYTES (NUM_PITCH * NUM_ROWS)
+
+static unsigned char number_sheet[NUM_SHEET_BYTES];
+static unsigned char number_surface[NUM_BYTES];
+
+/* Sprite n paints colour n + 1, so no sprite paints 0 and none of them
+   collides with BACKGROUND. */
+static int sprite_color(int sprite_index)
+{
+    return sprite_index + 1;
+}
+
+/* One 6x8 sprite per slot: eight rows of a single fill op, command 0x05 --
+   op 0 in the top two bits, a run of (5 & 0x3f) + 1 = 6 -- followed by the
+   pixel byte.  Six pixels is exactly the width fdps_blit_dispatch publishes,
+   so each row closes on its own and the blit steps by pitch - 6. */
+static void stage_number(int color_row)
+{
+    int sprite;
+    int row;
+    int stream_at;
+    int i;
+
+    for (i = 0; i < NUM_SHEET_BYTES; i++) {
+        number_sheet[i] = 0;
+    }
+
+    for (sprite = 0; sprite < NUM_SPRITES; sprite++) {
+        stream_at = NUM_STREAM_AT + sprite * NUM_STREAM_BYTES;
+        *(int *) (number_sheet + NUM_TABLE_AT + sprite * 4) = stream_at;
+        for (row = 0; row < 8; row++) {
+            number_sheet[stream_at + row * 2] = 0x05;
+            number_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) sprite_color(sprite);
+        }
+    }
+
+    for (i = 0; i < NUM_BYTES; i++) {
+        number_surface[i] = BACKGROUND;
+    }
+
+    data_fdps_number_glyph_sheet_ptr = number_sheet;
+    data_fdps_number_glyph_color_row = color_row;
+}
+
+/* The colour standing in the top-left pixel of the figure's cell number
+   `cell`, counting from the cell the figure was drawn at. */
+static int cell_color(int cell)
+{
+    return number_surface[cell * 6];
+}
+
+/* sprintf(buf, "%d", value) at 000175da: the digits the value needs and no
+   padding.  42 is two cells and the third is never touched. */
+static void a_natural_width_figure_draws_the_digits_it_needs(void)
+{
+    stage_number(0);
+    fdps_draw_number(number_surface, NUM_PITCH, 42, 0, 0);
+
+    CHECK_EQ(cell_color(0), sprite_color(4));
+    CHECK_EQ(cell_color(1), sprite_color(2));
+    CHECK_EQ(cell_color(2), BACKGROUND);
+}
+
+/* The reason the two format strings must stay apart.  "%d" of 0 is "0" and
+   draws sprite 0; the fold to sprintf(buf, "%.*d", digit_count, value) prints
+   the empty string for this call and draws nothing at all, and
+   fdps_draw_cursor_info_panel reaches it with digit_count 0 (PUSH 0x0 at
+   0002de10). */
+static void a_natural_width_zero_still_draws_one_digit(void)
+{
+    stage_number(0);
+    fdps_draw_number(number_surface, NUM_PITCH, 0, 0, 0);
+
+    CHECK_EQ(cell_color(0), sprite_color(0));
+    CHECK_EQ(cell_color(1), BACKGROUND);
+}
+
+/* MOV AL,byte ptr [EBP+0x20] / ADD AL,0x30 / MOV [EBP-0x16],AL turns the
+   template into "%.3d", so 7 in a three-digit field is "007" and the padding
+   is drawn as real zero sprites rather than skipped. */
+static void a_field_width_zero_pads_the_figure(void)
+{
+    stage_number(0);
+    fdps_draw_number(number_surface, NUM_PITCH, 7, 3, 0);
+
+    CHECK_EQ(cell_color(0), sprite_color(0));
+    CHECK_EQ(cell_color(1), sprite_color(0));
+    CHECK_EQ(cell_color(2), sprite_color(7));
+    CHECK_EQ(cell_color(3), BACKGROUND);
+}
+
+/* limit is built as 10^digit_count by the loop at 00017570 and a value that
+   reaches it is not formatted at all: the fill at 0001759a writes digit_count
+   '?' characters, which the map at 0001767d sends to sprite 12.  The field is
+   not widened and the figure is not truncated. */
+static void a_figure_too_wide_for_the_field_becomes_question_marks(void)
+{
+    stage_number(0);
+    fdps_draw_number(number_surface, NUM_PITCH, 1000, 3, 0);
+
+    CHECK_EQ(cell_color(0), sprite_color(12));
+    CHECK_EQ(cell_color(1), sprite_color(12));
+    CHECK_EQ(cell_color(2), sprite_color(12));
+    CHECK_EQ(cell_color(3), BACKGROUND);
+}
+
+/* The other side of that compare: 999 against a limit of 1000 is CMP EAX,
+   [EBP-0x10] / JL taken, so the widest figure the field holds is still drawn as
+   digits. */
+static void the_widest_figure_that_fits_is_still_formatted(void)
+{
+    stage_number(0);
+    fdps_draw_number(number_surface, NUM_PITCH, 999, 3, 0);
+
+    CHECK_EQ(cell_color(0), sprite_color(9));
+    CHECK_EQ(cell_color(1), sprite_color(9));
+    CHECK_EQ(cell_color(2), sprite_color(9));
+    CHECK_EQ(cell_color(3), BACKGROUND);
+}
+
+/* The overflow compare at 0001757f is the signed JL, so no negative value ever
+   reaches the '?' fill however many characters it needs, and the precision in
+   "%.3d" is a minimum and not a truncation: -12345 in a three-digit field draws
+   all six of its characters, sign first, straight past the field.  Reading that
+   compare as unsigned would send it to "???" instead. */
+static void a_negative_figure_never_trips_the_overflow_guard(void)
+{
+    stage_number(0);
+    fdps_draw_number(number_surface, NUM_PITCH, -12345, 3, 0);
+
+    CHECK_EQ(cell_color(0), sprite_color(11));
+    CHECK_EQ(cell_color(1), sprite_color(1));
+    CHECK_EQ(cell_color(2), sprite_color(2));
+    CHECK_EQ(cell_color(3), sprite_color(3));
+    CHECK_EQ(cell_color(4), sprite_color(4));
+    CHECK_EQ(cell_color(5), sprite_color(5));
+    CHECK_EQ(cell_color(6), BACKGROUND);
+}
+
+/* The '+' goes on in front of the already-formatted figure -- strcpy aside,
+   the literal stored over the head of the buffer, strcat back on -- so the
+   padding stays where the format put it and the sign is an extra cell rather
+   than one of the digit_count.  '+' maps to sprite 10 at 0001766e. */
+static void show_plus_prepends_to_a_non_negative_figure(void)
+{
+    stage_number(0);
+    fdps_draw_number(number_surface, NUM_PITCH, 5, 2, 1);
+
+    CHECK_EQ(cell_color(0), sprite_color(10));
+    CHECK_EQ(cell_color(1), sprite_color(0));
+    CHECK_EQ(cell_color(2), sprite_color(5));
+    CHECK_EQ(cell_color(3), BACKGROUND);
+}
+
+/* The guard is JGE at 000175ec, not JG: zero is not negative and gets the
+   sign. */
+static void show_plus_prepends_to_zero(void)
+{
+    stage_number(0);
+    fdps_draw_number(number_surface, NUM_PITCH, 0, 0, 1);
+
+    CHECK_EQ(cell_color(0), sprite_color(10));
+    CHECK_EQ(cell_color(1), sprite_color(0));
+    CHECK_EQ(cell_color(2), BACKGROUND);
+}
+
+/* A negative value carries its own '-' out of the format and the prepend is
+   skipped, so show_plus never produces "+-5".  '-' maps to sprite 11 at
+   0001765f -- the two signs are not adjacent sprites and swapping them is the
+   easy mistake. */
+static void show_plus_is_ignored_for_a_negative_figure(void)
+{
+    stage_number(0);
+    fdps_draw_number(number_surface, NUM_PITCH, -5, 0, 1);
+
+    CHECK_EQ(cell_color(0), sprite_color(11));
+    CHECK_EQ(cell_color(1), sprite_color(5));
+    CHECK_EQ(cell_color(2), BACKGROUND);
+}
+
+/* IMUL EAX,dword ptr [0x0006000c],0xd: the colour row is a block of thirteen,
+   not a byte offset and not a stride of ten.  Row 2's '3' is sprite 29 and row
+   4's is sprite 55. */
+static void the_colour_row_selects_a_block_of_thirteen(void)
+{
+    stage_number(2);
+    fdps_draw_number(number_surface, NUM_PITCH, 3, 0, 0);
+    CHECK_EQ(cell_color(0), sprite_color(2 * 13 + 3));
+
+    stage_number(4);
+    fdps_draw_number(number_surface, NUM_PITCH, 3, 0, 0);
+    CHECK_EQ(cell_color(0), sprite_color(4 * 13 + 3));
+}
+
+/* The row the caller leaves behind is the row the next figure is drawn in:
+   nothing here writes data_fdps_number_glyph_color_row, and
+   fdps_draw_save_slot_panel's first figure depends on that -- its CALL at
+   00024c60 comes before the first MOV [0x0006000c] at 00024c68. */
+static void the_colour_row_is_never_reset_by_the_draw(void)
+{
+    stage_number(1);
+    fdps_draw_number(number_surface, NUM_PITCH, 3, 0, 0);
+
+    CHECK_EQ(data_fdps_number_glyph_color_row, 1);
+    CHECK_EQ(cell_color(0), sprite_color(1 * 13 + 3));
+}
+
+/* PUSH 0x6 and PUSH 0x8 are literals in the call and IMUL EAX,[EBP-0x8],0x6
+   steps the destination, so every cell is six wide and eight tall whatever the
+   sheet header says.  Row 8 of the surface is the one watching for a ninth
+   row. */
+static void every_cell_is_six_wide_and_eight_rows_tall(void)
+{
+    stage_number(0);
+    fdps_draw_number(number_surface, NUM_PITCH, 12, 0, 0);
+
+    CHECK_EQ(number_surface[5], sprite_color(1));
+    CHECK_EQ(number_surface[6], sprite_color(2));
+    CHECK_EQ(number_surface[11], sprite_color(2));
+    CHECK_EQ(number_surface[12], BACKGROUND);
+    CHECK_EQ(number_surface[7 * NUM_PITCH], sprite_color(1));
+    CHECK_EQ(number_surface[8 * NUM_PITCH], BACKGROUND);
+    CHECK_EQ(data_fdps_graphics_rle_blit_src_width, 6);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* pitch is handed to fdps_blit_dispatch untouched and is the only thing that
+   decides where the next row of a cell lands: at 32 the eight rows of the cell
+   sit 32 bytes apart, and the pitch the dispatcher publishes is the caller's
+   and not the 0x140 of the visible screen. */
+static void the_callers_pitch_is_the_row_step(void)
+{
+    stage_number(0);
+    fdps_draw_number(number_surface, 32, 8, 0, 0);
+
+    CHECK_EQ(number_surface[0], sprite_color(8));
+    CHECK_EQ(number_surface[32], sprite_color(8));
+    CHECK_EQ(number_surface[7 * 32], sprite_color(8));
+    CHECK_EQ(number_surface[8 * 32], BACKGROUND);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_pitch, 32);
+}
+
+/* dest is the first digit cell itself, already offset by the caller: the
+   routine adds only 6 per character and never a row or a column of its own, so
+   nothing above or to the left of the pointer is touched. */
+static void the_figure_starts_exactly_at_dest(void)
+{
+    stage_number(0);
+    fdps_draw_number(number_surface + 2 * NUM_PITCH + 4, NUM_PITCH, 1, 0, 0);
+
+    CHECK_EQ(number_surface[2 * NUM_PITCH + 4], sprite_color(1));
+    CHECK_EQ(number_surface[2 * NUM_PITCH + 3], BACKGROUND);
+    CHECK_EQ(number_surface[1 * NUM_PITCH + 4], BACKGROUND);
+    CHECK_EQ(number_surface[9 * NUM_PITCH + 4], sprite_color(1));
+    CHECK_EQ(number_surface[10 * NUM_PITCH + 4], BACKGROUND);
+}
+
 void run_text_tests(void)
 {
     RUN_TEST(set_bits_paint_and_clear_bits_do_not);
@@ -580,6 +879,21 @@ void run_text_tests(void)
     RUN_TEST(a_zero_foreground_color_skips_the_glyph_body);
     RUN_TEST(all_five_blits_read_the_same_glyph);
 
+    RUN_TEST(a_natural_width_figure_draws_the_digits_it_needs);
+    RUN_TEST(a_natural_width_zero_still_draws_one_digit);
+    RUN_TEST(a_field_width_zero_pads_the_figure);
+    RUN_TEST(a_figure_too_wide_for_the_field_becomes_question_marks);
+    RUN_TEST(the_widest_figure_that_fits_is_still_formatted);
+    RUN_TEST(a_negative_figure_never_trips_the_overflow_guard);
+    RUN_TEST(show_plus_prepends_to_a_non_negative_figure);
+    RUN_TEST(show_plus_prepends_to_zero);
+    RUN_TEST(show_plus_is_ignored_for_a_negative_figure);
+    RUN_TEST(the_colour_row_selects_a_block_of_thirteen);
+    RUN_TEST(the_colour_row_is_never_reset_by_the_draw);
+    RUN_TEST(every_cell_is_six_wide_and_eight_rows_tall);
+    RUN_TEST(the_callers_pitch_is_the_row_step);
+    RUN_TEST(the_figure_starts_exactly_at_dest);
+
     /* Put every font global back before leaving.  stage() and stage_cell()
        write them, and the runners share one process: a later unit that expects
        an unloaded font would inherit this file's fixture cell size, its glyph
@@ -590,4 +904,11 @@ void run_text_tests(void)
     data_fdps_font_outline_enabled_flag = (unsigned char) 0;
     data_fdps_glyph_shadow_row_offset = 0;
     data_fdps_font_shadow_offset_x = 0;
+
+    /* And the two Number.cel globals, for the same reason: the sheet pointer
+       staged above is a static of this file and would outlive it as a live
+       pointer into a unit that has finished, and the colour row is the one
+       thing fdps_draw_number deliberately does not put back itself. */
+    data_fdps_number_glyph_sheet_ptr = (unsigned char *) 0;
+    data_fdps_number_glyph_color_row = 0;
 }
