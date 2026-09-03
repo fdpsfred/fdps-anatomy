@@ -1990,6 +1990,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x93"
+    },
+    "000575ed": {
+      "name": "fdps_rle_blit_mirrored_vertical",
+      "target": "rle.c",
+      "body_size": "0x2e",
+      "status": "committed",
+      "emitted_against": "0x2e",
+      "rounds": 2
     }
   }
 }

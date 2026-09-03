@@ -109,4 +109,27 @@ extern void fdps_rle_blit_mirrored_horizontal(unsigned char *rle_stream,
                                               unsigned char *dest_pixel);
 #pragma aux fdps_rle_blit_mirrored_horizontal "*" parm caller [];
 
+/* 000575ed.  Blit mode 8, the top-bottom mirror: it decodes nothing itself.  It
+   aims the destination at the bottom row of the rectangle and hands the stream
+   to fdps_rle_blit_passthrough with an upward row advance, so that kernel
+   climbs the rectangle while consuming the stream forwards and its output comes
+   out reflected top to bottom inside the same box.
+
+   `rle_stream` is the command stream and `dest_pixel` the first pixel of the
+   TOP destination row -- the rectangle's top-left corner, the same pointer
+   modes 0 and 7 take.  The routine finds the bottom row itself by adding
+   data_fdps_graphics_rle_blit_dst_pitch times one less than
+   data_fdps_graphics_rle_blit_remaining_rows, so a caller must NOT hand it the
+   bottom row.
+
+   The advance it passes on is -(pitch + width) and not -pitch, because the
+   pass-through kernel adds it only after the cursor has already walked one full
+   width across the row.  The row width is
+   data_fdps_graphics_rle_blit_src_width; the row count is
+   data_fdps_graphics_rle_blit_remaining_rows, which this routine only reads --
+   the pass-through kernel is what decrements it to zero. */
+extern void fdps_rle_blit_mirrored_vertical(unsigned char *rle_stream,
+                                            unsigned char *dest_pixel);
+#pragma aux fdps_rle_blit_mirrored_vertical "*" parm caller [];
+
 #endif

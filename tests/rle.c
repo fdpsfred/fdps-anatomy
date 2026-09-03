@@ -896,6 +896,125 @@ static void mirror_run_length_tops_out_at_64(void)
     CHECK_EQ(dest_surface[MIRROR_BASE + 64], SENTINEL);
 }
 
+/* The reflection itself.  Two one-pixel-per-row fill runs over a two-wide
+   sprite in a pitch of four: mode 0 would put 0xaa on the top row and 0xbb on
+   the one below it, and mode 8 has to put them the other way up inside the same
+   two-by-two rectangle.  The start is pitch * (rows - 1) = 4 (MUL EDX after
+   DEC DX at 000575fe) and the advance the pass-through kernel gets is
+   -(pitch + width) = -6 (ADD DX / NEG EDX at 0005760d).  The row count is left
+   at zero by that kernel, not by this one. */
+static void vmirror_reflects_the_rows(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x01;
+    stream[1] = 0xaa;
+    stream[2] = 0x01;
+    stream[3] = 0xbb;
+    mirror_setup(2, 2, 4);
+    fdps_rle_blit_mirrored_vertical(stream, dest_surface + MIRROR_BASE);
+
+    CHECK_EQ(dest_surface[MIRROR_BASE - 1], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 0], 0xbb);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 1], 0xbb);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 2], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 3], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 4], 0xaa);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 5], 0xaa);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 6], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* DEC DX before the multiply: with one row the displacement is pitch * 0, so a
+   single-row sprite lands on the pointer it was handed and mode 8 draws exactly
+   what mode 0 draws.  Without the decrement it would start a whole pitch lower,
+   which is what the assertion on MIRROR_BASE + 4 catches. */
+static void vmirror_single_row_starts_at_the_pointer(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x01;
+    stream[1] = 0xcc;
+    mirror_setup(2, 1, 4);
+    fdps_rle_blit_mirrored_vertical(stream, dest_surface + MIRROR_BASE);
+
+    CHECK_EQ(dest_surface[MIRROR_BASE - 1], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 0], 0xcc);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 1], 0xcc);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 2], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 4], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 5], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The advance has to pay the width back as well as the pitch, because the
+   pass-through kernel adds it only once the cursor has walked the row.  Three
+   two-wide rows in a pitch of five start at 5 * 2 = 10 and every row must land
+   back in columns 0 and 1: at MIRROR_BASE + 10, + 5 and + 0.  An advance of
+   -pitch would put the second row at + 7 and the third at + 4, which is what
+   the two sentinel assertions rule out.  Neither the width nor the pitch is
+   written by the routine. */
+static void vmirror_advance_pays_back_the_width(void)
+{
+    unsigned char stream[6];
+
+    stream[0] = 0x01;
+    stream[1] = 0x11;
+    stream[2] = 0x01;
+    stream[3] = 0x22;
+    stream[4] = 0x01;
+    stream[5] = 0x33;
+    mirror_setup(2, 3, 5);
+    fdps_rle_blit_mirrored_vertical(stream, dest_surface + MIRROR_BASE);
+
+    CHECK_EQ(dest_surface[MIRROR_BASE - 1], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 10], 0x11);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 11], 0x11);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 5], 0x22);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 6], 0x22);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 0], 0x33);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 1], 0x33);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 7], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 4], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 2], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 12], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_src_width, 2);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_pitch, 5);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The stream is consumed forwards while the destination climbs, so the four ops
+   keep their mode-0 meaning within a row and only the row order is reversed.
+   The five-wide row here is the one rle_all_four_ops_in_one_row blits -- fill,
+   stretched, literal, skip, which account for 1, 2, 1 and 1 columns -- and it
+   comes out in mode 0's left-to-right order, on the LOWER of the two rows. */
+static void vmirror_keeps_column_order_within_a_row(void)
+{
+    unsigned char stream[9];
+
+    stream[0] = 0x00;
+    stream[1] = 0xa1;
+    stream[2] = 0x40;
+    stream[3] = 0xb2;
+    stream[4] = 0x80;
+    stream[5] = 0xc3;
+    stream[6] = 0xc0;
+    stream[7] = 0x04;
+    stream[8] = 0xd4;
+    mirror_setup(5, 2, 6);
+    fdps_rle_blit_mirrored_vertical(stream, dest_surface + MIRROR_BASE);
+
+    CHECK_EQ(dest_surface[MIRROR_BASE + 6], 0xa1);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 7], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 8], 0xb2);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 9], 0xc3);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 10], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 0], 0xd4);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 4], 0xd4);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 5], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
 void run_rle_tests(void)
 {
     RUN_TEST(rle_fill_run_writes_len_bytes);
@@ -933,4 +1052,8 @@ void run_rle_tests(void)
     RUN_TEST(mirror_all_four_ops_in_one_row);
     RUN_TEST(mirror_second_row_steps_by_the_full_pitch);
     RUN_TEST(mirror_run_length_tops_out_at_64);
+    RUN_TEST(vmirror_reflects_the_rows);
+    RUN_TEST(vmirror_single_row_starts_at_the_pointer);
+    RUN_TEST(vmirror_advance_pays_back_the_width);
+    RUN_TEST(vmirror_keeps_column_order_within_a_row);
 }

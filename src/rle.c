@@ -612,3 +612,63 @@ void fdps_rle_blit_mirrored_horizontal(unsigned char *rle_stream,
         data_fdps_graphics_rle_blit_remaining_rows--;
     } while (data_fdps_graphics_rle_blit_remaining_rows != 0);
 }
+
+/* 000575ed.  Blit mode 8, the top-bottom mirror.  Hand-written assembly like
+   its neighbours above, and the shortest of the family: twelve instructions
+   that draw nothing at all.  It sets the destination cursor and the row advance
+   and then tail-jumps into fdps_rle_blit_passthrough (JMP 0x00056a0d at
+   00057616), so the whole reflection is mode 0's own decode run backwards up
+   the rectangle.  The JMP is a tail call and becomes an ordinary call here:
+   which of the two the compiler emits is codegen and not behaviour (ADR-0001),
+   and the plain RET that ends the pass-through kernel returns to
+   fdps_blit_dispatch either way.
+
+   The register contract is the family's: ESI is the stream and EDI the
+   rectangle's top-left corner, both set up by fdps_blit_dispatch before the
+   CALL at 000569b2, so those two become the parameters.  It discards the
+   pitch - width advance the dispatcher leaves in EDX for the sibling kernels
+   and builds its own.
+
+   Both of its numbers are arrived at in a way the obvious rewrite gets wrong:
+
+   The starting displacement is pitch * (rows - 1), not pitch * rows.  DEC DX at
+   000575fe takes one off the row count before MUL EDX, because the mirrored
+   image has to fill the very same rectangle an unmirrored blit would; stepping
+   down by a full pitch per row puts the whole sprite one row too low.
+
+   The upward advance is -(pitch + width), not -pitch.  The pass-through kernel
+   adds the advance at 00056a81, after the cursor has already walked one whole
+   width across the row, so the width has to be paid back as well.  An advance
+   of -pitch staggers the image one width further left on every row.
+
+   Both counts are sixteen bits and both wrap rather than saturating, which is
+   reproduced rather than guarded.  DEC DX on the row count is a sixteen-bit
+   decrement, so a row count of zero displaces the destination by 65535 pitches
+   and the kernel then draws 65536 rows from there; ADD DX at 0005760d is a
+   sixteen-bit add into a zeroed EDX, so a pitch plus width that exceeds 65535
+   is negated after truncation and the advance is not the arithmetic sum.  The
+   multiply itself cannot overflow: 65535 * 65535 fits the low half MUL leaves
+   in EAX.
+
+   The row count global is only read here.  DEC DX steps the register copy, so
+   the value the pass-through kernel finds when it starts is the full count. */
+void fdps_rle_blit_mirrored_vertical(unsigned char *rle_stream,
+                                     unsigned char *dest_pixel)
+{
+    unsigned int dest_row_pitch;
+    unsigned int rows_above_last;
+    unsigned char *bottom_row_pixel;
+    int upward_row_advance;
+
+    dest_row_pitch = (unsigned int) data_fdps_graphics_rle_blit_dst_pitch;
+    rows_above_last = (unsigned int) (unsigned short)
+                      (data_fdps_graphics_rle_blit_remaining_rows - 1);
+    bottom_row_pixel = dest_pixel + dest_row_pitch * rows_above_last;
+
+    upward_row_advance = -(int) (unsigned short)
+                         (data_fdps_graphics_rle_blit_dst_pitch +
+                          data_fdps_graphics_rle_blit_src_width);
+
+    fdps_rle_blit_passthrough(rle_stream, bottom_row_pixel,
+                              upward_row_advance);
+}

@@ -1485,5 +1485,33 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "000575ed": [
+    {
+      "what": "The handoff has not been read from both ends. Established here first-hand: fdps_blit_dispatch is the sole caller (get_xrefs_to 000575ed returns exactly one source), its mode-8 arm is CMP BH,0x8 / JNZ 0x000569bc / CALL 0x000575ed at 000569a9-000569b2 with no PUSH before and no ADD ESP after, and the three geometry globals are published earlier in the dispatcher at 000568ea, 000568f8 and 00056903, so the emitted two-parameter signature -- stream and rectangle top-left corner, nothing else -- matches what the assembly hands over. What is not established is the other half: the dispatcher computes EDX = [EBP+0x18] - [EBP+0x10] (pitch - width) at 000568e7/000568f1 and that value is still live in EDX at the CALL, and this kernel discards it at XOR EDX,EDX (000575ef) and builds -(pitch + width) itself. fdps_blit_dispatch is not emitted yet (no fdps_blit_dispatch in src/), so no one has written its mode-8 arm against this signature. Mode 8 is reached only from the two calls in fdps_unit_status_window_wait_input at 0001732e and 00017369, an idle animation armed on a rand draw that is a multiple of 200, so neither the build gate nor a unit test nor ordinary playtesting would surface a mismatch at this boundary.",
+      "needs": "The emit of fdps_blit_dispatch at 000568db (blit.c), with its mode-8 arm at 000569b2 read against this function's two-parameter signature and against the ADD EDI,EAX at 00057602 and NEG EDX at 00057614, so that whoever writes it sees for themselves that this kernel supplies its own advance and its own bottom-row displacement.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "tests/title.c's movie_drains_the_keyboard_queue is nondeterministic in this environment and reds the emit gate for work unrelated to it. Measured here, not inferred: with EMITTEST.EXE sha256 be6986d939a88315011e2d3f232165999ffaffdd5b5baf129b4b46f47ec0ee39 (1,253,021 bytes) unchanged before and after -- I hashed it either side -- four consecutive `python tools/code_emit/build_emit.py run` invocations returned fail, ok, ok, ok, 11180 checks every time, the single failure always movie_drains_the_keyboard_queue check 1, movie_queue_pending_after -> 2, expected 0. Two further `gate.py check --target emittest` runs over the same image both returned FAIL on that one check. One binary that both fails and passes has its nondeterminism outside the program text. It is also older than this function by several emits: 00057114's verdict records the same check failing fail/pass/fail/pass/fail on a DIFFERENT binary (1,235,117 bytes), and the same issue is recorded against 00030f40, 00056837, 00056a8d, 00056bb7, 00056c5e and 00056dc9, so it is neither caused by this emit nor by any particular image layout. One detail worth carrying forward: the observed value 2 is exactly MOVIE_QUEUED_KEY_COUNT (tests/title.c:111), i.e. on a failing run the head and tail are still exactly where movie_queue_stuff put them and the drain changed nothing at all, while check 2 (movie_kbhit_after == 0) passes on the same run -- so fdps_play_movie's drain loop (CALL kbhit / TEST EAX,EAX / JZ at 00030f56) saw an empty queue at the instant the BIOS ring at 0x41a/0x41c held two keys.",
+      "needs": "A ticket of its own against tests/title.c's movie cover and the run harness, owned by whoever owns src/title.c: determine what Watcom 10.0a's kbhit actually queries under DOS/4GW -- the BIOS ring through INT 16h, or DOS -- and what fdps_uninstall_keyboard_isr plus AIL_shutdown leave behind that makes the answer differ between runs of identical bytes. The cheap first probe named in 00057114's verdict still stands: have run_movie record kbhit's answer immediately after movie_queue_stuff and again immediately after the uninstall, which would say whether the queue goes invisible at the stuffing or at the uninstall. Until it is settled the gate cannot distinguish a real regression from this one on any run.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed for myself and with one detail the emitter did not state. I disassembled the whole of fdps_blit_dispatch (000568db-00056a0c) rather than only the neighbourhood of the call, which is what settles the part that matters: ESI and EDI are written exactly once each, at 000568e1 and 000568e4, and the entire body between there and CALL 0x000575ed at 000569b2 is the three geometry stores plus a flat CMP BH,n / JNZ / CALL chain that touches neither register -- so the two-parameter signature cannot be short by a register input. The unwritten half stands as the emitter states it: EDX = [EBP+0x18] - [EBP+0x10] (pitch - width, computed 32-bit at 000568e7/000568f1) is still live at the CALL and this kernel throws it away at XOR EDX,EDX (000575ef) to build -(pitch + width) instead, and no one has yet written the dispatcher's mode-8 arm against this signature.",
+      "needs": "The emit of fdps_blit_dispatch at 000568db (blit.c), with its mode-8 arm at 000569b2 read against this function's two-parameter signature and against ADD EDI,EAX at 00057602 and NEG EDX at 00057614.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Independently reproduced on a freshly built image rather than accepting the emitter's measurement. I ran `build_emit.py build` over the current tree (PASS, 0 errors, 0 warnings, EMITTEST.EXE 1,253,021 bytes) and then ran that one binary three times: FAIL, PASS, PASS, 11180 checks every time, the single failure always movie_drains_the_keyboard_queue check 1, movie_queue_pending_after -> 2, expected 0. Same bytes, both verdicts, so the failure is not in the program text and no edit to src/rle.c could cause or cure it. The four vmirror cases passed on all three runs.",
+      "needs": "A ticket of its own against tests/title.c's movie cover and the run harness, owned by whoever owns src/title.c, as the emitter describes: establish what Watcom 10.0a's kbhit queries under DOS/4GW and what fdps_uninstall_keyboard_isr plus AIL_shutdown leave behind that makes the answer differ between runs of identical bytes. Until it is settled the gate cannot tell this flake from a real regression on any run.",
+      "same_as": "emit#1",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }
