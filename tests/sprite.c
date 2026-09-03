@@ -52,6 +52,7 @@
 #include "testharn.h"
 #include "sprite.h"
 #include "gamedata.h"
+#include "audio.h"
 
 /* Header offsets and the geometry the fixture states.  Repeated here rather
    than shared with src/sprite.c: these are what the format and the assembly
@@ -91,7 +92,7 @@
 #define GRID_COLUMNS 3
 #define GRID_ROWS 2
 
-#define IMAGE_SIZE 0x80
+#define IMAGE_SIZE 0x200
 
 /* pitch - CELL_WIDTH is 4 and DEST_ROWS - CELL_HEIGHT is 4, so x and y are
    accepted at 1, 2 and 3 and refused at 0 and at 4: both bounds of the strict
@@ -647,6 +648,522 @@ static void the_copy_carries_the_surface_and_the_mode(void)
     CHECK_EQ(data_fdps_graphics_rle_blit_dst_pitch, LAYER_PITCH);
 }
 
+/* THE FRAME CASES.  Expected values come from the assembly at 00014140 -- MOV
+   AX,word ptr [EAX+0xc] / AND EAX,0xffff / CMP EAX,dword ptr [EBP+-0x5c] / JLE
+   then CMP dword ptr [EBP+-0x5c],0x0 / JGE for the frame index test, ADD
+   EDX,dword ptr [EAX+0xe] / LEA EAX,[EAX*0x4] / ADD EDX,EAX / ADD EAX,dword
+   ptr [EDX] for the frame address, MOVSX EAX,word ptr [EAX+0x8] at 00014208
+   for the layer count, ADD dword ptr [EBP+-0x14],0xd at 000142a3 for the step
+   from one layer record to the next, MOVSX EDX,word ptr [EAX+0x2] and MOVSX
+   EDX,word ptr [EAX+0x4] at 00014268 and 0001427a for the layer's offsets
+   against the caller's x and y, XOR EAX,EAX / MOV AX,word ptr [EDX] at 00014289
+   for the tilemap number, CMP dword ptr [EAX+0x20],0x0 / JNZ at 00014221 for
+   the caller's-mode guard, the flag chain at 00014232 and 00014241 with no
+   else, MOV EDX,0x10 / SUB EDX,EAX at 0001424e for the level, and CMP byte ptr
+   [EBP+0x18],0x0 / JZ at 000142ac for the sound -- and from the .SAF layout in
+   resource_info/saf.md (frame is section 0, so its descriptor is the first
+   10-byte one: u16 count at +0x0c, u32 start at +0x0e; a frame is i16 sound
+   number, i16 duration, two hint bytes, a zero u16 and an i16 layer count,
+   then that many 13-byte layers of u16 tilemap number, i16 x, i16 y, u8 blend
+   flag, u8 blend level and five reserved bytes).  None of them is read off the
+   emitted C.
+
+   HOW A BLENDED PIXEL IS MADE TELL ITS LEVEL.  Mode 9 reaches
+   fdps_rle_blit_translucent, which weights the source pixel through shade-ramp
+   row level + 9 and the destination pixel through row level, folds the sum and
+   looks the result up in the inverse colour cube (rleblend.h).  The two tables
+   are staged here rather than left as ticket 23 will fill them: every ramp
+   entry is zero except the one column the tile's pixel value indexes, which
+   holds its own row number times sixteen, and the cube is a sentinel
+   everywhere except its first eighteen entries, which hold 0x40 plus their
+   index.  The destination is a guard byte, which indexes a zero, so a blended
+   pixel comes back as 0x40 plus the source row -- that is, 0x40 plus 9 plus
+   the level -- and reading it says which level the descriptor carried.  A
+   level handed through unchanged instead of inverted picks the other row of
+   the pair and lands on a different cube entry, so the two spellings cannot
+   both pass.
+
+   THE SOUND IS OBSERVED THROUGH THE LIBRARY, as tests/audio.c observes it: the
+   real AIL is linked in, so the address it was handed is read back out of the
+   sample structure.  The handle fixture is the smaller half of that file's --
+   one free slot on every handle, a driver whose started flag is set so
+   AIL_start_sample returns before touching hardware -- because the question
+   here is only whether the call was made and with which two arguments. */
+
+#define SAF_FRAME_COUNT_AT 0x0c
+#define SAF_FRAME_SECTION_START_AT 0x0e
+#define SAF_SOUND_COUNT_AT 0x2a
+#define SAF_SOUND_SECTION_START_AT 0x2c
+
+/* The frame section's offset table follows the last tilemap record at 0x78,
+   and the six frames follow it: 10 bytes of header and 13 per layer each. */
+#define FRAME_TABLE_AT 0x78
+#define FRAME_COUNT 6
+#define FRAME_TWO_LAYERS_AT 0x90          /* 2 layers, offsets 0,0 and 4,2 */
+#define FRAME_NEGATIVE_OFFSET_AT 0xb4     /* 1 layer at -1,-1 */
+#define FRAME_NO_LAYERS_AT 0xcb           /* layer count -1 */
+#define FRAME_BLEND_THEN_OPAQUE_AT 0xd5   /* flag 1 then flag 0 */
+#define FRAME_BLEND_THEN_OTHER_AT 0xf9    /* flag 1 then flag 2 */
+#define FRAME_BLEND_LEVEL_B_AT 0x11d      /* 1 layer, the other blend level */
+
+#define FRAME_TWO_LAYERS 0
+#define FRAME_NEGATIVE_OFFSET 1
+#define FRAME_NO_LAYERS 2
+#define FRAME_BLEND_THEN_OPAQUE 3
+#define FRAME_BLEND_THEN_OTHER 4
+#define FRAME_BLEND_LEVEL_B 5
+
+#define LAYER_RECORD_BYTES 13
+#define SECOND_LAYER_DX 4
+#define SECOND_LAYER_DY 2
+
+/* The two sounds the frames name, and the frames that name them.  -1 is what a
+   frame with no sound stores. */
+#define SOUND_TABLE_AT 0x140
+#define SOUND_COUNT 2
+#define CLIP_0_AT 0x150
+#define CLIP_1_AT 0x180
+#define NO_SOUND (-1)
+#define TWO_LAYERS_SOUND 1
+#define NEGATIVE_OFFSET_SOUND 0
+
+/* The shade ramp is eighteen rows of 256 and the translucent kernel reads the
+   source through row level + 9; the cube is 4096 bytes of which only the low
+   entries are ever reached here. */
+#define RAMP_ROW_ENTRIES 0x100
+#define RAMP_ROWS 18
+#define RAMP_COMPLEMENT_ROWS 9
+#define CUBE_ENTRIES 0x1000
+#define CUBE_BASE 0x40
+#define CUBE_SENTINEL 0x11
+
+/* Two blend levels, both stored as the layer record's opacity field, and the
+   cube entry each one must land on once the drawer has inverted it. */
+#define BLEND_FIELD_A 13
+#define BLEND_FIELD_B 10
+#define BLENDED_PIXEL_A \
+    (CUBE_BASE + RAMP_COMPLEMENT_ROWS + (16 - BLEND_FIELD_A))
+#define BLENDED_PIXEL_B \
+    (CUBE_BASE + RAMP_COMPLEMENT_ROWS + (16 - BLEND_FIELD_B))
+
+/* A blend flag the assembly tests for neither value of. */
+#define BLEND_FLAG_OTHER 2
+
+/* The AIL sample fixture, the smaller half of tests/audio.c's: the vendor
+   field offsets are that file's, taken from the library's own code. */
+#define SAMPLE_STATUS 0x04
+#define SAMPLE_ADDRESS 0x08
+#define SAMPLE_WORDS (0x854 / 4 + 1)
+#define SAMPLE_DRIVER 0x00
+#define DRIVER_WORDS (0x80 / 4)
+#define DRIVER_STARTED 0x54
+#define STATUS_DONE 2
+#define CLIP_SAMPLES_AT 8
+
+static unsigned int free_sample[SAMPLE_WORDS];
+static unsigned int fake_driver[DRIVER_WORDS];
+
+static void stage_frame_record(int at, int sound_id, int layer_count)
+{
+    stage_i16(at, sound_id);
+    stage_i16(at + 2, 1);
+    stage_i16(at + 8, layer_count);
+}
+
+static void stage_layer_record(int at, int tilemap, int dx, int dy, int flag,
+                               int level)
+{
+    stage_u16(at, (unsigned long) tilemap);
+    stage_i16(at + 2, dx);
+    stage_i16(at + 4, dy);
+    stage_image[at + 6] = (unsigned char) flag;
+    stage_image[at + 7] = (unsigned char) level;
+}
+
+static void stage_clip(int at, unsigned long rate, unsigned long length)
+{
+    stage_image[at] = 1;
+    stage_image[at + 1] = 8;
+    stage_u16(at + 2, rate);
+    stage_u32(at + 4, length);
+}
+
+static void stage_blend_tables(void)
+{
+    int row;
+    int index;
+
+    for (index = 0; index < RAMP_ROWS * RAMP_ROW_ENTRIES; index++) {
+        data_fdps_palette_shade_ramp_table[index] = 0;
+    }
+    for (row = 0; row < RAMP_ROWS; row++) {
+        data_fdps_palette_shade_ramp_table[row * RAMP_ROW_ENTRIES
+                                           + TILE1_PIXEL] =
+            (unsigned int) (row * 16);
+    }
+    for (index = 0; index < CUBE_ENTRIES; index++) {
+        data_fdps_inverse_palette_cube[index] = CUBE_SENTINEL;
+    }
+    for (index = 0; index < RAMP_ROWS; index++) {
+        data_fdps_inverse_palette_cube[index] =
+            (unsigned char) (CUBE_BASE + index);
+    }
+}
+
+/* Every handle free, so the scan stops on slot 0 and the address it was given
+   lands in free_sample. */
+static void stage_sample_slots(void)
+{
+    int index;
+
+    for (index = 0; index < DRIVER_WORDS; index++) {
+        fake_driver[index] = 0;
+    }
+    fake_driver[DRIVER_STARTED / 4] = 1;
+    for (index = 0; index < SAMPLE_WORDS; index++) {
+        free_sample[index] = 0;
+    }
+    free_sample[SAMPLE_STATUS / 4] = STATUS_DONE;
+    free_sample[SAMPLE_DRIVER / 4] = (unsigned int) fake_driver;
+    for (index = 0; index < SFX_SAMPLE_SLOT_COUNT; index++) {
+        data_fdps_audio_sample_handle_table[index] = free_sample;
+    }
+    data_fdps_audio_sfx_driver_available_flag = 1;
+    data_fdps_audio_sfx_enabled_flag = 1;
+}
+
+/* Where in the staged image the address AIL was handed points, or -1 when
+   nothing was handed over at all. */
+static long played_clip_offset(void)
+{
+    unsigned int address;
+
+    address = free_sample[SAMPLE_ADDRESS / 4];
+    if (address == 0) {
+        return -1;
+    }
+    return (long) (address - (unsigned int) stage_image);
+}
+
+/* The tilemap every layer below names is index 3, the single-cell record whose
+   one cell is tile 1, so one layer paints one 4x2 cell of TILE1_PIXEL and the
+   count of painted bytes is the count of layers that drew. */
+static void stage_saf_with_frames(void)
+{
+    stage_saf_with_tilemaps();
+    stage_blend_tables();
+    stage_sample_slots();
+
+    stage_u16(SAF_FRAME_COUNT_AT, FRAME_COUNT);
+    stage_u32(SAF_FRAME_SECTION_START_AT, FRAME_TABLE_AT);
+    stage_u32(FRAME_TABLE_AT + FRAME_TWO_LAYERS * 4, FRAME_TWO_LAYERS_AT);
+    stage_u32(FRAME_TABLE_AT + FRAME_NEGATIVE_OFFSET * 4,
+              FRAME_NEGATIVE_OFFSET_AT);
+    stage_u32(FRAME_TABLE_AT + FRAME_NO_LAYERS * 4, FRAME_NO_LAYERS_AT);
+    stage_u32(FRAME_TABLE_AT + FRAME_BLEND_THEN_OPAQUE * 4,
+              FRAME_BLEND_THEN_OPAQUE_AT);
+    stage_u32(FRAME_TABLE_AT + FRAME_BLEND_THEN_OTHER * 4,
+              FRAME_BLEND_THEN_OTHER_AT);
+    stage_u32(FRAME_TABLE_AT + FRAME_BLEND_LEVEL_B * 4, FRAME_BLEND_LEVEL_B_AT);
+
+    stage_frame_record(FRAME_TWO_LAYERS_AT, TWO_LAYERS_SOUND, 2);
+    stage_layer_record(FRAME_TWO_LAYERS_AT + 10, TILEMAP_COUNT - 1, 0, 0, 0, 0);
+    stage_layer_record(FRAME_TWO_LAYERS_AT + 10 + LAYER_RECORD_BYTES,
+                       TILEMAP_COUNT - 1, SECOND_LAYER_DX, SECOND_LAYER_DY,
+                       0, 0);
+
+    stage_frame_record(FRAME_NEGATIVE_OFFSET_AT, NEGATIVE_OFFSET_SOUND, 1);
+    stage_layer_record(FRAME_NEGATIVE_OFFSET_AT + 10, TILEMAP_COUNT - 1,
+                       -1, -1, 0, 0);
+
+    stage_frame_record(FRAME_NO_LAYERS_AT, NO_SOUND, -1);
+
+    stage_frame_record(FRAME_BLEND_THEN_OPAQUE_AT, NO_SOUND, 2);
+    stage_layer_record(FRAME_BLEND_THEN_OPAQUE_AT + 10, TILEMAP_COUNT - 1,
+                       0, 0, 1, BLEND_FIELD_A);
+    stage_layer_record(FRAME_BLEND_THEN_OPAQUE_AT + 10 + LAYER_RECORD_BYTES,
+                       TILEMAP_COUNT - 1, SECOND_LAYER_DX, SECOND_LAYER_DY,
+                       0, 0);
+
+    stage_frame_record(FRAME_BLEND_THEN_OTHER_AT, NO_SOUND, 2);
+    stage_layer_record(FRAME_BLEND_THEN_OTHER_AT + 10, TILEMAP_COUNT - 1,
+                       0, 0, 1, BLEND_FIELD_A);
+    stage_layer_record(FRAME_BLEND_THEN_OTHER_AT + 10 + LAYER_RECORD_BYTES,
+                       TILEMAP_COUNT - 1, SECOND_LAYER_DX, SECOND_LAYER_DY,
+                       BLEND_FLAG_OTHER, 0);
+
+    stage_frame_record(FRAME_BLEND_LEVEL_B_AT, NO_SOUND, 1);
+    stage_layer_record(FRAME_BLEND_LEVEL_B_AT + 10, TILEMAP_COUNT - 1,
+                       0, 0, 1, BLEND_FIELD_B);
+
+    stage_u16(SAF_SOUND_COUNT_AT, SOUND_COUNT);
+    stage_u32(SAF_SOUND_SECTION_START_AT, SOUND_TABLE_AT);
+    stage_u32(SOUND_TABLE_AT, CLIP_0_AT);
+    stage_u32(SOUND_TABLE_AT + 4, CLIP_1_AT);
+    stage_clip(CLIP_0_AT, 11025, 0x10);
+    stage_clip(CLIP_1_AT, 22050, 0x20);
+}
+
+static void stage_composite_request(int x, int y, int frame_index,
+                                    int blit_mode)
+{
+    memset(layer_surface, GUARD, LAYER_BYTES);
+    draw_request[DRAW_REQUEST_DEST_BASE] = (int) layer_surface;
+    draw_request[DRAW_REQUEST_DEST_PITCH] = LAYER_PITCH;
+    draw_request[DRAW_REQUEST_DEST_ROWS] = LAYER_ROWS;
+    draw_request[DRAW_REQUEST_X] = x;
+    draw_request[DRAW_REQUEST_Y] = y;
+    draw_request[DRAW_REQUEST_IMAGE] = (int) stage_image;
+    draw_request[DRAW_REQUEST_ITEM_INDEX] = frame_index;
+    draw_request[DRAW_REQUEST_BLIT_OPERAND] = 0;
+    draw_request[DRAW_REQUEST_BLIT_MODE] = blit_mode;
+}
+
+/* Both layers of the frame, each at the request's origin plus its own offset.
+   Three things are pinned at once: the walk steps thirteen bytes from one
+   layer record to the next -- a step of twelve or fourteen reads the second
+   layer's tilemap number out of the middle of the first record and draws
+   nothing or the wrong grid; the second layer lands at x+4, y+2 rather than
+   carrying the first layer's position on; and the layer count comes from the
+   i16 at +0x08 of the frame rather than the zero u16 at +0x06, which would
+   leave the walk unentered. */
+static void composite_draws_every_layer_at_its_own_offset(void)
+{
+    stage_saf_with_frames();
+    stage_composite_request(1, 1, FRAME_TWO_LAYERS, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(layer_surface[LAYER_PITCH * 1 + 0], GUARD);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 1 + 1], TILE1_PIXEL);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 1 + 4], TILE1_PIXEL);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 1 + 5], GUARD);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 2 + 1], TILE1_PIXEL);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 3 + 4], GUARD);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 3 + 5], TILE1_PIXEL);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 3 + 8], TILE1_PIXEL);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 4 + 8], TILE1_PIXEL);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 5 + 5], GUARD);
+    CHECK_EQ(layer_painted_bytes(), 2 * CELL_WIDTH * CELL_HEIGHT);
+}
+
+/* MOVSX, not a zero-extending load: a layer whose x and y are -1 lands one
+   column and one row back from the request's origin.  Read the same two bytes
+   unsigned the layer would be aimed at x 65537, which the cell drawer refuses
+   -- pitch - width is 12 -- and nothing at all would be painted. */
+static void layer_offsets_are_signed(void)
+{
+    stage_saf_with_frames();
+    stage_composite_request(2, 2, FRAME_NEGATIVE_OFFSET, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(layer_surface[LAYER_PITCH * 1 + 1], TILE1_PIXEL);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 2 + 4], TILE1_PIXEL);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 2 + 2], TILE1_PIXEL);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 3 + 1], GUARD);
+    CHECK_EQ(layer_painted_bytes(), CELL_WIDTH * CELL_HEIGHT);
+}
+
+/* MOVSX EAX,word ptr [EAX+0x8]: the layer count is signed, so a frame claiming
+   -1 layers draws nothing.  Read unsigned the walk would run 65535 times over
+   whatever follows the record. */
+static void a_negative_layer_count_draws_nothing(void)
+{
+    stage_saf_with_frames();
+    stage_composite_request(1, 1, FRAME_NO_LAYERS, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(layer_painted_bytes(), 0);
+}
+
+/* CMP dword ptr [EBP+-0x5c],0x0 / JGE: a negative frame index is refused
+   before the offset table is touched, and the whole body -- sound included --
+   is under that test. */
+static void a_negative_frame_index_draws_nothing(void)
+{
+    stage_saf_with_frames();
+    stage_composite_request(1, 1, -1, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 1);
+
+    CHECK_EQ(layer_painted_bytes(), 0);
+    CHECK_EQ(played_clip_offset(), -1);
+}
+
+/* The upper bound is the item count itself: with six frames, index 6 draws
+   nothing and index 5 -- the last one -- draws its single layer. */
+static void a_frame_index_at_the_count_draws_nothing(void)
+{
+    stage_saf_with_frames();
+    stage_composite_request(1, 1, FRAME_COUNT, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(layer_painted_bytes(), 0);
+
+    stage_composite_request(1, 1, FRAME_COUNT - 1, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(layer_painted_bytes(), CELL_WIDTH * CELL_HEIGHT);
+}
+
+/* The index scales the frame section's offset table by four and the entry it
+   reads is rebased onto the image, not onto the table: frame 1's record sits
+   at 0xb4 and the table at 0x78, so an implementation that added the entry to
+   the table address would land at 0x12c, in the middle of the last frame's
+   layer record, and read its layer count out of whatever is there.  Frames 0
+   and 1 differ in layer count and in offset, so either error shows. */
+static void the_frame_table_entry_is_rebased_on_the_image(void)
+{
+    stage_saf_with_frames();
+    stage_composite_request(2, 2, FRAME_NEGATIVE_OFFSET, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(layer_surface[LAYER_PITCH * 1 + 1], TILE1_PIXEL);
+    CHECK_EQ(layer_painted_bytes(), CELL_WIDTH * CELL_HEIGHT);
+
+    stage_composite_request(2, 2, FRAME_TWO_LAYERS, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(layer_surface[LAYER_PITCH * 2 + 2], TILE1_PIXEL);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 4 + 6], TILE1_PIXEL);
+    CHECK_EQ(layer_painted_bytes(), 2 * CELL_WIDTH * CELL_HEIGHT);
+}
+
+/* Every layer is drawn through a copy, so the caller's block comes back
+   exactly as it went in: its element 6 still the frame index and not the last
+   layer's tilemap number, its x and y still the origin, and its mode and
+   operand still the caller's -- the blend setup writes only the copy.  Callers
+   draw frame after frame out of one block and rely on it. */
+static void the_callers_request_survives_the_frame(void)
+{
+    stage_saf_with_frames();
+    stage_composite_request(1, 1, FRAME_BLEND_THEN_OPAQUE, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(draw_request[DRAW_REQUEST_ITEM_INDEX], FRAME_BLEND_THEN_OPAQUE);
+    CHECK_EQ(draw_request[DRAW_REQUEST_X], 1);
+    CHECK_EQ(draw_request[DRAW_REQUEST_Y], 1);
+    CHECK_EQ(draw_request[DRAW_REQUEST_BLIT_MODE], 0);
+    CHECK_EQ(draw_request[DRAW_REQUEST_BLIT_OPERAND], 0);
+    CHECK_EQ(draw_request[DRAW_REQUEST_IMAGE], (int) stage_image);
+}
+
+/* Blend flag 1 puts the copy into mode 9 with the three-dword descriptor, and
+   flag 0 on the next layer puts it back to mode 0: the first cell comes back
+   as a cube entry and the second as the tile's own pixel.  A mode left at 9
+   for the second layer would blend it too, and a mode never set to 9 for the
+   first would paint TILE1_PIXEL there. */
+static void a_translucent_layer_blends_and_the_next_opaque_one_does_not(void)
+{
+    stage_saf_with_frames();
+    stage_composite_request(1, 1, FRAME_BLEND_THEN_OPAQUE, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(layer_surface[LAYER_PITCH * 1 + 1], BLENDED_PIXEL_A);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 1 + 4], BLENDED_PIXEL_A);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 2 + 1], BLENDED_PIXEL_A);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 3 + 5], TILE1_PIXEL);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 4 + 8], TILE1_PIXEL);
+    CHECK_EQ(layer_painted_bytes(), 2 * CELL_WIDTH * CELL_HEIGHT);
+}
+
+/* MOV EDX,0x10 / SUB EDX,EAX: the descriptor's level is 16 minus the record's
+   field, and two different fields land on two different cube entries.  Field
+   13 gives level 3 and reads shade-ramp row 12; field 10 gives level 6 and
+   reads row 15.  Handing either field through unchanged would pick the
+   complementary row -- row 3 and row 6 -- and land on cube entries 0x43 and
+   0x46, neither of which is what is checked here. */
+static void the_blend_level_is_sixteen_minus_the_records_field(void)
+{
+    stage_saf_with_frames();
+    stage_composite_request(1, 1, FRAME_BLEND_THEN_OPAQUE, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(layer_surface[LAYER_PITCH * 1 + 1], BLENDED_PIXEL_A);
+
+    stage_composite_request(1, 1, FRAME_BLEND_LEVEL_B, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(layer_surface[LAYER_PITCH * 1 + 1], BLENDED_PIXEL_B);
+    CHECK_EQ(layer_painted_bytes(), CELL_WIDTH * CELL_HEIGHT);
+}
+
+/* The flag chain is a test for 0 and a test for 1 and nothing else, so a layer
+   carrying any other value leaves the copy holding whatever the layer before
+   it set.  Here the second layer's flag is 2 and it comes out blended at the
+   first layer's level, because neither the mode nor the descriptor was
+   rewritten.  An else that reset the mode -- the natural thing to write --
+   would paint TILE1_PIXEL there instead. */
+static void an_unhandled_blend_flag_inherits_the_previous_layer(void)
+{
+    stage_saf_with_frames();
+    stage_composite_request(1, 1, FRAME_BLEND_THEN_OTHER, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(layer_surface[LAYER_PITCH * 1 + 1], BLENDED_PIXEL_A);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 3 + 5], BLENDED_PIXEL_A);
+    CHECK_EQ(layer_surface[LAYER_PITCH * 4 + 8], BLENDED_PIXEL_A);
+    CHECK_EQ(layer_painted_bytes(), 2 * CELL_WIDTH * CELL_HEIGHT);
+}
+
+/* CMP dword ptr [EAX+0x20],0x0 / JNZ: the whole blend setup is skipped while
+   the CALLER's own mode slot is non-zero, so the layers keep the caller's mode
+   and their own blend fields are never read.  Mode 13 reaches no kernel at
+   all, so nothing is painted -- where a blend setup that ran would have put
+   the first layer into mode 9 and painted it. */
+static void the_callers_blit_mode_suppresses_the_blend_setup(void)
+{
+    stage_saf_with_frames();
+    stage_composite_request(1, 1, FRAME_BLEND_THEN_OPAQUE, 13);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(layer_painted_bytes(), 0);
+
+    stage_composite_request(1, 1, FRAME_BLEND_THEN_OPAQUE, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(layer_surface[LAYER_PITCH * 1 + 1], BLENDED_PIXEL_A);
+}
+
+/* CMP byte ptr [EBP+0x18],0x0 / JZ: the sound is played only when the flag is
+   non-zero, and it is the frame's own leading i16 that names it -- frame 0
+   names sound 1 and frame 1 names sound 0, so an implementation that read the
+   sound number from the wrong frame or from the wrong offset would hand AIL
+   the other clip.  The image handed over is the request's own, which is what
+   makes the played address land inside the staged buffer at all. */
+static void the_frames_sound_plays_only_when_the_flag_is_set(void)
+{
+    stage_saf_with_frames();
+    stage_composite_request(1, 1, FRAME_TWO_LAYERS, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 0);
+
+    CHECK_EQ(played_clip_offset(), -1);
+
+    stage_saf_with_frames();
+    stage_composite_request(1, 1, FRAME_TWO_LAYERS, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 1);
+
+    CHECK_EQ(played_clip_offset(), CLIP_1_AT + CLIP_SAMPLES_AT);
+
+    stage_saf_with_frames();
+    stage_composite_request(1, 1, FRAME_NEGATIVE_OFFSET, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 1);
+
+    CHECK_EQ(played_clip_offset(), CLIP_0_AT + CLIP_SAMPLES_AT);
+}
+
+/* A frame whose script has no sound stores -1, and the drawer hands it through
+   sign-extended rather than suppressing the call: fdps_sfx_play is what
+   rejects it, on its own lower-bound test (audio.h).  What is observable from
+   here is that nothing plays, and that the layers drew anyway. */
+static void a_frame_with_no_sound_plays_nothing_and_still_draws(void)
+{
+    stage_saf_with_frames();
+    stage_composite_request(1, 1, FRAME_BLEND_LEVEL_B, 0);
+    fdps_draw_composite_sprite(draw_request, (char) 1);
+
+    CHECK_EQ(played_clip_offset(), -1);
+    CHECK_EQ(layer_painted_bytes(), CELL_WIDTH * CELL_HEIGHT);
+}
+
 void run_sprite_tests(void)
 {
     RUN_TEST(cell_lands_at_the_requests_x_and_y);
@@ -672,4 +1189,17 @@ void run_sprite_tests(void)
     RUN_TEST(a_negative_row_count_draws_nothing);
     RUN_TEST(a_dropped_cell_does_not_stop_the_walk);
     RUN_TEST(the_copy_carries_the_surface_and_the_mode);
+    RUN_TEST(composite_draws_every_layer_at_its_own_offset);
+    RUN_TEST(layer_offsets_are_signed);
+    RUN_TEST(a_negative_layer_count_draws_nothing);
+    RUN_TEST(a_negative_frame_index_draws_nothing);
+    RUN_TEST(a_frame_index_at_the_count_draws_nothing);
+    RUN_TEST(the_frame_table_entry_is_rebased_on_the_image);
+    RUN_TEST(the_callers_request_survives_the_frame);
+    RUN_TEST(a_translucent_layer_blends_and_the_next_opaque_one_does_not);
+    RUN_TEST(the_blend_level_is_sixteen_minus_the_records_field);
+    RUN_TEST(an_unhandled_blend_flag_inherits_the_previous_layer);
+    RUN_TEST(the_callers_blit_mode_suppresses_the_blend_setup);
+    RUN_TEST(the_frames_sound_plays_only_when_the_flag_is_set);
+    RUN_TEST(a_frame_with_no_sound_plays_nothing_and_still_draws);
 }

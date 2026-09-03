@@ -101,4 +101,55 @@ extern void fdps_draw_tilemap_cell(int *request);
 extern void fdps_draw_tilemap_layer(int *request);
 #pragma aux fdps_draw_tilemap_layer "*" parm caller [];
 
+/* Draws one frame of a .SAF: looks the frame that element 6 of the request
+   names up in the image, hands each of its layers to fdps_draw_tilemap_layer
+   at the request's origin plus the layer's own offset, and then, if
+   `play_sound` is non-zero, plays the sound the frame names.  This is the
+   entry point every animation in the game draws through -- eighteen callers,
+   from the title screen to the combat blow.
+
+   The frame is resolved the way a tilemap and a tile are one and two levels
+   down -- image plus the entry at index four of the offset table at image plus
+   the u32 at +0x0e, the frame section's start -- and the index is rejected
+   when it is negative or not less than the u16 item count at +0x0c.  Out of
+   range means nothing is drawn AND no sound is played: the whole body sits
+   under that one test.
+
+   EACH LAYER IS DRAWN THROUGH A COPY OF THE REQUEST, made once before the
+   walk, and the layer's x and y are the CALLER's x and y plus the layer's own
+   signed offsets every time -- not the previous layer's position advanced.
+   The caller's block comes back untouched, which is what lets a caller draw
+   frame after frame out of the same block.
+
+   `play_sound` is a byte the assembly tests against zero and nothing else, so
+   any non-zero value plays.  The sound number is the frame's leading i16 and
+   is sign-extended, so the -1 a frame with no sound carries reaches
+   fdps_sfx_play as -1 and is rejected there by its own lower-bound test
+   (audio.h) rather than being suppressed here.
+
+   THE BLEND SETUP IS SKIPPED WHOLE WHEN THE CALLER'S OWN BLIT MODE IS
+   NON-ZERO.  Element 8 of the CALLER's block is re-read at every layer, and
+   when it is anything but zero the copy keeps the caller's mode and operand
+   and the layer's own blend fields are never looked at.  That is how a caller
+   paints a whole frame in one mode of its choosing; it is not a fast path, and
+   dropping the test would let a translucent layer override the caller.
+
+   Only blend flags 0 and 1 are handled, and there is no else.  Flag 0 sets the
+   copy's mode to 0 and leaves its operand alone; flag 1 builds the three-dword
+   mode-9 descriptor (rleblend.h) out of data_fdps_palette_shade_ramp_table,
+   16 minus the layer's blend level and data_fdps_inverse_palette_cube, and
+   points the copy at it.  Any other flag value leaves the copy holding
+   whatever the PREVIOUS layer set, so a layer with flag 2 inherits the
+   layer before it.  No shipped .SAF stores anything but 0 or 1
+   (resource_info/saf.md), so this is reachable only through a corrupt image --
+   but it is the behaviour, and adding the else that shape asks for would
+   change it.
+
+   The blend level is inverted here and not in the kernel: the record's field
+   is opacity 0..16 and the descriptor wants 0 = opaque, so 16 minus the field
+   is what goes in.  Handing the field through unchanged inverts the fade
+   (rleblend.h). */
+extern void fdps_draw_composite_sprite(int *request, char play_sound);
+#pragma aux fdps_draw_composite_sprite "*" parm caller [];
+
 #endif

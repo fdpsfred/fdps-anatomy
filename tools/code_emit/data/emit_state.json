@@ -2054,6 +2054,14 @@
       "status": "committed",
       "emitted_against": "0x106",
       "rounds": 1
+    },
+    "00014140": {
+      "name": "fdps_draw_composite_sprite",
+      "target": "sprite.c",
+      "body_size": "0x18c",
+      "status": "committed",
+      "emitted_against": "0x18c",
+      "rounds": 0
     }
   }
 }
