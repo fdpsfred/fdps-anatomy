@@ -6,6 +6,11 @@
 #include <math.h>
 #include <string.h>
 #include "blit.h"
+#include "gamedata.h"
+#include "rle.h"
+#include "rleblend.h"
+#include "rlecolor.h"
+#include "rlerot.h"
 
 /* The VGA graphics aperture as a flat linear address, and the mode 13h
    scanline pitch in bytes.  Both are hard-coded in the original (ADD
@@ -838,5 +843,90 @@ void fdps_blit_rotated_scaled(unsigned char *dst, unsigned char *src,
 
         dst++;
         dst++;
+    }
+}
+
+/* 000568db.  Hand-written assembly, like the thirteen kernels it dispatches
+   to: it has a frame but no compiler prologue, it hands its arguments over in
+   ESI, EDI and EDX, and the kernels reach back into this frame for the sixth
+   argument.  The C below is the same publication, the same arithmetic and the
+   same thirteen-way selection, not the same registers (ADR-0001).
+
+   Three properties of that register contract do not carry over and must not be
+   reproduced.  The XOR ECX,ECX and XOR EAX,EAX at 0005690d exist because the
+   kernels write only CL and AL but read the whole of ECX and EAX; that is each
+   kernel's own business once the handoff is a parameter list.  The kernels
+   read the sixth argument out of this frame -- MOV EBP,[EBP+0x1c] at 00056a8d
+   is the plainest of them -- and four of them go further and use this frame's
+   argument slots as their own scratch, MOV [EBP+0x8],EBX at 00057627 and its
+   neighbours; that is invisible from the outside, because nothing here reads
+   an argument again after the CALL and the caller discards all seven with ADD
+   ESP,0x1c, so those slots become ordinary locals of the kernels.  And the
+   destruction of EBX, ESI, EDI and even EBP -- fdps_rle_blit_scaled zeroes EBP
+   and never puts it back, which this routine survives only because its
+   epilogue pops EBP off ESP -- is what a stack-convention callee is not
+   allowed to do, so it disappears with the handoff.
+
+   The publication order is the assembly's: the pitch is stored first, the row
+   advance is taken from the untruncated arguments, and only then are the width
+   and the row count truncated into their globals.
+
+   The compare chain is spelled out rather than switched because that is its
+   shape at 00056911 -- thirteen CMP BH,n / JNZ pairs, each arm converging on
+   the same epilogue, and a mode above 12 reaching the epilogue having called
+   nothing. */
+void fdps_blit_dispatch(unsigned char *rle_stream, unsigned char *dest_pixel,
+                        int src_width, int src_rows, int dest_pitch,
+                        unsigned int mode_operand, unsigned char blit_mode)
+{
+    int dest_row_advance;
+
+    data_fdps_graphics_rle_blit_dst_pitch = (unsigned short) dest_pitch;
+    dest_row_advance = dest_pitch - src_width;
+    data_fdps_graphics_rle_blit_src_width = (unsigned short) src_width;
+    data_fdps_graphics_rle_blit_remaining_rows = (unsigned short) src_rows;
+
+    if (blit_mode == 0) {
+        fdps_rle_blit_passthrough(rle_stream, dest_pixel, dest_row_advance);
+    } else if (blit_mode == 1) {
+        fdps_rle_blit_remap_sprite_and_backdrop(rle_stream, dest_pixel,
+                                                dest_row_advance,
+                                                (unsigned char *) mode_operand);
+    } else if (blit_mode == 2) {
+        fdps_rle_blit_with_palette_remap(rle_stream, dest_pixel,
+                                         dest_row_advance,
+                                         (unsigned char *) mode_operand);
+    } else if (blit_mode == 3) {
+        fdps_rle_blit_recolor(rle_stream, dest_pixel, dest_row_advance,
+                              mode_operand);
+    } else if (blit_mode == 4) {
+        fdps_rle_blit_scaled(rle_stream, dest_pixel,
+                             (unsigned short) mode_operand,
+                             (unsigned short) (mode_operand >> 16));
+    } else if (blit_mode == 5) {
+        fdps_rle_blit_rotated(rle_stream, dest_pixel,
+                              (short) mode_operand,
+                              (short) (mode_operand >> 16));
+    } else if (blit_mode == 6) {
+        fdps_rle_blit_rotated_scaled(rle_stream, dest_pixel,
+                                     (int *) mode_operand);
+    } else if (blit_mode == 7) {
+        fdps_rle_blit_mirrored_horizontal(rle_stream, dest_pixel);
+    } else if (blit_mode == 8) {
+        fdps_rle_blit_mirrored_vertical(rle_stream, dest_pixel);
+    } else if (blit_mode == 9) {
+        fdps_rle_blit_translucent(rle_stream, dest_pixel, dest_row_advance,
+                                  (int *) mode_operand);
+    } else if (blit_mode == 10) {
+        fdps_rle_blit_tint_sprite_and_backdrop(rle_stream, dest_pixel,
+                                               dest_row_advance,
+                                               (int *) mode_operand);
+    } else if (blit_mode == 11) {
+        fdps_rle_blit_tint(rle_stream, dest_pixel, dest_row_advance,
+                           (int *) mode_operand);
+    } else if (blit_mode == 12) {
+        fdps_rle_blit_translucent_color_range(rle_stream, dest_pixel,
+                                              dest_row_advance,
+                                              (int *) mode_operand);
     }
 }

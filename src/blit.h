@@ -375,5 +375,65 @@ extern void fdps_blit_rotated_scaled(unsigned char *dst, unsigned char *src,
                                      float rotation);
 #pragma aux fdps_blit_rotated_scaled "*" parm caller [];
 
+/* 000568db.  The one entry point into the RLE sprite blitters: every .CEL
+   sheet, map tile, font glyph and window frame the game draws reaches the
+   pixels through here.  It publishes the blit rectangle into the three globals
+   the whole kernel family reads, works out the end-of-row advance, and hands
+   the stream to one of the thirteen kernels in rle.c, rlecolor.c, rlerot.c and
+   rleblend.c.
+
+   `rle_stream` is the command stream and `dest_pixel` the first pixel of the
+   top destination row.  Both reach the chosen kernel unchanged.
+
+   `src_width` and `src_rows` are the source rectangle and `dest_pitch` the
+   destination surface's pitch in bytes.  All three are published, truncated to
+   sixteen bits, into data_fdps_graphics_rle_blit_src_width,
+   data_fdps_graphics_rle_blit_remaining_rows and
+   data_fdps_graphics_rle_blit_dst_pitch (gamedata.h), and the kernels read the
+   rectangle from there rather than from any parameter of their own.  A
+   src_rows of 0 therefore does not draw nothing: the kernels count the rows
+   down with a do-while, so it asks for 0x10000 of them.
+
+   THE ROW ADVANCE IS NOT ONE OF THE PUBLISHED VALUES.  It is dest_pitch -
+   src_width computed in full 32 bits from the arguments, before either is
+   truncated, and passed to the kernels that take one.  Recomputing it from the
+   two globals instead loses the difference whenever either argument does not
+   fit in sixteen bits.
+
+   `mode_operand` is a single dword that each mode reads its own way, which is
+   why the kernels cannot share one parameter list:
+
+     0   passthrough                not read
+     1   remap sprite and backdrop  a 256-byte palette remap table
+     2   palette remap              a 256-byte palette remap table
+     3   recolor                    three packed bytes (rlecolor.h)
+     4   scaled                     low word destination width, high word
+                                    destination height
+     5   rotated                    low word dx, high word dy, both signed
+     6   rotated and scaled         a four-slot geometry record (rlerot.h)
+     7   mirrored horizontal        not read
+     8   mirrored vertical          not read
+     9   translucent                a three-dword blend descriptor (rleblend.h)
+     10  tint sprite and backdrop   a four-dword blend descriptor
+     11  tint                       a four-dword blend descriptor
+     12  translucent colour range   a five-dword blend descriptor
+
+   Modes 4 to 8 are also the ones that are handed no row advance: the scaling,
+   rotating and mirroring kernels each derive their own destination stepping
+   from data_fdps_graphics_rle_blit_dst_pitch, and handing them pitch - width
+   would double-count the width.
+
+   `blit_mode` is that table's index, and only its low eight bits are read.  A
+   mode above 12 runs off the end of the compare chain and draws nothing at
+   all -- there is no default kernel and no clamp -- while still leaving the
+   three globals published, which is the one thing an out-of-range mode does
+   change.  Only 0, 3, 4, 8, 9, 10 and 11 are reachable in the shipped game;
+   the other six kernels are compiled in and unreached. */
+extern void fdps_blit_dispatch(unsigned char *rle_stream,
+                               unsigned char *dest_pixel,
+                               int src_width, int src_rows, int dest_pitch,
+                               unsigned int mode_operand,
+                               unsigned char blit_mode);
+#pragma aux fdps_blit_dispatch "*" parm caller [];
 
 #endif

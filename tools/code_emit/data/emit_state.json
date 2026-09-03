@@ -2030,6 +2030,14 @@
       "status": "committed",
       "emitted_against": "0x1e0",
       "rounds": 1
+    },
+    "000568db": {
+      "name": "fdps_blit_dispatch",
+      "target": "blit.c",
+      "body_size": "0x11d",
+      "status": "committed",
+      "emitted_against": "0x11d",
+      "rounds": 0
     }
   }
 }
