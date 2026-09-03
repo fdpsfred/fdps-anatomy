@@ -1470,5 +1470,20 @@
       "status": "open",
       "same_as": "emit#0 -- the flaky keyboard-queue check in tests/title.c"
     }
+  ],
+  "00057551": [
+    {
+      "from": "emit",
+      "what": "The handoff has not been read from both ends, and mode 7 is the arm where getting it wrong is silent. Established here: fdps_blit_dispatch (000568db, blit.c) is the sole caller, its mode-7 arm is CMP BH,0x7 / CALL 0x00057551 at 00056996-0005699f, and the two values this kernel consumes are already in ESI and EDI from MOV ESI,[EBP+0x8] (000568e1) and MOV EDI,[EBP+0xc] (000568e4) -- so the emitted two-parameter signature matches the assembly. What is not established is the other half of it, that this kernel takes NO row-advance argument while every other arm of the dispatcher is handed one: the dispatcher computes EDX = [EBP+0x18] - [EBP+0x10] at 000568e7/000568f1 and this kernel ignores it, reloading the full pitch from 0x0007002e instead because it restores each row's origin with PUSH/POP. The dispatcher is not emitted yet, so no one has yet seen its mode-7 arm written against this signature; if its emit hands mode 7 the same advance the other arms get, every mirrored sprite draws with its rows a width apart and nothing in the build gate or the unit tests can see it, because both ends would agree.",
+      "needs": "The emit of fdps_blit_dispatch at 000568db (blit.c), its mode-7 arm at 0005699f read against this function's two-parameter signature and against the ADD EDI,EDX at 000575dd, to confirm the dispatcher passes the stream and the top-left corner and nothing else.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed the emitter's concern from the caller's side myself and it stands. Reading fdps_blit_dispatch (000568db) end to end: nothing is PUSHed between its prologue and the mode-7 CALL at 0005699f and there is no ADD ESP afterwards, so the original passes this kernel no stack argument and the two-parameter signature is the whole of the handoff; meanwhile the dispatcher does compute EDX = [EBP+0x18] - [EBP+0x10] at 000568e7/000568f1 and leaves it live across the call, and this kernel ignores it, reloading the full pitch at 00057555 instead. So the risk the emitter names is exactly right and nothing available today can close it. What my pass adds is a second site to check at the same time: mode 8, fdps_rle_blit_mirrored_vertical at 000575ed, is the other arm that does not consume the dispatcher's advance verbatim -- it reads 0x0007002e itself at 000575f1 and reaches the mode-0 decoder with the advance negated -- so when blit.c is written, mode 7 and mode 8 are the two arms whose argument lists must be read off their own kernels rather than copied from the mode-0 arm.",
+      "needs": "The emit of fdps_blit_dispatch at 000568db (blit.c), with its mode-7 arm read against this function's two-parameter signature and against ADD EDI,EDX at 000575dd.",
+      "status": "open",
+      "same_as": "emit#0"
+    }
   ]
 }

@@ -479,3 +479,136 @@ unsigned char *fdps_rle_skip_row(unsigned char *rle_stream)
 
     return stream_cursor;
 }
+
+/* 00057551.  Blit mode 7, the left-right mirror: the same four ops and the same
+   stream consumption as the pass-through kernel at 00056a0d, decoded from the
+   right-hand column of the row leftwards, so the drawn rectangle is that
+   kernel's output reflected inside the same box.
+
+   Hand-written assembly like its three neighbours above, and with the same kind
+   of register contract: no prologue, no epilogue, no stack slot of its own
+   beyond the PUSH EDI / POP EDI that saves the row origin, and nothing read out
+   of the caller's frame at all.  fdps_blit_dispatch sets ESI and EDI
+   immediately before the CALL at 0005699f (MOV ESI,[EBP+8] and MOV EDI,[EBP+0xc]
+   at 000568e1 and 000568e4), so those two become the two parameters here.  What
+   does not carry over is the rest of the register contract -- the destruction of
+   EBX, ECX, EDX, ESI and EDI, and the caller's XOR ECX,ECX at 0005690d, which
+   exists only because the body writes CL and then reads the whole of ECX in REP
+   STOSB, LOOP and SUB EDI,ECX.  Those are properties of the handoff, not of what
+   the routine draws (ADR-0001), the way they are for fdps_rle_blit_passthrough.
+
+   Three things separate this from the mode-0 kernel, and all three are places
+   where the obvious rewrite is wrong:
+
+   The destination is not walked backwards from EDI.  EDI arrives at the
+   rectangle's top-left corner exactly as it does for mode 0, and this routine
+   adds the width and steps back one (ADD EDI,EBX / DEC EDI at 00057564) to reach
+   the row's right-hand column itself.  Starting at the incoming pointer and
+   walking left would draw the sprite a whole width too far left.
+
+   It ignores the EDX = pitch - width end-of-row advance the dispatcher leaves in
+   EDX and reloads the full pitch from the global instead (XOR EDX,EDX / MOV DX,
+   word ptr [0x0007002e] at 00057553), because it restores the row origin with
+   POP EDI rather than letting the cursor run off the row end.  Reusing the
+   siblings' advance here would double-count the width.  The pitch is read once,
+   above the row loop's entry at 0005755c, and it is read as a word into a zeroed
+   EDX, so it is a zero-extended sixteen-bit value and never a negative advance.
+
+   The stretched op is the one place where the reflection is not a plain index
+   flip.  Mode 0 does INC EDI and then STOSB, painting the second column of each
+   destination pair; this does DEC EDI, then the store, then DEC EDI again
+   (0005759d), painting the columns that are the reflections of those.  Mirroring
+   mode 0's loop body without moving the decrement ahead of the store paints the
+   complementary set of columns and the sprite comes out one pixel off.
+
+   Everything else is the mode-0 kernel's behaviour and is reproduced rather than
+   guarded: the row terminator is OR BX,BX / JNZ, an exact-zero test on a
+   sixteen-bit counter, so a run that overshoots the row width wraps it instead
+   of ending the row; the width is re-read from the global at the top of every
+   row because that is where MOV BX,[0x00070024] sits, at the row-restart target;
+   and the row count is decremented in memory by a do-while (DEC word ptr
+   [0x00070022] / JNZ at 000575df), so a caller asking for zero rows gets 0x10000
+   of them. */
+void fdps_rle_blit_mirrored_horizontal(unsigned char *rle_stream,
+                                       unsigned char *dest_pixel)
+{
+    unsigned char *stream_cursor;
+    unsigned char *row_origin;
+    unsigned char *dest_cursor;
+    unsigned int dest_row_pitch;
+    unsigned short width_remaining;
+    unsigned char command;
+    unsigned char run_pixel;
+    unsigned int run_length;
+
+    stream_cursor = rle_stream;
+    row_origin = dest_pixel;
+    dest_row_pitch = (unsigned int) data_fdps_graphics_rle_blit_dst_pitch;
+
+    do {
+        width_remaining = data_fdps_graphics_rle_blit_src_width;
+        dest_cursor = row_origin + width_remaining;
+        dest_cursor--;
+
+        do {
+            command = *stream_cursor;
+            stream_cursor++;
+            run_length = (unsigned int) (command & 0x3f) + 1;
+
+            switch (command >> 6) {
+            case 0:
+                /* fill: STD / REP STOSB / CLD, one pixel byte over run_length
+                   columns walking left */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length);
+                run_pixel = *stream_cursor;
+                stream_cursor++;
+                while (run_length != 0) {
+                    *dest_cursor = run_pixel;
+                    dest_cursor--;
+                    run_length--;
+                }
+                break;
+
+            case 1:
+                /* stretched: one pixel byte into the FIRST byte of each of
+                   run_length destination pairs counted leftwards, which is the
+                   reflection of the second byte of each pair mode 0 writes */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length - run_length);
+                run_pixel = *stream_cursor;
+                stream_cursor++;
+                while (run_length != 0) {
+                    dest_cursor--;
+                    *dest_cursor = run_pixel;
+                    dest_cursor--;
+                    run_length--;
+                }
+                break;
+
+            case 2:
+                /* literal: run_length bytes out of the stream, the stream read
+                   forwards and the destination written leftwards */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length);
+                while (run_length != 0) {
+                    *dest_cursor = *stream_cursor;
+                    dest_cursor--;
+                    stream_cursor++;
+                    run_length--;
+                }
+                break;
+
+            default:
+                /* skip: SUB EDI,ECX, a transparent run stepped over unwritten */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length);
+                dest_cursor -= run_length;
+                break;
+            }
+        } while (width_remaining != 0);
+
+        row_origin += dest_row_pitch;
+        data_fdps_graphics_rle_blit_remaining_rows--;
+    } while (data_fdps_graphics_rle_blit_remaining_rows != 0);
+}

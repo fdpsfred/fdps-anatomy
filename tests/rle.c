@@ -692,6 +692,210 @@ static void skip_zero_width_walks_a_full_row(void)
     CHECK_EQ((long) (fdps_rle_skip_row(wrap_stream) - wrap_stream), 1024);
 }
 
+/* --- fdps_rle_blit_mirrored_horizontal (00057551) ---------------------------
+ *
+ * Blit mode 7 consumes the stream exactly as the pass-through kernel does, so
+ * every expected value below is the mode-0 case reflected: in a row w wide the
+ * byte mode 0 writes at column c is written here at column w - 1 - c.  The
+ * reflection is asserted directly in mirror_all_four_ops_in_one_row, which
+ * blits the same seven-byte stream as rle_all_four_ops_in_one_row above and
+ * expects its five columns in the opposite order.
+ *
+ * Everything else comes off the assembly at 00057551: the row's starting column
+ * is ADD EDI,EBX / DEC EDI at 00057564, the stretched op's paint pattern is DEC
+ * EDI / store / DEC EDI at 0005759d, and the end-of-row step is POP EDI / ADD
+ * EDI,EDX at 000575dc with EDX holding the full pitch loaded at 00057555.
+ *
+ * The destination base is MIRROR_BASE rather than the start of the surface for
+ * two reasons: a run that finishes a row leaves the cursor one byte to the left
+ * of the row origin, and drawing at an offset is what catches the mistake the
+ * plate comment warns about -- starting at the incoming pointer and walking left
+ * puts the sprite one whole width too far left, which at offset zero would be
+ * indistinguishable from correct only by the bytes it overruns.
+ */
+#define MIRROR_BASE 8
+
+static void mirror_setup(unsigned short src_width, unsigned short rows,
+                         unsigned short dst_pitch)
+{
+    int byte_index;
+
+    for (byte_index = 0; byte_index < (int) sizeof dest_surface; byte_index++) {
+        dest_surface[byte_index] = SENTINEL;
+    }
+    data_fdps_graphics_rle_blit_src_width = src_width;
+    data_fdps_graphics_rle_blit_remaining_rows = rows;
+    data_fdps_graphics_rle_blit_dst_pitch = dst_pitch;
+}
+
+/* A four-byte literal run into a four-wide row: the stream is read forwards and
+   the destination written leftwards from the row's last column, so the four
+   bytes land in reverse order.  Nothing is written outside the rectangle, which
+   is the assertion on MIRROR_BASE - 1: the routine adds the width to the
+   incoming pointer itself, so the sprite occupies the same box mode 0 would
+   fill and not the one to its left. */
+static void mirror_literal_run_reverses_the_row(void)
+{
+    unsigned char stream[5];
+
+    stream[0] = 0x83;
+    stream[1] = 0x11;
+    stream[2] = 0x22;
+    stream[3] = 0x33;
+    stream[4] = 0x44;
+    mirror_setup(4, 1, 4);
+    fdps_rle_blit_mirrored_horizontal(stream, dest_surface + MIRROR_BASE);
+
+    CHECK_EQ(dest_surface[MIRROR_BASE - 1], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 0], 0x44);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 1], 0x33);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 2], 0x22);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 3], 0x11);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 4], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The first op of a row starts at the row's last column, not its first: a
+   two-byte literal followed by a length-2 skip paints the right-hand half of a
+   four-wide row and leaves the left-hand half alone.  A decoder that started at
+   the incoming pointer would paint the left-hand half instead. */
+static void mirror_first_op_paints_the_right_hand_end(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x81;
+    stream[1] = 0x11;
+    stream[2] = 0x22;
+    stream[3] = 0xc1;
+    mirror_setup(4, 1, 4);
+    fdps_rle_blit_mirrored_horizontal(stream, dest_surface + MIRROR_BASE);
+
+    CHECK_EQ(dest_surface[MIRROR_BASE + 0], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 1], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 2], 0x22);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 3], 0x11);
+}
+
+/* Op 00, the fill: STD then REP STOSB, so the run walks left.  Here a length-2
+   skip covers the two right-hand columns first and the fill lands on the two
+   left-hand ones, which is what pins the direction -- a fill that walked right
+   would paint the columns the skip has already stepped over. */
+static void mirror_fill_run_walks_left(void)
+{
+    unsigned char stream[3];
+
+    stream[0] = 0xc1;
+    stream[1] = 0x01;
+    stream[2] = 0x77;
+    mirror_setup(4, 1, 4);
+    fdps_rle_blit_mirrored_horizontal(stream, dest_surface + MIRROR_BASE);
+
+    CHECK_EQ(dest_surface[MIRROR_BASE + 0], 0x77);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 1], 0x77);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 2], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 3], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 4], SENTINEL);
+}
+
+/* Op 01 (0x41, length 2) is the one op whose reflection is not a plain index
+   flip.  The loop is DEC EDI / store / DEC EDI, so the store happens after the
+   first decrement and the painted columns are 2 and 0 of the four the run
+   covers -- the reflections of columns 1 and 3, which is where mode 0 paints
+   (rle_stretched_run_writes_second_of_each_pair above).  A rewrite that kept
+   mode 0's store-then-step order would paint columns 3 and 1 here and put the
+   sprite one pixel off. */
+static void mirror_stretched_run_paints_the_reflected_columns(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x41;
+    stream[1] = 0x99;
+    mirror_setup(4, 1, 4);
+    fdps_rle_blit_mirrored_horizontal(stream, dest_surface + MIRROR_BASE);
+
+    CHECK_EQ(dest_surface[MIRROR_BASE - 1], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 0], 0x99);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 1], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 2], 0x99);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 3], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 4], SENTINEL);
+}
+
+/* The reflection stated as a whole, on the same stream rle_all_four_ops_in_one_row
+   blits: fill, stretched, literal and skip, each at length 1, over a five-wide
+   row.  Mode 0 puts 0xa1 0x5a 0xb2 0xc3 0x5a in columns 0 to 4; this puts the
+   same five columns in the opposite order.  The widths the ops account for are
+   1, 2, 1 and 1, so the row ends exactly, and the row count comes back at
+   zero. */
+static void mirror_all_four_ops_in_one_row(void)
+{
+    unsigned char stream[7];
+
+    stream[0] = 0x00;
+    stream[1] = 0xa1;
+    stream[2] = 0x40;
+    stream[3] = 0xb2;
+    stream[4] = 0x80;
+    stream[5] = 0xc3;
+    stream[6] = 0xc0;
+    mirror_setup(5, 1, 5);
+    fdps_rle_blit_mirrored_horizontal(stream, dest_surface + MIRROR_BASE);
+
+    CHECK_EQ(dest_surface[MIRROR_BASE + 4], 0xa1);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 3], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 2], 0xb2);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 1], 0xc3);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 0], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 5], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The end-of-row step is the FULL pitch added to the saved row origin, not the
+   pitch - width advance the dispatcher hands the other kernels.  A two-wide
+   sprite in a pitch of four therefore starts its second row four bytes on; an
+   advance of pitch - width would start it two bytes on, on top of the first
+   row's right-hand column.  The width is re-read at the top of the second row,
+   and neither the width nor the pitch is written by the routine. */
+static void mirror_second_row_steps_by_the_full_pitch(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x01;
+    stream[1] = 0xaa;
+    stream[2] = 0x01;
+    stream[3] = 0xbb;
+    mirror_setup(2, 2, 4);
+    fdps_rle_blit_mirrored_horizontal(stream, dest_surface + MIRROR_BASE);
+
+    CHECK_EQ(dest_surface[MIRROR_BASE + 0], 0xaa);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 1], 0xaa);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 2], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 3], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 4], 0xbb);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 5], 0xbb);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 6], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_src_width, 2);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_pitch, 4);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* SHR CL,2 / INC CL makes 0x3f a length of 64, so one op fills a 64-wide row
+   and the mirrored run reaches back to the row origin exactly. */
+static void mirror_run_length_tops_out_at_64(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x3f;
+    stream[1] = 0xcc;
+    mirror_setup(64, 1, 64);
+    fdps_rle_blit_mirrored_horizontal(stream, dest_surface + MIRROR_BASE);
+
+    CHECK_EQ(dest_surface[MIRROR_BASE - 1], SENTINEL);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 0], 0xcc);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 63], 0xcc);
+    CHECK_EQ(dest_surface[MIRROR_BASE + 64], SENTINEL);
+}
+
 void run_rle_tests(void)
 {
     RUN_TEST(rle_fill_run_writes_len_bytes);
@@ -722,4 +926,11 @@ void run_rle_tests(void)
     RUN_TEST(skip_row_leaves_the_blit_globals_alone);
     RUN_TEST(skip_overshooting_run_wraps_the_width_counter);
     RUN_TEST(skip_zero_width_walks_a_full_row);
+    RUN_TEST(mirror_literal_run_reverses_the_row);
+    RUN_TEST(mirror_first_op_paints_the_right_hand_end);
+    RUN_TEST(mirror_fill_run_walks_left);
+    RUN_TEST(mirror_stretched_run_paints_the_reflected_columns);
+    RUN_TEST(mirror_all_four_ops_in_one_row);
+    RUN_TEST(mirror_second_row_steps_by_the_full_pitch);
+    RUN_TEST(mirror_run_length_tops_out_at_64);
 }

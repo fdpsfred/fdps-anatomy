@@ -1982,6 +1982,14 @@
       "rounds": 0,
       "status": "committed",
       "emitted_against": "0x437"
+    },
+    "00057551": {
+      "name": "fdps_rle_blit_mirrored_horizontal",
+      "target": "rle.c",
+      "body_size": "0x93",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x93"
     }
   }
 }

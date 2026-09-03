@@ -86,4 +86,27 @@ extern void fdps_rle_blit_scaled(unsigned char *rle_stream,
 extern unsigned char *fdps_rle_skip_row(unsigned char *rle_stream);
 #pragma aux fdps_rle_skip_row "*" parm caller [];
 
+/* 00057551.  Blit mode 7, the left-right mirror: decodes the same four ops as
+   the pass-through kernel into an 8bpp destination, but fills each row from its
+   right-hand column leftwards, so what lands is that kernel's output reflected
+   inside the same destination rectangle.
+
+   `rle_stream` is the command stream and `dest_pixel` the first pixel of the top
+   destination row -- the rectangle's top-left corner, the same pointer mode 0
+   takes.  The routine reaches the row's right-hand column itself by adding the
+   width, so a caller must NOT hand it the right-hand end.
+
+   There is no row-advance parameter, which is what separates this from
+   fdps_rle_blit_passthrough: it restores each row's origin itself and steps that
+   by the full destination pitch, read from
+   data_fdps_graphics_rle_blit_dst_pitch, so the pitch - width advance the
+   dispatcher computes for the other kernels is not used here and would
+   double-count the width.  The row width is
+   data_fdps_graphics_rle_blit_src_width, re-read at the top of every row, and
+   the row count is data_fdps_graphics_rle_blit_remaining_rows, which this
+   routine decrements to zero. */
+extern void fdps_rle_blit_mirrored_horizontal(unsigned char *rle_stream,
+                                              unsigned char *dest_pixel);
+#pragma aux fdps_rle_blit_mirrored_horizontal "*" parm caller [];
+
 #endif
