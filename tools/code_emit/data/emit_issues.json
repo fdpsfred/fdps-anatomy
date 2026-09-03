@@ -1528,5 +1528,20 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "00057916": [
+    {
+      "from": "emit",
+      "what": "tests/title.c's movie_drains_the_keyboard_queue is nondeterministic, and it is what made the gate red on rounds 1 and 2 for this function. Measured here first-hand on the image this change produces, which is the piece the earlier records did not have: EMITTEST.EXE sha256 f5c8db5139df2ced63126d39713b3293b149bec536604ab8bc62ae5723f21f0c, 1,271,449 bytes, hashed before and after and byte-identical throughout, was run four times through tools/code_emit/build_emit.py run without rebuilding: ok, ok, FAIL, ok. 11299 checks on every one of the four, and the only failure ever seen was movie_drains_the_keyboard_queue check 1, movie_queue_pending_after -> 2, expected 0. Round 3 then rebuilt from scratch with no source change at all and got the fifth data point, ok: same 1,271,449-byte EMITTEST.EXE, 11299 checks, 0 failed, gate_pass true. One source tree returning both verdicts puts the cause outside the program text, so no edit to src/rleblend.c could cause or cure it. The value 2 is MOVIE_QUEUED_KEY_COUNT exactly, i.e. on a failing run the drain moved the BIOS ring head and tail not at all, while check 2 (movie_kbhit_after == 0) passes on the same run -- so fdps_play_movie's drain loop (CALL kbhit / TEST EAX,EAX / JZ at 00030f56) saw an empty queue at the instant the ring at 0x41a/0x41c held two keys. The same check is already filed in tools/code_emit/data/emit_issues.json against 00057114 and 000575ed and was reported by earlier emits of 00030f40, 00056837, 00056a8d, 00056bb7, 00056c5e, 00056dc9 and 0005761b, on at least three different images; this is the same standing issue, not a new one, and it is a property of the harness rather than of any emitted function.",
+      "needs": "The owner of src/title.c and tests/title.c: what Watcom 10.0a's kbhit actually queries under DOS/4GW -- the BIOS ring via INT 16h, or DOS -- and what fdps_uninstall_keyboard_isr at 0005682f plus AIL's shutdown leave behind that makes the answer differ between runs of identical bytes. That is emulator and real-machine behaviour; no read of Ghidra, of the resource files or of the .obj tree can settle it, and nothing in this function is connected to it: 00057916 makes no call at all, and grep over src/title.c and tests/title.c finds no reference to fdps_rle_blit_tint or to any data_fdps_graphics_rle_blit_* global, so the two share no symbol, no global and no file. The cheap first probe named in 00057114's verdict still stands: have run_movie record kbhit's answer immediately after movie_queue_stuff and again immediately after the uninstall, which would say whether the queue goes invisible at the stuffing or at the uninstall.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached independently and it confirms the emitter's account rather than adding to it: this function cannot be connected to the title.c keyboard-drain flake by any route I can find. My own re-read of 00057916..00057a73 finds no CALL instruction at all, so there is no transitive reach; the only globals it touches are the three blit-state ones, none of which appears in src/title.c or tests/title.c; and I re-derived the ten new cases' array bounds by hand (ramp 4607 of 4608, cube 1527 of 4096, dest_surface 64 of 80, every stream array long enough), so the one mechanism by which a blit test could corrupt an unrelated test in a shared process -- a write past a static -- is not present. The gate this round is green on its own evidence: result.json reads build_ok true, run_ok true, 11299 checks, 0 failed, gate_pass true. I add nothing to the diagnosis itself.",
+      "needs": "As the emitter's entry states: the owner of src/title.c and tests/title.c, and behaviour only a real machine or a instrumented run settles.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

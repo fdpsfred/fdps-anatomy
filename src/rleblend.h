@@ -97,4 +97,37 @@ extern void fdps_rle_blit_tint_sprite_and_backdrop(unsigned char *rle_stream,
                                                    int *blend_descriptor);
 #pragma aux fdps_rle_blit_tint_sprite_and_backdrop "*" parm caller [];
 
+/* 00057916.  Blit mode 0x0b, the tinting SPRITE blit: draws one sprite stream
+   with every pixel it paints blended toward a single constant palette colour,
+   and leaves the transparent runs alone.  Op for op it is
+   fdps_rle_blit_tint_sprite_and_backdrop above with the fourth op reverted to
+   the family's plain skip, ADD EDI,ECX at 00057a52, so the tint covers the
+   sprite's own pixels and nothing else.
+
+   The first three parameters are what they are for the other two kernels: the
+   command stream, the first pixel of the top row, and the row advance the
+   caller computes as pitch - width, which this kernel likewise publishes in
+   data_fdps_graphics_rle_blit_dst_row_advance on entry and reads back from
+   there at every row end.
+
+   `blend_descriptor` is the same FOUR dwords mode 0x0a takes -- [0] the shade
+   ramp base, [1] the blend level, [2] the inverse colour cube base and [3] the
+   tint colour -- with the same row assignment: the tint carries weight
+   level/16 through ramp row level and the pixel 16 - level through row
+   level + 9, the two folded to 16 - level and swapped above 8.  Only the pixel
+   term varies, so ramp[tint row][tint colour] is fetched once before any
+   drawing.
+
+   One call site in the whole image reaches this mode: fdps_draw_map_unit at
+   0002d198, drawing a battle-map unit's 0x18 x 0x18 cell at level 8 with tint
+   colour 0 when bit 0x80 of the unit's flag byte is set, which is the
+   acted-this-turn flag -- so this is what makes a unit that has already moved
+   look half-faded into palette colour 0.  The row width and row count come
+   from the same two globals in gamedata.h. */
+extern void fdps_rle_blit_tint(unsigned char *rle_stream,
+                               unsigned char *dest_pixel,
+                               int dest_row_advance,
+                               int *blend_descriptor);
+#pragma aux fdps_rle_blit_tint "*" parm caller [];
+
 #endif

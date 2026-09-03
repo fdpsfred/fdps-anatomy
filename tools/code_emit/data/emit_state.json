@@ -2014,6 +2014,14 @@
       "status": "committed",
       "emitted_against": "0x17d",
       "rounds": 0
+    },
+    "00057916": {
+      "name": "fdps_rle_blit_tint",
+      "target": "rleblend.c",
+      "body_size": "0x158",
+      "status": "committed",
+      "emitted_against": "0x158",
+      "rounds": 2
     }
   }
 }

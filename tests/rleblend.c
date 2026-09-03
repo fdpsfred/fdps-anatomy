@@ -689,6 +689,261 @@ static void tint_run_length_tops_out_at_64(void)
     CHECK_EQ(dest_surface[64], SENTINEL);
 }
 
+/* ------------------------------------------------------------------------
+ * fdps_rle_blit_tint, 00057916.
+ *
+ * The same descriptor, the same fetch-once constant and the same row
+ * assignment as mode 0x0a -- MOV [EBP+0xc],EAX / MOV [EBP+0x10],EDX at
+ * 00057950 with EAX and EDX carrying 0 and 0x2400 for a level of 8 or less and
+ * the two exchanged by XCHG EAX,EDX above that, so the TINT reads the row the
+ * level names and the PIXEL the row nine on.  Ops 00, 01 and 10 are the same
+ * three ops; op 11 is ADD EDI,ECX at 00057a52, a skip.
+ *
+ * The cases reuse the ramp, cube, surface, descriptor and weight constants of
+ * the mode 0x0a block above, so every index is still one the assembly's own
+ * sequence forms and any other cube entry hands back the guard byte.
+ * ------------------------------------------------------------------------ */
+
+/* Op 00, length (0x01 & 0x3f) + 1 = 2: one stream byte weighted once, added to
+   the constant tint once, and the resulting palette index written to two
+   consecutive bytes by REP STOSB at 000579bd. */
+static void sprite_tint_fill_run_paints_len_bytes(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x01;
+    stream[1] = SRC_PIXEL;
+    tint_setup(0, 2, 1);
+    tint_level_zero_rows();
+    fdps_rle_blit_tint(stream, dest_surface, 0, tint_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+    CHECK_EQ(dest_surface[1], PAINT_A_A);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The blend is computed before the REP, so the fill never reads the surface and
+   two different destination bytes under one run come out identical.  The weight
+   parked at one of those bytes is what a kernel that read [EDI] would pick up
+   instead. */
+static void sprite_tint_fill_ignores_the_destination_byte(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x01;
+    stream[1] = SRC_PIXEL;
+    tint_setup(0, 2, 1);
+    tint_level_zero_rows();
+    set_ramp(9, 0x11, WEIGHT_SRC_B);
+    blend_cube[INDEX_B_A] = PAINT_B_A;
+    dest_surface[0] = 0x11;
+    dest_surface[1] = 0x22;
+    fdps_rle_blit_tint(stream, dest_surface, 0, tint_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+    CHECK_EQ(dest_surface[1], PAINT_A_A);
+}
+
+/* The op that separates this kernel from fdps_rle_blit_tint_sprite_and_backdrop
+   next to it.  Op 11 (0xc1, length 2) is ADD EDI,ECX at 00057a52 with no read
+   and no write, so the two bytes it covers keep the surface's own content and
+   the op 00 that follows lands two bytes on -- and its command byte is read
+   from stream[1], because the skip consumes no pixel byte either.  The ramp
+   entry for the sentinel is weighted here so that a body which tinted the
+   backdrop instead would paint PAINT_B_A over those two bytes. */
+static void sprite_tint_skip_run_leaves_the_destination_alone(void)
+{
+    unsigned char stream[3];
+
+    stream[0] = 0xc1;
+    stream[1] = 0x01;
+    stream[2] = SRC_PIXEL;
+    tint_setup(0, 4, 1);
+    tint_level_zero_rows();
+    set_ramp(9, SENTINEL, WEIGHT_SRC_B);
+    blend_cube[INDEX_B_A] = PAINT_B_A;
+    fdps_rle_blit_tint(stream, dest_surface, 0, tint_descriptor);
+
+    CHECK_EQ(dest_surface[0], SENTINEL);
+    CHECK_EQ(dest_surface[1], SENTINEL);
+    CHECK_EQ(dest_surface[2], PAINT_A_A);
+    CHECK_EQ(dest_surface[3], PAINT_A_A);
+    CHECK_EQ(dest_surface[4], SENTINEL);
+}
+
+/* Op 01 (0x41, length 2): INC EDI then STOSB at 000579f7, twice, so bytes 1 and
+   3 are painted and bytes 0 and 2 keep what they held.  The row is four bytes
+   wide because SUB BX,CX runs twice, at 000579ce and 000579d1. */
+static void sprite_tint_stretched_run_paints_the_second_of_each_pair(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x41;
+    stream[1] = SRC_PIXEL;
+    tint_setup(0, 4, 1);
+    tint_level_zero_rows();
+    fdps_rle_blit_tint(stream, dest_surface, 0, tint_descriptor);
+
+    CHECK_EQ(dest_surface[0], SENTINEL);
+    CHECK_EQ(dest_surface[1], PAINT_A_A);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+    CHECK_EQ(dest_surface[3], PAINT_A_A);
+    CHECK_EQ(dest_surface[4], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* Op 10 (0x81, length 2): the two bytes after the command byte are weighted one
+   per destination byte, in order. */
+static void sprite_tint_literal_run_paints_each_stream_byte(void)
+{
+    unsigned char stream[3];
+
+    stream[0] = 0x81;
+    stream[1] = SRC_PIXEL;
+    stream[2] = SRC_PIXEL_2;
+    tint_setup(0, 2, 1);
+    set_ramp(9, SRC_PIXEL, WEIGHT_SRC_A);
+    set_ramp(9, SRC_PIXEL_2, WEIGHT_SRC_B);
+    set_ramp(0, TINT_COLOR, WEIGHT_DST_A);
+    blend_cube[INDEX_A_A] = PAINT_A_A;
+    blend_cube[INDEX_B_A] = PAINT_B_A;
+    fdps_rle_blit_tint(stream, dest_surface, 0, tint_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+    CHECK_EQ(dest_surface[1], PAINT_B_A);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+}
+
+/* At a level of 8 or less the tint is read from row level and the pixel from
+   row level + 9.  Level 3 marks rows 3 and 12 and puts the decoys where the
+   swap would look; level 8 is the last level on this arm and reaches row 17,
+   the last row of the table. */
+static void sprite_tint_level_below_nine_reads_the_tint_in_row_level(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = SRC_PIXEL;
+    tint_setup(3, 1, 1);
+    set_ramp(12, SRC_PIXEL, WEIGHT_SRC_A);
+    set_ramp(3, TINT_COLOR, WEIGHT_DST_A);
+    set_ramp(3, SRC_PIXEL, WEIGHT_SRC_B);
+    set_ramp(12, TINT_COLOR, WEIGHT_DST_B);
+    blend_cube[INDEX_A_A] = PAINT_A_A;
+    fdps_rle_blit_tint(stream, dest_surface, 0, tint_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+    CHECK_EQ(dest_surface[1], SENTINEL);
+
+    tint_setup(8, 1, 1);
+    set_ramp(17, SRC_PIXEL, WEIGHT_SRC_B);
+    set_ramp(8, TINT_COLOR, WEIGHT_DST_A);
+    blend_cube[INDEX_B_A] = PAINT_B_A;
+    fdps_rle_blit_tint(stream, dest_surface, 0, tint_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_B_A);
+}
+
+/* Above 8 the row folds to 16 - level and the nine-row offset moves to the tint
+   side: level 12 reads the pixel from row 4 and the tint from row 13, level 9
+   from rows 7 and 16, and level 16 from rows 0 and 9.  The level 12 case puts
+   its decoys at rows 13 and 4, where a kernel that left the offset on the pixel
+   side would look. */
+static void sprite_tint_level_above_eight_folds_to_sixteen_minus_it(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = SRC_PIXEL;
+
+    tint_setup(12, 1, 1);
+    set_ramp(4, SRC_PIXEL, WEIGHT_SRC_A);
+    set_ramp(13, TINT_COLOR, WEIGHT_DST_A);
+    set_ramp(13, SRC_PIXEL, WEIGHT_SRC_B);
+    set_ramp(4, TINT_COLOR, WEIGHT_DST_B);
+    blend_cube[INDEX_A_A] = PAINT_A_A;
+    fdps_rle_blit_tint(stream, dest_surface, 0, tint_descriptor);
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+
+    tint_setup(9, 1, 1);
+    set_ramp(7, SRC_PIXEL, WEIGHT_SRC_B);
+    set_ramp(16, TINT_COLOR, WEIGHT_DST_A);
+    blend_cube[INDEX_B_A] = PAINT_B_A;
+    fdps_rle_blit_tint(stream, dest_surface, 0, tint_descriptor);
+    CHECK_EQ(dest_surface[0], PAINT_B_A);
+
+    tint_setup(16, 1, 1);
+    set_ramp(0, SRC_PIXEL, WEIGHT_SRC_A);
+    set_ramp(9, TINT_COLOR, WEIGHT_DST_B);
+    blend_cube[INDEX_A_B] = PAINT_A_B;
+    fdps_rle_blit_tint(stream, dest_surface, 0, tint_descriptor);
+    CHECK_EQ(dest_surface[0], PAINT_A_B);
+}
+
+/* The cube index is green-major: 0x00305070 folds to 0x00030507 and the
+   assembly's (v >> 12) | (v & 0xffff) at 000579b3 puts that at 0x537, not the
+   0x357 an (r << 8) | (g << 4) | b spelling would read, which is marked with a
+   different byte. */
+static void sprite_tint_cube_index_is_green_major(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = SRC_PIXEL;
+    tint_setup(0, 1, 1);
+    tint_level_zero_rows();
+    blend_cube[0x357] = 0x3c;
+    fdps_rle_blit_tint(stream, dest_surface, 0, tint_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+}
+
+/* MOV [0x00070030],EDX at 00057916 publishes the advance and ADD
+   EDI,[0x00070030] at 00057a60 reads it back at every row end, so the second
+   row starts three bytes past where the first one stopped, the row count is
+   consumed to zero and the width is re-read for the second row. */
+static void sprite_tint_row_advance_is_published_and_applied(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x01;
+    stream[1] = SRC_PIXEL;
+    stream[2] = 0x01;
+    stream[3] = SRC_PIXEL;
+    tint_setup(0, 2, 2);
+    tint_level_zero_rows();
+    fdps_rle_blit_tint(stream, dest_surface, 3, tint_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+    CHECK_EQ(dest_surface[1], PAINT_A_A);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+    CHECK_EQ(dest_surface[4], SENTINEL);
+    CHECK_EQ(dest_surface[5], PAINT_A_A);
+    CHECK_EQ(dest_surface[6], PAINT_A_A);
+    CHECK_EQ(dest_surface[7], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_row_advance, 3);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* SHR CL,2 / INC CL at 00057992 over a command byte whose low six bits are all
+   set: 64 pixels is the longest run the format encodes and zero cannot be
+   encoded at all. */
+static void sprite_tint_run_length_tops_out_at_64(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x3f;
+    stream[1] = SRC_PIXEL;
+    tint_setup(0, 64, 1);
+    tint_level_zero_rows();
+    fdps_rle_blit_tint(stream, dest_surface, 0, tint_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+    CHECK_EQ(dest_surface[63], PAINT_A_A);
+    CHECK_EQ(dest_surface[64], SENTINEL);
+}
+
 void run_rleblend_tests(void)
 {
     RUN_TEST(fill_run_blends_len_bytes);
@@ -713,4 +968,15 @@ void run_rleblend_tests(void)
     RUN_TEST(tint_cube_index_is_green_major);
     RUN_TEST(tint_row_advance_is_published_and_applied);
     RUN_TEST(tint_run_length_tops_out_at_64);
+
+    RUN_TEST(sprite_tint_fill_run_paints_len_bytes);
+    RUN_TEST(sprite_tint_fill_ignores_the_destination_byte);
+    RUN_TEST(sprite_tint_skip_run_leaves_the_destination_alone);
+    RUN_TEST(sprite_tint_stretched_run_paints_the_second_of_each_pair);
+    RUN_TEST(sprite_tint_literal_run_paints_each_stream_byte);
+    RUN_TEST(sprite_tint_level_below_nine_reads_the_tint_in_row_level);
+    RUN_TEST(sprite_tint_level_above_eight_folds_to_sixteen_minus_it);
+    RUN_TEST(sprite_tint_cube_index_is_green_major);
+    RUN_TEST(sprite_tint_row_advance_is_published_and_applied);
+    RUN_TEST(sprite_tint_run_length_tops_out_at_64);
 }
