@@ -27,6 +27,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dos.h>
+#include <i86.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "sprite.h"
@@ -368,6 +370,667 @@ static void turn_number_leaves_the_other_seven_slots_alone(void)
     CHECK_EQ(request[DRAW_REQUEST_BLIT_MODE], REQ_BLIT_MODE_MARK);
 }
 
+/* ---- fdps_animate_turn_banner, 0001e840 ---------------------------------
+ *
+ * Expected values come from the assembly: PUSH 0x15180 / CALL malloc at
+ * 0001e85b for the scratch surface; the stores of 0x168, 0xf0 and 0x5c into
+ * [EBP-0x2c], [EBP-0x28] and [EBP-0x20] at 0001e86b, 0001e872 and 0001e879 for
+ * the request's pitch, rows and row; the thirteen dwords at 0x0001c280 copied
+ * with REP MOVSD at 0001e859 for the offset table; ADD EAX,0x14 at 0001e8fb
+ * and MOV EAX,0x12c / SUB EAX,[table] at 0001e924 for the two columns a step
+ * derives; MOV dword ptr [EBP-0x18],0x0 at 0001e901 for the entry index the
+ * sign is drawn with; CMP [EBP-0x4],0xd / JL at 0001e8ac for thirteen steps in
+ * and MOV dword ptr [EBP-0x4],0xa at 0001e98b for eleven out; and the two
+ * six-push blits at 0001e8bf and 0001e93c -- 0xc0, 0x138, 0x168,
+ * surface + 0x21d8, 0x140, saved_screen + 0x504 and then the same rectangle
+ * out to 0xa0504 -- for the window that moves.  None of them is read off the
+ * emitted C.
+ *
+ * WHAT THE RUN IS OBSERVED THROUGH.  The routine's whole output is the VGA
+ * aperture at 0xa0000, which only answers in a graphics mode, so every case
+ * that calls it puts the adapter into mode 13h the way the game does, captures
+ * the frame and returns to text mode afterwards.  The scratch surface it
+ * composes on is allocated and freed inside the call and cannot be looked at.
+ *
+ * WHY A TIMER INTERRUPT IS INSTALLED.  Every step ends waiting for
+ * data_fdps_timer_tick_counter to change, and in the game that counter is
+ * advanced by fdps_timer_tick_handler off AIL's timer.  Nothing advances it in
+ * a test image, so the wait after the first step would never end.  Each run
+ * hooks IRQ0 for the duration of the call with a handler that increments the
+ * counter and chains to the one that was there.
+ *
+ * ONLY THE LAST OF THE 24 STEPS IS VISIBLE, because every step repaints the
+ * background over the one before it.  That last step is the slide-out's step 0
+ * and it places both pieces from table entry -60, which is exactly what makes
+ * it worth looking at: the two columns it derives, -60 + 0x14 and 0x12c - -60,
+ * are the widest apart the table can put them.  Where the banner sat on the
+ * other 23 steps has no unit observable and is a playtest contract
+ * (rebuild_info/pitfalls.md), and so is the tick pacing, which timing would
+ * only measure the emulator's cycle setting for.  The slide-out starting at
+ * entry 10 rather than 12 is in the same position: both spellings end on entry
+ * 0, so the frame cannot tell them apart, and it is recorded on the definition.
+ *
+ * WHAT THE SPRITE SHEET IS.  One case runs against the game's own Turn.saf,
+ * reached the way the routine reaches it -- BASEANI.VFS lifted out of the
+ * shipped MISC.VFS and published as the resident archive -- and a misspelling
+ * of the literal the routine looks up would end the process there rather than
+ * fail an assertion.  What that case can say is bounded by the sheet's own
+ * shape: its eleven frames carry one layer each, at offset (0,0) in every one
+ * of them but frame 6 -- the digit '5' -- whose layer sits at (0,1), the sign's
+ * tilemap is 5 x 2 cells of 24 x 24 and each digit's is 1 x 2, and the
+ * placement test the drawer applies is per cell.  So on the last step the
+ * number's column of 360 puts its one cell past the surface's 336 limit and
+ * nothing of it is drawn, while the sign's column of -40 puts three of its five
+ * cells at 8, 32 and 56, all of them inside -- the banner does NOT leave the
+ * screen clean, and 56 of the sign's 120 columns are still inside the window
+ * when the routine returns.  The case asserts where that leftover is and not
+ * how many bytes of it there are, because how much of those three cells is
+ * opaque is the artwork's business.
+ *
+ * The placement case therefore uses a synthetic sheet instead, whose two layers
+ * carry offsets of +100 and -100 that pull both pieces well inside the surface
+ * where their columns can be read; it is wrapped in a synthetic 26-byte-entry
+ * container because the lookup is what the routine takes its sheet through.
+ * The .SAF layout is resource_info/saf.md and the container's is
+ * resource_info/vfs.md; both are restated here rather than taken from src/.
+ *
+ * WHAT IS NOT COVERED.  The sound the sign is drawn with -- the 1 at 0001e908
+ * and 0001e9ee -- reaches fdps_sfx_play as the frame's own sound number, and
+ * every frame of the shipped Turn.saf carries -1, which that function rejects.
+ * There is nothing for a run against the real sheet to observe, and what a
+ * non-zero play_sound does is fdps_draw_composite_sprite's own behaviour,
+ * covered in tests/sprite.c.
+ * ------------------------------------------------------------------ */
+
+#define BANNER_VGA_BASE 0x000a0000
+#define BANNER_SCREEN_W 0x140
+#define BANNER_SCREEN_H 0xc8
+#define BANNER_SCREEN_BYTES (BANNER_SCREEN_W * BANNER_SCREEN_H)
+
+#define BANNER_MODE_TEXT 0x03
+#define BANNER_MODE_320X200X256 0x13
+
+/* IRQ0.  DOS/4GW reflects a hardware interrupt taken in protected mode to the
+   protected-mode vector, so the handler installed here is the one that runs
+   while the routine spins on the counter. */
+#define BANNER_TIMER_VECTOR 8
+
+/* The window that moves: 312 x 192 at screen pixel (4,4), which is byte 0x504
+   of a 320-pitch frame, and at surface pixel (24,24), which is byte 0x21d8 of
+   a 360-pitch one. */
+#define BANNER_WINDOW_W 0x138
+#define BANNER_WINDOW_H 0xc0
+#define BANNER_WINDOW_ROW 4
+#define BANNER_WINDOW_COL 4
+#define BANNER_SURFACE_WINDOW_ROW 24
+#define BANNER_SURFACE_WINDOW_COL 24
+#define BANNER_WINDOW_BYTES (BANNER_WINDOW_W * BANNER_WINDOW_H)
+#define BANNER_BORDER_BYTES (BANNER_SCREEN_BYTES - BANNER_WINDOW_BYTES)
+
+/* A surface column or row, converted to the screen one it is copied out to. */
+#define BANNER_TO_SCREEN_COL (BANNER_WINDOW_COL - BANNER_SURFACE_WINDOW_COL)
+#define BANNER_TO_SCREEN_ROW (BANNER_WINDOW_ROW - BANNER_SURFACE_WINDOW_ROW)
+
+/* The row both pieces are drawn on, the two ways a table entry becomes a
+   column, and the entry the last step of the whole animation places from. */
+#define BANNER_ROW 0x5c
+#define BANNER_SIGN_X_BIAS 0x14
+#define BANNER_NUMBER_X_BASE 0x12c
+#define BANNER_TABLE_ENTRY_0 (-60)
+
+/* What the aperture is filled with before each run.  Nothing the routine
+   writes can produce it, so a byte that still holds it was not written. */
+#define BANNER_SENTINEL 0x5a
+
+/* The turn the number is drawn for.  One digit, and '1' - 0x2f is bank entry
+   2, which is the synthetic sheet's third frame. */
+#define BANNER_TURN 1
+#define BANNER_DIGIT_FRAME 2
+
+/* One pixel value per piece, neither of them zero -- zero is the drawer's
+   transparency key -- and both below 0x80, which the background never is. */
+#define BANNER_SIGN_PIXEL 0x11
+#define BANNER_DIGIT_PIXEL 0x22
+
+/* The synthetic sheet's cell: four across and two down, small enough that the
+   two marks cannot meet and tall enough that a draw one row out shows. */
+#define BANNER_CELL_W 4
+#define BANNER_CELL_H 2
+
+/* The offsets the synthetic sheet's two layers carry, which is what pulls both
+   pieces back inside the surface on the last step. */
+#define BANNER_SIGN_LAYER_X 100
+#define BANNER_SIGN_LAYER_Y 0
+#define BANNER_DIGIT_LAYER_X (-100)
+#define BANNER_DIGIT_LAYER_Y 10
+
+/* Where the two marks therefore land on the captured screen. */
+#define BANNER_SIGN_COL (BANNER_TABLE_ENTRY_0 + BANNER_SIGN_X_BIAS \
+                         + BANNER_SIGN_LAYER_X + BANNER_TO_SCREEN_COL)
+#define BANNER_SIGN_ROW (BANNER_ROW + BANNER_SIGN_LAYER_Y \
+                         + BANNER_TO_SCREEN_ROW)
+#define BANNER_DIGIT_COL (BANNER_NUMBER_X_BASE - BANNER_TABLE_ENTRY_0 \
+                          + BANNER_DIGIT_LAYER_X + BANNER_TO_SCREEN_COL)
+#define BANNER_DIGIT_ROW (BANNER_ROW + BANNER_DIGIT_LAYER_Y \
+                          + BANNER_TO_SCREEN_ROW)
+
+/* The shipped Turn.saf's own shape, read out of BASEANI.VFS: 24x24 cells, a
+   sign whose tilemap is 5 cells across and 2 down, and a digit whose tilemap is
+   1 across and 2 down.  These are the sheet's numbers and not the routine's. */
+#define TURN_SAF_CELL 24
+#define TURN_SIGN_CELLS_W 5
+#define TURN_SIGN_CELLS_H 2
+
+/* Where the sign's leftover therefore is on the last step.  Its left edge is at
+   surface column -40, so its 120 columns end at 79 and the window's own left
+   edge at 24 clips the rest away; its 48 rows start at the drawing row.  Every
+   byte the run changes has to be inside this box. */
+#define TURN_LEFTOVER_FIRST_ROW (BANNER_ROW + BANNER_TO_SCREEN_ROW)
+#define TURN_LEFTOVER_LAST_ROW (BANNER_ROW + TURN_SAF_CELL * TURN_SIGN_CELLS_H \
+                                - 1 + BANNER_TO_SCREEN_ROW)
+#define TURN_LEFTOVER_FIRST_COL BANNER_WINDOW_COL
+#define TURN_LEFTOVER_LAST_COL (BANNER_TABLE_ENTRY_0 + BANNER_SIGN_X_BIAS \
+                                + TURN_SAF_CELL * TURN_SIGN_CELLS_W - 1 \
+                                + BANNER_TO_SCREEN_COL)
+
+/* The synthetic .SAF.  Header offsets first: the three magic bytes, the cell
+   size, and the three section descriptors. */
+#define BSAF_CELL_W_AT 0x07
+#define BSAF_CELL_H_AT 0x09
+#define BSAF_FRAME_COUNT_AT 0x0c
+#define BSAF_FRAME_TABLE_PTR_AT 0x0e
+#define BSAF_TILEMAP_COUNT_AT 0x16
+#define BSAF_TILEMAP_TABLE_PTR_AT 0x18
+#define BSAF_TILE_COUNT_AT 0x20
+#define BSAF_TILE_TABLE_PTR_AT 0x22
+
+/* Where the fixture puts each section: the header ends at 0x34, then two tile
+   offsets and their four-byte streams, two tilemap offsets and their six-byte
+   records, and a three-entry frame table with a record for each. */
+#define BSAF_TILE_TABLE_AT 0x34
+#define BSAF_TILE0_STREAM_AT 0x3c
+#define BSAF_TILE1_STREAM_AT 0x40
+#define BSAF_TILEMAP_TABLE_AT 0x44
+#define BSAF_TILEMAP0_AT 0x4c
+#define BSAF_TILEMAP1_AT 0x54
+#define BSAF_FRAME_TABLE_AT 0x5c
+#define BSAF_FRAME0_AT 0x68
+#define BSAF_FRAME1_AT 0x80
+#define BSAF_FRAME2_AT 0x98
+#define BSAF_FRAME_COUNT 3
+#define BSAF_IMAGE_BYTES 0x100
+
+/* The frame record: sound at +0, duration at +2, layer count at +8, the first
+   layer at +0x0a; a layer is 13 bytes of tilemap number, x, y, blend flag and
+   blend level.  Sound 0xffff is the -1 every frame of the real sheet carries,
+   so nothing is asked of the mixer. */
+#define BSAF_FRAME_SOUND_AT 0x00
+#define BSAF_FRAME_DURATION_AT 0x02
+#define BSAF_FRAME_LAYERS_AT 0x08
+#define BSAF_LAYER_AT 0x0a
+#define BSAF_LAYER_TILEMAP_AT 0x00
+#define BSAF_LAYER_X_AT 0x02
+#define BSAF_LAYER_Y_AT 0x04
+#define BSAF_LAYER_BLEND_AT 0x06
+#define BSAF_NO_SOUND 0xffff
+
+/* The synthetic container: a 35-byte header, one 26-byte entry, then the
+   member.  Only the table offset at 5, the count at 7, and each entry's name,
+   size and start are read. */
+#define BVFS_TABLE_AT 35
+#define BVFS_ENTRY_BYTES 26
+#define BVFS_ENTRY_SIZE_AT 0x0d
+#define BVFS_ENTRY_SIZE2_AT 0x11
+#define BVFS_ENTRY_START_AT 0x16
+#define BVFS_MEMBER_AT (BVFS_TABLE_AT + BVFS_ENTRY_BYTES)
+#define BVFS_IMAGE_BYTES (BVFS_MEMBER_AT + BSAF_IMAGE_BYTES)
+
+/* The nested container the real sheet lives in, and the outer one that holds
+   it.  MISC.VFS is staged by tests/gamefile.lst. */
+#define MISC_NAME "MISC.VFS"
+#define BASEANI_MEMBER "BASEANI.VFS"
+
+static unsigned char banner_background[BANNER_SCREEN_BYTES];
+static unsigned char banner_screen[BANNER_SCREEN_BYTES];
+static unsigned char banner_saf[BSAF_IMAGE_BYTES];
+static unsigned char banner_vfs[BVFS_IMAGE_BYTES];
+
+static void (__interrupt __far *banner_saved_timer)();
+
+static void __interrupt __far banner_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(banner_saved_timer);
+}
+
+static void banner_u16(unsigned char *image, int at, unsigned int value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void banner_u32(unsigned char *image, int at, unsigned long value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    image[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    image[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+/* The background the banner slides over.  Every byte has bit 7 set, so no byte
+   of it can be mistaken for the sentinel or for either mark. */
+static int banner_pattern(int row, int col)
+{
+    return ((row * 31 + col * 17) & 0x7f) | 0x80;
+}
+
+static void banner_stage_background(void)
+{
+    int row;
+    int col;
+
+    for (row = 0; row < BANNER_SCREEN_H; row++) {
+        for (col = 0; col < BANNER_SCREEN_W; col++) {
+            banner_background[row * BANNER_SCREEN_W + col] =
+                (unsigned char) banner_pattern(row, col);
+        }
+    }
+}
+
+/* One frame record naming one layer: which tilemap, and the offset the layer
+   carries from the request's own origin. */
+static void banner_stage_frame(int at, int tilemap, int layer_x, int layer_y)
+{
+    banner_u16(banner_saf, at + BSAF_FRAME_SOUND_AT, BSAF_NO_SOUND);
+    banner_u16(banner_saf, at + BSAF_FRAME_DURATION_AT, 1);
+    banner_u16(banner_saf, at + BSAF_FRAME_LAYERS_AT, 1);
+    banner_u16(banner_saf, at + BSAF_LAYER_AT + BSAF_LAYER_TILEMAP_AT,
+               (unsigned int) tilemap);
+    banner_u16(banner_saf, at + BSAF_LAYER_AT + BSAF_LAYER_X_AT,
+               (unsigned int) layer_x);
+    banner_u16(banner_saf, at + BSAF_LAYER_AT + BSAF_LAYER_Y_AT,
+               (unsigned int) layer_y);
+    banner_saf[at + BSAF_LAYER_AT + BSAF_LAYER_BLEND_AT] = 0;
+}
+
+/* The synthetic sheet: two 4x2 tiles of their own pixel value, one single-cell
+   tilemap each, and three frames.  Frame 0 is what the routine draws the sign
+   with and frame 2 is the bank entry the digit '1' selects; frame 1 is only
+   there so the table has an entry between them.  Command 0x03 is a fill run of
+   four pixels (resource_info/cel.md), so two of them make the two rows of a
+   cell. */
+static void banner_stage_sheet(void)
+{
+    memset(banner_saf, 0, (size_t) BSAF_IMAGE_BYTES);
+    banner_saf[0] = 'S';
+    banner_saf[1] = 'A';
+    banner_saf[2] = 'F';
+    banner_u16(banner_saf, BSAF_CELL_W_AT, BANNER_CELL_W);
+    banner_u16(banner_saf, BSAF_CELL_H_AT, BANNER_CELL_H);
+
+    banner_u16(banner_saf, BSAF_TILE_COUNT_AT, 2);
+    banner_u32(banner_saf, BSAF_TILE_TABLE_PTR_AT,
+               (unsigned long) BSAF_TILE_TABLE_AT);
+    banner_u32(banner_saf, BSAF_TILE_TABLE_AT,
+               (unsigned long) BSAF_TILE0_STREAM_AT);
+    banner_u32(banner_saf, BSAF_TILE_TABLE_AT + 4,
+               (unsigned long) BSAF_TILE1_STREAM_AT);
+    banner_saf[BSAF_TILE0_STREAM_AT] = 0x03;
+    banner_saf[BSAF_TILE0_STREAM_AT + 1] = BANNER_SIGN_PIXEL;
+    banner_saf[BSAF_TILE0_STREAM_AT + 2] = 0x03;
+    banner_saf[BSAF_TILE0_STREAM_AT + 3] = BANNER_SIGN_PIXEL;
+    banner_saf[BSAF_TILE1_STREAM_AT] = 0x03;
+    banner_saf[BSAF_TILE1_STREAM_AT + 1] = BANNER_DIGIT_PIXEL;
+    banner_saf[BSAF_TILE1_STREAM_AT + 2] = 0x03;
+    banner_saf[BSAF_TILE1_STREAM_AT + 3] = BANNER_DIGIT_PIXEL;
+
+    banner_u16(banner_saf, BSAF_TILEMAP_COUNT_AT, 2);
+    banner_u32(banner_saf, BSAF_TILEMAP_TABLE_PTR_AT,
+               (unsigned long) BSAF_TILEMAP_TABLE_AT);
+    banner_u32(banner_saf, BSAF_TILEMAP_TABLE_AT,
+               (unsigned long) BSAF_TILEMAP0_AT);
+    banner_u32(banner_saf, BSAF_TILEMAP_TABLE_AT + 4,
+               (unsigned long) BSAF_TILEMAP1_AT);
+    banner_u16(banner_saf, BSAF_TILEMAP0_AT, 1);
+    banner_u16(banner_saf, BSAF_TILEMAP0_AT + 2, 1);
+    banner_u16(banner_saf, BSAF_TILEMAP0_AT + 4, 0);
+    banner_u16(banner_saf, BSAF_TILEMAP1_AT, 1);
+    banner_u16(banner_saf, BSAF_TILEMAP1_AT + 2, 1);
+    banner_u16(banner_saf, BSAF_TILEMAP1_AT + 4, 1);
+
+    banner_u16(banner_saf, BSAF_FRAME_COUNT_AT, BSAF_FRAME_COUNT);
+    banner_u32(banner_saf, BSAF_FRAME_TABLE_PTR_AT,
+               (unsigned long) BSAF_FRAME_TABLE_AT);
+    banner_u32(banner_saf, BSAF_FRAME_TABLE_AT,
+               (unsigned long) BSAF_FRAME0_AT);
+    banner_u32(banner_saf, BSAF_FRAME_TABLE_AT + 4,
+               (unsigned long) BSAF_FRAME1_AT);
+    banner_u32(banner_saf, BSAF_FRAME_TABLE_AT + 8,
+               (unsigned long) BSAF_FRAME2_AT);
+    banner_stage_frame(BSAF_FRAME0_AT, 0, BANNER_SIGN_LAYER_X,
+                       BANNER_SIGN_LAYER_Y);
+    banner_stage_frame(BSAF_FRAME1_AT, 0, 0, 0);
+    banner_stage_frame(BSAF_FRAME2_AT, 1, BANNER_DIGIT_LAYER_X,
+                       BANNER_DIGIT_LAYER_Y);
+}
+
+/* The synthetic container holding that sheet under the name the routine looks
+   up.  The entry's name is stored upper-case because the lookup folds only the
+   query and compares the entry as the packer wrote it. */
+static void banner_stage_container(void)
+{
+    banner_stage_sheet();
+    memset(banner_vfs, 0, (size_t) BVFS_IMAGE_BYTES);
+    banner_vfs[0] = 'V';
+    banner_vfs[1] = 'F';
+    banner_vfs[2] = 'S';
+    banner_u16(banner_vfs, 3, 1);
+    banner_u16(banner_vfs, 5, BVFS_TABLE_AT);
+    banner_u32(banner_vfs, 7, 1);
+    strcpy((char *) banner_vfs + BVFS_TABLE_AT, "TURN.SAF");
+    banner_u32(banner_vfs, BVFS_TABLE_AT + BVFS_ENTRY_SIZE_AT,
+               (unsigned long) BSAF_IMAGE_BYTES);
+    banner_u32(banner_vfs, BVFS_TABLE_AT + BVFS_ENTRY_SIZE2_AT,
+               (unsigned long) BSAF_IMAGE_BYTES);
+    banner_u32(banner_vfs, BVFS_TABLE_AT + BVFS_ENTRY_START_AT,
+               (unsigned long) BVFS_MEMBER_AT);
+    memmove(banner_vfs + BVFS_MEMBER_AT, banner_saf,
+            (size_t) BSAF_IMAGE_BYTES);
+}
+
+/* BASEANI.VFS lifted out of MISC.VFS by walking the outer container's own
+   directory -- 26-byte entries at the offset the header's field at 5 names,
+   each with its name at +0 and its start at +0x16 (resource_info/vfs.md).  The
+   walk is written out here rather than taken through src/vfs.c so that staging
+   does not lean on the code the rest of this file is about.  Returns NULL when
+   the file is not staged, and the whole outer image is the caller's to free. */
+static unsigned char *banner_read_baseani(unsigned char **out_outer)
+{
+    FILE *fp;
+    unsigned char *outer;
+    long bytes;
+    unsigned long table_at;
+    unsigned long count;
+    unsigned long index;
+    unsigned long entry;
+
+    *out_outer = NULL;
+    fp = fopen(MISC_NAME, "rb");
+    if (fp == NULL) {
+        return NULL;
+    }
+    fseek(fp, 0L, SEEK_END);
+    bytes = ftell(fp);
+    fseek(fp, 0L, SEEK_SET);
+    outer = (unsigned char *) malloc((size_t) bytes);
+    if (outer == NULL) {
+        fclose(fp);
+        return NULL;
+    }
+    if (fread(outer, (size_t) bytes, 1, fp) != 1) {
+        free(outer);
+        fclose(fp);
+        return NULL;
+    }
+    fclose(fp);
+    *out_outer = outer;
+
+    table_at = (unsigned long) outer[5] | ((unsigned long) outer[6] << 8);
+    count = (unsigned long) outer[7] | ((unsigned long) outer[8] << 8)
+            | ((unsigned long) outer[9] << 16)
+            | ((unsigned long) outer[10] << 24);
+    for (index = 0; index < count; index++) {
+        entry = table_at + index * BVFS_ENTRY_BYTES;
+        if (strcmp((char *) outer + entry, BASEANI_MEMBER) == 0) {
+            return outer
+                   + ((unsigned long) outer[entry + BVFS_ENTRY_START_AT]
+                      | ((unsigned long) outer[entry + BVFS_ENTRY_START_AT + 1]
+                         << 8)
+                      | ((unsigned long) outer[entry + BVFS_ENTRY_START_AT + 2]
+                         << 16)
+                      | ((unsigned long) outer[entry + BVFS_ENTRY_START_AT + 3]
+                         << 24));
+        }
+    }
+    return NULL;
+}
+
+static void banner_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* One whole banner, with the adapter in the mode the game plays it in and a
+   timer interrupt running, leaving the frame in banner_screen[]. */
+static void banner_run(unsigned char *archive)
+{
+    banner_stage_background();
+    data_fdps_animation_baseani_archive_ptr = archive;
+    data_fdps_battle_turn_counter = BANNER_TURN;
+
+    banner_set_mode(BANNER_MODE_320X200X256);
+    memset((void *) BANNER_VGA_BASE, BANNER_SENTINEL,
+           (size_t) BANNER_SCREEN_BYTES);
+
+    banner_saved_timer = _dos_getvect(BANNER_TIMER_VECTOR);
+    _dos_setvect(BANNER_TIMER_VECTOR, banner_timer_isr);
+    fdps_animate_turn_banner(banner_background);
+    _dos_setvect(BANNER_TIMER_VECTOR, banner_saved_timer);
+
+    memmove(banner_screen, (void *) BANNER_VGA_BASE,
+            (size_t) BANNER_SCREEN_BYTES);
+    banner_set_mode(BANNER_MODE_TEXT);
+    data_fdps_animation_baseani_archive_ptr = NULL;
+}
+
+static int banner_pixel(int row, int col)
+{
+    return (int) banner_screen[row * BANNER_SCREEN_W + col];
+}
+
+/* How many bytes of the captured frame hold a given value. */
+static int banner_count(int value)
+{
+    long index;
+    int found;
+
+    found = 0;
+    for (index = 0; index < (long) BANNER_SCREEN_BYTES; index++) {
+        if ((int) banner_screen[index] == value) {
+            found++;
+        }
+    }
+    return found;
+}
+
+/* How many bytes inside the 312x192 window are not the background byte that
+   was under them. */
+static int banner_window_mismatches(void)
+{
+    int row;
+    int col;
+    long at;
+    int bad;
+
+    bad = 0;
+    for (row = 0; row < BANNER_WINDOW_H; row++) {
+        for (col = 0; col < BANNER_WINDOW_W; col++) {
+            at = (long) (row + BANNER_WINDOW_ROW) * BANNER_SCREEN_W
+                 + (col + BANNER_WINDOW_COL);
+            if (banner_screen[at] != banner_background[at]) {
+                bad++;
+            }
+        }
+    }
+    return bad;
+}
+
+/* How many bytes inside the window differ from the background they were
+   painted from while lying outside the given box. */
+static int banner_mismatches_outside(int first_row, int last_row,
+                                     int first_col, int last_col)
+{
+    int row;
+    int col;
+    long at;
+    int bad;
+
+    bad = 0;
+    for (row = 0; row < BANNER_WINDOW_H; row++) {
+        for (col = 0; col < BANNER_WINDOW_W; col++) {
+            at = (long) (row + BANNER_WINDOW_ROW) * BANNER_SCREEN_W
+                 + (col + BANNER_WINDOW_COL);
+            if (row + BANNER_WINDOW_ROW >= first_row
+                && row + BANNER_WINDOW_ROW <= last_row
+                && col + BANNER_WINDOW_COL >= first_col
+                && col + BANNER_WINDOW_COL <= last_col) {
+                continue;
+            }
+            if (banner_screen[at] != banner_background[at]) {
+                bad++;
+            }
+        }
+    }
+    return bad;
+}
+
+/* How many bytes outside that window still hold the sentinel. */
+static int banner_border_untouched(void)
+{
+    int row;
+    int col;
+    int kept;
+
+    kept = 0;
+    for (row = 0; row < BANNER_SCREEN_H; row++) {
+        for (col = 0; col < BANNER_SCREEN_W; col++) {
+            if (row >= BANNER_WINDOW_ROW
+                && row < BANNER_WINDOW_ROW + BANNER_WINDOW_H
+                && col >= BANNER_WINDOW_COL
+                && col < BANNER_WINDOW_COL + BANNER_WINDOW_W) {
+                continue;
+            }
+            if (banner_pixel(row, col) == BANNER_SENTINEL) {
+                kept++;
+            }
+        }
+    }
+    return kept;
+}
+
+/* The premise every case below rests on: in mode 13h the aperture is a plain
+   linear window that reads back what was written to it, at the first byte of
+   the frame and at its last. */
+static void banner_the_aperture_reads_back_in_mode_13h(void)
+{
+    unsigned char *aperture;
+    int first;
+    int last;
+
+    banner_set_mode(BANNER_MODE_320X200X256);
+    aperture = (unsigned char *) BANNER_VGA_BASE;
+    aperture[0] = 0x5a;
+    aperture[BANNER_SCREEN_BYTES - 1] = 0xa5;
+    first = (int) aperture[0];
+    last = (int) aperture[BANNER_SCREEN_BYTES - 1];
+    banner_set_mode(BANNER_MODE_TEXT);
+
+    CHECK_EQ(first, 0x5a);
+    CHECK_EQ(last, 0xa5);
+}
+
+/* The whole animation against the game's own sheet, ending where the routine
+   leaves it.  Three things at once.
+
+   Everything the run changed is inside the sign's own last-step footprint --
+   rows 72 to 119, columns 4 to 59 -- and something is: the number is gone,
+   because its single cell at column 360 is past the surface's 336 limit, and
+   the background is back everywhere the sign is not.  A run that stopped in the
+   held position leaves the sign at column 110 and the number at column 210, and
+   a run whose background repaint was missing leaves the trail of every step,
+   and both put changed bytes far outside the box.
+
+   Nothing outside the 312x192 window is written on the way in or on the way
+   out: the two blits take byte 0x504 of a 320-pitch frame for 192 rows of 312,
+   so the outermost four rows and columns, and the four columns past the window,
+   keep the sentinel.  4,096 bytes of the 64,000 are outside it. */
+static void banner_ends_with_the_signs_last_step_and_nothing_else(void)
+{
+    unsigned char *outer;
+    unsigned char *baseani;
+
+    baseani = banner_read_baseani(&outer);
+    if (baseani == NULL) {
+        free(outer);
+        return;
+    }
+
+    banner_run(baseani);
+    CHECK_EQ(banner_mismatches_outside(TURN_LEFTOVER_FIRST_ROW,
+                                       TURN_LEFTOVER_LAST_ROW,
+                                       TURN_LEFTOVER_FIRST_COL,
+                                       TURN_LEFTOVER_LAST_COL), 0);
+    CHECK_EQ(banner_window_mismatches() > 0, 1);
+    CHECK_EQ(banner_border_untouched(), BANNER_BORDER_BYTES);
+    free(outer);
+}
+
+/* The last step's two columns, read off the frame.  Both marks are 4x2 cells
+   and both are placed from the same table entry, -60: the sign lands at
+   -60 + 0x14 and the number at 0x12c - -60, and the surface's window starts 20
+   pixels left of and above the screen's, so they come out at screen columns 40
+   and 240 on rows 72 and 82.  Dropping the 0x14, or deriving the number from
+   0x140 instead of 0x12c, or reading the table backwards moves one of the two
+   and leaves the other where it was. */
+static void banner_places_both_pieces_from_one_table_entry(void)
+{
+    banner_stage_container();
+    banner_run(banner_vfs);
+
+    CHECK_EQ(banner_pixel(BANNER_SIGN_ROW, BANNER_SIGN_COL),
+             BANNER_SIGN_PIXEL);
+    CHECK_EQ(banner_pixel(BANNER_SIGN_ROW,
+                          BANNER_SIGN_COL + BANNER_CELL_W - 1),
+             BANNER_SIGN_PIXEL);
+    CHECK_EQ(banner_pixel(BANNER_SIGN_ROW + BANNER_CELL_H - 1,
+                          BANNER_SIGN_COL),
+             BANNER_SIGN_PIXEL);
+    CHECK_EQ(banner_pixel(BANNER_SIGN_ROW, BANNER_SIGN_COL - 1),
+             banner_pattern(BANNER_SIGN_ROW, BANNER_SIGN_COL - 1));
+
+    CHECK_EQ(banner_pixel(BANNER_DIGIT_ROW, BANNER_DIGIT_COL),
+             BANNER_DIGIT_PIXEL);
+    CHECK_EQ(banner_pixel(BANNER_DIGIT_ROW + BANNER_CELL_H - 1,
+                          BANNER_DIGIT_COL + BANNER_CELL_W - 1),
+             BANNER_DIGIT_PIXEL);
+    CHECK_EQ(banner_pixel(BANNER_DIGIT_ROW,
+                          BANNER_DIGIT_COL + BANNER_CELL_W),
+             banner_pattern(BANNER_DIGIT_ROW,
+                            BANNER_DIGIT_COL + BANNER_CELL_W));
+}
+
+/* Exactly one cell of each piece survives the run, and nothing else in the
+   window differs from the background.  That is three things at once: the
+   background really is repainted at the start of every step, so 23 earlier
+   placements left nothing behind; the sign really is drawn with bank entry 0
+   put back before each draw, because the digit's own entry index would paint
+   the digit's pixel at the sign's column; and the number really is one digit
+   for turn 1. */
+static void banner_repaints_the_background_under_every_step(void)
+{
+    banner_stage_container();
+    banner_run(banner_vfs);
+
+    CHECK_EQ(banner_count(BANNER_SIGN_PIXEL), BANNER_CELL_W * BANNER_CELL_H);
+    CHECK_EQ(banner_count(BANNER_DIGIT_PIXEL), BANNER_CELL_W * BANNER_CELL_H);
+    CHECK_EQ(banner_window_mismatches(), 2 * BANNER_CELL_W * BANNER_CELL_H);
+    CHECK_EQ(banner_border_untouched(), BANNER_BORDER_BYTES);
+}
+
 void run_anim_tests(void)
 {
     RUN_TEST(baseani_lookup_returns_a_pointer_into_the_image);
@@ -378,4 +1041,8 @@ void run_anim_tests(void)
     RUN_TEST(turn_number_biases_digits_one_past_the_word_sprite);
     RUN_TEST(turn_number_reads_the_counter_at_the_call);
     RUN_TEST(turn_number_leaves_the_other_seven_slots_alone);
+    RUN_TEST(banner_the_aperture_reads_back_in_mode_13h);
+    RUN_TEST(banner_ends_with_the_signs_last_step_and_nothing_else);
+    RUN_TEST(banner_places_both_pieces_from_one_table_entry);
+    RUN_TEST(banner_repaints_the_background_under_every_step);
 }

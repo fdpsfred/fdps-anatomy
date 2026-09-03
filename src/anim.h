@@ -88,4 +88,68 @@ extern void *fdps_baseani_get_entry_or_exit(char *name);
 extern void fdps_draw_turn_number(int *request);
 #pragma aux fdps_draw_turn_number "*" parm caller [];
 
+/* Plays the battle turn banner over a copy of the screen that was showing
+   before it began: the Turn.saf sign slides in from the left while the current
+   turn number slides in from the right, both hold for half a second, and both
+   slide back off.  Returns with the window repainted from saved_screen and the
+   number gone from it, but not with the banner gone -- see the last step
+   below.
+
+   saved_screen is a 320x200 8bpp frame the caller owns, and it is only read.
+   The banner is composed on a 360x240 scratch surface this function allocates
+   and frees, and only a 312x192 window of it -- pixel (4,4) of the screen
+   through to (315,195) -- is ever touched, on the scratch surface and on the
+   adapter alike, so the outermost four columns and rows of the screen keep
+   whatever was already there.  The background is repainted from saved_screen
+   under the banner at the start of every step, which is what stops the two
+   sliding pieces from smearing.
+
+   THE TWO PIECES ARE PLACED FROM ONE TABLE AND THEIR POSITIONS ALWAYS SUM TO
+   0x140.  Step i puts the sign at table[i] + 0x14 and the number at
+   0x12c - table[i], both at row 0x5c of the scratch surface, so one comes in
+   as the other does and neither is placed independently.
+
+   THE SLIDE-OUT STARTS AT TABLE ENTRY 10, NOT 12, so it is eleven steps
+   against the slide-in's thirteen and it begins by snapping the banner back
+   two pixels.  Writing the obvious mirror costs two extra steps and loses the
+   snap.
+
+   THE LAST STEP DOES NOT TAKE THE SIGN OFF THE SCREEN.  Both phases end on
+   table entry -60, which puts the sign's left edge at column -40 of the
+   scratch surface, and the sign's tilemap is five 24-pixel cells across, so
+   its cells sit at -40, -16, 8, 32 and 56 and the three from 8 rightwards pass
+   fdps_draw_tilemap_cell's strict x > 0 test (sprite.h).  The closing window
+   blit then carries scratch columns 24..335 out to screen columns 4..315, so
+   screen columns 4..59 of rows 72..119 come back holding sign pixels instead
+   of saved_screen's -- 660 bytes of the window against the shipped Turn.saf.
+   The number really is gone: for a one-digit turn its single cell lands at
+   0x12c - -60 = 360, which fails the same routine's pitch - cell width > x
+   test.  The slide-in's first step places from the same entry, so the sign is
+   already partly on screen when the animation starts.  Nothing shows for long
+   -- fdps_play_vfs_animation goes straight on to fdps_saf_play_over_background
+   at 0001ec35, which repaints the whole frame from the same saved screen --
+   but this routine's own final frame is not clean, and a rebuild checked
+   against "the screen comes back untouched" is checking something the original
+   does not do.
+
+   Each step is paced by one change of data_fdps_timer_tick_counter, but two of
+   the 24 steps are not paced at all.  The latch the wait compares against is
+   never initialised: the slide-in's first step falls straight through unless
+   the garbage on the stack happens to equal the counter, and the slide-out
+   inherits the value the slide-in latched, which delay() has already moved the
+   counter past.  So the banner costs 22 tick changes plus the half-second
+   hold, and the counter has to be advancing -- in the game the timer interrupt
+   does it -- or it is the second step of each phase that never ends, not the
+   first.  The definition in anim.c says why the latch stays uninitialised.
+
+   The sign is drawn with fdps_draw_composite_sprite's sound argument set, so
+   the sheet's own sound effect is asked for on every one of the 24 steps; the
+   shipped Turn.saf names no sound in any of its frames, so nothing is heard.
+   The number is drawn by fdps_draw_turn_number and is therefore whatever
+   data_fdps_battle_turn_counter says at the moment of each step.
+
+   A missing Turn.saf does not come back: the lookup above ends the process. */
+extern void fdps_animate_turn_banner(unsigned char *saved_screen);
+#pragma aux fdps_animate_turn_banner "*" parm caller [];
+
 #endif

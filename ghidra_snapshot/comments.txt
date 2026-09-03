@@ -3039,13 +3039,13 @@ Copies the 13-entry slide-offset table at 0x0001c280 (-60, -20, 10, 35, 50, 65, 
 
 Slide-in, i = 0..12, one step per timer tick:
   - fdps_blit_rect copies the 0x138 x 0xc0 (312x192) region at byte offset 0x504 of saved_screen (320-byte stride, so pixel (4,4)) into the work surface at offset 0x21d8 (pixel (24,24)), wiping the previous step's banner;
-  - request x = table[i] + 0x14 and entry index 0, then fdps_draw_composite_sprite with the sound flag set, so the sheet entry's sound effect is triggered on every step;
+  - request x = table[i] + 0x14 and entry index 0, then fdps_draw_composite_sprite with the sound flag set (MOV EAX,0x1 / PUSH EAX at 0001e908 and 0001e9ee, so it is set on every one of the 24 steps). No sound is ever produced by this animation, however: every one of the shipped Turn.saf's eleven frames carries a leading sound number of -1, which fdps_draw_composite_sprite sign-extends and fdps_sfx_play rejects on its own lower-bound test. Do not go looking for a missing effect;
   - request x = 0x12c - table[i], then fdps_draw_turn_number, which overwrites the entry index with one digit of the battle turn counter per decimal place and steps 0x1c pixels right for each;
   - fdps_blit_rect copies the same 312x192 region from the work surface to VGA at 0xa0504;
   - spins on the timer-tick global DAT_00069d64 until it changes, then latches the new value.
 The two x values always sum to 0x140, so the sign comes in from the left while the number comes in from the right; both overshoot their resting place by two pixels at table[10] before settling on table[12] = 90.
 
-delay(500) then holds the assembled banner for half a second, and the slide-out repeats the identical step for i = 10 down to 0, retracing the table until both pieces are back off the edges. free() releases the work surface.
+delay(500) then holds the assembled banner for half a second, and the slide-out repeats the identical step for i = 10 down to 0, retracing the table. The number leaves the screen; the sign does not. At the final table entry -60 the sign's request x is -40 and its tilemap is 5 cells of 24, so its cells sit at -40, -16, 8, 32 and 56, and fdps_draw_tilemap_cell's strict test (x > 0 and pitch - 24 > x, i.e. 336 > x) accepts the last three; the closing window blit then carries surface columns 24..335 out to screen columns 4..315, so 56 columns of the sign over 48 rows -- screen columns 4..59, rows 72..119 -- are still on the adapter when the routine returns. The number is genuinely gone: for a one-digit turn its single cell is at 0x12c - -60 = 360, which fails 336 > x. The slide-in's first step places from the same entry, so the sign is already partly visible when the animation starts. What actually clears the frame is the caller: fdps_play_vfs_animation goes straight on to fdps_saf_play_over_background at 0001ec35, which repaints the whole frame from the same saved screen. free() releases the work surface.
 
 Parameters:
   saved_screen -- the 320x200 8bpp copy of the screen that was showing before the animation began, allocated and filled from 0xa0000 by fdps_play_vfs_animation. Read only; it is the background the banner slides over, repainted under it on every step.
@@ -3056,7 +3056,7 @@ Returns:
 Pool: fdps  [no Function ID hit in the Watcom or ail sets; full_hash unique in the image, and it owns the private 13-dword table at 0x0001c280 and the game asset name "Turn.saf"]
 
 Rebuild note:
-The slide-out loop starts at table entry 10, not 12. Writing the obvious mirror of the slide-in -- for (i = 12; i >= 0; i--) -- gives two extra steps and loses the two-pixel snap the original shows the instant the banner starts leaving. The local the frame wait compares against is also left uninitialised before each loop, so the first step of each phase does not wait for a tick; declaring it initialised from DAT_00069d64 costs one extra tick per phase.
+The slide-out loop starts at table entry 10, not 12. Writing the obvious mirror of the slide-in -- for (i = 12; i >= 0; i--) -- gives two extra steps and loses the two-pixel snap the original shows the instant the banner starts leaving. The local the frame wait compares against is uninitialised on entry to the slide-in and stale on entry to the slide-out, so the first step of each phase does not wait for a tick; declaring it initialised from DAT_00069d64 costs one extra tick per phase. The mechanism differs between the two loops: [EBP-0xc] is written in exactly two places, MOV [EBP-0xc],EAX at 0001e976 and 0001ea5c, both after a completed wait, and nothing resets it between the loops, so the slide-out begins holding the value the slide-in's last step latched and its first compare fails because delay(500) has moved the counter past it, not because the slot is uninitialised. The second loop does not need an uninitialised local of its own.
 
 === 0001ea77 [EOL]
 Alignment padding: 8d 80 00 00 00 00 + 8d 52 00, aligning FUN_0001ea80 to 16 bytes.

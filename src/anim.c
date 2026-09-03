@@ -10,14 +10,19 @@
  * and CALL 0x00042e0f at 0002a284 and 0002a28e, CALL 0x00042d41 at 0001ea9c
  * and CALL 0x00042dd2 at 0001eaaf -- because the flag set carries no -oi
  * (rebuild_info/build_flags.md), so the plain declarations are what reproduce
- * them.
+ * them.  malloc and free come from <stdlib.h> and delay from <i86.h>, which is
+ * where Watcom 10.0a declares it; those three are calls in the original too --
+ * CALL 0x0003d375 at 0001e860, CALL 0x0003d478 at 0001ea68 and CALL 0x0003d370
+ * at 0001e983.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <i86.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "vfs.h"
+#include "blit.h"
 #include "sprite.h"
 #include "anim.h"
 
@@ -103,4 +108,151 @@ void fdps_draw_turn_number(int *request)
         fdps_draw_composite_sprite(request, 0);
         request[DRAW_REQUEST_X] += TURN_DIGIT_PITCH;
     }
+}
+
+/* The scratch surface the banner is composed on: 360 x 240 8bpp, PUSH 0x15180
+   / CALL malloc at 0001e85b. */
+#define BANNER_SURFACE_PITCH 0x168
+#define BANNER_SURFACE_ROWS 0xf0
+#define BANNER_SURFACE_BYTES 0x15180
+
+/* The mode 13h frame, and where the adapter answers.  Both are hard-coded in
+   the original -- PUSH 0x140 at 0001e8d7 and PUSH 0xa0504 at 0001e94b -- and
+   stay literals here: 0xa0000 is where the display adapter answers, not the
+   address of anything the linker places. */
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_PITCH 0x140
+
+/* The window of the screen the banner is allowed to disturb: 312 x 192 at
+   pixel (4,4), which is byte 0x504 of a 320-pitch frame.  The same rectangle
+   lands at pixel (24,24) of the scratch surface, byte 0x21d8 of a 360-pitch
+   one, so the surface keeps a 24-pixel apron the sliding pieces can hang over
+   without touching the screen. */
+#define BANNER_WINDOW_AT 0x504
+#define BANNER_WINDOW_W 0x138
+#define BANNER_WINDOW_H 0xc0
+#define BANNER_SURFACE_WINDOW_AT 0x21d8
+
+/* The row of the scratch surface both pieces are drawn on, and the two ways a
+   step's table entry becomes a column: the sign is placed at entry + 0x14 and
+   the number at 0x12c - entry, which is why the two always sum to 0x140. */
+#define BANNER_ROW 0x5c
+#define BANNER_SIGN_X_BIAS 0x14
+#define BANNER_NUMBER_X_BASE 0x12c
+
+/* Entry 0 of the banner's sprite bank is the word graphic; the numerals are
+   entries 1 to 10 and fdps_draw_turn_number selects those itself. */
+#define BANNER_SIGN_ENTRY 0
+
+/* Thirteen steps in, eleven out.  THE SLIDE-OUT STARTS AT ENTRY 10 AND NOT AT
+   12 -- MOV dword ptr [EBP-0x4],0xa at 0001e98b -- so the banner snaps back
+   two pixels the instant it starts leaving (rebuild_info/pitfalls.md). */
+#define BANNER_SLIDE_STEPS 13
+#define BANNER_SLIDE_OUT_FIRST 10
+
+/* How long the assembled banner is held before it leaves, in milliseconds. */
+#define BANNER_HOLD_MS 500
+
+/* 0001e840.  Two loops, no branch inside either, and the two bodies are the
+   same eight statements written out twice -- the original has them inline in
+   both loops and not behind a call, so they stay written out here.
+
+   THE FRAME WAIT'S LATCH IS DELIBERATELY LEFT UNINITIALISED.  last_tick is
+   read at 0001e966 before anything has written it, so the first step of the
+   slide-in ends its wait at once unless the garbage on the stack happens to
+   equal the counter.  The slide-out inherits the value the slide-in left, and
+   delay() has moved the counter past it, so its first step is unpaced as well.
+   Latching the counter before each loop -- which is what writing this cleanly
+   leads to -- adds a tick to each phase.
+
+   data_fdps_timer_tick_counter is volatile at its declaration (gamedata.h)
+   because of these two loops: nothing inside them writes the counter, so a
+   build allowed to hoist the load would spin here forever.
+
+   The request's entry index is put back to 0 before each sign draw -- MOV
+   dword ptr [EBP-0x18],0x0 at 0001e901 -- because fdps_draw_turn_number leaves
+   it holding the last digit's, and its x is rewritten for the same reason.
+   Nothing else in the block moves after it is built.
+
+   malloc's answer is used without a test, and there is no CALL whose value is
+   read other than malloc's and the sheet lookup's: fdps_blit_rect,
+   fdps_draw_composite_sprite, fdps_draw_turn_number and delay all return
+   void. */
+void fdps_animate_turn_banner(unsigned char *saved_screen)
+{
+    /* Where the sign's left edge sits at each step, before the 0x14 bias.  In
+       the original this is a 13-dword template at 0x0001c280 copied onto the
+       frame with REP MOVSD at 0001e859, which is what an initialised automatic
+       array compiles to; it is not a global and has no other reader.  The last
+       three entries are the overshoot: 92 is two pixels past the resting 90,
+       which is where the banner settles. */
+    int slide_x[BANNER_SLIDE_STEPS] = {-60, -20, 10, 35, 50, 65, 75, 80, 85,
+                                       90, 92, 91, 90};
+    /* The block sprite.h describes, built once and rewritten in two slots per
+       step. */
+    int request[DRAW_REQUEST_DWORDS];
+    /* The 360x240 scratch surface the step is composed on, so that the sign
+       and the number are never seen half-drawn on the adapter. */
+    unsigned char *work_surface;
+    /* Which entry of slide_x this step places the two pieces from. */
+    int step;
+    /* The tick the previous step ended on.  Deliberately not initialised --
+       see the note above. */
+    unsigned int last_tick;
+
+    work_surface = (unsigned char *) malloc((size_t) BANNER_SURFACE_BYTES);
+    request[DRAW_REQUEST_DEST_PITCH] = BANNER_SURFACE_PITCH;
+    request[DRAW_REQUEST_DEST_ROWS] = BANNER_SURFACE_ROWS;
+    request[DRAW_REQUEST_Y] = BANNER_ROW;
+    request[DRAW_REQUEST_IMAGE] =
+        (int) fdps_baseani_get_entry_or_exit("Turn.saf");
+    request[DRAW_REQUEST_BLIT_OPERAND] = 0;
+    request[DRAW_REQUEST_BLIT_MODE] = 0;
+    request[DRAW_REQUEST_DEST_BASE] = (int) work_surface;
+
+    for (step = 0; step < BANNER_SLIDE_STEPS; step++) {
+        fdps_blit_rect((unsigned int) (saved_screen + BANNER_WINDOW_AT),
+                       VGA_SCREEN_PITCH,
+                       work_surface + BANNER_SURFACE_WINDOW_AT,
+                       BANNER_SURFACE_PITCH, BANNER_WINDOW_W,
+                       BANNER_WINDOW_H);
+        request[DRAW_REQUEST_X] = slide_x[step] + BANNER_SIGN_X_BIAS;
+        request[DRAW_REQUEST_ITEM_INDEX] = BANNER_SIGN_ENTRY;
+        fdps_draw_composite_sprite(request, 1);
+        request[DRAW_REQUEST_X] = BANNER_NUMBER_X_BASE - slide_x[step];
+        fdps_draw_turn_number(request);
+        fdps_blit_rect((unsigned int) (work_surface
+                                       + BANNER_SURFACE_WINDOW_AT),
+                       BANNER_SURFACE_PITCH,
+                       (void *) (VGA_SCREEN_BASE + BANNER_WINDOW_AT),
+                       VGA_SCREEN_PITCH, BANNER_WINDOW_W, BANNER_WINDOW_H);
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
+
+    delay((unsigned int) BANNER_HOLD_MS);
+
+    for (step = BANNER_SLIDE_OUT_FIRST; step >= 0; step--) {
+        fdps_blit_rect((unsigned int) (saved_screen + BANNER_WINDOW_AT),
+                       VGA_SCREEN_PITCH,
+                       work_surface + BANNER_SURFACE_WINDOW_AT,
+                       BANNER_SURFACE_PITCH, BANNER_WINDOW_W,
+                       BANNER_WINDOW_H);
+        request[DRAW_REQUEST_X] = slide_x[step] + BANNER_SIGN_X_BIAS;
+        request[DRAW_REQUEST_ITEM_INDEX] = BANNER_SIGN_ENTRY;
+        fdps_draw_composite_sprite(request, 1);
+        request[DRAW_REQUEST_X] = BANNER_NUMBER_X_BASE - slide_x[step];
+        fdps_draw_turn_number(request);
+        fdps_blit_rect((unsigned int) (work_surface
+                                       + BANNER_SURFACE_WINDOW_AT),
+                       BANNER_SURFACE_PITCH,
+                       (void *) (VGA_SCREEN_BASE + BANNER_WINDOW_AT),
+                       VGA_SCREEN_PITCH, BANNER_WINDOW_W, BANNER_WINDOW_H);
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
+
+    free(work_surface);
 }

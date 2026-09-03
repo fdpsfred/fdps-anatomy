@@ -2119,6 +2119,14 @@
       "status": "committed",
       "emitted_against": "0x77",
       "rounds": 0
+    },
+    "0001e840": {
+      "name": "fdps_animate_turn_banner",
+      "target": "anim.c",
+      "body_size": "0x237",
+      "status": "committed",
+      "emitted_against": "0x237",
+      "rounds": 1
     }
   }
 }
