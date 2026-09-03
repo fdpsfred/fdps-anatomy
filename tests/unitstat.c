@@ -2147,6 +2147,548 @@ static void each_index_selects_its_own_record_for_status(void)
     CHECK_EQ(data_fdps_battle_pending_xp_credit, XP_SEED + 70);
 }
 
+/* ---------------------------------------------------------------------------
+   fdps_level_up_apply_stat_gain at 0001e370.
+
+   Every expected value below is read off the assembly at the addresses quoted
+   on each test: the XOR EAX,EAX / MOV AL,byte ptr [EDX] minimum at 0001e37c and
+   the MOV AL,byte ptr [EAX+0x1] / AND EAX,0xff bound at 0001e389 that make both
+   pair bytes unsigned, the SUB at 0001e391 that forms the range, the CMP dword
+   ptr [EBP-0x4],0x0 / JZ at 0001e397 that guards BOTH the CALL to rand() and
+   the IDIV, the IDIV at 0001e3a9 whose remainder is the offset, the MOV
+   [0x00064038],EAX store at 0001e3b5, the five pushes at 0001e3ba-0001e3cd that
+   make the drawing call fdps_draw_number(dst, 0xa4, figure, 0, 0), and the MOV
+   DX,word ptr [0x00064038] / ADD word ptr [EAX],DX pair at 0001e3d6 that adds
+   only the LOW WORD and only sixteen bits wide.  The five field offsets and the
+   five pair offsets are the caller's, ADD EAX,0x37/0x39/0x3e/0x42/0x46 and ADD
+   EAX,0x2/0x4/0x6/0x8 at 0001e10d through 0001e189.  None of them is read off
+   the emitted C.
+
+   HOW THE RANDOMNESS IS TAKEN OUT.  A pair whose two bytes are equal has a
+   range of 0 and takes the JZ, so it draws nothing at all and gains exactly the
+   minimum -- most of the assertions below use such a pair and are therefore
+   exact.  The cases that must exercise the divide either seed the stream with
+   srand and compute the same remainder by hand, or sweep many seeds and assert
+   an interval.
+
+   HOW THE DRAWN FIGURE IS OBSERVED.  The same staged sheet tests/text.c uses:
+   a real .CEL-shaped block whose sprite n is a flat 6x8 fill of colour n + 1,
+   so the window spells out which sprite index the figure selected and where it
+   landed.  That runs the whole path through fdps_draw_number and
+   fdps_blit_dispatch and is what pins the pitch of 164 and the natural-width
+   format, neither of which is visible in the stat field. */
+
+/* The sheet's shape, from resource_info/cel.md: the sprite offset table sits at
+   a fixed +0x0f and holds one dword per sprite.  Sixty-five sprites, five
+   colour rows of the thirteen glyphs '0'-'9', '+', '-', '?'. */
+#define GAIN_TABLE_AT     0x0f
+#define GAIN_SPRITES      65
+#define GAIN_STREAM_AT    (GAIN_TABLE_AT + GAIN_SPRITES * 4)
+#define GAIN_STREAM_BYTES 16
+#define GAIN_SHEET_BYTES  (GAIN_STREAM_AT + GAIN_SPRITES * GAIN_STREAM_BYTES)
+
+/* PUSH 0xa4 at 0001e3c5.  The window is 164 by 66; twelve rows is all any test
+   here draws into, and one row past the 8-row cell is enough to catch a blit
+   that stepped by the wrong stride. */
+#define GAIN_PITCH  0xa4
+#define GAIN_ROWS   12
+#define GAIN_BYTES  (GAIN_PITCH * GAIN_ROWS)
+
+/* Not a colour any sprite paints, so an untouched pixel is unmistakable. */
+#define GAIN_BACKGROUND 0xaa
+
+/* A figure no gain in these tests can produce, so the store at 0001e3b5 is
+   visible even when the gain is 0. */
+#define GAIN_SCRATCH_SEED 12345
+
+/* FRILEVUP.DAT records are eleven bytes and the caller indexes pairs at +0, +2,
+   +4, +6 and +8. */
+#define GROWTH_RECORD_BYTES 11
+#define GROWTH_DX_PAIR_AT 4
+
+/* Arbitrary but fixed: the tests that need a known draw reseed with these. */
+#define GAIN_SEED       4919
+#define GAIN_SEED_SWEEP 120
+
+static unsigned char gain_sheet[GAIN_SHEET_BYTES];
+static unsigned char gain_window[GAIN_BYTES];
+static unsigned char growth_record[GROWTH_RECORD_BYTES];
+
+/* Only ever read for its field sizes and offsets. */
+static struct fdps_character_growth growth_probe;
+
+static int gain_sprite_color(int sprite_index)
+{
+    return sprite_index + 1;
+}
+
+/* The colour standing at the top-left pixel of digit cell `cell`, counting from
+   the cell the figure was drawn at. */
+static int gain_cell(int cell)
+{
+    return gain_window[cell * 6];
+}
+
+/* The colour standing `row` rows below the figure's first cell.  This is what
+   separates a pitch of 164 from any other: a row lands here only if the blit
+   stepped by exactly 164. */
+static int gain_row_pixel(int row)
+{
+    return gain_window[row * GAIN_PITCH];
+}
+
+/* Zeroes the unit block and the growth record, repaints the window, and hands
+   fdps_draw_number a sheet whose sprite n is a flat fill of colour n + 1. */
+static void stage_gain(void)
+{
+    int sprite;
+    int row;
+    int stream_at;
+    int i;
+
+    for (i = 0; i < GAIN_SHEET_BYTES; i++) {
+        gain_sheet[i] = 0;
+    }
+
+    for (sprite = 0; sprite < GAIN_SPRITES; sprite++) {
+        stream_at = GAIN_STREAM_AT + sprite * GAIN_STREAM_BYTES;
+        *(int *) (gain_sheet + GAIN_TABLE_AT + sprite * 4) = stream_at;
+        for (row = 0; row < 8; row++) {
+            gain_sheet[stream_at + row * 2] = 0x05;
+            gain_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) gain_sprite_color(sprite);
+        }
+    }
+
+    for (i = 0; i < GAIN_BYTES; i++) {
+        gain_window[i] = GAIN_BACKGROUND;
+    }
+
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        unit_block[i] = 0;
+    }
+
+    for (i = 0; i < GROWTH_RECORD_BYTES; i++) {
+        growth_record[i] = 0;
+    }
+
+    data_fdps_map_unit_array_ptr = unit_block;
+    data_fdps_number_glyph_sheet_ptr = gain_sheet;
+    data_fdps_number_glyph_color_row = 0;
+    data_fdps_dialog_last_action_value_param = GAIN_SCRATCH_SEED;
+}
+
+/* Puts one {min, max} pair at the head of the growth record. */
+static void pair(int min_gain, int exclusive_max)
+{
+    growth_record[0] = (unsigned char) min_gain;
+    growth_record[1] = (unsigned char) exclusive_max;
+}
+
+/* The five fields the caller aims at and the five pairs it aims them with.  ADD
+   EAX,0x37/0x39/0x3e/0x42/0x46 on the record at 0001e10d, 0001e12c, 0001e14b,
+   0001e16a and 0001e189, and ADD EAX,0x2/0x4/0x6/0x8 on the growth record at
+   0001e125, 0001e144, 0001e163 and 0001e182 -- so the pair order is ap, dp, dx,
+   hp, mp and every field it reaches is two bytes wide. */
+static void the_growth_pair_layout_matches_the_offsets_read(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_character_growth), GROWTH_RECORD_BYTES);
+    CHECK_EQ((int) offsetof(struct fdps_character_growth, ap_min), 0);
+    CHECK_EQ((int) offsetof(struct fdps_character_growth, dp_min), 2);
+    CHECK_EQ((int) offsetof(struct fdps_character_growth, dx_min), 4);
+    CHECK_EQ((int) offsetof(struct fdps_character_growth, hp_min), 6);
+    CHECK_EQ((int) offsetof(struct fdps_character_growth, mp_min), 8);
+    CHECK_EQ((int) sizeof(growth_probe.ap_min), 1);
+    CHECK_EQ((int) sizeof(growth_probe.ap_max), 1);
+
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ap_base), 0x37);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, dp_base), 0x39);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, dx_base), 0x3e);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_max), 0x42);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, mp_max), 0x46);
+    CHECK_EQ((int) sizeof(layout_probe.ap_base), 2);
+    CHECK_EQ((int) sizeof(layout_probe.dp_base), 2);
+    CHECK_EQ((int) sizeof(layout_probe.dx_base), 2);
+    CHECK_EQ((int) sizeof(layout_probe.mp_max), 2);
+}
+
+/* The JZ at 0001e39b: a range of 0 skips everything and the gain is the
+   minimum, the same figure every time.  Three calls in a row also show the ADD
+   word ptr [EAX],DX at 0001e3e0 accumulating rather than assigning. */
+static void an_equal_pair_gains_exactly_the_minimum(void)
+{
+    stage_gain();
+    pair(3, 3);
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+    CHECK_EQ(unit(PATIENT)->hp_max, 3);
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+    CHECK_EQ(unit(PATIENT)->hp_max, 6);
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+    CHECK_EQ(unit(PATIENT)->hp_max, 9);
+}
+
+/* The zero test guards the CALL at 0001e39d as well as the IDIV, so an equal
+   pair leaves the shared stream exactly where it found it.  Half of
+   FRILEVUP.DAT's pairs are equal, so this is the ordinary path and every later
+   roll of the battle depends on it. */
+static void an_equal_pair_draws_no_random_number(void)
+{
+    int untouched;
+    int after_call;
+
+    srand(GAIN_SEED);
+    untouched = rand();
+
+    stage_gain();
+    pair(3, 3);
+
+    srand(GAIN_SEED);
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+    after_call = rand();
+
+    CHECK_EQ(after_call, untouched);
+}
+
+/* A range that is not zero takes exactly one draw and no more. */
+static void a_wider_pair_draws_exactly_one_random_number(void)
+{
+    int second;
+    int after_call;
+
+    srand(GAIN_SEED);
+    rand();
+    second = rand();
+
+    stage_gain();
+    pair(0, 5);
+
+    srand(GAIN_SEED);
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+    after_call = rand();
+
+    CHECK_EQ(after_call, second);
+}
+
+/* ADD EAX,dword ptr [EBP-0x4] at 0001e3b2: the figure is the minimum plus the
+   remainder, not the remainder alone and not a remainder taken over the whole
+   bound. */
+static void the_gain_is_the_minimum_plus_the_remainder(void)
+{
+    int roll;
+
+    srand(GAIN_SEED);
+    roll = rand();
+
+    stage_gain();
+    pair(7, 10);
+
+    srand(GAIN_SEED);
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+
+    CHECK_EQ(unit(PATIENT)->hp_max, 7 + roll % 3);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, 7 + roll % 3);
+}
+
+/* IDIV by growth_pair[1] - growth_pair[0]: the remainder of a non-negative
+   dividend is 0 through range - 1, so the bound is exclusive and a pair of
+   {0, 5} can never gain 5.  The top of the band has to actually appear, or an
+   off-by-one at the other end would pass this unnoticed. */
+static void the_upper_bound_of_the_pair_is_exclusive(void)
+{
+    int seed;
+    int gain;
+    int inside;
+    int saw_top;
+    int reached_bound;
+
+    inside = 0;
+    saw_top = 0;
+    reached_bound = 0;
+
+    for (seed = 1; seed <= GAIN_SEED_SWEEP; seed++) {
+        stage_gain();
+        pair(0, 5);
+        srand(seed);
+        fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                      gain_window);
+        gain = unit(PATIENT)->hp_max;
+        if (gain >= 0 && gain <= 4) {
+            inside++;
+        }
+        if (gain == 4) {
+            saw_top++;
+        }
+        if (gain >= 5) {
+            reached_bound++;
+        }
+    }
+
+    CHECK_EQ(inside, GAIN_SEED_SWEEP);
+    CHECK_EQ(saw_top > 0, 1);
+    CHECK_EQ(reached_bound, 0);
+}
+
+/* XOR EAX,EAX / MOV AL at 0001e37c: a minimum byte of 0x80 is 128, not -128. */
+static void the_minimum_byte_widens_unsigned(void)
+{
+    stage_gain();
+    pair(0x80, 0x80);
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+
+    CHECK_EQ(unit(PATIENT)->hp_max, 128);
+}
+
+/* MOV AL,byte ptr [EAX+0x1] / AND EAX,0xff at 0001e389: a bound byte of 0xc0 is
+   192, so {0x00, 0xc0} spans 0..191.  Read signed it would be -64 and the range
+   -64, which the IDIV would still turn into a non-negative remainder -- but one
+   that could never reach 64.  Both halves are asserted: every gain matches the
+   remainder over 192, and at least one of them is out of reach of the signed
+   reading. */
+static void the_bound_byte_widens_unsigned(void)
+{
+    int seed;
+    int roll;
+    int matched;
+    int above_signed_reach;
+
+    matched = 0;
+    above_signed_reach = 0;
+
+    for (seed = 1; seed <= GAIN_SEED_SWEEP; seed++) {
+        srand(seed);
+        roll = rand();
+
+        stage_gain();
+        pair(0x00, 0xc0);
+        srand(seed);
+        fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                      gain_window);
+
+        if (unit(PATIENT)->hp_max == roll % 192) {
+            matched++;
+        }
+        if (unit(PATIENT)->hp_max >= 64) {
+            above_signed_reach++;
+        }
+    }
+
+    CHECK_EQ(matched, GAIN_SEED_SWEEP);
+    CHECK_EQ(above_signed_reach > 0, 1);
+}
+
+/* growth_pair is a pointer into the middle of an eleven-byte record and only
+   the two bytes at it are read: the caller aims it at +4 for DX, and the ten
+   0xff bytes around the pair would be impossible to miss if either load
+   strayed.  The record is not written either. */
+static void only_the_two_bytes_at_the_pointer_are_read(void)
+{
+    int i;
+    int untouched;
+
+    stage_gain();
+    for (i = 0; i < GROWTH_RECORD_BYTES; i++) {
+        growth_record[i] = 0xff;
+    }
+    growth_record[GROWTH_DX_PAIR_AT] = 2;
+    growth_record[GROWTH_DX_PAIR_AT + 1] = 2;
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->dx_base,
+                                  growth_record + GROWTH_DX_PAIR_AT,
+                                  gain_window);
+
+    CHECK_EQ(unit(PATIENT)->dx_base, 2);
+
+    untouched = 0;
+    for (i = 0; i < GROWTH_RECORD_BYTES; i++) {
+        if (i == GROWTH_DX_PAIR_AT || i == GROWTH_DX_PAIR_AT + 1) {
+            if (growth_record[i] == 2) {
+                untouched++;
+            }
+        } else if (growth_record[i] == 0xff) {
+            untouched++;
+        }
+    }
+    CHECK_EQ(untouched, GROWTH_RECORD_BYTES);
+}
+
+/* ADD word ptr [EAX],DX at 0001e3e0 is sixteen bits wide and DX is the LOW WORD
+   of the dword global.  A field at 0xffff therefore wraps to 0 without carrying
+   into the field two bytes above it, and a field at 32767 wraps to -32768
+   rather than being clamped anywhere. */
+static void the_addition_is_sixteen_bits_wide(void)
+{
+    stage_gain();
+    pair(1, 1);
+    unit(PATIENT)->hp_max = -1;
+    unit(PATIENT)->mp_current = 0x1234;
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+
+    CHECK_EQ(unit(PATIENT)->hp_max, 0);
+    CHECK_EQ(unit(PATIENT)->mp_current, 0x1234);
+
+    stage_gain();
+    pair(1, 1);
+    unit(PATIENT)->hp_max = 32767;
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+
+    CHECK_EQ(unit(PATIENT)->hp_max, -32768);
+}
+
+/* The only store into the record is the one word the pointer names.  Four
+   records are staged zeroed, so a walk that strayed into a neighbouring field
+   or a neighbouring record would leave a mark. */
+static void nothing_but_the_named_field_is_written(void)
+{
+    int i;
+    int clean;
+
+    stage_gain();
+    pair(5, 5);
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+
+    CHECK_EQ(unit(PATIENT)->hp_max, 5);
+
+    clean = 0;
+    for (i = 0; i < (int) sizeof(unit_block); i++) {
+        if (i == PATIENT * UNIT_RECORD_STRIDE + 0x42) {
+            if (unit_block[i] == 5) {
+                clean++;
+            }
+        } else if (unit_block[i] == 0) {
+            clean++;
+        }
+    }
+    CHECK_EQ(clean, (int) sizeof(unit_block));
+}
+
+/* MOV [0x00064038],EAX at 0001e3b5 and MOV DX,word ptr [0x00064038] at
+   0001e3d6: the figure travels through the global, and what is left in it after
+   the call is the gain rather than whatever the caller had put there. */
+static void the_scratch_global_carries_the_figure(void)
+{
+    stage_gain();
+    pair(6, 6);
+
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, GAIN_SCRATCH_SEED);
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, 6);
+    CHECK_EQ(unit(PATIENT)->hp_max, 6);
+    CHECK_EQ(gain_cell(0), gain_sprite_color(6));
+}
+
+/* PUSH 0x0 at 0001e3bd is fdps_draw_number's digit_count, whose zero is the
+   natural-width mode: 12 draws two cells and the third is never touched.  A
+   three-digit field would have drawn a '0' sprite first. */
+static void the_figure_is_drawn_at_its_natural_width(void)
+{
+    stage_gain();
+    pair(12, 12);
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+
+    CHECK_EQ(unit(PATIENT)->hp_max, 12);
+    CHECK_EQ(gain_cell(0), gain_sprite_color(1));
+    CHECK_EQ(gain_cell(1), gain_sprite_color(2));
+    CHECK_EQ(gain_cell(2), GAIN_BACKGROUND);
+}
+
+/* XOR EAX,EAX / PUSH EAX at 0001e3ba is show_plus, and it is 0: a level-up gain
+   is drawn as a bare figure.  Sprite 10 is the '+' glyph and never appears. */
+static void no_leading_plus_is_drawn(void)
+{
+    stage_gain();
+    pair(5, 5);
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+
+    CHECK_EQ(gain_cell(0), gain_sprite_color(5));
+    CHECK_EQ(gain_cell(1), GAIN_BACKGROUND);
+}
+
+/* PUSH 0xa4 at 0001e3c5.  The eight rows of the 6x8 cell land 164 bytes apart,
+   which is the only stride that puts row 7 at offset 1148; the ninth row is
+   past the cell and stays background. */
+static void the_figure_is_drawn_at_the_window_pitch(void)
+{
+    stage_gain();
+    pair(5, 5);
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+
+    CHECK_EQ(gain_row_pixel(0), gain_sprite_color(5));
+    CHECK_EQ(gain_row_pixel(7), gain_sprite_color(5));
+    CHECK_EQ(gain_row_pixel(8), GAIN_BACKGROUND);
+    CHECK_EQ(gain_window[7 * GAIN_PITCH + 5], gain_sprite_color(5));
+    CHECK_EQ(gain_window[7 * GAIN_PITCH + 6], GAIN_BACKGROUND);
+}
+
+/* dst is handed to fdps_draw_number untouched, so the figure starts exactly
+   where the caller aimed it -- 0x10ce is 26 * 164 + 38, one of the two columns
+   fdps_unit_award_exp_and_level_up uses. */
+static void the_figure_starts_where_dst_points(void)
+{
+    stage_gain();
+    pair(5, 5);
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window + 3 * GAIN_PITCH + 38);
+
+    CHECK_EQ(gain_window[3 * GAIN_PITCH + 38], gain_sprite_color(5));
+    CHECK_EQ(gain_window[4 * GAIN_PITCH + 38], gain_sprite_color(5));
+    CHECK_EQ(gain_window[0], GAIN_BACKGROUND);
+    CHECK_EQ(gain_window[3 * GAIN_PITCH + 37], GAIN_BACKGROUND);
+}
+
+/* The colour row is not an argument and this function neither sets it nor puts
+   it back: with the global on 2 the digit comes out of the third colour row,
+   sprite 2 * 13 + 4, and the global is still 2 afterwards. */
+static void the_colour_row_is_left_to_the_caller(void)
+{
+    stage_gain();
+    pair(4, 4);
+    data_fdps_number_glyph_color_row = 2;
+
+    fdps_level_up_apply_stat_gain(&unit(PATIENT)->hp_max, growth_record,
+                                  gain_window);
+
+    CHECK_EQ(gain_cell(0), gain_sprite_color(2 * 13 + 4));
+    CHECK_EQ(data_fdps_number_glyph_color_row, 2);
+}
+
+/* The staged sheet is this file's own and nothing outside it should inherit the
+   pointer. */
+static void the_staged_sheet_is_put_back(void)
+{
+    data_fdps_number_glyph_sheet_ptr = (unsigned char *) 0;
+    data_fdps_number_glyph_color_row = 0;
+
+    CHECK_EQ(data_fdps_number_glyph_sheet_ptr == (unsigned char *) 0, 1);
+    CHECK_EQ(data_fdps_number_glyph_color_row, 0);
+}
+
 void run_unitstat_tests(void)
 {
     RUN_TEST(the_record_layout_matches_the_offsets_read);
@@ -2243,4 +2785,23 @@ void run_unitstat_tests(void)
     RUN_TEST(the_stream_advances_by_one_draw_per_failure_and_two_on_a_landing);
     RUN_TEST(nothing_outside_the_one_timer_byte_is_written);
     RUN_TEST(each_index_selects_its_own_record_for_status);
+
+    RUN_TEST(the_growth_pair_layout_matches_the_offsets_read);
+    RUN_TEST(an_equal_pair_gains_exactly_the_minimum);
+    RUN_TEST(an_equal_pair_draws_no_random_number);
+    RUN_TEST(a_wider_pair_draws_exactly_one_random_number);
+    RUN_TEST(the_gain_is_the_minimum_plus_the_remainder);
+    RUN_TEST(the_upper_bound_of_the_pair_is_exclusive);
+    RUN_TEST(the_minimum_byte_widens_unsigned);
+    RUN_TEST(the_bound_byte_widens_unsigned);
+    RUN_TEST(only_the_two_bytes_at_the_pointer_are_read);
+    RUN_TEST(the_addition_is_sixteen_bits_wide);
+    RUN_TEST(nothing_but_the_named_field_is_written);
+    RUN_TEST(the_scratch_global_carries_the_figure);
+    RUN_TEST(the_figure_is_drawn_at_its_natural_width);
+    RUN_TEST(no_leading_plus_is_drawn);
+    RUN_TEST(the_figure_is_drawn_at_the_window_pitch);
+    RUN_TEST(the_figure_starts_where_dst_points);
+    RUN_TEST(the_colour_row_is_left_to_the_caller);
+    RUN_TEST(the_staged_sheet_is_put_back);
 }

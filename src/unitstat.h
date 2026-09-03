@@ -5,8 +5,13 @@
  * Every unit here is named by its index in the map unit array reached through
  * data_fdps_map_unit_array_ptr (src/gamedata.h); the record layout is struct
  * fdps_unit_record in src/fdpstype.h.  No function in this file range checks
- * that index and none of them owns state -- the one global they write is
- * data_fdps_battle_pending_xp_credit, which gamedata.h declares.
+ * that index and none of them owns state -- the two globals they write,
+ * data_fdps_battle_pending_xp_credit and the figure scratch
+ * data_fdps_dialog_last_action_value_param, are both declared by gamedata.h.
+ *
+ * fdps_level_up_apply_stat_gain is the exception to the index rule: it is
+ * handed the field and the growth pair directly, because its caller has
+ * already resolved both.
  */
 #ifndef UNITSTAT_H
 #define UNITSTAT_H
@@ -285,5 +290,51 @@ extern int fdps_unit_apply_status_effect(int effect_id, int unit_index);
    touched. */
 extern int fdps_unit_is_ailment_immune(int unit_index);
 #pragma aux fdps_unit_is_ailment_immune "*" parm caller [];
+
+/* Raises one 16-bit stat field by one level's worth of growth, and paints the
+   figure it rolled into the level-up window on the way.
+   fdps_unit_award_exp_and_level_up calls it five times per level, once per
+   growth pair, and does nothing with the result: everything this does is done
+   through *stat, through the window buffer dst points into, and through
+   data_fdps_dialog_last_action_value_param.
+
+   growth_pair points at one two-byte {min, exclusive max} pair inside a
+   FRILEVUP.DAT record -- struct fdps_character_growth in src/fdpstype.h, as
+   fdps_get_growth_record hands it back.  THE SECOND BYTE IS AN EXCLUSIVE BOUND:
+   the gain is min + rand() % (max - min), so the most a pair can ever give is
+   max - 1.  The growth table in assets/characters.md prints the file's two
+   bytes as they stand, which makes its upper figure one more than any level-up
+   can roll (rebuild_info/pitfalls.md).
+
+   A PAIR WHOSE TWO BYTES ARE EQUAL DRAWS NO RANDOM NUMBER AT ALL.  The range is
+   tested against zero before the divide, and the test guards the rand() call as
+   well as the division, so an equal pair always gains exactly the minimum and
+   leaves the shared random stream where it found it.  Half of FRILEVUP.DAT's
+   300 pairs are equal, so that path is the ordinary one and not an edge case:
+   replacing the test with a rand() whose answer is discarded would still gain
+   the right amount and would still shift every later roll of the battle by one
+   draw.
+
+   Both bytes are read UNSIGNED, so a pair byte of 0xc8 is a growth of 200.
+   Nothing bounds the sum: the rolled gain is added to *stat sixteen bits wide
+   with no clamp and no cap check, so a field already near 32767 wraps inside
+   its own two bytes rather than carrying into the field above it.
+
+   dst is a pixel address inside the caller's 164x66 level-up window buffer, and
+   the pitch this draws at is the matching 164; the figure is painted at its
+   natural width with no zero padding and no leading '+'.  The digits come out
+   of Number.cel in whatever colour row data_fdps_number_glyph_color_row is
+   holding, which this function neither sets nor restores.
+
+   The rolled gain is left behind in data_fdps_dialog_last_action_value_param,
+   which is where this passes it to the drawing routine and where it reads it
+   back from to do the addition.
+
+   rand() is never seeded by the game (rebuild_info/pitfalls.md), so a given
+   playthrough rolls the same level-ups every time it is replayed. */
+extern void fdps_level_up_apply_stat_gain(short *stat,
+                                          unsigned char *growth_pair,
+                                          unsigned char *dst);
+#pragma aux fdps_level_up_apply_stat_gain "*" parm caller [];
 
 #endif

@@ -1152,4 +1152,29 @@ extern int data_fdps_graphics_rle_blit_dst_row_advance;
    its own global and not part of an array. */
 extern int data_fdps_number_glyph_color_row;
 
+/* 00064038.  The scratch dword a routine parks the FIGURE it is about to show
+   in, hands to the drawing call from there, and reads back out of afterwards to
+   apply.  It is a parameter passing slot and not a piece of game state: nothing
+   initialises it, nothing keeps it, and every user writes it before the read
+   that follows.
+
+   Thirty-four accesses in eight functions across seven files use it that shape
+   -- fdps_draw_text at 000201b6 pushes it into a formatter, and
+   fdps_run_death_scripts, fdps_battle_search_cell_at_cursor,
+   fdps_battle_tick_status_effects, fdps_shop_buy_loop, fdps_church_promote_loop,
+   fdps_village_item_sell_loop and fdps_level_up_apply_stat_gain each store it
+   and then read it back.  Because the value that goes in is whatever figure the
+   caller is showing, no single meaning can be attached to it beyond that; the
+   functions that use it document what they put there.
+
+   A full dword: the stores are dword ones and fdps_shop_buy_loop does SUB dword
+   ptr [0x00064038],EAX at 00033d83.  READERS NARROW IT THEMSELVES rather than
+   the global being narrow -- fdps_level_up_apply_stat_gain takes the low word
+   with MOV DX,word ptr at 0001e3d6 and fdps_church_promote_loop the low byte
+   with MOV DL,byte ptr at 000349ac -- so declaring it any smaller than an int
+   would change what the wide writers can store.  The signed int is what ticket
+   21.5's routing settled on; the accesses named above fix the width and leave
+   the signedness to the functions that put figures in it. */
+extern int data_fdps_dialog_last_action_value_param;
+
 #endif

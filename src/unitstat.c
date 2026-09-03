@@ -3,8 +3,9 @@
  *
  * See unitstat.h for what a caller has to know.  The file owns no state: it
  * reaches every unit record through fdps_get_unit_record (unit.h) and every
- * ENEMYDAT.DAT record through fdps_get_enemy_record (table.h), and the only
- * global it writes is data_fdps_battle_pending_xp_credit, which gamedata.h
+ * ENEMYDAT.DAT record through fdps_get_enemy_record (table.h), and the two
+ * globals it writes -- data_fdps_battle_pending_xp_credit and the figure
+ * scratch data_fdps_dialog_last_action_value_param -- are both ones gamedata.h
  * declares and gamedata.c defines.
  *
  * rand comes from <stdlib.h>; it is a real call in the original -- CALL
@@ -14,6 +15,7 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "table.h"
+#include "text.h"
 #include "unit.h"
 #include "unitstat.h"
 
@@ -605,4 +607,87 @@ int fdps_unit_is_ailment_immune(int unit_index)
     }
 
     return is_immune;
+}
+
+/* PUSH 0xa4 at 0001e3c5.  164 is the row pitch of the level-up window the
+   caller built, and the five dst offsets it forms confirm it: 0xad3, 0x1097,
+   0x165b, 0x10ce and 0x1692 are 16*164+147, 25*164+147, 34*164+147, 26*164+38
+   and 35*164+38, so every one of them is a whole number of rows plus one of two
+   columns. */
+#define LEVEL_UP_WINDOW_PITCH 0xa4
+
+/* PUSH 0x0 at 0001e3bd: fdps_draw_number's digit_count, whose zero is the
+   natural-width mode rather than a field of no digits (see text.h). */
+#define GAIN_FIELD_NATURAL_WIDTH 0
+
+/* XOR EAX,EAX / PUSH EAX at 0001e3ba: show_plus is 0, so a level-up gain is
+   painted without the leading '+' the same routine can draw. */
+#define GAIN_NO_LEADING_PLUS 0
+
+/* 0001e370.  The frame is the plain -4s one: PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP,
+   SUB ESP,0x8, the three arguments read from [EBP+0x14], [EBP+0x18] and
+   [EBP+0x1c] behind the four saves and the return address, and a RET carrying no
+   immediate.  fdps_unit_award_exp_and_level_up is the only caller and every one
+   of its five call sites pushes three dwords right to left and does ADD ESP,0xc
+   afterwards, so the caller cleans.  Nothing reads EAX after the CALL and the
+   function returns nothing.
+
+   Both bytes of the pair widen UNSIGNED.  The minimum is XOR EAX,EAX / MOV
+   AL,byte ptr [EDX] at 0001e37c and the bound is MOV AL,byte ptr [EAX+0x1] /
+   AND EAX,0xff at 0001e389, so a byte of 0xc8 is 200 and never -56.  The
+   subtraction that follows and the divide are both signed -- SUB EAX,dword ptr
+   [EBP-0x8] then IDIV -- which is what an inverted pair would show, but the two
+   widenings are what decide the ordinary numbers.
+
+   THE ZERO TEST IN FRONT OF THE DIVIDE IS NOT DEFENSIVE PADDING.  CMP dword ptr
+   [EBP-0x4],0x0 / JZ at 0001e397 skips the CALL to rand() as well as the IDIV,
+   so a pair whose two bytes are equal gains exactly the minimum AND DRAWS NO
+   NUMBER OUT OF THE SHARED rand() STREAM.  Half the pairs in FRILEVUP.DAT are
+   equal, so both halves of that are ordinary: dropping the test divides by zero,
+   and turning it into a rand() the result of which is thrown away shifts every
+   later roll in the battle by one draw.
+
+   The bound is EXCLUSIVE.  The remainder of a non-negative rand() is 0 through
+   range - 1, so the largest gain a pair can give is growth_pair[1] - 1.  The
+   growth table in assets/characters.md transcribes the file's two bytes as they
+   stand, so the upper figure printed there is one MORE than any level-up can
+   actually roll -- 蘭迪斯's AP row of 4-6 gains 4 or 5 and never 6
+   (rebuild_info/pitfalls.md).
+
+   The figure travels through the global rather than through a register: MOV
+   [0x00064038],EAX, then PUSH dword ptr [0x00064038] as fdps_draw_number's value
+   argument, then MOV DX,word ptr [0x00064038] for the addition.  Folding it into
+   a local would be invisible here -- nothing between the store and the reload
+   writes it -- but the store is what the original leaves behind for whatever
+   reads that global next, so it stays a global (see gamedata.h).
+
+   The last step is sixteen bits wide: ADD word ptr [EAX],DX at 0001e3e0 with DX
+   the LOW WORD of the dword global, so a stat field that overflows wraps inside
+   its own two bytes and nothing carries into the field above it.  Nothing clamps
+   the sum and nothing checks a cap. */
+void fdps_level_up_apply_stat_gain(short *stat, unsigned char *growth_pair,
+                                   unsigned char *dst)
+{
+    int min_gain;
+    int gain_range;
+    int gain_offset;
+
+    min_gain = growth_pair[0];
+    gain_range = (int) growth_pair[1] - min_gain;
+
+    /* The slot the range was computed into is the slot the offset is left in,
+       so a range of 0 reaches the addition below as an offset of 0. */
+    gain_offset = 0;
+    if (gain_range != 0) {
+        gain_offset = rand() % gain_range;
+    }
+
+    data_fdps_dialog_last_action_value_param = min_gain + gain_offset;
+
+    fdps_draw_number(dst, LEVEL_UP_WINDOW_PITCH,
+                     data_fdps_dialog_last_action_value_param,
+                     GAIN_FIELD_NATURAL_WIDTH, GAIN_NO_LEADING_PLUS);
+
+    *stat = (short) (*stat +
+                     (short) data_fdps_dialog_last_action_value_param);
 }
