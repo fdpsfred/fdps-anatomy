@@ -1513,5 +1513,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0005761b": [
+    {
+      "from": "emit",
+      "what": "A blend level above 16 has no defined meaning in the rebuild. The original computes 16 - level in 32-bit unsigned arithmetic (SUB ECX,0x10 / NEG ECX at 00057642) and then SHL ECX,0xa, so a level of, say, 20 yields the wrapped row index 0xfffffffc and reads the ramp table 4 GB below its base -- a wild read that lands wherever the address wraps to. The emitted C reproduces the same expression on an unsigned int, where the wrapped pointer arithmetic is undefined behaviour rather than a defined wrap, so the two could diverge for such a level. Every level this project can see is in range: the census in the plate comment resolves the mode 9 call sites to constants 8, 10 and 12, and fdps_draw_composite_sprite computes 16 - opacity at 0001424e. What is NOT established is the range of that opacity field, which is byte +7 of a sprite-part record fed by data this project has not read yet.",
+      "needs": "The range of the opacity word at +7 of the sprite-part record fdps_draw_composite_sprite (00014200) walks, once ticket 23 has emitted the tables that record is built from, or once fdps_draw_composite_sprite is itself emitted and its producer is known. If every producer keeps it within 0..16 the concern closes with no code change; if one can exceed 16 the divergence is real and needs an answer that keeps the original's wrap.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached the same concern independently and it holds, with one thing to add that the emitter did not state: the opacity the level is computed from is read SIGNED. fdps_draw_composite_sprite does MOVSX EAX,word ptr [EAX+0x7] at 0001424a and then MOV EDX,0x10 / SUB EDX,EAX at 0001424e, so the level is 16 - a signed 16-bit field. That opens the range at BOTH ends, not just above 16: a negative opacity gives a level above 16 directly, and an opacity above 16 gives a negative level, which the kernel's UNSIGNED CMP ECX,0x8 / JBE at 00057639 sends down the fold arm to produce 16 - (very large) -- also off the 18-row table. I also confirmed the record shape the emitter assumed from the producer's side: 00014258 stores 9 into the mode slot and 0001425f LEAs [EBP-0x28] as the descriptor, with the level written to [EBP-0x24], i.e. +4, matching the three-dword layout. What is not reachable from here is unchanged -- the field's actual range depends on tables ticket 23 has not emitted.",
+      "needs": "The range of the signed word at +7 of the sprite-part record fdps_draw_composite_sprite (00014200) walks, once ticket 23 has emitted the tables that record is built from.",
+      "status": "open",
+      "same_as": "emit#0"
+    }
   ]
 }

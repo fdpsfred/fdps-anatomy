@@ -1998,6 +1998,14 @@
       "status": "committed",
       "emitted_against": "0x2e",
       "rounds": 2
+    },
+    "0005761b": {
+      "name": "fdps_rle_blit_translucent",
+      "target": "rleblend.c",
+      "body_size": "0x172",
+      "status": "committed",
+      "emitted_against": "0x172",
+      "rounds": 0
     }
   }
 }
