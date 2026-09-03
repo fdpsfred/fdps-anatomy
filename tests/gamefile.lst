@@ -51,3 +51,11 @@ FIELD1.VFS
 # would be ciphertext this test produced with the code under test, which proves
 # nothing.
 FDE.SAV
+#
+# FACE.CEL is the portrait sheet: 160 records of 125x100, read by tests/msgwin.c's
+# cover for fdps_load_and_draw_portrait.  That routine holds the sheet's name as
+# a literal and takes no file argument, so nothing can point it at a smaller
+# fixture, and a sheet it cannot open ends the process at exit(1) rather than
+# failing an assertion.  The record offsets, lengths and decoded pixels the
+# cases expect are this file's own.
+FACE.CEL

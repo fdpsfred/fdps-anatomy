@@ -1882,10 +1882,10 @@ Returns:
 Pool: fdps  [game data file 'FACE.CEL', game-owned buffer global, calls fdps_blit_dispatch]
 
 Rebuild note:
-The loaded record deliberately outlives the call: fdps_prompt_two_choice, FUN_0001ff60 and FUN_000203d0 each repaint the same 125x100 image straight out of DAT_00060120 whenever it is non-NULL, so that the portrait survives a panel redraw. Reading the record into a local buffer, or freeing it after the blit, compiles and draws correctly once and then loses the portrait on the next redraw. The buffer is released only by the next call to this function, by a call with portrait_index -1, by fdps_village_animate_window_zoom and by fdps_shutdown_free_resources.
+The loaded record deliberately outlives the call: fdps_prompt_two_choice, fdps_draw_text and fdps_message_window_wait_key each repaint the same 125x100 image straight out of DAT_00060120 whenever it is non-NULL, so that the portrait survives a panel redraw. Reading the record into a local buffer, or freeing it after the blit, compiles and draws correctly once and then loses the portrait on the next redraw. The buffer is released only by the next call to this function, by a call with portrait_index -1, by fdps_village_animate_window_zoom and by fdps_shutdown_free_resources.
 
 === 00017839 [EOL]
-add esp,4 orphaned inside FUN_000177d0: unreachable stack cleanup after a noreturn crt_exit call; pool follows FUN_000177d0, which is game code
+add esp,4 orphaned inside fdps_load_and_draw_portrait: unreachable stack cleanup after a noreturn crt_exit call; pool follows fdps_load_and_draw_portrait, which is game code
 
 === 000178e1 [EOL]
 Watcom 16-byte alignment padding: lea eax,[eax+0] / lea edx,[edx+0] / lea eax,[eax+0]

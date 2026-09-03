@@ -2086,6 +2086,14 @@
       "status": "committed",
       "emitted_against": "0x1b6",
       "rounds": 0
+    },
+    "000177d0": {
+      "name": "fdps_load_and_draw_portrait",
+      "target": "msgwin.c",
+      "body_size": "0x111",
+      "status": "committed",
+      "emitted_against": "0x111",
+      "rounds": 0
     }
   }
 }
