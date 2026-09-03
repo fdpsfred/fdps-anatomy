@@ -2062,6 +2062,14 @@
       "status": "committed",
       "emitted_against": "0x18c",
       "rounds": 0
+    },
+    "00015b90": {
+      "name": "fdps_blit_command_sprite",
+      "target": "sprite.c",
+      "body_size": "0x4f",
+      "status": "committed",
+      "emitted_against": "0x4f",
+      "rounds": 0
     }
   }
 }

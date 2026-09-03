@@ -1,13 +1,18 @@
 /* sprite.c -- the .SAF sprite drawers: one tilemap cell, one tilemap layer,
- * one composite sprite.
+ * one composite sprite; and the one-line drawer for the Command.cel UI sheet.
  *
- * See sprite.h for the draw request every drawer here is handed and for what
- * each of its nine slots means, and resource_info/saf.md for the container
- * these functions walk.  Nothing in this file owns state: the request, the
+ * See sprite.h for the draw request every .SAF drawer here is handed and for
+ * what each of its nine slots means, and resource_info/saf.md for the
+ * container those three functions walk.  They own no state: the request, the
  * loaded image and the destination surface all belong to the caller.
+ *
+ * The Command.cel drawer at the bottom is the exception on both counts -- a
+ * .CEL sheet and not a .SAF (resource_info/cel.md), and the one function here
+ * that reads a global, the loaded sheet.
  */
 #include <stddef.h>
 #include <string.h>
+#include "fdpstype.h"
 #include "sprite.h"
 #include "blit.h"
 #include "audio.h"
@@ -317,4 +322,47 @@ void fdps_draw_composite_sprite(int *request, char play_sound)
                           *(short *) (frame + SAF_FRAME_SOUND_OFFSET));
         }
     }
+}
+
+/* Command.cel's sheet-wide sprite size, and where its offset table starts.
+   All three are constants in the assembly and never reads of the sheet's
+   header: PUSH 0x19 at 00015bc6 and PUSH 0x16 at 00015bc4 are the width and
+   height the header's i16 pair at +0x07 and +0x09 declares, and MOV EAX,dword
+   ptr [EAX+0xf] at 00015bb4 is the table position the header's u16 at +0x05
+   declares.  The table start is spelled as the header's size because that is
+   what the 15 is -- a .CEL opens with struct fdps_cel_header and the table
+   begins in the next byte (resource_info/cel.md). */
+#define COMMAND_SPRITE_WIDTH 0x19
+#define COMMAND_SPRITE_HEIGHT 0x16
+#define CEL_OFFSET_TABLE_START ((int) sizeof(struct fdps_cel_header))
+
+/* 00015b90.  One basic block: no branch, no test, no loop, and the only value
+   worked out before the call is the sprite's stream address.
+
+   The three adds that produce it are the .CEL rule that a stored offset is
+   measured from the start of the FILE.  LEA EAX,[EAX*0x4+0x0] scales the
+   index, ADD EAX,EDX puts it on the sheet base to address the table entry, and
+   ADD EAX,EDX after the load puts the entry itself on the sheet base again --
+   onto the base, never onto the address the entry was read from.
+
+   The original loads the sheet pointer from its global twice, at 00015ba6 and
+   again at 00015bae, because it needs it for the table address and then for
+   the rebase; one read of the global carries both here, which is the same
+   value either way (ADR-0001).
+
+   Nothing is read after the call: the seven arguments are pushed right to left
+   and the caller discards all of them with ADD ESP,0x1c at 00015bd5, and
+   fdps_blit_dispatch returns nothing this function looks at.  The width, the
+   height, the mode operand and the mode are all immediates in the push
+   sequence, so the only two values that come from outside are dst and pitch,
+   passed straight through. */
+void fdps_blit_command_sprite(unsigned char *dst, int pitch, int sprite_index)
+{
+    unsigned char *sprite_stream;
+
+    sprite_stream = data_fdps_command_sprite_sheet_ptr
+        + *(int *) (data_fdps_command_sprite_sheet_ptr
+                    + sprite_index * 4 + CEL_OFFSET_TABLE_START);
+    fdps_blit_dispatch(sprite_stream, dst, COMMAND_SPRITE_WIDTH,
+                       COMMAND_SPRITE_HEIGHT, pitch, 0, BLIT_MODE_OPAQUE);
 }

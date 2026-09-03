@@ -1164,6 +1164,374 @@ static void a_frame_with_no_sound_plays_nothing_and_still_draws(void)
     CHECK_EQ(layer_painted_bytes(), CELL_WIDTH * CELL_HEIGHT);
 }
 
+
+/* ------------------------------------------------------------------------
+ * fdps_blit_command_sprite -- the Command.cel drawer.
+ *
+ * Expected values come from the assembly at 00015b90 -- LEA EAX,[EAX*0x4+0x0]
+ * / ADD EAX,EDX / MOV EAX,dword ptr [EAX+0xf] / ADD EAX,EDX for the stream
+ * address, the two loads of the sheet pointer from 0x000643ac at 00015ba6 and
+ * 00015bae, and the seven pushes at 00015bbc through 00015bcf, whose
+ * immediates are 0x0, 0x0, 0x16 and 0x19 -- and from resource_info/cel.md
+ * (a 15-byte header, the offset table immediately after it at +0x0f with
+ * sprite_count+1 u32 entries all measured from the start of the file, and
+ * COMMAND.CEL's 76 sprites of 25 by 22).  None of them is read off the
+ * emitted C.
+ *
+ * The sheet is staged as a byte buffer rather than read from the real
+ * COMMAND.CEL because the drawer never opens a file: it reads a pointer to an
+ * already-unpacked block out of a global, and a buffer is exactly that block.
+ * Its header is written a byte at a time so the test makes no alignment
+ * assumption of its own -- the offset table starts at 0x0f, so every entry in
+ * it sits on an odd address.
+ *
+ * The sprites really are 25 by 22, the size the drawer hardwires, because a
+ * fixture that shrank them would not be exercising the constants at all.  A
+ * fill run covering 25 columns is one command byte, 0x18 -- op 00 with a
+ * length field of 24, and a run is length + 1 pixels of the byte that follows
+ * (resource_info/cel.md) -- so a whole sprite is 22 two-byte rows.
+ *
+ * WHAT THE FIXTURE PUTS WHERE, AND WHY.  Entry 3 of the four-entry table is a
+ * real stream and not the file-size sentinel a shipped sheet stores there:
+ * index 3 is out of range for a sheet declaring 3 sprites, and staging
+ * something drawable there is what makes "the index is not range checked"
+ * observable instead of a walk off the end of the buffer.  A second, decoy
+ * offset table sits at 0x180 with every entry pointing at a stream of its own
+ * colour, and the header's table-position field at +0x05 -- the field the
+ * drawer never reads -- points at it, so any byte of that colour reaching the
+ * surface means the header was consulted.
+ *
+ * The surface is 32 by 26 with the sprite aimed at column 3, row 2, which
+ * leaves a guard row above, three guard rows below and seven guard columns to
+ * the right: a sprite drawn a row or a column out of place lands on guards
+ * rather than off the buffer, and the guard bytes checked on all four edges
+ * are what pin 25 and 22 rather than merely the 550 bytes those multiply to.
+ */
+#define CEL_TABLE_FIELD_AT 0x05
+#define CEL_WIDTH_FIELD_AT 0x07
+#define CEL_HEIGHT_FIELD_AT 0x09
+#define CEL_COUNT_FIELD_AT 0x0b
+#define CEL_ENCODING_FIELD_AT 0x0d
+#define CEL_TABLE_AT 0x0f
+
+#define CEL_SPRITE_W 25
+#define CEL_SPRITE_H 22
+#define CEL_SPRITE_COUNT 3
+
+/* Four fill sprites of 44 bytes each and one mixed sprite of 198, spaced so
+   none of them touches the next, then the decoy table and its stream. */
+#define CEL_SPRITE0_AT 0x20
+#define CEL_SPRITE1_AT 0xb0
+#define CEL_SPRITE2_AT 0x50
+#define CEL_SPRITE3_AT 0x80
+#define CEL_DECOY_TABLE_AT 0x180
+#define CEL_DECOY_STREAM_AT 0x190
+#define CEL_SHEET_SIZE 0x200
+
+/* Command bytes: op in the top two bits, length minus one in the low six
+   (resource_info/cel.md).  0x18 is a 25-pixel fill, 0xc4 a 5-pixel skip, 0x0e
+   a 15-pixel fill and 0x84 a 5-byte literal; the last three add up to the 25
+   columns a row must cover exactly. */
+#define CEL_FILL_RUN_25 0x18
+#define CEL_SKIP_RUN_5 0xc4
+#define CEL_FILL_RUN_15 0x0e
+#define CEL_LITERAL_RUN_5 0x84
+#define CEL_SKIP_COLUMNS 5
+#define CEL_FILL_COLUMNS 15
+#define CEL_LITERAL_COLUMNS 5
+#define CEL_MIXED_ROW_BYTES 9
+
+/* No two of these, and none of them and the guard, are the same byte, so a
+   pixel always says which stream wrote it. */
+#define CEL_PIXEL0 0x11
+#define CEL_PIXEL0_ALT 0x77
+#define CEL_PIXEL2 0x33
+#define CEL_PIXEL3 0x44
+#define CEL_DECOY_PIXEL 0x99
+#define CEL_MIXED_FILL 0x22
+#define CEL_LITERAL_FIRST 0x61
+
+#define CEL_PITCH 32
+#define CEL_NARROW_PITCH 30
+#define CEL_SURFACE_ROWS 26
+#define CEL_SURFACE_BYTES (CEL_PITCH * CEL_SURFACE_ROWS)
+#define CEL_DEST_X 3
+#define CEL_DEST_Y 2
+
+static unsigned char cel_sheet[CEL_SHEET_SIZE];
+static unsigned char cel_sheet_alt[CEL_SHEET_SIZE];
+static unsigned char cel_surface[CEL_SURFACE_BYTES];
+
+static void cel_u16(unsigned char *sheet, int at, unsigned long value)
+{
+    sheet[at] = (unsigned char) (value & 0xff);
+    sheet[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void cel_u32(unsigned char *sheet, int at, unsigned long value)
+{
+    sheet[at] = (unsigned char) (value & 0xff);
+    sheet[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    sheet[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    sheet[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+/* 22 rows of one 25-pixel fill each: a whole sprite in the sheet's declared
+   size, and the plainest stream that covers every column of every row. */
+static void cel_fill_stream(unsigned char *sheet, int at, unsigned char pixel)
+{
+    int row;
+
+    for (row = 0; row < CEL_SPRITE_H; row++) {
+        sheet[at + row * 2] = CEL_FILL_RUN_25;
+        sheet[at + row * 2 + 1] = pixel;
+    }
+}
+
+/* 22 rows of skip 5, fill 15, literal 5.  The literal run is what separates
+   the pass-through kernel from every remapping one: its five bytes reach the
+   destination verbatim only under blit mode 0. */
+static void cel_mixed_stream(unsigned char *sheet, int at)
+{
+    int row;
+    int column;
+    int base;
+
+    for (row = 0; row < CEL_SPRITE_H; row++) {
+        base = at + row * CEL_MIXED_ROW_BYTES;
+        sheet[base] = CEL_SKIP_RUN_5;
+        sheet[base + 1] = CEL_FILL_RUN_15;
+        sheet[base + 2] = CEL_MIXED_FILL;
+        sheet[base + 3] = CEL_LITERAL_RUN_5;
+        for (column = 0; column < CEL_LITERAL_COLUMNS; column++) {
+            sheet[base + 4 + column] =
+                (unsigned char) (CEL_LITERAL_FIRST + column);
+        }
+    }
+}
+
+static void cel_stage_sheet(unsigned char *sheet, unsigned char sprite0_pixel)
+{
+    memset(sheet, 0, CEL_SHEET_SIZE);
+    sheet[0] = 'C';
+    sheet[1] = 'E';
+    sheet[2] = 'L';
+    cel_u16(sheet, 0x03, 1);
+    cel_u16(sheet, CEL_TABLE_FIELD_AT, CEL_DECOY_TABLE_AT);
+    cel_u16(sheet, CEL_WIDTH_FIELD_AT, CEL_SPRITE_W);
+    cel_u16(sheet, CEL_HEIGHT_FIELD_AT, CEL_SPRITE_H);
+    cel_u16(sheet, CEL_COUNT_FIELD_AT, CEL_SPRITE_COUNT);
+    cel_u16(sheet, CEL_ENCODING_FIELD_AT, 2);
+
+    cel_u32(sheet, CEL_TABLE_AT, CEL_SPRITE0_AT);
+    cel_u32(sheet, CEL_TABLE_AT + 4, CEL_SPRITE1_AT);
+    cel_u32(sheet, CEL_TABLE_AT + 8, CEL_SPRITE2_AT);
+    cel_u32(sheet, CEL_TABLE_AT + 12, CEL_SPRITE3_AT);
+
+    cel_fill_stream(sheet, CEL_SPRITE0_AT, sprite0_pixel);
+    cel_mixed_stream(sheet, CEL_SPRITE1_AT);
+    cel_fill_stream(sheet, CEL_SPRITE2_AT, CEL_PIXEL2);
+    cel_fill_stream(sheet, CEL_SPRITE3_AT, CEL_PIXEL3);
+
+    cel_u32(sheet, CEL_DECOY_TABLE_AT, CEL_DECOY_STREAM_AT);
+    cel_u32(sheet, CEL_DECOY_TABLE_AT + 4, CEL_DECOY_STREAM_AT);
+    cel_u32(sheet, CEL_DECOY_TABLE_AT + 8, CEL_DECOY_STREAM_AT);
+    cel_u32(sheet, CEL_DECOY_TABLE_AT + 12, CEL_DECOY_STREAM_AT);
+    cel_fill_stream(sheet, CEL_DECOY_STREAM_AT, CEL_DECOY_PIXEL);
+}
+
+/* The global is put back afterwards so the drawer's one dependency does not
+   leak into whatever test file runs next. */
+static void cel_blit(unsigned char *sheet, int pitch, int sprite_index)
+{
+    unsigned char *previous_sheet;
+
+    memset(cel_surface, GUARD, CEL_SURFACE_BYTES);
+    previous_sheet = data_fdps_command_sprite_sheet_ptr;
+    data_fdps_command_sprite_sheet_ptr = sheet;
+    fdps_blit_command_sprite(cel_surface + CEL_DEST_Y * pitch + CEL_DEST_X,
+                             pitch, sprite_index);
+    data_fdps_command_sprite_sheet_ptr = previous_sheet;
+}
+
+static int cel_painted(void)
+{
+    int index;
+    int painted;
+
+    painted = 0;
+    for (index = 0; index < CEL_SURFACE_BYTES; index++) {
+        if (cel_surface[index] != GUARD) {
+            painted++;
+        }
+    }
+    return painted;
+}
+
+/* How many of the 550 bytes of the 25x22 rectangle do not hold `pixel`. */
+static int cel_wrong_pixels(int pitch, unsigned char pixel)
+{
+    int row;
+    int column;
+    int wrong;
+
+    wrong = 0;
+    for (row = 0; row < CEL_SPRITE_H; row++) {
+        for (column = 0; column < CEL_SPRITE_W; column++) {
+            if (cel_surface[(CEL_DEST_Y + row) * pitch + CEL_DEST_X + column]
+                != pixel) {
+                wrong++;
+            }
+        }
+    }
+    return wrong;
+}
+
+static int cel_bytes_holding(unsigned char pixel)
+{
+    int index;
+    int found;
+
+    found = 0;
+    for (index = 0; index < CEL_SURFACE_BYTES; index++) {
+        if (cel_surface[index] == pixel) {
+            found++;
+        }
+    }
+    return found;
+}
+
+/* The sprite is written at the pointer it was handed, 25 columns by 22 rows of
+   it and not one byte more.  The four edge guards are the size assertion: the
+   column at CEL_DEST_X + 25 and the row at CEL_DEST_Y + 22 are the first ones
+   outside the rectangle the two pushed immediates describe, and the row above
+   and the column to the left are outside it the other way. */
+static void the_command_sprite_lands_at_the_destination_pointer(void)
+{
+    cel_stage_sheet(cel_sheet, CEL_PIXEL0);
+    cel_blit(cel_sheet, CEL_PITCH, 0);
+    CHECK_EQ(cel_wrong_pixels(CEL_PITCH, CEL_PIXEL0), 0);
+    CHECK_EQ(cel_painted(), CEL_SPRITE_W * CEL_SPRITE_H);
+    CHECK_EQ(cel_surface[CEL_DEST_Y * CEL_PITCH + CEL_DEST_X - 1], GUARD);
+    CHECK_EQ(cel_surface[CEL_DEST_Y * CEL_PITCH + CEL_DEST_X + CEL_SPRITE_W],
+             GUARD);
+    CHECK_EQ(cel_surface[(CEL_DEST_Y - 1) * CEL_PITCH + CEL_DEST_X], GUARD);
+    CHECK_EQ(cel_surface[(CEL_DEST_Y + CEL_SPRITE_H) * CEL_PITCH + CEL_DEST_X],
+             GUARD);
+}
+
+/* Entry 2 of the table, not entry 0 and not the table's own address: the index
+   is scaled by four and the entry it selects is rebased on the sheet. */
+static void the_command_sprite_index_selects_the_table_entry(void)
+{
+    cel_stage_sheet(cel_sheet, CEL_PIXEL0);
+    cel_blit(cel_sheet, CEL_PITCH, 2);
+    CHECK_EQ(cel_wrong_pixels(CEL_PITCH, CEL_PIXEL2), 0);
+    CHECK_EQ(cel_bytes_holding(CEL_PIXEL0), 0);
+}
+
+/* The header's table-position field points at the decoy table, whose every
+   entry names the decoy stream.  Reading that field instead of hardwiring 0x0f
+   would paint the decoy colour over the whole rectangle. */
+static void the_command_offset_table_is_read_at_fifteen(void)
+{
+    cel_stage_sheet(cel_sheet, CEL_PIXEL0);
+    cel_blit(cel_sheet, CEL_PITCH, 0);
+    CHECK_EQ(cel_wrong_pixels(CEL_PITCH, CEL_PIXEL0), 0);
+    CHECK_EQ(cel_bytes_holding(CEL_DECOY_PIXEL), 0);
+}
+
+/* Two sheets differing only in sprite 0's colour: the one the global points at
+   is the one that gets drawn. */
+static void the_command_sheet_comes_from_the_global(void)
+{
+    cel_stage_sheet(cel_sheet, CEL_PIXEL0);
+    cel_stage_sheet(cel_sheet_alt, CEL_PIXEL0_ALT);
+    cel_blit(cel_sheet_alt, CEL_PITCH, 0);
+    CHECK_EQ(cel_wrong_pixels(CEL_PITCH, CEL_PIXEL0_ALT), 0);
+    CHECK_EQ(cel_bytes_holding(CEL_PIXEL0), 0);
+}
+
+/* The three values the dispatcher publishes before handing over to a kernel:
+   the width and the pitch as it was given them, and the row counter the
+   pass-through kernel has counted down to zero over the 22 rows it drew. */
+static void the_command_sprite_size_reaches_the_dispatcher(void)
+{
+    cel_stage_sheet(cel_sheet, CEL_PIXEL0);
+    cel_blit(cel_sheet, CEL_PITCH, 0);
+    CHECK_EQ(data_fdps_graphics_rle_blit_src_width, CEL_SPRITE_W);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_pitch, CEL_PITCH);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The same surface walked at a stride of 30 instead of 32.  A drawer that had
+   folded the caller's pitch into a constant would leave the rows 32 apart, and
+   every byte after the first row would be in the wrong place. */
+static void the_command_pitch_is_the_destination_row_stride(void)
+{
+    cel_stage_sheet(cel_sheet, CEL_PIXEL0);
+    cel_blit(cel_sheet, CEL_NARROW_PITCH, 0);
+    CHECK_EQ(cel_wrong_pixels(CEL_NARROW_PITCH, CEL_PIXEL0), 0);
+    CHECK_EQ(cel_painted(), CEL_SPRITE_W * CEL_SPRITE_H);
+}
+
+/* Blit mode 0 is a constant in the push sequence, so the sprite goes through
+   the pass-through kernel: the skipped columns keep the guard, the filled ones
+   take the fill byte and the literal ones take their five stream bytes exactly
+   as the stream holds them.  The painted count is 20 columns by 22 rows, the
+   five skipped columns having written nothing. */
+static void mode_zero_passes_the_command_stream_through_unchanged(void)
+{
+    int row;
+    int column;
+    int wrong_skipped;
+    int wrong_filled;
+    int wrong_literal;
+    int at;
+
+    cel_stage_sheet(cel_sheet, CEL_PIXEL0);
+    cel_blit(cel_sheet, CEL_PITCH, 1);
+
+    wrong_skipped = 0;
+    wrong_filled = 0;
+    wrong_literal = 0;
+    for (row = 0; row < CEL_SPRITE_H; row++) {
+        at = (CEL_DEST_Y + row) * CEL_PITCH + CEL_DEST_X;
+        for (column = 0; column < CEL_SKIP_COLUMNS; column++) {
+            if (cel_surface[at + column] != GUARD) {
+                wrong_skipped++;
+            }
+        }
+        for (column = 0; column < CEL_FILL_COLUMNS; column++) {
+            if (cel_surface[at + CEL_SKIP_COLUMNS + column] != CEL_MIXED_FILL) {
+                wrong_filled++;
+            }
+        }
+        for (column = 0; column < CEL_LITERAL_COLUMNS; column++) {
+            if (cel_surface[at + CEL_SKIP_COLUMNS + CEL_FILL_COLUMNS + column]
+                != (unsigned char) (CEL_LITERAL_FIRST + column)) {
+                wrong_literal++;
+            }
+        }
+    }
+
+    CHECK_EQ(wrong_skipped, 0);
+    CHECK_EQ(wrong_filled, 0);
+    CHECK_EQ(wrong_literal, 0);
+    CHECK_EQ(cel_painted(),
+             (CEL_FILL_COLUMNS + CEL_LITERAL_COLUMNS) * CEL_SPRITE_H);
+}
+
+/* The sheet declares three sprites and index 3 is drawn anyway: there is no
+   compare against the count anywhere in the body. */
+static void the_command_sprite_index_is_not_range_checked(void)
+{
+    cel_stage_sheet(cel_sheet, CEL_PIXEL0);
+    cel_blit(cel_sheet, CEL_PITCH, CEL_SPRITE_COUNT);
+    CHECK_EQ(cel_wrong_pixels(CEL_PITCH, CEL_PIXEL3), 0);
+    CHECK_EQ(cel_painted(), CEL_SPRITE_W * CEL_SPRITE_H);
+}
+
 void run_sprite_tests(void)
 {
     RUN_TEST(cell_lands_at_the_requests_x_and_y);
@@ -1202,4 +1570,12 @@ void run_sprite_tests(void)
     RUN_TEST(the_callers_blit_mode_suppresses_the_blend_setup);
     RUN_TEST(the_frames_sound_plays_only_when_the_flag_is_set);
     RUN_TEST(a_frame_with_no_sound_plays_nothing_and_still_draws);
+    RUN_TEST(the_command_sprite_lands_at_the_destination_pointer);
+    RUN_TEST(the_command_sprite_index_selects_the_table_entry);
+    RUN_TEST(the_command_offset_table_is_read_at_fifteen);
+    RUN_TEST(the_command_sheet_comes_from_the_global);
+    RUN_TEST(the_command_sprite_size_reaches_the_dispatcher);
+    RUN_TEST(the_command_pitch_is_the_destination_row_stride);
+    RUN_TEST(mode_zero_passes_the_command_stream_through_unchanged);
+    RUN_TEST(the_command_sprite_index_is_not_range_checked);
 }

@@ -1,5 +1,5 @@
 /* sprite.h -- the .SAF sprite drawers: one tilemap cell, one tilemap layer,
- * one composite sprite.
+ * one composite sprite; and the one-line drawer for the Command.cel UI sheet.
  *
  * A .SAF holds an animation's material in four sections -- frames, tilemaps,
  * tiles and sounds -- and drawing anything out of one is three nested walks:
@@ -151,5 +151,42 @@ extern void fdps_draw_tilemap_layer(int *request);
    (rleblend.h). */
 extern void fdps_draw_composite_sprite(int *request, char play_sound);
 #pragma aux fdps_draw_composite_sprite "*" parm caller [];
+
+/* Draws one sprite of the global Command.cel sheet -- the sheet every piece of
+   menu furniture in the game is cut from, 76 sprites of 25 by 22
+   (resource_info/cel.md) -- into an 8bpp surface the caller owns.  Straight
+   line, no test of any kind: one offset-table lookup and one call.
+
+   `dst` is the destination byte itself, not a surface base: the caller has
+   already advanced it to the sprite's top left pixel, typically as page base
+   plus row times pitch plus column.  `pitch` is that surface's bytes per row,
+   and the shipped callers pass three different ones -- 0x140 for a full 320
+   wide page, 0x138 for the 312 wide shop and church list pages and 0x168 for
+   the message window's own wider buffer -- so it is a real argument and not a
+   constant waiting to be folded.  `sprite_index` selects the sheet entry.
+
+   THE SHEET'S OWN HEADER IS NEVER CONSULTED.  Three numbers that the .CEL
+   header records are written here as constants instead: the offset table's
+   position, which the u16 at +0x05 states and which this hardwires at 0x0f,
+   and the sprite width and height, which the i16 pair at +0x07 and +0x09
+   states and which this hardwires at 25 and 22.  All three agree with what
+   Command.cel actually declares, so the drawing is right; reading them from
+   the header instead would be a different program that happens to behave the
+   same on this one sheet, and would behave differently on any other.
+
+   NOTHING IS RANGE CHECKED.  There is no compare against the sheet's sprite
+   count and no lower bound, so an index of 76 reads the table's sentinel entry
+   -- the file size -- and blits 550 bytes of whatever follows the sheet, and a
+   negative index reads in front of the table.  The sheet pointer is not tested
+   for null either: called before fdps_load_global_resources has filled the
+   global, this dereferences a null pointer.
+
+   Blit mode 0 is passed as a constant, so the sprite always goes through the
+   opaque pass-through kernel: fill, stretch and literal runs are written to
+   the destination byte for byte and only a skip run leaves the destination
+   showing (rle.h).  The mode operand is 0 and is unused by that kernel. */
+extern void fdps_blit_command_sprite(unsigned char *dst, int pitch,
+                                     int sprite_index);
+#pragma aux fdps_blit_command_sprite "*" parm caller [];
 
 #endif

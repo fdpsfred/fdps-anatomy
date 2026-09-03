@@ -1507,11 +1507,11 @@ Draws one 25x22 sprite from the global Command.cel UI sheet into a caller-suppli
 
 Algorithm:
 1. Loads the Command.cel image pointer from the global at 0x000643ac (filled by fdps_load_global_resources with the "Command.cel" entry of Misc.vfs) and resolves the sprite's pixel stream through the sheet's offset table, whose position the game hardwires at sheet+0x0f rather than reading the header field that records it: src = sheet + *(int *)(sheet + sprite_index * 4 + 0x0f).
-2. Calls fdps_blit_dispatch(src, dst, 0x19, 0x16, pitch, 0, 0). 0x19 and 0x16 are Command.cel's sheet-wide sprite width (25) and height (22), written as constants instead of being read from the header at +0x07/+0x09; mode 0 selects the opaque RLE passthrough kernel fdps_blit_rle_passthrough, so index-0 pixels are the transparent ones and everything else is written through unchanged.
+2. Calls fdps_blit_dispatch(src, dst, 0x19, 0x16, pitch, 0, 0). 0x19 and 0x16 are Command.cel's sheet-wide sprite width (25) and height (22), written as constants instead of being read from the header at +0x07/+0x09; mode 0 selects the opaque pass-through kernel fdps_rle_blit_passthrough, which writes every fill, stretch and literal byte through unchanged -- index 0 included -- and leaves the destination showing only where the stream has a skip run.
 
 Parameters:
   dst -- destination address inside an 8bpp surface, already advanced to the sprite's top-left pixel; callers pass a screen or offscreen page base plus row * pitch + column
-  pitch -- bytes per row of that destination surface; 0x140 (320) for full-screen pages, 0x138 for the 312-wide list pages
+  pitch -- bytes per row of that destination surface; the shipped callers pass 0x140 (320) for full-screen pages, 0x138 for the 312-wide shop and church list pages and 0x168 for the message window's own buffer, and elsewhere forward a pitch of their caller's
   sprite_index -- index into Command.cel's offset table; the sheet holds 76 sprites and the value is not range-checked
 
 Returns:
