@@ -2070,6 +2070,14 @@
       "status": "committed",
       "emitted_against": "0x4f",
       "rounds": 0
+    },
+    "00016840": {
+      "name": "fdps_load_status_cel_image",
+      "target": "statwin.c",
+      "body_size": "0x99",
+      "status": "failed",
+      "note": "Abandoned after 4 fix rounds: the round-5 review still reports 1 blocking issue. Two comment blocks in src/statwin.c cite 000168a8 as the destination pitch when that push is the source width -- the destination pitch is the PUSH 0x140 at 0001689e -- and round 4 had rewritten them into that exact inversion, so the file asserted the opposite of the assembly. The emitted code, its tests and their expected values were correct in every round; only the assembly citations kept flipping between the two wrong readings. The build gate additionally tripped in rounds 2, 4 and 5 on the known flaky check tests/title.c movie_drains_the_keyboard_queue, which belongs to fdps_play_movie (emit_issues 00057114) and is not reproducible from source. Working-tree residue under src/ and tests/ was discarded; the verdicts stay at workspace/code_emit/verdicts/00016840.emit.json and .review.json, and both verdicts' open issues are logged under emit_issues.json key 00016840. Re-emit from scratch.",
+      "rounds": 0
     }
   }
 }
