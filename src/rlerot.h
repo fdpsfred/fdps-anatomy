@@ -42,6 +42,17 @@ extern int data_fdps_graphics_rle_rotate_dst_y_step_per_src_y;
 extern int data_fdps_graphics_rle_blit_rotated_src_pixel_step_y;
 extern int data_fdps_graphics_rle_blit_rot_row_dest_step_x;
 
+/* 00070044 and 00070046.  The within-row halves of the same fractional
+   arithmetic, and the counterpart of the two registers mode 5 keeps them in:
+   mode 6 needs DX and BP for its resampling counters instead, so it spills
+   these two to memory.  Both are zeroed at the top of every destination row,
+   which is what separates them from the row-to-row pair below, and they are
+   read and written by fdps_rle_blit_rotated_scaled alone -- a sweep of the
+   whole image for either address finds only that routine's nine accesses to
+   each. */
+extern unsigned short data_fdps_graphics_rle_blit_rot_pixel_step_x_accumulator;
+extern unsigned short data_fdps_graphics_rle_blit_rot_pixel_step_y_accumulator;
+
 /* 00070048 and 0007004a.  The two row-to-row fractional accumulators, cleared
    once when a blit starts and then carried across every source row of it: each
    gathers one magnitude per row and steps the row origin whenever it reaches
@@ -86,5 +97,43 @@ extern void fdps_rle_blit_rotated(unsigned char *rle_stream,
                                   short rotate_dx,
                                   short rotate_dy);
 #pragma aux fdps_rle_blit_rotated "*" parm caller [];
+
+/* 00057114.  Blit mode 6, the rotating sprite blit with resampling on top:
+   decodes the same four ops into an 8bpp destination surface, but the
+   rectangle it walks is destination-sized rather than source-sized, so the
+   sprite is resized to `blit_geometry`'s width and height as well as rotated
+   by the vector the same record carries.
+
+   `rle_stream` is the command stream and `dest_pixel` the destination pixel
+   the source's top-left corner maps to, the same two as mode 5.
+   `blit_geometry` is the record fdps_blit_dispatch's sixth argument points at
+   -- four 32-bit slots of which only the low sixteen bits are ever read: [0]
+   the destination width in pixels, [1] the destination height in rows, [2] and
+   [3] the rotation vector dx and dy in 1/0x1000ths of a destination pixel,
+   signed.  Mode 5 and mode 4 read that same argument slot as two packed words;
+   mode 6 is the one that reads it as a pointer and dereferences it.
+
+   Where mode 5 walks one source pixel per destination pixel, this one runs a
+   Bresenham counter in each axis: the horizontal one turns the source row's
+   pixels into `blit_geometry[0]` destination pixels, and the vertical one
+   decides how many source rows to walk past with fdps_rle_skip_row between one
+   destination row and the next.  The rotation is then applied on top, through
+   the same six step globals above.
+
+   The source rectangle comes from data_fdps_graphics_rle_blit_src_width and
+   data_fdps_graphics_rle_blit_remaining_rows, both read-only here -- this
+   kernel counts destination rows down in
+   data_fdps_graphics_rle_blit_dest_rows_remaining instead and leaves the
+   source row count alone -- and the destination pitch from
+   data_fdps_graphics_rle_blit_dst_pitch.
+
+   Nothing in the shipped executable selects mode 6 either: the census in the
+   plate comment at 00056e2a resolves every path to the dispatcher's mode
+   argument and finds 0, 3, 4, 8, 9, 0xa and 0xb, so this kernel is compiled in
+   and unreachable and cannot be checked by playing the game. */
+extern void fdps_rle_blit_rotated_scaled(unsigned char *rle_stream,
+                                         unsigned char *dest_pixel,
+                                         int *blit_geometry);
+#pragma aux fdps_rle_blit_rotated_scaled "*" parm caller [];
 
 #endif

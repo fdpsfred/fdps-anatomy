@@ -1442,5 +1442,33 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "00057114": [
+    {
+      "from": "emit",
+      "what": "tests/title.c's movie_drains_the_keyboard_queue is nondeterministic in this environment, and it fails often enough to red the emit gate for work that has nothing to do with it. Measured, not inferred: one and the same EMITTEST.EXE (1,235,117 bytes, built from src/ with mode 6 added and the mode-6 tests still absent, so the new function was never executed) was run five times through tools/code_emit/build_emit.py run and returned fail, pass, fail, pass, fail -- 11016 checks every time, and the single failure every time was movie_drains_the_keyboard_queue check 1, movie_queue_pending_after -> 2, expected 0. Its second check, movie_kbhit_after == 0, passed on every run, so on a failing run the BIOS ring holds the two stuffed keys while kbhit reports none, meaning the drain loop in fdps_play_movie (CALL kbhit / TEST EAX,EAX / JZ at 00030f56) saw an empty queue. movie_premise_the_queue_can_be_stuffed, which stuffs and calls kbhit with no keyboard ISR installed, passed on every run. The difference at the failing point is that run_movie has installed the game's INT 9 handler and fdps_play_movie has just uninstalled it and shut AIL down. This is not a property of 00057114: it does not run in that binary at all, and the final build of the full change (src plus 82 new assertions) came back 11098 checks, 0 failed.",
+      "needs": "The owner of tests/title.c and src/title.c, since the answer is in the interaction between fdps_install_keyboard_isr / fdps_uninstall_keyboard_isr, AIL_shutdown and what Watcom 10.0a's kbhit actually queries under DOS/4GW -- whether it reads the BIOS ring through INT 16h or asks DOS, and what the uninstall leaves behind that makes the answer differ between runs of the same binary. A cheap first probe would be to have run_movie record kbhit's answer immediately after movie_queue_stuff and again immediately after fdps_uninstall_keyboard_isr, which would say whether the queue goes invisible at the stuffing or at the uninstall. Until it is settled, a red gate on this one check alone is not evidence about the function being emitted, and re-running build_emit.py run distinguishes the two.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "The geometry record's shape rests on 00057114 alone, because nothing in FDPS.LE selects blit mode 6 -- the dispatcher's mode census finds 0, 3, 4, 8, 9, 0xa and 0xb -- so no caller anywhere in the image ever builds one and the build gate cannot see this kernel either. What is settled from the assembly is that the dispatcher's sixth argument is here a POINTER and not a packed word pair: MOV EBP,dword ptr [EBP+0x1c] at 00057114 followed by MOV AX,word ptr [EBP] / [EBP+4] / MOV DX,[EBP+8] / MOV AX,[EBP+0xc], four slots of stride 4 with only the low sixteen bits of each read, in the order width, height, dx, dy. That is the opposite of what modes 4 and 5 do with the same argument slot, which they read as two packed words in place (MOV DX,[EBP+0x1c] / MOV AX,[EBP+0x1e] at 00056c5e and 00056e3c). The thing that could go wrong silently is the C-side wiring: fdps_blit_dispatch has not been emitted, so nothing yet checks that its sixth parameter reaches this kernel as a pointer while it reaches the other two as scalars.",
+      "needs": "The emit of fdps_blit_dispatch at 000568db, whose mode-6 arm at 0005698c is the only call site, read against 00057114-00057133 for the slot order. Failing that, a differential run of the original kernel -- driven through an emulator with ESI, EDI, a frame whose [EBP+0x1c] addresses a four-dword record, ECX cleared and the blit parameter block at 0x00070022/0x00070024/0x0007002e filled -- against the rebuild on the same stream, comparing the destination surface byte for byte. Ghidra's emulate_function cannot do it alone: it returns final register state only, and the evidence needed is the drawn memory.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed independently and narrowed. I read the sole call site at 0005698c myself -- CMP BH,0x6 / JNZ 0x00056996 / four NOPs / CALL 0x00057114 / JMP 0x00056a08, with nothing pushed before it and no ESP adjustment after -- and searched fdps_blit_dispatch for its frame reads, which give MOV ESI,[EBP+0x8] at 000568e1 and MOV EDI,[EBP+0xc] at 000568e4. So the mapping of the three C parameters onto the dispatcher's arguments 1, 2 and 6 is settled from the assembly, as is the record's slot order and stride (00057117-00057133, four slots of four bytes, low word only, width/height/dx/dy). What genuinely cannot be settled yet is only the C-side typing on the dispatcher's own side: its sixth parameter has to reach mode 6 as a pointer while modes 4 and 5 read the same slot as two packed words in place (MOV DX,[EBP+0x1c] / MOV AX,[EBP+0x1e] at 00056c5e and 00056e3c), and no C exists yet to make that consistent. Nothing this round can do about it and nothing in the emitted function depends on the answer.",
+      "needs": "The emit of fdps_blit_dispatch at 000568db, read against 00057114-00057133 and against 00056c5e/00056e3c for how one argument slot serves both readings.",
+      "status": "open",
+      "same_as": "emit#1 -- the geometry record's shape and the unwired dispatcher"
+    },
+    {
+      "from": "review",
+      "what": "My pass added nothing to this one. The nondeterministic failure in tests/title.c's movie_drains_the_keyboard_queue is outside this function and outside this file, the emitter's five-run measurement is the evidence, and the final build of this change reported 11098 checks with 0 failures.",
+      "needs": "As the emitter states: the owner of src/title.c and tests/title.c.",
+      "status": "open",
+      "same_as": "emit#0 -- the flaky keyboard-queue check in tests/title.c"
+    }
   ]
 }

@@ -5,6 +5,7 @@
  * and the destination pitch come from.
  */
 #include "gamedata.h"
+#include "rle.h"
 #include "rlerot.h"
 
 /* 00056e2a.  Blit mode 5.  Hand-written assembly, not compiler output: no
@@ -322,4 +323,448 @@ void fdps_rle_blit_rotated(unsigned char *rle_stream,
 
         data_fdps_graphics_rle_blit_remaining_rows--;
     } while (data_fdps_graphics_rle_blit_remaining_rows != 0);
+}
+
+/* 00057114.  Blit mode 6.  Hand-written assembly like mode 5 above, and with
+   the same kind of register contract -- ESI is the stream, EDI the destination
+   -- but its third input arrives one indirection further out.  MOV
+   EBP,[EBP+0x1c] at 00057114 does not read the dispatcher's sixth argument as
+   a pair of packed words the way modes 4 and 5 do; it reads it as a POINTER,
+   replaces the frame pointer with it, and then pulls four words out of the
+   record it addresses (MOV AX,[EBP], [EBP+4], MOV DX,[EBP+8], MOV AX,[EBP+0xc]
+   at 00057117 to 00057133).  So the argument becomes one parameter here and
+   the four loads stay inside the routine, which is where the assembly does
+   them; only the record's slot stride is visible, four bytes with the top half
+   of each never read.  Destroying EBP and reaching into the caller's frame are
+   properties of the register contract and not of what the routine draws
+   (ADR-0001), as are the destruction of EBX, ESI and EDI and the requirement
+   that the caller have cleared the top of ECX.
+
+   What mode 6 adds to mode 5 is a Bresenham counter in each axis, the same
+   pair fdps_rle_blit_scaled runs, so the rectangle being walked is the
+   destination rectangle rather than the source one:
+
+   Horizontally, BX counts destination pixels down from the destination width
+   and BP is the accumulator, seeded with the destination width by MOV BP,BX at
+   00057236.  While BP is below the source width the run gives up one source
+   column (BP += destination width, CL down by one, and the run ends into the
+   next command byte when CL reaches zero); once BP reaches it, BP -= source
+   width and one destination pixel is emitted, BX down by one.  Either exit can
+   end the op, and BX reaching zero ends the whole row with the run
+   half-decoded.
+
+   Vertically, the accumulator at 00070026 is seeded with the destination
+   height and compared against the SOURCE height at 00070022 after every
+   destination row: every source row it is still at or below is walked by
+   fdps_rle_skip_row and costs it one destination height.  So a destination
+   taller than the source skips nothing and re-decodes the same source row, and
+   a shorter one drops rows.  Unlike mode 5 this kernel never touches
+   data_fdps_graphics_rle_blit_remaining_rows -- it reads it as the source
+   height and counts its own destination rows down in
+   data_fdps_graphics_rle_blit_dest_rows_remaining instead.
+
+   Which is what makes the push and pop at 0005724b and 000574bb load-bearing
+   in both registers at once.  ESI is restored so the next destination row
+   starts from this row's first command byte and only fdps_rle_skip_row ever
+   advances it to another source row -- carrying the cursor on from wherever
+   the decode stopped would desynchronise the stream on the first row that
+   fills early, and would break the vertical upscale as well.  EDI is restored
+   because the row's origin, not the cursor the rotation has walked away to, is
+   what the perpendicular row vector steps.
+
+   Everything the rotation itself does is mode 5's, with one difference: the
+   two within-row fractional accumulators live in memory at 00070044 and
+   00070046 rather than in DX and BP, because both registers are needed for the
+   resampling counters.  They are zeroed at the top of every row (00057239),
+   they subtract a single 0x1000 on carry rather than taking a modulo, and the
+   vertical carry still stores the pixel a second time at the cursor it has not
+   yet stepped (000572dc, 00057381, 0005741c) as the diagonal gap filler.  The
+   row-to-row pair at 00070048 and 0007004a is still cleared once, at 00057133,
+   and still carries across rows.
+
+   Two inherited details that look like defects and are not.  The destination
+   row ends on DEC BX / JNZ and the blit on DEC word ptr [0x0007002c] / JNZ,
+   both exact-zero tests on sixteen-bit counters, so a destination width or
+   height of zero asks for 0x10000 rather than none.  And a destination height
+   of zero also never leaves the vertical loop: the accumulator is seeded with
+   it and grows by it, so it stays at zero, which is never above the source
+   height, and fdps_rle_skip_row is called for ever.  Neither is guarded, here
+   or in mode 4.
+
+   Ghidra's decompiler claims a value comes back from the fdps_rle_skip_row
+   call in DX (extraout_DX) and there is no such thing.  The assembly holds the
+   vertical accumulator in DX across the call and adds to it afterwards (CALL
+   0x00056dc9 / ADD DX,[0x0007002a] at 000574d1); that routine touches only BX,
+   CX, ESI and AL, and what it returns is the advanced stream cursor, which is
+   ESI.  Its decompiled setup is wrong in one more place worth naming: it
+   assigns the record's second word to the vertical accumulator global, where
+   the assembly stores it to the destination height at 0007002a and only later
+   copies that into the accumulator.
+
+   Nothing in the shipped executable selects mode 6, so none of this can be
+   confirmed by playing the game: it is transcribed from the assembly and rests
+   on the assembly's authority. */
+void fdps_rle_blit_rotated_scaled(unsigned char *rle_stream,
+                                  unsigned char *dest_pixel,
+                                  int *blit_geometry)
+{
+    unsigned char *stream_cursor;
+    unsigned char *row_stream_start;
+    unsigned char *dest_cursor;
+    unsigned char *row_origin;
+    int dest_pitch;
+    short rotate_dx;
+    short rotate_dy;
+    unsigned short dx_magnitude;
+    unsigned short dy_magnitude;
+    unsigned short dest_pixels_remaining;
+    unsigned short hscale_accumulator;
+    unsigned short vscale_accumulator;
+    unsigned short pixel_step_accumulator;
+    unsigned short row_step_accumulator;
+    unsigned char command;
+    unsigned char run_pixel;
+    unsigned char run_length;
+    unsigned char halftone_phase;
+    int row_finished;
+    int run_finished;
+
+    /* The record's four slots, only the low word of each ever read. */
+    data_fdps_graphics_rle_blit_dest_width =
+        (unsigned short) blit_geometry[0];
+    data_fdps_graphics_rle_blit_dest_height =
+        (unsigned short) blit_geometry[1];
+    rotate_dx = (short) blit_geometry[2];
+    rotate_dy = (short) blit_geometry[3];
+
+    data_fdps_graphics_rle_blit_rot_row_step_x_accumulator = 0;
+    data_fdps_graphics_rle_blit_rot_row_step_y_accumulator = 0;
+
+    /* Zero-extended: XOR EBP,EBP then MOV BP,[0x0007002e] at 00057145. */
+    dest_pitch = (int) data_fdps_graphics_rle_blit_dst_pitch;
+
+    if (rotate_dx > 0) {
+        if (rotate_dy > 0) {
+            dx_magnitude = (unsigned short) rotate_dx;
+            dy_magnitude = (unsigned short) rotate_dy;
+            data_fdps_graphics_rle_rotate_dst_x_step_per_src_x = 1;
+            data_fdps_graphics_rle_rotate_dst_y_step_per_src_y = dest_pitch;
+            data_fdps_graphics_rle_blit_rotated_src_pixel_step_y = -dest_pitch;
+            data_fdps_graphics_rle_blit_rot_row_dest_step_x = 1;
+        } else {
+            dx_magnitude = (unsigned short) rotate_dx;
+            dy_magnitude = (unsigned short) -rotate_dy;
+            data_fdps_graphics_rle_rotate_dst_x_step_per_src_x = 1;
+            data_fdps_graphics_rle_blit_rotated_src_pixel_step_y = dest_pitch;
+            data_fdps_graphics_rle_blit_rot_row_dest_step_x = -1;
+            data_fdps_graphics_rle_rotate_dst_y_step_per_src_y = dest_pitch;
+        }
+    } else {
+        if (rotate_dy > 0) {
+            dx_magnitude = (unsigned short) -rotate_dx;
+            dy_magnitude = (unsigned short) rotate_dy;
+            data_fdps_graphics_rle_rotate_dst_x_step_per_src_x = -1;
+            data_fdps_graphics_rle_blit_rotated_src_pixel_step_y = -dest_pitch;
+            data_fdps_graphics_rle_rotate_dst_y_step_per_src_y = -dest_pitch;
+            data_fdps_graphics_rle_blit_rot_row_dest_step_x = 1;
+        } else {
+            dx_magnitude = (unsigned short) -rotate_dx;
+            dy_magnitude = (unsigned short) -rotate_dy;
+            data_fdps_graphics_rle_rotate_dst_x_step_per_src_x = -1;
+            data_fdps_graphics_rle_blit_rotated_src_pixel_step_y = dest_pitch;
+            data_fdps_graphics_rle_blit_rot_row_dest_step_x = -1;
+            data_fdps_graphics_rle_rotate_dst_y_step_per_src_y = -dest_pitch;
+        }
+    }
+
+    data_fdps_graphics_rle_rotate_cos_magnitude = dx_magnitude;
+    data_fdps_graphics_rle_rotate_sin_magnitude = dy_magnitude;
+    data_fdps_graphics_rle_blit_dest_rows_remaining =
+        data_fdps_graphics_rle_blit_dest_height;
+    data_fdps_graphics_rle_blit_vscale_accumulator =
+        data_fdps_graphics_rle_blit_dest_height;
+
+    stream_cursor = rle_stream;
+    row_origin = dest_pixel;
+
+    do {
+        dest_pixels_remaining = data_fdps_graphics_rle_blit_dest_width;
+        /* MOV BP,BX at 00057236: the horizontal accumulator starts at the
+           destination width, the same seed mode 4 uses. */
+        hscale_accumulator = data_fdps_graphics_rle_blit_dest_width;
+        data_fdps_graphics_rle_blit_rot_pixel_step_x_accumulator = 0;
+        data_fdps_graphics_rle_blit_rot_pixel_step_y_accumulator = 0;
+        /* PUSH ESI / PUSH EDI at 0005724b: the row's stream position and its
+           origin are both kept and both restored at the end of the row. */
+        row_stream_start = stream_cursor;
+        dest_cursor = row_origin;
+        row_finished = 0;
+
+        do {
+            command = *stream_cursor;
+            stream_cursor++;
+            run_length = (unsigned char) ((command & 0x3f) + 1);
+            run_finished = 0;
+
+            switch (command >> 6) {
+            case 0:
+                /* fill: one pixel byte follows and is the value of every
+                   source column the run covers */
+                run_pixel = *stream_cursor;
+                stream_cursor++;
+                while (run_finished == 0) {
+                    if (hscale_accumulator
+                        < data_fdps_graphics_rle_blit_src_width) {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator
+                             + data_fdps_graphics_rle_blit_dest_width);
+                        run_length--;
+                        if (run_length == 0) {
+                            run_finished = 1;
+                        }
+                    } else {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator
+                             - data_fdps_graphics_rle_blit_src_width);
+                        *dest_cursor = run_pixel;
+                        pixel_step_accumulator = (unsigned short)
+                            (data_fdps_graphics_rle_blit_rot_pixel_step_x_accumulator
+                             + data_fdps_graphics_rle_rotate_cos_magnitude);
+                        if (pixel_step_accumulator >= 0x1000) {
+                            pixel_step_accumulator = (unsigned short)
+                                (pixel_step_accumulator - 0x1000);
+                            dest_cursor +=
+                                data_fdps_graphics_rle_rotate_dst_x_step_per_src_x;
+                        }
+                        data_fdps_graphics_rle_blit_rot_pixel_step_x_accumulator =
+                            pixel_step_accumulator;
+                        pixel_step_accumulator = (unsigned short)
+                            (data_fdps_graphics_rle_blit_rot_pixel_step_y_accumulator
+                             + data_fdps_graphics_rle_rotate_sin_magnitude);
+                        if (pixel_step_accumulator >= 0x1000) {
+                            pixel_step_accumulator = (unsigned short)
+                                (pixel_step_accumulator - 0x1000);
+                            *dest_cursor = run_pixel;
+                            dest_cursor +=
+                                data_fdps_graphics_rle_blit_rotated_src_pixel_step_y;
+                        }
+                        data_fdps_graphics_rle_blit_rot_pixel_step_y_accumulator =
+                            pixel_step_accumulator;
+                        dest_pixels_remaining--;
+                        if (dest_pixels_remaining == 0) {
+                            run_finished = 1;
+                            row_finished = 1;
+                        }
+                    }
+                }
+                break;
+
+            case 1:
+                /* half-tone: the run covers two source columns per unit of
+                   length and the phase, flipped as each column is consumed,
+                   suppresses the store on the first of every pair */
+                run_length = (unsigned char) (run_length * 2);
+                run_pixel = *stream_cursor;
+                stream_cursor++;
+                halftone_phase = 0;
+                while (run_finished == 0) {
+                    if (hscale_accumulator
+                        < data_fdps_graphics_rle_blit_src_width) {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator
+                             + data_fdps_graphics_rle_blit_dest_width);
+                        halftone_phase = (unsigned char) (halftone_phase ^ 1);
+                        run_length--;
+                        if (run_length == 0) {
+                            run_finished = 1;
+                        }
+                    } else {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator
+                             - data_fdps_graphics_rle_blit_src_width);
+                        if (halftone_phase != 0) {
+                            *dest_cursor = run_pixel;
+                        }
+                        pixel_step_accumulator = (unsigned short)
+                            (data_fdps_graphics_rle_blit_rot_pixel_step_x_accumulator
+                             + data_fdps_graphics_rle_rotate_cos_magnitude);
+                        if (pixel_step_accumulator >= 0x1000) {
+                            pixel_step_accumulator = (unsigned short)
+                                (pixel_step_accumulator - 0x1000);
+                            dest_cursor +=
+                                data_fdps_graphics_rle_rotate_dst_x_step_per_src_x;
+                        }
+                        data_fdps_graphics_rle_blit_rot_pixel_step_x_accumulator =
+                            pixel_step_accumulator;
+                        pixel_step_accumulator = (unsigned short)
+                            (data_fdps_graphics_rle_blit_rot_pixel_step_y_accumulator
+                             + data_fdps_graphics_rle_rotate_sin_magnitude);
+                        if (pixel_step_accumulator >= 0x1000) {
+                            pixel_step_accumulator = (unsigned short)
+                                (pixel_step_accumulator - 0x1000);
+                            if (halftone_phase != 0) {
+                                *dest_cursor = run_pixel;
+                            }
+                            dest_cursor +=
+                                data_fdps_graphics_rle_blit_rotated_src_pixel_step_y;
+                        }
+                        data_fdps_graphics_rle_blit_rot_pixel_step_y_accumulator =
+                            pixel_step_accumulator;
+                        dest_pixels_remaining--;
+                        if (dest_pixels_remaining == 0) {
+                            run_finished = 1;
+                            row_finished = 1;
+                        }
+                    }
+                }
+                break;
+
+            case 2:
+                /* literal: the run's pixel bytes are in the stream, and the
+                   cursor steps over one only when a source column is consumed
+                   (INC ESI at 000573be), never when a pixel is emitted -- so
+                   MOV AL,[ESI] at 000573cf can hand the same source byte to
+                   several destination pixels */
+                while (run_finished == 0) {
+                    if (hscale_accumulator
+                        < data_fdps_graphics_rle_blit_src_width) {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator
+                             + data_fdps_graphics_rle_blit_dest_width);
+                        stream_cursor++;
+                        run_length--;
+                        if (run_length == 0) {
+                            run_finished = 1;
+                        }
+                    } else {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator
+                             - data_fdps_graphics_rle_blit_src_width);
+                        run_pixel = *stream_cursor;
+                        *dest_cursor = run_pixel;
+                        pixel_step_accumulator = (unsigned short)
+                            (data_fdps_graphics_rle_blit_rot_pixel_step_x_accumulator
+                             + data_fdps_graphics_rle_rotate_cos_magnitude);
+                        if (pixel_step_accumulator >= 0x1000) {
+                            pixel_step_accumulator = (unsigned short)
+                                (pixel_step_accumulator - 0x1000);
+                            dest_cursor +=
+                                data_fdps_graphics_rle_rotate_dst_x_step_per_src_x;
+                        }
+                        data_fdps_graphics_rle_blit_rot_pixel_step_x_accumulator =
+                            pixel_step_accumulator;
+                        pixel_step_accumulator = (unsigned short)
+                            (data_fdps_graphics_rle_blit_rot_pixel_step_y_accumulator
+                             + data_fdps_graphics_rle_rotate_sin_magnitude);
+                        if (pixel_step_accumulator >= 0x1000) {
+                            pixel_step_accumulator = (unsigned short)
+                                (pixel_step_accumulator - 0x1000);
+                            *dest_cursor = run_pixel;
+                            dest_cursor +=
+                                data_fdps_graphics_rle_blit_rotated_src_pixel_step_y;
+                        }
+                        data_fdps_graphics_rle_blit_rot_pixel_step_y_accumulator =
+                            pixel_step_accumulator;
+                        dest_pixels_remaining--;
+                        if (dest_pixels_remaining == 0) {
+                            run_finished = 1;
+                            row_finished = 1;
+                        }
+                    }
+                }
+                break;
+
+            default:
+                /* skip: a transparent run, the destination walked over
+                   unwritten -- the only op with no gap-filling store either */
+                while (run_finished == 0) {
+                    if (hscale_accumulator
+                        < data_fdps_graphics_rle_blit_src_width) {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator
+                             + data_fdps_graphics_rle_blit_dest_width);
+                        run_length--;
+                        if (run_length == 0) {
+                            run_finished = 1;
+                        }
+                    } else {
+                        hscale_accumulator = (unsigned short)
+                            (hscale_accumulator
+                             - data_fdps_graphics_rle_blit_src_width);
+                        pixel_step_accumulator = (unsigned short)
+                            (data_fdps_graphics_rle_blit_rot_pixel_step_x_accumulator
+                             + data_fdps_graphics_rle_rotate_cos_magnitude);
+                        if (pixel_step_accumulator >= 0x1000) {
+                            pixel_step_accumulator = (unsigned short)
+                                (pixel_step_accumulator - 0x1000);
+                            dest_cursor +=
+                                data_fdps_graphics_rle_rotate_dst_x_step_per_src_x;
+                        }
+                        data_fdps_graphics_rle_blit_rot_pixel_step_x_accumulator =
+                            pixel_step_accumulator;
+                        pixel_step_accumulator = (unsigned short)
+                            (data_fdps_graphics_rle_blit_rot_pixel_step_y_accumulator
+                             + data_fdps_graphics_rle_rotate_sin_magnitude);
+                        if (pixel_step_accumulator >= 0x1000) {
+                            pixel_step_accumulator = (unsigned short)
+                                (pixel_step_accumulator - 0x1000);
+                            dest_cursor +=
+                                data_fdps_graphics_rle_blit_rotated_src_pixel_step_y;
+                        }
+                        data_fdps_graphics_rle_blit_rot_pixel_step_y_accumulator =
+                            pixel_step_accumulator;
+                        dest_pixels_remaining--;
+                        if (dest_pixels_remaining == 0) {
+                            run_finished = 1;
+                            row_finished = 1;
+                        }
+                    }
+                }
+                break;
+            }
+        } while (row_finished == 0);
+
+        /* POP EDI / POP ESI at 000574bb, then the vertical step.  The
+           accumulator is compared against the SOURCE height, which this kernel
+           reads and never decrements, and every source row it is still at or
+           below is walked by decoding it. */
+        stream_cursor = row_stream_start;
+        vscale_accumulator = data_fdps_graphics_rle_blit_vscale_accumulator;
+        while (vscale_accumulator
+               <= data_fdps_graphics_rle_blit_remaining_rows) {
+            stream_cursor = fdps_rle_skip_row(stream_cursor);
+            vscale_accumulator = (unsigned short)
+                (vscale_accumulator
+                 + data_fdps_graphics_rle_blit_dest_height);
+        }
+        data_fdps_graphics_rle_blit_vscale_accumulator = (unsigned short)
+            (vscale_accumulator
+             - data_fdps_graphics_rle_blit_remaining_rows);
+
+        /* Then the perpendicular vector, applied to the row's origin rather
+           than to the cursor the row walked away with. */
+        row_step_accumulator = (unsigned short)
+            (data_fdps_graphics_rle_blit_rot_row_step_x_accumulator
+             + data_fdps_graphics_rle_rotate_sin_magnitude);
+        if (row_step_accumulator >= 0x1000) {
+            row_step_accumulator = (unsigned short)
+                (row_step_accumulator - 0x1000);
+            row_origin += data_fdps_graphics_rle_blit_rot_row_dest_step_x;
+        }
+        data_fdps_graphics_rle_blit_rot_row_step_x_accumulator =
+            row_step_accumulator;
+
+        row_step_accumulator = (unsigned short)
+            (data_fdps_graphics_rle_blit_rot_row_step_y_accumulator
+             + data_fdps_graphics_rle_rotate_cos_magnitude);
+        if (row_step_accumulator >= 0x1000) {
+            row_step_accumulator = (unsigned short)
+                (row_step_accumulator - 0x1000);
+            row_origin += data_fdps_graphics_rle_rotate_dst_y_step_per_src_y;
+        }
+        data_fdps_graphics_rle_blit_rot_row_step_y_accumulator =
+            row_step_accumulator;
+
+        data_fdps_graphics_rle_blit_dest_rows_remaining--;
+    } while (data_fdps_graphics_rle_blit_dest_rows_remaining != 0);
 }

@@ -1974,6 +1974,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x2e1"
+    },
+    "00057114": {
+      "name": "fdps_rle_blit_rotated_scaled",
+      "target": "rlerot.c",
+      "body_size": "0x437",
+      "rounds": 0,
+      "status": "committed",
+      "emitted_against": "0x437"
     }
   }
 }
