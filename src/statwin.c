@@ -1,8 +1,8 @@
 /* statwin.c -- the battle unit status window.
  *
  * See statwin.h for the window's geometry and what a caller has to know.
- * Nothing here owns state: every routine works on the images and the step
- * number it is handed.
+ * Nothing here owns state: every routine works on the images it is handed or
+ * loads for itself, and no global is read or written anywhere in the file.
  *
  * inp comes from <conio.h> and delay from <i86.h>, which is where Watcom
  * 10.0a declares them, and both are ordinary calls in the original rather
@@ -14,8 +14,10 @@
 #include <i86.h>
 #include <stdlib.h>
 #include <string.h>
+#include "fdpstype.h"
 #include "blit.h"
 #include "statwin.h"
+#include "vfs.h"
 
 /* The VGA graphics aperture as a flat linear address, the mode 13h scanline
    pitch, the row count and the size of one whole frame.  All four are
@@ -201,4 +203,88 @@ void fdps_draw_status_window_anim_frame(void *background, void *window_image,
 
     memmove((void *) VGA_SCREEN_BASE, frame, (size_t) VGA_SCREEN_BYTES);
     free(frame);
+}
+
+/* Where a .CEL sheet's offset table begins, spelled as the size of the header
+   it follows because that is what the 15 is (resource_info/cel.md).  MOV EAX,
+   dword ptr [EDX + 0xf] at 00016894 is the read, and 0xf is an immediate in
+   the instruction: the header's own u16 at +0x05 that declares the table
+   position is never looked at, here or anywhere else in the image. */
+#define CEL_OFFSET_TABLE_START ((int) sizeof(struct fdps_cel_header))
+
+/* The source rectangle the sheet is decoded as, PUSH 0x140 at 000168a8 and
+   PUSH 0xc8 at 000168a3.  Both are immediates and neither is a read of the
+   sheet's header: Status.cel's own i16 pair at +0x07 and +0x09 declares
+   exactly this 320x200, but the code does not consult it. */
+#define STATUS_CEL_WIDTH 0x140
+#define STATUS_CEL_HEIGHT 0xc8
+
+/* Mode 0, the plain opaque RLE kernel, PUSH 0x0 at 0001689a; the mode operand
+   pushed with it at 0001689c is the dword mode 0 does not read. */
+#define BLIT_MODE_OPAQUE 0
+
+/* 00016840.  One basic block: no branch, no test and no loop, and nothing is
+   checked -- not the container handle, not the loaded member and not the
+   allocation.  A missing MISC.VFS therefore does not fail gracefully, it hands
+   fdps_vfs_load_file a null handle to search.  That is the original's
+   behaviour and is reproduced rather than guarded (rebuild_info/pitfalls.md).
+
+   THE STRING LITERALS ARE WRITTEN THROUGH.  fdps_vfs_load_file upper-cases its
+   query in place (vfs.h), so the "Status.cel" below is permanently
+   "STATUS.CEL" after the first call, exactly as the original's copy at 0x61590
+   is.  Both spellings find the member -- every entry name in every shipped
+   container is upper case (resource_info/vfs.md) -- so the rewrite is
+   invisible, but the literal has to be in writable storage for the call to
+   work at all.  Under -mf it is: wcc386 puts string literals in CONST
+   (rebuild_info/build_flags.md) and CONST is a member of DGROUP alongside
+   _DATA and _BSS, which is where the original's own copy lives too.
+
+   THE ORDER OF THE TWO FREES IS NOT INTERCHANGEABLE WITH THE BLIT.  The
+   container handle goes back before the sheet is even addressed (CALL free at
+   00016886, ahead of the offset-table read at 00016894) and the sheet goes
+   back after the decode (CALL free at 000168c1).  So the handle is dead for
+   the whole of the drawing and only the 64000-byte result outlives the call.
+
+   Of the seven arguments the blit takes, three are the geometry and the
+   distinction between two of them matters: STATUS_CEL_WIDTH is the source
+   rectangle's width, the third argument, pushed last at 000168a8 and landing
+   at [EBP + 0x10] in fdps_blit_dispatch, and VGA_SCREEN_PITCH is the
+   destination surface's pitch, the fifth, pushed at 0001689e and landing at
+   [EBP + 0x18].  They are the same 0x140 here because the destination is a
+   whole mode 13h frame and the sheet fills it, which is why nothing in the
+   emitted call would look wrong if the two were swapped -- and why they are
+   named apart rather than sharing one constant.
+
+   The caller owns what comes back and must free it; all four call sites store
+   EAX into a local of their own and pass it on as the window image. */
+void *fdps_load_status_cel_image(void)
+{
+    void *misc_vfs;
+    unsigned char *cel_sheet;
+    unsigned char *cel_stream;
+    unsigned char *status_image;
+
+    misc_vfs = fdps_vfs_open("MISC.VFS");
+    cel_sheet = (unsigned char *) fdps_vfs_load_file("Status.cel", misc_vfs);
+    status_image = (unsigned char *) malloc(VGA_SCREEN_BYTES);
+    free(misc_vfs);
+
+    /* Sprite 0's stream, addressed from the start of the FILE: the table
+       entry is loaded off the sheet base and then added to the sheet base
+       again, never to the address it was read from. */
+    cel_stream = cel_sheet
+        + *(int *) (cel_sheet + CEL_OFFSET_TABLE_START);
+    fdps_blit_dispatch(cel_stream, status_image, STATUS_CEL_WIDTH,
+                       STATUS_CEL_HEIGHT, VGA_SCREEN_PITCH, 0,
+                       BLIT_MODE_OPAQUE);
+
+    free(cel_sheet);
+
+    /* The original copies the buffer into a fifth slot and returns that --
+       MOV [EBP-4],EAX / MOV EAX,[EBP-4] at 000168cc -- which is what a plain
+       return of a local compiles to at -od.  This one does the same: the
+       object file wcc386 produces from the line below carries both moves and
+       the same SUB ESP,0x14.  Only which slot holds which local differs, and
+       a stack slot is not observable behaviour (ADR-0001). */
+    return status_image;
 }

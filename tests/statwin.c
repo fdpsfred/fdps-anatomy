@@ -36,11 +36,38 @@
  * a playtest contract (rebuild_info/pitfalls.md), not a unit-test one.  The
  * order of the four blits is likewise unobservable: at every step the four
  * destination rectangles are disjoint, so no pixel is written twice.
+ *
+ * THE SECOND HALF, fdps_load_status_cel_image, IS PINNED AGAINST THE SHIPPED
+ * MISC.VFS.  That function names its container and its member with literals
+ * and takes no argument, so nothing can point it at a smaller fixture, and a
+ * fabricated sheet would be one this file encoded with the rules the decoder
+ * under test implements.  MISC.VFS is staged by tests/gamefile.lst for
+ * tests/main.c already and holds STATUS.CEL at 19,003 bytes.
+ *
+ * The pixel values the cases below expect were decoded from that member
+ * independently, by walking its stream with the four-op RLE rules written
+ * down in resource_info/cel.md, and not by running the code under test.  What
+ * is compared against the blitter itself -- one reference call with the seven
+ * arguments the assembly pushes -- is the argument list, which is the only
+ * thing this function contributes to the picture: whether the RLE is decoded
+ * correctly is tests/rle.c's question, not this file's.
+ *
+ * THE COMPARISON HAS TO BE MASKED.  Mode 0's skip op leaves pixels untouched,
+ * the destination is malloc'd rather than cleared, and STATUS.CEL skips 1,212
+ * of its 64,000 -- so those positions hold uninitialised bytes and comparing
+ * them would be comparing the heap.  The reference is therefore blitted twice
+ * over two different fills, and only the positions that agree between them
+ * were written by the blit at all.
  */
 #include <i86.h>
+#include <malloc.h>
+#include <stdlib.h>
 #include <string.h>
 #include "testharn.h"
+#include "fdpstype.h"
+#include "blit.h"
 #include "statwin.h"
+#include "vfs.h"
 
 #define VGA_SCREEN_BASE 0x000a0000
 #define VGA_SCREEN_PITCH 0x140
@@ -264,6 +291,237 @@ static void mid_frame_offsets_come_from_the_four_tables(void)
     CHECK_EQ(shot_pixel(199, 0), bg_pixel(199, 0));
 }
 
+/* ---- fdps_load_status_cel_image ------------------------------------- */
+
+/* The container and the member the function names with literals at 00016840,
+   held here as buffers rather than literals: fdps_vfs_load_file upper-cases
+   its query in place, and this file's own copy is not the one under test. */
+#define MISC_CONTAINER_NAME "MISC.VFS"
+#define STATUS_MEMBER_NAME "STATUS.CEL"
+#define NAME_MAX 16
+
+/* STATUS.CEL's header, out of the shipped MISC.VFS and read the way
+   resource_info/cel.md describes it.  The sentinel entry of a .CEL offset
+   table is the file's own length, so SHEET_BYTES is both the member's byte
+   count in the container's entry table and offset table entry 1. */
+#define SHEET_BYTES 19003
+#define SHEET_SPRITE_COUNT 1
+#define SHEET_ENCODING 2
+#define SHEET_STREAM_START 23
+
+/* The blit the function performs, from the seven pushes between 0001689a and
+   000168b4.  SOURCE_WIDTH is the third argument (PUSH 0x140 at 000168a8) and
+   DEST_PITCH the fifth (PUSH 0x140 at 0001689e); they are equal here and are
+   written apart so that a case reading this can see which is which. */
+#define SOURCE_WIDTH 0x140
+#define SOURCE_ROWS 0xc8
+#define DEST_PITCH 0x140
+#define BLIT_MODE_OPAQUE 0
+
+/* How many of the 64,000 pixels the sheet's stream actually writes.  The rest
+   are its skip runs, all of them between rows 118 and 144. */
+#define WRITTEN_PIXELS 62788
+#define A_SKIPPED_ROW 118
+#define A_SKIPPED_COLUMN 24
+
+static void *misc_vfs;
+static unsigned char *sheet;
+
+/* The same blit the function makes, over two different fills.  A position the
+   two agree on was written by the blit; a position they disagree on was
+   skipped, and in the function's own buffer it holds whatever malloc left. */
+static unsigned char reference_over_zeroes[VGA_SCREEN_BYTES];
+static unsigned char reference_over_ones[VGA_SCREEN_BYTES];
+
+/* Used entries currently in the heap.  A used entry becomes a free entry the
+   moment it is released, possibly merged with a neighbour, so the used ones
+   are counted and the free ones are not. */
+static int used_heap_blocks(void)
+{
+    struct _heapinfo entry;
+    int used;
+
+    used = 0;
+    entry._pentry = NULL;
+    while (_heapwalk(&entry) == _HEAPOK) {
+        if (entry._useflag == _USEDENTRY) {
+            used++;
+        }
+    }
+    return used;
+}
+
+/* Loads STATUS.CEL once for the whole file and answers whether it is there,
+   so a case can say so and stop rather than dereference nothing. */
+static int sheet_is_loaded(void)
+{
+    char container[NAME_MAX];
+    char member[NAME_MAX];
+
+    if (sheet != NULL) {
+        return 1;
+    }
+    strcpy(container, MISC_CONTAINER_NAME);
+    misc_vfs = fdps_vfs_open(container);
+    if (misc_vfs == NULL) {
+        return 0;
+    }
+    strcpy(member, STATUS_MEMBER_NAME);
+    sheet = (unsigned char *) fdps_vfs_load_file(member, misc_vfs);
+    return sheet != NULL;
+}
+
+/* Blits the sheet twice into the two reference frames and answers how many
+   positions the two agree on, which is how many the blit wrote. */
+static int build_reference(void)
+{
+    unsigned char *stream;
+    int index;
+    int written;
+
+    stream = sheet + *(int *) (sheet + (int) sizeof(struct fdps_cel_header));
+    memset(reference_over_zeroes, 0x00, (size_t) VGA_SCREEN_BYTES);
+    memset(reference_over_ones, 0xff, (size_t) VGA_SCREEN_BYTES);
+    fdps_blit_dispatch(stream, reference_over_zeroes, SOURCE_WIDTH,
+                       SOURCE_ROWS, DEST_PITCH, 0, BLIT_MODE_OPAQUE);
+    fdps_blit_dispatch(stream, reference_over_ones, SOURCE_WIDTH, SOURCE_ROWS,
+                       DEST_PITCH, 0, BLIT_MODE_OPAQUE);
+
+    written = 0;
+    for (index = 0; index < VGA_SCREEN_BYTES; index++) {
+        if (reference_over_zeroes[index] == reference_over_ones[index]) {
+            written++;
+        }
+    }
+    return written;
+}
+
+/* The premise the geometry rests on: the sheet the function loads really is
+   one 320x200 sprite in the encoding mode 0 decodes, and its stream starts
+   where the hard-coded table position at +0x0f says.  The function reads none
+   of these fields -- it pushes 0x140 and 0xc8 as immediates -- so if the
+   shipped sheet ever disagreed with them, every later assertion here would be
+   measuring the wrong rectangle rather than failing. */
+static void status_cel_is_the_sheet_the_pushed_geometry_assumes(void)
+{
+    CHECK_EQ(sheet_is_loaded(), 1);
+    if (sheet == NULL) {
+        return;
+    }
+
+    CHECK_EQ(sheet[0], 'C');
+    CHECK_EQ(sheet[1], 'E');
+    CHECK_EQ(sheet[2], 'L');
+    CHECK_EQ(*(short *) (sheet + 7), SOURCE_WIDTH);
+    CHECK_EQ(*(short *) (sheet + 9), SOURCE_ROWS);
+    CHECK_EQ(*(short *) (sheet + 11), SHEET_SPRITE_COUNT);
+    CHECK_EQ(*(unsigned short *) (sheet + 13), SHEET_ENCODING);
+
+    /* The offset table starts at 15 and its two entries are sprite 0's stream
+       and the sentinel, which is the member's own byte count. */
+    CHECK_EQ((int) sizeof(struct fdps_cel_header), 15);
+    CHECK_EQ(*(int *) (sheet + 15), SHEET_STREAM_START);
+    CHECK_EQ(*(int *) (sheet + 19), SHEET_BYTES);
+}
+
+/* The whole of what the function produces: STATUS.CEL's sprite 0 decoded into
+   a fresh 64000-byte frame at a pitch of 320.  Every position the blit writes
+   is compared, so a wrong source pointer, a wrong pitch, a wrong row count or
+   a wrong mode all land here; and ten of them are also checked against values
+   decoded from the member outside this program, so the case is not only
+   saying "the same as another call to the blitter". */
+static void loaded_image_is_status_cel_decoded_whole(void)
+{
+    unsigned char *image;
+    int written;
+    int mismatches;
+    int index;
+
+    CHECK_EQ(sheet_is_loaded(), 1);
+    if (sheet == NULL) {
+        return;
+    }
+
+    written = build_reference();
+    CHECK_EQ(written, WRITTEN_PIXELS);
+
+    /* The masked positions are real: this one is inside a skip run. */
+    CHECK_EQ(reference_over_zeroes[A_SKIPPED_ROW * DEST_PITCH
+                                   + A_SKIPPED_COLUMN]
+                 != reference_over_ones[A_SKIPPED_ROW * DEST_PITCH
+                                        + A_SKIPPED_COLUMN],
+             1);
+
+    image = (unsigned char *) fdps_load_status_cel_image();
+    CHECK_EQ(image != NULL, 1);
+    if (image == NULL) {
+        return;
+    }
+
+    mismatches = 0;
+    for (index = 0; index < VGA_SCREEN_BYTES; index++) {
+        if (reference_over_zeroes[index] == reference_over_ones[index]
+            && image[index] != reference_over_zeroes[index]) {
+            mismatches++;
+        }
+    }
+    CHECK_EQ(mismatches, 0);
+
+    /* Ten positions spread over the frame, decoded from the shipped
+       STATUS.CEL by the rules in resource_info/cel.md.  The last two are on
+       the bottom scanline, which is where a pitch of anything but 320 stops
+       landing. */
+    CHECK_EQ(image[0 * DEST_PITCH + 0], 6);
+    CHECK_EQ(image[0 * DEST_PITCH + 15], 175);
+    CHECK_EQ(image[30 * DEST_PITCH + 300], 186);
+    CHECK_EQ(image[50 * DEST_PITCH + 40], 183);
+    CHECK_EQ(image[100 * DEST_PITCH + 160], 187);
+    CHECK_EQ(image[145 * DEST_PITCH + 145], 175);
+    CHECK_EQ(image[180 * DEST_PITCH + 290], 184);
+    CHECK_EQ(image[198 * DEST_PITCH + 160], 26);
+    CHECK_EQ(image[199 * DEST_PITCH + 305], 217);
+    CHECK_EQ(image[199 * DEST_PITCH + 319], 6);
+
+    free(image);
+}
+
+/* The two frees inside the call, at 00016886 and 000168c1, and the one block
+   that is meant to outlive it.  The container handle and the loaded sheet are
+   both released before the return, so a call that is followed by a free of
+   what it returned leaves the heap exactly where it found it -- three heap
+   blocks taken and three given back.  Dropping either free would show up as a
+   surplus entry here and nowhere else.
+
+   The measured call is the second one: the first is a warm-up, so that any
+   one-off allocation the CRT makes for a stdio stream on the first fopen is
+   already accounted for and does not read as a leak. */
+static void the_call_frees_both_temporaries(void)
+{
+    unsigned char *image;
+    int before;
+    int after;
+    int settled;
+
+    CHECK_EQ(sheet_is_loaded(), 1);
+    if (sheet == NULL) {
+        return;
+    }
+
+    image = (unsigned char *) fdps_load_status_cel_image();
+    free(image);
+
+    before = used_heap_blocks();
+    image = (unsigned char *) fdps_load_status_cel_image();
+    after = used_heap_blocks();
+    CHECK_EQ(image != NULL, 1);
+    CHECK_EQ(after - before, 1);
+
+    free(image);
+    settled = used_heap_blocks();
+    CHECK_EQ(settled, before);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+}
+
 void run_statwin_tests(void)
 {
     stage_images();
@@ -272,4 +530,12 @@ void run_statwin_tests(void)
     RUN_TEST(settled_frame_puts_the_window_where_it_rests);
     RUN_TEST(first_frame_clips_each_panel_to_its_edge);
     RUN_TEST(mid_frame_offsets_come_from_the_four_tables);
+    RUN_TEST(status_cel_is_the_sheet_the_pushed_geometry_assumes);
+    RUN_TEST(loaded_image_is_status_cel_decoded_whole);
+    RUN_TEST(the_call_frees_both_temporaries);
+
+    free(sheet);
+    sheet = NULL;
+    free(misc_vfs);
+    misc_vfs = NULL;
 }

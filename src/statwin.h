@@ -41,4 +41,35 @@ extern void fdps_draw_status_window_anim_frame(void *background,
                                                void *window_image, int step);
 #pragma aux fdps_draw_status_window_anim_frame "*" parm caller [];
 
+/* Loads Status.cel out of MISC.VFS and hands back the whole 320x200 frame it
+   decodes to, freshly allocated.  Takes nothing: both names are literals in
+   the code, so there is no way to point it at another sheet.
+
+   THE CALLER OWNS THE BLOCK AND MUST FREE IT.  64000 bytes are allocated on
+   every call and nothing here or anywhere else remembers the pointer, so a
+   caller that drops it leaks a whole frame.  It is the window image the
+   animation above is driven with, which is the only thing the four call sites
+   do with it.
+
+   THE BLOCK IS NOT A BLANK SURFACE WITH A PICTURE ON IT.  Nothing clears the
+   allocation and Status.cel's stream does not cover all of it: 1,212 of the
+   64,000 pixels are inside skip runs and come back holding whatever the heap
+   left there.  Every one of them is inside the two 117x8 gauge windows at
+   block + 0x9396 (row 118, column 22) and block + 0xab56 (row 137, column
+   22), 606 in each, and nowhere else -- the sheet leaves the HP and MP bars
+   out on purpose.  fdps_draw_status_window_anim_frame does copy those bytes
+   to the screen, so what makes them invisible is not that nobody reads them:
+   it is that all four callers run fdps_draw_unit_status_panel over the block
+   before the window is ever animated, and that paints both bars there.  Bar.
+   cel's three graphics carry no palette index 0 at any of those 1,212
+   positions, so fdps_blit_transparent_rect writes every one of them whatever
+   the fill width and whichever half of the bar covers it.  Clearing the
+   allocation would therefore not change a displayed pixel, but it is not
+   what the original does.
+
+   Nothing is checked.  A missing container, a container without the member or
+   a failed allocation are all followed straight into the next call. */
+extern void *fdps_load_status_cel_image(void);
+#pragma aux fdps_load_status_cel_image "*" parm caller [];
+
 #endif
