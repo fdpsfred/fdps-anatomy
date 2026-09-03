@@ -56,13 +56,15 @@ emit 或 review 當下答不出來的等價性疑慮記進 `tools/code_emit/data
 
 `t22-05` 再落地 100 支（0 未完成、0 中斷、無拆檔），並撞出三件超出單支範圍的事：**CD 模組（32 支連續位址）是用另一組旗標編的**，逐 byte 判定，已寫進 `rebuild_info/build_flags.md`；**build gate 看不見連結器警告**，導致「重複定義被忽略」時 build 照樣 PASS 而剛 emit 的定義其實沒被連進去——已修，並把重複定義升級成錯誤；`0002eab0` 是這批唯一一次修正輪真的改到程式邏輯（`JBE` 讀成相等測試，會讓第 28 章的調色盤動畫整章不動）。
 
-累計 228 支在 `emit_state.json` 記為 `committed`，`next_batch.py --stats` 說還剩 286 支。**續跑從這個進度接下去，不重跑已完成的。**
+`t22-06` 要 100 支、落地 40 支後被一連三次 API 500 打斷（修正輪兩次、收拾階段一次），停在 `cleanup_failed`。58 支還沒輪到、1 支跑到一半——殘骸全在 pipeline 自己的路徑內，照 Recover 的界線清掉後退回清單，沒有遺失。趁停機修掉一條約五成失敗率的測試（`tests/title.c` 的 `movie_drains_the_keyboard_queue`），它先前弄紅的是別人的 gate，`00016840` 四輪修正裡有三輪被它拖進去。另有一支 `00016840` 跑滿四輪修正後標成 `failed`，程式碼每輪都對、錯的是註解引用的組語位址，留待重新 emit。
+
+累計 268 支在 `emit_state.json` 記為 `committed`（另有 1 支 `failed` 待重跑），`next_batch.py --stats` 說還剩 245 支。**續跑從這個進度接下去，不重跑已完成的；`failed` 與 `in_flight` 都會被重新發回清單。**
 
 前兩支的區域變數命名經人工檢查合格，但那是 emitter 自己的判斷，當時 workflow 裡沒有任何規則要求它，所以不能拿它當「規則有效」的證據。第三支才是票 21.7 的實測：Ghidra 給的四個區域變數全是預設名（`sVar1`／`sVar2`／`local_18`／`local_14`），emit 出來是 `grid_width`／`grid_height`／`cell_index`／`cell`。
 
 **Blocked by:** 21, 21.5, 21.6, 21.7, 22.1 — 全部已完成，沒有東西擋著批次（22.1 剩下的是本票收尾時的總掃）
 
-**Status:** in-progress（514 支已落地 228 支，剩 286）
+**Status:** in-progress（514 支已落地 268 支，剩 245，另有 1 支待重跑）
 
 - [ ] 遊戲本體 function 全部 emit 完成，每個都經 reviewer 通過
 - [ ] 每個 function 一次處理一個，無任何批次處理
