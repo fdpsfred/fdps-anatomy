@@ -64,4 +64,37 @@ extern void fdps_rle_blit_translucent(unsigned char *rle_stream,
                                       int *blend_descriptor);
 #pragma aux fdps_rle_blit_translucent "*" parm caller [];
 
+/* 00057793.  Blit mode 0x0a, the tinting sprite blit: draws one sprite stream
+   with every pixel it paints blended toward a single constant palette colour,
+   AND blends that same colour into the destination pixels showing through the
+   sprite's transparent runs, so the whole width x height rectangle comes out
+   tinted rather than only the sprite's opaque pixels.
+
+   The first three parameters are what they are for fdps_rle_blit_translucent:
+   the command stream, the first pixel of the top row, and the row advance the
+   caller computes as pitch - width, which this kernel likewise publishes in
+   data_fdps_graphics_rle_blit_dst_row_advance on entry and reads back from
+   there at every row end.
+
+   `blend_descriptor` here is FOUR dwords, not three: [0] the shade ramp base,
+   [1] the blend level, [2] the inverse colour cube base and [3] the tint
+   colour, a palette index.  Only one of the two blended terms varies per pixel,
+   so ramp[tint row][tint colour] is fetched once before any drawing and every
+   pixel is that constant added to its own weighted colour.  The level runs 0 =
+   no tint through 16 = every pixel replaced by the tint: the tint always
+   carries weight level/16 and the pixel 16 - level, with the level read in ramp
+   row level and the pixel in row level + 9 for a level of 8 or less, and the
+   two rows folded to 16 - level and swapped above that.
+
+   Its caller fdps_draw_scene_layer picks this mode for a map tile whose
+   movement-grid cell is marked, which makes it the battle map's movement-range
+   highlight; the row width and row count come from the same two globals in
+   gamedata.h.  See the note in rleblend.c on why the transparent op must tint
+   rather than skip and why the stretched op starts one pixel late. */
+extern void fdps_rle_blit_tint_sprite_and_backdrop(unsigned char *rle_stream,
+                                                   unsigned char *dest_pixel,
+                                                   int dest_row_advance,
+                                                   int *blend_descriptor);
+#pragma aux fdps_rle_blit_tint_sprite_and_backdrop "*" parm caller [];
+
 #endif

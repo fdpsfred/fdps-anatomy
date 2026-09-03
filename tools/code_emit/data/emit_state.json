@@ -2006,6 +2006,14 @@
       "status": "committed",
       "emitted_against": "0x172",
       "rounds": 0
+    },
+    "00057793": {
+      "name": "fdps_rle_blit_tint_sprite_and_backdrop",
+      "target": "rleblend.c",
+      "body_size": "0x17d",
+      "status": "committed",
+      "emitted_against": "0x17d",
+      "rounds": 0
     }
   }
 }
