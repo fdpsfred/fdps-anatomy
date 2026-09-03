@@ -50,4 +50,37 @@ extern void fdps_combat_compute_hit_outcome(int attacker_unit_index,
                                             int *outcome);
 #pragma aux fdps_combat_compute_hit_outcome "*" parm caller [];
 
+/* Slides the combat animation view from one combatant's terrain backdrop to
+   the other's and brings the incoming combatant's sprite in riding on it.
+   Eight steps of 40 pixels, one screen in all, each one composed on the
+   caller's offscreen page and presented to the mode 13h screen; the call
+   returns when the eighth step has been shown.
+
+   `outgoing_backdrop` is the Back%02d.saf image the view is showing when the
+   call is made and it leaves; `incoming_backdrop` is the other combatant's
+   and it comes to rest on the page's border corner, at x and y both 24.
+   `anim_cursor` is that combatant's three-dword .SAF playback cursor
+   (src/saf.h), advanced one tick per step, and it is drawn at whatever x its
+   own backdrop has reached rather than at one of its own.  `direction` is +1
+   or -1 and is the sign of the horizontal movement; nothing else about it is
+   read, so any other magnitude scales the whole slide.
+
+   `req` is a draw request block of DRAW_REQUEST_DWORDS ints (src/sprite.h)
+   that the caller owns and has already filled in.  ITS PAGE POINTER, PITCH,
+   HEIGHT AND TWO BLEND SLOTS ARE READ AND NEVER WRITTEN: the page is cleared
+   and presented on the geometry the caller put there, which the callers state
+   as a 368 by 248 page.  The four fields that are written -- x, y, the image
+   and the item index -- are left holding the last of the three draws, so the
+   block comes back naming the incoming combatant's frame at the resting x.
+
+   The tick counter data_fdps_timer_tick_counter (src/gamedata.h) paces the
+   steps, so a caller that runs this with no timer interrupt installed stops
+   on the first step that waits.  Nothing else outside the request and the
+   cursor is touched, and nothing is returned. */
+extern void fdps_combat_slide_backdrops(void *outgoing_backdrop,
+                                        void *incoming_backdrop,
+                                        int *anim_cursor, int *req,
+                                        int direction);
+#pragma aux fdps_combat_slide_backdrops "*" parm caller [];
+
 #endif

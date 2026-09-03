@@ -1603,5 +1603,13 @@
       "status": "open",
       "same_as": "emit#0 -- the flaky movie_drains_the_keyboard_queue check in tests/title.c"
     }
+  ],
+  "0001a370": [
+    {
+      "from": "review",
+      "what": "The emit round saw movie_drains_the_keyboard_queue (tests/title.c) fail once and then pass, and reproduced the failure on a clean tree at HEAD with this work stashed, so it is a flake in another function's test rather than anything this emit touched. It is not recorded anywhere outside the emit verdict's round narrative, and this stage cannot chase it under the one-function rule. Carried here so it is not lost: if that case is genuinely intermittent, every future round of this pipeline can be stopped by a red suite that has nothing to do with the function in flight.",
+      "needs": "Repeated runs of the existing EMITTEST.EXE at a fixed commit to establish whether the failure recurs and at what rate, then a read of movie_drains_the_keyboard_queue against fdps_title_play_movie's assembly to find what it depends on that is not deterministic under DOSBox-X -- most likely a timing or keyboard-buffer state the fixture does not reset. That belongs to a ticket that owns tests/title.c, not to this function's round.",
+      "status": "open"
+    }
   ]
 }

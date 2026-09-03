@@ -2094,6 +2094,14 @@
       "status": "committed",
       "emitted_against": "0x111",
       "rounds": 0
+    },
+    "0001a370": {
+      "name": "fdps_combat_slide_backdrops",
+      "target": "combat.c",
+      "body_size": "0x14b",
+      "status": "committed",
+      "emitted_against": "0x14b",
+      "rounds": 0
     }
   }
 }

@@ -7,9 +7,14 @@
  * src/gamedata.h declares.
  *
  * rand comes from <stdlib.h>.  It is a real call in the original -- CALL
- * 00042cf8 -- and not an inline expansion.
+ * 00042cf8 -- and not an inline expansion.  memset comes from <string.h> and
+ * is a call as well, CALL 00042cd0, and inp comes from <conio.h> and is the
+ * library routine at 0003d4e4 rather than the IN instruction an intrinsic
+ * would have produced.
  */
+#include <conio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "unit.h"
@@ -17,6 +22,9 @@
 #include "unitstat.h"
 #include "table.h"
 #include "maptile.h"
+#include "blit.h"
+#include "saf.h"
+#include "sprite.h"
 #include "combat.h"
 
 /* The six ints of the caller's outcome block.  All six are written on entry;
@@ -305,4 +313,133 @@ void fdps_combat_compute_hit_outcome(int attacker_unit_index,
     }
 
     outcome[OUTCOME_DAMAGE] = damage;
+}
+
+/* The offscreen page the whole combat animation is composed on: 368 bytes to
+   the row, 248 rows, and a 24-pixel border on every side so that a sprite
+   whose edge runs past the visible window has somewhere to land.  The byte
+   count is PUSH 0x16480 at 0001a3a0 and is written as a whole-page constant
+   there, not as pitch times rows.  The visible 320x200 window starts at the
+   border's corner, 24 rows down and 24 columns in, which is the 0x2298 added
+   to the page base at 0001a48e. */
+#define COMBAT_SURFACE_PITCH 0x170
+#define COMBAT_SURFACE_BYTES 0x16480
+#define COMBAT_SURFACE_MARGIN 0x18
+#define COMBAT_VISIBLE_ORIGIN_OFFSET 0x2298
+
+/* Eight steps of 40 pixels carry a backdrop exactly one 320-pixel screen, so
+   the outgoing picture is one whole screen away and the incoming one exactly
+   home when the last step is drawn: PUSH/CMP 0x8 at 0001a38d, IMUL 0x28 at
+   0001a3be and 0001a3e9, SUB 0x140 at 0001a3ed. */
+#define SLIDE_STEP_COUNT 8
+#define SLIDE_PIXELS_PER_STEP 0x28
+
+/* The mode 13h screen: 320 by 200 at the VGA graphics aperture.  The aperture
+   is hard-coded in the original -- PUSH 0xa0000 at 0001a47f -- and stays a
+   literal here, because it is where the display adapter answers and not the
+   address of anything the linker places. */
+#define SCREEN_WIDTH 0x140
+#define SCREEN_HEIGHT 0xc8
+#define VGA_SCREEN_BASE 0x000a0000
+
+/* VGA input status register 1.  Bit 3 is set while the vertical retrace is in
+   progress and is the only bit looked at: TEST AL,0x8 at 0001a45b and
+   0001a46c. */
+#define VGA_INPUT_STATUS_1 0x3da
+#define VGA_STATUS_VERTICAL_RETRACE 0x08
+
+/* 0001a370.  The frame is the plain -4s one: PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP, SUB ESP,0x8, the five arguments read from [EBP+0x14] through
+   [EBP+0x24], and both call sites doing ADD ESP,0x14 after the CALL --
+   00019a07 and 00019dbb.  Nothing is returned: EAX at the RET is only
+   whatever the last load through it left behind, and neither caller looks.
+
+   THE REQUEST IS THE CALLER'S AND ONLY FOUR OF ITS FIELDS ARE WRITTEN.  The
+   page pointer, the two extents and the two blend slots are read and never
+   stored to, so the caller's page, its 0x170 pitch and its 0xf8 height are
+   what the three draws and the present run on.  x, y, the image and the item
+   index are rewritten here, and the block comes back holding the last of the
+   three draws -- the incoming combatant's frame at the incoming backdrop's
+   resting x.  Clearing or restoring them on the way out would be a fifth and
+   sixth store this function does not make.
+
+   THE ANIMATION FRAME IS DRAWN BEFORE IT IS ADVANCED.  The third draw takes
+   anim_cursor[0] as it stands and fdps_saf_advance_tick moves it afterwards,
+   so the eight steps show frames 0 through 7 and leave the cursor on 8.
+   Advancing first would drop frame 0 and show frame 8.
+
+   THE THIRD DRAW INHERITS THE INCOMING BACKDROP'S x.  Nothing writes x
+   between the second and the third fdps_draw_composite_sprite, which is what
+   makes the combatant ride in on its own backdrop rather than stand still
+   while it arrives.  Giving the sprite an x of its own -- the reading the
+   three near-identical draws invite -- detaches the two.
+
+   THE FRAME-PACING LOCAL IS READ BEFORE IT IS WRITTEN.  MOV EAX,[EBP-0x4] at
+   0001a49c is the first reference to that slot in the function, so the first
+   of the eight steps compares stack garbage against the tick counter and
+   normally falls straight through.  Latching the counter before the loop --
+   the obvious way to write this -- adds a tick of delay to the first step
+   (rebuild_info/pitfalls.md).  data_fdps_timer_tick_counter is volatile at
+   its declaration in gamedata.h because of loops like this one: nothing here
+   writes it, so a build allowed to hoist the load would spin forever.
+
+   The two retrace waits straddle the present the way every other presenter in
+   the game does: wait for the retrace to begin, and then for it to end, so
+   that the 64000-byte transfer starts with the beam off the picture. */
+void fdps_combat_slide_backdrops(void *outgoing_backdrop,
+                                 void *incoming_backdrop, int *anim_cursor,
+                                 int *req, int direction)
+{
+    /* Which of the eight steps is being drawn, 1 through 8 and never 0: the
+       first step already has the outgoing backdrop 40 pixels off centre. */
+    int step;
+    /* The tick counter's value at the end of the previous step.  Deliberately
+       left uninitialised -- see the note above. */
+    unsigned int last_tick;
+
+    /* Written once, outside the loop: every draw of every step sits on the
+       page's top border. */
+    req[DRAW_REQUEST_Y] = COMBAT_SURFACE_MARGIN;
+
+    for (step = 1; step <= SLIDE_STEP_COUNT; step++) {
+        memset((void *) req[DRAW_REQUEST_DEST_BASE], 0,
+               (size_t) COMBAT_SURFACE_BYTES);
+
+        /* The outgoing backdrop, walking off in the direction given: entry 0
+           at 40 pixels further from home on every step. */
+        req[DRAW_REQUEST_ITEM_INDEX] = 0;
+        req[DRAW_REQUEST_X] = direction * (step * SLIDE_PIXELS_PER_STEP)
+                              + COMBAT_SURFACE_MARGIN;
+        req[DRAW_REQUEST_IMAGE] = (int) outgoing_backdrop;
+        fdps_draw_composite_sprite(req, 0);
+
+        /* The incoming one, one whole screen behind it, so that step 8 puts
+           it exactly on the border corner. */
+        req[DRAW_REQUEST_X] = direction * (step * SLIDE_PIXELS_PER_STEP
+                                           - SCREEN_WIDTH)
+                              + COMBAT_SURFACE_MARGIN;
+        req[DRAW_REQUEST_IMAGE] = (int) incoming_backdrop;
+        fdps_draw_composite_sprite(req, 0);
+
+        /* And the arriving combatant, at whatever x its backdrop just took. */
+        req[DRAW_REQUEST_IMAGE] = anim_cursor[SAF_CURSOR_IMAGE];
+        req[DRAW_REQUEST_ITEM_INDEX] = anim_cursor[SAF_CURSOR_FRAME_INDEX];
+        fdps_draw_composite_sprite(req, 0);
+
+        fdps_saf_advance_tick(anim_cursor, 0);
+
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+        }
+
+        fdps_blit_rect((unsigned int) (req[DRAW_REQUEST_DEST_BASE]
+                                       + COMBAT_VISIBLE_ORIGIN_OFFSET),
+                       COMBAT_SURFACE_PITCH, (void *) VGA_SCREEN_BASE,
+                       SCREEN_WIDTH, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
 }

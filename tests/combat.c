@@ -49,6 +49,9 @@
  * name a terrain effect cannot inherit one.
  */
 #include <stddef.h>
+#include <string.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -1003,6 +1006,464 @@ static void each_index_selects_its_own_record(void)
     CHECK_EQ(unit(ATTACKER)->hp_current, 0);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_combat_slide_backdrops @ 0001a370
+ *
+ * Expected values come from the assembly: MOV dword ptr [EAX+0x10],0x18 at
+ * 0001a37f for the y written once before the loop; CMP dword ptr [EBP-0x8],0x8
+ * / JLE at 0001a38d for eight steps starting at 1; PUSH 0x16480 at 0001a3a0
+ * for the page clear; IMUL EAX,[EBP-0x8],0x28 with IMUL by the direction and
+ * ADD EDX,0x18 at 0001a3be for the outgoing x and the same with SUB EAX,0x140
+ * at 0001a3e9 for the incoming one; the store order [EAX+0x18] then [EAX+0xc]
+ * then [EAX+0x14] around each of the three CALLs to 0x14140; MOV EDX,[EAX+0x8]
+ * and MOV EDX,[EAX] at 0001a41c for which two cursor slots the third draw
+ * takes; the CALL to 0x14550 at 0001a446 sitting AFTER that draw; and the six
+ * pushes at 0001a470 -- 0xc8, 0x140, 0x140, 0xa0000, 0x170, page + 0x2298 --
+ * for the present.  None of them is read off the emitted C.
+ *
+ * WHAT THE RUN IS OBSERVED THROUGH.  Two surfaces: the caller's offscreen page,
+ * which the fixture owns and reads back directly, and the VGA aperture, which
+ * only answers in a graphics mode -- so each run puts the adapter into mode 13h
+ * the way the game does, captures both, and returns to text mode afterwards.
+ *
+ * ONLY THE EIGHTH STEP IS VISIBLE ON THE PAGE, because every step memsets it
+ * before drawing.  That is itself the strongest thing the page can say: a build
+ * that dropped the clear, or ran a ninth step, or ran seven, leaves a different
+ * count of painted bytes behind.  Where the backdrops sat on steps 1 through 7
+ * has no unit observable and is a playtest contract.
+ *
+ * WHY A TIMER INTERRUPT IS INSTALLED.  Each step ends waiting for
+ * data_fdps_timer_tick_counter to change, and in the game that counter is
+ * advanced by the timer handler off AIL's interrupt.  Nothing advances it in a
+ * test image, so the wait after the first step would never end.  Each run hooks
+ * IRQ0 for the duration of the call with a handler that increments the counter
+ * and chains to the one that was there.
+ *
+ * WHAT THE THREE .SAF FIXTURES ARE.  Three synthetic images, each one frame
+ * deep except the animation's, each carrying a single 4x2 tile of its own
+ * pixel value, so that the page says which of the three draws painted a byte
+ * and not merely that something did.  The animation's layer carries an x offset
+ * of 8 so its mark cannot land on the incoming backdrop's, which shares its x.
+ * The .SAF layout is resource_info/saf.md; the offsets are restated here rather
+ * than taken from src/sprite.c for the same reason the record offsets above
+ * are.
+ * ------------------------------------------------------------------ */
+
+/* The geometry the two callers state and this function hard-codes. */
+#define SLIDE_STEPS 8
+#define SLIDE_STEP_PIXELS 0x28
+#define SLIDE_MARGIN 0x18
+#define SLIDE_PITCH 0x170
+#define SLIDE_ROWS 0xf8
+#define SLIDE_PAGE_BYTES 0x16480
+#define SLIDE_WINDOW_AT 0x2298
+#define SLIDE_SCREEN_W 0x140
+#define SLIDE_SCREEN_H 0xc8
+#define SLIDE_SCREEN_BYTES (SLIDE_SCREEN_W * SLIDE_SCREEN_H)
+#define SLIDE_VGA_BASE 0x000a0000
+
+/* The draw request's slots, as displacements off the request pointer:
+   +0x00, +0x04, +0x08, +0x0c, +0x10, +0x14, +0x18 are the seven the assembly
+   touches, and the block is nine dwords. */
+#define SLIDE_REQ_BASE 0
+#define SLIDE_REQ_PITCH 1
+#define SLIDE_REQ_ROWS 2
+#define SLIDE_REQ_X 3
+#define SLIDE_REQ_Y 4
+#define SLIDE_REQ_IMAGE 5
+#define SLIDE_REQ_ITEM 6
+#define SLIDE_REQ_OPERAND 7
+#define SLIDE_REQ_MODE 8
+#define SLIDE_REQ_DWORDS 9
+
+/* The playback cursor's slots: [EAX] and [EAX+0x8] are the two the third draw
+   reads, and the middle one is the tick count the advance keeps. */
+#define SLIDE_CUR_FRAME 0
+#define SLIDE_CUR_TICKS 1
+#define SLIDE_CUR_IMAGE 2
+
+/* The synthetic .SAF.  Header offsets first: the three magic bytes, the cell
+   size, and the three section descriptors. */
+#define SAF_CELL_W_AT 0x07
+#define SAF_CELL_H_AT 0x09
+#define SAF_FRAME_COUNT_AT 0x0c
+#define SAF_FRAME_TABLE_PTR_AT 0x0e
+#define SAF_TILEMAP_COUNT_AT 0x16
+#define SAF_TILEMAP_TABLE_PTR_AT 0x18
+#define SAF_TILE_COUNT_AT 0x20
+#define SAF_TILE_TABLE_PTR_AT 0x22
+
+/* Where the fixture puts each section.  The header ends at 0x34; one tile
+   offset and its four-byte stream, one tilemap offset and its six-byte record,
+   then the frame offset table and the single frame record every entry of it
+   points at. */
+#define SLIDE_TILE_TABLE_AT 0x34
+#define SLIDE_TILE_STREAM_AT 0x38
+#define SLIDE_TILEMAP_TABLE_AT 0x3c
+#define SLIDE_TILEMAP_AT 0x40
+#define SLIDE_FRAME_TABLE_AT 0x48
+#define SLIDE_FRAME_AT 0x88
+#define SLIDE_IMAGE_BYTES 0x100
+
+/* A cell small enough that three of them fit across the page without meeting,
+   and two rows tall so a draw that landed one row out is visible. */
+#define SLIDE_CELL_W 4
+#define SLIDE_CELL_H 2
+
+/* The frame record: sound at +0, duration at +2, layer count at +8, the first
+   layer at +0x0a; a layer is 13 bytes of tilemap number, x, y, blend flag and
+   blend level. */
+#define SLIDE_FRAME_SOUND_AT 0x00
+#define SLIDE_FRAME_DURATION_AT 0x02
+#define SLIDE_FRAME_LAYERS_AT 0x08
+#define SLIDE_LAYER_AT 0x0a
+#define SLIDE_LAYER_TILEMAP_AT 0x00
+#define SLIDE_LAYER_X_AT 0x02
+#define SLIDE_LAYER_Y_AT 0x04
+#define SLIDE_LAYER_BLEND_AT 0x06
+
+/* One pixel value per image, none of them zero, so a painted byte names the
+   draw that wrote it. */
+#define SLIDE_OUT_PIXEL 0xa1
+#define SLIDE_IN_PIXEL 0xb2
+#define SLIDE_ANIM_PIXEL 0xc3
+
+/* The animation's layer sits 8 pixels right of its request, which is what
+   keeps its mark clear of the incoming backdrop's at the same x. */
+#define SLIDE_ANIM_LAYER_X 8
+
+/* Sixteen frames of one tick each, so the cursor can be advanced eight times
+   without reaching the end of the clip and wrapping. */
+#define SLIDE_ANIM_FRAMES 16
+#define SLIDE_ANIM_DURATION 1
+
+/* Sentinels for the five request slots this function must not write. */
+#define SLIDE_OPERAND_SENTINEL 0x5a5a5a5a
+#define SLIDE_Y_SENTINEL (-999)
+#define SLIDE_X_SENTINEL (-777)
+
+/* What the aperture is filled with before each run, so that a byte still
+   holding it is a byte the present never wrote. */
+#define SLIDE_SCREEN_SENTINEL 0x5a
+
+#define SLIDE_MODE_TEXT 0x03
+#define SLIDE_MODE_320X200X256 0x13
+
+/* IRQ0.  DOS/4GW reflects a hardware interrupt taken in protected mode to the
+   protected-mode vector, so the handler installed here is the one that runs
+   while the routine spins on the counter. */
+#define SLIDE_TIMER_VECTOR 8
+
+static unsigned char slide_out_image[SLIDE_IMAGE_BYTES];
+static unsigned char slide_in_image[SLIDE_IMAGE_BYTES];
+static unsigned char slide_anim_image[SLIDE_IMAGE_BYTES];
+static unsigned char slide_page[SLIDE_PAGE_BYTES];
+static unsigned char slide_screen[SLIDE_SCREEN_BYTES];
+static int slide_request[SLIDE_REQ_DWORDS];
+static int slide_cursor[3];
+
+static void (__interrupt __far *slide_saved_timer)();
+
+static void __interrupt __far slide_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(slide_saved_timer);
+}
+
+static void slide_u16(unsigned char *image, int at, unsigned int value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void slide_u32(unsigned char *image, int at, unsigned long value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    image[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    image[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+/* Builds one image: a 4x2 tile of `pixel`, a one-cell tilemap holding it, and
+   `frames` frame-table entries all naming the one frame record, whose single
+   layer sits at layer_x.  Command 0x03 is a fill run of four pixels
+   (resource_info/cel.md), so two of them make the two rows of the cell. */
+static void slide_stage_image(unsigned char *image, unsigned char pixel,
+                              int frames, int duration, int layer_x)
+{
+    int index;
+
+    memset(image, 0, SLIDE_IMAGE_BYTES);
+    image[0] = 'S';
+    image[1] = 'A';
+    image[2] = 'F';
+    slide_u16(image, SAF_CELL_W_AT, SLIDE_CELL_W);
+    slide_u16(image, SAF_CELL_H_AT, SLIDE_CELL_H);
+
+    slide_u16(image, SAF_TILE_COUNT_AT, 1);
+    slide_u32(image, SAF_TILE_TABLE_PTR_AT, (unsigned long) SLIDE_TILE_TABLE_AT);
+    slide_u32(image, SLIDE_TILE_TABLE_AT, (unsigned long) SLIDE_TILE_STREAM_AT);
+    image[SLIDE_TILE_STREAM_AT] = 0x03;
+    image[SLIDE_TILE_STREAM_AT + 1] = pixel;
+    image[SLIDE_TILE_STREAM_AT + 2] = 0x03;
+    image[SLIDE_TILE_STREAM_AT + 3] = pixel;
+
+    slide_u16(image, SAF_TILEMAP_COUNT_AT, 1);
+    slide_u32(image, SAF_TILEMAP_TABLE_PTR_AT,
+              (unsigned long) SLIDE_TILEMAP_TABLE_AT);
+    slide_u32(image, SLIDE_TILEMAP_TABLE_AT, (unsigned long) SLIDE_TILEMAP_AT);
+    slide_u16(image, SLIDE_TILEMAP_AT, 1);
+    slide_u16(image, SLIDE_TILEMAP_AT + 2, 1);
+    slide_u16(image, SLIDE_TILEMAP_AT + 4, 0);
+
+    slide_u16(image, SAF_FRAME_COUNT_AT, (unsigned int) frames);
+    slide_u32(image, SAF_FRAME_TABLE_PTR_AT,
+              (unsigned long) SLIDE_FRAME_TABLE_AT);
+    for (index = 0; index < frames; index++) {
+        slide_u32(image, SLIDE_FRAME_TABLE_AT + index * 4,
+                  (unsigned long) SLIDE_FRAME_AT);
+    }
+    slide_u16(image, SLIDE_FRAME_AT + SLIDE_FRAME_SOUND_AT, 0xffff);
+    slide_u16(image, SLIDE_FRAME_AT + SLIDE_FRAME_DURATION_AT,
+              (unsigned int) duration);
+    slide_u16(image, SLIDE_FRAME_AT + SLIDE_FRAME_LAYERS_AT, 1);
+    slide_u16(image, SLIDE_FRAME_AT + SLIDE_LAYER_AT + SLIDE_LAYER_TILEMAP_AT,
+              0);
+    slide_u16(image, SLIDE_FRAME_AT + SLIDE_LAYER_AT + SLIDE_LAYER_X_AT,
+              (unsigned int) layer_x);
+    slide_u16(image, SLIDE_FRAME_AT + SLIDE_LAYER_AT + SLIDE_LAYER_Y_AT, 0);
+    image[SLIDE_FRAME_AT + SLIDE_LAYER_AT + SLIDE_LAYER_BLEND_AT] = 0;
+}
+
+static void slide_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* One whole slide, with the adapter in the mode the game plays it in and a
+   timer interrupt running, leaving the offscreen page in slide_page[], the
+   visible window in slide_screen[], and the request and the cursor where the
+   call left them. */
+static void slide_run(int direction)
+{
+    slide_stage_image(slide_out_image, SLIDE_OUT_PIXEL, 1, 1, 0);
+    slide_stage_image(slide_in_image, SLIDE_IN_PIXEL, 1, 1, 0);
+    slide_stage_image(slide_anim_image, SLIDE_ANIM_PIXEL, SLIDE_ANIM_FRAMES,
+                      SLIDE_ANIM_DURATION, SLIDE_ANIM_LAYER_X);
+
+    memset(slide_page, 0, SLIDE_PAGE_BYTES);
+    slide_request[SLIDE_REQ_BASE] = (int) slide_page;
+    slide_request[SLIDE_REQ_PITCH] = SLIDE_PITCH;
+    slide_request[SLIDE_REQ_ROWS] = SLIDE_ROWS;
+    slide_request[SLIDE_REQ_X] = SLIDE_X_SENTINEL;
+    slide_request[SLIDE_REQ_Y] = SLIDE_Y_SENTINEL;
+    slide_request[SLIDE_REQ_IMAGE] = 0;
+    slide_request[SLIDE_REQ_ITEM] = 0;
+    slide_request[SLIDE_REQ_OPERAND] = SLIDE_OPERAND_SENTINEL;
+    slide_request[SLIDE_REQ_MODE] = 0;
+
+    slide_cursor[SLIDE_CUR_FRAME] = 0;
+    slide_cursor[SLIDE_CUR_TICKS] = 0;
+    slide_cursor[SLIDE_CUR_IMAGE] = (int) slide_anim_image;
+
+    slide_set_mode(SLIDE_MODE_320X200X256);
+    memset((void *) SLIDE_VGA_BASE, SLIDE_SCREEN_SENTINEL,
+           (size_t) SLIDE_SCREEN_BYTES);
+
+    slide_saved_timer = _dos_getvect(SLIDE_TIMER_VECTOR);
+    _dos_setvect(SLIDE_TIMER_VECTOR, slide_timer_isr);
+    fdps_combat_slide_backdrops(slide_out_image, slide_in_image, slide_cursor,
+                                slide_request, direction);
+    _dos_setvect(SLIDE_TIMER_VECTOR, slide_saved_timer);
+
+    memmove(slide_screen, (void *) SLIDE_VGA_BASE,
+            (size_t) SLIDE_SCREEN_BYTES);
+    slide_set_mode(SLIDE_MODE_TEXT);
+}
+
+static int slide_page_pixel(int row, int col)
+{
+    return (int) slide_page[row * SLIDE_PITCH + col];
+}
+
+static int slide_screen_pixel(int row, int col)
+{
+    return (int) slide_screen[row * SLIDE_SCREEN_W + col];
+}
+
+/* How many bytes of the page hold a given value. */
+static int slide_page_count(int value)
+{
+    long index;
+    int found;
+
+    found = 0;
+    for (index = 0; index < (long) SLIDE_PAGE_BYTES; index++) {
+        if ((int) slide_page[index] == value) {
+            found++;
+        }
+    }
+    return found;
+}
+
+/* How many bytes of the captured window hold a given value. */
+static int slide_screen_count(int value)
+{
+    long index;
+    int found;
+
+    found = 0;
+    for (index = 0; index < (long) SLIDE_SCREEN_BYTES; index++) {
+        if ((int) slide_screen[index] == value) {
+            found++;
+        }
+    }
+    return found;
+}
+
+/* How many bytes of the page are not zero. */
+static int slide_page_painted(void)
+{
+    long index;
+    int found;
+
+    found = 0;
+    for (index = 0; index < (long) SLIDE_PAGE_BYTES; index++) {
+        if (slide_page[index] != 0) {
+            found++;
+        }
+    }
+    return found;
+}
+
+/* The premise the page assertions rest on: three 4x2 cells and nothing else
+   survive the run, so the clear at the top of every step really did run and
+   exactly three draws really did paint.  Eight steps of leftovers would leave
+   twenty-four times as much behind. */
+static void only_the_last_of_the_eight_steps_is_left_on_the_page(void)
+{
+    slide_run(1);
+    CHECK_EQ(slide_page_painted(),
+             3 * SLIDE_CELL_W * SLIDE_CELL_H);
+    CHECK_EQ(slide_page_count(SLIDE_OUT_PIXEL), SLIDE_CELL_W * SLIDE_CELL_H);
+    CHECK_EQ(slide_page_count(SLIDE_IN_PIXEL), SLIDE_CELL_W * SLIDE_CELL_H);
+    CHECK_EQ(slide_page_count(SLIDE_ANIM_PIXEL), SLIDE_CELL_W * SLIDE_CELL_H);
+}
+
+/* MOV dword ptr [EAX+0x10],0x18: the y is the page's border margin, is written
+   before the loop, and is the row every draw lands on. */
+static void the_y_is_the_pages_border_margin(void)
+{
+    slide_run(1);
+    CHECK_EQ(slide_request[SLIDE_REQ_Y], SLIDE_MARGIN);
+    CHECK_EQ(slide_page_pixel(SLIDE_MARGIN, SLIDE_MARGIN), SLIDE_IN_PIXEL);
+    CHECK_EQ(slide_page_pixel(SLIDE_MARGIN + 1, SLIDE_MARGIN), SLIDE_IN_PIXEL);
+    CHECK_EQ(slide_page_pixel(SLIDE_MARGIN - 1, SLIDE_MARGIN), 0);
+    CHECK_EQ(slide_page_pixel(SLIDE_MARGIN + 2, SLIDE_MARGIN), 0);
+}
+
+/* IMUL 0x28 / SUB 0x140 / ADD 0x18 with step 8: the incoming backdrop's last x
+   is 8 * 40 - 320 = 0, so it comes to rest on the border corner whichever way
+   the slide ran, and the column in front of it is untouched. */
+static void the_incoming_backdrop_comes_to_rest_on_the_corner(void)
+{
+    slide_run(1);
+    CHECK_EQ(slide_page_pixel(SLIDE_MARGIN, SLIDE_MARGIN), SLIDE_IN_PIXEL);
+    CHECK_EQ(slide_page_pixel(SLIDE_MARGIN, SLIDE_MARGIN - 1), 0);
+    CHECK_EQ(slide_request[SLIDE_REQ_X], SLIDE_MARGIN);
+
+    slide_run(-1);
+    CHECK_EQ(slide_page_pixel(SLIDE_MARGIN, SLIDE_MARGIN), SLIDE_IN_PIXEL);
+    CHECK_EQ(slide_request[SLIDE_REQ_X], SLIDE_MARGIN);
+}
+
+/* The outgoing backdrop's last x is 0x18 + direction * 8 * 40, one whole
+   320-pixel screen from home.  Forwards that is column 344, still inside a
+   368-byte row; backwards it is -296, which the cell drawer refuses, so the
+   page holds none of its pixels at all. */
+static void the_outgoing_backdrop_ends_one_screen_away(void)
+{
+    slide_run(1);
+    CHECK_EQ(slide_page_pixel(SLIDE_MARGIN, SLIDE_MARGIN + SLIDE_SCREEN_W),
+             SLIDE_OUT_PIXEL);
+    CHECK_EQ(slide_page_pixel(SLIDE_MARGIN + 1,
+                              SLIDE_MARGIN + SLIDE_SCREEN_W),
+             SLIDE_OUT_PIXEL);
+    CHECK_EQ(slide_page_count(SLIDE_OUT_PIXEL), SLIDE_CELL_W * SLIDE_CELL_H);
+
+    slide_run(-1);
+    CHECK_EQ(slide_page_count(SLIDE_OUT_PIXEL), 0);
+    CHECK_EQ(slide_page_painted(), 2 * SLIDE_CELL_W * SLIDE_CELL_H);
+}
+
+/* Nothing writes the x between the second and the third draw, so the arriving
+   sprite is composed at the incoming backdrop's x -- here that x plus the 8 the
+   fixture's own layer carries. */
+static void the_arriving_sprite_rides_at_the_incoming_backdrops_x(void)
+{
+    slide_run(1);
+    CHECK_EQ(slide_page_pixel(SLIDE_MARGIN,
+                              SLIDE_MARGIN + SLIDE_ANIM_LAYER_X),
+             SLIDE_ANIM_PIXEL);
+    CHECK_EQ(slide_page_pixel(SLIDE_MARGIN + 1,
+                              SLIDE_MARGIN + SLIDE_ANIM_LAYER_X),
+             SLIDE_ANIM_PIXEL);
+}
+
+/* The CALL to fdps_saf_advance_tick sits after the third draw, so step 8 draws
+   frame 7 and the cursor is left on 8: one tick per step, and the frame drawn
+   is always the one standing when the step began.  The clip is sixteen frames
+   of one tick, so neither number is a wrap. */
+static void the_cursor_is_advanced_once_per_step_after_the_draw(void)
+{
+    slide_run(1);
+    CHECK_EQ(slide_cursor[SLIDE_CUR_FRAME], SLIDE_STEPS);
+    CHECK_EQ(slide_cursor[SLIDE_CUR_TICKS], 0);
+    CHECK_EQ(slide_request[SLIDE_REQ_ITEM], SLIDE_STEPS - 1);
+    CHECK_EQ(slide_request[SLIDE_REQ_IMAGE], (int) slide_anim_image);
+}
+
+/* Only four of the request's slots are written.  The page pointer, the two
+   extents and the two blend slots come back holding what the fixture put
+   there, which is what lets the caller keep one block across the whole
+   exchange. */
+static void the_page_and_the_blend_slots_come_back_untouched(void)
+{
+    slide_run(1);
+    CHECK_EQ(slide_request[SLIDE_REQ_BASE], (int) slide_page);
+    CHECK_EQ(slide_request[SLIDE_REQ_PITCH], SLIDE_PITCH);
+    CHECK_EQ(slide_request[SLIDE_REQ_ROWS], SLIDE_ROWS);
+    CHECK_EQ(slide_request[SLIDE_REQ_OPERAND], SLIDE_OPERAND_SENTINEL);
+    CHECK_EQ(slide_request[SLIDE_REQ_MODE], 0);
+}
+
+/* The present takes the 320 by 200 window at page + 0x2298 -- the border
+   corner -- and lays it on the aperture with 320 bytes to the row out of a
+   368-byte source row.  So the incoming backdrop's corner pixel is the screen's
+   first byte, the sprite is 8 columns along, and the outgoing backdrop at page
+   column 344 is past the window's right edge and does not appear at all. */
+static void the_present_copies_the_window_at_the_border_corner(void)
+{
+    slide_run(1);
+    CHECK_EQ(slide_screen_pixel(0, 0), SLIDE_IN_PIXEL);
+    CHECK_EQ(slide_screen_pixel(1, 0), SLIDE_IN_PIXEL);
+    CHECK_EQ(slide_screen_pixel(0, SLIDE_ANIM_LAYER_X), SLIDE_ANIM_PIXEL);
+    CHECK_EQ(slide_screen_pixel(0, SLIDE_SCREEN_W - 1), 0);
+    CHECK_EQ(slide_screen_pixel(2, 0), 0);
+    CHECK_EQ(slide_screen_pixel(SLIDE_SCREEN_H - 1, SLIDE_SCREEN_W - 1), 0);
+    /* Every byte of the window was written: none of the fill survives. */
+    CHECK_EQ(slide_screen_count(SLIDE_SCREEN_SENTINEL), 0);
+    /* And none of it came from beyond the window's right edge: the outgoing
+       backdrop sits at page column 344 and a transfer that took 368 bytes to
+       the row instead of 320 would have carried it in. */
+    CHECK_EQ(slide_screen_count(SLIDE_OUT_PIXEL), 0);
+    CHECK_EQ(slide_screen_count(SLIDE_IN_PIXEL), SLIDE_CELL_W * SLIDE_CELL_H);
+}
+
 void run_combat_tests(void)
 {
     RUN_TEST(the_record_layouts_match_the_offsets_read);
@@ -1036,4 +1497,13 @@ void run_combat_tests(void)
     RUN_TEST(a_portrait_id_above_ten_divides_by_thirty_more);
     RUN_TEST(the_award_is_gated_on_the_two_side_bytes);
     RUN_TEST(each_index_selects_its_own_record);
+
+    RUN_TEST(only_the_last_of_the_eight_steps_is_left_on_the_page);
+    RUN_TEST(the_y_is_the_pages_border_margin);
+    RUN_TEST(the_incoming_backdrop_comes_to_rest_on_the_corner);
+    RUN_TEST(the_outgoing_backdrop_ends_one_screen_away);
+    RUN_TEST(the_arriving_sprite_rides_at_the_incoming_backdrops_x);
+    RUN_TEST(the_cursor_is_advanced_once_per_step_after_the_draw);
+    RUN_TEST(the_page_and_the_blend_slots_come_back_untouched);
+    RUN_TEST(the_present_copies_the_window_at_the_border_corner);
 }
