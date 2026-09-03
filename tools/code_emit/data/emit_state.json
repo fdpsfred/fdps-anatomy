@@ -2110,6 +2110,14 @@
       "status": "committed",
       "emitted_against": "0x7a",
       "rounds": 0
+    },
+    "0001ea80": {
+      "name": "fdps_draw_turn_number",
+      "target": "anim.c",
+      "body_size": "0x77",
+      "status": "committed",
+      "emitted_against": "0x77",
+      "rounds": 0
     }
   }
 }

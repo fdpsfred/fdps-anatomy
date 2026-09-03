@@ -29,6 +29,7 @@
 #include <string.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "sprite.h"
 #include "anim.h"
 #include "testharn.h"
 
@@ -219,10 +220,162 @@ static void baseani_lookup_folds_the_query_in_place(void)
     free(image);
 }
 
+/* ---- fdps_draw_turn_number, 0001ea80 ------------------------------------
+ *
+ * Expected values come from the assembly: SUB EDX,0x2f at 0001ead2 for the
+ * bank entry a formatted character becomes, MOV dword ptr [EAX+0x18],EDX at
+ * 0001ead5 and ADD dword ptr [EAX+0xc],0x1c at 0001eaea for the two slots that
+ * move and by how much, and the CALL at 0001eaaf sitting inside the loop's own
+ * condition for how many times round it goes.  None of them is read off the
+ * emitted C.
+ *
+ * HOW THE PAINTING IS KEPT OUT OF THE WAY.  fdps_draw_composite_sprite is real
+ * code, not a stub, and it would walk a .SAF frame and blit it.  The request
+ * here is aimed at a sprite bank that is 64 zero bytes, which makes the frame
+ * count the drawer reads at +0x0c zero, so its one range test rejects every
+ * entry index this function can produce -- the smallest is 1 -- and it returns
+ * having drawn nothing, played nothing and written nothing (sprite.h).  That
+ * is not a stand-in for a .SAF: it is the drawer's own documented do-nothing
+ * path, chosen so that everything the request block holds afterwards was put
+ * there by the function under test and by nothing else.
+ *
+ * WHAT IS NOT COVERED.  x is advanced AFTER each call, so the k-th digit is
+ * painted at the caller's x plus 28(k-1); with the drawer inert there is
+ * nothing that records where each digit landed, and no assertion here can tell
+ * that order from the reverse.  It is settled by reading 0001ead5 through
+ * 0001eaea, where the store of the entry index and the call both precede the
+ * ADD, and not by a case below.
+ */
+
+/* Nine dwords, the block sprite.h describes, with the slots this function does
+   not touch set to values that are recognisable if something writes them. */
+#define REQ_DEST_BASE_MARK 0x11110000
+#define REQ_DEST_PITCH_MARK 0x168
+#define REQ_DEST_ROWS_MARK 0xf0
+#define REQ_START_X 100
+#define REQ_START_Y 0x22220000
+#define REQ_BLIT_OPERAND_MARK 0x33330000
+#define REQ_BLIT_MODE_MARK 0x44440000
+
+/* The banner bank stood down to its do-nothing path: 64 bytes of zero, of
+   which only the frame count at +0x0c is read. */
+static unsigned char inert_sprite_bank[64];
+
+static void build_turn_request(int *request)
+{
+    int slot;
+
+    for (slot = 0; slot < (int) sizeof(inert_sprite_bank); slot++) {
+        inert_sprite_bank[slot] = 0;
+    }
+    request[DRAW_REQUEST_DEST_BASE] = REQ_DEST_BASE_MARK;
+    request[DRAW_REQUEST_DEST_PITCH] = REQ_DEST_PITCH_MARK;
+    request[DRAW_REQUEST_DEST_ROWS] = REQ_DEST_ROWS_MARK;
+    request[DRAW_REQUEST_X] = REQ_START_X;
+    request[DRAW_REQUEST_Y] = REQ_START_Y;
+    request[DRAW_REQUEST_IMAGE] = (int) inert_sprite_bank;
+    request[DRAW_REQUEST_ITEM_INDEX] = 0;
+    request[DRAW_REQUEST_BLIT_OPERAND] = REQ_BLIT_OPERAND_MARK;
+    request[DRAW_REQUEST_BLIT_MODE] = REQ_BLIT_MODE_MARK;
+}
+
+/* One digit is one pass: x moves exactly one 28-pixel pitch and the entry
+   index comes back as the digit plus one.  Turn 7 draws bank entry 8. */
+static void turn_number_draws_one_pass_per_digit(void)
+{
+    int request[DRAW_REQUEST_DWORDS];
+
+    build_turn_request(request);
+    data_fdps_battle_turn_counter = 7;
+    fdps_draw_turn_number(request);
+    CHECK_EQ(request[DRAW_REQUEST_X], REQ_START_X + 28);
+    CHECK_EQ(request[DRAW_REQUEST_ITEM_INDEX], 8);
+
+    build_turn_request(request);
+    data_fdps_battle_turn_counter = 123;
+    fdps_draw_turn_number(request);
+    CHECK_EQ(request[DRAW_REQUEST_X], REQ_START_X + 28 * 3);
+    CHECK_EQ(request[DRAW_REQUEST_ITEM_INDEX], 4);
+
+    build_turn_request(request);
+    data_fdps_battle_turn_counter = 9999;
+    fdps_draw_turn_number(request);
+    CHECK_EQ(request[DRAW_REQUEST_X], REQ_START_X + 28 * 4);
+    CHECK_EQ(request[DRAW_REQUEST_ITEM_INDEX], 10);
+}
+
+/* The bias is 0x2f and not '0', so a digit selects the entry one past its own
+   number: '0' is entry 1 and never entry 0, which is the banner word graphic.
+   Both numbers here end in a zero, so the naive bias would leave the entry
+   index at 0 while x still came out right -- the entry index is the only slot
+   that can tell the two spellings apart. */
+static void turn_number_biases_digits_one_past_the_word_sprite(void)
+{
+    int request[DRAW_REQUEST_DWORDS];
+
+    build_turn_request(request);
+    data_fdps_battle_turn_counter = 0;
+    fdps_draw_turn_number(request);
+    CHECK_EQ(request[DRAW_REQUEST_X], REQ_START_X + 28);
+    CHECK_EQ(request[DRAW_REQUEST_ITEM_INDEX], 1);
+
+    build_turn_request(request);
+    data_fdps_battle_turn_counter = 10;
+    fdps_draw_turn_number(request);
+    CHECK_EQ(request[DRAW_REQUEST_X], REQ_START_X + 28 * 2);
+    CHECK_EQ(request[DRAW_REQUEST_ITEM_INDEX], 1);
+}
+
+/* The counter is read at the moment of the call and nothing is passed in, so
+   the same block drawn twice with the counter moved on in between produces two
+   different lengths, and the second run starts from wherever the first left x
+   rather than from the block's original x.  This is what the caller sees when
+   it forgets to reset the two slots. */
+static void turn_number_reads_the_counter_at_the_call(void)
+{
+    int request[DRAW_REQUEST_DWORDS];
+
+    build_turn_request(request);
+    data_fdps_battle_turn_counter = 9;
+    fdps_draw_turn_number(request);
+    CHECK_EQ(request[DRAW_REQUEST_X], REQ_START_X + 28);
+    CHECK_EQ(request[DRAW_REQUEST_ITEM_INDEX], 10);
+
+    data_fdps_battle_turn_counter = 25;
+    fdps_draw_turn_number(request);
+    CHECK_EQ(request[DRAW_REQUEST_X], REQ_START_X + 28 * 3);
+    CHECK_EQ(request[DRAW_REQUEST_ITEM_INDEX], 6);
+}
+
+/* Seven of the nine slots are neither read nor written: the assembly's only
+   stores through the request pointer are [EAX+0x18] at 0001ead5 and
+   [EAX+0xc] at 0001eaea.  The drawer is on its do-nothing path, so anything
+   else that moved was moved here. */
+static void turn_number_leaves_the_other_seven_slots_alone(void)
+{
+    int request[DRAW_REQUEST_DWORDS];
+
+    build_turn_request(request);
+    data_fdps_battle_turn_counter = 42;
+    fdps_draw_turn_number(request);
+
+    CHECK_EQ(request[DRAW_REQUEST_DEST_BASE], REQ_DEST_BASE_MARK);
+    CHECK_EQ(request[DRAW_REQUEST_DEST_PITCH], REQ_DEST_PITCH_MARK);
+    CHECK_EQ(request[DRAW_REQUEST_DEST_ROWS], REQ_DEST_ROWS_MARK);
+    CHECK_EQ(request[DRAW_REQUEST_Y], REQ_START_Y);
+    CHECK_EQ(request[DRAW_REQUEST_IMAGE] == (int) inert_sprite_bank, 1);
+    CHECK_EQ(request[DRAW_REQUEST_BLIT_OPERAND], REQ_BLIT_OPERAND_MARK);
+    CHECK_EQ(request[DRAW_REQUEST_BLIT_MODE], REQ_BLIT_MODE_MARK);
+}
+
 void run_anim_tests(void)
 {
     RUN_TEST(baseani_lookup_returns_a_pointer_into_the_image);
     RUN_TEST(baseani_lookup_republishes_on_every_call);
     RUN_TEST(baseani_lookup_reads_the_archive_base_each_call);
     RUN_TEST(baseani_lookup_folds_the_query_in_place);
+    RUN_TEST(turn_number_draws_one_pass_per_digit);
+    RUN_TEST(turn_number_biases_digits_one_past_the_word_sprite);
+    RUN_TEST(turn_number_reads_the_counter_at_the_call);
+    RUN_TEST(turn_number_leaves_the_other_seven_slots_alone);
 }

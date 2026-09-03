@@ -54,4 +54,38 @@ extern unsigned char *data_fdps_animation_baseani_entry_ptr;
 extern void *fdps_baseani_get_entry_or_exit(char *name);
 #pragma aux fdps_baseani_get_entry_or_exit "*" parm caller [];
 
+/* Paints the current battle turn number over the player-phase turn banner, one
+   composite sprite per decimal place, through the draw request the caller has
+   already built (sprite.h owns that block and what each of its nine slots
+   means).
+
+   The number is data_fdps_battle_turn_counter formatted with "%d"; nothing is
+   passed in, so this always draws whatever the counter says at the moment of
+   the call.  Each character becomes the request's entry index and is painted
+   by fdps_draw_composite_sprite with its sound argument zero, and the
+   request's x then moves on 28 pixels.
+
+   THE ENTRY INDEX IS THE DIGIT PLUS ONE.  The character is biased by 0x2f, not
+   by '0', because entry 0 of the banner's sprite bank is the word graphic the
+   caller paints itself and the numerals begin at entry 1.  Writing the obvious
+   digit - '0' shifts every glyph one down the bank and makes a '0' draw the
+   word (rebuild_info/pitfalls.md).
+
+   `request` IS WRITTEN IN PLACE AND IS NOT RESTORED.  Two of its nine slots
+   move: the entry index, which comes back holding the last digit's, and x,
+   which comes back one pitch past the last digit drawn.  The other seven --
+   the destination surface, its pitch and rows, y, the sprite bank and the two
+   blit slots -- are neither read nor written here; the bank in particular is
+   whatever the caller loaded, and this routine never checks that it is the
+   banner's.  The one caller, fdps_animate_turn_banner, rewrites both moved
+   slots before it uses the block again, so nothing depends on where they are
+   left.
+
+   There is no bound on the formatted number.  It goes into an eight-byte
+   buffer, which holds seven digits and a terminator, and a counter wider than
+   that would run off the frame.  Nothing in the game gets near it: the counter
+   is a turn number. */
+extern void fdps_draw_turn_number(int *request);
+#pragma aux fdps_draw_turn_number "*" parm caller [];
+
 #endif

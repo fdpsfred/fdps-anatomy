@@ -3069,7 +3069,7 @@ Formats the battle turn counter DAT_00069ce8 into an 8-byte stack buffer with sp
 The request belongs to the caller and is modified in place: on return req+0x0c sits one pitch past the last digit drawn and req+0x18 holds the last digit's entry index. The only caller, the turn-banner animation at 0001e840, rewrites both fields before it uses the request again.
 
 Parameters:
-  req -- the composite-sprite request fdps_draw_composite_sprite consumes: destination buffer at +0x00, destination pitch at +0x04, height at +0x08, X at +0x0c, Y at +0x10, sprite bank at +0x14, bank entry index at +0x18. This routine reads nothing out of it and writes only +0x0c and +0x18. The caller at 0001e840 builds it on its own stack, aimed at a 360x240 off-screen buffer with the "Turn.saf" bank loaded by fdps_baseani_get_entry_or_exit.
+  req -- the composite-sprite request fdps_draw_composite_sprite consumes, nine dwords / 0x24 bytes in all: destination buffer at +0x00, destination pitch at +0x04, height at +0x08, X at +0x0c, Y at +0x10, sprite bank at +0x14, bank entry index at +0x18, blit mode operand at +0x1c, blit mode at +0x20. The block does not end at +0x18: fdps_draw_composite_sprite reads element 8 of the caller's block at every layer, and the caller at 0001e840 initialises elements 7 and 8 at 0001e891 and 0001e898, so the last two slots are live members of the same block and not padding. This routine reads nothing out of it and writes only +0x0c and +0x18; it neither reads nor writes +0x1c and +0x20. The caller at 0001e840 builds it on its own stack, aimed at a 360x240 off-screen buffer with the "Turn.saf" bank loaded by fdps_baseani_get_entry_or_exit.
 
 Returns:
   Nothing.

@@ -1611,5 +1611,13 @@
       "needs": "Repeated runs of the existing EMITTEST.EXE at a fixed commit to establish whether the failure recurs and at what rate, then a read of movie_drains_the_keyboard_queue against fdps_title_play_movie's assembly to find what it depends on that is not deterministic under DOSBox-X -- most likely a timing or keyboard-buffer state the fixture does not reset. That belongs to a ticket that owns tests/title.c, not to this function's round.",
       "status": "open"
     }
+  ],
+  "0001ea80": [
+    {
+      "from": "review",
+      "what": "The emitter reports that movie_drains_the_keyboard_queue in tests/title.c failed six of eight runs of one unchanged EMITTEST.EXE, while the run left in workspace passed 11797 of 11797. If that measurement is right, a committed test in another module is non-deterministic and will go red at random in future gate runs, which would make the gate unable to tell a real regression from a coin toss. It is outside this function -- nothing in the test executable reaches fdps_draw_turn_number -- and the ONE FUNCTION rule keeps it out of this change.",
+      "needs": "Somebody whose ticket is tests/title.c to run one fixed binary repeatedly and find what in the movie fixture is not deterministic -- the keyboard-queue drain and the ISR install both touch real interrupt state under DOSBox-X, which is where a run-to-run difference would come from. I did not re-run it myself; the only run I can see on disk is green, so this stands on the emitter's eight-run experiment, whose logs are not in the workspace.",
+      "status": "open"
+    }
   ]
 }
