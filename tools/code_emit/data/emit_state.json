@@ -2038,6 +2038,14 @@
       "status": "committed",
       "emitted_against": "0x11d",
       "rounds": 0
+    },
+    "00013ed0": {
+      "name": "fdps_draw_tilemap_cell",
+      "target": "sprite.c",
+      "body_size": "0xfa",
+      "status": "committed",
+      "emitted_against": "0xfa",
+      "rounds": 1
     }
   }
 }
