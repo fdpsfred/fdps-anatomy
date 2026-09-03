@@ -67,4 +67,38 @@
 extern void fdps_draw_tilemap_cell(int *request);
 #pragma aux fdps_draw_tilemap_cell "*" parm caller [];
 
+/* Draws one tilemap of a .SAF: walks the grid of cells the tilemap that
+   element 6 of the request names holds, and hands each cell to
+   fdps_draw_tilemap_cell as a request of its own.
+
+   The tilemap is resolved the same way a tile is one level down -- image plus
+   the entry at index four of the offset table at image plus the u32 at +0x18,
+   the tilemap section's start -- and the index is rejected when it is negative
+   or not less than the u16 item count at +0x16.  Out of range means the whole
+   layer is skipped.
+
+   THE CELL DRAWER IS HANDED A COPY, NOT THIS REQUEST.  The 0x24 bytes are
+   copied onto the stack once before the walk and the copy is what moves: its
+   element 6 takes each cell's tile number, its x walks across the row and its
+   y down the page.  The caller's own block is never written, which is what
+   lets fdps_draw_composite_sprite keep its part's origin and index across the
+   call.  x is reset at the top of every row from the CALLER's x rather than by
+   subtracting the row's width back off, and y is never reset, so the grid
+   lands with its top left corner at the request's x and y and every cell one
+   cell width or height on from its neighbour.
+
+   The grid's dimensions are the signed i16 pair at the front of the tilemap
+   record, columns then rows, and the cells are the signed i16 that follow it
+   in row-major order (resource_info/saf.md).  Signed is behaviour and not
+   spelling: a negative column or row count draws nothing at all, where reading
+   the same bytes unsigned would run the loop tens of thousands of times.  A
+   cell whose tile number is out of range is dropped by the cell drawer, not
+   here.
+
+   The cell size read for the step is the u16 pair at +0x07 and +0x09, the same
+   pair the cell drawer uses for its source rectangle, so the grid tiles
+   without a gap or an overlap.  No global is read or written here. */
+extern void fdps_draw_tilemap_layer(int *request);
+#pragma aux fdps_draw_tilemap_layer "*" parm caller [];
+
 #endif
