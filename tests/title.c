@@ -193,6 +193,17 @@ static int movie_dac_last_green;
 static int movie_dac_last_blue;
 static int movie_queue_pending_after;
 static int movie_kbhit_after;
+/* Read the moment the stuffing is done, before fdps_play_movie is entered.
+   movie_drains_the_keyboard_queue fails intermittently on a binary that does
+   not otherwise change (measured: five runs of one EMITTEST.EXE gave fail,
+   pass, fail, pass, fail, always the same single check), and the two readings
+   below are what separate the two candidate explanations: either the setup
+   never held the keys the drain assertion assumes, or the drain really did not
+   happen.  Recorded rather than asserted inside run_movie, because run_movie
+   is shared by every case in this group and must not gain a failure of its
+   own. */
+static int movie_queue_pending_at_stuff;
+static int movie_kbhit_at_stuff;
 static int movie_scancode_after;
 static int movie_sfx_flag_after;
 static int movie_timer_slot_before;
@@ -346,6 +357,8 @@ static void run_movie(void)
     movie_set_mode(MOVIE_MODE_320X200X256);
     memset((void *) MOVIE_BASE, MOVIE_SENTINEL, (size_t) MOVIE_WINDOW_BYTES);
     movie_queue_stuff();
+    movie_queue_pending_at_stuff = movie_queue_pending();
+    movie_kbhit_at_stuff = kbhit();
 
     fdps_play_movie(MOVIE_NAME);
 
@@ -459,16 +472,56 @@ static void movie_leaves_the_master_palette_unbiased_over_the_whole_dac(void)
     CHECK_EQ(movie_dac_last_blue, (255 + 42) & MOVIE_DAC_COMPONENT_MASK);
 }
 
-/* CALL kbhit / TEST EAX,EAX / JZ / CALL getch / JMP: the loop runs while
-   kbhit answers non-zero and throws each character away, so a queue that held
-   two keys going in holds none coming out.  The loop is the only branch in the
-   body and kbhit's is the only returned value the body uses. */
+/* CALL kbhit / TEST EAX,EAX / JZ / CALL getch / JMP: the loop runs while kbhit
+   answers non-zero and throws each character away.  The loop is the only branch
+   in the body and kbhit's is the only returned value the body uses -- which is
+   exactly why this case has to branch on kbhit too.
+
+   Writing keys into the BIOS ring does not reliably make kbhit report them once
+   run_movie has installed the game's INT 9 handler: measured over six runs of
+   one unchanged EMITTEST.EXE, three had the ring holding both keys with kbhit
+   already answering 0 at the moment of stuffing, before fdps_play_movie was
+   entered at all.  On those runs the loop was right to do nothing, and the old
+   unconditional "the queue is empty afterwards" was not measuring a drain; it
+   was measuring whether the setup had happened to work, and it reddened the
+   emit gate for functions that have nothing to do with any of this.
+
+   So both arms assert.  When kbhit could see the keys the ring must come back
+   empty, which is the drain.  When it could not, the ring must come back
+   holding exactly what was put in it, which says the loop did nothing rather
+   than something arbitrary.  Either way the case measures the body. */
 static void movie_drains_the_keyboard_queue(void)
 {
     run_movie();
 
+    if (movie_kbhit_at_stuff == 0) {
+        CHECK_EQ(movie_queue_pending_after, MOVIE_QUEUED_KEY_COUNT);
+        CHECK_EQ(movie_kbhit_after, 0);
+        return;
+    }
+
     CHECK_EQ(movie_queue_pending_after, 0);
     CHECK_EQ(movie_kbhit_after, 0);
+}
+
+/* The half of the setup that IS deterministic, asserted on its own so the case
+   above can branch on the half that is not.  The write into the BIOS ring lands
+   every time -- the ring held both keys on all six runs of the measurement,
+   including the three where kbhit could not see them -- so a failure here would
+   mean the stuffing itself broke, which is a different fault from the one the
+   drain case handles.
+
+   kbhit's answer at the same instant is deliberately NOT asserted here.  What
+   makes it vary is somewhere in fdps_install_keyboard_isr, the mode change and
+   AIL being up, none of which this file owns; movie_premise_the_queue_can_be_-
+   stuffed does the same stuffing with none of them in place and has never
+   failed.  Tracked as an open issue against src/title.c rather than pinned to
+   whatever the environment happens to do today. */
+static void movie_queue_really_held_two_keys_at_entry(void)
+{
+    run_movie();
+
+    CHECK_EQ(movie_queue_pending_at_stuff, MOVIE_QUEUED_KEY_COUNT);
 }
 
 /* CALL 0x00056818 at 00030f51, before anything else touches the keyboard: the
@@ -526,6 +579,7 @@ void run_title_tests(void)
     RUN_TEST(movie_clears_the_whole_mode13h_frame);
     RUN_TEST(movie_clears_no_more_than_the_frame);
     RUN_TEST(movie_leaves_the_master_palette_unbiased_over_the_whole_dac);
+    RUN_TEST(movie_queue_really_held_two_keys_at_entry);
     RUN_TEST(movie_drains_the_keyboard_queue);
     RUN_TEST(movie_takes_the_keyboard_hook_down_before_putting_it_back);
     RUN_TEST(movie_puts_the_keyboard_hook_back);
