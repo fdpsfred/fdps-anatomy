@@ -1543,5 +1543,20 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "00057a74": [
+    {
+      "from": "emit",
+      "what": "tests/title.c's movie_drains_the_keyboard_queue is nondeterministic in this harness, and it is the whole of the gate failure recorded against this function. It is not a property of 00057a74 and no edit to src/rleblend.c can cause or cure it. Measured first-hand on THIS image rather than carried over from the earlier records: EMITTEST.EXE sha256 6f987647a708a9cbee48ce61ca0bcef8eb7b2572d3ebb46f74813cf6e866a125, 1,278,181 bytes, hashed before the first run and again after the last and byte-identical throughout, was run six times through tools/code_emit/build_emit.py without any source change -- PASS, FAIL, FAIL, PASS, FAIL, PASS. 11354 checks on every one of the six, and the only failure ever seen in any of them was movie_drains_the_keyboard_queue check 1, movie_queue_pending_after -> 2, expected 0. Run 5 of that sequence came from a from-scratch 'build_emit.py all', which reproduced the same 1,278,181-byte image with the same sha256, so the build is deterministic and one identical source tree returns both verdicts. The failing value 2 is exactly MOVIE_QUEUED_KEY_COUNT (tests/title.c:111): on a failing run the BIOS ring head and tail are still where movie_queue_stuff put them and the drain moved nothing, while the same run's check 2 (movie_kbhit_after == 0) passes -- so fdps_play_movie's drain loop (CALL kbhit / TEST EAX,EAX / JZ at 00030f56) saw an empty queue at the instant the ring at 0x41a/0x41c held two keys. My own 14 range_* cases passed on all six runs including the three failing ones. I also checked the one mechanism by which this function's tests could plausibly reach unrelated memory and ruled it out: the row loop is a do-while so a zero row count would blast 0x10000 rows, but every range_setup call passes rows of 1 or 2, the widest run is 64 bytes into the 80-byte dest_surface, and nothing writes outside the test file's own buffers. This is the same standing issue already filed in tools/code_emit/data/emit_issues.json against 00057114, 000575ed and 00057916 and reported by earlier emits of 00030f40, 00056837, 00056a8d, 00056bb7, 00056c5e, 00056dc9 and 0005761b, on at least four different images -- a property of the harness, not of any emitted function.",
+      "needs": "A ticket of its own against tests/title.c's movie cover and the run harness, owned by whoever owns src/title.c. The question is what Watcom 10.0a's kbhit actually queries under DOS/4GW -- the BIOS ring at 0x41a/0x41c through INT 16h, or DOS -- and what fdps_uninstall_keyboard_isr plus AIL_shutdown leave behind that makes the answer differ between runs of byte-identical code. Until that is settled the emit gate cannot distinguish this flake from a real regression on any single run, which is what made it block an approved function here.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "My pass adds one thing to the emitter's account of the tests/title.c movie_drains_the_keyboard_queue flake: I did not re-run the harness, but I did establish independently that nothing in this function can reach that cover. 00057a74 makes no call of any kind (get_function_callees returns nothing, and there is no call instruction in 00057a74..00057c5f), it writes only 00070022, 00070030, 00070050 and 00070052, and the last two are touched by exactly eight instructions in the whole image, all of them inside this function -- so no edit to src/rleblend.c has a path to the keyboard-queue state at 0x41a/0x41c. That makes this an honest concern about evidence outside the function rather than a lookup the emitter skipped, and its needs field describes what would settle it without legislating any obligation on a later stage. Agreed as filed.",
+      "needs": "Nothing further from this address; see the emitter's entry for the ticket it belongs to.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

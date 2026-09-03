@@ -944,6 +944,402 @@ static void sprite_tint_run_length_tops_out_at_64(void)
     CHECK_EQ(dest_surface[64], SENTINEL);
 }
 
+/* ------------------------------------------------------------------------
+ * fdps_rle_blit_translucent_color_range, 00057a74.
+ *
+ * Mode 9's blend with one test added per source pixel: in range the pixel goes
+ * through the ramp and the cube exactly as mode 9 sends it, out of range it is
+ * stored as itself.  The row assignment is mode 9's -- MOV [EBP+0xc],EAX / MOV
+ * [EBP+0x10],EDX at 00057abe with EAX and EDX carrying 0x2400 and 0 for a level
+ * of 8 or less -- so the SOURCE reads the row nine on and the DESTINATION the
+ * row the level names, and the cases below reuse the ramp, cube, surface and
+ * weight constants of the mode 9 block at the top of this file.
+ *
+ * The descriptor is five dwords, the last two the bounds, and the kernel takes
+ * only sixteen bits of each (MOV BX,[EAX+0xc] at 00057a7d) into the two globals
+ * it compares against (CMP AX,[0x00070050] / JL at 00057afd).  Those compares
+ * are signed and the pixel byte reaches AX zero-extended, which is what the
+ * signed and sixteen-bit cases below pin down.
+ *
+ * Every out-of-range case marks the ramp entry and the cube entry that a body
+ * which blended anyway would land on, so the two answers cannot both pass.
+ * ------------------------------------------------------------------------ */
+
+/* The range the cases configure.  SRC_PIXEL and SRC_PIXEL_2 sit inside it and
+   OUT_PIXEL outside, and none of the four bound-adjacent bytes collides with a
+   paint mark, the guard or the sentinel. */
+#define RANGE_MIN 0x10
+#define RANGE_MAX 0x30
+#define OUT_PIXEL 0x40
+
+static int range_descriptor[5];
+
+/* Same fixture as blend_setup above with the two bounds appended; the globals
+   are the dispatcher's writes at 000568f8 and 00056903, and the bounds are the
+   kernel's own to publish. */
+static void range_setup(unsigned int level, unsigned short src_width,
+                        unsigned short rows, int color_min, int color_max)
+{
+    int entry_index;
+
+    for (entry_index = 0; entry_index < RAMP_ENTRIES; entry_index++) {
+        blend_ramp[entry_index] = 0;
+    }
+    memset(blend_cube, CUBE_GUARD, (size_t) CUBE_BYTES);
+    memset(dest_surface, SENTINEL, (size_t) DEST_BYTES);
+
+    range_descriptor[0] = (int) blend_ramp;
+    range_descriptor[1] = (int) level;
+    range_descriptor[2] = (int) blend_cube;
+    range_descriptor[3] = color_min;
+    range_descriptor[4] = color_max;
+
+    data_fdps_graphics_rle_blit_src_width = src_width;
+    data_fdps_graphics_rle_blit_remaining_rows = rows;
+}
+
+/* Op 00, length (0x01 & 0x3f) + 1 = 2, with the pixel byte inside the range:
+   the blend is mode 9's, so the two destination bytes come out at the same cube
+   entry mode 9's own fill case lands on.  The bounds are published into the two
+   globals on entry and are still there afterwards. */
+static void range_fill_run_blends_a_pixel_inside_the_range(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x01;
+    stream[1] = SRC_PIXEL;
+    range_setup(0, 2, 1, RANGE_MIN, RANGE_MAX);
+    level_zero_rows();
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+    CHECK_EQ(dest_surface[1], PAINT_A_A);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_translucent_color_min, RANGE_MIN);
+    CHECK_EQ(data_fdps_graphics_rle_blit_translucent_color_max, RANGE_MAX);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The same op with the pixel byte outside the range is REP STOSB at 00057b17:
+   the byte itself reaches the surface, untouched by ramp or cube.  Its ramp
+   entry and the cube entry that entry would form are marked here, so a body
+   that blended it anyway would paint PAINT_B_A instead. */
+static void range_fill_run_stores_a_pixel_outside_the_range_raw(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x01;
+    stream[1] = OUT_PIXEL;
+    range_setup(0, 2, 1, RANGE_MIN, RANGE_MAX);
+    level_zero_rows();
+    set_ramp(9, OUT_PIXEL, WEIGHT_SRC_B);
+    blend_cube[INDEX_B_A] = PAINT_B_A;
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+
+    CHECK_EQ(dest_surface[0], OUT_PIXEL);
+    CHECK_EQ(dest_surface[1], OUT_PIXEL);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+}
+
+/* JL against the low bound and JLE against the high one, so both ends are
+   inside the blended range and the two bytes just outside them are not.  A body
+   spelling either test strictly would fail on the first two blits and one
+   spelling them the other way round would fail on the last two. */
+static void range_bounds_are_inclusive_at_both_ends(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+
+    stream[1] = RANGE_MIN;
+    range_setup(0, 1, 1, RANGE_MIN, RANGE_MAX);
+    set_ramp(9, RANGE_MIN, WEIGHT_SRC_A);
+    set_ramp(0, SENTINEL, WEIGHT_DST_A);
+    blend_cube[INDEX_A_A] = PAINT_A_A;
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+
+    stream[1] = RANGE_MAX;
+    range_setup(0, 1, 1, RANGE_MIN, RANGE_MAX);
+    set_ramp(9, RANGE_MAX, WEIGHT_SRC_A);
+    set_ramp(0, SENTINEL, WEIGHT_DST_A);
+    blend_cube[INDEX_A_A] = PAINT_A_A;
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+
+    stream[1] = RANGE_MIN - 1;
+    range_setup(0, 1, 1, RANGE_MIN, RANGE_MAX);
+    set_ramp(9, RANGE_MIN - 1, WEIGHT_SRC_A);
+    set_ramp(0, SENTINEL, WEIGHT_DST_A);
+    blend_cube[INDEX_A_A] = PAINT_A_A;
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+    CHECK_EQ(dest_surface[0], RANGE_MIN - 1);
+
+    stream[1] = RANGE_MAX + 1;
+    range_setup(0, 1, 1, RANGE_MIN, RANGE_MAX);
+    set_ramp(9, RANGE_MAX + 1, WEIGHT_SRC_A);
+    set_ramp(0, SENTINEL, WEIGHT_DST_A);
+    blend_cube[INDEX_A_A] = PAINT_A_A;
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+    CHECK_EQ(dest_surface[0], RANGE_MAX + 1);
+}
+
+/* The compares are signed 16-bit over a pixel that was zero-extended into AX,
+   so only a bound can be negative.  A low bound of -1 lets every pixel through
+   -- read as an unsigned 0xffff it would let none -- and a high bound of -1
+   stops every pixel, which read as unsigned would stop none.  The two blits
+   disagree in opposite directions, so no single signedness mistake passes
+   both. */
+static void range_bounds_are_read_signed(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = SRC_PIXEL;
+
+    range_setup(0, 1, 1, -1, 0x7f);
+    level_zero_rows();
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+    CHECK_EQ(data_fdps_graphics_rle_blit_translucent_color_min, -1);
+
+    range_setup(0, 1, 1, 0, -1);
+    level_zero_rows();
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+    CHECK_EQ(dest_surface[0], SRC_PIXEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_translucent_color_max, -1);
+}
+
+/* MOV BX,word ptr [EAX+0xc] reads sixteen bits of a whole dword slot, so bits
+   16 and up of either bound are dropped.  Both bounds carry a high half here
+   that would put the pixel outside the range if the dword were used. */
+static void range_bounds_take_only_sixteen_bits(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = SRC_PIXEL;
+    range_setup(0, 1, 1, 0x00010000 + RANGE_MIN, 0x00010000 + RANGE_MAX);
+    level_zero_rows();
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+    CHECK_EQ(data_fdps_graphics_rle_blit_translucent_color_min, RANGE_MIN);
+    CHECK_EQ(data_fdps_graphics_rle_blit_translucent_color_max, RANGE_MAX);
+}
+
+/* Op 01 (0x41, length 2) in range: INC EDI, then the blend, then STOSB, twice,
+   so bytes 1 and 3 are blended and bytes 0 and 2 keep the surface's own
+   content.  The row is four bytes wide because the op subtracts the length
+   twice (SUB BX,CX at 00057b61 and 00057b64). */
+static void range_stretched_run_blends_the_second_of_each_pair(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x41;
+    stream[1] = SRC_PIXEL;
+    range_setup(0, 4, 1, RANGE_MIN, RANGE_MAX);
+    level_zero_rows();
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+
+    CHECK_EQ(dest_surface[0], SENTINEL);
+    CHECK_EQ(dest_surface[1], PAINT_A_A);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+    CHECK_EQ(dest_surface[3], PAINT_A_A);
+    CHECK_EQ(dest_surface[4], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The same op out of range is INC EDI / STOSB / LOOP at 00057b84: it lands on
+   the same two bytes and skips the same two, but the byte it writes is the
+   stream's own.  The ramp and cube entries a blend would use are marked. */
+static void range_stretched_run_stores_an_out_of_range_pixel_raw(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x41;
+    stream[1] = OUT_PIXEL;
+    range_setup(0, 4, 1, RANGE_MIN, RANGE_MAX);
+    level_zero_rows();
+    set_ramp(9, OUT_PIXEL, WEIGHT_SRC_B);
+    blend_cube[INDEX_B_A] = PAINT_B_A;
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+
+    CHECK_EQ(dest_surface[0], SENTINEL);
+    CHECK_EQ(dest_surface[1], OUT_PIXEL);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+    CHECK_EQ(dest_surface[3], OUT_PIXEL);
+    CHECK_EQ(dest_surface[4], SENTINEL);
+}
+
+/* Op 10 (0x81, length 2) tests every byte of its run rather than once for the
+   run: the first byte is inside the range and blends, the second is outside and
+   is stored as itself.  A body that tested once would paint both the same
+   way. */
+static void range_literal_run_tests_every_byte(void)
+{
+    unsigned char stream[3];
+
+    stream[0] = 0x81;
+    stream[1] = SRC_PIXEL;
+    stream[2] = OUT_PIXEL;
+    range_setup(0, 2, 1, RANGE_MIN, RANGE_MAX);
+    set_ramp(9, SRC_PIXEL, WEIGHT_SRC_A);
+    set_ramp(9, OUT_PIXEL, WEIGHT_SRC_B);
+    set_ramp(0, SENTINEL, WEIGHT_DST_A);
+    blend_cube[INDEX_A_A] = PAINT_A_A;
+    blend_cube[INDEX_B_A] = PAINT_B_A;
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+    CHECK_EQ(dest_surface[1], OUT_PIXEL);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+}
+
+/* Op 11 (0xc1, length 2) is ADD EDI,ECX at 00057c3e with no read, no write and
+   no range test: the two bytes it covers keep the surface's own content, it
+   consumes no pixel byte, and the op 00 that follows lands two bytes on. */
+static void range_skip_run_leaves_the_destination_alone(void)
+{
+    unsigned char stream[3];
+
+    stream[0] = 0xc1;
+    stream[1] = 0x01;
+    stream[2] = SRC_PIXEL;
+    range_setup(0, 4, 1, RANGE_MIN, RANGE_MAX);
+    level_zero_rows();
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+
+    CHECK_EQ(dest_surface[0], SENTINEL);
+    CHECK_EQ(dest_surface[1], SENTINEL);
+    CHECK_EQ(dest_surface[2], PAINT_A_A);
+    CHECK_EQ(dest_surface[3], PAINT_A_A);
+    CHECK_EQ(dest_surface[4], SENTINEL);
+}
+
+/* At level 8 or below the source is read from row level + 9 and the destination
+   from row level, which is mode 9's assignment and not the tinting kernels':
+   0x2400 is a byte offset applied after the row scale, so it is nine rows of
+   256 entries.  Level 3 marks rows 12 and 3 and puts the decoys at 3 and 12. */
+static void range_level_below_nine_reads_the_source_nine_rows_on(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = SRC_PIXEL;
+    range_setup(3, 1, 1, RANGE_MIN, RANGE_MAX);
+    set_ramp(12, SRC_PIXEL, WEIGHT_SRC_A);
+    set_ramp(3, SENTINEL, WEIGHT_DST_A);
+    set_ramp(3, SRC_PIXEL, WEIGHT_SRC_B);
+    set_ramp(12, SENTINEL, WEIGHT_DST_B);
+    blend_cube[INDEX_A_A] = PAINT_A_A;
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+    CHECK_EQ(dest_surface[1], SENTINEL);
+}
+
+/* Above 8 the row folds to 16 - level and the nine-row offset moves to the
+   destination: level 12 reads the source from row 4 and the destination from
+   row 13, with the decoys at 13 and 4 where a body that kept both offsets on
+   the same side would look. */
+static void range_level_above_eight_folds_to_sixteen_minus_it(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = SRC_PIXEL;
+    range_setup(12, 1, 1, RANGE_MIN, RANGE_MAX);
+    set_ramp(4, SRC_PIXEL, WEIGHT_SRC_A);
+    set_ramp(13, SENTINEL, WEIGHT_DST_A);
+    set_ramp(13, SRC_PIXEL, WEIGHT_SRC_B);
+    set_ramp(4, SENTINEL, WEIGHT_DST_B);
+    blend_cube[INDEX_A_A] = PAINT_A_A;
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+}
+
+/* The sum 0x00305070 folds to red 3, green 5, blue 7 and the assembly's
+   (v >> 12) | (v & 0xffff) at 00057b3f..00057b45 puts that at 0x537, green
+   major.  The obvious (r << 8) | (g << 4) | b would read 0x357, marked here
+   with a byte no assertion expects. */
+static void range_cube_index_is_green_major(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = SRC_PIXEL;
+    range_setup(0, 1, 1, RANGE_MIN, RANGE_MAX);
+    level_zero_rows();
+    blend_cube[0x357] = 0x3c;
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+}
+
+/* The advance is published into the global on entry and read back from it at
+   every row end, so the second row starts three bytes past where the first one
+   stopped, and the row count is consumed to zero. */
+static void range_row_advance_is_published_and_applied(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x01;
+    stream[1] = SRC_PIXEL;
+    stream[2] = 0x01;
+    stream[3] = SRC_PIXEL;
+    range_setup(0, 2, 2, RANGE_MIN, RANGE_MAX);
+    level_zero_rows();
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 3,
+                                          range_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+    CHECK_EQ(dest_surface[1], PAINT_A_A);
+    CHECK_EQ(dest_surface[2], SENTINEL);
+    CHECK_EQ(dest_surface[4], SENTINEL);
+    CHECK_EQ(dest_surface[5], PAINT_A_A);
+    CHECK_EQ(dest_surface[6], PAINT_A_A);
+    CHECK_EQ(dest_surface[7], SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_row_advance, 3);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* SHR CL,2 / INC CL at 00057af2 over a command byte whose low six bits are all
+   set: 64 pixels is the longest run the format encodes and zero cannot be
+   encoded at all. */
+static void range_run_length_tops_out_at_64(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x3f;
+    stream[1] = SRC_PIXEL;
+    range_setup(0, 64, 1, RANGE_MIN, RANGE_MAX);
+    level_zero_rows();
+    fdps_rle_blit_translucent_color_range(stream, dest_surface, 0,
+                                          range_descriptor);
+
+    CHECK_EQ(dest_surface[0], PAINT_A_A);
+    CHECK_EQ(dest_surface[63], PAINT_A_A);
+    CHECK_EQ(dest_surface[64], SENTINEL);
+}
+
 void run_rleblend_tests(void)
 {
     RUN_TEST(fill_run_blends_len_bytes);
@@ -979,4 +1375,19 @@ void run_rleblend_tests(void)
     RUN_TEST(sprite_tint_cube_index_is_green_major);
     RUN_TEST(sprite_tint_row_advance_is_published_and_applied);
     RUN_TEST(sprite_tint_run_length_tops_out_at_64);
+
+    RUN_TEST(range_fill_run_blends_a_pixel_inside_the_range);
+    RUN_TEST(range_fill_run_stores_a_pixel_outside_the_range_raw);
+    RUN_TEST(range_bounds_are_inclusive_at_both_ends);
+    RUN_TEST(range_bounds_are_read_signed);
+    RUN_TEST(range_bounds_take_only_sixteen_bits);
+    RUN_TEST(range_stretched_run_blends_the_second_of_each_pair);
+    RUN_TEST(range_stretched_run_stores_an_out_of_range_pixel_raw);
+    RUN_TEST(range_literal_run_tests_every_byte);
+    RUN_TEST(range_skip_run_leaves_the_destination_alone);
+    RUN_TEST(range_level_below_nine_reads_the_source_nine_rows_on);
+    RUN_TEST(range_level_above_eight_folds_to_sixteen_minus_it);
+    RUN_TEST(range_cube_index_is_green_major);
+    RUN_TEST(range_row_advance_is_published_and_applied);
+    RUN_TEST(range_run_length_tops_out_at_64);
 }

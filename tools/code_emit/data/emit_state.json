@@ -2022,6 +2022,14 @@
       "status": "committed",
       "emitted_against": "0x158",
       "rounds": 2
+    },
+    "00057a74": {
+      "name": "fdps_rle_blit_translucent_color_range",
+      "target": "rleblend.c",
+      "body_size": "0x1e0",
+      "status": "committed",
+      "emitted_against": "0x1e0",
+      "rounds": 1
     }
   }
 }

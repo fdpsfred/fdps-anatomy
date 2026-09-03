@@ -26,6 +26,12 @@
    0005779c. */
 #define BLEND_DESC_TINT_COLOR 3
 
+/* The fourth and fifth slots as the colour-range kernel reads them, MOV
+   BX,[EAX+0xc] and MOV BX,[EAX+0x10] at 00057a7d and 00057a88.  Both are whole
+   dwords in the record and only their low sixteen bits are taken. */
+#define BLEND_DESC_COLOR_MIN 3
+#define BLEND_DESC_COLOR_MAX 4
+
 /* 0005761b.  Hand-written assembly, not compiler output: no prologue, ESI is
    the stream, EDI the destination, EDX the row advance, BX the width left in
    the row and CL the command byte, and the blend record arrives as [EBP+0x1c],
@@ -591,6 +597,254 @@ void fdps_rle_blit_tint(unsigned char *rle_stream,
             default:
                 /* skip: a transparent run, destination stepped over unwritten
                    and no stream byte consumed */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length);
+                dest_cursor += run_length;
+                break;
+            }
+        } while (width_remaining != 0);
+
+        dest_cursor += data_fdps_graphics_rle_blit_dst_row_advance;
+        data_fdps_graphics_rle_blit_remaining_rows--;
+    } while (data_fdps_graphics_rle_blit_remaining_rows != 0);
+}
+
+/* 00057a74.  Hand-written assembly like the three kernels above, entered by a
+   plain CALL from fdps_blit_dispatch at 000569fe with that function's registers
+   and frame still live: ESI the stream, EDI the destination, EDX the row
+   advance, BX the width left in the row and CL the command byte.  It is the one
+   kernel of the four that does NOT rely on the dispatcher's ECX zeroing at
+   0005690d -- XOR ECX,ECX at 00057ad6 does it here -- which changes nothing for
+   the C but is why the entry note differs from its neighbours'.  The four
+   inputs become the same four parameters the other three take: the dispatcher
+   sets ESI and EDI from [EBP+8] and [EBP+0xc] and EDX as [EBP+0x18] -
+   [EBP+0x10] at 000568e1..000568f1, and the record pointer is its sixth
+   argument at [EBP+0x1c], which this routine dereferences itself at
+   00057a7a..00057a9e.  The C is the same decode and the same arithmetic, not
+   the same registers (ADR-0001).
+
+   The same three register facts as its neighbours do not carry over: the
+   destruction of EBX, ESI and EDI, which the stack convention says a callee
+   preserves; the scratch use of the caller's argument slots, which here is the
+   full width -- [EBP+8] takes the cube base, [EBP+0xc] and [EBP+0x10] the two
+   ramp rows, [EBP+0x14] and [EBP+0x18] the constants 0xf0f0f and 0xffff, and
+   [EBP+0x1c] is reused inside each blending run to park the weighted source
+   colour across the STOSB -- and the zeroing of ECX.  fdps_blit_dispatch reads
+   none of those slots after the call; its epilogue at 00056a08 is four POPs and
+   a RET.
+
+   WHAT SEPARATES THIS KERNEL FROM MODE 9 IS ONE TEST PER SOURCE PIXEL.  Every
+   pixel byte that would be drawn is compared against a caller-supplied palette
+   index range: inside it the pixel is blended into the destination exactly as
+   fdps_rle_blit_translucent blends it, instruction for instruction, and OUTSIDE
+   it the pixel is stored opaque, untouched by ramp or cube.  So the descriptor
+   is FIVE dwords rather than three, its last two carrying the bounds, and each
+   of the three drawing ops grows a second loop for the out-of-range answer:
+   REP STOSB at 00057b17 for the fill, INC EDI / STOSB / LOOP at 00057b84 for
+   the stretched fill, and for the literal a shared STOSB at 00057c28 that both
+   answers fall into with AL holding either the cube byte or the raw pixel.
+
+   THE BOUNDS TRAVEL THROUGH TWO GLOBALS, NOT TWO LOCALS.  MOV BX,[EAX+0xc] /
+   MOV [0x00070050],BX and MOV BX,[EAX+0x10] / MOV [0x00070052],BX at
+   00057a7d..00057a8c copy sixteen bits of each field into memory on entry, and
+   every one of the six compares re-reads it from there.  Nothing else in the
+   image touches either address -- a sweep of all 89420 instructions for
+   0x00070050 and 0x00070052 finds only this routine's four accesses to each --
+   so they are this function's own state, and they are left holding the last
+   call's range after it returns.
+
+   THE RANGE TEST IS SIGNED AND SIXTEEN BITS WIDE.  CMP AX,[0x00070050] / JL and
+   CMP AX,[0x00070052] / JLE at 00057afd..00057b11 compare a pixel byte that was
+   zero-extended by XOR EAX,EAX / LODSB, so the value under test is always 0..255
+   and only the bounds can be negative; a bound whose low sixteen bits have bit
+   15 set is a negative bound and passes every pixel.  The globals are therefore
+   signed shorts in gamedata terms, and comparing them as unsigned would flip
+   that whole half of the input space.  The literal op spells the same predicate
+   the other way round, JL / JG to the raw store at 00057be3..00057bf7, which is
+   the identical condition and not a different one.
+
+   The level fold is fdps_rle_blit_translucent's, unchanged.  CMP ECX,0x8 / JBE
+   at 00057aa8 is UNSIGNED and the arm it guards is SUB ECX,0x10 / NEG ECX /
+   XCHG EAX,EDX, so for a level of 8 or less the SOURCE pixel is weighted through
+   row level + 9 and the destination through row level, and above 8 the row folds
+   to 16 - level with the nine-row offset moved to the destination side.  Picking
+   any two rows whose coefficients do not sum to 16 breaks the masked add,
+   because the fold SHR EAX,0x4 / AND 0xf0f0f relies on no channel byte of the
+   sum exceeding 15 * 16.
+
+   The cube index is built green-major, (v >> 12) | (v & 0xffff) at
+   00057b3f..00057b45, the same order fdps_build_palette_tables writes the cube
+   in and NOT the order the axis names suggest (rebuild_info/pitfalls.md).
+
+   Three things look like defects and are the whole family's: the row ends on OR
+   BX,BX / JNZ, an exact-zero test, so a run that overshoots the remaining width
+   wraps the sixteen-bit counter instead of ending the row; op 01 writes only the
+   second byte of each destination pair -- INC EDI, then STOSB -- while
+   subtracting the length from the row width twice (SUB BX,CX at 00057b61 and
+   00057b64); and the row counter is decremented in memory by a do-while, so a
+   caller that asks for zero rows gets 0x10000 of them.  The width is re-read
+   from the global at the top of every row because that is where MOV
+   BX,[0x00070024] sits, at the row-restart target 00057ad8.
+
+   Nothing in the shipped executable selects mode 0x0c, so no play-test reaches
+   this kernel whatever a rebuild does with it; the only check available is
+   reading it against the original, which is what the cases in tests/rleblend.c
+   do. */
+void fdps_rle_blit_translucent_color_range(unsigned char *rle_stream,
+                                           unsigned char *dest_pixel,
+                                           int dest_row_advance,
+                                           int *blend_descriptor)
+{
+    unsigned char *stream_cursor;
+    unsigned char *dest_cursor;
+    unsigned int *shade_ramp;
+    unsigned int blend_level;
+    unsigned int ramp_row;
+    unsigned int *source_weight_row;
+    unsigned int *dest_weight_row;
+    unsigned char *inverse_palette_cube;
+    unsigned short width_remaining;
+    unsigned char command;
+    unsigned int run_length;
+    unsigned char run_pixel;
+    unsigned char written_pixel;
+    unsigned int weighted_source;
+    unsigned int blended;
+    unsigned int cube_index;
+
+    data_fdps_graphics_rle_blit_dst_row_advance = dest_row_advance;
+
+    /* Sixteen bits of each bound, published where the six compares read them
+       back from (00057a7d..00057a8c). */
+    data_fdps_graphics_rle_blit_translucent_color_min =
+        (short) blend_descriptor[BLEND_DESC_COLOR_MIN];
+    data_fdps_graphics_rle_blit_translucent_color_max =
+        (short) blend_descriptor[BLEND_DESC_COLOR_MAX];
+
+    shade_ramp = (unsigned int *) blend_descriptor[BLEND_DESC_SHADE_RAMP];
+    blend_level = (unsigned int) blend_descriptor[BLEND_DESC_LEVEL];
+    inverse_palette_cube =
+        (unsigned char *) blend_descriptor[BLEND_DESC_CUBE];
+
+    if (blend_level <= 8) {
+        ramp_row = blend_level;
+        source_weight_row = shade_ramp + ramp_row * SHADE_RAMP_ROW_ENTRIES
+                            + SHADE_RAMP_COMPLEMENT_ROWS;
+        dest_weight_row = shade_ramp + ramp_row * SHADE_RAMP_ROW_ENTRIES;
+    } else {
+        ramp_row = 16 - blend_level;
+        source_weight_row = shade_ramp + ramp_row * SHADE_RAMP_ROW_ENTRIES;
+        dest_weight_row = shade_ramp + ramp_row * SHADE_RAMP_ROW_ENTRIES
+                          + SHADE_RAMP_COMPLEMENT_ROWS;
+    }
+
+    stream_cursor = rle_stream;
+    dest_cursor = dest_pixel;
+
+    do {
+        width_remaining = data_fdps_graphics_rle_blit_src_width;
+
+        do {
+            command = *stream_cursor;
+            stream_cursor++;
+            run_length = (unsigned int) (command & 0x3f) + 1;
+
+            switch (command >> 6) {
+            case 0:
+                /* fill: one pixel byte for the whole run, tested once.  In
+                   range it is weighted once and blended into each of the
+                   run_length destination bytes in turn; out of range the byte
+                   itself is stored across them (REP STOSB at 00057b17). */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length);
+                run_pixel = *stream_cursor;
+                stream_cursor++;
+                if ((short) run_pixel
+                        >= data_fdps_graphics_rle_blit_translucent_color_min
+                    && (short) run_pixel
+                        <= data_fdps_graphics_rle_blit_translucent_color_max) {
+                    weighted_source = source_weight_row[run_pixel];
+                    while (run_length != 0) {
+                        blended = (weighted_source
+                                   + dest_weight_row[*dest_cursor]) >> 4;
+                        blended &= 0x000f0f0fu;
+                        cube_index = (blended & 0xffffu) | (blended >> 12);
+                        *dest_cursor = inverse_palette_cube[cube_index];
+                        dest_cursor++;
+                        run_length--;
+                    }
+                } else {
+                    while (run_length != 0) {
+                        *dest_cursor = run_pixel;
+                        dest_cursor++;
+                        run_length--;
+                    }
+                }
+                break;
+
+            case 1:
+                /* stretched fill: the second byte of each of run_length
+                   destination pairs, first halves untouched, and the same one
+                   test for the whole run. */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length - run_length);
+                run_pixel = *stream_cursor;
+                stream_cursor++;
+                if ((short) run_pixel
+                        >= data_fdps_graphics_rle_blit_translucent_color_min
+                    && (short) run_pixel
+                        <= data_fdps_graphics_rle_blit_translucent_color_max) {
+                    weighted_source = source_weight_row[run_pixel];
+                    while (run_length != 0) {
+                        dest_cursor++;
+                        blended = (weighted_source
+                                   + dest_weight_row[*dest_cursor]) >> 4;
+                        blended &= 0x000f0f0fu;
+                        cube_index = (blended & 0xffffu) | (blended >> 12);
+                        *dest_cursor = inverse_palette_cube[cube_index];
+                        dest_cursor++;
+                        run_length--;
+                    }
+                } else {
+                    while (run_length != 0) {
+                        dest_cursor++;
+                        *dest_cursor = run_pixel;
+                        dest_cursor++;
+                        run_length--;
+                    }
+                }
+                break;
+
+            case 2:
+                /* literal: run_length pixel bytes, each one tested on its own
+                   and either blended or stored raw, both answers meeting at the
+                   one STOSB at 00057c28. */
+                width_remaining = (unsigned short)
+                                  (width_remaining - run_length);
+                while (run_length != 0) {
+                    run_pixel = *stream_cursor;
+                    stream_cursor++;
+                    written_pixel = run_pixel;
+                    if ((short) run_pixel
+                            >= data_fdps_graphics_rle_blit_translucent_color_min
+                        && (short) run_pixel
+                            <= data_fdps_graphics_rle_blit_translucent_color_max) {
+                        weighted_source = source_weight_row[run_pixel];
+                        blended = (weighted_source
+                                   + dest_weight_row[*dest_cursor]) >> 4;
+                        blended &= 0x000f0f0fu;
+                        cube_index = (blended & 0xffffu) | (blended >> 12);
+                        written_pixel = inverse_palette_cube[cube_index];
+                    }
+                    *dest_cursor = written_pixel;
+                    dest_cursor++;
+                    run_length--;
+                }
+                break;
+
+            default:
+                /* skip: a transparent run, destination stepped over unwritten
+                   and no stream byte consumed, so no range test either */
                 width_remaining = (unsigned short)
                                   (width_remaining - run_length);
                 dest_cursor += run_length;

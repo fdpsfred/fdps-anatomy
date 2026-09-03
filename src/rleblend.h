@@ -31,6 +31,22 @@
 #ifndef RLEBLEND_H
 #define RLEBLEND_H
 
+/* 00070050 and 00070052.  The inclusive palette-index range that decides which
+   pixels fdps_rle_blit_translucent_color_range blends and which it draws
+   opaque.  The kernel copies sixteen bits of each of its descriptor's last two
+   fields here on entry (MOV [0x00070050],BX at 00057a81 and MOV
+   [0x00070052],BX at 00057a8c) and re-reads them from here at every one of its
+   six compares; nothing else in the image touches either address, so they are
+   that kernel's own state and they keep the last call's range after it
+   returns.
+
+   They are signed because the compares are: CMP AX,[0x00070050] / JL over a
+   pixel byte that was zero-extended into AX, so the value under test is always
+   0..255 and only a bound can be negative -- a bound with bit 15 set passes
+   every pixel, which reading them as unsigned would turn into passing none. */
+extern short data_fdps_graphics_rle_blit_translucent_color_min;
+extern short data_fdps_graphics_rle_blit_translucent_color_max;
+
 /* 0005761b.  Blit mode 9, the translucent sprite blit: draws one sprite stream
    with every pixel it paints blended into the destination pixel underneath it,
    so the whole sprite comes out see-through at the level the descriptor names.
@@ -129,5 +145,38 @@ extern void fdps_rle_blit_tint(unsigned char *rle_stream,
                                int dest_row_advance,
                                int *blend_descriptor);
 #pragma aux fdps_rle_blit_tint "*" parm caller [];
+
+/* 00057a74.  Blit mode 0x0c, the colour-range translucent blit: op for op it is
+   fdps_rle_blit_translucent above, with one test added per source pixel.  A
+   pixel whose palette index falls inside the range the descriptor names is
+   blended into the destination pixel underneath it exactly as mode 9 blends it;
+   a pixel outside the range is stored opaque, so the sprite comes out
+   see-through only in the colours the caller picked and solid everywhere else.
+
+   The first three parameters are what they are for the other three kernels: the
+   command stream, the first pixel of the top row, and the row advance the
+   caller computes as pitch - width, which this kernel likewise publishes in
+   data_fdps_graphics_rle_blit_dst_row_advance on entry and reads back from
+   there at every row end.
+
+   `blend_descriptor` is FIVE dwords: [0] the shade ramp base, [1] the blend
+   level, [2] the inverse colour cube base, [3] the low palette index of the
+   blended range and [4] the high one.  Only the low sixteen bits of the last
+   two are read, and they are copied into the two globals declared at the top of
+   this header before any drawing.  The level means what it means for mode 9 --
+   0 = the source drawn opaque through 16 = the source invisible, the source
+   weighted through ramp row level + 9 and the destination through row level for
+   a level of 8 or less, the two folded to 16 - level and swapped above that.
+
+   No call site in the image selects mode 0x0c: fdps_blit_dispatch is the only
+   entry and no path in the program produces that mode value, so this kernel
+   never runs in the shipped game and nothing observes the two range globals
+   either.  The row width and row count still come from the same two globals in
+   gamedata.h. */
+extern void fdps_rle_blit_translucent_color_range(unsigned char *rle_stream,
+                                                  unsigned char *dest_pixel,
+                                                  int dest_row_advance,
+                                                  int *blend_descriptor);
+#pragma aux fdps_rle_blit_translucent_color_range "*" parm caller [];
 
 #endif
