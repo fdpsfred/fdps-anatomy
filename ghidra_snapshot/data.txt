@@ -975,7 +975,8 @@
 0006179f | 0xe | /string | - | -
 000617b0 | 0x9 | /char[9] | s_Turn.saf_000617b0 | DEFAULT
 000617bc | 0x3 | /char[3] | binary_artifact_string_literal_decimal_format_617bc | USER_DEFINED
-000617bf | 0xe | /string | - | -
+000617bf | 0x1 | /undefined1 | - | -
+000617c0 | 0xd | /string | s_PLYPHASE.SAF_000617c0 | DEFAULT
 000617d0 | 0xc | /string | s_EasyAni.Saf_000617d0 | DEFAULT
 000617dc | 0xb | /string | s_PosEff.saf_000617dc | DEFAULT
 000617e8 | 0x3 | /char[3] | binary_artifact_string_literal_decimal_format_617e8 | USER_DEFINED

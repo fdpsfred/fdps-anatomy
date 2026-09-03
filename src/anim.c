@@ -1,29 +1,33 @@
 /* anim.c -- VFS/SAF animation playback and the turn banner.
  *
  * See anim.h for what a caller has to know and resource_info/vfs.md for the
- * container the animations come out of.  This file owns one piece of state,
+ * containers the animations come out of.  This file owns one piece of state,
  * the pointer to the member the last BaseAni.vfs lookup found; the archive
  * image itself belongs to the startup loader and is declared in gamedata.h.
  *
- * printf and sprintf come from <stdio.h>, exit from <stdlib.h> and strlen from
- * <string.h>, and all four are real calls in the original -- CALL 0x00042deb
- * and CALL 0x00042e0f at 0002a284 and 0002a28e, CALL 0x00042d41 at 0001ea9c
- * and CALL 0x00042dd2 at 0001eaaf -- because the flag set carries no -oi
- * (rebuild_info/build_flags.md), so the plain declarations are what reproduce
- * them.  malloc and free come from <stdlib.h> and delay from <i86.h>, which is
- * where Watcom 10.0a declares it; those three are calls in the original too --
- * CALL 0x0003d375 at 0001e860, CALL 0x0003d478 at 0001ea68 and CALL 0x0003d370
- * at 0001e983.
+ * printf and sprintf come from <stdio.h>, exit from <stdlib.h> and strlen and
+ * strcmp from <string.h>, and all five are real calls in the original -- CALL
+ * 0x00042deb and CALL 0x00042e0f at 0002a284 and 0002a28e, CALL 0x00042d41 at
+ * 0001ea9c, CALL 0x00042dd2 at 0001eaaf and CALL 0x00042fe0 at 0001ec15 --
+ * because the flag set carries no -oi (rebuild_info/build_flags.md), so the
+ * plain declarations are what reproduce them.  malloc and free come from
+ * <stdlib.h>, memmove from <string.h>, delay from <i86.h> and inp from
+ * <conio.h>, which is where Watcom 10.0a declares each of them; all four are
+ * calls in the original too -- CALL 0x0003d375 at 0001e860, CALL 0x0003d478 at
+ * 0001ea68, CALL 0x0003d514 at 0001eb4f, CALL 0x0003d370 at 0001e983 and CALL
+ * 0x0003d4e4 at 0001ebc3.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <conio.h>
 #include <i86.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "vfs.h"
 #include "blit.h"
 #include "sprite.h"
+#include "saf.h"
 #include "anim.h"
 
 /* 0002a240.  One branch, CMP dword ptr [0x000643ec],0x0 / JZ at 0002a267, and
@@ -255,4 +259,157 @@ void fdps_animate_turn_banner(unsigned char *saved_screen)
     }
 
     free(work_surface);
+}
+
+/* The container every full-screen animation is a member of, and the one member
+   the turn banner is announced in front of.  Both are literals in the original
+   -- MOV EAX,0x60128 at 0001eb10 and MOV EAX,0x617c0 at 0001ec0b -- and both
+   have to live in writable storage: the first because fdps_vfs_open's caller
+   chain folds nothing but the member name, which is the caller's buffer here,
+   and the second because it is only ever compared.  It is the CALLER'S buffer
+   that gets upper-cased in place, so a caller of this function is the one that
+   needs writable storage (rebuild_info/pitfalls.md). */
+#define ANIMATION_ARCHIVE "MISC.VFS"
+#define PLAYER_PHASE_ANIMATION "PLYPHASE.SAF"
+
+/* The mode 13h frame the fades cover, whole: 320 bytes to the row, 200 rows and
+   the 64000 bytes that comes to.  VGA_SCREEN_BASE and VGA_SCREEN_PITCH are the
+   banner's above and mean the same here. */
+#define VGA_SCREEN_ROWS 0xc8
+#define VGA_SCREEN_BYTES 0xfa00
+
+/* VGA input status register 1.  Bit 3 is set while the vertical retrace is in
+   progress, which is what each fade step straddles. */
+#define VGA_INPUT_STATUS_1 0x3da
+#define VGA_STATUS_VERTICAL_RETRACE 0x08
+
+/* How dark the dimming pass gets and how light the restoring pass ends: both
+   walk levels 1 to 5 of the shade ramp, out and back.  CMP dword ptr
+   [EBP-0x8],0x6 / JL at 0001eb74 and CMP dword ptr [EBP-0x8],0x0 / JG at
+   0001ec50 are both SIGNED, so the counter is a signed int. */
+#define ANIMATION_FADE_LEVELS 5
+
+/* The colour both fades weigh the screen against, PUSH 0x0 at 0001eb8b: entry 0
+   of the shade ramp's tint row, which is why the screen goes to black. */
+#define ANIMATION_FADE_TINT 0
+
+/* 0001eb00.  Two counted loops with no branch inside either and one test
+   between them, cyclomatic complexity 4 counting the four wait loops.
+
+   The two fade bodies are the same six statements written out twice.  The
+   original has them inline in both loops and not behind a call, and the only
+   thing that differs between them is which saved copy is read and which way the
+   level counter walks, so they stay written out here.
+
+   THE TWO SAVED COPIES ARE FILLED FROM THE ADAPTER SEPARATELY, not copied from
+   one another: the memmove at 0001eb4f and the one at 0001eb65 both read
+   0xa0000.  The dimming pass then overwrites the first one with the dimmed
+   screen at 0001ebf5, which is what makes it the clip's backdrop, and never
+   touches the second, which is what leaves the restoring pass an untouched
+   picture to work from.  Emitting one copy and reusing it makes the restoring
+   pass fade the dimmed screen back in and the picture never returns.
+
+   THE PLAYER-PHASE TEST IS MADE AGAINST THE FOLDED NAME, AND THAT IS THE ONLY
+   REASON IT EVER MATCHES.  strcmp at 0001ec15 compares [EBP+0x14] -- the
+   caller's own buffer -- with the upper-case literal at 0x617c0, while every
+   one of the three call sites hands in a mixed-case one: "EnyPhase.saf" at
+   0x61790 (0001e5ad), "PlyPhase.saf" at 0x617a0 (0001e609) and the same
+   spelling at 0x61acc (000241c0).  What closes the gap is fdps_vfs_load_entry,
+   which upper-cases the caller's buffer in place before it returns (vfs.h), so
+   by the time the comparison runs the caller's own literal has been rewritten
+   to "PLYPHASE.SAF".  The banner it runs draws on the adapter and leaves the
+   backdrop copy alone, so the clip that follows paints straight over it and
+   nothing of the banner is carried into the backdrop.
+
+   THE FRAME WAIT'S LATCH IS DELIBERATELY LEFT UNINITIALISED, the same contract
+   fdps_animate_turn_banner above and fdps_saf_play_over_background (saf.c)
+   carry.  last_tick is read at 0001ebe0 before anything has written it, so the
+   dimming pass's first step ends its wait at once unless the stack garbage
+   happens to equal the counter; the restoring pass then inherits whatever the
+   clip left in it, which is a value the counter has already gone past, so its
+   first step is unpaced as well.  Latching the counter before each loop adds a
+   tick to each pass.
+
+   data_fdps_timer_tick_counter is volatile at its declaration (gamedata.h)
+   because of these two loops: nothing inside them writes the counter, so a
+   build allowed to hoist the load would spin here forever.
+
+   No CALL's answer is read except fdps_vfs_load_entry's and the two malloc's,
+   and neither malloc is tested.  fdps_blit_tint_rect, fdps_animate_turn_banner,
+   fdps_saf_play_over_background and memmove all return values the original
+   discards; strcmp's is the one that is tested.
+
+   0xa0000 is written as a literal because it is the adapter's real linear
+   address under DOS/4GW and not a symbol the rebuild places anywhere
+   (rebuild_info/pitfalls.md, contract E). */
+void fdps_play_vfs_animation(char *name)
+{
+    /* The member loaded out of MISC.VFS, which this function owns and frees. */
+    void *animation;
+    /* The screen as it was on entry, read by the dimming pass and then
+       replaced by the dimmed screen the clip is played over. */
+    unsigned char *backdrop;
+    /* The screen as it was on entry, kept untouched for the restoring pass. */
+    unsigned char *saved_screen;
+    /* Which of the five shade-ramp levels this step weighs the screen at. */
+    int level;
+    /* The tick the previous step ended on.  Deliberately not initialised --
+       see the note above. */
+    unsigned int last_tick;
+
+    animation = fdps_vfs_load_entry(ANIMATION_ARCHIVE, name);
+    backdrop = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+    saved_screen = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+    memmove(backdrop, (void *) VGA_SCREEN_BASE, (size_t) VGA_SCREEN_BYTES);
+    memmove(saved_screen, (void *) VGA_SCREEN_BASE, (size_t) VGA_SCREEN_BYTES);
+
+    for (level = 1; level <= ANIMATION_FADE_LEVELS; level++) {
+        fdps_blit_tint_rect(backdrop, VGA_SCREEN_PITCH,
+                            (unsigned char *) VGA_SCREEN_BASE,
+                            VGA_SCREEN_PITCH, VGA_SCREEN_PITCH,
+                            VGA_SCREEN_ROWS,
+                            data_fdps_palette_shade_ramp_table,
+                            data_fdps_inverse_palette_cube,
+                            ANIMATION_FADE_TINT, level);
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins, so the step that has just been
+               written is the one the monitor shows whole. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends, so the next step's write starts clear of
+               it. */
+        }
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
+
+    memmove(backdrop, (void *) VGA_SCREEN_BASE, (size_t) VGA_SCREEN_BYTES);
+    if (strcmp(name, PLAYER_PHASE_ANIMATION) == 0) {
+        fdps_animate_turn_banner(backdrop);
+    }
+    fdps_saf_play_over_background(animation, backdrop);
+    free(backdrop);
+
+    for (level = ANIMATION_FADE_LEVELS; level > 0; level--) {
+        fdps_blit_tint_rect(saved_screen, VGA_SCREEN_PITCH,
+                            (unsigned char *) VGA_SCREEN_BASE,
+                            VGA_SCREEN_PITCH, VGA_SCREEN_PITCH,
+                            VGA_SCREEN_ROWS,
+                            data_fdps_palette_shade_ramp_table,
+                            data_fdps_inverse_palette_cube,
+                            ANIMATION_FADE_TINT, level);
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends. */
+        }
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
+
+    free(animation);
+    free(saved_screen);
 }

@@ -1031,6 +1031,405 @@ static void banner_repaints_the_background_under_every_step(void)
     CHECK_EQ(banner_border_untouched(), BANNER_BORDER_BYTES);
 }
 
+/* ---- fdps_play_vfs_animation, 0001eb00 -----------------------------------
+ *
+ * Expected values come from the assembly: MOV EAX,0x60128 / PUSH at 0001eb10
+ * for the container the member is loaded out of; PUSH 0xfa00 / CALL malloc at
+ * 0001eb21 and 0001eb31 for the two saved copies and PUSH 0xfa00 / PUSH
+ * 0xa0000 / CALL memmove at 0001eb4f and 0001eb65 for both being filled from
+ * the adapter; the ten-push blit at 0001ebb6 -- level, 0, 0x643f0, 0x653f0,
+ * 0xc8, 0x140, 0x140, 0xa0000, 0x140, the saved copy -- for the rectangle and
+ * the two tables a step folds through; MOV dword ptr [EBP-0x8],0x1 / CMP
+ * [EBP-0x8],0x6 / JL at 0001eb6d and 0001eb74 for the dimming pass's levels 1
+ * to 5, and MOV dword ptr [EBP-0x8],0x5 / CMP [EBP-0x8],0x0 / JG at 0001ec49
+ * and 0001ec50 for the restoring pass's 5 down to 1; the third memmove at
+ * 0001ec03, which reads 0xa0000 into the FIRST copy only; and the strcmp at
+ * 0001ec15 against 0x617c0 guarding the call to fdps_animate_turn_banner.  None
+ * of them is read off the emitted C.
+ *
+ * HOW A FADE STEP IS MADE READABLE.  A step's output is
+ * inverse_palette_cube[(shade_ramp[level * 0x100 + 0x900 + pixel] >> 4)
+ * folded], with the tint entry at shade_ramp[level * 0x100] contributing zero
+ * (blit.h); both tables are globals ticket 23 has not written, so the cases
+ * below fill them themselves.  Each ramp entry is set so that the fold lands on
+ * cube index level * 0x100 + pixel, and that cube entry is set to
+ * 0x40 + level * 16 + pixel.  So a byte on the adapter names the level it was
+ * tinted at AND the source pixel it came from, source pixels are kept to 0..15
+ * so the two never collide, and every index the tables do not define answers 0.
+ * That is a fixture for observing the function under test, not an assertion
+ * about what the tables hold in the game.
+ *
+ * WHAT THE CLIP IS.  ME03.SAF, a real 66-byte member of the shipped MISC.VFS:
+ * one frame, no layers and a duration of 12 ticks, so the player repaints the
+ * backdrop twelve times and draws nothing over it.  A fabricated container
+ * cannot stand in -- the loader takes the container's name as a literal, so
+ * there is nothing to point at a smaller file, and a member it cannot find ends
+ * the process rather than failing an assertion.
+ *
+ * WHY A TIMER INTERRUPT IS INSTALLED, and why the handler samples the adapter:
+ * every fade step and every frame of the clip ends waiting for
+ * data_fdps_timer_tick_counter to change, so nothing runs at all unless
+ * something advances it, and the handler that does is also the only place from
+ * which the screen can be looked at WHILE the call is still running.  The
+ * restoring pass overwrites all 64000 bytes, so the dimmed backdrop the clip
+ * plays over cannot be seen after the call returns.
+ *
+ * WHAT IS NOT COVERED.  Which of the two saved copies is freed where -- the
+ * backdrop at 0001ec41 before the restoring pass, the member and the untouched
+ * copy at 0001ecd5 and 0001ece1 after it -- has no unit observable; a leak or a
+ * double free would show as an allocator failure and not as a wrong value.  Nor
+ * does anything here pin the retrace waits: they cost a fraction of the tick
+ * every step already waits for, and what they buy is a playtest contract
+ * (rebuild_info/pitfalls.md).  The turn banner's own frames are covered by the
+ * cases above; the case below only establishes that it runs, and for which
+ * name.
+ * ------------------------------------------------------------------ */
+
+#define ANIM_ARCHIVE "MISC.VFS"
+
+/* One frame, no layers, duration 12: the shortest real clip in the container,
+   so the backdrop is repainted twelve times and nothing is drawn over it. */
+#define ANIM_CLIP "ME03.SAF"
+
+/* The two phase announcements, 35 and 34 frames, of which only the first is
+   the name the turn banner is keyed on -- spelled the way the game's own call
+   sites spell them, which is MIXED CASE: "EnyPhase.saf" at 0x61790 and
+   "PlyPhase.saf" at 0x617a0 and 0x61acc.  The comparison inside is against an
+   upper-case literal, so passing them as written is what puts the in-place fold
+   in the path of the test. */
+#define ANIM_PLAYER_CLIP "PlyPhase.saf"
+#define ANIM_ENEMY_CLIP "EnyPhase.saf"
+
+/* Queries are written into, because the loader upper-cases the caller's own
+   storage. */
+#define ANIM_NAME_MAX 16
+
+/* The shade ramp's shape, restated here from the fold at 00030010 rather than
+   taken from src/: 0x100 entries to a row and 0x900 entries from a tint row to
+   its complementary source row. */
+#define ANIM_RAMP_ROW_ENTRIES 0x100
+#define ANIM_RAMP_COMPLEMENT_ROWS 0x900
+
+/* The levels both passes walk, and the source values the fixture defines a
+   ramp entry for.  Sixteen keeps a level and a pixel in separate nibbles of the
+   cube index. */
+#define ANIM_LEVELS 5
+#define ANIM_SOURCE_VALUES 16
+
+/* What a defined cube entry answers: 0x50 through 0x9f, none of which a source
+   pixel can be and none of which is the 0 an undefined index gives. */
+#define ANIM_TINT_MARK 0x40
+
+/* Where the interrupt handler watches the screen, and how many ticks of it are
+   kept.  Row 100 column 160 is inside every rectangle in play; 128 samples is
+   five times the 22 ticks a run of the short clip costs. */
+#define ANIM_PROBE_ROW 100
+#define ANIM_PROBE_COL 160
+#define ANIM_SAMPLE_MAX 128
+
+/* How many ticks the probe has to spend on the darkest level before the clip
+   can be said to have played over the dimmed screen.  The two passes contribute
+   one step at level 5 each; everything beyond that is the clip. */
+#define ANIM_DIMMED_MIN_TICKS 3
+
+/* How many distinct levels have to show up for the fade to be a ramp rather
+   than a single step.  Ten steps are walked and one tick is sampled per step,
+   so three is well inside what the sampling can lose. */
+#define ANIM_LEVELS_MIN_SEEN 3
+
+/* What the player-phase name has to cost over the enemy-phase one before the
+   banner can be said to have run: 24 banner steps each waiting a tick, of which
+   two are documented as unpaced, plus the 500 ms hold, which is nine ticks at
+   the 18.2 Hz the interrupt arrives on.  The two clips themselves are 35 and 34
+   frames, so one tick of the difference is theirs. */
+#define ANIM_BANNER_MIN_TICKS 20
+
+static unsigned char anim_background[BANNER_SCREEN_BYTES];
+static unsigned char anim_screen[BANNER_SCREEN_BYTES];
+
+static volatile int anim_sample_count;
+static volatile unsigned char anim_samples[ANIM_SAMPLE_MAX];
+static int anim_probe_at;
+
+static void (__interrupt __far *anim_saved_timer)();
+
+static void __interrupt __far anim_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    if (anim_sample_count < ANIM_SAMPLE_MAX) {
+        anim_samples[anim_sample_count] =
+            ((unsigned char *) BANNER_VGA_BASE)[anim_probe_at];
+        anim_sample_count = anim_sample_count + 1;
+    }
+    _chain_intr(anim_saved_timer);
+}
+
+/* The pre-call picture.  Every byte is 0..15, which is the range the fixture
+   defines a ramp entry for and is disjoint from every value a tint can
+   produce. */
+static int anim_pattern(int row, int col)
+{
+    return (row * 7 + col * 3) & 0x0f;
+}
+
+/* What a step at this level over this source pixel has to put on the
+   adapter. */
+static int anim_tint(int level, int source_pixel)
+{
+    return ANIM_TINT_MARK + level * 16 + source_pixel;
+}
+
+/* Which level produced a byte, or 0 for a byte no level of this source pixel
+   can produce. */
+static int anim_level_of(int value, int source_pixel)
+{
+    int level;
+
+    for (level = 1; level <= ANIM_LEVELS; level++) {
+        if (value == anim_tint(level, source_pixel)) {
+            return level;
+        }
+    }
+    return 0;
+}
+
+static void anim_stage_tables(void)
+{
+    int level;
+    int pixel;
+    unsigned int blended;
+
+    memset(data_fdps_palette_shade_ramp_table, 0,
+           sizeof(data_fdps_palette_shade_ramp_table));
+    memset(data_fdps_inverse_palette_cube, 0,
+           sizeof(data_fdps_inverse_palette_cube));
+
+    for (level = 1; level <= ANIM_LEVELS; level++) {
+        for (pixel = 0; pixel < ANIM_SOURCE_VALUES; pixel++) {
+            blended = ((unsigned int) level << 8) | (unsigned int) pixel;
+            data_fdps_palette_shade_ramp_table[level * ANIM_RAMP_ROW_ENTRIES
+                                               + ANIM_RAMP_COMPLEMENT_ROWS
+                                               + pixel] = blended << 4;
+            data_fdps_inverse_palette_cube[blended] =
+                (unsigned char) anim_tint(level, pixel);
+        }
+    }
+}
+
+static void anim_stage_background(void)
+{
+    int row;
+    int col;
+
+    for (row = 0; row < BANNER_SCREEN_H; row++) {
+        for (col = 0; col < BANNER_SCREEN_W; col++) {
+            anim_background[row * BANNER_SCREEN_W + col] =
+                (unsigned char) anim_pattern(row, col);
+        }
+    }
+}
+
+/* One whole animation, with the adapter in the mode the game plays it in, the
+   pre-call picture on the screen and a timer interrupt running.  Leaves the
+   frame in anim_screen[] and the per-tick probe in anim_samples[], and answers
+   how many ticks the call took. */
+static unsigned int anim_play(char *clip_name)
+{
+    char query[ANIM_NAME_MAX];
+    unsigned int before;
+    unsigned int after;
+
+    anim_stage_tables();
+    anim_stage_background();
+    anim_sample_count = 0;
+    anim_probe_at = ANIM_PROBE_ROW * BANNER_SCREEN_W + ANIM_PROBE_COL;
+    strcpy(query, clip_name);
+
+    banner_set_mode(BANNER_MODE_320X200X256);
+    memmove((void *) BANNER_VGA_BASE, anim_background,
+            (size_t) BANNER_SCREEN_BYTES);
+
+    anim_saved_timer = _dos_getvect(BANNER_TIMER_VECTOR);
+    _dos_setvect(BANNER_TIMER_VECTOR, anim_timer_isr);
+    before = data_fdps_timer_tick_counter;
+    fdps_play_vfs_animation(query);
+    after = data_fdps_timer_tick_counter;
+    _dos_setvect(BANNER_TIMER_VECTOR, anim_saved_timer);
+
+    memmove(anim_screen, (void *) BANNER_VGA_BASE,
+            (size_t) BANNER_SCREEN_BYTES);
+    banner_set_mode(BANNER_MODE_TEXT);
+    return after - before;
+}
+
+static int anim_archive_is_staged(void)
+{
+    FILE *fp;
+
+    fp = fopen(ANIM_ARCHIVE, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    fclose(fp);
+    return 1;
+}
+
+/* Every one of the 64000 bytes comes back as level 1 of the byte that was under
+   it before the call, which is three things at once.
+
+   The restoring pass reads the copy that was never written again: had it read
+   the backdrop, whose bytes are level 5's 0x90..0x9f by then, the fold would
+   index a cube entry the fixture leaves at 0 and the frame would be black.
+
+   It ends at level 1 and not at 0: level 1 and level 2 differ by sixteen in
+   every byte.
+
+   And it covers the whole 320x200 frame at a pitch of 320: a byte the two
+   passes missed would still hold the pre-call value, which is 0..15 and cannot
+   be mistaken for a tint.  That last point is asserted again on its own, since
+   it is also what says the call does NOT put the picture back as it was. */
+static void vfs_animation_ends_on_level_one_of_the_untouched_screen(void)
+{
+    int row;
+    int col;
+    long at;
+    int wrong_level;
+    int still_pre_call;
+
+    if (!anim_archive_is_staged()) {
+        return;
+    }
+    anim_play(ANIM_CLIP);
+
+    wrong_level = 0;
+    still_pre_call = 0;
+    for (row = 0; row < BANNER_SCREEN_H; row++) {
+        for (col = 0; col < BANNER_SCREEN_W; col++) {
+            at = (long) row * BANNER_SCREEN_W + col;
+            if ((int) anim_screen[at] != anim_tint(1, anim_pattern(row, col))) {
+                wrong_level++;
+            }
+            if ((int) anim_screen[at] == anim_pattern(row, col)) {
+                still_pre_call++;
+            }
+        }
+    }
+    CHECK_EQ(wrong_level, 0);
+    CHECK_EQ(still_pre_call, 0);
+}
+
+/* What the screen held on each of the ticks the call spent, read at one pixel.
+
+   Before the first step lands the screen still holds the pre-call picture, and
+   every sample up to that point has to be exactly it.  From the first tinted
+   sample onwards no sample may be the pre-call value again and none may be a
+   byte no level can produce: the clip plays over the DIMMED screen, so a
+   backdrop taken from the untouched copy -- or one taken before the dimming
+   pass overwrote it -- would put the pre-call value back on the adapter for the
+   twelve ticks the clip lasts.
+
+   The darkest level has to hold for more ticks than the two passes can account
+   for on their own, which is what says the clip ran over it rather than the
+   passes simply meeting in the middle; and three different levels have to show
+   up, which is what says the screen is walked down a ramp rather than dropped
+   to one level and lifted back. */
+static void vfs_animation_plays_the_clip_over_the_dimmed_screen(void)
+{
+    int source_pixel;
+    int index;
+    int level;
+    int first_tinted;
+    int early_strangers;
+    int late_strangers;
+    int dimmed_ticks;
+    int levels_seen[ANIM_LEVELS + 1];
+    int distinct;
+
+    if (!anim_archive_is_staged()) {
+        return;
+    }
+    anim_play(ANIM_CLIP);
+
+    source_pixel = anim_pattern(ANIM_PROBE_ROW, ANIM_PROBE_COL);
+    for (level = 0; level <= ANIM_LEVELS; level++) {
+        levels_seen[level] = 0;
+    }
+
+    first_tinted = -1;
+    early_strangers = 0;
+    late_strangers = 0;
+    dimmed_ticks = 0;
+    for (index = 0; index < anim_sample_count; index++) {
+        level = anim_level_of((int) anim_samples[index], source_pixel);
+        if (level != 0 && first_tinted < 0) {
+            first_tinted = index;
+        }
+        if (first_tinted < 0) {
+            if ((int) anim_samples[index] != source_pixel) {
+                early_strangers++;
+            }
+        } else {
+            if (level == 0) {
+                late_strangers++;
+            } else {
+                levels_seen[level] = 1;
+                if (level == ANIM_LEVELS) {
+                    dimmed_ticks++;
+                }
+            }
+        }
+    }
+
+    distinct = 0;
+    for (level = 1; level <= ANIM_LEVELS; level++) {
+        distinct += levels_seen[level];
+    }
+
+    CHECK_EQ(first_tinted >= 0, 1);
+    CHECK_EQ(early_strangers, 0);
+    CHECK_EQ(late_strangers, 0);
+    CHECK_EQ(dimmed_ticks >= ANIM_DIMMED_MIN_TICKS, 1);
+    CHECK_EQ(distinct >= ANIM_LEVELS_MIN_SEEN, 1);
+}
+
+/* The banner is keyed on the name and on nothing else, so the two phase
+   announcements -- 34 frames and 35, the same two fades, the same container --
+   differ only in whether it runs.  It costs 24 tick-paced steps and a 500 ms
+   hold, so the player-phase name has to be at least twenty ticks dearer; a
+   comparison written against the wrong string, or dropped, brings the two
+   within one tick of each other.  Nothing the banner draws survives the call --
+   the clip repaints the whole frame over it -- so the tick it costs is what
+   there is to see.
+
+   BOTH NAMES GO IN MIXED CASE, because that is what the game's own three call
+   sites pass and because it is the whole point: the comparison is against an
+   upper-case literal, so the banner runs only if the loader upper-cased the
+   caller's buffer in place first.  Passing "PLYPHASE.SAF" here would pass
+   whether that fold happened or not.
+
+   The banner's sheet is reached the way it reaches it, through the resident
+   archive, and the synthetic container the cases above build serves: what the
+   banner draws is not what is being asserted here. */
+static void vfs_animation_banners_only_the_player_phase_clip(void)
+{
+    unsigned int enemy_ticks;
+    unsigned int player_ticks;
+
+    if (!anim_archive_is_staged()) {
+        return;
+    }
+    banner_stage_container();
+    data_fdps_animation_baseani_archive_ptr = banner_vfs;
+    data_fdps_battle_turn_counter = BANNER_TURN;
+
+    enemy_ticks = anim_play(ANIM_ENEMY_CLIP);
+    player_ticks = anim_play(ANIM_PLAYER_CLIP);
+
+    data_fdps_animation_baseani_archive_ptr = NULL;
+    CHECK_EQ(player_ticks > enemy_ticks, 1);
+    CHECK_EQ((int) (player_ticks - enemy_ticks) >= ANIM_BANNER_MIN_TICKS, 1);
+}
+
 void run_anim_tests(void)
 {
     RUN_TEST(baseani_lookup_returns_a_pointer_into_the_image);
@@ -1045,4 +1444,7 @@ void run_anim_tests(void)
     RUN_TEST(banner_ends_with_the_signs_last_step_and_nothing_else);
     RUN_TEST(banner_places_both_pieces_from_one_table_entry);
     RUN_TEST(banner_repaints_the_background_under_every_step);
+    RUN_TEST(vfs_animation_ends_on_level_one_of_the_untouched_screen);
+    RUN_TEST(vfs_animation_plays_the_clip_over_the_dimmed_screen);
+    RUN_TEST(vfs_animation_banners_only_the_player_phase_clip);
 }

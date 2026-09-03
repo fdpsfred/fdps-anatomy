@@ -1621,5 +1621,20 @@
       "needs": "Somebody whose ticket is tests/title.c to run one fixed binary repeatedly and find what in the movie fixture is not deterministic -- the keyboard-queue drain and the ISR install both touch real interrupt state under DOSBox-X, which is where a run-to-run difference would come from. I did not re-run it myself; the only run I can see on disk is green, so this stands on the emitter's eight-run experiment, whose logs are not in the workspace.",
       "status": "open"
     }
+  ],
+  "0001eb00": [
+    {
+      "from": "emit",
+      "what": "Whether the first step of the dimming pass waits a tick can differ between the original and the rebuild, and no unit test can settle it. The latch the wait compares against, [EBP-0x4] at 0001ebe0, is read before anything writes it, so the step is unpaced unless the stack garbage there happens to equal data_fdps_timer_tick_counter. The rebuild keeps the same uninitialised local, but WDISASM on workspace/code_emit/out/objs/ANIM.OBJ shows the compiler put it at [EBP-0x14] rather than [EBP-0x4], and a different slot holds different leftovers from whatever ran before -- so the two builds can disagree on that one tick, on that one step, for every animation in the game. ADR-0001 puts stack allocation out of scope, but the tick it costs is observable pacing, not allocation. The same reasoning applies to the restoring pass's first step, which inherits whatever the clip left in the latch, and to the identical latches in fdps_animate_turn_banner (0001e966) and fdps_saf_play_over_background (0001edd0).",
+      "needs": "A side-by-side run of the original FDPS.LE and the rebuilt executable on the same machine, entering a battle turn and counting the frames each spends on the first step of the dim -- or, cheaper and enough to bound it, a check that the game is insensitive to the difference because one extra tick at the darkest step of a five-step fade is not something a player can see. Nothing in the emit pipeline can decide either.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Independently confirmed by my own WDISASM run: the rebuild puts the uninitialised tick latch at -14H[ebp] where the original has it at [EBP-0x4], so the two builds can disagree on whether the first step of each fade waits a tick. I add nothing to the emitter's reading of it and reached no different conclusion; the concern is honest -- the evidence genuinely does not exist inside this pipeline -- and its needs field asks for a side-by-side run rather than legislating a change for a later stage.",
+      "needs": "A side-by-side run of the original FDPS.LE and the rebuilt executable on the same machine, counting the frames each spends on the first step of the dim when a battle turn starts; or an argument that one extra tick at one step of a five-step fade is below what a player can see. Nothing in the emit pipeline can decide either.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

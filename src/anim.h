@@ -1,12 +1,15 @@
 /* anim.h -- VFS/SAF animation playback and the turn banner.
  *
- * The animations this file plays are .SAF images that live inside BaseAni.vfs,
- * the container fdps_load_global_resources reads whole into memory at startup
- * and keeps resident for the run.  Nothing here loads a file: a member is found
- * where it already lies inside that resident image (vfs.h,
- * resource_info/vfs.md), so an animation costs no allocation and no copy, and
- * every pointer this file hands out stops being valid the moment
- * fdps_shutdown_free_resources releases the image.
+ * There are two ways into a .SAF here and they are not the same one.  The turn
+ * banner's sheet lives inside BaseAni.vfs, the container
+ * fdps_load_global_resources reads whole into memory at startup and keeps
+ * resident for the run: fdps_baseani_get_entry_or_exit finds a member where it
+ * already lies inside that resident image (vfs.h, resource_info/vfs.md), so it
+ * costs no allocation and no copy, and the pointer it hands out stops being
+ * valid the moment fdps_shutdown_free_resources releases the image.  The
+ * full-screen animations, by contrast, are members of MISC.VFS on disk, and
+ * fdps_play_vfs_animation opens that container and loads one into a block of
+ * its own on every call.
  */
 #ifndef ANIM_H
 #define ANIM_H
@@ -151,5 +154,61 @@ extern void fdps_draw_turn_number(int *request);
    A missing Turn.saf does not come back: the lookup above ends the process. */
 extern void fdps_animate_turn_banner(unsigned char *saved_screen);
 #pragma aux fdps_animate_turn_banner "*" parm caller [];
+
+/* Plays the MISC.VFS member called name as a full-screen animation: the screen
+   that was showing dims to black over five steps, the clip runs over the dimmed
+   screen, and then the screen that was showing comes back over five more.
+   Returns with the adapter holding the lightest of those five restoring steps
+   and NOT the picture it started from -- see below.
+
+   name is the member's name and it is written to.  It goes to
+   fdps_vfs_load_entry, which upper-cases the caller's own storage in place
+   (vfs.h), so a caller passing a string literal has that literal permanently
+   folded and it cannot live in read-only storage
+   (rebuild_info/pitfalls.md).  The three call sites all pass a literal.  A
+   container that will not open, or a member that is not in it, ends the process
+   inside that loader rather than coming back, so there is no failure for a
+   caller to test.
+
+   THE PICTURE IS NEVER PUT BACK EXACTLY.  Both fades run levels 1 to 5, so the
+   restoring pass ends on level 1 and not on level 0: the last thing written to
+   the adapter is one tint step away from the screen that was there before the
+   call, not that screen itself.  Nothing here blits the saved copy back
+   untinted.  Whatever runs next is expected to repaint, and in the game it
+   always does -- but a rebuild checked against "the screen comes back as it
+   was" is checking something the original does not do.
+
+   THE TWO SAVED COPIES ARE NOT THE SAME COPY AND ONLY ONE OF THEM IS REUSED.
+   Two 64000-byte blocks are taken and both are filled with the screen as it was
+   on entry.  The first is the dimming pass's source and is then OVERWRITTEN
+   with the dimmed screen, which is what the clip plays over; the second is
+   never written again, which is why the restoring pass has an untouched picture
+   to work from.  Both blocks and the loaded member are freed before the return,
+   so nothing survives the call.
+
+   EVERY STEP OF BOTH FADES IS PACED THREE TIMES OVER: the vertical retrace has
+   to begin, then end, and then data_fdps_timer_tick_counter has to change.  The
+   tick latch is never initialised, so the first step of the dimming pass falls
+   straight through its wait unless the stack garbage happens to equal the
+   counter, and the restoring pass inherits whatever the clip left in it.  The
+   counter has to be advancing -- in the game the timer interrupt does it -- or
+   the second step of the dimming pass never ends.
+
+   THE PLAYER-PHASE CLIP GETS THE TURN BANNER FIRST, AND ONLY THE IN-PLACE FOLD
+   MAKES THAT HAPPEN.  When name compares equal to "PLYPHASE.SAF" the turn
+   banner is animated over the dimmed screen before the clip starts.  All three
+   call sites pass a MIXED-CASE literal -- "EnyPhase.saf" at 0x61790,
+   "PlyPhase.saf" at 0x617a0 and 0x61acc -- and the literal the comparison is
+   made against is upper-case, so a straight strcmp of what the caller wrote
+   would never match and the banner would never run.  It matches because the
+   loader has already upper-cased the caller's buffer in place by the time the
+   comparison is made.  Anything that breaks that chain -- declaring the
+   parameter const, taking a copy of the name before loading, folding the
+   comparison instead of the buffer, or tidying the call sites' literals to
+   upper case -- either fails to compile or silently loses the banner.  The
+   banner is drawn on the adapter and leaves the dimmed copy alone, so the clip
+   that follows paints straight over it. */
+extern void fdps_play_vfs_animation(char *name);
+#pragma aux fdps_play_vfs_animation "*" parm caller [];
 
 #endif
