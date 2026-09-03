@@ -50,6 +50,7 @@
  */
 #include <string.h>
 #include "testharn.h"
+#include "fdpstype.h"
 #include "sprite.h"
 #include "gamedata.h"
 #include "audio.h"
@@ -1532,6 +1533,429 @@ static void the_command_sprite_index_is_not_range_checked(void)
     CHECK_EQ(cel_painted(), CEL_SPRITE_W * CEL_SPRITE_H);
 }
 
+/* fdps_blit_unit_sprite at 0001ee10.
+ *
+ * Expected values come from the assembly -- MOV AL,byte ptr [EAX] / AND
+ * EAX,0xff / IMUL EAX,EAX,0x18 / SUB EAX,dword ptr [0x00069ce4] / ADD EAX,0x18
+ * at 0001ee2e and the same five for y at +0x1 against 0x00069ce0 with ADD
+ * EAX,0x12, the four compares at 0001ee89 through 0001eea9 (JLE on 0, JL on
+ * 0xd8, JG on 0, JL on 0x150), SAR EAX,0x2 at 0001eec3 with CMP ...,0x3 / MOV
+ * ...,0x1 at 0001eec9, IMUL EDX,...,0xc / LEA EAX,[EAX + EAX*0x2] / ADD at
+ * 0001eed6 for the sprite index, LEA EAX,[EAX*0x4] / ADD EAX,EDX / MOV
+ * EAX,dword ptr [EAX] / ADD EAX,EDX at 0001eeed for the stream address, IMUL
+ * EAX,dword ptr [EBP + -0x1c],0x168 / ADD EAX,dword ptr [EBP + 0x14] / ADD
+ * EAX,dword ptr [EBP + -0x20] at 0001ef1a for the destination pixel, and the
+ * seven pushes at 0001ef09 through 0001ef2b -- and from the mode 3 operand
+ * layout in src/rlecolor.h (bits 0..7 tint offset, 8..15 colour base, 16..23
+ * band mask, so 0x0000ff00 collapses every pixel to index 0xff).  None of them
+ * is read off the emitted C.
+ *
+ * The unit array and the sprite cache are staged here rather than read from a
+ * game file: the function takes its whole input from four globals and its four
+ * arguments, so publishing local blocks through data_fdps_map_unit_array_ptr
+ * and data_fdps_cel_sprite_cache_ptr is the only way to reach the body, and
+ * the shipped cache is built at run time by fdps_cache_cel_sprite_group out of
+ * files inside a .VFS rather than existing as a loose image.  Nothing below
+ * asserts what any of those globals holds on its own -- ticket 23 owns that,
+ * and every one of them is put back after the call.
+ *
+ * The scene buffer is the real 360 by 240 the drawer hardwires, with one row
+ * of slack past the end, because the destination address is the whole point of
+ * most of these cases.  Every stream in the staged cache is 24 rows of one
+ * 24-pixel fill in a colour that names its own index, 0x20 + index, so the
+ * painted rectangle says which of the 48 entries was chosen.
+ */
+#define UNIT_PITCH 0x168
+#define UNIT_SCENE_ROWS 0xf0
+#define UNIT_SCENE_BYTES (UNIT_PITCH * (UNIT_SCENE_ROWS + 1))
+#define UNIT_SPRITE_W 24
+#define UNIT_SPRITE_H 24
+
+#define UNIT_FILL_RUN_24 0x17
+
+#define UNIT_CACHE_ENTRIES 48
+#define UNIT_TABLE_BYTES (UNIT_CACHE_ENTRIES * 4)
+#define UNIT_STREAM_BYTES (UNIT_SPRITE_H * 2)
+#define UNIT_CACHE_BYTES \
+    (UNIT_TABLE_BYTES + UNIT_CACHE_ENTRIES * UNIT_STREAM_BYTES)
+#define UNIT_PIXEL_BASE 0x20
+
+/* Three records, and the one under test is not the first: the record address
+   is base + index * 0x50, so a drawer that ignored the index would paint the
+   other unit's tile. */
+#define UNIT_RECORDS 3
+#define UNIT_TEST_INDEX 1
+#define UNIT_OTHER_INDEX 0
+
+/* Tile (3,4) with the window at the origin: 3 * 24 + 24 and 4 * 24 + 18. */
+#define UNIT_TILE_X 3
+#define UNIT_TILE_Y 4
+#define UNIT_BASE_X 96
+#define UNIT_BASE_Y 114
+
+/* Tile (8,8) for the record that must not be drawn: 8 * 24 + 24 and
+   8 * 24 + 18, both well inside the window. */
+#define UNIT_OTHER_TILE 8
+#define UNIT_OTHER_X 216
+#define UNIT_OTHER_Y 210
+
+static unsigned char unit_scene[UNIT_SCENE_BYTES];
+static unsigned char unit_cache[UNIT_CACHE_BYTES];
+static struct fdps_unit_record unit_records[UNIT_RECORDS];
+
+/* 24 rows of one 24-pixel fill: a whole unit sprite in the size the two pushed
+   immediates declare, and the plainest stream that covers every column of
+   every row. */
+static void unit_fill_stream(unsigned char *block, int at, unsigned char pixel)
+{
+    int row;
+
+    for (row = 0; row < UNIT_SPRITE_H; row++) {
+        block[at + row * 2] = UNIT_FILL_RUN_24;
+        block[at + row * 2 + 1] = pixel;
+    }
+}
+
+/* The offset table sits at the very base of the cache block -- there is no
+   header in front of it -- and every entry is measured from that same base. */
+static void unit_stage_cache(void)
+{
+    int entry;
+    int stream_at;
+
+    memset(unit_cache, 0, UNIT_CACHE_BYTES);
+    for (entry = 0; entry < UNIT_CACHE_ENTRIES; entry++) {
+        stream_at = UNIT_TABLE_BYTES + entry * UNIT_STREAM_BYTES;
+        cel_u32(unit_cache, entry * 4, (unsigned long) stream_at);
+        unit_fill_stream(unit_cache, stream_at,
+                         (unsigned char) (UNIT_PIXEL_BASE + entry));
+    }
+}
+
+static void unit_stage_record(int tile_x, int tile_y, int cache_slot,
+                              int facing, int walk_step)
+{
+    unit_stage_cache();
+    memset((unsigned char *) unit_records, 0, sizeof(unit_records));
+    unit_records[UNIT_TEST_INDEX].pos_x = (unsigned char) tile_x;
+    unit_records[UNIT_TEST_INDEX].pos_y = (unsigned char) tile_y;
+    unit_records[UNIT_TEST_INDEX].sprite_cache_slot = (unsigned char) cache_slot;
+    unit_records[UNIT_TEST_INDEX].facing = (unsigned char) facing;
+    unit_records[UNIT_TEST_INDEX].walk_step = (unsigned char) walk_step;
+}
+
+/* All four globals are put back afterwards so the drawer's dependencies do not
+   leak into whatever test file runs next. */
+static void unit_blit(int origin_x, int origin_y, int anim_counter,
+                      unsigned int blit_param, int blit_mode)
+{
+    unsigned char *saved_array;
+    unsigned char *saved_cache;
+    int saved_origin_x;
+    int saved_origin_y;
+    int saved_counter;
+
+    memset(unit_scene, GUARD, UNIT_SCENE_BYTES);
+
+    saved_array = data_fdps_map_unit_array_ptr;
+    saved_cache = data_fdps_cel_sprite_cache_ptr;
+    saved_origin_x = data_fdps_battle_view_window_origin_x;
+    saved_origin_y = data_fdps_battle_view_window_origin_y;
+    saved_counter = data_fdps_map_unit_walk_anim_counter;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) unit_records;
+    data_fdps_cel_sprite_cache_ptr = unit_cache;
+    data_fdps_battle_view_window_origin_x = origin_x;
+    data_fdps_battle_view_window_origin_y = origin_y;
+    data_fdps_map_unit_walk_anim_counter = anim_counter;
+
+    fdps_blit_unit_sprite(unit_scene, UNIT_TEST_INDEX, blit_param, blit_mode);
+
+    data_fdps_map_unit_array_ptr = saved_array;
+    data_fdps_cel_sprite_cache_ptr = saved_cache;
+    data_fdps_battle_view_window_origin_x = saved_origin_x;
+    data_fdps_battle_view_window_origin_y = saved_origin_y;
+    data_fdps_map_unit_walk_anim_counter = saved_counter;
+}
+
+static int unit_pixel(int row, int column)
+{
+    return unit_scene[row * UNIT_PITCH + column];
+}
+
+/* How many of the 576 bytes of the 24x24 rectangle at (row, column) do not
+   hold `pixel`. */
+static int unit_wrong_pixels(int row, int column, unsigned char pixel)
+{
+    int scan_row;
+    int scan_column;
+    int wrong;
+
+    wrong = 0;
+    for (scan_row = 0; scan_row < UNIT_SPRITE_H; scan_row++) {
+        for (scan_column = 0; scan_column < UNIT_SPRITE_W; scan_column++) {
+            if (unit_scene[(row + scan_row) * UNIT_PITCH + column + scan_column]
+                != pixel) {
+                wrong++;
+            }
+        }
+    }
+    return wrong;
+}
+
+static int unit_painted_in_rect(int row, int column)
+{
+    int scan_row;
+    int scan_column;
+    int painted;
+
+    painted = 0;
+    for (scan_row = 0; scan_row < UNIT_SPRITE_H; scan_row++) {
+        for (scan_column = 0; scan_column < UNIT_SPRITE_W; scan_column++) {
+            if (unit_scene[(row + scan_row) * UNIT_PITCH + column + scan_column]
+                != GUARD) {
+                painted++;
+            }
+        }
+    }
+    return painted;
+}
+
+static int unit_scene_painted(void)
+{
+    int index;
+    int painted;
+
+    painted = 0;
+    for (index = 0; index < UNIT_SCENE_BYTES; index++) {
+        if (unit_scene[index] != GUARD) {
+            painted++;
+        }
+    }
+    return painted;
+}
+
+/* The tile position converted to a buffer pixel: tile times 24, less the
+   window origin, plus the border bias, which is a whole tile across and 18
+   down.  The four edge guards are the size assertion -- the column at x + 24
+   and the row at y + 24 are the first ones outside the rectangle the two
+   pushed immediates describe, and the row above and the column to the left are
+   outside it the other way -- and the painted count says nothing else on the
+   whole 360 by 240 buffer was touched. */
+static void the_unit_lands_at_its_tile_converted_to_buffer_pixels(void)
+{
+    unit_stage_record(UNIT_TILE_X, UNIT_TILE_Y, 0, 0, 0);
+    unit_blit(0, 0, 0, 0, 0);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y, UNIT_BASE_X, UNIT_PIXEL_BASE), 0);
+    CHECK_EQ(unit_scene_painted(), UNIT_SPRITE_W * UNIT_SPRITE_H);
+    CHECK_EQ(unit_pixel(UNIT_BASE_Y - 1, UNIT_BASE_X), GUARD);
+    CHECK_EQ(unit_pixel(UNIT_BASE_Y, UNIT_BASE_X - 1), GUARD);
+    CHECK_EQ(unit_pixel(UNIT_BASE_Y + UNIT_SPRITE_H, UNIT_BASE_X), GUARD);
+    CHECK_EQ(unit_pixel(UNIT_BASE_Y, UNIT_BASE_X + UNIT_SPRITE_W), GUARD);
+}
+
+/* The two origin globals are subtracted, so scrolling the window moves the
+   unit the other way by the same amount on each axis independently. */
+static void the_view_window_origin_scrolls_the_unit(void)
+{
+    unit_stage_record(UNIT_TILE_X, UNIT_TILE_Y, 0, 0, 0);
+    unit_blit(10, 7, 0, 0, 0);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y - 7, UNIT_BASE_X - 10,
+                               UNIT_PIXEL_BASE), 0);
+    CHECK_EQ(unit_painted_in_rect(UNIT_BASE_Y - 7, UNIT_BASE_X - 10),
+             UNIT_SPRITE_W * UNIT_SPRITE_H);
+
+    unit_blit(-6, -6, 0, 0, 0);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y + 6, UNIT_BASE_X + 6,
+                               UNIT_PIXEL_BASE), 0);
+}
+
+/* The index reaches fdps_get_unit_record and picks record 1 out of the block:
+   record 0 is put on a tile that would also be drawn, and nothing lands
+   there. */
+static void the_unit_index_selects_the_record(void)
+{
+    unit_stage_record(UNIT_TILE_X, UNIT_TILE_Y, 0, 0, 0);
+    unit_records[UNIT_OTHER_INDEX].pos_x = UNIT_OTHER_TILE;
+    unit_records[UNIT_OTHER_INDEX].pos_y = UNIT_OTHER_TILE;
+    unit_blit(0, 0, 0, 0, 0);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y, UNIT_BASE_X, UNIT_PIXEL_BASE), 0);
+    CHECK_EQ(unit_painted_in_rect(UNIT_OTHER_Y, UNIT_OTHER_X), 0);
+    CHECK_EQ(unit_scene_painted(), UNIT_SPRITE_W * UNIT_SPRITE_H);
+}
+
+/* The counter divided by four is the walk frame, so four consecutive ticks
+   draw the same sprite and the fourth group would be frame 3. */
+static void the_walk_phase_is_the_counter_divided_by_four(void)
+{
+    unit_stage_record(UNIT_TILE_X, UNIT_TILE_Y, 0, 0, 0);
+
+    unit_blit(0, 0, 0, 0, 0);
+    CHECK_EQ(unit_pixel(UNIT_BASE_Y, UNIT_BASE_X), UNIT_PIXEL_BASE + 0);
+    unit_blit(0, 0, 3, 0, 0);
+    CHECK_EQ(unit_pixel(UNIT_BASE_Y, UNIT_BASE_X), UNIT_PIXEL_BASE + 0);
+    unit_blit(0, 0, 4, 0, 0);
+    CHECK_EQ(unit_pixel(UNIT_BASE_Y, UNIT_BASE_X), UNIT_PIXEL_BASE + 1);
+    unit_blit(0, 0, 8, 0, 0);
+    CHECK_EQ(unit_pixel(UNIT_BASE_Y, UNIT_BASE_X), UNIT_PIXEL_BASE + 2);
+    unit_blit(0, 0, 11, 0, 0);
+    CHECK_EQ(unit_pixel(UNIT_BASE_Y, UNIT_BASE_X), UNIT_PIXEL_BASE + 2);
+}
+
+/* Phase 3 is folded back onto phase 1, which is what turns three walk frames
+   into the ping-pong 0, 1, 2, 1 over the counter's sixteen ticks.  Without the
+   fold the last four ticks would select entry 3, the first frame of the next
+   facing. */
+static void the_fourth_walk_phase_folds_back_to_the_second(void)
+{
+    unit_stage_record(UNIT_TILE_X, UNIT_TILE_Y, 0, 0, 0);
+
+    unit_blit(0, 0, 12, 0, 0);
+    CHECK_EQ(unit_pixel(UNIT_BASE_Y, UNIT_BASE_X), UNIT_PIXEL_BASE + 1);
+    unit_blit(0, 0, 15, 0, 0);
+    CHECK_EQ(unit_pixel(UNIT_BASE_Y, UNIT_BASE_X), UNIT_PIXEL_BASE + 1);
+}
+
+/* Twelve sprites to a cache slot, three walk frames to a facing: slot 2,
+   facing 3 and phase 2 is entry 2 * 12 + 3 * 3 + 2 = 35, and slot 0 facing 1
+   phase 0 is entry 3. */
+static void the_sprite_index_is_slot_facing_and_phase(void)
+{
+    unit_stage_record(UNIT_TILE_X, UNIT_TILE_Y, 2, 3, 0);
+    unit_blit(0, 0, 8, 0, 0);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y, UNIT_BASE_X, UNIT_PIXEL_BASE + 35),
+             0);
+
+    unit_stage_record(UNIT_TILE_X, UNIT_TILE_Y, 0, 1, 0);
+    unit_blit(0, 0, 0, 0, 0);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y, UNIT_BASE_X, UNIT_PIXEL_BASE + 3),
+             0);
+}
+
+/* The table entry is added to the cache base, not to the address the entry was
+   read from.  Facing 1 selects entry 3, whose slot sits 12 bytes into the
+   block: rebasing on that address instead would start the stream six rows into
+   entry 3's own stream and run the last six rows out of entry 4's, so the
+   bottom quarter of the rectangle would hold the next colour. */
+static void the_cache_offset_is_rebased_on_the_cache_base(void)
+{
+    unit_stage_record(UNIT_TILE_X, UNIT_TILE_Y, 0, 1, 0);
+    unit_blit(0, 0, 0, 0, 0);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y, UNIT_BASE_X, UNIT_PIXEL_BASE + 3),
+             0);
+    CHECK_EQ(unit_pixel(UNIT_BASE_Y + UNIT_SPRITE_H - 1, UNIT_BASE_X),
+             UNIT_PIXEL_BASE + 3);
+}
+
+/* The record's sub-tile step counter is scaled by four into a local that
+   nothing reads, so a unit caught between two tiles is drawn snapped to the
+   tile it is leaving.  Applying the offset the way fdps_draw_map_unit does
+   would move this sprite four pixels down per step. */
+static void the_sub_tile_step_does_not_move_the_unit(void)
+{
+    unit_stage_record(UNIT_TILE_X, UNIT_TILE_Y, 0, 0, 0);
+    unit_blit(0, 0, 0, 0, 0);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y, UNIT_BASE_X, UNIT_PIXEL_BASE), 0);
+
+    unit_stage_record(UNIT_TILE_X, UNIT_TILE_Y, 0, 0, 5);
+    unit_blit(0, 0, 0, 0, 0);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y, UNIT_BASE_X, UNIT_PIXEL_BASE), 0);
+    CHECK_EQ(unit_scene_painted(), UNIT_SPRITE_W * UNIT_SPRITE_H);
+}
+
+/* The lower bound is strict on both axes: an origin of exactly zero is
+   refused, and one pixel in is accepted.  Writing the test as >= 0 would draw
+   this unit against the top edge, where the original shows nothing. */
+static void a_y_of_zero_draws_nothing(void)
+{
+    unit_stage_record(UNIT_TILE_X, 1, 0, 0, 0);
+    unit_blit(0, 1 * 24 + 18, 0, 0, 0);
+    CHECK_EQ(unit_scene_painted(), 0);
+}
+
+static void a_y_of_one_draws(void)
+{
+    unit_stage_record(UNIT_TILE_X, 1, 0, 0, 0);
+    unit_blit(0, 1 * 24 + 18 - 1, 0, 0, 0);
+    CHECK_EQ(unit_wrong_pixels(1, UNIT_BASE_X, UNIT_PIXEL_BASE), 0);
+}
+
+static void an_x_of_zero_draws_nothing(void)
+{
+    unit_stage_record(1, UNIT_TILE_Y, 0, 0, 0);
+    unit_blit(1 * 24 + 24, 0, 0, 0, 0);
+    CHECK_EQ(unit_scene_painted(), 0);
+}
+
+static void an_x_of_one_draws(void)
+{
+    unit_stage_record(1, UNIT_TILE_Y, 0, 0, 0);
+    unit_blit(1 * 24 + 24 - 1, 0, 0, 0, 0);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y, 1, UNIT_PIXEL_BASE), 0);
+}
+
+/* The upper bounds are the buffer less one sprite, 240 - 24 and 360 - 24, and
+   they are strict too: the last accepted origin is one pixel inside. */
+static void a_y_at_the_row_bound_draws_nothing(void)
+{
+    unit_stage_record(UNIT_TILE_X, 10, 0, 0, 0);
+    unit_blit(0, 10 * 24 + 18 - 0xd8, 0, 0, 0);
+    CHECK_EQ(unit_scene_painted(), 0);
+}
+
+static void a_y_one_inside_the_row_bound_draws(void)
+{
+    unit_stage_record(UNIT_TILE_X, 10, 0, 0, 0);
+    unit_blit(0, 10 * 24 + 18 - 0xd7, 0, 0, 0);
+    CHECK_EQ(unit_wrong_pixels(0xd7, UNIT_BASE_X, UNIT_PIXEL_BASE), 0);
+}
+
+static void an_x_at_the_column_bound_draws_nothing(void)
+{
+    unit_stage_record(14, UNIT_TILE_Y, 0, 0, 0);
+    unit_blit(14 * 24 + 24 - 0x150, 0, 0, 0, 0);
+    CHECK_EQ(unit_scene_painted(), 0);
+}
+
+static void an_x_one_inside_the_column_bound_draws(void)
+{
+    unit_stage_record(14, UNIT_TILE_Y, 0, 0, 0);
+    unit_blit(14 * 24 + 24 - 0x14f, 0, 0, 0, 0);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y, 0x14f, UNIT_PIXEL_BASE), 0);
+}
+
+/* Both are forwarded to fdps_blit_dispatch untouched.  Mode 3 with the
+   0x0000ff00 the shipped callers pass is tint offset 0, colour base 0xff and
+   band mask 0, which collapses every pixel of the sprite to palette index
+   0xff; mode 0 leaves the stream's own colour alone.  A drawer that dropped
+   either argument would paint the stream colour in both cases. */
+static void the_blit_mode_and_operand_reach_the_dispatcher(void)
+{
+    unit_stage_record(UNIT_TILE_X, UNIT_TILE_Y, 0, 0, 0);
+
+    unit_blit(0, 0, 0, 0xff00, 3);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y, UNIT_BASE_X, 0xff), 0);
+
+    unit_blit(0, 0, 0, 0x2b00, 3);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y, UNIT_BASE_X, 0x2b), 0);
+
+    unit_blit(0, 0, 0, 0xff00, 0);
+    CHECK_EQ(unit_wrong_pixels(UNIT_BASE_Y, UNIT_BASE_X, UNIT_PIXEL_BASE), 0);
+}
+
+/* The three values the dispatcher publishes before handing over to a kernel:
+   the source rectangle as the two 0x18 immediates state it, the scene pitch as
+   the 0x168 immediate states it, and the row counter the kernel has counted
+   down to zero over the 24 rows it drew. */
+static void the_sprite_size_and_scene_pitch_reach_the_dispatcher(void)
+{
+    unit_stage_record(UNIT_TILE_X, UNIT_TILE_Y, 0, 0, 0);
+    unit_blit(0, 0, 0, 0, 0);
+    CHECK_EQ(data_fdps_graphics_rle_blit_src_width, UNIT_SPRITE_W);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_pitch, UNIT_PITCH);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
 void run_sprite_tests(void)
 {
     RUN_TEST(cell_lands_at_the_requests_x_and_y);
@@ -1578,4 +2002,22 @@ void run_sprite_tests(void)
     RUN_TEST(the_command_pitch_is_the_destination_row_stride);
     RUN_TEST(mode_zero_passes_the_command_stream_through_unchanged);
     RUN_TEST(the_command_sprite_index_is_not_range_checked);
+    RUN_TEST(the_unit_lands_at_its_tile_converted_to_buffer_pixels);
+    RUN_TEST(the_view_window_origin_scrolls_the_unit);
+    RUN_TEST(the_unit_index_selects_the_record);
+    RUN_TEST(the_walk_phase_is_the_counter_divided_by_four);
+    RUN_TEST(the_fourth_walk_phase_folds_back_to_the_second);
+    RUN_TEST(the_sprite_index_is_slot_facing_and_phase);
+    RUN_TEST(the_cache_offset_is_rebased_on_the_cache_base);
+    RUN_TEST(the_sub_tile_step_does_not_move_the_unit);
+    RUN_TEST(a_y_of_zero_draws_nothing);
+    RUN_TEST(a_y_of_one_draws);
+    RUN_TEST(an_x_of_zero_draws_nothing);
+    RUN_TEST(an_x_of_one_draws);
+    RUN_TEST(a_y_at_the_row_bound_draws_nothing);
+    RUN_TEST(a_y_one_inside_the_row_bound_draws);
+    RUN_TEST(an_x_at_the_column_bound_draws_nothing);
+    RUN_TEST(an_x_one_inside_the_column_bound_draws);
+    RUN_TEST(the_blit_mode_and_operand_reach_the_dispatcher);
+    RUN_TEST(the_sprite_size_and_scene_pitch_reach_the_dispatcher);
 }

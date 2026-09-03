@@ -1,5 +1,6 @@
 /* sprite.h -- the .SAF sprite drawers: one tilemap cell, one tilemap layer,
- * one composite sprite; and the one-line drawer for the Command.cel UI sheet.
+ * one composite sprite; and the two .CEL drawers, one for the Command.cel UI
+ * sheet and one for a battle-map unit's walk sprite.
  *
  * A .SAF holds an animation's material in four sections -- frames, tilemaps,
  * tiles and sounds -- and drawing anything out of one is three nested walks:
@@ -188,5 +189,48 @@ extern void fdps_draw_composite_sprite(int *request, char play_sound);
 extern void fdps_blit_command_sprite(unsigned char *dst, int pitch,
                                      int sprite_index);
 #pragma aux fdps_blit_command_sprite "*" parm caller [];
+
+/* Draws one battle-map unit's 24 by 24 walk sprite into a scene buffer, in a
+   blit mode the caller picks, so a unit can be painted normally or as a flat
+   silhouette of one palette colour.  fdps_unit_rest, fdps_battle_advance_turn
+   and fdps_flash_units_in_color are the three callers, and all three are
+   flashing a unit inside their own wait loop.
+
+   `scene_buffer` is the caller's 360 by 240 8bpp scene buffer (0x15180 bytes),
+   already filled with the map; the sprite is composited into it and never onto
+   the VGA page, and the 360-byte pitch is hardwired here rather than passed.
+   `unit_index` is a position in the current battle's unit array and is not
+   range checked -- it is handed straight to fdps_get_unit_record (unit.h), so
+   the same re-resolution rule applies as there.  `blit_param` and `blit_mode`
+   are fdps_blit_dispatch's mode operand and kernel selector, forwarded
+   untouched; the shipped callers pass mode 3 with a palette colour shifted
+   left by eight, which the recolour kernel reads as add 0x00, base = the
+   colour, mask 0x00 and so paints every pixel that one index (rlecolor.h).
+
+   THE UNIT IS DRAWN WHOLE OR NOT AT ALL.  The sprite origin alone is tested,
+   strictly, against 0 < y < 0xd8 and 0 < x < 0x150 -- the scene buffer less
+   one sprite on each axis -- and a unit that fails any of the four is dropped
+   entirely rather than clipped.  Writing the lower bounds as >= 0 draws a row
+   of units along the top edge and a column along the left that the original
+   never shows (rebuild_info/pitfalls.md).
+
+   THE UNIT IS DRAWN SNAPPED TO ITS TILE.  The record's sub-tile step counter
+   is read and scaled by four and then never used, so a unit caught mid-step
+   between two tiles appears on the tile it is leaving.  The sibling
+   fdps_draw_map_unit does apply that counter through a facing switch; doing
+   the same here moves flashed and resting units up to 20 pixels off
+   (rebuild_info/pitfalls.md).
+
+   The walk frame is chosen from the shared map animation counter, which
+   fdps_draw_map_unit is the only writer of, divided by four with 3 folded back
+   to 1, giving the ping-pong 0, 1, 2, 1.  Which sprite that selects is the
+   record's cache slot times twelve plus its facing times three plus that
+   phase, indexed into the offset table at the base of
+   data_fdps_cel_sprite_cache_ptr; nothing bounds the index and the cache
+   pointer is not tested for null, so a call before
+   fdps_cache_cel_sprite_group has run reads through a null base. */
+extern void fdps_blit_unit_sprite(unsigned char *scene_buffer, int unit_index,
+                                  unsigned int blit_param, int blit_mode);
+#pragma aux fdps_blit_unit_sprite "*" parm caller [];
 
 #endif

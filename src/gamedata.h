@@ -70,6 +70,17 @@ extern unsigned char *data_fdps_tile_event_data_table_ptr;
    does the header and cell arithmetic itself, so a reader casts. */
 extern unsigned char *data_fdps_battle_move_grid_ptr;
 
+/* 00069cc8.  The map's shared walk-cycle counter: one tick per drawn frame,
+   stepped modulo 16.  fdps_draw_map_unit at 0002cdf8 is its only writer in the
+   whole image -- search_instructions over 0x00069cc8 finds eight references,
+   seven of them reads -- so a unit drawn by anything else animates only while
+   the map itself is being redrawn.
+
+   Every reader turns it into a walk frame the same way, dividing by four and
+   folding the value 3 back to 1 for the ping-pong 0, 1, 2, 1.  It is signed:
+   the division compiles to the SAR/SBB/SAR sequence, not a shift. */
+extern int data_fdps_map_unit_walk_anim_counter;
+
 /* 00069ce4 and 00069ce0.  Where the visible view window sits in the map's
    world pixels: the world-pixel coordinate of the left edge and of the top
    edge.  Everything that draws a map object converts its tile position with

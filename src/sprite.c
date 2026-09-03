@@ -1,14 +1,17 @@
 /* sprite.c -- the .SAF sprite drawers: one tilemap cell, one tilemap layer,
- * one composite sprite; and the one-line drawer for the Command.cel UI sheet.
+ * one composite sprite; and the two .CEL drawers, one for the Command.cel UI
+ * sheet and one for a battle-map unit's walk sprite.
  *
  * See sprite.h for the draw request every .SAF drawer here is handed and for
  * what each of its nine slots means, and resource_info/saf.md for the
  * container those three functions walk.  They own no state: the request, the
  * loaded image and the destination surface all belong to the caller.
  *
- * The Command.cel drawer at the bottom is the exception on both counts -- a
- * .CEL sheet and not a .SAF (resource_info/cel.md), and the one function here
- * that reads a global, the loaded sheet.
+ * The two .CEL drawers at the bottom are the exception on both counts -- a
+ * .CEL sheet and not a .SAF (resource_info/cel.md), and the two functions here
+ * that read globals: the loaded Command.cel sheet for one, and the unit array,
+ * the view window origin, the map animation counter and the sprite cache for
+ * the other.
  */
 #include <stddef.h>
 #include <string.h>
@@ -16,6 +19,7 @@
 #include "sprite.h"
 #include "blit.h"
 #include "audio.h"
+#include "unit.h"
 #include "gamedata.h"
 
 /* The .SAF header fields this file reads, as byte offsets from the image base.
@@ -365,4 +369,147 @@ void fdps_blit_command_sprite(unsigned char *dst, int pitch, int sprite_index)
                     + sprite_index * 4 + CEL_OFFSET_TABLE_START);
     fdps_blit_dispatch(sprite_stream, dst, COMMAND_SPRITE_WIDTH,
                        COMMAND_SPRITE_HEIGHT, pitch, 0, BLIT_MODE_OPAQUE);
+}
+
+/* A map tile is 24 pixels square -- IMUL EAX,EAX,0x18 on each of the record's
+   two tile bytes at 0001ee35 and 0001ee4f -- and the unit sprite is a tile-
+   sized 24 by 24, which is what the two 0x18 immediates pushed at 0001ef16 and
+   0001ef18 are.
+
+   The two biases are the view window's one-tile border.  x takes the whole
+   0x18 of it (ADD EAX,0x18 at 0001ee3e).  y takes 0x12 (ADD EAX,0x12 at
+   0001ee58), which is that same border with fdps_draw_map_unit's fixed
+   six-pixel sprite lift already folded into the constant by the compiler,
+   because a unit sprite stands taller than the tile it occupies. */
+#define UNIT_SPRITE_TILE_SIZE 0x18
+#define UNIT_SPRITE_SIZE 0x18
+#define UNIT_SPRITE_X_BIAS 0x18
+#define UNIT_SPRITE_Y_BIAS 0x12
+
+/* The scene buffer is 360 by 240 and the drawer is hardwired to it: 0x168 is
+   pushed as the destination pitch at 0001ef11 and is the multiplier of the row
+   in IMUL EAX,dword ptr [EBP + -0x1c],0x168 at 0001ef1a.  The two visibility
+   bounds are that buffer less one sprite, 360 - 24 and 240 - 24, and are the
+   immediates of CMP ...,0x150 at 0001eea2 and CMP ...,0xd8 at 0001ee8f. */
+#define UNIT_SCENE_PITCH 0x168
+#define UNIT_SCENE_VISIBLE_WIDTH 0x150
+#define UNIT_SCENE_VISIBLE_HEIGHT 0xd8
+
+/* A cache slot holds twelve streams as four facings of three walk frames --
+   struct fdps_cel_cache_slot in src/fdpstype.h -- which is the 0xc of IMUL
+   EDX,dword ptr [EBP + -0x18],0xc at 0001eed6 and the 3 of LEA EAX,[EAX +
+   EAX*0x2] at 0001eedd.  The animation counter advances one per frame tick and
+   a walk frame lasts four of them (SAR EAX,0x2 at 0001eec3). */
+#define UNIT_SPRITES_PER_CACHE_SLOT 0xc
+#define UNIT_WALK_FRAMES_PER_FACING 3
+#define UNIT_WALK_PHASE_TICKS 4
+
+/* The counter runs 0..15, so the division yields 0..3 and the fourth value is
+   folded back onto the second (CMP dword ptr [EBP + -0x14],0x3 / JNZ / MOV
+   dword ptr [EBP + -0x14],0x1 at 0001eec9).  That turns the three walk frames
+   into the ping-pong 0, 1, 2, 1 over the counter's sixteen ticks. */
+#define UNIT_WALK_PHASE_FOLDED 3
+#define UNIT_WALK_PHASE_FOLD_TO 1
+
+/* Four pixels of travel per sub-tile step, LEA EAX,[EAX*0x4 + 0x0] at
+   0001ee7f.  See the note in the function about where that value goes. */
+#define UNIT_SPRITE_STEP_PIXELS 4
+
+/* 0001ee10.  Draws one battle-map unit's 24x24 walk sprite into a scene
+   buffer, in a blit mode the caller picks, so a caller can paint the unit
+   normally or as a flat silhouette.  Three callers: fdps_unit_rest,
+   fdps_battle_advance_turn and fdps_flash_units_in_color.
+
+   `scene_buffer` is the 360x240 8bpp scene buffer the caller allocated and
+   filled, not the VGA page; the sprite is composited into it.  `unit_index`
+   goes straight to fdps_get_unit_record, which bounds-checks nothing.
+   `blit_param` and `blit_mode` are fdps_blit_dispatch's mode operand and
+   kernel selector, forwarded untouched -- the shipped callers pass mode 3, the
+   recolour kernel, with a palette colour shifted left by eight, and
+   fdps_flash_units_in_color alternates that with mode 0 to make the flash.
+
+   The tile position is converted the way fdps_draw_map_unit converts it: tile
+   times 24 minus the view window origin plus the border bias.  Both record
+   bytes are zero-extended (AND EAX,0xff at 0001ee30 and 0001ee4a), so they are
+   the unsigned 0..255 the layout declares, while both origin globals are
+   signed and are subtracted as such.
+
+   THE VISIBILITY TEST IS STRICT ON ALL FOUR SIDES AND NOTHING IS CLIPPED.  The
+   sprite is drawn only when 0 < y < 0xd8 and 0 < x < 0x150, and only the
+   sprite's origin is looked at, so a unit near an edge is drawn whole or
+   dropped whole.  The lower bounds are JLE and JG on zero at 0001ee8d and
+   0001ee9e: writing them as >= 0 draws a row of units along the top edge and a
+   column along the left that the original never shows
+   (rebuild_info/pitfalls.md).
+
+   THE SUB-TILE STEP OFFSET IS COMPUTED AND THEN NOT USED.  Record byte 4 is
+   the unit's step counter and is scaled by four into the frame slot at
+   [EBP-0x10] at 0001ee86, and nothing in the body ever reads that slot again.
+   The facing switch that fdps_draw_map_unit uses to turn the counter into a
+   displacement of (0,+4), (-4,0), (0,-4) or (+4,0) is absent here altogether,
+   so a unit caught between tiles is drawn snapped to the tile it is leaving.
+   Finishing the offset the way the sibling does -- the obvious C, given the
+   rest of the geometry is that routine's block trimmed -- moves flashed and
+   resting units up to 20 pixels off where the original puts them.  The line
+   below therefore keeps the multiply and stops there.
+
+   The walk phase is the shared map animation counter, which fdps_draw_map_unit
+   steps modulo 16 once per frame tick at 0002cdf8 and which nothing else in
+   the image writes.  The division is signed -- SAR EDX,0x1f / SHL EDX,0x2 /
+   SBB EAX,EDX / SAR EAX,0x2 at 0001eebb is the compiler's signed divide by
+   four -- so it truncates towards zero rather than flooring, which is only
+   reachable if something ever leaves the counter negative.
+
+   The stream address is the .CEL rule that a stored offset is measured from
+   the start of the block: the flat sprite index is scaled by four and added to
+   the cache base to reach the table entry, and the entry is added to that same
+   base again, never to the address it was read from.  The base is read from
+   the global twice in the original, at 0001eef4 and 0001eefc; one read carries
+   both here, which is the same value either way (ADR-0001).  Nothing bounds
+   the index and the cache pointer is not tested for null. */
+void fdps_blit_unit_sprite(unsigned char *scene_buffer, int unit_index,
+                           unsigned int blit_param, int blit_mode)
+{
+    struct fdps_unit_record *unit;
+    int sprite_x;
+    int sprite_y;
+    int sprite_index;
+    int facing;
+    int step_offset;
+    int walk_phase;
+    unsigned char *sprite_stream;
+
+    unit = fdps_get_unit_record(unit_index);
+
+    sprite_x = unit->pos_x * UNIT_SPRITE_TILE_SIZE
+        - data_fdps_battle_view_window_origin_x + UNIT_SPRITE_X_BIAS;
+    sprite_y = unit->pos_y * UNIT_SPRITE_TILE_SIZE
+        - data_fdps_battle_view_window_origin_y + UNIT_SPRITE_Y_BIAS;
+    sprite_index = unit->sprite_cache_slot;
+    facing = unit->facing;
+
+    /* Dead on purpose: see the note above.  This must not reach sprite_x or
+       sprite_y. */
+    step_offset = unit->walk_step * UNIT_SPRITE_STEP_PIXELS;
+
+    if (sprite_y > 0 && sprite_y < UNIT_SCENE_VISIBLE_HEIGHT &&
+        sprite_x > 0 && sprite_x < UNIT_SCENE_VISIBLE_WIDTH) {
+        walk_phase =
+            data_fdps_map_unit_walk_anim_counter / UNIT_WALK_PHASE_TICKS;
+        if (walk_phase == UNIT_WALK_PHASE_FOLDED) {
+            walk_phase = UNIT_WALK_PHASE_FOLD_TO;
+        }
+
+        sprite_index = sprite_index * UNIT_SPRITES_PER_CACHE_SLOT
+            + facing * UNIT_WALK_FRAMES_PER_FACING + walk_phase;
+        sprite_stream = data_fdps_cel_sprite_cache_ptr
+            + *(int *) (data_fdps_cel_sprite_cache_ptr + sprite_index * 4);
+
+        fdps_blit_dispatch(sprite_stream,
+                           scene_buffer + sprite_y * UNIT_SCENE_PITCH
+                               + sprite_x,
+                           UNIT_SPRITE_SIZE, UNIT_SPRITE_SIZE,
+                           UNIT_SCENE_PITCH, blit_param,
+                           (unsigned char) blit_mode);
+    }
 }

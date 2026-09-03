@@ -2140,6 +2140,14 @@
       "status": "committed",
       "emitted_against": "0x1f0",
       "rounds": 0
+    },
+    "0001ee10": {
+      "name": "fdps_blit_unit_sprite",
+      "target": "sprite.c",
+      "body_size": "0x12b",
+      "status": "committed",
+      "emitted_against": "0x12b",
+      "rounds": 0
     }
   }
 }
