@@ -1,6 +1,8 @@
 /* tests/title.c -- cover for src/title.c.
  *
- * fdps_play_movie @ 00030f40.
+ * fdps_play_movie @ 00030f40 and fdps_show_game_over @ 0002a960.  The
+ * game-over cases are at the end of the file and set out what they assert
+ * against above themselves; everything down to run_title_tests is the movie.
  *
  * Expected values come from the assembly at 00030f40: the CALL kbhit / TEST
  * EAX,EAX / JZ / CALL getch / JMP at 00030f56..00030f64 that makes the drain a
@@ -63,13 +65,20 @@
 #include <dos.h>
 #include <i86.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "testharn.h"
 #include "ailv3.h"
+#include "fdpstype.h"
 #include "gamedata.h"
 #include "audio.h"
+#include "blit.h"
 #include "cd.h"
 #include "keybd.h"
+#include "palette.h"
+#include "sprite.h"
+#include "vfs.h"
 #include "title.h"
 
 /* The aperture, the frame inside it, and the window it sits in.  The frame
@@ -572,6 +581,487 @@ static void movie_takes_the_audio_stack_down_and_brings_it_back(void)
     CHECK_EQ(movie_sfx_flag_after, 1);
 }
 
+/* --- fdps_show_game_over @ 0002a960 ------------------------------------- */
+
+/* WHAT THESE CASES ASSERT AGAINST.  This routine draws on the real adapter and
+   leaves what it drew standing, so the cases below put the machine in mode
+   13h, paint a known picture into the aperture, hook the timer, run the whole
+   thing once, and have the interrupt compare the live aperture against two
+   reference images on every tick.  Everything all five cases look at comes
+   from that one run.
+
+   MISC.VFS has to be there.  The routine loads GameOver.saf through
+   fdps_vfs_load_entry, which ends the process rather than returning when the
+   container will not open, so the container is staged through
+   tests/gamefile.lst and every case skips itself when it is missing.
+
+   THE TWO REFERENCES ARE BUILT, NOT GUESSED, and every number in them is read
+   off the assembly at 0002a960 rather than off the emitted C:
+
+     PUSH 0x16480 at 0002a9b7, MOV [EBP-0x4c],0x170 and MOV [EBP-0x48],0xf8 at
+       0002a9c7 and 0002a9ce, MOV [EBP-0x44],0x18 and MOV [EBP-0x40],0x18 at
+       0002a9d5 and 0002a9dc, ADD EAX,0x2298 at 0002aa0f -- the 368x248 page,
+       the (24, 24) origin and the 320x200 window taken out of it
+     MOV [EBP-0x2c],0x1 at 0002a9e9 -- the playback cursor opens on frame 1,
+       which is what the first reference is a picture of
+     MOV [EBP-0x4],0x0 / CMP [EBP-0x4],0x10 / JL at 0002aac7 and 0002aace --
+       sixteen fade steps, so the last one runs at step 15
+     PUSH 0x6f at 0002aae5 with the step itself pushed as the alpha at
+       0002aae4 -- the backdrop's tint colour and its strength
+     MOV EAX,0x10 / SUB EAX,[EBP-0x4] at 0002ab1c -- the translucency level,
+       so the last step draws the picture at level 1
+     MOV [EBP-0x38],0x0 at 0002ab34 and MOV [EBP-0x38],0x1f at 0002ab5b --
+       entry 0 drawn translucent and entry 0x1f drawn opaque over it, with
+       MOV [EBP-0x30],0x9 and MOV [EBP-0x30],0x0 for the two blit modes
+
+   A build that opened the clip on a different frame, sized the page
+   differently, took a different window out of it, ran a different number of
+   fade steps, tinted toward a different colour, inverted either the alpha or
+   the level, or composed the two entries in the other order produces a
+   different 320x200 image and no tick matches.
+
+   WHAT THE FIXTURE SUPPLIES.  The two palette blending tables are built here
+   from a staged palette before anything is drawn, because both references and
+   the run itself resolve every blended pixel through them: with the tables
+   left zero-filled every tint and every translucency would come out as palette
+   index 0 and the alpha and the level would be unobservable.  Which palette it
+   is does not matter -- the references and the run read the same tables -- only
+   that it is not degenerate, so it is a spread of all three channels.
+
+   HOW THE RUN IS ALLOWED TO FINISH.  The routine ends with
+   fdps_flush_keyboard_queue followed by fdps_wait_any_key, and that wait spins
+   until the scancode ring's two indices differ (keybd.h).  Nothing in a test
+   process presses a key, so the timer interrupt makes them differ -- but only
+   OVER_KEY_DELAY_TICKS after the finished picture has been seen on the
+   adapter, which is what lets the fourth case below tell a body that waited
+   from one that did not.  A run that never puts the expected picture up is
+   released anyway once OVER_BUDGET_TICKS have passed, so a wrong build fails
+   its assertions instead of hanging the harness. */
+
+#define OVER_MISC_NAME "MISC.VFS"
+#define OVER_MEMBER_NAME "GameOver.saf"
+
+/* The off-screen page and the window taken out of it, from the assembly cited
+   in the note above. */
+#define OVER_PAGE_PITCH 0x170
+#define OVER_PAGE_ROWS 0xf8
+#define OVER_PAGE_BYTES 0x16480
+#define OVER_PAGE_MARGIN 0x18
+#define OVER_PAGE_WINDOW_AT 0x2298
+
+/* The visible screen and the two BIOS modes the run moves between. */
+#define OVER_VGA_BASE 0x000a0000
+#define OVER_SCREEN_W 0x140
+#define OVER_SCREEN_H 0xc8
+#define OVER_SCREEN_BYTES (OVER_SCREEN_W * OVER_SCREEN_H)
+#define OVER_MODE_TEXT 0x03
+#define OVER_MODE_320X200X256 0x13
+
+/* The BIOS timer, the one interrupt that has to be running: nothing else moves
+   data_fdps_timer_tick_counter, and both of the routine's loops spin until it
+   changes. */
+#define OVER_TIMER_VECTOR 8
+
+/* The frame the clip opens on, and the two entries the fade composes. */
+#define OVER_FIRST_FRAME 1
+#define OVER_PICTURE_FRAME 0
+#define OVER_SIGN_FRAME 0x1f
+
+/* What the last fade step hands the two drawers: alpha 15, because the step
+   counter is the alpha and the bound `< 0x10` makes 15 the last one, and
+   level 1, because the level is 16 minus the step. */
+#define OVER_LAST_TINT_ALPHA 15
+#define OVER_LAST_BLEND_LEVEL 1
+#define OVER_TINT_COLOR 0x6f
+
+/* The blit modes and the three-dword descriptor slots, as rleblend.h has
+   them. */
+#define OVER_BLIT_MODE_OPAQUE 0
+#define OVER_BLIT_MODE_TRANSLUCENT 9
+#define OVER_BLEND_DESC_SHADE_RAMP 0
+#define OVER_BLEND_DESC_LEVEL 1
+#define OVER_BLEND_DESC_CUBE 2
+#define OVER_BLEND_DESC_DWORDS 3
+
+/* How long after the finished picture appears the scancode ring is made
+   non-empty, and how long the whole run is given before it is released
+   regardless.  Five ticks is a quarter of a second, far longer than the three
+   frees and the ring rewind between the last present and the wait, so a body
+   that did not wait cannot reach the release by accident. */
+#define OVER_KEY_DELAY_TICKS 5
+#define OVER_BUDGET_TICKS 400
+
+/* The clip is GameOver.saf's frames 1..31 at two ticks each and then sixteen
+   fade steps at one tick each, so a whole run is around 77 ticks.  The bound
+   is set well below that and well above what any partial playback could reach:
+   a body that drew one frame and fell through is 17, and one that skipped the
+   clip is 16. */
+#define OVER_MIN_RUN_TICKS 45
+
+/* The DAC range every component of the staged palette stays inside. */
+#define OVER_DAC_ENTRIES 256
+#define OVER_DAC_RANGE 64
+#define OVER_PAL_RED_STEP 7
+#define OVER_PAL_GREEN_STEP 11
+#define OVER_PAL_BLUE_STEP 13
+
+/* The picture painted into the aperture before the run, which is what the
+   routine snapshots and then tints away underneath the game-over picture.  Two
+   different multipliers so no row and no column repeats, and the whole 0..255
+   range so the tint has something to move. */
+#define OVER_BG_ROW_STEP 13
+#define OVER_BG_COL_STEP 7
+
+static unsigned char over_background[OVER_SCREEN_BYTES];
+static unsigned char over_first_ref[OVER_SCREEN_BYTES];
+static unsigned char over_final_ref[OVER_SCREEN_BYTES];
+static unsigned char over_palette[OVER_DAC_ENTRIES * 3];
+
+static void (__interrupt __far *over_saved_timer)();
+
+/* Written by the interrupt while the routine runs. */
+static volatile long over_ticks;
+static volatile long over_final_at_tick;
+static volatile int over_first_seen;
+static volatile int over_final_seen;
+
+static int over_ran;
+static int over_ready;
+static long over_return_ticks;
+static long over_left_mismatches;
+static long over_first_vs_background;
+static long over_first_vs_final;
+
+/* Sampled once per timer tick while the routine runs.  memcmp gives up at the
+   first differing byte, so a tick that matches neither reference costs almost
+   nothing and only a genuine match pays for the whole 64,000.
+
+   The release of the closing wait lives here as well: the ring's write index
+   is pushed off its read index once the finished picture has been up for
+   OVER_KEY_DELAY_TICKS, or unconditionally once the whole run has overrun its
+   budget, so that a build which never produces the picture fails a check
+   rather than spinning forever. */
+static void __interrupt __far over_timer_isr(void)
+{
+    unsigned char *aperture;
+
+    ++data_fdps_timer_tick_counter;
+    over_ticks++;
+
+    aperture = (unsigned char *) OVER_VGA_BASE;
+    if (over_first_seen == 0
+        && memcmp(aperture, over_first_ref, (size_t) OVER_SCREEN_BYTES) == 0) {
+        over_first_seen = 1;
+    }
+    if (over_final_seen == 0
+        && memcmp(aperture, over_final_ref, (size_t) OVER_SCREEN_BYTES) == 0) {
+        over_final_seen = 1;
+        over_final_at_tick = over_ticks;
+    }
+
+    if ((over_final_seen != 0
+         && over_ticks >= over_final_at_tick + OVER_KEY_DELAY_TICKS)
+        || over_ticks >= OVER_BUDGET_TICKS) {
+        data_fdps_input_scancode_queue_write_index =
+            data_fdps_input_scancode_queue_head + 1;
+    }
+
+    _chain_intr(over_saved_timer);
+}
+
+static void over_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* Copies the 320x200 window the routine presents out of a composition page. */
+static void over_take_window(unsigned char *page, unsigned char *out)
+{
+    int row;
+
+    for (row = 0; row < OVER_SCREEN_H; row++) {
+        memmove(out + row * OVER_SCREEN_W,
+                page + OVER_PAGE_WINDOW_AT + row * OVER_PAGE_PITCH,
+                (size_t) OVER_SCREEN_W);
+    }
+}
+
+/* The picture the playback loop puts up on its first pass: the caller's screen
+   copied opaquely into the page's window, then GameOver.saf entry
+   OVER_FIRST_FRAME drawn over it at the page's own origin in blit mode 0. */
+static void over_build_first(void *bank, unsigned char *out)
+{
+    int request[DRAW_REQUEST_DWORDS];
+    unsigned char *page;
+
+    page = (unsigned char *) malloc((size_t) OVER_PAGE_BYTES);
+    if (page == NULL) {
+        return;
+    }
+
+    fdps_blit_rect((unsigned int) over_background, OVER_SCREEN_W,
+                   page + OVER_PAGE_WINDOW_AT, OVER_PAGE_PITCH,
+                   OVER_SCREEN_W, OVER_SCREEN_H);
+
+    request[DRAW_REQUEST_DEST_BASE] = (int) page;
+    request[DRAW_REQUEST_DEST_PITCH] = OVER_PAGE_PITCH;
+    request[DRAW_REQUEST_DEST_ROWS] = OVER_PAGE_ROWS;
+    request[DRAW_REQUEST_X] = OVER_PAGE_MARGIN;
+    request[DRAW_REQUEST_Y] = OVER_PAGE_MARGIN;
+    request[DRAW_REQUEST_IMAGE] = (int) bank;
+    request[DRAW_REQUEST_ITEM_INDEX] = OVER_FIRST_FRAME;
+    request[DRAW_REQUEST_BLIT_OPERAND] = 0;
+    request[DRAW_REQUEST_BLIT_MODE] = OVER_BLIT_MODE_OPAQUE;
+    fdps_draw_composite_sprite(request, 1);
+
+    over_take_window(page, out);
+    free(page);
+}
+
+/* The picture the last fade step composes: the caller's screen tinted toward
+   colour 0x6f at alpha 15, entry 0 over it at translucency level 1, and entry
+   0x1f opaque on top of both.  The page is not cleared first, for the same
+   reason the routine does not clear it -- the tint covers every byte of the
+   window with no key and no clip. */
+static void over_build_final(void *bank, unsigned char *out)
+{
+    int request[DRAW_REQUEST_DWORDS];
+    int blend_descriptor[OVER_BLEND_DESC_DWORDS];
+    unsigned char *page;
+
+    page = (unsigned char *) malloc((size_t) OVER_PAGE_BYTES);
+    if (page == NULL) {
+        return;
+    }
+
+    fdps_blit_tint_rect(over_background, OVER_SCREEN_W,
+                        page + OVER_PAGE_WINDOW_AT, OVER_PAGE_PITCH,
+                        OVER_SCREEN_W, OVER_SCREEN_H,
+                        data_fdps_palette_shade_ramp_table,
+                        data_fdps_inverse_palette_cube,
+                        OVER_TINT_COLOR, OVER_LAST_TINT_ALPHA);
+
+    blend_descriptor[OVER_BLEND_DESC_SHADE_RAMP] =
+        (int) data_fdps_palette_shade_ramp_table;
+    blend_descriptor[OVER_BLEND_DESC_LEVEL] = OVER_LAST_BLEND_LEVEL;
+    blend_descriptor[OVER_BLEND_DESC_CUBE] =
+        (int) data_fdps_inverse_palette_cube;
+
+    request[DRAW_REQUEST_DEST_BASE] = (int) page;
+    request[DRAW_REQUEST_DEST_PITCH] = OVER_PAGE_PITCH;
+    request[DRAW_REQUEST_DEST_ROWS] = OVER_PAGE_ROWS;
+    request[DRAW_REQUEST_X] = OVER_PAGE_MARGIN;
+    request[DRAW_REQUEST_Y] = OVER_PAGE_MARGIN;
+    request[DRAW_REQUEST_IMAGE] = (int) bank;
+    request[DRAW_REQUEST_ITEM_INDEX] = OVER_PICTURE_FRAME;
+    request[DRAW_REQUEST_BLIT_OPERAND] = (int) blend_descriptor;
+    request[DRAW_REQUEST_BLIT_MODE] = OVER_BLIT_MODE_TRANSLUCENT;
+    fdps_draw_composite_sprite(request, 1);
+
+    request[DRAW_REQUEST_ITEM_INDEX] = OVER_SIGN_FRAME;
+    request[DRAW_REQUEST_BLIT_OPERAND] = 0;
+    request[DRAW_REQUEST_BLIT_MODE] = OVER_BLIT_MODE_OPAQUE;
+    fdps_draw_composite_sprite(request, 1);
+
+    over_take_window(page, out);
+    free(page);
+}
+
+static long over_differences(unsigned char *left, unsigned char *right)
+{
+    long count;
+    long at;
+
+    count = 0;
+    for (at = 0; at < OVER_SCREEN_BYTES; at++) {
+        if (left[at] != right[at]) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/* The one run all the cases read. */
+static void over_run(void)
+{
+    FILE *fp;
+    void *bank;
+    int saved_head;
+    int saved_write;
+    int entry;
+    int row;
+    int col;
+
+    if (over_ran) {
+        return;
+    }
+    over_ran = 1;
+
+    fp = fopen(OVER_MISC_NAME, "rb");
+    if (fp == NULL) {
+        return;
+    }
+    fclose(fp);
+
+    for (entry = 0; entry < OVER_DAC_ENTRIES; entry++) {
+        over_palette[entry * 3] =
+            (unsigned char) ((entry * OVER_PAL_RED_STEP) % OVER_DAC_RANGE);
+        over_palette[entry * 3 + 1] =
+            (unsigned char) ((entry * OVER_PAL_GREEN_STEP) % OVER_DAC_RANGE);
+        over_palette[entry * 3 + 2] =
+            (unsigned char) ((entry * OVER_PAL_BLUE_STEP) % OVER_DAC_RANGE);
+    }
+    fdps_build_palette_tables((struct fdps_palette_entry *) over_palette);
+
+    for (row = 0; row < OVER_SCREEN_H; row++) {
+        for (col = 0; col < OVER_SCREEN_W; col++) {
+            over_background[row * OVER_SCREEN_W + col] =
+                (unsigned char) (row * OVER_BG_ROW_STEP
+                                 + col * OVER_BG_COL_STEP);
+        }
+    }
+
+    bank = fdps_vfs_load_entry(OVER_MISC_NAME, OVER_MEMBER_NAME);
+    over_build_first(bank, over_first_ref);
+    over_build_final(bank, over_final_ref);
+    free(bank);
+
+    over_first_vs_background = over_differences(over_first_ref,
+                                                over_background);
+    over_first_vs_final = over_differences(over_first_ref, over_final_ref);
+
+    /* The ring goes in empty, so the closing wait really waits: only the
+       interrupt below can end it. */
+    saved_head = data_fdps_input_scancode_queue_head;
+    saved_write = data_fdps_input_scancode_queue_write_index;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+
+    over_ticks = 0;
+    over_final_at_tick = 0;
+    over_first_seen = 0;
+    over_final_seen = 0;
+
+    over_set_mode(OVER_MODE_320X200X256);
+    memmove((void *) OVER_VGA_BASE, over_background,
+            (size_t) OVER_SCREEN_BYTES);
+
+    over_saved_timer = _dos_getvect(OVER_TIMER_VECTOR);
+    _dos_setvect(OVER_TIMER_VECTOR, over_timer_isr);
+    fdps_show_game_over();
+    over_return_ticks = over_ticks;
+    _dos_setvect(OVER_TIMER_VECTOR, over_saved_timer);
+
+    over_left_mismatches = over_differences((unsigned char *) OVER_VGA_BASE,
+                                            over_final_ref);
+    over_set_mode(OVER_MODE_TEXT);
+
+    data_fdps_input_scancode_queue_head = saved_head;
+    data_fdps_input_scancode_queue_write_index = saved_write;
+    over_ready = 1;
+}
+
+/* The premise the two match cases rest on: the run happened at all, and the
+   two references are pictures of different things, neither of them simply the
+   backdrop that was already on the adapter.  Without the second and third a
+   match would be no evidence; without the first the whole group could go green
+   by never running, which is why the missing-container path is asserted here
+   rather than skipped silently -- build_emit.py's preflight refuses to build
+   at all unless every name in tests/gamefile.lst is present, so a container
+   that is not there is a broken harness and not a machine without game
+   files. */
+static void game_over_premise_the_references_are_distinct(void)
+{
+    over_run();
+
+    CHECK_EQ(over_ready, 1);
+    if (!over_ready) {
+        return;
+    }
+
+    CHECK_EQ(over_first_vs_background > 0, 1);
+    CHECK_EQ(over_first_vs_final > 0, 1);
+}
+
+/* The clip opens on entry 1 and composes it over the caller's own screen:
+   MOV [EBP-0x2c],0x1 seeds the cursor, and the opaque fdps_blit_rect at
+   0002aa1e repaints the page's window from the snapshot before the entry is
+   drawn.  A body that reset the cursor through fdps_saf_advance_tick instead,
+   the way fdps_saf_play_over_background does, would open on entry 0 and this
+   picture would never appear. */
+static void game_over_opens_the_clip_on_frame_one_over_the_snapshot(void)
+{
+    over_run();
+    if (!over_ready) {
+        return;
+    }
+
+    CHECK_EQ(over_first_seen, 1);
+}
+
+/* The last fade step reaches the adapter byte for byte: the backdrop tinted
+   toward 0x6f at alpha 15, entry 0 over it at level 1, entry 0x1f opaque on
+   top.  This is the one assertion that pins the whole fade at once -- the
+   sixteen-step bound, the tint colour, the alpha running up while the level
+   runs down, and the order the two entries are composed in. */
+static void game_over_ends_the_fade_on_the_fifteenth_step(void)
+{
+    over_run();
+    if (!over_ready) {
+        return;
+    }
+
+    CHECK_EQ(over_final_seen, 1);
+}
+
+/* Nothing clears the frame on the way out: the picture the fade ended on is
+   still on the adapter when the call returns, which is what the caller draws
+   over next. */
+static void game_over_leaves_the_finished_picture_on_the_adapter(void)
+{
+    over_run();
+    if (!over_ready) {
+        return;
+    }
+
+    CHECK_EQ(over_left_mismatches, 0L);
+}
+
+/* CALL 0x000567b3 / CALL 0x000567a0 at 0002abfc and 0002ac01: the ring is
+   emptied and then waited on, so the call does not come back until a scancode
+   arrives.  The interrupt makes one available OVER_KEY_DELAY_TICKS after the
+   finished picture goes up, and the call is still inside itself at that point.
+   A body that dropped the wait would return within a tick of the last present
+   and this gap would be 0 or 1. */
+static void game_over_waits_for_a_key_before_it_returns(void)
+{
+    over_run();
+    if (!over_ready) {
+        return;
+    }
+
+    CHECK_EQ(over_return_ticks - over_final_at_tick >= OVER_KEY_DELAY_TICKS, 1);
+}
+
+/* The playback loop runs the clip out rather than stopping on the first frame:
+   it exits only when fdps_saf_advance_tick answers non-zero, and GameOver.saf
+   is 31 frames of two ticks each.  The whole run therefore cannot be short,
+   and the bound is set below what a correct run takes and above what any
+   truncated playback could reach. */
+static void game_over_plays_the_whole_clip_before_it_fades(void)
+{
+    over_run();
+    if (!over_ready) {
+        return;
+    }
+
+    CHECK_EQ(over_final_at_tick >= OVER_MIN_RUN_TICKS, 1);
+}
+
 void run_title_tests(void)
 {
     RUN_TEST(movie_premise_the_aperture_reads_back);
@@ -584,4 +1074,10 @@ void run_title_tests(void)
     RUN_TEST(movie_takes_the_keyboard_hook_down_before_putting_it_back);
     RUN_TEST(movie_puts_the_keyboard_hook_back);
     RUN_TEST(movie_takes_the_audio_stack_down_and_brings_it_back);
+    RUN_TEST(game_over_premise_the_references_are_distinct);
+    RUN_TEST(game_over_opens_the_clip_on_frame_one_over_the_snapshot);
+    RUN_TEST(game_over_ends_the_fade_on_the_fifteenth_step);
+    RUN_TEST(game_over_leaves_the_finished_picture_on_the_adapter);
+    RUN_TEST(game_over_waits_for_a_key_before_it_returns);
+    RUN_TEST(game_over_plays_the_whole_clip_before_it_fades);
 }

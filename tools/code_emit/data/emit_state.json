@@ -2164,6 +2164,14 @@
       "status": "committed",
       "rounds": 1,
       "emitted_against": "0xad9"
+    },
+    "0002a960": {
+      "name": "fdps_show_game_over",
+      "target": "title.c",
+      "body_size": "0x2ad",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x2ad"
     }
   }
 }

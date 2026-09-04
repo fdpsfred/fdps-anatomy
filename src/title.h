@@ -48,4 +48,44 @@
 extern void fdps_play_movie(char *movie_name);
 #pragma aux fdps_play_movie "*" parm caller [];
 
+/* 0002a960.  Runs the whole game-over screen and returns when the player has
+   pressed a key.  main@00029220 is the only caller, and it carries on
+   afterwards, so this is a pause and not a way out of the program.
+
+   Whatever is on the adapter when the call is made is the backdrop: the
+   320x200 frame is copied out of 0xa0000 before anything is drawn, and every
+   frame of what follows is composed over that copy on a private 368x248 page
+   with the picture drawn at (24, 24), the same page geometry saf.h's player
+   uses.  Only the page's 320x200 window is ever put on the adapter.
+
+   GameOver.saf is pulled out of MISC.VFS here and released here.  It plays
+   once, FROM FRAME 1 -- the cursor is seeded directly rather than reset
+   through fdps_saf_advance_tick, so frame 0 is skipped by the animation --
+   paced one drawn frame per change of the timer tick counter and presented on
+   the vertical retrace.  The clip is 31 frames of two ticks each, so the
+   animation stands for a little over three seconds.
+
+   Then sixteen fade steps, on the same pacing.  At step n the backdrop is
+   redrawn from the untouched snapshot tinted toward palette colour 0x6f at
+   alpha n, entry 0 of the same .SAF -- the still game-over picture -- is
+   composited over it at translucency level 16 - n, and entry 31 is drawn
+   opaque on top of both.  So the backdrop drains away as the picture comes up,
+   the sign over it never fades, and the step counter never reaches 16: the
+   last step is alpha 15 against level 1, not a fully tinted backdrop under a
+   fully solid picture.
+
+   The finished picture is LEFT STANDING on the adapter.  Nothing here clears
+   the frame or touches the DAC, so the caller inherits the last fade step and
+   draws over it.  The keyboard ring is emptied and then waited on, which is
+   what holds the screen; a key pressed during the animation or the fade does
+   not dismiss it.
+
+   Reads data_fdps_timer_tick_counter for its pacing and the two palette
+   blending tables, data_fdps_palette_shade_ramp_table and
+   data_fdps_inverse_palette_cube, for the tint and the translucency; writes no
+   global at all.  Its three allocations -- the snapshot, the .SAF and the page
+   -- are all released before it waits. */
+extern void fdps_show_game_over(void);
+#pragma aux fdps_show_game_over "*" parm caller [];
+
 #endif
