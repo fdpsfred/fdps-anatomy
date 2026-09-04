@@ -373,6 +373,39 @@ extern unsigned char data_fdps_audio_bgm_enabled_flag;
    data_fdps_audio_sfx_driver_available_flag, in audio.h. */
 extern unsigned char data_fdps_audio_sfx_enabled_flag;
 
+/* 00060158.  The player's terrain-information toggle, the fourth of the option
+   flags the options menu writes and a save file carries (the
+   terrain_hud_user_enabled field of struct fdps_save_slot).  The options menu
+   flips it with XOR byte ptr [0x00060158],0x1 at 000184cc and shows its state
+   with the CMP at 0001843a; fdps_title_screen forces it off at 0002a84b and on
+   again at 0002a864, and fdps_run_village_phase saves it, clears it for the
+   length of the village phase and puts it back (000314d7, 000314df, 0003150e).
+
+   One byte, read as a boolean: all thirteen accesses in the image are byte
+   accesses and the only two tests are CMP byte ptr [...],0x0, so nothing here
+   is sign-sensitive.  What it gates is fdps_draw_cursor_info_panel
+   (mapcur.h) -- with it clear that function draws nothing at all. */
+extern unsigned char data_fdps_ui_terrain_hud_user_enabled;
+
+/* 00060159.  Whether the battle map is the live surface the player is driving
+   the cursor over, as opposed to a menu, a status window or a scripted scene
+   having the screen.  Every one of its thirty writers stores a literal 0 or 1
+   -- the battle menus, the unit turn loop, the turn advance and the cut-scene
+   icon scripts all clear it on the way in and set it on the way out, and
+   fdps_battle_show_unit_status_window / fdps_close_status_window save and
+   restore it around the status window (00016aea, 00016a89).
+
+   It has exactly one consumer: the CMP byte ptr [0x00060159],0x0 at 0002dd3b
+   in fdps_draw_cursor_info_panel (mapcur.h), which is the second half of that
+   function's gate.  So the flag's whole observable effect is that the terrain
+   panel disappears whenever something else owns the screen.
+
+   One byte, read as a boolean, and its neighbour at 00060158 above is the
+   other half of that gate but a separate global: both are named by their own
+   absolute address and nothing indexes across the pair
+   (rebuild_info/pitfalls.md, contract B). */
+extern unsigned char data_fdps_ui_play_active_flag;
+
 /* 000643a0.  BaseWav.vfs, the sound-effect pack, held whole in one heap block:
    header, directory and every member's .WAV bytes in the one image.
    fdps_load_global_resources loads it at startup -- the address of this

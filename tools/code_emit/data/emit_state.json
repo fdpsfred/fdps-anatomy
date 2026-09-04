@@ -2409,6 +2409,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x97"
+    },
+    "0002dcf0": {
+      "name": "fdps_draw_cursor_info_panel",
+      "target": "mapcur.c",
+      "body_size": "0x295",
+      "status": "committed",
+      "rounds": 1,
+      "emitted_against": "0x295"
     }
   }
 }

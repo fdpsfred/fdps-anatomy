@@ -26,6 +26,7 @@
  */
 #include <string.h>
 #include "testharn.h"
+#include "fdpstype.h"
 #include "gamedata.h"
 #include "mapcur.h"
 
@@ -498,10 +499,828 @@ static void test_the_drawing_modes_leave_the_grid_alone(void)
     CHECK_EQ(mapcur_lead_in_touched(), 0);
 }
 
+
+/* ------------------------------------------------------------------------
+   fdps_draw_cursor_info_panel, 0002dcf0.
+
+   The panel is exercised against the real fdps_map_load_tile_info,
+   fdps_cel_blit_sprite, fdps_battle_find_unit_at_cursor, fdps_blit_dispatch
+   and fdps_draw_number, because almost everything the function decides is only
+   visible in what those leave in the buffer: which colour row a figure came
+   out of, which cache entry the walking sprite came from, and which of the two
+   terrain tables an index reached.
+
+   Every sheet is staged so that a painted pixel names the sprite that painted
+   it -- the panel background paints 0x11, terrain tile t paints 0x20 + t,
+   sprite cache entry e paints 0x30 + e and Number.cel's glyph g of colour row
+   r paints 0x60 + r * 13 + g -- and the scene is filled with a guard first, so
+   an untouched pixel is as assertable as a painted one.
+
+   Expected positions come from the four folded displacements in the assembly:
+   0xe6b3, 0xf621, 0x10b39 and 0x11d8b are row * 0x168 + column for rows 164,
+   175, 190 and 203, and the two cel blits carry rows 0xa0 and 0xaf as
+   arguments.  Expected figures come from the assembly's argument groups, never
+   from the emitted C.
+
+   Nothing here asserts what any global holds on its own -- ticket 23 owns
+   their contents -- and every global the panel reads or writes is put back
+   afterwards. */
+
+/* The map is wide enough that a cursor eleven tiles into the view window, the
+   position that parks the panel on the left, still names a cell inside it. */
+#define PANEL_MAP_W 16
+#define PANEL_MAP_H 10
+#define PANEL_MAP_CELLS (PANEL_MAP_W * PANEL_MAP_H)
+
+#define PANEL_TILEMAP_BYTES 0x180
+#define PANEL_ATTR_BYTES 0x80
+#define PANEL_EVENT_BYTES 0x100
+#define PANEL_GRID_BYTES 0x180
+
+/* Two cells with different graphics and different terrain classes, so an
+   assertion about which cell was looked up is not vacuous. */
+#define PANEL_TILE_ID_HOME 5
+#define PANEL_TERRAIN_HOME 3
+#define PANEL_TILE_ID_AWAY 6
+#define PANEL_TERRAIN_AWAY 1
+
+/* The cell the unit stands on, well inside the top five rows of the view
+   window so that no test that is not about the dodge triggers one. */
+#define PANEL_HOME_TILE_X 4
+#define PANEL_HOME_TILE_Y 2
+
+/* The cell the dodge tests aim at: low enough down the window for the row test
+   to pass, so only the column decides. */
+#define PANEL_AWAY_TILE_X 1
+#define PANEL_AWAY_TILE_Y 6
+
+/* Neither of the two columns the function itself parks the panel at, so a
+   figure drawn at the right place proves the panel column was read from the
+   global rather than assumed. */
+#define PANEL_TEST_COLUMN 40
+#define PANEL_PARK_RIGHT 0x124
+#define PANEL_PARK_LEFT 0x19
+
+/* Number.cel's colour row a test leaves standing before the call: neither 0,
+   which the function forces on the way out, nor 3, which a hurt unit's HP
+   figure asks for. */
+#define PANEL_AMBIENT_ROW 2
+#define PANEL_HURT_ROW 3
+
+#define PANEL_GUARD 0xee
+#define PANEL_WIN_PIXEL 0x11
+#define PANEL_TILE_PIXEL_BASE 0x20
+#define PANEL_CACHE_PIXEL_BASE 0x30
+#define PANEL_GLYPH_PIXEL_BASE 0x60
+
+/* Where each piece lands, relative to the panel column. */
+#define PANEL_WIN_ROW 0xa0
+#define PANEL_WIN_COL 0
+#define PANEL_CELL_ROW 0xaf
+#define PANEL_CELL_COL 9
+#define PANEL_AP_ROW 164
+#define PANEL_AP_COL 19
+#define PANEL_HP_ROW 190
+#define PANEL_HP_COL 9
+#define PANEL_DEF_ROW 203
+#define PANEL_DEF_COL 19
+
+#define PANEL_GLYPH_W 6
+#define PANEL_GLYPH_H 8
+#define PANEL_CELL_SIZE 24
+
+/* The panel background is deliberately tiny -- four by two -- so that it
+   cannot reach any of the four fields and every painted pixel has exactly one
+   owner. */
+#define PANEL_WIN_W 4
+#define PANEL_WIN_H 2
+
+#define PANEL_WIN_SHEET_BYTES 0x40
+#define PANEL_TILE_SPRITES 8
+#define PANEL_TILE_STREAM0 0x40
+#define PANEL_TILE_STREAM_STRIDE 0x40
+#define PANEL_TILE_SHEET_BYTES 0x240
+
+/* Twelve cache entries to a slot, and three slots staged, so the entry the
+   panel picks for cache slot 2 is well away from entry 0. */
+#define PANEL_CACHE_SLOT 2
+#define PANEL_CACHE_SLOT_ENTRIES 12
+#define PANEL_CACHE_ENTRIES 36
+#define PANEL_CACHE_STREAM0 0x90
+#define PANEL_CACHE_STREAM_STRIDE 0x40
+#define PANEL_CACHE_BYTES 0x9a0
+
+#define PANEL_GLYPHS_PER_ROW 13
+#define PANEL_GLYPH_SPRITES 65
+#define PANEL_NUM_TABLE_AT 0x0f
+#define PANEL_NUM_STREAM0 0x120
+#define PANEL_NUM_STREAM_STRIDE 0x20
+#define PANEL_NUM_SHEET_BYTES 0x960
+
+/* fdps_draw_number's glyph indices: the ten digits are 0..9, then '+', '-'
+   and '?' (src/text.c). */
+#define PANEL_GLYPH_PLUS 10
+#define PANEL_GLYPH_MINUS 11
+
+/* The two figures the terrain tables are staged with.  A negative defense
+   modifier is the case that pins the tables as signed: read unsigned, -7 would
+   print as a ten-digit figure. */
+#define PANEL_AP_MODIFIER 25
+#define PANEL_DEF_MODIFIER (-7)
+
+#define PANEL_HP_HURT 12
+#define PANEL_HP_FULL 20
+
+static unsigned char panel_win_sheet[PANEL_WIN_SHEET_BYTES];
+static unsigned char panel_tile_sheet[PANEL_TILE_SHEET_BYTES];
+static unsigned char panel_cache[PANEL_CACHE_BYTES];
+static unsigned char panel_num_sheet[PANEL_NUM_SHEET_BYTES];
+static unsigned char panel_tilemap[PANEL_TILEMAP_BYTES];
+static unsigned char panel_attr[PANEL_ATTR_BYTES];
+static unsigned char panel_events[PANEL_EVENT_BYTES];
+static unsigned char panel_grid[PANEL_GRID_BYTES];
+static struct fdps_unit_record panel_units[1];
+
+static struct {
+    unsigned char hud_enabled;
+    unsigned char play_active;
+    short panel_offset;
+    int cursor_x;
+    int cursor_y;
+    int origin_x;
+    int origin_y;
+    unsigned char *tile_map;
+    unsigned char *tile_attr;
+    unsigned char *tile_sheet;
+    unsigned char *grid;
+    unsigned char *event_layer;
+    unsigned char *win_sheet;
+    unsigned char *num_sheet;
+    unsigned char *units;
+    int unit_count;
+    unsigned char *cache;
+    unsigned int tick;
+    int color_row;
+    int ap_table[6];
+    int def_table[6];
+    short tile_id;
+    unsigned char terrain;
+} panel_saved;
+
+/* One fill command per row: the top two bits of a command byte are the op and
+   its low six bits plus one are the run length (src/rle.c), so a run of `width`
+   opaque pixels is the byte width - 1 followed by the pixel. */
+static void panel_fill_stream(unsigned char *buffer, int at, int width,
+                              int rows, unsigned char pixel)
+{
+    int row;
+
+    for (row = 0; row < rows; row++) {
+        buffer[at + row * 2] = (unsigned char) (width - 1);
+        buffer[at + row * 2 + 1] = pixel;
+    }
+}
+
+static void panel_stage_sheets(void)
+{
+    int sprite_index;
+    int stream_at;
+
+    memset(panel_win_sheet, 0, PANEL_WIN_SHEET_BYTES);
+    mapcur_u16(panel_win_sheet, 7, PANEL_WIN_W);
+    mapcur_u16(panel_win_sheet, 9, PANEL_WIN_H);
+    mapcur_u32(panel_win_sheet, MAPCUR_TABLE_AT, 0x20);
+    panel_fill_stream(panel_win_sheet, 0x20, PANEL_WIN_W, PANEL_WIN_H,
+                      PANEL_WIN_PIXEL);
+
+    memset(panel_tile_sheet, 0, PANEL_TILE_SHEET_BYTES);
+    mapcur_u16(panel_tile_sheet, 7, PANEL_CELL_SIZE);
+    mapcur_u16(panel_tile_sheet, 9, PANEL_CELL_SIZE);
+    for (sprite_index = 0; sprite_index < PANEL_TILE_SPRITES; sprite_index++) {
+        stream_at = PANEL_TILE_STREAM0
+                    + sprite_index * PANEL_TILE_STREAM_STRIDE;
+        mapcur_u32(panel_tile_sheet, MAPCUR_TABLE_AT + sprite_index * 4,
+                   (unsigned long) stream_at);
+        panel_fill_stream(panel_tile_sheet, stream_at, PANEL_CELL_SIZE,
+                          PANEL_CELL_SIZE,
+                          (unsigned char) (PANEL_TILE_PIXEL_BASE
+                                           + sprite_index));
+    }
+
+    /* The sprite cache's offset table starts at the block's own base, not at a
+       .CEL's +0xf: it is a table fdps_cache_cel_sprite_group builds. */
+    memset(panel_cache, 0, PANEL_CACHE_BYTES);
+    for (sprite_index = 0; sprite_index < PANEL_CACHE_ENTRIES;
+         sprite_index++) {
+        stream_at = PANEL_CACHE_STREAM0
+                    + sprite_index * PANEL_CACHE_STREAM_STRIDE;
+        mapcur_u32(panel_cache, sprite_index * 4, (unsigned long) stream_at);
+        panel_fill_stream(panel_cache, stream_at, PANEL_CELL_SIZE,
+                          PANEL_CELL_SIZE,
+                          (unsigned char) (PANEL_CACHE_PIXEL_BASE
+                                           + sprite_index));
+    }
+
+    memset(panel_num_sheet, 0, PANEL_NUM_SHEET_BYTES);
+    for (sprite_index = 0; sprite_index < PANEL_GLYPH_SPRITES;
+         sprite_index++) {
+        stream_at = PANEL_NUM_STREAM0
+                    + sprite_index * PANEL_NUM_STREAM_STRIDE;
+        mapcur_u32(panel_num_sheet, PANEL_NUM_TABLE_AT + sprite_index * 4,
+                   (unsigned long) stream_at);
+        panel_fill_stream(panel_num_sheet, stream_at, PANEL_GLYPH_W,
+                          PANEL_GLYPH_H,
+                          (unsigned char) (PANEL_GLYPH_PIXEL_BASE
+                                           + sprite_index));
+    }
+}
+
+/* A tile map whose header carries the width at +7 and whose 16-bit tile ids
+   start at +0xb, an attribute table whose 4-byte rows start at +0x11, an event
+   code layer and a movement grid: the four blocks fdps_map_load_tile_info
+   walks before the panel draws anything. */
+static void panel_stage_map(void)
+{
+    int cell;
+
+    memset(panel_tilemap, 0, PANEL_TILEMAP_BYTES);
+    mapcur_u16(panel_tilemap, 7, PANEL_MAP_W);
+    mapcur_u16(panel_tilemap, 9, PANEL_MAP_H);
+    for (cell = 0; cell < PANEL_MAP_CELLS; cell++) {
+        mapcur_u16(panel_tilemap, 0x0b + cell * 2, PANEL_TILE_ID_HOME);
+    }
+    mapcur_u16(panel_tilemap,
+               0x0b + (PANEL_AWAY_TILE_Y * PANEL_MAP_W + PANEL_AWAY_TILE_X)
+                   * 2,
+               PANEL_TILE_ID_AWAY);
+
+    memset(panel_attr, 0, PANEL_ATTR_BYTES);
+    panel_attr[0x11 + PANEL_TILE_ID_HOME * 4 + 2] = PANEL_TERRAIN_HOME;
+    panel_attr[0x11 + PANEL_TILE_ID_AWAY * 4 + 2] = PANEL_TERRAIN_AWAY;
+
+    memset(panel_events, 0, PANEL_EVENT_BYTES);
+    mapcur_u16(panel_events, 7, PANEL_MAP_W);
+    mapcur_u16(panel_events, 9, PANEL_MAP_H);
+
+    memset(panel_grid, 0, PANEL_GRID_BYTES);
+    mapcur_u16(panel_grid, 0, PANEL_MAP_W);
+    mapcur_u16(panel_grid, 2, PANEL_MAP_H);
+}
+
+static void panel_save(void)
+{
+    int index;
+
+    panel_saved.hud_enabled = data_fdps_ui_terrain_hud_user_enabled;
+    panel_saved.play_active = data_fdps_ui_play_active_flag;
+    panel_saved.panel_offset = data_fdps_ui_terrain_hud_panel_offset;
+    panel_saved.cursor_x = data_fdps_map_cursor_world_x;
+    panel_saved.cursor_y = data_fdps_map_cursor_world_y;
+    panel_saved.origin_x = data_fdps_battle_view_window_origin_x;
+    panel_saved.origin_y = data_fdps_battle_view_window_origin_y;
+    panel_saved.tile_map = data_fdps_scene_layer_tile_map_ptrs[0];
+    panel_saved.tile_attr = data_fdps_scene_layer_tile_attr_ptr[0];
+    panel_saved.tile_sheet = data_fdps_scene_layer_tile_sheet_ptrs[0];
+    panel_saved.grid = data_fdps_battle_move_grid_ptr;
+    panel_saved.event_layer = data_fdps_map_cell_event_code_layer_ptr;
+    panel_saved.win_sheet = data_fdps_ui_terrain_hud_panel_sheet_ptr;
+    panel_saved.num_sheet = data_fdps_number_glyph_sheet_ptr;
+    panel_saved.units = data_fdps_map_unit_array_ptr;
+    panel_saved.unit_count = data_fdps_map_unit_count;
+    panel_saved.cache = data_fdps_cel_sprite_cache_ptr;
+    panel_saved.tick = data_fdps_timer_tick_counter;
+    panel_saved.color_row = data_fdps_number_glyph_color_row;
+    panel_saved.tile_id = data_fdps_map_tile_info_tile_id;
+    panel_saved.terrain = data_fdps_map_tile_terrain_type;
+    for (index = 0; index < 6; index++) {
+        panel_saved.ap_table[index] =
+            data_fdps_battle_tile_attr_ap_modifier_table[index];
+        panel_saved.def_table[index] =
+            data_fdps_battle_tile_attr_def_modifier_table[index];
+    }
+}
+
+static void panel_restore(void)
+{
+    int index;
+
+    data_fdps_ui_terrain_hud_user_enabled = panel_saved.hud_enabled;
+    data_fdps_ui_play_active_flag = panel_saved.play_active;
+    data_fdps_ui_terrain_hud_panel_offset = panel_saved.panel_offset;
+    data_fdps_map_cursor_world_x = panel_saved.cursor_x;
+    data_fdps_map_cursor_world_y = panel_saved.cursor_y;
+    data_fdps_battle_view_window_origin_x = panel_saved.origin_x;
+    data_fdps_battle_view_window_origin_y = panel_saved.origin_y;
+    data_fdps_scene_layer_tile_map_ptrs[0] = panel_saved.tile_map;
+    data_fdps_scene_layer_tile_attr_ptr[0] = panel_saved.tile_attr;
+    data_fdps_scene_layer_tile_sheet_ptrs[0] = panel_saved.tile_sheet;
+    data_fdps_battle_move_grid_ptr = panel_saved.grid;
+    data_fdps_map_cell_event_code_layer_ptr = panel_saved.event_layer;
+    data_fdps_ui_terrain_hud_panel_sheet_ptr = panel_saved.win_sheet;
+    data_fdps_number_glyph_sheet_ptr = panel_saved.num_sheet;
+    data_fdps_map_unit_array_ptr = panel_saved.units;
+    data_fdps_map_unit_count = panel_saved.unit_count;
+    data_fdps_cel_sprite_cache_ptr = panel_saved.cache;
+    data_fdps_timer_tick_counter = panel_saved.tick;
+    data_fdps_number_glyph_color_row = panel_saved.color_row;
+    data_fdps_map_tile_info_tile_id = panel_saved.tile_id;
+    data_fdps_map_tile_terrain_type = panel_saved.terrain;
+    for (index = 0; index < 6; index++) {
+        data_fdps_battle_tile_attr_ap_modifier_table[index] =
+            panel_saved.ap_table[index];
+        data_fdps_battle_tile_attr_def_modifier_table[index] =
+            panel_saved.def_table[index];
+    }
+}
+
+/* Everything switched on, the cursor on the unit's own tile with the view
+   window unscrolled, one live unit in the array and the panel parked at a
+   column the function never chooses for itself. */
+static void panel_install(void)
+{
+    data_fdps_ui_terrain_hud_user_enabled = 1;
+    data_fdps_ui_play_active_flag = 1;
+    data_fdps_ui_terrain_hud_panel_offset = PANEL_TEST_COLUMN;
+    data_fdps_map_cursor_world_x = PANEL_HOME_TILE_X * PANEL_CELL_SIZE;
+    data_fdps_map_cursor_world_y = PANEL_HOME_TILE_Y * PANEL_CELL_SIZE;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_scene_layer_tile_map_ptrs[0] = panel_tilemap;
+    data_fdps_scene_layer_tile_attr_ptr[0] = panel_attr;
+    data_fdps_scene_layer_tile_sheet_ptrs[0] = panel_tile_sheet;
+    data_fdps_battle_move_grid_ptr = panel_grid;
+    data_fdps_map_cell_event_code_layer_ptr = panel_events;
+    data_fdps_ui_terrain_hud_panel_sheet_ptr = panel_win_sheet;
+    data_fdps_number_glyph_sheet_ptr = panel_num_sheet;
+    data_fdps_cel_sprite_cache_ptr = panel_cache;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_number_glyph_color_row = PANEL_AMBIENT_ROW;
+    data_fdps_battle_tile_attr_ap_modifier_table[PANEL_TERRAIN_HOME] =
+        PANEL_AP_MODIFIER;
+    data_fdps_battle_tile_attr_def_modifier_table[PANEL_TERRAIN_HOME] =
+        PANEL_DEF_MODIFIER;
+    data_fdps_battle_tile_attr_ap_modifier_table[PANEL_TERRAIN_AWAY] = 0;
+    data_fdps_battle_tile_attr_def_modifier_table[PANEL_TERRAIN_AWAY] = 0;
+
+    memset(panel_units, 0, sizeof(panel_units));
+    panel_units[0].pos_x = PANEL_HOME_TILE_X;
+    panel_units[0].pos_y = PANEL_HOME_TILE_Y;
+    panel_units[0].sprite_cache_slot = PANEL_CACHE_SLOT;
+    panel_units[0].hp_current = PANEL_HP_FULL;
+    panel_units[0].hp_max = PANEL_HP_FULL;
+    data_fdps_map_unit_array_ptr = (unsigned char *) panel_units;
+    data_fdps_map_unit_count = 1;
+}
+
+static void panel_run(void)
+{
+    memset(mapcur_scene, PANEL_GUARD, MAPCUR_SCENE_BYTES);
+    fdps_draw_cursor_info_panel(mapcur_scene);
+}
+
+static unsigned char panel_px(int row, int col)
+{
+    return mapcur_scene[row * MAPCUR_PITCH + col];
+}
+
+/* A pixel two in and two down from the top left of glyph `slot` of a figure
+   whose first cell starts at `row`, `col` -- inside the cell whichever glyph
+   it is. */
+static unsigned char panel_glyph_px(int row, int col, int slot)
+{
+    return panel_px(row + 2, col + slot * PANEL_GLYPH_W + 2);
+}
+
+static int panel_glyph_pixel(int color_row, int glyph_index)
+{
+    return PANEL_GLYPH_PIXEL_BASE + color_row * PANEL_GLYPHS_PER_ROW
+           + glyph_index;
+}
+
+static int panel_painted(void)
+{
+    int index;
+    int painted;
+
+    painted = 0;
+    for (index = 0; index < MAPCUR_SCENE_BYTES; index++) {
+        if (mapcur_scene[index] != PANEL_GUARD) {
+            painted++;
+        }
+    }
+    return painted;
+}
+
+/* Puts the cursor on a tile of the map without moving the view window. */
+static void panel_cursor_at(int tile_x, int tile_y)
+{
+    data_fdps_map_cursor_world_x = tile_x * PANEL_CELL_SIZE;
+    data_fdps_map_cursor_world_y = tile_y * PANEL_CELL_SIZE;
+}
+
+/* The panel reads the unit record at +2, +0x40 and +0x42 -- MOV AL,byte ptr
+   [EAX+0x2] at 0002decd and the two MOVSX word ptr at 0002df2b and 0002df35 --
+   and walks the array with the 0x50 stride.  Those four numbers are what makes
+   struct fdps_unit_record the right window onto the array. */
+static void test_the_record_fields_sit_where_the_panel_reads_them(void)
+{
+    struct fdps_unit_record probe;
+
+    CHECK_EQ((char *) &probe.sprite_cache_slot - (char *) &probe, 2);
+    CHECK_EQ((char *) &probe.hp_current - (char *) &probe, 0x40);
+    CHECK_EQ((char *) &probe.hp_max - (char *) &probe, 0x42);
+    CHECK_EQ(sizeof(struct fdps_unit_record), 0x50);
+}
+
+/* CMP byte ptr [0x00060158],0x0 / JZ at 0002dd32 jumps straight to the
+   epilogue, so with the player's toggle off nothing is drawn, the panel column
+   is not moved, and -- because the gate sits ahead of the call at 0002dd75 --
+   the tile-info block is not refreshed either. */
+static void test_the_user_toggle_off_draws_nothing_at_all(void)
+{
+    panel_save();
+    panel_install();
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_map_tile_info_tile_id = 0x123;
+    panel_cursor_at(PANEL_AWAY_TILE_X, PANEL_AWAY_TILE_Y);
+    panel_run();
+
+    CHECK_EQ(panel_painted(), 0);
+    CHECK_EQ(data_fdps_ui_terrain_hud_panel_offset, PANEL_TEST_COLUMN);
+    CHECK_EQ(data_fdps_map_tile_info_tile_id, 0x123);
+    CHECK_EQ(data_fdps_number_glyph_color_row, PANEL_AMBIENT_ROW);
+    panel_restore();
+}
+
+/* The second half of the same gate, CMP byte ptr [0x00060159],0x0 / JNZ at
+   0002dd3b: a menu, a status window or a cut scene owns the screen and the
+   panel keeps out of it. */
+static void test_the_map_not_being_live_draws_nothing_at_all(void)
+{
+    panel_save();
+    panel_install();
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_map_tile_info_tile_id = 0x123;
+    panel_cursor_at(PANEL_AWAY_TILE_X, PANEL_AWAY_TILE_Y);
+    panel_run();
+
+    CHECK_EQ(panel_painted(), 0);
+    CHECK_EQ(data_fdps_ui_terrain_hud_panel_offset, PANEL_TEST_COLUMN);
+    CHECK_EQ(data_fdps_map_tile_info_tile_id, 0x123);
+    panel_restore();
+}
+
+/* CMP [EBP-0x4],0x4 / JLE then CMP [EBP-0x8],0x2 / JL at 0002dd7d: the cursor
+   has to be BELOW window row 4 and LEFT of window column 2 before the panel
+   moves to 0x124.  Row 4 itself does not qualify, and neither does column 2. */
+static void test_the_panel_parks_right_under_a_low_left_cursor(void)
+{
+    panel_save();
+    panel_install();
+    panel_cursor_at(1, 5);
+    panel_run();
+    CHECK_EQ(data_fdps_ui_terrain_hud_panel_offset, PANEL_PARK_RIGHT);
+
+    data_fdps_ui_terrain_hud_panel_offset = PANEL_TEST_COLUMN;
+    panel_cursor_at(0, 6);
+    panel_run();
+    CHECK_EQ(data_fdps_ui_terrain_hud_panel_offset, PANEL_PARK_RIGHT);
+
+    data_fdps_ui_terrain_hud_panel_offset = PANEL_TEST_COLUMN;
+    panel_cursor_at(1, 4);
+    panel_run();
+    CHECK_EQ(data_fdps_ui_terrain_hud_panel_offset, PANEL_TEST_COLUMN);
+
+    data_fdps_ui_terrain_hud_panel_offset = PANEL_TEST_COLUMN;
+    panel_cursor_at(2, 6);
+    panel_run();
+    CHECK_EQ(data_fdps_ui_terrain_hud_panel_offset, PANEL_TEST_COLUMN);
+    panel_restore();
+}
+
+/* CMP [EBP-0x8],0xa / JG at 0002dd9c, reached only when the first arm did not
+   fire: below window row 4 and past window column 10 parks the panel at 0x19.
+   Column 10 itself does not qualify. */
+static void test_the_panel_parks_left_under_a_low_right_cursor(void)
+{
+    panel_save();
+    panel_install();
+    panel_cursor_at(11, 5);
+    panel_run();
+    CHECK_EQ(data_fdps_ui_terrain_hud_panel_offset, PANEL_PARK_LEFT);
+
+    data_fdps_ui_terrain_hud_panel_offset = PANEL_TEST_COLUMN;
+    panel_cursor_at(10, 6);
+    panel_run();
+    CHECK_EQ(data_fdps_ui_terrain_hud_panel_offset, PANEL_TEST_COLUMN);
+
+    data_fdps_ui_terrain_hud_panel_offset = PANEL_TEST_COLUMN;
+    panel_cursor_at(11, 4);
+    panel_run();
+    CHECK_EQ(data_fdps_ui_terrain_hud_panel_offset, PANEL_TEST_COLUMN);
+    panel_restore();
+}
+
+/* Neither arm has an else, so a cursor the two tests do not name leaves the
+   column exactly where the last dodge put it -- which is why the column is a
+   global at all. */
+static void test_a_middle_cursor_leaves_the_panel_where_it_was(void)
+{
+    panel_save();
+    panel_install();
+    data_fdps_ui_terrain_hud_panel_offset = PANEL_PARK_LEFT;
+    panel_cursor_at(5, 6);
+    panel_run();
+    CHECK_EQ(data_fdps_ui_terrain_hud_panel_offset, PANEL_PARK_LEFT);
+
+    panel_cursor_at(1, 1);
+    panel_run();
+    CHECK_EQ(data_fdps_ui_terrain_hud_panel_offset, PANEL_PARK_LEFT);
+    panel_restore();
+}
+
+/* The dodge is decided on the cursor MINUS the view origin (0002dcfc,
+   0002dd17) while the tile whose information is shown is the cursor's absolute
+   map tile (0002dd49, 0002dd5f).  Scrolling the window under a stationary
+   cursor therefore changes where the panel sits without changing which cell is
+   read. */
+static void test_the_dodge_is_window_relative_and_the_lookup_is_not(void)
+{
+    panel_save();
+    panel_install();
+    panel_cursor_at(PANEL_AWAY_TILE_X, PANEL_AWAY_TILE_Y);
+    panel_run();
+    CHECK_EQ(data_fdps_ui_terrain_hud_panel_offset, PANEL_PARK_RIGHT);
+    CHECK_EQ(data_fdps_map_tile_info_tile_id, PANEL_TILE_ID_AWAY);
+    CHECK_EQ(data_fdps_map_tile_terrain_type, PANEL_TERRAIN_AWAY);
+
+    data_fdps_ui_terrain_hud_panel_offset = PANEL_TEST_COLUMN;
+    data_fdps_battle_view_window_origin_y = 5 * PANEL_CELL_SIZE;
+    panel_run();
+    CHECK_EQ(data_fdps_ui_terrain_hud_panel_offset, PANEL_TEST_COLUMN);
+    CHECK_EQ(data_fdps_map_tile_info_tile_id, PANEL_TILE_ID_AWAY);
+    CHECK_EQ(data_fdps_map_tile_terrain_type, PANEL_TERRAIN_AWAY);
+    panel_restore();
+}
+
+/* Both cel blits go through fdps_cel_blit_sprite with the panel column as
+   their x: the background at row 0xa0 and sprite 0, the cursor tile's own
+   graphic at row 0xaf, column + 9 and sprite = the tile id. */
+static void test_the_background_and_the_tile_graphic_land_on_the_panel(void)
+{
+    panel_save();
+    panel_install();
+    data_fdps_map_unit_count = 0;
+    panel_run();
+
+    CHECK_EQ(panel_px(PANEL_WIN_ROW, PANEL_TEST_COLUMN + PANEL_WIN_COL),
+             PANEL_WIN_PIXEL);
+    CHECK_EQ(panel_px(PANEL_WIN_ROW + PANEL_WIN_H - 1,
+                      PANEL_TEST_COLUMN + PANEL_WIN_COL + PANEL_WIN_W - 1),
+             PANEL_WIN_PIXEL);
+    CHECK_EQ(panel_px(PANEL_WIN_ROW + PANEL_WIN_H,
+                      PANEL_TEST_COLUMN + PANEL_WIN_COL),
+             PANEL_GUARD);
+
+    CHECK_EQ(panel_px(PANEL_CELL_ROW, PANEL_TEST_COLUMN + PANEL_CELL_COL),
+             PANEL_TILE_PIXEL_BASE + PANEL_TILE_ID_HOME);
+    CHECK_EQ(panel_px(PANEL_CELL_ROW + PANEL_CELL_SIZE - 1,
+                      PANEL_TEST_COLUMN + PANEL_CELL_COL + PANEL_CELL_SIZE - 1),
+             PANEL_TILE_PIXEL_BASE + PANEL_TILE_ID_HOME);
+    CHECK_EQ(panel_px(PANEL_CELL_ROW, PANEL_TEST_COLUMN + PANEL_CELL_COL - 1),
+             PANEL_GUARD);
+    panel_restore();
+}
+
+/* The attack figure comes out of the table at 0x60040 and the defense figure
+   out of the one at 0x60058, both indexed by the terrain class the tile lookup
+   just published, both drawn with digit_count 0 -- natural width, no padding
+   -- and show_plus 1.  So +25 is three glyphs and no fourth, and -7 is two:
+   the leading '+' is suppressed for a negative figure by fdps_draw_number's own
+   rule, and a table read as unsigned would print ten glyphs instead of two. */
+static void test_the_two_terrain_figures_come_from_their_own_tables(void)
+{
+    panel_save();
+    panel_install();
+    data_fdps_map_unit_count = 0;
+    panel_run();
+
+    CHECK_EQ(panel_glyph_px(PANEL_AP_ROW, PANEL_TEST_COLUMN + PANEL_AP_COL, 0),
+             panel_glyph_pixel(PANEL_AMBIENT_ROW, PANEL_GLYPH_PLUS));
+    CHECK_EQ(panel_glyph_px(PANEL_AP_ROW, PANEL_TEST_COLUMN + PANEL_AP_COL, 1),
+             panel_glyph_pixel(PANEL_AMBIENT_ROW, 2));
+    CHECK_EQ(panel_glyph_px(PANEL_AP_ROW, PANEL_TEST_COLUMN + PANEL_AP_COL, 2),
+             panel_glyph_pixel(PANEL_AMBIENT_ROW, 5));
+    CHECK_EQ(panel_glyph_px(PANEL_AP_ROW, PANEL_TEST_COLUMN + PANEL_AP_COL, 3),
+             PANEL_GUARD);
+
+    CHECK_EQ(panel_glyph_px(PANEL_DEF_ROW, PANEL_TEST_COLUMN + PANEL_DEF_COL,
+                            0),
+             panel_glyph_pixel(PANEL_AMBIENT_ROW, PANEL_GLYPH_MINUS));
+    CHECK_EQ(panel_glyph_px(PANEL_DEF_ROW, PANEL_TEST_COLUMN + PANEL_DEF_COL,
+                            1),
+             panel_glyph_pixel(PANEL_AMBIENT_ROW, 7));
+    CHECK_EQ(panel_glyph_px(PANEL_DEF_ROW, PANEL_TEST_COLUMN + PANEL_DEF_COL,
+                            2),
+             PANEL_GUARD);
+    panel_restore();
+}
+
+/* Nothing writes data_fdps_number_glyph_color_row before those two figures, so
+   they come out in whatever row the previous drawing call left standing -- and
+   with no unit under the cursor the function never touches the row at all. */
+static void test_the_terrain_figures_keep_the_ambient_colour_row(void)
+{
+    panel_save();
+    panel_install();
+    data_fdps_map_unit_count = 0;
+    data_fdps_number_glyph_color_row = 4;
+    panel_run();
+
+    CHECK_EQ(panel_glyph_px(PANEL_AP_ROW, PANEL_TEST_COLUMN + PANEL_AP_COL, 1),
+             panel_glyph_pixel(4, 2));
+    CHECK_EQ(data_fdps_number_glyph_color_row, 4);
+    panel_restore();
+}
+
+/* With no unit on the cursor's tile fdps_battle_find_unit_at_cursor answers -1
+   and CMP [EBP-0x1c],-0x1 / JZ at 0002de84 leaves for the epilogue: no sprite
+   over the tile graphic and no HP figure under it, so the tile cell still
+   shows the terrain graphic all the way down. */
+static void test_an_empty_tile_draws_neither_sprite_nor_hp(void)
+{
+    panel_save();
+    panel_install();
+    panel_units[0].pos_x = PANEL_HOME_TILE_X + 1;
+    panel_run();
+
+    CHECK_EQ(panel_px(PANEL_CELL_ROW + 1,
+                      PANEL_TEST_COLUMN + PANEL_CELL_COL + 2),
+             PANEL_TILE_PIXEL_BASE + PANEL_TILE_ID_HOME);
+    CHECK_EQ(panel_glyph_px(PANEL_HP_ROW, PANEL_TEST_COLUMN + PANEL_HP_COL, 0),
+             PANEL_TILE_PIXEL_BASE + PANEL_TILE_ID_HOME);
+    CHECK_EQ(data_fdps_number_glyph_color_row, PANEL_AMBIENT_ROW);
+    panel_restore();
+}
+
+/* The walk frame is (tick >> 2) & 3 with 3 folded back onto 1 (0002deb4 and
+   0002debd), so the cycle rocks 0, 1, 2, 1 instead of snapping back, and the
+   cache entry is the unit's slot times twelve plus that frame.  A fold to 0,
+   or a wrap, would put a different entry's colour on the cell. */
+static void test_the_walk_frame_rocks_and_indexes_the_cache_slot(void)
+{
+    int base_entry;
+
+    panel_save();
+    panel_install();
+    base_entry = PANEL_CACHE_SLOT * PANEL_CACHE_SLOT_ENTRIES;
+
+    data_fdps_timer_tick_counter = 0;
+    panel_run();
+    CHECK_EQ(panel_px(PANEL_CELL_ROW + 1,
+                      PANEL_TEST_COLUMN + PANEL_CELL_COL + 2),
+             PANEL_CACHE_PIXEL_BASE + base_entry);
+
+    data_fdps_timer_tick_counter = 4;
+    panel_run();
+    CHECK_EQ(panel_px(PANEL_CELL_ROW + 1,
+                      PANEL_TEST_COLUMN + PANEL_CELL_COL + 2),
+             PANEL_CACHE_PIXEL_BASE + base_entry + 1);
+
+    data_fdps_timer_tick_counter = 8;
+    panel_run();
+    CHECK_EQ(panel_px(PANEL_CELL_ROW + 1,
+                      PANEL_TEST_COLUMN + PANEL_CELL_COL + 2),
+             PANEL_CACHE_PIXEL_BASE + base_entry + 2);
+
+    data_fdps_timer_tick_counter = 12;
+    panel_run();
+    CHECK_EQ(panel_px(PANEL_CELL_ROW + 1,
+                      PANEL_TEST_COLUMN + PANEL_CELL_COL + 2),
+             PANEL_CACHE_PIXEL_BASE + base_entry + 1);
+
+    data_fdps_timer_tick_counter = 15;
+    panel_run();
+    CHECK_EQ(panel_px(PANEL_CELL_ROW + 1,
+                      PANEL_TEST_COLUMN + PANEL_CELL_COL + 2),
+             PANEL_CACHE_PIXEL_BASE + base_entry + 1);
+
+    data_fdps_timer_tick_counter = 16;
+    panel_run();
+    CHECK_EQ(panel_px(PANEL_CELL_ROW + 1,
+                      PANEL_TEST_COLUMN + PANEL_CELL_COL + 2),
+             PANEL_CACHE_PIXEL_BASE + base_entry);
+    panel_restore();
+}
+
+/* The sprite is a 24 by 24 blit at exactly the cell the terrain tile went
+   into, so it covers the tile rather than sitting beside it; the HP figure
+   then goes over the sprite's lower rows. */
+static void test_the_sprite_covers_the_tile_cell(void)
+{
+    panel_save();
+    panel_install();
+    panel_run();
+
+    CHECK_EQ(panel_px(PANEL_CELL_ROW, PANEL_TEST_COLUMN + PANEL_CELL_COL),
+             PANEL_CACHE_PIXEL_BASE
+                 + PANEL_CACHE_SLOT * PANEL_CACHE_SLOT_ENTRIES);
+    CHECK_EQ(panel_px(PANEL_CELL_ROW + PANEL_CELL_SIZE - 1,
+                      PANEL_TEST_COLUMN + PANEL_CELL_COL + PANEL_CELL_SIZE - 1),
+             PANEL_CACHE_PIXEL_BASE
+                 + PANEL_CACHE_SLOT * PANEL_CACHE_SLOT_ENTRIES);
+    CHECK_EQ(panel_px(PANEL_CELL_ROW + PANEL_CELL_SIZE,
+                      PANEL_TEST_COLUMN + PANEL_CELL_COL),
+             PANEL_GUARD);
+    panel_restore();
+}
+
+/* A unit below full HP has its figure drawn in colour row 3 -- MOV dword ptr
+   [0x0006000c],0x3 at 0002df44, guarded by the JZ at 0002df42 -- and the
+   figure is zero-padded to four digits, so 12 is "0012" and not "12". */
+static void test_a_hurt_unit_draws_its_hp_in_colour_row_three(void)
+{
+    panel_save();
+    panel_install();
+    panel_units[0].hp_current = PANEL_HP_HURT;
+    panel_run();
+
+    CHECK_EQ(panel_glyph_px(PANEL_HP_ROW, PANEL_TEST_COLUMN + PANEL_HP_COL, 0),
+             panel_glyph_pixel(PANEL_HURT_ROW, 0));
+    CHECK_EQ(panel_glyph_px(PANEL_HP_ROW, PANEL_TEST_COLUMN + PANEL_HP_COL, 1),
+             panel_glyph_pixel(PANEL_HURT_ROW, 0));
+    CHECK_EQ(panel_glyph_px(PANEL_HP_ROW, PANEL_TEST_COLUMN + PANEL_HP_COL, 2),
+             panel_glyph_pixel(PANEL_HURT_ROW, 1));
+    CHECK_EQ(panel_glyph_px(PANEL_HP_ROW, PANEL_TEST_COLUMN + PANEL_HP_COL, 3),
+             panel_glyph_pixel(PANEL_HURT_ROW, 2));
+    CHECK_EQ(data_fdps_number_glyph_color_row, 0);
+    panel_restore();
+}
+
+/* At full HP the colour row is not written before the figure, so it comes out
+   in the ambient row -- and the store of 0 at 0002df74 runs all the same, so
+   the function still leaves the row at 0. */
+static void test_a_whole_unit_draws_its_hp_in_the_ambient_row(void)
+{
+    panel_save();
+    panel_install();
+    panel_run();
+
+    CHECK_EQ(panel_glyph_px(PANEL_HP_ROW, PANEL_TEST_COLUMN + PANEL_HP_COL, 0),
+             panel_glyph_pixel(PANEL_AMBIENT_ROW, 0));
+    CHECK_EQ(panel_glyph_px(PANEL_HP_ROW, PANEL_TEST_COLUMN + PANEL_HP_COL, 2),
+             panel_glyph_pixel(PANEL_AMBIENT_ROW, 2));
+    CHECK_EQ(panel_glyph_px(PANEL_HP_ROW, PANEL_TEST_COLUMN + PANEL_HP_COL, 3),
+             panel_glyph_pixel(PANEL_AMBIENT_ROW, 0));
+    CHECK_EQ(data_fdps_number_glyph_color_row, 0);
+    panel_restore();
+}
+
+/* The HP comparison is on the two signed 16-bit fields as MOVSX widens them
+   (0002df2b, 0002df35), so a unit healed above its maximum counts as hurt too
+   -- the test is an inequality, not a "below". */
+static void test_hp_over_the_maximum_still_counts_as_hurt(void)
+{
+    panel_save();
+    panel_install();
+    panel_units[0].hp_current = PANEL_HP_FULL + 1;
+    panel_run();
+
+    CHECK_EQ(panel_glyph_px(PANEL_HP_ROW, PANEL_TEST_COLUMN + PANEL_HP_COL, 3),
+             panel_glyph_pixel(PANEL_HURT_ROW, 1));
+    CHECK_EQ(data_fdps_number_glyph_color_row, 0);
+    panel_restore();
+}
+
+/* Every figure and every sprite is placed at the panel column the global
+   holds, so parking the panel moves the whole thing together. */
+static void test_every_piece_follows_the_panel_column(void)
+{
+    panel_save();
+    panel_install();
+    data_fdps_ui_terrain_hud_panel_offset = PANEL_PARK_RIGHT;
+    panel_run();
+
+    CHECK_EQ(panel_px(PANEL_WIN_ROW, PANEL_PARK_RIGHT + PANEL_WIN_COL),
+             PANEL_WIN_PIXEL);
+    CHECK_EQ(panel_px(PANEL_CELL_ROW, PANEL_PARK_RIGHT + PANEL_CELL_COL),
+             PANEL_CACHE_PIXEL_BASE
+                 + PANEL_CACHE_SLOT * PANEL_CACHE_SLOT_ENTRIES);
+    CHECK_EQ(panel_glyph_px(PANEL_AP_ROW, PANEL_PARK_RIGHT + PANEL_AP_COL, 0),
+             panel_glyph_pixel(PANEL_AMBIENT_ROW, PANEL_GLYPH_PLUS));
+    CHECK_EQ(panel_glyph_px(PANEL_HP_ROW, PANEL_PARK_RIGHT + PANEL_HP_COL, 3),
+             panel_glyph_pixel(PANEL_AMBIENT_ROW, 0));
+    CHECK_EQ(panel_px(PANEL_WIN_ROW, PANEL_TEST_COLUMN + PANEL_WIN_COL),
+             PANEL_GUARD);
+    panel_restore();
+}
+
 void run_mapcur_tests(void)
 {
     mapcur_stage_sheet();
     mapcur_stage_grid();
+    panel_stage_sheets();
+    panel_stage_map();
 
     RUN_TEST(test_mode_one_draws_sprite_zero_on_the_cursor_tile);
     RUN_TEST(test_mode_two_draws_sprite_one_on_the_cursor_tile);
@@ -520,4 +1339,22 @@ void run_mapcur_tests(void)
     RUN_TEST(test_mode_six_takes_the_tile_the_pixel_lies_in);
     RUN_TEST(test_mode_six_divides_negative_coordinates_towards_zero);
     RUN_TEST(test_the_drawing_modes_leave_the_grid_alone);
+
+    RUN_TEST(test_the_record_fields_sit_where_the_panel_reads_them);
+    RUN_TEST(test_the_user_toggle_off_draws_nothing_at_all);
+    RUN_TEST(test_the_map_not_being_live_draws_nothing_at_all);
+    RUN_TEST(test_the_panel_parks_right_under_a_low_left_cursor);
+    RUN_TEST(test_the_panel_parks_left_under_a_low_right_cursor);
+    RUN_TEST(test_a_middle_cursor_leaves_the_panel_where_it_was);
+    RUN_TEST(test_the_dodge_is_window_relative_and_the_lookup_is_not);
+    RUN_TEST(test_the_background_and_the_tile_graphic_land_on_the_panel);
+    RUN_TEST(test_the_two_terrain_figures_come_from_their_own_tables);
+    RUN_TEST(test_the_terrain_figures_keep_the_ambient_colour_row);
+    RUN_TEST(test_an_empty_tile_draws_neither_sprite_nor_hp);
+    RUN_TEST(test_the_walk_frame_rocks_and_indexes_the_cache_slot);
+    RUN_TEST(test_the_sprite_covers_the_tile_cell);
+    RUN_TEST(test_a_hurt_unit_draws_its_hp_in_colour_row_three);
+    RUN_TEST(test_a_whole_unit_draws_its_hp_in_the_ambient_row);
+    RUN_TEST(test_hp_over_the_maximum_still_counts_as_hurt);
+    RUN_TEST(test_every_piece_follows_the_panel_column);
 }
