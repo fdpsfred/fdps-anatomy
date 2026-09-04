@@ -676,3 +676,167 @@ void fdps_play_attack_animation(int attacker_unit, int defender_unit)
 
     free((void *) request[DRAW_REQUEST_DEST_BASE]);
 }
+
+/* The page every tick of the effect is composed on: the same 360 x 240 with a
+   24-pixel apron the blow above composes on, PUSH 0x15180 at 00026e0c with the
+   pitch and the row count stored into the draw request at 00026e1c and
+   00026e23.  ATTACK_PAGE_* say the same numbers for the blow and are left
+   alone; these are this routine's own so that a change to one is not silently
+   a change to the other. */
+#define EFFECT_PAGE_PITCH 0x168
+#define EFFECT_PAGE_ROWS 0xf0
+#define EFFECT_PAGE_BYTES 0x15180
+
+/* The window handed to the adapter after every tick: 312 x 192 taken from page
+   byte 0x21d8, which is page pixel (24,24), and put down at screen byte 0x504,
+   which is screen pixel (4,4).  All six come from the pushes at 00026f63.
+   VGA_SCREEN_BASE and VGA_SCREEN_PITCH are the banner's above and mean the same
+   here, and 0xa0000 stays a literal because it is where the adapter answers and
+   not the address of anything the linker places (rebuild_info/pitfalls.md,
+   contract E). */
+#define EFFECT_PAGE_WINDOW_AT 0x21d8
+#define EFFECT_WINDOW_AT 0x504
+#define EFFECT_WINDOW_W 0x138
+#define EFFECT_WINDOW_H 0xc0
+
+/* How long one frame is held: CMP dword ptr [EBP-0x8],0x2 / JL at 00026e7f, so
+   two timer ticks each, whatever dwell the frame record itself carries. */
+#define EFFECT_TICKS_PER_FRAME 2
+
+/* What the request origin carries off the unit's own tile pixel, SUB EAX,0x18
+   at 00026eec and SUB EAX,0x1e at 00026f06: one whole tile to the left and
+   thirty pixels up.  They are NOT the six-pixel lift a unit sprite gets --
+   these clips are drawn from a corner a tile out from the cell they land on. */
+#define EFFECT_ORIGIN_LEFT 0x18
+#define EFFECT_ORIGIN_UP 0x1e
+
+/* 00026e00.  Three counted loops nested three deep and one branch inside the
+   innermost, the sound-flag test, so cyclomatic complexity 8 counting the two
+   retrace spins and the tick wait.
+
+   THERE IS NO PAGE VARIABLE AND NO CLIP VARIABLE.  Both pointers live in the
+   draw request and nowhere else: malloc's answer is stored into slot 0 at
+   00026e19 and read back at 00026e92, 00026f7c and 00026faa, and the loaded
+   member is stored into slot 5 at 00026e3c and read back at 00026e4d and
+   00026fb6.  A local of its own would be a second slot and a copy into it.
+
+   THE FRAME'S OWN DWELL IS NOT CONSULTED.  Every frame is held for exactly two
+   ticks -- the inner counter runs 0 to 1 and nothing reads the duration field
+   the .SAF frame record carries -- which is what makes this routine different
+   from fdps_saf_play_over_background, and it is the loop bound that says so.
+
+   THE SOUND FLAG IS SET ONCE PER FRAME AND NOT ONCE PER DRAW.  CMP
+   [EBP-0x10],0x0 / JNZ and CMP [EBP-0x8],0x0 / JZ at 00026f0c ask for the first
+   unit of the first of the frame's two ticks and for nothing else, so a frame
+   carrying a sound effect fires it once however many units the clip is drawn
+   over.  Handing 1 to every draw plays the effect twice per unit per frame.
+
+   THE TILE BYTES ARE WIDENED UNSIGNED -- MOV AL,byte ptr [EAX] then AND
+   EAX,0xff at 00026ed6 and 00026ef2 -- and so is every unit id, at 00026ec6.
+   A tile column past 127 is therefore far to the right and not far to the
+   left, and a unit id past 127 is a high index and not a negative one.
+
+   NOTHING CULLS A UNIT THAT IS OFF THE VIEW.  The origin is formed from the
+   tile and the camera whatever they say, and what keeps an off-screen copy off
+   the page is fdps_draw_tilemap_cell's own placement test, one cell at a time
+   (sprite.h).
+
+   THE FRAME WAIT'S LATCH IS DELIBERATELY LEFT UNINITIALISED, the same contract
+   the three routines above carry.  last_tick is read at 00026f8d before
+   anything has written it, so the first tick of the animation does not wait.
+   Giving it an initialiser -- 0, or the counter -- adds a tick of delay to the
+   start of every effect animation (rebuild_info/pitfalls.md).
+
+   data_fdps_timer_tick_counter is volatile at its declaration (gamedata.h)
+   because of that wait: nothing inside it writes the counter, so a build
+   allowed to hoist the load would spin here forever.  The retrace spins read a
+   port and cannot be hoisted for the same reason.
+
+   THREE CALLS' ANSWERS ARE READ.  malloc's is the page and is not tested;
+   fdps_vfs_load_entry's is the clip, stored into the request at 00026e3c and
+   read straight back as fdps_saf_frame_count's argument at 00026e4d; that
+   count is the outer loop's bound; and fdps_get_unit_record's is the record
+   both tile bytes come out of.  inp's is tested for bit 3 at both spins.
+   fdps_draw_scene_layers, fdps_draw_composite_sprite, fdps_blit_rect and free
+   all return nothing the original reads.
+
+   The frames are paced by the retrace and by the timer tick, so how many
+   instructions stand between them is not observable (contract D). */
+void fdps_play_vfs_animation_over_units(int unit_count, unsigned char *unit_ids,
+                                        char *anim_name)
+{
+    /* The nine-slot block sprite.h describes.  Slot 0 is the composite page and
+       slot 5 the loaded clip -- see the note above -- and slot 6 is the frame
+       this tick draws. */
+    int request[DRAW_REQUEST_DWORDS];
+    /* The record the tile position of the copy being drawn comes out of,
+       re-resolved for every unit of every tick. */
+    struct fdps_unit_record *record;
+    /* How many frames the clip holds, which is how many the outer loop
+       plays. */
+    int frame_count;
+    /* Which frame of the clip is on the page. */
+    int frame;
+    /* Which of that frame's two ticks this pass is. */
+    int tick;
+    /* Which entry of unit_ids this copy is being drawn over. */
+    int unit;
+    /* Whether this draw is the one allowed to fire the frame's sound. */
+    int play_sound;
+    /* The tick the previous pass ended on.  Deliberately not initialised --
+       see the note above. */
+    unsigned int last_tick;
+
+    request[DRAW_REQUEST_DEST_BASE] = (int) malloc((size_t) EFFECT_PAGE_BYTES);
+    request[DRAW_REQUEST_DEST_PITCH] = EFFECT_PAGE_PITCH;
+    request[DRAW_REQUEST_DEST_ROWS] = EFFECT_PAGE_ROWS;
+    request[DRAW_REQUEST_IMAGE] =
+        (int) fdps_vfs_load_entry(ANIMATION_ARCHIVE, anim_name);
+    request[DRAW_REQUEST_BLIT_OPERAND] = 0;
+    request[DRAW_REQUEST_BLIT_MODE] = 0;
+    frame_count = fdps_saf_frame_count((void *) request[DRAW_REQUEST_IMAGE]);
+
+    for (frame = 0; frame < frame_count; frame++) {
+        for (tick = 0; tick < EFFECT_TICKS_PER_FRAME; tick++) {
+            fdps_draw_scene_layers(
+                (unsigned char *) request[DRAW_REQUEST_DEST_BASE]);
+            request[DRAW_REQUEST_ITEM_INDEX] = frame;
+            for (unit = 0; unit < unit_count; unit++) {
+                record = fdps_get_unit_record((int) unit_ids[unit]);
+                request[DRAW_REQUEST_X] = (int) record->pos_x * MAP_TILE_SIZE
+                                          - data_fdps_battle_view_window_origin_x
+                                          - EFFECT_ORIGIN_LEFT;
+                request[DRAW_REQUEST_Y] = (int) record->pos_y * MAP_TILE_SIZE
+                                          - data_fdps_battle_view_window_origin_y
+                                          - EFFECT_ORIGIN_UP;
+                if (unit == 0 && tick == 0) {
+                    play_sound = 1;
+                } else {
+                    play_sound = 0;
+                }
+                fdps_draw_composite_sprite(request, (char) play_sound);
+            }
+            while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE)
+                   == 0) {
+                /* Spin until the retrace begins, so the tick that has just been
+                   composed is the one the monitor shows whole. */
+            }
+            while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE)
+                   != 0) {
+                /* And until it ends, so the blit starts clear of it. */
+            }
+            fdps_blit_rect((unsigned int)
+                               ((unsigned char *) request[DRAW_REQUEST_DEST_BASE]
+                                + EFFECT_PAGE_WINDOW_AT),
+                           EFFECT_PAGE_PITCH,
+                           (void *) (VGA_SCREEN_BASE + EFFECT_WINDOW_AT),
+                           VGA_SCREEN_PITCH, EFFECT_WINDOW_W, EFFECT_WINDOW_H);
+            while (last_tick == data_fdps_timer_tick_counter) {
+            }
+            last_tick = data_fdps_timer_tick_counter;
+        }
+    }
+
+    free((void *) request[DRAW_REQUEST_DEST_BASE]);
+    free((void *) request[DRAW_REQUEST_IMAGE]);
+}

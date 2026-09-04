@@ -2246,6 +2246,577 @@ static void attack_animation_paces_the_frames_with_the_tick(void)
     aa_unstage();
 }
 
+/* ---- fdps_play_vfs_animation_over_units, 00026e00 ------------------------
+ *
+ * Expected values come from the assembly at 00026e00 -- PUSH 0x15180 / CALL
+ * malloc at 00026e0c with the pitch and rows stored at 00026e1c and 00026e23;
+ * MOV EAX,0x60128 / PUSH at 00026e2e for the container the member is loaded out
+ * of and CALL 0x000144e0 at 00026e51 for the frame total the outer loop runs
+ * to; CMP dword ptr [EBP-0x8],0x2 / JL at 00026e7f for the two ticks every
+ * frame is held; MOV AL,byte ptr [EAX] / AND EAX,0xff / IMUL EAX,EAX,0x18 /
+ * SUB EAX,[0x00069ce4] / SUB EAX,0x18 at 00026ec6 and the same down the y axis
+ * with SUB EAX,[0x00069ce0] / SUB EAX,0x1e at 00026ef2 for where each copy is
+ * placed; the pair of tests at 00026f0c for which single draw carries the sound
+ * flag; and PUSH 0xc0 / PUSH 0x138 / PUSH 0x140 / PUSH 0xa0504 / PUSH 0x168
+ * with page + 0x21d8 at 00026f63 for the window.  None of them is read off the
+ * emitted C.
+ *
+ * HOW THE RUN IS WATCHED, and why the page is seeded through the heap: exactly
+ * as the attack-animation cases above do it, and for the same reasons.  The
+ * page is allocated and freed inside the call and its 312x192 window is blitted
+ * straight over the live mode 13h screen, so the adapter is the only place the
+ * output can be read back from; the page is never cleared, so a zeroed block of
+ * its exact size is freed immediately before each call and every undrawn window
+ * pixel then reads 0.  The staging is the attack cases' staging -- no scene
+ * layers, no cursor overlay, no map units -- so fdps_draw_scene_layers writes
+ * nothing into the page, which vfx_animation_no_units_draws_nothing states as
+ * an assertion rather than leaving as an assumption.
+ *
+ * THE CLIP IS REAL AND CANNOT BE STOOD IN FOR.  The container's name is a
+ * literal inside the function, so there is nothing to point at a smaller file,
+ * and a member it cannot find ends the process rather than failing an
+ * assertion.  PosEff.saf is one of the members the game's own call sites name:
+ * 990 bytes, ten frames of 24x24 cells, seven single-cell tilemaps and layer
+ * offsets that move between frames, every frame carrying sound -1.  It is
+ * passed in the MIXED CASE the call sites use, so the loader's in-place fold is
+ * in the path of the test.  Its frame count is asserted out of the member's own
+ * header rather than assumed.
+ *
+ * WHAT THE SNAPSHOT IS COMPARED WITH.  Every window byte is compared against a
+ * page this file composes itself, by driving the same production compositor
+ * over the same clip at the origins the ARITHMETIC ABOVE gives -- one draw per
+ * listed unit per tick, two ticks per frame, frames in ascending order.  That
+ * makes the comparison pin WHERE each copy lands and how many are drawn without
+ * pinning anything about the artwork, which is the sheet's business: a run that
+ * dropped the -0x18 or the -0x1e, or scaled a tile by anything but 24, or drew
+ * one copy for the list instead of one per entry, moves or loses bytes the
+ * comparison counts.  The reference does not call fdps_draw_scene_layers,
+ * because under this staging it writes nothing.
+ *
+ * WHAT IS NOT COVERED.  Which draw carries the sound flag -- the 1 at 00026f2a
+ * for the first unit of a frame's first tick -- reaches fdps_sfx_play as the
+ * frame's own sound number, and every frame of PosEff.saf carries -1, which
+ * that function rejects; what a non-zero play_sound does is
+ * fdps_draw_composite_sprite's own behaviour and is covered in tests/sprite.c.
+ * The retrace each tick straddles is a playtest contract
+ * (rebuild_info/pitfalls.md).  Only a FLOOR is put under the tick cost: the
+ * first tick's latch is uninitialised so it may end its wait at once, and the
+ * counter can advance more than once while a tick is composed, so an upper
+ * bound would be measuring the emulator's cycle setting.
+ * ------------------------------------------------------------------ */
+
+/* The container, and the member out of it.  Mixed case on purpose -- see the
+   note above. */
+#define VU_ARCHIVE "MISC.VFS"
+#define VU_CLIP "PosEff.saf"
+#define VU_CLIP_MEMBER "POSEFF.SAF"
+#define VU_CLIP_FRAMES 10
+#define VU_CLIP_BYTES 990L
+#define VU_NAME_MAX 16
+
+/* The .SAF header field the frame total is asserted out of, +0x0c
+   (resource_info/saf.md). */
+#define VU_SAF_FRAME_COUNT_AT 0x0c
+
+/* The page and the window it is presented through, the same numbers the attack
+   cases above spell out for the same page. */
+#define VU_PAGE_PITCH 0x168
+#define VU_PAGE_ROWS 0xf0
+#define VU_PAGE_BYTES 0x15180
+#define VU_PAGE_BORDER 24
+
+/* Two ticks a frame, a 24-pixel tile, and the corner the copy is drawn from. */
+#define VU_TICKS_PER_FRAME 2
+#define VU_TILE 0x18
+#define VU_ORIGIN_LEFT 0x18
+#define VU_ORIGIN_UP 0x1e
+
+/* Four records, so a unit id that is neither 0 nor its own position in the list
+   has somewhere to land, and the two ids the list carries. */
+#define VU_UNITS 4
+#define VU_FIRST_ID 2
+#define VU_SECOND_ID 0
+
+/* Two tiles far enough apart that the two copies cannot overlap, both placing
+   every one of the clip's ten frames inside the page and inside the presented
+   window. */
+#define VU_FIRST_TILE_X 5
+#define VU_FIRST_TILE_Y 5
+#define VU_SECOND_TILE_X 9
+#define VU_SECOND_TILE_Y 7
+
+/* A view scrolled off the map origin.  Neither number is a multiple of the
+   tile, so a run that scaled the scroll or applied it to the wrong axis
+   misses. */
+#define VU_SCROLL_X 10
+#define VU_SCROLL_Y 7
+
+static struct fdps_unit_record vu_units[VU_UNITS];
+static unsigned char vu_ids[VU_UNITS];
+
+/* The snapshot, the reference page and the clip, all on the heap for the reason
+   tests/gauge.c gives: this file already holds two 64,000-byte frames. */
+static unsigned char *vu_screen;
+static unsigned char *vu_reference;
+static unsigned char *vu_clip;
+static long vu_clip_bytes;
+
+static void (__interrupt __far *vu_saved_timer)();
+static int vu_blocks_before;
+static int vu_blocks_after;
+static unsigned int vu_ticks_used;
+
+static void __interrupt __far vu_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(vu_saved_timer);
+}
+
+/* One member out of a container, by walking the container's own directory --
+   26-byte entries at the offset the header's field at 5 names, each with its
+   name at +0, its size at +0x0d and its start at +0x16
+   (resource_info/vfs.md).  The walk is written out here rather than taken
+   through src/vfs.c so that staging does not lean on a callee of the function
+   under test.  Returns NULL when the file is not staged or holds no such
+   member; the block is the caller's to free. */
+static unsigned char *vu_read_member(char *archive_name, char *member_name,
+                                     long *out_bytes)
+{
+    FILE *fp;
+    unsigned char header[16];
+    unsigned char *table;
+    unsigned char *member;
+    unsigned long table_at;
+    unsigned long count;
+    unsigned long index;
+    unsigned long entry;
+    unsigned long start;
+    unsigned long bytes;
+
+    *out_bytes = 0;
+    fp = fopen(archive_name, "rb");
+    if (fp == NULL) {
+        return NULL;
+    }
+    if (fread(header, (size_t) sizeof(header), 1, fp) != 1) {
+        fclose(fp);
+        return NULL;
+    }
+    table_at = (unsigned long) header[5] | ((unsigned long) header[6] << 8);
+    count = (unsigned long) header[7] | ((unsigned long) header[8] << 8)
+            | ((unsigned long) header[9] << 16)
+            | ((unsigned long) header[10] << 24);
+    table = (unsigned char *) malloc((size_t) (count * BVFS_ENTRY_BYTES));
+    if (table == NULL) {
+        fclose(fp);
+        return NULL;
+    }
+    fseek(fp, (long) table_at, SEEK_SET);
+    if (fread(table, (size_t) (count * BVFS_ENTRY_BYTES), 1, fp) != 1) {
+        free(table);
+        fclose(fp);
+        return NULL;
+    }
+
+    member = NULL;
+    for (index = 0; index < count; index++) {
+        entry = index * BVFS_ENTRY_BYTES;
+        if (strcmp((char *) table + entry, member_name) != 0) {
+            continue;
+        }
+        bytes = (unsigned long) table[entry + BVFS_ENTRY_SIZE_AT]
+                | ((unsigned long) table[entry + BVFS_ENTRY_SIZE_AT + 1] << 8)
+                | ((unsigned long) table[entry + BVFS_ENTRY_SIZE_AT + 2] << 16)
+                | ((unsigned long) table[entry + BVFS_ENTRY_SIZE_AT + 3] << 24);
+        start = (unsigned long) table[entry + BVFS_ENTRY_START_AT]
+                | ((unsigned long) table[entry + BVFS_ENTRY_START_AT + 1] << 8)
+                | ((unsigned long) table[entry + BVFS_ENTRY_START_AT + 2] << 16)
+                | ((unsigned long) table[entry + BVFS_ENTRY_START_AT + 3] << 24);
+        member = (unsigned char *) malloc((size_t) bytes);
+        if (member != NULL) {
+            fseek(fp, (long) start, SEEK_SET);
+            if (fread(member, (size_t) bytes, 1, fp) != 1) {
+                free(member);
+                member = NULL;
+            } else {
+                *out_bytes = (long) bytes;
+            }
+        }
+        break;
+    }
+
+    free(table);
+    fclose(fp);
+    return member;
+}
+
+/* Everything the run needs and nothing else: four zeroed records published as
+   the battle's unit array, no scene layers, no cursor overlay and no map units,
+   so the scene repaint writes nothing into the page. */
+static int vu_stage(void)
+{
+    int offset;
+
+    for (offset = 0; offset < (int) sizeof(vu_units); offset++) {
+        ((unsigned char *) vu_units)[offset] = 0;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) vu_units;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_map_unit_count = 0;
+
+    vu_screen = (unsigned char *) malloc((size_t) BANNER_SCREEN_BYTES);
+    vu_reference = (unsigned char *) malloc((size_t) VU_PAGE_BYTES);
+    vu_clip = vu_read_member(VU_ARCHIVE, VU_CLIP_MEMBER, &vu_clip_bytes);
+    if (vu_screen == NULL || vu_reference == NULL || vu_clip == NULL) {
+        return 0;
+    }
+    return 1;
+}
+
+/* Put the staged globals back the way a freshly started program has them, for
+   the reason the attack cases give: the array pointer holds storage the game's
+   own loaders free. */
+static void vu_unstage(void)
+{
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    free(vu_screen);
+    free(vu_reference);
+    free(vu_clip);
+    vu_screen = NULL;
+    vu_reference = NULL;
+    vu_clip = NULL;
+}
+
+static void vu_set_unit(int unit_index, int tile_column, int tile_row)
+{
+    vu_units[unit_index].pos_x = (unsigned char) tile_column;
+    vu_units[unit_index].pos_y = (unsigned char) tile_row;
+}
+
+/* Used entries currently in the heap, so a case can say the page and the clip
+   came back. */
+static int vu_used_heap_blocks(void)
+{
+    struct _heapinfo entry;
+    int used;
+
+    used = 0;
+    entry._pentry = NULL;
+    while (_heapwalk(&entry) == _HEAPOK) {
+        if (entry._useflag == _USEDENTRY) {
+            used++;
+        }
+    }
+    return used;
+}
+
+/* Leave a zeroed block of exactly the page's size at the head of the free
+   list. */
+static void vu_seed_page(void)
+{
+    unsigned char *page;
+
+    page = (unsigned char *) malloc((size_t) VU_PAGE_BYTES);
+    if (page != NULL) {
+        memset(page, 0, (size_t) VU_PAGE_BYTES);
+        free(page);
+    }
+}
+
+/* One whole run, leaving the frame in vu_screen[]. */
+static void vu_run(int unit_count)
+{
+    char query[VU_NAME_MAX];
+    unsigned int before_ticks;
+
+    strcpy(query, VU_CLIP);
+    memset(vu_screen, AA_BORDER_FILL, (size_t) BANNER_SCREEN_BYTES);
+
+    vu_blocks_before = vu_used_heap_blocks();
+    banner_set_mode(BANNER_MODE_320X200X256);
+    memset((void *) BANNER_VGA_BASE, AA_BORDER_FILL,
+           (size_t) BANNER_SCREEN_BYTES);
+    vu_seed_page();
+
+    vu_saved_timer = _dos_getvect(BANNER_TIMER_VECTOR);
+    _dos_setvect(BANNER_TIMER_VECTOR, vu_timer_isr);
+    before_ticks = data_fdps_timer_tick_counter;
+    fdps_play_vfs_animation_over_units(unit_count, vu_ids, query);
+    vu_ticks_used = data_fdps_timer_tick_counter - before_ticks;
+    _dos_setvect(BANNER_TIMER_VECTOR, vu_saved_timer);
+
+    memmove(vu_screen, (void *) BANNER_VGA_BASE,
+            (size_t) BANNER_SCREEN_BYTES);
+    banner_set_mode(BANNER_MODE_TEXT);
+    vu_blocks_after = vu_used_heap_blocks();
+}
+
+/* The page the run had to produce: the clip's ten frames in ascending order,
+   each drawn twice, and each of those drawn once per listed unit at the origin
+   the arithmetic gives.  play_sound is 0 throughout because it decides nothing
+   about pixels (sprite.h). */
+static void vu_render_reference(int unit_count)
+{
+    int request[DRAW_REQUEST_DWORDS];
+    struct fdps_unit_record *record;
+    int frame;
+    int tick;
+    int unit;
+
+    memset(vu_reference, 0, (size_t) VU_PAGE_BYTES);
+    request[DRAW_REQUEST_DEST_BASE] = (int) vu_reference;
+    request[DRAW_REQUEST_DEST_PITCH] = VU_PAGE_PITCH;
+    request[DRAW_REQUEST_DEST_ROWS] = VU_PAGE_ROWS;
+    request[DRAW_REQUEST_IMAGE] = (int) vu_clip;
+    request[DRAW_REQUEST_BLIT_OPERAND] = 0;
+    request[DRAW_REQUEST_BLIT_MODE] = 0;
+
+    for (frame = 0; frame < VU_CLIP_FRAMES; frame++) {
+        for (tick = 0; tick < VU_TICKS_PER_FRAME; tick++) {
+            request[DRAW_REQUEST_ITEM_INDEX] = frame;
+            for (unit = 0; unit < unit_count; unit++) {
+                record = &vu_units[vu_ids[unit]];
+                request[DRAW_REQUEST_X] =
+                    (int) record->pos_x * VU_TILE
+                    - data_fdps_battle_view_window_origin_x - VU_ORIGIN_LEFT;
+                request[DRAW_REQUEST_Y] =
+                    (int) record->pos_y * VU_TILE
+                    - data_fdps_battle_view_window_origin_y - VU_ORIGIN_UP;
+                fdps_draw_composite_sprite(request, 0);
+            }
+        }
+    }
+}
+
+/* How many bytes of the presented window differ from the reference page's own
+   window: screen pixel (4,4) against page pixel (24,24), 312 x 192 of them. */
+static int vu_window_differences(void)
+{
+    int row;
+    int col;
+    int bad;
+
+    bad = 0;
+    for (row = 0; row < AA_WINDOW_H; row++) {
+        for (col = 0; col < AA_WINDOW_W; col++) {
+            if (vu_screen[(row + AA_WINDOW_ROW) * BANNER_SCREEN_W
+                          + col + AA_WINDOW_COL]
+                != vu_reference[(row + VU_PAGE_BORDER) * VU_PAGE_PITCH
+                                + col + VU_PAGE_BORDER]) {
+                bad++;
+            }
+        }
+    }
+    return bad;
+}
+
+/* How many bytes of the reference page's window are not the seed, so a
+   comparison that matched two blank pictures cannot pass for a match. */
+static int vu_reference_painted(void)
+{
+    int row;
+    int col;
+    int painted;
+
+    painted = 0;
+    for (row = 0; row < AA_WINDOW_H; row++) {
+        for (col = 0; col < AA_WINDOW_W; col++) {
+            if (vu_reference[(row + VU_PAGE_BORDER) * VU_PAGE_PITCH
+                             + col + VU_PAGE_BORDER] != 0) {
+                painted++;
+            }
+        }
+    }
+    return painted;
+}
+
+/* How many bytes of the presented window are not the page seed. */
+static int vu_screen_painted(void)
+{
+    int row;
+    int col;
+    int painted;
+
+    painted = 0;
+    for (row = 0; row < AA_WINDOW_H; row++) {
+        for (col = 0; col < AA_WINDOW_W; col++) {
+            if (vu_screen[(row + AA_WINDOW_ROW) * BANNER_SCREEN_W
+                          + col + AA_WINDOW_COL] != 0) {
+                painted++;
+            }
+        }
+    }
+    return painted;
+}
+
+/* How many bytes outside the presented window are no longer the sentinel. */
+static int vu_border_touched(void)
+{
+    int row;
+    int col;
+    int touched;
+
+    touched = 0;
+    for (row = 0; row < BANNER_SCREEN_H; row++) {
+        for (col = 0; col < BANNER_SCREEN_W; col++) {
+            if (row >= AA_WINDOW_ROW && row < AA_WINDOW_ROW + AA_WINDOW_H
+                && col >= AA_WINDOW_COL && col < AA_WINDOW_COL + AA_WINDOW_W) {
+                continue;
+            }
+            if (vu_screen[row * BANNER_SCREEN_W + col] != AA_BORDER_FILL) {
+                touched++;
+            }
+        }
+    }
+    return touched;
+}
+
+/* The two record bytes the function addresses by literal displacement, +0 and
+   +1, and the ten frames the fixture's own header names.  If the layout moved
+   or a different member were staged, every case below would still pass while
+   measuring something else. */
+static void vfx_animation_reads_the_measured_offsets(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 1);
+
+    if (!vu_stage()) {
+        vu_unstage();
+        return;
+    }
+    CHECK_EQ(vu_clip_bytes, VU_CLIP_BYTES);
+    CHECK_EQ((int) vu_clip[VU_SAF_FRAME_COUNT_AT]
+             | ((int) vu_clip[VU_SAF_FRAME_COUNT_AT + 1] << 8),
+             VU_CLIP_FRAMES);
+    vu_unstage();
+}
+
+/* One unit, the view at the map origin.  Every byte of the presented window is
+   the byte the same clip drawn at tile * 24 - 24 across and tile * 24 - 30 down
+   puts on a page of its own, and the reference is not blank.  Dropping either
+   corner offset, or scaling a tile by anything but 24, moves every drawn byte.
+   Nothing outside the 312x192 window at screen (4,4) is touched. */
+static void vfx_animation_draws_the_clip_over_the_unit_tile(void)
+{
+    if (!vu_stage()) {
+        vu_unstage();
+        return;
+    }
+    vu_set_unit(VU_FIRST_ID, VU_FIRST_TILE_X, VU_FIRST_TILE_Y);
+    vu_ids[0] = VU_FIRST_ID;
+    vu_run(1);
+    vu_render_reference(1);
+
+    CHECK_EQ(vu_reference_painted() > 0, 1);
+    CHECK_EQ(vu_window_differences(), 0);
+    CHECK_EQ(vu_border_touched(), 0);
+    vu_unstage();
+}
+
+/* Two entries in the list, two records, and a view scrolled off the map origin
+   by (10,7).  One copy per ENTRY and not one per run: the second entry's id is
+   0 while its position in the list is 1, so a run that used the loop counter as
+   the unit id draws the wrong record's tile.  The scroll is subtracted from
+   both axes, which the same comparison covers because the reference subtracts
+   it too and a run that did not moves everything by (10,7).  The window holds
+   strictly more painted bytes than the one-unit run's reference did, so the
+   second copy really was drawn. */
+static void vfx_animation_draws_one_copy_per_listed_unit(void)
+{
+    int one_unit_painted;
+
+    if (!vu_stage()) {
+        vu_unstage();
+        return;
+    }
+    vu_set_unit(VU_FIRST_ID, VU_FIRST_TILE_X, VU_FIRST_TILE_Y);
+    vu_set_unit(VU_SECOND_ID, VU_SECOND_TILE_X, VU_SECOND_TILE_Y);
+    vu_ids[0] = VU_FIRST_ID;
+    vu_ids[1] = VU_SECOND_ID;
+    data_fdps_battle_view_window_origin_x = VU_SCROLL_X;
+    data_fdps_battle_view_window_origin_y = VU_SCROLL_Y;
+
+    vu_render_reference(1);
+    one_unit_painted = vu_reference_painted();
+
+    vu_run(2);
+    vu_render_reference(2);
+
+    CHECK_EQ(vu_window_differences(), 0);
+    CHECK_EQ(vu_screen_painted() > one_unit_painted, 1);
+    CHECK_EQ(vu_border_touched(), 0);
+    vu_unstage();
+}
+
+/* MOV EAX,[EBP-0x10] / CMP EAX,[EBP+0x14] / JL at 00026eab: a count of 0 never
+   enters the per-unit loop, so nothing is drawn at all -- and since the page is
+   the seed and the scene repaint writes nothing under this staging, the whole
+   window comes back as zero.  That is the assumption every case above rests on,
+   stated as an assertion: a scene repaint that painted anything would show
+   here.  The blit still runs, so the window is written and the border is
+   not. */
+static void vfx_animation_no_units_draws_nothing(void)
+{
+    if (!vu_stage()) {
+        vu_unstage();
+        return;
+    }
+    vu_set_unit(VU_FIRST_ID, VU_FIRST_TILE_X, VU_FIRST_TILE_Y);
+    vu_ids[0] = VU_FIRST_ID;
+    vu_run(0);
+
+    CHECK_EQ(vu_screen_painted(), 0);
+    CHECK_EQ(vu_border_touched(), 0);
+    vu_unstage();
+}
+
+/* Every one of the ten frames is held for two ticks -- the inner counter runs
+   to 2 at 00026e7f and the wait at 00026f8d sits inside it -- so a run costs at
+   least nineteen tick changes, the twentieth being the first tick's, whose
+   latch is uninitialised and may end at once.  A run that held each frame for
+   one tick floors at nine and does not reach it, and a run that waited nowhere
+   costs none.  No ceiling is asserted: the counter can advance more than once
+   while a tick is composed. */
+static void vfx_animation_holds_every_frame_for_two_ticks(void)
+{
+    if (!vu_stage()) {
+        vu_unstage();
+        return;
+    }
+    vu_set_unit(VU_FIRST_ID, VU_FIRST_TILE_X, VU_FIRST_TILE_Y);
+    vu_ids[0] = VU_FIRST_ID;
+    vu_run(1);
+
+    CHECK_EQ(vu_ticks_used >= (unsigned int)
+             (VU_TICKS_PER_FRAME * VU_CLIP_FRAMES - 1), 1);
+    vu_unstage();
+}
+
+/* CALL free at 00026fae and again at 00026fba: the page goes back and so does
+   the loaded member, so the heap holds no more used blocks after the run than
+   before it.  This is also what the seeding depends on -- if the page did not
+   come back, the next case's expected values would be comparing against
+   rubbish. */
+static void vfx_animation_frees_the_page_and_the_clip(void)
+{
+    if (!vu_stage()) {
+        vu_unstage();
+        return;
+    }
+    vu_set_unit(VU_FIRST_ID, VU_FIRST_TILE_X, VU_FIRST_TILE_Y);
+    vu_ids[0] = VU_FIRST_ID;
+    vu_run(1);
+
+    CHECK_EQ(vu_blocks_after, vu_blocks_before);
+    vu_unstage();
+}
+
 void run_anim_tests(void)
 {
     RUN_TEST(baseani_lookup_returns_a_pointer_into_the_image);
@@ -2276,4 +2847,10 @@ void run_anim_tests(void)
     RUN_TEST(attack_animation_presents_312x192_at_screen_4_4);
     RUN_TEST(attack_animation_frees_the_page);
     RUN_TEST(attack_animation_paces_the_frames_with_the_tick);
+    RUN_TEST(vfx_animation_reads_the_measured_offsets);
+    RUN_TEST(vfx_animation_draws_the_clip_over_the_unit_tile);
+    RUN_TEST(vfx_animation_draws_one_copy_per_listed_unit);
+    RUN_TEST(vfx_animation_no_units_draws_nothing);
+    RUN_TEST(vfx_animation_holds_every_frame_for_two_ticks);
+    RUN_TEST(vfx_animation_frees_the_page_and_the_clip);
 }

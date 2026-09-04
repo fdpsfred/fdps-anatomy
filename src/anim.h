@@ -257,4 +257,55 @@ extern void fdps_play_vfs_animation(char *name);
 extern void fdps_play_attack_animation(int attacker_unit, int defender_unit);
 #pragma aux fdps_play_attack_animation "*" parm caller [];
 
+/* Plays one named MISC.VFS member over the map cell of each of a list of
+   battle-map units at once, in the framed 312x192 main view, and returns with
+   the adapter holding the animation's last tick; nothing here repaints the map
+   without it.  This is the spell, item and status-effect animation -- Cure.saf,
+   CureMP.saf, Posion.saf, PosEff.saf, EMg00.saf and their neighbours.
+
+   unit_count is how many entries of unit_ids to draw the copy over, and it is
+   not checked: the poison and status-effect call sites pass 1 and the address
+   of a single-byte local, the item and spell handlers their own target-id list
+   and its length.  Each entry is an index into the current battle's unit array,
+   WIDENED UNSIGNED, and each is resolved through fdps_get_unit_record on every
+   tick rather than held, so an id past 127 is a high index and not a negative
+   one.  Nothing is range checked at either end.
+
+   anim_name is the member's name inside MISC.VFS and it is WRITTEN TO: it goes
+   to fdps_vfs_load_entry, which upper-cases the caller's own storage in place
+   (vfs.h), so a caller passing a string literal has that literal permanently
+   folded and it cannot live in read-only storage (rebuild_info/pitfalls.md).
+   A member the container does not hold ends the process inside that loader
+   rather than coming back, so there is no failure for a caller to test.
+
+   EVERY FRAME IS HELD FOR EXACTLY TWO TICKS AND THE FRAME'S OWN DWELL IS
+   IGNORED, which is what separates this routine from
+   fdps_saf_play_over_background: a clip whose frames name a duration plays here
+   at a fixed rate regardless.  Each of those two ticks repaints the scene from
+   scratch into the page, draws the frame once per listed unit, straddles a
+   vertical retrace and then waits for data_fdps_timer_tick_counter to change,
+   so the counter has to be advancing -- in the game the timer interrupt does it
+   -- or the second tick never ends.  The very first tick does not wait at all:
+   the latch is uninitialised, the same contract the three routines above carry,
+   and the definition in anim.c says why it stays that way.
+
+   THE COPY IS PLACED A WHOLE TILE LEFT AND THIRTY PIXELS UP of the unit's own
+   cell -- tile times 24 minus the view scroll origin minus 24 on x and minus 30
+   on y -- and NOT with the six-pixel lift a unit sprite gets.  Nothing culls a
+   unit that has scrolled out of the view; what keeps an off-screen copy off the
+   page is the cell drawer's own placement test (sprite.h).
+
+   THE FRAME'S SOUND EFFECT FIRES ONCE PER FRAME, not once per copy: the sound
+   flag is set only for the first unit of the first of the frame's two ticks.
+   Drawing every copy with it set plays the effect twice per unit per frame.
+
+   THE PAGE IS NEVER CLEARED.  A 360x240 page is taken from the heap without a
+   NULL test and given back at the end, along with the loaded member, and what
+   the compositor does not paint on a tick is whatever was left there -- the
+   repaint of the scene layers is what covers it in the game. */
+extern void fdps_play_vfs_animation_over_units(int unit_count,
+                                               unsigned char *unit_ids,
+                                               char *anim_name);
+#pragma aux fdps_play_vfs_animation_over_units "*" parm caller [];
+
 #endif

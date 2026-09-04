@@ -2300,6 +2300,14 @@
       "status": "committed",
       "emitted_against": "0x14a",
       "rounds": 0
+    },
+    "00026e00": {
+      "name": "fdps_play_vfs_animation_over_units",
+      "target": "anim.c",
+      "body_size": "0x1c9",
+      "status": "committed",
+      "emitted_against": "0x1c9",
+      "rounds": 0
     }
   }
 }
