@@ -49,12 +49,18 @@
  * name a terrain effect cannot inherit one.
  */
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <conio.h>
 #include <dos.h>
 #include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "audio.h"
+#include "vfs.h"
+#include "sprite.h"
 #include "combat.h"
 
 /* The strides the four accessors in src/table.c and src/unit.c multiply by. */
@@ -1872,6 +1878,585 @@ static void attacker_only_lets_the_attacker_ride_the_backdrop_down(void)
              WALKIN_ATTACKER_PIXEL);
 }
 
+/* ---- fdps_combat_play_attack_exchange @ 00018d60 -------------------------
+ *
+ * This one is run whole, against the real game files, because there is nothing
+ * smaller to run: the function is a sequencer whose every step is a call, and
+ * the only things a caller can see are the globals it leaves behind, the
+ * screen, the DAC and the two records.  So each case below puts the adapter
+ * into mode 13h the way the game does, hooks IRQ0 so the presenters' tick waits
+ * end, and calls it with FMER1.TMP, FMER2.TMP, MER1.TMP, MER2.TMP, MISC.VFS,
+ * FIGHT.VFS, FIGACT.VFS and BACKGRND.VFS staged beside the executable
+ * (tests/gamefile.lst).  A fabricated stand-in would prove nothing: every one
+ * of the seven member names is composed inside the function out of a record
+ * byte, so what is asserted is that the composed name found the member the
+ * assembly's format string names.
+ *
+ * WHAT THE TIMER INTERRUPT IS FOR BESIDES THE TICK.  Four of this function's
+ * effects only exist while it is running -- the fight blend tables, the gauge
+ * fill sheet it frees before returning, the fight palette, and the backdrop id
+ * the terrain images were named from, which every blow then republishes over --
+ * so the handler takes one snapshot of all four the first tick after the first
+ * frame reaches the screen.  That moment is inside fdps_combat_slide_in_attacker: past every
+ * load, past the four gauge decodes and past the fight palette upload, and
+ * before fdps_combat_play_blow's critical flash can touch the DAC.  The
+ * aperture is filled with a sentinel before the call, so "a frame has reached
+ * the screen" is a read of video memory and needs no port of its own.
+ *
+ * WHY ONE BASELINE RUN IS CACHED.  A run plays two whole animations paced by
+ * the timer, so the five cases that read the standard duel share one, and
+ * everything each of them asserts is copied out of the globals the moment it
+ * returns.  The five cases that need a different setup each run their own.
+ *
+ * THE EXPECTED VALUES.  The two clip ids are chosen off the shipped files:
+ * ACT000.SAF's frame 0 carries a lead-in count of 0 and ACT005.SAF's carries
+ * 19, which is what separates the standing attack from the travelling one.  The
+ * backdrop ids are staged into the two tiles' attribute rows, so what the
+ * global holds afterwards says which tile was resolved last and that the id was
+ * decremented.  Everything else comes off the assembly cited in src/combat.c.
+ */
+
+#define EXCH_TIMER_VECTOR 8
+#define EXCH_MODE_TEXT 0x03
+#define EXCH_MODE_320X200X256 0x13
+#define EXCH_VGA_BASE 0x000a0000
+#define EXCH_SCREEN_BYTES (0x140 * 0xc8)
+
+/* What the aperture is filled with before a run.  A probe every 4001 bytes is
+   sixteen readings spread over the whole window, so the first frame's blit
+   cannot leave all of them looking untouched. */
+#define EXCH_SCREEN_SENTINEL 0x5a
+#define EXCH_PROBE_STRIDE 4001
+
+#define EXCH_DAC_READ_INDEX 0x3c7
+#define EXCH_DAC_WRITE_INDEX 0x3c8
+#define EXCH_DAC_DATA 0x3c9
+#define EXCH_DAC_ENTRIES 256
+/* Outside the 0..60 span both staged palettes are built in, so a DAC entry
+   still holding it is one neither upload wrote. */
+#define EXCH_DAC_SENTINEL 63
+#define EXCH_PALETTE_SPAN 61
+#define EXCH_READING_SLOTS 6
+
+/* PUSH 0x4800 at 00018d9f and PUSH 0x1000 at 00018ddb.  The window compared is
+   128 bytes at an offset where the fight file and the map file differ:
+   FMER1.TMP and MER1.TMP first disagree at 1028, FMER2.TMP and MER2.TMP at 2. */
+#define EXCH_RAMP_BYTES 0x4800
+#define EXCH_CUBE_BYTES 0x1000
+#define EXCH_RAMP_WINDOW_AT 1024
+#define EXCH_CUBE_WINDOW_AT 0
+#define EXCH_WINDOW_BYTES 128
+
+/* PUSH 0x9c4 at 00018e15, then sprites 4..7 at pitch 0x7d and y = index * 5. */
+#define EXCH_FILL_BYTES 0x9c4
+#define EXCH_FILL_STRIPS 4
+#define EXCH_FILL_FIRST_SPRITE 4
+#define EXCH_FILL_PITCH 0x7d
+#define EXCH_FILL_STRIP_HEIGHT 5
+/* The sprite index a body that started the run at 0 would have used. */
+#define EXCH_FILL_WRONG_SPRITE 0
+
+/* ACT000.SAF's frame 0 has a lead-in of 0 and ACT005.SAF's has 19, and both
+   have a STAND%03d.SAF beside them.  The defender is given a third id so that
+   a clip loaded for the wrong combatant would be a different file. */
+#define EXCH_STANDING_PORTRAIT 0
+#define EXCH_TRAVELLING_PORTRAIT 5
+#define EXCH_DEFENDER_PORTRAIT 1
+
+/* The two tiles' combat_backdrop_id bytes.  Both are above zero, so both are
+   decremented, and they differ, so the survivor names the tile. */
+#define EXCH_ATTACKER_BACKDROP_ID 7
+#define EXCH_DEFENDER_BACKDROP_ID 5
+
+/* Byte +3 of a four-byte attribute row is combat_backdrop_id. */
+#define EXCH_ATTR_BACKDROP_AT 3
+
+/* Both combatants start level with each other: AP 100 against DP 91 is a gap
+   of 9 and so a damage of 8, and accuracy 200 against evasion 0 lands on every
+   draw, so each blow that is played takes HP off and a blow that was not
+   played leaves the record standing at its start. */
+#define EXCH_START_HP 60
+#define EXCH_FIXTURE_ATTACK 100
+#define EXCH_FIXTURE_DEFENSE 91
+#define EXCH_FIXTURE_ACCURACY 200
+/* Less than one blow's damage, so the first blow floors the record at zero and
+   fdps_combat_play_blow answers 0. */
+#define EXCH_FATAL_HP 4
+
+static struct fdps_palette_entry exch_fight_palette[EXCH_DAC_ENTRIES];
+static struct fdps_palette_entry exch_map_palette[EXCH_DAC_ENTRIES];
+
+static unsigned char exch_fill_snapshot[EXCH_FILL_BYTES];
+static unsigned char exch_fill_over_zero[EXCH_FILL_BYTES];
+static unsigned char exch_fill_over_ones[EXCH_FILL_BYTES];
+static unsigned char exch_ramp_snapshot[EXCH_WINDOW_BYTES];
+static unsigned char exch_cube_snapshot[EXCH_WINDOW_BYTES];
+static unsigned char exch_ramp_at_return[EXCH_WINDOW_BYTES];
+static unsigned char exch_cube_at_return[EXCH_WINDOW_BYTES];
+static unsigned char exch_file_window[EXCH_WINDOW_BYTES];
+
+/* The member name is handed to fdps_vfs_load_entry, which upper-cases the
+   caller's own storage in place, so it cannot be a literal the compiler may
+   put anywhere read-only. */
+static char exch_gauge_member[] = "FigBar.cel";
+static char exch_misc_archive[] = "MISC.VFS";
+
+static int exch_snapshot_dac[EXCH_READING_SLOTS];
+static int exch_return_dac[EXCH_READING_SLOTS];
+static int exch_snapshot_taken;
+static int exch_snapshot_backdrop_id;
+static int exch_screen_nonzero;
+static int exch_attacker_hp;
+static int exch_defender_hp;
+static int exch_xp_credit;
+static int exch_defender_paralysis;
+static int exch_baseline_done;
+
+static void (__interrupt __far *exch_saved_timer)();
+
+static void exch_read_dac(int *into)
+{
+    outp(EXCH_DAC_READ_INDEX, 0);
+    into[0] = (int) inp(EXCH_DAC_DATA);
+    into[1] = (int) inp(EXCH_DAC_DATA);
+    into[2] = (int) inp(EXCH_DAC_DATA);
+    outp(EXCH_DAC_READ_INDEX, EXCH_DAC_ENTRIES - 1);
+    into[3] = (int) inp(EXCH_DAC_DATA);
+    into[4] = (int) inp(EXCH_DAC_DATA);
+    into[5] = (int) inp(EXCH_DAC_DATA);
+}
+
+/* The three things that only exist while the exchange is running. */
+static void exch_take_snapshot(void)
+{
+    memmove(exch_fill_snapshot, data_fdps_gauge_fill_sheet_ptr,
+            (size_t) EXCH_FILL_BYTES);
+    memmove(exch_ramp_snapshot,
+            (unsigned char *) data_fdps_palette_shade_ramp_table
+            + EXCH_RAMP_WINDOW_AT, (size_t) EXCH_WINDOW_BYTES);
+    memmove(exch_cube_snapshot,
+            data_fdps_inverse_palette_cube + EXCH_CUBE_WINDOW_AT,
+            (size_t) EXCH_WINDOW_BYTES);
+    exch_snapshot_backdrop_id = (int) data_fdps_map_tile_combat_backdrop_id;
+    exch_read_dac(exch_snapshot_dac);
+}
+
+static void __interrupt __far exch_timer_isr(void)
+{
+    unsigned char *aperture;
+    int probe;
+
+    ++data_fdps_timer_tick_counter;
+
+    if (exch_snapshot_taken == 0) {
+        aperture = (unsigned char *) EXCH_VGA_BASE;
+        for (probe = 0; probe < EXCH_SCREEN_BYTES; probe += EXCH_PROBE_STRIDE) {
+            if (aperture[probe] != EXCH_SCREEN_SENTINEL) {
+                exch_take_snapshot();
+                exch_snapshot_taken = 1;
+                break;
+            }
+        }
+    }
+
+    _chain_intr(exch_saved_timer);
+}
+
+static void exch_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* The combat_backdrop_id byte of each combatant's own tile: the attacker
+   stands on cell (0,0) and so on attribute row 0, the defender on (1,0) and so
+   on row 1. */
+static void exch_set_backdrop_ids(int attacker_id, int defender_id)
+{
+    stage_attr[ATTR_ROWS_AT + ATTACKER_ATTR_ROW * 4 + EXCH_ATTR_BACKDROP_AT] =
+        (unsigned char) attacker_id;
+    stage_attr[ATTR_ROWS_AT + DEFENDER_ATTR_ROW * 4 + EXCH_ATTR_BACKDROP_AT] =
+        (unsigned char) defender_id;
+}
+
+/* The standard duel, on top of the fixture the outcome cases share: both units
+   able to hurt each other for 8, the defender armed with a range-1 weapon so
+   the counterattack test passes, and two palettes whose entries no other
+   palette in the run can be confused with. */
+static void exch_stage(int attacker_portrait)
+{
+    int index;
+
+    stage();
+
+    unit(ATTACKER)->portrait_id = (unsigned char) attacker_portrait;
+    unit(ATTACKER)->dp = EXCH_FIXTURE_DEFENSE;
+    unit(ATTACKER)->ev = 0;
+    unit(ATTACKER)->hp_current = EXCH_START_HP;
+    unit(ATTACKER)->hp_max = EXCH_START_HP;
+
+    unit(DEFENDER)->portrait_id = EXCH_DEFENDER_PORTRAIT;
+    unit(DEFENDER)->ap = EXCH_FIXTURE_ATTACK;
+    unit(DEFENDER)->hit = EXCH_FIXTURE_ACCURACY;
+    unit(DEFENDER)->hp_current = EXCH_START_HP;
+    unit(DEFENDER)->hp_max = EXCH_START_HP;
+    unit(DEFENDER)->inventory_slots[0] = ENTRY_EQUIPPED;
+    unit(DEFENDER)->inventory_slots[1] = FIXTURE_WEAPON_ID;
+
+    item(FIXTURE_WEAPON_ID)->range_min = 1;
+
+    exch_set_backdrop_ids(EXCH_ATTACKER_BACKDROP_ID, EXCH_DEFENDER_BACKDROP_ID);
+
+    for (index = 0; index < EXCH_DAC_ENTRIES; index++) {
+        exch_fight_palette[index].red =
+            (unsigned char) (index % EXCH_PALETTE_SPAN);
+        exch_fight_palette[index].green =
+            (unsigned char) ((index + 7) % EXCH_PALETTE_SPAN);
+        exch_fight_palette[index].blue =
+            (unsigned char) ((index + 14) % EXCH_PALETTE_SPAN);
+        exch_map_palette[index].red =
+            (unsigned char) ((index + 21) % EXCH_PALETTE_SPAN);
+        exch_map_palette[index].green =
+            (unsigned char) ((index + 28) % EXCH_PALETTE_SPAN);
+        exch_map_palette[index].blue =
+            (unsigned char) ((index + 35) % EXCH_PALETTE_SPAN);
+    }
+    data_fdps_vga_fight_palette_ptr = (unsigned char *) exch_fight_palette;
+    data_fdps_vga_main_palette_ptr = (unsigned char *) exch_map_palette;
+
+    /* Both audio gates closed, so the sound ids the shipped clips carry play
+       nothing, and eight empty voices for the fdps_audio_stop_sample(-1) the
+       teardown makes. */
+    data_fdps_audio_sfx_enabled_flag = 0;
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    for (index = 0; index < SFX_SAMPLE_SLOT_COUNT; index++) {
+        data_fdps_audio_sample_handle_table[index] = NULL;
+    }
+
+    data_fdps_timer_tick_counter = 0;
+}
+
+/* One whole exchange, with everything a case can read afterwards copied out
+   before anything else can move it. */
+static void exch_run(void)
+{
+    int index;
+
+    exch_snapshot_taken = 0;
+    exch_snapshot_backdrop_id = -1;
+    memset(exch_fill_snapshot, 0, (size_t) EXCH_FILL_BYTES);
+    memset(exch_ramp_snapshot, 0, (size_t) EXCH_WINDOW_BYTES);
+    memset(exch_cube_snapshot, 0, (size_t) EXCH_WINDOW_BYTES);
+    for (index = 0; index < EXCH_READING_SLOTS; index++) {
+        exch_snapshot_dac[index] = -1;
+        exch_return_dac[index] = -1;
+    }
+
+    exch_set_mode(EXCH_MODE_320X200X256);
+    memset((void *) EXCH_VGA_BASE, EXCH_SCREEN_SENTINEL,
+           (size_t) EXCH_SCREEN_BYTES);
+    for (index = 0; index < EXCH_DAC_ENTRIES; index++) {
+        outp(EXCH_DAC_WRITE_INDEX, index);
+        outp(EXCH_DAC_DATA, EXCH_DAC_SENTINEL);
+        outp(EXCH_DAC_DATA, EXCH_DAC_SENTINEL);
+        outp(EXCH_DAC_DATA, EXCH_DAC_SENTINEL);
+    }
+
+    exch_saved_timer = _dos_getvect(EXCH_TIMER_VECTOR);
+    _dos_setvect(EXCH_TIMER_VECTOR, exch_timer_isr);
+    fdps_combat_play_attack_exchange(ATTACKER, DEFENDER);
+    _dos_setvect(EXCH_TIMER_VECTOR, exch_saved_timer);
+
+    exch_read_dac(exch_return_dac);
+    exch_screen_nonzero = 0;
+    for (index = 0; index < EXCH_SCREEN_BYTES; index++) {
+        if (((unsigned char *) EXCH_VGA_BASE)[index] != 0) {
+            exch_screen_nonzero++;
+        }
+    }
+    exch_set_mode(EXCH_MODE_TEXT);
+
+    memmove(exch_ramp_at_return,
+            (unsigned char *) data_fdps_palette_shade_ramp_table
+            + EXCH_RAMP_WINDOW_AT, (size_t) EXCH_WINDOW_BYTES);
+    memmove(exch_cube_at_return,
+            data_fdps_inverse_palette_cube + EXCH_CUBE_WINDOW_AT,
+            (size_t) EXCH_WINDOW_BYTES);
+
+    exch_attacker_hp = (int) unit(ATTACKER)->hp_current;
+    exch_defender_hp = (int) unit(DEFENDER)->hp_current;
+    exch_xp_credit = data_fdps_battle_pending_xp_credit;
+    exch_defender_paralysis =
+        (int) unit(DEFENDER)->status_timers[PARALYSIS_SLOT];
+}
+
+/* The standard duel, played once and shared by the five cases that read it. */
+static void exch_baseline(void)
+{
+    if (exch_baseline_done != 0) {
+        return;
+    }
+    exch_stage(EXCH_STANDING_PORTRAIT);
+    exch_run();
+    exch_baseline_done = 1;
+}
+
+static void exch_read_file_window(char *name, long at, unsigned char *into)
+{
+    FILE *fp;
+
+    memset(into, 0, (size_t) EXCH_WINDOW_BYTES);
+    fp = fopen(name, "rb");
+    if (fp != NULL) {
+        fseek(fp, at, SEEK_SET);
+        fread(into, 1, (size_t) EXCH_WINDOW_BYTES, fp);
+        fclose(fp);
+    }
+}
+
+/* The four strips as this file's own reading of the assembly composes them,
+   over a surface pre-filled with `fill` so that two runs with different fills
+   say which bytes the decode actually wrote. */
+static void exch_build_fill_sheet(int first_sprite, unsigned char fill,
+                                  unsigned char *into)
+{
+    unsigned char *sheet;
+    int strip;
+
+    memset(into, fill, (size_t) EXCH_FILL_BYTES);
+    sheet = (unsigned char *) fdps_vfs_load_entry(exch_misc_archive,
+                                                 exch_gauge_member);
+    for (strip = 0; strip < EXCH_FILL_STRIPS; strip++) {
+        fdps_cel_blit_sprite(sheet, strip + first_sprite, into,
+                             EXCH_FILL_PITCH, 0,
+                             strip * EXCH_FILL_STRIP_HEIGHT, 0, 0);
+    }
+    free(sheet);
+}
+
+/* How many of the bytes the decode really wrote -- the ones both fills agree
+   on -- the snapshot disagrees with. */
+static int exch_fill_mismatches(void)
+{
+    int offset;
+    int wrong;
+
+    wrong = 0;
+    for (offset = 0; offset < EXCH_FILL_BYTES; offset++) {
+        if (exch_fill_over_zero[offset] == exch_fill_over_ones[offset]
+            && exch_fill_snapshot[offset] != exch_fill_over_zero[offset]) {
+            wrong++;
+        }
+    }
+    return wrong;
+}
+
+static int exch_fill_written_bytes(void)
+{
+    int offset;
+    int written;
+
+    written = 0;
+    for (offset = 0; offset < EXCH_FILL_BYTES; offset++) {
+        if (exch_fill_over_zero[offset] == exch_fill_over_ones[offset]) {
+            written++;
+        }
+    }
+    return written;
+}
+
+/* The offsets this body reads out of a record, and the two struct sizes the
+   loads assume.  If any of them moved, every case below would be reading
+   other bytes. */
+static void the_record_offsets_the_exchange_reads(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 1);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, portrait_id), 7);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers) +
+             PARALYSIS_SLOT, 0x26);
+    CHECK_EQ((int) sizeof(struct fdps_tile_attr_entry), 4);
+    CHECK_EQ((int) offsetof(struct fdps_tile_attr_entry, combat_backdrop_id),
+             EXCH_ATTR_BACKDROP_AT);
+}
+
+/* FMer1.tmp and FMer2.tmp are in the two globals for the length of the
+   animation, and Mer1.tmp and Mer2.tmp are back in them when it returns.  The
+   window compared is one the fight file and the map file disagree over, so
+   neither half can pass by holding the other's bytes. */
+static void the_fight_blend_tables_replace_the_map_ones_and_go_back(void)
+{
+    exch_baseline();
+    CHECK_EQ(exch_snapshot_taken, 1);
+
+    exch_read_file_window("FMER1.TMP", EXCH_RAMP_WINDOW_AT, exch_file_window);
+    CHECK_EQ(memcmp(exch_ramp_snapshot, exch_file_window,
+                    EXCH_WINDOW_BYTES), 0);
+    exch_read_file_window("FMER2.TMP", EXCH_CUBE_WINDOW_AT, exch_file_window);
+    CHECK_EQ(memcmp(exch_cube_snapshot, exch_file_window,
+                    EXCH_WINDOW_BYTES), 0);
+
+    exch_read_file_window("MER1.TMP", EXCH_RAMP_WINDOW_AT, exch_file_window);
+    CHECK_EQ(memcmp(exch_ramp_at_return, exch_file_window,
+                    EXCH_WINDOW_BYTES), 0);
+    CHECK_EQ(memcmp(exch_ramp_snapshot, exch_file_window,
+                    EXCH_WINDOW_BYTES) != 0, 1);
+    exch_read_file_window("MER2.TMP", EXCH_CUBE_WINDOW_AT, exch_file_window);
+    CHECK_EQ(memcmp(exch_cube_at_return, exch_file_window,
+                    EXCH_WINDOW_BYTES), 0);
+    CHECK_EQ(memcmp(exch_cube_snapshot, exch_file_window,
+                    EXCH_WINDOW_BYTES) != 0, 1);
+}
+
+/* The 0x9c4-byte fill sheet holds FigBar.cel's sprites 4, 5, 6 and 7 laid five
+   rows apart at a pitch of 0x7d -- and not its sprites 0 through 3, which is
+   the sheet a body that started the run at the first sprite would have built. */
+static void the_gauge_fill_sheet_is_figbars_last_four_sprites(void)
+{
+    exch_baseline();
+
+    exch_build_fill_sheet(EXCH_FILL_FIRST_SPRITE, 0x00, exch_fill_over_zero);
+    exch_build_fill_sheet(EXCH_FILL_FIRST_SPRITE, 0xff, exch_fill_over_ones);
+    CHECK_EQ(exch_fill_written_bytes() > 0, 1);
+    CHECK_EQ(exch_fill_mismatches(), 0);
+
+    exch_build_fill_sheet(EXCH_FILL_WRONG_SPRITE, 0x00, exch_fill_over_zero);
+    exch_build_fill_sheet(EXCH_FILL_WRONG_SPRITE, 0xff, exch_fill_over_ones);
+    CHECK_EQ(exch_fill_mismatches() > 0, 1);
+}
+
+/* The teardown clears all 64000 bytes of the mode 13h screen and puts the map
+   palette back over the whole DAC.  The reading taken during the run is the
+   fight palette, at the same two entries, so the two uploads are told apart by
+   which block each one came out of. */
+static void the_screen_is_cleared_and_the_map_palette_uploaded(void)
+{
+    exch_baseline();
+
+    CHECK_EQ(exch_screen_nonzero, 0);
+
+    CHECK_EQ(exch_snapshot_dac[0], (int) exch_fight_palette[0].red);
+    CHECK_EQ(exch_snapshot_dac[1], (int) exch_fight_palette[0].green);
+    CHECK_EQ(exch_snapshot_dac[2], (int) exch_fight_palette[0].blue);
+    CHECK_EQ(exch_snapshot_dac[3],
+             (int) exch_fight_palette[EXCH_DAC_ENTRIES - 1].red);
+    CHECK_EQ(exch_snapshot_dac[5],
+             (int) exch_fight_palette[EXCH_DAC_ENTRIES - 1].blue);
+
+    CHECK_EQ(exch_return_dac[0], (int) exch_map_palette[0].red);
+    CHECK_EQ(exch_return_dac[1], (int) exch_map_palette[0].green);
+    CHECK_EQ(exch_return_dac[2], (int) exch_map_palette[0].blue);
+    CHECK_EQ(exch_return_dac[3],
+             (int) exch_map_palette[EXCH_DAC_ENTRIES - 1].red);
+    CHECK_EQ(exch_return_dac[5],
+             (int) exch_map_palette[EXCH_DAC_ENTRIES - 1].blue);
+}
+
+/* The accumulator is zeroed before anything else happens, and this duel -- a
+   side-1 attacker -- pays nothing into it, so the sentinel the fixture left is
+   gone and nothing has replaced it. */
+static void the_pending_experience_credit_is_cleared_on_entry(void)
+{
+    exch_baseline();
+
+    CHECK_EQ(exch_xp_credit, 0);
+}
+
+/* An attack whose clip does not travel resolves the DEFENDER's tile and no
+   other, and the id the Back%02d.saf name was composed from is that tile's,
+   decremented.
+
+   THE READING IS THE SNAPSHOT'S AND NOT THE ONE TAKEN AFTER THE RETURN.
+   data_fdps_map_tile_combat_backdrop_id is a shared scratch slot, and
+   fdps_combat_compute_hit_outcome republishes it for both combatants from
+   inside every blow, so what is in it when the exchange returns is the last
+   thing the BLOW looked up and says nothing about this function.  The snapshot
+   is taken during fdps_combat_slide_in_attacker, which makes no terrain lookup
+   of its own, so it still holds what the name was built from. */
+static void a_standing_attack_opens_on_the_defenders_terrain(void)
+{
+    exch_baseline();
+
+    CHECK_EQ(exch_snapshot_backdrop_id, EXCH_DEFENDER_BACKDROP_ID - 1);
+}
+
+/* Both blows are played: the attacker's takes the damage out of the defender
+   and the counterblow takes it back out of the attacker. */
+static void the_blow_and_the_counterblow_both_drain_a_record(void)
+{
+    exch_baseline();
+
+    CHECK_EQ(exch_defender_hp < EXCH_START_HP, 1);
+    CHECK_EQ(exch_attacker_hp < EXCH_START_HP, 1);
+}
+
+/* A clip that travels resolves the attacker's tile as well, second, so the id
+   the global keeps is the ATTACKER's -- which is what makes the animation open
+   on his terrain and slide across to the defender's. */
+static void a_travelling_attack_opens_on_the_attackers_terrain(void)
+{
+    exch_stage(EXCH_TRAVELLING_PORTRAIT);
+    exch_run();
+
+    CHECK_EQ(exch_snapshot_backdrop_id, EXCH_ATTACKER_BACKDROP_ID - 1);
+}
+
+/* The guard is an unsigned test against zero, so a tile carrying no backdrop
+   id is left alone rather than wrapping to 255. */
+static void a_backdrop_id_of_zero_is_left_alone(void)
+{
+    exch_stage(EXCH_STANDING_PORTRAIT);
+    exch_set_backdrop_ids(EXCH_ATTACKER_BACKDROP_ID, 0);
+    exch_run();
+
+    CHECK_EQ(exch_snapshot_backdrop_id, 0);
+}
+
+/* The counterattack test refuses a defender with nothing equipped, so no
+   second blow is played and the attacker's record is never written. */
+static void a_defender_with_no_weapon_never_strikes_back(void)
+{
+    exch_stage(EXCH_STANDING_PORTRAIT);
+    unit(DEFENDER)->inventory_slots[0] = 0;
+    unit(DEFENDER)->inventory_slots[1] = 0;
+    exch_run();
+
+    CHECK_EQ(exch_defender_hp < EXCH_START_HP, 1);
+    CHECK_EQ(exch_attacker_hp, EXCH_START_HP);
+}
+
+/* THE TEST IS ASKED TWICE.  The first ask passes -- the defender is adjacent
+   and armed, and his Act clip is loaded -- and then the blow itself paralyses
+   him through fdps_combat_compute_hit_outcome, which is the first thing the
+   second ask rejects on.  A body that kept the first answer would play the
+   counterblow and the attacker's record would show it. */
+static void an_ailment_the_blow_lands_cancels_the_counterblow(void)
+{
+    exch_stage(EXCH_STANDING_PORTRAIT);
+    set_weapon(EFFECT_PARALYSIS, 100);
+    exch_run();
+
+    CHECK_EQ(exch_defender_paralysis > 0, 1);
+    CHECK_EQ(exch_defender_hp < EXCH_START_HP, 1);
+    CHECK_EQ(exch_attacker_hp, EXCH_START_HP);
+}
+
+/* A blow that empties the defender's HP makes fdps_combat_play_blow answer 0,
+   and that answer alone stops the counterblow -- the counterattack test is
+   never even reached. */
+static void a_defender_the_blow_kills_never_strikes_back(void)
+{
+    exch_stage(EXCH_STANDING_PORTRAIT);
+    unit(DEFENDER)->hp_current = EXCH_FATAL_HP;
+    exch_run();
+
+    CHECK_EQ(exch_defender_hp, 0);
+    CHECK_EQ(exch_attacker_hp, EXCH_START_HP);
+}
+
 void run_combat_tests(void)
 {
     RUN_TEST(the_record_layouts_match_the_offsets_read);
@@ -1923,4 +2508,17 @@ void run_combat_tests(void)
     RUN_TEST(a_side_two_attacker_closes_in_from_the_right);
     RUN_TEST(a_side_zero_attacker_closes_in_from_the_left);
     RUN_TEST(attacker_only_lets_the_attacker_ride_the_backdrop_down);
+
+    RUN_TEST(the_record_offsets_the_exchange_reads);
+    RUN_TEST(the_fight_blend_tables_replace_the_map_ones_and_go_back);
+    RUN_TEST(the_gauge_fill_sheet_is_figbars_last_four_sprites);
+    RUN_TEST(the_screen_is_cleared_and_the_map_palette_uploaded);
+    RUN_TEST(the_pending_experience_credit_is_cleared_on_entry);
+    RUN_TEST(a_standing_attack_opens_on_the_defenders_terrain);
+    RUN_TEST(the_blow_and_the_counterblow_both_drain_a_record);
+    RUN_TEST(a_travelling_attack_opens_on_the_attackers_terrain);
+    RUN_TEST(a_backdrop_id_of_zero_is_left_alone);
+    RUN_TEST(a_defender_with_no_weapon_never_strikes_back);
+    RUN_TEST(an_ailment_the_blow_lands_cancels_the_counterblow);
+    RUN_TEST(a_defender_the_blow_kills_never_strikes_back);
 }

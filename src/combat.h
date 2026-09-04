@@ -126,4 +126,45 @@ extern void fdps_combat_slide_in_attacker(int attacker_unit_index,
                                           void *backdrop);
 #pragma aux fdps_combat_slide_in_attacker "*" parm caller [];
 
+/* Plays one whole physical attack on the full-screen combat animation: the
+   attacker's blow and, when the defender is still standing and still able to,
+   the defender's counterblow.  It is the alternative to the on-map attack
+   display fdps_unit_attack_target (src/unitatk.h) puts up; both callers pick
+   one or the other for the same blow, and neither reads a result.
+
+   Both units are named by index in the map unit array.  `attacker_unit_index`
+   is the acting unit throughout: its Act%03d.saf is the attack clip, its
+   terrain is where a travelling attack opens, and it is the attacker in both
+   counterattack tests.  `defender_unit_index` is the struck unit, whose HP the
+   blow drains and whose terrain the animation normally shows.
+
+   THE FUNCTION OWNS THE FIGHT-MODE ENVIRONMENT AND PUTS IT BACK.  On the way
+   in it reads FMer1.tmp and FMer2.tmp -- the fight blend tables -- over
+   data_fdps_palette_shade_ramp_table and data_fdps_inverse_palette_cube, and
+   uploads the fight palette; on the way out it clears the 64000 bytes of the
+   mode 13h screen, uploads the map palette and reads Mer1.tmp and Mer2.tmp
+   back over the same two globals.  Both pairs are opened by bare name in the
+   working directory and NEITHER fopen RESULT IS TESTED, so a missing file
+   faults inside fread.  It also builds and frees the two combat gauge sheets
+   data_fdps_gauge_fill_sheet_ptr and
+   data_fdps_combat_gauge_sprite_sheet_ptr (src/gamedata.h), which is why
+   the panels are painted for the whole animation and by nothing after it.
+
+   Everything the animation needs comes off disk here: both units'
+   Stand%03d.saf out of Fight.vfs, the attacker's Act%03d.saf out of
+   FigAct.vfs, the defender's as well when the counterattack test passes, and
+   one or two Back%02d.saf terrain images out of BackGrnd.vfs.  All of them are
+   freed before the return.  Nothing is returned and no load is checked --
+   fdps_vfs_load_entry ends the process on a miss.
+
+   data_fdps_battle_pending_xp_credit is cleared on entry and left holding
+   whatever the blow earned.  The tile-info block fdps_map_load_tile_info
+   publishes into is used as scratch here and is left holding whatever the last
+   blow looked up, not what the terrain images were chosen from.
+   data_fdps_timer_tick_counter paces every frame the two presenters draw, so a
+   caller running this with no timer interrupt installed stops inside them. */
+extern void fdps_combat_play_attack_exchange(int attacker_unit_index,
+                                             int defender_unit_index);
+#pragma aux fdps_combat_play_attack_exchange "*" parm caller [];
+
 #endif

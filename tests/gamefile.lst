@@ -59,3 +59,21 @@ FDE.SAV
 # failing an assertion.  The record offsets, lengths and decoded pixels the
 # cases expect are this file's own.
 FACE.CEL
+#
+# The four blend tables and the three combat containers are what
+# fdps_combat_play_attack_exchange reads, and none of them can be stood in for.
+# The two .tmp pairs are opened by bare name with the result untested, so a
+# missing one faults inside fread rather than failing an assertion; the
+# containers are opened through fdps_vfs_load_entry, which ends the process on a
+# member it cannot find.  What tests/combat.c asserts is that the names the
+# function composes out of a record byte -- Stand%03d.saf, Act%03d.saf and
+# Back%02d.saf -- reach the members the shipped containers hold, and the lead-in
+# counts that separate a standing attack from a travelling one are ACT000.SAF's
+# and ACT005.SAF's own.
+FMER1.TMP
+FMER2.TMP
+MER1.TMP
+MER2.TMP
+FIGHT.VFS
+FIGACT.VFS
+BACKGRND.VFS
