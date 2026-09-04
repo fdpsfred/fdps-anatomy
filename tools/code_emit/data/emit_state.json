@@ -2385,6 +2385,14 @@
       "status": "committed",
       "rounds": 1,
       "emitted_against": "0x245"
+    },
+    "00024650": {
+      "name": "fdps_save_slot_select_loop",
+      "target": "save.c",
+      "body_size": "0x1d9",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x1d9"
     }
   }
 }
