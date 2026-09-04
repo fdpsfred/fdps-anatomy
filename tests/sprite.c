@@ -1956,6 +1956,456 @@ static void the_sprite_size_and_scene_pitch_reach_the_dispatcher(void)
     CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
 }
 
+
+/* fdps_blit_cursor_tile at 0002cc20.
+ *
+ * Expected values come from the assembly -- CMP EAX,dword ptr [0x00069ce4] /
+ * JL at 0002cc2f, ADD EAX,0x138 / CMP EAX,dword ptr [EBP+0x14] / JG at
+ * 0002cc3c, CMP EAX,dword ptr [0x00069ce0] / JGE at 0002cc4b and ADD EAX,0xc0
+ * / CMP / JG at 0002cc5a for the four bounds; SUB EAX,dword ptr [0x00069ce0] /
+ * ADD EAX,0x18 / IMUL EAX,EAX,0x168 / ADD EAX,dword ptr [EBP+0x14] / SUB
+ * EAX,dword ptr [0x00069ce4] / ADD EAX,0x18 / ADD EDX,EAX at 0002cc66 for the
+ * destination pixel; LEA EAX,[EAX*0x4+0x0] / ADD EAX,EDX / MOV EAX,dword ptr
+ * [EAX+0xf] / ADD EAX,EDX at 0002cc95 for the stream address; and the seven
+ * pushes at 0002ccac through 0002ccc0 -- and from the .CEL layout in
+ * resource_info/cel.md (a 15-byte header, then the offset table, every entry
+ * of it measured from the start of the file).  None of them is read off the
+ * emitted C.
+ *
+ * The sheet is staged as a byte buffer rather than read from Cusor.cel because
+ * the drawer takes it from a global that fdps_load_global_resources fills, and
+ * because a staged sheet can give each piece its own flat colour and so say
+ * which table entry was chosen.  Nothing below asserts what any global holds
+ * on its own -- ticket 23 owns that -- and both of the drawer's globals are
+ * put back after the call.
+ *
+ * The scene buffer is the real 360 by 240 the drawer hardwires, with one row
+ * of slack past the end, because the destination address is the whole point of
+ * most of these cases.  The header's own table-position field points at a
+ * decoy table whose entries all name a decoy stream, so a drawer that read the
+ * field instead of hardwiring 0x0f would paint the decoy colour.
+ */
+#define CURSOR_PITCH 0x168
+#define CURSOR_SCENE_ROWS 0xf0
+#define CURSOR_SCENE_BYTES (CURSOR_PITCH * (CURSOR_SCENE_ROWS + 1))
+#define CURSOR_TILE_W 24
+#define CURSOR_TILE_H 24
+#define CURSOR_BORDER 24
+#define CURSOR_WINDOW_W 0x138
+#define CURSOR_WINDOW_H 0xc0
+
+#define CURSOR_FILL_RUN_24 0x17
+#define CURSOR_SKIP_RUN_5 0xc4
+#define CURSOR_FILL_RUN_14 0x0d
+#define CURSOR_LITERAL_RUN_5 0x84
+#define CURSOR_SKIP_COLUMNS 5
+#define CURSOR_FILL_COLUMNS 14
+#define CURSOR_LITERAL_COLUMNS 5
+#define CURSOR_MIXED_ROW_BYTES 9
+
+#define CURSOR_SPRITE_COUNT 3
+#define CURSOR_TABLE_AT 0x0f
+#define CURSOR_SPRITE0_AT 0x40
+#define CURSOR_SPRITE1_AT 0x100
+#define CURSOR_SPRITE2_AT 0x70
+#define CURSOR_SPRITE3_AT 0xa0
+#define CURSOR_DECOY_TABLE_AT 0x1e0
+#define CURSOR_DECOY_STREAM_AT 0x200
+#define CURSOR_SHEET_SIZE 0x280
+
+#define CURSOR_PIXEL0 0x51
+#define CURSOR_PIXEL0_ALT 0x57
+#define CURSOR_PIXEL2 0x53
+#define CURSOR_PIXEL3 0x54
+#define CURSOR_DECOY_PIXEL 0x59
+#define CURSOR_MIXED_FILL 0x52
+#define CURSOR_LITERAL_FIRST 0x71
+
+static unsigned char cursor_sheet[CURSOR_SHEET_SIZE];
+static unsigned char cursor_sheet_alt[CURSOR_SHEET_SIZE];
+static unsigned char cursor_scene[CURSOR_SCENE_BYTES];
+
+/* 24 rows of one 24-pixel fill: a whole piece in the size the two pushed
+   immediates declare, and the plainest stream that covers every column of
+   every row. */
+static void cursor_fill_stream(unsigned char *sheet, int at,
+                               unsigned char pixel)
+{
+    int row;
+
+    for (row = 0; row < CURSOR_TILE_H; row++) {
+        sheet[at + row * 2] = CURSOR_FILL_RUN_24;
+        sheet[at + row * 2 + 1] = pixel;
+    }
+}
+
+/* 24 rows of skip 5, fill 14, literal 5.  The skip run is the kit's own
+   transparency -- it advances the destination without writing -- and the
+   literal run is what separates the pass-through kernel from every remapping
+   one. */
+static void cursor_mixed_stream(unsigned char *sheet, int at)
+{
+    int row;
+    int column;
+    int base;
+
+    for (row = 0; row < CURSOR_TILE_H; row++) {
+        base = at + row * CURSOR_MIXED_ROW_BYTES;
+        sheet[base] = CURSOR_SKIP_RUN_5;
+        sheet[base + 1] = CURSOR_FILL_RUN_14;
+        sheet[base + 2] = CURSOR_MIXED_FILL;
+        sheet[base + 3] = CURSOR_LITERAL_RUN_5;
+        for (column = 0; column < CURSOR_LITERAL_COLUMNS; column++) {
+            sheet[base + 4 + column] =
+                (unsigned char) (CURSOR_LITERAL_FIRST + column);
+        }
+    }
+}
+
+static void cursor_stage_sheet(unsigned char *sheet, unsigned char piece0_pixel)
+{
+    memset(sheet, 0, CURSOR_SHEET_SIZE);
+    sheet[0] = 'C';
+    sheet[1] = 'E';
+    sheet[2] = 'L';
+    cel_u16(sheet, 0x03, 1);
+    cel_u16(sheet, CEL_TABLE_FIELD_AT, CURSOR_DECOY_TABLE_AT);
+    cel_u16(sheet, CEL_WIDTH_FIELD_AT, CURSOR_TILE_W);
+    cel_u16(sheet, CEL_HEIGHT_FIELD_AT, CURSOR_TILE_H);
+    cel_u16(sheet, CEL_COUNT_FIELD_AT, CURSOR_SPRITE_COUNT);
+    cel_u16(sheet, CEL_ENCODING_FIELD_AT, 2);
+
+    cel_u32(sheet, CURSOR_TABLE_AT, CURSOR_SPRITE0_AT);
+    cel_u32(sheet, CURSOR_TABLE_AT + 4, CURSOR_SPRITE1_AT);
+    cel_u32(sheet, CURSOR_TABLE_AT + 8, CURSOR_SPRITE2_AT);
+    cel_u32(sheet, CURSOR_TABLE_AT + 12, CURSOR_SPRITE3_AT);
+
+    cursor_fill_stream(sheet, CURSOR_SPRITE0_AT, piece0_pixel);
+    cursor_mixed_stream(sheet, CURSOR_SPRITE1_AT);
+    cursor_fill_stream(sheet, CURSOR_SPRITE2_AT, CURSOR_PIXEL2);
+    cursor_fill_stream(sheet, CURSOR_SPRITE3_AT, CURSOR_PIXEL3);
+
+    cel_u32(sheet, CURSOR_DECOY_TABLE_AT, CURSOR_DECOY_STREAM_AT);
+    cel_u32(sheet, CURSOR_DECOY_TABLE_AT + 4, CURSOR_DECOY_STREAM_AT);
+    cel_u32(sheet, CURSOR_DECOY_TABLE_AT + 8, CURSOR_DECOY_STREAM_AT);
+    cel_u32(sheet, CURSOR_DECOY_TABLE_AT + 12, CURSOR_DECOY_STREAM_AT);
+    cursor_fill_stream(sheet, CURSOR_DECOY_STREAM_AT, CURSOR_DECOY_PIXEL);
+}
+
+/* Both globals are put back afterwards so the drawer's dependencies do not
+   leak into whatever test file runs next. */
+static void cursor_blit(unsigned char *sheet, int origin_x, int origin_y,
+                        int map_x, int map_y, int sprite_index)
+{
+    unsigned char *saved_sheet;
+    int saved_origin_x;
+    int saved_origin_y;
+
+    memset(cursor_scene, GUARD, CURSOR_SCENE_BYTES);
+
+    saved_sheet = data_fdps_cursor_highlight_sprite_sheet_ptr;
+    saved_origin_x = data_fdps_battle_view_window_origin_x;
+    saved_origin_y = data_fdps_battle_view_window_origin_y;
+
+    data_fdps_cursor_highlight_sprite_sheet_ptr = sheet;
+    data_fdps_battle_view_window_origin_x = origin_x;
+    data_fdps_battle_view_window_origin_y = origin_y;
+
+    fdps_blit_cursor_tile(map_x, map_y, sprite_index, cursor_scene);
+
+    data_fdps_cursor_highlight_sprite_sheet_ptr = saved_sheet;
+    data_fdps_battle_view_window_origin_x = saved_origin_x;
+    data_fdps_battle_view_window_origin_y = saved_origin_y;
+}
+
+static int cursor_painted(void)
+{
+    int index;
+    int painted;
+
+    painted = 0;
+    for (index = 0; index < CURSOR_SCENE_BYTES; index++) {
+        if (cursor_scene[index] != GUARD) {
+            painted++;
+        }
+    }
+    return painted;
+}
+
+/* How many of the 576 bytes of the 24x24 rectangle at (row, column) do not
+   hold `pixel`. */
+static int cursor_wrong_pixels(int row, int column, unsigned char pixel)
+{
+    int scan_row;
+    int scan_column;
+    int wrong;
+
+    wrong = 0;
+    for (scan_row = 0; scan_row < CURSOR_TILE_H; scan_row++) {
+        for (scan_column = 0; scan_column < CURSOR_TILE_W; scan_column++) {
+            if (cursor_scene[(row + scan_row) * CURSOR_PITCH
+                             + column + scan_column] != pixel) {
+                wrong++;
+            }
+        }
+    }
+    return wrong;
+}
+
+static int cursor_bytes_holding(unsigned char pixel)
+{
+    int index;
+    int found;
+
+    found = 0;
+    for (index = 0; index < CURSOR_SCENE_BYTES; index++) {
+        if (cursor_scene[index] == pixel) {
+            found++;
+        }
+    }
+    return found;
+}
+
+/* With the window at the map origin and the piece at map (0,0), the piece
+   lands at scene pixel (24,24): the border the two ADD EAX,0x18 apply, and not
+   at (0,0).  The four edge guards are the size assertion -- 24 columns by 24
+   rows and not one byte more. */
+static void the_cursor_tile_lands_inside_the_scene_border(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 0, 0, 0, 0, 0);
+    CHECK_EQ(cursor_wrong_pixels(CURSOR_BORDER, CURSOR_BORDER, CURSOR_PIXEL0),
+             0);
+    CHECK_EQ(cursor_painted(), CURSOR_TILE_W * CURSOR_TILE_H);
+    CHECK_EQ(cursor_scene[CURSOR_BORDER * CURSOR_PITCH + CURSOR_BORDER - 1],
+             GUARD);
+    CHECK_EQ(cursor_scene[CURSOR_BORDER * CURSOR_PITCH + CURSOR_BORDER
+                          + CURSOR_TILE_W], GUARD);
+    CHECK_EQ(cursor_scene[(CURSOR_BORDER - 1) * CURSOR_PITCH + CURSOR_BORDER],
+             GUARD);
+    CHECK_EQ(cursor_scene[(CURSOR_BORDER + CURSOR_TILE_H) * CURSOR_PITCH
+                          + CURSOR_BORDER], GUARD);
+}
+
+/* The map position moves the piece one for one in scene pixels: map (96,72)
+   with the window still at the origin is scene (120,96). */
+static void the_map_position_places_the_cursor_tile(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 0, 0, 96, 72, 0);
+    CHECK_EQ(cursor_wrong_pixels(72 + CURSOR_BORDER, 96 + CURSOR_BORDER,
+                                 CURSOR_PIXEL0), 0);
+    CHECK_EQ(cursor_painted(), CURSOR_TILE_W * CURSOR_TILE_H);
+}
+
+/* The position is relative to the scrolled window, not absolute: with the
+   window at (48,24) the same map (72,48) lands at scene (48,48).  A drawer
+   that dropped either SUB would put it at (96,72). */
+static void the_view_window_origin_scrolls_the_cursor_tile(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 48, 24, 72, 48, 0);
+    CHECK_EQ(cursor_wrong_pixels(48, 48, CURSOR_PIXEL0), 0);
+    CHECK_EQ(cursor_painted(), CURSOR_TILE_W * CURSOR_TILE_H);
+}
+
+/* Entry 2 of the table, not entry 0 and not the table's own address: the index
+   is scaled by four and the entry it selects is rebased on the sheet. */
+static void the_cursor_sprite_index_selects_the_table_entry(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 0, 0, 0, 0, 2);
+    CHECK_EQ(cursor_wrong_pixels(CURSOR_BORDER, CURSOR_BORDER, CURSOR_PIXEL2),
+             0);
+    CHECK_EQ(cursor_bytes_holding(CURSOR_PIXEL0), 0);
+}
+
+/* The header's table-position field points at the decoy table, whose every
+   entry names the decoy stream.  Reading that field instead of hardwiring 0x0f
+   would paint the decoy colour. */
+static void the_cursor_offset_table_is_read_at_fifteen(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 0, 0, 0, 0, 0);
+    CHECK_EQ(cursor_wrong_pixels(CURSOR_BORDER, CURSOR_BORDER, CURSOR_PIXEL0),
+             0);
+    CHECK_EQ(cursor_bytes_holding(CURSOR_DECOY_PIXEL), 0);
+}
+
+/* Two sheets differing only in piece 0's colour: the one the global points at
+   is the one that gets drawn. */
+static void the_cursor_sheet_comes_from_the_global(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_stage_sheet(cursor_sheet_alt, CURSOR_PIXEL0_ALT);
+    cursor_blit(cursor_sheet_alt, 0, 0, 0, 0, 0);
+    CHECK_EQ(cursor_wrong_pixels(CURSOR_BORDER, CURSOR_BORDER,
+                                 CURSOR_PIXEL0_ALT), 0);
+    CHECK_EQ(cursor_bytes_holding(CURSOR_PIXEL0), 0);
+}
+
+/* JL at 0002cc35 rejects only a strictly smaller x, so the left bound is
+   inclusive: one pixel left of the window origin draws nothing and the origin
+   itself draws. */
+static void a_map_x_left_of_the_window_draws_nothing(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 24, 0, 23, 0, 0);
+    CHECK_EQ(cursor_painted(), 0);
+}
+
+static void a_map_x_on_the_window_origin_draws(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 24, 0, 24, 0, 0);
+    CHECK_EQ(cursor_wrong_pixels(CURSOR_BORDER, CURSOR_BORDER, CURSOR_PIXEL0),
+             0);
+    CHECK_EQ(cursor_painted(), CURSOR_TILE_W * CURSOR_TILE_H);
+}
+
+/* JG at 0002cc44 needs origin + 0x138 strictly greater than x, so the right
+   bound is exclusive: 0x138 past the origin draws nothing and 0x137 draws,
+   landing its whole 24 columns in the border margin at scene column 0x14f. */
+static void a_map_x_at_the_window_width_draws_nothing(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 0, 0, CURSOR_WINDOW_W, 0, 0);
+    CHECK_EQ(cursor_painted(), 0);
+}
+
+static void a_map_x_one_inside_the_window_width_draws(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 0, 0, CURSOR_WINDOW_W - 1, 0, 0);
+    CHECK_EQ(cursor_wrong_pixels(CURSOR_BORDER,
+                                 CURSOR_WINDOW_W - 1 + CURSOR_BORDER,
+                                 CURSOR_PIXEL0), 0);
+    CHECK_EQ(cursor_painted(), CURSOR_TILE_W * CURSOR_TILE_H);
+}
+
+/* JGE at 0002cc51 keeps only y above the origin out, so the top bound is
+   inclusive the same way the left one is. */
+static void a_map_y_above_the_window_draws_nothing(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 0, 24, 0, 23, 0);
+    CHECK_EQ(cursor_painted(), 0);
+}
+
+static void a_map_y_on_the_window_origin_draws(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 0, 24, 0, 24, 0);
+    CHECK_EQ(cursor_wrong_pixels(CURSOR_BORDER, CURSOR_BORDER, CURSOR_PIXEL0),
+             0);
+    CHECK_EQ(cursor_painted(), CURSOR_TILE_W * CURSOR_TILE_H);
+}
+
+/* JG at 0002cc62 needs origin + 0xc0 strictly greater than y, so the bottom
+   bound is exclusive: 0xc0 below the origin draws nothing and 0xbf draws, at
+   scene row 0xd7 with its last rows inside the bottom margin. */
+static void a_map_y_at_the_window_height_draws_nothing(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 0, 0, 0, CURSOR_WINDOW_H, 0);
+    CHECK_EQ(cursor_painted(), 0);
+}
+
+static void a_map_y_one_inside_the_window_height_draws(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 0, 0, 0, CURSOR_WINDOW_H - 1, 0);
+    CHECK_EQ(cursor_wrong_pixels(CURSOR_WINDOW_H - 1 + CURSOR_BORDER,
+                                 CURSOR_BORDER, CURSOR_PIXEL0), 0);
+    CHECK_EQ(cursor_painted(), CURSOR_TILE_W * CURSOR_TILE_H);
+}
+
+/* All four compares are signed -- JL, JG, JGE, JG and not JB, JA, JAE.  With
+   the window origin at (-48,-48) and the piece on it, an unsigned upper-bound
+   test compares 0xffffffd0 against a wrapped 0x00000108 and drops the piece;
+   the signed one draws it at the border. */
+static void the_window_bounds_are_signed(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, -48, -48, -48, -48, 0);
+    CHECK_EQ(cursor_wrong_pixels(CURSOR_BORDER, CURSOR_BORDER, CURSOR_PIXEL0),
+             0);
+    CHECK_EQ(cursor_painted(), CURSOR_TILE_W * CURSOR_TILE_H);
+}
+
+/* Blit mode 0 is a constant in the push sequence, so the piece goes through
+   the pass-through kernel: the kit's skip runs leave the scene showing, the
+   filled columns take the fill byte and the literal ones take their five
+   stream bytes exactly as the stream holds them.  The painted count is 19
+   columns by 24 rows, the five skipped columns having written nothing. */
+static void mode_zero_passes_the_cursor_stream_through_unchanged(void)
+{
+    int row;
+    int column;
+    int wrong_skipped;
+    int wrong_filled;
+    int wrong_literal;
+    int at;
+
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 0, 0, 0, 0, 1);
+
+    wrong_skipped = 0;
+    wrong_filled = 0;
+    wrong_literal = 0;
+    for (row = 0; row < CURSOR_TILE_H; row++) {
+        at = (CURSOR_BORDER + row) * CURSOR_PITCH + CURSOR_BORDER;
+        for (column = 0; column < CURSOR_SKIP_COLUMNS; column++) {
+            if (cursor_scene[at + column] != GUARD) {
+                wrong_skipped++;
+            }
+        }
+        for (column = 0; column < CURSOR_FILL_COLUMNS; column++) {
+            if (cursor_scene[at + CURSOR_SKIP_COLUMNS + column]
+                != CURSOR_MIXED_FILL) {
+                wrong_filled++;
+            }
+        }
+        for (column = 0; column < CURSOR_LITERAL_COLUMNS; column++) {
+            if (cursor_scene[at + CURSOR_SKIP_COLUMNS + CURSOR_FILL_COLUMNS
+                             + column]
+                != (unsigned char) (CURSOR_LITERAL_FIRST + column)) {
+                wrong_literal++;
+            }
+        }
+    }
+
+    CHECK_EQ(wrong_skipped, 0);
+    CHECK_EQ(wrong_filled, 0);
+    CHECK_EQ(wrong_literal, 0);
+    CHECK_EQ(cursor_painted(),
+             (CURSOR_FILL_COLUMNS + CURSOR_LITERAL_COLUMNS) * CURSOR_TILE_H);
+}
+
+/* The three values the dispatcher publishes before handing over to a kernel:
+   the source rectangle as the two 0x18 immediates state it, the scene pitch as
+   the 0x168 immediate states it, and the row counter the pass-through kernel
+   has counted down to zero over the 24 rows it drew. */
+static void the_tile_size_and_scene_pitch_reach_the_dispatcher(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 0, 0, 0, 0, 0);
+    CHECK_EQ(data_fdps_graphics_rle_blit_src_width, CURSOR_TILE_W);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_pitch, CURSOR_PITCH);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The sheet declares three pieces and index 3 is drawn anyway: there is no
+   compare against the count anywhere in the body. */
+static void the_cursor_sprite_index_is_not_range_checked(void)
+{
+    cursor_stage_sheet(cursor_sheet, CURSOR_PIXEL0);
+    cursor_blit(cursor_sheet, 0, 0, 0, 0, CURSOR_SPRITE_COUNT);
+    CHECK_EQ(cursor_wrong_pixels(CURSOR_BORDER, CURSOR_BORDER, CURSOR_PIXEL3),
+             0);
+    CHECK_EQ(cursor_painted(), CURSOR_TILE_W * CURSOR_TILE_H);
+}
+
 void run_sprite_tests(void)
 {
     RUN_TEST(cell_lands_at_the_requests_x_and_y);
@@ -2020,4 +2470,22 @@ void run_sprite_tests(void)
     RUN_TEST(an_x_one_inside_the_column_bound_draws);
     RUN_TEST(the_blit_mode_and_operand_reach_the_dispatcher);
     RUN_TEST(the_sprite_size_and_scene_pitch_reach_the_dispatcher);
+    RUN_TEST(the_cursor_tile_lands_inside_the_scene_border);
+    RUN_TEST(the_map_position_places_the_cursor_tile);
+    RUN_TEST(the_view_window_origin_scrolls_the_cursor_tile);
+    RUN_TEST(the_cursor_sprite_index_selects_the_table_entry);
+    RUN_TEST(the_cursor_offset_table_is_read_at_fifteen);
+    RUN_TEST(the_cursor_sheet_comes_from_the_global);
+    RUN_TEST(a_map_x_left_of_the_window_draws_nothing);
+    RUN_TEST(a_map_x_on_the_window_origin_draws);
+    RUN_TEST(a_map_x_at_the_window_width_draws_nothing);
+    RUN_TEST(a_map_x_one_inside_the_window_width_draws);
+    RUN_TEST(a_map_y_above_the_window_draws_nothing);
+    RUN_TEST(a_map_y_on_the_window_origin_draws);
+    RUN_TEST(a_map_y_at_the_window_height_draws_nothing);
+    RUN_TEST(a_map_y_one_inside_the_window_height_draws);
+    RUN_TEST(the_window_bounds_are_signed);
+    RUN_TEST(mode_zero_passes_the_cursor_stream_through_unchanged);
+    RUN_TEST(the_tile_size_and_scene_pitch_reach_the_dispatcher);
+    RUN_TEST(the_cursor_sprite_index_is_not_range_checked);
 }

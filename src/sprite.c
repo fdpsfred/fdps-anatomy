@@ -1,17 +1,19 @@
 /* sprite.c -- the .SAF sprite drawers: one tilemap cell, one tilemap layer,
- * one composite sprite; and the two .CEL drawers, one for the Command.cel UI
- * sheet and one for a battle-map unit's walk sprite.
+ * one composite sprite; and the three .CEL drawers, one for the Command.cel UI
+ * sheet, one for a battle-map unit's walk sprite and one for a piece of the
+ * Cusor.cel map-cursor outline kit.
  *
  * See sprite.h for the draw request every .SAF drawer here is handed and for
  * what each of its nine slots means, and resource_info/saf.md for the
  * container those three functions walk.  They own no state: the request, the
  * loaded image and the destination surface all belong to the caller.
  *
- * The two .CEL drawers at the bottom are the exception on both counts -- a
- * .CEL sheet and not a .SAF (resource_info/cel.md), and the two functions here
- * that read globals: the loaded Command.cel sheet for one, and the unit array,
- * the view window origin, the map animation counter and the sprite cache for
- * the other.
+ * The three .CEL drawers at the bottom are the exception on both counts -- a
+ * .CEL sheet and not a .SAF (resource_info/cel.md), and the three functions
+ * here that read globals: the loaded Command.cel sheet for the first; the unit
+ * array, the view window origin, the map animation counter and the sprite
+ * cache for the second; and the loaded Cusor.cel sheet and the view window
+ * origin for the third.
  */
 #include <stddef.h>
 #include <string.h>
@@ -511,5 +513,71 @@ void fdps_blit_unit_sprite(unsigned char *scene_buffer, int unit_index,
                            UNIT_SPRITE_SIZE, UNIT_SPRITE_SIZE,
                            UNIT_SCENE_PITCH, blit_param,
                            (unsigned char) blit_mode);
+    }
+}
+
+/* The visible map window is 312 by 192 map pixels: the immediates of ADD
+   EAX,0x138 at 0002cc3c and ADD EAX,0xc0 at 0002cc5a, added to the view window
+   origin to form each upper bound.
+
+   The scene buffer the pieces land in is 360 bytes per row -- IMUL
+   EAX,EAX,0x168 at 0002cc72, the same stride pushed as the destination pitch
+   at 0002ccb0 -- and carries a 24 pixel border on all four sides, which is the
+   ADD EAX,0x18 on each axis at 0002cc6f and 0002cc81.  The piece itself is a
+   map tile square, the two 0x18 immediates pushed at 0002ccb5 and 0002ccb7. */
+#define CURSOR_VIEW_WIDTH 0x138
+#define CURSOR_VIEW_HEIGHT 0xc0
+#define CURSOR_SCENE_PITCH 0x168
+#define CURSOR_SCENE_BORDER 0x18
+#define CURSOR_TILE_SIZE 0x18
+
+/* 0002cc20.  Four compares and then one basic block.  The four branches all
+   land on the same exit -- the chain JL 0002cc46 / JMP 0002cc53 / JMP 0002cc64
+   / JMP 0002ccc9 collapses a rejected x straight past the y test -- so the
+   whole body is the one guarded block below, and there is nothing after it.
+
+   Every compare is signed: JL at 0002cc35 and JGE at 0002cc51 on the two lower
+   bounds, JG at 0002cc44 and 0002cc62 on the two upper ones.  Writing the
+   bounds test unsigned drops a piece whose position is left of or above the
+   map origin instead of drawing it (rebuild_info/pitfalls.md).
+
+   The bounds are asymmetric and that is not an accident of the encoding: the
+   lower bound is taken on equality (JL rejects only a strictly smaller value)
+   and the upper one is not (JG requires the bound to be strictly greater), so
+   a piece exactly on the left or top edge is drawn and one exactly on the
+   right or bottom edge is not.
+
+   The stream address is the .CEL rule that a stored offset is measured from
+   the start of the FILE: the index is scaled by four and added to the sheet
+   base to reach the table entry, and the entry is added to that same base
+   again, never to the address it was read from.  The original reads the sheet
+   pointer out of its global twice, at 0002cc8c and again at 0002cc9e; one read
+   carries both here, which is the same value either way (ADR-0001).
+
+   Nothing is read after the call: the seven arguments are pushed right to left
+   and discarded with ADD ESP,0x1c at 0002ccc6, and fdps_blit_dispatch returns
+   nothing this function looks at. */
+void fdps_blit_cursor_tile(int map_x, int map_y, int sprite_index,
+                           unsigned char *dest)
+{
+    unsigned char *dest_pixel;
+    unsigned char *sprite_stream;
+
+    if (map_x >= data_fdps_battle_view_window_origin_x &&
+        map_x < data_fdps_battle_view_window_origin_x + CURSOR_VIEW_WIDTH &&
+        map_y >= data_fdps_battle_view_window_origin_y &&
+        map_y < data_fdps_battle_view_window_origin_y + CURSOR_VIEW_HEIGHT) {
+        dest_pixel = dest
+            + (map_y - data_fdps_battle_view_window_origin_y
+               + CURSOR_SCENE_BORDER) * CURSOR_SCENE_PITCH
+            + (map_x - data_fdps_battle_view_window_origin_x)
+            + CURSOR_SCENE_BORDER;
+        sprite_stream = data_fdps_cursor_highlight_sprite_sheet_ptr
+            + *(int *) (data_fdps_cursor_highlight_sprite_sheet_ptr
+                        + sprite_index * 4 + CEL_OFFSET_TABLE_START);
+
+        fdps_blit_dispatch(sprite_stream, dest_pixel, CURSOR_TILE_SIZE,
+                           CURSOR_TILE_SIZE, CURSOR_SCENE_PITCH, 0,
+                           BLIT_MODE_OPAQUE);
     }
 }

@@ -1,6 +1,7 @@
 /* sprite.h -- the .SAF sprite drawers: one tilemap cell, one tilemap layer,
- * one composite sprite; and the two .CEL drawers, one for the Command.cel UI
- * sheet and one for a battle-map unit's walk sprite.
+ * one composite sprite; and the three .CEL drawers, one for the Command.cel UI
+ * sheet, one for a battle-map unit's walk sprite and one for a piece of the
+ * Cusor.cel map-cursor outline kit.
  *
  * A .SAF holds an animation's material in four sections -- frames, tilemaps,
  * tiles and sounds -- and drawing anything out of one is three nested walks:
@@ -232,5 +233,43 @@ extern void fdps_blit_command_sprite(unsigned char *dst, int pitch,
 extern void fdps_blit_unit_sprite(unsigned char *scene_buffer, int unit_index,
                                   unsigned int blit_param, int blit_mode);
 #pragma aux fdps_blit_unit_sprite "*" parm caller [];
+
+/* Draws one 24 by 24 piece of the global Cusor.cel overlay sheet into the
+   scrolling scene buffer at a map pixel position, and draws nothing at all
+   when that position is outside the visible window.
+
+   `map_x` and `map_y` are in map pixels, the same space as the view window
+   origin data_fdps_battle_view_window_origin_x and
+   data_fdps_battle_view_window_origin_y (gamedata.h), and the shipped caller
+   fdps_draw_map_cursor forms them from the cursor position globals plus or
+   minus multiples of 24.  `sprite_index` picks the piece.  `dest` is the
+   caller's 360 by 240 scene buffer base, not a pixel address: the border and
+   the row stride are applied here.
+
+   Cusor.cel is one box-outline kit rather than a set of cursor pictures, which
+   is what lets the caller outline an arbitrary tile region a cell at a time:
+   sprite 0 is a closed box and 1 the same box gapped in the middle of each
+   side (the two cursor styles), 2 through 5 are the box missing its bottom,
+   right, left and top side, 6 through 9 are the two-sided corner pieces, 0x0a
+   through 0x0d are pairs of 3 by 3 corner nubs and 0x0e through 0x11 those
+   nubs singly.  The index is not range checked and the sheet pointer is not
+   tested for null.
+
+   THE TILE IS DRAWN WHOLE OR NOT AT ALL.  Only the tile's top left corner is
+   tested, against the 312 by 192 visible window with the left and top bounds
+   inclusive and the right and bottom exclusive, so a tile accepted at the
+   right or bottom edge writes up to 23 pixels into the scene buffer's 24 pixel
+   border margin -- the margin is what makes that safe, and it is also why
+   cursor tiles vanish whole rather than clipping as they leave the view.
+   Adding extent-based clipping, or compositing into a tight 312 by 192 buffer,
+   changes what the player sees at the map edges (rebuild_info/pitfalls.md).
+
+   Blit mode 0 is a constant in the push sequence, so the piece goes through
+   the opaque pass-through kernel; the kit's uncovered pixels are skip runs
+   that advance the destination without writing, and no colour index is treated
+   as a transparency key. */
+extern void fdps_blit_cursor_tile(int map_x, int map_y, int sprite_index,
+                                  unsigned char *dest);
+#pragma aux fdps_blit_cursor_tile "*" parm caller [];
 
 #endif
