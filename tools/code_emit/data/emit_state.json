@@ -2393,6 +2393,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x1d9"
+    },
+    "00026230": {
+      "name": "fdps_apply_damage_to_targets",
+      "target": "item.c",
+      "body_size": "0x6c",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x6c"
     }
   }
 }
