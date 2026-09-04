@@ -41,4 +41,24 @@ extern void fdps_render_ring_menu_frame(int *cmd_icons, int *cmd_disabled,
                                         int radius, int cursor_dir);
 #pragma aux fdps_render_ring_menu_frame "*" parm caller [];
 
+/* Plays the ring menu's opening sweep: the window cue once, then eight frames
+   of fdps_render_ring_menu_frame at radii 1, 5, 9, 0xd, 0x11, 0x15, 0x18 and
+   0x19.  Returns nothing, and hands cmd_icons, cmd_disabled and cursor_dir to
+   every frame exactly as they came in -- see the notes above for what each of
+   the three means and for the fact that radius drives the angle as well as the
+   distance, which is what makes the sweep a spiral rather than a growing ring.
+
+   THE SWEEP ENDS PAST THE RESTING RING, NOT ON IT.  The last frame is drawn at
+   radius 0x19 and not at the 0x18 the menu rests at, so the picture the player
+   is left looking at while fdps_menu_cursor_input_loop takes over has the four
+   buttons a pixel off their resting places until the first repaint moves them
+   back.  The frames are also not erased between one another, because
+   fdps_render_ring_menu_frame composes each one on a fresh uncleared page.
+
+   It draws straight to the adapter, exactly as the frame it calls does, and it
+   presents nothing afterwards. */
+extern void fdps_menu_animate_open(int *cmd_icons, int *cmd_disabled,
+                                   int cursor_dir);
+#pragma aux fdps_menu_animate_open "*" parm caller [];
+
 #endif

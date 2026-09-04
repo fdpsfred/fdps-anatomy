@@ -11,6 +11,7 @@
 #include <math.h>
 #include <i86.h>
 #include "gamedata.h"
+#include "audio.h"
 #include "blit.h"
 #include "mapdraw.h"
 #include "unit.h"
@@ -301,4 +302,64 @@ void fdps_render_ring_menu_frame(int *cmd_icons, int *cmd_disabled, int radius,
                    (void *) (VGA_SCREEN_BASE + RING_WINDOW_AT),
                    VGA_SCREEN_PITCH, RING_WINDOW_W, RING_WINDOW_H);
     free(scene_page);
+}
+
+/* The window cue the opening sweep plays, PUSH 0x61584 / CALL fdps_play_sfx at
+   0001613c.  The pack member it names is the one fdps_menu_animate_close plays
+   as well; the program's second window sound, "OpWin1.wav" at 0x6159c, belongs
+   to the status and shop windows and is never played from here.
+
+   It has to be a plain writable literal.  The lookup inside fdps_play_sfx
+   upper-cases the caller's own storage in place (vfs.h), so this spelling is
+   permanently "OPWIN.WAV" after the first menu of the run, exactly as the
+   original's copy at 0x61584 is (rebuild_info/pitfalls.md). */
+#define RING_OPEN_SOUND "OpWin.wav"
+
+/* The sweep's radius ladder, MOV dword ptr [EBP-0x4],0x1 at 0001614a, CMP
+   against 0x18 / JL at 00016151 and ADD 0x4 at 00016159, then the two literal
+   frames PUSH 0x18 at 0001617d and PUSH 0x19 at 00016193.
+
+   THE LAST FRAME IS 0x19 AND NOT THE RESTING 0x18.  The loop stops one step
+   short of the resting ring, the frame after it is the resting ring, and the
+   frame after that is a pixel past it -- so the sweep overshoots and stays
+   overshot until something else repaints the view.  Writing the ladder as a
+   loop that simply runs up to and including the resting radius drops both the
+   overshoot and the resting frame's own place in the order. */
+#define RING_OPEN_FIRST_RADIUS 1
+#define RING_OPEN_RADIUS_STEP 4
+#define RING_OPEN_LOOP_LIMIT 0x18
+#define RING_RESTING_RADIUS 0x18
+#define RING_OPEN_OVERSHOOT_RADIUS 0x19
+
+/* 00016130.  The opening animation of the four-command ring menu.  See menu.h
+   for the arguments and for what the sweep leaves on the screen.
+
+   The three descriptors are forwarded untouched to every frame -- each of the
+   eight call sites reloads them straight out of the parameter slots
+   ([EBP+0x14], [EBP+0x18] and [EBP+0x1c]) rather than caching them -- and
+   nothing here indexes them, so this function never looks at what is in them.
+
+   The cue is played once, before the first frame, and its result is dropped:
+   fdps_play_sfx returns nothing and a member the pack does not hold is silence
+   with no way to tell (audio.h), so a machine with sound effects off runs the
+   same eight frames as one with them on.
+
+   The pacing is fdps_render_ring_menu_frame's own delay(2), not anything here;
+   this function's only contribution to how the animation looks is the ladder,
+   and the ladder is eight frames whatever the machine. */
+void fdps_menu_animate_open(int *cmd_icons, int *cmd_disabled, int cursor_dir)
+{
+    /* The ring's radius this frame, and with it the angle of the sweep. */
+    int radius;
+
+    fdps_play_sfx(RING_OPEN_SOUND);
+    for (radius = RING_OPEN_FIRST_RADIUS; radius < RING_OPEN_LOOP_LIMIT;
+         radius += RING_OPEN_RADIUS_STEP) {
+        fdps_render_ring_menu_frame(cmd_icons, cmd_disabled, radius,
+                                    cursor_dir);
+    }
+    fdps_render_ring_menu_frame(cmd_icons, cmd_disabled, RING_RESTING_RADIUS,
+                                cursor_dir);
+    fdps_render_ring_menu_frame(cmd_icons, cmd_disabled,
+                                RING_OPEN_OVERSHOOT_RADIUS, cursor_dir);
 }

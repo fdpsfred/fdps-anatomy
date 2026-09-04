@@ -2228,6 +2228,14 @@
       "status": "committed",
       "rounds": 1,
       "emitted_against": "0x326"
+    },
+    "00016130": {
+      "name": "fdps_menu_animate_open",
+      "target": "menu.c",
+      "body_size": "0x7c",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x7c"
     }
   }
 }

@@ -339,6 +339,30 @@ static void ring_stage(void)
     data_fdps_map_cursor_world_y = RING_CURSOR_Y;
 }
 
+/* Puts the staged globals back to the state a freshly started program has
+   them in, and every case ends with a call to this.
+
+   IT IS NOT TIDINESS, IT IS THE HEAP.  Three of the globals staged above hold
+   blocks the program's own loaders release -- fdps_field_load_chapter_
+   resources frees data_fdps_map_unit_array_ptr when data_fdps_map_unit_count
+   is non-zero and data_fdps_cel_sprite_cache_ptr when data_fdps_cel_sprite_
+   cache_count is, fdps_deploy_map_units does the same, and
+   fdps_shutdown_free_resources frees data_fdps_command_sprite_sheet_ptr
+   unguarded.  A case that walks away leaving one of them pointing at a static
+   in this file hands a later test's call of one of those loaders a free() of
+   storage that never came from the heap, which corrupts the allocator for
+   every test that follows and is not noticed anywhere near here.  Zero count
+   plus null pointer is the bss state those guards were written against, and
+   free(NULL) is a no-op, so nothing downstream has to know these cases ran. */
+static void ring_unstage(void)
+{
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_cel_sprite_cache_count = 0;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_command_sprite_sheet_ptr = NULL;
+}
+
 static void ring_set_mode(int mode)
 {
     union REGS regs;
@@ -459,7 +483,7 @@ static void ring_window_is_the_page_and_nothing_else(void)
     CHECK_EQ(ring_pixel(196, 315), RING_BORDER_FILL);
     CHECK_EQ(ring_pixel(195, 316), RING_BORDER_FILL);
     CHECK_EQ(_heapchk(), _HEAPOK);
-    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);    ring_unstage();
 }
 
 /* The resting ring's up slot, box and all.  Its origin is (144, 120 - 23), so
@@ -489,7 +513,7 @@ static void ring_resting_slot_is_twenty_three_pixels_out(void)
     CHECK_EQ(ring_pixel(102, 172), RING_COLOR(RING_PLATE_HI));
     CHECK_EQ(ring_pixel(102, 173), RING_PAGE_SEED);
     CHECK_EQ(_heapchk(), _HEAPOK);
-    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);    ring_unstage();
 }
 
 /* All four slots of the resting ring, and the order they stand in.  With dx 0
@@ -518,7 +542,7 @@ static void ring_resting_slots_stand_up_left_right_down(void)
     CHECK_EQ(ring_pixel(123, 171), RING_PAGE_SEED);
     CHECK_EQ(ring_pixel(146, 148), RING_PAGE_SEED);
     CHECK_EQ(_heapchk(), _HEAPOK);
-    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);    ring_unstage();
 }
 
 /* Partway through the opening sweep the ring is a quarter turn spread over four
@@ -546,7 +570,7 @@ static void ring_spiral_offsets_come_from_one_radius(void)
     CHECK_EQ(ring_pixel(103, 144), RING_PAGE_SEED);
     CHECK_EQ(ring_pixel(119, 190), RING_PAGE_SEED);
     CHECK_EQ(_heapchk(), _HEAPOK);
-    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);    ring_unstage();
 }
 
 /* cursor_dir picks exactly one plate.  With it on the left slot that slot gets
@@ -568,7 +592,7 @@ static void ring_highlight_follows_cursor_dir(void)
     CHECK_EQ(ring_pixel(125, 171), RING_COLOR(RING_PLATE_PLAIN));
     CHECK_EQ(ring_pixel(148, 148), RING_COLOR(RING_PLATE_PLAIN));
     CHECK_EQ(_heapchk(), _HEAPOK);
-    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);    ring_unstage();
 }
 
 /* cursor_dir is not range checked and is not clamped: a value outside 0..3
@@ -589,7 +613,7 @@ static void ring_cursor_dir_out_of_range_highlights_nothing(void)
     CHECK_EQ(ring_pixel(125, 171), RING_COLOR(RING_PLATE_PLAIN));
     CHECK_EQ(ring_pixel(148, 148), RING_COLOR(RING_PLATE_PLAIN));
     CHECK_EQ(_heapchk(), _HEAPOK);
-    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);    ring_unstage();
 }
 
 /* The greyed-out flag does two different things to the two sub-images, and this
@@ -621,7 +645,7 @@ static void ring_disabled_bumps_the_plate_and_banks_the_icon(void)
     CHECK_EQ(ring_pixel(124, 171), RING_COLOR(RING_ICON_RIGHT));
     CHECK_EQ(ring_pixel(125, 171), RING_COLOR(RING_PLATE_PLAIN));
     CHECK_EQ(_heapchk(), _HEAPOK);
-    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);    ring_unstage();
 }
 
 /* The ring hangs on the cursor's position IN THE VIEW, which is its world pixel
@@ -647,7 +671,7 @@ static void ring_camera_scroll_is_subtracted(void)
     CHECK_EQ(ring_pixel(124, 171), RING_COLOR(RING_ICON_RIGHT));
     CHECK_EQ(ring_pixel(147, 148), RING_COLOR(RING_ICON_DOWN));
     CHECK_EQ(_heapchk(), _HEAPOK);
-    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);    ring_unstage();
 }
 
 /* The bounds test is on the slot's ORIGIN and lets the plate hang off the page.
@@ -682,7 +706,7 @@ static void ring_slot_origin_test_is_not_a_clip(void)
     CHECK_EQ(ring_pixel(82, 4), RING_COLOR(RING_PLATE_PLAIN));
     CHECK_EQ(ring_pixel(104, 4), RING_COLOR(RING_ICON_RIGHT));
     CHECK_EQ(_heapchk(), _HEAPOK);
-    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);    ring_unstage();
 }
 
 /* Stages one unit whose sprite lands at page (168,138) -- screen rows 118..141,
@@ -729,7 +753,7 @@ static void ring_unit_under_cursor_is_drawn_over_the_buttons(void)
     CHECK_EQ(ring_pixel(119, 170), RING_UNIT_COLOR);
     CHECK_EQ(ring_pixel(120, 150), RING_UNIT_COLOR);
     CHECK_EQ(_heapchk(), _HEAPOK);
-    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);    ring_unstage();
 }
 
 /* The same picture with the unit one tile to the left and six walk steps into
@@ -752,7 +776,231 @@ static void ring_no_unit_under_cursor_leaves_the_buttons_on_top(void)
     CHECK_EQ(ring_pixel(119, 170), RING_UNIT_COLOR);
     CHECK_EQ(ring_pixel(120, 150), RING_COLOR(RING_PLATE_HI));
     CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);    ring_unstage();
+}
+
+/* ------------------------------------------------------------------ */
+/* fdps_menu_animate_open @ 00016130                                   */
+/* ------------------------------------------------------------------ */
+
+/* The eight radii the sweep draws, read off the assembly: MOV [EBP-4],1 at
+   0001614a, CMP against 0x18 / JL at 00016151 and ADD 4 at 00016159 give
+   1, 5, 9, 0xd, 0x11, 0x15, and PUSH 0x18 at 0001617d and PUSH 0x19 at
+   00016193 give the two frames after the loop. */
+#define OPEN_LADDER_FRAMES 8
+#define OPEN_OVERSHOOT_RADIUS 0x19
+
+static int open_ladder[OPEN_LADDER_FRAMES] = {
+    1, 5, 9, 0xd, 0x11, 0x15, RING_RESTING_RADIUS, OPEN_OVERSHOOT_RADIUS
+};
+
+/* The screen a hand-run ladder leaves, kept apart from ring_screen so a case
+   can hold both pictures at once. */
+static unsigned char open_reference[RING_SCREEN_BYTES];
+
+/* The sound pack fdps_play_sfx looks the cue up in.  An image whose entry
+   count is zero makes the lookup miss without touching the name and without
+   allocating anything, so the cue is a silent miss and the frames are all that
+   is left to watch -- which is what the original does on a machine whose
+   effect pack does not hold the member (audio.h).  Whether the cue reaches the
+   mixer is fdps_play_sfx's own contract and is covered where it lives. */
+static struct fdps_vfs_image_header open_sfx_pack;
+
+static void open_stage(void)
+{
+    ring_stage();
+    memset(&open_sfx_pack, 0, sizeof(open_sfx_pack));
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = (unsigned char *) &open_sfx_pack;
+}
+
+/* ring_unstage plus the pack, for the same reason: fdps_shutdown_free_resources
+   frees data_fdps_audio_basewav_sfx_bank_buf_ptr unguarded, and the pack above
+   is a static. */
+static void open_unstage(void)
+{
+    ring_unstage();
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = NULL;
+}
+
+/* The same watch ring_run keeps, over the whole animation instead of one
+   frame.  The page is seeded once: the frames after the first are handed the
+   block the frame before them freed, contents and all, which is how the sweep
+   accumulates on the screen. */
+static void open_run(int *cmd_icons, int *cmd_disabled, int cursor_dir)
+{
+    ring_blocks_before = ring_used_heap_blocks();
+    ring_set_mode(RING_MODE_320X200X256);
+    memset((void *) RING_VGA_BASE, RING_BORDER_FILL,
+           (size_t) RING_SCREEN_BYTES);
+    ring_seed_page();
+    fdps_menu_animate_open(cmd_icons, cmd_disabled, cursor_dir);
+    memmove(ring_screen, (void *) RING_VGA_BASE, (size_t) RING_SCREEN_BYTES);
+    ring_set_mode(RING_MODE_TEXT);
+    ring_blocks_after = ring_used_heap_blocks();
+}
+
+/* The same run with the frames called out by hand, from the same seeded page
+   and the same filled screen, so the two pictures are comparable byte for
+   byte. */
+static void open_run_ladder(int *cmd_icons, int *cmd_disabled, int cursor_dir,
+                            int *radii, int frames)
+{
+    int frame;
+
+    ring_set_mode(RING_MODE_320X200X256);
+    memset((void *) RING_VGA_BASE, RING_BORDER_FILL,
+           (size_t) RING_SCREEN_BYTES);
+    ring_seed_page();
+    for (frame = 0; frame < frames; frame++) {
+        fdps_render_ring_menu_frame(cmd_icons, cmd_disabled, radii[frame],
+                                    cursor_dir);
+    }
+    memmove(open_reference, (void *) RING_VGA_BASE, (size_t) RING_SCREEN_BYTES);
+    ring_set_mode(RING_MODE_TEXT);
+}
+
+/* The whole sweep is those eight radii in that order and nothing else.  The
+   frames are not erased between one another -- each one composes on the page
+   the one before it freed -- so every frame that ran leaves something on the
+   screen and the finished picture names the whole ladder, not just its last
+   frame.  Byte-equal against the hand-run ladder is therefore the strongest
+   statement available here: an extra frame, a missing one, a different step or
+   a different starting radius all change the picture. */
+static void open_ladder_is_the_eight_frames(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+
+    open_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+    open_run(cmd_icons, cmd_disabled, 0);
+    open_run_ladder(cmd_icons, cmd_disabled, 0, open_ladder,
+                    OPEN_LADDER_FRAMES);
+
+    CHECK_EQ(memcmp(ring_screen, open_reference, (size_t) RING_SCREEN_BYTES),
+             0);
+    CHECK_EQ(_heapchk(), _HEAPOK);
     CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    open_unstage();
+}
+
+/* What the case above is worth depends on a shorter ladder being a different
+   picture, so both plausible shortenings are run and neither is allowed to
+   match: dropping the overshoot frame leaves the buttons on the resting ring,
+   and dropping the six loop frames leaves the spiral trail off the page. */
+static void open_ladder_has_teeth(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+
+    open_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+    open_run(cmd_icons, cmd_disabled, 0);
+
+    open_run_ladder(cmd_icons, cmd_disabled, 0, open_ladder,
+                    OPEN_LADDER_FRAMES - 1);
+    CHECK_EQ(memcmp(ring_screen, open_reference,
+                    (size_t) RING_SCREEN_BYTES) != 0, 1);
+
+    open_run_ladder(cmd_icons, cmd_disabled, 0,
+                    open_ladder + OPEN_LADDER_FRAMES - 2, 2);
+    CHECK_EQ(memcmp(ring_screen, open_reference,
+                    (size_t) RING_SCREEN_BYTES) != 0, 1);
+    open_unstage();
+}
+
+/* The animation stops a pixel past where the menu rests.  At radius 0x19 the
+   legs are -1 and 24, so the up slot's origin is page (145,96) and its cell is
+   screen rows 100..121, columns 149..173 -- one row up and one column right of
+   the resting cell the frame before it drew at page (144,97).  Both are
+   readable at once because the last frame does not erase the one before it:
+   column 148 still carries the resting frame's own top row, and row 122 still
+   carries the bottom of its plate.
+
+   Row 99 is the seed because 24 is the largest leg any of the eight frames
+   produces.  A sweep that ended on the resting radius would leave row 100 seed
+   as well and put the icon on column 148 at row 101 with nothing to its
+   right. */
+static void open_last_frame_overshoots_the_resting_ring(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+
+    open_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+    open_run(cmd_icons, cmd_disabled, 0);
+
+    CHECK_EQ(ring_pixel(99, 149), RING_PAGE_SEED);
+    CHECK_EQ(ring_pixel(100, 149), RING_COLOR(RING_ICON_UP));
+    CHECK_EQ(ring_pixel(101, 149), RING_COLOR(RING_PLATE_HI));
+    CHECK_EQ(ring_pixel(101, 148), RING_COLOR(RING_ICON_UP));
+    CHECK_EQ(ring_pixel(122, 148), RING_COLOR(RING_PLATE_HI));
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    open_unstage();
+}
+
+/* Two of the loop's own frames, still on the screen when the sweep is over.
+   At radius 0x11 the legs are 7 and 15 and the up slot's cell starts at screen
+   (109,141); at radius 0x15 they are 4 and 20 and it starts at (104,144).
+   Neither cell is reached by any later frame, so both survive, and the icon on
+   the cell's first row with the plate on the row under it is what says a whole
+   frame was drawn there rather than a stray column.
+
+   These are the two radii the loop's step decides: 1 + 4 * 4 and 1 + 5 * 4.  A
+   step of 3 or 5, or a first radius of 0, puts the intermediate cells
+   somewhere else entirely and neither pixel is the icon any more. */
+static void open_loop_frames_stay_on_the_page(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+
+    open_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+    open_run(cmd_icons, cmd_disabled, 0);
+
+    CHECK_EQ(ring_pixel(109, 141), RING_COLOR(RING_ICON_UP));
+    CHECK_EQ(ring_pixel(110, 141), RING_COLOR(RING_PLATE_HI));
+    CHECK_EQ(ring_pixel(104, 144), RING_COLOR(RING_ICON_UP));
+    CHECK_EQ(ring_pixel(105, 144), RING_COLOR(RING_PLATE_HI));
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    open_unstage();
+}
+
+/* All three arguments reach every frame exactly as they came in.  cursor_dir 2
+   lights the right slot of the last frame -- cell at screen (125,172) -- and
+   leaves the up slot on the plain plate; the greyed-out fourth entry banks its
+   icon by 0x24 and bumps its plate by one in the last frame's down cell at
+   (148,147); and the two descriptor arrays are unchanged afterwards, which is
+   what lets fdps_battle_item_menu reuse its copy for the cursor loop that
+   follows this call. */
+static void open_forwards_its_arguments(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+
+    open_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+    cmd_disabled[3] = 1;
+    open_run(cmd_icons, cmd_disabled, 2);
+
+    CHECK_EQ(ring_pixel(125, 172), RING_COLOR(RING_ICON_RIGHT));
+    CHECK_EQ(ring_pixel(126, 172), RING_COLOR(RING_PLATE_HI));
+    CHECK_EQ(ring_pixel(101, 149), RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(ring_pixel(148, 147), RING_COLOR(RING_ICON_DOWN + RING_ICON_BANK));
+    CHECK_EQ(ring_pixel(149, 147), RING_COLOR(RING_PLATE_PLAIN_OFF));
+    CHECK_EQ(cmd_icons[0], RING_ICON_UP);
+    CHECK_EQ(cmd_icons[1], RING_ICON_LEFT);
+    CHECK_EQ(cmd_icons[2], RING_ICON_RIGHT);
+    CHECK_EQ(cmd_icons[3], RING_ICON_DOWN);
+    CHECK_EQ(cmd_disabled[0], 0);
+    CHECK_EQ(cmd_disabled[1], 0);
+    CHECK_EQ(cmd_disabled[2], 0);
+    CHECK_EQ(cmd_disabled[3], 1);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    open_unstage();
 }
 
 void run_menu_tests(void)
@@ -776,5 +1024,9 @@ void run_menu_tests(void)
     RUN_TEST(ring_camera_scroll_is_subtracted);
     RUN_TEST(ring_slot_origin_test_is_not_a_clip);
     RUN_TEST(ring_unit_under_cursor_is_drawn_over_the_buttons);
-    RUN_TEST(ring_no_unit_under_cursor_leaves_the_buttons_on_top);
+    RUN_TEST(ring_no_unit_under_cursor_leaves_the_buttons_on_top);    RUN_TEST(open_ladder_is_the_eight_frames);
+    RUN_TEST(open_ladder_has_teeth);
+    RUN_TEST(open_last_frame_overshoots_the_resting_ring);
+    RUN_TEST(open_loop_frames_stay_on_the_page);
+    RUN_TEST(open_forwards_its_arguments);
 }
