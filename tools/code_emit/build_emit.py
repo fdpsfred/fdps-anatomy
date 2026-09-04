@@ -61,6 +61,15 @@ OBJ_STB = OUT / "objz"
 GUEST_LIB = WORK / "lib"
 RUN = WORK / "run"
 
+# How much memory the guest that RUNS the tests gets, in megabytes.  The
+# toolchain's own guest keeps build_min.py's default of 32, which is what the
+# DOS-hosted Watcom is known to work in; this one needs more because the test
+# suite reads whole shipped containers into memory -- tests/anim.c takes all
+# 27.4 MB of MISC.VFS -- and at 32 the whole executable plus that block sat so
+# close to the ceiling that any growth of EMITTEST.EXE at all faulted DOS/4GW
+# partway through the run.
+RUN_MEMSIZE_MB = 64
+
 EXE = "EMITTEST.EXE"
 LNK = "EMITTEST.LNK"
 # The second link, the one that carries the generated stub module.
@@ -653,6 +662,7 @@ def do_run(dosbox, watcom, disc, timeout, quiet=False):
          "%s:" % DRV_SRC,
          EXE],
         logfile=RUN / "dosbox.log",
+        memsize=RUN_MEMSIZE_MB,
     )
 
     if not quiet:

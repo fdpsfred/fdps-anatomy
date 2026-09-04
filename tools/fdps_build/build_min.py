@@ -149,15 +149,20 @@ def preflight(watcom, disc, need_disc):
 
 # ------------------------------------------------------------- guest driving
 
-def write_conf(path, mounts, disc, lines, logfile):
+def write_conf(path, mounts, disc, lines, logfile, memsize=32):
     """A DOSBox-X conf whose autoexec mounts, sets up Watcom, then runs lines.
 
     logfile is not optional: without it DOSBox-X prints a few init lines to
     stdout and then says "No logfile was given. All further logging will be
     discarded" -- so a fault scan over captured stdout would silently have
     nothing to find and pass everything.
+
+    memsize is how many megabytes the guest gets.  32 is what the Watcom
+    toolchain is driven with and is the default; a guest that only has to RUN a
+    program can ask for more, and a caller whose program reads a large resource
+    file into memory has to (see tools/code_emit/build_emit.py).
     """
-    body = ["[dosbox]", "memsize=32",
+    body = ["[dosbox]", "memsize=%d" % memsize,
             "[sdl]", "output=surface", "autolock=false",
             "[cpu]", "core=auto", "cputype=pentium_mmx", "cycles=max",
             "[log]", "logfile=%s" % logfile,
