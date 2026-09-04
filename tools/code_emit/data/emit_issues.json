@@ -1681,5 +1681,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "000170c0": [
+    {
+      "what": "The drawing pass -- everything from fdps_cycle_ui_palette to the store of the tick, which is about nine tenths of the function -- has no unit-test coverage at all. It cannot be reached from a test that terminates. The loop draws only when data_fdps_timer_tick_counter differs from data_fdps_unit_status_window_last_tick, and the pass ends by making them equal; nothing in the test binary advances that counter, because it is written by the game's timer interrupt handler and no test installs one. So a call can be made to draw at most one frame and can then never return: fdps_read_scancode_auto_repeat answers 0xff on every poll after the first while the tick stands still (its 'same key, same tick' path, src/keybd.c lines 71-76), and 0xff keeps the loop running. Driving one frame would also need data_fdps_cel_sprite_cache_ptr and data_fdps_shadow_sprite_sheet_ptr to hold real sheets rather than the zero-filled stubs, since the code dereferences both without a null test. What IS pinned is the pass that ends the wait: which codes get out, that the poll is tested before the tick, that nothing is drawn or allocated on that path, and that allow_idle_animation is worth exactly one draw of rand or none. What is pinned WITHOUT a test is the rest: the emitted STATWIN.OBJ was disassembled with WDISASM and compared against 000170c0-00017524 instruction by instruction, by the emitter and independently by the reviewer, so the frame body's geometry, its five idle arms and their blit modes agree with the original's own code even though nothing executes them.",
+      "needs": "Ticket 23's real definitions for data_fdps_cel_sprite_cache_ptr and data_fdps_shadow_sprite_sheet_ptr, plus a way to make the tick advance during the call -- either the game's own timer ISR installed by the test, or a playtest. Until then the frame's geometry (the 0x21d8 scene window, the 0xd21 cell position, the 0x123x0xc8 window blit, the five idle phases and their two blit modes) is settled from the assembly and from the agreement between the original's listing and the object file this emit produced, but nothing exercises it at run time.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed independently and added the object-file half of the evidence. I reached the same conclusion from the other side: to drive one drawing pass and then return, the reader would have to answer above 0x7f on one poll and at or below it on the next, and the only thing it can report is the latch byte, which no test can change while the call is inside its own loop. The first latch value above 0x7f that would get a frame drawn also walks straight into the two stubbed pointers -- sprite_stream is computed as data_fdps_cel_sprite_cache_ptr + *(int *)(NULL + ...) and data_fdps_shadow_sprite_sheet_ptr goes into fdps_cel_blit_sprite untested -- so the pass is genuinely unreachable until ticket 23, not merely awkward. What I add to the emitter's entry is a second, independent WDISASM comparison of STATWIN.OBJ against 000170c0-00017524: I read the emitted arms myself and they carry the same +0cH/+18H/+24H displacements, the same 0xd521 standing position, the same 0xa1 column and the same 8/8/0/0/0 blit modes as the original, so the untested nine tenths of the function is pinned by two people reading the object rather than one.",
+      "needs": "Ticket 23's real definitions for data_fdps_cel_sprite_cache_ptr and data_fdps_shadow_sprite_sheet_ptr, plus something that advances data_fdps_timer_tick_counter during the call -- the game's own timer ISR installed by the test, or a playtest.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

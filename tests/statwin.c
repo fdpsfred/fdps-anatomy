@@ -52,6 +52,20 @@
  * thing this function contributes to the picture: whether the RLE is decoded
  * correctly is tests/rle.c's question, not this file's.
  *
+ * THE THIRD FUNCTION, fdps_unit_status_window_wait_input, IS COVERED ONLY
+ * ON THE PASS THAT ENDS THE WAIT.  Its loop polls the keyboard and draws a
+ * frame whenever the timer tick has moved; nothing in the test binary moves
+ * that tick, because the counter is written by the game's timer interrupt
+ * handler and no test installs it.  So a call that is made to draw one frame
+ * cannot then be made to return: the auto-repeat reader answers 0xff for
+ * every poll after the first while the tick stands still, and the loop spins.
+ * The cases below therefore drive the reader to hand back an accepted code on
+ * the first poll and pin what that pass does -- which code ends the wait, that
+ * the poll is tested before the tick, that nothing is drawn or allocated, and
+ * that the idle flag draws exactly one rand or none.  Everything the drawing
+ * pass does is a playtest contract until the sprite cache and the shadow sheet
+ * hold real sheets and a timer is running.
+ *
  * THE COMPARISON HAS TO BE MASKED.  Mode 0's skip op leaves pixels untouched,
  * the destination is malloc'd rather than cleared, and STATUS.CEL skips 1,212
  * of its 64,000 -- so those positions hold uninitialised bytes and comparing
@@ -66,6 +80,8 @@
 #include "testharn.h"
 #include "fdpstype.h"
 #include "blit.h"
+#include "gamedata.h"
+#include "keybd.h"
 #include "statwin.h"
 #include "vfs.h"
 
@@ -522,6 +538,150 @@ static void the_call_frees_both_temporaries(void)
     CHECK_EQ(_heapchk(), _HEAPOK);
 }
 
+
+/* The seed the two rand cases below run from.  Any seed does, as long as its
+   first two draws differ, which the last assertion of that case checks. */
+#define RAND_SEED 7
+
+/* Scancodes the wait loop is driven with.  0x1c is Enter, one of the codes
+   fdps_unit_item_select_loop acts on (the battle window discards the result
+   and closes on any accepted code); 0x7f is the last code the loop will hand
+   back at all (CMP ...,0x7f / JLE at 00017117 is <=, so 0x7f ends the wait
+   and 0x80 would not). */
+#define SCANCODE_ENTER 0x1c
+#define SCANCODE_LAST_ACCEPTED 0x7f
+
+/* Puts the auto-repeat reader in the state where its very next poll reports
+   `code` unchanged: the latch holds the code and the repeat filter remembers
+   a different one, which is that reader's "a key went down" path
+   (src/keybd.h).  0x100 is not a byte, so it is different from every latch
+   value including 0xff. */
+static void arm_next_scancode(unsigned int code)
+{
+    data_fdps_input_last_scancode = (unsigned char) code;
+    data_fdps_input_key_repeat_prev_scancode = 0x100;
+    data_fdps_input_key_repeat_counter = 0;
+}
+
+/* Which codes end the wait.  The loop keeps running while the poll answers
+   above 0x7f and returns the first answer at or below it, unchanged and
+   without sign-extending -- 0x7f is the largest value that gets out, and the
+   test that lets it out is signed (JLE), so the code is carried in an int.
+
+   0x1c is an ordinary accepted code -- one of the six fdps_unit_item_select_loop
+   discriminates on, though the assertion does not depend on that -- 0x7f is the
+   boundary the JLE puts inside the accepted range, and 0 is the other end. */
+static void a_code_at_or_below_7f_ends_the_wait(void)
+{
+    int enter;
+    int boundary;
+    int zero;
+
+    arm_next_scancode(SCANCODE_ENTER);
+    enter = fdps_unit_status_window_wait_input(window, 0, 0);
+    arm_next_scancode(SCANCODE_LAST_ACCEPTED);
+    boundary = fdps_unit_status_window_wait_input(window, 0, 0);
+    arm_next_scancode(0);
+    zero = fdps_unit_status_window_wait_input(window, 0, 0);
+
+    CHECK_EQ(enter, SCANCODE_ENTER);
+    CHECK_EQ(boundary, SCANCODE_LAST_ACCEPTED);
+    CHECK_EQ(zero, 0);
+}
+
+/* The poll is tested before the tick, and a pass that ends the wait draws
+   nothing at all.  The last-drawn tick is set here to a value the timer
+   counter does not hold, which is exactly the condition a drawing pass needs
+   -- so if the tick comparison came first, or if the accepted code were
+   allowed to fall through it, this call would compose and present a frame and
+   leave its own tick behind.  It does neither: the last-drawn tick is
+   untouched and the window image still holds the pixel the staging put in the
+   unit's cell at row 10, column 161.
+
+   Both are checked because they fail apart.  A frame drawn for the wrong
+   reason writes the cell; a tick recorded without a frame writes only the
+   tick. */
+static void an_accepted_code_draws_no_frame(void)
+{
+    int premise;
+    int code;
+    int cell_pixel;
+    int tick_after;
+
+    data_fdps_unit_status_window_last_tick = 0x5a5a;
+    premise = ((int) data_fdps_timer_tick_counter
+               != data_fdps_unit_status_window_last_tick);
+    cell_pixel = (int) window[10 * VGA_SCREEN_PITCH + 161];
+
+    arm_next_scancode(SCANCODE_ENTER);
+    code = fdps_unit_status_window_wait_input(window, 0, 1);
+    tick_after = data_fdps_unit_status_window_last_tick;
+
+    CHECK_EQ(premise, 1);
+    CHECK_EQ(code, SCANCODE_ENTER);
+    CHECK_EQ(tick_after, 0x5a5a);
+    CHECK_EQ((int) window[10 * VGA_SCREEN_PITCH + 161], cell_pixel);
+    CHECK_EQ((int) window[10 * VGA_SCREEN_PITCH + 161],
+             win_pixel(10, 161));
+}
+
+/* allow_idle_animation is read before the loop and it decides whether rand is
+   called at all: CMP byte ptr [EBP+0x1c],0x0 / JZ at 000170e9 jumps past the
+   CALL at 000170ef.  So the flag is observable even on a pass that draws
+   nothing -- it moves the CRT's random state by exactly one draw or by none.
+
+   That is the whole of what a caller can see of the arming from outside: the
+   frame counter it sets is a local, and the animation it starts is drawn only
+   on a pass that this test cannot reach.  Consuming two draws, or consuming
+   one with the flag clear, would show up here and in nothing else. */
+static void the_idle_flag_decides_whether_rand_is_drawn(void)
+{
+    int first;
+    int second;
+    int after_flag_clear;
+    int after_flag_set;
+
+    srand(RAND_SEED);
+    first = rand();
+    second = rand();
+
+    srand(RAND_SEED);
+    arm_next_scancode(SCANCODE_ENTER);
+    fdps_unit_status_window_wait_input(window, 0, 0);
+    after_flag_clear = rand();
+
+    srand(RAND_SEED);
+    arm_next_scancode(SCANCODE_ENTER);
+    fdps_unit_status_window_wait_input(window, 0, 1);
+    after_flag_set = rand();
+
+    CHECK_EQ(first != second, 1);
+    CHECK_EQ(after_flag_clear, first);
+    CHECK_EQ(after_flag_set, second);
+}
+
+/* A pass that ends the wait takes no heap.  All three of the loop's
+   allocations are inside the drawing branch and all three are freed before
+   that branch ends, so a wait that returns on its first poll must leave the
+   heap exactly as it found it.  The first call is a warm-up, so that anything
+   the CRT allocates once is already accounted for. */
+static void an_accepted_code_takes_no_heap(void)
+{
+    int before;
+    int after;
+
+    arm_next_scancode(SCANCODE_ENTER);
+    fdps_unit_status_window_wait_input(window, 0, 1);
+
+    before = used_heap_blocks();
+    arm_next_scancode(SCANCODE_ENTER);
+    fdps_unit_status_window_wait_input(window, 0, 1);
+    after = used_heap_blocks();
+
+    CHECK_EQ(after, before);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+}
+
 void run_statwin_tests(void)
 {
     stage_images();
@@ -533,6 +693,10 @@ void run_statwin_tests(void)
     RUN_TEST(status_cel_is_the_sheet_the_pushed_geometry_assumes);
     RUN_TEST(loaded_image_is_status_cel_decoded_whole);
     RUN_TEST(the_call_frees_both_temporaries);
+    RUN_TEST(a_code_at_or_below_7f_ends_the_wait);
+    RUN_TEST(an_accepted_code_draws_no_frame);
+    RUN_TEST(the_idle_flag_decides_whether_rand_is_drawn);
+    RUN_TEST(an_accepted_code_takes_no_heap);
 
     free(sheet);
     sheet = NULL;

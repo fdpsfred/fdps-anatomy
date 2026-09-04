@@ -2316,6 +2316,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x75"
+    },
+    "000170c0": {
+      "name": "fdps_unit_status_window_wait_input",
+      "target": "statwin.c",
+      "body_size": "0x465",
+      "status": "committed",
+      "emitted_against": "0x465",
+      "rounds": 1
     }
   }
 }
