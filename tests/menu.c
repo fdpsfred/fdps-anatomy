@@ -1003,6 +1003,167 @@ static void open_forwards_its_arguments(void)
     open_unstage();
 }
 
+/* ------------------------------------------------------------------ */
+/* fdps_menu_animate_close @ 000161b0                                  */
+/* ------------------------------------------------------------------ */
+
+/* The six radii the retraction draws, read off the assembly: MOV [EBP-4],0x17
+   at 000161ca, CMP against 0 / JG at 000161d1 and ADD -4 at 000161d9.  There is
+   no frame after the loop, unlike the opening sweep. */
+#define CLOSE_LADDER_FRAMES 6
+
+static int close_ladder[CLOSE_LADDER_FRAMES] = {
+    0x17, 0x13, 0xf, 0xb, 7, 3
+};
+
+/* The same watch open_run keeps, over the retraction instead of the sweep. */
+static void close_run(int *cmd_icons, int *cmd_disabled, int cursor_dir)
+{
+    ring_blocks_before = ring_used_heap_blocks();
+    ring_set_mode(RING_MODE_320X200X256);
+    memset((void *) RING_VGA_BASE, RING_BORDER_FILL,
+           (size_t) RING_SCREEN_BYTES);
+    ring_seed_page();
+    fdps_menu_animate_close(cmd_icons, cmd_disabled, cursor_dir);
+    memmove(ring_screen, (void *) RING_VGA_BASE, (size_t) RING_SCREEN_BYTES);
+    ring_set_mode(RING_MODE_TEXT);
+    ring_blocks_after = ring_used_heap_blocks();
+}
+
+/* The whole retraction is those six radii in that order and nothing else.  The
+   frames accumulate on the page for the same reason the opening sweep's do, so
+   the finished picture names the whole ladder and byte-equal against the
+   hand-run one is the strongest statement available: a seventh frame, a missing
+   one, a different step or a different starting radius all change it. */
+static void close_ladder_is_the_six_frames(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+
+    open_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+    close_run(cmd_icons, cmd_disabled, 0);
+    open_run_ladder(cmd_icons, cmd_disabled, 0, close_ladder,
+                    CLOSE_LADDER_FRAMES);
+
+    CHECK_EQ(memcmp(ring_screen, open_reference, (size_t) RING_SCREEN_BYTES),
+             0);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    open_unstage();
+}
+
+/* What the case above is worth depends on a shorter ladder being a different
+   picture, so both ends are cut and neither is allowed to match: dropping the
+   last frame leaves the buttons three pixels further out, and dropping the
+   first leaves the outermost cell unpainted. */
+static void close_ladder_has_teeth(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+
+    open_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+    close_run(cmd_icons, cmd_disabled, 0);
+
+    open_run_ladder(cmd_icons, cmd_disabled, 0, close_ladder,
+                    CLOSE_LADDER_FRAMES - 1);
+    CHECK_EQ(memcmp(ring_screen, open_reference,
+                    (size_t) RING_SCREEN_BYTES) != 0, 1);
+
+    open_run_ladder(cmd_icons, cmd_disabled, 0, close_ladder + 1,
+                    CLOSE_LADDER_FRAMES - 1);
+    CHECK_EQ(memcmp(ring_screen, open_reference,
+                    (size_t) RING_SCREEN_BYTES) != 0, 1);
+    open_unstage();
+}
+
+/* The retraction starts one pixel in from where the menu was resting.  At
+   radius 0x17 the legs are 1 and 22, so the up slot's origin is page (143,98)
+   and its cell is screen rows 102..123, columns 147..171 -- the outermost cell
+   of the whole animation, which nothing drawn afterwards reaches.
+
+   SCREEN (101,148) BEING THE SEED IS THE POINT.  That is where the resting
+   frame puts the up icon, and a ladder that began at 0x18 rather than 0x17
+   would paint it. */
+static void close_first_frame_is_inside_the_resting_ring(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+
+    open_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+    close_run(cmd_icons, cmd_disabled, 0);
+
+    CHECK_EQ(ring_pixel(101, 148), RING_PAGE_SEED);
+    CHECK_EQ(ring_pixel(101, 147), RING_PAGE_SEED);
+    CHECK_EQ(ring_pixel(102, 147), RING_COLOR(RING_ICON_UP));
+    CHECK_EQ(ring_pixel(103, 147), RING_COLOR(RING_PLATE_HI));
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    open_unstage();
+}
+
+/* The last frame is radius 3 and the buttons are still standing when the
+   function returns.  At radius 3 the legs are 2 and 0, so the up slot's origin
+   is page (142,120) and its cell begins at screen (124,146).
+
+   SCREEN (124,148) IS WHAT SAYS NO RADIUS-0 FRAME WAS DRAWN.  It comes back the
+   right slot's plain plate here, because at radius 3 the right slot's cell
+   covers it and nothing later does; a seventh frame at radius 0 would stack all
+   four slots on the cursor itself and leave the down slot's icon there. */
+static void close_stops_three_pixels_out(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+
+    open_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+    close_run(cmd_icons, cmd_disabled, 0);
+
+    CHECK_EQ(ring_pixel(124, 146), RING_COLOR(RING_ICON_UP));
+    CHECK_EQ(ring_pixel(125, 146), RING_COLOR(RING_PLATE_HI));
+    CHECK_EQ(ring_pixel(124, 148), RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    open_unstage();
+}
+
+/* All three arguments reach every frame exactly as they came in.  cursor_dir 2
+   keeps the right slot highlighted all the way in -- its last cell is at screen
+   (122,148) -- and leaves the up slot on the plain plate; the greyed-out fourth
+   entry banks its icon by 0x24 and bumps its plate by one in the last frame's
+   down cell at (124,150); and neither descriptor array is written back, which
+   is what lets fdps_battle_action_menu read its own copy again after the menu
+   has closed. */
+static void close_forwards_its_arguments(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+
+    open_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+    cmd_disabled[3] = 1;
+    close_run(cmd_icons, cmd_disabled, 2);
+
+    CHECK_EQ(ring_pixel(122, 148), RING_COLOR(RING_ICON_RIGHT));
+    CHECK_EQ(ring_pixel(123, 148), RING_COLOR(RING_PLATE_HI));
+    CHECK_EQ(ring_pixel(124, 150), RING_COLOR(RING_ICON_DOWN + RING_ICON_BANK));
+    CHECK_EQ(ring_pixel(125, 150), RING_COLOR(RING_PLATE_PLAIN_OFF));
+    CHECK_EQ(ring_pixel(125, 146), RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(cmd_icons[0], RING_ICON_UP);
+    CHECK_EQ(cmd_icons[1], RING_ICON_LEFT);
+    CHECK_EQ(cmd_icons[2], RING_ICON_RIGHT);
+    CHECK_EQ(cmd_icons[3], RING_ICON_DOWN);
+    CHECK_EQ(cmd_disabled[0], 0);
+    CHECK_EQ(cmd_disabled[1], 0);
+    CHECK_EQ(cmd_disabled[2], 0);
+    CHECK_EQ(cmd_disabled[3], 1);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    open_unstage();
+}
+
 void run_menu_tests(void)
 {
     RUN_TEST(menu_first_entry_wins);
@@ -1029,4 +1190,9 @@ void run_menu_tests(void)
     RUN_TEST(open_last_frame_overshoots_the_resting_ring);
     RUN_TEST(open_loop_frames_stay_on_the_page);
     RUN_TEST(open_forwards_its_arguments);
+    RUN_TEST(close_ladder_is_the_six_frames);
+    RUN_TEST(close_ladder_has_teeth);
+    RUN_TEST(close_first_frame_is_inside_the_resting_ring);
+    RUN_TEST(close_stops_three_pixels_out);
+    RUN_TEST(close_forwards_its_arguments);
 }

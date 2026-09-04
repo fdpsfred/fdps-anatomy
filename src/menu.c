@@ -363,3 +363,61 @@ void fdps_menu_animate_open(int *cmd_icons, int *cmd_disabled, int cursor_dir)
     fdps_render_ring_menu_frame(cmd_icons, cmd_disabled,
                                 RING_OPEN_OVERSHOOT_RADIUS, cursor_dir);
 }
+
+/* The retraction's radius ladder, MOV dword ptr [EBP-0x4],0x17 at 000161ca,
+   CMP against 0 / JG at 000161d1 and ADD -0x4 at 000161d9: six frames at 0x17,
+   0x13, 0xf, 0xb, 7 and 3.
+
+   The original's step instruction is ADD -0x4 and this file's is SUB 0x4.  That
+   is not a spelling that can be chosen back: wcc386 10.0a here normalises both
+   "radius -= 4" and "radius += -4" into the same SUB, measured on the object
+   this file compiles to.  It is the same class of difference as the argument
+   loads, where the original does MOV EAX / PUSH EAX and this build pushes the
+   slot directly, in fdps_menu_animate_open as well as here.
+
+   IT STARTS AT 0x17 AND NOT AT THE RESTING 0x18.  The first frame of the
+   retraction is already a pixel in from where the menu was sitting, so the ring
+   never redraws the resting radius on its way out.
+
+   IT STOPS AT 3 AND DRAWS NOTHING AT RADIUS 0.  The test is the signed JG
+   against zero, so 3 - 4 = -1 ends the loop and the four buttons are left
+   standing three pixels off the cursor.  Writing the guard as "not equal to
+   zero" never terminates, and stepping down to and including 0 draws a seventh
+   frame with all four buttons stacked on the cursor itself. */
+#define RING_CLOSE_FIRST_RADIUS 0x17
+#define RING_CLOSE_RADIUS_STEP 4
+
+/* 000161b0.  The closing animation of the four-command ring menu.  See menu.h
+   for the arguments and for what is left on the screen afterwards.
+
+   The cue is the same "OpWin.wav" the opening sweep plays, and it is the same
+   copy: both functions push the one literal the original keeps at 0x61584, so
+   the in-place upper-casing fdps_play_sfx does to the caller's storage (vfs.h)
+   happens once and both spellings are "OPWIN.WAV" from the first menu of the
+   run onward.  Its result is dropped, exactly as in the opening sweep.
+
+   The three descriptors are forwarded untouched: all four call sites reload
+   them out of the parameter slots ([EBP+0x14], [EBP+0x18] and [EBP+0x1c]) for
+   every frame and nothing here indexes them, so this function never looks
+   inside either array.
+
+   NOTHING ERASES THE BUTTONS HERE.  The last frame is drawn at radius 3 and the
+   function returns with it on the screen; what clears it is the caller's next
+   repaint, and fdps_options_menu has no repaint of its own and leaves the
+   stale buttons up until the next fdps_menu_animate_open recomposites the view.
+
+   fdps_battle_system_menu does not call this function -- it carries the same
+   six-frame ladder inline at 00014b17, without the cue -- so the top-level
+   battle menu closes silently while these four close with the window sound. */
+void fdps_menu_animate_close(int *cmd_icons, int *cmd_disabled, int cursor_dir)
+{
+    /* The ring's radius this frame, and with it the angle of the retraction. */
+    int radius;
+
+    fdps_play_sfx(RING_OPEN_SOUND);
+    for (radius = RING_CLOSE_FIRST_RADIUS; radius > 0;
+         radius -= RING_CLOSE_RADIUS_STEP) {
+        fdps_render_ring_menu_frame(cmd_icons, cmd_disabled, radius,
+                                    cursor_dir);
+    }
+}

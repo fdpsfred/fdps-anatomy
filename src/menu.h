@@ -61,4 +61,23 @@ extern void fdps_menu_animate_open(int *cmd_icons, int *cmd_disabled,
                                    int cursor_dir);
 #pragma aux fdps_menu_animate_open "*" parm caller [];
 
+/* Plays the ring menu's closing retraction: the same window cue once, then six
+   frames of fdps_render_ring_menu_frame at radii 0x17, 0x13, 0xf, 0xb, 7 and 3.
+   Returns nothing, and hands cmd_icons, cmd_disabled and cursor_dir to every
+   frame exactly as they came in; cursor_dir is the entry the player was last
+   on, so that entry stays highlighted all the way in.
+
+   THE RETRACTION NEITHER REACHES THE CURSOR NOR ERASES THE BUTTONS.  The last
+   frame is drawn at radius 3, three pixels out, and the function returns with
+   the four buttons still on the adapter.  Which caller clears them and when is
+   the caller's business: fdps_battle_system_submenu, fdps_battle_action_menu
+   and fdps_battle_item_menu repaint the view on the next instruction, and
+   fdps_options_menu leaves them standing until the menu is opened again.
+
+   It draws straight to the adapter, exactly as the frame it calls does, and it
+   presents nothing afterwards. */
+extern void fdps_menu_animate_close(int *cmd_icons, int *cmd_disabled,
+                                    int cursor_dir);
+#pragma aux fdps_menu_animate_close "*" parm caller [];
+
 #endif
