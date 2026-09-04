@@ -80,4 +80,38 @@ extern void fdps_menu_animate_close(int *cmd_icons, int *cmd_disabled,
                                     int cursor_dir);
 #pragma aux fdps_menu_animate_close "*" parm caller [];
 
+/* Runs the ring menu until the player chooses: -1 when the menu was cancelled
+   with Escape or keypad Del, 1 when it was confirmed with Enter or Space.  It
+   never answers 0 -- that is the value it loops on.
+
+   cmd_icons and cmd_disabled are the same two four-int arrays the frame and
+   the two animations take, in slot order up, left, right, down; see the notes
+   on fdps_render_ring_menu_frame above.  cmd_icons is only forwarded to the
+   repaint, and neither array is written.
+
+   cursor_dir is IN AND OUT: it comes in holding the slot the menu opens on and
+   goes out holding the slot the player finished on, which is the entry the
+   caller must act on when the answer is 1.  It is written on every accepted
+   arrow key, so it has already moved even when the answer is -1.
+
+   IT IS A FRAME LOOP AND IT NEVER BLOCKS.  One pass reads one scancode out of
+   the ring (keybd.h) -- 0xff and all -- then cycles the scene and UI palettes
+   and repaints the ring at the resting radius 0x18, so the picture is redrawn
+   and the palettes advanced on every vertical retrace whether or not a key was
+   pending.  The pass that chooses the answer repaints as well before this
+   returns.  A caller cannot therefore treat the screen as untouched across
+   this call, and must not expect the queue to be drained: exactly one code is
+   consumed per frame, so a burst arrives one frame at a time.
+
+   AN ARROW INTO A GREYED-OUT ENTRY DOES NOTHING AT ALL.  A non-zero
+   cmd_disabled[slot] leaves cursor_dir where it was rather than skipping to
+   the next selectable entry, so a menu with three entries greyed out cannot be
+   moved off the fourth.  Nothing validates the incoming cursor_dir either.
+
+   The only keys it knows are those eight.  Every other code, the empty-queue
+   marker included, falls through the chain and costs one frame. */
+extern int fdps_menu_cursor_input_loop(int *cmd_icons, int *cmd_disabled,
+                                       int *cursor_dir);
+#pragma aux fdps_menu_cursor_input_loop "*" parm caller [];
+
 #endif

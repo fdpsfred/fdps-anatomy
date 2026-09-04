@@ -1638,12 +1638,12 @@ Rebuild note:
   system menu closes silently while the four menus that do call this one close with the window cue.
 
 === 00016200 [PLATE]
-Modal four-way menu cursor input loop: reads one keyboard scan code per iteration, maps Esc/0x53 to cancel (-1) and Enter/Space to confirm (1), moves *cursor_dir to 0 up / 1 left / 2 right / 3 down when the matching dir_blocked entry is zero, then cycles the scene palette and repaints the cursor via 0x00015860(ctx, dir_blocked, 0x18, *cursor_dir) until a result is chosen.
+Modal four-way menu cursor input loop: reads one keyboard scan code per iteration, maps Esc/0x53 to cancel (-1) and Enter/Space to confirm (1), moves *cursor_dir to 0 up / 1 left / 2 right / 3 down when the matching cmd_disabled entry is zero, then calls fdps_cycle_scene_palette and fdps_cycle_ui_palette and repaints the cursor via 0x00015860(cmd_icons, cmd_disabled, 0x18, *cursor_dir) until a result is chosen.
 Pool: fdps  [no library match; sits inside the game call graph]
 Evidence: Zero Function ID candidates against the Watcom libraries and against ailv3.lib (same_hash_in_image 1). All five callers are named fdps menu/battle functions and one callee is fdps_cycle_scene_palette, so a third-party library object cannot be the source. The body is PC/XT scancode UI logic over caller-supplied out-pointers, with no CRT or maths idiom, no AIL state area and no debug format string; at 253 bytes with a frame and a loop it is not a linker island or convention shim.
 Name: no library symbol identified; fdps_ + snake_case describing the loop's job.
 Boundary: 00016200-000162fc, canonical Watcom prologue 53 56 57 55 89 e5 through the matching 89 ec 5d 5f 5e 5b c3 epilogue; the 3 bytes after it are 8d 40 00 alignment padding before the aligned next function at 00016300.
-Signature: __cdecl, int (void * ctx, int * dir_blocked, int * cursor_dir) — the three arguments are read from [EBP+0x14/0x18/0x1c], the result is returned in EAX and the plain RET leaves cleanup to the caller. dir_blocked points at four ints indexed by direction; a non-zero entry suppresses movement that way, so the cursor keeps its previous value. Confirmed by the assembly, not a guess.
+Signature: __cdecl, int (int * cmd_icons, int * cmd_disabled, int * cursor_dir) — the three arguments are read from [EBP+0x14/0x18/0x1c], the result is returned in EAX and the plain RET leaves cleanup to the caller. cmd_disabled points at four ints indexed by direction; a non-zero entry suppresses movement that way, so the cursor keeps its previous value. Confirmed by the assembly, not a guess.
 
 === 000162fd [EOL]
 3-byte alignment padding (lea eax,[eax+0]) before fdps_draw_unit_status_panel

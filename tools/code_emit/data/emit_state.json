@@ -2244,6 +2244,14 @@
       "status": "committed",
       "emitted_against": "0x50",
       "rounds": 0
+    },
+    "00016200": {
+      "name": "fdps_menu_cursor_input_loop",
+      "target": "menu.c",
+      "body_size": "0xfd",
+      "status": "committed",
+      "emitted_against": "0xfd",
+      "rounds": 0
     }
   }
 }

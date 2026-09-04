@@ -53,7 +53,7 @@
 000160e0 | 0x50 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | int __cdecl fdps_menu_find_first_enabled_entry(int * cmd_disabled)
 00016130 | 0x7c | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_menu_animate_open(int * cmd_icons, int * cmd_disabled, int cursor_dir)
 000161b0 | 0x50 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_menu_animate_close(int * cmd_icons, int * cmd_disabled, int cursor_dir)
-00016200 | 0xfd | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_menu | int __cdecl fdps_menu_cursor_input_loop(void * ctx, int * dir_blocked, int * cursor_dir)
+00016200 | 0xfd | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_menu | int __cdecl fdps_menu_cursor_input_loop(int * ctx, int * dir_blocked, int * cursor_dir)
 00016300 | 0x535 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_graphics | void __cdecl fdps_draw_unit_status_panel(int unit_index, uchar * dest)
 00016840 | 0x99 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_graphics | void * __cdecl fdps_load_status_cel_image(void)
 000168e0 | 0x1b5 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_close_status_window(void * window_image, void * background)

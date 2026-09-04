@@ -13,7 +13,9 @@
 #include "gamedata.h"
 #include "audio.h"
 #include "blit.h"
+#include "keybd.h"
 #include "mapdraw.h"
+#include "palcycle.h"
 #include "unit.h"
 #include "menu.h"
 
@@ -420,4 +422,119 @@ void fdps_menu_animate_close(int *cmd_icons, int *cmd_disabled, int cursor_dir)
         fdps_render_ring_menu_frame(cmd_icons, cmd_disabled, radius,
                                     cursor_dir);
     }
+}
+
+/* The make codes the input loop acts on, straight off the CMP immediates at
+   0001622a, 00016230, 00016242, 00016248, 0001625a, 00016275, 00016291 and
+   000162ad.  They are set 1 scancodes as fdps_keyboard_isr queues them
+   (keybd.h), not ASCII, so Enter is 0x1c and not '\r'.
+
+   THE TWO CANCEL KEYS ARE ESCAPE AND KEYPAD DEL, AND THE TWO CONFIRM KEYS ARE
+   ENTER AND SPACE.  0x53 is the keypad's Del/full-stop key and it cancels
+   exactly as Escape does; the same pairing runs through the other modal
+   readers in the game (keybd.h).  There is no arrow-key alternative for
+   confirm and no separate "back" code. */
+#define KEY_ESC 0x01
+#define KEY_ENTER 0x1c
+#define KEY_SPACE 0x39
+#define KEY_KEYPAD_DEL 0x53
+#define KEY_UP 0x48
+#define KEY_LEFT 0x4b
+#define KEY_RIGHT 0x4d
+#define KEY_DOWN 0x50
+
+/* The slot each arrow key moves the cursor to.  The descriptor's order is the
+   one menu.h states -- 0 up, 1 left, 2 right, 3 down -- and the store is the
+   plain literal in every arm (MOV dword ptr [EAX],0x0 / 0x3 / 0x1 / 0x2). */
+#define RING_SLOT_UP 0
+#define RING_SLOT_LEFT 1
+#define RING_SLOT_RIGHT 2
+#define RING_SLOT_DOWN 3
+
+/* What the loop hands back: 0 means it has not finished, so it is also the
+   value the loop tests to decide whether to run another pass. */
+#define MENU_CURSOR_OPEN 0
+#define MENU_CURSOR_CANCELLED (-1)
+#define MENU_CURSOR_CONFIRMED 1
+
+/* 00016200.  The modal loop that drives the ring menu's cursor.  See menu.h
+   for what the arguments are and what the answer means.
+
+   ONE SCANCODE PER FRAME, NOT ONE FRAME PER SCANCODE.  The pass reads the ring
+   exactly once and acts on whatever came back, including the 0xff that means
+   the queue was empty, and then repaints regardless.  So the loop is a frame
+   loop paced by the vertical retrace fdps_cycle_ui_palette waits for and not
+   an input loop that blocks: a player who touches nothing still has the scene
+   palette cycled and the ring redrawn every retrace.  Ten keystrokes queued
+   between two passes therefore take ten more frames to drain, one each, which
+   is what makes a held arrow key walk the cursor at the ring's frame rate.
+
+   The three calls at the bottom run on EVERY pass, the one that chose the
+   answer included: the arms that set the result jump to 000162c7, which is the
+   palette pair and the repaint, and only then is the loop test reached.  So a
+   confirmed or cancelled menu is repainted once more before this returns, with
+   the cursor on whatever slot the player last moved to.  Cutting that last
+   repaint out -- returning from inside the branch -- leaves the previous
+   frame's highlight on the screen for whatever the caller draws next.
+
+   THE ORDER OF THE THREE IS PART OF THE PACE.  The scene cycle is handed to
+   fdps_set_palette_range_on_retrace and does its own waiting inside; the UI
+   cycle waits for the retrace unconditionally before it looks at anything
+   (palcycle.h).  Swapping them, or dropping one on a pass that changed no
+   colour, changes how long a frame takes on real hardware.
+
+   A BLOCKED DIRECTION IS IGNORED, NOT CLAMPED.  cmd_disabled[slot] non-zero
+   makes the arm fall through to the next comparison -- CMP dword ptr
+   [EAX + n],0x0 / JZ to the store, otherwise the JMP past it -- and no other
+   arm can match, so *cursor_dir keeps the value it had and the frame is drawn
+   with the cursor where it already was.  It does not skip to the next
+   selectable entry and it does not move part way.
+
+   NOTHING HERE IS BOUNDS CHECKED AND NOTHING VALIDATES *cursor_dir ON ENTRY.
+   The caller's starting value is passed to the first repaint untouched, so a
+   caller that opens the menu on a greyed-out entry keeps that entry
+   highlighted until the player moves off it; fdps_menu_find_first_enabled_entry
+   is what the callers use to avoid that, and it is their call to make.
+
+   cmd_icons is never read here.  It is loaded from its parameter slot and
+   pushed straight to the repaint, which is the only thing this function does
+   with it. */
+int fdps_menu_cursor_input_loop(int *cmd_icons, int *cmd_disabled,
+                                int *cursor_dir)
+{
+    /* Cancelled, confirmed, or still open.  It is both the loop's condition
+       and the answer, which is why the loop cannot end on the pass that reads
+       nothing. */
+    int result;
+    /* The make code this pass took out of the ring, widened from the byte
+       fdps_read_keyboard_queue sets in AL -- the AND EAX,0xff at 00016222.
+       0xff means the queue was empty and matches none of the eight codes. */
+    int scancode;
+
+    result = MENU_CURSOR_OPEN;
+    while (result == MENU_CURSOR_OPEN) {
+        scancode = fdps_read_keyboard_queue();
+
+        if (scancode == KEY_ESC || scancode == KEY_KEYPAD_DEL) {
+            result = MENU_CURSOR_CANCELLED;
+        } else if (scancode == KEY_SPACE || scancode == KEY_ENTER) {
+            result = MENU_CURSOR_CONFIRMED;
+        } else if (scancode == KEY_UP && cmd_disabled[RING_SLOT_UP] == 0) {
+            *cursor_dir = RING_SLOT_UP;
+        } else if (scancode == KEY_DOWN && cmd_disabled[RING_SLOT_DOWN] == 0) {
+            *cursor_dir = RING_SLOT_DOWN;
+        } else if (scancode == KEY_LEFT && cmd_disabled[RING_SLOT_LEFT] == 0) {
+            *cursor_dir = RING_SLOT_LEFT;
+        } else if (scancode == KEY_RIGHT
+                   && cmd_disabled[RING_SLOT_RIGHT] == 0) {
+            *cursor_dir = RING_SLOT_RIGHT;
+        }
+
+        fdps_cycle_scene_palette();
+        fdps_cycle_ui_palette();
+        fdps_render_ring_menu_frame(cmd_icons, cmd_disabled,
+                                    RING_RESTING_RADIUS, *cursor_dir);
+    }
+
+    return result;
 }

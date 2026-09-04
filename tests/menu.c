@@ -40,6 +40,7 @@
 #include <i86.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "keybd.h"
 #include "mapdraw.h"
 #include "testharn.h"
 #include "menu.h"
@@ -1164,6 +1165,401 @@ static void close_forwards_its_arguments(void)
     open_unstage();
 }
 
+/* ------------------------------------------------------------------ */
+/* fdps_menu_cursor_input_loop @ 00016200                              */
+/* ------------------------------------------------------------------ */
+
+/* The eight make codes the loop knows, taken off the CMP immediates at
+   0001622a, 00016230, 00016242, 00016248, 0001625a, 00016275, 00016291 and
+   000162ad, plus one it does not know: 0x2c is Z and matches no arm. */
+#define CURSOR_KEY_ESC 0x01
+#define CURSOR_KEY_ENTER 0x1c
+#define CURSOR_KEY_SPACE 0x39
+#define CURSOR_KEY_KEYPAD_DEL 0x53
+#define CURSOR_KEY_UP 0x48
+#define CURSOR_KEY_LEFT 0x4b
+#define CURSOR_KEY_RIGHT 0x4d
+#define CURSOR_KEY_DOWN 0x50
+#define CURSOR_KEY_UNKNOWN 0x2c
+
+/* The two answers, MOV dword ptr [EBP-0x8],0xffffffff at 00016236 and MOV
+   dword ptr [EBP-0x8],0x1 at 0001624e. */
+#define CURSOR_CANCELLED (-1)
+#define CURSOR_CONFIRMED 1
+
+/* Loads the scancode ring with a burst and puts the two indices where
+   fdps_keyboard_isr would have left them after queueing exactly that many make
+   codes.
+
+   EVERY BURST HAS TO END IN A KEY THAT ENDS THE LOOP.  The loop does not stop
+   when the ring runs dry -- an empty ring answers 0xff, which matches no arm,
+   and the pass costs a frame and goes round again -- so a burst without a
+   confirm or a cancel in it hangs the run.  Nine codes is also the ceiling:
+   the read index wraps at ten and the write index staged here does not, so a
+   full ring never reads as drained (keybd.h). */
+static void cursor_queue(unsigned char *codes, int count)
+{
+    int index;
+
+    for (index = 0; index < count; index++) {
+        data_fdps_input_scancode_queue[index] = codes[index];
+    }
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = count;
+}
+
+/* The watch open_run keeps, with the ring loaded before the call.  The page is
+   seeded once and every frame after the first is handed the block the frame
+   before it freed, so the screen at the end is the last frame's plates over
+   whatever the earlier ones left. */
+static int cursor_run(int *cmd_icons, int *cmd_disabled, int *cursor_dir,
+                      unsigned char *codes, int count)
+{
+    int result;
+
+    cursor_queue(codes, count);
+    ring_blocks_before = ring_used_heap_blocks();
+    ring_set_mode(RING_MODE_320X200X256);
+    memset((void *) RING_VGA_BASE, RING_BORDER_FILL,
+           (size_t) RING_SCREEN_BYTES);
+    ring_seed_page();
+    result = fdps_menu_cursor_input_loop(cmd_icons, cmd_disabled, cursor_dir);
+    memmove(ring_screen, (void *) RING_VGA_BASE, (size_t) RING_SCREEN_BYTES);
+    ring_set_mode(RING_MODE_TEXT);
+    ring_blocks_after = ring_used_heap_blocks();
+    return result;
+}
+
+/* The same run with the frames called out by hand -- one per pass, all at the
+   resting radius, each with the cursor_dir that pass should have been holding
+   -- from the same seeded page and the same filled screen, so the two pictures
+   are comparable byte for byte. */
+static void cursor_run_ladder(int *cmd_icons, int *cmd_disabled, int *dirs,
+                              int frames)
+{
+    int frame;
+
+    ring_set_mode(RING_MODE_320X200X256);
+    memset((void *) RING_VGA_BASE, RING_BORDER_FILL,
+           (size_t) RING_SCREEN_BYTES);
+    ring_seed_page();
+    for (frame = 0; frame < frames; frame++) {
+        fdps_render_ring_menu_frame(cmd_icons, cmd_disabled,
+                                    RING_RESTING_RADIUS, dirs[frame]);
+    }
+    memmove(open_reference, (void *) RING_VGA_BASE, (size_t) RING_SCREEN_BYTES);
+    ring_set_mode(RING_MODE_TEXT);
+}
+
+/* ring_unstage plus the ring: a burst left half drained would be read by the
+   next case that calls anything which polls the keyboard. */
+static void cursor_unstage(void)
+{
+    ring_unstage();
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* Escape and keypad Del are the same arm: CMP ...,0x1 / JZ and CMP ...,0x53 /
+   JNZ both reach the MOV -1 at 00016236.  The cursor is left where it was --
+   the arm writes the result and nothing else -- and exactly one code has been
+   taken out of the ring. */
+static void cursor_escape_and_keypad_del_cancel(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+    int cursor_dir;
+    unsigned char keys[1];
+
+    ring_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+
+    cursor_dir = 2;
+    keys[0] = CURSOR_KEY_ESC;
+    CHECK_EQ(cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 1),
+             CURSOR_CANCELLED);
+    CHECK_EQ(cursor_dir, 2);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 1);
+
+    cursor_dir = 2;
+    keys[0] = CURSOR_KEY_KEYPAD_DEL;
+    CHECK_EQ(cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 1),
+             CURSOR_CANCELLED);
+    CHECK_EQ(cursor_dir, 2);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    cursor_unstage();
+}
+
+/* Space and Enter are the other shared arm, CMP ...,0x39 / JZ and CMP ...,0x1c
+   / JNZ into the MOV 1 at 0001624e.  The answer is 1 and not the slot the
+   cursor is on: the entry the caller has to act on is what cursor_dir holds. */
+static void cursor_space_and_enter_confirm(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+    int cursor_dir;
+    unsigned char keys[1];
+
+    ring_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+
+    cursor_dir = 3;
+    keys[0] = CURSOR_KEY_SPACE;
+    CHECK_EQ(cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 1),
+             CURSOR_CONFIRMED);
+    CHECK_EQ(cursor_dir, 3);
+
+    cursor_dir = 3;
+    keys[0] = CURSOR_KEY_ENTER;
+    CHECK_EQ(cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 1),
+             CURSOR_CONFIRMED);
+    CHECK_EQ(cursor_dir, 3);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    cursor_unstage();
+}
+
+/* Which slot each arrow writes, MOV dword ptr [EAX],0x0 / 0x3 / 0x1 / 0x2 at
+   0001626d, 00016289, 000162a5 and 000162c1.  The four runs start from a
+   different slot than the one they select, so a loop that left cursor_dir
+   alone would fail every one of them, and the down and right arms in
+   particular pin the descriptor order -- 0 up, 1 left, 2 right, 3 down --
+   against the screen order the arrows suggest. */
+static void cursor_each_arrow_selects_its_slot(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+    int cursor_dir;
+    unsigned char keys[2];
+
+    ring_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+    keys[1] = CURSOR_KEY_ENTER;
+
+    cursor_dir = 3;
+    keys[0] = CURSOR_KEY_UP;
+    CHECK_EQ(cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 2),
+             CURSOR_CONFIRMED);
+    CHECK_EQ(cursor_dir, 0);
+
+    cursor_dir = 0;
+    keys[0] = CURSOR_KEY_LEFT;
+    cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 2);
+    CHECK_EQ(cursor_dir, 1);
+
+    cursor_dir = 0;
+    keys[0] = CURSOR_KEY_RIGHT;
+    cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 2);
+    CHECK_EQ(cursor_dir, 2);
+
+    cursor_dir = 0;
+    keys[0] = CURSOR_KEY_DOWN;
+    cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 2);
+    CHECK_EQ(cursor_dir, 3);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    cursor_unstage();
+}
+
+/* A greyed-out entry is not moved to, and the arm that finds it does not fall
+   into any other store: CMP dword ptr [EAX + n],0x0 / JZ to the store, and the
+   JMP past the whole chain otherwise.  Each of the four runs greys out exactly
+   the slot it then presses towards, so the cursor has to come back holding the
+   slot it started on.
+
+   It is not a skip to the next selectable entry and not a clamp: with the
+   target blocked the frame is drawn with the cursor exactly where it was. */
+static void cursor_blocked_slot_does_not_move(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+    int cursor_dir;
+    unsigned char keys[2];
+
+    ring_stage();
+    keys[1] = CURSOR_KEY_ENTER;
+
+    ring_default_menu(cmd_icons, cmd_disabled);
+    cmd_disabled[0] = 1;
+    cursor_dir = 2;
+    keys[0] = CURSOR_KEY_UP;
+    cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 2);
+    CHECK_EQ(cursor_dir, 2);
+
+    ring_default_menu(cmd_icons, cmd_disabled);
+    cmd_disabled[1] = 1;
+    cursor_dir = 2;
+    keys[0] = CURSOR_KEY_LEFT;
+    cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 2);
+    CHECK_EQ(cursor_dir, 2);
+
+    ring_default_menu(cmd_icons, cmd_disabled);
+    cmd_disabled[2] = 1;
+    cursor_dir = 0;
+    keys[0] = CURSOR_KEY_RIGHT;
+    cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 2);
+    CHECK_EQ(cursor_dir, 0);
+
+    ring_default_menu(cmd_icons, cmd_disabled);
+    cmd_disabled[3] = 1;
+    cursor_dir = 0;
+    keys[0] = CURSOR_KEY_DOWN;
+    cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 2);
+    CHECK_EQ(cursor_dir, 0);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    cursor_unstage();
+}
+
+/* The blocked test is against zero and nothing else, so a negative entry blocks
+   the move exactly as 1 does.  Writing the guard as "greater than zero", which
+   is the reading a descriptor of flags invites, would let the move through.
+
+   THE LEFT SLOT'S ICON ID IS SHIFTED UP A BANK FOR THIS CASE, AND THAT IS ABOUT
+   THE REPAINT AND NOT ABOUT THE LOOP.  fdps_render_ring_menu_frame multiplies
+   the same entry by 0x24 into the icon id and adds it to the plate id, so a
+   flag of -1 over the ordinary icon 0x0b resolves sub-image -0x19 and reads the
+   synthetic sheet's offset table below its base -- which is a wild pointer and
+   corrupts the heap for every case after this one.  0x2f - 0x24 is 0x0b and
+   0x1b - 1 is 0x1a, both real sub-images, so the frame is drawn from inside the
+   sheet and the only thing on trial here is which way the loop branches. */
+static void cursor_any_nonzero_entry_blocks(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+    int cursor_dir;
+    unsigned char keys[2];
+
+    ring_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+    cmd_icons[1] = RING_ICON_LEFT + RING_ICON_BANK;
+    cmd_disabled[1] = -1;
+    cursor_dir = 2;
+    keys[0] = CURSOR_KEY_LEFT;
+    keys[1] = CURSOR_KEY_ENTER;
+    CHECK_EQ(cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 2),
+             CURSOR_CONFIRMED);
+    CHECK_EQ(cursor_dir, 2);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    cursor_unstage();
+}
+
+/* One code per pass, and the pass that chooses is the last one: the burst here
+   is three long and the loop stops on the second, leaving the third still
+   queued for whatever the caller does next.  A loop that drained the ring, or
+   that read again after setting the result, would take the read index to 3.
+
+   The unknown code is the other half of the same statement -- it matches no arm
+   and moves nothing, but it is still consumed and still costs its frame. */
+static void cursor_reads_one_code_per_pass(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+    int cursor_dir;
+    unsigned char keys[3];
+
+    ring_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+
+    cursor_dir = 1;
+    keys[0] = CURSOR_KEY_RIGHT;
+    keys[1] = CURSOR_KEY_ENTER;
+    keys[2] = CURSOR_KEY_DOWN;
+    CHECK_EQ(cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 3),
+             CURSOR_CONFIRMED);
+    CHECK_EQ(cursor_dir, 2);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 2);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, 3);
+
+    cursor_dir = 1;
+    keys[0] = CURSOR_KEY_UNKNOWN;
+    keys[1] = CURSOR_KEY_ENTER;
+    CHECK_EQ(cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 2),
+             CURSOR_CONFIRMED);
+    CHECK_EQ(cursor_dir, 1);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 2);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    cursor_unstage();
+}
+
+/* The repaint is one frame per pass, at the resting radius, with the cursor
+   already moved -- and it happens on the pass that chose as well, because the
+   arms that set the result jump to 000162c7 and not to the exit.  Three codes
+   in, three frames out, drawn for slots 1, 3 and 3.
+
+   Byte-equal against the hand-run ladder is the whole statement at once: a
+   missing final frame, a frame drawn before the move rather than after it, a
+   radius other than the 0x18 pushed at 000162d6, or an extra pass all change
+   the picture.  The frames are not erased between one another, so every one
+   that ran leaves something behind and the finished screen names the whole
+   sequence rather than just its last frame. */
+static void cursor_repaints_once_per_pass_including_the_last(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+    int cursor_dir;
+    unsigned char keys[3];
+    int dirs[3];
+
+    ring_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+
+    cursor_dir = 0;
+    keys[0] = CURSOR_KEY_LEFT;
+    keys[1] = CURSOR_KEY_DOWN;
+    keys[2] = CURSOR_KEY_ENTER;
+    CHECK_EQ(cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 3),
+             CURSOR_CONFIRMED);
+    CHECK_EQ(cursor_dir, 3);
+
+    dirs[0] = 1;
+    dirs[1] = 3;
+    dirs[2] = 3;
+    cursor_run_ladder(cmd_icons, cmd_disabled, dirs, 3);
+
+    CHECK_EQ(memcmp(ring_screen, open_reference, (size_t) RING_SCREEN_BYTES),
+             0);
+    CHECK_EQ(ring_pixel(148, 148), RING_COLOR(RING_PLATE_HI));
+    CHECK_EQ(ring_pixel(102, 148), RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    cursor_unstage();
+}
+
+/* Neither descriptor is written: cmd_disabled is only ever read with CMP and
+   cmd_icons is loaded from its parameter slot straight into the repaint's
+   argument list.  A cancel is also not an undo -- the cursor comes back on the
+   slot the player last moved to, not on the slot the menu opened on -- which is
+   what lets a caller redraw the menu where the player left it. */
+static void cursor_cancel_keeps_the_move_and_the_descriptors(void)
+{
+    int cmd_icons[4];
+    int cmd_disabled[4];
+    int cursor_dir;
+    unsigned char keys[2];
+
+    ring_stage();
+    ring_default_menu(cmd_icons, cmd_disabled);
+    cmd_disabled[3] = 1;
+
+    cursor_dir = 0;
+    keys[0] = CURSOR_KEY_RIGHT;
+    keys[1] = CURSOR_KEY_ESC;
+    CHECK_EQ(cursor_run(cmd_icons, cmd_disabled, &cursor_dir, keys, 2),
+             CURSOR_CANCELLED);
+    CHECK_EQ(cursor_dir, 2);
+    CHECK_EQ(cmd_icons[0], RING_ICON_UP);
+    CHECK_EQ(cmd_icons[1], RING_ICON_LEFT);
+    CHECK_EQ(cmd_icons[2], RING_ICON_RIGHT);
+    CHECK_EQ(cmd_icons[3], RING_ICON_DOWN);
+    CHECK_EQ(cmd_disabled[0], 0);
+    CHECK_EQ(cmd_disabled[1], 0);
+    CHECK_EQ(cmd_disabled[2], 0);
+    CHECK_EQ(cmd_disabled[3], 1);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    cursor_unstage();
+}
+
 void run_menu_tests(void)
 {
     RUN_TEST(menu_first_entry_wins);
@@ -1195,4 +1591,12 @@ void run_menu_tests(void)
     RUN_TEST(close_first_frame_is_inside_the_resting_ring);
     RUN_TEST(close_stops_three_pixels_out);
     RUN_TEST(close_forwards_its_arguments);
+    RUN_TEST(cursor_escape_and_keypad_del_cancel);
+    RUN_TEST(cursor_space_and_enter_confirm);
+    RUN_TEST(cursor_each_arrow_selects_its_slot);
+    RUN_TEST(cursor_blocked_slot_does_not_move);
+    RUN_TEST(cursor_any_nonzero_entry_blocks);
+    RUN_TEST(cursor_reads_one_code_per_pass);
+    RUN_TEST(cursor_repaints_once_per_pass_including_the_last);
+    RUN_TEST(cursor_cancel_keeps_the_move_and_the_descriptors);
 }
