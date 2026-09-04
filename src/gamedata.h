@@ -209,6 +209,22 @@ extern int data_fdps_scene_layer_scroll_step_y[6];
    (rebuild_info/pitfalls.md, contract B). */
 extern unsigned char data_fdps_scene_layer_tile_attr_mode[6];
 
+/* 0006015c.  The phase of the pulse the movement-range highlight beats at: a
+   counter that runs 0..0x37 and picks a blend level out of a 14-entry ramp by
+   dividing by four, so the marked tiles breathe between blend levels 2 and 7
+   out of 16.
+
+   It steps in fdps_draw_scene_layer, which means ONCE PER DRAWN LAYER and not
+   once per frame -- the pulse runs faster on a map with more active scene
+   layers, and src/mapdraw.c says why that cannot be tidied up
+   (rebuild_info/pitfalls.md).
+
+   Signed, and read as such: the advance is IDIV EBX at 0002c35e with the
+   SAR EDX,0x1f sign extension in front of it, and the ramp index is the
+   SAR/SBB/SAR division by four at 0002c5cd, not a shift.  Three files read it;
+   the other two are src/aiact.c and src/btlturn.c. */
+extern int data_fdps_marked_tile_blend_phase;
+
 /* 00060124.  The loaded chapter's FDETXT%02d.TXT block: the chapter's script
    text, read by seventeen files -- every cut-scene, the shops, the village
    menus and the death and ending screens.  fdps_field_load_chapter_resources
