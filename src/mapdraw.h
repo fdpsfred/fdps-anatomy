@@ -156,4 +156,26 @@ extern void fdps_draw_map_unit(int unit_index, unsigned char *scene_buf,
                                unsigned char unused_flag);
 #pragma aux fdps_draw_map_unit "*" parm caller [];
 
+/* Draws every unit on the map into the scene buffer: one whole sweep laying
+   down every shadow, then a second whole sweep drawing every sprite.  Returns
+   nothing.
+
+   THE SWEEPS ARE SEPARATE ON PURPOSE and both walk 0 up to
+   data_fdps_map_unit_count.  Drawing each unit's shadow and sprite together in
+   one loop is the same arithmetic and a different picture: a unit later in the
+   table lays its translucent shadow over a unit already drawn, which the
+   original never does (rebuild_info/pitfalls.md).
+
+   scene_buf is the destination surface, pitch 0x168, forwarded unchanged.
+   unused_flag is forwarded as fdps_draw_map_unit's third argument, which that
+   routine overwrites with 0 before any read, so nothing passed here has any
+   effect; the only caller, fdps_draw_scene_layers, passes 0.
+
+   data_fdps_map_unit_shadow_pass_flag is set to 1 for the first sweep and back
+   to 0 for the second, and is left at 0 on the way out.  This is its only
+   writer. */
+extern void fdps_draw_map_units(unsigned char *scene_buf,
+                                unsigned char unused_flag);
+#pragma aux fdps_draw_map_units "*" parm caller [];
+
 #endif

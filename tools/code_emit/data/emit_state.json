@@ -2204,6 +2204,14 @@
       "status": "committed",
       "emitted_against": "0x464",
       "rounds": 1
+    },
+    "0002d240": {
+      "name": "fdps_draw_map_units",
+      "target": "mapdraw.c",
+      "body_size": "0x89",
+      "status": "committed",
+      "emitted_against": "0x89",
+      "rounds": 0
     }
   }
 }

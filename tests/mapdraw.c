@@ -1434,6 +1434,160 @@ static void test_status_icon_lands_thirteen_rows_below_the_cell(void)
     CHECK_EQ(pixel_at(55, 48), CUBE_BASE + sprite_color(0));
 }
 
+/* ------------------------------------------------------------------ */
+/* fdps_draw_map_units @ 0002d240                                      */
+/* ------------------------------------------------------------------ */
+
+/* Two units stacked one tile apart in the same column, which is the only
+   arrangement that can tell the two-sweep order from a fused one.  Unit 0 sits
+   at tile (1, 1): its sprite block runs rows 42..65 (tile 24 less the six
+   pixel lift plus the 24-pixel border) and its shadow rows 44..67.  Unit 1
+   sits at tile (1, 0) one tile higher: sprite rows 18..41, shadow rows 20..43.
+   So rows 42 and 43 are covered by unit 1's SHADOW and by unit 0's SPRITE and
+   by nothing else, and which of the two a pixel there holds says which went
+   down last.
+
+   The two are given different facings so a drawn pixel also names the unit
+   that drew it: facing 0 selects sprite 0 and facing 1 sprite 3, while both
+   shadows come out of the walk counter and so are shadow frame 0. */
+static void stage_two_stacked_units(void)
+{
+    stage_unit();
+    data_fdps_map_unit_count = 2;
+
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+    units[0].facing = 0;
+
+    units[1].pos_x = 1;
+    units[1].pos_y = 0;
+    units[1].facing = 1;
+
+    fill_scene(SCENE_UNTOUCHED);
+}
+
+/* THE WHOLE POINT OF THE FUNCTION.  Every shadow is on the surface before the
+   first sprite goes down, so the rows where unit 1's shadow overlaps unit 0's
+   sprite come back as the sprite.  A single fused loop -- draw unit 0's shadow
+   and sprite, then unit 1's shadow and sprite -- puts unit 1's shadow over
+   unit 0's sprite there instead and rows 42 and 43 come back CUBE_BASE + 1.
+   Row 66 is below every sprite and holds unit 0's own shadow, which is what
+   says the shadow sweep ran at all. */
+static void test_every_shadow_is_laid_before_the_first_sprite(void)
+{
+    stage_two_stacked_units();
+
+    fdps_draw_map_units(scene, 0);
+
+    CHECK_EQ(pixel_at(42, 48), sprite_color(0));
+    CHECK_EQ(pixel_at(43, 48), sprite_color(0));
+    CHECK_EQ(pixel_at(66, 48), CUBE_BASE + sprite_color(0));
+    CHECK_EQ(pixel_at(67, 48), CUBE_BASE + sprite_color(0));
+    CHECK_EQ(pixel_at(41, 48), sprite_color(3));
+    CHECK_EQ(pixel_at(18, 48), sprite_color(3));
+    CHECK_EQ(pixel_at(68, 48), SCENE_UNTOUCHED);
+    CHECK_EQ(pixel_at(17, 48), SCENE_UNTOUCHED);
+}
+
+/* Both sweeps stop at data_fdps_map_unit_count (MOV byte ptr [0x0006014c] then
+   the JL pair at 0002d263 and 0002d29e), so a count of 1 draws unit 0 and
+   leaves unit 1's rows -- 18..41 for its sprite and 20..43 for its shadow --
+   untouched apart from where unit 0 itself reaches. */
+static void test_both_sweeps_stop_at_the_unit_count(void)
+{
+    stage_two_stacked_units();
+    data_fdps_map_unit_count = 1;
+
+    fdps_draw_map_units(scene, 0);
+
+    CHECK_EQ(pixel_at(42, 48), sprite_color(0));
+    CHECK_EQ(pixel_at(66, 48), CUBE_BASE + sprite_color(0));
+    CHECK_EQ(pixel_at(41, 48), SCENE_UNTOUCHED);
+    CHECK_EQ(pixel_at(18, 48), SCENE_UNTOUCHED);
+}
+
+/* The count is compared SIGNED -- JL, not JB -- so a negative count draws
+   nothing at all rather than sweeping the array four billion times
+   (rebuild_info/pitfalls.md, contract C).  A zero count likewise draws
+   nothing, and both leave the pass byte where the second sweep puts it. */
+static void test_zero_and_negative_counts_draw_nothing(void)
+{
+    stage_two_stacked_units();
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_unit_shadow_pass_flag = 0xaa;
+
+    fdps_draw_map_units(scene, 0);
+
+    CHECK_EQ(pixel_at(42, 48), SCENE_UNTOUCHED);
+    CHECK_EQ(pixel_at(18, 48), SCENE_UNTOUCHED);
+    CHECK_EQ(data_fdps_map_unit_shadow_pass_flag, 0);
+
+    stage_two_stacked_units();
+    data_fdps_map_unit_count = -1;
+    data_fdps_map_unit_shadow_pass_flag = 0xaa;
+
+    fdps_draw_map_units(scene, 0);
+
+    CHECK_EQ(pixel_at(42, 48), SCENE_UNTOUCHED);
+    CHECK_EQ(pixel_at(18, 48), SCENE_UNTOUCHED);
+    CHECK_EQ(data_fdps_map_unit_shadow_pass_flag, 0);
+}
+
+/* The pass byte is 1 for the first sweep and 0 for the second, and 0 is what
+   it is left holding: the shadows on screen prove it was 1 while they were
+   drawn, and the byte read afterwards proves the second store ran. */
+static void test_the_pass_byte_is_left_clear(void)
+{
+    stage_two_stacked_units();
+    data_fdps_map_unit_shadow_pass_flag = 0xaa;
+
+    fdps_draw_map_units(scene, 0);
+
+    CHECK_EQ(data_fdps_map_unit_shadow_pass_flag, 0);
+    CHECK_EQ(pixel_at(66, 48), CUBE_BASE + sprite_color(0));
+}
+
+/* The walk clock steps ONCE for the frame although this routine calls
+   fdps_draw_map_unit twice for every unit -- four calls here.  The latch in
+   the callee is what holds it, and it is the reason the two sweeps cost the
+   animation nothing. */
+static void test_four_calls_step_the_walk_clock_once(void)
+{
+    stage_two_stacked_units();
+    data_fdps_map_unit_walk_anim_counter = 3;
+    data_fdps_map_unit_status_icon_tick_counter = 7;
+    data_fdps_timer_tick_counter = 101;
+    data_fdps_map_unit_anim_last_tick = 100;
+
+    fdps_draw_map_units(scene, 0);
+
+    CHECK_EQ(data_fdps_map_unit_anim_last_tick, 101);
+    CHECK_EQ(data_fdps_map_unit_walk_anim_counter, 4);
+    CHECK_EQ(data_fdps_map_unit_status_icon_tick_counter, 8);
+}
+
+/* The second argument is forwarded to every call and read nowhere else, and
+   the callee overwrites its own copy with 0 before touching it, so passing
+   0xff paints exactly the same scene as passing 0.  Only the low byte is read
+   here (XOR EAX,EAX / MOV AL,byte ptr [EBP + 0x18]). */
+static void test_the_forwarded_flag_changes_nothing(void)
+{
+    unsigned char with_zero[8];
+    int i;
+
+    stage_two_stacked_units();
+    fdps_draw_map_units(scene, 0);
+    for (i = 0; i < 8; i++) {
+        with_zero[i] = (unsigned char) pixel_at(40 + i, 48);
+    }
+
+    stage_two_stacked_units();
+    fdps_draw_map_units(scene, 0xff);
+    for (i = 0; i < 8; i++) {
+        CHECK_EQ(pixel_at(40 + i, 48), with_zero[i]);
+    }
+}
+
 void run_mapdraw_tests(void)
 {
     RUN_TEST(test_ascending_depths_keep_identity_order);
@@ -1481,4 +1635,11 @@ void run_mapdraw_tests(void)
     RUN_TEST(test_translucent_portrait_ids_take_mode_nine_at_level_seven);
     RUN_TEST(test_acted_unit_is_frame_one_through_the_tinting_blit);
     RUN_TEST(test_status_icon_lands_thirteen_rows_below_the_cell);
+
+    RUN_TEST(test_every_shadow_is_laid_before_the_first_sprite);
+    RUN_TEST(test_both_sweeps_stop_at_the_unit_count);
+    RUN_TEST(test_zero_and_negative_counts_draw_nothing);
+    RUN_TEST(test_the_pass_byte_is_left_clear);
+    RUN_TEST(test_four_calls_step_the_walk_clock_once);
+    RUN_TEST(test_the_forwarded_flag_changes_nothing);
 }

@@ -666,3 +666,45 @@ void fdps_draw_map_unit(int unit_index, unsigned char *scene_buf,
         }
     }
 }
+
+/* 0002d240.  Draws every unit on the map into the scene buffer, all the
+   shadows first and then all the sprites, and leaves the pass byte at 0.
+
+   THE TWO SWEEPS MUST STAY TWO SWEEPS.  Both loops run index 0 up to
+   data_fdps_map_unit_count and forward both arguments unchanged, so the
+   obvious simplification -- one loop that draws each unit's shadow and then
+   its sprite, since the pass byte is only ever read inside the callee -- is
+   arithmetically identical and visibly wrong: a unit further down the table
+   would drop its translucent shadow over a unit already drawn, which the
+   original never does because every shadow is on the surface before the first
+   sprite goes down (rebuild_info/pitfalls.md).
+
+   The bound is SIGNED -- CMP EAX,dword ptr [0x00060150] / JL at 0002d263 and
+   0002d29e -- so a count that ever went negative draws nothing rather than
+   walking the array as an enormous unsigned run.
+
+   unused_flag is forwarded as fdps_draw_map_unit's third argument and read
+   only as a byte here (XOR EAX,EAX / MOV AL,byte ptr [EBP + 0x18] at 0002d26f
+   and 0002d2aa).  The callee overwrites its copy with 0 before any read, so
+   nothing passed here can be observed; the only caller,
+   fdps_draw_scene_layers, pushes 0.
+
+   The walk-animation clock is not stepped here.  fdps_draw_map_unit steps it,
+   under a tick latch, which is what keeps the cycle at one step per frame
+   although this routine calls it twice for every unit. */
+void fdps_draw_map_units(unsigned char *scene_buf, unsigned char unused_flag)
+{
+    int unit_index;
+
+    data_fdps_map_unit_shadow_pass_flag = 1;
+    for (unit_index = 0; unit_index < data_fdps_map_unit_count;
+         unit_index++) {
+        fdps_draw_map_unit(unit_index, scene_buf, unused_flag);
+    }
+
+    data_fdps_map_unit_shadow_pass_flag = 0;
+    for (unit_index = 0; unit_index < data_fdps_map_unit_count;
+         unit_index++) {
+        fdps_draw_map_unit(unit_index, scene_buf, unused_flag);
+    }
+}
