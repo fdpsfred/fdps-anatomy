@@ -1,19 +1,23 @@
 /* sprite.c -- the .SAF sprite drawers: one tilemap cell, one tilemap layer,
- * one composite sprite; and the three .CEL drawers, one for the Command.cel UI
- * sheet, one for a battle-map unit's walk sprite and one for a piece of the
- * Cusor.cel map-cursor outline kit.
+ * one composite sprite; and the four .CEL drawers, the general one every UI
+ * screen blits through and three that each know one sheet -- the Command.cel
+ * UI sheet, a battle-map unit's walk sprite and a piece of the Cusor.cel
+ * map-cursor outline kit.
  *
  * See sprite.h for the draw request every .SAF drawer here is handed and for
  * what each of its nine slots means, and resource_info/saf.md for the
  * container those three functions walk.  They own no state: the request, the
  * loaded image and the destination surface all belong to the caller.
  *
- * The three .CEL drawers at the bottom are the exception on both counts -- a
- * .CEL sheet and not a .SAF (resource_info/cel.md), and the three functions
- * here that read globals: the loaded Command.cel sheet for the first; the unit
- * array, the view window origin, the map animation counter and the sprite
- * cache for the second; and the loaded Cusor.cel sheet and the view window
- * origin for the third.
+ * The four .CEL drawers at the bottom are the exception on the first count --
+ * a .CEL sheet and not a .SAF (resource_info/cel.md) -- and three of them on
+ * the second, being the only functions here that read globals: the loaded
+ * Command.cel sheet for the first; the unit array, the view window origin, the
+ * map animation counter and the sprite cache for the second; and the loaded
+ * Cusor.cel sheet and the view window origin for the third.  The fourth,
+ * fdps_cel_blit_sprite, is handed its sheet and its surface and owns nothing
+ * of its own; it is the general drawer the game's menus, shops and windows all
+ * go through.
  */
 #include <stddef.h>
 #include <string.h>
@@ -580,4 +584,58 @@ void fdps_blit_cursor_tile(int map_x, int map_y, int sprite_index,
                            CURSOR_TILE_SIZE, CURSOR_SCENE_PITCH, 0,
                            BLIT_MODE_OPAQUE);
     }
+}
+
+/* 0002dba0.  One basic block: no branch, no test, no loop, and the four
+   values it works out are the sprite's size, its stream address and the
+   destination pixel.
+
+   The size is a pair of MOVSX word reads off the sheet's header, at +0x07 and
+   +0x09, and it is the sheet's size rather than the sprite's -- the index is
+   nowhere in either address.  They are signed reads, so the two header fields
+   are the i16 pair struct fdps_cel_header declares and not a u16 pair
+   (fdpstype.h); every shipped sheet states a positive size, so the choice
+   shows only on a malformed one.
+
+   The three adds that produce the stream are the .CEL rule that a stored
+   offset is measured from the start of the FILE.  LEA EAX,[EAX*0x4+0x0]
+   scales the index, ADD EDX,EAX puts it on the sheet base to address the table
+   entry, and ADD EAX,dword ptr [EDX+0xf] puts the entry itself on the sheet
+   base again -- onto the base, never onto the address the entry was read from.
+   The 0x0f is a displacement in that load and not a read of the header's own
+   table-position field at +0x05 (rebuild_info/pitfalls.md).
+
+   The destination is dest_base + dest_y * dest_pitch + dest_x, assembled as
+   IMUL EAX,dword ptr [EBP+0x20] on the row, ADD EAX,dword ptr [EBP+0x1c] onto
+   the base and ADD EDX,EAX with the column; the same pitch then goes to the
+   dispatcher as the surface's row stride.  The original loads the sheet
+   pointer from its argument slot twice, at 0002dbca and again at 0002dbcf,
+   because it needs it for the table address and then for the rebase; one read
+   of the parameter carries both here, which is the same value either way
+   (ADR-0001).
+
+   Nothing is read after the call: the seven arguments are pushed right to left
+   and the caller discards all of them with ADD ESP,0x1c at 0002dc0b, and
+   fdps_blit_dispatch returns nothing this function looks at.  The mode operand
+   and the blit mode are the caller's last two arguments passed straight
+   through, which is what makes this the one .CEL drawer that can reach any of
+   the dispatcher's kernels. */
+void fdps_cel_blit_sprite(unsigned char *cel_sheet, int sprite_index,
+                          unsigned char *dest_base, int dest_pitch,
+                          int dest_x, int dest_y, unsigned int mode_operand,
+                          unsigned char blit_mode)
+{
+    int sprite_width;
+    int sprite_height;
+    unsigned char *sprite_stream;
+    unsigned char *dest_pixel;
+
+    sprite_width = ((struct fdps_cel_header *) cel_sheet)->sprite_width;
+    sprite_height = ((struct fdps_cel_header *) cel_sheet)->sprite_height;
+    sprite_stream = cel_sheet
+        + *(int *) (cel_sheet + sprite_index * 4 + CEL_OFFSET_TABLE_START);
+    dest_pixel = dest_base + dest_y * dest_pitch + dest_x;
+
+    fdps_blit_dispatch(sprite_stream, dest_pixel, sprite_width, sprite_height,
+                       dest_pitch, mode_operand, blit_mode);
 }

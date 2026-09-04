@@ -261,7 +261,7 @@
 0002da50 | 0x47 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps,shared_helper | void __cdecl fdps_map_cursor_move_to_unit(int unit_index)
 0002daa0 | 0xaf | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | int __cdecl fdps_battle_find_unit_at_cursor(void)
 0002db50 | 0x47 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | void __cdecl fdps_units_clear_status_bit7(void)
-0002dba0 | 0x75 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,shared_helper,subsys_graphics | void __cdecl fdps_cel_blit_sprite(fdps_cel_header * cel, int index, uchar * dest_base, int pitch, int x, int y, int mode, int arg8)
+0002dba0 | 0x75 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,shared_helper,subsys_graphics | void __cdecl fdps_cel_blit_sprite(fdps_cel_header * cel, int index, uchar * dest_base, int pitch, int x, int y, int mode_operand, int blit_mode)
 0002dc20 | 0xc8 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | int __cdecl fdps_battle_find_unit_by_character_id(int character_id, fdps_unit_record * * out_record)
 0002dcf0 | 0x295 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | void __cdecl fdps_draw_cursor_info_panel(uchar * dest)
 0002df90 | 0x9d | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_relocate_unit_array(void)

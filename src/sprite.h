@@ -1,7 +1,8 @@
 /* sprite.h -- the .SAF sprite drawers: one tilemap cell, one tilemap layer,
- * one composite sprite; and the three .CEL drawers, one for the Command.cel UI
- * sheet, one for a battle-map unit's walk sprite and one for a piece of the
- * Cusor.cel map-cursor outline kit.
+ * one composite sprite; and the four .CEL drawers, the general one every UI
+ * screen blits through and three that each know one sheet -- the Command.cel
+ * UI sheet, a battle-map unit's walk sprite and a piece of the Cusor.cel
+ * map-cursor outline kit.
  *
  * A .SAF holds an animation's material in four sections -- frames, tilemaps,
  * tiles and sounds -- and drawing anything out of one is three nested walks:
@@ -271,5 +272,46 @@ extern void fdps_blit_unit_sprite(unsigned char *scene_buffer, int unit_index,
 extern void fdps_blit_cursor_tile(int map_x, int map_y, int sprite_index,
                                   unsigned char *dest);
 #pragma aux fdps_blit_cursor_tile "*" parm caller [];
+
+/* Draws one sprite out of any .CEL sheet into a linear 8-bit surface.  This is
+   the general drawer the game's screens go through -- 34 functions call it
+   from 54 sites, every menu, shop, church, village, save slot and battle
+   window among them -- and unlike the three above it knows nothing about which
+   sheet it is looking at: the sheet, the surface and every coordinate are
+   arguments, and it reads no global at all.
+
+   `cel_sheet` is a whole .CEL image already unpacked into memory, header
+   first.  `sprite_index` picks one of its sprites.  `dest_base` is the
+   surface's base address and `dest_pitch` its row stride in bytes, and the
+   sprite's top left corner goes at column `dest_x`, row `dest_y` of that
+   surface.  `mode_operand` and `blit_mode` are handed straight to
+   fdps_blit_dispatch (blit.h) and mean there what they mean there: nearly
+   every caller asks for mode 0, the opaque pass-through, and
+   fdps_message_window_open_from_tile asks for mode 4 with a packed scale pair
+   in the operand.
+
+   ONE SIZE FOR THE WHOLE SHEET.  The width and the height come from the
+   header's signed i16 pair at +0x07 and +0x09, which is a property of the
+   sheet and not of the sprite, so every sprite in one .CEL is drawn at the
+   same size no matter which index is asked for (resource_info/cel.md).
+
+   NOTHING ABOUT THE REQUEST IS CHECKED.  The offset table is addressed at the
+   fixed +0x0f, so the header's own table-position field at +0x05, its sprite
+   count at +0x0b and its encoding tag at +0x0d are never read; the index is
+   not compared against that count, the sheet pointer is not tested for null,
+   and there is no clipping of any kind -- a position that puts the sprite off
+   the surface writes past it.  The callers are what keep the arguments in
+   range (rebuild_info/pitfalls.md).
+
+   The stream address is the .CEL rule that a stored offset is measured from
+   the start of the FILE: the index is scaled by four and added to the sheet
+   base to reach the table entry, and the entry is added to that same base
+   again, never to the address it was read from. */
+extern void fdps_cel_blit_sprite(unsigned char *cel_sheet, int sprite_index,
+                                 unsigned char *dest_base, int dest_pitch,
+                                 int dest_x, int dest_y,
+                                 unsigned int mode_operand,
+                                 unsigned char blit_mode);
+#pragma aux fdps_cel_blit_sprite "*" parm caller [];
 
 #endif
