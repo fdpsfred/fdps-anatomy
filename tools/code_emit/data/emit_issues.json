@@ -1711,5 +1711,20 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "000205b0": [
+    {
+      "status": "open",
+      "from": "emit",
+      "what": "The six-step slide itself -- the panel arriving at rows 190, 170, 150, 135, 127 and 120 at 5/16, 7/16, 9/16, 11/16, 13/16 and 15/16 of full strength, each frame presented on a vertical retrace edge -- cannot be asserted by any unit test, because the routine leaves no trace of it. Every frame is composed on a work page that starts as a fresh copy of the screen saved at entry, and the still frame in front of the opaque blit starts from that copy again, so the state after the call is byte-identical whether the loop ran six times or none. What I did establish: the row template in the emitted object is the same 24 bytes read_memory returns at 0001fd50; the weight is i+i+5 from ADD EAX,EAX / ADD EAX,0x5 at 0002069a; the band height is 200 - row clipped to 73 from the CMP 0x49 / JLE at 0002068a; and the emitted loop is instruction-for-instruction the same shape as the original's, including the two-phase retrace spin. What is not established is what the sequence looks like at speed, which is where contract D lives.",
+      "needs": "A playtest in DOSBox-X with the real Message.cel and the real Mer1.tmp/Mer2.tmp tables loaded, opening a message window and watching the panel slide up: six distinct bands rising from the bottom of the screen, each brighter than the last, with the panel fully opaque at the end. A single-phase retrace wait, or a loop that composed each frame on top of the last, would show as a visibly different reveal rather than as a failing assertion. Comparing against the original executable's own reveal on the same emulator settings is the sharper form of the same check."
+    },
+    {
+      "status": "open",
+      "from": "review",
+      "what": "Confirmed for myself that the six-frame slide leaves no trace a unit test can see, and by a slightly different route than the emitter's: the frame the caller is left with depends on nothing the loop computed, because the memmove at 0002074c overwrites the whole work page from screen_backup before the opaque blit at 0002076d, and the present at 000207a5 copies that page. So the end state is byte-identical whether the loop ran six times or zero, and it is also independent of the two ticket 23 blend tables' contents, which is why the zero-filled stubs do not weaken any of the six cases. What I add to the emitter's entry: the same argument settles the stub question, so this open issue does not grow when ticket 23 lands -- it stays exactly the playtest-only contract it is now.",
+      "needs": "A playtest in DOSBox-X with the real Message.cel and the real Mer1.tmp/Mer2.tmp loaded: open a message window and watch six distinct bands rise from the bottom, each brighter than the last, ending with an opaque panel. Comparing the reveal against the original executable's on the same cycle setting is the sharper form.",
+      "same_as": "emit#0"
+    }
   ]
 }

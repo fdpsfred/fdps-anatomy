@@ -1455,6 +1455,320 @@ static void a_loaded_portrait_is_repainted_over_the_panel(void)
     portrait_release();
 }
 
+/* ---- fdps_message_window_open, 000205b0 ----------------------------------
+ *
+ * WHAT A FINISHED CALL LEAVES BEHIND IS ALL THERE IS TO SEE, and that is a
+ * property of the routine rather than a limit of the harness.  The six slide
+ * frames are each composed on a work page that starts as a copy of the screen
+ * the call found, and the still frame in front of the opaque blit starts from
+ * that same copy again, so no frame can leave a trace in the next one.  What
+ * survives the call is the original screen with Message.cel's sprite 0 blitted
+ * opaque at (9, 120) and, when there is a speaker, the portrait over it at
+ * (12, 90).  The reveal itself -- six bands at rows 190, 170, 150, 135, 127
+ * and 120 at 5/16, 7/16, 9/16, 11/16, 13/16 and 15/16, each presented on a
+ * vertical retrace edge -- is on the screen only while the call is running and
+ * is a playtest contract.
+ *
+ * The cases below therefore aim at what does survive, and two of them are
+ * sharper than they look:
+ *
+ * THE PANEL IS COMPARED PIXEL BY PIXEL, ALL 22,046 OF THEM, against the
+ * fixture's own bytes.  That pins the origin (9, 120) pushed at 0002075a and
+ * 00020758, the 0x140 pitch pushed at 0002075c, the sprite index 0 pushed at
+ * 00020765, and that the last draw is the OPAQUE cel blit at 0002076d and not
+ * a seventh blend -- a blend would fold every byte through the shade ramp and
+ * the inverse-palette cube and could not give the sprite's own values back.
+ * The fixture's sprite 1 is a solid zero for the same reason: a body that
+ * asked for any index but 0 paints the window black.
+ *
+ * NOTHING OUTSIDE THE PANEL MAY HAVE CHANGED, and rows 193 to 199 are the
+ * load-bearing part of that.  They lie below the still panel and no draw in
+ * the routine ever reaches them except the slide: at row 190 the band is ten
+ * rows tall and at 170, 150 and 135 it reaches the bottom of the screen too.
+ * They come back holding the pattern only because every frame is rebuilt from
+ * the saved screen and the whole 64000-byte page is presented each time.  A
+ * body that composed each frame on top of the last, or that presented only the
+ * window's rectangle, leaves the early bands standing there.
+ *
+ * WHY THE PORTRAIT BUFFER IS STAGED WITH malloc IN THREE OF THE CASES.  What
+ * the negative arm at 000207d5 does is free the buffer and null the global; it
+ * does not care what is in it and never reads it.  A 16-byte block is
+ * therefore a complete stand-in and lets those cases run whether or not
+ * FACE.CEL is next to the executable.  The one case that asserts a drawn
+ * portrait needs the real sheet and skips itself without it.
+ *
+ * THE EXPECTED VALUES.  The window rectangle, the alpha ramp and the row table
+ * are the assembly's: MOVSD.REP from 0001fd50 for 190, 170, 150, 135, 127,
+ * 120, CMP 0x6 at 0002064c for the six steps, ADD EAX,EAX / ADD EAX,0x5 at
+ * 0002069a for the weight, PUSH 0x12e and the CMP 0x49 at 0002068a for the
+ * 302 x 73 panel, and PUSH 0xa708c at 00020803 for the portrait's place.  The
+ * panel's pixel values are this file's fixture, encoded as the four-op RLE
+ * resource_info/cel.md documents.  The three portrait pixels are FACE.CEL
+ * record 0 decoded by hand, the same trio the cases further up use.
+ * ------------------------------------------------------------------ */
+
+/* The synthetic Message.cel: two sprites of 302 x 73 at a stream base far
+   enough past the offset table that a reader which started at the table would
+   decode nonsense.  Sprite 0 is the panel; sprite 1 is a solid zero and exists
+   only so that reading the wrong index is visible. */
+#define MSGOPEN_CEL_SPRITES 2
+#define MSGOPEN_CEL_SPRITE_W WAIT_WINDOW_W
+#define MSGOPEN_CEL_SPRITE_H WAIT_WINDOW_H
+#define MSGOPEN_CEL_TABLE_AT 0x0f
+#define MSGOPEN_CEL_DECOY_TABLE_AT 0x100
+#define MSGOPEN_STREAM_BASE 0x40
+
+/* One row of the sprite as four 64-pixel fills and one of 46: the fill op is
+   0b00 in the top two bits with the length less one in the bottom six, so a
+   run cannot be longer than 64 and 302 needs five of them. */
+#define MSGOPEN_FILL_MAX 64
+#define MSGOPEN_FILL_SEGMENTS 5
+#define MSGOPEN_LAST_SEGMENT_W 46
+#define MSGOPEN_ROW_BYTES (MSGOPEN_FILL_SEGMENTS * 2)
+#define MSGOPEN_STREAM_BYTES (MSGOPEN_CEL_SPRITE_H * MSGOPEN_ROW_BYTES)
+#define MSGOPEN_SHEET_BYTES \
+    (MSGOPEN_STREAM_BASE + MSGOPEN_CEL_SPRITES * MSGOPEN_STREAM_BYTES)
+
+/* The panel's pixel values live in 0x40..0x7f, which is below the background
+   pattern's 0x80..0xff and above FACE.CEL record 0's 0x2b and 0x2e, so a byte
+   on the captured screen says on its own which of the three drew it. */
+#define MSGOPEN_PANEL_BASE 0x40
+#define MSGOPEN_PANEL_MASK 0x3f
+#define MSGOPEN_PANEL_ROW_STRIDE 5
+#define MSGOPEN_DECOY_SPRITE_VALUE 0x00
+
+/* The two no-speaker indices.  -1 is what every fixed call site passes for a
+   silent window; -2 stands for the rest of the negative range, which only
+   fdps_message_window_open_from_tile produces and which
+   fdps_load_and_draw_portrait would take for a directory offset in front of
+   the table. */
+#define MSGOPEN_NO_SPEAKER (-1)
+#define MSGOPEN_NO_SPEAKER_DEEP (-2)
+
+/* A stand-in portrait record.  The negative arm frees the block and nulls the
+   global without reading a byte of it, so any size will do. */
+#define MSGOPEN_PORTRAIT_STUB_BYTES 16
+
+static unsigned char msgopen_sheet[MSGOPEN_SHEET_BYTES];
+static int msgopen_sheet_staged = 0;
+
+/* What the fixture's sprite 0 holds at a pixel: one value per 64-column
+   segment, walking with the row so that a panel drawn one row or one segment
+   out of place disagrees everywhere. */
+static int msgopen_panel_value(int row, int col)
+{
+    return MSGOPEN_PANEL_BASE
+        + ((row * MSGOPEN_PANEL_ROW_STRIDE + col / MSGOPEN_FILL_MAX)
+           & MSGOPEN_PANEL_MASK);
+}
+
+static void msgopen_stage_sheet(void)
+{
+    int index;
+    int row;
+    int segment;
+    int at;
+    int cursor;
+    int run;
+
+    if (msgopen_sheet_staged) {
+        return;
+    }
+    msgopen_sheet_staged = 1;
+    memset(msgopen_sheet, 0, (size_t) MSGOPEN_SHEET_BYTES);
+    msgopen_sheet[0] = 'C';
+    msgopen_sheet[1] = 'E';
+    msgopen_sheet[2] = 'L';
+    wait_u16(msgopen_sheet, 0x03, 1);
+    wait_u16(msgopen_sheet, 0x05, MSGOPEN_CEL_DECOY_TABLE_AT);
+    wait_u16(msgopen_sheet, 0x07, MSGOPEN_CEL_SPRITE_W);
+    wait_u16(msgopen_sheet, 0x09, MSGOPEN_CEL_SPRITE_H);
+    wait_u16(msgopen_sheet, 0x0b, MSGOPEN_CEL_SPRITES);
+    wait_u16(msgopen_sheet, 0x0d, 2);
+
+    for (index = 0; index < MSGOPEN_CEL_SPRITES; index++) {
+        at = MSGOPEN_STREAM_BASE + index * MSGOPEN_STREAM_BYTES;
+        wait_u32(msgopen_sheet, MSGOPEN_CEL_TABLE_AT + index * 4,
+                 (unsigned long) at);
+        for (row = 0; row < MSGOPEN_CEL_SPRITE_H; row++) {
+            cursor = at + row * MSGOPEN_ROW_BYTES;
+            for (segment = 0; segment < MSGOPEN_FILL_SEGMENTS; segment++) {
+                if (segment == MSGOPEN_FILL_SEGMENTS - 1) {
+                    run = MSGOPEN_LAST_SEGMENT_W;
+                } else {
+                    run = MSGOPEN_FILL_MAX;
+                }
+                msgopen_sheet[cursor] = (unsigned char) (run - 1);
+                if (index == 0) {
+                    msgopen_sheet[cursor + 1] = (unsigned char)
+                        msgopen_panel_value(row,
+                                            segment * MSGOPEN_FILL_MAX);
+                } else {
+                    msgopen_sheet[cursor + 1] = MSGOPEN_DECOY_SPRITE_VALUE;
+                }
+                cursor += 2;
+            }
+        }
+    }
+    wait_u32(msgopen_sheet, MSGOPEN_CEL_TABLE_AT + MSGOPEN_CEL_SPRITES * 4,
+             (unsigned long) MSGOPEN_SHEET_BYTES);
+}
+
+/* Gives the global a block to release, so the negative arm has something to
+   free.  Nothing reads it. */
+static void msgopen_stage_portrait_buffer(void)
+{
+    data_fdps_portrait_sprite_buf_ptr =
+        (unsigned char *) malloc((size_t) MSGOPEN_PORTRAIT_STUB_BYTES);
+}
+
+/* One whole open, with the adapter in the mode the game runs it in and the
+   pattern on the screen.  Leaves the finished frame in wait_capture[], which
+   is shared with the two sections above. */
+static void msgopen_run(int face_index)
+{
+    unsigned char *previous_sheet;
+
+    msgopen_stage_sheet();
+    previous_sheet = data_fdps_message_window_sheet_ptr;
+    data_fdps_message_window_sheet_ptr = msgopen_sheet;
+
+    wait_set_mode(WAIT_MODE_320X200X256);
+    wait_paint_pattern((unsigned char *) WAIT_VGA_BASE);
+    fdps_message_window_open(face_index);
+    memmove(wait_capture, (void *) WAIT_VGA_BASE, (size_t) SCREEN_BYTES);
+    wait_set_mode(WAIT_MODE_TEXT);
+
+    data_fdps_message_window_sheet_ptr = previous_sheet;
+}
+
+/* Bytes of the window rectangle that are not the fixture's own sprite 0. */
+static long msgopen_panel_mismatches(void)
+{
+    long wrong;
+    int row;
+    int col;
+
+    wrong = 0;
+    for (row = 0; row < WAIT_WINDOW_H; row++) {
+        for (col = 0; col < WAIT_WINDOW_W; col++) {
+            if (wait_pixel(WAIT_WINDOW_ROW + row, WAIT_WINDOW_COL + col)
+                    != msgopen_panel_value(row, col)) {
+                wrong++;
+            }
+        }
+    }
+    return wrong;
+}
+
+/* ---------------------------------------------------------------------- */
+
+/* The panel the call leaves standing is sprite 0 of the sheet in
+   data_fdps_message_window_sheet_ptr, 302 x 73, at screen (9, 120), at a 320
+   pitch, and opaque.  All 22,046 pixels are compared, so a wrong origin, a
+   wrong pitch, a wrong sprite index or a blend in place of the final blit
+   disagrees. */
+static void the_still_panel_lands_at_the_windows_place(void)
+{
+    msgopen_run(MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(wait_pixel(WAIT_WINDOW_ROW, WAIT_WINDOW_COL),
+             msgopen_panel_value(0, 0));
+    CHECK_EQ(wait_pixel(WAIT_WINDOW_ROW + WAIT_WINDOW_H - 1,
+                        WAIT_WINDOW_COL + WAIT_WINDOW_W - 1),
+             msgopen_panel_value(WAIT_WINDOW_H - 1, WAIT_WINDOW_W - 1));
+    CHECK_EQ(msgopen_panel_mismatches(), 0);
+}
+
+/* Every byte of the page outside the window rectangle is the byte that was
+   there before the call.  Rows 193 to 199 are the ones that matter: the slide
+   blends over them at rows 190, 170, 150 and 135 and nothing else in the
+   routine ever writes there, so they are clean only because each frame is
+   rebuilt from the screen saved at entry and the whole page is presented every
+   time. */
+static void nothing_outside_the_still_panel_survives_the_slide(void)
+{
+    msgopen_run(MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(wait_changed(0, WAIT_WINDOW_ROW, 0, SCREEN_PITCH), 0);
+    CHECK_EQ(wait_changed(WAIT_WINDOW_ROW + WAIT_WINDOW_H,
+                          SCREEN_ROWS - WAIT_WINDOW_ROW - WAIT_WINDOW_H, 0,
+                          SCREEN_PITCH), 0);
+    CHECK_EQ(wait_changed(WAIT_WINDOW_ROW, WAIT_WINDOW_H, 0, WAIT_WINDOW_COL),
+             0);
+    CHECK_EQ(wait_changed(WAIT_WINDOW_ROW, WAIT_WINDOW_H,
+                          WAIT_WINDOW_COL + WAIT_WINDOW_W,
+                          SCREEN_PITCH - WAIT_WINDOW_COL - WAIT_WINDOW_W), 0);
+}
+
+/* -1 releases the portrait buffer in line -- CMP [EBP+0x14],0x0 / JGE at
+   000207d1 falls through to the free at 000207e6 and the store of 0 at
+   000207ee -- and draws no portrait, which the intact panel says: the
+   portrait's rectangle overlaps rows 120 to 189 of it. */
+static void a_negative_index_releases_the_portrait_and_draws_none(void)
+{
+    msgopen_stage_portrait_buffer();
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 0);
+    msgopen_run(MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 1);
+    CHECK_EQ(msgopen_panel_mismatches(), 0);
+}
+
+/* Any negative index means the same thing, not just -1.  The test at 000207d1
+   is JGE and not an equality against -1, which is why the release is written
+   out here rather than delegated: fdps_load_and_draw_portrait's own
+   no-portrait test is == -1, so -2 handed to it would be scaled into a
+   directory offset in front of the table.  The rows above the window that the
+   portrait would have covered are checked as well, since the panel comparison
+   cannot see them. */
+static void an_index_below_minus_one_is_also_no_speaker(void)
+{
+    msgopen_stage_portrait_buffer();
+    msgopen_run(MSGOPEN_NO_SPEAKER_DEEP);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 1);
+    CHECK_EQ(msgopen_panel_mismatches(), 0);
+    CHECK_EQ(wait_changed(WAIT_PORTRAIT_ROW,
+                          WAIT_WINDOW_ROW - WAIT_PORTRAIT_ROW,
+                          WAIT_PORTRAIT_COL, PORTRAIT_WIDTH), 0);
+}
+
+/* The free is guarded and the store of 0 is not: CMP [0x00060120],0x0 / JZ at
+   000207de skips the free, and MOV [0x00060120],0x0 at 000207ee is the JZ's
+   target.  Two silent opens in a row therefore leave the slot null both times
+   and the window still goes up. */
+static void a_negative_index_on_an_empty_slot_is_harmless(void)
+{
+    msgopen_run(MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 1);
+    msgopen_run(MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 1);
+    CHECK_EQ(msgopen_panel_mismatches(), 0);
+}
+
+/* A non-negative index goes to fdps_load_and_draw_portrait with the visible
+   page at 0xa708c and a 320 pitch, so the portrait lands at screen (12, 90)
+   and OVER the panel that was blitted one step earlier.  The two decoded
+   pixels both fall inside the window rectangle and both differ from the
+   fixture's panel bytes there, so they say the portrait went on top; the third
+   is row 0 of the record, which is transparent, and falls above the window,
+   where the background pattern still shows.  The buffer is left allocated, as
+   the repaint in fdps_message_window_wait_key depends on. */
+static void a_non_negative_index_draws_the_portrait_over_the_panel(void)
+{
+    if (!sheet_present()) {
+        return;
+    }
+    msgopen_run(RECORD_A);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 0);
+    CHECK_EQ(wait_pixel(WAIT_PORTRAIT_ROW + PIXEL_MID_ROW,
+                        WAIT_PORTRAIT_COL + PIXEL_MID_COL), PIXEL_MID_VALUE);
+    CHECK_EQ(wait_pixel(WAIT_PORTRAIT_ROW + PIXEL_LAST_ROW,
+                        WAIT_PORTRAIT_COL + PIXEL_LAST_COL), PIXEL_LAST_VALUE);
+    CHECK_EQ(wait_pixel(WAIT_PORTRAIT_ROW + PIXEL_CLEAR_ROW,
+                        WAIT_PORTRAIT_COL + PIXEL_CLEAR_COL),
+             wait_pattern(WAIT_PORTRAIT_ROW + PIXEL_CLEAR_ROW,
+                          WAIT_PORTRAIT_COL + PIXEL_CLEAR_COL));
+    portrait_release();
+}
+
 void run_msgwin_tests(void)
 {
     RUN_TEST(loads_the_record_the_directory_names);
@@ -1493,4 +1807,10 @@ void run_msgwin_tests(void)
     RUN_TEST(only_the_two_option_cells_are_drawn);
     RUN_TEST(the_battle_branch_recomposes_the_prompt_scene);
     RUN_TEST(a_loaded_portrait_is_repainted_over_the_panel);
+    RUN_TEST(the_still_panel_lands_at_the_windows_place);
+    RUN_TEST(nothing_outside_the_still_panel_survives_the_slide);
+    RUN_TEST(a_negative_index_releases_the_portrait_and_draws_none);
+    RUN_TEST(an_index_below_minus_one_is_also_no_speaker);
+    RUN_TEST(a_negative_index_on_an_empty_slot_is_harmless);
+    RUN_TEST(a_non_negative_index_draws_the_portrait_over_the_panel);
 }

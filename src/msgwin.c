@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <conio.h>
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -527,4 +528,177 @@ int fdps_prompt_two_choice(void)
 
     free(saved_panel);
     return selection;
+}
+
+/* The whole mode 13h page, which is what this routine saves and puts back:
+   200 rows of VGA_SCREEN_PITCH, PUSH 0xfa00 in front of all three mallocs and
+   all six memmoves, and the 0xc8 the band height is subtracted from at
+   0002067e. */
+#define VGA_SCREEN_ROWS 0xc8
+#define VGA_SCREEN_BYTES 0xfa00
+
+/* Where the panel stands when the slide is over: screen (9, 120), pushed as
+   PUSH 0x9 / PUSH 0x78 at 0002075a and 00020758.  The same 9 is the column
+   every intermediate frame blends at, and 120 is the last entry of the row
+   table below, which is why the slide ends exactly where the still panel is
+   drawn. */
+#define MESSAGE_WINDOW_COL 0x9
+#define MESSAGE_WINDOW_ROW 0x78
+
+/* Message.cel holds the panel as its sprite 0 -- PUSH 0x0 for the index in
+   both blits, at 00020635 and 00020765 -- and both blits are mode 0, the
+   plain opaque RLE decode, with the mode operand 0. */
+#define MESSAGE_WINDOW_SPRITE 0
+#define MESSAGE_WINDOW_BLIT_MODE 0
+#define MESSAGE_WINDOW_BLIT_MODE_OPERAND 0
+
+/* The slide: six frames, and the blend weight of frame i is i * 2 + 5.  ADD
+   EAX,EAX / ADD EAX,0x5 at 0002069a, against the CMP 0x6 at 0002064c.
+   fdps_blit_blend_rect divides by sixteen, so the panel arrives at 5/16, 7/16,
+   9/16, 11/16, 13/16 and 15/16 -- it is never blended at 16/16, because the
+   still frame below is an opaque blit and not a blend. */
+#define MESSAGE_WINDOW_SLIDE_STEPS 6
+#define MESSAGE_WINDOW_FIRST_ALPHA 5
+#define MESSAGE_WINDOW_ALPHA_STEP 2
+
+/* Where the portrait goes on the visible page: PUSH 0xa708c at 00020803, which
+   at a 320 pitch is screen (12, 90).  The base is the adapter's own linear
+   address, so only the offset is a placement (contract E). */
+#define SCREEN_PORTRAIT_AT 0x708c
+
+/* 000205b0.  One counted loop over a six-entry table and one two-armed tail;
+   everything else is straight line.  The loop is Watcom's usual shape -- the
+   test at 0002064c with JL into the body and JMP past it, the increment at
+   0002065a, the JMP back at 0002073a -- and the tail is CMP [EBP+0x14],0x0 /
+   JGE at 000207d1, so the negative arm is the fall-through and the portrait is
+   the branch taken.
+
+   THE SEVEN FRAMES ARE ALL COMPOSED FROM THE SAME SAVED SCREEN.  The visible
+   page is copied into screen_backup once, before anything is drawn, and every
+   frame starts by copying that backup over the work page.  So the slide never
+   accumulates: frame i is the original screen with the panel blended at row
+   table[i] and nothing else, and the still frame at the end is the original
+   screen with the panel blitted opaque.  A body that dropped either restore
+   would leave every earlier frame's band underneath the next one.
+
+   THE BAND IS CLIPPED AT THE BOTTOM OF THE SCREEN AND NOWHERE ELSE.
+   band_height is 200 - row clipped down to the panel's own 73, which for the
+   first four rows of the table (190, 170, 150, 135) is the part of the panel
+   that fits above row 200 and for the last two (127, 120) is the whole panel.
+   Nothing here clips the width and nothing checks the left edge: the blend is
+   handed a raw work_page + row * 320 + 9 and would run off the end of the
+   64000-byte page if the clip were dropped, because 190 + 73 rows at a 320
+   pitch is 20,000 bytes past it.
+
+   THE RETRACE WAIT IS TWO-PHASE AND HAS TO STAY THAT WAY.  Each present spins
+   until bit 3 of 0x3da is set and then until it is clear, so the 64000-byte
+   copy begins at the top of active display rather than inside the blanking
+   interval.  The single-phase wait-for-set that the same idiom is usually
+   written with starts every copy one blanking period earlier and changes what
+   the reveal looks like (rebuild_info/pitfalls.md).
+
+   THE PANEL BUFFER IS ZEROED BEFORE THE CEL IS DECODED INTO IT.  Message.cel's
+   sprite 0 has transparent pixels, and mode 0 leaves them as it found them, so
+   without the memset the blend would read whatever malloc handed back through
+   them.  Zero is also the palette index the blend folds to nothing much, which
+   is what makes the panel's rounded corners come out dark rather than random.
+
+   ONLY THE STILL PANEL AND THE PORTRAIT SURVIVE THE CALL.  The six blended
+   frames are transient by construction -- each is wiped by the next frame's
+   restore and the last of them by the restore in front of the still blit -- so
+   what a caller sees afterwards is the original screen, the opaque panel at
+   (9, 120) and, if there is a speaker, the portrait over it at (12, 90). */
+void fdps_message_window_open(int face_index)
+{
+    /* The row the panel's top edge sits at in each of the six frames, copied
+       onto the stack from the read-only template at 0001fd50.  It ends at 120,
+       the row the still panel is drawn at. */
+    int slide_in_row[MESSAGE_WINDOW_SLIDE_STEPS] =
+        { 190, 170, 150, 135, 127, 120 };
+    /* The off-screen page every frame is composed on and presented from. */
+    unsigned char *work_page;
+    /* Message.cel's sprite 0 decoded once, packed at its own 302 pitch: the
+       foreground of all six blends. */
+    unsigned char *panel;
+    /* The visible page as it stood on entry.  Every frame starts from it. */
+    unsigned char *screen_backup;
+    /* Which of the six slide frames is being composed. */
+    int step;
+    /* How many of the panel's 73 rows fit above the bottom of the screen at
+       this frame's row. */
+    int band_height;
+
+    work_page = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+    screen_backup = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+    panel = (unsigned char *) malloc((size_t) MESSAGE_WINDOW_BYTES);
+
+    memmove(screen_backup, (void *) VGA_SCREEN_BASE,
+            (size_t) VGA_SCREEN_BYTES);
+    memset(panel, 0, (size_t) MESSAGE_WINDOW_BYTES);
+    fdps_cel_blit_sprite(data_fdps_message_window_sheet_ptr,
+                         MESSAGE_WINDOW_SPRITE, panel, MESSAGE_WINDOW_W, 0, 0,
+                         MESSAGE_WINDOW_BLIT_MODE_OPERAND,
+                         MESSAGE_WINDOW_BLIT_MODE);
+
+    for (step = 0; step < MESSAGE_WINDOW_SLIDE_STEPS; step++) {
+        memmove(work_page, screen_backup, (size_t) VGA_SCREEN_BYTES);
+
+        band_height = VGA_SCREEN_ROWS - slide_in_row[step];
+        if (band_height > MESSAGE_WINDOW_H) {
+            band_height = MESSAGE_WINDOW_H;
+        }
+
+        fdps_blit_blend_rect(panel, MESSAGE_WINDOW_W,
+                             work_page
+                                 + slide_in_row[step] * VGA_SCREEN_PITCH
+                                 + MESSAGE_WINDOW_COL,
+                             VGA_SCREEN_PITCH,
+                             work_page
+                                 + slide_in_row[step] * VGA_SCREEN_PITCH
+                                 + MESSAGE_WINDOW_COL,
+                             VGA_SCREEN_PITCH, MESSAGE_WINDOW_W, band_height,
+                             data_fdps_palette_shade_ramp_table,
+                             data_fdps_inverse_palette_cube,
+                             step * MESSAGE_WINDOW_ALPHA_STEP
+                                 + MESSAGE_WINDOW_FIRST_ALPHA);
+
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends, so the copy starts at the top of the frame. */
+        }
+        memmove((void *) VGA_SCREEN_BASE, work_page,
+                (size_t) VGA_SCREEN_BYTES);
+    }
+
+    memmove(work_page, screen_backup, (size_t) VGA_SCREEN_BYTES);
+    fdps_cel_blit_sprite(data_fdps_message_window_sheet_ptr,
+                         MESSAGE_WINDOW_SPRITE, work_page, VGA_SCREEN_PITCH,
+                         MESSAGE_WINDOW_COL, MESSAGE_WINDOW_ROW,
+                         MESSAGE_WINDOW_BLIT_MODE_OPERAND,
+                         MESSAGE_WINDOW_BLIT_MODE);
+
+    while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+        /* Spin until the retrace begins. */
+    }
+    while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+        /* And until it ends, so the copy starts at the top of the frame. */
+    }
+    memmove((void *) VGA_SCREEN_BASE, work_page, (size_t) VGA_SCREEN_BYTES);
+
+    free(work_page);
+    free(screen_backup);
+    free(panel);
+
+    if (face_index < 0) {
+        if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+            free(data_fdps_portrait_sprite_buf_ptr);
+        }
+        data_fdps_portrait_sprite_buf_ptr = NULL;
+    } else {
+        fdps_load_and_draw_portrait(
+            (unsigned char *) (VGA_SCREEN_BASE + SCREEN_PORTRAIT_AT),
+            VGA_SCREEN_PITCH, face_index);
+    }
 }

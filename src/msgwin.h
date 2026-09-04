@@ -45,6 +45,34 @@ extern void fdps_load_and_draw_portrait(unsigned char *dest, int dest_pitch,
                                         int portrait_index);
 #pragma aux fdps_load_and_draw_portrait "*" parm caller [];
 
+/* 000205b0.  Puts the message window up over whatever is on screen and LEAVES
+   IT THERE.  It slides the Message.cel panel in from the bottom over six
+   steps, ends with the panel standing at screen (9, 120) at full strength, and
+   draws the speaker's portrait into it.  Nothing is returned and nothing is
+   saved for a caller to restore.
+
+   THE CALLER OWNS EVERYTHING THAT COMES NEXT.  The text is written afterwards
+   with fdps_draw_text, the wait is fdps_message_window_wait_key, and the
+   window is taken down again by fdps_message_window_close, which runs the same
+   row table backwards.  A caller that opens and never closes leaves the panel
+   on the visible page.
+
+   THE WHOLE SCREEN IS SAVED AND PUT BACK, not just the window's rectangle.
+   The visible page is copied out at entry and every one of the seven frames is
+   composed from that copy, so anything that was on screen is still there
+   underneath, and anything drawn on the visible page WHILE this runs is lost.
+
+   face_index selects the speaker's picture in FACE.CEL and is handed to
+   fdps_load_and_draw_portrait unchanged.  ANY NEGATIVE VALUE MEANS "NO
+   SPEAKER", not just -1: this routine tests face_index < 0 and releases the
+   portrait buffer itself rather than calling through, because
+   fdps_load_and_draw_portrait's own no-portrait test is == -1 and would treat
+   any other negative index as a directory offset in front of the table.  It
+   matters because fdps_message_window_open_from_tile passes a signed character
+   id that stays negative when that speaker is not on the map. */
+extern void fdps_message_window_open(int face_index);
+#pragma aux fdps_message_window_open "*" parm caller [];
+
 /* 000203d0.  Holds the message window that fdps_message_window_open left
    standing on the visible screen, repainting it over a live background once
    per game tick, until the player presses a key or the tick budget runs out.
