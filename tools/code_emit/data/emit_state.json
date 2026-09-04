@@ -2377,6 +2377,14 @@
       "status": "committed",
       "emitted_against": "0x267",
       "rounds": 0
+    },
+    "00020820": {
+      "name": "fdps_message_window_close",
+      "target": "msgwin.c",
+      "body_size": "0x245",
+      "status": "committed",
+      "rounds": 1,
+      "emitted_against": "0x245"
     }
   }
 }

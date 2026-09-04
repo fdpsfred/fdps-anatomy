@@ -1769,6 +1769,367 @@ static void a_non_negative_index_draws_the_portrait_over_the_panel(void)
     portrait_release();
 }
 
+/* ---- fdps_message_window_close, 00020820 ---------------------------------
+ *
+ * The close is watched the same way the open above is -- put the adapter into
+ * mode 13h, paint a known pattern over the page, call, capture the frame and
+ * come back to text mode -- because the routine's whole output is the VGA
+ * aperture at 0xa0000.  Its four working buffers are allocated and freed
+ * inside the call and cannot be looked at.
+ *
+ * WHAT MAKES THE FRAME DETERMINED HERE.  The backdrop is not lifted off the
+ * screen, it is recomposed by fdps_draw_scene_layers into a page malloc has
+ * just handed over, so with no layers staged the frame would be whatever was
+ * in that memory.  One layer is therefore staged the way tests/mapdraw.c
+ * stages them: a 1x1 tile map, so every cell of the 14x9 window wraps back
+ * onto cell (0, 0) and the whole composition page comes out one colour,
+ * CLOSE_SCENE_COLOR.  What the screen must hold afterwards is then fully
+ * known -- that colour inside the 312 x 192 viewport at (4, 4) and palette
+ * index 0 everywhere else.
+ *
+ * THE FOUR COLOUR BANDS ARE DISJOINT ON PURPOSE.  The background pattern has
+ * bit 7 set in every byte, the panel fixture's sprite 0 holds 0x40..0x7f, the
+ * scene is 0x11 and a blended pixel is 0x1f, so a byte on the captured page
+ * says on its own which of the four put it there.  That is what lets the cases
+ * below assert that no frame of the slide survives: the blend resolves every
+ * pixel through the inverse-palette cube, and the cube is staged to answer
+ * CLOSE_BLEND_VALUE for every index, so a pixel a blend wrote carries that
+ * value wherever it lands.
+ *
+ * EXPECTED VALUES COME FROM THE ASSEMBLY.  PUSH 0x15180 at 0002083b for the
+ * 360 x 240 composition page; the six-push blit at 000208a0 -- 0xc0, 0x138,
+ * 0x140, page + 0x504, 0x168, scratch + 0x21d8 -- for the 312 x 192 viewport
+ * copied from scene pixel (24, 24) to screen (4, 4); PUSH 0xfa00 / PUSH 0x0 at
+ * 00020867 for the zeroed screen page under it; MOVSD.REP from 0001fd68 for
+ * the rows 190, 170, 150, 135, 127, 120; MOV [EBP-0xc],0x5 with the JGE at
+ * 00020913 for the six steps counted down; the CMP 0x49 at 0002094d for the
+ * band clip; ADD EAX,EAX / ADD EAX,0x5 at 0002095d for the weight; and the
+ * final present at 00020a32, which pushes the CLEAN page and not the work
+ * page.
+ *
+ * WHAT IS NOT COVERED.  The six animation frames are transient by
+ * construction -- each is wiped by the next frame's restore and the last of
+ * them by the present of the clean page -- so nothing about the slide's rows,
+ * weights or clipping can be read off the finished screen, and neither can the
+ * panel's pixels, since the panel never reaches the visible page at all.  That
+ * the panel is sprite 0 of data_fdps_message_window_sheet_ptr, and that the
+ * bands fall where the row table says, are playtest contracts.  The two-phase
+ * retrace wait is not observable from here either.
+ * ------------------------------------------------------------------ */
+
+/* One tile of 24 x 24 per entry, encoded as 24 rows of a single fill run: the
+   fill op is 0b00 in the top two bits with the length less one below it, so a
+   24-pixel run is 0x17 followed by the palette index. */
+#define CLOSE_TILE 24
+#define CLOSE_TILES 2
+#define CLOSE_TILE_STREAM_BYTES (CLOSE_TILE * 2)
+#define CLOSE_CEL_TABLE_AT 0x0f
+#define CLOSE_STREAMS_AT (CLOSE_CEL_TABLE_AT + CLOSE_TILES * 4)
+#define CLOSE_ATTR_HEADER 0x11
+
+/* The tile the 1x1 map holds, and the colour it paints.  0x11 is below the
+   panel fixture's 0x40 and the pattern's 0x80, and it is not 0, so it cannot
+   be confused with a border pixel, a panel pixel or a leftover of the screen
+   that was there before the call. */
+#define CLOSE_LAYER_TILE 1
+#define CLOSE_TILE_COLOR_BASE 0x10
+#define CLOSE_SCENE_COLOR (CLOSE_TILE_COLOR_BASE + CLOSE_LAYER_TILE)
+
+/* What every blended pixel comes back as: the cube answers this for any index,
+   so a pixel written by fdps_blit_blend_rect carries it wherever it lands. */
+#define CLOSE_BLEND_VALUE 0x1f
+
+/* The panel fixture's own band, MSGOPEN_PANEL_BASE through
+   MSGOPEN_PANEL_BASE + MSGOPEN_PANEL_MASK. */
+#define CLOSE_PANEL_FIRST 0x40
+#define CLOSE_PANEL_LAST 0x7f
+
+/* The band the background pattern lives in: every one of its bytes has bit 7
+   set. */
+#define CLOSE_PATTERN_FIRST 0x80
+#define CLOSE_PATTERN_LAST 0xff
+
+/* The shade ramp's shape, which is what the blend folds its two weights into,
+   and the inverse-palette cube's. */
+#define CLOSE_RAMP_ENTRIES (18 * 256)
+#define CLOSE_CUBE_ENTRIES 4096
+
+/* A stand-in portrait record.  Nothing in the close reads it; the case that
+   uses it only asks whether the global still points at it afterwards. */
+#define CLOSE_PORTRAIT_STUB_BYTES 16
+
+/* The six layer slots the arrays hold, of which one is made active. */
+#define CLOSE_LAYER_SLOTS 6
+
+static unsigned char close_tileset[CLOSE_STREAMS_AT
+                                   + CLOSE_TILES * CLOSE_TILE_STREAM_BYTES];
+static unsigned char close_map[0x0b + 2];
+static unsigned char close_grid[4 + 2];
+static unsigned char close_attr[CLOSE_ATTR_HEADER + CLOSE_TILES * 4];
+static unsigned char close_capture[SCREEN_BYTES];
+
+/* One flat-coloured tile per entry, and the .CEL offset table that points at
+   each stream from the sheet base. */
+static void close_build_tileset(void)
+{
+    int tile_id;
+    int row;
+    int stream_at;
+
+    for (tile_id = 0; tile_id < CLOSE_TILES; tile_id++) {
+        stream_at = CLOSE_STREAMS_AT + tile_id * CLOSE_TILE_STREAM_BYTES;
+        wait_u32(close_tileset, CLOSE_CEL_TABLE_AT + tile_id * 4,
+                 (unsigned long) stream_at);
+        for (row = 0; row < CLOSE_TILE; row++) {
+            close_tileset[stream_at + row * 2] =
+                (unsigned char) (CLOSE_TILE - 1);
+            close_tileset[stream_at + row * 2 + 1] =
+                (unsigned char) (CLOSE_TILE_COLOR_BASE + tile_id);
+        }
+    }
+}
+
+/* One layer, attribute mode 0 so neither the attribute table nor the movement
+   grid is read, no scroll and no parallax, no units and no cursor: the
+   composition page comes out one flat colour and nothing else is drawn on it.
+   The scroll latch is left on a marker the counter cannot reach, so the
+   compositor having run is visible as that latch no longer holding it. */
+static void close_stage_scene(void)
+{
+    int slot;
+    int i;
+
+    close_build_tileset();
+    wait_u16(close_map, 7, 1);
+    wait_u16(close_map, 9, 1);
+    wait_u16(close_map, 0x0b, CLOSE_LAYER_TILE);
+    for (i = 0; i < CLOSE_ATTR_HEADER; i++) {
+        close_attr[i] = 0xff;
+    }
+    for (i = 0; i < CLOSE_TILES * 4; i++) {
+        close_attr[CLOSE_ATTR_HEADER + i] = 0;
+    }
+    close_grid[4] = 0x33;
+    close_grid[5] = 0xff;
+
+    for (slot = 0; slot < CLOSE_LAYER_SLOTS; slot++) {
+        data_fdps_scene_layer_tile_map_ptrs[slot] = close_map;
+        data_fdps_scene_layer_tile_sheet_ptrs[slot] = close_tileset;
+        data_fdps_scene_layer_tile_attr_ptr[slot] = close_attr;
+        data_fdps_scene_layer_tile_attr_mode[slot] = 0;
+        data_fdps_scene_layer_draw_depth[slot] = 0;
+        data_fdps_scene_layer_scroll_x_accumulator[slot] = 0;
+        data_fdps_scene_layer_scroll_offset_y[slot] = 0;
+        data_fdps_scene_layer_scroll_x_step[slot] = 0;
+        data_fdps_scene_layer_scroll_step_y[slot] = 0;
+        data_fdps_scene_layer_parallax_factor_x[slot] = 0;
+        data_fdps_scene_layer_parallax_factor_y[slot] = 0;
+    }
+    data_fdps_scene_layer_count = 1;
+    data_fdps_battle_move_grid_ptr = close_grid;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_scene_tile_anim_phase = 0;
+    data_fdps_scene_tile_anim_last_flip_tick = 0;
+    data_fdps_marked_tile_blend_phase = 0;
+    data_fdps_scene_marked_tile_tint_color = 0;
+    data_fdps_scene_layer_scroll_last_tick = WAIT_SCROLL_MARKER;
+}
+
+/* A ramp of zeroes and a cube that answers the same index everywhere, so every
+   pixel fdps_blit_blend_rect writes is CLOSE_BLEND_VALUE whatever the two
+   sources held. */
+static void close_stage_blend_tables(void)
+{
+    int i;
+
+    for (i = 0; i < CLOSE_RAMP_ENTRIES; i++) {
+        data_fdps_palette_shade_ramp_table[i] = 0;
+    }
+    for (i = 0; i < CLOSE_CUBE_ENTRIES; i++) {
+        data_fdps_inverse_palette_cube[i] = CLOSE_BLEND_VALUE;
+    }
+}
+
+/* One whole close, with the adapter in the mode the game runs it in and the
+   pattern on the screen.  Leaves the finished frame in close_capture[]. */
+static void close_run(void)
+{
+    unsigned char *previous_sheet;
+
+    msgopen_stage_sheet();
+    close_stage_scene();
+    close_stage_blend_tables();
+    previous_sheet = data_fdps_message_window_sheet_ptr;
+    data_fdps_message_window_sheet_ptr = msgopen_sheet;
+
+    wait_set_mode(WAIT_MODE_320X200X256);
+    wait_paint_pattern((unsigned char *) WAIT_VGA_BASE);
+    fdps_message_window_close();
+    memmove(close_capture, (void *) WAIT_VGA_BASE, (size_t) SCREEN_BYTES);
+    wait_set_mode(WAIT_MODE_TEXT);
+
+    data_fdps_message_window_sheet_ptr = previous_sheet;
+}
+
+static int close_pixel(int row, int col)
+{
+    return (int) close_capture[(long) row * SCREEN_PITCH + col];
+}
+
+static int close_inside_viewport(int row, int col)
+{
+    if (row < WAIT_VIEWPORT_ROW || row >= WAIT_VIEWPORT_ROW + WAIT_VIEWPORT_H) {
+        return 0;
+    }
+    if (col < WAIT_VIEWPORT_COL || col >= WAIT_VIEWPORT_COL + WAIT_VIEWPORT_W) {
+        return 0;
+    }
+    return 1;
+}
+
+/* Bytes of the viewport that are not the colour the staged layer paints. */
+static long close_viewport_mismatches(void)
+{
+    long wrong;
+    int row;
+    int col;
+
+    wrong = 0;
+    for (row = WAIT_VIEWPORT_ROW; row < WAIT_VIEWPORT_ROW + WAIT_VIEWPORT_H;
+         row++) {
+        for (col = WAIT_VIEWPORT_COL;
+             col < WAIT_VIEWPORT_COL + WAIT_VIEWPORT_W; col++) {
+            if (close_pixel(row, col) != CLOSE_SCENE_COLOR) {
+                wrong++;
+            }
+        }
+    }
+    return wrong;
+}
+
+/* Bytes outside the viewport that are not palette index 0. */
+static long close_border_not_black(void)
+{
+    long wrong;
+    int row;
+    int col;
+
+    wrong = 0;
+    for (row = 0; row < SCREEN_ROWS; row++) {
+        for (col = 0; col < SCREEN_PITCH; col++) {
+            if (!close_inside_viewport(row, col)
+                    && close_pixel(row, col) != 0) {
+                wrong++;
+            }
+        }
+    }
+    return wrong;
+}
+
+/* Bytes of the whole captured page inside a value range. */
+static long close_bytes_between(int low, int high)
+{
+    long found;
+    int row;
+    int col;
+    int value;
+
+    found = 0;
+    for (row = 0; row < SCREEN_ROWS; row++) {
+        for (col = 0; col < SCREEN_PITCH; col++) {
+            value = close_pixel(row, col);
+            if (value >= low && value <= high) {
+                found++;
+            }
+        }
+    }
+    return found;
+}
+
+/* ---------------------------------------------------------------------- */
+
+/* What is left standing is the recomposed scene and nothing else: the
+   312 x 192 viewport carries the layer's colour in every one of its 59,904
+   pixels.  That pins the source pixel (24, 24) of the 360-pitch composition
+   page, the 320-pitch destination at (4, 4) and both extents -- a wrong pitch
+   on either side shears the rectangle and a wrong origin shifts it, and either
+   way the border shows through -- and it pins that the frame presented last is
+   the CLEAN page: the work page carries the blended band at rows 120 to 192,
+   which would read CLOSE_BLEND_VALUE and not the layer's colour. */
+static void the_recomposed_scene_is_what_is_left_standing(void)
+{
+    close_run();
+    CHECK_EQ(close_pixel(WAIT_VIEWPORT_ROW, WAIT_VIEWPORT_COL),
+             CLOSE_SCENE_COLOR);
+    CHECK_EQ(close_pixel(WAIT_VIEWPORT_ROW + WAIT_VIEWPORT_H - 1,
+                         WAIT_VIEWPORT_COL + WAIT_VIEWPORT_W - 1),
+             CLOSE_SCENE_COLOR);
+    CHECK_EQ(close_viewport_mismatches(), 0);
+}
+
+/* The four-pixel border comes out black, because the screen page is memset to
+   0 before the narrower viewport is copied into it.  The pattern painted
+   before the call has bit 7 set in every byte, so a border pixel that is 0 can
+   only have come from that memset, and the count over every byte outside the
+   viewport is what says the whole 64000-byte page was presented rather than
+   just the rectangle that changed. */
+static void the_border_the_viewport_leaves_is_black(void)
+{
+    close_run();
+    CHECK_EQ(close_pixel(WAIT_VIEWPORT_ROW - 1, WAIT_VIEWPORT_COL), 0);
+    CHECK_EQ(close_pixel(WAIT_VIEWPORT_ROW, WAIT_VIEWPORT_COL - 1), 0);
+    CHECK_EQ(close_pixel(WAIT_VIEWPORT_ROW + WAIT_VIEWPORT_H,
+                         WAIT_VIEWPORT_COL), 0);
+    CHECK_EQ(close_pixel(WAIT_VIEWPORT_ROW,
+                         WAIT_VIEWPORT_COL + WAIT_VIEWPORT_W), 0);
+    CHECK_EQ(close_border_not_black(), 0);
+}
+
+/* No frame of the slide survives the call.  Every pixel a blend wrote is
+   CLOSE_BLEND_VALUE and every pixel of the panel fixture's sprite 0 is in
+   0x40..0x7f, and neither appears anywhere on the captured page: the six
+   blended frames go to the work page, which is thrown away, and the present
+   that ends the routine copies the clean page over all of them. */
+static void no_frame_of_the_slide_survives(void)
+{
+    close_run();
+    CHECK_EQ(close_bytes_between(CLOSE_BLEND_VALUE, CLOSE_BLEND_VALUE), 0);
+    CHECK_EQ(close_bytes_between(CLOSE_PANEL_FIRST, CLOSE_PANEL_LAST), 0);
+}
+
+/* The backdrop is built, not lifted off the screen.  fdps_draw_scene_layers
+   runs -- visible in the scroll latch it moves off the marker -- and not one
+   byte of what was on the visible page is left: the pattern is the only source
+   of a byte with bit 7 set, and the finished frame has none.  A close that
+   composed over a copy of the screen, the way the open does, would leave the
+   pattern standing in the border and around the panel. */
+static void the_backdrop_is_recomposed_and_the_old_screen_is_gone(void)
+{
+    close_run();
+    CHECK_EQ(data_fdps_scene_layer_scroll_last_tick == WAIT_SCROLL_MARKER, 0);
+    CHECK_EQ(close_bytes_between(CLOSE_PATTERN_FIRST, CLOSE_PATTERN_LAST), 0);
+}
+
+/* The portrait buffer is not one of the four the routine frees.  It is still
+   allocated and the global still points at the same block afterwards, which is
+   what lets the next window redraw the same face without going back to
+   FACE.CEL. */
+static void the_portrait_buffer_is_left_alone(void)
+{
+    unsigned char *staged;
+
+    staged = (unsigned char *) malloc((size_t) CLOSE_PORTRAIT_STUB_BYTES);
+    data_fdps_portrait_sprite_buf_ptr = staged;
+    close_run();
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == staged, 1);
+    free(staged);
+    data_fdps_portrait_sprite_buf_ptr = NULL;
+}
+
 void run_msgwin_tests(void)
 {
     RUN_TEST(loads_the_record_the_directory_names);
@@ -1813,4 +2174,9 @@ void run_msgwin_tests(void)
     RUN_TEST(an_index_below_minus_one_is_also_no_speaker);
     RUN_TEST(a_negative_index_on_an_empty_slot_is_harmless);
     RUN_TEST(a_non_negative_index_draws_the_portrait_over_the_panel);
+    RUN_TEST(the_recomposed_scene_is_what_is_left_standing);
+    RUN_TEST(the_border_the_viewport_leaves_is_black);
+    RUN_TEST(no_frame_of_the_slide_survives);
+    RUN_TEST(the_backdrop_is_recomposed_and_the_old_screen_is_gone);
+    RUN_TEST(the_portrait_buffer_is_left_alone);
 }

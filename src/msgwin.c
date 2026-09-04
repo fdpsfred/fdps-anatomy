@@ -702,3 +702,146 @@ void fdps_message_window_open(int face_index)
             VGA_SCREEN_PITCH, face_index);
     }
 }
+
+/* 00020820.  One counted loop over a six-entry table, and nothing else
+   branches: the test at 0002090f is CMP [EBP-0xc],0x0 / JGE into the body with
+   a JMP past it, the step is the DEC at 0002091d, and the only other test in
+   the body is the band clip's CMP 0x49 / JLE at 0002094d.  The loop runs
+   DOWNWARDS, from 5 to 0, which is what turns the same row table the open
+   above walks forwards into a slide off the bottom of the screen.
+
+   IT DOES NOT TAKE THE WINDOW THAT IS ON SCREEN BACK DOWN.  The visible page
+   is never read.  The backdrop is built from scratch -- fdps_draw_scene_layers
+   recomposes the scrolling scene into a 360 x 240 page and its 312 x 192
+   viewport is copied into an otherwise zeroed screen page -- and the panel
+   that slides is a bare Message.cel sprite 0 with no text and no portrait
+   drawn into it.  So the message and the speaker are gone from the first
+   animation frame, and whatever else was on the visible page is gone with
+   them (rebuild_info/pitfalls.md).
+
+   THE FOUR-PIXEL BORDER IS BLACK BECAUSE THE PAGE IS ZEROED AND THE VIEWPORT
+   IS NARROWER THAN THE SCREEN.  memset over the whole 64000 bytes at 00020872
+   and then a 312 x 192 copy to byte 0x504 leaves rows 0..3, rows 196..199 and
+   four columns at each edge holding index 0, and every frame carries that
+   border because every frame is a copy of this page.
+
+   EVERY FRAME IS COMPOSED FROM THAT CLEAN PAGE AND NOT FROM THE LAST ONE.  The
+   memmove at 0002092f restores the work page before each blend, so frame i is
+   the bare scene with the panel blended at one row -- the bands do not
+   accumulate -- and the frame left standing at the end is the clean page
+   itself, presented at 00020a32, with no panel on it at all.
+
+   THE BAND IS 200 - row, AND THE CLAMP ONLY BITES ON THE FIRST FRAME.  The
+   subtraction at 00020946 is what shortens the band as the panel walks down,
+   and the clamp at 0002094d holds it to the panel's own 73 rows.  This loop
+   runs the table backwards, so the rows come out 120, 127, 135, 150, 170, 190
+   and the bands 80, 73, 65, 50, 30, 10: only the first exceeds 73, and the JLE
+   at 00020951 is taken on the other five.  What the clamp bounds is the READ,
+   not the write.  An unclamped 80 rows at row 120 would still finish at work
+   page byte 120 * 320 + 9 + 79 * 320 + 301 = 63990, inside the page, while
+   reading 302 * 80 = 24160 bytes out of a panel buffer that holds only
+   302 * 73 = 22046.
+
+   THE RETRACE WAIT IS TWO-PHASE AND HAS TO STAY THAT WAY: spin until bit 3 of
+   0x3da is set, then until it is clear, so each 64000-byte present begins at
+   the top of active display.  The single-phase wait the idiom is usually
+   written with starts every copy one blanking period earlier and changes what
+   the six steps look like (rebuild_info/pitfalls.md).
+
+   NOTHING BUT ITS OWN FOUR BUFFERS IS RELEASED.  The scene page goes as soon
+   as its viewport has been copied out, and the work page, the clean page and
+   the panel go at the end; the portrait buffer
+   data_fdps_portrait_sprite_buf_ptr that fdps_message_window_open left loaded
+   is deliberately still allocated at the RET, because the next window reuses
+   it.  No malloc is checked. */
+void fdps_message_window_close(void)
+{
+    /* The row the panel's top edge sits at in each of the six frames, copied
+       onto the stack by the MOVSD.REP at 00020839 from the template at
+       0001fd68 -- a second copy of the table the open above takes from
+       0001fd50, holding the same six rows in the same order.  This loop reads
+       it from the far end, so the panel starts at 120, where the open left it,
+       and ends at 190. */
+    int slide_out_row[MESSAGE_WINDOW_SLIDE_STEPS] =
+        { 190, 170, 150, 135, 127, 120 };
+    /* The 360 x 240 page the scrolling scene is recomposed on.  Only its
+       312 x 192 viewport is wanted, and it is freed as soon as that has been
+       copied out. */
+    unsigned char *scene_page;
+    /* The bare scene on a screen-sized page: every frame is restored from it,
+       and it is the frame left on the visible page at the end. */
+    unsigned char *clean_page;
+    /* The off-screen page a frame is composed on and presented from. */
+    unsigned char *work_page;
+    /* Message.cel's sprite 0 decoded once, packed at its own 302 pitch, with
+       nothing written over it: the foreground of all six blends. */
+    unsigned char *panel;
+    /* Which of the six slide frames is being composed, counting down. */
+    int step;
+    /* How many of the panel's 73 rows fit above the bottom of the screen at
+       this frame's row. */
+    int band_height;
+
+    scene_page = (unsigned char *) malloc((size_t) SCENE_PAGE_BYTES);
+    fdps_draw_scene_layers(scene_page);
+
+    clean_page = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+    memset(clean_page, 0, (size_t) VGA_SCREEN_BYTES);
+    fdps_blit_rect((unsigned int) (scene_page + SCENE_PAGE_WINDOW_AT),
+                   SCENE_PAGE_PITCH, clean_page + SCREEN_WINDOW_AT,
+                   VGA_SCREEN_PITCH, SCREEN_WINDOW_W, SCREEN_WINDOW_H);
+
+    work_page = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+    free(scene_page);
+
+    panel = (unsigned char *) malloc((size_t) MESSAGE_WINDOW_BYTES);
+    memset(panel, 0, (size_t) MESSAGE_WINDOW_BYTES);
+    fdps_cel_blit_sprite(data_fdps_message_window_sheet_ptr,
+                         MESSAGE_WINDOW_SPRITE, panel, MESSAGE_WINDOW_W, 0, 0,
+                         MESSAGE_WINDOW_BLIT_MODE_OPERAND,
+                         MESSAGE_WINDOW_BLIT_MODE);
+
+    for (step = MESSAGE_WINDOW_SLIDE_STEPS - 1; step >= 0; step--) {
+        memmove(work_page, clean_page, (size_t) VGA_SCREEN_BYTES);
+
+        band_height = VGA_SCREEN_ROWS - slide_out_row[step];
+        if (band_height > MESSAGE_WINDOW_H) {
+            band_height = MESSAGE_WINDOW_H;
+        }
+
+        fdps_blit_blend_rect(panel, MESSAGE_WINDOW_W,
+                             work_page
+                                 + slide_out_row[step] * VGA_SCREEN_PITCH
+                                 + MESSAGE_WINDOW_COL,
+                             VGA_SCREEN_PITCH,
+                             work_page
+                                 + slide_out_row[step] * VGA_SCREEN_PITCH
+                                 + MESSAGE_WINDOW_COL,
+                             VGA_SCREEN_PITCH, MESSAGE_WINDOW_W, band_height,
+                             data_fdps_palette_shade_ramp_table,
+                             data_fdps_inverse_palette_cube,
+                             step * MESSAGE_WINDOW_ALPHA_STEP
+                                 + MESSAGE_WINDOW_FIRST_ALPHA);
+
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends, so the copy starts at the top of the frame. */
+        }
+        memmove((void *) VGA_SCREEN_BASE, work_page,
+                (size_t) VGA_SCREEN_BYTES);
+    }
+
+    while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+        /* Spin until the retrace begins. */
+    }
+    while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+        /* And until it ends, so the copy starts at the top of the frame. */
+    }
+    memmove((void *) VGA_SCREEN_BASE, clean_page, (size_t) VGA_SCREEN_BYTES);
+
+    free(work_page);
+    free(clean_page);
+    free(panel);
+}

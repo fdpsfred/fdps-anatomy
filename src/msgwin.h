@@ -73,6 +73,37 @@ extern void fdps_load_and_draw_portrait(unsigned char *dest, int dest_pitch,
 extern void fdps_message_window_open(int face_index);
 #pragma aux fdps_message_window_open "*" parm caller [];
 
+/* 00020820.  Takes the message window down again: six frames of the bare
+   Message.cel panel sliding off the bottom of the screen and fading as it
+   goes, over a freshly rebuilt map scene, and that scene left standing on the
+   visible page.  Takes nothing and returns nothing.
+
+   IT DOES NOT RETRACT WHAT IS ON SCREEN, IT REPLACES IT.  The visible page is
+   never read.  The backdrop is recomposed from the scene layers into a
+   360 x 240 page whose 312 x 192 viewport is copied into an otherwise zeroed
+   screen page, so the four-pixel border comes out black, and anything a caller
+   had drawn on the visible page -- the message text, a menu, a status panel --
+   is gone from the first animation frame.  It is not the reverse of
+   fdps_message_window_open, which composes its slide from a copy of the screen
+   it found.
+
+   THE PANEL THAT SLIDES CARRIES NEITHER TEXT NOR PORTRAIT.  It is sprite 0 of
+   the sheet in data_fdps_message_window_sheet_ptr (gamedata.h) decoded into a
+   scratch buffer of its own, so what the player sees drop away is an empty
+   window frame.
+
+   IT USES THE SAME SIX ROWS AS THE OPEN, READ FROM THE FAR END: 120, 127, 135,
+   150, 170, 190, with the blend weight running 15, 13, 11, 9, 7, 5 out of 16.
+   The first frame therefore stands exactly where the open left the panel, and
+   the last is nearly transparent and mostly off the bottom edge.
+
+   THE PORTRAIT BUFFER IS NOT RELEASED.  data_fdps_portrait_sprite_buf_ptr is
+   left holding whatever fdps_load_and_draw_portrait last loaded; only the four
+   buffers this routine allocates are freed.  A caller that wants the portrait
+   gone has to pass a negative index to fdps_message_window_open. */
+extern void fdps_message_window_close(void);
+#pragma aux fdps_message_window_close "*" parm caller [];
+
 /* 000203d0.  Holds the message window that fdps_message_window_open left
    standing on the visible screen, repainting it over a live background once
    per game tick, until the player presses a key or the tick budget runs out.
