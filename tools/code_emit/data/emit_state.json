@@ -2276,6 +2276,14 @@
       "status": "committed",
       "emitted_against": "0x17e",
       "rounds": 0
+    },
+    "0001f910": {
+      "name": "fdps_flash_units_in_color",
+      "target": "indicat.c",
+      "body_size": "0x11b",
+      "status": "committed",
+      "emitted_against": "0x11b",
+      "rounds": 0
     }
   }
 }

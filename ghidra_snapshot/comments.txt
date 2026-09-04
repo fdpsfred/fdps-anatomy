@@ -3279,7 +3279,7 @@ Presentation repeats fdps_render_view_frame's sequence without the cursor panel 
 Parameters:
   unit_count -- how many entries of unit_indices to flash. Zero is legal and turns the call into an eight-tick pause. Every caller passes the target count of the effect it has just applied.
   unit_indices -- array of unit_count byte indices into the 0x50-byte unit record array based at DAT_00069cd8. Each index goes straight to fdps_blit_unit_sprite, which silently drops any unit whose sprite origin lies outside the visible view. Every caller passes the target id list of the effect it has just applied.
-  flash_color -- the palette index every pixel of a flashed sprite becomes. FUN_000262a0 (the Cure/CureMP branches) and fdps_apply_heal_to_targets pass 0xff; FUN_000288f0 passes 0x2b for effect id 0x11 and calls twice in a row, giving four flashes.
+  flash_color -- the palette index every pixel of a flashed sprite becomes. fdps_apply_item_effect_to_targets (the Cure/CureMP branches) and fdps_apply_heal_to_targets pass 0xff; fdps_cast_spell_on_targets passes 0x2b for effect id 0x11 and calls twice in a row, giving four flashes.
 
 Returns:
   Nothing.

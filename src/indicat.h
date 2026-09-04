@@ -137,6 +137,42 @@ extern void fdps_show_miss_indicator(int unit_index);
 extern void fdps_show_cure_indicator(int unit_index);
 #pragma aux fdps_show_cure_indicator "*" parm caller [];
 
+/* 0001f910.  Marks a list of battle units out on screen by flashing them all in
+   one palette colour, and does not come back until it has finished: eight whole
+   scenes composed offscreen and presented one after another, each waiting for
+   the vertical retrace and then for the timer tick to move on.  A call
+   therefore costs about eight ticks -- roughly four tenths of a second at the
+   18.2 Hz the game's interrupt runs at -- and nothing else happens while it
+   runs.  Unlike the popup producers above nothing is queued and nothing is left
+   behind: the last frame is the picture the caller is left looking at.
+
+   The listed units are drawn flat in `flash_color` on frames 2, 3, 6 and 7 and
+   drawn normally on the other four, so the player sees them blink twice.  Every
+   other unit on the map is painted by the scene compositor as usual, so a unit
+   that is not listed shows through untouched.
+
+   unit_count is how many entries of unit_indices to flash and zero is legal --
+   the call is then an eight-tick pause with the scene redrawn under it.
+
+   unit_indices is an array of unit_count BYTE indices into the current battle's
+   unit array, widened unsigned, so an index above 127 names the unit it looks
+   like it names.  Nothing range checks them; each one goes straight to
+   fdps_blit_unit_sprite (sprite.h), which silently draws nothing for a unit
+   whose sprite origin lies outside the visible scene.
+
+   flash_color is the palette index every pixel of a flashed sprite becomes.
+   The shipped callers pass 0xff -- the item and heal paths -- and 0x2b, which
+   fdps_cast_spell_on_targets uses for effect id 0x11 and calls twice in a row
+   so that effect flashes four times rather than two.
+
+   The pacing depends on the timer interrupt actually advancing
+   data_fdps_timer_tick_counter: with the interrupt not installed the frame
+   waits never end and the call does not return. */
+extern void fdps_flash_units_in_color(int unit_count,
+                                      unsigned char *unit_indices,
+                                      unsigned int flash_color);
+#pragma aux fdps_flash_units_in_color "*" parm caller [];
+
 /* 0001fc00.  Floats a caller-supplied word over one battle unit by appending
    one cell per glyph to the shared queue.  This is the only producer of the
    family whose message is an argument: fdps_show_miss_indicator and

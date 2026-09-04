@@ -15,9 +15,15 @@
  * asserts what any global holds on its own -- ticket 23 owns that.
  */
 #include <stddef.h>
+#include <stdlib.h>
+#include <malloc.h>
+#include <string.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "mapdraw.h"
 #include "indicat.h"
 
 #define STAGE_UNITS 4
@@ -1170,6 +1176,630 @@ static void sprite_touches_neither_the_record_nor_the_label(void)
     CHECK_EQ(sprite_label_att[3], 0x00);
 }
 
+/* ------------------------------------------------------------------
+ * fdps_flash_units_in_color at 0001f910.
+ *
+ * Expected values come from the assembly -- SHL dword ptr [EBP+0x1c],0x8 at
+ * 0001f91c for the colour shift, CMP dword ptr [EBP-0x10],0x8 at 0001f927 for
+ * the eight frames, SAR EAX,0x1 / TEST AL,0x1 at 0001f961 with MOV ...,0x3 and
+ * MOV ...,0x0 for the two kernels, MOV AL,byte ptr [EAX] / AND EAX,0xff at
+ * 0001f99e for the list step and its widening, CMP EAX,[EBP+0x14] / JL at
+ * 0001f981 for the count, PUSH 0x15180 at 0001f93a for the scene, the six
+ * pushes 0xc0 / 0x138 / 0x140 / 0xa0504 / 0x168 / scene+0x21d8 at 0001f9d6
+ * through 0001f9f7 for the presentation, and the tick wait at 0001fa00 -- and
+ * from the mode 3 operand layout in src/rlecolor.h, where a painted pixel is
+ * ((source + bits 0..7) & bits 16..23) + bits 8..15, so a colour shifted into
+ * bits 8..15 collapses every pixel to that index.  None of them is read off the
+ * emitted C.
+ *
+ * HOW THE RUN IS WATCHED.  The function composes every frame on a scene it
+ * allocates and frees itself and blits that scene's 312x192 window straight
+ * over the live mode 13h screen, so the adapter is the only place its output
+ * can be read back from.  Every case sets mode 13h, fills the frame with a
+ * border sentinel, seeds the scene through the heap, runs a real timer
+ * interrupt so the frame waits end, calls, snapshots the 64,000 bytes and
+ * returns to text mode -- the same way tests/anim.c watches
+ * fdps_play_attack_animation.
+ *
+ * WHY THE SCENE IS SEEDED THROUGH THE HEAP.  The scene is not cleared, and with
+ * no scene layers, no map cursor and no map units staged the compositor writes
+ * nothing into it, so whatever malloc hands over is what shows everywhere the
+ * flashed sprites do not reach.  Each run frees a zeroed block of exactly the
+ * scene's 0x15180 bytes immediately before the call, and the function frees its
+ * block at the end of every frame, so all eight frames take that same block
+ * back and every undrawn window pixel reads 0.  flash_frees_every_scene is that
+ * assumption stated as an assertion.
+ *
+ * WHAT THE SNAPSHOT SHOWS IS THE LAST FRAME, which is frame 7 and so a recolour
+ * frame.  The alternation itself cannot be read off the snapshot at all, so it
+ * is read off the interrupt instead: the handler samples one screen pixel
+ * inside the flashed sprite on every tick, and since every frame ends waiting
+ * for a tick the samples are one per frame.  What they have to show is both
+ * kernels' output and at least the three changes the schedule 0,0,3,3,0,0,3,3
+ * has in it.
+ *
+ * THE UNIT ARRAY AND THE SPRITE CACHE ARE STAGED HERE rather than read from a
+ * game file, for the reason tests/sprite.c gives: the drawer takes its whole
+ * input from those globals, and the shipped cache is built at run time out of
+ * files inside a .VFS rather than existing as a loose image.  Every stream in
+ * the staged cache is 24 rows of one 24-pixel fill in a colour that names its
+ * own entry, so a painted rectangle says which entry was chosen and, more to
+ * the point here, is a colour no recolour frame can produce.
+ *
+ * THE RECORD ARRAY IS PUBLISHED FROM ITS MIDDLE.  data_fdps_map_unit_array_ptr
+ * points 128 records into a 257-record block, so an index of -128 is as valid a
+ * read as an index of +128 and the widening case can ask which of the two a
+ * list byte of 0x80 selects without reading outside anything.
+ * ------------------------------------------------------------------ */
+
+/* The adapter, the frame it presents and the two modes the cases switch
+   between. */
+#define FL_VGA_BASE 0x000a0000
+#define FL_SCREEN_W 0x140
+#define FL_SCREEN_H 0xc8
+#define FL_SCREEN_BYTES (FL_SCREEN_W * FL_SCREEN_H)
+#define FL_MODE_TEXT 0x03
+#define FL_MODE_320X200X256 0x13
+
+/* IRQ0, the vector tests/anim.c hooks and for the same reason: every frame ends
+   waiting for data_fdps_timer_tick_counter to change. */
+#define FL_TIMER_VECTOR 8
+
+/* The window the function copies out of its scene: 312x192 taken from scene
+   byte 0x21d8, which is scene pixel (24,24), and landing at screen byte 0x504,
+   which is screen pixel (4,4).  A scene column is therefore 20 lower on
+   screen. */
+#define FL_SCENE_BYTES 0x15180
+#define FL_SCENE_BORDER 24
+#define FL_WINDOW_ROW 4
+#define FL_WINDOW_COL 4
+#define FL_WINDOW_W 0x138
+#define FL_WINDOW_H 0xc0
+#define FL_TO_SCREEN (FL_WINDOW_COL - FL_SCENE_BORDER)
+
+/* What a screen byte outside the presented window holds. */
+#define FL_BORDER_FILL 0xa5
+
+/* The sprite cache, laid out the way tests/sprite.c lays its own out: a table
+   of 32-bit offsets at the very base of the block, each measured from that same
+   base, and then one stream per entry of 24 rows of a single 24-pixel fill.
+   Command 0x17 is a fill run of 24 pixels (resource_info/cel.md). */
+#define FL_SPRITE_W 24
+#define FL_SPRITE_H 24
+#define FL_FILL_RUN_24 0x17
+#define FL_CACHE_ENTRIES 48
+#define FL_TABLE_BYTES (FL_CACHE_ENTRIES * 4)
+#define FL_STREAM_BYTES (FL_SPRITE_H * 2)
+#define FL_CACHE_BYTES (FL_TABLE_BYTES + FL_CACHE_ENTRIES * FL_STREAM_BYTES)
+
+/* What cache entry 0 paints, which is what a passthrough frame leaves at the
+   probe and is neither of the two flash colours nor the seed nor the border. */
+#define FL_ART_PIXEL 0x20
+
+/* The record block and where the game's array pointer is published inside it:
+   257 records with the pointer at record 128, so index +128 and index -128 are
+   both real records. */
+#define FL_RECORDS 257
+#define FL_BASE_SLOT 128
+#define FL_WIDE_INDEX 0x80
+
+/* Where the three units of the ordinary fixture stand.  Tile (3,4), (6,4) and
+   (9,4) with the view at the map origin: the drawer puts a sprite at scene
+   (tile_x * 24 + 24, tile_y * 24 + 18), so the three sprites are 72 pixels
+   apart and none of them touches another. */
+#define FL_TILE_Y 4
+#define FL_TILE_X0 3
+#define FL_TILE_X1 6
+#define FL_TILE_X2 9
+
+/* And where the two candidates of the widening case stand: far enough from each
+   other and from everything else that either answer is unmistakable. */
+#define FL_WIDE_TILE_X 3
+#define FL_WIDE_TILE_Y 1
+#define FL_NARROW_TILE_X 9
+#define FL_NARROW_TILE_Y 6
+
+/* The two colours the shipped callers pass. */
+#define FL_COLOR_ITEM 0xff
+#define FL_COLOR_SPELL 0x2b
+
+/* Eight frames, of which the first may end its wait at once because its latch
+   is uninitialised, so seven ticks is the floor a whole call cannot go under.
+   The schedule 0,0,3,3,0,0,3,3 changes kernel three times, which is the floor
+   on how many changes the per-tick probe can see. */
+#define FL_FRAMES 8
+#define FL_MIN_TICKS (FL_FRAMES - 1)
+#define FL_MIN_KERNEL_CHANGES 3
+
+/* Eight times the ticks a run costs. */
+#define FL_SAMPLE_MAX 64
+
+static struct fdps_unit_record flash_units[FL_RECORDS];
+static unsigned char flash_cache[FL_CACHE_BYTES];
+static unsigned char *flash_screen;
+static void (__interrupt __far *flash_saved_timer)();
+static volatile int flash_sample_count;
+static volatile unsigned char flash_samples[FL_SAMPLE_MAX];
+static int flash_probe_at;
+static unsigned int flash_ticks_used;
+static int flash_blocks_before;
+static int flash_blocks_after;
+
+static void __interrupt __far flash_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    if (flash_sample_count < FL_SAMPLE_MAX) {
+        flash_samples[flash_sample_count] =
+            ((unsigned char *) FL_VGA_BASE)[flash_probe_at];
+        flash_sample_count = flash_sample_count + 1;
+    }
+    _chain_intr(flash_saved_timer);
+}
+
+/* One little-endian 32-bit offset into the cache's table. */
+static void flash_cache_u32(int at, unsigned long value)
+{
+    flash_cache[at] = (unsigned char) (value & 0xff);
+    flash_cache[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    flash_cache[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    flash_cache[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+/* Every record zeroed, every cache entry a solid 24x24 square of its own
+   colour, the view at the map origin and the map itself empty, so the
+   compositor writes nothing and the only paint in the scene is the flash's
+   own. */
+static void flash_stage(void)
+{
+    int entry;
+    int stream_at;
+    int row;
+
+    memset((unsigned char *) flash_units, 0, sizeof(flash_units));
+    memset(flash_cache, 0, sizeof(flash_cache));
+    for (entry = 0; entry < FL_CACHE_ENTRIES; entry++) {
+        stream_at = FL_TABLE_BYTES + entry * FL_STREAM_BYTES;
+        flash_cache_u32(entry * 4, (unsigned long) stream_at);
+        for (row = 0; row < FL_SPRITE_H; row++) {
+            flash_cache[stream_at + row * 2] = FL_FILL_RUN_24;
+            flash_cache[stream_at + row * 2 + 1] =
+                (unsigned char) (FL_ART_PIXEL + entry);
+        }
+    }
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) &flash_units[FL_BASE_SLOT];
+    data_fdps_cel_sprite_cache_ptr = flash_cache;
+    data_fdps_map_unit_walk_anim_counter = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+}
+
+/* Put back what a freshly started program has, for the reason tests/anim.c
+   gives: a later unit that expects an empty battle would otherwise inherit this
+   fixture. */
+static void flash_unstage(void)
+{
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_map_unit_count = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    free(flash_screen);
+    flash_screen = NULL;
+}
+
+static void flash_place(int index, int tile_x, int tile_y)
+{
+    flash_units[FL_BASE_SLOT + index].pos_x = (unsigned char) tile_x;
+    flash_units[FL_BASE_SLOT + index].pos_y = (unsigned char) tile_y;
+}
+
+static void flash_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* Used entries currently in the heap, so a case can say every scene came
+   back. */
+static int flash_used_heap_blocks(void)
+{
+    struct _heapinfo entry;
+    int used;
+
+    used = 0;
+    entry._pentry = NULL;
+    while (_heapwalk(&entry) == _HEAPOK) {
+        if (entry._useflag == _USEDENTRY) {
+            used++;
+        }
+    }
+    return used;
+}
+
+/* Leave a zeroed block of exactly the scene's size at the head of the free
+   list. */
+static void flash_seed_scene(void)
+{
+    unsigned char *scene;
+
+    scene = (unsigned char *) malloc((size_t) FL_SCENE_BYTES);
+    if (scene != NULL) {
+        memset(scene, 0, (size_t) FL_SCENE_BYTES);
+        free(scene);
+    }
+}
+
+/* Where a sprite drawn for the unit on (tile_x, tile_y) lands on screen: the
+   drawer's scene position carried out through the presented window's own
+   offset. */
+static int flash_sprite_row(int tile_y)
+{
+    return tile_y * 24 + 18 + FL_TO_SCREEN;
+}
+
+static int flash_sprite_col(int tile_x)
+{
+    return tile_x * 24 + 24 + FL_TO_SCREEN;
+}
+
+static int flash_pixel(int row, int col)
+{
+    return (int) flash_screen[row * FL_SCREEN_W + col];
+}
+
+/* How many of the 576 bytes of the sprite square standing on (tile_x, tile_y)
+   are not `pixel`. */
+static int flash_wrong_pixels(int tile_x, int tile_y, int pixel)
+{
+    int row;
+    int col;
+    int base_row;
+    int base_col;
+    int wrong;
+
+    base_row = flash_sprite_row(tile_y);
+    base_col = flash_sprite_col(tile_x);
+    wrong = 0;
+    for (row = 0; row < FL_SPRITE_H; row++) {
+        for (col = 0; col < FL_SPRITE_W; col++) {
+            if (flash_pixel(base_row + row, base_col + col) != pixel) {
+                wrong++;
+            }
+        }
+    }
+    return wrong;
+}
+
+/* How many bytes outside the presented window are no longer the sentinel. */
+static int flash_outside_window_touched(void)
+{
+    int row;
+    int col;
+    int touched;
+
+    touched = 0;
+    for (row = 0; row < FL_SCREEN_H; row++) {
+        for (col = 0; col < FL_SCREEN_W; col++) {
+            if (row >= FL_WINDOW_ROW && row < FL_WINDOW_ROW + FL_WINDOW_H
+                && col >= FL_WINDOW_COL && col < FL_WINDOW_COL + FL_WINDOW_W) {
+                continue;
+            }
+            if (flash_pixel(row, col) != FL_BORDER_FILL) {
+                touched++;
+            }
+        }
+    }
+    return touched;
+}
+
+/* How many bytes inside the presented window are not the seeded 0. */
+static int flash_window_painted(void)
+{
+    int row;
+    int col;
+    int painted;
+
+    painted = 0;
+    for (row = 0; row < FL_WINDOW_H; row++) {
+        for (col = 0; col < FL_WINDOW_W; col++) {
+            if (flash_pixel(FL_WINDOW_ROW + row, FL_WINDOW_COL + col) != 0) {
+                painted++;
+            }
+        }
+    }
+    return painted;
+}
+
+static int flash_saw_sample(int value)
+{
+    int i;
+
+    for (i = 0; i < flash_sample_count; i++) {
+        if ((int) flash_samples[i] == value) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int flash_kernel_changes(void)
+{
+    int i;
+    int changes;
+
+    changes = 0;
+    for (i = 1; i < flash_sample_count; i++) {
+        if (flash_samples[i] != flash_samples[i - 1]) {
+            changes++;
+        }
+    }
+    return changes;
+}
+
+/* One whole call, with the adapter in the mode the game flashes in, the border
+   sentinel on the screen, a zeroed scene at the head of the free list and a
+   real timer interrupt running.  Leaves the last frame in flash_screen[] and
+   the per-tick probe in flash_samples[]. */
+static void flash_run(int unit_count, unsigned char *unit_indices,
+                      unsigned int flash_color, int probe_tile_x,
+                      int probe_tile_y)
+{
+    unsigned int before_ticks;
+
+    flash_screen = (unsigned char *) malloc((size_t) FL_SCREEN_BYTES);
+    CHECK_EQ(flash_screen != NULL, 1);
+    if (flash_screen == NULL) {
+        return;
+    }
+    memset(flash_screen, FL_BORDER_FILL, (size_t) FL_SCREEN_BYTES);
+
+    flash_sample_count = 0;
+    flash_probe_at = flash_sprite_row(probe_tile_y) * FL_SCREEN_W
+                     + flash_sprite_col(probe_tile_x);
+
+    flash_blocks_before = flash_used_heap_blocks();
+    flash_set_mode(FL_MODE_320X200X256);
+    memset((void *) FL_VGA_BASE, FL_BORDER_FILL, (size_t) FL_SCREEN_BYTES);
+    flash_seed_scene();
+
+    flash_saved_timer = _dos_getvect(FL_TIMER_VECTOR);
+    _dos_setvect(FL_TIMER_VECTOR, flash_timer_isr);
+    before_ticks = data_fdps_timer_tick_counter;
+    fdps_flash_units_in_color(unit_count, unit_indices, flash_color);
+    flash_ticks_used = data_fdps_timer_tick_counter - before_ticks;
+    _dos_setvect(FL_TIMER_VECTOR, flash_saved_timer);
+
+    memmove(flash_screen, (void *) FL_VGA_BASE, (size_t) FL_SCREEN_BYTES);
+    flash_set_mode(FL_MODE_TEXT);
+    flash_blocks_after = flash_used_heap_blocks();
+}
+
+/* The one unit of the plain fixture, listed once. */
+static void flash_run_one(unsigned int flash_color)
+{
+    unsigned char list[1];
+
+    list[0] = 0;
+    flash_stage();
+    flash_place(0, FL_TILE_X0, FL_TILE_Y);
+    flash_run(1, list, flash_color, FL_TILE_X0, FL_TILE_Y);
+}
+
+/* MOV dword ptr [EBP-0x4],0x3 at 0001f967 with the frame index reaching it as
+   (i / 2) & 1: frame 7 takes the recolour kernel, so the picture the call
+   leaves behind has the listed unit painted flat in the colour that was asked
+   for, all 576 pixels of it. */
+static void flash_last_frame_recolours_the_listed_unit(void)
+{
+    flash_run_one(FL_COLOR_ITEM);
+    CHECK_EQ(flash_wrong_pixels(FL_TILE_X0, FL_TILE_Y, FL_COLOR_ITEM), 0);
+    flash_unstage();
+}
+
+/* SHL dword ptr [EBP+0x1c],0x8 at 0001f91c puts the colour in bits 8..15 of the
+   recolour kernel's operand, which is its colour base.  Left unshifted it would
+   land in bits 0..7, the tint offset, where the zero band mask throws it away
+   and every pixel comes out 0 -- so a second colour painted verbatim is what
+   says the shift is there and is by eight. */
+static void flash_colour_reaches_the_recolour_base(void)
+{
+    flash_run_one(FL_COLOR_SPELL);
+    CHECK_EQ(flash_wrong_pixels(FL_TILE_X0, FL_TILE_Y, FL_COLOR_SPELL), 0);
+    flash_unstage();
+}
+
+/* The per-tick probe over one whole call.  The schedule 0,0,3,3,0,0,3,3 has to
+   show up as both kernels' output at the same pixel -- the cache entry's own
+   0x20 from the passthrough frames and the flash colour from the recolour ones
+   -- and as at least the three changes the schedule contains.  A body that took
+   one kernel for all eight frames would show one value and no change at all,
+   and one that alternated every frame would show seven. */
+static void flash_alternates_the_two_kernels(void)
+{
+    flash_run_one(FL_COLOR_ITEM);
+    CHECK_EQ(flash_saw_sample(FL_ART_PIXEL), 1);
+    CHECK_EQ(flash_saw_sample(FL_COLOR_ITEM), 1);
+    CHECK_EQ(flash_kernel_changes() >= FL_MIN_KERNEL_CHANGES, 1);
+    flash_unstage();
+}
+
+/* The inner loop runs over the whole list -- CMP EAX,[EBP+0x14] / JL at
+   0001f981 -- so every listed unit is flashed, while a unit that is on the map
+   and not in the list is left to the compositor, which with an empty map paints
+   nothing at all. */
+static void flash_draws_every_listed_unit(void)
+{
+    unsigned char list[2];
+
+    list[0] = 0;
+    list[1] = 1;
+    flash_stage();
+    flash_place(0, FL_TILE_X0, FL_TILE_Y);
+    flash_place(1, FL_TILE_X1, FL_TILE_Y);
+    flash_place(2, FL_TILE_X2, FL_TILE_Y);
+    flash_run(2, list, FL_COLOR_ITEM, FL_TILE_X0, FL_TILE_Y);
+
+    CHECK_EQ(flash_wrong_pixels(FL_TILE_X0, FL_TILE_Y, FL_COLOR_ITEM), 0);
+    CHECK_EQ(flash_wrong_pixels(FL_TILE_X1, FL_TILE_Y, FL_COLOR_ITEM), 0);
+    CHECK_EQ(flash_wrong_pixels(FL_TILE_X2, FL_TILE_Y, 0), 0);
+    flash_unstage();
+}
+
+/* The same list read one entry short: the count is what bounds the walk, not
+   anything in the list itself. */
+static void flash_count_bounds_the_list(void)
+{
+    unsigned char list[2];
+
+    list[0] = 0;
+    list[1] = 1;
+    flash_stage();
+    flash_place(0, FL_TILE_X0, FL_TILE_Y);
+    flash_place(1, FL_TILE_X1, FL_TILE_Y);
+    flash_run(1, list, FL_COLOR_ITEM, FL_TILE_X0, FL_TILE_Y);
+
+    CHECK_EQ(flash_wrong_pixels(FL_TILE_X0, FL_TILE_Y, FL_COLOR_ITEM), 0);
+    CHECK_EQ(flash_wrong_pixels(FL_TILE_X1, FL_TILE_Y, 0), 0);
+    flash_unstage();
+}
+
+/* MOV EAX,[EBP+0x18] / ADD EAX,[EBP-0x8] / MOV AL,byte ptr [EAX] at 0001f998:
+   the list is stepped one BYTE at a time.  Entries 1 and 2 flash the second and
+   third units and leave the first alone; a walk of four bytes a step would read
+   0x00000201 out of the same two entries and name a record 513 places along. */
+static void flash_reads_the_list_a_byte_at_a_time(void)
+{
+    unsigned char list[2];
+
+    list[0] = 1;
+    list[1] = 2;
+    flash_stage();
+    flash_place(0, FL_TILE_X0, FL_TILE_Y);
+    flash_place(1, FL_TILE_X1, FL_TILE_Y);
+    flash_place(2, FL_TILE_X2, FL_TILE_Y);
+    flash_run(2, list, FL_COLOR_ITEM, FL_TILE_X1, FL_TILE_Y);
+
+    CHECK_EQ(flash_wrong_pixels(FL_TILE_X1, FL_TILE_Y, FL_COLOR_ITEM), 0);
+    CHECK_EQ(flash_wrong_pixels(FL_TILE_X2, FL_TILE_Y, FL_COLOR_ITEM), 0);
+    CHECK_EQ(flash_wrong_pixels(FL_TILE_X0, FL_TILE_Y, 0), 0);
+    flash_unstage();
+}
+
+/* AND EAX,0xff at 0001f9a0: the list byte is widened UNSIGNED, so 0x80 is unit
+   128 and not unit -128.  Both candidates are real records here, standing on
+   tiles of their own, and only one of them may be painted. */
+static void flash_list_byte_is_widened_unsigned(void)
+{
+    unsigned char list[1];
+
+    list[0] = FL_WIDE_INDEX;
+    flash_stage();
+    flash_place(FL_WIDE_INDEX, FL_WIDE_TILE_X, FL_WIDE_TILE_Y);
+    flash_place(-FL_WIDE_INDEX, FL_NARROW_TILE_X, FL_NARROW_TILE_Y);
+    flash_run(1, list, FL_COLOR_ITEM, FL_WIDE_TILE_X, FL_WIDE_TILE_Y);
+
+    CHECK_EQ(flash_wrong_pixels(FL_WIDE_TILE_X, FL_WIDE_TILE_Y,
+                                FL_COLOR_ITEM), 0);
+    CHECK_EQ(flash_wrong_pixels(FL_NARROW_TILE_X, FL_NARROW_TILE_Y, 0), 0);
+    flash_unstage();
+}
+
+/* A count of 0 fails the inner loop's test at once and every frame still runs:
+   nothing is painted anywhere in the presented window, and the call still costs
+   its eight paced frames. */
+static void flash_zero_count_paints_nothing_and_still_waits(void)
+{
+    unsigned char list[1];
+
+    list[0] = 0;
+    flash_stage();
+    flash_place(0, FL_TILE_X0, FL_TILE_Y);
+    flash_run(0, list, FL_COLOR_ITEM, FL_TILE_X0, FL_TILE_Y);
+
+    CHECK_EQ(flash_window_painted(), 0);
+    CHECK_EQ(flash_ticks_used >= FL_MIN_TICKS, 1);
+    flash_unstage();
+}
+
+/* CMP dword ptr [EBP-0x10],0x8 at 0001f927 with the tick wait at 0001fa00 in
+   the body: eight frames, each ending on a change of the counter.  The floor is
+   seven and not eight because the first frame's latch is uninitialised and may
+   already differ, which is the contract src/indicat.c states. */
+static void flash_costs_eight_paced_frames(void)
+{
+    flash_run_one(FL_COLOR_ITEM);
+    CHECK_EQ(flash_ticks_used >= FL_MIN_TICKS, 1);
+    flash_unstage();
+}
+
+/* CALL malloc at 0001f93f and CALL free at 0001fa17 are both inside the frame
+   loop, so eight scenes are taken and eight are given back and the heap is
+   where it started.  This is also what lets every frame reuse the one seeded
+   block, which every case above depends on. */
+static void flash_frees_every_scene(void)
+{
+    flash_run_one(FL_COLOR_ITEM);
+    CHECK_EQ(flash_blocks_after, flash_blocks_before);
+    flash_unstage();
+}
+
+/* PUSH 0xc0 / PUSH 0x138 / PUSH 0x140 / PUSH 0xa0504 / PUSH 0x168 with
+   scene + 0x21d8 at 0001f9d6 through 0001f9f7: 312x192 out of scene pixel
+   (24,24) and into screen pixel (4,4).  The four edges pin both ends of that at
+   once -- the first and last row and column of the window carry the scene's
+   seeded 0 while the byte just outside each of them is still the sentinel --
+   and nothing outside the window is written at all. */
+static void flash_presents_312x192_at_screen_four_four(void)
+{
+    unsigned char list[1];
+
+    list[0] = 0;
+    flash_stage();
+    flash_place(0, FL_TILE_X0, FL_TILE_Y);
+    flash_run(0, list, FL_COLOR_ITEM, FL_TILE_X0, FL_TILE_Y);
+
+    CHECK_EQ(flash_pixel(FL_WINDOW_ROW, FL_WINDOW_COL), 0);
+    CHECK_EQ(flash_pixel(FL_WINDOW_ROW - 1, FL_WINDOW_COL), FL_BORDER_FILL);
+    CHECK_EQ(flash_pixel(FL_WINDOW_ROW, FL_WINDOW_COL - 1), FL_BORDER_FILL);
+    CHECK_EQ(flash_pixel(FL_WINDOW_ROW + FL_WINDOW_H - 1,
+                         FL_WINDOW_COL + FL_WINDOW_W - 1), 0);
+    CHECK_EQ(flash_pixel(FL_WINDOW_ROW + FL_WINDOW_H,
+                         FL_WINDOW_COL + FL_WINDOW_W - 1), FL_BORDER_FILL);
+    CHECK_EQ(flash_pixel(FL_WINDOW_ROW + FL_WINDOW_H - 1,
+                         FL_WINDOW_COL + FL_WINDOW_W), FL_BORDER_FILL);
+    CHECK_EQ(flash_outside_window_touched(), 0);
+    flash_unstage();
+}
+
+/* CALL fdps_draw_scene_layers at 0001f94e, once per frame and before anything
+   is drawn over it.  The compositor's own scroll latch is the observable it
+   leaves behind on an empty map: it is brought up to the tick counter whenever
+   the two differ, and it is the only thing in the image that writes that
+   global, so a sentinel put in it before the call cannot survive one.  What the
+   latch holds afterwards is not asserted -- the last frame's own tick wait
+   moves the counter on past it. */
+static void flash_composes_the_scene_every_frame(void)
+{
+    unsigned char list[1];
+
+    list[0] = 0;
+    flash_stage();
+    flash_place(0, FL_TILE_X0, FL_TILE_Y);
+    data_fdps_scene_layer_scroll_last_tick = 0x7fffffffu;
+    flash_run(1, list, FL_COLOR_ITEM, FL_TILE_X0, FL_TILE_Y);
+
+    CHECK_EQ(data_fdps_scene_layer_scroll_last_tick != 0x7fffffffu, 1);
+    data_fdps_scene_layer_scroll_last_tick = 0;
+    flash_unstage();
+}
+
 void run_indicat_tests(void)
 {
     RUN_TEST(number_position_is_the_first_two_record_bytes);
@@ -1244,11 +1874,28 @@ void run_indicat_tests(void)
     RUN_TEST(sprite_culls_against_the_named_units_record);
     RUN_TEST(sprite_touches_neither_the_record_nor_the_label);
 
+    RUN_TEST(flash_last_frame_recolours_the_listed_unit);
+    RUN_TEST(flash_colour_reaches_the_recolour_base);
+    RUN_TEST(flash_alternates_the_two_kernels);
+    RUN_TEST(flash_draws_every_listed_unit);
+    RUN_TEST(flash_count_bounds_the_list);
+    RUN_TEST(flash_reads_the_list_a_byte_at_a_time);
+    RUN_TEST(flash_list_byte_is_widened_unsigned);
+    RUN_TEST(flash_zero_count_paints_nothing_and_still_waits);
+    RUN_TEST(flash_costs_eight_paced_frames);
+    RUN_TEST(flash_frees_every_scene);
+    RUN_TEST(flash_presents_312x192_at_screen_four_four);
+    RUN_TEST(flash_composes_the_scene_every_frame);
+
     /* Put the globals back before leaving.  The runners share one process, and
        a later unit that expects an empty battle or an empty queue would
        otherwise inherit this file's fixture and pass or fail for the wrong
        reason. */
     data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_map_unit_walk_anim_counter = 0;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
     data_fdps_map_unit_count = 0;
     data_fdps_indicator_queue_count = 0;
     data_fdps_battle_view_window_origin_x = 0;

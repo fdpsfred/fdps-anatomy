@@ -9,13 +9,20 @@
  * 0001f62f.  Watcom 10.0a only turns strlen into an instruction sequence when
  * the intrinsics are asked for, and -oi is not in this build's flag set
  * (rebuild_info/build_flags.md), so the plain declarations are what reproduce
- * the two calls.
+ * the two calls.  malloc and free come from <stdlib.h> and inp from <conio.h>,
+ * and all three are calls in the original too -- CALL 0x0003d375 at 0001f93f,
+ * CALL 0x0003d478 at 0001fa17 and CALL 0x0003d4e4 at 0001f9b9 and 0001f9ca.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <conio.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "unit.h"
+#include "blit.h"
+#include "sprite.h"
+#include "mapdraw.h"
 #include "indicat.h"
 
 /* One map tile is 24 pixels square, and the view origins are in pixels, so this
@@ -296,6 +303,158 @@ void fdps_show_cure_indicator(int unit_index)
         }
 
         data_fdps_indicator_queue_count += INDICATOR_WORD_CELLS;
+    }
+}
+
+/* How many frames the flash runs for, and the cadence the blit mode switches
+   on.  MOV EDX,i / SAR EDX,0x1f / SUB EAX,EDX / SAR EAX,0x1 at 0001f959 is the
+   compiler's SIGNED divide of the frame index by two and TEST AL,0x1 at
+   0001f963 takes bit 0 of it, so the schedule is two frames of one mode then
+   two of the other, twice over: 0, 1, 4 and 5 one way and 2, 3, 6 and 7 the
+   other. */
+#define FLASH_FRAMES 8
+#define FLASH_MODE_PERIOD 2
+
+/* The two fdps_blit_dispatch kernels the cadence picks between (blit.h).  Mode
+   0 is the plain passthrough, which redraws each listed sprite over the
+   identical pixels fdps_draw_scene_layers has already painted there and so
+   changes nothing visible; mode 3 is the recolour kernel, which paints every
+   pixel of the sprite one palette index.  The listed units therefore go flat
+   coloured on two stretches of two frames each and look like themselves in
+   between, which is the flash. */
+#define FLASH_MODE_PASSTHROUGH 0
+#define FLASH_MODE_RECOLOR 3
+
+/* Where the palette index has to sit in the recolour kernel's operand: bits
+   8..15 are its colour base, bits 0..7 the tint offset and bits 16..23 the band
+   mask, and a painted pixel is ((source + offset) & mask) + base (rlecolor.h).
+   SHL dword ptr [EBP+0x1c],0x8 at 0001f91c shifts the argument slot itself,
+   once, before the loop, which leaves the offset and the mask 0 and so collapses
+   every pixel to the colour.  Passing the colour unshifted lands it in the tint
+   offset instead, where the zero mask throws it away and every pixel comes out
+   0 (rebuild_info/pitfalls.md). */
+#define FLASH_COLOR_BASE_SHIFT 8
+
+/* The offscreen scene the frame is composed on: 360 by 240 at a 360-byte pitch,
+   the PUSH 0x15180 at 0001f93a and the PUSH 0x168 at 0001f9ea, and the same
+   surface fdps_draw_scene_layers and fdps_blit_unit_sprite both hardwire. */
+#define FLASH_SCENE_BYTES 0x15180
+#define FLASH_SCENE_PITCH 0x168
+
+/* What is presented and where.  312 by 192 taken from scene byte 0x21d8, which
+   is scene pixel (24,24), and landing at screen byte 0x504, which is screen
+   pixel (4,4) of the mode 13h page: the immediates of the six pushes at
+   0001f9d6 through 0001f9f7. */
+#define FLASH_SCENE_WINDOW_AT 0x21d8
+#define FLASH_WINDOW_AT 0x504
+#define FLASH_WINDOW_W 0x138
+#define FLASH_WINDOW_H 0xc0
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_PITCH 0x140
+
+/* The VGA input status register and its vertical retrace bit, tested as TEST
+   AL,0x8 after each CALL to inp at 0001f9c1 and 0001f9d2. */
+#define VGA_INPUT_STATUS_1 0x3da
+#define VGA_STATUS_VERTICAL_RETRACE 0x08
+
+/* 0001f910.  Flashes a list of battle units in one palette colour so the player
+   can see which units an effect has just been applied to.  Eight frames, each
+   one whole scene composed offscreen and presented, each paced by one change of
+   the timer tick, and nothing is returned.
+
+   THE SCENE IS ALLOCATED AND FREED INSIDE THE LOOP, once per frame -- CALL
+   malloc at 0001f93f and CALL free at 0001fa17 are both between the loop's
+   test and its increment -- and nothing clears what comes back.  With no scene
+   layers active fdps_draw_scene_layers writes nothing into it, so a frame can
+   show whatever the previous one left in the same recycled block.  Hoisting the
+   pair out of the loop is the obvious tidy-up and it is a different program:
+   one allocation of a 86,400-byte block instead of eight, and a heap that no
+   longer sees the flash at all.
+
+   THE COLOUR IS SHIFTED ONCE, OVER THE ARGUMENT ITSELF, before the first frame
+   -- see FLASH_COLOR_BASE_SHIFT above for what the shift is for.
+
+   THE UNIT INDICES ARE BYTES AND ARE WIDENED UNSIGNED.  MOV AL,byte ptr [EAX] /
+   AND EAX,0xff at 0001f99e steps the list one byte at a time and zero extends,
+   so a list entry of 0x82 selects unit 130 and not unit -126.  The index is
+   handed straight to fdps_blit_unit_sprite, which resolves it through
+   fdps_get_unit_record without a range check and drops a unit whose sprite
+   origin lies outside the visible scene, so a list entry that names nothing
+   visible simply draws nothing.
+
+   A COUNT OF ZERO IS LEGAL and turns the call into an eight-tick pause with the
+   scene redrawn under it: the inner loop's CMP EAX,[EBP+0x14] / JL at 0001f981
+   fails at once and everything else in the frame still runs.
+
+   THE FRAME WAIT'S LATCH IS DELIBERATELY LEFT UNINITIALISED, the same contract
+   fdps_play_attack_animation and the rest of anim.c carry.  last_tick is read
+   at 0001fa00 before anything has written it, so the first frame waits either
+   not at all or a full tick depending on what that stack slot held on entry.
+   Initialising it, or latching into data_fdps_view_frame_last_tick the way
+   fdps_render_view_frame does, changes the pacing of the first flash frame, and
+   the second of those would also perturb the next fdps_render_view_frame call
+   (rebuild_info/pitfalls.md).
+
+   data_fdps_timer_tick_counter is volatile at its declaration (gamedata.h)
+   because of that wait: nothing inside this function writes the counter, so a
+   build allowed to hoist the load would spin here forever.  The two retrace
+   spins read a port and cannot be hoisted for the same reason.
+
+   ONE CALL'S ANSWER IS READ: malloc's, which is the scene and is what every
+   other call in the frame is handed.  fdps_draw_scene_layers,
+   fdps_blit_unit_sprite, fdps_blit_rect and free return nothing the original
+   looks at, and inp's answer is tested for bit 3 at both spins.
+
+   The frames are paced by the retrace and by the timer tick, so how many
+   instructions stand between them is not observable (contract D). */
+void fdps_flash_units_in_color(int unit_count, unsigned char *unit_indices,
+                               unsigned int flash_color)
+{
+    /* The 360x240 offscreen scene this frame is composed on. */
+    unsigned char *scene_buf;
+    /* Which of the eight frames is being drawn. */
+    int frame;
+    /* Where the walk over the caller's index list has got to. */
+    int list_position;
+    /* Which fdps_blit_dispatch kernel this frame's sprites go through. */
+    int blit_mode;
+    /* The tick the previous frame ended on.  Deliberately not initialised --
+       see the note above. */
+    unsigned int last_tick;
+
+    flash_color <<= FLASH_COLOR_BASE_SHIFT;
+
+    for (frame = 0; frame < FLASH_FRAMES; frame++) {
+        scene_buf = (unsigned char *) malloc((size_t) FLASH_SCENE_BYTES);
+        fdps_draw_scene_layers(scene_buf);
+
+        if (((frame / FLASH_MODE_PERIOD) & 1) != 0) {
+            blit_mode = FLASH_MODE_RECOLOR;
+        } else {
+            blit_mode = FLASH_MODE_PASSTHROUGH;
+        }
+
+        for (list_position = 0; list_position < unit_count; list_position++) {
+            fdps_blit_unit_sprite(scene_buf,
+                                  (int) unit_indices[list_position],
+                                  flash_color, blit_mode);
+        }
+
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins, so the frame that has just been
+               composed is the one the monitor shows whole. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends, so the blit starts clear of it. */
+        }
+        fdps_blit_rect((unsigned int) (scene_buf + FLASH_SCENE_WINDOW_AT),
+                       FLASH_SCENE_PITCH,
+                       (void *) (VGA_SCREEN_BASE + FLASH_WINDOW_AT),
+                       VGA_SCREEN_PITCH, FLASH_WINDOW_W, FLASH_WINDOW_H);
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+        free(scene_buf);
     }
 }
 
