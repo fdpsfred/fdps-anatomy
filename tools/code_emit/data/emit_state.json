@@ -2348,6 +2348,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x1e1"
+    },
+    "000196d0": {
+      "name": "fdps_combat_play_blow",
+      "target": "cmbblow.c",
+      "body_size": "0x8ae",
+      "status": "committed",
+      "emitted_against": "0x8ae",
+      "rounds": 0
     }
   }
 }

@@ -1696,5 +1696,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "000196d0": [
+    {
+      "from": "emit",
+      "what": "The recoil is not unit-observable. The struck sprite's x and y come off the two ramps through a counter set to 5 at 00019a90 and decremented at 00019d68, and a landed blow additionally draws that sprite with request slots 7 and 8 holding 0x28000 and 3 -- but every frame memsets the page and the twelve settle frames at 00019dfd redraw the defender at the plain 0x18,0x18 with the blend slots cleared, so nothing of either survives to the aperture or to any block the caller owns by the time the call returns. tests/cmbblow.c therefore pins the frame COUNTS and the record, and says nothing about where the sprite sat on any frame but the last. The emitted C reproduces the ramps, the sign and the blend from the assembly, so this is a witness gap and not a known divergence.",
+      "needs": "A frame capture of a real blow -- the game running in DOSBox-X with the page grabbed on the impact frame, or a still from the original executable -- showing the struck sprite displaced by 14 or 18 pixels away from the attacker and drawn through blit mode 3 on the frames after the hit. Nothing reachable from a unit test can answer it, because the function frees its own page.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached the same conclusion independently and confirmed the emitter's reasoning: every frame memsets the whole page at 00019ae6 before drawing, and the twelve settle frames at 00019dfd redraw the defender at the plain 0x18,0x18 with request slots 7 and 8 cleared at 00019dd5, so neither the ramp displacement nor the blit-mode-3 blend survives to the aperture or to anything the caller owns once the call returns. What my pass adds is the other half: WDISASM on the emitted object shows the two ramp templates as const blocks whose bytes equal 00018c60 and 00018c78 exactly, the sign multiply at `imul edx,-84H[eax+ebp]`, and the 0x28000/3 stores, so the VALUES are verified against the original and only the on-screen result is unwitnessed. The gap is a witness gap, not a suspected divergence.",
+      "needs": "A frame capture of a real blow from the original executable in DOSBox-X, grabbed on an impact frame, showing the struck sprite displaced 14 or 18 pixels away from the attacker and drawn through blit mode 3. No unit test can reach it, because the function frees its own page before returning.",
+      "status": "open",
+      "same_as": "emit#0"
+    }
   ]
 }
