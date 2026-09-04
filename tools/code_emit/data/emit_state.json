@@ -2340,6 +2340,14 @@
       "status": "committed",
       "emitted_against": "0x1c9",
       "rounds": 0
+    },
+    "000194e0": {
+      "name": "fdps_combat_slide_in_attacker",
+      "target": "combat.c",
+      "body_size": "0x1e1",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x1e1"
     }
   }
 }

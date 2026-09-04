@@ -6,10 +6,11 @@
  * own: everything it touches is either one of the two unit records or a global
  * src/gamedata.h declares.
  *
- * rand comes from <stdlib.h>.  It is a real call in the original -- CALL
- * 00042cf8 -- and not an inline expansion.  memset comes from <string.h> and
- * is a call as well, CALL 00042cd0, and inp comes from <conio.h> and is the
- * library routine at 0003d4e4 rather than the IN instruction an intrinsic
+ * rand, malloc and free come from <stdlib.h>.  rand is a real call in the
+ * original -- CALL 00042cf8 -- and not an inline expansion, and so are the
+ * other two, CALL 0003d375 and CALL 0003d478.  memset comes from <string.h>
+ * and is a call as well, CALL 00042cd0, and inp comes from <conio.h> and is
+ * the library routine at 0003d4e4 rather than the IN instruction an intrinsic
  * would have produced.
  */
 #include <conio.h>
@@ -23,6 +24,7 @@
 #include "table.h"
 #include "maptile.h"
 #include "blit.h"
+#include "gauge.h"
 #include "saf.h"
 #include "sprite.h"
 #include "combat.h"
@@ -442,4 +444,190 @@ void fdps_combat_slide_backdrops(void *outgoing_backdrop,
         }
         last_tick = data_fdps_timer_tick_counter;
     }
+}
+
+/* The page's row count, MOV dword ptr [EBP-0x2c],0xf8 at 00019503.  It is the
+   same 368 by 248 page with the same 24-pixel apron the slide above composes
+   on, so COMBAT_SURFACE_PITCH, COMBAT_SURFACE_BYTES, COMBAT_SURFACE_MARGIN and
+   COMBAT_VISIBLE_ORIGIN_OFFSET are that routine's and mean the same here; the
+   row count is only spelled out because the slide never writes it. */
+#define COMBAT_SURFACE_ROWS 0xf8
+
+/* Nine frames, counted DOWN: MOV dword ptr [EBP-0x10],0x8 at 0001954e and
+   CMP dword ptr [EBP-0x10],0x0 / JGE at 00019555, so the counter runs 8 to 0
+   inclusive and the last pass is the one that has everything at rest.  The
+   counter is how far each element still has to travel, which is why every
+   position below is a multiple of it. */
+#define ENTRANCE_FIRST_FRAME 8
+
+/* How far the backdrop climbs per frame, IMUL EAX,dword ptr [EBP-0x10],0x14 at
+   0001958f: nine frames of 20 rows, so it starts 160 rows below its resting
+   place and arrives exactly as the counter reaches 0. */
+#define ENTRANCE_BACKDROP_RISE 0x14
+
+/* And how far the attacker moves per frame, MOV dword ptr [EBP-0xc],0xf at
+   0001953e against MOV dword ptr [EBP-0xc],0xfffffff1 at 00019547: nine frames
+   of 15 columns, so he starts 120 columns out and arrives at the same moment. */
+#define ENTRANCE_SLIDE_PER_FRAME 0xf
+
+/* 000194e0.  The frame is the plain -4s one: PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP,
+   SUB ESP,0x34, the six arguments read from [EBP+0x14] through [EBP+0x28], and
+   both call sites doing ADD ESP,0x18 after the CALL -- 000190ba in
+   fdps_combat_play_attack_exchange and 0001a9ac in
+   fdps_combat_play_spell_on_targets.  Nothing is returned and neither caller
+   looks: both overwrite EAX with a load on the next instruction.
+
+   One branch before the loop, the side test, and one inside it, the
+   attacker_only test, so cyclomatic complexity 5 counting the two retrace
+   spins and the tick wait.
+
+   THERE IS NO PAGE VARIABLE.  Slot 0 of the draw request IS the page: malloc's
+   answer is stored there at 000194f9 and every later use -- the clear at
+   0001956f, the two gauge calls at 000195ed and 0001963e, the present's source
+   at 00019685 and free's argument at 000196ae -- reads that slot back.  A local
+   of its own would be a second slot and a copy into it.
+
+   THE ATTACKER'S y IS WHATEVER THE PREVIOUS DRAW LEFT IN THE REQUEST, and that
+   is the whole of the diagonal entrance.  Nothing between the second and the
+   third draw writes slot 4: when the defender was drawn it holds the 0x18 that
+   draw put there and the attacker slides in level, and when attacker_only is
+   set it still holds the backdrop's own climbing y and the attacker rides down
+   with it.  Filling in every field of the request before each draw -- the
+   obvious way to write three near-identical draws -- pins the attacker at 0x18
+   and kills that second mode outright (rebuild_info/pitfalls.md).
+
+   THE CURSOR IS ADVANCED BEFORE THE FRAME IS DRAWN, which is the opposite of
+   fdps_combat_slide_backdrops above: fdps_saf_advance_tick is called at
+   000195b5 and 00019600 and the two slots are read afterwards at 000195c4 and
+   00019608.  So the nine passes show frames 1 through 9 of each clip and frame
+   0 is never seen.
+
+   THE ITEM INDEX AND THE y ARE WRITTEN TWICE, once before the loop at 0001950a
+   and 0001951f and again inside it at 00019581 and 00019596, and the pre-loop
+   pair is dead.  Both stores are in the original and both are kept: the second
+   assignment is to a local and no reader can tell either way.
+
+   THE FRAME-PACING LOCAL IS READ BEFORE IT IS WRITTEN.  MOV EAX,dword ptr
+   [EBP-0x8] at 00019696 is the first reference to that slot in the function, so
+   the first of the nine frames compares stack garbage against the tick counter
+   and normally falls straight through.  Latching the counter before the loop
+   adds a tick to the first frame (rebuild_info/pitfalls.md).
+   data_fdps_timer_tick_counter is volatile at its declaration in gamedata.h
+   because of waits like this one: nothing here writes it, so a build allowed to
+   hoist the load would spin forever, and the retrace spins read a port and
+   cannot be hoisted for the same reason.
+
+   TWO CALLS' ANSWERS ARE READ.  malloc's is the page, and it is read back out
+   of slot 0 five times as above; fdps_get_unit_record's is the record whose
+   side byte at +6 picks the direction, and it is not kept past that test.
+   inp's is tested for bit 3 at both spins.  fdps_saf_advance_tick,
+   fdps_draw_composite_sprite, fdps_draw_unit_hp_mp_gauges, fdps_blit_rect,
+   memset and free all return nothing the original reads -- the two advances in
+   particular throw away the end-of-clip answer, so a clip that runs out inside
+   these nine frames wraps and nothing here notices.
+
+   THE PAGE IS NOT CHECKED.  malloc's answer goes straight into the request and
+   is cleared through on the first pass, so an exhausted heap faults rather than
+   being rejected; adding the null test the obvious reading invites is a branch
+   the original does not have.
+
+   The frames are paced by the retrace and by the timer tick, so how many
+   instructions stand between them is not observable (contract D). */
+void fdps_combat_slide_in_attacker(int attacker_unit_index,
+                                   int defender_unit_index, int attacker_only,
+                                   int *attacker_saf_cursor,
+                                   int *defender_saf_cursor, void *backdrop)
+{
+    /* The nine-slot block sprite.h describes, and the page with it -- see the
+       note above.  Every one of the three draws a frame makes goes through
+       this one block, which is what makes the leftovers behaviour. */
+    int request[DRAW_REQUEST_DWORDS];
+    /* The acting unit's record, read for its side byte and not kept. */
+    struct fdps_unit_record *attacker;
+    /* How far the attacker still has to move, per frame remaining: negative
+       for a side-0 unit, which enters from the left, and positive for anyone
+       else, who enters from the right. */
+    int slide_step;
+    /* How many frames of travel are left, 8 down to 0, so 0 is the frame that
+       has everything home. */
+    int frames_left;
+    /* The tick the previous frame ended on.  Deliberately not initialised --
+       see the note above. */
+    unsigned int last_tick;
+
+    request[DRAW_REQUEST_DEST_BASE] = (int) malloc((size_t)
+                                                   COMBAT_SURFACE_BYTES);
+    request[DRAW_REQUEST_DEST_PITCH] = COMBAT_SURFACE_PITCH;
+    request[DRAW_REQUEST_DEST_ROWS] = COMBAT_SURFACE_ROWS;
+    request[DRAW_REQUEST_ITEM_INDEX] = 0;
+    request[DRAW_REQUEST_BLIT_OPERAND] = 0;
+    request[DRAW_REQUEST_BLIT_MODE] = 0;
+    request[DRAW_REQUEST_Y] = COMBAT_SURFACE_MARGIN;
+
+    attacker = fdps_get_unit_record(attacker_unit_index);
+    if (attacker->side == ENEMY_SIDE) {
+        slide_step = -ENTRANCE_SLIDE_PER_FRAME;
+    } else {
+        slide_step = ENTRANCE_SLIDE_PER_FRAME;
+    }
+
+    for (frames_left = ENTRANCE_FIRST_FRAME; frames_left >= 0; frames_left--) {
+        memset((void *) request[DRAW_REQUEST_DEST_BASE], 0,
+               (size_t) COMBAT_SURFACE_BYTES);
+
+        /* The terrain, entry 0, climbing into place under everything else. */
+        request[DRAW_REQUEST_IMAGE] = (int) backdrop;
+        request[DRAW_REQUEST_ITEM_INDEX] = 0;
+        request[DRAW_REQUEST_X] = COMBAT_SURFACE_MARGIN;
+        request[DRAW_REQUEST_Y] = frames_left * ENTRANCE_BACKDROP_RISE
+                                  + COMBAT_SURFACE_MARGIN;
+        fdps_draw_composite_sprite(request, 0);
+
+        /* The unit on the receiving end, already standing where it will stay:
+           it is drawn on the border corner every frame and never moves. */
+        if (attacker_only == 0) {
+            fdps_saf_advance_tick(defender_saf_cursor, 0);
+            request[DRAW_REQUEST_Y] = COMBAT_SURFACE_MARGIN;
+            request[DRAW_REQUEST_IMAGE] =
+                defender_saf_cursor[SAF_CURSOR_IMAGE];
+            request[DRAW_REQUEST_ITEM_INDEX] =
+                defender_saf_cursor[SAF_CURSOR_FRAME_INDEX];
+            fdps_draw_composite_sprite(request, 0);
+            fdps_draw_unit_hp_mp_gauges(
+                (unsigned char *) request[DRAW_REQUEST_DEST_BASE],
+                COMBAT_SURFACE_PITCH, defender_unit_index);
+        }
+
+        /* And the attacker, coming in from his own edge -- at whatever y the
+           draw before him left behind. */
+        fdps_saf_advance_tick(attacker_saf_cursor, 0);
+        request[DRAW_REQUEST_IMAGE] = attacker_saf_cursor[SAF_CURSOR_IMAGE];
+        request[DRAW_REQUEST_ITEM_INDEX] =
+            attacker_saf_cursor[SAF_CURSOR_FRAME_INDEX];
+        request[DRAW_REQUEST_X] = frames_left * slide_step
+                                  + COMBAT_SURFACE_MARGIN;
+        fdps_draw_composite_sprite(request, 0);
+        fdps_draw_unit_hp_mp_gauges(
+            (unsigned char *) request[DRAW_REQUEST_DEST_BASE],
+            COMBAT_SURFACE_PITCH, attacker_unit_index);
+
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins, so the frame just composed is the
+               one the monitor shows whole. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends, so the 64000-byte transfer starts clear. */
+        }
+
+        fdps_blit_rect((unsigned int) (request[DRAW_REQUEST_DEST_BASE]
+                                       + COMBAT_VISIBLE_ORIGIN_OFFSET),
+                       COMBAT_SURFACE_PITCH, (void *) VGA_SCREEN_BASE,
+                       SCREEN_WIDTH, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
+
+    free((void *) request[DRAW_REQUEST_DEST_BASE]);
 }

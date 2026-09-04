@@ -1464,6 +1464,414 @@ static void the_present_copies_the_window_at_the_border_corner(void)
     CHECK_EQ(slide_screen_count(SLIDE_IN_PIXEL), SLIDE_CELL_W * SLIDE_CELL_H);
 }
 
+
+/* ------------------------------------------------------------------ *
+ * fdps_combat_slide_in_attacker @ 000194e0
+ *
+ * The entrance runs on the same offscreen page and the same presenter as the
+ * slide above, so the .SAF fixtures, the mode switch, the aperture capture and
+ * the IRQ0 handler that lets the frame wait finish are the ones built for it.
+ * Two things are new.
+ *
+ * THE PAGE IS THE FUNCTION'S OWN.  It comes from malloc at 000194f1 and is
+ * freed at 000196b2, so no fixture can look at it and every position assertion
+ * below reads the aperture instead.  The present copies page (24,24) to screen
+ * (0,0), so a page coordinate is a screen coordinate less the 24-pixel apron.
+ *
+ * ONLY THE LAST OF THE NINE FRAMES SURVIVES THE RUN, and the last frame is by
+ * construction the one with everything at rest, so the aperture on its own
+ * cannot say which way anything travelled.  The motion is sampled instead:
+ * walkin_timer_isr scans the top row of the aperture on every tick and records
+ * where the attacker's mark was, which is exactly the moment the routine is
+ * spinning on the counter with a finished frame on screen.  A sample is kept
+ * only once the row holds a zero byte, because before the first present the
+ * aperture is still full of the fixture's sentinel.
+ *
+ * The gauge art both panels are painted from is staged rather than loaded: a
+ * four-sprite .CEL of one pixel each, so a frame blit marks its own corner and
+ * nothing else, and a flat fill sheet.  Ticket 23 owns what either real sheet
+ * holds and neither is opened by name here.
+ * ------------------------------------------------------------------ */
+
+/* Nine frames, 8 down to 0: MOV dword ptr [EBP-0x10],0x8 at 0001954e with
+   CMP ...,0x0 / JGE at 00019555.  WALKIN_FIRST_FRAME is the counter's first
+   value and WALKIN_FRAMES how many passes that makes. */
+#define WALKIN_FIRST_FRAME 8
+#define WALKIN_FRAMES 9
+
+/* IMUL EAX,dword ptr [EBP-0x10],0x14 at 0001958f and MOV dword ptr
+   [EBP-0xc],0xf / 0xfffffff1 at 0001953e and 00019547. */
+#define WALKIN_BACKDROP_RISE 0x14
+#define WALKIN_SLIDE 0x0f
+
+/* One pixel value per image, none of them zero and none of them the slide
+   fixture's, so a painted byte names the draw that wrote it. */
+#define WALKIN_BACKDROP_PIXEL 0x11
+#define WALKIN_ATTACKER_PIXEL 0x22
+#define WALKIN_DEFENDER_PIXEL 0x33
+
+/* The two combatants' layers sit 8 and 16 pixels right of their request, so
+   the three marks of a resting frame cannot land on one another. */
+#define WALKIN_ATTACKER_LAYER_X 8
+#define WALKIN_DEFENDER_LAYER_X 16
+
+/* The two gauge panels' origins in page coordinates, from the assembly of
+   fdps_draw_unit_hp_mp_gauges at 00019310: SHL EAX,0x5 / ADD EAX,0xc3 for the
+   upper right, IMUL EAX,...,0xc7 / ADD EAX,0x1e for the lower left, and PUSH
+   0xa for the MP frame's row.  A side of 0 takes the lower left. */
+#define WALKIN_UP_RIGHT_ROW 0x20
+#define WALKIN_UP_RIGHT_COLUMN 0xc3
+#define WALKIN_LOW_LEFT_ROW 0xc7
+#define WALKIN_LOW_LEFT_COLUMN 0x1e
+#define WALKIN_MP_FRAME_ROW 10
+
+/* Four one-pixel sprites: 0 and 1 are the upper-right panel's two frames and
+   2 and 3 the lower left's.  The header is fifteen bytes and the offset table
+   is sprite_count + 1 four-byte entries measured from the start of the sheet
+   (resource_info/cel.md). */
+#define WALKIN_CEL_SPRITES 4
+#define WALKIN_CEL_TABLE_START 15
+#define WALKIN_CEL_STREAM_START (WALKIN_CEL_TABLE_START \
+                                 + (WALKIN_CEL_SPRITES + 1) * 4)
+#define WALKIN_CEL_STREAM_BYTES 2
+#define WALKIN_CEL_BYTES (WALKIN_CEL_STREAM_START \
+                          + WALKIN_CEL_SPRITES * WALKIN_CEL_STREAM_BYTES)
+#define WALKIN_CEL_PIXEL_BASE 0x80
+
+/* Four fill strips of 0x271 bytes, the packed surface src/gauge.c describes. */
+#define WALKIN_FILL_BYTES 0x9c4
+#define WALKIN_FILL_PIXEL 0x40
+
+/* Room for more samples than nine frames can produce, so an overflow cannot
+   silently truncate the record. */
+#define WALKIN_MAX_SAMPLES 128
+
+/* What a sample holds when the attacker's mark was not on the top row at all. */
+#define WALKIN_ABSENT (-1)
+
+static unsigned char walkin_backdrop_image[SLIDE_IMAGE_BYTES];
+static unsigned char walkin_attacker_image[SLIDE_IMAGE_BYTES];
+static unsigned char walkin_defender_image[SLIDE_IMAGE_BYTES];
+static unsigned char walkin_cel[WALKIN_CEL_BYTES];
+static unsigned char walkin_fill[WALKIN_FILL_BYTES];
+static unsigned char walkin_screen[SLIDE_SCREEN_BYTES];
+static int walkin_attacker_cursor[3];
+static int walkin_defender_cursor[3];
+static int walkin_samples[WALKIN_MAX_SAMPLES];
+static int walkin_sample_count;
+
+static void (__interrupt __far *walkin_saved_timer)();
+
+/* Drives the counter the frame wait spins on, and takes one reading of the
+   finished frame while it is still on screen. */
+static void __interrupt __far walkin_timer_isr(void)
+{
+    unsigned char *aperture;
+    int column;
+    int found;
+    int presented;
+
+    if (walkin_sample_count < WALKIN_MAX_SAMPLES) {
+        aperture = (unsigned char *) SLIDE_VGA_BASE;
+        found = WALKIN_ABSENT;
+        presented = 0;
+        for (column = 0; column < SLIDE_SCREEN_W; column++) {
+            if (aperture[column] == 0) {
+                presented = 1;
+            } else if (aperture[column] == WALKIN_ATTACKER_PIXEL
+                       && found == WALKIN_ABSENT) {
+                found = column;
+            }
+        }
+        if (presented != 0) {
+            walkin_samples[walkin_sample_count] = found;
+            walkin_sample_count++;
+        }
+    }
+
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(walkin_saved_timer);
+}
+
+/* One whole entrance, with the adapter in the mode the game plays it in and a
+   timer interrupt running, leaving the presented window in walkin_screen[],
+   the two cursors where the call left them and the top-row readings in
+   walkin_samples[]. */
+static void walkin_run(int attacker_side, int attacker_only)
+{
+    int offset;
+    int sprite;
+
+    stage();
+
+    unit(ATTACKER)->side = (unsigned char) attacker_side;
+    unit(ATTACKER)->hp_current = 50;
+    unit(ATTACKER)->hp_max = 100;
+    unit(ATTACKER)->mp_current = 25;
+    unit(ATTACKER)->mp_max = 100;
+
+    unit(DEFENDER)->side = ENEMY_SIDE;
+    unit(DEFENDER)->hp_current = 50;
+    unit(DEFENDER)->hp_max = 100;
+    unit(DEFENDER)->mp_current = 25;
+    unit(DEFENDER)->mp_max = 100;
+
+    for (offset = 0; offset < WALKIN_CEL_BYTES; offset++) {
+        walkin_cel[offset] = 0;
+    }
+    walkin_cel[0] = 'C';
+    walkin_cel[1] = 'E';
+    walkin_cel[2] = 'L';
+    *(short *) (walkin_cel + 7) = 1;
+    *(short *) (walkin_cel + 9) = 1;
+    *(short *) (walkin_cel + 11) = WALKIN_CEL_SPRITES;
+    for (sprite = 0; sprite < WALKIN_CEL_SPRITES; sprite++) {
+        offset = WALKIN_CEL_STREAM_START + sprite * WALKIN_CEL_STREAM_BYTES;
+        *(int *) (walkin_cel + WALKIN_CEL_TABLE_START + sprite * 4) = offset;
+        /* Command 0x00 is a fill run of one pixel and the byte after it is the
+           pixel (rle.h). */
+        walkin_cel[offset] = 0x00;
+        walkin_cel[offset + 1] = (unsigned char) (WALKIN_CEL_PIXEL_BASE
+                                                  + sprite);
+    }
+    *(int *) (walkin_cel + WALKIN_CEL_TABLE_START + WALKIN_CEL_SPRITES * 4) =
+        WALKIN_CEL_BYTES;
+    data_fdps_combat_gauge_sprite_sheet_ptr = walkin_cel;
+
+    for (offset = 0; offset < WALKIN_FILL_BYTES; offset++) {
+        walkin_fill[offset] = WALKIN_FILL_PIXEL;
+    }
+    data_fdps_gauge_fill_sheet_ptr = walkin_fill;
+
+    slide_stage_image(walkin_backdrop_image, WALKIN_BACKDROP_PIXEL, 1, 1, 0);
+    slide_stage_image(walkin_attacker_image, WALKIN_ATTACKER_PIXEL,
+                      SLIDE_ANIM_FRAMES, SLIDE_ANIM_DURATION,
+                      WALKIN_ATTACKER_LAYER_X);
+    slide_stage_image(walkin_defender_image, WALKIN_DEFENDER_PIXEL,
+                      SLIDE_ANIM_FRAMES, SLIDE_ANIM_DURATION,
+                      WALKIN_DEFENDER_LAYER_X);
+
+    walkin_attacker_cursor[SLIDE_CUR_FRAME] = 0;
+    walkin_attacker_cursor[SLIDE_CUR_TICKS] = 0;
+    walkin_attacker_cursor[SLIDE_CUR_IMAGE] = (int) walkin_attacker_image;
+    walkin_defender_cursor[SLIDE_CUR_FRAME] = 0;
+    walkin_defender_cursor[SLIDE_CUR_TICKS] = 0;
+    walkin_defender_cursor[SLIDE_CUR_IMAGE] = (int) walkin_defender_image;
+
+    walkin_sample_count = 0;
+    for (offset = 0; offset < WALKIN_MAX_SAMPLES; offset++) {
+        walkin_samples[offset] = WALKIN_ABSENT;
+    }
+
+    slide_set_mode(SLIDE_MODE_320X200X256);
+    memset((void *) SLIDE_VGA_BASE, SLIDE_SCREEN_SENTINEL,
+           (size_t) SLIDE_SCREEN_BYTES);
+
+    walkin_saved_timer = _dos_getvect(SLIDE_TIMER_VECTOR);
+    _dos_setvect(SLIDE_TIMER_VECTOR, walkin_timer_isr);
+    fdps_combat_slide_in_attacker(ATTACKER, DEFENDER, attacker_only,
+                                  walkin_attacker_cursor,
+                                  walkin_defender_cursor,
+                                  walkin_backdrop_image);
+    _dos_setvect(SLIDE_TIMER_VECTOR, walkin_saved_timer);
+
+    memmove(walkin_screen, (void *) SLIDE_VGA_BASE,
+            (size_t) SLIDE_SCREEN_BYTES);
+    slide_set_mode(SLIDE_MODE_TEXT);
+}
+
+/* One byte of the presented window. */
+static int walkin_screen_pixel(int row, int column)
+{
+    return (int) walkin_screen[row * SLIDE_SCREEN_W + column];
+}
+
+/* And one byte of it addressed in page coordinates, which is how every
+   position in the assembly is written. */
+static int walkin_page_pixel(int page_row, int page_column)
+{
+    return walkin_screen_pixel(page_row - SLIDE_MARGIN,
+                               page_column - SLIDE_MARGIN);
+}
+
+/* How many readings did not find the attacker on the top row at all. */
+static int walkin_absent_samples(void)
+{
+    int index;
+    int absent;
+
+    absent = 0;
+    for (index = 0; index < walkin_sample_count; index++) {
+        if (walkin_samples[index] == WALKIN_ABSENT) {
+            absent++;
+        }
+    }
+    return absent;
+}
+
+/* The rightmost column any reading found him at, or WALKIN_ABSENT if none
+   did. */
+static int walkin_rightmost_sample(void)
+{
+    int index;
+    int rightmost;
+
+    rightmost = WALKIN_ABSENT;
+    for (index = 0; index < walkin_sample_count; index++) {
+        if (walkin_samples[index] > rightmost) {
+            rightmost = walkin_samples[index];
+        }
+    }
+    return rightmost;
+}
+
+/* How many readings found him somewhere that is not a whole number of 15-column
+   steps out from his resting place, which is where every frame of the entrance
+   must put him. */
+static int walkin_off_grid_samples(void)
+{
+    int index;
+    int column;
+    int wrong;
+
+    wrong = 0;
+    for (index = 0; index < walkin_sample_count; index++) {
+        column = walkin_samples[index];
+        if (column != WALKIN_ABSENT) {
+            if (column < WALKIN_ATTACKER_LAYER_X
+                || column > WALKIN_FIRST_FRAME * WALKIN_SLIDE
+                            + WALKIN_ATTACKER_LAYER_X
+                || (column - WALKIN_ATTACKER_LAYER_X) % WALKIN_SLIDE != 0) {
+                wrong++;
+            }
+        }
+    }
+    return wrong;
+}
+
+/* CMP byte ptr [EAX+0x6],0x0 / JZ at 00019538: the direction is decided by the
+   record's side byte and by nothing else, so it is that offset the whole test
+   rests on. */
+static void the_direction_is_taken_from_record_offset_six(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 6);
+}
+
+/* Nine passes, one advance each, on clips of sixteen frames so that neither
+   count is a wrap.  The advance is BEFORE the draw here -- the CALLs at
+   000195b5 and 00019600 come ahead of the slot reads at 000195c4 and 00019608
+   -- so frame 0 of each clip is never shown and the cursors are left on 9. */
+static void nine_frames_advance_both_cursors_nine_times(void)
+{
+    walkin_run(2, 0);
+    CHECK_EQ(walkin_attacker_cursor[SLIDE_CUR_FRAME], WALKIN_FRAMES);
+    CHECK_EQ(walkin_attacker_cursor[SLIDE_CUR_TICKS], 0);
+    CHECK_EQ(walkin_defender_cursor[SLIDE_CUR_FRAME], WALKIN_FRAMES);
+    CHECK_EQ(walkin_defender_cursor[SLIDE_CUR_TICKS], 0);
+}
+
+/* CMP dword ptr [EBP+0x1c],0x0 / JNZ at 000195a8 jumps the whole defender
+   block, so his cursor is not advanced, his sprite is not drawn and his panel
+   is not painted.  The attacker's nine advances still happen. */
+static void attacker_only_leaves_the_defender_out_entirely(void)
+{
+    walkin_run(2, 1);
+    CHECK_EQ(walkin_defender_cursor[SLIDE_CUR_FRAME], 0);
+    CHECK_EQ(walkin_attacker_cursor[SLIDE_CUR_FRAME], WALKIN_FRAMES);
+    CHECK_EQ(walkin_screen_pixel(0, WALKIN_DEFENDER_LAYER_X), 0);
+    CHECK_EQ(walkin_page_pixel(WALKIN_LOW_LEFT_ROW, WALKIN_LOW_LEFT_COLUMN), 0);
+    CHECK_EQ(walkin_page_pixel(WALKIN_LOW_LEFT_ROW + WALKIN_MP_FRAME_ROW,
+                               WALKIN_LOW_LEFT_COLUMN), 0);
+}
+
+/* At a counter of 0 every position is its own margin: the backdrop's y is
+   0 * 0x14 + 0x18 and the attacker's x is 0 * step + 0x18, so all three marks
+   land on the border corner and the present puts that corner at screen (0,0).
+   The cells are 4 by 2, so row 2 is clear. */
+static void the_last_frame_has_everything_on_the_border_corner(void)
+{
+    walkin_run(2, 0);
+    CHECK_EQ(walkin_screen_pixel(0, 0), WALKIN_BACKDROP_PIXEL);
+    CHECK_EQ(walkin_screen_pixel(1, 0), WALKIN_BACKDROP_PIXEL);
+    CHECK_EQ(walkin_screen_pixel(0, WALKIN_ATTACKER_LAYER_X),
+             WALKIN_ATTACKER_PIXEL);
+    CHECK_EQ(walkin_screen_pixel(1, WALKIN_ATTACKER_LAYER_X),
+             WALKIN_ATTACKER_PIXEL);
+    CHECK_EQ(walkin_screen_pixel(0, WALKIN_DEFENDER_LAYER_X),
+             WALKIN_DEFENDER_PIXEL);
+    CHECK_EQ(walkin_screen_pixel(2, 0), 0);
+    /* Every byte of the window was written, so none of the fixture's fill
+       survived the nine presents. */
+    CHECK_EQ(walkin_screen_pixel(SLIDE_SCREEN_H - 1, SLIDE_SCREEN_W - 1), 0);
+}
+
+/* Both bars are painted every frame, each into the panel its own side byte
+   picks: the side-2 attacker into the upper right out of sprites 0 and 1, the
+   side-0 defender into the lower left out of sprites 2 and 3.  The MP frame is
+   ten rows under the HP frame in both. */
+static void each_combatant_gets_the_panel_his_side_byte_picks(void)
+{
+    walkin_run(2, 0);
+    CHECK_EQ(walkin_page_pixel(WALKIN_UP_RIGHT_ROW, WALKIN_UP_RIGHT_COLUMN),
+             WALKIN_CEL_PIXEL_BASE);
+    CHECK_EQ(walkin_page_pixel(WALKIN_UP_RIGHT_ROW + WALKIN_MP_FRAME_ROW,
+                               WALKIN_UP_RIGHT_COLUMN),
+             WALKIN_CEL_PIXEL_BASE + 1);
+    CHECK_EQ(walkin_page_pixel(WALKIN_LOW_LEFT_ROW, WALKIN_LOW_LEFT_COLUMN),
+             WALKIN_CEL_PIXEL_BASE + 2);
+    CHECK_EQ(walkin_page_pixel(WALKIN_LOW_LEFT_ROW + WALKIN_MP_FRAME_ROW,
+                               WALKIN_LOW_LEFT_COLUMN),
+             WALKIN_CEL_PIXEL_BASE + 3);
+}
+
+/* MOV dword ptr [EBP-0xc],0xf at 0001953e is the arm a side other than 0
+   takes, so the attacker starts 8 * 15 columns to the RIGHT of home and closes
+   in.  Every reading finds him, and every one finds him a whole number of
+   15-column steps out; at least one finds him short of home, which is what says
+   he moved at all. */
+static void a_side_two_attacker_closes_in_from_the_right(void)
+{
+    walkin_run(2, 0);
+    CHECK_EQ(walkin_sample_count >= 2, 1);
+    CHECK_EQ(walkin_absent_samples(), 0);
+    CHECK_EQ(walkin_off_grid_samples(), 0);
+    CHECK_EQ(walkin_rightmost_sample() > WALKIN_ATTACKER_LAYER_X, 1);
+    CHECK_EQ(walkin_screen_pixel(0, WALKIN_ATTACKER_LAYER_X),
+             WALKIN_ATTACKER_PIXEL);
+}
+
+/* MOV dword ptr [EBP-0xc],0xfffffff1 at 00019547 is the arm side 0 takes, so
+   the same eight steps run the other way and put him at page column -96 on the
+   first frame -- off the left of the window entirely.  So no reading finds him
+   anywhere right of home, and some find him nowhere at all, while the last
+   frame still stands him on the corner. */
+static void a_side_zero_attacker_closes_in_from_the_left(void)
+{
+    walkin_run(0, 0);
+    CHECK_EQ(walkin_sample_count >= 2, 1);
+    CHECK_EQ(walkin_rightmost_sample(), WALKIN_ATTACKER_LAYER_X);
+    CHECK_EQ(walkin_absent_samples() > 0, 1);
+    CHECK_EQ(walkin_screen_pixel(0, WALKIN_ATTACKER_LAYER_X),
+             WALKIN_ATTACKER_PIXEL);
+}
+
+/* The one the rebuild note is about.  With the defender drawn, his own store of
+   0x18 at 000195bd is the last thing to touch the request's y, so the attacker
+   is on the top row every frame -- which the case above already leans on, every
+   reading finding him there.  With attacker_only set that store never runs and
+   the y is still the backdrop's climbing 0x14 * counter + 0x18, so he is 160
+   rows down on the first frame and only reaches the top row at the end: the
+   readings lose him.  An emitter that filled the request in completely before
+   each draw would make these two runs identical. */
+static void attacker_only_lets_the_attacker_ride_the_backdrop_down(void)
+{
+    walkin_run(2, 1);
+    CHECK_EQ(walkin_sample_count >= 2, 1);
+    CHECK_EQ(walkin_absent_samples() > 0, 1);
+    CHECK_EQ(walkin_screen_pixel(0, WALKIN_ATTACKER_LAYER_X),
+             WALKIN_ATTACKER_PIXEL);
+}
+
 void run_combat_tests(void)
 {
     RUN_TEST(the_record_layouts_match_the_offsets_read);
@@ -1506,4 +1914,13 @@ void run_combat_tests(void)
     RUN_TEST(the_cursor_is_advanced_once_per_step_after_the_draw);
     RUN_TEST(the_page_and_the_blend_slots_come_back_untouched);
     RUN_TEST(the_present_copies_the_window_at_the_border_corner);
+
+    RUN_TEST(the_direction_is_taken_from_record_offset_six);
+    RUN_TEST(nine_frames_advance_both_cursors_nine_times);
+    RUN_TEST(attacker_only_leaves_the_defender_out_entirely);
+    RUN_TEST(the_last_frame_has_everything_on_the_border_corner);
+    RUN_TEST(each_combatant_gets_the_panel_his_side_byte_picks);
+    RUN_TEST(a_side_two_attacker_closes_in_from_the_right);
+    RUN_TEST(a_side_zero_attacker_closes_in_from_the_left);
+    RUN_TEST(attacker_only_lets_the_attacker_ride_the_backdrop_down);
 }

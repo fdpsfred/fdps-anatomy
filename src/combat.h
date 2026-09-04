@@ -83,4 +83,47 @@ extern void fdps_combat_slide_backdrops(void *outgoing_backdrop,
                                         int direction);
 #pragma aux fdps_combat_slide_backdrops "*" parm caller [];
 
+/* Plays the entrance of the combat animation: the terrain backdrop climbs into
+   place while the acting unit walks in from his own edge of the screen.  Nine
+   frames, one per timer tick, each composed on an offscreen page this function
+   allocates and frees for itself and presented to the mode 13h screen; the call
+   returns when the ninth frame, the one that has everything at rest, has been
+   shown.  That resting state is what the caller's own attack animation takes
+   over from.
+
+   Both units are named by index in the map unit array.  `attacker_unit_index`
+   is the acting unit: its side byte decides which edge he comes in from -- side
+   0 from the left, any other side from the right, 15 columns a frame over 120 --
+   and his HP/MP panel is painted on every frame.  `defender_unit_index` is used
+   for nothing but its panel, and only when `attacker_only` is 0.
+
+   `attacker_only` non-zero drops the defender entirely: he is neither drawn nor
+   gauged, AND the attacker then rides down with the climbing backdrop instead of
+   moving only sideways, because the draw request's y is left holding whatever
+   the previous draw put there.  fdps_combat_play_attack_exchange takes the flag
+   off the attacker's own Act%03d.saf and hands over the attacker's terrain when
+   it is set; fdps_combat_play_spell_on_targets always passes 0.
+
+   `attacker_saf_cursor` and `defender_saf_cursor` are three-dword .SAF playback
+   cursors (src/saf.h) for the two units' Stand%03d.saf clips.  Each is ADVANCED
+   ONE TICK BEFORE the frame that reads it, so the nine frames show frames 1
+   through 9 of a clip and frame 0 is never seen; the end-of-clip answer is
+   discarded, so a shorter clip wraps unremarked.  The defender's is read only
+   when `attacker_only` is 0, though both callers always pass a live cursor.
+   `backdrop` is the Back%02d.saf terrain image, of which entry 0 is drawn.
+
+   Nothing is returned.  The page comes from malloc and is not checked, so an
+   exhausted heap faults.  data_fdps_timer_tick_counter (src/gamedata.h) paces
+   the frames, so a caller running this with no timer interrupt installed stops
+   on the first frame that waits, and both units' gauge art must already be
+   loaded because every frame paints a panel through
+   fdps_draw_unit_hp_mp_gauges (src/gauge.h). */
+extern void fdps_combat_slide_in_attacker(int attacker_unit_index,
+                                          int defender_unit_index,
+                                          int attacker_only,
+                                          int *attacker_saf_cursor,
+                                          int *defender_saf_cursor,
+                                          void *backdrop);
+#pragma aux fdps_combat_slide_in_attacker "*" parm caller [];
+
 #endif
