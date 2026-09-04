@@ -2401,6 +2401,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x6c"
+    },
+    "00026fd0": {
+      "name": "fdps_apply_heal_to_targets",
+      "target": "item.c",
+      "body_size": "0x97",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x97"
     }
   }
 }
