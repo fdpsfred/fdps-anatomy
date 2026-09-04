@@ -1,6 +1,11 @@
-/* unitatk.c -- the on-map physical attack: one blow of a weapon swing
- * resolved from the two units' records, the ground they stand on and the
- * weapon's hit effect.
+/* unitatk.c -- the on-map physical attack: a unit's whole weapon swing at
+ * another, and the single blow that swing is made of.
+ *
+ * fdps_unit_attack_target is what the map calls.  It decides how many blows
+ * the swing lands, plays each blow's animation, hands the numbers to the
+ * resolver and drains the target's HP bar down to what the blow left.
+ * fdps_unit_resolve_attack_hit is that resolver: one blow worked out from the
+ * two units' records, the ground they stand on and the weapon's hit effect.
  *
  * See unitatk.h for what a caller has to know.  The only state this file owns
  * is data_fdps_battle_last_hit_or_miss_flag; everything else it touches is
@@ -19,14 +24,18 @@
 #include "table.h"
 #include "maptile.h"
 #include "palette.h"
+#include "anim.h"
+#include "gauge.h"
 #include "unitatk.h"
 
-/* The weapon hit effects, read out of item record byte +9 and compared here
-   against three of the four values the table uses.  Effect 2, the double
-   strike, is deliberately absent: fdps_unit_attack_target reads the same byte
-   for itself and answers it by calling this function twice, so the chain below
-   passes over it and the blow resolves as an ordinary one. */
+/* The weapon hit effects, read out of item record byte +9.  Both functions in
+   this file read that byte and each answers a different part of it:
+   fdps_unit_resolve_attack_hit's chain compares against 3, 4 and 1 and passes
+   over 2, while fdps_unit_attack_target compares against 2 alone and answers
+   it by calling the resolver twice.  So each blow of a double-strike weapon
+   resolves as an ordinary one. */
 #define WEAPON_EFFECT_PARALYSIS 1
+#define WEAPON_EFFECT_DOUBLE_STRIKE 2
 #define WEAPON_EFFECT_CRITICAL 3
 #define WEAPON_EFFECT_POISON 4
 
@@ -96,6 +105,188 @@
    farming experience the party keeps. */
 #define LAST_PERMANENT_ROSTER_PORTRAIT_ID 10
 #define GUEST_LEVEL_PENALTY 0x1e
+
+/* Which of the unit gauge sheet's three graphics fills the target's bar, from
+   CMP byte ptr [EAX+0x6],0x0 / JNZ at 0001c3c5: a side byte of 0 picks graphic
+   2 and every other side picks graphic 1, the same reading
+   fdps_play_attack_animation (anim.c) and fdps_battle_show_combat_gauges
+   (gauge.c) make of the same byte. */
+#define GAUGE_SIDE_ZERO_GRAPHIC 2
+#define GAUGE_OTHER_SIDE_GRAPHIC 1
+
+/* The bar's 41-column interior, the span the HP proportion is taken over:
+   IMUL EAX,dword ptr [EBP-0x24],0x29 at 0001c466 and again at 0001c49e.  It is
+   gauge.c's UNIT_GAUGE_INTERIOR_WIDTH and the ceiling is the same
+   (value * 0x29 + max - 1) / max, but it is written out here rather than
+   called: the shipped image has no CALL to fdps_draw_unit_gauge_proportional
+   at either place (rebuild_info/build_flags.md). */
+#define UNIT_GAUGE_INTERIOR_WIDTH 0x29
+
+/* Where the drain paints and how.  All of it is hard-coded in the original --
+   LEA EDX,[EAX + 0xa0000] at 0001c4db with PUSH 0x140 at 0001c4c7, ADD
+   EAX,0x4 at 0001c4d2 and ADD EDX,0x4 at 0001c4e6 for the two insets, and the
+   two PUSH 0x0 at 0001c4bb -- and 0xa0000 stays a literal because it is where
+   the display adapter answers, not the address of anything the linker places
+   (rebuild_info/pitfalls.md, contract E).  The bar goes down four pixels right
+   and four pixels below the position the caller hands over, which is the same
+   four-pixel inset the battle window is blitted to.  Mode 0 is
+   fdps_draw_unit_gauge's plain painter, which never reads the strength, so the
+   alpha of 0 is carried and not used (gauge.h). */
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_PITCH 0x140
+#define GAUGE_SCREEN_INSET 4
+#define GAUGE_DRAIN_MODE_PLAIN 0
+#define GAUGE_DRAIN_ALPHA 0
+
+/* PUSH 0x8 / CALL delay at 0001c4f2: the bar gives up one pixel every 8 ms. */
+#define GAUGE_DRAIN_STEP_MS 8
+
+/* CMP EDX,0x3 / JGE at 0001c42c, on the remainder of a signed IDIV by 100: a
+   flat 3 percent chance of a second strike on every attack, whatever weapon
+   the attacker holds. */
+#define BONUS_STRIKE_PERCENT 3
+
+/* MOV dword ptr [EBP-0x14],0x1 at 0001c3ac and the two MOV ...,0x2 at 0001c431
+   and 0001c43e.  Neither test adds to the count; both set it, so an attack
+   that passes both still lands two blows and not three. */
+#define STRIKES_ORDINARY 1
+#define STRIKES_DOUBLE 2
+
+/* 0001c3a0.  The frame is the plain -4s one: PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP, SUB ESP,0x2c, the three arguments read from [EBP+0x14], [EBP+0x18]
+   and [EBP+0x1c], RET with no immediate, and both call sites in its one caller
+   -- 00012f3e and 00012fbe in fdps_map_actor_move_and_attack -- pushing three
+   dwords and doing ADD ESP,0xc afterwards.
+
+   THE rand CALL IS UNCONDITIONAL AND THE TWO TESTS ARE SEPARATE.  CALL rand at
+   0001c419 stands above both of them, and the double-strike test at 0001c438
+   is a second `if` and not the other arm of the first.  Folding them into
+   `if (hit_effect == 2 || rand() % 100 < 3)` short-circuits the call away
+   whenever a double-strike weapon is equipped and shifts the whole
+   pseudo-random stream from that attack onward, changing every later hit,
+   critical and status roll (rebuild_info/pitfalls.md).
+
+   THE DOUBLE-STRIKE BRANCH NEVER READS THE WEAPON'S RATE.  Item byte +0x0a,
+   the percentage the resolver rolls for a poison or a paralysis weapon, is not
+   loaded anywhere in this function, so a double-strike weapon always gets both
+   blows.
+
+   THE HP AND THE MAXIMUM ARE RE-READ FROM THE RECORD AT THE TOP OF EVERY
+   STRIKE, at 0001c455 and 0001c45f, which is inside the loop and not above it.
+   That matters for the second blow: the resolver has written the first blow's
+   HP back into the record, so the second bar starts where the first one
+   stopped.
+
+   THE COUNT-DOWN TEST IS >= AND NOT >.  CMP EAX,[EBP-0x18] / JL at 0001c4b9
+   leaves the loop only when the width has fallen BELOW the new one, so a blow
+   that takes nothing off still repaints the bar once at its unchanged width.
+
+   NEITHER THE UNIT INDICES NOR THE WEAPON LOOKUP IS GUARDED, and neither is
+   the division by the maximum HP.  fdps_unit_find_equipped_slot answers -1 for
+   an attacker with nothing equipped and that -1 goes straight into
+   fdps_unit_get_item_id, which then reads unit record byte +9 and asks the
+   item table for whatever id it holds (unititem.h); a target whose maximum HP
+   is 0 is a divide error here exactly as it is in the original.
+
+   FOUR CALLS' ANSWERS ARE READ.  fdps_get_unit_record's pointer at 0001c3bf is
+   the record every field below comes off and stays live to the end of the
+   loop; fdps_unit_find_equipped_slot's slot at 0001c3e9 is
+   fdps_unit_get_item_id's second argument; that id at 0001c3fc is
+   fdps_get_item_record's argument; and fdps_unit_resolve_attack_hit's answer
+   at 0001c49b is the new HP, which is the second bar width, the loop's own
+   exit test and the function's return value.  fdps_play_attack_animation,
+   fdps_draw_unit_gauge and delay return nothing the original reads. */
+int fdps_unit_attack_target(int attacker_unit_index, int target_unit_index,
+                            int *gauge_pos)
+{
+    /* The target's record, resolved once and read on every strike. */
+    struct fdps_unit_record *target;
+    /* The attacker's equipped weapon, read only for its hit effect. */
+    struct fdps_item_effect *weapon;
+    /* Which graphic of the sheet the filled part of the bar is drawn from. */
+    int gauge_gfx_index;
+    /* The inventory slot the weapon sits in, and the item id that slot holds.
+       The original keeps both in the one stack slot at [EBP-0xc], the second
+       overwriting the first; they are two locals here because they hold two
+       different things and neither name is true of the other value. */
+    int weapon_slot;
+    int weapon_item_id;
+    /* Item record byte +9, widened unsigned by the XOR EAX,EAX / MOV AL at
+       0001c40e. */
+    int hit_effect;
+    /* How many blows this attack still owes, counted down to -1. */
+    int strike_count;
+    /* The target's HP: read off the record at the top of each strike and then
+       replaced by what the resolver hands back.  One local, because the
+       original keeps both in [EBP-0x24]. */
+    int current_hp;
+    /* The target's maximum HP, what the bar is a proportion of. */
+    int max_hp;
+    /* The bar width being painted this step.  It starts at the width the HP
+       had before the blow and walks down one pixel at a time. */
+    int bar_width;
+    /* Where that walk stops: the width the HP left by the blow gives. */
+    int bar_width_after;
+
+    strike_count = STRIKES_ORDINARY;
+
+    target = fdps_get_unit_record(target_unit_index);
+    if (target->side == 0) {
+        gauge_gfx_index = GAUGE_SIDE_ZERO_GRAPHIC;
+    } else {
+        gauge_gfx_index = GAUGE_OTHER_SIDE_GRAPHIC;
+    }
+
+    weapon_slot = fdps_unit_find_equipped_slot(attacker_unit_index, 0);
+    weapon_item_id = fdps_unit_get_item_id(attacker_unit_index, weapon_slot);
+    weapon = fdps_get_item_record(weapon_item_id);
+    hit_effect = weapon->hit_effect;
+
+    if (rand() % PERCENT < BONUS_STRIKE_PERCENT) {
+        strike_count = STRIKES_DOUBLE;
+    }
+    if (hit_effect == WEAPON_EFFECT_DOUBLE_STRIKE) {
+        strike_count = STRIKES_DOUBLE;
+    }
+
+    /* The strike loop.  The original decrements at the top and leaves on -1 --
+       DEC dword ptr [EBP-0x14] / CMP ...,-0x1 / JZ at 0001c445 -- so a count of
+       1 makes one pass and a count of 2 makes two, and the bottom test at
+       0001c504 is a JNZ back to that decrement, which is what stops a second
+       blow falling on a target the first one killed. */
+    do {
+        strike_count--;
+        if (strike_count == -1) {
+            break;
+        }
+
+        current_hp = target->hp_current;
+        max_hp = target->hp_max;
+        bar_width = (current_hp * UNIT_GAUGE_INTERIOR_WIDTH + max_hp - 1)
+                    / max_hp;
+
+        fdps_play_attack_animation(attacker_unit_index, target_unit_index);
+        current_hp = fdps_unit_resolve_attack_hit(attacker_unit_index,
+                                                  target_unit_index);
+
+        bar_width_after = (current_hp * UNIT_GAUGE_INTERIOR_WIDTH + max_hp - 1)
+                          / max_hp;
+
+        while (bar_width >= bar_width_after) {
+            fdps_draw_unit_gauge(
+                (unsigned char *)
+                    (VGA_SCREEN_BASE
+                     + (gauge_pos[1] + GAUGE_SCREEN_INSET) * VGA_SCREEN_PITCH
+                     + gauge_pos[0] + GAUGE_SCREEN_INSET),
+                VGA_SCREEN_PITCH, gauge_gfx_index, bar_width,
+                GAUGE_DRAIN_MODE_PLAIN, GAUGE_DRAIN_ALPHA);
+            delay((unsigned int) GAUGE_DRAIN_STEP_MS);
+            bar_width--;
+        }
+    } while (current_hp != 0);
+
+    return current_hp;
+}
 
 /* 0001c520.  The frame is the plain -4s one: PUSH EBX/ESI/EDI/EBP, MOV
    EBP,ESP, SUB ESP,0x54, with the two arguments read from [EBP+0x14] and

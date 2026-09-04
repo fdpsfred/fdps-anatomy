@@ -2268,6 +2268,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x3fb"
+    },
+    "0001c3a0": {
+      "name": "fdps_unit_attack_target",
+      "target": "unitatk.c",
+      "body_size": "0x17e",
+      "status": "committed",
+      "emitted_against": "0x17e",
+      "rounds": 0
     }
   }
 }
