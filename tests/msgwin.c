@@ -1,8 +1,9 @@
 /* tests/msgwin.c -- cover for src/msgwin.c.
  *
- * Two subjects: fdps_load_and_draw_portrait at 000177d0 and
- * fdps_message_window_wait_key at 000203d0.  The notes below belong to the
- * first; the second has its own banner further down.
+ * Three subjects: fdps_load_and_draw_portrait at 000177d0,
+ * fdps_message_window_wait_key at 000203d0 and fdps_prompt_two_choice at
+ * 00017990.  The notes below belong to the first; the other two have their own
+ * banners further down.
  *
  * These read the real FACE.CEL, staged through tests/gamefile.lst, and they
  * have to.  The routine formats no name and takes no file argument -- the
@@ -996,6 +997,464 @@ static void a_null_portrait_buffer_draws_nothing(void)
                           WAIT_PORTRAIT_COL + PIXEL_LAST_COL, 1), 0);
 }
 
+/* ---- fdps_prompt_two_choice, 00017990 ------------------------------------
+ *
+ * Expected values come from the assembly and from resource_info/cel.md, never
+ * from the emitted C.  The geometry is the six-push blit at 000179e7 --
+ * 0x49, 0x12e, 0x12e, the buffer, 0x140, 0xa9609 -- for the 302 x 73 panel at
+ * screen (9, 120); the pair at 00017a6b and 00017bea for the 312 x 192
+ * viewport at screen (4, 4); the page offsets 0xc4fd and 0x9ad0 pushed at
+ * 00017a82 and 00017ab2; and PUSH 0xf9 / PUSH 0x113 with the 0x7b the
+ * prologue puts in the frame at 000179b1 for the two option cells, which at a
+ * 360 pitch and the scene layers' 20-row, 20-column apron are screen
+ * (229, 103) and (255, 103).  The sprite indices are PUSH 0xd at 00017ae2,
+ * PUSH 0x8 at 00017b50, ADD EDX,0x4 at 00017b26 and ADD EDX,0x9 at 00017b94,
+ * over the phase the two IDIVs at 00017b16 and 00017b24 take as
+ * (tick / 3) % 4.  The key handling is CMP 0x7f / JGE at 00017c1e and the
+ * four compares behind it at 00017c24 to 00017c68.
+ *
+ * THE RUN IS OBSERVED THE SAME WAY THE WAIT ABOVE IS: mode 13h, a known
+ * pattern painted over the page, the call, then the frame captured out of the
+ * aperture.  wait_paint_pattern, wait_pattern, wait_pixel and wait_changed are
+ * shared with that section rather than duplicated; only the staging and the
+ * interrupt handler below are this subject's own.
+ *
+ * WHY THE SCANCODES ARE FED FROM THE INTERRUPT AND NOT STAGED IN THE RING.
+ * The routine's first act is fdps_flush_keyboard_queue (CALL at 000179b8),
+ * which stores the read index into the write index, so anything put in the
+ * ring before the call is thrown away -- that is the whole point of the call,
+ * and a test that staged codes the way the wait's cases do would measure
+ * nothing.  The handler installed here therefore plays the part of
+ * fdps_keyboard_isr: it appends one make code per timer tick, in the order the
+ * case lists them, exactly as the real handler does at 0005686f.  It waits
+ * until its second tick to do so, which puts the first append a whole timer
+ * period after the vector is installed and so unambiguously after the flush,
+ * which the routine reaches microseconds into the call.
+ *
+ * A pass reads exactly one code, so the codes arrive one per pass in order;
+ * how many passes a run takes is not fixed and does not need to be, because
+ * every case here asserts the answer the sequence produces and not the pass it
+ * arrived on.
+ *
+ * WHY VILLAGE MODE IS THE DEFAULT HERE, again: with the flag set the backdrop
+ * is a copy of the visible page, so a pass puts the screen back byte for byte
+ * and every byte that did change is something the routine drew.  That is what
+ * makes counting the changed bytes of the whole page a statement about the
+ * two option cells and nothing else.
+ *
+ * WHAT THE SHADOW SHEET IS.  A byte buffer published through
+ * data_fdps_shadow_sprite_sheet_ptr: the drawer never opens a file, it reads
+ * an already-unpacked block out of that global.  Its fourteen entries are the
+ * count the shipped Shadow.cel declares, at that file's own 24 x 24, and entry
+ * i is 24 rows of one 24-pixel fill run of the byte i -- so a pixel on the
+ * screen names the sprite index that was drawn.  The header's table-position
+ * field is deliberately wrong, so a reader that consulted it instead of
+ * hardwiring 0x0f would draw nothing recognisable.
+ *
+ * WHAT IS NOT COVERED.  Which picture each of sprites 4 to 13 actually is, and
+ * so which cell reads as "yes" on screen, is a playtest contract; so are the
+ * four zeroed corner pixels, which the transparent put-back skips and which in
+ * village mode land on the very bytes they were taken from.  A run with no key
+ * ever arriving is not exercised either: there is no timeout here and the loop
+ * has no other exit.
+ * ------------------------------------------------------------------ */
+
+/* The two option cells on the screen: 24 x 24 each, at (229, 103) and
+   (255, 103). */
+#define PROMPT_CELL_ROW 103
+#define PROMPT_LEFT_CELL_COL 229
+#define PROMPT_RIGHT_CELL_COL 255
+#define PROMPT_CELL_W 24
+#define PROMPT_CELL_H 24
+
+/* The sprite indices the two cells can show. */
+#define PROMPT_LEFT_STILL 8
+#define PROMPT_RIGHT_STILL 0x0d
+#define PROMPT_LEFT_ANIM_FIRST 4
+#define PROMPT_RIGHT_ANIM_FIRST 9
+
+/* Make codes.  0x7f is the highest one the ring can hold, and this loop's
+   CMP 0x7f / JGE throws it away; 0x20 is a key the loop has no arm for. */
+#define PROMPT_KEY_ESC 0x01
+#define PROMPT_KEY_ENTER 0x1c
+#define PROMPT_KEY_SPACE 0x39
+#define PROMPT_KEY_KEYPAD_DEL 0x53
+#define PROMPT_KEY_LEFT 0x4b
+#define PROMPT_KEY_RIGHT 0x4d
+#define PROMPT_KEY_HIGHEST 0x7f
+#define PROMPT_KEY_UNMAPPED 0x20
+
+/* The answers. */
+#define PROMPT_ANSWER_LEFT 0
+#define PROMPT_ANSWER_RIGHT 1
+#define PROMPT_ANSWER_CANCELLED (-1)
+
+/* The synthetic Shadow.cel: fourteen 24 x 24 sprites, each 24 rows of one
+   fill run -- command 0x17 then the pixel (resource_info/cel.md). */
+#define PROMPT_CEL_SPRITES 14
+#define PROMPT_CEL_SPRITE_W 24
+#define PROMPT_CEL_SPRITE_H 24
+#define PROMPT_CEL_FILL_RUN_24 0x17
+#define PROMPT_CEL_STREAM_BYTES (PROMPT_CEL_SPRITE_H * 2)
+#define PROMPT_CEL_STREAM_BASE 0x80
+#define PROMPT_CEL_SHEET_BYTES \
+    (PROMPT_CEL_STREAM_BASE + PROMPT_CEL_SPRITES * PROMPT_CEL_STREAM_BYTES)
+
+/* A table position the drawer must not read: it hardwires 0x0f. */
+#define PROMPT_CEL_DECOY_TABLE_AT 0x60
+
+/* Which handler the installed interrupt behaves as.  0 advances the counter
+   the way the game's timer does; 1 pins it to a pair of neighbouring values
+   that both divide by three to the same phase, so the frame left on the
+   screen is drawn at a phase the case can name. */
+#define PROMPT_ISR_ADVANCE 0
+#define PROMPT_ISR_PINNED_PHASE 1
+#define PROMPT_PINNED_TICK_BASE 9
+#define PROMPT_PINNED_PHASE 3
+
+/* The tick the appends start on.  One whole timer period after the vector is
+   installed, and so after the flush at the top of the routine. */
+#define PROMPT_FEED_FIRST_TICK 2
+
+/* More codes than any case here plays, and fewer than the ring holds. */
+#define PROMPT_CODES_MAX 4
+
+static unsigned char prompt_sheet[PROMPT_CEL_SHEET_BYTES];
+static unsigned char prompt_codes[PROMPT_CODES_MAX];
+static int prompt_code_count;
+static int prompt_code_next;
+static unsigned int prompt_timer_fires;
+static int prompt_isr_mode;
+static int prompt_sheet_staged = 0;
+static void (__interrupt __far *prompt_saved_timer)();
+
+/* Advances the game's clock and plays the case's keys into the scancode ring
+   the way fdps_keyboard_isr does: the byte goes in at the write index, which
+   is then bumped and wrapped at ten. */
+static void __interrupt __far prompt_timer_isr(void)
+{
+    int slot;
+
+    ++prompt_timer_fires;
+    if (prompt_isr_mode == PROMPT_ISR_ADVANCE) {
+        ++data_fdps_timer_tick_counter;
+    } else {
+        data_fdps_timer_tick_counter =
+            (unsigned int) (PROMPT_PINNED_TICK_BASE
+                            + (prompt_timer_fires & 1));
+    }
+    if (prompt_timer_fires >= PROMPT_FEED_FIRST_TICK
+            && prompt_code_next < prompt_code_count) {
+        slot = data_fdps_input_scancode_queue_write_index;
+        data_fdps_input_scancode_queue[slot] =
+            prompt_codes[prompt_code_next];
+        prompt_code_next++;
+        slot++;
+        if (slot == SCANCODE_QUEUE_LEN) {
+            slot = 0;
+        }
+        data_fdps_input_scancode_queue_write_index = slot;
+    }
+    _chain_intr(prompt_saved_timer);
+}
+
+static void prompt_stage_sheet(void)
+{
+    int index;
+    int row;
+    int at;
+
+    if (prompt_sheet_staged) {
+        return;
+    }
+    prompt_sheet_staged = 1;
+    memset(prompt_sheet, 0, (size_t) PROMPT_CEL_SHEET_BYTES);
+    prompt_sheet[0] = 'C';
+    prompt_sheet[1] = 'E';
+    prompt_sheet[2] = 'L';
+    wait_u16(prompt_sheet, 0x03, 1);
+    wait_u16(prompt_sheet, 0x05, PROMPT_CEL_DECOY_TABLE_AT);
+    wait_u16(prompt_sheet, 0x07, PROMPT_CEL_SPRITE_W);
+    wait_u16(prompt_sheet, 0x09, PROMPT_CEL_SPRITE_H);
+    wait_u16(prompt_sheet, 0x0b, PROMPT_CEL_SPRITES);
+    wait_u16(prompt_sheet, 0x0d, 2);
+
+    for (index = 0; index < PROMPT_CEL_SPRITES; index++) {
+        at = PROMPT_CEL_STREAM_BASE + index * PROMPT_CEL_STREAM_BYTES;
+        wait_u32(prompt_sheet, 0x0f + index * 4, (unsigned long) at);
+        for (row = 0; row < PROMPT_CEL_SPRITE_H; row++) {
+            prompt_sheet[at + row * 2] = PROMPT_CEL_FILL_RUN_24;
+            prompt_sheet[at + row * 2 + 1] = (unsigned char) index;
+        }
+    }
+    wait_u32(prompt_sheet, 0x0f + PROMPT_CEL_SPRITES * 4,
+             (unsigned long) PROMPT_CEL_SHEET_BYTES);
+}
+
+/* Loads the case's key sequence.  count is how many of prompt_codes[] the
+   interrupt is allowed to play. */
+static void prompt_stage_codes(int count)
+{
+    prompt_code_count = count;
+    prompt_code_next = 0;
+}
+
+/* One whole prompt, with the adapter in the mode the game runs it in, the
+   pattern on the screen and a timer interrupt feeding the keys.  Leaves the
+   frame in wait_capture[] and answers with what the routine returned. */
+static int prompt_run(int village_mode, int isr_mode)
+{
+    unsigned char *previous_sheet;
+    int answer;
+
+    prompt_stage_sheet();
+    data_fdps_village_mode_flag = (unsigned char) village_mode;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    prompt_timer_fires = 0;
+    prompt_isr_mode = isr_mode;
+    previous_sheet = data_fdps_shadow_sprite_sheet_ptr;
+    data_fdps_shadow_sprite_sheet_ptr = prompt_sheet;
+
+    wait_set_mode(WAIT_MODE_320X200X256);
+    wait_paint_pattern((unsigned char *) WAIT_VGA_BASE);
+
+    prompt_saved_timer = _dos_getvect(WAIT_TIMER_VECTOR);
+    _dos_setvect(WAIT_TIMER_VECTOR, prompt_timer_isr);
+    answer = fdps_prompt_two_choice();
+    _dos_setvect(WAIT_TIMER_VECTOR, prompt_saved_timer);
+
+    memmove(wait_capture, (void *) WAIT_VGA_BASE, (size_t) SCREEN_BYTES);
+    wait_set_mode(WAIT_MODE_TEXT);
+
+    data_fdps_shadow_sprite_sheet_ptr = previous_sheet;
+    data_fdps_village_mode_flag = 0;
+    return answer;
+}
+
+/* How many codes the run took out of the ring.  The read index starts each run
+   at 0 and only fdps_read_keyboard_queue moves it, and only when a code was
+   there, so a pass that found the ring empty leaves it alone. */
+static int prompt_codes_taken(void)
+{
+    return data_fdps_input_scancode_queue_head;
+}
+
+/* ---------------------------------------------------------------------- */
+
+/* Enter confirms and keeps the selection the loop starts on, which the
+   prologue's MOV dword ptr [EBP + -0x14],0x0 at 000179a3 makes the left
+   cell. */
+static void enter_confirms_the_left_cell(void)
+{
+    prompt_codes[0] = PROMPT_KEY_ENTER;
+    prompt_stage_codes(1);
+    CHECK_EQ(prompt_run(1, PROMPT_ISR_ADVANCE), PROMPT_ANSWER_LEFT);
+}
+
+/* Space is the second half of the same arm -- CMP 0x39 / JNZ at 00017c2a
+   falls into the store at 00017c30 -- so it confirms exactly as Enter does. */
+static void space_confirms_as_well(void)
+{
+    prompt_codes[0] = PROMPT_KEY_SPACE;
+    prompt_stage_codes(1);
+    CHECK_EQ(prompt_run(1, PROMPT_ISR_ADVANCE), PROMPT_ANSWER_LEFT);
+}
+
+/* Esc sets the flag and the selection together at 00017c45, so it answers -1
+   and not the cell that was highlighted. */
+static void esc_cancels_with_minus_one(void)
+{
+    prompt_codes[0] = PROMPT_KEY_ESC;
+    prompt_stage_codes(1);
+    CHECK_EQ(prompt_run(1, PROMPT_ISR_ADVANCE), PROMPT_ANSWER_CANCELLED);
+}
+
+/* Keypad Del is the second half of that arm, CMP 0x53 / JNZ at 00017c3f. */
+static void keypad_del_cancels_as_well(void)
+{
+    prompt_codes[0] = PROMPT_KEY_KEYPAD_DEL;
+    prompt_stage_codes(1);
+    CHECK_EQ(prompt_run(1, PROMPT_ISR_ADVANCE), PROMPT_ANSWER_CANCELLED);
+}
+
+/* Right moves the selection and a confirm after it answers 1: the store at
+   00017c6a survives into the next pass, and the confirm arm writes nothing
+   over it. */
+static void right_then_enter_answers_the_right_cell(void)
+{
+    prompt_codes[0] = PROMPT_KEY_RIGHT;
+    prompt_codes[1] = PROMPT_KEY_ENTER;
+    prompt_stage_codes(2);
+    CHECK_EQ(prompt_run(1, PROMPT_ISR_ADVANCE), PROMPT_ANSWER_RIGHT);
+    CHECK_EQ(prompt_codes_taken(), 2);
+}
+
+/* Left puts it back.  Both arrows store absolute values rather than stepping,
+   so the answer depends only on the last arrow seen. */
+static void left_puts_the_selection_back(void)
+{
+    prompt_codes[0] = PROMPT_KEY_RIGHT;
+    prompt_codes[1] = PROMPT_KEY_LEFT;
+    prompt_codes[2] = PROMPT_KEY_ENTER;
+    prompt_stage_codes(3);
+    CHECK_EQ(prompt_run(1, PROMPT_ISR_ADVANCE), PROMPT_ANSWER_LEFT);
+    CHECK_EQ(prompt_codes_taken(), 3);
+}
+
+/* A cancel overwrites whatever was highlighted, so the right cell selected and
+   then cancelled is still -1 and not 1. */
+static void a_cancel_overwrites_the_selection(void)
+{
+    prompt_codes[0] = PROMPT_KEY_RIGHT;
+    prompt_codes[1] = PROMPT_KEY_ESC;
+    prompt_stage_codes(2);
+    CHECK_EQ(prompt_run(1, PROMPT_ISR_ADVANCE), PROMPT_ANSWER_CANCELLED);
+}
+
+/* 0x7f is a code the ring can hold and this loop throws away: the guard is
+   CMP 0x7f / JGE at 00017c1e, the other way round from the JLE the wait above
+   uses, so the two routines disagree about this one value.  Two codes taken is
+   the evidence that the run did not end on it. */
+static void the_highest_make_code_is_ignored(void)
+{
+    prompt_codes[0] = PROMPT_KEY_HIGHEST;
+    prompt_codes[1] = PROMPT_KEY_ENTER;
+    prompt_stage_codes(2);
+    CHECK_EQ(prompt_run(1, PROMPT_ISR_ADVANCE), PROMPT_ANSWER_LEFT);
+    CHECK_EQ(prompt_codes_taken(), 2);
+}
+
+/* A code below the guard that matches none of the four compares falls out of
+   the chain at 00017c68 and changes nothing. */
+static void an_unmapped_code_changes_nothing(void)
+{
+    prompt_codes[0] = PROMPT_KEY_UNMAPPED;
+    prompt_codes[1] = PROMPT_KEY_ENTER;
+    prompt_stage_codes(2);
+    CHECK_EQ(prompt_run(1, PROMPT_ISR_ADVANCE), PROMPT_ANSWER_LEFT);
+    CHECK_EQ(prompt_codes_taken(), 2);
+}
+
+/* With the left cell selected it is the one that animates and the right one
+   that stands still: sprite 4 + phase at (229, 103) and sprite 13 at
+   (255, 103).  The phase is pinned by driving the counter between 9 and 10,
+   both of which divide by three to 3, and the frame left on the screen is the
+   last pass's -- which is never the first, because the first append is a tick
+   behind the first pass. */
+static void the_selected_cell_is_the_animated_one(void)
+{
+    prompt_codes[0] = PROMPT_KEY_ENTER;
+    prompt_stage_codes(1);
+    CHECK_EQ(prompt_run(1, PROMPT_ISR_PINNED_PHASE), PROMPT_ANSWER_LEFT);
+    CHECK_EQ(wait_pixel(PROMPT_CELL_ROW, PROMPT_LEFT_CELL_COL),
+             PROMPT_LEFT_ANIM_FIRST + PROMPT_PINNED_PHASE);
+    CHECK_EQ(wait_pixel(PROMPT_CELL_ROW + PROMPT_CELL_H - 1,
+                        PROMPT_LEFT_CELL_COL + PROMPT_CELL_W - 1),
+             PROMPT_LEFT_ANIM_FIRST + PROMPT_PINNED_PHASE);
+    CHECK_EQ(wait_pixel(PROMPT_CELL_ROW, PROMPT_RIGHT_CELL_COL),
+             PROMPT_RIGHT_STILL);
+    CHECK_EQ(wait_pixel(PROMPT_CELL_ROW + PROMPT_CELL_H - 1,
+                        PROMPT_RIGHT_CELL_COL + PROMPT_CELL_W - 1),
+             PROMPT_RIGHT_STILL);
+}
+
+/* Selecting the right cell swaps both halves of that: the left falls back to
+   its single still sprite 8 and the right starts cycling from 9. */
+static void selecting_the_right_cell_swaps_both_pictures(void)
+{
+    prompt_codes[0] = PROMPT_KEY_RIGHT;
+    prompt_codes[1] = PROMPT_KEY_ENTER;
+    prompt_stage_codes(2);
+    CHECK_EQ(prompt_run(1, PROMPT_ISR_PINNED_PHASE), PROMPT_ANSWER_RIGHT);
+    CHECK_EQ(wait_pixel(PROMPT_CELL_ROW, PROMPT_LEFT_CELL_COL),
+             PROMPT_LEFT_STILL);
+    CHECK_EQ(wait_pixel(PROMPT_CELL_ROW + PROMPT_CELL_H - 1,
+                        PROMPT_LEFT_CELL_COL + PROMPT_CELL_W - 1),
+             PROMPT_LEFT_STILL);
+    CHECK_EQ(wait_pixel(PROMPT_CELL_ROW, PROMPT_RIGHT_CELL_COL),
+             PROMPT_RIGHT_ANIM_FIRST + PROMPT_PINNED_PHASE);
+    CHECK_EQ(wait_pixel(PROMPT_CELL_ROW + PROMPT_CELL_H - 1,
+                        PROMPT_RIGHT_CELL_COL + PROMPT_CELL_W - 1),
+             PROMPT_RIGHT_ANIM_FIRST + PROMPT_PINNED_PHASE);
+}
+
+/* In village mode the backdrop and the panel put-back are both copies of the
+   page as it stood, so the only bytes that can differ are the ones the two
+   cells wrote.  Counting them over the whole page and then over each cell
+   pins the extent as well as the origin: a cell one row or one column out, or
+   one pixel wider, moves one of the three numbers. */
+static void only_the_two_option_cells_are_drawn(void)
+{
+    prompt_codes[0] = PROMPT_KEY_ENTER;
+    prompt_stage_codes(1);
+    CHECK_EQ(prompt_run(1, PROMPT_ISR_ADVANCE), PROMPT_ANSWER_LEFT);
+    CHECK_EQ(wait_changed(0, SCREEN_ROWS, 0, SCREEN_PITCH),
+             2L * PROMPT_CELL_W * PROMPT_CELL_H);
+    CHECK_EQ(wait_changed(PROMPT_CELL_ROW, PROMPT_CELL_H,
+                          PROMPT_LEFT_CELL_COL, PROMPT_CELL_W),
+             (long) PROMPT_CELL_W * PROMPT_CELL_H);
+    CHECK_EQ(wait_changed(PROMPT_CELL_ROW, PROMPT_CELL_H,
+                          PROMPT_RIGHT_CELL_COL, PROMPT_CELL_W),
+             (long) PROMPT_CELL_W * PROMPT_CELL_H);
+}
+
+/* With the flag clear the other branch runs and fdps_draw_scene_layers
+   composes the backdrop, which is visible in the scroll gate it advances.  The
+   page it composes on is malloc's and nothing stages anything into it, so only
+   two things about the frame stay determined: the saved panel came back over
+   it -- read off the panel's bottom row, which the option cells sit well
+   clear of -- and the present touched nothing outside the 312 x 192
+   viewport. */
+static void the_battle_branch_recomposes_the_prompt_scene(void)
+{
+    data_fdps_scene_layer_scroll_last_tick = WAIT_SCROLL_MARKER;
+    prompt_codes[0] = PROMPT_KEY_ENTER;
+    prompt_stage_codes(1);
+    CHECK_EQ(prompt_run(0, PROMPT_ISR_ADVANCE), PROMPT_ANSWER_LEFT);
+    CHECK_EQ(data_fdps_scene_layer_scroll_last_tick == WAIT_SCROLL_MARKER, 0);
+    CHECK_EQ(wait_changed(WAIT_WINDOW_ROW + WAIT_WINDOW_H - 1, 1,
+                          WAIT_WINDOW_COL + 1, WAIT_WINDOW_W - 2), 0);
+    CHECK_EQ(wait_changed(0, WAIT_VIEWPORT_ROW, 0, SCREEN_PITCH), 0);
+    CHECK_EQ(wait_changed(WAIT_VIEWPORT_ROW + WAIT_VIEWPORT_H,
+                          SCREEN_ROWS - WAIT_VIEWPORT_ROW - WAIT_VIEWPORT_H,
+                          0, SCREEN_PITCH), 0);
+    CHECK_EQ(wait_changed(WAIT_VIEWPORT_ROW, WAIT_VIEWPORT_H, 0,
+                          WAIT_VIEWPORT_COL), 0);
+    CHECK_EQ(wait_changed(WAIT_VIEWPORT_ROW, WAIT_VIEWPORT_H,
+                          WAIT_VIEWPORT_COL + WAIT_VIEWPORT_W,
+                          SCREEN_PITCH - WAIT_VIEWPORT_COL
+                              - WAIT_VIEWPORT_W), 0);
+}
+
+/* A loaded portrait is repainted on every pass, at screen (12, 90) and over
+   the panel: the CMP dword ptr [0x00060120],0x0 / JZ at 00017a99 admits it and
+   the page offset 0xc4fd it lands over was written one blit earlier.  The two
+   values are record 0 of FACE.CEL decoded by hand, the same pair the portrait
+   cases above use, offset by the portrait's origin.  Left last, and the buffer
+   released after it, because the cases above it assume an empty slot. */
+static void a_loaded_portrait_is_repainted_over_the_panel(void)
+{
+    if (!sheet_present()) {
+        return;
+    }
+    fdps_load_and_draw_portrait(screen, SCREEN_PITCH, RECORD_A);
+    prompt_codes[0] = PROMPT_KEY_ENTER;
+    prompt_stage_codes(1);
+    CHECK_EQ(prompt_run(1, PROMPT_ISR_ADVANCE), PROMPT_ANSWER_LEFT);
+    CHECK_EQ(wait_pixel(WAIT_PORTRAIT_ROW + PIXEL_MID_ROW,
+                        WAIT_PORTRAIT_COL + PIXEL_MID_COL),
+             PIXEL_MID_VALUE);
+    CHECK_EQ(wait_pixel(WAIT_PORTRAIT_ROW + PIXEL_LAST_ROW,
+                        WAIT_PORTRAIT_COL + PIXEL_LAST_COL),
+             PIXEL_LAST_VALUE);
+    portrait_release();
+}
+
 void run_msgwin_tests(void)
 {
     RUN_TEST(loads_the_record_the_directory_names);
@@ -1020,4 +1479,18 @@ void run_msgwin_tests(void)
     RUN_TEST(the_phase_comes_from_the_previous_passs_tick);
     RUN_TEST(a_loaded_portrait_is_drawn_over_the_window);
     RUN_TEST(a_null_portrait_buffer_draws_nothing);
+    RUN_TEST(enter_confirms_the_left_cell);
+    RUN_TEST(space_confirms_as_well);
+    RUN_TEST(esc_cancels_with_minus_one);
+    RUN_TEST(keypad_del_cancels_as_well);
+    RUN_TEST(right_then_enter_answers_the_right_cell);
+    RUN_TEST(left_puts_the_selection_back);
+    RUN_TEST(a_cancel_overwrites_the_selection);
+    RUN_TEST(the_highest_make_code_is_ignored);
+    RUN_TEST(an_unmapped_code_changes_nothing);
+    RUN_TEST(the_selected_cell_is_the_animated_one);
+    RUN_TEST(selecting_the_right_cell_swaps_both_pictures);
+    RUN_TEST(only_the_two_option_cells_are_drawn);
+    RUN_TEST(the_battle_branch_recomposes_the_prompt_scene);
+    RUN_TEST(a_loaded_portrait_is_repainted_over_the_panel);
 }

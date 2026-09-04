@@ -1918,13 +1918,16 @@ Alignment padding: 3-byte NOP form lea eax,[eax+0x0] before entry at 00017990.
 === 00017990 [PLATE]
 Modal two-option (left/right) prompt loop; returns the chosen option or -1 if cancelled.
 Pool: fdps  [game renderer callees and game menu callers; no Function ID hit]
-Evidence: Calls only the game's own drawing entry points (fdps_blit_rect, fdps_blit_dispatch, fdps_cel_blit_sprite, fdps_draw_scene_layers, fdps_cycle_scene_palette) plus malloc/free and inp for VGA status port 0x3DA; all 22 call sites are game menu/shop/battle routines. Reads game globals 00060070, 00060120, 000643DC, 00069D64 and hard-codes VGA frame addresses and PC keyboard scancodes. Function ID matched nothing in CLIB3S/MATH387S/EMU387 or ailv3.lib (0 candidates on both sides), and 770 bytes of application UI logic is not a linker artifact.
+Evidence: Calls only the game's own drawing entry points (fdps_blit_rect, fdps_blit_dispatch, fdps_cel_blit_sprite, fdps_draw_scene_layers, fdps_cycle_scene_palette) plus fdps_flush_keyboard_queue (000567B3), fdps_read_keyboard_queue (000567BE), malloc/free and inp for VGA status port 0x3DA; all 22 call sites are game menu/shop/battle routines. Reads game globals 00060070, 00060120, 000643DC, 00069D64 and hard-codes VGA frame addresses and PC keyboard scancodes. Function ID matched nothing in CLIB3S/MATH387S/EMU387 or ailv3.lib (0 candidates on both sides), and 770 bytes of application UI logic is not a linker artifact.
 Name: fdps pool, descriptive fdps_ + snake_case name; no library symbol identified and none applies.
 Boundary: 00017990-00017c91, Watcom prologue 53 56 57 55 89 E5 at the entry, matching epilogue and single RET at the end; the following 14 bytes are LEA/MOV alignment padding before the next function at 00017ca0.
 Signature: __cdecl int fdps_prompt_two_choice(void) - no argument is read from the frame or from EAX/EDX/EBX/ECX, and the result is returned in EAX.
 
 Algorithm:
-1. Allocates a 0x561E byte buffer and copies a 302x73 (0x12E x 0x49) region of
+1. Calls fdps_flush_keyboard_queue (000567B3), which rewinds the scancode ring's
+   write index onto its read index, so anything queued before the prompt opened is
+   discarded and the key that opened it cannot answer it. Then allocates a 0x561E
+   byte buffer and copies a 302x73 (0x12E x 0x49) region of
    VGA memory at 0xA9609 into it at stride 302. The caller has already drawn the
    prompt panel there, so this captures the panel bitmap. The four corner pixels
    (offsets 0, 0x12D, 0x54F0, 0x561D) are then cleared to 0 so the later masked

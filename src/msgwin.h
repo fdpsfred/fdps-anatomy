@@ -86,4 +86,29 @@ extern void fdps_message_window_wait_key(int show_wait_indicator,
                                          int timeout_ticks);
 #pragma aux fdps_message_window_wait_key "*" parm caller [];
 
+/* 00017990.  The modal two-option prompt.  It runs its own frame loop over the
+   panel the caller has already drawn and does not return until the player
+   commits: 0 for the left cell, 1 for the right, -1 for a cancel.
+
+   IT TAKES NOTHING AND IT ANSWERS ONLY WITH THAT NUMBER.  The question, the
+   panel it is written in and the two option pictures all come from elsewhere
+   -- the caller draws the panel on the visible screen first, and the pictures
+   are sprites 4 to 13 of Shadow.cel (gamedata.h) -- so nothing here says what
+   is being asked.  All twenty-two call sites test the result against 0, and
+   the left cell is the one selected on entry, so 0 is the affirmative answer
+   and both other values decline.
+
+   A CANCEL IS NOT THE RIGHT OPTION.  Esc and keypad Del answer -1 whichever
+   cell was highlighted, so -1 and 1 are different inputs with the same
+   outcome at every call site that only asks whether the result is 0.
+
+   IT CONSUMES THE KEY QUEUE ON ENTRY and reads the next key only at the
+   bottom of each pass, so at least one whole frame is always drawn and shown
+   before any answer can be given.  What it draws over depends on
+   data_fdps_village_mode_flag (gamedata.h) exactly as the wait above does,
+   and the portrait in data_fdps_portrait_sprite_buf_ptr is repainted whenever
+   it is not null. */
+extern int fdps_prompt_two_choice(void);
+#pragma aux fdps_prompt_two_choice "*" parm caller [];
+
 #endif

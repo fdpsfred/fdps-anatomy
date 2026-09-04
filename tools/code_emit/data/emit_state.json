@@ -2324,6 +2324,14 @@
       "status": "committed",
       "emitted_against": "0x465",
       "rounds": 1
+    },
+    "00017990": {
+      "name": "fdps_prompt_two_choice",
+      "target": "msgwin.c",
+      "body_size": "0x302",
+      "status": "committed",
+      "emitted_against": "0x302",
+      "rounds": 0
     }
   }
 }

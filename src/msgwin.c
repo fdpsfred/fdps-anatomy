@@ -294,3 +294,237 @@ void fdps_message_window_wait_key(int show_wait_indicator, int timeout_ticks)
 
     free(saved_window);
 }
+
+/* Where the two option pictures go on the composition page.  PUSH 0xf9 at
+   00017af4 and 00017b42 for the left cell, PUSH 0x113 at 00017ad4 and
+   00017b68 for the right, and the row is the local the prologue seeds with
+   MOV dword ptr [EBP + -0x8],0x7b at 000179b1.  At a 360 pitch and the scene
+   layers' 20-row, 20-column apron those are screen (229, 103) and (255, 103),
+   two 24 x 24 cells with two columns of gap between them. */
+#define OPTION_LEFT_X 0xf9
+#define OPTION_RIGHT_X 0x113
+#define OPTION_ROW_Y 0x7b
+
+/* The option pictures themselves, out of Shadow.cel (gamedata.h).  That sheet
+   holds fourteen 24 x 24 sprites: 0 to 3 are the unit shadows mapdraw.c and
+   statwin.c draw, and 4 to 13 are this prompt's, five per side.  The side the
+   player is not on shows its single still picture; the side he is on cycles
+   the four frames above it, so the highlighted option is the one that moves.
+
+   ADD EDX,0x4 at 00017b26 and PUSH 0x8 at 00017b50 for the left cell,
+   ADD EDX,0x9 at 00017b94 and PUSH 0xd at 00017ae2 for the right. */
+#define OPTION_LEFT_ANIM_FIRST_SPRITE 4
+#define OPTION_LEFT_STILL_SPRITE 8
+#define OPTION_RIGHT_ANIM_FIRST_SPRITE 9
+#define OPTION_RIGHT_STILL_SPRITE 0xd
+
+/* One frame every three ticks, the frame taken modulo four.  Both divisions
+   are IDIV against a sign-extended dividend -- MOV EDX,[EBP-0x18] / SAR
+   EDX,0x1f in front of each, at 00017b10 and 00017b21 -- so the tick they
+   divide is read as a signed int, and the second one is a real remainder and
+   not the AND a power of two would allow.  That is what the cast and the %
+   at the calls below reproduce. */
+#define OPTION_ANIM_TICKS_PER_PHASE 3
+#define OPTION_ANIM_PHASES 4
+
+/* PUSH 0x0 twice in front of every cel blit here: mode 0, the opaque
+   pass-through, with the operand that mode never reads. */
+#define OPTION_BLIT_MODE 0
+#define OPTION_BLIT_MODE_OPERAND 0
+
+/* The lowest scancode this loop throws away.  CMP dword ptr [EBP + -0xc],0x7f
+   / JGE at 00017c1e, which is NOT the JLE 0x7f that ends the wait above: the
+   test here is >= and the one there is <=, so 0x7f itself is a code this loop
+   ignores and one that loop acts on.  Both readings are of the same widened
+   byte -- AND EAX,0xff at 00017c16 -- so the queue-empty marker 0xff is above
+   the threshold either way. */
+#define PROMPT_SCANCODE_IGNORED_FROM 0x7f
+
+/* The scancodes the prompt answers to.  These are the ring's make codes
+   (keybd.h), not ASCII, and they are the same six menu.c reads. */
+#define PROMPT_KEY_ESC 0x01
+#define PROMPT_KEY_ENTER 0x1c
+#define PROMPT_KEY_SPACE 0x39
+#define PROMPT_KEY_KEYPAD_DEL 0x53
+#define PROMPT_KEY_LEFT 0x4b
+#define PROMPT_KEY_RIGHT 0x4d
+
+/* What the routine answers with.  The left cell is option 0 and the selection
+   the loop starts on -- MOV dword ptr [EBP + -0x14],0x0 at 000179a3 -- and
+   every one of the twenty-two call sites tests the result against 0, so the
+   left cell is the affirmative one. */
+#define CHOICE_LEFT 0
+#define CHOICE_RIGHT 1
+#define CHOICE_CANCELLED (-1)
+
+/* 00017990.  The modal two-option prompt: it takes over the screen, animates
+   the two option cells over whatever the caller left there, and does not
+   return until the player commits.  0 is the left cell, 1 the right, -1 a
+   cancel.
+
+   IT IS A while LOOP AND NOT A do-while, though the flag it tests is zero on
+   entry so the first pass always runs.  The test at 00017a13 is both the
+   entry and the target of the JMP at 00017c71, and the JNZ out of it goes
+   straight to the free at 00017c76.
+
+   THE KEY IS READ AT THE BOTTOM OF THE PASS, after the frame has been
+   presented -- which is the opposite of fdps_message_window_wait_key above,
+   where the read is at the top and a key already down dismisses the window
+   with nothing drawn.  Here a full frame is always drawn and shown before any
+   key is looked at, and the queue is thrown away at the entry
+   (fdps_flush_keyboard_queue at 000179b8) so the key that opened the prompt
+   cannot answer it.
+
+   THE PANEL IT ANIMATES OVER IS LIFTED OFF THE VISIBLE SCREEN, not off a
+   page: the source is the adapter at 0xa9609, the same 302 x 73 rectangle at
+   screen (9, 120) the message window occupies, so what is captured is the
+   panel and the question the caller has already drawn into it.  It is
+   captured once, before the loop, and put back on every pass; the four corner
+   pixels are zeroed in the copy so the transparent put-back leaves the
+   corners rounded over a live battle map.
+
+   THE SELECTION SURVIVES A CANCEL ONLY AS -1.  Esc and keypad Del set the
+   flag and overwrite the selection in the same arm at 00017c45, so a cancel
+   after an arrow key still answers -1 and never the option that was
+   highlighted.
+
+   Confirm keeps whatever is highlighted and writes nothing: the arm at
+   00017c30 sets the loop flag alone.
+
+   THE PACING SPIN NEEDS data_fdps_timer_tick_counter TO BE volatile, for the
+   same reason the wait above does; it is qualified at the declaration in
+   gamedata.h.  Neither malloc is tested, and the only values used after a
+   CALL are inp's status byte and fdps_read_keyboard_queue's scancode. */
+int fdps_prompt_two_choice(void)
+{
+    /* The prompt panel lifted off the visible screen on entry, at its own
+       302-byte pitch, and put back over the background on every pass. */
+    unsigned char *saved_panel;
+    /* The 360x240 page this pass composes its frame on, thrown away at the
+       end of the pass. */
+    unsigned char *frame;
+    /* The timer tick as it stood at the end of the previous pass.  It paces
+       the loop and it is what the highlighted cell's animation phase is taken
+       from, so the first pass always draws phase 0. */
+    unsigned int last_tick;
+    /* Which cell is highlighted: 0 the left, 1 the right, -1 once a cancel
+       has been taken.  It is also the answer. */
+    int selection;
+    /* Set by a confirm or a cancel, and the only way out of the loop. */
+    int confirmed;
+    /* The make code this pass took out of the ring, widened from the byte
+       fdps_read_keyboard_queue answers with. */
+    int scancode;
+    /* The page row both option cells are drawn at.  The original keeps it in
+       a frame slot rather than pushing the literal twice. */
+    int option_row_y;
+
+    last_tick = 0;
+    selection = CHOICE_LEFT;
+    confirmed = 0;
+    option_row_y = OPTION_ROW_Y;
+
+    fdps_flush_keyboard_queue();
+    saved_panel = (unsigned char *) malloc((size_t) MESSAGE_WINDOW_BYTES);
+    fdps_blit_rect(VGA_SCREEN_BASE + MESSAGE_WINDOW_AT, VGA_SCREEN_PITCH,
+                   saved_panel, MESSAGE_WINDOW_W, MESSAGE_WINDOW_W,
+                   MESSAGE_WINDOW_H);
+    saved_panel[0] = 0;
+    saved_panel[MESSAGE_WINDOW_TOP_RIGHT] = 0;
+    saved_panel[MESSAGE_WINDOW_BOTTOM_LEFT] = 0;
+    saved_panel[MESSAGE_WINDOW_BOTTOM_RIGHT] = 0;
+
+    while (confirmed == 0) {
+        fdps_cycle_scene_palette();
+        frame = (unsigned char *) malloc((size_t) SCENE_PAGE_BYTES);
+        if (data_fdps_village_mode_flag == 0) {
+            fdps_draw_scene_layers(frame);
+        } else {
+            fdps_blit_rect(VGA_SCREEN_BASE + SCREEN_WINDOW_AT,
+                           VGA_SCREEN_PITCH, frame + SCENE_PAGE_WINDOW_AT,
+                           SCENE_PAGE_PITCH, SCREEN_WINDOW_W,
+                           SCREEN_WINDOW_H);
+        }
+        fdps_blit_transparent_rect(saved_panel, MESSAGE_WINDOW_W,
+                                   frame + SCENE_PAGE_MESSAGE_WINDOW_AT,
+                                   SCENE_PAGE_PITCH, MESSAGE_WINDOW_W,
+                                   MESSAGE_WINDOW_H);
+        if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+            fdps_blit_dispatch(data_fdps_portrait_sprite_buf_ptr,
+                               frame + SCENE_PAGE_PORTRAIT_AT,
+                               PORTRAIT_WIDTH, PORTRAIT_HEIGHT,
+                               SCENE_PAGE_PITCH, PORTRAIT_BLIT_MODE_OPERAND,
+                               PORTRAIT_BLIT_MODE);
+        }
+
+        /* The still cell goes down first and the animated one after it, in
+           both arms, so the highlighted side is always the last thing drawn
+           over the panel. */
+        if (selection == CHOICE_LEFT) {
+            fdps_cel_blit_sprite(data_fdps_shadow_sprite_sheet_ptr,
+                                 OPTION_RIGHT_STILL_SPRITE, frame,
+                                 SCENE_PAGE_PITCH, OPTION_RIGHT_X,
+                                 option_row_y, OPTION_BLIT_MODE_OPERAND,
+                                 OPTION_BLIT_MODE);
+            fdps_cel_blit_sprite(data_fdps_shadow_sprite_sheet_ptr,
+                                 OPTION_LEFT_ANIM_FIRST_SPRITE
+                                     + ((int) last_tick
+                                        / OPTION_ANIM_TICKS_PER_PHASE)
+                                       % OPTION_ANIM_PHASES,
+                                 frame, SCENE_PAGE_PITCH, OPTION_LEFT_X,
+                                 option_row_y, OPTION_BLIT_MODE_OPERAND,
+                                 OPTION_BLIT_MODE);
+        } else {
+            fdps_cel_blit_sprite(data_fdps_shadow_sprite_sheet_ptr,
+                                 OPTION_LEFT_STILL_SPRITE, frame,
+                                 SCENE_PAGE_PITCH, OPTION_LEFT_X,
+                                 option_row_y, OPTION_BLIT_MODE_OPERAND,
+                                 OPTION_BLIT_MODE);
+            fdps_cel_blit_sprite(data_fdps_shadow_sprite_sheet_ptr,
+                                 OPTION_RIGHT_ANIM_FIRST_SPRITE
+                                     + ((int) last_tick
+                                        / OPTION_ANIM_TICKS_PER_PHASE)
+                                       % OPTION_ANIM_PHASES,
+                                 frame, SCENE_PAGE_PITCH, OPTION_RIGHT_X,
+                                 option_row_y, OPTION_BLIT_MODE_OPERAND,
+                                 OPTION_BLIT_MODE);
+        }
+
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins, so the frame that goes out is
+               shown whole. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends, so the copy below starts clear of it. */
+        }
+        fdps_blit_rect((unsigned int) (frame + SCENE_PAGE_WINDOW_AT),
+                       SCENE_PAGE_PITCH,
+                       (void *) (VGA_SCREEN_BASE + SCREEN_WINDOW_AT),
+                       VGA_SCREEN_PITCH, SCREEN_WINDOW_W, SCREEN_WINDOW_H);
+
+        while (last_tick == data_fdps_timer_tick_counter) {
+            /* One pass per game tick.  See the note above: the counter has to
+               be volatile or this never ends. */
+        }
+        last_tick = data_fdps_timer_tick_counter;
+        free(frame);
+
+        scancode = fdps_read_keyboard_queue();
+        if (scancode < PROMPT_SCANCODE_IGNORED_FROM) {
+            if (scancode == PROMPT_KEY_ENTER || scancode == PROMPT_KEY_SPACE) {
+                confirmed = 1;
+            } else if (scancode == PROMPT_KEY_ESC
+                       || scancode == PROMPT_KEY_KEYPAD_DEL) {
+                confirmed = 1;
+                selection = CHOICE_CANCELLED;
+            } else if (scancode == PROMPT_KEY_LEFT) {
+                selection = CHOICE_LEFT;
+            } else if (scancode == PROMPT_KEY_RIGHT) {
+                selection = CHOICE_RIGHT;
+            }
+        }
+    }
+
+    free(saved_panel);
+    return selection;
+}
