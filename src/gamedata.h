@@ -1129,6 +1129,27 @@ extern unsigned char *data_fdps_all_game_text_ptr;
    frees it under a guard at 00029568 and stores nothing back. */
 extern unsigned char *data_fdps_portrait_sprite_buf_ptr;
 
+/* 00060070.  Which of the game's two presentation modes is running, and so
+   where a window repaint has to get its background from: 0 on the battle map,
+   where the scene is live and has to be composited again behind whatever is
+   being drawn over it, and 1 in the village, where the visible page already
+   holds a finished picture and is simply copied.  fdps_run_village_phase is
+   its only writer -- MOV byte ptr [0x00060070],0x1 at 000312f4 on the way in
+   and MOV byte ptr [0x00060070],0x0 at 000314ba on the way out -- so it is set
+   for exactly as long as a village phase runs and clear everywhere else.
+
+   One byte, read as a boolean, and no compare on it is sign-sensitive: a sweep
+   of the image for 0x00060070 finds seventeen instructions, the two stores
+   above and fifteen reads, and every one of the fifteen is
+   CMP byte ptr [0x00060070],0x0.
+
+   IT IS ALSO WHAT A TERRAIN CLASS OF 6 LANDS ON.  The byte sits immediately
+   after data_fdps_battle_tile_attr_def_modifier_table, whose six declared
+   entries the shipped maps index past; see that table's note above for what
+   the original reads there and why the two cannot be emitted as separate
+   objects. */
+extern unsigned char data_fdps_village_mode_flag;
+
 /* 00070022 and 00070024.  The two halves of the blit rectangle the RLE kernel
    family in rle.c, rlerot.c, rlecolor.c and rleblend.c is currently drawing:
    how many rows are still to come, and how many pixels wide a source row is.

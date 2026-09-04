@@ -1,6 +1,8 @@
 /* tests/msgwin.c -- cover for src/msgwin.c.
  *
- * One subject so far: fdps_load_and_draw_portrait at 000177d0.
+ * Two subjects: fdps_load_and_draw_portrait at 000177d0 and
+ * fdps_message_window_wait_key at 000203d0.  The notes below belong to the
+ * first; the second has its own banner further down.
  *
  * These read the real FACE.CEL, staged through tests/gamefile.lst, and they
  * have to.  The routine formats no name and takes no file argument -- the
@@ -32,9 +34,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "keybd.h"
+#include "mapdraw.h"
 #include "msgwin.h"
 
 /* 8.3, and the name the routine itself holds. */
@@ -480,6 +486,516 @@ static void draws_at_the_address_it_was_handed(void)
     portrait_release();
 }
 
+
+/* ---- fdps_message_window_wait_key, 000203d0 ------------------------------
+ *
+ * Expected values come from the assembly and from resource_info/cel.md, never
+ * from the emitted C.  The geometry is the six-push blit at 0002040d --
+ * 0x49, 0x12e, 0x12e, the buffer, 0x140, 0xa9609 -- for the 302 x 73 window at
+ * screen (9, 120); the pair at 00020495 and 00020567 -- 0xc0, 0x138, 0x168,
+ * page + 0x21d8 against 0xa0504 and 0x140 -- for the 312 x 192 viewport at
+ * screen (4, 4); and the three page offsets 0xc4fd, 0x106bc and 0x9ad0 pushed
+ * at 000204ac, 000204e8 and 0002050f, which at a 360 pitch and the scene
+ * layers' 20-row, 20-column apron are screen (9, 120), (280, 166) and
+ * (12, 90).  The loop shape is the JLE at 00020446 out of the top, the
+ * ADD dword ptr [EBP + 0x18],-0x1 / JNZ at 0002058e and 00020596 at the
+ * bottom, and MOV dword ptr [EBP + -0x4],0x0 at 000203dc for the tick the
+ * first pass derives its indicator phase from.  The indicator's own arithmetic
+ * is the IDIV against 3, the AND EAX,0x3 and the ADD EAX,0x48 at 000204d7 to
+ * 000204dc.
+ *
+ * WHAT THE RUN IS OBSERVED THROUGH.  The routine's whole output is the VGA
+ * aperture at 0xa0000, which only answers in a graphics mode, so every case
+ * puts the adapter into mode 13h the way the game does, paints a known
+ * pattern over the page, calls, captures the frame and returns to text mode.
+ * The composition page and the saved window are both allocated and freed
+ * inside the call and cannot be looked at.
+ *
+ * WHY A TIMER INTERRUPT IS INSTALLED.  Every pass ends waiting for
+ * data_fdps_timer_tick_counter to change, and in the game that counter is
+ * advanced by fdps_timer_tick_handler off AIL's timer.  Nothing advances it in
+ * a test image, so the first pass would never end.  Each run hooks IRQ0 for
+ * the duration of the call and chains to the handler that was there.
+ *
+ * THE PATTERN HAS BIT 7 SET IN EVERY BYTE, so no byte of the background can be
+ * mistaken for a sprite pixel below 0x80, and none of it is zero -- which
+ * matters because fdps_blit_transparent_rect skips a source byte of 0 and a
+ * background carrying zeros would put holes in the window it puts back.
+ *
+ * WHY VILLAGE MODE IS THE DEFAULT HERE.  With data_fdps_village_mode_flag set
+ * the backdrop is a copy of the visible page, so a pass that draws nothing
+ * over it leaves the screen byte for byte as it was and any pixel that did
+ * change is something the routine drew.  With the flag clear the backdrop is
+ * whatever fdps_draw_scene_layers composes, and with no layers, no units and
+ * no cursor staged that is the composition page as malloc handed it over --
+ * unpredictable, so the one case that takes that branch asserts only what is
+ * still determined: that the compositor ran, that the saved window came back
+ * over it, and that nothing outside the 312 x 192 viewport was touched.
+ *
+ * WHAT THE COMMAND SHEET IS.  A byte buffer published through
+ * data_fdps_command_sprite_sheet_ptr, the way tests/sprite.c stages one: the
+ * drawer never opens a file, it reads an already-unpacked block out of that
+ * global.  Every one of its 0x4c entries is 22 rows of one 25-pixel fill run
+ * -- command 0x18 then the pixel (resource_info/cel.md) -- and entry i is
+ * filled with the byte i, so a pixel on the screen names the sprite index that
+ * was drawn.  The header's table-position field is deliberately wrong, so a
+ * reader that consulted it instead of hardwiring 0x0f would draw nothing
+ * recognisable.
+ *
+ * WHAT IS NOT COVERED.  The four corner pixels the copy is zeroed at cannot be
+ * seen from here: the transparent put-back skips them, so the destination
+ * keeps its backdrop, and in village mode that backdrop is the same screen
+ * byte the copy was taken from.  Only a live battle map behind the window
+ * makes them visible, and that is a playtest contract.  timeout_ticks == 0 is
+ * not exercised either -- the decrement precedes the test, so it wraps and
+ * spins for 2^32 ticks -- and no call site in the game passes it.
+ * ------------------------------------------------------------------ */
+
+/* The adapter, and the two modes the run moves between. */
+#define WAIT_VGA_BASE 0x000a0000
+#define WAIT_MODE_TEXT 0x03
+#define WAIT_MODE_320X200X256 0x13
+
+/* IRQ0.  DOS/4GW reflects a hardware interrupt taken in protected mode to the
+   protected-mode vector, so the handler installed here is the one that runs
+   while the routine spins on the counter. */
+#define WAIT_TIMER_VECTOR 8
+
+/* The message window: 302 x 73 at screen (9, 120), the rectangle lifted from
+   0xa9609 at pitch 0x140. */
+#define WAIT_WINDOW_ROW 120
+#define WAIT_WINDOW_COL 9
+#define WAIT_WINDOW_W 302
+#define WAIT_WINDOW_H 73
+
+/* The part of the screen a pass presents: 312 x 192 at (4, 4). */
+#define WAIT_VIEWPORT_ROW 4
+#define WAIT_VIEWPORT_COL 4
+#define WAIT_VIEWPORT_W 312
+#define WAIT_VIEWPORT_H 192
+
+/* The prompt indicator: a 25 x 22 Command.cel sprite at screen (280, 166). */
+#define WAIT_INDICATOR_ROW 166
+#define WAIT_INDICATOR_COL 280
+#define WAIT_INDICATOR_W 25
+#define WAIT_INDICATOR_H 22
+
+/* The portrait: 125 x 100 at screen (12, 90). */
+#define WAIT_PORTRAIT_ROW 90
+#define WAIT_PORTRAIT_COL 12
+
+/* The scancodes staged in the ring.  0x1c is Enter's make code and ends the
+   wait; 0x9c is its break code and does not.  Only make codes ever reach the
+   ring in the game -- fdps_keyboard_isr drops anything with bit 7 set -- so a
+   break code is staged by hand here purely to pin the 0x80 threshold the
+   routine tests, which is the same threshold the queue-empty marker 0xff
+   clears. */
+#define WAIT_MAKE_CODE 0x1c
+#define WAIT_BREAK_CODE 0x9c
+
+/* Sprite indices the indicator can draw: 0x48 plus the phase. */
+#define WAIT_INDICATOR_SPRITE_0 0x48
+#define WAIT_INDICATOR_SPRITE_3 0x4b
+
+/* The synthetic Command.cel: a 15-byte header, an offset table at 0x0f with
+   0x4c entries, then one 44-byte fill stream per entry.  0x4c is one more than
+   the highest index the indicator can ask for. */
+#define WAIT_CEL_TABLE_AT 0x0f
+#define WAIT_CEL_ENTRIES 0x4c
+#define WAIT_CEL_SPRITE_W 25
+#define WAIT_CEL_SPRITE_H 22
+#define WAIT_CEL_FILL_RUN_25 0x18
+#define WAIT_CEL_STREAM_BYTES (WAIT_CEL_SPRITE_H * 2)
+#define WAIT_CEL_STREAM_BASE 0x140
+#define WAIT_CEL_SHEET_BYTES \
+    (WAIT_CEL_STREAM_BASE + WAIT_CEL_ENTRIES * WAIT_CEL_STREAM_BYTES)
+
+/* A table position the drawer must not read: it hardwires 0x0f. */
+#define WAIT_CEL_DECOY_TABLE_AT 0x100
+
+/* Which handler the installed ISR behaves as.  0 advances the counter the way
+   the game's timer does.  1 drives it between two fixed values, 9 and 10, so
+   that whatever a pass latches gives the same indicator phase -- 9 / 3 and
+   10 / 3 are both 3 -- and the phase becomes deterministic however many times
+   the interrupt happens to fire while a pass is drawing.  The two values also
+   always differ from each other, so the pacing spin can never wait on a value
+   equal to the one it latched. */
+#define WAIT_ISR_ADVANCE 0
+#define WAIT_ISR_PHASE_PAIR 1
+#define WAIT_PHASE_TICK_BASE 9
+
+/* A value data_fdps_scene_layer_scroll_last_tick cannot reach on its own here,
+   so that the compositor having run is visible as that global no longer
+   holding it. */
+#define WAIT_SCROLL_MARKER 0x7fffff00
+
+static unsigned char wait_sheet[WAIT_CEL_SHEET_BYTES];
+static unsigned char wait_capture[SCREEN_BYTES];
+static unsigned char wait_queue_codes[SCANCODE_QUEUE_LEN];
+static void (__interrupt __far *wait_saved_timer)();
+static unsigned int wait_timer_fires;
+static int wait_isr_mode;
+static int wait_sheet_staged = 0;
+
+static void __interrupt __far wait_timer_isr(void)
+{
+    ++wait_timer_fires;
+    if (wait_isr_mode == WAIT_ISR_ADVANCE) {
+        ++data_fdps_timer_tick_counter;
+    } else {
+        data_fdps_timer_tick_counter =
+            (unsigned int) (WAIT_PHASE_TICK_BASE + (wait_timer_fires & 1));
+    }
+    _chain_intr(wait_saved_timer);
+}
+
+static void wait_u16(unsigned char *image, int at, unsigned int value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void wait_u32(unsigned char *image, int at, unsigned long value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    image[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    image[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+static void wait_stage_sheet(void)
+{
+    int index;
+    int row;
+    int at;
+
+    if (wait_sheet_staged) {
+        return;
+    }
+    wait_sheet_staged = 1;
+    memset(wait_sheet, 0, (size_t) WAIT_CEL_SHEET_BYTES);
+    wait_sheet[0] = 'C';
+    wait_sheet[1] = 'E';
+    wait_sheet[2] = 'L';
+    wait_u16(wait_sheet, 0x03, 1);
+    wait_u16(wait_sheet, 0x05, WAIT_CEL_DECOY_TABLE_AT);
+    wait_u16(wait_sheet, 0x07, WAIT_CEL_SPRITE_W);
+    wait_u16(wait_sheet, 0x09, WAIT_CEL_SPRITE_H);
+    wait_u16(wait_sheet, 0x0b, WAIT_CEL_ENTRIES - 1);
+    wait_u16(wait_sheet, 0x0d, 2);
+
+    for (index = 0; index < WAIT_CEL_ENTRIES; index++) {
+        at = WAIT_CEL_STREAM_BASE + index * WAIT_CEL_STREAM_BYTES;
+        wait_u32(wait_sheet, WAIT_CEL_TABLE_AT + index * 4, (unsigned long) at);
+        for (row = 0; row < WAIT_CEL_SPRITE_H; row++) {
+            wait_sheet[at + row * 2] = WAIT_CEL_FILL_RUN_25;
+            wait_sheet[at + row * 2 + 1] = (unsigned char) index;
+        }
+    }
+}
+
+static void wait_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* Every byte has bit 7 set, so none of it is zero and none of it can be
+   mistaken for a sprite index the indicator draws. */
+static int wait_pattern(int row, int col)
+{
+    return ((row * 31 + col * 17) & 0x7f) | 0x80;
+}
+
+static void wait_paint_pattern(unsigned char *page)
+{
+    int row;
+    int col;
+
+    for (row = 0; row < SCREEN_ROWS; row++) {
+        for (col = 0; col < SCREEN_PITCH; col++) {
+            page[(long) row * SCREEN_PITCH + col] =
+                (unsigned char) wait_pattern(row, col);
+        }
+    }
+}
+
+static void wait_stage_queue(int count)
+{
+    int index;
+
+    for (index = 0; index < SCANCODE_QUEUE_LEN; index++) {
+        data_fdps_input_scancode_queue[index] = wait_queue_codes[index];
+    }
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = count;
+}
+
+/* One whole wait, with the adapter in the mode the game runs it in, the
+   pattern on the screen, the ring staged and a timer interrupt running.
+   Leaves the frame in wait_capture[]. */
+static void wait_run(int show_indicator, int timeout, int code_count,
+                     int village_mode, int isr_mode)
+{
+    unsigned char *previous_sheet;
+
+    wait_stage_sheet();
+    wait_stage_queue(code_count);
+    data_fdps_village_mode_flag = (unsigned char) village_mode;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_timer_tick_counter = 0;
+    wait_timer_fires = 0;
+    wait_isr_mode = isr_mode;
+    previous_sheet = data_fdps_command_sprite_sheet_ptr;
+    data_fdps_command_sprite_sheet_ptr = wait_sheet;
+
+    wait_set_mode(WAIT_MODE_320X200X256);
+    wait_paint_pattern((unsigned char *) WAIT_VGA_BASE);
+
+    wait_saved_timer = _dos_getvect(WAIT_TIMER_VECTOR);
+    _dos_setvect(WAIT_TIMER_VECTOR, wait_timer_isr);
+    fdps_message_window_wait_key(show_indicator, timeout);
+    _dos_setvect(WAIT_TIMER_VECTOR, wait_saved_timer);
+
+    memmove(wait_capture, (void *) WAIT_VGA_BASE, (size_t) SCREEN_BYTES);
+    wait_set_mode(WAIT_MODE_TEXT);
+
+    data_fdps_command_sprite_sheet_ptr = previous_sheet;
+    data_fdps_village_mode_flag = 0;
+}
+
+static int wait_pixel(int row, int col)
+{
+    return (int) wait_capture[(long) row * SCREEN_PITCH + col];
+}
+
+/* Bytes of the captured page that are no longer the pattern, over a window of
+   rows and columns. */
+static long wait_changed(int first_row, int rows, int first_col, int cols)
+{
+    long changed;
+    int row;
+    int col;
+
+    changed = 0;
+    for (row = first_row; row < first_row + rows; row++) {
+        for (col = first_col; col < first_col + cols; col++) {
+            if (wait_capture[(long) row * SCREEN_PITCH + col]
+                    != (unsigned char) wait_pattern(row, col)) {
+                changed++;
+            }
+        }
+    }
+    return changed;
+}
+
+/* How many scancodes the run took out of the ring: the read index is the only
+   thing fdps_read_keyboard_queue advances, and it starts each run at 0. */
+static int wait_codes_taken(void)
+{
+    return data_fdps_input_scancode_queue_head;
+}
+
+/* ---------------------------------------------------------------------- */
+
+/* A make code already in the ring ends the wait at the top of the first pass,
+   before anything at all is drawn: the JLE at 00020446 leaves for the free at
+   0002059c.  One code is consumed and the screen is exactly as it was, which
+   is what lets a window be dismissed by a key that was already down without
+   the window flickering. */
+static void a_queued_make_code_ends_it_before_drawing(void)
+{
+    wait_queue_codes[0] = WAIT_MAKE_CODE;
+    wait_run(1, 30, 1, 1, WAIT_ISR_ADVANCE);
+    CHECK_EQ(wait_codes_taken(), 1);
+    CHECK_EQ(wait_changed(0, SCREEN_ROWS, 0, SCREEN_PITCH), 0);
+}
+
+/* An empty ring does not end it.  fdps_read_keyboard_queue reports 0xff, which
+   is above the threshold, so the pass runs and the wait ends on the tick
+   budget instead -- and an empty read advances no index, so nothing was
+   consumed.  That a pass really ran is read off the indicator, which is drawn
+   only inside one. */
+static void an_empty_ring_does_not_end_it(void)
+{
+    wait_run(1, 1, 0, 1, WAIT_ISR_ADVANCE);
+    CHECK_EQ(wait_codes_taken(), 0);
+    CHECK_EQ(wait_pixel(WAIT_INDICATOR_ROW, WAIT_INDICATOR_COL),
+             WAIT_INDICATOR_SPRITE_0);
+}
+
+/* A code with bit 7 set does not end it either: 0x9c is consumed, a pass runs,
+   and the make code behind it ends the wait on the next pass.  Two codes taken
+   is the whole of the evidence that the threshold is 0x80 and not "anything
+   the ring hands back". */
+static void a_code_above_the_threshold_does_not_end_it(void)
+{
+    wait_queue_codes[0] = WAIT_BREAK_CODE;
+    wait_queue_codes[1] = WAIT_MAKE_CODE;
+    wait_run(0, 30, 2, 1, WAIT_ISR_ADVANCE);
+    CHECK_EQ(wait_codes_taken(), 2);
+}
+
+/* timeout_ticks is a pass count: one scancode is read per pass, the count is
+   decremented at the bottom and the loop stops when it reaches 0.  With a ring
+   full of codes that do not end the wait, the codes taken are exactly the
+   passes made. */
+static void the_tick_budget_counts_passes(void)
+{
+    int index;
+
+    for (index = 0; index < SCANCODE_QUEUE_LEN; index++) {
+        wait_queue_codes[index] = (unsigned char) (0x80 + index);
+    }
+    wait_run(0, 1, SCANCODE_QUEUE_LEN, 1, WAIT_ISR_ADVANCE);
+    CHECK_EQ(wait_codes_taken(), 1);
+    wait_run(0, 3, SCANCODE_QUEUE_LEN, 1, WAIT_ISR_ADVANCE);
+    CHECK_EQ(wait_codes_taken(), 3);
+}
+
+/* In village mode the backdrop is a copy of the visible page, so a pass with
+   nothing drawn over it puts the screen back exactly as it found it: the
+   window it saved from (9, 120) lands at (9, 120) again and the 312 x 192
+   viewport it copied out of (4, 4) goes back to (4, 4).  A pitch, an origin or
+   an extent wrong on either side of that round trip scrambles the page. */
+static void village_mode_round_trips_the_page(void)
+{
+    data_fdps_scene_layer_scroll_last_tick = WAIT_SCROLL_MARKER;
+    wait_run(0, 1, 0, 1, WAIT_ISR_ADVANCE);
+    CHECK_EQ(wait_changed(0, SCREEN_ROWS, 0, SCREEN_PITCH), 0);
+    CHECK_EQ(data_fdps_scene_layer_scroll_last_tick == WAIT_SCROLL_MARKER, 1);
+}
+
+/* With the flag clear the other branch runs and fdps_draw_scene_layers
+   composes the backdrop, which is visible in the scroll gate it advances.  The
+   page it composes on is malloc's, and with no layers, units or cursor staged
+   nothing writes to it, so only two things about the frame are still
+   determined: the saved window came back over it, and the present touched
+   nothing outside the 312 x 192 viewport. */
+static void the_battle_branch_recomposes_the_scene(void)
+{
+    data_fdps_scene_layer_scroll_last_tick = WAIT_SCROLL_MARKER;
+    wait_run(0, 1, 0, 0, WAIT_ISR_ADVANCE);
+    CHECK_EQ(data_fdps_scene_layer_scroll_last_tick == WAIT_SCROLL_MARKER, 0);
+    CHECK_EQ(wait_changed(WAIT_WINDOW_ROW, 1, WAIT_WINDOW_COL + 1,
+                          WAIT_WINDOW_W - 2), 0);
+    CHECK_EQ(wait_changed(WAIT_WINDOW_ROW + WAIT_WINDOW_H - 1, 1,
+                          WAIT_WINDOW_COL + 1, WAIT_WINDOW_W - 2), 0);
+    CHECK_EQ(wait_changed(WAIT_WINDOW_ROW + 1, WAIT_WINDOW_H - 2,
+                          WAIT_WINDOW_COL, WAIT_WINDOW_W), 0);
+    CHECK_EQ(wait_changed(0, WAIT_VIEWPORT_ROW, 0, SCREEN_PITCH), 0);
+    CHECK_EQ(wait_changed(WAIT_VIEWPORT_ROW + WAIT_VIEWPORT_H,
+                          SCREEN_ROWS - WAIT_VIEWPORT_ROW - WAIT_VIEWPORT_H,
+                          0, SCREEN_PITCH), 0);
+    CHECK_EQ(wait_changed(WAIT_VIEWPORT_ROW, WAIT_VIEWPORT_H, 0,
+                          WAIT_VIEWPORT_COL), 0);
+    CHECK_EQ(wait_changed(WAIT_VIEWPORT_ROW, WAIT_VIEWPORT_H,
+                          WAIT_VIEWPORT_COL + WAIT_VIEWPORT_W,
+                          SCREEN_PITCH - WAIT_VIEWPORT_COL
+                              - WAIT_VIEWPORT_W), 0);
+}
+
+/* show_wait_indicator nonzero draws a 25 x 22 sprite at screen (280, 166) and
+   nothing outside it.  The four bands checked around the rectangle are what
+   pin 25 and 22 rather than merely the bytes they multiply to, and the pixel
+   value is the sprite index the fixture writes, so it also says which entry of
+   the table was drawn: 0x48 on the first pass, from the tick of 0 the prologue
+   stores at 000203dc. */
+static void the_indicator_is_drawn_at_the_windows_corner(void)
+{
+    wait_run(1, 1, 0, 1, WAIT_ISR_ADVANCE);
+    CHECK_EQ(wait_pixel(WAIT_INDICATOR_ROW, WAIT_INDICATOR_COL),
+             WAIT_INDICATOR_SPRITE_0);
+    CHECK_EQ(wait_pixel(WAIT_INDICATOR_ROW + WAIT_INDICATOR_H - 1,
+                        WAIT_INDICATOR_COL + WAIT_INDICATOR_W - 1),
+             WAIT_INDICATOR_SPRITE_0);
+    CHECK_EQ(wait_changed(WAIT_INDICATOR_ROW, WAIT_INDICATOR_H,
+                          WAIT_INDICATOR_COL, WAIT_INDICATOR_W),
+             (long) WAIT_INDICATOR_W * WAIT_INDICATOR_H);
+    CHECK_EQ(wait_changed(WAIT_INDICATOR_ROW - 1, 1, WAIT_INDICATOR_COL - 1,
+                          WAIT_INDICATOR_W + 2), 0);
+    CHECK_EQ(wait_changed(WAIT_INDICATOR_ROW + WAIT_INDICATOR_H, 1,
+                          WAIT_INDICATOR_COL - 1, WAIT_INDICATOR_W + 2), 0);
+    CHECK_EQ(wait_changed(WAIT_INDICATOR_ROW, WAIT_INDICATOR_H,
+                          WAIT_INDICATOR_COL - 1, 1), 0);
+    CHECK_EQ(wait_changed(WAIT_INDICATOR_ROW, WAIT_INDICATOR_H,
+                          WAIT_INDICATOR_COL + WAIT_INDICATOR_W, 1), 0);
+}
+
+/* show_wait_indicator zero leaves it out entirely -- the CMP dword ptr
+   [EBP + 0x14],0x0 / JZ at 000204c3 skips the call -- and in village mode that
+   makes the whole pass invisible. */
+static void a_zero_indicator_flag_draws_nothing(void)
+{
+    wait_run(0, 1, 0, 1, WAIT_ISR_ADVANCE);
+    CHECK_EQ(wait_changed(WAIT_INDICATOR_ROW, WAIT_INDICATOR_H,
+                          WAIT_INDICATOR_COL, WAIT_INDICATOR_W), 0);
+    CHECK_EQ(wait_changed(0, SCREEN_ROWS, 0, SCREEN_PITCH), 0);
+}
+
+/* The phase is the PREVIOUS pass's tick divided by three and taken modulo
+   four, not the current one: the divide reads the slot the previous pass
+   stored the counter into.  Two passes are made with the counter driven
+   between 9 and 10, both of which divide by three to 3, so whichever of them
+   the first pass latched the second draws sprite 0x48 + 3.  Only the second
+   pass's frame survives on the screen. */
+static void the_phase_comes_from_the_previous_passs_tick(void)
+{
+    wait_run(1, 2, 0, 1, WAIT_ISR_PHASE_PAIR);
+    CHECK_EQ(wait_pixel(WAIT_INDICATOR_ROW, WAIT_INDICATOR_COL),
+             WAIT_INDICATOR_SPRITE_3);
+    CHECK_EQ(wait_pixel(WAIT_INDICATOR_ROW + WAIT_INDICATOR_H - 1,
+                        WAIT_INDICATOR_COL + WAIT_INDICATOR_W - 1),
+             WAIT_INDICATOR_SPRITE_3);
+}
+
+/* A loaded portrait is drawn at screen (12, 90), and OVER the window rather
+   than under it: both pixels checked lie inside the 302 x 73 window rectangle
+   that was put back one call earlier, so a body that drew the portrait first
+   would show the window's bytes there instead.  The two values are record 0 of
+   FACE.CEL decoded by hand, the same pair the portrait cases above use, offset
+   by the portrait's origin.  Rows 0..3 of that record are wholly transparent,
+   so the window still shows through at the top left. */
+static void a_loaded_portrait_is_drawn_over_the_window(void)
+{
+    if (!sheet_present()) {
+        return;
+    }
+    fdps_load_and_draw_portrait(screen, SCREEN_PITCH, RECORD_A);
+    wait_run(0, 1, 0, 1, WAIT_ISR_ADVANCE);
+    CHECK_EQ(wait_pixel(WAIT_PORTRAIT_ROW + PIXEL_MID_ROW,
+                        WAIT_PORTRAIT_COL + PIXEL_MID_COL),
+             PIXEL_MID_VALUE);
+    CHECK_EQ(wait_pixel(WAIT_PORTRAIT_ROW + PIXEL_LAST_ROW,
+                        WAIT_PORTRAIT_COL + PIXEL_LAST_COL),
+             PIXEL_LAST_VALUE);
+    CHECK_EQ(wait_changed(WAIT_PORTRAIT_ROW + PIXEL_CLEAR_ROW, 1,
+                          WAIT_PORTRAIT_COL + PIXEL_CLEAR_COL, 1), 0);
+    portrait_release();
+}
+
+/* A null portrait buffer is an ordinary state and not a failure: the CMP
+   dword ptr [0x00060120],0x0 / JZ at 000204f6 skips the blit, and the two
+   pixels the portrait would have written keep the pattern. */
+static void a_null_portrait_buffer_draws_nothing(void)
+{
+    if (!sheet_present()) {
+        return;
+    }
+    portrait_release();
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 1);
+    wait_run(0, 1, 0, 1, WAIT_ISR_ADVANCE);
+    CHECK_EQ(wait_changed(WAIT_PORTRAIT_ROW + PIXEL_MID_ROW, 1,
+                          WAIT_PORTRAIT_COL + PIXEL_MID_COL, 1), 0);
+    CHECK_EQ(wait_changed(WAIT_PORTRAIT_ROW + PIXEL_LAST_ROW, 1,
+                          WAIT_PORTRAIT_COL + PIXEL_LAST_COL, 1), 0);
+}
+
 void run_msgwin_tests(void)
 {
     RUN_TEST(loads_the_record_the_directory_names);
@@ -493,4 +1009,15 @@ void run_msgwin_tests(void)
     RUN_TEST(blits_the_sheets_rectangle_at_the_callers_pitch);
     RUN_TEST(forwards_the_pitch_it_was_given);
     RUN_TEST(draws_at_the_address_it_was_handed);
+    RUN_TEST(a_queued_make_code_ends_it_before_drawing);
+    RUN_TEST(an_empty_ring_does_not_end_it);
+    RUN_TEST(a_code_above_the_threshold_does_not_end_it);
+    RUN_TEST(the_tick_budget_counts_passes);
+    RUN_TEST(village_mode_round_trips_the_page);
+    RUN_TEST(the_battle_branch_recomposes_the_scene);
+    RUN_TEST(the_indicator_is_drawn_at_the_windows_corner);
+    RUN_TEST(a_zero_indicator_flag_draws_nothing);
+    RUN_TEST(the_phase_comes_from_the_previous_passs_tick);
+    RUN_TEST(a_loaded_portrait_is_drawn_over_the_window);
+    RUN_TEST(a_null_portrait_buffer_draws_nothing);
 }

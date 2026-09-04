@@ -2284,6 +2284,14 @@
       "status": "committed",
       "emitted_against": "0x11b",
       "rounds": 0
+    },
+    "000203d0": {
+      "name": "fdps_message_window_wait_key",
+      "target": "msgwin.c",
+      "body_size": "0x1df",
+      "status": "committed",
+      "emitted_against": "0x1df",
+      "rounds": 0
     }
   }
 }

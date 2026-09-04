@@ -45,4 +45,45 @@ extern void fdps_load_and_draw_portrait(unsigned char *dest, int dest_pitch,
                                         int portrait_index);
 #pragma aux fdps_load_and_draw_portrait "*" parm caller [];
 
+/* 000203d0.  Holds the message window that fdps_message_window_open left
+   standing on the visible screen, repainting it over a live background once
+   per game tick, until the player presses a key or the tick budget runs out.
+   Returns nothing and writes nothing back.
+
+   IT NEITHER OPENS NOR CLOSES THE WINDOW.  What it draws is a copy of the
+   screen it lifts on entry from 0xa9609 -- 302 x 73 at screen (9, 120), the
+   exact rectangle fdps_message_window_open puts the Message.cel panel in --
+   so the window and whatever text has already been written into it have to be
+   on screen before the call, and they are still on screen after it.
+
+   show_wait_indicator nonzero draws the blinking four-phase prompt indicator,
+   Command.cel sprites 0x48 to 0x4b, in the window's bottom right corner at
+   screen (280, 166), one phase every three ticks; zero leaves it out.  All
+   nine call sites in the game pass 1.
+
+   timeout_ticks is the most passes to make, one per game tick, decremented at
+   the bottom of the loop and tested against 0 there.  Callers pass 0x1e, 0x32
+   or 0x64.  ZERO IS NOT "DO NOT WAIT": the decrement happens before the test,
+   so 0 wraps and spins for 2^32 ticks.  Nothing in the game passes it.
+
+   THE BACKGROUND IT REPAINTS OVER DEPENDS ON data_fdps_village_mode_flag
+   (gamedata.h).  Clear, on the battle map, fdps_draw_scene_layers recomposes
+   the whole scrolling scene every pass so the map keeps animating behind the
+   window; set, in the village, the visible page's 312 x 192 viewport is copied
+   into the composition page instead and the backdrop stays still.
+
+   The portrait is drawn from data_fdps_portrait_sprite_buf_ptr whenever that
+   is not null, at screen (12, 90) and over the window rather than under it,
+   which is what makes fdps_load_and_draw_portrait's deliberately outliving
+   buffer worth keeping.
+
+   A KEY ALREADY IN THE RING ENDS IT BEFORE ANYTHING IS DRAWN.  The scancode is
+   read at the top of each pass, so a make code found on the first read returns
+   with the screen untouched.  The code itself is discarded either way: a
+   caller that needs to know which key was pressed has to read the ring
+   itself. */
+extern void fdps_message_window_wait_key(int show_wait_indicator,
+                                         int timeout_ticks);
+#pragma aux fdps_message_window_wait_key "*" parm caller [];
+
 #endif
