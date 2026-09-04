@@ -2252,6 +2252,14 @@
       "status": "committed",
       "emitted_against": "0xfd",
       "rounds": 0
+    },
+    "0001cdc0": {
+      "name": "fdps_battle_show_combat_gauges",
+      "target": "gauge.c",
+      "body_size": "0x807",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x807"
     }
   }
 }

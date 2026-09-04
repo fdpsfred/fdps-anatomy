@@ -1666,5 +1666,20 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "0001cdc0": [
+    {
+      "what": "The two animated phases' painting arguments are read off the assembly but are not asserted by any test. Only the closing frame survives on the adapter, and it cannot be seen through: every painter in the family is colour-keyed on the same source bytes, so a pixel painted by the tint phase is painted again by the plain one, and planting a transparent byte in the sheet makes all three passes skip it rather than revealing an earlier one. What is unasserted is that phase 1 is blit mode 1, phase 2 is blit mode 0x1a and both walk alpha 0, 6, 12 -- six unambiguous MOV immediates at 0001cf23, 0001cfc4, 0001d139, 0001d22e and the two loop tails, so this is a coverage gap and not a doubt.",
+      "needs": "A real machine or a DOSBox-X playthrough of one attack: the two bars should blend up out of the map over three frames and then be tinted over three more before settling opaque. An emulator-level per-frame capture would settle it mechanically, but the harness has none and ADR-0003 rules out a hook in src/ to get one.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed the gap independently and it is real: the six MOV immediates that set the two animated phases' painting arguments (0001cf23 and 0001cfc4 for mode 1, 0001d139 and 0001d22e for mode 0x1a, plus the two loop tails for the 0, 6, 12 walk) are unambiguous in the assembly, but no test can see them, because the closing frame paints mode 0 over the same 43x6 pixels out of the same non-zero sheet bytes and every painter in the family is keyed on the source, so the last pass always wins. My pass adds nothing to the emitter's reading of the values; what it adds is that the coverage gap is bounded to the two phases' mode and alpha only -- the frame COUNT is covered by combat_gauges_pace_six_of_the_seven_frames and the closing frame's mode by the raw-sheet-byte expectations in cg_bar_is, so nothing about the sequence's length or its end state is unasserted.",
+      "needs": "A DOSBox-X playthrough of one attack, watching the two bars blend up out of the map over three frames and then tint over three more before settling opaque.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

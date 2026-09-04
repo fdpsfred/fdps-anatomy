@@ -72,6 +72,11 @@
  * They reuse the unit sheet and table staging above.
  */
 #include <stddef.h>
+#include <stdlib.h>
+#include <malloc.h>
+#include <string.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -1785,6 +1790,589 @@ static void prop_dst_and_stride_pass_through(void)
     CHECK_EQ((int) unit_canvas[base + UNIT_BAR_WIDTH], UNIT_GUARD);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_battle_show_combat_gauges @ 0001cdc0
+ *
+ * HOW THE SEVEN FRAMES ARE WATCHED.  The function composes every frame on a
+ * page it allocates and frees itself and blits the page's 312x192 window
+ * straight over the live mode 13h screen, so the adapter is the only place its
+ * output can be read back from.  Every case below therefore sets mode 13h,
+ * fills the frame with a border sentinel, seeds the page through the heap,
+ * runs a real timer interrupt so the six frame waits end, calls, snapshots the
+ * 64,000 bytes and returns to text mode -- the same way tests/menu.c watches
+ * the ring menu and tests/anim.c the turn banner.
+ *
+ * WHAT THE SNAPSHOT SHOWS IS THE LAST FRAME AND ONLY THE LAST FRAME.  The
+ * seventh frame paints in blit mode 0, which is fdps_blit_transparent_rect and
+ * copies the sheet's bytes through unchanged, and the staged sheet holds no
+ * zero byte, so every one of the bar's 43x6 pixels is overwritten by raw art.
+ * That is what makes the expected values below plain sheet bytes: if the run
+ * ended on either blended phase instead they would be inverse-cube entries,
+ * and if the phases ran in the other order the closing frame would be a tint.
+ *
+ * WHY THE PAGE IS SEEDED THROUGH THE HEAP.  The page is not cleared, and with
+ * no scene layers, no map cursor and no units staged the compositor writes
+ * nothing into it, so whatever malloc hands over is what shows everywhere the
+ * two bars do not reach.  Each case allocates a block of exactly the page's
+ * 0x15180 bytes, zeroes it and frees it immediately before the call, so the
+ * block the function is handed is that one and every undrawn window pixel
+ * reads 0.  combat_page_comes_back_from_the_heap is that assumption stated as
+ * an assertion.
+ *
+ * Expected values come from the assembly at 0001cdc0 -- PUSH 0x15180 / CALL
+ * malloc at 0001ce89, MOV EAX,[0x00064020] / ADD EAX,0x18 / IMUL EAX,EAX,0x168
+ * / ADD [EBP-0x38] / ADD [0x0006401c] / ADD EAX,0x18 at 0001ce99 for the
+ * destination, CMP EAX,0x1 / JNZ at 0001cdee for the counter test, MOV dword
+ * ptr [0x0006401c],0xffffffff at 0001ce07 for the refusal, CMP byte ptr
+ * [EAX+0x6],0x0 / JNZ at 0001ce32 and 0001ce4b for the two graphics, the four
+ * MOVSX at 0001ce64..0001ce86 for the HP pairs, the IMUL ...,0x29 / ADD / DEC
+ * / SAR / IDIV triples at 0001cf69, 0001d037, 0001d1b5, 0001d2aa, 0001d41d and
+ * 0001d513 for the six fills, CMP [EBP-0x20],0x10 / JL with ADD ...,0x6 for
+ * the three strengths of each animated phase, MOV ...,0x1a at 0001d139 for the
+ * tint colour, the two MOV ...,0x0 at 0001d3a0 and 0001d3aa for the closing
+ * frame, and PUSH 0xc0 / PUSH 0x138 / PUSH 0x140 / PUSH 0xa0504 / PUSH 0x168 /
+ * page + 0x21d8 at 0001d098 for the window.  None of them is read off the
+ * emitted C.
+ * ------------------------------------------------------------------ */
+
+/* The adapter, the frame it presents and the two modes the cases switch
+   between. */
+#define CG_VGA_BASE 0x000a0000
+#define CG_SCREEN_W 0x140
+#define CG_SCREEN_H 0xc8
+#define CG_SCREEN_BYTES (CG_SCREEN_W * CG_SCREEN_H)
+#define CG_MODE_TEXT 0x03
+#define CG_MODE_320X200X256 0x13
+
+/* The window the function copies out of its page: 312x192 taken from page byte
+   0x21d8, which is page pixel (24,24), and landing at screen byte 0x504, which
+   is screen pixel (4,4).  A gauge placed at view position (x,y) is therefore
+   drawn at page pixel (x + 24, y + 24) and lands on screen at (x + 4, y + 4),
+   which is what every expected position below is built from. */
+#define CG_WINDOW_ROW 4
+#define CG_WINDOW_COL 4
+#define CG_WINDOW_W 0x138
+#define CG_WINDOW_H 0xc0
+
+/* The page, and the value that says a screen byte is outside the presented
+   window.  The page seed is 0 because the staged sheet is filled 1..251, so
+   "non-zero inside the window" counts exactly the pixels the bars painted. */
+#define CG_PAGE_BYTES 0x15180
+#define CG_BORDER_FILL 0xa5
+
+/* The timer the six frame waits are paced by. */
+#define CG_TIMER_VECTOR 8
+
+/* One whole bar is 43 columns by 6 rows and every one of those pixels is
+   written by the closing frame, so a run that drew one bar leaves exactly this
+   many non-zero bytes inside the window. */
+#define CG_BAR_PIXELS (UNIT_BAR_WIDTH * UNIT_BAR_ROWS)
+
+/* Item record geometry, from IMUL EAX,dword ptr [EBP+0x14],0x17 in
+   fdps_get_item_record, and the inventory flag bit fdps_unit_find_equipped_slot
+   tests with AND AL,0x40. */
+#define CG_ITEM_STRIDE 0x17
+#define CG_ITEM_COUNT 256
+#define CG_EQUIPPED 0x40
+#define CG_ITEM_TYPE_WEAPON 0x01
+#define CG_COUNTER_ITEM_ID 7
+
+/* What the two position slots hold going in, so a case can say which of them
+   the function wrote.  Neither is a value any placement produces. */
+#define CG_POISON_X 200
+#define CG_POISON_Y 100
+
+/* The two units, and the tiles and facings that put their bars on rows that do
+   not overlap: the defender faces 0 and is placed above and to the right of
+   tile (0,0), the attacker faces 2 and is placed below and to the left of tile
+   (0,1).  The two tiles are one step apart, which is what
+   fdps_check_can_counter_attack needs. */
+#define CG_ATTACKER 0
+#define CG_DEFENDER 1
+
+/* fdps_battle_compute_unit_gauge_position's answers for those two, worked out
+   the same way the placement cases at the top of this file work theirs out:
+   the defender's anchor is (4, 0), the up step is unaffordable so y takes the
+   +5 nudge and the right step is affordable so x becomes 0x1c; the attacker's
+   anchor is (4, 24), the down step is affordable so y becomes 46 and the left
+   step is not so x takes the +0x1c fallback. */
+#define CG_DEFENDER_POS_X 28
+#define CG_DEFENDER_POS_Y 5
+#define CG_ATTACKER_POS_X 32
+#define CG_ATTACKER_POS_Y 46
+
+/* THE SNAPSHOT IS ON THE HEAP AND NOT A STATIC, AND THAT IS NOT TIDINESS.
+   tests/anim.c reads the whole 27 MB of MISC.VFS into one malloc for each of
+   its banner cases, and the guest is given 32 MB, so the suite runs within
+   about a megabyte of the ceiling.  A fourth 64,000-byte static frame buffer
+   -- tests/anim.c already has two and tests/menu.c one -- is enough to make
+   fdps_animate_turn_banner's untested malloc come back NULL, and that function
+   writes through it: the run dies inside tests/anim.c with the extender's IDT
+   overwritten, nowhere near here.  This buffer is therefore taken and given
+   back around each run, when the big archive is not held. */
+static unsigned char *cg_screen;
+static unsigned char cg_items[(CG_ITEM_COUNT + 1) * CG_ITEM_STRIDE];
+static void (__interrupt __far *cg_saved_timer)();
+static int cg_blocks_before;
+static int cg_blocks_after;
+static unsigned int cg_ticks_used;
+
+static void __interrupt __far cg_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(cg_saved_timer);
+}
+
+/* The item table is published one record PAST the start of its storage so
+   record -1 is real addressable memory, the arrangement tests/aitarget.c and
+   tests/unititem.c both use. */
+static struct fdps_item_effect *cg_item(int item_id)
+{
+    return (struct fdps_item_effect *)
+           (cg_items + (item_id + 1) * CG_ITEM_STRIDE);
+}
+
+/* One unit's side, HP pair and tile.  stage() has already zeroed every record,
+   so nothing is equipped and every status timer is clear. */
+static void cg_set_unit(int unit_index, int tile_column, int tile_row,
+                        int facing, int side, int hp_current, int hp_max)
+{
+    set_unit(unit_index, tile_column, tile_row, facing);
+    stage_units[unit_index].side = (unsigned char) side;
+    stage_units[unit_index].hp_current = (short) hp_current;
+    stage_units[unit_index].hp_max = (short) hp_max;
+}
+
+/* Nothing on the map and nothing in the way -- no scene layers, no map cursor
+   overlay and no units -- so the compositor writes nothing into the page and
+   every window pixel the bars do not reach is the seed.  The unit gauge sheet
+   and the two blending tables come from the staging the unit gauge cases above
+   already use. */
+static void cg_stage(void)
+{
+    int offset;
+
+    stage();
+    stage_unit();
+    stage_tables();
+    for (offset = 0; offset < (int) sizeof(cg_items); offset++) {
+        cg_items[offset] = 0;
+    }
+    data_fdps_item_effect_table_ptr = cg_items + CG_ITEM_STRIDE;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_battle_combat_gauge_pos_pairs[0] = CG_POISON_X;
+    data_fdps_battle_combat_gauge_pos_pairs[1] = CG_POISON_Y;
+    data_fdps_battle_combat_gauge_pos_pairs[2] = CG_POISON_X;
+    data_fdps_battle_combat_gauge_pos_pairs[3] = CG_POISON_Y;
+}
+
+/* Put the staged globals back to the state a freshly started program has them
+   in, for the reason tests/menu.c gives: three of them hold blocks the game's
+   own loaders free, and leaving one pointing at a static in this file hands a
+   later test a free() of storage that never came from the heap. */
+static void cg_unstage(void)
+{
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_cel_sprite_cache_count = 0;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_item_effect_table_ptr = NULL;
+    data_fdps_unit_gauge_sheet_ptr = NULL;
+    free(cg_screen);
+    cg_screen = NULL;
+}
+
+/* Give the defender an equipped weapon whose minimum range is 1, which is the
+   last of fdps_check_can_counter_attack's four tests. */
+static void cg_arm_defender(void)
+{
+    struct fdps_item_effect *weapon;
+
+    stage_units[CG_DEFENDER].inventory_slots[0] = CG_EQUIPPED;
+    stage_units[CG_DEFENDER].inventory_slots[1] = CG_COUNTER_ITEM_ID;
+    weapon = cg_item(CG_COUNTER_ITEM_ID);
+    weapon->type = CG_ITEM_TYPE_WEAPON;
+    weapon->range_min = 1;
+    weapon->range_max = 1;
+}
+
+static void cg_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* Used entries currently in the heap, so a case can say the page came back. */
+static int cg_used_heap_blocks(void)
+{
+    struct _heapinfo entry;
+    int used;
+
+    used = 0;
+    entry._pentry = NULL;
+    while (_heapwalk(&entry) == _HEAPOK) {
+        if (entry._useflag == _USEDENTRY) {
+            used++;
+        }
+    }
+    return used;
+}
+
+/* Leave a zeroed block of exactly the page's size at the head of the free
+   list. */
+static void cg_seed_page(void)
+{
+    unsigned char *page;
+
+    page = (unsigned char *) malloc((size_t) CG_PAGE_BYTES);
+    if (page != NULL) {
+        memset(page, 0, (size_t) CG_PAGE_BYTES);
+        free(page);
+    }
+}
+
+/* One whole run, leaving the frame in cg_screen[] and the answer in the
+   returned pointer. */
+static int *cg_run(void)
+{
+    unsigned int before_ticks;
+    int *pairs;
+
+    cg_screen = (unsigned char *) malloc((size_t) CG_SCREEN_BYTES);
+    CHECK_EQ(cg_screen != NULL, 1);
+    if (cg_screen == NULL) {
+        return data_fdps_battle_combat_gauge_pos_pairs;
+    }
+    memset(cg_screen, CG_BORDER_FILL, (size_t) CG_SCREEN_BYTES);
+
+    cg_blocks_before = cg_used_heap_blocks();
+    cg_set_mode(CG_MODE_320X200X256);
+    memset((void *) CG_VGA_BASE, CG_BORDER_FILL, (size_t) CG_SCREEN_BYTES);
+    cg_seed_page();
+
+    cg_saved_timer = _dos_getvect(CG_TIMER_VECTOR);
+    _dos_setvect(CG_TIMER_VECTOR, cg_timer_isr);
+    before_ticks = data_fdps_timer_tick_counter;
+    pairs = fdps_battle_show_combat_gauges(CG_ATTACKER, CG_DEFENDER);
+    cg_ticks_used = data_fdps_timer_tick_counter - before_ticks;
+    _dos_setvect(CG_TIMER_VECTOR, cg_saved_timer);
+
+    memmove(cg_screen, (void *) CG_VGA_BASE, (size_t) CG_SCREEN_BYTES);
+    cg_set_mode(CG_MODE_TEXT);
+    cg_blocks_after = cg_used_heap_blocks();
+    return pairs;
+}
+
+static int cg_pixel(int row, int col)
+{
+    return (int) cg_screen[row * CG_SCREEN_W + col];
+}
+
+/* One pixel of a bar whose gauge position is (pos_x, pos_y), in the bar's own
+   coordinates. */
+static int cg_bar(int pos_x, int pos_y, int row, int column)
+{
+    return cg_pixel(pos_y + CG_WINDOW_ROW + row,
+                    pos_x + CG_WINDOW_COL + column);
+}
+
+/* How many bytes inside the presented window are not the page seed. */
+static int cg_painted(void)
+{
+    int row;
+    int col;
+    int painted;
+
+    painted = 0;
+    for (row = 0; row < CG_WINDOW_H; row++) {
+        for (col = 0; col < CG_WINDOW_W; col++) {
+            if (cg_pixel(CG_WINDOW_ROW + row, CG_WINDOW_COL + col) != 0) {
+                painted++;
+            }
+        }
+    }
+    return painted;
+}
+
+/* How many bytes outside the presented window are no longer the sentinel the
+   frame was filled with. */
+static int cg_border_touched(void)
+{
+    int row;
+    int col;
+    int touched;
+
+    touched = 0;
+    for (row = 0; row < CG_SCREEN_H; row++) {
+        for (col = 0; col < CG_SCREEN_W; col++) {
+            if (row >= CG_WINDOW_ROW && row < CG_WINDOW_ROW + CG_WINDOW_H
+                && col >= CG_WINDOW_COL && col < CG_WINDOW_COL + CG_WINDOW_W) {
+                continue;
+            }
+            if (cg_pixel(row, col) != CG_BORDER_FILL) {
+                touched++;
+            }
+        }
+    }
+    return touched;
+}
+
+/* Every segment of one closing-frame bar: the two-pixel left cap and the fill
+   run out of graphic gfx_index, the rest of the 41-column interior out of
+   GRAPHIC 0 at its own columns, and the right cap out of gfx_index again.  Row
+   5 is checked alongside row 0 because every blit is handed 6 as its row count
+   and steps by the page's 0x168 pitch. */
+static void cg_bar_is(int pos_x, int pos_y, int gfx_index, int fill_width)
+{
+    CHECK_EQ(cg_bar(pos_x, pos_y, 0, 0), unit_art(gfx_index, 0, 0));
+    CHECK_EQ(cg_bar(pos_x, pos_y, 0, 1), unit_art(gfx_index, 0, 1));
+    CHECK_EQ(cg_bar(pos_x, pos_y, 5, 1), unit_art(gfx_index, 5, 1));
+    if (fill_width > 0) {
+        CHECK_EQ(cg_bar(pos_x, pos_y, 0, 2), unit_art(gfx_index, 0, 2));
+        CHECK_EQ(cg_bar(pos_x, pos_y, 0, fill_width + 1),
+                 unit_art(gfx_index, 0, fill_width + 1));
+        CHECK_EQ(cg_bar(pos_x, pos_y, 5, fill_width + 1),
+                 unit_art(gfx_index, 5, fill_width + 1));
+    }
+    CHECK_EQ(unit_art(0, 0, fill_width + 2)
+             != unit_art(gfx_index, 0, fill_width + 2), 1);
+    CHECK_EQ(cg_bar(pos_x, pos_y, 0, fill_width + 2),
+             unit_art(0, 0, fill_width + 2));
+    CHECK_EQ(cg_bar(pos_x, pos_y, 0, UNIT_INTERIOR - 1),
+             unit_art(0, 0, UNIT_INTERIOR - 1));
+    CHECK_EQ(cg_bar(pos_x, pos_y, 0, UNIT_INTERIOR),
+             unit_art(gfx_index, 0, UNIT_INTERIOR));
+    CHECK_EQ(cg_bar(pos_x, pos_y, 5, UNIT_BAR_WIDTH - 1),
+             unit_art(gfx_index, 5, UNIT_BAR_WIDTH - 1));
+}
+
+/* The three record bytes the function addresses by literal displacement: +6
+   for the side that picks the graphic and +0x40 / +0x42 for the HP pair the
+   fill is taken over.  If the layout moved, every case below would still pass
+   while reading the wrong bytes. */
+static void combat_gauges_read_the_measured_offsets(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 6);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_current), 0x40);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_max), 0x42);
+}
+
+/* MOV dword ptr [EBP-0x4],0x64014 / MOV EAX,[EBP-0x4] at 0001d5b6: the answer
+   is the global itself and not a copy, and pair 0 holds the defender's
+   placement -- the same (28,5) the placement cases at the top of this file get
+   for tile (0,0) facing 0 with the view at the origin.
+
+   fdps_check_can_counter_attack refuses a defender two tiles away, so element
+   2 is the -1 that suppresses the attacker's bar, and element 3 is not written
+   at all: the refusal arm is a single store to element 2.  A run that placed
+   the attacker anyway would leave 46 there. */
+static void combat_gauges_return_the_pair_and_suppress_without_a_counter(void)
+{
+    int *pairs;
+
+    cg_stage();
+    cg_set_unit(CG_DEFENDER, 0, 0, 0, 0, 1, 1000);
+    cg_set_unit(CG_ATTACKER, 5, 5, 2, 1, 3, 4);
+    pairs = cg_run();
+
+    CHECK_EQ(pairs == data_fdps_battle_combat_gauge_pos_pairs, 1);
+    CHECK_EQ(pairs[0], CG_DEFENDER_POS_X);
+    CHECK_EQ(pairs[1], CG_DEFENDER_POS_Y);
+    CHECK_EQ(pairs[2], -1);
+    CHECK_EQ(pairs[3], CG_POISON_Y);
+    CHECK_EQ(cg_painted(), CG_BAR_PIXELS);
+    cg_unstage();
+}
+
+/* The one bar that run drew, read back segment by segment.  The defender's
+   side byte is 0, so its graphic is 2 and not 1, and 1 HP of 1000 is
+   (41 + 999) / 1000 = 1 filled column -- the sliver the ceiling exists for.
+
+   The values being raw sheet bytes is also what pins the closing frame's blit
+   mode at 0: the blended phases write inverse-cube entries, so a run that
+   ended on one of those would not match here. */
+static void combat_gauges_draw_the_defender_bar_from_side_zero(void)
+{
+    cg_stage();
+    cg_set_unit(CG_DEFENDER, 0, 0, 0, 0, 1, 1000);
+    cg_set_unit(CG_ATTACKER, 5, 5, 2, 1, 3, 4);
+    cg_run();
+
+    CHECK_EQ(unit_art(2, 0, 0) != unit_art(1, 0, 0), 1);
+    cg_bar_is(CG_DEFENDER_POS_X, CG_DEFENDER_POS_Y, 2, 1);
+    cg_unstage();
+}
+
+/* CMP byte ptr [EAX+0x6],0x0 / JNZ at 0001ce4b: any side other than 0 takes
+   graphic 1, so the same bar in the same place is drawn out of a different
+   graphic.  Side 2 is used rather than 1 to show the test is against 0 and not
+   a two-way flag. */
+static void combat_gauges_side_other_than_zero_takes_graphic_one(void)
+{
+    cg_stage();
+    cg_set_unit(CG_DEFENDER, 0, 0, 0, 2, 1, 1000);
+    cg_set_unit(CG_ATTACKER, 5, 5, 2, 1, 3, 4);
+    cg_run();
+
+    cg_bar_is(CG_DEFENDER_POS_X, CG_DEFENDER_POS_Y, 1, 1);
+    cg_unstage();
+}
+
+/* Both bars, with the counter confirmed.  The attacker is one tile away and
+   the defender holds an equipped weapon of minimum range 1, which is what
+   makes fdps_check_can_counter_attack answer exactly 1; element 2 then holds
+   the attacker's own placement instead of -1.
+
+   The attacker's side is 1, so its graphic is 1 against the defender's 2, and
+   3 HP of 4 is (123 + 3) / 4 = 31 filled columns against the defender's 1.
+   The two facings put the bars 41 rows apart, so the painted count is exactly
+   two whole bars and neither has overwritten the other. */
+static void combat_gauges_draw_both_bars_on_a_counter(void)
+{
+    int *pairs;
+
+    cg_stage();
+    cg_set_unit(CG_DEFENDER, 0, 0, 0, 0, 1, 1000);
+    cg_set_unit(CG_ATTACKER, 0, 1, 2, 1, 3, 4);
+    cg_arm_defender();
+    pairs = cg_run();
+
+    CHECK_EQ(pairs[0], CG_DEFENDER_POS_X);
+    CHECK_EQ(pairs[1], CG_DEFENDER_POS_Y);
+    CHECK_EQ(pairs[2], CG_ATTACKER_POS_X);
+    CHECK_EQ(pairs[3], CG_ATTACKER_POS_Y);
+    CHECK_EQ(cg_painted(), 2 * CG_BAR_PIXELS);
+    cg_bar_is(CG_DEFENDER_POS_X, CG_DEFENDER_POS_Y, 2, 1);
+    cg_bar_is(CG_ATTACKER_POS_X, CG_ATTACKER_POS_Y, 1, 31);
+    cg_unstage();
+}
+
+/* CMP dword ptr [EBP+0xffffff78],0x0 / JG at 0001d025 and its five siblings:
+   a maximum of 0 never reaches the IDIV and the bar is drawn empty, so the
+   interior is graphic 0 from its first column and the caps are still the
+   unit's own graphic.  A current of 50 against it would be a division by zero
+   if the guard were not there. */
+static void combat_gauges_zero_max_hp_draws_an_empty_bar(void)
+{
+    cg_stage();
+    cg_set_unit(CG_DEFENDER, 0, 0, 0, 0, 50, 0);
+    cg_set_unit(CG_ATTACKER, 5, 5, 2, 1, 3, 4);
+    cg_run();
+
+    cg_bar_is(CG_DEFENDER_POS_X, CG_DEFENDER_POS_Y, 2, 0);
+    CHECK_EQ(cg_painted(), CG_BAR_PIXELS);
+    cg_unstage();
+}
+
+/* The same branch is JG and not JNE, so a negative maximum takes the empty
+   path too rather than dividing by it. */
+static void combat_gauges_negative_max_hp_draws_an_empty_bar(void)
+{
+    cg_stage();
+    cg_set_unit(CG_DEFENDER, 0, 0, 0, 0, 5, -10);
+    cg_set_unit(CG_ATTACKER, 5, 5, 2, 1, 3, 4);
+    cg_run();
+
+    cg_bar_is(CG_DEFENDER_POS_X, CG_DEFENDER_POS_Y, 2, 0);
+    cg_unstage();
+}
+
+/* ADD EDX,max / DEC EDX before the IDIV is what makes the fill a ceiling and
+   not a truncation: 1 HP of 2 is (41 + 1) / 2 = 21 columns, where 41 / 2 would
+   be 20 and the seam would sit one column to the left.  The seam is read at
+   both ends, so a fill of 20 or 22 fails here. */
+static void combat_gauges_fill_is_the_ceiling_over_41_columns(void)
+{
+    cg_stage();
+    cg_set_unit(CG_DEFENDER, 0, 0, 0, 0, 1, 2);
+    cg_set_unit(CG_ATTACKER, 5, 5, 2, 1, 3, 4);
+    cg_run();
+
+    CHECK_EQ(cg_bar(CG_DEFENDER_POS_X, CG_DEFENDER_POS_Y, 0, 22),
+             unit_art(2, 0, 22));
+    CHECK_EQ(unit_art(0, 0, 23) != unit_art(2, 0, 23), 1);
+    CHECK_EQ(cg_bar(CG_DEFENDER_POS_X, CG_DEFENDER_POS_Y, 0, 23),
+             unit_art(0, 0, 23));
+    cg_unstage();
+}
+
+/* The record's HP words are read with MOVSX at 0001ce64 and 0001ce7c, so a
+   current above 0x7fff is negative and not a huge positive: -1 of 1000 gives
+   (-41 + 999) / 1000 = 0 columns after truncation toward zero, which is the
+   empty bar, where an unsigned read would give a fill far past the interior
+   and smear the art's next row across it. */
+static void combat_gauges_hp_words_are_read_signed(void)
+{
+    cg_stage();
+    cg_set_unit(CG_DEFENDER, 0, 0, 0, 0, -1, 1000);
+    cg_set_unit(CG_ATTACKER, 5, 5, 2, 1, 3, 4);
+    cg_run();
+
+    cg_bar_is(CG_DEFENDER_POS_X, CG_DEFENDER_POS_Y, 2, 0);
+    CHECK_EQ(cg_painted(), CG_BAR_PIXELS);
+    cg_unstage();
+}
+
+/* PUSH 0xa0504 / PUSH 0x140 / PUSH 0x138 / PUSH 0xc0 with page + 0x21d8 as the
+   source: 312x192 out of page pixel (24,24) and down at screen pixel (4,4).
+   Nothing outside that rectangle is touched, which is what the four-pixel
+   margin of the sentinel proves, and the bar landing at screen (32,9) for a
+   gauge position of (28,5) is what fixes the two origins against each other --
+   a source of page byte 0 would put it at (52,29) and a destination of 0xa0000
+   at (28,5). */
+static void combat_gauges_present_312x192_at_screen_4_4(void)
+{
+    cg_stage();
+    cg_set_unit(CG_DEFENDER, 0, 0, 0, 0, 1, 1000);
+    cg_set_unit(CG_ATTACKER, 5, 5, 2, 1, 3, 4);
+    cg_run();
+
+    CHECK_EQ(cg_border_touched(), 0);
+    CHECK_EQ(cg_pixel(9, 32), unit_art(2, 0, 0));
+    CHECK_EQ(cg_pixel(9, 31), 0);
+    CHECK_EQ(cg_pixel(8, 32), 0);
+    CHECK_EQ(cg_pixel(9, 32 + UNIT_BAR_WIDTH), 0);
+    CHECK_EQ(cg_pixel(9 + UNIT_BAR_ROWS, 32), 0);
+    cg_unstage();
+}
+
+/* CALL free at 0001d5ae: the page is released before the return, so the heap
+   holds no more used blocks after the run than before it.  This is also what
+   the seeding above depends on -- if the block did not come back, every
+   expected value in this section would be comparing against rubbish. */
+static void combat_page_comes_back_from_the_heap(void)
+{
+    cg_stage();
+    cg_set_unit(CG_DEFENDER, 0, 0, 0, 0, 1, 1000);
+    cg_set_unit(CG_ATTACKER, 5, 5, 2, 1, 3, 4);
+    cg_run();
+
+    CHECK_EQ(cg_blocks_after, cg_blocks_before);
+    cg_unstage();
+}
+
+/* Six of the seven frames end by waiting for the timer tick to move -- MOV
+   EAX,[EBP-0x24] / CMP EAX,[0x00069d64] / JZ back at 0001d0c2, 0001d341 and
+   nowhere after the closing frame.  The first frame's latch is uninitialised
+   and may end its wait at once, so five ticks are the guaranteed floor and a
+   run that waited nowhere, or that latched the counter before the first loop
+   and waited seven times, does not land on it. */
+static void combat_gauges_pace_six_of_the_seven_frames(void)
+{
+    cg_stage();
+    cg_set_unit(CG_DEFENDER, 0, 0, 0, 0, 1, 1000);
+    cg_set_unit(CG_ATTACKER, 5, 5, 2, 1, 3, 4);
+    cg_run();
+
+    CHECK_EQ(cg_ticks_used >= 5, 1);
+    cg_unstage();
+}
+
 void run_gauge_tests(void)
 {
     RUN_TEST(zero_max_draws_an_empty_bar);
@@ -1870,4 +2458,17 @@ void run_gauge_tests(void)
     RUN_TEST(facing_3_and_beyond_place_like_facing_2);
     RUN_TEST(down_step_falls_back_at_the_limit_not_before);
     RUN_TEST(left_step_falls_back_at_the_margin_not_before);
+
+    RUN_TEST(combat_gauges_read_the_measured_offsets);
+    RUN_TEST(combat_gauges_return_the_pair_and_suppress_without_a_counter);
+    RUN_TEST(combat_gauges_draw_the_defender_bar_from_side_zero);
+    RUN_TEST(combat_gauges_side_other_than_zero_takes_graphic_one);
+    RUN_TEST(combat_gauges_draw_both_bars_on_a_counter);
+    RUN_TEST(combat_gauges_zero_max_hp_draws_an_empty_bar);
+    RUN_TEST(combat_gauges_negative_max_hp_draws_an_empty_bar);
+    RUN_TEST(combat_gauges_fill_is_the_ceiling_over_41_columns);
+    RUN_TEST(combat_gauges_hp_words_are_read_signed);
+    RUN_TEST(combat_gauges_present_312x192_at_screen_4_4);
+    RUN_TEST(combat_page_comes_back_from_the_heap);
+    RUN_TEST(combat_gauges_pace_six_of_the_seven_frames);
 }

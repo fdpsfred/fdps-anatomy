@@ -222,6 +222,60 @@ extern void fdps_draw_unit_gauge(unsigned char *dst, int dst_stride,
                                  int alpha);
 #pragma aux fdps_draw_unit_gauge "*" parm caller [];
 
+/* 00064014.  Where the two combatants' HP gauges were placed, as one array of
+   two {x, y} int pairs: pair 0 (elements 0 and 1) is the defender's bar and
+   pair 1 (elements 2 and 3) the attacker's.  Both are view pixels, before the
+   composite page's 0x18 border is added.
+
+   IT IS ONE ARRAY, NOT FOUR GLOBALS (rebuild_info/pitfalls.md, contract B).
+   fdps_battle_show_combat_gauges hands &pairs[0] and &pairs[2] to
+   fdps_battle_compute_unit_gauge_position, which writes out_position[0] and
+   out_position[1] through the pointer it is given, so element 1 must sit
+   immediately after element 0 and element 3 immediately after element 2; the
+   function then returns the array's base and its caller reads pair 1 out of
+   it.  Splitting it into separate globals lets the linker put them apart and
+   every write lands on the wrong neighbour.
+
+   Element 2 is set to -1 when no counter-attack is coming, which is what
+   suppresses the attacker's bar for the rest of the run and what the caller
+   tests.  Written only by fdps_battle_show_combat_gauges and read by it and by
+   fdps_map_actor_move_and_attack; nothing initialises it, so a read before
+   that function has run sees the bss zeroes. */
+extern int data_fdps_battle_combat_gauge_pos_pairs[4];
+
+/* Puts both combatants' HP gauges on the battle map ahead of an attack and
+   hands back where it put them.
+
+   The defender's bar is always placed; the attacker's is placed only when
+   fdps_check_can_counter_attack answers exactly 1, and otherwise element 2 of
+   the pair array is set to -1 and that bar is skipped for the whole run.  Each
+   bar's graphic is picked from its unit's side byte -- side 0 takes graphic 2
+   and every other side graphic 1 -- and each is filled from that unit's
+   current and maximum HP, as the same 41-column ceiling
+   fdps_draw_unit_gauge_proportional takes.
+
+   SEVEN FRAMES ARE COMPOSED AND THE FUNCTION DOES NOT RETURN UNTIL THEY HAVE
+   ALL BEEN SHOWN.  Each one repaints the whole scene into a page this function
+   allocates and frees, draws the two bars over it, waits out a vertical
+   retrace and blits the 312x192 window to the adapter, and every frame but the
+   last then waits for the timer tick to move.  The three phases differ only in
+   how the bars are painted: three frames blended up out of the background at
+   strengths 0, 6 and 12 of 16, three tinted with palette index 0x1a at the
+   same three strengths, and one closing frame of the plain opaque bar.  The
+   bars are left standing on the adapter for the attack animation that follows.
+
+   THE RETURN VALUE IS THE GLOBAL ITSELF, not a copy: it is
+   data_fdps_battle_combat_gauge_pos_pairs above, and the next call overwrites
+   what a caller is still holding.  The caller reads pair 0 for the attack and
+   pair 1 for the counter, and must test pair 1's x against -1 first.
+
+   Neither unit index is range checked, malloc's answer is not tested against
+   NULL, and the page is never cleared -- whatever the heap left behind shows
+   through everywhere the compositor does not paint. */
+extern int *fdps_battle_show_combat_gauges(int attacker_unit,
+                                           int defender_unit);
+#pragma aux fdps_battle_show_combat_gauges "*" parm caller [];
+
 /* Works out where one battle unit's HP gauge goes on screen while a combat
    animation is playing, and writes the position through out_position.
 

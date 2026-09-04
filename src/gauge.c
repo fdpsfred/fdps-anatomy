@@ -1,14 +1,29 @@
-/* gauge.c -- the game's gauge bars and where a combat gauge is placed.
+/* gauge.c -- the game's gauge bars, where a combat gauge is placed, and the
+ * seven-frame appearance the two combatants' bars make before an attack.
  *
- * See gauge.h for what a caller has to know.  Nothing in this file holds
- * state: the unit record comes from fdps_get_unit_record (unit.h), the scroll
- * position from the two view window origin globals and the bar art from the
- * gauge sheet pointers gamedata.h declares, and the only thing written is the
- * caller's own memory -- a pair of ints, or a destination surface.
+ * See gauge.h for what a caller has to know.  Every drawing routine here is
+ * stateless: the unit record comes from fdps_get_unit_record (unit.h), the
+ * scroll position from the two view window origin globals and the bar art from
+ * the gauge sheet pointers gamedata.h declares, and the only thing written is
+ * the caller's own memory -- a pair of ints, or a destination surface.
+ *
+ * The one piece of state in the file is the pair of gauge positions
+ * fdps_battle_show_combat_gauges publishes, declared in gauge.h because it is
+ * that function's answer to its caller rather than anything the drawing
+ * routines read.
+ *
+ * malloc and free come from <stdlib.h> and inp from <conio.h>, which is where
+ * Watcom 10.0a declares them; all three are real calls in the original --
+ * CALL 0x0003d375 at 0001ce8e, CALL 0x0003d478 at 0001d5ae and CALL 0x0003d4e4
+ * at 0001d07b -- so the plain declarations are what reproduce them.
  */
+#include <stdlib.h>
+#include <conio.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "aitarget.h"
 #include "blit.h"
+#include "mapdraw.h"
 #include "unit.h"
 #include "gauge.h"
 
@@ -365,6 +380,309 @@ void fdps_draw_unit_gauge(unsigned char *dst, int dst_stride, int gfx_index,
             data_fdps_palette_shade_ramp_table, data_fdps_inverse_palette_cube,
             blit_mode, alpha);
     }
+}
+
+/* The offscreen page one combat frame is composed on: 360 x 240 8bpp at pitch
+   0x168, PUSH 0x15180 / CALL malloc at 0001ce89.  The 24-pixel apron on all
+   four sides is why the page is wider than the window it presents: a gauge
+   whose unit has scrolled to the edge of the view still lands inside the
+   allocation instead of over the adapter.
+
+   THE PAGE IS NOT CLEARED.  malloc's block goes straight to the compositor,
+   which paints only the layers, cursor and units it is given, so whatever the
+   heap left behind shows through everywhere those do not reach.  malloc's
+   answer is not tested against NULL either: there is no CMP EAX,0x0 between
+   the CALL at 0001ce8e and the store at 0001ce96. */
+#define SCENE_PAGE_PITCH 0x168
+#define SCENE_PAGE_BYTES 0x15180
+#define SCENE_PAGE_BORDER 0x18
+
+/* The window handed to the adapter, and where the adapter answers.  312 x 192
+   taken from page byte 0x21d8 -- page coordinate (24,24), the top-left of the
+   picture inside the apron -- and put down at screen byte 0x504, screen
+   coordinate (4,4).  Both are hard-coded in the original (PUSH 0xa0504 at
+   0001d0a7) and stay literals here: 0xa0000 is where the display adapter
+   answers, not the address of anything the linker places
+   (rebuild_info/pitfalls.md, contract E). */
+#define SCENE_PAGE_WINDOW_AT 0x21d8
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_PITCH 0x140
+#define COMBAT_WINDOW_AT 0x504
+#define COMBAT_WINDOW_W 0x138
+#define COMBAT_WINDOW_H 0xc0
+
+/* VGA input status register 1.  Bit 3 is set while the vertical retrace is in
+   progress, which is what every frame straddles. */
+#define VGA_INPUT_STATUS_1 0x3da
+#define VGA_STATUS_VERTICAL_RETRACE 0x08
+
+/* The four elements of data_fdps_battle_combat_gauge_pos_pairs, and the x that
+   says the attacker has no bar this run: MOV dword ptr [0x0006401c],
+   0xffffffff at 0001ce07 and the three CMP ...,-0x1 that read it back. */
+#define COMBAT_GAUGE_DEFENDER_X 0
+#define COMBAT_GAUGE_DEFENDER_Y 1
+#define COMBAT_GAUGE_ATTACKER_X 2
+#define COMBAT_GAUGE_ATTACKER_Y 3
+#define COMBAT_GAUGE_NO_BAR (-1)
+
+/* CMP EAX,0x1 / JNZ at 0001cdee: fdps_check_can_counter_attack answers -1 on
+   every refusal and never 0, so the test is against 1 and is not a bare
+   predicate (aitarget.h). */
+#define COUNTER_ATTACK_CONFIRMED 1
+
+/* CMP byte ptr [EAX+0x6],0x0 / JNZ at 0001ce32 and 0001ce4b: a side byte of 0
+   picks graphic 2 of the unit gauge sheet and every other side picks graphic
+   1. */
+#define COMBAT_GAUGE_SIDE_ZERO_GRAPHIC 2
+#define COMBAT_GAUGE_OTHER_SIDE_GRAPHIC 1
+
+/* The blend strength both animated phases walk: CMP dword ptr [EBP-0x20],0x10
+   / JL and ADD dword ptr [EBP-0x20],0x6, so three frames at 0, 6 and 12 out of
+   the 16 the blending painters take.  The limit is 0x10 and not 0x0d, so a
+   step of 6 would give a fourth frame at 18 if the step were smaller; it is
+   the pair that fixes the three. */
+#define COMBAT_GAUGE_ALPHA_LIMIT 0x10
+#define COMBAT_GAUGE_ALPHA_STEP 6
+
+/* MOV dword ptr [EBP+0xffffff28],0x1a at 0001d139: the second phase's blit
+   mode, which fdps_draw_unit_gauge reads as a tint colour index because it is
+   neither 0 nor 1. */
+#define COMBAT_GAUGE_TINT_COLOR 0x1a
+
+/* See gauge.h.  The two animated phases are the same eleven statements written
+   out twice and the closing frame is the same again with both painting
+   arguments fixed at 0.  The original has all three inline and not behind a
+   call, so they stay written out here; the seven calls of
+   fdps_draw_unit_gauge_proportional the source made are inline expansions in
+   the shipped image (rebuild_info/build_flags.md) and are open-coded here for
+   the same reason -- writing them as calls would put seven CALLs in the
+   rebuild that the original does not have.
+
+   THE FRAME WAIT'S LATCH IS DELIBERATELY LEFT UNINITIALISED, the same contract
+   fdps_animate_turn_banner and fdps_play_vfs_animation (anim.c) carry.
+   last_tick is read at 0001d0c2 before anything has written it, so the first
+   of the seven frames ends its wait at once unless the stack garbage happens
+   to equal the counter.  Writing the obvious last_tick =
+   data_fdps_timer_tick_counter before the first loop adds a tick of delay the
+   original does not have (rebuild_info/pitfalls.md).
+
+   data_fdps_timer_tick_counter is volatile at its declaration (gamedata.h)
+   because of these waits: nothing inside them writes the counter, so a build
+   allowed to hoist the load would spin here forever.  The retrace spins read a
+   port and cannot be hoisted for the same reason.
+
+   THE ATTACKER'S DESTINATION IS FORMED EVEN WHEN THERE IS NO ATTACKER BAR.
+   The multiply and the two adds at 0001ce99 run before the loops and read
+   element 2 whatever it holds, so with the -1 in place the pointer is one byte
+   short of where a zero would put it.  Nothing dereferences it on that path --
+   every use is inside the CMP ...,-0x1 guard -- so it is arithmetic on a
+   pointer that is never read, not a fault.  Guarding it changes nothing on
+   screen.
+
+   NO CALL'S ANSWER IS READ EXCEPT THREE.  fdps_check_can_counter_attack's is
+   compared against 1, the two fdps_get_unit_record pointers are the records
+   every field below comes out of, and malloc's is the page.  inp's is tested
+   for bit 3 at each of the six spins.  fdps_battle_compute_unit_gauge_position,
+   fdps_draw_scene_layers, fdps_draw_unit_gauge, fdps_blit_rect and free all
+   return nothing the original reads.
+
+   The seven frames are paced by the retrace and the timer tick, so the number
+   of instructions between them is not observable (contract D); what is
+   observable is that the last frame does NOT wait for a tick, which is what
+   lets the attack animation start against the bars immediately. */
+int *fdps_battle_show_combat_gauges(int attacker_unit, int defender_unit)
+{
+    /* The two records every field below is read out of.  Both are resolved
+       once, before the page is allocated, and the loops re-read neither. */
+    struct fdps_unit_record *attacker;
+    struct fdps_unit_record *defender;
+    /* The 360x240 page the frame is composed on, allocated and freed here. */
+    unsigned char *scene_page;
+    /* Where each bar's top-left pixel sits in that page, the position pair
+       with the page's 24-pixel border added on both axes. */
+    unsigned char *attacker_bar_pixel;
+    unsigned char *defender_bar_pixel;
+    /* Which of the sheet's three graphics fills each bar. */
+    int attacker_gfx_index;
+    int defender_gfx_index;
+    /* The HP pair each bar is filled from, widened from the record's signed
+       words by MOVSX at 0001ce64 and the three that follow it. */
+    int attacker_hp_current;
+    int attacker_hp_max;
+    int defender_hp_current;
+    int defender_hp_max;
+    /* How many of the bar's 41 interior columns this frame fills. */
+    int attacker_fill_width;
+    int defender_fill_width;
+    /* The blend strength this frame paints at, 0, 6 or 12 of 16. */
+    int alpha;
+    /* The tick the previous frame ended on.  Deliberately not initialised --
+       see the note above. */
+    unsigned int last_tick;
+
+    fdps_battle_compute_unit_gauge_position(
+        &data_fdps_battle_combat_gauge_pos_pairs[COMBAT_GAUGE_DEFENDER_X],
+        defender_unit);
+    if (fdps_check_can_counter_attack(attacker_unit, defender_unit)
+            == COUNTER_ATTACK_CONFIRMED) {
+        fdps_battle_compute_unit_gauge_position(
+            &data_fdps_battle_combat_gauge_pos_pairs[COMBAT_GAUGE_ATTACKER_X],
+            attacker_unit);
+    } else {
+        data_fdps_battle_combat_gauge_pos_pairs[COMBAT_GAUGE_ATTACKER_X] =
+            COMBAT_GAUGE_NO_BAR;
+    }
+
+    attacker = fdps_get_unit_record(attacker_unit);
+    defender = fdps_get_unit_record(defender_unit);
+
+    if (attacker->side == 0) {
+        attacker_gfx_index = COMBAT_GAUGE_SIDE_ZERO_GRAPHIC;
+    } else {
+        attacker_gfx_index = COMBAT_GAUGE_OTHER_SIDE_GRAPHIC;
+    }
+    if (defender->side == 0) {
+        defender_gfx_index = COMBAT_GAUGE_SIDE_ZERO_GRAPHIC;
+    } else {
+        defender_gfx_index = COMBAT_GAUGE_OTHER_SIDE_GRAPHIC;
+    }
+
+    attacker_hp_current = (int) attacker->hp_current;
+    attacker_hp_max = (int) attacker->hp_max;
+    defender_hp_current = (int) defender->hp_current;
+    defender_hp_max = (int) defender->hp_max;
+
+    scene_page = (unsigned char *) malloc((size_t) SCENE_PAGE_BYTES);
+    attacker_bar_pixel = scene_page
+        + (data_fdps_battle_combat_gauge_pos_pairs[COMBAT_GAUGE_ATTACKER_Y]
+           + SCENE_PAGE_BORDER) * SCENE_PAGE_PITCH
+        + data_fdps_battle_combat_gauge_pos_pairs[COMBAT_GAUGE_ATTACKER_X]
+        + SCENE_PAGE_BORDER;
+    defender_bar_pixel = scene_page
+        + (data_fdps_battle_combat_gauge_pos_pairs[COMBAT_GAUGE_DEFENDER_Y]
+           + SCENE_PAGE_BORDER) * SCENE_PAGE_PITCH
+        + data_fdps_battle_combat_gauge_pos_pairs[COMBAT_GAUGE_DEFENDER_X]
+        + SCENE_PAGE_BORDER;
+
+    for (alpha = 0; alpha < COMBAT_GAUGE_ALPHA_LIMIT;
+         alpha += COMBAT_GAUGE_ALPHA_STEP) {
+        fdps_draw_scene_layers(scene_page);
+        if (data_fdps_battle_combat_gauge_pos_pairs[COMBAT_GAUGE_ATTACKER_X]
+                != COMBAT_GAUGE_NO_BAR) {
+            if (attacker_hp_max <= 0) {
+                attacker_fill_width = 0;
+            } else {
+                attacker_fill_width =
+                    (attacker_hp_current * UNIT_GAUGE_INTERIOR_WIDTH
+                     + attacker_hp_max - 1) / attacker_hp_max;
+            }
+            fdps_draw_unit_gauge(attacker_bar_pixel, SCENE_PAGE_PITCH,
+                                 attacker_gfx_index, attacker_fill_width,
+                                 UNIT_GAUGE_MODE_BLEND, alpha);
+        }
+        if (defender_hp_max <= 0) {
+            defender_fill_width = 0;
+        } else {
+            defender_fill_width =
+                (defender_hp_current * UNIT_GAUGE_INTERIOR_WIDTH
+                 + defender_hp_max - 1) / defender_hp_max;
+        }
+        fdps_draw_unit_gauge(defender_bar_pixel, SCENE_PAGE_PITCH,
+                             defender_gfx_index, defender_fill_width,
+                             UNIT_GAUGE_MODE_BLEND, alpha);
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins, so the frame that has just been
+               composed is the one the monitor shows whole. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends, so the blit starts clear of it. */
+        }
+        fdps_blit_rect((unsigned int) (scene_page + SCENE_PAGE_WINDOW_AT),
+                       SCENE_PAGE_PITCH,
+                       (void *) (VGA_SCREEN_BASE + COMBAT_WINDOW_AT),
+                       VGA_SCREEN_PITCH, COMBAT_WINDOW_W, COMBAT_WINDOW_H);
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
+
+    for (alpha = 0; alpha < COMBAT_GAUGE_ALPHA_LIMIT;
+         alpha += COMBAT_GAUGE_ALPHA_STEP) {
+        fdps_draw_scene_layers(scene_page);
+        if (data_fdps_battle_combat_gauge_pos_pairs[COMBAT_GAUGE_ATTACKER_X]
+                != COMBAT_GAUGE_NO_BAR) {
+            if (attacker_hp_max <= 0) {
+                attacker_fill_width = 0;
+            } else {
+                attacker_fill_width =
+                    (attacker_hp_current * UNIT_GAUGE_INTERIOR_WIDTH
+                     + attacker_hp_max - 1) / attacker_hp_max;
+            }
+            fdps_draw_unit_gauge(attacker_bar_pixel, SCENE_PAGE_PITCH,
+                                 attacker_gfx_index, attacker_fill_width,
+                                 COMBAT_GAUGE_TINT_COLOR, alpha);
+        }
+        if (defender_hp_max <= 0) {
+            defender_fill_width = 0;
+        } else {
+            defender_fill_width =
+                (defender_hp_current * UNIT_GAUGE_INTERIOR_WIDTH
+                 + defender_hp_max - 1) / defender_hp_max;
+        }
+        fdps_draw_unit_gauge(defender_bar_pixel, SCENE_PAGE_PITCH,
+                             defender_gfx_index, defender_fill_width,
+                             COMBAT_GAUGE_TINT_COLOR, alpha);
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends. */
+        }
+        fdps_blit_rect((unsigned int) (scene_page + SCENE_PAGE_WINDOW_AT),
+                       SCENE_PAGE_PITCH,
+                       (void *) (VGA_SCREEN_BASE + COMBAT_WINDOW_AT),
+                       VGA_SCREEN_PITCH, COMBAT_WINDOW_W, COMBAT_WINDOW_H);
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
+
+    fdps_draw_scene_layers(scene_page);
+    if (data_fdps_battle_combat_gauge_pos_pairs[COMBAT_GAUGE_ATTACKER_X]
+            != COMBAT_GAUGE_NO_BAR) {
+        if (attacker_hp_max <= 0) {
+            attacker_fill_width = 0;
+        } else {
+            attacker_fill_width = (attacker_hp_current
+                                   * UNIT_GAUGE_INTERIOR_WIDTH
+                                   + attacker_hp_max - 1) / attacker_hp_max;
+        }
+        fdps_draw_unit_gauge(attacker_bar_pixel, SCENE_PAGE_PITCH,
+                             attacker_gfx_index, attacker_fill_width,
+                             UNIT_GAUGE_MODE_PLAIN, 0);
+    }
+    if (defender_hp_max <= 0) {
+        defender_fill_width = 0;
+    } else {
+        defender_fill_width = (defender_hp_current * UNIT_GAUGE_INTERIOR_WIDTH
+                               + defender_hp_max - 1) / defender_hp_max;
+    }
+    fdps_draw_unit_gauge(defender_bar_pixel, SCENE_PAGE_PITCH,
+                         defender_gfx_index, defender_fill_width,
+                         UNIT_GAUGE_MODE_PLAIN, 0);
+    while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+        /* Spin until the retrace begins. */
+    }
+    while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+        /* And until it ends. */
+    }
+    fdps_blit_rect((unsigned int) (scene_page + SCENE_PAGE_WINDOW_AT),
+                   SCENE_PAGE_PITCH,
+                   (void *) (VGA_SCREEN_BASE + COMBAT_WINDOW_AT),
+                   VGA_SCREEN_PITCH, COMBAT_WINDOW_W, COMBAT_WINDOW_H);
+    free(scene_page);
+
+    return data_fdps_battle_combat_gauge_pos_pairs;
 }
 
 /* One map tile is 24 pixels square, and a map object's view position is its

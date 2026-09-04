@@ -2858,7 +2858,7 @@ Parameters:
   defender_unit -- index of the unit being attacked, in the same array; its bar is always drawn.
 
 Returns:
-  &DAT_00064014, the two gauge positions as one array of {x, y} int pairs: pair 0 is the defender's bar, pair 1 (DAT_0006401c/DAT_00064020) the attacker's, whose x is -1 when no counter-attack is coming. FUN_00012e50 hands pair 0 to fdps_unit_attack_target for the attack and pair 1 to it for the counter, so each blow drains the bar this function placed.
+  &DAT_00064014, the two gauge positions as one array of {x, y} int pairs: pair 0 is the defender's bar, pair 1 (DAT_0006401c/DAT_00064020) the attacker's, whose x is -1 when no counter-attack is coming. fdps_map_actor_move_and_attack hands pair 0 to fdps_unit_attack_target for the attack and pair 1 to it for the counter, so each blow drains the bar this function placed.
 
 Pool: fdps  [no Function ID candidate in either library; it calls named game code, owns the game globals at 00064014/00064018/0006401c/00064020 and writes the VGA framebuffer, and at 2055 bytes is far too large to be a linker or compiler product]
 
