@@ -38,17 +38,30 @@
  * chapter 5 ends with six, the first on MAP05.COD record 32 at (4, 8) and the
  * fifth being character 98 at (15, 4).
  *
+ * fdps_show_chapter_title_card is run whole too, and for a related reason:
+ * it loads Chapter.saf and Chapter.pal out of MISC.VFS through
+ * fdps_vfs_load_entry, which ends the process rather than returning when the
+ * container is not there.  MISC.VFS is staged through tests/gamefile.lst and
+ * the three cases skip themselves unless it is present.  What they assert
+ * against is set out above those cases.
+ *
  * Nothing here asserts what any global holds before a case sets it: the
  * definitions are ticket 23's and are zero-filled until then.
  */
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <conio.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "deploy.h"
 #include "keybd.h"
+#include "sprite.h"
+#include "vfs.h"
 #include "chapter.h"
 
 #define CH_ONE_SLOT 0
@@ -424,9 +437,339 @@ static void reset_installs_the_state_a_chapter_opens_in(void)
     free_chapter_globals();
 }
 
+/* --- fdps_show_chapter_title_card @ 00020c60 ---------------------------- */
+
+/* WHAT THESE CASES ASSERT AGAINST.  This routine draws on the real adapter
+   and then wipes what it drew: it composes the card on a private page, puts
+   the page's 320x200 window at 0xa0000, fades the DAC up and down around it,
+   and clears the aperture again before it returns.  So the picture is not
+   there to be read afterwards, and the cases below put the machine in mode
+   13h, hook the timer, run the whole thing once, and have the interrupt
+   compare the live aperture against a reference image on every tick.
+   Everything all three cases look at comes from that single run.
+
+   THE REFERENCE IS BUILT, NOT GUESSED.  It is Chapter.saf entry 5 -- the
+   chapter data_fdps_chapter_current_chapter_id is staged with -- drawn by
+   fdps_draw_composite_sprite at (0x18, 0x18) on a 0x170 x 0xf8 page, with the
+   0x140 x 0xc8 window at page + 0x2298 taken out of it.  Every one of those
+   numbers is read off the assembly and not off the emitted C: MOV
+   [EBP-0x2c],0x170 and MOV [EBP-0x28],0xf8 at 00020cbe and 00020cc5, MOV
+   [EBP-0x24],0x18 and MOV [EBP-0x20],0x18 at 00020cda and 00020ce1, PUSH
+   0x16480 at 00020cae, and ADD EAX,0x2298 at 00020d3c.  A build that sized
+   the page differently, drew at a different origin, took a different window
+   out of it or handed the drawer a different entry index produces a different
+   320x200 image, and no tick matches.
+
+   THE PAGE IS NOT CLEARED BEFORE IT IS DRAWN ON -- malloc's block goes to the
+   drawer as it comes -- so the reference is only well defined if the card
+   covers every pixel of the window.  That is not assumed: the reference is
+   built twice, from a page pre-filled with 0x00 and from one pre-filled with
+   0xff, and the first assertion is that the two agree.  CHAPTER.SAF's frames
+   are one 14x9 tilemap of 24x24 cells at offset (0, 0), which is 336x216 over
+   a 320x200 window, and every cell is opaque.
+
+   THE CHAPTER IS THE GLOBAL AND NOT A CONSTANT.  Entry 5's card differs from
+   entry 0's in 18,306 of its 64,000 bytes (tools/saf_decode over MISC.VFS's
+   CHAPTER.SAF), so a body that ignored
+   data_fdps_chapter_current_chapter_id and drew entry 0 fails the match.
+
+   WHAT IS LEFT TO THE PLAYTEST.  How bright the card is at any moment, how
+   many steps each fade takes and how long each step is held are properties of
+   the DAC over time.  The interrupt cannot read the DAC to check them: the
+   fades are uploading it through the same index and data ports 33 times over,
+   and an interrupt that read those ports mid-upload would corrupt the upload
+   it was trying to observe.  The one part of the fade that survives into a
+   readable state is the last upload of all, which is what the third case
+   below reads. */
+
+#define MISC_NAME "MISC.VFS"
+
+/* The chapter staged into the global before the run.  Any of the thirty would
+   do; 5 is one whose card differs from entry 0's, so the case can tell a body
+   that read the global from one that did not. */
+#define CARD_CHAPTER 5
+
+/* The off-screen page and the window taken out of it, from the assembly cited
+   in the note above. */
+#define CARD_PAGE_PITCH 0x170
+#define CARD_PAGE_ROWS 0xf8
+#define CARD_PAGE_BYTES 0x16480
+#define CARD_PAGE_MARGIN 0x18
+#define CARD_PAGE_WINDOW_AT 0x2298
+
+/* The visible screen and the two BIOS modes the run moves between. */
+#define CARD_VGA_BASE 0x000a0000
+#define CARD_SCREEN_W 0x140
+#define CARD_SCREEN_H 0xc8
+#define CARD_SCREEN_BYTES (CARD_SCREEN_W * CARD_SCREEN_H)
+#define CARD_MODE_TEXT 0x03
+#define CARD_MODE_320X200X256 0x13
+
+/* The BIOS timer, the interrupt the aperture is sampled from. */
+#define CARD_TIMER_VECTOR 8
+
+/* Painted over the whole aperture before the run.  No byte of the card is
+   this value, so a screen still holding it is one the routine never wrote. */
+#define CARD_SENTINEL 0x5a
+
+/* How many ticks have to have seen the finished card on the adapter.  The two
+   fades and the hold between them are 33 delays of 80 ms plus one of 1000 ms,
+   so the card stands on the adapter for at least 3.64 seconds -- around 66
+   ticks of the 18.2 Hz timer -- and the bound is set at less than half of
+   that so a slow host cannot fail the case for the wrong reason. */
+#define CARD_MIN_MATCH_TICKS 30
+
+/* The DAC read port pair.  Writing an entry number to 0x3c7 arms a read of
+   that entry's three components from 0x3c9. */
+#define CARD_DAC_READ_INDEX 0x3c7
+#define CARD_DAC_DATA 0x3c9
+#define CARD_DAC_ENTRIES 256
+
+/* The master palette staged behind data_fdps_vga_main_palette_ptr for the
+   run.  Every component is inside the DAC's 0..63 range, so an upload at bias
+   0 has to reproduce it exactly, and the three channels step by different
+   amounts so a build that uploaded one channel's bytes three times over does
+   not pass. */
+#define CARD_MASTER_RED_STEP 7
+#define CARD_MASTER_GREEN_STEP 11
+#define CARD_MASTER_BLUE_STEP 13
+#define CARD_DAC_RANGE 64
+
+static unsigned char card_reference[CARD_SCREEN_BYTES];
+static unsigned char card_alt_reference[CARD_SCREEN_BYTES];
+static unsigned char card_final_screen[CARD_SCREEN_BYTES];
+static unsigned char card_master_palette[CARD_DAC_ENTRIES * 3];
+static unsigned char card_final_dac[CARD_DAC_ENTRIES * 3];
+
+static void (__interrupt __far *card_saved_timer)();
+static volatile long card_matched_ticks;
+static volatile long card_best_diff;
+
+static int card_ran = 0;
+static int card_ready = 0;
+static long card_prefill_disagreements = 0;
+
+/* Sampled once per timer tick while the routine runs.  The aperture holds the
+   finished card from the blit until the closing memset, which is the whole of
+   both fades and the hold, so a correct build is seen matching on most ticks;
+   the smallest byte difference seen on any tick is kept as well, so a failure
+   says how far off the picture was rather than only that it was off. */
+static void __interrupt __far card_timer_isr(void)
+{
+    unsigned char *aperture;
+    long diff;
+    long at;
+
+    aperture = (unsigned char *) CARD_VGA_BASE;
+    if (memcmp(aperture, card_reference, (size_t) CARD_SCREEN_BYTES) == 0) {
+        card_matched_ticks++;
+        card_best_diff = 0;
+    } else if (card_best_diff != 0) {
+        diff = 0;
+        for (at = 0; at < CARD_SCREEN_BYTES; at++) {
+            if (aperture[at] != card_reference[at]) {
+                diff++;
+            }
+        }
+        if (diff < card_best_diff) {
+            card_best_diff = diff;
+        }
+    }
+    _chain_intr(card_saved_timer);
+}
+
+static void card_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* Draws Chapter.saf entry CARD_CHAPTER onto a page pre-filled with `prefill`
+   and copies the window the routine blits into `out`. */
+static void card_build_reference(void *bank, int prefill, unsigned char *out)
+{
+    int request[DRAW_REQUEST_DWORDS];
+    unsigned char *page;
+    int row;
+
+    page = (unsigned char *) malloc((size_t) CARD_PAGE_BYTES);
+    if (page == NULL) {
+        return;
+    }
+    memset(page, prefill, (size_t) CARD_PAGE_BYTES);
+
+    request[DRAW_REQUEST_DEST_BASE] = (int) page;
+    request[DRAW_REQUEST_DEST_PITCH] = CARD_PAGE_PITCH;
+    request[DRAW_REQUEST_DEST_ROWS] = CARD_PAGE_ROWS;
+    request[DRAW_REQUEST_X] = CARD_PAGE_MARGIN;
+    request[DRAW_REQUEST_Y] = CARD_PAGE_MARGIN;
+    request[DRAW_REQUEST_IMAGE] = (int) bank;
+    request[DRAW_REQUEST_ITEM_INDEX] = CARD_CHAPTER;
+    request[DRAW_REQUEST_BLIT_OPERAND] = 0;
+    request[DRAW_REQUEST_BLIT_MODE] = 0;
+    fdps_draw_composite_sprite(request, 0);
+
+    for (row = 0; row < CARD_SCREEN_H; row++) {
+        memmove(out + row * CARD_SCREEN_W,
+                page + CARD_PAGE_WINDOW_AT + row * CARD_PAGE_PITCH,
+                (size_t) CARD_SCREEN_W);
+    }
+    free(page);
+}
+
+/* The one run all three cases read.  MISC.VFS has to be there: a container
+   fdps_vfs_load_entry cannot open ends the process rather than failing a
+   check. */
+static void card_run(void)
+{
+    FILE *fp;
+    void *bank;
+    unsigned char *saved_master;
+    int saved_chapter;
+    int entry;
+    long at;
+
+    if (card_ran) {
+        return;
+    }
+    card_ran = 1;
+
+    fp = fopen(MISC_NAME, "rb");
+    if (fp == NULL) {
+        return;
+    }
+    fclose(fp);
+
+    for (entry = 0; entry < CARD_DAC_ENTRIES; entry++) {
+        card_master_palette[entry * 3] =
+            (unsigned char) ((entry * CARD_MASTER_RED_STEP) % CARD_DAC_RANGE);
+        card_master_palette[entry * 3 + 1] =
+            (unsigned char) ((entry * CARD_MASTER_GREEN_STEP) % CARD_DAC_RANGE);
+        card_master_palette[entry * 3 + 2] =
+            (unsigned char) ((entry * CARD_MASTER_BLUE_STEP) % CARD_DAC_RANGE);
+    }
+
+    saved_master = data_fdps_vga_main_palette_ptr;
+    saved_chapter = data_fdps_chapter_current_chapter_id;
+    data_fdps_vga_main_palette_ptr = card_master_palette;
+    data_fdps_chapter_current_chapter_id = CARD_CHAPTER;
+
+    bank = fdps_vfs_load_entry(MISC_NAME, "Chapter.saf");
+    card_build_reference(bank, 0x00, card_reference);
+    card_build_reference(bank, 0xff, card_alt_reference);
+    free(bank);
+
+    card_prefill_disagreements = 0;
+    for (at = 0; at < CARD_SCREEN_BYTES; at++) {
+        if (card_reference[at] != card_alt_reference[at]) {
+            card_prefill_disagreements++;
+        }
+    }
+
+    card_matched_ticks = 0;
+    card_best_diff = CARD_SCREEN_BYTES;
+
+    card_set_mode(CARD_MODE_320X200X256);
+    memset((void *) CARD_VGA_BASE, CARD_SENTINEL, (size_t) CARD_SCREEN_BYTES);
+
+    card_saved_timer = _dos_getvect(CARD_TIMER_VECTOR);
+    _dos_setvect(CARD_TIMER_VECTOR, card_timer_isr);
+    fdps_show_chapter_title_card();
+    _dos_setvect(CARD_TIMER_VECTOR, card_saved_timer);
+
+    memmove(card_final_screen, (void *) CARD_VGA_BASE,
+            (size_t) CARD_SCREEN_BYTES);
+    for (entry = 0; entry < CARD_DAC_ENTRIES; entry++) {
+        outp(CARD_DAC_READ_INDEX, entry);
+        card_final_dac[entry * 3] = (unsigned char) (inp(CARD_DAC_DATA) & 0x3f);
+        card_final_dac[entry * 3 + 1] =
+            (unsigned char) (inp(CARD_DAC_DATA) & 0x3f);
+        card_final_dac[entry * 3 + 2] =
+            (unsigned char) (inp(CARD_DAC_DATA) & 0x3f);
+    }
+    card_set_mode(CARD_MODE_TEXT);
+
+    data_fdps_vga_main_palette_ptr = saved_master;
+    data_fdps_chapter_current_chapter_id = saved_chapter;
+    card_ready = 1;
+}
+
+/* The card the chapter global names reaches the adapter, pixel for pixel, and
+   stays there.  card_best_diff is the smallest number of bytes any tick saw
+   between the aperture and the reference, so 0 means some tick saw the exact
+   image; the tick count then says it was held rather than flashed. */
+static void title_card_puts_the_chapter_the_global_names_on_the_adapter(void)
+{
+    card_run();
+    if (!card_ready) {
+        return;
+    }
+
+    CHECK_EQ(card_prefill_disagreements, 0L);
+    CHECK_EQ(card_best_diff, 0L);
+    CHECK_EQ(card_matched_ticks >= CARD_MIN_MATCH_TICKS, 1);
+}
+
+/* The routine wipes what it drew.  Every byte of CHAPTER.SAF's cards is
+   non-zero, so an aperture that still held any of the picture -- or the
+   sentinel it was filled with beforehand -- would show up here. */
+static void title_card_leaves_the_frame_buffer_cleared(void)
+{
+    long still_set;
+    long at;
+
+    card_run();
+    if (!card_ready) {
+        return;
+    }
+
+    still_set = 0;
+    for (at = 0; at < CARD_SCREEN_BYTES; at++) {
+        if (card_final_screen[at] != 0) {
+            still_set++;
+        }
+    }
+    CHECK_EQ(still_set, 0L);
+}
+
+/* The last upload of all is the master palette at bias 0, not the black the
+   fade down ended on.  A body that dropped the closing upload, or that
+   carried the fade's -0x40 into it, leaves the DAC extinguished; the second
+   check is what tells those two apart from a build that got it right. */
+static void title_card_leaves_the_master_palette_installed(void)
+{
+    long wrong;
+    long lit;
+    long at;
+
+    card_run();
+    if (!card_ready) {
+        return;
+    }
+
+    wrong = 0;
+    lit = 0;
+    for (at = 0; at < CARD_DAC_ENTRIES * 3; at++) {
+        if (card_final_dac[at] != card_master_palette[at]) {
+            wrong++;
+        }
+        if (card_final_dac[at] != 0) {
+            lit++;
+        }
+    }
+    CHECK_EQ(wrong, 0L);
+    CHECK_EQ(lit > 0, 1);
+}
+
 void run_chapter_tests(void)
 {
     RUN_TEST(reset_rebuilds_the_unit_array_for_the_chapter_global);
     RUN_TEST(reset_reads_the_chapter_id_from_the_global);
     RUN_TEST(reset_installs_the_state_a_chapter_opens_in);
+    RUN_TEST(title_card_puts_the_chapter_the_global_names_on_the_adapter);
+    RUN_TEST(title_card_leaves_the_frame_buffer_cleared);
+    RUN_TEST(title_card_leaves_the_master_palette_installed);
 }

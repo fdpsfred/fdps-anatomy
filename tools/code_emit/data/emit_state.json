@@ -2148,6 +2148,14 @@
       "status": "committed",
       "emitted_against": "0x12b",
       "rounds": 0
+    },
+    "00020c60": {
+      "name": "fdps_show_chapter_title_card",
+      "target": "chapter.c",
+      "body_size": "0x22d",
+      "status": "committed",
+      "emitted_against": "0x22d",
+      "rounds": 2
     }
   }
 }

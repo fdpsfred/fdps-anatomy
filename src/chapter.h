@@ -28,4 +28,39 @@
 extern void fdps_chapter_state_reset(void);
 #pragma aux fdps_chapter_state_reset "*" parm caller [];
 
+/* Shows the current chapter's title card and returns when it has finished:
+   the chapter's graphic fades up out of black, stands at full brightness for
+   a second, fades back down to black, and the screen is left cleared.  The
+   whole thing takes a little over three and a half seconds of real time and
+   nothing can interrupt it -- no key is read and no flag is tested.
+
+   It takes no argument and returns nothing.  WHICH card is drawn comes from
+   data_fdps_chapter_current_chapter_id (gamedata.h) as a 0-based index into
+   Chapter.saf's thirty entries.  The thirty callers -- the chapter entry
+   handlers fdps_chapter_01_init .. fdps_chapter_30_init -- do not set that
+   global themselves; it already holds the chapter by the time one of them
+   runs.  The image writes the global in thirty-four places and none of them
+   is inside an entry handler.  Twenty-nine are the chapter-end handlers
+   fdps_chapter_01_end .. fdps_chapter_29_end, each storing the next
+   chapter's index as a literal as its last act before the epilogue -- 1 at
+   0003a440 up to 29 at 0003ba39, in order; fdps_chapter_30_end has no such
+   write, chapter 30 being the last.  The other five enter a chapter from
+   outside that sequence: fdps_title_screen (0, starting a new game),
+   fdps_load_savegame and fdps_load_game_screen (the chapter byte out of the
+   save record), fdps_title_demo (25, the demo's fixed chapter) and
+   fdps_icon_script_run (the script opcode that advances the story).
+
+   The card is loaded, drawn and freed inside the call: Chapter.saf and
+   Chapter.pal come out of MISC.VFS, the picture is composed on a private
+   368x248 page, and all three allocations are released before the return, so
+   nothing is left behind and nothing is cached between chapters.
+
+   WHAT THE CALLER INHERITS.  The mode 13h aperture is cleared to palette
+   index 0 and the DAC is left holding the master palette
+   data_fdps_vga_main_palette_ptr names at no bias -- a live palette over a
+   blank screen.  The caller has to repaint; it does not have to fade back
+   in. */
+extern void fdps_show_chapter_title_card(void);
+#pragma aux fdps_show_chapter_title_card "*" parm caller [];
+
 #endif
