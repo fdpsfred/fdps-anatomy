@@ -46,10 +46,12 @@
  * re-enables interrupts inside the very INT 21h being made.
  */
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <malloc.h>
 #include "testharn.h"
+#include "blit.h"
 #include "gamedata.h"
 #include "keybd.h"
 #include "vfs.h"
@@ -898,6 +900,675 @@ static void releases_every_block_a_full_shutdown_holds(void)
     shutdown_clear_everything();
 }
 
+/* --- fdps_load_global_resources at 00029660 --------------------------------
+ *
+ * The startup loader, measured end to end: it takes nothing, returns nothing
+ * and reports nothing, so every assertion below reads a global it filled, a
+ * file it wrote, or a byte of a buffer it built.
+ *
+ * It is run for real, against the shipped MISC.VFS and FIELD.VFS, because
+ * nothing smaller can stand in.  Every filename it opens is a literal in its
+ * own body, so no fixture can point it anywhere else; a container it cannot
+ * open ends the process at exit(1), and a member it cannot find sends it into
+ * fdps_wait_any_key, which spins until a keyboard interrupt that never comes.
+ * Neither failure is one an assertion could catch, which is why the fixture
+ * checks every one of the seventeen members is really there before it calls,
+ * and why every case here skips itself when they are not.
+ *
+ * The four cache files are deleted first, so the call takes the arm that
+ * builds the tables rather than the arm that reads them back -- which is what
+ * makes the run deterministic whatever an earlier run of this executable left
+ * in the directory.  The read arm is covered afterwards by a second call, with
+ * the files the first one wrote now in place.
+ *
+ * The keyboard vector is fenced the way tests/keybd.c fences its own: the
+ * function installs the game's INT 09h handler at 000296b3 and never takes it
+ * down, so IRQ1 is masked at the 8259 across the call and the machine's own
+ * vector is put back the moment it returns.
+ * -------------------------------------------------------------------------- */
+
+/* The two containers, by the 8.3 names tests/gamefile.lst stages them under.
+   The function's own literals are "MISC.VFS" at 000296ca and "Field.vfs" at
+   00029e6b; DOS matches either spelling to the same file. */
+#define MISC_CONTAINER "MISC.VFS"
+#define FIELD_CONTAINER "FIELD.VFS"
+
+/* The four palette-cache files, in the order the generating arm writes them:
+   FMer1.tmp and FMer2.tmp from Fight.pal at 00029fba and 00029ff6, then
+   Mer1.tmp and Mer2.tmp from Fde.pal at 0002a040 and 0002a07c. */
+#define FIGHT_RAMP_FILE "FMER1.TMP"
+#define FIGHT_CUBE_FILE "FMER2.TMP"
+#define MAIN_RAMP_FILE "MER1.TMP"
+#define MAIN_CUBE_FILE "MER2.TMP"
+
+/* PUSH 0x4800 at 00029fd5 and PUSH 0x1000 at 0002a011: the byte counts the
+   fwrite and fread calls carry, and so the sizes the four files must have. */
+#define RAMP_FILE_BYTES 0x4800
+#define CUBE_FILE_BYTES 0x1000
+
+/* 256 entries per row of the shade ramp, and row 1 is the one that holds the
+   palette itself (src/gamedata.h). */
+#define PALETTE_ENTRIES 256
+
+/* Thirteen members of Misc.vfs land in a global of their own; EasyBar.cel and
+   Bar.cel are loaded into a local, consumed and freed, so they are counted
+   separately. */
+#define MISC_MEMBER_COUNT 13
+#define FIELD_MEMBER_COUNT 2
+
+/* Sub-image offset table at +0x0f, three sub-images, 43x6 into a 0x102 stride
+   for EasyBar.cel and 117x8 into a 0x3a8 stride for Bar.cel: the numbers in
+   the two loops at 00029cfc and 00029dfc, read off the assembly and written
+   here independently of the constants src/main.c gives them names for. */
+#define CEL_TABLE_AT 0x0f
+#define SUB_IMAGES 3
+#define EASYBAR_W 0x2b
+#define EASYBAR_H 6
+#define EASYBAR_STRIDE 0x102
+#define EASYBAR_TOTAL 0x306
+#define BAR_W 0x75
+#define BAR_H 8
+#define BAR_STRIDE 0x3a8
+#define BAR_TOTAL 0xaf8
+
+/* One member of a container and the global the loader must leave it in. */
+struct load_member {
+    char *name;
+    unsigned char **slot;
+};
+
+/* The thirteen Misc.vfs loads that keep their block, in the order of the
+   thirteen call sites from 00029731 to 00029c35. */
+static const struct load_member misc_members[MISC_MEMBER_COUNT] = {
+    { "FDE.PAL", &data_fdps_vga_main_palette_ptr },
+    { "FIGHT.PAL", &data_fdps_vga_fight_palette_ptr },
+    { "CUSOR.CEL", &data_fdps_cursor_highlight_sprite_sheet_ptr },
+    { "COMMAND.CEL", &data_fdps_command_sprite_sheet_ptr },
+    { "SHADOW.CEL", &data_fdps_shadow_sprite_sheet_ptr },
+    { "ICONSTS.CEL", &data_fdps_unit_status_icon_sheet_ptr },
+    { "MESSAGE.CEL", &data_fdps_message_window_sheet_ptr },
+    { "NUMBER.CEL", &data_fdps_number_glyph_sheet_ptr },
+    { "SELBAR.CEL", &data_fdps_selection_bar_sheet_ptr },
+    { "LEVUP.CEL", &data_fdps_level_up_window_sheet_ptr },
+    { "BASEWAV.VFS", &data_fdps_audio_basewav_sfx_bank_buf_ptr },
+    { "BASEANI.VFS", &data_fdps_animation_baseani_archive_ptr },
+    { "ADWIN.CEL", &data_fdps_ui_terrain_hud_panel_sheet_ptr }
+};
+
+/* The two Field.vfs loads, at 00029ee7 and 00029f5e. */
+static const struct load_member field_members[FIELD_MEMBER_COUNT] = {
+    { "FDETXT.FON", &data_fdps_font_sheet_ptr },
+    { "FDETXT00.TXT", &data_fdps_all_game_text_ptr }
+};
+
+/* The two sheets that are consumed rather than kept, at 00029cab and
+   00029dab.  They have to be in the container for the call to survive even
+   though no global ends up holding them. */
+static char *const misc_temporaries[2] = { "EASYBAR.CEL", "BAR.CEL" };
+
+/* 0 not attempted, 1 the loader has run and its globals are live, -1 the
+   inputs are not next to the executable and every case skips. */
+static int load_ran;
+
+/* What the generating arm left in the two tables, kept so the reading arm's
+   own run can be compared against it byte for byte. */
+static unsigned int generated_ramp[RAMP_FILE_BYTES / 4];
+static unsigned char generated_cube[CUBE_FILE_BYTES];
+
+/* Row 1 of the shade ramp for one palette entry, as fdps_build_palette_tables
+   computes it (src/palette.c): the six-bit components widened to eight by a
+   multiply by four, then the top nibble of each packed into its own byte of a
+   0x000R0G0B word. */
+static unsigned int expected_ramp_row1(unsigned char *palette, int index)
+{
+    unsigned int red;
+    unsigned int green;
+    unsigned int blue;
+
+    red = (unsigned int) (unsigned char) (palette[index * 3] * 4);
+    green = (unsigned int) (unsigned char) (palette[index * 3 + 1] * 4);
+    blue = (unsigned int) (unsigned char) (palette[index * 3 + 2] * 4);
+    return ((red & 0xf0u) << 12) | ((green & 0xf0u) << 4)
+         | ((blue & 0xf0u) >> 4);
+}
+
+/* Is `name` a member of the already open container?  The query is upper-cased
+   in place by the search, so it goes in through a buffer. */
+static int member_is_present(char *name, void *handle)
+{
+    char query[QUERY_MAX];
+
+    strcpy(query, name);
+    return fdps_vfs_find_entry_size(query, handle) >= 0;
+}
+
+/* Every member the loader names, checked before it is called rather than
+   after: a miss inside the function does not fail a check, it waits for a key
+   that never arrives. */
+static int load_inputs_are_present(void)
+{
+    void *misc;
+    void *field;
+    int ok;
+    int i;
+
+    misc = fdps_vfs_open(MISC_CONTAINER);
+    if (misc == NULL) {
+        return 0;
+    }
+    ok = 1;
+    for (i = 0; i < MISC_MEMBER_COUNT; i++) {
+        if (!member_is_present(misc_members[i].name, misc)) {
+            ok = 0;
+        }
+    }
+    for (i = 0; i < 2; i++) {
+        if (!member_is_present(misc_temporaries[i], misc)) {
+            ok = 0;
+        }
+    }
+    free(misc);
+    if (!ok) {
+        return 0;
+    }
+
+    field = fdps_vfs_open(FIELD_CONTAINER);
+    if (field == NULL) {
+        return 0;
+    }
+    for (i = 0; i < FIELD_MEMBER_COUNT; i++) {
+        if (!member_is_present(field_members[i].name, field)) {
+            ok = 0;
+        }
+    }
+    free(field);
+    return ok;
+}
+
+/* The nine members fdps_load_data_tables asks the same container for.  A miss
+   there is as fatal as a miss in the fifteen, so it is part of the preflight
+   rather than of the assertions. */
+static int data_table_members_are_present(void)
+{
+    static char *const names[TABLE_COUNT] = {
+        "FRIAPRDA.DAT", "FRILEVUP.DAT", "ITEM.DAT", "ENEMYDAT.DAT",
+        "PROMAP.DAT", "PROEQU.DAT", "MAGICDAT.DAT", "GETMGTAB.DAT",
+        "RANKUP.DAT"
+    };
+    void *misc;
+    int ok;
+    int i;
+
+    misc = fdps_vfs_open(MISC_CONTAINER);
+    if (misc == NULL) {
+        return 0;
+    }
+    ok = 1;
+    for (i = 0; i < TABLE_COUNT; i++) {
+        if (!member_is_present(names[i], misc)) {
+            ok = 0;
+        }
+    }
+    free(misc);
+    return ok;
+}
+
+/* One call with IRQ1 masked and the machine's own vector 09h put back after,
+   because the function installs the game's handler and never removes it. */
+static void load_call_fenced(void)
+{
+    unsigned char saved_mask;
+    unsigned short saved_selector;
+    unsigned int saved_offset;
+
+    saved_mask = shutdown_mask_irq1();
+    saved_offset = shutdown_read_int9_vector(&saved_selector);
+
+    fdps_load_global_resources();
+
+    shutdown_write_int9_vector(saved_selector, saved_offset);
+    shutdown_restore_irq_mask(saved_mask);
+}
+
+/* How big a file on disk is, or -1 when it is not there. */
+static long file_size(char *name)
+{
+    FILE *fp;
+    long size;
+
+    fp = fopen(name, "rb");
+    if (fp == NULL) {
+        return -1;
+    }
+    fseek(fp, 0L, SEEK_END);
+    size = ftell(fp);
+    fclose(fp);
+    return size;
+}
+
+/* The whole of one cache file in a fresh block, or null. */
+static void *read_whole_file(char *name, long bytes)
+{
+    FILE *fp;
+    void *buffer;
+
+    if (file_size(name) != bytes) {
+        return NULL;
+    }
+    fp = fopen(name, "rb");
+    if (fp == NULL) {
+        return NULL;
+    }
+    buffer = malloc((size_t) bytes);
+    if (buffer != NULL) {
+        fread(buffer, 1, (size_t) bytes, fp);
+    }
+    fclose(fp);
+    return buffer;
+}
+
+/* Run the loader once, on the arm that builds the palette tables.  Everything
+   it fills stays live for the cases that follow; the read-arm case at the end
+   is what releases it. */
+static int loader_has_run(void)
+{
+    if (load_ran != 0) {
+        return load_ran > 0;
+    }
+    if (!load_inputs_are_present() || !data_table_members_are_present()) {
+        load_ran = -1;
+        return 0;
+    }
+
+    shutdown_clear_everything();
+
+    /* No cache, so access("FMer1.tmp", 0) comes back non-zero and the call
+       takes the arm at 00029fac that builds and writes all four files. */
+    remove(FIGHT_RAMP_FILE);
+    remove(FIGHT_CUBE_FILE);
+    remove(MAIN_RAMP_FILE);
+    remove(MAIN_CUBE_FILE);
+
+    load_call_fenced();
+
+    memcpy(generated_ramp, data_fdps_palette_shade_ramp_table,
+           RAMP_FILE_BYTES);
+    memcpy(generated_cube, data_fdps_inverse_palette_cube, CUBE_FILE_BYTES);
+    load_ran = 1;
+    return 1;
+}
+
+/* The eight font metrics, one per MOV between 0002966c and 000296b3.  Every
+   one of them is a literal in the instruction, so a wrong constant or a store
+   aimed at the wrong global is visible here and nowhere else. */
+static void seeds_the_eight_font_metrics(void)
+{
+    if (!loader_has_run()) {
+        return;
+    }
+    CHECK_EQ(data_fdps_font_glyph_width, 0x10);
+    CHECK_EQ(data_fdps_glyph_cell_height, 0x10);
+    CHECK_EQ(data_fdps_font_shadow_offset_x, 1);
+    CHECK_EQ(data_fdps_glyph_shadow_row_offset, 1);
+    CHECK_EQ(data_fdps_font_glyph_stride_bytes, 0x20);
+    CHECK_EQ(data_fdps_font_outline_enabled_flag, 0);
+    CHECK_EQ(data_fdps_glyph_advance_x, 0x10);
+    CHECK_EQ(data_fdps_font_line_height, 0x12);
+}
+
+/* PUSH 0xa00 / CALL malloc / MOV [0x00064108],EAX at 000296b8: the roster
+   block is allocated here and by nothing else, and its result is not tested
+   before it is stored. */
+static void allocates_the_roster_block(void)
+{
+    if (!loader_has_run()) {
+        return;
+    }
+    CHECK_EQ(data_fdps_roster_array_ptr != NULL, 1);
+}
+
+/* One member out of one container, compared against an independently loaded
+   copy of the same member.  This is the check a filename paired with the wrong
+   destination fails: the slot would hold some other member's bytes. */
+static void check_member_landed(void *handle, char *name,
+                                unsigned char **slot)
+{
+    char query[QUERY_MAX];
+    int bytes;
+    void *reference;
+
+    strcpy(query, name);
+    bytes = fdps_vfs_find_entry_size(query, handle);
+    CHECK_EQ(bytes >= 0, 1);
+    CHECK_EQ(*slot != NULL, 1);
+    if (bytes < 0 || *slot == NULL) {
+        return;
+    }
+    strcpy(query, name);
+    reference = fdps_vfs_load_file(query, handle);
+    CHECK_EQ(reference != NULL, 1);
+    if (reference != NULL) {
+        CHECK_EQ(memcmp(*slot, reference, (size_t) bytes), 0);
+        free(reference);
+    }
+}
+
+/* Thirteen loads out of Misc.vfs, thirteen globals.  Every one is checked
+   against the member the assembly names for it, so a transposed pair fails
+   twice over. */
+static void fills_the_thirteen_misc_globals(void)
+{
+    void *misc;
+    int i;
+
+    if (!loader_has_run()) {
+        return;
+    }
+    misc = fdps_vfs_open(MISC_CONTAINER);
+    CHECK_EQ(misc != NULL, 1);
+    if (misc == NULL) {
+        return;
+    }
+    for (i = 0; i < MISC_MEMBER_COUNT; i++) {
+        check_member_landed(misc, misc_members[i].name,
+                            misc_members[i].slot);
+    }
+    free(misc);
+}
+
+/* And the two out of Field.vfs, which is opened only after Misc.vfs has been
+   closed at 00029e63. */
+static void fills_the_two_field_globals(void)
+{
+    void *field;
+    int i;
+
+    if (!loader_has_run()) {
+        return;
+    }
+    field = fdps_vfs_open(FIELD_CONTAINER);
+    CHECK_EQ(field != NULL, 1);
+    if (field == NULL) {
+        return;
+    }
+    for (i = 0; i < FIELD_MEMBER_COUNT; i++) {
+        check_member_landed(field, field_members[i].name,
+                            field_members[i].slot);
+    }
+    free(field);
+}
+
+/* Fifteen separate loads, so no two of the fifteen globals may hold the same
+   address.  A destination written twice would pass every content check above
+   and fail here. */
+static void fills_them_with_distinct_blocks(void)
+{
+    unsigned char *held[MISC_MEMBER_COUNT + FIELD_MEMBER_COUNT];
+    int i;
+    int j;
+
+    if (!loader_has_run()) {
+        return;
+    }
+    for (i = 0; i < MISC_MEMBER_COUNT; i++) {
+        held[i] = *misc_members[i].slot;
+    }
+    for (i = 0; i < FIELD_MEMBER_COUNT; i++) {
+        held[MISC_MEMBER_COUNT + i] = *field_members[i].slot;
+    }
+    for (i = 0; i < MISC_MEMBER_COUNT + FIELD_MEMBER_COUNT; i++) {
+        for (j = i + 1; j < MISC_MEMBER_COUNT + FIELD_MEMBER_COUNT; j++) {
+            CHECK_EQ(held[i] != held[j], 1);
+        }
+    }
+}
+
+/* One composite buffer built the way the assembly builds it: zeroed, then the
+   first three sub-images of `sheet` blitted to base + index * stride with the
+   destination pitch equal to the source width.  The numbers come off the two
+   loops, not off src/main.c. */
+static unsigned char *build_reference_composite(void *sheet, int total,
+                                                int width, int rows,
+                                                int stride)
+{
+    unsigned char *base;
+    unsigned char *source;
+    unsigned char *sub_image;
+    int index;
+
+    base = (unsigned char *) malloc((size_t) total);
+    if (base == NULL) {
+        return NULL;
+    }
+    memset(base, 0, (size_t) total);
+    source = (unsigned char *) sheet;
+    for (index = 0; index < SUB_IMAGES; index++) {
+        sub_image = source
+            + *(int *) (source + index * 4 + CEL_TABLE_AT);
+        fdps_blit_dispatch(sub_image, base + index * stride,
+                           width, rows, width, 0, 0);
+    }
+    return base;
+}
+
+/* The composite check both gauge sheets get: the global holds a buffer whose
+   every byte matches one built here from the same source sheet with the same
+   geometry.  A wrong stride, a wrong sub-image count, a wrong offset-table
+   base or a wrong blit argument all land here. */
+static void check_composite(char *sheet_name, unsigned char **slot,
+                            int total, int width, int rows, int stride)
+{
+    char query[QUERY_MAX];
+    void *misc;
+    void *sheet;
+    unsigned char *reference;
+
+    CHECK_EQ(*slot != NULL, 1);
+    if (*slot == NULL) {
+        return;
+    }
+    misc = fdps_vfs_open(MISC_CONTAINER);
+    CHECK_EQ(misc != NULL, 1);
+    if (misc == NULL) {
+        return;
+    }
+    strcpy(query, sheet_name);
+    sheet = fdps_vfs_load_file(query, misc);
+    CHECK_EQ(sheet != NULL, 1);
+    if (sheet != NULL) {
+        reference = build_reference_composite(sheet, total, width, rows,
+                                              stride);
+        CHECK_EQ(reference != NULL, 1);
+        if (reference != NULL) {
+            CHECK_EQ(memcmp(*slot, reference, (size_t) total), 0);
+            free(reference);
+        }
+        free(sheet);
+    }
+    free(misc);
+}
+
+/* EasyBar.cel's three 43x6 gauges packed into 0x306 bytes at 0x000643b4. */
+static void builds_the_unit_gauge_composite(void)
+{
+    if (!loader_has_run()) {
+        return;
+    }
+    check_composite("EASYBAR.CEL", &data_fdps_unit_gauge_sheet_ptr,
+                    EASYBAR_TOTAL, EASYBAR_W, EASYBAR_H, EASYBAR_STRIDE);
+}
+
+/* Bar.cel's three 117x8 bars packed into 0xaf8 bytes at 0x000643c8. */
+static void builds_the_status_gauge_composite(void)
+{
+    if (!loader_has_run()) {
+        return;
+    }
+    check_composite("BAR.CEL", &data_fdps_status_gauge_bar_sheet_ptr,
+                    BAR_TOTAL, BAR_W, BAR_H, BAR_STRIDE);
+}
+
+/* The two source sheets are freed at 00029d57 and 00029e57, so neither global
+   may be holding one of them: the composite is a block of its own. */
+static void keeps_only_the_composites(void)
+{
+    if (!loader_has_run()) {
+        return;
+    }
+    CHECK_EQ(data_fdps_unit_gauge_sheet_ptr
+                 != data_fdps_status_gauge_bar_sheet_ptr, 1);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+}
+
+/* Four files, four sizes: the two fwrite counts, each used twice. */
+static void writes_all_four_cache_files(void)
+{
+    if (!loader_has_run()) {
+        return;
+    }
+    CHECK_EQ(file_size(FIGHT_RAMP_FILE), RAMP_FILE_BYTES);
+    CHECK_EQ(file_size(FIGHT_CUBE_FILE), CUBE_FILE_BYTES);
+    CHECK_EQ(file_size(MAIN_RAMP_FILE), RAMP_FILE_BYTES);
+    CHECK_EQ(file_size(MAIN_CUBE_FILE), CUBE_FILE_BYTES);
+}
+
+/* Row 1 of a ramp against the palette it must have been built from: 256
+   entries, and one mismatch is one wrong palette. */
+static void check_ramp_row1(unsigned int *ramp, unsigned char *palette)
+{
+    int index;
+    int wrong;
+
+    wrong = 0;
+    for (index = 0; index < PALETTE_ENTRIES; index++) {
+        if (ramp[PALETTE_ENTRIES + index]
+            != expected_ramp_row1(palette, index)) {
+            wrong++;
+        }
+    }
+    CHECK_EQ(wrong, 0);
+}
+
+/* The build at 0002a032 is handed [0x000643bc], the Fde.pal pointer, and it is
+   the last one, so the tables the program runs on are the main palette's.
+   Reading them against Fight.pal instead would fail here. */
+static void leaves_the_tables_built_from_the_main_palette(void)
+{
+    if (!loader_has_run()) {
+        return;
+    }
+    CHECK_EQ(data_fdps_vga_main_palette_ptr != NULL, 1);
+    if (data_fdps_vga_main_palette_ptr == NULL) {
+        return;
+    }
+    check_ramp_row1(data_fdps_palette_shade_ramp_table,
+                    data_fdps_vga_main_palette_ptr);
+}
+
+/* The build at 00029fb2 is handed [0x000643e4], the Fight.pal pointer, and its
+   output is what FMer1.tmp holds.  This is the assertion that pins which
+   palette goes into which pair of files. */
+static void writes_the_fight_palette_tables_to_the_f_files(void)
+{
+    void *ramp;
+
+    if (!loader_has_run()) {
+        return;
+    }
+    CHECK_EQ(data_fdps_vga_fight_palette_ptr != NULL, 1);
+    ramp = read_whole_file(FIGHT_RAMP_FILE, RAMP_FILE_BYTES);
+    CHECK_EQ(ramp != NULL, 1);
+    if (ramp != NULL && data_fdps_vga_fight_palette_ptr != NULL) {
+        check_ramp_row1((unsigned int *) ramp,
+                        data_fdps_vga_fight_palette_ptr);
+    }
+    free(ramp);
+}
+
+/* And Mer1.tmp and Mer2.tmp hold the second build, byte for byte what the two
+   tables were left holding. */
+static void writes_the_main_palette_tables_to_the_plain_files(void)
+{
+    void *ramp;
+    void *cube;
+
+    if (!loader_has_run()) {
+        return;
+    }
+    ramp = read_whole_file(MAIN_RAMP_FILE, RAMP_FILE_BYTES);
+    CHECK_EQ(ramp != NULL, 1);
+    if (ramp != NULL) {
+        CHECK_EQ(memcmp(ramp, generated_ramp, RAMP_FILE_BYTES), 0);
+        free(ramp);
+    }
+    cube = read_whole_file(MAIN_CUBE_FILE, CUBE_FILE_BYTES);
+    CHECK_EQ(cube != NULL, 1);
+    if (cube != NULL) {
+        CHECK_EQ(memcmp(cube, generated_cube, CUBE_FILE_BYTES), 0);
+        free(cube);
+    }
+}
+
+/* The inverse cube is 4096 nearest-palette lookups and cannot be all zero for
+   any real palette: at least one cell must name a non-zero DAC entry.  This is
+   what a build that never ran, or a cube written from the wrong buffer, fails
+   even though its file is the right size. */
+static void fills_the_inverse_palette_cube(void)
+{
+    int index;
+    int nonzero;
+
+    if (!loader_has_run()) {
+        return;
+    }
+    nonzero = 0;
+    for (index = 0; index < CUBE_FILE_BYTES; index++) {
+        if (generated_cube[index] != 0) {
+            nonzero++;
+        }
+    }
+    CHECK_EQ(nonzero > 0, 1);
+}
+
+/* The other arm.  With the four files in place access("FMer1.tmp", 0) comes
+   back zero, the branch at 00029fa6 is taken, and the two tables are read out
+   of Mer1.tmp and Mer2.tmp instead of being built -- so both must come back
+   holding exactly what the generating run left in them.  Reading the pair in
+   the wrong order, or with the wrong byte count, does not survive this.
+   Everything the first run allocated goes back first, because a second load
+   fills the same globals again. */
+static void reads_the_tables_back_from_the_cache(void)
+{
+    if (!loader_has_run()) {
+        return;
+    }
+
+    /* The first run's eighteen blocks and nine tables, released through the
+       shutdown routine that owns them. */
+    shutdown_call_fenced();
+    shutdown_clear_everything();
+
+    memset(data_fdps_palette_shade_ramp_table, 0, RAMP_FILE_BYTES);
+    memset(data_fdps_inverse_palette_cube, 0, CUBE_FILE_BYTES);
+
+    load_call_fenced();
+
+    CHECK_EQ(memcmp(data_fdps_palette_shade_ramp_table, generated_ramp,
+                    RAMP_FILE_BYTES), 0);
+    CHECK_EQ(memcmp(data_fdps_inverse_palette_cube, generated_cube,
+                    CUBE_FILE_BYTES), 0);
+
+    /* And the fifteen resources are loaded again on this arm too, so the
+       branch is the only thing that differs between the two runs. */
+    CHECK_EQ(data_fdps_font_sheet_ptr != NULL, 1);
+    CHECK_EQ(data_fdps_all_game_text_ptr != NULL, 1);
+
+    shutdown_call_fenced();
+    shutdown_clear_everything();
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    load_ran = -1;
+}
+
 void run_main_tests(void)
 {
     RUN_TEST(fills_every_table_pointer);
@@ -957,6 +1628,24 @@ void run_main_tests(void)
 
     RUN_TEST(leaves_every_pointer_uncleared);
     RUN_TEST(releases_every_block_a_full_shutdown_holds);
+
+    /* The startup loader last, because it fills every one of those globals
+       for real and holds them live across its own cases; the read-arm case at
+       the end is what gives them all back. */
+    RUN_TEST(seeds_the_eight_font_metrics);
+    RUN_TEST(allocates_the_roster_block);
+    RUN_TEST(fills_the_thirteen_misc_globals);
+    RUN_TEST(fills_the_two_field_globals);
+    RUN_TEST(fills_them_with_distinct_blocks);
+    RUN_TEST(builds_the_unit_gauge_composite);
+    RUN_TEST(builds_the_status_gauge_composite);
+    RUN_TEST(keeps_only_the_composites);
+    RUN_TEST(writes_all_four_cache_files);
+    RUN_TEST(leaves_the_tables_built_from_the_main_palette);
+    RUN_TEST(writes_the_fight_palette_tables_to_the_f_files);
+    RUN_TEST(writes_the_main_palette_tables_to_the_plain_files);
+    RUN_TEST(fills_the_inverse_palette_cube);
+    RUN_TEST(reads_the_tables_back_from_the_cache);
 
     /* And out with every global this file touched back at null, so nothing
        downstream finds one of the dangling addresses the shutdown left. */

@@ -6,11 +6,70 @@
  * read out of belongs to whoever opened it.
  */
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <io.h>
+#include "fdpstype.h"
+#include "blit.h"
 #include "gamedata.h"
 #include "keybd.h"
+#include "palette.h"
 #include "vfs.h"
 #include "main.h"
+
+/* The party roster block: PUSH 0xa00 / CALL malloc / MOV [0x00064108],EAX at
+   000296b8.  Thirty-two members of 0x50 bytes, as gamedata.h records. */
+#define ROSTER_BLOCK_BYTES 0xa00
+
+/* The font metrics the startup loader seeds, one constant per MOV between
+   0002966c and 000296b3.  The two cell dimensions and the decoration selector
+   are byte stores; the other five are dword stores. */
+#define FONT_GLYPH_WIDTH 0x10
+#define FONT_GLYPH_CELL_HEIGHT 0x10
+#define FONT_SHADOW_OFFSET_X 1
+#define FONT_SHADOW_ROW_OFFSET 1
+#define FONT_GLYPH_STRIDE_BYTES 0x20
+#define FONT_OUTLINE_DISABLED 0
+#define FONT_GLYPH_ADVANCE_X 0x10
+#define FONT_LINE_HEIGHT 0x12
+
+/* A .CEL's sub-image offset table starts at byte 0x0f of the file and holds
+   one dword per sub-image, each the distance from the file's own base to that
+   sub-image's RLE stream: MOV EDX,[EBP-0x10] / ADD EDX,EAX / MOV EAX,[EBP-0x10]
+   / ADD EAX,dword ptr [EDX + 0xf] at 00029d1d and again at 00029e1d. */
+#define CEL_SUB_IMAGE_TABLE_OFFSET 0x0f
+
+/* Both composites take the first three sub-images of their source sheet and
+   nothing else: MOV [EBP-0x8],0x0 / CMP [EBP-0x8],0x3 / JL at 00029cfc and
+   00029dfc. */
+#define GAUGE_SUB_IMAGE_COUNT 3
+
+/* EasyBar.cel's three 43x6 gauges, packed one after another with the
+   destination pitch equal to the sub-image width, so each occupies exactly
+   43 * 6 = 0x102 bytes and the buffer is 3 * 0x102 = 0x306. */
+#define UNIT_GAUGE_WIDTH 0x2b
+#define UNIT_GAUGE_ROWS 6
+#define UNIT_GAUGE_STRIDE 0x102
+#define UNIT_GAUGE_SHEET_BYTES 0x306
+
+/* Bar.cel's three 117x8 bars, packed the same way: 117 * 8 = 0x3a8 each and
+   3 * 0x3a8 = 0xaf8 for the buffer. */
+#define STATUS_GAUGE_WIDTH 0x75
+#define STATUS_GAUGE_ROWS 8
+#define STATUS_GAUGE_STRIDE 0x3a8
+#define STATUS_GAUGE_SHEET_BYTES 0xaf8
+
+/* Mode 0 of fdps_blit_dispatch, the plain copy: PUSH 0x0 for the mode and
+   PUSH 0x0 for the operand mode 0 never reads (src/blit.h). */
+#define GAUGE_BLIT_MODE 0
+#define GAUGE_BLIT_OPERAND 0
+
+/* The two palette lookup tables' byte counts, as the fread and fwrite calls
+   count them: 0x4800 for the 18-row shade ramp and 0x1000 for the 16x16x16
+   inverse cube. */
+#define SHADE_RAMP_BYTES 0x4800
+#define INVERSE_CUBE_BYTES 0x1000
 
 /* 00018930.  Nine identical groups, each MOV EAX,<destination global> / PUSH /
    MOV EAX,<filename> / PUSH / MOV EAX,[EBP + 0x14] / PUSH / CALL 00029400 /
@@ -202,4 +261,300 @@ void fdps_shutdown_free_resources(void)
 
     fdps_free_global_resource_buffers();
     fdps_uninstall_keyboard_isr();
+}
+
+/* 00029660.  The startup loader, 0xad9 bytes of straight-line code with two
+   counted loops and one two-armed branch in it.  The frame is the canonical
+   Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x1ac -- and the
+   sole caller, main at 00029316, pushes nothing, pops nothing and never reads
+   EAX, so the signature is void(void) with a stack purge of 0.
+
+   Only five of the 0x1ac bytes of frame are variables: the container handle at
+   [EBP-0x14], the source sheet at [EBP-0x10], the sub-image pointer at
+   [EBP-0xc], the loop counter at [EBP-0x8] and the cache FILE * at [EBP-0x4].
+   Everything above [EBP-0x18] is argument scratch, three dwords per resource
+   load, written and read once each and never afterwards.
+
+   Those scratch triples are why each of the fifteen loads is fourteen
+   instructions rather than five: what stands at each of them is the body of
+   fdps_vfs_load_file_or_exit (00029400) expanded in place -- the same CALL
+   00039bd0, the same MOV [EDX],EAX through a pointer to the destination, the
+   same CMP dword ptr [EAX],0x0 / CALL fdps_wait_any_key / exit(1) -- with the
+   wrapper's three parameters standing in this frame instead of on the stack.
+   There is no CALL 00029400 anywhere in this function, so the C below does not
+   make one either: the load and its guard are written out fifteen times, which
+   is what the original executes.
+
+   The container handle is one variable used twice.  Misc.vfs is opened at
+   000296d0, thirteen members and the two gauge sheets come out of it, it is
+   freed at 00029e63, and the same slot then takes Field.vfs from 00029e71 for
+   the last two members.  The two failure arms differ from the fifteen loads'
+   and from each other: a container that will not open prints its own complete
+   message -- one PUSH and ADD ESP,0x4, so a single argument with the filename
+   already in the literal, and the two literals disagree about case, Misc.vfs
+   at 00061cb0 against field.vfs at 00061d84 -- and then exits.  A member that
+   will not load prints nothing here; fdps_vfs_load_file has already said which
+   member it was (src/vfs.h), and the arm only waits for a key and exits.
+
+   The nine data tables are loaded through fdps_load_data_tables at 000296fd,
+   before any of the fifteen, and out of the same handle.
+
+   Both composite loops are the same shape: CMP [EBP-0x8],0x3 / JL, the signed
+   compare, with the increment block sitting above the body and jumped back to,
+   which is what -od does with a for-statement.  Each iteration reads a dword
+   out of the source sheet's offset table at +0xf, adds it to the sheet's own
+   base, and blits 43x6 (or 117x8) pixels to base + index * stride with the
+   destination pitch equal to the source width -- so the three sub-images tile
+   their buffer end to end with no gap.  The buffer is malloc'd and memset to
+   zero first, which is what leaves a transparent pixel transparent: mode 0
+   skips the pixels the RLE stream does not cover, and the zero underneath is
+   what shows.  The source sheet is freed straight after each loop; only the
+   composites survive.
+
+   The palette-blend cache is the one branch: TEST EAX,EAX / JZ 0002a0ba after
+   access("FMer1.tmp", 0), so the fall-through arm is the one taken when the
+   file is NOT there.  That arm builds the tables twice -- Fight.pal first,
+   written out as FMer1.tmp and FMer2.tmp, then Fde.pal, written out as
+   Mer1.tmp and Mer2.tmp -- and the second build is what the program runs on,
+   because fdps_build_palette_tables replaces both tables outright
+   (src/palette.h).  The taken arm reads Mer1.tmp and Mer2.tmp back, which is
+   the same two files and therefore the same Fde.pal-derived contents.  The
+   Fight.pal pair is written and then read by nothing at all: every reference
+   to the two literals at 00061dc0 and 00061dd0 is inside this function, and
+   FMer1.tmp is only ever looked at by the access() that decides the branch, so
+   the fight palette's tables reach disk and no code ever loads them back.
+   Only FMer1.tmp is tested for; nothing checks that the other three are, and
+   no fopen result is tested at all, so a partial cache directory hands a null
+   FILE * to fread.  That is the original's behaviour and no check is added.
+
+   The stores into 0006403c..0006404f are eight separate absolute
+   displacements, three byte-wide and five dword-wide, and every reader of
+   those globals addresses them the same way; nothing indexes across them, so
+   they stay eight globals here (rebuild_info/pitfalls.md, contract B). */
+void fdps_load_global_resources(void)
+{
+    void *archive;
+    unsigned char *source_cel;
+    unsigned char *sub_image;
+    int sub_image_index;
+    FILE *cache_file;
+
+    data_fdps_font_glyph_width = FONT_GLYPH_WIDTH;
+    data_fdps_glyph_cell_height = FONT_GLYPH_CELL_HEIGHT;
+    data_fdps_font_shadow_offset_x = FONT_SHADOW_OFFSET_X;
+    data_fdps_glyph_shadow_row_offset = FONT_SHADOW_ROW_OFFSET;
+    data_fdps_font_glyph_stride_bytes = FONT_GLYPH_STRIDE_BYTES;
+    data_fdps_font_outline_enabled_flag = FONT_OUTLINE_DISABLED;
+    data_fdps_glyph_advance_x = FONT_GLYPH_ADVANCE_X;
+    data_fdps_font_line_height = FONT_LINE_HEIGHT;
+
+    fdps_install_keyboard_isr();
+    data_fdps_roster_array_ptr = (unsigned char *) malloc(ROSTER_BLOCK_BYTES);
+
+    archive = fdps_vfs_open("MISC.VFS");
+    if (archive == NULL) {
+        printf("file not found: 'Misc.vfs'\n");
+        exit(1);
+    }
+
+    fdps_load_data_tables(archive);
+
+    data_fdps_vga_main_palette_ptr =
+        (unsigned char *) fdps_vfs_load_file("Fde.pal", archive);
+    if (data_fdps_vga_main_palette_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_vga_fight_palette_ptr =
+        (unsigned char *) fdps_vfs_load_file("Fight.pal", archive);
+    if (data_fdps_vga_fight_palette_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_cursor_highlight_sprite_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_file("Cusor.cel", archive);
+    if (data_fdps_cursor_highlight_sprite_sheet_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_command_sprite_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_file("Command.cel", archive);
+    if (data_fdps_command_sprite_sheet_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_shadow_sprite_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_file("Shadow.cel", archive);
+    if (data_fdps_shadow_sprite_sheet_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_unit_status_icon_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_file("IconSts.cel", archive);
+    if (data_fdps_unit_status_icon_sheet_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_message_window_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_file("Message.cel", archive);
+    if (data_fdps_message_window_sheet_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_number_glyph_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_file("Number.cel", archive);
+    if (data_fdps_number_glyph_sheet_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_selection_bar_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_file("SelBar.cel", archive);
+    if (data_fdps_selection_bar_sheet_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_level_up_window_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_file("LevUp.cel", archive);
+    if (data_fdps_level_up_window_sheet_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_audio_basewav_sfx_bank_buf_ptr =
+        (unsigned char *) fdps_vfs_load_file("BaseWav.vfs", archive);
+    if (data_fdps_audio_basewav_sfx_bank_buf_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_animation_baseani_archive_ptr =
+        (unsigned char *) fdps_vfs_load_file("BaseAni.vfs", archive);
+    if (data_fdps_animation_baseani_archive_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_ui_terrain_hud_panel_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_file("ADWin.cel", archive);
+    if (data_fdps_ui_terrain_hud_panel_sheet_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    source_cel = (unsigned char *) fdps_vfs_load_file("EasyBar.cel", archive);
+    if (source_cel == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_unit_gauge_sheet_ptr =
+        (unsigned char *) malloc(UNIT_GAUGE_SHEET_BYTES);
+    memset(data_fdps_unit_gauge_sheet_ptr, 0, UNIT_GAUGE_SHEET_BYTES);
+    for (sub_image_index = 0; sub_image_index < GAUGE_SUB_IMAGE_COUNT;
+         sub_image_index++) {
+        sub_image = source_cel
+            + *(int *) (source_cel + sub_image_index * 4
+                        + CEL_SUB_IMAGE_TABLE_OFFSET);
+        fdps_blit_dispatch(sub_image,
+                           data_fdps_unit_gauge_sheet_ptr
+                               + sub_image_index * UNIT_GAUGE_STRIDE,
+                           UNIT_GAUGE_WIDTH, UNIT_GAUGE_ROWS,
+                           UNIT_GAUGE_WIDTH,
+                           GAUGE_BLIT_OPERAND, GAUGE_BLIT_MODE);
+    }
+    free(source_cel);
+
+    source_cel = (unsigned char *) fdps_vfs_load_file("Bar.cel", archive);
+    if (source_cel == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_status_gauge_bar_sheet_ptr =
+        (unsigned char *) malloc(STATUS_GAUGE_SHEET_BYTES);
+    memset(data_fdps_status_gauge_bar_sheet_ptr, 0, STATUS_GAUGE_SHEET_BYTES);
+    for (sub_image_index = 0; sub_image_index < GAUGE_SUB_IMAGE_COUNT;
+         sub_image_index++) {
+        sub_image = source_cel
+            + *(int *) (source_cel + sub_image_index * 4
+                        + CEL_SUB_IMAGE_TABLE_OFFSET);
+        fdps_blit_dispatch(sub_image,
+                           data_fdps_status_gauge_bar_sheet_ptr
+                               + sub_image_index * STATUS_GAUGE_STRIDE,
+                           STATUS_GAUGE_WIDTH, STATUS_GAUGE_ROWS,
+                           STATUS_GAUGE_WIDTH,
+                           GAUGE_BLIT_OPERAND, GAUGE_BLIT_MODE);
+    }
+    free(source_cel);
+
+    free(archive);
+
+    archive = fdps_vfs_open("Field.vfs");
+    if (archive == NULL) {
+        printf("file not found: 'field.vfs'\n");
+        exit(1);
+    }
+
+    data_fdps_font_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_file("Fdetxt.fon", archive);
+    if (data_fdps_font_sheet_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    data_fdps_all_game_text_ptr =
+        (unsigned char *) fdps_vfs_load_file("Fdetxt00.txt", archive);
+    if (data_fdps_all_game_text_ptr == NULL) {
+        fdps_wait_any_key();
+        exit(1);
+    }
+
+    free(archive);
+
+    if (access("FMer1.tmp", F_OK) != 0) {
+        fdps_build_palette_tables(
+            (struct fdps_palette_entry *) data_fdps_vga_fight_palette_ptr);
+
+        cache_file = fopen("FMer1.tmp", "wb");
+        fwrite(data_fdps_palette_shade_ramp_table, 1, SHADE_RAMP_BYTES,
+               cache_file);
+        fclose(cache_file);
+
+        cache_file = fopen("FMer2.tmp", "wb");
+        fwrite(data_fdps_inverse_palette_cube, 1, INVERSE_CUBE_BYTES,
+               cache_file);
+        fclose(cache_file);
+
+        fdps_build_palette_tables(
+            (struct fdps_palette_entry *) data_fdps_vga_main_palette_ptr);
+
+        cache_file = fopen("Mer1.tmp", "wb");
+        fwrite(data_fdps_palette_shade_ramp_table, 1, SHADE_RAMP_BYTES,
+               cache_file);
+        fclose(cache_file);
+
+        cache_file = fopen("Mer2.tmp", "wb");
+        fwrite(data_fdps_inverse_palette_cube, 1, INVERSE_CUBE_BYTES,
+               cache_file);
+        fclose(cache_file);
+    } else {
+        cache_file = fopen("Mer1.tmp", "rb");
+        fread(data_fdps_palette_shade_ramp_table, 1, SHADE_RAMP_BYTES,
+              cache_file);
+        fclose(cache_file);
+
+        cache_file = fopen("Mer2.tmp", "rb");
+        fread(data_fdps_inverse_palette_cube, 1, INVERSE_CUBE_BYTES,
+              cache_file);
+        fclose(cache_file);
+    }
 }

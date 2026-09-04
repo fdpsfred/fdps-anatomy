@@ -1636,5 +1636,20 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "00029660": [
+    {
+      "from": "emit",
+      "what": "Whether the missing-member arm is reachable in a shipped installation, i.e. whether fdps_wait_any_key + exit(1) is dead code in practice. Both containers ship with all seventeen members, so the arm cannot be entered without deliberately damaging an install, and the test preflights around it.",
+      "needs": "A real machine with a damaged Misc.vfs, or a DOSBox-X run with a truncated container, to confirm the game hangs on the key wait rather than exiting. Nothing in the rebuild depends on the answer; it matters only for how a corrupted install is described.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed for myself that the concern is honest and that the evidence really is out of reach from here: the missing-member arm cannot be entered without deliberately damaging a container, so only a real machine or a DOSBox-X run with a truncated Misc.vfs settles whether it hangs on fdps_wait_any_key or exits. Nothing in the emitted C depends on the answer -- the arm is written exactly as the assembly has it either way -- so this is a description question, not an equivalence one. My pass adds nothing further.",
+      "needs": "A DOSBox-X run against a deliberately truncated container.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

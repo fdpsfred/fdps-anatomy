@@ -458,6 +458,24 @@ extern int data_fdps_font_glyph_stride_bytes;
 extern int data_fdps_font_shadow_offset_x;
 extern int data_fdps_glyph_shadow_row_offset;
 
+/* 0006404b and 0006404f.  How far the text writer steps between one glyph and
+   the next: columns per glyph, and rows from one line of text to the next.
+   Both are full dwords.  fdps_draw_text reads the line height into a frame
+   slot on entry (MOV EAX,[0x0006404f] at 0001ff73) and adds the advance to the
+   pen after every glyph it places (MOV EAX,[0x0006404b] / ADD dword ptr
+   [EBP + -0x14],EAX at 00020396), so the advance is a signed displacement like
+   the shadow offsets above and not a size.
+
+   Neither is derived from the cell dimensions: the startup loader in main.c
+   writes 0x10 into the advance and 0x12 into the line height, so a line is two
+   rows taller than the 0x10-row cell and nothing recomputes either from the
+   other.
+
+   Read one at a time through their own absolute displacements, never indexed
+   across (rebuild_info/pitfalls.md, contract B). */
+extern int data_fdps_glyph_advance_x;
+extern int data_fdps_font_line_height;
+
 /* 000643bc.  Pointer to the game's master VGA palette: the 768 bytes of
    Fde.pal, 256 records of three 6-bit components in R, G, B order, so a
    struct fdps_palette_entry[256] read through a cast.  The startup resource

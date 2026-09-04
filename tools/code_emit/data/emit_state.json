@@ -2156,6 +2156,14 @@
       "status": "committed",
       "emitted_against": "0x22d",
       "rounds": 2
+    },
+    "00029660": {
+      "name": "fdps_load_global_resources",
+      "target": "main.c",
+      "body_size": "0xad9",
+      "status": "committed",
+      "rounds": 1,
+      "emitted_against": "0xad9"
     }
   }
 }

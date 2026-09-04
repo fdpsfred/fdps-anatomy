@@ -66,4 +66,50 @@ extern void fdps_free_global_resource_buffers(void);
 extern void fdps_shutdown_free_resources(void);
 #pragma aux fdps_shutdown_free_resources "*" parm caller [];
 
+/* Everything the program holds for its whole life, put in place in one call
+   from main and released only by fdps_shutdown_free_resources: the eight font
+   metrics, the keyboard vector, the roster block, the nine data tables,
+   fifteen resources out of two containers, two composite gauge sheets built
+   from two more, and the two palette lookup tables.  It takes nothing, returns
+   nothing and reports nothing -- every result is a global, and a failure ends
+   the process instead of coming back.
+
+   The order matters in three places and nowhere else.  The font metrics are
+   seeded before anything can draw.  Misc.vfs supplies the nine data tables and
+   thirteen of the fifteen resources and is closed before Field.vfs is opened,
+   so only one container handle is ever live.  And the palette tables are built
+   last, because the builder needs the two palettes this function loaded.
+
+   Three kinds of failure, none of which returns.  A container that will not
+   open prints its own message and exits: Misc.vfs and Field.vfs each have
+   their own literal, and the two disagree about case.  A member that will not
+   load has already been named by fdps_vfs_load_file, so this only waits for a
+   key and exits.  And a malloc that comes back null is not tested at all --
+   the roster block and the two composite buffers go straight to memset and to
+   the blitter.
+
+   The two composites are built rather than loaded.  EasyBar.cel's first three
+   sub-images become one 0x306-byte buffer of three 43x6 gauges laid end to
+   end, and Bar.cel's first three become one 0xaf8-byte buffer of three 117x8
+   bars; both source sheets are freed and only the composites survive, which is
+   why nothing else in the game ever opens either name.
+
+   The palette tables come out of a disk cache.  If FMer1.tmp is present the
+   two tables are read straight out of Mer1.tmp and Mer2.tmp; if it is not,
+   they are computed twice -- once from Fight.pal, written out as FMer1.tmp and
+   FMer2.tmp, and once from Fde.pal, written out as Mer1.tmp and Mer2.tmp --
+   and the Fde.pal pair is what the program runs on either way.  Nothing ever
+   reads the Fight.pal pair back: FMer1.tmp exists so that the branch has
+   something to test for, FMer2.tmp is not even that, and no other code in the
+   image names either.  Only FMer1.tmp is tested for, and no fopen is checked,
+   so a directory holding FMer1.tmp but not Mer1.tmp reads through a null
+   FILE *.  Deleting the four files is what makes the game pick up an edited
+   palette; nothing else invalidates the cache.
+
+   It runs exactly once.  A second call would install the keyboard vector over
+   its own handler and overwrite every pointer it filled the first time,
+   leaking all eighteen blocks and the nine tables. */
+extern void fdps_load_global_resources(void);
+#pragma aux fdps_load_global_resources "*" parm caller [];
+
 #endif
