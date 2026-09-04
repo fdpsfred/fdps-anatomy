@@ -2188,6 +2188,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0xb0"
+    },
+    "0002c6a0": {
+      "name": "fdps_draw_map_cursor",
+      "target": "mapcur.c",
+      "body_size": "0x577",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x577"
     }
   }
 }
