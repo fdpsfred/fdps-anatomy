@@ -2220,6 +2220,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x2b1"
+    },
+    "00015860": {
+      "name": "fdps_render_ring_menu_frame",
+      "target": "menu.c",
+      "body_size": "0x326",
+      "status": "committed",
+      "rounds": 1,
+      "emitted_against": "0x326"
     }
   }
 }
