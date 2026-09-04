@@ -2260,6 +2260,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x807"
+    },
+    "0001ef40": {
+      "name": "fdps_play_attack_animation",
+      "target": "anim.c",
+      "body_size": "0x3fb",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x3fb"
     }
   }
 }

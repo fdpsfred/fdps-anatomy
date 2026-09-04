@@ -10,6 +10,11 @@
  * full-screen animations, by contrast, are members of MISC.VFS on disk, and
  * fdps_play_vfs_animation opens that container and loads one into a block of
  * its own on every call.
+ *
+ * fdps_play_attack_animation takes the first of those two roads without the
+ * wrapper: it hands the resident image to fdps_vfs_image_get_entry itself, so
+ * a member that is not there comes back as a NULL image rather than ending the
+ * process.
  */
 #ifndef ANIM_H
 #define ANIM_H
@@ -210,5 +215,46 @@ extern void fdps_animate_turn_banner(unsigned char *saved_screen);
    that follows paints straight over it. */
 extern void fdps_play_vfs_animation(char *name);
 #pragma aux fdps_play_vfs_animation "*" parm caller [];
+
+/* Plays the on-map animation of one blow landing on the defender, over the
+   whole map, with both combatants' HP bars standing over it.  Returns with the
+   adapter holding the animation's last frame; nothing here repaints the map
+   without it.
+
+   Both arguments are positions in the current battle's unit array and neither
+   is range checked.  The animation is always drawn over the DEFENDER's tile --
+   its record fixes the request origin as tile * 24 minus the view scroll
+   origin, with the same six-pixel lift fdps_draw_map_unit gives a unit sprite
+   -- and the attacker is read only for its own bar and for whether that bar is
+   wanted at all.
+
+   THE ATTACKER'S BAR IS DRAWN ONLY WHEN A COUNTER-ATTACK IS COMING.
+   fdps_check_can_counter_attack has to answer exactly 1; on anything else the
+   attacker's position pair is poisoned with -1 and its bar is skipped for the
+   whole run, exactly as fdps_battle_show_combat_gauges does it.  The
+   defender's bar is always drawn.  Each is filled to a ceiling over the bar's
+   41 columns and to nothing at all when that unit's maximum HP is not
+   positive, and each takes graphic 2 of the unit gauge sheet for side 0 and
+   graphic 1 for every other side.
+
+   THE SAME CLIP IS PLAYED FOR EVERY ATTACK.  The member is "EasyAni.Saf" out
+   of the resident BaseAni.vfs image, looked up on every call, and nothing here
+   varies with the weapon, the damage or either combatant.  One pass per frame
+   of that sheet, each drawn with the composite drawer's sound flag set so the
+   frame's own sound effect fires.
+
+   THE MAP IS REPAINTED INTO THE PAGE ON EVERY FRAME BUT THE PAGE IS NEVER
+   CLEARED.  A 360x240 page is taken from the heap without a NULL test and
+   given back at the end, and what the compositor does not paint is whatever
+   the heap left there.
+
+   Every frame straddles a vertical retrace and then waits for
+   data_fdps_timer_tick_counter to change, so the counter has to be advancing
+   -- in the game the timer interrupt does it -- or the second frame never
+   ends.  The first frame does not wait at all: the latch is uninitialised, the
+   same contract the two routines above carry.  The definition in anim.c says
+   why it stays that way. */
+extern void fdps_play_attack_animation(int attacker_unit, int defender_unit);
+#pragma aux fdps_play_attack_animation "*" parm caller [];
 
 #endif

@@ -24,7 +24,9 @@
  * is asserted through the found path instead, which folds the buffer the same
  * way.
  */
+#include <stddef.h>
 #include <stdio.h>
+#include <malloc.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dos.h>
@@ -1430,6 +1432,820 @@ static void vfs_animation_banners_only_the_player_phase_clip(void)
     CHECK_EQ((int) (player_ticks - enemy_ticks) >= ANIM_BANNER_MIN_TICKS, 1);
 }
 
+
+/* ---- fdps_play_attack_animation, 0001ef40 --------------------------------
+ *
+ * Expected values come from the assembly at 0001ef40 -- CMP EAX,0x1 / JNZ at
+ * 0001ef6c and MOV dword ptr [EBP-0x38],0xffffffff at 0001ef83 for the counter
+ * test and the poison that suppresses the attacker's bar; the four MOVSX at
+ * 0001ef9c, 0001efa6, 0001efd8 and 0001efe2 for the two HP pairs and CMP byte
+ * ptr [EAX+0x6],0x0 / JNZ at 0001efb0 and 0001efec for the two graphics; MOV
+ * AL,byte ptr [EAX] / AND EAX,0xff / IMUL EAX,EAX,0x18 / SUB EAX,[0x00069ce4]
+ * at 0001f002 and the same with SUB EAX,[0x00069ce0] / SUB EAX,0x6 at 0001f018
+ * for the request origin; PUSH 0x15180 / CALL malloc at 0001f032 with the
+ * pitch and rows at 0001f042 and 0001f049; MOV EAX,0x617d0 / PUSH
+ * [0x000643a8] / CALL at 0001f054 for the sheet and CALL 0x000144e0 at 0001f07d
+ * for the frame count the loop runs to; ADD EAX,0x18 / IMUL EAX,EAX,0x168 /
+ * ADD the page / ADD the x / ADD EAX,0x18 at 0001f088 and 0001f0a0 for the two
+ * bar pixels; MOV [EBP-0x4c],EAX at 0001f0d4 for the frame slot; the IMUL
+ * ...,0x29 / ADD / DEC / SAR / IDIV pairs at 0001f171 and 0001f267 with their
+ * CMP ...,0x0 / JG guards for the two fills, and PUSH 0x0 / PUSH 0xf at
+ * 0001f190 and 0001f286 for how both bars are painted; PUSH 0x1 / CALL
+ * 0x00014140 at 0001f2b2 for the sprite and its sound flag; and PUSH 0xc0 /
+ * PUSH 0x138 / PUSH 0x140 / PUSH 0xa0504 / PUSH 0x168 / page + 0x21d8 at
+ * 0001f2e6 for the window.  None of them is read off the emitted C.
+ *
+ * HOW THE RUN IS WATCHED.  The function composes every frame on a page it
+ * allocates and frees itself and blits that page's 312x192 window straight
+ * over the live mode 13h screen, so the adapter is the only place its output
+ * can be read back from.  Every case sets mode 13h, fills the frame with a
+ * border sentinel, seeds the page through the heap, runs a real timer
+ * interrupt so the frame waits end, calls, snapshots the 64,000 bytes and
+ * returns to text mode -- the same way tests/gauge.c watches
+ * fdps_battle_show_combat_gauges and the banner cases above watch the banner.
+ *
+ * WHY THE PAGE IS SEEDED THROUGH THE HEAP.  The page is not cleared, and with
+ * no scene layers, no map cursor and no units staged the compositor writes
+ * nothing into it, so whatever malloc hands over is what shows everywhere the
+ * bars and the clip do not reach.  Each run frees a zeroed block of exactly
+ * the page's 0x15180 bytes immediately before the call, so every undrawn
+ * window pixel reads 0.  attack_animation_frees_the_page is that assumption
+ * stated as an assertion.
+ *
+ * WHAT THE SNAPSHOT SHOWS IS EVERY FRAME AT ONCE, not the last one.  Nothing
+ * clears the page between passes, so the clip's three frames pile up on it and
+ * the frame left on the adapter carries all three marks side by side.  That is
+ * what makes the marks worth reading: the fixture puts frame i's mark eight
+ * pixels right of frame i-1's, so three marks in the right three places say
+ * the loop made one pass per frame of the sheet AND that pass i drew frame i,
+ * where a run that drew frame 0 three times would leave one mark and a run
+ * that ran the frames backwards would leave them in the wrong order.
+ *
+ * THE SHEET IS SYNTHETIC AND SO IS THE CONTAINER IT IS LOOKED UP IN.  The
+ * shipped EasyAni.Saf is 24-pixel artwork whose own shape would decide every
+ * position below; the fixture's frames carry one 4x2 cell each so a mark can
+ * be read as a position.  It is wrapped in a synthetic 26-byte-entry container
+ * under the name EASYANI.SAF because the resident-image lookup is how the
+ * function reaches its sheet, and the entry's name is stored upper-case
+ * because that lookup folds only the query.  The .SAF layout is
+ * resource_info/saf.md and the container's is resource_info/vfs.md; the offset
+ * macros the banner fixture above already spells out are reused rather than
+ * restated, and neither set was read off src/.
+ *
+ * WHAT IS NOT COVERED.  Which frame's sound effect fires -- the 1 at 0001f2b2
+ * -- is fdps_draw_composite_sprite's own behaviour and is covered in
+ * tests/sprite.c; the fixture's frames all carry -1, which the mixer rejects.
+ * The tick pacing between frames and the retrace each frame straddles are
+ * playtest contracts (rebuild_info/pitfalls.md): only the floor on how many
+ * ticks a whole run costs is asserted here, because the first frame's latch is
+ * uninitialised and may end its wait at once.
+ * ------------------------------------------------------------------ */
+
+/* The adapter, the frame it presents and the two modes the cases switch
+   between. */
+#define AA_VGA_BASE 0x000a0000
+#define AA_SCREEN_W 0x140
+#define AA_SCREEN_H 0xc8
+#define AA_SCREEN_BYTES (AA_SCREEN_W * AA_SCREEN_H)
+#define AA_MODE_TEXT 0x03
+#define AA_MODE_320X200X256 0x13
+
+/* IRQ0, the same vector the banner cases above hook and for the same reason:
+   every frame ends waiting for data_fdps_timer_tick_counter to change. */
+#define AA_TIMER_VECTOR 8
+
+/* The window the function copies out of its page: 312x192 taken from page byte
+   0x21d8, which is page pixel (24,24), and landing at screen byte 0x504, which
+   is screen pixel (4,4).  A page column is therefore 20 lower on screen. */
+#define AA_WINDOW_ROW 4
+#define AA_WINDOW_COL 4
+#define AA_WINDOW_W 0x138
+#define AA_WINDOW_H 0xc0
+#define AA_PAGE_BORDER 24
+#define AA_PAGE_BYTES 0x15180
+#define AA_TO_SCREEN (AA_WINDOW_COL - AA_PAGE_BORDER)
+
+/* What a screen byte outside the presented window holds. */
+#define AA_BORDER_FILL 0xa5
+
+/* The unit gauge sheet's geometry, restated from the assembly at 0001cb00 the
+   way tests/gauge.c states it: three 43x6 graphics 0x102 bytes apart with a
+   0x2b row pitch, and a 41-column interior between the two-pixel caps. */
+#define AA_ART_GRAPHIC_STRIDE 0x102
+#define AA_ART_ROW_PITCH 0x2b
+#define AA_BAR_WIDTH 0x2b
+#define AA_BAR_ROWS 6
+#define AA_INTERIOR 0x29
+#define AA_SHEET_BYTES 0x306
+#define AA_BAR_PIXELS (AA_BAR_WIDTH * AA_BAR_ROWS)
+
+/* Item record geometry and the equipped flag, from IMUL EAX,dword ptr
+   [EBP+0x14],0x17 in fdps_get_item_record and the AND AL,0x40 in
+   fdps_unit_find_equipped_slot. */
+#define AA_ITEM_STRIDE 0x17
+#define AA_ITEM_COUNT 256
+#define AA_EQUIPPED 0x40
+#define AA_ITEM_TYPE_WEAPON 0x01
+#define AA_COUNTER_ITEM_ID 7
+
+/* Four records, so an index other than 0 has somewhere to land. */
+#define AA_UNITS 4
+#define AA_ATTACKER 0
+#define AA_DEFENDER 1
+
+/* A map tile and the six-pixel lift the request origin carries. */
+#define AA_TILE 0x18
+#define AA_LIFT 6
+
+/* The defender's tile, and the attacker's in each of the two arrangements: one
+   step away, which is what fdps_check_can_counter_attack needs, and far away,
+   which makes it refuse. */
+#define AA_DEFENDER_TILE_X 3
+#define AA_DEFENDER_TILE_Y 3
+#define AA_NEAR_ATTACKER_TILE_X 3
+#define AA_NEAR_ATTACKER_TILE_Y 4
+#define AA_FAR_ATTACKER_TILE_X 10
+#define AA_FAR_ATTACKER_TILE_Y 10
+
+/* fdps_battle_compute_unit_gauge_position's answers for those two at the view
+   origin, worked out from its own measured constants (gauge.c): the defender
+   faces 0, so its anchor (76,72) takes the affordable up step to y 56 and the
+   affordable right step to x 100; the attacker faces 2, so its anchor (76,96)
+   takes the affordable down step to y 118 and the affordable left step to
+   x 32.  Both bars therefore land clear of each other and of the clip. */
+#define AA_DEFENDER_POS_X 100
+#define AA_DEFENDER_POS_Y 56
+#define AA_ATTACKER_POS_X 32
+#define AA_ATTACKER_POS_Y 118
+
+/* Where the clip's first mark lands with the view at the origin: page column
+   3 * 24 and page row 3 * 24 - 6, both carried out to the screen. */
+#define AA_SPRITE_COL (AA_DEFENDER_TILE_X * AA_TILE + AA_TO_SCREEN)
+#define AA_SPRITE_ROW (AA_DEFENDER_TILE_Y * AA_TILE - AA_LIFT + AA_TO_SCREEN)
+
+/* A view scrolled off the map origin, and where the clip lands then.  Neither
+   number is a multiple of the tile, so a run that scaled the scroll or applied
+   it to the wrong axis misses. */
+#define AA_SCROLL_X 10
+#define AA_SCROLL_Y 7
+#define AA_SCROLLED_SPRITE_COL (AA_SPRITE_COL - AA_SCROLL_X)
+#define AA_SCROLLED_SPRITE_ROW (AA_SPRITE_ROW - AA_SCROLL_Y)
+
+/* The synthetic sheet: three frames of one 4x2 cell each, frame i's cell eight
+   pixels right of frame i-1's and painted in its own colour.  Frames are
+   0x18 bytes apart, which clears the 0x0a header and the 13-byte layer of the
+   record before it. */
+#define AA_CELL_W 4
+#define AA_CELL_H 2
+#define AA_FRAMES 3
+#define AA_MARK_STEP 8
+#define AA_SAF_TILE_TABLE_AT 0x34
+#define AA_SAF_TILE0_STREAM_AT 0x40
+#define AA_SAF_TILEMAP_TABLE_AT 0x4c
+#define AA_SAF_TILEMAP0_AT 0x58
+#define AA_SAF_FRAME_TABLE_AT 0x70
+#define AA_SAF_FRAME0_AT 0x80
+#define AA_SAF_TILE_STREAM_BYTES 4
+#define AA_SAF_TILEMAP_BYTES 8
+#define AA_SAF_FRAME_BYTES 0x18
+#define AA_SAF_IMAGE_BYTES 0x100
+
+/* The synthetic container, laid out with the same macros the banner fixture
+   above uses, and the member name the function looks up.  It is stored
+   upper-case because fdps_vfs_image_get_entry folds the query and compares the
+   entry as the packer wrote it. */
+#define AA_VFS_MEMBER "EASYANI.SAF"
+#define AA_VFS_MEMBER_AT (BVFS_TABLE_AT + BVFS_ENTRY_BYTES)
+#define AA_VFS_IMAGE_BYTES (AA_VFS_MEMBER_AT + AA_SAF_IMAGE_BYTES)
+
+static struct fdps_unit_record aa_units[AA_UNITS];
+static unsigned char aa_gauge_sheet[AA_SHEET_BYTES];
+static unsigned char aa_items[(AA_ITEM_COUNT + 1) * AA_ITEM_STRIDE];
+static unsigned char aa_saf[AA_SAF_IMAGE_BYTES];
+static unsigned char aa_vfs[AA_VFS_IMAGE_BYTES];
+
+/* The snapshot is on the heap and not a static, for the reason tests/gauge.c
+   gives: this file already holds two 64,000-byte frames and reads the whole of
+   MISC.VFS into one malloc, and the guest has 32 MB. */
+static unsigned char *aa_screen;
+static void (__interrupt __far *aa_saved_timer)();
+static int aa_blocks_before;
+static int aa_blocks_after;
+static unsigned int aa_ticks_used;
+
+static void __interrupt __far aa_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(aa_saved_timer);
+}
+
+/* Which colour frame index carries. */
+static int aa_mark_pixel(int frame_index)
+{
+    return 0x11 * (frame_index + 1);
+}
+
+/* Distinct neighbours a row pitch and a graphic stride apart, 1..251 so
+   nothing is the transparency key by accident and every drawn bar pixel is
+   non-zero. */
+static void aa_stage_sheet(void)
+{
+    int offset;
+
+    for (offset = 0; offset < AA_SHEET_BYTES; offset++) {
+        aa_gauge_sheet[offset] = (unsigned char) (offset % 251 + 1);
+    }
+    data_fdps_unit_gauge_sheet_ptr = aa_gauge_sheet;
+}
+
+/* One sheet byte, in the bar's own coordinates. */
+static int aa_art(int graphic, int row, int column)
+{
+    return (int) aa_gauge_sheet[graphic * AA_ART_GRAPHIC_STRIDE
+                                + row * AA_ART_ROW_PITCH + column];
+}
+
+/* The clip: three tiles of their own colour, one single-cell tilemap each, and
+   three frames whose layers step eight pixels apart.  Command 0x03 is a fill
+   run of four pixels (resource_info/cel.md), so two of them make the two rows
+   of a 4x2 cell.  Sound 0xffff is the -1 the mixer rejects. */
+static void aa_stage_clip(void)
+{
+    int frame_index;
+    int tile_at;
+    int tilemap_at;
+    int frame_at;
+
+    memset(aa_saf, 0, (size_t) AA_SAF_IMAGE_BYTES);
+    aa_saf[0] = 'S';
+    aa_saf[1] = 'A';
+    aa_saf[2] = 'F';
+    banner_u16(aa_saf, BSAF_CELL_W_AT, AA_CELL_W);
+    banner_u16(aa_saf, BSAF_CELL_H_AT, AA_CELL_H);
+
+    banner_u16(aa_saf, BSAF_TILE_COUNT_AT, AA_FRAMES);
+    banner_u32(aa_saf, BSAF_TILE_TABLE_PTR_AT,
+               (unsigned long) AA_SAF_TILE_TABLE_AT);
+    banner_u16(aa_saf, BSAF_TILEMAP_COUNT_AT, AA_FRAMES);
+    banner_u32(aa_saf, BSAF_TILEMAP_TABLE_PTR_AT,
+               (unsigned long) AA_SAF_TILEMAP_TABLE_AT);
+    banner_u16(aa_saf, BSAF_FRAME_COUNT_AT, AA_FRAMES);
+    banner_u32(aa_saf, BSAF_FRAME_TABLE_PTR_AT,
+               (unsigned long) AA_SAF_FRAME_TABLE_AT);
+
+    for (frame_index = 0; frame_index < AA_FRAMES; frame_index++) {
+        tile_at = AA_SAF_TILE0_STREAM_AT
+                  + frame_index * AA_SAF_TILE_STREAM_BYTES;
+        tilemap_at = AA_SAF_TILEMAP0_AT + frame_index * AA_SAF_TILEMAP_BYTES;
+        frame_at = AA_SAF_FRAME0_AT + frame_index * AA_SAF_FRAME_BYTES;
+
+        banner_u32(aa_saf, AA_SAF_TILE_TABLE_AT + frame_index * 4,
+                   (unsigned long) tile_at);
+        aa_saf[tile_at] = 0x03;
+        aa_saf[tile_at + 1] = (unsigned char) aa_mark_pixel(frame_index);
+        aa_saf[tile_at + 2] = 0x03;
+        aa_saf[tile_at + 3] = (unsigned char) aa_mark_pixel(frame_index);
+
+        banner_u32(aa_saf, AA_SAF_TILEMAP_TABLE_AT + frame_index * 4,
+                   (unsigned long) tilemap_at);
+        banner_u16(aa_saf, tilemap_at, 1);
+        banner_u16(aa_saf, tilemap_at + 2, 1);
+        banner_u16(aa_saf, tilemap_at + 4, (unsigned int) frame_index);
+
+        banner_u32(aa_saf, AA_SAF_FRAME_TABLE_AT + frame_index * 4,
+                   (unsigned long) frame_at);
+        banner_u16(aa_saf, frame_at + BSAF_FRAME_SOUND_AT, BSAF_NO_SOUND);
+        banner_u16(aa_saf, frame_at + BSAF_FRAME_DURATION_AT, 1);
+        banner_u16(aa_saf, frame_at + BSAF_FRAME_LAYERS_AT, 1);
+        banner_u16(aa_saf, frame_at + BSAF_LAYER_AT + BSAF_LAYER_TILEMAP_AT,
+                   (unsigned int) frame_index);
+        banner_u16(aa_saf, frame_at + BSAF_LAYER_AT + BSAF_LAYER_X_AT,
+                   (unsigned int) (frame_index * AA_MARK_STEP));
+        banner_u16(aa_saf, frame_at + BSAF_LAYER_AT + BSAF_LAYER_Y_AT, 0);
+        aa_saf[frame_at + BSAF_LAYER_AT + BSAF_LAYER_BLEND_AT] = 0;
+    }
+}
+
+/* The container that clip is looked up in, published as the resident archive
+   the function reads on every call. */
+static void aa_stage_container(void)
+{
+    aa_stage_clip();
+    memset(aa_vfs, 0, (size_t) AA_VFS_IMAGE_BYTES);
+    aa_vfs[0] = 'V';
+    aa_vfs[1] = 'F';
+    aa_vfs[2] = 'S';
+    banner_u16(aa_vfs, 3, 1);
+    banner_u16(aa_vfs, 5, BVFS_TABLE_AT);
+    banner_u32(aa_vfs, 7, 1);
+    strcpy((char *) aa_vfs + BVFS_TABLE_AT, AA_VFS_MEMBER);
+    banner_u32(aa_vfs, BVFS_TABLE_AT + BVFS_ENTRY_SIZE_AT,
+               (unsigned long) AA_SAF_IMAGE_BYTES);
+    banner_u32(aa_vfs, BVFS_TABLE_AT + BVFS_ENTRY_SIZE2_AT,
+               (unsigned long) AA_SAF_IMAGE_BYTES);
+    banner_u32(aa_vfs, BVFS_TABLE_AT + BVFS_ENTRY_START_AT,
+               (unsigned long) AA_VFS_MEMBER_AT);
+    memmove(aa_vfs + AA_VFS_MEMBER_AT, aa_saf, (size_t) AA_SAF_IMAGE_BYTES);
+}
+
+/* One unit's tile, facing, side and HP pair.  Every record is zeroed first, so
+   nothing is equipped and every status timer is clear. */
+static void aa_set_unit(int unit_index, int tile_column, int tile_row,
+                        int facing, int side, int hp_current, int hp_max)
+{
+    aa_units[unit_index].pos_x = (unsigned char) tile_column;
+    aa_units[unit_index].pos_y = (unsigned char) tile_row;
+    aa_units[unit_index].facing = (unsigned char) facing;
+    aa_units[unit_index].side = (unsigned char) side;
+    aa_units[unit_index].hp_current = (short) hp_current;
+    aa_units[unit_index].hp_max = (short) hp_max;
+}
+
+/* Nothing on the map and nothing in the way -- no scene layers, no cursor
+   overlay and no units -- so the compositor writes nothing into the page and
+   every window pixel the bars and the clip do not reach is the seed. */
+static void aa_stage(void)
+{
+    int offset;
+
+    for (offset = 0; offset < (int) sizeof(aa_units); offset++) {
+        ((unsigned char *) aa_units)[offset] = 0;
+    }
+    for (offset = 0; offset < (int) sizeof(aa_items); offset++) {
+        aa_items[offset] = 0;
+    }
+    aa_stage_sheet();
+    aa_stage_container();
+    data_fdps_map_unit_array_ptr = (unsigned char *) aa_units;
+    data_fdps_item_effect_table_ptr = aa_items + AA_ITEM_STRIDE;
+    data_fdps_animation_baseani_archive_ptr = aa_vfs;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_map_unit_count = 0;
+}
+
+/* Put the staged globals back the way a freshly started program has them, for
+   the reason tests/gauge.c gives: three of them hold blocks the game's own
+   loaders free, and leaving one pointing at a static here hands a later test a
+   free() of storage that never came from the heap. */
+static void aa_unstage(void)
+{
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_item_effect_table_ptr = NULL;
+    data_fdps_unit_gauge_sheet_ptr = NULL;
+    data_fdps_animation_baseani_archive_ptr = NULL;
+    free(aa_screen);
+    aa_screen = NULL;
+}
+
+/* Give the defender an equipped weapon of minimum range 1, which is the last
+   of fdps_check_can_counter_attack's four tests. */
+static void aa_arm_defender(void)
+{
+    struct fdps_item_effect *weapon;
+
+    aa_units[AA_DEFENDER].inventory_slots[0] = AA_EQUIPPED;
+    aa_units[AA_DEFENDER].inventory_slots[1] = AA_COUNTER_ITEM_ID;
+    weapon = (struct fdps_item_effect *)
+             (aa_items + (AA_COUNTER_ITEM_ID + 1) * AA_ITEM_STRIDE);
+    weapon->type = AA_ITEM_TYPE_WEAPON;
+    weapon->range_min = 1;
+    weapon->range_max = 1;
+}
+
+static void aa_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* Used entries currently in the heap, so a case can say the page came back. */
+static int aa_used_heap_blocks(void)
+{
+    struct _heapinfo entry;
+    int used;
+
+    used = 0;
+    entry._pentry = NULL;
+    while (_heapwalk(&entry) == _HEAPOK) {
+        if (entry._useflag == _USEDENTRY) {
+            used++;
+        }
+    }
+    return used;
+}
+
+/* Leave a zeroed block of exactly the page's size at the head of the free
+   list. */
+static void aa_seed_page(void)
+{
+    unsigned char *page;
+
+    page = (unsigned char *) malloc((size_t) AA_PAGE_BYTES);
+    if (page != NULL) {
+        memset(page, 0, (size_t) AA_PAGE_BYTES);
+        free(page);
+    }
+}
+
+/* One whole run, leaving the frame in aa_screen[]. */
+static void aa_run(void)
+{
+    unsigned int before_ticks;
+
+    aa_screen = (unsigned char *) malloc((size_t) AA_SCREEN_BYTES);
+    CHECK_EQ(aa_screen != NULL, 1);
+    if (aa_screen == NULL) {
+        return;
+    }
+    memset(aa_screen, AA_BORDER_FILL, (size_t) AA_SCREEN_BYTES);
+
+    aa_blocks_before = aa_used_heap_blocks();
+    aa_set_mode(AA_MODE_320X200X256);
+    memset((void *) AA_VGA_BASE, AA_BORDER_FILL, (size_t) AA_SCREEN_BYTES);
+    aa_seed_page();
+
+    aa_saved_timer = _dos_getvect(AA_TIMER_VECTOR);
+    _dos_setvect(AA_TIMER_VECTOR, aa_timer_isr);
+    before_ticks = data_fdps_timer_tick_counter;
+    fdps_play_attack_animation(AA_ATTACKER, AA_DEFENDER);
+    aa_ticks_used = data_fdps_timer_tick_counter - before_ticks;
+    _dos_setvect(AA_TIMER_VECTOR, aa_saved_timer);
+
+    memmove(aa_screen, (void *) AA_VGA_BASE, (size_t) AA_SCREEN_BYTES);
+    aa_set_mode(AA_MODE_TEXT);
+    aa_blocks_after = aa_used_heap_blocks();
+}
+
+static int aa_pixel(int row, int col)
+{
+    return (int) aa_screen[row * AA_SCREEN_W + col];
+}
+
+/* One pixel of a bar whose gauge position is (pos_x, pos_y), in the bar's own
+   coordinates: the position plus the page's 24-pixel apron, carried out to the
+   screen's own 4-pixel inset. */
+static int aa_bar(int pos_x, int pos_y, int row, int column)
+{
+    return aa_pixel(pos_y + AA_WINDOW_ROW + row, pos_x + AA_WINDOW_COL + column);
+}
+
+/* How many bytes inside the presented window are not the page seed. */
+static int aa_painted(void)
+{
+    int row;
+    int col;
+    int painted;
+
+    painted = 0;
+    for (row = 0; row < AA_WINDOW_H; row++) {
+        for (col = 0; col < AA_WINDOW_W; col++) {
+            if (aa_pixel(AA_WINDOW_ROW + row, AA_WINDOW_COL + col) != 0) {
+                painted++;
+            }
+        }
+    }
+    return painted;
+}
+
+/* How many bytes outside the presented window are no longer the sentinel. */
+static int aa_border_touched(void)
+{
+    int row;
+    int col;
+    int touched;
+
+    touched = 0;
+    for (row = 0; row < AA_SCREEN_H; row++) {
+        for (col = 0; col < AA_SCREEN_W; col++) {
+            if (row >= AA_WINDOW_ROW && row < AA_WINDOW_ROW + AA_WINDOW_H
+                && col >= AA_WINDOW_COL && col < AA_WINDOW_COL + AA_WINDOW_W) {
+                continue;
+            }
+            if (aa_pixel(row, col) != AA_BORDER_FILL) {
+                touched++;
+            }
+        }
+    }
+    return touched;
+}
+
+/* Every segment of one bar as the plain painter leaves it: the two-pixel left
+   cap and the fill run out of graphic gfx_index, the rest of the 41-column
+   interior out of GRAPHIC 0 at its own columns, and the right cap out of
+   gfx_index again.  Row 5 is read alongside row 0 because every blit is handed
+   6 as its row count and steps by the page's 0x168 pitch.  The values being
+   raw sheet bytes is what pins the painting mode at 0: mode 1 would write
+   inverse-cube entries and any other value a tint. */
+static void aa_bar_is(int pos_x, int pos_y, int gfx_index, int fill_width)
+{
+    CHECK_EQ(aa_bar(pos_x, pos_y, 0, 0), aa_art(gfx_index, 0, 0));
+    CHECK_EQ(aa_bar(pos_x, pos_y, 5, 1), aa_art(gfx_index, 5, 1));
+    if (fill_width > 0) {
+        CHECK_EQ(aa_bar(pos_x, pos_y, 0, fill_width + 1),
+                 aa_art(gfx_index, 0, fill_width + 1));
+    }
+    CHECK_EQ(aa_art(0, 0, fill_width + 2)
+             != aa_art(gfx_index, 0, fill_width + 2), 1);
+    CHECK_EQ(aa_bar(pos_x, pos_y, 0, fill_width + 2),
+             aa_art(0, 0, fill_width + 2));
+    CHECK_EQ(aa_bar(pos_x, pos_y, 0, AA_INTERIOR), aa_art(gfx_index, 0,
+                                                          AA_INTERIOR));
+    CHECK_EQ(aa_bar(pos_x, pos_y, 5, AA_BAR_WIDTH - 1),
+             aa_art(gfx_index, 5, AA_BAR_WIDTH - 1));
+}
+
+/* Every mark the clip left, read at both ends of its 4x2 cell, with the pixel
+   just left of the first one still the seed so a mark one column wide of where
+   it belongs fails here. */
+static void aa_marks_are(int first_col, int row)
+{
+    int frame_index;
+    int col;
+
+    for (frame_index = 0; frame_index < AA_FRAMES; frame_index++) {
+        col = first_col + frame_index * AA_MARK_STEP;
+        CHECK_EQ(aa_pixel(row, col), aa_mark_pixel(frame_index));
+        CHECK_EQ(aa_pixel(row + AA_CELL_H - 1, col + AA_CELL_W - 1),
+                 aa_mark_pixel(frame_index));
+    }
+    CHECK_EQ(aa_pixel(row, first_col - 1), 0);
+    CHECK_EQ(aa_pixel(row - 1, first_col), 0);
+}
+
+/* The five record bytes the function addresses by literal displacement: +0 and
+   +1 for the tile the clip is placed over, +6 for the side that picks each
+   graphic, and +0x40 / +0x42 for the HP pair each fill is taken over.  If the
+   layout moved, every case below would still pass while reading the wrong
+   bytes. */
+static void attack_animation_reads_the_measured_offsets(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 1);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 6);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_current), 0x40);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_max), 0x42);
+}
+
+/* The clip is placed over the DEFENDER's tile and one frame is drawn per pass,
+   frame i on pass i.  Tile (3,3) with the view at the origin puts frame 0's
+   cell at page (72,66) -- the tile times 24 on x and the same less the
+   six-pixel lift on y -- which the window blit carries out to screen (52,46),
+   and the fixture steps each later frame eight pixels right of that.
+
+   The attacker is two tiles away, so no counter is coming and only the
+   defender's bar is drawn: 258 bar pixels and three 4x2 marks are the whole of
+   what the run painted, which is also what says the clip was drawn over the
+   defender's tile and not the attacker's -- the attacker's would put the marks
+   168 pixels to the right. */
+static void attack_animation_draws_one_frame_per_pass_over_the_defender(void)
+{
+    aa_stage();
+    aa_set_unit(AA_DEFENDER, AA_DEFENDER_TILE_X, AA_DEFENDER_TILE_Y, 0, 0,
+                1, 1000);
+    aa_set_unit(AA_ATTACKER, AA_FAR_ATTACKER_TILE_X, AA_FAR_ATTACKER_TILE_Y,
+                2, 1, 3, 4);
+    aa_run();
+
+    aa_marks_are(AA_SPRITE_COL, AA_SPRITE_ROW);
+    CHECK_EQ(aa_painted(),
+             AA_BAR_PIXELS + AA_FRAMES * AA_CELL_W * AA_CELL_H);
+    aa_unstage();
+}
+
+/* SUB EAX,[0x00069ce4] and SUB EAX,[0x00069ce0]: the view scroll origin is
+   subtracted from each axis of the request origin, and the six-pixel lift is
+   applied on top of the y one rather than instead of it.  A scroll of (10,7)
+   moves the whole clip by exactly that and by nothing else. */
+static void attack_animation_subtracts_the_view_scroll_origin(void)
+{
+    aa_stage();
+    aa_set_unit(AA_DEFENDER, AA_DEFENDER_TILE_X, AA_DEFENDER_TILE_Y, 0, 0,
+                1, 1000);
+    aa_set_unit(AA_ATTACKER, AA_FAR_ATTACKER_TILE_X, AA_FAR_ATTACKER_TILE_Y,
+                2, 1, 3, 4);
+    data_fdps_battle_view_window_origin_x = AA_SCROLL_X;
+    data_fdps_battle_view_window_origin_y = AA_SCROLL_Y;
+    aa_run();
+
+    aa_marks_are(AA_SCROLLED_SPRITE_COL, AA_SCROLLED_SPRITE_ROW);
+    aa_unstage();
+}
+
+/* The one bar that run drew, read back segment by segment, and where it
+   landed.  The defender's side byte is 0, so its graphic is 2 and not 1, and
+   1 HP of 1000 is (41 + 999) / 1000 = 1 filled column -- the sliver the
+   ceiling exists for.  The bar's top-left pixel at screen (60,104) for a gauge
+   position of (100,56) is what fixes the page's 24-pixel apron and its 0x168
+   pitch against the window's 4-pixel inset: a run that left the apron out
+   would put it at (80,124). */
+static void attack_animation_draws_the_defender_bar_from_side_zero(void)
+{
+    aa_stage();
+    aa_set_unit(AA_DEFENDER, AA_DEFENDER_TILE_X, AA_DEFENDER_TILE_Y, 0, 0,
+                1, 1000);
+    aa_set_unit(AA_ATTACKER, AA_FAR_ATTACKER_TILE_X, AA_FAR_ATTACKER_TILE_Y,
+                2, 1, 3, 4);
+    aa_run();
+
+    CHECK_EQ(aa_art(2, 0, 0) != aa_art(1, 0, 0), 1);
+    CHECK_EQ(aa_pixel(AA_DEFENDER_POS_Y + AA_WINDOW_ROW,
+                      AA_DEFENDER_POS_X + AA_WINDOW_COL), aa_art(2, 0, 0));
+    aa_bar_is(AA_DEFENDER_POS_X, AA_DEFENDER_POS_Y, 2, 1);
+    aa_unstage();
+}
+
+/* CMP byte ptr [EAX+0x6],0x0 / JNZ at 0001efec: any side other than 0 takes
+   graphic 1, so the same bar in the same place comes out of a different
+   graphic.  Side 2 is used rather than 1 to show the test is against 0 and not
+   a two-way flag. */
+static void attack_animation_side_other_than_zero_takes_graphic_one(void)
+{
+    aa_stage();
+    aa_set_unit(AA_DEFENDER, AA_DEFENDER_TILE_X, AA_DEFENDER_TILE_Y, 0, 2,
+                1, 1000);
+    aa_set_unit(AA_ATTACKER, AA_FAR_ATTACKER_TILE_X, AA_FAR_ATTACKER_TILE_Y,
+                2, 1, 3, 4);
+    aa_run();
+
+    aa_bar_is(AA_DEFENDER_POS_X, AA_DEFENDER_POS_Y, 1, 1);
+    aa_unstage();
+}
+
+/* Both bars, with the counter confirmed.  The attacker is one tile away and
+   the defender holds an equipped weapon of minimum range 1, which is what
+   makes fdps_check_can_counter_attack answer exactly 1; the attacker's pair
+   then holds its own placement instead of the -1 that suppresses it.
+
+   The attacker's side is 1, so its graphic is 1 against the defender's 2, and
+   3 HP of 4 is (123 + 3) / 4 = 31 filled columns against the defender's 1.
+   The painted count is two whole bars and the clip's three marks, so neither
+   bar has overwritten the other or the clip. */
+static void attack_animation_draws_both_bars_on_a_counter(void)
+{
+    aa_stage();
+    aa_set_unit(AA_DEFENDER, AA_DEFENDER_TILE_X, AA_DEFENDER_TILE_Y, 0, 0,
+                1, 1000);
+    aa_set_unit(AA_ATTACKER, AA_NEAR_ATTACKER_TILE_X, AA_NEAR_ATTACKER_TILE_Y,
+                2, 1, 3, 4);
+    aa_arm_defender();
+    aa_run();
+
+    aa_bar_is(AA_DEFENDER_POS_X, AA_DEFENDER_POS_Y, 2, 1);
+    aa_bar_is(AA_ATTACKER_POS_X, AA_ATTACKER_POS_Y, 1, 31);
+    CHECK_EQ(aa_painted(),
+             2 * AA_BAR_PIXELS + AA_FRAMES * AA_CELL_W * AA_CELL_H);
+    aa_unstage();
+}
+
+/* The same two units and the same one step apart, but with nothing equipped:
+   the counter is refused, the attacker's pair x is poisoned with -1 and its
+   bar is skipped for every pass.  The count is one bar and the clip, and the
+   place the attacker's bar would have taken is still the page seed. */
+static void attack_animation_suppresses_the_attacker_bar_without_a_counter(void)
+{
+    aa_stage();
+    aa_set_unit(AA_DEFENDER, AA_DEFENDER_TILE_X, AA_DEFENDER_TILE_Y, 0, 0,
+                1, 1000);
+    aa_set_unit(AA_ATTACKER, AA_NEAR_ATTACKER_TILE_X, AA_NEAR_ATTACKER_TILE_Y,
+                2, 1, 3, 4);
+    aa_run();
+
+    CHECK_EQ(aa_painted(),
+             AA_BAR_PIXELS + AA_FRAMES * AA_CELL_W * AA_CELL_H);
+    CHECK_EQ(aa_bar(AA_ATTACKER_POS_X, AA_ATTACKER_POS_Y, 0, 0), 0);
+    aa_bar_is(AA_DEFENDER_POS_X, AA_DEFENDER_POS_Y, 2, 1);
+    aa_unstage();
+}
+
+/* ADD EDX,max / DEC EDX before the IDIV at 0001f267 is what makes the fill a
+   ceiling and not a truncation: 1 HP of 2 is (41 + 1) / 2 = 21 columns, where
+   41 / 2 would be 20 and the seam would sit one column left.  The seam is read
+   at both ends, so a fill of 20 or 22 fails here. */
+static void attack_animation_fill_is_the_ceiling_over_41_columns(void)
+{
+    aa_stage();
+    aa_set_unit(AA_DEFENDER, AA_DEFENDER_TILE_X, AA_DEFENDER_TILE_Y, 0, 0,
+                1, 2);
+    aa_set_unit(AA_ATTACKER, AA_FAR_ATTACKER_TILE_X, AA_FAR_ATTACKER_TILE_Y,
+                2, 1, 3, 4);
+    aa_run();
+
+    CHECK_EQ(aa_bar(AA_DEFENDER_POS_X, AA_DEFENDER_POS_Y, 0, 22),
+             aa_art(2, 0, 22));
+    CHECK_EQ(aa_art(0, 0, 23) != aa_art(2, 0, 23), 1);
+    CHECK_EQ(aa_bar(AA_DEFENDER_POS_X, AA_DEFENDER_POS_Y, 0, 23),
+             aa_art(0, 0, 23));
+    aa_unstage();
+}
+
+/* CMP dword ptr [EBP+0xffffff34],0x0 / JG at 0001f252: a maximum of 0 never
+   reaches the IDIV and the bar is drawn empty, so the interior is graphic 0
+   from its first column.  A current of 50 against it would be a division by
+   zero if the guard were not there, and the guard is JG and not JNE, which is
+   what the negative case says. */
+static void attack_animation_zero_max_hp_draws_an_empty_bar(void)
+{
+    aa_stage();
+    aa_set_unit(AA_DEFENDER, AA_DEFENDER_TILE_X, AA_DEFENDER_TILE_Y, 0, 0,
+                50, 0);
+    aa_set_unit(AA_ATTACKER, AA_FAR_ATTACKER_TILE_X, AA_FAR_ATTACKER_TILE_Y,
+                2, 1, 3, 4);
+    aa_run();
+
+    aa_bar_is(AA_DEFENDER_POS_X, AA_DEFENDER_POS_Y, 2, 0);
+    CHECK_EQ(aa_painted(),
+             AA_BAR_PIXELS + AA_FRAMES * AA_CELL_W * AA_CELL_H);
+    aa_unstage();
+}
+
+/* The HP words are read with MOVSX at 0001efd8 and 0001efe2, so a current
+   above 0x7fff is negative and not a huge positive: -1 of 1000 gives
+   (-41 + 999) / 1000 = 0 columns after truncation toward zero, which is the
+   empty bar, where an unsigned read would give a fill far past the interior
+   and smear the art's next row across it. */
+static void attack_animation_hp_words_are_read_signed(void)
+{
+    aa_stage();
+    aa_set_unit(AA_DEFENDER, AA_DEFENDER_TILE_X, AA_DEFENDER_TILE_Y, 0, 0,
+                -1, 1000);
+    aa_set_unit(AA_ATTACKER, AA_FAR_ATTACKER_TILE_X, AA_FAR_ATTACKER_TILE_Y,
+                2, 1, 3, 4);
+    aa_run();
+
+    aa_bar_is(AA_DEFENDER_POS_X, AA_DEFENDER_POS_Y, 2, 0);
+    CHECK_EQ(aa_painted(),
+             AA_BAR_PIXELS + AA_FRAMES * AA_CELL_W * AA_CELL_H);
+    aa_unstage();
+}
+
+/* PUSH 0xc0 / PUSH 0x138 / PUSH 0x140 / PUSH 0xa0504 / PUSH 0x168 with
+   page + 0x21d8 as the source: 312x192 out of page pixel (24,24) and down at
+   screen pixel (4,4).  Nothing outside that rectangle is touched, which is
+   what the four-pixel margin of the sentinel proves -- a destination of
+   0xa0000, or a source of page byte 0, would carry the clip and the bar four
+   rows and four columns out of place and leave the margin alone anyway, which
+   is why the marks are read as well. */
+static void attack_animation_presents_312x192_at_screen_4_4(void)
+{
+    aa_stage();
+    aa_set_unit(AA_DEFENDER, AA_DEFENDER_TILE_X, AA_DEFENDER_TILE_Y, 0, 0,
+                1, 1000);
+    aa_set_unit(AA_ATTACKER, AA_FAR_ATTACKER_TILE_X, AA_FAR_ATTACKER_TILE_Y,
+                2, 1, 3, 4);
+    aa_run();
+
+    CHECK_EQ(aa_border_touched(), 0);
+    aa_marks_are(AA_SPRITE_COL, AA_SPRITE_ROW);
+    CHECK_EQ(aa_pixel(AA_DEFENDER_POS_Y + AA_WINDOW_ROW,
+                      AA_DEFENDER_POS_X + AA_WINDOW_COL - 1), 0);
+    CHECK_EQ(aa_pixel(AA_DEFENDER_POS_Y + AA_WINDOW_ROW + AA_BAR_ROWS,
+                      AA_DEFENDER_POS_X + AA_WINDOW_COL), 0);
+    aa_unstage();
+}
+
+/* CALL free at 0001f32c: the page is released before the return, so the heap
+   holds no more used blocks after the run than before it.  This is also what
+   the seeding depends on -- if the block did not come back, every expected
+   value above would be comparing against rubbish. */
+static void attack_animation_frees_the_page(void)
+{
+    aa_stage();
+    aa_set_unit(AA_DEFENDER, AA_DEFENDER_TILE_X, AA_DEFENDER_TILE_Y, 0, 0,
+                1, 1000);
+    aa_set_unit(AA_ATTACKER, AA_FAR_ATTACKER_TILE_X, AA_FAR_ATTACKER_TILE_Y,
+                2, 1, 3, 4);
+    aa_run();
+
+    CHECK_EQ(aa_blocks_after, aa_blocks_before);
+    aa_unstage();
+}
+
+/* Every frame ends waiting for the timer tick to move -- MOV EAX,[EBP-0x20] /
+   CMP EAX,[0x00069d64] / JZ back at 0001f310, inside the loop and not after
+   it.  The first frame's latch is uninitialised and may end its wait at once,
+   so two ticks are the guaranteed floor for a three-frame clip; a run that
+   waited nowhere does not reach it, and one that latched the counter before
+   the loop would cost three. */
+static void attack_animation_paces_the_frames_with_the_tick(void)
+{
+    aa_stage();
+    aa_set_unit(AA_DEFENDER, AA_DEFENDER_TILE_X, AA_DEFENDER_TILE_Y, 0, 0,
+                1, 1000);
+    aa_set_unit(AA_ATTACKER, AA_FAR_ATTACKER_TILE_X, AA_FAR_ATTACKER_TILE_Y,
+                2, 1, 3, 4);
+    aa_run();
+
+    CHECK_EQ(aa_ticks_used >= (unsigned int) (AA_FRAMES - 1), 1);
+    aa_unstage();
+}
+
 void run_anim_tests(void)
 {
     RUN_TEST(baseani_lookup_returns_a_pointer_into_the_image);
@@ -1447,4 +2263,17 @@ void run_anim_tests(void)
     RUN_TEST(vfs_animation_ends_on_level_one_of_the_untouched_screen);
     RUN_TEST(vfs_animation_plays_the_clip_over_the_dimmed_screen);
     RUN_TEST(vfs_animation_banners_only_the_player_phase_clip);
+    RUN_TEST(attack_animation_reads_the_measured_offsets);
+    RUN_TEST(attack_animation_draws_one_frame_per_pass_over_the_defender);
+    RUN_TEST(attack_animation_subtracts_the_view_scroll_origin);
+    RUN_TEST(attack_animation_draws_the_defender_bar_from_side_zero);
+    RUN_TEST(attack_animation_side_other_than_zero_takes_graphic_one);
+    RUN_TEST(attack_animation_draws_both_bars_on_a_counter);
+    RUN_TEST(attack_animation_suppresses_the_attacker_bar_without_a_counter);
+    RUN_TEST(attack_animation_fill_is_the_ceiling_over_41_columns);
+    RUN_TEST(attack_animation_zero_max_hp_draws_an_empty_bar);
+    RUN_TEST(attack_animation_hp_words_are_read_signed);
+    RUN_TEST(attack_animation_presents_312x192_at_screen_4_4);
+    RUN_TEST(attack_animation_frees_the_page);
+    RUN_TEST(attack_animation_paces_the_frames_with_the_tick);
 }

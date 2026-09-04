@@ -28,6 +28,10 @@
 #include "blit.h"
 #include "sprite.h"
 #include "saf.h"
+#include "gauge.h"
+#include "unit.h"
+#include "aitarget.h"
+#include "mapdraw.h"
 #include "anim.h"
 
 /* 0002a240.  One branch, CMP dword ptr [0x000643ec],0x0 / JZ at 0002a267, and
@@ -412,4 +416,263 @@ void fdps_play_vfs_animation(char *name)
 
     free(animation);
     free(saved_screen);
+}
+
+/* The composite page every frame of the blow is built on: 360 x 240 with a
+   24-pixel apron on all four sides, the same page fdps_battle_show_combat_gauges
+   composes its seven frames on (gauge.c).  PUSH 0x15180 at 0001f032 buys it,
+   and the two stores at 0001f042 and 0001f049 put the pitch and the row count
+   into the draw request.  A gauge position is turned into a page pixel by
+   adding the apron on both axes -- ADD EAX,0x18 / IMUL EAX,EAX,0x168 / ADD the
+   page / ADD the x / ADD EAX,0x18 at 0001f088. */
+#define ATTACK_PAGE_PITCH 0x168
+#define ATTACK_PAGE_ROWS 0xf0
+#define ATTACK_PAGE_BYTES 0x15180
+#define ATTACK_PAGE_BORDER 0x18
+
+/* The window handed to the adapter after every frame: 312 x 192 taken from
+   page byte 0x21d8, which is page pixel (24,24), and put down at screen byte
+   0x504, which is screen pixel (4,4).  Both come from the six pushes at
+   0001f2e6.  VGA_SCREEN_BASE and VGA_SCREEN_PITCH are the banner's above and
+   mean the same here, and 0xa0000 stays a literal because it is where the
+   adapter answers and not the address of anything the linker places
+   (rebuild_info/pitfalls.md, contract E). */
+#define ATTACK_PAGE_WINDOW_AT 0x21d8
+#define ATTACK_WINDOW_AT 0x504
+#define ATTACK_WINDOW_W 0x138
+#define ATTACK_WINDOW_H 0xc0
+
+/* A map tile is 24 pixels square, and the sprite is drawn six pixels above the
+   tile row -- IMUL EAX,EAX,0x18 at 0001f00c and 0001f023 and the SUB EAX,0x6
+   at 0001f02c, the same lift fdps_draw_map_unit gives a unit's own sprite. */
+#define MAP_TILE_SIZE 0x18
+#define ATTACK_SPRITE_LIFT 6
+
+/* CMP EAX,0x1 / JNZ at 0001ef6c: fdps_check_can_counter_attack answers -1 on
+   every refusal and never 0, so the test is against 1 and is not a bare
+   predicate (aitarget.h).  The refusal arm writes -1 into the attacker pair's
+   x half and that is what suppresses its bar for the whole run -- MOV dword
+   ptr [EBP-0x38],0xffffffff at 0001ef83 and the CMP ...,-0x1 at 0001f0e6 that
+   reads it back. */
+#define COUNTER_ATTACK_CONFIRMED 1
+#define ATTACK_GAUGE_NO_BAR (-1)
+
+/* CMP byte ptr [EAX+0x6],0x0 / JNZ at 0001efb0 and 0001efec: a side byte of 0
+   picks graphic 2 of the unit gauge sheet and every other side picks graphic 1,
+   the same reading fdps_battle_show_combat_gauges makes. */
+#define ATTACK_GAUGE_SIDE_ZERO_GRAPHIC 2
+#define ATTACK_GAUGE_OTHER_SIDE_GRAPHIC 1
+
+/* The bar's 41-column interior, and the two painting arguments both bars are
+   drawn with: PUSH 0x0 and PUSH 0xf at 0001f190 and 0001f286.  Mode 0 is
+   fdps_draw_unit_gauge's plain painter, which never reads the strength, so the
+   0xf is carried and not used (gauge.h). */
+#define UNIT_GAUGE_INTERIOR_WIDTH 0x29
+#define ATTACK_GAUGE_MODE_PLAIN 0
+#define ATTACK_GAUGE_ALPHA 0xf
+
+/* The member of the resident BaseAni.vfs image that every attack is played
+   from, MOV EAX,0x617d0 at 0001f054.  It is looked up straight through
+   fdps_vfs_image_get_entry rather than through fdps_baseani_get_entry_or_exit,
+   so a miss comes back as a NULL image and not as an exit, and the literal is
+   upper-cased IN PLACE by that lookup: it has to live in writable storage
+   (rebuild_info/pitfalls.md). */
+#define ATTACK_ANIMATION_MEMBER "EasyAni.Saf"
+
+/* 0001ef40.  Four branches before the loop -- the counter test and the two
+   side tests -- and three inside it, the attacker's bar guard and the two
+   empty-bar guards, so cyclomatic complexity 9 counting the two retrace spins
+   and the tick wait.
+
+   THERE IS NO SEPARATE PAGE VARIABLE, and that is what the assembly says: the
+   page pointer is slot 0 of the draw request, malloc's answer is stored there
+   at 0001f03f and every later use -- the compositor's argument at 0001f0da,
+   the two bar pixels at 0001f094 and 0001f0ac, the blit source at 0001f2ff and
+   free's argument at 0001f328 -- reads that same slot back.  A local of its
+   own would be a second slot and a copy into it.
+
+   THE ATTACKER'S DESTINATION IS FORMED EVEN WHEN THERE IS NO ATTACKER BAR.
+   The arithmetic at 0001f088 runs before the loop and reads the pair's y half
+   whatever it holds, and on the refusal path that half was never written --
+   only the x half is stored.  Nothing dereferences the pointer on that path,
+   every use being inside the CMP ...,-0x1 guard, so it is arithmetic on a
+   pointer that is never read.  Guarding it changes nothing on screen.
+
+   THE SIZE THE LOOKUP WRITES OUT IS THROWN AWAY.  frame_count is handed to
+   fdps_vfs_image_get_entry as the place to put the member's size -- LEA
+   EAX,[EBP-0x4] / PUSH EAX at 0001f050 -- and is overwritten at 0001f085 with
+   fdps_saf_frame_count of the same image before it is ever read.  It is one
+   local in the original and stays one here.
+
+   THE FRAME WAIT'S LATCH IS DELIBERATELY LEFT UNINITIALISED, the same contract
+   fdps_animate_turn_banner and fdps_play_vfs_animation above and
+   fdps_battle_show_combat_gauges (gauge.c) carry.  last_tick is read at
+   0001f310 before anything has written it, so the first frame does not wait
+   for a tick.  Declaring it initialised from the counter, which is what
+   writing the loop cleanly in C invites, costs one extra tick of animation
+   (rebuild_info/pitfalls.md).
+
+   data_fdps_timer_tick_counter is volatile at its declaration (gamedata.h)
+   because of that wait: nothing inside it writes the counter, so a build
+   allowed to hoist the load would spin here forever.  The retrace spins read a
+   port and cannot be hoisted for the same reason.
+
+   THE TWO FILLS ARE INLINE EXPANSIONS OF fdps_draw_unit_gauge_proportional and
+   are open-coded here for that reason (rebuild_info/build_flags.md): the
+   shipped image has no CALL to that function at either of them, so writing
+   them as calls would put two CALLs in the rebuild that the original does not
+   have.
+
+   FOUR CALLS' ANSWERS ARE READ.  fdps_check_can_counter_attack's is compared
+   against 1 at 0001ef6c; the two fdps_get_unit_record pointers at 0001ef96 and
+   0001efd2 are the records every field below comes out of, and the second is
+   still live at 0001f002 where the request origin is taken off it;
+   fdps_vfs_image_get_entry's is the sheet, stored into the request at 0001f068
+   and read straight back as fdps_saf_frame_count's argument; malloc's is the
+   page.  inp's is tested for bit 3 at both spins.
+   fdps_battle_compute_unit_gauge_position, fdps_draw_scene_layers,
+   fdps_draw_unit_gauge, fdps_draw_composite_sprite, fdps_blit_rect and free
+   all return nothing the original reads.
+
+   The frames are paced by the retrace and by the timer tick, so how many
+   instructions stand between them is not observable (contract D). */
+void fdps_play_attack_animation(int attacker_unit, int defender_unit)
+{
+    /* The nine-slot block sprite.h describes.  Slot 0 is the composite page --
+       see the note above -- and slot 6 is the frame this pass draws. */
+    int request[DRAW_REQUEST_DWORDS];
+    /* Where each bar's top-left pixel sits, in view pixels and before the
+       page's apron is added.  Both halves of the defender's are always
+       written; the attacker's x holds -1 when no counter-attack is coming and
+       its y is then never written at all. */
+    int defender_gauge_pos[2];
+    int attacker_gauge_pos[2];
+    /* The record being read: the attacker's first and then the defender's,
+       which is the one the request origin is taken off.  One local in the
+       original -- both stores are to [EBP-0x30]. */
+    struct fdps_unit_record *record;
+    /* Those two positions turned into page pixels. */
+    unsigned char *attacker_bar_pixel;
+    unsigned char *defender_bar_pixel;
+    /* Which of the sheet's three graphics fills each bar. */
+    int attacker_gfx_index;
+    int defender_gfx_index;
+    /* The HP pair each bar is filled from, widened from the record's signed
+       words by the four MOVSX at 0001ef9c, 0001efa6, 0001efd8 and 0001efe2. */
+    int attacker_hp_current;
+    int attacker_hp_max;
+    int defender_hp_current;
+    int defender_hp_max;
+    /* How many of the bar's 41 interior columns this frame fills. */
+    int attacker_fill_width;
+    int defender_fill_width;
+    /* How many frames the sheet holds, which is how many passes the loop
+       makes.  The lookup's discarded size slot first -- see the note above. */
+    unsigned int frame_count;
+    /* Which frame of the sheet this pass draws. */
+    int frame;
+    /* The tick the previous frame ended on.  Deliberately not initialised --
+       see the note above. */
+    unsigned int last_tick;
+
+    fdps_battle_compute_unit_gauge_position(defender_gauge_pos, defender_unit);
+    if (fdps_check_can_counter_attack(attacker_unit, defender_unit)
+            == COUNTER_ATTACK_CONFIRMED) {
+        fdps_battle_compute_unit_gauge_position(attacker_gauge_pos,
+                                                attacker_unit);
+    } else {
+        attacker_gauge_pos[0] = ATTACK_GAUGE_NO_BAR;
+    }
+
+    record = fdps_get_unit_record(attacker_unit);
+    attacker_hp_current = (int) record->hp_current;
+    attacker_hp_max = (int) record->hp_max;
+    if (record->side == 0) {
+        attacker_gfx_index = ATTACK_GAUGE_SIDE_ZERO_GRAPHIC;
+    } else {
+        attacker_gfx_index = ATTACK_GAUGE_OTHER_SIDE_GRAPHIC;
+    }
+
+    record = fdps_get_unit_record(defender_unit);
+    defender_hp_current = (int) record->hp_current;
+    defender_hp_max = (int) record->hp_max;
+    if (record->side == 0) {
+        defender_gfx_index = ATTACK_GAUGE_SIDE_ZERO_GRAPHIC;
+    } else {
+        defender_gfx_index = ATTACK_GAUGE_OTHER_SIDE_GRAPHIC;
+    }
+
+    /* Both tile bytes are widened UNSIGNED -- MOV AL,byte ptr [EAX] then AND
+       EAX,0xff at 0001f002 and 0001f018 -- so a tile column past 127 is far to
+       the right and not far to the left. */
+    request[DRAW_REQUEST_X] = (int) record->pos_x * MAP_TILE_SIZE
+                              - data_fdps_battle_view_window_origin_x;
+    request[DRAW_REQUEST_Y] = (int) record->pos_y * MAP_TILE_SIZE
+                              - data_fdps_battle_view_window_origin_y
+                              - ATTACK_SPRITE_LIFT;
+    request[DRAW_REQUEST_DEST_BASE] = (int) malloc((size_t) ATTACK_PAGE_BYTES);
+    request[DRAW_REQUEST_DEST_PITCH] = ATTACK_PAGE_PITCH;
+    request[DRAW_REQUEST_DEST_ROWS] = ATTACK_PAGE_ROWS;
+    request[DRAW_REQUEST_IMAGE] = (int) fdps_vfs_image_get_entry(
+        (struct fdps_vfs_image_header *)
+            data_fdps_animation_baseani_archive_ptr,
+        ATTACK_ANIMATION_MEMBER, &frame_count);
+    request[DRAW_REQUEST_BLIT_OPERAND] = 0;
+    request[DRAW_REQUEST_BLIT_MODE] = 0;
+    frame_count = (unsigned int)
+        fdps_saf_frame_count((void *) request[DRAW_REQUEST_IMAGE]);
+
+    attacker_bar_pixel = (unsigned char *) request[DRAW_REQUEST_DEST_BASE]
+        + (attacker_gauge_pos[1] + ATTACK_PAGE_BORDER) * ATTACK_PAGE_PITCH
+        + attacker_gauge_pos[0] + ATTACK_PAGE_BORDER;
+    defender_bar_pixel = (unsigned char *) request[DRAW_REQUEST_DEST_BASE]
+        + (defender_gauge_pos[1] + ATTACK_PAGE_BORDER) * ATTACK_PAGE_PITCH
+        + defender_gauge_pos[0] + ATTACK_PAGE_BORDER;
+
+    for (frame = 0; frame < (int) frame_count; frame++) {
+        request[DRAW_REQUEST_ITEM_INDEX] = frame;
+        fdps_draw_scene_layers(
+            (unsigned char *) request[DRAW_REQUEST_DEST_BASE]);
+        if (attacker_gauge_pos[0] != ATTACK_GAUGE_NO_BAR) {
+            if (attacker_hp_max <= 0) {
+                attacker_fill_width = 0;
+            } else {
+                attacker_fill_width =
+                    (attacker_hp_current * UNIT_GAUGE_INTERIOR_WIDTH
+                     + attacker_hp_max - 1) / attacker_hp_max;
+            }
+            fdps_draw_unit_gauge(attacker_bar_pixel, ATTACK_PAGE_PITCH,
+                                 attacker_gfx_index, attacker_fill_width,
+                                 ATTACK_GAUGE_MODE_PLAIN, ATTACK_GAUGE_ALPHA);
+        }
+        if (defender_hp_max <= 0) {
+            defender_fill_width = 0;
+        } else {
+            defender_fill_width =
+                (defender_hp_current * UNIT_GAUGE_INTERIOR_WIDTH
+                 + defender_hp_max - 1) / defender_hp_max;
+        }
+        fdps_draw_unit_gauge(defender_bar_pixel, ATTACK_PAGE_PITCH,
+                             defender_gfx_index, defender_fill_width,
+                             ATTACK_GAUGE_MODE_PLAIN, ATTACK_GAUGE_ALPHA);
+        fdps_draw_composite_sprite(request, 1);
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins, so the frame that has just been
+               composed is the one the monitor shows whole. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends, so the blit starts clear of it. */
+        }
+        fdps_blit_rect((unsigned int)
+                           ((unsigned char *) request[DRAW_REQUEST_DEST_BASE]
+                            + ATTACK_PAGE_WINDOW_AT),
+                       ATTACK_PAGE_PITCH,
+                       (void *) (VGA_SCREEN_BASE + ATTACK_WINDOW_AT),
+                       VGA_SCREEN_PITCH, ATTACK_WINDOW_W, ATTACK_WINDOW_H);
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
+
+    free((void *) request[DRAW_REQUEST_DEST_BASE]);
 }
