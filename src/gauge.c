@@ -24,6 +24,7 @@
 #include "aitarget.h"
 #include "blit.h"
 #include "mapdraw.h"
+#include "sprite.h"
 #include "unit.h"
 #include "gauge.h"
 
@@ -192,6 +193,135 @@ void fdps_draw_stat_gauge(unsigned char *dest, int dest_stride,
     }
 
     fdps_draw_gauge_fill(dest, dest_stride, gauge_index, fill_width);
+}
+
+/* Where each side's gauge panel sits in the 0x170-pixel-wide animation frame,
+   and which of the fill sheet's four strips it takes.  A side byte of 0 goes to
+   the lower left, every other side to the upper right: IMUL EAX,dword ptr
+   [EBP+0x18],0xc7 / ADD EAX,0x1e at 00019388 against SHL EAX,0x5 / ADD EAX,0xc3
+   at 0001936d, with MOV dword ptr [EBP+-0x18],0x2 and MOV dword ptr
+   [EBP+-0x4],0x13 in the first block against 0x0 and 0x1 in the second.
+
+   The strip base is what mirrors the two panels: fdps_draw_gauge_fill fills
+   right-to-left below index 2, so the upper-right panel's 0 and 1 fill towards
+   the frame's right edge and the lower-left panel's 2 and 3 fill towards its
+   left.  Handing the lower-left panel strips 0 and 1 would draw the right
+   artwork the wrong way round. */
+#define COMBAT_PANEL_LOW_LEFT_ROW 0xc7
+#define COMBAT_PANEL_LOW_LEFT_COLUMN 0x1e
+#define COMBAT_PANEL_LOW_LEFT_STRIP 2
+#define COMBAT_PANEL_LOW_LEFT_BAR_COLUMN 0x13
+#define COMBAT_PANEL_UP_RIGHT_ROW 0x20
+#define COMBAT_PANEL_UP_RIGHT_COLUMN 0xc3
+#define COMBAT_PANEL_UP_RIGHT_STRIP 0
+#define COMBAT_PANEL_UP_RIGHT_BAR_COLUMN 1
+
+/* Where the two gauges sit inside the panel: the MP frame is blitted ten rows
+   below the HP frame -- PUSH 0xa at 000193bb against PUSH 0x0 at 00019399 --
+   and the two fill runs go two and twelve rows below the panel origin, ADD
+   EAX,EAX at 000193dd and IMUL EAX,dword ptr [EBP+0x18],0xc at 00019456.  The
+   fill rows are not the frame rows plus a constant: 2 and 0xc are three rows
+   apart from 0 and 0xa, so the fill sits lower inside the MP frame than inside
+   the HP one. */
+#define COMBAT_PANEL_MP_FRAME_ROW 10
+#define COMBAT_PANEL_HP_FILL_ROW 2
+#define COMBAT_PANEL_MP_FILL_ROW 0xc
+
+/* Both frames go down opaque with no mode operand: PUSH 0x0 / PUSH 0x0 at
+   00019395 and 000193b7 are fdps_cel_blit_sprite's last two arguments. */
+#define COMBAT_PANEL_FRAME_BLIT_MODE 0
+#define COMBAT_PANEL_FRAME_MODE_OPERAND 0
+
+/* See gauge.h.  The panel origin is folded into the caller's own dest_base
+   slot -- ADD dword ptr [EBP+0x14],EAX at 00019375 and 00019392 -- so
+   everything after the branch is relative to the panel and not to the frame,
+   which is why the two blits are at x 0 and the two fills at bar_column.
+
+   The side test is CMP byte ptr [EAX+0x6],0x0 / JZ at 00019356, so the
+   non-zero arm is the fall-through and is written first here; a side byte of 2
+   is the player and 0 the enemy, but the test is against 0 and any other side
+   code takes the player's panel.
+
+   THE TWO FILLS ARE INLINE EXPANSIONS OF fdps_draw_stat_gauge, not calls to
+   it.  Each one puts five argument-shaped slots into this frame ([EBP-0x48] to
+   [EBP-0x38] and [EBP-0x74] to [EBP-0x64]), copies them into a second set that
+   replays that function's own parameter slots, and runs its body inline -- the
+   fingerprint rebuild_info/build_flags.md describes.  They are open-coded here
+   for the same reason fdps_battle_show_combat_gauges' seven are: writing them
+   as calls would put two CALLs in the rebuild that the original does not have.
+   The out-of-line copy at 000192c0 still exists and still has no call site.
+
+   Neither width is capped at the span's own 0x7d and that is behaviour, not an
+   oversight: fdps_draw_gauge_fill drops its blit outright above 0x7d, so a
+   current above its maximum blanks that bar where an added min() would fill
+   it.  The four stat words are MOVSX reads at 0001932e and the three that
+   follow, so a maximum of -1 takes the empty path that an unsigned read would
+   turn into a one-pixel bar. */
+void fdps_draw_unit_hp_mp_gauges(unsigned char *dest_base, int dest_stride,
+                                 int unit_index)
+{
+    /* The record every value below is read out of, resolved once. */
+    struct fdps_unit_record *unit;
+    /* The four stat words, widened signed at entry and not re-read. */
+    int hp_current;
+    int hp_max;
+    int mp_current;
+    int mp_max;
+    /* [EBP-0x18]: the fill sheet strip the HP gauge takes; the MP gauge takes
+       the one after it, and both frames are the .CEL sprites of the same two
+       indices. */
+    int gauge_strip;
+    /* [EBP-4]: how far into the panel the fill runs start. */
+    int bar_column;
+    /* [EBP-0x20] and [EBP-0x4c]: the two expansions' own result slots. */
+    int hp_fill_width;
+    int mp_fill_width;
+
+    unit = fdps_get_unit_record(unit_index);
+    hp_current = (int) unit->hp_current;
+    hp_max = (int) unit->hp_max;
+    mp_current = (int) unit->mp_current;
+    mp_max = (int) unit->mp_max;
+
+    if (unit->side != 0) {
+        gauge_strip = COMBAT_PANEL_UP_RIGHT_STRIP;
+        bar_column = COMBAT_PANEL_UP_RIGHT_BAR_COLUMN;
+        dest_base += dest_stride * COMBAT_PANEL_UP_RIGHT_ROW
+                     + COMBAT_PANEL_UP_RIGHT_COLUMN;
+    } else {
+        gauge_strip = COMBAT_PANEL_LOW_LEFT_STRIP;
+        bar_column = COMBAT_PANEL_LOW_LEFT_BAR_COLUMN;
+        dest_base += dest_stride * COMBAT_PANEL_LOW_LEFT_ROW
+                     + COMBAT_PANEL_LOW_LEFT_COLUMN;
+    }
+
+    fdps_cel_blit_sprite(data_fdps_combat_gauge_sprite_sheet_ptr, gauge_strip,
+                         dest_base, dest_stride, 0, 0,
+                         COMBAT_PANEL_FRAME_MODE_OPERAND,
+                         COMBAT_PANEL_FRAME_BLIT_MODE);
+    fdps_cel_blit_sprite(data_fdps_combat_gauge_sprite_sheet_ptr,
+                         gauge_strip + 1, dest_base, dest_stride, 0,
+                         COMBAT_PANEL_MP_FRAME_ROW,
+                         COMBAT_PANEL_FRAME_MODE_OPERAND,
+                         COMBAT_PANEL_FRAME_BLIT_MODE);
+
+    if (hp_max <= 0) {
+        hp_fill_width = 0;
+    } else {
+        hp_fill_width = (hp_current * GAUGE_FILL_WIDTH + hp_max - 1) / hp_max;
+    }
+    fdps_draw_gauge_fill(dest_base + dest_stride * COMBAT_PANEL_HP_FILL_ROW
+                             + bar_column,
+                         dest_stride, gauge_strip, hp_fill_width);
+
+    if (mp_max <= 0) {
+        mp_fill_width = 0;
+    } else {
+        mp_fill_width = (mp_current * GAUGE_FILL_WIDTH + mp_max - 1) / mp_max;
+    }
+    fdps_draw_gauge_fill(dest_base + dest_stride * COMBAT_PANEL_MP_FILL_ROW
+                             + bar_column,
+                         dest_stride, gauge_strip + 1, mp_fill_width);
 }
 
 /* The unit gauge bar is 43 pixels wide and 6 rows tall, and the sheet holds

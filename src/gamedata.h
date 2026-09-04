@@ -841,6 +841,17 @@ extern unsigned char *data_fdps_status_gauge_bar_sheet_ptr;
    pointer and nothing reads it. */
 extern unsigned char *data_fdps_gauge_fill_sheet_ptr;
 
+/* 00064004.  Base of the loaded FigBar.cel sheet, the .CEL the combat panel's
+   gauge artwork comes out of: sprites 0..3 are the two panels' HP and MP gauge
+   FRAMES, and sprites 4..7 are the four fill strips both combat presenters
+   decode into the scratch surface data_fdps_gauge_fill_sheet_ptr above holds.
+
+   The original types it as a byte pointer and hands it straight to
+   fdps_cel_blit_sprite, which does the .CEL table arithmetic itself, so a
+   reader casts nothing.  Read by fdps_draw_unit_hp_mp_gauges for the frames and
+   by the two presenters for the strips. */
+extern unsigned char *data_fdps_combat_gauge_sprite_sheet_ptr;
+
 /* 00069d80.  Base of the loaded chapter's SHOP%02d.DAT image: three rows of
    twelve item-id bytes, 36 bytes in all, with row 0 the item shop, row 1 the
    weapon shop and row 2 the secret shop.  The row is the whole record -- there

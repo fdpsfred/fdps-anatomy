@@ -140,6 +140,40 @@ extern void fdps_draw_stat_gauge(unsigned char *dest, int dest_stride,
                                  int gauge_index, int max, int current);
 #pragma aux fdps_draw_stat_gauge "*" parm caller [];
 
+/* Draws one battle unit's whole combat gauge panel -- both frames and both
+   filled bars -- into the animation frame being composed at dest_base.
+
+   THE PANEL'S CORNER COMES OUT OF THE UNIT RECORD, not out of an argument.
+   Record byte 6 is the side code, and a side of 0 puts the panel in the
+   frame's lower left, at dest_base + dest_stride * 0xc7 + 0x1e with the bars
+   starting 0x13 pixels in and taking fill strips 2 and 3; every other side
+   puts it in the upper right, at dest_base + dest_stride * 0x20 + 0xc3 with
+   the bars starting 1 pixel in and taking strips 0 and 1.  Strips below 2 fill
+   right-to-left in fdps_draw_gauge_fill, so the two panels are mirror images
+   and neither the corner nor the strip pair may be swapped for the other's.
+
+   Both frames are blitted opaque out of the FigBar.cel sheet
+   data_fdps_combat_gauge_sprite_sheet_ptr holds (gamedata.h), the HP frame at
+   the panel origin and the MP frame ten rows below it, and the two fill runs go
+   two and twelve rows below that origin.  The fill art comes from
+   data_fdps_gauge_fill_sheet_ptr, which lives only while a combat animation is
+   on screen, so this is not callable outside one.
+
+   Each bar is filled to the same 125-column CEILING fdps_draw_stat_gauge takes,
+   HP from record words +0x40 and +0x42 and MP from +0x44 and +0x46, all four
+   read SIGNED.  A maximum of 0 or below draws an empty bar rather than
+   dividing, and NOTHING CAPS THE WIDTH AT 125: a current above its maximum
+   makes fdps_draw_gauge_fill skip that bar entirely, so the gauge reads empty
+   rather than full and adding the natural min() changes the picture.
+
+   dest_base is the surface the animation frame is being composed in and
+   dest_stride its pitch; every caller passes its own 0x16480-byte off-screen
+   page and the constant 0x170.  unit_index goes straight to
+   fdps_get_unit_record and is not range checked.  Nothing is returned. */
+extern void fdps_draw_unit_hp_mp_gauges(unsigned char *dest_base,
+                                        int dest_stride, int unit_index);
+#pragma aux fdps_draw_unit_hp_mp_gauges "*" parm caller [];
+
 /* Draws one battle unit's 43x6 gauge bar at dst, filled in proportion to
    cur_value against max_value, for a caller that holds a stat pair rather than
    a pixel width.

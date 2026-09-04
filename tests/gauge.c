@@ -2373,6 +2373,354 @@ static void combat_gauges_pace_six_of_the_seven_frames(void)
     cg_unstage();
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_draw_unit_hp_mp_gauges @ 00019310
+ * ------------------------------------------------------------------ */
+
+/* The panel geometry comes from the assembly at 00019310 and from nowhere
+   else: SHL EAX,0x5 / ADD EAX,0xc3 at 0001936d and IMUL EAX,dword ptr
+   [EBP+0x18],0xc7 / ADD EAX,0x1e at 00019388 for the two panel origins, MOV
+   dword ptr [EBP+-0x18],0x0 / MOV dword ptr [EBP+-0x4],0x1 against 0x2 / 0x13
+   for the strip base and the bar column, CMP byte ptr [EAX+0x6],0x0 / JZ at
+   00019356 for the split, PUSH 0x0 and PUSH 0xa at 00019399 and 000193bb for
+   the two frame rows, ADD EAX,EAX at 000193dd and IMUL EAX,dword ptr
+   [EBP+0x18],0xc at 00019456 for the two fill rows, the four MOVSX word reads
+   at 0001932e, 00019338, 00019342 and 0001934c for the stat pairs, and
+   IMUL EDX,...,0x7d / ADD EDX / DEC EDX / SAR EDX,0x1f / IDIV at
+   0001942f..0001943c for the ceiling.
+
+   The function draws through two callees that are real code here -- the frames
+   through fdps_cel_blit_sprite and the bars through fdps_draw_gauge_fill -- so
+   every case below reads its answer back off the destination surface.  The two
+   art sources are staged rather than loaded: the fill strips reuse stage_fill
+   above, and the .CEL is a four-sprite sheet built here whose sprites are one
+   pixel each, so a frame blit marks its own corner and nothing else.  Ticket 23
+   owns what either real sheet holds, and neither is opened by name by anything
+   in this file. */
+
+/* The frame the panels are composed in.  0x170 is the pitch every call site
+   passes; 0x180 is a second one, used by the case that shows the stride is not
+   a constant inside the function, and the array is sized for that wider one. */
+#define HPMP_FRAME_PITCH 0x170
+#define HPMP_ALT_PITCH 0x180
+#define HPMP_FRAME_ROWS 240
+#define HPMP_FRAME_BYTES (HPMP_FRAME_ROWS * HPMP_ALT_PITCH)
+
+/* Outside the 1..251 the staged art takes, so "nothing was drawn here" cannot
+   be satisfied by an art byte that happened to match. */
+#define HPMP_GUARD 0xfe
+
+/* The two panel origins, spelled out from the assembly rather than taken from
+   a header. */
+#define HPMP_UP_RIGHT_ROW 0x20
+#define HPMP_UP_RIGHT_COLUMN 0xc3
+#define HPMP_UP_RIGHT_BAR_COLUMN 1
+#define HPMP_LOW_LEFT_ROW 0xc7
+#define HPMP_LOW_LEFT_COLUMN 0x1e
+#define HPMP_LOW_LEFT_BAR_COLUMN 0x13
+
+/* Four sprites is what the two panels between them ask for: strips 0 and 1 for
+   one and 2 and 3 for the other.  The header is fifteen bytes, the offset table
+   is sprite_count + 1 entries of four bytes right after it, and every stored
+   offset is measured from the start of the sheet. */
+#define HPMP_CEL_SPRITES 4
+#define HPMP_CEL_TABLE_START 15
+#define HPMP_CEL_STREAM_START (HPMP_CEL_TABLE_START + (HPMP_CEL_SPRITES + 1) * 4)
+#define HPMP_CEL_STREAM_BYTES 2
+#define HPMP_CEL_BYTES (HPMP_CEL_STREAM_START \
+                        + HPMP_CEL_SPRITES * HPMP_CEL_STREAM_BYTES)
+
+/* Sprite N paints the single byte HPMP_CEL_PIXEL_BASE + N, so which sprite
+   reached the surface is readable from the surface. */
+#define HPMP_CEL_PIXEL_BASE 0xa0
+
+static unsigned char hpmp_cel[HPMP_CEL_BYTES];
+static unsigned char hpmp_frame[HPMP_FRAME_BYTES];
+
+/* Zero records, a staged fill sheet, a one-pixel-per-sprite .CEL and a frame
+   of guard bytes. */
+static void hpmp_stage(void)
+{
+    int sprite;
+    int offset;
+
+    stage();
+    stage_fill();
+
+    for (offset = 0; offset < HPMP_CEL_BYTES; offset++) {
+        hpmp_cel[offset] = 0;
+    }
+    hpmp_cel[0] = 'C';
+    hpmp_cel[1] = 'E';
+    hpmp_cel[2] = 'L';
+    *(short *) (hpmp_cel + 7) = 1;
+    *(short *) (hpmp_cel + 9) = 1;
+    *(short *) (hpmp_cel + 11) = HPMP_CEL_SPRITES;
+    for (sprite = 0; sprite < HPMP_CEL_SPRITES; sprite++) {
+        offset = HPMP_CEL_STREAM_START + sprite * HPMP_CEL_STREAM_BYTES;
+        *(int *) (hpmp_cel + HPMP_CEL_TABLE_START + sprite * 4) = offset;
+        /* Command 0x00 is a fill run of one pixel, and the byte after it is
+           the pixel (rle.h). */
+        hpmp_cel[offset] = 0x00;
+        hpmp_cel[offset + 1] = (unsigned char) (HPMP_CEL_PIXEL_BASE + sprite);
+    }
+    *(int *) (hpmp_cel + HPMP_CEL_TABLE_START + HPMP_CEL_SPRITES * 4) =
+        HPMP_CEL_BYTES;
+    data_fdps_combat_gauge_sprite_sheet_ptr = hpmp_cel;
+
+    for (offset = 0; offset < HPMP_FRAME_BYTES; offset++) {
+        hpmp_frame[offset] = HPMP_GUARD;
+    }
+}
+
+/* The five record fields this function reads. */
+static void hpmp_set_unit(int unit_index, int side, int hp_current, int hp_max,
+                          int mp_current, int mp_max)
+{
+    stage_units[unit_index].side = (unsigned char) side;
+    stage_units[unit_index].hp_current = (short) hp_current;
+    stage_units[unit_index].hp_max = (short) hp_max;
+    stage_units[unit_index].mp_current = (short) mp_current;
+    stage_units[unit_index].mp_max = (short) mp_max;
+}
+
+/* One frame pixel in each panel's own coordinates, at the pitch every call
+   site uses. */
+static int up_right(int row, int column)
+{
+    return (int) hpmp_frame[(HPMP_UP_RIGHT_ROW + row) * HPMP_FRAME_PITCH
+                            + HPMP_UP_RIGHT_COLUMN + column];
+}
+
+static int low_left(int row, int column)
+{
+    return (int) hpmp_frame[(HPMP_LOW_LEFT_ROW + row) * HPMP_FRAME_PITCH
+                            + HPMP_LOW_LEFT_COLUMN + column];
+}
+
+/* The offsets every case below addresses through.  If the record were shaped
+   differently, each of them would be reading other bytes. */
+static void hpmp_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 6);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_current), 0x40);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_max), 0x42);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, mp_current), 0x44);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, mp_max), 0x46);
+}
+
+/* Side 2 takes the fall-through arm: origin dest_stride * 0x20 + 0xc3, frames
+   from sprites 0 and 1, bars one pixel in out of strips 0 and 1 -- and strips
+   below 2 fill from the RIGHT, so both runs end at the span's last column
+   rather than starting at its first.  HP is (50 * 125 + 99) / 100 = 63 columns
+   and MP (25 * 125 + 99) / 100 = 32, so they are shifted right by 62 and 93.
+
+   The two guard columns at bar column 0 are what pin the bar column at 1 and
+   the MP frame row at 10 rather than at the fill's own 12. */
+static void hpmp_side_two_takes_the_upper_right_panel(void)
+{
+    hpmp_stage();
+    hpmp_set_unit(0, 2, 50, 100, 25, 100);
+    fdps_draw_unit_hp_mp_gauges(hpmp_frame, HPMP_FRAME_PITCH, 0);
+
+    CHECK_EQ(up_right(0, 0), HPMP_CEL_PIXEL_BASE);
+    CHECK_EQ(up_right(10, 0), HPMP_CEL_PIXEL_BASE + 1);
+    CHECK_EQ(up_right(1, 0), HPMP_GUARD);
+    CHECK_EQ(up_right(2, 0), HPMP_GUARD);
+    CHECK_EQ(up_right(12, 0), HPMP_GUARD);
+
+    CHECK_EQ(up_right(2, HPMP_UP_RIGHT_BAR_COLUMN + 62), fill_art(0, 0, 62));
+    CHECK_EQ(up_right(2, HPMP_UP_RIGHT_BAR_COLUMN + 124), fill_art(0, 0, 124));
+    CHECK_EQ(up_right(6, HPMP_UP_RIGHT_BAR_COLUMN + 62), fill_art(0, 4, 62));
+    CHECK_EQ(up_right(2, HPMP_UP_RIGHT_BAR_COLUMN + 61), HPMP_GUARD);
+    CHECK_EQ(up_right(7, HPMP_UP_RIGHT_BAR_COLUMN + 62), HPMP_GUARD);
+
+    CHECK_EQ(up_right(12, HPMP_UP_RIGHT_BAR_COLUMN + 93), fill_art(1, 0, 93));
+    CHECK_EQ(up_right(12, HPMP_UP_RIGHT_BAR_COLUMN + 124), fill_art(1, 0, 124));
+    CHECK_EQ(up_right(16, HPMP_UP_RIGHT_BAR_COLUMN + 93), fill_art(1, 4, 93));
+    CHECK_EQ(up_right(12, HPMP_UP_RIGHT_BAR_COLUMN + 92), HPMP_GUARD);
+
+    CHECK_EQ(low_left(0, 0), HPMP_GUARD);
+}
+
+/* Side 0 takes the other arm: origin dest_stride * 0xc7 + 0x1e, frames from
+   sprites 2 and 3, bars 0x13 pixels in out of strips 2 and 3 -- and strips from
+   2 up fill from the LEFT, so both runs start at the span's first column.  The
+   same 50 of 100 and 25 of 100 give the same 63 and 32 columns, which is what
+   makes the mirroring the only difference between this case and the one
+   above. */
+static void hpmp_side_zero_takes_the_lower_left_panel(void)
+{
+    hpmp_stage();
+    hpmp_set_unit(1, 0, 50, 100, 25, 100);
+    fdps_draw_unit_hp_mp_gauges(hpmp_frame, HPMP_FRAME_PITCH, 1);
+
+    CHECK_EQ(low_left(0, 0), HPMP_CEL_PIXEL_BASE + 2);
+    CHECK_EQ(low_left(10, 0), HPMP_CEL_PIXEL_BASE + 3);
+
+    CHECK_EQ(low_left(2, HPMP_LOW_LEFT_BAR_COLUMN), fill_art(2, 0, 0));
+    CHECK_EQ(low_left(2, HPMP_LOW_LEFT_BAR_COLUMN + 62), fill_art(2, 0, 62));
+    CHECK_EQ(low_left(6, HPMP_LOW_LEFT_BAR_COLUMN), fill_art(2, 4, 0));
+    CHECK_EQ(low_left(2, HPMP_LOW_LEFT_BAR_COLUMN + 63), HPMP_GUARD);
+    CHECK_EQ(low_left(2, HPMP_LOW_LEFT_BAR_COLUMN - 1), HPMP_GUARD);
+
+    CHECK_EQ(low_left(12, HPMP_LOW_LEFT_BAR_COLUMN), fill_art(3, 0, 0));
+    CHECK_EQ(low_left(12, HPMP_LOW_LEFT_BAR_COLUMN + 31), fill_art(3, 0, 31));
+    CHECK_EQ(low_left(12, HPMP_LOW_LEFT_BAR_COLUMN + 32), HPMP_GUARD);
+
+    CHECK_EQ(up_right(0, 0), HPMP_GUARD);
+}
+
+/* The test is CMP byte ptr [EAX+0x6],0x0 and not a compare against the player
+   side's own 2, so side 1 and side 255 both land in the upper right.  Read as a
+   signed char, 255 would still be non-zero, so this is about the value the
+   branch tests and not about the widening. */
+static void hpmp_any_non_zero_side_takes_the_upper_right_panel(void)
+{
+    hpmp_stage();
+    hpmp_set_unit(0, 1, 100, 100, 100, 100);
+    fdps_draw_unit_hp_mp_gauges(hpmp_frame, HPMP_FRAME_PITCH, 0);
+    CHECK_EQ(up_right(0, 0), HPMP_CEL_PIXEL_BASE);
+    CHECK_EQ(low_left(0, 0), HPMP_GUARD);
+
+    hpmp_stage();
+    hpmp_set_unit(0, 255, 100, 100, 100, 100);
+    fdps_draw_unit_hp_mp_gauges(hpmp_frame, HPMP_FRAME_PITCH, 0);
+    CHECK_EQ(up_right(0, 0), HPMP_CEL_PIXEL_BASE);
+    CHECK_EQ(low_left(0, 0), HPMP_GUARD);
+}
+
+/* unit_index goes straight to fdps_get_unit_record, whose stride is 0x50, so
+   the panel drawn is record 3's and not record 0's.  Record 0 is staged with
+   the other side and a full pair, which would put the panel in the other corner
+   and fill it whole. */
+static void hpmp_unit_index_selects_the_record(void)
+{
+    hpmp_stage();
+    hpmp_set_unit(0, 0, 100, 100, 100, 100);
+    hpmp_set_unit(3, 2, 50, 100, 25, 100);
+    fdps_draw_unit_hp_mp_gauges(hpmp_frame, HPMP_FRAME_PITCH, 3);
+
+    CHECK_EQ(up_right(0, 0), HPMP_CEL_PIXEL_BASE);
+    CHECK_EQ(low_left(0, 0), HPMP_GUARD);
+    CHECK_EQ(up_right(2, HPMP_UP_RIGHT_BAR_COLUMN + 62), fill_art(0, 0, 62));
+    CHECK_EQ(up_right(2, HPMP_UP_RIGHT_BAR_COLUMN + 61), HPMP_GUARD);
+}
+
+/* CMP dword ptr [EBP+-0x30],0x0 / JG at 00019420 and the same at 0001949c: a
+   maximum of 0 and a negative maximum both fall through to a width of 0 and
+   never reach the IDIV, so the bar is empty however large the current is.  The
+   frames still go down, which is what separates "the bar was skipped" from
+   "the function did nothing". */
+static void hpmp_zero_and_negative_max_draw_empty_bars(void)
+{
+    hpmp_stage();
+    hpmp_set_unit(0, 0, 50, 0, 5, -10);
+    fdps_draw_unit_hp_mp_gauges(hpmp_frame, HPMP_FRAME_PITCH, 0);
+
+    CHECK_EQ(low_left(0, 0), HPMP_CEL_PIXEL_BASE + 2);
+    CHECK_EQ(low_left(10, 0), HPMP_CEL_PIXEL_BASE + 3);
+    CHECK_EQ(low_left(2, HPMP_LOW_LEFT_BAR_COLUMN), HPMP_GUARD);
+    CHECK_EQ(low_left(2, HPMP_LOW_LEFT_BAR_COLUMN + 124), HPMP_GUARD);
+    CHECK_EQ(low_left(12, HPMP_LOW_LEFT_BAR_COLUMN), HPMP_GUARD);
+    CHECK_EQ(low_left(12, HPMP_LOW_LEFT_BAR_COLUMN + 124), HPMP_GUARD);
+}
+
+/* MOVSX word ptr [EAX+0x42] at 00019338 widens the maximum SIGNED, so the word
+   0xffff is -1 and takes the empty path.  Widened unsigned it would be 65535,
+   the divide would be reached, and (50 * 125 + 65534) / 65535 is 1 -- a single
+   lit column.  The MP bar is a normal 32 of 125 so the call is known to have
+   run. */
+static void hpmp_stat_words_are_read_signed(void)
+{
+    hpmp_stage();
+    hpmp_set_unit(0, 0, 50, -1, 25, 100);
+    fdps_draw_unit_hp_mp_gauges(hpmp_frame, HPMP_FRAME_PITCH, 0);
+
+    CHECK_EQ(low_left(2, HPMP_LOW_LEFT_BAR_COLUMN), HPMP_GUARD);
+    CHECK_EQ(low_left(12, HPMP_LOW_LEFT_BAR_COLUMN), fill_art(3, 0, 0));
+    CHECK_EQ(low_left(12, HPMP_LOW_LEFT_BAR_COLUMN + 31), fill_art(3, 0, 31));
+}
+
+/* DEC EDX after ADD EDX,max rounds up: 1 of 1000 is (125 + 999) / 1000 = 1 lit
+   column where the truncating 125 / 1000 would be an empty bar.  The rounding
+   stops at zero, which the MP pair shows: (0 * 125 + 999) / 1000 is 0 and
+   nothing is drawn. */
+static void hpmp_one_point_of_current_still_lights_one_column(void)
+{
+    hpmp_stage();
+    hpmp_set_unit(0, 0, 1, 1000, 0, 1000);
+    fdps_draw_unit_hp_mp_gauges(hpmp_frame, HPMP_FRAME_PITCH, 0);
+
+    CHECK_EQ(low_left(2, HPMP_LOW_LEFT_BAR_COLUMN), fill_art(2, 0, 0));
+    CHECK_EQ(low_left(6, HPMP_LOW_LEFT_BAR_COLUMN), fill_art(2, 4, 0));
+    CHECK_EQ(low_left(2, HPMP_LOW_LEFT_BAR_COLUMN + 1), HPMP_GUARD);
+    CHECK_EQ(low_left(12, HPMP_LOW_LEFT_BAR_COLUMN), HPMP_GUARD);
+}
+
+/* current == max is (77 * 125 + 76) / 77 = 125, the whole span, and 125 is
+   still drawn.  One point above the maximum is 127, which fdps_draw_gauge_fill
+   drops outright -- so an overfull gauge reads EMPTY and not full.  Adding the
+   min(125, width) a rebuilder would reach for turns the MP bar here into a full
+   one. */
+static void hpmp_full_span_is_drawn_and_an_overfull_one_is_not(void)
+{
+    hpmp_stage();
+    hpmp_set_unit(0, 0, 77, 77, 101, 100);
+    fdps_draw_unit_hp_mp_gauges(hpmp_frame, HPMP_FRAME_PITCH, 0);
+
+    CHECK_EQ(low_left(2, HPMP_LOW_LEFT_BAR_COLUMN), fill_art(2, 0, 0));
+    CHECK_EQ(low_left(2, HPMP_LOW_LEFT_BAR_COLUMN + 124), fill_art(2, 0, 124));
+    CHECK_EQ(low_left(2, HPMP_LOW_LEFT_BAR_COLUMN + 125), HPMP_GUARD);
+
+    CHECK_EQ(low_left(12, HPMP_LOW_LEFT_BAR_COLUMN), HPMP_GUARD);
+    CHECK_EQ(low_left(12, HPMP_LOW_LEFT_BAR_COLUMN + 124), HPMP_GUARD);
+}
+
+/* The HP bar is fed from +0x40 and +0x42 and the MP bar from +0x44 and +0x46,
+   and the two pairs are not interchangeable: a full HP pair with a
+   one-of-a-thousand MP pair draws the whole span on row 2 and a single column
+   on row 12, and swapping the pairs would swap those two readings. */
+static void hpmp_hp_pair_feeds_row_two_and_mp_pair_row_twelve(void)
+{
+    hpmp_stage();
+    hpmp_set_unit(0, 0, 77, 77, 1, 1000);
+    fdps_draw_unit_hp_mp_gauges(hpmp_frame, HPMP_FRAME_PITCH, 0);
+
+    CHECK_EQ(low_left(2, HPMP_LOW_LEFT_BAR_COLUMN + 124), fill_art(2, 0, 124));
+    CHECK_EQ(low_left(12, HPMP_LOW_LEFT_BAR_COLUMN), fill_art(3, 0, 0));
+    CHECK_EQ(low_left(12, HPMP_LOW_LEFT_BAR_COLUMN + 1), HPMP_GUARD);
+}
+
+/* dest_stride is the row multiplier for the panel origin AND the pitch handed
+   to both callees, so a pitch of 0x180 moves the panel to row 0xc7 of a
+   0x180-byte row and steps the fill's own rows by the same 0x180.  Nothing is
+   drawn where the 0x170 pitch would have put the panel. */
+static void hpmp_dest_stride_places_the_panel_and_pitches_the_blits(void)
+{
+    int origin;
+
+    hpmp_stage();
+    hpmp_set_unit(0, 0, 50, 100, 0, 0);
+    fdps_draw_unit_hp_mp_gauges(hpmp_frame, HPMP_ALT_PITCH, 0);
+
+    origin = HPMP_LOW_LEFT_ROW * HPMP_ALT_PITCH + HPMP_LOW_LEFT_COLUMN;
+    CHECK_EQ((int) hpmp_frame[origin], HPMP_CEL_PIXEL_BASE + 2);
+    CHECK_EQ((int) hpmp_frame[origin + 10 * HPMP_ALT_PITCH],
+             HPMP_CEL_PIXEL_BASE + 3);
+    CHECK_EQ((int) hpmp_frame[origin + 2 * HPMP_ALT_PITCH
+                              + HPMP_LOW_LEFT_BAR_COLUMN],
+             fill_art(2, 0, 0));
+    CHECK_EQ((int) hpmp_frame[origin + 3 * HPMP_ALT_PITCH
+                              + HPMP_LOW_LEFT_BAR_COLUMN],
+             fill_art(2, 1, 0));
+    CHECK_EQ((int) hpmp_frame[origin + 2 * HPMP_ALT_PITCH
+                              + HPMP_LOW_LEFT_BAR_COLUMN + 63],
+             HPMP_GUARD);
+
+    CHECK_EQ(low_left(0, 0), HPMP_GUARD);
+}
+
 void run_gauge_tests(void)
 {
     RUN_TEST(zero_max_draws_an_empty_bar);
@@ -2471,4 +2819,16 @@ void run_gauge_tests(void)
     RUN_TEST(combat_gauges_present_312x192_at_screen_4_4);
     RUN_TEST(combat_page_comes_back_from_the_heap);
     RUN_TEST(combat_gauges_pace_six_of_the_seven_frames);
+
+    RUN_TEST(hpmp_record_shape_matches_the_offsets);
+    RUN_TEST(hpmp_side_two_takes_the_upper_right_panel);
+    RUN_TEST(hpmp_side_zero_takes_the_lower_left_panel);
+    RUN_TEST(hpmp_any_non_zero_side_takes_the_upper_right_panel);
+    RUN_TEST(hpmp_unit_index_selects_the_record);
+    RUN_TEST(hpmp_zero_and_negative_max_draw_empty_bars);
+    RUN_TEST(hpmp_stat_words_are_read_signed);
+    RUN_TEST(hpmp_one_point_of_current_still_lights_one_column);
+    RUN_TEST(hpmp_full_span_is_drawn_and_an_overfull_one_is_not);
+    RUN_TEST(hpmp_hp_pair_feeds_row_two_and_mp_pair_row_twelve);
+    RUN_TEST(hpmp_dest_stride_places_the_panel_and_pitches_the_blits);
 }
