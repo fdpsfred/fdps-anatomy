@@ -22,8 +22,15 @@
  * the frame-count test, MOVSX EDX,word ptr [EAX+0x2] / CMP EDX,dword ptr
  * [EAX+0x4] / JG for the hold, and CMP byte ptr [EBP+0x18],0x0 / JNZ for the
  * choice between restarting and stopping at the end.
+ *
+ * The two player sections at the end drive the real adapter and take their
+ * expected geometry from the two request origins and the two fdps_blit_rect
+ * argument lists, 0001ecf0 for the full-screen player over a caller-supplied
+ * background and 000222c0 for the framed 312x192 player over the live scene.
  */
 #include <stddef.h>
+#include <stdlib.h>
+#include <malloc.h>
 #include <string.h>
 #include <dos.h>
 #include <i86.h>
@@ -883,6 +890,339 @@ static void play_draws_an_overhanging_layer_into_the_margin(void)
              0);
 }
 
+/* --- fdps_saf_play_over_scene @ 000222c0 -------------------------------- */
+
+/* WHAT THE SCENE CASES ASSERT AGAINST, AND WHY THEY LOOK DIFFERENT FROM THE
+   ONES ABOVE.  This player takes no background: it hands its private page to
+   fdps_draw_scene_layers before every tick and lets the map compositor fill
+   it.  The cases here stage that compositor quiet -- no scene layers, no map
+   cursor overlay and no units, the same staging tests/gauge.c and tests/anim.c
+   use for their own presentation loops -- so the compositor writes nothing at
+   all and the page shows only what the frames put there.  The page is
+   otherwise never cleared (there is no memset and no fill between the malloc
+   at 000222d1 and the first fdps_draw_scene_layers), so a zeroed block of
+   exactly its size is left at the head of the free list first and every window
+   byte no frame reached reads back 0.  That is what makes a positive pixel
+   assertion possible; without it those bytes would be whatever the heap held.
+
+   Because the page is never cleared, a multi-frame clip ends with EVERY
+   frame's mark on it at once rather than only the last one.  That is not a
+   weakness of the fixture, it is what the routine does with a quiet scene, and
+   it is what lets a case count how many frames were drawn.
+
+   WHERE THE EXPECTED POSITIONS COME FROM.  The request's x and y are both 0x18
+   -- MOV dword ptr [EBP-0x2c],0x18 and MOV dword ptr [EBP-0x28],0x18 -- and
+   the window fdps_blit_rect publishes starts at page byte 0x21d8, which is row
+   0x18, column 0x18 of a 0x168-byte pitch.  The two 0x18s cancel, so a frame
+   layer at offset x,y lands at window pixel x,y; the window is put down at
+   0xa0504, screen pixel (4,4), so it lands on screen pixel (x + 4, y + 4).
+
+   WHAT IS NOT COVERED.  The sound flag is MOV EAX,0x1 / PUSH EAX at 0002237c,
+   so every frame fires its own effect on every tick it is held; the fixture
+   frames all carry sound -1 and fdps_sfx_play does nothing while the audio
+   flags are clear, so no assertion here can see it.  Nor can one see the scene
+   being repainted UNDER a long frame, because the staged compositor paints
+   nothing: both take a machine with a driver and a loaded chapter. */
+
+/* The presented window and where it lands: 312 x 192 at screen pixel (4,4),
+   from PUSH 0xc0 / PUSH 0x138 / PUSH 0x140 / PUSH 0xa0504 at 000223b0. */
+#define SCENE_WINDOW_ROW 4
+#define SCENE_WINDOW_COL 4
+#define SCENE_WINDOW_W 0x138
+#define SCENE_WINDOW_H 0xc0
+
+/* The page the frames are composed on, PUSH 0x15180 at 000222cc: 360 x 240,
+   the screen with a 24-pixel apron on all four sides. */
+#define SCENE_PAGE_BYTES 0x15180
+
+/* A duration of 0xffff.  MOVSX at 0002235a reads the field signed, so this is
+   -1 and holds the frame for no ticks at all. */
+#define SCENE_DURATION_MINUS_ONE 0xffff
+
+/* Long enough that the pacing is unmistakable and short enough that the case
+   still finishes in a third of a second at 18.2 ticks a second. */
+#define SCENE_LONG_DURATION 6
+
+static int scene_blocks_before;
+static int scene_blocks_after;
+static unsigned int scene_ticks_used;
+
+/* Used entries currently in the heap, so a case can say the page came back. */
+static int scene_used_heap_blocks(void)
+{
+    struct _heapinfo entry;
+    int used;
+
+    used = 0;
+    entry._pentry = NULL;
+    while (_heapwalk(&entry) == _HEAPOK) {
+        if (entry._useflag == _USEDENTRY) {
+            used++;
+        }
+    }
+    return used;
+}
+
+/* Leave a zeroed block of exactly the page's size at the head of the free
+   list, so the malloc inside the routine gets a page whose untouched bytes are
+   0 and not heap litter. */
+static void scene_seed_page(void)
+{
+    unsigned char *page;
+
+    page = (unsigned char *) malloc((size_t) SCENE_PAGE_BYTES);
+    if (page != NULL) {
+        memset(page, 0, (size_t) SCENE_PAGE_BYTES);
+        free(page);
+    }
+}
+
+/* Nothing on the map and nothing in the way -- no scene layers, no map cursor
+   overlay and no units -- so fdps_draw_scene_layers writes nothing into the
+   page and every window byte a frame does not reach is the seed.  All three
+   are the values a freshly started program holds, so nothing has to be put
+   back afterwards. */
+static void scene_stage(void)
+{
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_map_unit_count = 0;
+}
+
+/* Overwrite one staged frame's duration word, which play_stage_frame always
+   leaves at 1. */
+static void scene_set_duration(int index, unsigned int duration)
+{
+    play_u16(PSAF_FRAME0_AT + index * PSAF_FRAME_STRIDE
+             + PSAF_FRAME_DURATION_AT, duration);
+}
+
+/* One whole clip, with the adapter in the mode the game plays it in and a
+   timer interrupt running, leaving the finished screen in play_screen[]. */
+static void scene_run(void)
+{
+    unsigned int before_ticks;
+
+    scene_blocks_before = scene_used_heap_blocks();
+    play_set_mode(PLAY_MODE_320X200X256);
+    memset((void *) PLAY_VGA_BASE, PLAY_SENTINEL, (size_t) PLAY_SCREEN_BYTES);
+    scene_seed_page();
+
+    play_saved_timer = _dos_getvect(PLAY_TIMER_VECTOR);
+    _dos_setvect(PLAY_TIMER_VECTOR, play_timer_isr);
+    before_ticks = data_fdps_timer_tick_counter;
+    fdps_saf_play_over_scene(play_saf);
+    scene_ticks_used = data_fdps_timer_tick_counter - before_ticks;
+    _dos_setvect(PLAY_TIMER_VECTOR, play_saved_timer);
+
+    memmove(play_screen, (void *) PLAY_VGA_BASE, (size_t) PLAY_SCREEN_BYTES);
+    play_set_mode(PLAY_MODE_TEXT);
+    scene_blocks_after = scene_used_heap_blocks();
+}
+
+/* The screen byte a frame layer at offset x,y is expected to land on. */
+static int scene_at(int layer_x, int layer_y)
+{
+    return play_pixel(SCENE_WINDOW_ROW + layer_y, SCENE_WINDOW_COL + layer_x);
+}
+
+/* How many bytes outside the presented window are no longer the sentinel the
+   screen was filled with. */
+static int scene_border_touched(void)
+{
+    int row;
+    int col;
+    int touched;
+
+    touched = 0;
+    for (row = 0; row < PLAY_SCREEN_H; row++) {
+        for (col = 0; col < PLAY_SCREEN_W; col++) {
+            if (row >= SCENE_WINDOW_ROW
+                && row < SCENE_WINDOW_ROW + SCENE_WINDOW_H
+                && col >= SCENE_WINDOW_COL
+                && col < SCENE_WINDOW_COL + SCENE_WINDOW_W) {
+                continue;
+            }
+            if (play_pixel(row, col) != PLAY_SENTINEL) {
+                touched++;
+            }
+        }
+    }
+    return touched;
+}
+
+/* How many bytes inside the presented window still hold the sentinel, so a
+   case can say the whole 312 x 192 travelled and not a smaller rectangle. */
+static int scene_window_unwritten(void)
+{
+    int row;
+    int col;
+    int kept;
+
+    kept = 0;
+    for (row = 0; row < SCENE_WINDOW_H; row++) {
+        for (col = 0; col < SCENE_WINDOW_W; col++) {
+            if (play_pixel(SCENE_WINDOW_ROW + row, SCENE_WINDOW_COL + col)
+                == PLAY_SENTINEL) {
+                kept++;
+            }
+        }
+    }
+    return kept;
+}
+
+/* How many bytes inside the presented window are not the page seed, which
+   with a quiet compositor is exactly the frame marks. */
+static int scene_window_painted(void)
+{
+    int row;
+    int col;
+    int painted;
+
+    painted = 0;
+    for (row = 0; row < SCENE_WINDOW_H; row++) {
+        for (col = 0; col < SCENE_WINDOW_W; col++) {
+            if (play_pixel(SCENE_WINDOW_ROW + row, SCENE_WINDOW_COL + col)
+                != 0) {
+                painted++;
+            }
+        }
+    }
+    return painted;
+}
+
+/* The two 0x18s and the two window origins, pinned against each other.  The
+   request's origin is 0x18,0x18 and the published window starts at page byte
+   0x21d8 -- row 0x18, column 0x18 of the 0x168-pitch page -- so they cancel
+   and a layer at offset 0,0 lands at window pixel 0,0, which the 0xa0504
+   destination puts at screen pixel (4,4).  A source of page byte 0 would put
+   the mark at (28,28) and a destination of 0xa0000 would put it at (0,0);
+   dropping the request's 0x18 would also put the cell at page x = 0, which
+   fdps_draw_tilemap_cell's strict x > 0 test refuses outright. */
+static void scene_puts_a_zero_offset_layer_at_screen_four_four(void)
+{
+    scene_stage();
+    play_stage_clip(1);
+    scene_run();
+
+    CHECK_EQ(play_pixel(4, 4), PLAY_F0_PIXEL);
+    CHECK_EQ(play_pixel(4 + PLAY_CELL_H - 1, 4 + PLAY_CELL_W - 1),
+             PLAY_F0_PIXEL);
+    CHECK_EQ(play_pixel(3, 4), PLAY_SENTINEL);
+    CHECK_EQ(play_pixel(4, 3), PLAY_SENTINEL);
+    CHECK_EQ(play_pixel(4, 4 + PLAY_CELL_W), 0);
+    CHECK_EQ(play_pixel(4 + PLAY_CELL_H, 4), 0);
+}
+
+/* PUSH 0xc0 / PUSH 0x138 / PUSH 0x140 / PUSH 0xa0504 with page + 0x21d8 as the
+   source: 312 x 192 lands at screen (4,4) and nothing outside it is written at
+   all.  The four-pixel border and the strip to the right of column 315 and
+   below row 195 therefore still hold the sentinel the run started from, while
+   no byte inside the window does -- a short row count or a narrow row would
+   leave sentinel inside, and a bigger rectangle would clear it outside. */
+static void scene_presents_312x192_and_leaves_the_border_alone(void)
+{
+    scene_stage();
+    play_stage_clip(1);
+    scene_run();
+
+    CHECK_EQ(scene_border_touched(), 0);
+    CHECK_EQ(scene_window_unwritten(), 0);
+    CHECK_EQ(play_pixel(SCENE_WINDOW_ROW + SCENE_WINDOW_H, SCENE_WINDOW_COL),
+             PLAY_SENTINEL);
+    CHECK_EQ(play_pixel(SCENE_WINDOW_ROW, SCENE_WINDOW_COL + SCENE_WINDOW_W),
+             PLAY_SENTINEL);
+}
+
+/* The outer loop runs from 0 to the header's frame count and writes its
+   counter into the request's index field at 0002233a, so every frame of the
+   clip is drawn once.  With the compositor quiet the page is never repainted,
+   so all three marks are on the screen together at the end, each at the offset
+   its OWN layer names -- which is also what pins the page pitch at 0x168, as
+   frame 1's mark is 40 rows down the page and frame 2's is 80.  A run that
+   drew one frame three times, or that took every frame's layer from frame 0,
+   would leave a different set of marks. */
+static void scene_draws_every_frame_of_the_clip(void)
+{
+    scene_stage();
+    play_stage_clip(3);
+    scene_run();
+
+    CHECK_EQ(scene_at(PLAY_F0_X, PLAY_F0_Y), PLAY_F0_PIXEL);
+    CHECK_EQ(scene_at(PLAY_F1_X, PLAY_F1_Y), PLAY_F1_PIXEL);
+    CHECK_EQ(scene_at(PLAY_F2_X, PLAY_F2_Y), PLAY_F2_PIXEL);
+    CHECK_EQ(scene_window_painted(), 3 * PLAY_CELL_W * PLAY_CELL_H);
+}
+
+/* CMP EAX,dword ptr [EBP-0x14] / JL at 00022325 against the answer
+   fdps_saf_frame_count gave: the image's header count, not the three frame
+   records the fixture actually holds.  With the count declared as 1 only frame
+   0 is drawn and the other two marks never appear, so the painted area is one
+   cell. */
+static void scene_frame_count_from_the_header_bounds_the_clip(void)
+{
+    scene_stage();
+    play_stage_clip(1);
+    scene_run();
+
+    CHECK_EQ(scene_at(PLAY_F0_X, PLAY_F0_Y), PLAY_F0_PIXEL);
+    CHECK_EQ(scene_at(PLAY_F1_X, PLAY_F1_Y), 0);
+    CHECK_EQ(scene_at(PLAY_F2_X, PLAY_F2_Y), 0);
+    CHECK_EQ(scene_window_painted(), PLAY_CELL_W * PLAY_CELL_H);
+}
+
+/* The inner loop runs the frame's duration field's worth of ticks and each of
+   them but the first waits for the timer counter to change -- MOV EAX,dword
+   ptr [EBP-0xc] / CMP EAX,dword ptr [0x00069d64] / JZ back at 000223da.  A
+   single frame declared for six ticks therefore consumes at least five of
+   them, where a routine that ignored the duration would consume none and one
+   that read it as a per-clip count rather than a per-frame one would consume
+   fewer.  Only the lower bound is asserted: a tick the body itself overruns
+   makes the next wait fall straight through, so the count can exceed the
+   duration on a slow host but can never fall below it. */
+static void scene_holds_a_frame_for_its_duration_in_ticks(void)
+{
+    scene_stage();
+    play_stage_clip(1);
+    scene_set_duration(0, SCENE_LONG_DURATION);
+    scene_run();
+
+    CHECK_EQ(scene_ticks_used >= (unsigned int) (SCENE_LONG_DURATION - 1), 1);
+    CHECK_EQ(scene_at(PLAY_F0_X, PLAY_F0_Y), PLAY_F0_PIXEL);
+}
+
+/* MOVSX EAX,word ptr [EAX+0x2] / CMP EAX,dword ptr [EBP-0x10] / JG at
+   0002235a: the duration is SIGN-extended and the compare is signed, so
+   0xffff is -1 and the inner loop's body never runs once.  Nothing is
+   composed, nothing is blitted and the whole screen still holds the sentinel
+   -- 64000 bytes of it.  A zero-extending read would hold the frame for 65535
+   ticks instead, which is an hour of wall clock and would hang this case
+   rather than fail it, so the assertion that the screen is untouched is the
+   one that can actually be made. */
+static void scene_a_negative_duration_presents_no_tick_at_all(void)
+{
+    scene_stage();
+    play_stage_clip(1);
+    scene_set_duration(0, SCENE_DURATION_MINUS_ONE);
+    scene_run();
+
+    CHECK_EQ(play_sentinel_left(), PLAY_SCREEN_BYTES);
+    CHECK_EQ(scene_at(PLAY_F0_X, PLAY_F0_Y), PLAY_SENTINEL);
+}
+
+/* PUSH EAX / CALL 0x0003d478 at 000223fb with the request's destination field
+   as the argument: the page malloc handed out is given back before the routine
+   returns, so the heap holds the same number of used entries afterwards as
+   before.  A run that leaked it would leave one more. */
+static void scene_gives_the_page_back(void)
+{
+    scene_stage();
+    play_stage_clip(3);
+    scene_run();
+
+    CHECK_EQ(scene_blocks_after, scene_blocks_before);
+}
+
 void run_saf_tests(void)
 {
     RUN_TEST(negative_index_is_rejected);
@@ -917,4 +1257,11 @@ void run_saf_tests(void)
     RUN_TEST(play_repaints_the_background_under_every_frame);
     RUN_TEST(play_puts_a_zero_offset_layer_at_the_screen_origin);
     RUN_TEST(play_draws_an_overhanging_layer_into_the_margin);
+    RUN_TEST(scene_puts_a_zero_offset_layer_at_screen_four_four);
+    RUN_TEST(scene_presents_312x192_and_leaves_the_border_alone);
+    RUN_TEST(scene_draws_every_frame_of_the_clip);
+    RUN_TEST(scene_frame_count_from_the_header_bounds_the_clip);
+    RUN_TEST(scene_holds_a_frame_for_its_duration_in_ticks);
+    RUN_TEST(scene_a_negative_duration_presents_no_tick_at_all);
+    RUN_TEST(scene_gives_the_page_back);
 }

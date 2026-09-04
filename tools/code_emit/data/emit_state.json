@@ -2292,6 +2292,14 @@
       "status": "committed",
       "emitted_against": "0x1df",
       "rounds": 0
+    },
+    "000222c0": {
+      "name": "fdps_saf_play_over_scene",
+      "target": "saf.c",
+      "body_size": "0x14a",
+      "status": "committed",
+      "emitted_against": "0x14a",
+      "rounds": 0
     }
   }
 }

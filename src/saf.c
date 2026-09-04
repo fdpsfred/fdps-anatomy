@@ -3,16 +3,24 @@
  *
  * See saf.h for the layout facts these readers depend on, and
  * resource_info/saf.md for the format itself.  Everything here works on a
- * caller-supplied image pointer; this file owns no state.  The player at the
- * end is the one routine that reaches outside itself: it reads the timer tick
- * counter to pace the clip and puts each finished frame straight on the
+ * caller-supplied image pointer; this file owns no state.  The two players at
+ * the end are the routines that reach outside themselves: they read the timer
+ * tick counter to pace the clip and put each finished frame straight on the
  * adapter.
+ *
+ * malloc and free come from <stdlib.h> and inp from <conio.h>, which is where
+ * Watcom 10.0a declares each of them, and all three are real calls in the
+ * original -- CALL 0x0003d375 at 000222d1, CALL 0x0003d478 at 000223fb and
+ * CALL 0x0003d4e4 at 00022393 -- because the flag set carries no -oi, so the
+ * plain declarations are what reproduce them (rebuild_info/build_flags.md).
  */
 #include <stddef.h>
 #include <stdlib.h>
+#include <conio.h>
 #include "gamedata.h"
 #include "blit.h"
 #include "sprite.h"
+#include "mapdraw.h"
 #include "saf.h"
 
 /* Section descriptor 0 is the frame section, and it is the first of the four,
@@ -280,4 +288,143 @@ void fdps_saf_play_over_background(void *saf_image,
     }
 
     free(work_page);
+}
+
+/* The page the scene player composes on: 360 x 240 8bpp at pitch 0x168, PUSH
+   0x15180 / CALL malloc at 000222cc.  This is the battle view's own scene
+   page, the same geometry gauge.c, indicat.c and menu.c compose on, and its
+   24-pixel apron on all four sides is what a frame layer hanging off the edge
+   of the view is drawn into instead of being clipped or wrapping onto the next
+   row.
+
+   THE PAGE IS NOT CLEARED and malloc's answer is not tested.  There is no CMP
+   EAX,0x0 between the CALL at 000222d1 and the store at 000222d9, and nothing
+   between that store and the first fdps_draw_scene_layers writes the block, so
+   every byte the scene compositor and the frame do not reach shows whatever
+   the heap left behind. */
+#define SCENE_PAGE_PITCH 0x168
+#define SCENE_PAGE_ROWS 0xf0
+#define SCENE_PAGE_BYTES 0x15180
+#define SCENE_PAGE_BORDER 0x18
+
+/* What is presented and where.  312 x 192 taken from page byte 0x21d8 -- page
+   pixel (24,24), the top-left of the picture inside the apron -- and put down
+   at screen byte 0x504, screen pixel (4,4).  Both are hard-coded in the
+   original, PUSH 0xa0504 at 000223bf, and stay literals here: 0xa0000 is where
+   the display adapter answers and not the address of anything the linker
+   places (rebuild_info/pitfalls.md, contract E). */
+#define SCENE_PAGE_WINDOW_AT 0x21d8
+#define SCENE_WINDOW_AT 0x504
+#define SCENE_WINDOW_W 0x138
+#define SCENE_WINDOW_H 0xc0
+
+/* VGA input status register 1.  Bit 3 is set while the vertical retrace is in
+   progress, which is what every presented frame straddles. */
+#define VGA_INPUT_STATUS_1 0x3da
+#define VGA_STATUS_VERTICAL_RETRACE 0x08
+
+/* 000222c0.  Two counted loops, one inside the other, both with their test at
+   the top and their increment in a block of its own that the body jumps back
+   to -- CMP EAX,dword ptr [EBP-0x14] / JL at 00022325 and MOVSX EAX,word ptr
+   [EAX+0x2] / CMP EAX,dword ptr [EBP-0x10] / JG at 0002235e.  There is no
+   other branch in the function: the four spin loops are the only remaining
+   control flow.
+
+   THE FRAME IS HELD BY A SIGNED COMPARE ON A SIGN-EXTENDED WORD.  MOVSX at
+   0002235a reads the frame record's duration at +2 as a signed 16-bit value
+   and the JG that follows is the signed test, so a duration of 0xffff is -1
+   and the frame is not shown at all, where a zero-extending read would hold it
+   for 65535 ticks (rebuild_info/pitfalls.md, contract C).
+
+   THE PAGE POINTER LIVES IN THE REQUEST AND NOWHERE ELSE.  malloc's answer is
+   stored straight into the request's destination field at 000222d9 and every
+   later use -- the compositor's argument, the blit's source, free's argument
+   -- reads it back out of there.  Keeping a separate copy would be a variable
+   the original does not have.
+
+   EVERY HELD TICK REPAINTS THE SCENE AND REDRAWS THE FRAME.  Both calls are
+   inside the inner loop, so a frame with a duration of five is composited five
+   times over five fresh repaints of the scrolling layers; because the sound
+   flag handed to fdps_draw_composite_sprite is 1 -- MOV EAX,0x1 / PUSH EAX at
+   0002237c -- a frame that carries a sound effect retriggers it once per tick
+   it is held.  Hoisting either call out of the inner loop would stop the
+   scene scrolling under a long frame and would fire that effect once instead.
+
+   NO PANEL AND NO PALETTE CYCLE.  This is fdps_render_view_frame's
+   presentation loop with a SAF frame in place of the cursor information panel,
+   and the two calls that draw the panel and cycle the scene palette are simply
+   absent from it: for the length of the animation neither happens.
+
+   THE WAIT'S LATCH IS DELIBERATELY LEFT UNINITIALISED, the same contract
+   fdps_saf_play_over_background above and fdps_animate_turn_banner (anim.c)
+   carry.  last_tick is read at 000223da before anything has written it, so the
+   first tick of the first frame ends its wait at once unless the stack happened
+   to hold the counter's current value, and the clip is one tick shorter than a
+   clean reading of it would be.  Latching the counter before the loop -- which
+   is what writing this tidily leads to -- adds that tick back
+   (rebuild_info/pitfalls.md).  data_fdps_timer_tick_counter is volatile at its
+   declaration (gamedata.h) precisely so this loop keeps reloading it.
+
+   The image is the caller's throughout: it is read through
+   fdps_saf_frame_count, fdps_saf_get_frame and the compositor, and both call
+   sites free it themselves the instant this returns. */
+void fdps_saf_play_over_scene(void *saf_image)
+{
+    /* The nine-dword draw request sprite.h describes.  Built once before the
+       clip starts, with only its frame number rewritten as the clip runs, and
+       holding the composing page in its destination field. */
+    int request[DRAW_REQUEST_DWORDS];
+    /* How many frames the image's header declares. */
+    int frame_count;
+    /* Which of them is being shown. */
+    int frame_index;
+    /* That frame's record, resolved out of the image. */
+    unsigned char *frame;
+    /* How many ticks it has been shown for. */
+    int ticks_held;
+    /* The tick the previous presented tick ended on.  Deliberately not
+       initialised -- see the note above. */
+    unsigned int last_tick;
+
+    request[DRAW_REQUEST_DEST_BASE] = (int) malloc((size_t) SCENE_PAGE_BYTES);
+    request[DRAW_REQUEST_DEST_PITCH] = SCENE_PAGE_PITCH;
+    request[DRAW_REQUEST_DEST_ROWS] = SCENE_PAGE_ROWS;
+    request[DRAW_REQUEST_X] = SCENE_PAGE_BORDER;
+    request[DRAW_REQUEST_Y] = SCENE_PAGE_BORDER;
+    request[DRAW_REQUEST_IMAGE] = (int) saf_image;
+    request[DRAW_REQUEST_BLIT_OPERAND] = 0;
+    request[DRAW_REQUEST_BLIT_MODE] = 0;
+    frame_count = fdps_saf_frame_count(saf_image);
+
+    for (frame_index = 0; frame_index < frame_count; frame_index++) {
+        request[DRAW_REQUEST_ITEM_INDEX] = frame_index;
+        frame = (unsigned char *) fdps_saf_get_frame(saf_image, frame_index);
+        for (ticks_held = 0; ticks_held < *(short *) (frame + 2);
+             ticks_held++) {
+            fdps_draw_scene_layers(
+                (unsigned char *) request[DRAW_REQUEST_DEST_BASE]);
+            fdps_draw_composite_sprite(request, 1);
+            while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE)
+                   == 0) {
+                /* Spin until the retrace begins, so the frame that has just
+                   been composed is the one the monitor shows whole. */
+            }
+            while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE)
+                   != 0) {
+                /* And until it ends, so the blit starts clear of it. */
+            }
+            fdps_blit_rect((unsigned int)
+                               ((unsigned char *)
+                                    request[DRAW_REQUEST_DEST_BASE]
+                                + SCENE_PAGE_WINDOW_AT),
+                           SCENE_PAGE_PITCH,
+                           (void *) (VGA_SCREEN_BASE + SCENE_WINDOW_AT),
+                           VGA_SCREEN_PITCH, SCENE_WINDOW_W, SCENE_WINDOW_H);
+            while (last_tick == data_fdps_timer_tick_counter) {
+            }
+            last_tick = data_fdps_timer_tick_counter;
+        }
+    }
+
+    free((void *) request[DRAW_REQUEST_DEST_BASE]);
 }

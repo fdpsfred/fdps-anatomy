@@ -104,4 +104,34 @@ extern void fdps_saf_play_over_background(void *saf_image,
                                           unsigned char *background_page);
 #pragma aux fdps_saf_play_over_background "*" parm caller [];
 
+/* Plays the loaded .SAF image saf_image through once over the live scrolling
+   scene, in the battle view's framed 312x192 main window, and returns when the
+   clip has run out.  saf_image stays the caller's: it is not freed here, and
+   both call sites free it themselves the moment this returns.
+
+   The sibling above plays over a still picture the caller supplies; this one
+   plays over the scene the map compositor draws, so there is no background
+   argument.  fdps_draw_scene_layers repaints the scrolling layer table, the
+   map cursor and the units into the private page before every single tick, and
+   the frame goes over the top of that -- which means the scene keeps scrolling
+   underneath a frame that is held for several ticks.
+
+   Frames are composed on a private 360x240 page with a 24-pixel apron on every
+   side, and only its 312x192 window is put on the adapter, at screen pixel
+   (4,4).  The four-pixel border around that window and the strip to its right
+   and below it are never written, so whatever the caller left there stays.
+
+   Each frame is held for the tick count in its own record, one presented tick
+   per change of the timer counter, and each frame's sound effect is started
+   once per tick it is held rather than once per frame.  No information panel
+   is drawn and the scene palette is not cycled for as long as the clip runs.
+
+   THE FIRST TICK IS NOT PACED.  The latch the wait loop compares the tick
+   counter against is deliberately never initialised, exactly as in the sibling
+   above, so the clip's first tick goes up and moves on without waiting
+   (rebuild_info/pitfalls.md).  Seeding it -- with 0, or with the counter's
+   current value -- adds one tick to every playback in the game. */
+extern void fdps_saf_play_over_scene(void *saf_image);
+#pragma aux fdps_saf_play_over_scene "*" parm caller [];
+
 #endif
