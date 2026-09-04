@@ -1588,6 +1588,340 @@ static void test_the_forwarded_flag_changes_nothing(void)
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* fdps_draw_scene_layers @ 0002bf60                                   */
+/* ------------------------------------------------------------------ */
+
+/* Each of the six layer slots gets its OWN 1x1 tile map, holding a tile id
+   that names the slot.  A 1x1 map makes every cell of the 14x9 window wrap
+   back onto cell (0, 0), so a layer fills the whole scene buffer with one
+   colour and the buffer afterwards names the LAST layer that was blitted --
+   which is exactly what a test of the draw order needs to read.
+
+   The ids start at 100 so a layer's colour, 101..106, cannot be confused with
+   a unit sprite (1..64), a shadow, an icon (0x80 up), the sentinel (0x5a) or a
+   blended pixel (0xa0 up). */
+#define LAYER_TILE_BASE 100
+#define LAYER_MAP_BYTES (0x0b + 2)
+
+static unsigned char layer_maps[6][LAYER_MAP_BYTES];
+
+static int layer_color(int slot)
+{
+    return tile_color(LAYER_TILE_BASE + slot);
+}
+
+/* Every layer at depth 0, no scroll, no parallax, attribute mode 0 -- so
+   neither the attribute table nor the movement grid is read and the picture is
+   decided by the layer arrays alone.  The cursor is put in mode 0, which draws
+   nothing, and the unit count at 0, so a case that does not stage them sees
+   only the layers.  Both tick latches are seeded to the counter so nothing
+   moves unless the case moves it. */
+static void stage_layers(int count)
+{
+    int slot;
+
+    build_tileset();
+    stage_attr(0, 0);
+    stage_grid(0xff);
+    fill_scene(SCENE_UNTOUCHED);
+
+    for (slot = 0; slot < 6; slot++) {
+        *(short *) (layer_maps[slot] + 7) = 1;
+        *(short *) (layer_maps[slot] + 9) = 1;
+        *(short *) (layer_maps[slot] + 0x0b) =
+            (short) (LAYER_TILE_BASE + slot);
+        data_fdps_scene_layer_tile_map_ptrs[slot] = layer_maps[slot];
+        data_fdps_scene_layer_tile_sheet_ptrs[slot] = tileset;
+        data_fdps_scene_layer_tile_attr_ptr[slot] = tile_attr;
+        data_fdps_scene_layer_tile_attr_mode[slot] = 0;
+        data_fdps_scene_layer_draw_depth[slot] = 0;
+        data_fdps_scene_layer_scroll_x_accumulator[slot] = 0;
+        data_fdps_scene_layer_scroll_offset_y[slot] = 0;
+        data_fdps_scene_layer_scroll_x_step[slot] = 0;
+        data_fdps_scene_layer_scroll_step_y[slot] = 0;
+        data_fdps_scene_layer_parallax_factor_x[slot] = 0;
+        data_fdps_scene_layer_parallax_factor_y[slot] = 0;
+    }
+
+    data_fdps_scene_layer_count = count;
+    data_fdps_battle_move_grid_ptr = move_grid;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_timer_tick_counter = 100;
+    data_fdps_scene_layer_scroll_last_tick = 100;
+    data_fdps_scene_tile_anim_last_flip_tick = 100;
+    data_fdps_scene_tile_anim_phase = 0;
+    data_fdps_marked_tile_blend_phase = 0;
+}
+
+/* Point one slot at the 16x16 map instead, whose cell (x, y) holds tile id
+   y * 16 + x, so a drawn colour names the cell the window's origin landed on
+   and the scroll arithmetic becomes readable. */
+static void stage_addressable_layer(void)
+{
+    stage_layers(1);
+    build_map(MAP_MAX_DIM, MAP_MAX_DIM);
+    data_fdps_scene_layer_tile_map_ptrs[0] = tile_map;
+}
+
+/* The accumulators step by their step values once per frame tick, both axes,
+   and the latch is moved to the counter.  A second call on the same tick adds
+   nothing -- the gate at 0002bf71 is what holds the scroll to one step per
+   frame although the compositor is called several times in a frame. */
+static void test_scroll_advances_once_per_tick(void)
+{
+    stage_layers(3);
+    data_fdps_scene_layer_scroll_x_accumulator[0] = 100;
+    data_fdps_scene_layer_scroll_offset_y[0] = 100;
+    data_fdps_scene_layer_scroll_x_step[0] = 5;
+    data_fdps_scene_layer_scroll_step_y[0] = -7;
+    data_fdps_scene_layer_scroll_x_accumulator[2] = -1;
+    data_fdps_scene_layer_scroll_x_step[2] = 3;
+    data_fdps_timer_tick_counter = 101;
+
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(data_fdps_scene_layer_scroll_x_accumulator[0], 105);
+    CHECK_EQ(data_fdps_scene_layer_scroll_offset_y[0], 93);
+    CHECK_EQ(data_fdps_scene_layer_scroll_x_accumulator[2], 2);
+    CHECK_EQ(data_fdps_scene_layer_scroll_last_tick, 101);
+
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(data_fdps_scene_layer_scroll_x_accumulator[0], 105);
+    CHECK_EQ(data_fdps_scene_layer_scroll_offset_y[0], 93);
+    CHECK_EQ(data_fdps_scene_layer_scroll_x_accumulator[2], 2);
+}
+
+/* The scroll loop is bounded by data_fdps_scene_layer_count (JL at 0002bf89),
+   not by the six slots the arrays hold, so the inactive slots keep whatever
+   the chapter loader left in them. */
+static void test_scroll_stops_at_the_layer_count(void)
+{
+    int slot;
+
+    stage_layers(2);
+    for (slot = 0; slot < 6; slot++) {
+        data_fdps_scene_layer_scroll_x_step[slot] = 1;
+        data_fdps_scene_layer_scroll_step_y[slot] = 1;
+    }
+    data_fdps_timer_tick_counter = 101;
+
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(data_fdps_scene_layer_scroll_x_accumulator[0], 1);
+    CHECK_EQ(data_fdps_scene_layer_scroll_offset_y[1], 1);
+    CHECK_EQ(data_fdps_scene_layer_scroll_x_accumulator[2], 0);
+    CHECK_EQ(data_fdps_scene_layer_scroll_offset_y[5], 0);
+}
+
+/* A tick that has not moved skips the whole scroll block -- accumulators and
+   latch alike -- and the scene is still composed, which is the asymmetry the
+   function turns on: the drawing is not gated, only the scrolling is. */
+static void test_scroll_is_skipped_when_the_tick_has_not_moved(void)
+{
+    stage_layers(1);
+    data_fdps_scene_layer_scroll_x_accumulator[0] = 40;
+    data_fdps_scene_layer_scroll_x_step[0] = 5;
+    data_fdps_timer_tick_counter = 100;
+    data_fdps_scene_layer_scroll_last_tick = 100;
+
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(data_fdps_scene_layer_scroll_x_accumulator[0], 40);
+    CHECK_EQ(data_fdps_scene_layer_scroll_last_tick, 100);
+    CHECK_EQ(pixel_at(TILE, TILE), layer_color(0));
+}
+
+/* Each axis' origin is view origin * parallax factor + accumulator, shifted
+   right three (IMUL / ADD / SAR EDX,0x3 at 0002c03e..0002c05c for x and
+   0002c06c..0002c08a for y).  x: 80 * 3 + 4 is 244 and 244 >> 3 is 30, one
+   tile and six pixels, so the window's first column is cell 1 drawn at x = 18.
+   y: 8 * 3 + 0 is 24 and 24 >> 3 is 3, no whole tile and three pixels, so the
+   first row of tiles starts at scanline 21. */
+static void test_parallax_forms_each_axis_origin(void)
+{
+    stage_addressable_layer();
+    data_fdps_battle_view_window_origin_x = 80;
+    data_fdps_scene_layer_parallax_factor_x[0] = 3;
+    data_fdps_scene_layer_scroll_x_accumulator[0] = 4;
+
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(TILE, TILE - 6), tile_color(1));
+    CHECK_EQ(pixel_at(TILE, TILE - 7), SCENE_UNTOUCHED);
+
+    stage_addressable_layer();
+    data_fdps_battle_view_window_origin_y = 8;
+    data_fdps_scene_layer_parallax_factor_y[0] = 3;
+
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(TILE - 3, TILE), tile_color(0));
+    CHECK_EQ(pixel_at(TILE - 4, TILE), SCENE_UNTOUCHED);
+}
+
+/* Contract C on the shift.  A view origin of -1 with a factor of 1 gives -1,
+   and SAR keeps that -1: the window backs up one pixel, so column 0 starts at
+   x = 1 and shows cell 15, the map's last column wrapped round, with cell 0 in
+   the next column from x = 25.  Read through an unsigned expression the same
+   bits shift to 0x1fffffff, which is 22369621 tiles and 7 pixels -- column 0
+   would start at x = 17 showing cell 5, and x = 1 would never be written at
+   all. */
+static void test_parallax_shift_is_arithmetic(void)
+{
+    stage_addressable_layer();
+    data_fdps_battle_view_window_origin_x = -1;
+    data_fdps_scene_layer_parallax_factor_x[0] = 1;
+
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(TILE, 1), tile_color(15));
+    CHECK_EQ(pixel_at(TILE, 0), SCENE_UNTOUCHED);
+    CHECK_EQ(pixel_at(TILE, 24), tile_color(15));
+    CHECK_EQ(pixel_at(TILE, 25), tile_color(0));
+}
+
+/* The slot each pass draws is draw_order[position], not position: the sorted
+   list comes back from fdps_build_scene_layer_draw_order and is used as an
+   index.  Every layer here fills the whole buffer, so the colour left behind
+   names the layer blitted LAST, which is the one with the highest depth.  The
+   third case is the tie: equal depths keep slot order, so slot 2 lands on top
+   of slots 0 and 1. */
+static void test_layers_are_blitted_in_ascending_depth_order(void)
+{
+    stage_layers(3);
+    data_fdps_scene_layer_draw_depth[0] = 5;
+    data_fdps_scene_layer_draw_depth[1] = 3;
+    data_fdps_scene_layer_draw_depth[2] = 1;
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(TILE, TILE), layer_color(0));
+
+    stage_layers(3);
+    data_fdps_scene_layer_draw_depth[0] = 1;
+    data_fdps_scene_layer_draw_depth[1] = 3;
+    data_fdps_scene_layer_draw_depth[2] = 5;
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(TILE, TILE), layer_color(2));
+
+    stage_layers(3);
+    data_fdps_scene_layer_draw_depth[0] = 4;
+    data_fdps_scene_layer_draw_depth[1] = 4;
+    data_fdps_scene_layer_draw_depth[2] = 4;
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(TILE, TILE), layer_color(2));
+}
+
+/* Depth exactly 10 is drawn by NEITHER pass: the first takes strictly less
+   (JGE at 0002c02e skips it) and the second strictly more (JLE at 0002c14a
+   skips it).  9 and 11 either side of it both draw, which is what says the
+   sentinel is the value 10 and not a bound one pass owns. */
+static void test_depth_of_exactly_ten_is_drawn_by_neither_pass(void)
+{
+    stage_layers(1);
+    data_fdps_scene_layer_draw_depth[0] = 10;
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(TILE, TILE), SCENE_UNTOUCHED);
+
+    stage_layers(1);
+    data_fdps_scene_layer_draw_depth[0] = 9;
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(TILE, TILE), layer_color(0));
+
+    stage_layers(1);
+    data_fdps_scene_layer_draw_depth[0] = 11;
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(TILE, TILE), layer_color(0));
+
+    stage_layers(2);
+    data_fdps_scene_layer_draw_depth[0] = 10;
+    data_fdps_scene_layer_draw_depth[1] = 9;
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(TILE, TILE), layer_color(1));
+}
+
+/* THE SANDWICH.  A layer below depth 10 goes down before the units and a layer
+   above 10 after them, so the unit's own block reads back as the sprite in the
+   first case and as the layer in the second.  Anything else -- both passes
+   before the units, both after, or the units first -- gets one of these two
+   pixels wrong. */
+static void test_units_are_drawn_between_the_two_passes(void)
+{
+    stage_unit();
+    stage_layers(1);
+    data_fdps_map_unit_count = 1;
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+    data_fdps_scene_layer_draw_depth[0] = 5;
+
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(42, 48), sprite_color(0));
+    CHECK_EQ(pixel_at(TILE, TILE), layer_color(0));
+
+    stage_unit();
+    stage_layers(1);
+    data_fdps_map_unit_count = 1;
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+    data_fdps_scene_layer_draw_depth[0] = 11;
+
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(42, 48), layer_color(0));
+}
+
+/* Contract C on the depth byte.  Both tests widen it with AND EAX,0xff first
+   (0002c026 and 0002c142), so 0x80 is 128 and the layer is FOREGROUND -- it
+   covers the unit.  Read through a signed char the same byte is -128, the
+   layer would fall into the background pass and the unit would cover it
+   instead. */
+static void test_depth_byte_is_widened_unsigned(void)
+{
+    stage_unit();
+    stage_layers(1);
+    data_fdps_map_unit_count = 1;
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+    data_fdps_scene_layer_draw_depth[0] = 0x80;
+
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(42, 48), layer_color(0));
+}
+
+/* Both blit loops and the sort are bounded by the layer count, but the cursor
+   and the unit sweep are not inside either loop: with no active layer at all
+   the scene keeps the sentinel everywhere the layers would have reached and
+   the unit is still drawn. */
+static void test_zero_layer_count_still_draws_the_units(void)
+{
+    stage_unit();
+    stage_layers(0);
+    data_fdps_map_unit_count = 1;
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(pixel_at(TILE, TILE), SCENE_UNTOUCHED);
+    CHECK_EQ(pixel_at(42, 48), sprite_color(0));
+}
+
+/* The cursor call sits between the two passes and is made on every frame.
+   Cursor mode 6 is the arm that draws nothing and instead clears byte 1 of the
+   movement grid cell under the cursor, so it can be seen without staging a
+   cursor sheet: with the grid's width header at 16 and the cursor at world
+   (48, 24), cell (2, 1) is the one that loses its marker and its neighbour
+   keeps one.  Byte 0 of the cell is left alone, which is what says it was the
+   marker that was cleared. */
+static void test_the_map_cursor_is_drawn_every_frame(void)
+{
+    stage_layers(1);
+    stage_grid(0x01);
+    *(short *) move_grid = (short) MAP_MAX_DIM;
+    data_fdps_map_cursor_draw_mode = 6;
+    data_fdps_map_cursor_world_x = 2 * TILE;
+    data_fdps_map_cursor_world_y = 1 * TILE;
+
+    fdps_draw_scene_layers(scene);
+    CHECK_EQ(move_grid[4 + (1 * MAP_MAX_DIM + 2) * 2 + 1], 0);
+    CHECK_EQ(move_grid[4 + (1 * MAP_MAX_DIM + 2) * 2], 0x33);
+    CHECK_EQ(move_grid[4 + (1 * MAP_MAX_DIM + 3) * 2 + 1], 0x01);
+}
+
 void run_mapdraw_tests(void)
 {
     RUN_TEST(test_ascending_depths_keep_identity_order);
@@ -1642,4 +1976,16 @@ void run_mapdraw_tests(void)
     RUN_TEST(test_the_pass_byte_is_left_clear);
     RUN_TEST(test_four_calls_step_the_walk_clock_once);
     RUN_TEST(test_the_forwarded_flag_changes_nothing);
+
+    RUN_TEST(test_scroll_advances_once_per_tick);
+    RUN_TEST(test_scroll_stops_at_the_layer_count);
+    RUN_TEST(test_scroll_is_skipped_when_the_tick_has_not_moved);
+    RUN_TEST(test_parallax_forms_each_axis_origin);
+    RUN_TEST(test_parallax_shift_is_arithmetic);
+    RUN_TEST(test_layers_are_blitted_in_ascending_depth_order);
+    RUN_TEST(test_depth_of_exactly_ten_is_drawn_by_neither_pass);
+    RUN_TEST(test_units_are_drawn_between_the_two_passes);
+    RUN_TEST(test_depth_byte_is_widened_unsigned);
+    RUN_TEST(test_zero_layer_count_still_draws_the_units);
+    RUN_TEST(test_the_map_cursor_is_drawn_every_frame);
 }

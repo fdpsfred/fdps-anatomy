@@ -9,6 +9,7 @@
 #include "gamedata.h"
 #include "blit.h"
 #include "unit.h"
+#include "mapcur.h"
 #include "mapdraw.h"
 
 /* 0002c220.  A hand-written bubble sort over the layer slot indices, keyed on
@@ -706,5 +707,131 @@ void fdps_draw_map_units(unsigned char *scene_buf, unsigned char unused_flag)
     for (unit_index = 0; unit_index < data_fdps_map_unit_count;
          unit_index++) {
         fdps_draw_map_unit(unit_index, scene_buf, unused_flag);
+    }
+}
+
+/* The six slots of the scene layer table, which is also the width of the stack
+   array the draw order is built into: SUB ESP,0x28 at 0002bf66 with four
+   further ints below it leaves 0x18 bytes at EBP-0x28, and that is the address
+   handed to fdps_build_scene_layer_draw_order at 0002bfe1. */
+#define SCENE_LAYER_SLOTS 6
+
+/* The depth byte the two passes split on.  Below it a slot is background and
+   goes down before the units; above it the slot is foreground and goes over
+   them.  Exactly 10 belongs to neither: JGE at 0002c02e skips it in the first
+   loop and JLE at 0002c14a skips it in the second. */
+#define SCENE_LAYER_MID_DEPTH 10
+
+/* The layer origins are fixed point with three fractional bits: the view
+   origin times the layer's parallax factor plus the layer's scroll
+   accumulator, closed with SAR EDX,0x3 at 0002c05c and 0002c08a for x and
+   0002c178 and 0002c1a6 for y.  SAR and not SHR, which is what settles the
+   whole expression as signed (gamedata.h). */
+#define SCENE_LAYER_PARALLAX_SHIFT 3
+
+/* 0002bf60.  The frame compositor: one scene buffer in, the whole map picture
+   out.  One stack argument, caller-cleaned -- every one of the twenty-six call
+   sites is PUSH / CALL / ADD ESP,0x4, at 0002bed0, 0001e422 and 0002000e among
+   them -- and nothing returned.
+
+   THE SCROLL IS GATED ON THE TICK AND THE DRAWING IS NOT.  Only the
+   accumulator advance sits inside the data_fdps_scene_layer_scroll_last_tick
+   test; the sort, both blit passes, the cursor and the units run on every
+   call.  That asymmetry is the whole point of the latch: the compositor is
+   called several times in a single frame, once for the map and again by every
+   window and animation that repaints the scene behind itself, and the layers
+   must scroll one step across all of them while the picture is redrawn each
+   time (rebuild_info/pitfalls.md).
+
+   A DEPTH OF EXACTLY 10 IS DRAWN BY NEITHER PASS.  The first loop takes
+   strictly less and the second strictly more, so 10 parks a layer off screen
+   rather than putting it on one side of the units.  Making either test
+   inclusive shows a layer the original never shows.
+
+   THE ORDER ARRAY IS INDEXED, NOT WALKED.  Each pass runs order_position over
+   the sorted list and takes the slot number out of it, so both passes visit
+   every active slot in ascending depth order and the depth test decides only
+   whether that slot draws.  Walking the slots in slot order and sorting the
+   drawn ones afterwards is a different picture whenever two layers overlap.
+
+   The two passes are written out twice here because that is what the original
+   does.  Folding the shared body into a helper would put a CALL in the rebuild
+   that the original does not have, and the two arms are byte-identical
+   sequences at 0002c00c-0002c0e6 and 0002c128-0002c202.
+
+   The depth byte is widened UNSIGNED before the compare -- MOV AL,byte ptr
+   [EAX + 0x69cfe] / AND EAX,0xff at 0002c020 and 0002c13c -- so a depth of
+   0x80 is 128 and lands in the foreground pass, not -128 in the background one
+   (gamedata.h).  Nothing bounds-checks data_fdps_scene_layer_count against the
+   six slots the arrays and the stack array hold; the shipped descriptor files
+   are what keeps it in range. */
+void fdps_draw_scene_layers(unsigned char *scene_buf)
+{
+    int draw_order[SCENE_LAYER_SLOTS];
+    int slot;
+    int order_position;
+    int scroll_x;
+    int scroll_y;
+
+    if (data_fdps_scene_layer_scroll_last_tick
+            != data_fdps_timer_tick_counter) {
+        for (slot = 0; slot < data_fdps_scene_layer_count; slot++) {
+            data_fdps_scene_layer_scroll_x_accumulator[slot] +=
+                data_fdps_scene_layer_scroll_x_step[slot];
+            data_fdps_scene_layer_scroll_offset_y[slot] +=
+                data_fdps_scene_layer_scroll_step_y[slot];
+        }
+        data_fdps_scene_layer_scroll_last_tick = data_fdps_timer_tick_counter;
+    }
+
+    fdps_build_scene_layer_draw_order(draw_order);
+
+    for (order_position = 0;
+         order_position < data_fdps_scene_layer_count;
+         order_position++) {
+        slot = draw_order[order_position];
+        if (data_fdps_scene_layer_draw_depth[slot] < SCENE_LAYER_MID_DEPTH) {
+            scroll_x = (data_fdps_battle_view_window_origin_x
+                        * data_fdps_scene_layer_parallax_factor_x[slot]
+                        + data_fdps_scene_layer_scroll_x_accumulator[slot])
+                       >> SCENE_LAYER_PARALLAX_SHIFT;
+            scroll_y = (data_fdps_battle_view_window_origin_y
+                        * data_fdps_scene_layer_parallax_factor_y[slot]
+                        + data_fdps_scene_layer_scroll_offset_y[slot])
+                       >> SCENE_LAYER_PARALLAX_SHIFT;
+            fdps_draw_scene_layer(scene_buf,
+                                  data_fdps_scene_layer_tile_map_ptrs[slot],
+                                  data_fdps_scene_layer_tile_sheet_ptrs[slot],
+                                  data_fdps_battle_move_grid_ptr,
+                                  scroll_x, scroll_y,
+                                  data_fdps_scene_layer_tile_attr_ptr[slot],
+                                  data_fdps_scene_layer_tile_attr_mode[slot]);
+        }
+    }
+
+    fdps_draw_map_cursor(scene_buf);
+    fdps_draw_map_units(scene_buf, 0);
+
+    for (order_position = 0;
+         order_position < data_fdps_scene_layer_count;
+         order_position++) {
+        slot = draw_order[order_position];
+        if (data_fdps_scene_layer_draw_depth[slot] > SCENE_LAYER_MID_DEPTH) {
+            scroll_x = (data_fdps_battle_view_window_origin_x
+                        * data_fdps_scene_layer_parallax_factor_x[slot]
+                        + data_fdps_scene_layer_scroll_x_accumulator[slot])
+                       >> SCENE_LAYER_PARALLAX_SHIFT;
+            scroll_y = (data_fdps_battle_view_window_origin_y
+                        * data_fdps_scene_layer_parallax_factor_y[slot]
+                        + data_fdps_scene_layer_scroll_offset_y[slot])
+                       >> SCENE_LAYER_PARALLAX_SHIFT;
+            fdps_draw_scene_layer(scene_buf,
+                                  data_fdps_scene_layer_tile_map_ptrs[slot],
+                                  data_fdps_scene_layer_tile_sheet_ptrs[slot],
+                                  data_fdps_battle_move_grid_ptr,
+                                  scroll_x, scroll_y,
+                                  data_fdps_scene_layer_tile_attr_ptr[slot],
+                                  data_fdps_scene_layer_tile_attr_mode[slot]);
+        }
     }
 }

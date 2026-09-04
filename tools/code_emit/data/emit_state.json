@@ -2212,6 +2212,14 @@
       "status": "committed",
       "emitted_against": "0x89",
       "rounds": 0
+    },
+    "0002bf60": {
+      "name": "fdps_draw_scene_layers",
+      "target": "mapdraw.c",
+      "body_size": "0x2b1",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x2b1"
     }
   }
 }

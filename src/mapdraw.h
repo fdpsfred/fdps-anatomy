@@ -51,6 +51,22 @@ extern int data_fdps_scene_marked_tile_tint_color;
 extern int data_fdps_scene_tile_anim_phase;
 extern unsigned int data_fdps_scene_tile_anim_last_flip_tick;
 
+/* 00069d14.  The frame tick the six layer scroll accumulators were last
+   advanced on.  fdps_draw_scene_layers compares data_fdps_timer_tick_counter
+   against it and steps every active layer's accumulator only when the two
+   differ, which is what holds the scroll to one step per frame although the
+   compositor is called many times per frame: twenty-six call sites repaint the
+   scene, among them every message window, every animation frame and every
+   status panel that has to show the map behind itself.  Without the latch a
+   frame that happened to repaint eight times would scroll eight steps.
+
+   Read and written only by fdps_draw_scene_layers, and only as a whole dword:
+   MOV EAX,[0x00069d14] at 0002bf6c and MOV [0x00069d14],EAX at 0002bfdc are
+   the only two instructions in the image that name the address.  Unsigned, to
+   match the tick counter it latches; the only operation on the pair is
+   equality, so a counter that has wrapped is compared correctly either way. */
+extern unsigned int data_fdps_scene_layer_scroll_last_tick;
+
 /* 00069d18.  The frame tick the map's walk-animation clock was last stepped
    on.  fdps_draw_map_unit compares data_fdps_timer_tick_counter against it and
    steps the two counters below only when the two differ, which is what holds
@@ -177,5 +193,32 @@ extern void fdps_draw_map_unit(int unit_index, unsigned char *scene_buf,
 extern void fdps_draw_map_units(unsigned char *scene_buf,
                                 unsigned char unused_flag);
 #pragma aux fdps_draw_map_units "*" parm caller [];
+
+/* Composites the whole scene into scene_buf and returns nothing: it advances
+   the layer scroll once per frame tick, blits the layer slots whose depth byte
+   is below 10, draws the map cursor and then every map unit, and finally blits
+   the layer slots whose depth byte is above 10 over the top.
+
+   This is the frame compositor: twenty-six call sites reach it, one for the map
+   itself and the rest for every window, animation and panel that has to repaint
+   the scene behind what it is about to draw.  scene_buf is the 360x240 8bpp
+   page and is forwarded unchanged to all three drawing callees; nothing is
+   returned and no argument is written back.
+
+   A LAYER AT DEPTH EXACTLY 10 IS DRAWN BY NEITHER PASS.  The first loop takes
+   depth < 10 and the second depth > 10, so 10 parks a layer rather than
+   assigning it to one side of the units.  Turning either test into its
+   inclusive form puts a layer that the original never shows on screen.
+
+   THE SCROLL STEP IS GATED ON data_fdps_scene_layer_scroll_last_tick and the
+   gate has to stay, for the reason on that global above.  The DRAW is not
+   gated: every call repaints, whether or not the tick has moved.
+
+   The draw order is rebuilt from scratch on every call, into a six-int stack
+   array, by fdps_build_scene_layer_draw_order -- which is what makes the sort's
+   stability observable, since a depth-tied pair is blitted in slot order on
+   every frame and never drifts. */
+extern void fdps_draw_scene_layers(unsigned char *scene_buf);
+#pragma aux fdps_draw_scene_layers "*" parm caller [];
 
 #endif
