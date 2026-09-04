@@ -1800,6 +1800,537 @@ static void flash_composes_the_scene_every_frame(void)
     flash_unstage();
 }
 
+/* ------------------------------------------------------------------
+ * fdps_play_indicator_queue at 0001f340.
+ *
+ * Expected values come from the assembly -- CMP dword ptr [0x00064378],0x0 / JZ
+ * at 0001f35c for the empty-queue exit, CMP dword ptr [EBP-0x10],0x16 / JL at
+ * 0001f370 for the 22 frames, the 25 bytes at 0001c2b4 copied by the MOVSD.REP
+ * / MOVSB at 0001f359 for the bounce table, IDIV EBX with EBX = 4 / ADD
+ * EDX,[EBP-0x10] at 0001f418 for the phase, IMUL ...,0x18 / SUB [0x00069ce4] /
+ * ADD [EAX+0x64120] / ADD 0x18 at 0001f437 for the column and IMUL ...,0x18 /
+ * SUB [0x00069ce0] / ADD bounce / ADD 0x15 at 0001f427 for the row, CMP
+ * EAX,0xff / JZ at 0001f3cc for the blank cell, MOV AL,byte ptr [EAX+0x641e8] /
+ * AND EAX,0xff at 0001f3da for the queued unit index and its widening, CMP
+ * EAX,[0x00064378] / JL at 0001f3a9 for the walk's bound, PUSH 0x15180 at
+ * 0001f383 for the scene, the six pushes 0xc0 / 0x138 / 0x140 / 0xa0504 /
+ * 0x168 / scene+0x21d8 at 0001f4a4 through 0001f4c5 for the presentation, the
+ * tick wait at 0001f4ce, and MOV dword ptr [0x00064378],0x0 at 0001f4ff for the
+ * emptying.  None of them is read off the emitted C.
+ *
+ * HOW THE RUN IS WATCHED is exactly how the flash above is watched, and the
+ * adapter fixture and its helpers are shared with it: mode 13h, a border
+ * sentinel over the whole frame, a zeroed scene left at the head of the free
+ * list, a real timer interrupt so the frame waits end, and a snapshot of the
+ * 64,000 bytes afterwards.
+ *
+ * WHAT THE SNAPSHOT SHOWS IS EVERY FRAME AT ONCE, and that is the point.  The
+ * scene is never cleared and all 22 frames take the same seeded block back, so
+ * the picture left behind is the union of the 22 positions each glyph stood in.
+ * The union's top row is the frame where the bounce reached 0 and its bottom
+ * row is the glyph's last row at the resting displacement of 15, which pins
+ * both ends of the table and the +0x15 under it, while each glyph's column band
+ * never moves at all.
+ *
+ * THE PHASE CANNOT BE READ OFF THE SNAPSHOT, because by the last frame every
+ * cell has stood everywhere it is going to stand.  It is read off the interrupt
+ * instead: the handler samples three screen pixels a tick, each one the top row
+ * of one cell's band, which is a pixel that is painted only on a frame where
+ * that cell's bounce is exactly 0.  Cell 1 reaches it before cell 0 and cell 4
+ * reaches it on the same frame as cell 0, which is the phase being the queue
+ * index modulo four.
+ *
+ * THE GLYPH SHEET IS STAGED HERE rather than read from Number.cel, for the
+ * reason tests/sprite.c gives: the drawer takes the sheet as an argument and
+ * the shipped one is unpacked out of a .VFS at run time.  Entry n is eight rows
+ * of one six-pixel fill in colour 0x30 + n, so a painted band says which glyph
+ * id was asked for, and six pixels wide is narrow enough that the five cells
+ * staged six pixels apart stand side by side without touching.
+ * ------------------------------------------------------------------ */
+
+/* The staged Number.cel: a 15-byte header, an eight-entry offset table at 0x0f
+   and one stream per entry (resource_info/cel.md). */
+#define PL_GLYPH_W 6
+#define PL_GLYPH_H 8
+#define PL_SHEET_ENTRIES 8
+#define PL_VERSION_FIELD_AT 0x03
+#define PL_TABLE_FIELD_AT 0x05
+#define PL_WIDTH_FIELD_AT 0x07
+#define PL_HEIGHT_FIELD_AT 0x09
+#define PL_COUNT_FIELD_AT 0x0b
+#define PL_ENCODING_FIELD_AT 0x0d
+#define PL_TABLE_AT 0x0f
+#define PL_FILL_RUN_6 0x05
+#define PL_STREAM_BYTES (PL_GLYPH_H * 2)
+#define PL_STREAM0_AT (PL_TABLE_AT + PL_SHEET_ENTRIES * 4)
+#define PL_SHEET_BYTES (PL_STREAM0_AT + PL_SHEET_ENTRIES * PL_STREAM_BYTES)
+
+/* Entry n's colour, and nothing else in the fixture is one of them: the scene
+   reads 0 where nothing was drawn and the screen outside the window is
+   FL_BORDER_FILL. */
+#define PL_ART_PIXEL 0x30
+
+/* The three immediates the popup's position is built out of: the 24-pixel tile,
+   the +0x18 on the column and the +0x15 on the row. */
+#define PL_TILE_SIZE 24
+#define PL_POPUP_ORIGIN_X 24
+#define PL_POPUP_ORIGIN_Y 21
+
+/* The queue the main fixture stages: five cells over one unit, laid out at the
+   number popup's own pitch so each has a band of its own.  Five and not four so
+   that the fifth is back in phase with the first. */
+#define PL_CELLS 5
+#define PL_CELL_FIRST 2
+#define PL_CELL_PITCH 6
+
+/* The glyph id that means "draw nothing here", which the walk skips. */
+#define PL_BLANK_GLYPH 0xff
+
+/* The bounce table's two extremes: it rests at 15 and its deepest hop reaches
+   0, so the union of the 22 frames is 16 + PL_GLYPH_H rows tall. */
+#define PL_BOUNCE_TOP 0
+#define PL_BOUNCE_REST 15
+
+/* Where the fixtures stand.  Three tiles far enough apart that no two glyph
+   bands can be confused, on a row that keeps the whole bounce inside the
+   presented window. */
+#define PL_TILE_Y 4
+#define PL_TILE_X 3
+#define PL_TILE_WIDE 6
+#define PL_TILE_NARROW 9
+
+/* The scroll the camera case uses: one whole tile on both axes, so a body that
+   subtracted neither origin, or only one of them, puts the glyph somewhere no
+   assertion here accepts. */
+#define PL_SCROLL 24
+
+/* 22 frames, of which the first may end its wait at once because its latch is
+   uninitialised, so 21 ticks is the floor a whole playback cannot go under.
+   The half-second delay at the end adds about nine more on top. */
+#define PL_FRAMES 0x16
+#define PL_MIN_TICKS (PL_FRAMES - 1)
+
+/* And what an empty queue may cost: the compare and the epilogue, which cannot
+   straddle more than the one tick boundary that may fall inside them. */
+#define PL_EMPTY_MAX_TICKS 1
+
+/* One probe per cell whose phase is being asked about, sampled every tick. */
+#define PL_PROBES 3
+#define PL_SAMPLE_MAX 64
+
+static unsigned char play_sheet[PL_SHEET_BYTES];
+static void (__interrupt __far *play_saved_timer)();
+static volatile int play_sample_count;
+static volatile unsigned char play_samples[PL_PROBES][PL_SAMPLE_MAX];
+static int play_probe_at[PL_PROBES];
+static unsigned int play_ticks_used;
+static int play_blocks_before;
+static int play_blocks_after;
+
+static void __interrupt __far play_timer_isr(void)
+{
+    int probe;
+
+    ++data_fdps_timer_tick_counter;
+    if (play_sample_count < PL_SAMPLE_MAX) {
+        for (probe = 0; probe < PL_PROBES; probe++) {
+            play_samples[probe][play_sample_count] =
+                ((unsigned char *) FL_VGA_BASE)[play_probe_at[probe]];
+        }
+        play_sample_count = play_sample_count + 1;
+    }
+    _chain_intr(play_saved_timer);
+}
+
+static void play_sheet_u16(int at, unsigned int value)
+{
+    play_sheet[at] = (unsigned char) (value & 0xff);
+    play_sheet[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void play_sheet_u32(int at, unsigned long value)
+{
+    play_sheet[at] = (unsigned char) (value & 0xff);
+    play_sheet[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    play_sheet[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    play_sheet[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+/* Eight glyphs, each PL_GLYPH_H rows of one PL_GLYPH_W-pixel fill in a colour
+   that names its own entry.  The header's table-position field is left at 0
+   deliberately: the drawer addresses the table at the fixed 0x0f and a sheet
+   that only works when that field is read would say so here. */
+static void play_stage_sheet(void)
+{
+    int entry;
+    int stream_at;
+    int row;
+
+    memset(play_sheet, 0, sizeof(play_sheet));
+    play_sheet[0] = 'C';
+    play_sheet[1] = 'E';
+    play_sheet[2] = 'L';
+    play_sheet_u16(PL_VERSION_FIELD_AT, 1);
+    play_sheet_u16(PL_TABLE_FIELD_AT, 0);
+    play_sheet_u16(PL_WIDTH_FIELD_AT, PL_GLYPH_W);
+    play_sheet_u16(PL_HEIGHT_FIELD_AT, PL_GLYPH_H);
+    play_sheet_u16(PL_COUNT_FIELD_AT, PL_SHEET_ENTRIES);
+    play_sheet_u16(PL_ENCODING_FIELD_AT, 2);
+
+    for (entry = 0; entry < PL_SHEET_ENTRIES; entry++) {
+        stream_at = PL_STREAM0_AT + entry * PL_STREAM_BYTES;
+        play_sheet_u32(PL_TABLE_AT + entry * 4, (unsigned long) stream_at);
+        for (row = 0; row < PL_GLYPH_H; row++) {
+            play_sheet[stream_at + row * 2] = PL_FILL_RUN_6;
+            play_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) (PL_ART_PIXEL + entry);
+        }
+    }
+}
+
+/* The flash fixture, plus the glyph sheet and a queue whose every cell is blank
+   until a case fills one in. */
+static void play_stage(void)
+{
+    int cell;
+
+    flash_stage();
+    play_stage_sheet();
+    data_fdps_number_glyph_sheet_ptr = play_sheet;
+
+    for (cell = 0; cell < INDICATOR_QUEUE_CELLS; cell++) {
+        data_fdps_indicator_queue_glyph_ids[cell] = PL_BLANK_GLYPH;
+        data_fdps_battle_indicator_queue_unit_idx[cell] = 0;
+        data_fdps_indicator_queue_cell_x_offset[cell] = 0;
+    }
+    data_fdps_indicator_queue_count = 0;
+
+    for (cell = 0; cell < PL_PROBES; cell++) {
+        play_probe_at[cell] = 0;
+    }
+}
+
+static void play_unstage(void)
+{
+    data_fdps_number_glyph_sheet_ptr = NULL;
+    data_fdps_indicator_queue_count = 0;
+    flash_unstage();
+}
+
+static void play_queue_cell(int index, int glyph_id, int unit_index,
+                            int cell_x)
+{
+    data_fdps_indicator_queue_glyph_ids[index] = (unsigned char) glyph_id;
+    data_fdps_battle_indicator_queue_unit_idx[index] =
+        (unsigned char) unit_index;
+    data_fdps_indicator_queue_cell_x_offset[index] = (unsigned char) cell_x;
+}
+
+/* Where a cell's glyph lands on screen: the popup position the assembly builds,
+   carried out through the presented window's own offset. */
+static int play_screen_col(int tile_x, int scroll_x, int cell_x)
+{
+    return tile_x * PL_TILE_SIZE - scroll_x + cell_x + PL_POPUP_ORIGIN_X
+           + FL_TO_SCREEN;
+}
+
+static int play_screen_row(int tile_y, int scroll_y, int bounce)
+{
+    return tile_y * PL_TILE_SIZE - scroll_y + bounce + PL_POPUP_ORIGIN_Y
+           + FL_TO_SCREEN;
+}
+
+/* Point a probe at the top row of one cell's band, which is painted only on a
+   frame where that cell's bounce is exactly 0. */
+static void play_probe(int slot, int tile_x, int cell)
+{
+    play_probe_at[slot] =
+        play_screen_row(PL_TILE_Y, 0, PL_BOUNCE_TOP) * FL_SCREEN_W
+        + play_screen_col(tile_x, 0, PL_CELL_FIRST + cell * PL_CELL_PITCH);
+}
+
+/* One whole playback, watched the way flash_run watches a flash. */
+static void play_run(void)
+{
+    unsigned int before_ticks;
+
+    flash_screen = (unsigned char *) malloc((size_t) FL_SCREEN_BYTES);
+    CHECK_EQ(flash_screen != NULL, 1);
+    if (flash_screen == NULL) {
+        return;
+    }
+    memset(flash_screen, FL_BORDER_FILL, (size_t) FL_SCREEN_BYTES);
+
+    play_sample_count = 0;
+    play_blocks_before = flash_used_heap_blocks();
+    flash_set_mode(FL_MODE_320X200X256);
+    memset((void *) FL_VGA_BASE, FL_BORDER_FILL, (size_t) FL_SCREEN_BYTES);
+    flash_seed_scene();
+
+    play_saved_timer = _dos_getvect(FL_TIMER_VECTOR);
+    _dos_setvect(FL_TIMER_VECTOR, play_timer_isr);
+    before_ticks = data_fdps_timer_tick_counter;
+    fdps_play_indicator_queue();
+    play_ticks_used = data_fdps_timer_tick_counter - before_ticks;
+    _dos_setvect(FL_TIMER_VECTOR, play_saved_timer);
+
+    memmove(flash_screen, (void *) FL_VGA_BASE, (size_t) FL_SCREEN_BYTES);
+    flash_set_mode(FL_MODE_TEXT);
+    play_blocks_after = flash_used_heap_blocks();
+}
+
+/* Five cells over one unit, glyph ids 0 to 4, laid out at the number popup's
+   pitch, with the three phase probes aimed at cells 0, 1 and 4. */
+static void play_stage_main(void)
+{
+    int cell;
+
+    play_stage();
+    flash_place(0, PL_TILE_X, PL_TILE_Y);
+    for (cell = 0; cell < PL_CELLS; cell++) {
+        play_queue_cell(cell, cell, 0, PL_CELL_FIRST + cell * PL_CELL_PITCH);
+    }
+    data_fdps_indicator_queue_count = PL_CELLS;
+
+    play_probe(0, PL_TILE_X, 0);
+    play_probe(1, PL_TILE_X, 1);
+    play_probe(2, PL_TILE_X, PL_CELLS - 1);
+}
+
+/* How many bytes of one screen column inside the presented window are not the
+   scene's own 0, which with nothing else staged means how much of that column
+   a glyph reached. */
+static int play_column_painted(int col)
+{
+    int row;
+    int painted;
+
+    painted = 0;
+    for (row = FL_WINDOW_ROW; row < FL_WINDOW_ROW + FL_WINDOW_H; row++) {
+        if (flash_pixel(row, col) != 0) {
+            painted++;
+        }
+    }
+    return painted;
+}
+
+/* The first tick on which one probe saw `value`, or -1.  The scene is never
+   cleared, so a pixel once painted stays painted and only the first sighting
+   says which frame reached it. */
+static int play_first_sample(int probe, int value)
+{
+    int i;
+
+    for (i = 0; i < play_sample_count; i++) {
+        if ((int) play_samples[probe][i] == value) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* IMUL EAX,[EBP-0x18],0x18 / SUB EAX,[0x00069ce4] / ADD EAX,[EAX+0x64120] /
+   ADD EAX,0x18 at 0001f437: the column is the unit's tile x scaled by 24 with
+   the cell's own offset and the scene border on it, and the glyph drawn there
+   is the one the cell's id names -- cell i carries id i here, so the five bands
+   have to come out in five different colours in the order they were queued.
+   The columns just outside the outermost bands stay clear, which is what says
+   the offsets are the queued ones and not a pitch of the drawer's own. */
+static void play_glyph_lands_over_its_unit(void)
+{
+    int cell;
+    int top_row;
+
+    play_stage_main();
+    play_run();
+
+    top_row = play_screen_row(PL_TILE_Y, 0, PL_BOUNCE_TOP);
+    for (cell = 0; cell < PL_CELLS; cell++) {
+        CHECK_EQ(flash_pixel(top_row,
+                             play_screen_col(PL_TILE_X, 0,
+                                             PL_CELL_FIRST
+                                             + cell * PL_CELL_PITCH)),
+                 PL_ART_PIXEL + cell);
+    }
+    CHECK_EQ(play_column_painted(play_screen_col(PL_TILE_X, 0,
+                                                PL_CELL_FIRST) - 1), 0);
+    CHECK_EQ(play_column_painted(
+                 play_screen_col(PL_TILE_X, 0,
+                                 PL_CELL_FIRST
+                                 + (PL_CELLS - 1) * PL_CELL_PITCH)
+                 + PL_GLYPH_W), 0);
+    play_unstage();
+}
+
+/* The 25 bytes at 0001c2b4 read through ADD EAX,EDX / ADD EAX,0x15 at 0001f431:
+   over 22 frames a cell stands at every displacement its phase reaches, and the
+   union runs from the row the table's 0 puts it on down to the last row of the
+   glyph at the resting 15.  One row above and one row below that union are
+   clear, so the table's ends and the +0x15 are pinned together -- an
+   initialised table one byte out, or a missing +0x15, moves both edges. */
+static void play_bounce_spans_zero_to_fifteen(void)
+{
+    int col;
+
+    play_stage_main();
+    play_run();
+
+    col = play_screen_col(PL_TILE_X, 0, PL_CELL_FIRST);
+    CHECK_EQ(flash_pixel(play_screen_row(PL_TILE_Y, 0, PL_BOUNCE_TOP), col),
+             PL_ART_PIXEL);
+    CHECK_EQ(flash_pixel(play_screen_row(PL_TILE_Y, 0, PL_BOUNCE_TOP) - 1, col),
+             0);
+    CHECK_EQ(flash_pixel(play_screen_row(PL_TILE_Y, 0,
+                                         PL_BOUNCE_REST + PL_GLYPH_H - 1), col),
+             PL_ART_PIXEL);
+    CHECK_EQ(flash_pixel(play_screen_row(PL_TILE_Y, 0,
+                                         PL_BOUNCE_REST + PL_GLYPH_H), col),
+             0);
+    play_unstage();
+}
+
+/* IDIV EBX with EBX = 4 / ADD EDX,[EBP-0x10] at 0001f418: the table index is
+   the QUEUE index modulo four plus the frame, so cell 1 runs one frame ahead of
+   cell 0 and cell 4 is back in step with it.  The table holds 0 at indices 7
+   and 8, so cell 0 first reaches its top row on frame 7 and cell 1 on frame 6;
+   the per-tick probes are compared with each other rather than against absolute
+   frame numbers, because the first frame's uninitialised latch may or may not
+   cost it a tick.  A body with no phase term at all would light all three
+   probes on the same tick. */
+static void play_bounce_phase_is_the_queue_index_mod_four(void)
+{
+    int first_cell0;
+    int first_cell1;
+    int first_cell4;
+
+    play_stage_main();
+    play_run();
+
+    first_cell0 = play_first_sample(0, PL_ART_PIXEL + 0);
+    first_cell1 = play_first_sample(1, PL_ART_PIXEL + 1);
+    first_cell4 = play_first_sample(2, PL_ART_PIXEL + PL_CELLS - 1);
+    CHECK_EQ(first_cell0 >= 0, 1);
+    CHECK_EQ(first_cell1 >= 0, 1);
+    CHECK_EQ(first_cell1 < first_cell0, 1);
+    CHECK_EQ(first_cell4, first_cell0);
+    play_unstage();
+}
+
+/* MOV dword ptr [0x00064378],0x0 at 0001f4ff empties the queue on the way out;
+   CALL malloc at 0001f388 and CALL free at 0001f4e5 are both inside the frame
+   loop, so 22 scenes are taken and 22 given back and the heap is where it
+   started -- which is also what lets every frame reuse the one seeded block
+   that every case above depends on; and CMP dword ptr [EBP-0x10],0x16 at
+   0001f370 with the tick wait at 0001f4ce is what the tick floor measures. */
+static void play_empties_the_queue_and_frees_every_scene(void)
+{
+    play_stage_main();
+    play_run();
+
+    CHECK_EQ(data_fdps_indicator_queue_count, 0);
+    CHECK_EQ(play_blocks_after, play_blocks_before);
+    CHECK_EQ(play_ticks_used >= PL_MIN_TICKS, 1);
+    play_unstage();
+}
+
+/* PUSH 0xc0 / PUSH 0x138 / PUSH 0x140 / PUSH 0xa0504 / PUSH 0x168 with
+   scene + 0x21d8 at 0001f4a4 through 0001f4c5: 312x192 out of scene pixel
+   (24,24) and into screen pixel (4,4).  The four edges pin both ends of that at
+   once -- the first and last row and column of the window carry the scene's own
+   0 while the byte just outside each of them is still the sentinel -- and
+   nothing outside the window is written at all. */
+static void play_presents_312x192_at_screen_four_four(void)
+{
+    play_stage_main();
+    play_run();
+
+    CHECK_EQ(flash_pixel(FL_WINDOW_ROW, FL_WINDOW_COL), 0);
+    CHECK_EQ(flash_pixel(FL_WINDOW_ROW - 1, FL_WINDOW_COL), FL_BORDER_FILL);
+    CHECK_EQ(flash_pixel(FL_WINDOW_ROW, FL_WINDOW_COL - 1), FL_BORDER_FILL);
+    CHECK_EQ(flash_pixel(FL_WINDOW_ROW + FL_WINDOW_H - 1,
+                         FL_WINDOW_COL + FL_WINDOW_W - 1), 0);
+    CHECK_EQ(flash_pixel(FL_WINDOW_ROW + FL_WINDOW_H,
+                         FL_WINDOW_COL + FL_WINDOW_W - 1), FL_BORDER_FILL);
+    CHECK_EQ(flash_pixel(FL_WINDOW_ROW + FL_WINDOW_H - 1,
+                         FL_WINDOW_COL + FL_WINDOW_W), FL_BORDER_FILL);
+    CHECK_EQ(flash_outside_window_touched(), 0);
+    play_unstage();
+}
+
+/* CMP dword ptr [0x00064378],0x0 / JZ 0x0001f509 at 0001f35c: with the cursor
+   at zero the whole body is stepped over.  No scene is composed, nothing is
+   blitted -- the sentinel is still on the screen where the window would have
+   landed -- no tick is waited for and the half-second delay at 0001f4f2 is not
+   reached either.  That is what makes the unconditional call at the end of
+   every producer's caller free. */
+static void play_empty_queue_costs_nothing(void)
+{
+    play_stage();
+    play_run();
+
+    CHECK_EQ(flash_pixel(FL_WINDOW_ROW, FL_WINDOW_COL), FL_BORDER_FILL);
+    CHECK_EQ(flash_outside_window_touched(), 0);
+    CHECK_EQ(play_ticks_used <= PL_EMPTY_MAX_TICKS, 1);
+    CHECK_EQ(data_fdps_indicator_queue_count, 0);
+    play_unstage();
+}
+
+/* SUB EAX,[0x00069ce4] at 0001f43b and SUB EAX,[0x00069ce0] at 0001f42b: both
+   camera origins are taken off, so scrolling one tile on each axis moves the
+   popup one tile up and one tile left.  The column the unscrolled popup would
+   have used is asserted clear, so a body that subtracted neither, or only the
+   one, fails on both halves at once. */
+static void play_camera_scroll_is_subtracted(void)
+{
+    play_stage();
+    flash_place(0, PL_TILE_X, PL_TILE_Y);
+    play_queue_cell(0, 0, 0, PL_CELL_FIRST);
+    data_fdps_indicator_queue_count = 1;
+    data_fdps_battle_view_window_origin_x = PL_SCROLL;
+    data_fdps_battle_view_window_origin_y = PL_SCROLL;
+    play_run();
+
+    CHECK_EQ(flash_pixel(play_screen_row(PL_TILE_Y, PL_SCROLL, PL_BOUNCE_TOP),
+                         play_screen_col(PL_TILE_X, PL_SCROLL, PL_CELL_FIRST)),
+             PL_ART_PIXEL);
+    CHECK_EQ(play_column_painted(play_screen_col(PL_TILE_X, 0,
+                                                PL_CELL_FIRST)), 0);
+    play_unstage();
+}
+
+/* Three branches in one run, each with its own column band.
+   Cell 0 names unit 0x80 and its glyph appears over that unit's tile, not over
+   the tile of unit -128 -- MOV AL,byte ptr [EAX+0x641e8] / AND EAX,0xff at
+   0001f3da widens the queued index UNSIGNED, and both candidates are real
+   records here.  Cell 1 carries the blank id and CMP EAX,0xff / JZ at 0001f3cc
+   skips it without resolving a record.  Cell 2 is past the cursor and CMP
+   EAX,[0x00064378] / JL at 0001f3a9 never reaches it, so a stale cell left in
+   the arrays from an earlier popup cannot be drawn. */
+static void play_blank_cell_and_cursor_bound(void)
+{
+    play_stage();
+    flash_place(0, PL_TILE_X, PL_TILE_Y);
+    flash_place(FL_WIDE_INDEX, PL_TILE_WIDE, PL_TILE_Y);
+    flash_place(-FL_WIDE_INDEX, PL_TILE_NARROW, PL_TILE_Y);
+    play_queue_cell(0, 0, FL_WIDE_INDEX, PL_CELL_FIRST);
+    play_queue_cell(1, PL_BLANK_GLYPH, 0, PL_CELL_FIRST + PL_CELL_PITCH);
+    play_queue_cell(2, 2, 0, PL_CELL_FIRST + 2 * PL_CELL_PITCH);
+    data_fdps_indicator_queue_count = 2;
+    play_run();
+
+    CHECK_EQ(play_column_painted(play_screen_col(PL_TILE_WIDE, 0,
+                                                PL_CELL_FIRST)) > 0, 1);
+    CHECK_EQ(play_column_painted(play_screen_col(PL_TILE_NARROW, 0,
+                                                PL_CELL_FIRST)), 0);
+    CHECK_EQ(play_column_painted(play_screen_col(PL_TILE_X, 0,
+                                                PL_CELL_FIRST
+                                                + PL_CELL_PITCH)), 0);
+    CHECK_EQ(play_column_painted(play_screen_col(PL_TILE_X, 0,
+                                                PL_CELL_FIRST
+                                                + 2 * PL_CELL_PITCH)), 0);
+    play_unstage();
+}
+
 void run_indicat_tests(void)
 {
     RUN_TEST(number_position_is_the_first_two_record_bytes);
@@ -1887,12 +2418,22 @@ void run_indicat_tests(void)
     RUN_TEST(flash_presents_312x192_at_screen_four_four);
     RUN_TEST(flash_composes_the_scene_every_frame);
 
+    RUN_TEST(play_glyph_lands_over_its_unit);
+    RUN_TEST(play_bounce_spans_zero_to_fifteen);
+    RUN_TEST(play_bounce_phase_is_the_queue_index_mod_four);
+    RUN_TEST(play_empties_the_queue_and_frees_every_scene);
+    RUN_TEST(play_presents_312x192_at_screen_four_four);
+    RUN_TEST(play_empty_queue_costs_nothing);
+    RUN_TEST(play_camera_scroll_is_subtracted);
+    RUN_TEST(play_blank_cell_and_cursor_bound);
+
     /* Put the globals back before leaving.  The runners share one process, and
        a later unit that expects an empty battle or an empty queue would
        otherwise inherit this file's fixture and pass or fail for the wrong
        reason. */
     data_fdps_map_unit_array_ptr = NULL;
     data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_number_glyph_sheet_ptr = NULL;
     data_fdps_map_unit_walk_anim_counter = 0;
     data_fdps_scene_layer_count = 0;
     data_fdps_map_cursor_draw_mode = 0;

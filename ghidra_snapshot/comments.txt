@@ -3190,7 +3190,7 @@ Otherwise it runs 22 frames. Each frame allocates a fresh 0x15180-byte (360x240)
   x = tile_x * 24 - DAT_00069ce4 + DAT_00064120[i] + 24
   y = tile_y * 24 - DAT_00069ce0 + bounce[i % 4 + frame] + 21
 
-where 24 is the tile size in pixels, DAT_00069ce4 and DAT_00069ce0 are the camera's pixel scroll x and y, DAT_00064120[i] is the cell's x offset inside its own popup, and the +24 / +21 place the popup inside the scene page's border. The i % 4 term staggers the four cells of a popup by one frame each, so a four-digit number hops as a wave instead of as a block; with frame at most 21 and i % 4 at most 3 the table index reaches exactly 24, the table's last byte.
+where 24 is the tile size in pixels, DAT_00069ce4 and DAT_00069ce0 are the camera's pixel scroll x and y, DAT_00064120[i] is the cell's x offset inside its own popup, and the +24 / +21 place the popup inside the scene page's border. The i % 4 term staggers consecutive queued cells by one frame each, so a four-digit number hops as a wave instead of as a block -- i is the absolute queue index, so a popup only starts on phase 0 when the cursor happened to be a multiple of four. With frame at most 21 and i % 4 at most 3 the table index reaches exactly 24, the table's last byte.
 
 The frame is then presented: it spins on the VGA input status register (port 0x3da, bit 3) for a whole vertical retrace pulse, first until the bit sets and then until it clears, and blits the page's visible 312x192 window -- page + 0x21d8, i.e. 24 rows down and 24 pixels in -- to the mode-13h screen at 0xa0504 (row 4, column 4) with fdps_blit_rect. It then spins until the timer tick DAT_00069d64 differs from the tick it recorded on the previous frame, records the new tick, and frees the page.
 

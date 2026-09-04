@@ -2361,6 +2361,14 @@
       "status": "committed",
       "emitted_against": "0x4e8",
       "rounds": 0
+    },
+    "0001f340": {
+      "name": "fdps_play_indicator_queue",
+      "target": "indicat.c",
+      "body_size": "0x1d0",
+      "status": "committed",
+      "emitted_against": "0x1d0",
+      "rounds": 0
     }
   }
 }

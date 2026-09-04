@@ -10,13 +10,17 @@
  * the intrinsics are asked for, and -oi is not in this build's flag set
  * (rebuild_info/build_flags.md), so the plain declarations are what reproduce
  * the two calls.  malloc and free come from <stdlib.h> and inp from <conio.h>,
- * and all three are calls in the original too -- CALL 0x0003d375 at 0001f93f,
- * CALL 0x0003d478 at 0001fa17 and CALL 0x0003d4e4 at 0001f9b9 and 0001f9ca.
+ * and all three are calls in the original too -- CALL 0x0003d375 at 0001f93f
+ * and 0001f388, CALL 0x0003d478 at 0001fa17 and 0001f4e5, and CALL 0x0003d4e4
+ * at 0001f9b9, 0001f9ca, 0001f487 and 0001f498.  delay comes from <i86.h>,
+ * which is where Watcom 10.0a declares it, and it is a call too -- CALL
+ * 0x0003d370 at 0001f4f7.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <conio.h>
+#include <i86.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "unit.h"
@@ -93,6 +97,209 @@
    cell i emits a digit only while the formatted number is longer than
    INDICATOR_NUMBER_CELLS - 1 - i characters. */
 #define INDICATOR_ALIGN_COUNTDOWN 3
+
+/* The VGA input status register and its vertical retrace bit, tested as TEST
+   AL,0x8 after each CALL to inp -- at 0001f48f and 0001f4a0 in the queue
+   player and at 0001f9c1 and 0001f9d2 in the unit flash. */
+#define VGA_INPUT_STATUS_1 0x3da
+#define VGA_STATUS_VERTICAL_RETRACE 0x08
+
+/* The mode 13h screen and its row stride.  Both frame presenters in this file
+   push an absolute 0xa0504 and a stride of 0x140, so the screen base is named
+   here once and the window offset stays with the presenter that uses it. */
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_PITCH 0x140
+
+/* How many frames one playback runs for -- CMP dword ptr [EBP-0x10],0x16 / JL
+   at 0001f370 -- and how many steps the bounce table has.  The table is copied
+   onto the stack as 6 MOVSD plus 1 MOVSB at 0001f359, which is the 25 bytes
+   at 0001c2b4 and is the shape -mf gives an initialised local array
+   (rebuild_info/build_flags.md), not a memcpy call. */
+#define PLAYBACK_FRAMES 0x16
+#define PLAYBACK_BOUNCE_STEPS 25
+
+/* How the bounce is staggered across the queue: the phase is the QUEUE index
+   modulo four, IDIV EBX with EBX = 4 at 0001f418, and the remainder is added to
+   the frame number to index the table.  With the frame at most 21 and the phase
+   at most 3 the index reaches exactly 24, the table's last byte, so the table
+   is read to its end and never past it.
+
+   The phase is the absolute queue index and NOT the cell's index inside its own
+   popup (rebuild_info/pitfalls.md).  fdps_show_sprite_indicator advances the
+   cursor by the number of cells it actually wrote rather than by four, so a
+   short label leaves the cursor off a multiple of four and every popup queued
+   after it bounces out of phase.  Writing the phase as a per-popup cell index
+   is tidier and loses that. */
+#define PLAYBACK_BOUNCE_PHASES 4
+
+/* Where the popup sits inside the scene page, in pixels, once the unit's tile
+   position has been converted and the camera scroll taken off: ADD EAX,0x18 at
+   0001f453 on the column and ADD EAX,0x15 at 0001f433 on the row.  The x is the
+   scene's own 24-pixel border and the y is three pixels less, which lifts the
+   glyph so it floats over the unit rather than standing on it. */
+#define PLAYBACK_POPUP_ORIGIN_X 0x18
+#define PLAYBACK_POPUP_ORIGIN_Y 0x15
+
+/* The offscreen scene each frame is composed on: 360 by 240 at a 360-byte
+   pitch, the PUSH 0x15180 at 0001f383 and the PUSH 0x168 at 0001f457 and
+   0001f4b8.  It is the surface fdps_draw_scene_layers hardwires. */
+#define PLAYBACK_SCENE_BYTES 0x15180
+#define PLAYBACK_SCENE_PITCH 0x168
+
+/* What is presented and where: 312 by 192 taken from scene byte 0x21d8, which
+   is scene pixel (24,24), landing at screen byte 0x504, which is screen pixel
+   (4,4) -- the immediates of the six pushes at 0001f4a4 through 0001f4c5. */
+#define PLAYBACK_SCENE_WINDOW_AT 0x21d8
+#define PLAYBACK_WINDOW_AT 0x504
+#define PLAYBACK_WINDOW_W 0x138
+#define PLAYBACK_WINDOW_H 0xc0
+
+/* How long the finished popup is left standing before the queue is cleared:
+   PUSH 0x1f4 / CALL delay at 0001f4f2. */
+#define PLAYBACK_TAIL_MS 500
+
+/* 0001f340.  Plays the whole queue back and empties it.  Every cell any of the
+   four producers above appended is bounced over its own unit for 22 frames,
+   the last frame is left on screen for half a second, and the cursor goes back
+   to zero.  Nothing is returned and nothing else happens while it runs: the
+   call costs about 22 timer ticks, a little over a second.
+
+   AN EMPTY QUEUE COSTS NOTHING.  CMP dword ptr [0x00064378],0x0 / JZ at
+   0001f35c leaves through the epilogue before the first frame, so a caller that
+   queued nothing -- every producer culls its request against the view window --
+   does not pay the 22 frames or the half second, and the delay is not reached
+   either.
+
+   THE BOUNCE TABLE IS READ AT THE QUEUE INDEX MODULO FOUR PLUS THE FRAME.  See
+   PLAYBACK_BOUNCE_PHASES above for why that is the queue index and not the
+   cell's place in its popup.  The table's values are pixels of DOWNWARD
+   displacement, so the run is a rest at 15, a hop 15 pixels up and back, a
+   short rest, a smaller hop 7 pixels up and back, and a rest to finish.
+
+   THE SCENE IS ALLOCATED AND FREED INSIDE THE FRAME LOOP, once per frame --
+   CALL malloc at 0001f388 and CALL free at 0001f4e5 are both between the loop's
+   test and its increment -- and nothing checks what malloc handed back and
+   nothing clears it.  With no scene layers loaded fdps_draw_scene_layers writes
+   nothing into it, so a frame can show whatever the previous one left in the
+   same recycled block.  Hoisting the pair out of the loop is the obvious tidy-up
+   and it is a different program: one allocation of an 86,400-byte block instead
+   of 22, and a heap that never sees the playback.
+
+   THE FRAME WAIT'S LATCH IS DELIBERATELY LEFT UNINITIALISED, the same contract
+   fdps_flash_units_in_color above and the whole of anim.c carry.  last_tick is
+   read at 0001f4ce before anything has written it, so the first frame waits
+   either not at all or a full tick depending on what that stack slot held on
+   entry.  Initialising it, to zero or to the current tick, adds a tick to the
+   first frame (rebuild_info/pitfalls.md).
+
+   data_fdps_timer_tick_counter is volatile at its declaration (gamedata.h)
+   because of that wait: nothing here writes the counter, so a build allowed to
+   hoist the load would spin forever.  The two retrace spins read a port and
+   cannot be hoisted for the same reason.
+
+   A BLANK CELL IS SKIPPED BY GLYPH ID.  CMP EAX,0xff / JZ at 0001f3cc jumps
+   straight to the loop's increment, so a blank cell is not resolved to a unit
+   record and nothing is drawn for it -- that is how a short number stays right
+   aligned inside its four cells without the popup moving.
+
+   THE QUEUED UNIT INDEX IS A BYTE AND IS WIDENED UNSIGNED.  MOV AL,byte ptr
+   [EAX + 0x641e8] / AND EAX,0xff at 0001f3da, so a queued index of 0x82 names
+   unit 130 and not unit -126.  It is resolved through fdps_get_unit_record on
+   every cell of every frame and never cached, so a popup follows its unit if
+   the unit moves or the array is relocated under it.
+
+   TWO CALLS' ANSWERS ARE READ: malloc's, which is the scene page every other
+   call in the frame is handed, and fdps_get_unit_record's, whose record bytes 0
+   and 1 are the unit's tile position.  fdps_draw_scene_layers,
+   fdps_cel_blit_sprite, fdps_blit_rect, free and delay return nothing the
+   original looks at, and inp's answer is tested for bit 3 at both spins.
+
+   The frames are paced by the retrace and by the timer tick, so how many
+   instructions stand between them is not observable (contract D). */
+void fdps_play_indicator_queue(void)
+{
+    /* Pixels of downward displacement, one per step of the bounce. */
+    unsigned char bounce_offset[PLAYBACK_BOUNCE_STEPS] = {
+        15, 15, 15, 15,
+        7, 3, 1, 0, 0, 1, 3, 7,
+        15, 15,
+        11, 9, 8, 8, 9, 11,
+        15, 15, 15, 15, 15
+    };
+    /* The 360x240 offscreen scene this frame is composed on. */
+    unsigned char *scene_buf;
+    /* The record of the unit the cell being drawn floats over. */
+    struct fdps_unit_record *unit;
+    /* Which of the 22 frames is being drawn. */
+    int frame;
+    /* Where the walk over the queued cells has got to. */
+    int cell_index;
+    /* The cell's unit's tile position, read afresh for every cell. */
+    int tile_x;
+    int tile_y;
+    /* The tick the previous frame ended on.  Deliberately not initialised --
+       see the note above. */
+    unsigned int last_tick;
+
+    if (data_fdps_indicator_queue_count != 0) {
+        for (frame = 0; frame < PLAYBACK_FRAMES; frame++) {
+            scene_buf = (unsigned char *) malloc((size_t) PLAYBACK_SCENE_BYTES);
+            fdps_draw_scene_layers(scene_buf);
+
+            for (cell_index = 0;
+                 cell_index < data_fdps_indicator_queue_count;
+                 cell_index++) {
+                if (data_fdps_indicator_queue_glyph_ids[cell_index]
+                        != INDICATOR_BLANK_GLYPH) {
+                    unit = fdps_get_unit_record(
+                        (int) data_fdps_battle_indicator_queue_unit_idx[
+                                  cell_index]);
+                    tile_x = unit->pos_x;
+                    tile_y = unit->pos_y;
+
+                    fdps_cel_blit_sprite(
+                        data_fdps_number_glyph_sheet_ptr,
+                        (int) data_fdps_indicator_queue_glyph_ids[cell_index],
+                        scene_buf, PLAYBACK_SCENE_PITCH,
+                        tile_x * INDICATOR_TILE_SIZE
+                            - data_fdps_battle_view_window_origin_x
+                            + (int) data_fdps_indicator_queue_cell_x_offset[
+                                        cell_index]
+                            + PLAYBACK_POPUP_ORIGIN_X,
+                        tile_y * INDICATOR_TILE_SIZE
+                            - data_fdps_battle_view_window_origin_y
+                            + (int) bounce_offset[
+                                        cell_index % PLAYBACK_BOUNCE_PHASES
+                                        + frame]
+                            + PLAYBACK_POPUP_ORIGIN_Y,
+                        0, 0);
+                }
+            }
+
+            while ((inp(VGA_INPUT_STATUS_1)
+                    & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+                /* Spin until the retrace begins, so the frame that has just
+                   been composed is the one the monitor shows whole. */
+            }
+            while ((inp(VGA_INPUT_STATUS_1)
+                    & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+                /* And until it ends, so the blit starts clear of it. */
+            }
+            fdps_blit_rect(
+                (unsigned int) (scene_buf + PLAYBACK_SCENE_WINDOW_AT),
+                PLAYBACK_SCENE_PITCH,
+                (void *) (VGA_SCREEN_BASE + PLAYBACK_WINDOW_AT),
+                VGA_SCREEN_PITCH, PLAYBACK_WINDOW_W, PLAYBACK_WINDOW_H);
+            while (last_tick == data_fdps_timer_tick_counter) {
+            }
+            last_tick = data_fdps_timer_tick_counter;
+            free(scene_buf);
+        }
+
+        delay((unsigned int) PLAYBACK_TAIL_MS);
+        data_fdps_indicator_queue_count = 0;
+    }
+}
 
 /* 0001f510.  The digit buffer is a five-byte local seeded with four spaces --
    MOVSD / MOVSB out of the initialiser image at 0001c2cd, which is the shape
@@ -349,13 +556,6 @@ void fdps_show_cure_indicator(int unit_index)
 #define FLASH_WINDOW_AT 0x504
 #define FLASH_WINDOW_W 0x138
 #define FLASH_WINDOW_H 0xc0
-#define VGA_SCREEN_BASE 0x000a0000
-#define VGA_SCREEN_PITCH 0x140
-
-/* The VGA input status register and its vertical retrace bit, tested as TEST
-   AL,0x8 after each CALL to inp at 0001f9c1 and 0001f9d2. */
-#define VGA_INPUT_STATUS_1 0x3da
-#define VGA_STATUS_VERTICAL_RETRACE 0x08
 
 /* 0001f910.  Flashes a list of battle units in one palette colour so the player
    can see which units an effect has just been applied to.  Eight frames, each

@@ -39,6 +39,40 @@ extern unsigned char data_fdps_battle_indicator_queue_unit_idx[INDICATOR_QUEUE_C
    number is right-aligned inside its four cells without moving the popup. */
 extern unsigned char data_fdps_indicator_queue_glyph_ids[INDICATOR_QUEUE_CELLS];
 
+/* 0001f340.  Plays the queue back and empties it, and does not come back until
+   it has finished.  Every cell the producers below appended is bounced over its
+   own unit for 22 frames -- each frame a whole scene composed offscreen and
+   presented, each paced by the vertical retrace and then by one change of the
+   timer tick -- the last frame is held for another half second, and the cursor
+   goes back to zero.  A call therefore costs roughly 22 ticks plus 500 ms, a
+   little over a second and a half, and nothing else happens while it runs.
+
+   This is where a popup is actually drawn.  A caller queues as many popups as
+   its effect produced and calls here once, and they all animate together in the
+   one pass; calling here between two producers animates them one after the
+   other instead, which is why the damage, heal, item and spell paths each queue
+   a whole batch first.
+
+   AN EMPTY QUEUE RETURNS AT ONCE and costs neither the frames nor the half
+   second, so a caller whose every request was culled against the view window
+   pays nothing for calling here anyway.  That is what makes the unconditional
+   call at the end of each of those paths correct.
+
+   Each cell floats over the unit its producer named, at the tile position that
+   unit holds NOW: the record is resolved through fdps_get_unit_record on every
+   cell of every frame, so a unit that moves between queueing and playback drags
+   its popup with it.  A cell whose glyph id is 0xff is skipped and draws
+   nothing.
+
+   The queue is emptied on the way out, so a second call with nothing queued in
+   between is the no-op above rather than a repeat.
+
+   The pacing depends on the timer interrupt actually advancing
+   data_fdps_timer_tick_counter: with the interrupt not installed the frame
+   waits never end and the call does not return. */
+extern void fdps_play_indicator_queue(void);
+#pragma aux fdps_play_indicator_queue "*" parm caller [];
+
 /* 0001f510.  Floats a number over one battle unit -- damage taken, HP healed,
    MP restored or a stat gain -- by appending four cells to the shared queue.
    Nothing is drawn here and nothing waits; the caller drains the queue with
