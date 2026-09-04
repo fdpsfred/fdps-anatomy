@@ -1651,5 +1651,20 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "0002cda0": [
+    {
+      "from": "emit",
+      "what": "What portrait ids 0x24..0x27, 0x69 and 0x6a portray, and why they -- together with 0x8e and 0x3c..0x3e -- are the sets singled out for semi-transparent and no-shadow drawing. The code's behaviour is fully settled and tested; only the subject of those records is not. What the knowledge base does settle: assets/characters.md puts the table split at 60, so an id below 0x3c indexes FRIAPRDA.DAT / FRILEVUP.DAT and 0x3c or above indexes ENEMYDAT.DAT at id - 60. That makes 0x24..0x27 part of the 0x24..0x31 run that shares one filler row in FRIAPRDA.DAT (class 06, LV 1, HP 1, MV 1), and makes 0x69, 0x6a and 0x8e ENEMYDAT.DAT records 45, 46 and 82 of the 91 that table holds. resource_info/data_tables.md records ENEMYDAT.DAT's record contents as not yet decoded, so nothing reachable now says what any of these depict.",
+      "needs": "The decoded ENEMYDAT.DAT record contents for indices 45, 46 and 82 once that table is read, plus the sprite groups fdps_cache_cel_sprite_group builds for those portrait ids so the artwork can be looked at. A playtest would settle whether the semi-transparent set is the ghost/spirit forms it reads as.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed the emitter's reading of the knowledge base for myself rather than restating the concern. assets/characters.md does say the map unit record's portrait id below 60 indexes FRIAPRDA.DAT / FRILEVUP.DAT and 60 or above indexes ENEMYDAT.DAT, and its index table does give 0x24-0x31 a shared filler row (class 06, LV 1, HP 1, MV 1), so 0x24..0x27 are inside the player range and 0x69, 0x6a and 0x8e are ENEMYDAT.DAT entries -- the source comment now states this correctly. What I add: the gap is confined to what those records depict, and nothing about the drawing behaviour is unsettled by it. Every branch that keys on these ids is pinned by test_shadow_pass_drops_the_no_shadow_portrait_ids and test_translucent_portrait_ids_take_mode_nine_at_level_seven at both ends of each span and at the ids either side, so a later answer about what they portray cannot change the code.",
+      "needs": "ENEMYDAT.DAT's record contents for indices 45, 46 and 82, which resource_info/data_tables.md records as not yet decoded.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

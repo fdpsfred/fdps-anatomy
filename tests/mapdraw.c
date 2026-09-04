@@ -35,6 +35,7 @@
  *   5", which is what lets a test see a blend level and a blit mode at all.
  */
 #include "testharn.h"
+#include "fdpstype.h"
 #include "gamedata.h"
 #include "mapdraw.h"
 
@@ -703,6 +704,736 @@ static void test_only_marked_cells_leave_the_opaque_path(void)
     CHECK_EQ(pixel_at(TILE + TILE, TILE), tile_color(MAP_MAX_DIM));
 }
 
+
+/* ------------------------------------------------------------------ */
+/* fdps_draw_map_unit @ 0002cda0                                       */
+/* ------------------------------------------------------------------ */
+
+/* Four unit records is all any case below needs, and only index 0 is drawn;
+   the array is what data_fdps_map_unit_array_ptr is pointed at, so the stride
+   under test is struct fdps_unit_record's own 0x50. */
+#define UNIT_SLOTS 4
+
+/* The sprite cache reaches index 40 in the cache-slot case (slot 3 of twelve,
+   facing 1, frame 1) and index 21 in the facing-above-three case, so 64
+   streams cover every index any case forms.  ITS offset table starts at the
+   cache base, not at +0x0f: the cache is a table fdps_cache_cel_sprite_group
+   builds rather than a loaded .CEL file. */
+#define CACHE_SPRITES 64
+#define CACHE_STREAMS_AT (CACHE_SPRITES * 4)
+
+/* The shadow sheet and the status-icon sheet are real .CEL sheets, so their
+   offset tables sit at +0x0f.  Three shadow frames are reachable and five icon
+   slots exist; one spare each keeps a fixture overrun visible. */
+#define SHEET_TABLE_AT 0x0f
+#define SHADOW_SPRITES 4
+#define SHADOW_STREAMS_AT (SHEET_TABLE_AT + SHADOW_SPRITES * 4)
+#define ICON_SPRITES 5
+#define ICON_ROWS 11
+#define ICON_STREAM_BYTES (ICON_ROWS * 2)
+#define ICON_STREAMS_AT (SHEET_TABLE_AT + ICON_SPRITES * 4)
+
+/* Icon colours are put well clear of the sprite and shadow colours (1..64 and
+   1..4) so a pixel says which sheet drew it. */
+#define ICON_COLOR_BASE 0x80
+
+static struct fdps_unit_record units[UNIT_SLOTS];
+static unsigned char sprite_cache[CACHE_STREAMS_AT
+                                  + CACHE_SPRITES * TILE_STREAM_BYTES];
+static unsigned char shadow_sheet[SHADOW_STREAMS_AT
+                                  + SHADOW_SPRITES * TILE_STREAM_BYTES];
+static unsigned char icon_sheet[ICON_STREAMS_AT
+                                + ICON_SPRITES * ICON_STREAM_BYTES];
+
+/* Sprite index i paints palette index i + 1 over its whole 24x24 block, and
+   shadow frame k likewise paints k + 1, so an opaque pixel names the stream
+   that drew it.  Icon slot k paints ICON_COLOR_BASE + k over 24x11. */
+static int sprite_color(int sprite_index)
+{
+    return (sprite_index + 1) & 0xff;
+}
+
+static void build_unit_sheets(void)
+{
+    int i;
+    int row;
+    int stream_at;
+
+    for (i = 0; i < CACHE_SPRITES; i++) {
+        stream_at = CACHE_STREAMS_AT + i * TILE_STREAM_BYTES;
+        *(int *) (sprite_cache + i * 4) = stream_at;
+        for (row = 0; row < TILE; row++) {
+            sprite_cache[stream_at + row * 2] = 0x17;
+            sprite_cache[stream_at + row * 2 + 1] =
+                (unsigned char) sprite_color(i);
+        }
+    }
+
+    for (i = 0; i < SHADOW_SPRITES; i++) {
+        stream_at = SHADOW_STREAMS_AT + i * TILE_STREAM_BYTES;
+        *(int *) (shadow_sheet + SHEET_TABLE_AT + i * 4) = stream_at;
+        for (row = 0; row < TILE; row++) {
+            shadow_sheet[stream_at + row * 2] = 0x17;
+            shadow_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) sprite_color(i);
+        }
+    }
+
+    for (i = 0; i < ICON_SPRITES; i++) {
+        stream_at = ICON_STREAMS_AT + i * ICON_STREAM_BYTES;
+        *(int *) (icon_sheet + SHEET_TABLE_AT + i * 4) = stream_at;
+        for (row = 0; row < ICON_ROWS; row++) {
+            icon_sheet[stream_at + row * 2] = 0x17;
+            icon_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) (ICON_COLOR_BASE + i);
+        }
+    }
+}
+
+/* The blend staging for this half of the file.  fdps_draw_map_unit asks for
+   three non-opaque draws and no two of them read the same pair of shade-ramp
+   rows, which is what lets one staging serve all three:
+
+     mode 9 at level 7   -- the semi-transparent portrait ids.  Source through
+                            row 16, destination through row 7.  Row 16 is a
+                            constant 0x70 everywhere and row 7 is zero, so the
+                            pixel comes back CUBE_BASE + 7 whatever the sprite
+                            and whatever the destination held.
+     mode 9 at level 0xa -- the shadow.  Source through row 6, destination
+                            through row 15.  Row 6 carries (colour & 0x0f) << 4
+                            and row 15 is zero, so the pixel comes back
+                            CUBE_BASE + (shadow colour & 0x0f) and names the
+                            shadow frame that drew it.
+     mode 0x0b at level 8 -- the unit that has already acted.  Tint colour 0
+                            through row 8, which is zero, and the pixel through
+                            row 17, which carries (colour & 0x0f) << 4, so the
+                            pixel comes back CUBE_BASE + (sprite colour & 0x0f)
+                            and names the sprite that drew it.
+
+   Rows 7, 8 and 15 staying zero is what makes each of the three a single term,
+   and the cube is CUBE_BASE + (index & 0x0f) as it is for the layer cases. */
+static void stage_unit_blend_tables(void)
+{
+    int i;
+
+    for (i = 0; i < 18 * 256; i++) {
+        data_fdps_palette_shade_ramp_table[i] = 0;
+    }
+    for (i = 0; i < 256; i++) {
+        data_fdps_palette_shade_ramp_table[6 * 256 + i] =
+            (unsigned int) ((i & 0x0f) << 4);
+        data_fdps_palette_shade_ramp_table[16 * 256 + i] = 0x70;
+        data_fdps_palette_shade_ramp_table[17 * 256 + i] =
+            (unsigned int) ((i & 0x0f) << 4);
+    }
+    for (i = 0; i < 4096; i++) {
+        data_fdps_inverse_palette_cube[i] =
+            (unsigned char) (CUBE_BASE + (i & 0x0f));
+    }
+}
+
+/* The state every unit case starts from: one unit at tile (0, 0) facing down,
+   standing still, opaque portrait id 0, no ailments; the camera at the origin;
+   the sprite pass selected; and the tick already latched, so the walk clock
+   does not move under a case that is not testing it. */
+static void stage_unit(void)
+{
+    unsigned char *record_bytes;
+    int i;
+
+    build_unit_sheets();
+    stage_unit_blend_tables();
+    fill_scene(SCENE_UNTOUCHED);
+
+    record_bytes = (unsigned char *) units;
+    for (i = 0; i < (int) sizeof(units); i++) {
+        record_bytes[i] = 0;
+    }
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) units;
+    data_fdps_map_unit_count = UNIT_SLOTS;
+    data_fdps_cel_sprite_cache_ptr = sprite_cache;
+    data_fdps_shadow_sprite_sheet_ptr = shadow_sheet;
+    data_fdps_unit_status_icon_sheet_ptr = icon_sheet;
+
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_unit_shadow_pass_flag = 0;
+    data_fdps_map_unit_walk_anim_counter = 0;
+    data_fdps_map_unit_status_icon_tick_counter = 0;
+    data_fdps_map_unit_status_icon_cycle = 0;
+    data_fdps_timer_tick_counter = 100;
+    data_fdps_map_unit_anim_last_tick = 100;
+}
+
+/* The clock steps once when the tick has moved and not at all when it has not
+   -- CMP EAX,dword ptr [0x00069d18] / JZ at 0002cdd1 -- which is the whole
+   point of the latch: fdps_draw_map_units calls this routine twice per unit
+   per frame and the walk cycle still advances once.  Portrait id 0x80 sends
+   the body home right after the clock, so nothing but the clock is in play. */
+static void test_walk_clock_steps_only_when_the_tick_moves(void)
+{
+    stage_unit();
+    units[0].portrait_id = 0x80;
+    data_fdps_map_unit_walk_anim_counter = 3;
+    data_fdps_map_unit_status_icon_tick_counter = 7;
+    data_fdps_timer_tick_counter = 101;
+
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(data_fdps_map_unit_anim_last_tick, 101);
+    CHECK_EQ(data_fdps_map_unit_walk_anim_counter, 4);
+    CHECK_EQ(data_fdps_map_unit_status_icon_tick_counter, 8);
+
+    fdps_draw_map_unit(0, scene, 0);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(data_fdps_map_unit_walk_anim_counter, 4);
+    CHECK_EQ(data_fdps_map_unit_status_icon_tick_counter, 8);
+}
+
+/* The walk counter wraps at 0x10 (IDIV by 0x10 at 0002cdf6), which is what
+   makes the four walk frames repeat every sixteen ticks. */
+static void test_walk_counter_wraps_at_sixteen(void)
+{
+    stage_unit();
+    units[0].portrait_id = 0x80;
+    data_fdps_map_unit_walk_anim_counter = 15;
+    data_fdps_timer_tick_counter = 101;
+
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(data_fdps_map_unit_walk_anim_counter, 0);
+}
+
+/* The status-icon counter wraps at 0x19 and the cycle is bumped only on the
+   wrap to zero (CMP dword ptr [0x00069d1c],0x0 / JNZ at 0002ce17), so a unit
+   carrying more than one ailment shows the next of them every 25 ticks. */
+static void test_icon_counter_wraps_and_bumps_the_cycle(void)
+{
+    stage_unit();
+    units[0].portrait_id = 0x80;
+    data_fdps_map_unit_status_icon_tick_counter = 23;
+    data_fdps_map_unit_status_icon_cycle = 5;
+
+    data_fdps_timer_tick_counter = 101;
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(data_fdps_map_unit_status_icon_tick_counter, 24);
+    CHECK_EQ(data_fdps_map_unit_status_icon_cycle, 5);
+
+    data_fdps_timer_tick_counter = 102;
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(data_fdps_map_unit_status_icon_tick_counter, 0);
+    CHECK_EQ(data_fdps_map_unit_status_icon_cycle, 6);
+}
+
+/* Portrait id 0x80 marks a record with no map sprite and returns at 0002ce79,
+   and bit 0 of the flag byte retires the unit and returns at 0002ceb2.
+   Neither draws anything at all -- not even a shadow. */
+static void test_no_sprite_and_retired_units_draw_nothing(void)
+{
+    stage_unit();
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+    units[0].portrait_id = 0x80;
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), SCENE_UNTOUCHED);
+
+    stage_unit();
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+    units[0].flags = 0x01;
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), SCENE_UNTOUCHED);
+
+    stage_unit();
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+    units[0].flags = 0x01;
+    data_fdps_map_unit_shadow_pass_flag = 1;
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), SCENE_UNTOUCHED);
+}
+
+/* Where a standing unit lands.  Tile (1, 1) is world pixel (24, 24) and the
+   sprite is lifted six pixels (SUB EAX,0x6 at 0002cefd), so with the camera at
+   the origin the block runs from buffer row 24 - 6 + 24 = 42 and column
+   24 + 24 = 48 for 24 pixels each way.  The row above it and the row below the
+   last must still hold the sentinel: the lift is what puts the sprite's feet
+   on the tile rather than its head. */
+static void test_standing_sprite_is_lifted_six_pixels(void)
+{
+    stage_unit();
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), sprite_color(0));
+    CHECK_EQ(pixel_at(41, 48), SCENE_UNTOUCHED);
+    CHECK_EQ(pixel_at(65, 71), sprite_color(0));
+    CHECK_EQ(pixel_at(66, 71), SCENE_UNTOUCHED);
+    CHECK_EQ(pixel_at(42, 47), SCENE_UNTOUCHED);
+}
+
+/* The facing byte does two things at once and this pins both: it picks the
+   per-step displacement -- (0,+4), (-4,0), (0,-4) and (+4,0) for 0, 1, 2 and
+   the else -- and it selects the facing's three sprites at facing * 3.  Walk
+   step 3 makes the displacement 12 pixels, and the colour of the drawn block
+   names the sprite index that came out. */
+static void test_facing_picks_the_displacement_and_the_sprite_row(void)
+{
+    stage_unit();
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+    units[0].walk_step = 3;
+
+    units[0].facing = 0;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(54, 48), sprite_color(0));
+
+    units[0].facing = 1;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 36), sprite_color(3));
+
+    units[0].facing = 2;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(30, 48), sprite_color(6));
+
+    units[0].facing = 3;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 60), sprite_color(9));
+}
+
+/* Facing 3 is reached by the else of a three-test chain, not by a fourth test,
+   so a facing byte of 7 walks right exactly as 3 does -- and still indexes the
+   sprite table at facing * 3, which for 7 is 21 and lands well outside the
+   twelve sprites of the unit's own cache slot. */
+static void test_facing_above_three_falls_into_the_walk_right_branch(void)
+{
+    stage_unit();
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+    units[0].walk_step = 3;
+    units[0].facing = 7;
+
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 60), sprite_color(21));
+}
+
+/* The cache slot at record +2 is twelve sprites wide, so the flat index is
+   slot * 12 + facing * 3 + frame: slot 3, facing 1 and a walk counter of 4 --
+   frame 1 -- is index 40. */
+static void test_cache_slot_is_twelve_sprites_wide(void)
+{
+    stage_unit();
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+    units[0].sprite_cache_slot = 3;
+    units[0].facing = 1;
+    data_fdps_map_unit_walk_anim_counter = 4;
+
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), sprite_color(40));
+}
+
+/* The walk frame is the counter divided by four with 3 folded back to 1, so
+   the three sprites of a facing play 0, 1, 2, 1 over the counter's sixteen
+   values.  The fold is the CMP ...,0x3 / MOV ...,0x1 at 0002cf1c; without it
+   the fourth quarter of the cycle would index a fourth sprite that the
+   twelve-per-slot layout does not have. */
+static void test_walk_frame_folds_three_back_to_one(void)
+{
+    stage_unit();
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+
+    data_fdps_map_unit_walk_anim_counter = 0;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), sprite_color(0));
+
+    data_fdps_map_unit_walk_anim_counter = 4;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), sprite_color(1));
+
+    data_fdps_map_unit_walk_anim_counter = 8;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), sprite_color(2));
+
+    data_fdps_map_unit_walk_anim_counter = 12;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), sprite_color(1));
+}
+
+/* A unit carrying the paralysis counter at record +0x26 -- status_timers[4] --
+   is pinned to frame 0 however far the walk counter has got, and is displaced
+   by the counter modulo 2 in x instead, which is what makes it shiver in
+   place.  A counter of 8 would otherwise be frame 2 and is not displaced; 9 is
+   still frame 0 and is displaced one pixel right, which moves the block's last
+   column from 47 to 48. */
+static void test_paralysed_unit_is_pinned_to_frame_zero_and_shivers(void)
+{
+    stage_unit();
+    units[0].status_timers[4] = 3;
+
+    data_fdps_map_unit_walk_anim_counter = 8;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(18, 24), sprite_color(0));
+    CHECK_EQ(pixel_at(18, 47), sprite_color(0));
+    CHECK_EQ(pixel_at(18, 48), SCENE_UNTOUCHED);
+
+    data_fdps_map_unit_walk_anim_counter = 9;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(18, 24), SCENE_UNTOUCHED);
+    CHECK_EQ(pixel_at(18, 25), sprite_color(0));
+    CHECK_EQ(pixel_at(18, 48), sprite_color(0));
+}
+
+/* The horizontal window is origin - 0x18 < x < origin + 0x138, both bounds
+   strict (JGE at 0002cf5c rejects equality at the low end, JG at 0002cf6b
+   requires it at the high end).  Facing 1 at walk step 6 puts x at exactly
+   -24 and is dropped; step 5 puts it at -20 and is drawn.  Tile 13 puts x at
+   exactly 312 and is dropped; tile 12 puts it at 288 and is drawn. */
+static void test_horizontal_window_rejects_both_bounds_on_equality(void)
+{
+    stage_unit();
+    units[0].pos_y = 1;
+    units[0].facing = 1;
+
+    units[0].walk_step = 6;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 0), SCENE_UNTOUCHED);
+
+    units[0].walk_step = 5;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 4), sprite_color(3));
+
+    units[0].facing = 3;
+    units[0].walk_step = 0;
+
+    units[0].pos_x = 13;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 336), SCENE_UNTOUCHED);
+
+    units[0].pos_x = 12;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 312), sprite_color(9));
+}
+
+/* The sprite pass's vertical window is origin - 0x18 < y < origin + 0xc0, both
+   bounds strict.  The camera is put at 98 so that a rejected y still maps to a
+   row inside the buffer and the test can look at where the block would have
+   gone.  y = 74 is exactly origin - 24 and is dropped; y = 78 is drawn at row
+   4.  y = 290 is exactly origin + 192 and is dropped; y = 286 is drawn at row
+   212. */
+static void test_sprite_pass_vertical_window_rejects_both_bounds(void)
+{
+    stage_unit();
+    data_fdps_battle_view_window_origin_y = 98;
+    units[0].pos_x = 1;
+    units[0].pos_y = 3;
+
+    units[0].walk_step = 2;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(0, 48), SCENE_UNTOUCHED);
+
+    units[0].walk_step = 3;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(4, 48), sprite_color(0));
+
+    units[0].pos_y = 12;
+
+    units[0].walk_step = 2;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(216, 48), SCENE_UNTOUCHED);
+
+    units[0].walk_step = 1;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(212, 48), sprite_color(0));
+}
+
+/* The shadow pass's window is two pixels higher at BOTH ends -- origin - 0x1a
+   to origin + 0xbe -- because the shadow is laid down two scanlines below the
+   cell, and that is what keeps a shadow and its sprite appearing and
+   disappearing together.  A unit's y is always the tile times 24 less 6 plus a
+   multiple of 4, so which of the two-pixel gaps a case can land in depends on
+   the camera: at 98 the value 74 falls in the near gap, inside the shadow
+   window (> 72) and outside the sprite one (not > 74), and at 100 the value
+   290 falls in the far one, outside the shadow window (not < 290) and inside
+   the sprite one (< 292).  One shared vertical test would get both wrong. */
+static void test_shadow_window_sits_two_pixels_above_the_sprite_window(void)
+{
+    stage_unit();
+    data_fdps_battle_view_window_origin_y = 98;
+    units[0].pos_x = 1;
+    units[0].pos_y = 3;
+    units[0].walk_step = 2;
+
+    data_fdps_map_unit_shadow_pass_flag = 1;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(2, 48), CUBE_BASE + sprite_color(0));
+
+    data_fdps_map_unit_shadow_pass_flag = 0;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(0, 48), SCENE_UNTOUCHED);
+
+    data_fdps_battle_view_window_origin_y = 100;
+    units[0].pos_y = 12;
+    units[0].walk_step = 2;
+
+    data_fdps_map_unit_shadow_pass_flag = 1;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(216, 48), SCENE_UNTOUCHED);
+
+    data_fdps_map_unit_shadow_pass_flag = 0;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(214, 48), sprite_color(0));
+
+    units[0].walk_step = 1;
+    data_fdps_map_unit_shadow_pass_flag = 1;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(212, 48), CUBE_BASE + sprite_color(0));
+}
+
+/* The shadow goes down two scanlines below the cell (ADD EAX,0x2d0 at
+   0002d041, which is 2 * 0x168) through mode 9 at level 0xa, and its frame is
+   the walk frame -- taken out of the Shadow.cel offset table at +0x0f, not out
+   of the sprite cache.  A unit that has already acted is pinned to shadow
+   sprite 1 instead (the +0x13 read at 0002d060). */
+static void test_shadow_frame_follows_the_walk_and_pins_when_acted(void)
+{
+    stage_unit();
+    data_fdps_map_unit_shadow_pass_flag = 1;
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+
+    data_fdps_map_unit_walk_anim_counter = 0;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), CUBE_BASE + sprite_color(0));
+    CHECK_EQ(pixel_at(43, 48), SCENE_UNTOUCHED);
+    CHECK_EQ(pixel_at(67, 48), CUBE_BASE + sprite_color(0));
+
+    data_fdps_map_unit_walk_anim_counter = 8;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), CUBE_BASE + sprite_color(2));
+
+    units[0].flags = 0x80;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), CUBE_BASE + sprite_color(1));
+}
+
+/* The shadow pass drops five sets of portrait ids: 0x8e, 0x69, 0x6a, the span
+   0x24..0x27 and the span 0x3c..0x3e.  Each span is checked at both ends and
+   at the id either side of it, because the compares are JL/JLE pairs and an
+   off-by-one at either end is exactly what they would produce. */
+static void test_shadow_pass_drops_the_no_shadow_portrait_ids(void)
+{
+    stage_unit();
+    data_fdps_map_unit_shadow_pass_flag = 1;
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+
+    units[0].portrait_id = 0x8e;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), SCENE_UNTOUCHED);
+
+    units[0].portrait_id = 0x69;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), SCENE_UNTOUCHED);
+
+    units[0].portrait_id = 0x6a;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), SCENE_UNTOUCHED);
+
+    units[0].portrait_id = 0x24;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), SCENE_UNTOUCHED);
+
+    units[0].portrait_id = 0x27;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), SCENE_UNTOUCHED);
+
+    units[0].portrait_id = 0x3c;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), SCENE_UNTOUCHED);
+
+    units[0].portrait_id = 0x3e;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), SCENE_UNTOUCHED);
+
+    units[0].portrait_id = 0x23;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), CUBE_BASE + sprite_color(0));
+
+    units[0].portrait_id = 0x28;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), CUBE_BASE + sprite_color(0));
+
+    units[0].portrait_id = 0x3b;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), CUBE_BASE + sprite_color(0));
+
+    units[0].portrait_id = 0x3f;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), CUBE_BASE + sprite_color(0));
+
+    units[0].portrait_id = 0x8d;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(44, 48), CUBE_BASE + sprite_color(0));
+}
+
+/* In the sprite pass the ids 0x69, 0x6a and the span 0x24..0x27 go through
+   mode 9 at level 7, which the staging above resolves to CUBE_BASE + 7
+   whatever the sprite; every other id draws opaque and comes back as its own
+   sprite colour.  The 0x3c..0x3e span is NOT in this set: those cast no shadow
+   but draw opaque, which is the difference between the two portrait tests. */
+static void test_translucent_portrait_ids_take_mode_nine_at_level_seven(void)
+{
+    stage_unit();
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+
+    units[0].portrait_id = 0x24;
+    fill_scene(0);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), CUBE_BASE + 7);
+
+    units[0].portrait_id = 0x27;
+    fill_scene(0);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), CUBE_BASE + 7);
+
+    units[0].portrait_id = 0x69;
+    fill_scene(0);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), CUBE_BASE + 7);
+
+    units[0].portrait_id = 0x6a;
+    fill_scene(0);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), CUBE_BASE + 7);
+
+    units[0].portrait_id = 0x23;
+    fill_scene(0);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), sprite_color(0));
+
+    units[0].portrait_id = 0x28;
+    fill_scene(0);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), sprite_color(0));
+
+    units[0].portrait_id = 0x3d;
+    fill_scene(0);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), sprite_color(0));
+
+    units[0].portrait_id = 0x6b;
+    fill_scene(0);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), sprite_color(0));
+}
+
+/* A unit that has already acted -- bit 0x80 of the flag byte -- is drawn at
+   frame 1 of its facing through mode 0x0b at level 8 with tint colour 0, which
+   the staging resolves to CUBE_BASE + (sprite colour & 0x0f).  The frame is
+   pinned whatever the walk counter says: a counter of 8 would otherwise be
+   frame 2.  Facing 2 is checked as well, because the pinned index is
+   slot * 12 + facing * 3 + 1 and not the constant 1. */
+static void test_acted_unit_is_frame_one_through_the_tinting_blit(void)
+{
+    stage_unit();
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+    data_fdps_map_unit_walk_anim_counter = 8;
+
+    fill_scene(0);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), sprite_color(2));
+
+    units[0].flags = 0x80;
+    fill_scene(0);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), CUBE_BASE + (sprite_color(1) & 0x0f));
+
+    units[0].facing = 2;
+    fill_scene(0);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(42, 48), CUBE_BASE + (sprite_color(7) & 0x0f));
+}
+
+/* The status icon is a 0x18 by 0x0b strip out of IconSts.cel put down 13
+   scanlines below the top of the unit's cell -- ADD EAX,0x1248, which is
+   13 * 0x168 -- and only in the sprite pass.  The icon slot is whatever
+   fdps_unit_select_status_icon answers for the cycle: record +0x23 is slot 0
+   and +0x22 is slot 1, so the two timers pick different icons.  A unit with no
+   ailment gets -1 and no strip at all. */
+static void test_status_icon_lands_thirteen_rows_below_the_cell(void)
+{
+    stage_unit();
+    units[0].pos_x = 1;
+    units[0].pos_y = 1;
+
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(55, 48), sprite_color(0));
+
+    units[0].status_timers[1] = 5;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(54, 48), sprite_color(0));
+    CHECK_EQ(pixel_at(55, 48), ICON_COLOR_BASE + 0);
+    CHECK_EQ(pixel_at(65, 48), ICON_COLOR_BASE + 0);
+    CHECK_EQ(pixel_at(66, 48), SCENE_UNTOUCHED);
+    CHECK_EQ(pixel_at(55, 71), ICON_COLOR_BASE + 0);
+    CHECK_EQ(pixel_at(55, 72), SCENE_UNTOUCHED);
+
+    units[0].status_timers[1] = 0;
+    units[0].status_timers[0] = 5;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(55, 48), ICON_COLOR_BASE + 1);
+
+    data_fdps_map_unit_shadow_pass_flag = 1;
+    fill_scene(SCENE_UNTOUCHED);
+    fdps_draw_map_unit(0, scene, 0);
+    CHECK_EQ(pixel_at(55, 48), CUBE_BASE + sprite_color(0));
+}
+
 void run_mapdraw_tests(void)
 {
     RUN_TEST(test_ascending_depths_keep_identity_order);
@@ -731,4 +1462,23 @@ void run_mapdraw_tests(void)
     RUN_TEST(test_marked_cells_pulse_through_the_blend_ramp);
     RUN_TEST(test_layer_mode_one_tints_and_other_modes_blend);
     RUN_TEST(test_only_marked_cells_leave_the_opaque_path);
+
+    RUN_TEST(test_walk_clock_steps_only_when_the_tick_moves);
+    RUN_TEST(test_walk_counter_wraps_at_sixteen);
+    RUN_TEST(test_icon_counter_wraps_and_bumps_the_cycle);
+    RUN_TEST(test_no_sprite_and_retired_units_draw_nothing);
+    RUN_TEST(test_standing_sprite_is_lifted_six_pixels);
+    RUN_TEST(test_facing_picks_the_displacement_and_the_sprite_row);
+    RUN_TEST(test_facing_above_three_falls_into_the_walk_right_branch);
+    RUN_TEST(test_cache_slot_is_twelve_sprites_wide);
+    RUN_TEST(test_walk_frame_folds_three_back_to_one);
+    RUN_TEST(test_paralysed_unit_is_pinned_to_frame_zero_and_shivers);
+    RUN_TEST(test_horizontal_window_rejects_both_bounds_on_equality);
+    RUN_TEST(test_sprite_pass_vertical_window_rejects_both_bounds);
+    RUN_TEST(test_shadow_window_sits_two_pixels_above_the_sprite_window);
+    RUN_TEST(test_shadow_frame_follows_the_walk_and_pins_when_acted);
+    RUN_TEST(test_shadow_pass_drops_the_no_shadow_portrait_ids);
+    RUN_TEST(test_translucent_portrait_ids_take_mode_nine_at_level_seven);
+    RUN_TEST(test_acted_unit_is_frame_one_through_the_tinting_blit);
+    RUN_TEST(test_status_icon_lands_thirteen_rows_below_the_cell);
 }

@@ -7102,9 +7102,9 @@ With the pass byte clear it is the sprite pass, windowed at DAT_00069ce0 - 0x18 
 Every sprite blit is 0x18 by 0x18 at pitch 0x168; only the status icon is smaller.
 
 Parameters:
-  unit_index -- index into the 0x50-byte unit record array based at DAT_00069cd8, 0 .. DAT_00060150 - 1. fdps_draw_map_units passes every live index in turn, once per pass; FUN_00015860 passes the single unit standing under the map cursor.
-  dest_base_offset -- base address of the destination surface, pitch 0x168. fdps_draw_map_units forwards the scene buffer it was handed; FUN_00015860 passes its own 360x240 page.
-  flag -- overwritten with 0 at 0002cdba before any read, so no value passed here can be observed. fdps_draw_map_units forwards its own second argument, FUN_00015860 passes 0.
+  unit_index -- index into the 0x50-byte unit record array based at DAT_00069cd8, 0 .. DAT_00060150 - 1. fdps_draw_map_units passes every live index in turn, once per pass; fdps_render_ring_menu_frame passes the single unit standing under the map cursor.
+  dest_base_offset -- base address of the destination surface, pitch 0x168. fdps_draw_map_units forwards the scene buffer it was handed; fdps_render_ring_menu_frame passes its own 360x240 page.
+  flag -- overwritten with 0 at 0002cdba before any read, so no value passed here can be observed. fdps_draw_map_units forwards its own second argument, fdps_render_ring_menu_frame passes 0.
 
 Returns:
   Nothing.
@@ -7112,7 +7112,7 @@ Returns:
 Pool: fdps  [no Function ID candidate in either library set and a hash unique in the image; its whole state is game globals and the game's 0x50-byte unit record, and every callee is game code]
 
 Rebuild note:
-The map's walk-animation clock lives inside this per-unit draw: DAT_00069cc8, DAT_00069d1c and DAT_00060168 are stepped here and nowhere else in the program, and only when the frame tick DAT_00069d64 has moved since the previous call (the latch is DAT_00069d18). Writing the obvious thing -- stepping the counter at the top of the function without the tick latch, or hoisting the step out into the frame loop -- runs the walk cycle at twice the unit count per frame, or stops it on the frames where only FUN_00015860 draws. Separately, the two passes clip against vertical windows two pixels apart (DAT_00069ce0-0x18 .. +0xc0 for the sprite, -0x1a .. +0xbe for the shadow, which is blitted two scanlines lower); folding them into one shared test makes shadows appear and disappear a row early or late along the top and bottom edges of the view.
+The map's walk-animation clock lives inside this per-unit draw: DAT_00069cc8, DAT_00069d1c and DAT_00060168 are stepped here and nowhere else in the program, and only when the frame tick DAT_00069d64 has moved since the previous call (the latch is DAT_00069d18). Writing the obvious thing -- stepping the counter at the top of the function without the tick latch, or hoisting the step out into the frame loop -- runs the walk cycle at twice the unit count per frame, or stops it on the frames where only fdps_render_ring_menu_frame draws. Separately, the two passes clip against vertical windows two pixels apart (DAT_00069ce0-0x18 .. +0xc0 for the sprite, -0x1a .. +0xbe for the shadow, which is blitted two scanlines lower); folding them into one shared test makes shadows appear and disappear a row early or late along the top and bottom edges of the view.
 
 === 0002d204 [EOL]
 Alignment padding: two 6-byte LEA NOP forms filling to the 16-byte entry of fdps_get_unit_record.

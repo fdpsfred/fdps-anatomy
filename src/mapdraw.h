@@ -51,6 +51,38 @@ extern int data_fdps_scene_marked_tile_tint_color;
 extern int data_fdps_scene_tile_anim_phase;
 extern unsigned int data_fdps_scene_tile_anim_last_flip_tick;
 
+/* 00069d18.  The frame tick the map's walk-animation clock was last stepped
+   on.  fdps_draw_map_unit compares data_fdps_timer_tick_counter against it and
+   steps the two counters below only when the two differ, which is what holds
+   the clock to one step per frame even though fdps_draw_map_units calls that
+   routine twice for every unit on the map.
+
+   Read and written only by fdps_draw_map_unit, and only as a whole dword: the
+   compare at 0002cdd1 is CMP EAX,dword ptr [0x00069d18].  Unsigned, to match
+   the tick counter it latches; the only operation on the pair is equality, so
+   a counter that has wrapped is compared correctly either way. */
+extern unsigned int data_fdps_map_unit_anim_last_tick;
+
+/* 00069d1c and 00060168.  The status-icon rotation: a counter that steps once
+   per frame tick and wraps at 0x19, and the cycle number that is bumped every
+   time it wraps to 0.  The cycle is what fdps_draw_map_unit hands
+   fdps_unit_select_status_icon as its rotation argument, so a unit carrying
+   more than one ailment shows each of their icons in turn, one every 25 ticks.
+
+   Both are signed ints: the wrap at 0002ce0f is IDIV, and the compare against
+   zero at 0002ce17 is on the whole dword.  Both are stepped only by
+   fdps_draw_map_unit; the cycle is otherwise read only there too. */
+extern int data_fdps_map_unit_status_icon_tick_counter;
+extern int data_fdps_map_unit_status_icon_cycle;
+
+/* 0006014c.  Which of fdps_draw_map_units' two passes over the unit list is
+   running: non-zero while it is laying down shadows, zero while it is drawing
+   the sprites themselves.  fdps_draw_map_units sets it to 1 at 0002d24c and
+   back to 0 at 0002d287, and fdps_draw_map_unit is the only reader.
+
+   A byte, tested CMP byte ptr [0x0006014c],0x0 at 0002cf96. */
+extern unsigned char data_fdps_map_unit_shadow_pass_flag;
+
 /* Fills draw_order with the layer slot indices 0, 1, ... sorted by ascending
    depth byte, and returns nothing: the list is the caller's array.
 
@@ -93,5 +125,35 @@ extern void fdps_draw_scene_layer(unsigned char *scene_buf,
                                   int scroll_y, unsigned char *tile_attr,
                                   int layer_mode);
 #pragma aux fdps_draw_scene_layer "*" parm caller [];
+
+/* Draws one map unit into the scene buffer -- its shadow or its sprite,
+   whichever pass data_fdps_map_unit_shadow_pass_flag says is running -- and
+   steps the map's shared walk-animation clock on the way past.  Returns
+   nothing.
+
+   THE WALK CLOCK LIVES IN HERE.  data_fdps_map_unit_walk_anim_counter,
+   data_fdps_map_unit_status_icon_tick_counter and
+   data_fdps_map_unit_status_icon_cycle are stepped by this function and by
+   nothing else in the image, and only on a frame tick the latch above has not
+   already seen.  Stepping them at the top of the frame loop instead, or
+   dropping the latch, runs the walk cycle at twice the unit count per frame or
+   stops it on the frames where only the ring menu draws
+   (rebuild_info/pitfalls.md).
+
+   unit_index selects the 0x50-byte record in the array at
+   data_fdps_map_unit_array_ptr and is not range checked.  scene_buf is the
+   destination surface, always at pitch 0x168 with a 24-pixel border on both
+   axes.  unused_flag is overwritten with 0 at 0002cdba before any read, so no
+   value passed there can be observed; all three call sites still push one.
+
+   Nothing is drawn for a record whose portrait id is 0x80, for a retired unit
+   -- bit 0 of the flag byte -- or for a unit outside the camera window.  The
+   two passes clip against vertical windows two pixels apart, because the
+   shadow is laid down two scanlines below the cell; folding them into one
+   shared test makes shadows appear and disappear a row early or late along the
+   top and bottom edges (rebuild_info/pitfalls.md). */
+extern void fdps_draw_map_unit(int unit_index, unsigned char *scene_buf,
+                               unsigned char unused_flag);
+#pragma aux fdps_draw_map_unit "*" parm caller [];
 
 #endif
