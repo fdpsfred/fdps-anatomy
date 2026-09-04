@@ -129,6 +129,8 @@ B、E、H 三類的共同症狀是「數值或指標讀到不相干的東西」�
 
 `src/fdpstype.h` 的 23 個遊戲 struct 由 `tests/fdpstype.c` 逐欄檢查：每個 struct 的 `sizeof` 與每個欄位的 `offsetof` 都對照 `ghidra_snapshot/data_types.txt` 記的偏移。期望值來自快照而不是標頭，所以它證明的是「編出來的佈局等於原版的佈局」，不是「標頭等於它自己」。兩個檔都是 `tools/code_emit/gen_types.py` 的產生物，不手改。
 
+**Case 結束前要把「載入器會 free 的全域」放回 bss 狀態。** `data_fdps_map_unit_array_ptr`、`data_fdps_cel_sprite_cache_ptr`、`data_fdps_command_sprite_sheet_ptr` 這一類全域，生產程式碼會直接 `free`（`fdps_field_load_chapter_resources`、`fdps_deploy_map_units`、`fdps_shutdown_free_resources`），而且守門條件是配對的計數不為零，不是指標不為 NULL。測試 case 把它們指向測試檔裡的 static 之後就離開，後面任何一個呼叫這些載入器的測試都會對非堆積記憶體做一次 `free`，配置器從此壞掉。症狀落在幾百個 case 之後、與肇因無關的檔案裡（`_heapchk` 回 `_HEAPBADNODE`、堆積走訪數到 0、最後整支測試程式卡死），而且會隨連結佈局漂移：今天全綠只代表那個 static 前面的位元組剛好不像堆積節點，下一個 function 落地就可能翻臉。計數歸零、指標設 NULL 就是那些守門條件當初假設的初始狀態，`free(NULL)` 是 no-op，所以還原不會讓下游少掉任何東西。
+
 **`__LINE__` 在 `CHECK_EQ` 裡不可用。** wcc386 10.0a 只有在巨集呼叫位於行首時給出正確的行號；跟在同一行其他 token 後面時給的是前處理後串流的行號，會落到檔案結尾之外。所以失敗訊息用「測試名稱＋該測試內的第幾個檢查」定位，不用行號。
 
 ## 工作狀態與續跑
