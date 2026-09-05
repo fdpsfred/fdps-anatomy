@@ -58,13 +58,17 @@ emit 或 review 當下答不出來的等價性疑慮記進 `tools/code_emit/data
 
 `t22-06` 要 100 支、落地 40 支後被一連三次 API 500 打斷（修正輪兩次、收拾階段一次），停在 `cleanup_failed`。58 支還沒輪到、1 支跑到一半——殘骸全在 pipeline 自己的路徑內，照 Recover 的界線清掉後退回清單，沒有遺失。趁停機修掉一條約五成失敗率的測試（`tests/title.c` 的 `movie_drains_the_keyboard_queue`），它先前弄紅的是別人的 gate，`00016840` 四輪修正裡有三輪被它拖進去。另有一支 `00016840` 跑滿四輪修正後標成 `failed`，程式碼每輪都對、錯的是註解引用的組語位址，留待重新 emit。
 
-累計 268 支在 `emit_state.json` 記為 `committed`（另有 1 支 `failed` 待重跑），`next_batch.py --stats` 說還剩 245 支。**續跑從這個進度接下去，不重跑已完成的；`failed` 與 `in_flight` 都會被重新發回清單。**
+`t22-07` 落地 65 支後**觸發全票第一次拆檔**（`src/save.c` 過 1000 行，切成 `save.c`／`savepnl.c`／`savefile.c`），依設計提早收工——手上那份工作清單是舊路由算的，繼續跑會把 function emit 進路由不再指名的檔。35 支還沒輪到，下一批重新問 `next_batch.py` 就好。t22-06 標成 `failed` 的 `00016840` 這批重新 emit 成功落地。
+
+**每支 function 的耗時在漲，已量出成因。** 落地間隔從 t22-03 的約 22 分升到 t22-07 的約 37 分。量測拆開來看：全樹建置 74 秒、跑完整測試映像 244 秒，一支 function 要跑兩次（emitter 自己一次、gate 一次）合計約 10.6 分，**其餘約 26 分是 agent 讀組語與寫程式的時間**。主因是 function 本身變大——body 大小中位數從 88 byte 升到 423 byte，那是 callee 先於 caller 這個排序的必然結果，小的葉子早就做完了。機器成本只佔三成，而且測試映像的執行時間會隨累積的測試數繼續漲。
+
+累計 333 支在 `emit_state.json` 記為 `committed`，`next_batch.py --stats` 說還剩 181 支。**續跑從這個進度接下去，不重跑已完成的；`failed` 與 `in_flight` 都會被重新發回清單。**
 
 前兩支的區域變數命名經人工檢查合格，但那是 emitter 自己的判斷，當時 workflow 裡沒有任何規則要求它，所以不能拿它當「規則有效」的證據。第三支才是票 21.7 的實測：Ghidra 給的四個區域變數全是預設名（`sVar1`／`sVar2`／`local_18`／`local_14`），emit 出來是 `grid_width`／`grid_height`／`cell_index`／`cell`。
 
 **Blocked by:** 21, 21.5, 21.6, 21.7, 22.1 — 全部已完成，沒有東西擋著批次（22.1 剩下的是本票收尾時的總掃）
 
-**Status:** in-progress（514 支已落地 268 支，剩 245，另有 1 支待重跑）
+**Status:** in-progress（514 支已落地 333 支，剩 181）
 
 - [ ] 遊戲本體 function 全部 emit 完成，每個都經 reviewer 通過
 - [ ] 每個 function 一次處理一個，無任何批次處理
