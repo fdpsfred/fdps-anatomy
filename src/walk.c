@@ -28,9 +28,10 @@
 #define WALK_SUB_STEPS 6
 #define WALK_STEP_PIXELS 4
 
-/* The facing code src/mapdraw.c and fdps_unit_face_target use for a unit
-   facing down the screen. */
+/* The facing codes src/mapdraw.c and fdps_unit_face_target use for a unit
+   facing down and up the screen. */
 #define MAP_UNIT_FACING_DOWN 0
+#define MAP_UNIT_FACING_UP 2
 
 /* The battle view is 192 pixels tall, so the lowest view origin that still has
    map underneath it is the map's pixel height less that. */
@@ -40,6 +41,11 @@
    pixels below the top of the view: above that it is still comfortably inside
    the window and the map stays put. */
 #define VIEW_SCROLL_TRIGGER_Y 0x78
+
+/* Walking up, the view follows only while the unit's starting row is less than
+   two tiles below the top of the view; once it sits further down than that the
+   unit is comfortably inside the window and the map stays put. */
+#define VIEW_SCROLL_UP_TRIGGER_Y 0x30
 
 /* The two scancodes that fast-forward movement.  Either one suppresses the
    per-pass frame inside the loop; only the first one still draws the catch-up
@@ -125,6 +131,84 @@ void fdps_walk_step_down(int unit_index)
     }
 
     unit->pos_y++;
+    unit->walk_step = 0;
+    fdps_map_set_pending_tile_event(
+        data_fdps_map_cursor_world_x / SCENE_TILE_SIZE,
+        data_fdps_map_cursor_world_y / SCENE_TILE_SIZE,
+        TILE_EVENT_ON_ARRIVAL);
+}
+
+/* 0002d480.  One tile up the screen.
+
+   The shape is the downward step's, mirrored, with three differences that are
+   behaviour rather than style.
+
+   THERE IS NO MAP EXTENT TO CLAMP AGAINST, AND NONE IS READ.  Walking down
+   needs the terrain layer's tile height so the view stops at the bottom of the
+   map; walking up needs only CMP dword ptr [0x00069ce0],0x4 at 0002d4e3, which
+   stops the view the moment another four-pixel step would carry it above the
+   map's own row 0.  The terrain header is never touched here, so this routine
+   works with no scene layer loaded at all, and adding a symmetrical height
+   lookup would give it a dependency the original does not have.
+
+   THE STARTING ROW IS MEASURED ONCE AND THE GAP GROWS UNDER IT.  [EBP-0x8] is
+   written at 0002d4a8 and never again, so the loop compares a fixed pixel row
+   against a view origin that moves up beneath it four pixels a pass.  The gap
+   therefore INCREASES, and the scroll switches itself off once it reaches 0x30
+   -- the mirror of the downward step, where it closes instead.  Both tests are
+   signed and their senses are opposite: JGE at 0002d4e1 skips the scroll when
+   the gap has reached 48, so 47 scrolls and 48 does not, and JGE at 0002d4ea
+   takes it when the origin is at least 4, so 4 scrolls and 3 does not.  A
+   starting row above the view's top gives a negative gap, which is why the
+   comparison has to stay signed.
+
+   THE ARRIVAL TILE COMES FROM THE MAP CURSOR, NOT FROM THE RECORD.  The two
+   IDIVs at 0002d55f and 0002d575 divide data_fdps_map_cursor_world_x and
+   data_fdps_map_cursor_world_y by 24 after the loop has moved the cursor; the
+   record's pos_x and the pos_y the DEC at 0002d540 has just made current are
+   not read.  The two agree only while the view is locked onto the moving unit.
+   Both divisions are signed (SAR EDX,0x1f ahead of each IDIV).
+
+   As in the downward step the in-loop scancode test calls
+   fdps_keyboard_scancode_ptr twice -- 0002d4fc and 0002d50d -- because the
+   second comparison re-fetches the pointer, and the tail test at 0002d527
+   draws the catch-up frame on scancode 2 only while the in-loop suppression
+   covers 2 and 3 alike. */
+void fdps_animate_move_step_up(int unit_index)
+{
+    /* The moving unit's record inside the map unit array. */
+    struct fdps_unit_record *unit;
+    /* Where the unit's row sat, in pixels, before the step began. */
+    int start_pixel_y;
+    /* The animation sub-step being played, 1..6. */
+    int walk_step;
+
+    unit = (struct fdps_unit_record *) data_fdps_map_unit_array_ptr
+           + unit_index;
+    start_pixel_y = unit->pos_y * SCENE_TILE_SIZE;
+    unit->facing = MAP_UNIT_FACING_UP;
+
+    for (walk_step = 1; walk_step <= WALK_SUB_STEPS; walk_step++) {
+        unit->walk_step = (unsigned char) walk_step;
+
+        if (start_pixel_y - data_fdps_battle_view_window_origin_y
+                < VIEW_SCROLL_UP_TRIGGER_Y
+            && data_fdps_battle_view_window_origin_y >= WALK_STEP_PIXELS) {
+            data_fdps_battle_view_window_origin_y -= WALK_STEP_PIXELS;
+        }
+        data_fdps_map_cursor_world_y -= WALK_STEP_PIXELS;
+
+        if (*fdps_keyboard_scancode_ptr() != SCANCODE_FAST_FORWARD
+            && *fdps_keyboard_scancode_ptr() != SCANCODE_SKIP_ANIMATION) {
+            fdps_render_view_frame();
+        }
+    }
+
+    if (*fdps_keyboard_scancode_ptr() == SCANCODE_FAST_FORWARD) {
+        fdps_render_view_frame();
+    }
+
+    unit->pos_y--;
     unit->walk_step = 0;
     fdps_map_set_pending_tile_event(
         data_fdps_map_cursor_world_x / SCENE_TILE_SIZE,

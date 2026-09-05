@@ -46,4 +46,30 @@
 extern void fdps_walk_step_down(int unit_index);
 #pragma aux fdps_walk_step_down "*" parm caller [];
 
+/* Steps the unit at unit_index one tile UP the screen and returns nothing.
+ *
+ * The six passes each move the map cursor's pixel row
+ * (data_fdps_map_cursor_world_y) back by four, and each scrolls the view
+ * origin (data_fdps_battle_view_window_origin_y) back by four as well while
+ * two conditions both hold: the unit's STARTING pixel row is less than 48
+ * pixels -- two tiles -- below the top of the view, and the view origin is
+ * still at least four, so the subtraction cannot take it above the top of the
+ * map.  As with the downward step the starting row is measured once before the
+ * loop and never remeasured; here the view moves up underneath a fixed row, so
+ * the gap GROWS by four each time it scrolls and the scrolling stops once it
+ * reaches 48.
+ *
+ * Unlike the downward step this direction has no map extent to clamp against.
+ * The view origin never runs off the top because the >= 4 test alone stops it,
+ * so the terrain layer's header is not read here at all.
+ *
+ * The arrival tile reported to fdps_map_set_pending_tile_event is derived from
+ * the map cursor globals and not from the unit record that was just
+ * decremented, and the post-loop catch-up frame is drawn on scancode 2 only
+ * while the in-loop suppression covers both 2 and 3 -- both exactly as in the
+ * downward step, and both behaviour rather than style.
+ */
+extern void fdps_animate_move_step_up(int unit_index);
+#pragma aux fdps_animate_move_step_up "*" parm caller [];
+
 #endif

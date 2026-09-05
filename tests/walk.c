@@ -26,6 +26,16 @@
  * That is why nothing below asserts anything about the frames drawn: the
  * difference between the in-loop test (2 or 3) and the tail test (2 only) is
  * settled by reading 0002d3ff..0002d42d and cannot be reached from here.
+ *
+ * The upward step at 0002d480 is covered by the second group of cases, and its
+ * expected values come the same way: MOV AL,byte ptr [EAX+1] / AND EAX,0xff /
+ * IMUL EAX,EAX,0x18 at 0002d49a for the starting pixel row, MOV byte ptr
+ * [EAX+3],0x2 for the facing, CMP EDX,0x30 / JGE at 0002d4de and CMP dword ptr
+ * [0x00069ce0],0x4 / JGE at 0002d4e3 for the two scroll tests, SUB dword ptr
+ * [0x00069ce0],0x4 and SUB dword ptr [0x00069ccc],0x4 for the two retreats,
+ * DEC byte ptr [EAX+1] and MOV byte ptr [EAX+4],0x0 for the commit, and the
+ * SAR EDX,0x1f / IDIV EBX pairs at 0002d55c and 0002d572 for the arrival tile.
+ * The latch stays at 3 for those cases too, and for the same reason.
  */
 #include <stddef.h>
 #include "testharn.h"
@@ -342,6 +352,192 @@ static void widens_the_unit_row_unsigned(void)
     CHECK_EQ(stage_units[1].pos_y, 201);
 }
 
+/* One step up, with the unit close enough to the top of the view that every
+   one of the six passes scrolls.
+
+   Unit 1 starts on tile row 1, pixel row 24, and the view origin starts at 40,
+   so the gap is -16: far below the 48 the JGE at 0002d4e1 needs to skip the
+   scroll, and it only grows to 8 by the last pass.  The view origin stays at
+   or above 4 the whole way -- 40, 36, 32, 28, 24, 20 going in -- so the second
+   test never stops it either, and six passes of SUB dword ptr
+   [0x00069ce0],0x4 leave it at 16.  Six passes of SUB dword ptr
+   [0x00069ccc],0x4 take the cursor row from 2 * 24 = 48 to 24.
+
+   The facing byte is written 2 before the loop -- MOV byte ptr [EAX+3],0x2 --
+   the sub-step counter is cleared after it, the tile row is decremented once,
+   and the column is not touched at all. */
+static void steps_one_tile_up_and_scrolls_every_pass(void)
+{
+    stage(20, 1, 40, 3, 2);
+    fdps_animate_move_step_up(1);
+
+    CHECK_EQ(stage_units[1].facing, 2);
+    CHECK_EQ(stage_units[1].walk_step, 0);
+    CHECK_EQ(stage_units[1].pos_y, 0);
+    CHECK_EQ(stage_units[1].pos_x, 1);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 16);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 2 * TILE - 24);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 3 * TILE);
+}
+
+/* The index really is scaled by 0x50 here too: unit 2 moves and its neighbours
+   do not.
+
+   Unit 2 keeps the stage's own pos_y of 0x38, so its starting pixel row is
+   1344, the first scroll test fails on every pass and the view never moves --
+   which is beside the point of this case.  What it is for is the records on
+   either side keeping the sentinel values stage() wrote, which they only do if
+   the record address really was base + 2 * 0x50. */
+static void indexes_the_unit_array_by_record_stride_up(void)
+{
+    stage(20, 7, 0, 3, 2);
+    fdps_animate_move_step_up(2);
+
+    CHECK_EQ(stage_units[2].pos_y, 0x37);
+    CHECK_EQ(stage_units[2].facing, 2);
+    CHECK_EQ(stage_units[2].walk_step, 0);
+    CHECK_EQ(stage_units[1].pos_y, 7);
+    CHECK_EQ(stage_units[1].facing, 0xee);
+    CHECK_EQ(stage_units[1].walk_step, 0xdd);
+    CHECK_EQ(stage_units[3].pos_y, 0x3c);
+    CHECK_EQ(stage_units[3].facing, 0xee);
+}
+
+/* A gap of exactly 48 pixels does not scroll.
+
+   Tile row 4 is pixel row 96 and the view starts at 48, so the subtraction at
+   0002d4d8 gives exactly 0x30 and JGE sends every pass round the scroll.  The
+   view origin is well clear of the >= 4 limit, so the first test is the only
+   thing that can be stopping it, and because the starting row is measured once
+   and the view never moves the same test fails all six times.  The cursor row
+   retreats regardless -- its SUB is outside the scroll test -- which is what
+   separates "the scroll was skipped" from "the loop did not run". */
+static void does_not_scroll_at_exactly_the_trigger_gap_up(void)
+{
+    stage(20, 4, 48, 3, 2);
+    fdps_animate_move_step_up(1);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 48);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 2 * TILE - 24);
+    CHECK_EQ(stage_units[1].pos_y, 3);
+}
+
+/* The scroll stops partway through the loop, because the gap OPENS under it.
+
+   Tile row 4 is pixel row 96 and the view starts at 60, so the gap is 36.
+   Every pass that scrolls costs the view four pixels and therefore widens the
+   gap by four, and the test wants it strictly under 48: passes one to three
+   scroll, taking the view origin 60 -> 56 -> 52 -> 48 and the gap 36 -> 48,
+   and passes four to six find exactly 48 and leave it alone.  Three scrolls
+   out of six is the whole point -- a routine that remeasured the unit's row
+   against the moving view would never widen the gap at all and would scroll
+   all six times, ending at 36. */
+static void stops_scrolling_when_the_gap_opens_mid_loop(void)
+{
+    stage(20, 4, 60, 3, 2);
+    fdps_animate_move_step_up(1);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 48);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 2 * TILE - 24);
+}
+
+/* The view stops at the top of the map even though the unit keeps walking.
+
+   Tile row 1 is pixel row 24 and the view starts at 12, so the gap runs 12,
+   16, 20, 24 and never reaches 48: the first test passes on every one of the
+   six passes and only the >= 4 limit can stop the scroll.  From 12 the view
+   takes three steps to 0 -- the third is taken with the origin sitting exactly
+   on 4, which JGE at 0002d4ea allows -- and then stays, because 0 is below the
+   limit.  Three scrolls out of six, and an origin of 0 rather than -12, is
+   what says the limit is >= 4 and not > 4 or a bare test against zero. */
+static void stops_scrolling_at_the_top_of_the_map(void)
+{
+    stage(20, 1, 12, 3, 2);
+    fdps_animate_move_step_up(1);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 2 * TILE - 24);
+    CHECK_EQ(stage_units[1].pos_y, 0);
+}
+
+/* The arrival tile handed to fdps_map_set_pending_tile_event comes from the
+   map cursor and from its POST-loop value, not from the unit record.
+
+   Three event cells are armed, each with its own handler index in the event
+   data table at code * 2 + 0x31:
+
+     the cell the cursor ends on, (3, 1) -- cursor x 3 * 24 and cursor y
+       2 * 24 - 24 = 24, and 24 / 24 = 1 -- carries code 5, handler 0x11;
+     the cell the cursor started on, (3, 2), carries code 7, handler 0x33, so
+       reporting the departure tile instead of the arrival tile is visible;
+     the cell the unit record now names, (1, 6) -- pos_x 1 and the pos_y the
+       DEC at 0002d540 has just made 6 -- carries code 9, handler 0x22, so
+       substituting the record for the cursor is visible too.
+
+   Each entry's trigger byte at code * 2 + 0x32 is 0, the occasion this call
+   site reports, so all three would fire if they were reached.  0x11 is the one
+   that must come back. */
+static void reports_the_arrival_tile_from_the_map_cursor_up(void)
+{
+    stage(20, 7, 0, 3, 2);
+
+    stage_event[EVENT_CELLS_AT + 1 * STAGE_MAP_WIDTH + 3] = 5;
+    stage_event[EVENT_CELLS_AT + 2 * STAGE_MAP_WIDTH + 3] = 7;
+    stage_event[EVENT_CELLS_AT + 6 * STAGE_MAP_WIDTH + 1] = 9;
+    stage_event_table[EVENT_TABLE_AT + 5 * 2] = 0x11;
+    stage_event_table[EVENT_TABLE_AT + 5 * 2 + 1] = 0;
+    stage_event_table[EVENT_TABLE_AT + 7 * 2] = 0x33;
+    stage_event_table[EVENT_TABLE_AT + 7 * 2 + 1] = 0;
+    stage_event_table[EVENT_TABLE_AT + 9 * 2] = 0x22;
+    stage_event_table[EVENT_TABLE_AT + 9 * 2 + 1] = 0;
+
+    fdps_animate_move_step_up(1);
+
+    CHECK_EQ(data_fdps_chapter_pending_event_idx, 0x11);
+}
+
+/* A cursor left of the map origin divides towards zero, not into a huge
+   unsigned tile number.
+
+   SAR EDX,0x1f before each IDIV makes both divisions signed, so a cursor x of
+   -12 comes out as tile 0; the cursor y set to 24 before the loop is 24 - 24 =
+   0 after it, tile 0 as well.  Cell (0, 0) is armed with code 4, handler 0x44,
+   so the assertion says the pair of divisions landed there; read unsigned,
+   -12 / 24 is 178956970 and the cell reached would be far outside the staged
+   block. */
+static void divides_the_cursor_signed_up(void)
+{
+    stage(20, 7, 0, 0, 0);
+    data_fdps_map_cursor_world_x = -12;
+    data_fdps_map_cursor_world_y = 24;
+
+    stage_event[EVENT_CELLS_AT + 0] = 4;
+    stage_event_table[EVENT_TABLE_AT + 4 * 2] = 0x44;
+    stage_event_table[EVENT_TABLE_AT + 4 * 2 + 1] = 0;
+
+    fdps_animate_move_step_up(1);
+
+    CHECK_EQ(data_fdps_map_cursor_world_y, 0);
+    CHECK_EQ(data_fdps_chapter_pending_event_idx, 0x44);
+}
+
+/* The unit's tile row widens UNSIGNED into the pixel measurement here as well:
+   AND EAX,0xff at 0002d4a0 after the byte load.
+
+   Tile row 200 is pixel row 4800, a gap of 4760 over a view origin of 40, so
+   the first test fails on every pass and the view is still at 40 when the step
+   ends.  Read through a signed char the row would be -56, pixel row -1344, and
+   a gap of -1384 would pass the first test every pass while the origin stayed
+   above 4, scrolling all six times down to 16. */
+static void widens_the_unit_row_unsigned_up(void)
+{
+    stage(20, 200, 40, 3, 2);
+    fdps_animate_move_step_up(1);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 40);
+    CHECK_EQ(stage_units[1].pos_y, 199);
+}
+
 void run_walk_tests(void)
 {
     RUN_TEST(unit_record_offsets_are_what_the_step_reads);
@@ -354,4 +550,12 @@ void run_walk_tests(void)
     RUN_TEST(divides_the_cursor_signed);
     RUN_TEST(reads_the_map_height_signed);
     RUN_TEST(widens_the_unit_row_unsigned);
+    RUN_TEST(steps_one_tile_up_and_scrolls_every_pass);
+    RUN_TEST(indexes_the_unit_array_by_record_stride_up);
+    RUN_TEST(does_not_scroll_at_exactly_the_trigger_gap_up);
+    RUN_TEST(stops_scrolling_when_the_gap_opens_mid_loop);
+    RUN_TEST(stops_scrolling_at_the_top_of_the_map);
+    RUN_TEST(reports_the_arrival_tile_from_the_map_cursor_up);
+    RUN_TEST(divides_the_cursor_signed_up);
+    RUN_TEST(widens_the_unit_row_unsigned_up);
 }
