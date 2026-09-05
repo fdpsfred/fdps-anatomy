@@ -390,3 +390,86 @@ int fdps_icon_script_set_unit_facing(unsigned char *script, int offset)
 
     return offset + unit_count * 2;
 }
+
+/* The phase counter runs 1, 2, ... 7 -- MOV dword ptr [EBP-0x10],0x1 with CMP
+   against 0x8 and JL -- so the flash has seven phases and the last of them is
+   odd.  Both ends of that range are behaviour: starting at 0 or stopping at 8
+   would leave the units visible, because it is the phase's low bit that goes
+   into the record. */
+#define BLINK_FIRST_PHASE 1
+#define BLINK_PHASE_LIMIT 8
+
+/* How long one phase is held for: CMP dword ptr [EBP-0x18],0x3 / JL around the
+   bare CALL 0x0002beb0, so three rendered frames per phase and twenty-one for
+   the whole effect.  Nothing in the script can change it. */
+#define BLINK_FRAMES_PER_PHASE 3
+
+/* 000221e0.  Script opcode 9, the scripted retire-with-a-flash.  See icon.h
+   for the operand layout and what the handler leaves behind.
+
+   THE LIST IS ONE BYTE PER UNIT.  MOV EAX,[EBP+0x18] / ADD EAX,[EBP-0x18] /
+   MOV EDX,[EBP+0x14] / ADD EDX,EAX / MOV AL,byte ptr [EDX]: the list index is
+   added to the offset unscaled, where the walk and turn handlers above scale
+   theirs by two.  So the operand header is two bytes and the list that follows
+   is unit_count bytes, and the returned offset is offset + 2 + unit_count.
+
+   THE FLAGS BYTE IS ASSIGNED WHOLE.  MOV AL,byte ptr [EBP-0x10] / AND AL,0x1 /
+   MOV byte ptr [EDX+0x5],AL is a store of the phase's low bit over the entire
+   byte, not a read-modify-write of bit 0.  Every other flag the record carried
+   is cleared with it, including the acted-this-turn bit; spelling this as
+   `unit->flags |= 1` and `unit->flags &= ~1`, which is what the single-unit
+   retire and un-retire opcodes in fdps_icon_script_run do, preserves those
+   flags where the original destroys them, so a unit flashed out here and later
+   brought back comes back able to act (rebuild_info/pitfalls.md).
+
+   THE LAST PHASE IS ODD, AND THAT IS THE POINT.  Phase 7 writes 1, which is
+   the retired flag set, so the effect deliberately ends with the listed units
+   off the map rather than back where it found them.  Treating it as a
+   symmetric blink and restoring the units afterwards leaves scripted units
+   standing that the original removed (rebuild_info/pitfalls.md).
+
+   THE COUNT AND THE INDICES ARE UNSIGNED.  XOR EAX,EAX / MOV AL,byte ptr
+   [EDX+0x1] for the count and XOR EAX,EAX / MOV AL,byte ptr [EDX] for each
+   index, so both are 0..255 and a top-bit-set count is 128 units rather than a
+   list walked backwards.
+
+   The unit loop and the frame loop are siblings inside the phase loop, so
+   every listed unit changes state on the same displayed frame; and the frame
+   loop's only call is fdps_render_view_frame, which holds until the timer tick
+   moves, so the flash's speed is the game's frame rate and not the CPU's. */
+int fdps_icon_script_blink_units_out(unsigned char *script, int offset)
+{
+    /* The one operand byte: how many unit indices follow it. */
+    int unit_count;
+    /* The flash's phase counter, whose low bit is what reaches the record. */
+    int phase;
+    /* Position in the unit list, and the held-frame counter. */
+    int listed;
+    int held;
+    /* The listed unit's index in the battle unit array, and its record. */
+    int unit_index;
+    struct fdps_unit_record *unit;
+
+    unit_count = (int) script[offset + 1];
+    offset += 2;
+
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_ui_play_active_flag = 0;
+
+    for (phase = BLINK_FIRST_PHASE; phase < BLINK_PHASE_LIMIT; phase++) {
+        for (listed = 0; listed < unit_count; listed++) {
+            unit_index = (int) script[offset + listed];
+            unit = fdps_get_unit_record(unit_index);
+            unit->flags = (unsigned char) (phase & 1);
+        }
+
+        for (held = 0; held < BLINK_FRAMES_PER_PHASE; held++) {
+            fdps_render_view_frame();
+        }
+    }
+
+    data_fdps_map_cursor_draw_mode = 1;
+    data_fdps_ui_play_active_flag = 1;
+
+    return offset + unit_count;
+}

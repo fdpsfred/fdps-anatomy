@@ -144,4 +144,41 @@ extern int fdps_icon_script_walk_units(unsigned char *script, int offset);
 extern int fdps_icon_script_set_unit_facing(unsigned char *script, int offset);
 #pragma aux fdps_icon_script_set_unit_facing "*" parm caller [];
 
+/* Script opcode 9.  Flashes a list of battle units on and off seven times and
+   then leaves them off -- retired from the battle, not merely hidden.
+
+   script is the base of the loaded IconAni .DAT image and offset the byte
+   offset of this opcode inside it.  script[offset + 1] is how many units are
+   listed, an unsigned byte, and the list follows at script[offset + 2] as that
+   many one-byte unit indices -- one byte per unit here, not the two-byte
+   index-and-direction pairs the walk and turn opcodes take.
+
+   Returns offset + 2 + unit_count, the position of the next opcode, which the
+   interpreter stores as its new script position.
+
+   THE EFFECT ENDS WITH THE UNITS GONE.  Seven phases run and each one assigns
+   the phase's low bit to every listed unit's flags byte, whose bit 0 is the
+   retired flag the map drawing skips a unit on.  Seven is odd, so the last
+   phase writes 1 and the units stay off the map after the opcode returns.
+   Reading this as a decorative blink and putting the units back afterwards
+   leaves units standing that the original removed
+   (rebuild_info/pitfalls.md).
+
+   THE WHOLE FLAGS BYTE IS ASSIGNED, NOT JUST THE RETIRED BIT.  Every other
+   flag in that byte is cleared as a side effect, the acted-this-turn flag
+   included, which is what separates this from the single-unit retire and
+   un-retire opcodes that edit bit 0 in place.
+
+   Each phase is held for three rendered frames, so the flash runs at a fixed
+   twenty-one frames however many units are listed; there is no operand for its
+   speed.
+
+   The handler leaves two globals set (both gamedata.h):
+   data_fdps_map_cursor_draw_mode and data_fdps_ui_play_active_flag are both 0
+   for the duration of the flash, so no cursor and no info panel are drawn over
+   it, and both are 1 on return.  They are set to those constants rather than
+   put back to what they held on entry. */
+extern int fdps_icon_script_blink_units_out(unsigned char *script, int offset);
+#pragma aux fdps_icon_script_blink_units_out "*" parm caller [];
+
 #endif

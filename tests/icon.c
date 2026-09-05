@@ -1132,6 +1132,264 @@ static void face_the_hud_globals_end_at_one_not_where_they_started(void)
     CHECK_EQ(data_fdps_ui_play_active_flag, 1);
 }
 
+/* ---------------------------------------------------------------------------
+ * fdps_icon_script_blink_units_out -- 000221e0, script opcode 9.
+ *
+ * WHAT IS OBSERVABLE.  The handler's whole output is the flags byte of every
+ * listed unit's record, the two HUD globals it writes on the way in and out,
+ * and the offset it returns.  The alternation itself is not observable from
+ * outside: each phase overwrites the byte the phase before it wrote, and the
+ * only thing that ever sees an intermediate value is fdps_draw_map_unit inside
+ * a rendered frame.  What the cases below pin is the state the run ENDS in,
+ * which is where the phase count's parity shows up -- an eighth phase, or a
+ * counter started at 0, would leave 0 in the byte and the units on the map.
+ *
+ * EVERY CASE RENDERS.  Unlike the walk and turn handlers there is no operand
+ * that can zero the frame loop: seven phases of three frames run on every
+ * call, so every case here goes through blink_run and hooks IRQ0 the way the
+ * walk cases above do.  fdps_render_view_frame's wait ends only when
+ * data_fdps_timer_tick_counter moves and nothing advances that counter in a
+ * test image.
+ *
+ * Expected values come from the assembly: XOR EAX,EAX / MOV AL,byte ptr
+ * [EDX+0x1] for the unsigned count and ADD dword ptr [EBP+0x18],0x2 for the
+ * two-byte header it sits in; MOV EAX,[EBP+0x18] / ADD EAX,[EBP-0x18] with no
+ * scaling for the one-byte-per-unit list; MOV [EBP-0x10],0x1 with CMP against
+ * 0x8 and JL for the seven phases; MOV AL,byte ptr [EBP-0x10] / AND AL,0x1 /
+ * MOV byte ptr [EDX+0x5],AL at 0002226b for the whole-byte assignment of the
+ * phase's low bit; CMP dword ptr [EBP-0x18],0x3 / JL around the bare CALL
+ * 0x0002beb0 for the three frames a phase is held; MOV dword ptr
+ * [0x00069cd0],0x1 and MOV byte ptr [0x00060159],0x1 at 00022290 for the exit
+ * constants; and MOV EAX,[EBP+0x18] / ADD EAX,[EBP-0x14] at 000222a1 for the
+ * returned offset.  None is read off the emitted C.
+ *
+ * WHAT IS NOT ASSERTED.  That the units are visible on the even phases and
+ * hidden on the odd ones, and that each phase lasts three frames rather than
+ * one or ten, are playtest contracts (rebuild_info/pitfalls.md): both are
+ * properties of what is on screen partway through a call that returns only
+ * once the flash is over.
+ */
+
+/* Records staged for the battle unit array, and the script image the operand
+   and the unit list are written into.  The image is large enough for the
+   biggest list a one-byte count can name, 2 + 255 bytes. */
+#define BLINK_UNITS 5
+#define BLINK_SCRIPT_BYTES 300
+
+/* Staged into every record's flags byte before a run.  Every bit set, so a
+   handler that only edited bit 0 would leave 0xff or 0xfe behind and a
+   handler that assigns the whole byte leaves 1.  Bit 7 is the acted-this-turn
+   flag, which is exactly the one the assignment destroys. */
+#define BLINK_STAGED_FLAGS 0xff
+
+/* Staged into the frame latch before a run.  A value the timer's tick counter
+   will not be sitting on, so the latch having moved says frames were
+   presented. */
+#define BLINK_LATCH_SENTINEL 0x5a5a5a5aUL
+
+/* Staged into the two HUD globals before a run, so that finding 1 in them
+   afterwards says the handler wrote the exit constants rather than put back
+   what it found. */
+#define BLINK_STAGED_CURSOR_MODE 4
+#define BLINK_STAGED_PLAY_FLAG 4
+
+static struct fdps_unit_record blink_units[BLINK_UNITS];
+static unsigned char blink_script[BLINK_SCRIPT_BYTES];
+
+/* Points the battle unit array at the staged records, sets every flags byte to
+   all ones, stages the frame latch and switches off everything a rendered
+   frame would otherwise paint. */
+static void blink_stage(void)
+{
+    int unit;
+
+    memset(blink_units, 0, sizeof(blink_units));
+    for (unit = 0; unit < BLINK_UNITS; unit++) {
+        blink_units[unit].flags = BLINK_STAGED_FLAGS;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) blink_units;
+
+    data_fdps_map_unit_count = 0;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+
+    data_fdps_view_frame_last_tick = (unsigned int) BLINK_LATCH_SENTINEL;
+
+    data_fdps_map_cursor_draw_mode = BLINK_STAGED_CURSOR_MODE;
+    data_fdps_ui_play_active_flag = BLINK_STAGED_PLAY_FLAG;
+
+    memset(blink_script, 0, sizeof(blink_script));
+}
+
+/* Writes the opcode and its one operand at offset, and returns the offset the
+   first unit index goes at. */
+static int blink_write_header(int offset, int unit_count)
+{
+    blink_script[offset] = 9;
+    blink_script[offset + 1] = (unsigned char) unit_count;
+    return offset + 2;
+}
+
+/* One whole run with the frame wait serviced.  Every case needs it: the frame
+   loop is not operand-controlled, so twenty-one frames run whatever the script
+   says. */
+static int blink_run(int offset)
+{
+    int next_offset;
+
+    walk_saved_timer = _dos_getvect(WALK_TIMER_VECTOR);
+    _dos_setvect(WALK_TIMER_VECTOR, walk_timer_isr);
+    next_offset = fdps_icon_script_blink_units_out(blink_script, offset);
+    _dos_setvect(WALK_TIMER_VECTOR, walk_saved_timer);
+
+    return next_offset;
+}
+
+/* The phase counter runs 1..7 and the last phase writes its low bit, so the
+   run ends with the retired flag set on every listed unit.  A loop that ran an
+   eighth phase, or started at 0, would end on an even phase and leave 0 here --
+   the units back on the map, which is what a reading of this opcode as a
+   decorative blink produces (rebuild_info/pitfalls.md).  Unit 3 is not listed
+   and keeps the staged byte, which says the handler walks the list rather than
+   the whole array. */
+static void blink_the_listed_units_end_retired(void)
+{
+    int list_at;
+    int next_offset;
+
+    blink_stage();
+    list_at = blink_write_header(0, 2);
+    blink_script[list_at] = 1;
+    blink_script[list_at + 1] = 4;
+
+    next_offset = blink_run(0);
+
+    CHECK_EQ(blink_units[1].flags, 1);
+    CHECK_EQ(blink_units[4].flags, 1);
+    CHECK_EQ(blink_units[3].flags, BLINK_STAGED_FLAGS);
+    CHECK_EQ(next_offset, 4);
+}
+
+/* MOV byte ptr [EDX+0x5],AL assigns the whole byte: the record went in with
+   every flag set and comes out holding 1, not 0xff and not 0x81.  Writing the
+   obvious `unit->flags |= 1` -- which is what the single-unit retire opcode in
+   fdps_icon_script_run does to the same byte -- would preserve bit 7, the
+   acted-this-turn flag, and a unit flashed out here and later un-retired would
+   come back with a different turn state than the original leaves it
+   (rebuild_info/pitfalls.md). */
+static void blink_the_whole_flags_byte_is_assigned(void)
+{
+    int list_at;
+
+    blink_stage();
+    list_at = blink_write_header(0, 1);
+    blink_script[list_at] = 2;
+
+    blink_run(0);
+
+    CHECK_EQ(blink_units[2].flags, 1);
+}
+
+/* The list index is added to the offset unscaled -- ADD EAX,[EBP-0x18] with no
+   ADD EAX,EAX in front of it -- so the indices are one byte apart, not two.
+   Reading them as the two-byte pairs the walk and turn opcodes take would pick
+   up unit 0 as the second entry here and hand back an offset four bytes too
+   far. */
+static void blink_the_list_is_one_byte_per_unit(void)
+{
+    int list_at;
+    int next_offset;
+
+    blink_stage();
+    list_at = blink_write_header(0, 3);
+    blink_script[list_at] = 1;
+    blink_script[list_at + 1] = 2;
+    blink_script[list_at + 2] = 3;
+
+    next_offset = blink_run(0);
+
+    CHECK_EQ(blink_units[1].flags, 1);
+    CHECK_EQ(blink_units[2].flags, 1);
+    CHECK_EQ(blink_units[3].flags, 1);
+    CHECK_EQ(blink_units[0].flags, BLINK_STAGED_FLAGS);
+    CHECK_EQ(next_offset, 5);
+}
+
+/* The count is at offset + 1 and the list starts at offset + 2, neither of
+   which is offset + 0: the opcode byte and the byte just past the list are
+   both set to unit indices that would give a very different run if either were
+   picked up by mistake. */
+static void blink_the_operand_follows_the_opcode_byte(void)
+{
+    int list_at;
+    int next_offset;
+
+    blink_stage();
+    blink_script[10] = 3;
+    list_at = blink_write_header(7, 1);
+    blink_script[list_at] = 4;
+
+    next_offset = blink_run(7);
+
+    CHECK_EQ(blink_units[4].flags, 1);
+    CHECK_EQ(blink_units[3].flags, BLINK_STAGED_FLAGS);
+    CHECK_EQ(next_offset, 10);
+}
+
+/* XOR EAX,EAX / MOV AL,byte ptr [EDX+0x1]: a count with its top bit set is
+   128, not -128.  A signed decode would list no unit at all and hand the
+   interpreter back a position 126 bytes BEHIND this opcode.  Every list byte
+   is left zero, so all 128 entries name unit 0 -- what is being pinned is the
+   decode and the return arithmetic, and unit 0 having been retired says the
+   loop ran at all. */
+static void blink_the_unit_count_operand_is_unsigned(void)
+{
+    int next_offset;
+
+    blink_stage();
+    blink_write_header(0, 0x80);
+
+    next_offset = blink_run(0);
+
+    CHECK_EQ(next_offset, 2 + 0x80);
+    CHECK_EQ(blink_units[0].flags, 1);
+}
+
+/* A count of 0 lists nobody, so no record is touched -- but the phase loop and
+   its frame loop are not guarded by the count, so the flash still runs its
+   twenty-one frames and the latch still moves off the sentinel.  A frame loop
+   hoisted under the unit loop, or skipped on an empty list, would leave the
+   sentinel in place and would take the opcode's on-screen time to nothing. */
+static void blink_an_empty_list_still_renders(void)
+{
+    int next_offset;
+
+    blink_stage();
+    blink_write_header(0, 0);
+
+    next_offset = blink_run(0);
+
+    CHECK_EQ(blink_units[0].flags, BLINK_STAGED_FLAGS);
+    CHECK_EQ(data_fdps_view_frame_last_tick == BLINK_LATCH_SENTINEL, 0);
+    CHECK_EQ(next_offset, 2);
+}
+
+/* MOV dword ptr [0x00069cd0],0x1 and MOV byte ptr [0x00060159],0x1 at 00022290
+   are stores of literals, not restores: both globals were staged at 4 and both
+   come back 1.  A save-and-restore pair -- the obvious spelling of "hide the
+   HUD for the duration" -- would leave 4 in each and carry an area-of-effect
+   cursor mode straight through the opcode (rebuild_info/pitfalls.md). */
+static void blink_the_hud_globals_end_at_one_not_where_they_started(void)
+{
+    blink_stage();
+    blink_write_header(0, 0);
+
+    blink_run(0);
+
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+    CHECK_EQ(data_fdps_ui_play_active_flag, 1);
+}
+
 void run_icon_tests(void)
 {
     RUN_TEST(the_dac_reads_back_what_was_written);
@@ -1164,4 +1422,11 @@ void run_icon_tests(void)
     RUN_TEST(face_the_unit_count_operand_is_unsigned);
     RUN_TEST(face_a_nonzero_hold_presents_frames);
     RUN_TEST(face_the_hud_globals_end_at_one_not_where_they_started);
+    RUN_TEST(blink_the_listed_units_end_retired);
+    RUN_TEST(blink_the_whole_flags_byte_is_assigned);
+    RUN_TEST(blink_the_list_is_one_byte_per_unit);
+    RUN_TEST(blink_the_operand_follows_the_opcode_byte);
+    RUN_TEST(blink_the_unit_count_operand_is_unsigned);
+    RUN_TEST(blink_an_empty_list_still_renders);
+    RUN_TEST(blink_the_hud_globals_end_at_one_not_where_they_started);
 }
