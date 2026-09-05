@@ -5,11 +5,14 @@
  * data_fdps_battle_move_grid_ptr and works in place on what it finds.
  */
 #include <stddef.h>
+#include <stdlib.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "maptile.h"
 #include "movegrid.h"
+#include "table.h"
 #include "unit.h"
+#include "walk.h"
 
 /* 00010b20.  CMP dword ptr [0x00060144],0 / JZ to the epilogue: an unallocated
    grid is not an error here, it is a silent return.  Which of the fourteen
@@ -922,4 +925,273 @@ int fdps_move_path_trace(int goal_x, int goal_y, unsigned char *out_path,
     }
 
     return step_count;
+}
+
+/* Bytes malloc'd for the direction-code buffer: PUSH 0x64 at 00011a3d.  One
+   byte per step, and it is the same 100 that fdps_move_path_trace stages its
+   own frame copy in before handing the codes over, so neither side bounds a
+   path longer than that. */
+#define MOVE_STEP_PATH_BYTES 100
+
+/* Bytes malloc'd for the reachable-tile list: PUSH 0x800 at 00011a4a.  Two
+   bytes a tile, so 1024 tiles -- fdps_map_grid_collect_marked_tiles bounds
+   nothing itself and a map with more marked cells than that overruns this. */
+#define MOVE_REACHABLE_COORD_BYTES 0x800
+
+/* The allowance the relaxed retry floods with: PUSH 0x64 at 00011aaf, a
+   literal and not the unit's own move points.  It is larger than any real
+   map's diameter, so the retry answers "is there a route at all", ignoring
+   what the unit can afford. */
+#define MOVE_UNLIMITED_ALLOWANCE 100
+
+/* Larger than any Manhattan distance a real map can produce, so the first
+   candidate tile always beats it: MOV dword ptr [EBP-0x1c],0xff at 00011c1a
+   and MOV dword ptr [EBP-0xc],0xff at 00011c21.  It is a seed and not a
+   sentinel -- nothing tests for it afterwards -- but it is also a bound: a
+   candidate 255 or more tiles away in Manhattan terms is refused and the
+   destination the caller asked for stands. */
+#define MOVE_NO_CANDIDATE_YET 0xff
+
+/* 000119e0.  The whole move command behind one call: decide where the unit can
+   actually get to, pick the reachable tile closest to where it was asked to
+   go, and walk it there.  Answers 1 when a walk was played and 0 when the tile
+   that won is the one the unit already stands on.
+
+   side_select is the acting unit's side as a TRUTH VALUE, not a coordinate and
+   not a mode.  It is forwarded unchanged to
+   fdps_move_grid_mark_opposing_zones_of_control, which reads 0 as "mark the
+   units whose side byte is non-zero", and to
+   fdps_move_grid_block_occupied_tiles, which reads 0 as "block the units whose
+   side byte is 0" -- opposite polarities, one value, so the units whose zones
+   of control stop the walk are exactly the ones whose tiles it may cross but
+   not finish on.  fdps_battle_system_menu pushes a literal 1 at 00014cf5 for a
+   player unit; the four AI entries forward their own second argument.
+
+   THE GRID IS REBUILT FOUR TIMES AND THE ROUNDS ARE NOT INTERCHANGEABLE.
+
+   Round 1 (00011a5a) is the only one that does NOT reset the grid first: it
+   marks and floods over whatever the caller left in it.  Round 2, the relaxed
+   retry (00011aaa), resets and then floods WITHOUT marking any zone of
+   control, which is what lets it find a route through the tiles round 1
+   refuses.  Rounds 3 (00011bc6) and 4 (00011cef) are the full sequence --
+   reset, mark, flood -- and round 3 alone also calls
+   fdps_move_grid_block_occupied_tiles, because it is the only round whose
+   result is read out as a list of tiles the unit may finish on.  Collapsing
+   any two of them into one shared setup changes which tiles the walk may use.
+
+   THE RETARGET REPLAY WALKS THE PATH FORWARDS AND SO INVERTS EVERY CODE.
+   fdps_move_path_trace is called with the unit's tile as the goal and the
+   destination as the start, so its codes describe steps from the destination
+   back to the unit and arrive reversed (movegrid.h).  Replaying them from the
+   unit's tile therefore means undoing each one: 0 becomes y+1, 1 becomes x-1,
+   2 becomes y-1 and 3 becomes x+1, the same table src/walk.c dispatches on.
+   The fourth arm is a default (JMP at 00011b88, with no fourth compare), so
+   any code above 2 steps right.
+
+   THE PROBE READS THE MOVE GRID AND NOT THE TERRAIN.  Each replayed tile is
+   fed to fdps_map_load_tile_info purely so that
+   data_fdps_map_current_move_grid_marker republishes that cell's flood-fill
+   cost, and the tile is kept when the cost is anything but the 0xff
+   unreachable sentinel.  Round 1's flood used the unit's REAL allowance, so
+   what the loop does is slide the request back along the blocked route to the
+   furthest tile the unit can pay for.  Every step is tested and the LAST one
+   that passes wins, not the first.
+
+   ABS IS CALLED FIVE TIMES A TILE AND THE TWO EXPRESSIONS SHARE NOTHING.
+   00011c6c, 00011c7d, 00011c91, 00011ca2 and 00011cad: the Manhattan distance
+   and the skew each recompute both absolute differences, and the skew takes an
+   absolute value of its own.  The flag set carries no -oi,
+   so __INLINE_FUNCTIONS__ is not defined and stdlib.h leaves abs a real call
+   (rebuild_info/build_flags.md).  Both differences are measured against the
+   REQUESTED destination in [EBP+0x14] / [EBP+0x18] -- which the retarget above
+   may already have moved -- and never against the best candidate so far.
+
+   THE TIE-BREAK IS STRICT AT BOTH LEVELS AND BOTH COMPARES ARE SIGNED.  JL at
+   00011cbe takes a strictly smaller distance; on an exact tie JL at 00011cce
+   takes a strictly smaller skew.  Equal on both loses, so the earliest tile in
+   the collect order -- row-major, so the topmost and then the leftmost --
+   keeps the win.  The skew is abs(abs(dx) - abs(dy)): among tiles the same
+   number of steps away it prefers one lying on the diagonal towards the target
+   over one straight out along a row or a column.
+
+   THE FINAL TEST ASKS FOR A NON-ZERO COUNT, NOT A POSITIVE ONE.  CMP dword ptr
+   [EBP-0x44],0x0 / JZ at 00011d3f: a step count of -1 -- what
+   fdps_move_path_trace answers when the chosen tile is unreachable -- is
+   handed to fdps_animate_move_path, where the signed loop bound turns it into
+   no steps at all, and this function still reports 1.  Spelling the test as
+   > 0 would report 0 there instead.  The case is not reachable in practice:
+   the flood always costs the unit's own tile at 0 and
+   fdps_move_grid_block_occupied_tiles exempts the acting unit, so that tile is
+   always in the collect list and always beats the 0xff seed, which leaves the
+   chosen tile reachable by construction.
+
+   Both tile bytes and the direction byte widen through XOR EAX,EAX / MOV AL
+   (00011b57, 00011c4c, 00011c5d), so 0xff is 255 everywhere and never -1.
+
+   The two buffers are freed on the one exit path; there is no early return
+   anywhere in the body. */
+int fdps_battle_move_unit_toward(int dest_x, int dest_y, int unit_index,
+                                 int side_select)
+{
+    /* The acting unit's record, and its row of the PROMAP.DAT class table. */
+    struct fdps_unit_record *unit;
+    struct fdps_class_record *class_move_cost;
+    /* malloc'd: one direction code per step of the traced route. */
+    unsigned char *step_path;
+    /* malloc'd: the (x, y) byte pairs of every tile the unit can reach. */
+    unsigned char *reachable_coords;
+    /* The unit's movement allowance, record byte +0x3b. */
+    int move_points;
+    /* The tile the unit is standing on now. */
+    int start_x;
+    int start_y;
+    /* The unit's class code, record byte +0x20; the table row is this plus
+       one. */
+    int class_index;
+    /* What fdps_move_path_trace last answered: steps, or -1 for no route. */
+    int step_count;
+    /* How many tiles fdps_map_grid_collect_marked_tiles listed. */
+    int reachable_count;
+    /* Cursors into the two lists above. */
+    int step_index;
+    int tile_slot;
+    /* The direction code of the step being replayed. */
+    int direction_code;
+    /* Where the replay has walked to so far. */
+    int walk_x;
+    int walk_y;
+    /* The tile the unit will actually be sent to. */
+    int chosen_x;
+    int chosen_y;
+    /* The candidate tile this pass of the selection loop is judging. */
+    int tile_x;
+    int tile_y;
+    /* That candidate's Manhattan distance from the destination, and how far
+       off the diagonal towards it the candidate sits. */
+    int tile_distance;
+    int tile_skew;
+    /* The same two measures for the best candidate seen so far.  The
+       initialiser is the store at 000119ec, which the assignment before the
+       selection loop makes again; -od keeps both. */
+    int best_distance = MOVE_NO_CANDIDATE_YET;
+    int best_skew;
+    /* The answer: 1 when a walk was played. */
+    int moved;
+
+    unit = fdps_get_unit_record(unit_index);
+    move_points = (int) unit->move;
+    start_x = (int) unit->pos_x;
+    start_y = (int) unit->pos_y;
+    class_index = (int) unit->clazz;
+    class_move_cost = fdps_get_class_record(class_index + 1);
+
+    step_path = malloc(MOVE_STEP_PATH_BYTES);
+    reachable_coords = malloc(MOVE_REACHABLE_COORD_BYTES);
+
+    /* Round 1: can the unit reach the tile it was asked for, at its own
+       expense and around the zones of control? */
+    fdps_move_grid_mark_opposing_zones_of_control(side_select);
+    fdps_move_grid_flood_fill_range(class_move_cost, start_x, start_y,
+                                    move_points);
+    step_count = fdps_move_path_trace(start_x, start_y, step_path,
+                                      dest_x, dest_y, 0);
+
+    if (step_count == -1) {
+        /* Round 2: is there a route at all, ignoring both the allowance and
+           the zones of control? */
+        fdps_map_grid_reset();
+        fdps_move_grid_flood_fill_range(class_move_cost, start_x, start_y,
+                                        MOVE_UNLIMITED_ALLOWANCE);
+        step_count = fdps_move_path_trace(start_x, start_y, step_path,
+                                          dest_x, dest_y, 1);
+
+        if (step_count != -1) {
+            /* Put the real range back under the probe, then slide the request
+               along that route to the furthest tile inside it. */
+            fdps_map_grid_reset();
+            fdps_move_grid_mark_opposing_zones_of_control(side_select);
+            fdps_move_grid_flood_fill_range(class_move_cost, start_x, start_y,
+                                            move_points);
+
+            walk_x = start_x;
+            walk_y = start_y;
+            chosen_x = dest_x;
+            chosen_y = dest_y;
+
+            for (step_index = 0; step_index < step_count; step_index++) {
+                direction_code = (int) step_path[step_index];
+                if (direction_code == 0) {
+                    walk_y++;
+                } else if (direction_code == 1) {
+                    walk_x--;
+                } else if (direction_code == 2) {
+                    walk_y--;
+                } else {
+                    walk_x++;
+                }
+
+                fdps_map_load_tile_info(walk_x, walk_y);
+                if (data_fdps_map_current_move_grid_marker != 0xff) {
+                    chosen_x = walk_x;
+                    chosen_y = walk_y;
+                }
+            }
+
+            dest_x = chosen_x;
+            dest_y = chosen_y;
+        }
+    }
+
+    /* Round 3: the range the unit may actually finish its move inside, read
+       out as a flat list of tiles. */
+    fdps_map_grid_reset();
+    fdps_move_grid_mark_opposing_zones_of_control(side_select);
+    fdps_move_grid_flood_fill_range(class_move_cost, start_x, start_y,
+                                    move_points);
+    fdps_move_grid_block_occupied_tiles(unit_index, side_select);
+    reachable_count = fdps_map_grid_collect_marked_tiles(reachable_coords);
+
+    chosen_x = dest_x;
+    chosen_y = dest_y;
+    best_distance = MOVE_NO_CANDIDATE_YET;
+    best_skew = MOVE_NO_CANDIDATE_YET;
+
+    for (tile_slot = 0; tile_slot < reachable_count; tile_slot++) {
+        tile_x = (int) reachable_coords[tile_slot * 2];
+        tile_y = (int) reachable_coords[tile_slot * 2 + 1];
+
+        tile_distance = abs(tile_x - dest_x) + abs(tile_y - dest_y);
+        tile_skew = abs(abs(tile_x - dest_x) - abs(tile_y - dest_y));
+
+        if (tile_distance < best_distance
+            || (tile_distance == best_distance && tile_skew < best_skew)) {
+            chosen_x = tile_x;
+            chosen_y = tile_y;
+            best_distance = tile_distance;
+            best_skew = tile_skew;
+        }
+    }
+
+    /* Round 4: the range once more, this time to trace the route the walk
+       plays back.  The occupied tiles are NOT taken out of it here, so the
+       route may cross the ally round 3 refused to let the unit stop on. */
+    fdps_map_grid_reset();
+    fdps_move_grid_mark_opposing_zones_of_control(side_select);
+    fdps_move_grid_flood_fill_range(class_move_cost, start_x, start_y,
+                                    move_points);
+    step_count = fdps_move_path_trace(start_x, start_y, step_path,
+                                      chosen_x, chosen_y, 0);
+    fdps_map_grid_reset();
+
+    if (step_count != 0) {
+        fdps_animate_move_path(unit_index, step_path, step_count);
+        moved = 1;
+    } else {
+        moved = 0;
+    }
+
+    free(step_path);
+    free(reachable_coords);
+
+    return moved;
 }

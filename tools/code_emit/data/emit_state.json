@@ -2534,6 +2534,14 @@
       "status": "committed",
       "emitted_against": "0x83",
       "rounds": 0
+    },
+    "000119e0": {
+      "name": "fdps_battle_move_unit_toward",
+      "target": "movegrid.c",
+      "body_size": "0x3b1",
+      "status": "committed",
+      "emitted_against": "0x3b1",
+      "rounds": 1
     }
   }
 }

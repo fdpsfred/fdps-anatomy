@@ -13,7 +13,7 @@
 00011460 | 0x489 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | int __cdecl fdps_move_path_trace(int goal_x, int goal_y, uchar * out_path, int start_x, int start_y, uchar mode)
 000118f0 | 0xbd | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_move_grid_block_occupied_tiles(int exclude_unit_index, int side_select)
 000119b0 | 0x29 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_battle_mark_unit_done(int unit_index)
-000119e0 | 0x3b1 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | int __cdecl fdps_battle_move_unit_toward(int dest_x, int dest_y, int unit_index, int map_mode)
+000119e0 | 0x3b1 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | int __cdecl fdps_battle_move_unit_toward(int dest_x, int dest_y, int unit_index, int side_select)
 00011da0 | 0xab | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | int __cdecl fdps_map_grid_collect_marked_tiles(uchar * out_coords)
 00011e50 | 0x274 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps,shared_helper | int __cdecl fdps_collect_targets_in_range(int tile_x, int tile_y, uchar * out_indices, int range_code, int min_dist, int select_mode)
 000120d0 | 0x15c | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | int __cdecl fdps_unit_rest(int unit_index)

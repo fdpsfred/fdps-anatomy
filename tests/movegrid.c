@@ -14,6 +14,7 @@
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "keybd.h"
 #include "movegrid.h"
 
 /* Room for a 4x4 grid plus spare cells past the bound, so a walk that runs
@@ -1958,6 +1959,419 @@ static void trace_mode_two_cell_is_column_times_two_plus_row_stride(void)
     CHECK_EQ(trace_byte(1), 1);
 }
 
+
+/* ---- fdps_battle_move_unit_toward, 000119e0 -------------------------------
+ *
+ * This one is an orchestrator: everything it decides it decides by driving the
+ * rest of this file, src/maptile.c, src/table.c, src/unit.c and src/walk.c, so
+ * the fixture below is the whole battle-time environment those need -- the
+ * terrain layer, the attribute table, the movement grid, the cell-event layer,
+ * the PROMAP.DAT class table and the map unit array -- and every case is
+ * driven end to end and read back off the unit record and the return value.
+ *
+ * Expected values come from the assembly at 000119e0 (the four
+ * reset/mark/flood rounds, the direction decode at 00011b5e..00011b8e, the
+ * probe against 0xff at 00011ba5, the five abs calls at 00011c6c..00011cad,
+ * the two JL tie-break tests at 00011cbe and 00011cce, and CMP [EBP-0x44],0 /
+ * JZ at 00011d3f), and the expected tile of each case is worked out by hand
+ * from the documented behaviour of the callees.  None of them is read off the
+ * emitted C.
+ *
+ * The animation really runs.  data_fdps_input_last_scancode is parked on the
+ * skip-animation code 3, which suppresses every frame src/walk.c would draw
+ * (the in-loop test covers 2 and 3, the catch-up test only 2), and every
+ * attribute row carries flags 0x60, which makes fdps_map_set_pending_tile_event
+ * return before it reaches the tile-event table.  What is left of a step is the
+ * arithmetic on the unit record and the view globals, which is what these cases
+ * are reading.
+ */
+
+#define TOWARD_W 5
+#define TOWARD_H 5
+#define TOWARD_CELLS (TOWARD_W * TOWARD_H)
+#define TOWARD_ATTR_ROWS 32
+#define TOWARD_UNITS 4
+#define TOWARD_CLASS_ROWS 8
+#define TOWARD_TILE_PX 24
+
+static unsigned char toward_tile_map[FILL_TILES_AT + TOWARD_CELLS * 2];
+static unsigned char toward_attr[FILL_ATTR_AT + TOWARD_ATTR_ROWS * 4];
+static unsigned char toward_grid[4 + TOWARD_CELLS * 2];
+static unsigned char toward_event[FILL_EVENT_AT + TOWARD_CELLS];
+static unsigned char toward_class[TOWARD_CLASS_ROWS * 0x0a];
+static struct fdps_unit_record toward_units[TOWARD_UNITS];
+
+/* A 5x5 map of distinct tile ids over uniform terrain type 0, a class table
+   whose every row costs 1 to enter any terrain, an empty unit array and a grid
+   in the state fdps_map_grid_reset leaves it in -- which is what the function
+   inherits, since round 1 does not reset before it floods. */
+static void toward_stage(void)
+{
+    int i;
+    int terrain;
+
+    for (i = 0; i < FILL_TILES_AT; i++) {
+        toward_tile_map[i] = 0xaa;
+    }
+    *(short *) (toward_tile_map + 7) = (short) TOWARD_W;
+    *(short *) (toward_tile_map + 9) = (short) TOWARD_H;
+    for (i = 0; i < TOWARD_CELLS; i++) {
+        *(short *) (toward_tile_map + FILL_TILES_AT + i * 2) = (short) i;
+    }
+
+    for (i = 0; i < FILL_ATTR_AT; i++) {
+        toward_attr[i] = 0xaa;
+    }
+    for (i = 0; i < TOWARD_ATTR_ROWS; i++) {
+        /* flags 0x60 keeps fdps_map_set_pending_tile_event out of the event
+           table; terrain type 0 for every tile until a case says otherwise. */
+        toward_attr[FILL_ATTR_AT + i * 4] = 0x60;
+        toward_attr[FILL_ATTR_AT + i * 4 + 1] = 0x00;
+        toward_attr[FILL_ATTR_AT + i * 4 + 2] = 0x00;
+        toward_attr[FILL_ATTR_AT + i * 4 + 3] = 0x00;
+    }
+
+    *(short *) toward_grid = (short) TOWARD_W;
+    *(short *) (toward_grid + 2) = (short) TOWARD_H;
+    for (i = 0; i < TOWARD_CELLS; i++) {
+        toward_grid[4 + i * 2] = 0x00;
+        toward_grid[4 + i * 2 + 1] = 0xff;
+    }
+
+    for (i = 0; i < FILL_EVENT_AT; i++) {
+        toward_event[i] = 0xaa;
+    }
+    *(short *) (toward_event + 7) = (short) TOWARD_W;
+    for (i = 0; i < TOWARD_CELLS; i++) {
+        toward_event[FILL_EVENT_AT + i] = 0x00;
+    }
+
+    for (i = 0; i < TOWARD_CLASS_ROWS * 0x0a; i++) {
+        toward_class[i] = 0x00;
+    }
+    for (i = 0; i < TOWARD_CLASS_ROWS; i++) {
+        for (terrain = 0; terrain < 8; terrain++) {
+            toward_class[i * 0x0a + terrain] = 1;
+        }
+    }
+
+    for (i = 0; i < (int) sizeof(toward_units); i++) {
+        ((unsigned char *) toward_units)[i] = 0x00;
+    }
+
+    data_fdps_scene_layer_tile_map_ptrs[0] = toward_tile_map;
+    data_fdps_scene_layer_tile_attr_ptr[0] = toward_attr;
+    data_fdps_battle_move_grid_ptr = toward_grid;
+    data_fdps_map_cell_event_code_layer_ptr = toward_event;
+    data_fdps_class_table_ptr = toward_class;
+    data_fdps_map_unit_array_ptr = (unsigned char *) toward_units;
+    data_fdps_map_unit_count = 0;
+
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_input_last_scancode = 3;
+}
+
+/* Put one unit in the array and lock the map cursor onto it, which is what the
+   walk routines derive the arrival tile from. */
+static void toward_place(int slot, int x, int y, int side, int clazz, int move)
+{
+    toward_units[slot].pos_x = (unsigned char) x;
+    toward_units[slot].pos_y = (unsigned char) y;
+    toward_units[slot].side = (unsigned char) side;
+    toward_units[slot].clazz = (unsigned char) clazz;
+    toward_units[slot].move = (unsigned char) move;
+    if (slot + 1 > data_fdps_map_unit_count) {
+        data_fdps_map_unit_count = slot + 1;
+    }
+    if (slot == 0) {
+        data_fdps_map_cursor_world_x = x * TOWARD_TILE_PX;
+        data_fdps_map_cursor_world_y = y * TOWARD_TILE_PX;
+    }
+}
+
+static void toward_set_terrain(int x, int y, int terrain_type)
+{
+    toward_attr[FILL_ATTR_AT + (y * TOWARD_W + x) * 4 + 2] =
+        (unsigned char) terrain_type;
+}
+
+static void toward_set_cost(int row, int terrain_type, int cost)
+{
+    toward_class[row * 0x0a + terrain_type] = (unsigned char) cost;
+}
+
+static int toward_marker(int x, int y)
+{
+    return (int) toward_grid[4 + (y * TOWARD_W + x) * 2 + 1];
+}
+
+/* The four record bytes the function reads, at the offsets the assembly names:
+   MOV AL,byte ptr [EDX] and [EDX+0x1] at 00011a12 and 00011a1c for the tile it
+   starts on, [EDX+0x20] at 00011a27 for the class code and [EDX+0x3b] at
+   00011a07 for the movement allowance.  The stride is the one
+   fdps_get_unit_record multiplies the index by. */
+static void toward_unit_record_field_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0x00);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 0x01);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, clazz), 0x20);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, move), 0x3b);
+}
+
+/* Asked for the tile it is already standing on, the unit wins the selection
+   loop with a distance of 0, fdps_move_path_trace answers 0 steps and CMP
+   dword ptr [EBP-0x44],0x0 / JZ at 00011d3f takes the arm that stores 0.  No
+   walk is played and the record is untouched.  The last thing the body does
+   before the test is fdps_map_grid_reset (00011d3a), so every cell is back on
+   the 0xff sentinel when it returns. */
+static void toward_target_is_the_unit_tile_returns_zero(void)
+{
+    int moved;
+
+    toward_stage();
+    toward_place(0, 2, 2, 1, 0, 3);
+
+    moved = fdps_battle_move_unit_toward(2, 2, 0, 1);
+
+    CHECK_EQ(moved, 0);
+    CHECK_EQ((int) toward_units[0].pos_x, 2);
+    CHECK_EQ((int) toward_units[0].pos_y, 2);
+    CHECK_EQ(toward_marker(2, 2), 0xff);
+    CHECK_EQ(toward_marker(0, 0), 0xff);
+}
+
+/* A unit at (0,0) with one move point asked for (4,0), four tiles away on
+   uniform terrain that costs 1 a step.
+
+   Round 1 floods an allowance of 1, so (4,0) holds the sentinel and
+   fdps_move_path_trace answers -1.  Round 2 floods 100 and traces a relaxed
+   route, which comes back as the four codes 3 3 3 3.  The replay inverts each
+   one to x+1 and probes (1,0), (2,0), (3,0) and (4,0) against the real range:
+   only (1,0) is inside it, so the request is retargeted there.  The selection
+   loop then finds (1,0) at distance 0, the final trace is one step, and
+   fdps_animate_move_path dispatches code 3 to the rightward step. */
+static void toward_walks_right_to_the_furthest_affordable_tile(void)
+{
+    int moved;
+
+    toward_stage();
+    toward_place(0, 0, 0, 1, 0, 1);
+
+    moved = fdps_battle_move_unit_toward(4, 0, 0, 1);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) toward_units[0].pos_x, 1);
+    CHECK_EQ((int) toward_units[0].pos_y, 0);
+}
+
+/* The same case turned downwards: the relaxed route from (0,4) back to (0,0)
+   records four code 0s, the replay inverts each to y+1 and only (0,1) is
+   affordable, and fdps_animate_move_path dispatches code 0 to the downward
+   step. */
+static void toward_walks_down_to_the_furthest_affordable_tile(void)
+{
+    int moved;
+
+    toward_stage();
+    toward_place(0, 0, 0, 1, 0, 1);
+
+    moved = fdps_battle_move_unit_toward(0, 4, 0, 1);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) toward_units[0].pos_x, 0);
+    CHECK_EQ((int) toward_units[0].pos_y, 1);
+}
+
+/* Turned upwards: the unit starts at (0,4) and is asked for (0,0).  The
+   relaxed route records four code 2s, the replay inverts each to y-1, (0,3) is
+   the only affordable tile on it and code 2 dispatches to the upward step. */
+static void toward_walks_up_to_the_furthest_affordable_tile(void)
+{
+    int moved;
+
+    toward_stage();
+    toward_place(0, 0, 4, 1, 0, 1);
+
+    moved = fdps_battle_move_unit_toward(0, 0, 0, 1);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) toward_units[0].pos_x, 0);
+    CHECK_EQ((int) toward_units[0].pos_y, 3);
+}
+
+/* Turned leftwards: the unit starts at (4,0) and is asked for (0,0).  The
+   relaxed route records four code 1s, the replay inverts each to x-1, (3,0) is
+   the only affordable tile on it and code 1 dispatches to the leftward step.
+   With the four directions together this pins the whole inverted table -- 0 is
+   y+1, 1 is x-1, 2 is y-1 and anything else is x+1 -- against the one
+   fdps_move_path_trace records. */
+static void toward_walks_left_to_the_furthest_affordable_tile(void)
+{
+    int moved;
+
+    toward_stage();
+    toward_place(0, 4, 0, 1, 0, 1);
+
+    moved = fdps_battle_move_unit_toward(0, 0, 0, 1);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) toward_units[0].pos_x, 3);
+    CHECK_EQ((int) toward_units[0].pos_y, 0);
+}
+
+/* The tie-break at 00011cc8..00011cce, which only shows itself when the
+   destination cannot be retargeted onto a reachable tile at all.  Column 3 is
+   terrain type 1 at a cost of 101, so no allowance the function uses -- the
+   unit's 2 in rounds 1, 3 and 4 or the literal 100 in round 2 -- can pay to
+   enter it, and (4,4) stays unreachable through both traces.
+
+   The range is then the six tiles {(0,0) (1,0) (2,0) (0,1) (1,1) (0,2)} and
+   fdps_map_grid_collect_marked_tiles hands them over in that row-major order.
+   Their Manhattan distances to (4,4) are 8 7 6 7 6 6 and their skews 0 1 2 1 0
+   2, so (2,0) takes the lead at distance 6 with a skew of 2 and (1,1), which
+   arrives later on the same distance with a skew of 0, takes it off it.  The
+   first-past-the-post answer would have been (2,0). */
+static void toward_tie_breaks_on_the_smaller_skew(void)
+{
+    int moved;
+    int wall_row;
+
+    toward_stage();
+    for (wall_row = 0; wall_row < TOWARD_H; wall_row++) {
+        toward_set_terrain(3, wall_row, 1);
+    }
+    for (wall_row = 0; wall_row < TOWARD_CLASS_ROWS; wall_row++) {
+        toward_set_cost(wall_row, 1, 101);
+    }
+    toward_place(0, 0, 0, 1, 0, 2);
+
+    moved = fdps_battle_move_unit_toward(4, 4, 0, 1);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) toward_units[0].pos_x, 1);
+    CHECK_EQ((int) toward_units[0].pos_y, 1);
+}
+
+/* INC EAX between the class byte and the push at 00011a30: the movement costs
+   come from row class_code + 1 of PROMAP.DAT, because row 0 is the table's
+   default row (table.h).  The unit's class code is 3; row 4 costs 1 a step and
+   row 3 costs 100.  With the correct row the unit's single move point reaches
+   (1,0) and it walks there; off by one it could not leave its own tile and the
+   answer would be 0. */
+static void toward_class_row_is_the_class_code_plus_one(void)
+{
+    int moved;
+
+    toward_stage();
+    toward_set_cost(3, 0, 100);
+    toward_set_cost(4, 0, 1);
+    toward_place(0, 0, 0, 1, 3, 1);
+
+    moved = fdps_battle_move_unit_toward(1, 0, 0, 1);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) toward_units[0].pos_x, 1);
+    CHECK_EQ((int) toward_units[0].pos_y, 0);
+}
+
+/* side_select reaches fdps_move_grid_block_occupied_tiles, and round 3 is the
+   only round that calls it.  Both units are on side 1 and the argument is 1,
+   which is the reading that blocks the units whose side byte is non-zero, so
+   the ally standing on (2,0) has its tile taken out of the range even though
+   round 1 traced a route to it happily.  The unit settles for (1,0), the
+   nearest tile left.  Without that call the request would have been satisfied
+   exactly and the unit would be on (2,0), on top of its ally. */
+static void toward_ally_tile_is_taken_out_of_the_range(void)
+{
+    int moved;
+
+    toward_stage();
+    toward_place(0, 0, 0, 1, 0, 2);
+    toward_place(1, 2, 0, 1, 0, 2);
+
+    moved = fdps_battle_move_unit_toward(2, 0, 0, 1);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) toward_units[0].pos_x, 1);
+    CHECK_EQ((int) toward_units[0].pos_y, 0);
+    CHECK_EQ((int) toward_units[1].pos_x, 2);
+    CHECK_EQ((int) toward_units[1].pos_y, 0);
+}
+
+/* side_select reaches fdps_move_grid_mark_opposing_zones_of_control as well,
+   with the opposite reading: 1 marks the units whose side byte is 0.  The
+   enemy on (2,0) therefore turns its own tile impassable and stamps the stop
+   bit on (1,0), so round 1 cannot reach the requested tile and answers -1.
+   Round 2, which floods without marking anything, finds the relaxed route
+   3 3, and the replay retargets the request to (1,0) -- the last tile on it
+   still inside the real range.  The unit walks the one step and stops beside
+   the enemy instead of onto it. */
+static void toward_enemy_zone_of_control_stops_the_unit_short(void)
+{
+    int moved;
+
+    toward_stage();
+    toward_place(0, 0, 0, 1, 0, 2);
+    toward_place(1, 2, 0, 0, 0, 2);
+
+    moved = fdps_battle_move_unit_toward(2, 0, 0, 1);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) toward_units[0].pos_x, 1);
+    CHECK_EQ((int) toward_units[0].pos_y, 0);
+    CHECK_EQ((int) toward_units[1].pos_x, 2);
+    CHECK_EQ((int) toward_units[1].pos_y, 0);
+}
+
+/* The retarget block at 00011aaa..00011bc3 answering something the selection
+   loop on its own cannot reach.  In every case above, the tile the replay
+   retargets to is also the reachable tile nearest the ORIGINAL request, so
+   deleting the block would leave the answers unchanged; here the two differ.
+
+   Column x=1 is terrain type 1 at a cost of 101 for rows 1..4 only, leaving
+   (1,0) on terrain 0, so the wall has one gap and it is at the top.  The unit
+   stands at (0,2) with 3 move points and is asked for (2,2).
+
+   Round 1 floods 3 and reaches {(0,2)=0 (0,1)=1 (0,3)=1 (0,0)=2 (0,4)=2
+   (1,0)=3}: (2,2) holds the sentinel and the trace answers -1.  Round 2 floods
+   100, which still cannot pay 101 to enter the wall, so its costs are the same
+   six plus the whole of columns 2..4 reached around through (1,0): (2,0)=4,
+   (2,1)=5, (2,2)=6.  Tracing from (2,2) back to (0,2) in mode 1 records
+   0 0 3 3 2 2 and hands them over reversed as 2 2 3 3 0 0.
+
+   The replay walks that route from the unit's own tile with the inverted
+   table -- (0,1), (0,0), (1,0), (2,0), (2,1), (2,2) -- and probes each against
+   the real range.  The first three are inside it and the last three are not,
+   so the LAST affordable tile, (1,0) at cost 3, is what the request is
+   retargeted to; a first-past-the-post probe would have stopped at (0,1).  The
+   unit then walks 2 2 3 and ends on (1,0).
+
+   With the retarget suppressed the request stays (2,2), whose distances over
+   the same six tiles are 4 3 3 2 3 4, so the selection loop picks the unit's
+   OWN tile (0,2) at distance 2, the final trace answers 0 steps and the
+   function returns 0 having moved nothing.  moved and the arrival tile
+   therefore both separate the two. */
+static void toward_retarget_beats_the_nearest_reachable_tile(void)
+{
+    int moved;
+    int wall_row;
+
+    toward_stage();
+    for (wall_row = 1; wall_row < TOWARD_H; wall_row++) {
+        toward_set_terrain(1, wall_row, 1);
+    }
+    toward_set_cost(1, 1, 101);
+    toward_place(0, 0, 2, 1, 0, 3);
+
+    moved = fdps_battle_move_unit_toward(2, 2, 0, 1);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) toward_units[0].pos_x, 1);
+    CHECK_EQ((int) toward_units[0].pos_y, 0);
+}
+
 void run_movegrid_tests(void)
 {
     RUN_TEST(grid_cell_stride_is_two);
@@ -2060,6 +2474,18 @@ void run_movegrid_tests(void)
     RUN_TEST(trace_mode_two_scan_stops_at_the_unit_count);
     RUN_TEST(trace_mode_two_cell_is_column_times_two_plus_row_stride);
 
+    RUN_TEST(toward_unit_record_field_offsets);
+    RUN_TEST(toward_target_is_the_unit_tile_returns_zero);
+    RUN_TEST(toward_walks_right_to_the_furthest_affordable_tile);
+    RUN_TEST(toward_walks_down_to_the_furthest_affordable_tile);
+    RUN_TEST(toward_walks_up_to_the_furthest_affordable_tile);
+    RUN_TEST(toward_walks_left_to_the_furthest_affordable_tile);
+    RUN_TEST(toward_tie_breaks_on_the_smaller_skew);
+    RUN_TEST(toward_class_row_is_the_class_code_plus_one);
+    RUN_TEST(toward_ally_tile_is_taken_out_of_the_range);
+    RUN_TEST(toward_enemy_zone_of_control_stops_the_unit_short);
+    RUN_TEST(toward_retarget_beats_the_nearest_reachable_tile);
+
 
     /* Put the global back before leaving.  stage() points it at this file's
        own stage_grid, and the runners share one process: a later unit that
@@ -2071,4 +2497,6 @@ void run_movegrid_tests(void)
     data_fdps_scene_layer_tile_map_ptrs[0] = NULL;
     data_fdps_scene_layer_tile_attr_ptr[0] = NULL;
     data_fdps_map_cell_event_code_layer_ptr = NULL;
+    data_fdps_class_table_ptr = NULL;
+    data_fdps_input_last_scancode = 0;
 }

@@ -160,4 +160,31 @@ extern int fdps_move_path_trace(int goal_x, int goal_y,
                                 int start_x, int start_y, unsigned char mode);
 #pragma aux fdps_move_path_trace "*" parm caller [];
 
+/* Moves the unit at unit_index as close as it can get to (dest_x, dest_y) and
+   answers whether a walk was played: 1 when it was, 0 when the tile that won
+   is the one the unit already stands on.  The move is committed -- the walk is
+   animated and the unit record's tile position advanced -- before it returns.
+
+   side_select is the acting unit's side as a TRUTH VALUE and is forwarded
+   unchanged to fdps_move_grid_mark_opposing_zones_of_control and
+   fdps_move_grid_block_occupied_tiles above, whose readings of it are opposite
+   in polarity: the units whose zones of control stop the walk are exactly the
+   ones whose tiles the walk may cross but not finish on.
+
+   The destination is a request and not a promise.  When no affordable route to
+   it exists the function retries with the allowance and the zones of control
+   lifted and, if that finds a route, slides the request back along it to the
+   furthest tile the unit can really pay for.  Either way it then picks, out of
+   every tile the unit can finish its move on, the one with the smallest
+   Manhattan distance to the destination, ties going to the tile nearest the
+   diagonal towards it and then to the earliest in row-major order.
+
+   The grid is left reset.  Four separate (reset, mark, flood) rounds are run
+   over it and the last thing done before the walk is a reset, so nothing a
+   caller staged in the grid survives the call and nothing it computed is left
+   behind for the caller to read. */
+extern int fdps_battle_move_unit_toward(int dest_x, int dest_y, int unit_index,
+                                        int side_select);
+#pragma aux fdps_battle_move_unit_toward "*" parm caller [];
+
 #endif

@@ -284,17 +284,19 @@ Pool: fdps  [no Function ID hit in either library set; body is entirely game-dom
 Evidence: Calls only game routines - fdps_get_unit_record, fdps_get_class_record, fdps_move_path_trace, fdps_map_load_tile_info, fdps_animate_move_path - and reads the map probe result at DAT_00069d0c. malloc/free/abs are consumed, not joined. All callers are battle and map code. Not crt or ail (no library byte match, no vendor state area), not binary_artifact (945-byte body with a real frame).
 Name: fdps_ + snake_case for game code; no library symbol identified, and none exists to identify.
 Boundary: 000119e0-00011d90, Watcom prologue 53 56 57 55 89 e5 to matching epilogue 89 ec 5d 5f 5e 5b c3; the 15 bytes after are lea-form alignment padding before FUN_00011da0.
-Signature: __cdecl, int (int dest_x, int dest_y, int unit_index, int map_mode) at [ebp+0x14/0x18/0x1c/0x20], caller-cleaned (add esp,0x10 at every call site), result in EAX.
+Signature: __cdecl, int (int dest_x, int dest_y, int unit_index, int side_select) at [ebp+0x14/0x18/0x1c/0x20], caller-cleaned (add esp,0x10 at every call site), result in EAX. The fourth argument is a side truth value, not a mode: it reaches only fdps_move_grid_mark_opposing_zones_of_control (00010be9..00010c07, marks the units whose side byte at +6 is non-zero when the argument is 0) and fdps_move_grid_block_occupied_tiles (0001197a..0001199d, which reads it with the opposite polarity).
 
 Algorithm:
 1. fdps_get_unit_record(unit_index) supplies tile x at +0x00, tile y at +0x01, a class index at +0x20 and a movement/terrain cost selector at +0x3b.
 2. fdps_get_class_record(class_index + 1) yields the movement context; malloc(100) is the step buffer (one direction code per step) and malloc(0x800) is the reachable-tile list (x,y byte pairs).
-3. Build the movement cost map (FUN_00010b90(map_mode) then FUN_00010de0(ctx, x, y, cost_selector)) and path from the unit to (dest_x, dest_y) with fdps_move_path_trace(x, y, step_buf, dest_x, dest_y, 0), which returns the step count or -1 for no path.
+3. Mark the opposing units' zones of control with fdps_move_grid_mark_opposing_zones_of_control(side_select), then build the movement cost map with fdps_move_grid_flood_fill_range(ctx, x, y, cost_selector) - only the flood builds the cost map, the mark does not - and path from the unit to (dest_x, dest_y) with fdps_move_path_trace(x, y, step_buf, dest_x, dest_y, 0), which returns the step count or -1 for no path.
 4. On failure, retry with the relaxed flag 1. If a relaxed path exists, replay it step by step (direction 0 = y+1, 1 = x-1, 2 = y-1, else x+1), probing each tile with fdps_map_load_tile_info(x, y) and reading DAT_00069d0c. The last tile whose probe is not 0xff becomes the new destination - the request is retargeted to the furthest usable tile along the blocked route.
-5. Rebuild the movement map, flood the unit's reach with FUN_000118f0(unit_index, map_mode), and collect the reachable tiles with FUN_00011da0(tile_buf), which returns their count.
+5. Rebuild the movement map, then narrow it with fdps_move_grid_block_occupied_tiles(unit_index, side_select), which does the OPPOSITE of flooding the unit's reach: it stores the 0xff unreachable sentinel into the occupied units' cells, so the mover may cross them but may not stop on them. Collect the tiles that survive with fdps_map_grid_collect_marked_tiles(tile_buf), which returns their count.
 6. Scan those tiles and keep the one minimising |tx - dest_x| + |ty - dest_y|, breaking ties on the smaller ||dx| - |dy||.
 7. Path to the chosen tile with the strict flag 0. If the step count is non-zero, fdps_animate_move_path(unit_index, step_buf, step_count) performs the move and the result is 1; otherwise 0.
 8. Free both buffers and return.
+
+Grid setup rounds: the grid is set up four separate times and the rounds are NOT interchangeable. Round 1 at 00011a5a does not reset first, so it inherits whatever the caller staged. Round 2 at 00011aaa resets and floods with NO mark and a literal allowance of 100. Rounds 3 (00011bc6) and 4 (00011cef) reset + mark + flood, and only round 3 calls fdps_move_grid_block_occupied_tiles. Collapsing them into one shared setup would change which tiles the walk may cross and which it may finish on.
 
 === 00011d91 [EOL]
 Alignment padding: three multi-byte LEA NOP forms aligning 00011da0 to 16 bytes.
