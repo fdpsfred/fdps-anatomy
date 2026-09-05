@@ -5211,7 +5211,7 @@ The rest is one loop. fdps_unit_item_select_loop(unit_index, 0, window_image, li
 On the way out fdps_close_status_window(window_image, saved_screen) takes the window away and puts the screen back, and the four buffers are freed in the order window image, list backdrop, stats backdrop, saved screen.
 
 Parameters:
-  unit_index -- index of the 0x50-byte record in the unit array based at DAT_00069cd8; the unit whose equipment is being changed. Handed on unchanged to every callee that takes a unit index. fdps_village_member_equip_loop passes the party member the player picked, FUN_000252b0 passes the unit whose battle turn it is.
+  unit_index -- index of the 0x50-byte record in the unit array based at DAT_00069cd8; the unit whose equipment is being changed. Handed on unchanged to every callee that takes a unit index. fdps_village_member_equip_loop passes the party member the player picked, fdps_battle_item_menu passes the unit whose battle turn it is.
 
 Returns:
   Nothing.

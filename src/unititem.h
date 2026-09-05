@@ -8,7 +8,9 @@
  * the unit's class rather than its inventory and asks the PROEQU.DAT class
  * equipment table whether an item's type is one the class may wear, and
  * fdps_unit_item_select_loop is the modal cursor the player moves over those
- * eight entries while the unit status window is up.  The
+ * eight entries while the unit status window is up, with
+ * fdps_unit_item_select_window and fdps_unit_equip_window the two functions
+ * that put that window up around it.  The
  * records themselves live in the block reached
  * through data_fdps_map_unit_array_ptr (gamedata.h) and are resolved through
  * fdps_get_unit_record (unit.h).  The file owns no state of its own.
@@ -241,6 +243,48 @@ extern void fdps_unit_remove_item(int unit_index, int slot);
    so a call after the array has moved writes into the new block. */
 extern int fdps_unit_add_item(int unit_index, int item_id);
 #pragma aux fdps_unit_add_item "*" parm caller [];
+
+/* Opens the unit status window on one unit's bag and lets the player equip one
+   item after another until they back out.  Returns nothing and both call sites
+   discard EAX: fdps_battle_item_menu calls it at 0002595f for the unit whose
+   turn it is, fdps_village_member_equip_loop at 00034503 for the party member
+   the player picked.  The call does not return until the player has cancelled
+   or the bag has turned out to be empty.
+
+   It owns the whole window for the duration and nothing outlives it: the
+   320x200 Status.cel frame, a copy of the visible screen taken on entry, a
+   clean copy of the item list rectangle for the cursor loop to erase its
+   highlight with, and a clean copy of the stats rectangle for this function to
+   erase the old figures with.  All four are released before it returns.
+
+   BOTH CLEAN COPIES ARE TAKEN BEFORE ANYTHING IS PAINTED INTO THE WINDOW
+   IMAGE.  Snapshotting after the status panel and the item list have been
+   drawn -- the intuitive order -- captures the rows and the figures as part of
+   the backdrops, and every later erase then leaves the old highlight, and the
+   old digits, showing under the new ones.
+
+   THE WINDOW OPENS EVEN FOR A UNIT CARRYING NOTHING.  The count test that ends
+   the loop runs only after fdps_unit_item_select_loop has returned, so an
+   empty bag still gets the window, the cue and the nine-frame slide-in, and
+   the player's first key closes it again.  An early "nothing to equip" guard
+   changes what the player sees.  That is also the case that opens the cursor
+   loop on an occupied count of 0, which is what its wrap arithmetic has to
+   survive (see above).
+
+   The cursor loop is opened with usable_only 0, so a confirm accepts any entry
+   without the item table being consulted; whether the item can actually be
+   worn is fdps_unit_can_equip_item's answer afterwards.  A refusal is silent
+   -- no sound, no message -- and the list simply comes back.  An accepted item
+   plays Equip.wav, goes on through fdps_unit_equip_slot, and the derived stats
+   are recomputed and the stats rectangle alone redrawn; the item list is not
+   repainted here, because the cursor loop lays its own backdrop down again at
+   the top of every pass.
+
+   unit_index is a position in the current battle's unit array on the battle
+   side and a party member index in a village.  It is not range checked and it
+   is handed on unchanged to every callee that takes one. */
+extern void fdps_unit_equip_window(int unit_index);
+#pragma aux fdps_unit_equip_window "*" parm caller [];
 
 /* Is unit `unit_index`'s class allowed to equip item `item_id`?  Returns 1
    when the item's type code is one of the six the class's PROEQU.DAT record

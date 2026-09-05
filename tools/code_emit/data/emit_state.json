@@ -2653,6 +2653,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x157"
+    },
+    "00025da0": {
+      "name": "fdps_unit_equip_window",
+      "target": "unititem.c",
+      "body_size": "0x23e",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x23e"
     }
   }
 }

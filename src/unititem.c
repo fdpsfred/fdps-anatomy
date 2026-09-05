@@ -7,8 +7,9 @@
  * touches no record of its own -- it searches an inventory entirely through
  * the other two accessors -- and fdps_unit_item_select_loop is the modal
  * cursor the player moves over those eight entries in the unit status window.
- * fdps_unit_item_select_window is what puts that window up around the loop.
- * The file owns no state.
+ * fdps_unit_item_select_window and fdps_unit_equip_window are the two that put
+ * that window up around the loop, the first answering which entry was picked
+ * and the second equipping the picks itself.  The file owns no state.
  *
  * malloc, free and memmove come from <stdlib.h> and <string.h>, which is where
  * Watcom 10.0a declares them, and all three are real calls in the original --
@@ -553,6 +554,166 @@ int fdps_unit_add_item(int unit_index, int item_id)
     }
 
     return -1;
+}
+
+/* Where the stats block sits inside the same 320x200 window image and how big
+   it is: PUSH 0x55 / PUSH 0x7d / PUSH 0x7d / PUSH [EBP-0x4] / PUSH 0x140 /
+   ADD EAX,0x8ad3 at 00025e2a.  0x8ad3 is row 111 * 0x140 + column 19, so the
+   rectangle's top-left corner is (0x13, 0x6f) and it covers the HP and MP
+   gauges and the stat figures fdps_draw_unit_status_panel paints (statunit.h).
+   Its backdrop is a tight copy like the list's, so the backdrop's own stride
+   is its width. */
+#define STATS_BLOCK_AT 0x8ad3
+#define STATS_BLOCK_WIDTH 0x7d
+#define STATS_BLOCK_ROWS 0x55
+
+/* The stats backdrop's size: PUSH 0x2981 at 00025df1, which is exactly
+   STATS_BLOCK_WIDTH * STATS_BLOCK_ROWS, 125 * 85, with no slack row and no
+   padding to a scanline. */
+#define STATS_BACKDROP_BYTES 0x2981
+
+/* The usable_only argument this menu opens the cursor loop with: PUSH 0x0 at
+   00025ebd.  Zero, so a confirm accepts whatever entry the cursor is on and
+   the item table is not consulted at all -- an item the unit cannot drink is
+   still one it may be able to wear. */
+#define EQUIP_ACCEPTS_ANY_ITEM 0
+
+/* The cue an accepted equip plays, the member at 0x61b44 and the only use of
+   that string in the image.  fdps_play_sfx folds the name to upper case in the
+   caller's own storage, so this literal is permanently "EQUIP.WAV" after the
+   first item is put on (rebuild_info/pitfalls.md). */
+#define EQUIP_SOUND "Equip.wav"
+
+/* 00025da0.  The equipment menu: the status window opened on one unit's bag,
+   equipping whatever the player picks until they back out.
+
+   BOTH BACKDROPS ARE TAKEN BEFORE ANYTHING IS PAINTED INTO THE IMAGE.  The two
+   fdps_blit_rect calls at 00025e22 and 00025e42 copy the list rectangle and
+   the stats rectangle out of the freshly loaded window image, and only then do
+   fdps_draw_unit_status_panel at 00025e52 and fdps_draw_unit_inventory at
+   00025e6e paint into it.  Taking either copy after the paint -- the intuitive
+   order, snapshot the thing you are about to erase with -- captures the item
+   rows, or the stat figures, as part of the backdrop, and every later erase
+   then leaves the old highlight and the old digits showing under the new ones.
+
+   THE LOOP HAS TWO EXITS AND BOTH ARE TESTED AFTER THE CURSOR LOOP HAS
+   RETURNED.  CMP dword ptr [EBP-0x20],-0x1 / JZ at 00025f0c is the cancel, and
+   fdps_unit_item_count == 0 at 00025f16 is the only way out for a unit
+   carrying nothing.  The window is therefore opened, painted and slid in even
+   for an empty bag, and an early "nothing to equip" guard changes what the
+   player sees.  The count call is short-circuited away on a cancel: JZ jumps
+   straight past it.
+
+   THE ID BYTE IS READ ON EVERY PASS, WHICHEVER WAY THE CURSOR LOOP ENDED, and
+   the read at 00025ece..00025f09 is an inline expansion of
+   fdps_unit_get_item_id at 00025200 -- the caller's frame carries the two
+   parameter-shaped slots at [EBP-0x2c] and [EBP-0x30] and the result slot at
+   [EBP-0x24] that the expansion fingerprint is (rebuild_info/build_flags.md).
+   It is emitted open-coded here rather than as a call, because a plain call
+   would put a CALL in the rebuild that the original does not have; the
+   expression is the same one fdps_unit_get_item_id's body computes.
+
+   A REFUSED ITEM IS REFUSED IN SILENCE.  When fdps_unit_can_equip_item answers
+   0 the JZ at 00025f36 goes straight to the JMP that starts the next pass --
+   no sound, no message, the list simply comes back.
+
+   Nothing on the accepted path repaints the item list.  Only the stats
+   rectangle is erased from its backdrop and redrawn, because
+   fdps_unit_item_select_loop lays the list backdrop down again at the top of
+   every one of its own passes.
+
+   No CALL's answer is read other than fdps_load_status_cel_image's, the three
+   malloc's, fdps_unit_item_select_loop's, fdps_get_unit_record's,
+   fdps_unit_item_count's and fdps_unit_can_equip_item's.  No malloc is checked
+   against null and the loaded image is not checked either. */
+void fdps_unit_equip_window(int unit_index)
+{
+    /* The unit's record, resolved once per pass for the id byte below and for
+       nothing else. */
+    struct fdps_unit_record *unit;
+    /* The 320x200 Status.cel frame every painter composes into, and the frame
+       the slide-in and the close animate.  Owned and freed here. */
+    unsigned char *window_image;
+    /* The visible screen as it was on entry, so that closing the window can
+       put a picture back.  Owned and freed here. */
+    unsigned char *saved_screen;
+    /* The clean copy of the list rectangle the cursor loop lays down again
+       before each of its repaints.  Owned and freed here. */
+    unsigned char *list_backdrop;
+    /* The clean copy of the stats rectangle, laid back down to erase the old
+       figures before the panel is redrawn.  Owned and freed here. */
+    unsigned char *stats_backdrop;
+    /* Which of the nine slide-in frames is being drawn. */
+    int step;
+    /* The entry the cursor is on.  Seeded 0 here -- MOV dword ptr
+       [EBP-0x14],0x0 at 00025dac -- and owned by the cursor loop afterwards,
+       which is why it survives from one pass to the next. */
+    int selected_slot;
+    /* What the cursor loop answered: 1 for a confirmed slot, -1 for a
+       cancel. */
+    int select_result;
+    /* The id byte of the entry the cursor was left on, widened without
+       sign. */
+    int item_id;
+
+    selected_slot = 0;
+    window_image = (unsigned char *) fdps_load_status_cel_image();
+
+    saved_screen = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+    memmove(saved_screen, (void *) VGA_SCREEN_BASE,
+            (size_t) VGA_SCREEN_BYTES);
+
+    list_backdrop =
+        (unsigned char *) malloc((size_t) ITEM_LIST_BACKDROP_BYTES);
+    stats_backdrop = (unsigned char *) malloc((size_t) STATS_BACKDROP_BYTES);
+
+    fdps_blit_rect((unsigned int) (window_image + ITEM_LIST_AT),
+                   WINDOW_IMAGE_PITCH, list_backdrop, ITEM_LIST_WIDTH,
+                   ITEM_LIST_WIDTH, ITEM_LIST_ROWS);
+    fdps_blit_rect((unsigned int) (window_image + STATS_BLOCK_AT),
+                   WINDOW_IMAGE_PITCH, stats_backdrop, STATS_BLOCK_WIDTH,
+                   STATS_BLOCK_WIDTH, STATS_BLOCK_ROWS);
+
+    fdps_draw_unit_status_panel(unit_index, window_image);
+    fdps_draw_unit_inventory(unit_index, ITEM_LIST_OPENING_SLOT,
+                             window_image + ITEM_LIST_AT, WINDOW_IMAGE_PITCH);
+
+    fdps_play_sfx(STATUS_WINDOW_SOUND);
+
+    for (step = 0; step < OPEN_ANIM_STEP_COUNT; step++) {
+        fdps_draw_status_window_anim_frame(saved_screen, window_image, step);
+    }
+
+    for (;;) {
+        select_result = fdps_unit_item_select_loop(unit_index,
+                                                   EQUIP_ACCEPTS_ANY_ITEM,
+                                                   window_image, list_backdrop,
+                                                   &selected_slot);
+
+        unit = fdps_get_unit_record(unit_index);
+        item_id = (int) unit->inventory_slots[selected_slot * 2 + 1];
+
+        if (select_result == ITEM_SELECT_CANCELLED ||
+            fdps_unit_item_count(unit_index) == 0) {
+            break;
+        }
+
+        if (fdps_unit_can_equip_item(unit_index, item_id) != 0) {
+            fdps_play_sfx(EQUIP_SOUND);
+            fdps_unit_equip_slot(unit_index, selected_slot);
+            fdps_unit_recompute_combat_stats(unit_index);
+            fdps_blit_rect((unsigned int) stats_backdrop, STATS_BLOCK_WIDTH,
+                           window_image + STATS_BLOCK_AT, WINDOW_IMAGE_PITCH,
+                           STATS_BLOCK_WIDTH, STATS_BLOCK_ROWS);
+            fdps_draw_unit_status_panel(unit_index, window_image);
+        }
+    }
+
+    fdps_close_status_window(window_image, saved_screen);
+    free(window_image);
+    free(list_backdrop);
+    free(stats_backdrop);
+    free(saved_screen);
 }
 
 /* 00025fe0.  May this unit's class equip this item?  Three calls and then one

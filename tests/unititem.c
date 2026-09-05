@@ -101,9 +101,9 @@
  * because that one is a modal loop that paints through four callees before it
  * waits.  What can and cannot be reached from a test, and why, is set out above
  * that section rather than here, and the same goes for the
- * fdps_unit_item_select_window cases that close the file: those open the real
- * window over the real Status.cel and are the only ones here that read a
- * shipped game file.
+ * fdps_unit_item_select_window and fdps_unit_equip_window cases that close the
+ * file: those open the real window over the real Status.cel and are the only
+ * ones here that read a shipped game file.
  */
 #include <i86.h>
 #include <malloc.h>
@@ -2973,6 +2973,180 @@ static void the_window_gives_back_every_block_it_took(void)
     CHECK_EQ(_heapchk(), _HEAPOK);
 }
 
+/* ---- fdps_unit_equip_window @ 00025da0 -----------------------------------
+ *
+ * THE SAME TWO WALLS AS THE SECTION ABOVE, plus a third of its own.  The call
+ * is run whole and almost nothing it draws survives it, for the reason set out
+ * over fdps_unit_item_select_window: all four buffers are allocated, painted
+ * and freed inside the one call and fdps_close_status_window repaints the
+ * whole screen from the picture behind the window on the way out.  And one
+ * make code is all a case can drive into one call, because the keyboard latch
+ * is only moved by an INT 09h handler no test installs.
+ *
+ * THE THIRD WALL IS THAT THE EQUIP BRANCH CANNOT RETURN.  Both arms of
+ * fdps_unit_can_equip_item's test go back round to fdps_unit_item_select_loop
+ * -- an accepted item after it has been put on, a refused one in silence --
+ * and that second cursor loop can never come back on the one make code a case
+ * has to spend.  So fdps_unit_can_equip_item, fdps_unit_equip_slot,
+ * fdps_unit_recompute_combat_stats and the stats-rectangle erase are emitted
+ * and read but are not reachable from here; what they do is pinned in their
+ * own sections of this file and in tests/unit.c, and the fact that this
+ * function reaches them at all is a playtest contract.
+ *
+ * WHAT IS LEFT TO ASSERT is the two exits that do return, the unit index the
+ * window is opened on, and the heap.  Both exits are the ones the plate
+ * comment's rebuild note is about: a cancel, and a confirm on a unit carrying
+ * nothing, which is the case that proves the window is opened and slid in
+ * before anything asks whether the bag has anything in it.
+ * data_fdps_village_status_window_unit_idx is the observable for that --
+ * fdps_draw_unit_status_panel publishes the unit index it was handed
+ * (statunit.h) and nothing else in the call writes it, so a body that
+ * returned early on an empty bag would leave the value the fixture seeded.
+ *
+ * THE usable_only ARGUMENT IS PINNED BY NOT HANGING.  It is the literal 0 at
+ * 00025ebd, so a confirm is accepted whatever the entry holds.  Every staged
+ * entry names an item record whose use effect is 0, so a body that passed
+ * anything else would have the cursor loop refuse the confirm in silence and
+ * wait again, and the case would freeze on its own name rather than fail a
+ * check.
+ *
+ * THE REAL MISC.VFS AND FACE.CEL ARE READ, exactly as in the section above and
+ * for the same reason; both are staged by tests/gamefile.lst and every case
+ * stops if either is missing.
+ *
+ * Expected values come from the assembly at 00025da0: MOV dword ptr
+ * [EBP-0x14],0x0 at 00025dac for the seeded cursor, PUSH 0x0 at 00025ebd for
+ * usable_only, CMP dword ptr [EBP-0x20],-0x1 / JZ at 00025f0c and the
+ * fdps_unit_item_count call at 00025f16 with TEST EAX,EAX / JNZ for the two
+ * exits, the two arguments pushed at 00025e4a and 00025e4e for the panel's
+ * unit index, and the four CALL 0x0003d478 at 00025fab, 00025fb7, 00025fc3 and
+ * 00025fcf for the buffers going back.  The values -1 and 1 the cursor loop
+ * answers with are its own, from the stores at 00025ca1 and 00025c57.  None of
+ * them is read off the emitted C.
+ */
+
+/* The id a staged entry carries, so that the id byte read on the way out of
+   the loop finds something other than 0 and a body that wrote to the record
+   would be visible.  Its item record's use effect stays 0, which is what makes
+   the usable_only pin above work. */
+#define EQ_STAGED_ITEM 0x22
+
+/* One window, opened with the adapter in the mode it is drawn in and taken
+   down again afterwards.  The function answers nothing, so what a case reads
+   is the record, the published unit index and the heap. */
+static void equip_window_open(int unit_index)
+{
+    window_set_video_mode(VIDEO_MODE_320X200X256);
+    fdps_unit_equip_window(unit_index);
+    window_set_video_mode(VIDEO_MODE_TEXT);
+    window_unstage();
+}
+
+/* A cancel ends the loop on the CMP against -1 alone, and nothing on that path
+   writes the record: the id byte is read and the count call is skipped
+   entirely.  The entry is left exactly as the fixture set it -- still marked
+   empty rather than carrying the 0x40 fdps_unit_equip_slot would store, and
+   still holding its own id.  The panel index says the window was opened for
+   this unit before the cancel came back. */
+static void a_cancelled_equip_window_leaves_the_bag_alone(void)
+{
+    int files_present;
+
+    files_present = window_files_present();
+    CHECK_EQ(files_present, 1);
+    if (!files_present) {
+        return;
+    }
+    window_stage(KEY_ESC);
+    set_entry(0, 0, FLAG_EMPTY, EQ_STAGED_ITEM);
+
+    equip_window_open(0);
+
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY], FLAG_EMPTY);
+    CHECK_EQ(unit_slot(0)[OFF_INVENTORY + 1], EQ_STAGED_ITEM);
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, 0);
+}
+
+/* The empty-bag exit, which is the one the rebuild note is about.  Every entry
+   of the staged unit is marked empty, so fdps_unit_item_count answers 0 -- and
+   the confirm still has to travel all the way through the cursor loop and back
+   before that test is made.  The window is therefore opened, the panel drawn
+   and the slide-in run for a unit carrying nothing, which is what the
+   published unit index shows: a body that refused the whole window on an empty
+   bag would leave the fixture's own WN_NO_UNIT there.  Nothing is equipped on
+   the way out either, because the loop breaks before
+   fdps_unit_can_equip_item. */
+static void an_empty_bag_still_opens_the_window_before_it_closes_it(void)
+{
+    int files_present;
+
+    files_present = window_files_present();
+    CHECK_EQ(files_present, 1);
+    if (!files_present) {
+        return;
+    }
+    window_stage(KEY_ENTER);
+
+    equip_window_open(WN_UNIT);
+
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, WN_UNIT);
+    CHECK_EQ(unit_slot(WN_UNIT)[OFF_INVENTORY], FLAG_EMPTY);
+}
+
+/* The unit index is handed on rather than being a literal anywhere: two runs
+   of the same shape on two different units publish two different indices.  It
+   is the index the panel was drawn for, which is also the index the item list,
+   the cursor loop and the count test are given. */
+static void the_equip_window_opens_on_the_unit_the_index_names(void)
+{
+    int files_present;
+
+    files_present = window_files_present();
+    CHECK_EQ(files_present, 1);
+    if (!files_present) {
+        return;
+    }
+    window_stage(KEY_ESC);
+    equip_window_open(WN_OTHER_UNIT);
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, WN_OTHER_UNIT);
+
+    window_stage(KEY_ESC);
+    equip_window_open(WN_UNIT);
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, WN_UNIT);
+}
+
+/* Four blocks are taken -- the window image, the saved screen, the list
+   backdrop and the stats backdrop -- and all four are released before the call
+   returns, so a second run of the same shape leaves the heap holding exactly
+   what the first one did.  The heap check on the end is the other half of it:
+   both backdrops are written by fdps_blit_rect at their own tight strides, so
+   a block allocated smaller than the rectangle it holds would run off its end
+   into the allocator's control structures and _heapchk would say so.  The
+   first run is made before the count is taken because the loaders underneath
+   hold one-time allocations of their own. */
+static void the_equip_window_gives_back_every_block_it_took(void)
+{
+    int before;
+    int after;
+    int files_present;
+
+    files_present = window_files_present();
+    CHECK_EQ(files_present, 1);
+    if (!files_present) {
+        return;
+    }
+    window_stage(KEY_ESC);
+    equip_window_open(0);
+    before = window_used_heap_blocks();
+
+    window_stage(KEY_ESC);
+    equip_window_open(0);
+    after = window_used_heap_blocks();
+
+    CHECK_EQ(after, before);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+}
+
 void run_unititem_tests(void)
 {
     RUN_TEST(the_two_record_layouts_match_the_strides);
@@ -3078,4 +3252,8 @@ void run_unititem_tests(void)
     RUN_TEST(a_cancelled_window_answers_minus_one_and_keeps_the_slot);
     RUN_TEST(a_confirmed_window_answers_one_for_the_unit_it_was_given);
     RUN_TEST(the_window_gives_back_every_block_it_took);
+    RUN_TEST(a_cancelled_equip_window_leaves_the_bag_alone);
+    RUN_TEST(an_empty_bag_still_opens_the_window_before_it_closes_it);
+    RUN_TEST(the_equip_window_opens_on_the_unit_the_index_names);
+    RUN_TEST(the_equip_window_gives_back_every_block_it_took);
 }
