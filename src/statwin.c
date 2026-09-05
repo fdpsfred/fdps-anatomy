@@ -1,10 +1,11 @@
 /* statwin.c -- the battle unit status window.
  *
  * See statwin.h for the window's geometry and what a caller has to know.
- * The two drawing routines own no state: each works on the images it is
+ * The three drawing routines own no state: each works on the images it is
  * handed or loads for itself.  The window's event loop does own state -- the
  * tick it last drew a frame on, and the unit a village phase substitutes for
- * the one it was asked for -- and statwin.h declares both.
+ * the one it was asked for -- and statwin.h declares both.  The panel drawer
+ * is what writes the second of those.
  *
  * inp comes from <conio.h> and delay from <i86.h>, which is where Watcom
  * 10.0a declares them, and both are ordinary calls in the original rather
@@ -20,11 +21,15 @@
 #include "audio.h"
 #include "blit.h"
 #include "gamedata.h"
+#include "gauge.h"
 #include "keybd.h"
 #include "mapdraw.h"
+#include "msgwin.h"
 #include "palcycle.h"
 #include "sprite.h"
 #include "statwin.h"
+#include "text.h"
+#include "unit.h"
 #include "vfs.h"
 
 /* The VGA graphics aperture as a flat linear address, the mode 13h scanline
@@ -42,6 +47,289 @@
    progress, and it is the only bit this file looks at. */
 #define VGA_INPUT_STATUS_1 0x3da
 #define VGA_STATUS_VERTICAL_RETRACE 0x08
+
+/* Every destination the panel drawer writes, as the byte offset from the
+   surface's origin that the assembly adds (ADD EAX,0x98d8 and its eighteen
+   companions between 0001643b and 00016811).  The pitch is the literal 0x140
+   pushed beside each of them, so an offset is row * 320 + column and the two
+   halves are worth writing down: the portrait cell is at row 10 column 161,
+   the HP figures at row 122 columns 88 and 117, the MP figures at row 141 in
+   the same two columns, the two gauges at rows 118 and 137 column 22, level
+   and move at row 155 columns 62 and 118, the six-figure stat block at rows
+   164, 173 and 182 in columns 56 and 112, the face at row 4 column 19, and
+   the three names at row 5 column 201 and row 23 columns 192 and 263. */
+#define PANEL_PITCH 0x140
+#define PANEL_PORTRAIT_AT 0xd21
+#define PANEL_HP_CURRENT_AT 0x98d8
+#define PANEL_HP_MAX_AT 0x98f5
+#define PANEL_MP_CURRENT_AT 0xb098
+#define PANEL_MP_MAX_AT 0xb0b5
+#define PANEL_LEVEL_AT 0xc1fe
+#define PANEL_EXP_AT 0xcd38
+#define PANEL_MOVE_AT 0xc236
+#define PANEL_HP_GAUGE_AT 0x9396
+#define PANEL_MP_GAUGE_AT 0xab56
+#define PANEL_HIT_AT 0xe3b8
+#define PANEL_EV_AT 0xd878
+#define PANEL_DX_AT 0xcd70
+#define PANEL_AP_AT 0xd8b0
+#define PANEL_DP_AT 0xe3f0
+#define PANEL_FACE_AT 0x513
+#define PANEL_NAME_AT 0x709
+#define PANEL_CLASS_AT 0x1d80
+#define PANEL_RACE_AT 0x1dc7
+
+/* The 24x24 sprite-cache cell the panel stamps at PANEL_PORTRAIT_AT: PUSH
+   0x18 twice at 00016434, and mode 0 with operand 0 in the two zeroes pushed
+   before them. */
+#define PANEL_UNIT_CELL_SIZE 0x18
+
+/* The field width each figure is given, as the fourth argument pushed to
+   fdps_draw_number.  These are fixed widths and not maxima: a figure that
+   does not fit is replaced by that many '?' glyphs (text.h). */
+#define PANEL_HP_MP_DIGITS 4
+#define PANEL_LEVEL_DIGITS 2
+#define PANEL_MOVE_DIGITS 2
+#define PANEL_STAT_DIGITS 3
+
+/* The three values written into data_fdps_number_glyph_color_row, which is
+   which of Number.cel's five colour rows the digits come out of: 0 the plain
+   one, 1 for a stat a buff timer is raising, 3 for a current HP or MP that is
+   below its maximum. */
+#define NUMBER_COLOR_NORMAL 0
+#define NUMBER_COLOR_BUFFED 1
+#define NUMBER_COLOR_REDUCED 3
+
+/* struct fdps_unit_record's status_timers[] slots the three buffs use, the
+   same three fdps_unit_recompute_combat_stats applies (src/unit.c): slot 0
+   multiplies ap, slot 1 multiplies dp, and slot 2 adds to dx and so to both
+   hit and ev.  Which figures light up here is exactly which figures each of
+   them changes. */
+#define ATTACK_BUFF_TIMER_SLOT 0
+#define DEFENSE_BUFF_TIMER_SLOT 1
+#define DEXTERITY_BUFF_TIMER_SLOT 2
+
+/* What record exp_carry holds for a unit that earns the player nothing, and
+   the figure drawn in its place: CMP dword ptr [EBP+-0x2c],0xff / MOV
+   ...,0x3e8 at 000163de.  A thousand does not fit PANEL_STAT_DIGITS, and that
+   is the point -- see statwin.h. */
+#define EXP_CARRY_NOT_PLAYER 0xff
+#define EXP_NOT_PLAYER_FIGURE 1000
+
+/* Which of the gauge sheet's three graphics each bar is filled from, and how
+   many columns a full bar is: PUSH 0x1 and PUSH 0x2 into fdps_draw_gauge_bar,
+   and the IMUL by 0x75 that scales the fill. */
+#define PANEL_HP_GAUGE_BAR 1
+#define PANEL_MP_GAUGE_BAR 2
+#define PANEL_GAUGE_BAR_WIDTH 0x75
+
+/* Where the three name blocks start in data_fdps_all_game_text_ptr: the
+   character names at entry 1, the race names at 0x97 and the class names at
+   0xa1.  Each base is the constant added to a record byte before the id is
+   passed, so the class block covers 0xa1..0xc8 for the forty class codes
+   0x00..0x27 that assets/classes.md lists, and the race block starts far
+   enough before it to hold the race codes those records carry. */
+#define TEXT_ID_FIRST_CHARACTER_NAME 1
+#define TEXT_ID_FIRST_RACE_NAME 0x97
+#define TEXT_ID_FIRST_CLASS_NAME 0xa1
+
+/* The colours all three names are drawn in, pushed as literals at 000167a8
+   and its two companions: the standard message colours. */
+#define PANEL_TEXT_FG_COLOR 0xd0
+#define PANEL_TEXT_BG_COLOR 0
+#define PANEL_TEXT_OUTLINE_COLOR 0x6d
+
+/* 00016300.  See statwin.h for what the caller has to supply and what the
+   colour rules are.
+
+   THE TWO GAUGE FILLS ARE WRITTEN OUT AND NOT CALLED, BECAUSE THE ASSEMBLY
+   HAS NO CALL TO THE PROPORTIONAL FRONT END IN IT.  Both stretches carry a
+   full copy of fdps_draw_gauge_bar_proportional's frame -- five argument
+   temps copied into consecutive parameter-shaped slots at 00016586, the
+   callee's body replayed under a uniform slot substitution, and the fill width
+   copied back out of a result slot -- which is the inline-expansion
+   fingerprint, and that function has no caller anywhere in the image because
+   both of its uses were expanded (rebuild_info/build_flags.md).  Writing the
+   arithmetic out is correct under ADR-0001: the two spellings behave
+   identically, and spelling it as a call without an _inline declaration to
+   expand it would put two CALLs here that the original does not have.
+
+   The division is the signed one -- MOV EAX,EDX / SAR EDX,0x1f / IDIV at
+   000165b8 -- and it rounds up, so one hit point left still shows a filled
+   pixel.  A maximum of zero or less skips the divide entirely.
+
+   THE FIELDS ARE READ ONCE, UP FRONT, AND THE RECORD IS READ AGAIN LATER.
+   Seventeen values are copied into the frame before anything is drawn, but the
+   three buff timers are read straight off the record between the draws
+   (00016708 and its two companions reload the record pointer).  Nothing here
+   can move the unit array, so the two are the same record either way.
+
+   The widths are the record's: the four HP/MP words and the four combat stats
+   and dx come in through MOVSX, sign extended, and every byte field comes in
+   through XOR EAX,EAX / MOV AL, zero extended.  A negative HP therefore
+   reaches both the figure and the gauge as a negative number, and a race or
+   class byte of 0xff indexes 0x96 or 0xa0 entries past its block. */
+void fdps_draw_unit_status_panel(int unit_index, unsigned char *dest)
+{
+    struct fdps_unit_record *unit;
+    unsigned char *unit_cell_stream;
+    int sprite_cache_slot;
+    int hp_current;
+    int hp_max;
+    int mp_current;
+    int mp_max;
+    int level;
+    int attack;
+    int defense;
+    int hit;
+    int evade;
+    int dexterity;
+    int move;
+    int char_id;
+    int portrait_id;
+    int clazz;
+    int race;
+    int exp_figure;
+    int hp_fill_width;
+    int mp_fill_width;
+
+    if (data_fdps_village_mode_flag != 0) {
+        data_fdps_village_status_window_unit_idx = unit_index;
+    }
+
+    unit = fdps_get_unit_record(unit_index);
+    sprite_cache_slot = (int) unit->sprite_cache_slot;
+    hp_current = (int) unit->hp_current;
+    hp_max = (int) unit->hp_max;
+    mp_current = (int) unit->mp_current;
+    mp_max = (int) unit->mp_max;
+    level = (int) unit->level;
+    attack = (int) unit->ap;
+    defense = (int) unit->dp;
+    hit = (int) unit->hit;
+    evade = (int) unit->ev;
+    dexterity = (int) unit->dx_base;
+    move = (int) unit->move;
+    char_id = (int) unit->char_id;
+    portrait_id = (int) unit->portrait_id;
+    clazz = (int) unit->clazz;
+    race = (int) unit->race;
+
+    exp_figure = (int) unit->exp_carry;
+    if (exp_figure == EXP_CARRY_NOT_PLAYER) {
+        exp_figure = EXP_NOT_PLAYER_FIGURE;
+    }
+
+    /* Sprite 0 of a cache slot, reached the way every other reader reaches
+       one: the slot table sits at the base of the block and each slot's entry
+       is an offset from that same base. */
+    if (data_fdps_village_mode_flag == 0) {
+        unit_cell_stream = data_fdps_cel_sprite_cache_ptr
+            + ((struct fdps_cel_cache_slot *) data_fdps_cel_sprite_cache_ptr)
+                  [sprite_cache_slot].sprite_offset[0];
+    } else {
+        unit_cell_stream = data_fdps_cel_sprite_cache_ptr
+            + ((struct fdps_cel_cache_slot *) data_fdps_cel_sprite_cache_ptr)
+                  [unit_index].sprite_offset[0];
+    }
+    fdps_blit_dispatch(unit_cell_stream, dest + PANEL_PORTRAIT_AT,
+                       PANEL_UNIT_CELL_SIZE, PANEL_UNIT_CELL_SIZE, PANEL_PITCH,
+                       0, 0);
+
+    /* No else on either compare: a current equal to its maximum leaves the
+       colour row as the caller left it, and it is the store after the figure
+       that puts it back to 0. */
+    if (hp_current != hp_max) {
+        data_fdps_number_glyph_color_row = NUMBER_COLOR_REDUCED;
+    }
+    fdps_draw_number(dest + PANEL_HP_CURRENT_AT, PANEL_PITCH, hp_current,
+                     PANEL_HP_MP_DIGITS, 0);
+    data_fdps_number_glyph_color_row = NUMBER_COLOR_NORMAL;
+    fdps_draw_number(dest + PANEL_HP_MAX_AT, PANEL_PITCH, hp_max,
+                     PANEL_HP_MP_DIGITS, 0);
+
+    if (mp_current != mp_max) {
+        data_fdps_number_glyph_color_row = NUMBER_COLOR_REDUCED;
+    }
+    fdps_draw_number(dest + PANEL_MP_CURRENT_AT, PANEL_PITCH, mp_current,
+                     PANEL_HP_MP_DIGITS, 0);
+    data_fdps_number_glyph_color_row = NUMBER_COLOR_NORMAL;
+    fdps_draw_number(dest + PANEL_MP_MAX_AT, PANEL_PITCH, mp_max,
+                     PANEL_HP_MP_DIGITS, 0);
+
+    fdps_draw_number(dest + PANEL_LEVEL_AT, PANEL_PITCH, level,
+                     PANEL_LEVEL_DIGITS, 0);
+    fdps_draw_number(dest + PANEL_EXP_AT, PANEL_PITCH, exp_figure,
+                     PANEL_STAT_DIGITS, 0);
+    fdps_draw_number(dest + PANEL_MOVE_AT, PANEL_PITCH, move,
+                     PANEL_MOVE_DIGITS, 0);
+
+    if (hp_max <= 0) {
+        hp_fill_width = 0;
+    } else {
+        hp_fill_width = (hp_current * PANEL_GAUGE_BAR_WIDTH + hp_max - 1)
+                        / hp_max;
+    }
+    fdps_draw_gauge_bar(dest + PANEL_HP_GAUGE_AT, PANEL_PITCH,
+                        PANEL_HP_GAUGE_BAR, hp_fill_width);
+
+    if (mp_max <= 0) {
+        mp_fill_width = 0;
+    } else {
+        mp_fill_width = (mp_current * PANEL_GAUGE_BAR_WIDTH + mp_max - 1)
+                        / mp_max;
+    }
+    fdps_draw_gauge_bar(dest + PANEL_MP_GAUGE_AT, PANEL_PITCH,
+                        PANEL_MP_GAUGE_BAR, mp_fill_width);
+
+    /* One timer covers three figures here, because one buff moves all three:
+       dx is what the buff raises and hit and ev are both derived from it. */
+    if (unit->status_timers[DEXTERITY_BUFF_TIMER_SLOT] != 0) {
+        data_fdps_number_glyph_color_row = NUMBER_COLOR_BUFFED;
+    } else {
+        data_fdps_number_glyph_color_row = NUMBER_COLOR_NORMAL;
+    }
+    fdps_draw_number(dest + PANEL_HIT_AT, PANEL_PITCH, hit,
+                     PANEL_STAT_DIGITS, 0);
+    fdps_draw_number(dest + PANEL_EV_AT, PANEL_PITCH, evade,
+                     PANEL_STAT_DIGITS, 0);
+    fdps_draw_number(dest + PANEL_DX_AT, PANEL_PITCH, dexterity,
+                     PANEL_STAT_DIGITS, 0);
+
+    if (unit->status_timers[ATTACK_BUFF_TIMER_SLOT] != 0) {
+        data_fdps_number_glyph_color_row = NUMBER_COLOR_BUFFED;
+    } else {
+        data_fdps_number_glyph_color_row = NUMBER_COLOR_NORMAL;
+    }
+    fdps_draw_number(dest + PANEL_AP_AT, PANEL_PITCH, attack,
+                     PANEL_STAT_DIGITS, 0);
+
+    if (unit->status_timers[DEFENSE_BUFF_TIMER_SLOT] != 0) {
+        data_fdps_number_glyph_color_row = NUMBER_COLOR_BUFFED;
+    } else {
+        data_fdps_number_glyph_color_row = NUMBER_COLOR_NORMAL;
+    }
+    fdps_draw_number(dest + PANEL_DP_AT, PANEL_PITCH, defense,
+                     PANEL_STAT_DIGITS, 0);
+
+    data_fdps_number_glyph_color_row = NUMBER_COLOR_NORMAL;
+
+    fdps_load_and_draw_portrait(dest + PANEL_FACE_AT, PANEL_PITCH,
+                                portrait_id);
+
+    fdps_draw_text(data_fdps_all_game_text_ptr,
+                   TEXT_ID_FIRST_CHARACTER_NAME + char_id,
+                   dest + PANEL_NAME_AT, PANEL_PITCH, PANEL_TEXT_FG_COLOR,
+                   PANEL_TEXT_BG_COLOR, PANEL_TEXT_OUTLINE_COLOR);
+    fdps_draw_text(data_fdps_all_game_text_ptr,
+                   TEXT_ID_FIRST_CLASS_NAME + clazz,
+                   dest + PANEL_CLASS_AT, PANEL_PITCH, PANEL_TEXT_FG_COLOR,
+                   PANEL_TEXT_BG_COLOR, PANEL_TEXT_OUTLINE_COLOR);
+    fdps_draw_text(data_fdps_all_game_text_ptr,
+                   TEXT_ID_FIRST_RACE_NAME + race,
+                   dest + PANEL_RACE_AT, PANEL_PITCH, PANEL_TEXT_FG_COLOR,
+                   PANEL_TEXT_BG_COLOR, PANEL_TEXT_OUTLINE_COLOR);
+}
 
 /* How many steps the slide-in has, and so how long each of the four offset
    tables is.  Both callers that open the window walk 0..8 (CMP ...,0x9 / JL

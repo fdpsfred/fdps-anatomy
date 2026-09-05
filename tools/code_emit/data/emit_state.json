@@ -2566,6 +2566,14 @@
       "status": "committed",
       "emitted_against": "0x46e",
       "rounds": 0
+    },
+    "00016300": {
+      "name": "fdps_draw_unit_status_panel",
+      "target": "statwin.c",
+      "body_size": "0x535",
+      "status": "committed",
+      "emitted_against": "0x535",
+      "rounds": 0
     }
   }
 }

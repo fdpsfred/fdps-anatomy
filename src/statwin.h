@@ -11,6 +11,49 @@
 #ifndef STATWIN_H
 #define STATWIN_H
 
+/* 00016300.  Paints one unit's figures, gauges, portrait and three names into
+   a surface that already holds the empty window artwork.  This is the body of
+   the window; the animation below only moves the finished picture about.
+
+   unit_index selects the record through fdps_get_unit_record (unit.h) and is
+   not range checked.  dest is an 8bpp surface AT ITS ORIGIN, not offset: every
+   one of the nineteen destinations is a fixed byte offset from it, computed
+   against a pitch of 320 that is pushed as a literal at each call, so the
+   surface has to be a whole 320-pitch frame and the caller cannot move the
+   layout.  All four call sites hand it the Status.cel image
+   fdps_load_status_cel_image returned.
+
+   WHAT IS DRAWN COMES OUT OF THE RECORD, BUT THE PORTRAIT SLOT DOES NOT
+   ALWAYS.  The 24x24 cell at row 10, column 161 is sprite 0 of a sprite-cache
+   slot, and which slot is data_fdps_village_mode_flag's decision: clear, it is
+   the record's own sprite_cache_slot; set, it is unit_index itself, used as a
+   slot number with nothing bounding it.  Setting the flag also latches
+   unit_index into data_fdps_village_status_window_unit_idx below, which is the
+   only thing that ever writes that global.
+
+   FOUR OF THE FIGURES CHANGE COLOUR AND THE RULES ARE NOT THE SAME.  The
+   colour is data_fdps_number_glyph_color_row (gamedata.h), set before each
+   figure: row 3 for a current HP or MP that is below its maximum, row 1 for
+   each of the three stats whose buff timer is running -- attack for ap,
+   defense for dp, dexterity for hit, ev and dx together -- and row 0
+   otherwise.  The HP branch has no else: whatever the caller left in the
+   global stands until the first figure has been drawn, and only then is the
+   global put back to 0.  It is left at 0 on the way out.
+
+   THE EXPERIENCE FIGURE IS DRAWN IN A FIELD IT CANNOT FIT.  Record exp_carry
+   holds 0..99 for one of the player's units and 0xff for anything else, and
+   the 0xff is replaced with 1000 before it is drawn -- into a three-digit
+   field, which fdps_draw_number (text.h) fills with three '?' glyphs rather
+   than truncating.  So a unit that earns the player nothing shows "???" for
+   experience, and that is the intent rather than an overflow.
+
+   NOTHING IS CHECKED AND THE PORTRAIT LOAD CAN END THE PROCESS.  The record
+   pointer, the sprite cache pointer, the text block pointer and the two sheet
+   pointers are all used without a test, and the FACE.CEL load this ends with
+   exits on a sheet it cannot open (msgwin.h). */
+extern void fdps_draw_unit_status_panel(int unit_index, unsigned char *dest);
+#pragma aux fdps_draw_unit_status_panel "*" parm caller [];
+
 /* Draws one step of the status window's four-panel slide-in over a background
    image and puts the result on the screen.
 

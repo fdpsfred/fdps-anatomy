@@ -1853,5 +1853,13 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00016300": [
+    {
+      "what": "The race name block has room for only ten entries before the class block begins: the three text bases are ADD EAX,0x1 (character names), ADD EAX,0x97 (race names) and ADD EAX,0xa1 (class names) at 000167c2, 0001681a and 000167ec, and 0xa1 - 0x97 = 10. So any unit record carrying a race byte of 10 or more draws a CLASS name where its race name should be, and 0xff would run 0x96 entries past the end of the block. src/statwin.c's comment asserts the race block \"starts far enough before it to hold the race codes those records carry\" without evidence, and nothing in assets/ or program_info/ states the range of the race code -- assets/tables/characters.md defines the field and stops there. This is a documentation and game-behaviour question only; the emitted C adds the same three literals the assembly does, so equivalence is not at stake either way.",
+      "needs": "The contents of the game text block, which ticket 23 has not emitted (data_fdps_all_game_text_ptr is still in workspace/code_emit/undefined.json as a zero-filled stub), plus the observed range of the race byte across the shipped chapter unit tables. Reading entries 0x97..0xa0 of the real text table and seeing where the race names stop settles it in one look, and it cannot be looked at until that data lands.",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

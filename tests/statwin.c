@@ -75,6 +75,7 @@
  */
 #include <i86.h>
 #include <malloc.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "testharn.h"
@@ -1014,6 +1015,637 @@ static void the_close_gives_its_scene_page_back(void)
     CHECK_EQ(_heapchk(), _HEAPOK);
 }
 
+/* ------------------------------------------------------------------
+ * fdps_draw_unit_status_panel @ 00016300
+ * ------------------------------------------------------------------
+ *
+ * Every offset, digit count, colour row and text-id base below is read off
+ * the assembly between 0001630c and 00016826 -- the nineteen ADD EAX,imm that
+ * form the destinations, the PUSH 0x4 / 0x3 / 0x2 field widths, the MOV
+ * [0x0006000c],0x3 / 0x1 / 0x0 stores, the IMUL by 0x75 with the ADD max /
+ * DEC / IDIV that rounds the gauge up, and the ADD EAX,0x1 / 0xa1 / 0x97 in
+ * front of the three text calls.  None of it is taken from the emitted C.
+ *
+ * WHAT THE PANEL IS OBSERVED THROUGH IS THE SURFACE IT DRAWS ON.  This
+ * function writes nothing else: no return value, no global but the colour row
+ * and the village index.  So the cases stage sheets whose pixels SAY which
+ * slot was picked, run the whole path, and read the answer out of the
+ * destination.
+ *
+ *   - The number sheet is the same shape tests/text.c stages: sprite n is a
+ *     flat 6x8 fill of colour n + 1, and a sprite index is colour row * 13 +
+ *     glyph.  One destination pixel therefore names both the digit drawn and
+ *     the colour row it came from, which is what lets one assertion cover a
+ *     figure's value, its position and its highlight together.
+ *   - The gauge sheet's three graphics are 1, 2 and 3 in their top four rows
+ *     and transparent below, so a gauge row reads back as a filled run
+ *     followed by track and the fill width is the length of that run.
+ *
+ * THE GAUGES OVERLAP THE HP AND MP FIGURES AND ARE DRAWN OVER THEM, WHICH IS
+ * WHY THE FIXTURE'S LOWER HALF IS TRANSPARENT.  The HP figures are at row 122
+ * and the HP gauge covers rows 118..125; the MP pair is the same four rows
+ * apart.  Both figures are drawn first and the gauge second, so an opaque bar
+ * would bury them.  The shipped Bar.cel does not: its three 117x8 graphics are
+ * one tapering wedge, opaque across the full width only in rows 0 and 1 and
+ * narrowing to 57 columns by row 7, and the packed sheet main.c builds keeps
+ * those skip runs as index 0 for fdps_blit_transparent_rect to skip.  Both
+ * figure columns -- 66 and 95 measured from the gauge's own origin -- are
+ * outside the wedge from row 2 down.  The fixture models that with a flat cut
+ * at row 4, which is above every figure pixel an assertion reads.
+ *   - The sprite cache's slot s decodes to a flat 24x24 of 0x40 + s, so the
+ *     cell says which slot the village flag chose.
+ *   - The font is one byte per glyph and the text block's entry k is the
+ *     single glyph k, so the eight pixels a name draws spell out IN BINARY
+ *     the text id the function computed.  A wrong id is read back as itself
+ *     rather than as an absence.
+ *
+ * THE PORTRAIT IS THE REAL FACE.CEL AND CANNOT BE STOOD IN FOR.  The record
+ * byte that selects it is zero-extended, so it is never the -1 that would
+ * make the loader return early: every call reaches fdps_load_and_draw_portrait
+ * and that routine names its sheet with a literal and exits the process on a
+ * sheet it cannot open (msgwin.h).  FACE.CEL is staged by tests/gamefile.lst
+ * and each case skips itself when it is not there.  Its 125x100 blit lands at
+ * rows 4..103, columns 19..143, which no assertion below reads.
+ *
+ * WHAT IS NOT ASSERTED.  Nothing here checks the artwork -- which colour row 3
+ * looks like, what portrait 0 contains -- only which slot of it was selected.
+ * And the order of the draws is unobservable: all nineteen destination
+ * rectangles are disjoint, so no pixel is written twice.
+ */
+
+/* The nineteen destinations, as the byte offsets the assembly adds. */
+#define PN_PORTRAIT_AT 0xd21
+#define PN_HP_CURRENT_AT 0x98d8
+#define PN_HP_MAX_AT 0x98f5
+#define PN_MP_CURRENT_AT 0xb098
+#define PN_MP_MAX_AT 0xb0b5
+#define PN_LEVEL_AT 0xc1fe
+#define PN_EXP_AT 0xcd38
+#define PN_MOVE_AT 0xc236
+#define PN_HP_GAUGE_AT 0x9396
+#define PN_MP_GAUGE_AT 0xab56
+#define PN_HIT_AT 0xe3b8
+#define PN_EV_AT 0xd878
+#define PN_DX_AT 0xcd70
+#define PN_AP_AT 0xd8b0
+#define PN_DP_AT 0xe3f0
+#define PN_NAME_AT 0x709
+#define PN_CLASS_AT 0x1d80
+#define PN_RACE_AT 0x1dc7
+
+/* The three text-id bases and the colour the names are drawn in. */
+#define PN_NAME_BASE 1
+#define PN_RACE_BASE 0x97
+#define PN_CLASS_BASE 0xa1
+#define PN_TEXT_FG 0xd0
+
+/* The colour rows: 0 plain, 1 buffed, 3 below maximum. */
+#define PN_ROW_NORMAL 0
+#define PN_ROW_BUFFED 1
+#define PN_ROW_REDUCED 3
+
+/* A full gauge is 0x75 columns and the two bars take graphics 1 and 2. */
+#define PN_BAR_WIDTH 0x75
+#define PN_HP_BAR 1
+#define PN_MP_BAR 2
+
+/* The sentinel the destination is filled with.  It is above the 65 sprite
+   colours and is none of the sheet values, so an untouched pixel is always
+   distinguishable from a drawn one. */
+#define PN_FILL 0x5a
+
+/* Number.cel's shape (resource_info/cel.md): the sprite offset table at a
+   fixed +0x0f, one dword per sprite, five colour rows of thirteen glyphs. */
+#define PN_NUM_TABLE_AT 0x0f
+#define PN_NUM_GLYPHS 13
+#define PN_NUM_SPRITES 65
+#define PN_NUM_STREAM_AT (PN_NUM_TABLE_AT + PN_NUM_SPRITES * 4)
+#define PN_NUM_STREAM_BYTES 16
+#define PN_NUM_SHEET_BYTES \
+    (PN_NUM_STREAM_AT + PN_NUM_SPRITES * PN_NUM_STREAM_BYTES)
+
+/* The gauge sheet: three 0x75 x 8 graphics 0x3a8 bytes apart, opaque down to
+   PN_BAR_OPAQUE_ROWS and index 0 below it. */
+#define PN_BAR_GRAPHIC_STRIDE 0x3a8
+#define PN_BAR_SHEET_BYTES (3 * PN_BAR_GRAPHIC_STRIDE)
+#define PN_BAR_OPAQUE_ROWS 4
+
+/* The sprite cache: a table of slots at the base, each twelve dword offsets,
+   followed by one 24x24 stream per slot.  Eight slots is more than any case
+   asks for and lets a wrong slot land on a different value rather than off
+   the block. */
+#define PN_CACHE_SLOTS 8
+#define PN_CELL_SIZE 0x18
+#define PN_CELL_STREAM_BYTES (PN_CELL_SIZE * 2)
+#define PN_CACHE_TABLE_BYTES \
+    (PN_CACHE_SLOTS * (int) sizeof(struct fdps_cel_cache_slot))
+#define PN_CACHE_BYTES \
+    (PN_CACHE_TABLE_BYTES + PN_CACHE_SLOTS * PN_CELL_STREAM_BYTES)
+
+/* The text block: 256 two-byte table entries followed by 256 streams of one
+   glyph and a terminator, so every id the panel can compute has an entry. */
+#define PN_TEXT_ENTRIES 256
+#define PN_TEXT_TABLE_BYTES (PN_TEXT_ENTRIES * 2)
+#define PN_TEXT_STREAM_BYTES 4
+#define PN_TEXT_BYTES \
+    (PN_TEXT_TABLE_BYTES + PN_TEXT_ENTRIES * PN_TEXT_STREAM_BYTES)
+
+/* One glyph is eight pixels wide and one row tall, so a name's eight pixels
+   are the glyph byte's eight bits, most significant first. */
+#define PN_GLYPH_WIDTH 8
+#define PN_GLYPH_ROWS 1
+
+#define PN_UNIT_COUNT 8
+
+static unsigned char panel_surface[VGA_SCREEN_BYTES];
+static struct fdps_unit_record panel_units[PN_UNIT_COUNT];
+static unsigned char panel_number_sheet[PN_NUM_SHEET_BYTES];
+static unsigned char panel_bar_sheet[PN_BAR_SHEET_BYTES];
+static unsigned char panel_cache[PN_CACHE_BYTES];
+static unsigned char panel_text[PN_TEXT_BYTES];
+static unsigned char panel_font[PN_TEXT_ENTRIES];
+
+/* Slot s of the sprite cache decodes to a flat cell of this colour. */
+static int cell_color(int slot)
+{
+    return 0x40 + slot;
+}
+
+static int face_sheet_present(void)
+{
+    FILE *probe;
+
+    probe = fopen("FACE.CEL", "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+    return 1;
+}
+
+/* Builds every sheet the panel draws through and points the globals at them.
+   Called once; the per-case staging below only refills the destination and
+   the unit records. */
+static void panel_stage_sheets(void)
+{
+    int index;
+    int sprite;
+    int row;
+    int stream_at;
+    int slot;
+
+    for (index = 0; index < PN_NUM_SHEET_BYTES; index++) {
+        panel_number_sheet[index] = 0;
+    }
+    for (sprite = 0; sprite < PN_NUM_SPRITES; sprite++) {
+        stream_at = PN_NUM_STREAM_AT + sprite * PN_NUM_STREAM_BYTES;
+        *(int *) (panel_number_sheet + PN_NUM_TABLE_AT + sprite * 4) =
+            stream_at;
+        /* Eight rows of one fill op: command 0x05 is op 00 with a run of
+           (5 & 0x3f) + 1 = 6, which is exactly the cell width. */
+        for (row = 0; row < 8; row++) {
+            panel_number_sheet[stream_at + row * 2] = 0x05;
+            panel_number_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) (sprite + 1);
+        }
+    }
+
+    for (index = 0; index < PN_BAR_SHEET_BYTES; index++) {
+        row = index % PN_BAR_GRAPHIC_STRIDE / PN_BAR_WIDTH;
+        if (row < PN_BAR_OPAQUE_ROWS) {
+            panel_bar_sheet[index] =
+                (unsigned char) (index / PN_BAR_GRAPHIC_STRIDE + 1);
+        } else {
+            panel_bar_sheet[index] = (unsigned char) 0;
+        }
+    }
+
+    for (index = 0; index < PN_CACHE_BYTES; index++) {
+        panel_cache[index] = 0;
+    }
+    for (slot = 0; slot < PN_CACHE_SLOTS; slot++) {
+        stream_at = PN_CACHE_TABLE_BYTES + slot * PN_CELL_STREAM_BYTES;
+        ((struct fdps_cel_cache_slot *) panel_cache)[slot].sprite_offset[0] =
+            stream_at;
+        /* 24 rows of one fill op: command 0x17 is a run of 24, the cell
+           width, so every row closes on its own column count. */
+        for (row = 0; row < PN_CELL_SIZE; row++) {
+            panel_cache[stream_at + row * 2] = 0x17;
+            panel_cache[stream_at + row * 2 + 1] =
+                (unsigned char) cell_color(slot);
+        }
+    }
+
+    for (index = 0; index < PN_TEXT_ENTRIES; index++) {
+        panel_font[index] = (unsigned char) index;
+        stream_at = PN_TEXT_TABLE_BYTES + index * PN_TEXT_STREAM_BYTES;
+        *(short *) (panel_text + index * 2) = (short) stream_at;
+        *(short *) (panel_text + stream_at) = (short) index;
+        *(short *) (panel_text + stream_at + 2) = (short) -1;
+    }
+
+    data_fdps_number_glyph_sheet_ptr = panel_number_sheet;
+    data_fdps_status_gauge_bar_sheet_ptr = panel_bar_sheet;
+    data_fdps_cel_sprite_cache_ptr = panel_cache;
+    data_fdps_all_game_text_ptr = panel_text;
+    data_fdps_font_sheet_ptr = panel_font;
+    data_fdps_font_glyph_width = (unsigned char) PN_GLYPH_WIDTH;
+    data_fdps_glyph_cell_height = (unsigned char) PN_GLYPH_ROWS;
+    data_fdps_font_glyph_stride_bytes = 1;
+    data_fdps_font_outline_enabled_flag = (unsigned char) 0;
+    data_fdps_glyph_shadow_row_offset = 0;
+    data_fdps_font_shadow_offset_x = 0;
+    data_fdps_glyph_advance_x = PN_GLYPH_WIDTH;
+    data_fdps_font_line_height = PN_GLYPH_ROWS;
+    data_fdps_map_unit_array_ptr = (unsigned char *) panel_units;
+}
+
+/* Clears the records and the destination and puts the two globals the panel
+   reads into their battle-phase state. */
+static struct fdps_unit_record *panel_reset(void)
+{
+    int index;
+
+    for (index = 0; index < VGA_SCREEN_BYTES; index++) {
+        panel_surface[index] = PN_FILL;
+    }
+    memset(panel_units, 0, sizeof panel_units);
+    data_fdps_village_mode_flag = (unsigned char) 0;
+    data_fdps_number_glyph_color_row = 0;
+    return &panel_units[0];
+}
+
+/* Gives the portrait buffer back between cases, the way tests/msgwin.c does:
+   the loader leaves it allocated on purpose. */
+static void panel_release_portrait(void)
+{
+    if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+        free(data_fdps_portrait_sprite_buf_ptr);
+        data_fdps_portrait_sprite_buf_ptr = NULL;
+    }
+}
+
+/* The top-left pixel of a figure's cell number `cell`. */
+static int figure_pixel(int at, int cell)
+{
+    return (int) panel_surface[at + cell * 6];
+}
+
+/* Which sprite of the staged sheet stands in that cell, or -1 for a cell
+   nothing drew in. */
+static int figure_sprite(int at, int cell)
+{
+    int sprite;
+
+    sprite = figure_pixel(at, cell) - 1;
+    if (sprite < 0 || sprite >= PN_NUM_SPRITES) {
+        return -1;
+    }
+    return sprite;
+}
+
+/* The glyph the cell holds -- 0..9 for a digit, 12 for '?' -- or -1. */
+static int figure_glyph(int at, int cell)
+{
+    int sprite;
+
+    sprite = figure_sprite(at, cell);
+    if (sprite < 0) {
+        return -1;
+    }
+    return sprite % PN_NUM_GLYPHS;
+}
+
+/* The colour row the cell's sprite came out of, or -1. */
+static int figure_row(int at, int cell)
+{
+    int sprite;
+
+    sprite = figure_sprite(at, cell);
+    if (sprite < 0) {
+        return -1;
+    }
+    return sprite / PN_NUM_GLYPHS;
+}
+
+/* How many of the bar's columns came out of the filled graphic. */
+static int gauge_fill(int at, int bar_index)
+{
+    int column;
+
+    column = 0;
+    while (column < PN_BAR_WIDTH
+           && panel_surface[at + column] == (unsigned char) (bar_index + 1)) {
+        column++;
+    }
+    return column;
+}
+
+/* The text id a name drew, read back out of its eight pixels. */
+static int name_text_id(int at)
+{
+    int column;
+    int value;
+
+    value = 0;
+    for (column = 0; column < PN_GLYPH_WIDTH; column++) {
+        if (panel_surface[at + column] == (unsigned char) PN_TEXT_FG) {
+            value |= 1 << (PN_GLYPH_WIDTH - 1 - column);
+        }
+    }
+    return value;
+}
+
+/* Nine figures, nine values, nine destinations.  Each value is chosen so its
+   digits identify it, so a figure that landed at another figure's offset --
+   or that was drawn from another record field -- reads back as the wrong
+   digits rather than as the right ones by luck.  The field widths are pinned
+   at the same time: the two-digit fields must not touch a third cell and the
+   four-digit ones must pad, so 56 in a four-digit field is 0056. */
+static void every_figure_lands_at_its_own_offset(void)
+{
+    struct fdps_unit_record *unit;
+
+    if (!face_sheet_present()) {
+        return;
+    }
+    unit = panel_reset();
+    unit->hp_current = 1234;
+    unit->hp_max = 1234;
+    unit->mp_current = 56;
+    unit->mp_max = 56;
+    unit->level = 12;
+    unit->move = 34;
+    unit->exp_carry = 56;
+    unit->ap = 123;
+    unit->dp = 456;
+    unit->hit = 789;
+    unit->ev = 246;
+    unit->dx_base = 135;
+
+    fdps_draw_unit_status_panel(0, panel_surface);
+    panel_release_portrait();
+
+    CHECK_EQ(figure_glyph(PN_HP_CURRENT_AT, 0), 1);
+    CHECK_EQ(figure_glyph(PN_HP_CURRENT_AT, 3), 4);
+    CHECK_EQ(figure_glyph(PN_HP_MAX_AT, 0), 1);
+    CHECK_EQ(figure_glyph(PN_HP_MAX_AT, 3), 4);
+    CHECK_EQ(figure_glyph(PN_MP_CURRENT_AT, 0), 0);
+    CHECK_EQ(figure_glyph(PN_MP_CURRENT_AT, 2), 5);
+    CHECK_EQ(figure_glyph(PN_MP_CURRENT_AT, 3), 6);
+    CHECK_EQ(figure_glyph(PN_MP_MAX_AT, 2), 5);
+    CHECK_EQ(figure_glyph(PN_LEVEL_AT, 0), 1);
+    CHECK_EQ(figure_glyph(PN_LEVEL_AT, 1), 2);
+    CHECK_EQ(figure_pixel(PN_LEVEL_AT, 2), PN_FILL);
+    CHECK_EQ(figure_glyph(PN_MOVE_AT, 0), 3);
+    CHECK_EQ(figure_glyph(PN_MOVE_AT, 1), 4);
+    CHECK_EQ(figure_pixel(PN_MOVE_AT, 2), PN_FILL);
+    CHECK_EQ(figure_glyph(PN_EXP_AT, 0), 0);
+    CHECK_EQ(figure_glyph(PN_EXP_AT, 1), 5);
+    CHECK_EQ(figure_glyph(PN_EXP_AT, 2), 6);
+    CHECK_EQ(figure_glyph(PN_AP_AT, 0), 1);
+    CHECK_EQ(figure_glyph(PN_AP_AT, 2), 3);
+    CHECK_EQ(figure_glyph(PN_DP_AT, 0), 4);
+    CHECK_EQ(figure_glyph(PN_DP_AT, 2), 6);
+    CHECK_EQ(figure_glyph(PN_HIT_AT, 0), 7);
+    CHECK_EQ(figure_glyph(PN_HIT_AT, 2), 9);
+    CHECK_EQ(figure_glyph(PN_EV_AT, 0), 2);
+    CHECK_EQ(figure_glyph(PN_EV_AT, 2), 6);
+    CHECK_EQ(figure_glyph(PN_DX_AT, 0), 1);
+    CHECK_EQ(figure_glyph(PN_DX_AT, 2), 5);
+}
+
+/* CMP EAX,dword ptr [EBP+-0x3c] / JZ at 00016450 and its MP twin at 000164ad
+   set row 3 only when the pair differs, and the MOV [0x0006000c],0x0 that
+   follows each figure is what puts it back -- so the maximum is always drawn
+   plain, and the global is 0 at the RET. */
+static void a_current_below_its_maximum_draws_in_the_reduced_row(void)
+{
+    struct fdps_unit_record *unit;
+
+    if (!face_sheet_present()) {
+        return;
+    }
+    unit = panel_reset();
+    unit->hp_current = 1;
+    unit->hp_max = 2;
+    unit->mp_current = 3;
+    unit->mp_max = 4;
+
+    fdps_draw_unit_status_panel(0, panel_surface);
+    panel_release_portrait();
+
+    CHECK_EQ(figure_row(PN_HP_CURRENT_AT, 3), PN_ROW_REDUCED);
+    CHECK_EQ(figure_row(PN_HP_MAX_AT, 3), PN_ROW_NORMAL);
+    CHECK_EQ(figure_row(PN_MP_CURRENT_AT, 3), PN_ROW_REDUCED);
+    CHECK_EQ(figure_row(PN_MP_MAX_AT, 3), PN_ROW_NORMAL);
+    CHECK_EQ(data_fdps_number_glyph_color_row, PN_ROW_NORMAL);
+}
+
+/* The HP compare has no else arm: JZ at 00016453 jumps past the store rather
+   than to one that clears it, so a full unit inherits whatever colour row the
+   caller left behind and the first figure is drawn in it.  Row 2 is a row no
+   branch in this function can select, so seeing it proves the inheritance
+   rather than a missed store.  MP is drawn after the first put-back and so
+   starts from 0 whatever the caller did. */
+static void a_full_unit_inherits_the_callers_colour_row(void)
+{
+    struct fdps_unit_record *unit;
+
+    if (!face_sheet_present()) {
+        return;
+    }
+    unit = panel_reset();
+    unit->hp_current = 9;
+    unit->hp_max = 9;
+    unit->mp_current = 9;
+    unit->mp_max = 9;
+    data_fdps_number_glyph_color_row = 2;
+
+    fdps_draw_unit_status_panel(0, panel_surface);
+    panel_release_portrait();
+
+    CHECK_EQ(figure_row(PN_HP_CURRENT_AT, 3), 2);
+    CHECK_EQ(figure_row(PN_HP_MAX_AT, 3), PN_ROW_NORMAL);
+    CHECK_EQ(figure_row(PN_MP_CURRENT_AT, 3), PN_ROW_NORMAL);
+    CHECK_EQ(data_fdps_number_glyph_color_row, PN_ROW_NORMAL);
+}
+
+/* Each buff timer lights exactly the figures its buff moves, which is the
+   grouping fdps_unit_recompute_combat_stats applies: timer 2 raises dx and so
+   both hit and ev, timer 0 multiplies ap and timer 1 multiplies dp.  The
+   three tests are separate CMP byte ptr [EAX+0x2x],0x0 with their own
+   else arms, so a timer that is clear drives its figures back to row 0
+   instead of leaving the previous group's row standing. */
+static void each_buff_timer_lights_only_its_own_figures(void)
+{
+    struct fdps_unit_record *unit;
+
+    if (!face_sheet_present()) {
+        return;
+    }
+    unit = panel_reset();
+    unit->status_timers[2] = 1;
+    fdps_draw_unit_status_panel(0, panel_surface);
+    panel_release_portrait();
+    CHECK_EQ(figure_row(PN_HIT_AT, 2), PN_ROW_BUFFED);
+    CHECK_EQ(figure_row(PN_EV_AT, 2), PN_ROW_BUFFED);
+    CHECK_EQ(figure_row(PN_DX_AT, 2), PN_ROW_BUFFED);
+    CHECK_EQ(figure_row(PN_AP_AT, 2), PN_ROW_NORMAL);
+    CHECK_EQ(figure_row(PN_DP_AT, 2), PN_ROW_NORMAL);
+
+    unit = panel_reset();
+    unit->status_timers[0] = 1;
+    fdps_draw_unit_status_panel(0, panel_surface);
+    panel_release_portrait();
+    CHECK_EQ(figure_row(PN_AP_AT, 2), PN_ROW_BUFFED);
+    CHECK_EQ(figure_row(PN_DP_AT, 2), PN_ROW_NORMAL);
+    CHECK_EQ(figure_row(PN_HIT_AT, 2), PN_ROW_NORMAL);
+
+    unit = panel_reset();
+    unit->status_timers[1] = 1;
+    fdps_draw_unit_status_panel(0, panel_surface);
+    panel_release_portrait();
+    CHECK_EQ(figure_row(PN_DP_AT, 2), PN_ROW_BUFFED);
+    CHECK_EQ(figure_row(PN_AP_AT, 2), PN_ROW_NORMAL);
+    CHECK_EQ(data_fdps_number_glyph_color_row, PN_ROW_NORMAL);
+}
+
+/* CMP dword ptr [EBP+-0x2c],0xff / MOV ...,0x3e8 at 000163de replaces the
+   sentinel with a thousand, and the field it is drawn in is three digits --
+   PUSH 0x3 at 00016523 -- so fdps_draw_number's overflow guard turns it into
+   three '?' glyphs, sprite 12 of the row.  A player's own unit carries 0..99
+   and is drawn as a figure. */
+static void the_not_player_experience_sentinel_fills_the_field(void)
+{
+    struct fdps_unit_record *unit;
+
+    if (!face_sheet_present()) {
+        return;
+    }
+    unit = panel_reset();
+    unit->exp_carry = (unsigned char) 0xff;
+    fdps_draw_unit_status_panel(0, panel_surface);
+    panel_release_portrait();
+    CHECK_EQ(figure_glyph(PN_EXP_AT, 0), 12);
+    CHECK_EQ(figure_glyph(PN_EXP_AT, 1), 12);
+    CHECK_EQ(figure_glyph(PN_EXP_AT, 2), 12);
+
+    unit = panel_reset();
+    unit->exp_carry = (unsigned char) 99;
+    fdps_draw_unit_status_panel(0, panel_surface);
+    panel_release_portrait();
+    CHECK_EQ(figure_glyph(PN_EXP_AT, 0), 0);
+    CHECK_EQ(figure_glyph(PN_EXP_AT, 1), 9);
+    CHECK_EQ(figure_glyph(PN_EXP_AT, 2), 9);
+}
+
+/* The fill is (current * 0x75 + max - 1) / max and it rounds UP, so one hit
+   point out of a thousand still shows a column; a full pair fills all 0x75;
+   and a maximum of zero or less never reaches the divide at all (CMP ...,0x0
+   / JG at 000165a5).  The HP bar comes out of graphic 1 and the MP bar out of
+   graphic 2, which is what separates the two rows. */
+static void the_gauges_round_up_and_take_a_graphic_each(void)
+{
+    struct fdps_unit_record *unit;
+
+    if (!face_sheet_present()) {
+        return;
+    }
+    unit = panel_reset();
+    unit->hp_current = 1;
+    unit->hp_max = 1000;
+    unit->mp_current = 40;
+    unit->mp_max = 40;
+    fdps_draw_unit_status_panel(0, panel_surface);
+    panel_release_portrait();
+    CHECK_EQ(gauge_fill(PN_HP_GAUGE_AT, PN_HP_BAR), 1);
+    CHECK_EQ(gauge_fill(PN_MP_GAUGE_AT, PN_MP_BAR), PN_BAR_WIDTH);
+    /* The column past the HP fill is the track, graphic 0, and the fill is
+       the same width three rows down -- the two blits are rectangles at the
+       destination's own pitch. */
+    CHECK_EQ(panel_surface[PN_HP_GAUGE_AT + 1], 1);
+    CHECK_EQ(panel_surface[PN_HP_GAUGE_AT + 3 * VGA_SCREEN_PITCH], 2);
+
+    unit = panel_reset();
+    unit->hp_current = 5;
+    unit->hp_max = 0;
+    unit->mp_current = 5;
+    unit->mp_max = -1;
+    fdps_draw_unit_status_panel(0, panel_surface);
+    panel_release_portrait();
+    CHECK_EQ(gauge_fill(PN_HP_GAUGE_AT, PN_HP_BAR), 0);
+    CHECK_EQ(gauge_fill(PN_MP_GAUGE_AT, PN_MP_BAR), 0);
+    CHECK_EQ(panel_surface[PN_HP_GAUGE_AT], 1);
+
+    /* Half of an odd maximum rounds up rather than down: 3 of 5 is
+       (3 * 117 + 4) / 5 = 71, where a truncating divide would give 70. */
+    unit = panel_reset();
+    unit->hp_current = 3;
+    unit->hp_max = 5;
+    fdps_draw_unit_status_panel(0, panel_surface);
+    panel_release_portrait();
+    CHECK_EQ(gauge_fill(PN_HP_GAUGE_AT, PN_HP_BAR), 71);
+}
+
+/* CMP byte ptr [0x00060070],0x0 / JNZ at 000163f5 picks which index reaches
+   the slot table: the record's own sprite_cache_slot on the battle map, the
+   caller's unit_index in a village phase.  The store at 00016318 is the only
+   thing in the image that writes data_fdps_village_status_window_unit_idx, and
+   it happens only on the village arm. */
+static void the_village_flag_swaps_the_cache_slot_and_latches_the_index(void)
+{
+    if (!face_sheet_present()) {
+        return;
+    }
+    panel_reset();
+    panel_units[2].sprite_cache_slot = (unsigned char) 5;
+    data_fdps_village_status_window_unit_idx = -1;
+    fdps_draw_unit_status_panel(2, panel_surface);
+    panel_release_portrait();
+    CHECK_EQ(panel_surface[PN_PORTRAIT_AT], cell_color(5));
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, -1);
+
+    panel_reset();
+    panel_units[2].sprite_cache_slot = (unsigned char) 5;
+    data_fdps_village_mode_flag = (unsigned char) 1;
+    fdps_draw_unit_status_panel(2, panel_surface);
+    panel_release_portrait();
+    data_fdps_village_mode_flag = (unsigned char) 0;
+    CHECK_EQ(panel_surface[PN_PORTRAIT_AT], cell_color(2));
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, 2);
+    /* And the cell is 24 x 24 at that offset and no larger. */
+    CHECK_EQ(panel_surface[PN_PORTRAIT_AT + 23 * VGA_SCREEN_PITCH + 23],
+             cell_color(2));
+    CHECK_EQ(panel_surface[PN_PORTRAIT_AT + 24 * VGA_SCREEN_PITCH], PN_FILL);
+    CHECK_EQ(panel_surface[PN_PORTRAIT_AT + 24], PN_FILL);
+}
+
+/* ADD EAX,0x1 at 000167c2, ADD EAX,0xa1 at 000167ec and ADD EAX,0x97 at
+   0001681a: the name comes from char_id, the class name from clazz and the
+   race name from race, each offset by its block's first entry.  The three
+   destinations are separate, so a pair swapped between two of them is caught
+   as well as a wrong base. */
+static void the_three_names_come_from_their_own_blocks(void)
+{
+    struct fdps_unit_record *unit;
+
+    if (!face_sheet_present()) {
+        return;
+    }
+    unit = panel_reset();
+    unit->char_id = (unsigned char) 20;
+    unit->clazz = (unsigned char) 3;
+    unit->race = (unsigned char) 4;
+
+    fdps_draw_unit_status_panel(0, panel_surface);
+    panel_release_portrait();
+
+    CHECK_EQ(name_text_id(PN_NAME_AT), PN_NAME_BASE + 20);
+    CHECK_EQ(name_text_id(PN_CLASS_AT), PN_CLASS_BASE + 3);
+    CHECK_EQ(name_text_id(PN_RACE_AT), PN_RACE_BASE + 4);
+}
+
 void run_statwin_tests(void)
 {
     stage_images();
@@ -1035,8 +1667,40 @@ void run_statwin_tests(void)
     RUN_TEST(the_play_flag_comes_back_from_the_saved_copy);
     RUN_TEST(the_close_gives_its_scene_page_back);
 
+    panel_stage_sheets();
+    RUN_TEST(every_figure_lands_at_its_own_offset);
+    RUN_TEST(a_current_below_its_maximum_draws_in_the_reduced_row);
+    RUN_TEST(a_full_unit_inherits_the_callers_colour_row);
+    RUN_TEST(each_buff_timer_lights_only_its_own_figures);
+    RUN_TEST(the_not_player_experience_sentinel_fills_the_field);
+    RUN_TEST(the_gauges_round_up_and_take_a_graphic_each);
+    RUN_TEST(the_village_flag_swaps_the_cache_slot_and_latches_the_index);
+    RUN_TEST(the_three_names_come_from_their_own_blocks);
+
     free(sheet);
     sheet = NULL;
     free(misc_vfs);
     misc_vfs = NULL;
+
+    /* Every global panel_stage_sheets() wrote goes back: all five sheet
+       pointers and the unit array base are statics of this file and would
+       outlive it as live pointers into a unit that has finished, and the font
+       metrics and the colour row are what a later unit expects to own. */
+    panel_release_portrait();
+    data_fdps_number_glyph_sheet_ptr = (unsigned char *) 0;
+    data_fdps_status_gauge_bar_sheet_ptr = (unsigned char *) 0;
+    data_fdps_cel_sprite_cache_ptr = (unsigned char *) 0;
+    data_fdps_all_game_text_ptr = (unsigned char *) 0;
+    data_fdps_font_sheet_ptr = (unsigned char *) 0;
+    data_fdps_map_unit_array_ptr = (unsigned char *) 0;
+    data_fdps_font_glyph_width = (unsigned char) 0;
+    data_fdps_glyph_cell_height = (unsigned char) 0;
+    data_fdps_font_glyph_stride_bytes = 0;
+    data_fdps_font_outline_enabled_flag = (unsigned char) 0;
+    data_fdps_glyph_shadow_row_offset = 0;
+    data_fdps_font_shadow_offset_x = 0;
+    data_fdps_glyph_advance_x = 0;
+    data_fdps_font_line_height = 0;
+    data_fdps_number_glyph_color_row = 0;
+    data_fdps_village_mode_flag = (unsigned char) 0;
 }
