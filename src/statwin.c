@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "fdpstype.h"
+#include "audio.h"
 #include "blit.h"
 #include "gamedata.h"
 #include "keybd.h"
@@ -656,4 +657,141 @@ int fdps_unit_status_window_wait_input(unsigned char *window_image,
     }
 
     return input_code;
+}
+
+/* The window cue, PUSH 0x6159c / CALL fdps_play_sfx at 000168ec.  It is the
+   same member the opening plays (PUSH 0x6159c at 00016b09 in
+   fdps_battle_show_unit_status_window), and those two are the only references
+   to that string in the image -- the ring menu's own cue is a different member,
+   "OpWin.wav" at 0x61584 (menu.c).
+
+   It has to be a plain writable literal, for the reason menu.c's copy does:
+   the lookup inside fdps_play_sfx upper-cases the caller's own storage in place
+   (vfs.h), so this spelling is permanently "OPWIN1.WAV" after the first status
+   window of the run, exactly as the original's copy at 0x6159c is
+   (rebuild_info/pitfalls.md). */
+#define STATUS_WINDOW_SOUND "OpWin1.wav"
+
+/* Where the closing walk starts.  MOV dword ptr [EBP-0x4],0x5 at 000169a9 and
+   CMP against 0 / JGE at 000169b0, so the steps drawn are 5, 4, 3, 2, 1, 0 --
+   six frames, and step 0 is the closed position.  The opening walks 0 up to 8,
+   so the closing does NOT retrace it: it starts from the resting frame's
+   predecessor and never draws steps 6, 7 or 8, which are the one-pixel
+   overshoot the opening settles through (statwin.h). */
+#define CLOSE_ANIM_FIRST_STEP 5
+
+/* The view's frame: the four pixels of screen around the 312x192 window that
+   fdps_render_view_frame never writes.  VIEW_BORDER_BAND_BYTES is one band of
+   four whole rows, the 0x500 pushed at 000169e8 and 000169fc, and
+   VIEW_BOTTOM_BORDER_AT is where the lower band starts -- the 0xaf500 pushed at
+   00016a03, which is row 196. */
+#define VIEW_BORDER_WIDTH 4
+#define VIEW_BORDER_BAND_BYTES (VIEW_BORDER_WIDTH * VGA_SCREEN_PITCH)
+#define VIEW_BOTTOM_BORDER_AT \
+    ((VGA_SCREEN_ROWS - VIEW_BORDER_WIDTH) * VGA_SCREEN_PITCH)
+#define VIEW_RIGHT_BORDER_AT (VGA_SCREEN_PITCH - VIEW_BORDER_WIDTH)
+
+/* How many times the loop that blanks the left and right margins runs: CMP
+   dword ptr [EBP-0x4],0x140 / JL at 00016a17.
+
+   IT IS THE SCREEN'S WIDTH AND NOT ITS HEIGHT, AND THAT IS THE ORIGINAL'S BUG.
+   Only the first 200 iterations land on a scanline; the last 120 write their
+   four-byte zero runs from the end of the frame at 0xafa00 up to 0xb8fff, which
+   is past the mode 13h aperture entirely.  It is harmless only because the
+   destination is the adapter and not a buffer -- writing the obvious thing, a
+   border clear over a 64000-byte offscreen page, would overrun that page by 38
+   KB (rebuild_info/pitfalls.md).  So the count stays 0x140 and the writes stay
+   aimed at VGA_SCREEN_BASE; it is spelled as the pitch because that is the
+   constant the original used, not because a row index belongs in it. */
+#define BORDER_CLEAR_ROW_COUNT VGA_SCREEN_PITCH
+
+/* 000168e0.  Takes the status window away again.  See statwin.h for what the
+   two arguments are and what the caller still owns afterwards.
+
+   THE SCRATCH PAGE IS TAKEN IN BOTH BRANCHES AND USED IN ONLY ONE.  The
+   0x15180-byte scene page is allocated before the branch and freed after
+   everything, but the village arm never reads it: the blit that arm performs
+   writes the saved page's view window INTO the scratch, and nothing looks at it
+   again.  That blit is dead work in the original too, and it stays -- dropping
+   it would drop the read of the saved page and its 192 row-by-row memmoves, and
+   keeping the allocation out of the village arm would change which block the
+   next malloc in the program is handed.
+
+   THE ANIMATION IS DRAWN OVER background AND ITS RESULT IS THROWN AWAY.  Each
+   of the six frames presents itself to the screen, and then the restore below
+   paints over the whole of what the last one put there.  What the player sees
+   is the six frames; what is left on the adapter afterwards is the restore
+   alone.
+
+   NOTHING IS CHECKED.  malloc's result goes straight into the branch, the
+   saved page pointer is dereferenced without a null test, and neither the cue
+   nor the compositor reports anything back. */
+void fdps_close_status_window(void *window_image, void *background)
+{
+    /* The 360x240 page the scene behind the window is composed on, taken and
+       given back inside this one call. */
+    unsigned char *scene_page;
+    /* Which step of the four-panel slide is being drawn, counting down. */
+    int step;
+    /* The screen row whose four-pixel left and right margins are being
+       blanked -- for the first 200 of the loop's 320 passes; see
+       BORDER_CLEAR_ROW_COUNT above for what the rest write. */
+    int border_row;
+
+    fdps_play_sfx(STATUS_WINDOW_SOUND);
+    scene_page = (unsigned char *) malloc((size_t) SCENE_PAGE_BYTES);
+
+    /* The picture that lies behind the window, into background.  On the battle
+       map it is composed again from the scene layers and only the view window
+       is written, the rest of the frame being cleared; in a village it is the
+       saved page copied whole. */
+    if (data_fdps_village_mode_flag == 0) {
+        fdps_draw_scene_layers(scene_page);
+        memset(background, 0, (size_t) VGA_SCREEN_BYTES);
+        fdps_blit_rect((unsigned int) (scene_page + SCENE_PAGE_WINDOW_AT),
+                       SCENE_PAGE_PITCH,
+                       (void *) ((unsigned char *) background
+                                 + SCREEN_WINDOW_AT),
+                       VGA_SCREEN_PITCH, SCREEN_WINDOW_W, SCREEN_WINDOW_H);
+    } else {
+        fdps_blit_rect((unsigned int) (data_fdps_village_backdrop_page_ptr
+                                       + SCREEN_WINDOW_AT),
+                       VGA_SCREEN_PITCH,
+                       scene_page + SCENE_PAGE_WINDOW_AT,
+                       SCENE_PAGE_PITCH, SCREEN_WINDOW_W, SCREEN_WINDOW_H);
+        memmove(background, data_fdps_village_backdrop_page_ptr,
+                (size_t) VGA_SCREEN_BYTES);
+    }
+
+    for (step = CLOSE_ANIM_FIRST_STEP; step >= 0; step--) {
+        fdps_draw_status_window_anim_frame(background, window_image, step);
+    }
+
+    /* And the visible screen.  The battle branch goes through the compositor,
+       which writes only the 312x192 window, and then blanks the frame around it
+       directly in the adapter; the village branch puts the saved page back and
+       blanks nothing, because the border there belongs to the village screen
+       and the saved page already holds it. */
+    if (data_fdps_village_mode_flag == 0) {
+        fdps_render_view_frame();
+        memset((void *) VGA_SCREEN_BASE, 0, (size_t) VIEW_BORDER_BAND_BYTES);
+        memset((void *) (VGA_SCREEN_BASE + VIEW_BOTTOM_BORDER_AT), 0,
+               (size_t) VIEW_BORDER_BAND_BYTES);
+        for (border_row = 0; border_row < BORDER_CLEAR_ROW_COUNT;
+             border_row++) {
+            memset((void *) (VGA_SCREEN_BASE
+                             + border_row * VGA_SCREEN_PITCH),
+                   0, (size_t) VIEW_BORDER_WIDTH);
+            memset((void *) (VGA_SCREEN_BASE
+                             + border_row * VGA_SCREEN_PITCH
+                             + VIEW_RIGHT_BORDER_AT),
+                   0, (size_t) VIEW_BORDER_WIDTH);
+        }
+    } else {
+        memmove((void *) VGA_SCREEN_BASE, data_fdps_village_backdrop_page_ptr,
+                (size_t) VGA_SCREEN_BYTES);
+    }
+
+    free(scene_page);
+    data_fdps_ui_play_active_flag = data_fdps_ui_play_active_flag_saved;
 }

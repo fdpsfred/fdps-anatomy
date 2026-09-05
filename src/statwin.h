@@ -151,4 +151,52 @@ extern int fdps_unit_status_window_wait_input(unsigned char *window_image,
                                               char allow_idle_animation);
 #pragma aux fdps_unit_status_window_wait_input "*" parm caller [];
 
+/* 00063fb8.  Where data_fdps_ui_play_active_flag is parked for as long as the
+ * status window is up.  fdps_battle_show_unit_status_window saves the live flag
+ * here and zeroes it on the way in (MOV [0x00063fb8],AL at 00016aef) and
+ * fdps_close_status_window copies it back on the way out (MOV AL,[0x00063fb8]
+ * at 00016a84); those two instructions are every reference to the address in
+ * the image.
+ *
+ * So it is not a second flag, it is one function's saved copy of another
+ * global, and it is what keeps fdps_draw_cursor_info_panel from painting the
+ * terrain panel into the scene behind the window while the window is open.
+ *
+ * A byte, and it holds whatever the live flag held: it is copied both ways
+ * without a test, so nothing here reduces it to 0 or 1.  It is uninitialised
+ * until the status window has been opened once. */
+extern unsigned char data_fdps_ui_play_active_flag_saved;
+
+/* Takes the status window away again and puts the screen back the way it was.
+   The mirror of the opening the caller ran: the same cue, the same four panels
+   and the same nine-step tables, walked from step 5 down to step 0 instead of
+   0 up to 8.
+
+   window_image is the assembled window -- what fdps_load_status_cel_image
+   loaded and the caller painted -- and is only read.  background is a
+   caller-owned 64000-byte frame and is only WRITTEN: whatever it holds on entry
+   is discarded, because this function fills it with the picture that lies
+   behind the window before it draws the first retreating frame over it.  A
+   caller that has a background it wants preserved must keep its own copy.
+
+   WHERE THE PICTURE BEHIND THE WINDOW COMES FROM IS
+   data_fdps_village_mode_flag's decision, and the two branches differ in more
+   than their source.  Clear, the scene is composed again and the 312x192 view
+   window is the only part of background that is written -- the rest is zeroed
+   -- and the screen is put back by fdps_render_view_frame with the view's
+   four-pixel border blanked afterwards.  Set, the saved village page is copied
+   whole into background and whole to the screen, and no border is blanked.
+
+   IT DOES NOT WAIT FOR A KEY AND IT RETURNS NOTHING.  All four call sites
+   follow the CALL with ADD ESP,0x8 and then free the window image they passed,
+   so the block is the caller's to release and this function does not touch it.
+
+   THE PLAY FLAG COMES BACK LAST.  data_fdps_ui_play_active_flag is restored
+   from data_fdps_ui_play_active_flag_saved after the screen has been repainted,
+   not before, so the repaint this function performs still runs with the cursor
+   info panel switched off and the panel reappears only on the caller's next
+   frame. */
+extern void fdps_close_status_window(void *window_image, void *background);
+#pragma aux fdps_close_status_window "*" parm caller [];
+
 #endif

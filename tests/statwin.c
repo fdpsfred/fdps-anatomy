@@ -82,6 +82,7 @@
 #include "blit.h"
 #include "gamedata.h"
 #include "keybd.h"
+#include "mapdraw.h"
 #include "statwin.h"
 #include "vfs.h"
 
@@ -682,6 +683,337 @@ static void an_accepted_code_takes_no_heap(void)
     CHECK_EQ(_heapchk(), _HEAPOK);
 }
 
+/* ---- fdps_close_status_window @ 000168e0 ---------------------------- */
+
+/* WHAT A CLOSE LEAVES BEHIND IS THE RESTORE, NOT THE ANIMATION.  The six
+   retreating frames each present themselves to 0xa0000 and are then painted
+   over in full -- by the saved page in a village, by the compositor and the
+   border blank on the battle map -- so nothing of them survives to be asserted
+   and their only observable is the time they take, which is the same playtest
+   contract the opening's frames are (rebuild_info/pitfalls.md).  What the cases
+   below pin is therefore the two ends of the call: where the picture behind the
+   window is fetched from, and what reaches the screen and the caller's
+   background afterwards.
+
+   THE TWO BRANCHES ARE ASSERTED AGAINST EACH OTHER.  The village page below is
+   filled so that no byte of it is zero, so "the border is blank" and "the page
+   came back whole" are mutually exclusive statements about the same four bands
+   of screen: the village case checks that the top band still holds the page and
+   the battle case that it holds zeros.  A branch taken the wrong way round
+   fails both.
+
+   HOW THE BATTLE BRANCH IS MADE PREDICTABLE.  fdps_draw_scene_layers writes
+   nothing into the 360x240 page with no layers, no units and no cursor staged,
+   so what that branch blits into the caller's background is the page as malloc
+   handed it over.  Each run therefore fills a block of exactly that size and
+   releases it immediately before the call, which is the same seeding
+   tests/menu.c uses on the ring menu's page: the allocator hands the freed
+   block straight back, contents and all, and the first assertion of the case
+   that relies on it says so in as many words rather than assuming it.
+
+   WHY THE CUE IS A CONTAINER WITH NO MEMBERS.  fdps_play_sfx looks the name up
+   in data_fdps_audio_basewav_sfx_bank_buf_ptr, and an image whose entry count is
+   zero makes the lookup miss without touching the name and without allocating,
+   which is what the original does on a machine whose effect pack does not hold
+   the member (audio.h).  Whether a found clip reaches the mixer is that
+   function's own contract and is covered in tests/audio.c.
+
+   WHAT IS NOT COVERED.  The 120 iterations of the border loop that run past the
+   end of the frame write to 0xb0000 upwards, which the adapter does not decode
+   in mode 13h, so they can be neither observed nor asserted from here -- that
+   the loop must keep running 320 times rather than 200 is a rebuild note
+   (statwin.c), not a unit-test one.  The village branch's blit into the scratch
+   page is likewise unobservable: the page is freed without being read. */
+
+/* The view the compositor presents and the frame around it: 312 x 192 at
+   (4, 4), with four pixels of border on every side. */
+#define CLOSE_VIEW_TOP 4
+#define CLOSE_VIEW_LEFT 4
+#define CLOSE_VIEW_W 312
+#define CLOSE_VIEW_H 192
+#define CLOSE_BORDER 4
+
+/* The 360x240 scene page, the size of the block each run seeds. */
+#define CLOSE_SCENE_PAGE_BYTES 0x15180
+
+/* The three fills.  All three are distinct, none of them is zero, and the
+   scene fill is outside the range page_pixel produces, so any byte of any
+   assertion below names where it came from. */
+#define CLOSE_SCREEN_GUARD 0x5a
+#define CLOSE_BG_GUARD 0xab
+#define CLOSE_SCENE_FILL 0x6d
+
+/* The two saved play-flag values the restore is measured with.  Neither is 0,
+   because the staging clears the live flag before every call, and they differ
+   from each other so the restore cannot pass by writing a constant. */
+#define CLOSE_SAVED_FLAG_A 0x37
+#define CLOSE_SAVED_FLAG_B 0x12
+
+static unsigned char close_page[VGA_SCREEN_BYTES];
+static unsigned char close_bg[VGA_SCREEN_BYTES];
+
+/* The effect pack the cue misses in.  See the note above. */
+static struct fdps_vfs_image_header close_sfx_pack;
+
+/* The saved village page's pixel at a position.  Never zero and never equal to
+   any of the three fills, so a byte of it on the screen says both that the page
+   was copied and which of its positions the byte came from. */
+static int page_pixel(int row, int col)
+{
+    return ((row * 5 + col * 3) & 0x7e) + 1;
+}
+
+/* How many bytes of a rectangle are not `value`.  Zero means the whole
+   rectangle holds it. */
+static long close_differing(unsigned char *buf, int row, int rows, int col,
+                            int cols, int value)
+{
+    long count;
+    int r;
+    int c;
+
+    count = 0;
+    for (r = row; r < row + rows; r++) {
+        for (c = col; c < col + cols; c++) {
+            if ((int) buf[r * VGA_SCREEN_PITCH + c] != value) {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+/* Everything the call reads that this file can set: the saved page, the mode
+   flag, the cue's container, and the scene state that keeps the compositor
+   silent and its pacing spin from blocking.  The frame latch is put one off the
+   counter because no timer is installed here, so a latch equal to the counter
+   would spin for ever. */
+static void close_stage(int village)
+{
+    int row;
+    int col;
+
+    for (row = 0; row < VGA_SCREEN_ROWS; row++) {
+        for (col = 0; col < VGA_SCREEN_PITCH; col++) {
+            close_page[row * VGA_SCREEN_PITCH + col] =
+                (unsigned char) page_pixel(row, col);
+        }
+    }
+    memset(close_bg, CLOSE_BG_GUARD, (size_t) VGA_SCREEN_BYTES);
+
+    memset(&close_sfx_pack, 0, sizeof(close_sfx_pack));
+    data_fdps_audio_basewav_sfx_bank_buf_ptr =
+        (unsigned char *) &close_sfx_pack;
+
+    data_fdps_village_backdrop_page_ptr = close_page;
+    data_fdps_village_mode_flag = (unsigned char) village;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_scene_layer_scroll_last_tick = data_fdps_timer_tick_counter;
+    data_fdps_view_frame_last_tick = data_fdps_timer_tick_counter + 1;
+}
+
+/* The pack and the page are statics, and fdps_shutdown_free_resources frees
+   both of those globals unguarded, so neither may be left published. */
+static void close_unstage(void)
+{
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = NULL;
+    data_fdps_village_backdrop_page_ptr = NULL;
+    data_fdps_village_mode_flag = 0;
+}
+
+/* Fills a block the size of the scene page and gives it straight back, so the
+   allocation the call is about to make lands on it. */
+static void close_seed_scene_page(void)
+{
+    void *page;
+
+    page = malloc((size_t) CLOSE_SCENE_PAGE_BYTES);
+    memset(page, CLOSE_SCENE_FILL, (size_t) CLOSE_SCENE_PAGE_BYTES);
+    free(page);
+}
+
+/* One close, against a guarded screen and a guarded background, with the
+   adapter in the mode the window is drawn in.  The frame it leaves is in
+   shot[] and the background it filled is in close_bg[]. */
+static void close_run(int village)
+{
+    close_stage(village);
+    close_seed_scene_page();
+    set_video_mode(VIDEO_MODE_320X200X256);
+    memset((void *) VGA_SCREEN_BASE, CLOSE_SCREEN_GUARD,
+           (size_t) VGA_SCREEN_BYTES);
+    fdps_close_status_window(window, close_bg);
+    capture_aperture();
+    set_video_mode(VIDEO_MODE_TEXT);
+    close_unstage();
+}
+
+/* With the flag set both the screen and the caller's background come out as
+   the saved page, byte for byte and all 64000 of them.  That is one memmove
+   each and nothing else: the six animation frames drew over the screen and were
+   painted out, the border was not blanked -- every byte of the page is non-zero
+   and the top band still holds it -- and the background's guard is gone from
+   the corners the battle branch would have zeroed rather than copied.
+
+   The whole-frame comparisons are what pin the length: a copy of the 312 x 192
+   window instead of the frame, or a copy of 0xfa00 bytes from the wrong origin,
+   leaves the guard somewhere in the 64000. */
+static void village_close_puts_the_saved_page_back(void)
+{
+    close_run(1);
+
+    CHECK_EQ(memcmp(shot, close_page, (size_t) VGA_SCREEN_BYTES), 0);
+    CHECK_EQ(memcmp(close_bg, close_page, (size_t) VGA_SCREEN_BYTES), 0);
+
+    CHECK_EQ(shot_pixel(0, 0), page_pixel(0, 0));
+    CHECK_EQ(shot_pixel(0, VGA_SCREEN_PITCH - 1),
+             page_pixel(0, VGA_SCREEN_PITCH - 1));
+    CHECK_EQ(shot_pixel(VGA_SCREEN_ROWS - 1, 0),
+             page_pixel(VGA_SCREEN_ROWS - 1, 0));
+    CHECK_EQ(shot_pixel(VGA_SCREEN_ROWS - 1, VGA_SCREEN_PITCH - 1),
+             page_pixel(VGA_SCREEN_ROWS - 1, VGA_SCREEN_PITCH - 1));
+
+    /* No byte of the top band is zero, which is the statement the battle
+       branch's case contradicts. */
+    CHECK_EQ(close_differing(shot, 0, CLOSE_BORDER, 0, VGA_SCREEN_PITCH, 0),
+             (long) CLOSE_BORDER * VGA_SCREEN_PITCH);
+
+    CHECK_EQ((int) close_bg[0], page_pixel(0, 0));
+    CHECK_EQ((int) close_bg[VGA_SCREEN_BYTES - 1],
+             page_pixel(VGA_SCREEN_ROWS - 1, VGA_SCREEN_PITCH - 1));
+}
+
+/* With the flag clear the screen is put back by the compositor, which writes
+   only the 312 x 192 window, and the four-pixel frame around it is blanked
+   afterwards.  All four bands are checked whole rather than at their corners,
+   so a band four rows deep instead of four rows of 320 bytes, or a right margin
+   at column 315 instead of 316, shows up as a count rather than as a lucky
+   byte.
+
+   The interior is not asserted: it is whatever the compositor's own page held,
+   and that page is the second allocation of the call rather than the seeded
+   first one. */
+static void battle_close_blanks_the_views_four_pixel_border(void)
+{
+    close_run(0);
+
+    CHECK_EQ(close_differing(shot, 0, CLOSE_BORDER, 0, VGA_SCREEN_PITCH, 0), 0);
+    CHECK_EQ(close_differing(shot, VGA_SCREEN_ROWS - CLOSE_BORDER,
+                             CLOSE_BORDER, 0, VGA_SCREEN_PITCH, 0),
+             0);
+    CHECK_EQ(close_differing(shot, CLOSE_VIEW_TOP, CLOSE_VIEW_H, 0,
+                             CLOSE_BORDER, 0),
+             0);
+    CHECK_EQ(close_differing(shot, CLOSE_VIEW_TOP, CLOSE_VIEW_H,
+                             CLOSE_VIEW_LEFT + CLOSE_VIEW_W, CLOSE_BORDER, 0),
+             0);
+}
+
+/* And the caller's background is rebuilt rather than copied: cleared to zero
+   over the whole frame and then written only inside the 312 x 192 window, from
+   the scene page at page byte 0x21d8 with the two strides 0x168 and 0x140.
+
+   The first assertion is the premise -- the seeded block came back, so the
+   scene page really does hold CLOSE_SCENE_FILL and the window's contents are
+   determined.  The interior count then pins the destination extent and both
+   strides, and the four bands around it pin the memset that a village close
+   does not do.  The guard is what makes both halves fail rather than pass
+   vacuously: it is neither zero nor the scene fill, so a background left
+   untouched fails every one of them. */
+static void battle_close_rebuilds_the_background_from_the_scene(void)
+{
+    close_run(0);
+
+    CHECK_EQ((int) close_bg[CLOSE_VIEW_TOP * VGA_SCREEN_PITCH
+                            + CLOSE_VIEW_LEFT],
+             CLOSE_SCENE_FILL);
+    CHECK_EQ(close_differing(close_bg, CLOSE_VIEW_TOP, CLOSE_VIEW_H,
+                             CLOSE_VIEW_LEFT, CLOSE_VIEW_W, CLOSE_SCENE_FILL),
+             0);
+
+    CHECK_EQ(close_differing(close_bg, 0, CLOSE_BORDER, 0, VGA_SCREEN_PITCH,
+                             0),
+             0);
+    CHECK_EQ(close_differing(close_bg, VGA_SCREEN_ROWS - CLOSE_BORDER,
+                             CLOSE_BORDER, 0, VGA_SCREEN_PITCH, 0),
+             0);
+    CHECK_EQ(close_differing(close_bg, CLOSE_VIEW_TOP, CLOSE_VIEW_H, 0,
+                             CLOSE_BORDER, 0),
+             0);
+    CHECK_EQ(close_differing(close_bg, CLOSE_VIEW_TOP, CLOSE_VIEW_H,
+                             CLOSE_VIEW_LEFT + CLOSE_VIEW_W, CLOSE_BORDER, 0),
+             0);
+}
+
+/* The play flag is restored from the saved copy, and the copy goes one way.
+   The staging clears the live flag before each call, so a flag that comes back
+   holding the saved value can only have been copied from it; two different
+   saved values rule out a constant, and the saved byte itself is unchanged
+   afterwards, which is what says this function reads 0x00063fb8 and does not
+   write it.
+
+   That the restore happens after the repaint rather than before it is not
+   asserted here.  Its only consequence is whether fdps_draw_cursor_info_panel
+   paints into the frame this call presents, and the panel needs the terrain
+   tables and the glyph sheet to draw at all; it is a playtest contract
+   (statwin.h). */
+static void the_play_flag_comes_back_from_the_saved_copy(void)
+{
+    int after_a;
+    int saved_after_a;
+    int after_b;
+
+    data_fdps_ui_play_active_flag_saved = CLOSE_SAVED_FLAG_A;
+    close_run(1);
+    after_a = (int) data_fdps_ui_play_active_flag;
+    saved_after_a = (int) data_fdps_ui_play_active_flag_saved;
+
+    data_fdps_ui_play_active_flag_saved = CLOSE_SAVED_FLAG_B;
+    close_run(1);
+    after_b = (int) data_fdps_ui_play_active_flag;
+
+    CHECK_EQ(after_a, CLOSE_SAVED_FLAG_A);
+    CHECK_EQ(saved_after_a, CLOSE_SAVED_FLAG_A);
+    CHECK_EQ(after_b, CLOSE_SAVED_FLAG_B);
+    CHECK_EQ((int) data_fdps_ui_play_active_flag_saved, CLOSE_SAVED_FLAG_B);
+}
+
+/* The scene page is given back.  One block is taken at the top of the call and
+   released at the bottom, in both branches, and every block the six animation
+   frames take is released inside the frame that took it -- so a close leaves
+   the heap exactly where it found it.  Both branches are measured, because the
+   village arm is the one that never reads the page it allocated and is
+   therefore the one an over-tidy rewrite would drop.
+
+   The first call of each pair is a warm-up, so anything the CRT allocates once
+   is already accounted for. */
+static void the_close_gives_its_scene_page_back(void)
+{
+    int before_village;
+    int after_village;
+    int before_battle;
+    int after_battle;
+
+    close_run(1);
+    before_village = used_heap_blocks();
+    close_run(1);
+    after_village = used_heap_blocks();
+
+    close_run(0);
+    before_battle = used_heap_blocks();
+    close_run(0);
+    after_battle = used_heap_blocks();
+
+    CHECK_EQ(after_village, before_village);
+    CHECK_EQ(after_battle, before_battle);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+}
+
 void run_statwin_tests(void)
 {
     stage_images();
@@ -697,6 +1029,11 @@ void run_statwin_tests(void)
     RUN_TEST(an_accepted_code_draws_no_frame);
     RUN_TEST(the_idle_flag_decides_whether_rand_is_drawn);
     RUN_TEST(an_accepted_code_takes_no_heap);
+    RUN_TEST(village_close_puts_the_saved_page_back);
+    RUN_TEST(battle_close_blanks_the_views_four_pixel_border);
+    RUN_TEST(battle_close_rebuilds_the_background_from_the_scene);
+    RUN_TEST(the_play_flag_comes_back_from_the_saved_copy);
+    RUN_TEST(the_close_gives_its_scene_page_back);
 
     free(sheet);
     sheet = NULL;

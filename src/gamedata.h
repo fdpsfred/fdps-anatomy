@@ -1194,6 +1194,25 @@ extern unsigned char *data_fdps_portrait_sprite_buf_ptr;
    objects. */
 extern unsigned char data_fdps_village_mode_flag;
 
+/* 00063fb4.  The village phase's saved screen: a malloc'd 64000-byte page
+   holding the finished 320x200 picture the visible screen is showing, kept so
+   that a window opened over it can be taken away again without recomposing
+   anything.  It is what data_fdps_village_mode_flag selects -- the flag says
+   "the backdrop is a copy of the page", and this is the page.
+
+   Five village screens write it and each one takes a fresh block: PUSH 0xfa00
+   / CALL malloc / MOV [0x00063fb4],EAX at 000358ac, 00035ae9, 00035d09,
+   0003601c and 0003625c, in fdps_village_item_menu, fdps_run_church_screen,
+   fdps_run_bar_shop, fdps_run_weapon_shop and fdps_run_secret_menu.  Two
+   functions read it, fdps_close_status_window and
+   fdps_spell_list_window_wait_input, and both only while the flag is set.
+
+   NOTHING CLEARS IT AND NOTHING TESTS IT.  Both readers dereference it the
+   moment the flag is set, so its contents outside a village phase are whatever
+   the last village screen left, and a null here is not an ordinary state the
+   way data_fdps_portrait_sprite_buf_ptr's is. */
+extern unsigned char *data_fdps_village_backdrop_page_ptr;
+
 /* 00070022 and 00070024.  The two halves of the blit rectangle the RLE kernel
    family in rle.c, rlerot.c, rlecolor.c and rleblend.c is currently drawing:
    how many rows are still to come, and how many pixels wide a source row is.
