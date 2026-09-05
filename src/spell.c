@@ -5,14 +5,30 @@
  * unit.h and table.h, so a call made after the unit array has moved sees the
  * array as it is at that moment.
  *
- * rand comes from <stdlib.h>.  It is a real call in the original -- CALL
- * 00042cf8 -- and not an inline expansion.
+ * rand, malloc and free come from <stdlib.h>, memmove and memset from
+ * <string.h> and inp from <conio.h>, which is where Watcom 10.0a declares each
+ * of them.  Every one is a real library call in the original rather than an
+ * inline expansion -- CALL 00042cf8 at 000283ee, CALL 0003d375 at 0002864d and
+ * 0002869d, CALL 0003d478 at 000287a4, 00028858 and 00028864, CALL 0003d514 at
+ * 000286b6, CALL 00042cd0 at 000287c7 and 00028893, and CALL 0003d4e4 at
+ * 00028741, 00028752, 000287f5 and 00028806 -- because the flag that would
+ * inline the string and character routines, -oi, is not in this build's set
+ * (rebuild_info/build_flags.md).
  */
 #include <stdlib.h>
+#include <string.h>
+#include <conio.h>
 #include "fdpstype.h"
+#include "gamedata.h"
 #include "unit.h"
 #include "table.h"
 #include "unitstat.h"
+#include "vfs.h"
+#include "saf.h"
+#include "blit.h"
+#include "sprite.h"
+#include "palette.h"
+#include "mapdraw.h"
 #include "spell.h"
 
 /* Every ratio in here is a percentage: the magic resistance complement, the
@@ -202,4 +218,248 @@ void fdps_spell_deduct_mp_cost(int unit_index, int spell_id)
     current_mp = caster->mp_current;
 
     caster->mp_current = (short) (current_mp - spell->mp_cost);
+}
+
+/* The container spell 11's animation lives in and the member itself, from
+   MOV EAX,0x60128 at 00028629 and MOV EAX,0x61bb0 at 00028623.  The member
+   name reaches fdps_vfs_load_entry, which upper-cases its argument IN PLACE
+   before the compare, so this literal is permanently folded to MAG11.SAF by
+   the first call and cannot live in read-only storage (vfs.h,
+   rebuild_info/pitfalls.md).  The container name is copied raw and is left as
+   it stands. */
+#define SPELL11_ARCHIVE "MISC.VFS"
+#define SPELL11_CLIP "Mag11.saf"
+
+/* The page every frame is composed on: 368 x 248 8bpp, PUSH 0x16480 at
+   00028648.  It is 48 pixels wider and taller than the screen, so a frame may
+   overhang the visible window without being clipped. */
+#define SPELL11_PAGE_PITCH 0x170
+#define SPELL11_PAGE_ROWS 0xf8
+#define SPELL11_PAGE_BYTES 0x16480
+
+/* Where the animation origin is put inside that page -- PUSH 0x18 twice at
+   0002866c and 00028673 -- and the byte the visible 320 x 200 window starts
+   at, which is the same corner: 24 * 368 + 24 = 0x2298, the ADD EAX,0x2298 at
+   00028701, 0002877a and 0002882e. */
+#define SPELL11_PAGE_MARGIN 0x18
+#define SPELL11_PAGE_WINDOW_AT 0x2298
+
+/* The mode 13h frame.  0xa0000 is where the display adapter answers, not the
+   address of anything the linker places, so it stays a literal. */
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_PITCH 0x140
+#define VGA_SCREEN_ROWS 0xc8
+#define VGA_SCREEN_BYTES 0xfa00
+
+/* Input Status 1, whose bit 3 is set while the vertical retrace is running. */
+#define VGA_INPUT_STATUS_1 0x3da
+#define VGA_STATUS_VERTICAL_RETRACE 0x08
+
+/* The blit the composite drawer is asked for and the three-dword descriptor
+   that mode reads (rleblend.h).  The mode is set once, before the first frame,
+   and neither phase changes it, so every layer of every frame is drawn
+   translucent -- fdps_draw_composite_sprite consults a layer's own blend flag
+   only when the request's mode is 0 (sprite.h). */
+#define BLIT_MODE_TRANSLUCENT 9
+#define BLEND_DESC_SHADE_RAMP 0
+#define BLEND_DESC_LEVEL 1
+#define BLEND_DESC_CUBE 2
+#define BLEND_DESC_DWORDS 3
+
+/* The fade-in: MOV dword ptr [EBP-0x10],0x1f at 000286c5 with CMP against 0
+   and JG, so 31 ticks with the counter running 0x1f down to 1, and the blend
+   level is its signed half -- SAR EDX,0x1f / SUB / SAR EAX,1 at 000286e5. */
+#define SPELL11_FADE_TICKS 0x1f
+#define SPELL11_FADE_LEVEL_DIVISOR 2
+
+/* The white flash and the six steps that come out of it: the whole DAC every
+   time, PUSH 0xff / PUSH 0x0 at 00028872 and 000288c1; three PUSH 0x3f at
+   0002886c for the flash; and IMUL EAX,[EBP-0x10],0xa at 000288b2 with the
+   counter starting at 5 and CMP against 0 / JGE, so six steps of 50, 40, 30,
+   20, 10 and 0. */
+#define FADE_FIRST_DAC_ENTRY 0
+#define FADE_LAST_DAC_ENTRY 0xff
+#define WHITE_FLASH_BIAS 0x3f
+#define FLASH_FADE_FIRST_STEP 5
+#define FLASH_FADE_BIAS_PER_STEP 0xa
+
+/* 00028610.  Spell 11's full-screen cutscene, and the white flash that hands
+   the screen back to the battle map.
+ *
+ * PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x50 and a bare RET, with nothing
+ * read above [EBP]; the one call site at 000289b1 pushes nothing before the
+ * CALL, cleans nothing after it and reads no answer, so this takes no argument
+ * and returns none under the stack convention.
+ *
+ * THE FRAME CLOCK'S LATCH IS NOT INITIALISED, and that is behaviour rather
+ * than an oversight.  [EBP-0x4] is never written before the first frame's wait
+ * reads it at 00028788, so on that one tick the wait falls through on stack
+ * garbage and the frame is presented without waiting.  Seeding it with 0 or
+ * with the counter -- the obvious C -- costs an extra tick there and lengthens
+ * the fade-in (rebuild_info/pitfalls.md).  data_fdps_timer_tick_counter is
+ * written only by the timer interrupt and is declared volatile in gamedata.h,
+ * without which wcc386 loads it once into a register and neither spin ever
+ * ends.
+ *
+ * The two phases differ in three things and in nothing else.  The fade-in
+ * refills the page's visible window from the frozen screen every tick, so the
+ * animation comes up out of the picture the spell was cast over; the main
+ * phase memsets the whole page instead, so the rest of the clip plays on
+ * black.  The fade-in discards fdps_saf_advance_tick's answer, so its cursor
+ * wraps rather than stopping; the main phase keeps it as its exit condition,
+ * and mode 0 reports 1 once as it wraps, so that phase runs the clip to its
+ * end exactly once.  And the blend level moves only in the fade-in: the main
+ * phase inherits the last value the fade-in left, which is 0.
+ *
+ * THE CURSOR IS NOT RESET BETWEEN THEM.  Mag11.saf holds 22 frames and every
+ * one of them dwells a single tick, so the 31-tick fade-in plays frames 0
+ * through 21, wraps, plays 0 through 8 again and leaves the cursor on frame 9;
+ * the main phase then picks the clip up there and runs frames 9 through 21, 13
+ * ticks.  Resetting the cursor, shortening the fade-in to the clip's length,
+ * or letting the fade-in stop at the end of the clip each changes what the
+ * player sees (rebuild_info/pitfalls.md).
+ *
+ * The flag handed to fdps_draw_composite_sprite is 0 in both phases, so the
+ * two sound effects Mag11.saf carries -- frame 0's sound 0 and frame 15's
+ * sound 1 -- are never played; the audio for this spell is started by the
+ * caller.  Every CALL in the body returns void or has its answer discarded
+ * except fdps_vfs_load_entry's, the two malloc's, inp's inside the four spins
+ * and the fdps_saf_advance_tick at 000287e5 whose EAX is stored into the
+ * loop's flag at 000287ed. */
+void fdps_play_spell_11_cutscene(void)
+{
+    /* The nine-dword draw request sprite.h describes.  Built once and then
+       rewritten in place: only its item index moves after the first frame. */
+    int request[DRAW_REQUEST_DWORDS];
+    /* The three-dword mode-9 descriptor rleblend.h describes.  Its two table
+       pointers are filled before anything else and never move again; only the
+       level changes, once per fade-in tick. */
+    int blend_descriptor[BLEND_DESC_DWORDS];
+    /* The three-dword playback cursor saf.h describes.  Its image slot is
+       filled by hand and the reset call zeroes the other two. */
+    int playback_cursor[SAF_CURSOR_DWORDS];
+    /* Mag11.saf.  This function owns it and frees it. */
+    void *clip;
+    /* The 368 x 248 page every frame is composed on, so that nothing is seen
+       half-drawn.  The assembly keeps it only in the request's element 0 and
+       re-reads it from there; the name is here for the reader. */
+    unsigned char *work_page;
+    /* The 320 x 200 picture that was on the adapter when the call was made.
+       Freed at the end of the fade-in, which is the last thing that reads
+       it. */
+    unsigned char *screen_snapshot;
+    /* The tick the previous frame ended on.  Deliberately not initialised --
+       see the note above. */
+    unsigned int last_tick;
+    /* fdps_saf_advance_tick's answer in the main phase: 0 while the clip is
+       still running, 1 on the tick that steps past its last frame. */
+    int clip_ended;
+    /* The fade-in's counter first, 0x1f down to 1, and then the white flash's,
+       5 down to 0.  One slot in the frame serves both, [EBP-0x10]. */
+    int fade_step;
+
+    clip_ended = 0;
+    clip = fdps_vfs_load_entry(SPELL11_ARCHIVE, SPELL11_CLIP);
+    blend_descriptor[BLEND_DESC_SHADE_RAMP] =
+        (int) data_fdps_palette_shade_ramp_table;
+    blend_descriptor[BLEND_DESC_CUBE] = (int) data_fdps_inverse_palette_cube;
+
+    work_page = (unsigned char *) malloc((size_t) SPELL11_PAGE_BYTES);
+    request[DRAW_REQUEST_DEST_BASE] = (int) work_page;
+    request[DRAW_REQUEST_DEST_PITCH] = SPELL11_PAGE_PITCH;
+    request[DRAW_REQUEST_DEST_ROWS] = SPELL11_PAGE_ROWS;
+    request[DRAW_REQUEST_BLIT_OPERAND] = (int) blend_descriptor;
+    request[DRAW_REQUEST_X] = SPELL11_PAGE_MARGIN;
+    request[DRAW_REQUEST_Y] = SPELL11_PAGE_MARGIN;
+    request[DRAW_REQUEST_IMAGE] = (int) clip;
+
+    playback_cursor[SAF_CURSOR_IMAGE] = (int) clip;
+    fdps_saf_advance_tick(playback_cursor, 1);
+
+    screen_snapshot = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+    memmove(screen_snapshot, (void *) VGA_SCREEN_BASE,
+            (size_t) VGA_SCREEN_BYTES);
+
+    request[DRAW_REQUEST_BLIT_MODE] = BLIT_MODE_TRANSLUCENT;
+
+    for (fade_step = SPELL11_FADE_TICKS; fade_step > 0; fade_step--) {
+        /* 15 down to 0, two ticks to a level.  Level 0 draws the source
+           opaque and level 16 makes it invisible (rleblend.h), so the clip
+           comes up out of the frozen screen rather than dissolving into it. */
+        blend_descriptor[BLEND_DESC_LEVEL] =
+            fade_step / SPELL11_FADE_LEVEL_DIVISOR;
+
+        fdps_blit_rect((unsigned int) screen_snapshot, VGA_SCREEN_PITCH,
+                       work_page + SPELL11_PAGE_WINDOW_AT, SPELL11_PAGE_PITCH,
+                       VGA_SCREEN_PITCH, VGA_SCREEN_ROWS);
+        request[DRAW_REQUEST_ITEM_INDEX] =
+            playback_cursor[SAF_CURSOR_FRAME_INDEX];
+        fdps_draw_composite_sprite(request, 0);
+        fdps_saf_advance_tick(playback_cursor, 0);
+
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends, so the present runs inside the displayed
+               part of the frame. */
+        }
+
+        fdps_blit_rect((unsigned int) (work_page + SPELL11_PAGE_WINDOW_AT),
+                       SPELL11_PAGE_PITCH, (void *) VGA_SCREEN_BASE,
+                       VGA_SCREEN_PITCH, VGA_SCREEN_PITCH, VGA_SCREEN_ROWS);
+
+        while (last_tick == data_fdps_timer_tick_counter) {
+            /* spin: only the timer interrupt can end this */
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
+    free(screen_snapshot);
+
+    while (clip_ended == 0) {
+        request[DRAW_REQUEST_ITEM_INDEX] =
+            playback_cursor[SAF_CURSOR_FRAME_INDEX];
+        memset(work_page, 0, (size_t) SPELL11_PAGE_BYTES);
+        fdps_draw_composite_sprite(request, 0);
+        clip_ended = fdps_saf_advance_tick(playback_cursor, 0);
+
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* The same pair of spins, for the same reason. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+        }
+
+        fdps_blit_rect((unsigned int) (work_page + SPELL11_PAGE_WINDOW_AT),
+                       SPELL11_PAGE_PITCH, (void *) VGA_SCREEN_BASE,
+                       VGA_SCREEN_PITCH, VGA_SCREEN_PITCH, VGA_SCREEN_ROWS);
+
+        while (last_tick == data_fdps_timer_tick_counter) {
+            /* spin: only the timer interrupt can end this */
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
+
+    free(clip);
+    free(work_page);
+
+    /* The maximum per-channel bias clamps every DAC entry to white, and the
+       aperture is blanked under it.  The six steps that follow walk the bias
+       down an arithmetic progression the opening 0x3f is not part of, so the
+       screen whites out and then fades into the live map at its true
+       palette. */
+    fdps_set_palette_range(
+        (struct fdps_palette_entry *) data_fdps_vga_main_palette_ptr,
+        FADE_FIRST_DAC_ENTRY, FADE_LAST_DAC_ENTRY,
+        WHITE_FLASH_BIAS, WHITE_FLASH_BIAS, WHITE_FLASH_BIAS);
+    memset((void *) VGA_SCREEN_BASE, 0, (size_t) VGA_SCREEN_BYTES);
+
+    for (fade_step = FLASH_FADE_FIRST_STEP; fade_step >= 0; fade_step--) {
+        fdps_set_palette_range(
+            (struct fdps_palette_entry *) data_fdps_vga_main_palette_ptr,
+            FADE_FIRST_DAC_ENTRY, FADE_LAST_DAC_ENTRY,
+            fade_step * FLASH_FADE_BIAS_PER_STEP,
+            fade_step * FLASH_FADE_BIAS_PER_STEP,
+            fade_step * FLASH_FADE_BIAS_PER_STEP);
+        fdps_render_view_frame();
+    }
 }

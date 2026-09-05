@@ -2478,6 +2478,14 @@
       "status": "committed",
       "emitted_against": "0x102",
       "rounds": 0
+    },
+    "00028610": {
+      "name": "fdps_play_spell_11_cutscene",
+      "target": "spell.c",
+      "body_size": "0x2d4",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x2d4"
     }
   }
 }

@@ -1,10 +1,12 @@
 /* tests/spell.c -- cover for src/spell.c.
  *
- * The file covers three functions and is in three parts, each starting at its
+ * The file covers four functions and is in four parts, each starting at its
  * own banner: fdps_spell_damage_unit first, then fdps_spell_heal_unit, then
- * fdps_spell_deduct_mp_cost.  Each banner carries its own account of where that
- * part's figures come from.  The fixture, the three staged tables and the
- * helpers are shared.
+ * fdps_spell_deduct_mp_cost, then fdps_play_spell_11_cutscene.  Each banner
+ * carries its own account of where that part's figures come from.  The
+ * fixture, the three staged tables and the helpers are shared by the first
+ * three parts; the cutscene part stages the adapter, the two blend tables and
+ * a palette of its own and shares nothing with them.
  *
  * Every expected value in the damage half is read off the assembly of
  * fdps_spell_damage_unit at 00028320 -- the XOR EAX,EAX / MOV AL byte loads at 0002833d, 00028358 and
@@ -47,6 +49,10 @@
  */
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
+#include <conio.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -888,6 +894,407 @@ static void the_cost_record_is_the_spell_id_itself_with_no_bias(void)
     CHECK_EQ(unit(CASTER)->mp_current, MP_START - MP_COST);
 }
 
+/* ------------------------------------------------------------------ *
+ * 00028610  fdps_play_spell_11_cutscene                              *
+ * ------------------------------------------------------------------ *
+ *
+ * WHAT THE RUN IS OBSERVED THROUGH.  The routine takes nothing, returns
+ * nothing and composes on a page it allocates and frees inside the call, so
+ * everything it does is seen either on the mode 13h aperture or in the DAC.
+ * The case below puts the adapter into the mode the game plays in, fills the
+ * frame with a sentinel and the whole DAC with another, runs the whole
+ * presentation once, and reads the aperture and the DAC back afterwards.  The
+ * frames themselves are gone by then -- the teardown blanks the aperture -- so
+ * they are watched from inside the timer interrupt instead.
+ *
+ * WHY A TIMER INTERRUPT IS INSTALLED.  Every one of the 44 animation ticks and
+ * every one of the six frames the teardown renders ends waiting for
+ * data_fdps_timer_tick_counter to change, and in the game that counter is
+ * advanced by fdps_timer_tick_handler off AIL's timer.  Nothing advances it in
+ * a test image, so the run hooks IRQ0 for the duration of the call with a
+ * handler that increments the counter, samples the aperture and chains to the
+ * one that was there.  The wait ends only when the counter moves, so every
+ * presented frame is on the adapter across at least one of those samples.
+ *
+ * HOW A FRAME NAMES THE BLEND LEVEL IT WAS DRAWN AT.  fdps_rle_blit_translucent
+ * folds a weighted source and a weighted destination into a 4-bit g:r:b triple
+ * and resolves that through the inverse colour cube (rleblend.c).  For a blend
+ * level above 8 the destination is weighted through shade-ramp row 25 - level
+ * and the source through row 16 - level; at 8 and below the two rows are
+ * level + 9 and level.  So the fixture leaves the whole ramp at zero except for
+ * ONE entry in each of rows 10 to 16 -- the destination rows of levels 15 down
+ * to 9 -- namely the entry the frozen screen's own byte indexes, which it sets
+ * to level << 12.  A frame drawn at one of those seven levels over the frozen
+ * screen therefore folds to cube index level << 8 whatever its source pixels
+ * are, and the cube answers CUT_MARK_BASE + level there.  Every other fold in
+ * the run lands on cube index 0, which answers CUT_BLACK_MARK.
+ *
+ * Rows 10 to 16 are also the SOURCE rows of levels 1 to 7, and that is why only
+ * the sentinel's entry is staged rather than the whole row: the value the fold
+ * looks up in a source row is an artwork pixel, and 0x0a is one of the 129 byte
+ * values Mag11.saf's 1,817 tiles never carry, so no frame at a low level can
+ * reach a staged entry.  That was checked by counting every pixel byte the 4-op
+ * RLE of resource_info/cel.md produces out of the shipped member.  All of this
+ * is a fixture for observing the function under test, not an assertion about
+ * what the two tables hold in the game.
+ *
+ * WHY EVERY FRAME IS ONE FLAT COLOUR.  Mag11.saf's 22 frames each carry one
+ * layer whose tilemap is 14 x 9 cells of 24 x 24 -- 336 x 216 laid at the page
+ * margin, so it covers the whole 320 x 200 window -- and not one of the 17
+ * tilemaps leaves a single visible pixel transparent.  Every visible byte of
+ * every presented frame therefore goes through the fold above, which is what
+ * makes "the whole frame is one value" a usable reading.  That was checked
+ * against the shipped member by walking all 17 tilemaps' cells through the
+ * 4-op RLE of resource_info/cel.md.
+ *
+ * WHERE THE EXPECTED VALUES COME FROM.  MOV dword ptr [EBP-0x10],0x1f at
+ * 000286c5 with CMP against 0 / JG for the fade-in's 31 ticks; MOV EDX,[EBP-
+ * 0x10] / SAR EDX,0x1f / SUB EAX,EDX / SAR EAX,1 at 000286e2 for the level
+ * being its signed half, so the level runs 15, 15, 14, 14 down to 0; the six
+ * pushes at 000286ef -- 0xc8, 0x140, 0x170, page + 0x2298, 0x140, snapshot --
+ * for the refill that puts the frozen screen under every fade-in frame; PUSH
+ * 0xfa00 / PUSH 0x0 / PUSH 0xa0000 / CALL memset at 00028887 for the blanked
+ * aperture; and PUSH 0xff / PUSH 0x0 with IMUL EAX,[EBP-0x10],0xa at 000288b2
+ * and the counter running 5 down to 0 for the last palette upload being the
+ * whole DAC at bias 0.  None of them is read off the emitted C.
+ *
+ * WHAT IS NOT ASSERTED.  The white flash -- the 0x3f bias at 0002886c and the
+ * five steps of 50, 40, 30, 20 and 10 that walk out of it -- is overwritten by
+ * the bias-0 upload before the call returns, and the DAC cannot be read from
+ * the interrupt handler without cutting into the very write sequences it would
+ * be reading.  Its arithmetic is a playtest contract
+ * (rebuild_info/pitfalls.md).  So is the main phase's memset of the page: the
+ * clip covers every visible pixel opaquely and that phase runs at level 0,
+ * where the fold ignores the destination entirely, so clearing the page and
+ * leaving it alone put the same bytes on the adapter for THIS clip.  The two
+ * retrace spins are in the same position, and so is the uninitialised frame
+ * latch, whose only effect is one tick of pacing.
+ */
+
+#define CUT_VGA_BASE 0x000a0000
+#define CUT_SCREEN_BYTES 64000
+#define CUT_MODE_320X200X256 0x13
+#define CUT_MODE_TEXT 0x03
+#define CUT_TIMER_VECTOR 8
+
+#define CUT_DAC_READ_INDEX 0x3c7
+#define CUT_DAC_WRITE_INDEX 0x3c8
+#define CUT_DAC_DATA 0x3c9
+#define CUT_DAC_ENTRIES 256
+#define CUT_READING_SLOTS 6
+
+/* The shade ramp's shape, restated from the fold at 00057648 rather than taken
+   from src/: 0x100 entries to a row, and the destination row of a level above
+   8 is 25 - level. */
+#define CUT_RAMP_ROW_ENTRIES 0x100
+#define CUT_HIGH_LEVEL_DEST_ROW(level) (25 - (level))
+
+/* The levels whose destination row the fixture stages, which are the only ones
+   a presented frame can name.  The mask has one bit per level. */
+#define CUT_TOP_LEVEL 15
+#define CUT_BOTTOM_LEVEL 9
+#define CUT_ALL_LEVELS_MASK 0xfe00
+
+/* The pre-call picture, one flat byte.  Only its low nibble reaches the cube
+   index, and 0x0a is disjoint from both marks below. */
+#define CUT_SENTINEL 0x0a
+/* What the cube answers for a frame drawn over the frozen screen at level L,
+   and for every fold that lands on cube index 0. */
+#define CUT_MARK_BASE 0x80
+#define CUT_BLACK_MARK 0x3b
+/* What the whole DAC is filled with before the call, so that a component still
+   holding it afterwards says no upload reached that entry. */
+#define CUT_DAC_SENTINEL 0x2a
+
+/* A chapter with no arm in fdps_cycle_scene_palette's dispatch, so the six
+   rendered frames the teardown runs cannot write the DAC behind the last
+   upload. */
+#define CUT_QUIET_CHAPTER 1
+
+/* How many bytes apart the interrupt handler probes the aperture, and how many
+   ticks it keeps a reading for.  73 is coprime to the 320-byte row, so the
+   probe walks every column; 128 covers the 44 animation ticks, the six
+   rendered frames and the ticks the member load costs. */
+#define CUT_PROBE_STRIDE 73
+#define CUT_SAMPLES 128
+
+static struct fdps_palette_entry cut_palette[CUT_DAC_ENTRIES];
+
+static volatile int cut_sample[CUT_SAMPLES];
+static volatile int cut_sample_count;
+
+static int cut_return_dac[CUT_READING_SLOTS];
+static int cut_first_screen_byte;
+static int cut_last_screen_byte;
+static int cut_first_mark;
+static int cut_level_mask;
+static int cut_levels_descend;
+static int cut_black_seen;
+static int cut_mark_after_black;
+static int cut_baseline_done;
+
+static void (__interrupt __far *cut_saved_timer)();
+
+/* One tick: advance the counter the frame waits on, then decide whether the
+   aperture is holding a single value and keep it if it is.  A reading taken
+   while a present blit is half done is not one value and is dropped. */
+static void __interrupt __far cut_timer_isr(void)
+{
+    unsigned char *aperture;
+    int probe;
+    int first_byte;
+    int uniform;
+
+    ++data_fdps_timer_tick_counter;
+
+    if (cut_sample_count < CUT_SAMPLES) {
+        aperture = (unsigned char *) CUT_VGA_BASE;
+        first_byte = (int) aperture[0];
+        uniform = 1;
+        if ((int) aperture[CUT_SCREEN_BYTES - 1] != first_byte) {
+            uniform = 0;
+        }
+        for (probe = CUT_PROBE_STRIDE;
+             uniform != 0 && probe < CUT_SCREEN_BYTES;
+             probe += CUT_PROBE_STRIDE) {
+            if ((int) aperture[probe] != first_byte) {
+                uniform = 0;
+            }
+        }
+        if (uniform != 0) {
+            cut_sample[cut_sample_count] = first_byte;
+        } else {
+            cut_sample[cut_sample_count] = -1;
+        }
+        cut_sample_count++;
+    }
+
+    _chain_intr(cut_saved_timer);
+}
+
+static void cut_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+static void cut_read_dac(int *into)
+{
+    outp(CUT_DAC_READ_INDEX, 0);
+    into[0] = (int) inp(CUT_DAC_DATA);
+    into[1] = (int) inp(CUT_DAC_DATA);
+    into[2] = (int) inp(CUT_DAC_DATA);
+    outp(CUT_DAC_READ_INDEX, CUT_DAC_ENTRIES - 1);
+    into[3] = (int) inp(CUT_DAC_DATA);
+    into[4] = (int) inp(CUT_DAC_DATA);
+    into[5] = (int) inp(CUT_DAC_DATA);
+}
+
+/* The two blend tables, the map palette, and everything a rendered frame would
+   otherwise paint switched off so the six frames the teardown runs cost a tick
+   each and nothing else. */
+static void cut_stage(void)
+{
+    int level;
+    int entry;
+
+    memset(data_fdps_palette_shade_ramp_table, 0,
+           sizeof(data_fdps_palette_shade_ramp_table));
+    memset(data_fdps_inverse_palette_cube, 0,
+           sizeof(data_fdps_inverse_palette_cube));
+
+    for (level = CUT_BOTTOM_LEVEL; level <= CUT_TOP_LEVEL; level++) {
+        data_fdps_palette_shade_ramp_table[
+            CUT_HIGH_LEVEL_DEST_ROW(level) * CUT_RAMP_ROW_ENTRIES
+            + CUT_SENTINEL] = (unsigned int) (level << 12);
+        data_fdps_inverse_palette_cube[level << 8] =
+            (unsigned char) (CUT_MARK_BASE + level);
+    }
+    data_fdps_inverse_palette_cube[0] = CUT_BLACK_MARK;
+
+    for (entry = 0; entry < CUT_DAC_ENTRIES; entry++) {
+        cut_palette[entry].red = (unsigned char) ((entry * 3) % 64);
+        cut_palette[entry].green = (unsigned char) ((entry * 5 + 7) % 64);
+        cut_palette[entry].blue = (unsigned char) ((entry * 7 + 13) % 64);
+    }
+    data_fdps_vga_main_palette_ptr = (unsigned char *) cut_palette;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_chapter_current_chapter_id = CUT_QUIET_CHAPTER;
+}
+
+/* Reduce the per-tick readings to the five things the cases ask about: the
+   first frame that was presented at all, which levels named themselves, whether
+   they only ever went down, and where the marks stop. */
+static void cut_reduce(void)
+{
+    int index;
+    int value;
+    int level;
+    int previous_level;
+
+    cut_first_mark = -1;
+    cut_level_mask = 0;
+    cut_levels_descend = 1;
+    cut_black_seen = 0;
+    cut_mark_after_black = 0;
+    previous_level = CUT_TOP_LEVEL + 1;
+
+    for (index = 0; index < cut_sample_count; index++) {
+        value = cut_sample[index];
+        if (value < 0 || value == CUT_SENTINEL) {
+            continue;
+        }
+        if (cut_first_mark < 0) {
+            cut_first_mark = value;
+        }
+        if (value >= CUT_MARK_BASE + CUT_BOTTOM_LEVEL
+            && value <= CUT_MARK_BASE + CUT_TOP_LEVEL) {
+            level = value - CUT_MARK_BASE;
+            if (level > previous_level) {
+                cut_levels_descend = 0;
+            }
+            previous_level = level;
+            cut_level_mask |= 1 << level;
+            if (cut_black_seen != 0) {
+                cut_mark_after_black = 1;
+            }
+        } else if (value == CUT_BLACK_MARK) {
+            cut_black_seen = 1;
+        }
+    }
+}
+
+/* One whole cutscene, with everything a case can read afterwards copied out
+   before the mode change can move it.  It costs some fifty timer ticks and
+   loads a 722,133-byte member, so it is run once and shared. */
+static void cut_baseline(void)
+{
+    int index;
+
+    if (cut_baseline_done != 0) {
+        return;
+    }
+
+    cut_stage();
+
+    cut_sample_count = 0;
+    for (index = 0; index < CUT_SAMPLES; index++) {
+        cut_sample[index] = -1;
+    }
+    for (index = 0; index < CUT_READING_SLOTS; index++) {
+        cut_return_dac[index] = -1;
+    }
+
+    cut_set_mode(CUT_MODE_320X200X256);
+    memset((void *) CUT_VGA_BASE, CUT_SENTINEL, (size_t) CUT_SCREEN_BYTES);
+    for (index = 0; index < CUT_DAC_ENTRIES; index++) {
+        outp(CUT_DAC_WRITE_INDEX, index);
+        outp(CUT_DAC_DATA, CUT_DAC_SENTINEL);
+        outp(CUT_DAC_DATA, CUT_DAC_SENTINEL);
+        outp(CUT_DAC_DATA, CUT_DAC_SENTINEL);
+    }
+
+    cut_saved_timer = _dos_getvect(CUT_TIMER_VECTOR);
+    _dos_setvect(CUT_TIMER_VECTOR, cut_timer_isr);
+    fdps_play_spell_11_cutscene();
+    _dos_setvect(CUT_TIMER_VECTOR, cut_saved_timer);
+
+    cut_read_dac(cut_return_dac);
+    cut_first_screen_byte = (int) ((unsigned char *) CUT_VGA_BASE)[0];
+    cut_last_screen_byte =
+        (int) ((unsigned char *) CUT_VGA_BASE)[CUT_SCREEN_BYTES - 1];
+    cut_set_mode(CUT_MODE_TEXT);
+
+    cut_reduce();
+    cut_baseline_done = 1;
+}
+
+/* Something was presented, and the first thing presented was the whole frame
+   drawn over the frozen screen at level 15.  Only level 15's destination row is
+   ramp row 10, so no other opening level can produce this byte: a counter that
+   started anywhere but 0x1f or 0x1e, or a level that was the counter itself
+   rather than its half, lands on a row the fixture leaves at zero and the frame
+   comes out CUT_BLACK_MARK instead.  It also says the frozen screen reached the
+   page -- the memmove of the aperture and the refill blit into the page window
+   at 0x2298 -- since the mark is what the SENTINEL folds to, and that the
+   request carries blit mode 9 with the descriptor the two staged tables are
+   named in. */
+static void the_fade_in_opens_over_the_frozen_screen_at_level_fifteen(void)
+{
+    cut_baseline();
+
+    CHECK_EQ(cut_sample_count > 0, 1);
+    CHECK_EQ(cut_first_mark, CUT_MARK_BASE + CUT_TOP_LEVEL);
+}
+
+/* Every level from 15 down to 9 names itself once, and none of them ever
+   follows a lower one.  The seven together are what say the level is the
+   counter's half and steps by one: a divisor of 4 would skip every other level
+   and leave four of the seven bits clear, and a level that did not move at all
+   would leave six of them clear. */
+static void the_blend_level_walks_down_one_step_at_a_time(void)
+{
+    cut_baseline();
+
+    CHECK_EQ(cut_level_mask, CUT_ALL_LEVELS_MASK);
+    CHECK_EQ(cut_levels_descend, 1);
+}
+
+/* The fade-in ends and nothing puts the frozen screen back.  Once a frame has
+   come out CUT_BLACK_MARK -- which is every frame from level 8 down, the fold
+   landing on cube index 0 -- no later frame names a level again.  A body that
+   reset the blend level for the main phase, or ran the two phases the other way
+   round, would put a level-15 frame after the black ones. */
+static void the_frozen_screen_never_returns_once_the_fade_is_done(void)
+{
+    cut_baseline();
+
+    CHECK_EQ(cut_black_seen, 1);
+    CHECK_EQ(cut_mark_after_black, 0);
+}
+
+/* The teardown blanks all 64000 bytes of the aperture, and the six frames it
+   renders afterwards put back only the 312 x 192 window inset four pixels, so
+   the first and last bytes of the frame are the memset's and nothing else's.
+   Without that memset both would still hold the last animation frame, which is
+   CUT_BLACK_MARK; a memset shorter than 0xfa00 would leave the last byte
+   holding it. */
+static void the_aperture_is_blanked_before_the_map_comes_back(void)
+{
+    cut_baseline();
+
+    CHECK_EQ(cut_first_screen_byte, 0);
+    CHECK_EQ(cut_last_screen_byte, 0);
+}
+
+/* The last thing the routine does to the DAC is upload the whole map palette
+   at no bias.  Entry 0 and entry 255 are both read, so a range that stopped
+   short of 0xff -- the bound is inclusive -- shows as the second entry still
+   holding the pre-call sentinel, and a final step at any bias but 0 shows as
+   every component being 10 too high. */
+static void the_call_ends_with_the_map_palette_at_no_bias(void)
+{
+    cut_baseline();
+
+    CHECK_EQ(cut_return_dac[0], (int) cut_palette[0].red);
+    CHECK_EQ(cut_return_dac[1], (int) cut_palette[0].green);
+    CHECK_EQ(cut_return_dac[2], (int) cut_palette[0].blue);
+    CHECK_EQ(cut_return_dac[3],
+             (int) cut_palette[CUT_DAC_ENTRIES - 1].red);
+    CHECK_EQ(cut_return_dac[4],
+             (int) cut_palette[CUT_DAC_ENTRIES - 1].green);
+    CHECK_EQ(cut_return_dac[5],
+             (int) cut_palette[CUT_DAC_ENTRIES - 1].blue);
+}
+
 void run_spell_tests(void)
 {
     RUN_TEST(the_record_layouts_match_the_offsets_read);
@@ -930,4 +1337,10 @@ void run_spell_tests(void)
     RUN_TEST(nothing_but_the_casters_mp_word_is_written);
     RUN_TEST(each_argument_selects_its_own_record);
     RUN_TEST(the_cost_record_is_the_spell_id_itself_with_no_bias);
+
+    RUN_TEST(the_fade_in_opens_over_the_frozen_screen_at_level_fifteen);
+    RUN_TEST(the_blend_level_walks_down_one_step_at_a_time);
+    RUN_TEST(the_frozen_screen_never_returns_once_the_fade_is_done);
+    RUN_TEST(the_aperture_is_blanked_before_the_map_comes_back);
+    RUN_TEST(the_call_ends_with_the_map_palette_at_no_bias);
 }

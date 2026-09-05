@@ -1797,5 +1797,46 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00028610": [
+    {
+      "what": "The white flash's bias sequence is not unit-observable. fdps_set_palette_range is called seven times in the teardown -- at bias 0x3f, then 50, 40, 30, 20, 10 and 0 -- and only the last survives the call, which is what the test asserts. The five intermediate uploads happen while the aperture is blanked, so nothing is on screen to read them off, and sampling the DAC from the timer handler is not available: the read index port shares the DAC's internal component counter with the write port, so an interrupt-time read would cut into the very upload sequence it was trying to observe. What is established is that the first bias is 0x3f and is NOT part of the arithmetic progression the six steps walk, and that the last is 0.",
+      "needs": "A DAC write-port trace from an emulator, or a real-machine playtest of the spell, comparing the six-frame white-out against the original.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "The main phase's memset of the 0x16480-byte page (CALL 00042cd0 at 000287c7) has no observable effect for this clip, so a rebuild that dropped it would pass every unit assertion. Two facts make it invisible: Mag11.saf's 22 frames each carry one 14 x 9 tilemap laid at the page margin and not one of the 17 tilemaps leaves a single visible pixel transparent (checked by decoding every referenced tile out of the shipped member through the 4-op RLE of resource_info/cel.md), and the main phase runs at blend level 0, where fdps_rle_blit_translucent weights the destination at zero. So every visible byte is overwritten with a value that does not depend on what was under it.",
+      "needs": "Nothing in the shipped image distinguishes the two spellings; only a playtest against the original, or a later caller of the same page shape whose clip does leave visible pixels transparent, would.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "The uninitialised frame latch at [EBP-0x4] is emitted as an uninitialised local, which is what the assembly does, but its one effect -- the first frame of the fade-in is presented without waiting a tick, whenever the stack garbage differs from the counter -- is not asserted. Measuring it would mean counting timer ticks across the call, and the count is not stable: composing a frame is a 64000-byte refill plus a 336 x 216 blended blit, so on a slow enough host a frame costs more than a tick and the total rises with the emulator's cycle setting rather than with the code.",
+      "needs": "A real-machine or fixed-cycle playtest that counts the ticks the presentation takes against the original's, or a cycle-exact trace.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed independently and add nothing to the emitter's reading: the five intermediate white-flash biases are unobservable from a unit test. I checked the assembly myself -- fdps_set_palette_range is entered seven times in the teardown (0002887f once at 0x3f, then 000288ce six times at fade_step*10) and only the bias-0 upload survives the return, so nothing on the aperture or in the DAC can distinguish the five in between. I did not find a sixth observation point the emitter missed.",
+      "needs": "A DAC write-port trace from an emulator, or a real-machine playtest of the spell against the original.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "I did not re-derive the emitter's decode of Mag11.saf's 17 tilemaps, so the claim that no visible pixel is left transparent rests on its check rather than on mine. What I did verify is the half that makes the concern real: the main phase runs at whatever level the fade-in left, and the fade-in's last iteration is fade_step = 1, so the level is 1/2 = 0 (000286e5), and src/rleblend.c weights the destination through ramp row 0 at that level. So the memset at 000287c7 is invisible for any clip that covers the window opaquely, whichever clip this one turns out to be.",
+      "needs": "A playtest against the original, or a later caller of the same page shape whose clip does leave visible pixels transparent.",
+      "same_as": "emit#1",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Confirmed the uninitialised latch reaches the binary -- SPELL.OBJ has no store to -0cH[ebp] before the read at 0339 -- but agree its one effect cannot be asserted. The tick count across the call is not a stable number: composing a frame is a 64000-byte refill plus a 336x216 blended blit, so on a slow host a frame costs more than a tick and the total moves with the emulator's cycle setting rather than with the code.",
+      "needs": "A fixed-cycle or real-machine playtest counting the ticks the presentation takes against the original's.",
+      "same_as": "emit#2",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

@@ -102,4 +102,42 @@ extern int fdps_spell_heal_unit(int unit_index, int spell_id);
 extern void fdps_spell_deduct_mp_cost(int unit_index, int spell_id);
 #pragma aux fdps_spell_deduct_mp_cost "*" parm caller [];
 
+/* Plays spell 11 封神裂震's full-screen cutscene and hands the screen back to
+   the battle map through a white flash.  Takes nothing, returns nothing, and
+   the only caller is fdps_cast_spell_on_targets, which reaches it when the
+   spell id is 0x0b.
+
+   The clip is MISC.VFS's Mag11.saf, loaded here and freed here, composed on a
+   368 x 248 page this function also owns, and presented to the mode 13h
+   aperture one frame per timer tick with each present straddling the vertical
+   retrace.  The adapter must already be in that mode: nothing here sets it.
+
+   The presentation is 44 ticks long and runs in two phases.  For 31 ticks the
+   page's visible window is refilled from the picture that was on the adapter
+   when the call was made and the clip is drawn over it translucently, at a
+   blend level that steps 15 down to 0 -- two ticks to a level -- so the
+   animation comes up out of the frozen screen.  For the remaining 13 the page
+   is cleared to 0 first, so the rest of the clip plays on black, and the phase
+   ends when the clip does.  The playback cursor is NOT reset between them: the
+   clip's 22 single-tick frames are outrun by the fade-in, which wraps once and
+   leaves the cursor on frame 9, so the whole clip is played through exactly
+   twice with the seam inside the fade-in.
+
+   Neither of the two sound effects Mag11.saf carries is played -- the flag
+   handed to the composite drawer is 0 on every frame -- so a caller that wants
+   this spell to be heard starts the sample itself.
+
+   The screen is not left holding the animation.  On the way out the whole DAC
+   is re-uploaded from data_fdps_vga_main_palette_ptr at the maximum bias,
+   which clamps every entry to white, the aperture is blanked, and six frames
+   of the live battle view are then rendered at biases 50, 40, 30, 20, 10 and
+   0.  So the caller inherits a screen showing the map at its true palette, and
+   six more timer ticks have gone by.
+
+   The function reads data_fdps_palette_shade_ramp_table,
+   data_fdps_inverse_palette_cube, data_fdps_vga_main_palette_ptr and
+   data_fdps_timer_tick_counter (gamedata.h) and writes none of them. */
+extern void fdps_play_spell_11_cutscene(void);
+#pragma aux fdps_play_spell_11_cutscene "*" parm caller [];
+
 #endif
