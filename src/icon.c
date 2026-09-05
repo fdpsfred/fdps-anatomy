@@ -1,8 +1,9 @@
 /* icon.c -- the IconAni cut-scene script interpreter and its opcode handlers.
  *
- * See icon.h for what a caller has to know.  Nothing in this file holds
- * state: the palette a fade runs from is the master palette gamedata.h
- * declares, and the DAC is the only thing written.
+ * See icon.h for what a caller has to know.  No handler here keeps state of
+ * its own: the palette a fade runs from is the master palette gamedata.h
+ * declares, and the view origin and map cursor the scroll handler moves are
+ * the game's own globals, also declared there.
  *
  * inp comes from <conio.h> as an ordinary library call, which is what the
  * original has: 00022410 issues CALL 0003d4e4 rather than an IN instruction.
@@ -10,12 +11,16 @@
  * defined, and the flag that defines it, -oi, is not in this build's set
  * (rebuild_info/build_flags.md).  delay comes from <i86.h>, which is where
  * Watcom 10.0a declares it, and it is a real call in the original too:
- * CALL 0003d370.
+ * CALL 0003d370.  abs comes from <stdlib.h> and is likewise a real call in
+ * the original -- 00021e6e and 00021e83 both issue CALL 0003d364 rather than
+ * the CDQ/XOR/SUB sequence Watcom emits when it expands abs inline.
  */
 #include <conio.h>
 #include <i86.h>
+#include <stdlib.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "mapdraw.h"
 #include "palette.h"
 #include "icon.h"
 
@@ -118,4 +123,86 @@ void fdps_icon_script_fade_in(int step_delay_ms)
 
         delay((unsigned int) step_delay_ms);
     }
+}
+
+/* The map is drawn on 24-pixel tiles, so a tile number becomes map pixels by
+   multiplying by 0x18 -- the IMUL EAX,EAX,0x18 the operands go through -- and
+   a pixel distance becomes a tile distance by dividing by the same. */
+#define MAP_TILE_PIXELS 0x18
+
+/* 00021e30.  Script opcode 5, the scripted view scroll.  See icon.h for what
+   the operands are and what the handler leaves behind.
+
+   THE STEP COUNT IS THE DOMINANT AXIS.  Both axis distances go through abs and
+   the larger of the two is divided by the tile size, so the scroll takes as
+   many frames as the longer axis takes tiles.  The comparison is a signed
+   CMP/JLE over two values abs has already made non-negative, and the division
+   is IDIV with the dividend sign-extended by SAR EDX,0x1f, so it is signed
+   division throughout.
+
+   THE INCREMENTS ARE COMPUTED ONCE.  The original divides each axis delta by
+   the step count before the loop is entered, into [EBP-0xc] and [EBP-0x8], and
+   the loop then adds those two constants.  The deltas are taken from the view
+   origin as it stood on entry, so a per-iteration recomputation would not give
+   the same numbers -- the origin it would divide from has already moved.
+
+   THE MINOR AXIS IS TRUNCATED, AND THE END ABSORBS IT.  step_x and step_y are
+   integer quotients, so over step_count frames the minor axis arrives short of
+   the target by the remainder.  The two writes after the loop put the exact
+   target pixels into the origin, which closes that gap in one jump on the last
+   frame.  Rounding the increments instead -- the obvious repair -- changes what
+   is on screen during the scroll (rebuild_info/pitfalls.md).
+
+   A SUB-TILE MOVE IS NOT A SCROLL.  When the dominant distance is under one
+   tile the quotient is zero, the loop body never runs, and the view is simply
+   placed at the target: no frame is rendered and nothing is animated.
+
+   The loop's only call is fdps_render_view_frame, which composes a frame and
+   holds until the timer tick moves, so the step rate is the game's frame rate
+   and not the CPU's speed. */
+int fdps_icon_script_scroll_view_to_tile(unsigned char *script, int offset)
+{
+    /* The tile the script names, converted to map pixels. */
+    int target_x;
+    int target_y;
+    /* How far the view has to travel on each axis, in pixels, unsigned. */
+    int travel_x;
+    int travel_y;
+    /* Frames the scroll takes, and the per-frame movement on each axis. */
+    int step_count;
+    int step_x;
+    int step_y;
+    int step;
+
+    target_x = (int) script[offset + 1] * MAP_TILE_PIXELS;
+    target_y = (int) script[offset + 2] * MAP_TILE_PIXELS;
+
+    travel_x = abs(target_x - data_fdps_battle_view_window_origin_x);
+    travel_y = abs(target_y - data_fdps_battle_view_window_origin_y);
+
+    if (travel_x > travel_y) {
+        step_count = travel_x / MAP_TILE_PIXELS;
+    } else {
+        step_count = travel_y / MAP_TILE_PIXELS;
+    }
+
+    if (step_count != 0) {
+        step_x = (target_x - data_fdps_battle_view_window_origin_x)
+                 / step_count;
+        step_y = (target_y - data_fdps_battle_view_window_origin_y)
+                 / step_count;
+
+        for (step = 0; step < step_count; step++) {
+            data_fdps_battle_view_window_origin_x += step_x;
+            data_fdps_battle_view_window_origin_y += step_y;
+            fdps_render_view_frame();
+        }
+    }
+
+    data_fdps_map_cursor_world_x = target_x + MAP_TILE_PIXELS;
+    data_fdps_map_cursor_world_y = target_y + MAP_TILE_PIXELS;
+    data_fdps_battle_view_window_origin_x = target_x;
+    data_fdps_battle_view_window_origin_y = target_y;
+
+    return offset + 3;
 }

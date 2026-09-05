@@ -58,4 +58,27 @@ extern void fdps_icon_script_fade_to_black(int step_delay_ms);
 extern void fdps_icon_script_fade_in(int step_delay_ms);
 #pragma aux fdps_icon_script_fade_in "*" parm caller [];
 
+/* Script opcode 5.  Scrolls the map view from wherever it is to the tile the
+   script names, one tile-step per rendered frame, and parks it there.
+
+   script is the base of the loaded IconAni .DAT image and offset the byte
+   offset of this opcode inside it, so script[offset + 1] is the target tile x
+   and script[offset + 2] the target tile y.  Both operands are unsigned bytes:
+   the original masks the loaded byte with 0xff before it multiplies, so a tile
+   number of 200 is 200 and not -56.
+
+   Returns offset + 3, the position of the next opcode, which the interpreter
+   stores as its new script position.
+
+   The handler leaves four globals set (all gamedata.h): the view origin
+   data_fdps_battle_view_window_origin_x / _y hold the target tile in map
+   pixels exactly, and the map cursor data_fdps_map_cursor_world_x / _y hold
+   that same point one tile further in, so the cursor sits just inside the new
+   view's top-left corner.  Nothing is clamped against the map extents -- the
+   tile the script names becomes the view origin as written, which is the
+   difference between this and fdps_map_cursor_move_to. */
+extern int fdps_icon_script_scroll_view_to_tile(unsigned char *script,
+                                                int offset);
+#pragma aux fdps_icon_script_scroll_view_to_tile "*" parm caller [];
+
 #endif

@@ -368,6 +368,166 @@ static void the_fade_in_restores_what_the_fade_out_dimmed(void)
     CHECK_EQ(restored[2], 61);
 }
 
+
+/* ---------------------------------------------------------------------------
+ * 00021e30, script opcode 5: the scripted view scroll.
+ *
+ * WHAT CAN BE ASSERTED HERE AND WHAT CANNOT.  The scroll's animated path runs
+ * fdps_render_view_frame once per step, and that function holds until the
+ * timer's tick counter moves and blits to the VGA aperture -- neither of which
+ * a unit test has.  So every case below drives the step_count == 0 path, where
+ * the assembly's CMP dword ptr [EBP-0x10],0x0 / JZ 0x00021f1e skips the loop
+ * outright and no call is made at all.  That path still carries all of the
+ * function's arithmetic: the operand decode, the tile-to-pixel conversion, the
+ * distance and the quotient that decides whether a scroll happens, the four
+ * globals it leaves set, and the return value.
+ *
+ * The one thing it cannot pin is that the step count comes from the LARGER of
+ * the two axis distances rather than the smaller: below one tile both choices
+ * give zero.  That is settled in the assembly instead -- CMP EAX,[EBP-0x14] /
+ * JLE at 00021e94 picks the x branch only when x is the greater -- and is a
+ * playtest observation, not a unit-test one.
+ *
+ * Expected values come from the assembly: IMUL EAX,EAX,0x18 on each operand
+ * after AND EAX,0xff, the byte loads at [EAX+0x1] and [EAX+0x2], the IDIV by
+ * 0x18 that makes the step count, the ADD EAX,0x18 before each of the two
+ * cursor stores at 00021f24 and 00021f2f, the plain stores of the target into
+ * the origin at 00021f37 and 00021f3f, and the ADD EAX,0x3 on the returned
+ * offset.  None is read off the emitted C.
+ *
+ * The view origin and cursor globals are ordinary ints that ticket 23 has not
+ * filled in yet, so each case sets the origin itself and asserts only against
+ * what it staged.
+ */
+
+/* The map's tile size in pixels, the 0x18 every operand is multiplied by. */
+#define TILE_PIXELS 24
+
+/* A script image big enough for an opcode at a non-zero offset plus its two
+   operands and a decoy byte after them. */
+static unsigned char scroll_script[16];
+
+/* Puts the view where the scroll will find it, so the distance -- and with it
+   the step count -- is whatever the case wants it to be. */
+static void place_view(int origin_x, int origin_y)
+{
+    data_fdps_battle_view_window_origin_x = origin_x;
+    data_fdps_battle_view_window_origin_y = origin_y;
+}
+
+/* A target the view already sits on: both distances are 0, the quotient is 0,
+   and the loop is skipped.  Pins the tile-to-pixel conversion, both cursor
+   stores at target + one tile, and the returned offset. */
+static void a_target_the_view_already_sits_on_moves_nothing(void)
+{
+    int next_offset;
+
+    scroll_script[0] = 5;
+    scroll_script[1] = 10;
+    scroll_script[2] = 4;
+    place_view(10 * TILE_PIXELS, 4 * TILE_PIXELS);
+
+    next_offset = fdps_icon_script_scroll_view_to_tile(scroll_script, 0);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 10 * TILE_PIXELS);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 4 * TILE_PIXELS);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 10 * TILE_PIXELS + TILE_PIXELS);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 4 * TILE_PIXELS + TILE_PIXELS);
+    CHECK_EQ(next_offset, 3);
+}
+
+/* The operands are read at offset + 1 and offset + 2, not at offset + 0, and
+   the return value is the offset the caller gave plus three.  The opcode byte
+   and the byte after the operands are both set to tile numbers that would give
+   very different pixels if either were picked up by mistake. */
+static void the_operands_are_the_two_bytes_after_the_opcode(void)
+{
+    int next_offset;
+
+    scroll_script[7] = 99;
+    scroll_script[8] = 3;
+    scroll_script[9] = 2;
+    scroll_script[10] = 77;
+    place_view(3 * TILE_PIXELS, 2 * TILE_PIXELS);
+
+    next_offset = fdps_icon_script_scroll_view_to_tile(scroll_script, 7);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 3 * TILE_PIXELS);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 2 * TILE_PIXELS);
+    CHECK_EQ(next_offset, 10);
+}
+
+/* AND EAX,0xff before the multiply: a tile number with its top bit set is 200
+   and 255, not -56 and -1.  A signed decode would put the origin at -1344 and
+   -24 instead of at 4800 and 6120. */
+static void the_operand_bytes_are_unsigned(void)
+{
+    scroll_script[0] = 5;
+    scroll_script[1] = 200;
+    scroll_script[2] = 255;
+    place_view(200 * TILE_PIXELS, 255 * TILE_PIXELS);
+
+    fdps_icon_script_scroll_view_to_tile(scroll_script, 0);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 4800);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 6120);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 4800 + TILE_PIXELS);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 6120 + TILE_PIXELS);
+}
+
+/* A distance of 23 pixels on the x axis: the quotient by 0x18 truncates to
+   zero, so no frame is rendered and the view is placed on the target in one
+   go.  The origin has to land on the target exactly -- a step count rounded up
+   to one would have divided a 23-pixel delta by 1 and got there too, but a
+   division that rounded the quotient the other way would leave the view 23
+   pixels short. */
+static void a_sub_tile_distance_on_x_jumps_straight_to_the_target(void)
+{
+    scroll_script[0] = 5;
+    scroll_script[1] = 6;
+    scroll_script[2] = 6;
+    place_view(6 * TILE_PIXELS - 23, 6 * TILE_PIXELS);
+
+    fdps_icon_script_scroll_view_to_tile(scroll_script, 0);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 6 * TILE_PIXELS);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 6 * TILE_PIXELS);
+}
+
+/* The same on the y axis, and in the negative direction: abs is applied to
+   each axis distance before the comparison, so a view 23 pixels BELOW the
+   target is as much a sub-tile move as one 23 pixels above it. */
+static void a_sub_tile_distance_on_y_jumps_straight_to_the_target(void)
+{
+    scroll_script[0] = 5;
+    scroll_script[1] = 9;
+    scroll_script[2] = 9;
+    place_view(9 * TILE_PIXELS, 9 * TILE_PIXELS + 23);
+
+    fdps_icon_script_scroll_view_to_tile(scroll_script, 0);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 9 * TILE_PIXELS);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 9 * TILE_PIXELS);
+}
+
+/* Tile 0, 0 is a real target and not a no-op: the cursor still ends one tile
+   in from the view's corner, which is where the assembly's ADD EAX,0x18 puts
+   it whatever the target is. */
+static void the_cursor_sits_one_tile_inside_the_new_view(void)
+{
+    scroll_script[0] = 5;
+    scroll_script[1] = 0;
+    scroll_script[2] = 0;
+    place_view(0, 0);
+
+    fdps_icon_script_scroll_view_to_tile(scroll_script, 0);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    CHECK_EQ(data_fdps_map_cursor_world_x, TILE_PIXELS);
+    CHECK_EQ(data_fdps_map_cursor_world_y, TILE_PIXELS);
+}
+
 void run_icon_tests(void)
 {
     RUN_TEST(the_dac_reads_back_what_was_written);
@@ -379,4 +539,10 @@ void run_icon_tests(void)
     RUN_TEST(the_fade_in_gives_every_entry_its_own_record);
     RUN_TEST(the_fade_in_derives_from_the_master_palette_not_the_live_dac);
     RUN_TEST(the_fade_in_restores_what_the_fade_out_dimmed);
+    RUN_TEST(a_target_the_view_already_sits_on_moves_nothing);
+    RUN_TEST(the_operands_are_the_two_bytes_after_the_opcode);
+    RUN_TEST(the_operand_bytes_are_unsigned);
+    RUN_TEST(a_sub_tile_distance_on_x_jumps_straight_to_the_target);
+    RUN_TEST(a_sub_tile_distance_on_y_jumps_straight_to_the_target);
+    RUN_TEST(the_cursor_sits_one_tile_inside_the_new_view);
 }
