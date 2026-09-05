@@ -2130,6 +2130,417 @@ static void the_portrait_buffer_is_left_alone(void)
     data_fdps_portrait_sprite_buf_ptr = NULL;
 }
 
+/* ---- fdps_message_window_open_from_tile, 00020a70 ------------------------
+ *
+ * Watched the same way the open and the close above are: the adapter into mode
+ * 13h, a known pattern over the page, the call, the frame captured, back to
+ * text mode.  A timer interrupt is installed for the duration because every
+ * one of the seven zoom frames ends waiting for data_fdps_timer_tick_counter
+ * to move and nothing else in a test image advances it.
+ *
+ * WHAT MAKES THE FINISHED FRAME FULLY DETERMINED.  Every frame is composed by
+ * fdps_draw_scene_layers into a page malloc has just handed over, so with
+ * nothing staged the result would be whatever was in that memory.  One layer
+ * is staged the way the close section above stages it -- a 1x1 tile map, so
+ * every cell of the 14x9 window wraps onto cell (0, 0) and the whole page
+ * comes out CLOSE_SCENE_COLOR -- and a one-tile Cusor.cel is published so the
+ * cursor the compositor draws has a sprite.  The last frame is then knowable
+ * pixel by pixel: the scene colour everywhere, the cursor's flat tile where
+ * the speaker stands, and Message.cel's sprite 0 at screen (9, 120).
+ *
+ * WHY THE SPEAKER IS AT TILE (3, 1) AND THE CURSOR STARTS AT (1, 1).  Both are
+ * at least one tile in from the view's top left corner, so none of
+ * fdps_map_cursor_move_to's four view clamps fires and the view origin stays
+ * at (0, 0) for the whole call.  That is what lets this file work out where
+ * the speaker is on the screen, and so where the zoom's last frame puts the
+ * panel and where the cursor tile lands: map pixel minus origin plus four.
+ *
+ * THE FOUR COLOUR BANDS STAY DISJOINT.  The pattern has bit 7 set in every
+ * byte, the panel fixture's sprite 0 holds 0x40..0x7f, the scene is 0x11 and
+ * the cursor tile is 0x21, so a byte on the captured page says on its own
+ * which of the four put it there.
+ *
+ * HOW "THE CURSOR WAS HIDDEN FOR THE WALK" IS SEEN.  The mode staged before
+ * every call is 6, the sweep mode, whose one lasting effect is that
+ * fdps_draw_map_cursor CLEARS the movement grid's marker byte under the cursor
+ * (mapcur.c).  With the mode cleared to 0 the walk draws no frame at all --
+ * the cursor is invisible and the view does not move, so
+ * fdps_map_cursor_move_to's own draw test fails on every step -- and the
+ * markers under the tiles the cursor crossed are still standing afterwards.  A
+ * body that left the mode at 6 would draw a frame per step and wipe them.
+ *
+ * EXPECTED VALUES COME FROM THE ASSEMBLY.  IMUL ...,0x18 at 00020a7c and
+ * 00020a83 for the tile size and the argument order of the walk; MOV
+ * [0x00069cd0],0x0 at 00020aa9 and MOV [0x00069cd0],0x1 at 00020ac3 for the
+ * two cursor modes; the JLE at 00020aea against the 6 seeded at 00020a98 for
+ * seven frames; PUSH 0x15180 at 00020af9 for the 360 x 240 page; the two
+ * IDIVs at 00020b21 and 00020b3d against 0x12e and 0x49 for the growing panel,
+ * the two at 00020b6d and 00020b8a with the 9 and 0x78 seeded at 00020a8a and
+ * 00020a91 and the ADD EDX,0x14 beside each for its corner; the eight-push
+ * blit at 00020bb7 -- 4, the packed size, y, x, 0x168, the page, 0, the sheet
+ * -- for mode 4 at a 360 pitch; and the six-push blit at 00020c03 -- 0xc0,
+ * 0x138, 0x140, 0xa0504, 0x168, page + 0x21d8 -- for the 312 x 192 viewport at
+ * screen (4, 4).  The panel's pixel values are this file's own fixture.
+ *
+ * WHAT IS NOT COVERED.  The six frames before the last are transient: each is
+ * overwritten by the next present, so neither the growing size, nor the corner
+ * walking in from the speaker's tile, nor the 4 x 2 floor the first frame's
+ * quotients are replaced by can be read off the finished screen.  They are
+ * playtest contracts, as the open's slide is.  So is the two-phase retrace
+ * wait.  What the pacing case below can say is only that at least one tick was
+ * waited for per frame after the first.
+ * ------------------------------------------------------------------ */
+
+/* The battle map's tile, and the movement grid staged under the walk: a
+   4-byte header of two i16 tile dimensions and then one 2-byte cell per tile,
+   flags first and the flood fill's marker second (movegrid.h).  20 by 14 tiles
+   is 480 by 336 pixels, comfortably larger than the 312 by 192 view, so
+   fdps_map_cursor_move_to's far-edge pull-backs cannot fire either. */
+#define ZOOM_TILE 24
+#define ZOOM_GRID_W 20
+#define ZOOM_GRID_H 14
+#define ZOOM_GRID_HEADER 4
+#define ZOOM_GRID_BYTES (ZOOM_GRID_HEADER + ZOOM_GRID_W * ZOOM_GRID_H * 2)
+
+/* Where the cursor stands on entry and the tile the speaker is on.  Same row,
+   two tiles apart, so the walk is two whole steps along x with no movement on
+   y and no clamp on either axis. */
+#define ZOOM_START_TILE_X 1
+#define ZOOM_START_TILE_Y 1
+#define ZOOM_SPEAKER_TILE_X 3
+#define ZOOM_SPEAKER_TILE_Y 1
+
+/* The sweep mode staged before every call, and the marker byte written into
+   every cell of the grid.  0x5a is not the 0xff unreachable sentinel and not
+   the 0 the sweep writes, so a cleared cell is unmistakable. */
+#define ZOOM_ENTRY_DRAW_MODE 6
+#define ZOOM_MARKER 0x5a
+
+/* The mode the call must leave behind on the map arm: the ordinary single box,
+   stored rather than restored. */
+#define ZOOM_EXIT_DRAW_MODE 1
+
+/* The Cusor.cel fixture: sprite 0 as 24 rows of one 24-pixel fill run, the
+   same encoding the close section's tileset uses.  Only the offset table at
+   0x0f is read -- fdps_blit_cursor_tile hardwires it and takes the 24 x 24
+   size from its own constants -- so the header is left blank on purpose. */
+#define ZOOM_CEL_TABLE_AT 0x0f
+#define ZOOM_CURSOR_STREAM_AT 0x40
+#define ZOOM_CURSOR_SHEET_BYTES (ZOOM_CURSOR_STREAM_AT + ZOOM_TILE * 2)
+#define ZOOM_CURSOR_COLOR 0x21
+
+/* Where that tile lands on the screen.  fdps_blit_cursor_tile puts a map pixel
+   at scene page pixel (map - origin + 24) and the viewport copy takes page
+   (24, 24) to screen (4, 4), so a map pixel is a screen pixel plus four while
+   the origin is 0.  The speaker's tile is map (72, 24). */
+#define ZOOM_CURSOR_SCREEN_ROW (ZOOM_SPEAKER_TILE_Y * ZOOM_TILE + 4)
+#define ZOOM_CURSOR_SCREEN_COL (ZOOM_SPEAKER_TILE_X * ZOOM_TILE + 4)
+
+/* Frames the zoom draws, and the fewest timer ticks a whole call has to wait
+   for.  Every frame after the first spins until the counter has moved off what
+   the frame before it latched, so six changes have to happen; the first
+   frame's latch is uninitialised and normally falls straight through. */
+#define ZOOM_FRAMES 7
+#define ZOOM_MIN_TICKS (ZOOM_FRAMES - 1)
+
+/* The tile column that sends the call to fdps_message_window_open instead. */
+#define ZOOM_NOT_ON_MAP (-1)
+
+static unsigned char zoom_cursor_sheet[ZOOM_CURSOR_SHEET_BYTES];
+static unsigned char zoom_grid[ZOOM_GRID_BYTES];
+static int zoom_cursor_sheet_staged = 0;
+
+static void zoom_stage_cursor_sheet(void)
+{
+    int row;
+
+    if (zoom_cursor_sheet_staged) {
+        return;
+    }
+    zoom_cursor_sheet_staged = 1;
+    memset(zoom_cursor_sheet, 0, (size_t) ZOOM_CURSOR_SHEET_BYTES);
+    wait_u32(zoom_cursor_sheet, ZOOM_CEL_TABLE_AT,
+             (unsigned long) ZOOM_CURSOR_STREAM_AT);
+    for (row = 0; row < ZOOM_TILE; row++) {
+        zoom_cursor_sheet[ZOOM_CURSOR_STREAM_AT + row * 2] =
+            (unsigned char) (ZOOM_TILE - 1);
+        zoom_cursor_sheet[ZOOM_CURSOR_STREAM_AT + row * 2 + 1] =
+            ZOOM_CURSOR_COLOR;
+    }
+}
+
+/* A grid whose header gives the map its size and every one of whose cells
+   carries a marker, so the tiles the walk crosses can be asked afterwards
+   whether a sweep-mode frame was drawn on them. */
+static void zoom_stage_grid(void)
+{
+    int cell;
+
+    memset(zoom_grid, 0, (size_t) ZOOM_GRID_BYTES);
+    wait_u16(zoom_grid, 0, ZOOM_GRID_W);
+    wait_u16(zoom_grid, 2, ZOOM_GRID_H);
+    for (cell = 0; cell < ZOOM_GRID_W * ZOOM_GRID_H; cell++) {
+        zoom_grid[ZOOM_GRID_HEADER + cell * 2 + 1] = ZOOM_MARKER;
+    }
+    data_fdps_battle_move_grid_ptr = zoom_grid;
+}
+
+static int zoom_marker(int tile_x, int tile_y)
+{
+    return (int) zoom_grid[ZOOM_GRID_HEADER
+                           + (tile_y * ZOOM_GRID_W + tile_x) * 2 + 1];
+}
+
+/* One whole call, with the scene, the cursor, the grid and both sheets staged,
+   the adapter in mode 13h, the pattern on the screen and a timer running.
+   Leaves the finished frame in wait_capture[]. */
+static void zoom_run(int tile_x, int tile_y, int face_index)
+{
+    unsigned char *previous_message_sheet;
+    unsigned char *previous_cursor_sheet;
+
+    msgopen_stage_sheet();
+    close_stage_scene();
+    zoom_stage_cursor_sheet();
+    zoom_stage_grid();
+
+    data_fdps_map_cursor_world_x = ZOOM_START_TILE_X * ZOOM_TILE;
+    data_fdps_map_cursor_world_y = ZOOM_START_TILE_Y * ZOOM_TILE;
+    data_fdps_map_cursor_draw_mode = ZOOM_ENTRY_DRAW_MODE;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_timer_tick_counter = 0;
+    wait_timer_fires = 0;
+    wait_isr_mode = WAIT_ISR_ADVANCE;
+
+    previous_message_sheet = data_fdps_message_window_sheet_ptr;
+    previous_cursor_sheet = data_fdps_cursor_highlight_sprite_sheet_ptr;
+    data_fdps_message_window_sheet_ptr = msgopen_sheet;
+    data_fdps_cursor_highlight_sprite_sheet_ptr = zoom_cursor_sheet;
+
+    wait_set_mode(WAIT_MODE_320X200X256);
+    wait_paint_pattern((unsigned char *) WAIT_VGA_BASE);
+
+    wait_saved_timer = _dos_getvect(WAIT_TIMER_VECTOR);
+    _dos_setvect(WAIT_TIMER_VECTOR, wait_timer_isr);
+    fdps_message_window_open_from_tile(tile_x, tile_y, face_index);
+    _dos_setvect(WAIT_TIMER_VECTOR, wait_saved_timer);
+
+    memmove(wait_capture, (void *) WAIT_VGA_BASE, (size_t) SCREEN_BYTES);
+    wait_set_mode(WAIT_MODE_TEXT);
+
+    data_fdps_message_window_sheet_ptr = previous_message_sheet;
+    data_fdps_cursor_highlight_sprite_sheet_ptr = previous_cursor_sheet;
+}
+
+/* Every byte of the 312 x 192 viewport, against what the last zoom frame has
+   to hold there: the panel fixture inside the window rectangle, the cursor
+   fixture's colour inside the speaker's tile, and the staged layer's colour
+   everywhere else.  A wrong panel origin, size, pitch or sprite index, a
+   cursor drawn at the wrong place or not at all, and a backdrop that was not
+   recomposed all show up in this one number. */
+static long zoom_viewport_mismatches(void)
+{
+    long wrong;
+    int row;
+    int col;
+    int want;
+
+    wrong = 0;
+    for (row = WAIT_VIEWPORT_ROW; row < WAIT_VIEWPORT_ROW + WAIT_VIEWPORT_H;
+         row++) {
+        for (col = WAIT_VIEWPORT_COL;
+             col < WAIT_VIEWPORT_COL + WAIT_VIEWPORT_W; col++) {
+            if (row >= WAIT_WINDOW_ROW && row < WAIT_WINDOW_ROW + WAIT_WINDOW_H
+                    && col >= WAIT_WINDOW_COL
+                    && col < WAIT_WINDOW_COL + WAIT_WINDOW_W) {
+                want = msgopen_panel_value(row - WAIT_WINDOW_ROW,
+                                           col - WAIT_WINDOW_COL);
+            } else if (row >= ZOOM_CURSOR_SCREEN_ROW
+                           && row < ZOOM_CURSOR_SCREEN_ROW + ZOOM_TILE
+                           && col >= ZOOM_CURSOR_SCREEN_COL
+                           && col < ZOOM_CURSOR_SCREEN_COL + ZOOM_TILE) {
+                want = ZOOM_CURSOR_COLOR;
+            } else {
+                want = CLOSE_SCENE_COLOR;
+            }
+            if (wait_pixel(row, col) != want) {
+                wrong++;
+            }
+        }
+    }
+    return wrong;
+}
+
+/* ---------------------------------------------------------------------- */
+
+/* The panel the zoom leaves standing is Message.cel's sprite 0 at its own
+   302 x 73, at screen (9, 120), and every one of its 22,046 pixels carries the
+   fixture's own byte.  That is the last frame's four interpolations all
+   arriving together: width 6 * 0x12e / 6 and height 6 * 0x49 / 6 are the
+   sprite's full size, so the scaling blitter reproduces it one for one, and
+   the corner 9 + (9 - 9) and 120 + (120 - 120) is the resting place
+   fdps_message_window_open leaves its own panel at.  A loop that stopped one
+   frame short would put a smaller panel somewhere between the speaker and
+   here. */
+static void the_zoom_ends_on_the_panel_at_its_resting_place(void)
+{
+    zoom_run(ZOOM_SPEAKER_TILE_X, ZOOM_SPEAKER_TILE_Y, MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(wait_pixel(WAIT_WINDOW_ROW, WAIT_WINDOW_COL),
+             msgopen_panel_value(0, 0));
+    CHECK_EQ(wait_pixel(WAIT_WINDOW_ROW + WAIT_WINDOW_H - 1,
+                        WAIT_WINDOW_COL + WAIT_WINDOW_W - 1),
+             msgopen_panel_value(WAIT_WINDOW_H - 1, WAIT_WINDOW_W - 1));
+    CHECK_EQ(msgopen_panel_mismatches(), 0);
+}
+
+/* The backdrop under it is the live scene, rebuilt for the frame, and not the
+   screen the call found: the compositor ran -- visible in the scroll latch it
+   moves off the marker -- and every pixel of the viewport is the layer's
+   colour, the cursor's or the panel's.  The pattern painted before the call
+   has bit 7 set in every byte and none of it is left inside the viewport. */
+static void the_backdrop_under_the_panel_is_the_live_scene(void)
+{
+    zoom_run(ZOOM_SPEAKER_TILE_X, ZOOM_SPEAKER_TILE_Y, MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(data_fdps_scene_layer_scroll_last_tick == WAIT_SCROLL_MARKER, 0);
+    CHECK_EQ(wait_pixel(WAIT_VIEWPORT_ROW, WAIT_VIEWPORT_COL),
+             CLOSE_SCENE_COLOR);
+    CHECK_EQ(wait_pixel(WAIT_VIEWPORT_ROW + WAIT_VIEWPORT_H - 1,
+                        WAIT_VIEWPORT_COL + WAIT_VIEWPORT_W - 1),
+             CLOSE_SCENE_COLOR);
+    CHECK_EQ(zoom_viewport_mismatches(), 0);
+}
+
+/* Only the 312 x 192 viewport is presented.  The four-pixel border keeps the
+   pattern that was on the screen before the call, which is what separates this
+   opening from the -1 arm's: fdps_message_window_open moves the whole
+   64000-byte page. */
+static void the_border_outside_the_viewport_is_not_touched(void)
+{
+    zoom_run(ZOOM_SPEAKER_TILE_X, ZOOM_SPEAKER_TILE_Y, MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(wait_changed(0, WAIT_VIEWPORT_ROW, 0, SCREEN_PITCH), 0);
+    CHECK_EQ(wait_changed(WAIT_VIEWPORT_ROW + WAIT_VIEWPORT_H,
+                          SCREEN_ROWS - WAIT_VIEWPORT_ROW - WAIT_VIEWPORT_H, 0,
+                          SCREEN_PITCH), 0);
+    CHECK_EQ(wait_changed(WAIT_VIEWPORT_ROW, WAIT_VIEWPORT_H, 0,
+                          WAIT_VIEWPORT_COL), 0);
+    CHECK_EQ(wait_changed(WAIT_VIEWPORT_ROW, WAIT_VIEWPORT_H,
+                          WAIT_VIEWPORT_COL + WAIT_VIEWPORT_W,
+                          SCREEN_PITCH - WAIT_VIEWPORT_COL - WAIT_VIEWPORT_W),
+             0);
+}
+
+/* The walk is handed the speaker's tile scaled by 24, x first: the cursor
+   comes to rest on map pixel (72, 24) and not on (24, 72), which is where a
+   swapped pair would put it. */
+static void the_cursor_is_walked_onto_the_speakers_tile(void)
+{
+    zoom_run(ZOOM_SPEAKER_TILE_X, ZOOM_SPEAKER_TILE_Y, MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(data_fdps_map_cursor_world_x, ZOOM_SPEAKER_TILE_X * ZOOM_TILE);
+    CHECK_EQ(data_fdps_map_cursor_world_y, ZOOM_SPEAKER_TILE_Y * ZOOM_TILE);
+}
+
+/* The draw mode is set to 1 and not put back.  It is 6 going in, the cursor's
+   flat tile is on the finished frame -- which only mode 1 or 2 draws as a
+   single tile at the cursor -- and it is 1 coming out. */
+static void the_cursor_mode_is_left_on_the_plain_box(void)
+{
+    zoom_run(ZOOM_SPEAKER_TILE_X, ZOOM_SPEAKER_TILE_Y, MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, ZOOM_EXIT_DRAW_MODE);
+    CHECK_EQ(wait_pixel(ZOOM_CURSOR_SCREEN_ROW, ZOOM_CURSOR_SCREEN_COL),
+             ZOOM_CURSOR_COLOR);
+    CHECK_EQ(wait_pixel(ZOOM_CURSOR_SCREEN_ROW + ZOOM_TILE - 1,
+                        ZOOM_CURSOR_SCREEN_COL + ZOOM_TILE - 1),
+             ZOOM_CURSOR_COLOR);
+}
+
+/* And it is 0 while the view is walked.  In sweep mode every frame drawn
+   clears the movement grid's marker under the cursor, so the two tiles the
+   cursor crosses would come back holding 0 if the mode had been left at 6 for
+   the walk.  Both still hold their marker. */
+static void the_cursor_is_hidden_while_the_view_is_walked(void)
+{
+    zoom_run(ZOOM_SPEAKER_TILE_X, ZOOM_SPEAKER_TILE_Y, MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(zoom_marker(ZOOM_START_TILE_X + 1, ZOOM_START_TILE_Y),
+             ZOOM_MARKER);
+    CHECK_EQ(zoom_marker(ZOOM_SPEAKER_TILE_X, ZOOM_SPEAKER_TILE_Y),
+             ZOOM_MARKER);
+}
+
+/* Every frame after the first waits for the timer to move.  Six changes of the
+   counter therefore have to happen inside one call, and the interrupt that
+   makes them is counted.  It is a floor and not an equality: the interrupt
+   keeps firing while a frame is being composed. */
+static void every_frame_after_the_first_waits_for_a_tick(void)
+{
+    zoom_run(ZOOM_SPEAKER_TILE_X, ZOOM_SPEAKER_TILE_Y, MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(wait_timer_fires >= ZOOM_MIN_TICKS, 1);
+}
+
+/* A column of -1 is the whole test: the map is not touched at all -- the
+   cursor stands where it stood, the draw mode is still the caller's 6 and the
+   cursor tile was never drawn -- and the panel on the screen is the one
+   fdps_message_window_open's slide leaves, over a page that is still the
+   pattern rather than a recomposed scene. */
+static void a_column_of_minus_one_hands_the_opening_over(void)
+{
+    zoom_run(ZOOM_NOT_ON_MAP, ZOOM_SPEAKER_TILE_Y, MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(data_fdps_map_cursor_world_x, ZOOM_START_TILE_X * ZOOM_TILE);
+    CHECK_EQ(data_fdps_map_cursor_world_y, ZOOM_START_TILE_Y * ZOOM_TILE);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, ZOOM_ENTRY_DRAW_MODE);
+    CHECK_EQ(wait_changed(ZOOM_CURSOR_SCREEN_ROW, ZOOM_TILE,
+                          ZOOM_CURSOR_SCREEN_COL, ZOOM_TILE), 0);
+    CHECK_EQ(msgopen_panel_mismatches(), 0);
+}
+
+/* The whole screen outside the window rectangle survives that arm, border
+   included, because the slide composes every frame from the copy of the screen
+   it took at entry.  The zoom arm above leaves the viewport holding the scene
+   instead. */
+static void the_minus_one_arm_leaves_the_screen_it_found(void)
+{
+    zoom_run(ZOOM_NOT_ON_MAP, ZOOM_SPEAKER_TILE_Y, MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(wait_changed(0, WAIT_WINDOW_ROW, 0, SCREEN_PITCH), 0);
+    CHECK_EQ(wait_changed(WAIT_WINDOW_ROW + WAIT_WINDOW_H,
+                          SCREEN_ROWS - WAIT_WINDOW_ROW - WAIT_WINDOW_H, 0,
+                          SCREEN_PITCH), 0);
+}
+
+/* A face index of -1 leaves no portrait on either arm: the tail call releases
+   the buffer and draws nothing, so a block staged beforehand is gone and the
+   panel is unmarked. */
+static void a_face_of_minus_one_releases_the_portrait(void)
+{
+    msgopen_stage_portrait_buffer();
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 0);
+    zoom_run(ZOOM_SPEAKER_TILE_X, ZOOM_SPEAKER_TILE_Y, MSGOPEN_NO_SPEAKER);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 1);
+    CHECK_EQ(msgopen_panel_mismatches(), 0);
+}
+
+/* A face the sheet has goes to fdps_load_and_draw_portrait with the visible
+   page at 0xa708c and a 320 pitch, so it lands at screen (12, 90) and over the
+   frame the zoom has just presented.  The two decoded pixels are inside the
+   panel's rectangle and differ from the fixture's bytes there, so they say the
+   portrait went on last; the third is a transparent pixel of row 0, above the
+   panel, where the scene colour still shows. */
+static void a_face_the_sheet_has_is_drawn_over_the_last_frame(void)
+{
+    if (!sheet_present()) {
+        return;
+    }
+    zoom_run(ZOOM_SPEAKER_TILE_X, ZOOM_SPEAKER_TILE_Y, RECORD_A);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 0);
+    CHECK_EQ(wait_pixel(WAIT_PORTRAIT_ROW + PIXEL_MID_ROW,
+                        WAIT_PORTRAIT_COL + PIXEL_MID_COL), PIXEL_MID_VALUE);
+    CHECK_EQ(wait_pixel(WAIT_PORTRAIT_ROW + PIXEL_LAST_ROW,
+                        WAIT_PORTRAIT_COL + PIXEL_LAST_COL), PIXEL_LAST_VALUE);
+    CHECK_EQ(wait_pixel(WAIT_PORTRAIT_ROW + PIXEL_CLEAR_ROW,
+                        WAIT_PORTRAIT_COL + PIXEL_CLEAR_COL),
+             CLOSE_SCENE_COLOR);
+    portrait_release();
+}
+
 void run_msgwin_tests(void)
 {
     RUN_TEST(loads_the_record_the_directory_names);
@@ -2179,4 +2590,15 @@ void run_msgwin_tests(void)
     RUN_TEST(no_frame_of_the_slide_survives);
     RUN_TEST(the_backdrop_is_recomposed_and_the_old_screen_is_gone);
     RUN_TEST(the_portrait_buffer_is_left_alone);
+    RUN_TEST(the_zoom_ends_on_the_panel_at_its_resting_place);
+    RUN_TEST(the_backdrop_under_the_panel_is_the_live_scene);
+    RUN_TEST(the_border_outside_the_viewport_is_not_touched);
+    RUN_TEST(the_cursor_is_walked_onto_the_speakers_tile);
+    RUN_TEST(the_cursor_mode_is_left_on_the_plain_box);
+    RUN_TEST(the_cursor_is_hidden_while_the_view_is_walked);
+    RUN_TEST(every_frame_after_the_first_waits_for_a_tick);
+    RUN_TEST(a_column_of_minus_one_hands_the_opening_over);
+    RUN_TEST(the_minus_one_arm_leaves_the_screen_it_found);
+    RUN_TEST(a_face_of_minus_one_releases_the_portrait);
+    RUN_TEST(a_face_the_sheet_has_is_drawn_over_the_last_frame);
 }

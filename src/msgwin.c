@@ -19,6 +19,7 @@
 #include "keybd.h"
 #include "sprite.h"
 #include "mapdraw.h"
+#include "mapcur.h"
 #include "msgwin.h"
 
 /* The portrait sheet, PUSH 0x615b0 at 0001780d against the "rb" at 0x6157c. */
@@ -844,4 +845,213 @@ void fdps_message_window_close(void)
     free(work_page);
     free(clean_page);
     free(panel);
+}
+
+/* The battle map's tile, 24 x 24 pixels: IMUL EAX,dword ptr [EBP + 0x14],0x18
+   at 00020a7c and its companion at 00020a83 turn a tile column and row into
+   map pixels, which is the space fdps_map_cursor_move_to and the view window
+   origin both work in (mapcur.h). */
+#define MAP_TILE_SIZE 0x18
+
+/* The tile column that means "this speaker is not standing on the map".  CMP
+   dword ptr [EBP + 0x14],-0x1 at 00020a9f is an equality and not a sign test,
+   so only -1 selects the slide-up open; a column of -2 would be walked to like
+   any other. */
+#define SPEAKER_NOT_ON_MAP (-1)
+
+/* The two values written into data_fdps_map_cursor_draw_mode (gamedata.h): 0
+   at 00020aa9 so that nothing is painted over the scroll, and 1 -- the
+   ordinary single box -- at 00020ac3 for the seven zoom frames.  THE SECOND IS
+   A PLAIN STORE AND NOT A RESTORE.  Whatever mode the caller was in is gone,
+   which is why a speaker on a map that was showing a movement range comes back
+   showing a plain cursor instead. */
+#define CURSOR_DRAW_MODE_HIDDEN 0
+#define CURSOR_DRAW_MODE_BOX 1
+
+/* Screen to composition page on both axes: the 312 x 192 window sits at page
+   pixel (24, 24) and at screen pixel (4, 4), so a page pixel is a screen pixel
+   plus twenty.  ADD EDX,0x14 at 00020b73 and 00020b90. */
+#define SCENE_PAGE_FROM_SCREEN 0x14
+
+/* The zoom's shape: seven frames over six intervals, so the last frame lands
+   exactly on the panel's resting size and place.  MOV dword ptr
+   [EBP + -0x8],0x6 at 00020a98 seeds the count, the JLE at 00020aea makes the
+   test <= rather than <, and the same slot is the divisor of all four
+   interpolations at 00020b21, 00020b3d, 00020b6d and 00020b8a. */
+#define ZOOM_INTERVALS 6
+
+/* What the first frame's panel is made instead of nothing.  Step 0 puts both
+   quotients at zero and the two tests at 00020b27 and 00020b43 replace them
+   with 4 and 2, so the zoom starts from a visible speck rather than from an
+   empty rectangle. */
+#define ZOOM_MIN_PANEL_W 4
+#define ZOOM_MIN_PANEL_H 2
+
+/* Blit mode 4, the scaling kernel fdps_blit_dispatch reaches at
+   fdps_rle_blit_scaled (rle.h), and the way its operand carries the
+   destination rectangle: the height in the top half of the dword and the width
+   in the bottom.  SHL EAX,0x10 / ADD EDX,EAX at 00020b53. */
+#define ZOOM_BLIT_MODE 4
+#define ZOOM_SIZE_HEIGHT_SHIFT 16
+
+/* 00020a70.  One two-armed test and one counted loop.  The test is CMP
+   [EBP + 0x14],-0x1 / JZ at 00020a9f, and it is the zoom that is the
+   fall-through: the JZ leaves for the fdps_message_window_open call at
+   00020c31 and the zoom's tail jumps over it at 00020c2f, so both arms
+   converge on the portrait draw at 00020c3d.  The loop is Watcom's usual
+   shape, the test at 00020ae4 with JLE into the body and a JMP past it, the
+   increment at 00020af4 and the JMP back at 00020c2a.
+
+   THE PANEL IS GROWN OUT OF THE SPEAKER'S TILE AND THE LAST FRAME IS THE
+   RESTING PLACE.  Both interpolations run over the same six intervals from the
+   speaker to (9, 120), and both sizes from nothing to Message.cel's own
+   302 x 73, so step 6 puts a full-size panel at page (29, 140) -- screen
+   (9, 120) -- which is byte for byte where fdps_message_window_open leaves its
+   own panel and where fdps_message_window_wait_key expects to find one.  A
+   loop that stopped at step 5 would leave the window short of its place and
+   the wait would lift the wrong rectangle off the screen.
+
+   ALL FOUR DIVISIONS ARE SIGNED.  Each is an IDIV with the dividend
+   sign-extended by SAR EDX,0x1f, at 00020b1e, 00020b3a, 00020b6a and 00020b87,
+   so they truncate toward zero.  It matters on the two corner interpolations:
+   a speaker to the right of column 9 or below row 120 makes the numerator
+   negative, and an unsigned divide would send the panel off the far side of
+   the page instead of walking it back.
+
+   THE CURSOR MODE IS CLEARED FOR THE WALK AND THEN SET TO 1, NOT RESTORED.
+   Clearing it first is what keeps a cursor out of the frames
+   fdps_map_cursor_move_to draws while it scrolls; storing 1 afterwards is what
+   puts the ordinary box into the seven zoom frames, because each of them is
+   composed by fdps_draw_scene_layers, which draws the cursor itself.  Nothing
+   remembers what the mode held on entry.
+
+   THE SPEAKER'S VIEW POSITION IS TAKEN AFTER THE SCROLL, not before: the two
+   subtractions at 00020ad2 and 00020ada read the view origin the walk has just
+   left behind, so the zoom starts from where the speaker actually is on the
+   screen rather than from where he was before the map moved.
+
+   THE TICK LATCH IS DELIBERATELY NOT INITIALISED.  See the note on it in the
+   body: it is read at 00020c0b before anything writes it.
+
+   THE RETRACE WAIT IS TWO-PHASE AND HAS TO STAY THAT WAY, for the same reason
+   the open and the close above give: spin until bit 3 of 0x3da is set and then
+   until it is clear, so each viewport copy begins at the top of active display
+   (rebuild_info/pitfalls.md).
+
+   ONLY THE VIEWPORT IS PRESENTED.  Every step copies 312 x 192 from page byte
+   0x21d8 to screen byte 0x504 and nothing else, so the four-pixel border keeps
+   whatever was on the screen before the call -- unlike the -1 arm, where
+   fdps_message_window_open moves the whole 64000-byte page.
+
+   THE PORTRAIT IS DRAWN TWICE ON THE -1 ARM.  fdps_message_window_open has
+   already loaded and drawn face_index by the time it returns, and the tail
+   here draws the same record at the same place again.  It is not observable --
+   the second blit lands on the first -- but a negative index that is not -1 is
+   NOT the same on the two paths: the open releases the buffer itself for any
+   negative index, while the call below tests only == -1 and would hand
+   anything else to the directory as an index. */
+void fdps_message_window_open_from_tile(int tile_x, int tile_y, int face_index)
+{
+    /* The speaker's place, in map pixels until the walk is over and in screen
+       pixels afterwards -- the same number minus the view origin. */
+    int speaker_view_x;
+    int speaker_view_y;
+    /* Where the panel is going: the message window's resting corner, in the
+       same screen pixels. */
+    int window_rest_x;
+    int window_rest_y;
+    /* How many intervals the zoom is divided into.  The loop runs one frame
+       more than this, and it is also the divisor of every interpolation.  The
+       original keeps it in a frame slot rather than dividing by a literal. */
+    int zoom_intervals;
+    /* Which frame is being composed, 0 through zoom_intervals. */
+    int step;
+    /* The 360 x 240 page this frame is composed on, thrown away at the end of
+       the frame. */
+    unsigned char *frame;
+    /* The panel's size on this frame, growing to Message.cel's own 302 x 73. */
+    int panel_width;
+    int panel_height;
+    /* Its top left corner on that page. */
+    int panel_x;
+    int panel_y;
+    /* The same size packed the way blit mode 4 takes it, height above width. */
+    unsigned int panel_size;
+    /* The timer tick as it stood at the end of the previous frame.  IT IS
+       DELIBERATELY LEFT UNINITIALISED: the original reads the slot at 00020c0b
+       before anything has written it, so on the first frame it holds whatever
+       the stack held and the pacing spin normally falls straight through.
+       Seeding it from data_fdps_timer_tick_counter would make the first frame
+       wait a whole tick that the original does not wait
+       (rebuild_info/pitfalls.md). */
+    unsigned int last_tick;
+
+    speaker_view_x = tile_x * MAP_TILE_SIZE;
+    speaker_view_y = tile_y * MAP_TILE_SIZE;
+    window_rest_x = MESSAGE_WINDOW_COL;
+    window_rest_y = MESSAGE_WINDOW_ROW;
+    zoom_intervals = ZOOM_INTERVALS;
+
+    if (tile_x != SPEAKER_NOT_ON_MAP) {
+        data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;
+        fdps_map_cursor_move_to(speaker_view_x, speaker_view_y);
+        data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_BOX;
+        speaker_view_x -= data_fdps_battle_view_window_origin_x;
+        speaker_view_y -= data_fdps_battle_view_window_origin_y;
+
+        for (step = 0; step <= zoom_intervals; step++) {
+            frame = (unsigned char *) malloc((size_t) SCENE_PAGE_BYTES);
+            fdps_draw_scene_layers(frame);
+
+            panel_width = step * MESSAGE_WINDOW_W / zoom_intervals;
+            if (panel_width == 0) {
+                panel_width = ZOOM_MIN_PANEL_W;
+            }
+            panel_height = step * MESSAGE_WINDOW_H / zoom_intervals;
+            if (panel_height == 0) {
+                panel_height = ZOOM_MIN_PANEL_H;
+            }
+            panel_size =
+                ((unsigned int) panel_height << ZOOM_SIZE_HEIGHT_SHIFT)
+                + (unsigned int) panel_width;
+            panel_x = speaker_view_x + SCENE_PAGE_FROM_SCREEN
+                      + (window_rest_x - speaker_view_x) * step
+                        / zoom_intervals;
+            panel_y = speaker_view_y + SCENE_PAGE_FROM_SCREEN
+                      + (window_rest_y - speaker_view_y) * step
+                        / zoom_intervals;
+            fdps_cel_blit_sprite(data_fdps_message_window_sheet_ptr,
+                                 MESSAGE_WINDOW_SPRITE, frame,
+                                 SCENE_PAGE_PITCH, panel_x, panel_y,
+                                 panel_size, ZOOM_BLIT_MODE);
+
+            while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE)
+                   == 0) {
+                /* Spin until the retrace begins, so the frame that goes out is
+                   shown whole. */
+            }
+            while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE)
+                   != 0) {
+                /* And until it ends, so the copy below starts clear of it. */
+            }
+            fdps_blit_rect((unsigned int) (frame + SCENE_PAGE_WINDOW_AT),
+                           SCENE_PAGE_PITCH,
+                           (void *) (VGA_SCREEN_BASE + SCREEN_WINDOW_AT),
+                           VGA_SCREEN_PITCH, SCREEN_WINDOW_W, SCREEN_WINDOW_H);
+
+            while (last_tick == data_fdps_timer_tick_counter) {
+                /* One frame per game tick.  The counter has to be volatile or
+                   this never ends; it is qualified at its declaration in
+                   gamedata.h. */
+            }
+            last_tick = data_fdps_timer_tick_counter;
+            free(frame);
+        }
+    } else {
+        fdps_message_window_open(face_index);
+    }
+
+    fdps_load_and_draw_portrait(
+        (unsigned char *) (VGA_SCREEN_BASE + SCREEN_PORTRAIT_AT),
+        VGA_SCREEN_PITCH, face_index);
 }

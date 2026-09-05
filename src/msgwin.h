@@ -170,4 +170,45 @@ extern void fdps_message_window_wait_key(int show_wait_indicator,
 extern int fdps_prompt_two_choice(void);
 #pragma aux fdps_prompt_two_choice "*" parm caller [];
 
+/* 00020a70.  Puts the message window up for a speaker who is standing on the
+   battle map: it walks the view onto him, grows the Message.cel panel out of
+   his tile over seven frames until it stands exactly where
+   fdps_message_window_open would have left it, and draws his portrait.
+   Returns nothing.
+
+   IT IS THE MAP-SIDE ALTERNATIVE TO fdps_message_window_open, NOT A WRAPPER
+   AROUND IT.  The two leave the same panel in the same place, so the same
+   fdps_draw_text, fdps_message_window_wait_key and fdps_message_window_close
+   follow either; what differs is the animation and what the screen looks like
+   underneath.  tile_x == -1 means "not on the map" and hands the whole opening
+   over to fdps_message_window_open instead -- an equality test, so -2 is a
+   tile column and not a second way of saying no.
+
+   THE ZOOM REPLACES THE VIEWPORT AND THE SLIDE PRESERVES THE SCREEN.  Each of
+   the seven frames is composed by fdps_draw_scene_layers -- the live scrolling
+   map, the units and the cursor -- and only the 312 x 192 viewport at screen
+   (4, 4) is presented, so anything a caller had drawn inside it is gone and
+   the four-pixel border is untouched.  fdps_message_window_open, on the -1
+   arm, composes from a copy of the screen it found and moves the whole page.
+
+   tile_x and tile_y are the speaker's tile on the battle map, 0-based; they
+   are scaled by the 24-pixel tile and handed to fdps_map_cursor_move_to
+   (mapcur.h), so the call also MOVES THE MAP CURSOR AND MAY SCROLL THE VIEW.
+   tile_y is not read at all on the -1 arm.
+
+   IT LEAVES data_fdps_map_cursor_draw_mode HOLDING 1 (gamedata.h) whenever the
+   speaker is on the map.  The mode is cleared to 0 so that the scroll draws no
+   cursor and then set to 1 for the zoom; the caller's own mode is not saved
+   and not put back, so a movement range that was being outlined is showing a
+   plain box afterwards.  The -1 arm does not touch it.
+
+   face_index selects the speaker's portrait in FACE.CEL.  On the map arm it
+   goes straight to fdps_load_and_draw_portrait, whose no-portrait test is
+   == -1, so any OTHER negative index is scaled into a directory offset in
+   front of the table; on the -1 arm fdps_message_window_open sees it first and
+   releases the buffer for any negative value. */
+extern void fdps_message_window_open_from_tile(int tile_x, int tile_y,
+                                               int face_index);
+#pragma aux fdps_message_window_open_from_tile "*" parm caller [];
+
 #endif

@@ -2550,6 +2550,14 @@
       "status": "committed",
       "emitted_against": "0x28f",
       "rounds": 0
+    },
+    "00020a70": {
+      "name": "fdps_message_window_open_from_tile",
+      "target": "msgwin.c",
+      "body_size": "0x1ea",
+      "status": "committed",
+      "emitted_against": "0x1ea",
+      "rounds": 0
     }
   }
 }
