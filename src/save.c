@@ -246,6 +246,185 @@ int fdps_save_slot_select_loop(void *background, int *slot)
     return result;
 }
 
+/* The whole FDE.SAV image and where the three panel slots sit inside it, PUSH
+   0x59cb at 0002488c, 000248d0 and 000248ef for the size, ADD EDX,0x312b at
+   00024929 for the base and IMUL EAX,[EBP-0x8],0xa28 at 0002491f for the
+   stride.  The stride is sizeof(struct fdps_save_slot) exactly (fdpstype.h),
+   and 0x312b + 4 * 0xa28 is the 0x59cb the file holds -- the fourth slot is on
+   disc and is not reachable from this screen (save.h). */
+#define SAVE_IMAGE_BYTES 0x59cb
+#define SAVE_IMAGE_SLOTS_AT 0x312b
+#define SAVE_SLOT_STRIDE 0xa28
+
+/* The chapter byte of a slot that has never been written, CMP EAX,0xff at
+   00024942 on the byte the AND EAX,0xff at 0002493d just widened -- the byte
+   value 255 and not -1 (contract C in rebuild_info/emit_pipeline.md).
+
+   IT IS ALSO THE FILL BYTE, PUSH 0xff at 000248f4, and that is not a
+   coincidence: filling the whole image with it is exactly how a missing
+   FDE.SAV makes every slot read as never written.  fdps_draw_save_slot_panel
+   below tests the same byte for the same thing under its own name, because it
+   is reached with the record already in hand and never sees the fill. */
+#define SAVE_SLOT_UNWRITTEN_CHAPTER 0xff
+
+/* What goes into data_fdps_ui_save_slot_occupied_flags, MOV 0x0 at 00024953
+   and MOV 0x1 at 00024969.  They are a flag and not a count: the one reader
+   tests them against zero (save.h). */
+#define SAVE_SLOT_FLAG_EMPTY 0
+#define SAVE_SLOT_FLAG_OCCUPIED 1
+
+/* Where the three panels go on the page, ADD EDX,0xd at 0002498c for the
+   column and IMUL EAX,[EBP-0x8],0x34 / ADD EAX,0x1a at 0002497c for the row:
+   the first panel's top-left byte is pixel (13, 26) and the next two are 52
+   rows below each other, which puts them at rows 26, 78 and 130 of a 200-row
+   page. */
+#define SAVE_PANEL_COL 0x0d
+#define SAVE_PANEL_FIRST_ROW 0x1a
+#define SAVE_PANEL_ROW_PITCH 0x34
+
+/* How the background is laid down: sprite 0 at the page origin with no
+   operand and blit mode 0, the opaque pass-through -- six PUSH 0x0 around the
+   PUSH 0x140 at 00024861 through 00024872 (sprite.h). */
+#define SAVE_BG_SPRITE 0
+#define SAVE_BG_X 0
+#define SAVE_BG_Y 0
+#define SAVE_BG_BLIT_OPERAND 0
+#define SAVE_BG_BLIT_MODE 0
+
+/* One party roster record, IMUL EAX,[EBP-0x8],0x50 at 00024a03.  The roster
+   block is an array of struct fdps_unit_record and the original scales the
+   index off a byte pointer itself (gamedata.h). */
+#define ROSTER_RECORD_STRIDE 0x50
+
+/* 00024830.  Composes the whole save/load page and hands it to the caller:
+   the background named by `bg_cel_name` out of MISC.VFS, the three slot
+   summaries read out of FDE.SAV, and the party's icon groups put back into the
+   sprite cache the summaries emptied.  See save.h for the argument, the
+   answer, and what a caller inherits.
+
+   STRAIGHT LINE APART FROM THREE BRANCHES AND TWO LOOPS, and none of the
+   branches is a fork over what to draw: the save file either exists or is
+   stood in for, the old sprite cache either has a block to give back or does
+   not, and both loops are the -od shape with the body below the increment and
+   a JMP back to the test.
+
+   "FDE.SAV", "ICON.CEL" and "rb" are written here as literals rather than
+   through the SLOT_ named copies below, because the original holds ONE copy of
+   each and both functions push the same addresses -- 0x61a00 and 0x61a04 at
+   000249cc and 000249d2 here, at 00024ab5 and 00024abb in the panel.  Identical
+   literals in one translation unit are pooled, which is that same single copy.
+
+   THE NAME THE BACKGROUND IS ASKED FOR IS WRITTEN TO.  It reaches strupr
+   inside fdps_vfs_load_entry, which upper-cases the caller's own storage in
+   place (vfs.h), so both call sites' literals -- "Save.cel" at 0x61adc and
+   "Load.cel" at 0x61aec -- are folded to upper case by the first screen and
+   stay that way (rebuild_info/pitfalls.md).
+
+   FOUR CALLS' ANSWERS ARE READ AND ONLY ONE OF THEM IS TESTED.
+   fdps_vfs_load_entry's is the background cel, blitted once and freed at
+   00024884.  Both mallocs' answers are used without a test, the same as
+   everywhere else in this file.  fopen's IS tested at 000248b3, and that test
+   is the whole of the missing-file handling -- but only the first fopen: the
+   ICON.CEL stream at 000249d8 goes straight into fdps_cache_cel_sprite_group
+   and fclose untested, which is what fdps_draw_save_slot_panel does with it
+   too.  fread's count, fdps_cache_cel_sprite_group's slot number,
+   fdps_cel_blit_sprite, fdps_xor_crypt_buffer, memset, free and fclose all
+   return values the original never looks at.
+
+   A SHORT FDE.SAV IS NOT DETECTED.  fread's count is discarded, so a truncated
+   file leaves the tail of the buffer holding whatever malloc handed over and
+   the cipher runs over that too.  The file the game writes is always the whole
+   0x59cb bytes, and nothing here guards the case.
+
+   THE SPRITE CACHE HAS TO BE REFILLED AND THAT IS WHY THE ROSTER LOOP IS HERE.
+   Each of the three panels empties the cache and loads one group into it, so on
+   the way out of the slot loop the cache holds the last panel's leader and
+   nothing else.  The loop below empties it once more and puts every roster
+   member's group back, in roster order, so the cache the rest of the game
+   paints out of is the one it had before this screen ran
+   (rebuild_info/pitfalls.md).  fdps_load_field_chapter_resources refills it the
+   same way (rsrc.c).
+
+   THE PAGE IS THE CALLER'S.  It is never freed here; all three call sites store
+   it, hand it to fdps_save_slot_select_loop as the background and free it
+   themselves. */
+unsigned char *fdps_saveload_screen_build(char *bg_cel_name)
+{
+    /* The background image for this screen, held only long enough to be
+       blitted into the page. */
+    unsigned char *background_cel;
+    /* The 320x200 page being composed, and the answer. */
+    unsigned char *page;
+    /* The whole FDE.SAV image, decrypted in place, or 0xff throughout when
+       there is no file to read. */
+    unsigned char *save_image;
+    /* The slot this pass of the loop flags and draws. */
+    struct fdps_save_slot *slot_record;
+    /* The roster entry whose icon group this pass puts back in the cache. */
+    struct fdps_unit_record *roster_member;
+    /* The save file, the one stream whose answer is tested. */
+    FILE *save_fp;
+    /* The icon sheet, open across the whole refill and never tested. */
+    FILE *icon_cel_fp;
+    int slot;
+    int member;
+
+    background_cel = (unsigned char *) fdps_vfs_load_entry(SLOT_PANEL_ARCHIVE,
+                                                           bg_cel_name);
+    page = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+    fdps_cel_blit_sprite(background_cel, SAVE_BG_SPRITE, page,
+                         VGA_SCREEN_PITCH, SAVE_BG_X, SAVE_BG_Y,
+                         SAVE_BG_BLIT_OPERAND, SAVE_BG_BLIT_MODE);
+    free(background_cel);
+
+    save_image = (unsigned char *) malloc((size_t) SAVE_IMAGE_BYTES);
+    save_fp = fopen("FDE.SAV", "rb");
+    if (save_fp != NULL) {
+        fread(save_image, 1, (size_t) SAVE_IMAGE_BYTES, save_fp);
+        fdps_xor_crypt_buffer(save_image, (unsigned int) SAVE_IMAGE_BYTES);
+        fclose(save_fp);
+    } else {
+        memset(save_image, SAVE_SLOT_UNWRITTEN_CHAPTER,
+               (size_t) SAVE_IMAGE_BYTES);
+    }
+
+    for (slot = 0; slot < SAVE_SLOT_COUNT; slot++) {
+        slot_record = (struct fdps_save_slot *)
+                      (save_image + SAVE_IMAGE_SLOTS_AT
+                       + slot * SAVE_SLOT_STRIDE);
+        if (slot_record->chapter_index == SAVE_SLOT_UNWRITTEN_CHAPTER) {
+            data_fdps_ui_save_slot_occupied_flags[slot] = SAVE_SLOT_FLAG_EMPTY;
+        } else {
+            data_fdps_ui_save_slot_occupied_flags[slot] =
+                SAVE_SLOT_FLAG_OCCUPIED;
+        }
+        fdps_draw_save_slot_panel(page
+                                      + (slot * SAVE_PANEL_ROW_PITCH
+                                         + SAVE_PANEL_FIRST_ROW)
+                                            * VGA_SCREEN_PITCH
+                                      + SAVE_PANEL_COL,
+                                  VGA_SCREEN_PITCH, slot_record);
+    }
+    free(save_image);
+
+    if (data_fdps_cel_sprite_cache_count != 0) {
+        free(data_fdps_cel_sprite_cache_ptr);
+    }
+    data_fdps_cel_sprite_cache_count = 0;
+
+    icon_cel_fp = fopen("ICON.CEL", "rb");
+    for (member = 0; member < data_fdps_roster_member_count; member++) {
+        roster_member = (struct fdps_unit_record *)
+                        (data_fdps_roster_array_ptr
+                         + member * ROSTER_RECORD_STRIDE);
+        fdps_cache_cel_sprite_group((int) roster_member->portrait_id,
+                                    icon_cel_fp);
+    }
+    fclose(icon_cel_fp);
+
+    return page;
+}
+
 /* The chapter byte of a slot that has never been written, CMP EAX,0xff at
    00024a5a on the byte the AND EAX,0xff just widened -- an unsigned widening,
    so this is the byte value 255 and not -1 (contract C in

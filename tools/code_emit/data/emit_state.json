@@ -2606,6 +2606,14 @@
       "status": "committed",
       "emitted_against": "0x301",
       "rounds": 0
+    },
+    "00024830": {
+      "name": "fdps_saveload_screen_build",
+      "target": "save.c",
+      "body_size": "0x20e",
+      "status": "committed",
+      "emitted_against": "0x20e",
+      "rounds": 0
     }
   }
 }

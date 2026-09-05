@@ -104,6 +104,42 @@ extern int data_fdps_ui_saveload_is_load_mode;
 extern int fdps_save_slot_select_loop(void *background, int *slot);
 #pragma aux fdps_save_slot_select_loop "*" parm caller [];
 
+/* 00024830.  Builds the whole save/load page and hands it back: the background
+   named by `bg_cel_name` loaded out of MISC.VFS and blitted into a fresh
+   320x200 page, the three slot summaries drawn onto it from FDE.SAV, and the
+   party's icon groups reloaded into the sprite cache afterwards.  Both screens
+   call it -- fdps_load_game_screen once and fdps_save_game_screen twice, the
+   second time to redraw the page after a save has been written.
+
+   `bg_cel_name` is a member of MISC.VFS: "Save.cel" for the save screen and
+   "Load.cel" for the load screen.  It is UPPER-CASED IN THE CALLER'S OWN
+   STORAGE by fdps_vfs_load_entry (vfs.h), so it cannot be a pointer into
+   read-only memory.
+
+   The answer is a 64000-byte heap block the caller owns and must free.  It is
+   never null-checked here and malloc's answer is not tested.
+
+   THE SCREEN READS FDE.SAV EVERY TIME IT IS BUILT and never caches it, which
+   is what makes the save screen's second call show the slot that was just
+   written.  A missing file is not an error: the image is filled with 0xff
+   instead and all three slots read as never written.
+
+   IT PUBLISHES data_fdps_ui_save_slot_occupied_flags, one entry per panel
+   slot, which is the only thing that survives the call besides the page.
+
+   IT LEAVES THE SPRITE CACHE HOLDING THE PARTY.  Each panel empties the cache
+   and loads one group into it, so the cache is emptied once more on the way
+   out and refilled from the roster in roster order -- without that the rest of
+   the game would paint out of a one-entry cache
+   (rebuild_info/pitfalls.md).  Anything a caller was holding into the cache
+   before the call is stale afterwards.
+
+   A container or a member that cannot be found ends the process inside
+   fdps_vfs_load_entry (vfs.h), and a missing ICON.CEL reaches
+   fdps_cache_cel_sprite_group as a null stream rather than being reported. */
+extern unsigned char *fdps_saveload_screen_build(char *bg_cel_name);
+#pragma aux fdps_saveload_screen_build "*" parm caller [];
+
 /* 00024a40.  Draws one slot's summary panel: the leader's face and level, the
    chapter the slot holds and that chapter's title, and the date and time the
    slot was written.  fdps_saveload_screen_build calls it once per slot and it
