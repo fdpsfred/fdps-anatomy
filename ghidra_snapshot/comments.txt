@@ -4552,7 +4552,7 @@ Watcom alignment padding: lea eax,[eax+0] / lea edx,[edx+0] / mov eax,eax, align
 Runs the IconAni event script's three-way player choice: asks up to two two-option questions and hands the interpreter back the branch the player picked, 1, 2 or 3.
 
 Algorithm:
-Preloads the answer with 3, the value that survives when the player takes the second option twice. Reveals the message panel (FUN_000205b0, panel id 0x7a), renders message 0x10 of the loaded chapter text at DAT_00060124 with FUN_0001ff60, runs fdps_prompt_two_choice, and retracts the panel with FUN_00020820. Every FUN_0001ff60 call here passes the same trailing arguments: pitch 0x140 and the glyph arguments 0xd0, 0, 0x6d. The two calls that follow a panel reveal draw into the in-panel cursor 0xaa44a; the four that stand alone draw at 0xa0000, the mode-13h screen, and compose their own window first.
+Preloads the answer with 3, the value that survives when the player takes the second option twice. Reveals the message panel (fdps_message_window_open, face index 0x7a, the FACE.CEL portrait record), renders message 0x10 of the loaded chapter text at data_fdps_current_chapter_text_ptr with fdps_draw_text, runs fdps_prompt_two_choice, and retracts the panel with fdps_message_window_close. Every fdps_draw_text call here passes the same trailing arguments: pitch 0x140 and the glyph arguments 0xd0, 0, 0x6d. The two calls that follow a panel reveal draw into the in-panel cursor 0xaa44a; the four that stand alone draw at 0xa0000, the mode-13h screen, and compose their own window only when the entry carries a page-break or speaker code.
 On answer 0 (the left option) it renders message 0x11 and sets the answer to 1. On anything else -- the right option, or -1 for cancel -- it reveals the panel again, renders message 0x13, asks a second time and retracts: answer 0 renders message 0x14 and sets the answer to 2, anything else renders message 0x15 and leaves the answer at 3.
 All three branches then render message 0x12 and return the answer.
 
@@ -4560,7 +4560,7 @@ Parameters:
   none
 
 Returns:
-  int -- 1, 2 or 3, the branch the player chose. The interpreter at 00021650 reaches this function through script opcode 0x63 and keeps the value; its opcode 4 later passes that value to FUN_00023830 as the record match key whenever the opcode's own key operand is 0xff. In the shipped data only Icon11.dat -- chapter 12's opening script -- carries opcode 0x63, and map11.dat holds exactly three records keyed 1, 2 and 3, so the three answers deploy the three rooms of that chapter.
+  int -- 1, 2 or 3, the branch the player chose. The interpreter at 00021650 reaches this function through script opcode 0x63 and keeps the value; its opcode 4 later passes that value to fdps_deploy_wave as the record match key whenever the opcode's own key operand is 0xff. In the shipped data only Icon11.dat -- chapter 12's opening script -- carries opcode 0x63, and map11.dat holds exactly three records keyed 1, 2 and 3, so the three answers deploy the three rooms of that chapter.
 
 Pool: fdps  [no Function ID hit in either library set; every caller and callee is settled game code]
 

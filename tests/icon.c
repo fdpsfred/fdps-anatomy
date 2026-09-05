@@ -41,12 +41,15 @@
  * is therefore in the same position; every test here passes 0.
  */
 #include <conio.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <dos.h>
 #include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "keybd.h"
 #include "mapdraw.h"
 #include "icon.h"
 
@@ -1719,6 +1722,544 @@ static void shake_a_held_step_displaces_once(void)
     CHECK_EQ(shake_seen_count, 1);
 }
 
+/* ---- fdps_icon_script_prompt_three_way_choice, 00022600 -----------------
+ *
+ * Expected values come from the assembly: MOV dword ptr [EBP-0xc],0x3 at
+ * 0002260c for the preloaded answer, the two CMP dword ptr [EBP-0x8],0x0 /
+ * JNZ at 0002264d and 000226bc for the branch tests, MOV dword ptr
+ * [EBP-0xc],0x1 at 00022676 and 0x2 at 000226e5 for the two answers that are
+ * written, the PUSH 0x10, 0x11, 0x13, 0x14, 0x15 and 0x12 in front of the six
+ * fdps_draw_text calls, and the PUSH 0xaa44a in front of the two that follow
+ * a panel reveal against the PUSH 0xa0000 in front of the other four.  None
+ * of them is read off the emitted C.
+ *
+ * WHAT THE FUNCTION IS OBSERVED THROUGH.  It takes no arguments, touches no
+ * global of its own and returns one int, so the two observables are that
+ * return value and what its six text draws leave on the visible page.  The
+ * whole run is therefore made in mode 13h with a timer interrupt playing the
+ * player's keys, the frame is captured out of the aperture afterwards, and
+ * the adapter is back in text mode before the first CHECK_EQ so a failure
+ * prints on a readable screen.
+ *
+ * HOW THE KEYS ARE PLAYED, and why this feeder is not the one tests/msgwin.c
+ * uses.  A run here contains up to two prompts, and every prompt begins with
+ * fdps_flush_keyboard_queue, which stores the read index into the WRITE index
+ * (keybd.h): a code appended between the two prompts is thrown away, and the
+ * whole window between them -- two panel slides, twelve retrace-paced 64000
+ * byte presents -- is many timer ticks long, so a feeder that appended one
+ * code per tick would lose the second prompt's key and hang.  The handler
+ * installed below therefore appends a code only while the ring is EMPTY and
+ * advances through the case's list only when the read index has moved, which
+ * only fdps_read_keyboard_queue moves.  A code a flush discarded is simply
+ * appended again on the next tick, and the count of read indexes seen is
+ * exactly how many keys the run consumed -- which is how a case says how many
+ * prompts ran.  Past the end of the list the last code is held, so a run that
+ * asks for one more key than the case staged fails an assertion instead of
+ * spinning forever.
+ *
+ * HOW A TEXT DRAW IS MADE VISIBLE.  The font staged here is one 16-pixel,
+ * one-row cell per glyph whose glyph n paints exactly column n, and the
+ * chapter text block staged here gives entry 0x10 + n a stream of the single
+ * glyph n and nothing else.  So a text id the routine drew at the screen
+ * origin shows up as one pixel at row 0, column id - 0x10, and the ids it did
+ * not draw leave their columns at the palette index 0 that
+ * fdps_message_window_close's clean page put there.  Row 0 is inside the four
+ * black rows above that page's 312 x 192 viewport, so what is in the viewport
+ * -- nothing is staged into the scene -- cannot reach the columns the cases
+ * read.  The two questions, ids 0x10 and 0x13, go to the panel cursor 0xaa44a
+ * instead and are wiped by the close that follows them, so their columns
+ * staying at 0 is what says they were not drawn at the screen origin.
+ *
+ * WHAT IS NOT ASSERTED.  Where inside the panel a question lands, what the
+ * portrait is and what the two slides look like belong to
+ * fdps_message_window_open, fdps_message_window_close and
+ * fdps_prompt_two_choice and are covered against those functions in
+ * tests/msgwin.c.  The colours the six draws pass -- 0xd0, 0 and 0x6d -- are
+ * pinned only as "the pixel is the foreground colour": with the fixture's
+ * outline flag clear and both shadow offsets 0 the outline colour lands on
+ * the same pixels the foreground then overwrites, so it cannot be seen from
+ * here.
+ *
+ * FACE.CEL HAS TO BE THERE.  Both panel reveals pass face 0x7a, and
+ * fdps_message_window_open sends a non-negative face straight to
+ * fdps_load_and_draw_portrait, which ends the process at exit(1) on a sheet
+ * it cannot open rather than failing an assertion.  Every case below skips
+ * itself when the sheet is not next to the executable.
+ * ------------------------------------------------------------------ */
+
+#define CHOICE_VGA_BASE 0x000a0000
+#define CHOICE_MODE_TEXT 0x03
+#define CHOICE_MODE_320X200X256 0x13
+#define CHOICE_SCREEN_PITCH 320
+#define CHOICE_SCREEN_ROWS 200
+#define CHOICE_SCREEN_BYTES (CHOICE_SCREEN_PITCH * CHOICE_SCREEN_ROWS)
+
+/* The portrait sheet the two reveals load their speaker out of. */
+#define CHOICE_FACE_SHEET "FACE.CEL"
+
+/* The make codes the prompt answers to, its three answers, and the timer
+   vector the feeder is installed on. */
+#define CHOICE_KEY_ESC 0x01
+#define CHOICE_KEY_ENTER 0x1c
+#define CHOICE_KEY_RIGHT 0x4d
+#define CHOICE_TIMER_VECTOR 8
+
+/* The three branches the routine can answer with. */
+#define CHOICE_BRANCH_FIRST 1
+#define CHOICE_BRANCH_SECOND 2
+#define CHOICE_BRANCH_THIRD 3
+
+/* The text block: entries 0 to 0x15, a shared empty stream for every id the
+   routine must not ask for, and one single-glyph stream per id it does. */
+#define CHOICE_TEXT_IDS 0x16
+#define CHOICE_TEXT_FIRST_ID 0x10
+#define CHOICE_TEXT_DRAWN_IDS 6
+#define CHOICE_TEXT_EMPTY_AT 0x30
+#define CHOICE_TEXT_STREAMS_AT 0x34
+#define CHOICE_TEXT_STREAM_BYTES 4
+#define CHOICE_TEXT_BLOCK_BYTES (CHOICE_TEXT_STREAMS_AT \
+                                 + CHOICE_TEXT_DRAWN_IDS \
+                                   * CHOICE_TEXT_STREAM_BYTES)
+#define CHOICE_TEXT_END (-1)
+
+/* The columns the six ids paint at row 0, one per id. */
+#define CHOICE_COL_FIRST_QUESTION 0
+#define CHOICE_COL_FIRST_TAKEN 1
+#define CHOICE_COL_CLOSING 2
+#define CHOICE_COL_SECOND_QUESTION 3
+#define CHOICE_COL_SECOND_TAKEN 4
+#define CHOICE_COL_THIRD_TAKEN 5
+
+/* The colour a drawn glyph carries, and the colour an undrawn column keeps:
+   the foreground the routine pushes, and the palette index
+   fdps_message_window_close's zeroed page leaves behind. */
+#define CHOICE_GLYPH_COLOR 0xd0
+#define CHOICE_CLEAR_COLOR 0x00
+
+/* The font fixture: sixteen glyphs of one 16-pixel row, two bytes each, with
+   glyph n setting the bit for column n. */
+#define CHOICE_FONT_GLYPHS 16
+#define CHOICE_FONT_STRIDE 2
+#define CHOICE_FONT_CELL_WIDTH 16
+#define CHOICE_FONT_CELL_ROWS 1
+#define CHOICE_FONT_ADVANCE 24
+#define CHOICE_FONT_LINE_HEIGHT 2
+
+/* The Message.cel stand-in: one 302 x 73 sprite encoded as five fill runs per
+   row, because a fill run cannot be longer than 64 pixels. */
+#define CHOICE_PANEL_W 302
+#define CHOICE_PANEL_H 73
+#define CHOICE_PANEL_FILL_MAX 64
+#define CHOICE_PANEL_SEGMENTS 5
+#define CHOICE_PANEL_LAST_SEGMENT_W 46
+#define CHOICE_PANEL_ROW_BYTES (CHOICE_PANEL_SEGMENTS * 2)
+#define CHOICE_PANEL_STREAM_AT 0x40
+#define CHOICE_PANEL_SHEET_BYTES (CHOICE_PANEL_STREAM_AT \
+                                  + CHOICE_PANEL_H * CHOICE_PANEL_ROW_BYTES)
+#define CHOICE_PANEL_COLOR 0x40
+
+/* The Shadow.cel stand-in the prompt draws its two option cells out of:
+   fourteen 24 x 24 sprites, one fill run per row, sprite i filled with i. */
+#define CHOICE_SHADOW_SPRITES 14
+#define CHOICE_SHADOW_SPRITE_W 24
+#define CHOICE_SHADOW_SPRITE_H 24
+#define CHOICE_SHADOW_STREAM_BYTES (CHOICE_SHADOW_SPRITE_H * 2)
+#define CHOICE_SHADOW_STREAM_AT 0x50
+#define CHOICE_SHADOW_SHEET_BYTES (CHOICE_SHADOW_STREAM_AT \
+                                   + CHOICE_SHADOW_SPRITES \
+                                     * CHOICE_SHADOW_STREAM_BYTES)
+
+/* The .CEL header fields both fixtures carry, and a table position neither
+   reader may consult: both hardwire the table at 0x0f. */
+#define CHOICE_CEL_TABLE_AT 0x0f
+#define CHOICE_CEL_DECOY_TABLE_AT 0x100
+#define CHOICE_CEL_VERSION 1
+#define CHOICE_CEL_PIXEL_FORMAT 2
+
+/* More keys than any case here plays, and fewer than the ring holds. */
+#define CHOICE_KEYS_MAX 4
+
+static unsigned char choice_panel_sheet[CHOICE_PANEL_SHEET_BYTES];
+static unsigned char choice_shadow_sheet[CHOICE_SHADOW_SHEET_BYTES];
+static unsigned char choice_text_block[CHOICE_TEXT_BLOCK_BYTES];
+static unsigned char choice_font[CHOICE_FONT_GLYPHS * CHOICE_FONT_STRIDE];
+static unsigned char choice_capture[CHOICE_SCREEN_BYTES];
+static unsigned char choice_keys[CHOICE_KEYS_MAX];
+static volatile int choice_key_count;
+static volatile int choice_keys_read;
+static volatile int choice_last_head;
+static int choice_fixtures_staged = 0;
+static void (__interrupt __far *choice_saved_timer)();
+
+static void choice_u16(unsigned char *image, int at, unsigned int value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void choice_u32(unsigned char *image, int at, unsigned long value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    image[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    image[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+/* A signed 16-bit word at a byte position: a table offset and a stream token
+   are both written this way, which is the whole of the block format. */
+static void choice_put_word(unsigned char *block, int at, int value)
+{
+    *(short *) (block + at) = (short) value;
+}
+
+static int choice_sheet_present(void)
+{
+    FILE *probe;
+
+    probe = fopen(CHOICE_FACE_SHEET, "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+    return 1;
+}
+
+/* The .CEL header both fixtures share. */
+static void choice_cel_header(unsigned char *sheet, int width, int height,
+                              int sprites)
+{
+    sheet[0] = 'C';
+    sheet[1] = 'E';
+    sheet[2] = 'L';
+    choice_u16(sheet, 0x03, CHOICE_CEL_VERSION);
+    choice_u16(sheet, 0x05, CHOICE_CEL_DECOY_TABLE_AT);
+    choice_u16(sheet, 0x07, (unsigned int) width);
+    choice_u16(sheet, 0x09, (unsigned int) height);
+    choice_u16(sheet, 0x0b, (unsigned int) sprites);
+    choice_u16(sheet, 0x0d, CHOICE_CEL_PIXEL_FORMAT);
+}
+
+/* The two sheets, the font and the text block.  None of them changes between
+   cases, so they are built once. */
+static void choice_stage_fixtures(void)
+{
+    int row;
+    int segment;
+    int cursor;
+    int run;
+    int sprite;
+    int stream_at;
+    int glyph;
+    int text_id;
+
+    if (choice_fixtures_staged) {
+        return;
+    }
+    choice_fixtures_staged = 1;
+
+    memset(choice_panel_sheet, 0, (size_t) CHOICE_PANEL_SHEET_BYTES);
+    choice_cel_header(choice_panel_sheet, CHOICE_PANEL_W, CHOICE_PANEL_H, 1);
+    choice_u32(choice_panel_sheet, CHOICE_CEL_TABLE_AT,
+               (unsigned long) CHOICE_PANEL_STREAM_AT);
+    choice_u32(choice_panel_sheet, CHOICE_CEL_TABLE_AT + 4,
+               (unsigned long) CHOICE_PANEL_SHEET_BYTES);
+    for (row = 0; row < CHOICE_PANEL_H; row++) {
+        cursor = CHOICE_PANEL_STREAM_AT + row * CHOICE_PANEL_ROW_BYTES;
+        for (segment = 0; segment < CHOICE_PANEL_SEGMENTS; segment++) {
+            if (segment == CHOICE_PANEL_SEGMENTS - 1) {
+                run = CHOICE_PANEL_LAST_SEGMENT_W;
+            } else {
+                run = CHOICE_PANEL_FILL_MAX;
+            }
+            choice_panel_sheet[cursor] = (unsigned char) (run - 1);
+            choice_panel_sheet[cursor + 1] = CHOICE_PANEL_COLOR;
+            cursor += 2;
+        }
+    }
+
+    memset(choice_shadow_sheet, 0, (size_t) CHOICE_SHADOW_SHEET_BYTES);
+    choice_cel_header(choice_shadow_sheet, CHOICE_SHADOW_SPRITE_W,
+                      CHOICE_SHADOW_SPRITE_H, CHOICE_SHADOW_SPRITES);
+    for (sprite = 0; sprite < CHOICE_SHADOW_SPRITES; sprite++) {
+        stream_at = CHOICE_SHADOW_STREAM_AT
+                    + sprite * CHOICE_SHADOW_STREAM_BYTES;
+        choice_u32(choice_shadow_sheet, CHOICE_CEL_TABLE_AT + sprite * 4,
+                   (unsigned long) stream_at);
+        for (row = 0; row < CHOICE_SHADOW_SPRITE_H; row++) {
+            choice_shadow_sheet[stream_at + row * 2] =
+                (unsigned char) (CHOICE_SHADOW_SPRITE_W - 1);
+            choice_shadow_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) sprite;
+        }
+    }
+    choice_u32(choice_shadow_sheet,
+               CHOICE_CEL_TABLE_AT + CHOICE_SHADOW_SPRITES * 4,
+               (unsigned long) CHOICE_SHADOW_SHEET_BYTES);
+
+    memset(choice_font, 0, (size_t) sizeof(choice_font));
+    for (glyph = 0; glyph < 8; glyph++) {
+        choice_font[glyph * CHOICE_FONT_STRIDE] =
+            (unsigned char) (0x80 >> glyph);
+    }
+    for (glyph = 8; glyph < CHOICE_FONT_GLYPHS; glyph++) {
+        choice_font[glyph * CHOICE_FONT_STRIDE + 1] =
+            (unsigned char) (0x80 >> (glyph - 8));
+    }
+
+    memset(choice_text_block, 0, (size_t) CHOICE_TEXT_BLOCK_BYTES);
+    choice_put_word(choice_text_block, CHOICE_TEXT_EMPTY_AT, CHOICE_TEXT_END);
+    for (text_id = 0; text_id < CHOICE_TEXT_IDS; text_id++) {
+        choice_put_word(choice_text_block, text_id * 2, CHOICE_TEXT_EMPTY_AT);
+    }
+    for (glyph = 0; glyph < CHOICE_TEXT_DRAWN_IDS; glyph++) {
+        stream_at = CHOICE_TEXT_STREAMS_AT + glyph * CHOICE_TEXT_STREAM_BYTES;
+        choice_put_word(choice_text_block,
+                        (CHOICE_TEXT_FIRST_ID + glyph) * 2, stream_at);
+        choice_put_word(choice_text_block, stream_at, glyph);
+        choice_put_word(choice_text_block, stream_at + 2, CHOICE_TEXT_END);
+    }
+}
+
+/* Everything the three callees read that this file has to make definite: the
+   font, the text block, the two sheets, an empty scene so the close's
+   recomposition draws nothing, and village mode so the prompt lifts its
+   backdrop off the visible page instead of composing one. */
+static void choice_stage_globals(void)
+{
+    choice_stage_fixtures();
+
+    data_fdps_font_glyph_width = (unsigned char) CHOICE_FONT_CELL_WIDTH;
+    data_fdps_glyph_cell_height = (unsigned char) CHOICE_FONT_CELL_ROWS;
+    data_fdps_font_glyph_stride_bytes = CHOICE_FONT_STRIDE;
+    data_fdps_font_outline_enabled_flag = (unsigned char) 0;
+    data_fdps_glyph_shadow_row_offset = 0;
+    data_fdps_font_shadow_offset_x = 0;
+    data_fdps_glyph_advance_x = CHOICE_FONT_ADVANCE;
+    data_fdps_font_line_height = CHOICE_FONT_LINE_HEIGHT;
+    data_fdps_font_sheet_ptr = choice_font;
+
+    data_fdps_current_chapter_text_ptr = choice_text_block;
+    data_fdps_message_window_sheet_ptr = choice_panel_sheet;
+    data_fdps_shadow_sprite_sheet_ptr = choice_shadow_sheet;
+
+    data_fdps_village_mode_flag = 1;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_timer_tick_counter = 0;
+}
+
+static void choice_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* The player.  It advances the game's clock like the real timer handler and
+   appends the case's next make code the way fdps_keyboard_isr does, but only
+   while the ring is empty, and it steps through the list on the read index
+   moving rather than on ticks -- see the note at the top of this section. */
+static void __interrupt __far choice_timer_isr(void)
+{
+    int slot;
+    int next_key;
+
+    ++data_fdps_timer_tick_counter;
+
+    if (data_fdps_input_scancode_queue_head != choice_last_head) {
+        choice_last_head = data_fdps_input_scancode_queue_head;
+        choice_keys_read++;
+    }
+
+    if (data_fdps_input_scancode_queue_head
+            == data_fdps_input_scancode_queue_write_index) {
+        next_key = choice_keys_read;
+        if (next_key >= choice_key_count) {
+            next_key = choice_key_count - 1;
+        }
+        slot = data_fdps_input_scancode_queue_write_index;
+        data_fdps_input_scancode_queue[slot] = choice_keys[next_key];
+        slot++;
+        if (slot == SCANCODE_QUEUE_LEN) {
+            slot = 0;
+        }
+        data_fdps_input_scancode_queue_write_index = slot;
+    }
+
+    _chain_intr(choice_saved_timer);
+}
+
+/* One whole run: the adapter in the mode the game runs it in, the feeder
+   installed, the frame captured out of the aperture and text mode back before
+   anything is asserted.  Answers with what the routine returned. */
+static int choice_run(void)
+{
+    int answer;
+
+    choice_stage_globals();
+
+    choice_keys_read = 0;
+    choice_last_head = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+
+    choice_set_mode(CHOICE_MODE_320X200X256);
+    choice_saved_timer = _dos_getvect(CHOICE_TIMER_VECTOR);
+    _dos_setvect(CHOICE_TIMER_VECTOR, choice_timer_isr);
+    answer = fdps_icon_script_prompt_three_way_choice();
+    _dos_setvect(CHOICE_TIMER_VECTOR, choice_saved_timer);
+    memmove(choice_capture, (void *) CHOICE_VGA_BASE,
+            (size_t) CHOICE_SCREEN_BYTES);
+    choice_set_mode(CHOICE_MODE_TEXT);
+
+    if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+        free(data_fdps_portrait_sprite_buf_ptr);
+        data_fdps_portrait_sprite_buf_ptr = NULL;
+    }
+    data_fdps_village_mode_flag = 0;
+    return answer;
+}
+
+/* Loads the keys this case plays, in the order the prompts read them. */
+static void choice_stage_keys(int count, int first, int second, int third,
+                              int fourth)
+{
+    choice_keys[0] = (unsigned char) first;
+    choice_keys[1] = (unsigned char) second;
+    choice_keys[2] = (unsigned char) third;
+    choice_keys[3] = (unsigned char) fourth;
+    choice_key_count = count;
+}
+
+/* What row 0 of the captured frame holds at one text id's column. */
+static int choice_column(int column)
+{
+    return (int) choice_capture[column];
+}
+
+/* ---------------------------------------------------------------------- */
+
+/* The left option at the first question is the only value either test
+   matches, and it ends the routine there: MOV dword ptr [EBP-0xc],0x1 at
+   00022676 and JMP 0x00022711 past the whole else arm.  One key is read, so
+   the second question was never asked, and the ids drawn at the screen origin
+   are 0x11 and then 0x12 -- neither question's id is among them, because both
+   go to the panel cursor 0xaa44a and the close wipes them. */
+static void choice_the_left_option_answers_the_first_branch(void)
+{
+    int answer;
+
+    if (!choice_sheet_present()) {
+        return;
+    }
+    choice_stage_keys(1, CHOICE_KEY_ENTER, 0, 0, 0);
+    answer = choice_run();
+
+    CHECK_EQ(answer, CHOICE_BRANCH_FIRST);
+    CHECK_EQ(choice_keys_read, 1);
+    CHECK_EQ(choice_column(CHOICE_COL_FIRST_TAKEN), CHOICE_GLYPH_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_CLOSING), CHOICE_GLYPH_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_SECOND_TAKEN), CHOICE_CLEAR_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_THIRD_TAKEN), CHOICE_CLEAR_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_FIRST_QUESTION), CHOICE_CLEAR_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_SECOND_QUESTION), CHOICE_CLEAR_COLOR);
+}
+
+/* The right option at the first question and the left at the second is the
+   inner test's taken arm: MOV dword ptr [EBP-0xc],0x2 at 000226e5.  Three
+   keys are read -- the arrow, the confirm, and the second question's confirm
+   -- and the ids drawn at the origin are 0x14 and 0x12, with 0x11 absent
+   because the first branch was not taken. */
+static void choice_the_right_option_then_the_left_answers_the_second(void)
+{
+    int answer;
+
+    if (!choice_sheet_present()) {
+        return;
+    }
+    choice_stage_keys(3, CHOICE_KEY_RIGHT, CHOICE_KEY_ENTER,
+                      CHOICE_KEY_ENTER, 0);
+    answer = choice_run();
+
+    CHECK_EQ(answer, CHOICE_BRANCH_SECOND);
+    CHECK_EQ(choice_keys_read, 3);
+    CHECK_EQ(choice_column(CHOICE_COL_SECOND_TAKEN), CHOICE_GLYPH_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_CLOSING), CHOICE_GLYPH_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_FIRST_TAKEN), CHOICE_CLEAR_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_THIRD_TAKEN), CHOICE_CLEAR_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_SECOND_QUESTION), CHOICE_CLEAR_COLOR);
+}
+
+/* The right option twice writes nothing at all: the inner else arm at
+   000226ee draws 0x15 and falls through, so what comes back is the 3 the
+   prologue put in the slot at 0002260c.  A body that assigned the answer in
+   that arm as the other two do would be indistinguishable here, which is why
+   the case that matters for the preload is the cancel one below. */
+static void choice_the_right_option_twice_answers_the_third(void)
+{
+    int answer;
+
+    if (!choice_sheet_present()) {
+        return;
+    }
+    choice_stage_keys(4, CHOICE_KEY_RIGHT, CHOICE_KEY_ENTER,
+                      CHOICE_KEY_RIGHT, CHOICE_KEY_ENTER);
+    answer = choice_run();
+
+    CHECK_EQ(answer, CHOICE_BRANCH_THIRD);
+    CHECK_EQ(choice_keys_read, 4);
+    CHECK_EQ(choice_column(CHOICE_COL_THIRD_TAKEN), CHOICE_GLYPH_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_CLOSING), CHOICE_GLYPH_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_FIRST_TAKEN), CHOICE_CLEAR_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_SECOND_TAKEN), CHOICE_CLEAR_COLOR);
+}
+
+/* A cancel is not a way out.  Esc makes fdps_prompt_two_choice answer -1, and
+   the test at 0002264d is JNZ against 0, so -1 takes the same else arm the
+   right option takes and the second question is asked.  A body that tested
+   for the right option with == 1, or that returned early on -1, would answer
+   1 or leave the dialogue here instead of 2. */
+static void choice_a_cancel_at_the_first_question_asks_the_second(void)
+{
+    int answer;
+
+    if (!choice_sheet_present()) {
+        return;
+    }
+    choice_stage_keys(2, CHOICE_KEY_ESC, CHOICE_KEY_ENTER, 0, 0);
+    answer = choice_run();
+
+    CHECK_EQ(answer, CHOICE_BRANCH_SECOND);
+    CHECK_EQ(choice_keys_read, 2);
+    CHECK_EQ(choice_column(CHOICE_COL_SECOND_TAKEN), CHOICE_GLYPH_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_CLOSING), CHOICE_GLYPH_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_FIRST_TAKEN), CHOICE_CLEAR_COLOR);
+}
+
+/* The same at the second question, where the arm writes no answer at all:
+   two cancels leave the slot holding the 3 it was preloaded with, and 0x15 is
+   the line that goes with it.  This is the case that would catch a preload of
+   0 or an answer written in the wrong arm. */
+static void choice_a_cancel_at_both_questions_answers_the_third(void)
+{
+    int answer;
+
+    if (!choice_sheet_present()) {
+        return;
+    }
+    choice_stage_keys(2, CHOICE_KEY_ESC, CHOICE_KEY_ESC, 0, 0);
+    answer = choice_run();
+
+    CHECK_EQ(answer, CHOICE_BRANCH_THIRD);
+    CHECK_EQ(choice_keys_read, 2);
+    CHECK_EQ(choice_column(CHOICE_COL_THIRD_TAKEN), CHOICE_GLYPH_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_CLOSING), CHOICE_GLYPH_COLOR);
+    CHECK_EQ(choice_column(CHOICE_COL_SECOND_TAKEN), CHOICE_CLEAR_COLOR);
+}
+
 void run_icon_tests(void)
 {
     RUN_TEST(the_dac_reads_back_what_was_written);
@@ -1766,4 +2307,9 @@ void run_icon_tests(void)
     RUN_TEST(shake_a_zero_step_count_renders_nothing);
     RUN_TEST(shake_each_step_is_measured_from_the_origin_saved_on_entry);
     RUN_TEST(shake_a_held_step_displaces_once);
+    RUN_TEST(choice_the_left_option_answers_the_first_branch);
+    RUN_TEST(choice_the_right_option_then_the_left_answers_the_second);
+    RUN_TEST(choice_the_right_option_twice_answers_the_third);
+    RUN_TEST(choice_a_cancel_at_the_first_question_asks_the_second);
+    RUN_TEST(choice_a_cancel_at_both_questions_answers_the_third);
 }

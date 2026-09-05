@@ -212,4 +212,36 @@ extern int fdps_icon_script_animate_view_offset(unsigned char *script,
                                                 int offset);
 #pragma aux fdps_icon_script_animate_view_offset "*" parm caller [];
 
+/* Script opcode 0x63.  Asks the player up to two two-option questions and
+   answers with the branch they picked: 1, 2 or 3.  It takes no operand out of
+   the script and reads nothing from it, which is why it is the one handler
+   here with no script or offset argument -- the interpreter keeps the answer
+   in its own slot instead of moving the script position by it.
+
+   The questions and the lines that acknowledge them are entries 0x10 to 0x15
+   of the loaded chapter's text block, data_fdps_current_chapter_text_ptr
+   (gamedata.h): 0x10 is the first question, 0x11 the line for answer 1, 0x12
+   the line all three branches end on, 0x13 the second question, 0x14 the line
+   for answer 2 and 0x15 the line for answer 3.  The two questions are drawn
+   inside the message panel the handler has just revealed; the four other
+   entries are drawn straight to the visible screen at its origin, which is
+   the only surface fdps_draw_text's page-break and speaker codes work over
+   (text.h) -- the panel is down by the time they are drawn, so an entry
+   carrying one of those codes composes the window it needs itself.
+
+   A QUESTION IS ANSWERED BY ANYTHING THAT IS NOT THE LEFT OPTION.  Both tests
+   are against fdps_prompt_two_choice's 0, so its -1 -- Esc or keypad Del --
+   counts as the right option and carries the player into the next question
+   rather than out of the dialogue.  There is no way to leave without
+   committing to one of the three branches, and writing either test as
+   "== 1", or adding an abort path for -1, changes which branch the chapter
+   takes (rebuild_info/pitfalls.md).
+
+   Only Icon11.dat, chapter 12's opening script, carries opcode 0x63, and the
+   interpreter passes the answer to the deployment lookup as a record match
+   key, where map11.dat's three records keyed 1, 2 and 3 are the chapter's
+   three rooms. */
+extern int fdps_icon_script_prompt_three_way_choice(void);
+#pragma aux fdps_icon_script_prompt_three_way_choice "*" parm caller [];
+
 #endif

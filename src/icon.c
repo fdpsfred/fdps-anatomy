@@ -21,8 +21,10 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "mapdraw.h"
+#include "msgwin.h"
 #include "palcycle.h"
 #include "palette.h"
+#include "text.h"
 #include "unit.h"
 #include "icon.h"
 
@@ -560,4 +562,131 @@ int fdps_icon_script_animate_view_offset(unsigned char *script, int offset)
     data_fdps_ui_play_active_flag = (unsigned char) saved_play_flag;
 
     return offset;
+}
+
+/* The message panel's speaker: FACE.CEL record 122, pushed at 00022613 and
+   again at 00022682, so both questions are asked under the same portrait. */
+#define CHOICE_SPEAKER_FACE 0x7a
+
+/* The chapter text block's entries, in the order the handler draws them:
+   PUSH 0x10, 0x11, 0x13, 0x14, 0x15 and 0x12 at 00022630, 00022666, 0002269f,
+   000226d5, 00022701 and 00022724. */
+#define CHOICE_FIRST_QUESTION_TEXT_ID 0x10
+#define CHOICE_FIRST_TAKEN_TEXT_ID 0x11
+#define CHOICE_CLOSING_TEXT_ID 0x12
+#define CHOICE_SECOND_QUESTION_TEXT_ID 0x13
+#define CHOICE_SECOND_TAKEN_TEXT_ID 0x14
+#define CHOICE_THIRD_TAKEN_TEXT_ID 0x15
+
+/* The two places the text goes.  0xa0000 is the mode 13h aperture and 0x140
+   its row stride, and 0xaa44a is the pen the message panel's own text sits at,
+   screen (138, 131) -- the same origin fdps_draw_text puts the pen back to on
+   a page break (text.c).  All three are hard-coded in the original, PUSH
+   0xa0000 at 00022661, PUSH 0xaa44a at 0002262b and PUSH 0x140 at 00022626,
+   and stay literals here: 0xa0000 is where the display adapter answers and not
+   the address of anything the linker places (rebuild_info/pitfalls.md). */
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_PITCH 0x140
+#define PANEL_TEXT_ORIGIN 0x000aa44a
+
+/* The standard message colours, PUSH 0xd0 / PUSH 0x0 / PUSH 0x6d in front of
+   every one of the six draws: foreground, no background fill, and the shadow
+   the outline colour becomes while the font's outline flag is clear. */
+#define CHOICE_TEXT_FG_COLOR 0xd0
+#define CHOICE_TEXT_BG_COLOR 0
+#define CHOICE_TEXT_OUTLINE_COLOR 0x6d
+
+/* What the player is answering with.  fdps_prompt_two_choice's 0 is the left
+   option and the only value either test here matches; its 1 and its -1 both
+   fall into the else arm. */
+#define CHOICE_ANSWER_LEFT 0
+
+/* The three branches, and the order they are settled in: the third is the
+   value the frame slot is preloaded with at 0002260c and the one that survives
+   when neither test matches. */
+#define CHOICE_FIRST_BRANCH 1
+#define CHOICE_SECOND_BRANCH 2
+#define CHOICE_THIRD_BRANCH 3
+
+/* 00022600.  Straight-line code with one two-armed test nested inside the else
+   arm of another: CMP dword ptr [EBP + -0x8],0x0 / JNZ at 0002264d and again
+   at 000226bc, both against the value the CALL to fdps_prompt_two_choice left
+   in EAX and the prologue's frame slot took at 00022645 and 000226b4.  Both
+   arms of both tests join at 00022711, where the closing line is drawn, so
+   that draw is on every path and there is no early return.
+
+   THE ANSWER IS PRELOADED WITH THE THIRD BRANCH AND ONLY EVER OVERWRITTEN.
+   MOV dword ptr [EBP + -0xc],0x3 at 0002260c runs before the first question is
+   asked, and the innermost else arm at 000226ee writes nothing, so the third
+   branch is what a player who takes the right option twice gets by default.
+
+   THE SECOND QUESTION IS ASKED UNDER A PANEL OF ITS OWN.  The first one's
+   panel is retracted before the answer is looked at -- CALL 00020820 at
+   00022648 sits between the prompt and the test -- and the else arm reveals a
+   fresh one at 00022684 rather than drawing into the panel that is already up.
+
+   Only the prompt's answer is used after a CALL.  fdps_draw_text's return, the
+   pen one glyph past the last one drawn, is dropped at all six call sites: the
+   ADD ESP,0x1c that follows each one is the argument cleanup and EAX is dead
+   from there. */
+int fdps_icon_script_prompt_three_way_choice(void)
+{
+    /* What the player picked, 1, 2 or 3, and the value handed back.  The
+       interpreter keeps it and uses it as the deployment record's match key
+       (icon.h). */
+    int chosen_branch;
+    /* The answer to the question just asked: 0 the left option, 1 the right,
+       -1 a cancel.  The same frame slot carries both questions' answers. */
+    int answer;
+
+    chosen_branch = CHOICE_THIRD_BRANCH;
+
+    fdps_message_window_open(CHOICE_SPEAKER_FACE);
+    fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                   CHOICE_FIRST_QUESTION_TEXT_ID,
+                   (unsigned char *) PANEL_TEXT_ORIGIN, VGA_SCREEN_PITCH,
+                   CHOICE_TEXT_FG_COLOR, CHOICE_TEXT_BG_COLOR,
+                   CHOICE_TEXT_OUTLINE_COLOR);
+    answer = fdps_prompt_two_choice();
+    fdps_message_window_close();
+
+    if (answer == CHOICE_ANSWER_LEFT) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CHOICE_FIRST_TAKEN_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       CHOICE_TEXT_FG_COLOR, CHOICE_TEXT_BG_COLOR,
+                       CHOICE_TEXT_OUTLINE_COLOR);
+        chosen_branch = CHOICE_FIRST_BRANCH;
+    } else {
+        fdps_message_window_open(CHOICE_SPEAKER_FACE);
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CHOICE_SECOND_QUESTION_TEXT_ID,
+                       (unsigned char *) PANEL_TEXT_ORIGIN, VGA_SCREEN_PITCH,
+                       CHOICE_TEXT_FG_COLOR, CHOICE_TEXT_BG_COLOR,
+                       CHOICE_TEXT_OUTLINE_COLOR);
+        answer = fdps_prompt_two_choice();
+        fdps_message_window_close();
+
+        if (answer == CHOICE_ANSWER_LEFT) {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CHOICE_SECOND_TAKEN_TEXT_ID,
+                           (unsigned char *) VGA_SCREEN_BASE,
+                           VGA_SCREEN_PITCH, CHOICE_TEXT_FG_COLOR,
+                           CHOICE_TEXT_BG_COLOR, CHOICE_TEXT_OUTLINE_COLOR);
+            chosen_branch = CHOICE_SECOND_BRANCH;
+        } else {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CHOICE_THIRD_TAKEN_TEXT_ID,
+                           (unsigned char *) VGA_SCREEN_BASE,
+                           VGA_SCREEN_PITCH, CHOICE_TEXT_FG_COLOR,
+                           CHOICE_TEXT_BG_COLOR, CHOICE_TEXT_OUTLINE_COLOR);
+        }
+    }
+
+    fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                   CHOICE_CLOSING_TEXT_ID, (unsigned char *) VGA_SCREEN_BASE,
+                   VGA_SCREEN_PITCH, CHOICE_TEXT_FG_COLOR,
+                   CHOICE_TEXT_BG_COLOR, CHOICE_TEXT_OUTLINE_COLOR);
+
+    return chosen_branch;
 }
