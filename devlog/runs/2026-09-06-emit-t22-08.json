@@ -1,0 +1,543 @@
+{
+  "batch": "t22-08",
+  "attempted": 100,
+  "committed": 2,
+  "skipped": 0,
+  "unfinished": 98,
+  "never_reached": 98,
+  "cut_short": [],
+  "recovered": [],
+  "stopped": null,
+  "stop_detail": "",
+  "ended_early": "src/statwin.c was split; the worklist this run is holding predates the new routing",
+  "splits": [
+    {
+      "file": "statwin.c",
+      "lines": 1239,
+      "new_files": [
+        "C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\src\\statunit.c",
+        "C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\src\\statunit.h",
+        "C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tests\\statunit.c"
+      ],
+      "note": "Cut along the window frame / window contents seam, which is also the seam the three file-scope globals fall on. statwin.c keeps fdps_load_status_cel_image, fdps_draw_status_window_anim_frame and fdps_close_status_window (the artwork, the four-panel slide, the slide run backwards) plus data_fdps_ui_play_active_flag_saved; the one still-pending function routed here, fdps_battle_show_unit_status_window @ 00016aa0, is the window's opening and belongs with them. New statunit.c takes fdps_draw_unit_status_panel, fdps_unit_status_window_wait_input and fdps_draw_unit_inventory plus data_fdps_village_status_window_unit_idx and data_fdps_unit_status_window_last_tick -- the panel drawer writes the village index and the wait loop is its only reader, so they cannot honestly be separated. Dependency is one-way: statwin.c will include statunit.h when the show function lands; statunit.c needs nothing from statwin.h.\n\nLine counts after the cut: src/statwin.c 450 (about 617 once the pending function lands), src/statunit.c 839, both under the 1000 budget. Tests moved with their code: tests/statwin.c 885 lines / 12 cases, new tests/statunit.c 1545 lines / 24 cases, runner renamed to run_statunit_tests. All 36 original cases are present and the whole suite reports 14593 checks, 0 failures.\n\nThree mechanical adjustments were needed beyond a pure move, all verified against the assembly rather than guessed: SCENE_PAGE_*/SCREEN_WINDOW_* were defined in the wait loop's block but also used by the close, so statwin.c carries its own copy with the close's own push addresses (000168fa, 00016932..00016958) rather than the wait loop's; BLIT_MODE_OPAQUE was defined in the load-cel block but used by the wait loop's shadow blit, so statunit.c defines it citing PUSH 0x0 at 00017229 (confirmed from the disassembly of 000170c0); and tests/statunit.c needed <stdio.h> for the FACE.CEL probe that came across with the panel fixture. Per-file duplication of shared VGA/geometry constants is the existing convention in src/ (anim.c, blit.c, btlend.c, chapter.c all define VGA_SCREEN_BASE themselves).\n\nGhidra was read-only (two disassemble_function calls) and unchanged, so no snapshot re-export. Nothing outside the pipeline's own paths was touched; the working tree is clean after the commit."
+    }
+  ],
+  "remaining_at_start": 181,
+  "concerns_logged": 0,
+  "concern_mismatches": [],
+  "results": [
+    {
+      "addr": "00024490",
+      "name": "fdps_load_game_screen",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "b62a618 fdps_load_game_screen @ 00024490",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 87,
+      "problems": "No strays: git status --porcelain before any staging showed only src/save.c, src/save.h, tests/save.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files carried ghidra_fixes: [] and open_issues: [], so Ghidra was not touched -- no corrections applied, no baseline audit run, no save_program, no snapshot re-export (ghidra_gate_clean is true on the basis that no database change was made, not on a fresh audit) -- and nothing was appended to tools/code_emit/data/emit_issues.json, which already exists with 93 keys and has no 00024490 key; it was left byte-identical. emit_state.json entry 00024490 advanced in_flight -> committed with emitted_against 0x1bd, in_flight_since dropped and rounds 0 used verbatim; the diff shows that one entry and nothing else. The commit message was written to a UTF-8 file and passed via git commit -F rather than -m, to avoid CP950 mangling of the Traditional Chinese subject on this machine; the commit is findable with git log --grep \"@ 00024490\" -> b62a618, contains exactly the four expected files, and git status --porcelain afterwards prints nothing."
+    },
+    {
+      "addr": "00024ea0",
+      "name": "fdps_draw_unit_inventory",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "7ef2228 fdps_draw_unit_inventory @ 00024ea0",
+      "ghidra_applied": 3,
+      "issues": 0,
+      "out_tok_k": 112,
+      "problems": "No strays: git status --porcelain before staging showed only ghidra_snapshot/comments.txt, src/statwin.c, src/statwin.h, tests/statwin.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. All three ghidra_fixes were plate edits on 00024ea0 (the emitter's u16->i16 on use_amount, which the reviewer restated identically, plus the reviewer's replacement of the stale FUN_0001ff60 / FUN_000259c0 / FUN_00025b20 / FUN_00025da0 labels with fdps_draw_text, fdps_unit_item_select_window, fdps_unit_item_select_loop and fdps_unit_equip_window); all applied verbatim in one set_plate_comment. Both verdict files had empty open_issues arrays, so nothing was appended to tools/code_emit/data/emit_issues.json (the file already existed and was left untouched). Baseline audit gate: orphan code ranges 0, error bookmarks 0, undefined bytes 0. Program saved and snapshot re-exported (comments.txt is the only snapshot diff)."
+    },
+    {
+      "addr": "00025b20",
+      "name": "fdps_unit_item_select_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000259c0",
+      "name": "fdps_unit_item_select_window",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00025da0",
+      "name": "fdps_unit_equip_window",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000276f0",
+      "name": "fdps_draw_spell_list_page",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000278e0",
+      "name": "fdps_spell_list_window_wait_input",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00016aa0",
+      "name": "fdps_battle_show_unit_status_window",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00028130",
+      "name": "fdps_spell_list_select_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000288f0",
+      "name": "fdps_cast_spell_on_targets",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "0001a4c0",
+      "name": "fdps_combat_play_spell_on_targets",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "0002b4f0",
+      "name": "fdps_map_cursor_select_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "0002da50",
+      "name": "fdps_map_cursor_move_to_unit",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00010760",
+      "name": "fdps_chapter_30_revive_wave_4_undead",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000120d0",
+      "name": "fdps_unit_rest",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000126b0",
+      "name": "fdps_map_actor_move_toward_nearest_reachable_opponent",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000127c0",
+      "name": "fdps_map_actor_move_toward_nearest_opponent",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "0001dd30",
+      "name": "fdps_unit_award_exp_and_level_up",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "0002e640",
+      "name": "fdps_cel_expand_sheet_24x24",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "0002e160",
+      "name": "fdps_battle_map_overview",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00030cc0",
+      "name": "fdps_cd_verify_disc_and_play_track",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000183d0",
+      "name": "fdps_options_menu",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00023e20",
+      "name": "fdps_load_savegame",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00014ea0",
+      "name": "fdps_battle_system_submenu",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00031f60",
+      "name": "fdps_village_animate_walk_to_destination",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00031bc0",
+      "name": "fdps_village_signboard_menu",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00032370",
+      "name": "fdps_draw_party_gold",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000324d0",
+      "name": "fdps_menu_draw_command_icons",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000323e0",
+      "name": "fdps_menu_command_icon_select_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00032570",
+      "name": "fdps_village_animate_window_zoom",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00032a70",
+      "name": "fdps_shop_draw_item_entry",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00032710",
+      "name": "fdps_shop_select_item",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000330e0",
+      "name": "fdps_shop_render_buy_target_frame",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00033230",
+      "name": "fdps_shop_draw_member_entry",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000336d0",
+      "name": "fdps_village_select_member",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00032c40",
+      "name": "fdps_shop_select_buy_target",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00033b80",
+      "name": "fdps_shop_buy_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00033f80",
+      "name": "fdps_village_member_status_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00034000",
+      "name": "fdps_village_item_sell_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00034210",
+      "name": "fdps_village_item_transfer_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00034420",
+      "name": "fdps_village_member_equip_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00034c10",
+      "name": "fdps_church_promote_unit",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000352c0",
+      "name": "fdps_church_select_promote_candidate",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000345a0",
+      "name": "fdps_church_promote_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00035860",
+      "name": "fdps_village_item_menu",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00035aa0",
+      "name": "fdps_run_church_screen",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00035fd0",
+      "name": "fdps_run_weapon_shop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00036210",
+      "name": "fdps_run_secret_menu",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00036460",
+      "name": "fdps_run_bonus_lottery",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00035cc0",
+      "name": "fdps_run_bar_shop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00036bb0",
+      "name": "fdps_chapter_03_event_deploy_wave_for_turn",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00036c70",
+      "name": "fdps_chapter_03_event_deploy_wave_1",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00036ea0",
+      "name": "fdps_chapter_03_event_deploy_wave_14",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00036f10",
+      "name": "fdps_chapter_03_event_turn_limit_game_over",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00036f70",
+      "name": "fdps_chapter_04_event_for_turn",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00037170",
+      "name": "fdps_chapter_06_event_deploy_wave_2",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00037440",
+      "name": "fdps_chapter_08_event_send_guest_mage_to_cells",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00037600",
+      "name": "fdps_chapter_08_event_villager_escapes",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00037730",
+      "name": "fdps_chapter_09_event_deploy_wave_1",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00037780",
+      "name": "fdps_chapter_10_event_deploy_wave_for_turn",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000378f0",
+      "name": "fdps_chapter_11_event_deploy_wave_for_turn",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00037a50",
+      "name": "fdps_chapter_14_event_deploy_wave_4",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00037cd0",
+      "name": "fdps_chapter_16_event_wandering_smith_forge",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00038180",
+      "name": "fdps_chapter_19_event_lancelot_joins",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000381d0",
+      "name": "fdps_chapter_19_event_deploy_wave_6",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000382f0",
+      "name": "fdps_chapter_20_event_upgrade_randis_sword",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00038380",
+      "name": "fdps_chapter_21_event_deploy_wave_1",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00038400",
+      "name": "fdps_chapter_21_event_deploy_wave_2",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000384e0",
+      "name": "fdps_chapter_22_event_for_turn",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000388b0",
+      "name": "fdps_chapter_22_event_boss_defeat",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00038950",
+      "name": "fdps_chapter_23_event_boss_defeat",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00038a30",
+      "name": "fdps_chapter_23_event_deploy_wave_for_turn",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00038b60",
+      "name": "fdps_chapter_23_event_give_martial_artist_ring",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00038cc0",
+      "name": "fdps_chapter_24_event_deploy_wave_for_turn",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00038e60",
+      "name": "fdps_chapter_25_event_deploy_wave_1",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00038fd0",
+      "name": "fdps_chapter_25_event_upgrade_randis_sword",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00039060",
+      "name": "fdps_chapter_25_event_marian_buys_wind_god_bow",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00039190",
+      "name": "fdps_chapter_26_event_enemies_advance",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00039230",
+      "name": "fdps_chapter_26_event_deploy_waves_2_and_3",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000393b0",
+      "name": "fdps_chapter_26_event_wave_2_defeated_line",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00039440",
+      "name": "fdps_chapter_27_event_deploy_wave_1",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00039550",
+      "name": "fdps_chapter_28_event_deploy_wave_for_turn",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00039770",
+      "name": "fdps_chapter_30_event_deploy_wave_4",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00039840",
+      "name": "fdps_chapter_30_event_deploy_wave_2",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00039e10",
+      "name": "fdps_battle_destroy_remaining_enemies",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00037b70",
+      "name": "fdps_chapter_15_event_boss_defeat",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00010010",
+      "name": "fdps_map_actor_behavior_step",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00012c10",
+      "name": "fdps_map_actor_take_best_action",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00012e50",
+      "name": "fdps_map_actor_move_and_attack",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00013c90",
+      "name": "fdps_map_actor_cast_chosen_spell",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "0001d990",
+      "name": "fdps_run_death_scripts",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00021650",
+      "name": "fdps_icon_script_run",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000262a0",
+      "name": "fdps_apply_item_effect_to_targets",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00027180",
+      "name": "fdps_map_actor_use_item",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000372d0",
+      "name": "fdps_chapter_08_event_for_turn",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000374e0",
+      "name": "fdps_chapter_08_event_villagers_leave_cells",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000184f0",
+      "name": "fdps_battle_search_cell_at_cursor",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00020e90",
+      "name": "fdps_chapter_01_init",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00020ef0",
+      "name": "fdps_chapter_02_init",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00020f30",
+      "name": "fdps_chapter_03_init",
+      "status": "not_started_routing_changed"
+    }
+  ],
+  "out_tok_k": 265
+}
