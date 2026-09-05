@@ -93,4 +93,40 @@ extern int fdps_collect_death_scripts(unsigned char *out_scripts);
 extern int fdps_collect_death_script_events(unsigned char *out_events);
 #pragma aux fdps_collect_death_script_events "*" parm caller [];
 
+/* Plays the destruction sequence for every battle unit standing at exactly
+   zero hit points, and takes those units off the map.  Reads its whole input
+   from data_fdps_map_unit_count and the records fdps_get_unit_record resolves
+   (gamedata.h, unit.h); takes nothing and returns nothing.
+
+   WHICH UNITS IT TAKES IS NOT THE TEST THE TWO COLLECTORS ABOVE APPLY.  A unit
+   qualifies when bit 0 of its flags byte is clear AND its hit-point word is
+   EQUAL to zero -- the collectors accept anything at zero or below, so a unit
+   the fight drove past zero owes its death script but is not destroyed by this
+   routine.  Nothing bounds the 80-slot list the qualifying indices are
+   collected into.
+
+   Three phases, and nothing happens at all when the list comes out empty.
+   First the dying units spin on the spot: thirteen frames, each storing the
+   step number modulo 4 into every dying unit's facing byte and then presenting
+   one frame through fdps_render_view_frame (mapdraw.h), so the last frame
+   leaves every one of them facing 0, down.  Then every dying unit's flags byte
+   is set to 1 -- a whole-byte store, not a bit set, so bit 7 and everything
+   else in that byte is wiped along with it.  Then Explo.Saf, out of the
+   resident BaseAni.vfs image at data_fdps_animation_baseani_archive_ptr, is
+   played once over every dying unit's tile at the same time, one frame of the
+   sheet per presented frame, with the frame's sound effect asked for on the
+   first unit of the list only so it fires once a frame rather than once a
+   dying unit.
+
+   IT MARKS THE FLAG THE TWO COLLECTORS ABOVE REJECT ON, so both of them have
+   to run before it; see fdps_collect_death_scripts for what running them
+   afterwards costs.
+
+   The explosion is presented straight to the mode 13h aperture, so the caller
+   must already be in a graphics mode, and every frame ends waiting for
+   data_fdps_timer_tick_counter to change: with the timer interrupt not
+   installed the first frame of the spin never ends. */
+extern void fdps_play_death_animation_and_mark_dead(void);
+#pragma aux fdps_play_death_animation_and_mark_dead "*" parm caller [];
+
 #endif

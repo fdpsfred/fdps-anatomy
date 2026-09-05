@@ -1782,5 +1782,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0001d6c0": [
+    {
+      "what": "The 80-slot dying list has no bound check and the array it is filled from has no cap. What I established: the list is 80 dwords (frame EBP-0x18c..EBP-0x4c) and the append at 0001d730 indexes it with the output counter and tests nothing; data_fdps_map_unit_count is grown one record at a time by realloc in fdps_deploy_unit (src/deploy.c) with no ceiling anywhere, so nothing in the code bounds it below 80. In the ORIGINAL an 81st entry lands on the draw request block, which sits immediately above the list on the same frame; in the rebuild dying_units[] and request[] are two separate automatics, so the same overrun writes somewhere else. Whether this is reachable at all is the open half: it needs more than 80 units at EXACTLY zero hit points in one action, and units are taken off the map as soon as they die.",
+      "needs": "The largest data_fdps_map_unit_count any shipped chapter reaches -- a sweep of every MAP%02d placement table plus every wave fdps_deploy_wave brings on, which ticket 23's data emit and chapters/ will have -- and, if that number is above 80, a real battle showing whether one action can leave more than 80 units resting at exactly zero. If the ceiling is at or below 80 the concern closes with nothing to change; the routine's own behaviour is not in question either way.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same concern independently and confirmed it: the 80-slot list is bounded by nothing (the append at 0001d730 writes dying_units[dying_count] and tests only the loop condition), and I found no ceiling on data_fdps_map_unit_count in the knowledge base -- chapters/ currently holds only its _index.md, so the per-chapter unit totals that would settle reachability do not exist yet. What my pass adds is the rebuild half the emitter left open: I disassembled the object this build produced and the compiler placed dying_units[] at EBP-0x190 with request[] at EBP-0x50 directly above it, i.e. the same adjacency and order the original has, so an 81st entry lands on the draw request block here exactly as it does in the shipped image. That is today's layout and not a guarantee -- Watcom is free to reorder two automatics on any rebuild -- so it lowers the stakes without closing the question.",
+      "needs": "The largest data_fdps_map_unit_count any shipped chapter reaches, from the MAP%02d placement tables plus every wave fdps_deploy_wave brings on, which ticket 23's data emit and chapters/ will produce. If that ceiling is at or below 80 the concern closes with nothing to change.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

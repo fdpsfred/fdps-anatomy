@@ -2433,6 +2433,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x1b5"
+    },
+    "0001d6c0": {
+      "name": "fdps_play_death_animation_and_mark_dead",
+      "target": "death.c",
+      "body_size": "0x2c6",
+      "status": "committed",
+      "emitted_against": "0x2c6",
+      "rounds": 0
     }
   }
 }
