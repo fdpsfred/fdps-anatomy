@@ -13,6 +13,8 @@
 #ifndef SAVE_H
 #define SAVE_H
 
+#include "fdpstype.h"
+
 /* How many slots the save and load panel offers, and the modulus the slot
    cursor wraps on.  MOV EBX,0x3 before each of the two IDIVs at 000246b9 and
    000246ef, and CMP dword ptr [EBP-0x8],0x3 / JGE at 0002490c bounds the loop
@@ -101,6 +103,44 @@ extern int data_fdps_ui_saveload_is_load_mode;
    process inside fdps_vfs_load_entry rather than coming back (vfs.h). */
 extern int fdps_save_slot_select_loop(void *background, int *slot);
 #pragma aux fdps_save_slot_select_loop "*" parm caller [];
+
+/* 00024a40.  Draws one slot's summary panel: the leader's face and level, the
+   chapter the slot holds and that chapter's title, and the date and time the
+   slot was written.  fdps_saveload_screen_build calls it once per slot and it
+   is the only caller.
+
+   `dest` is the top-left byte of this slot's panel inside the page being
+   composed -- the caller forms it as page + 0xd + (slot * 0x34 + 0x1a) * 0x140,
+   so the three panels sit 52 rows apart -- and `pitch` is that page's row
+   stride, 0x140 at the one call site.  `slot_record` is one 0xa28-byte slot of
+   the decrypted FDE.SAV image, save_buffer + 0x312b + slot * 0xa28 at the call
+   site; its first 0x9b0 bytes are the roster copy, so roster[0] is the party
+   leader.
+
+   A SLOT WHOSE chapter_index IS 0xff HAS NEVER BEEN WRITTEN.  It prints entry
+   0x209 of data_fdps_all_game_text_ptr across the panel and draws nothing else
+   -- no captions, no face, no figures.
+
+   IT EMPTIES THE GLOBAL SPRITE CACHE AND LEAVES IT HOLDING ONE GROUP.  Drawing
+   a written slot frees the cache buffer, zeroes the count and loads the
+   leader's icon group into the slot that frees up, so on return the cache holds
+   that one group and nothing else.  Every panel does it again, and the caller
+   has to reload the party's groups after its slot loop or the rest of the game
+   paints out of a one-entry cache (rebuild_info/pitfalls.md).
+
+   IT MOVES data_fdps_number_glyph_color_row AND LEAVES IT AT 0.  The level is
+   drawn in whatever row the global already held on entry; the chapter, the date
+   and the time each set their own row, and 0 is written on the way out.  An
+   unwritten slot does not touch it at all.
+
+   The two messages are placed at raw byte offsets into the page rather than at
+   a row times `pitch`, so they only land where they are meant to at a pitch of
+   0x140.  Nothing is clipped and no pointer is checked: a missing ICON.CEL
+   faults inside the cache loader and a missing chapter member ends the process
+   inside fdps_vfs_load_entry (vfs.h). */
+extern void fdps_draw_save_slot_panel(unsigned char *dest, int pitch,
+                                      struct fdps_save_slot *slot_record);
+#pragma aux fdps_draw_save_slot_panel "*" parm caller [];
 
 /* 00056898.  The FDE.SAV integrity checksum: the sum of every byte of the
    save image except the trailing four, which are the stored checksum field

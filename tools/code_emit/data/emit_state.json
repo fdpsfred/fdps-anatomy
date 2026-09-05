@@ -2598,6 +2598,14 @@
       "status": "committed",
       "emitted_against": "0x144",
       "rounds": 0
+    },
+    "00024a40": {
+      "name": "fdps_draw_save_slot_panel",
+      "target": "save.c",
+      "body_size": "0x301",
+      "status": "committed",
+      "emitted_against": "0x301",
+      "rounds": 0
     }
   }
 }
