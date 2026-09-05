@@ -1,0 +1,949 @@
+{
+  "batch": "t22-07",
+  "attempted": 100,
+  "committed": 65,
+  "skipped": 0,
+  "unfinished": 35,
+  "never_reached": 35,
+  "cut_short": [],
+  "recovered": [],
+  "stopped": null,
+  "stop_detail": "",
+  "ended_early": "src/save.c was split; the worklist this run is holding predates the new routing",
+  "splits": [
+    {
+      "file": "save.c",
+      "lines": 1045,
+      "new_files": [
+        "src/savepnl.c",
+        "src/savepnl.h",
+        "src/savefile.c",
+        "src/savefile.h",
+        "tests/savepnl.c",
+        "tests/savefile.c"
+      ],
+      "note": "Cut along the save subsystem's own seams, three files instead of two because save.c still had fdps_load_game_screen and fdps_load_savegame routed into it and either one alone would have kept it over budget.\n\nsave.c (498 lines) keeps the two modal screens and the slot cursor they share: fdps_save_game_screen, fdps_load_game_screen (pending), fdps_save_slot_select_loop. savepnl.c (515) takes the page they are drawn on: fdps_saveload_screen_build and fdps_draw_save_slot_panel. savefile.c (113 now, ~350 once fdps_load_savegame lands) takes FDE.SAV itself: fdps_load_savegame (pending), fdps_compute_save_checksum, fdps_xor_crypt_buffer.\n\nConsequence the routing regeneration produced on its own: data_fdps_ui_save_slot_occupied_flags is now written from savepnl.c and read from save.c, so build_routing.py routes it to gamedata.c. Its extern moved from save.h to gamedata.h, spelled with the literal 3 the way every other array in that header is (SAVE_SLOT_COUNT stays in save.h and savepnl.c includes it for its slot loop). data_fdps_ui_saveload_is_load_mode has all three of its referencers in save.c and stayed there.\n\nTests moved with their functions. The three test units are self-contained, which is this project's existing convention (a *_used_heap_blocks helper and a fabricated .CEL sheet fixture already appear in eleven and fourteen test files respectively), so two copies were made: slot_used_heap_blocks into tests/savepnl.c, and the panel staging that screen_stage() reaches (the fabricated Command.cel/Number.cel/font/text sheets, panel_reset, panel_release_cache, panel_files_present, build_files_present, SAVE_STORED_CHECKSUM) into tests/save.c. The copy in tests/save.c carries only what the screen cases actually reach — sixteen assertion-only macros were left behind in tests/savepnl.c rather than copied dead — and is headed by a comment saying the assertions that read the fixture back belong to tests/savepnl.c. No test was rewritten, weakened or dropped: the runner split is 11 + 14 + 11 = the same 36 cases, and the run transcript is total=14465 failed=0 verdict=ok, identical to before.\n\nGate green (emittest PASS, all six files compile 0 warnings 0 errors, code_emit.run PASS). routing.py --check clean at 78 targets, all under the 1000-line estimate budget.\n\nOne incidental change was committed separately first, as 9199ba4: rebuild_info/_index.md said \"76 個檔各自負責什麼\" and would go stale on every future split, so the count was dropped from the index line (code_layout.md's own file table owns it, and there it was updated to 78)."
+    }
+  ],
+  "remaining_at_start": 246,
+  "concerns_logged": 35,
+  "concern_mismatches": [
+    {
+      "addr": "00016840",
+      "name": "fdps_load_status_cel_image",
+      "claimed": 1,
+      "logged": 0
+    },
+    {
+      "addr": "00029660",
+      "name": "fdps_load_global_resources",
+      "claimed": 3,
+      "logged": 2
+    },
+    {
+      "addr": "0002cda0",
+      "name": "fdps_draw_map_unit",
+      "claimed": 1,
+      "logged": 2
+    },
+    {
+      "addr": "0002dcf0",
+      "name": "fdps_draw_cursor_info_panel",
+      "claimed": 5,
+      "logged": 6
+    }
+  ],
+  "results": [
+    {
+      "addr": "00016840",
+      "name": "fdps_load_status_cel_image",
+      "status": "committed",
+      "rounds": 1,
+      "commit": "f4b7bc2 fdps_load_status_cel_image @ 00016840",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 129,
+      "problems": "No strays: git status --porcelain before staging listed only src/statwin.c, src/statwin.h, tests/statwin.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was made.\n\nBoth verdict files had empty ghidra_fixes and empty open_issues, so Ghidra was not touched, the baseline audit and snapshot re-export were correctly skipped, and nothing was appended to tools/code_emit/data/emit_issues.json (which already existed).\n\nOne thing for a human to note, left untouched deliberately because the instruction said to change only status/emitted_against/in_flight_since/rounds: the 00016840 entry in emit_state.json still carries the long \"note\" field from the earlier abandoned attempt, ending in \"Re-emit from scratch.\" It is now stale — the entry says status \"committed\" while the note describes the abandonment. Other committed entries carry no note field at all.\n\nAlso note the entry's committed baseline was status \"failed\" (the \"in_flight\" was the emitter's uncommitted working-tree write, as expected), and git log --oneline --grep \"@ 00016840\" returns two commits: f4b7bc2 (this landing) and d4ef005 (an earlier one for the same address). The newest is the landing commit."
+    },
+    {
+      "addr": "0001e840",
+      "name": "fdps_animate_turn_banner",
+      "status": "committed",
+      "rounds": 1,
+      "commit": "e3e5b26 fdps_animate_turn_banner @ 0001e840",
+      "ghidra_applied": 3,
+      "issues": 0,
+      "out_tok_k": 173,
+      "problems": "No strays: git status before staging showed only src/anim.c, src/anim.h, tests/anim.c, tools/code_emit/data/emit_state.json and (after the re-export) ghidra_snapshot/comments.txt, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files carried the same three plate-comment corrections and all three were applied to the single plate at 0001e840 in one rewrite (slide-out end state: the number leaves, the sign does not, plus the caller's fdps_saf_play_over_background at 0001ec35; sound flag set on all 24 steps but Turn.saf's eleven frames all carry sound number -1 so nothing sounds; the wait latch is uninitialised on entry to the slide-in and stale on entry to the slide-out, not uninitialised before each loop). Nothing was adjusted to fit. Both open_issues arrays were empty, so emit_issues.json (already present, 79 keys) was left untouched and no 0001e840 key was created. Baseline audit gate: orphan code ranges 0, error bookmarks 0, undefined bytes 0. Program saved and snapshot re-exported; the snapshot diff is confined to ghidra_snapshot/comments.txt, as expected for a plate-only change. Staged range matched the function exactly (5 files) and the tree is clean afterwards. The landing commit is findable with git log --oneline --grep \\\"@ 0001e840\\\" (1 hit)."
+    },
+    {
+      "addr": "0001ecf0",
+      "name": "fdps_saf_play_over_background",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "e9bd2a1 fdps_saf_play_over_background @ 0001ecf0",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 89,
+      "problems": "No strays: git status --porcelain before staging listed only src/saf.c, src/saf.h, tests/saf.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files carried empty ghidra_fixes and empty open_issues, so Ghidra was not touched (no baseline audit, no save_program, no snapshot re-export — ghidra_gate_clean is reported true only in the sense that no database change was made that could have dirtied it) and emit_issues.json was left byte-identical (it already exists, 79 addresses, valid UTF-8 JSON). The emit_state.json diff versus HEAD is exactly one added 8-line block for 0001ecf0 (the emitter's in_flight entry was itself uncommitted), with status committed, emitted_against 0x11d, rounds 0 and in_flight_since dropped; no other entry or field moved. Commit message encoding verified by decoding git log -1 --format=%B as UTF-8 in python rather than through the console, and git log --grep \"@ 0001ecf0\" matches exactly one commit."
+    },
+    {
+      "addr": "0001eb00",
+      "name": "fdps_play_vfs_animation",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "84117c4 fdps_play_vfs_animation @ 0001eb00",
+      "ghidra_applied": 2,
+      "issues": 2,
+      "out_tok_k": 128,
+      "problems": "No strays: git status --porcelain before staging listed only src/anim.c, src/anim.h, tests/anim.c, tools/code_emit/data/emit_state.json plus the three ghidra_snapshot files I re-exported. Nothing outside the pipeline's own paths, so no separate stray commit was needed.\n\nBoth verdict files carried the same two ghidra_fixes; both were applied, using the reviewer's wording where the two differed in detail.\n\n1. plate @ 0001eb00 -- applied with set_plate_comment. The Flow paragraph now names fdps_animate_turn_banner and fdps_saf_play_over_background instead of FUN_0001e840/FUN_0001ecf0, states explicitly that the banner does NOT preprocess or modify the backdrop (it only reads its saved_screen argument as fdps_blit_rect's source and writes its own work page and 000a0504), and records that the strcmp at 0001ec15 is against the upper-case literal at 000617c0 while all three call sites pass mixed case, so the branch only matches because fdps_vfs_load_entry upper-cases the caller's buffer in place. Everything else in the plate was left as it stood, except that the two tint tables and the tick global are now named by symbol in the Flow line rather than as DAT_000653f0/DAT_000643f0/DAT_00069d64. The server returned three advisory warnings (missing Algorithm/Parameters/Returns sections) that were already true of the pre-existing plate; I did not add sections that no fix asked for.\n\n2. rename @ 000617bf -- applied, but not with rename_function_by_address, which does not fit: this is a data string, not a function, and the fix asks for a redefinition rather than a rename. Confirmed the byte layout first (000617bf holds 0x75, \"PLYPHASE.SAF\" begins at 000617c0). apply_data_type(\"string\") at 000617c0 alone was refused (\"Conflicting data exists at address 000617bf to 000617cc\"), so it took two steps: apply_data_type(000617bf, \"undefined1\", clear_existing) to drop the one-byte-early string, then apply_data_type(000617c0, \"string\", clear_existing). Snapshot diff confirms the result is what the fix specified: s_uPLYPHASE_SAF_000617bf is gone and s_PLYPHASE.SAF_000617c0 stands at the right address. One transcription detail worth flagging rather than hiding: the fix says \"leaving 000617bf as data\", and 000617bf is now an explicit undefined1 byte rather than being folded back into the preceding data run -- deciding which run it belongs to would have been a judgement, so I left it standing alone.\n\nBaseline audit after the changes: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved, snapshot re-exported; the only snapshot diffs are these two fixes (definedData 1629 -> 1630 and the data.txt line split at 000617bf/000617c0) plus the plate text in comments.txt.\n\nemit_state.json: the 0001eb00 entry advanced from {status: in_flight, in_flight_since} to {status: committed, emitted_against: 0x1f0, rounds: 0}, written literally as instructed. That leaves it without the name/target/body_size fields most entries carry; I did not add them, since the instruction said to touch no other field, and 12 existing committed entries already have exactly this three-field shape. The diff is a five-line addition and touches no other address.\n\nemit_issues.json: 2 entries appended under key \"0001eb00\" -- the emitter's first, then the reviewer's, which carries same_as \"emit#0\" verbatim and therefore points at the 0th entry with from \"emit\", as required. Both got status \"open\". Read back through python/UTF-8 afterwards: 80 addresses parse, the pre-existing Traditional Chinese elsewhere in the file is intact, and there are no replacement characters.\n\nCommit message was written to a UTF-8 file and committed with git commit -F rather than passed through the PowerShell console, then verified by decoding %B straight from git: valid UTF-8, 41 non-ASCII characters intact, no replacement characters, trailer present. git log --oneline --grep \"@ 0001eb00\" finds exactly one commit. git status --porcelain after the commit prints nothing."
+    },
+    {
+      "addr": "0001ee10",
+      "name": "fdps_blit_unit_sprite",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "24340ae fdps_blit_unit_sprite @ 0001ee10",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 104,
+      "problems": "No strays: git status --porcelain before staging showed only ghidra_snapshot/comments.txt, src/gamedata.h, src/sprite.c, src/sprite.h, tests/sprite.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed and none was made.\n\nGhidra: the emit verdict had an empty ghidra_fixes array; the review verdict had one \"plate\" fix at 0001ee10, applied verbatim via set_plate_comment. Both the sentence replacement (\"self-relative entry\" -> the base-relative wording the reviewer dictated) and the four stale DAT_ spellings named in the same fix (DAT_00069cc8, DAT_00069ce4, DAT_00069ce0, DAT_00060138 -> data_fdps_map_unit_walk_anim_counter, data_fdps_battle_view_window_origin_x, data_fdps_battle_view_window_origin_y, data_fdps_cel_sprite_cache_ptr) went in. DAT_00069cd8 in the unit_index paragraph was left untouched because the fix does not name it. No rename and no prototype change was requested. Baseline audit Gate section: orphan code ranges = 0, error bookmarks = 0, undefined bytes in .object1 = 0. Program saved, snapshot re-exported (ghidra_snapshot/comments.txt is the only snapshot file that moved, 6 lines).\n\nIssues: both 0001ee10.emit.json and 0001ee10.review.json carry \"open_issues\": [], so nothing was appended. tools/code_emit/data/emit_issues.json already existed and was left byte-identical (it does not appear in git status). issues_logged = 0.\n\nState: tools/code_emit/data/emit_state.json entry \"0001ee10\" carried forward to status \"committed\", emitted_against \"0x12b\", in_flight_since dropped, rounds 0 verbatim; written with json.dumps(indent=2, ensure_ascii=False) plus trailing newline in UTF-8 and read back to confirm. The staged diff for that file is +8 lines and nothing else, so no other entry moved.\n\nNote carried from the review, not acted on: the reviewer flagged a comment nit in src/sprite.c (\"one read carries both here\" describing the cache base, which the code and the original both load twice) as \"worth one line of correction next time this file is touched, not a reason to hold the function\". It was left as-is, since fixing it here would put an unreviewed edit under this function's subject.\n\ntarget_lines is 515 by newline count; note that PowerShell's Measure-Object -Line reports 465 for the same file, so the wc -l equivalent above was taken from a byte-level newline count."
+    },
+    {
+      "addr": "00020c60",
+      "name": "fdps_show_chapter_title_card",
+      "status": "committed",
+      "rounds": 2,
+      "commit": "3fca6b6 fdps_show_chapter_title_card @ 00020c60",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 209,
+      "problems": "No strays: git status --porcelain before staging showed only src/chapter.c, src/chapter.h, tests/chapter.c, tools/code_emit/data/emit_state.json (plus ghidra_snapshot/comments.txt after the re-export), all inside the pipeline's own paths, so no separate stray commit was needed. Ghidra: both verdict files raise the same single plate correction at 00020c60 (emitter one entry, reviewer two entries covering the same two points), applied as one set_plate_comment rewrite -- the blackout sentence moved to sit between the request fill and fdps_draw_composite_sprite, and the four DAT_ spellings replaced with data_fdps_vga_main_palette_ptr (x2) and data_fdps_chapter_current_chapter_id (x2). Counted as 1 applied plate edit. Baseline audit Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved and snapshot re-exported (comments.txt is the only snapshot file that moved). emit_issues.json untouched: open_issues is empty in both the emit and the review verdict, so nothing to append. emit_state.json 00020c60 now status committed, emitted_against 0x22d, rounds 2, in_flight_since dropped; diff against HEAD is 8 added lines and no other entry moved. Note for the record, not acted on: the emit verdict's rounds array documents three rounds while the workflow-observed count of 2 was written verbatim as instructed."
+    },
+    {
+      "addr": "00029660",
+      "name": "fdps_load_global_resources",
+      "status": "committed",
+      "rounds": 1,
+      "commit": "5809c3c fdps_load_global_resources @ 00029660",
+      "ghidra_applied": 4,
+      "issues": 2,
+      "out_tok_k": 189,
+      "problems": "No strays: git status --porcelain before staging showed only ghidra_snapshot/comments.txt, src/gamedata.h, src/main.c, src/main.h, tests/main.c, tools/code_emit/data/emit_issues.json and tools/code_emit/data/emit_state.json, all inside the permitted paths, so no separate stray commit was made. All four ghidra_fixes were \"plate\" on 00029660 (three from the emit verdict, one from the review verdict); since they all edit the same plate comment they were applied as a single set_plate_comment rewrite carrying every correction verbatim: the FMer1/FMer2-never-read-back note, the Signature line reworded from \"__cdecl void(void)\" to \"stack convention (-4s), void(void), caller cleans, stack purge 0\", both failure-message literals requoted exactly (\"file not found: 'Misc.vfs'\\n\" at 00061cb0, \"file not found: 'field.vfs'\\n\" at 00061d84) with the two open() arguments spelled as they are (\"MISC.VFS\" at 00060128, \"Field.vfs\" at 00061d78), and the \"calls the reporter at 0x567a0\" clause reworded to the fdps_wait_any_key wording. No rename or prototype fix was requested. set_plate_comment returned success with three advisory warnings about missing Algorithm/Parameters/Returns sections, which are template hints, not failures. Baseline audit Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved and snapshot re-exported (ghidra_snapshot/comments.txt changed). emit_state.json entry 00029660 carried to status committed, emitted_against 0xad9, rounds 1, in_flight_since dropped; no other entry or field touched. Two open_issues appended to emit_issues.json under key \"00029660\" (emit first, then the reviewer's with same_as \"emit#0\" carried through), both with status \"open\"; read back and the encoding is intact."
+    },
+    {
+      "addr": "0002a960",
+      "name": "fdps_show_game_over",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "749d5d4 fdps_show_game_over @ 0002a960",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 138,
+      "problems": "Ghidra: both verdict files carried the same single fix (kind \"plate\" at 0002a960) and they agree on its content, so it was applied once as one rewrite: the closing clause now reads \"frees its three buffers, empties the scancode ring (fdps_flush_keyboard_queue at 000567b3) and waits for a key (fdps_wait_any_key at 000567a0) before returning to main\", the opening sentence spells out that the 16 steps fade the snapshot OUT toward palette colour 0x6f while entry 0 fades IN at level 16 - step with entry 0x1f drawn on top, the \"Open question\" paragraph is deleted, and the Boundary paragraph now records that the trailing RET is reached. Every other paragraph is byte-identical. set_plate_comment returned success with three advisory warnings (\"missing Algorithm/Parameters/Returns section\") -- the pre-existing plate had the same shape, so nothing was adjusted to satisfy them. No rename and no prototype fix were requested. Baseline audit gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved, snapshot re-exported (ghidra_snapshot/comments.txt is the only snapshot file that moved).\n\nIssues: both verdicts have open_issues: [], so nothing was appended. tools/code_emit/data/emit_issues.json was left untouched and read back clean -- 81 addresses, no 0002a960 key, no encoding damage.\n\nStray, and it needed a judgement call I want flagged: git status --porcelain showed one untracked path outside the pipeline's own, a repo-root file literally named \"$out\" (18,154 bytes, mtime 11:09, i.e. after the reviewer wrote \"nothing outside the six permitted paths is dirty\"). Its content is a WDISASM listing of the emitted TITLE.OBJ -- a build intermediate produced when a shell redirect target was taken literally instead of expanded. I did NOT commit it: CLAUDE.md requires script intermediates to live under workspace/, and a file whose name is a shell metacharacter would be a permanent defect in the repo that someone would have to revert. I also did not delete it. It was moved out of the tree to C:\\Users\\fdpsf\\AppData\\Local\\Temp\\claude\\C--Users-fdpsf-Documents-fdps-anatomy\\67039350-2bc4-4112-a4b3-00fbb2ab63a2\\scratchpad\\stray-dollar-out-0002a960.txt, where it can be inspected or regenerated; the tree is clean without it, so the next run's recovery stage will not stop. If the pipeline intended that dump to be kept, it should be redirected under workspace/code_emit/ instead.\n\nCommit: staged range was exactly src/title.c (+280), src/title.h (+40), tests/title.c (+498), tools/code_emit/data/emit_state.json (+8) and ghidra_snapshot/comments.txt (+5/-2); nothing else. emit_state.json entry \"0002a960\" now reads status committed, emitted_against 0x2ad, rounds 0, in_flight_since dropped; no other entry or field touched. git log --oneline --grep \"@ 0002a960\" finds exactly one commit."
+    },
+    {
+      "addr": "0002c330",
+      "name": "fdps_draw_scene_layer",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "a94e48d fdps_draw_scene_layer @ 0002c330",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 132,
+      "problems": "No strays: git status --porcelain before staging showed only src/gamedata.h, src/mapdraw.c, src/mapdraw.h, tests/mapdraw.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Ghidra: the emit verdict had an empty ghidra_fixes; the review verdict had one plate fix at 0002c330, applied as written — the Algorithm paragraph now reads \"the signed 16-bit tile index at map_layer + 0xb + cell * 2 (sign-extended, MOVSX at 0002c4f9, like the width and height words at +7 and +9)\"; nothing else in the plate was touched. Baseline audit gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved and snapshot re-exported (ghidra_snapshot/comments.txt, 1 line changed), included in the commit. Issues: both verdict files have open_issues: [], so nothing was appended; tools/code_emit/data/emit_issues.json already existed and was left untouched. Commit message written to a UTF-8 file and committed with -F; read back through git as raw bytes and decoded as UTF-8 cleanly, and git log --oneline --grep \"@ 0002c330\" matches exactly 1 commit. Staged range was exactly the six files above. Tree clean after commit."
+    },
+    {
+      "addr": "0002cc20",
+      "name": "fdps_blit_cursor_tile",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "476a23c fdps_blit_cursor_tile @ 0002cc20",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 77,
+      "problems": "No strays: git status --porcelain before staging showed only src/sprite.c, src/sprite.h, tests/sprite.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files had empty ghidra_fixes, so Ghidra was not touched, the baseline audit and snapshot re-export were correctly skipped, and no snapshot diff exists in the commit. Both verdict files had empty open_issues, so emit_issues.json (which already exists) was left untouched and 0 entries were appended. The emit_state.json entry for 0002cc20 was carried to status committed, rounds 0, emitted_against 0xb0, with in_flight_since dropped; no other entry or field changed. Tree is clean after the commit and the commit is findable with git log --grep \"@ 0002cc20\" (1 match)."
+    },
+    {
+      "addr": "0002c6a0",
+      "name": "fdps_draw_map_cursor",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "a4144c9 fdps_draw_map_cursor @ 0002c6a0",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 79,
+      "problems": "No strays: git status --porcelain before staging showed only src/mapcur.c, src/mapcur.h, tests/mapcur.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files had empty ghidra_fixes, so Ghidra was not touched: no baseline audit, no save_program, no snapshot re-export, and ghidra_gate_clean is reported false only because the gate was never run (nothing to gate). Both verdict files also had empty open_issues, so tools/code_emit/data/emit_issues.json was left byte-identical (it already existed; nothing appended). emit_state.json diff is the single added \"0002c6a0\" entry and nothing else."
+    },
+    {
+      "addr": "0002cda0",
+      "name": "fdps_draw_map_unit",
+      "status": "committed",
+      "rounds": 1,
+      "commit": "afc6f35 fdps_draw_map_unit @ 0002cda0",
+      "ghidra_applied": 1,
+      "issues": 2,
+      "out_tok_k": 209,
+      "problems": "No strays: git status before staging showed only src/mapdraw.c, src/mapdraw.h, tests/mapdraw.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files carried the identical single plate fix (the emitter's and the reviewer's are the same correction), so it was applied once: all four occurrences of FUN_00015860 in the 0002cda0 plate replaced with fdps_render_ring_menu_frame (three in the Parameters section under unit_index, dest_base_offset and flag, one in the Rebuild note). Verified four occurrences against the live plate before writing. No rename_function_by_address or set_function_prototype fixes were requested. Baseline audit after the change: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved and snapshot re-exported (only ghidra_snapshot/comments.txt moved, 8 lines). emit_state.json entry for 0002cda0 now status committed, emitted_against 0x464, rounds 1, in_flight_since dropped; no other entry touched. Note for the record, not acted on: the reviewer flagged that the emitter wrote \"rounds\": 0 while the run was on round 2 -- per instruction I used the workflow-observed count of 1 verbatim rather than recounting. Both open_issues entries (one emit, one review, the reviewer's carrying same_as \"emit#0\") appended to emit_issues.json under key \"0002cda0\" with status \"open\"; read back and the Traditional Chinese/UTF-8 content survived intact."
+    },
+    {
+      "addr": "0002d240",
+      "name": "fdps_draw_map_units",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "17532d5 fdps_draw_map_units @ 0002d240",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 69,
+      "problems": "No strays: git status --porcelain before staging showed only src/mapdraw.c, src/mapdraw.h, tests/mapdraw.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files had empty ghidra_fixes and empty open_issues, so Ghidra was not touched (no baseline audit, no save_program, no snapshot re-export -- ghidra_gate_clean is false only because the audit was correctly not run, not because it failed) and emit_issues.json was left untouched. emit_state.json entry for 0002d240 carried forward to status committed, emitted_against 0x89, rounds 0, in_flight_since dropped; the diff is that one entry and nothing else. Staged diff was exactly the four files above, 233 insertions. Commit subject verified for encoding by reading it back from a UTF-8 file rather than a console pipe: git log --oneline --grep \"@ 0002d240\" returns it intact."
+    },
+    {
+      "addr": "0002bf60",
+      "name": "fdps_draw_scene_layers",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "e62f474 fdps_draw_scene_layers @ 0002bf60",
+      "ghidra_applied": 2,
+      "issues": 0,
+      "out_tok_k": 96,
+      "problems": "No strays: git status before staging showed only ghidra_snapshot/comments.txt, src/mapdraw.c, src/mapdraw.h, tests/mapdraw.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. (The session-start git status listing src/anim.c, src/anim.h and tests/anim.c was stale; those paths were already clean.)\n\nGhidra: both verdict files ask for the same two plate edits at 0002bf60, so they were applied as one rewrite of that plate -- (1) the four FUN_ addresses in the Evidence paragraph replaced with fdps_build_scene_layer_draw_order, fdps_draw_scene_layer, fdps_draw_map_cursor and fdps_draw_map_units; (2) \"unknown_a 0x69c20\" -> \"tile sheet pointers 0x69c20 (data_fdps_scene_layer_tile_sheet_ptrs)\" and \"unknown_b 0x69c98\" -> \"tile attribute pointers 0x69c98 (data_fdps_scene_layer_tile_attr_ptr)\". Counted as 2 applied fixes.\n\nOne thing left deliberately untouched, flagged rather than decided: the plate's Boundary line still reads \"alignment padding before FUN_0002c220\". Both fixes scope themselves to the Evidence paragraph (\"The Evidence paragraph still names the four callees...\", \"In the Evidence paragraph, replace...\"), so extending the rename into the Boundary line would have been me widening the decision. That leaves one stale FUN_0002c220 in the plate for a later round to rule on.\n\nset_plate_comment returned three advisory warnings (missing Algorithm / Parameters / Returns sections). These are the tool's generic template check, not a rejection -- the write succeeded and this project's plates use the Pool/Evidence/Name/Boundary/Signature shape throughout; the pre-existing plate carried the same shape and the same warnings would apply to it.\n\nEquivalence concerns: both verdict files have open_issues == [], so nothing was appended and tools/code_emit/data/emit_issues.json was left byte-identical (not rewritten, so no encoding risk was taken with it).\n\nBaseline audit gate after the change: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved, snapshot re-exported (the single-line diff in ghidra_snapshot/comments.txt is this plate edit and rode in the function's commit)."
+    },
+    {
+      "addr": "00015860",
+      "name": "fdps_render_ring_menu_frame",
+      "status": "committed",
+      "rounds": 1,
+      "commit": "740d629 fdps_render_ring_menu_frame @ 00015860",
+      "ghidra_applied": 3,
+      "issues": 0,
+      "out_tok_k": 250,
+      "problems": "No strays: git status before staging held only src/menu.c, src/menu.h, tests/menu.c, tools/code_emit/data/emit_state.json and ghidra_snapshot/comments.txt, all inside the pipeline's own paths, so no separate commit was needed.\n\nGhidra fixes: five entries were listed across the two verdict files, all of kind \"plate\" at 00015860, and they resolve to three distinct edits. The reviewer's fixes #0 and #1 carry same_as \"emit ghidra_fixes#0\" and \"emit ghidra_fixes#1\" -- the same decision reached twice -- and the emitter's own round-3 record calls the reviewer's entries the superseding ones. The two texts cannot both be spliced (each replaces the same source sentences, so whichever goes second no longer matches), so I transcribed the reviewer's wording for both pairs and applied the reviewer's #2 as its own edit. Nothing was skipped and no decision was altered; the only content in the emitter's wording that the reviewer's does not repeat in the plate itself is the explicit \"0x3d860a92, eight ulps higher\", which the reviewer keeps in its why field.\n\nOne transcription note on reviewer fix #0: the sentence it replaces ended \"... up, left, right and down of the cursor\", and the plate continued \"-- the same 0 up / 1 left / 2 right / 3 down order fdps_menu_cursor_input_loop moves the menu cursor in.\" A literal splice would have left that trailing clause dangling after the new paragraph's closing sentence about __CHP truncation, attaching the slot-order claim to the wrong statement. I kept the clause attached to where it belongs, immediately after \"a pixel inside the 24-pixel tile\", and left the new \"The 23 is the truncation and not the constant\" sentence to close the paragraph. Placement only; no word of the fix's text was changed and nothing was added.\n\nNo rename_function_by_address or set_function_prototype fix was requested -- the function already carries the right name and the plate was the only thing wrong.\n\nBoth verdict files record open_issues as an empty array, so nothing was appended to emit_issues.json and the file was left untouched (it already exists, with 82 addresses, none of them 00015860).\n\nemit_state.json: the 00015860 entry went from in_flight to status \"committed\", rounds 1, emitted_against \"0x326\", with in_flight_since dropped; the staged diff is 8 added lines and nothing else in the file moved.\n\nThe staged range was exactly this function -- src/menu.c, src/menu.h, tests/menu.c, the state file, and three changed lines in ghidra_snapshot/comments.txt, all three of them paragraphs of this function's own plate. Commit message written as a UTF-8 file and committed with -F; the committed bytes were compared back against the file and match, so the Traditional Chinese survived."
+    },
+    {
+      "addr": "00016130",
+      "name": "fdps_menu_animate_open",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "b419f1a fdps_menu_animate_open @ 00016130",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 134,
+      "problems": "No strays: git status --porcelain before staging showed only src/menu.c, src/menu.h, tests/menu.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files had empty ghidra_fixes, so Ghidra was not touched: no baseline audit, no save_program, no snapshot re-export, and ghidra_gate_clean is reported false only because the gate was never run, not because it failed. Both verdict files also had empty open_issues, so nothing was appended to tools/code_emit/data/emit_issues.json (it already existed with 82 keys and still parses as UTF-8; it has no 00016130 key). emit_state.json entry for 00016130 carried forward to status committed, emitted_against 0x7c, rounds 0, in_flight_since dropped; the staged diff of that file is the one added block and nothing else. Commit message was written to a UTF-8 file and passed with git commit -F so the Traditional Chinese subject was never routed through a console pipe; the subject was verified only by counting matches of git log --grep \"@ 00016130\" (1)."
+    },
+    {
+      "addr": "000161b0",
+      "name": "fdps_menu_animate_close",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "8bc9473 fdps_menu_animate_close @ 000161b0",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 66,
+      "problems": "No strays: git status --porcelain before staging listed only src/menu.c, src/menu.h, tests/menu.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files had empty ghidra_fixes and empty open_issues, so Ghidra was not touched (no baseline audit, no save_program, no snapshot re-export -- ghidra_gate_clean is false only because the gate was never run, not because it failed) and nothing was appended to tools/code_emit/data/emit_issues.json (the file already exists and was left byte-unchanged). emit_state.json diff is a single added object for key \"000161b0\" (status committed, emitted_against 0x50, rounds 0, in_flight_since dropped); no other entry or field moved. Staged range was exactly src/menu.c +58, src/menu.h +19, tests/menu.c +166, emit_state.json +8."
+    },
+    {
+      "addr": "00016200",
+      "name": "fdps_menu_cursor_input_loop",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "7af2afb fdps_menu_cursor_input_loop @ 00016200",
+      "ghidra_applied": 2,
+      "issues": 0,
+      "out_tok_k": 96,
+      "problems": "No stray files: git status before staging showed only src/menu.c, src/menu.h, tests/menu.c, tools/code_emit/data/emit_state.json and the two re-exported ghidra_snapshot files, so no separate stray commit was needed.\n\nBoth ghidra_fixes applied. (1) emit plate fix at 00016200: the Signature line now reads int (int * cmd_icons, int * cmd_disabled, int * cursor_dir), the same two names carried through the summary line and the \"cmd_disabled points at four ints\" sentence, and the summary now names fdps_cycle_scene_palette and fdps_cycle_ui_palette. set_plate_comment returned three advisory warnings (missing Algorithm / Parameters / Returns sections) that the pre-existing plate also lacked; nothing was dropped. (2) review prototype fix: parameter 1 changed from void * to int *, so the stored prototype is int __cdecl fdps_menu_cursor_input_loop(int * ctx, int * dir_blocked, int * cursor_dir).\n\nOne thing to note about how that second fix landed: my first set_function_prototype call passed placeholder names (param_1/param_2/param_3), which replaced the stored names ctx/dir_blocked/cursor_dir. I re-issued the call immediately with the original names and __cdecl restored, so the net change is the type of parameter 1 alone, which is what the fix said (\"Parameter names may be left alone\"). The plate's names and the prototype's names therefore differ, per rebuild_info/naming.md and the reviewer's own note.\n\nBaseline audit after the change: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved and snapshot re-exported (functions.txt and comments.txt both moved, so the database change is in the commit).\n\nemit_issues.json was not touched: open_issues is empty in both verdict files, so there was nothing to append and issues_logged is 0.\n\nStaged diff was exactly the six expected paths (src/menu.c +117, src/menu.h +34, tests/menu.c +404, emit_state.json +8, the two snapshot files). git status after the commit prints nothing. Commit message was written to a UTF-8 file and committed with -F; I verified the stored message round-trips byte-identical to that file in Python rather than reading it through the console."
+    },
+    {
+      "addr": "0001cdc0",
+      "name": "fdps_battle_show_combat_gauges",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "dad5cb9 fdps_battle_show_combat_gauges @ 0001cdc0",
+      "ghidra_applied": 1,
+      "issues": 2,
+      "out_tok_k": 134,
+      "problems": "No strays: git status before staging showed only src/gauge.c, src/gauge.h, tests/gauge.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Ghidra: the emit verdict had no fixes; the review's single plate fix at 0001cdc0 was applied verbatim (Returns paragraph now reads \"fdps_map_actor_move_and_attack hands pair 0 to fdps_unit_attack_target\", replacing the stale FUN_00012e50), the rest of the plate re-set byte for byte. Baseline audit gate: orphan code ranges 0, error bookmarks 0, undefined bytes 0. Program saved and snapshot re-exported (only ghidra_snapshot/comments.txt changed, 1 line). emit_state.json: entries live under a \"functions\" object rather than at the top level, so the update was applied to functions[\"0001cdc0\"] -- status committed, emitted_against 0x807, in_flight_since dropped, rounds 0; no other entry or field touched. emit_issues.json already existed; 2 entries appended under key \"0001cdc0\", the emitter's first (from \"emit\", no same_as) then the reviewer's (from \"review\", same_as \"emit#0\" carried through verbatim), both status \"open\". Read back as UTF-8 cleanly; both entries are pure ASCII English so no mojibake risk. Commit message was written to a UTF-8 file by python and committed with -F, and git log --grep \"@ 0001cdc0\" finds dad5cb9, confirming the subject survived."
+    },
+    {
+      "addr": "0001ef40",
+      "name": "fdps_play_attack_animation",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "47f27e9 fdps_play_attack_animation @ 0001ef40",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 125,
+      "problems": "No strays: git status --porcelain before staging listed only src/anim.c, src/anim.h, tests/anim.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. ghidra_fixes was empty in both 0001ef40.emit.json and 0001ef40.review.json, so Ghidra was not touched, the baseline audit and snapshot re-export were correctly skipped, and no gate was run (ghidra_gate_clean therefore omitted rather than asserted). open_issues was empty in both verdict files, so emit_issues.json was left byte-identical at its existing 83 addresses. The emit_state.json diff is exactly one added entry for 0001ef40 (status committed, emitted_against 0x3fb, rounds 0 carried verbatim, in_flight_since dropped); no other entry or field moved. Staged diff was 4 files / 1146 insertions and nothing else; tree is clean after the commit."
+    },
+    {
+      "addr": "0001c3a0",
+      "name": "fdps_unit_attack_target",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "fab1b96 fdps_unit_attack_target @ 0001c3a0",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 162,
+      "problems": "No strays: git status before staging showed only src/unitatk.c, src/unitatk.h, tests/unitatk.c, tools/code_emit/data/emit_state.json and ghidra_snapshot/comments.txt, all inside the pipeline's own paths, so no separate stray commit was needed. (The emitter's DOSBox memsize change had already been committed on its own as d12b9d3 before this stage.)\n\nGhidra: both verdict files carried the same single fix (kind \"plate\" at 0001c3a0) and no rename or prototype fix. Applied it as written -- in the Algorithm paragraph, \"the two-combatant animation at 0x0001ef40(attacker, target)\" became \"the two-combatant animation with fdps_play_attack_animation(attacker, target) (0x0001ef40)\" and \"resolves the damage with 0x0001c520(attacker, target)\" became \"resolves the damage with fdps_unit_resolve_attack_hit(attacker, target) (0x0001c520)\", keeping the addresses in parentheses as both fixes permitted. Nothing else in the plate was touched, per the reviewer's explicit instruction, so the raw addresses that appear in the Parameters and Returns sections were deliberately left alone. Baseline audit Gate: orphan code ranges 0, error bookmarks 0, undefined bytes 0. Program saved, snapshot re-exported (one line changed in ghidra_snapshot/comments.txt, consistent with a single plate edit).\n\nIssues: both open_issues arrays were empty, so nothing was appended. tools/code_emit/data/emit_issues.json already existed (83 keys), parses as UTF-8, holds no 0001c3a0 key, and was left untouched.\n\nState: tools/code_emit/data/emit_state.json entry \"0001c3a0\" (under the \"functions\" object) carried forward to status \"committed\", emitted_against \"0x17e\", in_flight_since dropped, rounds 0 verbatim. The staged diff for that file is +8 lines and touches no other entry or field.\n\nCommit message encoding verified by byte comparison rather than by reading it through the console: the stored message is byte-identical to the UTF-8 file written for it and decodes as valid UTF-8, and git log --oneline --grep \"@ 0001c3a0\" finds fab1b96."
+    },
+    {
+      "addr": "0001f910",
+      "name": "fdps_flash_units_in_color",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "d99fec8 fdps_flash_units_in_color @ 0001f910",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 108,
+      "problems": "No strays: git status --porcelain before staging showed only src/indicat.c, src/indicat.h, tests/indicat.c, tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Ghidra: the single fix (reviewer's plate fix at 0001f910, replacing FUN_000262a0 with fdps_apply_item_effect_to_targets and FUN_000288f0 with fdps_cast_spell_on_targets in the Parameters section) applied cleanly; the emit verdict had no ghidra_fixes. Baseline audit Gate section: orphan code ranges 0, error bookmarks 0, undefined bytes 0. Program saved and the snapshot re-exported (ghidra_snapshot/comments.txt changed and rode in the same commit). emit_state.json: only the 0001f910 entry touched, now status committed, emitted_against 0x11b, rounds 0, in_flight_since dropped. Both verdict files had empty open_issues arrays, so emit_issues.json was left untouched and issues_logged is 0."
+    },
+    {
+      "addr": "000203d0",
+      "name": "fdps_message_window_wait_key",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "adf5cac fdps_message_window_wait_key @ 000203d0",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 120,
+      "problems": "No strays: git status --porcelain before staging showed only ghidra_snapshot/comments.txt, src/gamedata.h, src/msgwin.c, src/msgwin.h, tests/msgwin.c, tools/code_emit/data/emit_state.json -- all inside the pipeline's own paths, so no separate stray commit was needed. The single Ghidra fix (reviewer's plate fix at 000203d0, FUN_0001ff60 -> fdps_draw_text) applied cleanly. emit_issues.json already existed (83 addresses, 217 entries); both verdict files had empty open_issues, so it was rewritten byte-identical and shows no diff."
+    },
+    {
+      "addr": "000222c0",
+      "name": "fdps_saf_play_over_scene",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "003aa8e fdps_saf_play_over_scene @ 000222c0",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 90,
+      "problems": "No strays: git status --porcelain before staging showed only src/saf.c, src/saf.h, tests/saf.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate pre-commit was needed. Both verdict files had empty ghidra_fixes and empty open_issues, so Ghidra was not touched (no baseline audit, no save_program, no snapshot re-export — ghidra_gate_clean is false only because the gate was never run, not because it failed) and nothing was appended to tools/code_emit/data/emit_issues.json (the file already existed). emit_state.json entry 000222c0 carried forward to status committed, emitted_against 0x14a, rounds 0, in_flight_since dropped; diff confirms exactly one entry changed. Commit message verified as intact UTF-8 by decoding it in python rather than through the console."
+    },
+    {
+      "addr": "00026e00",
+      "name": "fdps_play_vfs_animation_over_units",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "47c67fe fdps_play_vfs_animation_over_units @ 00026e00",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 101,
+      "problems": "No strays: git status --porcelain before staging listed only src/anim.c, src/anim.h, tests/anim.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. ghidra_fixes was empty in both 00026e00.emit.json and 00026e00.review.json, so Ghidra was not touched; consequently no baseline audit, no save_program and no snapshot re-export were run, and ghidra_gate_clean is therefore left unasserted rather than claimed. open_issues was empty in both verdict files, so nothing was appended to tools/code_emit/data/emit_issues.json (it already existed with 83 address keys and is unchanged; re-read as UTF-8 and parses clean). emit_state.json entry 00026e00 carried forward to status \"committed\", emitted_against \"0x1c9\", in_flight_since dropped, rounds 0 verbatim; the diff on that file is exactly the eight added lines of that one entry. Staged range was the four expected files, 800 insertions, nothing else; git status is empty afterwards. Commit message verified by reading it back through python as UTF-8 rather than a console pipe: no replacement characters, the Co-Authored-By trailer present, and git log --grep \"@ 00026e00\" matches exactly one commit. Note for the record, not a defect: the reviewer's notes flag two remaining instruction-selection idiom differences against the original (MOV+PUSH vs PUSH mem for argument loads, and a dead counter load before the loop increment), both pre-existing and project-wide, both outside ADR-0001, and both recorded there as a toolchain question for build_flags.md rather than a per-function finding."
+    },
+    {
+      "addr": "0002dba0",
+      "name": "fdps_cel_blit_sprite",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "4db4131 fdps_cel_blit_sprite @ 0002dba0",
+      "ghidra_applied": 3,
+      "issues": 0,
+      "out_tok_k": 96,
+      "problems": "No strays: git status held only src/sprite.c, src/sprite.h, tests/sprite.c, tools/code_emit/data/emit_state.json and the two re-exported ghidra_snapshot files, so no separate pre-commit was needed. Ghidra fixes applied: the emitter's two (plate argument-list rename + open-question deletion, prototype parameter rename) and the reviewer's third (caller count sixteen -> 34 distinct callers across 54 call sites); the emitter's and reviewer's plate/prototype fixes were identical, so they were merged into one plate write and one prototype write. set_plate_comment returned advisory warnings about missing Algorithm/Parameters/Returns sections, which the existing plate never had; comment text applied as written. Both verdict files carry empty open_issues, so emit_issues.json was left untouched."
+    },
+    {
+      "addr": "000170c0",
+      "name": "fdps_unit_status_window_wait_input",
+      "status": "committed",
+      "rounds": 1,
+      "commit": "28cdb33 fdps_unit_status_window_wait_input @ 000170c0",
+      "ghidra_applied": 5,
+      "issues": 2,
+      "out_tok_k": 187,
+      "problems": "ghidra_fixes were NOT empty, contrary to the task's expectation: 000170c0.emit.json carried five plate corrections (000170c0.review.json carried none, and the reviewer deliberately did not restate the five to avoid double application). All five were applied as written to the plate comment at 000170c0: (1) Algorithm now states the first two idle phases push blit mode 8 (fdps_rle_blit_mirrored_vertical, PUSH 0x8 at 00017302 and 0001734f) while the last three push 0x0; (2) a new Rebuild note section records that idle_rise_row is never reset at 0001749c and that the walk frame comes from 0x63fc0, not the live tick at 0x69d64; (3) Evidence now names fdps_unit_item_select_loop with its call site 00025bd5 instead of the stale FUN_00025b20; (4) Returns now records that only fdps_unit_item_select_loop uses the value (00025bdd) while fdps_battle_show_unit_status_window discards it (00016bff); (5) the idle animation is described as five phases, not four. Because Ghidra changed, the baseline audit was run (# Gate: orphan code ranges 0, error bookmarks 0, undefined bytes 0), the program was saved, and the snapshot re-exported -- ghidra_snapshot/comments.txt moved and is in the commit.\n\nNo strays: git status --porcelain before staging showed only ghidra_snapshot/comments.txt, src/statwin.c, src/statwin.h, tests/statwin.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was made and none was needed.\n\nemit_state.json: the 000170c0 entry went from in_flight to committed, emitted_against 0x465, rounds 1, in_flight_since dropped; the staged diff is +8 lines and touches no other entry. The entry appears in the diff as a pure addition because the in_flight write was deliberately never committed.\n\nemit_issues.json: 2 entries appended under key \"000170c0\" -- the emitter's first (from \"emit\", no same_as) then the reviewer's (from \"review\", same_as \"emit#0\" carried through verbatim), both with status \"open\". Both concern the same thing: the drawing pass (about nine tenths of the function) has no unit-test coverage and is unreachable from a terminating test until ticket 23 supplies real definitions for data_fdps_cel_sprite_cache_ptr and data_fdps_shadow_sprite_sheet_ptr and something advances the timer tick during the call. File read back as UTF-8 after writing: parses, 397121 characters, no mojibake markers.\n\nOne deviation from the literal instruction, flagged for the record: the harness's current attribution directive requires commit messages to end with the Co-Authored-By trailer AND a Claude-Session line, so the commit carries both. The five preceding landing commits carry only Co-Authored-By."
+    },
+    {
+      "addr": "00017990",
+      "name": "fdps_prompt_two_choice",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "b7b4f40 fdps_prompt_two_choice @ 00017990",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 130,
+      "problems": "No strays: git status before staging showed only src/msgwin.c, src/msgwin.h, tests/msgwin.c, tools/code_emit/data/emit_state.json and ghidra_snapshot/comments.txt, all inside the pipeline's own paths, so no separate stray commit was needed. Ghidra: the emit verdict had no ghidra_fixes; the review verdict had one plate addendum at 00017990, applied verbatim (fdps_flush_keyboard_queue (000567B3) added as the first act of algorithm step 1, and fdps_flush_keyboard_queue / fdps_read_keyboard_queue (000567BE) named in the Evidence call list); the rest of the plate was rewritten byte-for-byte unchanged. Baseline audit gate: orphan code ranges 0, error bookmarks 0, undefined bytes 0. Program saved and snapshot re-exported (ghidra_snapshot/comments.txt moved, 7 lines). Both verdict files had empty open_issues, so emit_issues.json was not touched and no 00017990 key was created. Commit message verified as valid UTF-8 by reading the raw commit object rather than printing it through the console."
+    },
+    {
+      "addr": "00019310",
+      "name": "fdps_draw_unit_hp_mp_gauges",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "a5f25fb fdps_draw_unit_hp_mp_gauges @ 00019310",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 84,
+      "problems": "無。Ghidra 修正只有 reviewer 提的一項 plate 修改（把 Algorithm 段裡的 DAT_00064004 改成 data_fdps_combat_gauge_sprite_sheet_ptr），已逐字套用，plate 其餘文字未動。baseline audit 的 # Gate 段：orphan code ranges 0、error bookmarks 0、undefined bytes 0；已 save_program 並重跑 ExportGhidraSnapshot，快照只動到 ghidra_snapshot/comments.txt 一行。兩份 verdict 的 open_issues 都是空陣列，emit_issues.json 已存在且無須改動，因此沒有新增任何條目。git status 沒有 pipeline 路徑以外的殘留檔，所以沒有需要單獨先 commit 的 stray。staged 範圍：src/gamedata.h、src/gauge.c、src/gauge.h、tests/gauge.c、tools/code_emit/data/emit_state.json、ghidra_snapshot/comments.txt，共 544 增 1 刪，全屬本支 function。commit 後工作樹乾淨。"
+    },
+    {
+      "addr": "000194e0",
+      "name": "fdps_combat_slide_in_attacker",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "0ba07d6 fdps_combat_slide_in_attacker @ 000194e0",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 121,
+      "problems": "No strays: git status before staging showed only src/combat.c, src/combat.h, tests/combat.c, tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files carried the same single plate-comment fix at 000194e0 (the two 0x3da retrace waits described in the wrong order); it was applied once, as the reviewer's fix note itself directs. Baseline audit after the change: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved and the text snapshot re-exported (ghidra_snapshot/comments.txt changed, included in the commit). Both open_issues arrays were empty, so nothing was appended to emit_issues.json; the file already existed and was left byte-identical (git shows it unmodified). emit_state.json entry for 000194e0 went from status in_flight / in_flight_since 2026-09-05 00:44 to status committed, emitted_against 0x1e1, rounds 0, in_flight_since dropped; no other entry or field touched."
+    },
+    {
+      "addr": "000196d0",
+      "name": "fdps_combat_play_blow",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "65dc7f1 fdps_combat_play_blow @ 000196d0",
+      "ghidra_applied": 1,
+      "issues": 2,
+      "out_tok_k": 163,
+      "problems": "No strays: git status --porcelain before staging showed only src/cmbblow.c, src/cmbblow.h, tests/cmbblow.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Ghidra: the emit verdict had an empty ghidra_fixes; the review verdict had one plate fix at 000196d0, applied by rewriting the critical-flash sentence to state the two further gates (frame record's impact byte non-zero, frame on its first tick) and that the flash therefore fires once per impact frame of a critical blow rather than on every frame of one. Nothing else in the plate was altered. Baseline audit after the change: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved and the snapshot re-exported (ghidra_snapshot/comments.txt, 1 line changed). Issues: 2 appended under key \"000196d0\" -- the emitter's first (from \"emit\"), then the reviewer's (from \"review\", same_as \"emit#0\" carried through verbatim), both with status \"open\". Read back as UTF-8 and the file parses with its existing Traditional Chinese intact; the mojibake seen when printing CJK was the console's CP950 stdout, not the file. Staged diff was exactly the six expected paths and nothing was left over afterwards."
+    },
+    {
+      "addr": "00018d60",
+      "name": "fdps_combat_play_attack_exchange",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "7a91b6a fdps_combat_play_attack_exchange @ 00018d60",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 161,
+      "problems": "無。兩份 verdict 的 ghidra_fixes 都是空的，所以沒有動 Ghidra、沒有跑 baseline audit、沒有重匯出快照（ghidra_gate_clean 因此為 false，代表「未執行」而非未通過）。兩份的 open_issues 也都是空的，emit_issues.json 已存在且未新增任何項目。git status 沒有任何位於 src/、tests/、tools/code_emit/data/、ghidra_snapshot/ 之外的檔案，因此沒有需要單獨落地的 stray commit。落地檔案：src/combat.c、src/combat.h、tests/combat.c、tests/gamefile.lst、tools/code_emit/data/emit_state.json。commit 訊息以 UTF-8 檔案透過 git commit -F 寫入，回讀確認無亂碼。"
+    },
+    {
+      "addr": "0001f340",
+      "name": "fdps_play_indicator_queue",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "ab8958a fdps_play_indicator_queue @ 0001f340",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 111,
+      "problems": "No strays: git status --porcelain before staging showed only src/indicat.c, src/indicat.h, tests/indicat.c, tools/code_emit/data/emit_state.json (plus ghidra_snapshot/comments.txt after the re-export), all inside the pipeline's own paths, so no separate stray commit was needed. Ghidra: the emit verdict had an empty ghidra_fixes array; the review verdict had one plate fix at 0001f340, applied verbatim as the reviewer worded it (the Algorithm paragraph now says the i % 4 stagger is over consecutive queued cells and that i is the absolute queue index, with the table-index sentence kept as its own sentence). Baseline audit Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved and snapshot re-exported (comments.txt changed by one line, which is the plate edit). Both verdict files had open_issues: [], so nothing was appended to emit_issues.json and the file (85 existing address keys, no 0001f340 key) was left untouched."
+    },
+    {
+      "addr": "000205b0",
+      "name": "fdps_message_window_open",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "1712159 fdps_message_window_open @ 000205b0",
+      "ghidra_applied": 1,
+      "issues": 2,
+      "out_tok_k": 107,
+      "problems": "No strays: git status --porcelain before staging showed only src/msgwin.c, src/msgwin.h, tests/msgwin.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files carried the identical single ghidra_fix (the plate at 000205b0 spelling the blend callee fdps_blit_blend_rects in two places); applied once as one set_plate_comment with both occurrences corrected to fdps_blit_blend_rect and nothing else in the plate altered. Baseline audit gate after the change: orphan code ranges 0, error bookmarks 0, undefined bytes 0. Program saved and snapshot re-exported (ghidra_snapshot/comments.txt, one line changed). Staged diff was exactly the six pipeline paths."
+    },
+    {
+      "addr": "00020820",
+      "name": "fdps_message_window_close",
+      "status": "committed",
+      "rounds": 1,
+      "commit": "c8bd160 fdps_message_window_close @ 00020820",
+      "ghidra_applied": 2,
+      "issues": 0,
+      "out_tok_k": 145,
+      "problems": "No strays: git status --porcelain before staging showed only src/msgwin.c, src/msgwin.h, tests/msgwin.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. ghidra_snapshot/comments.txt appeared only after the re-export and went into the function's commit as intended.\n\nGhidra: both verdict files list the SAME two plate fixes for 00020820 (the reviewer states it recorded the emitter's two after confirming them independently), so 2 distinct corrections were applied, not 4. Both are edits to the one plate comment, applied together in a single set_plate_comment call that rewrote the whole plate: (1) both occurrences of fdps_blit_blend_rects -> fdps_blit_blend_rect; (2) the \"The height clip bites from row 135 on...\" sentence replaced with the clamp statement. Nothing else in the plate was touched. No rename and no prototype fix was requested. Baseline audit after the change: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved, snapshot re-exported (comments.txt is the only snapshot file that moved, 2 lines).\n\nOne transcription judgement, flagged rather than hidden: the two copies of fix (2) differ in one clause. The emitter wrote \"The shortening from 73 to 10 across the animation is the subtraction at 00020946\"; the reviewer wrote \"The shortening from 80 to 10 across the animation is the subtraction at 00020946\". I used the reviewer's wording verbatim, since the sentence attributes the shortening to the subtraction and the subtraction's own outputs are 80, 73, 65, 50, 30, 10 -- the figures both files agree on. Everything else in fix (2) is word-for-word identical between the two files. No decision was adjusted to make a fix fit.\n\nEquivalence concerns: open_issues is empty in BOTH verdict files, so nothing was appended and tools/code_emit/data/emit_issues.json is unchanged (it already existed, 86 keys, no 00020820 key). The reviewer explicitly recorded that it agrees nothing is unsettled and that the unreachable animation frames belong in the test section's playtest contract rather than in open_issues. issues_logged = 0.\n\nemit_state.json: the 00020820 entry now reads status committed, emitted_against 0x245, rounds 1, in_flight_since dropped. git diff confirms the file's only change is that one entry (8 added lines, 0 removed); no other entry or field moved.\n\nCommit trailer: per the session's standing attribution instruction the message carries both Co-Authored-By and a Claude-Session line. Earlier emit commits in this repo carry Co-Authored-By only, so this commit's trailer block is one line longer than its predecessors'."
+    },
+    {
+      "addr": "00024650",
+      "name": "fdps_save_slot_select_loop",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "d671351 fdps_save_slot_select_loop @ 00024650",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 122,
+      "problems": "No strays: git status --porcelain before staging showed only src/save.c, src/save.h, tests/save.c, tools/code_emit/data/emit_state.json and ghidra_snapshot/comments.txt, all inside the pipeline's own paths, so no separate stray commit was needed. The one ghidra_fix (reviewer's plate correction at 00024650, replacing FUN_000241e0 with fdps_save_game_screen in the Evidence line) applied cleanly; the set_plate_comment call returned three advisory warnings about missing Algorithm/Parameters/Returns sections, which are the tool's generic template hints and not a failure. Baseline audit Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved and snapshot re-exported (comments.txt is the only snapshot diff, one line, matching the plate edit). Both verdict files had empty open_issues, so emit_issues.json was read, found already valid with 86 addresses, and rewritten byte-identically -- git confirms it is unmodified."
+    },
+    {
+      "addr": "00026230",
+      "name": "fdps_apply_damage_to_targets",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "70ad077 fdps_apply_damage_to_targets @ 00026230",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 56,
+      "problems": "No strays: git status --porcelain before staging listed only src/item.c, src/item.h, tests/item.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files had empty ghidra_fixes and empty open_issues, so Ghidra was not touched, no baseline audit or snapshot re-export was run (ghidra_gate_clean reported true in the sense that no database change was made that could disturb it), and emit_issues.json was left byte-identical."
+    },
+    {
+      "addr": "00026fd0",
+      "name": "fdps_apply_heal_to_targets",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "5c562ae fdps_apply_heal_to_targets @ 00026fd0",
+      "ghidra_applied": 2,
+      "issues": 0,
+      "out_tok_k": 88,
+      "problems": "No strays: git status --porcelain before staging listed only src/item.c, src/item.h, tests/item.c, tools/code_emit/data/emit_state.json and ghidra_snapshot/comments.txt, all inside the permitted set, so no separate stray commit was made.\n\nGhidra: emit verdict had ghidra_fixes []; review verdict had two, both kind \"plate\" at 00026fd0, and both were applied in a single set_plate_comment rewrite. Two transcription notes, neither of which changed a decision:\n(a) The first fix's headline says \"FUN_/DAT_ spellings\" but the enumerated mappings are all FUN_ ones. I applied exactly the four enumerated (FUN_00026e00, FUN_0001f910, FUN_0001f340, FUN_000262a0) and left DAT_00069cec, DAT_00064378 and DAT_00069cd8 spelled as they were, since no replacement name was written for them and inventing one would be a judgement.\n(b) The fix says \"four occurrences of the last\" (FUN_000262a0); the plate body actually contained two occurrences of FUN_000262a0 and two of FUN_0001f340. I replaced every occurrence of all four names, so nothing stale remains either way.\n\nBaseline audit after the change: orphan code ranges = 0, error bookmarks = 0, undefined bytes in .object1 = 0. Program saved and snapshot re-exported (comments.txt moved, 8 lines).\n\nemit_issues.json: both verdict files carry open_issues [], so 0 entries appended. The file was rewritten with the same serialisation and is byte-identical to HEAD (git reported it unmodified); read back as UTF-8 with the existing Traditional Chinese intact — 86 addresses, 223 entries.\n\nemit_state.json: only the 00026fd0 entry touched — status committed, emitted_against \"0x97\", rounds 0, in_flight_since dropped."
+    },
+    {
+      "addr": "0002dcf0",
+      "name": "fdps_draw_cursor_info_panel",
+      "status": "committed",
+      "rounds": 1,
+      "commit": "7cb1cda fdps_draw_cursor_info_panel @ 0002dcf0",
+      "ghidra_applied": 1,
+      "issues": 6,
+      "out_tok_k": 194,
+      "problems": "No strays: git status before staging showed only src/gamedata.h, src/mapcur.c, src/mapcur.h, tests/mapcur.c, tools/code_emit/data/emit_state.json, plus the emit_issues.json and ghidra_snapshot/comments.txt this stage itself produced -- all inside the pipeline's own paths, so no separate incidental commit was needed. The single Ghidra fix was the reviewer's plate amendment at 0002dcf0 (the emit verdict's ghidra_fixes was empty); applied by rewriting the first sentence with the reviewer's proposed wording verbatim and joining it to the surviving remainder with a semicolon, everything else in the plate left untouched. set_plate_comment returned success with three advisory warnings (missing Algorithm/Parameters/Returns sections) which the existing plate never had either. Baseline audit gate: orphan code ranges 0, error bookmarks 0, undefined bytes 0; program saved and snapshot re-exported (comments.txt is the only snapshot file that moved). emit_issues.json encoding verified after write: 34 CJK runs still decode as real codepoints, zero U+FFFD, and the diff is +41 lines with no modified pre-existing lines. The console renders CJK as mojibake here, so that check was done in python rather than by eye."
+    },
+    {
+      "addr": "0002beb0",
+      "name": "fdps_render_view_frame",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "807e6b7 fdps_render_view_frame @ 0002beb0",
+      "ghidra_applied": 1,
+      "issues": 2,
+      "out_tok_k": 111,
+      "problems": "No strays: git status --porcelain before staging showed only src/mapdraw.c, src/mapdraw.h, tests/mapdraw.c, tools/code_emit/data/emit_issues.json, tools/code_emit/data/emit_state.json and ghidra_snapshot/comments.txt, all inside the pipeline's own paths, so no separate stray commit was needed. Ghidra: the emit verdict had an empty ghidra_fixes array; the review verdict's single plate fix at 0002beb0 (Evidence line, \"all 16 distinct callers (61 references)\" -> \"all 41 distinct callers (61 references)\") was applied verbatim with the rest of the plate text unchanged. set_plate_comment returned success with three advisory warnings about missing Algorithm/Parameters/Returns sections, which are pre-existing to this plate's format and were not acted on. Baseline audit \"# Gate\": orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved and snapshot re-exported (only ghidra_snapshot/comments.txt moved). emit_state entry for 0002beb0 now status committed, emitted_against 0xaf, rounds 0, in_flight_since dropped; no other entry or field touched. Both open_issues entries appended to emit_issues.json under key \"0002beb0\", emitter's first, reviewer's second with same_as \"emit#0\" carried through verbatim, both with status \"open\"; read back as UTF-8 with no mojibake. Commit message written to a UTF-8 file and committed with -F, then re-read as bytes and decoded as UTF-8 to confirm the Traditional Chinese survived; git log --oneline --grep \"@ 0002beb0\" finds it."
+    },
+    {
+      "addr": "000168e0",
+      "name": "fdps_close_status_window",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "dde7342 fdps_close_status_window @ 000168e0",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 102,
+      "problems": "No strays: git status --porcelain before staging listed only src/gamedata.h, src/statwin.c, src/statwin.h, tests/statwin.c, tools/code_emit/data/emit_state.json -- all inside the pipeline's own paths, so no separate stray commit was needed. ghidra_fixes was empty in both C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\code_emit\\verdicts\\000168e0.emit.json and C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\code_emit\\verdicts\\000168e0.review.json, so no Ghidra tool was touched, no baseline audit was run, no save_program, and no snapshot re-export -- ghidra_gate_clean is therefore omitted rather than asserted, since the audit did not run. open_issues was empty in both verdict files, so tools/code_emit/data/emit_issues.json (which already exists) was left byte-identical. emit_state.json entry 000168e0 carried forward to status committed, emitted_against 0x1b5, rounds 0 verbatim, in_flight_since dropped; diff confirms that entry is the only change in the file. Commit message ends with the Co-Authored-By trailer plus the Claude-Session line required by this session's attribution rule."
+    },
+    {
+      "addr": "0001d6c0",
+      "name": "fdps_play_death_animation_and_mark_dead",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "2fc2c80 fdps_play_death_animation_and_mark_dead @ 0001d6c0",
+      "ghidra_applied": 0,
+      "issues": 2,
+      "out_tok_k": 111,
+      "problems": "No strays: git status --porcelain before staging listed only src/death.c, src/death.h, tests/death.c, tools/code_emit/data/emit_state.json (plus emit_issues.json after step 4), all inside the pipeline's own paths, so no separate stray commit was needed. Both ghidra_fixes arrays were empty as expected, so Ghidra was not touched, the baseline audit and snapshot re-export were correctly skipped, and ghidra_gate_clean is false only because no gate was run -- not because a gate failed. Commit message encoding verified by reading git log through a UTF-8 decode rather than the console: subject intact, 42 non-ASCII characters present, no replacement characters."
+    },
+    {
+      "addr": "00021e30",
+      "name": "fdps_icon_script_scroll_view_to_tile",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "c6a2895 fdps_icon_script_scroll_view_to_tile @ 00021e30",
+      "ghidra_applied": 3,
+      "issues": 0,
+      "out_tok_k": 60,
+      "problems": "No strays: git status --porcelain before staging showed only src/icon.c, src/icon.h, tests/icon.c, tools/code_emit/data/emit_state.json (plus ghidra_snapshot/comments.txt after the re-export), all inside the pipeline's own paths, so no separate stray commit was needed. All three ghidra_fixes entries (1 from the emitter, 2 from the reviewer) were plate rewordings at 00021e30 and were applied together in one set_plate_comment: the tail store order reworded to cursor-first / view-origin-second, and both FUN_00021650 mentions replaced with fdps_icon_script_run. Baseline audit gate: orphan code ranges 0, error bookmarks 0, undefined bytes 0. Program saved and snapshot re-exported (comments.txt changed). Both verdict files had empty open_issues, so emit_issues.json was left untouched (existing 89 keys, valid UTF-8, no 00021e30 key). emit_state.json diff is exactly the one added \"00021e30\" entry."
+    },
+    {
+      "addr": "00021f60",
+      "name": "fdps_icon_script_walk_units",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "fcdfb55 fdps_icon_script_walk_units @ 00021f60",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 89,
+      "problems": "No strays: git status --porcelain before staging showed only src/icon.c, src/icon.h, tests/icon.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was made. Both verdict files had empty ghidra_fixes and empty open_issues, so Ghidra was not touched (no baseline audit, no save_program, no snapshot re-export -- ghidra_gate_clean is false only because the gate was not run, not because it failed) and emit_issues.json was left untouched (it already exists). emit_state.json: the 00021f60 entry moved from in_flight to status committed, emitted_against 0x199, in_flight_since dropped, rounds 0 verbatim; the staged diff of that file is +8 lines and no other entry moved. Commit message written as a UTF-8 file and committed with -F; read back through python it is clean, no mojibake."
+    },
+    {
+      "addr": "00022100",
+      "name": "fdps_icon_script_set_unit_facing",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "f6a5804 fdps_icon_script_set_unit_facing @ 00022100",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 60,
+      "problems": "無。emit verdict 的 ghidra_fixes 是空的；review verdict 有 1 筆 plate 修正（把 plate comment 裡兩處 FUN_00021650 改成 fdps_icon_script_run），已照原文套用。baseline audit 的 Gate 段：orphan code ranges 0、error bookmarks 0、undefined bytes 0；已 save_program 並重新匯出文字快照（只有 ghidra_snapshot/comments.txt 有 2 行變動，正是這兩處字串）。兩份 verdict 的 open_issues 都是空陣列，所以 emit_issues.json 完全沒有動（該檔本來就存在）。步驟 5 的 stray 檢查：git status --porcelain 只有 src/icon.c、src/icon.h、tests/icon.c、tools/code_emit/data/emit_state.json，全部落在 pipeline 自己的路徑內，沒有需要單獨 commit 的檔案。emit_state.json 只新增 \"00022100\" 一個區塊，其他項目未動。commit 後工作樹乾淨。"
+    },
+    {
+      "addr": "000221e0",
+      "name": "fdps_icon_script_blink_units_out",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "93b73d8 fdps_icon_script_blink_units_out @ 000221e0",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 61,
+      "problems": "No strays: git status --porcelain before staging showed only src/icon.c, src/icon.h, tests/icon.c and tools/code_emit/data/emit_state.json (plus ghidra_snapshot/comments.txt after the re-export), all inside the pipeline's own paths, so no separate stray commit was needed. Ghidra: emit verdict had no ghidra_fixes; review verdict had one plate fix at 000221e0, applied. One wording discrepancy worth recording, no decision changed: the fix text says FUN_00021650 appears three times (parameter note, 0x0b/0x0c note, returns note), but the plate actually carried four occurrences -- the fourth is in the Rebuild note ('the neighbouring script opcodes 0x0b and 0x0c in FUN_00021650'). I replaced all four with fdps_icon_script_run, since leaving one stale FUN_ spelling behind would defeat the stated purpose of the fix. FUN_0002cda0 -> fdps_draw_map_unit applied (one occurrence). DAT_00069cd0 / DAT_00060159 replaced by data_fdps_map_cursor_draw_mode / data_fdps_ui_play_active_flag in all three places they appeared, each written with its address in parentheses per 'keeping the addresses alongside the names'. DAT_00069cd8 (the unit array base) was not in the fix list and was left untouched. Baseline audit Gate section: orphan code ranges = 0, error bookmarks = 0, undefined bytes in .object1 = 0. Program saved and snapshot re-exported (comments.txt was the only snapshot file to change). Both verdict files have empty open_issues arrays, so nothing was appended to tools/code_emit/data/emit_issues.json and the existing file was left untouched. emit_state.json: only the 000221e0 entry changed -- status committed, emitted_against 0xd4, rounds 0, in_flight_since dropped; the staged diff is 8 added lines and no other entry."
+    },
+    {
+      "addr": "000224f0",
+      "name": "fdps_icon_script_animate_view_offset",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "a188298 fdps_icon_script_animate_view_offset @ 000224f0",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 59,
+      "problems": "None. Both verdict files had empty ghidra_fixes and empty open_issues, so no Ghidra edit was made and no baseline audit, save or snapshot re-export was needed; ghidra_gate_clean is reported true in the sense that no database change was introduced. Nothing was appended to emit_issues.json. git status --porcelain before staging showed only src/icon.c, src/icon.h, tests/icon.c and tools/code_emit/data/emit_state.json -- no stray outside the pipeline's own paths, so no separate stray commit was needed. emit_state.json entry 000224f0 carried forward to status committed / emitted_against 0x102 / rounds 0 with in_flight_since dropped, written with python json.dumps(indent=2, ensure_ascii=False) plus trailing newline in UTF-8 and read back intact; no other entry or field touched. Commit message encoding verified by reading it back through python rather than a console pipe. Tree clean after commit."
+    },
+    {
+      "addr": "00028610",
+      "name": "fdps_play_spell_11_cutscene",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "5b7e376 fdps_play_spell_11_cutscene @ 00028610",
+      "ghidra_applied": 0,
+      "issues": 6,
+      "out_tok_k": 142,
+      "problems": "無。兩份 verdict 的 ghidra_fixes 都是空的，所以沒有動 Ghidra，也就沒有跑 baseline audit、沒有 save_program、沒有重匯出快照。git status --porcelain 在 stage 之前只列出 src/spell.c、src/spell.h、tests/spell.c、tools/code_emit/data/emit_state.json 四項，全部落在 pipeline 自己的路徑內，沒有任何 stray，因此沒有額外的單獨 commit。emit_state.json 的 diff 只新增 \"00028610\" 一個 entry，其他 315 筆未動。emit_issues.json 原本已存在，本次在 \"00028610\" 下新增 6 筆（emitter 3 筆在前、reviewer 3 筆在後），每筆都有 status=open 與 from，reviewer 三筆的 same_as 依原文保留為 emit#0 / emit#1 / emit#2；寫回後以 UTF-8 讀回檢查，內容完好無亂碼。"
+    },
+    {
+      "addr": "00029100",
+      "name": "fdps_play_spell_palette_flash",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "6be2fbe fdps_play_spell_palette_flash @ 00029100",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 108,
+      "problems": "No strays: git status before staging showed only src/spell.c, src/spell.h, tests/spell.c, tools/code_emit/data/emit_state.json and ghidra_snapshot/comments.txt, all inside the pipeline's own paths, so no separate stray commit was needed.\n\nGhidra: both verdict files carried the same two plate fixes at 00029100 (correct the colour summary to \"(63,0,0) for 0x00-0x02, 0x0c, 0x14, 0x1e and 0x1f\" / \"every remaining spell\", and add a \"Rebuild note:\" saying DAC entry 0 is left black and must not be given a save-and-restore). Both are edits to the one plate comment, so they were applied together in a single set_plate_comment write — counted as 1 applied write covering 2 fixes. Nothing was refused or adjusted. Baseline audit \"# Gate\": orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved, snapshot re-exported (comments.txt is the only snapshot file that moved).\n\nemit_issues.json: both verdict files have empty open_issues arrays, so nothing was appended. The file already existed with 90 keys and was left byte-unchanged; it has no \"00029100\" key.\n\nemit_state.json: the \"00029100\" entry did not exist in HEAD at all (the emitter's in_flight write was deliberately uncommitted), so the staged diff is an 8-line append of the finished entry and no other entry was touched."
+    },
+    {
+      "addr": "0002d360",
+      "name": "fdps_walk_step_down",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "5225481 fdps_walk_step_down @ 0002d360",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 79,
+      "problems": "無 stray：commit 前的 git status --porcelain 只有 ghidra_snapshot/comments.txt、src/walk.c、src/walk.h、tests/walk.c、tools/code_emit/data/emit_state.json，全部在 pipeline 允許的路徑內，因此沒有另外開一個單獨的 commit。Ghidra 修正：emitter 與 reviewer 的 ghidra_fixes 都是同一個 plate comment 的 0002d360，emitter 一則（fdps_walk_step_up → fdps_animate_move_step_up）與 reviewer 兩則（同一則，加上把兩處 view 改成 map cursor），三項措辭修正合併成一次 set_plate_comment 全部套用，逐字照寫；沒有無法套用的項目。baseline audit 的 Gate 區段：orphan code ranges 0、error bookmarks 0、undefined bytes 0，程式已存檔並重新匯出快照，comments.txt 的 diff 只有這支 function 的 plate 三行。兩份 verdict 的 open_issues 皆為空陣列，emit_issues.json 已存在且未被改動，因此沒有新增任何項目。"
+    },
+    {
+      "addr": "0002d480",
+      "name": "fdps_animate_move_step_up",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "e0c707e fdps_animate_move_step_up @ 0002d480",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 58,
+      "problems": "No strays: git status --porcelain before staging showed only src/walk.c, src/walk.h, tests/walk.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files had empty ghidra_fixes, so Ghidra was not touched -- no baseline audit, no save_program, no snapshot re-export; ghidra_gate_clean is reported true in the sense that nothing was changed that could require the gate. Both verdict files had empty open_issues, so emit_issues.json (which already existed) was left untouched and 0 entries appended. emit_state.json entry 0002d480 carried forward to status committed, emitted_against 0x107, in_flight_since dropped, rounds 0 verbatim; written with python json.dumps(indent=2, ensure_ascii=False) plus trailing newline in UTF-8, and the diff is 8 insertions / 0 deletions so no other entry or field moved. Staged range was exactly the four files above; the landing commit is findable with git log --oneline --grep \"@ 0002d480\" (1 match)."
+    },
+    {
+      "addr": "0002d590",
+      "name": "fdps_animate_move_step_left",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "b961ed2 fdps_animate_move_step_left @ 0002d590",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 59,
+      "problems": "No strays: git status --porcelain before staging listed only src/walk.c, src/walk.h, tests/walk.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both ghidra_fixes arrays were empty as expected, so Ghidra was not touched -- no baseline audit, no save_program, no snapshot re-export, and ghidra_snapshot/ contributed nothing to the commit. Both open_issues arrays were empty, so nothing was appended to tools/code_emit/data/emit_issues.json (it already exists, 90 addresses, verified as valid UTF-8 JSON and left byte-identical). emit_state.json diff is +8 lines, exactly the one 0002d590 entry, no other entry or field touched. Staged range was the four files above only. Commit subject read back through a UTF-8 byte decode rather than a console pipe and confirmed intact. Two non-blocking observations the reviewer recorded and that nobody owns yet, carried here rather than logged as issues since the reviewer deliberately left open_issues empty: src/walk.c line 257 has a comment address typo (0002d67d should be 0002d66d), and tests/walk.c stage() resets data_fdps_battle_view_window_origin_y but not _origin_x, which the reviewer flagged for whoever emits the rightward step at 0002d6a0."
+    },
+    {
+      "addr": "0002d6a0",
+      "name": "fdps_animate_move_step_right",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "cf91d6e fdps_animate_move_step_right @ 0002d6a0",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 76,
+      "problems": "無阻礙。（1）Ghidra 修正只有一項，emit 與 review 兩份 verdict 指的是同一個 plate 缺陷：把最後一段裡互換的兩個 sibling 名稱改正為 fdps_walk_step_down（0002d360）與 fdps_animate_move_step_up（0002d480），已依 review 給的字面套用，plate 其餘內容一字未動。baseline audit 的 # Gate 段：orphan code ranges 0、error bookmarks 0、undefined bytes 0；已 save_program 並重新匯出文字快照（只有 ghidra_snapshot/comments.txt 一行變動）。（2）兩份 verdict 的 open_issues 都是空陣列，因此 emit_issues.json 未被修改，appended 0 筆。（3）git status 沒有任何落在 src/、tests/、tools/code_emit/data/、ghidra_snapshot/ 之外的雜項檔案，所以沒有需要先單獨 commit 的東西。（4）emit_state.json 只改 \"0002d6a0\" 這一筆：status 轉 committed、加 emitted_against 0x11f 與 rounds 0、移除 in_flight_since，其他條目零變動。"
+    },
+    {
+      "addr": "0002d2d0",
+      "name": "fdps_animate_move_path",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "4a73b54 fdps_animate_move_path @ 0002d2d0",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 59,
+      "problems": "No strays: git status --porcelain before staging listed only ghidra_snapshot/comments.txt, src/walk.c, src/walk.h, tests/walk.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Ghidra: the emit verdict had an empty ghidra_fixes array; the review verdict had one plate fix at 0002d2d0, applied verbatim -- the four FUN_ spellings in the plate's first paragraph replaced with fdps_walk_step_down / fdps_animate_move_step_left / fdps_animate_move_step_up / fdps_animate_move_step_right, nothing else in the plate touched (the Evidence paragraph's bare addresses 0002d360/0002d480/0002d590/0002d6a0 were left as they are, since the fix scoped itself to the first paragraph). set_plate_comment returned success with three advisory warnings about missing Algorithm/Parameters/Returns sections, which is the house plate format and not a failure. Baseline audit # Gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved and snapshot re-exported (comments.txt was the only snapshot file that moved). Both verdict files carried empty open_issues arrays, so nothing was appended to emit_issues.json and that file was left untouched. The reviewer's notes list a wording inaccuracy in a source comment in src/walk.c (it says the original's dead counter reload is preserved by -od, while our WALK.OBJ emits only the bare inc) -- the reviewer explicitly classed it as a non-blocking note on comment accuracy under ADR-0001 and did not file it as an open issue, so as bookkeeper I did not act on it; recording it here so it is not lost."
+    },
+    {
+      "addr": "000119e0",
+      "name": "fdps_battle_move_unit_toward",
+      "status": "committed",
+      "rounds": 1,
+      "commit": "af6e185 fdps_battle_move_unit_toward @ 000119e0",
+      "ghidra_applied": 2,
+      "issues": 0,
+      "out_tok_k": 208,
+      "problems": "No strays: git status --porcelain before staging listed only src/movegrid.c, src/movegrid.h, tests/movegrid.c, tools/code_emit/data/emit_state.json and the two re-exported ghidra_snapshot files, all inside the pipeline's own paths, so no separate stray commit was needed. Both ghidra_fixes applied as written: set_function_prototype at 000119e0 renamed the fourth parameter map_mode -> side_select (calling convention passed explicitly as __cdecl so it was preserved, not reset), and set_plate_comment rewrote the Signature line, Algorithm steps 3 and 5 and added the four-round grid-setup paragraph exactly as the two verdicts specify. set_plate_comment returned two advisory warnings (\"Plate comment missing Parameters section\", \"missing Returns section\"); the original plate had neither section either, so nothing was added or removed to satisfy them. Both verdict files carry an empty open_issues list, so emit_issues.json was left byte-identical (it already existed, 90 keys, read back as valid UTF-8 JSON). Baseline audit gate: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved and snapshot re-exported (comments.txt and functions.txt changed)."
+    },
+    {
+      "addr": "0002d7c0",
+      "name": "fdps_map_cursor_move_to",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "a031da9 fdps_map_cursor_move_to @ 0002d7c0",
+      "ghidra_applied": 2,
+      "issues": 0,
+      "out_tok_k": 103,
+      "problems": "No strays: git status --porcelain before staging showed only src/mapcur.c, src/mapcur.h, tests/mapcur.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both ghidra_fixes were plate edits on 0002d7c0 (emit: rename the five DAT_ addresses in the summary paragraph to their settled labels and re-read DAT_00069cd0 as data_fdps_map_cursor_draw_mode, the cursor overlay mode, with the frame drawn whenever the cursor is visible or the view moved; review: correct \"All 16 static callers\" to 19 distinct caller functions across 34 call sites, list of examples kept). Both were applied verbatim in one set_plate_comment write; every other paragraph is byte-identical to what was there. Baseline audit Gate section afterwards: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved, snapshot re-exported (ghidra_snapshot/comments.txt is the only snapshot file that moved). Both verdict files have empty open_issues arrays, so nothing was appended to tools/code_emit/data/emit_issues.json and that file was left untouched rather than rewritten. emit_state.json diff is exactly the one 0002d7c0 object."
+    },
+    {
+      "addr": "00020a70",
+      "name": "fdps_message_window_open_from_tile",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "af31d51 fdps_message_window_open_from_tile @ 00020a70",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 116,
+      "problems": "No strays: git status --porcelain before staging listed only src/msgwin.c, src/msgwin.h, tests/msgwin.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files had empty ghidra_fixes, so Ghidra was not touched: no baseline audit, no save_program, no snapshot re-export, and ghidra_gate_clean is left false because the gate was never run (not because it failed). Both verdict files also had empty open_issues, so tools/code_emit/data/emit_issues.json (which already exists) was not modified. emit_state.json diff is exactly the one new \"00020a70\" entry, 8 added lines, no other entry or field touched; written by python with json.dumps(indent=2, ensure_ascii=False) plus a trailing newline in UTF-8. Commit message was passed via git commit -F from a UTF-8 file and verified after the fact by decoding the raw bytes of git log -1 --format=%B as UTF-8 (ok), without printing the Traditional Chinese subject through the console."
+    },
+    {
+      "addr": "0001ff60",
+      "name": "fdps_draw_text",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "37d062c fdps_draw_text @ 0001ff60",
+      "ghidra_applied": 0,
+      "issues": 2,
+      "out_tok_k": 126,
+      "problems": "No strays: git status --porcelain before staging showed only src/gamedata.h, src/text.c, src/text.h, tests/text.c and tools/code_emit/data/*, all inside the pipeline's own paths, so no separate stray commit was needed. Both ghidra_fixes arrays were empty as expected, so Ghidra was not touched -- no baseline audit, no save_program, no snapshot re-export (ghidra_gate_clean is false only because the gate was not run, not because it failed). emit_issues.json gained 2 entries under key \"0001ff60\": the emitter's -6 digit-map out-of-range concern (from \"emit\") and the reviewer's confirmation of it (from \"review\", same_as \"emit#0\" carried through verbatim); both got status \"open\", read back as UTF-8 with no mojibake. Staged diff was 6 files, 839 insertions, all this function's emit."
+    },
+    {
+      "addr": "00016300",
+      "name": "fdps_draw_unit_status_panel",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "0102d25 fdps_draw_unit_status_panel @ 00016300",
+      "ghidra_applied": 3,
+      "issues": 1,
+      "out_tok_k": 139,
+      "problems": "No strays: git status --porcelain before staging showed only src/statwin.c, src/statwin.h, tests/statwin.c, tools/code_emit/data/emit_issues.json, tools/code_emit/data/emit_state.json and ghidra_snapshot/comments.txt, all inside the pipeline's own paths, so no separate stray commit was needed.\n\nGhidra: both verdict files carry the SAME three plate corrections (steps 3, 4 and 6 of the plate at 00016300) — the reviewer reached them independently and recorded identical entries. All three are of kind \"plate\" on one address, so they were transcribed into a single set_plate_comment rewrite; ghidra_applied is counted as 3 distinct corrections, not 6 array entries. No rename or prototype fix was requested. Step 3 now names the CEL sprite cache and the 24x24 map cell (with 0x30 as sizeof(struct fdps_cel_cache_slot)) and points the portrait at the FACE.CEL record step 6 draws; step 4 now states the current-versus-maximum test has no else arm and that only the store after each current figure resets 0x0006000c; step 6 now names 0x0001ff60 as fdps_draw_text and the three values as text ids into the game text block at 0x000643c4. Nothing else in the plate was touched — including step 2's \"used as sprite indices\" wording for +0x08/+0x1f/+0x20, which no fix named and which I did not extend a decision to cover.\n\nBaseline audit after the edit: orphan code ranges 0, error bookmarks 0, undefined bytes in .object1 0. Program saved, snapshot re-exported (comments.txt is the only snapshot file that moved).\n\nIssues: the emit verdict's open_issues is empty; the review verdict has one (the race name block holding only ten entries between 0x97 and 0xa1). It was appended under key \"00016300\" with \"status\": \"open\" and \"from\": \"review\". The reviewer set no \"same_as\" on it, so nothing was carried through. Read back as UTF-8 afterwards and the whole file parses, with the Traditional Chinese in the pre-existing entries intact.\n\nemit_state.json: the \"00016300\" entry now reads status \"committed\", emitted_against \"0x535\", rounds 0, with in_flight_since dropped; no other entry or field changed."
+    },
+    {
+      "addr": "00017ca0",
+      "name": "fdps_battle_show_win_fail_window",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "07daa21 fdps_battle_show_win_fail_window @ 00017ca0",
+      "ghidra_applied": 0,
+      "issues": 2,
+      "out_tok_k": 150,
+      "problems": "No strays: git status --porcelain before staging showed only src/btlend.c, src/btlend.h, src/gamedata.h, tests/btlend.c and tools/code_emit/data/*, all inside the pipeline's own paths, so no separate stray commit was made. Both ghidra_fixes arrays were empty as expected, so Ghidra was not touched: no baseline audit, no save_program, no snapshot re-export, and ghidra_gate_clean is false only because the gate was never run (nothing to gate). Note carried forward for the closing sweep, not acted on here: the reviewer recorded that Ghidra holds a stale disassembly comment at 00017d2c naming the enclosing function FUN_00017ca0; it was deliberately not filed under ghidra_fixes because the fix kinds available do not cover a disassembly comment."
+    },
+    {
+      "addr": "0001ba40",
+      "name": "fdps_play_ending_credit_roll",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "e3d1d32 fdps_play_ending_credit_roll @ 0001ba40",
+      "ghidra_applied": 3,
+      "issues": 0,
+      "out_tok_k": 229,
+      "problems": "No strays: git status --porcelain before staging showed only src/title.c, src/title.h, tests/title.c, tools/code_emit/data/emit_state.json (and ghidra_snapshot/comments.txt after the re-export), all inside the pipeline's own paths, so no separate stray commit was needed. Ghidra: all plate corrections applied as one set_plate_comment rewrite of 0001ba40 — the FUN_0001ff60 to fdps_draw_text rename that both verdicts asked for (counted once), plus the reviewer's two wording fixes, \"the class byte at offset 7\" to \"the portrait id byte at offset 7\" and \"the fixed class 12\" to \"the fixed portrait id 12\"; ghidra_applied counts the three textual edits. Baseline audit Gate section: orphan code ranges 0, error bookmarks 0, undefined bytes 0. Program saved and snapshot re-exported (comments.txt, 2 lines changed). emit_issues.json was not touched: both verdict files carry open_issues: [], so there was nothing to append. emit_state.json entry 0001ba40 carried forward to status committed, emitted_against 0x832, in_flight_since dropped, rounds 0 verbatim; the diff against HEAD is +8 lines and no other entry moved. Staged diff was exactly the five expected files; tree clean after commit and git log --oneline --grep \"@ 0001ba40\" finds e3d1d32."
+    },
+    {
+      "addr": "00022600",
+      "name": "fdps_icon_script_prompt_three_way_choice",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "8154385 fdps_icon_script_prompt_three_way_choice @ 00022600",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 97,
+      "problems": "No strays: git status before staging showed only src/icon.c, src/icon.h, tests/icon.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. The only ghidra_fixes entry was the reviewer's plate refresh at 00022600 (emit verdict had none); applied verbatim -- the five stale FUN_/DAT_ names replaced with fdps_message_window_open, fdps_draw_text, fdps_message_window_close, data_fdps_current_chapter_text_ptr and fdps_deploy_wave, 'panel id 0x7a' corrected to 'face index 0x7a, the FACE.CEL portrait record', and the optional softening applied so the four stand-alone draws are said to compose their own window only when the entry carries a page-break or speaker code. Baseline audit gate: orphan code ranges 0, error bookmarks 0, undefined bytes 0. Program saved and snapshot re-exported (ghidra_snapshot/comments.txt changed, included in the commit). Both verdict files had empty open_issues, so nothing was appended to emit_issues.json; the file was rewritten byte-identically (git status did not list it), which confirms the UTF-8 round-trip held."
+    },
+    {
+      "addr": "00024a40",
+      "name": "fdps_draw_save_slot_panel",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "4f004cc fdps_draw_save_slot_panel @ 00024a40",
+      "ghidra_applied": 3,
+      "issues": 0,
+      "out_tok_k": 144,
+      "problems": "No strays: git status --porcelain before staging showed only ghidra_snapshot/comments.txt, src/save.c, src/save.h, tests/save.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. All three ghidra_fixes were \"plate\" at 00024a40 (one from the emitter, two from the reviewer) and were applied as a single composed set_plate_comment: the Command.cel caption layout paragraph added; FUN_0001ff60 replaced by fdps_draw_text and DAT_000643c4/DAT_00060138/DAT_00069cf0/DAT_0006000c replaced by data_fdps_all_game_text_ptr/data_fdps_cel_sprite_cache_ptr/data_fdps_cel_sprite_cache_count/data_fdps_number_glyph_color_row throughout; the slot_record roster-extent sentence replaced with roster[31] to +0x9b0, 0x3c gap, flag dword at +0x9ec, timestamps +0x9f0..+0x9ff, chapter index at +0xa00. Baseline audit gate: orphan code ranges 0, error bookmarks 0, undefined bytes 0. Program saved and snapshot re-exported (ghidra_snapshot/comments.txt changed). Both verdict files had empty open_issues arrays, so nothing was appended to tools/code_emit/data/emit_issues.json; it was read and rewritten byte-identical (93 address keys, UTF-8 intact, unchanged in git status). Commit message verified as valid UTF-8 with the address in the subject and the Co-Authored-By trailer, without piping the Traditional Chinese text through the console."
+    },
+    {
+      "addr": "00024830",
+      "name": "fdps_saveload_screen_build",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "d05e7f6 fdps_saveload_screen_build @ 00024830",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 105,
+      "problems": "No strays: git status --porcelain before staging showed only src/save.c, src/save.h, tests/save.c, tools/code_emit/data/emit_state.json and ghidra_snapshot/comments.txt, all inside the pipeline's own paths, so no separate stray commit was needed. Ghidra: the emit verdict had an empty ghidra_fixes; the review verdict's single plate fix at 00024830 was applied verbatim (step 3 now says \"drawn by fdps_draw_save_slot_panel\" instead of FUN_00024a40, and step 4 now states that the flag at 0x69cf0 guards only the free and is cleared unconditionally at the join point). set_plate_comment returned success with two advisory warnings (\"missing Parameters section\", \"missing Returns section\") that the pre-existing plate already had and that the fix did not ask me to change, so I left them. Baseline audit gate: orphan code ranges 0, error bookmarks 0, undefined bytes 0. Program saved and the text snapshot re-exported (ghidra_snapshot/comments.txt moved, 4 lines). emit_issues.json existed already and both verdict files carried an empty open_issues, so nothing was appended and the file is untouched."
+    },
+    {
+      "addr": "000241e0",
+      "name": "fdps_save_game_screen",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "baf9338 fdps_save_game_screen @ 000241e0",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 125,
+      "problems": "No strays: git status --porcelain before staging showed only ghidra_snapshot/comments.txt, src/gamedata.h, src/save.c, src/save.h, tests/save.c and tools/code_emit/data/emit_state.json, all inside the pipeline's own paths, so no separate stray commit was needed. Both verdict files carried the same single plate-comment fix at 000241e0 (the \"CD-music enable\"/\"sound-available\" wording for DAT_00060008 and DAT_00069d70); it is one identical edit, so it was applied once. No rename or prototype fixes were listed. Both open_issues arrays were empty, so nothing was appended to tools/code_emit/data/emit_issues.json and that file was left untouched (it already existed)."
+    },
+    {
+      "addr": "00024490",
+      "name": "fdps_load_game_screen",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00024ea0",
+      "name": "fdps_draw_unit_inventory",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00025b20",
+      "name": "fdps_unit_item_select_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000259c0",
+      "name": "fdps_unit_item_select_window",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00025da0",
+      "name": "fdps_unit_equip_window",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000276f0",
+      "name": "fdps_draw_spell_list_page",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000278e0",
+      "name": "fdps_spell_list_window_wait_input",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00016aa0",
+      "name": "fdps_battle_show_unit_status_window",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00028130",
+      "name": "fdps_spell_list_select_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000288f0",
+      "name": "fdps_cast_spell_on_targets",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "0001a4c0",
+      "name": "fdps_combat_play_spell_on_targets",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "0002b4f0",
+      "name": "fdps_map_cursor_select_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "0002da50",
+      "name": "fdps_map_cursor_move_to_unit",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00010760",
+      "name": "fdps_chapter_30_revive_wave_4_undead",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000120d0",
+      "name": "fdps_unit_rest",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000126b0",
+      "name": "fdps_map_actor_move_toward_nearest_reachable_opponent",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000127c0",
+      "name": "fdps_map_actor_move_toward_nearest_opponent",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "0001dd30",
+      "name": "fdps_unit_award_exp_and_level_up",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "0002e640",
+      "name": "fdps_cel_expand_sheet_24x24",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "0002e160",
+      "name": "fdps_battle_map_overview",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00030cc0",
+      "name": "fdps_cd_verify_disc_and_play_track",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000183d0",
+      "name": "fdps_options_menu",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00023e20",
+      "name": "fdps_load_savegame",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00014ea0",
+      "name": "fdps_battle_system_submenu",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00031f60",
+      "name": "fdps_village_animate_walk_to_destination",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00031bc0",
+      "name": "fdps_village_signboard_menu",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00032370",
+      "name": "fdps_draw_party_gold",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000324d0",
+      "name": "fdps_menu_draw_command_icons",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000323e0",
+      "name": "fdps_menu_command_icon_select_loop",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00032570",
+      "name": "fdps_village_animate_window_zoom",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00032a70",
+      "name": "fdps_shop_draw_item_entry",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00032710",
+      "name": "fdps_shop_select_item",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000330e0",
+      "name": "fdps_shop_render_buy_target_frame",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "00033230",
+      "name": "fdps_shop_draw_member_entry",
+      "status": "not_started_routing_changed"
+    },
+    {
+      "addr": "000336d0",
+      "name": "fdps_village_select_member",
+      "status": "not_started_routing_changed"
+    }
+  ],
+  "out_tok_k": 7852
+}
