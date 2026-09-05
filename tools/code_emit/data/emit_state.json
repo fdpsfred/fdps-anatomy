@@ -2542,6 +2542,14 @@
       "status": "committed",
       "emitted_against": "0x3b1",
       "rounds": 1
+    },
+    "0002d7c0": {
+      "name": "fdps_map_cursor_move_to",
+      "target": "mapcur.c",
+      "body_size": "0x28f",
+      "status": "committed",
+      "emitted_against": "0x28f",
+      "rounds": 0
     }
   }
 }

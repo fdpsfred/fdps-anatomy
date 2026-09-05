@@ -5,10 +5,12 @@
  * the shared cursor globals in gamedata.h; the one global the file owns is the
  * column the information panel is parked at, declared in mapcur.h.
  */
+#include <stdlib.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "blit.h"
 #include "mapcur.h"
+#include "mapdraw.h"
 #include "maptile.h"
 #include "movegrid.h"
 #include "sprite.h"
@@ -235,6 +237,186 @@ void fdps_draw_map_cursor(unsigned char *scene_buffer)
                        * grid_width
                    + data_fdps_map_cursor_world_x / CURSOR_TILE_STEP].marker =
             (unsigned char) 0;
+    }
+}
+
+/* The battle view window the cursor is walked inside: 312 by 192 pixels of
+   map, the same window fdps_render_view_frame presents (mapdraw.h).  The two
+   far-edge pull-backs subtract them from the map's own pixel size -- SUB
+   EAX,0x138 at 0002d9e7 and SUB EAX,0xc0 at 0002d96c. */
+#define MAP_VIEW_WIDTH 0x138
+#define MAP_VIEW_HEIGHT 0xc0
+
+/* How far the cursor may get from the view's top-left corner before the view
+   is scrolled to follow it.  The near limit is one tile on both axes (CMP
+   EAX,0x18 / JGE at 0002d98b and 0002da06); the far limits are 216 across and
+   144 down (CMP EAX,0xd8 / JLE at 0002d9c4, CMP EAX,0x90 / JLE at 0002d949).
+   So the cursor is held in a band 192 wide and 120 tall inside a window 312 by
+   192, and the two are NOT symmetric -- all of the leftover slack is on the
+   right and at the bottom, which is where the information panel sits. */
+#define CURSOR_VIEW_MIN_OFFSET 0x18
+#define CURSOR_VIEW_MAX_OFFSET_X 0xd8
+#define CURSOR_VIEW_MAX_OFFSET_Y 0x90
+
+/* 0002d7c0.  Walks the cursor from where it stands to the target pixel a step
+   at a time, scrolling the view to keep up and drawing a frame per step.  See
+   mapcur.h for what a caller gets out of it.
+
+   THE TWO DELTAS ARE MEASURED ONCE.  Both are taken before the walk and are
+   never refreshed, so the axis test inside the loop -- which the original
+   re-evaluates, two fresh abs calls a step, at 0002d8bf and 0002d8cd -- is
+   asking the same question of the same two numbers every time round.  Hoisting
+   it out of the loop is the same function; recomputing the deltas from the
+   cursor as it moves is not.
+
+   THE STEP COUNT IS THE DOMINANT AXIS IN TILES, AND THE WALK CAN STOP SHORT.
+   n is abs(major delta) / 24 and the major axis advances by the truncated
+   quotient major/n, so over n steps it covers n * (major/n), which is the
+   whole delta only when n divides it.  Nothing after the loop writes the
+   target in -- unlike fdps_icon_script_scroll_view_to_tile (icon.c), which
+   closes its own gap with two stores -- so a target the division does not come
+   out even on leaves the cursor a few pixels short of it for good.  Every
+   caller passes a tile-aligned target, where the quotient is exactly one tile.
+
+   THE MINOR AXIS CARRIES ITS REMAINDER.  Its slot holds an accumulator seeded
+   with the whole minor delta; each step advances the axis by acc / n and
+   re-seeds acc = minor delta + acc % n.  That distributes the remainder over
+   the steps instead of dropping it, and it is what makes the minor axis arrive
+   exactly on its delta: writing the obvious minor += delta / n per step leaves
+   the cursor short by the remainder, permanently, for the same reason the
+   major axis stops short.
+
+   Both divisions on both axes are IDIV with the dividend sign-extended by SAR
+   EDX,0x1f (0002d855, 0002d889, 0002d8e8, 0002d919), so they truncate toward
+   zero, and the step count goes through abs first -- a move left or up divides
+   a POSITIVE distance by the tile size, and dropping the abs would make n
+   negative and the loop body never run at all.
+
+   A MOVE OF LESS THAN ONE TILE ON THE DOMINANT AXIS DIVIDES BY ZERO.  n is
+   then 0 and the very next IDIV faults; there is no guard anywhere in the
+   function.  Nothing in play reaches it: all 34 call sites in the image push a
+   whole-tile target -- a literal multiple of 0x18, or a tile number that has
+   just gone through IMUL EAX,...,0x18 -- and every other writer of the cursor
+   globals leaves them on a tile boundary as well (the two select loops step by
+   0x18, the walk animators by 4 six times), so a target the cursor is not
+   already standing on is at least one whole tile away on an axis.  Adding a
+   step_count != 0 guard would be a check the original does not have.
+
+   A FRAME IS DRAWN WHENEVER THE CURSOR IS VISIBLE OR THE VIEW MOVED, and the
+   count of them is behaviour rather than pacing.  With a draw mode of 0 and a
+   cursor that stays inside the band, no frame is drawn at all and the walk is
+   instant.  With mode 6 the frame compositor clears the movement grid's marker
+   byte under the cursor (fdps_draw_map_cursor above), so the tiles a sweep
+   marks are exactly the ones a frame was drawn on -- one frame per step, no
+   more and no fewer.
+
+   THE FOUR VIEW CLAMPS ARE FOUR SEPARATE TESTS, NOT TWO PAIRS OF ALTERNATIVES.
+   Each is its own if and each sets the moved flag; the near test is applied to
+   an origin the far test may have just written, which is what pins a map
+   smaller than the window at 0 rather than at a negative origin. */
+void fdps_map_cursor_move_to(int target_x, int target_y)
+{
+    /* The map's full extent in pixels, from the two signed 16-bit tile
+       dimensions in the movement grid's header (movegrid.h). */
+    int map_pixel_width;
+    int map_pixel_height;
+    /* How far the cursor has to travel on each axis, measured once. */
+    int delta_x;
+    int delta_y;
+    /* How many steps the walk takes, and which one is running. */
+    int step_count;
+    int step;
+    /* What each axis carries.  For the axis with the larger delta this is the
+       fixed advance the cursor takes every step; for the other one it is the
+       accumulator described above, whose quotient by step_count is this step's
+       advance and whose remainder is carried into the next seed. */
+    int x_advance;
+    int y_advance;
+    /* Whether this step scrolled the view. */
+    int view_moved;
+
+    map_pixel_width = (int) *(short *) data_fdps_battle_move_grid_ptr
+                      * CURSOR_TILE_STEP;
+    map_pixel_height = (int) *(short *) (data_fdps_battle_move_grid_ptr + 2)
+                       * CURSOR_TILE_STEP;
+
+    delta_x = target_x - data_fdps_map_cursor_world_x;
+    delta_y = target_y - data_fdps_map_cursor_world_y;
+    if (delta_x == 0 && delta_y == 0) {
+        return;
+    }
+
+    if (abs(delta_x) > abs(delta_y)) {
+        step_count = abs(delta_x) / CURSOR_TILE_STEP;
+        x_advance = delta_x / step_count;
+        y_advance = delta_y;
+    } else {
+        step_count = abs(delta_y) / CURSOR_TILE_STEP;
+        y_advance = delta_y / step_count;
+        x_advance = delta_x;
+    }
+
+    for (step = 0; step < step_count; step++) {
+        view_moved = 0;
+
+        if (abs(delta_x) > abs(delta_y)) {
+            data_fdps_map_cursor_world_x += x_advance;
+            data_fdps_map_cursor_world_y += y_advance / step_count;
+            y_advance = delta_y + y_advance % step_count;
+        } else {
+            data_fdps_map_cursor_world_y += y_advance;
+            data_fdps_map_cursor_world_x += x_advance / step_count;
+            x_advance = delta_x + x_advance % step_count;
+        }
+
+        if (data_fdps_map_cursor_world_y
+                - data_fdps_battle_view_window_origin_y
+            > CURSOR_VIEW_MAX_OFFSET_Y) {
+            data_fdps_battle_view_window_origin_y =
+                data_fdps_map_cursor_world_y - CURSOR_VIEW_MAX_OFFSET_Y;
+            if (data_fdps_battle_view_window_origin_y + MAP_VIEW_HEIGHT
+                > map_pixel_height) {
+                data_fdps_battle_view_window_origin_y =
+                    map_pixel_height - MAP_VIEW_HEIGHT;
+            }
+            view_moved = 1;
+        }
+        if (data_fdps_map_cursor_world_y
+                - data_fdps_battle_view_window_origin_y
+            < CURSOR_VIEW_MIN_OFFSET) {
+            data_fdps_battle_view_window_origin_y =
+                data_fdps_map_cursor_world_y - CURSOR_VIEW_MIN_OFFSET;
+            if (data_fdps_battle_view_window_origin_y < 0) {
+                data_fdps_battle_view_window_origin_y = 0;
+            }
+            view_moved = 1;
+        }
+        if (data_fdps_map_cursor_world_x
+                - data_fdps_battle_view_window_origin_x
+            > CURSOR_VIEW_MAX_OFFSET_X) {
+            data_fdps_battle_view_window_origin_x =
+                data_fdps_map_cursor_world_x - CURSOR_VIEW_MAX_OFFSET_X;
+            if (data_fdps_battle_view_window_origin_x + MAP_VIEW_WIDTH
+                > map_pixel_width) {
+                data_fdps_battle_view_window_origin_x =
+                    map_pixel_width - MAP_VIEW_WIDTH;
+            }
+            view_moved = 1;
+        }
+        if (data_fdps_map_cursor_world_x
+                - data_fdps_battle_view_window_origin_x
+            < CURSOR_VIEW_MIN_OFFSET) {
+            data_fdps_battle_view_window_origin_x =
+                data_fdps_map_cursor_world_x - CURSOR_VIEW_MIN_OFFSET;
+            if (data_fdps_battle_view_window_origin_x < 0) {
+                data_fdps_battle_view_window_origin_x = 0;
+            }
+            view_moved = 1;
+        }
+
+        if (data_fdps_map_cursor_draw_mode != 0 || view_moved == 1) {
+            fdps_render_view_frame();
+        }
     }
 }
 

@@ -1315,6 +1315,219 @@ static void test_every_piece_follows_the_panel_column(void)
     panel_restore();
 }
 
+/* ---------------------------------------------------------------------------
+ * 0002d7c0, the animated cursor walk.
+ *
+ * WHAT CAN BE ASSERTED HERE AND WHAT CANNOT.  Every step of the walk ends in a
+ * call to fdps_render_view_frame unless the cursor is invisible AND the view
+ * did not scroll -- and that function blits to the VGA aperture and then holds
+ * until the timer's tick counter moves, neither of which a unit test has.  So
+ * every case below sets data_fdps_map_cursor_draw_mode to 0 and keeps the
+ * whole walk inside the band the view follows the cursor in: between 0x18 and
+ * 0xd8 pixels from the view's left edge and between 0x18 and 0x90 from its
+ * top.  On that path the assembly's CMP dword ptr [0x00069cd0],0x0 / JNZ at
+ * 0002da2f falls through to CMP [EBP-0x4],0x1 / JNZ and no call is made.
+ *
+ * That leaves the four view clamps and the number of frames a walk draws
+ * uncovered here; both are settled in the assembly (the four independent
+ * compares at 0002d949, 0002d98b, 0002d9c4 and 0002da06, each ending in MOV
+ * [EBP-0x4],0x1) and are playtest observations rather than unit-test ones.
+ * What the path below does cover is all of the arithmetic: the deltas, the
+ * choice of dominant axis, the step count, the truncated major advance and the
+ * minor axis's carried remainder -- which is the whole of where the cursor
+ * ends up.
+ *
+ * Expected values are worked out from the assembly by hand: n = abs(major) /
+ * 0x18 from the IDIV EBX pair at 0002d84a and 0002d87e, major / n from the
+ * IDIV at 0002d858 and 0002d88c, and the per-step acc / n and acc = delta +
+ * acc % n from the four IDIVs at 0002d8eb, 0002d8fd, 0002d91c and 0002d92e.
+ * None is read off the emitted C.
+ *
+ * The view origin and the cursor are ordinary ints ticket 23 has not filled in
+ * yet, so each case places all four itself and asserts only against what it
+ * staged; all five globals are put back afterwards.
+ */
+
+/* A map big enough that no walk below can reach an edge: only the far-edge
+   pull-backs read these, and no case gets near them. */
+#define MOVE_MAP_TILES_W 40
+#define MOVE_MAP_TILES_H 30
+
+/* The movement grid header the walk reads its map size out of: signed 16-bit
+   tile width at +0 and tile height at +2 (movegrid.h).  The walk never looks
+   at a cell, so a bare header is the whole of what it needs. */
+static short move_grid_header[2];
+
+static struct {
+    int cursor_x;
+    int cursor_y;
+    int origin_x;
+    int origin_y;
+    int draw_mode;
+    unsigned char *grid;
+} move_saved;
+
+static void move_save(void)
+{
+    move_saved.cursor_x = data_fdps_map_cursor_world_x;
+    move_saved.cursor_y = data_fdps_map_cursor_world_y;
+    move_saved.origin_x = data_fdps_battle_view_window_origin_x;
+    move_saved.origin_y = data_fdps_battle_view_window_origin_y;
+    move_saved.draw_mode = data_fdps_map_cursor_draw_mode;
+    move_saved.grid = data_fdps_battle_move_grid_ptr;
+}
+
+static void move_restore(void)
+{
+    data_fdps_map_cursor_world_x = move_saved.cursor_x;
+    data_fdps_map_cursor_world_y = move_saved.cursor_y;
+    data_fdps_battle_view_window_origin_x = move_saved.origin_x;
+    data_fdps_battle_view_window_origin_y = move_saved.origin_y;
+    data_fdps_map_cursor_draw_mode = move_saved.draw_mode;
+    data_fdps_battle_move_grid_ptr = move_saved.grid;
+}
+
+/* Puts the cursor and the view where the case wants them, with the cursor
+   switched off so no step of the walk draws a frame. */
+static void move_place(int cursor_x, int cursor_y, int origin_x, int origin_y)
+{
+    move_grid_header[0] = (short) MOVE_MAP_TILES_W;
+    move_grid_header[1] = (short) MOVE_MAP_TILES_H;
+    data_fdps_battle_move_grid_ptr = (unsigned char *) move_grid_header;
+    data_fdps_map_cursor_world_x = cursor_x;
+    data_fdps_map_cursor_world_y = cursor_y;
+    data_fdps_battle_view_window_origin_x = origin_x;
+    data_fdps_battle_view_window_origin_y = origin_y;
+    data_fdps_map_cursor_draw_mode = 0;
+}
+
+/* Both deltas zero takes the JZ at 0002d80b straight to the epilogue: no step
+   is taken, no frame is drawn and the view is not even looked at. */
+static void test_a_target_the_cursor_stands_on_moves_nothing(void)
+{
+    move_save();
+    move_place(48, 48, 0, 0);
+
+    fdps_map_cursor_move_to(48, 48);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 48);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 48);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    move_restore();
+}
+
+/* The first argument is the x target and the second the y: a walk three tiles
+   to the right with the y target left where the cursor already is moves only
+   x.  n = 72 / 0x18 = 3 and the advance is 72 / 3 = 24, one tile a step. */
+static void test_the_first_argument_is_the_x_target(void)
+{
+    move_save();
+    move_place(48, 48, 0, 0);
+
+    fdps_map_cursor_move_to(120, 48);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 120);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 48);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    move_restore();
+}
+
+/* An x delta of 0 against a non-zero y delta fails the CMP EBX,EAX / JLE at
+   0002d830 -- the test is strictly greater-than -- so y is the dominant axis
+   and x is the one carrying an accumulator of 0. */
+static void test_a_walk_down_moves_only_the_y_cursor(void)
+{
+    move_save();
+    move_place(48, 48, 0, 0);
+
+    fdps_map_cursor_move_to(48, 120);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 48);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 120);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    move_restore();
+}
+
+/* The minor axis carries its remainder, and that is what makes it land
+   exactly.  dx = 120 and dy = 72 give n = 5 and a minor quotient of 72 / 5 =
+   14 remainder 2, so the five steps advance y by 14, 14, 15, 14 and 15 as the
+   carry is re-seeded -- 72 in total.  Dropping the carry and adding 72 / 5
+   five times, the obvious spelling, would leave y at 118. */
+static void test_the_minor_axis_carries_its_remainder(void)
+{
+    move_save();
+    move_place(48, 48, 0, 0);
+
+    fdps_map_cursor_move_to(168, 120);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 168);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 120);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    move_restore();
+}
+
+/* The same arrangement with the axes the other way round: dy = 96 against
+   dx = 72 puts the walk in the else arm at 0002d866, where n = 96 / 0x18 = 4,
+   y advances a whole tile a step and x is the accumulator -- 72 / 4 = 18
+   pixels a step, which is not a tile and does not need to be. */
+static void test_the_larger_delta_is_the_axis_that_paces_the_walk(void)
+{
+    move_save();
+    move_place(48, 48, 0, 12);
+
+    fdps_map_cursor_move_to(120, 144);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 120);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 144);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 12);
+    move_restore();
+}
+
+/* A walk up and to the left.  The step count goes through abs before the
+   division (CALL 0x0003d364 at 0002d836), so it is 120 / 0x18 = 5 and not
+   -5: without the abs the loop's CMP/JL would fail on the first test and the
+   cursor would never move at all.  The advances are negative and every
+   division truncates toward zero -- -72 / 5 is -14, not -15 -- and the carry
+   still lands the minor axis exactly on -72. */
+static void test_a_walk_up_and_left_takes_the_same_number_of_steps(void)
+{
+    move_save();
+    move_place(168, 120, 0, 0);
+
+    fdps_map_cursor_move_to(48, 48);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 48);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 48);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    move_restore();
+}
+
+/* THE WALK CAN STOP SHORT AND NOTHING PUTS IT RIGHT.  dx = 101 gives n = 101 /
+   0x18 = 4 and a major advance of 101 / 4 = 25, so four steps cover 100 and
+   the cursor comes to rest one pixel short of the target for good -- there is
+   no store of the target after the loop.  The same numbers pin the step count
+   on the dominant axis: taking n from the minor delta instead (30 / 0x18 = 1)
+   would move the whole 101 in a single step and land on 149.  The minor axis,
+   which carries, still arrives exactly on 30. */
+static void test_a_target_that_does_not_divide_evenly_is_undershot(void)
+{
+    move_save();
+    move_place(48, 48, 0, 0);
+
+    fdps_map_cursor_move_to(149, 78);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 148);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 78);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    move_restore();
+}
+
 void run_mapcur_tests(void)
 {
     mapcur_stage_sheet();
@@ -1357,4 +1570,12 @@ void run_mapcur_tests(void)
     RUN_TEST(test_a_whole_unit_draws_its_hp_in_the_ambient_row);
     RUN_TEST(test_hp_over_the_maximum_still_counts_as_hurt);
     RUN_TEST(test_every_piece_follows_the_panel_column);
+
+    RUN_TEST(test_a_target_the_cursor_stands_on_moves_nothing);
+    RUN_TEST(test_the_first_argument_is_the_x_target);
+    RUN_TEST(test_a_walk_down_moves_only_the_y_cursor);
+    RUN_TEST(test_the_minor_axis_carries_its_remainder);
+    RUN_TEST(test_the_larger_delta_is_the_axis_that_paces_the_walk);
+    RUN_TEST(test_a_walk_up_and_left_takes_the_same_number_of_steps);
+    RUN_TEST(test_a_target_that_does_not_divide_evenly_is_undershot);
 }

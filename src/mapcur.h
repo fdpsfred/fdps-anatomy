@@ -35,6 +35,34 @@
 extern void fdps_draw_map_cursor(unsigned char *scene_buffer);
 #pragma aux fdps_draw_map_cursor "*" parm caller [];
 
+/* Walks the cursor from wherever it stands to the world pixel (target_x,
+   target_y), one step per tile of the longer of the two distances, and
+   scrolls the view along with it.  The arguments are WORLD PIXELS, not tiles:
+   every caller multiplies a tile number by 24 before the call.
+
+   It is animated, not a jump.  Each step advances both cursor globals, keeps
+   the cursor between 24 and 216 pixels from the view's left edge and between
+   24 and 144 from its top by moving data_fdps_battle_view_window_origin_x /
+   _y, and then draws a frame through fdps_render_view_frame (mapdraw.h) --
+   which holds for the timer tick, so the walk takes one frame per tile and
+   runs at the game's frame rate.  The frame is skipped only when the cursor
+   is invisible (data_fdps_map_cursor_draw_mode 0) AND that step did not
+   scroll the view, so a move made with the cursor switched off costs nothing
+   and shows nothing.
+
+   A target the cursor already stands on returns at once, having drawn no
+   frame and touched nothing.  A target less than one tile away on the
+   dominant axis divides by zero; every call site in the image passes a
+   tile-aligned target.
+
+   The view is left wherever the walk put it and the cursor is left on -- or,
+   for a target that is not a whole number of tiles away, a few pixels short
+   of -- the target.  The map's own size comes from the movement grid header
+   through data_fdps_battle_move_grid_ptr, which therefore has to be loaded
+   before the first call. */
+extern void fdps_map_cursor_move_to(int target_x, int target_y);
+#pragma aux fdps_map_cursor_move_to "*" parm caller [];
+
 /* 0006016c.  Which screen column the terrain information panel is drawn at,
    and the only global this file owns.  All eight references to it in the image
    are inside fdps_draw_cursor_info_panel: the two stores that park it and the
