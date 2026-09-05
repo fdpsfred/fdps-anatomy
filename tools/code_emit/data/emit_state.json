@@ -2510,6 +2510,14 @@
       "status": "committed",
       "emitted_against": "0x107",
       "rounds": 0
+    },
+    "0002d590": {
+      "name": "fdps_animate_move_step_left",
+      "target": "walk.c",
+      "body_size": "0x105",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x105"
     }
   }
 }

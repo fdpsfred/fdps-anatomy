@@ -72,4 +72,31 @@ extern void fdps_walk_step_down(int unit_index);
 extern void fdps_animate_move_step_up(int unit_index);
 #pragma aux fdps_animate_move_step_up "*" parm caller [];
 
+/* Steps the unit at unit_index one tile LEFT across the screen and returns
+ * nothing.
+ *
+ * This is the upward step turned through ninety degrees.  The six passes each
+ * move the map cursor's pixel column (data_fdps_map_cursor_world_x) back by
+ * four, and each scrolls the view origin
+ * (data_fdps_battle_view_window_origin_x) back by four as well while two
+ * conditions both hold: the unit's STARTING pixel column is less than 48
+ * pixels -- two tiles -- right of the left edge of the view, and the view
+ * origin is still at least four, so the subtraction cannot take it left of the
+ * map.  The starting column is measured once before the loop and never
+ * remeasured, so the view moves left underneath a fixed column, the gap GROWS
+ * by four each time it scrolls, and the scrolling stops once it reaches 48.
+ *
+ * As with the upward step there is no map extent to clamp against and none is
+ * read: the >= 4 test alone stops the view, so this routine touches no map
+ * layer at all.  The tile column is a plain byte and widens unsigned.
+ *
+ * The arrival tile reported to fdps_map_set_pending_tile_event is derived from
+ * the map cursor globals and not from the unit record that was just
+ * decremented, and the post-loop catch-up frame is drawn on scancode 2 only
+ * while the in-loop suppression covers both 2 and 3 -- both exactly as in the
+ * other directions, and both behaviour rather than style.
+ */
+extern void fdps_animate_move_step_left(int unit_index);
+#pragma aux fdps_animate_move_step_left "*" parm caller [];
+
 #endif
