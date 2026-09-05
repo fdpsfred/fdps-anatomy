@@ -21,7 +21,9 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "mapdraw.h"
+#include "palcycle.h"
 #include "palette.h"
+#include "unit.h"
 #include "icon.h"
 
 /* VGA input status register 1.  Bit 3 is set while the vertical retrace is in
@@ -205,4 +207,120 @@ int fdps_icon_script_scroll_view_to_tile(unsigned char *script, int offset)
     data_fdps_battle_view_window_origin_y = target_y;
 
     return offset + 3;
+}
+
+/* How many walk sub-steps carry a unit across one tile.  The loop counter runs
+   1..6 -- MOV [EBP-0x18],0x1 with CMP against 0x6 and JLE -- and
+   fdps_draw_map_unit offsets a unit by four pixels per sub-step, so five
+   drawn offsets of 4, 8, 12, 16, 20 and then the tile itself at 24 make one
+   0x18-pixel tile of travel. */
+#define WALK_SUB_STEPS 6
+
+/* The facing codes the commit branches on, the same four fdps_draw_map_unit
+   reads: the assembly tests the facing byte against 0, then 1, then 2, and
+   every other value falls into the last arm. */
+#define WALK_FACING_DOWN 0
+#define WALK_FACING_LEFT 1
+#define WALK_FACING_UP 2
+
+/* 00021f60.  Script opcode 1, the scripted group walk.  See icon.h for the
+   operand layout and what the handler leaves behind.
+
+   THE CURSOR AND THE PANEL ARE SWITCHED OFF AND THEN SWITCHED ON, NOT PUT
+   BACK.  The entry pair writes 0 into both globals and the exit pair writes
+   the literal 1 into both -- MOV dword ptr [0x00069cd0],0x1 and MOV byte ptr
+   [0x00060159],0x1 at 000220d1 -- so whatever cursor mode was in force before
+   the opcode does not survive it.  Saving the two on entry and restoring them
+   on exit, the obvious spelling, is a different function
+   (rebuild_info/pitfalls.md).
+
+   THE UNIT UPDATE LIVES INSIDE THE PER-FRAME HOLD LOOP.  The list is walked
+   once per held frame, not once per sub-step: the hold counter [EBP-0xc] is
+   the loop the CALL 0x0002beb0 sits at the bottom of, and the unit loop
+   [EBP-0x10] is nested inside it.  With a frames-per-sub-step operand of 0
+   the hold loop never runs, so nothing is drawn AND nothing moves.  Hoisting
+   the unit work out to run once per sub-step would move the units on a zero
+   operand, which the original does not.
+
+   THE TILE IS COMMITTED ONCE PER TILE, ON THE FIRST HELD FRAME OF SUB-STEP 6.
+   CMP dword ptr [EBP-0x18],0x6 / JZ picks the commit arm and CMP dword ptr
+   [EBP-0xc],0x0 / JNZ lets only the first held frame through it, so a
+   frames-per-sub-step of 3 still advances the unit by exactly one tile.  The
+   sub-step counter written to the record is the loop counter itself for
+   sub-steps 1 to 5 and is cleared to 0 by the commit, which is what puts the
+   unit on its new tile with no sub-tile offset left over.
+
+   THE FACING IS TAKEN FROM THE SCRIPT ON EVERY PASS AND THE COMMIT READS IT
+   BACK.  MOV DL,byte ptr [EAX+0x1] / MOV byte ptr [EAX+0x3],DL runs before
+   the commit's own MOV AL,byte ptr [EAX+0x3], so the direction the tile is
+   committed in is the script's operand and never the facing the unit carried
+   in.
+
+   The three operand bytes are zero-extended -- XOR EAX,EAX / MOV AL,byte ptr
+   [EDX+n] for each -- so all three counts are 0..255.
+
+   Nothing here scrolls the view, consults the terrain or reports an arrival
+   tile: the listed units walk straight through whatever is on the map for
+   exactly the scripted number of tiles. */
+int fdps_icon_script_walk_units(unsigned char *script, int offset)
+{
+    /* The three operand bytes: how many rendered frames each walk sub-step is
+       held for, how many tiles the group walks, and how many units are
+       listed. */
+    int frames_per_sub_step;
+    int tile_count;
+    int unit_count;
+    /* The three loop counters, outermost first, plus the position in the
+       unit list. */
+    int tile;
+    int sub_step;
+    int hold;
+    int listed;
+    /* The listed unit's index in the battle unit array, and its record. */
+    int unit_index;
+    struct fdps_unit_record *unit;
+
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_ui_play_active_flag = 0;
+
+    frames_per_sub_step = (int) script[offset + 1];
+    tile_count = (int) script[offset + 2];
+    unit_count = (int) script[offset + 3];
+    offset += 4;
+
+    for (tile = 0; tile < tile_count; tile++) {
+        for (sub_step = 1; sub_step <= WALK_SUB_STEPS; sub_step++) {
+            for (hold = 0; hold < frames_per_sub_step; hold++) {
+                for (listed = 0; listed < unit_count; listed++) {
+                    unit_index = (int) script[offset + listed * 2];
+                    unit = fdps_get_unit_record(unit_index);
+                    unit->facing = script[offset + listed * 2 + 1];
+
+                    if (sub_step == WALK_SUB_STEPS) {
+                        if (hold == 0) {
+                            unit->walk_step = 0;
+                            if (unit->facing == WALK_FACING_DOWN) {
+                                unit->pos_y++;
+                            } else if (unit->facing == WALK_FACING_LEFT) {
+                                unit->pos_x--;
+                            } else if (unit->facing == WALK_FACING_UP) {
+                                unit->pos_y--;
+                            } else {
+                                unit->pos_x++;
+                            }
+                        }
+                    } else {
+                        unit->walk_step = (unsigned char) sub_step;
+                    }
+                }
+                fdps_render_view_frame();
+                fdps_cycle_scene_palette();
+            }
+        }
+    }
+
+    data_fdps_map_cursor_draw_mode = 1;
+    data_fdps_ui_play_active_flag = 1;
+
+    return offset + unit_count * 2;
 }

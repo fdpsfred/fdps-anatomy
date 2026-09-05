@@ -81,4 +81,36 @@ extern int fdps_icon_script_scroll_view_to_tile(unsigned char *script,
                                                 int offset);
 #pragma aux fdps_icon_script_scroll_view_to_tile "*" parm caller [];
 
+/* Script opcode 1.  Walks a list of battle units a scripted number of tiles,
+   each unit in its own scripted direction, playing the six sub-step walk
+   animation as they go.
+
+   script is the base of the loaded IconAni .DAT image and offset the byte
+   offset of this opcode inside it.  The three operand bytes are all unsigned:
+   script[offset + 1] is how many rendered frames each of the six walk
+   sub-steps is held for, script[offset + 2] is how many tiles the group
+   walks, and script[offset + 3] is how many units are listed.  The list
+   follows at script[offset + 4] as that many two-byte pairs, a unit index
+   then a facing code (0 down, 1 left, 2 up, anything else right).
+
+   Returns offset + 4 + 2 * unit_count, the position of the next opcode, which
+   the interpreter stores as its new script position.
+
+   Every listed unit ends up on the tile its facing code names, one tile
+   further along per scripted tile, with its sub-tile step counter back at 0.
+   Nothing is clamped, no terrain is consulted and no arrival event is raised:
+   the listed units walk straight through whatever is on the map, which is
+   what separates a scripted walk from the interactive movement playback.
+
+   A frames-per-sub-step operand of 0 moves nothing at all -- the units are
+   updated once per rendered frame, so with no frames there is no update.
+
+   The handler leaves two globals set (both gamedata.h):
+   data_fdps_map_cursor_draw_mode and data_fdps_ui_play_active_flag are both 0
+   for the duration of the walk, so no cursor and no info panel are drawn over
+   it, and both are 1 on return.  They are set to those constants rather than
+   put back to what they held on entry. */
+extern int fdps_icon_script_walk_units(unsigned char *script, int offset);
+#pragma aux fdps_icon_script_walk_units "*" parm caller [];
+
 #endif

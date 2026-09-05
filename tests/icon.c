@@ -41,6 +41,9 @@
  * is therefore in the same position; every test here passes 0.
  */
 #include <conio.h>
+#include <string.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -528,6 +531,341 @@ static void the_cursor_sits_one_tile_inside_the_new_view(void)
     CHECK_EQ(data_fdps_map_cursor_world_y, TILE_PIXELS);
 }
 
+
+/* ---------------------------------------------------------------------------
+ * 00021f60, script opcode 1: the scripted group walk.
+ *
+ * WHAT THE RUN IS WATCHED THROUGH.  The handler's whole persistent output is
+ * the unit records it edits, the two HUD globals it leaves set and the stream
+ * offset it returns; the frames it renders in between are the compositor's
+ * output and not this function's.  So every case below points the battle unit
+ * array at records staged here, runs the handler and reads those records back.
+ *
+ * WHY A TIMER INTERRUPT IS INSTALLED.  Every held frame goes through
+ * fdps_render_view_frame, whose own wait ends only when
+ * data_fdps_timer_tick_counter moves, and nothing advances that counter in a
+ * test image -- the first frame would never end.  Each run that renders at all
+ * hooks IRQ0 for the duration of the call with a handler that increments the
+ * counter and chains to the one that was there, the same way tests/death.c and
+ * tests/anim.c do.
+ *
+ * WHY NOTHING PAINTS.  The handler itself clears
+ * data_fdps_map_cursor_draw_mode and data_fdps_ui_play_active_flag on entry,
+ * which switches off the map cursor and the info panel; walk_stage zeroes the
+ * scene layer count, the terrain HUD flag and the map unit count as well, so
+ * the composite each frame builds is empty and the blit copies a blank page.
+ * That keeps a run to the cost of one timer tick per frame and keeps the test
+ * report on screen.
+ *
+ * Expected values come from the assembly: XOR EAX,EAX / MOV AL,byte ptr
+ * [EDX+0x1], [EDX+0x2] and [EDX+0x3] for the three unsigned operands and ADD
+ * dword ptr [EBP+0x18],0x4 for the header they sit in; MOV [EBP-0x18],0x1 with
+ * CMP against 0x6 and JLE for the six sub-steps; the nesting order of the four
+ * counters, with CALL 0x0002beb0 and CALL 0x0002eab0 at 000220b8 sitting at
+ * the bottom of the hold loop and the unit loop inside it; MOV DL,byte ptr
+ * [EAX+0x1] / MOV byte ptr [EAX+0x3],DL for the facing write; CMP dword ptr
+ * [EBP-0x18],0x6 / JZ and CMP dword ptr [EBP-0xc],0x0 / JNZ for the commit
+ * guard; INC byte ptr [EAX+0x1] / DEC byte ptr [EAX] / DEC byte ptr [EAX+0x1] /
+ * INC byte ptr [EAX] for the four direction arms; MOV [0x00069cd0],0x1 and MOV
+ * [0x00060159],0x1 at 000220d1 for the exit constants; and MOV EAX,[EBP-0x20] /
+ * ADD EAX,EAX / ADD EDX,EAX for the returned offset.  None is read off the
+ * emitted C.
+ *
+ * WHAT IS NOT ASSERTED.  The sub-tile step counter the handler writes for
+ * sub-steps 1 to 5 is overwritten by the commit before the call returns, so its
+ * intermediate values are visible only to fdps_draw_map_unit inside a frame;
+ * the counter's value on return -- 0 -- is asserted instead, and the four-pixel
+ * displacement it drives is covered in tests/mapdraw.c.  The unsigned decode of
+ * the frames-per-sub-step and tile-count operands has no cheap observable
+ * either: a top-bit-set value there is 128 tiles or 128 held frames, tens of
+ * thousands of timer ticks, so only the unit count's decode is exercised from
+ * the outside and the other two rest on the identical XOR EAX,EAX / MOV AL
+ * sequence.  The one rendered frame per held pass, and the retrace each one
+ * straddles, are playtest contracts (rebuild_info/pitfalls.md).
+ */
+
+/* IRQ0.  DOS/4GW reflects a hardware interrupt taken in protected mode to the
+   protected-mode vector, so the handler installed here is the one that runs
+   while the frame wait spins on the counter. */
+#define WALK_TIMER_VECTOR 8
+
+/* Records staged for the battle unit array, and the script image the operands
+   and the unit list are written into. */
+#define WALK_UNITS 5
+#define WALK_SCRIPT_BYTES 32
+
+/* Where the staged units start out.  Far enough from either end of a byte that
+   a step in any of the four directions stays in range. */
+#define WALK_HOME_X 10
+#define WALK_HOME_Y 10
+
+/* Values staged into the two record fields the handler writes, chosen so that
+   neither could be mistaken for something the handler produced: no facing arm
+   yields 9 and no sub-step is 7. */
+#define WALK_STAGED_FACING 9
+#define WALK_STAGED_STEP 7
+
+/* Values staged into the two HUD globals before a run, so that finding 1 in
+   them afterwards says the handler wrote the exit constants rather than put
+   back what it found. */
+#define WALK_STAGED_CURSOR_MODE 4
+#define WALK_STAGED_PLAY_FLAG 4
+
+static struct fdps_unit_record walk_units[WALK_UNITS];
+static unsigned char walk_script[WALK_SCRIPT_BYTES];
+
+static void (__interrupt __far *walk_saved_timer)();
+
+static void __interrupt __far walk_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(walk_saved_timer);
+}
+
+/* Points the battle unit array at the staged records, puts every one of them
+   on the same tile with a facing and a step counter no arm of the handler
+   produces, and switches off everything a rendered frame would otherwise
+   paint. */
+static void walk_stage(void)
+{
+    int unit;
+
+    memset(walk_units, 0, sizeof(walk_units));
+    for (unit = 0; unit < WALK_UNITS; unit++) {
+        walk_units[unit].pos_x = WALK_HOME_X;
+        walk_units[unit].pos_y = WALK_HOME_Y;
+        walk_units[unit].facing = WALK_STAGED_FACING;
+        walk_units[unit].walk_step = WALK_STAGED_STEP;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) walk_units;
+
+    data_fdps_map_unit_count = 0;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+
+    data_fdps_map_cursor_draw_mode = WALK_STAGED_CURSOR_MODE;
+    data_fdps_ui_play_active_flag = WALK_STAGED_PLAY_FLAG;
+
+    memset(walk_script, 0, sizeof(walk_script));
+}
+
+/* Writes the opcode and its three operands at offset, and returns the offset
+   the first unit pair goes at. */
+static int walk_write_header(int offset, int frames_per_sub_step,
+                             int tile_count, int unit_count)
+{
+    walk_script[offset] = 1;
+    walk_script[offset + 1] = (unsigned char) frames_per_sub_step;
+    walk_script[offset + 2] = (unsigned char) tile_count;
+    walk_script[offset + 3] = (unsigned char) unit_count;
+    return offset + 4;
+}
+
+/* One listed unit: its index in the battle array and the direction it walks. */
+static void walk_write_pair(int pair_at, int unit_index, int direction)
+{
+    walk_script[pair_at] = (unsigned char) unit_index;
+    walk_script[pair_at + 1] = (unsigned char) direction;
+}
+
+/* One whole run with the frame wait serviced.  Used only by the cases that
+   render; a run with a frames-per-sub-step of 0 renders nothing and calls the
+   handler directly. */
+static int walk_run(int offset)
+{
+    int next_offset;
+
+    walk_saved_timer = _dos_getvect(WALK_TIMER_VECTOR);
+    _dos_setvect(WALK_TIMER_VECTOR, walk_timer_isr);
+    next_offset = fdps_icon_script_walk_units(walk_script, offset);
+    _dos_setvect(WALK_TIMER_VECTOR, walk_saved_timer);
+
+    return next_offset;
+}
+
+/* CMP dword ptr [EBP-0xc],0x0 at the top of the hold loop with the unit loop
+   nested inside it: with no frames to hold, the list is never walked, so no
+   record is touched however many tiles the script asks for.  Hoisting the unit
+   update out to run once per sub-step -- the natural way to write "update the
+   units, then render the held frames" -- would move both units three tiles
+   here (rebuild_info/pitfalls.md).  The handler still returns the offset past
+   the list and still writes the exit constants. */
+static void walk_no_held_frames_moves_nothing(void)
+{
+    int pair_at;
+    int next_offset;
+
+    walk_stage();
+    pair_at = walk_write_header(0, 0, 3, 2);
+    walk_write_pair(pair_at, 0, 0);
+    walk_write_pair(pair_at + 2, 1, 3);
+
+    next_offset = fdps_icon_script_walk_units(walk_script, 0);
+
+    CHECK_EQ(walk_units[0].pos_x, WALK_HOME_X);
+    CHECK_EQ(walk_units[0].pos_y, WALK_HOME_Y);
+    CHECK_EQ(walk_units[0].facing, WALK_STAGED_FACING);
+    CHECK_EQ(walk_units[0].walk_step, WALK_STAGED_STEP);
+    CHECK_EQ(walk_units[1].pos_x, WALK_HOME_X);
+    CHECK_EQ(walk_units[1].pos_y, WALK_HOME_Y);
+    CHECK_EQ(next_offset, 8);
+}
+
+/* The four direction arms, all in one run: INC byte ptr [EAX+0x1] for facing 0,
+   DEC byte ptr [EAX] for 1, DEC byte ptr [EAX+0x1] for 2, and INC byte ptr
+   [EAX] for everything else -- which is why the fifth unit here carries 7 and
+   still steps right.  Each pair's second byte is written into the record's
+   facing before the commit reads it back, so the facing on return is the
+   script's code and not the 9 every unit was staged with, and the commit clears
+   the sub-tile step counter to 0 rather than leaving the sixth sub-step in it.
+   One tile and one held frame per sub-step: six rendered frames. */
+static void walk_one_tile_steps_each_unit_in_its_own_direction(void)
+{
+    int pair_at;
+    int next_offset;
+
+    walk_stage();
+    pair_at = walk_write_header(0, 1, 1, WALK_UNITS);
+    walk_write_pair(pair_at, 0, 0);
+    walk_write_pair(pair_at + 2, 1, 1);
+    walk_write_pair(pair_at + 4, 2, 2);
+    walk_write_pair(pair_at + 6, 3, 3);
+    walk_write_pair(pair_at + 8, 4, 7);
+
+    next_offset = walk_run(0);
+
+    CHECK_EQ(walk_units[0].pos_x, WALK_HOME_X);
+    CHECK_EQ(walk_units[0].pos_y, WALK_HOME_Y + 1);
+    CHECK_EQ(walk_units[1].pos_x, WALK_HOME_X - 1);
+    CHECK_EQ(walk_units[1].pos_y, WALK_HOME_Y);
+    CHECK_EQ(walk_units[2].pos_x, WALK_HOME_X);
+    CHECK_EQ(walk_units[2].pos_y, WALK_HOME_Y - 1);
+    CHECK_EQ(walk_units[3].pos_x, WALK_HOME_X + 1);
+    CHECK_EQ(walk_units[3].pos_y, WALK_HOME_Y);
+    CHECK_EQ(walk_units[4].pos_x, WALK_HOME_X + 1);
+    CHECK_EQ(walk_units[4].pos_y, WALK_HOME_Y);
+    CHECK_EQ(walk_units[0].facing, 0);
+    CHECK_EQ(walk_units[4].facing, 7);
+    CHECK_EQ(walk_units[0].walk_step, 0);
+    CHECK_EQ(walk_units[3].walk_step, 0);
+    CHECK_EQ(next_offset, 4 + 2 * WALK_UNITS);
+}
+
+/* CMP dword ptr [EBP-0xc],0x0 / JNZ guards the commit: only the first held
+   frame of sub-step 6 advances the tile, so three held frames per sub-step
+   still move the unit exactly one tile.  A commit that ran on every held pass
+   would put this unit three tiles down instead of one.  Eighteen rendered
+   frames. */
+static void walk_a_held_frame_does_not_commit_the_tile_again(void)
+{
+    int pair_at;
+
+    walk_stage();
+    pair_at = walk_write_header(0, 3, 1, 1);
+    walk_write_pair(pair_at, 0, 0);
+
+    walk_run(0);
+
+    CHECK_EQ(walk_units[0].pos_y, WALK_HOME_Y + 1);
+    CHECK_EQ(walk_units[0].pos_x, WALK_HOME_X);
+    CHECK_EQ(walk_units[0].walk_step, 0);
+}
+
+/* The outermost counter is the tile count operand, so three tiles is three
+   commits and the unit ends three tiles along.  Eighteen rendered frames. */
+static void walk_the_tile_count_is_how_far_the_group_goes(void)
+{
+    int pair_at;
+
+    walk_stage();
+    pair_at = walk_write_header(0, 1, 3, 1);
+    walk_write_pair(pair_at, 0, 3);
+
+    walk_run(0);
+
+    CHECK_EQ(walk_units[0].pos_x, WALK_HOME_X + 3);
+    CHECK_EQ(walk_units[0].pos_y, WALK_HOME_Y);
+}
+
+/* The pair's first byte is the index fdps_get_unit_record is called with, not
+   the position in the list: the two listed units here are 3 and 1, and 0, 2 and
+   4 are left exactly where they were staged.  Six rendered frames. */
+static void walk_the_pair_names_the_unit_by_index(void)
+{
+    int pair_at;
+
+    walk_stage();
+    pair_at = walk_write_header(0, 1, 1, 2);
+    walk_write_pair(pair_at, 3, 0);
+    walk_write_pair(pair_at + 2, 1, 2);
+
+    walk_run(0);
+
+    CHECK_EQ(walk_units[3].pos_y, WALK_HOME_Y + 1);
+    CHECK_EQ(walk_units[1].pos_y, WALK_HOME_Y - 1);
+    CHECK_EQ(walk_units[0].pos_y, WALK_HOME_Y);
+    CHECK_EQ(walk_units[0].facing, WALK_STAGED_FACING);
+    CHECK_EQ(walk_units[2].pos_y, WALK_HOME_Y);
+    CHECK_EQ(walk_units[4].pos_y, WALK_HOME_Y);
+}
+
+/* The operands are at offset + 1, + 2 and + 3 and the list starts at
+   offset + 4, none of which is offset + 0: the opcode byte and the byte just
+   past the list are both set to values that would give a very different run if
+   either were picked up by mistake.  Twelve rendered frames -- one held frame
+   per sub-step across two tiles -- and the returned offset is the byte past the
+   one pair. */
+static void walk_the_operands_follow_the_opcode_byte(void)
+{
+    int pair_at;
+    int next_offset;
+
+    walk_stage();
+    walk_script[13] = 99;
+    pair_at = walk_write_header(7, 1, 2, 1);
+    walk_write_pair(pair_at, 0, 3);
+
+    next_offset = walk_run(7);
+
+    CHECK_EQ(walk_units[0].pos_x, WALK_HOME_X + 2);
+    CHECK_EQ(walk_units[0].pos_y, WALK_HOME_Y);
+    CHECK_EQ(next_offset, 13);
+}
+
+/* XOR EAX,EAX / MOV AL,byte ptr [EDX+0x3]: a unit count with its top bit set is
+   128, not -128, and the returned offset is offset + 4 + 2 * 128.  A signed
+   decode would hand the interpreter back a position 260 bytes BEHIND this
+   opcode.  The tile count is 0 so no record is read and the list is never
+   walked -- what is being pinned here is the decode and the return arithmetic,
+   not the walk. */
+static void walk_the_unit_count_operand_is_unsigned(void)
+{
+    int next_offset;
+
+    walk_stage();
+    walk_write_header(0, 1, 0, 0x80);
+
+    next_offset = fdps_icon_script_walk_units(walk_script, 0);
+
+    CHECK_EQ(next_offset, 4 + 2 * 0x80);
+}
+
+/* MOV dword ptr [0x00069cd0],0x1 and MOV byte ptr [0x00060159],0x1 on the exit
+   path are stores of literals, not restores: both globals were staged at 4 and
+   both come back 1.  A save-and-restore pair -- the obvious spelling -- would
+   leave 4 in each and carry an area-of-effect cursor mode straight through the
+   opcode (rebuild_info/pitfalls.md). */
+static void walk_the_hud_globals_end_at_one_not_where_they_started(void)
+{
+    walk_stage();
+    walk_write_header(0, 0, 0, 0);
+
+    fdps_icon_script_walk_units(walk_script, 0);
+
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+    CHECK_EQ(data_fdps_ui_play_active_flag, 1);
+}
+
 void run_icon_tests(void)
 {
     RUN_TEST(the_dac_reads_back_what_was_written);
@@ -545,4 +883,12 @@ void run_icon_tests(void)
     RUN_TEST(a_sub_tile_distance_on_x_jumps_straight_to_the_target);
     RUN_TEST(a_sub_tile_distance_on_y_jumps_straight_to_the_target);
     RUN_TEST(the_cursor_sits_one_tile_inside_the_new_view);
+    RUN_TEST(walk_no_held_frames_moves_nothing);
+    RUN_TEST(walk_one_tile_steps_each_unit_in_its_own_direction);
+    RUN_TEST(walk_a_held_frame_does_not_commit_the_tile_again);
+    RUN_TEST(walk_the_tile_count_is_how_far_the_group_goes);
+    RUN_TEST(walk_the_pair_names_the_unit_by_index);
+    RUN_TEST(walk_the_operands_follow_the_opcode_byte);
+    RUN_TEST(walk_the_unit_count_operand_is_unsigned);
+    RUN_TEST(walk_the_hud_globals_end_at_one_not_where_they_started);
 }
