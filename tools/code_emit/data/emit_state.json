@@ -1905,7 +1905,7 @@
     },
     "00056898": {
       "name": "fdps_compute_save_checksum",
-      "target": "save.c",
+      "target": "savefile.c",
       "body_size": "0x1f",
       "status": "committed",
       "emitted_against": "0x1f",
@@ -1913,7 +1913,7 @@
     },
     "000568b7": {
       "name": "fdps_xor_crypt_buffer",
-      "target": "save.c",
+      "target": "savefile.c",
       "body_size": "0x24",
       "status": "committed",
       "emitted_against": "0x24",
@@ -2601,7 +2601,7 @@
     },
     "00024a40": {
       "name": "fdps_draw_save_slot_panel",
-      "target": "save.c",
+      "target": "savepnl.c",
       "body_size": "0x301",
       "status": "committed",
       "emitted_against": "0x301",
@@ -2609,7 +2609,7 @@
     },
     "00024830": {
       "name": "fdps_saveload_screen_build",
-      "target": "save.c",
+      "target": "savepnl.c",
       "body_size": "0x20e",
       "status": "committed",
       "emitted_against": "0x20e",

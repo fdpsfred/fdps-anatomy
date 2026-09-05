@@ -180,9 +180,15 @@ RULES = [
     (r"^fdps_roster_", "roster.c"),
 
     # --------------------------------------------------------- save / load
-    (r"^fdps_(save_game_screen|load_game_screen|load_savegame|"
-     r"save_slot_select_loop|saveload_screen_build|draw_save_slot_panel|"
-     r"compute_save_checksum|xor_crypt_buffer)$", "save.c"),
+    # Three files, cut where the subsystem's own seams are: the two modal
+    # screens and the slot cursor they share; the page they are drawn on; and
+    # FDE.SAV itself.  save.c held all eight and ran past the line budget with
+    # two still to emit (rebuild_info/code_layout.md).
+    (r"^fdps_(save_game_screen|load_game_screen|save_slot_select_loop)$",
+     "save.c"),
+    (r"^fdps_(saveload_screen_build|draw_save_slot_panel)$", "savepnl.c"),
+    (r"^fdps_(load_savegame|compute_save_checksum|xor_crypt_buffer)$",
+     "savefile.c"),
 
     # ------------------------------------------------------------- village
     (r"^fdps_(run_village_phase|village_signboard_menu|"

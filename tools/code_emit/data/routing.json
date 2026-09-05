@@ -1251,7 +1251,7 @@
     },
     "00023e20": {
       "name": "fdps_load_savegame",
-      "target": "save.c",
+      "target": "savefile.c",
       "est_lines": 164,
       "body_size": 959,
       "status": "pending"
@@ -1279,14 +1279,14 @@
     },
     "00024830": {
       "name": "fdps_saveload_screen_build",
-      "target": "save.c",
+      "target": "savepnl.c",
       "est_lines": 96,
       "body_size": 526,
       "status": "pending"
     },
     "00024a40": {
       "name": "fdps_draw_save_slot_panel",
-      "target": "save.c",
+      "target": "savepnl.c",
       "est_lines": 135,
       "body_size": 769,
       "status": "pending"
@@ -3519,14 +3519,14 @@
     },
     "00056898": {
       "name": "fdps_compute_save_checksum",
-      "target": "save.c",
+      "target": "savefile.c",
       "est_lines": 46,
       "body_size": 31,
       "status": "pending"
     },
     "000568b7": {
       "name": "fdps_xor_crypt_buffer",
-      "target": "save.c",
+      "target": "savefile.c",
       "est_lines": 42,
       "body_size": 36,
       "status": "pending"
@@ -3665,9 +3665,10 @@
         "cdaudio.c",
         "menu.c",
         "save.c",
+        "savefile.c",
         "title.c"
       ],
-      "reason": "read from 5 files: btlmenu.c, cdaudio.c, menu.c, save.c, title.c",
+      "reason": "read from 6 files: btlmenu.c, cdaudio.c, menu.c, save.c, savefile.c, title.c",
       "status": "pending"
     },
     "0006000c": {
@@ -3680,12 +3681,12 @@
       "ref_count": 31,
       "reader_files": [
         "mapcur.c",
-        "save.c",
+        "savepnl.c",
         "shopdraw.c",
         "statwin.c",
         "text.c"
       ],
-      "reason": "read from 5 files: mapcur.c, save.c, shopdraw.c, statwin.c, text.c",
+      "reason": "read from 5 files: mapcur.c, savepnl.c, shopdraw.c, statwin.c, text.c",
       "status": "pending"
     },
     "00060010": {
@@ -3700,9 +3701,10 @@
         "aiact.c",
         "btlmenu.c",
         "menu.c",
-        "save.c"
+        "save.c",
+        "savefile.c"
       ],
-      "reason": "read from 4 files: aiact.c, btlmenu.c, menu.c, save.c",
+      "reason": "read from 5 files: aiact.c, btlmenu.c, menu.c, save.c, savefile.c",
       "status": "pending"
     },
     "00060014": {
@@ -3877,7 +3879,8 @@
         "mapdraw.c",
         "roster.c",
         "rsrc.c",
-        "save.c",
+        "savefile.c",
+        "savepnl.c",
         "shopdraw.c",
         "spellmnu.c",
         "sprite.c",
@@ -3886,7 +3889,7 @@
         "village.c",
         "vilmenu.c"
       ],
-      "reason": "read from 15 files: church.c, deploy.c, main.c, mapcur.c, mapdraw.c, roster.c, rsrc.c, save.c, shopdraw.c, spellmnu.c, sprite.c, statwin.c, unitstat.c, village.c, vilmenu.c",
+      "reason": "read from 16 files: church.c, deploy.c, main.c, mapcur.c, mapdraw.c, roster.c, rsrc.c, savefile.c, savepnl.c, shopdraw.c, spellmnu.c, sprite.c, statwin.c, unitstat.c, village.c, vilmenu.c",
       "status": "pending"
     },
     "0006013c": {
@@ -3905,9 +3908,9 @@
         "mapai.c",
         "maptile.c",
         "rsrc.c",
-        "save.c"
+        "savefile.c"
       ],
-      "reason": "read from 8 files: btlmenu.c, btlturn.c, deploy.c, main.c, mapai.c, maptile.c, rsrc.c, save.c",
+      "reason": "read from 8 files: btlmenu.c, btlturn.c, deploy.c, main.c, mapai.c, maptile.c, rsrc.c, savefile.c",
       "status": "pending"
     },
     "00060140": {
@@ -4006,13 +4009,13 @@
         "overview.c",
         "roster.c",
         "rsrc.c",
-        "save.c",
+        "savefile.c",
         "title.c",
         "unit.c",
         "unitstat.c",
         "village.c"
       ],
-      "reason": "read from 24 files: aitarget.c, btlend.c, btlmenu.c, btlturn.c, chend2.c, chevt4.c, chevt5.c, chevt6.c, chpost2.c, death.c, deploy.c, icon.c, mapai.c, mapcur.c, mapdraw.c, movegrid.c, overview.c, roster.c, rsrc.c, save.c, title.c, unit.c, unitstat.c, village.c",
+      "reason": "read from 24 files: aitarget.c, btlend.c, btlmenu.c, btlturn.c, chend2.c, chevt4.c, chevt5.c, chevt6.c, chpost2.c, death.c, deploy.c, icon.c, mapai.c, mapcur.c, mapdraw.c, movegrid.c, overview.c, roster.c, rsrc.c, savefile.c, title.c, unit.c, unitstat.c, village.c",
       "status": "pending"
     },
     "00060154": {
@@ -4043,10 +4046,11 @@
         "mapcur.c",
         "menu.c",
         "save.c",
+        "savefile.c",
         "title.c",
         "village.c"
       ],
-      "reason": "read from 7 files: btlmenu.c, chend2.c, mapcur.c, menu.c, save.c, title.c, village.c",
+      "reason": "read from 8 files: btlmenu.c, chend2.c, mapcur.c, menu.c, save.c, savefile.c, title.c, village.c",
       "status": "pending"
     },
     "00060159": {
@@ -5054,23 +5058,24 @@
         "icon.c",
         "mapai.c",
         "maptile.c",
-        "save.c"
+        "savefile.c"
       ],
-      "reason": "read from 6 files: btlmenu.c, chapter.c, icon.c, mapai.c, maptile.c, save.c",
+      "reason": "read from 6 files: btlmenu.c, chapter.c, icon.c, mapai.c, maptile.c, savefile.c",
       "status": "pending"
     },
     "000640f8": {
       "symbol": "data_fdps_ui_save_slot_occupied_flags",
-      "target": "save.c",
+      "target": "gamedata.c",
       "type": "/int[3]",
       "size": 12,
       "segment": "bss",
       "est_lines": 1,
       "ref_count": 3,
       "reader_files": [
-        "save.c"
+        "save.c",
+        "savepnl.c"
       ],
-      "reason": "read only from save.c",
+      "reason": "read from 2 files: save.c, savepnl.c",
       "status": "pending"
     },
     "00064104": {
@@ -5102,11 +5107,13 @@
         "roster.c",
         "rsrc.c",
         "save.c",
+        "savefile.c",
+        "savepnl.c",
         "table.c",
         "title.c",
         "unit.c"
       ],
-      "reason": "read from 9 files: btlmenu.c, deploy.c, main.c, roster.c, rsrc.c, save.c, table.c, title.c, unit.c",
+      "reason": "read from 11 files: btlmenu.c, deploy.c, main.c, roster.c, rsrc.c, save.c, savefile.c, savepnl.c, table.c, title.c, unit.c",
       "status": "pending"
     },
     "0006410c": {
@@ -5120,9 +5127,9 @@
       "reader_files": [
         "deploy.c",
         "rsrc.c",
-        "save.c"
+        "savefile.c"
       ],
-      "reason": "read from 3 files: deploy.c, rsrc.c, save.c",
+      "reason": "read from 3 files: deploy.c, rsrc.c, savefile.c",
       "status": "pending"
     },
     "00064110": {
@@ -5156,6 +5163,8 @@
         "roster.c",
         "rsrc.c",
         "save.c",
+        "savefile.c",
+        "savepnl.c",
         "shop.c",
         "shopdraw.c",
         "title.c",
@@ -5163,7 +5172,7 @@
         "village.c",
         "vilmenu.c"
       ],
-      "reason": "read from 12 files: btlmenu.c, church.c, deploy.c, roster.c, rsrc.c, save.c, shop.c, shopdraw.c, title.c, unit.c, village.c, vilmenu.c",
+      "reason": "read from 14 files: btlmenu.c, church.c, deploy.c, roster.c, rsrc.c, save.c, savefile.c, savepnl.c, shop.c, shopdraw.c, title.c, unit.c, village.c, vilmenu.c",
       "status": "pending"
     },
     "00064118": {
@@ -5177,9 +5186,9 @@
       "reader_files": [
         "deploy.c",
         "rsrc.c",
-        "save.c"
+        "savefile.c"
       ],
-      "reason": "read from 3 files: deploy.c, rsrc.c, save.c",
+      "reason": "read from 3 files: deploy.c, rsrc.c, savefile.c",
       "status": "pending"
     },
     "0006411c": {
@@ -5330,12 +5339,13 @@
         "death.c",
         "roster.c",
         "save.c",
+        "savefile.c",
         "shop.c",
         "village.c",
         "vilmenu.c",
         "vilshop.c"
       ],
-      "reason": "read from 11 files: btlend.c, btlmenu.c, chevt3.c, chevt5.c, death.c, roster.c, save.c, shop.c, village.c, vilmenu.c, vilshop.c",
+      "reason": "read from 12 files: btlend.c, btlmenu.c, chevt3.c, chevt5.c, death.c, roster.c, save.c, savefile.c, shop.c, village.c, vilmenu.c, vilshop.c",
       "status": "pending"
     },
     "000643a8": {
@@ -5434,14 +5444,14 @@
         "combat.c",
         "icon.c",
         "main.c",
-        "save.c",
+        "savefile.c",
         "spell.c",
         "title.c",
         "transit.c",
         "unitatk.c",
         "village.c"
       ],
-      "reason": "read from 14 files: aiact.c, chapter.c, chevt6.c, church.c, cmbspell.c, combat.c, icon.c, main.c, save.c, spell.c, title.c, transit.c, unitatk.c, village.c",
+      "reason": "read from 14 files: aiact.c, chapter.c, chevt6.c, church.c, cmbspell.c, combat.c, icon.c, main.c, savefile.c, spell.c, title.c, transit.c, unitatk.c, village.c",
       "status": "pending"
     },
     "000643c0": {
@@ -5480,7 +5490,8 @@
         "item.c",
         "main.c",
         "roster.c",
-        "save.c",
+        "savefile.c",
+        "savepnl.c",
         "shop.c",
         "shopdraw.c",
         "spellmnu.c",
@@ -5490,7 +5501,7 @@
         "vilmenu.c",
         "vilshop.c"
       ],
-      "reason": "read from 16 files: btlmenu.c, cdaudio.c, church.c, death.c, item.c, main.c, roster.c, save.c, shop.c, shopdraw.c, spellmnu.c, statwin.c, text.c, unitstat.c, vilmenu.c, vilshop.c",
+      "reason": "read from 17 files: btlmenu.c, cdaudio.c, church.c, death.c, item.c, main.c, roster.c, savefile.c, savepnl.c, shop.c, shopdraw.c, spellmnu.c, statwin.c, text.c, unitstat.c, vilmenu.c, vilshop.c",
       "status": "pending"
     },
     "000643c8": {
@@ -5914,12 +5925,12 @@
         "mapcur.c",
         "menu.c",
         "overview.c",
-        "save.c",
+        "savefile.c",
         "spellmnu.c",
         "unit.c",
         "walk.c"
       ],
-      "reason": "read from 14 files: aiact.c, aitarget.c, btlmenu.c, btlturn.c, chapter.c, icon.c, item.c, mapcur.c, menu.c, overview.c, save.c, spellmnu.c, unit.c, walk.c",
+      "reason": "read from 14 files: aiact.c, aitarget.c, btlmenu.c, btlturn.c, chapter.c, icon.c, item.c, mapcur.c, menu.c, overview.c, savefile.c, spellmnu.c, unit.c, walk.c",
       "status": "pending"
     },
     "00069cd0": {
@@ -5972,12 +5983,12 @@
         "mapcur.c",
         "menu.c",
         "overview.c",
-        "save.c",
+        "savefile.c",
         "spellmnu.c",
         "unit.c",
         "walk.c"
       ],
-      "reason": "read from 14 files: aiact.c, aitarget.c, btlmenu.c, btlturn.c, chapter.c, icon.c, item.c, mapcur.c, menu.c, overview.c, save.c, spellmnu.c, unit.c, walk.c",
+      "reason": "read from 14 files: aiact.c, aitarget.c, btlmenu.c, btlturn.c, chapter.c, icon.c, item.c, mapcur.c, menu.c, overview.c, savefile.c, spellmnu.c, unit.c, walk.c",
       "status": "pending"
     },
     "00069cd8": {
@@ -6000,12 +6011,12 @@
         "movegrid.c",
         "overview.c",
         "rsrc.c",
-        "save.c",
+        "savefile.c",
         "unit.c",
         "village.c",
         "walk.c"
       ],
-      "reason": "read from 15 files: aitarget.c, btlmenu.c, btlturn.c, deploy.c, main.c, mapai.c, mapcur.c, mapdraw.c, movegrid.c, overview.c, rsrc.c, save.c, unit.c, village.c, walk.c",
+      "reason": "read from 15 files: aitarget.c, btlmenu.c, btlturn.c, deploy.c, main.c, mapai.c, mapcur.c, mapdraw.c, movegrid.c, overview.c, rsrc.c, savefile.c, unit.c, village.c, walk.c",
       "status": "pending"
     },
     "00069cdc": {
@@ -6047,13 +6058,13 @@
         "menu.c",
         "msgwin.c",
         "overview.c",
-        "save.c",
+        "savefile.c",
         "spell.c",
         "sprite.c",
         "unitstat.c",
         "walk.c"
       ],
-      "reason": "read from 19 files: anim.c, btlmenu.c, btlturn.c, chapter.c, death.c, gauge.c, icon.c, indicat.c, item.c, mapcur.c, mapdraw.c, menu.c, msgwin.c, overview.c, save.c, spell.c, sprite.c, unitstat.c, walk.c",
+      "reason": "read from 19 files: anim.c, btlmenu.c, btlturn.c, chapter.c, death.c, gauge.c, icon.c, indicat.c, item.c, mapcur.c, mapdraw.c, menu.c, msgwin.c, overview.c, savefile.c, spell.c, sprite.c, unitstat.c, walk.c",
       "status": "pending"
     },
     "00069ce4": {
@@ -6079,13 +6090,13 @@
         "menu.c",
         "msgwin.c",
         "overview.c",
-        "save.c",
+        "savefile.c",
         "spell.c",
         "sprite.c",
         "unitstat.c",
         "walk.c"
       ],
-      "reason": "read from 19 files: anim.c, btlmenu.c, btlturn.c, chapter.c, death.c, gauge.c, icon.c, indicat.c, item.c, mapcur.c, mapdraw.c, menu.c, msgwin.c, overview.c, save.c, spell.c, sprite.c, unitstat.c, walk.c",
+      "reason": "read from 19 files: anim.c, btlmenu.c, btlturn.c, chapter.c, death.c, gauge.c, icon.c, indicat.c, item.c, mapcur.c, mapdraw.c, menu.c, msgwin.c, overview.c, savefile.c, spell.c, sprite.c, unitstat.c, walk.c",
       "status": "pending"
     },
     "00069ce8": {
@@ -6110,9 +6121,9 @@
         "chevt6.c",
         "chpost1.c",
         "chpost2.c",
-        "save.c"
+        "savefile.c"
       ],
-      "reason": "read from 14 files: anim.c, btlend.c, btlmenu.c, btlturn.c, chapter.c, chevt1.c, chevt2.c, chevt3.c, chevt4.c, chevt5.c, chevt6.c, chpost1.c, chpost2.c, save.c",
+      "reason": "read from 14 files: anim.c, btlend.c, btlmenu.c, btlturn.c, chapter.c, chevt1.c, chevt2.c, chevt3.c, chevt4.c, chevt5.c, chevt6.c, chpost1.c, chpost2.c, savefile.c",
       "status": "pending"
     },
     "00069cec": {
@@ -6150,9 +6161,10 @@
         "main.c",
         "roster.c",
         "rsrc.c",
-        "save.c"
+        "savefile.c",
+        "savepnl.c"
       ],
-      "reason": "read from 5 files: deploy.c, main.c, roster.c, rsrc.c, save.c",
+      "reason": "read from 6 files: deploy.c, main.c, roster.c, rsrc.c, savefile.c, savepnl.c",
       "status": "pending"
     },
     "00069cf4": {
@@ -6184,6 +6196,7 @@
         "roster.c",
         "rsrc.c",
         "save.c",
+        "savefile.c",
         "shop.c",
         "shopdraw.c",
         "title.c",
@@ -6192,7 +6205,7 @@
         "vilmenu.c",
         "vilshop.c"
       ],
-      "reason": "read from 27 files: btlend.c, btlmenu.c, btlturn.c, chapter.c, chend1.c, chend2.c, chevt1.c, chevt2.c, chevt3.c, chevt4.c, chevt5.c, chevt6.c, chpost2.c, icon.c, main.c, menu.c, palcycle.c, roster.c, rsrc.c, save.c, shop.c, shopdraw.c, title.c, unitstat.c, village.c, vilmenu.c, vilshop.c",
+      "reason": "read from 28 files: btlend.c, btlmenu.c, btlturn.c, chapter.c, chend1.c, chend2.c, chevt1.c, chevt2.c, chevt3.c, chevt4.c, chevt5.c, chevt6.c, chpost2.c, icon.c, main.c, menu.c, palcycle.c, roster.c, rsrc.c, save.c, savefile.c, shop.c, shopdraw.c, title.c, unitstat.c, village.c, vilmenu.c, vilshop.c",
       "status": "pending"
     },
     "00069cf8": {
@@ -6578,9 +6591,10 @@
         "audio.c",
         "btlmenu.c",
         "menu.c",
-        "save.c"
+        "save.c",
+        "savefile.c"
       ],
-      "reason": "read from 4 files: audio.c, btlmenu.c, menu.c, save.c",
+      "reason": "read from 5 files: audio.c, btlmenu.c, menu.c, save.c, savefile.c",
       "status": "pending"
     },
     "00069d71": {
@@ -9008,7 +9022,9 @@
       "carried_in": [
         "deploy.c",
         "rsrc.c",
-        "save.c"
+        "save.c",
+        "savefile.c",
+        "savepnl.c"
       ],
       "reason": "A string literal, not a named global. It comes back as the literal in the statement that uses it; naming it would invent a symbol the original never had. See rebuild_info/naming.md.",
       "status": "skip"
@@ -9027,7 +9043,8 @@
       ],
       "carried_in": [
         "deploy.c",
-        "save.c"
+        "savefile.c",
+        "savepnl.c"
       ],
       "reason": "A string literal, not a named global. It comes back as the literal in the statement that uses it; naming it would invent a symbol the original never had. See rebuild_info/naming.md.",
       "status": "skip"

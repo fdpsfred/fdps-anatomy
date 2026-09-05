@@ -1391,4 +1391,24 @@ extern int data_fdps_dialog_last_action_value_param;
 extern int data_fdps_dialog_last_action_text_id_param;
 extern int data_fdps_dialog_subst_text_id_2;
 
+/* 000640f8.  Whether each of the three panel slots holds a game that can be
+   loaded, one int per slot, written by fdps_saveload_screen_build as it draws
+   the panel -- MOV dword ptr [EAX + 0x640f8],0x0 at 00024953 for an empty slot
+   and 0x1 at 00024969 for an occupied one (savepnl.c) -- and read by
+   fdps_save_slot_select_loop (save.c), which is the only reader in the image.
+   The writer and the reader are different files, which is what puts the
+   declaration here (rebuild_info/code_layout.md).
+
+   The flags gate confirmation on the load screen alone.  On the save screen
+   data_fdps_ui_saveload_is_load_mode is zero and the whole test is
+   short-circuited, so an empty slot confirms exactly as an occupied one does
+   (save.h).
+
+   Indexed with LEA EAX,[EAX*0x4 + 0x0] / [EAX + 0x640f8] from the slot cursor,
+   whose value the modulus in fdps_save_slot_select_loop keeps in 0..2, so the
+   array is exactly three entries -- SAVE_SLOT_COUNT in save.h, spelled here as
+   the literal every other array in this header uses -- and the mode flag that
+   follows it in memory is never reached through it. */
+extern int data_fdps_ui_save_slot_occupied_flags[3];
+
 #endif
