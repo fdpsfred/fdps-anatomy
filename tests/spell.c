@@ -1,12 +1,13 @@
 /* tests/spell.c -- cover for src/spell.c.
  *
- * The file covers four functions and is in four parts, each starting at its
+ * The file covers five functions and is in five parts, each starting at its
  * own banner: fdps_spell_damage_unit first, then fdps_spell_heal_unit, then
- * fdps_spell_deduct_mp_cost, then fdps_play_spell_11_cutscene.  Each banner
- * carries its own account of where that part's figures come from.  The
- * fixture, the three staged tables and the helpers are shared by the first
- * three parts; the cutscene part stages the adapter, the two blend tables and
- * a palette of its own and shares nothing with them.
+ * fdps_spell_deduct_mp_cost, then fdps_play_spell_11_cutscene, then
+ * fdps_play_spell_palette_flash.  Each banner carries its own account of where
+ * that part's figures come from.  The fixture, the three staged tables and the
+ * helpers are shared by the first three parts; the cutscene part and the
+ * palette-flash part each stage the adapter and a palette of their own and
+ * share nothing with them or with each other.
  *
  * Every expected value in the damage half is read off the assembly of
  * fdps_spell_damage_unit at 00028320 -- the XOR EAX,EAX / MOV AL byte loads at 0002833d, 00028358 and
@@ -56,6 +57,7 @@
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "mapdraw.h"
 #include "spell.h"
 
 /* The strides the three accessors multiply by. */
@@ -1295,6 +1297,407 @@ static void the_call_ends_with_the_map_palette_at_no_bias(void)
              (int) cut_palette[CUT_DAC_ENTRIES - 1].blue);
 }
 
+/* ---------------------------------------------------------------------------
+ * fdps_play_spell_palette_flash
+ *
+ * WHERE THE EXPECTED VALUES COME FROM.  The three 40-byte planes restated below
+ * are the read-only blocks at 00027674, 0002769c and 000276c4 read back byte
+ * for byte -- the three REP MOVSD sources at 00029114, 00029123 and 00029132 --
+ * and not a copy of the emitted initialisers.  The pass count is
+ * MOV dword ptr [EBP-0x4],0x0 at 00029139 with CMP against 0x4 / JL, the two
+ * frames a pass presents are the CALLs to fdps_render_view_frame at 000291b0
+ * and 000291f1, the single DAC entry is PUSH 0x0 / PUSH 0x3c8 at 00029153 and
+ * 000291b5, and the three components per burst are the three PUSH 0x3c9 pairs
+ * that follow each of them.
+ *
+ * HOW THE COLOUR IS OBSERVED, AND WHY IT IS SAFE TO READ THE DAC HERE.  The
+ * routine leaves entry 0 black, so the colour it flashed is gone by the time
+ * the call returns and the only way to see it is from inside the call.  A
+ * handler that simply read the DAC every tick would sooner or later cut into
+ * one of the routine's own write bursts, because 0x3c7 and 0x3c8 load the same
+ * internal address register -- which is why the cutscene part above does not
+ * read the DAC from its handler at all.
+ *
+ * What makes it safe here is that the handler owns the frame clock.  Every one
+ * of the eight frames ends in fdps_render_view_frame's spin on
+ * data_fdps_timer_tick_counter (mapdraw.h), which only this handler advances,
+ * so the routine cannot leave a frame until the handler lets it.  The handler
+ * therefore advances the counter on every SECOND tick and reads the DAC
+ * immediately before it does: at that instant the routine has been parked in
+ * the spin for a whole tick period, its write bursts are long finished, and no
+ * further one can start until the counter moves.  data_fdps_view_frame_last_tick
+ * is seeded to the counter before the call so that the first frame waits too --
+ * without that the first reading would be taken during the black half.
+ *
+ * The eight readings of the sampled run are therefore the eight frames in
+ * order.  Every other run is stopped after one reading, which is the first
+ * frame's colour, and then paced freely, so a whole-table sweep costs nine
+ * ticks a spell rather than sixteen.
+ *
+ * WHAT IS NOT ASSERTED.  How long a flash lasts in wall time is
+ * fdps_render_view_frame's contract and not this routine's, and the picture the
+ * strobe is seen against is whatever the scene drew in palette index 0 -- both
+ * are playtest contracts (rebuild_info/pitfalls.md).
+ */
+
+#define FLASH_SPELL_COUNT 40
+#define FLASH_PASSES 4
+#define FLASH_FRAMES (FLASH_PASSES * 2)
+/* Two more readings than the routine can produce, so a body that presented more
+   frames than it should would show up as a ninth reading. */
+#define FLASH_SAMPLE_SLOTS (FLASH_FRAMES + 2)
+
+#define FLASH_TIMER_VECTOR 8
+#define FLASH_DAC_READ_INDEX 0x3c7
+#define FLASH_DAC_WRITE_INDEX 0x3c8
+#define FLASH_DAC_DATA 0x3c9
+#define FLASH_DAC_ENTRIES 256
+/* The entry the routine is supposed to move, and the one after it, which it is
+   supposed to leave alone.  A burst of four components instead of three would
+   spill into the guard entry's red. */
+#define FLASH_DAC_ENTRY 0
+#define FLASH_GUARD_ENTRY 1
+/* What both entries hold before a run, so that a component still holding it
+   afterwards says nothing was written there. */
+#define FLASH_DAC_SENTINEL 0x2a
+
+#define FLASH_VGA_BASE 0x000a0000
+#define FLASH_SCREEN_BYTES 64000
+#define FLASH_MODE_320X200X256 0x13
+#define FLASH_MODE_TEXT 0x03
+
+/* A chapter with no arm in fdps_cycle_scene_palette's dispatch, so the frames
+   the routine presents cannot write the DAC behind the readings. */
+#define FLASH_QUIET_CHAPTER 1
+
+/* The spell whose run is sampled frame by frame.  裂地術's colour has three
+   different components, so a run that swapped two planes could not produce it. */
+#define FLASH_SAMPLED_SPELL 0x0a
+
+/* Ids whose colour the cases name outright: the first fire spell, the two
+   ground shocks' brown, 甦癒術's green, 審判之雷's red-orange, and the two ends
+   of the white run that surrounds them. */
+#define FLASH_SPELL_FIRE 0x00
+#define FLASH_SPELL_QUAKE 0x0a
+#define FLASH_SPELL_REVIVE 0x18
+#define FLASH_SPELL_JUDGEMENT 0x20
+#define FLASH_SPELL_FIRST_WHITE 0x03
+#define FLASH_SPELL_LAST 0x27
+
+static const unsigned char flash_expect_red[FLASH_SPELL_COUNT] = {
+    63, 63, 63, 63, 63, 63, 63, 63,
+    63, 63, 57, 57, 63, 63, 63, 63,
+    63, 63, 63, 63, 63, 63, 63, 63,
+     0, 63, 63, 63, 63, 63, 63, 63,
+    63, 63, 63, 63, 63, 63, 63, 63
+};
+static const unsigned char flash_expect_green[FLASH_SPELL_COUNT] = {
+     0,  0,  0, 63, 63, 63, 63, 63,
+    63, 63, 42, 42,  0, 63, 63, 63,
+    63, 63, 63, 63,  0, 63, 63, 63,
+    63, 63, 63, 63, 63, 63,  0,  0,
+     9, 63, 63, 63, 63, 63, 63, 63
+};
+static const unsigned char flash_expect_blue[FLASH_SPELL_COUNT] = {
+     0,  0,  0, 63, 63, 63, 63, 63,
+    63, 63, 25, 25,  0, 63, 63, 63,
+    63, 63, 63, 63,  0, 63, 63, 63,
+     0, 63, 63, 63, 63, 63,  0,  0,
+     0, 63, 63, 63, 63, 63, 63, 63
+};
+
+static struct fdps_palette_entry flash_palette[FLASH_DAC_ENTRIES];
+
+static volatile int flash_gate;
+static volatile int flash_want;
+static volatile int flash_taken;
+static volatile int flash_sample_red[FLASH_SAMPLE_SLOTS];
+static volatile int flash_sample_green[FLASH_SAMPLE_SLOTS];
+static volatile int flash_sample_blue[FLASH_SAMPLE_SLOTS];
+
+static void (__interrupt __far *flash_saved_timer)();
+
+/* What one whole sweep left behind. */
+static int flash_seen_red[FLASH_SPELL_COUNT];
+static int flash_seen_green[FLASH_SPELL_COUNT];
+static int flash_seen_blue[FLASH_SPELL_COUNT];
+static int flash_red_wrong;
+static int flash_green_wrong;
+static int flash_blue_wrong;
+static int flash_frames_presented;
+static int flash_colour_frames;
+static int flash_black_frames;
+static int flash_alternates;
+static int flash_end_entry[3];
+static int flash_guard_entry[3];
+static int flash_baseline_done;
+
+/* One tick.  On every second one the routine is parked in the frame spin, which
+   is when the DAC may be read and when the counter is advanced to release it. */
+static void __interrupt __far flash_timer_isr(void)
+{
+    if (flash_want > 0) {
+        flash_gate = flash_gate ^ 1;
+        if (flash_gate == 0) {
+            outp(FLASH_DAC_READ_INDEX, FLASH_DAC_ENTRY);
+            flash_sample_red[flash_taken] = (int) inp(FLASH_DAC_DATA);
+            flash_sample_green[flash_taken] = (int) inp(FLASH_DAC_DATA);
+            flash_sample_blue[flash_taken] = (int) inp(FLASH_DAC_DATA);
+            flash_taken++;
+            flash_want--;
+            ++data_fdps_timer_tick_counter;
+        }
+    } else {
+        ++data_fdps_timer_tick_counter;
+    }
+
+    _chain_intr(flash_saved_timer);
+}
+
+/* Everything a presented frame would otherwise paint switched off, so the eight
+   frames a run costs are eight ticks and nothing else. */
+static void flash_stage(void)
+{
+    int entry;
+
+    for (entry = 0; entry < FLASH_DAC_ENTRIES; entry++) {
+        flash_palette[entry].red = (unsigned char) (entry % 64);
+        flash_palette[entry].green = (unsigned char) ((entry + 21) % 64);
+        flash_palette[entry].blue = (unsigned char) ((entry + 42) % 64);
+    }
+    data_fdps_vga_main_palette_ptr = (unsigned char *) flash_palette;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_chapter_current_chapter_id = FLASH_QUIET_CHAPTER;
+}
+
+static void flash_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+static void flash_write_entry(int entry, int level)
+{
+    outp(FLASH_DAC_WRITE_INDEX, entry);
+    outp(FLASH_DAC_DATA, level);
+    outp(FLASH_DAC_DATA, level);
+    outp(FLASH_DAC_DATA, level);
+}
+
+static void flash_read_entry(int entry, int *into)
+{
+    outp(FLASH_DAC_READ_INDEX, entry);
+    into[0] = (int) inp(FLASH_DAC_DATA);
+    into[1] = (int) inp(FLASH_DAC_DATA);
+    into[2] = (int) inp(FLASH_DAC_DATA);
+}
+
+/* One whole flash, with the first `samples` frames read back out of the DAC. */
+static void flash_run(int spell_id, int samples)
+{
+    int index;
+
+    for (index = 0; index < FLASH_SAMPLE_SLOTS; index++) {
+        flash_sample_red[index] = -1;
+        flash_sample_green[index] = -1;
+        flash_sample_blue[index] = -1;
+    }
+    flash_taken = 0;
+    flash_gate = 0;
+    flash_want = samples;
+
+    flash_write_entry(FLASH_DAC_ENTRY, FLASH_DAC_SENTINEL);
+    flash_write_entry(FLASH_GUARD_ENTRY, FLASH_DAC_SENTINEL);
+
+    flash_saved_timer = _dos_getvect(FLASH_TIMER_VECTOR);
+    _dos_setvect(FLASH_TIMER_VECTOR, flash_timer_isr);
+    data_fdps_view_frame_last_tick = data_fdps_timer_tick_counter;
+    fdps_play_spell_palette_flash(spell_id);
+    _dos_setvect(FLASH_TIMER_VECTOR, flash_saved_timer);
+}
+
+/* The sampled run and then the whole table, once.  It costs some four hundred
+   timer ticks, so it is run once and shared. */
+static void flash_baseline(void)
+{
+    int index;
+    int is_colour;
+    int is_black;
+
+    if (flash_baseline_done != 0) {
+        return;
+    }
+
+    flash_stage();
+    flash_set_mode(FLASH_MODE_320X200X256);
+    memset((void *) FLASH_VGA_BASE, 0, (size_t) FLASH_SCREEN_BYTES);
+
+    flash_run(FLASH_SAMPLED_SPELL, FLASH_SAMPLE_SLOTS);
+    flash_frames_presented = flash_taken;
+    flash_read_entry(FLASH_DAC_ENTRY, flash_end_entry);
+    flash_read_entry(FLASH_GUARD_ENTRY, flash_guard_entry);
+
+    flash_colour_frames = 0;
+    flash_black_frames = 0;
+    flash_alternates = 1;
+    for (index = 0; index < flash_frames_presented; index++) {
+        is_colour = 0;
+        if (flash_sample_red[index]
+                == (int) flash_expect_red[FLASH_SAMPLED_SPELL]
+            && flash_sample_green[index]
+                == (int) flash_expect_green[FLASH_SAMPLED_SPELL]
+            && flash_sample_blue[index]
+                == (int) flash_expect_blue[FLASH_SAMPLED_SPELL]) {
+            is_colour = 1;
+        }
+        is_black = 0;
+        if (flash_sample_red[index] == 0 && flash_sample_green[index] == 0
+            && flash_sample_blue[index] == 0) {
+            is_black = 1;
+        }
+        if (is_colour != 0) {
+            flash_colour_frames++;
+        }
+        if (is_black != 0) {
+            flash_black_frames++;
+        }
+        if ((index % 2) == 0) {
+            if (is_colour == 0) {
+                flash_alternates = 0;
+            }
+        } else {
+            if (is_black == 0) {
+                flash_alternates = 0;
+            }
+        }
+    }
+
+    flash_red_wrong = 0;
+    flash_green_wrong = 0;
+    flash_blue_wrong = 0;
+    for (index = 0; index < FLASH_SPELL_COUNT; index++) {
+        flash_run(index, 1);
+        flash_seen_red[index] = flash_sample_red[0];
+        flash_seen_green[index] = flash_sample_green[0];
+        flash_seen_blue[index] = flash_sample_blue[0];
+        if (flash_seen_red[index] != (int) flash_expect_red[index]) {
+            flash_red_wrong++;
+        }
+        if (flash_seen_green[index] != (int) flash_expect_green[index]) {
+            flash_green_wrong++;
+        }
+        if (flash_seen_blue[index] != (int) flash_expect_blue[index]) {
+            flash_blue_wrong++;
+        }
+    }
+
+    flash_set_mode(FLASH_MODE_TEXT);
+    flash_baseline_done = 1;
+}
+
+/* Every one of the forty spell ids flashes the colour its own three planes
+   hold.  This is what says the id indexes the planes directly -- a bias of one
+   either way moves the two brown entries and the green one off the ids that own
+   them, and every id in a white run keeps reading 63 -- and that the three
+   planes are 0x28 bytes apart rather than interleaved. */
+static void every_spell_id_flashes_the_colour_its_planes_hold(void)
+{
+    flash_baseline();
+
+    CHECK_EQ(flash_red_wrong, 0);
+    CHECK_EQ(flash_green_wrong, 0);
+    CHECK_EQ(flash_blue_wrong, 0);
+}
+
+/* The four colours that are not white, named outright and in channel order.
+   業火 is pure red, 裂地術 the earth brown whose three components all differ,
+   甦癒術 pure green and 審判之雷 the red-orange with the 9 in the green plane.
+   Two planes handed to outp in the wrong order would keep the white ids white
+   and show up only here. */
+static void the_element_colours_reach_the_dac_in_channel_order(void)
+{
+    flash_baseline();
+
+    CHECK_EQ(flash_seen_red[FLASH_SPELL_FIRE], 63);
+    CHECK_EQ(flash_seen_green[FLASH_SPELL_FIRE], 0);
+    CHECK_EQ(flash_seen_blue[FLASH_SPELL_FIRE], 0);
+
+    CHECK_EQ(flash_seen_red[FLASH_SPELL_QUAKE], 57);
+    CHECK_EQ(flash_seen_green[FLASH_SPELL_QUAKE], 42);
+    CHECK_EQ(flash_seen_blue[FLASH_SPELL_QUAKE], 25);
+
+    CHECK_EQ(flash_seen_red[FLASH_SPELL_REVIVE], 0);
+    CHECK_EQ(flash_seen_green[FLASH_SPELL_REVIVE], 63);
+    CHECK_EQ(flash_seen_blue[FLASH_SPELL_REVIVE], 0);
+
+    CHECK_EQ(flash_seen_red[FLASH_SPELL_JUDGEMENT], 63);
+    CHECK_EQ(flash_seen_green[FLASH_SPELL_JUDGEMENT], 9);
+    CHECK_EQ(flash_seen_blue[FLASH_SPELL_JUDGEMENT], 0);
+}
+
+/* The two ends of the white majority: the first id past the fire run and the
+   last record MAGICDAT.DAT holds.  The last one is where an index that ran off
+   the top of a table would show, since 0x27 is the final entry of all three. */
+static void the_spells_with_no_element_colour_flash_white(void)
+{
+    flash_baseline();
+
+    CHECK_EQ(flash_seen_red[FLASH_SPELL_FIRST_WHITE], 63);
+    CHECK_EQ(flash_seen_green[FLASH_SPELL_FIRST_WHITE], 63);
+    CHECK_EQ(flash_seen_blue[FLASH_SPELL_FIRST_WHITE], 63);
+
+    CHECK_EQ(flash_seen_red[FLASH_SPELL_LAST], 63);
+    CHECK_EQ(flash_seen_green[FLASH_SPELL_LAST], 63);
+    CHECK_EQ(flash_seen_blue[FLASH_SPELL_LAST], 63);
+}
+
+/* Eight frames, no more and no fewer, and they run colour, black, colour, black
+   from the first one.  The handler was willing to read ten, so a fifth pass or
+   a third frame in a pass would have been read; a loop that ran three times
+   would have stopped at six.  The alternation is what says the black burst
+   comes after the colour's frame and not before it. */
+static void the_flash_presents_four_passes_alternating_with_black(void)
+{
+    flash_baseline();
+
+    CHECK_EQ(flash_frames_presented, FLASH_FRAMES);
+    CHECK_EQ(flash_colour_frames, FLASH_PASSES);
+    CHECK_EQ(flash_black_frames, FLASH_PASSES);
+    CHECK_EQ(flash_alternates, 1);
+}
+
+/* The entry is black when the call returns, and it is the routine that made it
+   so: both entries went in holding the sentinel.  A body that put back what
+   entry 0 held before the flash would leave the sentinel here. */
+static void the_flash_leaves_dac_entry_zero_black(void)
+{
+    flash_baseline();
+
+    CHECK_EQ(flash_end_entry[0], 0);
+    CHECK_EQ(flash_end_entry[1], 0);
+    CHECK_EQ(flash_end_entry[2], 0);
+}
+
+/* And it moves nothing else.  Entry 1 still holds the sentinel it was given, so
+   the write index was 0 on every burst and each burst was three components
+   long: a fourth write would have run on into this entry's red. */
+static void nothing_but_dac_entry_zero_is_written(void)
+{
+    flash_baseline();
+
+    CHECK_EQ(flash_guard_entry[0], FLASH_DAC_SENTINEL);
+    CHECK_EQ(flash_guard_entry[1], FLASH_DAC_SENTINEL);
+    CHECK_EQ(flash_guard_entry[2], FLASH_DAC_SENTINEL);
+}
+
 void run_spell_tests(void)
 {
     RUN_TEST(the_record_layouts_match_the_offsets_read);
@@ -1343,4 +1746,11 @@ void run_spell_tests(void)
     RUN_TEST(the_frozen_screen_never_returns_once_the_fade_is_done);
     RUN_TEST(the_aperture_is_blanked_before_the_map_comes_back);
     RUN_TEST(the_call_ends_with_the_map_palette_at_no_bias);
+
+    RUN_TEST(every_spell_id_flashes_the_colour_its_planes_hold);
+    RUN_TEST(the_element_colours_reach_the_dac_in_channel_order);
+    RUN_TEST(the_spells_with_no_element_colour_flash_white);
+    RUN_TEST(the_flash_presents_four_passes_alternating_with_black);
+    RUN_TEST(the_flash_leaves_dac_entry_zero_black);
+    RUN_TEST(nothing_but_dac_entry_zero_is_written);
 }

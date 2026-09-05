@@ -140,4 +140,35 @@ extern void fdps_spell_deduct_mp_cost(int unit_index, int spell_id);
 extern void fdps_play_spell_11_cutscene(void);
 #pragma aux fdps_play_spell_11_cutscene "*" parm caller [];
 
+/* Strobes DAC entry 0 between one spell's signature colour and black, four
+   times, and presents a frame of the battle view in each.  Takes the spell's
+   MAGICDAT.DAT record index and returns nothing; the only caller is
+   fdps_cast_spell_on_targets, which hands it the same id it hands
+   fdps_get_spell_record.
+
+   Everything the player sees comes out of palette index 0, so what the flash
+   actually does depends on what the scene has drawn in that index -- the
+   routine itself only moves one DAC entry.  Eight frames are presented in all,
+   the colour and then black on each pass, and because every one of them goes
+   through fdps_render_view_frame (mapdraw.h) the call costs eight timer ticks
+   and repaints the live map eight times.  Nothing else on the screen is
+   touched: the write index is 0 every time and three components are written
+   after it, so no other DAC entry moves.
+
+   The colour is looked up in three 40-byte tables, one per channel, indexed by
+   the spell id with no bias.  It is the spell's element: red for the three fire
+   spells and for 震空重力彈, 神之祝福, 流星箭 and 靈彈超必殺, an earth brown
+   for 裂地術 and 封神裂震, green for 甦癒術, a red-orange for 審判之雷, and
+   white for every other id.  The id is not range checked at either end and the
+   bound is the caller's; an index past 0x27 reads off the end of the tables.
+
+   DAC ENTRY 0 IS BLACK WHEN THE CALL RETURNS.  The entry is never read before
+   it is written and the last pass ends on the black write, so whatever colour
+   index 0 held before the call is gone and the caller has to put it back if it
+   wants it.
+
+   The function reads no global of its own and writes none. */
+extern void fdps_play_spell_palette_flash(int spell_id);
+#pragma aux fdps_play_spell_palette_flash "*" parm caller [];
+
 #endif

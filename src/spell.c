@@ -6,13 +6,14 @@
  * array as it is at that moment.
  *
  * rand, malloc and free come from <stdlib.h>, memmove and memset from
- * <string.h> and inp from <conio.h>, which is where Watcom 10.0a declares each
- * of them.  Every one is a real library call in the original rather than an
- * inline expansion -- CALL 00042cf8 at 000283ee, CALL 0003d375 at 0002864d and
- * 0002869d, CALL 0003d478 at 000287a4, 00028858 and 00028864, CALL 0003d514 at
- * 000286b6, CALL 00042cd0 at 000287c7 and 00028893, and CALL 0003d4e4 at
- * 00028741, 00028752, 000287f5 and 00028806 -- because the flag that would
- * inline the string and character routines, -oi, is not in this build's set
+ * <string.h> and inp and outp from <conio.h>, which is where Watcom 10.0a
+ * declares each of them.  Every one is a real library call in the original
+ * rather than an inline expansion -- CALL 00042cf8 at 000283ee, CALL 0003d375
+ * at 0002864d and 0002869d, CALL 0003d478 at 000287a4, 00028858 and 00028864,
+ * CALL 0003d514 at 000286b6, CALL 00042cd0 at 000287c7 and 00028893, CALL
+ * 0003d4e4 at 00028741, 00028752, 000287f5 and 00028806, and the eight CALL
+ * 00042cb8 per pass at 0002915a onwards -- because the flag that would inline
+ * the string, character and port routines, -oi, is not in this build's set
  * (rebuild_info/build_flags.md).
  */
 #include <stdlib.h>
@@ -460,6 +461,112 @@ void fdps_play_spell_11_cutscene(void)
             fade_step * FLASH_FADE_BIAS_PER_STEP,
             fade_step * FLASH_FADE_BIAS_PER_STEP,
             fade_step * FLASH_FADE_BIAS_PER_STEP);
+        fdps_render_view_frame();
+    }
+}
+
+/* The DAC write port pair: the entry number goes to 0x3c8 and the entry's red,
+   green and blue components follow on 0x3c9, six bits each.  Both are port
+   numbers rather than addresses the linker places, so they stay literals. */
+#define VGA_DAC_WRITE_INDEX 0x3c8
+#define VGA_DAC_DATA 0x3c9
+
+/* The flash touches one DAC entry and no other -- PUSH 0x0 / PUSH 0x3c8 at
+   00029153 -- and runs four times: MOV dword ptr [EBP-0x4],0x0 at 00029139
+   with CMP against 0x4 / JL at 00029140. */
+#define SPELL_FLASH_DAC_ENTRY 0
+#define SPELL_FLASH_PASSES 4
+
+/* One colour per MAGICDAT.DAT record, and the file has 0x28 of them.  The three
+   read-only blocks the planes are copied from are 0x28 bytes apart -- 00027674,
+   0002769c, 000276c4 -- so the count is the blocks' own and not a guess. */
+#define SPELL_FLASH_COLOR_COUNT 40
+
+/* 00029100.  Four passes of one spell's signature colour against black, with a
+ * whole presented frame of the battle view held in each.
+ *
+ * PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x7c and a bare RET.  The one
+ * argument is read from [EBP+0x14], which is the first stack slot above the
+ * return address and the four saved registers, and the single call site at
+ * 0002891c inside fdps_cast_spell_on_targets pushes it and cleans the 4 bytes
+ * off itself.  So this takes one stack argument, returns nothing, and is the
+ * stack convention like the rest of the game code.
+ *
+ * The three planes are function-local arrays with initialisers, which is what
+ * the three REP MOVSDs at 00029119, 00029128 and 00029137 are: ten dwords each
+ * copied onto the frame out of read-only storage before anything else happens,
+ * in the declaration order below.  Their contents are those three blocks read
+ * back byte for byte.  They are not one table of triples: the original keeps a
+ * whole plane per channel, and the three loads inside the loop reach three
+ * separate frame slots 0x28 apart.
+ *
+ * The index is the spell id itself, with no bias and no bound test.  MOV EAX,
+ * [EBP+0x14] / MOV AL,byte ptr [EAX + EBP*0x1 + -0x7c] at 00029162 makes the
+ * whole dword the index, and the AND EAX,0xff that follows each load is what
+ * makes a plane unsigned char: a signed one would have been sign extended into
+ * the argument outp is handed.
+ *
+ * The stored levels are 6-bit DAC components and they follow the spell's
+ * element: (63,0,0) for 業火, 狂暴巨燄, 烈獄之火, 震空重力彈, 神之祝福, 流星箭
+ * and 靈彈超必殺 -- ids 0x00-0x02, 0x0c, 0x14, 0x1e and 0x1f -- (57,42,25) for
+ * the two ground shocks 裂地術 and 封神裂震, (0,63,0) for 甦癒術, (63,9,0) for
+ * 審判之雷, and full white for every other id.
+ *
+ * DAC ENTRY 0 IS LEFT BLACK, not put back.  Nothing here reads the entry before
+ * writing it and the last pass ends on the black write, so the caller inherits
+ * a palette whose index 0 is black whatever it held before the call.  A body
+ * that saved and restored it -- the obvious courtesy, and what a reader expects
+ * of a routine that borrows a palette entry -- changes what the map is drawn
+ * over once the cast is finished.
+ *
+ * The pacing is not this function's.  Each fdps_render_view_frame holds until
+ * the timer's tick counter moves (mapdraw.h), so the eight presented frames are
+ * eight ticks whatever the machine's speed, and the instruction count of the
+ * loop has nothing to do with how long a flash lasts.
+ *
+ * Neither fdps_render_view_frame nor outp returns anything this reads: every
+ * CALL in the body is followed by ADD ESP,0x8 or by nothing at all, and EAX is
+ * reloaded from the argument slot before each of the three plane loads. */
+void fdps_play_spell_palette_flash(int spell_id)
+{
+    /* 00027674.  The red component of each spell's flash colour. */
+    unsigned char flash_red[SPELL_FLASH_COLOR_COUNT] = {
+        63, 63, 63, 63, 63, 63, 63, 63,
+        63, 63, 57, 57, 63, 63, 63, 63,
+        63, 63, 63, 63, 63, 63, 63, 63,
+         0, 63, 63, 63, 63, 63, 63, 63,
+        63, 63, 63, 63, 63, 63, 63, 63
+    };
+    /* 0002769c.  The green component. */
+    unsigned char flash_green[SPELL_FLASH_COLOR_COUNT] = {
+         0,  0,  0, 63, 63, 63, 63, 63,
+        63, 63, 42, 42,  0, 63, 63, 63,
+        63, 63, 63, 63,  0, 63, 63, 63,
+        63, 63, 63, 63, 63, 63,  0,  0,
+         9, 63, 63, 63, 63, 63, 63, 63
+    };
+    /* 000276c4.  The blue component. */
+    unsigned char flash_blue[SPELL_FLASH_COLOR_COUNT] = {
+         0,  0,  0, 63, 63, 63, 63, 63,
+        63, 63, 25, 25,  0, 63, 63, 63,
+        63, 63, 63, 63,  0, 63, 63, 63,
+         0, 63, 63, 63, 63, 63,  0,  0,
+         0, 63, 63, 63, 63, 63, 63, 63
+    };
+    /* Which of the four strobes is being played. */
+    int pass;
+
+    for (pass = 0; pass < SPELL_FLASH_PASSES; pass++) {
+        outp(VGA_DAC_WRITE_INDEX, SPELL_FLASH_DAC_ENTRY);
+        outp(VGA_DAC_DATA, flash_red[spell_id]);
+        outp(VGA_DAC_DATA, flash_green[spell_id]);
+        outp(VGA_DAC_DATA, flash_blue[spell_id]);
+        fdps_render_view_frame();
+
+        outp(VGA_DAC_WRITE_INDEX, SPELL_FLASH_DAC_ENTRY);
+        outp(VGA_DAC_DATA, 0);
+        outp(VGA_DAC_DATA, 0);
+        outp(VGA_DAC_DATA, 0);
         fdps_render_view_frame();
     }
 }

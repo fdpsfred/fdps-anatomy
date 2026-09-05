@@ -2486,6 +2486,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x2d4"
+    },
+    "00029100": {
+      "name": "fdps_play_spell_palette_flash",
+      "target": "spell.c",
+      "body_size": "0x102",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x102"
     }
   }
 }

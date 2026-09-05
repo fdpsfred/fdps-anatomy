@@ -5957,13 +5957,16 @@ Single-byte 0x90 NOP alignment filler between FUN_00029080 and FUN_00029100
 Flashes the screen in one spell's signature colour, four times, while the spell is being cast.
 
 Algorithm:
-Copies three 40-byte colour planes out of read-only data onto the stack -- red from 0x00027674, green from 0x0002769c, blue from 0x000276c4 -- one entry per spell id 0x00-0x27. Then loops four times. Each pass selects VGA DAC entry 0 by writing 0 to port 0x3c8 through outp, writes red[spell_id], green[spell_id] and blue[spell_id] to port 0x3c9, and calls fdps_render_view_frame to paint and present one frame with that palette in force; it then selects DAC entry 0 again, writes (0,0,0), and calls fdps_render_view_frame once more. Eight presented frames in all, alternating the spell's colour with black, so everything drawn in palette index 0 strobes four times at the render loop's frame rate. The stored values are 6-bit VGA DAC levels and follow the spell's element: (63,0,0) red for the fire spells 0x00-0x02, (57,42,25) earth brown for 0x0a-0x0b 裂地術/封神裂震, (0,63,0) green for 0x18 甦癒術, (63,9,0) for 0x20 審判之雷, and full white (63,63,63) for every other spell. DAC entry 0 is left black on return; the routine never puts back whatever colour it held before.
+Copies three 40-byte colour planes out of read-only data onto the stack -- red from 0x00027674, green from 0x0002769c, blue from 0x000276c4 -- one entry per spell id 0x00-0x27. Then loops four times. Each pass selects VGA DAC entry 0 by writing 0 to port 0x3c8 through outp, writes red[spell_id], green[spell_id] and blue[spell_id] to port 0x3c9, and calls fdps_render_view_frame to paint and present one frame with that palette in force; it then selects DAC entry 0 again, writes (0,0,0), and calls fdps_render_view_frame once more. Eight presented frames in all, alternating the spell's colour with black, so everything drawn in palette index 0 strobes four times at the render loop's frame rate. The stored values are 6-bit VGA DAC levels and follow the spell's element: (63,0,0) for 0x00-0x02, 0x0c, 0x14, 0x1e and 0x1f, (57,42,25) earth brown for 0x0a-0x0b 裂地術/封神裂震, (0,63,0) green for 0x18 甦癒術, (63,9,0) for 0x20 審判之雷, and full white (63,63,63) for every remaining spell. DAC entry 0 is left black on return; the routine never puts back whatever colour it held before.
 
 Parameters:
   spell_id -- MAGICDAT.DAT spell table index, 0x00-0x27. Comes straight from the caller at 0x000288f0, which passes the same value to fdps_get_spell_record. Used unchecked as the index into all three colour planes.
 
 Returns:
   Nothing.
+
+Rebuild note:
+DAC entry 0 is left black and is NOT put back. The entry is never read before it is written -- there is no IN from port 0x3c7 or 0x3c9 anywhere between 00029100 and 00029201 -- and the last pass ends on the black burst at 000291b5..000291e9, so whatever colour index 0 held before the call is gone when the routine returns. Saving the entry first and restoring it at the end, the obvious courtesy for a routine that borrows one palette slot, changes what the map is drawn over once the cast is finished. A rebuild must not add that save-and-restore.
 
 Pool: fdps  [no Function ID hit in either library set, hash unique in the image; calls the game symbol fdps_render_view_frame, which no compiled vendor object could reference]
 
