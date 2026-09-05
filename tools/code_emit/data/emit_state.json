@@ -2318,7 +2318,7 @@
     },
     "000170c0": {
       "name": "fdps_unit_status_window_wait_input",
-      "target": "statwin.c",
+      "target": "statunit.c",
       "body_size": "0x465",
       "status": "committed",
       "emitted_against": "0x465",
@@ -2568,7 +2568,7 @@
     },
     "00016300": {
       "name": "fdps_draw_unit_status_panel",
-      "target": "statwin.c",
+      "target": "statunit.c",
       "body_size": "0x535",
       "status": "committed",
       "emitted_against": "0x535",
@@ -2632,7 +2632,7 @@
     },
     "00024ea0": {
       "name": "fdps_draw_unit_inventory",
-      "target": "statwin.c",
+      "target": "statunit.c",
       "body_size": "0x29d",
       "rounds": 0,
       "status": "committed",

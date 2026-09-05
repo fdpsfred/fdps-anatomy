@@ -26,7 +26,7 @@ emit 是序列的，一次一支 function，每支各自 commit。檔案落點�
 
 **每個檔的預估行數不超過 1000。** 這不是程式的性質，是模型讀寫的效率界線：超過之後每次改一行都要把整個檔讀進 context。
 
-預估值的來源是 **Ghidra decompiled code 的行數**，由 `tools/code_emit/DumpRoutingInputs.java` 產生。全部 514 支合計約 50,000 行，分成 78 個 `.c`。這是估計不是保證——實際 emit 出來的 C 會偏離，處置規則見下面「超標了怎麼辦」。
+預估值的來源是 **Ghidra decompiled code 的行數**，由 `tools/code_emit/DumpRoutingInputs.java` 產生。全部 514 支合計約 50,000 行，分成 79 個 `.c`。這是估計不是保證——實際 emit 出來的 C 會偏離，處置規則見下面「超標了怎麼辦」。
 
 ## 資料符號歸誰
 
@@ -85,7 +85,7 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 
 ## 檔案表
 
-78 個 `.c`，各自配一個同名 `.h`。逐檔的 function 清單與行數在 `tools/code_emit/data/routing.md`。
+79 個 `.c`，各自配一個同名 `.h`。逐檔的 function 清單與行數在 `tools/code_emit/data/routing.md`。
 
 ### 戰鬥地圖 AI
 
@@ -166,7 +166,8 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 | 檔 | 負責 |
 | --- | --- |
 | `menu.c` | 環狀指令選單與共用的選單開啟／游標／關閉原語 |
-| `statwin.c` | 單位狀態視窗：開闔動畫、面板、道具欄 |
+| `statwin.c` | 單位狀態視窗的外框：底圖載入、四片滑入滑出動畫、開窗與關窗 |
+| `statunit.c` | 狀態視窗裡的單位：數值面板、道具欄清單，以及開著時的走路／待機動畫與輸入等待 |
 | `gauge.c` | 各種量表的繪製與戰鬥量表的擺位 |
 | `msgwin.c` | 訊息視窗、人像載入繪製、二選一提示 |
 | `indicat.c` | 戰場上的浮動指示器佇列（傷害數字、MISS、CURE、閃色） |

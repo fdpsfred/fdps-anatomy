@@ -150,7 +150,7 @@ RULES = [
      r"apply_status_effect|is_ailment_immune|award_exp_and_level_up|"
      r"collect_known_spells)$", "unitstat.c"),
     (r"^fdps_unit_(attack_target|resolve_attack_hit|rest)$", "unitatk.c"),
-    (r"^fdps_unit_status_window_wait_input$", "statwin.c"),
+    (r"^fdps_unit_status_window_wait_input$", "statunit.c"),
 
     # ------------------------------------------------------- table records
     (r"^fdps_get_(character_base|growth|enemy|item|class|class_equip|spell|"
@@ -258,9 +258,9 @@ RULES = [
     (r"^fdps_battle_(show_combat_gauges|compute_unit_gauge_position)$",
      "gauge.c"),
     (r"^fdps_(load_status_cel_image|close_status_window|"
-     r"draw_status_window_anim_frame|draw_unit_status_panel|"
-     r"draw_unit_inventory)$", "statwin.c"),
+     r"draw_status_window_anim_frame)$", "statwin.c"),
     (r"^fdps_battle_show_unit_status_window$", "statwin.c"),
+    (r"^fdps_draw_unit_(status_panel|inventory)$", "statunit.c"),
     (r"^fdps_message_window_", "msgwin.c"),
 
     # --------------------------------------------------- floating markers

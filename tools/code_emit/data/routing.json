@@ -378,7 +378,7 @@
     },
     "00016300": {
       "name": "fdps_draw_unit_status_panel",
-      "target": "statwin.c",
+      "target": "statunit.c",
       "est_lines": 170,
       "body_size": 1333,
       "status": "pending"
@@ -413,7 +413,7 @@
     },
     "000170c0": {
       "name": "fdps_unit_status_window_wait_input",
-      "target": "statwin.c",
+      "target": "statunit.c",
       "est_lines": 213,
       "body_size": 1125,
       "status": "pending"
@@ -1300,7 +1300,7 @@
     },
     "00024ea0": {
       "name": "fdps_draw_unit_inventory",
-      "target": "statwin.c",
+      "target": "statunit.c",
       "est_lines": 127,
       "body_size": 669,
       "status": "pending"
@@ -3683,10 +3683,10 @@
         "mapcur.c",
         "savepnl.c",
         "shopdraw.c",
-        "statwin.c",
+        "statunit.c",
         "text.c"
       ],
-      "reason": "read from 5 files: mapcur.c, savepnl.c, shopdraw.c, statwin.c, text.c",
+      "reason": "read from 5 files: mapcur.c, savepnl.c, shopdraw.c, statunit.c, text.c",
       "status": "pending"
     },
     "00060010": {
@@ -3779,11 +3779,12 @@
         "msgwin.c",
         "save.c",
         "spellmnu.c",
+        "statunit.c",
         "statwin.c",
         "text.c",
         "village.c"
       ],
-      "reason": "read from 6 files: msgwin.c, save.c, spellmnu.c, statwin.c, text.c, village.c",
+      "reason": "read from 7 files: msgwin.c, save.c, spellmnu.c, statunit.c, statwin.c, text.c, village.c",
       "status": "pending"
     },
     "00060074": {
@@ -3884,12 +3885,12 @@
         "shopdraw.c",
         "spellmnu.c",
         "sprite.c",
-        "statwin.c",
+        "statunit.c",
         "unitstat.c",
         "village.c",
         "vilmenu.c"
       ],
-      "reason": "read from 16 files: church.c, deploy.c, main.c, mapcur.c, mapdraw.c, roster.c, rsrc.c, savefile.c, savepnl.c, shopdraw.c, spellmnu.c, sprite.c, statwin.c, unitstat.c, village.c, vilmenu.c",
+      "reason": "read from 16 files: church.c, deploy.c, main.c, mapcur.c, mapdraw.c, roster.c, rsrc.c, savefile.c, savepnl.c, shopdraw.c, spellmnu.c, sprite.c, statunit.c, unitstat.c, village.c, vilmenu.c",
       "status": "pending"
     },
     "0006013c": {
@@ -4559,16 +4560,16 @@
     },
     "00063fb0": {
       "symbol": "data_fdps_village_status_window_unit_idx",
-      "target": "statwin.c",
+      "target": "statunit.c",
       "type": "/int",
       "size": 4,
       "segment": "bss",
       "est_lines": 1,
       "ref_count": 2,
       "reader_files": [
-        "statwin.c"
+        "statunit.c"
       ],
-      "reason": "read only from statwin.c",
+      "reason": "read only from statunit.c",
       "status": "pending"
     },
     "00063fb4": {
@@ -4618,16 +4619,16 @@
     },
     "00063fc0": {
       "symbol": "data_fdps_unit_status_window_last_tick",
-      "target": "statwin.c",
+      "target": "statunit.c",
       "type": "/int",
       "size": 4,
       "segment": "bss",
       "est_lines": 1,
       "ref_count": 4,
       "reader_files": [
-        "statwin.c"
+        "statunit.c"
       ],
-      "reason": "read only from statwin.c",
+      "reason": "read only from statunit.c",
       "status": "pending"
     },
     "00063fc4": {
@@ -5468,10 +5469,10 @@
         "shop.c",
         "shopdraw.c",
         "spellmnu.c",
-        "statwin.c",
+        "statunit.c",
         "vilmenu.c"
       ],
-      "reason": "read from 7 files: church.c, main.c, shop.c, shopdraw.c, spellmnu.c, statwin.c, vilmenu.c",
+      "reason": "read from 7 files: church.c, main.c, shop.c, shopdraw.c, spellmnu.c, statunit.c, vilmenu.c",
       "status": "pending"
     },
     "000643c4": {
@@ -5495,13 +5496,13 @@
         "shop.c",
         "shopdraw.c",
         "spellmnu.c",
-        "statwin.c",
+        "statunit.c",
         "text.c",
         "unitstat.c",
         "vilmenu.c",
         "vilshop.c"
       ],
-      "reason": "read from 17 files: btlmenu.c, cdaudio.c, church.c, death.c, item.c, main.c, roster.c, savefile.c, savepnl.c, shop.c, shopdraw.c, spellmnu.c, statwin.c, text.c, unitstat.c, vilmenu.c, vilshop.c",
+      "reason": "read from 17 files: btlmenu.c, cdaudio.c, church.c, death.c, item.c, main.c, roster.c, savefile.c, savepnl.c, shop.c, shopdraw.c, spellmnu.c, statunit.c, text.c, unitstat.c, vilmenu.c, vilshop.c",
       "status": "pending"
     },
     "000643c8": {
@@ -5594,9 +5595,9 @@
         "mapdraw.c",
         "msgwin.c",
         "spellmnu.c",
-        "statwin.c"
+        "statunit.c"
       ],
-      "reason": "read from 5 files: main.c, mapdraw.c, msgwin.c, spellmnu.c, statwin.c",
+      "reason": "read from 5 files: main.c, mapdraw.c, msgwin.c, spellmnu.c, statunit.c",
       "status": "pending"
     },
     "000643e0": {
@@ -6540,7 +6541,7 @@
         "shopdraw.c",
         "spell.c",
         "spellmnu.c",
-        "statwin.c",
+        "statunit.c",
         "title.c",
         "transit.c",
         "unitstat.c",
@@ -6548,7 +6549,7 @@
         "vilmenu.c",
         "vilshop.c"
       ],
-      "reason": "read from 31 files: anim.c, audio.c, btlend.c, cdaudio.c, church.c, cmbblow.c, cmbspell.c, combat.c, death.c, gauge.c, indicat.c, keybd.c, mapcur.c, mapdraw.c, msgwin.c, overview.c, palcycle.c, roster.c, saf.c, save.c, shop.c, shopdraw.c, spell.c, spellmnu.c, statwin.c, title.c, transit.c, unitstat.c, village.c, vilmenu.c, vilshop.c",
+      "reason": "read from 31 files: anim.c, audio.c, btlend.c, cdaudio.c, church.c, cmbblow.c, cmbspell.c, combat.c, death.c, gauge.c, indicat.c, keybd.c, mapcur.c, mapdraw.c, msgwin.c, overview.c, palcycle.c, roster.c, saf.c, save.c, shop.c, shopdraw.c, spell.c, spellmnu.c, statunit.c, title.c, transit.c, unitstat.c, village.c, vilmenu.c, vilshop.c",
       "status": "pending"
     },
     "00069d68": {
@@ -7675,7 +7676,7 @@
         "fdps_unit_status_window_wait_input"
       ],
       "carried_in": [
-        "statwin.c"
+        "statunit.c"
       ],
       "reason": "The compiler's read-only copy of a function-local array initialiser. It comes back from declaring that local with its initialiser inside the owning function, which is where its contents belong.",
       "status": "skip"
