@@ -97,6 +97,39 @@ extern int fdps_unit_get_item_id(int unit_index, int slot);
 extern int fdps_unit_item_count(int unit_index);
 #pragma aux fdps_unit_item_count "*" parm caller [];
 
+/* Opens the unit status window on one unit's bag, runs the item list until the
+   player picks an entry or backs out, closes the window again and answers what
+   the list answered: 1 for a pick, with the entry in *selected_slot, and -1 for
+   a cancel.  Every call site tests for -1 and skips the action.  The call does
+   not return until the player has done one or the other.
+
+   It owns everything the window needs for the duration and nothing outlives it:
+   the 320x200 Status.cel frame, a copy of the visible screen taken on entry so
+   the window can be taken away again, and the clean copy of the list rectangle
+   the cursor loop erases its highlight with.  All three are released before the
+   answer comes back, so a caller passes no buffer in and gets none out.
+
+   THE OPENING DRAW HIGHLIGHTS ROW 0 AND NOT *selected_slot.  The caller seeds
+   the cursor -- every current call site seeds 0 -- and the cursor loop honours
+   that seed on its first repaint, but the one draw this function makes itself
+   passes a literal 0.  With a seed of anything else the bar therefore jumps
+   from row 0 to the seeded row on the first pass of the loop.
+
+   usable_only is handed to fdps_unit_item_select_loop unchanged and means what
+   it means there: 0 accepts any entry the cursor is on, non-zero accepts only
+   an entry whose ITEM.DAT record has a non-zero use effect.  Only the battle
+   "use item" path passes non-zero.
+
+   unit_index is a position in the current battle's unit array on the battle
+   side and a party member index in a village; it is not range checked and it
+   reaches the status panel, the item list, the cursor loop and one record
+   lookup of this function's own.  The window is drawn over whatever is on the
+   screen when the call is made, and the screen the close puts back is composed
+   from the scene rather than from that copy on the battle map (statwin.h). */
+extern int fdps_unit_item_select_window(int unit_index, int usable_only,
+                                        int *selected_slot);
+#pragma aux fdps_unit_item_select_window "*" parm caller [];
+
 /* Runs the item list of the unit status window until the player picks an entry
    or backs out, and answers 1 for a pick and -1 for a cancel.  The entry that
    was picked is left in *selected_slot, which the caller seeds and reads back;

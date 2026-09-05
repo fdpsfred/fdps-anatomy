@@ -7,14 +7,24 @@
  * touches no record of its own -- it searches an inventory entirely through
  * the other two accessors -- and fdps_unit_item_select_loop is the modal
  * cursor the player moves over those eight entries in the unit status window.
+ * fdps_unit_item_select_window is what puts that window up around the loop.
  * The file owns no state.
+ *
+ * malloc, free and memmove come from <stdlib.h> and <string.h>, which is where
+ * Watcom 10.0a declares them, and all three are real calls in the original --
+ * CALL 0x0003d375 at 000259e7, CALL 0x0003d478 at 00025ae7 and CALL 0x0003d514
+ * at 00025a00 -- because the flag set carries no -oi
+ * (rebuild_info/build_flags.md), so the plain declarations are what reproduce
+ * them.
  */
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 #include "audio.h"
 #include "blit.h"
 #include "fdpstype.h"
 #include "statunit.h"
+#include "statwin.h"
 #include "table.h"
 #include "unit.h"
 #include "unititem.h"
@@ -225,6 +235,126 @@ int fdps_unit_item_count(int unit_index)
    MOV dword ptr [EBP-0x4],0xffffffff at 00025ca1. */
 #define ITEM_SELECT_CONFIRMED 1
 #define ITEM_SELECT_CANCELLED (-1)
+
+/* The mode 13h frame the window is opened over, and where the adapter answers:
+   PUSH 0xfa00 / PUSH 0xa0000 / CALL memmove at 000259f2.  0xa0000 is a literal
+   because it is the display adapter's real linear address under DOS/4GW and
+   not the address of anything the linker places (rebuild_info/pitfalls.md,
+   contract E). */
+#define VGA_SCREEN_BYTES 0xfa00
+#define VGA_SCREEN_BASE 0x000a0000
+
+/* The list backdrop's size: PUSH 0x57e3 at 00025a08.  It is exactly
+   ITEM_LIST_WIDTH * ITEM_LIST_ROWS, 151 * 149, so the copy is tight and its
+   own stride is its width -- there is no slack row and no padding to a
+   scanline. */
+#define ITEM_LIST_BACKDROP_BYTES 0x57e3
+
+/* The row the opening draw puts the selection bar on: PUSH 0x0 at 00025a5f.
+   It is a literal and NOT *selected_slot, which is read for the first time by
+   the cursor loop's own repaint. */
+#define ITEM_LIST_OPENING_SLOT 0
+
+/* The nine frames of the slide-in: MOV dword ptr [EBP-0x20],0x0 / CMP
+   [EBP-0x20],0x9 / JL at 00025a87.  Steps 0..8, which is the whole of the four
+   panels' travel including the one-pixel overshoot steps 6 and 7 settle
+   through (statwin.h). */
+#define OPEN_ANIM_STEP_COUNT 9
+
+/* The cue the window opens with, the member at 0x61b2c.  It is the same
+   spelling fdps_close_status_window plays on the way out, from that function's
+   own copy at 0x6159c, and it has to be a plain writable literal for the same
+   reason: fdps_play_sfx upper-cases the caller's storage in place, so this one
+   is permanently "OPWIN1.WAV" after the first status window of the run
+   (rebuild_info/pitfalls.md). */
+#define STATUS_WINDOW_SOUND "OpWin1.wav"
+
+/* 000259c0.  Puts the unit status window up around the item list and takes it
+   down again.  One counted loop and no branch of any kind: every call below is
+   made on every pass through the function.
+
+   THE BACKDROP IS TAKEN BEFORE THE LIST IS PAINTED.  fdps_blit_rect copies the
+   still-empty list rectangle out of the freshly loaded window image at
+   00025a39, and only then does fdps_draw_unit_inventory paint the eight rows
+   into that same rectangle at 00025a65.  Taking the copy after the paint --
+   which is the intuitive order, snapshot the thing you are about to erase with
+   -- captures the rows and the slot-0 bar as part of the backdrop, and every
+   repaint inside fdps_unit_item_select_loop then lays the old highlight down
+   again underneath the new one.
+
+   THE OPENING DRAW'S SLOT IS A LITERAL 0.  *selected_slot is never read here;
+   it is passed to the cursor loop and read there.  A window opened on a seed
+   other than 0 therefore shows the bar on row 0 for the length of the slide-in
+   and moves it on the loop's first repaint.
+
+   The record fetched at 00025a71 is used for one byte, record +0x02, and
+   nothing afterwards reads it: the store at 00025a84 is the only use of the
+   value.  It is the sprite cache slot the cursor loop's own record lookup
+   fetches again for itself (statunit.h), and both the call and the load are
+   kept because both are work the original does.
+
+   No CALL's answer is read other than fdps_load_status_cel_image's, the two
+   malloc's, fdps_get_unit_record's and fdps_unit_item_select_loop's.  Neither
+   malloc is checked against null, the loaded image is not checked either, and
+   the loop's answer is returned exactly as it came back -- MOV [EBP-0x1c],EAX
+   at 00025ad0 and MOV EAX,[EBP-0x4] at 00025b0d, with no test in between. */
+int fdps_unit_item_select_window(int unit_index, int usable_only,
+                                 int *selected_slot)
+{
+    /* The unit's record, fetched for the byte below and nothing else. */
+    struct fdps_unit_record *unit;
+    /* The 320x200 Status.cel frame every painter composes into, and the frame
+       the slide-in and the close animate.  Owned and freed here. */
+    unsigned char *window_image;
+    /* The visible screen as it was on entry, so that closing the window can
+       put a picture back.  Owned and freed here. */
+    unsigned char *saved_screen;
+    /* The clean copy of the list rectangle the cursor loop lays down again
+       before each repaint.  Owned and freed here. */
+    unsigned char *list_backdrop;
+    /* Record +0x02, the unit's sprite cache slot.  Assigned and never read --
+       see the note above. */
+    int sprite_cache_slot;
+    /* Which of the nine slide-in frames is being drawn. */
+    int step;
+    /* What the cursor loop answered: 1 for a confirmed slot, -1 for a
+       cancel. */
+    int select_result;
+
+    fdps_play_sfx(STATUS_WINDOW_SOUND);
+    window_image = (unsigned char *) fdps_load_status_cel_image();
+
+    saved_screen = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+    memmove(saved_screen, (void *) VGA_SCREEN_BASE,
+            (size_t) VGA_SCREEN_BYTES);
+
+    list_backdrop =
+        (unsigned char *) malloc((size_t) ITEM_LIST_BACKDROP_BYTES);
+    fdps_blit_rect((unsigned int) (window_image + ITEM_LIST_AT),
+                   WINDOW_IMAGE_PITCH, list_backdrop, ITEM_LIST_WIDTH,
+                   ITEM_LIST_WIDTH, ITEM_LIST_ROWS);
+
+    fdps_draw_unit_status_panel(unit_index, window_image);
+    fdps_draw_unit_inventory(unit_index, ITEM_LIST_OPENING_SLOT,
+                             window_image + ITEM_LIST_AT, WINDOW_IMAGE_PITCH);
+
+    unit = fdps_get_unit_record(unit_index);
+    sprite_cache_slot = (int) unit->sprite_cache_slot;
+
+    for (step = 0; step < OPEN_ANIM_STEP_COUNT; step++) {
+        fdps_draw_status_window_anim_frame(saved_screen, window_image, step);
+    }
+
+    select_result = fdps_unit_item_select_loop(unit_index, usable_only,
+                                               window_image, list_backdrop,
+                                               selected_slot);
+
+    fdps_close_status_window(window_image, saved_screen);
+    free(window_image);
+    free(list_backdrop);
+    free(saved_screen);
+    return select_result;
+}
 
 /* 00025b20.  The modal cursor loop over one unit's eight inventory entries.
    Everything before the loop happens once: the record call, the byte at record

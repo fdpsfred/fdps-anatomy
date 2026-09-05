@@ -1891,5 +1891,20 @@
       "from": "review",
       "same_as": "emit#0"
     }
+  ],
+  "000259c0": [
+    {
+      "what": "Everything this function draws is unobservable from a unit test, so the paint order that its plate comment's rebuild note is about is verified by reading and by the object file, not by execution. Concretely: the list backdrop is copied out of the window image BEFORE fdps_draw_unit_inventory paints the rows into that same rectangle (00025a39 ahead of 00025a65), and the opening draw's selected row is a literal 0 rather than *selected_slot (PUSH 0x0 at 00025a5f). Both are emitted as the assembly has them and both were confirmed in workspace/code_emit/out/objs/UNITITEM.OBJ. What no case can check is their effect, because all three buffers are allocated, painted and freed inside the one call and the last thing the call does is fdps_close_status_window, which repaints all 64,000 bytes of the screen from the picture behind the window: the backdrop is read only by the cursor loop, the window image dies with the call, and the nine slide-in frames are painted over by the six closing ones. I did look for a channel before concluding this. Seeding the allocator so the 0x57e3 block can be read back afterwards -- the trick tests/statwin.c uses on the scene page -- is not sound here, because fdps_load_status_cel_image allocates and frees twice in between and a coalesced neighbour would make the block a split of a larger one, so a wrong reading would look like a wrong backdrop. Sampling the adapter from a timer ISR during the slide-in, the way tests/anim.c samples a fade, lands on whichever step the tick falls in rather than on a chosen one, and in any case would show the window image and not the backdrop. What the cases do establish is that the copy happened at all and that the buffers were the right sizes: the confirm comes back rather than the call faulting, and the heap balances.",
+      "needs": "A playtest: open a unit's item list in a village or in battle, move the cursor down one row and back up, and look at whether a row ever carries two highlight bars at once. One bar per pass means the backdrop was taken clean; a stale bar showing under the new one is the failure the rebuild note describes. The same session settles the opening frame's row, which is the bar sitting on row 0 for the length of the slide-in and jumping to the seeded row on the loop's first repaint -- visible only when a caller ever seeds something other than 0, which none does today.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same place independently: the paint order and the opening draw's literal slot are both unobservable from a unit test. What my pass adds is the confirmation from the object file rather than from the emitter's report -- UNITITEM.OBJ at offset 0x01e7 calls fdps_blit_rect before 0x0210 calls fdps_draw_unit_inventory, and 0x020b is 'push 00000000H' into that call, so both facts survive compilation and not just the source. I also agree the allocator-seeding channel is closed here, for the reason given: fdps_load_status_cel_image allocates and frees between the two mallocs at 000259e7 and 00025a0d, so the 0x57e3 block cannot be identified afterwards.",
+      "needs": "A playtest, as the emitter describes: open a unit's item list, move the cursor one row and back, and look for two highlight bars at once.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

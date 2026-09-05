@@ -97,16 +97,25 @@
  * plate comment's rebuild note is about: they fail for a body written as a
  * sweep over all eight entries, in both directions.
  *
- * The fdps_unit_item_select_loop cases come last and stage a great deal more,
+ * The fdps_unit_item_select_loop cases come next and stage a great deal more,
  * because that one is a modal loop that paints through four callees before it
  * waits.  What can and cannot be reached from a test, and why, is set out above
- * that section rather than here.
+ * that section rather than here, and the same goes for the
+ * fdps_unit_item_select_window cases that close the file: those open the real
+ * window over the real Status.cel and are the only ones here that read a
+ * shipped game file.
  */
+#include <i86.h>
+#include <malloc.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "keybd.h"
+#include "statunit.h"
 #include "unititem.h"
 
 /* IMUL EAX,dword ptr [EBP+0x14],0x50 in fdps_get_unit_record and IMUL
@@ -2566,6 +2575,404 @@ static void a_slot_outside_the_eight_rows_draws_no_bar(void)
     CHECK_EQ(selected_slot, SLOT_NONE);
 }
 
+/* ---- fdps_unit_item_select_window @ 000259c0 -----------------------------
+ *
+ * THE CALL IS RUN WHOLE, AND ALMOST NOTHING IT DRAWS SURVIVES IT.  The three
+ * buffers the window is composed in are allocated, painted, animated and freed
+ * inside the one call, and the last thing it does before returning is
+ * fdps_close_status_window, which repaints all 64,000 bytes of the screen from
+ * the picture behind the window.  So the opening slide-in, the status panel,
+ * the item rows and the backdrop copy leave nothing behind that a case could
+ * read: they are drawing side effects with no unit observable, deferred here
+ * and covered as far as they can be in tests/statunit.c and tests/statwin.c.
+ * The rebuild note the plate comment carries -- that the list rectangle has to
+ * be copied out BEFORE the item rows are painted into it, or every repaint
+ * inside the cursor loop leaves the old highlight showing -- is in that same
+ * class: the backdrop is read only by the loop and is freed before the call
+ * returns, so what these cases pin about it is that it was taken at all, by
+ * the confirm coming back rather than the call faulting on a null buffer.
+ *
+ * WHAT IS LEFT TO ASSERT is the three things that outlive the call: the answer
+ * itself, the caller's slot, and the two globals the call writes on its way
+ * through -- data_fdps_village_status_window_unit_idx, which
+ * fdps_draw_unit_status_panel publishes from the unit index it was handed
+ * (statunit.h), and the heap, which has to come back to the state it was in.
+ *
+ * ONE MAKE CODE PER CALL, for the reason set out above the loop's own section:
+ * nothing here can advance the keyboard latch a second time, so a case drives
+ * exactly one code into the modal loop and the branches that repaint and go
+ * round again cannot be reached.  A case that fails by not coming back is
+ * therefore a real outcome here and is called out where it applies.
+ *
+ * THE REAL MISC.VFS IS READ.  fdps_load_status_cel_image names its container
+ * and its member with literals and takes no argument, so there is nothing to
+ * point it at a fixture, and FACE.CEL is needed as well because the panel
+ * draws the unit's portrait out of it.  Both are staged by tests/gamefile.lst;
+ * every case here stops if either is missing rather than dereferencing what a
+ * failed load leaves behind.
+ *
+ * Expected values come from the assembly at 000259c0: PUSH 0x0 at 00025a5f for
+ * the opening draw's slot, MOV [EBP-0x1c],EAX at 00025ad0 with no test between
+ * it and the MOV EAX,[EBP-0x4] at 00025b0d for the answer being the loop's
+ * unchanged, the two arguments pushed at 00025a41 and 00025a45 for the panel's
+ * unit index, and the three CALL 0x0003d478 at 00025ae7, 00025af3 and 00025aff
+ * for the buffers going back.  The values -1 and 1 are the loop's own, from
+ * the stores at 00025ca1 and 00025c57.  None of them is read off the emitted
+ * C.
+ */
+
+/* The two containers the call cannot be run without. */
+#define WINDOW_CONTAINER_FILE "MISC.VFS"
+#define WINDOW_PORTRAIT_FILE "FACE.CEL"
+
+#define VIDEO_MODE_TEXT 0x03
+#define VIDEO_MODE_320X200X256 0x13
+
+/* The mode 13h frame the window is opened over and put back on top of. */
+#define WINDOW_SCREEN_BYTES 0xfa00
+
+/* Number.cel's shape, restated from tests/statunit.c's fixture: the sprite
+   offset table at a fixed +0x0f, one dword per sprite, five colour rows of
+   thirteen glyphs, and a stream per sprite of eight rows of one fill op six
+   pixels wide -- command 0x05 is op 00 with a run of (5 & 0x3f) + 1. */
+#define WN_NUM_TABLE_AT 0x0f
+#define WN_NUM_SPRITES 65
+#define WN_NUM_STREAM_AT (WN_NUM_TABLE_AT + WN_NUM_SPRITES * 4)
+#define WN_NUM_STREAM_BYTES 16
+#define WN_NUM_SHEET_BYTES \
+    (WN_NUM_STREAM_AT + WN_NUM_SPRITES * WN_NUM_STREAM_BYTES)
+
+/* The gauge sheet: three graphics of 0x75 by 8 raw pixels, 0x3a8 bytes
+   apart. */
+#define WN_BAR_GRAPHIC_STRIDE 0x3a8
+#define WN_BAR_SHEET_BYTES (3 * WN_BAR_GRAPHIC_STRIDE)
+
+/* The sprite cache the panel takes the unit's cell out of: a table of slots at
+   the base, each holding twelve dword offsets from that same base, followed by
+   one 24x24 stream per slot.  Command 0x17 is a run of 24, the cell width, so
+   every row of the stream closes on its own column count.  There is one slot
+   per staged unit because a village-phase panel indexes the cache with the
+   unit index itself (statunit.h). */
+#define WN_CACHE_SLOTS STAGE_UNITS
+#define WN_CELL_SIZE 0x18
+#define WN_CELL_STREAM_BYTES (WN_CELL_SIZE * 2)
+#define WN_CACHE_TABLE_BYTES \
+    (WN_CACHE_SLOTS * (int) sizeof(struct fdps_cel_cache_slot))
+#define WN_CACHE_BYTES \
+    (WN_CACHE_TABLE_BYTES + WN_CACHE_SLOTS * WN_CELL_STREAM_BYTES)
+
+/* The text block: 256 two-byte table entries followed by a stream each, which
+   covers every id the panel can compute -- the highest base it adds a record
+   byte to is the class name's 0xa1 (statunit.h) and every staged record byte
+   is 0. */
+#define WN_TEXT_ENTRIES 256
+#define WN_TEXT_TABLE_BYTES (WN_TEXT_ENTRIES * 2)
+#define WN_TEXT_STREAM_BYTES 4
+#define WN_TEXT_BYTES \
+    (WN_TEXT_TABLE_BYTES + WN_TEXT_ENTRIES * WN_TEXT_STREAM_BYTES)
+
+/* One glyph is eight pixels wide, one row tall and one byte in the sheet. */
+#define WN_GLYPH_WIDTH 8
+#define WN_GLYPH_ROWS 1
+
+/* The item the usable-only case confirms on, and the slot it sits in.  The use
+   effect is non-zero, which is the only thing the loop's usable test asks
+   (00025c84), and every other record of the staged table has zero there. */
+#define WN_USABLE_SLOT 3
+#define WN_USABLE_ITEM 0x22
+#define WN_USABLE_EFFECT 0x0b
+
+/* The unit the usable-only case opens the window on, and the one a swapped
+   pair of arguments would reach instead. */
+#define WN_UNIT 2
+#define WN_OTHER_UNIT 1
+
+/* What the village unit index is set to before each call, so that a panel that
+   never ran leaves a value no case expects. */
+#define WN_NO_UNIT (-1)
+
+static unsigned char window_number_sheet[WN_NUM_SHEET_BYTES];
+static unsigned char window_bar_sheet[WN_BAR_SHEET_BYTES];
+static unsigned char window_cache[WN_CACHE_BYTES];
+static unsigned char window_text[WN_TEXT_BYTES];
+static unsigned char window_font[WN_TEXT_ENTRIES];
+
+/* The effect pack the window's cue misses in: an image whose entry count is
+   zero makes the lookup fail without touching the name and without allocating,
+   which is what the original does on a machine whose pack does not hold the
+   member (audio.h). */
+static struct fdps_vfs_image_header window_sfx_pack;
+
+/* The village screen the close puts back.  It goes on the heap for the length
+   of one call rather than into a static of its own. */
+static unsigned char *window_village_page;
+
+/* Both shipped files the call needs, probed rather than assumed. */
+static int window_files_present(void)
+{
+    FILE *probe;
+
+    probe = fopen(WINDOW_CONTAINER_FILE, "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+
+    probe = fopen(WINDOW_PORTRAIT_FILE, "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+    return 1;
+}
+
+/* Used entries currently in the heap.  A used entry becomes a free entry the
+   moment it is released, possibly merged with a neighbour, so the used ones
+   are counted and the free ones are not. */
+static int window_used_heap_blocks(void)
+{
+    struct _heapinfo entry;
+    int used;
+
+    used = 0;
+    entry._pentry = NULL;
+    while (_heapwalk(&entry) == _HEAPOK) {
+        if (entry._useflag == _USEDENTRY) {
+            used++;
+        }
+    }
+    return used;
+}
+
+static void window_set_video_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* Builds every sheet the status panel draws through and points the globals at
+   them.  Nothing here is asserted on: the panel's own output is pinned in
+   tests/statunit.c, and these exist so that every decode the panel makes stays
+   inside a buffer this file owns. */
+static void window_stage_sheets(void)
+{
+    int index;
+    int sprite;
+    int row;
+    int stream_at;
+    int slot;
+
+    memset(window_number_sheet, 0, sizeof window_number_sheet);
+    for (sprite = 0; sprite < WN_NUM_SPRITES; sprite++) {
+        stream_at = WN_NUM_STREAM_AT + sprite * WN_NUM_STREAM_BYTES;
+        *(int *) (window_number_sheet + WN_NUM_TABLE_AT + sprite * 4) =
+            stream_at;
+        for (row = 0; row < 8; row++) {
+            window_number_sheet[stream_at + row * 2] = 0x05;
+            window_number_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) (sprite + 1);
+        }
+    }
+
+    memset(window_bar_sheet, 0x01, sizeof window_bar_sheet);
+
+    memset(window_cache, 0, sizeof window_cache);
+    for (slot = 0; slot < WN_CACHE_SLOTS; slot++) {
+        stream_at = WN_CACHE_TABLE_BYTES + slot * WN_CELL_STREAM_BYTES;
+        ((struct fdps_cel_cache_slot *) window_cache)[slot].sprite_offset[0] =
+            stream_at;
+        for (row = 0; row < WN_CELL_SIZE; row++) {
+            window_cache[stream_at + row * 2] = 0x17;
+            window_cache[stream_at + row * 2 + 1] = (unsigned char) (slot + 1);
+        }
+    }
+
+    memset(window_text, 0, sizeof window_text);
+    for (index = 0; index < WN_TEXT_ENTRIES; index++) {
+        window_font[index] = (unsigned char) index;
+        stream_at = WN_TEXT_TABLE_BYTES + index * WN_TEXT_STREAM_BYTES;
+        *(short *) (window_text + index * 2) = (short) stream_at;
+        *(short *) (window_text + stream_at) = (short) index;
+        *(short *) (window_text + stream_at + 2) = (short) -1;
+    }
+
+    data_fdps_number_glyph_sheet_ptr = window_number_sheet;
+    data_fdps_status_gauge_bar_sheet_ptr = window_bar_sheet;
+    data_fdps_cel_sprite_cache_ptr = window_cache;
+    data_fdps_all_game_text_ptr = window_text;
+    data_fdps_font_sheet_ptr = window_font;
+    data_fdps_font_glyph_width = (unsigned char) WN_GLYPH_WIDTH;
+    data_fdps_glyph_cell_height = (unsigned char) WN_GLYPH_ROWS;
+    data_fdps_font_glyph_stride_bytes = 1;
+    data_fdps_font_outline_enabled_flag = (unsigned char) 0;
+    data_fdps_glyph_shadow_row_offset = 0;
+    data_fdps_font_shadow_offset_x = 0;
+    data_fdps_glyph_advance_x = WN_GLYPH_WIDTH;
+    data_fdps_font_line_height = WN_GLYPH_ROWS;
+}
+
+/* Everything one call reads that this file can set.  loop_stage above already
+   publishes the records, the item table, the selection bar sheet and the make
+   code the modal loop will come back on, so this adds what the panel and the
+   close need on top of it: every entry of every staged unit empty, so the item
+   list draws its bar and nothing else; the village branch, which is the one
+   that closes out of a page this file owns rather than out of the scene
+   compositor; and the pack the cue misses in. */
+static void window_stage(unsigned int scancode)
+{
+    int unit;
+    int slot;
+
+    loop_stage(scancode);
+    for (unit = 0; unit < STAGE_UNITS; unit++) {
+        for (slot = 0; slot < INVENTORY_ENTRY_COUNT; slot++) {
+            set_entry(unit, slot, FLAG_EMPTY, 0);
+        }
+    }
+    window_stage_sheets();
+
+    window_village_page =
+        (unsigned char *) malloc((size_t) WINDOW_SCREEN_BYTES);
+    memset(window_village_page, 0x3c, (size_t) WINDOW_SCREEN_BYTES);
+    data_fdps_village_backdrop_page_ptr = window_village_page;
+    data_fdps_village_mode_flag = (unsigned char) 1;
+    data_fdps_village_status_window_unit_idx = WN_NO_UNIT;
+
+    memset(&window_sfx_pack, 0, sizeof window_sfx_pack);
+    data_fdps_audio_basewav_sfx_bank_buf_ptr =
+        (unsigned char *) &window_sfx_pack;
+
+    data_fdps_number_glyph_color_row = 0;
+}
+
+/* Gives back the portrait buffer the panel's loader leaves allocated on
+   purpose, and the village page, and unpublishes every global that points at
+   storage this file owns: fdps_shutdown_free_resources frees all of them
+   unguarded. */
+static void window_unstage(void)
+{
+    if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+        free(data_fdps_portrait_sprite_buf_ptr);
+        data_fdps_portrait_sprite_buf_ptr = NULL;
+    }
+    if (window_village_page != NULL) {
+        free(window_village_page);
+        window_village_page = NULL;
+    }
+    data_fdps_village_backdrop_page_ptr = NULL;
+    data_fdps_village_mode_flag = 0;
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = NULL;
+    data_fdps_number_glyph_sheet_ptr = NULL;
+    data_fdps_status_gauge_bar_sheet_ptr = NULL;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_all_game_text_ptr = NULL;
+    data_fdps_font_sheet_ptr = NULL;
+    data_fdps_selection_bar_sheet_ptr = NULL;
+}
+
+/* One window, opened with the adapter in the mode it is drawn in and taken
+   down again afterwards. */
+static int window_open(int unit_index, int usable_only, int *selected_slot)
+{
+    int answer;
+
+    window_set_video_mode(VIDEO_MODE_320X200X256);
+    answer = fdps_unit_item_select_window(unit_index, usable_only,
+                                          selected_slot);
+    window_set_video_mode(VIDEO_MODE_TEXT);
+    window_unstage();
+    return answer;
+}
+
+/* A cancel comes back as the loop's own -1 and the caller's slot is not
+   touched on the way: the window function never writes through the pointer, it
+   only hands it on.  The seed is 5 rather than 0 so that a body that reset the
+   cursor -- or that handed the opening draw's literal 0 to the loop instead of
+   the caller's pointer -- would show up as a 0 here. */
+static void a_cancelled_window_answers_minus_one_and_keeps_the_slot(void)
+{
+    int selected_slot;
+    int files_present;
+
+    files_present = window_files_present();
+    CHECK_EQ(files_present, 1);
+    if (!files_present) {
+        return;
+    }
+    window_stage(KEY_ESC);
+    selected_slot = 5;
+    CHECK_EQ(window_open(0, 0, &selected_slot), -1);
+    CHECK_EQ(selected_slot, 5);
+}
+
+/* A confirm comes back as the loop's own 1, again with the slot as the caller
+   left it, and the panel is drawn for the unit index the caller named: the
+   village-phase panel publishes that index in
+   data_fdps_village_status_window_unit_idx and nothing else in the call writes
+   it.
+   THE UNIT INDEX IS ALSO PINNED BY NOT HANGING.  usable_only is 1 here, so the
+   confirm is allowed only by a non-zero use effect on the item the entry names,
+   and only unit 2's entry 3 holds that item -- unit 1's entry 3, which is where
+   a swapped unit_index/usable_only pair would look, holds an id whose record
+   has use effect 0.  A refusal repaints and waits again, and no second wait can
+   return, so that failure shows up as this case hanging with the heartbeat
+   frozen on its name rather than as a check that did not hold. */
+static void a_confirmed_window_answers_one_for_the_unit_it_was_given(void)
+{
+    int selected_slot;
+    int files_present;
+
+    files_present = window_files_present();
+    CHECK_EQ(files_present, 1);
+    if (!files_present) {
+        return;
+    }
+    window_stage(KEY_ENTER);
+    set_entry(WN_UNIT, WN_USABLE_SLOT, FLAG_EMPTY, WN_USABLE_ITEM);
+    set_entry(WN_OTHER_UNIT, WN_USABLE_SLOT, FLAG_EMPTY, WN_USABLE_ITEM + 1);
+    set_use_effect(WN_USABLE_ITEM, WN_USABLE_EFFECT);
+    selected_slot = WN_USABLE_SLOT;
+
+    CHECK_EQ(window_open(WN_UNIT, 1, &selected_slot), 1);
+    CHECK_EQ(selected_slot, WN_USABLE_SLOT);
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, WN_UNIT);
+}
+
+/* The window image, the list backdrop and the saved screen are all three the
+   call's own and all three are released before it returns, so a second call
+   leaves the heap holding exactly what the first one did.  The first run is
+   made before the count is taken because the loaders underneath it hold
+   one-time allocations of their own; what is compared is two runs of the same
+   shape. */
+static void the_window_gives_back_every_block_it_took(void)
+{
+    int selected_slot;
+    int before;
+    int after;
+    int files_present;
+
+    files_present = window_files_present();
+    CHECK_EQ(files_present, 1);
+    if (!files_present) {
+        return;
+    }
+    window_stage(KEY_ESC);
+    selected_slot = 0;
+    CHECK_EQ(window_open(0, 0, &selected_slot), -1);
+    before = window_used_heap_blocks();
+
+    window_stage(KEY_ESC);
+    selected_slot = 0;
+    CHECK_EQ(window_open(0, 0, &selected_slot), -1);
+    after = window_used_heap_blocks();
+
+    CHECK_EQ(after, before);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+}
+
 void run_unititem_tests(void)
 {
     RUN_TEST(the_two_record_layouts_match_the_strides);
@@ -2668,4 +3075,7 @@ void run_unititem_tests(void)
     RUN_TEST(the_blit_stops_at_the_rectangles_edges);
     RUN_TEST(the_selection_bar_lands_on_the_row_the_slot_names);
     RUN_TEST(a_slot_outside_the_eight_rows_draws_no_bar);
+    RUN_TEST(a_cancelled_window_answers_minus_one_and_keeps_the_slot);
+    RUN_TEST(a_confirmed_window_answers_one_for_the_unit_it_was_given);
+    RUN_TEST(the_window_gives_back_every_block_it_took);
 }
