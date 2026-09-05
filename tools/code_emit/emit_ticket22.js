@@ -1269,6 +1269,11 @@ const splits = []
 // change under its feet. Unlike `stopped` it does not suppress the closing
 // documents, because nothing about the run is unaccounted for.
 let endedEarly = null
+// Set when a split has made this segment's worklist stale. Not a stop and not
+// an early finish: the rest of the segment is abandoned, a fresh worklist is
+// fetched under the new routing, and the run carries on with what is left of
+// its budget.
+let refetch = null
 let batchStart = 0
 try { batchStart = budget.spent() } catch (e) { batchStart = 0 }
 const spentK = (from) => { try { return Math.round((budget.spent() - from) / 1000) } catch (e) { return -1 } }
@@ -1324,20 +1329,42 @@ if (rec.residue_without_marker) {
 // has to be in the list this asks for, not in the one after it.
 let fns = (A && A.functions) || []
 let remainingTotal = null
-if (!fns.length) {
+// One segment is one worklist. A run has more than one only when a split has
+// invalidated the routing under it. `attempted` counts functions the run
+// actually reached, plus the tail it never reached when it stopped -- a tail
+// deferred to the next worklist is not counted here, it is counted when that
+// worklist reaches it.
+let attemptedTotal = 0
+let segment = 0
+// A ceiling, not an expectation. Each pass has to land at least one function
+// to reach a split, so this cannot spin on its own; it is here so that a
+// worklist that somehow keeps handing back the same address ends the run
+// instead of the budget.
+const MAX_SEGMENTS = 12
+
+async function fetchWorklist(limit) {
   phase('Worklist')
-  const wl = await agent(worklistPrompt(LIMIT),
-    { label: 'worklist', phase: 'Worklist', schema: WORKLIST })
+  const wl = await agent(worklistPrompt(limit),
+    { label: segment ? 'worklist:' + (segment + 1) : 'worklist',
+      phase: 'Worklist', schema: WORKLIST })
   if (!wl) {
-    log('the worklist stage returned nothing; nothing was attempted')
-    return { error: 'no worklist', batch: LABEL }
+    return { error: 'the worklist stage returned nothing' }
   }
   if (wl.conflicts) {
-    log('next_batch.py refused: ' + wl.conflicts)
-    return { error: 'worklist conflict', detail: wl.conflicts, batch: LABEL }
+    return { error: 'next_batch.py refused: ' + wl.conflicts, conflicts: wl.conflicts }
   }
-  fns = wl.functions || []
-  remainingTotal = wl.remaining_total
+  return { functions: wl.functions || [], remainingTotal: wl.remaining_total }
+}
+
+if (!fns.length) {
+  const wl = await fetchWorklist(LIMIT)
+  if (wl.error) {
+    log(wl.error + '; nothing was attempted')
+    return { error: wl.conflicts ? 'worklist conflict' : 'no worklist',
+      detail: wl.conflicts || wl.error, batch: LABEL }
+  }
+  fns = wl.functions
+  remainingTotal = wl.remainingTotal
   log('worklist: ' + fns.length + ' function(s) this run, '
     + remainingTotal + ' still to go overall')
 }
@@ -1348,8 +1375,13 @@ if (!fns.length) {
     recovered: recovered }
 }
 
-for (let i = 0; i < fns.length && !stopped && !endedEarly; i++) {
+while (fns.length) {
+segment++
+refetch = null
+
+for (let i = 0; i < fns.length && !stopped && !endedEarly && !refetch; i++) {
   const fn = fns[i]
+  attemptedTotal++
   const tag = '[' + (i + 1) + '/' + fns.length + '] ' + fn.name + ' @ ' + fn.addr
   let fnStart = 0
   try { fnStart = budget.spent() } catch (e) { fnStart = 0 }
@@ -1518,13 +1550,19 @@ for (let i = 0; i < fns.length && !stopped && !endedEarly; i++) {
               log('  split: ' + fn.target + ' -> '
                 + (sp.new_files || []).join(', '))
               // Everything still queued for that file now belongs somewhere
-              // else, and this run's copy of the worklist says otherwise. End
-              // here rather than emit into a file routing no longer names; the
-              // next run asks next_batch.py again and gets the new answer.
-              // This is a clean finish, not a failure -- the closing documents
-              // still get written, because everything they describe did happen.
-              endedEarly = 'src/' + fn.target + ' was split; the worklist this run '
-                + 'is holding predates the new routing'
+              // else, and this run's copy of the worklist says otherwise, so
+              // the rest of THIS segment is abandoned rather than emitted into
+              // a file routing no longer names. What follows is a fresh
+              // worklist, not the end of the run: next_batch.py is asked again
+              // and the remaining budget carries on against the new routing.
+              //
+              // Ending the whole run here is what this used to do, and it cost
+              // more than it looked like it would -- t22-08 hit a split on its
+              // second function and stopped with 98 of 100 untouched. Splits
+              // arrive when a file crosses the budget, which is exactly when
+              // the biggest functions are landing, so they cluster in the late
+              // batches rather than being rare.
+              refetch = 'src/' + fn.target + ' was split'
             } else {
               splits.push({ file: fn.target, lines: book.target_lines,
                 new_files: [], note: (sp && sp.note) || 'the split stage returned nothing' })
@@ -1599,12 +1637,49 @@ for (let i = 0; i < fns.length && !stopped && !endedEarly; i++) {
     }
   }
 
+  // Only when the run is really over. After a split the tail is not abandoned,
+  // it is handed to the next worklist and emitted there, so recording it as
+  // never-reached would double-count it against its own later landing.
   if (stopped || endedEarly) {
     for (let j = i + 1; j < fns.length; j++) {
       results.push({ addr: fns[j].addr, name: fns[j].name,
         status: stopped ? 'not_started_after_stop' : 'not_started_routing_changed' })
+      attemptedTotal++
     }
   }
+}
+
+if (!refetch || stopped || endedEarly) {
+  break
+}
+
+// A split landed. What is left of the budget is measured in functions actually
+// committed, not in segments started, so an abandoned tail does not eat it.
+const landedSoFar = results.filter((r) => r.status === 'committed').length
+const left = LIMIT - landedSoFar
+if (left <= 0) {
+  endedEarly = refetch + '; the batch had already committed its ' + LIMIT
+  break
+}
+if (segment >= MAX_SEGMENTS) {
+  endedEarly = refetch + '; stopping after ' + segment + ' worklists rather than fetching again'
+  break
+}
+log(refetch + ' -- re-fetching the worklist for the remaining ' + left)
+const nwl = await fetchWorklist(left)
+if (nwl.error) {
+  endedEarly = refetch + ', and the re-fetch failed: ' + nwl.error
+  break
+}
+fns = nwl.functions
+if (nwl.remainingTotal !== undefined && nwl.remainingTotal !== null) {
+  remainingTotal = nwl.remainingTotal
+}
+if (!fns.length) {
+  log('nothing left to emit after the split')
+  break
+}
+log('worklist: ' + fns.length + ' more function(s) under the new routing')
 }
 
 // ------------------------------------------------------------------ report
@@ -1624,7 +1699,10 @@ const cutShort = results.filter((r) => r.status === 'interrupted')
 
 const stats = {
   batch: LABEL,
-  attempted: fns.length,
+  attempted: attemptedTotal,
+  // How many worklists this run went through. More than one means a split
+  // invalidated the routing mid-run and the rest was fetched again.
+  segments: segment,
   committed: landed.length,
   skipped: skipped.length,
   unfinished: unfinished.length,
@@ -1655,7 +1733,8 @@ const stats = {
 log('batch ' + (stopped ? 'STOPPED (' + stopped + ')'
   : endedEarly ? 'ended early (' + endedEarly + ')' : 'complete') + ': '
   + landed.length + ' committed, ' + skipped.length + ' skipped, '
-  + unfinished.length + ' unfinished of ' + fns.length)
+  + unfinished.length + ' unfinished of ' + attemptedTotal
+  + (segment > 1 ? ' across ' + segment + ' worklists' : ''))
 for (const r of unfinished) {
   const kind = r.status === 'interrupted' ? 'CUT SHORT MID-FLIGHT'
     : (r.status === 'not_started_after_stop' || r.status === 'not_started_routing_changed')
