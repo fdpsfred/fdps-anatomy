@@ -324,3 +324,69 @@ int fdps_icon_script_walk_units(unsigned char *script, int offset)
 
     return offset + unit_count * 2;
 }
+
+/* 00022100.  Opcode 2: turn a list of units, then hold the view on them.
+   Two operand bytes, both zero-extended -- XOR EAX,EAX / MOV AL,byte ptr
+   [EDX+0x1] and the same at [EDX+0x2] -- so the hold length and the unit count
+   are 0..255 and never negative.  ADD dword ptr [EBP+0x18],0x3 skips the
+   opcode byte and those two operands, and every list access is taken from the
+   advanced offset.
+
+   THE TURNING LOOP AND THE HOLD LOOP ARE SIBLINGS, NOT NESTED.  The unit loop
+   at 00022144 closes at 0002218d and the hold loop at 00022196 starts after
+   it, each with its own CMP against its own operand.  So every listed unit is
+   turned before the first frame is drawn -- the group turns together on one
+   displayed frame -- and a hold count of 0 still turns them all.  Nesting the
+   turn inside the hold, the way the sibling walk handler nests its unit loop,
+   would make a hold of 0 a no-op and would rewrite the facings once per frame.
+
+   THE EXIT WRITES CONSTANTS, IT DOES NOT PUT ANYTHING BACK.  MOV dword ptr
+   [0x00069cd0],0x1 and MOV byte ptr [0x00060159],0x1 at 000221af are stores of
+   literals; the entry pair stored 0 into the same two and nothing saved what
+   was there.  Saving on entry and restoring on exit, the obvious spelling of
+   "hide the HUD for the duration", is a different function whenever the cursor
+   mode was not 1 going in (rebuild_info/pitfalls.md).
+
+   MOV DL,byte ptr [EAX+0x1] / MOV byte ptr [EAX+0x3],DL: the pair's second
+   byte goes into the record's facing field as it stands.  Nothing masks it,
+   compares it or maps it, so a facing code outside 0..3 is stored too, and it
+   is fdps_draw_map_unit that later decides what such a value looks like.
+
+   The hold loop's only call is fdps_render_view_frame, which composes a frame
+   and holds until the timer tick moves, so the pose's on-screen length is a
+   count of the game's frames and not of CPU time. */
+int fdps_icon_script_set_unit_facing(unsigned char *script, int offset)
+{
+    /* The two operand bytes: how many rendered frames the pose is held for,
+       and how many units are listed. */
+    int hold_frames;
+    int unit_count;
+    /* Position in the unit list, and the held-frame counter. */
+    int listed;
+    int held;
+    /* The listed unit's index in the battle unit array, and its record. */
+    int unit_index;
+    struct fdps_unit_record *unit;
+
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_ui_play_active_flag = 0;
+
+    hold_frames = (int) script[offset + 1];
+    unit_count = (int) script[offset + 2];
+    offset += 3;
+
+    for (listed = 0; listed < unit_count; listed++) {
+        unit_index = (int) script[offset + listed * 2];
+        unit = fdps_get_unit_record(unit_index);
+        unit->facing = script[offset + listed * 2 + 1];
+    }
+
+    for (held = 0; held < hold_frames; held++) {
+        fdps_render_view_frame();
+    }
+
+    data_fdps_map_cursor_draw_mode = 1;
+    data_fdps_ui_play_active_flag = 1;
+
+    return offset + unit_count * 2;
+}

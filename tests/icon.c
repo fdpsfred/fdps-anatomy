@@ -47,6 +47,7 @@
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "mapdraw.h"
 #include "icon.h"
 
 #define VGA_DAC_READ_INDEX 0x3c7
@@ -866,6 +867,271 @@ static void walk_the_hud_globals_end_at_one_not_where_they_started(void)
     CHECK_EQ(data_fdps_ui_play_active_flag, 1);
 }
 
+/* ---------------------------------------------------------------------------
+ * fdps_icon_script_set_unit_facing -- 00022100, script opcode 2.
+ *
+ * WHAT IS OBSERVABLE.  The handler's whole output is the facing byte of every
+ * listed unit's record, the two HUD globals it writes on the way in and out,
+ * and the offset it returns; the frames it holds the pose for are the
+ * compositor's output and not this function's.  So each case below points the
+ * battle unit array at records staged here, runs the handler and reads those
+ * records back.
+ *
+ * WHY MOST CASES HOLD NO FRAMES.  The turning loop at 00022144 closes at
+ * 0002218d and the hold loop at 00022196 is a sibling of it, not its parent,
+ * so a hold operand of 0 turns every listed unit and renders nothing.  That is
+ * exactly the property being pinned, and it also means the decode, the list
+ * walk and the returned offset can all be exercised without a rendered frame
+ * at all.  One case does render, to cover the hold loop, and it hooks IRQ0 the
+ * same way the walk cases above do -- fdps_render_view_frame's wait ends only
+ * when data_fdps_timer_tick_counter moves, and nothing advances that counter
+ * in a test image.
+ *
+ * HOW A RENDERED FRAME IS SEEN FROM OUTSIDE.  fdps_render_view_frame latches
+ * data_fdps_timer_tick_counter into data_fdps_view_frame_last_tick (mapdraw.h)
+ * as the last thing it does, so a sentinel staged into that latch survives a
+ * run that renders nothing and is gone after a run that renders.  That is an
+ * exact observable; the NUMBER of frames a hold of n produces is not, because
+ * a frame consumes one timer tick and the test cannot say how many ticks
+ * elapsed inside the call without racing the interrupt.  One frame per held
+ * pass is a playtest contract (rebuild_info/pitfalls.md), the same position
+ * the walk cases above leave it in.
+ *
+ * Expected values come from the assembly: XOR EAX,EAX / MOV AL,byte ptr
+ * [EDX+0x1] and [EDX+0x2] for the two unsigned operands and ADD dword ptr
+ * [EBP+0x18],0x3 for the header they sit in; the two sibling loops, the first
+ * counting to [EBP-0x14] with CALL 0x0002d210 and MOV byte ptr [EAX+0x3],DL in
+ * it and the second counting to [EBP-0x18] with CALL 0x0002beb0 alone in it;
+ * MOV DL,byte ptr [EAX+0x1] for the facing byte, stored with no mask and no
+ * comparison; MOV dword ptr [0x00069cd0],0x1 and MOV byte ptr [0x00060159],0x1
+ * at 000221af for the exit constants; and MOV EAX,[EBP-0x14] / ADD EAX,EAX /
+ * ADD EDX,EAX at 000221c0 for the returned offset.  None is read off the
+ * emitted C.
+ */
+
+/* Records staged for the battle unit array, and the script image the operands
+   and the unit list are written into.  The image is large enough for the
+   biggest list a one-byte count can name, 3 + 2 * 255 bytes. */
+#define FACE_UNITS 5
+#define FACE_SCRIPT_BYTES 520
+
+/* Staged into every record's facing field before a run, so that finding it
+   afterwards says the handler did not touch that unit.  No script below asks
+   for a facing of 9. */
+#define FACE_STAGED_FACING 9
+
+/* Staged into the frame latch before a run.  A value the timer's tick counter
+   will not be sitting on, so the latch having moved says a frame was
+   presented. */
+#define FACE_LATCH_SENTINEL 0x5a5a5a5aUL
+
+/* Staged into the two HUD globals before a run, so that finding 1 in them
+   afterwards says the handler wrote the exit constants rather than put back
+   what it found. */
+#define FACE_STAGED_CURSOR_MODE 4
+#define FACE_STAGED_PLAY_FLAG 4
+
+static struct fdps_unit_record face_units[FACE_UNITS];
+static unsigned char face_script[FACE_SCRIPT_BYTES];
+
+/* Points the battle unit array at the staged records, gives every one of them
+   a facing no script below asks for, stages the frame latch and switches off
+   everything a rendered frame would otherwise paint. */
+static void face_stage(void)
+{
+    int unit;
+
+    memset(face_units, 0, sizeof(face_units));
+    for (unit = 0; unit < FACE_UNITS; unit++) {
+        face_units[unit].facing = FACE_STAGED_FACING;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) face_units;
+
+    data_fdps_map_unit_count = 0;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+
+    data_fdps_view_frame_last_tick = (unsigned int) FACE_LATCH_SENTINEL;
+
+    data_fdps_map_cursor_draw_mode = FACE_STAGED_CURSOR_MODE;
+    data_fdps_ui_play_active_flag = FACE_STAGED_PLAY_FLAG;
+
+    memset(face_script, 0, sizeof(face_script));
+}
+
+/* Writes the opcode and its two operands at offset, and returns the offset the
+   first unit pair goes at. */
+static int face_write_header(int offset, int hold_frames, int unit_count)
+{
+    face_script[offset] = 2;
+    face_script[offset + 1] = (unsigned char) hold_frames;
+    face_script[offset + 2] = (unsigned char) unit_count;
+    return offset + 3;
+}
+
+/* One listed unit: its index in the battle array and the facing code written
+   into its record. */
+static void face_write_pair(int pair_at, int unit_index, int facing)
+{
+    face_script[pair_at] = (unsigned char) unit_index;
+    face_script[pair_at + 1] = (unsigned char) facing;
+}
+
+/* One whole run with the frame wait serviced.  Used only by the case that
+   holds frames; every other case holds none and calls the handler directly.
+   The IRQ0 helper is the one the walk cases above install. */
+static int face_run(int offset)
+{
+    int next_offset;
+
+    walk_saved_timer = _dos_getvect(WALK_TIMER_VECTOR);
+    _dos_setvect(WALK_TIMER_VECTOR, walk_timer_isr);
+    next_offset = fdps_icon_script_set_unit_facing(face_script, offset);
+    _dos_setvect(WALK_TIMER_VECTOR, walk_saved_timer);
+
+    return next_offset;
+}
+
+/* The turning loop is a sibling of the hold loop, not nested inside it: with a
+   hold operand of 0 every listed unit is still turned, no frame is presented,
+   and the offset past the list still comes back.  Nesting the turn inside the
+   hold the way the walk handler nests its unit loop -- the natural way to
+   write "turn them and hold the pose" -- would leave both facings at 9 here
+   (rebuild_info/pitfalls.md). */
+static void face_a_zero_hold_still_turns_every_listed_unit(void)
+{
+    int next_offset;
+    int pair_at;
+
+    face_stage();
+    pair_at = face_write_header(0, 0, 2);
+    face_write_pair(pair_at, 0, 1);
+    face_write_pair(pair_at + 2, 2, 3);
+
+    next_offset = fdps_icon_script_set_unit_facing(face_script, 0);
+
+    CHECK_EQ(face_units[0].facing, 1);
+    CHECK_EQ(face_units[2].facing, 3);
+    CHECK_EQ(data_fdps_view_frame_last_tick == FACE_LATCH_SENTINEL, 1);
+    CHECK_EQ(next_offset, 7);
+}
+
+/* The pair's first byte is the index fdps_get_unit_record is called with, not
+   the position in the list: the two listed units here are 3 and 1, and 0, 2
+   and 4 keep the facing they were staged with. */
+static void face_the_pair_names_the_unit_by_index(void)
+{
+    int pair_at;
+
+    face_stage();
+    pair_at = face_write_header(0, 0, 2);
+    face_write_pair(pair_at, 3, 2);
+    face_write_pair(pair_at + 2, 1, 0);
+
+    fdps_icon_script_set_unit_facing(face_script, 0);
+
+    CHECK_EQ(face_units[3].facing, 2);
+    CHECK_EQ(face_units[1].facing, 0);
+    CHECK_EQ(face_units[0].facing, FACE_STAGED_FACING);
+    CHECK_EQ(face_units[2].facing, FACE_STAGED_FACING);
+    CHECK_EQ(face_units[4].facing, FACE_STAGED_FACING);
+}
+
+/* MOV DL,byte ptr [EAX+0x1] / MOV byte ptr [EAX+0x3],DL and nothing between
+   them: the pair's second byte reaches the record as it stands.  Nothing masks
+   it to two bits, compares it against 3 or maps it through a table, so a code
+   the drawing side has no arm for is stored too -- clamping it here, the
+   obvious defensive spelling, would make this unit face down instead
+   (rebuild_info/pitfalls.md). */
+static void face_the_facing_byte_is_stored_as_it_stands(void)
+{
+    int pair_at;
+
+    face_stage();
+    pair_at = face_write_header(0, 0, 1);
+    face_write_pair(pair_at, 0, 0xfe);
+
+    fdps_icon_script_set_unit_facing(face_script, 0);
+
+    CHECK_EQ(face_units[0].facing, 0xfe);
+}
+
+/* The operands are at offset + 1 and + 2 and the list starts at offset + 3,
+   none of which is offset + 0: the opcode byte and the byte just past the list
+   are both set to values that would give a very different run if either were
+   picked up by mistake.  The returned offset is the byte past the one pair. */
+static void face_the_operands_follow_the_opcode_byte(void)
+{
+    int next_offset;
+    int pair_at;
+
+    face_stage();
+    face_script[12] = 99;
+    pair_at = face_write_header(7, 0, 1);
+    face_write_pair(pair_at, 4, 2);
+
+    next_offset = fdps_icon_script_set_unit_facing(face_script, 7);
+
+    CHECK_EQ(face_units[4].facing, 2);
+    CHECK_EQ(next_offset, 12);
+}
+
+/* XOR EAX,EAX / MOV AL,byte ptr [EDX+0x2]: a unit count with its top bit set
+   is 128, not -128.  A signed decode would walk no unit at all and hand the
+   interpreter back a position 253 bytes BEHIND this opcode.  Every pair is
+   left zero, so all 128 of them name unit 0 and ask for a facing of 0 -- what
+   is being pinned is the decode and the return arithmetic, and unit 0 having
+   been turned says the loop ran at all. */
+static void face_the_unit_count_operand_is_unsigned(void)
+{
+    int next_offset;
+
+    face_stage();
+    face_write_header(0, 0, 0x80);
+
+    next_offset = fdps_icon_script_set_unit_facing(face_script, 0);
+
+    CHECK_EQ(next_offset, 3 + 2 * 0x80);
+    CHECK_EQ(face_units[0].facing, 0);
+}
+
+/* The hold loop presents frames: with a hold operand of 2 the frame latch no
+   longer holds the sentinel staged into it, and the facings the turning loop
+   wrote before the first frame are still the ones in the records afterwards --
+   nothing inside the hold loop touches a unit. */
+static void face_a_nonzero_hold_presents_frames(void)
+{
+    int next_offset;
+    int pair_at;
+
+    face_stage();
+    pair_at = face_write_header(0, 2, 1);
+    face_write_pair(pair_at, 1, 3);
+
+    next_offset = face_run(0);
+
+    CHECK_EQ(data_fdps_view_frame_last_tick == FACE_LATCH_SENTINEL, 0);
+    CHECK_EQ(face_units[1].facing, 3);
+    CHECK_EQ(next_offset, 5);
+}
+
+/* MOV dword ptr [0x00069cd0],0x1 and MOV byte ptr [0x00060159],0x1 on the exit
+   path are stores of literals, not restores: both globals were staged at 4 and
+   both come back 1.  A save-and-restore pair -- the obvious spelling of "hide
+   the HUD for the duration" -- would leave 4 in each and carry an
+   area-of-effect cursor mode straight through the opcode
+   (rebuild_info/pitfalls.md). */
+static void face_the_hud_globals_end_at_one_not_where_they_started(void)
+{
+    face_stage();
+    face_write_header(0, 0, 0);
+
+    fdps_icon_script_set_unit_facing(face_script, 0);
+
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+    CHECK_EQ(data_fdps_ui_play_active_flag, 1);
+}
+
 void run_icon_tests(void)
 {
     RUN_TEST(the_dac_reads_back_what_was_written);
@@ -891,4 +1157,11 @@ void run_icon_tests(void)
     RUN_TEST(walk_the_operands_follow_the_opcode_byte);
     RUN_TEST(walk_the_unit_count_operand_is_unsigned);
     RUN_TEST(walk_the_hud_globals_end_at_one_not_where_they_started);
+    RUN_TEST(face_a_zero_hold_still_turns_every_listed_unit);
+    RUN_TEST(face_the_pair_names_the_unit_by_index);
+    RUN_TEST(face_the_facing_byte_is_stored_as_it_stands);
+    RUN_TEST(face_the_operands_follow_the_opcode_byte);
+    RUN_TEST(face_the_unit_count_operand_is_unsigned);
+    RUN_TEST(face_a_nonzero_hold_presents_frames);
+    RUN_TEST(face_the_hud_globals_end_at_one_not_where_they_started);
 }

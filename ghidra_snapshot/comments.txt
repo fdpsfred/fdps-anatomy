@@ -4424,11 +4424,11 @@ Algorithm:
 Clears the map cursor mode DAT_00069cd0 to 0 and the cursor/info-panel display flag DAT_00060159 to 0, so fdps_draw_map_cursor draws no cursor and fdps_draw_cursor_info_panel draws no panel while the scripted pose is on screen. Reads two unsigned operand bytes: script[offset+1] is how many frames the pose is held for, script[offset+2] is how many units follow; then skips the 3-byte opcode header. Each unit is a 2-byte pair: the first byte is a unit index, which fdps_get_unit_record turns into a pointer to that unit's 0x50-byte record, and the second byte is written to record+3, the unit's facing code (0/1/2/3, the same codes the walk handlers reached from fdps_animate_move_path set). Every listed unit is turned first, then fdps_render_view_frame is called frame_count times, each call waiting for vertical retrace before it presents, so all of them appear to turn on the same frame. Finally it writes the constants 1 back into DAT_00069cd0 and DAT_00060159 -- cursor mode 1 is the bare cursor tile -- and returns the stream offset just past the operands it consumed.
 
 Parameters:
-  script -- base of the IconAni.vfs .DAT script image; FUN_00021650 loaded it with fdps_vfs_load_file and passes the same pointer to every opcode handler.
+  script -- base of the IconAni.vfs .DAT script image; fdps_icon_script_run loaded it with fdps_vfs_load_file and passes the same pointer to every opcode handler.
   offset -- byte offset of this opcode within that image, so script[offset] is the opcode byte 2, script[offset+1] the hold length in frames and script[offset+2] the unit count.
 
 Returns:
-  The stream offset one byte past this instruction's last operand, i.e. offset + 3 + 2 * unit_count. FUN_00021650 stores it as its new script position.
+  The stream offset one byte past this instruction's last operand, i.e. offset + 3 + 2 * unit_count. fdps_icon_script_run stores it as its new script position.
 
 Pool: fdps  [no Function ID hit in either library set; both callees and the sole caller are game code, and the body walks the game's script stream and mutates unit records]
 

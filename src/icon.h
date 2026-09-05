@@ -113,4 +113,35 @@ extern int fdps_icon_script_scroll_view_to_tile(unsigned char *script,
 extern int fdps_icon_script_walk_units(unsigned char *script, int offset);
 #pragma aux fdps_icon_script_walk_units "*" parm caller [];
 
+/* Script opcode 2.  Turns a list of battle units to face the directions the
+   script names, then holds the view on the result for a scripted number of
+   rendered frames.
+
+   script is the base of the loaded IconAni .DAT image and offset the byte
+   offset of this opcode inside it.  Both operand bytes are unsigned:
+   script[offset + 1] is how many frames the pose is held for and
+   script[offset + 2] is how many units are listed.  The list follows at
+   script[offset + 3] as that many two-byte pairs, a unit index then the
+   facing code written into that unit's record.
+
+   Returns offset + 3 + 2 * unit_count, the position of the next opcode, which
+   the interpreter stores as its new script position.
+
+   EVERY LISTED UNIT IS TURNED BEFORE ANY FRAME IS DRAWN, so the whole group
+   changes facing on the same displayed frame.  The turning is not inside the
+   hold loop, which is what separates this from the walk handler: a hold count
+   of 0 still turns every listed unit, it just draws nothing afterwards.
+
+   No facing code is interpreted, ranged or mapped here -- the script's second
+   byte is stored into the record as it stands, so a value outside 0..3 is
+   stored as well.
+
+   The handler leaves two globals set (both gamedata.h):
+   data_fdps_map_cursor_draw_mode and data_fdps_ui_play_active_flag are both 0
+   for the duration of the pose, so no cursor and no info panel are drawn over
+   it, and both are 1 on return.  They are set to those constants rather than
+   put back to what they held on entry. */
+extern int fdps_icon_script_set_unit_facing(unsigned char *script, int offset);
+#pragma aux fdps_icon_script_set_unit_facing "*" parm caller [];
+
 #endif

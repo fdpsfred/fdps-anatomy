@@ -2454,6 +2454,14 @@
       "status": "committed",
       "emitted_against": "0x199",
       "rounds": 0
+    },
+    "00022100": {
+      "name": "fdps_icon_script_set_unit_facing",
+      "target": "icon.c",
+      "body_size": "0xd7",
+      "status": "committed",
+      "emitted_against": "0xd7",
+      "rounds": 0
     }
   }
 }
