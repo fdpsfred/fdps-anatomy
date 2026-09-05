@@ -22,10 +22,25 @@
  * comment names, and it is not a power of two and not 0x140, so a row address
  * built as (row * 0x11 + k) * pitch + x cannot be confused with any other
  * reading of the same constants.
+ *
+ * fdps_spell_list_window_wait_input IS COVERED ONLY ON THE PASS THAT ENDS THE
+ * WAIT.  Its loop polls the keyboard and draws a frame whenever the timer tick
+ * has moved; nothing in the test binary moves that tick, because the counter is
+ * written by the game's timer interrupt handler and no test installs it.  A
+ * call made to draw one frame therefore cannot then be made to return -- the
+ * auto-repeat reader answers 0xff for every poll after the first while the tick
+ * stands still, and the loop spins.  The cases below drive the reader to hand
+ * back an accepted code on the first poll and pin what that pass does: which
+ * code ends the wait, that the poll is tested before the tick, that the reader
+ * is polled exactly once, and that nothing is drawn or allocated.  Everything
+ * the drawing pass does is a playtest contract until the sprite cache, the
+ * shadow sheet and a running timer are all real.
  */
+#include <malloc.h>
 #include <string.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "keybd.h"
 #include "sprite.h"
 #include "table.h"
 #include "text.h"
@@ -640,6 +655,235 @@ static void the_surface_and_the_pitch_are_the_callers(void)
     CHECK_EQ(spell_at(SPELL_ICON_Y, SPELL_ICON_X), SPELL_SENTINEL);
 }
 
+/* ------------------------------------------------------------------
+ * fdps_spell_list_window_wait_input @ 000278e0
+ * ------------------------------------------------------------------
+ *
+ * The window image the loop is handed: a whole 320x200 frame, the size both
+ * shipped callers malloc.  Every position holds a different value from its
+ * neighbours in either direction, so a byte written one row or one column out
+ * is caught rather than matching anyway.
+ */
+#define WAIT_PITCH 0x140
+#define WAIT_ROWS 0xc8
+#define WAIT_BYTES (WAIT_PITCH * WAIT_ROWS)
+
+/* The panel background the loop would blit over the list area, 151 x 149 at
+   its own stride.  Staged so the argument is a real buffer, never read on the
+   pass these cases reach. */
+#define WAIT_PANEL_BYTES (0x97 * 0x95)
+
+static unsigned char wait_window[WAIT_BYTES];
+static unsigned char wait_panel[WAIT_PANEL_BYTES];
+
+static int wait_pixel(int row, int col)
+{
+    return ((row * 31 + col * 17) & 0x7f) | 0x80;
+}
+
+static void wait_stage_window(void)
+{
+    int row;
+    int col;
+
+    for (row = 0; row < WAIT_ROWS; row++) {
+        for (col = 0; col < WAIT_PITCH; col++) {
+            wait_window[row * WAIT_PITCH + col] =
+                (unsigned char) wait_pixel(row, col);
+        }
+    }
+    memset(wait_panel, 0x11, (size_t) WAIT_PANEL_BYTES);
+}
+
+/* Every byte of the window image that no longer holds the value the staging
+   put there.  A drawing pass rewrites four regions of it, so a count above
+   zero says a frame was composed. */
+static int wait_window_changed(void)
+{
+    int row;
+    int col;
+    int changed;
+
+    changed = 0;
+    for (row = 0; row < WAIT_ROWS; row++) {
+        for (col = 0; col < WAIT_PITCH; col++) {
+            if (wait_window[row * WAIT_PITCH + col]
+                != (unsigned char) wait_pixel(row, col)) {
+                changed++;
+            }
+        }
+    }
+    return changed;
+}
+
+/* Used entries currently in the heap.  A used entry becomes a free entry the
+   moment it is released, possibly merged with a neighbour, so the used ones are
+   counted and the free ones are not. */
+static int wait_used_heap_blocks(void)
+{
+    struct _heapinfo entry;
+    int used;
+
+    used = 0;
+    entry._pentry = NULL;
+    while (_heapwalk(&entry) == _HEAPOK) {
+        if (entry._useflag == _USEDENTRY) {
+            used++;
+        }
+    }
+    return used;
+}
+
+/* Scancodes the wait loop is driven with.  0x48 is the up arrow, one of the
+   codes fdps_spell_list_select_loop acts on (CMP dword ptr [EBP-0x1c],0x48 at
+   000281d7); 0x7f is the last code the loop hands back at all, because CMP
+   ...,0x7f / JLE at 00027907 is <=, so 0x7f ends the wait and 0x80 would
+   not. */
+#define WAIT_SCANCODE_UP 0x48
+#define WAIT_SCANCODE_LAST_ACCEPTED 0x7f
+
+/* A tick the timer counter does not hold, so a pass that reaches the tick test
+   would find the two different and draw. */
+#define WAIT_STALE_TICK 0x5a5a
+
+/* Puts the auto-repeat reader in the state where its very next poll reports
+   `code` unchanged: the latch holds the code and the repeat filter remembers a
+   different one, which is that reader's "a key went down" path (src/keybd.h).
+   0x100 is not a byte, so it differs from every latch value including 0xff. */
+static void wait_arm_scancode(unsigned int code)
+{
+    data_fdps_input_last_scancode = (unsigned char) code;
+    data_fdps_input_key_repeat_prev_scancode = 0x100;
+    data_fdps_input_key_repeat_counter = 0;
+}
+
+/* The unit array and the window image staged together.  spell_reset publishes
+   the array the collector walks; the wait loop calls that collector before its
+   first poll, so the array has to be real even on a pass that draws nothing. */
+static void wait_reset(void)
+{
+    spell_reset();
+    spell_give(0, spell_set_bitmap);
+    wait_stage_window();
+}
+
+/* Which codes end the wait.  The loop keeps running while the poll answers
+   above 0x7f and returns the first answer at or below it, unchanged and without
+   sign-extending -- 0x7f is the largest value that gets out, and the test that
+   lets it out is signed (JLE), so the code is carried in an int.
+
+   0x48 is an ordinary accepted code, 0x7f is the boundary the JLE puts inside
+   the accepted range, and 0 is the other end. */
+static void a_code_at_or_below_7f_ends_the_wait(void)
+{
+    int up;
+    int boundary;
+    int zero;
+
+    wait_reset();
+    wait_arm_scancode(WAIT_SCANCODE_UP);
+    up = fdps_spell_list_window_wait_input(wait_window, wait_panel, 0, 0, 0);
+    wait_arm_scancode(WAIT_SCANCODE_LAST_ACCEPTED);
+    boundary = fdps_spell_list_window_wait_input(wait_window, wait_panel, 0, 0,
+                                                 0);
+    wait_arm_scancode(0);
+    zero = fdps_spell_list_window_wait_input(wait_window, wait_panel, 0, 0, 0);
+
+    CHECK_EQ(up, WAIT_SCANCODE_UP);
+    CHECK_EQ(boundary, WAIT_SCANCODE_LAST_ACCEPTED);
+    CHECK_EQ(zero, 0);
+}
+
+/* The poll is tested before the tick, and a pass that ends the wait draws
+   nothing at all.  The last-drawn tick is set here to a value the timer counter
+   does not hold, which is exactly the condition a drawing pass needs -- so if
+   the tick comparison came first, or if the accepted code were allowed to fall
+   through it, this call would compose and present a frame and leave its own
+   tick behind.  It does neither: the latch is untouched and every byte of the
+   window image still holds what the staging put there, including the four
+   positions a frame rewrites.
+
+   All of them are checked because they fail apart.  A frame drawn for the wrong
+   reason writes the image; a tick recorded without a frame writes only the
+   latch. */
+static void an_accepted_code_draws_no_frame(void)
+{
+    int premise;
+    int code;
+    int tick_after;
+
+    wait_reset();
+    data_fdps_spell_list_window_last_tick = WAIT_STALE_TICK;
+    premise = ((int) data_fdps_timer_tick_counter
+               != data_fdps_spell_list_window_last_tick);
+
+    wait_arm_scancode(WAIT_SCANCODE_UP);
+    code = fdps_spell_list_window_wait_input(wait_window, wait_panel, 0, 0, 0);
+    tick_after = data_fdps_spell_list_window_last_tick;
+
+    CHECK_EQ(premise, 1);
+    CHECK_EQ(code, WAIT_SCANCODE_UP);
+    CHECK_EQ(tick_after, WAIT_STALE_TICK);
+    CHECK_EQ(wait_window_changed(), 0);
+    /* The list area, the two arrows and the caster's cell, spelled out so a
+       failure says which region moved: rows 47, 49, 191 and 10 at columns 152,
+       220, 220 and 161. */
+    CHECK_EQ((int) wait_window[47 * WAIT_PITCH + 152], wait_pixel(47, 152));
+    CHECK_EQ((int) wait_window[49 * WAIT_PITCH + 220], wait_pixel(49, 220));
+    CHECK_EQ((int) wait_window[191 * WAIT_PITCH + 220], wait_pixel(191, 220));
+    CHECK_EQ((int) wait_window[10 * WAIT_PITCH + 161], wait_pixel(10, 161));
+}
+
+/* An accepted code leaves on the FIRST poll.  A second poll would find the
+   reader's filter already holding that code and would take its repeat path,
+   which advances the hold counter and stamps the timer tick into
+   data_fdps_input_key_repeat_last_tick (src/keybd.c).  Neither moves here, and
+   the filter holds the code the one poll put in it.
+
+   The repeat tick is seeded away from the timer counter on purpose: that is the
+   state in which a second poll WOULD change both of those, so the assertions
+   distinguish one poll from two rather than merely from many. */
+static void the_accepted_code_costs_exactly_one_poll(void)
+{
+    int code;
+
+    wait_reset();
+    wait_arm_scancode(WAIT_SCANCODE_UP);
+    data_fdps_input_key_repeat_last_tick = 0x1234;
+    data_fdps_input_key_repeat_counter = 5;
+
+    code = fdps_spell_list_window_wait_input(wait_window, wait_panel, 0, 0, 0);
+
+    CHECK_EQ(code, WAIT_SCANCODE_UP);
+    CHECK_EQ((int) data_fdps_input_key_repeat_last_tick, 0x1234);
+    CHECK_EQ(data_fdps_input_key_repeat_counter, 0);
+    CHECK_EQ((int) data_fdps_input_key_repeat_prev_scancode,
+             WAIT_SCANCODE_UP);
+}
+
+/* A pass that ends the wait takes no heap.  All three of the loop's allocations
+   are inside the drawing branch and all three are freed before that branch
+   ends, so a wait that returns on its first poll must leave the heap exactly as
+   it found it.  The first call is a warm-up, so anything the CRT allocates once
+   is already accounted for. */
+static void an_accepted_code_takes_no_heap(void)
+{
+    int before;
+    int after;
+
+    wait_reset();
+    wait_arm_scancode(WAIT_SCANCODE_UP);
+    fdps_spell_list_window_wait_input(wait_window, wait_panel, 0, 0, 0);
+
+    before = wait_used_heap_blocks();
+    wait_arm_scancode(WAIT_SCANCODE_UP);
+    fdps_spell_list_window_wait_input(wait_window, wait_panel, 0, 0, 0);
+    after = wait_used_heap_blocks();
+
+    CHECK_EQ(after, before);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+}
+
 void run_spellmnu_tests(void)
 {
     RUN_TEST(empty_spell_list_draws_nothing);
@@ -652,4 +896,9 @@ void run_spellmnu_tests(void)
     RUN_TEST(rows_past_the_count_are_left_alone);
     RUN_TEST(the_page_belongs_to_the_unit_that_was_asked_for);
     RUN_TEST(the_surface_and_the_pitch_are_the_callers);
+
+    RUN_TEST(a_code_at_or_below_7f_ends_the_wait);
+    RUN_TEST(an_accepted_code_draws_no_frame);
+    RUN_TEST(the_accepted_code_costs_exactly_one_poll);
+    RUN_TEST(an_accepted_code_takes_no_heap);
 }

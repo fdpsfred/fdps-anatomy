@@ -7,12 +7,24 @@
  * unit record's five-byte bitmap by unitstat.c and never cached; everything
  * this file draws with comes from sprite.c, text.c and table.c, and the two
  * .CEL sheet pointers and the global text block belong to gamedata.h.
+ *
+ * The page drawer owns no state.  The wait loop does own one piece -- the tick
+ * it last drew a frame on -- and spellmnu.h declares it; the map behind the
+ * window comes from mapdraw.c and the presentation goes straight to the
+ * adapter.
  */
+#include <stdlib.h>
+#include <string.h>
 #include "fdpstype.h"
+#include "blit.h"
 #include "gamedata.h"
+#include "keybd.h"
+#include "mapdraw.h"
+#include "palcycle.h"
 #include "sprite.h"
 #include "table.h"
 #include "text.h"
+#include "unit.h"
 #include "unitstat.h"
 #include "spellmnu.h"
 
@@ -163,4 +175,293 @@ void fdps_draw_spell_list_page(int unit_index, int list_top, int cursor_index,
                              SPELL_LIST_MP_SHOW_PLUS);
         }
     }
+}
+
+/* The VGA graphics aperture as a flat linear address, the mode 13h scanline
+   pitch and one whole frame.  All three are hard-coded in the original (PUSH
+   0xa0000 at 00027bce, the PUSH 0x140 beside every window blit, PUSH 0xfa00 at
+   000279e9) and stay literals here: 0xa0000 is where the display adapter
+   answers, not the address of anything the linker places, so there is no
+   symbol to reference instead. */
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_PITCH 0x140
+#define VGA_SCREEN_BYTES 0xfa00
+
+/* The largest input code the wait loop below will hand back.  Everything above
+   it -- the 0xff the scancode reader answers with when nothing has been
+   pressed, and every break code -- keeps the loop running.  CMP dword ptr
+   [EBP-0x14],0x7f / JLE at 00027907, a SIGNED compare, which is why the code
+   is held in an int here rather than in the unsigned the reader returns. */
+#define SCANCODE_LAST_MAKE_CODE 0x7f
+
+/* The spell panel background and where it lands in the window image: a
+   151 x 149 rectangle at its own 0x97 stride (PUSH 0x95 / PUSH 0x97 / PUSH 0x97
+   at 00027943) blitted to row 47, column 152, which is the 0x3b58 of ADD
+   EAX,0x3b58 at 00027955.  The same address is then handed to the page drawer,
+   so the rows go down over the background that was just restored. */
+#define PANEL_STRIDE 0x97
+#define PANEL_W 0x97
+#define PANEL_H 0x95
+#define LIST_AREA_ROW 47
+#define LIST_AREA_COL 152
+#define LIST_AREA_AT (LIST_AREA_ROW * VGA_SCREEN_PITCH + LIST_AREA_COL)
+
+/* The two scroll arrows.  Command.cel sprites 0x44/0x45 are the up arrow's two
+   blink phases and 0x46/0x47 the down arrow's (ADD EAX,0x44 at 00027997 and ADD
+   EAX,0x46 at 000279bf, each added to the blink bit), drawn at row 49 column
+   220 and row 191 column 220 -- the 0x3e1c and 0xef9c of the two ADDs at
+   000279a3 and 000279cb.
+
+   The blink bit is (latch / 8) & 1, so a phase lasts eight ticks: MOV EDX /
+   SAR EDX,0x1f / SHL EDX,0x3 / SBB / SAR EAX,0x3 at 00027927 is a SIGNED
+   divide by eight and not a shift, and the AND that follows takes bit 0 of the
+   quotient. */
+#define UP_ARROW_ROW 49
+#define UP_ARROW_COL 220
+#define UP_ARROW_AT (UP_ARROW_ROW * VGA_SCREEN_PITCH + UP_ARROW_COL)
+#define DOWN_ARROW_ROW 191
+#define DOWN_ARROW_COL 220
+#define DOWN_ARROW_AT (DOWN_ARROW_ROW * VGA_SCREEN_PITCH + DOWN_ARROW_COL)
+#define UP_ARROW_SPRITE 0x44
+#define DOWN_ARROW_SPRITE 0x46
+#define ARROW_BLINK_TICKS 8
+
+/* The page the map behind the window is composed on: 360 x 240 8bpp at pitch
+   0x168, PUSH 0x15180 at 000279d9, with the 24-pixel apron on all four sides
+   that fdps_draw_scene_layers needs.  Its visible window starts at page byte
+   0x21d8, page coordinate (24,24), and lands at screen byte 0x504, screen
+   coordinate (4,4). */
+#define SCENE_PAGE_PITCH 0x168
+#define SCENE_PAGE_BYTES 0x15180
+#define SCENE_PAGE_WINDOW_AT 0x21d8
+#define SCREEN_WINDOW_AT 0x504
+#define SCREEN_WINDOW_W 0x138
+#define SCREEN_WINDOW_H 0xc0
+
+/* Where the composed window sits in a whole 320x200 frame and how big it is:
+   columns 15..305 of every one of the 200 rows, PUSH 0x123 / PUSH 0xc8 with the
+   two 0xf offsets at 00027bad and 00027bb9. */
+#define WINDOW_AT 0x0f
+#define WINDOW_W 0x123
+#define WINDOW_H 0xc8
+
+/* The caster's cell: one 24x24 sprite, 0x240 bytes at pitch 0x18 (PUSH 0x240 at
+   00027ad6 and the three PUSH 0x18 at 00027b65), composed shadow first and walk
+   frame over it, then copied whole into the window image at row 10, column 161
+   -- the 0xd21 of ADD EAX,0xd21 at 00027b87. */
+#define UNIT_SPRITE_W 0x18
+#define UNIT_SPRITE_H 0x18
+#define UNIT_SPRITE_BYTES 0x240
+#define WINDOW_SPRITE_ROW 0x0a
+#define WINDOW_SPRITE_COL 0xa1
+#define WINDOW_SPRITE_AT \
+    (WINDOW_SPRITE_ROW * VGA_SCREEN_PITCH + WINDOW_SPRITE_COL)
+
+/* Sprite 3 of Shadow.cel, the shadow every unit in this window stands on (PUSH
+   0x3 at 00027af4), and blit mode 0, the plain opaque RLE kernel, which is the
+   last of the sprite blitter's eight arguments and so the first pushed. */
+#define SHADOW_SPRITE_INDEX 3
+#define BLIT_MODE_OPAQUE 0
+
+/* The walk cycle.  The latch is taken modulo 16 and divided by 4, and a
+   quotient of 3 is folded back to 1, so the three drawn frames run 0, 1, 2, 1
+   and the cycle reads as a ping-pong rather than a snap back to the start.  MOV
+   EBX,0x10 / IDIV at 00027ab7 and the SAR EAX,0x2 at 00027ac3, both signed. */
+#define WALK_CYCLE_TICKS 0x10
+#define WALK_CYCLE_TICKS_PER_FRAME 4
+
+/* A cache slot's twelve stream offsets are four facings of three walk frames
+   (struct fdps_cel_cache_slot, src/fdpstype.h), and the facing numbering is the
+   one the whole game uses: 0 down, 1 left, 2 up, 3 right.  This window only
+   ever draws the caster facing the player, so the facing displacement the
+   assembly folds into LEA EAX,[EAX*0x4 + 0x0] at 00027b4b is zero. */
+#define WALK_FRAMES_PER_FACING 3
+#define FACING_DOWN 0
+
+/* 000278e0.  Five stack arguments, caller-cleaned: all three call sites push
+   five dwords right to left and follow the CALL with ADD ESP,0x14, the body
+   reads them at [EBP+0x14] through [EBP+0x24] behind PUSH EBX/ESI/EDI/EBP and
+   the return address, and RET carries no immediate.  The result is EAX, and
+   fdps_spell_list_select_loop keeps it (MOV dword ptr [EBP-0x1c],EAX at
+   000281d4) while fdps_battle_show_unit_status_window discards it.
+
+   THE COLLECTOR RUNS ONCE, OUTSIDE THE LOOP.  CALL 0x00027840 at 000278f4 sits
+   before the loop head at 000278ff, and only its count is kept -- the 40 ids it
+   wrote into the stack buffer are never read here.  Moving it inside the loop
+   would give the same picture and would walk the caster's bitmap on every
+   frame.
+
+   BOTH ANIMATION PHASES COME FROM THE LATCH, NOT FROM THE LIVE COUNTER, and
+   the latch is advanced on the last line of the frame.  Latching the new tick
+   at the top of the pass and deriving the blink and the walk frame from
+   data_fdps_timer_tick_counter is the obvious loop and it shifts both
+   animations by one tick (rebuild_info/pitfalls.md).
+
+   Three branches inside the pass and one outside it.  The mode flag is tested
+   twice, once for where the backdrop comes from and once for where the sprite
+   row comes from, and the two tests are the opposite way round in the assembly
+   -- JNZ at 00027a00 takes the village path, JZ at 00027b27 takes the field
+   one -- which is why the second is written as a test against non-zero here.
+   The two arrows are independent: list_top != 0 for the up arrow and the
+   signed list_top + 8 < spell_count for the down one, so a nine-spell list
+   scrolled to the bottom shows the up arrow alone.
+
+   Nothing is read after any call except the three the results of which are
+   named below: the collector's count, the reader's code, the record pointer
+   and the three malloc blocks. */
+int fdps_spell_list_window_wait_input(unsigned char *window_buf,
+                                      unsigned char *panel_src,
+                                      int unit_index, int list_top,
+                                      int cursor_index)
+{
+    /* The ids the collector writes.  Only the count it returns is used, but
+       the buffer is what the collector is given and its forty bytes are the
+       whole of the frame's SUB ESP,0x54 that the eleven scalars do not
+       occupy -- forty is also the most ids five bitmap bytes can hold, so it
+       is exactly full-sized and nothing bounds the write (unitstat.h). */
+    unsigned char spell_ids[SPELL_LIST_ID_BUFFER_BYTES];
+    /* The caster's record, looked up once per frame.  Fetched on both sides of
+       the mode flag and read only on the field side. */
+    struct fdps_unit_record *unit;
+    /* The 360x240 page the map behind the window is composed on, taken and
+       given back inside one pass. */
+    unsigned char *scene_page;
+    /* The whole 320x200 frame this pass builds and presents. */
+    unsigned char *frame;
+    /* The 24x24 cell the shadow and the caster are composed in before the pair
+       is copied into the window image. */
+    unsigned char *sprite_cell;
+    /* The RLE stream of the walk frame being drawn, addressed from the base of
+       the sprite cache block. */
+    unsigned char *sprite_stream;
+    /* How many spells the caster knows, collected once on the way in; the down
+       arrow is the only thing that reads it. */
+    int spell_count;
+    /* The code the last poll returned.  Held signed because the test that ends
+       the loop is signed, and returned as it stands. */
+    int input_code;
+    /* Which of the two blink phases the arrows are drawn in this frame. */
+    int arrow_blink;
+    /* Which of the three walk frames of the caster's facing is drawn. */
+    int walk_frame;
+    /* The row of the sprite cache the walk frame is taken from: the caster's
+       own slot in the field, and unit_index itself in a village. */
+    int sprite_cache_slot;
+
+    spell_count = fdps_unit_collect_known_spells(unit_index, spell_ids);
+
+    for (;;) {
+        input_code = (int) fdps_read_scancode_auto_repeat();
+        if (input_code <= SCANCODE_LAST_MAKE_CODE) {
+            break;
+        }
+        if ((int) data_fdps_timer_tick_counter
+                == data_fdps_spell_list_window_last_tick) {
+            continue;
+        }
+
+        fdps_cycle_ui_palette();
+        arrow_blink =
+            (data_fdps_spell_list_window_last_tick / ARROW_BLINK_TICKS) & 1;
+
+        /* The background first and the eight rows over it, so the previous
+           frame's rows are erased rather than drawn on top of. */
+        fdps_blit_rect((unsigned int) panel_src, PANEL_STRIDE,
+                       window_buf + LIST_AREA_AT, VGA_SCREEN_PITCH,
+                       PANEL_W, PANEL_H);
+        fdps_draw_spell_list_page(unit_index, list_top, cursor_index,
+                                  window_buf + LIST_AREA_AT,
+                                  VGA_SCREEN_PITCH);
+        if (list_top != 0) {
+            fdps_blit_command_sprite(window_buf + UP_ARROW_AT,
+                                     VGA_SCREEN_PITCH,
+                                     arrow_blink + UP_ARROW_SPRITE);
+        }
+        if (list_top + SPELL_LIST_ROWS < spell_count) {
+            fdps_blit_command_sprite(window_buf + DOWN_ARROW_AT,
+                                     VGA_SCREEN_PITCH,
+                                     arrow_blink + DOWN_ARROW_SPRITE);
+        }
+
+        scene_page = (unsigned char *) malloc((size_t) SCENE_PAGE_BYTES);
+        frame = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+
+        /* Where the picture behind the window comes from.  In the field the
+           map is composed from scratch into the scene page and its view window
+           is blitted into a cleared frame; in a village the saved page already
+           holds a finished picture and is taken whole, and the blit into the
+           scene page that precedes it fills a buffer nothing then reads.  The
+           frame is cleared on the field path only. */
+        if (data_fdps_village_mode_flag == 0) {
+            fdps_draw_scene_layers(scene_page);
+            memset(frame, 0, (size_t) VGA_SCREEN_BYTES);
+            fdps_blit_rect((unsigned int) (scene_page + SCENE_PAGE_WINDOW_AT),
+                           SCENE_PAGE_PITCH, frame + SCREEN_WINDOW_AT,
+                           VGA_SCREEN_PITCH, SCREEN_WINDOW_W, SCREEN_WINDOW_H);
+        } else {
+            fdps_blit_rect((unsigned int)
+                               (data_fdps_village_backdrop_page_ptr
+                                + SCREEN_WINDOW_AT),
+                           VGA_SCREEN_PITCH,
+                           scene_page + SCENE_PAGE_WINDOW_AT,
+                           SCENE_PAGE_PITCH, SCREEN_WINDOW_W, SCREEN_WINDOW_H);
+            memmove(frame, data_fdps_village_backdrop_page_ptr,
+                    (size_t) VGA_SCREEN_BYTES);
+        }
+        free(scene_page);
+
+        walk_frame =
+            (data_fdps_spell_list_window_last_tick % WALK_CYCLE_TICKS)
+            / WALK_CYCLE_TICKS_PER_FRAME;
+        if (walk_frame == 3) {
+            walk_frame = 1;
+        }
+
+        /* The shadow goes down first and the walk frame over it, so the cell
+           the window image receives is the pair composited. */
+        sprite_cell = (unsigned char *) malloc((size_t) UNIT_SPRITE_BYTES);
+        fdps_cel_blit_sprite(data_fdps_shadow_sprite_sheet_ptr,
+                             SHADOW_SPRITE_INDEX, sprite_cell, UNIT_SPRITE_W,
+                             0, 0, 0, BLIT_MODE_OPAQUE);
+
+        /* The clamp is AFTER the shadow, not folded into the test above it,
+           and it cannot fire from a non-negative latch: it is what a negative
+           one -- the counter having run past 0x7fffffff -- would land on. */
+        if (walk_frame < 0) {
+            walk_frame = 0;
+        }
+
+        unit = fdps_get_unit_record(unit_index);
+        if (data_fdps_village_mode_flag != 0) {
+            sprite_cache_slot = unit_index;
+        } else {
+            sprite_cache_slot = (int) unit->sprite_cache_slot;
+        }
+
+        /* A stored offset is measured from the base of the cache block, not
+           from the slot it was read out of. */
+        sprite_stream = data_fdps_cel_sprite_cache_ptr
+            + ((struct fdps_cel_cache_slot *) data_fdps_cel_sprite_cache_ptr)
+                  [sprite_cache_slot].sprite_offset[
+                      FACING_DOWN * WALK_FRAMES_PER_FACING + walk_frame];
+        fdps_blit_dispatch(sprite_stream, sprite_cell, UNIT_SPRITE_W,
+                           UNIT_SPRITE_H, UNIT_SPRITE_W, 0, BLIT_MODE_OPAQUE);
+        fdps_blit_rect((unsigned int) sprite_cell, UNIT_SPRITE_W,
+                       window_buf + WINDOW_SPRITE_AT, VGA_SCREEN_PITCH,
+                       UNIT_SPRITE_W, UNIT_SPRITE_H);
+        fdps_blit_rect((unsigned int) (window_buf + WINDOW_AT),
+                       VGA_SCREEN_PITCH, frame + WINDOW_AT, VGA_SCREEN_PITCH,
+                       WINDOW_W, WINDOW_H);
+
+        /* The whole frame goes out, on both paths: unlike the unit status
+           window this one has no village variant that presents the inner
+           rectangle alone. */
+        memmove((void *) VGA_SCREEN_BASE, frame, (size_t) VGA_SCREEN_BYTES);
+        free(frame);
+        free(sprite_cell);
+        data_fdps_spell_list_window_last_tick =
+            (int) data_fdps_timer_tick_counter;
+    }
+
+    return input_code;
 }

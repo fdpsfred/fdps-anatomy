@@ -53,4 +53,70 @@ extern void fdps_draw_spell_list_page(int unit_index, int list_top,
                                       int pitch);
 #pragma aux fdps_draw_spell_list_page "*" parm caller [];
 
+/* 00064390.  The tick the spell-list window last drew a frame for.  The pacing
+ * state of the wait loop below -- a global rather than a local, and that is
+ * observable: it keeps its value between calls, so a window opened again on
+ * the tick a previous one closed on draws nothing until the timer moves.
+ *
+ * IT IS SIGNED, AND BOTH ANIMATION PHASES ARE TAKEN FROM IT RATHER THAN FROM
+ * THE LIVE COUNTER.  The arrow blink is (this / 8) & 1 through a SAR pair at
+ * 00027932, and the walk frame is (this % 16) / 4 through IDIV and SAR at
+ * 00027ab7 and 00027ac3; every one of those divisions is signed, so the phase
+ * chosen once the counter has passed 0x7fffffff is the one signed division
+ * gives.  The latch is advanced to data_fdps_timer_tick_counter only on the
+ * last line of the frame.
+ *
+ * Never cleared.  Nothing resets it when the window closes or a chapter
+ * ends. */
+extern int data_fdps_spell_list_window_last_tick;
+
+/* Holds the assembled spell-list window on the screen, keeps the caster
+   walking and the scroll arrows blinking in it, and comes back with the first
+   input code the caller can act on.
+
+   window_buf is the composed 320-pitch window image, and it is READ AND
+   WRITTEN.  Every drawn frame rewrites four regions of it -- the list area at
+   row 47 column 152, the up arrow at row 49 column 220, the down arrow at row
+   191 column 220 and the caster's 24x24 cell at row 10 column 161 -- and then
+   stamps its columns 15..305 into the frame that goes to the adapter.  Both
+   shipped callers hand in a 64000-byte 320x200 page, and the down arrow's
+   sprite is declared 22 rows tall, so its rectangle nominally reaches row 212;
+   Command.cel sprites 0x46 and 0x47 encode pixels only in their first five
+   rows and skip the rest, so nothing is stored past the end of that page.
+
+   panel_src is the pristine 151 x 149 spell-panel background at stride 0x97,
+   blitted over the list area before the rows are redrawn so the previous
+   frame's rows are erased.  Neither buffer is checked for null.
+
+   list_top AND cursor_index ARE LIST INDICES, the same pair
+   fdps_draw_spell_list_page takes, and list_top also decides the arrows: the
+   up arrow is drawn when it is non-zero and the down arrow when list_top + 8
+   is below the spell count.  THE COUNT IS COLLECTED ONCE, BEFORE THE LOOP --
+   the caller may scroll the page between frames, but a spell learned or lost
+   while the window is up does not change which arrows appear.
+
+   unit_index picks the caster, and it is read three ways: it goes to the
+   collector and to the page drawer, and it is the sprite cache slot ITSELF
+   during a village phase.  Outside one the slot is byte +2 of the record
+   fdps_get_unit_record returns -- struct fdps_unit_record's sprite_cache_slot
+   -- and the record is fetched on both paths, so the lookup happens and its
+   result is dropped when the village flag is set.
+
+   The result is the scancode, and everything above 0x7f keeps the loop
+   running.  ONE PASS IS NOT ONE FRAME: the loop polls the keyboard as fast as
+   it can and draws only when the timer tick has moved since the last frame it
+   drew, so the frame rate is the timer's and the poll rate is the machine's.
+
+   NOTHING HERE CHECKS A malloc.  Three blocks are taken per frame -- a 360x240
+   scene page, a whole 320x200 frame and a 24x24 cell -- and all three are given
+   back before the pass ends; none is compared against NULL, and neither the
+   sprite cache pointer nor the shadow sheet pointer is tested either
+   (gamedata.h).  During a village phase the scene page is filled and then
+   freed without ever being read. */
+extern int fdps_spell_list_window_wait_input(unsigned char *window_buf,
+                                             unsigned char *panel_src,
+                                             int unit_index, int list_top,
+                                             int cursor_index);
+#pragma aux fdps_spell_list_window_wait_input "*" parm caller [];
+
 #endif
