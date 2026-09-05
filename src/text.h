@@ -90,4 +90,49 @@ extern void fdps_draw_number(unsigned char *dest, int pitch, int value,
                              int digit_count, char show_plus);
 #pragma aux fdps_draw_number "*" parm caller [];
 
+/* Draws one entry of a text block into an 8bpp surface, interpreting the
+   control codes embedded in the entry, and hands back the cursor it stopped at.
+   Every piece of text the game shows -- menu labels, item names, save-slot
+   dates, the chapters' spoken lines -- comes out of this one routine.
+
+   text_base is the start of a text block: a table of signed 16-bit BYTE offsets
+   followed by the token streams those offsets point at, and text_id is a
+   0-based index into that table.  The offset is added to text_base itself, not
+   to the address the offset was read from, and it is signed.  Callers pass
+   data_fdps_all_game_text_ptr, data_fdps_current_chapter_text_ptr or a block
+   they have loaded themselves (gamedata.h).
+
+   dest is the byte address the first glyph goes at AND the origin the line
+   break measures from, and pitch is the destination's row stride -- 0x140 for
+   the visible screen, 0x138 for the game's 312-wide offscreen pages.  The three
+   colours go straight to fdps_draw_glyph above and mean what they mean there.
+
+   The stream is walked a signed 16-bit token at a time until -1.  A token that
+   is not one of the control codes is a glyph index, drawn through
+   fdps_draw_glyph and followed by a step of data_fdps_glyph_advance_x.  The
+   codes are -2 line break, -3 page break, -4 and -5 substitution, -6 number,
+   -0x11 speaker by character id and -0x12 speaker by unit index.  Zero is NOT a
+   terminator: it is glyph 0.
+
+   THREE OF THE CODES TAKE THE PEN AWAY FROM THE CALLER'S SURFACE.  The page
+   break and both speaker codes overwrite dest with a fixed VGA address and the
+   line break then measures from that new value, so an entry carrying any of
+   them only comes out right when the caller is drawing straight to the visible
+   screen at pitch 0x140.  Those three also stand a modal wait on the keyboard
+   and repaint the whole message panel, which is why a caller drawing into an
+   offscreen page has to know the entry it asked for holds none of them.
+
+   A SUBSTITUTION IGNORES THE CALLER'S COLOURS.  The -4 and -5 codes always draw
+   in 0xd0 / 0 / 0x6d, so a substituted name stays in the standard message
+   colours even inside text the caller asked for in another colour -- a greyed
+   menu entry at 0xc8 gets a full-brightness name in the middle of it.
+
+   The return is the cursor one glyph past the last one drawn, so a caller can
+   chain a second entry onto the end of the first. */
+extern unsigned char *fdps_draw_text(unsigned char *text_base, int text_id,
+                                     unsigned char *dest, int pitch,
+                                     int fg_color, int bg_color,
+                                     int outline_color);
+#pragma aux fdps_draw_text "*" parm caller [];
+
 #endif

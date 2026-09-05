@@ -853,6 +853,409 @@ static void the_figure_starts_exactly_at_dest(void)
     CHECK_EQ(number_surface[10 * NUM_PITCH + 4], BACKGROUND);
 }
 
+/* ---------------------------------------------------------------------------
+   fdps_draw_text at 0001ff60.
+
+   Expected values below are the assembly's, read at the addresses quoted on
+   each case: the entry lookup at 0001ff82-0001ff93, the terminator test at
+   0001ff96, the line break's IMUL/IMUL/ADD at 0001ffba-0001ffca, the two
+   substitution arms at 00020144 and 0002017b, the number arm's sprintf, strlen
+   and digit map at 000201b6-0002022a, and the glyph arm at 00020370-0002039e.
+   None of them is read off the emitted C.
+
+   THREE OF THE EIGHT ARMS ARE NOT EXERCISED HERE and cannot be.  The page break
+   (-3) and both speaker codes (-0x11, -0x12) call
+   fdps_message_window_wait_key, which runs a modal frame loop on the keyboard
+   ring and does not come back until a key arrives or its timeout expires; the
+   page break also composes into and presents to the adapter's real framebuffer
+   at 0xa0000.  A unit runner has no keyboard and no business writing to video
+   memory, so what those arms do is left to the manual playtest (ADR-0003).
+
+   The fixture makes the glyph index readable out of the destination: the sheet
+   staged below is one 16-pixel-wide, one-row cell per glyph, two bytes of it,
+   whose glyph n sets exactly the bit for column n.  So a cell that came out of
+   the routine carrying a painted column tells which glyph index the routine
+   chose, and the byte the column sits at tells where the pen was.  The sheet
+   has a sixteen-byte lead-in in front of the pointer the font global holds,
+   because the number arm's digit map really can produce a negative index and
+   the case below watches it do so. */
+
+#define TEXT_PITCH  128
+#define TEXT_ROWS   8
+#define TEXT_BYTES  (TEXT_PITCH * TEXT_ROWS)
+
+#define TEXT_CELL_WIDTH   16
+#define TEXT_CELL_ROWS    1
+#define TEXT_GLYPH_STRIDE 2
+
+/* Deliberately not 16 and not the number arm's 0x10, so a cell drawn at the
+   wrong one of the two advances lands somewhere the assertions can see. */
+#define TEXT_ADVANCE      24
+#define TEXT_LINE_HEIGHT  2
+
+#define FONT_LEAD_IN 16
+#define FONT_GLYPHS  16
+
+static unsigned char font_storage[FONT_LEAD_IN + FONT_GLYPHS
+                                 * TEXT_GLYPH_STRIDE];
+static unsigned char text_surface[TEXT_BYTES];
+static unsigned char text_block[64];
+static unsigned char subst_block[64];
+static unsigned char back_block[32];
+
+/* A stream token and a table offset are both signed 16-bit words written into
+   the block at a byte position, which is the whole of the block format. */
+static void put_word(unsigned char *block, int byte_at, int value)
+{
+    *(short *) (block + byte_at) = (short) value;
+}
+
+static int text_pixel(int at)
+{
+    return (int) text_surface[at];
+}
+
+static void stage_text(void)
+{
+    int i;
+
+    for (i = 0; i < TEXT_BYTES; i++) {
+        text_surface[i] = BACKGROUND;
+    }
+    for (i = 0; i < (int) sizeof(font_storage); i++) {
+        font_storage[i] = 0;
+    }
+    for (i = 0; i < FONT_GLYPHS; i++) {
+        if (i < 8) {
+            font_storage[FONT_LEAD_IN + i * 2] = (unsigned char) (0x80 >> i);
+        } else {
+            font_storage[FONT_LEAD_IN + i * 2 + 1] =
+                (unsigned char) (0x80 >> (i - 8));
+        }
+    }
+    /* Glyph index -3, six bytes in front of the sheet: what '-' becomes. */
+    font_storage[FONT_LEAD_IN - 6] = 0x80;
+
+    for (i = 0; i < (int) sizeof(text_block); i++) {
+        text_block[i] = 0;
+    }
+    for (i = 0; i < (int) sizeof(subst_block); i++) {
+        subst_block[i] = 0;
+    }
+    for (i = 0; i < (int) sizeof(back_block); i++) {
+        back_block[i] = 0;
+    }
+
+    data_fdps_font_glyph_width = (unsigned char) TEXT_CELL_WIDTH;
+    data_fdps_glyph_cell_height = (unsigned char) TEXT_CELL_ROWS;
+    data_fdps_font_glyph_stride_bytes = TEXT_GLYPH_STRIDE;
+    data_fdps_font_outline_enabled_flag = (unsigned char) 0;
+    data_fdps_glyph_shadow_row_offset = 0;
+    data_fdps_font_shadow_offset_x = 0;
+    data_fdps_glyph_advance_x = TEXT_ADVANCE;
+    data_fdps_font_line_height = TEXT_LINE_HEIGHT;
+    data_fdps_font_sheet_ptr = font_storage + FONT_LEAD_IN;
+    data_fdps_all_game_text_ptr = subst_block;
+    data_fdps_dialog_last_action_text_id_param = 0;
+    data_fdps_dialog_subst_text_id_2 = 0;
+    data_fdps_dialog_last_action_value_param = 0;
+}
+
+/* CMP EAX,-0x1 / JZ 0x000203a7 at 0001ff9c is tested before anything is drawn,
+   so an entry whose first word is the terminator paints nothing and hands the
+   caller's own dest straight back.  MOV EAX,[EBP + -0x14] at 000203be is the
+   pen, which MOV dword ptr [EBP + -0x14],EAX at 0001ff85 set to dest on
+   entry. */
+static void an_empty_entry_paints_nothing_and_returns_dest(void)
+{
+    unsigned char *end;
+
+    stage_text();
+    put_word(text_block, 0, 8);
+    put_word(text_block, 8, -1);
+
+    end = fdps_draw_text(text_block, 0, text_surface, TEXT_PITCH, 0x22, 0, 0);
+
+    CHECK_EQ(end == text_surface, 1);
+    CHECK_EQ(text_pixel(0), BACKGROUND);
+    CHECK_EQ(text_pixel(1), BACKGROUND);
+}
+
+/* MOV EAX,[EBP+0x18] / ADD EAX,EAX / ADD EAX,[EBP+0x14] / MOVSX EAX,word ptr
+   [EAX] / ADD dword ptr [EBP+0x14],EAX: the id is scaled by two to reach the
+   table entry, and the WORD THERE IS ADDED TO THE TABLE BASE, not to the
+   address it was read from and not scaled again.  Entry 1's offset of 14 would
+   land at byte 28 if it were an element index and at byte 16 -- the
+   terminator, so nothing at all -- if it were measured from the entry's own
+   address. */
+static void the_table_offset_is_a_byte_offset_from_the_table_base(void)
+{
+    stage_text();
+    put_word(text_block, 0, 8);
+    put_word(text_block, 2, 14);
+    put_word(text_block, 8, 3);
+    put_word(text_block, 10, -1);
+    put_word(text_block, 14, 11);
+    put_word(text_block, 16, -1);
+
+    fdps_draw_text(text_block, 0, text_surface, TEXT_PITCH, 0x22, 0, 0);
+    CHECK_EQ(text_pixel(3), 0x22);
+
+    stage_text();
+    put_word(text_block, 0, 8);
+    put_word(text_block, 2, 14);
+    put_word(text_block, 8, 3);
+    put_word(text_block, 10, -1);
+    put_word(text_block, 14, 11);
+    put_word(text_block, 16, -1);
+
+    fdps_draw_text(text_block, 1, text_surface, TEXT_PITCH, 0x22, 0, 0);
+    CHECK_EQ(text_pixel(11), 0x22);
+    CHECK_EQ(text_pixel(3), BACKGROUND);
+}
+
+/* The offset is read with MOVSX and not MOVZX, so an entry may sit in front of
+   the table it is named from.  Here the table base handed over is byte 16 of
+   the block and entry 0 holds -16, which reaches the stream at byte 0; read
+   unsigned it would be 65520 and run off the block entirely. */
+static void a_table_offset_is_signed(void)
+{
+    stage_text();
+    put_word(back_block, 0, 6);
+    put_word(back_block, 2, -1);
+    put_word(back_block, 16, -16);
+
+    fdps_draw_text(back_block + 16, 0, text_surface, TEXT_PITCH, 0x22, 0, 0);
+
+    CHECK_EQ(text_pixel(6), 0x22);
+}
+
+/* MOV EAX,[0x0006404b] / ADD dword ptr [EBP + -0x14],EAX at 00020396 steps the
+   pen once per glyph by the font's advance and by nothing else, and the pen at
+   the terminator is what comes back.  Two glyphs at an advance of 24 put the
+   second cell at 24 and the return at 48. */
+static void a_glyph_steps_the_pen_by_the_font_advance(void)
+{
+    unsigned char *end;
+
+    stage_text();
+    put_word(text_block, 0, 8);
+    put_word(text_block, 8, 5);
+    put_word(text_block, 10, 6);
+    put_word(text_block, 12, -1);
+
+    end = fdps_draw_text(text_block, 0, text_surface, TEXT_PITCH, 0x22, 0, 0);
+
+    CHECK_EQ(text_pixel(5), 0x22);
+    CHECK_EQ(text_pixel(24 + 6), 0x22);
+    CHECK_EQ(text_pixel(16), BACKGROUND);
+    CHECK_EQ(end == text_surface + 2 * TEXT_ADVANCE, 1);
+}
+
+/* The only value the loop stops on is -1.  Zero falls through every CMP in the
+   chain to the glyph arm at 00020370 and is drawn as glyph 0, so a stream of
+   two zeros is two glyphs and not an empty entry -- treating 0 as a terminator
+   the way a C string does would draw nothing here. */
+static void a_zero_token_is_glyph_zero_and_not_a_terminator(void)
+{
+    unsigned char *end;
+
+    stage_text();
+    put_word(text_block, 0, 8);
+    put_word(text_block, 8, 0);
+    put_word(text_block, 10, 0);
+    put_word(text_block, 12, -1);
+
+    end = fdps_draw_text(text_block, 0, text_surface, TEXT_PITCH, 0x22, 0, 0);
+
+    CHECK_EQ(text_pixel(0), 0x22);
+    CHECK_EQ(text_pixel(24), 0x22);
+    CHECK_EQ(end == text_surface + 2 * TEXT_ADVANCE, 1);
+}
+
+/* The glyph arm pushes [EBP+0x24], [EBP+0x28] and [EBP+0x2c] unchanged at
+   00020370-0002037b, so all three of the caller's colours reach
+   fdps_draw_glyph as they were handed over: the body comes out in fg_color and
+   the cell is filled with bg_color across the sixteen columns the font's cell
+   width publishes. */
+static void the_callers_colours_reach_the_glyph_draw_unchanged(void)
+{
+    stage_text();
+    put_word(text_block, 0, 8);
+    put_word(text_block, 8, 1);
+    put_word(text_block, 10, -1);
+
+    fdps_draw_text(text_block, 0, text_surface, TEXT_PITCH, 0x2c, 0x5a, 0);
+
+    CHECK_EQ(text_pixel(1), 0x2c);
+    CHECK_EQ(text_pixel(0), 0x5a);
+    CHECK_EQ(text_pixel(15), 0x5a);
+    CHECK_EQ(text_pixel(16), BACKGROUND);
+}
+
+/* INC dword ptr [EBP + -0x30] then MOV EAX,[EBP+0x20] / IMUL EAX,[EBP + -0x20]
+   / IMUL EAX,[EBP + -0x30] / MOV EDX,[EBP+0x1c] / ADD EDX,EAX: the new line's
+   pen is dest + pitch * line_height * line_count, so the origin is the
+   PARAMETER and not the pen, and the multiplier is the running count and not
+   one line at a time.  Line 1 lands at 2*pitch and line 2 at 4*pitch with a
+   line height of 2, and both start at the left margin however far along the
+   previous line got. */
+static void a_line_break_measures_from_dest_and_multiplies_by_the_count(void)
+{
+    unsigned char *end;
+
+    stage_text();
+    put_word(text_block, 0, 8);
+    put_word(text_block, 8, 0);
+    put_word(text_block, 10, -2);
+    put_word(text_block, 12, 1);
+    put_word(text_block, 14, -2);
+    put_word(text_block, 16, 2);
+    put_word(text_block, 18, -1);
+
+    end = fdps_draw_text(text_block, 0, text_surface, TEXT_PITCH, 0x22, 0, 0);
+
+    CHECK_EQ(text_pixel(0), 0x22);
+    CHECK_EQ(text_pixel(2 * TEXT_PITCH + 1), 0x22);
+    CHECK_EQ(text_pixel(4 * TEXT_PITCH + 2), 0x22);
+    /* Where the second line would have started had the break measured from the
+       pen rather than from dest. */
+    CHECK_EQ(text_pixel(2 * TEXT_PITCH + TEXT_ADVANCE + 1), BACKGROUND);
+    /* And where the third would have been had the count not multiplied. */
+    CHECK_EQ(text_pixel(2 * TEXT_PITCH + 2), BACKGROUND);
+    CHECK_EQ(end == text_surface + 4 * TEXT_PITCH + TEXT_ADVANCE, 1);
+}
+
+/* The -6 arm formats data_fdps_dialog_last_action_value_param through "%d" (the
+   literal at 000617e8), takes its strlen, and draws each character as glyph
+   index (character - '0') -- AND EAX,0xff / SUB EAX,0x30 at 0002020b -- so 407
+   is glyphs 4, 0 and 7.  The step between digits is the literal 0x10 of ADD
+   dword ptr [EBP + -0x14],0x10 at 0002022a and NOT data_fdps_glyph_advance_x,
+   which is 24 here: the second digit lands at 16 and column 24 stays clear. */
+static void a_number_token_draws_the_dialog_value_a_digit_at_a_time(void)
+{
+    unsigned char *end;
+
+    stage_text();
+    data_fdps_dialog_last_action_value_param = 407;
+    put_word(text_block, 0, 8);
+    put_word(text_block, 8, -6);
+    put_word(text_block, 10, -1);
+
+    end = fdps_draw_text(text_block, 0, text_surface, TEXT_PITCH, 0x22, 0, 0);
+
+    CHECK_EQ(text_pixel(4), 0x22);
+    CHECK_EQ(text_pixel(16 + 0), 0x22);
+    CHECK_EQ(text_pixel(32 + 7), 0x22);
+    CHECK_EQ(text_pixel(24), BACKGROUND);
+    CHECK_EQ(text_pixel(48 + 7), BACKGROUND);
+    CHECK_EQ(end == text_surface + 3 * 0x10, 1);
+}
+
+/* The digit map has no range check and no case for the sign: '-' is 0x2d, so
+   "%d" of a negative value sends glyph index -3 into fdps_draw_glyph, which
+   multiplies it by the sheet stride and reads six bytes IN FRONT of the font
+   sheet.  That is what the original does; clamping the index, or special-casing
+   the sign the way fdps_draw_number does, would draw a different character
+   here.  The staged sheet carries a lead-in so the read lands somewhere real,
+   and the byte at -3 is a column-0 glyph. */
+static void the_digit_map_sends_a_minus_sign_three_glyphs_before_the_sheet(void)
+{
+    unsigned char *end;
+
+    stage_text();
+    data_fdps_dialog_last_action_value_param = -5;
+    put_word(text_block, 0, 8);
+    put_word(text_block, 8, -6);
+    put_word(text_block, 10, -1);
+
+    end = fdps_draw_text(text_block, 0, text_surface, TEXT_PITCH, 0x22, 0, 0);
+
+    CHECK_EQ(text_pixel(0), 0x22);
+    CHECK_EQ(text_pixel(16 + 5), 0x22);
+    CHECK_EQ(end == text_surface + 2 * 0x10, 1);
+}
+
+/* PUSH dword ptr [0x00064030] / PUSH dword ptr [0x000643c4] at 00020155 and the
+   same pair for [0x00064034] at 0002018c: the substituted entry is named by the
+   id global, and the block it is drawn from is the GLOBAL text and not the
+   block the caller handed over.  Both blocks here hold an entry 0, and it is
+   the substitution block's that has to come out. */
+static void a_substitution_draws_the_global_block_entry_its_id_global_names(void)
+{
+    stage_text();
+    data_fdps_dialog_last_action_text_id_param = 0;
+    data_fdps_dialog_subst_text_id_2 = 2;
+    put_word(subst_block, 0, 8);
+    put_word(subst_block, 4, 16);
+    put_word(subst_block, 8, 9);
+    put_word(subst_block, 10, -1);
+    put_word(subst_block, 16, 4);
+    put_word(subst_block, 18, -1);
+    put_word(text_block, 0, 8);
+    put_word(text_block, 8, -4);
+    put_word(text_block, 10, -1);
+
+    fdps_draw_text(text_block, 0, text_surface, TEXT_PITCH, 0x22, 0, 0);
+    CHECK_EQ(text_pixel(9), 0xd0);
+    CHECK_EQ(text_pixel(4), BACKGROUND);
+
+    stage_text();
+    data_fdps_dialog_last_action_text_id_param = 0;
+    data_fdps_dialog_subst_text_id_2 = 2;
+    put_word(subst_block, 0, 8);
+    put_word(subst_block, 4, 16);
+    put_word(subst_block, 8, 9);
+    put_word(subst_block, 10, -1);
+    put_word(subst_block, 16, 4);
+    put_word(subst_block, 18, -1);
+    put_word(text_block, 0, 8);
+    put_word(text_block, 8, -5);
+    put_word(text_block, 10, -1);
+
+    fdps_draw_text(text_block, 0, text_surface, TEXT_PITCH, 0x22, 0, 0);
+    CHECK_EQ(text_pixel(4), 0xd0);
+    CHECK_EQ(text_pixel(9), BACKGROUND);
+}
+
+/* The pitfall.  PUSH 0x6d / PUSH 0x0 / PUSH 0xd0 at 00020144 are literals: the
+   recursive call does NOT forward [EBP+0x24], [EBP+0x28] and [EBP+0x2c], so a
+   substituted name stays in the standard message colours inside text the caller
+   asked for in another one -- and the caller's background fill stops at the
+   substitution's cell and starts again after it.  Forwarding the three, which
+   is the obvious tidy-up, would put the whole line in one colour.
+
+   The pen carries on from what the recursive call returned (MOV dword ptr
+   [EBP + -0x14],EAX at 00020169), so the glyph after the substitution sits one
+   advance past the substituted one and not one advance past where the
+   substitution began. */
+static void a_substitution_ignores_the_callers_colours(void)
+{
+    unsigned char *end;
+
+    stage_text();
+    data_fdps_dialog_last_action_text_id_param = 0;
+    put_word(subst_block, 0, 8);
+    put_word(subst_block, 8, 9);
+    put_word(subst_block, 10, -1);
+    put_word(text_block, 0, 8);
+    put_word(text_block, 8, 7);
+    put_word(text_block, 10, -4);
+    put_word(text_block, 12, 8);
+    put_word(text_block, 14, -1);
+
+    end = fdps_draw_text(text_block, 0, text_surface, TEXT_PITCH, 0x22, 0x5a,
+                         0);
+
+    CHECK_EQ(text_pixel(7), 0x22);
+    CHECK_EQ(text_pixel(1), 0x5a);
+    CHECK_EQ(text_pixel(TEXT_ADVANCE + 9), 0xd0);
+    CHECK_EQ(text_pixel(TEXT_ADVANCE), BACKGROUND);
+    CHECK_EQ(text_pixel(2 * TEXT_ADVANCE + 8), 0x22);
+    CHECK_EQ(text_pixel(2 * TEXT_ADVANCE + 1), 0x5a);
+    CHECK_EQ(end == text_surface + 3 * TEXT_ADVANCE, 1);
+}
+
 void run_text_tests(void)
 {
     RUN_TEST(set_bits_paint_and_clear_bits_do_not);
@@ -893,6 +1296,30 @@ void run_text_tests(void)
     RUN_TEST(every_cell_is_six_wide_and_eight_rows_tall);
     RUN_TEST(the_callers_pitch_is_the_row_step);
     RUN_TEST(the_figure_starts_exactly_at_dest);
+
+    RUN_TEST(an_empty_entry_paints_nothing_and_returns_dest);
+    RUN_TEST(the_table_offset_is_a_byte_offset_from_the_table_base);
+    RUN_TEST(a_table_offset_is_signed);
+    RUN_TEST(a_glyph_steps_the_pen_by_the_font_advance);
+    RUN_TEST(a_zero_token_is_glyph_zero_and_not_a_terminator);
+    RUN_TEST(the_callers_colours_reach_the_glyph_draw_unchanged);
+    RUN_TEST(a_line_break_measures_from_dest_and_multiplies_by_the_count);
+    RUN_TEST(a_number_token_draws_the_dialog_value_a_digit_at_a_time);
+    RUN_TEST(the_digit_map_sends_a_minus_sign_three_glyphs_before_the_sheet);
+    RUN_TEST(a_substitution_draws_the_global_block_entry_its_id_global_names);
+    RUN_TEST(a_substitution_ignores_the_callers_colours);
+
+    /* The text globals stage_text() writes go back too: the two block pointers
+       are statics of this file and would outlive it, and the three dialog
+       parameter slots are what the next unit's own store-then-draw pair
+       expects to own. */
+    data_fdps_glyph_advance_x = 0;
+    data_fdps_font_line_height = 0;
+    data_fdps_font_sheet_ptr = (unsigned char *) 0;
+    data_fdps_all_game_text_ptr = (unsigned char *) 0;
+    data_fdps_dialog_last_action_text_id_param = 0;
+    data_fdps_dialog_subst_text_id_2 = 0;
+    data_fdps_dialog_last_action_value_param = 0;
 
     /* Put every font global back before leaving.  stage() and stage_cell()
        write them, and the runners share one process: a later unit that expects

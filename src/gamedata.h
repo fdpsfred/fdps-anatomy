@@ -1146,6 +1146,21 @@ extern unsigned char *data_fdps_level_up_window_sheet_ptr;
 /* 000643e0.  "ADWin.cel" out of Misc.vfs (00061d58).  Freed at 0002953a. */
 extern unsigned char *data_fdps_ui_terrain_hud_panel_sheet_ptr;
 
+/* 00069d84.  "ShopWin.Cel" out of the village container (00061ef8), and the one
+   .cel sheet here that is NOT a startup resource: fdps_run_village_phase loads
+   it on the way into a village phase (MOV [0x00069d84],EAX at 0003130f, the
+   instruction after it sets data_fdps_village_mode_flag) and frees it again on
+   the way out (00031499), storing nothing back.
+
+   So outside a village phase it holds a freed pointer, and none of its six
+   readers tests it -- fdps_draw_text, fdps_village_animate_window_zoom,
+   fdps_shop_select_item, fdps_shop_render_buy_target_frame,
+   fdps_village_select_member and fdps_church_select_promote_candidate all
+   dereference
+   it unguarded.  Every one of them runs only while the flag is set, which is
+   what keeps that safe. */
+extern unsigned char *data_fdps_village_window_sheet_ptr;
+
 /* 000643cc.  "Fdetxt.fon" out of "Field.vfs" (00061da4) -- the second
    container fdps_load_global_resources opens, after it has released the
    Misc.vfs handle.  Freed at 000294e6. */
@@ -1305,5 +1320,28 @@ extern int data_fdps_number_glyph_color_row;
    21.5's routing settled on; the accesses named above fix the width and leave
    the signedness to the functions that put figures in it. */
 extern int data_fdps_dialog_last_action_value_param;
+
+/* 00064030 and 00064034.  The two text ids a message substitutes into itself:
+   the -4 control code in a text entry draws the entry these name in the first,
+   and the -5 code the entry named in the second, both out of
+   data_fdps_all_game_text_ptr.  They are parameter-passing slots of the same
+   kind as data_fdps_dialog_last_action_value_param above -- a caller stores the
+   id of the name or item it is about to talk about and then draws the sentence
+   that carries the code.
+
+   fdps_draw_text IS THE ONLY READER of either, at 00020155 and 0002018c.  Every
+   other access in the image is a store: eight of the first, in
+   fdps_battle_search_cell_at_cursor, fdps_run_death_scripts, fdps_shop_buy_loop,
+   fdps_village_item_sell_loop (twice), fdps_village_item_transfer_loop,
+   fdps_village_member_equip_loop and fdps_church_promote_loop; four of the
+   second, in fdps_battle_search_cell_at_cursor, fdps_shop_buy_loop,
+   fdps_village_item_transfer_loop and fdps_church_promote_loop.  Nothing
+   initialises either and nothing clears them, so outside such a store-then-draw
+   pair each holds whatever the last caller left.
+
+   Both are full dwords: every store is MOV [addr],EAX and both reads are
+   PUSH dword ptr. */
+extern int data_fdps_dialog_last_action_text_id_param;
+extern int data_fdps_dialog_subst_text_id_2;
 
 #endif

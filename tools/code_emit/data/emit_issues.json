@@ -1838,5 +1838,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0001ff60": [
+    {
+      "what": "The -6 number arm maps a formatted character to a glyph index by bare subtraction of '0' with no range check (AND EAX,0xff / SUB EAX,0x30 at 0002020b), so a negative data_fdps_dialog_last_action_value_param makes sprintf emit '-' and sends glyph index -3 into fdps_draw_glyph, which reads six bytes in FRONT of data_fdps_font_sheet_ptr. In the original those six bytes are whatever the allocator left before the Fdetxt.fon block; in the rebuild the heap layout is not the same, so the glyph that comes out differs and the read could land outside a mapped page. The transcription is faithful -- the C does exactly what the assembly does, and tests/text.c pins it against a sheet staged with a lead-in -- so this is not a defect in the emit. What is unsettled is whether the game ever reaches it: that needs a text entry carrying a -6 token to be drawn while the value slot holds a negative, and the entries live in the text blocks.",
+      "needs": "Ticket 23's emitted text blocks, swept for every entry that carries a -6 token, cross-referenced against what the seven functions that store data_fdps_dialog_last_action_value_param can put there (fdps_shop_buy_loop does SUB dword ptr [0x00064038],EAX at 00033d83, which is the one store that can go below zero). If any reachable pair exists, a playtest of that screen says what the original actually draws and whether the rebuild has to place a real glyph at index -3.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same concern independently and confirm it: the -6 arm's AND EAX,0xff / SUB EAX,0x30 at 0002020b has no range check, so a negative data_fdps_dialog_last_action_value_param sends glyph index -3 into fdps_draw_glyph and reads in front of the font sheet. What my pass adds is a second site the emitter's `needs` does not name: sweeping 0x00064038 across the image (search_instructions operand '0x0006403') shows TWO arithmetic writes that can leave the slot negative, both in fdps_shop_buy_loop -- SUB dword ptr [0x00064038],EAX at 00033d83 and NEG dword ptr [0x00064038] at 00033e98, the latter sitting immediately after a fdps_draw_text call at 00033e8e. Every other write in the image is a plain MOV of a computed value. So the reachability question should be asked of both instructions, not just the subtraction.",
+      "needs": "Ticket 23's emitted text blocks swept for entries carrying a -6 token, cross-referenced against what fdps_shop_buy_loop can leave in 0x00064038 at 00033d83 and 00033e98. If a reachable pair exists, a playtest of that shop screen says what the original draws there.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

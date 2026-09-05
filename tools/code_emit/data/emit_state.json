@@ -2558,6 +2558,14 @@
       "status": "committed",
       "emitted_against": "0x1ea",
       "rounds": 0
+    },
+    "0001ff60": {
+      "name": "fdps_draw_text",
+      "target": "text.c",
+      "body_size": "0x46e",
+      "status": "committed",
+      "emitted_against": "0x46e",
+      "rounds": 0
     }
   }
 }
