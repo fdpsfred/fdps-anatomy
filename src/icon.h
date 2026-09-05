@@ -181,4 +181,35 @@ extern int fdps_icon_script_set_unit_facing(unsigned char *script, int offset);
 extern int fdps_icon_script_blink_units_out(unsigned char *script, int offset);
 #pragma aux fdps_icon_script_blink_units_out "*" parm caller [];
 
+/* Script opcode 0x10.  Displaces the map view by a scripted list of pixel
+   offsets, holding each one for a fixed number of rendered frames, and puts
+   the view back where it found it.
+
+   script is the base of the loaded IconAni .DAT image and offset the byte
+   offset of this opcode inside it.  The two header operand bytes are unsigned:
+   script[offset + 1] is how many rendered frames each step is held for and
+   script[offset + 2] is how many steps follow.  The list follows at
+   script[offset + 3] as that many two-byte pairs, an x displacement then a y
+   displacement, each one signed over -128..127.
+
+   Returns offset + 3 + 2 * step_count, the position of the next opcode, which
+   the interpreter stores as its new script position.
+
+   EACH PAIR IS MEASURED FROM THE VIEW ORIGIN AS IT STOOD ON ENTRY, not added
+   to the step before it, so a list of -6, -12, -18, -24 slides the view four
+   equal-ish notches and not sixty pixels away.
+
+   The handler leaves the view origin data_fdps_battle_view_window_origin_x /
+   _y (gamedata.h) exactly where it found them.  data_fdps_ui_play_active_flag
+   (gamedata.h) is 0 for the duration, so the info panel draws nothing over the
+   effect, and is put back to whatever it held on entry -- not forced to 1 the
+   way the walk, turn and blink handlers above force it.
+   data_fdps_map_cursor_draw_mode is not touched at all.
+
+   A frames-per-step operand of 0 shows nothing: the origin is displaced and
+   restored with no frame presented in between. */
+extern int fdps_icon_script_animate_view_offset(unsigned char *script,
+                                                int offset);
+#pragma aux fdps_icon_script_animate_view_offset "*" parm caller [];
+
 #endif

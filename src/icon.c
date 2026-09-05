@@ -473,3 +473,91 @@ int fdps_icon_script_blink_units_out(unsigned char *script, int offset)
 
     return offset + unit_count;
 }
+
+/* The value an operand byte has to exceed to be a negative displacement, and
+   what is taken off it when it does.  CMP dword ptr [EBP-0x10],0x7f / JLE
+   round ADD dword ptr [EBP-0x10],0xffffff00, so the byte is loaded unsigned
+   and sign-extended by hand rather than being loaded as a signed char. */
+#define VIEW_OFFSET_SIGN_THRESHOLD 0x7f
+#define VIEW_OFFSET_SIGN_BIAS 0x100
+
+/* 000224f0.  Script opcode 0x10, the scripted view shake.  See icon.h for the
+   operand layout and what the handler leaves behind.
+
+   EACH STEP'S PAIR IS MEASURED FROM THE ORIGIN SAVED ON ENTRY, NOT FROM THE
+   PREVIOUS STEP.  MOV EAX,[EBP-0x28] / ADD EAX,[EBP-0x10] / MOV [0x00069ce4],
+   EAX reloads the saved x every time round the loop and adds this step's
+   displacement to it; the same shape at 0002259d does the y.  Writing it as
+   `data_fdps_battle_view_window_origin_x += offset_x`, which is what "shake
+   the view by these amounts" reads like, turns ICON06.DAT's ramp of
+   -6, -12, -18, -24 into -6, -18, -36, -60 (rebuild_info/pitfalls.md).
+
+   THE DISPLAY FLAG IS PUT BACK, NOT FORCED TO 1.  MOV AL,byte ptr [EBP-0x8] /
+   MOV [0x00060159],AL restores whatever the flag held on entry, where the
+   walk, turn and blink handlers above all end with MOV [0x00060159],0x1.  This
+   handler also never touches data_fdps_map_cursor_draw_mode at all.  Writing
+   the family uniformly makes the info panel reappear after a cut-scene that
+   had deliberately hidden it (rebuild_info/pitfalls.md).
+
+   THE HEADER OPERANDS ARE UNSIGNED AND THE PAIRS ARE SIGNED.  XOR EAX,EAX /
+   MOV AL,byte ptr [EDX+0x1] and [EDX+0x2] load the frame count and the step
+   count as 0..255, while each displacement byte is loaded the same way and
+   then folded down by 0x100 when it exceeds 0x7f, so a pair byte spans
+   -128..127.
+
+   A frame count of 0 holds nothing: the inner loop's CMP dword ptr
+   [EBP-0x14],[EBP-0x20] / JL runs zero times, so the origin is written and
+   overwritten with nothing presented in between. */
+int fdps_icon_script_animate_view_offset(unsigned char *script, int offset)
+{
+    /* The view origin the effect displaces from and puts back. */
+    int saved_origin_x;
+    int saved_origin_y;
+    /* The info-panel flag on entry, held in a dword and put back as a byte. */
+    int saved_play_flag;
+    /* The two header operands: how many rendered frames each step is held for
+       and how many displacement pairs follow. */
+    int frames_per_step;
+    int step_count;
+    /* Position in the pair list, and the held-frame counter. */
+    int step;
+    int held;
+    /* This step's displacement from the saved origin, in pixels. */
+    int offset_x;
+    int offset_y;
+
+    saved_origin_x = data_fdps_battle_view_window_origin_x;
+    saved_origin_y = data_fdps_battle_view_window_origin_y;
+
+    frames_per_step = (int) script[offset + 1];
+    step_count = (int) script[offset + 2];
+    offset += 3;
+
+    saved_play_flag = (int) data_fdps_ui_play_active_flag;
+    data_fdps_ui_play_active_flag = 0;
+
+    for (step = 0; step < step_count; step++) {
+        offset_x = (int) script[offset];
+        if (offset_x > VIEW_OFFSET_SIGN_THRESHOLD) {
+            offset_x -= VIEW_OFFSET_SIGN_BIAS;
+        }
+        offset_y = (int) script[offset + 1];
+        if (offset_y > VIEW_OFFSET_SIGN_THRESHOLD) {
+            offset_y -= VIEW_OFFSET_SIGN_BIAS;
+        }
+        offset += 2;
+
+        data_fdps_battle_view_window_origin_x = saved_origin_x + offset_x;
+        data_fdps_battle_view_window_origin_y = saved_origin_y + offset_y;
+
+        for (held = 0; held < frames_per_step; held++) {
+            fdps_render_view_frame();
+        }
+    }
+
+    data_fdps_battle_view_window_origin_x = saved_origin_x;
+    data_fdps_battle_view_window_origin_y = saved_origin_y;
+    data_fdps_ui_play_active_flag = (unsigned char) saved_play_flag;
+
+    return offset;
+}

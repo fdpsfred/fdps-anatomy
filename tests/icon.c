@@ -1390,6 +1390,335 @@ static void blink_the_hud_globals_end_at_one_not_where_they_started(void)
     CHECK_EQ(data_fdps_ui_play_active_flag, 1);
 }
 
+/* ---------------------------------------------------------------------------
+ * 000224f0, script opcode 0x10: the scripted view shake.
+ *
+ * WHAT CAN BE ASSERTED FROM OUTSIDE, AND HOW.  The handler puts the view
+ * origin back before it returns, so nothing a case reads after the call can
+ * see what the origin held during a step.  The steps are observed from inside
+ * instead: every rendered frame ends in fdps_render_view_frame's wait on
+ * data_fdps_timer_tick_counter, and in a test image the only thing that moves
+ * that counter is the IRQ0 handler installed here -- so the handler is
+ * guaranteed to run at least once inside every frame, and it records the view
+ * origin it finds.  Duplicate fires within one step record nothing new because
+ * the recorder only stores a pair that differs from the one before it, which
+ * makes the recorded list the distinct sequence of origins the effect passed
+ * through.  data_fdps_view_frame_last_tick is staged equal to the tick counter
+ * so that the very first frame waits too; left alone it could find the two
+ * already unequal and pass straight through without a fire.
+ *
+ * Expected values come from the assembly: XOR EAX,EAX / MOV AL,byte ptr
+ * [EDX+0x1] and [EDX+0x2] for the two unsigned header operands with ADD dword
+ * ptr [EBP+0x18],0x3 for the header they sit in; CMP dword ptr [EBP-0x10],0x7f
+ * / JLE round ADD dword ptr [EBP-0x10],0xffffff00 for each pair byte's sign
+ * fold, and the same shape at 00022581 for the y; ADD dword ptr [EBP+0x18],0x2
+ * for the pair stride; MOV EAX,[EBP-0x28] / ADD EAX,[EBP-0x10] / MOV
+ * [0x00069ce4],EAX at 00022592 and the matching y store at 0002259d, both
+ * reloading the origin saved at 000224fc and 00022504; the frame loop at
+ * 000225af bounded by [EBP-0x20] with CALL 0x0002beb0 as its whole body; the
+ * plain stores of the saved origin back at 000225ca and the byte restore MOV
+ * AL,byte ptr [EBP-0x8] / MOV [0x00060159],AL at 000225da; and MOV EAX,[EBP
+ * +0x18] as the return.  None is read off the emitted C.
+ *
+ * WHAT IS NOT ASSERTED.  The frames-per-step operand's unsigned decode has no
+ * cheap observable -- a top-bit-set value there is at least 128 timer ticks a
+ * step -- so only the step-count operand's decode is exercised from the
+ * outside and the frame count rests on the identical XOR EAX,EAX / MOV AL
+ * sequence.  That each held frame straddles a vertical retrace is a playtest
+ * contract (rebuild_info/pitfalls.md), not a unit-test one.
+ *
+ * The view origin globals are ordinary ints that ticket 23 has not filled in
+ * yet, so each case stages the origin itself and asserts only against what it
+ * staged.
+ */
+
+/* Room for a step count with its top bit set: 0x82 steps is 260 pair bytes on
+   top of the three header bytes. */
+#define SHAKE_SCRIPT_BYTES 320
+
+/* Where the shake cases put the view before they run, and the values staged
+   into the two HUD globals.  Neither HUD value is one the handler produces, so
+   finding them again says it left them alone rather than wrote them. */
+#define SHAKE_HOME_X 100
+#define SHAKE_HOME_Y 60
+#define SHAKE_STAGED_CURSOR_MODE 4
+#define SHAKE_STAGED_PLAY_FLAG 4
+
+/* A frame-latch value no timer tick will be sitting on, so the latch still
+   holding it says no frame was presented. */
+#define SHAKE_LATCH_SENTINEL 0x5a5a5a5aUL
+
+/* How many distinct origins the recorder below will hold. */
+#define SHAKE_SEEN_MAX 8
+
+static unsigned char shake_script[SHAKE_SCRIPT_BYTES];
+
+static volatile int shake_seen_x[SHAKE_SEEN_MAX];
+static volatile int shake_seen_y[SHAKE_SEEN_MAX];
+static volatile int shake_seen_count;
+static volatile int shake_last_x;
+static volatile int shake_last_y;
+
+/* IRQ0 for the shake cases: moves the tick counter the frame wait spins on,
+   and on the way records the view origin the handler currently has set.  A
+   pair equal to the home position is never recorded, so neither a fire before
+   the first step nor one in the few instructions between the handler's restore
+   and the vector being put back can add an entry; and a pair equal to the last
+   one recorded is never recorded twice, so extra fires inside one step are
+   ignored.  What is left is the distinct sequence of displaced origins. */
+static void __interrupt __far shake_timer_isr(void)
+{
+    int live_x;
+    int live_y;
+
+    live_x = data_fdps_battle_view_window_origin_x;
+    live_y = data_fdps_battle_view_window_origin_y;
+    if ((live_x != SHAKE_HOME_X || live_y != SHAKE_HOME_Y)
+        && (live_x != shake_last_x || live_y != shake_last_y)) {
+        if (shake_seen_count < SHAKE_SEEN_MAX) {
+            shake_seen_x[shake_seen_count] = live_x;
+            shake_seen_y[shake_seen_count] = live_y;
+            shake_seen_count++;
+        }
+        shake_last_x = live_x;
+        shake_last_y = live_y;
+    }
+
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(walk_saved_timer);
+}
+
+/* Puts the view at its home position, arms the recorder against that position
+   so a fire before the first step records nothing, stages the frame latch and
+   the two HUD globals, and switches off everything a rendered frame would
+   otherwise paint. */
+static void shake_stage(void)
+{
+    data_fdps_battle_view_window_origin_x = SHAKE_HOME_X;
+    data_fdps_battle_view_window_origin_y = SHAKE_HOME_Y;
+
+    shake_seen_count = 0;
+    shake_last_x = SHAKE_HOME_X;
+    shake_last_y = SHAKE_HOME_Y;
+
+    data_fdps_map_unit_count = 0;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+
+    data_fdps_view_frame_last_tick = (unsigned int) SHAKE_LATCH_SENTINEL;
+
+    data_fdps_map_cursor_draw_mode = SHAKE_STAGED_CURSOR_MODE;
+    data_fdps_ui_play_active_flag = SHAKE_STAGED_PLAY_FLAG;
+
+    memset(shake_script, 0, sizeof(shake_script));
+}
+
+/* Writes the opcode and its two operands at offset, and returns the offset the
+   first displacement pair goes at. */
+static int shake_write_header(int offset, int frames_per_step, int step_count)
+{
+    shake_script[offset] = 0x10;
+    shake_script[offset + 1] = (unsigned char) frames_per_step;
+    shake_script[offset + 2] = (unsigned char) step_count;
+    return offset + 3;
+}
+
+/* One displacement pair, written as the raw bytes the script carries. */
+static void shake_write_pair(int pair_at, int raw_x, int raw_y)
+{
+    shake_script[pair_at] = (unsigned char) raw_x;
+    shake_script[pair_at + 1] = (unsigned char) raw_y;
+}
+
+/* One whole run with the frame wait serviced and the origin recorded.  Only
+   the cases with a non-zero frame count need it; a run that holds no frames
+   calls the handler directly. */
+static int shake_run(int offset)
+{
+    int next_offset;
+
+    data_fdps_view_frame_last_tick = data_fdps_timer_tick_counter;
+    walk_saved_timer = _dos_getvect(WALK_TIMER_VECTOR);
+    _dos_setvect(WALK_TIMER_VECTOR, shake_timer_isr);
+    next_offset = fdps_icon_script_animate_view_offset(shake_script, offset);
+    _dos_setvect(WALK_TIMER_VECTOR, walk_saved_timer);
+
+    return next_offset;
+}
+
+/* The header is read at offset + 1 and offset + 2 and the pairs start at
+   offset + 3, so the returned position is offset + 3 + 2 * step_count.  The
+   opcode byte and the byte past the list are both set to values that would
+   give a wildly different answer if either were picked up as an operand. */
+static void shake_the_operands_follow_the_opcode_byte(void)
+{
+    int pair_at;
+    int next_offset;
+
+    shake_stage();
+    shake_script[5] = 99;
+    pair_at = shake_write_header(5, 0, 2);
+    shake_write_pair(pair_at, 1, 2);
+    shake_write_pair(pair_at + 2, 3, 4);
+    shake_script[12] = 77;
+
+    next_offset = fdps_icon_script_animate_view_offset(shake_script, 5);
+
+    CHECK_EQ(pair_at, 8);
+    CHECK_EQ(next_offset, 12);
+}
+
+/* XOR EAX,EAX / MOV AL,byte ptr [EDX+0x2]: a step count with its top bit set
+   is 130 steps, so 260 pair bytes are consumed and the position advances by
+   263.  A signed decode would make it -126, skip the loop and return 3,
+   leaving the interpreter to resume in the middle of the pair list. */
+static void shake_the_step_count_operand_is_unsigned(void)
+{
+    int next_offset;
+
+    shake_stage();
+    shake_write_header(0, 0, 0x82);
+
+    next_offset = fdps_icon_script_animate_view_offset(shake_script, 0);
+
+    CHECK_EQ(next_offset, 263);
+}
+
+/* The origin stores at 000225ca and 000225d2 are the values saved at 000224fc
+   and 00022504, so however far the steps displaced the view it ends where it
+   began.  The displacements here are large enough that a missing restore would
+   be unmistakable. */
+static void shake_the_origin_ends_where_it_started(void)
+{
+    int pair_at;
+
+    shake_stage();
+    pair_at = shake_write_header(0, 0, 2);
+    shake_write_pair(pair_at, 40, 50);
+    shake_write_pair(pair_at + 2, 0xc0, 0xd0);
+
+    fdps_icon_script_animate_view_offset(shake_script, 0);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, SHAKE_HOME_X);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, SHAKE_HOME_Y);
+}
+
+/* MOV AL,byte ptr [EBP-0x8] / MOV [0x00060159],AL puts back the byte saved at
+   0002252e, where the walk, turn and blink handlers all store the literal 1
+   over it; and nothing in this function writes 0x00069cd0 at all.  Both
+   globals were staged at 4 and both come back 4.  Writing the family uniformly
+   would make the info panel reappear after a cut-scene that had hidden it, and
+   would reset a cursor mode the opcode never touched
+   (rebuild_info/pitfalls.md). */
+static void shake_the_hud_globals_are_left_as_they_were_found(void)
+{
+    int pair_at;
+
+    shake_stage();
+    pair_at = shake_write_header(0, 0, 1);
+    shake_write_pair(pair_at, 4, 4);
+
+    fdps_icon_script_animate_view_offset(shake_script, 0);
+
+    CHECK_EQ(data_fdps_ui_play_active_flag, SHAKE_STAGED_PLAY_FLAG);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, SHAKE_STAGED_CURSOR_MODE);
+}
+
+/* The frame loop at 000225af is bounded by the frames-per-step operand, so a
+   count of 0 presents nothing: the latch keeps its sentinel through four steps
+   of origin writes.  The position still advances past the whole pair list. */
+static void shake_no_held_frames_presents_nothing(void)
+{
+    int pair_at;
+    int next_offset;
+
+    shake_stage();
+    pair_at = shake_write_header(0, 0, 4);
+    shake_write_pair(pair_at, 1, 1);
+    shake_write_pair(pair_at + 2, 2, 2);
+    shake_write_pair(pair_at + 4, 3, 3);
+    shake_write_pair(pair_at + 6, 4, 4);
+
+    next_offset = fdps_icon_script_animate_view_offset(shake_script, 0);
+
+    CHECK_EQ(data_fdps_view_frame_last_tick == SHAKE_LATCH_SENTINEL, 1);
+    CHECK_EQ(next_offset, 11);
+}
+
+/* The frame loop is nested inside the step loop -- CALL 0x0002beb0 sits at
+   000225c1, inside the body the step counter at [EBP-0x1c] bounds -- so a step
+   count of 0 renders nothing however many frames each step asks for, and the
+   position advances by the three header bytes alone.  A frame loop hoisted out
+   to run once per opcode would burn two hundred timer ticks here. */
+static void shake_a_zero_step_count_renders_nothing(void)
+{
+    int next_offset;
+
+    shake_stage();
+    shake_write_header(0, 200, 0);
+
+    next_offset = fdps_icon_script_animate_view_offset(shake_script, 0);
+
+    CHECK_EQ(data_fdps_view_frame_last_tick == SHAKE_LATCH_SENTINEL, 1);
+    CHECK_EQ(next_offset, 3);
+}
+
+/* The heart of the opcode, watched from inside the frames it presents.  Each
+   step's pair is added to the origin saved on entry, so the ramp
+   -6, -12, -18, -24 from x = 100 walks 94, 88, 82, 76; a loop that added each
+   pair to the running origin -- which is what "shake the view by these
+   amounts" reads like -- would walk 94, 82, 64, 40 instead
+   (rebuild_info/pitfalls.md).  The same four frames pin the pair bytes' sign
+   fold on both axes: 0xfa is -6 and not 250, and the y column mixes +5 with
+   -10 so a decode that dropped the fold, or applied it to the wrong axis,
+   moves every recorded value. */
+static void shake_each_step_is_measured_from_the_origin_saved_on_entry(void)
+{
+    int pair_at;
+    int next_offset;
+
+    shake_stage();
+    pair_at = shake_write_header(0, 1, 4);
+    shake_write_pair(pair_at, 0xfa, 5);
+    shake_write_pair(pair_at + 2, 0xf4, 0xf6);
+    shake_write_pair(pair_at + 4, 0xee, 15);
+    shake_write_pair(pair_at + 6, 0xe8, 0xec);
+
+    next_offset = shake_run(0);
+
+    CHECK_EQ(shake_seen_count, 4);
+    CHECK_EQ(shake_seen_x[0], SHAKE_HOME_X - 6);
+    CHECK_EQ(shake_seen_y[0], SHAKE_HOME_Y + 5);
+    CHECK_EQ(shake_seen_x[1], SHAKE_HOME_X - 12);
+    CHECK_EQ(shake_seen_y[1], SHAKE_HOME_Y - 10);
+    CHECK_EQ(shake_seen_x[2], SHAKE_HOME_X - 18);
+    CHECK_EQ(shake_seen_y[2], SHAKE_HOME_Y + 15);
+    CHECK_EQ(shake_seen_x[3], SHAKE_HOME_X - 24);
+    CHECK_EQ(shake_seen_y[3], SHAKE_HOME_Y - 20);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, SHAKE_HOME_X);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, SHAKE_HOME_Y);
+    CHECK_EQ(next_offset, 11);
+}
+
+/* One step held for two frames is still one displacement: the origin is
+   written once per step, above the frame loop rather than inside it, so the
+   recorder sees a single distinct pair however long the step is held.  A
+   handler that displaced per frame would record two. */
+static void shake_a_held_step_displaces_once(void)
+{
+    int pair_at;
+
+    shake_stage();
+    pair_at = shake_write_header(0, 2, 1);
+    shake_write_pair(pair_at, 7, 0xf9);
+
+    shake_run(0);
+
+    CHECK_EQ(shake_seen_x[0], SHAKE_HOME_X + 7);
+    CHECK_EQ(shake_seen_y[0], SHAKE_HOME_Y - 7);
+    CHECK_EQ(shake_seen_count, 1);
+}
+
 void run_icon_tests(void)
 {
     RUN_TEST(the_dac_reads_back_what_was_written);
@@ -1429,4 +1758,12 @@ void run_icon_tests(void)
     RUN_TEST(blink_the_unit_count_operand_is_unsigned);
     RUN_TEST(blink_an_empty_list_still_renders);
     RUN_TEST(blink_the_hud_globals_end_at_one_not_where_they_started);
+    RUN_TEST(shake_the_operands_follow_the_opcode_byte);
+    RUN_TEST(shake_the_step_count_operand_is_unsigned);
+    RUN_TEST(shake_the_origin_ends_where_it_started);
+    RUN_TEST(shake_the_hud_globals_are_left_as_they_were_found);
+    RUN_TEST(shake_no_held_frames_presents_nothing);
+    RUN_TEST(shake_a_zero_step_count_renders_nothing);
+    RUN_TEST(shake_each_step_is_measured_from_the_origin_saved_on_entry);
+    RUN_TEST(shake_a_held_step_displaces_once);
 }
