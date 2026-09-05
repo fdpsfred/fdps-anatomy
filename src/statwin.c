@@ -28,6 +28,7 @@
 #include "palcycle.h"
 #include "sprite.h"
 #include "statwin.h"
+#include "table.h"
 #include "text.h"
 #include "unit.h"
 #include "vfs.h"
@@ -1082,4 +1083,157 @@ void fdps_close_status_window(void *window_image, void *background)
 
     free(scene_page);
     data_fdps_ui_play_active_flag = data_fdps_ui_play_active_flag_saved;
+}
+
+/* The inventory list's geometry, straight out of the address arithmetic.  A
+   row is 0x11 pixels tall (IMUL EAX,dword ptr [EBP+-0x14],0x11, three times
+   over), and the three things a row holds sit on three different baselines:
+   the category icon on row_top + 9 at column 3, the item name on row_top + 8
+   at column 0x13, and the right-hand caption on row_top + 0xd at column 0x66
+   with its figure 0x16 pixels further right.  The selection bar is drawn at
+   column 0 on the name's baseline, selected_slot * 0x11 + 8.
+
+   Every one of those is folded into the destination pointer as dest_base +
+   y * pitch + x, so the caller's dest_base is the list's top-left corner and
+   not the surface origin. */
+#define INV_ROW_PITCH 0x11
+#define INV_SEL_BAR_SPRITE 0
+#define INV_SEL_BAR_X 0
+#define INV_SEL_BAR_Y 8
+#define INV_ICON_X 3
+#define INV_ICON_Y 9
+#define INV_NAME_X 0x13
+#define INV_NAME_Y 8
+#define INV_CAPTION_X 0x66
+#define INV_CAPTION_Y 0x0d
+#define INV_FIGURE_X_BIAS 0x16
+
+/* How many slots a unit record carries and what the flag byte of a slot pair
+   means: bit 7 empty, bit 6 equipped (TEST dword ptr [EBP+-0xc],0x80 and TEST
+   ...,0x40).  The pair itself is inventory_slots[2 * slot] and
+   inventory_slots[2 * slot + 1] of struct fdps_unit_record. */
+#define INV_SLOT_COUNT 8
+#define INV_SLOT_EMPTY 0x80
+#define INV_SLOT_EQUIPPED 0x40
+
+/* Where the item names live in data_fdps_all_game_text_ptr: entry 0xc9 plus
+   the item id (ADD EAX,0xc9 at 00024fd9). */
+#define INV_ITEM_NAME_TEXT_BASE 0xc9
+
+/* The two upper bounds the item type byte is tested against.  Types 1..0x15
+   are the weapons and 0x16..0x27 the armour; assets/items.md lists what each
+   code is. */
+#define ITEM_TYPE_WEAPON_LAST 0x15
+#define ITEM_TYPE_ARMOUR_LAST 0x27
+
+/* The Command.cel sprites the list draws: the three category icons, the four
+   added to an icon when the item is equipped, and the four right-hand
+   captions -- attack power, defence power, HP recovery and MP recovery -- plus
+   the plain one an item with no headline number gets. */
+#define INV_ICON_WEAPON 0x1d
+#define INV_ICON_ARMOUR 0x1e
+#define INV_ICON_OTHER 0x1f
+#define INV_ICON_EQUIPPED_BIAS 4
+#define INV_CAPTION_HP_RECOVERY 0x3e
+#define INV_CAPTION_MP_RECOVERY 0x3f
+#define INV_CAPTION_AP 0x40
+#define INV_CAPTION_DP 0x41
+#define INV_CAPTION_PLAIN 0x43
+
+/* The two use_effect codes that put a recovery amount on the row (CMP EAX,0xb
+   at 000250a2 and CMP EAX,0xc at 000250e6).  Every other effect, 0x20 among
+   them, draws INV_CAPTION_PLAIN and no figure. */
+#define ITEM_USE_RESTORE_HP 0x0b
+#define ITEM_USE_RESTORE_MP 0x0c
+
+/* The width of the headline figure and its sign flag: PUSH 0x4 and a zeroed
+   EAX pushed behind it at every one of the four call sites. */
+#define INV_FIGURE_DIGITS 4
+#define INV_FIGURE_SHOW_PLUS 0
+
+/* 00024ea0.  See statwin.h for the list's shape and for why the item type is
+   classified twice rather than once. */
+void fdps_draw_unit_inventory(int unit_index, int selected_slot,
+                              unsigned char *dest_base, int pitch)
+{
+    struct fdps_unit_record *unit;
+    struct fdps_item_effect *item;
+    unsigned char *caption_dest;
+    int slot;
+    int slot_flags;
+    int item_id;
+    int item_type;
+    int icon_sprite;
+
+    unit = fdps_get_unit_record(unit_index);
+    if (selected_slot >= 0 && selected_slot < INV_SLOT_COUNT) {
+        fdps_cel_blit_sprite(data_fdps_selection_bar_sheet_ptr,
+                             INV_SEL_BAR_SPRITE, dest_base, pitch,
+                             INV_SEL_BAR_X,
+                             selected_slot * INV_ROW_PITCH + INV_SEL_BAR_Y,
+                             0, 0);
+    }
+
+    for (slot = 0; slot < INV_SLOT_COUNT; slot++) {
+        slot_flags = unit->inventory_slots[slot * 2];
+        if ((slot_flags & INV_SLOT_EMPTY) != 0) {
+            continue;
+        }
+        item_id = unit->inventory_slots[slot * 2 + 1];
+        item = fdps_get_item_record(item_id);
+
+        /* The icon's classification.  Type 0 falls out of both bounded tests
+           and takes INV_ICON_OTHER. */
+        item_type = item->type;
+        if (item_type > 0 && item_type <= ITEM_TYPE_WEAPON_LAST) {
+            icon_sprite = INV_ICON_WEAPON;
+        } else if (item_type > 0 && item_type <= ITEM_TYPE_ARMOUR_LAST) {
+            icon_sprite = INV_ICON_ARMOUR;
+        } else {
+            icon_sprite = INV_ICON_OTHER;
+        }
+        if ((slot_flags & INV_SLOT_EQUIPPED) != 0) {
+            icon_sprite += INV_ICON_EQUIPPED_BIAS;
+        }
+        fdps_blit_command_sprite(dest_base
+                                 + (slot * INV_ROW_PITCH + INV_ICON_Y) * pitch
+                                 + INV_ICON_X, pitch, icon_sprite);
+
+        fdps_draw_text(data_fdps_all_game_text_ptr,
+                       item_id + INV_ITEM_NAME_TEXT_BASE,
+                       dest_base
+                       + (slot * INV_ROW_PITCH + INV_NAME_Y) * pitch
+                       + INV_NAME_X, pitch, PANEL_TEXT_FG_COLOR,
+                       PANEL_TEXT_BG_COLOR, PANEL_TEXT_OUTLINE_COLOR);
+
+        /* The caption's own classification, which is deliberately a second
+           reading of the same byte: here type 0 misses the weapon test and
+           then passes the armour one, so it prints the defence caption and a
+           defence figure while its icon was the catch-all.  See statwin.h. */
+        caption_dest = dest_base
+            + (slot * INV_ROW_PITCH + INV_CAPTION_Y) * pitch + INV_CAPTION_X;
+        if (item->type > 0 && item->type <= ITEM_TYPE_WEAPON_LAST) {
+            fdps_blit_command_sprite(caption_dest, pitch, INV_CAPTION_AP);
+            fdps_draw_number(caption_dest + INV_FIGURE_X_BIAS, pitch, item->ap,
+                             INV_FIGURE_DIGITS, INV_FIGURE_SHOW_PLUS);
+        } else if (item->type <= ITEM_TYPE_ARMOUR_LAST) {
+            fdps_blit_command_sprite(caption_dest, pitch, INV_CAPTION_DP);
+            fdps_draw_number(caption_dest + INV_FIGURE_X_BIAS, pitch, item->dp,
+                             INV_FIGURE_DIGITS, INV_FIGURE_SHOW_PLUS);
+        } else if (item->use_effect == ITEM_USE_RESTORE_HP) {
+            fdps_blit_command_sprite(caption_dest, pitch,
+                                     INV_CAPTION_HP_RECOVERY);
+            fdps_draw_number(caption_dest + INV_FIGURE_X_BIAS, pitch,
+                             item->use_amount, INV_FIGURE_DIGITS,
+                             INV_FIGURE_SHOW_PLUS);
+        } else if (item->use_effect == ITEM_USE_RESTORE_MP) {
+            fdps_blit_command_sprite(caption_dest, pitch,
+                                     INV_CAPTION_MP_RECOVERY);
+            fdps_draw_number(caption_dest + INV_FIGURE_X_BIAS, pitch,
+                             item->use_amount, INV_FIGURE_DIGITS,
+                             INV_FIGURE_SHOW_PLUS);
+        } else {
+            fdps_blit_command_sprite(caption_dest, pitch, INV_CAPTION_PLAIN);
+        }
+    }
 }

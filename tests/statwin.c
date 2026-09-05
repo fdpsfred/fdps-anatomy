@@ -1646,6 +1646,636 @@ static void the_three_names_come_from_their_own_blocks(void)
     CHECK_EQ(name_text_id(PN_RACE_AT), PN_RACE_BASE + 4);
 }
 
+/* ------------------------------------------------------------------ *
+ * fdps_draw_unit_inventory @ 00024ea0
+ *
+ * The list is drawn entirely through four callees, so what this function
+ * contributes is which sprite, which text entry, which record field and which
+ * pixel -- and all four are readable off a surface once the sheets are
+ * fabricated so that a drawn pixel names what drew it.  Every expected value
+ * below is the literal the assembly pushes: 0x11 between rows, 0x1d/0x1e/0x1f
+ * for the three icons and +4 when equipped, 0xc9 added to the item id for the
+ * name, 0x40/0x41/0x3e/0x3f/0x43 for the five captions, the bounds 0, 0x15,
+ * 0x27, 0x0b and 0x0c the two classifications test, and the offsets 3/9,
+ * 0x13/8, 0x66/0xd and the further 0x16 for the figure.
+ *
+ * THE FIXTURE IS BUILT SO NOTHING COLLIDES.  A command sprite paints 0x80 plus
+ * its index, a number glyph paints its digit plus one, the selection bar
+ * paints 0x70, a text glyph paints 0xd0, and the surface starts at 0x5a -- so
+ * one byte says both what drew it and which sprite it was.  The bar is made
+ * three pixels wide and one row tall so it lives in columns 0..2, which
+ * nothing else in the list ever reaches; that is what lets a case assert the
+ * bar's row is the ONLY row it touched rather than merely one of them.
+ *
+ * The command sprites are 25 by 22 and the rows are 17 apart, so consecutive
+ * rows overlap.  Every position read back below is the top-left pixel of the
+ * thing that owns it, and the drawing order -- icon, name, caption, figure,
+ * slot by slot -- puts the later writer on top at each of them, so no
+ * assertion is reading a neighbour's overspill.
+ */
+
+#define INV_PITCH 0x140
+/* A pitch that is not the 0x140 every call site passes.  Each of the three
+   destinations is row * pitch + column, so at another pitch a coordinate pair
+   that was folded into a fixed byte offset would land somewhere else. */
+#define INV_ODD_PITCH 0x100
+#define INV_ROWS 200
+#define INV_SURFACE_BYTES (INV_PITCH * INV_ROWS)
+#define INV_FILL 0x5a
+
+#define INV_ROW_H 0x11
+#define INV_SLOTS 8
+#define INV_EMPTY 0x80
+#define INV_EQUIPPED 0x40
+#define INV_ICON_COL 3
+#define INV_ICON_ROW_BIAS 9
+#define INV_NAME_COL 0x13
+#define INV_NAME_ROW_BIAS 8
+#define INV_CAP_COL 0x66
+#define INV_CAP_ROW_BIAS 0x0d
+#define INV_FIG_COL (INV_CAP_COL + 0x16)
+#define INV_BAR_ROW_BIAS 8
+
+/* A .CEL's sprite offset table starts at +0x0f (resource_info/cel.md) and
+   fdps_blit_command_sprite draws 25 by 22 of whatever the entry points at
+   (sprite.h), so each stream is 22 rows of one fill op with a run of 25 --
+   command byte 0x18 is op 00 with a run of (0x18 & 0x3f) + 1.  0x44 sprites is
+   one more than 0x43, the highest caption the list asks for. */
+#define INV_CEL_TABLE_AT 0x0f
+#define INV_CMD_SPRITES 0x44
+#define INV_CMD_RUN 0x18
+#define INV_CMD_ROWS 22
+#define INV_CMD_STREAM_BYTES (INV_CMD_ROWS * 2)
+#define INV_CMD_STREAMS_AT (INV_CEL_TABLE_AT + INV_CMD_SPRITES * 4)
+#define INV_CMD_SHEET_BYTES \
+    (INV_CMD_STREAMS_AT + INV_CMD_SPRITES * INV_CMD_STREAM_BYTES)
+#define INV_CMD_COLOR_BASE 0x80
+
+/* Number.cel: fdps_draw_number picks colour_row * 13 + glyph off the same
+   +0x0f table and draws 6 by 8, so command byte 0x05 is a run of 6.  A
+   sprite's colour is its index plus one, and every case leaves
+   data_fdps_number_glyph_color_row at 0, so a digit paints digit + 1. */
+#define INV_NUM_GLYPHS 13
+#define INV_NUM_COLOR_ROWS 5
+#define INV_NUM_SPRITES (INV_NUM_GLYPHS * INV_NUM_COLOR_ROWS)
+#define INV_NUM_RUN 0x05
+#define INV_NUM_CELL_W 6
+#define INV_NUM_CELL_H 8
+#define INV_NUM_STREAM_BYTES (INV_NUM_CELL_H * 2)
+#define INV_NUM_STREAMS_AT (INV_CEL_TABLE_AT + INV_NUM_SPRITES * 4)
+#define INV_NUM_SHEET_BYTES \
+    (INV_NUM_STREAMS_AT + INV_NUM_SPRITES * INV_NUM_STREAM_BYTES)
+
+/* SelBar.cel.  fdps_cel_blit_sprite takes the sprite size out of the header
+   rather than from its caller, so the fixture's header is what decides it:
+   three columns and one row, which keeps the bar inside columns 0..2. */
+#define INV_BAR_W 3
+#define INV_BAR_H 1
+#define INV_BAR_RUN 0x02
+#define INV_BAR_SPRITES 1
+#define INV_BAR_STREAMS_AT (INV_CEL_TABLE_AT + INV_BAR_SPRITES * 4)
+#define INV_BAR_SHEET_BYTES (INV_BAR_STREAMS_AT + INV_BAR_H * 2)
+#define INV_BAR_COLOR 0x70
+
+/* The text block, laid out the way text.h describes: signed 16-bit offsets
+   from the block's own base, then the token streams.  Entry 0xc9 + id holds
+   one glyph whose index IS the id, so the eight pixels a name paints read back
+   as the item id the name was fetched for. */
+#define INV_NAME_TEXT_BASE 0xc9
+#define INV_ITEM_IDS 256
+#define INV_TEXT_ENTRIES (INV_NAME_TEXT_BASE + INV_ITEM_IDS)
+#define INV_TEXT_TABLE_BYTES (INV_TEXT_ENTRIES * 2)
+#define INV_TEXT_STREAM_BYTES 4
+#define INV_TEXT_BYTES \
+    (INV_TEXT_TABLE_BYTES + INV_TEXT_ENTRIES * INV_TEXT_STREAM_BYTES)
+#define INV_TEXT_END (-1)
+#define INV_TEXT_FG 0xd0
+
+/* One glyph is eight pixels wide and one row tall, so a name's eight pixels
+   are the glyph byte's eight bits, most significant first. */
+#define INV_GLYPH_W 8
+#define INV_GLYPH_ROWS 1
+
+/* ITEM.DAT's stride is 0x17 and not sizeof (src/table.c). */
+#define INV_ITEM_STRIDE 0x17
+#define INV_ITEM_TABLE_BYTES (INV_ITEM_IDS * INV_ITEM_STRIDE)
+
+#define INV_UNIT_COUNT 2
+
+static unsigned char inv_surface[INV_SURFACE_BYTES];
+static unsigned char inv_command_sheet[INV_CMD_SHEET_BYTES];
+static unsigned char inv_number_sheet[INV_NUM_SHEET_BYTES];
+static unsigned char inv_bar_sheet[INV_BAR_SHEET_BYTES];
+static unsigned char inv_text[INV_TEXT_BYTES];
+static unsigned char inv_font[INV_ITEM_IDS];
+static unsigned char inv_item_table[INV_ITEM_TABLE_BYTES];
+static struct fdps_unit_record inv_units[INV_UNIT_COUNT];
+static int inv_pitch;
+
+static void inv_stage_sheets(void)
+{
+    int sprite;
+    int row;
+    int stream_at;
+    int index;
+    struct fdps_cel_header *bar_header;
+
+    memset(inv_command_sheet, 0, sizeof inv_command_sheet);
+    for (sprite = 0; sprite < INV_CMD_SPRITES; sprite++) {
+        stream_at = INV_CMD_STREAMS_AT + sprite * INV_CMD_STREAM_BYTES;
+        *(int *) (inv_command_sheet + INV_CEL_TABLE_AT + sprite * 4) =
+            stream_at;
+        for (row = 0; row < INV_CMD_ROWS; row++) {
+            inv_command_sheet[stream_at + row * 2] =
+                (unsigned char) INV_CMD_RUN;
+            inv_command_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) (INV_CMD_COLOR_BASE + sprite);
+        }
+    }
+
+    memset(inv_number_sheet, 0, sizeof inv_number_sheet);
+    for (sprite = 0; sprite < INV_NUM_SPRITES; sprite++) {
+        stream_at = INV_NUM_STREAMS_AT + sprite * INV_NUM_STREAM_BYTES;
+        *(int *) (inv_number_sheet + INV_CEL_TABLE_AT + sprite * 4) = stream_at;
+        for (row = 0; row < INV_NUM_CELL_H; row++) {
+            inv_number_sheet[stream_at + row * 2] =
+                (unsigned char) INV_NUM_RUN;
+            inv_number_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) (sprite + 1);
+        }
+    }
+
+    memset(inv_bar_sheet, 0, sizeof inv_bar_sheet);
+    bar_header = (struct fdps_cel_header *) inv_bar_sheet;
+    bar_header->sprite_width = (short) INV_BAR_W;
+    bar_header->sprite_height = (short) INV_BAR_H;
+    bar_header->sprite_count = (short) INV_BAR_SPRITES;
+    *(int *) (inv_bar_sheet + INV_CEL_TABLE_AT) = INV_BAR_STREAMS_AT;
+    for (row = 0; row < INV_BAR_H; row++) {
+        inv_bar_sheet[INV_BAR_STREAMS_AT + row * 2] =
+            (unsigned char) INV_BAR_RUN;
+        inv_bar_sheet[INV_BAR_STREAMS_AT + row * 2 + 1] =
+            (unsigned char) INV_BAR_COLOR;
+    }
+
+    for (index = 0; index < INV_ITEM_IDS; index++) {
+        inv_font[index] = (unsigned char) index;
+    }
+    memset(inv_text, 0, sizeof inv_text);
+    for (index = 0; index < INV_TEXT_ENTRIES; index++) {
+        stream_at = INV_TEXT_TABLE_BYTES + index * INV_TEXT_STREAM_BYTES;
+        *(short *) (inv_text + index * 2) = (short) stream_at;
+        if (index >= INV_NAME_TEXT_BASE) {
+            *(short *) (inv_text + stream_at) =
+                (short) (index - INV_NAME_TEXT_BASE);
+        } else {
+            *(short *) (inv_text + stream_at) = (short) 0;
+        }
+        *(short *) (inv_text + stream_at + 2) = (short) INV_TEXT_END;
+    }
+}
+
+/* Publishes the fixture, clears the surface, the item table and the records,
+   and fixes the pitch the case draws at. */
+static void inv_reset(int pitch)
+{
+    inv_pitch = pitch;
+    memset(inv_surface, INV_FILL, (size_t) INV_SURFACE_BYTES);
+    memset(inv_item_table, 0, sizeof inv_item_table);
+    memset(inv_units, 0, sizeof inv_units);
+
+    data_fdps_command_sprite_sheet_ptr = inv_command_sheet;
+    data_fdps_number_glyph_sheet_ptr = inv_number_sheet;
+    data_fdps_selection_bar_sheet_ptr = inv_bar_sheet;
+    data_fdps_all_game_text_ptr = inv_text;
+    data_fdps_font_sheet_ptr = inv_font;
+    data_fdps_item_effect_table_ptr = inv_item_table;
+    data_fdps_map_unit_array_ptr = (unsigned char *) inv_units;
+    data_fdps_font_glyph_width = (unsigned char) INV_GLYPH_W;
+    data_fdps_glyph_cell_height = (unsigned char) INV_GLYPH_ROWS;
+    data_fdps_font_glyph_stride_bytes = 1;
+    data_fdps_font_outline_enabled_flag = (unsigned char) 0;
+    data_fdps_glyph_shadow_row_offset = 0;
+    data_fdps_font_shadow_offset_x = 0;
+    data_fdps_glyph_advance_x = INV_GLYPH_W;
+    data_fdps_font_line_height = INV_GLYPH_ROWS;
+    data_fdps_number_glyph_color_row = 0;
+}
+
+static void inv_set_slot(int slot, int flags, int item_id)
+{
+    inv_units[0].inventory_slots[slot * 2] = (unsigned char) flags;
+    inv_units[0].inventory_slots[slot * 2 + 1] = (unsigned char) item_id;
+}
+
+static void inv_empty_all_slots(void)
+{
+    int slot;
+
+    for (slot = 0; slot < INV_SLOTS; slot++) {
+        inv_set_slot(slot, INV_EMPTY, 0);
+    }
+}
+
+static struct fdps_item_effect *inv_item(int item_id)
+{
+    return (struct fdps_item_effect *)
+        (inv_item_table + item_id * INV_ITEM_STRIDE);
+}
+
+static int inv_pixel(int row, int column)
+{
+    return (int) inv_surface[row * inv_pitch + column];
+}
+
+/* Which command sprite painted a position, or -1 for a position no command
+   sprite reached. */
+static int inv_command_at(int row, int column)
+{
+    int value;
+
+    value = inv_pixel(row, column);
+    if (value < INV_CMD_COLOR_BASE
+        || value >= INV_CMD_COLOR_BASE + INV_CMD_SPRITES) {
+        return -1;
+    }
+    return value - INV_CMD_COLOR_BASE;
+}
+
+static int inv_icon_sprite(int slot)
+{
+    return inv_command_at(slot * INV_ROW_H + INV_ICON_ROW_BIAS, INV_ICON_COL);
+}
+
+static int inv_caption_sprite(int slot)
+{
+    return inv_command_at(slot * INV_ROW_H + INV_CAP_ROW_BIAS, INV_CAP_COL);
+}
+
+/* The digit standing in cell `cell` of a row's figure, or -1 when no number
+   glyph reached it. */
+static int inv_figure_digit(int slot, int cell)
+{
+    int value;
+
+    value = inv_pixel(slot * INV_ROW_H + INV_CAP_ROW_BIAS,
+                      INV_FIG_COL + cell * INV_NUM_CELL_W);
+    if (value < 1 || value > INV_NUM_GLYPHS) {
+        return -1;
+    }
+    return value - 1;
+}
+
+/* The item id a row's name was fetched for, read back out of the glyph's
+   eight pixels. */
+static int inv_name_id(int slot)
+{
+    int column;
+    int value;
+    int row;
+
+    row = slot * INV_ROW_H + INV_NAME_ROW_BIAS;
+    value = 0;
+    for (column = 0; column < INV_GLYPH_W; column++) {
+        if (inv_pixel(row, INV_NAME_COL + column) == INV_TEXT_FG) {
+            value |= 1 << (INV_GLYPH_W - 1 - column);
+        }
+    }
+    return value;
+}
+
+/* The one row the selection bar touched, -1 when it touched none and -2 when
+   it touched more than one. */
+static int inv_bar_row(void)
+{
+    int row;
+    int found;
+
+    found = -1;
+    for (row = 0; row < INV_ROWS; row++) {
+        if (inv_pixel(row, 0) != INV_FILL) {
+            if (found >= 0) {
+                return -2;
+            }
+            found = row;
+        }
+    }
+    return found;
+}
+
+static int inv_touched_bytes(void)
+{
+    int index;
+    int count;
+
+    count = 0;
+    for (index = 0; index < INV_SURFACE_BYTES; index++) {
+        if (inv_surface[index] != INV_FILL) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/* IMUL EAX,dword ptr [EBP+0x18],0x11 / ADD EAX,0x8 with x = 0 and sprite 0:
+   the bar sits on the highlighted row's name baseline, and every row above and
+   below it is left alone. */
+static void the_bar_sits_on_the_selected_rows_baseline(void)
+{
+    inv_reset(INV_PITCH);
+    inv_empty_all_slots();
+    fdps_draw_unit_inventory(0, 3, inv_surface, INV_PITCH);
+    CHECK_EQ(inv_bar_row(), 3 * INV_ROW_H + INV_BAR_ROW_BIAS);
+    CHECK_EQ(inv_pixel(3 * INV_ROW_H + INV_BAR_ROW_BIAS, 0), INV_BAR_COLOR);
+    CHECK_EQ(inv_pixel(3 * INV_ROW_H + INV_BAR_ROW_BIAS, INV_BAR_W - 1),
+             INV_BAR_COLOR);
+    CHECK_EQ(inv_pixel(3 * INV_ROW_H + INV_BAR_ROW_BIAS, INV_BAR_W), INV_FILL);
+
+    inv_reset(INV_PITCH);
+    inv_empty_all_slots();
+    fdps_draw_unit_inventory(0, 0, inv_surface, INV_PITCH);
+    CHECK_EQ(inv_bar_row(), INV_BAR_ROW_BIAS);
+
+    inv_reset(INV_PITCH);
+    inv_empty_all_slots();
+    fdps_draw_unit_inventory(0, INV_SLOTS - 1, inv_surface, INV_PITCH);
+    CHECK_EQ(inv_bar_row(), (INV_SLOTS - 1) * INV_ROW_H + INV_BAR_ROW_BIAS);
+}
+
+/* CMP dword ptr [EBP+0x18],0x0 / JL and CMP ...,0x8 / JL: the bar is drawn
+   only for 0..7, and -1 is what fdps_battle_show_unit_status_window passes. */
+static void a_selection_outside_the_eight_rows_draws_no_bar(void)
+{
+    inv_reset(INV_PITCH);
+    inv_empty_all_slots();
+    fdps_draw_unit_inventory(0, -1, inv_surface, INV_PITCH);
+    CHECK_EQ(inv_bar_row(), -1);
+
+    inv_reset(INV_PITCH);
+    inv_empty_all_slots();
+    fdps_draw_unit_inventory(0, INV_SLOTS, inv_surface, INV_PITCH);
+    CHECK_EQ(inv_bar_row(), -1);
+}
+
+/* TEST dword ptr [EBP+-0xc],0x80 / JNZ: bit 7 means the slot is empty and the
+   row is skipped whole -- no icon, no name, no caption -- and the equipped bit
+   alongside it does not change that. */
+static void the_empty_bit_skips_the_whole_row(void)
+{
+    inv_reset(INV_PITCH);
+    inv_empty_all_slots();
+    fdps_draw_unit_inventory(0, -1, inv_surface, INV_PITCH);
+    CHECK_EQ(inv_touched_bytes(), 0);
+
+    inv_reset(INV_PITCH);
+    inv_empty_all_slots();
+    inv_set_slot(2, INV_EMPTY | INV_EQUIPPED, 7);
+    inv_item(7)->type = (unsigned char) 5;
+    fdps_draw_unit_inventory(0, -1, inv_surface, INV_PITCH);
+    CHECK_EQ(inv_touched_bytes(), 0);
+}
+
+/* The three IMUL ...,0x11 and the biases 9, 8 and 0xd beside them: eight rows
+   seventeen pixels apart, each with its icon at column 3, its name at column
+   0x13 and its caption at column 0x66. */
+static void every_row_sits_seventeen_pixels_below_the_last(void)
+{
+    int slot;
+
+    inv_reset(INV_PITCH);
+    for (slot = 0; slot < INV_SLOTS; slot++) {
+        inv_set_slot(slot, 0, slot + 1);
+        inv_item(slot + 1)->type = (unsigned char) 1;
+    }
+    fdps_draw_unit_inventory(0, -1, inv_surface, INV_PITCH);
+
+    for (slot = 0; slot < INV_SLOTS; slot++) {
+        CHECK_EQ(inv_icon_sprite(slot), 0x1d);
+        CHECK_EQ(inv_caption_sprite(slot), 0x40);
+        CHECK_EQ(inv_name_id(slot), slot + 1);
+    }
+    /* One row above the first icon and above the first name is outside the
+       list: nothing widened it upwards. */
+    CHECK_EQ(inv_pixel(INV_ICON_ROW_BIAS - 1, INV_ICON_COL), INV_FILL);
+    CHECK_EQ(inv_pixel(INV_NAME_ROW_BIAS - 1, INV_NAME_COL), INV_FILL);
+}
+
+/* CMP ...,0x0 / JLE and CMP ...,0x15 / JLE, then CMP ...,0x27 / JLE: the icon
+   is 0x1d for 1..0x15, 0x1e for 0x16..0x27 and 0x1f for everything else,
+   TYPE 0 INCLUDED. */
+static void the_icon_says_which_category_the_type_falls_in(void)
+{
+    inv_reset(INV_PITCH);
+    inv_set_slot(0, 0, 1);
+    inv_item(1)->type = (unsigned char) 1;
+    inv_set_slot(1, 0, 2);
+    inv_item(2)->type = (unsigned char) 0x15;
+    inv_set_slot(2, 0, 3);
+    inv_item(3)->type = (unsigned char) 0x16;
+    inv_set_slot(3, 0, 4);
+    inv_item(4)->type = (unsigned char) 0x27;
+    inv_set_slot(4, 0, 5);
+    inv_item(5)->type = (unsigned char) 0x28;
+    inv_set_slot(5, 0, 6);
+    inv_item(6)->type = (unsigned char) 0;
+    inv_set_slot(6, 0, 7);
+    inv_item(7)->type = (unsigned char) 0xff;
+    inv_set_slot(7, INV_EMPTY, 0);
+    fdps_draw_unit_inventory(0, -1, inv_surface, INV_PITCH);
+
+    CHECK_EQ(inv_icon_sprite(0), 0x1d);
+    CHECK_EQ(inv_icon_sprite(1), 0x1d);
+    CHECK_EQ(inv_icon_sprite(2), 0x1e);
+    CHECK_EQ(inv_icon_sprite(3), 0x1e);
+    CHECK_EQ(inv_icon_sprite(4), 0x1f);
+    CHECK_EQ(inv_icon_sprite(5), 0x1f);
+    CHECK_EQ(inv_icon_sprite(6), 0x1f);
+}
+
+/* TEST dword ptr [EBP+-0xc],0x40 / ADD dword ptr [EBP+-0x8],0x4: the equipped
+   bit moves the icon four sprites along, whichever of the three it was. */
+static void the_equipped_bit_moves_the_icon_four_sprites_along(void)
+{
+    inv_reset(INV_PITCH);
+    inv_empty_all_slots();
+    inv_set_slot(0, INV_EQUIPPED, 1);
+    inv_item(1)->type = (unsigned char) 1;
+    inv_set_slot(1, INV_EQUIPPED, 2);
+    inv_item(2)->type = (unsigned char) 0x20;
+    inv_set_slot(2, INV_EQUIPPED, 3);
+    inv_item(3)->type = (unsigned char) 0x30;
+    fdps_draw_unit_inventory(0, -1, inv_surface, INV_PITCH);
+
+    CHECK_EQ(inv_icon_sprite(0), 0x1d + 4);
+    CHECK_EQ(inv_icon_sprite(1), 0x1e + 4);
+    CHECK_EQ(inv_icon_sprite(2), 0x1f + 4);
+}
+
+/* ADD EAX,0xc9 on the slot's id byte: the name is message 0xc9 + item id, and
+   the id read is the SECOND byte of the slot pair, not the flag byte. */
+static void the_name_is_message_c9_plus_the_item_id(void)
+{
+    inv_reset(INV_PITCH);
+    inv_empty_all_slots();
+    inv_set_slot(0, 0, 0x5a);
+    inv_item(0x5a)->type = (unsigned char) 1;
+    inv_set_slot(1, INV_EQUIPPED, 0xa5);
+    inv_item(0xa5)->type = (unsigned char) 1;
+    fdps_draw_unit_inventory(0, -1, inv_surface, INV_PITCH);
+
+    CHECK_EQ(inv_name_id(0), 0x5a);
+    CHECK_EQ(inv_name_id(1), 0xa5);
+}
+
+/* The weapon caption: CMP EAX,0x15 / JLE then PUSH 0x40 and MOVSX EAX,word ptr
+   [EAX + 0x1] -- caption 0x40 with the record's ap, in a four-digit field that
+   pads. */
+static void a_weapon_prints_caption_40_and_its_ap(void)
+{
+    inv_reset(INV_PITCH);
+    inv_empty_all_slots();
+    inv_set_slot(0, 0, 1);
+    inv_item(1)->type = (unsigned char) 0x15;
+    inv_item(1)->ap = (short) 1234;
+    inv_item(1)->dp = (short) 5678;
+    inv_set_slot(1, 0, 2);
+    inv_item(2)->type = (unsigned char) 1;
+    inv_item(2)->ap = (short) 7;
+    fdps_draw_unit_inventory(0, -1, inv_surface, INV_PITCH);
+
+    CHECK_EQ(inv_caption_sprite(0), 0x40);
+    CHECK_EQ(inv_figure_digit(0, 0), 1);
+    CHECK_EQ(inv_figure_digit(0, 1), 2);
+    CHECK_EQ(inv_figure_digit(0, 2), 3);
+    CHECK_EQ(inv_figure_digit(0, 3), 4);
+    CHECK_EQ(inv_caption_sprite(1), 0x40);
+    CHECK_EQ(inv_figure_digit(1, 0), 0);
+    CHECK_EQ(inv_figure_digit(1, 2), 0);
+    CHECK_EQ(inv_figure_digit(1, 3), 7);
+}
+
+/* The armour caption, and the point of keeping the two classifications apart:
+   CMP EAX,0x27 / JG is reached with the type reloaded, so TYPE 0 -- which took
+   the catch-all ICON -- prints caption 0x41 and a DP figure here.  A rewrite
+   that classified once and reused the answer would give type 0 the 0x43
+   caption and no number instead (statwin.h). */
+static void armour_and_type_zero_both_print_caption_41_and_dp(void)
+{
+    inv_reset(INV_PITCH);
+    inv_empty_all_slots();
+    inv_set_slot(0, 0, 1);
+    inv_item(1)->type = (unsigned char) 0x16;
+    inv_item(1)->dp = (short) 907;
+    inv_set_slot(1, 0, 2);
+    inv_item(2)->type = (unsigned char) 0x27;
+    inv_item(2)->dp = (short) 12;
+    inv_set_slot(2, 0, 3);
+    /* Type 0 with a use_effect that would otherwise print an HP recovery: it
+       never reaches that test. */
+    inv_item(3)->type = (unsigned char) 0;
+    inv_item(3)->dp = (short) 34;
+    inv_item(3)->use_effect = (unsigned char) 0x0b;
+    inv_item(3)->use_amount = (short) 9999;
+    fdps_draw_unit_inventory(0, -1, inv_surface, INV_PITCH);
+
+    CHECK_EQ(inv_caption_sprite(0), 0x41);
+    CHECK_EQ(inv_figure_digit(0, 1), 9);
+    CHECK_EQ(inv_figure_digit(0, 2), 0);
+    CHECK_EQ(inv_figure_digit(0, 3), 7);
+    CHECK_EQ(inv_caption_sprite(1), 0x41);
+    CHECK_EQ(inv_figure_digit(1, 2), 1);
+    CHECK_EQ(inv_figure_digit(1, 3), 2);
+    CHECK_EQ(inv_icon_sprite(2), 0x1f);
+    CHECK_EQ(inv_caption_sprite(2), 0x41);
+    CHECK_EQ(inv_figure_digit(2, 2), 3);
+    CHECK_EQ(inv_figure_digit(2, 3), 4);
+}
+
+/* CMP EAX,0xb / JNZ and CMP EAX,0xc / JNZ on the use_effect byte at +0x0d,
+   with MOVSX EAX,word ptr [EAX + 0xe] for the amount: only those two print a
+   figure, and every other effect -- 0x20 among them, which also restores HP --
+   falls through to caption 0x43 with no number beside it. */
+static void only_use_effects_b_and_c_print_a_recovery_amount(void)
+{
+    inv_reset(INV_PITCH);
+    inv_empty_all_slots();
+    inv_set_slot(0, 0, 1);
+    inv_item(1)->type = (unsigned char) 0x28;
+    inv_item(1)->use_effect = (unsigned char) 0x0b;
+    inv_item(1)->use_amount = (short) 50;
+    inv_item(1)->dp = (short) 7777;
+    inv_set_slot(1, 0, 2);
+    inv_item(2)->type = (unsigned char) 0x40;
+    inv_item(2)->use_effect = (unsigned char) 0x0c;
+    inv_item(2)->use_amount = (short) 306;
+    inv_set_slot(2, 0, 3);
+    inv_item(3)->type = (unsigned char) 0x28;
+    inv_item(3)->use_effect = (unsigned char) 0x20;
+    inv_item(3)->use_amount = (short) 40;
+    fdps_draw_unit_inventory(0, -1, inv_surface, INV_PITCH);
+
+    CHECK_EQ(inv_caption_sprite(0), 0x3e);
+    CHECK_EQ(inv_figure_digit(0, 2), 5);
+    CHECK_EQ(inv_figure_digit(0, 3), 0);
+    CHECK_EQ(inv_caption_sprite(1), 0x3f);
+    CHECK_EQ(inv_figure_digit(1, 1), 3);
+    CHECK_EQ(inv_figure_digit(1, 2), 0);
+    CHECK_EQ(inv_figure_digit(1, 3), 6);
+    CHECK_EQ(inv_caption_sprite(2), 0x43);
+    /* No number was drawn, so the figure's second cell still holds the fill
+       the caption sprite did not reach. */
+    CHECK_EQ(inv_figure_digit(2, 1), -1);
+    CHECK_EQ(inv_pixel(2 * INV_ROW_H + INV_CAP_ROW_BIAS,
+                       INV_FIG_COL + INV_NUM_CELL_W), INV_FILL);
+}
+
+/* Every destination is dest_base + y * pitch + x, computed against the pitch
+   the caller passed and never against a surface descriptor -- so at a pitch
+   that is not 0x140 the same row and column land somewhere else. */
+static void the_list_is_folded_into_the_pointer_with_the_callers_pitch(void)
+{
+    inv_reset(INV_ODD_PITCH);
+    inv_empty_all_slots();
+    inv_set_slot(2, 0, 9);
+    inv_item(9)->type = (unsigned char) 3;
+    inv_item(9)->ap = (short) 8;
+    fdps_draw_unit_inventory(0, 2, inv_surface, INV_ODD_PITCH);
+
+    CHECK_EQ(inv_bar_row(), 2 * INV_ROW_H + INV_BAR_ROW_BIAS);
+    CHECK_EQ(inv_icon_sprite(2), 0x1d);
+    CHECK_EQ(inv_caption_sprite(2), 0x40);
+    CHECK_EQ(inv_name_id(2), 9);
+    CHECK_EQ(inv_figure_digit(2, 3), 8);
+}
+
+/* dest_base is the list's own corner and not the surface origin: the same list
+   drawn onto a base 0x3b58 bytes in -- what all four call sites pass -- lands
+   0x3b58 bytes further on and nothing is left at the origin. */
+static void the_list_hangs_off_dest_base(void)
+{
+    int shifted_row;
+    int shifted_column;
+
+    shifted_row = 0x3b58 / INV_PITCH;
+    shifted_column = 0x3b58 % INV_PITCH;
+
+    inv_reset(INV_PITCH);
+    inv_empty_all_slots();
+    inv_set_slot(1, INV_EQUIPPED, 0x21);
+    inv_item(0x21)->type = (unsigned char) 0x16;
+    inv_item(0x21)->dp = (short) 42;
+    fdps_draw_unit_inventory(0, 1, inv_surface + 0x3b58, INV_PITCH);
+
+    CHECK_EQ(inv_command_at(shifted_row + INV_ROW_H + INV_ICON_ROW_BIAS,
+                            shifted_column + INV_ICON_COL), 0x1e + 4);
+    CHECK_EQ(inv_command_at(shifted_row + INV_ROW_H + INV_CAP_ROW_BIAS,
+                            shifted_column + INV_CAP_COL), 0x41);
+    CHECK_EQ(inv_pixel(shifted_row + INV_ROW_H + INV_BAR_ROW_BIAS,
+                       shifted_column), INV_BAR_COLOR);
+    CHECK_EQ(inv_pixel(INV_ROW_H + INV_ICON_ROW_BIAS, INV_ICON_COL), INV_FILL);
+    CHECK_EQ(inv_pixel(INV_ROW_H + INV_BAR_ROW_BIAS, 0), INV_FILL);
+}
+
 void run_statwin_tests(void)
 {
     stage_images();
@@ -1677,6 +2307,20 @@ void run_statwin_tests(void)
     RUN_TEST(the_village_flag_swaps_the_cache_slot_and_latches_the_index);
     RUN_TEST(the_three_names_come_from_their_own_blocks);
 
+    inv_stage_sheets();
+    RUN_TEST(the_bar_sits_on_the_selected_rows_baseline);
+    RUN_TEST(a_selection_outside_the_eight_rows_draws_no_bar);
+    RUN_TEST(the_empty_bit_skips_the_whole_row);
+    RUN_TEST(every_row_sits_seventeen_pixels_below_the_last);
+    RUN_TEST(the_icon_says_which_category_the_type_falls_in);
+    RUN_TEST(the_equipped_bit_moves_the_icon_four_sprites_along);
+    RUN_TEST(the_name_is_message_c9_plus_the_item_id);
+    RUN_TEST(a_weapon_prints_caption_40_and_its_ap);
+    RUN_TEST(armour_and_type_zero_both_print_caption_41_and_dp);
+    RUN_TEST(only_use_effects_b_and_c_print_a_recovery_amount);
+    RUN_TEST(the_list_is_folded_into_the_pointer_with_the_callers_pitch);
+    RUN_TEST(the_list_hangs_off_dest_base);
+
     free(sheet);
     sheet = NULL;
     free(misc_vfs);
@@ -1693,6 +2337,9 @@ void run_statwin_tests(void)
     data_fdps_all_game_text_ptr = (unsigned char *) 0;
     data_fdps_font_sheet_ptr = (unsigned char *) 0;
     data_fdps_map_unit_array_ptr = (unsigned char *) 0;
+    data_fdps_command_sprite_sheet_ptr = (unsigned char *) 0;
+    data_fdps_selection_bar_sheet_ptr = (unsigned char *) 0;
+    data_fdps_item_effect_table_ptr = (unsigned char *) 0;
     data_fdps_font_glyph_width = (unsigned char) 0;
     data_fdps_glyph_cell_height = (unsigned char) 0;
     data_fdps_font_glyph_stride_bytes = 0;

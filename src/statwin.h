@@ -242,4 +242,40 @@ extern unsigned char data_fdps_ui_play_active_flag_saved;
 extern void fdps_close_status_window(void *window_image, void *background);
 #pragma aux fdps_close_status_window "*" parm caller [];
 
+/* 00024ea0.  Draws one unit's eight-slot inventory list: the selection bar on
+   the highlighted row, then, for each filled slot, the item's category icon,
+   its name and one headline number.
+
+   dest_base IS THE TOP-LEFT CORNER OF THE LIST, NOT THE SURFACE ORIGIN.
+   Every coordinate is folded into the pointer as dest_base + y * pitch + x
+   with no surface descriptor anywhere, so the caller decides where the list
+   lands.  All four call sites hand in their 320x200 window buffer + 0x3b58
+   with a pitch of 0x140, which puts the list at pixel (0x98, 0x2f).  A row is
+   17 pixels tall.
+
+   selected_slot is the row that carries the bar.  Only 0..7 draws one;
+   anything else -- fdps_battle_show_unit_status_window passes -1 -- leaves the
+   list unhighlighted.  unit_index is not range checked and goes straight to
+   fdps_get_unit_record (unit.h).
+
+   THE ITEM TYPE IS CLASSIFIED TWICE AND THE TWO TESTS DISAGREE ABOUT TYPE 0.
+   The icon test is 1..0x15 weapon, 0x16..0x27 armour, everything else the
+   catch-all; the caption test is 1..0x15 attack power, then everything at or
+   below 0x27 -- type 0 included -- defence power.  So a slot holding an id
+   past the end of Item.dat (the guide's FF bug item, or 0xE2..0xFA whose
+   records are blank) draws the plain item icon beside a DP figure.  Computing
+   the category once and reusing it changes that row, which is why the two
+   tests stay apart in the source.
+
+   ONLY use_effect 0x0b AND 0x0c PRINT A RECOVERY AMOUNT.  Effect 0x20 also
+   restores HP but falls through to the plain caption with no figure beside it.
+
+   Which colour row the figures come out of is not set here: whatever the
+   caller left in data_fdps_number_glyph_color_row (gamedata.h) stands for the
+   whole list.  Nothing is null-checked -- neither sheet pointer, neither table
+   base, nor the record. */
+extern void fdps_draw_unit_inventory(int unit_index, int selected_slot,
+                                     unsigned char *dest_base, int pitch);
+#pragma aux fdps_draw_unit_inventory "*" parm caller [];
+
 #endif
