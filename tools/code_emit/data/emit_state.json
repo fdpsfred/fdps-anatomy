@@ -2494,6 +2494,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x102"
+    },
+    "0002d360": {
+      "name": "fdps_walk_step_down",
+      "target": "walk.c",
+      "body_size": "0x11e",
+      "status": "committed",
+      "emitted_against": "0x11e",
+      "rounds": 0
     }
   }
 }
