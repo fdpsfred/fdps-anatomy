@@ -2661,6 +2661,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x23e"
+    },
+    "000276f0": {
+      "name": "fdps_draw_spell_list_page",
+      "target": "spellmnu.c",
+      "body_size": "0x14d",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x14d"
     }
   }
 }
