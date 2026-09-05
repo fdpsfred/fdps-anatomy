@@ -2677,6 +2677,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x332"
+    },
+    "00016aa0": {
+      "name": "fdps_battle_show_unit_status_window",
+      "target": "statwin.c",
+      "body_size": "0x3d1",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x3d1"
     }
   }
 }

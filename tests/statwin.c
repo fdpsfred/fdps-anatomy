@@ -72,6 +72,7 @@
 #include "fdpstype.h"
 #include "blit.h"
 #include "gamedata.h"
+#include "keybd.h"
 #include "mapdraw.h"
 #include "statwin.h"
 #include "vfs.h"
@@ -861,9 +862,474 @@ static void the_close_gives_its_scene_page_back(void)
     CHECK_EQ(_heapchk(), _HEAPOK);
 }
 
+/* ---- fdps_battle_show_unit_status_window @ 00016aa0 ----------------- */
+
+/* THE WINDOW'S OWN DRAWING CANNOT BE OBSERVED FROM OUTSIDE THE CALL, AND THAT
+ * IS THE FUNCTION'S SHAPE RATHER THAN THIS FILE'S CHOICE.  Everything it
+ * composes goes into two blocks it allocates and frees inside the call, and
+ * everything it puts on the adapter -- the nine slide-in frames, the mosaic
+ * dissolve, the cross-fade -- is painted over by fdps_close_status_window's
+ * own restore before it returns.  So the frame that survives the call is the
+ * close's, the buffers are gone, and the mosaic block sizes and blend alphas
+ * are a playtest contract (rebuild_info/pitfalls.md) and not something an
+ * assertion here can reach.
+ *
+ * WHAT DOES SURVIVE IS THE SEQUENCE'S EDGES, and they are what the cases below
+ * pin: whether the window opened at all, the flag it parks while it is up, the
+ * three heap blocks it takes, the queue it empties on the way out and the
+ * picture the close leaves behind.
+ *
+ * THE SAVED PLAY FLAG IS WHAT SAYS THE WINDOW OPENED.  The store at 00016aef
+ * is the first thing past the portrait test, and nothing else in the image
+ * writes data_fdps_ui_play_active_flag_saved except the close that reads it
+ * back (statwin.h).  So a sentinel put there before the call is untouched
+ * after a call that returned early and holds the live flag's entry value after
+ * one that did not -- one byte that separates the two paths without depending
+ * on anything either path draws.
+ *
+ * THE RANGE IS TESTED FROM BOTH SIDES.  0x24 through 0x27 are asserted to do
+ * nothing and 0x23 and 0x28 to open the window, so a compare that used < and >
+ * rather than <= and >=, or that tested the wrong record byte, fails here
+ * rather than passing on the four ids alone.
+ *
+ * THE RUN IS A VILLAGE RUN, with one unit that knows no spell.  The village
+ * flag is what keeps fdps_render_view_frame out of the opening and gives the
+ * close a saved page to put back rather than a composed scene, and an empty
+ * spells_known_bitmap is what keeps the count at zero, which is the only
+ * branch of the three the window has that a test can drive: each of the other
+ * two ends in a second wait loop, and the loop can only be got out of by an
+ * armed scancode that the first loop has already consumed.
+ *
+ * EVERY SHEET THE PANEL DRAWS THROUGH HAS TO BE STAGED, because
+ * fdps_draw_unit_status_panel dereferences all five without a test
+ * (statunit.h).  They are the same fixtures tests/statunit.c builds and are
+ * built here for the same reason -- to let the call run -- and not to be
+ * asserted against: nothing below reads a pixel the panel drew.  The portrait
+ * is the exception that cannot be fabricated at all: the loader names FACE.CEL
+ * with a literal and ends the process on a sheet it cannot open, so the sheet
+ * is staged by tests/gamefile.lst and each case skips itself without it.
+ *
+ * THE INVENTORY SLOTS ARE MARKED EMPTY ON PURPOSE.  Bit 7 clear is a filled
+ * slot, so a zeroed record is eight filled slots holding item 0 and would send
+ * the draw through the item table and the icon sheets as well (statunit.h).
+ * The window does not care either way; the fixture does. */
+
+/* The four ids that get no window and the two just outside them. */
+#define SHOW_NO_WINDOW_FIRST 0x24
+#define SHOW_NO_WINDOW_LAST 0x27
+#define SHOW_BELOW_RANGE 0x23
+#define SHOW_ABOVE_RANGE 0x28
+
+/* The live play flag every run starts with, and the sentinel parked in its
+   saved copy.  Neither is 0 and they differ, so "the flag was saved" and "the
+   saved byte was left alone" are different observations. */
+#define SHOW_LIVE_FLAG 0x37
+#define SHOW_SAVED_SENTINEL 0xc3
+
+/* Enter, the code the wait loop is let out with.  The battle window discards
+   the value (statunit.h), so which accepted code it is does not matter. */
+#define SHOW_SCANCODE_ENTER 0x1c
+
+/* The queue the call empties last.  The two ring indices are made to differ
+   before every run, and fdps_flush_keyboard_queue's one store makes them equal
+   again, so the pair says whether the tail of the function ran. */
+#define SHOW_QUEUE_HEAD 0
+#define SHOW_QUEUE_WRITE 3
+
+/* An inventory slot with nothing in it: bit 7 of the slot's flag byte
+   (statunit.c's INV_SLOT_EMPTY). */
+#define SHOW_SLOT_EMPTY 0x80
+#define SHOW_SLOT_COUNT 8
+
+/* The unit array.  Four records is more than the one case index 0 uses and
+   leaves room for the sprite-cache slot lookup to land somewhere harmless if
+   it ever read a neighbour. */
+#define SHOW_UNIT_COUNT 4
+
+/* The five staged sheets, in the shapes tests/statunit.c sets out: the number
+   sheet is 65 sprites of one 6-pixel fill op per row, the gauge sheet three
+   0x75 x 8 graphics, the sprite cache eight slots of one 24x24 stream each,
+   and the text block 256 one-glyph entries with a one-byte font. */
+#define SHOW_NUM_TABLE_AT 0x0f
+#define SHOW_NUM_SPRITES 65
+#define SHOW_NUM_STREAM_AT (SHOW_NUM_TABLE_AT + SHOW_NUM_SPRITES * 4)
+#define SHOW_NUM_STREAM_BYTES 16
+#define SHOW_NUM_SHEET_BYTES \
+    (SHOW_NUM_STREAM_AT + SHOW_NUM_SPRITES * SHOW_NUM_STREAM_BYTES)
+#define SHOW_BAR_GRAPHIC_STRIDE 0x3a8
+#define SHOW_BAR_SHEET_BYTES (3 * SHOW_BAR_GRAPHIC_STRIDE)
+#define SHOW_BAR_OPAQUE_ROWS 4
+#define SHOW_BAR_WIDTH 0x75
+#define SHOW_CACHE_SLOTS 8
+#define SHOW_CELL_SIZE 0x18
+#define SHOW_CELL_STREAM_BYTES (SHOW_CELL_SIZE * 2)
+#define SHOW_CACHE_TABLE_BYTES \
+    (SHOW_CACHE_SLOTS * (int) sizeof(struct fdps_cel_cache_slot))
+#define SHOW_CACHE_BYTES \
+    (SHOW_CACHE_TABLE_BYTES + SHOW_CACHE_SLOTS * SHOW_CELL_STREAM_BYTES)
+#define SHOW_TEXT_ENTRIES 256
+#define SHOW_TEXT_TABLE_BYTES (SHOW_TEXT_ENTRIES * 2)
+#define SHOW_TEXT_STREAM_BYTES 4
+#define SHOW_TEXT_BYTES \
+    (SHOW_TEXT_TABLE_BYTES + SHOW_TEXT_ENTRIES * SHOW_TEXT_STREAM_BYTES)
+#define SHOW_GLYPH_WIDTH 8
+#define SHOW_GLYPH_ROWS 1
+
+/* The unit's figures.  Both maxima are above zero so the two gauges divide by
+   something, and both currents are below their maximum so the panel takes the
+   reduced colour row -- neither is asserted, but a fixture that cannot be
+   drawn is not a fixture. */
+#define SHOW_HP_CURRENT 20
+#define SHOW_HP_MAX 40
+#define SHOW_MP_CURRENT 5
+#define SHOW_MP_MAX 10
+
+/* The guard the aperture is filled with before a run, so the frame the close
+   leaves can be told from the frame that was there. */
+#define SHOW_SCREEN_GUARD 0x5a
+
+static struct fdps_unit_record show_units[SHOW_UNIT_COUNT];
+static unsigned char show_number_sheet[SHOW_NUM_SHEET_BYTES];
+static unsigned char show_bar_sheet[SHOW_BAR_SHEET_BYTES];
+static unsigned char show_cache[SHOW_CACHE_BYTES];
+static unsigned char show_text[SHOW_TEXT_BYTES];
+static unsigned char show_font[SHOW_TEXT_ENTRIES];
+static unsigned char show_page[VGA_SCREEN_BYTES];
+static struct fdps_vfs_image_header show_sfx_pack;
+
+/* Both real files the run cannot do without: the container the window artwork
+   is decoded from and the portrait sheet the panel ends on.  A missing one is
+   not a failure the call reports -- the loads end the process -- so the cases
+   that need them check first. */
+static int show_inputs_present(void)
+{
+    FILE *probe;
+
+    probe = fopen(MISC_CONTAINER_NAME, "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+    probe = fopen("FACE.CEL", "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+    return 1;
+}
+
+/* Builds the five sheets and publishes them.  Called once. */
+static void show_stage_sheets(void)
+{
+    int index;
+    int sprite;
+    int row;
+    int stream_at;
+    int slot;
+
+    memset(show_number_sheet, 0, sizeof show_number_sheet);
+    for (sprite = 0; sprite < SHOW_NUM_SPRITES; sprite++) {
+        stream_at = SHOW_NUM_STREAM_AT + sprite * SHOW_NUM_STREAM_BYTES;
+        *(int *) (show_number_sheet + SHOW_NUM_TABLE_AT + sprite * 4) =
+            stream_at;
+        for (row = 0; row < 8; row++) {
+            show_number_sheet[stream_at + row * 2] = 0x05;
+            show_number_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) (sprite + 1);
+        }
+    }
+
+    for (index = 0; index < SHOW_BAR_SHEET_BYTES; index++) {
+        row = index % SHOW_BAR_GRAPHIC_STRIDE / SHOW_BAR_WIDTH;
+        if (row < SHOW_BAR_OPAQUE_ROWS) {
+            show_bar_sheet[index] =
+                (unsigned char) (index / SHOW_BAR_GRAPHIC_STRIDE + 1);
+        } else {
+            show_bar_sheet[index] = (unsigned char) 0;
+        }
+    }
+
+    memset(show_cache, 0, sizeof show_cache);
+    for (slot = 0; slot < SHOW_CACHE_SLOTS; slot++) {
+        stream_at = SHOW_CACHE_TABLE_BYTES + slot * SHOW_CELL_STREAM_BYTES;
+        ((struct fdps_cel_cache_slot *) show_cache)[slot].sprite_offset[0] =
+            stream_at;
+        for (row = 0; row < SHOW_CELL_SIZE; row++) {
+            show_cache[stream_at + row * 2] = 0x17;
+            show_cache[stream_at + row * 2 + 1] = (unsigned char) (0x40 + slot);
+        }
+    }
+
+    for (index = 0; index < SHOW_TEXT_ENTRIES; index++) {
+        show_font[index] = (unsigned char) index;
+        stream_at = SHOW_TEXT_TABLE_BYTES + index * SHOW_TEXT_STREAM_BYTES;
+        *(short *) (show_text + index * 2) = (short) stream_at;
+        *(short *) (show_text + stream_at) = (short) index;
+        *(short *) (show_text + stream_at + 2) = (short) -1;
+    }
+
+    for (index = 0; index < VGA_SCREEN_BYTES; index++) {
+        show_page[index] = (unsigned char)
+            page_pixel(index / VGA_SCREEN_PITCH, index % VGA_SCREEN_PITCH);
+    }
+
+    memset(&show_sfx_pack, 0, sizeof show_sfx_pack);
+}
+
+/* Puts the reader in the state where its next poll reports `code`, exactly as
+   tests/statunit.c does: the latch holds the code and the repeat filter
+   remembers something that is not a byte. */
+static void show_arm_scancode(unsigned int code)
+{
+    data_fdps_input_last_scancode = (unsigned char) code;
+    data_fdps_input_key_repeat_prev_scancode = 0x100;
+    data_fdps_input_key_repeat_counter = 0;
+}
+
+/* Everything one run reads: the unit, the published sheets, the village page,
+   the two flags, the armed key and the queue that is not empty. */
+static void show_stage(int portrait_id)
+{
+    int slot;
+
+    memset(show_units, 0, sizeof show_units);
+    for (slot = 0; slot < SHOW_SLOT_COUNT; slot++) {
+        show_units[0].inventory_slots[slot * 2] = SHOW_SLOT_EMPTY;
+    }
+    show_units[0].portrait_id = (unsigned char) portrait_id;
+    show_units[0].hp_current = SHOW_HP_CURRENT;
+    show_units[0].hp_max = SHOW_HP_MAX;
+    show_units[0].mp_current = SHOW_MP_CURRENT;
+    show_units[0].mp_max = SHOW_MP_MAX;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) show_units;
+    data_fdps_number_glyph_sheet_ptr = show_number_sheet;
+    data_fdps_status_gauge_bar_sheet_ptr = show_bar_sheet;
+    data_fdps_cel_sprite_cache_ptr = show_cache;
+    data_fdps_all_game_text_ptr = show_text;
+    data_fdps_font_sheet_ptr = show_font;
+    data_fdps_font_glyph_width = (unsigned char) SHOW_GLYPH_WIDTH;
+    data_fdps_glyph_cell_height = (unsigned char) SHOW_GLYPH_ROWS;
+    data_fdps_font_glyph_stride_bytes = 1;
+    data_fdps_font_outline_enabled_flag = (unsigned char) 0;
+    data_fdps_glyph_shadow_row_offset = 0;
+    data_fdps_font_shadow_offset_x = 0;
+    data_fdps_glyph_advance_x = SHOW_GLYPH_WIDTH;
+    data_fdps_font_line_height = SHOW_GLYPH_ROWS;
+    data_fdps_number_glyph_color_row = 0;
+
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = (unsigned char *) &show_sfx_pack;
+    data_fdps_village_backdrop_page_ptr = show_page;
+    data_fdps_village_mode_flag = (unsigned char) 1;
+
+    data_fdps_ui_play_active_flag = (unsigned char) SHOW_LIVE_FLAG;
+    data_fdps_ui_play_active_flag_saved = (unsigned char) SHOW_SAVED_SENTINEL;
+
+    data_fdps_input_scancode_queue_head = SHOW_QUEUE_HEAD;
+    data_fdps_input_scancode_queue_write_index = SHOW_QUEUE_WRITE;
+    show_arm_scancode(SHOW_SCANCODE_ENTER);
+}
+
+/* The staged pointers are statics and fdps_shutdown_free_resources frees
+   several of those globals unguarded, so none of them may be left published;
+   the portrait the panel loaded is the one real block a run leaves behind, and
+   it is released here the way tests/msgwin.c releases it. */
+static void show_unstage(void)
+{
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_number_glyph_sheet_ptr = NULL;
+    data_fdps_status_gauge_bar_sheet_ptr = NULL;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_all_game_text_ptr = NULL;
+    data_fdps_font_sheet_ptr = NULL;
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = NULL;
+    data_fdps_village_backdrop_page_ptr = NULL;
+    data_fdps_village_mode_flag = 0;
+    if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+        free(data_fdps_portrait_sprite_buf_ptr);
+        data_fdps_portrait_sprite_buf_ptr = NULL;
+    }
+}
+
+/* One whole window, from the staged state, with the adapter in the mode the
+   game draws in and a guarded frame under it.  What is left on the adapter
+   ends up in shot[]. */
+static void show_run(int portrait_id)
+{
+    show_stage(portrait_id);
+    set_video_mode(VIDEO_MODE_320X200X256);
+    memset((void *) VGA_SCREEN_BASE, SHOW_SCREEN_GUARD,
+           (size_t) VGA_SCREEN_BYTES);
+    fdps_battle_show_unit_status_window(0);
+    capture_aperture();
+    set_video_mode(VIDEO_MODE_TEXT);
+}
+
+/* The four ids the window refuses.  Nothing at all happens: the saved flag
+   keeps its sentinel, the live flag keeps its value, the queue keeps its
+   pending key and the heap does not move -- which together say the call
+   returned before the store at 00016aef, before the three allocations and
+   before the flush at 00016e65.
+
+   No sheets need staging for this one and none is loaded, which is the point:
+   an id inside the range does not reach anything that could need them. */
+static void the_four_portrait_ids_get_no_window(void)
+{
+    int id;
+    int before;
+    int after;
+    int saved_touched;
+    int live_touched;
+    int queue_touched;
+
+    saved_touched = 0;
+    live_touched = 0;
+    queue_touched = 0;
+
+    show_stage(SHOW_NO_WINDOW_FIRST);
+    fdps_battle_show_unit_status_window(0);
+    before = used_heap_blocks();
+
+    for (id = SHOW_NO_WINDOW_FIRST; id <= SHOW_NO_WINDOW_LAST; id++) {
+        show_stage(id);
+        fdps_battle_show_unit_status_window(0);
+        if ((int) data_fdps_ui_play_active_flag_saved != SHOW_SAVED_SENTINEL) {
+            saved_touched++;
+        }
+        if ((int) data_fdps_ui_play_active_flag != SHOW_LIVE_FLAG) {
+            live_touched++;
+        }
+        if (data_fdps_input_scancode_queue_write_index != SHOW_QUEUE_WRITE) {
+            queue_touched++;
+        }
+    }
+    after = used_heap_blocks();
+
+    CHECK_EQ(saved_touched, 0);
+    CHECK_EQ(live_touched, 0);
+    CHECK_EQ(queue_touched, 0);
+    CHECK_EQ(after, before);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    show_unstage();
+}
+
+/* The ids on either side of the range open the window.  Both leave the live
+   flag's entry value in the saved copy, which no path but the opening writes,
+   and both come back with the live flag itself restored -- the close is what
+   puts it back, so the pair says the whole sequence ran rather than just its
+   first store.
+
+   0x23 and 0x28 are one below and one above the refused range, so a compare
+   with the wrong sense or a strict inequality at either end fails here. */
+static void the_ids_either_side_of_the_range_open_the_window(void)
+{
+    int saved_below;
+    int live_below;
+    int saved_above;
+    int live_above;
+
+    CHECK_EQ(show_inputs_present(), 1);
+    if (!show_inputs_present()) {
+        return;
+    }
+
+    show_run(SHOW_BELOW_RANGE);
+    saved_below = (int) data_fdps_ui_play_active_flag_saved;
+    live_below = (int) data_fdps_ui_play_active_flag;
+
+    show_run(SHOW_ABOVE_RANGE);
+    saved_above = (int) data_fdps_ui_play_active_flag_saved;
+    live_above = (int) data_fdps_ui_play_active_flag;
+
+    CHECK_EQ(saved_below, SHOW_LIVE_FLAG);
+    CHECK_EQ(live_below, SHOW_LIVE_FLAG);
+    CHECK_EQ(saved_above, SHOW_LIVE_FLAG);
+    CHECK_EQ(live_above, SHOW_LIVE_FLAG);
+    show_unstage();
+}
+
+/* The queue is emptied on the way out, and only on the way out.  The two ring
+   indices are set apart before the run and the flush's single store makes them
+   equal, so this is the one witness that the call reached its last line -- the
+   assertion the refused ids make in the negative. */
+static void the_window_empties_the_queue_when_it_closes(void)
+{
+    int write_index;
+    int head;
+
+    CHECK_EQ(show_inputs_present(), 1);
+    if (!show_inputs_present()) {
+        return;
+    }
+
+    show_run(SHOW_BELOW_RANGE);
+    write_index = data_fdps_input_scancode_queue_write_index;
+    head = data_fdps_input_scancode_queue_head;
+
+    CHECK_EQ(head, SHOW_QUEUE_HEAD);
+    CHECK_EQ(write_index, head);
+    show_unstage();
+}
+
+/* The saved page is what is on the screen when the window has gone.  Every
+   frame the opening, the wait loop and the closing put up is painted over by
+   the village restore at the end of fdps_close_status_window, so the guard
+   this run filled the aperture with must be gone and the page must be there --
+   including inside the window's own panel area, where the last thing drawn
+   before the close was the status window itself.
+
+   The three positions are the first pixel, one inside the panel area at frame
+   byte 0x3b58 and one on the bottom scanline. */
+static void the_closed_window_leaves_the_saved_page_on_the_screen(void)
+{
+    CHECK_EQ(show_inputs_present(), 1);
+    if (!show_inputs_present()) {
+        return;
+    }
+
+    show_run(SHOW_BELOW_RANGE);
+
+    CHECK_EQ(shot_pixel(0, 0), page_pixel(0, 0));
+    CHECK_EQ(shot_pixel(47, 152), page_pixel(47, 152));
+    CHECK_EQ(shot_pixel(100, 200), page_pixel(100, 200));
+    CHECK_EQ(shot_pixel(199, 319), page_pixel(199, 319));
+    CHECK_EQ(page_pixel(0, 0) != SHOW_SCREEN_GUARD, 1);
+    show_unstage();
+}
+
+/* All three blocks come back.  The window image, the 64000-byte frame and the
+   panel copy are taken inside the call and released after the close, and every
+   block anything it calls takes is released by that callee -- so a whole
+   window must leave the heap where it found it.  The portrait the panel loads
+   is the one block that outlives a call, and it is freed and taken again by
+   the next one, which is why the measured run is the second.
+
+   Dropping any one of the three frees at 00016e45, 00016e51 and 00016e5d
+   shows up here and nowhere else. */
+static void the_window_gives_all_three_blocks_back(void)
+{
+    int before;
+    int after;
+
+    CHECK_EQ(show_inputs_present(), 1);
+    if (!show_inputs_present()) {
+        return;
+    }
+
+    show_run(SHOW_BELOW_RANGE);
+    before = used_heap_blocks();
+    show_run(SHOW_BELOW_RANGE);
+    after = used_heap_blocks();
+
+    CHECK_EQ(after, before);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    show_unstage();
+}
+
 void run_statwin_tests(void)
 {
     stage_images();
+    show_stage_sheets();
 
     RUN_TEST(aperture_reads_back_in_mode_13h);
     RUN_TEST(settled_frame_puts_the_window_where_it_rests);
@@ -877,6 +1343,12 @@ void run_statwin_tests(void)
     RUN_TEST(battle_close_rebuilds_the_background_from_the_scene);
     RUN_TEST(the_play_flag_comes_back_from_the_saved_copy);
     RUN_TEST(the_close_gives_its_scene_page_back);
+
+    RUN_TEST(the_four_portrait_ids_get_no_window);
+    RUN_TEST(the_ids_either_side_of_the_range_open_the_window);
+    RUN_TEST(the_window_empties_the_queue_when_it_closes);
+    RUN_TEST(the_closed_window_leaves_the_saved_page_on_the_screen);
+    RUN_TEST(the_window_gives_all_three_blocks_back);
 
     free(sheet);
     sheet = NULL;

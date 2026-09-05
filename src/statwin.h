@@ -120,4 +120,34 @@ extern unsigned char data_fdps_ui_play_active_flag_saved;
 extern void fdps_close_status_window(void *window_image, void *background);
 #pragma aux fdps_close_status_window "*" parm caller [];
 
+/* Opens one unit's status window, holds it there for as long as the player
+   looks at it, and closes it again.  The two call sites are the battle map's
+   own phase loop and the village member list, and both discard everything: the
+   call returns nothing and the window leaves no state behind but the play flag
+   it borrowed.
+
+   unit_index is a position in the current battle's unit array, unchecked, and
+   the record it resolves to decides both what is drawn and WHETHER ANYTHING IS.
+   A record whose portrait_id is 0x24, 0x25, 0x26 or 0x27 gets no window at all
+   and the call is a no-op -- not a blank window, not a cue, not even the saved
+   play flag; those four ids are the only such range, and everything outside it
+   opens the window whether or not the unit is one of the player's.
+
+   ONE CALL BLOCKS FOR AS MANY KEYS AS THE UNIT HAS PAGES.  The stat panel is
+   held by a wait loop; a unit that knows a spell then gets the first spell page
+   behind a mosaic dissolve and a second wait loop; and one that knows more than
+   eight gets a second page cross-faded in and a third.  So this returns after
+   one key for most units, two for a caster and three for a well-taught one, and
+   the keyboard queue is emptied before it does.
+
+   IT LEAVES THE SCREEN AS IT FOUND IT, THROUGH ITS OWN SAVED COPY.  Outside a
+   village the picture behind the window is composed once by
+   fdps_render_view_frame before the copy is taken, so the frame the window
+   restores afterwards is that composed picture and not whatever the caller had
+   on the adapter; in a village it is the adapter's own contents.  Every heap
+   block it takes -- the window image, the saved frame and the panel copy -- is
+   released before it returns. */
+extern void fdps_battle_show_unit_status_window(int unit_index);
+#pragma aux fdps_battle_show_unit_status_window "*" parm caller [];
+
 #endif

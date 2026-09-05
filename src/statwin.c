@@ -2,9 +2,11 @@
  *
  * The window's own artwork and the movement of it: the sheet the empty window
  * is decoded from, one step of the four-panel slide that puts it on the
- * screen, and the same slide run backwards to take it away again.  What is
- * painted into the window -- one unit's figures, its inventory list and its
- * walk cycle -- is statunit.c.  See statwin.h for the window's geometry.
+ * screen, the same slide run backwards to take it away again, and the battle
+ * routine that drives the whole sequence from the outside.  What is painted
+ * into the window -- one unit's figures, its inventory list and its walk
+ * cycle -- is statunit.c, and the spell pages the window turns into are
+ * spellmnu.c.  See statwin.h for the window's geometry.
  *
  * Nothing here owns state except the byte the close hands back to the caller
  * it was opened from, data_fdps_ui_play_active_flag_saved, which statwin.h
@@ -24,8 +26,13 @@
 #include "audio.h"
 #include "blit.h"
 #include "gamedata.h"
+#include "keybd.h"
 #include "mapdraw.h"
+#include "spellmnu.h"
+#include "statunit.h"
 #include "statwin.h"
+#include "unit.h"
+#include "unitstat.h"
 #include "vfs.h"
 
 /* The VGA graphics aperture as a flat linear address, the mode 13h scanline
@@ -447,4 +454,282 @@ void fdps_close_status_window(void *window_image, void *background)
 
     free(scene_page);
     data_fdps_ui_play_active_flag = data_fdps_ui_play_active_flag_saved;
+}
+
+/* ------------------------------------------------------------------
+ * fdps_battle_show_unit_status_window @ 00016aa0
+ * ------------------------------------------------------------------ */
+
+/* The portrait ids that have no status window at all: CMP 0x24 / JL and
+   CMP 0x27 / JLE at 00016ac6 and 00016ad6, so the closed range 0x24..0x27 --
+   four ids -- turns the whole call into a no-op.  The byte is record offset
+   7, struct fdps_unit_record's portrait_id, and it is zero-extended before
+   either compare, so the domain is 0..255 and no negative value reaches
+   them. */
+#define NO_WINDOW_PORTRAIT_FIRST 0x24
+#define NO_WINDOW_PORTRAIT_LAST 0x27
+
+/* The spell panel: the 151 x 149 area of the window at frame byte 0x3b58,
+   which is row 47 column 152, and the packed 0x57e3-byte buffer one copy of
+   it fits in exactly (PUSH 0x57e3 at 00016b3d, and 0x97 * 0x95 = 0x57e3).
+   The buffer's pitch is its own width, not the frame's.
+
+   It is the area the stat panel occupies and the area the spell list is drawn
+   in, which is why one saved copy serves both: the copy is taken before
+   anything is drawn, so it holds the empty window artwork. */
+#define SPELL_PANEL_AT 0x3b58
+#define SPELL_PANEL_W 0x97
+#define SPELL_PANEL_H 0x95
+#define SPELL_PANEL_PITCH 0x97
+#define SPELL_PANEL_BYTES 0x57e3
+
+/* The mosaic dissolve, in block sizes.  Going to the spell list runs 2, 4, 6,
+   8, 10 (MOV 0x2 / CMP 0xc / ADD 0x2 at 00016c1c) and coming back out of it
+   runs 11, 9, 7, 5, 3, 1 (MOV 0xb / CMP 0x1 / ADD -0x2 at 00016cce), so the
+   picture breaks up in five steps and reassembles in six.  The two sequences
+   are deliberately not each other's reverse: the second ends at block 1,
+   which is the unblocked picture, and the first starts at block 2, which is
+   not. */
+#define MOSAIC_COARSEN_FIRST 2
+#define MOSAIC_COARSEN_LIMIT 0xc
+#define MOSAIC_REFINE_FIRST 0xb
+#define MOSAIC_REFINE_LAST 1
+#define MOSAIC_BLOCK_STEP 2
+
+/* The cross-fade to the second page of the spell list, in ramp alphas: 1, 3,
+   5, 7, 9, 11, 13, 15 (MOV 0x1 / CMP 0x10 / ADD 0x2 at 00016d74).  Alpha 16
+   is never passed, so the last blended frame is still one sixteenth short of
+   the new page and what completes the fade is the plain copy that follows the
+   loop. */
+#define BLEND_ALPHA_FIRST 1
+#define BLEND_ALPHA_LIMIT 0x10
+#define BLEND_ALPHA_STEP 2
+
+/* The spell list's second page starts at list entry 8 and the window shows a
+   page at a time, so a unit that knows more than eight spells gets the second
+   page and the cross-fade to it (CMP 0x8 / JLE at 00016d51). */
+#define SPELL_PAGE_ROWS 8
+
+/* Neither list the window draws has a cursor on it -- both pages are pushed
+   with -1 as the highlighted entry -- and the inventory list is drawn with no
+   selected slot the same way. */
+#define NO_HIGHLIGHT (-1)
+
+/* PUSH 0x1 at 00016be9: the window offers the caster's idle animation.  The
+   item window is the call site that passes 0 (statunit.h). */
+#define IDLE_ANIMATION_OFFERED 1
+
+/* The largest list fdps_unit_collect_known_spells can write is the whole
+   0..39 span of spell ids, one byte each (unitstat.h), and the original's
+   buffer is exactly that: the 40 bytes of frame between [EBP-0x44] and
+   [EBP-0x1c], addressed by the LEA at 00016bff. */
+#define SPELL_ID_BUFFER_BYTES 40
+
+/* Puts one unit's status window on the screen, holds it there, and takes it
+   away again: this is the whole of what the player sees when they ask about a
+   unit, from the empty window artwork to the last key that closes it.
+
+   THE FOUR IDS 0x24..0x27 GET NO WINDOW.  The record's portrait_id is tested
+   before anything is loaded, allocated or sounded, and an id inside that range
+   returns with nothing done at all -- no cue, no saved flag, no screen change.
+   Every other id, 0x3c and above included, opens the window.
+
+   WHAT IS SHOWN IS TWO OR THREE SCREENS, NOT ONE.  The stat panel comes first;
+   then, if the unit knows any spell, the panel dissolves into a mosaic and
+   reassembles as the first page of the spell list, and a unit that knows more
+   than eight spells gets a second page cross-faded in over the first.  Each of
+   those screens is held by its own wait loop, so closing the window takes one
+   key per screen.
+
+   THE PLAY FLAG IS PARKED FOR THE WHOLE OF IT.  data_fdps_ui_play_active_flag
+   is copied into data_fdps_ui_play_active_flag_saved and cleared here, and
+   fdps_close_status_window is what puts it back, so the two functions are a
+   pair and neither is usable without the other.
+
+   THE COMPOSITOR IS RUN ONCE BEFORE THE FRAME IS SAVED, and only outside a
+   village: the 64000-byte copy taken straight afterwards is what every
+   animation frame is drawn over, so the picture behind the window is the one
+   fdps_render_view_frame leaves on the adapter rather than whatever the caller
+   had up.  In a village the saved frame is simply the screen as it stood.
+
+   THE SAVED PANEL IS TAKEN BEFORE THE PANEL IS DRAWN AND IS USED THREE WAYS.
+   The 151 x 149 copy holds the empty window artwork, so it erases the stat
+   panel before the first spell page is drawn, it is the background the wait
+   loop repaints its rows over, and it is the surface the second page is
+   composed in.  After the second page has been drawn into it it is no longer
+   the empty artwork, and the second wait loop gets it in that state -- which
+   is what makes that loop repaint page two under its own rows rather than
+   clearing them.
+
+   NOTHING IS CHECKED.  The record pointer, all three allocations and every
+   sheet the drawing reaches are used untested, and the unit index is handed on
+   as it arrives.
+
+   THE THREE BLOCKS ARE ALL RELEASED HERE, after the close has run, and the
+   keyboard queue is emptied last so that keys pressed while the window was
+   animating do not reach the caller. */
+void fdps_battle_show_unit_status_window(int unit_index)
+{
+    /* The record the portrait test reads.  The original keeps this and the
+       window image in ONE stack slot, [EBP-0x1c], reassigning it at 00016ae7;
+       the two are separate variables here because the pointer means two
+       different things and a stack slot is not observable behaviour
+       (ADR-0001). */
+    struct fdps_unit_record *unit;
+    /* The whole 320x200 frame the window is composed in: the empty artwork to
+       start with, then the stat panel, then each spell page in turn. */
+    unsigned char *window_image;
+    /* The screen as it stood before the window opened.  Every animation frame
+       is drawn over this copy, and the close is handed it to fill again. */
+    void *background_frame;
+    /* The 151 x 149 packed copy of the window's panel area.  See
+       SPELL_PANEL_BYTES above for what it is used for. */
+    unsigned char *panel_backdrop;
+    /* The record resolved a second time, at 00016ba6, for the one byte the
+       wait loop needs.  The panel and inventory draws run between the two
+       lookups, so this is a re-read rather than a reuse of `unit` (unit.h). */
+    struct fdps_unit_record *walk_unit;
+    /* Which sprite cache slot the caster's walk cycle comes out of, record
+       byte 2 widened unsigned. */
+    int sprite_cache_slot;
+    /* How many spells the unit knows.  Zero means the window is the stat panel
+       and nothing else; above SPELL_PAGE_ROWS means it has a second page. */
+    int spell_count;
+    /* The counter the four transitions share -- the slide-in step, the two
+       mosaic block sizes and the cross-fade alpha.  One variable in the
+       original as well, [EBP-0x0c]. */
+    int step;
+    /* The spell ids the collector writes.  Nothing here reads them: the list
+       is collected for its count, and both pages collect it again for
+       themselves. */
+    unsigned char spell_ids[SPELL_ID_BUFFER_BYTES];
+
+    unit = fdps_get_unit_record(unit_index);
+    if (unit->portrait_id >= NO_WINDOW_PORTRAIT_FIRST
+        && unit->portrait_id <= NO_WINDOW_PORTRAIT_LAST) {
+        return;
+    }
+
+    window_image = (unsigned char *) fdps_load_status_cel_image();
+    data_fdps_ui_play_active_flag_saved = data_fdps_ui_play_active_flag;
+    data_fdps_ui_play_active_flag = 0;
+    if (data_fdps_village_mode_flag == 0) {
+        fdps_render_view_frame();
+    }
+    fdps_play_sfx(STATUS_WINDOW_SOUND);
+
+    background_frame = malloc((size_t) VGA_SCREEN_BYTES);
+    memmove(background_frame, (void *) VGA_SCREEN_BASE,
+            (size_t) VGA_SCREEN_BYTES);
+    panel_backdrop = (unsigned char *) malloc((size_t) SPELL_PANEL_BYTES);
+    fdps_blit_rect((unsigned int) (window_image + SPELL_PANEL_AT),
+                   VGA_SCREEN_PITCH, panel_backdrop, SPELL_PANEL_PITCH,
+                   SPELL_PANEL_W, SPELL_PANEL_H);
+
+    /* The panel goes into the whole frame at its origin and the inventory list
+       into the panel area, which is why the two calls are handed different
+       pointers (statunit.h). */
+    fdps_draw_unit_status_panel(unit_index, window_image);
+    fdps_draw_unit_inventory(unit_index, NO_HIGHLIGHT,
+                             window_image + SPELL_PANEL_AT, VGA_SCREEN_PITCH);
+
+    walk_unit = fdps_get_unit_record(unit_index);
+    sprite_cache_slot = walk_unit->sprite_cache_slot;
+
+    for (step = 0; step < ANIM_STEP_COUNT; step++) {
+        fdps_draw_status_window_anim_frame(background_frame, window_image,
+                                           step);
+    }
+    fdps_unit_status_window_wait_input(window_image, sprite_cache_slot,
+                                       IDLE_ANIMATION_OFFERED);
+
+    spell_count = fdps_unit_collect_known_spells(unit_index, spell_ids);
+    if (spell_count != 0) {
+        /* Straight to the adapter, one step per retrace: the stat panel breaks
+           up where it stands rather than being composed off-screen first, so
+           what paces this is the two retrace waits and nothing else. */
+        for (step = MOSAIC_COARSEN_FIRST; step < MOSAIC_COARSEN_LIMIT;
+             step += MOSAIC_BLOCK_STEP) {
+            fdps_blit_mosaic_rect(window_image + SPELL_PANEL_AT,
+                                  VGA_SCREEN_PITCH,
+                                  (unsigned char *) (VGA_SCREEN_BASE
+                                                     + SPELL_PANEL_AT),
+                                  VGA_SCREEN_PITCH, SPELL_PANEL_W,
+                                  SPELL_PANEL_H, step, step);
+            while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE)
+                   == 0) {
+            }
+            while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE)
+                   != 0) {
+            }
+        }
+
+        /* The empty artwork back over the stat panel, and the first page drawn
+           on it. */
+        fdps_blit_rect((unsigned int) panel_backdrop, SPELL_PANEL_PITCH,
+                       window_image + SPELL_PANEL_AT, VGA_SCREEN_PITCH,
+                       SPELL_PANEL_W, SPELL_PANEL_H);
+        fdps_draw_spell_list_page(unit_index, 0, NO_HIGHLIGHT,
+                                  window_image + SPELL_PANEL_AT,
+                                  VGA_SCREEN_PITCH);
+
+        for (step = MOSAIC_REFINE_FIRST; step >= MOSAIC_REFINE_LAST;
+             step -= MOSAIC_BLOCK_STEP) {
+            fdps_blit_mosaic_rect(window_image + SPELL_PANEL_AT,
+                                  VGA_SCREEN_PITCH,
+                                  (unsigned char *) (VGA_SCREEN_BASE
+                                                     + SPELL_PANEL_AT),
+                                  VGA_SCREEN_PITCH, SPELL_PANEL_W,
+                                  SPELL_PANEL_H, step, step);
+            while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE)
+                   == 0) {
+            }
+            while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE)
+                   != 0) {
+            }
+        }
+        fdps_spell_list_window_wait_input(window_image, panel_backdrop,
+                                          unit_index, 0, NO_HIGHLIGHT);
+
+        if (spell_count > SPELL_PAGE_ROWS) {
+            /* The second page is composed in the saved panel and folded over
+               the first, which is still in the window image: fg is the new
+               page, bg the old one and the adapter is the destination, so
+               neither source is disturbed and every step blends from the same
+               two pictures. */
+            fdps_draw_spell_list_page(unit_index, SPELL_PAGE_ROWS,
+                                      NO_HIGHLIGHT, panel_backdrop,
+                                      SPELL_PANEL_PITCH);
+            for (step = BLEND_ALPHA_FIRST; step < BLEND_ALPHA_LIMIT;
+                 step += BLEND_ALPHA_STEP) {
+                fdps_blit_blend_rect(panel_backdrop, SPELL_PANEL_PITCH,
+                                     window_image + SPELL_PANEL_AT,
+                                     VGA_SCREEN_PITCH,
+                                     (unsigned char *) (VGA_SCREEN_BASE
+                                                        + SPELL_PANEL_AT),
+                                     VGA_SCREEN_PITCH, SPELL_PANEL_W,
+                                     SPELL_PANEL_H,
+                                     data_fdps_palette_shade_ramp_table,
+                                     data_fdps_inverse_palette_cube, step);
+                while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE)
+                       == 0) {
+                }
+                while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE)
+                       != 0) {
+                }
+            }
+            fdps_blit_rect((unsigned int) panel_backdrop, SPELL_PANEL_PITCH,
+                           window_image + SPELL_PANEL_AT, VGA_SCREEN_PITCH,
+                           SPELL_PANEL_W, SPELL_PANEL_H);
+            fdps_spell_list_window_wait_input(window_image, panel_backdrop,
+                                              unit_index, SPELL_PAGE_ROWS,
+                                              NO_HIGHLIGHT);
+        }
+    }
+
+    fdps_close_status_window(window_image, background_frame);
+    free(window_image);
+    free(background_frame);
+    free(panel_backdrop);
+    fdps_flush_keyboard_queue();
 }
