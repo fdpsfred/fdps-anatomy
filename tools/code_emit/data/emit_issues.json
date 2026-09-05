@@ -1861,5 +1861,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00017ca0": [
+    {
+      "what": "What the panel actually LOOKS like is not reachable from a unit test, only its geometry is. The page is malloc'd and freed inside the call, and the scene it is blitted into is a page malloc hands over that nothing clears -- with no layers, units or cursor staged fdps_draw_scene_layers writes nothing into it -- so the frame that reaches the adapter is the allocator's leftovers with the strips laid over it, and only the presented window's own edge can be asserted. That leaves four things unchecked by any assertion: that WinFail.Cel's sprite 0 fills the 209 x 133 page at pitch 0xd1; that the six number fields at page (85,4), (131,4), (87,121), (47,104), (119,104) and (174,104) land inside the boxes the artwork draws for them; that the victory and defeat lines at (35,22) and (35,59) fit the space above them; and that the four strips slide down the screen in the order and at the speed the two keyframe tables describe. The transcription itself is not in doubt -- every folded constant of the original is in the emitted BTLEND.OBJ exactly once and at the same value (0x399, 0x3c7, 0x6320, 0x5517, 0x555f, 0x5596, 0x1219, 0x304e for the eight fields; 0x37, 0xde1, 0x51a4, 0x5fca against 0x537b, 0x6b2c, 0xdfe4, 0xf811 for the four resting strips; 0x21d8 and 0xa0504 three times each), and the two rodata templates in the object match the 304 and 208 bytes read out of 0x1485c and 0x149cc -- so what is open is whether those numbers produce a readable panel on a real display, not whether they were copied right.",
+      "needs": "A playtest: open the in-battle system submenu's first entry in DOSBox-X with the disc mounted and look at the panel. Alternatively a later test could make the composited scene deterministic by staging one synthetic scene layer with its own tile map and tile sheet, which would let the strip rectangles be asserted on screen frame by frame; that fixture does not exist yet and is far larger than this function's own cover.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same concern independently and add only this: the transcription half of it is now closed from two directions, not one. I re-read both keyframe tables out of the image (304 bytes at 0x1485c, 208 at 0x149cc) and checked all 128 values against the C by hand, and separately confirmed the emitted BTLEND.OBJ's own rodata template and every folded constant. So what remains open is purely whether those numbers produce a readable panel on a real display -- the artwork filling the 209 x 133 page, the six number fields landing inside the boxes drawn for them, the two condition lines fitting the space, and the strips sliding at the speed the tables describe. None of that is reachable from a unit test, because the panel page is allocated and freed inside the call and the scene it composites over is uncleared malloc memory.",
+      "needs": "A playtest: open entry 0 of the in-battle system submenu in DOSBox-X with the disc mounted and look at the panel.",
+      "status": "open",
+      "from": "review",
+      "same_as": "emit#0"
+    }
   ]
 }

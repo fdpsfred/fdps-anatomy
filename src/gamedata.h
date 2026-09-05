@@ -1111,6 +1111,24 @@ extern int data_fdps_audio_cd_current_music_index;
  * The original types all twelve as byte pointers and does its own arithmetic,
  * so a reader casts. */
 
+/* 000643a4.  The party's purse, in gold, shared by the whole roster: what the
+   shops spend, what a battle's bonus lottery and the wandering smith add to,
+   what the save file carries and what the result panels print.  It is the one
+   slot in the 0x643a0-0x643e4 block that is not a resource pointer, which is
+   why that block must not be emitted as an array (contract B above).
+
+   A full dword and SIGNED: every compare in the image is a signed one --
+   CMP EAX,[0x000643a4] / JG at 00033deb in fdps_shop_buy_loop,
+   CMP dword ptr [0x000643a4],0x7530 / JGE at 0003908b, and
+   CMP dword ptr [0x000643a4],0x0 / JGE at 0003a2ad in
+   fdps_roster_revive_fallen_members, which follows it by storing 0 back.  That
+   clamp is the proof rather than the guard: the purse really can be driven
+   below zero -- the revival charge is subtracted first and tested afterwards
+   -- and it is only put right at that one point.  Read through an unsigned
+   type a negative purse becomes an enormous one and neither the clamp nor any
+   affordability test fires. */
+extern int data_fdps_shared_party_total_gold;
+
 /* 000643e4.  "Fight.pal" out of Misc.vfs (the string at 00061cd4), the palette
    the combat screens run in, as against data_fdps_vga_main_palette_ptr's
    "Fde.pal" for the field.  fdps_load_global_resources hands this one to

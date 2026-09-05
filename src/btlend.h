@@ -59,4 +59,48 @@ extern int fdps_battle_count_remaining_units_on_side(int side);
 extern void fdps_battle_check_default_end_conditions(void);
 #pragma aux fdps_battle_check_default_end_conditions "*" parm caller [];
 
+/* Shows the chapter's victory and defeat conditions over the live battle map
+   and waits for a keypress.  Entry 0 of the in-battle system submenu, and its
+   only caller.  Takes nothing, returns nothing and leaves no state behind: the
+   panel is built, animated and released inside the call, and the screen it
+   was drawn over is not restored -- whatever repaints the map next is what
+   puts it back.
+
+   The panel is a 209 x 133 page built from scratch on every call.  MISC.VFS is
+   opened, WinFail.Cel is taken out of it as the artwork, and six numbers are
+   stamped onto it: the chapter number (the chapter id plus one, so it reads
+   1-based) in two digits, the battle turn counter in three, the party's gold
+   in eight, and the units still standing on side 0, side 2 and side 1 in two
+   each, from fdps_battle_count_remaining_units_on_side above.  Entries 2 and 3
+   of the chapter's own text block -- the victory and the defeat condition --
+   are drawn under them.
+
+   OPENING THE CONTAINER RELOADS THE NINE GLOBAL DATA TABLES AND LEAKS THE
+   PREVIOUS SET.  That is not a side effect of showing the panel that a caller
+   could avoid; it is what the function does, and a build that hoisted the load
+   out of it or freed the old tables would behave differently
+   (rebuild_info/pitfalls.md).  A missing MISC.VFS prints a line and ends the
+   process, and so does a container without WinFail.Cel in it.
+
+   The panel is then slid down over the map in four horizontal strips, held,
+   and slid off: 19 slide-in frames, then as many hold frames as the player
+   leaves it up for, then 13 slide-out frames.  Every frame recomposes the
+   whole battle map behind the panel with fdps_draw_scene_layers (mapdraw.h) on
+   a page of its own, is presented in the vertical blanking interval, and is
+   paced to one timer tick, so the panel animates over a map that goes on
+   moving underneath it.
+
+   THE HOLD ENDS ON A MAKE CODE AND NOTHING ELSE.  The queue is emptied first,
+   so anything pressed during the slide-in is discarded, and the loop then runs
+   for as long as the scancode it reads is 0x80 or above -- which covers both
+   the 0xff an empty queue reports and a key RELEASE code.  A key held down
+   from before the panel opened therefore does not dismiss it, and the release
+   of that key does not either: it takes a fresh press.
+
+   Nothing about the display is restored on the way out.  The last slide-out
+   frame is left on the screen, the keyboard queue is emptied a second time,
+   and the caller repaints. */
+extern void fdps_battle_show_win_fail_window(void);
+#pragma aux fdps_battle_show_win_fail_window "*" parm caller [];
+
 #endif

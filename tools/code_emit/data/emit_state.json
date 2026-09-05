@@ -2574,6 +2574,14 @@
       "status": "committed",
       "emitted_against": "0x535",
       "rounds": 0
+    },
+    "00017ca0": {
+      "name": "fdps_battle_show_win_fail_window",
+      "target": "btlend.c",
+      "body_size": "0x6a5",
+      "status": "committed",
+      "emitted_against": "0x6a5",
+      "rounds": 0
     }
   }
 }
