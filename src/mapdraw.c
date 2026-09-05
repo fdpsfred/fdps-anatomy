@@ -3,13 +3,23 @@
  *
  * See mapdraw.h for what a layer slot is and why the draw order matters.
  * Nothing here owns state: the layer arrays belong to the chapter resource
- * loader, and this file only reads them.
+ * loader, and this file only reads them.  The one exception is the frame-pace
+ * latch declared in the header, which fdps_render_view_frame at the bottom of
+ * this file both reads and writes.
+ *
+ * That routine reaches the runtime for malloc and free from <stdlib.h> and for
+ * inp from <conio.h>, which is where Watcom 10.0a declares them; all three are
+ * calls in the original too -- CALL 0x0003d375 at 0002bec1, CALL 0x0003d478 at
+ * 0002bf50 and CALL 0x0003d4e4 at 0002bee9 and 0002beff.
  */
+#include <stdlib.h>
+#include <conio.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "blit.h"
 #include "unit.h"
 #include "mapcur.h"
+#include "palcycle.h"
 #include "mapdraw.h"
 
 /* 0002c220.  A hand-written bubble sort over the layer slot indices, keyed on
@@ -834,4 +844,99 @@ void fdps_draw_scene_layers(unsigned char *scene_buf)
                                   data_fdps_scene_layer_tile_attr_mode[slot]);
         }
     }
+}
+
+/* The offscreen page the frame is composed on: a whole 360x240 8bpp surface,
+   allocated and freed inside every call.  0x168 * 0xf0 is the 0x15180 that is
+   pushed to malloc at 0002bebc. */
+#define SCENE_BUF_ROWS 0xf0
+#define SCENE_BUF_BYTES (SCENE_BUF_PITCH * SCENE_BUF_ROWS)
+
+/* How far in from that page's top-left corner the presented window starts.
+   The layer compositor lays its 14x9 tile window down 24 pixels in on both
+   axes, and 0x18 * 0x168 + 0x18 is the 0x21d8 added to the buffer at
+   0002bf27. */
+#define SCENE_BUF_BORDER 0x18
+
+/* The mode 13h aperture and the inset the window is presented at.  4 * 0x140
+   + 4 is the 0xa0504 pushed at 0002bf1a. */
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_PITCH 0x140
+#define VIEW_SCREEN_INSET 4
+
+/* Input Status 1, whose bit 3 is set while the vertical retrace is running. */
+#define VGA_INPUT_STATUS_1 0x3da
+#define VGA_STATUS_VERTICAL_RETRACE 0x08
+
+/* 0002beb0.  One whole frame of the framed main view, composed and presented.
+   Takes nothing, returns nothing, and reads nothing above [EBP] -- all
+   sixty-one call sites push nothing before the CALL and clean nothing after
+   it.
+
+   Four things about it are behaviour rather than style, and all four are
+   playtest contracts (rebuild_info/pitfalls.md).
+
+   THE PAGE IS ALLOCATED PER FRAME.  0x15180 bytes come from malloc at the top
+   and go back to free at the bottom, so nothing composed here survives to the
+   next frame and every frame starts on whatever the allocator hands back.
+   Hoisting the buffer into a static -- the obvious tidy-up, and the one a
+   modern reader reaches for -- changes what an unpainted pixel of the page
+   holds from frame to frame, which the compositor relies on nowhere but the
+   allocator's behaviour decides everywhere.
+
+   ONLY THE INTERIOR IS PRESENTED.  The blit takes 0x138 x 0xc0 pixels from
+   0x18 rows and 0x18 columns into the page and puts them 4 pixels into the
+   screen, with the two strides -- 0x168 out of the page, 0x140 into the
+   screen -- independent of each other and of the 0x138 row width.  The
+   24-pixel page margin is the room the layers scroll in and is never shown;
+   the 4-pixel screen margin is the view's frame and is never written.
+
+   THE PALETTE CYCLE RUNS INSIDE THE BLANKING WINDOW.  The first spin waits for
+   Input Status 1 bit 3 to come up, fdps_cycle_scene_palette writes the DAC
+   while it is up, and the second spin waits for it to go down again before a
+   single pixel is blitted.  Both spins are load-bearing and they are not
+   interchangeable: writing DAC registers while the beam is live snows the
+   picture, and blitting during the blanking interval throws away the only
+   window the DAC is free in.
+
+   THE TICK WAIT IS THE GAME'S FRAME CLOCK.  Every modal loop in the game --
+   the cursor loops, the menus, the walk animations, the chapter event
+   scripts -- runs as fast as it can and is held to the timer's rate by this
+   spin alone.  Dropping it does not merely speed the game up, it removes the
+   only pacing those loops have. */
+void fdps_render_view_frame(void)
+{
+    /* The offscreen page this frame is composed on. */
+    unsigned char *scene_buf;
+
+    scene_buf = (unsigned char *) malloc((size_t) SCENE_BUF_BYTES);
+    fdps_draw_scene_layers(scene_buf);
+    fdps_draw_cursor_info_panel(scene_buf);
+
+    while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+        /* Spin until the retrace begins, so the DAC writes below land in the
+           blanking interval. */
+    }
+    fdps_cycle_scene_palette();
+    while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+        /* And until it ends, so the blit below has the whole frame to run
+           in. */
+    }
+
+    fdps_blit_rect((unsigned int) (scene_buf
+                                   + SCENE_BUF_BORDER * SCENE_BUF_PITCH
+                                   + SCENE_BUF_BORDER),
+                   SCENE_BUF_PITCH,
+                   (void *) (VGA_SCREEN_BASE
+                             + VIEW_SCREEN_INSET * VGA_SCREEN_PITCH
+                             + VIEW_SCREEN_INSET),
+                   VGA_SCREEN_PITCH, MAP_VIEW_WIDTH, MAP_VIEW_HEIGHT);
+
+    while (data_fdps_view_frame_last_tick == data_fdps_timer_tick_counter) {
+        /* Hold the caller here until the timer's tick counter moves, which is
+           what paces it to one frame per tick. */
+    }
+    data_fdps_view_frame_last_tick = data_fdps_timer_tick_counter;
+
+    free(scene_buf);
 }

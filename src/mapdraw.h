@@ -67,6 +67,23 @@ extern unsigned int data_fdps_scene_tile_anim_last_flip_tick;
    equality, so a counter that has wrapped is compared correctly either way. */
 extern unsigned int data_fdps_scene_layer_scroll_last_tick;
 
+/* 00069d10.  The frame tick fdps_render_view_frame last presented on.  That
+   routine spins until data_fdps_timer_tick_counter differs from it and then
+   copies the counter in, which is what paces every modal loop in the game to
+   one presented frame per timer tick however fast the machine composes one.
+
+   Read and written only by fdps_render_view_frame, and only as a whole dword:
+   MOV EAX,[0x00069d10] at 0002bf35 and MOV [0x00069d10],EAX at 0002bf47 are
+   the only two instructions in the image that name the address.  Unsigned, to
+   match the counter it latches; the only operation on the pair is equality, so
+   a counter that has wrapped is compared correctly either way.
+
+   THE WAIT IS ON INEQUALITY WITH THE LATCH, not on a tick boundary: a frame
+   that took longer than a tick to compose finds the counter already moved and
+   presents with no wait at all, so the pacing is a ceiling on the frame rate
+   and never a floor. */
+extern unsigned int data_fdps_view_frame_last_tick;
+
 /* 00069d18.  The frame tick the map's walk-animation clock was last stepped
    on.  fdps_draw_map_unit compares data_fdps_timer_tick_counter against it and
    steps the two counters below only when the two differ, which is what holds
@@ -220,5 +237,34 @@ extern void fdps_draw_map_units(unsigned char *scene_buf,
    every frame and never drifts. */
 extern void fdps_draw_scene_layers(unsigned char *scene_buf);
 #pragma aux fdps_draw_scene_layers "*" parm caller [];
+
+/* Composes one whole frame of the framed main view and puts it on the screen.
+   Takes nothing and returns nothing: every one of the sixty-one call sites
+   invokes it bare, because all the state it draws from is in globals.
+
+   THE SCENE BUFFER IS ALLOCATED AND FREED INSIDE THE CALL, 0x15180 bytes of
+   it -- a whole 360x240 page -- so a frame costs a malloc and a free and
+   nothing survives between frames.  Only its 312x192 interior, from 24 rows
+   and 24 columns in, is ever presented; the border is the margin the layer
+   compositor scrolls within and it is never seen.
+
+   IT PRESENTS INTO THE MODE 13H APERTURE FOUR PIXELS IN ON BOTH AXES, at
+   0xa0000 + 4 * 320 + 4, and the four-pixel frame around the window is left
+   holding whatever was drawn there before -- that border is the view's frame
+   and is painted by somebody else.
+
+   THE RETRACE IS STRADDLED ON PURPOSE.  It waits for the vertical retrace to
+   BEGIN, cycles the scene palette inside the blanking window where a DAC write
+   is invisible, waits for the retrace to END, and only then blits.  Doing the
+   palette work outside the window snows the picture, and blitting inside it
+   wastes the only interval the DAC is free in.
+
+   IT PACES THE CALLER TO ONE FRAME PER TIMER TICK, by spinning on
+   data_fdps_view_frame_last_tick above.  That wait is what makes every modal
+   loop in the game run at the timer's rate rather than the machine's, so a
+   loop that presents through this routine needs no clock of its own -- and one
+   that stops presenting stops advancing. */
+extern void fdps_render_view_frame(void);
+#pragma aux fdps_render_view_frame "*" parm caller [];
 
 #endif

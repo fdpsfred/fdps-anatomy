@@ -34,9 +34,13 @@
  *   of 0xa5 says "mode 9 at level 5" and one of 0xa6 says "mode 0x0a at level
  *   5", which is what lets a test see a blend level and a blit mode at all.
  */
+#include <string.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "mapcur.h"
 #include "mapdraw.h"
 
 #define ORDER_SLOTS 8
@@ -1922,6 +1926,376 @@ static void test_the_map_cursor_is_drawn_every_frame(void)
     CHECK_EQ(move_grid[4 + (1 * MAP_MAX_DIM + 3) * 2 + 1], 0x01);
 }
 
+/* ------------------------------------------------------------------ *
+ * 0002beb0  fdps_render_view_frame                                   *
+ * ------------------------------------------------------------------ *
+ *
+ * WHAT THE RUN IS OBSERVED THROUGH.  The routine composes on a page it
+ * allocates and frees inside the call, so the only thing a test can look at is
+ * where that page ends up: the mode 13h aperture at 0xa0000.  Every case below
+ * puts the adapter into the mode the game presents in, poisons the whole frame
+ * with FRAME_GUARD first so an untouched byte is recognisable, runs one frame
+ * and copies the aperture out before returning to text mode.  FRAME_GUARD is
+ * 0xf0, above every colour the ids in play here can produce -- they stop at
+ * 141 -- so a guard byte cannot be mistaken for a drawn pixel.
+ *
+ * WHERE THE EXPECTED GEOMETRY COMES FROM.  The six pushes at
+ * 0002bf0b..0002bf2c -- 0xc0, 0x138, 0x140, 0xa0504, 0x168, buffer + 0x21d8 --
+ * read back through fdps_blit_rect's argument order as: 192 rows of 312 bytes,
+ * from the page at pitch 0x168 starting 0x21d8 in, to 0xa0504 at pitch 0x140.
+ * 0x21d8 is 24 * 360 + 24 and 0xa0504 is 0xa0000 + 4 * 320 + 4, so screen
+ * pixel (4, 4) is page pixel (24, 24) and the four-pixel screen border is
+ * never written.  0x15180 at 0002bebc is the page size, 360 * 240.
+ *
+ * WHY A TIMER INTERRUPT IS INSTALLED FOR ONE CASE ONLY.  The frame ends
+ * spinning until data_fdps_timer_tick_counter leaves
+ * data_fdps_view_frame_last_tick, and in the game the counter is advanced by
+ * fdps_timer_tick_handler off AIL's timer.  Nothing advances it in a test
+ * image, so the case that exercises the wait hooks IRQ0 for the duration of
+ * the call; every other case puts the latch one off the counter so the spin
+ * falls through at once.  That those cases return at all is itself the
+ * evidence that the spin runs while the two are EQUAL.
+ *
+ * WHAT IS NOT ASSERTED HERE.  That the palette cycle lands inside the blanking
+ * interval and the blit outside it is a playtest contract
+ * (rebuild_info/pitfalls.md): both spins complete in a fraction of a tick and
+ * nothing a unit test can read distinguishes a frame that straddled the
+ * retrace from one that did not.  The per-frame malloc and free are in the
+ * same position -- a static page would present the same pixels.
+ */
+
+#define FRAME_VGA_BASE 0x000a0000
+#define FRAME_SCREEN_W 320
+#define FRAME_SCREEN_H 200
+#define FRAME_SCREEN_BYTES (FRAME_SCREEN_W * FRAME_SCREEN_H)
+#define FRAME_MODE_13H 0x13
+#define FRAME_MODE_TEXT 0x03
+#define FRAME_GUARD 0xf0
+#define FRAME_TIMER_VECTOR 8
+
+/* The presented rectangle, straight off the pushes at 0002bf0b..0002bf1a. */
+#define FRAME_VIEW_LEFT 4
+#define FRAME_VIEW_TOP 4
+#define FRAME_VIEW_W 0x138
+#define FRAME_VIEW_H 0xc0
+
+/* And the page-side origin the blit reads from, 0x21d8 = 24 * 360 + 24. */
+#define FRAME_PAGE_BORDER 24
+
+static unsigned char frame_screen[FRAME_SCREEN_BYTES];
+
+static void (__interrupt __far *frame_saved_timer)();
+
+static void __interrupt __far frame_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(frame_saved_timer);
+}
+
+static void frame_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* One layer filling the whole window with colour 101, the cursor and the units
+   switched off by stage_layers, and the terrain panel switched off here so the
+   picture on the screen is the layer alone.  The two HUD flags are written
+   rather than assumed, because other test files leave them wherever their own
+   cases put them. */
+static void frame_stage(void)
+{
+    stage_layers(1);
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+}
+
+/* The same, against the 16x16 map whose cell (x, y) holds tile id y * 16 + x,
+   so a screen pixel names the page pixel it was copied from. */
+static void frame_stage_addressable(void)
+{
+    frame_stage();
+    build_map(MAP_MAX_DIM, MAP_MAX_DIM);
+    data_fdps_scene_layer_tile_map_ptrs[0] = tile_map;
+}
+
+/* One frame, captured.  The latch is put one off the counter so the pacing
+   spin falls straight through; the case that wants the spin exercised installs
+   the timer itself. */
+static void frame_run(void)
+{
+    frame_set_mode(FRAME_MODE_13H);
+    memset((void *) FRAME_VGA_BASE, FRAME_GUARD, (size_t) FRAME_SCREEN_BYTES);
+    data_fdps_view_frame_last_tick = data_fdps_timer_tick_counter + 1;
+    fdps_render_view_frame();
+    memmove(frame_screen, (void *) FRAME_VGA_BASE,
+            (size_t) FRAME_SCREEN_BYTES);
+    frame_set_mode(FRAME_MODE_TEXT);
+}
+
+static int frame_pixel(int row, int col)
+{
+    return (int) frame_screen[row * FRAME_SCREEN_W + col];
+}
+
+/* The window is 312 x 192 at (4, 4): its four corners hold the layer's colour,
+   and the row above it, the column left of it and the first row and column
+   past it still hold the guard.  A dest stride other than 0x140, or an extent
+   other than 0x138 x 0xc0, moves at least one of these eight bytes. */
+static void test_the_presented_window_is_inset_four_pixels(void)
+{
+    frame_stage();
+    frame_run();
+
+    CHECK_EQ(frame_pixel(FRAME_VIEW_TOP, FRAME_VIEW_LEFT), layer_color(0));
+    CHECK_EQ(frame_pixel(FRAME_VIEW_TOP, FRAME_VIEW_LEFT + FRAME_VIEW_W - 1),
+             layer_color(0));
+    CHECK_EQ(frame_pixel(FRAME_VIEW_TOP + FRAME_VIEW_H - 1, FRAME_VIEW_LEFT),
+             layer_color(0));
+    CHECK_EQ(frame_pixel(FRAME_VIEW_TOP + FRAME_VIEW_H - 1,
+                         FRAME_VIEW_LEFT + FRAME_VIEW_W - 1),
+             layer_color(0));
+
+    CHECK_EQ(frame_pixel(FRAME_VIEW_TOP - 1, FRAME_VIEW_LEFT), FRAME_GUARD);
+    CHECK_EQ(frame_pixel(FRAME_VIEW_TOP, FRAME_VIEW_LEFT - 1), FRAME_GUARD);
+    CHECK_EQ(frame_pixel(FRAME_VIEW_TOP + FRAME_VIEW_H, FRAME_VIEW_LEFT),
+             FRAME_GUARD);
+    CHECK_EQ(frame_pixel(FRAME_VIEW_TOP, FRAME_VIEW_LEFT + FRAME_VIEW_W),
+             FRAME_GUARD);
+}
+
+/* And nothing outside the window is written anywhere on the frame: not the
+   margins, and not the eight rows of screen below the window's last row that a
+   destination stride of 0x138 rather than 0x140 would have walked into. */
+static void test_nothing_outside_the_window_is_written(void)
+{
+    int row;
+    int col;
+    long strays;
+
+    frame_stage();
+    frame_run();
+
+    strays = 0;
+    for (row = 0; row < FRAME_SCREEN_H; row++) {
+        for (col = 0; col < FRAME_SCREEN_W; col++) {
+            if (row >= FRAME_VIEW_TOP && row < FRAME_VIEW_TOP + FRAME_VIEW_H
+                && col >= FRAME_VIEW_LEFT
+                && col < FRAME_VIEW_LEFT + FRAME_VIEW_W) {
+                continue;
+            }
+            if (frame_pixel(row, col) != FRAME_GUARD) {
+                strays++;
+            }
+        }
+    }
+    CHECK_EQ(strays, 0);
+}
+
+/* The source is the page's interior, buffer + 0x21d8, and not the page's own
+   corner: screen (4, 4) is page (24, 24), which against the addressable map is
+   cell (0, 0).  Each 24-pixel step across the screen names the next cell
+   along, which pins the 0x168 source stride as well as the offset.  The
+   bottom-right pixel, screen (195, 315), is page (215, 335) -- window offset
+   (191, 311), which lands in tile row 7 and tile column 12. */
+static void test_the_source_is_the_page_interior(void)
+{
+    frame_stage_addressable();
+    frame_run();
+
+    CHECK_EQ(frame_pixel(4, 4), tile_color(0));
+    CHECK_EQ(frame_pixel(4, 4 + TILE), tile_color(1));
+    CHECK_EQ(frame_pixel(4, 4 + TILE * 12), tile_color(12));
+    CHECK_EQ(frame_pixel(4 + TILE, 4), tile_color(MAP_MAX_DIM));
+    CHECK_EQ(frame_pixel(4 + TILE * 7, 4 + TILE * 12),
+             tile_color(7 * MAP_MAX_DIM + 12));
+    CHECK_EQ(frame_pixel(FRAME_VIEW_TOP + FRAME_VIEW_H - 1,
+                         FRAME_VIEW_LEFT + FRAME_VIEW_W - 1),
+             tile_color(7 * MAP_MAX_DIM + 12));
+}
+
+/* The page is composed by fdps_draw_scene_layers on every call, so a second
+   frame with a different layer tile presents the new picture rather than
+   whatever the first frame left behind. */
+static void test_every_frame_recomposes_the_page(void)
+{
+    frame_stage();
+    frame_run();
+    CHECK_EQ(frame_pixel(FRAME_VIEW_TOP, FRAME_VIEW_LEFT), layer_color(0));
+
+    *(short *) (layer_maps[0] + 0x0b) = (short) (LAYER_TILE_BASE + 5);
+    frame_run();
+    CHECK_EQ(frame_pixel(FRAME_VIEW_TOP, FRAME_VIEW_LEFT), layer_color(5));
+}
+
+/* fdps_draw_cursor_info_panel's first blit is sub-image 0 of the HUD sheet,
+   put at (data_fdps_ui_terrain_hud_panel_offset, 0xa0) of the page at pitch
+   0x168.  The sheet staged below makes that a 24x24 block of colour 0x2a,
+   which neither the layer's 101 nor the aperture's guard can be confused with
+   -- so a block of 0x2a on the presented screen says the panel was drawn into
+   the very page that was then presented, and after the layers rather than
+   before them.
+
+   Reaching that blit means surviving fdps_map_load_tile_info first, which is
+   what the event-code layer below is for; the two figures the panel draws
+   afterwards need a glyph sheet, and the unit figure is skipped because
+   fdps_battle_find_unit_at_cursor returns -1 with no units on the map.
+
+   BOTH SHEETS NEED A CEL HEADER and the tileset is given one here, because
+   fdps_cel_blit_sprite takes its extents from sprite_width and sprite_height
+   at +7 and +9 rather than from its arguments, and a zero there does not draw
+   nothing -- fdps_rle_blit_passthrough's row loop is a do-while over an
+   unsigned counter, so zero rows of zero width is 65535 rows of runaway.
+
+   THE PANEL'S TILE BLIT COVERS THE BLOCK'S BOTTOM-RIGHT CORNER.  It goes to
+   (offset + 9, 0xaf) at 24x24, which overlaps the HUD block's last nine rows
+   and columns, so the corner probed below is the top-right and the bottom-left
+   rather than the bottom-right.  Its colour is the layer's own 101, since it
+   comes out of the same tileset as the layer's single tile.
+
+   What the panel itself decides is covered in tests/mapcur.c; all that is
+   under test here is that this frame calls it, with this page. */
+#define FRAME_PANEL_COLUMN 100
+#define FRAME_PANEL_TOP_ROW 0xa0
+#define FRAME_CEL_TABLE_AT 0x0f
+#define FRAME_CEL_WIDTH_AT 7
+#define FRAME_CEL_HEIGHT_AT 9
+#define FRAME_HUD_COLOR 0x2a
+#define FRAME_HUD_STREAM_BYTES (TILE * 2)
+#define FRAME_HUD_STREAM_AT (FRAME_CEL_TABLE_AT + 4)
+#define FRAME_GLYPH_COUNT 13
+#define FRAME_GLYPH_W 6
+#define FRAME_GLYPH_ROWS 8
+#define FRAME_GLYPH_STREAM_BYTES (FRAME_GLYPH_ROWS * 2)
+#define FRAME_GLYPH_STREAMS_AT (FRAME_CEL_TABLE_AT + FRAME_GLYPH_COUNT * 4)
+#define FRAME_GLYPH_COLOR 0x60
+
+static unsigned char frame_hud_sheet[FRAME_HUD_STREAM_AT
+                                     + FRAME_HUD_STREAM_BYTES];
+static unsigned char frame_glyph_sheet[FRAME_GLYPH_STREAMS_AT
+                                       + FRAME_GLYPH_COUNT
+                                         * FRAME_GLYPH_STREAM_BYTES];
+static struct fdps_map_cell_code_layer frame_events;
+
+/* One 24x24 sub-image of a single colour, with the header extents
+   fdps_cel_blit_sprite reads, and thirteen glyphs of eight rows of six pixels
+   for fdps_draw_number.  The op-0 command byte is width - 1, the same encoding
+   build_tileset uses for its 24-pixel rows. */
+static void frame_build_sheets(void)
+{
+    int glyph;
+    int row;
+    int stream_at;
+
+    *(short *) (tileset + FRAME_CEL_WIDTH_AT) = (short) TILE;
+    *(short *) (tileset + FRAME_CEL_HEIGHT_AT) = (short) TILE;
+
+    *(short *) (frame_hud_sheet + FRAME_CEL_WIDTH_AT) = (short) TILE;
+    *(short *) (frame_hud_sheet + FRAME_CEL_HEIGHT_AT) = (short) TILE;
+    *(int *) (frame_hud_sheet + FRAME_CEL_TABLE_AT) = FRAME_HUD_STREAM_AT;
+    for (row = 0; row < TILE; row++) {
+        frame_hud_sheet[FRAME_HUD_STREAM_AT + row * 2] =
+            (unsigned char) (TILE - 1);
+        frame_hud_sheet[FRAME_HUD_STREAM_AT + row * 2 + 1] = FRAME_HUD_COLOR;
+    }
+
+    for (glyph = 0; glyph < FRAME_GLYPH_COUNT; glyph++) {
+        stream_at = FRAME_GLYPH_STREAMS_AT + glyph * FRAME_GLYPH_STREAM_BYTES;
+        *(int *) (frame_glyph_sheet + FRAME_CEL_TABLE_AT + glyph * 4) =
+            stream_at;
+        for (row = 0; row < FRAME_GLYPH_ROWS; row++) {
+            frame_glyph_sheet[stream_at + row * 2] =
+                (unsigned char) (FRAME_GLYPH_W - 1);
+            frame_glyph_sheet[stream_at + row * 2 + 1] = FRAME_GLYPH_COLOR;
+        }
+    }
+}
+
+static void test_the_panel_is_composited_over_the_layers(void)
+{
+    int panel_row;
+    int panel_col;
+
+    frame_stage();
+    frame_build_sheets();
+
+    frame_events.width = 1;
+    frame_events.height = 1;
+    frame_events.cells[0] = 0;
+    data_fdps_map_cell_event_code_layer_ptr = (unsigned char *) &frame_events;
+
+    data_fdps_ui_terrain_hud_user_enabled = 1;
+    data_fdps_ui_play_active_flag = 1;
+    data_fdps_ui_terrain_hud_panel_offset = FRAME_PANEL_COLUMN;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_ui_terrain_hud_panel_sheet_ptr = frame_hud_sheet;
+    data_fdps_number_glyph_sheet_ptr = frame_glyph_sheet;
+    data_fdps_number_glyph_color_row = 0;
+    data_fdps_battle_tile_attr_ap_modifier_table[0] = 0;
+    data_fdps_battle_tile_attr_def_modifier_table[0] = 0;
+
+    frame_run();
+
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_number_glyph_sheet_ptr = NULL;
+    data_fdps_ui_terrain_hud_panel_sheet_ptr = NULL;
+    data_fdps_map_cell_event_code_layer_ptr = NULL;
+
+    /* Page (0xa0, 100) is screen (0xa0 - 24 + 4, 100 - 24 + 4). */
+    panel_row = FRAME_PANEL_TOP_ROW - FRAME_PAGE_BORDER + FRAME_VIEW_TOP;
+    panel_col = FRAME_PANEL_COLUMN - FRAME_PAGE_BORDER + FRAME_VIEW_LEFT;
+
+    CHECK_EQ(frame_pixel(panel_row, panel_col), FRAME_HUD_COLOR);
+    CHECK_EQ(frame_pixel(panel_row, panel_col + TILE - 1), FRAME_HUD_COLOR);
+    CHECK_EQ(frame_pixel(panel_row + TILE - 1, panel_col), FRAME_HUD_COLOR);
+    CHECK_EQ(frame_pixel(panel_row, panel_col - 1), layer_color(0));
+    CHECK_EQ(frame_pixel(panel_row, panel_col + TILE), layer_color(0));
+    CHECK_EQ(frame_pixel(panel_row + TILE, panel_col), layer_color(0));
+}
+
+/* The latch is taken from the counter and not stepped: a frame that finds the
+   two already different presents at once and copies the counter's whole value
+   in (MOV EAX,[0x69d64] / MOV [0x69d10],EAX at 0002bf42). */
+static void test_the_latch_is_copied_from_the_counter(void)
+{
+    frame_stage();
+    data_fdps_timer_tick_counter = 7777;
+    data_fdps_view_frame_last_tick = 1234;
+
+    frame_set_mode(FRAME_MODE_13H);
+    fdps_render_view_frame();
+    frame_set_mode(FRAME_MODE_TEXT);
+
+    CHECK_EQ(data_fdps_view_frame_last_tick, 7777);
+    CHECK_EQ(data_fdps_timer_tick_counter, 7777);
+}
+
+/* And with the two equal on entry the frame does not return until the counter
+   moves.  IRQ0 is hooked for the duration of the call so that it can. */
+static void test_the_frame_waits_for_the_counter_to_move(void)
+{
+    unsigned int before;
+
+    frame_stage();
+    before = data_fdps_timer_tick_counter;
+    data_fdps_view_frame_last_tick = before;
+
+    frame_set_mode(FRAME_MODE_13H);
+    frame_saved_timer = _dos_getvect(FRAME_TIMER_VECTOR);
+    _dos_setvect(FRAME_TIMER_VECTOR, frame_timer_isr);
+    fdps_render_view_frame();
+    _dos_setvect(FRAME_TIMER_VECTOR, frame_saved_timer);
+    frame_set_mode(FRAME_MODE_TEXT);
+
+    CHECK_EQ(data_fdps_view_frame_last_tick != before, 1);
+    CHECK_EQ(data_fdps_view_frame_last_tick - before >= 1, 1);
+}
+
 void run_mapdraw_tests(void)
 {
     RUN_TEST(test_ascending_depths_keep_identity_order);
@@ -1988,4 +2362,12 @@ void run_mapdraw_tests(void)
     RUN_TEST(test_depth_byte_is_widened_unsigned);
     RUN_TEST(test_zero_layer_count_still_draws_the_units);
     RUN_TEST(test_the_map_cursor_is_drawn_every_frame);
+
+    RUN_TEST(test_the_presented_window_is_inset_four_pixels);
+    RUN_TEST(test_nothing_outside_the_window_is_written);
+    RUN_TEST(test_the_source_is_the_page_interior);
+    RUN_TEST(test_every_frame_recomposes_the_page);
+    RUN_TEST(test_the_panel_is_composited_over_the_layers);
+    RUN_TEST(test_the_latch_is_copied_from_the_counter);
+    RUN_TEST(test_the_frame_waits_for_the_counter_to_move);
 }

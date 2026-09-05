@@ -1767,5 +1767,20 @@
       "status": "open",
       "same_as": "emit#2"
     }
+  ],
+  "0002beb0": [
+    {
+      "what": "Whether the palette cycle really lands inside the vertical blanking interval and the blit really lands outside it. The order is preserved instruction for instruction -- first spin, fdps_cycle_scene_palette, second spin, fdps_blit_rect -- but a unit test cannot see it: both spins complete in a fraction of a tick and the presented pixels are identical whether or not the DAC writes were shielded. What the original relies on is that the palette work fits in the blanking window on the hardware of the day; the rebuilt fdps_cycle_scene_palette copies 586 bytes of ramp initialisers onto its frame on every call, and whether that still fits is a property of the machine, not of this function.",
+      "needs": "A real run: the game in DOSBox-X (and ideally on period hardware) on a map with an active colour cycle -- chapters 2, 8, 20, 21, 24, 28, 29 and 30 all have one -- watching for colour snow or tearing across the map view. If it snows, the fault is in how long fdps_cycle_scene_palette takes, not in this function's structure.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed the ordering half independently and it holds: the produced object places `call fdps_cycle_scene_palette` between the two 0x3DA polls and `call fdps_blit_rect` after the second, byte for byte as the original does, so nothing about the structure was lost in emission. What remains open is unchanged and is not about this function -- whether the palette work still FITS inside the blanking window on the target machine. I added nothing to that half.",
+      "needs": "The real run the emitter describes: DOSBox-X on a chapter with an active colour cycle, watching the map view for snow or tearing.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

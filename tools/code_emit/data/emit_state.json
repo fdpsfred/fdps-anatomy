@@ -2417,6 +2417,14 @@
       "status": "committed",
       "rounds": 1,
       "emitted_against": "0x295"
+    },
+    "0002beb0": {
+      "name": "fdps_render_view_frame",
+      "target": "mapdraw.c",
+      "body_size": "0xaf",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0xaf"
     }
   }
 }
