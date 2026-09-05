@@ -51,6 +51,44 @@ extern int data_fdps_ui_save_slot_occupied_flags[SAVE_SLOT_COUNT];
    it, so that costs nothing. */
 extern int data_fdps_ui_saveload_is_load_mode;
 
+/* 000241e0.  The save screen, and the whole of what "Save" on the village and
+   bar menus does: it reveals the three-slot panel, runs the slot cursor,
+   writes the live game state into the slot the player picked, redraws the
+   panel so the new save shows, and offers it again until the player presses
+   Escape.
+
+   `restore_page` is a 64000-byte 320x200 8bpp page the caller owns.  It is
+   never written to and never freed here; it is only what the closing mosaic
+   puts back on the adapter when the screen ends.  fdps_run_village_phase
+   passes a freshly zeroed page, so the village fades to black behind the menu
+   it is about to redraw; fdps_run_bar_shop passes the page still holding the
+   bar screen, so the bar comes back.
+
+   NOTHING IS REPORTED.  The function is void: whether a save was written,
+   which slot took it, and whether the disc could be written to at all are all
+   invisible to the caller.  The write stream's fopen is not tested.
+
+   THE PLAYER MAY SAVE AS MANY TIMES AS HE LIKES IN ONE VISIT.  Every confirm
+   writes the file and then rebuilds the panel, and only Escape ends the
+   screen.  The slot cursor keeps its position across those passes.
+
+   AN EMPTY SLOT MAY BE PICKED, because the mode flag above is set to 0 on the
+   way in and that is what short-circuits the occupied test inside
+   fdps_save_slot_select_loop.
+
+   IT WRITES THE WHOLE OF FDE.SAV, not one slot of it: the file is read back
+   into memory, the picked slot's 0xa28 bytes are replaced, the checksum is
+   recomputed over the whole image and everything is encrypted and written out
+   again.  A missing file is not an error -- the image is filled with 0xff, so
+   the three slots the player did not pick come out reading as never written
+   (rebuild_info/pitfalls.md).
+
+   IT LEAVES THE SPRITE CACHE HOLDING THE PARTY and the mode flag at 0, both
+   of them by way of fdps_saveload_screen_build; and it needs the timer
+   interrupt running, because the slot cursor paces its frames on it. */
+extern void fdps_save_game_screen(unsigned char *restore_page);
+#pragma aux fdps_save_game_screen "*" parm caller [];
+
 /* 00024650.  The modal loop both save/load screens run once the slot panel is
    on the page: it drives a three-entry slot cursor from the keyboard, animates
    the cursor highlight over a background the caller composed, and answers

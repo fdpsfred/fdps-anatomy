@@ -2614,6 +2614,14 @@
       "status": "committed",
       "emitted_against": "0x20e",
       "rounds": 0
+    },
+    "000241e0": {
+      "name": "fdps_save_game_screen",
+      "target": "save.c",
+      "body_size": "0x2a9",
+      "status": "committed",
+      "emitted_against": "0x2a9",
+      "rounds": 0
     }
   }
 }

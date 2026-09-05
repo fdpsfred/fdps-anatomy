@@ -387,6 +387,22 @@ extern unsigned char data_fdps_audio_sfx_enabled_flag;
    (mapcur.h) -- with it clear that function draws nothing at all. */
 extern unsigned char data_fdps_ui_terrain_hud_user_enabled;
 
+/* 00060010.  The player's battle-animation toggle, the second of the four
+   option flags the options menu writes and a save file carries (the
+   battle_animation_enabled field of struct fdps_save_slot).  The options menu
+   flips it with XOR byte ptr [0x00060010],0x1 at 000184bd and shows its state
+   with the CMP at 00018421; fdps_load_savegame restores it with MOV
+   [0x00060010],AL at 0002417e and fdps_load_game_screen with the same store at
+   000245df.
+
+   One byte, and read as a boolean by the two battle routines that consult it
+   -- CMP byte ptr [0x00060010],0x0 at 00012ecc in
+   fdps_map_actor_move_and_attack and the widened CMP EAX,0x1 at 00013d72 in
+   fdps_map_actor_cast_chosen_spell, both of which skip the whole attack
+   animation when it is clear.  fdps_battle_system_submenu copies the same byte
+   into a record field at 00015280 rather than testing it. */
+extern unsigned char data_fdps_ui_battle_animation_enabled;
+
 /* 00060159.  Whether the battle map is the live surface the player is driving
    the cursor over, as opposed to a menu, a status window or a scripted scene
    having the screen.  Every one of its thirty writers stores a literal 0 or 1
@@ -1128,6 +1144,19 @@ extern int data_fdps_audio_cd_current_music_index;
    type a negative purse becomes an enormous one and neither the clamp nor any
    affordability test fires. */
 extern int data_fdps_shared_party_total_gold;
+
+/* 00064110.  Whether the bar's bonus draw has already been taken: an int
+   holding 0 or 1 and nothing else.  fdps_run_bonus_lottery tests it with CMP
+   dword ptr [0x00064110],0x0 at 0003648a and returns without drawing when it
+   is set, and sets it with MOV dword ptr [0x00064110],0x1 at 00036ad8 once a
+   draw has been made.  fdps_title_screen clears it at 0002a2ec.
+
+   It is part of the saved game and travels in the save record's own
+   bonus_lottery_drawn_flag field (struct fdps_save_slot in fdpstype.h):
+   fdps_save_game_screen stores it there at 00024364 and fdps_load_game_screen
+   puts it back with MOV [0x00064110],EAX at 00024609.  A dword in the record
+   as well as in memory, so nothing here narrows it to a byte. */
+extern int data_fdps_bonus_lottery_drawn_flag;
 
 /* 000643e4.  "Fight.pal" out of Misc.vfs (the string at 00061cd4), the palette
    the combat screens run in, as against data_fdps_vga_main_palette_ptr's

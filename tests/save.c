@@ -1737,6 +1737,500 @@ static void build_without_a_save_file_reads_every_slot_empty(void)
     build_drop_cache(BUILD_ROSTER_MEMBERS);
 }
 
+
+/* ---- fdps_save_game_screen -----------------------------------------------
+ *
+ * The whole save screen, run end to end against the real files, because
+ * nothing about it can be stood in for: it names "Save.cel", "FDE.SAV", "rb"
+ * and "wb" itself, takes only the page it restores on the way out, and its
+ * one visible product is the file it leaves on disc.  So each case stages the
+ * game state the screen copies, drives it with a burst of make codes through
+ * the same ring fdps_save_slot_select_loop reads, and then reads FDE.SAV back
+ * and decrypts it.
+ *
+ * THE SHIPPED SAVE IS MOVED ASIDE AND PUT BACK.  The screen rewrites the whole
+ * file, so every case that confirms a slot renames FDE.SAV to FDE.BK2 first
+ * and renames it back at the end; the cases that only cancel leave it where it
+ * is.  Running from no file at all is also the arm that shows the 0xff fill:
+ * the two slots the player did not pick have to come back reading as never
+ * written.
+ *
+ * THE FOUR TIMESTAMP FIELDS ARE BRACKETED RATHER THAN STAGED.  They are the
+ * only part of the record whose value does not come from a global -- the
+ * screen takes them from _dos_getdate and _dos_gettime and nothing else -- and
+ * the DOS clock is not this test's to set: DOSBox-X does not take the setting,
+ * so a case that pinned it would skip itself and assert nothing.  Each field is
+ * therefore read against the clock as it stood immediately before and
+ * immediately after the run, which are one call apart, AND against the range
+ * its DOS structure member can hold.  Between them a field stored at another
+ * field's offset fails: a day in 13..31 cannot pass as a month and a minute in
+ * 24..59 cannot pass as an hour, and on a value low enough for the range to
+ * allow it the bracket still has to agree.  What the pair cannot separate is a
+ * swap on the rare stroke where the two members happen to hold the same
+ * number.
+ *
+ * EVERY OFFSET BELOW IS A RAW BYTE OFFSET AND NOT A STRUCT MEMBER.  The whole
+ * point of these cases is where the fields land inside the record, so reading
+ * them back through struct fdps_save_slot would only be asserting that the
+ * emitted C agrees with itself.  They come off the assembly: ADD dword ptr
+ * [EBP-0x18],0xa00 at 00024328 and the five stores at -0x4, -0x8, -0xc, -0x10
+ * and -0x14 behind it, then +0x0, +0x1, +0x2, +0x6, +0x7, +0x8 and +0x9 in
+ * front of it.
+ *
+ * A timer interrupt is installed for the length of every run for the same
+ * reason the slot-cursor cases install one: the frames inside the cursor loop
+ * do not end without it.
+ */
+
+#define SCREEN_SAVE_FILE "FDE.SAV"
+#define SCREEN_SAVE_ASIDE "FDE.BK2"
+
+/* PUSH 0x59cb at 0002426b, ADD EDX,0x312b at 000242ee, IMUL EAX,[EBP-0x14],
+   0xa28 at 000242e4 and MOV dword ptr [EDX + 0x59c7],EAX at 000243df. */
+#define SCREEN_IMAGE_BYTES 0x59cbL
+#define SCREEN_SLOTS_AT 0x312bL
+#define SCREEN_SLOT_STRIDE 0xa28L
+#define SCREEN_CHECKSUM_AT 0x59c7L
+
+/* PUSH 0xa00 at 00024311: how much live state the memmove copies, which is
+   also where the stamp begins to overwrite it. */
+#define SCREEN_LIVE_BYTES 0xa00
+#define SCREEN_STAMP_AT 0x9ec
+
+/* The five stamp fields, at -0x14 through -0x4 from the end of the copied
+   block, and the seven header fields at +0x0 through +0x9 past it. */
+#define SCREEN_AT_LOTTERY 0x9ec
+#define SCREEN_AT_MINUTE 0x9f0
+#define SCREEN_AT_HOUR 0x9f4
+#define SCREEN_AT_DAY 0x9f8
+#define SCREEN_AT_MONTH 0x9fc
+#define SCREEN_AT_CHAPTER 0xa00
+#define SCREEN_AT_MEMBERS 0xa01
+#define SCREEN_AT_GOLD 0xa02
+#define SCREEN_AT_TERRAIN 0xa06
+#define SCREEN_AT_BATTLE_ANIM 0xa07
+#define SCREEN_AT_BGM 0xa08
+#define SCREEN_AT_SFX 0xa09
+
+/* PUSH 0xff at 000242d3: the fill a missing file is stood up with, and the
+   byte fdps_saveload_screen_build reads as "never written". */
+#define SCREEN_UNWRITTEN 0xff
+
+/* What each timestamp member of the two DOS structures can hold, straight off
+   the comments in Watcom 10.0a's own <dos.h>: day 1-31, month 1-12, hour 0-23
+   and minute 0-59.  Half of the field-to-offset check is that the value found
+   at an offset is one its own member could have produced. */
+#define SCREEN_MONTH_LOW 1
+#define SCREEN_MONTH_HIGH 12
+#define SCREEN_DAY_LOW 1
+#define SCREEN_DAY_HIGH 31
+#define SCREEN_HOUR_LOW 0
+#define SCREEN_HOUR_HIGH 23
+#define SCREEN_MINUTE_LOW 0
+#define SCREEN_MINUTE_HIGH 59
+
+/* The game state the two runs stage.  Every value is distinct so a field read
+   out of the wrong global fails, and the two chapters are ones FIELD.VFS holds
+   a text member for -- fdetxt01.txt and fdetxt04.txt -- because the panel the
+   screen redraws after a save loads the saved chapter's title. */
+#define SCREEN_CHAPTER_A 0
+#define SCREEN_CHAPTER_B 3
+#define SCREEN_GOLD_A 0x0001e240L
+#define SCREEN_GOLD_B 0x00003039L
+#define SCREEN_MEMBERS_A 3
+#define SCREEN_MEMBERS_B 2
+#define SCREEN_LOTTERY_A 1
+#define SCREEN_LOTTERY_B 0
+#define SCREEN_TERRAIN_A 1
+#define SCREEN_TERRAIN_B 0
+#define SCREEN_BATTLE_ANIM_A 0
+#define SCREEN_BATTLE_ANIM_B 1
+#define SCREEN_BGM_A 1
+#define SCREEN_BGM_B 0
+#define SCREEN_SFX_A 0
+#define SCREEN_SFX_B 1
+
+/* The 0xa00 bytes at data_fdps_roster_array_ptr that the save copies, and the
+   image read back off disc. */
+static unsigned char screen_live_state[SCREEN_LIVE_BYTES];
+static unsigned char screen_image[0x59cb];
+static unsigned char screen_restore[SLOT_SCREEN_BYTES];
+
+/* The clock either side of a run, read one call before it starts and one call
+   after it ends. */
+static struct dosdate_t screen_date_before;
+static struct dosdate_t screen_date_after;
+static struct dostime_t screen_time_before;
+static struct dostime_t screen_time_after;
+
+/* Whether a value the record carries is one of the two readings that bracket
+   the run, and inside the range its own DOS member can hold. */
+static int screen_stamp_holds(unsigned long stored, int before, int after,
+                              int low, int high)
+{
+    if (stored < (unsigned long) low || stored > (unsigned long) high) {
+        return 0;
+    }
+    return stored == (unsigned long) before || stored == (unsigned long) after;
+}
+
+/* One byte of the staged live state: a function of the byte's own index and of
+   which of the two states this is, so a record written at the wrong offset
+   inside the image cannot match it and the two runs cannot be confused. */
+static unsigned char screen_pattern_byte(int seed, int index)
+{
+    return (unsigned char) ((index * 5 + seed * 0x51 + 3) & 0xff);
+}
+
+/* The live game state the save copies, and the roster the redraw walks.  The
+   last 0x14 bytes carry a value the stamp cannot leave in place. */
+static void screen_stage_live_state(int seed, int members)
+{
+    struct fdps_unit_record *member;
+    int index;
+
+    for (index = 0; index < SCREEN_LIVE_BYTES; index++) {
+        screen_live_state[index] = screen_pattern_byte(seed, index);
+    }
+    for (index = SCREEN_STAMP_AT; index < SCREEN_LIVE_BYTES; index++) {
+        screen_live_state[index] = (unsigned char) 0xaa;
+    }
+    for (index = 0; index < members; index++) {
+        member = (struct fdps_unit_record *) screen_live_state + index;
+        member->portrait_id = (unsigned char) (index + 1);
+        member->level = (unsigned char) (index + 4);
+    }
+    data_fdps_roster_array_ptr = screen_live_state;
+    data_fdps_roster_member_count = members;
+}
+
+/* Everything the screen reads out of a global, staged as one of the two sets
+   above.  panel_reset publishes the fixture sheets and the font the redrawn
+   panels paint through; slot_stage publishes the empty sound pack and clears
+   the ring. */
+static void screen_stage(int set)
+{
+    panel_reset(PANEL_CHAPTER_FIRST);
+    data_fdps_number_glyph_color_row = 0;
+    panel_release_cache();
+    slot_stage();
+
+    if (set == 0) {
+        screen_stage_live_state(0, SCREEN_MEMBERS_A);
+        data_fdps_chapter_current_chapter_id = SCREEN_CHAPTER_A;
+        data_fdps_shared_party_total_gold = (int) SCREEN_GOLD_A;
+        data_fdps_bonus_lottery_drawn_flag = SCREEN_LOTTERY_A;
+        data_fdps_ui_terrain_hud_user_enabled = (unsigned char) SCREEN_TERRAIN_A;
+        data_fdps_ui_battle_animation_enabled =
+            (unsigned char) SCREEN_BATTLE_ANIM_A;
+        data_fdps_audio_bgm_enabled_flag = (unsigned char) SCREEN_BGM_A;
+        data_fdps_audio_sfx_enabled_flag = (unsigned char) SCREEN_SFX_A;
+    } else {
+        screen_stage_live_state(1, SCREEN_MEMBERS_B);
+        data_fdps_chapter_current_chapter_id = SCREEN_CHAPTER_B;
+        data_fdps_shared_party_total_gold = (int) SCREEN_GOLD_B;
+        data_fdps_bonus_lottery_drawn_flag = SCREEN_LOTTERY_B;
+        data_fdps_ui_terrain_hud_user_enabled = (unsigned char) SCREEN_TERRAIN_B;
+        data_fdps_ui_battle_animation_enabled =
+            (unsigned char) SCREEN_BATTLE_ANIM_B;
+        data_fdps_audio_bgm_enabled_flag = (unsigned char) SCREEN_BGM_B;
+        data_fdps_audio_sfx_enabled_flag = (unsigned char) SCREEN_SFX_B;
+    }
+}
+
+/* The page the screen puts back on the adapter when it ends.  Every byte is
+   different from the sentinel the screen is filled with beforehand. */
+static void screen_stage_restore_page(void)
+{
+    int index;
+
+    for (index = 0; index < SLOT_SCREEN_BYTES; index++) {
+        screen_restore[index] = (unsigned char) ((index * 3 + 1) & 0x7f);
+    }
+}
+
+/* One whole run of the screen, driven by a burst of make codes.  EVERY BURST
+   HAS TO END IN AN ESCAPE: the outer loop only leaves on a cancelled
+   selection, and a drained ring answers 0xff, which the cursor loop ignores.
+   The adapter is left holding the last thing the screen put there. */
+static void screen_run(unsigned char *codes, int count)
+{
+    slot_queue(codes, count);
+
+    slot_set_mode(SLOT_MODE_320X200X256);
+    memset((void *) SLOT_VGA_BASE, SLOT_SENTINEL, (size_t) SLOT_SCREEN_BYTES);
+
+    data_fdps_timer_tick_counter = 0;
+    slot_saved_timer = _dos_getvect(SLOT_TIMER_VECTOR);
+    _dos_setvect(SLOT_TIMER_VECTOR, slot_timer_isr);
+    _dos_getdate(&screen_date_before);
+    _dos_gettime(&screen_time_before);
+    fdps_save_game_screen(screen_restore);
+    _dos_getdate(&screen_date_after);
+    _dos_gettime(&screen_time_after);
+    _dos_setvect(SLOT_TIMER_VECTOR, slot_saved_timer);
+
+    memmove(slot_screen, (void *) SLOT_VGA_BASE, (size_t) SLOT_SCREEN_BYTES);
+    slot_set_mode(SLOT_MODE_TEXT);
+}
+
+/* The sprite cache the redraw left holding the party, given back. */
+static void screen_drop_cache(int members)
+{
+    if (members > 0) {
+        free(data_fdps_cel_sprite_cache_ptr);
+    }
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_cel_sprite_cache_count = 0;
+    data_fdps_cel_sprite_cache_buffer_used = 0;
+}
+
+static long screen_file_size(void)
+{
+    FILE *fp;
+    long size;
+
+    fp = fopen(SCREEN_SAVE_FILE, "rb");
+    if (fp == NULL) {
+        return -1L;
+    }
+    fseek(fp, 0L, SEEK_END);
+    size = ftell(fp);
+    fclose(fp);
+    return size;
+}
+
+/* FDE.SAV as the screen left it, decrypted in place.  The same routine that
+   wrote it undoes it, which is the whole of the file's cipher (save.h). */
+static int screen_reload(void)
+{
+    FILE *fp;
+    size_t got;
+
+    fp = fopen(SCREEN_SAVE_FILE, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    got = fread(screen_image, 1, (size_t) SCREEN_IMAGE_BYTES, fp);
+    fclose(fp);
+    if (got != (size_t) SCREEN_IMAGE_BYTES) {
+        return 0;
+    }
+    fdps_xor_crypt_buffer(screen_image, (unsigned int) SCREEN_IMAGE_BYTES);
+    return 1;
+}
+
+static unsigned char *screen_slot(int slot)
+{
+    return screen_image + SCREEN_SLOTS_AT + (long) slot * SCREEN_SLOT_STRIDE;
+}
+
+static unsigned long screen_dword(unsigned char *at)
+{
+    return (unsigned long) at[0]
+           | ((unsigned long) at[1] << 8)
+           | ((unsigned long) at[2] << 16)
+           | ((unsigned long) at[3] << 24);
+}
+
+/* The whole record, field by field, written from no save file at all.
+ *
+ * The 0xa00 bytes of live state have to arrive whole and at the record's own
+ * base -- 0x312b for slot 0 -- with only the last 0x14 of them replaced: the
+ * pattern is compared byte for byte up to 0x9eb, and the 0xaa the staging left
+ * across 0x9ec..0x9ff has to be gone, which is what says the stamp landed
+ * INSIDE the copied block and not after it.  Then every header field is read at
+ * its own raw offset against the global it was staged in and each of the four
+ * timestamp fields against the bracket described above, so a field taken out of
+ * the wrong global or written at the wrong offset fails on its own.
+ *
+ * The two slots nobody picked have to read 0xff at their chapter byte, which
+ * is only true if a missing file was stood up with the memset fill and that
+ * fill was NOT put through the cipher; and the checksum the screen stored at
+ * +0x59c7 has to be the sum of the plaintext, which is only true if it was
+ * computed before the encryption and not after.
+ */
+static void screen_save_writes_the_record_it_staged(void)
+{
+    unsigned char keys[2];
+    unsigned char *record;
+
+    if (!build_files_present()) {
+        return;
+    }
+    remove(SCREEN_SAVE_ASIDE);
+    CHECK_EQ(rename(SCREEN_SAVE_FILE, SCREEN_SAVE_ASIDE), 0);
+
+    screen_stage_restore_page();
+    screen_stage(0);
+    data_fdps_ui_saveload_is_load_mode = 1;
+
+    keys[0] = SLOT_KEY_SPACE;
+    keys[1] = SLOT_KEY_ESC;
+    screen_run(keys, 2);
+    screen_drop_cache(SCREEN_MEMBERS_A);
+
+    CHECK_EQ(screen_file_size(), SCREEN_IMAGE_BYTES);
+    CHECK_EQ(screen_reload(), 1);
+    CHECK_EQ(data_fdps_ui_saveload_is_load_mode, 0);
+
+    record = screen_slot(0);
+    CHECK_EQ(memcmp(record, screen_live_state, (size_t) SCREEN_STAMP_AT), 0);
+    CHECK_EQ(record[SCREEN_STAMP_AT] == 0xaa, 0);
+    CHECK_EQ(record[SCREEN_LIVE_BYTES - 1] == 0xaa, 0);
+
+    CHECK_EQ(screen_stamp_holds(screen_dword(record + SCREEN_AT_MONTH),
+                                screen_date_before.month,
+                                screen_date_after.month,
+                                SCREEN_MONTH_LOW, SCREEN_MONTH_HIGH), 1);
+    CHECK_EQ(screen_stamp_holds(screen_dword(record + SCREEN_AT_DAY),
+                                screen_date_before.day, screen_date_after.day,
+                                SCREEN_DAY_LOW, SCREEN_DAY_HIGH), 1);
+    CHECK_EQ(screen_stamp_holds(screen_dword(record + SCREEN_AT_HOUR),
+                                screen_time_before.hour,
+                                screen_time_after.hour,
+                                SCREEN_HOUR_LOW, SCREEN_HOUR_HIGH), 1);
+    CHECK_EQ(screen_stamp_holds(screen_dword(record + SCREEN_AT_MINUTE),
+                                screen_time_before.minute,
+                                screen_time_after.minute,
+                                SCREEN_MINUTE_LOW, SCREEN_MINUTE_HIGH), 1);
+    CHECK_EQ(screen_dword(record + SCREEN_AT_LOTTERY), SCREEN_LOTTERY_A);
+
+    CHECK_EQ(record[SCREEN_AT_CHAPTER], SCREEN_CHAPTER_A);
+    CHECK_EQ(record[SCREEN_AT_MEMBERS], SCREEN_MEMBERS_A);
+    CHECK_EQ(screen_dword(record + SCREEN_AT_GOLD), SCREEN_GOLD_A);
+    CHECK_EQ(record[SCREEN_AT_TERRAIN], SCREEN_TERRAIN_A);
+    CHECK_EQ(record[SCREEN_AT_BATTLE_ANIM], SCREEN_BATTLE_ANIM_A);
+    CHECK_EQ(record[SCREEN_AT_BGM], SCREEN_BGM_A);
+    CHECK_EQ(record[SCREEN_AT_SFX], SCREEN_SFX_A);
+
+    CHECK_EQ(screen_slot(1)[SCREEN_AT_CHAPTER], SCREEN_UNWRITTEN);
+    CHECK_EQ(screen_slot(2)[SCREEN_AT_CHAPTER], SCREEN_UNWRITTEN);
+
+    CHECK_EQ(fdps_compute_save_checksum(screen_image,
+                                        (unsigned int) SCREEN_IMAGE_BYTES),
+             screen_dword(screen_image + SCREEN_CHECKSUM_AT));
+
+    remove(SCREEN_SAVE_FILE);
+    CHECK_EQ(rename(SCREEN_SAVE_ASIDE, SCREEN_SAVE_FILE), 0);
+}
+
+/* The second save reads the file the first one wrote.
+ *
+ * Two runs from no file at all: the first confirms slot 0, the second walks the
+ * cursor one step right and confirms slot 1 with a different game state
+ * staged.  Slot 0 has to come back holding exactly what the first run put
+ * there -- which is only possible if the second run read FDE.SAV and decrypted
+ * it before replacing one record -- and slot 1 has to hold the second run's
+ * state at 0x312b + 0xa28, which is what pins the stride.  Slot 2 is still
+ * 0xff from the first run's fill.
+ *
+ * It also pins the outer loop: the cursor is cleared once, before the loop, so
+ * the second run starts on slot 0 again and the Right code is what moves it.
+ */
+static void screen_second_save_keeps_the_first_one(void)
+{
+    unsigned char keys[3];
+    unsigned char *record;
+
+    if (!build_files_present()) {
+        return;
+    }
+    remove(SCREEN_SAVE_ASIDE);
+    CHECK_EQ(rename(SCREEN_SAVE_FILE, SCREEN_SAVE_ASIDE), 0);
+
+    screen_stage_restore_page();
+
+    screen_stage(0);
+    keys[0] = SLOT_KEY_SPACE;
+    keys[1] = SLOT_KEY_ESC;
+    screen_run(keys, 2);
+    screen_drop_cache(SCREEN_MEMBERS_A);
+
+    screen_stage(1);
+    keys[0] = SLOT_KEY_RIGHT;
+    keys[1] = SLOT_KEY_SPACE;
+    keys[2] = SLOT_KEY_ESC;
+    screen_run(keys, 3);
+    screen_drop_cache(SCREEN_MEMBERS_B);
+
+    CHECK_EQ(screen_reload(), 1);
+
+    record = screen_slot(0);
+    CHECK_EQ(record[SCREEN_AT_CHAPTER], SCREEN_CHAPTER_A);
+    CHECK_EQ(record[SCREEN_AT_MEMBERS], SCREEN_MEMBERS_A);
+    CHECK_EQ(screen_dword(record + SCREEN_AT_GOLD), SCREEN_GOLD_A);
+    CHECK_EQ(record[SCREEN_AT_BGM], SCREEN_BGM_A);
+    CHECK_EQ(record[0], screen_pattern_byte(0, 0));
+
+    record = screen_slot(1);
+    CHECK_EQ(memcmp(record, screen_live_state, (size_t) SCREEN_STAMP_AT), 0);
+    CHECK_EQ(record[SCREEN_AT_CHAPTER], SCREEN_CHAPTER_B);
+    CHECK_EQ(record[SCREEN_AT_MEMBERS], SCREEN_MEMBERS_B);
+    CHECK_EQ(screen_dword(record + SCREEN_AT_GOLD), SCREEN_GOLD_B);
+    CHECK_EQ(record[SCREEN_AT_BGM], SCREEN_BGM_B);
+
+    CHECK_EQ(screen_slot(2)[SCREEN_AT_CHAPTER], SCREEN_UNWRITTEN);
+    CHECK_EQ(fdps_compute_save_checksum(screen_image,
+                                        (unsigned int) SCREEN_IMAGE_BYTES),
+             screen_dword(screen_image + SCREEN_CHECKSUM_AT));
+
+    remove(SCREEN_SAVE_FILE);
+    CHECK_EQ(rename(SCREEN_SAVE_ASIDE, SCREEN_SAVE_FILE), 0);
+}
+
+/* Escape on the first pass writes nothing and hands the adapter back.
+ *
+ * The mosaic on the way out reveals `restore_page` over the whole 320x200
+ * screen -- 80 block columns cover the columns exactly and the bands reach
+ * every row (transit.h) -- so the adapter has to end up holding that page byte
+ * for byte, with none of the sentinel left anywhere.  The save file must not
+ * have been touched: its length and its stored checksum are still the shipped
+ * file's, which is also what says no fopen("wb") ran.
+ *
+ * The mode flag is staged non-zero and has to come back 0, because that store
+ * is the first thing the screen does and it is what lets an empty slot be
+ * confirmed at all.
+ *
+ * The run has to be heap-neutral once the cache the redraw filled is given
+ * back: the page is built inside the call and freed inside it.
+ */
+static void screen_cancel_writes_nothing_and_restores_the_page(void)
+{
+    unsigned char keys[1];
+    long size_before;
+    int blocks_before;
+
+    if (!build_files_present()) {
+        return;
+    }
+
+    screen_stage_restore_page();
+    screen_stage(0);
+    data_fdps_ui_saveload_is_load_mode = 1;
+    size_before = screen_file_size();
+    CHECK_EQ(screen_reload(), 1);
+    CHECK_EQ(screen_dword(screen_image + SCREEN_CHECKSUM_AT),
+             SAVE_STORED_CHECKSUM);
+
+    blocks_before = slot_used_heap_blocks();
+    keys[0] = SLOT_KEY_ESC;
+    screen_run(keys, 1);
+    screen_drop_cache(SCREEN_MEMBERS_A);
+
+    CHECK_EQ(data_fdps_ui_saveload_is_load_mode, 0);
+    CHECK_EQ(memcmp(slot_screen, screen_restore, (size_t) SLOT_SCREEN_BYTES),
+             0);
+    CHECK_EQ(screen_file_size(), size_before);
+    CHECK_EQ(screen_reload(), 1);
+    CHECK_EQ(screen_dword(screen_image + SCREEN_CHECKSUM_AT),
+             SAVE_STORED_CHECKSUM);
+    CHECK_EQ(slot_used_heap_blocks() - blocks_before, 0);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+
+    slot_unstage();
+}
+
 void run_save_tests(void)
 {
     RUN_TEST(trailing_four_bytes_are_not_summed);
@@ -1772,4 +2266,7 @@ void run_save_tests(void)
     RUN_TEST(build_refills_the_cache_from_the_roster);
     RUN_TEST(build_gives_back_everything_but_the_page);
     RUN_TEST(build_without_a_save_file_reads_every_slot_empty);
+    RUN_TEST(screen_save_writes_the_record_it_staged);
+    RUN_TEST(screen_second_save_keeps_the_first_one);
+    RUN_TEST(screen_cancel_writes_nothing_and_restores_the_page);
 }
