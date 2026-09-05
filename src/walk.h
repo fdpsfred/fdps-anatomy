@@ -20,6 +20,38 @@
 #ifndef WALK_H
 #define WALK_H
 
+/* Plays a traced movement path back, one tile step at a time, and returns
+ * nothing.  step_count bytes are read from path in order and each one is a
+ * direction code selecting the step routine that animates it: 0 walks the unit
+ * DOWN, 1 walks it LEFT, 2 walks it UP and EVERY OTHER VALUE walks it RIGHT.
+ * Each routine is handed unit_index and nothing else; the code byte itself is
+ * never passed on.
+ *
+ * Three things are behaviour rather than style.
+ *
+ * The fourth arm is a default and not a fourth comparison.  A code of 3 is
+ * what the shipped path buffers hold for that direction, but 4, 0x80 and 0xff
+ * all animate a step right as well, and a rebuild that added a range guard --
+ * or a fifth "no move" arm for the code 4 that fdps_move_path_trace uses
+ * internally to mean "stood still" -- would leave the unit where the original
+ * moves it.
+ *
+ * The codes are the INVERSE of the ones fdps_move_path_trace records.  That
+ * function's codes are 0 = y-1, 1 = x+1, 2 = y+1, 3 = x-1 (movegrid.h) and it
+ * copies them into the caller's buffer REVERSED, so replaying the buffer
+ * forwards means undoing each recorded step: 0 becomes y+1, 1 becomes x-1,
+ * 2 becomes y-1 and 3 becomes x+1, which is exactly the dispatch above.
+ * Aligning the two tables so they read alike sends every unit the wrong way.
+ *
+ * The step count is signed.  fdps_move_path_trace returns -1 when the start
+ * tile was never reached by the flood fill, the caller at 00011d3f rejects
+ * only a count of 0 before calling in, and the signed bound is what turns that
+ * -1 into no steps at all rather than a walk over four billion path bytes.
+ */
+extern void fdps_animate_move_path(int unit_index, unsigned char *path,
+                                   int step_count);
+#pragma aux fdps_animate_move_path "*" parm caller [];
+
 /* Steps the unit at unit_index one tile DOWN the screen and returns nothing.
  *
  * The six passes each advance the map cursor's pixel row

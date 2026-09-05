@@ -79,6 +79,63 @@
    finishing a step onto the cell during movement (maptile.h). */
 #define TILE_EVENT_ON_ARRIVAL 0
 
+/* 0002d2d0.  The path playback loop: read one direction code per step and hand
+   the unit index to the step routine that animates it.
+
+   Four things here are behaviour rather than style.
+
+   THE LAST ARM IS A DEFAULT, NOT A FOURTH TEST.  The assembly compares the
+   code against 0, 1 and 2 (0002d302, 0002d316, 0002d32a) and falls into the
+   call at 0002d342 for everything else, so 3, 4, 0x80 and 0xff all animate a
+   step to the right.  A range guard, or a fifth arm for the code 4 that
+   fdps_move_path_trace uses internally to mean "stood still", leaves the unit
+   somewhere the original does not.
+
+   THE CODES INVERT fdps_move_path_trace's.  That function records 0 = y-1,
+   1 = x+1, 2 = y+1, 3 = x-1 and copies them into the caller's buffer REVERSED
+   (movegrid.h), so playing the buffer forwards means undoing each recorded
+   step.  The dispatch here is exactly that inversion -- 0 down, 1 left, 2 up,
+   3 right -- and matching it to the trace's own table instead would send every
+   unit the wrong way.
+
+   THE STEP COUNT IS SIGNED.  CMP EAX,[EBP+0x1c] / JL at 0002d2e6 is the signed
+   compare, and the count the caller at 00011d51 supplies is
+   fdps_move_path_trace's return, which is -1 when the start tile was never
+   reached by the flood fill.  The caller rejects only a count of 0 before
+   calling in (CMP dword ptr [EBP-0x44],0x0 / JZ at 00011d3f), so the -1 gets
+   here, and the signed bound is the only thing that turns it into no steps
+   rather than a walk over four billion path bytes.
+
+   THE CODE BYTE IS NEVER PASSED ON.  Each arm pushes [EBP+0x14], the unit
+   index, and nothing else; the handlers set the facing themselves.  The byte
+   widens through XOR EAX,EAX / MOV AL (0002d2fb), so a code of 0xff is 255 and
+   not -1 -- with every value outside 0..2 taking the same arm that widening is
+   not observable, but reading the buffer as anything other than bytes is.
+
+   The reload of the counter at 0002d2ed before the INC is a dead load that -od
+   leaves in place (rebuild_info/build_flags.md), not a second read of
+   anything. */
+void fdps_animate_move_path(int unit_index, unsigned char *path, int step_count)
+{
+    /* Which step of the path is being played, 0 .. step_count - 1. */
+    int step_index;
+    /* The direction code this step's path byte holds. */
+    int direction_code;
+
+    for (step_index = 0; step_index < step_count; step_index++) {
+        direction_code = (int) path[step_index];
+        if (direction_code == 0) {
+            fdps_walk_step_down(unit_index);
+        } else if (direction_code == 1) {
+            fdps_animate_move_step_left(unit_index);
+        } else if (direction_code == 2) {
+            fdps_animate_move_step_up(unit_index);
+        } else {
+            fdps_animate_move_step_right(unit_index);
+        }
+    }
+}
+
 /* 0002d360.  One tile down the screen.
 
    Three things here are behaviour rather than style.

@@ -1005,6 +1005,218 @@ static void widens_the_unit_column_unsigned_right(void)
     CHECK_EQ(stage_units[1].pos_x, 201);
 }
 
+/* The path playback loop at 0002d2d0 sits above the four step routines, so its
+   cases are read through what the step routines did: which record field moved
+   and by how much says which arm the dispatch took.
+
+   Expected values come from 0002d2d0 -- MOV dword ptr [EBP-0x8],0x0 and CMP
+   EAX,[EBP+0x1c] / JL at 0002d2e6 for the loop and its SIGNED bound, MOV EDX,
+   [EBP+0x18] / ADD EDX,[EBP-0x8] / XOR EAX,EAX / MOV AL,byte ptr [EDX] at
+   0002d2f5 for the one path byte per step, the three CMP dword ptr
+   [EBP-0x4],0/1/2 at 0002d302, 0002d316 and 0002d32a for the dispatch, the
+   fall-through CALL at 0002d342 for the default arm, and the single PUSH of
+   [EBP+0x14] ahead of every one of the four calls for the argument -- together
+   with the per-direction effects the cases above already pin down.
+
+   stage_path leaves unit 1 far enough from both view edges that no direction
+   scrolls, so nothing below has to account for the view moving; the latch stays
+   at 3, as everywhere else in this file, to keep fdps_render_view_frame out of
+   the way. */
+static void stage_path(int unit_pos_x, int unit_pos_y,
+                       int cursor_tile_x, int cursor_tile_y)
+{
+    stage(20, unit_pos_y, 0, cursor_tile_x, cursor_tile_y);
+    stage_units[1].pos_x = (unsigned char) unit_pos_x;
+    data_fdps_battle_view_window_origin_x = 0;
+}
+
+/* Code 0 is the DOWNWARD step: the tile row goes up by one and the facing byte
+   ends at 0, which is what 0002d360 writes and no other handler does. */
+static void path_code_0_takes_the_downward_step(void)
+{
+    static unsigned char path[1];
+
+    path[0] = 0;
+    stage_path(4, 5, 3, 2);
+    fdps_animate_move_path(1, path, 1);
+
+    CHECK_EQ(stage_units[1].facing, 0);
+    CHECK_EQ(stage_units[1].pos_y, 6);
+    CHECK_EQ(stage_units[1].pos_x, 4);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 2 * TILE + 24);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 3 * TILE);
+}
+
+/* Code 1 is the LEFTWARD step -- 0002d590, facing 1 -- and not the rightward
+   one.  The pairing is the inverse of fdps_move_path_trace's own code 1, which
+   records x+1, and getting it the other way round moves the unit two tiles
+   away from where the original puts it. */
+static void path_code_1_takes_the_leftward_step(void)
+{
+    static unsigned char path[1];
+
+    path[0] = 1;
+    stage_path(4, 5, 3, 2);
+    fdps_animate_move_path(1, path, 1);
+
+    CHECK_EQ(stage_units[1].facing, 1);
+    CHECK_EQ(stage_units[1].pos_x, 3);
+    CHECK_EQ(stage_units[1].pos_y, 5);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 3 * TILE - 24);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 2 * TILE);
+}
+
+/* Code 2 is the UPWARD step -- 0002d480, facing 2 -- the inverse of the trace's
+   code 2, which records y+1. */
+static void path_code_2_takes_the_upward_step(void)
+{
+    static unsigned char path[1];
+
+    path[0] = 2;
+    stage_path(4, 5, 3, 2);
+    fdps_animate_move_path(1, path, 1);
+
+    CHECK_EQ(stage_units[1].facing, 2);
+    CHECK_EQ(stage_units[1].pos_y, 4);
+    CHECK_EQ(stage_units[1].pos_x, 4);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 2 * TILE - 24);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 3 * TILE);
+}
+
+/* Code 3 reaches the RIGHTWARD step -- 0002d6a0, facing 3 -- through the
+   fall-through arm and not through a comparison of its own. */
+static void path_code_3_takes_the_rightward_step(void)
+{
+    static unsigned char path[1];
+
+    path[0] = 3;
+    stage_path(4, 5, 3, 2);
+    fdps_animate_move_path(1, path, 1);
+
+    CHECK_EQ(stage_units[1].facing, 3);
+    CHECK_EQ(stage_units[1].pos_x, 5);
+    CHECK_EQ(stage_units[1].pos_y, 5);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 3 * TILE + 24);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 2 * TILE);
+}
+
+/* Every code above 2 lands in the same arm, because the arm is a default.
+   Code 4 is fdps_move_path_trace's own "stood still" marker and 0xff is the
+   largest a path byte can hold; both step the unit RIGHT, so the two passes
+   move it two columns.  A range guard, or a no-move arm for code 4, would
+   leave it on column 4 or 5 instead of 6. */
+static void path_codes_above_2_all_take_the_rightward_step(void)
+{
+    static unsigned char path[2];
+
+    path[0] = 4;
+    path[1] = 0xff;
+    stage_path(4, 5, 3, 2);
+    fdps_animate_move_path(1, path, 2);
+
+    CHECK_EQ(stage_units[1].facing, 3);
+    CHECK_EQ(stage_units[1].pos_x, 6);
+    CHECK_EQ(stage_units[1].pos_y, 5);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 3 * TILE + 48);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 2 * TILE);
+}
+
+/* The bytes are played in order, one per step: path[step] and not path[0] six
+   times over.
+
+   Down, down, right, up from tile (4, 5) ends on (5, 6) facing 2, and the
+   cursor -- which every step moves whether or not the view follows -- ends 24
+   pixels right of and 24 below where it started.  A loop that re-read the first
+   byte would walk four tiles down to row 9 facing 0. */
+static void path_plays_the_bytes_in_order(void)
+{
+    static unsigned char path[4];
+
+    path[0] = 0;
+    path[1] = 0;
+    path[2] = 3;
+    path[3] = 2;
+    stage_path(4, 5, 3, 2);
+    fdps_animate_move_path(1, path, 4);
+
+    CHECK_EQ(stage_units[1].pos_x, 5);
+    CHECK_EQ(stage_units[1].pos_y, 6);
+    CHECK_EQ(stage_units[1].facing, 2);
+    CHECK_EQ(stage_units[1].walk_step, 0);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 3 * TILE + 24);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 2 * TILE + 24);
+}
+
+/* The unit index reaches every handler unchanged, and nothing else moves.
+
+   Unit 2 keeps the column and row stage() gave it, 0x22 and 0x38, and a step
+   down followed by a step right leaves it on (0x23, 0x39) facing 3.  Its
+   neighbours keep the sentinel facing and sub-step stage() wrote, which they
+   only do if all four arms were handed the same index the caller passed. */
+static void path_passes_the_unit_index_to_every_handler(void)
+{
+    static unsigned char path[2];
+
+    path[0] = 0;
+    path[1] = 3;
+    stage_path(4, 5, 3, 2);
+    fdps_animate_move_path(2, path, 2);
+
+    CHECK_EQ(stage_units[2].pos_y, 0x39);
+    CHECK_EQ(stage_units[2].pos_x, 0x23);
+    CHECK_EQ(stage_units[2].facing, 3);
+    CHECK_EQ(stage_units[2].walk_step, 0);
+    CHECK_EQ(stage_units[1].pos_x, 4);
+    CHECK_EQ(stage_units[1].pos_y, 5);
+    CHECK_EQ(stage_units[1].facing, 0xee);
+    CHECK_EQ(stage_units[3].facing, 0xee);
+    CHECK_EQ(stage_units[3].walk_step, 0xdd);
+}
+
+/* A count of zero plays nothing at all: the loop is tested before its first
+   pass, so not even the facing byte -- which every handler writes before it
+   does anything else -- is touched. */
+static void path_of_zero_steps_animates_nothing(void)
+{
+    static unsigned char path[3];
+
+    path[0] = 0;
+    path[1] = 0;
+    path[2] = 0;
+    stage_path(4, 5, 3, 2);
+    fdps_animate_move_path(1, path, 0);
+
+    CHECK_EQ(stage_units[1].pos_x, 4);
+    CHECK_EQ(stage_units[1].pos_y, 5);
+    CHECK_EQ(stage_units[1].facing, 0xee);
+    CHECK_EQ(stage_units[1].walk_step, 0xdd);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 3 * TILE);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 2 * TILE);
+}
+
+/* A NEGATIVE count plays nothing either, because the bound is signed.
+   fdps_move_path_trace returns -1 for a start tile the flood fill never
+   reached and the caller lets that through -- it rejects only 0 -- so the JL at
+   0002d2e9 is what stops it.  Read unsigned the same -1 would be 4294967295
+   steps over whatever follows the buffer. */
+static void path_of_negative_steps_animates_nothing(void)
+{
+    static unsigned char path[3];
+
+    path[0] = 0;
+    path[1] = 0;
+    path[2] = 0;
+    stage_path(4, 5, 3, 2);
+    fdps_animate_move_path(1, path, -1);
+
+    CHECK_EQ(stage_units[1].pos_x, 4);
+    CHECK_EQ(stage_units[1].pos_y, 5);
+    CHECK_EQ(stage_units[1].facing, 0xee);
+    CHECK_EQ(stage_units[1].walk_step, 0xdd);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 3 * TILE);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 2 * TILE);
+}
+
 void run_walk_tests(void)
 {
     RUN_TEST(unit_record_offsets_are_what_the_step_reads);
@@ -1043,4 +1255,13 @@ void run_walk_tests(void)
     RUN_TEST(reports_the_arrival_tile_from_the_map_cursor_right);
     RUN_TEST(divides_the_cursor_signed_right);
     RUN_TEST(widens_the_unit_column_unsigned_right);
+    RUN_TEST(path_code_0_takes_the_downward_step);
+    RUN_TEST(path_code_1_takes_the_leftward_step);
+    RUN_TEST(path_code_2_takes_the_upward_step);
+    RUN_TEST(path_code_3_takes_the_rightward_step);
+    RUN_TEST(path_codes_above_2_all_take_the_rightward_step);
+    RUN_TEST(path_plays_the_bytes_in_order);
+    RUN_TEST(path_passes_the_unit_index_to_every_handler);
+    RUN_TEST(path_of_zero_steps_animates_nothing);
+    RUN_TEST(path_of_negative_steps_animates_nothing);
 }
