@@ -1876,5 +1876,20 @@
       "from": "review",
       "same_as": "emit#0"
     }
+  ],
+  "00025b20": [
+    {
+      "what": "The two cursor-move branches, the silent refusal of an item with use_effect 0, and the fall-through repaint of an unrecognised scancode are emitted but cannot be exercised from a test, so the wrap arithmetic is unverified by execution. The specific behaviour at stake is the empty-bag case the plate's rebuild note describes: with occupied_count 0, up turns slot 0 into -1 and down walks the index past 7, and the emitted C reproduces that with two compares rather than a remainder. The reason it is unreachable is structural, not an omission: fdps_read_scancode_auto_repeat reports the latched byte only when it differs from data_fdps_input_key_repeat_prev_scancode, it records the code it reported, and nothing inside one call can change the latch again because only the INT 09h handler writes it; the frame that would otherwise end the spin is never drawn either, because a frame needs data_fdps_timer_tick_counter to move and that is written by the timer interrupt. So one call can be driven with exactly one make code, and only the branches that return on the first pass are observable. I did check the alternative openings before concluding this: pre-setting data_fdps_input_key_repeat_last_tick away from the tick counter buys one extra poll that the repeat schedule silences (the counter is reset to 0 by the reporting poll, so it can never reach the delay of 5), and fdps_flush_keyboard_queue leaves the latch alone by design. Round 2 note: the code-shape half is now settled without execution -- WDISASM of workspace/code_emit/out/objs/UNITITEM.OBJ shows the two wrap arms compiling to `cmp dword ptr [eax],0` / `dec dword ptr [eax]` and `mov edx,count / dec edx / cmp edx,[eax]` / `inc dword ptr [eax]`, the same instructions as 00025bf7 and 00025c25, with no DIV or IDIV anywhere in the function. What is left is only that nobody has watched the cursor wrap on screen.",
+      "needs": "Either a playtest of the two screens that open this list -- the equipment screen reached through fdps_unit_equip_window, which is the one that can open it with an empty bag, and the battle \"use item\" list through fdps_unit_item_select_window with usable_only 1 -- confirming that up/down wrap at the ends and that an item with use_effect 0 is refused in silence; or a test-side keyboard and timer able to advance data_fdps_input_last_scancode and data_fdps_timer_tick_counter between polls inside one call, which needs the INT 09h and timer ISRs installed under the test runner and is not something this function can be given on its own.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same limit independently and confirmed the emitter's reasoning rather than restating it: the four branches that go round the loop again -- both cursor moves, the silent refusal of use_effect 0, and the unrecognised-code fall-through -- have no observable exit under the test harness, so the wrap arithmetic is unverified by execution. What my pass adds is the machine-level half, checked myself rather than taken from the emitter's note: WDISASM of workspace/code_emit/out/objs/UNITITEM.OBJ puts the up arm at 0x023c as cmp dword ptr [eax],0 / dec dword ptr [eax] and the down arm at 0x026a as mov edx,count / dec edx / cmp edx,[eax] / inc dword ptr [eax], the same instructions as 00025bf7 and 00025c25, and the object contains no DIV or IDIV at all. So the divide-by-zero the pitfall warns about cannot occur in the built code; what is genuinely unsettled is only that nobody has watched the cursor wrap and the silent refusal on screen.",
+      "needs": "A playtest of the equipment screen (fdps_unit_equip_window, the path that can open the list with an empty bag) and the battle use-item list with usable_only 1, confirming that up and down wrap at the ends and that an item with use_effect 0 is refused without sound or message.",
+      "status": "open",
+      "from": "review",
+      "same_as": "emit#0"
+    }
   ]
 }

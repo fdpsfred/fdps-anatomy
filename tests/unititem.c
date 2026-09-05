@@ -96,11 +96,17 @@
  * cases that hold the bound against a hole in the inventory are the ones the
  * plate comment's rebuild note is about: they fail for a body written as a
  * sweep over all eight entries, in both directions.
+ *
+ * The fdps_unit_item_select_loop cases come last and stage a great deal more,
+ * because that one is a modal loop that paints through four callees before it
+ * waits.  What can and cannot be reached from a test, and why, is set out above
+ * that section rather than here.
  */
 #include <stddef.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "keybd.h"
 #include "unititem.h"
 
 /* IMUL EAX,dword ptr [EBP+0x14],0x50 in fdps_get_unit_record and IMUL
@@ -2249,6 +2255,317 @@ static void find_item_slot_resolves_the_record_on_every_call(void)
     CHECK_EQ(fdps_unit_find_item_slot(0, 0x66), 6);
 }
 
+/* fdps_unit_item_select_loop, 00025b20.
+ *
+ * ONLY THE PASS THAT ENDS THE LOOP CAN BE OBSERVED, AND THAT IS STRUCTURAL.
+ * The loop's exit is fdps_unit_status_window_wait_input, whose reader
+ * fdps_read_scancode_auto_repeat reports the latched byte only when it differs
+ * from data_fdps_input_key_repeat_prev_scancode; the reader records the code it
+ * reported, and nothing inside a call can change the latch again, because only
+ * the INT 09h handler writes it and no test installs one.  A second wait in the
+ * same call therefore polls 0xff for ever, and the frame that would end that
+ * spin is never drawn either, because a frame needs the timer tick to move and
+ * the tick is written by an interrupt as well.  So a case can drive exactly one
+ * make code into one call, and the branches that repaint and go round again --
+ * the two cursor moves, the silent refusal of an unusable item, and every
+ * unrecognised code -- cannot be reached and returned from at all.  What those
+ * branches do with the occupied count is a playtest contract; the count itself
+ * has no other reader, so it is not observable here either.
+ *
+ * Expected values come from the assembly at 00025b20: PUSH 0x95 / PUSH 0x97 /
+ * PUSH 0x140 / ADD EAX,0x3b58 / PUSH 0x97 at 00025b82 for the backdrop blit,
+ * PUSH 0x140 / ADD EAX,0x3b58 / PUSH dword ptr [EAX] at 00025bab for the list
+ * redraw, XOR EAX,EAX / PUSH EAX at 00025bca for the idle flag, the six CMPs
+ * against 0x48, 0x50, 0x1c, 0x39, 0x1 and 0x53, MOV AL,byte ptr [EDX+0xb] at
+ * 00025c6c for the id byte and CMP byte ptr [EAX+0xd],0x0 at 00025c84 for the
+ * usability test; and from the 0x11 row pitch and the (0, 8) bar origin
+ * fdps_draw_unit_inventory uses (statunit.h).  None of them is read off the
+ * emitted C.
+ *
+ * The fixture keeps every inventory entry marked empty so that the list redraw
+ * touches no sprite sheet but the selection bar's, which is fabricated three
+ * pixels wide, one row tall and colour 0x70 -- a colour the backdrop pattern
+ * never produces, so a bar pixel and a backdrop pixel can never be confused.
+ */
+
+/* The window image the list is composed into and the geometry of the list
+   rectangle inside it. */
+#define WINDOW_PITCH 0x140
+#define WINDOW_ROWS 200
+#define WINDOW_BYTES (WINDOW_PITCH * WINDOW_ROWS)
+#define LIST_AT 0x3b58
+#define LIST_W 0x97
+#define LIST_H 0x95
+#define LIST_BYTES (LIST_W * LIST_H)
+
+/* The value the window starts at, which is what an untouched pixel reads back
+   as.  It is below 0x80, and every backdrop pixel is at or above 0x80, so a
+   pixel says on its own whether the blit reached it. */
+#define WINDOW_FILL 0x5a
+
+/* The selection bar fixture: a one-sprite .CEL whose header says three by one
+   and whose single row is one fill op of colour 0x70.  A .CEL's sprite offset
+   table starts at +0x0f (resource_info/cel.md) and command byte 0x02 is op 00
+   with a run of (0x02 & 0x3f) + 1. */
+#define CEL_TABLE_AT 0x0f
+#define BAR_W 3
+#define BAR_H 1
+#define BAR_RUN 0x02
+#define BAR_COLOR 0x70
+#define BAR_STREAM_AT (CEL_TABLE_AT + 4)
+#define BAR_SHEET_BYTES (BAR_STREAM_AT + BAR_H * 2)
+
+/* How far apart the list's rows are and where the bar sits inside one:
+   selected_slot * 0x11 + 8, column 0 (statunit.h). */
+#define ROW_PITCH 0x11
+#define BAR_ROW_BIAS 8
+
+/* CMP byte ptr [EAX+0xd],0x0 at 00025c84: the use effect is byte +0x0d of the
+   ITEM.DAT record, and any non-zero value makes the item usable. */
+#define OFF_USE_EFFECT 0x0d
+
+/* The make codes the dispatch names. */
+#define KEY_ENTER 0x1c
+#define KEY_SPACE 0x39
+#define KEY_ESC 0x01
+#define KEY_DELETE 0x53
+
+/* A slot the list draws no bar for, which is what leaves the whole rectangle
+   holding backdrop pixels alone. */
+#define SLOT_NONE (-1)
+
+static unsigned char window_image[WINDOW_BYTES];
+static unsigned char list_backdrop[LIST_BYTES];
+static unsigned char bar_sheet[BAR_SHEET_BYTES];
+
+/* The backdrop's pixel at an offset.  Every value is at or above 0x80, so it is
+   never WINDOW_FILL and never BAR_COLOR, and the low seven bits change with the
+   offset, so a row copied at the wrong stride reads back as a different byte
+   rather than matching anyway. */
+static int backdrop_pixel(int at)
+{
+    return 0x80 | (at & 0x7f);
+}
+
+/* Publishes the tables, empties both staged inventories, repaints the window
+   and the backdrop, builds the bar sheet, and latches one make code for the
+   next poll to report.  Setting the previous code to 0x100 is what makes that
+   poll see a change: the latch is a byte and can never hold that value. */
+static void loop_stage(unsigned int scancode)
+{
+    int i;
+    struct fdps_cel_header *bar_header;
+
+    stage();
+    for (i = 0; i < INVENTORY_ENTRY_COUNT; i++) {
+        set_entry(0, i, FLAG_EMPTY, 0);
+        set_entry(1, i, FLAG_EMPTY, 0);
+    }
+
+    for (i = 0; i < WINDOW_BYTES; i++) {
+        window_image[i] = (unsigned char) WINDOW_FILL;
+    }
+    for (i = 0; i < LIST_BYTES; i++) {
+        list_backdrop[i] = (unsigned char) backdrop_pixel(i);
+    }
+
+    for (i = 0; i < BAR_SHEET_BYTES; i++) {
+        bar_sheet[i] = 0;
+    }
+    bar_header = (struct fdps_cel_header *) bar_sheet;
+    bar_header->sprite_width = (short) BAR_W;
+    bar_header->sprite_height = (short) BAR_H;
+    bar_header->sprite_count = (short) 1;
+    *(int *) (bar_sheet + CEL_TABLE_AT) = BAR_STREAM_AT;
+    bar_sheet[BAR_STREAM_AT] = (unsigned char) BAR_RUN;
+    bar_sheet[BAR_STREAM_AT + 1] = (unsigned char) BAR_COLOR;
+    data_fdps_selection_bar_sheet_ptr = bar_sheet;
+
+    data_fdps_input_last_scancode = (unsigned char) scancode;
+    data_fdps_input_key_repeat_prev_scancode = 0x100;
+}
+
+/* The use effect byte of one ITEM.DAT record of the staged table. */
+static void set_use_effect(int item_id, int use_effect)
+{
+    item_block[(item_id + 1) * ITEM_RECORD_STRIDE + OFF_USE_EFFECT] =
+        (unsigned char) use_effect;
+}
+
+/* The window pixel at a position inside the list rectangle. */
+static int list_pixel(int row, int col)
+{
+    return window_image[LIST_AT + row * WINDOW_PITCH + col];
+}
+
+/* Escape answers -1 and leaves the cursor where it was: MOV dword ptr
+   [EBP-0x4],0xffffffff at 00025ca1, with nothing written through
+   [EBP+0x24] on that path. */
+static void escape_cancels_and_leaves_the_slot_alone(void)
+{
+    int selected_slot;
+
+    loop_stage(KEY_ESC);
+    selected_slot = 3;
+    CHECK_EQ(fdps_unit_item_select_loop(0, 0, window_image, list_backdrop,
+                                        &selected_slot), -1);
+    CHECK_EQ(selected_slot, 3);
+}
+
+/* Delete reaches the same store, CMP dword ptr [EBP-0x20],0x53 / JNZ at
+   00025c9b falling into the branch escape took. */
+static void delete_cancels_the_same_way_escape_does(void)
+{
+    int selected_slot;
+
+    loop_stage(KEY_DELETE);
+    selected_slot = 6;
+    CHECK_EQ(fdps_unit_item_select_loop(0, 0, window_image, list_backdrop,
+                                        &selected_slot), -1);
+    CHECK_EQ(selected_slot, 6);
+}
+
+/* With usable_only clear the confirm returns 1 before the item table is
+   reached at all: CMP dword ptr [EBP+0x18],0x0 / JNZ at 00025c51 skips the
+   record lookup entirely.  Every record of the staged table has use effect 0,
+   so a body that consulted it anyway would refuse and never return. */
+static void enter_confirms_without_consulting_the_item_table(void)
+{
+    int selected_slot;
+
+    loop_stage(KEY_ENTER);
+    set_entry(0, 4, FLAG_EMPTY, 0x33);
+    selected_slot = 4;
+    CHECK_EQ(fdps_unit_item_select_loop(0, 0, window_image, list_backdrop,
+                                        &selected_slot), 1);
+    CHECK_EQ(selected_slot, 4);
+}
+
+/* Space is the second half of the same test, CMP dword ptr [EBP-0x20],0x39 /
+   JNZ at 00025c4b falling into the branch enter took. */
+static void space_confirms_the_same_way_enter_does(void)
+{
+    int selected_slot;
+
+    loop_stage(KEY_SPACE);
+    selected_slot = 0;
+    CHECK_EQ(fdps_unit_item_select_loop(0, 0, window_image, list_backdrop,
+                                        &selected_slot), 1);
+    CHECK_EQ(selected_slot, 0);
+}
+
+/* With usable_only set the confirm is allowed only by a non-zero use effect,
+   and the id it looks up is the entry's id byte -- record + 0x0a + 2 * slot + 1
+   -- with the entry's flag byte never consulted: the entry below is marked
+   empty and is confirmed anyway.
+   THIS CASE DISTINGUISHES BY NOT COMING BACK.  Every other record of the staged
+   table has use effect 0, so a body that read the flag byte, a neighbouring
+   entry or an unscaled slot would refuse; a refusal repaints and waits again,
+   and no second wait in one call can return, so the failure shows up as this
+   case hanging with the heartbeat frozen on its name rather than as a check
+   that did not hold. */
+static void usable_only_accepts_the_id_byte_of_the_selected_entry(void)
+{
+    int selected_slot;
+
+    loop_stage(KEY_ENTER);
+    set_entry(0, 3, FLAG_EMPTY, 0x22);
+    set_use_effect(0x22, 0x0b);
+    selected_slot = 3;
+    CHECK_EQ(fdps_unit_item_select_loop(0, 1, window_image, list_backdrop,
+                                        &selected_slot), 1);
+    CHECK_EQ(selected_slot, 3);
+}
+
+/* The backdrop is laid over the list rectangle before the wait, at the window's
+   0x140 pitch out of a source of its own 0x97 stride.  That the rectangle holds
+   backdrop pixels at all on a pass that returned is what pins the order: the
+   wait that ended this call drew nothing, so the paint must have come first. */
+static void the_backdrop_is_laid_over_the_list_rectangle(void)
+{
+    int selected_slot;
+
+    loop_stage(KEY_ENTER);
+    selected_slot = SLOT_NONE;
+    CHECK_EQ(fdps_unit_item_select_loop(0, 0, window_image, list_backdrop,
+                                        &selected_slot), 1);
+
+    CHECK_EQ(list_pixel(0, 0), backdrop_pixel(0));
+    CHECK_EQ(list_pixel(0, LIST_W - 1), backdrop_pixel(LIST_W - 1));
+    CHECK_EQ(list_pixel(1, 0), backdrop_pixel(LIST_W));
+    CHECK_EQ(list_pixel(LIST_H - 1, LIST_W - 1),
+             backdrop_pixel((LIST_H - 1) * LIST_W + LIST_W - 1));
+}
+
+/* Nothing outside the 0x97 by 0x95 rectangle is touched: the byte in front of
+   the rectangle, the column past its width on the first and last rows, and the
+   first row past its height all keep the window's fill. */
+static void the_blit_stops_at_the_rectangles_edges(void)
+{
+    int selected_slot;
+
+    loop_stage(KEY_ENTER);
+    selected_slot = SLOT_NONE;
+    CHECK_EQ(fdps_unit_item_select_loop(0, 0, window_image, list_backdrop,
+                                        &selected_slot), 1);
+
+    CHECK_EQ(window_image[LIST_AT - 1], WINDOW_FILL);
+    CHECK_EQ(list_pixel(0, LIST_W), WINDOW_FILL);
+    CHECK_EQ(list_pixel(LIST_H - 1, LIST_W), WINDOW_FILL);
+    CHECK_EQ(list_pixel(LIST_H, 0), WINDOW_FILL);
+}
+
+/* The bar goes down after the backdrop and on the row *selected_slot names, at
+   slot * 0x11 + 8 from the top of the rectangle and column 0.  The unit index
+   is 1 and the slot is 5, so a body that handed fdps_draw_unit_inventory its
+   arguments the other way round would put the bar on row 1 * 0x11 + 8; that row
+   is checked and must still hold the backdrop. */
+static void the_selection_bar_lands_on_the_row_the_slot_names(void)
+{
+    int selected_slot;
+    int bar_row;
+    int other_row;
+
+    loop_stage(KEY_ENTER);
+    selected_slot = 5;
+    CHECK_EQ(fdps_unit_item_select_loop(1, 0, window_image, list_backdrop,
+                                        &selected_slot), 1);
+
+    bar_row = 5 * ROW_PITCH + BAR_ROW_BIAS;
+    other_row = 1 * ROW_PITCH + BAR_ROW_BIAS;
+    CHECK_EQ(list_pixel(bar_row, 0), BAR_COLOR);
+    CHECK_EQ(list_pixel(bar_row, BAR_W - 1), BAR_COLOR);
+    CHECK_EQ(list_pixel(bar_row, BAR_W),
+             backdrop_pixel(bar_row * LIST_W + BAR_W));
+    CHECK_EQ(list_pixel(other_row, 0), backdrop_pixel(other_row * LIST_W));
+    CHECK_EQ(list_pixel(BAR_ROW_BIAS, 0),
+             backdrop_pixel(BAR_ROW_BIAS * LIST_W));
+}
+
+/* A slot outside 0..7 draws no bar, which is the state the wrap leaves the
+   cursor in when the unit is carrying nothing: the whole rectangle is still the
+   backdrop after the paint. */
+static void a_slot_outside_the_eight_rows_draws_no_bar(void)
+{
+    int selected_slot;
+    int row;
+    int strays;
+
+    loop_stage(KEY_ENTER);
+    selected_slot = SLOT_NONE;
+    CHECK_EQ(fdps_unit_item_select_loop(0, 0, window_image, list_backdrop,
+                                        &selected_slot), 1);
+
+    strays = 0;
+    for (row = 0; row < LIST_H; row++) {
+        if (list_pixel(row, 0) != backdrop_pixel(row * LIST_W)) {
+            strays++;
+        }
+    }
+    CHECK_EQ(strays, 0);
+    CHECK_EQ(selected_slot, SLOT_NONE);
+}
+
 void run_unititem_tests(void)
 {
     RUN_TEST(the_two_record_layouts_match_the_strides);
@@ -2342,4 +2659,13 @@ void run_unititem_tests(void)
     RUN_TEST(find_item_slot_takes_its_unit_from_the_index);
     RUN_TEST(find_item_slot_writes_nothing);
     RUN_TEST(find_item_slot_resolves_the_record_on_every_call);
+    RUN_TEST(escape_cancels_and_leaves_the_slot_alone);
+    RUN_TEST(delete_cancels_the_same_way_escape_does);
+    RUN_TEST(enter_confirms_without_consulting_the_item_table);
+    RUN_TEST(space_confirms_the_same_way_enter_does);
+    RUN_TEST(usable_only_accepts_the_id_byte_of_the_selected_entry);
+    RUN_TEST(the_backdrop_is_laid_over_the_list_rectangle);
+    RUN_TEST(the_blit_stops_at_the_rectangles_edges);
+    RUN_TEST(the_selection_bar_lands_on_the_row_the_slot_names);
+    RUN_TEST(a_slot_outside_the_eight_rows_draws_no_bar);
 }

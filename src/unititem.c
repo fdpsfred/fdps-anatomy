@@ -1,15 +1,20 @@
 /* unititem.c -- a unit's inventory and what it has equipped.
  *
- * See unititem.h.  Six of the functions here reach a record through
+ * See unititem.h.  Most of the functions here reach a record through
  * fdps_get_unit_record and work on the eight 2-byte inventory entries at
  * record offset 0x0a; fdps_unit_can_equip_item asks instead whether the unit's
- * class is allowed to equip a given item at all, and fdps_unit_find_item_slot
+ * class is allowed to equip a given item at all, fdps_unit_find_item_slot
  * touches no record of its own -- it searches an inventory entirely through
- * the other two accessors.  The file owns no state.
+ * the other two accessors -- and fdps_unit_item_select_loop is the modal
+ * cursor the player moves over those eight entries in the unit status window.
+ * The file owns no state.
  */
 #include <stddef.h>
 #include <string.h>
+#include "audio.h"
+#include "blit.h"
 #include "fdpstype.h"
+#include "statunit.h"
 #include "table.h"
 #include "unit.h"
 #include "unititem.h"
@@ -177,6 +182,158 @@ int fdps_unit_item_count(int unit_index)
     }
 
     return occupied_count;
+}
+
+/* Where the item list sits inside the 320x200 status window image, and how big
+   it is: PUSH 0x95 / PUSH 0x97 / PUSH 0x140 / ADD EAX,0x3b58 / PUSH 0x97 at
+   00025b82.  0x3b58 is row 47 * 0x140 + column 152, so the rectangle's top-left
+   corner is (0x98, 0x2f) -- the same corner fdps_draw_unit_inventory's four
+   call sites all hand it (statunit.h).  The backdrop's own stride is its width,
+   because it is a tight 0x97 x 0x95 copy of just that rectangle. */
+#define ITEM_LIST_AT 0x3b58
+#define ITEM_LIST_WIDTH 0x97
+#define ITEM_LIST_ROWS 0x95
+
+/* The pitch of the window image the list is composed into: PUSH 0x140 at both
+   00025b8c and 00025bab.  A whole 320-pixel scanline, because the list is a
+   rectangle of a full-screen frame and not a surface of its own. */
+#define WINDOW_IMAGE_PITCH 0x140
+
+/* The status window's idle animation is not offered here: XOR EAX,EAX / PUSH
+   EAX at 00025bca.  A zero is not merely "do not animate" -- it also keeps
+   fdps_unit_status_window_wait_input from drawing the rand this window would
+   otherwise consume, which is visible in the CRT's random state (statunit.h). */
+#define STATUS_WINDOW_NO_IDLE_ANIM 0
+
+/* The six make codes the loop acts on: CMP dword ptr [EBP-0x20],0x48 at
+   00025be0, 0x50 at 00025c11, 0x1c at 00025c45, 0x39 at 00025c4b, 0x1 at
+   00025c95 and 0x53 at 00025c9b.  Everything else falls through and the list is
+   simply painted again. */
+#define SCANCODE_UP 0x48
+#define SCANCODE_DOWN 0x50
+#define SCANCODE_ENTER 0x1c
+#define SCANCODE_SPACE 0x39
+#define SCANCODE_ESC 0x01
+#define SCANCODE_DELETE 0x53
+
+/* The click the cursor moves with, the same asset name fdps_save_slot_select_loop
+   uses.  fdps_play_sfx folds the name to upper case in place, so this literal
+   ends up upper case after the first move (rebuild_info/pitfalls.md). */
+#define CURSOR_MOVE_SFX "Beep.wav"
+
+/* The two answers: MOV dword ptr [EBP-0x4],0x1 at 00025c57 and 00025c8a, and
+   MOV dword ptr [EBP-0x4],0xffffffff at 00025ca1. */
+#define ITEM_SELECT_CONFIRMED 1
+#define ITEM_SELECT_CANCELLED (-1)
+
+/* 00025b20.  The modal cursor loop over one unit's eight inventory entries.
+   Everything before the loop happens once: the record call, the byte at record
+   +0x02 into [EBP-0x10], and the counted sweep that fills [EBP-0x1c].
+
+   THE OCCUPIED COUNT IS TAKEN ONCE AND IS THE ONLY THING THE WRAP KNOWS.  The
+   sweep is the same test fdps_unit_item_count applies -- MOV EAX,[EBP-0x18] /
+   ADD EAX,EAX / ADD EAX,[EBP-0xc] / MOV AL,byte ptr [EAX+0xa] / AND AL,0x80 at
+   00025b64 -- and it is outside the loop, so an inventory edited while the list
+   is open does not move the wrap point.
+
+   THE WRAP IS TWO COMPARES AND NOT A REMAINDER.  Up is CMP dword ptr [EAX],0x0
+   / JNZ at 00025bf7, so slot 0 becomes count - 1; down is MOV EDX,[EBP-0x1c] /
+   DEC EDX / CMP EDX,[EAX] at 00025c25, so count - 1 becomes 0.  Writing either
+   as (*selected_slot + 1) % occupied_count divides by zero, because
+   fdps_unit_equip_window opens this loop without first checking that the unit
+   carries anything and the count really can be 0.  What the original does with
+   a count of 0 is let the index walk outside 0..7; fdps_draw_unit_inventory
+   draws no bar for such a row and nothing else reads it, and the caller tests
+   fdps_unit_item_count after the loop returns.
+
+   The paint is always both halves in the same order: fdps_blit_rect lays the
+   untouched backdrop back over the list rectangle, then
+   fdps_draw_unit_inventory redraws the eight rows with the bar on
+   *selected_slot.  The wait that follows is handed record +0x02, the unit's
+   sprite cache slot (statunit.h), and never the unit index itself.
+
+   THE CONFIRM READS THE ID BYTE WITHOUT LOOKING AT THE FLAG BYTE.  MOV EDX,
+   [EAX] / ADD EDX,EDX / ADD EDX,[EBP-0xc] / MOV AL,byte ptr [EDX+0xb] at
+   00025c60 is record + 0x0a + 2 * slot + 1, so an empty entry answers with
+   whatever id byte was last left in it, and the id is widened without sign.
+   usable_only is a plain zero test, CMP dword ptr [EBP+0x18],0x0 at 00025c51,
+   and the usability test is CMP byte ptr [EAX+0xd],0x0 on the returned item
+   record -- unchecked for null, like every other reader of that table.  A
+   refusal is silent: no sound, no message, straight back to the paint. */
+int fdps_unit_item_select_loop(int unit_index, int usable_only,
+                               unsigned char *window_image,
+                               unsigned char *list_backdrop,
+                               int *selected_slot)
+{
+    struct fdps_unit_record *unit;
+    /* The ITEM.DAT record of the entry the player tried to confirm, looked up
+       only on the usable_only path. */
+    struct fdps_item_effect *item;
+    /* Record +0x02, the slot of the sprite cache the window animates the unit
+       out of.  Cached before the loop and handed to every wait. */
+    int sprite_cache_slot;
+    /* How many of the eight entries hold something, counted once.  It is the
+       cursor's wrap point and nothing else. */
+    int occupied_count;
+    /* The entry being examined by the counting sweep. */
+    int slot_index;
+    /* The make code the last wait came back with, held signed and compared as
+       a full int. */
+    int scancode;
+    /* The id byte of the entry being confirmed, widened without sign. */
+    int item_id;
+
+    occupied_count = 0;
+    unit = fdps_get_unit_record(unit_index);
+    sprite_cache_slot = (int) unit->sprite_cache_slot;
+
+    for (slot_index = 0;
+         slot_index < INVENTORY_ENTRY_COUNT;
+         slot_index++) {
+        if ((unit->inventory_slots[slot_index * 2]
+             & INVENTORY_FLAG_EMPTY) == 0) {
+            occupied_count++;
+        }
+    }
+
+    for (;;) {
+        fdps_blit_rect((unsigned int) list_backdrop, ITEM_LIST_WIDTH,
+                       window_image + ITEM_LIST_AT, WINDOW_IMAGE_PITCH,
+                       ITEM_LIST_WIDTH, ITEM_LIST_ROWS);
+        fdps_draw_unit_inventory(unit_index, *selected_slot,
+                                 window_image + ITEM_LIST_AT,
+                                 WINDOW_IMAGE_PITCH);
+        scancode = fdps_unit_status_window_wait_input(
+                       window_image, sprite_cache_slot,
+                       STATUS_WINDOW_NO_IDLE_ANIM);
+
+        if (scancode == SCANCODE_UP) {
+            fdps_play_sfx(CURSOR_MOVE_SFX);
+            if (*selected_slot == 0) {
+                *selected_slot = occupied_count - 1;
+            } else {
+                *selected_slot = *selected_slot - 1;
+            }
+        } else if (scancode == SCANCODE_DOWN) {
+            fdps_play_sfx(CURSOR_MOVE_SFX);
+            if (occupied_count - 1 == *selected_slot) {
+                *selected_slot = 0;
+            } else {
+                *selected_slot = *selected_slot + 1;
+            }
+        } else if (scancode == SCANCODE_ENTER || scancode == SCANCODE_SPACE) {
+            if (usable_only == 0) {
+                return ITEM_SELECT_CONFIRMED;
+            }
+            item_id = (int) unit->inventory_slots[*selected_slot * 2 + 1];
+            item = fdps_get_item_record(item_id);
+            if (item->use_effect != 0) {
+                return ITEM_SELECT_CONFIRMED;
+            }
+        } else if (scancode == SCANCODE_ESC || scancode == SCANCODE_DELETE) {
+            return ITEM_SELECT_CANCELLED;
+        }
+    }
 }
 
 /* 00025cc0.  Drops one inventory entry and closes the gap.  Straight-line code

@@ -3,10 +3,12 @@
  * A unit record carries eight 2-byte inventory entries at record offset 0x0a,
  * struct fdps_unit_record's inventory_slots[16] in src/fdpstype.h: entry i is
  * inventory_slots[i * 2], a flag byte whose bit 0x40 means "equipped" and bit
- * 0x80 means "no item here", followed by the item id byte.  Five of the functions
- * here read and edit that set; the sixth, fdps_unit_can_equip_item, is about
+ * 0x80 means "no item here", followed by the item id byte.  Most of the
+ * functions here read and edit that set; fdps_unit_can_equip_item is about
  * the unit's class rather than its inventory and asks the PROEQU.DAT class
- * equipment table whether an item's type is one the class may wear.  The
+ * equipment table whether an item's type is one the class may wear, and
+ * fdps_unit_item_select_loop is the modal cursor the player moves over those
+ * eight entries while the unit status window is up.  The
  * records themselves live in the block reached
  * through data_fdps_map_unit_array_ptr (gamedata.h) and are resolved through
  * fdps_get_unit_record (unit.h).  The file owns no state of its own.
@@ -94,6 +96,51 @@ extern int fdps_unit_get_item_id(int unit_index, int slot);
    written. */
 extern int fdps_unit_item_count(int unit_index);
 #pragma aux fdps_unit_item_count "*" parm caller [];
+
+/* Runs the item list of the unit status window until the player picks an entry
+   or backs out, and answers 1 for a pick and -1 for a cancel.  The entry that
+   was picked is left in *selected_slot, which the caller seeds and reads back;
+   a cancel leaves the cursor wherever it had got to rather than restoring it.
+   The call does not return until one of those two things happens -- everything
+   in between is repaint, wait, dispatch.
+
+   Up (0x48) and down (0x50) move the highlight and play Beep.wav; enter (0x1c)
+   and space (0x39) confirm; escape (0x1) and delete (0x53) cancel.  Any other
+   make code just repaints.
+
+   THE CURSOR WRAPS AGAINST THE OCCUPIED COUNT TAKEN ONCE ON ENTRY, AND THAT
+   COUNT CAN BE 0.  fdps_unit_equip_window opens this loop without asking
+   whether the unit is carrying anything, so with an empty bag the wrap turns
+   slot 0 into -1 on the way up and walks the index off the top on the way
+   down; the original does no harm with that, because no bar is drawn for a row
+   outside 0..7 and the caller checks fdps_unit_item_count once the loop is
+   over.  A wrap written as a remainder instead divides by zero there
+   (rebuild_info/pitfalls.md).  The count is also never recomputed, so an
+   inventory that changes while the list is up does not move the wrap point.
+
+   usable_only decides what a confirm accepts.  Zero accepts any entry, without
+   the item table being touched at all.  Non-zero accepts an entry only when
+   the ITEM.DAT record of its id byte has a non-zero use_effect at +0x0d;
+   anything else is refused in silence -- no sound, no message, the list simply
+   comes back.  Only the battle "use item" path passes non-zero.  THE ID BYTE
+   IS READ WITHOUT CONSULTING THE ENTRY'S FLAG BYTE, so an empty entry inside
+   the cursor's range is looked up on whatever id was last left in it.
+
+   window_image is the whole 320x200 status window frame; the list is the
+   0x97 x 0x95 rectangle at +0x3b58 and is the only part of it this writes,
+   apart from the unit cell fdps_unit_status_window_wait_input (statunit.h)
+   stamps in on a frame it draws.  list_backdrop is a tight 0x97 x 0x95 copy of
+   that rectangle with no highlight on it, and it is laid down again at the top
+   of every pass, so the caller must keep it alive for the whole call.
+
+   unit_index is not range checked and is resolved through fdps_get_unit_record
+   (unit.h) once, on entry; the sprite cache slot the window animates comes from
+   that record and not from the index. */
+extern int fdps_unit_item_select_loop(int unit_index, int usable_only,
+                                      unsigned char *window_image,
+                                      unsigned char *list_backdrop,
+                                      int *selected_slot);
+#pragma aux fdps_unit_item_select_loop "*" parm caller [];
 
 /* Take entry `slot` out of unit `unit_index`'s inventory and close the gap.
    Entries slot+1..7 move down one place, so the entries that are left stay
