@@ -56,6 +56,7 @@
 | `.VFS` 成員查找是**單向**轉大寫：把傳入的名稱就地轉大寫，entry 名稱原樣取用，兩者 `strcmp` | 寫成 `stricmp(entry, query)`。遇到非全大寫的 entry 名稱行為就不同，而且原版會就地改寫呼叫端的緩衝區，這個副作用是可見的 | [`resource_info/vfs.md`](../resource_info/vfs.md) |
 | `.VFS` 的 entry 筆數以 8-bit 讀入，第 256 筆以後走不到；entry table 偏移以帶號 16-bit seek，上限 `0x7FFF` | 用 `u32` 讀筆數、用 `long` seek。容器沒有踩到上限，但這是原版的硬限制 | [`resource_info/vfs.md`](../resource_info/vfs.md) |
 | `SHOP%02d.DAT` 的商品編號列必須以 `unsigned char` 取值——原版是 `XOR EAX,EAX` / `MOV AL,[EDX]` 的零延伸，而 `0x80` 以上的編號是正常的貨（`SHOP01.DAT` 的道具列是 `B4 DE`） | 宣告成 `char *`。`0xFF` 變成 `-1`、跳過空位的判斷永遠不成立，空位會被當成物品編號 255 擺上架，`0x80` 以上的貨也全部變成負數編號 | plate comment 的 `Rebuild note` |
+| 狀態視窗物品清單的游標環繞是拿 `count - 1` 比大小，不是取餘數，而那個 count 可以是 0：`fdps_unit_equip_window` 開這個清單之前不問單位身上有沒有東西 | 統一寫成 `*selected_slot = (*selected_slot + 1) % occupied_count`——存檔槽位的游標（`00024650`）確實是取餘數的，照著統一過來，空背包的單位一走進裝備畫面就除以零。原版讓索引走出 0..7，那種列不畫游標條，呼叫端等迴圈結束才呼叫 `fdps_unit_item_count` | plate comment 的 `Rebuild note`（`00025b20`） |
 | `.SAF` 的 tilemap 格子編號是 `i16`（`short *` 取值、`-1 < index` 擋下界），但 layer 的 tilemap 編號是零延伸的 `u16` | 兩個都寫成同一種索引型別 | [`resource_info/saf.md`](../resource_info/saf.md) |
 | `.SAF` 的 layer 半透明程度以 16-bit `MOVSX` 讀 `+0x07`，連 `+0x08` 的保留 byte 一起讀進來 | 宣告成 `u8`。保留 byte 恆為 0，所以目前無差別，但欄位的實際寬度是 2 | [`resource_info/saf.md`](../resource_info/saf.md) |
 | 章節音軌表的位元組要 **+1** 才是 MSCDEX 音軌編號，加法由呼叫端在起播前做，不在表裡 | 直接把表值當音軌編號送出去，整首曲子會差一軌 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
