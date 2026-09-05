@@ -68,6 +68,44 @@ extern int data_fdps_ui_saveload_is_load_mode;
 extern void fdps_save_game_screen(unsigned char *restore_page);
 #pragma aux fdps_save_game_screen "*" parm caller [];
 
+/* 00024490.  The load screen, and the whole of what "Load" on the title menu
+   and on the bar menu does: it reveals the three-slot panel, runs the slot
+   cursor over it once, and on a confirm reads FDE.SAV back and installs the
+   picked slot into the live game state.
+
+   `restore_page` is a 64000-byte 320x200 8bpp page the caller owns, on exactly
+   the same terms as fdps_save_game_screen's: never written to, never freed
+   here, and only what the closing mosaic puts back on the adapter -- whether a
+   slot was loaded or not.
+
+   THE ANSWER IS THE SLOT CURSOR'S, 1 for a load that happened and -1 for a
+   cancelled screen, and both callers act on it: fdps_title_screen folds the -1
+   into 0 and stays on the title, fdps_run_bar_shop ends the bar phase on the 1.
+
+   IT RUNS ONCE.  There is no outer loop as there is on the save screen: one
+   pass of the cursor, one load at most, and the screen is over.
+
+   AN EMPTY SLOT CANNOT BE PICKED, because the mode flag above is set to 1 on
+   the way in and that is what makes fdps_save_slot_select_loop consult the
+   occupied flags.  The flag is left set behind the screen.
+
+   IT INSTALLS ELEVEN THINGS AND VERIFIES NONE.  The record's first 0xa00 bytes
+   go over the roster block whole, then the chapter, the member count, the
+   purse, the terrain HUD flag, the battle animation flag and the two audio
+   flags are unpacked out of its header; the bar's bonus-draw flag follows them
+   ONLY WHEN NO VILLAGE PHASE IS RUNNING.  Nothing checks the file's length, its
+   checksum or even that it opened: a missing or short FDE.SAV faults inside the
+   CRT.
+
+   IT LEAKS THE SAVE IMAGE.  Every confirmed load allocates 0x59cb bytes and
+   never frees them; the leak is the original's and is not repaired
+   (rebuild_info/pitfalls.md).
+
+   It needs the timer interrupt running, because the slot cursor paces its
+   frames on it. */
+extern int fdps_load_game_screen(unsigned char *restore_page);
+#pragma aux fdps_load_game_screen "*" parm caller [];
+
 /* 00024650.  The modal loop both save/load screens run once the slot panel is
    on the page: it drives a three-entry slot cursor from the keyboard, animates
    the cursor highlight over a background the caller composed, and answers

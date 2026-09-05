@@ -74,10 +74,13 @@
 #define SAVE_SLOT_UNWRITTEN_CHAPTER 0xff
 
 /* Which of the two screens is running, MOV dword ptr [0x00064104],0x0 at
-   000241fa.  Zero is the save screen, and it is what makes
-   fdps_save_slot_select_loop accept a confirm on a slot that has never been
-   written (save.h). */
+   000241fa and MOV dword ptr [0x00064104],0x1 at 000244a3.  Zero is the save
+   screen, and it is what makes fdps_save_slot_select_loop accept a confirm on a
+   slot that has never been written; one is the load screen, where the same test
+   sends an unwritten slot back into the frame (save.h).  Neither screen clears
+   it on the way out. */
 #define SAVELOAD_MODE_SAVE 0
+#define SAVELOAD_MODE_LOAD 1
 
 /* The member the page is composed from, PUSH 0x61adc at 00024204 and the same
    address again at 00024431: ONE copy of the name reaches both calls in the
@@ -294,6 +297,167 @@ void fdps_save_game_screen(unsigned char *restore_page)
                                   SAVE_TRANSITION_BLOCK_W,
                                   SAVE_TRANSITION_BLOCK_H,
                                   SAVE_TRANSITION_DELAY);
+}
+
+/* The member the load screen's page is composed from, PUSH 0x61aec at
+   000244ad.  It is a second literal and not the save screen's: the original
+   holds "Save.cel" at 0x61adc and "Load.cel" at 0x61aec, and each screen
+   reaches only its own.
+
+   IT IS WRITTEN TO for the same reason the save screen's name is.  It reaches
+   strupr inside fdps_vfs_load_entry, which upper-cases the caller's own storage
+   in place (vfs.h), so it is folded to "LOAD.CEL" by the first build and stays
+   that way (rebuild_info/pitfalls.md). */
+#define LOAD_SCREEN_BACKGROUND "Load.cel"
+
+/* 00024490.  The load screen, and the whole of what "Load" on the title menu
+   and on the bar menu does: it reveals the same three-slot panel the save
+   screen uses, runs the slot cursor over it, and on a confirm reads FDE.SAV
+   back, decrypts it and pours the picked slot into the live game state.  See
+   save.h for the argument and for what the screen answers.
+
+   THERE IS NO OUTER LOOP.  Unlike fdps_save_game_screen, which offers the panel
+   again after every write, this screen runs the cursor exactly once: JNZ
+   0x0002460e at 00024510 skips the whole load when the answer is not a confirm,
+   and either way the closing mosaic runs and the function returns.  That is
+   what makes a load leave the screen straight away.
+
+   THE PANEL IS GIVEN BACK BEFORE THE FILE IS READ, free at 00024504 with the
+   read at 00024532 behind it, so the peak footprint is one page or one save
+   image and never both.
+
+   NOTHING ON THE READ PATH IS CHECKED.  malloc's block at 0002451b goes
+   straight into fopen's stream at 00024532 and into fread at 0004270d without a
+   test between them, fread's count is dropped, and no checksum is recomputed --
+   the dword the save screen stored at +0x59c7 is read by nobody here.  A
+   missing FDE.SAV therefore faults inside the CRT rather than telling the
+   player anything, which is the opposite of the save screen's own read, where
+   the same fopen IS tested and a missing file becomes the 0xff fill.
+
+   THE SAVE IMAGE IS NEVER FREED.  There is no CALL to free between the fclose
+   at 00024569 and the epilogue: every confirmed load leaks 0x59cb bytes for the
+   rest of the process.  It is the original's leak and it stays
+   (rebuild_info/pitfalls.md).
+
+   THE RECORD POINTER IS WALKED PAST THE COPIED BLOCK AND THE FIELDS ARE READ
+   FROM BOTH SIDES OF IT.  ADD dword ptr [EBP-0x14],0xa00 at 0002459d moves it
+   to the end of the 0xa00 bytes memmove has just taken, and the reads that
+   follow are at +0x0, +0x1, +0x2, +0x6, +0x7, +0x8 and +0x9 past it and at
+   -0x14 behind it -- the mirror of where fdps_save_game_screen put them, and
+   the reason the lottery flag is inside the copied block rather than after it.
+
+   THE MEMMOVE GOES THE OTHER WAY FROM THE SAVE SCREEN'S.  PUSH
+   dword ptr [0x00064108] last at 0002458f puts the roster block in the
+   destination and the record in the source, so the live roster is overwritten
+   by the file; the save screen pushes the same two the other way round.
+
+   THE TWO COUNTS ARE WIDENED UNSIGNED AND THE FOUR OPTION FLAGS ARE NOT WIDENED
+   AT ALL.  MOV AL,byte ptr [..] / AND EAX,0xff in front of the stores at
+   000245ae and 000245be, against a plain MOV [..],AL at 000245d4, 000245df,
+   000245ea and 000245f5: the chapter and the member count are byte fields going
+   into int globals and the four options are byte to byte (contract C in
+   rebuild_info/emit_pipeline.md).  The purse and the lottery flag are dwords at
+   both ends.
+
+   THE LOTTERY FLAG ONLY TRAVELS OUTSIDE A VILLAGE.  CMP byte ptr
+   [0x00060070],0x0 / JNZ at 000245fa and 00024601 skips that one store while a
+   village phase is running, and nothing puts it back afterwards: a load started
+   from the bar keeps whatever draw state the current run had, while a load from
+   the title screen -- where the flag is clear -- takes the saved one.  Every
+   other field is installed either way.
+
+   THE CLOSING MOSAIC IS UNCONDITIONAL.  The eleven pushes at 0002460e through
+   0002462c are the branch target of the confirm test as well as the fall
+   through, so a cancelled screen puts the caller's page back exactly as a
+   loaded one does.
+
+   THE MODE FLAG IS LEFT SET.  MOV dword ptr [0x00064104],0x1 at 000244a3 is
+   never undone here, so whichever screen ran last leaves its value behind
+   (save.h).
+
+   FOUR CALLS' ANSWERS ARE READ.  fdps_saveload_screen_build's is the page,
+   stored at 000244bb and used as the mosaic's source and as the select loop's
+   background; fdps_save_slot_select_loop's is the answer, stored at 000244fd
+   and returned; malloc's is the save image, stored at 00024523 and used without
+   a test; fopen's is the stream, stored at 0002453a and used without a test.
+   fread, fclose, memmove, fdps_xor_crypt_buffer, free and
+   fdps_transition_random_blocks all return values the original never looks
+   at. */
+int fdps_load_game_screen(unsigned char *restore_page)
+{
+    /* The composed 320x200 panel page, built once and given back before the
+       file is opened. */
+    unsigned char *page;
+    /* Which of the three panel slots the cursor is on, cleared before the loop
+       and read back to index the image. */
+    int slot_index;
+    /* What the slot cursor answered: 1 for a confirmed slot, -1 for a cancelled
+       screen.  It is also what the caller is told. */
+    int selection;
+    /* The whole FDE.SAV image, decrypted in place and deliberately never
+       freed. */
+    unsigned char *save_image;
+    /* The save file, opened for reading once and not tested. */
+    FILE *save_fp;
+    /* The 0xa28-byte record inside the image that the picked slot occupies. */
+    struct fdps_save_slot *slot_record;
+
+    slot_index = 0;
+    data_fdps_ui_saveload_is_load_mode = SAVELOAD_MODE_LOAD;
+
+    page = fdps_saveload_screen_build(LOAD_SCREEN_BACKGROUND);
+    fdps_transition_random_blocks((unsigned int) page, VGA_SCREEN_PITCH,
+                                  (unsigned char *) VGA_SCREEN_BASE,
+                                  VGA_SCREEN_PITCH, SAVE_TRANSITION_WIDTH,
+                                  SAVE_TRANSITION_HEIGHT,
+                                  SAVE_TRANSITION_GRID_COLS,
+                                  SAVE_TRANSITION_GRID_ROWS,
+                                  SAVE_TRANSITION_BLOCK_W,
+                                  SAVE_TRANSITION_BLOCK_H,
+                                  SAVE_TRANSITION_DELAY);
+
+    selection = fdps_save_slot_select_loop(page, &slot_index);
+    free(page);
+
+    if (selection == SLOT_SELECT_CONFIRMED) {
+        save_image = (unsigned char *) malloc((size_t) SAVE_IMAGE_BYTES);
+        save_fp = fopen("FDE.SAV", "rb");
+        fread(save_image, 1, (size_t) SAVE_IMAGE_BYTES, save_fp);
+        fdps_xor_crypt_buffer(save_image, (unsigned int) SAVE_IMAGE_BYTES);
+        fclose(save_fp);
+
+        slot_record = (struct fdps_save_slot *)
+                      (save_image + SAVE_IMAGE_SLOTS_AT
+                       + slot_index * SAVE_SLOT_STRIDE);
+        memmove(data_fdps_roster_array_ptr, slot_record,
+                (size_t) SAVE_LIVE_STATE_BYTES);
+
+        data_fdps_chapter_current_chapter_id = slot_record->chapter_index;
+        data_fdps_roster_member_count = slot_record->roster_member_count;
+        data_fdps_shared_party_total_gold = slot_record->party_gold;
+        data_fdps_ui_terrain_hud_user_enabled =
+            slot_record->terrain_hud_user_enabled;
+        data_fdps_ui_battle_animation_enabled =
+            slot_record->battle_animation_enabled;
+        data_fdps_audio_bgm_enabled_flag = slot_record->bgm_enabled_flag;
+        data_fdps_audio_sfx_enabled_flag = slot_record->sfx_enabled_flag;
+        if (data_fdps_village_mode_flag == 0) {
+            data_fdps_bonus_lottery_drawn_flag =
+                (int) slot_record->bonus_lottery_drawn_flag;
+        }
+    }
+
+    fdps_transition_random_blocks((unsigned int) restore_page,
+                                  VGA_SCREEN_PITCH,
+                                  (unsigned char *) VGA_SCREEN_BASE,
+                                  VGA_SCREEN_PITCH, SAVE_TRANSITION_WIDTH,
+                                  SAVE_TRANSITION_HEIGHT,
+                                  SAVE_TRANSITION_GRID_COLS,
+                                  SAVE_TRANSITION_GRID_ROWS,
+                                  SAVE_TRANSITION_BLOCK_W,
+                                  SAVE_TRANSITION_BLOCK_H,
+                                  SAVE_TRANSITION_DELAY);
+    return selection;
 }
 
 /* The three names this screen pulls out of the game's data, all of them

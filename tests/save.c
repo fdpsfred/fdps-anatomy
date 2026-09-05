@@ -1319,6 +1319,236 @@ static void screen_cancel_writes_nothing_and_restores_the_page(void)
     slot_unstage();
 }
 
+/* ---- fdps_load_game_screen -----------------------------------------------
+ *
+ * The load screen is watched the same way the save screen is, and for the same
+ * reason: it names "Load.cel", "FDE.SAV" and "rb" itself and takes only the
+ * page it restores on the way out, so nothing about it can be pointed at a
+ * fixture.  What it produces is not a file this time but the eleven globals it
+ * installs, so each case writes a save file it controls with the save screen --
+ * which is covered above and whose record layout is pinned there -- stages a
+ * DIFFERENT game state into those globals, runs the load, and reads them back.
+ *
+ * THE TWO SLOTS CARRY THE TWO STATES.  Slot 0 takes state A and slot 1 takes
+ * state B, so a load that reached the wrong record, or indexed it with the
+ * wrong stride, brings back the wrong set and every field fails at once: that
+ * is what pins ADD EDX,0x312b at 0002457b and IMUL EAX,[EBP-0xc],0xa28 at
+ * 00024571 on the READ side, independently of the save screen's own arithmetic.
+ *
+ * THE ROSTER BLOCK IS COMPARED AGAINST A SNAPSHOT AND NOT AGAINST THE PATTERN.
+ * The staged live state is a pattern with the first few unit records patched,
+ * so the bytes that have to come back are the ones that went in; the snapshot
+ * is taken immediately before the save run that stores them.
+ *
+ * THE LEAK IS ASSERTED, NOT TOLERATED.  A confirmed load leaves exactly one
+ * more used heap block behind than it found -- the 0x59cb save image that has
+ * no free() anywhere behind it (save.h) -- and a cancelled one leaves none,
+ * because the allocation is inside the confirm arm.
+ */
+
+/* The 0xa00 bytes of live state as they stood when the save that stores them
+   ran, which is what the load has to put back. */
+static unsigned char load_expected[SCREEN_LIVE_BYTES];
+
+/* One whole run of the load screen, driven by a burst of make codes.  A burst
+   that neither cancels nor lands an accepted confirm hangs, exactly as it does
+   for the save screen; there is no outer loop here, so one confirm ends it. */
+static int load_run(unsigned char *codes, int count)
+{
+    int result;
+
+    slot_queue(codes, count);
+
+    slot_set_mode(SLOT_MODE_320X200X256);
+    memset((void *) SLOT_VGA_BASE, SLOT_SENTINEL, (size_t) SLOT_SCREEN_BYTES);
+
+    data_fdps_timer_tick_counter = 0;
+    slot_saved_timer = _dos_getvect(SLOT_TIMER_VECTOR);
+    _dos_setvect(SLOT_TIMER_VECTOR, slot_timer_isr);
+    result = fdps_load_game_screen(screen_restore);
+    _dos_setvect(SLOT_TIMER_VECTOR, slot_saved_timer);
+
+    memmove(slot_screen, (void *) SLOT_VGA_BASE, (size_t) SLOT_SCREEN_BYTES);
+    slot_set_mode(SLOT_MODE_TEXT);
+    return result;
+}
+
+/* The whole install, field by field, off the slot the cursor was moved onto.
+ *
+ * State A is written to slot 0, state B to slot 1, and then state A is staged
+ * live and slot 1 is loaded: every one of the eight globals has to come back
+ * holding B's value, which no other record in the image carries.  The roster
+ * block has to hold the 0x9ec bytes that went into slot 1, and its last dword
+ * before the header -- the lottery flag inside the record -- has to be B's
+ * rather than the 0xaa the staging left there, which is what says the memmove
+ * really took 0xa00 bytes and not 0x9ec.
+ *
+ * The adapter has to end up holding the caller's page, because the closing
+ * mosaic runs on the confirm path as well as the cancel path; and the mode flag
+ * has to still be 1, because nothing clears it.
+ */
+static void load_installs_the_slot_the_cursor_confirms(void)
+{
+    unsigned char keys[3];
+    int blocks_before;
+
+    if (!build_files_present()) {
+        return;
+    }
+    remove(SCREEN_SAVE_ASIDE);
+    CHECK_EQ(rename(SCREEN_SAVE_FILE, SCREEN_SAVE_ASIDE), 0);
+
+    screen_stage_restore_page();
+
+    screen_stage(0);
+    keys[0] = SLOT_KEY_SPACE;
+    keys[1] = SLOT_KEY_ESC;
+    screen_run(keys, 2);
+    screen_drop_cache(SCREEN_MEMBERS_A);
+
+    screen_stage(1);
+    memmove(load_expected, screen_live_state, (size_t) SCREEN_LIVE_BYTES);
+    keys[0] = SLOT_KEY_RIGHT;
+    keys[1] = SLOT_KEY_SPACE;
+    keys[2] = SLOT_KEY_ESC;
+    screen_run(keys, 3);
+    screen_drop_cache(SCREEN_MEMBERS_B);
+
+    screen_stage(0);
+    data_fdps_village_mode_flag = (unsigned char) 0;
+    blocks_before = slot_used_heap_blocks();
+
+    keys[0] = SLOT_KEY_RIGHT;
+    keys[1] = SLOT_KEY_SPACE;
+    CHECK_EQ(load_run(keys, 2), SLOT_CONFIRMED);
+    panel_release_cache();
+
+    CHECK_EQ(data_fdps_ui_saveload_is_load_mode, 1);
+    CHECK_EQ(data_fdps_chapter_current_chapter_id, SCREEN_CHAPTER_B);
+    CHECK_EQ(data_fdps_roster_member_count, SCREEN_MEMBERS_B);
+    CHECK_EQ(data_fdps_shared_party_total_gold, (int) SCREEN_GOLD_B);
+    CHECK_EQ(data_fdps_ui_terrain_hud_user_enabled, SCREEN_TERRAIN_B);
+    CHECK_EQ(data_fdps_ui_battle_animation_enabled, SCREEN_BATTLE_ANIM_B);
+    CHECK_EQ(data_fdps_audio_bgm_enabled_flag, SCREEN_BGM_B);
+    CHECK_EQ(data_fdps_audio_sfx_enabled_flag, SCREEN_SFX_B);
+    CHECK_EQ(data_fdps_bonus_lottery_drawn_flag, SCREEN_LOTTERY_B);
+
+    CHECK_EQ(memcmp(screen_live_state, load_expected,
+                    (size_t) SCREEN_STAMP_AT), 0);
+    CHECK_EQ(screen_dword(screen_live_state + SCREEN_AT_LOTTERY),
+             SCREEN_LOTTERY_B);
+
+    CHECK_EQ(memcmp(slot_screen, screen_restore, (size_t) SLOT_SCREEN_BYTES),
+             0);
+    CHECK_EQ(slot_used_heap_blocks() - blocks_before, 1);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+
+    remove(SCREEN_SAVE_FILE);
+    CHECK_EQ(rename(SCREEN_SAVE_ASIDE, SCREEN_SAVE_FILE), 0);
+    slot_unstage();
+}
+
+/* Escape installs nothing and gives the page back.
+ *
+ * JNZ 0x0002460e at 00024510 has to jump the whole load, so not one of the
+ * globals may move and the roster block has to still be carrying the 0xaa the
+ * staging put across its last 0x14 bytes.  The shipped save file is left where
+ * it is -- the load screen never opens it for writing -- and its length and
+ * stored checksum say so.
+ *
+ * The run has to be heap-neutral once the cache the panel filled is given back,
+ * which is the other half of the leak assertion above: the 0x59cb block is
+ * allocated inside the confirm arm and a cancel never reaches it.
+ */
+static void load_cancel_installs_nothing(void)
+{
+    unsigned char keys[1];
+    long size_before;
+    int blocks_before;
+
+    if (!build_files_present()) {
+        return;
+    }
+
+    screen_stage_restore_page();
+    screen_stage(1);
+    data_fdps_village_mode_flag = (unsigned char) 0;
+    size_before = screen_file_size();
+    CHECK_EQ(screen_reload(), 1);
+    CHECK_EQ(screen_dword(screen_image + SCREEN_CHECKSUM_AT),
+             SAVE_STORED_CHECKSUM);
+
+    blocks_before = slot_used_heap_blocks();
+    keys[0] = SLOT_KEY_ESC;
+    CHECK_EQ(load_run(keys, 1), SLOT_CANCELLED);
+    panel_release_cache();
+
+    CHECK_EQ(data_fdps_ui_saveload_is_load_mode, 1);
+    CHECK_EQ(data_fdps_chapter_current_chapter_id, SCREEN_CHAPTER_B);
+    CHECK_EQ(data_fdps_roster_member_count, SCREEN_MEMBERS_B);
+    CHECK_EQ(data_fdps_shared_party_total_gold, (int) SCREEN_GOLD_B);
+    CHECK_EQ(data_fdps_bonus_lottery_drawn_flag, SCREEN_LOTTERY_B);
+    CHECK_EQ(screen_live_state[SCREEN_AT_LOTTERY], 0xaa);
+
+    CHECK_EQ(memcmp(slot_screen, screen_restore, (size_t) SLOT_SCREEN_BYTES),
+             0);
+    CHECK_EQ(screen_file_size(), size_before);
+    CHECK_EQ(screen_reload(), 1);
+    CHECK_EQ(screen_dword(screen_image + SCREEN_CHECKSUM_AT),
+             SAVE_STORED_CHECKSUM);
+    CHECK_EQ(slot_used_heap_blocks() - blocks_before, 0);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    slot_unstage();
+}
+
+/* CMP byte ptr [0x00060070],0x0 / JNZ at 000245fa: the one store the load
+ * skips, and the only one.
+ *
+ * State A -- whose lottery flag is 1 -- goes into slot 0, state B is staged
+ * live with the flag at 0 and a village phase is declared running, and slot 0
+ * is loaded.  The chapter and the purse have to arrive, so the load plainly
+ * ran; the flag has to still read 0, because the store is inside the branch.
+ *
+ * The record's own copy of the flag still reaches the roster block, because it
+ * travels inside the 0xa00 bytes the memmove takes and not through the store
+ * that was skipped -- which is why the two are read separately here.
+ */
+static void load_in_a_village_keeps_the_lottery_flag(void)
+{
+    unsigned char keys[2];
+
+    if (!build_files_present()) {
+        return;
+    }
+    remove(SCREEN_SAVE_ASIDE);
+    CHECK_EQ(rename(SCREEN_SAVE_FILE, SCREEN_SAVE_ASIDE), 0);
+
+    screen_stage_restore_page();
+    screen_stage(0);
+    keys[0] = SLOT_KEY_SPACE;
+    keys[1] = SLOT_KEY_ESC;
+    screen_run(keys, 2);
+    screen_drop_cache(SCREEN_MEMBERS_A);
+
+    screen_stage(1);
+    data_fdps_village_mode_flag = (unsigned char) 1;
+    keys[0] = SLOT_KEY_SPACE;
+    CHECK_EQ(load_run(keys, 1), SLOT_CONFIRMED);
+    panel_release_cache();
+    data_fdps_village_mode_flag = (unsigned char) 0;
+
+    CHECK_EQ(data_fdps_chapter_current_chapter_id, SCREEN_CHAPTER_A);
+    CHECK_EQ(data_fdps_shared_party_total_gold, (int) SCREEN_GOLD_A);
+    CHECK_EQ(data_fdps_bonus_lottery_drawn_flag, SCREEN_LOTTERY_B);
+    CHECK_EQ(screen_dword(screen_live_state + SCREEN_AT_LOTTERY),
+             SCREEN_LOTTERY_A);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+
+    remove(SCREEN_SAVE_FILE);
+    CHECK_EQ(rename(SCREEN_SAVE_ASIDE, SCREEN_SAVE_FILE), 0);
+    slot_unstage();
+}
+
 void run_save_tests(void)
 {
     RUN_TEST(slot_escape_is_the_only_cancel);
@@ -1332,4 +1562,7 @@ void run_save_tests(void)
     RUN_TEST(screen_save_writes_the_record_it_staged);
     RUN_TEST(screen_second_save_keeps_the_first_one);
     RUN_TEST(screen_cancel_writes_nothing_and_restores_the_page);
+    RUN_TEST(load_installs_the_slot_the_cursor_confirms);
+    RUN_TEST(load_cancel_installs_nothing);
+    RUN_TEST(load_in_a_village_keeps_the_lottery_flag);
 }
