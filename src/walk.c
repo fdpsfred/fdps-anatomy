@@ -22,6 +22,10 @@
    header; the width sits at +7 (maptile.h). */
 #define SCENE_TILE_MAP_HEIGHT_AT 9
 
+/* Offset of the scene terrain layer's signed 16-bit tile width in the same
+   header (maptile.h).  MOVSX word ptr [EAX+7] at 0002d6c0. */
+#define SCENE_TILE_MAP_WIDTH_AT 7
+
 /* Six passes of four pixels make one 24-pixel tile.  The sub-step counter
    stored in the unit record runs 1..6 while the animation plays and is cleared
    once the tile is committed. */
@@ -33,15 +37,27 @@
 #define MAP_UNIT_FACING_DOWN 0
 #define MAP_UNIT_FACING_LEFT 1
 #define MAP_UNIT_FACING_UP 2
+#define MAP_UNIT_FACING_RIGHT 3
 
 /* The battle view is 192 pixels tall, so the lowest view origin that still has
    map underneath it is the map's pixel height less that. */
 #define MAP_VIEW_HEIGHT 0xc0
 
+/* The battle view is 312 pixels wide, so the rightmost view origin that still
+   has map underneath it is the map's pixel width less that.  SUB EAX,0x138 at
+   0002d718. */
+#define MAP_VIEW_WIDTH 0x138
+
 /* The view only starts following the unit once the unit is more than 120
    pixels below the top of the view: above that it is still comfortably inside
    the window and the map stays put. */
 #define VIEW_SCROLL_TRIGGER_Y 0x78
+
+/* Walking right, the view follows only while the unit's starting column is
+   more than 240 pixels right of the left edge of the view: any nearer and the
+   unit is still comfortably inside the 312-pixel window and the map stays
+   put. */
+#define VIEW_SCROLL_TRIGGER_X 0xf0
 
 /* Walking up, the view follows only while the unit's starting row is less than
    two tiles below the top of the view; once it sits further down than that the
@@ -300,6 +316,99 @@ void fdps_animate_move_step_left(int unit_index)
     }
 
     unit->pos_x--;
+    unit->walk_step = 0;
+    fdps_map_set_pending_tile_event(
+        data_fdps_map_cursor_world_x / SCENE_TILE_SIZE,
+        data_fdps_map_cursor_world_y / SCENE_TILE_SIZE,
+        TILE_EVENT_ON_ARRIVAL);
+}
+
+/* 0002d6a0.  One tile right across the screen.
+
+   This is the DOWNWARD step turned through ninety degrees, not the leftward
+   one: it is the pair of directions that walk towards the far edge of the map
+   that need the map's own extent to stop the view, and this direction reads
+   the terrain header for it exactly as the downward step does.  What changes
+   from the downward step is the axis -- the tile COLUMN at record+0, the view
+   origin data_fdps_battle_view_window_origin_x, the cursor column
+   data_fdps_map_cursor_world_x and the terrain header's WIDTH at +7 rather
+   than its height at +9 -- and the facing code.  Four things are behaviour
+   rather than style.
+
+   THE TWO PIXEL MEASUREMENTS ARE TAKEN ONCE, BEFORE THE LOOP.  The map's pixel
+   width lands in [EBP-4] at 0002d6c7 and the unit's starting pixel column in
+   [EBP-0xc] at 0002d6d7, and neither slot is written again.  The scroll test
+   inside the loop therefore compares a FIXED starting column against a view
+   origin that moves under it, and the gap closes by four pixels a pass until
+   the test stops firing.  Recomputing the unit's drawn column each pass --
+   which is what reaching for unit->pos_x inside the loop would do -- keeps the
+   gap constant instead and scrolls a different number of times.
+
+   BOTH SCROLL TESTS ARE SIGNED AND BOTH ARE STRICT.  The assembly spells them
+   CMP EDX,0xf0 / JLE at 0002d70d and CMP EAX,[0x00069ce4] / JG at 0002d71d, so
+   a gap of exactly 240 does not scroll and a view origin already sitting
+   exactly on the right-hand limit does not move.  All three values are signed:
+   a view origin left of the map origin has to stay negative rather than
+   becoming a huge unsigned number that passes every test, and the map width is
+   MOVSX so a header word of 0xffff is -1 tiles and not 65535.
+
+   THE COLUMN WIDENS UNSIGNED.  MOV AL,byte ptr [EAX] then AND EAX,0xff at
+   0002d6cd..0002d6cf: the tile column is a plain byte and column 200 is pixel
+   4800, not -1344.
+
+   THE ARRIVAL TILE COMES FROM THE MAP CURSOR, NOT FROM THE RECORD.  The two
+   IDIVs at 0002d797 and 0002d7ad divide data_fdps_map_cursor_world_x and
+   data_fdps_map_cursor_world_y by 24 after the loop has moved the cursor; the
+   record's pos_y and the pos_x the INC at 0002d779 has just made current are
+   not read.  The two agree only while the view is locked onto the moving unit.
+   Both divisions are signed (SAR EDX,0x1f ahead of each IDIV).
+
+   As in the other three directions the in-loop scancode test calls
+   fdps_keyboard_scancode_ptr twice -- 0002d735 and 0002d746 -- because the
+   second comparison re-fetches the pointer, and the tail test at 0002d760
+   draws the catch-up frame on scancode 2 only while the in-loop suppression
+   covers 2 and 3 alike. */
+void fdps_animate_move_step_right(int unit_index)
+{
+    /* The moving unit's record inside the map unit array. */
+    struct fdps_unit_record *unit;
+    /* The whole map's width in pixels, from the terrain layer's header. */
+    int map_width_px;
+    /* Where the unit's column sat, in pixels, before the step began. */
+    int start_pixel_x;
+    /* The animation sub-step being played, 1..6. */
+    int walk_step;
+
+    unit = (struct fdps_unit_record *) data_fdps_map_unit_array_ptr
+           + unit_index;
+    map_width_px = (int) *(short *) (data_fdps_scene_layer_tile_map_ptrs[0]
+                                     + SCENE_TILE_MAP_WIDTH_AT)
+                   * SCENE_TILE_SIZE;
+    start_pixel_x = unit->pos_x * SCENE_TILE_SIZE;
+    unit->facing = MAP_UNIT_FACING_RIGHT;
+
+    for (walk_step = 1; walk_step <= WALK_SUB_STEPS; walk_step++) {
+        unit->walk_step = (unsigned char) walk_step;
+
+        if (start_pixel_x - data_fdps_battle_view_window_origin_x
+                > VIEW_SCROLL_TRIGGER_X
+            && data_fdps_battle_view_window_origin_x
+                < map_width_px - MAP_VIEW_WIDTH) {
+            data_fdps_battle_view_window_origin_x += WALK_STEP_PIXELS;
+        }
+        data_fdps_map_cursor_world_x += WALK_STEP_PIXELS;
+
+        if (*fdps_keyboard_scancode_ptr() != SCANCODE_FAST_FORWARD
+            && *fdps_keyboard_scancode_ptr() != SCANCODE_SKIP_ANIMATION) {
+            fdps_render_view_frame();
+        }
+    }
+
+    if (*fdps_keyboard_scancode_ptr() == SCANCODE_FAST_FORWARD) {
+        fdps_render_view_frame();
+    }
+
+    unit->pos_x++;
     unit->walk_step = 0;
     fdps_map_set_pending_tile_event(
         data_fdps_map_cursor_world_x / SCENE_TILE_SIZE,

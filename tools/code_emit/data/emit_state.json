@@ -2518,6 +2518,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x105"
+    },
+    "0002d6a0": {
+      "name": "fdps_animate_move_step_right",
+      "target": "walk.c",
+      "body_size": "0x11f",
+      "status": "committed",
+      "emitted_against": "0x11f",
+      "rounds": 0
     }
   }
 }
