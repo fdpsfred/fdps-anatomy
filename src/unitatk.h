@@ -1,5 +1,6 @@
-/* unitatk.h -- the on-map physical attack: a whole weapon swing, the single
- * blow it is made of, and the state the blow leaves behind.
+/* unitatk.h -- what a unit does with its own turn on the battle map: the
+ * physical attack -- a whole weapon swing, the single blow it is made of, and
+ * the state the blow leaves behind -- and the rest.
  *
  * This is the map-side resolver, the one that runs while the battle map is on
  * screen and the attacker's sprite swings.  The full-screen animated exchange
@@ -100,5 +101,42 @@ extern int fdps_unit_attack_target(int attacker_unit_index,
 extern int fdps_unit_resolve_attack_hit(int attacker_unit_index,
                                         int target_unit_index);
 #pragma aux fdps_unit_resolve_attack_hit "*" parm caller [];
+
+/* Rests one battle-map unit -- a fifth of its maximum HP back, with a white
+   flash of the unit and REST.WAV -- and answers whether the unit was in a
+   state to rest at all.  1 says it rested; 0 says nothing was drawn, played or
+   changed.  Neither caller reads the answer: fdps_battle_action_menu passes the
+   unit whose turn it is, and fdps_map_actor_behavior_step passes the actor it
+   is stepping, as the last-resort branch of every behaviour mode in which the
+   actor found nothing else to do.
+
+   `unit_index` is a position in the current battle's unit array and is not
+   range checked -- it goes straight to fdps_get_unit_record (unit.h),
+   fdps_map_cursor_move_to_unit (mapcur.h) and fdps_blit_unit_sprite
+   (sprite.h), and none of those bounds it either.
+
+   Three conditions refuse the rest, in this order: current HP already equal to
+   maximum HP, a running poison timer, a running paralysis timer.  It is the
+   same three-part guard fdps_battle_advance_turn applies to the units it rests
+   at the turn boundary.  The HP test is an equality, so a unit somehow above
+   its maximum rests and is clamped back down rather than being refused.
+
+   THE FLASH IS LEFT STANDING.  The call hides the map cursor, brings the view
+   onto the unit, composes the map into a fresh 360 by 240 page, overpaints the
+   unit as a flat palette-index-0xff silhouette, presents that 312 by 192 window
+   to the mode 13h screen on a vertical retrace, plays the cue, holds for 40 ms
+   and frees the page -- and then returns with the silhouette still on screen.
+   Nothing here repaints the view, so the caller is what clears it and the 40 ms
+   is how long the frame is held rather than how long the flash lasts.
+   fdps_battle_advance_turn runs the same flash and does call
+   fdps_render_view_frame afterwards; adding that call here, which is the
+   obvious way to read the missing repaint, cuts the flash short.
+
+   The heal is applied after the flash: current HP plus maximum HP / 5, a signed
+   division that truncates toward zero, clamped down to the maximum and written
+   back as a word.  data_fdps_map_cursor_draw_mode (gamedata.h) is left holding
+   1 on the rested path and is not touched at all on the refused one. */
+extern int fdps_unit_rest(int unit_index);
+#pragma aux fdps_unit_rest "*" parm caller [];
 
 #endif

@@ -53,6 +53,7 @@
  */
 #include <stddef.h>
 #include <stdlib.h>
+#include <malloc.h>
 #include <string.h>
 #include <conio.h>
 #include <dos.h>
@@ -1487,6 +1488,474 @@ static void the_unfilled_remainder_is_the_empty_graphic(void)
              ATK_ART_GRAPHIC2);
 }
 
+/* ---- fdps_unit_rest, 000120d0 -------------------------------------------
+ *
+ * Every expected value in this section is read off the assembly at 000120d0:
+ * the MOVSX word loads at 000120f5 and 000120ff for the two HP figures, the
+ * CMP/JZ at 00012109 and the two CMP byte ptr [EAX+0x25]/[EAX+0x26],0x0 that
+ * make up the three-part guard, MOV EBX,0x5 with SAR EDX,0x1f / IDIV EBX at
+ * 000121e6 for the fifth, CMP EAX,[EBP-0xc] / JLE at 000121ff for the ceiling,
+ * MOV word ptr [EDX+0x40],AX for the write-back, and the two MOV dword ptr
+ * [0x00069cd0] immediates 0 and 1.  Where a flashed pixel lands comes from
+ * fdps_blit_unit_sprite's own placement, the same (tile_x * 24 + 24,
+ * tile_y * 24 + 18) tests/indicat.c reads off it, carried out through the
+ * presented window's offset.
+ *
+ * WHAT IS STAGED.  stage() above already publishes the unit array, the
+ * movement grid and the master palette, so this fixture adds only what the
+ * flash reaches for: a sprite cache, an empty sound pack and the view.
+ *
+ *   - The sprite cache is laid out the way tests/indicat.c lays its own out --
+ *     a table of 32-bit offsets at the base of the block and then one stream
+ *     per entry of 24 rows of a single 24-pixel fill, command 0x17
+ *     (resource_info/cel.md).  All 48 entries are identical, so which one the
+ *     walk phase picks cannot change what is drawn.
+ *   - The sound pack is 35 zero bytes, which is a container of no members, so
+ *     the REST.WAV lookup finds nothing and no voice is started.
+ *   - data_fdps_scene_layer_count, data_fdps_map_unit_count and the cursor
+ *     overlay mode are all 0 or a sentinel the compositor ignores, so
+ *     fdps_draw_scene_layers writes nothing into the page: the only paint in
+ *     the presented window is the flash's own.
+ *   - The cursor already stands on the resting unit's tile, so
+ *     fdps_map_cursor_move_to_unit's walk has a delta of zero and returns
+ *     without animating or scrolling the view.
+ *
+ * WHY THE PAGE IS SEEDED.  The scene page is malloc'd and nothing clears it,
+ * so a block of exactly its size is zeroed and freed just before each run;
+ * the call takes that same block back and the window's untouched bytes are a
+ * known 0 rather than the allocator's leftovers.  That is what lets the case
+ * below say the flash painted the sprite square AND nothing else.
+ *
+ * WHAT IS NOT REACHABLE FROM HERE.  That the silhouette is still standing when
+ * the caller gets control is the point of the function and cannot be asserted
+ * from inside a unit test -- nothing here can observe the absence of a repaint
+ * the function never makes.  It is a playtest contract, and unitatk.h carries
+ * it.
+ * ------------------------------------------------------------------ */
+
+/* The resting unit's place in the staged array, and a neighbour that must come
+   through untouched. */
+#define REST_UNIT 2
+#define REST_WITNESS 3
+
+/* Where the resting unit stands.  Tile (2,2) with the view at the map origin
+   puts its 24x24 sprite well inside the presented window and well away from
+   every edge. */
+#define REST_TILE_X 2
+#define REST_TILE_Y 2
+
+/* The adapter and the two modes each run moves between. */
+#define REST_VGA_BASE 0x000a0000
+#define REST_SCREEN_W 0x140
+#define REST_SCREEN_H 0xc8
+#define REST_SCREEN_BYTES (REST_SCREEN_W * REST_SCREEN_H)
+#define REST_MODE_TEXT 0x03
+#define REST_MODE_320X200X256 0x13
+
+/* The page and the window it is presented through: 312x192 taken from page
+   byte 0x21d8, which is page pixel (24,24), landing at screen pixel (4,4).  A
+   page column is therefore 20 lower on screen. */
+#define REST_SCENE_BYTES 0x15180
+#define REST_SCENE_BORDER 24
+#define REST_WINDOW_ROW 4
+#define REST_WINDOW_COL 4
+#define REST_WINDOW_W 0x138
+#define REST_WINDOW_H 0xc0
+#define REST_TO_SCREEN (REST_WINDOW_COL - REST_SCENE_BORDER)
+
+/* What every screen byte holds before a run, so an untouched byte is
+   distinguishable from a painted one. */
+#define REST_BORDER_FILL 0xa5
+
+/* The sprite cache: a table of 32-bit offsets measured from the block's own
+   base, then one stream per entry of 24 rows of one 24-pixel fill run. */
+#define REST_SPRITE_W 24
+#define REST_SPRITE_H 24
+#define REST_FILL_RUN_24 0x17
+#define REST_CACHE_ENTRIES 48
+#define REST_TABLE_BYTES (REST_CACHE_ENTRIES * 4)
+#define REST_STREAM_BYTES (REST_SPRITE_H * 2)
+#define REST_CACHE_BYTES \
+    (REST_TABLE_BYTES + REST_CACHE_ENTRIES * REST_STREAM_BYTES)
+
+/* What the cache's own art is, and what the recolour kernel must turn it into:
+   the flash's 0xff, from the 0xff00 the function parks at 000120dc. */
+#define REST_ART_PIXEL 0x20
+#define REST_FLASH_PIXEL 0xff
+
+/* Where that sprite lands on screen. */
+#define REST_SPRITE_ROW (REST_TILE_Y * 24 + 18 + REST_TO_SCREEN)
+#define REST_SPRITE_COL (REST_TILE_X * 24 + 24 + REST_TO_SCREEN)
+
+/* A cursor overlay mode neither of the function's two stores can produce, so
+   "left alone" is distinguishable from "written with 0".  It is also a mode
+   fdps_draw_map_cursor's dispatch chain does not name, so the compositor draws
+   no cursor into the page while it stands. */
+#define REST_MODE_SENTINEL 7
+#define REST_MODE_PLAIN 1
+
+/* One tile is 24 pixels of map. */
+#define REST_TILE_STEP 24
+
+/* A 35-byte VFS header of all zeroes is a container of no members. */
+#define REST_VFS_HEADER_BYTES 35
+
+static unsigned char rest_cache[REST_CACHE_BYTES];
+static unsigned char rest_sfx_pack[REST_VFS_HEADER_BYTES];
+static unsigned char *rest_screen;
+static int rest_blocks_before;
+static int rest_blocks_after;
+
+/* One little-endian 32-bit offset into the cache's table. */
+static void rest_cache_u32(int at, unsigned long value)
+{
+    rest_cache[at] = (unsigned char) (value & 0xff);
+    rest_cache[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    rest_cache[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    rest_cache[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+/* The duel fixture, plus everything the rest's flash reaches for. */
+static void rest_stage(void)
+{
+    int entry;
+    int stream_at;
+    int row;
+
+    stage();
+
+    memset(rest_cache, 0, sizeof(rest_cache));
+    for (entry = 0; entry < REST_CACHE_ENTRIES; entry++) {
+        stream_at = REST_TABLE_BYTES + entry * REST_STREAM_BYTES;
+        rest_cache_u32(entry * 4, (unsigned long) stream_at);
+        for (row = 0; row < REST_SPRITE_H; row++) {
+            rest_cache[stream_at + row * 2] = REST_FILL_RUN_24;
+            rest_cache[stream_at + row * 2 + 1] = REST_ART_PIXEL;
+        }
+    }
+    data_fdps_cel_sprite_cache_ptr = rest_cache;
+
+    memset(rest_sfx_pack, 0, sizeof(rest_sfx_pack));
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = rest_sfx_pack;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_unit_walk_anim_counter = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_world_x = REST_TILE_X * REST_TILE_STEP;
+    data_fdps_map_cursor_world_y = REST_TILE_Y * REST_TILE_STEP;
+    data_fdps_map_cursor_draw_mode = REST_MODE_SENTINEL;
+
+    unit(REST_UNIT)->pos_x = REST_TILE_X;
+    unit(REST_UNIT)->pos_y = REST_TILE_Y;
+    unit(REST_UNIT)->hp_current = 10;
+    unit(REST_UNIT)->hp_max = 30;
+    unit(REST_WITNESS)->hp_current = 77;
+    unit(REST_WITNESS)->hp_max = 99;
+}
+
+/* Put back what a freshly started program has, so a later unit does not
+   inherit this fixture's sheets. */
+static void rest_unstage(void)
+{
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = NULL;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    if (rest_screen != NULL) {
+        free(rest_screen);
+        rest_screen = NULL;
+    }
+}
+
+/* Used entries currently in the heap, so a case can say the scene page came
+   back. */
+static int rest_used_heap_blocks(void)
+{
+    struct _heapinfo entry;
+    int used;
+
+    used = 0;
+    entry._pentry = NULL;
+    while (_heapwalk(&entry) == _HEAPOK) {
+        if (entry._useflag == _USEDENTRY) {
+            used++;
+        }
+    }
+    return used;
+}
+
+/* Leave a zeroed block of exactly the scene's size at the head of the free
+   list. */
+static void rest_seed_scene(void)
+{
+    unsigned char *scene;
+
+    scene = (unsigned char *) malloc((size_t) REST_SCENE_BYTES);
+    if (scene != NULL) {
+        memset(scene, 0, (size_t) REST_SCENE_BYTES);
+        free(scene);
+    }
+}
+
+static int rest_pixel(int row, int col)
+{
+    if (rest_screen == NULL) {
+        return -1;
+    }
+    return (int) rest_screen[row * REST_SCREEN_W + col];
+}
+
+/* One whole rest, leaving the frame in rest_screen[]. */
+static int rest_run(void)
+{
+    int answer;
+
+    if (rest_screen == NULL) {
+        rest_screen = (unsigned char *) malloc((size_t) REST_SCREEN_BYTES);
+    }
+    CHECK_EQ(rest_screen != NULL, 1);
+    if (rest_screen == NULL) {
+        return 0;
+    }
+
+    rest_seed_scene();
+    rest_blocks_before = rest_used_heap_blocks();
+
+    atk_set_mode(REST_MODE_320X200X256);
+    memset((void *) REST_VGA_BASE, REST_BORDER_FILL,
+           (size_t) REST_SCREEN_BYTES);
+    answer = fdps_unit_rest(REST_UNIT);
+    memmove(rest_screen, (void *) REST_VGA_BASE, (size_t) REST_SCREEN_BYTES);
+    atk_set_mode(REST_MODE_TEXT);
+
+    rest_blocks_after = rest_used_heap_blocks();
+    return answer;
+}
+
+/* How many of the 576 bytes of the resting unit's sprite square are not
+   `pixel`. */
+static int rest_wrong_sprite_pixels(int pixel)
+{
+    int row;
+    int col;
+    int wrong;
+
+    wrong = 0;
+    for (row = 0; row < REST_SPRITE_H; row++) {
+        for (col = 0; col < REST_SPRITE_W; col++) {
+            if (rest_pixel(REST_SPRITE_ROW + row, REST_SPRITE_COL + col)
+                != pixel) {
+                wrong++;
+            }
+        }
+    }
+    return wrong;
+}
+
+/* How many of the whole screen's bytes are not `pixel`. */
+static int rest_wrong_screen_pixels(int pixel)
+{
+    int row;
+    int col;
+    int wrong;
+
+    wrong = 0;
+    for (row = 0; row < REST_SCREEN_H; row++) {
+        for (col = 0; col < REST_SCREEN_W; col++) {
+            if (rest_pixel(row, col) != pixel) {
+                wrong++;
+            }
+        }
+    }
+    return wrong;
+}
+
+/* The first of the three refusals: CMP EAX,[EBP-0xc] / JZ at 00012109 on the
+   two HP figures.  Nothing is drawn, nothing is healed and the cursor mode is
+   not touched, so the sentinel survives. */
+static void a_unit_at_full_hp_is_refused(void)
+{
+    rest_stage();
+    unit(REST_UNIT)->hp_current = 30;
+    unit(REST_UNIT)->hp_max = 30;
+
+    CHECK_EQ(rest_run(), 0);
+    CHECK_EQ(unit(REST_UNIT)->hp_current, 30);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, REST_MODE_SENTINEL);
+}
+
+/* The second refusal: CMP byte ptr [EAX+0x25],0x0, which is
+   status_timers[3]. */
+static void a_poisoned_unit_is_refused(void)
+{
+    rest_stage();
+    unit(REST_UNIT)->status_timers[POISON_SLOT] = 1;
+
+    CHECK_EQ(rest_run(), 0);
+    CHECK_EQ(unit(REST_UNIT)->hp_current, 10);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, REST_MODE_SENTINEL);
+}
+
+/* The third: CMP byte ptr [EAX+0x26],0x0, which is status_timers[4]. */
+static void a_paralysed_unit_is_refused(void)
+{
+    rest_stage();
+    unit(REST_UNIT)->status_timers[PARALYSIS_SLOT] = 1;
+
+    CHECK_EQ(rest_run(), 0);
+    CHECK_EQ(unit(REST_UNIT)->hp_current, 10);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, REST_MODE_SENTINEL);
+}
+
+/* A rest gives back maximum / 5: 30 / 5 is 6 on top of 10. */
+static void a_rest_recovers_a_fifth_of_the_maximum(void)
+{
+    rest_stage();
+
+    CHECK_EQ(rest_run(), 1);
+    CHECK_EQ(unit(REST_UNIT)->hp_current, 16);
+}
+
+/* The fifth is an integer division and the remainder is dropped: 14 / 5 is 2,
+   and a maximum of 4 gives nothing back at all -- which is still a rest, not a
+   refusal, because the HP and the maximum differ. */
+static void the_fifth_drops_the_remainder(void)
+{
+    rest_stage();
+    unit(REST_UNIT)->hp_max = 14;
+    CHECK_EQ(rest_run(), 1);
+    CHECK_EQ(unit(REST_UNIT)->hp_current, 12);
+
+    rest_stage();
+    unit(REST_UNIT)->hp_current = 3;
+    unit(REST_UNIT)->hp_max = 4;
+    CHECK_EQ(rest_run(), 1);
+    CHECK_EQ(unit(REST_UNIT)->hp_current, 3);
+}
+
+/* CMP EAX,[EBP-0xc] / JLE at 000121ff: 28 plus a fifth of 30 comes to 34 and
+   is put back to 30. */
+static void the_recovery_is_clamped_to_the_maximum(void)
+{
+    rest_stage();
+    unit(REST_UNIT)->hp_current = 28;
+
+    CHECK_EQ(rest_run(), 1);
+    CHECK_EQ(unit(REST_UNIT)->hp_current, 30);
+}
+
+/* The guard's first test is an equality and not a >=, so a unit carrying more
+   than its maximum is not refused: it rests, and the ceiling brings it down.
+   Reading the JZ as a "full or over" test would return 0 and leave the 40
+   standing. */
+static void a_unit_above_its_maximum_rests_and_is_clamped_down(void)
+{
+    rest_stage();
+    unit(REST_UNIT)->hp_current = 40;
+
+    CHECK_EQ(rest_run(), 1);
+    CHECK_EQ(unit(REST_UNIT)->hp_current, 30);
+}
+
+/* The ceiling test is JLE, the signed branch, and both HP words are widened
+   with MOVSX.  With a maximum of -7 the heal takes 3 to 2, and 2 is above -7
+   only on a signed compare; an unsigned one leaves the 2 standing. */
+static void the_ceiling_test_is_signed(void)
+{
+    rest_stage();
+    unit(REST_UNIT)->hp_current = 3;
+    unit(REST_UNIT)->hp_max = -7;
+
+    CHECK_EQ(rest_run(), 1);
+    CHECK_EQ(unit(REST_UNIT)->hp_current, -7);
+}
+
+/* SAR EDX,0x1f / IDIV EBX truncates toward zero, so -7 / 5 is -1 and not the
+   -2 a flooring division would give.  The clamp cannot reach this case: -101
+   is below the maximum, so what is written back is the sum itself. */
+static void the_fifth_truncates_toward_zero(void)
+{
+    rest_stage();
+    unit(REST_UNIT)->hp_current = -100;
+    unit(REST_UNIT)->hp_max = -7;
+
+    CHECK_EQ(rest_run(), 1);
+    CHECK_EQ(unit(REST_UNIT)->hp_current, -101);
+}
+
+/* MOV dword ptr [0x00069cd0],0x1 at 00012211 is the last thing the rested path
+   does to the overlay, so the cursor is back to its plain box when the call
+   returns. */
+static void the_cursor_overlay_is_put_back_to_plain(void)
+{
+    rest_stage();
+
+    CHECK_EQ(rest_run(), 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, REST_MODE_PLAIN);
+}
+
+/* Everything the function touches goes through the one record
+   fdps_get_unit_record resolved from the argument, so the neighbour is
+   untouched. */
+static void only_the_named_units_record_is_written(void)
+{
+    rest_stage();
+
+    CHECK_EQ(rest_run(), 1);
+    CHECK_EQ(unit(REST_WITNESS)->hp_current, 77);
+    CHECK_EQ(unit(REST_WITNESS)->hp_max, 99);
+}
+
+/* The unit is overpainted through blit mode 3 with an operand of 0xff00, which
+   the recolour kernel reads as tint offset 0, colour base 0xff and band mask 0
+   -- so every pixel of the 24x24 sprite comes out palette index 0xff and none
+   of them keeps the cache's own 0x20.  The bytes around it are the seeded 0
+   the page came back holding, and the four bands outside the presented window
+   still carry the fill. */
+static void the_unit_is_flashed_flat_white(void)
+{
+    rest_stage();
+
+    CHECK_EQ(rest_run(), 1);
+    CHECK_EQ(rest_wrong_sprite_pixels(REST_FLASH_PIXEL), 0);
+    CHECK_EQ(rest_pixel(REST_SPRITE_ROW, REST_SPRITE_COL - 2), 0);
+    CHECK_EQ(rest_pixel(REST_SPRITE_ROW + REST_SPRITE_H, REST_SPRITE_COL), 0);
+    CHECK_EQ(rest_pixel(REST_WINDOW_ROW - 1, REST_WINDOW_COL),
+             REST_BORDER_FILL);
+    CHECK_EQ(rest_pixel(REST_WINDOW_ROW, REST_WINDOW_COL - 1),
+             REST_BORDER_FILL);
+    CHECK_EQ(rest_pixel(REST_WINDOW_ROW + REST_WINDOW_H, REST_WINDOW_COL),
+             REST_BORDER_FILL);
+    CHECK_EQ(rest_pixel(REST_WINDOW_ROW, REST_WINDOW_COL + REST_WINDOW_W),
+             REST_BORDER_FILL);
+}
+
+/* A refused rest draws nothing at all: the guard jumps straight to the return
+   with no allocation, no composite and no present, so the screen comes back
+   exactly as the run left it. */
+static void a_refused_rest_draws_nothing(void)
+{
+    rest_stage();
+    unit(REST_UNIT)->status_timers[POISON_SLOT] = 1;
+
+    CHECK_EQ(rest_run(), 0);
+    CHECK_EQ(rest_wrong_screen_pixels(REST_BORDER_FILL), 0);
+}
+
+/* CALL free at 000121de: the page the flash was composed on is given back
+   before the heal, so a rest leaves the heap with the same number of used
+   entries it started with. */
+static void the_scene_page_is_given_back(void)
+{
+    rest_stage();
+
+    CHECK_EQ(rest_run(), 1);
+    CHECK_EQ(rest_blocks_after, rest_blocks_before);
+}
+
 void run_unitatk_tests(void)
 {
     capture_live_palette();
@@ -1535,6 +2004,22 @@ void run_unitatk_tests(void)
     RUN_TEST(the_pair_is_x_then_y);
     RUN_TEST(the_graphic_comes_from_the_targets_side_byte);
     RUN_TEST(the_unfilled_remainder_is_the_empty_graphic);
+
+    RUN_TEST(a_unit_at_full_hp_is_refused);
+    RUN_TEST(a_poisoned_unit_is_refused);
+    RUN_TEST(a_paralysed_unit_is_refused);
+    RUN_TEST(a_rest_recovers_a_fifth_of_the_maximum);
+    RUN_TEST(the_fifth_drops_the_remainder);
+    RUN_TEST(the_recovery_is_clamped_to_the_maximum);
+    RUN_TEST(a_unit_above_its_maximum_rests_and_is_clamped_down);
+    RUN_TEST(the_ceiling_test_is_signed);
+    RUN_TEST(the_fifth_truncates_toward_zero);
+    RUN_TEST(the_cursor_overlay_is_put_back_to_plain);
+    RUN_TEST(only_the_named_units_record_is_written);
+    RUN_TEST(the_unit_is_flashed_flat_white);
+    RUN_TEST(a_refused_rest_draws_nothing);
+    RUN_TEST(the_scene_page_is_given_back);
+    rest_unstage();
 
     /* Put the two staged pointers back, so nothing after this file reads a
        synthetic sheet or a synthetic container by accident, and give the

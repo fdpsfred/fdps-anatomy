@@ -2727,6 +2727,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x24f"
+    },
+    "000120d0": {
+      "name": "fdps_unit_rest",
+      "target": "unitatk.c",
+      "body_size": "0x15c",
+      "status": "committed",
+      "emitted_against": "0x15c",
+      "rounds": 0
     }
   }
 }

@@ -1,22 +1,26 @@
-/* unitatk.c -- the on-map physical attack: a unit's whole weapon swing at
- * another, and the single blow that swing is made of.
+/* unitatk.c -- what a unit does with its own turn on the battle map: the
+ * physical attack, and the rest.
  *
- * fdps_unit_attack_target is what the map calls.  It decides how many blows
- * the swing lands, plays each blow's animation, hands the numbers to the
- * resolver and drains the target's HP bar down to what the blow left.
- * fdps_unit_resolve_attack_hit is that resolver: one blow worked out from the
- * two units' records, the ground they stand on and the weapon's hit effect.
+ * fdps_unit_attack_target is what the map calls for the attack.  It decides
+ * how many blows the swing lands, plays each blow's animation, hands the
+ * numbers to the resolver and drains the target's HP bar down to what the blow
+ * left.  fdps_unit_resolve_attack_hit is that resolver: one blow worked out
+ * from the two units' records, the ground they stand on and the weapon's hit
+ * effect.  fdps_unit_rest is the other command a unit can spend its turn on:
+ * one white flash of the unit and a fifth of its maximum HP back.
  *
  * See unitatk.h for what a caller has to know.  The only state this file owns
  * is data_fdps_battle_last_hit_or_miss_flag; everything else it touches is
  * either one of the two unit records or a global gamedata.h declares.
  *
- * rand comes from <stdlib.h> and delay from <i86.h>, which is where Watcom
- * 10.0a declares it; both are real calls in the original -- CALL 00042cf8 and
- * CALL 0003d370 -- and not inline expansions.
+ * rand and malloc come from <stdlib.h>, delay from <i86.h> and inp from
+ * <conio.h>, which is where Watcom 10.0a declares each of them; all of them
+ * are real calls in the original -- CALL 00042cf8, CALL 0003d370, CALL
+ * 0003d375 and CALL 0003d4e4 -- and not inline expansions.
  */
 #include <stdlib.h>
 #include <i86.h>
+#include <conio.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "unit.h"
@@ -26,6 +30,11 @@
 #include "palette.h"
 #include "anim.h"
 #include "gauge.h"
+#include "mapcur.h"
+#include "mapdraw.h"
+#include "sprite.h"
+#include "blit.h"
+#include "audio.h"
 #include "unitatk.h"
 
 /* The weapon hit effects, read out of item record byte +9.  Both functions in
@@ -570,4 +579,166 @@ int fdps_unit_resolve_attack_hit(int attacker_unit_index,
     }
 
     return current_hp;
+}
+
+/* ---- fdps_unit_rest, 000120d0 ------------------------------------------ */
+
+/* The two map cursor overlay modes the rest moves between: 0 is the value
+   fdps_draw_map_cursor's dispatch chain does not name, so no cursor is drawn
+   at all, and 1 is the plain box the map sits at otherwise (gamedata.h). */
+#define MAP_CURSOR_HIDDEN 0
+#define MAP_CURSOR_PLAIN 1
+
+/* The page the flash frame is composed on: a whole 360 by 240 8bpp surface at
+   a 360-byte pitch, the 0x15180 pushed to malloc at 00012144 and the 0x168
+   pushed as the source stride at 000121ac.  It is the surface
+   fdps_draw_scene_layers and fdps_blit_unit_sprite both hardwire. */
+#define REST_SCENE_BYTES 0x15180
+#define REST_SCENE_PITCH 0x168
+
+/* What is presented and where: 312 by 192 taken from scene byte 0x21d8, which
+   is scene pixel (24,24), and landing at screen byte 0x504, which is screen
+   pixel (4,4) of the mode 13h page -- the ADD EAX,0x21d8 at 000121b4 and the
+   four immediates pushed at 00012198 through 000121a7.  VGA_SCREEN_BASE above
+   stays a literal for the reason given there: it is where the adapter
+   answers, not the address of anything the linker places. */
+#define REST_SCENE_WINDOW_AT 0x21d8
+#define REST_SCREEN_WINDOW_AT 0x504
+#define REST_VIEW_WIDTH 0x138
+#define REST_VIEW_ROWS 0xc0
+
+/* VGA input status register 1.  Bit 3 is set while the vertical retrace is in
+   progress, which is what the single present straddles. */
+#define VGA_INPUT_STATUS_1 0x3da
+#define VGA_STATUS_VERTICAL_RETRACE 0x08
+
+/* fdps_blit_unit_sprite's kernel selector and its mode operand.  Mode 3 is the
+   recolour kernel, which reads the operand as tint offset in the low byte,
+   colour base in byte 1 and band mask in byte 2; 0xff00 is therefore offset 0,
+   base 0xff and mask 0, and a zero mask collapses every pixel of the sprite to
+   that one palette index (rlecolor.h).  The unit shows as a flat white
+   silhouette. */
+#define REST_FLASH_BLIT_MODE 3
+#define REST_FLASH_RECOLOR 0xff00
+
+/* The cue the rest plays, MOV EAX,0x61568 / CALL fdps_play_sfx at 000121c2.
+   It has to be a plain writable literal: the lookup inside fdps_play_sfx
+   upper-cases the caller's own storage in place (vfs.h,
+   rebuild_info/pitfalls.md), and the original's copy at 0x61568 is already in
+   that case. */
+#define REST_SOUND "REST.WAV"
+
+/* PUSH 0x28 / CALL delay at 000121d0: how long the presented frame is held
+   before the page is given back. */
+#define REST_HOLD_MS 0x28
+
+/* MOV EBX,0x5 / IDIV EBX at 000121e6: the rest gives back a fifth of the
+   maximum.  The game's own instructions quote the same 20 percent. */
+#define REST_FRACTION_DIVISOR 5
+
+/* 000120d0.  The frame is the plain -4s one: PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP, SUB ESP,0x18, the one argument read from [EBP+0x14], RET with no
+   immediate, and every one of the fourteen call sites -- thirteen in
+   fdps_map_actor_behavior_step and one at 000160a5 in
+   fdps_battle_action_menu -- pushing one dword and doing ADD ESP,0x4
+   afterwards.
+
+   THE GUARD IS THREE TESTS AND THE FIRST IS AN EQUALITY.  CMP EAX,[EBP-0xc] /
+   JZ at 00012109, on the two HP figures, and then CMP byte ptr [EAX+0x25],0x0
+   and CMP byte ptr [EAX+0x26],0x0 on the two status timers.  The HP test is
+   `==` and not `>=`: a unit somehow carrying more HP than its maximum is not
+   refused here, it rests and is clamped back down at the end.
+
+   BOTH HP FIGURES ARE READ SIGNED AND COMPARED SIGNED.  MOVSX at 000120f5 and
+   000120ff widens the two words, and the ceiling test at 000121ff is JLE, the
+   signed branch; the fifth is an IDIV with a CDQ-equivalent SAR EDX,0x1f in
+   front of it, so it truncates toward zero rather than down
+   (rebuild_info/pitfalls.md, contract C).
+
+   NOTHING REPAINTS THE VIEW AFTER THE FLASH.  The sequence ends at free() with
+   the white silhouette still standing on screen, and it is the caller that
+   clears it; the delay is what the frame is held for, not what the flash lasts.
+   fdps_battle_advance_turn runs the same flash and does call
+   fdps_render_view_frame afterwards, so copying that shape here, or adding the
+   repaint that looks missing, cuts the flash short (unitatk.h).
+
+   THE INDEX IS NOT CHECKED AND NEITHER IS THE ALLOCATION.  unit_index goes
+   straight to fdps_get_unit_record, fdps_map_cursor_move_to_unit and
+   fdps_blit_unit_sprite, none of which bounds it, and malloc's answer is
+   composed into without being tested.
+
+   TWO CALLS' ANSWERS ARE READ.  fdps_get_unit_record's pointer at 000120e7 is
+   the record every field comes off and is the record the healed HP is written
+   back into, and inp's byte at 0001217b and 0001218c is the retrace bit each
+   spin tests.  malloc's block at 00012149 is the scene page.  The remaining
+   calls -- fdps_map_cursor_move_to_unit, fdps_draw_scene_layers,
+   fdps_blit_unit_sprite, fdps_blit_rect, fdps_play_sfx, delay and free --
+   return nothing the original reads. */
+int fdps_unit_rest(int unit_index)
+{
+    /* The record the whole function works on, resolved once and held to the
+       end -- nothing in the body moves the unit array. */
+    struct fdps_unit_record *unit;
+    /* The 360 by 240 page the flash frame is composed on, allocated and freed
+       inside the call. */
+    unsigned char *scene;
+    /* The unit's HP as the call found it, and after the heal the figure that
+       is written back into the record. */
+    int current_hp;
+    /* Its maximum: the figure the fifth is taken of, and the ceiling the heal
+       is clamped to. */
+    int hp_max;
+    /* Whether the unit was in a state to rest, which is what the function
+       returns.  Neither caller reads it. */
+    int rested;
+    /* fdps_blit_unit_sprite's mode operand.  The original parks it in a stack
+       slot on entry -- MOV dword ptr [EBP-0x8],0xff00 at 000120dc, above the
+       guard and so on the refused path too -- rather than pushing the literal
+       at the call site. */
+    unsigned int flash_recolor = REST_FLASH_RECOLOR;
+
+    unit = fdps_get_unit_record(unit_index);
+    current_hp = (int) unit->hp_current;
+    hp_max = (int) unit->hp_max;
+
+    if (current_hp == hp_max
+        || unit->status_timers[POISON_TIMER_SLOT] != 0
+        || unit->status_timers[PARALYSIS_TIMER_SLOT] != 0) {
+        rested = 0;
+    } else {
+        data_fdps_map_cursor_draw_mode = MAP_CURSOR_HIDDEN;
+        fdps_map_cursor_move_to_unit(unit_index);
+
+        scene = (unsigned char *) malloc((size_t) REST_SCENE_BYTES);
+        fdps_draw_scene_layers(scene);
+        fdps_blit_unit_sprite(scene, unit_index, flash_recolor,
+                              REST_FLASH_BLIT_MODE);
+
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins, so the frame that has just been
+               composed is the one the monitor shows whole. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends, so the present starts clear of it. */
+        }
+        fdps_blit_rect((unsigned int) (scene + REST_SCENE_WINDOW_AT),
+                       REST_SCENE_PITCH,
+                       (void *) (VGA_SCREEN_BASE + REST_SCREEN_WINDOW_AT),
+                       VGA_SCREEN_PITCH, REST_VIEW_WIDTH, REST_VIEW_ROWS);
+
+        fdps_play_sfx(REST_SOUND);
+        delay(REST_HOLD_MS);
+        free(scene);
+
+        current_hp += hp_max / REST_FRACTION_DIVISOR;
+        if (current_hp > hp_max) {
+            current_hp = hp_max;
+        }
+        unit->hp_current = (short) current_hp;
+
+        data_fdps_map_cursor_draw_mode = MAP_CURSOR_PLAIN;
+        rested = 1;
+    }
+
+    return rested;
 }

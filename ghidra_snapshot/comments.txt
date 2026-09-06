@@ -358,14 +358,14 @@ Rests one battle-map unit: recovers a fifth of its maximum HP with the white res
 Algorithm:
 Resolves the record with fdps_get_unit_record(unit_index) and refuses the rest, returning 0 without touching anything, when current HP (signed word +0x40) already equals maximum HP (signed word +0x42), or when the poison timer at +0x25 or the paralysis timer at +0x26 is running -- the same three-part guard fdps_battle_advance_turn applies to the units it rests at the turn boundary.
 Otherwise it plays the rest and then applies it:
-  - Sets the map-cursor overlay mode DAT_00069cd0 to 0, the value at which fdps_draw_map_cursor draws no cursor, and brings the view onto the unit with fdps_map_cursor_move_to_unit.
+  - Sets the map-cursor overlay mode data_fdps_map_cursor_draw_mode to 0, the value at which fdps_draw_map_cursor draws no cursor, and brings the view onto the unit with fdps_map_cursor_move_to_unit.
   - Allocates a 0x15180-byte (360x240) scene buffer with malloc, composites the map into it with fdps_draw_scene_layers, then overpaints the resting unit with fdps_blit_unit_sprite(buf, unit_index, 0xff00, 3): blit mode 3 is fdps_blit_rle_recolor and the parameter 0xff00 forces every pixel to palette index 0xff, so the unit shows as a flat white silhouette.
   - Waits out a whole VGA vertical retrace on port 0x3da bit 3 through inp -- spinning first until the bit is set, then until it clears -- and presents the frame with fdps_blit_rect(buf + 0x21d8, 0x168, 0xa0504, 0x140, 0x138, 0xc0): the 312x192 map viewport, from (24,24) of the 360-byte-wide buffer to (4,4) of the mode 13h screen at 0xa0000.
   - Plays REST.WAV through fdps_play_sfx, waits delay(0x28), and frees the buffer.
-Then the heal: current HP += maximum HP / 5, a signed IDIV so the fifth is rounded toward zero, clamped down to maximum HP and written back to +0x40 as a word. The 20% figure is the one the game's own instructions quote for resting. Finally DAT_00069cd0 is set to 1, putting the plain map cursor back, and the result is 1.
+Then the heal: current HP += maximum HP / 5, a signed IDIV so the fifth is rounded toward zero, clamped down to maximum HP and written back to +0x40 as a word. The 20% figure is the one the game's own instructions quote for resting. Finally data_fdps_map_cursor_draw_mode is set to 1, putting the plain map cursor back, and the result is 1.
 
 Parameters:
-  unit_index -- index into the 0x50-byte unit record array based at DAT_00069cd8; handed straight to fdps_get_unit_record, fdps_map_cursor_move_to_unit and fdps_blit_unit_sprite, and range-checked by none of them. fdps_battle_action_menu passes the unit whose turn it is, from the menu's last command and only when its own fourth argument is 0; fdps_map_actor_behavior_step passes the actor it is stepping, as the last-resort branch of every behaviour mode in which the actor found nothing else to do.
+  unit_index -- index into the 0x50-byte unit record array based at data_fdps_map_unit_array_ptr; handed straight to fdps_get_unit_record, fdps_map_cursor_move_to_unit and fdps_blit_unit_sprite, and range-checked by none of them. fdps_battle_action_menu passes the unit whose turn it is, from the menu's last command and only when its own fourth argument is 0; fdps_map_actor_behavior_step passes the actor it is stepping, as the last-resort branch of every behaviour mode in which the actor found nothing else to do.
 
 Returns:
   1 -- the unit rested: the flash and sound played and its HP has been raised.
