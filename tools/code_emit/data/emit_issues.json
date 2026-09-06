@@ -1974,5 +1974,33 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "0002e160": [
+    {
+      "from": "emit",
+      "what": "Nothing pins the tile pointer table the call builds at 0002e266-0002e2d1: that fdps_map_load_tile_info is called once per tile in tile_y-then-tile_x order over the map's own width and height, that the entry goes to index tile_y * 0x40 + tile_x with a row pitch of 0x40 rather than the map's width, and that the entry is tile_sheet + 6 + data_fdps_map_tile_info_tile_id * 0x240. The table is allocated and freed inside the call, so its only channel to a test is what fdps_render_map_overview_scaled draws through it, and that needs both a tile sheet behind data_fdps_scene_layer_tile_sheet_ptrs[0] and the three further layer globals fdps_map_load_tile_info reads (data_fdps_scene_layer_tile_attr_ptr, data_fdps_battle_move_grid_ptr, data_fdps_map_cell_event_code_layer_ptr). All four are null until ticket 23, so the emitted test staged a sheet naming no sprites and kept one of the map's two dimensions at 0, which makes the render draw nothing and the presented frame all zeroes. The arithmetic itself was read off the assembly and the emitted OVERVIEW.OBJ disassembles to the same SHL EAX,0x6 / ADD / LEA [EAX*4] and IMUL ...,0x240 sequences as the original.",
+      "needs": "Ticket 23's contents for those four globals, or a fixture built from the shipped chapter resources that supplies them. Then a case with both map dimensions non-zero can assert that a named tile's 24x24 pixels appear at the expected place in the presented frame, and that a tile one row down comes from the entry 0x40 further along rather than map_width further along.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "Nothing pins what the fly-in and the fly-out actually present: the seven passes at zoom_step 1..7 and the six at 6..1, the centre interpolated as view_centre + (zoom_step + 1) * (map_centre - view_centre) / 8 -- which lands exactly on the map's centre at step 7 and stops two eighths short of the camera's at the end of the fly-out -- and the render step of zoom_span * zoom_step / 7 + 0x80. Same root cause as the entry above: with the tile sheet and the layer globals unwritten the render's output is not determined, so every presented frame in the emitted test is all zeroes and carries no information about which centre or which step produced it. The arithmetic was read off the assembly and verified instruction for instruction against the emitted object, including the SAR 0x1f / SHL 0x3 / SBB / SAR 0x3 divide-by-8 and the IDIV-by-7.",
+      "needs": "The same fixture as the entry above. With a real sheet and a real map, a case can capture the frame the last fly-in pass presents -- which is the one still on the screen when the hold begins, so it is reachable from the same interrupt-driven capture the marker cases already use -- and assert that the map covers exactly map_width * 4 by map_height * 4 pixels centred on (160, 100), which is what step 7 with a render step of 0x300 comes to.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed independently that the tile-table build at 0002e266-0002e2d1 is unreachable by any assertion today, and confirmed why: with one map dimension staged at 0 the double loop runs zero iterations, so fdps_map_load_tile_info is never called in any of the three cases and the table is handed to the render still holding malloc's contents. I add two things the emitter did not say. First, the reason the arrangement is safe rather than merely untested: with map_height 0 the render's `tile_y >= 0 && tile_y < map_height` guard rejects every row so no entry is fetched at all, and with map_width 0 an entry IS fetched -- including at a negative index for the row whose tile_x starts left of the map -- but is only ever added to, never dereferenced, because the render guards the pixel copy alone. Second, the closure: fdps_game_files/ is not in the repo, so the fixture this needs cannot come from the shipped resources and really does wait on ticket 23.",
+      "needs": "Ticket 23's contents for data_fdps_scene_layer_tile_sheet_ptrs[0], data_fdps_scene_layer_tile_attr_ptr, data_fdps_battle_move_grid_ptr and data_fdps_map_cell_event_code_layer_ptr.",
+      "status": "open",
+      "same_as": "emit#0"
+    },
+    {
+      "from": "review",
+      "what": "Same root cause and same conclusion for the fly-in and fly-out: with the render's output undetermined, every presented frame is zeroes and carries nothing about which centre or which step produced it. What my pass adds is the arithmetic checked a second way -- I read the interpolation as view_centre + (step + 1) * (map_centre - view_centre) / 8 off the SAR 0x1f / SHL 0x3 / SBB / SAR 0x3 at 0002e317-0002e324 and 0002e335-0002e342, and the step as span * zoom_step / 7 + 0x80 off the IDIV at 0002e302, and then confirmed both sequences survive into OVERVIEW.OBJ. So the gap is coverage, not doubt about what the code computes.",
+      "needs": "The same ticket 23 globals as the entry above.",
+      "status": "open",
+      "same_as": "emit#1"
+    }
   ]
 }

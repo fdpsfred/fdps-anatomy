@@ -13,6 +13,32 @@
 #ifndef OVERVIEW_H
 #define OVERVIEW_H
 
+/* Opens the overview screen and does not come back until the player closes it.
+
+   Takes nothing and answers nothing: the map comes from the loaded terrain
+   layer, the camera from the battle view origin, the markers from the map unit
+   array and the cursor from the map cursor position, all of them globals.
+
+   Three things happen in order.  The whole map is flown into view over seven
+   render passes, each one presented to the visible screen; then the screen is
+   held while the player looks at it, with a marker painted for every unit that
+   is still on the field and one more for the cursor, all of them pulsing
+   together; then the map is flown back out over six passes.  The hold ends on
+   the first scancode below 0x80 -- a make code -- so a key being released does
+   not close the screen and an empty keyboard queue does not either.
+
+   THE MARKERS ARE PAINTED ONTO THE VISIBLE SCREEN, NOT INTO A PAGE.  They go
+   through fdps_fill_screen_square, which addresses 0xa0000 itself, over the
+   frame the last fly-in pass presented; nothing repaints the background
+   between marker passes, so the markers accumulate and the fly-out is what
+   clears them.
+
+   The off-screen page, the tile pointer table and the expanded tile sheet are
+   all taken and given back inside the call, so it owns no memory on either
+   side of it. */
+extern void fdps_battle_map_overview(void);
+#pragma aux fdps_battle_map_overview "*" parm caller [];
+
 /* Renders the battle map into dest, scaled, and clears everything the map
    does not cover.
 

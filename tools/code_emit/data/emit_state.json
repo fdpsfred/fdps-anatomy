@@ -2767,6 +2767,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0xce"
+    },
+    "0002e160": {
+      "name": "fdps_battle_map_overview",
+      "target": "overview.c",
+      "body_size": "0x476",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x476"
     }
   }
 }
