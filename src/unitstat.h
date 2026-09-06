@@ -5,13 +5,18 @@
  * Every unit here is named by its index in the map unit array reached through
  * data_fdps_map_unit_array_ptr (src/gamedata.h); the record layout is struct
  * fdps_unit_record in src/fdpstype.h.  No function in this file range checks
- * that index and none of them owns state -- the two globals they write,
- * data_fdps_battle_pending_xp_credit and the figure scratch
- * data_fdps_dialog_last_action_value_param, are both declared by gamedata.h.
+ * that index and none of them owns state -- every global they write,
+ * data_fdps_battle_pending_xp_credit, the figure scratch
+ * data_fdps_dialog_last_action_value_param and the cursor mode
+ * data_fdps_map_cursor_draw_mode, is declared by gamedata.h.
  *
  * fdps_level_up_apply_stat_gain is the exception to the index rule: it is
  * handed the field and the growth pair directly, because its caller has
  * already resolved both.
+ *
+ * fdps_unit_award_exp_and_level_up is the exception to everything else here
+ * being arithmetic: it is the one blocking, frame-paced routine in the file,
+ * and it is where a unit's level actually goes up.
  */
 #ifndef UNITSTAT_H
 #define UNITSTAT_H
@@ -336,5 +341,44 @@ extern void fdps_level_up_apply_stat_gain(short *stat,
                                           unsigned char *growth_pair,
                                           unsigned char *dst);
 #pragma aux fdps_level_up_apply_stat_gain "*" parm caller [];
+
+/* Pays the pending battle experience in data_fdps_battle_pending_xp_credit to
+   one unit, floats the figure up over that unit on the map, and levels the unit
+   behind the full-screen level-up window when the running total reaches 100.
+   This is the only place in the game a unit's level goes up.
+
+   THREE ENTRY GATES RETURN WITHOUT CLEARING THE ACCUMULATOR.  Nothing is paid
+   and nothing is cleared when the accumulator is 0, when fdps_unit_is_retired
+   reports the unit has left the battle, or when the unit already sits at its
+   level cap -- 99 for portrait id 9 (the machine soldier 蓋亞) and 40 for every
+   other id.  Only a call that runs to the end clears the accumulator, so
+   experience credited to a retired or capped unit stays in it and is handed to
+   whichever unit is awarded next.  That carry-over is the original's behaviour
+   (rebuild_info/pitfalls.md).
+
+   THE AWARD IS CLAMPED TO 99 BEFORE IT IS PAID.  An accumulator above 99 is
+   written back down to 99 first, so a single award can never move a unit more
+   than one level, and the surplus is discarded rather than carried.
+
+   THE LEFTOVER IS A BYTE.  The running total is the clamped award plus the
+   leftover the record already carried at exp_carry, and what is left after a
+   level-up is stored back into that same byte field.
+
+   WHICHEVER UNIT INDEX IS HANDED IN IS THE ONE THAT COLLECTS.  Nothing in the
+   body tests the unit's side, so an enemy index pays an enemy.
+
+   THE CURSOR MODE IS NOT RESTORED, IT IS SET.  The animation runs with
+   data_fdps_map_cursor_draw_mode at 0 so fdps_draw_map_cursor paints nothing
+   over it, and the routine leaves it at 1 -- the plain cursor -- whatever it
+   held on entry.  The cursor itself is parked on the awarded unit on the way
+   in and stays there.
+
+   The routine is frame-paced and blocking: fifteen float frames and then, on a
+   level-up, up to 250 window frames, each one straddling a vertical retrace and
+   waiting for data_fdps_timer_tick_counter to move.  The window frames end
+   early on the first make code out of fdps_read_keyboard_queue, and the routine
+   does not return until Levup.wav has finished playing. */
+extern void fdps_unit_award_exp_and_level_up(int unit_index);
+#pragma aux fdps_unit_award_exp_and_level_up "*" parm caller [];
 
 #endif

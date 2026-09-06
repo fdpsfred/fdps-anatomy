@@ -50,6 +50,9 @@
  */
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -2688,6 +2691,615 @@ static void the_staged_sheet_is_put_back(void)
     CHECK_EQ(data_fdps_number_glyph_sheet_ptr == (unsigned char *) 0, 1);
     CHECK_EQ(data_fdps_number_glyph_color_row, 0);
 }
+/* ------------------------------------------------------------------
+ * fdps_unit_award_exp_and_level_up @ 0001dd30
+ *
+ * Expected values come from the assembly -- CMP dword ptr [0x00069cec],0x0 /
+ * JZ at 0001dd61 and CALL 0x000109b0 / TEST EAX,EAX / JZ at 0001dd6e for the
+ * first two gates; CMP dword ptr [EBP-0x20],0x9 / CMP dword ptr
+ * [EBP-0x24],0x63 / CMP dword ptr [EBP-0x24],0x28 at 0001dd7f for the third;
+ * MOV dword ptr [0x00069cd0],0x0 at 0001dd9b and MOV dword ptr
+ * [0x00069cd0],0x1 at 0001e353 for the two cursor modes; CMP dword ptr
+ * [0x00069cec],0x63 / JLE / MOV ...,0x63 at 0001ddb1 for the clamp; MOV AL,byte
+ * ptr [EAX+0x3c] / AND EAX,0xff / ADD EDX,EAX at 0001dded for the running
+ * total; IMUL EAX,EAX,0x18 / SUB EAX,[0x00069ce4] / ADD EAX,0x18 at 0001de00
+ * and the same with [0x00069ce0] / ADD EAX,0x20 at 0001de19 for where the
+ * label sits; MOV dword ptr [EBP-0x8],0x6 / CMP ...,0x24 / ADD ...,0x2 at
+ * 0001de90 and CMP dword ptr [EBP-0x4],0x18 / JLE at 0001deae for the rise
+ * ramp; PUSH 0x8 / PUSH 0x28 at 0001def7 for the label's extent; CMP dword ptr
+ * [EBP-0x10],0x64 / JL at 0001dfb9 for the level's price; and MOV AL,byte ptr
+ * [EBP-0x10] / MOV byte ptr [EDX+0x3c],AL / MOV dword ptr [0x00069cec],0x0 at
+ * 0001e340 for what is left behind.  None of them is read off the emitted C.
+ *
+ * WHAT IS NOT COVERED, AND WHY.  The level-up half -- everything behind
+ * CMP dword ptr [EBP-0x10],0x64 at 0001dfb9 -- loads Levup.wav and hands the
+ * sample slot fdps_audio_start_wav answers with straight back to
+ * fdps_audio_sample_is_playing in a spin.  With no AIL driver initialised
+ * fdps_audio_start_wav refuses and answers -1, and the spin then asks the
+ * vendor library for the status of a handle one entry before the table.  No
+ * assertion can reach that path without a running sound driver, so every case
+ * here keeps the running total under 100 and the cases that would otherwise
+ * level a unit instead prove that the gate LET THE UNIT THROUGH, by the
+ * accumulator having been cleared.  The stat rolls, the spell learning and the
+ * window layout behind that gate are unreached here; fdps_level_up_apply_stat_gain,
+ * which does the rolling, is covered above.
+ *
+ * HOW THE RUN IS WATCHED.  The routine composes each frame on a page it
+ * allocates and frees itself and blits that page's 312x192 window over the live
+ * mode 13h screen, so the adapter is the only place the floating label can be
+ * read back from.  Each animated case sets mode 13h, fills the frame with a
+ * sentinel, seeds the heap, runs a real timer interrupt so the frame waits end,
+ * calls, snapshots the 64,000 bytes and returns to text mode -- the same way
+ * tests/death.c watches fdps_play_death_animation_and_mark_dead.
+ *
+ * WHY A TIMER INTERRUPT IS INSTALLED.  Every one of the fifteen float frames
+ * ends by spinning until data_fdps_timer_tick_counter moves.  Nothing advances
+ * that counter in a test image, so the second frame would never end.  Each run
+ * hooks IRQ0 for the duration of the call with a handler that increments the
+ * counter and chains to the one that was there.
+ *
+ * WHY THE BLEND PAINTS ONE COLOUR.  fdps_blit_blend_transparent_rect ends every
+ * pixel it touches as inverse_palette_cube[index], and the index it forms is
+ * always inside that 4096-entry table.  Filling the whole cube with one
+ * sentinel therefore makes every pixel the label reached that sentinel, whatever
+ * the shade ramp holds -- which matters because ticket 23 has not written either
+ * table yet and neither may be assumed to be zero.  The cube is saved and put
+ * back around every run.
+ *
+ * WHY THE HEAP IS SEEDED, AND WITH WHAT.  The page is uncleared malloc storage
+ * and nothing in the routine paints the parts of it the label does not reach:
+ * the scene layer count, the unit count and the cursor mode are all zero, so
+ * fdps_draw_scene_layers writes nothing.  Whatever the heap left behind is
+ * therefore what shows everywhere else.  Each run first allocates the same two
+ * blocks the routine will, in the same order and the same sizes -- 0x140 then
+ * 0x15180 -- zeroes both and frees them, so a first-fit allocator hands the
+ * routine back the same two zeroed regions.  Every undrawn window pixel then
+ * reads 0 and the label's extent can be read off the frame.
+ *
+ * WHAT THE SNAPSHOT SHOWS IS THE WHOLE CLIMB AT ONCE, not the last frame.  The
+ * page is freed and taken again at the same size every frame with the label
+ * buffer still held, so it is the same block and nothing clears it between
+ * frames: the label's trail piles up.  The band it leaves runs from the top of
+ * the highest frame, label_y - 24, to the bottom of the lowest, label_y - 6 + 7,
+ * and that band's four edges are what pin the rise ramp and the 40x8 extent.
+ * ------------------------------------------------------------------ */
+
+/* Three records, so the neighbour either side of the awarded unit would show a
+   walk that strayed out of it. */
+#define AWD_UNITS 3
+#define AWD_PATIENT 1
+
+/* A leftover byte no case here can produce, parked in both neighbours. */
+#define AWD_NEIGHBOUR_MARK 0x77
+
+/* CMP dword ptr [EBP-0x20],0x9: portrait id 9 is the machine soldier, the one
+   character allowed past 40, and 5 is an ordinary roster portrait.  0x63 and
+   0x28 are the two caps the gate compares the level against. */
+#define AWD_MACHINE_PORTRAIT 9
+#define AWD_PLAIN_PORTRAIT 5
+#define AWD_MACHINE_CAP 0x63
+#define AWD_ORDINARY_CAP 0x28
+
+/* Well below either cap, so the standard fixture takes neither gate. */
+#define AWD_START_LEVEL 4
+
+/* A cursor mode neither 0 nor 1, so "left at the plain cursor" and "not
+   touched at all" are different answers. */
+#define AWD_CURSOR_SEED 7
+
+/* The tile the awarded unit stands on, and the map the movement grid states --
+   40 by 30 tiles, wide enough that no view clamp bites. */
+#define AWD_TILE 0x18
+#define AWD_TILE_X 3
+#define AWD_TILE_Y 3
+#define AWD_MAP_TILES_X 40
+#define AWD_MAP_TILES_Y 30
+
+/* The label: 40 x 8, parked half a tile right of the unit's cell and one tile
+   plus eight scanlines below its top, climbing 6 pixels on the first frame and
+   held at 24 on the last five. */
+#define AWD_LABEL_W 0x28
+#define AWD_LABEL_H 8
+#define AWD_LABEL_ORIGIN_X 0x18
+#define AWD_LABEL_ORIGIN_Y 0x20
+#define AWD_RISE_FIRST 6
+#define AWD_RISE_HELD 0x18
+#define AWD_LABEL_BYTES 0x140
+
+/* The page and where its window lands on the adapter: 312 x 192 taken from page
+   pixel (24,24) and put down at screen pixel (4,4), so a page column is 20
+   lower on screen. */
+#define AWD_PAGE_PITCH 0x168
+#define AWD_PAGE_BYTES 0x15180
+#define AWD_PAGE_BORDER 24
+#define AWD_WINDOW_INSET 4
+#define AWD_TO_SCREEN (AWD_WINDOW_INSET - AWD_PAGE_BORDER)
+
+/* The adapter, the frame it presents and the two modes the cases switch
+   between. */
+#define AWD_VGA_BASE 0x000a0000
+#define AWD_SCREEN_W 0x140
+#define AWD_SCREEN_H 0xc8
+#define AWD_SCREEN_BYTES (AWD_SCREEN_W * AWD_SCREEN_H)
+#define AWD_MODE_TEXT 0x03
+#define AWD_MODE_320X200X256 0x13
+
+/* IRQ0.  DOS/4GW reflects a hardware interrupt taken in protected mode to the
+   protected-mode vector, so the handler installed here is the one that runs
+   while the routine spins on the counter. */
+#define AWD_TIMER_VECTOR 8
+
+/* What a screen byte outside the presented window keeps, and the colour every
+   blended pixel comes out as. */
+#define AWD_BORDER_FILL 0xa5
+#define AWD_BLEND_SENTINEL 0x5c
+
+/* The .CEL sheets the routine draws the label out of, shaped as
+   resource_info/cel.md describes them: the sprite offset table sits at a fixed
+   +0x0f and holds one dword per sprite, and every stored offset is measured
+   from the start of the file.  The plate sheet states 40 x 8 in its header,
+   because fdps_cel_blit_sprite takes the size from the SHEET and not from the
+   sprite, and carries 36 entries so that sprite 0x23 exists.  A row of it is one
+   fill run: command 0x27 is op 0 with a length of 39 + 1. */
+#define AWD_CEL_TABLE_AT 0x0f
+#define AWD_CEL_WIDTH_AT 0x07
+#define AWD_CEL_HEIGHT_AT 0x09
+#define AWD_PLATE_SPRITES 0x24
+#define AWD_PLATE_ROW_BYTES 2
+#define AWD_PLATE_STREAM_AT (AWD_CEL_TABLE_AT + AWD_PLATE_SPRITES * 4)
+#define AWD_PLATE_STREAM_BYTES (AWD_LABEL_H * AWD_PLATE_ROW_BYTES)
+#define AWD_PLATE_SHEET_BYTES \
+    (AWD_PLATE_STREAM_AT + AWD_PLATE_SPRITES * AWD_PLATE_STREAM_BYTES)
+#define AWD_PLATE_FILL_RUN 0x27
+#define AWD_PLATE_COLOR 0x21
+
+/* The digit sheet fdps_draw_number reaches through
+   data_fdps_number_glyph_sheet_ptr: thirteen 6 x 8 glyphs for colour row 0,
+   each a flat fill so that no digit pixel is ever transparent and the whole
+   label stays a solid mask. */
+#define AWD_GLYPH_W 6
+#define AWD_GLYPH_H 8
+#define AWD_GLYPHS 13
+#define AWD_GLYPH_STREAM_AT (AWD_CEL_TABLE_AT + AWD_GLYPHS * 4)
+#define AWD_GLYPH_STREAM_BYTES (AWD_GLYPH_H * 2)
+#define AWD_GLYPH_SHEET_BYTES \
+    (AWD_GLYPH_STREAM_AT + AWD_GLYPHS * AWD_GLYPH_STREAM_BYTES)
+#define AWD_GLYPH_FILL_RUN (AWD_GLYPH_W - 1)
+#define AWD_GLYPH_COLOR 0x31
+
+static unsigned char awd_block[AWD_UNITS * UNIT_RECORD_STRIDE];
+static unsigned char awd_plate_sheet[AWD_PLATE_SHEET_BYTES];
+static unsigned char awd_glyph_sheet[AWD_GLYPH_SHEET_BYTES];
+static short awd_grid_header[2];
+static unsigned char awd_growth_table[16 * 11];
+static unsigned char *awd_screen;
+static unsigned char *awd_saved_cube;
+static void (__interrupt __far *awd_saved_timer)();
+static int awd_seed_ok;
+
+static void __interrupt __far awd_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(awd_saved_timer);
+}
+
+static struct fdps_unit_record *awd_unit(int unit_index)
+{
+    return (struct fdps_unit_record *)
+        (awd_block + unit_index * UNIT_RECORD_STRIDE);
+}
+
+static void awd_put_u16(unsigned char *image, int at, int value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+/* Zeroes the records, builds both sheets and publishes every global the routine
+   reads.  The cursor is parked on the awarded unit already, so
+   fdps_map_cursor_move_to has nothing to walk and leaves the view origins where
+   the case put them; the one case that wants the walk moves the cursor away
+   itself. */
+static void awd_stage(void)
+{
+    int i;
+    int sprite;
+    int stream_at;
+    int row;
+
+    for (i = 0; i < (int) sizeof(awd_block); i++) {
+        awd_block[i] = 0;
+    }
+    for (i = 0; i < (int) sizeof(awd_growth_table); i++) {
+        awd_growth_table[i] = 0;
+    }
+    awd_unit(0)->exp_carry = AWD_NEIGHBOUR_MARK;
+    awd_unit(AWD_UNITS - 1)->exp_carry = AWD_NEIGHBOUR_MARK;
+
+    awd_unit(AWD_PATIENT)->pos_x = (unsigned char) AWD_TILE_X;
+    awd_unit(AWD_PATIENT)->pos_y = (unsigned char) AWD_TILE_Y;
+    awd_unit(AWD_PATIENT)->portrait_id = (unsigned char) AWD_PLAIN_PORTRAIT;
+    awd_unit(AWD_PATIENT)->level = (unsigned char) AWD_START_LEVEL;
+
+    for (i = 0; i < AWD_PLATE_SHEET_BYTES; i++) {
+        awd_plate_sheet[i] = 0;
+    }
+    awd_put_u16(awd_plate_sheet, AWD_CEL_WIDTH_AT, AWD_LABEL_W);
+    awd_put_u16(awd_plate_sheet, AWD_CEL_HEIGHT_AT, AWD_LABEL_H);
+    for (sprite = 0; sprite < AWD_PLATE_SPRITES; sprite++) {
+        stream_at = AWD_PLATE_STREAM_AT + sprite * AWD_PLATE_STREAM_BYTES;
+        *(int *) (awd_plate_sheet + AWD_CEL_TABLE_AT + sprite * 4) = stream_at;
+        for (row = 0; row < AWD_LABEL_H; row++) {
+            awd_plate_sheet[stream_at + row * 2] = AWD_PLATE_FILL_RUN;
+            awd_plate_sheet[stream_at + row * 2 + 1] = AWD_PLATE_COLOR;
+        }
+    }
+
+    for (i = 0; i < AWD_GLYPH_SHEET_BYTES; i++) {
+        awd_glyph_sheet[i] = 0;
+    }
+    for (sprite = 0; sprite < AWD_GLYPHS; sprite++) {
+        stream_at = AWD_GLYPH_STREAM_AT + sprite * AWD_GLYPH_STREAM_BYTES;
+        *(int *) (awd_glyph_sheet + AWD_CEL_TABLE_AT + sprite * 4) = stream_at;
+        for (row = 0; row < AWD_GLYPH_H; row++) {
+            awd_glyph_sheet[stream_at + row * 2] = AWD_GLYPH_FILL_RUN;
+            awd_glyph_sheet[stream_at + row * 2 + 1] = AWD_GLYPH_COLOR;
+        }
+    }
+
+    awd_grid_header[0] = (short) AWD_MAP_TILES_X;
+    awd_grid_header[1] = (short) AWD_MAP_TILES_Y;
+
+    data_fdps_map_unit_array_ptr = awd_block;
+    data_fdps_map_unit_count = 0;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_battle_move_grid_ptr = (unsigned char *) awd_grid_header;
+    data_fdps_battle_character_growth_table_ptr = awd_growth_table;
+    data_fdps_command_sprite_sheet_ptr = awd_plate_sheet;
+    data_fdps_number_glyph_sheet_ptr = awd_glyph_sheet;
+    data_fdps_number_glyph_color_row = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_world_x = AWD_TILE_X * AWD_TILE;
+    data_fdps_map_cursor_world_y = AWD_TILE_Y * AWD_TILE;
+    data_fdps_map_cursor_draw_mode = AWD_CURSOR_SEED;
+    data_fdps_battle_pending_xp_credit = 0;
+}
+
+/* Put the staged pointers back the way a freshly started program has them, for
+   the reason tests/anim.c gives: these hold blocks the game's own loaders free,
+   and leaving one pointing at a static here hands a later test a free() of
+   storage that never came from the heap. */
+static void awd_unstage(void)
+{
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_battle_move_grid_ptr = NULL;
+    data_fdps_battle_character_growth_table_ptr = NULL;
+    data_fdps_command_sprite_sheet_ptr = NULL;
+    data_fdps_number_glyph_sheet_ptr = NULL;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_battle_pending_xp_credit = 0;
+}
+
+static void awd_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* The two blocks the routine will ask for, in its own order and at its own
+   sizes, zeroed and handed straight back. */
+static void awd_seed_heap(void)
+{
+    unsigned char *label;
+    unsigned char *page;
+
+    label = (unsigned char *) malloc((size_t) AWD_LABEL_BYTES);
+    page = (unsigned char *) malloc((size_t) AWD_PAGE_BYTES);
+    awd_seed_ok = (label != NULL && page != NULL);
+    if (label != NULL) {
+        memset(label, 0, (size_t) AWD_LABEL_BYTES);
+    }
+    if (page != NULL) {
+        memset(page, 0, (size_t) AWD_PAGE_BYTES);
+    }
+    free(page);
+    free(label);
+}
+
+/* One whole run, leaving the frame in awd_screen[]. */
+static void awd_run(void)
+{
+    size_t cube_bytes;
+
+    cube_bytes = sizeof(data_fdps_inverse_palette_cube);
+    awd_screen = (unsigned char *) malloc((size_t) AWD_SCREEN_BYTES);
+    awd_saved_cube = (unsigned char *) malloc(cube_bytes);
+    CHECK_EQ(awd_screen != NULL && awd_saved_cube != NULL, 1);
+    if (awd_screen == NULL || awd_saved_cube == NULL) {
+        free(awd_screen);
+        free(awd_saved_cube);
+        awd_screen = NULL;
+        awd_saved_cube = NULL;
+        return;
+    }
+    memset(awd_screen, AWD_BORDER_FILL, (size_t) AWD_SCREEN_BYTES);
+    memmove(awd_saved_cube, data_fdps_inverse_palette_cube, cube_bytes);
+    memset(data_fdps_inverse_palette_cube, AWD_BLEND_SENTINEL, cube_bytes);
+
+    awd_set_mode(AWD_MODE_320X200X256);
+    memset((void *) AWD_VGA_BASE, AWD_BORDER_FILL, (size_t) AWD_SCREEN_BYTES);
+    awd_seed_heap();
+
+    awd_saved_timer = _dos_getvect(AWD_TIMER_VECTOR);
+    _dos_setvect(AWD_TIMER_VECTOR, awd_timer_isr);
+    fdps_unit_award_exp_and_level_up(AWD_PATIENT);
+    _dos_setvect(AWD_TIMER_VECTOR, awd_saved_timer);
+
+    memmove(awd_screen, (void *) AWD_VGA_BASE, (size_t) AWD_SCREEN_BYTES);
+    awd_set_mode(AWD_MODE_TEXT);
+
+    memmove(data_fdps_inverse_palette_cube, awd_saved_cube, cube_bytes);
+    free(awd_saved_cube);
+    awd_saved_cube = NULL;
+}
+
+static void awd_drop_screen(void)
+{
+    free(awd_screen);
+    awd_screen = NULL;
+}
+
+static int awd_pixel(int row, int col)
+{
+    return (int) awd_screen[row * AWD_SCREEN_W + col];
+}
+
+/* The four edges of the trail the climb leaves, in screen coordinates: the
+   label's own left column and the row the highest frame's top lands on, and the
+   column and row one past the widest and lowest frame.  Between them they say
+   the figure was 40 wide and 8 tall, that the first frame rose 6 and that the
+   last five were held at 24. */
+static void awd_trail_is(int label_x, int label_y)
+{
+    int left;
+    int top;
+    int right;
+    int bottom;
+
+    left = label_x + AWD_TO_SCREEN;
+    right = left + AWD_LABEL_W - 1;
+    top = label_y - AWD_RISE_HELD + AWD_TO_SCREEN;
+    bottom = label_y - AWD_RISE_FIRST + AWD_LABEL_H - 1 + AWD_TO_SCREEN;
+
+    CHECK_EQ(awd_pixel(top, left), AWD_BLEND_SENTINEL);
+    CHECK_EQ(awd_pixel(bottom, right), AWD_BLEND_SENTINEL);
+    CHECK_EQ(awd_pixel(top - 1, left), 0);
+    CHECK_EQ(awd_pixel(bottom + 1, right), 0);
+    CHECK_EQ(awd_pixel(top, left - 1), 0);
+    CHECK_EQ(awd_pixel(top, right + 1), 0);
+}
+
+/* The eight record bytes the routine addresses by literal displacement, and the
+   stride fdps_get_unit_record multiplies by.  If any of them moved, every case
+   below would still pass while reading the wrong byte. */
+static void awd_the_record_fields_sit_where_the_loads_read(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), UNIT_RECORD_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0x00);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 0x01);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, sprite_cache_slot), 0x02);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 0x05);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, portrait_id), 0x07);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, level), 0x21);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, exp_carry), 0x3c);
+    CHECK_EQ((int) sizeof(layout_probe.exp_carry), 1);
+}
+
+/* CMP dword ptr [0x00069cec],0x0 / JZ at 0001dd61 jumps to the RET, so nothing
+   is paid, nothing is drawn and the cursor mode is not touched. */
+static void awd_a_zero_accumulator_pays_nothing(void)
+{
+    awd_stage();
+    awd_unit(AWD_PATIENT)->exp_carry = 12;
+    data_fdps_battle_pending_xp_credit = 0;
+
+    fdps_unit_award_exp_and_level_up(AWD_PATIENT);
+
+    CHECK_EQ(awd_unit(AWD_PATIENT)->exp_carry, 12);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 0);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AWD_CURSOR_SEED);
+    awd_unstage();
+}
+
+/* CALL fdps_unit_is_retired / TEST EAX,EAX / JZ at 0001dd6e takes the same exit,
+   and that exit does NOT clear the accumulator: the credit is still standing
+   afterwards, ready for whichever unit is awarded next. */
+static void awd_a_retired_unit_keeps_the_accumulator(void)
+{
+    awd_stage();
+    awd_unit(AWD_PATIENT)->flags = 1;
+    awd_unit(AWD_PATIENT)->exp_carry = 12;
+    data_fdps_battle_pending_xp_credit = 30;
+
+    fdps_unit_award_exp_and_level_up(AWD_PATIENT);
+
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 30);
+    CHECK_EQ(awd_unit(AWD_PATIENT)->exp_carry, 12);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AWD_CURSOR_SEED);
+    awd_unstage();
+}
+
+/* CMP dword ptr [EBP-0x20],0x9 / CMP dword ptr [EBP-0x24],0x63 / JZ at
+   0001dd85: portrait id 9 at level 99 is capped, and the exit leaves the
+   accumulator alone as well. */
+static void awd_the_machine_soldier_stops_at_ninety_nine(void)
+{
+    awd_stage();
+    awd_unit(AWD_PATIENT)->portrait_id = (unsigned char) AWD_MACHINE_PORTRAIT;
+    awd_unit(AWD_PATIENT)->level = (unsigned char) AWD_MACHINE_CAP;
+    data_fdps_battle_pending_xp_credit = 30;
+
+    fdps_unit_award_exp_and_level_up(AWD_PATIENT);
+
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 30);
+    CHECK_EQ(awd_unit(AWD_PATIENT)->exp_carry, 0);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AWD_CURSOR_SEED);
+    awd_unstage();
+}
+
+/* CMP dword ptr [EBP-0x24],0x28 / JZ at 0001dd91: every other portrait id is
+   capped at 40 instead. */
+static void awd_every_other_character_stops_at_forty(void)
+{
+    awd_stage();
+    awd_unit(AWD_PATIENT)->level = (unsigned char) AWD_ORDINARY_CAP;
+    data_fdps_battle_pending_xp_credit = 30;
+
+    fdps_unit_award_exp_and_level_up(AWD_PATIENT);
+
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 30);
+    CHECK_EQ(awd_unit(AWD_PATIENT)->exp_carry, 0);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AWD_CURSOR_SEED);
+    awd_unstage();
+}
+
+/* The two gates are exclusive: JNZ at 0001dd83 sends portrait id 9 to the 99
+   test and never to the 40 one, so the machine soldier at level 40 is paid.
+   The cleared accumulator is what says the gate let it through. */
+static void awd_the_machine_soldier_is_not_stopped_at_forty(void)
+{
+    awd_stage();
+    awd_unit(AWD_PATIENT)->portrait_id = (unsigned char) AWD_MACHINE_PORTRAIT;
+    awd_unit(AWD_PATIENT)->level = (unsigned char) AWD_ORDINARY_CAP;
+    data_fdps_battle_pending_xp_credit = 30;
+
+    awd_run();
+
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 0);
+    CHECK_EQ(awd_unit(AWD_PATIENT)->exp_carry, 30);
+    CHECK_EQ(awd_unit(AWD_PATIENT)->level, AWD_ORDINARY_CAP);
+    awd_drop_screen();
+    awd_unstage();
+}
+
+/* And the other way round: an ordinary portrait id is tested against 40 only,
+   so one standing at 99 is paid rather than refused. */
+static void awd_an_ordinary_character_is_not_stopped_at_ninety_nine(void)
+{
+    awd_stage();
+    awd_unit(AWD_PATIENT)->level = (unsigned char) AWD_MACHINE_CAP;
+    data_fdps_battle_pending_xp_credit = 30;
+
+    awd_run();
+
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 0);
+    CHECK_EQ(awd_unit(AWD_PATIENT)->exp_carry, 30);
+    awd_drop_screen();
+    awd_unstage();
+}
+
+/* MOV AL,byte ptr [EAX+0x3c] / AND EAX,0xff / ADD EDX,EAX at 0001dded forms the
+   running total, and MOV AL,byte ptr [EBP-0x10] / MOV byte ptr [EDX+0x3c],AL at
+   0001e340 stores it back.  Under 100 nothing is spent on a level, so the whole
+   total stays in the byte.  The accumulator is cleared, the cursor mode is set
+   to the plain cursor rather than put back to what it was, and neither
+   neighbouring record is touched. */
+static void awd_the_award_lands_in_the_leftover_byte(void)
+{
+    awd_stage();
+    awd_unit(AWD_PATIENT)->exp_carry = 12;
+    data_fdps_battle_pending_xp_credit = 30;
+
+    awd_run();
+
+    CHECK_EQ(awd_unit(AWD_PATIENT)->exp_carry, 42);
+    CHECK_EQ(awd_unit(AWD_PATIENT)->level, AWD_START_LEVEL);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 0);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+    CHECK_EQ(awd_unit(0)->exp_carry, AWD_NEIGHBOUR_MARK);
+    CHECK_EQ(awd_unit(AWD_UNITS - 1)->exp_carry, AWD_NEIGHBOUR_MARK);
+    awd_drop_screen();
+    awd_unstage();
+}
+
+/* CMP dword ptr [0x00069cec],0x63 / JLE / MOV dword ptr [0x00069cec],0x63 at
+   0001ddb1: the award is written back down to 99 before it is added, so the
+   surplus is discarded rather than carried, and a single award can never buy
+   more than one level. */
+static void awd_an_award_above_ninety_nine_is_clamped(void)
+{
+    awd_stage();
+    awd_unit(AWD_PATIENT)->exp_carry = 0;
+    data_fdps_battle_pending_xp_credit = 250;
+
+    awd_run();
+
+    CHECK_EQ(awd_unit(AWD_PATIENT)->exp_carry, 99);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 0);
+    awd_drop_screen();
+    awd_unstage();
+}
+
+/* CALL fdps_map_cursor_move_to_unit at 0001dda9, with the cursor started at the
+   map origin: it ends on the awarded unit's own tile, 24 pixels to the tile.
+   The walk is short enough that the view does not scroll, which is what lets
+   the label cases below start from a known origin. */
+static void awd_the_cursor_is_parked_on_the_unit(void)
+{
+    awd_stage();
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_battle_pending_xp_credit = 30;
+
+    awd_run();
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, AWD_TILE_X * AWD_TILE);
+    CHECK_EQ(data_fdps_map_cursor_world_y, AWD_TILE_Y * AWD_TILE);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    awd_drop_screen();
+    awd_unstage();
+}
+
+/* IMUL EAX,EAX,0x18 / SUB EAX,[0x00069ce4] / ADD EAX,0x18 at 0001de00 and the
+   same on the other axis with ADD EAX,0x20 at 0001de19: with the view at the
+   map origin the label sits at tile * 24 plus (24, 32). */
+static void awd_the_label_floats_over_the_unit(void)
+{
+    awd_stage();
+    data_fdps_battle_pending_xp_credit = 30;
+
+    awd_run();
+
+    CHECK_EQ(awd_seed_ok, 1);
+    awd_trail_is(AWD_TILE_X * AWD_TILE + AWD_LABEL_ORIGIN_X,
+                 AWD_TILE_Y * AWD_TILE + AWD_LABEL_ORIGIN_Y);
+    awd_drop_screen();
+    awd_unstage();
+}
+
+/* The two SUBs are the view scroll, so a scrolled view moves the label by
+   exactly what it scrolled.  The cursor is parked on the unit already, so
+   fdps_map_cursor_move_to returns before it can move the origins itself. */
+static void awd_the_label_follows_the_view_scroll(void)
+{
+    awd_stage();
+    data_fdps_battle_view_window_origin_x = 24;
+    data_fdps_battle_view_window_origin_y = 48;
+    data_fdps_battle_pending_xp_credit = 30;
+
+    awd_run();
+
+    CHECK_EQ(awd_seed_ok, 1);
+    awd_trail_is(AWD_TILE_X * AWD_TILE - 24 + AWD_LABEL_ORIGIN_X,
+                 AWD_TILE_Y * AWD_TILE - 48 + AWD_LABEL_ORIGIN_Y);
+    awd_drop_screen();
+    awd_unstage();
+}
 
 void run_unitstat_tests(void)
 {
@@ -2804,4 +3416,16 @@ void run_unitstat_tests(void)
     RUN_TEST(the_figure_starts_where_dst_points);
     RUN_TEST(the_colour_row_is_left_to_the_caller);
     RUN_TEST(the_staged_sheet_is_put_back);
+    RUN_TEST(awd_the_record_fields_sit_where_the_loads_read);
+    RUN_TEST(awd_a_zero_accumulator_pays_nothing);
+    RUN_TEST(awd_a_retired_unit_keeps_the_accumulator);
+    RUN_TEST(awd_the_machine_soldier_stops_at_ninety_nine);
+    RUN_TEST(awd_every_other_character_stops_at_forty);
+    RUN_TEST(awd_the_machine_soldier_is_not_stopped_at_forty);
+    RUN_TEST(awd_an_ordinary_character_is_not_stopped_at_ninety_nine);
+    RUN_TEST(awd_the_award_lands_in_the_leftover_byte);
+    RUN_TEST(awd_an_award_above_ninety_nine_is_clamped);
+    RUN_TEST(awd_the_cursor_is_parked_on_the_unit);
+    RUN_TEST(awd_the_label_floats_over_the_unit);
+    RUN_TEST(awd_the_label_follows_the_view_scroll);
 }

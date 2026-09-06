@@ -1959,5 +1959,20 @@
       "needs": "The chapter/map data work that parses map29 out of its container and records the two types' placement records and their wave tag; the anchors and the 'wave 4' name can then be confirmed or the comments corrected.",
       "status": "open"
     }
+  ],
+  "0001dd30": [
+    {
+      "from": "emit",
+      "what": "Nothing behind the level-up gate at 0001dfb9 is exercised by any assertion: the level increment, the six-pair spell walk and its fdps_set_flag_bit calls, the five fdps_level_up_apply_stat_gain rolls and their window positions, the 250-frame hold loop and its walk-sprite cycle, the early break on a make code, and the post-level-up leftover zeroing. The reason is that the branch starts by loading Levup.wav and handing fdps_audio_start_wav's answer straight to fdps_audio_sample_is_playing in a spin; with no AIL driver initialised fdps_audio_start_wav returns -1 and that spin asks the vendor library for the status of handle table entry -1. So a test that reaches this path either faults or never returns. What IS established: every emitted call in the branch was read off the assembly and checked argument by argument against the pushes, and the emitted object's shape was compared with the original at the two points where codegen could differ (the walk-cycle divides and the sound-load sequence), both identical.",
+      "needs": "Either a test harness that brings up an AIL DIG driver so fdps_audio_start_wav returns a real slot and fdps_audio_sample_is_playing terminates, or a playtest: level one unit up in DOSBox-X and check the window shows the new level, the five gains, and any spell learned at that level, that any key closes it early, and that a unit reaching level 40 loses its carried experience while one below 40 keeps it.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached the same conclusion independently and confirmed it, with one addition the emitter did not name: there are TWO independent reasons no unit test can enter the level-up branch, not one. The emitter's is the audio spin. Mine is that the branch's first act, fdps_vfs_load_entry(\"MISC.VFS\", \"Levup.wav\") at 0001dfcf, ends the process outright when the container will not open -- src/vfs.h says it prints \"file not found\" and calls exit(1) with no return path -- so the branch is unreachable from a test image even if the sound side were made safe. That strengthens rather than weakens the emitter's case for leaving it uncovered. What I did verify for myself in place of a test: every argument of all fifteen calls in the branch against the pushes (the five stat-gain triples at 0001e10a..0001e18d, the seven-argument fdps_draw_text at 0001e08f, the seven-argument fdps_blit_dispatch at 0001e259), and that the walk-cycle codegen in the rebuild's own UNITSTAT.OBJ at 0ac3..0ae0 is the original's instruction sequence at 0001e1fd..0001e21a.",
+      "needs": "As the emitter states: an AIL DIG driver in the harness, or a playtest in DOSBox-X with the disc mounted.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

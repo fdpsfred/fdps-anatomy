@@ -2751,6 +2751,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x191"
+    },
+    "0001dd30": {
+      "name": "fdps_unit_award_exp_and_level_up",
+      "target": "unitstat.c",
+      "body_size": "0x639",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x639"
     }
   }
 }
