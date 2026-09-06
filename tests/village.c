@@ -2146,6 +2146,272 @@ static void gold_spaces_its_rows_by_the_pitch(void)
     gold_unstage();
 }
 
+/* ---- fdps_village_animate_window_zoom, 00032570 --------------------------
+ *
+ * Expected values come from the assembly at 00032570 and from nothing else.
+ * The nine frames run 0..8 inclusive (CMP EAX,[EBP-0x20] / JLE at 000325cc)
+ * and only the last one survives on the adapter, so each case reads back the
+ * frame that step 8 left there: on an open that is the far extreme, the full
+ * 0x138 by 0x4c window at (0x4, 0x79), and on a close it is the near one, the
+ * substituted 4 by 2 minimum at the collapsed corner (0x8c, 0x50).
+ *
+ * The sheet is a synthetic .CEL whose sprite is exactly the opened window's
+ * size, so the opening sweep's last frame is a 1:1 blit and the closing
+ * sweep's is a 312-to-4 by 76-to-2 reduction through the same kernel.  Sprite
+ * 1 carries a different colour, so a wrong sprite index would read back as
+ * itself rather than as the frame under test.
+ */
+
+/* The window's two extremes, off the immediates listed above. */
+#define ZWIN_OPEN_X 0x4
+#define ZWIN_OPEN_Y 0x79
+#define ZWIN_OPEN_W 0x138
+#define ZWIN_OPEN_H 0x4c
+#define ZWIN_COLLAPSED_X 0x8c
+#define ZWIN_COLLAPSED_Y 0x50
+#define ZWIN_MIN_W 4
+#define ZWIN_MIN_H 2
+
+/* The sheet: two sprites the size of the opened window, one flat colour each,
+   with a row spelled as four 64-pixel fills and one of 56 because a run
+   carries at most 64 (resource_info/cel.md). */
+#define ZWIN_SHEET_SPRITES 2
+#define ZWIN_SHEET_TABLE_AT 15
+#define ZWIN_SHEET_STREAM_AT \
+    (ZWIN_SHEET_TABLE_AT + (ZWIN_SHEET_SPRITES + 1) * 4)
+#define ZWIN_SHEET_CMD_64 0x3f
+#define ZWIN_SHEET_CMD_56 0x37
+#define ZWIN_SHEET_FULL_RUNS 4
+#define ZWIN_SHEET_ROW_BYTES ((ZWIN_SHEET_FULL_RUNS + 1) * 2)
+#define ZWIN_SHEET_STREAM_BYTES (ZWIN_OPEN_H * ZWIN_SHEET_ROW_BYTES)
+#define ZWIN_SHEET_BYTES \
+    (ZWIN_SHEET_STREAM_AT + ZWIN_SHEET_SPRITES * ZWIN_SHEET_STREAM_BYTES)
+#define ZWIN_FRAME_COLOR(sprite) (0x51 + (sprite))
+#define ZWIN_WINDOW_SPRITE 0
+
+/* What the caller's page is filled with, so anything the sweep did not paint
+   reads back as this. */
+#define ZWIN_PAGE_FILL 0x23
+
+/* A block handed to the portrait pointer so the release at the top of the
+   function has something to give back. */
+#define ZWIN_PORTRAIT_BYTES 64
+
+static unsigned char zwin_sheet[ZWIN_SHEET_BYTES];
+static unsigned char *zwin_screen;
+static unsigned char *zwin_page;
+static int zwin_blocks_before;
+static int zwin_blocks_after;
+
+/* Two flat sprites of 0x138 by 0x4c behind a header that states that size, and
+   an offset table whose entries are measured from the start of the file. */
+static void zwin_stage_sheet(void)
+{
+    struct fdps_cel_header *header;
+    int sprite;
+    int row;
+    int run;
+    int at;
+
+    memset(zwin_sheet, 0, (size_t) ZWIN_SHEET_BYTES);
+    header = (struct fdps_cel_header *) zwin_sheet;
+    header->magic[0] = 'C';
+    header->magic[1] = 'E';
+    header->magic[2] = 'L';
+    header->sprite_width = ZWIN_OPEN_W;
+    header->sprite_height = ZWIN_OPEN_H;
+    header->sprite_count = ZWIN_SHEET_SPRITES;
+
+    for (sprite = 0; sprite < ZWIN_SHEET_SPRITES; sprite++) {
+        at = ZWIN_SHEET_STREAM_AT + sprite * ZWIN_SHEET_STREAM_BYTES;
+        *(int *) (zwin_sheet + ZWIN_SHEET_TABLE_AT + sprite * 4) = at;
+        for (row = 0; row < ZWIN_OPEN_H; row++) {
+            for (run = 0; run <= ZWIN_SHEET_FULL_RUNS; run++) {
+                if (run < ZWIN_SHEET_FULL_RUNS) {
+                    zwin_sheet[at + row * ZWIN_SHEET_ROW_BYTES + run * 2] =
+                        ZWIN_SHEET_CMD_64;
+                } else {
+                    zwin_sheet[at + row * ZWIN_SHEET_ROW_BYTES + run * 2] =
+                        ZWIN_SHEET_CMD_56;
+                }
+                zwin_sheet[at + row * ZWIN_SHEET_ROW_BYTES + run * 2 + 1] =
+                    (unsigned char) ZWIN_FRAME_COLOR(sprite);
+            }
+        }
+    }
+    *(int *) (zwin_sheet + ZWIN_SHEET_TABLE_AT + ZWIN_SHEET_SPRITES * 4) =
+        ZWIN_SHEET_BYTES;
+}
+
+/* One whole sweep, leaving the ninth frame in zwin_screen[] and the caller's
+   own page in zwin_page[] for the case to look at.  `portrait` asks for a
+   heap block to be parked in the portrait pointer first. */
+static void zwin_run(int closing, int portrait)
+{
+    zwin_stage_sheet();
+    data_fdps_village_window_sheet_ptr = zwin_sheet;
+    data_fdps_portrait_sprite_buf_ptr = NULL;
+
+    zwin_screen = (unsigned char *) malloc((size_t) VILL_SCREEN_BYTES);
+    zwin_page = (unsigned char *) malloc((size_t) VILL_SCREEN_BYTES);
+    CHECK_EQ(zwin_screen != NULL && zwin_page != NULL, 1);
+    if (zwin_screen == NULL || zwin_page == NULL) {
+        return;
+    }
+    memset(zwin_page, ZWIN_PAGE_FILL, (size_t) VILL_SCREEN_BYTES);
+    if (portrait != 0) {
+        data_fdps_portrait_sprite_buf_ptr =
+            (unsigned char *) malloc((size_t) ZWIN_PORTRAIT_BYTES);
+    }
+
+    zwin_blocks_before = vill_used_heap_blocks();
+    vill_set_mode(VILL_MODE_320X200X256);
+    fdps_village_animate_window_zoom(zwin_page, (unsigned char) closing);
+    memmove(zwin_screen, (void *) VILL_VGA_BASE, (size_t) VILL_SCREEN_BYTES);
+    vill_set_mode(VILL_MODE_TEXT);
+    zwin_blocks_after = vill_used_heap_blocks();
+}
+
+static void zwin_unstage(void)
+{
+    /* Put the sheet pointer back the way a freshly started program has it: it
+       holds a block the village phase's own loader frees, and leaving it
+       pointing at a static here hands a later test a free of storage that
+       never came from the heap. */
+    data_fdps_village_window_sheet_ptr = NULL;
+    free(zwin_screen);
+    free(zwin_page);
+    zwin_screen = NULL;
+    zwin_page = NULL;
+}
+
+static int zwin_pixel(int row, int col)
+{
+    if (zwin_screen == NULL) {
+        return -1;
+    }
+    return (int) zwin_screen[row * VILL_SCREEN_W + col];
+}
+
+/* The opening sweep's ninth frame is the far extreme: open_amount reaches
+   zoom_steps, so the size is 8 * 0x138 / 8 by 8 * 0x4c / 8 and the corner is
+   0x8c + 8 * (4 - 0x8c) / 8 by 0x50 + 8 * (0x79 - 0x50) / 8 -- 312 by 76 at
+   column 4, row 121.  Every edge is checked from both sides, which is also
+   what pins the destination pitch: a row stride other than 0x140 would shear
+   the rectangle rather than leave its last row ending at column 315. */
+static void zwin_open_ends_on_the_full_window(void)
+{
+    zwin_run(0, 0);
+
+    CHECK_EQ(zwin_pixel(ZWIN_OPEN_Y, ZWIN_OPEN_X),
+             ZWIN_FRAME_COLOR(ZWIN_WINDOW_SPRITE));
+    CHECK_EQ(zwin_pixel(ZWIN_OPEN_Y + ZWIN_OPEN_H - 1,
+                        ZWIN_OPEN_X + ZWIN_OPEN_W - 1),
+             ZWIN_FRAME_COLOR(ZWIN_WINDOW_SPRITE));
+    CHECK_EQ(zwin_pixel(ZWIN_OPEN_Y + ZWIN_OPEN_H / 2,
+                        ZWIN_OPEN_X + ZWIN_OPEN_W - 1),
+             ZWIN_FRAME_COLOR(ZWIN_WINDOW_SPRITE));
+    CHECK_EQ(zwin_pixel(ZWIN_OPEN_Y - 1, ZWIN_OPEN_X), ZWIN_PAGE_FILL);
+    CHECK_EQ(zwin_pixel(ZWIN_OPEN_Y, ZWIN_OPEN_X - 1), ZWIN_PAGE_FILL);
+    CHECK_EQ(zwin_pixel(ZWIN_OPEN_Y + ZWIN_OPEN_H, ZWIN_OPEN_X),
+             ZWIN_PAGE_FILL);
+    CHECK_EQ(zwin_pixel(ZWIN_OPEN_Y, ZWIN_OPEN_X + ZWIN_OPEN_W),
+             ZWIN_PAGE_FILL);
+    /* The rest of the adapter is the caller's page, so the whole 64,000 bytes
+       went out and not just the window's rectangle. */
+    CHECK_EQ(zwin_pixel(0, 0), ZWIN_PAGE_FILL);
+    CHECK_EQ(zwin_pixel(VILL_SCREEN_H - 1, VILL_SCREEN_W - 1), ZWIN_PAGE_FILL);
+    /* And no earlier frame is left behind: the sliver the sweep started from
+       was copied over by the frames that followed it. */
+    CHECK_EQ(zwin_pixel(ZWIN_COLLAPSED_Y, ZWIN_COLLAPSED_X), ZWIN_PAGE_FILL);
+    zwin_unstage();
+}
+
+/* The closing sweep runs the same nine positions the other way -- open_amount
+   is zoom_steps - step -- so its ninth frame is open_amount 0: both sizes work
+   out to zero and are substituted with the 4 and the 2 of 00032622 and
+   0003263e, at the collapsed corner its own interpolation gives, (0x8c, 0x50).
+   All four pixels of the sliver and all four sides just outside it are
+   checked, so the substitution is pinned as an exact 4 by 2 and not merely as
+   something non-empty. */
+static void zwin_close_ends_on_the_four_by_two_sliver(void)
+{
+    zwin_run(1, 0);
+
+    CHECK_EQ(zwin_pixel(ZWIN_COLLAPSED_Y, ZWIN_COLLAPSED_X),
+             ZWIN_FRAME_COLOR(ZWIN_WINDOW_SPRITE));
+    CHECK_EQ(zwin_pixel(ZWIN_COLLAPSED_Y, ZWIN_COLLAPSED_X + ZWIN_MIN_W - 1),
+             ZWIN_FRAME_COLOR(ZWIN_WINDOW_SPRITE));
+    CHECK_EQ(zwin_pixel(ZWIN_COLLAPSED_Y + ZWIN_MIN_H - 1, ZWIN_COLLAPSED_X),
+             ZWIN_FRAME_COLOR(ZWIN_WINDOW_SPRITE));
+    CHECK_EQ(zwin_pixel(ZWIN_COLLAPSED_Y + ZWIN_MIN_H - 1,
+                        ZWIN_COLLAPSED_X + ZWIN_MIN_W - 1),
+             ZWIN_FRAME_COLOR(ZWIN_WINDOW_SPRITE));
+    CHECK_EQ(zwin_pixel(ZWIN_COLLAPSED_Y, ZWIN_COLLAPSED_X + ZWIN_MIN_W),
+             ZWIN_PAGE_FILL);
+    CHECK_EQ(zwin_pixel(ZWIN_COLLAPSED_Y, ZWIN_COLLAPSED_X - 1),
+             ZWIN_PAGE_FILL);
+    CHECK_EQ(zwin_pixel(ZWIN_COLLAPSED_Y + ZWIN_MIN_H, ZWIN_COLLAPSED_X),
+             ZWIN_PAGE_FILL);
+    CHECK_EQ(zwin_pixel(ZWIN_COLLAPSED_Y - 1, ZWIN_COLLAPSED_X),
+             ZWIN_PAGE_FILL);
+    /* The full window the sweep started from is gone. */
+    CHECK_EQ(zwin_pixel(ZWIN_OPEN_Y, ZWIN_OPEN_X), ZWIN_PAGE_FILL);
+    zwin_unstage();
+}
+
+/* Every frame copies the caller's page over a private one and draws into that,
+   so the argument comes back exactly as it went in -- which is what lets a
+   screen play the closing sweep over the same page it played the opening one
+   over. */
+static void zwin_never_writes_the_callers_page(void)
+{
+    int index;
+    int strangers;
+
+    zwin_run(0, 0);
+    if (zwin_page == NULL) {
+        zwin_unstage();
+        return;
+    }
+
+    strangers = 0;
+    for (index = 0; index < VILL_SCREEN_BYTES; index++) {
+        if (zwin_page[index] != ZWIN_PAGE_FILL) {
+            strangers++;
+        }
+    }
+    CHECK_EQ(strangers, 0);
+    zwin_unstage();
+}
+
+/* CMP dword ptr [0x00060120],0x0 / PUSH / CALL free / MOV dword ptr
+   [0x00060120],0x0 at 00032591: the portrait block is given back and the
+   pointer cleared before the first frame.  The heap is one used block lighter
+   afterwards -- the portrait's -- because the composing page the sweep took
+   for itself has been given back too. */
+static void zwin_releases_the_portrait_buffer(void)
+{
+    zwin_run(0, 1);
+
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 1);
+    CHECK_EQ(zwin_blocks_after, zwin_blocks_before - 1);
+    zwin_unstage();
+}
+
+/* The composing page is taken once at 000325b7 and freed once at 000326f3, so
+   a whole sweep leaves the heap where it found it.  With the portrait pointer
+   already null the guard skips the free rather than handing free a null, and
+   the count is unchanged either way. */
+static void zwin_frees_its_page_and_leaves_a_null_portrait_alone(void)
+{
+    zwin_run(1, 0);
+
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 1);
+    CHECK_EQ(zwin_blocks_after, zwin_blocks_before);
+    zwin_unstage();
+}
+
 void run_village_tests(void)
 {
     RUN_TEST(village_secret_code_completes);
@@ -2196,4 +2462,10 @@ void run_village_tests(void)
     RUN_TEST(gold_negative_purse_draws_its_sign);
     RUN_TEST(gold_reads_the_purse_at_the_time_of_the_call);
     RUN_TEST(gold_spaces_its_rows_by_the_pitch);
+
+    RUN_TEST(zwin_open_ends_on_the_full_window);
+    RUN_TEST(zwin_close_ends_on_the_four_by_two_sliver);
+    RUN_TEST(zwin_never_writes_the_callers_page);
+    RUN_TEST(zwin_releases_the_portrait_buffer);
+    RUN_TEST(zwin_frees_its_page_and_leaves_a_null_portrait_alone);
 }

@@ -2841,6 +2841,14 @@
       "status": "committed",
       "emitted_against": "0xe9",
       "rounds": 0
+    },
+    "00032570": {
+      "name": "fdps_village_animate_window_zoom",
+      "target": "village.c",
+      "body_size": "0x192",
+      "status": "committed",
+      "emitted_against": "0x192",
+      "rounds": 0
     }
   }
 }

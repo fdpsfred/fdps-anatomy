@@ -159,4 +159,41 @@ extern void fdps_village_signboard_menu(unsigned char *background,
 extern void fdps_draw_party_gold(unsigned char *dst, int pitch);
 #pragma aux fdps_draw_party_gold "*" parm caller [];
 
+/* Plays the village window frame's zoom, nine retrace-paced frames of it, and
+   returns with the last frame on the adapter.  An open sweeps the frame out
+   from a 4 by 2 sliver at column 140, row 80 to the full 312 by 76 window at
+   column 4, row 121; a close runs the same nine positions the other way and
+   ends on the sliver.  Every shop, church, bar, lottery and item screen calls
+   it once on the way in and once on the way out.
+
+   `screen_page` is the caller's own 320x200 8bpp page holding the screen the
+   window opens over.  It is only read: the animation takes one 64,000-byte
+   page from the heap, copies this over it before every frame, draws into that
+   and frees it on the way out, so nothing the animation draws is left in the
+   caller's page and the same page serves both halves of the sweep.
+
+   `closing` is 0 for the opening sweep and non-zero for the closing one.  Only
+   its low byte is tested.
+
+   IT RELEASES THE PORTRAIT BUFFER.  data_fdps_portrait_sprite_buf_ptr is freed
+   and cleared before the first frame, unconditionally and whatever the sweep
+   is about to do (gamedata.h).  A caller that had a portrait up loses it here,
+   which is what stops the previous speaker's face being drawn over the town
+   prompts the window is opening for.
+
+   WHAT IT NEEDS IN PLACE.  It draws sprite 0 of the sheet in
+   data_fdps_village_window_sheet_ptr, which the village phase loads and holds
+   for as long as it runs, and it is not checked.  It paces every frame on the
+   vertical retrace, so on an adapter whose status register never toggles the
+   first frame never ends.  It leaves the adapter holding the last frame and
+   the caller's page holding what it always held.
+
+   THE WINDOW IS NEVER DRAWN SMALLER THAN 4 BY 2.  A step whose interpolated
+   size comes out zero is drawn at that minimum instead, at the corner its own
+   interpolation gave it, so the fully collapsed frame is a visible sliver
+   rather than nothing at all. */
+extern void fdps_village_animate_window_zoom(unsigned char *screen_page,
+                                             unsigned char closing);
+#pragma aux fdps_village_animate_window_zoom "*" parm caller [];
+
 #endif

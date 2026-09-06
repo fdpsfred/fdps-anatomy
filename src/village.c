@@ -646,6 +646,152 @@ void fdps_draw_party_gold(unsigned char *dst, int pitch)
                      GOLD_FIGURE_DIGITS, 0);
 }
 
+/* The window sweep's two extremes.  The corner it collapses to is held in the
+   original's frame -- MOV dword ptr [EBP + -0x8],0x8c and MOV dword ptr [EBP +
+   -0x14],0x50 at 00032583 and 0003258a, both of them read back as the base of
+   an interpolation and as its far end -- while the opened window's own corner
+   is an immediate loaded into the arithmetic, MOV EDX,0x4 at 00032653 and MOV
+   EDX,0x79 at 0003266f.  The opened size is the pair of IMUL immediates, 0x138
+   at 0003260a and 0x4c at 00032629: 312 by 76 at column 4, row 121, which is
+   the shop and church window laid across the bottom of the screen. */
+#define ZOOM_COLLAPSED_X 0x8c
+#define ZOOM_COLLAPSED_Y 0x50
+#define ZOOM_OPEN_X 4
+#define ZOOM_OPEN_Y 0x79
+#define ZOOM_OPEN_W 0x138
+#define ZOOM_OPEN_H 0x4c
+
+/* What a step that works out to nothing is drawn as instead, MOV dword ptr
+   [EBP + -0x18],0x4 at 00032622 and MOV dword ptr [EBP + -0x1c],0x2 at
+   0003263e.  Only the fully collapsed step reaches either: with a divisor of 8
+   the next step up is already 39 by 9. */
+#define ZOOM_MIN_W 4
+#define ZOOM_MIN_H 2
+
+/* How many steps the sweep is cut into.  The counter runs 0..8 INCLUSIVE --
+   CMP EAX,dword ptr [EBP + -0x20] / JLE at 000325cc -- so nine frames are
+   drawn and the last one lands exactly on the far extreme. */
+#define ZOOM_STEPS 8
+
+/* The window frame is sprite 0 of the sheet, PUSH 0x0 at 000326a2. */
+#define ZOOM_WINDOW_SPRITE 0
+
+/* 00032570.  Plays the shop and church window frame opening out of, or closing
+   back into, a sliver in the middle of the screen: nine frames, one per
+   vertical retrace, each composed on a private page over a fresh copy of the
+   caller's screen.  See village.h for what a caller has to have in place.
+
+   Two stack arguments, caller-cleaned.  All seventy-odd call sites push two
+   dwords and follow the CALL with ADD ESP,0x8 -- 00033b9d, 00033bb6, 00035d5e
+   and 00033fa0 are typical -- the body reads them at [EBP+0x14] and [EBP+0x18]
+   behind PUSH EBX/ESI/EDI/EBP and the return address, and RET carries no
+   immediate.  EAX is never set before the epilogue and no call site looks at
+   it.
+
+   THE PORTRAIT BUFFER IS RELEASED HERE AND THAT IS NOT INCIDENTAL.  CMP dword
+   ptr [0x00060120],0x0 / free / MOV dword ptr [0x00060120],0x0 at 00032591 is
+   the same shape fdps_load_and_draw_portrait and fdps_message_window_wait_key
+   use, and the readers of that pointer draw the portrait whenever it is
+   non-null (gamedata.h).  Writing this as a pure window animation and dropping
+   the release leaks the block and leaves the previous speaker's portrait drawn
+   over the town prompts.
+
+   THE STEP COUNT, THE COLLAPSED CORNER AND THE SWEEP ARE SIGNED THROUGHOUT.
+   All four interpolations are CDQ/IDIV over the same [EBP-0x20] divisor and
+   the loop's own test is JLE, so nothing here is an unsigned division that a
+   shift could stand in for.
+
+   THE MINIMUM SIZE IS A SUBSTITUTION AND NOT A CLAMP.  Each of the two sizes
+   is computed first and only then tested against zero, so a step whose size
+   comes out zero is drawn as 4 by 2 at whatever corner that step's own
+   interpolation gave it -- which on a close is the collapsed corner itself.
+
+   THE CALLER'S PAGE IS NEVER WRITTEN.  Every frame copies it over the private
+   page and draws into that, so a caller can call again for the closing half
+   and get the same screen back underneath.
+
+   The frames are paced by the retrace, and the page copy deliberately runs
+   AFTER the retrace has ended rather than inside it: the first spin waits for
+   it to begin and the second for it to end, the same way round as
+   fdps_village_signboard_menu's own present.  How many instructions stand
+   between the two spins is therefore not observable (contract D).
+
+   malloc's answer is not tested, the same as the original. */
+void fdps_village_animate_window_zoom(unsigned char *screen_page,
+                                      unsigned char closing)
+{
+    /* The sweep's divisor and the corner the window collapses to.  All three
+       are locals in the original's frame and not immediates folded into the
+       arithmetic: the divisor is the memory operand of all four IDIVs and the
+       two coordinates are each read twice, once as the far end of their own
+       interpolation and once as its base. */
+    int zoom_steps = ZOOM_STEPS;
+    int collapsed_x = ZOOM_COLLAPSED_X;
+    int collapsed_y = ZOOM_COLLAPSED_Y;
+    /* The 64,000-byte page the whole animation is composed on, taken once and
+       released on the way out -- unlike the two other village animations,
+       which take one per frame. */
+    unsigned char *compose_page;
+    /* Which of the nine frames is being drawn, 0..zoom_steps. */
+    int step;
+    /* How far open this frame's window is, 0 for the sliver and zoom_steps for
+       the full window.  It counts up with the frames on an open and down on a
+       close, which is the whole of what `closing` does. */
+    int open_amount;
+    /* That amount turned into the window's drawn size, its top-left corner,
+       and the size packed the way mode 4 reads it. */
+    int window_width;
+    int window_height;
+    int window_x;
+    int window_y;
+    int window_size;
+
+    if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+        free(data_fdps_portrait_sprite_buf_ptr);
+    }
+    data_fdps_portrait_sprite_buf_ptr = NULL;
+
+    compose_page = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+
+    for (step = 0; step <= zoom_steps; step++) {
+        if (closing != 0) {
+            open_amount = zoom_steps - step;
+        } else {
+            open_amount = step;
+        }
+        memmove(compose_page, screen_page, (size_t) VGA_SCREEN_BYTES);
+
+        window_width = open_amount * ZOOM_OPEN_W / zoom_steps;
+        if (window_width == 0) {
+            window_width = ZOOM_MIN_W;
+        }
+        window_height = open_amount * ZOOM_OPEN_H / zoom_steps;
+        if (window_height == 0) {
+            window_height = ZOOM_MIN_H;
+        }
+        window_size = (window_height << 16) + window_width;
+        window_x = collapsed_x
+                   + (ZOOM_OPEN_X - collapsed_x) * open_amount / zoom_steps;
+        window_y = collapsed_y
+                   + (ZOOM_OPEN_Y - collapsed_y) * open_amount / zoom_steps;
+        fdps_cel_blit_sprite(data_fdps_village_window_sheet_ptr,
+                             ZOOM_WINDOW_SPRITE, compose_page,
+                             VGA_SCREEN_PITCH, window_x, window_y,
+                             (unsigned int) window_size, BLIT_MODE_SCALED);
+
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends, before the page goes out. */
+        }
+        memmove((void *) VGA_SCREEN_BASE, compose_page,
+                (size_t) VGA_SCREEN_BYTES);
+    }
+
+    free(compose_page);
+}
+
 /* 000357a0.  One keystroke of the chapter's secret-shop unlock code.
 
    The table is a 24-row, eight-byte-per-row block of keyboard make codes that
