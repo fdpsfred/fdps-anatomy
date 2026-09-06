@@ -2075,5 +2075,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00031bc0": [
+    {
+      "from": "emit",
+      "what": "Whether the twenty DAC port writes finish inside the vertical blanking interval on real hardware. This is a question about the ORIGINAL's timing, not about a rebuild divergence, and round 2 settled the rebuild half of it in the object file. The original spins until the retrace BEGINS at 00031e4c, writes five entries of three components through 0x3c8/0x3c9, and only then spins until it ENDS at 00031efb, so the whole band has to be written inside one blanking interval or the five animated colours change in view of the beam. WDISASM on workspace/code_emit/out/objs/VILLAGE.OBJ shows the code between those two spins is the original's instruction for instruction except that the -od loop's increment block is a bare 'inc dword ptr -24H[ebp]' at 0397 where the original has MOV EAX,dword ptr [EBP-0x8] / INC dword ptr [EBP-0x8] at 00031e84 -- one dead load fewer per iteration, five fewer instructions per frame, all inside the window. Nothing was hoisted, nothing was inlined and the spins were not merged, so the rebuild does strictly less work inside the interval and cannot tear anywhere the original does not. What is left open is only whether the original itself fits the interval on a given machine.",
+      "needs": "A playtest of the village signboard screen watching the five animated entries 0xf0..0xf4 for a tear or a flicker as the ramp rotates, read as a question about the original rather than about the rebuild: run the original executable and the rebuilt one on the same machine at the same DOSBox-X cycle setting. A tear that both show is the original's own behaviour under ADR-0001 and closes this entry; a tear only the rebuild shows would contradict the instruction count measured above and would be the thing to investigate.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed the rebuild half of the contract D concern for myself rather than restating it: I disassembled this round's workspace/code_emit/out/objs/VILLAGE.OBJ and read the window between the two retrace spins directly. It is the original's sequence -- both inp spins, the two divisions, the -od loop shape and four outp per iteration in the order 3c8H,3c9H,3c9H,3c9H -- with exactly one difference, a bare 'inc dword ptr -24H[ebp]' at the increment block where the original has MOV EAX,dword ptr [EBP-0x8] ahead of the INC at 00031e84. Nothing was hoisted out, nothing was inlined and the two spins were not merged, so the rebuild does strictly less work inside the blanking interval than the original. I add nothing to what still has to be settled, and I agree it is not settleable from here: whether the ORIGINAL's twenty port writes fit one interval is a property of real hardware at a given cycle setting, and no read of Ghidra, the object or the knowledge base answers it.",
+      "needs": "As emit#0 states: watch DAC entries 0xf0..0xf4 on the village signboard screen in the original and in the rebuild on the same machine at the same DOSBox-X cycle setting. A tear both show is the original's own behaviour under ADR-0001; a tear only the rebuild shows would contradict the instruction count measured above.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

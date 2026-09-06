@@ -13,14 +13,18 @@
  * Both globals the function touches are set by every test before it calls, so
  * nothing here depends on what the not-yet-emitted data definitions hold.
  */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <malloc.h>
+#include <conio.h>
 #include <dos.h>
 #include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "cdaudio.h"
+#include "keybd.h"
 #include "village.h"
 
 /* Chapter id 5 is the player's chapter 6, whose row is 1f 12 2e 13 12 14 --
@@ -972,6 +976,807 @@ static void village_paces_the_frames_with_the_tick(void)
     vill_unstage();
 }
 
+/* ---- fdps_village_signboard_menu, 00031bc0 -------------------------------
+ *
+ * Expected values come from the assembly at 00031bc0: CMP EAX,dword ptr
+ * [0x00064114] / JL at 00031bfc for the entry check; CMP dword ptr
+ * [EBP-0xc],0x7f / JGE at 00031c43 for the threshold; CALL 0x000357a0 at
+ * 00031c51 sitting AHEAD of every key compare with the arrows as its else, and
+ * MOV dword ptr [EAX],0x5 at 00031c60 for what a completed code does; the
+ * compares at 00031c84, 00031c8a, 00031cd5, 00031cdb, 00031d21, 00031d27 and
+ * 00031d33 for the keys, with ADD EDX,0x4 / MOV EBX,0x5 / IDIV at 00031ca3 and
+ * INC EDX / IDIV at 00031cf4 for the two cursor steps; MOV EBX,0x5 / DIV / AND
+ * EAX,0x3 at 00031d53 with CMP,0x3 / MOV 0x1 at 00031d65 for the leg cell;
+ * MOV byte ptr [EBP-0x4],0x1 / JMP 0x00031d53 at 00031d2d for the confirming
+ * pass falling into its own frame; ADD EAX,0xf0 at 00031e8f with CMP,0x5 at
+ * 00031e7c and the three MOV AL,byte ptr [EAX + EBP*0x1 + ...] at 00031ea8,
+ * 00031ec5 and 00031ee2 for the DAC band; and the nine bytes each of the three
+ * ramps that the image holds at 00031064, 0003106d and 00031076.  None of them
+ * is read off the emitted C.
+ *
+ * THE SHEET IS THE SHIPPED ONE AND CANNOT BE STOOD IN FOR.  The menu holds
+ * "MISC.VFS" and "CanBan.cel" as literals and takes no file argument, and a
+ * container it cannot open ends the process at exit(1) rather than failing an
+ * assertion, so every case here skips itself unless MISC.VFS is next to the
+ * executable (tests/gamefile.lst stages it).  Nothing below asserts a pixel of
+ * that sheet: what is asserted about the plate box is that something opaque
+ * covered it, and every colour that is named is one this fixture put in the
+ * marker cache itself.
+ *
+ * HOW THE KEYS GET IN.  fdps_read_keyboard_queue drains the ring the INT 09h
+ * handler fills, and it owns only the read index (keybd.h), so a case can load
+ * the ring's bytes and set the write index itself without an interrupt.  The
+ * ring holds nine readable entries, the tenth position being what makes the
+ * two indices equal again, and a pass that finds it empty reads 0xff -- which
+ * the threshold drops -- so a script that never confirms would spin forever.
+ * Every script below ends with Enter or Space.
+ *
+ * WHAT ELSE HAD TO BE PUT IN PLACE.  The arrows call fdps_play_sfx, which
+ * looks its cue up in the pack behind data_fdps_audio_basewav_sfx_bank_buf_ptr
+ * and does nothing at all when the name is not in it (audio.c), so the pack
+ * here is an empty container: the cue misses and no voice is started.  The CD
+ * poll at the top of every pass is disarmed by publishing -1 as the current
+ * music index, which is the arm its own cheapest test takes (cdaudio.c), so no
+ * device request is ever made.  And the unlock matcher sees every accepted
+ * key, so the cases that are not about it run under a chapter whose row is
+ * eight zero bytes and can never match.
+ */
+
+#define MENU_ARCHIVE "MISC.VFS"
+
+/* Where the six destinations are put.  They are spread over two rows well
+   clear of the plate box at rows 174..197, so no marker overlaps a plate and
+   no two markers overlap each other. */
+#define MENU_DEST_COUNT 6
+#define MENU_DEST_ROW_Y0 40
+#define MENU_DEST_ROW_Y1 80
+#define MENU_DEST_COL_X0 100
+#define MENU_DEST_COL_X1 140
+#define MENU_DEST_COL_X2 180
+
+/* The marker cache this section stages: the roster slot under test gets three
+   distinct colours in its first three offsets and every other offset of every
+   slot gets the stray, so a marker drawn from the wrong slot, or from a cell
+   past the first facing's three, shows up as its own value. */
+#define MENU_ROSTER_SLOT 3
+#define MENU_ROSTER_COUNT 4
+#define MENU_CELLS 3
+#define MENU_CELL_COLOR(cell) (0x51 + (cell))
+#define MENU_STRAY_COLOR 0x5f
+
+/* What mode 13h leaves the adapter holding until the first frame is copied
+   over it.  The ISR below starts sampling as soon as it is installed, and the
+   sheet load ahead of the first frame is long enough for a tick, so this is an
+   honest value for a probe to see and is accepted alongside the three cells. */
+#define MENU_CLEARED 0x00
+
+/* The five entries the menu animates, the two either side of them that it must
+   not touch, and the guard triple written into those two.  0x2a and 0x15 are
+   nowhere in the three ramps, whose values are all 0x31..0x3c. */
+#define MENU_DAC_WRITE_INDEX 0x3c8
+#define MENU_DAC_READ_INDEX 0x3c7
+#define MENU_DAC_DATA 0x3c9
+#define MENU_DAC_COMPONENT_MASK 0x3f
+#define MENU_DAC_FIRST 0xf0
+#define MENU_DAC_ENTRIES 5
+#define MENU_DAC_READ_FIRST (MENU_DAC_FIRST - 1)
+#define MENU_DAC_READ_COUNT (MENU_DAC_ENTRIES + 2)
+#define MENU_DAC_BAND_AT 1
+#define MENU_DAC_GUARD_BELOW 0
+#define MENU_DAC_GUARD_ABOVE (MENU_DAC_ENTRIES + 1)
+#define MENU_DAC_GUARD_LOW 0x2a
+#define MENU_DAC_GUARD_HIGH 0x15
+#define MENU_RAMP_BYTES 9
+#define MENU_RAMP_PHASES 5
+
+/* The keys, as fdps_keyboard_isr queues them. */
+#define MENU_KEY_TAB 0x0f
+#define MENU_KEY_ENTER 0x1c
+#define MENU_KEY_SPACE 0x39
+#define MENU_KEY_UP 0x48
+#define MENU_KEY_LEFT 0x4b
+#define MENU_KEY_RIGHT 0x4d
+#define MENU_KEY_DOWN 0x50
+
+/* Three codes the threshold has to drop: the boundary itself, a break code and
+   the empty-ring marker. */
+#define MENU_KEY_AT_THRESHOLD 0x7f
+#define MENU_KEY_BREAK 0x9d
+#define MENU_KEY_NONE 0xff
+#define MENU_DROPPED_CODES 3
+
+/* The chapters two cases pick their unlock row out of.  Chapter id 16's row is
+   eight zero bytes, so no keystroke can ever match it; chapter id 10's is
+   48 4b 50 4d -- up, left, down, right -- and ends on an arrow key, which is
+   what separates the matcher's own arm from the arrow chain it precedes. */
+#define MENU_CHAPTER_NO_CODE 16
+#define MENU_CHAPTER_ARROW_CODE 10
+
+#define MENU_SFX_PACK_BYTES 64
+#define MENU_SCRIPT_MAX 9
+
+/* Three pixels of the plate box, given as offsets inside the sheet's own 72 by
+   24 sprite and as the values the shipped CANBAN.CEL decodes to there.  The
+   sheet is 4-op RLE with a skip op (resource_info/cel.md), so a sprite leaves
+   most of the box untouched and the three pixels below are the three ways that
+   can come out:
+
+     (0,0)   every one of the seven sprites skips it, so the page shows through
+     (0,2)   only sprite 6, the empty plate frame, paints it -- 0xe6
+     (5,14)  sprite 6 paints 0xe6, sprite 2 paints 0x80 over it and sprite 5
+             paints 0xd0, while sprites 0, 1, 3 and 4 skip it and leave 0xe6
+
+   So the third pixel says which name plate went on top, the second says the
+   empty frame went down under it, and the first says a skipped pixel is left
+   alone rather than filled.  The box's corner goes at
+   (PLATE_BOX_X, PLATE_BOX_Y) = (3, 0xae). */
+#define MENU_PLATE_ORIGIN_X 3
+#define MENU_PLATE_ORIGIN_Y 0xae
+#define MENU_PLATE_CLEAR_ROW 0
+#define MENU_PLATE_CLEAR_COL 0
+#define MENU_PLATE_FRAME_ROW 0
+#define MENU_PLATE_FRAME_COL 2
+#define MENU_PLATE_FRAME_PIXEL 0xe6
+#define MENU_PLATE_NAME_ROW 5
+#define MENU_PLATE_NAME_COL 14
+#define MENU_PLATE_NAME_PIXEL_2 0x80
+#define MENU_PLATE_NAME_PIXEL_5 0xd0
+
+/* The three component ramps, quoted from the nine bytes each that the image
+   holds at 00031064, 0003106d and 00031076.  Each is a five-long cycle with
+   its first four values repeated behind it. */
+static unsigned char menu_ramp_red[MENU_RAMP_BYTES] = {
+    0x3c, 0x37, 0x31, 0x33, 0x37, 0x3c, 0x37, 0x31, 0x33
+};
+static unsigned char menu_ramp_green[MENU_RAMP_BYTES] = {
+    0x3c, 0x39, 0x33, 0x36, 0x39, 0x3c, 0x39, 0x33, 0x36
+};
+static unsigned char menu_ramp_blue[MENU_RAMP_BYTES] = {
+    0x3c, 0x3c, 0x3a, 0x3b, 0x3c, 0x3c, 0x3c, 0x3a, 0x3b
+};
+
+static unsigned char menu_sfx_pack[MENU_SFX_PACK_BYTES];
+static unsigned char menu_dac[MENU_DAC_READ_COUNT][3];
+static int menu_dest_x[MENU_DEST_COUNT] = {
+    MENU_DEST_COL_X0, MENU_DEST_COL_X1, MENU_DEST_COL_X2,
+    MENU_DEST_COL_X0, MENU_DEST_COL_X1, MENU_DEST_COL_X2
+};
+static int menu_dest_y[MENU_DEST_COUNT] = {
+    MENU_DEST_ROW_Y0, MENU_DEST_ROW_Y0, MENU_DEST_ROW_Y0,
+    MENU_DEST_ROW_Y1, MENU_DEST_ROW_Y1, MENU_DEST_ROW_Y1
+};
+
+/* MISC.VFS next to the executable, which every case here needs. */
+static int menu_archive_present(void)
+{
+    FILE *fp;
+
+    fp = fopen(MENU_ARCHIVE, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    fclose(fp);
+    return 1;
+}
+
+/* Three flat 24 by 24 markers and a stray one, with a slot table that points
+   every offset of every slot at the stray before the slot under test is given
+   the three in its first three. */
+static void menu_stage_cache(void)
+{
+    struct fdps_cel_cache_slot *slots;
+    int stream;
+    int slot;
+    int cell;
+    int row;
+    int at;
+    int color;
+
+    memset(vill_cache, 0, (size_t) VILL_CACHE_BYTES);
+    for (stream = 0; stream < VILL_CACHE_STREAMS; stream++) {
+        at = VILL_CACHE_TABLE_BYTES + stream * VILL_MARKER_STREAM_BYTES;
+        if (stream < MENU_CELLS) {
+            color = MENU_CELL_COLOR(stream);
+        } else {
+            color = MENU_STRAY_COLOR;
+        }
+        for (row = 0; row < VILL_MARKER_H; row++) {
+            vill_cache[at + row * VILL_MARKER_ROW_BYTES] = VILL_MARKER_CMD_24;
+            vill_cache[at + row * VILL_MARKER_ROW_BYTES + 1] =
+                (unsigned char) color;
+        }
+    }
+
+    slots = (struct fdps_cel_cache_slot *) vill_cache;
+    for (slot = 0; slot < VILL_CACHE_SLOTS; slot++) {
+        for (cell = 0; cell < VILL_CELLS_PER_SLOT; cell++) {
+            slots[slot].sprite_offset[cell] = VILL_CACHE_TABLE_BYTES
+                + MENU_CELLS * VILL_MARKER_STREAM_BYTES;
+        }
+    }
+    for (cell = 0; cell < MENU_CELLS; cell++) {
+        slots[MENU_ROSTER_SLOT].sprite_offset[cell] =
+            VILL_CACHE_TABLE_BYTES + cell * VILL_MARKER_STREAM_BYTES;
+    }
+    data_fdps_cel_sprite_cache_ptr = vill_cache;
+}
+
+/* Everything the menu reads that is not the sheet: the six destinations, the
+   party the marker is taken from, a sound pack that holds nothing, a CD poll
+   with no track selected, and a chapter with no unlock code. */
+static void menu_stage(void)
+{
+    int destination;
+
+    menu_stage_cache();
+    vill_stage_blend();
+    for (destination = 0; destination < MENU_DEST_COUNT; destination++) {
+        vill_place(destination, menu_dest_x[destination],
+                   menu_dest_y[destination]);
+    }
+    data_fdps_roster_member_count = MENU_ROSTER_COUNT;
+    data_fdps_village_marker_roster_idx = MENU_ROSTER_SLOT;
+
+    memset(menu_sfx_pack, 0, (size_t) MENU_SFX_PACK_BYTES);
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = menu_sfx_pack;
+
+    data_fdps_audio_cd_current_music_index = -1;
+    data_fdps_audio_bgm_enabled_flag = 0;
+    data_fdps_audio_cd_repeat_tick_counter = 0;
+    data_fdps_audio_cd_repeat_last_tick = data_fdps_timer_tick_counter;
+
+    data_fdps_chapter_current_chapter_id = MENU_CHAPTER_NO_CODE;
+    data_fdps_secret_code_match_pos = 0;
+}
+
+static void menu_unstage(void)
+{
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = NULL;
+    vill_unstage();
+}
+
+/* Loads the ring with the script and hands the read index back to its start.
+   The write index is what says how much is readable, so nothing has to be
+   cleared out of the bytes behind it. */
+static void menu_queue(unsigned char *script, int count)
+{
+    int index;
+
+    for (index = 0; index < SCANCODE_QUEUE_LEN; index++) {
+        data_fdps_input_scancode_queue[index] = 0;
+    }
+    for (index = 0; index < count; index++) {
+        data_fdps_input_scancode_queue[index] = script[index];
+    }
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = count;
+}
+
+static void menu_write_dac(int entry, int red, int green, int blue)
+{
+    outp(MENU_DAC_WRITE_INDEX, entry);
+    outp(MENU_DAC_DATA, red);
+    outp(MENU_DAC_DATA, green);
+    outp(MENU_DAC_DATA, blue);
+}
+
+/* The seven entries around the animated band, read back through the DAC's own
+   read port before the mode change that would reset them. */
+static void menu_read_dac(void)
+{
+    int entry;
+    int component;
+
+    for (entry = 0; entry < MENU_DAC_READ_COUNT; entry++) {
+        outp(MENU_DAC_READ_INDEX, MENU_DAC_READ_FIRST + entry);
+        for (component = 0; component < 3; component++) {
+            menu_dac[entry][component] =
+                (unsigned char) (inp(MENU_DAC_DATA) & MENU_DAC_COMPONENT_MASK);
+        }
+    }
+}
+
+/* One whole menu, leaving the last frame in vill_screen[], the band in
+   menu_dac[] and the per-tick probes in vill_samples[]. */
+static void menu_run(unsigned char *script, int count, int *selection,
+                     int probe_destination)
+{
+    vill_screen = (unsigned char *) malloc((size_t) VILL_SCREEN_BYTES);
+    vill_background = (unsigned char *) malloc((size_t) VILL_SCREEN_BYTES);
+    CHECK_EQ(vill_screen != NULL && vill_background != NULL, 1);
+    if (vill_screen == NULL || vill_background == NULL) {
+        return;
+    }
+    memset(vill_background, VILL_BACKGROUND_FILL, (size_t) VILL_SCREEN_BYTES);
+
+    vill_sample_count = 0;
+    vill_probe_at[0] =
+        (menu_dest_y[probe_destination] + VILL_MARKER_MID) * VILL_SCREEN_W
+        + menu_dest_x[probe_destination] + VILL_MARKER_MID;
+    vill_probe_at[1] =
+        (MENU_PLATE_ORIGIN_Y + MENU_PLATE_FRAME_ROW) * VILL_SCREEN_W
+        + MENU_PLATE_ORIGIN_X + MENU_PLATE_FRAME_COL;
+    vill_probe_at[2] = 0;
+    vill_probe_at[3] = 0;
+    vill_probe_at[4] = 0;
+
+    menu_queue(script, count);
+    vill_set_mode(VILL_MODE_320X200X256);
+    menu_write_dac(MENU_DAC_READ_FIRST, MENU_DAC_GUARD_LOW,
+                   MENU_DAC_GUARD_LOW, MENU_DAC_GUARD_LOW);
+    menu_write_dac(MENU_DAC_FIRST + MENU_DAC_ENTRIES, MENU_DAC_GUARD_HIGH,
+                   MENU_DAC_GUARD_HIGH, MENU_DAC_GUARD_HIGH);
+    vill_blocks_before = vill_used_heap_blocks();
+
+    vill_saved_timer = _dos_getvect(VILL_TIMER_VECTOR);
+    _dos_setvect(VILL_TIMER_VECTOR, vill_timer_isr);
+    fdps_village_signboard_menu(vill_background, selection);
+    _dos_setvect(VILL_TIMER_VECTOR, vill_saved_timer);
+
+    menu_read_dac();
+    memmove(vill_screen, (void *) VILL_VGA_BASE, (size_t) VILL_SCREEN_BYTES);
+    vill_set_mode(VILL_MODE_TEXT);
+    vill_blocks_after = vill_used_heap_blocks();
+}
+
+/* The pixel the marker's centre left on the last frame at this destination. */
+static int menu_marker_pixel(int destination)
+{
+    return vill_pixel(menu_dest_y[destination] + VILL_MARKER_MID,
+                      menu_dest_x[destination] + VILL_MARKER_MID);
+}
+
+/* A pixel of the plate box, addressed inside the sheet's own sprite. */
+static int menu_plate_pixel(int row, int col)
+{
+    return vill_pixel(MENU_PLATE_ORIGIN_Y + row, MENU_PLATE_ORIGIN_X + col);
+}
+
+/* Whether a pixel is one of the three cells the roster slot under test can be
+   drawn from -- which is what says it is neither the stray nor the page. */
+static int menu_is_a_cell(int pixel)
+{
+    return pixel >= MENU_CELL_COLOR(0) && pixel <= MENU_CELL_COLOR(2);
+}
+
+/* Which phase of the ramp the band was left on, or -1 if it is on none of the
+   five.  The five windows are distinct sequences, so at most one can hold. */
+static int menu_band_phase(void)
+{
+    int phase;
+    int entry;
+    int matched;
+    int found;
+
+    found = -1;
+    for (phase = 0; phase < MENU_RAMP_PHASES; phase++) {
+        matched = 1;
+        for (entry = 0; entry < MENU_DAC_ENTRIES; entry++) {
+            if ((int) menu_dac[MENU_DAC_BAND_AT + entry][0]
+                    != (int) menu_ramp_red[phase + entry]
+                || (int) menu_dac[MENU_DAC_BAND_AT + entry][1]
+                    != (int) menu_ramp_green[phase + entry]
+                || (int) menu_dac[MENU_DAC_BAND_AT + entry][2]
+                    != (int) menu_ramp_blue[phase + entry]) {
+                matched = 0;
+            }
+        }
+        if (matched != 0) {
+            found = phase;
+        }
+    }
+    return found;
+}
+
+/* Left and Up are the same arm and step the cursor BACK: ADD EDX,0x4 before a
+   signed IDIV by 5 at 00031ca3, so entry 0 wraps to 4 and not to -1. */
+static void menu_left_and_up_step_back(void)
+{
+    unsigned char script[MENU_SCRIPT_MAX];
+    int selection;
+
+    if (menu_archive_present() == 0) {
+        return;
+    }
+
+    menu_stage();
+    script[0] = MENU_KEY_LEFT;
+    script[1] = MENU_KEY_ENTER;
+    selection = 0;
+    menu_run(script, 2, &selection, 4);
+    CHECK_EQ(selection, 4);
+    menu_unstage();
+
+    menu_stage();
+    script[0] = MENU_KEY_UP;
+    script[1] = MENU_KEY_ENTER;
+    selection = 3;
+    menu_run(script, 2, &selection, 2);
+    CHECK_EQ(selection, 2);
+    menu_unstage();
+}
+
+/* Right and Down are the other arm and step forward, INC EDX before the same
+   signed IDIV at 00031cf4, so entry 4 wraps to 0. */
+static void menu_right_and_down_step_forward(void)
+{
+    unsigned char script[MENU_SCRIPT_MAX];
+    int selection;
+
+    if (menu_archive_present() == 0) {
+        return;
+    }
+
+    menu_stage();
+    script[0] = MENU_KEY_RIGHT;
+    script[1] = MENU_KEY_ENTER;
+    selection = 4;
+    menu_run(script, 2, &selection, 0);
+    CHECK_EQ(selection, 0);
+    menu_unstage();
+
+    menu_stage();
+    script[0] = MENU_KEY_DOWN;
+    script[1] = MENU_KEY_DOWN;
+    script[2] = MENU_KEY_ENTER;
+    selection = 0;
+    menu_run(script, 3, &selection, 2);
+    CHECK_EQ(selection, 2);
+    menu_unstage();
+}
+
+/* Space confirms as well as Enter -- CMP,0x1c / JZ then CMP,0x39 / JNZ at
+   00031d21 -- and the answer is whatever the cursor had reached. */
+static void menu_space_confirms_like_enter(void)
+{
+    unsigned char script[MENU_SCRIPT_MAX];
+    int selection;
+
+    if (menu_archive_present() == 0) {
+        return;
+    }
+
+    menu_stage();
+    script[0] = MENU_KEY_RIGHT;
+    script[1] = MENU_KEY_SPACE;
+    selection = 1;
+    menu_run(script, 2, &selection, 2);
+    CHECK_EQ(selection, 2);
+    menu_unstage();
+}
+
+/* Everything at or above 0x7f is dropped before the matcher and before the key
+   chain: CMP dword ptr [EBP-0xc],0x7f / JGE at 00031c43, over a value the
+   reader widened UNSIGNED with AND EAX,0xff at 00031c33.
+
+   The first run says a dropped code moves nothing.  The three after it say it
+   never reached the matcher either, which is the only way to see the guard at
+   all -- none of these three codes is a menu key, so a build with no guard
+   would still leave the cursor alone.  Chapter id 14's row is 02 06, so after
+   0x02 the match position stands at 1, and the run finishes the code -- and
+   selects the hidden sixth destination -- only because the code wedged between
+   the two digits was thrown away.  Had it got through,
+   fdps_check_secret_code_key would have missed on it, cleared the position,
+   and 0x06 would then have missed on the row's first byte and left the cursor
+   at 1.  So the 0x7f run fails under a JG, the other two fail under no guard
+   at all, and all three fail under a signed widening, which would deliver 0x9d
+   as -99 and 0xff as -1. */
+static void menu_drops_codes_at_and_above_the_threshold(void)
+{
+    unsigned char script[MENU_SCRIPT_MAX];
+    unsigned char dropped[MENU_DROPPED_CODES];
+    int selection;
+    int code;
+
+    if (menu_archive_present() == 0) {
+        return;
+    }
+
+    menu_stage();
+    script[0] = MENU_KEY_AT_THRESHOLD;
+    script[1] = MENU_KEY_BREAK;
+    script[2] = MENU_KEY_NONE;
+    script[3] = MENU_KEY_ENTER;
+    selection = 2;
+    menu_run(script, 4, &selection, 2);
+    CHECK_EQ(selection, 2);
+    CHECK_EQ(data_fdps_secret_code_match_pos, 0);
+    menu_unstage();
+
+    dropped[0] = MENU_KEY_AT_THRESHOLD;
+    dropped[1] = MENU_KEY_BREAK;
+    dropped[2] = MENU_KEY_NONE;
+    for (code = 0; code < MENU_DROPPED_CODES; code++) {
+        menu_stage();
+        /* Chapter id 14's unlock row is 02 06, the digits 1 and 5, and
+           neither digit is a menu key. */
+        data_fdps_chapter_current_chapter_id = 14;
+        data_fdps_secret_code_match_pos = 0;
+        script[0] = 0x02;
+        script[1] = dropped[code];
+        script[2] = 0x06;
+        script[3] = MENU_KEY_ENTER;
+        selection = 1;
+        menu_run(script, 4, &selection, 5);
+        CHECK_EQ(selection, 5);
+        menu_unstage();
+    }
+}
+
+/* Tab walks the marker's party member on by a signed modulus of the party
+   size, MOV EDX,[0x000601a4] / INC / IDIV at 00031d39, and touches nothing
+   else. */
+static void menu_tab_cycles_the_marker_member(void)
+{
+    unsigned char script[MENU_SCRIPT_MAX];
+    int selection;
+
+    if (menu_archive_present() == 0) {
+        return;
+    }
+
+    menu_stage();
+    script[0] = MENU_KEY_TAB;
+    script[1] = MENU_KEY_ENTER;
+    selection = 1;
+    data_fdps_village_marker_roster_idx = MENU_ROSTER_SLOT;
+    menu_run(script, 2, &selection, 1);
+    CHECK_EQ(data_fdps_village_marker_roster_idx, 0);
+    CHECK_EQ(selection, 1);
+    menu_unstage();
+
+    menu_stage();
+    script[0] = MENU_KEY_TAB;
+    script[1] = MENU_KEY_TAB;
+    script[2] = MENU_KEY_ENTER;
+    selection = 1;
+    data_fdps_village_marker_roster_idx = 1;
+    menu_run(script, 3, &selection, 1);
+    CHECK_EQ(data_fdps_village_marker_roster_idx, 3);
+    menu_unstage();
+}
+
+/* The party index is range-checked once, on the way in, and the compare is
+   JL on the signed pair: an index equal to the party size is already out of
+   range and is reset, one below it is left alone.  A JLE there would keep the
+   equal case and index one slot past the party. */
+static void menu_resets_an_out_of_range_member_on_entry(void)
+{
+    unsigned char script[MENU_SCRIPT_MAX];
+    int selection;
+
+    if (menu_archive_present() == 0) {
+        return;
+    }
+
+    menu_stage();
+    script[0] = MENU_KEY_ENTER;
+    selection = 0;
+    data_fdps_village_marker_roster_idx = MENU_ROSTER_COUNT;
+    menu_run(script, 1, &selection, 0);
+    CHECK_EQ(data_fdps_village_marker_roster_idx, 0);
+    menu_unstage();
+
+    menu_stage();
+    script[0] = MENU_KEY_ENTER;
+    selection = 0;
+    data_fdps_village_marker_roster_idx = MENU_ROSTER_COUNT - 1;
+    menu_run(script, 1, &selection, 0);
+    CHECK_EQ(data_fdps_village_marker_roster_idx, MENU_ROSTER_COUNT - 1);
+    menu_unstage();
+}
+
+/* A completed unlock code selects the hidden sixth destination, MOV dword ptr
+   [EAX],0x5 at 00031c60.  Chapter id 14's row is 02 06 -- the digits 1 and 5 --
+   so the second keystroke finishes it, and neither digit is a menu key. */
+static void menu_completed_code_selects_the_secret_shop(void)
+{
+    unsigned char script[MENU_SCRIPT_MAX];
+    int selection;
+
+    if (menu_archive_present() == 0) {
+        return;
+    }
+
+    menu_stage();
+    data_fdps_chapter_current_chapter_id = 14;
+    data_fdps_secret_code_match_pos = 0;
+    script[0] = 0x02;
+    script[1] = 0x06;
+    script[2] = MENU_KEY_ENTER;
+    selection = 1;
+    menu_run(script, 3, &selection, 5);
+    CHECK_EQ(selection, 5);
+    CHECK_EQ(menu_is_a_cell(menu_marker_pixel(5)), 1);
+    /* And the plate the last frame drew is the sixth sprite, not the first
+       five: 0xd0 is what sprite 5 paints where sprite 2 paints 0x80. */
+    CHECK_EQ(menu_plate_pixel(MENU_PLATE_NAME_ROW, MENU_PLATE_NAME_COL),
+             MENU_PLATE_NAME_PIXEL_5);
+    menu_unstage();
+}
+
+/* The matcher runs AHEAD of the key chain and the arrows are its else, so the
+   keystroke that finishes a code does not also move the cursor.  Chapter id
+   10's row is 48 4b 50 4d -- up, left, down, right -- and its last key is an
+   arrow: from entry 0 the first three walk the cursor to 4, 3 and 4, and the
+   fourth completes the code and jumps to 5.  A build that tested the arrows
+   first, or that let both arms run, would leave 0 here. */
+static void menu_a_code_key_does_not_also_move_the_cursor(void)
+{
+    unsigned char script[MENU_SCRIPT_MAX];
+    int selection;
+
+    if (menu_archive_present() == 0) {
+        return;
+    }
+
+    menu_stage();
+    data_fdps_chapter_current_chapter_id = MENU_CHAPTER_ARROW_CODE;
+    data_fdps_secret_code_match_pos = 0;
+    script[0] = MENU_KEY_UP;
+    script[1] = MENU_KEY_LEFT;
+    script[2] = MENU_KEY_DOWN;
+    script[3] = MENU_KEY_RIGHT;
+    script[4] = MENU_KEY_ENTER;
+    selection = 0;
+    menu_run(script, 5, &selection, 5);
+    CHECK_EQ(selection, 5);
+    /* Enter broke the run that the fourth key had completed, and the row's
+       first byte is not Enter either, so the position was left cleared. */
+    CHECK_EQ(data_fdps_secret_code_match_pos, 0);
+    menu_unstage();
+}
+
+/* The confirming pass still draws its whole frame: the flag is set at 00031d2d
+   and the loop falls into the body from there, so what is on the adapter when
+   the menu returns is a page composed this pass -- the caller's background,
+   the marker at the chosen destination and both plates -- and not the frame
+   before it.  A loop that ended where the key was read would leave the marker
+   at the previous destination. */
+static void menu_draws_a_frame_on_the_confirming_pass(void)
+{
+    unsigned char script[MENU_SCRIPT_MAX];
+    int selection;
+    int center;
+
+    if (menu_archive_present() == 0) {
+        return;
+    }
+
+    menu_stage();
+    script[0] = MENU_KEY_RIGHT;
+    script[1] = MENU_KEY_ENTER;
+    selection = 1;
+    menu_run(script, 2, &selection, 2);
+
+    center = menu_marker_pixel(2);
+    CHECK_EQ(menu_is_a_cell(center), 1);
+    /* The marker is a flat 24 by 24, so its two far corners hold the same cell
+       the centre does, and one pixel past the bottom right is still the page. */
+    CHECK_EQ(vill_pixel(menu_dest_y[2], menu_dest_x[2]), center);
+    CHECK_EQ(vill_pixel(menu_dest_y[2] + VILL_MARKER_H - 1,
+                        menu_dest_x[2] + VILL_MARKER_W - 1), center);
+    CHECK_EQ(vill_pixel(menu_dest_y[2] + VILL_MARKER_H,
+                        menu_dest_x[2] + VILL_MARKER_W),
+             VILL_BACKGROUND_FILL);
+    /* The destination it came from is back to the page: every frame starts
+       from a fresh copy of the caller's own. */
+    CHECK_EQ(menu_marker_pixel(1), VILL_BACKGROUND_FILL);
+    /* The empty frame went down, destination 2's own name plate went down on
+       top of it, and a pixel both sprites skip is still the caller's page. */
+    CHECK_EQ(menu_plate_pixel(MENU_PLATE_FRAME_ROW, MENU_PLATE_FRAME_COL),
+             MENU_PLATE_FRAME_PIXEL);
+    CHECK_EQ(menu_plate_pixel(MENU_PLATE_NAME_ROW, MENU_PLATE_NAME_COL),
+             MENU_PLATE_NAME_PIXEL_2);
+    CHECK_EQ(menu_plate_pixel(MENU_PLATE_CLEAR_ROW, MENU_PLATE_CLEAR_COL),
+             VILL_BACKGROUND_FILL);
+    CHECK_EQ(vill_pixel(0, 0), VILL_BACKGROUND_FILL);
+    CHECK_EQ(vill_pixel(VILL_SCREEN_H - 1, VILL_SCREEN_W - 1),
+             VILL_BACKGROUND_FILL);
+    /* And the caller's own page was only ever read. */
+    CHECK_EQ((int) vill_background[(menu_dest_y[2] + VILL_MARKER_MID)
+                                   * VILL_SCREEN_W + menu_dest_x[2]
+                                   + VILL_MARKER_MID],
+             VILL_BACKGROUND_FILL);
+    CHECK_EQ((int) vill_background[MENU_PLATE_ORIGIN_Y * VILL_SCREEN_W
+                                   + MENU_PLATE_ORIGIN_X + 2],
+             VILL_BACKGROUND_FILL);
+    menu_unstage();
+}
+
+/* The marker is taken from the party member's own slot and from the first
+   three of that slot's twelve offsets -- the cell number is the whole of the
+   index at 00031d75, with no facing term ahead of it.  Every frame of a run
+   that presses nothing is watched, so a slot or a cell read from anywhere else
+   would show as the stray on one of them.  The cleared adapter is allowed
+   because the sheet load ahead of the first frame outlasts a tick. */
+static void menu_marker_comes_from_the_members_first_cells(void)
+{
+    unsigned char script[MENU_SCRIPT_MAX];
+    int selection;
+
+    if (menu_archive_present() == 0) {
+        return;
+    }
+
+    menu_stage();
+    script[0] = MENU_KEY_AT_THRESHOLD;
+    script[1] = MENU_KEY_AT_THRESHOLD;
+    script[2] = MENU_KEY_AT_THRESHOLD;
+    script[3] = MENU_KEY_ENTER;
+    selection = 4;
+    menu_run(script, 4, &selection, 4);
+
+    CHECK_EQ(vill_sample_count >= 1, 1);
+    CHECK_EQ(vill_strangers(0, MENU_CELL_COLOR(0), MENU_CELL_COLOR(1),
+                            MENU_CELL_COLOR(2), MENU_CLEARED), 0);
+    CHECK_EQ(vill_seen(0, MENU_STRAY_COLOR), 0);
+    CHECK_EQ(vill_seen(0, VILL_BACKGROUND_FILL), 0);
+    CHECK_EQ(menu_is_a_cell(menu_marker_pixel(4)), 1);
+    /* And the empty plate frame is redrawn on every one of those frames, not
+       only on the last: PUSH 0x6 at 00031e19 is inside the loop. */
+    CHECK_EQ(vill_strangers(1, MENU_PLATE_FRAME_PIXEL, MENU_CLEARED,
+                            MENU_PLATE_FRAME_PIXEL, MENU_PLATE_FRAME_PIXEL),
+             0);
+    menu_unstage();
+}
+
+/* Five DAC entries from 0xf0 up are stepped through the sliding window, three
+   components each, and nothing either side of them is touched.  The window is
+   read at a phase this test cannot predict -- the frame counter the phase
+   comes off is never seeded -- so what is asserted is that the band holds one
+   of the five windows exactly, which pins all fifteen ramp bytes and the
+   window's stride at once. */
+static void menu_steps_the_five_dac_entries(void)
+{
+    unsigned char script[MENU_SCRIPT_MAX];
+    int selection;
+
+    if (menu_archive_present() == 0) {
+        return;
+    }
+
+    menu_stage();
+    script[0] = MENU_KEY_ENTER;
+    selection = 0;
+    menu_run(script, 1, &selection, 0);
+
+    CHECK_EQ(menu_band_phase() >= 0, 1);
+    CHECK_EQ((int) menu_dac[MENU_DAC_GUARD_BELOW][0], MENU_DAC_GUARD_LOW);
+    CHECK_EQ((int) menu_dac[MENU_DAC_GUARD_BELOW][1], MENU_DAC_GUARD_LOW);
+    CHECK_EQ((int) menu_dac[MENU_DAC_GUARD_BELOW][2], MENU_DAC_GUARD_LOW);
+    CHECK_EQ((int) menu_dac[MENU_DAC_GUARD_ABOVE][0], MENU_DAC_GUARD_HIGH);
+    CHECK_EQ((int) menu_dac[MENU_DAC_GUARD_ABOVE][1], MENU_DAC_GUARD_HIGH);
+    CHECK_EQ((int) menu_dac[MENU_DAC_GUARD_ABOVE][2], MENU_DAC_GUARD_HIGH);
+    menu_unstage();
+}
+
+/* The sheet is loaded once and freed once and every frame's page is given back
+   before the next one starts -- CALL malloc at 00031d9e and CALL free at
+   00031f39 inside the loop, CALL free at 00031f4a after it -- so the heap is
+   where it was when the menu returns. */
+static void menu_frees_the_sheet_and_every_page(void)
+{
+    unsigned char script[MENU_SCRIPT_MAX];
+    int selection;
+
+    if (menu_archive_present() == 0) {
+        return;
+    }
+
+    menu_stage();
+    script[0] = MENU_KEY_RIGHT;
+    script[1] = MENU_KEY_AT_THRESHOLD;
+    script[2] = MENU_KEY_LEFT;
+    script[3] = MENU_KEY_ENTER;
+    selection = 0;
+    menu_run(script, 4, &selection, 0);
+
+    CHECK_EQ(selection, 0);
+    CHECK_EQ(vill_blocks_after, vill_blocks_before);
+    menu_unstage();
+}
+
 void run_village_tests(void)
 {
     RUN_TEST(village_secret_code_completes);
@@ -998,4 +1803,17 @@ void run_village_tests(void)
     RUN_TEST(village_presents_the_page_and_keeps_the_background);
     RUN_TEST(village_frees_every_frames_page);
     RUN_TEST(village_paces_the_frames_with_the_tick);
+
+    RUN_TEST(menu_left_and_up_step_back);
+    RUN_TEST(menu_right_and_down_step_forward);
+    RUN_TEST(menu_space_confirms_like_enter);
+    RUN_TEST(menu_drops_codes_at_and_above_the_threshold);
+    RUN_TEST(menu_tab_cycles_the_marker_member);
+    RUN_TEST(menu_resets_an_out_of_range_member_on_entry);
+    RUN_TEST(menu_completed_code_selects_the_secret_shop);
+    RUN_TEST(menu_a_code_key_does_not_also_move_the_cursor);
+    RUN_TEST(menu_draws_a_frame_on_the_confirming_pass);
+    RUN_TEST(menu_marker_comes_from_the_members_first_cells);
+    RUN_TEST(menu_steps_the_five_dac_entries);
+    RUN_TEST(menu_frees_the_sheet_and_every_page);
 }

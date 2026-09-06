@@ -2812,6 +2812,14 @@
       "status": "committed",
       "emitted_against": "0x406",
       "rounds": 0
+    },
+    "00031bc0": {
+      "name": "fdps_village_signboard_menu",
+      "target": "village.c",
+      "body_size": "0x399",
+      "status": "committed",
+      "emitted_against": "0x399",
+      "rounds": 1
     }
   }
 }

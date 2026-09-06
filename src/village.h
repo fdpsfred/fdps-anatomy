@@ -17,8 +17,14 @@
    index is the destination number the signboard menu is on, 0..5, with 5 the
    hidden secret shop.
 
-   fdps_village_animate_walk_to_destination is the only reader of either, and
-   it reads both entries of both tables on every call. */
+   Three functions read them, each with its own index.
+   fdps_village_animate_walk_to_destination reads both entries of both tables
+   on every call, the journey's two endpoints.  fdps_village_signboard_menu
+   reads one entry of each per frame, at the cursor's current destination, to
+   place the party-member marker.  fdps_run_village_phase reads one entry of
+   each twice, at 0003139e/000313ae and 000313dd/000313ed, and hands the pair
+   to fdps_transition_zoom as the centre the village zooms out from on the way
+   into the menu and back into on the way out. */
 extern int data_fdps_village_signboard_destination_x_table[6];
 extern int data_fdps_village_destination_marker_y_table[6];
 
@@ -84,5 +90,45 @@ extern void fdps_village_animate_walk_to_destination(unsigned char *background,
                                                      unsigned char
                                                          *signboard_cel);
 #pragma aux fdps_village_animate_walk_to_destination "*" parm caller [];
+
+/* Runs the village signboard's modal menu and returns when the player has
+   chosen a destination.  The choice is `*selection` on return; there is no
+   other answer and no way to cancel.
+
+   `background` is the caller's own 320x200 8bpp page holding the painted town
+   screen, and it is only read: every frame takes a fresh 64,000-byte page from
+   the heap, copies this over it, draws into that and frees it again.
+
+   `selection` is both the starting position of the cursor and where the answer
+   is written, in place, on every keystroke that moves it.  It is a signboard
+   destination number: 0..4 are the five entries the arrow keys wrap over, and
+   5 is the hidden secret shop, which is reachable ONLY by entering the
+   chapter's unlock code (fdps_check_secret_code_key above) while the menu is
+   up.  A caller that starts the cursor outside 0..5 indexes both coordinate
+   tables out of range, and nothing here checks it.
+
+   The keys are Left and Up for the previous entry, Right and Down for the
+   next, Enter and Space to confirm, and Tab to show the next party member as
+   the marker walking about the map.  Every one of them is fed to the unlock
+   matcher first, so a keystroke that completes the code jumps to the secret
+   shop instead of doing its usual job.
+
+   WHAT THE MENU NEEDS IN PLACE BEFORE IT IS CALLED.  It loads "CanBan.cel" out
+   of "MISC.VFS" itself, so the archive has to be readable -- a miss ends the
+   process inside fdps_vfs_load_entry (vfs.h).  It draws the marker out of the
+   block behind data_fdps_cel_sprite_cache_ptr, so that cache has to hold the
+   roster member's group.  It paces every frame on data_fdps_timer_tick_counter
+   and on the vertical retrace, so with the timer interrupt not installed the
+   frame wait never ends.  And its entry check reads
+   data_fdps_roster_member_count: a count of zero divides by zero the first
+   time Tab is pressed.
+
+   IT ANIMATES DAC ENTRIES 0xf0 TO 0xf4 AND NEVER PUTS THEM BACK.  Those five
+   entries are stepped through a rotating six-bit ramp on every frame and are
+   left wherever the last frame put them, so a caller that wants them at a
+   fixed colour afterwards has to write them itself. */
+extern void fdps_village_signboard_menu(unsigned char *background,
+                                        int *selection);
+#pragma aux fdps_village_signboard_menu "*" parm caller [];
 
 #endif
