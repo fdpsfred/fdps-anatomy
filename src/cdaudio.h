@@ -371,4 +371,31 @@ extern unsigned int data_fdps_audio_cd_repeat_last_tick;
 extern void fdps_cd_music_repeat_poll(void);
 #pragma aux fdps_cd_music_repeat_poll "*" parm caller [];
 
+/* 00030cc0.  Makes sure the disc the chapter needs is in the drive and then
+   starts that chapter's music: it stops whatever is playing, waits -- with no
+   timeout and no way out but the right disc -- until "%s\Pack.vfs" is
+   readable and the Pass.Dat member inside it names the matching disc, and then
+   publishes the chapter's track in data_fdps_audio_cd_current_music_index and
+   sends it to the drive.
+
+   chapter is the chapter index, and it is what decides the disc as well as the
+   track: 0 to 17 need disc 1 and 18 upwards need disc 2
+   (resource_info/disc_images.md).  Only chapters 0 to 29 have a row in the
+   table, and nothing here range-checks the index -- a chapter past the end
+   reads the frame beyond the table.  track_slot picks one of that chapter's
+   two entries; four of the five call sites pass 0, and fdps_battle_advance_turn
+   passes 1 at 0001e5db before passing 0 at 0001e620.
+
+   IT IS MODAL AND IT DRAWS.  While the wrong disc is in, it opens the message
+   panel, waits on getch and holds for twenty seconds after each keypress, so a
+   caller has to be somewhere the panel may appear and the game may stop.  It
+   also takes the keyboard hook down for the duration and puts it back on the
+   way out, which is what makes getch read through DOS while it waits.
+
+   Returns nothing.  With music switched off it publishes -1 and stops the
+   drive whatever the chapter's table entry says, exactly as
+   fdps_cd_set_music_track does with its argument. */
+extern void fdps_cd_verify_disc_and_play_track(int chapter, int track_slot);
+#pragma aux fdps_cd_verify_disc_and_play_track "*" parm caller [];
+
 #endif

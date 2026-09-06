@@ -16,24 +16,40 @@
  * (rebuild_info/build_flags.md), so what it builds from this file is the same
  * code without the probe, and the probe is not written out below.
  *
- * fdps_cd_set_music_track at 00030bf0 and fdps_cd_music_repeat_poll at
- * 00030c50 are the exceptions in the other direction: both sit outside that
- * block, were built with the game's own flag set and carry no probe of their
- * own.  Routing puts them here because they are the music layer's front door
- * onto these commands -- the one that starts a track and the one that keeps it
- * going -- not because they shared a translation unit with them.
+ * fdps_cd_set_music_track at 00030bf0, fdps_cd_music_repeat_poll at 00030c50
+ * and fdps_cd_verify_disc_and_play_track at 00030cc0 are the exceptions in the
+ * other direction: all three sit outside that block, were built with the
+ * game's own flag set and carry no probe of their own.  Routing puts them here
+ * because they are the music layer's front door onto these commands -- the one
+ * that starts a track, the one that keeps it going and the one the game
+ * changes chapters through -- not because they shared a translation unit with
+ * them.
  *
  * memcpy comes from <string.h> and is a real call in the image; the request
  * header layout comes from fdpstype.h, the DOS block pointer and the published
  * status word from gamedata.h, the driver request path from cd.h, and the
  * table-of-contents query the play range is resolved out of from cdtoc.h.
+ *
+ * The disc check at the end of the file is the only routine here that touches
+ * anything but the drive: sprintf from <stdio.h>, access from <io.h>, kbhit
+ * and getch from <conio.h> and delay from <i86.h>, all real calls in the image
+ * too, plus the container reader in vfs.h, the message panel in msgwin.h, the
+ * text renderer in text.h and the keyboard hook in keybd.h.
  */
+#include <stdio.h>
 #include <string.h>
+#include <conio.h>
+#include <io.h>
+#include <i86.h>
 
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "cd.h"
 #include "cdtoc.h"
+#include "keybd.h"
+#include "msgwin.h"
+#include "text.h"
+#include "vfs.h"
 #include "cdaudio.h"
 
 /* 0003c3fa.  A bare MSCDEX device request -- command 0x83, Seek -- with no
@@ -734,5 +750,246 @@ void fdps_cd_music_repeat_poll(void)
         }
 
         data_fdps_audio_cd_repeat_last_tick = data_fdps_timer_tick_counter;
+    }
+}
+
+
+/* How many chapters the track table has a row for, and how many entries each
+   row holds: MOV ECX,0xf / MOVSD.REP at 00030ccc copies fifteen dwords, sixty
+   bytes, and the index the body forms is chapter * 2 + track_slot (ADD EAX,EAX
+   / ADD EDX,EAX at 00030e86).  Sixty bytes over a stride of two is thirty
+   rows. */
+#define CHAPTER_TRACK_ROWS 30
+#define CHAPTER_TRACK_SLOTS 2
+
+/* The path buffer sprintf composes into.  Twenty bytes is the gap between
+   [EBP-0x24], the address LEA hands sprintf and access, and [EBP-0x10], the
+   next thing on the frame.  It is not a bound the code enforces: what goes in
+   is data_fdps_cdrom_path, which Disk.no's third token fills unbounded
+   (gamedata.h), plus the ten characters of "\Pack.vfs" and a terminator. */
+#define PACK_VFS_PATH_BYTES 20
+
+/* The chapter the discs are cut between: CMP dword ptr [EBP+0x14],0x12 at
+   00030d5d, 00030d63, 00030de9 and 00030df3, all four decided by JGE or JL, so
+   the comparison is signed and the split is chapters 0 to 17 on disc 1 and 18
+   upwards on disc 2. */
+#define FIRST_DISC_2_CHAPTER 0x12
+
+/* What Pass.Dat's first character says once '0' has been taken off it: the
+   member holds "1\r\n" on disc 1 and "2\r\n" on disc 2
+   (resource_info/disc_images.md).  The two compares are CMP dword ptr
+   [EBP-0xc],0x1 at 00030d69 and ,0x2 at 00030df5. */
+#define INSERTED_DISC_1 1
+#define INSERTED_DISC_2 2
+
+/* The three text-block entries the prompt draws, PUSH 0x223, PUSH 0x222 and
+   PUSH 0x22a.  The first two are the swap requests, one per disc; the third is
+   drawn over the same panel after the player has pressed a key and stays up
+   for the hold below while the drive is spinning up on the new disc. */
+#define TEXT_INSERT_DISC_2 0x223
+#define TEXT_INSERT_DISC_1 0x222
+#define TEXT_DISC_SWAP_ACKNOWLEDGED 0x22a
+
+/* The portrait the message panel opens with, PUSH 0x28 at 00030d71 and
+   00030dfd. */
+#define DISC_PROMPT_FACE_INDEX 0x28
+
+/* PUSH 0x4e20 at 00030dcc and 00030e58 -- twenty seconds, in the milliseconds
+   delay() takes.  It is the pause after the acknowledgement line, long enough
+   for a drive to notice the new disc and mount it, and it runs before the
+   panel comes down and before the probe is made again. */
+#define DISC_PROMPT_HOLD_MS 0x4e20
+
+/* Where the two prompt lines go and how wide the surface under them is.
+   0xaa44a is screen (138, 131), the pen the message panel's own text sits at,
+   and 0xabc0a is (138, 150), nineteen rows below it; 0x140 is the mode 13h row
+   stride.  All three are hard-coded in the original -- PUSH 0xaa44a at
+   00030d89 and 00030e15, PUSH 0xabc0a at 00030db4 and 00030e40, PUSH 0x140
+   beside each -- and stay literals here, because they are addresses inside the
+   display adapter's aperture rather than the address of anything the linker
+   places (rebuild_info/pitfalls.md). */
+#define DISC_PROMPT_TEXT_ORIGIN 0x000aa44a
+#define DISC_PROMPT_TAIL_ORIGIN 0x000abc0a
+#define VGA_SCREEN_PITCH 0x140
+
+/* The standard message colours, PUSH 0x6d / PUSH 0x0 / PUSH 0xd0 in front of
+   all four draws: foreground, no background fill, and the shadow the outline
+   colour becomes while the font's outline flag is clear. */
+#define PROMPT_TEXT_FG_COLOR 0xd0
+#define PROMPT_TEXT_BG_COLOR 0
+#define PROMPT_TEXT_OUTLINE_COLOR 0x6d
+
+/* 00030cc0.  Holds the game still until the disc the chapter needs is in the
+   drive, then puts the music for that chapter on.  It is what a chapter
+   change, a load and the music toggle all go through, and it is the only place
+   in the image that reads which disc is inserted.
+
+   THE LOOP DOES NOT TIME OUT AND HAS NO WAY OUT BUT THE RIGHT DISC.  Every arm
+   that draws a prompt jumps back to the top at 00030dde and 00030e6a, and the
+   only store of 1 into the done flag is at 00030e6c, on the arm where the
+   probe succeeded and the disc number matched.  A player who never swaps the
+   disc stays in fdps_message_window_open / getch / delay for as long as they
+   like.
+
+   The disc test is written twice over, once per disc, and each half tests the
+   chapter twice.  Reading the branches at 00030d57 rather than the shape they
+   suggest: the probe result is looked at first, and only the arm where it
+   failed tests the chapter on its own -- CMP byte ptr [EBP-0x4],0x0 / JZ
+   0x00030d63 skips straight past the first clause when the probe succeeded, so
+   the disc number is never read on a pass where no container was found.  That
+   is what makes the uninitialised disc-number slot safe in the original and
+   what the two-clause form below keeps: || is short-circuit, so the second
+   clause's chapter test fails before the disc number is reached whenever the
+   first clause's did.
+
+   THE TABLE ENTRY IS ZERO-EXTENDED, SO IT CANNOT BE THE -1 THE NEXT LINE TESTS
+   FOR.  XOR EAX,EAX / MOV AL,byte ptr [EDX + EBP + -0x60] at 00030e8d makes
+   the byte unsigned, so 0xff would arrive as 255 and go to the drive as track
+   256 rather than stopping it; the compare against -1 below can only be true
+   on the arm that put the -1 there itself.  No row of the shipped table holds
+   0xff, so the two readings never differ in play, but the array has to be
+   unsigned char for them to agree at all (contract C).
+
+   Nothing here reports anything.  Every callee is void or has its result
+   dropped -- both fdps_draw_text returns are discarded, and the CALL to access
+   at 00030d21 is the only one whose value is kept, as the low byte of EAX --
+   and the RET at 00030f31 follows the epilogue with EAX holding whatever the
+   last call left.  What a caller learns is in the globals: the index that was
+   published and, through it, what the drive was told. */
+void fdps_cd_verify_disc_and_play_track(int chapter, int track_slot)
+{
+    /* 000304a0.  Which CD audio track each chapter plays, as 0-based music
+       indices -- one more than this is the disc track, the disc's track 1
+       being the data track.  Column 0 is the entry every caller but one asks
+       for; fdps_battle_advance_turn is the exception and asks for column 1 at
+       0001e5db before asking for column 0 at 0001e620, so the pair is the two
+       tracks a battle chapter moves between.
+
+       An automatic array with an initialiser and not a static const: the sixty
+       bytes are copied onto the frame on every call, which is what the
+       MOVSD.REP at 00030cd9 is, and -mf is what puts the template at 000304a0
+       between two functions rather than in DGROUP
+       (rebuild_info/build_flags.md). */
+    unsigned char chapter_track_table[CHAPTER_TRACK_ROWS][CHAPTER_TRACK_SLOTS] =
+    {
+        {0x0d, 0x06}, {0x0d, 0x06}, {0x0d, 0x06}, {0x0d, 0x06},
+        {0x04, 0x04}, {0x04, 0x04}, {0x09, 0x09}, {0x0e, 0x12},
+        {0x0d, 0x06}, {0x06, 0x04}, {0x09, 0x09}, {0x0e, 0x0e},
+        {0x0d, 0x06}, {0x0d, 0x06}, {0x0d, 0x04}, {0x0d, 0x06},
+        {0x0d, 0x04}, {0x09, 0x09}, {0x06, 0x07}, {0x05, 0x07},
+        {0x05, 0x07}, {0x05, 0x07}, {0x06, 0x04}, {0x06, 0x07},
+        {0x06, 0x0c}, {0x01, 0x0c}, {0x0d, 0x09}, {0x04, 0x0a},
+        {0x04, 0x0a}, {0x0d, 0x0c}
+    };
+    char pack_vfs_path[PACK_VFS_PATH_BYTES];
+    unsigned char *pass_dat_block;
+    int inserted_disc;
+    char pack_vfs_missing;
+    char disc_accepted;
+    int music_index;
+
+    disc_accepted = 0;
+    fdps_cd_stop_audio();
+
+    while (disc_accepted == 0) {
+        /* The hook comes down before the probe and goes back up after the
+           loop, at 00030cee and 00030e75, so every pass through the prompt
+           runs with the game's INT 09h handler off the vector and getch
+           reading through DOS.  It also parks the latched scancode at 0xff on
+           every pass. */
+        fdps_uninstall_keyboard_isr();
+        while (kbhit() != 0) {
+            getch();
+        }
+
+        sprintf(pack_vfs_path, "%s\\Pack.vfs", data_fdps_cdrom_path);
+        pack_vfs_missing = (char) access(pack_vfs_path, F_OK);
+        if (pack_vfs_missing == 0) {
+            /* fdps_vfs_load_entry ends the process on a container it cannot
+               open or a member it cannot find, so reaching the next line means
+               both were there.  The block it hands back is a malloc nothing
+               frees -- the original leaks three bytes per pass, and adding the
+               free would be a change no caller can see but this loop can spin
+               a long time. */
+            pass_dat_block = (unsigned char *)
+                fdps_vfs_load_entry(pack_vfs_path, "Pass.Dat");
+            inserted_disc = *pass_dat_block - '0';
+        }
+
+        if ((pack_vfs_missing != 0 && chapter >= FIRST_DISC_2_CHAPTER) ||
+            (chapter >= FIRST_DISC_2_CHAPTER &&
+             inserted_disc == INSERTED_DISC_1)) {
+            fdps_message_window_open(DISC_PROMPT_FACE_INDEX);
+            fdps_draw_text(data_fdps_all_game_text_ptr, TEXT_INSERT_DISC_2,
+                           (unsigned char *) DISC_PROMPT_TEXT_ORIGIN,
+                           VGA_SCREEN_PITCH, PROMPT_TEXT_FG_COLOR,
+                           PROMPT_TEXT_BG_COLOR, PROMPT_TEXT_OUTLINE_COLOR);
+            getch();
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           TEXT_DISC_SWAP_ACKNOWLEDGED,
+                           (unsigned char *) DISC_PROMPT_TAIL_ORIGIN,
+                           VGA_SCREEN_PITCH, PROMPT_TEXT_FG_COLOR,
+                           PROMPT_TEXT_BG_COLOR, PROMPT_TEXT_OUTLINE_COLOR);
+            delay((unsigned int) DISC_PROMPT_HOLD_MS);
+            fdps_message_window_close();
+        } else if ((pack_vfs_missing != 0 &&
+                    chapter < FIRST_DISC_2_CHAPTER) ||
+                   (chapter < FIRST_DISC_2_CHAPTER &&
+                    inserted_disc == INSERTED_DISC_2)) {
+            fdps_message_window_open(DISC_PROMPT_FACE_INDEX);
+            fdps_draw_text(data_fdps_all_game_text_ptr, TEXT_INSERT_DISC_1,
+                           (unsigned char *) DISC_PROMPT_TEXT_ORIGIN,
+                           VGA_SCREEN_PITCH, PROMPT_TEXT_FG_COLOR,
+                           PROMPT_TEXT_BG_COLOR, PROMPT_TEXT_OUTLINE_COLOR);
+            getch();
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           TEXT_DISC_SWAP_ACKNOWLEDGED,
+                           (unsigned char *) DISC_PROMPT_TAIL_ORIGIN,
+                           VGA_SCREEN_PITCH, PROMPT_TEXT_FG_COLOR,
+                           PROMPT_TEXT_BG_COLOR, PROMPT_TEXT_OUTLINE_COLOR);
+            delay((unsigned int) DISC_PROMPT_HOLD_MS);
+            fdps_message_window_close();
+        } else {
+            disc_accepted = 1;
+        }
+    }
+
+    fdps_install_keyboard_isr();
+
+    /* Both arms below are the body of fdps_cd_set_music_track written out
+       where it stands, once per branch: 00030e83 to 00030edc and 00030ede to
+       00030f2b are the same eight instructions apart from what the index
+       starts as, and there is no CALL to 00030bf0 anywhere in the function.
+       Writing the call instead would put one in the rebuild that the original
+       does not have.
+
+       That is also why the second test of the enable flag survives inside each
+       arm.  In the enabled arm it can never fire and in the disabled one it
+       stores the -1 that is already there, but both compares are instructions
+       the original executes -- CMP byte ptr [0x00060008],0x0 at 00030e9c,
+       00030ec4, 00030eeb and 00030f13 -- and they are kept for the same reason
+       the identical dead test in fdps_cd_set_music_track is. */
+    if (data_fdps_audio_bgm_enabled_flag != 0) {
+        music_index = chapter_track_table[chapter][track_slot];
+        if (data_fdps_audio_bgm_enabled_flag == 0) {
+            music_index = -1;
+        }
+        data_fdps_audio_cd_current_music_index = music_index;
+        if (data_fdps_audio_cd_current_music_index == -1) {
+            fdps_cd_stop_audio();
+        } else if (data_fdps_audio_bgm_enabled_flag != 0) {
+            fdps_cd_play_track(data_fdps_audio_cd_current_music_index + 1);
+        }
+    } else {
+        music_index = -1;
+        if (data_fdps_audio_bgm_enabled_flag == 0) {
+            music_index = -1;
+        }
+        data_fdps_audio_cd_current_music_index = music_index;
+        if (data_fdps_audio_cd_current_music_index == -1) {
+            fdps_cd_stop_audio();
+        } else if (data_fdps_audio_bgm_enabled_flag != 0) {
+            fdps_cd_play_track(data_fdps_audio_cd_current_music_index + 1);
+        }
     }
 }

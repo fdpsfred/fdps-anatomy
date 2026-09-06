@@ -2002,5 +2002,20 @@
       "status": "open",
       "same_as": "emit#1"
     }
+  ],
+  "00030cc0": [
+    {
+      "from": "emit",
+      "what": "The disc-mismatch arm is emitted but has never been executed. Both prompt bodies -- fdps_message_window_open(0x28), fdps_draw_text of text entry 0x223 or 0x222 at screen (138, 131), getch, fdps_draw_text of entry 0x22a at (138, 150), delay(20000), fdps_message_window_close, and the jump back to the top of the loop -- are reachable only when the inserted disc does not match the chapter, and reaching them means a modal getch that no unattended run comes back from. What has been settled from here: the branch structure that selects each arm is asserted indirectly, in that both acceptance paths were exercised (disc 1 with chapters 0 to 17 and disc 2 with chapters 18 to 29, one run each, all sixty table bytes matched); the emitted object disassembles to the same instruction sequence as the original inside both prompt bodies, including the two text ids, the two pen addresses, the three colours and the 0x4e20; and no other reading of the two pen literals is possible, since 0xa0000 + 131 * 320 + 138 and 0xa0000 + 150 * 320 + 138 are the panel's own two text rows. What is not settled is what the player sees and how it behaves: whether entries 0x222, 0x223 and 0x22a are the lines this reading assumes, whether the twenty-second hold is long enough for the drive to remount, and whether the loop really re-probes and lets the game through once the disc is swapped.",
+      "needs": "A human playtest in DOSBox-X with both images available: start a chapter numbered 18 or above with disc 1 mounted, confirm the panel asks for disc 2, swap the image (DOSBox-X's imgmount can be re-issued at the prompt), press a key and confirm the game continues into that chapter with its music playing. The same in the other direction for a chapter below 18 with disc 2 in. That also reads back the three text entries, which is the only way to check them: the entries live in the block data_fdps_all_game_text_ptr points at, and ticket 23 has not written that global.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached the same concern independently and confirm it is real evidence-does-not-exist-yet, not a lookup that was skipped. What my pass adds: (a) the object-level half is now settled from the built CDAUDIO.OBJ rather than asserted -- both prompt bodies disassemble to the original's exact sequence, PUSH 00000028H / fdps_message_window_open, the seven-argument fdps_draw_text with 0x223 (or 0x222) at 000aa44aH and 0x22aH at 000abc0aH, colours 6d/00/d0, PUSH 00004e20H / delay, fdps_message_window_close, so nothing about the emitted code is in doubt; (b) two of the three text ids are in fact already documented -- program_info/cd_audio.md line 47 names 0x222 as the swap-to-disc-1 prompt and 0x223 as swap-to-disc-2, and resource_info/disc_images.md line 19 gives PASS.DAT as \"1\\r\\n\" on disc 1 and \"2\\r\\n\" on disc 2, which corroborates the emitter's reading from a source it did not cite. What is still genuinely unreachable from here: 0x22a is documented nowhere, and no unattended run can enter the mismatch arm at all, because doing so means a modal getch. So the disc rule in either direction, the adequacy of the twenty-second hold for a real drive to remount, and whether the loop re-probes and releases the game after a swap remain unmeasured.",
+      "needs": "A human playtest in DOSBox-X with both images to hand: enter a chapter numbered 18 or above with disc 1 mounted, confirm the panel asks for disc 2, re-issue imgmount at the prompt, press a key, and confirm the game continues into that chapter with its music playing; then the mirror case, a chapter below 18 with disc 2 in. That run also reads back all three text entries, including 0x22a, which nothing else can do while data_fdps_all_game_text_ptr is a ticket-23 stub.",
+      "status": "open",
+      "same_as": "emit#0"
+    }
   ]
 }

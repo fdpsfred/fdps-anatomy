@@ -6,7 +6,8 @@
  * fdps_cd_resolve_track_range at 0003c803, fdps_cd_play_track at 0003c85b,
  * fdps_cd_play_track_range at 0003c892, fdps_cd_play_whole_disc at 0003c8e6,
  * fdps_cd_read_audio_position at 0003c93a, fdps_cd_set_music_track at
- * 00030bf0 and fdps_cd_music_repeat_poll at 00030c50.
+ * 00030bf0, fdps_cd_music_repeat_poll at 00030c50 and
+ * fdps_cd_verify_disc_and_play_track at 00030cc0.
  *
  * Every expected value below comes from the instructions of those functions,
  * never from the emitted C.  For fdps_cd_seek:
@@ -63,11 +64,14 @@
  */
 #include <stddef.h>
 #include <string.h>
+#include <io.h>
 
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "cd.h"
+#include "keybd.h"
+#include "vfs.h"
 #include "cdaudio.h"
 
 /* 0xa5 is a value no assertion below expects, so a byte the function did not
@@ -2730,6 +2734,397 @@ static void cdaudio_read_position_re_reads_the_block_on_every_call(void)
     CHECK_EQ(frame, 0x74);
 }
 
+/* fdps_cd_verify_disc_and_play_track at 00030cc0 is the one routine in this
+ * file that is run whole rather than probed, and it is the only one that needs
+ * the disc.  It can be run at all because there is exactly one path through it
+ * that neither draws nor waits for a key: the probe finds the container, the
+ * Pass.Dat member inside it names a disc, and the chapter asked for is one
+ * that disc carries.  Every other path opens the message panel and stops on
+ * getch until somebody swaps the disc, so nothing below may hand it a chapter
+ * from the other side of the split.
+ *
+ * The disc is there because the build mounts it: tools/fdps_build/build_min.py
+ * imgmounts the cue at E: for every run, which is the same E:\PACK.VFS the
+ * smoke build already reads.  A machine with no image gets no E: drive, so
+ * every case here returns without asserting unless the probe below succeeds --
+ * the same way tests/rsrc.c stands down without its containers.
+ *
+ * Which chapters may be asked for is read out of the disc rather than assumed.
+ * Pass.Dat holds "1\r\n" on disc 1 and "2\r\n" on disc 2
+ * (resource_info/disc_images.md), and the function splits chapters at 18, so
+ * the cases below ask the inserted disc which half of the table they may walk.
+ * That leaves the other half of the table uncovered on any one run.  Both
+ * halves have been covered, one run each: the default disc 1 walks rows 0 to
+ * 17 and a run with FDPS_DISC1 pointed at FDPS_DISC_2.cue walks rows 18 to 29,
+ * and the two together assert every one of the sixty bytes.  What no run can
+ * cover is the disc rule itself in either direction: reaching the mismatch arm
+ * means reaching the modal prompt, which nothing unattended comes back from.
+ *
+ * Two of the callees have to be fenced rather than let run.  The drive is
+ * data_fdps_cdrom_drive_letter_index 0xff, past every drive letter there is,
+ * so MSCDEX rejects every request the music chain issues before it follows
+ * ES:BX -- the bytes left in the DOS blocks are the ones the module staged,
+ * exactly as everywhere above.  And the loop's first act is
+ * fdps_uninstall_keyboard_isr, which puts vector 09h back from two globals
+ * that are zero until ticket 23 fills them in; the helper below seeds them
+ * with the vector that is live at the time, masks IRQ1 for the duration and
+ * puts the vector back afterwards, so the game's INT 09h handler is not left
+ * on the vector for the rest of the suite.
+ */
+
+/* The sixty bytes at 000304a0, read out of the image:
+ *
+ *   0d060d06 0d060d06 04040404 09090e12 0d060604 09090e0e
+ *   0d060d06 0d040d06 0d040909 06070507 05070507 06040607
+ *   060c010c 0d09040a 040a0d0c
+ *
+ * as thirty rows of two: the row is the chapter, the column is track_slot, and
+ * the byte is the 0-based music index the function publishes.  This is the
+ * expectation for every track assertion below -- the values are the image's,
+ * not the emitted array's. */
+static unsigned char verify_expected_tracks[30][2] = {
+    {0x0d, 0x06}, {0x0d, 0x06}, {0x0d, 0x06}, {0x0d, 0x06},
+    {0x04, 0x04}, {0x04, 0x04}, {0x09, 0x09}, {0x0e, 0x12},
+    {0x0d, 0x06}, {0x06, 0x04}, {0x09, 0x09}, {0x0e, 0x0e},
+    {0x0d, 0x06}, {0x0d, 0x06}, {0x0d, 0x04}, {0x0d, 0x06},
+    {0x0d, 0x04}, {0x09, 0x09}, {0x06, 0x07}, {0x05, 0x07},
+    {0x05, 0x07}, {0x05, 0x07}, {0x06, 0x04}, {0x06, 0x07},
+    {0x06, 0x0c}, {0x01, 0x0c}, {0x0d, 0x09}, {0x04, 0x0a},
+    {0x04, 0x0a}, {0x0d, 0x0c}
+};
+
+/* The prefix the function composes "%s\Pack.vfs" from, and the same path
+   spelled out for the test's own probe.  Two characters and a terminator is
+   all data_fdps_cdrom_path holds (gamedata.h). */
+#define VERIFY_DISC_DRIVE_LETTER 'E'
+#define VERIFY_PACK_VFS_PATH "E:\\Pack.vfs"
+
+/* The member the disc number comes out of, and the character its first byte is
+   measured against -- SUB EAX,0x30 at 00030d51. */
+#define VERIFY_PASS_DAT_MEMBER "Pass.Dat"
+#define VERIFY_DISC_DIGIT_BASE '0'
+
+/* The chapter the discs are cut between, CMP dword ptr [EBP+0x14],0x12. */
+#define VERIFY_FIRST_DISC_2_CHAPTER 18
+#define VERIFY_LAST_CHAPTER 29
+
+/* Chapters whose two entries differ, one per disc: chapter 7 is {0x0e, 0x12}
+   and chapter 19 is {0x05, 0x07}, so on either disc there is a row where
+   asking for the wrong column is visible. */
+#define VERIFY_SPLIT_ROW_DISC_1 7
+#define VERIFY_SPLIT_ROW_DISC_2 19
+
+/* Parked in the latched scancode before each run so that the 0xff
+   fdps_uninstall_keyboard_isr writes is visible as a write rather than as a
+   value that was already there.  Not 0xff and not a scancode any key
+   produces. */
+#define VERIFY_SCANCODE_MARKER 0x42
+#define VERIFY_SCANCODE_NONE 0xff
+
+/* INT 21h AH=35h for vector 09h: offset as the result, selector through the
+   pointer.  Written out here rather than shared with tests/title.c because a
+   test file is a translation unit of its own. */
+extern unsigned int verify_read_int9_vector(unsigned short *selector_out);
+#pragma aux verify_read_int9_vector =   \
+    "push es"                           \
+    "push esi"                          \
+    "mov  eax,3509h"                    \
+    "int  21h"                          \
+    "mov  ax,es"                        \
+    "pop  esi"                          \
+    "mov  [esi],ax"                     \
+    "pop  es"                           \
+    parm [esi]                          \
+    value [ebx]                         \
+    modify [eax ebx ecx edx];
+
+/* INT 21h AH=25h for vector 09h with an arbitrary selector:offset, which is
+   what putting the original handler back needs. */
+extern void verify_write_int9_vector(unsigned short handler_selector,
+                                     unsigned int handler_offset);
+#pragma aux verify_write_int9_vector =  \
+    "push ds"                           \
+    "mov  eax,2509h"                    \
+    "mov  ds,cx"                        \
+    "int  21h"                          \
+    "pop  ds"                           \
+    parm [cx] [edx]                     \
+    modify [eax ebx ecx edx];
+
+/* Set bit 1 of the master 8259's mask so IRQ1 cannot be delivered while the
+   vector is being moved about, and hand the mask back as it was.  Masking
+   stops the interrupt rather than deferring it the way CLI would, and deferral
+   would not hold: DOS re-enables interrupts inside the very INT 21h calls the
+   function under test makes. */
+extern unsigned char verify_mask_irq1(void);
+#pragma aux verify_mask_irq1 =          \
+    "in   al,21h"                       \
+    "mov  ah,al"                        \
+    "or   al,2"                         \
+    "out  21h,al"                       \
+    "mov  al,ah"                        \
+    value [al]                          \
+    modify [eax];
+
+extern void verify_restore_irq_mask(unsigned char mask);
+#pragma aux verify_restore_irq_mask = "out 21h,al" parm [al] modify [eax];
+
+/* What the fence read on either side of the call, kept so the cases can ask
+   about the vector without running the call again. */
+static unsigned short verify_vector_before_selector;
+static unsigned int verify_vector_before_offset;
+static unsigned short verify_vector_after_selector;
+static unsigned int verify_vector_after_offset;
+
+/* Whether the disc the run needs is in the drive at all.  The path is the one
+   the function itself composes, so a machine that fails this probe is one the
+   function would have sent into its prompt loop. */
+static int verify_disc_is_mounted(void)
+{
+    return access(VERIFY_PACK_VFS_PATH, F_OK) == 0 ? 1 : 0;
+}
+
+/* Which disc is in, read the way the function reads it: the first byte of the
+   Pass.Dat member less '0'.  Both arguments are the test's own arrays because
+   fdps_vfs_load_entry uppercases the member name in the caller's buffer. */
+static int verify_inserted_disc_number(void)
+{
+    char container_path[20];
+    char member_name[16];
+    unsigned char *pass_dat_block;
+
+    strcpy(container_path, VERIFY_PACK_VFS_PATH);
+    strcpy(member_name, VERIFY_PASS_DAT_MEMBER);
+    pass_dat_block = (unsigned char *)
+        fdps_vfs_load_entry(container_path, member_name);
+    return *pass_dat_block - VERIFY_DISC_DIGIT_BASE;
+}
+
+/* One whole call, fenced: the DOS blocks allocated the way the module
+   allocates them, the drive named past every letter there is, the CD prefix
+   pointed at the mounted image, the scancode latch marked, and vector 09h
+   saved, seeded and put back around the call. */
+static void run_verify_disc(int chapter, int track_slot)
+{
+    unsigned char saved_irq_mask;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    data_fdps_cdrom_path[0] = VERIFY_DISC_DRIVE_LETTER;
+    data_fdps_cdrom_path[1] = ':';
+    data_fdps_cdrom_path[2] = '\0';
+    data_fdps_input_last_scancode = VERIFY_SCANCODE_MARKER;
+
+    saved_irq_mask = verify_mask_irq1();
+    verify_vector_before_offset =
+        verify_read_int9_vector(&verify_vector_before_selector);
+    data_fdps_input_prev_int9_handler_selector = verify_vector_before_selector;
+    data_fdps_prev_int9_handler_offset = verify_vector_before_offset;
+
+    fdps_cd_verify_disc_and_play_track(chapter, track_slot);
+
+    verify_vector_after_offset =
+        verify_read_int9_vector(&verify_vector_after_selector);
+    verify_write_int9_vector(verify_vector_before_selector,
+                             verify_vector_before_offset);
+    verify_restore_irq_mask(saved_irq_mask);
+}
+
+/* The first chapter of the half of the table the inserted disc can be asked
+   about: 0 for disc 1, 18 for disc 2. */
+static int verify_first_chapter_on_this_disc(int disc_number)
+{
+    if (disc_number == 2) {
+        return VERIFY_FIRST_DISC_2_CHAPTER;
+    }
+    return 0;
+}
+
+static int verify_last_chapter_on_this_disc(int disc_number)
+{
+    if (disc_number == 2) {
+        return VERIFY_LAST_CHAPTER;
+    }
+    return VERIFY_FIRST_DISC_2_CHAPTER - 1;
+}
+
+/* The premise every case below rests on: the container is where the function
+   composes it, and the member inside it names one of the two discs.  A disc
+   number that was neither would mean the chapter ranges the cases pick are the
+   wrong half of the table, and every track assertion would then be measuring
+   the wrong row. */
+static void cdaudio_verify_premise_the_disc_names_itself(void)
+{
+    int disc_number;
+
+    if (verify_disc_is_mounted() == 0) {
+        return;
+    }
+    disc_number = verify_inserted_disc_number();
+    CHECK_EQ(disc_number == 1 || disc_number == 2, 1);
+}
+
+/* MOV EAX,dword ptr [EBP+0x14] / ADD EAX,EAX / MOV EDX,dword ptr [EBP+0x18] /
+   ADD EDX,EAX / MOV AL,byte ptr [EDX + EBP + -0x60] is the whole of the
+   lookup, so the published index has to be the table's own byte at
+   chapter * 2 + track_slot for every row the inserted disc lets the loop
+   reach.  Walking the whole half rather than sampling is what catches a
+   template copied short, a stride of one, or an initialiser whose rows drifted
+   against the image's sixty bytes. */
+static void cdaudio_verify_publishes_the_chapters_own_track(void)
+{
+    int disc_number;
+    int chapter;
+    int track_slot;
+
+    if (verify_disc_is_mounted() == 0) {
+        return;
+    }
+    disc_number = verify_inserted_disc_number();
+    data_fdps_audio_bgm_enabled_flag = 1;
+
+    for (chapter = verify_first_chapter_on_this_disc(disc_number);
+         chapter <= verify_last_chapter_on_this_disc(disc_number);
+         chapter++) {
+        for (track_slot = 0; track_slot < 2; track_slot++) {
+            run_verify_disc(chapter, track_slot);
+            CHECK_EQ(data_fdps_audio_cd_current_music_index,
+                     verify_expected_tracks[chapter][track_slot]);
+        }
+    }
+}
+
+/* The second argument is the column and not anything else: on a row whose two
+   entries differ, the two calls have to publish the two different bytes.  A
+   lookup that ignored track_slot, or that folded it into the row, would give
+   the same answer twice and would still pass a row where the two entries
+   agree -- which twelve of the thirty rows do. */
+static void cdaudio_verify_the_slot_picks_the_column(void)
+{
+    int disc_number;
+    int chapter;
+
+    if (verify_disc_is_mounted() == 0) {
+        return;
+    }
+    disc_number = verify_inserted_disc_number();
+    chapter = disc_number == 2 ? VERIFY_SPLIT_ROW_DISC_2
+                               : VERIFY_SPLIT_ROW_DISC_1;
+    data_fdps_audio_bgm_enabled_flag = 1;
+
+    CHECK_EQ(verify_expected_tracks[chapter][0] !=
+             verify_expected_tracks[chapter][1], 1);
+
+    run_verify_disc(chapter, 0);
+    CHECK_EQ(data_fdps_audio_cd_current_music_index,
+             verify_expected_tracks[chapter][0]);
+
+    run_verify_disc(chapter, 1);
+    CHECK_EQ(data_fdps_audio_cd_current_music_index,
+             verify_expected_tracks[chapter][1]);
+}
+
+/* The index is published one lower than the disc track it plays: MOV
+   EAX,[0x00069d54] / INC EAX / PUSH EAX at 00030ecd, the same numbering shift
+   fdps_cd_set_music_track applies, because the disc's track 1 is the data
+   track.  fdps_cd_play_track's query is what carries that number to the
+   driver, so the track it asked about -- published in
+   data_fdps_cd_track_info_track_number and staged as the control block's track
+   byte -- is the assertion.  Command 0x84 in the header says the last request
+   of the call was the Play Audio one and not the query or a stop. */
+static void cdaudio_verify_plays_the_track_one_past_the_index(void)
+{
+    int disc_number;
+    int chapter;
+    int expected_index;
+    unsigned char *header;
+
+    if (verify_disc_is_mounted() == 0) {
+        return;
+    }
+    disc_number = verify_inserted_disc_number();
+    chapter = verify_first_chapter_on_this_disc(disc_number);
+    expected_index = (int) verify_expected_tracks[chapter][0];
+    data_fdps_audio_bgm_enabled_flag = 1;
+
+    run_verify_disc(chapter, 0);
+
+    CHECK_EQ(data_fdps_audio_cd_current_music_index, expected_index);
+    CHECK_EQ(data_fdps_cd_track_info_track_number, expected_index + 1);
+    CHECK_EQ(data_fdps_cd_ioctl_buffer[1], expected_index + 1);
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0x16);
+    CHECK_EQ(header[2], 0x84);
+}
+
+/* CMP byte ptr [0x00060008],0x0 / JZ 0x00030ede at 00030e7a takes the whole
+   lookup out of the picture: with music off the index published is -1 whatever
+   the chapter's row holds, and the drive is stopped instead of played.  The
+   header carrying command 0x85 at a declared length of 13 is what says no play
+   request followed -- a body that published -1 and played anyway would leave
+   the 0x84 of the previous case standing. */
+static void cdaudio_verify_music_off_publishes_no_track(void)
+{
+    int disc_number;
+    int chapter;
+    unsigned char *header;
+
+    if (verify_disc_is_mounted() == 0) {
+        return;
+    }
+    disc_number = verify_inserted_disc_number();
+    chapter = verify_first_chapter_on_this_disc(disc_number);
+
+    data_fdps_audio_bgm_enabled_flag = 1;
+    run_verify_disc(chapter, 0);
+    CHECK_EQ(data_fdps_audio_cd_current_music_index,
+             verify_expected_tracks[chapter][0]);
+
+    data_fdps_audio_bgm_enabled_flag = 0;
+    run_verify_disc(chapter, 0);
+    CHECK_EQ(data_fdps_audio_cd_current_music_index, -1);
+
+    header = data_fdps_cd_request_header_buffer;
+    CHECK_EQ(header[0], 0xd);
+    CHECK_EQ(header[2], 0x85);
+}
+
+/* The hook comes down at 00030cee, once per pass through the loop, and goes
+   back up at 00030e75 after it.  Three things say both happened: the scancode
+   latch holds the 0xff only fdps_uninstall_keyboard_isr writes, where the
+   fence left a marker; the two saved-vector globals hold the vector that was
+   live before the call, which is what fdps_install_keyboard_isr files as it
+   displaces it; and the vector the call returns with is not that one, because
+   the game's own handler is on it.
+
+   A body that skipped the uninstall would leave the marker standing, and one
+   that skipped the install would come back with the vector it was handed. */
+static void cdaudio_verify_takes_the_keyboard_hook_down_and_puts_it_back(void)
+{
+    int disc_number;
+    int chapter;
+
+    if (verify_disc_is_mounted() == 0) {
+        return;
+    }
+    disc_number = verify_inserted_disc_number();
+    chapter = verify_first_chapter_on_this_disc(disc_number);
+    data_fdps_audio_bgm_enabled_flag = 1;
+
+    run_verify_disc(chapter, 0);
+
+    CHECK_EQ(data_fdps_input_last_scancode, VERIFY_SCANCODE_NONE);
+    CHECK_EQ(data_fdps_prev_int9_handler_offset ==
+             verify_vector_before_offset, 1);
+    CHECK_EQ(data_fdps_input_prev_int9_handler_selector ==
+             verify_vector_before_selector, 1);
+    CHECK_EQ(verify_vector_after_offset != verify_vector_before_offset ||
+             verify_vector_after_selector != verify_vector_before_selector, 1);
+}
+
 void run_cdaudio_tests(void)
 {
     RUN_TEST(cdaudio_seek_header_fields_sit_where_the_stores_land);
@@ -2832,4 +3227,10 @@ void run_cdaudio_tests(void)
     RUN_TEST(cdaudio_repeat_poll_asks_nothing_with_no_track_selected);
     RUN_TEST(cdaudio_repeat_poll_asks_nothing_with_the_music_switched_off);
     RUN_TEST(cdaudio_repeat_poll_latches_the_tick_it_finished_on);
+    RUN_TEST(cdaudio_verify_premise_the_disc_names_itself);
+    RUN_TEST(cdaudio_verify_publishes_the_chapters_own_track);
+    RUN_TEST(cdaudio_verify_the_slot_picks_the_column);
+    RUN_TEST(cdaudio_verify_plays_the_track_one_past_the_index);
+    RUN_TEST(cdaudio_verify_music_off_publishes_no_track);
+    RUN_TEST(cdaudio_verify_takes_the_keyboard_hook_down_and_puts_it_back);
 }

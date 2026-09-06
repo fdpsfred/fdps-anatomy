@@ -2775,6 +2775,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x476"
+    },
+    "00030cc0": {
+      "name": "fdps_cd_verify_disc_and_play_track",
+      "target": "cdaudio.c",
+      "body_size": "0x272",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x272"
     }
   }
 }

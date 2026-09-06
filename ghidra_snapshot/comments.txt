@@ -8065,16 +8065,16 @@ Boundary: 00030cc0-00030f31, ends at the epilogue MOV ESP,EBP / POP EBP,EDI,ESI,
 Signature: __cdecl void (int chapter, int slot) - both arguments read as dwords from [EBP+0x14] and [EBP+0x18], bare RET so the caller cleans; confirmed by the assembly, not a guess.
 
 Algorithm:
-1. Copy the 60-byte constant table at 000304a0 onto the stack (15 dwords). It is 30 chapter rows of 2 bytes; the row is the chapter, the column is the slot, and the byte is a zero-based CD audio track index (0xff means no track).
+1. Copy the 60-byte constant table at 000304a0 onto the stack (15 dwords). It is 30 chapter rows of 2 bytes; the row is the chapter, the column is the slot, and the byte is a zero-based CD audio track index, read unsigned.
 2. Stop any playing CD audio (fdps_cd_stop_audio).
 3. Loop until the inserted disc is acceptable:
-   - Release the keyboard ISR (FUN_00056818) and drain pending input (kbhit / getch).
+   - Release the keyboard ISR (fdps_uninstall_keyboard_isr) and drain pending input (kbhit / getch).
    - Format "%s\\Pack.vfs" from the game path global at 000643e8 with sprintf and probe it with access(path, 0). A non-zero result means no usable disc.
    - When the probe succeeds, load the "Pass.Dat" entry through fdps_vfs_load_entry and take its first byte minus '0' as the disc number (1 or 2).
-   - Chapters 0..17 live on disc 1, chapters 18 (0x12) and above on disc 2. If the probe failed, or the disc number does not match the chapter, draw the matching prompt through FUN_0001ff60 with the draw context at 000643c4 (message 0x223 for "insert disc 2", 0x222 for "insert disc 1"), wait for a keypress with getch, draw message 0x22a, delay(0x4e20), tear the prompt down (FUN_00020820) and retry from step 2.
+   - Chapters 0..17 live on disc 1, chapters 18 (0x12) and above on disc 2. If the probe failed, or the disc number does not match the chapter, draw the matching prompt through fdps_draw_text with the draw context at 000643c4 (message 0x223 for "insert disc 2", 0x222 for "insert disc 1"), wait for a keypress with getch, draw message 0x22a, delay(0x4e20), tear the prompt down (fdps_message_window_close) and retry from the top of step 3.
    - Otherwise set the done flag and leave the loop.
 4. Reinstall the keyboard ISR (fdps_install_keyboard_isr).
-5. If the CD audio enable flag at 00060008 is clear, store -1 into the current-track global at 00069d54 and stop CD audio. Otherwise take table[chapter * 2 + slot], store it at 00069d54, and if it is not -1 start playback of that value + 1 (fdps_cd_play_track).
+5. If the CD audio enable flag at 00060008 is clear, store -1 into the current-track global at 00069d54 and stop CD audio. Otherwise take table[chapter * 2 + slot], store it at 00069d54, and then start playback of that value + 1; the -1 test on that arm can never fire, because the byte is zero-extended (fdps_cd_play_track).
 
 Parameters:
   chapter - chapter index; also selects the required disc (>= 18 means disc 2).
