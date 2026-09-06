@@ -40,6 +40,7 @@
 #include <i86.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "cdaudio.h"
 #include "keybd.h"
 #include "mapdraw.h"
 #include "palcycle.h"
@@ -2198,6 +2199,294 @@ static void command_icons_does_not_write_the_id_array(void)
     CHECK_EQ(memcmp(icon_ids, before, sizeof(before)), 0);
 }
 
+/* --- fdps_menu_command_icon_select_loop ---------------------------------
+ *
+ * WHY EVERY CASE HERE ENDS THE LOOP ON ITS FIRST PASS.  The loop takes its
+ * input from fdps_read_scancode_auto_repeat, which answers from the one-byte
+ * latch and not from the scancode ring, so a case cannot stage a burst the way
+ * the ring-menu cases above stage one: whatever the latch holds is what every
+ * pass reads.  A latch holding an arrow reports the arrow once and 0xff for
+ * ever after (keybd.c), and 0xff matches no arm -- so a run staged on an arrow
+ * key never returns.  Escape, keypad Del, Enter and Space are the only codes
+ * that end the loop, and those four are therefore the only inputs used here.
+ *
+ * That leaves the two arrow arms and the "any other code does nothing" arm
+ * unexercised from this file.  Their arithmetic is stated in src/menu.c from
+ * the IDIV pair at 00032457 and 00032489; reaching it needs a second input
+ * event and there is no way to deliver one to a latch.
+ *
+ * WHAT THE SCREEN IS FOR.  The repaint at the bottom of the pass is the only
+ * output the loop has besides the pointer, and the rebuild note at 000323e0 is
+ * entirely about that repaint happening on the pass that ends the loop.  So
+ * each case runs the loop over a filled mode 13h screen, snapshots it, then
+ * draws by hand the one row fdps_menu_draw_command_icons would have drawn into
+ * open_reference from the same starting screen, and compares the two byte for
+ * byte.  A loop that returned early from inside an ending arm leaves the
+ * border fill standing and fails on the first byte.
+ */
+
+/* The latch value the filter has never seen, so the first poll of a case takes
+   the "different code" arm and reports the code as it stands.  No key sends 0,
+   and none of the four codes staged below is 0. */
+#define SELECT_NO_PREVIOUS_KEY 0
+
+/* The tick the CD poll is staged one behind, so its counter moves exactly once
+   per pass and stays far from the 0x4b that would send a real request to the
+   drive (cdaudio.h). */
+#define SELECT_CD_TICKS_BEFORE 1
+
+/* Selection values: the entry the row opens on, the last of a six-entry row,
+   one outside the row, and what the cancel arm writes. */
+#define SELECT_START_ENTRY 2
+#define SELECT_LAST_OF_SIX 5
+#define SELECT_OUTSIDE_ROW 9
+#define SELECT_CANCELLED (-1)
+
+/* The answer, MOV dword ptr [EBP-0x8],0x1 at 0003241f and 00032437 reaching
+   the one return slot: confirm and cancel hand back the same 1. */
+#define SELECT_DONE 1
+
+/* Puts the auto-repeat filter in the state a key that has just gone down
+   leaves it in, and the CD poll one tick behind the clock so its counter
+   records the pass. */
+static void select_stage(int scancode)
+{
+    unsigned int now;
+
+    now = data_fdps_timer_tick_counter;
+    data_fdps_input_last_scancode = (unsigned char) scancode;
+    data_fdps_input_key_repeat_prev_scancode = SELECT_NO_PREVIOUS_KEY;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = now;
+    data_fdps_audio_cd_repeat_last_tick = now - SELECT_CD_TICKS_BEFORE;
+    data_fdps_audio_cd_repeat_tick_counter = 0;
+    data_fdps_audio_cd_current_music_index = -1;
+}
+
+/* The filter's globals and the ring indices back to their bss state: a latch
+   left loaded would be read by the next case that polls the keyboard, and the
+   reader rewinds the ring on every call. */
+static void select_unstage(void)
+{
+    data_fdps_input_last_scancode = 0xff;
+    data_fdps_input_key_repeat_prev_scancode = 0xff;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_audio_cd_repeat_tick_counter = 0;
+    data_fdps_audio_cd_repeat_last_tick = 0;
+    data_fdps_audio_cd_current_music_index = 0;
+    ring_unstage();
+}
+
+static int select_run(int *icon_ids, int icon_count, int *selected_index,
+                      int scancode)
+{
+    int result;
+
+    ring_build_sheet();
+    data_fdps_command_sprite_sheet_ptr = ring_sheet;
+    select_stage(scancode);
+    ring_set_mode(RING_MODE_320X200X256);
+    memset((void *) RING_VGA_BASE, RING_BORDER_FILL,
+           (size_t) RING_SCREEN_BYTES);
+    result = fdps_menu_command_icon_select_loop(icon_ids, icon_count,
+                                                selected_index);
+    memmove(ring_screen, (void *) RING_VGA_BASE, (size_t) RING_SCREEN_BYTES);
+    ring_set_mode(RING_MODE_TEXT);
+    return result;
+}
+
+/* The single repaint the run should have left, drawn by hand from the same
+   filled screen into the other buffer. */
+static void select_reference(int *icon_ids, int icon_count, int selected_index)
+{
+    ring_build_sheet();
+    data_fdps_command_sprite_sheet_ptr = ring_sheet;
+    ring_set_mode(RING_MODE_320X200X256);
+    memset((void *) RING_VGA_BASE, RING_BORDER_FILL,
+           (size_t) RING_SCREEN_BYTES);
+    fdps_menu_draw_command_icons(icon_ids, icon_count, selected_index);
+    memmove(open_reference, (void *) RING_VGA_BASE, (size_t) RING_SCREEN_BYTES);
+    ring_set_mode(RING_MODE_TEXT);
+}
+
+/* Escape writes -1 through the pointer (MOV dword ptr [EAX],0xffffffff at
+   00032419) and ends the loop -- and the ending arm jumps to the repaint, so
+   the row is drawn once more with -1 and the cell the cursor was on comes back
+   on the plain plate.  Dropping that last paint is the rebuild note at
+   000323e0, and it fails here on the plate colour and again on the picture. */
+static void select_escape_cancels_and_repaints_with_nothing_highlighted(void)
+{
+    int icon_ids[4];
+    int selected_index;
+    int result;
+
+    icons_church_row(icon_ids);
+    selected_index = SELECT_START_ENTRY;
+    result = select_run(icon_ids, 4, &selected_index, CURSOR_KEY_ESC);
+    select_reference(icon_ids, 4, SELECT_CANCELLED);
+
+    CHECK_EQ(result, SELECT_DONE);
+    CHECK_EQ(selected_index, SELECT_CANCELLED);
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1,
+                        ICONS_FOUR_LEFT
+                            + SELECT_START_ENTRY * ICONS_CELL_PITCH),
+             RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(memcmp(ring_screen, open_reference, (size_t) RING_SCREEN_BYTES),
+             0);
+    select_unstage();
+}
+
+/* CMP dword ptr [EBP-0xc],0x53 / JNZ reaches the same arm as the Escape
+   compare above it, so keypad Del cancels identically. */
+static void select_keypad_del_cancels_the_same_way(void)
+{
+    int icon_ids[4];
+    int selected_index;
+    int result;
+
+    icons_church_row(icon_ids);
+    selected_index = SELECT_START_ENTRY;
+    result = select_run(icon_ids, 4, &selected_index, CURSOR_KEY_KEYPAD_DEL);
+    select_reference(icon_ids, 4, SELECT_CANCELLED);
+
+    CHECK_EQ(result, SELECT_DONE);
+    CHECK_EQ(selected_index, SELECT_CANCELLED);
+    CHECK_EQ(memcmp(ring_screen, open_reference, (size_t) RING_SCREEN_BYTES),
+             0);
+    select_unstage();
+}
+
+/* The confirm arm at 00032437 stores the done flag and nothing else, so the
+   caller's entry survives untouched and the final repaint still carries its
+   highlight.  The answer is the same 1 the cancel gives. */
+static void select_enter_confirms_and_keeps_the_index(void)
+{
+    int icon_ids[4];
+    int selected_index;
+    int result;
+
+    icons_church_row(icon_ids);
+    selected_index = SELECT_START_ENTRY;
+    result = select_run(icon_ids, 4, &selected_index, CURSOR_KEY_ENTER);
+    select_reference(icon_ids, 4, SELECT_START_ENTRY);
+
+    CHECK_EQ(result, SELECT_DONE);
+    CHECK_EQ(selected_index, SELECT_START_ENTRY);
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1,
+                        ICONS_FOUR_LEFT
+                            + SELECT_START_ENTRY * ICONS_CELL_PITCH),
+             RING_COLOR(RING_PLATE_HI));
+    CHECK_EQ(memcmp(ring_screen, open_reference, (size_t) RING_SCREEN_BYTES),
+             0);
+    select_unstage();
+}
+
+/* CMP dword ptr [EBP-0xc],0x39 / JZ is the other half of the confirm arm. */
+static void select_space_confirms_the_same_way(void)
+{
+    int icon_ids[4];
+    int selected_index;
+    int result;
+
+    icons_church_row(icon_ids);
+    selected_index = 3;
+    result = select_run(icon_ids, 4, &selected_index, CURSOR_KEY_SPACE);
+
+    CHECK_EQ(result, SELECT_DONE);
+    CHECK_EQ(selected_index, 3);
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_FOUR_LEFT + 3 * ICONS_CELL_PITCH),
+             RING_COLOR(RING_PLATE_HI));
+    select_unstage();
+}
+
+/* Nothing in the ending arms looks at the index, so a value the row does not
+   contain is handed straight back and the repaint highlights nothing.  A loop
+   that clamped or validated on the way out would answer 3 here. */
+static void select_confirm_does_not_clamp_the_index(void)
+{
+    int icon_ids[4];
+    int selected_index;
+    int result;
+
+    icons_church_row(icon_ids);
+    selected_index = SELECT_OUTSIDE_ROW;
+    result = select_run(icon_ids, 4, &selected_index, CURSOR_KEY_ENTER);
+    select_reference(icon_ids, 4, SELECT_OUTSIDE_ROW);
+
+    CHECK_EQ(result, SELECT_DONE);
+    CHECK_EQ(selected_index, SELECT_OUTSIDE_ROW);
+    CHECK_EQ(memcmp(ring_screen, open_reference, (size_t) RING_SCREEN_BYTES),
+             0);
+    select_unstage();
+}
+
+/* icon_ids and icon_count are forwarded to the repaint exactly as they came in
+   -- MOV EAX,[EBP+0x18] / PUSH EAX and MOV EAX,[EBP+0x14] / PUSH EAX at
+   000324a4 and 000324a8.  A six-entry row moves the strip's left edge two
+   cells, so a count that was not forwarded, or was forwarded as something
+   else, moves every pixel of the picture. */
+static void select_forwards_the_row_and_its_count(void)
+{
+    int icon_ids[6];
+    int selected_index;
+    int result;
+
+    icons_six_row(icon_ids);
+    selected_index = SELECT_LAST_OF_SIX;
+    result = select_run(icon_ids, 6, &selected_index, CURSOR_KEY_ENTER);
+    select_reference(icon_ids, 6, SELECT_LAST_OF_SIX);
+
+    CHECK_EQ(result, SELECT_DONE);
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_SIX_LEFT),
+             RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_SIX_LEFT - 1), RING_BORDER_FILL);
+    CHECK_EQ(memcmp(ring_screen, open_reference, (size_t) RING_SCREEN_BYTES),
+             0);
+    select_unstage();
+}
+
+/* CALL 0x00030c50 is the first instruction of the pass, ahead of the read, so
+   the background track is kept alive while the row is up.  Staged one tick
+   behind the clock the poll takes its counting arm exactly once, which is the
+   only trace it leaves on a pass that finds no music selected (cdaudio.h) --
+   and it is one and not two, so the loop really did run a single pass. */
+static void select_polls_the_cd_music_before_reading_the_key(void)
+{
+    int icon_ids[4];
+    int selected_index;
+
+    icons_church_row(icon_ids);
+    selected_index = SELECT_START_ENTRY;
+    select_run(icon_ids, 4, &selected_index, CURSOR_KEY_ENTER);
+
+    CHECK_EQ(data_fdps_audio_cd_repeat_tick_counter, 1);
+    CHECK_EQ((int) data_fdps_audio_cd_repeat_last_tick,
+             (int) data_fdps_timer_tick_counter);
+    select_unstage();
+}
+
+/* The row is read for the repaint and never written: the only store the
+   function makes through a pointer is the cancel arm's -1 into
+   selected_index. */
+static void select_does_not_write_the_id_array(void)
+{
+    int icon_ids[4];
+    int before[4];
+    int selected_index;
+
+    icons_church_row(icon_ids);
+    memmove(before, icon_ids, sizeof(before));
+    selected_index = SELECT_START_ENTRY;
+    select_run(icon_ids, 4, &selected_index, CURSOR_KEY_ESC);
+
+    CHECK_EQ(memcmp(icon_ids, before, sizeof(before)), 0);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    select_unstage();
+}
+
 void run_menu_tests(void)
 {
     RUN_TEST(menu_first_entry_wins);
@@ -2256,4 +2545,12 @@ void run_menu_tests(void)
     RUN_TEST(command_icons_zero_entries_draws_nothing);
     RUN_TEST(command_icons_cycles_the_ui_palette_after_the_row);
     RUN_TEST(command_icons_does_not_write_the_id_array);
+    RUN_TEST(select_escape_cancels_and_repaints_with_nothing_highlighted);
+    RUN_TEST(select_keypad_del_cancels_the_same_way);
+    RUN_TEST(select_enter_confirms_and_keeps_the_index);
+    RUN_TEST(select_space_confirms_the_same_way);
+    RUN_TEST(select_confirm_does_not_clamp_the_index);
+    RUN_TEST(select_forwards_the_row_and_its_count);
+    RUN_TEST(select_polls_the_cd_music_before_reading_the_key);
+    RUN_TEST(select_does_not_write_the_id_array);
 }

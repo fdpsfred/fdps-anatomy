@@ -175,4 +175,44 @@ extern void fdps_menu_draw_command_icons(int *icon_ids, int icon_count,
                                          int selected_index);
 #pragma aux fdps_menu_draw_command_icons "*" parm caller [];
 
+
+/* Runs the modal selection loop over a village screen's row of command icons
+   and hands the player's choice back through selected_index.  Always returns
+   1, on the cancel path as much as on the confirm path, and all five callers
+   drop the answer: the two cases are told apart only by what was written
+   through the pointer.
+
+   icon_ids is the row's array of icon_count Command.cel sub-image ids, and
+   icon_count how many entries it has -- 4, 5 or 6 across the five village
+   screens.  Neither is read here; both are forwarded untouched to
+   fdps_menu_draw_command_icons every pass.  icon_count is also the divisor the
+   selection wraps on, and it is not checked: 0 divides by zero.
+
+   selected_index is read and written every pass and is the loop's only real
+   output.  It comes in holding the entry the cursor starts on -- the callers
+   keep the variable across calls, so the row opens where the player left it --
+   and goes out holding the confirmed entry, or -1 if the player cancelled.
+   Nothing clamps it: a value the row does not contain is left as it stands by
+   a confirm and simply highlights nothing.
+
+   ESCAPE AND KEYPAD DEL CANCEL; ENTER AND SPACE CONFIRM.  The four arrows step
+   the selection with a wrap at both ends and play the step cue, Up and Right
+   forward and Left and Down back.  Every other code, the filter's 0xff
+   included, costs one pass and does nothing.
+
+   IT DRAWS EVERY PASS AND THE LAST PASS DRAWS TOO.  The row is repainted at
+   the bottom of every pass through fdps_menu_draw_command_icons, so the caller
+   cannot treat the adapter or the DAC as untouched across this call, and the
+   pass that ends the loop repaints as well -- with -1 on the cancel path,
+   which leaves the row on screen with no cell highlighted.
+
+   IT NEVER BLOCKS AND IT KEEPS THE MUSIC ALIVE.  One pass takes one poll from
+   the auto-repeat filter (keybd.h) whether or not a key is down, and calls
+   fdps_cd_music_repeat_poll first (cdaudio.h), so the CD track is restarted
+   from inside this loop when it runs out.  The pace is the vertical retrace
+   the repaint waits for. */
+extern int fdps_menu_command_icon_select_loop(int *icon_ids, int icon_count,
+                                              int *selected_index);
+#pragma aux fdps_menu_command_icon_select_loop "*" parm caller [];
+
 #endif

@@ -750,3 +750,104 @@ void fdps_menu_draw_command_icons(int *icon_ids, int icon_count,
        with no entries at all still pays for it. */
     fdps_cycle_ui_palette();
 }
+
+/* The step cue, MOV EAX,0x61f4c ahead of both calls at 00032465 and 00032497.
+   It is this function's own copy of the eight characters and not the one
+   fdps_map_cursor_select_loop pushes from 0x61e78 nor the one audio.c and
+   save.c name at 0x61b04; the image keeps three separate literals holding the
+   same spelling.
+
+   It has to be a plain writable literal for the same reason the ring menu's
+   window cue above is: the lookup inside fdps_play_sfx upper-cases the
+   caller's own storage in place (vfs.h), so this copy reads "BEEP.WAV" from
+   the first accepted step of the run onward, exactly as the original's copy at
+   0x61f4c does (rebuild_info/pitfalls.md). */
+#define COMMAND_ICON_STEP_SOUND "Beep.wav"
+
+/* The loop's done flag, which is also what the function returns: 0 means
+   another pass is due, and 1 is the only other value it ever holds -- the two
+   ending arms both store the same MOV dword ptr [EBP-0x8],0x1 (0003241f and
+   00032437), so confirm and cancel are indistinguishable in the answer. */
+#define COMMAND_SELECT_RUNNING 0
+#define COMMAND_SELECT_DONE 1
+
+/* What the cancel arm writes through the caller's pointer, MOV dword ptr
+   [EAX],0xffffffff at 00032419.  All five callers test the value they get back
+   with an unsigned CMP against the last entry index followed by JA -- 00035ba6
+   in fdps_run_church_screen and the same shape in the other four -- so -1
+   reads as "above every entry" and falls into their default arm; it is not
+   compared against -1 anywhere. */
+#define COMMAND_SELECT_CANCELLED (-1)
+
+/* 000323e0.  The modal selection loop for a village screen's row of command
+   icons.  See menu.h for the arguments and for what the answer means.
+
+   THE REDRAW AT THE BOTTOM IS UNCONDITIONAL AND THE ENDING ARMS FALL INTO IT.
+   Cancel and confirm set the done flag and JMP to 0003249f, which is the
+   repaint, and only then is the loop test reached.  So the row is painted once
+   more on the pass that ends the loop -- on the cancel path with -1, which
+   highlights nothing (fdps_menu_draw_command_icons above) -- and the obvious
+   `*selected_index = -1; return 1;` inside the Esc arm drops that last paint
+   and leaves the old highlight on the adapter for whatever the caller draws
+   next.
+
+   THE ARROWS ARE PAIRED THE WAY THE STRIP IS NOT.  Up and Right both step
+   forward and Left and Down both step back (CMP 0x48 / JZ and CMP 0x4d / JNZ
+   into one arm, CMP 0x4b / JZ and CMP 0x50 / JNZ into the other), so on a row
+   that runs left to right the Up key walks the cursor rightwards.  That is
+   what the assembly does and it is not a transcription slip.
+
+   THE WRAP IS A SIGNED REMAINDER AND IT IS NOT GUARDED.  Both arms sign-extend
+   with SAR EDX,0x1f before IDIV dword ptr [EBP+0x18], so a caller that starts
+   the loop on a negative index gets C's truncated remainder and stays
+   negative, and icon_count of 0 divides by zero.  Neither is checked here and
+   neither can happen from the five callers, which all pass a positive count
+   and an index they own.  Writing the back step as `(*selected_index - 1 +
+   icon_count)` is the same arithmetic; the original adds the count first (ADD
+   EDX,[EBP+0x18] / DEC EDX) and that is what is written.
+
+   NOTHING BLOCKS AND ONE PASS IS ONE FRAME.  fdps_read_scancode_auto_repeat
+   answers 0xff when it has nothing to report (keybd.h) and 0xff matches no
+   arm, so a player who touches nothing still costs a pass; the pace comes from
+   the retrace fdps_menu_draw_command_icons waits for at the end of every one.
+   The CD poll ahead of the read is what keeps the background track looping
+   while the row is up (cdaudio.h), and it runs on every pass including the
+   last.
+
+   The scancode is read into an int here.  The filter hands back a zero-extended
+   byte in a full unsigned int, the assembly keeps it in one dword slot
+   ([EBP-0xc]) and every test on it is CMP/JZ against a literal, so no
+   comparison in this function is signed and the width is the only thing that
+   has to match. */
+int fdps_menu_command_icon_select_loop(int *icon_ids, int icon_count,
+                                       int *selected_index)
+{
+    /* Whether the loop has finished, and the value handed back when it has. */
+    int done;
+    /* The make code this pass took from the auto-repeat filter, 0xff when the
+       filter had nothing to report. */
+    int scancode;
+
+    done = COMMAND_SELECT_RUNNING;
+    while (done == COMMAND_SELECT_RUNNING) {
+        fdps_cd_music_repeat_poll();
+        scancode = (int) fdps_read_scancode_auto_repeat();
+
+        if (scancode == KEY_ESC || scancode == KEY_KEYPAD_DEL) {
+            *selected_index = COMMAND_SELECT_CANCELLED;
+            done = COMMAND_SELECT_DONE;
+        } else if (scancode == KEY_SPACE || scancode == KEY_ENTER) {
+            done = COMMAND_SELECT_DONE;
+        } else if (scancode == KEY_UP || scancode == KEY_RIGHT) {
+            *selected_index = (*selected_index + 1) % icon_count;
+            fdps_play_sfx(COMMAND_ICON_STEP_SOUND);
+        } else if (scancode == KEY_LEFT || scancode == KEY_DOWN) {
+            *selected_index = (*selected_index + icon_count - 1) % icon_count;
+            fdps_play_sfx(COMMAND_ICON_STEP_SOUND);
+        }
+
+        fdps_menu_draw_command_icons(icon_ids, icon_count, *selected_index);
+    }
+
+    return done;
+}
