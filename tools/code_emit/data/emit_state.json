@@ -2865,6 +2865,14 @@
       "status": "committed",
       "emitted_against": "0x351",
       "rounds": 0
+    },
+    "000330e0": {
+      "name": "fdps_shop_render_buy_target_frame",
+      "target": "shopdraw.c",
+      "body_size": "0x14b",
+      "status": "committed",
+      "emitted_against": "0x14b",
+      "rounds": 0
     }
   }
 }
