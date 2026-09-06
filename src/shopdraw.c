@@ -17,10 +17,12 @@
 #include "gamedata.h"
 #include "blit.h"
 #include "palcycle.h"
+#include "roster.h"
 #include "shopdraw.h"
 #include "sprite.h"
 #include "table.h"
 #include "text.h"
+#include "unititem.h"
 
 /* Where the item names sit in the game's one text block: entry 0xc9 plus the
    item id, ADD EAX,0xc9 at 00032a90.  fdps_draw_unit_inventory adds the same
@@ -324,4 +326,288 @@ void fdps_shop_render_buy_target_frame(unsigned char *list_bitmap,
                    BUY_TARGET_WINDOW_H);
 
     free(page);
+}
+
+/* ------------------------------------------------------------------------
+   fdps_shop_draw_member_entry, 00033230
+   ------------------------------------------------------------------------ */
+
+/* The walk cycle, MOV EBX,0x6 / DIV EBX / AND EAX,0x3 at 0003324b..00033259
+   and the CMP ...,0x3 at 0003325f: six timer ticks a frame and the top of the
+   two-bit phase folded back onto 1, so the icon rocks 0, 1, 2, 1 instead of
+   snapping back to 0.  fdps_draw_map_unit_panel folds the same phase the same
+   way (mapcur.c).
+
+   THE DIVIDE IS UNSIGNED, DIV and not IDIV, which is why
+   data_fdps_timer_tick_counter is declared unsigned (gamedata.h): past
+   0x7fffffff the icon keeps walking instead of standing on one frame. */
+#define MEMBER_ICON_WALK_FRAME_TICKS 6
+#define MEMBER_ICON_WALK_FRAME_FOLDED 3
+#define MEMBER_ICON_WALK_FRAME_FOLD_TO 1
+
+/* Twelve sprites to a roster member in the .CEL sprite cache -- four facings
+   of three walk frames -- so the set number is the roster index and the frame
+   is added on top (IMUL EAX,[EBP+0x1c],0xc at 0003326c).  The cache block's
+   offset table starts at the block's own base and not at a .CEL's +0xf, and
+   an entry is the offset from that base to the sprite's stream (rsrc.h). */
+#define MEMBER_SPRITES_PER_CACHE_SLOT 0x0c
+#define MEMBER_CEL_ENTRY_BYTES 4
+
+/* The icon and the two Command.cel cells under it.  0x2a is the sandy mound
+   the icon stands on and 0x2b its right tail, one sprite width apart on row
+   0x11 and starting two columns LEFT of dst (SUB EAX,0x2 at 00033280 against
+   ADD EAX,0x17 at 00033299), so the entry's cell is wider than the icon. */
+#define MEMBER_ICON_W 0x18
+#define MEMBER_ICON_H 0x18
+#define MEMBER_MOUND_ROW 0x11
+#define MEMBER_MOUND_COLUMN (-2)
+#define MEMBER_MOUND_TAIL_COLUMN 0x17
+#define MEMBER_MOUND_SPRITE 0x2a
+#define MEMBER_MOUND_TAIL_SPRITE 0x2b
+
+/* The blend descriptor mode 9 reads, three dwords in the order the kernel
+   takes them (rleblend.h), built on the stack exactly as the original builds
+   it at 000332df..000332ed.  The two table addresses are the symbols and not
+   the original's 0x653f0 and 0x643f0: the rebuild does not place either table
+   where the original placed it. */
+#define BLEND_DESC_SHADE_RAMP 0
+#define BLEND_DESC_LEVEL 1
+#define BLEND_DESC_CUBE 2
+#define BLEND_DESC_SLOTS 3
+
+/* The ghosting gate and how heavy the ghost is: CMP [0x00069cf4],0x17 / JL at
+   000332c4 and CMP EAX,0x1 / JZ at 000332d8 over the record's character id,
+   then PUSH 0x9 for the mode and 0xa for the level.  Character id 1 is
+   法蓮娜, whom the caller's confirm gate locks out from the same chapter index
+   on (roster.h has the same two literals for the same member).  The chapter
+   test is signed and has no upper bound. */
+#define MEMBER_GHOST_FIRST_CHAPTER 0x17
+#define MEMBER_GHOST_CHAR_ID 1
+#define MEMBER_GHOST_BLEND_LEVEL 0x0a
+#define MEMBER_BLIT_MODE_OPAQUE 0
+#define MEMBER_BLIT_MODE_TRANSLUCENT 9
+#define MEMBER_BLIT_NO_OPERAND 0
+
+/* The name.  Its message id is the record's character id plus one (INC EAX at
+   0003336a) and it goes at row 9, column 0x1e -- LEA EAX,[EAX + EAX*0x8] over
+   the pitch at 00033355.
+
+   THE PITCH IT IS HANDED IS THE LITERAL 0x138, PUSH 0x138 at 0003334d, while
+   the row it is placed on is the pitch ARGUMENT like everything else here.  So
+   only fdps_draw_text's own row stepping is on 312: the cannot-equip line at
+   00033540 is handed [EBP+0x18] instead, and the two disagree on any surface
+   the one caller does not compose. */
+#define MEMBER_NAME_TEXT_BIAS 1
+#define MEMBER_NAME_ROW 9
+#define MEMBER_NAME_COLUMN 0x1e
+#define MEMBER_NAME_PITCH 0x138
+#define MEMBER_NAME_FG_COLOR 0xd0
+
+/* The cannot-equip line, message 0x1f7 at row 0x23 column 0xe in its own
+   glyph colour, and the two colours both messages share.  A zero background
+   leaves the glyph cell unfilled, so the text composites over the icon row the
+   entry has already drawn (text.h). */
+#define MEMBER_CANNOT_EQUIP_TEXT_ID 0x1f7
+#define MEMBER_CANNOT_EQUIP_ROW 0x23
+#define MEMBER_CANNOT_EQUIP_COLUMN 0x0e
+#define MEMBER_CANNOT_EQUIP_FG_COLOR 0x2b
+#define MEMBER_TEXT_BG_COLOR 0
+#define MEMBER_TEXT_OUTLINE_COLOR 0x6d
+
+/* The two labelled columns.  Command.cel sprite 0x2c carries "EV :" over
+   "HIT:" and 0x2f "AP :" over "DP :", one caption cell holding both lines of
+   its column, so the left column is evade over hit and the right one attack
+   over defence.  The captions sit on the top row and the figures three columns
+   inside them; the second line is nine rows lower. */
+#define MEMBER_STAT_TOP_ROW 0x22
+#define MEMBER_STAT_BOTTOM_ROW 0x2b
+#define MEMBER_EV_HIT_CAPTION_SPRITE 0x2c
+#define MEMBER_EV_HIT_CAPTION_COLUMN 0x04
+#define MEMBER_AP_DP_CAPTION_SPRITE 0x2f
+#define MEMBER_AP_DP_CAPTION_COLUMN 0x33
+#define MEMBER_LEFT_FIGURE_COLUMN 0x1a
+#define MEMBER_RIGHT_FIGURE_COLUMN 0x49
+#define MEMBER_STAT_DIGITS 3
+#define MEMBER_FIGURE_SHOW_PLUS 0
+
+/* Which Number.cel colour row each figure is drawn in, the three literals
+   stored into data_fdps_number_glyph_color_row across 000333bd..000333e7 and
+   its three twins, and the 0 put back at 00033534 after the last figure. */
+#define MEMBER_STAT_COLOR_ROW_LOWER 2
+#define MEMBER_STAT_COLOR_ROW_HIGHER 3
+#define MEMBER_STAT_COLOR_ROW_EQUAL 0
+
+/* The four ints fdps_roster_preview_combat_stats_with_item writes, in its own
+   order (roster.h) -- which is not the order they are drawn in. */
+#define PREVIEW_STAT_ATTACK 0
+#define PREVIEW_STAT_DEFENSE 1
+#define PREVIEW_STAT_HIT 2
+#define PREVIEW_STAT_EVADE 3
+#define PREVIEW_STAT_SLOTS 4
+
+/* 00033230.  Four stack arguments, caller-cleaned: the one call site, 0003303d
+   inside fdps_shop_select_buy_target, pushes four dwords right to left -- the
+   item id, the roster index, PUSH 0x138 and the cell pointer -- and follows the
+   CALL with ADD ESP,0x10, while the body reads them at [EBP+0x14], [EBP+0x18],
+   [EBP+0x1c] and [EBP+0x20] behind PUSH EBX/ESI/EDI/EBP and the return address.
+   RET carries no immediate and the call site does not look at EAX.
+
+   THE FOUR STATS ARE READ SIGNED AND COMPARED SIGNED.  MOVSX word ptr
+   [EAX+0x4e] at 000333ae and its three twins, then JLE at 000333bb and JGE at
+   000333cf: a member whose current stat is negative -- which a cursed weapon's
+   modifier reaches, since fdps_roster_recompute_combat_stats does not clamp --
+   sorts below every positive preview and colours its figure 3.  Read unsigned
+   it would sort above and be coloured 2 instead.
+
+   THE COLOUR SELECTOR IS ONLY TOUCHED ON THE PATH THAT DRAWS FIGURES.  The
+   cannot-equip branch at 00033540 writes data_fdps_number_glyph_color_row
+   neither before nor after, so whatever the caller left there stands; zeroing
+   it on the way in or out of this function would be visible in the next
+   figure some other screen draws (gamedata.h).
+
+   THE TWO COLUMNS ARE DRAWN LEFT CAPTION, ITS TWO FIGURES, RIGHT CAPTION, ITS
+   TWO FIGURES, not both captions and then all four figures.  A figure's column
+   is inside its caption's 25-pixel cell, so the caption has to go down before
+   the figures beside it or it paints over them.
+
+   Two values are used after a CALL.  fdps_get_roster_record's is parked in
+   [EBP-0x10] at 00033248 and every read of the member -- the character id
+   twice and the four stat words -- loads it back from there.
+   fdps_unit_can_equip_item's is tested where it lands, TEST EAX,EAX / JZ at
+   0003338a with nothing between it and the CALL.  Nothing else here returns
+   anything this function reads: fdps_roster_preview_combat_stats_with_item
+   answers through its out_stats pointer, fdps_draw_text hands back a pen this
+   caller drops, and neither blitter nor fdps_draw_number returns a value. */
+void fdps_shop_draw_member_entry(unsigned char *dst, int pitch,
+                                 int roster_index, int item_id)
+{
+    struct fdps_unit_record *member;
+    /* The four figures as they would be WITH the item on, filled by the call
+       below; the member's own record still holds what they are now. */
+    int preview_stats[PREVIEW_STAT_SLOTS];
+    int blend_desc[BLEND_DESC_SLOTS];
+    int walk_frame;
+    int sprite_index;
+    unsigned char *icon_stream;
+    /* The stat the member has now, reloaded from the record before each of the
+       four comparisons -- one slot in the original, [EBP-0x4]. */
+    int current_stat;
+
+    member = fdps_get_roster_record(roster_index);
+
+    walk_frame = (int) ((data_fdps_timer_tick_counter
+                         / MEMBER_ICON_WALK_FRAME_TICKS) & 3);
+    if (walk_frame == MEMBER_ICON_WALK_FRAME_FOLDED) {
+        walk_frame = MEMBER_ICON_WALK_FRAME_FOLD_TO;
+    }
+    sprite_index = roster_index * MEMBER_SPRITES_PER_CACHE_SLOT + walk_frame;
+
+    fdps_blit_command_sprite(dst + MEMBER_MOUND_ROW * pitch
+                                 + MEMBER_MOUND_COLUMN,
+                             pitch, MEMBER_MOUND_SPRITE);
+    fdps_blit_command_sprite(dst + MEMBER_MOUND_ROW * pitch
+                                 + MEMBER_MOUND_TAIL_COLUMN,
+                             pitch, MEMBER_MOUND_TAIL_SPRITE);
+
+    icon_stream = data_fdps_cel_sprite_cache_ptr
+        + *(int *) (data_fdps_cel_sprite_cache_ptr
+                    + sprite_index * MEMBER_CEL_ENTRY_BYTES);
+
+    if (data_fdps_chapter_current_chapter_id >= MEMBER_GHOST_FIRST_CHAPTER
+        && member->char_id == MEMBER_GHOST_CHAR_ID) {
+        blend_desc[BLEND_DESC_SHADE_RAMP] =
+            (int) data_fdps_palette_shade_ramp_table;
+        blend_desc[BLEND_DESC_LEVEL] = MEMBER_GHOST_BLEND_LEVEL;
+        blend_desc[BLEND_DESC_CUBE] = (int) data_fdps_inverse_palette_cube;
+        fdps_blit_dispatch(icon_stream, dst, MEMBER_ICON_W, MEMBER_ICON_H,
+                           pitch, (unsigned int) blend_desc,
+                           MEMBER_BLIT_MODE_TRANSLUCENT);
+    } else {
+        fdps_blit_dispatch(icon_stream, dst, MEMBER_ICON_W, MEMBER_ICON_H,
+                           pitch, MEMBER_BLIT_NO_OPERAND,
+                           MEMBER_BLIT_MODE_OPAQUE);
+    }
+
+    fdps_roster_preview_combat_stats_with_item(roster_index, item_id,
+                                               preview_stats);
+
+    fdps_draw_text(data_fdps_all_game_text_ptr,
+                   (int) member->char_id + MEMBER_NAME_TEXT_BIAS,
+                   dst + MEMBER_NAME_ROW * pitch + MEMBER_NAME_COLUMN,
+                   MEMBER_NAME_PITCH, MEMBER_NAME_FG_COLOR,
+                   MEMBER_TEXT_BG_COLOR, MEMBER_TEXT_OUTLINE_COLOR);
+
+    if (fdps_unit_can_equip_item(roster_index, item_id) == 0) {
+        fdps_draw_text(data_fdps_all_game_text_ptr,
+                       MEMBER_CANNOT_EQUIP_TEXT_ID,
+                       dst + MEMBER_CANNOT_EQUIP_ROW * pitch
+                           + MEMBER_CANNOT_EQUIP_COLUMN,
+                       pitch, MEMBER_CANNOT_EQUIP_FG_COLOR,
+                       MEMBER_TEXT_BG_COLOR, MEMBER_TEXT_OUTLINE_COLOR);
+        return;
+    }
+
+    /* Left column: "EV :" over "HIT:". */
+    fdps_blit_command_sprite(dst + MEMBER_STAT_TOP_ROW * pitch
+                                 + MEMBER_EV_HIT_CAPTION_COLUMN,
+                             pitch, MEMBER_EV_HIT_CAPTION_SPRITE);
+
+    current_stat = (int) member->ev;
+    if (preview_stats[PREVIEW_STAT_EVADE] < current_stat) {
+        data_fdps_number_glyph_color_row = MEMBER_STAT_COLOR_ROW_LOWER;
+    } else if (current_stat < preview_stats[PREVIEW_STAT_EVADE]) {
+        data_fdps_number_glyph_color_row = MEMBER_STAT_COLOR_ROW_HIGHER;
+    } else {
+        data_fdps_number_glyph_color_row = MEMBER_STAT_COLOR_ROW_EQUAL;
+    }
+    fdps_draw_number(dst + MEMBER_STAT_TOP_ROW * pitch
+                         + MEMBER_LEFT_FIGURE_COLUMN,
+                     pitch, preview_stats[PREVIEW_STAT_EVADE],
+                     MEMBER_STAT_DIGITS, MEMBER_FIGURE_SHOW_PLUS);
+
+    current_stat = (int) member->hit;
+    if (preview_stats[PREVIEW_STAT_HIT] < current_stat) {
+        data_fdps_number_glyph_color_row = MEMBER_STAT_COLOR_ROW_LOWER;
+    } else if (current_stat < preview_stats[PREVIEW_STAT_HIT]) {
+        data_fdps_number_glyph_color_row = MEMBER_STAT_COLOR_ROW_HIGHER;
+    } else {
+        data_fdps_number_glyph_color_row = MEMBER_STAT_COLOR_ROW_EQUAL;
+    }
+    fdps_draw_number(dst + MEMBER_STAT_BOTTOM_ROW * pitch
+                         + MEMBER_LEFT_FIGURE_COLUMN,
+                     pitch, preview_stats[PREVIEW_STAT_HIT],
+                     MEMBER_STAT_DIGITS, MEMBER_FIGURE_SHOW_PLUS);
+
+    /* Right column: "AP :" over "DP :". */
+    fdps_blit_command_sprite(dst + MEMBER_STAT_TOP_ROW * pitch
+                                 + MEMBER_AP_DP_CAPTION_COLUMN,
+                             pitch, MEMBER_AP_DP_CAPTION_SPRITE);
+
+    current_stat = (int) member->ap;
+    if (preview_stats[PREVIEW_STAT_ATTACK] < current_stat) {
+        data_fdps_number_glyph_color_row = MEMBER_STAT_COLOR_ROW_LOWER;
+    } else if (current_stat < preview_stats[PREVIEW_STAT_ATTACK]) {
+        data_fdps_number_glyph_color_row = MEMBER_STAT_COLOR_ROW_HIGHER;
+    } else {
+        data_fdps_number_glyph_color_row = MEMBER_STAT_COLOR_ROW_EQUAL;
+    }
+    fdps_draw_number(dst + MEMBER_STAT_TOP_ROW * pitch
+                         + MEMBER_RIGHT_FIGURE_COLUMN,
+                     pitch, preview_stats[PREVIEW_STAT_ATTACK],
+                     MEMBER_STAT_DIGITS, MEMBER_FIGURE_SHOW_PLUS);
+
+    current_stat = (int) member->dp;
+    if (preview_stats[PREVIEW_STAT_DEFENSE] < current_stat) {
+        data_fdps_number_glyph_color_row = MEMBER_STAT_COLOR_ROW_LOWER;
+    } else if (current_stat < preview_stats[PREVIEW_STAT_DEFENSE]) {
+        data_fdps_number_glyph_color_row = MEMBER_STAT_COLOR_ROW_HIGHER;
+    } else {
+        data_fdps_number_glyph_color_row = MEMBER_STAT_COLOR_ROW_EQUAL;
+    }
+    fdps_draw_number(dst + MEMBER_STAT_BOTTOM_ROW * pitch
+                         + MEMBER_RIGHT_FIGURE_COLUMN,
+                     pitch, preview_stats[PREVIEW_STAT_DEFENSE],
+                     MEMBER_STAT_DIGITS, MEMBER_FIGURE_SHOW_PLUS);
+
+    data_fdps_number_glyph_color_row = MEMBER_STAT_COLOR_ROW_EQUAL;
 }

@@ -2873,6 +2873,14 @@
       "status": "committed",
       "emitted_against": "0x14b",
       "rounds": 0
+    },
+    "00033230": {
+      "name": "fdps_shop_draw_member_entry",
+      "target": "shopdraw.c",
+      "body_size": "0x33f",
+      "status": "committed",
+      "emitted_against": "0x33f",
+      "rounds": 0
     }
   }
 }

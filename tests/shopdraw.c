@@ -1135,6 +1135,711 @@ static void buytarget_layers_go_down_back_to_front(void)
              BT_BAR_COLOR_BASE + BT_BAR_SPRITE);
 }
 
+/* ---- fdps_shop_draw_member_entry, 00033230 --------------------------------
+ *
+ * Expected values come from the assembly at 00033230 -- MOV EBX,0x6 / DIV EBX
+ * / AND EAX,0x3 at 0003324b..00033259 with the CMP ...,0x3 at 0003325f, IMUL
+ * EAX,[EBP+0x1c],0xc at 0003326c, the two Command.cel placements SUB EAX,0x2
+ * at 00033280 and ADD EAX,0x17 at 00033299 on IMUL EAX,[EBP+0x18],0x11, the
+ * icon's PUSH 0x18 / PUSH 0x18 pair, the gate CMP [0x00069cf4],0x17 / JL at
+ * 000332c4 and CMP EAX,0x1 / JZ at 000332d8 with PUSH 0x9 and the level 0xa,
+ * the name's INC EAX at 0003336a on LEA EAX,[EAX + EAX*0x8] + 0x1e with the
+ * literal PUSH 0x138 at 0003334d, TEST EAX,EAX / JZ 0x00033540 at 0003338a,
+ * the sprite immediates 0x2a 0x2b 0x2c 0x2f, the columns 0x4 0x1a 0x33 0x49 on
+ * rows 0x22 and 0x2b, PUSH 0x3 for the field width, the MOVSX word ptr
+ * [EAX+0x4e] / [EAX+0x4c] / [EAX+0x48] / [EAX+0x4a] reads with their JLE and
+ * JGE compares, the three colour-row literals 2 3 0 and the final store of 0 at
+ * 00033534, and message 0x1f7 in colour 0x2b at row 0x23 column 0xe -- checked
+ * against the callees' documented behaviour in blit.h, roster.h, rleblend.h,
+ * sprite.h, table.h, text.h and unititem.h.  None of them is read off the
+ * emitted C.
+ *
+ * THE SURFACE'S PITCH IS 156 AND NOT 312 ON PURPOSE.  The name is the one
+ * thing this routine draws on a literal 0x138 rather than on its pitch
+ * argument -- its POSITION still comes from the argument, it is the pitch
+ * handed to fdps_draw_text that is the literal -- so a surface half 312 wide
+ * makes that literal a row count the cases can read back: one glyph row of
+ * 0x138 is two rows of this surface and one of the argument is one.
+ *
+ * THE FIXTURE IS THE SAME COLOUR-CODED ONE THE REST OF THE FILE USES, with
+ * four bands kept apart so a pixel names the step that wrote it: the icon
+ * cache paints 0x30 plus the sprite index, Command.cel 0xc0 plus the sprite,
+ * Number.cel 0x80 plus the sprite -- which is colour_row * 13 + glyph, so a
+ * digit's colour names the row it was drawn in -- the two messages 0xd0 and
+ * 0x2b over a 0x6d shadow, the ghosted icon 0x11, and an untouched surface
+ * 0x77.
+ *
+ * THE GHOST IS READ THROUGH AN ALL-ZERO BLEND.  Mode 9 weights the source and
+ * the destination byte through the shade ramp and looks the pair up in the
+ * inverse colour cube (rleblend.h); with the ramp zeroed every pixel lands on
+ * cube entry 0, so setting that one entry to 0x11 makes "the icon went through
+ * mode 9" a colour the surface can be asked about.
+ *
+ * NO TIMER INTERRUPT IS INSTALLED.  Nothing here waits for the tick to change
+ * -- it is only divided -- so leaving the counter still makes the walk frame
+ * the case's own input.
+ */
+
+/* The surface.  Wide enough for the right column's third digit cell at 85 plus
+   its six pixels, tall enough for the second-line figure at row 0x2b and the
+   captions' 22 rows, and its origin is inside it on both axes because the
+   mound is drawn two columns LEFT of the entry. */
+#define MB_PITCH          156
+#define MB_ROWS           60
+#define MB_SURFACE_BYTES  (MB_PITCH * MB_ROWS)
+#define MB_ORIGIN_ROW     2
+#define MB_ORIGIN_COL     4
+#define MB_BG             0x77
+
+/* The .CEL sprite cache: an offset table at the block's own base, one dword a
+   sprite, twelve sprites to a roster member (rsrc.h).  Four members is one
+   more than any case asks for. */
+#define MB_ICON_SLOTS     4
+#define MB_ICON_PER_SLOT  0x0c
+#define MB_ICON_SPRITES   (MB_ICON_SLOTS * MB_ICON_PER_SLOT)
+#define MB_ICON_W         0x18
+#define MB_ICON_H         0x18
+#define MB_ROW_BYTES      2
+#define MB_ICON_TABLE_BYTES (MB_ICON_SPRITES * 4)
+#define MB_ICON_CACHE_BYTES \
+    (MB_ICON_TABLE_BYTES + MB_ICON_SPRITES * MB_ICON_H * MB_ROW_BYTES)
+#define MB_ICON_COLOR(sprite) (0x30 + (sprite))
+
+/* Command.cel: the table at the .CEL's fixed +0x0f, 25 by 22 cells, and enough
+   sprites to hold 0x2f, the last one the entry asks for. */
+#define MB_CEL_TABLE_AT   0x0f
+#define MB_CMD_SPRITES    0x30
+#define MB_CMD_W          0x19
+#define MB_CMD_H          0x16
+#define MB_CMD_STREAM_AT  (MB_CEL_TABLE_AT + MB_CMD_SPRITES * 4)
+#define MB_CMD_SHEET_BYTES \
+    (MB_CMD_STREAM_AT + MB_CMD_SPRITES * MB_CMD_H * MB_ROW_BYTES)
+#define MB_CMD_COLOR(sprite) (0xc0 + (sprite))
+
+/* Number.cel: four colour rows of the thirteen glyphs '0'-'9', '+', '-', '?',
+   each 6 by 8, which covers rows 0, 2 and 3 -- the three this routine picks
+   from.  The sprite finally drawn is colour_row * 13 + glyph (text.h). */
+#define MB_NUM_ROWS       4
+#define MB_NUM_GLYPHS     13
+#define MB_NUM_SPRITES    (MB_NUM_ROWS * MB_NUM_GLYPHS)
+#define MB_NUM_W          6
+#define MB_NUM_H          8
+#define MB_NUM_STREAM_AT  (MB_CEL_TABLE_AT + MB_NUM_SPRITES * 4)
+#define MB_NUM_SHEET_BYTES \
+    (MB_NUM_STREAM_AT + MB_NUM_SPRITES * MB_NUM_H * MB_ROW_BYTES)
+#define MB_NUM_COLOR(row, glyph) (0x80 + (row) * MB_NUM_GLYPHS + (glyph))
+
+/* The text block: 0x1f8 entries covers 0x1f7, the cannot-equip line. */
+#define MB_TEXT_ENTRIES   0x1f8
+#define MB_TEXT_EMPTY_AT  1010
+#define MB_TEXT_NAME_AT   1014
+#define MB_TEXT_NEXT_AT   1022
+#define MB_TEXT_OTHER_AT  1030
+#define MB_TEXT_BYTES     1040
+#define MB_NAME_FG        0xd0
+#define MB_CANNOT_FG      0x2b
+#define MB_TEXT_OUTLINE   0x6d
+#define MB_GHOST_COLOR    0x11
+
+/* The tables the two callees resolve their records through. */
+#define MB_ROSTER_SLOTS   4
+#define MB_ROSTER_INDEX   2
+#define MB_ITEM_COUNT     8
+#define MB_ITEM_ID        5
+#define MB_ITEM_TYPE      0x03
+#define MB_CLASS_COUNT    4
+#define MB_CLASS          1
+#define MB_CLASS_EQUIP_SLOTS 6
+#define MB_TYPE_NOT_ALLOWED  0xfe
+
+/* The geometry the assertions measure against, named again here so a case
+   states the assembly's number rather than the header's constant. */
+#define MB_WALK_FRAME_TICKS   6
+#define MB_MOUND_ROW          0x11
+#define MB_MOUND_COL          (-2)
+#define MB_TAIL_COL           0x17
+#define MB_MOUND_SPRITE       0x2a
+#define MB_TAIL_SPRITE        0x2b
+#define MB_NAME_COL           0x1e
+#define MB_NAME_ROW           9
+/* 0x138 bytes is two rows of this 156-wide surface, which is how the literal
+   the name is drawn on is told apart from the pitch argument. */
+#define MB_LITERAL_PITCH_ROWS 2
+#define MB_GHOST_CHAPTER      0x17
+#define MB_GHOST_CHAR_ID      1
+#define MB_CANNOT_ROW         0x23
+#define MB_CANNOT_COL         0x0e
+#define MB_STAT_TOP_ROW       0x22
+#define MB_STAT_BOTTOM_ROW    0x2b
+#define MB_EV_HIT_SPRITE      0x2c
+#define MB_EV_HIT_COL         0x04
+#define MB_AP_DP_SPRITE       0x2f
+#define MB_AP_DP_COL          0x33
+#define MB_LEFT_FIGURE_COL    0x1a
+#define MB_RIGHT_FIGURE_COL   0x49
+#define MB_COLOR_ROW_LOWER    2
+#define MB_COLOR_ROW_HIGHER   3
+#define MB_COLOR_ROW_EQUAL    0
+#define MB_CALLER_COLOR_ROW   1
+
+static unsigned char mb_surface[MB_SURFACE_BYTES];
+static unsigned char mb_icon_cache[MB_ICON_CACHE_BYTES];
+static unsigned char mb_cmd_sheet[MB_CMD_SHEET_BYTES];
+static unsigned char mb_num_sheet[MB_NUM_SHEET_BYTES];
+static unsigned char mb_font[SD_FONT_GLYPHS * SD_FONT_STRIDE];
+static unsigned char mb_text_block[MB_TEXT_BYTES];
+static struct fdps_unit_record mb_roster[MB_ROSTER_SLOTS];
+static struct fdps_item_effect mb_items[MB_ITEM_COUNT];
+static struct fdps_class_equip_record mb_class_equip[MB_CLASS_COUNT];
+
+/* A .CEL-shaped sheet whose sprite n is a flat fill of color_base + n, its
+   offset table at the .CEL's fixed +0x0f. */
+static void mb_build_cel(unsigned char *sheet, int sprites, int stream_at,
+                         int width, int height, int color_base)
+{
+    struct fdps_cel_header *header;
+    int sprite;
+    int row;
+    int at;
+
+    header = (struct fdps_cel_header *) sheet;
+    header->magic[0] = 'C';
+    header->magic[1] = 'E';
+    header->magic[2] = 'L';
+    header->sprite_width = (short) width;
+    header->sprite_height = (short) height;
+    header->sprite_count = (short) sprites;
+
+    for (sprite = 0; sprite < sprites; sprite++) {
+        at = stream_at + sprite * height * MB_ROW_BYTES;
+        *(int *) (sheet + MB_CEL_TABLE_AT + sprite * 4) = at;
+        for (row = 0; row < height; row++) {
+            sheet[at + row * MB_ROW_BYTES] = SD_FILL_CMD(width);
+            sheet[at + row * MB_ROW_BYTES + 1] =
+                (unsigned char) (color_base + sprite);
+        }
+    }
+}
+
+/* The sprite cache is NOT a .CEL: its offset table starts at the block's own
+   base, with no header in front of it, and an entry is the offset from that
+   base to the sprite's stream (rsrc.h).  Sprite n is a flat fill of
+   0x30 + n. */
+static void mb_build_icon_cache(void)
+{
+    int sprite;
+    int row;
+    int at;
+
+    for (sprite = 0; sprite < MB_ICON_SPRITES; sprite++) {
+        at = MB_ICON_TABLE_BYTES + sprite * MB_ICON_H * MB_ROW_BYTES;
+        *(int *) (mb_icon_cache + sprite * 4) = at;
+        for (row = 0; row < MB_ICON_H; row++) {
+            mb_icon_cache[at + row * MB_ROW_BYTES] = SD_FILL_CMD(MB_ICON_W);
+            mb_icon_cache[at + row * MB_ROW_BYTES + 1] =
+                (unsigned char) MB_ICON_COLOR(sprite);
+        }
+    }
+}
+
+/* Points text entry `text_index` at a stream holding one glyph and the end
+   marker, so drawing that entry paints exactly column `glyph` of its cell. */
+static void mb_text_entry(int text_index, int stream_at, int glyph)
+{
+    *(short *) (mb_text_block + text_index * 2) = (short) stream_at;
+    *(short *) (mb_text_block + stream_at) = (short) glyph;
+    *(short *) (mb_text_block + stream_at + 2) = (short) -1;
+}
+
+static void mb_stage(void)
+{
+    int i;
+
+    memset(mb_surface, MB_BG, (size_t) MB_SURFACE_BYTES);
+    memset(mb_icon_cache, 0, sizeof(mb_icon_cache));
+    memset(mb_cmd_sheet, 0, sizeof(mb_cmd_sheet));
+    memset(mb_num_sheet, 0, sizeof(mb_num_sheet));
+    memset(mb_font, 0, sizeof(mb_font));
+    memset(mb_text_block, 0, sizeof(mb_text_block));
+    memset(mb_roster, 0, sizeof(mb_roster));
+    memset(mb_items, 0, sizeof(mb_items));
+    memset(mb_class_equip, 0, sizeof(mb_class_equip));
+
+    mb_build_icon_cache();
+    mb_build_cel(mb_cmd_sheet, MB_CMD_SPRITES, MB_CMD_STREAM_AT, MB_CMD_W,
+                 MB_CMD_H, 0xc0);
+    mb_build_cel(mb_num_sheet, MB_NUM_SPRITES, MB_NUM_STREAM_AT, MB_NUM_W,
+                 MB_NUM_H, 0x80);
+
+    for (i = 0; i < SD_FONT_GLYPHS; i++) {
+        if (i < 8) {
+            mb_font[i * SD_FONT_STRIDE] = (unsigned char) (0x80 >> i);
+        } else {
+            mb_font[i * SD_FONT_STRIDE + 1] =
+                (unsigned char) (0x80 >> (i - 8));
+        }
+    }
+
+    for (i = 0; i < MB_TEXT_ENTRIES; i++) {
+        *(short *) (mb_text_block + i * 2) = (short) MB_TEXT_EMPTY_AT;
+    }
+    *(short *) (mb_text_block + MB_TEXT_EMPTY_AT) = (short) -1;
+
+    /* The blend the ghost path goes through: an all-zero ramp sends every
+       pixel to cube entry 0, which is the one entry a case then reads back. */
+    memset(data_fdps_palette_shade_ramp_table, 0,
+           sizeof(data_fdps_palette_shade_ramp_table));
+    data_fdps_inverse_palette_cube[0] = (unsigned char) MB_GHOST_COLOR;
+
+    /* The village points the map unit array at the roster block, which is what
+       lets fdps_unit_can_equip_item's fdps_get_unit_record reach the same
+       record fdps_get_roster_record does (unititem.h). */
+    data_fdps_roster_array_ptr = (unsigned char *) mb_roster;
+    data_fdps_map_unit_array_ptr = (unsigned char *) mb_roster;
+    data_fdps_item_effect_table_ptr = (unsigned char *) mb_items;
+    data_fdps_class_equip_table_ptr = (unsigned char *) mb_class_equip;
+    data_fdps_cel_sprite_cache_ptr = mb_icon_cache;
+    data_fdps_command_sprite_sheet_ptr = mb_cmd_sheet;
+    data_fdps_number_glyph_sheet_ptr = mb_num_sheet;
+    data_fdps_number_glyph_color_row = 0;
+    data_fdps_font_sheet_ptr = mb_font;
+    data_fdps_font_glyph_width = (unsigned char) SD_FONT_CELL_W;
+    data_fdps_glyph_cell_height = (unsigned char) SD_FONT_CELL_H;
+    data_fdps_font_glyph_stride_bytes = SD_FONT_STRIDE;
+    data_fdps_font_outline_enabled_flag = (unsigned char) 0;
+    data_fdps_glyph_shadow_row_offset = 0;
+    data_fdps_font_shadow_offset_x = SD_FONT_SHADOW_X;
+    data_fdps_glyph_advance_x = SD_FONT_ADVANCE;
+    data_fdps_font_line_height = SD_FONT_LINE_H;
+    data_fdps_all_game_text_ptr = mb_text_block;
+
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_chapter_current_chapter_id = 0;
+
+    /* The member and the item on offer.  No inventory entry is flagged
+       equipped, so the preview is the member's three base stats plus the
+       candidate item's own four modifiers and nothing else (roster.h). */
+    mb_roster[MB_ROSTER_INDEX].char_id = 5;
+    mb_roster[MB_ROSTER_INDEX].clazz = (unsigned char) MB_CLASS;
+    mb_items[MB_ITEM_ID].type = (unsigned char) MB_ITEM_TYPE;
+    for (i = 0; i < MB_CLASS_EQUIP_SLOTS; i++) {
+        mb_class_equip[MB_CLASS].allowed_item_type[i] =
+            (unsigned char) MB_TYPE_NOT_ALLOWED;
+    }
+}
+
+/* Back to the state a freshly started program has these in: the loaders free
+   every one of these blocks unguarded, so a case that walked away leaving one
+   naming a static here hands a later test a free of storage that never came
+   from the heap. */
+static void mb_unstage(void)
+{
+    data_fdps_roster_array_ptr = NULL;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_item_effect_table_ptr = NULL;
+    data_fdps_class_equip_table_ptr = NULL;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_command_sprite_sheet_ptr = NULL;
+    data_fdps_number_glyph_sheet_ptr = NULL;
+    data_fdps_font_sheet_ptr = NULL;
+    data_fdps_all_game_text_ptr = NULL;
+    data_fdps_inverse_palette_cube[0] = 0;
+    data_fdps_number_glyph_color_row = 0;
+    data_fdps_chapter_current_chapter_id = 0;
+    data_fdps_timer_tick_counter = 0;
+}
+
+/* Lets the member's class equip the item on offer, which is what steers the
+   routine onto the four-figure path. */
+static void mb_allow_the_item(void)
+{
+    mb_class_equip[MB_CLASS].allowed_item_type[3] =
+        (unsigned char) MB_ITEM_TYPE;
+}
+
+/* The four previewed figures, set through the seeds the preview adds up:
+   attack is ap_base + the item's ap, defence dp_base + its dp, and hit and
+   evade both start from the one dexterity word (roster.h). */
+static void mb_seed_preview(int attack, int defense, int hit, int evade)
+{
+    mb_roster[MB_ROSTER_INDEX].ap_base = (short) attack;
+    mb_roster[MB_ROSTER_INDEX].dp_base = (short) defense;
+    mb_roster[MB_ROSTER_INDEX].dx_base = (short) hit;
+    mb_items[MB_ITEM_ID].ap = 0;
+    mb_items[MB_ITEM_ID].dp = 0;
+    mb_items[MB_ITEM_ID].hit = 0;
+    mb_items[MB_ITEM_ID].ev = (short) (evade - hit);
+}
+
+/* What the member has now, which is what each previewed figure is coloured
+   against. */
+static void mb_set_current(int attack, int defense, int hit, int evade)
+{
+    mb_roster[MB_ROSTER_INDEX].ap = (short) attack;
+    mb_roster[MB_ROSTER_INDEX].dp = (short) defense;
+    mb_roster[MB_ROSTER_INDEX].hit = (short) hit;
+    mb_roster[MB_ROSTER_INDEX].ev = (short) evade;
+}
+
+static void mb_draw(void)
+{
+    fdps_shop_draw_member_entry(mb_surface + MB_ORIGIN_ROW * MB_PITCH
+                                    + MB_ORIGIN_COL,
+                                MB_PITCH, MB_ROSTER_INDEX, MB_ITEM_ID);
+}
+
+/* A pixel of the surface, addressed from the entry's own top-left corner. */
+static int mb_pixel(int row, int col)
+{
+    return (int) mb_surface[(MB_ORIGIN_ROW + row) * MB_PITCH + MB_ORIGIN_COL
+                            + col];
+}
+
+/* The colour standing in the top-left pixel of digit cell `cell` of the figure
+   drawn at (row, col). */
+static int mb_digit(int row, int col, int cell)
+{
+    return mb_pixel(row, col + cell * MB_NUM_W);
+}
+
+/* The icon is drawn at dst itself, 24 by 24, and its sprite is the roster
+   index times twelve plus the walk frame -- so member 2 standing still takes
+   sprite 24 out of the cache. */
+static void member_icon_is_twelve_per_member_at_dst(void)
+{
+    mb_stage();
+    mb_draw();
+
+    CHECK_EQ(mb_pixel(0, 0),
+             MB_ICON_COLOR(MB_ROSTER_INDEX * MB_ICON_PER_SLOT));
+    CHECK_EQ(mb_pixel(MB_ICON_H - 1, MB_ICON_W - 1),
+             MB_ICON_COLOR(MB_ROSTER_INDEX * MB_ICON_PER_SLOT));
+    CHECK_EQ(mb_pixel(0, MB_ICON_W), MB_BG);
+    CHECK_EQ(mb_pixel(-1, 0), MB_BG);
+    mb_unstage();
+}
+
+/* (tick / 6) & 3 with the value 3 folded back onto 1: the walk rocks 0, 1, 2,
+   1 and back to 0 rather than snapping from 2 to 0.  Six ticks a frame, so the
+   frame changes at 6, 12, 18 and 24. */
+static void member_walk_frame_pings_back_from_three_to_one(void)
+{
+    int base;
+
+    base = MB_ROSTER_INDEX * MB_ICON_PER_SLOT;
+
+    mb_stage();
+    data_fdps_timer_tick_counter = 0;
+    mb_draw();
+    CHECK_EQ(mb_pixel(0, 0), MB_ICON_COLOR(base));
+
+    data_fdps_timer_tick_counter = MB_WALK_FRAME_TICKS;
+    mb_draw();
+    CHECK_EQ(mb_pixel(0, 0), MB_ICON_COLOR(base + 1));
+
+    data_fdps_timer_tick_counter = MB_WALK_FRAME_TICKS * 2;
+    mb_draw();
+    CHECK_EQ(mb_pixel(0, 0), MB_ICON_COLOR(base + 2));
+
+    data_fdps_timer_tick_counter = MB_WALK_FRAME_TICKS * 3;
+    mb_draw();
+    CHECK_EQ(mb_pixel(0, 0), MB_ICON_COLOR(base + 1));
+
+    data_fdps_timer_tick_counter = MB_WALK_FRAME_TICKS * 4;
+    mb_draw();
+    CHECK_EQ(mb_pixel(0, 0), MB_ICON_COLOR(base));
+
+    data_fdps_timer_tick_counter = MB_WALK_FRAME_TICKS - 1;
+    mb_draw();
+    CHECK_EQ(mb_pixel(0, 0), MB_ICON_COLOR(base));
+    mb_unstage();
+}
+
+/* DIV EBX and not IDIV: 0xffffffff over six is 715827882, whose low two bits
+   are 2, so the icon is on its third frame.  Read as a signed -1 the quotient
+   would be 0 and the first frame would be shown instead. */
+static void member_walk_divide_is_unsigned(void)
+{
+    mb_stage();
+    data_fdps_timer_tick_counter = 0xffffffffu;
+    mb_draw();
+
+    CHECK_EQ(mb_pixel(0, 0),
+             MB_ICON_COLOR(MB_ROSTER_INDEX * MB_ICON_PER_SLOT + 2));
+    mb_unstage();
+}
+
+/* The mound is Command.cel sprite 0x2a two columns LEFT of the entry and its
+   tail 0x2b one sprite width to the right of that, both on row 0x11.  Row 24
+   is below the icon, so the two cells are seen there without it on top. */
+static void member_mound_is_sprites_2a_and_2b_on_row_0x11(void)
+{
+    mb_stage();
+    mb_draw();
+
+    CHECK_EQ(mb_pixel(MB_MOUND_ROW, MB_MOUND_COL),
+             MB_CMD_COLOR(MB_MOUND_SPRITE));
+    CHECK_EQ(mb_pixel(MB_MOUND_ROW, MB_MOUND_COL - 1), MB_BG);
+    CHECK_EQ(mb_pixel(MB_MOUND_ROW - 1, MB_MOUND_COL), MB_BG);
+    CHECK_EQ(mb_pixel(MB_ICON_H, MB_MOUND_COL + MB_CMD_W - 1),
+             MB_CMD_COLOR(MB_MOUND_SPRITE));
+    CHECK_EQ(mb_pixel(MB_ICON_H, MB_TAIL_COL), MB_CMD_COLOR(MB_TAIL_SPRITE));
+    CHECK_EQ(mb_pixel(MB_ICON_H, MB_TAIL_COL + MB_CMD_W - 1),
+             MB_CMD_COLOR(MB_TAIL_SPRITE));
+    CHECK_EQ(mb_pixel(MB_ICON_H, MB_TAIL_COL + MB_CMD_W), MB_BG);
+    mb_unstage();
+}
+
+/* The icon goes down in mode 0 until the chapter index reaches 0x17 AND the
+   record's character id is 1, and in mode 9 from then on.  The chapter test is
+   >= with no upper bound, so a later chapter ghosts the same member. */
+static void member_icon_is_ghosted_from_chapter_0x17(void)
+{
+    int opaque;
+
+    opaque = MB_ICON_COLOR(MB_ROSTER_INDEX * MB_ICON_PER_SLOT);
+
+    mb_stage();
+    mb_roster[MB_ROSTER_INDEX].char_id = (unsigned char) MB_GHOST_CHAR_ID;
+    data_fdps_chapter_current_chapter_id = MB_GHOST_CHAPTER - 1;
+    mb_draw();
+    CHECK_EQ(mb_pixel(0, 0), opaque);
+
+    data_fdps_chapter_current_chapter_id = MB_GHOST_CHAPTER;
+    mb_draw();
+    CHECK_EQ(mb_pixel(0, 0), MB_GHOST_COLOR);
+
+    data_fdps_chapter_current_chapter_id = MB_GHOST_CHAPTER + 0x20;
+    mb_draw();
+    CHECK_EQ(mb_pixel(0, 0), MB_GHOST_COLOR);
+
+    mb_roster[MB_ROSTER_INDEX].char_id = (unsigned char) (MB_GHOST_CHAR_ID + 1);
+    data_fdps_chapter_current_chapter_id = MB_GHOST_CHAPTER;
+    mb_draw();
+    CHECK_EQ(mb_pixel(0, 0), opaque);
+    mb_unstage();
+}
+
+/* The name's message id is the record's character id plus one, so a member
+   carrying id 5 draws entry 6 and not entry 7.  It goes at row 9 column 0x1e
+   -- LEA EAX,[EAX + EAX*0x8] over the PITCH ARGUMENT, which is the one thing
+   about this message that is not the 0x138 literal -- with the body in 0xd0
+   and the drop shadow beside it in 0x6d, the two colour arguments arriving in
+   the right places.  Entry 7's own glyph column keeps the surface colour. */
+static void member_name_is_message_char_id_plus_one(void)
+{
+    mb_stage();
+    mb_text_entry(6, MB_TEXT_NAME_AT, 3);
+    mb_text_entry(7, MB_TEXT_NEXT_AT, 9);
+    mb_draw();
+
+    CHECK_EQ(mb_pixel(MB_NAME_ROW, MB_NAME_COL + 3), MB_NAME_FG);
+    CHECK_EQ(mb_pixel(MB_NAME_ROW, MB_NAME_COL + 4), MB_TEXT_OUTLINE);
+    CHECK_EQ(mb_pixel(MB_NAME_ROW, MB_NAME_COL + 9), MB_BG);
+    CHECK_EQ(mb_pixel(MB_NAME_ROW - 1, MB_NAME_COL + 3), MB_BG);
+    CHECK_EQ(mb_pixel(MB_NAME_ROW, MB_NAME_COL - 1), MB_BG);
+    mb_unstage();
+}
+
+/* PUSH 0x138 at 0003334d is the PITCH the name is drawn on, and PUSH EAX from
+   [EBP+0x18] at 0003354a is the pitch the cannot-equip line is drawn on: the
+   two messages of this routine do not agree, and only the first is the
+   literal.  fdps_draw_text hands its pitch on to every row step inside a glyph
+   (text.h), so putting the drop shadow a row below the body rather than a
+   column beside it makes the difference a pixel: 312 bytes is two rows of this
+   surface and 156 is one.
+
+   The one caller composes at 0x138 so the two agree in play; replacing the
+   literal with the argument would be invisible there and visible on any other
+   surface. */
+static void member_name_takes_0x138_where_the_cannot_line_takes_the_pitch(void)
+{
+    mb_stage();
+    data_fdps_glyph_shadow_row_offset = 1;
+    data_fdps_font_shadow_offset_x = 0;
+    mb_text_entry(6, MB_TEXT_NAME_AT, 3);
+    mb_text_entry(0x1f7, MB_TEXT_OTHER_AT, 2);
+    mb_draw();
+
+    CHECK_EQ(mb_pixel(MB_NAME_ROW, MB_NAME_COL + 3), MB_NAME_FG);
+    CHECK_EQ(mb_pixel(MB_NAME_ROW + MB_LITERAL_PITCH_ROWS, MB_NAME_COL + 3),
+             MB_TEXT_OUTLINE);
+    CHECK_EQ(mb_pixel(MB_NAME_ROW + 1, MB_NAME_COL + 3), MB_BG);
+
+    CHECK_EQ(mb_pixel(MB_CANNOT_ROW, MB_CANNOT_COL + 2), MB_CANNOT_FG);
+    CHECK_EQ(mb_pixel(MB_CANNOT_ROW + 1, MB_CANNOT_COL + 2), MB_TEXT_OUTLINE);
+    CHECK_EQ(mb_pixel(MB_CANNOT_ROW + MB_LITERAL_PITCH_ROWS,
+                      MB_CANNOT_COL + 2),
+             MB_CMD_COLOR(MB_MOUND_SPRITE));
+    mb_unstage();
+}
+
+/* fdps_unit_can_equip_item answering 0 draws message 0x1f7 at row 0x23 column
+   0xe in colour 0x2b and stops there: no caption, no figure, and the colour
+   selector the caller left is still standing afterwards. */
+static void member_cannot_equip_draws_message_0x1f7_alone(void)
+{
+    mb_stage();
+    mb_text_entry(0x1f7, MB_TEXT_OTHER_AT, 2);
+    data_fdps_number_glyph_color_row = MB_CALLER_COLOR_ROW;
+    mb_draw();
+
+    CHECK_EQ(mb_pixel(MB_CANNOT_ROW, MB_CANNOT_COL + 2), MB_CANNOT_FG);
+    CHECK_EQ(mb_pixel(MB_CANNOT_ROW, MB_CANNOT_COL + 3), MB_TEXT_OUTLINE);
+    CHECK_EQ(mb_pixel(MB_STAT_BOTTOM_ROW, MB_EV_HIT_COL), MB_BG);
+    CHECK_EQ(mb_pixel(MB_STAT_TOP_ROW, MB_AP_DP_COL), MB_BG);
+    CHECK_EQ(mb_pixel(MB_STAT_BOTTOM_ROW, MB_LEFT_FIGURE_COL), MB_BG);
+    CHECK_EQ(data_fdps_number_glyph_color_row, MB_CALLER_COLOR_ROW);
+    mb_unstage();
+}
+
+/* Answering non-zero draws both caption cells -- 0x2c at column 4 and 0x2f at
+   column 0x33, both on row 0x22 -- and the cannot-equip line is not drawn.
+   The selector is put back to 0 after the last figure. */
+static void member_can_equip_draws_both_captions(void)
+{
+    mb_stage();
+    mb_allow_the_item();
+    mb_text_entry(0x1f7, MB_TEXT_OTHER_AT, 2);
+    data_fdps_number_glyph_color_row = MB_CALLER_COLOR_ROW;
+    mb_draw();
+
+    CHECK_EQ(mb_pixel(MB_STAT_TOP_ROW, MB_EV_HIT_COL),
+             MB_CMD_COLOR(MB_EV_HIT_SPRITE));
+    CHECK_EQ(mb_pixel(MB_STAT_TOP_ROW, MB_AP_DP_COL),
+             MB_CMD_COLOR(MB_AP_DP_SPRITE));
+    CHECK_EQ(mb_pixel(MB_CANNOT_ROW, MB_CANNOT_COL + 2),
+             MB_CMD_COLOR(MB_EV_HIT_SPRITE));
+    CHECK_EQ(data_fdps_number_glyph_color_row, MB_COLOR_ROW_EQUAL);
+    mb_unstage();
+}
+
+/* Which figure goes where, and it is not the order the preview writes them in:
+   evade over hit down the left column at 0x1a, attack over defence down the
+   right one at 0x49, top row 0x22 and second row 0x2b.  Every figure is three
+   digits zero padded, PUSH 0x3.  All four current stats are set equal to their
+   preview here so every figure is drawn in colour row 0. */
+static void member_figures_are_ev_hit_ap_dp_in_two_columns(void)
+{
+    mb_stage();
+    mb_allow_the_item();
+    mb_seed_preview(12, 34, 56, 78);
+    mb_set_current(12, 34, 56, 78);
+    mb_draw();
+
+    CHECK_EQ(mb_digit(MB_STAT_TOP_ROW, MB_LEFT_FIGURE_COL, 0),
+             MB_NUM_COLOR(MB_COLOR_ROW_EQUAL, 0));
+    CHECK_EQ(mb_digit(MB_STAT_TOP_ROW, MB_LEFT_FIGURE_COL, 1),
+             MB_NUM_COLOR(MB_COLOR_ROW_EQUAL, 7));
+    CHECK_EQ(mb_digit(MB_STAT_TOP_ROW, MB_LEFT_FIGURE_COL, 2),
+             MB_NUM_COLOR(MB_COLOR_ROW_EQUAL, 8));
+
+    CHECK_EQ(mb_digit(MB_STAT_BOTTOM_ROW, MB_LEFT_FIGURE_COL, 1),
+             MB_NUM_COLOR(MB_COLOR_ROW_EQUAL, 5));
+    CHECK_EQ(mb_digit(MB_STAT_BOTTOM_ROW, MB_LEFT_FIGURE_COL, 2),
+             MB_NUM_COLOR(MB_COLOR_ROW_EQUAL, 6));
+
+    CHECK_EQ(mb_digit(MB_STAT_TOP_ROW, MB_RIGHT_FIGURE_COL, 1),
+             MB_NUM_COLOR(MB_COLOR_ROW_EQUAL, 1));
+    CHECK_EQ(mb_digit(MB_STAT_TOP_ROW, MB_RIGHT_FIGURE_COL, 2),
+             MB_NUM_COLOR(MB_COLOR_ROW_EQUAL, 2));
+
+    CHECK_EQ(mb_digit(MB_STAT_BOTTOM_ROW, MB_RIGHT_FIGURE_COL, 1),
+             MB_NUM_COLOR(MB_COLOR_ROW_EQUAL, 3));
+    CHECK_EQ(mb_digit(MB_STAT_BOTTOM_ROW, MB_RIGHT_FIGURE_COL, 2),
+             MB_NUM_COLOR(MB_COLOR_ROW_EQUAL, 4));
+    mb_unstage();
+}
+
+/* A caption's 25-pixel cell reaches over the first digit cell beside it, so the
+   caption has to be blitted before the figures it labels: the first digit of
+   the left column stands on top of sprite 0x2c and not underneath it. */
+static void member_captions_go_down_before_their_figures(void)
+{
+    mb_stage();
+    mb_allow_the_item();
+    mb_seed_preview(12, 34, 56, 78);
+    mb_set_current(12, 34, 56, 78);
+    mb_draw();
+
+    CHECK_EQ(mb_digit(MB_STAT_TOP_ROW, MB_LEFT_FIGURE_COL, 0),
+             MB_NUM_COLOR(MB_COLOR_ROW_EQUAL, 0));
+    CHECK_EQ(mb_pixel(MB_STAT_TOP_ROW, MB_LEFT_FIGURE_COL - 1),
+             MB_CMD_COLOR(MB_EV_HIT_SPRITE));
+    CHECK_EQ(mb_digit(MB_STAT_TOP_ROW, MB_RIGHT_FIGURE_COL, 0),
+             MB_NUM_COLOR(MB_COLOR_ROW_EQUAL, 0));
+    CHECK_EQ(mb_pixel(MB_STAT_TOP_ROW, MB_RIGHT_FIGURE_COL - 1),
+             MB_CMD_COLOR(MB_AP_DP_SPRITE));
+    mb_unstage();
+}
+
+/* Colour row 2 when the previewed figure is BELOW the stat the member has now,
+   3 when it is above, 0 when they are equal.  All four figures take their own
+   comparison, so setting only evade apart leaves the other three on row 0. */
+static void member_figure_colour_row_says_lower_higher_or_equal(void)
+{
+    mb_stage();
+    mb_allow_the_item();
+    mb_seed_preview(12, 34, 56, 78);
+    mb_set_current(12, 34, 56, 99);
+    mb_draw();
+    CHECK_EQ(mb_digit(MB_STAT_TOP_ROW, MB_LEFT_FIGURE_COL, 1),
+             MB_NUM_COLOR(MB_COLOR_ROW_LOWER, 7));
+    CHECK_EQ(mb_digit(MB_STAT_BOTTOM_ROW, MB_LEFT_FIGURE_COL, 1),
+             MB_NUM_COLOR(MB_COLOR_ROW_EQUAL, 5));
+
+    mb_set_current(12, 34, 56, 5);
+    mb_draw();
+    CHECK_EQ(mb_digit(MB_STAT_TOP_ROW, MB_LEFT_FIGURE_COL, 1),
+             MB_NUM_COLOR(MB_COLOR_ROW_HIGHER, 7));
+
+    mb_set_current(12, 34, 56, 78);
+    mb_draw();
+    CHECK_EQ(mb_digit(MB_STAT_TOP_ROW, MB_LEFT_FIGURE_COL, 1),
+             MB_NUM_COLOR(MB_COLOR_ROW_EQUAL, 7));
+    mb_unstage();
+}
+
+/* Each of the four comparisons reads its own stat field of the record: attack
+   at +0x48, defence at +0x4a, hit at +0x4c and evade at +0x4e.  Setting all
+   four current stats above their preview puts every figure on colour row 2, and
+   a routine that had crossed two of the fields would leave two of them on 0. */
+static void member_each_figure_is_compared_against_its_own_field(void)
+{
+    mb_stage();
+    mb_allow_the_item();
+    mb_seed_preview(12, 34, 56, 78);
+    mb_set_current(13, 35, 57, 79);
+    mb_draw();
+
+    CHECK_EQ(mb_digit(MB_STAT_TOP_ROW, MB_LEFT_FIGURE_COL, 1),
+             MB_NUM_COLOR(MB_COLOR_ROW_LOWER, 7));
+    CHECK_EQ(mb_digit(MB_STAT_BOTTOM_ROW, MB_LEFT_FIGURE_COL, 1),
+             MB_NUM_COLOR(MB_COLOR_ROW_LOWER, 5));
+    CHECK_EQ(mb_digit(MB_STAT_TOP_ROW, MB_RIGHT_FIGURE_COL, 1),
+             MB_NUM_COLOR(MB_COLOR_ROW_LOWER, 1));
+    CHECK_EQ(mb_digit(MB_STAT_BOTTOM_ROW, MB_RIGHT_FIGURE_COL, 1),
+             MB_NUM_COLOR(MB_COLOR_ROW_LOWER, 3));
+    mb_unstage();
+}
+
+/* MOVSX and JLE/JGE: the current stat is read and compared signed, so a member
+   whose evade has been driven below zero sorts BELOW a positive preview and its
+   figure is coloured 3.  Read unsigned the same word is 65535 and the figure
+   would come out on row 2 instead. */
+static void member_stat_compare_is_signed(void)
+{
+    mb_stage();
+    mb_allow_the_item();
+    mb_seed_preview(12, 34, 56, 78);
+    mb_set_current(12, 34, 56, -1);
+    mb_draw();
+
+    CHECK_EQ(mb_digit(MB_STAT_TOP_ROW, MB_LEFT_FIGURE_COL, 1),
+             MB_NUM_COLOR(MB_COLOR_ROW_HIGHER, 7));
+    mb_unstage();
+}
+
 void run_shopdraw_tests(void)
 {
     RUN_TEST(shopdraw_name_is_entry_c9_plus_the_item_id);
@@ -1167,4 +1872,19 @@ void run_shopdraw_tests(void)
     RUN_TEST(buytarget_down_arrow_test_counts_from_scroll_top);
     RUN_TEST(buytarget_both_arrows_share_one_blink_phase);
     RUN_TEST(buytarget_layers_go_down_back_to_front);
+
+    RUN_TEST(member_icon_is_twelve_per_member_at_dst);
+    RUN_TEST(member_walk_frame_pings_back_from_three_to_one);
+    RUN_TEST(member_walk_divide_is_unsigned);
+    RUN_TEST(member_mound_is_sprites_2a_and_2b_on_row_0x11);
+    RUN_TEST(member_icon_is_ghosted_from_chapter_0x17);
+    RUN_TEST(member_name_is_message_char_id_plus_one);
+    RUN_TEST(member_name_takes_0x138_where_the_cannot_line_takes_the_pitch);
+    RUN_TEST(member_cannot_equip_draws_message_0x1f7_alone);
+    RUN_TEST(member_can_equip_draws_both_captions);
+    RUN_TEST(member_figures_are_ev_hit_ap_dp_in_two_columns);
+    RUN_TEST(member_captions_go_down_before_their_figures);
+    RUN_TEST(member_figure_colour_row_says_lower_higher_or_equal);
+    RUN_TEST(member_each_figure_is_compared_against_its_own_field);
+    RUN_TEST(member_stat_compare_is_signed);
 }

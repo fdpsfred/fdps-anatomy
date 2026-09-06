@@ -67,4 +67,42 @@ extern void fdps_shop_render_buy_target_frame(unsigned char *list_bitmap,
                                               int scroll_top);
 #pragma aux fdps_shop_render_buy_target_frame "*" parm caller [];
 
+/* Draws one party member's entry in the buy-target list: the member's animated
+   walk icon on its mound, the member's name, and the four combat stats that
+   member would have with the item on offer, each figure coloured against the
+   stat the member has now.
+
+   dst is the first pixel of this member's cell in the caller's entry grid and
+   pitch is that grid's bytes per row; roster_index is a position in the party
+   roster and doubles as the sprite-set number in the .CEL sprite cache; and
+   item_id is the ITEM.DAT id of the item the shop is offering.  Nothing is
+   range checked and nothing is clipped.
+
+   THE NAME IS HANDED A PITCH OF 0x138 AND NOT THE pitch ARGUMENT.  Where the
+   name goes still comes from the argument; what does not is the surface stride
+   fdps_draw_text is told to step its own rows by, which is the literal 312.
+   The cannot-equip line on the other path is handed the argument.  The only
+   caller composes its grid at 312 so the two agree in play, and on any other
+   surface a glyph's rows would come apart from the entry around them.
+
+   WHICH FIGURE IS WHICH IS DECIDED BY THE ARTWORK.  Command.cel sprite 0x2c
+   carries "EV :" over "HIT:" and 0x2f "AP :" over "DP :", so the left column
+   is evade over hit and the right one attack over defence -- which is not the
+   order fdps_roster_preview_combat_stats_with_item writes its four ints in
+   (attack, defense, hit, evade, roster.h) and not the order of the record's
+   own stat fields either.
+
+   IT MOVES data_fdps_number_glyph_color_row AND LEAVES IT AT 0 -- but only on
+   the path that draws figures.  The colour before each figure is 2 when the
+   previewed value is below the one the member has now, 3 when it is above and
+   0 when they are equal; the cannot-equip path draws no figure and does not
+   touch the global at all, so a caller that had set it keeps it.
+
+   ONE MEMBER'S ICON IS DRAWN TRANSLUCENT.  From chapter index 0x17 on, a
+   member whose record carries character id 1 has the icon blended rather than
+   blitted opaque.  There is no upper bound on the chapter test. */
+extern void fdps_shop_draw_member_entry(unsigned char *dst, int pitch,
+                                        int roster_index, int item_id);
+#pragma aux fdps_shop_draw_member_entry "*" parm caller [];
+
 #endif
