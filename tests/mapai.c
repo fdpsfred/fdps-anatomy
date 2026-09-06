@@ -27,6 +27,7 @@
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "keybd.h"
 #include "maptile.h"
 #include "mapai.h"
 
@@ -303,6 +304,319 @@ static void event_code_is_compared_as_an_unsigned_byte(void)
     CHECK_EQ(fdps_map_find_chest_cell(-1, found_xy), -1);
 }
 
+
+/* ---- fdps_map_actor_move_toward_nearest_reachable_opponent, 000126b0 -------
+ *
+ * This one is an orchestrator: everything it decides it decides by driving
+ * src/movegrid.c, src/table.c, src/unit.c, src/mapcur.c and src/walk.c, so the
+ * fixture below is the whole battle-time environment those need -- the terrain
+ * layer, the attribute table, the movement grid, the cell-event layer, the
+ * PROMAP.DAT class table and the map unit array -- and every case is driven end
+ * to end and read back off the unit record, the cursor draw mode and the return
+ * value.
+ *
+ * Expected values come from the assembly at 000126b0 -- MOV AL,[EDX] and
+ * [EDX+0x1] at 000126d2 and 000126dc for the tile the fill starts from,
+ * [EDX+0x20] at 000126e7 with no INC before the PUSH at 000126f5, PUSH 0x64 at
+ * 00012701 for the allowance, PUSH 0x0 at 0001271d for the side filter and
+ * MOV EAX,0x2 at 00012717 for the trace mode, CMP EAX,-0x1 / JNZ at 00012735,
+ * the two equality tests at 00012760 and 00012768 with the JNZ / JZ pair, the
+ * two stores to 0x00069cd0 at 0001276d and 000127a6, and TEST EAX,EAX / JZ at
+ * 0001279b -- and by walking the documented behaviour of the callees over the
+ * fixture by hand.  None of them is read off the emitted C.
+ *
+ * The animation really runs, and the fixture is the one tests/movegrid.c uses
+ * for fdps_battle_move_unit_toward and for the same reasons:
+ * data_fdps_input_last_scancode is parked on the skip-animation code 3, which
+ * suppresses every frame src/walk.c would draw, and every attribute row carries
+ * flags 0x60, which makes fdps_map_set_pending_tile_event return before it
+ * reaches the tile-event table.  The map cursor is parked on the acting unit's
+ * own tile, so fdps_map_cursor_move_to_unit takes its zero-delta early return
+ * and no frame is rendered there either.
+ */
+
+#define AI_W 5
+#define AI_H 5
+#define AI_CELLS (AI_W * AI_H)
+#define AI_ATTR_ROWS 32
+#define AI_UNITS 4
+#define AI_CLASS_ROWS 8
+#define AI_CLASS_STRIDE 0x0a
+#define AI_TILE_PX 24
+
+/* The sentinel the cursor draw mode is parked on before each case: neither of
+   the two values the function stores, so "untouched" and "stored" are told
+   apart rather than assumed. */
+#define AI_DRAW_MODE_SENTINEL 7
+
+static unsigned char ai_tile_map[TERRAIN_CELLS_AT + AI_CELLS * 2];
+static unsigned char ai_attr[ATTR_ROWS_AT + AI_ATTR_ROWS * 4];
+static unsigned char ai_grid[4 + AI_CELLS * 2];
+static unsigned char ai_event[EVENT_CELLS_AT + AI_CELLS];
+static unsigned char ai_class[AI_CLASS_ROWS * AI_CLASS_STRIDE];
+static struct fdps_unit_record ai_units[AI_UNITS];
+
+/* A 5x5 map of distinct tile ids over uniform terrain type 0, a class table
+   whose every row costs 1 to enter any terrain, an empty unit array and a grid
+   in the state fdps_map_grid_reset leaves it in -- which is what this function
+   inherits, since it floods without resetting first. */
+static void ai_stage(void)
+{
+    int i;
+    int terrain;
+
+    for (i = 0; i < TERRAIN_CELLS_AT; i++) {
+        ai_tile_map[i] = 0xaa;
+    }
+    *(short *) (ai_tile_map + 7) = (short) AI_W;
+    *(short *) (ai_tile_map + 9) = (short) AI_H;
+    for (i = 0; i < AI_CELLS; i++) {
+        *(short *) (ai_tile_map + TERRAIN_CELLS_AT + i * 2) = (short) i;
+    }
+
+    for (i = 0; i < ATTR_ROWS_AT; i++) {
+        ai_attr[i] = 0xaa;
+    }
+    for (i = 0; i < AI_ATTR_ROWS; i++) {
+        ai_attr[ATTR_ROWS_AT + i * 4] = 0x60;
+        ai_attr[ATTR_ROWS_AT + i * 4 + 1] = 0x00;
+        ai_attr[ATTR_ROWS_AT + i * 4 + 2] = 0x00;
+        ai_attr[ATTR_ROWS_AT + i * 4 + 3] = 0x00;
+    }
+
+    *(short *) ai_grid = (short) AI_W;
+    *(short *) (ai_grid + 2) = (short) AI_H;
+    for (i = 0; i < AI_CELLS; i++) {
+        ai_grid[4 + i * 2] = 0x00;
+        ai_grid[4 + i * 2 + 1] = 0xff;
+    }
+
+    for (i = 0; i < EVENT_CELLS_AT; i++) {
+        ai_event[i] = 0xaa;
+    }
+    *(short *) (ai_event + 7) = (short) AI_W;
+    for (i = 0; i < AI_CELLS; i++) {
+        ai_event[EVENT_CELLS_AT + i] = 0x00;
+    }
+
+    for (i = 0; i < AI_CLASS_ROWS * AI_CLASS_STRIDE; i++) {
+        ai_class[i] = 0x00;
+    }
+    for (i = 0; i < AI_CLASS_ROWS; i++) {
+        for (terrain = 0; terrain < 8; terrain++) {
+            ai_class[i * AI_CLASS_STRIDE + terrain] = 1;
+        }
+    }
+
+    for (i = 0; i < (int) sizeof(ai_units); i++) {
+        ((unsigned char *) ai_units)[i] = 0x00;
+    }
+
+    data_fdps_scene_layer_tile_map_ptrs[0] = ai_tile_map;
+    data_fdps_scene_layer_tile_attr_ptr[0] = ai_attr;
+    data_fdps_battle_move_grid_ptr = ai_grid;
+    data_fdps_map_cell_event_code_layer_ptr = ai_event;
+    data_fdps_class_table_ptr = ai_class;
+    data_fdps_map_unit_array_ptr = (unsigned char *) ai_units;
+    data_fdps_map_unit_count = 0;
+
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_input_last_scancode = 3;
+    data_fdps_map_cursor_draw_mode = AI_DRAW_MODE_SENTINEL;
+}
+
+/* Put one unit in the array.  Slot 0 is the actor in every case below, and the
+   cursor is parked on its tile so that the cursor walk has nothing to do. */
+static void ai_place(int slot, int x, int y, int side, int clazz, int move)
+{
+    ai_units[slot].pos_x = (unsigned char) x;
+    ai_units[slot].pos_y = (unsigned char) y;
+    ai_units[slot].side = (unsigned char) side;
+    ai_units[slot].clazz = (unsigned char) clazz;
+    ai_units[slot].move = (unsigned char) move;
+    if (slot + 1 > data_fdps_map_unit_count) {
+        data_fdps_map_unit_count = slot + 1;
+    }
+    if (slot == 0) {
+        data_fdps_map_cursor_world_x = x * AI_TILE_PX;
+        data_fdps_map_cursor_world_y = y * AI_TILE_PX;
+    }
+}
+
+static void ai_set_cost(int row, int terrain_type, int cost)
+{
+    ai_class[row * AI_CLASS_STRIDE + terrain_type] = (unsigned char) cost;
+}
+
+static int ai_marker(int x, int y)
+{
+    return (int) ai_grid[4 + (y * AI_W + x) * 2 + 1];
+}
+
+/* With the actor the only unit on the map and its own side byte 0, nothing
+   passes the search's side filter, fdps_move_path_trace answers -1 and the arm
+   at 0001273a is taken: fdps_map_grid_reset runs, 0 is returned and the cursor
+   draw mode is never written, so the sentinel survives.  The reset is what the
+   marker assertions read: the fill had reached every tile of this open map, and
+   every cell is back on the 0xff sentinel. */
+static void ai_no_candidate_returns_zero_and_resets_the_grid(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_place(0, 2, 2, 0, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_reachable_opponent(0, 0);
+
+    CHECK_EQ(moved, 0);
+    CHECK_EQ((int) ai_units[0].pos_x, 2);
+    CHECK_EQ((int) ai_units[0].pos_y, 2);
+    CHECK_EQ(ai_marker(2, 2), 0xff);
+    CHECK_EQ(ai_marker(0, 0), 0xff);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AI_DRAW_MODE_SENTINEL);
+}
+
+/* The side filter is the literal 0 pushed at 0001271d and not side_select.
+   Mode 2 reads that 0 as "keep the units whose side byte is non-zero"
+   (movegrid.h), so on the NPC phase -- side_select 1, an actor whose own side
+   byte is 1 -- the actor itself passes the filter and wins with cost 0 on its
+   own tile.  The two equality tests at 00012760 and 00012768 then both hold,
+   the move branch is skipped, and the handler answers 0 having moved nothing
+   even though a side-0 opponent is standing three tiles away.  Had side_select
+   been forwarded, that opponent would have been the answer and the actor would
+   have walked. */
+static void ai_side_filter_is_hard_coded_not_side_select(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_place(0, 1, 1, 1, 0, 3);
+    ai_place(1, 4, 1, 0, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_reachable_opponent(0, 1);
+
+    CHECK_EQ(moved, 0);
+    CHECK_EQ((int) ai_units[0].pos_x, 1);
+    CHECK_EQ((int) ai_units[0].pos_y, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AI_DRAW_MODE_SENTINEL);
+}
+
+/* The ordinary case, driven the whole way through the move.  The actor is on
+   side 0 and the only other unit is on side 1, so the search keeps it, its tile
+   (4,1) is three steps of cost 1 away and the trace answers 3.  That tile is
+   not the actor's, so the move branch runs: with an allowance of 2 the actor
+   cannot reach the opponent's tile and fdps_battle_move_unit_toward retargets
+   the request to the furthest affordable tile on the route, (3,1).
+   TEST EAX,EAX / JZ at 0001279b then takes the store of 1.
+   The draw mode ends on 1 and not on the sentinel it entered with: the store at
+   000127a6 is a plain store, not a restore. */
+static void ai_walks_toward_the_nearest_reachable_opponent(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_place(0, 1, 1, 0, 0, 2);
+    ai_place(1, 4, 1, 1, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_reachable_opponent(0, 0);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) ai_units[0].pos_x, 3);
+    CHECK_EQ((int) ai_units[0].pos_y, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+    CHECK_EQ(ai_marker(1, 1), 0xff);
+}
+
+/* The two coordinate tests at 00012760 and 00012768 are joined by JNZ then JZ,
+   which is "different if EITHER differs".  Here the winning tile shares the
+   actor's column and differs only in its row, and the actor still walks; code
+   that required both to differ would decline the actor instead.
+
+   The actor stops one tile short of the opponent, at (2,3) and not (2,4).  The
+   tile handed over is the opponent's OWN tile, and every round inside
+   fdps_battle_move_unit_toward but the relaxed retry marks zones of control
+   first, which puts the 0x40 "may not be entered" bit on that tile
+   (movegrid.h); the walk is retargeted to the last tile of the route that the
+   real range still reaches. */
+static void ai_a_target_on_the_same_column_still_moves(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_place(0, 2, 2, 0, 0, 2);
+    ai_place(1, 2, 4, 1, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_reachable_opponent(0, 0);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) ai_units[0].pos_x, 2);
+    CHECK_EQ((int) ai_units[0].pos_y, 3);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+}
+
+/* The class code goes to fdps_get_class_record RAW, with no INC between the
+   load at 000126e7 and the push at 000126f5, so an actor of class 3 floods the
+   map with ROW 3's terrain costs and not row 4's.  Row 3 is made impassable --
+   a cost of 200 exceeds the allowance of 100 on the first step -- while row 4,
+   the row every other caller of the accessor would have reached for, still
+   costs 1.  The fill therefore never leaves the actor's tile, the opponent
+   stands on an unreachable cell, the trace answers -1 and nothing moves.
+   Making row 3 cheap again moves the same actor over the same map, so the 0 is
+   the class row and not a broken fixture. */
+static void ai_class_row_is_the_raw_code_with_no_bias(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_set_cost(3, 0, 200);
+    ai_place(0, 1, 1, 0, 3, 2);
+    ai_place(1, 4, 1, 1, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_reachable_opponent(0, 0);
+
+    CHECK_EQ(moved, 0);
+    CHECK_EQ((int) ai_units[0].pos_x, 1);
+    CHECK_EQ((int) ai_units[0].pos_y, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AI_DRAW_MODE_SENTINEL);
+
+    ai_stage();
+    ai_set_cost(3, 0, 1);
+    ai_place(0, 1, 1, 0, 3, 2);
+    ai_place(1, 4, 1, 1, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_reachable_opponent(0, 0);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) ai_units[0].pos_x, 3);
+    CHECK_EQ((int) ai_units[0].pos_y, 1);
+}
+
+/* PUSH 0x64 at 00012701 is a flat 100 and not the actor's own movement
+   allowance at record byte +0x3b.  Every tile costs 30 here and the opponent is
+   three tiles away, so its cell costs 90: inside the 100 the search floods with
+   and outside the 60 the actor can really pay.  The search therefore finds it,
+   the move retargets to the two tiles the actor can afford, and the handler
+   answers 1.  Had the fill been given the actor's allowance the opponent's cell
+   would have held the unreachable sentinel and the handler would have answered
+   0 without moving anything. */
+static void ai_fill_allowance_is_a_flat_hundred(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_set_cost(0, 0, 30);
+    ai_set_cost(1, 0, 30);
+    ai_place(0, 1, 1, 0, 0, 60);
+    ai_place(1, 4, 1, 1, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_reachable_opponent(0, 0);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) ai_units[0].pos_x, 3);
+    CHECK_EQ((int) ai_units[0].pos_y, 1);
+}
+
 void run_mapai_tests(void)
 {
     RUN_TEST(finds_the_chest_and_returns_zero);
@@ -319,6 +633,13 @@ void run_mapai_tests(void)
     RUN_TEST(a_negative_height_scans_nothing);
     RUN_TEST(event_code_is_compared_as_an_unsigned_byte);
 
+    RUN_TEST(ai_no_candidate_returns_zero_and_resets_the_grid);
+    RUN_TEST(ai_side_filter_is_hard_coded_not_side_select);
+    RUN_TEST(ai_walks_toward_the_nearest_reachable_opponent);
+    RUN_TEST(ai_a_target_on_the_same_column_still_moves);
+    RUN_TEST(ai_class_row_is_the_raw_code_with_no_bias);
+    RUN_TEST(ai_fill_allowance_is_a_flat_hundred);
+
     /* Put the globals back before leaving.  stage() points four of them at
        this file's own arrays and the runners share one process: a later unit
        that expects an unallocated map would inherit live pointers into another
@@ -327,4 +648,17 @@ void run_mapai_tests(void)
     data_fdps_scene_layer_tile_attr_ptr[0] = NULL;
     data_fdps_battle_move_grid_ptr = NULL;
     data_fdps_map_cell_event_code_layer_ptr = NULL;
+
+    /* The same for the six the AI cases above stage on top of those four, plus
+       the three view and cursor globals the walk they drive advances.  Every
+       one goes back to the value the uninitialised bss holds. */
+    data_fdps_class_table_ptr = NULL;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_input_last_scancode = 0;
 }
