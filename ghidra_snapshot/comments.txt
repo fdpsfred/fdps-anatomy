@@ -8484,7 +8484,7 @@ Parameters:
   signboard_cel -- the "CanBan.cel" sheet fdps_village_signboard_menu loaded out of "MISC.VFS"; sprites 0..5 are the destination name plates and sprite 6 is the empty plate frame.
 
 Returns:
-  Nothing. EAX is not set before the epilogue and the single call site ignores it.
+  Nothing. EAX is not set before the epilogue and none of the three call sites reads it.
 
 Pool: fdps  [no Function ID hit in either library set; calls the game's own blit routines]
 

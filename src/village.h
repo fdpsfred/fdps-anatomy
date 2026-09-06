@@ -9,6 +9,28 @@
 #ifndef VILLAGE_H
 #define VILLAGE_H
 
+/* 00060174 and 0006018c.  Where on the village map each of the six signboard
+   destinations puts the party-member marker: the x table first, the y table
+   0x18 bytes later, six int each.  The six-entry length is fixed by the
+   addresses themselves -- 0x00060174 + 0x18 is exactly 0x0006018c and
+   0x0006018c + 0x18 is exactly 0x000601a4, the next global below -- and the
+   index is the destination number the signboard menu is on, 0..5, with 5 the
+   hidden secret shop.
+
+   fdps_village_animate_walk_to_destination is the only reader of either, and
+   it reads both entries of both tables on every call. */
+extern int data_fdps_village_signboard_destination_x_table[6];
+extern int data_fdps_village_destination_marker_y_table[6];
+
+/* 000601a4.  Which .CEL cache slot the marker walking about the village map is
+   drawn out of, so which party member the signboard menu is currently showing.
+   The signboard menu cycles it over 0..data_fdps_roster_member_count - 1 and
+   the walk animation indexes the slot table behind
+   data_fdps_cel_sprite_cache_ptr with it (struct fdps_cel_cache_slot,
+   src/fdpstype.h).  Nothing range-checks it against the thirty slots that
+   table holds. */
+extern int data_fdps_village_marker_roster_idx;
+
 /* 000601c0.  How many scancodes of the current chapter's secret-shop unlock
    code the player has entered in a row.  It is the index of the next byte of
    the chapter's eight-byte code row that has to be matched, so it counts 0..7
@@ -31,5 +53,36 @@ extern int data_fdps_secret_code_match_pos;
    entry, the secret shop. */
 extern int fdps_check_secret_code_key(int scancode);
 #pragma aux fdps_check_secret_code_key "*" parm caller [];
+
+/* Walks the village map's party-member marker from one signboard destination
+   to the next in six tick-paced frames, swapping the destination name plate
+   over as it goes, and leaves the last frame on the adapter.
+
+   `background` is the caller's own 320x200 8bpp page holding the painted town
+   screen.  It is only read: every frame takes a fresh 64,000-byte page from
+   the heap, copies this over it, draws into that and frees it again, so
+   nothing the animation draws is left in the caller's page.
+
+   `from_destination` and `to_destination` are signboard destination numbers,
+   0..5, and index both coordinate tables above; the plate that shrinks away
+   over the first three frames and the one that grows in over the last three
+   are the sprites of those two numbers in `signboard_cel`.  Nothing checks
+   either against the tables' six entries.
+
+   `signboard_cel` is the "CanBan.cel" sheet out of "MISC.VFS": sprites 0..5
+   are the destination name plates and sprite 6 the empty plate frame that is
+   redrawn under each of them.
+
+   THE MARKER'S FACING COMES FROM THE WHOLE JOURNEY AND IS FIXED FOR ALL SIX
+   FRAMES, and only cell 0 of that facing is ever drawn, so the marker slides
+   across without cycling its legs.  It also draws no walk cycle to interrupt:
+   the six frames are the animation, and it is the caller that decides how
+   often one runs. */
+extern void fdps_village_animate_walk_to_destination(unsigned char *background,
+                                                     int from_destination,
+                                                     int to_destination,
+                                                     unsigned char
+                                                         *signboard_cel);
+#pragma aux fdps_village_animate_walk_to_destination "*" parm caller [];
 
 #endif
