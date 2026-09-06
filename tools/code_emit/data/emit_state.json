@@ -2857,6 +2857,14 @@
       "status": "committed",
       "emitted_against": "0x1ca",
       "rounds": 0
+    },
+    "00032710": {
+      "name": "fdps_shop_select_item",
+      "target": "shop.c",
+      "body_size": "0x351",
+      "status": "committed",
+      "emitted_against": "0x351",
+      "rounds": 0
     }
   }
 }

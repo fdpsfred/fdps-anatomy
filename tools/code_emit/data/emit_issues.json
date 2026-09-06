@@ -2090,5 +2090,33 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "00032710": [
+    {
+      "from": "emit",
+      "what": "The down arrow's blit runs off the end of the page the pass allocates, and that is preserved. fdps_blit_command_sprite writes a fixed 25x22 block with no clipping and page offset 0x4e96 is row 64 of the 76-row 0x5ca0 block, so its last ten rows write as far as 0x6846 -- about 3 KB past the end of the malloc'd block, once per frame for as long as a shop with more than six items is open. This is the original's behaviour and it is recorded in rebuild_info/pitfalls.md; what is NOT settled is what those bytes land on in the rebuild, because the rebuild does not lay the heap out the way the original did. In the original the damage evidently fell somewhere harmless; here it could fall on a live allocation. Moving the arrow or enlarging the page both change the drawing or the allocation and are not the fix to reach for without evidence.",
+      "needs": "A real run of the rebuilt executable in DOSBox-X: open the item shop of a chapter whose row stocks more than six items (SHOP00.DAT's item row stocks nine), scroll through the list for a while, and see whether the heap survives -- _heapchk after leaving the shop, or simply whether the village phase continues normally. If it does not survive, the question becomes which allocation sits behind the page and that is a link-layout matter, not a rewrite of this function.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "Nothing asserts the picture. The cell geometry (x = 0x10 + 0x91*(i&1), y = 0x0b + 0x13*(i/2)), the selection bar's -5/-1 lift, the two arrow positions and the 0x130 x 0x43 window blit from page offset 0x3ad to screen (8, 125) are all read straight off the assembly and none of them is checked against a rendered surface: every sprite the tests stage is a skip-only stream that writes no pixel, deliberately, so that the out-of-bounds arrow above cannot corrupt the test image. So a transposed coordinate or an off-by-one in the window rectangle would pass the suite.",
+      "needs": "A playtest of the shop screen in DOSBox-X against the original executable: the two columns of three entries in the right places, the highlight bar surrounding rather than sitting on the entry, the scroll arrows blinking at the top and bottom of the list, and the window landing at screen (8, 125). This is the class emit_pipeline.md allows to be deferred with a note.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached independently and confirms the emitter's arithmetic rather than restating it: 0x5ca0 = 23712 = 312 * 76 so the page is exactly 76 rows, and 0x4e96 = 20118 = 312 * 64 + 150 so the down arrow starts on row 64; a 22-row block therefore needs rows 64 through 85 and its last byte lands at page offset 0x6846, about 2.9 KB past the block. I also checked that this is already recorded in rebuild_info/pitfalls.md line 29 alongside the other original out-of-bounds writes, so nothing needs writing there. What my pass adds is only the confirmation; I agree the rebuild's heap layout is the unsettled part and that it is not answerable from here.",
+      "needs": "A real run in DOSBox-X of a shop whose row stocks more than six items, watching whether the village phase survives leaving the shop.",
+      "same_as": "emit#0",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Nothing my pass could add. I confirmed for myself that no staged sprite writes a pixel (every stream is one 0xc0|(w-1) skip run per row) and therefore that no assertion in the file can distinguish a correct cell coordinate from a transposed one, so the geometry, the -5/-1 bar lift, the two arrow offsets and the window rectangle rest on the assembly alone.",
+      "needs": "A playtest of the shop screen against the original executable.",
+      "same_as": "emit#1",
+      "status": "open"
+    }
   ]
 }
