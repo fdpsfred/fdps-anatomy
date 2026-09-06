@@ -2743,6 +2743,14 @@
       "status": "committed",
       "emitted_against": "0x110",
       "rounds": 0
+    },
+    "000127c0": {
+      "name": "fdps_map_actor_move_toward_nearest_opponent",
+      "target": "mapai.c",
+      "body_size": "0x191",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x191"
     }
   }
 }

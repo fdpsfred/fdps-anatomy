@@ -617,6 +617,262 @@ static void ai_fill_allowance_is_a_flat_hundred(void)
     CHECK_EQ((int) ai_units[0].pos_y, 1);
 }
 
+/* ---- fdps_map_actor_move_toward_nearest_opponent, 000127c0 ----------------
+ *
+ * The straight-line sibling of the handler above, driven over the same fixture
+ * and for the same reasons: it decides nothing on its own that is visible from
+ * outside, so every case below is read back off the unit record, the cursor
+ * draw mode and the return value after the whole chain has run.
+ *
+ * Expected values come from the assembly at 000127c0 -- MOV [EBP-0x24],0xffff
+ * and MOV [EBP-0x14],0xffffffff at 000127cc and 000127d3 for the two sentinels,
+ * XOR EAX,EAX / MOV AL,[EDX] and [EDX+0x1] at 000127f0 and 000127fa for the
+ * actor's tile, CMP EAX,[0x00060150] / JL at 0001280f for the scan bound, the
+ * CMP [EBP+0x18],0x0 / CMP byte ptr [EAX+0x6],0x0 pairs at 00012833..0001284f
+ * for the side filter, AND AL,0x1 at 00012876 for the retired bit, the two
+ * CALL 0x0003d364 with ADD EBX,EAX between at 000128a2..000128bb for the
+ * distance, CMP EAX,[EBP-0x24] / JGE at 000128c3 for the strict replacement,
+ * CMP [EBP-0x14],-0x1 / JNZ at 000128df, the two equality tests at 000128f1 and
+ * 000128f9 joined JNZ then JZ, the two stores to 0x00069cd0 at 000128fe and
+ * 00012937, and TEST EAX,EAX / JZ at 0001292c -- and by walking the documented
+ * behaviour of the callees over the fixture by hand.  None of them is read off
+ * the emitted C.
+ *
+ * Where a case ends in a walk, the endpoint is the one the sibling's cases
+ * above already establish for this fixture: the tile handed over is occupied,
+ * so fdps_battle_move_unit_toward retargets to the furthest tile of the route
+ * the actor's own allowance still reaches.
+ */
+
+/* Nothing on the map but the actor, whose own side byte is 0 while side_select
+ * 0 keeps only the non-zero sides.  The sweep scores nobody, [EBP-0x14] is
+ * still -1 at 000128df and the exit at 000128e5 loads 0 without ever reaching
+ * the two stores to the draw mode, so the sentinel survives. */
+static void sl_no_opposing_unit_returns_zero(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_place(0, 2, 2, 0, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_opponent(0, 0);
+
+    CHECK_EQ(moved, 0);
+    CHECK_EQ((int) ai_units[0].pos_x, 2);
+    CHECK_EQ((int) ai_units[0].pos_y, 2);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AI_DRAW_MODE_SENTINEL);
+}
+
+/* side_select really is consulted here, unlike the sibling's hard-coded 0, and
+ * it is consulted as a TRUTH VALUE.
+ *
+ * First half: an actor of side 1 driven with side_select 1.  The filter's
+ * second arm keeps only side byte 0, so the actor is not a candidate and the
+ * side-0 unit at (4,1) is; the walk runs and the draw mode ends on 1.
+ *
+ * Second half: the same two units with side_select 0.  Now the filter keeps
+ * every non-zero side, which is the actor itself at distance 0.  It wins, the
+ * two equality tests at 000128f1 and 000128f9 both hold, the move branch is
+ * skipped entirely and the draw mode is never written.  Comparing side numbers
+ * -- record->side != actor->side -- would have kept the side-0 unit here and
+ * walked. */
+static void sl_side_select_is_a_truth_value_not_a_side_number(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_place(0, 1, 1, 1, 0, 3);
+    ai_place(1, 4, 1, 0, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_opponent(0, 1);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) ai_units[0].pos_x, 3);
+    CHECK_EQ((int) ai_units[0].pos_y, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+
+    ai_stage();
+    ai_place(0, 1, 1, 1, 0, 3);
+    ai_place(1, 4, 1, 0, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_opponent(0, 0);
+
+    CHECK_EQ(moved, 0);
+    CHECK_EQ((int) ai_units[0].pos_x, 1);
+    CHECK_EQ((int) ai_units[0].pos_y, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AI_DRAW_MODE_SENTINEL);
+}
+
+/* AND AL,0x1 and nothing wider.  With bit 0 set the only unit that passes the
+ * side filter is dropped and the handler answers 0 without touching the draw
+ * mode; with bit 7 set instead -- the acted-this-turn flag, which shares the
+ * byte -- the same unit is still a candidate and the actor walks.  A truth test
+ * on the whole flags byte would have dropped it in both halves. */
+static void sl_only_flags_bit_zero_retires_a_candidate(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_place(0, 1, 1, 0, 0, 2);
+    ai_place(1, 4, 1, 1, 0, 3);
+    ai_units[1].flags = 0x01;
+
+    moved = fdps_map_actor_move_toward_nearest_opponent(0, 0);
+
+    CHECK_EQ(moved, 0);
+    CHECK_EQ((int) ai_units[0].pos_x, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AI_DRAW_MODE_SENTINEL);
+
+    ai_stage();
+    ai_place(0, 1, 1, 0, 0, 2);
+    ai_place(1, 4, 1, 1, 0, 3);
+    ai_units[1].flags = 0x80;
+
+    moved = fdps_map_actor_move_toward_nearest_opponent(0, 0);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) ai_units[0].pos_x, 3);
+    CHECK_EQ((int) ai_units[0].pos_y, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+}
+
+/* The winner is the nearest candidate and not the first one found.  Unit 1 sits
+ * four tiles east, unit 2 two tiles north; CMP EAX,[EBP-0x24] / JGE at 000128c3
+ * lets the later index displace the earlier because its distance is smaller, so
+ * the actor walks north to (0,1).  Code that kept the first match would have
+ * sent it east to (2,2) instead. */
+static void sl_nearest_candidate_wins_not_the_first_found(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_place(0, 0, 2, 0, 0, 2);
+    ai_place(1, 4, 2, 1, 0, 3);
+    ai_place(2, 0, 0, 1, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_opponent(0, 0);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) ai_units[0].pos_x, 0);
+    CHECK_EQ((int) ai_units[0].pos_y, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+}
+
+/* Two things at once, because one fixture pins both.
+ *
+ * The distance is abs(dx) + abs(dy) and not the larger of the two: unit 1 at
+ * (4,2) is 4 + 0 away and unit 2 at (2,0) is 2 + 2, so the sums tie at 4 while
+ * the diagonal metric would make unit 2 a clear winner at 2.
+ *
+ * And a tie keeps the candidate already held, because the replacement is
+ * guarded by JGE -- strictly smaller.  So unit 1, the lower index, wins the tie
+ * and the actor walks east to (2,2); had the tie gone to the later index, or
+ * had the metric been the diagonal one, it would have gone north-east
+ * instead. */
+static void sl_distance_is_the_sum_and_a_tie_keeps_the_lower_index(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_place(0, 0, 2, 0, 0, 2);
+    ai_place(1, 4, 2, 1, 0, 3);
+    ai_place(2, 2, 0, 1, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_opponent(0, 0);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) ai_units[0].pos_x, 2);
+    CHECK_EQ((int) ai_units[0].pos_y, 2);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+}
+
+/* The equality guard at 000128f1 and 000128f9, isolated from the side filter.
+ * Unit 1 stands on the actor's own tile and wins at distance 0, so the move
+ * branch is skipped even though unit 2 two tiles north was a perfectly movable
+ * target: the guard is on the WINNING tile and not on "was anything found".
+ * The draw mode is never written, which is what tells this apart from a walk
+ * that simply produced no steps. */
+static void sl_a_winner_on_the_actors_own_tile_moves_nothing(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_place(0, 2, 2, 0, 0, 2);
+    ai_place(1, 2, 2, 1, 0, 3);
+    ai_place(2, 2, 0, 1, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_opponent(0, 0);
+
+    CHECK_EQ(moved, 0);
+    CHECK_EQ((int) ai_units[0].pos_x, 2);
+    CHECK_EQ((int) ai_units[0].pos_y, 2);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AI_DRAW_MODE_SENTINEL);
+}
+
+/* The scan bound is data_fdps_map_unit_count and not the size of the array.
+ * The opponent is staged in slot 1 and then the count is cut back to 1, so
+ * CMP EAX,[0x00060150] / JL at 0001280f stops the sweep before it, and the same
+ * map with the count left alone walks the actor.  Cutting the count is also
+ * what proves the scan starts at index 0 and runs upward. */
+static void sl_scan_stops_at_the_unit_count(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_place(0, 1, 1, 0, 0, 2);
+    ai_place(1, 4, 1, 1, 0, 3);
+    data_fdps_map_unit_count = 1;
+
+    moved = fdps_map_actor_move_toward_nearest_opponent(0, 0);
+
+    CHECK_EQ(moved, 0);
+    CHECK_EQ((int) ai_units[0].pos_x, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AI_DRAW_MODE_SENTINEL);
+
+    ai_stage();
+    ai_place(0, 1, 1, 0, 0, 2);
+    ai_place(1, 4, 1, 1, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_opponent(0, 0);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) ai_units[0].pos_x, 3);
+    CHECK_EQ((int) ai_units[0].pos_y, 1);
+}
+
+/* Terrain never reaches this search, which is the whole difference from the
+ * sibling handler.  There is no flood fill and no fdps_get_class_record between
+ * 000127c0 and the move call at 00012924: the sweep reads bytes +0, +1, +5 and
+ * +6 of each record and nothing else.
+ *
+ * The fixture is the one that stops the path-cost sibling dead -- class 3 with
+ * row 3 of the class table costing 200, from
+ * ai_class_row_is_the_raw_code_with_no_bias -- and on it that sibling answers 0
+ * and leaves the draw mode on its sentinel.  This handler walks the actor to
+ * (3,1) on the same map instead.
+ *
+ * The walk still happens because the move is the only thing here that touches
+ * the class table, and it fetches the row with the +1 every caller but the
+ * sibling applies (00011a27): a class-3 actor moves on row 4, which this
+ * fixture leaves at cost 1 per tile.  So row 3 being impassable is invisible
+ * from end to end, which is the point. */
+static void sl_terrain_cost_does_not_reach_the_search(void)
+{
+    int moved;
+
+    ai_stage();
+    ai_set_cost(3, 0, 200);
+    ai_place(0, 1, 1, 0, 3, 2);
+    ai_place(1, 4, 1, 1, 0, 3);
+
+    moved = fdps_map_actor_move_toward_nearest_opponent(0, 0);
+
+    CHECK_EQ(moved, 1);
+    CHECK_EQ((int) ai_units[0].pos_x, 3);
+    CHECK_EQ((int) ai_units[0].pos_y, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+}
+
 void run_mapai_tests(void)
 {
     RUN_TEST(finds_the_chest_and_returns_zero);
@@ -639,6 +895,15 @@ void run_mapai_tests(void)
     RUN_TEST(ai_a_target_on_the_same_column_still_moves);
     RUN_TEST(ai_class_row_is_the_raw_code_with_no_bias);
     RUN_TEST(ai_fill_allowance_is_a_flat_hundred);
+
+    RUN_TEST(sl_no_opposing_unit_returns_zero);
+    RUN_TEST(sl_side_select_is_a_truth_value_not_a_side_number);
+    RUN_TEST(sl_only_flags_bit_zero_retires_a_candidate);
+    RUN_TEST(sl_nearest_candidate_wins_not_the_first_found);
+    RUN_TEST(sl_distance_is_the_sum_and_a_tie_keeps_the_lower_index);
+    RUN_TEST(sl_a_winner_on_the_actors_own_tile_moves_nothing);
+    RUN_TEST(sl_scan_stops_at_the_unit_count);
+    RUN_TEST(sl_terrain_cost_does_not_reach_the_search);
 
     /* Put the globals back before leaving.  stage() points four of them at
        this file's own arrays and the runners share one process: a later unit

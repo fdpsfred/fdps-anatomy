@@ -5,6 +5,7 @@
  * the map layers, the movement grid and the unit records all belong to other
  * files, and everything below works on what those pointers hold.
  */
+#include <stdlib.h>
 #include "gamedata.h"
 #include "fdpstype.h"
 #include "mapcur.h"
@@ -119,6 +120,142 @@ int fdps_map_actor_move_toward_nearest_reachable_opponent(int unit_index,
 
     target_x = (int) target_xy[0];
     target_y = (int) target_xy[1];
+
+    if (target_x != actor_x || target_y != actor_y) {
+        data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;
+        fdps_map_cursor_move_to_unit(unit_index);
+        if (fdps_battle_move_unit_toward(target_x, target_y, unit_index,
+                                         side_select) != 0) {
+            moved = 1;
+        }
+        data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_BOX;
+    }
+
+    return moved;
+}
+
+/* The distance the straight-line search starts from, MOV dword ptr
+   [EBP-0x24],0xffff at 000127cc.  It is 65535 and not -1: the compare that
+   guards the replacement is JGE, the signed one, and the largest sum two byte
+   coordinates can be apart is 510, so the first candidate always beats it. */
+#define MAP_AI_NO_DISTANCE 0xffff
+
+/* The tile that search starts from, MOV dword ptr [EBP-0x14],0xffffffff at
+   000127d3, and the value CMP dword ptr [EBP-0x14],-0x1 at 000128df tests for.
+   A candidate's column is widened out of a record byte through XOR EAX,EAX /
+   MOV AL, so it is 0..255 and can never collide with this. */
+#define MAP_AI_NO_TILE (-1)
+
+/* 000127c0.  Walks one actor toward the opposing unit nearest to it in a
+   straight line, ignoring terrain entirely.  This is the fallback
+   fdps_map_actor_behavior_step reaches for at all five of its call sites once
+   the path-cost sibling above has declined the actor.
+
+   THE SIDE FILTER COMPARES TRUTH VALUES AND NEVER SIDE NUMBERS.  CMP dword ptr
+   [EBP+0x18],0x0 then CMP byte ptr [EAX+0x6],0x0 on each arm at 00012833..
+   0001284f: side_select 0 keeps every unit whose side byte is non-zero, and any
+   non-zero side_select keeps only the units whose side byte is 0.  Side byte 6
+   is 0 for the enemy side, 1 for neutral and 2 for the player, so the obvious
+   record->side != own_side is wrong in both directions -- it would make neutral
+   units targets for a player-driven actor and player units targets for a
+   neutral one (rebuild_info/pitfalls.md).
+
+   THE ACTOR SCORES ITSELF WHENEVER ITS OWN SIDE BYTE PASSES THAT FILTER.  The
+   sweep runs over every index from 0 and nothing excludes unit_index, so an
+   actor of side 1 driven with side_select 0 wins its own tile at distance 0,
+   the equality test below then holds and the handler returns 0 having moved
+   nothing.  This is the same shape as the sibling's hard-coded filter and is
+   equally load-bearing.
+
+   THE RUNNING BEST IS REPLACED ONLY ON A STRICTLY SMALLER DISTANCE.  CMP EAX,
+   [EBP-0x24] / JGE at 000128c3, so a tie keeps the candidate already held and
+   the lowest unit index wins it.
+
+   The distance is the SUM of the two axes, abs on each through the CRT call at
+   0003d364 twice per candidate (000128a2 and 000128b3) with ADD EBX,EAX
+   between: the diagonal metric would pick a different unit wherever the two
+   sums tie and the larger axes do not.
+
+   The retired test is bit 0 of the flags byte alone -- AND AL,0x1 at 00012876
+   inside an inline expansion of fdps_unit_is_retired, whose out-of-line body at
+   000109b0 this replays instruction for instruction (rebuild_info/build_flags.md
+   on inline expansion under -od).  Bit 7, the acted-this-turn flag, is not part
+   of the answer.
+
+   The tile handed to fdps_battle_move_unit_toward is the winning unit's OWN
+   occupied tile, which no walk can end on; that function is what retargets the
+   request to the reachable tile nearest it (movegrid.h), so a non-zero result
+   means the actor moved, not that it arrived.
+
+   The cursor draw mode is written 0 and then 1 around the walk, at 000128fe and
+   00012937.  THE SECOND IS A PLAIN STORE AND NOT A RESTORE, and neither runs at
+   all when the winning tile is the one the actor already stands on.
+
+   The answer is 1 only when the move reported steps; 0 covers "no candidate",
+   "the winner is standing where I am" and "the walk played nothing", and
+   fdps_map_actor_behavior_step reads all three as "this handler did not claim
+   the actor". */
+int fdps_map_actor_move_toward_nearest_opponent(int unit_index, int side_select)
+{
+    /* The acting unit's record inside the map unit array. */
+    struct fdps_unit_record *actor;
+    /* The record the sweep is looking at this iteration. */
+    struct fdps_unit_record *candidate;
+    /* The tile the actor is standing on, record bytes +0 and +1, both widened
+       as unsigned so a coordinate of 0x80 or above is 128 and never -128. */
+    int actor_x;
+    int actor_y;
+    /* The unit index the sweep is at. */
+    int index;
+    /* The tile this candidate is standing on. */
+    int candidate_x;
+    int candidate_y;
+    /* This candidate's straight-line distance from the actor. */
+    int distance;
+    /* The smallest distance seen so far. */
+    int best_distance;
+    /* The tile that distance belongs to -- the winning unit's own tile, which
+       is what gets handed to the move.  target_x carries the "nothing found"
+       sentinel; target_y is only ever read once target_x has left it, which is
+       the same iteration that writes it. */
+    int target_x;
+    int target_y;
+    /* The answer: 1 once the move has reported that it played a walk. */
+    int moved;
+
+    best_distance = MAP_AI_NO_DISTANCE;
+    target_x = MAP_AI_NO_TILE;
+    moved = 0;
+
+    actor = fdps_get_unit_record(unit_index);
+    actor_x = (int) actor->pos_x;
+    actor_y = (int) actor->pos_y;
+
+    for (index = 0; index < data_fdps_map_unit_count; index++) {
+        candidate = fdps_get_unit_record(index);
+
+        if (!((side_select == 0 && candidate->side != 0) ||
+              (side_select != 0 && candidate->side == 0))) {
+            continue;
+        }
+        if (fdps_unit_is_retired(index) != 0) {
+            continue;
+        }
+
+        candidate_x = (int) candidate->pos_x;
+        candidate_y = (int) candidate->pos_y;
+        distance = abs(actor_x - candidate_x) + abs(actor_y - candidate_y);
+
+        if (distance < best_distance) {
+            target_x = candidate_x;
+            target_y = candidate_y;
+            best_distance = distance;
+        }
+    }
+
+    if (target_x == MAP_AI_NO_TILE) {
+        return 0;
+    }
 
     if (target_x != actor_x || target_y != actor_y) {
         data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;

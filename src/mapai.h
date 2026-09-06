@@ -39,6 +39,38 @@ extern int fdps_map_actor_move_toward_nearest_reachable_opponent(
                int unit_index, int side_select);
 #pragma aux fdps_map_actor_move_toward_nearest_reachable_opponent "*" parm caller [];
 
+/* Walks the actor at unit_index toward the opposing unit that is nearest to it
+   IN A STRAIGHT LINE -- the sum of the two axis distances, terrain ignored
+   entirely -- and answers whether it moved.  This is the fallback the behaviour
+   dispatcher tries once the path-cost search above has declined the actor.
+
+   Every unit index from 0 to data_fdps_map_unit_count-1 is scored.  A unit
+   counts only when it has not retired and when its side byte disagrees with
+   side_select AS A TRUTH VALUE: side_select 0 accepts every unit whose side
+   byte is non-zero, and any non-zero side_select accepts only side byte 0.
+   Side numbers are never compared, so an actor whose own side byte passes that
+   filter is scored along with everybody else, wins its own tile at distance 0
+   and this function moves nothing.  A tie in distance keeps the lower unit
+   index.
+
+   The actor is then sent toward the winning unit's own tile -- which is
+   occupied, so what it actually reaches is the tile nearest it that the walk
+   can finish on.  Unlike the path-cost sibling this one touches the movement
+   grid only through that move: it neither floods nor resets.
+
+   The result is 1 only when a walk was played.  0 comes back when no unit
+   passed the filter, when the tile that won is the one the actor is already on,
+   and when the move produced no steps; the caller reads that 0 as "this handler
+   declined the actor".
+
+   side_select is forwarded unchanged to the move as well as driving the filter.
+   The cursor draw mode is left at 1, the ordinary box, whenever the move branch
+   was taken -- it is stored, not restored -- and is not touched at all when it
+   was not. */
+extern int fdps_map_actor_move_toward_nearest_opponent(int unit_index,
+                                                       int side_select);
+#pragma aux fdps_map_actor_move_toward_nearest_opponent "*" parm caller [];
+
 /* Finds the treasure-chest cell carrying cell_code and reports where it is, so
    the AI can walk a unit to it.
 
