@@ -13,6 +13,7 @@
 #include "gamedata.h"
 #include "audio.h"
 #include "blit.h"
+#include "cdaudio.h"
 #include "keybd.h"
 #include "mapdraw.h"
 #include "palcycle.h"
@@ -537,4 +538,146 @@ int fdps_menu_cursor_input_loop(int *cmd_icons, int *cmd_disabled,
     }
 
     return result;
+}
+
+/* The four command icon ids the options menu shows when its setting is on,
+   MOV dword ptr [EBP-0x28],0xd / -0x24,0xe / -0x20,0xf / -0x1c,0x18 at
+   000183f8, 00018411, 0001842a and 00018443, in slot order up, left, right,
+   down.  The off variant of each is the same id a whole bank of 0x24
+   sub-images further along Command.cel -- 0x31, 0x32, 0x33 and 0x3c, the
+   immediates at 00018401, 0001841a, 00018433 and 0001844c.
+
+   THE OFF LABEL BORROWS THE GREYED-OUT BANK WITHOUT GREYING THE ENTRY OUT.
+   0x24 is the same shift fdps_render_ring_menu_frame applies of its own accord
+   to a slot whose cmd_disabled entry is set, so an option that is switched off
+   is drawn from the artwork the frame otherwise reserves for an unselectable
+   command.  The descriptor here stays all zeros, so the plate is the ordinary
+   one and every entry can still be chosen: the shift is this menu's way of
+   spelling "off", not a claim that the entry is unavailable. */
+#define OPTION_ICON_BGM 0x0d
+#define OPTION_ICON_SFX 0x0e
+#define OPTION_ICON_BATTLE_ANIMATION 0x0f
+#define OPTION_ICON_TERRAIN_HUD 0x18
+#define OPTION_ICON_OFF_BANK 0x24
+
+/* PUSH 0x0 at 000184a5: column 0 of the chapter track table, which is the
+   track a chapter plays outside a battle turn (cdaudio.h). */
+#define OPTION_BGM_TRACK_SLOT 0
+
+/* 000183d0.  The in-game options menu: a ring menu of four switches that stays
+   up until the player cancels out of it.  Takes nothing, answers nothing, and
+   everything it does is in the four setting globals.
+
+   THE LABELS ARE REBUILT AT THE TOP OF EVERY PASS AND NOT ONLY WHEN A FLAG
+   CHANGED.  The loop entry is 000183ef, above the four CMP/MOV pairs, so the
+   whole descriptor is composed again from the current flags before each
+   opening sweep -- which is how the switch the player just flipped is shown in
+   its new state when the menu reopens.
+
+   THE FOUR ENTRIES ARE NEVER GREYED OUT.  The sixteen bytes copied onto the
+   frame by the four MOVSDs at 000183e4 are the zeros the image holds at
+   00014a9c, and nothing writes that array again, so cmd_disabled is all zeros
+   for the life of the call and no arrow is ever refused.
+
+   THE CURSOR IS NOT PUT BACK ON THE FIRST ENTRY BETWEEN PASSES.  cursor_dir is
+   set to 0 once, before the loop at 000183e8, and fdps_menu_cursor_input_loop
+   writes the player's last slot back into it, so the menu reopens on the entry
+   that was just toggled rather than on the music switch.
+
+   THE MENU IS CLOSED AND REOPENED AROUND EVERY TOGGLE.  A confirm runs the
+   whole closing retraction, applies the switch and then plays the opening
+   sweep again, cue and all -- the animations are inside the loop, not around
+   it -- so flipping four switches costs four full open/close animations.
+
+   IT LEAVES THE BUTTONS ON THE SCREEN.  fdps_menu_animate_close stops three
+   pixels out without erasing anything and this function draws nothing
+   afterwards, so the retracted ring is still on the adapter when the caller
+   gets control back; fdps_battle_system_menu is what repaints over it.
+
+   THE MUSIC SWITCH GOES THROUGH THE DISC CHECK IN BOTH DIRECTIONS, AND WHAT
+   IT DOES TO THE DRIVE IS NOT SYMMETRIC.  The XOR at 0001849e flips the flag
+   before the call at 000184ad, and that call is not inside a test of it, so
+   fdps_cd_verify_disc_and_play_track runs whichever way the switch went and
+   reads the flag already in its new state: switching on publishes the
+   chapter's track and plays it, switching off takes the JZ at 00030e81 to the
+   arm that publishes -1 and stops the drive, whatever the chapter's table
+   entry says (cdaudio.h).  That is what makes the music stop the moment the
+   switch goes off.  The disc check, and the insert-the-other-disc prompt it
+   can raise, sits ahead of that test and so happens on the way out of music as
+   well as into it.  The three other switches touch nothing but their own
+   byte. */
+void fdps_options_menu(void)
+{
+    /* The Command.cel sub-image of each switch's label, in slot order up,
+       left, right, down: music, sound effects, battle animation, terrain
+       information.  Rebuilt from the flags on every pass. */
+    int cmd_icons[RING_SLOTS];
+    /* Handed to all three menu primitives and never written -- see above. */
+    int cmd_disabled[RING_SLOTS] = {0, 0, 0, 0};
+    /* What the cursor loop answered: MENU_CURSOR_CANCELLED closes the menu,
+       MENU_CURSOR_CONFIRMED toggles the switch cursor_dir is sitting on.  The
+       loop has no third answer. */
+    int menu_answer;
+    /* The highlighted slot.  It goes into the cursor loop by address and comes
+       back holding the entry the player finished on, and it survives from one
+       pass to the next. */
+    int cursor_dir = RING_SLOT_UP;
+
+    for (;;) {
+        if (data_fdps_audio_bgm_enabled_flag != 0) {
+            cmd_icons[RING_SLOT_UP] = OPTION_ICON_BGM;
+        } else {
+            cmd_icons[RING_SLOT_UP] = OPTION_ICON_BGM + OPTION_ICON_OFF_BANK;
+        }
+        if (data_fdps_audio_sfx_enabled_flag != 0) {
+            cmd_icons[RING_SLOT_LEFT] = OPTION_ICON_SFX;
+        } else {
+            cmd_icons[RING_SLOT_LEFT] = OPTION_ICON_SFX + OPTION_ICON_OFF_BANK;
+        }
+        if (data_fdps_ui_battle_animation_enabled != 0) {
+            cmd_icons[RING_SLOT_RIGHT] = OPTION_ICON_BATTLE_ANIMATION;
+        } else {
+            cmd_icons[RING_SLOT_RIGHT] = OPTION_ICON_BATTLE_ANIMATION
+                                         + OPTION_ICON_OFF_BANK;
+        }
+        if (data_fdps_ui_terrain_hud_user_enabled != 0) {
+            cmd_icons[RING_SLOT_DOWN] = OPTION_ICON_TERRAIN_HUD;
+        } else {
+            cmd_icons[RING_SLOT_DOWN] = OPTION_ICON_TERRAIN_HUD
+                                        + OPTION_ICON_OFF_BANK;
+        }
+
+        fdps_menu_animate_open(cmd_icons, cmd_disabled, cursor_dir);
+        menu_answer = fdps_menu_cursor_input_loop(cmd_icons, cmd_disabled,
+                                                  &cursor_dir);
+        fdps_menu_animate_close(cmd_icons, cmd_disabled, cursor_dir);
+
+        if (menu_answer == MENU_CURSOR_CANCELLED) {
+            break;
+        }
+
+        /* XOR of bit 0 and not a store of the logical complement -- XOR byte
+           ptr [...],0x1 at 0001849e, 000184bd, 000184cc and 000184d5 -- so a
+           flag that somehow held 2 would come back 3 rather than 0.  Every one
+           of the four is a byte access, matching the unsigned char these are
+           declared as in gamedata.h.
+
+           THE LAST ARM IS THE FALL-THROUGH, NOT A TEST FOR SLOT 1.  The chain
+           at 00018498 tests 0, then 2, then 3, and anything else reaches the
+           sound-effect toggle at 000184d5.  Only the cursor loop writes
+           cursor_dir and it writes nothing outside 0..3, so slot 1 is the only
+           value that gets there in play -- but the arm is not conditional and
+           writing it as one would be a different function. */
+        if (cursor_dir == RING_SLOT_UP) {
+            data_fdps_audio_bgm_enabled_flag ^= 1;
+            fdps_cd_verify_disc_and_play_track(
+                data_fdps_chapter_current_chapter_id, OPTION_BGM_TRACK_SLOT);
+        } else if (cursor_dir == RING_SLOT_RIGHT) {
+            data_fdps_ui_battle_animation_enabled ^= 1;
+        } else if (cursor_dir == RING_SLOT_DOWN) {
+            data_fdps_ui_terrain_hud_user_enabled ^= 1;
+        } else {
+            data_fdps_audio_sfx_enabled_flag ^= 1;
+        }
+    }
 }

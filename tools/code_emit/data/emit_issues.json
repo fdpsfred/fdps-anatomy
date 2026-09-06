@@ -2017,5 +2017,20 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "000183d0": [
+    {
+      "from": "emit",
+      "what": "The music arm is the one path no unit test exercises, and what it does is asymmetric. From the assembly the control flow is settled: XOR byte ptr [0x00060008],0x1 at 0001849e flips the flag and is followed unconditionally by PUSH 0x0 / PUSH dword ptr [0x00069cf4] / CALL 0x00030cc0, so fdps_cd_verify_disc_and_play_track(data_fdps_chapter_current_chapter_id, 0) runs whichever way the switch went and is not guarded by the flag it just flipped. Inside 00030cc0 the disc check and its message panel come first, and only then does CMP byte ptr [0x00060008],0x0 / JZ 0x00030ede at 00030e7a-00030e81 split the two directions: with music now on it reads the chapter's table entry, publishes it to data_fdps_audio_cd_current_music_index at 0x00069d54 and plays it at 00030ed4; with music now off it takes the JZ to 00030ede, publishes -1 and calls fdps_cd_stop_audio at 00030f0c, so the drive stops rather than restarting (the same conclusion src/cdaudio.h:396-398 already records). What no test can show is that the resulting behaviour matches the original on a machine: 00030cc0 probes the CD path, and with the disc unreachable it opens the message window and blocks in getch, so a case that pressed Enter on slot 0 would hang the harness instead of asserting anything.",
+      "needs": "A playtest in DOSBox-X with FDPS_DISC_1.cue mounted: open the in-game options menu, toggle the music switch off and then on again, and confirm that the music stops on the way off, that the chapter's track starts again on the way on, and that neither direction raises the insert-the-other-disc prompt while the correct disc is mounted.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed the asymmetry for myself from the assembly rather than from the emitter's account: 0001849e XORs the flag and 000184ad calls 00030cc0 with no test of it in between, so the callee always sees the already-flipped value; inside 00030cc0 the disc-wait loop runs first (00030ce4 through the JMP back at 00030e70), and only then does CMP byte ptr [0x00060008],0x0 / JZ 0x00030ede at 00030e7a-00030e81 split the two directions -- the off arm at 00030ede puts -1 in EBP-0x6c, publishes it to 0x00069d54 and reaches CALL 0x0003c4a7 at 00030f0c (stop), while the table read [EBP+0x14]*2 + [EBP+0x18] indexed off EBP-0x60 and the play call at 00030ed4 are on the unreachable side. Nothing to add to the emitter's reading; what is still unsettled is the same thing, that no unit test can run this arm because 00030cc0 opens the message panel and blocks in getch when the pack is not reachable.",
+      "needs": "The playtest the emitter asks for, unchanged: in DOSBox-X with FDPS_DISC_1.cue mounted, open the in-game options menu, toggle the music switch off and then on, and confirm the music stops on the way off, the chapter's track starts again on the way on, and neither direction raises the insert-the-other-disc prompt while the correct disc is mounted.",
+      "status": "open",
+      "same_as": "emit#0"
+    }
   ]
 }

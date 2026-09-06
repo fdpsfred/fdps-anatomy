@@ -114,4 +114,28 @@ extern int fdps_menu_cursor_input_loop(int *cmd_icons, int *cmd_disabled,
                                        int *cursor_dir);
 #pragma aux fdps_menu_cursor_input_loop "*" parm caller [];
 
+/* Runs the in-game options menu until the player cancels out of it.  Takes
+   nothing and returns nothing: the four switches it drives are
+   data_fdps_audio_bgm_enabled_flag, data_fdps_audio_sfx_enabled_flag,
+   data_fdps_ui_battle_animation_enabled and
+   data_fdps_ui_terrain_hud_user_enabled (gamedata.h), in slot order up, left,
+   right, down.
+
+   IT DOES NOT RETURN UNTIL ESCAPE OR KEYPAD DEL.  Confirming a switch toggles
+   it and reopens the menu; only a cancel ends the call, so a caller gets
+   control back knowing only that the player left, never which switches moved.
+
+   THE MUSIC SWITCH GOES THROUGH THE DISC CHECK IN BOTH DIRECTIONS.  Toggling
+   it calls fdps_cd_verify_disc_and_play_track for the current chapter's track
+   whether the switch went on or off (cdaudio.h), so the insert-the-other-disc
+   prompt and its blocking getch can be raised from inside this menu.
+
+   IT LEAVES THE RETRACTED RING ON THE ADAPTER.  Nothing is drawn after
+   fdps_menu_animate_close, and that stops three pixels out without erasing, so
+   the caller has to repaint the view itself.  It also draws the whole menu
+   straight to the adapter throughout and presents nothing afterwards, exactly
+   as the primitives it is built from do. */
+extern void fdps_options_menu(void);
+#pragma aux fdps_options_menu "*" parm caller [];
+
 #endif

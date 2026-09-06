@@ -1560,6 +1560,394 @@ static void cursor_cancel_keeps_the_move_and_the_descriptors(void)
     cursor_unstage();
 }
 
+/* ------------------------------------------------------------------ */
+/* fdps_options_menu @ 000183d0                                        */
+/* ------------------------------------------------------------------ */
+
+/* The eight label ids, read off the MOV immediates at 000183f8/00018401,
+   00018411/0001841a, 0001842a/00018433 and 00018443/0001844c: the on id and
+   the on id plus the 0x24 bank, in slot order up, left, right, down. */
+#define OPTIONS_ICON_BGM 0x0d
+#define OPTIONS_ICON_SFX 0x0e
+#define OPTIONS_ICON_BATTLE_ANIMATION 0x0f
+#define OPTIONS_ICON_TERRAIN_HUD 0x18
+
+/* Where the four slots' icon rows can still be read after a whole menu run.
+   The frames are never erased, so the finished screen is every frame that ran
+   stacked up and each pixel below has to be one no later frame covered.
+
+   Three of them come from the closing retraction's last frame at radius 3,
+   whose cells the ring cases already pin: up at screen (124,146), right at
+   (122,148) and down at (124,150), with the plate on the row after the icon.
+   The left slot is buried there -- the right slot is composited after it and
+   its radius-3 cell covers the left one's icon row -- so the left label is read
+   at the resting radius instead, at screen (124,125), which the retraction's
+   cells all sit inside of and to the right of. */
+#define OPTIONS_UP_ICON_ROW 124
+#define OPTIONS_UP_ICON_COL 146
+#define OPTIONS_RIGHT_ICON_ROW 122
+#define OPTIONS_RIGHT_ICON_COL 148
+#define OPTIONS_DOWN_ICON_ROW 124
+#define OPTIONS_DOWN_ICON_COL 150
+#define OPTIONS_LEFT_ICON_ROW 124
+#define OPTIONS_LEFT_ICON_COL 125
+
+/* The descriptor the menu builds on its stack: the sixteen bytes at 00014a9c
+   are zero, so nothing is ever greyed out. */
+static int options_zero_descriptor[4] = { 0, 0, 0, 0 };
+
+static void options_set_flags(int bgm, int sfx, int battle_animation,
+                              int terrain_hud)
+{
+    data_fdps_audio_bgm_enabled_flag = (unsigned char) bgm;
+    data_fdps_audio_sfx_enabled_flag = (unsigned char) sfx;
+    data_fdps_ui_battle_animation_enabled = (unsigned char) battle_animation;
+    data_fdps_ui_terrain_hud_user_enabled = (unsigned char) terrain_hud;
+}
+
+/* open_stage plus the four flags back at the zero the image links them as, and
+   the ring emptied: a burst left half drained would be read by the next case
+   that polls the keyboard. */
+static void options_unstage(void)
+{
+    open_unstage();
+    options_set_flags(0, 0, 0, 0);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+/* The same watch the other menu cases keep, over a whole run of the options
+   menu.  The burst has to end in a cancel: nothing else ends the call.
+
+   NO CASE HERE CONFIRMS ON THE MUSIC SWITCH.  That arm calls
+   fdps_cd_verify_disc_and_play_track, which prompts for the other disc and
+   blocks in getch when the pack is not reachable (cdaudio.h), so a case that
+   pressed Enter on slot 0 would hang the run rather than test anything. */
+static void options_run(unsigned char *codes, int count)
+{
+    cursor_queue(codes, count);
+    ring_blocks_before = ring_used_heap_blocks();
+    ring_set_mode(RING_MODE_320X200X256);
+    memset((void *) RING_VGA_BASE, RING_BORDER_FILL,
+           (size_t) RING_SCREEN_BYTES);
+    ring_seed_page();
+    fdps_options_menu();
+    memmove(ring_screen, (void *) RING_VGA_BASE, (size_t) RING_SCREEN_BYTES);
+    ring_set_mode(RING_MODE_TEXT);
+    ring_blocks_after = ring_used_heap_blocks();
+}
+
+static void options_ladder_begin(void)
+{
+    ring_set_mode(RING_MODE_320X200X256);
+    memset((void *) RING_VGA_BASE, RING_BORDER_FILL,
+           (size_t) RING_SCREEN_BYTES);
+    ring_seed_page();
+}
+
+/* One pass of the menu played out by hand in the order the assembly runs it:
+   the opening sweep on the slot the pass began on, then one resting-radius
+   frame for each code the cursor loop consumed with the slot that pass was
+   holding, then the closing retraction on the slot the pass ended on.  The
+   descriptor is the all-zero one, which is what makes a wrong cmd_disabled in
+   the emitted C show up as a different picture. */
+static void options_ladder_pass(int *cmd_icons, int open_dir, int *dirs,
+                                int frames, int close_dir)
+{
+    int frame;
+
+    fdps_menu_animate_open(cmd_icons, options_zero_descriptor, open_dir);
+    for (frame = 0; frame < frames; frame++) {
+        fdps_render_ring_menu_frame(cmd_icons, options_zero_descriptor,
+                                    RING_RESTING_RADIUS, dirs[frame]);
+    }
+    fdps_menu_animate_close(cmd_icons, options_zero_descriptor, close_dir);
+}
+
+static void options_ladder_end(void)
+{
+    memmove(open_reference, (void *) RING_VGA_BASE, (size_t) RING_SCREEN_BYTES);
+    ring_set_mode(RING_MODE_TEXT);
+}
+
+/* A cancel on the first pass leaves all four settings exactly as they were and
+   ends the call: the JZ at 00018496 goes straight to the epilogue and no XOR
+   runs.  The four flags are given a mixed pattern so a run that cleared them,
+   set them or copied one onto another would be caught.
+
+   One code out of the ring is the other half of it: the pass that cancelled is
+   the only pass, so a loop that ran a second opening sweep before noticing the
+   answer would have taken a second code. */
+static void options_escape_closes_and_changes_nothing(void)
+{
+    unsigned char keys[1];
+
+    open_stage();
+    options_set_flags(1, 0, 1, 0);
+    keys[0] = CURSOR_KEY_ESC;
+    options_run(keys, 1);
+
+    CHECK_EQ((int) data_fdps_audio_bgm_enabled_flag, 1);
+    CHECK_EQ((int) data_fdps_audio_sfx_enabled_flag, 0);
+    CHECK_EQ((int) data_fdps_ui_battle_animation_enabled, 1);
+    CHECK_EQ((int) data_fdps_ui_terrain_hud_user_enabled, 0);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 1);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    options_unstage();
+}
+
+/* Which label each slot carries with every switch on, and which with every
+   switch off.  The two runs together pin all eight ids and the direction of
+   the test -- CMP byte ptr [...],0x0 / JZ to the banked id, so a non-zero flag
+   is the plain one -- and a reading with the two arms swapped fails all four
+   pixels of both runs.
+
+   THE PLATE ROW IS WHAT SAYS THE ENTRY IS STILL SELECTABLE.  A set
+   cmd_disabled entry would bump the plate to 0x1c as well as banking the icon,
+   so an off switch drawn on the plain 0x1b plate and the highlighted 0x1a is
+   the descriptor being all zeros, stated where it can be seen. */
+static void options_labels_follow_each_flag(void)
+{
+    unsigned char keys[1];
+
+    open_stage();
+    keys[0] = CURSOR_KEY_ESC;
+
+    options_set_flags(1, 1, 1, 1);
+    options_run(keys, 1);
+    CHECK_EQ(ring_pixel(OPTIONS_UP_ICON_ROW, OPTIONS_UP_ICON_COL),
+             RING_COLOR(OPTIONS_ICON_BGM));
+    CHECK_EQ(ring_pixel(OPTIONS_LEFT_ICON_ROW, OPTIONS_LEFT_ICON_COL),
+             RING_COLOR(OPTIONS_ICON_SFX));
+    CHECK_EQ(ring_pixel(OPTIONS_RIGHT_ICON_ROW, OPTIONS_RIGHT_ICON_COL),
+             RING_COLOR(OPTIONS_ICON_BATTLE_ANIMATION));
+    CHECK_EQ(ring_pixel(OPTIONS_DOWN_ICON_ROW, OPTIONS_DOWN_ICON_COL),
+             RING_COLOR(OPTIONS_ICON_TERRAIN_HUD));
+
+    options_set_flags(0, 0, 0, 0);
+    options_run(keys, 1);
+    CHECK_EQ(ring_pixel(OPTIONS_UP_ICON_ROW, OPTIONS_UP_ICON_COL),
+             RING_COLOR(OPTIONS_ICON_BGM + RING_ICON_BANK));
+    CHECK_EQ(ring_pixel(OPTIONS_LEFT_ICON_ROW, OPTIONS_LEFT_ICON_COL),
+             RING_COLOR(OPTIONS_ICON_SFX + RING_ICON_BANK));
+    CHECK_EQ(ring_pixel(OPTIONS_RIGHT_ICON_ROW, OPTIONS_RIGHT_ICON_COL),
+             RING_COLOR(OPTIONS_ICON_BATTLE_ANIMATION + RING_ICON_BANK));
+    CHECK_EQ(ring_pixel(OPTIONS_DOWN_ICON_ROW, OPTIONS_DOWN_ICON_COL),
+             RING_COLOR(OPTIONS_ICON_TERRAIN_HUD + RING_ICON_BANK));
+    CHECK_EQ(ring_pixel(OPTIONS_UP_ICON_ROW + 1, OPTIONS_UP_ICON_COL),
+             RING_COLOR(RING_PLATE_HI));
+    CHECK_EQ(ring_pixel(OPTIONS_DOWN_ICON_ROW + 1, OPTIONS_DOWN_ICON_COL),
+             RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    options_unstage();
+}
+
+/* The whole first pass, byte for byte, against the three calls it is made of
+   run by hand: opening sweep on slot 0, one resting-radius frame for the one
+   code the cursor loop took, closing retraction on slot 0.  A missing
+   animation, the two animations in the other order, a descriptor that was not
+   all zeros, a starting slot other than 0, or any label id off by anything at
+   all changes the picture.
+
+   The mixed flag pattern is the point of doing it here rather than with the
+   switches all one way: on, off, on, off means the two arms of all four tests
+   are exercised inside one comparison. */
+static void options_first_pass_is_open_one_frame_close(void)
+{
+    int cmd_icons[4];
+    int dirs[1];
+    unsigned char keys[1];
+
+    open_stage();
+    options_set_flags(1, 0, 1, 0);
+    keys[0] = CURSOR_KEY_ESC;
+    options_run(keys, 1);
+
+    cmd_icons[0] = OPTIONS_ICON_BGM;
+    cmd_icons[1] = OPTIONS_ICON_SFX + RING_ICON_BANK;
+    cmd_icons[2] = OPTIONS_ICON_BATTLE_ANIMATION;
+    cmd_icons[3] = OPTIONS_ICON_TERRAIN_HUD + RING_ICON_BANK;
+    dirs[0] = 0;
+    options_ladder_begin();
+    options_ladder_pass(cmd_icons, 0, dirs, 1, 0);
+    options_ladder_end();
+
+    CHECK_EQ(memcmp(ring_screen, open_reference, (size_t) RING_SCREEN_BYTES),
+             0);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    options_unstage();
+}
+
+/* Confirming on the left slot toggles the sound effects and nothing else: the
+   chain at 00018498 tests 0, 2 and 3 and falls through to XOR byte ptr
+   [0x00069d70],0x1 at 000184d5.  The other three flags are left on, so an arm
+   that wrote the wrong global shows up as one of them going out. */
+static void options_left_confirm_toggles_sound_effects(void)
+{
+    unsigned char keys[3];
+
+    open_stage();
+    options_set_flags(1, 1, 1, 1);
+    keys[0] = CURSOR_KEY_LEFT;
+    keys[1] = CURSOR_KEY_ENTER;
+    keys[2] = CURSOR_KEY_ESC;
+    options_run(keys, 3);
+
+    CHECK_EQ((int) data_fdps_audio_sfx_enabled_flag, 0);
+    CHECK_EQ((int) data_fdps_audio_bgm_enabled_flag, 1);
+    CHECK_EQ((int) data_fdps_ui_battle_animation_enabled, 1);
+    CHECK_EQ((int) data_fdps_ui_terrain_hud_user_enabled, 1);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 3);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    options_unstage();
+}
+
+/* The right slot is the battle-animation switch, XOR byte ptr
+   [0x00060010],0x1 at 000184bd under CMP dword ptr [EBP-0x4],0x2. */
+static void options_right_confirm_toggles_battle_animation(void)
+{
+    unsigned char keys[3];
+
+    open_stage();
+    options_set_flags(1, 1, 1, 1);
+    keys[0] = CURSOR_KEY_RIGHT;
+    keys[1] = CURSOR_KEY_ENTER;
+    keys[2] = CURSOR_KEY_ESC;
+    options_run(keys, 3);
+
+    CHECK_EQ((int) data_fdps_ui_battle_animation_enabled, 0);
+    CHECK_EQ((int) data_fdps_audio_bgm_enabled_flag, 1);
+    CHECK_EQ((int) data_fdps_audio_sfx_enabled_flag, 1);
+    CHECK_EQ((int) data_fdps_ui_terrain_hud_user_enabled, 1);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    options_unstage();
+}
+
+/* The down slot is the terrain-information switch, XOR byte ptr
+   [0x00060158],0x1 at 000184cc under CMP dword ptr [EBP-0x4],0x3. */
+static void options_down_confirm_toggles_terrain_hud(void)
+{
+    unsigned char keys[3];
+
+    open_stage();
+    options_set_flags(1, 1, 1, 1);
+    keys[0] = CURSOR_KEY_DOWN;
+    keys[1] = CURSOR_KEY_ENTER;
+    keys[2] = CURSOR_KEY_ESC;
+    options_run(keys, 3);
+
+    CHECK_EQ((int) data_fdps_ui_terrain_hud_user_enabled, 0);
+    CHECK_EQ((int) data_fdps_audio_bgm_enabled_flag, 1);
+    CHECK_EQ((int) data_fdps_audio_sfx_enabled_flag, 1);
+    CHECK_EQ((int) data_fdps_ui_battle_animation_enabled, 1);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    options_unstage();
+}
+
+/* The toggle is XOR of bit 0 and not a store of the logical complement.  A
+   flag holding 2 comes back 3, which is what the assembly's XOR byte ptr
+   [...],0x1 does; writing the switch as "flag = flag == 0" -- the reading a
+   pair of on and off labels invites -- would answer 0 and the label would flip
+   with it.  Nothing in the shipped game puts a 2 there, so this is about the
+   operation and not about a state the player can reach. */
+static void options_toggle_is_an_xor_of_bit_zero(void)
+{
+    unsigned char keys[3];
+
+    open_stage();
+    options_set_flags(1, 2, 1, 1);
+    keys[0] = CURSOR_KEY_LEFT;
+    keys[1] = CURSOR_KEY_ENTER;
+    keys[2] = CURSOR_KEY_ESC;
+    options_run(keys, 3);
+
+    CHECK_EQ((int) data_fdps_audio_sfx_enabled_flag, 3);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    options_unstage();
+}
+
+/* A confirm does not end the call: only the -1 the cancel arm writes does.
+   Two confirms on the same switch put it back where it started and the run
+   still swallows all four codes, so a loop that returned on the first confirm
+   would leave two of them queued and the flag inverted. */
+static void options_confirm_does_not_end_the_menu(void)
+{
+    unsigned char keys[4];
+
+    open_stage();
+    options_set_flags(1, 1, 1, 1);
+    keys[0] = CURSOR_KEY_DOWN;
+    keys[1] = CURSOR_KEY_ENTER;
+    keys[2] = CURSOR_KEY_ENTER;
+    keys[3] = CURSOR_KEY_ESC;
+    options_run(keys, 4);
+
+    CHECK_EQ((int) data_fdps_ui_terrain_hud_user_enabled, 1);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, 4);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    CHECK_EQ(ring_blocks_after - ring_blocks_before, 0);
+    options_unstage();
+}
+
+/* The whole two-pass run, byte for byte, against the six calls it is made of.
+   It is the strongest statement available about what survives a toggle:
+
+   the second pass reopens on slot 3 and not on slot 0, because cursor_dir is
+   set once above the loop at 000183e8 and the cursor loop wrote the player's
+   slot back through the pointer;
+
+   the closing retraction of the first pass is drawn on slot 3 as well, because
+   it is called after the cursor loop and with the same variable;
+
+   and the second pass's down label is the banked 0x3c and not the 0x18 the
+   first pass drew, because the four CMP/MOV pairs sit inside the loop at
+   000183ef and are re-run with the flag the toggle just changed.
+
+   Two frames in the first pass and one in the second is the arithmetic of one
+   frame per code: DOWN and Enter, then Escape. */
+static void options_reopens_on_the_toggled_switch_with_its_new_label(void)
+{
+    int first_icons[4];
+    int second_icons[4];
+    int first_dirs[2];
+    int second_dirs[1];
+    unsigned char keys[3];
+
+    open_stage();
+    options_set_flags(1, 1, 1, 1);
+    keys[0] = CURSOR_KEY_DOWN;
+    keys[1] = CURSOR_KEY_ENTER;
+    keys[2] = CURSOR_KEY_ESC;
+    options_run(keys, 3);
+    CHECK_EQ((int) data_fdps_ui_terrain_hud_user_enabled, 0);
+
+    first_icons[0] = OPTIONS_ICON_BGM;
+    first_icons[1] = OPTIONS_ICON_SFX;
+    first_icons[2] = OPTIONS_ICON_BATTLE_ANIMATION;
+    first_icons[3] = OPTIONS_ICON_TERRAIN_HUD;
+    second_icons[0] = OPTIONS_ICON_BGM;
+    second_icons[1] = OPTIONS_ICON_SFX;
+    second_icons[2] = OPTIONS_ICON_BATTLE_ANIMATION;
+    second_icons[3] = OPTIONS_ICON_TERRAIN_HUD + RING_ICON_BANK;
+    first_dirs[0] = 3;
+    first_dirs[1] = 3;
+    second_dirs[0] = 3;
+    options_ladder_begin();
+    options_ladder_pass(first_icons, 0, first_dirs, 2, 3);
+    options_ladder_pass(second_icons, 3, second_dirs, 1, 3);
+    options_ladder_end();
+
+    CHECK_EQ(memcmp(ring_screen, open_reference, (size_t) RING_SCREEN_BYTES),
+             0);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    options_unstage();
+}
+
 void run_menu_tests(void)
 {
     RUN_TEST(menu_first_entry_wins);
@@ -1599,4 +1987,13 @@ void run_menu_tests(void)
     RUN_TEST(cursor_reads_one_code_per_pass);
     RUN_TEST(cursor_repaints_once_per_pass_including_the_last);
     RUN_TEST(cursor_cancel_keeps_the_move_and_the_descriptors);
+    RUN_TEST(options_escape_closes_and_changes_nothing);
+    RUN_TEST(options_labels_follow_each_flag);
+    RUN_TEST(options_first_pass_is_open_one_frame_close);
+    RUN_TEST(options_left_confirm_toggles_sound_effects);
+    RUN_TEST(options_right_confirm_toggles_battle_animation);
+    RUN_TEST(options_down_confirm_toggles_terrain_hud);
+    RUN_TEST(options_toggle_is_an_xor_of_bit_zero);
+    RUN_TEST(options_confirm_does_not_end_the_menu);
+    RUN_TEST(options_reopens_on_the_toggled_switch_with_its_new_label);
 }
