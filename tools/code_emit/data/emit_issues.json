@@ -2118,5 +2118,20 @@
       "same_as": "emit#1",
       "status": "open"
     }
+  ],
+  "000336d0": [
+    {
+      "from": "emit",
+      "what": "The grid indexes the walking-icon cache by ROSTER INDEX times 0xc (IMUL EAX,dword ptr [EBP-0xc],0xc at 0003398b) rather than by the record's own sprite_cache_slot field the way the battle map does. fdps_load_field_chapter_resources (00031540) makes that line up: it zeroes data_fdps_cel_sprite_cache_count and then calls fdps_cache_cel_sprite_group once per roster member in roster order, so cache slot i is member i. BUT fdps_cache_cel_sprite_group is keyed on the group id, which is the record's portrait_id at +7, and it returns an EXISTING slot without allocating a new one when two members ask for the same group. If any two members of a party share a portrait_id, every member after the duplicate has a cache slot one lower than its roster index and the village grid then draws the wrong member's walking icon for all of them. This changes no emitted C either way -- src/vilmenu.c reproduces the roster-index arithmetic the assembly has -- but it decides whether the shipped game shows a wrong icon in the village member grid, and therefore whether a rebuild that looked right in playtest is actually matching.",
+      "needs": "The portrait_id (record byte +7) each playable character is given when it joins the roster. That is written by the chapter join code and by ticket 23's character tables, neither of which is emitted yet; assets/ and program_info/ carry no portrait_id table today. Settle it by listing the portrait_id of every joinable character once those land and checking whether any two can be in the party at the same time, and if they can, confirm the mis-drawn icon on real hardware in a chapter where it happens.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed independently and narrowed. fdps_load_field_chapter_resources at 00031540 calls fdps_cache_cel_sprite_group((uint)data_fdps_roster_array_ptr[i * 0x50 + 7], icon_file) once per roster member in roster order, and byte +7 of the record is portrait_id in fdpstype.h -- so the group key really is portrait_id and not the roster index, and two members sharing a portrait_id really would collapse into one cache slot and shift every later member's icon. I also checked the reachable half of the question the emitter did not name: assets/, program_info/ and resource_info/ contain no occurrence of the string 'portrait' at all, so there is no table to settle it against today. Nothing in src/vilmenu.c changes either way -- it reproduces the roster-index arithmetic at 0003398b as the assembly has it.",
+      "needs": "The portrait_id each joinable character is given, from ticket 23's character tables, plus a check of whether any two such characters can be in the party at once.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }
