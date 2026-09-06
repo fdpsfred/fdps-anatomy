@@ -25,6 +25,8 @@
 #include "gamedata.h"
 #include "cdaudio.h"
 #include "keybd.h"
+#include "sprite.h"
+#include "text.h"
 #include "village.h"
 
 /* Chapter id 5 is the player's chapter 6, whose row is 1f 12 2e 13 12 14 --
@@ -1777,6 +1779,373 @@ static void menu_frees_the_sheet_and_every_page(void)
     menu_unstage();
 }
 
+/* ---- fdps_draw_party_gold, 00032370 ---------------------------------------
+ *
+ * Expected values come from the assembly at 00032370 -- the three-iteration
+ * loop (CMP dword ptr [EBP-0x4],0x3 / JL at 00032383), the sprite base ADD
+ * EAX,0x34 at 00032396, the one-sprite-width step IMUL EAX,[EBP-0x4],0x19 at
+ * 0003239e, the figure's LEA EAX,[EAX*0x4] over the pitch at 000323c2 and ADD
+ * EAX,0x13 at 000323cc, the PUSH 0x8 field width at 000323b3, the XOR EAX,EAX
+ * show_plus at 000323b0 and the PUSH dword ptr [0x000643a4] at 000323b5 --
+ * cross-checked against the two callees' own documented behaviour in sprite.h
+ * and text.h.  None of them is read off the emitted C.
+ *
+ * Both sheets are staged the way tests/text.c stages NUMBER.CEL: a real
+ * .CEL-shaped block whose sprite n is a flat fill of a colour that identifies
+ * n, so the destination surface spells out which sprite each step selected and
+ * where it landed.  The two colour ranges are kept apart -- plate sprites paint
+ * 0x80 and up, glyph sprites 1..13 -- so a pixel says which of the two drawing
+ * steps last wrote it, which is what lets a case assert that the digits go on
+ * top of the plate rather than under it.
+ *
+ * Neither Command.cel nor Number.cel is read here.  This file asserts nothing
+ * about the game's artwork, only about which sprite slots the routine picks and
+ * where it puts them.
+ */
+
+/* The Command.cel sheet's shape, from resource_info/cel.md: the sprite offset
+   table sits at a fixed +0x0f, one dword per sprite, each the offset from the
+   base of the sheet to that sprite's RLE stream.  Fifty-five sprites is enough
+   to hold 0x36, the last one the readout asks for.  25 by 22 is the size
+   fdps_blit_command_sprite publishes (sprite.h). */
+#define GOLD_CMD_SPRITES     55
+#define GOLD_CMD_W           0x19
+#define GOLD_CMD_H           0x16
+#define GOLD_CMD_TABLE_AT    0x0f
+#define GOLD_CMD_ROW_BYTES   2
+#define GOLD_CMD_STREAM_BYTES (GOLD_CMD_H * GOLD_CMD_ROW_BYTES)
+#define GOLD_CMD_STREAM_AT   (GOLD_CMD_TABLE_AT + GOLD_CMD_SPRITES * 4)
+#define GOLD_CMD_SHEET_BYTES \
+    (GOLD_CMD_STREAM_AT + GOLD_CMD_SPRITES * GOLD_CMD_STREAM_BYTES)
+
+/* And the Number.cel sheet's: sixty-five sprites, five colour rows of the
+   thirteen glyphs '0'-'9', '+', '-', '?', each 6 by 8. */
+#define GOLD_NUM_SPRITES     65
+#define GOLD_NUM_W           6
+#define GOLD_NUM_H           8
+#define GOLD_NUM_TABLE_AT    0x0f
+#define GOLD_NUM_ROW_BYTES   2
+#define GOLD_NUM_STREAM_BYTES (GOLD_NUM_H * GOLD_NUM_ROW_BYTES)
+#define GOLD_NUM_STREAM_AT   (GOLD_NUM_TABLE_AT + GOLD_NUM_SPRITES * 4)
+#define GOLD_NUM_SHEET_BYTES \
+    (GOLD_NUM_STREAM_AT + GOLD_NUM_SPRITES * GOLD_NUM_STREAM_BYTES)
+
+/* A single fill op covering a whole row: op 0 in the top two bits and a run of
+   (byte & 0x3f) + 1, so the row closes on its own width and the blit steps by
+   pitch - width.  Same encoding tests/text.c uses. */
+#define GOLD_FILL_CMD(width) ((unsigned char) ((width) - 1))
+
+/* The three plate sprites and the geometry of the figure over them. */
+#define GOLD_PLATE_FIRST     0x34
+#define GOLD_PLATE_SPRITES   3
+#define GOLD_PLATE_W         (GOLD_PLATE_SPRITES * GOLD_CMD_W)
+#define GOLD_FIGURE_ROW      4
+#define GOLD_FIGURE_COL      0x13
+#define GOLD_FIGURE_DIGITS   8
+
+/* Wide enough for the 75-pixel plate at an offset origin, and a few rows past
+   the plate's bottom so an overrun has somewhere to show. */
+#define GOLD_PITCH           96
+#define GOLD_ROWS            28
+#define GOLD_SURFACE_BYTES   (GOLD_PITCH * GOLD_ROWS)
+#define GOLD_ORIGIN_ROW      2
+#define GOLD_ORIGIN_COL      5
+#define GOLD_BG              0x77
+
+/* The two colour ranges.  Nothing in either reaches GOLD_BG. */
+#define GOLD_PLATE_COLOR(sprite) (0x80 + (sprite))
+#define GOLD_GLYPH_COLOR(sprite) ((sprite) + 1)
+
+/* The glyph slots the number drawer maps its characters onto (text.c): digits
+   are their own value, '+' is 10, '-' is 11 and '?' is 12. */
+#define GOLD_GLYPH_PLUS      10
+#define GOLD_GLYPH_MINUS     11
+#define GOLD_GLYPH_QUERY     12
+
+static unsigned char gold_cmd_sheet[GOLD_CMD_SHEET_BYTES];
+static unsigned char gold_num_sheet[GOLD_NUM_SHEET_BYTES];
+static unsigned char gold_surface[GOLD_SURFACE_BYTES];
+
+static void gold_build_sheet(unsigned char *sheet, int sprites, int table_at,
+                             int stream_at, int width, int height,
+                             int row_bytes, int color_base)
+{
+    struct fdps_cel_header *header;
+    int sprite;
+    int row;
+    int at;
+
+    header = (struct fdps_cel_header *) sheet;
+    header->magic[0] = 'C';
+    header->magic[1] = 'E';
+    header->magic[2] = 'L';
+    header->sprite_width = (short) width;
+    header->sprite_height = (short) height;
+    header->sprite_count = (short) sprites;
+
+    for (sprite = 0; sprite < sprites; sprite++) {
+        at = stream_at + sprite * height * row_bytes;
+        *(int *) (sheet + table_at + sprite * 4) = at;
+        for (row = 0; row < height; row++) {
+            sheet[at + row * row_bytes] = GOLD_FILL_CMD(width);
+            sheet[at + row * row_bytes + 1] =
+                (unsigned char) (color_base + sprite);
+        }
+    }
+}
+
+/* Both sheets, a background-filled surface and the purse the call will read. */
+static void gold_stage(int purse)
+{
+    memset(gold_cmd_sheet, 0, (size_t) GOLD_CMD_SHEET_BYTES);
+    memset(gold_num_sheet, 0, (size_t) GOLD_NUM_SHEET_BYTES);
+    memset(gold_surface, GOLD_BG, (size_t) GOLD_SURFACE_BYTES);
+
+    gold_build_sheet(gold_cmd_sheet, GOLD_CMD_SPRITES, GOLD_CMD_TABLE_AT,
+                     GOLD_CMD_STREAM_AT, GOLD_CMD_W, GOLD_CMD_H,
+                     GOLD_CMD_ROW_BYTES, 0x80);
+    gold_build_sheet(gold_num_sheet, GOLD_NUM_SPRITES, GOLD_NUM_TABLE_AT,
+                     GOLD_NUM_STREAM_AT, GOLD_NUM_W, GOLD_NUM_H,
+                     GOLD_NUM_ROW_BYTES, 1);
+
+    data_fdps_command_sprite_sheet_ptr = gold_cmd_sheet;
+    data_fdps_number_glyph_sheet_ptr = gold_num_sheet;
+    data_fdps_number_glyph_color_row = 0;
+    data_fdps_shared_party_total_gold = purse;
+}
+
+/* Put the two sheet pointers back the way a freshly started program has them,
+   for the reason vill_unstage gives: they hold blocks the game's own loaders
+   free, and leaving one pointing at a static here hands a later test a free of
+   storage that never came from the heap. */
+static void gold_unstage(void)
+{
+    data_fdps_command_sprite_sheet_ptr = NULL;
+    data_fdps_number_glyph_sheet_ptr = NULL;
+    data_fdps_shared_party_total_gold = 0;
+}
+
+/* One call, drawing at an origin that is not the surface's own corner so a case
+   can say the routine draws where it is pointed. */
+static void gold_draw(void)
+{
+    fdps_draw_party_gold(gold_surface + GOLD_ORIGIN_ROW * GOLD_PITCH
+                             + GOLD_ORIGIN_COL,
+                         GOLD_PITCH);
+}
+
+/* A pixel of the surface, addressed from the readout's own top-left corner. */
+static int gold_pixel(int row, int col)
+{
+    return (int) gold_surface[(GOLD_ORIGIN_ROW + row) * GOLD_PITCH
+                              + GOLD_ORIGIN_COL + col];
+}
+
+/* The colour standing in the top-left pixel of the figure's digit cell
+   `cell`, counting from the first digit. */
+static int gold_cell(int cell)
+{
+    return gold_pixel(GOLD_FIGURE_ROW, GOLD_FIGURE_COL + cell * GOLD_NUM_W);
+}
+
+/* Three sprites, 0x34 0x35 0x36, laid side by side one sprite width apart: the
+   loop runs i = 0..2 and passes dst + i * 0x19 and 0x34 + i, so the plate is 75
+   wide and 22 tall and each third of it identifies its own sprite. */
+static void gold_plate_is_three_sprites_side_by_side(void)
+{
+    gold_stage(0);
+    gold_draw();
+
+    CHECK_EQ(gold_pixel(0, 0), GOLD_PLATE_COLOR(GOLD_PLATE_FIRST));
+    CHECK_EQ(gold_pixel(0, GOLD_CMD_W - 1), GOLD_PLATE_COLOR(GOLD_PLATE_FIRST));
+    CHECK_EQ(gold_pixel(0, GOLD_CMD_W), GOLD_PLATE_COLOR(GOLD_PLATE_FIRST + 1));
+    CHECK_EQ(gold_pixel(0, GOLD_CMD_W * 2),
+             GOLD_PLATE_COLOR(GOLD_PLATE_FIRST + 2));
+    CHECK_EQ(gold_pixel(0, GOLD_PLATE_W - 1),
+             GOLD_PLATE_COLOR(GOLD_PLATE_FIRST + 2));
+    CHECK_EQ(gold_pixel(0, GOLD_PLATE_W), GOLD_BG);
+    CHECK_EQ(gold_pixel(GOLD_CMD_H - 1, 0),
+             GOLD_PLATE_COLOR(GOLD_PLATE_FIRST));
+    CHECK_EQ(gold_pixel(GOLD_CMD_H, 0), GOLD_BG);
+    gold_unstage();
+}
+
+/* dst is a parameter and nothing in the body is an absolute address, so the
+   readout begins exactly at the pointer it was handed and touches nothing in
+   front of it. */
+static void gold_readout_starts_where_it_is_pointed(void)
+{
+    gold_stage(0);
+    gold_draw();
+
+    CHECK_EQ((int) gold_surface[0], GOLD_BG);
+    CHECK_EQ(gold_pixel(-1, 0), GOLD_BG);
+    CHECK_EQ(gold_pixel(0, -1), GOLD_BG);
+    CHECK_EQ(gold_pixel(-1, -1), GOLD_BG);
+    gold_unstage();
+}
+
+/* The figure's corner is dst + pitch * 4 + 0x13 -- four rows down and nineteen
+   columns right -- and it is 6 by 8 per digit.  Every one of those neighbours
+   is still plate, which is the same assertion twice over: the offset is what it
+   is, and the plate went down first so the digits sit on top of it rather than
+   the other way round. */
+static void gold_figure_sits_four_rows_down_and_nineteen_right(void)
+{
+    gold_stage(11111111);
+    gold_draw();
+
+    CHECK_EQ(gold_cell(0), GOLD_GLYPH_COLOR(1));
+    CHECK_EQ(gold_pixel(GOLD_FIGURE_ROW - 1, GOLD_FIGURE_COL),
+             GOLD_PLATE_COLOR(GOLD_PLATE_FIRST));
+    CHECK_EQ(gold_pixel(GOLD_FIGURE_ROW, GOLD_FIGURE_COL - 1),
+             GOLD_PLATE_COLOR(GOLD_PLATE_FIRST));
+    CHECK_EQ(gold_pixel(GOLD_FIGURE_ROW + GOLD_NUM_H - 1, GOLD_FIGURE_COL),
+             GOLD_GLYPH_COLOR(1));
+    CHECK_EQ(gold_pixel(GOLD_FIGURE_ROW + GOLD_NUM_H, GOLD_FIGURE_COL),
+             GOLD_PLATE_COLOR(GOLD_PLATE_FIRST));
+    gold_unstage();
+}
+
+/* Eight digits of the purse, most significant first, and nothing in a ninth
+   cell.  The ninth cell falls inside the plate's third sprite, so the value
+   there also says the figure did not run on past its field. */
+static void gold_figure_is_the_purse_digit_by_digit(void)
+{
+    gold_stage(12345678);
+    gold_draw();
+
+    CHECK_EQ(gold_cell(0), GOLD_GLYPH_COLOR(1));
+    CHECK_EQ(gold_cell(1), GOLD_GLYPH_COLOR(2));
+    CHECK_EQ(gold_cell(2), GOLD_GLYPH_COLOR(3));
+    CHECK_EQ(gold_cell(3), GOLD_GLYPH_COLOR(4));
+    CHECK_EQ(gold_cell(4), GOLD_GLYPH_COLOR(5));
+    CHECK_EQ(gold_cell(5), GOLD_GLYPH_COLOR(6));
+    CHECK_EQ(gold_cell(6), GOLD_GLYPH_COLOR(7));
+    CHECK_EQ(gold_cell(7), GOLD_GLYPH_COLOR(8));
+    CHECK_EQ(gold_cell(GOLD_FIGURE_DIGITS),
+             GOLD_PLATE_COLOR(GOLD_PLATE_FIRST + 2));
+    gold_unstage();
+}
+
+/* PUSH 0x8 makes the field eight wide and the padding is drawn as real zero
+   glyphs rather than skipped, so a small purse still fills all eight cells. */
+static void gold_field_is_eight_digits_zero_padded(void)
+{
+    gold_stage(7);
+    gold_draw();
+
+    CHECK_EQ(gold_cell(0), GOLD_GLYPH_COLOR(0));
+    CHECK_EQ(gold_cell(1), GOLD_GLYPH_COLOR(0));
+    CHECK_EQ(gold_cell(2), GOLD_GLYPH_COLOR(0));
+    CHECK_EQ(gold_cell(3), GOLD_GLYPH_COLOR(0));
+    CHECK_EQ(gold_cell(4), GOLD_GLYPH_COLOR(0));
+    CHECK_EQ(gold_cell(5), GOLD_GLYPH_COLOR(0));
+    CHECK_EQ(gold_cell(6), GOLD_GLYPH_COLOR(0));
+    CHECK_EQ(gold_cell(7), GOLD_GLYPH_COLOR(7));
+    gold_unstage();
+}
+
+/* XOR EAX,EAX / PUSH EAX is show_plus, so the figure never carries a leading
+   '+' and no cell of the field ever holds the '+' glyph. */
+static void gold_figure_carries_no_leading_plus(void)
+{
+    int cell;
+    int plus_cells;
+
+    gold_stage(7);
+    gold_draw();
+
+    plus_cells = 0;
+    for (cell = 0; cell < GOLD_FIGURE_DIGITS; cell++) {
+        if (gold_cell(cell) == GOLD_GLYPH_COLOR(GOLD_GLYPH_PLUS)) {
+            plus_cells++;
+        }
+    }
+    CHECK_EQ(plus_cells, 0);
+    CHECK_EQ(gold_cell(0), GOLD_GLYPH_COLOR(0));
+    gold_unstage();
+}
+
+/* The eight-digit field holds a purse up to 99,999,999.  One gold more is not
+   truncated and does not widen the field: the number drawer replaces it with
+   eight '?' glyphs, so an overflowing purse is visibly unreadable rather than
+   quietly wrong. */
+static void gold_purse_past_the_field_becomes_question_marks(void)
+{
+    gold_stage(99999999);
+    gold_draw();
+    CHECK_EQ(gold_cell(0), GOLD_GLYPH_COLOR(9));
+    CHECK_EQ(gold_cell(7), GOLD_GLYPH_COLOR(9));
+
+    gold_stage(100000000);
+    gold_draw();
+    CHECK_EQ(gold_cell(0), GOLD_GLYPH_COLOR(GOLD_GLYPH_QUERY));
+    CHECK_EQ(gold_cell(3), GOLD_GLYPH_COLOR(GOLD_GLYPH_QUERY));
+    CHECK_EQ(gold_cell(7), GOLD_GLYPH_COLOR(GOLD_GLYPH_QUERY));
+    CHECK_EQ(gold_cell(GOLD_FIGURE_DIGITS),
+             GOLD_PLATE_COLOR(GOLD_PLATE_FIRST + 2));
+    gold_unstage();
+}
+
+/* The purse is signed and really can go below zero -- the revival charge is
+   subtracted before it is tested (gamedata.h) -- and it reaches the drawer as a
+   signed value.  The overflow guard is a signed compare, so a negative never
+   trips it: -1 draws its sign and then eight padded digits, nine cells in all,
+   rather than the eight '?' an unsigned reading would give. */
+static void gold_negative_purse_draws_its_sign(void)
+{
+    gold_stage(-1);
+    gold_draw();
+
+    CHECK_EQ(gold_cell(0), GOLD_GLYPH_COLOR(GOLD_GLYPH_MINUS));
+    CHECK_EQ(gold_cell(1), GOLD_GLYPH_COLOR(0));
+    CHECK_EQ(gold_cell(7), GOLD_GLYPH_COLOR(0));
+    CHECK_EQ(gold_cell(8), GOLD_GLYPH_COLOR(1));
+    gold_unstage();
+}
+
+/* The amount is not an argument: PUSH dword ptr [0x000643a4] reads the shared
+   global at the moment of the call, so a second call after the purse has
+   changed redraws the new figure over the old one. */
+static void gold_reads_the_purse_at_the_time_of_the_call(void)
+{
+    gold_stage(1);
+    gold_draw();
+    CHECK_EQ(gold_cell(7), GOLD_GLYPH_COLOR(1));
+
+    data_fdps_shared_party_total_gold = 2;
+    gold_draw();
+    CHECK_EQ(gold_cell(7), GOLD_GLYPH_COLOR(2));
+    CHECK_EQ(gold_cell(6), GOLD_GLYPH_COLOR(0));
+    gold_unstage();
+}
+
+/* pitch is what both steps space their rows by: the plate's rows step by it and
+   the figure's corner is dst + pitch * 4.  Drawn at a pitch of 80 into the same
+   storage, every landmark moves with it. */
+static void gold_spaces_its_rows_by_the_pitch(void)
+{
+    int narrow_pitch;
+
+    narrow_pitch = 80;
+    gold_stage(90000000);
+    fdps_draw_party_gold(gold_surface, narrow_pitch);
+
+    CHECK_EQ((int) gold_surface[0], GOLD_PLATE_COLOR(GOLD_PLATE_FIRST));
+    CHECK_EQ((int) gold_surface[narrow_pitch + GOLD_CMD_W],
+             GOLD_PLATE_COLOR(GOLD_PLATE_FIRST + 1));
+    CHECK_EQ((int) gold_surface[(GOLD_CMD_H - 1) * narrow_pitch],
+             GOLD_PLATE_COLOR(GOLD_PLATE_FIRST));
+    CHECK_EQ((int) gold_surface[GOLD_FIGURE_ROW * narrow_pitch
+                                + GOLD_FIGURE_COL],
+             GOLD_GLYPH_COLOR(9));
+    CHECK_EQ((int) gold_surface[(GOLD_FIGURE_ROW - 1) * narrow_pitch
+                                + GOLD_FIGURE_COL],
+             GOLD_PLATE_COLOR(GOLD_PLATE_FIRST));
+    gold_unstage();
+}
+
 void run_village_tests(void)
 {
     RUN_TEST(village_secret_code_completes);
@@ -1816,4 +2185,15 @@ void run_village_tests(void)
     RUN_TEST(menu_marker_comes_from_the_members_first_cells);
     RUN_TEST(menu_steps_the_five_dac_entries);
     RUN_TEST(menu_frees_the_sheet_and_every_page);
+
+    RUN_TEST(gold_plate_is_three_sprites_side_by_side);
+    RUN_TEST(gold_readout_starts_where_it_is_pointed);
+    RUN_TEST(gold_figure_sits_four_rows_down_and_nineteen_right);
+    RUN_TEST(gold_figure_is_the_purse_digit_by_digit);
+    RUN_TEST(gold_field_is_eight_digits_zero_padded);
+    RUN_TEST(gold_figure_carries_no_leading_plus);
+    RUN_TEST(gold_purse_past_the_field_becomes_question_marks);
+    RUN_TEST(gold_negative_purse_draws_its_sign);
+    RUN_TEST(gold_reads_the_purse_at_the_time_of_the_call);
+    RUN_TEST(gold_spaces_its_rows_by_the_pitch);
 }

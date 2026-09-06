@@ -131,4 +131,32 @@ extern void fdps_village_signboard_menu(unsigned char *background,
                                         int *selection);
 #pragma aux fdps_village_signboard_menu "*" parm caller [];
 
+/* Draws the party's gold readout: a three-sprite plate out of the Command.cel
+   UI sheet with the purse painted over it as an eight-digit figure.  `dst` is
+   the readout's top-left corner in an 8bpp destination surface whose rows are
+   `pitch` bytes apart.
+
+   The two overlap by design.  The plate is 75 by 22 pixels -- three 25 by 22
+   sprites side by side -- and the figure starts 4 rows down and 19 columns
+   right of its corner and runs 48 by 8, so it lands wholly inside the plate:
+   the plate has to be drawn first and the digits go on top of it.
+
+   The amount is not an argument: it is read from
+   data_fdps_shared_party_total_gold at the moment of the call, so a screen that
+   has just charged or paid the player refreshes the figure by calling here
+   again.  The field is a fixed eight digits with no leading '+', and a purse of
+   100,000,000 or more comes out as eight '?' glyphs rather than as a number
+   (fdps_draw_number, text.h).
+
+   The caption comes out of the global Command.cel sheet, so
+   data_fdps_command_sprite_sheet_ptr has to be loaded, and the figure out of
+   the global Number.cel sheet in the colour row
+   data_fdps_number_glyph_color_row currently names.  Nothing here is checked.
+
+   Every one of the seven village and shop screens that calls it passes the same
+   place -- 0xa8208 with pitch 0x140, column 8 and row 104 of the mode-13h
+   screen -- but the routine itself draws wherever it is pointed. */
+extern void fdps_draw_party_gold(unsigned char *dst, int pitch);
+#pragma aux fdps_draw_party_gold "*" parm caller [];
+
 #endif

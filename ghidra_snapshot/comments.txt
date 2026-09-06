@@ -8498,7 +8498,9 @@ Alignment padding: multi-byte NOP forms lea eax,[eax+0] and lea edx,[edx+0]
 Draws the party's gold readout: the three-sprite caption of the Command.cel UI sheet, followed by the current gold amount as an eight-digit figure.
 
 Algorithm:
-Loops i from 0 to 2 and calls fdps_blit_command_sprite(dst + i * 0x19, pitch, 0x34 + i), laying caption sprites 0x34, 0x35 and 0x36 of the global Command.cel sheet side by side; the 0x19 step is one sprite width (the sheet's sprites are 25x22). Then calls FUN_00017530(dst + pitch * 4 + 0x13, pitch, DAT_000643a4, 8, 0), which formats the party gold global at 000643a4 into a decimal string padded to a fixed field of 8 digits (that routine fills the field with '?' instead when the value needs more) and draws it as a run of 6x8 digit glyphs, starting 4 scanlines below and 0x13 = 19 pixels right of the caption's top-left corner, with no leading '+'.
+Loops i from 0 to 2 and calls fdps_blit_command_sprite(dst + i * 0x19, pitch, 0x34 + i), laying caption sprites 0x34, 0x35 and 0x36 of the global Command.cel sheet side by side; the 0x19 step is one sprite width (the sheet's sprites are 25x22). Then calls fdps_draw_number(dst + pitch * 4 + 0x13, pitch, data_fdps_shared_party_total_gold, 8, 0), which formats the party gold global at 000643a4 into a decimal string padded to a fixed field of 8 digits (that routine fills the field with '?' instead when the value needs more) and draws it as a run of 6x8 digit glyphs, starting 4 scanlines below and 0x13 = 19 pixels right of the caption's top-left corner, with no leading '+'.
+
+The figure lands wholly INSIDE the caption plate: the plate is 75x22 (three 25x22 sprites side by side) and the figure's 48x8 field starts at +4 rows, +19 columns. The order of the two drawing steps is therefore load-bearing rather than incidental -- the plate must be blitted first and the digits drawn over it, or the digits are painted away.
 
 Parameters:
   dst -- top-left corner of the readout in an 8bpp destination surface. Every call site passes the literal 0xa8208, i.e. column 8, row 104 of the mode-13h VGA screen.

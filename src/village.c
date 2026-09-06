@@ -26,6 +26,7 @@
 #include "cdaudio.h"
 #include "keybd.h"
 #include "sprite.h"
+#include "text.h"
 #include "vfs.h"
 #include "village.h"
 
@@ -586,6 +587,63 @@ void fdps_village_animate_walk_to_destination(unsigned char *background,
         last_tick = data_fdps_timer_tick_counter;
         free(page);
     }
+}
+
+/* The gold readout's plate is sprites 0x34, 0x35 and 0x36 of the Command.cel
+   sheet laid side by side: MOV EAX,[EBP-0x4] / ADD EAX,0x34 at 00032393 picks
+   the sprite and IMUL EAX,dword ptr [EBP + -0x4],0x19 at 0003239e steps the
+   destination by one sprite width, the same 0x19 fdps_blit_command_sprite
+   publishes as its width (sprite.h).  Three of them -- CMP dword ptr [EBP +
+   -0x4],0x3 / JL at 00032383, a signed compare over a signed counter. */
+#define GOLD_CAPTION_FIRST_SPRITE 0x34
+#define GOLD_CAPTION_SPRITES 3
+#define GOLD_CAPTION_SPRITE_WIDTH 0x19
+
+/* Where the figure sits relative to the caption's top-left corner, and how wide
+   its field is: LEA EAX,[EAX*0x4 + 0x0] over the pitch at 000323c2 puts it four
+   scanlines down, ADD EAX,0x13 at 000323cc nineteen pixels right, and PUSH 0x8
+   at 000323b3 gives fdps_draw_number an eight-digit field.  Eight digits is a
+   purse of up to 99,999,999; a larger one is drawn as eight '?' glyphs instead,
+   which is fdps_draw_number's own overflow behaviour (text.h) and not something
+   this function tests for. */
+#define GOLD_FIGURE_ROWS_DOWN 4
+#define GOLD_FIGURE_COLUMNS_RIGHT 0x13
+#define GOLD_FIGURE_DIGITS 8
+
+/* 00032370.  Draws the party's gold readout: the three-sprite plate first, then
+   the purse as an eight-digit figure painted over it.  The figure's corner is
+   inside the plate -- 4 rows down and 19 columns right of a 75 by 22 plate, and
+   48 by 8 itself -- so the order the two are drawn in is what makes the digits
+   visible.
+
+   The purse is not an argument -- PUSH dword ptr [0x000643a4] at 000323b5 reads
+   the shared global directly -- so every caller draws whatever the global holds
+   at that moment, and a shop that has just charged the player redraws by
+   calling here again.  It is signed and can be negative (gamedata.h), in which
+   case the field's minus sign eats one of the eight digit positions.
+
+   XOR EAX,EAX / PUSH EAX at 000323b0 is the show_plus argument: the figure
+   never carries a leading '+'.
+
+   `dst` is the readout's top-left corner in an 8bpp destination surface and
+   `pitch` its bytes per row.  All seventeen call sites pass the literal 0xa8208
+   and 0x140, i.e. column 8, row 104 of the mode-13h screen, but neither is
+   hard-coded here and the routine draws wherever it is pointed. */
+void fdps_draw_party_gold(unsigned char *dst, int pitch)
+{
+    int caption_index;
+
+    for (caption_index = 0; caption_index < GOLD_CAPTION_SPRITES;
+         caption_index++) {
+        fdps_blit_command_sprite(dst + caption_index * GOLD_CAPTION_SPRITE_WIDTH,
+                                 pitch,
+                                 GOLD_CAPTION_FIRST_SPRITE + caption_index);
+    }
+
+    fdps_draw_number(dst + pitch * GOLD_FIGURE_ROWS_DOWN
+                         + GOLD_FIGURE_COLUMNS_RIGHT,
+                     pitch, data_fdps_shared_party_total_gold,
+                     GOLD_FIGURE_DIGITS, 0);
 }
 
 /* 000357a0.  One keystroke of the chapter's secret-shop unlock code.

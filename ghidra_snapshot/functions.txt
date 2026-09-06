@@ -306,7 +306,7 @@
 00031920 | 0x292 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_blit_rotated_scaled(uchar * dst, uchar * src, int camera_height, float tilt, int center_x, int center_y, float rotation)
 00031bc0 | 0x399 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_menu | void __cdecl fdps_village_signboard_menu(uchar * background, int * selection)
 00031f60 | 0x406 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_village_animate_walk_to_destination(uchar * background, int from_destination, int to_destination, fdps_cel_header * signboard_cel)
-00032370 | 0x6f | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_draw_party_gold(void * dst, int pitch)
+00032370 | 0x6f | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_draw_party_gold(undefined1 * dst, int pitch)
 000323e0 | 0xe9 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | int __cdecl fdps_menu_command_icon_select_loop(int * icon_ids, int icon_count, int * selected_index)
 000324d0 | 0xa0 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_menu_draw_command_icons(int * icon_ids, int icon_count, int selected_index)
 00032570 | 0x192 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps,shared_helper | void __cdecl fdps_village_animate_window_zoom(void * screen_page, uchar closing)

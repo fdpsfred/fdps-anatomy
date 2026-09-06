@@ -2820,6 +2820,14 @@
       "status": "committed",
       "emitted_against": "0x399",
       "rounds": 1
+    },
+    "00032370": {
+      "name": "fdps_draw_party_gold",
+      "target": "village.c",
+      "body_size": "0x6f",
+      "status": "committed",
+      "emitted_against": "0x6f",
+      "rounds": 0
     }
   }
 }
