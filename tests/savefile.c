@@ -6,6 +6,31 @@
  * both loops closed by LOOP -- and from the shipped FDE.SAV itself.  None of
  * them is read off the emitted C.
  *
+ * fdps_load_savegame at 00023e20 is covered at the end of the file and NO CASE
+ * CALLS IT.  Three of the four things it does on the way out are unbounded in
+ * an unattended run: fdps_render_view_frame holds on
+ * data_fdps_view_frame_last_tick until the timer moves, the "PlyPhase.saf"
+ * banner holds the same way once per fade step and once per frame, and
+ * fdps_cd_verify_disc_and_play_track has no exit but the right disc -- a
+ * machine without the image reaches a modal getch nothing comes back from
+ * (cdaudio.h).  Reaching them at all first needs the whole game up:
+ * fdps_load_global_resources for the sheets and the font the view frame draws
+ * through, and a chapter's field resources for the scene it composes from.
+ * What that costs is not the reason no case calls it -- the reason is that the
+ * result would be a cover that stands down on any machine without the disc
+ * mounted, and that installing a whole battle over the live globals would
+ * leave every test unit sorting after this one reading state this one wrote.
+ * Confirming the installed battle is a playtest (ADR-0003) and is recorded as
+ * such in the emit issues.
+ *
+ * WHAT THE CASES BELOW DO INSTEAD is hold the loader's map of the file against
+ * the file itself.  Every offset it reads is one fdps_battle_system_submenu
+ * writes with the same literal -- ADD EAX,0x8a3 at 00015177 and 00023f09, ADD
+ * EAX,0x12a3 at 00015196 and 00024043, ADD EAX,0x30a3 at 000151af and
+ * 0002405c, ADD EAX,0x30c3 at 000151c0 and 00023ea8 -- so the two sides of the
+ * contract are checkable against a save the game actually wrote, and a wrong
+ * offset or a wrong stride reads bytes that cannot pass.
+ *
  * The checksum's buffers are staged here rather than read from a game file
  * because that function takes its entire input from its two arguments: it
  * reads no global and opens nothing.  The cipher is the routine that makes the
@@ -16,6 +41,9 @@
  * game wrote, and neither routine can be wrong for it to hold.
  */
 #include <stdio.h>
+#include <stddef.h>
+#include "fdpstype.h"
+#include "gamedata.h"
 #include "testharn.h"
 #include "savefile.h"
 
@@ -286,6 +314,336 @@ static void the_shipped_save_decrypts_to_its_own_checksum(void)
              stored_checksum);
 }
 
+/* ------------------------------------------------------- fdps_load_savegame
+
+   The first 0x312b bytes of the image are the battle resume region, and every
+   number below is one of the loader's own displacements read off the assembly:
+   the four ADD EAX,<offset> at 00023f09, 00024043, 0002405c and 00023ea8 for
+   where the blocks start, PUSH 0xa00 at 00023f01, PUSH 0x1e00 at 00024005,
+   PUSH 0x20 at 00024057 and PUSH 0x8a3 at 00023f70 for how long they are, and
+   IMUL ...,0x50 at 00024038 for the unit stride.  fdps_battle_system_submenu
+   writes the same file with the same displacements, which is what makes them a
+   contract rather than one function's opinion. */
+#define RESUME_FIELD_BLOCK_AT 0x0000L
+#define RESUME_FIELD_BLOCK_BYTES 0x08a3L
+#define RESUME_ROSTER_AT 0x08a3L
+#define RESUME_ROSTER_BYTES 0x0a00L
+#define RESUME_UNITS_AT 0x12a3L
+#define RESUME_UNITS_BYTES 0x1e00L
+#define RESUME_UNIT_STRIDE 0x50L
+#define RESUME_FLAGS_AT 0x30a3L
+#define RESUME_FLAGS_BYTES 0x20L
+#define RESUME_HEADER_AT 0x30c3L
+
+/* Where the four slot records begin, ADD EDX,0x312b at 00024929 in save.c's
+   half of the file: the resume region has to end before it. */
+#define SAVE_SLOTS_AT 0x312bL
+
+/* The offsets inside the scalar header, from the MOV AL,byte ptr [EAX + n]
+   chain at 00024105, 00023ff8, 00023f50, 00024114, 00024127, 0002413a,
+   0002414d, 00024160, 00024170, 0002417b, 00024186, 00024191 and 0002419c. */
+#define AT_TURN 0x00
+#define AT_UNIT_COUNT 0x01
+#define AT_CHAPTER 0x02
+#define AT_VIEW_TILE_X 0x03
+#define AT_VIEW_TILE_Y 0x04
+#define AT_CURSOR_TILE_X 0x05
+#define AT_CURSOR_TILE_Y 0x06
+#define AT_ROSTER_MEMBERS 0x09
+#define AT_PARTY_GOLD 0x0a
+#define AT_BATTLE_ANIM 0x0e
+#define AT_TERRAIN_HUD 0x0f
+#define AT_BGM 0x10
+#define AT_SFX 0x11
+
+/* Inside the field block, from MOV AL,byte ptr [EAX + 0x1] at 00023fbf and
+   [EAX + 0x2] at 00023fd1. */
+#define AT_PLAYER_SLOT_COUNT 0x01
+#define AT_CHAR_SPAWN_COUNT 0x02
+
+/* Inside a unit record: byte 2 is the sprite cache slot the loader overwrites
+   with what fdps_cache_cel_sprite_group hands back, byte 7 is the group id it
+   asks for.  MOV AL,byte ptr [EAX + 0x7] at 000240d4 and MOV byte ptr
+   [EDX + 0x2],AL at 000240f1; the same two bytes are sprite_cache_slot and
+   portrait_id of struct fdps_unit_record. */
+#define AT_UNIT_SPRITE_SLOT 0x02
+#define AT_UNIT_GROUP_ID 0x07
+
+/* IMUL EAX,EAX,0x18 behind each of the four coordinate reads. */
+#define RESUME_TILE_SIZE 0x18
+
+/* ICON.CEL holds 1920 sprites in 160 groups of twelve (tests/gamefile.lst), so
+   a group id past 159 is one the sheet has no offset table entry for. */
+#define ICON_CEL_GROUP_COUNT 160
+
+/* What the shipped FDE.SAV's resume region holds, read out of the file: turn
+   10 of chapter 0, twenty-three units on the field, the view origin at tile
+   (10, 6) and the cursor at tile (17, 11), one enrolled party member, 600 gold
+   and all four options on.  These are the file's bytes and not the emitted C's
+   idea of them. */
+#define SHIPPED_TURN 10
+#define SHIPPED_UNIT_COUNT 23
+#define SHIPPED_CHAPTER 0
+#define SHIPPED_VIEW_TILE_X 10
+#define SHIPPED_VIEW_TILE_Y 6
+#define SHIPPED_CURSOR_TILE_X 17
+#define SHIPPED_CURSOR_TILE_Y 11
+#define SHIPPED_ROSTER_MEMBERS 1
+#define SHIPPED_PARTY_GOLD 600L
+#define SHIPPED_BATTLE_ANIM 1
+#define SHIPPED_TERRAIN_HUD 1
+#define SHIPPED_BGM 1
+#define SHIPPED_SFX 1
+
+/* The two counts in the field block, and the group ids of the first and last
+   unit record.  The two counts are the file's own and they add up to the unit
+   count, which is what makes the pair worth asserting: the loader reads them
+   from a different block of the image than the count it compares against. */
+#define SHIPPED_PLAYER_SLOTS 1
+#define SHIPPED_CHAR_SPAWNS 22
+#define SHIPPED_FIRST_GROUP_ID 0
+#define SHIPPED_LAST_GROUP_ID 74
+
+/* The image, decrypted once and kept, so no case depends on what another one
+   did to it.  0 means not tried yet, 1 staged, -1 not staged. */
+static unsigned char resume_image[0x59cb];
+static int resume_staged;
+
+static int resume_image_is_staged(void)
+{
+    FILE *fp;
+    size_t got;
+
+    if (resume_staged != 0) {
+        return resume_staged > 0;
+    }
+    resume_staged = -1;
+    fp = fopen(SAVE_NAME, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    got = fread(resume_image, 1, (size_t) SAVE_IMAGE_SIZE, fp);
+    fclose(fp);
+    if (got != (size_t) SAVE_IMAGE_SIZE) {
+        return 0;
+    }
+    fdps_xor_crypt_buffer(resume_image, (unsigned int) SAVE_IMAGE_SIZE);
+    resume_staged = 1;
+    return 1;
+}
+
+static int resume_header_byte(long offset)
+{
+    return (int) resume_image[RESUME_HEADER_AT + offset];
+}
+
+/* The thirteen bytes the loader fans out into thirteen globals, each at the
+   displacement its own MOV AL carries.  A header read one byte off would move
+   every field after it, and no two neighbouring values here are equal. */
+static void the_header_holds_the_thirteen_scalars_the_loader_publishes(void)
+{
+    CHECK_EQ(resume_image_is_staged(), 1);
+    if (!resume_image_is_staged()) {
+        return;
+    }
+
+    CHECK_EQ(resume_header_byte(AT_TURN), SHIPPED_TURN);
+    CHECK_EQ(resume_header_byte(AT_UNIT_COUNT), SHIPPED_UNIT_COUNT);
+    CHECK_EQ(resume_header_byte(AT_CHAPTER), SHIPPED_CHAPTER);
+    CHECK_EQ(resume_header_byte(AT_VIEW_TILE_X), SHIPPED_VIEW_TILE_X);
+    CHECK_EQ(resume_header_byte(AT_VIEW_TILE_Y), SHIPPED_VIEW_TILE_Y);
+    CHECK_EQ(resume_header_byte(AT_CURSOR_TILE_X), SHIPPED_CURSOR_TILE_X);
+    CHECK_EQ(resume_header_byte(AT_CURSOR_TILE_Y), SHIPPED_CURSOR_TILE_Y);
+    CHECK_EQ(resume_header_byte(AT_ROSTER_MEMBERS), SHIPPED_ROSTER_MEMBERS);
+    CHECK_EQ(resume_header_byte(AT_BATTLE_ANIM), SHIPPED_BATTLE_ANIM);
+    CHECK_EQ(resume_header_byte(AT_TERRAIN_HUD), SHIPPED_TERRAIN_HUD);
+    CHECK_EQ(resume_header_byte(AT_BGM), SHIPPED_BGM);
+    CHECK_EQ(resume_header_byte(AT_SFX), SHIPPED_SFX);
+}
+
+/* +0x0a is a dword and not a byte, and it sits at an offset that is not
+   four-byte aligned.  600 needs two bytes, so a byte read would answer 88 and
+   a read from the wrong end of the dword would answer 2. */
+static void the_party_gold_is_an_unaligned_dword(void)
+{
+    unsigned long gold;
+
+    CHECK_EQ(resume_image_is_staged(), 1);
+    if (!resume_image_is_staged()) {
+        return;
+    }
+
+    gold = (unsigned long) resume_image[RESUME_HEADER_AT + AT_PARTY_GOLD]
+        | ((unsigned long) resume_image[RESUME_HEADER_AT + AT_PARTY_GOLD + 1]
+           << 8)
+        | ((unsigned long) resume_image[RESUME_HEADER_AT + AT_PARTY_GOLD + 2]
+           << 16)
+        | ((unsigned long) resume_image[RESUME_HEADER_AT + AT_PARTY_GOLD + 3]
+           << 24);
+
+    CHECK_EQ(gold, SHIPPED_PARTY_GOLD);
+    CHECK_EQ((RESUME_HEADER_AT + AT_PARTY_GOLD) & 3L, 1L);
+}
+
+/* The four coordinates are stored as tile indices and every global they land
+   in is in world pixels, IMUL EAX,EAX,0x18.  These are the four products the
+   loader publishes, computed here from the file's own bytes. */
+static void the_view_origin_and_cursor_are_tiles_scaled_by_twenty_four(void)
+{
+    CHECK_EQ(resume_image_is_staged(), 1);
+    if (!resume_image_is_staged()) {
+        return;
+    }
+
+    CHECK_EQ(resume_header_byte(AT_VIEW_TILE_X) * RESUME_TILE_SIZE, 240);
+    CHECK_EQ(resume_header_byte(AT_VIEW_TILE_Y) * RESUME_TILE_SIZE, 144);
+    CHECK_EQ(resume_header_byte(AT_CURSOR_TILE_X) * RESUME_TILE_SIZE, 408);
+    CHECK_EQ(resume_header_byte(AT_CURSOR_TILE_Y) * RESUME_TILE_SIZE, 264);
+}
+
+/* The loader takes the unit count out of the header at +0x30c4 and the two map
+   counts out of the field block at +0x0001 and +0x0002, three reads in two
+   different blocks of the image.  In the shipped save the two add up to the
+   one, which no wrong offset among the three can reproduce. */
+static void the_field_block_counts_add_up_to_the_unit_count(void)
+{
+    int player_slots;
+    int char_spawns;
+
+    CHECK_EQ(resume_image_is_staged(), 1);
+    if (!resume_image_is_staged()) {
+        return;
+    }
+
+    player_slots = (int) resume_image[RESUME_FIELD_BLOCK_AT
+                                      + AT_PLAYER_SLOT_COUNT];
+    char_spawns = (int) resume_image[RESUME_FIELD_BLOCK_AT
+                                     + AT_CHAR_SPAWN_COUNT];
+
+    CHECK_EQ(player_slots, SHIPPED_PLAYER_SLOTS);
+    CHECK_EQ(char_spawns, SHIPPED_CHAR_SPAWNS);
+    CHECK_EQ(player_slots + char_spawns, resume_header_byte(AT_UNIT_COUNT));
+}
+
+/* The five blocks are written end to end with nothing between them, and the
+   whole region ends before save.c's first slot record.  The malloc the loader
+   makes for the unit array is the whole 0x1e00 and the copy that follows is
+   count * 0x50, so the count the header carries has to fit -- 23 records is
+   0x730 bytes of the 0x1e00 taken. */
+static void the_resume_blocks_are_written_end_to_end(void)
+{
+    CHECK_EQ(resume_image_is_staged(), 1);
+    if (!resume_image_is_staged()) {
+        return;
+    }
+
+    CHECK_EQ(RESUME_FIELD_BLOCK_AT + RESUME_FIELD_BLOCK_BYTES,
+             RESUME_ROSTER_AT);
+    CHECK_EQ(RESUME_ROSTER_AT + RESUME_ROSTER_BYTES, RESUME_UNITS_AT);
+    CHECK_EQ(RESUME_UNITS_AT + RESUME_UNITS_BYTES, RESUME_FLAGS_AT);
+    CHECK_EQ(RESUME_FLAGS_AT + RESUME_FLAGS_BYTES, RESUME_HEADER_AT);
+    CHECK_EQ(RESUME_HEADER_AT + AT_SFX < SAVE_SLOTS_AT, 1);
+    CHECK_EQ(resume_header_byte(AT_UNIT_COUNT) * RESUME_UNIT_STRIDE,
+             0x730L);
+    CHECK_EQ(resume_header_byte(AT_UNIT_COUNT) * RESUME_UNIT_STRIDE
+             <= RESUME_UNITS_BYTES, 1);
+}
+
+/* The stride the loader walks the unit array at, checked against what the
+   records themselves say.  Every one of the twenty-three group ids the sheet
+   is asked for is inside the 160 groups ICON.CEL holds, which a stride other
+   than 0x50 or a field other than +7 does not survive: at a stride of 0x4f the
+   fourth record's byte 7 is already a level and not a group.  The first and
+   last are pinned exactly as well, so a walk that started or stopped in the
+   wrong place fails even if every byte it read happened to be small. */
+static void every_unit_record_names_a_group_the_sheet_holds(void)
+{
+    int unit_index;
+    int group_id;
+    int outside_the_sheet;
+
+    CHECK_EQ(resume_image_is_staged(), 1);
+    if (!resume_image_is_staged()) {
+        return;
+    }
+
+    outside_the_sheet = 0;
+    for (unit_index = 0; unit_index < SHIPPED_UNIT_COUNT; unit_index++) {
+        group_id = (int) resume_image[RESUME_UNITS_AT
+                                      + unit_index * RESUME_UNIT_STRIDE
+                                      + AT_UNIT_GROUP_ID];
+        if (group_id >= ICON_CEL_GROUP_COUNT) {
+            outside_the_sheet++;
+        }
+    }
+
+    CHECK_EQ(outside_the_sheet, 0);
+    CHECK_EQ((int) resume_image[RESUME_UNITS_AT + AT_UNIT_GROUP_ID],
+             SHIPPED_FIRST_GROUP_ID);
+    CHECK_EQ((int) resume_image[RESUME_UNITS_AT
+                                + (SHIPPED_UNIT_COUNT - 1)
+                                  * RESUME_UNIT_STRIDE
+                                + AT_UNIT_GROUP_ID],
+             SHIPPED_LAST_GROUP_ID);
+}
+
+/* The sprite cache slot the file carries is byte 2 of the record, and the
+   loader overwrites all twenty-three of them with the slots the fresh cache
+   hands out.  In the shipped save the slots run 0,1,2,1,1,1... -- a value that
+   repeats, which is what says the field is a cache slot shared by units of the
+   same group and not a per-unit index.  The case pins the first three so that
+   a record layout with byte 2 somewhere else fails here as well as above. */
+static void the_sprite_cache_slot_is_byte_two_of_the_record(void)
+{
+    CHECK_EQ(resume_image_is_staged(), 1);
+    if (!resume_image_is_staged()) {
+        return;
+    }
+
+    CHECK_EQ((int) resume_image[RESUME_UNITS_AT + AT_UNIT_SPRITE_SLOT], 0);
+    CHECK_EQ((int) resume_image[RESUME_UNITS_AT + RESUME_UNIT_STRIDE
+                                + AT_UNIT_SPRITE_SLOT], 1);
+    CHECK_EQ((int) resume_image[RESUME_UNITS_AT + 2 * RESUME_UNIT_STRIDE
+                                + AT_UNIT_SPRITE_SLOT], 2);
+    CHECK_EQ(offsetof(struct fdps_unit_record, sprite_cache_slot),
+             AT_UNIT_SPRITE_SLOT);
+    CHECK_EQ(offsetof(struct fdps_unit_record, portrait_id),
+             AT_UNIT_GROUP_ID);
+    CHECK_EQ(sizeof(struct fdps_unit_record), RESUME_UNIT_STRIDE);
+}
+
+/* The 0x20 bytes the loader copies straight into
+   data_fdps_map_cell_event_triggered_flags, which is declared as exactly 32
+   bytes: the copy fills the array and does not reach past it (contract H in
+   rebuild_info/emit_pipeline.md).  All thirty-two are clear in the shipped
+   save, and the byte on either side of the block is checked so that a copy
+   taken one byte early or late shows up -- 0x30a2 is the last unit record's
+   tail and 0x30c3 is the turn counter. */
+static void the_triggered_flags_block_is_thirty_two_clear_bytes(void)
+{
+    int index;
+    int set_flags;
+
+    CHECK_EQ(resume_image_is_staged(), 1);
+    if (!resume_image_is_staged()) {
+        return;
+    }
+
+    set_flags = 0;
+    for (index = 0; index < (int) RESUME_FLAGS_BYTES; index++) {
+        if (resume_image[RESUME_FLAGS_AT + index] != 0) {
+            set_flags++;
+        }
+    }
+
+    CHECK_EQ(set_flags, 0);
+    CHECK_EQ(sizeof(data_fdps_map_cell_event_triggered_flags),
+             RESUME_FLAGS_BYTES);
+    CHECK_EQ((int) resume_image[RESUME_FLAGS_AT - 1] != 0, 1);
+    CHECK_EQ((int) resume_image[RESUME_FLAGS_AT + RESUME_FLAGS_BYTES],
+             SHIPPED_TURN);
+}
+
 void run_savefile_tests(void)
 {
     RUN_TEST(trailing_four_bytes_are_not_summed);
@@ -299,4 +657,12 @@ void run_savefile_tests(void)
     RUN_TEST(crypting_twice_restores_the_buffer);
     RUN_TEST(the_length_is_a_byte_count);
     RUN_TEST(the_shipped_save_decrypts_to_its_own_checksum);
+    RUN_TEST(the_header_holds_the_thirteen_scalars_the_loader_publishes);
+    RUN_TEST(the_party_gold_is_an_unaligned_dword);
+    RUN_TEST(the_view_origin_and_cursor_are_tiles_scaled_by_twenty_four);
+    RUN_TEST(the_field_block_counts_add_up_to_the_unit_count);
+    RUN_TEST(the_resume_blocks_are_written_end_to_end);
+    RUN_TEST(every_unit_record_names_a_group_the_sheet_holds);
+    RUN_TEST(the_sprite_cache_slot_is_byte_two_of_the_record);
+    RUN_TEST(the_triggered_flags_block_is_thirty_two_clear_bytes);
 }

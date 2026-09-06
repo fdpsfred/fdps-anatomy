@@ -2032,5 +2032,20 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "00023e20": [
+    {
+      "from": "emit",
+      "what": "No test invokes fdps_load_savegame, so nothing automated confirms that the battle it installs is the battle the file holds -- the roster block landing at data_fdps_roster_array_ptr, the unit array at data_fdps_map_unit_array_ptr with each record's byte 2 replaced by the slot fdps_cache_cel_sprite_group hands back, the field block at data_fdps_tile_event_data_table_ptr, and the thirteen scalars. What IS established: the offsets, lengths and stride the function reads are asserted against the shipped FDE.SAV and are the same literals fdps_battle_system_submenu writes it with (00015177/00023f09, 00015196/00024043, 000151af/0002405c, 000151c0/00023ea8); the emitted object was disassembled with WDISASM and matches the original instruction for instruction over the whole body apart from the redundant MOV EAX before the loop's INC, the cached record pointer in the loop body and the resulting 8-byte-larger frame; and the checksum and cipher the load path depends on are covered end to end against the same file elsewhere in tests/savefile.c. What blocks the call is not effort: the tail is unbounded unattended -- fdps_render_view_frame waits on data_fdps_view_frame_last_tick, the PlyPhase.saf banner waits per fade step and per frame, and fdps_cd_verify_disc_and_play_track has no way out but the right disc in the drive -- and a call would install a whole battle over the live globals that every test unit sorting after savefile then reads.",
+      "needs": "A human playtest in DOSBox-X with the disc mounted (ADR-0003): save mid-battle from the in-battle system submenu, leave to the title screen, take Continue, and confirm the same units stand on the same tiles with the same HP, the cursor and the view window are where they were, the turn number, party gold and the four option toggles are unchanged, and the chapter's field music starts. Alternatively an automated cover would need a fixture that runs fdps_load_global_resources for the sheets and font, installs a timer ISR on vector 8, requires E:\\\\Pack.vfs and a Pass.Dat naming disc 1, and snapshots and restores all twenty-one globals the call writes -- which would still stand down on any machine without the disc image.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached the same conclusion independently and agree it is genuinely unsettleable here rather than a lookup nobody did: the tail is three unbounded waits and the call clobbers twenty-one live globals, so there is no honest automated cover short of a playtest. What my pass adds is the one piece of evidence the emitter's argument rests on and had only asserted -- that hoisting the array base out of the loop is safe. I read the whole of fdps_cache_cel_sprite_group at 00023050 and it writes [0x00064060], [0x00060138], [0x00069cf0] and [0x0006411c] and never [0x00069cd8], so the emitted C's single read of data_fdps_map_unit_array_ptr is the same address as the original's reload at 000240e9. I also re-derived every SHIPPED_* constant by decrypting the shipped FDE.SAV myself from the cipher at 000568b7, so the file-layout half of the cover stands on its own.",
+      "needs": "The playtest the emitter describes: save mid-battle from the in-battle system submenu, leave to the title screen, take Continue with the disc mounted, and confirm the units, tiles, HP, cursor, view window, turn number, gold and four toggles all come back and the chapter's field music starts.",
+      "status": "open",
+      "same_as": "emit#0"
+    }
   ]
 }
