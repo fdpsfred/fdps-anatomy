@@ -2759,6 +2759,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x639"
+    },
+    "0002e640": {
+      "name": "fdps_cel_expand_sheet_24x24",
+      "target": "sprite.c",
+      "body_size": "0xce",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0xce"
     }
   }
 }

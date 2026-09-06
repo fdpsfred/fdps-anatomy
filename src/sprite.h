@@ -2,7 +2,9 @@
  * one composite sprite; and the four .CEL drawers, the general one every UI
  * screen blits through and three that each know one sheet -- the Command.cel
  * UI sheet, a battle-map unit's walk sprite and a piece of the Cusor.cel
- * map-cursor outline kit.
+ * map-cursor outline kit.  One .CEL consumer sits alongside them:
+ * fdps_cel_expand_sheet_24x24 unpacks the loaded map tile sheet into a flat
+ * array of 24 by 24 pixel blocks for the battlefield overview screen.
  *
  * A .SAF holds an animation's material in four sections -- frames, tilemaps,
  * tiles and sounds -- and drawing anything out of one is three nested walks:
@@ -313,5 +315,36 @@ extern void fdps_cel_blit_sprite(unsigned char *cel_sheet, int sprite_index,
                                  unsigned int mode_operand,
                                  unsigned char blit_mode);
 #pragma aux fdps_cel_blit_sprite "*" parm caller [];
+
+/* Unpacks every sprite of the loaded map tile sheet,
+   data_fdps_scene_layer_tile_sheet_ptrs[0], into one freshly allocated block
+   of uncompressed 24 by 24 pixel tiles and hands that block to the caller,
+   who owns it and frees it.  It takes nothing and reads no other global.
+
+   The block is a six-byte header -- three i16, the tile width 24, the tile
+   height 24 and the tile count -- followed by the tiles themselves, count of
+   them, each a contiguous 576 bytes with no padding and no stride other than
+   its own 24 columns.  Tile n therefore begins at block + 6 + n * 576, which
+   is the address its one caller, fdps_battle_map_overview, builds by hand for
+   every cell of the map: the overview renderer wants a plain pixel block per
+   tile, and a .CEL's RLE streams are not that.
+
+   THE HEADER IS WRITTEN AND NEVER READ.  The only caller steps past it with
+   its own literal 6 and takes the tile count from the map header instead, so
+   the three fields are the format's own record of itself and nothing in the
+   shipped game consults them.
+
+   THE TILE COUNT IS THE SHEET'S, SIGNED.  It comes from the .CEL header's
+   i16 sprite_count at +0x0b (MOVSX at 0002e651), so it decides both the size
+   of the allocation and how many tiles are expanded; the sheet's width and
+   height fields are not consulted at all and the 24 by 24 geometry is
+   hard-coded, which is why this is the map tile sheet's expander and not a
+   general one.
+
+   IT DOES NOT RETURN NULL.  A failed allocation prints "Out of memory at
+   rease shape !!!" -- the typo is the original's -- and calls exit(1), so
+   there is no failure the caller can be handed and none to test for. */
+extern unsigned char *fdps_cel_expand_sheet_24x24(void);
+#pragma aux fdps_cel_expand_sheet_24x24 "*" parm caller [];
 
 #endif

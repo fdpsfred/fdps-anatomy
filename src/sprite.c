@@ -2,7 +2,11 @@
  * one composite sprite; and the four .CEL drawers, the general one every UI
  * screen blits through and three that each know one sheet -- the Command.cel
  * UI sheet, a battle-map unit's walk sprite and a piece of the Cusor.cel
- * map-cursor outline kit.
+ * map-cursor outline kit.  Last comes the one .CEL consumer that draws into
+ * memory rather than onto a screen surface, fdps_cel_expand_sheet_24x24,
+ * which unpacks the loaded map tile sheet into a flat array of 24 by 24 pixel
+ * blocks for the battlefield overview screen and is the only function here
+ * that allocates.
  *
  * See sprite.h for the draw request every .SAF drawer here is handed and for
  * what each of its nine slots means, and resource_info/saf.md for the
@@ -20,6 +24,8 @@
  * go through.
  */
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "fdpstype.h"
 #include "sprite.h"
@@ -638,4 +644,82 @@ void fdps_cel_blit_sprite(unsigned char *cel_sheet, int sprite_index,
 
     fdps_blit_dispatch(sprite_stream, dest_pixel, sprite_width, sprite_height,
                        dest_pitch, mode_operand, blit_mode);
+}
+
+/* The expanded block's geometry, every number of it an immediate in the
+   assembly and none of them a read of the sheet's own header.  A map tile is
+   24 pixels square -- MOV word ptr [EDX],0x18 at 0002e68f and MOV word ptr
+   [EDX+0x2],0x18 at 0002e694 write it into the header, PUSH 0x18 at 0002e6e4
+   hands it to the drawer as the destination pitch and IMUL EAX,...,0x18 at
+   0002e6dd scales the row -- and 576 bytes is that square laid out with no
+   padding, the 0x240 of the two IMULs at 0002e658 and 0002e6a7.
+
+   The header is six bytes of three i16 at +0, +2 and +4, and EXPANDED_TILES_AT
+   is spelled as its size because that is what the 6 pushed as the drawer's x
+   at 0002e6e2 is: a column offset abused as a flat byte fudge, which lands
+   tile n at block + 6 + n * 576 because the drawer's destination arithmetic is
+   base + y * pitch + x and the pitch is the tile's own width. */
+#define EXPANDED_TILE_SIZE 0x18
+#define EXPANDED_TILE_BYTES 0x240
+#define EXPANDED_WIDTH_AT 0
+#define EXPANDED_HEIGHT_AT 2
+#define EXPANDED_COUNT_AT 4
+#define EXPANDED_TILES_AT 6
+
+/* 0002e640.  One counted loop over the sheet's sprites and one branch, the
+   allocation test, whose failure arm never rejoins: it prints and calls exit,
+   so the C leaves the arm without a return and falls through exactly as the
+   JNZ at 0002e672 does.  The ADD ESP,0x4 the compiler emitted after the exit
+   call is dead cdecl cleanup behind a noreturn callee and has no source.
+
+   The count is read once, sign-extended out of the sheet's i16 sprite_count by
+   the MOVSX at 0002e651, and then serves three times over: as the multiplier
+   of the allocation, as the value stored in the header and as the loop bound
+   the signed JL at 0002e6cd tests.  The original re-loads the sheet pointer
+   from the global for the drawer's first argument at 0002e6ee rather than
+   holding the one it read at 0002e64c, which is the same pointer either way
+   (ADR-0001).
+
+   Only the block's tile area is cleared.  memset covers count * 576 bytes
+   from +6 and the six header bytes are the three stores that follow, so every
+   byte of the allocation is written before it is returned -- which matters,
+   because the .CEL streams need not cover every pixel of a tile and a skip run
+   leaves the destination alone.  Uncovered pixels are palette index 0.
+
+   Nothing is read after any call but malloc's pointer, tested against zero at
+   0002e672 and then used as the block: memset returns it again and the code
+   ignores that, fdps_cel_blit_sprite returns nothing, and the value returned
+   to the caller is the block, staged through [EBP-0x4] at 0002e701 the way
+   Watcom stages every return value at -od. */
+unsigned char *fdps_cel_expand_sheet_24x24(void)
+{
+    /* How many sprites the loaded tile sheet holds, and so how many tiles the
+       block gets. */
+    int tile_count;
+    /* The block being filled, and the answer. */
+    unsigned char *expanded;
+    /* Which sprite of the sheet is being unpacked. */
+    int tile_index;
+
+    tile_count = ((struct fdps_cel_header *)
+                  data_fdps_scene_layer_tile_sheet_ptrs[0])->sprite_count;
+    expanded = (unsigned char *) malloc((size_t)
+        (tile_count * EXPANDED_TILE_BYTES + EXPANDED_TILES_AT));
+    if (expanded == NULL) {
+        printf("Out of memory at rease shape !!!\n");
+        exit(1);
+    }
+    *(short *) (expanded + EXPANDED_WIDTH_AT) = EXPANDED_TILE_SIZE;
+    *(short *) (expanded + EXPANDED_HEIGHT_AT) = EXPANDED_TILE_SIZE;
+    *(short *) (expanded + EXPANDED_COUNT_AT) = (short) tile_count;
+    memset(expanded + EXPANDED_TILES_AT, 0,
+           (size_t) (tile_count * EXPANDED_TILE_BYTES));
+    for (tile_index = 0; tile_index < tile_count; tile_index++) {
+        fdps_cel_blit_sprite(data_fdps_scene_layer_tile_sheet_ptrs[0],
+                             tile_index, expanded, EXPANDED_TILE_SIZE,
+                             EXPANDED_TILES_AT,
+                             tile_index * EXPANDED_TILE_SIZE, 0,
+                             BLIT_MODE_OPAQUE);
+    }
+    return expanded;
 }

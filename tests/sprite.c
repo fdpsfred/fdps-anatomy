@@ -48,6 +48,7 @@
  * write, and a case that expects nothing at all proves nothing was written
  * anywhere on the surface rather than just at the place it was aimed.
  */
+#include <stdlib.h>
 #include <string.h>
 #include "testharn.h"
 #include "fdpstype.h"
@@ -2682,6 +2683,395 @@ static void the_sheet_sprite_index_is_not_range_checked(void)
     CHECK_EQ(cel_painted(), CEL_SPRITE_W * CEL_SPRITE_H);
 }
 
+/* fdps_cel_expand_sheet_24x24 -- the map tile sheet expander.
+ *
+ * Expected values come from the assembly at 0002e640: MOVSX EAX,word ptr
+ * [EAX+0xb] for the tile count, IMUL EAX,...,0x240 / ADD EAX,0x6 for the
+ * allocation, MOV word ptr [EDX],0x18 and MOV word ptr [EDX+0x2],0x18 and MOV
+ * word ptr [EDX+0x4],AX for the header, PUSH count*0x240 / PUSH 0x0 / PUSH
+ * dest+6 for the clear, and the eight pushes at 0002e6d9 through 0002e6ee --
+ * 0, 0, i*0x18, 6, 0x18, block, i, sheet -- for each tile.  The sheet's own
+ * layout is resource_info/cel.md: the i16 sprite count at +0x0b, the u32
+ * offset table at +0x0f, and RLE commands whose top two bits pick fill,
+ * stretch, literal or skip and whose low six bits are the run length less one.
+ *
+ * The sheet is staged as a byte buffer for the same reason the .SAF fixture
+ * above is: a .CEL reaches this code only as a block already unpacked out of a
+ * .VFS, and that block is what the buffer is.
+ *
+ * WHAT MAKES THE GEOMETRY OBSERVABLE.  The expander's 24 by 24 and its 576
+ * bytes per tile are immediates, so a fixture whose sheet declares those same
+ * numbers cannot tell them apart from a read of the sheet's header.  The 12 by
+ * 12 case is what separates them: the drawer paints the sheet's 12 columns and
+ * 12 rows, but the block still steps 576 bytes to the next tile and still uses
+ * 24 as the row stride, so a 12 by 12 sprite lands in the top left corner of a
+ * 24 by 24 slot and everything else stays cleared.
+ *
+ * WHAT MAKES THE COUNT'S WIDTH OBSERVABLE.  The encoding field the sheet
+ * carries at +0x0d is a large non-zero number, so a count read 32 bits wide
+ * would be over 0x12340000 and the allocation would fail and take the process
+ * out through exit(1).  Every case here coming back at all is that assertion.
+ */
+#define EXP_TILE_SIZE 24
+#define EXP_TILE_BYTES 576
+#define EXP_HEADER_BYTES 6
+#define EXP_WIDTH_AT 0
+#define EXP_HEIGHT_AT 2
+#define EXP_COUNT_AT 4
+
+#define EXP_SHEET_COUNT 3
+#define EXP_SMALL_SIZE 12
+#define EXP_SMALL_COUNT 2
+
+#define EXP_MAX_SPRITES 4
+#define EXP_STREAM0_AT 0x40
+#define EXP_STREAM_STRIDE 0x40
+#define EXP_DECOY_TABLE_AT 0x200
+#define EXP_DECOY_STREAM_AT 0x240
+#define EXP_HOLE_STREAM_AT 0x300
+#define EXP_LITERAL_STREAM_AT 0x400
+#define EXP_SHEET_BYTES 0x700
+
+/* Large enough that a 32-bit read of the count field would ask for more than
+   the DOS/4G heap can give. */
+#define EXP_ENCODING_JUNK 0x1234
+
+#define EXP_PIXEL0 0x11
+#define EXP_PIXEL_STEP 0x11
+#define EXP_ALT_PIXEL0 0x88
+#define EXP_SMALL_PIXEL0 0x44
+#define EXP_HOLE_PIXEL 0x66
+#define EXP_DECOY_PIXEL_EXP 0x9d
+#define EXP_LITERAL_FIRST 0x60
+#define EXP_DIRT 0xee
+
+/* Eight columns stepped over and sixteen filled: the run lengths are one less
+   than the pixel counts, and the two together are the 24 the row must consume
+   exactly. */
+#define EXP_HOLE_COLUMNS 8
+#define EXP_HOLE_SKIP_RUN 0xc7
+#define EXP_HOLE_FILL_RUN 0x0f
+#define EXP_HOLE_ROW_BYTES 3
+
+/* One literal run covering the whole 24-pixel row: op 2 with a length field of
+   23, then the 24 bytes themselves. */
+#define EXP_LITERAL_RUN 0x97
+#define EXP_LITERAL_ROW_BYTES 25
+
+static unsigned char exp_sheet[EXP_SHEET_BYTES];
+static unsigned char exp_sheet_alt[EXP_SHEET_BYTES];
+
+/* One fill run per row, covering the row exactly. */
+static void exp_fill_stream(unsigned char *sheet, int at, int width,
+                            int height, unsigned char pixel)
+{
+    int row;
+
+    for (row = 0; row < height; row++) {
+        sheet[at + row * 2] = (unsigned char) (width - 1);
+        sheet[at + row * 2 + 1] = pixel;
+    }
+}
+
+/* A sheet of `count` sprites, each a solid block of its own colour, with the
+   header's table-position field aimed at a decoy table so that a reader which
+   trusted it would paint the decoy colour instead. */
+static void exp_stage_sheet(unsigned char *sheet, int width, int height,
+                            int count, unsigned char first_pixel)
+{
+    int index;
+
+    memset(sheet, 0, EXP_SHEET_BYTES);
+    sheet[0] = 'C';
+    sheet[1] = 'E';
+    sheet[2] = 'L';
+    cel_u16(sheet, 0x03, 1);
+    cel_u16(sheet, CEL_TABLE_FIELD_AT, EXP_DECOY_TABLE_AT);
+    cel_u16(sheet, CEL_WIDTH_FIELD_AT, (unsigned long) width);
+    cel_u16(sheet, CEL_HEIGHT_FIELD_AT, (unsigned long) height);
+    cel_u16(sheet, CEL_COUNT_FIELD_AT, (unsigned long) count);
+    cel_u16(sheet, CEL_ENCODING_FIELD_AT, EXP_ENCODING_JUNK);
+    for (index = 0; index < EXP_MAX_SPRITES; index++) {
+        cel_u32(sheet, CEL_TABLE_AT + index * 4,
+                (unsigned long) (EXP_STREAM0_AT + index * EXP_STREAM_STRIDE));
+        cel_u32(sheet, EXP_DECOY_TABLE_AT + index * 4,
+                (unsigned long) EXP_DECOY_STREAM_AT);
+        exp_fill_stream(sheet, EXP_STREAM0_AT + index * EXP_STREAM_STRIDE,
+                        width, height,
+                        (unsigned char) (first_pixel + index * EXP_PIXEL_STEP));
+    }
+    exp_fill_stream(sheet, EXP_DECOY_STREAM_AT, width, height,
+                    EXP_DECOY_PIXEL_EXP);
+}
+
+/* Sprite 0 becomes a stream that leaves the first eight columns of every row
+   untouched, so whatever the block held under them is what shows. */
+static void exp_stage_hole_sheet(unsigned char *sheet)
+{
+    int row;
+    int base;
+
+    exp_stage_sheet(sheet, EXP_TILE_SIZE, EXP_TILE_SIZE, 1, EXP_PIXEL0);
+    cel_u32(sheet, CEL_TABLE_AT, (unsigned long) EXP_HOLE_STREAM_AT);
+    for (row = 0; row < EXP_TILE_SIZE; row++) {
+        base = EXP_HOLE_STREAM_AT + row * EXP_HOLE_ROW_BYTES;
+        sheet[base] = EXP_HOLE_SKIP_RUN;
+        sheet[base + 1] = EXP_HOLE_FILL_RUN;
+        sheet[base + 2] = EXP_HOLE_PIXEL;
+    }
+}
+
+/* Sprite 0 becomes 24 rows of one 24-byte literal run, whose bytes reach the
+   block verbatim only under the pass-through kernel. */
+static void exp_stage_literal_sheet(unsigned char *sheet)
+{
+    int row;
+    int column;
+    int base;
+
+    exp_stage_sheet(sheet, EXP_TILE_SIZE, EXP_TILE_SIZE, 1, EXP_PIXEL0);
+    cel_u32(sheet, CEL_TABLE_AT, (unsigned long) EXP_LITERAL_STREAM_AT);
+    for (row = 0; row < EXP_TILE_SIZE; row++) {
+        base = EXP_LITERAL_STREAM_AT + row * EXP_LITERAL_ROW_BYTES;
+        sheet[base] = EXP_LITERAL_RUN;
+        for (column = 0; column < EXP_TILE_SIZE; column++) {
+            sheet[base + 1 + column] =
+                (unsigned char) (EXP_LITERAL_FIRST + column);
+        }
+    }
+}
+
+/* Both layer slots are put back afterwards so the expander's one dependency
+   does not leak into whatever test file runs next. */
+static unsigned char *exp_expand(unsigned char *slot0, unsigned char *slot1)
+{
+    unsigned char *previous_slot0;
+    unsigned char *previous_slot1;
+    unsigned char *block;
+
+    previous_slot0 = data_fdps_scene_layer_tile_sheet_ptrs[0];
+    previous_slot1 = data_fdps_scene_layer_tile_sheet_ptrs[1];
+    data_fdps_scene_layer_tile_sheet_ptrs[0] = slot0;
+    data_fdps_scene_layer_tile_sheet_ptrs[1] = slot1;
+    block = fdps_cel_expand_sheet_24x24();
+    data_fdps_scene_layer_tile_sheet_ptrs[0] = previous_slot0;
+    data_fdps_scene_layer_tile_sheet_ptrs[1] = previous_slot1;
+    return block;
+}
+
+static int exp_u16_at(unsigned char *block, int at)
+{
+    return (int) block[at] | ((int) block[at + 1] << 8);
+}
+
+/* How many bytes of a stretch of the block do not hold `pixel`. */
+static int exp_bytes_not(unsigned char *block, int at, int length,
+                         unsigned char pixel)
+{
+    int index;
+    int wrong;
+
+    wrong = 0;
+    for (index = 0; index < length; index++) {
+        if (block[at + index] != pixel) {
+            wrong++;
+        }
+    }
+    return wrong;
+}
+
+static int exp_bytes_holding(unsigned char *block, int at, int length,
+                             unsigned char pixel)
+{
+    int index;
+    int found;
+
+    found = 0;
+    for (index = 0; index < length; index++) {
+        if (block[at + index] == pixel) {
+            found++;
+        }
+    }
+    return found;
+}
+
+/* Leaves a block of dirt where the expander's allocation is likely to land, so
+   that a cleared byte in the answer has a chance of being the clear rather
+   than fresh heap that was already zero. */
+static void exp_dirty_heap(int bytes)
+{
+    void *dirt;
+
+    dirt = malloc((size_t) bytes);
+    if (dirt != NULL) {
+        memset(dirt, EXP_DIRT, (size_t) bytes);
+        free(dirt);
+    }
+}
+
+/* The block opens with three i16: the tile width 24, the tile height 24 and
+   the sheet's tile count.  All three are stores of immediates or of the count,
+   none of them a copy of a field of the sheet -- whose own width and height
+   here are the same 24 only because this fixture's sprites are map tiles. */
+static void the_block_opens_with_the_tile_size_and_the_count(void)
+{
+    unsigned char *block;
+
+    exp_stage_sheet(exp_sheet, EXP_TILE_SIZE, EXP_TILE_SIZE, EXP_SHEET_COUNT,
+                    EXP_PIXEL0);
+    block = exp_expand(exp_sheet, exp_sheet_alt);
+    CHECK_EQ(exp_u16_at(block, EXP_WIDTH_AT), EXP_TILE_SIZE);
+    CHECK_EQ(exp_u16_at(block, EXP_HEIGHT_AT), EXP_TILE_SIZE);
+    CHECK_EQ(exp_u16_at(block, EXP_COUNT_AT), EXP_SHEET_COUNT);
+    free(block);
+}
+
+/* Tile n is 576 bytes of its own colour beginning at block + 6 + n * 576.
+   The three sprites carry three different colours, so a tile drawn at the
+   wrong index or the wrong offset shows up as a stretch of the wrong one. */
+static void every_tile_fills_its_own_slot_six_bytes_in(void)
+{
+    unsigned char *block;
+
+    exp_stage_sheet(exp_sheet, EXP_TILE_SIZE, EXP_TILE_SIZE, EXP_SHEET_COUNT,
+                    EXP_PIXEL0);
+    block = exp_expand(exp_sheet, exp_sheet_alt);
+    CHECK_EQ(exp_bytes_not(block, EXP_HEADER_BYTES, EXP_TILE_BYTES,
+                           EXP_PIXEL0), 0);
+    CHECK_EQ(exp_bytes_not(block, EXP_HEADER_BYTES + EXP_TILE_BYTES,
+                           EXP_TILE_BYTES,
+                           EXP_PIXEL0 + EXP_PIXEL_STEP), 0);
+    CHECK_EQ(exp_bytes_not(block, EXP_HEADER_BYTES + 2 * EXP_TILE_BYTES,
+                           EXP_TILE_BYTES,
+                           EXP_PIXEL0 + 2 * EXP_PIXEL_STEP), 0);
+    free(block);
+}
+
+/* Nothing sits between two tiles: the last byte of tile 0 and the first byte
+   of tile 1 are neighbours, which is what makes the caller's block + 6 +
+   index * 576 the address of a tile. */
+static void the_tiles_are_packed_with_no_gap(void)
+{
+    unsigned char *block;
+
+    exp_stage_sheet(exp_sheet, EXP_TILE_SIZE, EXP_TILE_SIZE, EXP_SHEET_COUNT,
+                    EXP_PIXEL0);
+    block = exp_expand(exp_sheet, exp_sheet_alt);
+    CHECK_EQ(block[EXP_HEADER_BYTES + EXP_TILE_BYTES - 1], EXP_PIXEL0);
+    CHECK_EQ(block[EXP_HEADER_BYTES + EXP_TILE_BYTES],
+             EXP_PIXEL0 + EXP_PIXEL_STEP);
+    free(block);
+}
+
+/* How many tiles there are is the sheet's field and not the size of its offset
+   table: the same four-entry table with the count cut to one expands one tile
+   and says one. */
+static void the_count_comes_from_the_sheets_own_field(void)
+{
+    unsigned char *block;
+
+    exp_stage_sheet(exp_sheet, EXP_TILE_SIZE, EXP_TILE_SIZE, 1, EXP_PIXEL0);
+    block = exp_expand(exp_sheet, exp_sheet_alt);
+    CHECK_EQ(exp_u16_at(block, EXP_COUNT_AT), 1);
+    CHECK_EQ(exp_bytes_not(block, EXP_HEADER_BYTES, EXP_TILE_BYTES,
+                           EXP_PIXEL0), 0);
+    free(block);
+}
+
+/* A sheet of no sprites still gets a block and still gets a header: the loop
+   bound is the count, so nothing is drawn, and the six header bytes are
+   written after the allocation and outside the loop. */
+static void an_empty_sheet_still_gets_its_header(void)
+{
+    unsigned char *block;
+
+    exp_stage_sheet(exp_sheet, EXP_TILE_SIZE, EXP_TILE_SIZE, 0, EXP_PIXEL0);
+    block = exp_expand(exp_sheet, exp_sheet_alt);
+    CHECK_EQ(exp_u16_at(block, EXP_WIDTH_AT), EXP_TILE_SIZE);
+    CHECK_EQ(exp_u16_at(block, EXP_HEIGHT_AT), EXP_TILE_SIZE);
+    CHECK_EQ(exp_u16_at(block, EXP_COUNT_AT), 0);
+    free(block);
+}
+
+/* The 24 by 24 slot is the expander's, not the sheet's.  A 12 by 12 sheet
+   paints 12 columns of 12 rows -- the drawer takes those from the header --
+   but the row stride is still 24 and the next tile is still 576 bytes on, so
+   the sprite occupies the top left corner of its slot and the rest of the slot
+   stays cleared. */
+static void the_slot_geometry_is_the_expanders_not_the_sheets(void)
+{
+    unsigned char *block;
+
+    exp_stage_sheet(exp_sheet, EXP_SMALL_SIZE, EXP_SMALL_SIZE,
+                    EXP_SMALL_COUNT, EXP_SMALL_PIXEL0);
+    block = exp_expand(exp_sheet, exp_sheet_alt);
+    CHECK_EQ(block[EXP_HEADER_BYTES], EXP_SMALL_PIXEL0);
+    CHECK_EQ(block[EXP_HEADER_BYTES + (EXP_SMALL_SIZE - 1) * EXP_TILE_SIZE
+                   + EXP_SMALL_SIZE - 1], EXP_SMALL_PIXEL0);
+    CHECK_EQ(block[EXP_HEADER_BYTES + EXP_SMALL_SIZE], 0);
+    CHECK_EQ(block[EXP_HEADER_BYTES + EXP_SMALL_SIZE * EXP_TILE_SIZE], 0);
+    CHECK_EQ(block[EXP_HEADER_BYTES + EXP_TILE_BYTES],
+             EXP_SMALL_PIXEL0 + EXP_PIXEL_STEP);
+    free(block);
+}
+
+/* The tile area is cleared before anything is drawn into it, and a skip run is
+   what makes that visible: the eight columns it steps over every row are never
+   written by the drawer, so the zero found under them is the clear. */
+static void a_skip_run_leaves_the_cleared_block_showing(void)
+{
+    unsigned char *block;
+
+    exp_stage_hole_sheet(exp_sheet);
+    exp_dirty_heap(EXP_HEADER_BYTES + EXP_TILE_BYTES);
+    block = exp_expand(exp_sheet, exp_sheet_alt);
+    CHECK_EQ(exp_bytes_not(block, EXP_HEADER_BYTES, EXP_HOLE_COLUMNS, 0), 0);
+    CHECK_EQ(exp_bytes_not(block, EXP_HEADER_BYTES + EXP_HOLE_COLUMNS,
+                           EXP_TILE_SIZE - EXP_HOLE_COLUMNS,
+                           EXP_HOLE_PIXEL), 0);
+    CHECK_EQ(exp_bytes_not(block,
+                           EXP_HEADER_BYTES
+                           + (EXP_TILE_SIZE - 1) * EXP_TILE_SIZE,
+                           EXP_HOLE_COLUMNS, 0), 0);
+    free(block);
+}
+
+/* Blit mode 0 and operand 0 are the drawer's last two arguments, both of them
+   immediates, and a literal run is what tells the pass-through kernel from
+   every remapping one: its 24 bytes land in the block exactly as the sheet
+   spells them. */
+static void the_tiles_are_drawn_through_the_pass_through_kernel(void)
+{
+    unsigned char *block;
+
+    exp_stage_literal_sheet(exp_sheet);
+    block = exp_expand(exp_sheet, exp_sheet_alt);
+    CHECK_EQ(block[EXP_HEADER_BYTES], EXP_LITERAL_FIRST);
+    CHECK_EQ(block[EXP_HEADER_BYTES + EXP_TILE_SIZE - 1],
+             EXP_LITERAL_FIRST + EXP_TILE_SIZE - 1);
+    free(block);
+}
+
+/* The sheet is slot 0 of the layer array and no other slot: with a second
+   sheet of different colours in slot 1, not one of its bytes reaches the
+   block. */
+static void the_sheet_is_slot_zero_of_the_layer_array(void)
+{
+    unsigned char *block;
+
+    exp_stage_sheet(exp_sheet, EXP_TILE_SIZE, EXP_TILE_SIZE, EXP_SHEET_COUNT,
+                    EXP_PIXEL0);
+    exp_stage_sheet(exp_sheet_alt, EXP_TILE_SIZE, EXP_TILE_SIZE,
+                    EXP_SHEET_COUNT, EXP_ALT_PIXEL0);
+    block = exp_expand(exp_sheet, exp_sheet_alt);
+    CHECK_EQ(exp_bytes_not(block, EXP_HEADER_BYTES, EXP_TILE_BYTES,
+                           EXP_PIXEL0), 0);
+    CHECK_EQ(exp_bytes_holding(block, EXP_HEADER_BYTES,
+                               EXP_SHEET_COUNT * EXP_TILE_BYTES,
+                               EXP_ALT_PIXEL0), 0);
+    free(block);
+}
+
 void run_sprite_tests(void)
 {
     RUN_TEST(cell_lands_at_the_requests_x_and_y);
@@ -2776,4 +3166,13 @@ void run_sprite_tests(void)
     RUN_TEST(the_sheet_operand_is_not_read_as_the_mode);
     RUN_TEST(mode_zero_passes_the_sheet_stream_through_unchanged);
     RUN_TEST(the_sheet_sprite_index_is_not_range_checked);
+    RUN_TEST(the_block_opens_with_the_tile_size_and_the_count);
+    RUN_TEST(every_tile_fills_its_own_slot_six_bytes_in);
+    RUN_TEST(the_tiles_are_packed_with_no_gap);
+    RUN_TEST(the_count_comes_from_the_sheets_own_field);
+    RUN_TEST(an_empty_sheet_still_gets_its_header);
+    RUN_TEST(the_slot_geometry_is_the_expanders_not_the_sheets);
+    RUN_TEST(a_skip_run_leaves_the_cleared_block_showing);
+    RUN_TEST(the_tiles_are_drawn_through_the_pass_through_kernel);
+    RUN_TEST(the_sheet_is_slot_zero_of_the_layer_array);
 }
