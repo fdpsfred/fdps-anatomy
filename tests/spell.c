@@ -57,6 +57,7 @@
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "indicat.h"
 #include "mapdraw.h"
 #include "spell.h"
 
@@ -1698,6 +1699,1010 @@ static void nothing_but_dac_entry_zero_is_written(void)
     CHECK_EQ(flash_guard_entry[2], FLASH_DAC_SENTINEL);
 }
 
+/* ------------------------------------------------------------------ *
+ * 000288f0  fdps_cast_spell_on_targets                               *
+ * ------------------------------------------------------------------ *
+ *
+ * WHAT THE RUN IS OBSERVED THROUGH.  The routine takes four arguments, returns
+ * nothing and spends most of its time presenting, so what it can be held to is
+ * the state it leaves behind: the unit records the target indices name, the
+ * floating-popup queue, the two view origins and the map cursor mode.  Every
+ * case below stages that state, runs one whole cast, copies the four unit
+ * records and the head of the queue into a capture, and asserts against the
+ * copy.  Each cast is run once and shared by the cases that read it.
+ *
+ * WHY A TIMER INTERRUPT IS INSTALLED, and why the scene is emptied first: for
+ * the reasons the palette-flash part above gives.  Every frame the flash, the
+ * ground shock, the map animation and the popup playback present ends waiting
+ * for data_fdps_timer_tick_counter to change, and nothing advances it in a test
+ * image, so the run hooks IRQ0 with a handler that advances it and chains on.
+ * flash_stage's empty scene is reused unchanged, so a presented frame paints
+ * nothing and costs one tick.
+ *
+ * THE QUEUE SURVIVES ITS OWN PLAYBACK.  fdps_play_indicator_queue resets the
+ * cell count on the way out but leaves the cells themselves where they are
+ * (indicat.c), so the glyph ids and the unit each cell belongs to can be read
+ * back after the call.  That is how the popups are pinned here without going
+ * to the adapter for them.  Cells past the count are never drawn, so the whole
+ * array is filled with 0xee before a run and a cell still holding that value is
+ * one nothing queued.
+ *
+ * THE GLYPH SHEET IS STAGED, not borrowed from the game files: the playback
+ * blits every non-blank cell through data_fdps_number_glyph_sheet_ptr, and the
+ * ids reached here run up to 0x40, so a synthetic .CEL of 0x41 uniform entries
+ * is published for the duration.  Nothing is asserted about the pixels it
+ * paints; it is there so the playback has a sheet to read.
+ *
+ * HOW THE SHAKE IS WATCHED.  The 25 shake frames each write both view origins
+ * and then park in fdps_render_view_frame's tick wait, so the handler sees one
+ * sample per shake frame with that frame's offsets still in place.  It records
+ * how many samples were off centre and the extreme offset on each axis.  The
+ * bound that matters is the upper one: rand() % 4 - 2 gives -2..+1, so an
+ * offset of +2 can never be sampled, while the symmetric jitter the code
+ * invites -- rand() % 5 - 2 -- would show one within a few frames.
+ *
+ * HOW THE THREE 神之祝福 GROUPS ARE SEPARATED.  The blessing plays its queue out
+ * once per slot, so only the last slot's cells are still in the queue when the
+ * call returns.  The handler therefore also samples the head of the queue while
+ * it is being played and records each distinct triple, which recovers all three
+ * groups from one run and pins the order they are played in.
+ *
+ * WHERE THE EXPECTED VALUES COME FROM.  The 12 bytes at 00027668 for the three
+ * buff groups; MOVSX word ptr [EAX+0x44] at 0002895b with XOR EDX,EDX /
+ * MOV DL,byte ptr [EAX+0x5] at 00028967 and MOV word ptr [EAX+0x44],BX at
+ * 00028972 for the MP charge; AND byte ptr [EAX+0x5],0x7f at 00028bfe for the
+ * acted bit; the two MOV byte stores at 00028b9c and 00028ba7 for the teleport
+ * writing the FIRST entry of the array only; PUSH 0x3 / PUSH 0x0 with
+ * ADD EAX,0x25 at 00028c7b for the three ailment slots the cure clears;
+ * PUSH 0x27 at 00028b4a and PUSH 0x0 at 00028e6e for the two glyph bases;
+ * MOV EBX,0x4 / IDIV EBX / SUB EDX,0x2 at 00028a54 and 00028a6d with
+ * CMP dword ptr [EBP-0x20],0x19 at 00028a3d for the shake; and
+ * CMP dword ptr [EBP-0x18],0x3 at 00028d86 for the three blessing passes.  The
+ * cure, MISS and digit glyph ids are indicat.c's, the ailment slot the
+ * paralysis id selects is unitstat.c's, and none of them is read off the
+ * emitted C.
+ *
+ * WHAT IS NOT ASSERTED.  鬼動死靈陣's extra roll.  That arm calls
+ * fdps_unit_inflict_random_ailments on a target it damaged, and that routine
+ * lands each of the three ailments on a flat one draw in five, so a single cast
+ * leaves the record untouched about half the time and no number of casts a test
+ * image can afford makes it certain.  Nothing here can pin it; what would is a
+ * count of the draws the cast takes out of the shared rand() stream, which the
+ * image has no way to observe.
+ *
+ * Nor is the presentation itself: which clip is played, that the map cursor is
+ * off for the whole of it rather than only at the ends, that 封神裂震 shares
+ * 裂地術's Emg10.saf and that 鎮魂之歌 plays its extra clip.
+ * The first two are playtest contracts.  The Emg10.saf sharing is settled the
+ * only way a test could settle it -- the container has EMG10.SAF and no
+ * EMG11.SAF, so the id that formats itself minus one is the only id that can
+ * load at all -- but running spell 0x0b here would drag its whole full-screen
+ * cutscene and that cutscene's own fixture in behind it, and the cutscene part
+ * above already covers that.
+ */
+
+/* The four staged records.  The caster is a fifth party to every cast and is
+   the witness that a per-target write did not stray. */
+#define CAST_CASTER 1
+#define CAST_A 0
+#define CAST_B 2
+#define CAST_C 3
+
+/* Tiles well inside the popup cull window, which with both origins at 0 is
+   columns 0 to 12 and rows 0 to 8 (indicat.c). */
+#define CAST_A_TILE_X 2
+#define CAST_A_TILE_Y 2
+#define CAST_B_TILE_X 4
+#define CAST_B_TILE_Y 3
+#define CAST_C_TILE_X 6
+#define CAST_C_TILE_Y 4
+#define CAST_CASTER_TILE_X 8
+#define CAST_CASTER_TILE_Y 5
+
+/* The spell ids the cases cast, each with its own arm in the dispatch. */
+#define CAST_HASTE 0x16     /* 神行術 */
+#define CAST_TELEPORT 0x15  /* 傳送術 */
+#define CAST_CURE 0x18      /* 甦癒術 */
+#define CAST_HEAL 0x0e      /* 恢復之光 */
+#define CAST_QUAKE 0x0a     /* 裂地術 */
+#define CAST_PARALYSIS 0x13 /* 麻痺術 */
+#define CAST_BLESSING 0x14  /* 神之祝福 */
+
+/* What every cast is charged, and what the caster starts with.  One case
+   raises the cost to 0xff to prove the byte widens unsigned. */
+#define CAST_MP_START 50
+#define CAST_MP_COST 4
+#define CAST_HASTE_COST 7
+
+/* A heal of 10 is inside the band where fdps_unit_apply_heal's second term
+   truncates to nothing whatever rand() returned -- (0..99) * 10 / 1000 is 0 --
+   so the roll is exactly 10 * 9 / 10, and the same band makes a damage of 10
+   land as exactly 9 (unitstat.c, and the damage part above). */
+#define CAST_POWER 10
+#define CAST_ROLLED 9
+#define CAST_HP_START 50
+#define CAST_HP_MAX 100
+#define CAST_FULL_HP 100
+
+/* rand() % 100 is 0..99, so these are the deterministic ends of a hit rate. */
+#define CAST_ALWAYS 100
+
+/* The glyph bases and the fixed words, from indicat.c. */
+#define CAST_HEAL_GLYPH_BASE 0x27
+#define CAST_DAMAGE_GLYPH_BASE 0
+#define CAST_BLANK_GLYPH 0xff
+#define CAST_MISS_M 0x34
+#define CAST_MISS_I 0x35
+#define CAST_MISS_S 0x36
+#define CAST_CURE_C 0x37
+#define CAST_CURE_U 0x38
+#define CAST_CURE_R 0x39
+#define CAST_CURE_E 0x3a
+
+/* The three four-byte groups at 00027668, which the function copies onto its
+   own frame before anything else. */
+#define CAST_BUFF0_A 0x3b
+#define CAST_BUFF0_B 0x3c
+#define CAST_BUFF0_C 0x3c
+#define CAST_BUFF1_A 0x3d
+#define CAST_BUFF1_B 0x3e
+#define CAST_BUFF1_C 0x3f
+#define CAST_BUFF2_A 0x3d
+#define CAST_BUFF2_B 0x3e
+#define CAST_BUFF2_C 0x40
+
+/* status_timers slots: 0 to 2 are 神之祝福's three buffs and 3 to 5 are the
+   ailments, of which 麻痺術 is slot 4 (unitstat.c). */
+#define CAST_BUFF_SLOTS 3
+#define CAST_AILMENT_FIRST 3
+#define CAST_PARALYSIS_SLOT 4
+
+/* A timer value no roll can produce -- fdps_unit_apply_status_effect writes
+   rand() % 2 + 2, which is 2 or 3 -- so a slot still holding it was refused and
+   one holding 2 or 3 was written by the roll. */
+#define CAST_TIMER_OCCUPIED 5
+#define CAST_TIMER_MIN 2
+#define CAST_TIMER_MAX 3
+
+/* The value every derived combat word is pre-loaded with, so that a word still
+   holding it says fdps_unit_recompute_combat_stats was not called on that
+   record.  The base stats are all left at 0, which is what makes the recomputed
+   attack and defence 0 whatever the 1.15 buff multiplier does with them; the
+   evasion bonus is the integer 15 that unit.c adds for a live slot 2. */
+#define CAST_STAT_SENTINEL 77
+#define CAST_DEX_BONUS 15
+
+/* The mode the cursor global is loaded with before a run: neither the 0 the
+   routine clears it to nor the 1 it leaves, so the value found afterwards can
+   only have been written by the routine. */
+#define CAST_CURSOR_SENTINEL 2
+#define CAST_CURSOR_PLAIN 1
+
+/* What an unqueued cell holds.  It is not a glyph the playback can reach,
+   because only cells below the queue count are ever drawn. */
+#define CAST_QUEUE_SENTINEL 0xee
+/* Cells kept in the capture: two targets' worth of a four-cell popup with room
+   to see that a third was not appended. */
+#define CAST_QUEUE_WATCH 12
+
+/* 25 shake frames -- CMP dword ptr [EBP-0x20],0x19 at 00028a3d -- of which the
+   one in sixteen that draws (0, 0) leaves the view centred, so the count of
+   off-centre samples runs around 23 and cannot exceed 25.  The floor is set
+   where a correct run cannot fall through it: 14 or fewer needs eleven of the
+   25 frames to draw dead centre, which is one run in four million.
+
+   The upper offset is asserted as a bound rather than as a value reached,
+   because a correct run is not obliged to draw +1 at all -- it is one draw in
+   four per axis, so demanding it would fail about one run in thirteen hundred.
+   As a bound it still separates the two spellings: the symmetric jitter the
+   shape invites, rand() % 5 - 2, draws +2 one frame in five and would be
+   caught in 25 frames all but four times in a thousand.  The lower offset is
+   the other way round -- half of all draws are below zero, so a run that never
+   reached -1 is one in thirty million. */
+#define CAST_SHAKE_FRAMES 0x19
+#define CAST_SHAKE_MIN_SAMPLES 15
+#define CAST_SHAKE_MAX_OFFSET 1
+#define CAST_SHAKE_MIN_OFFSET (-1)
+
+/* One distinct queue head per blessing pass, with room for a fourth so a run
+   that played its queue out more often than it should would be visible. */
+#define CAST_TRIPLES_MAX 6
+
+/* The synthetic glyph sheet: 0x41 uniform 6x8 entries in the .CEL shape
+   resource_info/cel.md describes, which is one more than the highest id any
+   popup here reaches. */
+#define CG_GLYPH_W 6
+#define CG_GLYPH_H 8
+#define CG_SHEET_ENTRIES 0x41
+#define CG_VERSION_FIELD_AT 0x03
+#define CG_TABLE_FIELD_AT 0x05
+#define CG_WIDTH_FIELD_AT 0x07
+#define CG_HEIGHT_FIELD_AT 0x09
+#define CG_COUNT_FIELD_AT 0x0b
+#define CG_ENCODING_FIELD_AT 0x0d
+#define CG_TABLE_AT 0x0f
+#define CG_FILL_RUN 0x05
+#define CG_STREAM_BYTES (CG_GLYPH_H * 2)
+#define CG_STREAM0_AT (CG_TABLE_AT + CG_SHEET_ENTRIES * 4)
+#define CG_SHEET_BYTES (CG_STREAM0_AT + CG_SHEET_ENTRIES * CG_STREAM_BYTES)
+#define CG_ART_PIXEL 0x30
+
+/* The movement grid fdps_map_cursor_move_to reads the map's extent out of: a
+   four-byte header of two signed 16-bit tile dimensions (movegrid.h).  Only
+   the header is read on the way through, so the cells are not staged.  A map
+   this size leaves the destination tile below well inside the view, so the
+   scroll clamps have nothing to do and the cursor walk is one step long. */
+#define CAST_MAP_TILES_W 20
+#define CAST_MAP_TILES_H 15
+#define CAST_GRID_HEADER_BYTES 4
+
+/* Where the teleport is aimed, and where the cursor is standing when the cast
+   begins: one tile to its left, so the walk is a single step whose end
+   position says which pixel coordinates the scroll was asked for. */
+#define CAST_DEST_TILE_X 5
+#define CAST_DEST_TILE_Y 5
+#define CAST_TILE_PIXELS 0x18
+
+/* Everything one whole cast left behind. */
+struct cast_capture {
+    unsigned char units[STAGE_UNITS * UNIT_RECORD_STRIDE];
+    unsigned char glyphs[CAST_QUEUE_WATCH];
+    unsigned char owners[CAST_QUEUE_WATCH];
+    int cursor_mode;
+    int cursor_world_x;
+    int cursor_world_y;
+    int origin_x;
+    int origin_y;
+    int min_dx;
+    int max_dx;
+    int min_dy;
+    int max_dy;
+    int offset_samples;
+    int triples;
+    unsigned char triple_a[CAST_TRIPLES_MAX];
+    unsigned char triple_b[CAST_TRIPLES_MAX];
+    unsigned char triple_c[CAST_TRIPLES_MAX];
+};
+
+static unsigned char cast_sheet[CG_SHEET_BYTES];
+static unsigned char cast_targets[CAST_BUFF_SLOTS];
+static unsigned char cast_grid[CAST_GRID_HEADER_BYTES];
+
+static void (__interrupt __far *cast_saved_timer)();
+
+static volatile int cast_base_origin_x;
+static volatile int cast_base_origin_y;
+static volatile int cast_min_dx;
+static volatile int cast_max_dx;
+static volatile int cast_min_dy;
+static volatile int cast_max_dy;
+static volatile int cast_offset_samples;
+static volatile int cast_triples;
+static volatile unsigned char cast_last_a;
+static volatile unsigned char cast_last_b;
+static volatile unsigned char cast_last_c;
+static volatile unsigned char cast_triple_a[CAST_TRIPLES_MAX];
+static volatile unsigned char cast_triple_b[CAST_TRIPLES_MAX];
+static volatile unsigned char cast_triple_c[CAST_TRIPLES_MAX];
+
+/* One tick: advance the counter every frame is waiting on, and while it is
+   here, sample the two view origins and the head of the popup queue. */
+static void __interrupt __far cast_timer_isr(void)
+{
+    int offset_x;
+    int offset_y;
+    unsigned char head_a;
+    unsigned char head_b;
+    unsigned char head_c;
+
+    offset_x = data_fdps_battle_view_window_origin_x - cast_base_origin_x;
+    offset_y = data_fdps_battle_view_window_origin_y - cast_base_origin_y;
+    if (offset_x != 0 || offset_y != 0) {
+        cast_offset_samples++;
+    }
+    if (offset_x < cast_min_dx) {
+        cast_min_dx = offset_x;
+    }
+    if (offset_x > cast_max_dx) {
+        cast_max_dx = offset_x;
+    }
+    if (offset_y < cast_min_dy) {
+        cast_min_dy = offset_y;
+    }
+    if (offset_y > cast_max_dy) {
+        cast_max_dy = offset_y;
+    }
+
+    if (data_fdps_indicator_queue_count != 0) {
+        head_a = data_fdps_indicator_queue_glyph_ids[0];
+        head_b = data_fdps_indicator_queue_glyph_ids[1];
+        head_c = data_fdps_indicator_queue_glyph_ids[2];
+        if (cast_triples == 0 || head_a != cast_last_a
+            || head_b != cast_last_b || head_c != cast_last_c) {
+            if (cast_triples < CAST_TRIPLES_MAX) {
+                cast_triple_a[cast_triples] = head_a;
+                cast_triple_b[cast_triples] = head_b;
+                cast_triple_c[cast_triples] = head_c;
+            }
+            cast_triples++;
+            cast_last_a = head_a;
+            cast_last_b = head_b;
+            cast_last_c = head_c;
+        }
+    }
+
+    ++data_fdps_timer_tick_counter;
+
+    _chain_intr(cast_saved_timer);
+}
+
+static void cast_sheet_u16(int at, int value)
+{
+    cast_sheet[at] = (unsigned char) (value & 0xff);
+    cast_sheet[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void cast_sheet_u32(int at, unsigned long value)
+{
+    cast_sheet[at] = (unsigned char) (value & 0xff);
+    cast_sheet[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    cast_sheet[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    cast_sheet[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+/* 0x41 entries of one flat colour each, so the playback has a sheet to read. */
+static void cast_stage_sheet(void)
+{
+    int entry;
+    int stream_at;
+    int row;
+
+    memset(cast_sheet, 0, sizeof(cast_sheet));
+    cast_sheet[0] = 'C';
+    cast_sheet[1] = 'E';
+    cast_sheet[2] = 'L';
+    cast_sheet_u16(CG_VERSION_FIELD_AT, 1);
+    cast_sheet_u16(CG_TABLE_FIELD_AT, 0);
+    cast_sheet_u16(CG_WIDTH_FIELD_AT, CG_GLYPH_W);
+    cast_sheet_u16(CG_HEIGHT_FIELD_AT, CG_GLYPH_H);
+    cast_sheet_u16(CG_COUNT_FIELD_AT, CG_SHEET_ENTRIES);
+    cast_sheet_u16(CG_ENCODING_FIELD_AT, 2);
+
+    for (entry = 0; entry < CG_SHEET_ENTRIES; entry++) {
+        stream_at = CG_STREAM0_AT + entry * CG_STREAM_BYTES;
+        cast_sheet_u32(CG_TABLE_AT + entry * 4, (unsigned long) stream_at);
+        for (row = 0; row < CG_GLYPH_H; row++) {
+            cast_sheet[stream_at + row * 2] = CG_FILL_RUN;
+            cast_sheet[stream_at + row * 2 + 1] = (unsigned char) CG_ART_PIXEL;
+        }
+    }
+}
+
+/* The three staged tables and the empty scene, plus the four records placed on
+   the map and the target list every cast is handed. */
+static void cast_stage(void)
+{
+    int index;
+
+    stage();
+    flash_stage();
+    cast_stage_sheet();
+    data_fdps_number_glyph_sheet_ptr = cast_sheet;
+
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_battle_teleport_dest_tile_x = 0;
+    data_fdps_teleport_destination_tile_y = 0;
+
+    /* The map extent the cursor scroll clamps against.  Null here would be a
+       read through address zero rather than a caught error: the reader does
+       not test the pointer (gamedata.h). */
+    cast_grid[0] = (unsigned char) CAST_MAP_TILES_W;
+    cast_grid[1] = 0;
+    cast_grid[2] = (unsigned char) CAST_MAP_TILES_H;
+    cast_grid[3] = 0;
+    data_fdps_battle_move_grid_ptr = cast_grid;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+
+    unit(CAST_A)->pos_x = CAST_A_TILE_X;
+    unit(CAST_A)->pos_y = CAST_A_TILE_Y;
+    unit(CAST_B)->pos_x = CAST_B_TILE_X;
+    unit(CAST_B)->pos_y = CAST_B_TILE_Y;
+    unit(CAST_C)->pos_x = CAST_C_TILE_X;
+    unit(CAST_C)->pos_y = CAST_C_TILE_Y;
+    unit(CAST_CASTER)->pos_x = CAST_CASTER_TILE_X;
+    unit(CAST_CASTER)->pos_y = CAST_CASTER_TILE_Y;
+    unit(CAST_CASTER)->mp_current = CAST_MP_START;
+
+    /* Side 2 is the player's.  A record left on side 0 would send the damage
+       path into an ENEMYDAT.DAT lookup through a table pointer nothing here
+       stages, for the reason the damage part above gives, and the maximum HP
+       is what the heal's experience credit divides by. */
+    for (index = 0; index < STAGE_UNITS; index++) {
+        unit(index)->side = PLAYER_SIDE;
+        unit(index)->hp_max = CAST_HP_MAX;
+    }
+
+    cast_targets[0] = CAST_A;
+    cast_targets[1] = CAST_B;
+    cast_targets[2] = CAST_C;
+}
+
+static void cast_capture_into(struct cast_capture *into)
+{
+    int cell;
+
+    memcpy(into->units, unit_block, sizeof(into->units));
+    for (cell = 0; cell < CAST_QUEUE_WATCH; cell++) {
+        into->glyphs[cell] = data_fdps_indicator_queue_glyph_ids[cell];
+        into->owners[cell] = data_fdps_battle_indicator_queue_unit_idx[cell];
+    }
+    into->cursor_mode = data_fdps_map_cursor_draw_mode;
+    into->cursor_world_x = data_fdps_map_cursor_world_x;
+    into->cursor_world_y = data_fdps_map_cursor_world_y;
+    into->origin_x = data_fdps_battle_view_window_origin_x;
+    into->origin_y = data_fdps_battle_view_window_origin_y;
+    into->min_dx = cast_min_dx;
+    into->max_dx = cast_max_dx;
+    into->min_dy = cast_min_dy;
+    into->max_dy = cast_max_dy;
+    into->offset_samples = cast_offset_samples;
+    into->triples = cast_triples;
+    for (cell = 0; cell < CAST_TRIPLES_MAX; cell++) {
+        into->triple_a[cell] = cast_triple_a[cell];
+        into->triple_b[cell] = cast_triple_b[cell];
+        into->triple_c[cell] = cast_triple_c[cell];
+    }
+}
+
+/* One whole cast, with the adapter in the mode the game plays in and the
+   handler installed for the duration. */
+static void cast_run(int spell_id, int target_count,
+                     struct cast_capture *into)
+{
+    int cell;
+
+    for (cell = 0; cell < INDICATOR_QUEUE_CELLS; cell++) {
+        data_fdps_indicator_queue_glyph_ids[cell] = CAST_QUEUE_SENTINEL;
+        data_fdps_battle_indicator_queue_unit_idx[cell] = CAST_QUEUE_SENTINEL;
+        data_fdps_indicator_queue_cell_x_offset[cell] = CAST_QUEUE_SENTINEL;
+    }
+    data_fdps_indicator_queue_count = 0;
+
+    cast_base_origin_x = data_fdps_battle_view_window_origin_x;
+    cast_base_origin_y = data_fdps_battle_view_window_origin_y;
+    cast_min_dx = 0;
+    cast_max_dx = 0;
+    cast_min_dy = 0;
+    cast_max_dy = 0;
+    cast_offset_samples = 0;
+    cast_triples = 0;
+    cast_last_a = 0;
+    cast_last_b = 0;
+    cast_last_c = 0;
+
+    data_fdps_map_cursor_draw_mode = CAST_CURSOR_SENTINEL;
+
+    flash_set_mode(FLASH_MODE_320X200X256);
+    memset((void *) FLASH_VGA_BASE, 0, (size_t) FLASH_SCREEN_BYTES);
+
+    cast_saved_timer = _dos_getvect(FLASH_TIMER_VECTOR);
+    _dos_setvect(FLASH_TIMER_VECTOR, cast_timer_isr);
+    data_fdps_view_frame_last_tick = data_fdps_timer_tick_counter;
+    fdps_cast_spell_on_targets(CAST_CASTER, spell_id, target_count,
+                               cast_targets);
+    _dos_setvect(FLASH_TIMER_VECTOR, cast_saved_timer);
+
+    flash_set_mode(FLASH_MODE_TEXT);
+
+    cast_capture_into(into);
+}
+
+static struct fdps_unit_record *cast_unit(struct cast_capture *cap, int index)
+{
+    return (struct fdps_unit_record *)
+        (cap->units + index * UNIT_RECORD_STRIDE);
+}
+
+static struct cast_capture cast_haste_cap;
+static int cast_haste_done;
+
+/* 神行術 over two of the three placed units, with every acted bit set going in
+   and the third unit left out of the list as the witness. */
+static void cast_haste_baseline(void)
+{
+    if (cast_haste_done != 0) {
+        return;
+    }
+
+    cast_stage();
+    stage_cost(CAST_HASTE, CAST_HASTE_COST);
+    unit(CAST_A)->flags = 0xff;
+    unit(CAST_B)->flags = 0xff;
+    unit(CAST_C)->flags = 0xff;
+
+    cast_run(CAST_HASTE, 2, &cast_haste_cap);
+    cast_haste_done = 1;
+}
+
+/* The charge is the record's cost byte off the caster's current MP, and it is
+   made whatever the spell goes on to do. */
+static void a_cast_charges_the_casters_mp(void)
+{
+    cast_haste_baseline();
+
+    CHECK_EQ(cast_unit(&cast_haste_cap, CAST_CASTER)->mp_current,
+             CAST_MP_START - CAST_HASTE_COST);
+    CHECK_EQ(cast_unit(&cast_haste_cap, CAST_CASTER)->mp_max, 0);
+}
+
+/* Bit 7 comes off every listed target and off nothing else.  The mask is 0x7f,
+   so the other seven bits of the flags byte have to survive. */
+static void haste_clears_the_acted_bit_of_every_target(void)
+{
+    cast_haste_baseline();
+
+    CHECK_EQ(cast_unit(&cast_haste_cap, CAST_A)->flags, 0x7f);
+    CHECK_EQ(cast_unit(&cast_haste_cap, CAST_B)->flags, 0x7f);
+    CHECK_EQ(cast_unit(&cast_haste_cap, CAST_C)->flags, 0xff);
+}
+
+/* Nothing floats over a hasted unit: the arm has no indicator call in it. */
+static void haste_queues_no_popup(void)
+{
+    cast_haste_baseline();
+
+    CHECK_EQ(cast_haste_cap.glyphs[0], CAST_QUEUE_SENTINEL);
+    CHECK_EQ(cast_haste_cap.glyphs[1], CAST_QUEUE_SENTINEL);
+}
+
+/* The cursor mode is 1 when the call returns whatever it was before, so the
+   caller gets the plain cursor back and not the one it had. */
+static void the_cast_leaves_the_map_cursor_in_plain_mode(void)
+{
+    cast_haste_baseline();
+
+    CHECK_EQ(cast_haste_cap.cursor_mode, CAST_CURSOR_PLAIN);
+}
+
+static struct cast_capture cast_teleport_cap;
+static int cast_teleport_done;
+
+/* 傳送術 over two targets, with a destination tile that is neither unit's own
+   and a cost that fills the whole byte. */
+static void cast_teleport_baseline(void)
+{
+    if (cast_teleport_done != 0) {
+        return;
+    }
+
+    cast_stage();
+    stage_cost(CAST_TELEPORT, 0xff);
+    data_fdps_battle_teleport_dest_tile_x = CAST_DEST_TILE_X;
+    data_fdps_teleport_destination_tile_y = CAST_DEST_TILE_Y;
+    data_fdps_map_cursor_world_x =
+        (CAST_DEST_TILE_X - 1) * CAST_TILE_PIXELS;
+    data_fdps_map_cursor_world_y = CAST_DEST_TILE_Y * CAST_TILE_PIXELS;
+
+    cast_run(CAST_TELEPORT, 2, &cast_teleport_cap);
+    cast_teleport_done = 1;
+}
+
+/* The first entry of the array is moved to the destination tile and the second
+   one is not moved at all, however many targets were listed. */
+static void only_the_first_target_is_teleported(void)
+{
+    cast_teleport_baseline();
+
+    CHECK_EQ(cast_unit(&cast_teleport_cap, CAST_A)->pos_x, CAST_DEST_TILE_X);
+    CHECK_EQ(cast_unit(&cast_teleport_cap, CAST_A)->pos_y, CAST_DEST_TILE_Y);
+    CHECK_EQ(cast_unit(&cast_teleport_cap, CAST_B)->pos_x, CAST_B_TILE_X);
+    CHECK_EQ(cast_unit(&cast_teleport_cap, CAST_B)->pos_y, CAST_B_TILE_Y);
+}
+
+/* The scroll is asked for in pixels and the record is written in tiles: the
+   cursor walk ends on the destination tile times the 24-pixel tile size, and
+   the same two globals go into the record as plain bytes.  A rebuild that
+   scaled the record write, or handed the scroll the unscaled tile numbers,
+   would move one of the two and not the other. */
+static void the_teleport_scrolls_to_the_destination_in_pixels(void)
+{
+    cast_teleport_baseline();
+
+    CHECK_EQ(cast_teleport_cap.cursor_world_x,
+             CAST_DEST_TILE_X * CAST_TILE_PIXELS);
+    CHECK_EQ(cast_teleport_cap.cursor_world_y,
+             CAST_DEST_TILE_Y * CAST_TILE_PIXELS);
+}
+
+/* A cost byte of 0xff is 255 and not -1, and the difference is stored back
+   through a signed word, so 50 - 255 comes out as -205 rather than 51 or a
+   floor at zero. */
+static void the_charge_reads_the_cost_byte_unsigned(void)
+{
+    cast_teleport_baseline();
+
+    CHECK_EQ(cast_unit(&cast_teleport_cap, CAST_CASTER)->mp_current,
+             CAST_MP_START - 0xff);
+}
+
+/* The arrival is drawn with the animation, not with a popup. */
+static void teleport_queues_no_popup(void)
+{
+    cast_teleport_baseline();
+
+    CHECK_EQ(cast_teleport_cap.glyphs[0], CAST_QUEUE_SENTINEL);
+}
+
+static struct cast_capture cast_cure_cap;
+static int cast_cure_done;
+
+/* 甦癒術 over one target carrying all three ailments and one carrying none,
+   both of them with all three buff slots running. */
+static void cast_cure_baseline(void)
+{
+    if (cast_cure_done != 0) {
+        return;
+    }
+
+    cast_stage();
+    stage_cost(CAST_CURE, CAST_MP_COST);
+
+    unit(CAST_A)->status_timers[0] = 7;
+    unit(CAST_A)->status_timers[1] = 8;
+    unit(CAST_A)->status_timers[2] = 9;
+    unit(CAST_A)->status_timers[CAST_AILMENT_FIRST] = 1;
+    unit(CAST_A)->status_timers[CAST_AILMENT_FIRST + 1] = 2;
+    unit(CAST_A)->status_timers[CAST_AILMENT_FIRST + 2] = 3;
+    unit(CAST_B)->status_timers[0] = 7;
+
+    cast_run(CAST_CURE, 2, &cast_cure_cap);
+    cast_cure_done = 1;
+}
+
+/* The clear is three bytes at slot 3, so the three buff slots below it have to
+   come through untouched, and it runs on the clean target as well. */
+static void the_cure_clears_the_three_ailment_slots_and_no_others(void)
+{
+    cast_cure_baseline();
+
+    CHECK_EQ(cast_unit(&cast_cure_cap, CAST_A)->
+                 status_timers[CAST_AILMENT_FIRST], 0);
+    CHECK_EQ(cast_unit(&cast_cure_cap, CAST_A)->
+                 status_timers[CAST_AILMENT_FIRST + 1], 0);
+    CHECK_EQ(cast_unit(&cast_cure_cap, CAST_A)->
+                 status_timers[CAST_AILMENT_FIRST + 2], 0);
+    CHECK_EQ(cast_unit(&cast_cure_cap, CAST_A)->status_timers[0], 7);
+    CHECK_EQ(cast_unit(&cast_cure_cap, CAST_A)->status_timers[1], 8);
+    CHECK_EQ(cast_unit(&cast_cure_cap, CAST_A)->status_timers[2], 9);
+    CHECK_EQ(cast_unit(&cast_cure_cap, CAST_B)->status_timers[0], 7);
+}
+
+/* Only the target that had something to cure gets the popup, and it is four
+   cells of the fixed word charged to that target's own index. */
+static void the_cure_popup_goes_to_the_ailing_target_alone(void)
+{
+    cast_cure_baseline();
+
+    CHECK_EQ(cast_cure_cap.glyphs[0], CAST_CURE_C);
+    CHECK_EQ(cast_cure_cap.glyphs[1], CAST_CURE_U);
+    CHECK_EQ(cast_cure_cap.glyphs[2], CAST_CURE_R);
+    CHECK_EQ(cast_cure_cap.glyphs[3], CAST_CURE_E);
+    CHECK_EQ(cast_cure_cap.owners[0], CAST_A);
+    CHECK_EQ(cast_cure_cap.glyphs[4], CAST_QUEUE_SENTINEL);
+}
+
+static struct cast_capture cast_heal_cap;
+static int cast_heal_done;
+
+/* 恢復之光 over two wounded targets, with a power inside the band where the
+   heal's spread term truncates away. */
+static void cast_heal_baseline(void)
+{
+    if (cast_heal_done != 0) {
+        return;
+    }
+
+    cast_stage();
+    stage_spell(CAST_HEAL, CAST_POWER, CAST_ALWAYS);
+    stage_cost(CAST_HEAL, CAST_MP_COST);
+    unit(CAST_A)->hp_current = CAST_HP_START;
+    unit(CAST_A)->hp_max = CAST_HP_MAX;
+    unit(CAST_B)->hp_current = CAST_HP_START;
+    unit(CAST_B)->hp_max = CAST_HP_MAX;
+
+    cast_run(CAST_HEAL, 2, &cast_heal_cap);
+    cast_heal_done = 1;
+}
+
+/* Every listed target is healed, by the record's power word and not by
+   anything of the caster's. */
+static void a_healing_spell_heals_every_target(void)
+{
+    cast_heal_baseline();
+
+    CHECK_EQ(cast_unit(&cast_heal_cap, CAST_A)->hp_current,
+             CAST_HP_START + CAST_ROLLED);
+    CHECK_EQ(cast_unit(&cast_heal_cap, CAST_B)->hp_current,
+             CAST_HP_START + CAST_ROLLED);
+    CHECK_EQ(cast_unit(&cast_heal_cap, CAST_CASTER)->hp_current, 0);
+    CHECK_EQ(cast_unit(&cast_heal_cap, CAST_CASTER)->mp_current,
+             CAST_MP_START - CAST_MP_COST);
+}
+
+/* The figure floats over each target as its own four-cell popup, right
+   aligned, drawn from glyph base 0x27.  Two targets append eight cells and no
+   more. */
+static void the_healed_figure_floats_from_the_heal_glyph_base(void)
+{
+    cast_heal_baseline();
+
+    CHECK_EQ(cast_heal_cap.glyphs[0], CAST_BLANK_GLYPH);
+    CHECK_EQ(cast_heal_cap.glyphs[1], CAST_BLANK_GLYPH);
+    CHECK_EQ(cast_heal_cap.glyphs[2], CAST_BLANK_GLYPH);
+    CHECK_EQ(cast_heal_cap.glyphs[3], CAST_HEAL_GLYPH_BASE + CAST_ROLLED);
+    CHECK_EQ(cast_heal_cap.owners[3], CAST_A);
+    CHECK_EQ(cast_heal_cap.glyphs[7], CAST_HEAL_GLYPH_BASE + CAST_ROLLED);
+    CHECK_EQ(cast_heal_cap.owners[7], CAST_B);
+    CHECK_EQ(cast_heal_cap.glyphs[8], CAST_QUEUE_SENTINEL);
+}
+
+static struct cast_capture cast_quake_cap;
+static int cast_quake_done;
+
+/* 裂地術 over two targets at full HP: the only arm that shakes the view, and
+   one that falls through to the damage path afterwards.  The second target is
+   given the flying class, which fdps_spell_damage_unit answers 0 for on a
+   ground-shock spell however the hit roll went, and whose staged class record
+   leaves it no magic resistance either -- so its figure is 0 by construction
+   and one run drives both sides of the test on the figure that came back. */
+static void cast_quake_baseline(void)
+{
+    if (cast_quake_done != 0) {
+        return;
+    }
+
+    cast_stage();
+    stage_spell(SPELL_QUAKE, CAST_POWER, CAST_ALWAYS);
+    stage_cost(SPELL_QUAKE, CAST_MP_COST);
+    unit(CAST_A)->hp_current = CAST_FULL_HP;
+    unit(CAST_A)->hp_max = CAST_FULL_HP;
+    unit(CAST_A)->clazz = GROUND_CLASS;
+    unit(CAST_B)->hp_current = CAST_FULL_HP;
+    unit(CAST_B)->hp_max = CAST_FULL_HP;
+    unit(CAST_B)->clazz = FLYING_CLASS;
+
+    cast_run(SPELL_QUAKE, 2, &cast_quake_cap);
+    cast_quake_done = 1;
+}
+
+/* The view is moved off centre on most of the 25 shake frames and is back
+   where it started when the call returns.  The offsets never reach +2 on
+   either axis, which is what says the range is rand() % 4 - 2 and not the
+   symmetric jitter the shape invites, and they do reach the negative side. */
+static void the_ground_shock_jitters_the_view_and_puts_it_back(void)
+{
+    cast_quake_baseline();
+
+    CHECK_EQ(cast_quake_cap.origin_x, 0);
+    CHECK_EQ(cast_quake_cap.origin_y, 0);
+    CHECK_EQ(cast_quake_cap.offset_samples >= CAST_SHAKE_MIN_SAMPLES, 1);
+    CHECK_EQ(cast_quake_cap.offset_samples <= CAST_SHAKE_FRAMES, 1);
+    CHECK_EQ(cast_quake_cap.max_dx <= CAST_SHAKE_MAX_OFFSET, 1);
+    CHECK_EQ(cast_quake_cap.max_dy <= CAST_SHAKE_MAX_OFFSET, 1);
+    CHECK_EQ(cast_quake_cap.min_dx <= CAST_SHAKE_MIN_OFFSET, 1);
+    CHECK_EQ(cast_quake_cap.min_dy <= CAST_SHAKE_MIN_OFFSET, 1);
+}
+
+/* A target that took damage loses that HP and the figure floats over it from
+   glyph base 0, which is the other of the two bases and not the heal's. */
+static void the_damage_figure_floats_from_glyph_base_zero(void)
+{
+    cast_quake_baseline();
+
+    CHECK_EQ(cast_unit(&cast_quake_cap, CAST_A)->hp_current,
+             CAST_FULL_HP - CAST_ROLLED);
+    CHECK_EQ(cast_quake_cap.glyphs[0], CAST_BLANK_GLYPH);
+    CHECK_EQ(cast_quake_cap.glyphs[3], CAST_DAMAGE_GLYPH_BASE + CAST_ROLLED);
+    CHECK_EQ(cast_quake_cap.owners[3], CAST_A);
+}
+
+/* A figure of zero shows MISS instead, and the two outcomes are decided by the
+   value the damage call came back with and by nothing else: both targets were
+   in the same list, on the same spell, at a hit rate that always lands. */
+static void a_damage_figure_of_zero_shows_miss_instead(void)
+{
+    cast_quake_baseline();
+
+    CHECK_EQ(cast_unit(&cast_quake_cap, CAST_B)->hp_current, CAST_FULL_HP);
+    CHECK_EQ(cast_quake_cap.glyphs[4], CAST_MISS_M);
+    CHECK_EQ(cast_quake_cap.glyphs[5], CAST_MISS_I);
+    CHECK_EQ(cast_quake_cap.glyphs[6], CAST_MISS_S);
+    CHECK_EQ(cast_quake_cap.glyphs[7], CAST_MISS_S);
+    CHECK_EQ(cast_quake_cap.owners[4], CAST_B);
+    CHECK_EQ(cast_quake_cap.glyphs[8], CAST_QUEUE_SENTINEL);
+}
+
+static struct cast_capture cast_status_cap;
+static int cast_status_done;
+
+/* 麻痺術 at a hit rate that always lands, over one target whose paralysis slot
+   is already counting down -- which is the one thing the roll refuses on -- and
+   one whose is clear. */
+static void cast_status_baseline(void)
+{
+    if (cast_status_done != 0) {
+        return;
+    }
+
+    cast_stage();
+    stage_spell(CAST_PARALYSIS, 0, CAST_ALWAYS);
+    stage_cost(CAST_PARALYSIS, CAST_MP_COST);
+    unit(CAST_A)->status_timers[CAST_PARALYSIS_SLOT] = CAST_TIMER_OCCUPIED;
+
+    cast_run(CAST_PARALYSIS, 2, &cast_status_cap);
+    cast_status_done = 1;
+}
+
+/* The id reaches the roll as itself, so the timer that moves is the one 0x13
+   selects and neither of its neighbours. */
+static void the_ailment_lands_in_the_slot_its_own_id_names(void)
+{
+    cast_status_baseline();
+
+    CHECK_EQ(cast_unit(&cast_status_cap, CAST_B)->
+                 status_timers[CAST_PARALYSIS_SLOT] >= CAST_TIMER_MIN, 1);
+    CHECK_EQ(cast_unit(&cast_status_cap, CAST_B)->
+                 status_timers[CAST_PARALYSIS_SLOT] <= CAST_TIMER_MAX, 1);
+    CHECK_EQ(cast_unit(&cast_status_cap, CAST_B)->
+                 status_timers[CAST_PARALYSIS_SLOT - 1], 0);
+    CHECK_EQ(cast_unit(&cast_status_cap, CAST_B)->
+                 status_timers[CAST_PARALYSIS_SLOT + 1], 0);
+}
+
+/* A roll that comes back zero shows MISS over that target and leaves its timer
+   as it was; the target it landed on gets no popup at all. */
+static void a_refused_roll_shows_miss_over_that_target_alone(void)
+{
+    cast_status_baseline();
+
+    CHECK_EQ(cast_unit(&cast_status_cap, CAST_A)->
+                 status_timers[CAST_PARALYSIS_SLOT], CAST_TIMER_OCCUPIED);
+    CHECK_EQ(cast_status_cap.glyphs[0], CAST_MISS_M);
+    CHECK_EQ(cast_status_cap.glyphs[1], CAST_MISS_I);
+    CHECK_EQ(cast_status_cap.glyphs[2], CAST_MISS_S);
+    CHECK_EQ(cast_status_cap.glyphs[3], CAST_MISS_S);
+    CHECK_EQ(cast_status_cap.owners[0], CAST_A);
+    CHECK_EQ(cast_status_cap.glyphs[4], CAST_QUEUE_SENTINEL);
+}
+
+static struct cast_capture cast_blessing_cap;
+static int cast_blessing_done;
+
+/* 神之祝福 over three targets, each with exactly one of the three buff slots
+   free, so every pass lands on one target and only one.  Every derived combat
+   word starts at a value no recompute can produce. */
+static void cast_blessing_baseline(void)
+{
+    if (cast_blessing_done != 0) {
+        return;
+    }
+
+    cast_stage();
+    stage_spell(CAST_BLESSING, 0, CAST_ALWAYS);
+    stage_cost(CAST_BLESSING, CAST_MP_COST);
+
+    unit(CAST_A)->status_timers[1] = CAST_TIMER_OCCUPIED;
+    unit(CAST_A)->status_timers[2] = CAST_TIMER_OCCUPIED;
+    unit(CAST_B)->status_timers[0] = CAST_TIMER_OCCUPIED;
+    unit(CAST_B)->status_timers[2] = CAST_TIMER_OCCUPIED;
+    unit(CAST_C)->status_timers[0] = CAST_TIMER_OCCUPIED;
+    unit(CAST_C)->status_timers[1] = CAST_TIMER_OCCUPIED;
+
+    unit(CAST_A)->ap = CAST_STAT_SENTINEL;
+    unit(CAST_A)->ev = CAST_STAT_SENTINEL;
+    unit(CAST_B)->ap = CAST_STAT_SENTINEL;
+    unit(CAST_B)->ev = CAST_STAT_SENTINEL;
+    unit(CAST_C)->ap = CAST_STAT_SENTINEL;
+    unit(CAST_C)->ev = CAST_STAT_SENTINEL;
+    unit(CAST_CASTER)->ap = CAST_STAT_SENTINEL;
+    unit(CAST_CASTER)->ev = CAST_STAT_SENTINEL;
+
+    cast_run(CAST_BLESSING, CAST_BUFF_SLOTS, &cast_blessing_cap);
+    cast_blessing_done = 1;
+}
+
+/* Three passes, and the pass number is what is handed to the roll as the
+   effect id, which is also the timer slot it lands in.  Each target's two
+   occupied slots are still holding the value that made them refuse. */
+static void each_blessing_pass_lands_in_its_own_slot(void)
+{
+    cast_blessing_baseline();
+
+    CHECK_EQ(cast_unit(&cast_blessing_cap, CAST_A)->status_timers[0]
+                 >= CAST_TIMER_MIN, 1);
+    CHECK_EQ(cast_unit(&cast_blessing_cap, CAST_A)->status_timers[0]
+                 <= CAST_TIMER_MAX, 1);
+    CHECK_EQ(cast_unit(&cast_blessing_cap, CAST_A)->status_timers[1],
+             CAST_TIMER_OCCUPIED);
+    CHECK_EQ(cast_unit(&cast_blessing_cap, CAST_B)->status_timers[1]
+                 >= CAST_TIMER_MIN, 1);
+    CHECK_EQ(cast_unit(&cast_blessing_cap, CAST_B)->status_timers[1]
+                 <= CAST_TIMER_MAX, 1);
+    CHECK_EQ(cast_unit(&cast_blessing_cap, CAST_C)->status_timers[2]
+                 >= CAST_TIMER_MIN, 1);
+    CHECK_EQ(cast_unit(&cast_blessing_cap, CAST_C)->status_timers[2]
+                 <= CAST_TIMER_MAX, 1);
+}
+
+/* A landing buff recomputes that target's combat words and nothing recomputes
+   the caster's.  With every base stat at zero the recomputed attack is zero
+   and the evasion is the flat bonus a live third slot adds, so both say the
+   recompute ran rather than merely that something moved. */
+static void a_landing_buff_recomputes_that_targets_combat_stats(void)
+{
+    cast_blessing_baseline();
+
+    CHECK_EQ(cast_unit(&cast_blessing_cap, CAST_A)->ap, 0);
+    CHECK_EQ(cast_unit(&cast_blessing_cap, CAST_B)->ap, 0);
+    CHECK_EQ(cast_unit(&cast_blessing_cap, CAST_C)->ap, 0);
+    CHECK_EQ(cast_unit(&cast_blessing_cap, CAST_C)->ev, CAST_DEX_BONUS);
+    CHECK_EQ(cast_unit(&cast_blessing_cap, CAST_CASTER)->ap,
+             CAST_STAT_SENTINEL);
+    CHECK_EQ(cast_unit(&cast_blessing_cap, CAST_CASTER)->ev,
+             CAST_STAT_SENTINEL);
+}
+
+/* The queue is played out between passes, so the three groups reach the screen
+   one after another and in slot order.  The groups themselves are the twelve
+   bytes the function copies onto its frame before anything else. */
+static void the_three_buff_groups_are_played_one_pass_at_a_time(void)
+{
+    cast_blessing_baseline();
+
+    CHECK_EQ(cast_blessing_cap.triples, CAST_BUFF_SLOTS);
+    CHECK_EQ(cast_blessing_cap.triple_a[0], CAST_BUFF0_A);
+    CHECK_EQ(cast_blessing_cap.triple_b[0], CAST_BUFF0_B);
+    CHECK_EQ(cast_blessing_cap.triple_c[0], CAST_BUFF0_C);
+    CHECK_EQ(cast_blessing_cap.triple_a[1], CAST_BUFF1_A);
+    CHECK_EQ(cast_blessing_cap.triple_b[1], CAST_BUFF1_B);
+    CHECK_EQ(cast_blessing_cap.triple_c[1], CAST_BUFF1_C);
+    CHECK_EQ(cast_blessing_cap.triple_a[2], CAST_BUFF2_A);
+    CHECK_EQ(cast_blessing_cap.triple_b[2], CAST_BUFF2_B);
+    CHECK_EQ(cast_blessing_cap.triple_c[2], CAST_BUFF2_C);
+}
+
+/* The fourth byte of a group is a terminator and not a sprite: three cells are
+   appended per landing buff, so the fourth cell of the queue is still holding
+   what the run put there. */
+static void the_fourth_byte_of_a_buff_group_queues_nothing(void)
+{
+    cast_blessing_baseline();
+
+    CHECK_EQ(cast_blessing_cap.glyphs[0], CAST_BUFF2_A);
+    CHECK_EQ(cast_blessing_cap.glyphs[1], CAST_BUFF2_B);
+    CHECK_EQ(cast_blessing_cap.glyphs[2], CAST_BUFF2_C);
+    CHECK_EQ(cast_blessing_cap.glyphs[3], CAST_QUEUE_SENTINEL);
+}
+
+/* The record offsets this function addresses by hand, against the layouts
+   ticket 17 settled: the tile position the teleport writes, the flags byte the
+   haste masks, the ailment triple the cure clears at slot 3, and the MP word
+   the charge reads and writes. */
+static void the_offsets_the_cast_reaches_are_where_ticket_17_puts_them(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0x00);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 0x01);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 0x05);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers), 0x22);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers)
+                 + CAST_AILMENT_FIRST, 0x25);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, mp_current), 0x44);
+    CHECK_EQ((int) offsetof(struct fdps_spell_effect, power), 0x00);
+    CHECK_EQ((int) offsetof(struct fdps_spell_effect, mp_cost), 0x05);
+}
+
 void run_spell_tests(void)
 {
     RUN_TEST(the_record_layouts_match_the_offsets_read);
@@ -1753,4 +2758,27 @@ void run_spell_tests(void)
     RUN_TEST(the_flash_presents_four_passes_alternating_with_black);
     RUN_TEST(the_flash_leaves_dac_entry_zero_black);
     RUN_TEST(nothing_but_dac_entry_zero_is_written);
+
+    RUN_TEST(the_offsets_the_cast_reaches_are_where_ticket_17_puts_them);
+    RUN_TEST(a_cast_charges_the_casters_mp);
+    RUN_TEST(haste_clears_the_acted_bit_of_every_target);
+    RUN_TEST(haste_queues_no_popup);
+    RUN_TEST(the_cast_leaves_the_map_cursor_in_plain_mode);
+    RUN_TEST(only_the_first_target_is_teleported);
+    RUN_TEST(the_teleport_scrolls_to_the_destination_in_pixels);
+    RUN_TEST(the_charge_reads_the_cost_byte_unsigned);
+    RUN_TEST(teleport_queues_no_popup);
+    RUN_TEST(the_cure_clears_the_three_ailment_slots_and_no_others);
+    RUN_TEST(the_cure_popup_goes_to_the_ailing_target_alone);
+    RUN_TEST(a_healing_spell_heals_every_target);
+    RUN_TEST(the_healed_figure_floats_from_the_heal_glyph_base);
+    RUN_TEST(the_ground_shock_jitters_the_view_and_puts_it_back);
+    RUN_TEST(the_damage_figure_floats_from_glyph_base_zero);
+    RUN_TEST(a_damage_figure_of_zero_shows_miss_instead);
+    RUN_TEST(the_ailment_lands_in_the_slot_its_own_id_names);
+    RUN_TEST(a_refused_roll_shows_miss_over_that_target_alone);
+    RUN_TEST(each_blessing_pass_lands_in_its_own_slot);
+    RUN_TEST(a_landing_buff_recomputes_that_targets_combat_stats);
+    RUN_TEST(the_three_buff_groups_are_played_one_pass_at_a_time);
+    RUN_TEST(the_fourth_byte_of_a_buff_group_queues_nothing);
 }

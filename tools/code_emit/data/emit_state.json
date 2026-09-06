@@ -2693,6 +2693,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x175"
+    },
+    "000288f0": {
+      "name": "fdps_cast_spell_on_targets",
+      "target": "spell.c",
+      "body_size": "0x5ed",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x5ed"
     }
   }
 }

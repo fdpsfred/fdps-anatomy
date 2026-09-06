@@ -102,6 +102,23 @@ extern int data_fdps_map_unit_walk_anim_counter;
 extern int data_fdps_battle_view_window_origin_x;
 extern int data_fdps_battle_view_window_origin_y;
 
+/* 0006437c and 00064380.  The map tile a teleport is aimed at, in tiles rather
+   than pixels.  The two menus that can start one write them -- the item menu
+   at 00025647 and 0002565e and the battle spell command at 0002801c and
+   00028033 -- and fdps_cast_spell_on_targets is the only reader.
+
+   They are read at two different widths and both are the original's.  The
+   scroll that brings the destination into view multiplies the whole dword by
+   the 0x18 tile size, IMUL EAX,dword ptr [0x00064380],0x18 at 00028b65, and
+   the store into the teleported unit's own tile position takes the low byte,
+   MOV DL,byte ptr [0x0006437c] at 00028b93 into a record field that is one
+   byte wide.
+
+   Two globals, not a pair: every reference names its own absolute address and
+   nothing indexes across them (rebuild_info/pitfalls.md, contract B). */
+extern int data_fdps_battle_teleport_dest_tile_x;
+extern int data_fdps_teleport_destination_tile_y;
+
 /* 00069c98 and 00069cb0.  The loaded scene's six layers, held as two parallel
    arrays of six byte pointers each: the tile map of layer n and the tileset
    attribute table of layer n.  The battle map is layer 0 and is the only one

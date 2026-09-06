@@ -140,6 +140,42 @@ extern void fdps_spell_deduct_mp_cost(int unit_index, int spell_id);
 extern void fdps_play_spell_11_cutscene(void);
 #pragma aux fdps_play_spell_11_cutscene "*" parm caller [];
 
+/* Casts one spell over the battle map: charges the caster's MP, plays the
+   spell's presentation on the map itself rather than on the full-screen combat
+   screen, and then resolves the spell against every listed target.  Takes the
+   casting unit's index into the map unit array, the MAGICDAT.DAT spell id, how
+   many targets there are and a caller-owned array of that many unit indices,
+   one byte each.  Returns nothing.
+
+   The presentation is a screen flash in the spell's colour, then MISC.VFS's
+   Emg<id>.saf drawn over every target's map cell.  Two spells add to it:
+   封神裂震 plays its own full-screen cutscene first, and 鎮魂之歌 plays
+   Emg33-1.saf over the live scene.  裂地術 and 封神裂震 also shake the view
+   for 25 frames with EarQu.wav under it.  The map cursor is switched off for
+   the whole of it and switched back to plain mode on the way out, so a caller
+   that had a selection cursor up gets the plain one back.
+
+   What the spell then does to each target depends on its id: the four healing
+   spells raise HP by the record's power, 傳送術 moves the FIRST target only to
+   the tile the two teleport globals name, 神行術 clears the acted-this-turn
+   bit, 甦癒術 clears the three ailment timers, the three ailment spells and
+   神之祝福 roll fdps_unit_apply_status_effect, and every other id is damage
+   through fdps_spell_damage_unit.  Each of those floats its own popup over the
+   target, and the queue is played out before the call returns.
+
+   The caster's MP is charged whatever the id is and whatever the outcome, with
+   no affordability test and no floor; the callers check what the unit can
+   afford before they get here.  Nothing bounds-checks the spell id, the target
+   count or the indices in the array.
+
+   The function reads and writes data_fdps_map_cursor_draw_mode and the two
+   battle view origins, reads the two teleport tile globals (gamedata.h), and
+   writes the unit records the target indices name. */
+extern void fdps_cast_spell_on_targets(int caster_unit_index, int spell_id,
+                                       int target_count,
+                                       unsigned char *target_unit_indices);
+#pragma aux fdps_cast_spell_on_targets "*" parm caller [];
+
 /* Strobes DAC entry 0 between one spell's signature colour and black, four
    times, and presents a frame of the battle view in each.  Takes the spell's
    MAGICDAT.DAT record index and returns nothing; the only caller is

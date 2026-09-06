@@ -1921,5 +1921,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "000288f0": [
+    {
+      "what": "The 鬼動死靈陣 (0x0d) arm of the damage path calls fdps_unit_inflict_random_ailments on a target it damaged, and nothing in the test image asserts that it does. The call itself is emitted straight off CALL 0x00028ee0 at 00028e90 under CMP dword ptr [EBP+0x18],0xd / JNZ at 00028e7c, so the branch is not in doubt; what cannot be observed is the effect. That routine lands each of three ailments on a flat one draw in five (unitstat.c), so a single cast leaves the record untouched about half the time, and the cast costs some seventy timer ticks, which puts repeating it enough times out of reach of a unit-test image.",
+      "needs": "Either a way to count the draws one cast takes out of the shared rand() stream -- which would separate the arm that rolls three extra values from the one that does not, and which this image has no way to observe because rand() cannot be interposed on -- or the manual playtest: casting 鬼動死靈陣 in DOSBox-X and watching whether a damaged target picks up poison, paralysis or the seal. Until then the arm is emitted and unasserted.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed independently and added a reason the gap cannot be closed in this image rather than merely left open. The 0x0d arm is not in doubt -- CMP dword ptr [EBP+0x18],0xd / JNZ at 00028e7c with CALL 0x00028ee0 at 00028e90, inside the non-zero-damage branch -- so what is unasserted is only the effect. I checked whether the test image could pin it statistically the way the shake test does: fdps_unit_inflict_random_ailments rolls rand() % 100 < AILMENT_CHANCE independently for each of three slots (src/unitstat.c around line 419) and refuses nothing, and the shared fixture is STAGE_UNITS 4, which leaves at most three targets once the caster is placed. Nine independent 20% rolls means about one run in eight lands nothing at all, so an assertion over one cast would flake at roughly 13% -- two orders of magnitude worse than the odds the emitter accepted elsewhere in this file. Widening the fixture would change a shared constant that the already-committed damage, heal and flash parts of tests/spell.c also build on. So the gap is genuine and the playtest really is where it gets settled.",
+      "needs": "The manual playtest the emitter names: cast 鬼動死靈陣 on the battle map in DOSBox-X and watch whether a damaged target picks up poison, paralysis or the seal.",
+      "status": "open",
+      "from": "review",
+      "same_as": "emit#0"
+    }
   ]
 }

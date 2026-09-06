@@ -5861,7 +5861,7 @@ fdps_play_vfs_animation_over_units(target_count, target_unit_indices, name) draw
 
   0x16 (神行術) -- clears bit 7 of each target's record byte +0x05, the bit fdps_battle_mark_unit_done sets, so the target may act again this turn.
 
-  0x18 (甦癒術) -- for each target whose ailment bytes at +0x25..+0x27 are not all zero, fdps_queue_status_cured_popup queues the cured mark; then memset clears those three bytes.
+  0x18 (甦癒術) -- for each target whose ailment bytes at +0x25..+0x27 are not all zero, fdps_show_cure_indicator queues the cured mark; then memset clears those three bytes.
 
   0x11 (封魔咒術) -- fdps_flash_units_in_color(target_count, target_unit_indices, 0x2b) runs twice back to back, then fdps_unit_apply_status_effect(0x11, target) is rolled on each target, with fdps_show_miss_indicator on the targets it fails against.
 
@@ -5873,7 +5873,7 @@ fdps_play_vfs_animation_over_units(target_count, target_unit_indices, name) draw
 
 Every path converges on a final fdps_play_indicator_queue, sets DAT_00069cd0 to 1 so the plain map cursor is drawn again, and frees the EarQu.wav buffer if one was loaded.
 
-The two callers both reach it with the same four arguments. fdps_map_actor_cast_chosen_spell calls it directly when the battle-animation option byte DAT_00060010 is not 1, and otherwise goes through FUN_0001a4c0, which forwards to this function anyway for spell ids 0x0a, 0x0b, 0x0e-0x16, 0x18 and 0x21 -- the spells that have no full-screen presentation of their own.
+The two callers both reach it with the same four arguments. fdps_map_actor_cast_chosen_spell calls it directly when the battle-animation option byte DAT_00060010 is not 1, and otherwise goes through fdps_combat_play_spell_on_targets, which forwards to this function anyway for spell ids 0x0a, 0x0b, 0x0e-0x16, 0x18 and 0x21 -- the spells that have no full-screen presentation of their own.
 
 Parameters:
   caster_unit_index -- index into the 0x50-byte unit array at DAT_00069cd8 of the unit casting the spell. Its MP pays the cost and it is the attacker fdps_spell_damage_unit scores the damage from. Both callers pass their own unit index straight through.

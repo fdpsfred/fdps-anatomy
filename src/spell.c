@@ -16,6 +16,7 @@
  * the string, character and port routines, -oi, is not in this build's set
  * (rebuild_info/build_flags.md).
  */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <conio.h>
@@ -26,8 +27,12 @@
 #include "unitstat.h"
 #include "vfs.h"
 #include "saf.h"
+#include "anim.h"
+#include "audio.h"
 #include "blit.h"
 #include "sprite.h"
+#include "indicat.h"
+#include "mapcur.h"
 #include "palette.h"
 #include "mapdraw.h"
 #include "spell.h"
@@ -462,6 +467,368 @@ void fdps_play_spell_11_cutscene(void)
             fade_step * FLASH_FADE_BIAS_PER_STEP,
             fade_step * FLASH_FADE_BIAS_PER_STEP);
         fdps_render_view_frame();
+    }
+}
+
+/* The container every clip and the ground-shock sample come out of, and the
+   format the map animation's member name is built with -- MOV EAX,0x60128 at
+   000289c4 and 00028a03, MOV EAX,0x61bbc at 00028980 and 0002899e.  All three
+   member names below reach fdps_vfs_load_entry, which upper-cases its argument
+   IN PLACE before the compare (vfs.h), so none of them may be moved into
+   read-only storage; the container name is copied raw and is left alone.
+ *
+ * REBUILD NOTE, and the one thing in here that reads like an off-by-one.
+ * Spell 0x0b 封神裂震 formats spell_id - 1 and so plays Emg10.saf, 裂地術's
+ * animation: CMP dword ptr [EBP+0x18],0xb / JZ at 00028976 picks the branch
+ * and DEC EAX at 00028997 is the subtraction.  MISC.VFS holds EMG10.SAF and no
+ * EMG11.SAF at all, so writing the obvious single
+ * sprintf(name, "Emg%02d.saf", spell_id) for every id -- or "correcting" the
+ * -1 -- sends 封神裂震 into fdps_vfs_load_entry after a member the container
+ * does not have, and that ends the process. */
+#define SPELL_MAP_ARCHIVE "MISC.VFS"
+#define SPELL_MAP_ANIM_FORMAT "Emg%02d.saf"
+#define SPELL_REQUIEM_CLIP "Emg33-1.saf"
+#define SPELL_QUAKE_SAMPLE "EarQu.wav"
+
+/* The name buffer is the 20 bytes of frame between [EBP-0x44] and [EBP-0x30],
+   and 11 characters and a terminator is all that is ever put in it. */
+#define SPELL_ANIM_NAME_MAX 20
+
+/* The shake: 25 frames -- CMP dword ptr [EBP-0x20],0x19 / JL at 00028a3d --
+   each offsetting both view origins by rand() % 4 - 2.  MOV EBX,0x4 / IDIV EBX
+   / SUB EDX,0x2 at 00028a54 and again at 00028a6d, so the offset runs -2 to +1
+   and NOT -2 to +2: the shake leans one pixel up and left of centre. */
+#define SPELL_SHAKE_FRAMES 0x19
+#define SPELL_SHAKE_SPREAD 4
+#define SPELL_SHAKE_BIAS 2
+
+/* PUSH 0x1 at 00028a18 with the two -1s before it: the sample is played once
+   at the rate and volume its own header names (audio.h). */
+#define SPELL_SAMPLE_PLAY_ONCE 1
+
+/* The ids that resolve to something other than damage.  裂地術 and 封神裂震
+   are SPELL_QUAKE and SPELL_GREAT_QUAKE above; those two pick the shake rather
+   than an effect of their own and fall through to the damage path. */
+#define SPELL_FIRST_HEAL 0x0e       /* 恢復之光 */
+#define SPELL_LAST_HEAL 0x10        /* 痊癒之泉 */
+#define SPELL_NECROMANCY 0x0d       /* 鬼動死靈陣 */
+#define SPELL_SEAL 0x11             /* 封魔咒術 */
+#define SPELL_POISON 0x12           /* 腐毒術 */
+#define SPELL_PARALYSIS 0x13        /* 麻痺術 */
+#define SPELL_BLESSING 0x14         /* 神之祝福 */
+#define SPELL_TELEPORT 0x15         /* 傳送術 */
+#define SPELL_HASTE 0x16            /* 神行術 */
+#define SPELL_REVIVE 0x18           /* 甦癒術 */
+#define SPELL_REQUIEM 0x21          /* 鎮魂之歌 */
+
+/* 神之祝福's three passes are the first three status_timers slots, and the
+   sprite table has one four-byte group per slot: three sprite ids and a 0,
+   which is the id fdps_show_sprite_indicator treats as "no cell" (indicat.h),
+   so each landing buff floats three sprites and not four. */
+#define BUFF_SLOT_COUNT 3
+#define BUFF_SPRITE_CELLS 4
+
+/* The three ailment timers 甦癒術 clears are record +0x25 to +0x27, and
+   status_timers itself starts at +0x22, so they are slots 3, 4 and 5 -- the
+   same three fdps_unit_apply_status_effect assigns to 封魔咒術, 腐毒術 and
+   麻痺術 (unitstat.h).  Slots 0 to 2 are the buffs and are not cleared. */
+#define AILMENT_FIRST_TIMER_SLOT 3
+#define AILMENT_TIMER_SLOTS 3
+
+/* AND byte ptr [EAX+0x5],0x7f at 00028bfe.  Bit 7 of the record's flags byte
+   is the one fdps_battle_mark_unit_done sets when a unit has acted, so 神行術
+   hands the turn back by clearing it. */
+#define UNIT_NOT_DONE_MASK 0x7f
+
+/* PUSH 0x27 at 00028b4a and PUSH 0x0 at 00028e6e: the glyph a healed figure's
+   digits are drawn from and the one a damage figure's are, both handed to
+   fdps_show_number_indicator as the base its digit is added to (indicat.h). */
+#define HEAL_GLYPH_BASE 0x27
+#define DAMAGE_GLYPH_BASE 0
+
+/* PUSH 0x2b at 00028c9f and 00028cb1: the palette index 封魔咒術 washes its
+   targets in, twice over. */
+#define SEAL_FLASH_COLOR 0x2b
+
+/* IMUL by 0x18 at 00028b65 and 00028b6d.  A map tile is 24 pixels square, so
+   the teleport globals are scaled into the pixel coordinates
+   fdps_map_cursor_move_to scrolls to. */
+#define MAP_TILE_SIZE 0x18
+
+/* MOV dword ptr [0x00069cd0],0x0 at 0002890e and 0x1 at 00028eba: no cursor at
+   all while the spell plays, and the plain one afterwards (gamedata.h). */
+#define MAP_CURSOR_OFF 0
+#define MAP_CURSOR_PLAIN 1
+
+/* 000288f0.  One spell, one list of map targets, presentation and effect.
+ *
+ * The frame is the plain -4s one -- PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP,
+ * SUB ESP,0x7c -- with the four arguments read from [EBP+0x14] through
+ * [EBP+0x20] and a bare RET.  Both call sites, 00013da5 in
+ * fdps_map_actor_cast_chosen_spell and 0001a551 in
+ * fdps_combat_play_spell_on_targets, push the four in reverse and follow the
+ * CALL with ADD ESP,0x10, so the caller cleans up.  Neither reads EAX
+ * afterwards and no path here sets it deliberately: the function returns
+ * nothing.
+ *
+ * TWO OF THE STEPS BELOW ARE INLINE EXPANSIONS, not a body written twice.  The
+ * MP charge is fdps_spell_deduct_mp_cost and the heal loop's first three lines
+ * are fdps_spell_heal_unit, both of them above in this file, and both expanded
+ * into this frame with the fingerprint build_flags.md describes: a run of
+ * parameter-shaped slots as wide as the callee's parameter list, the callee's
+ * body replayed instruction for instruction against them, and for the heal a
+ * separate result slot the answer is copied out of.  Watcom 10.0a still honours
+ * a source-level _inline under -od.  They are written open-coded here because
+ * ADR-0001 asks for the behaviour and not the source text, and because turning
+ * either back into a call without also declaring it _inline would put a CALL in
+ * the rebuild that the original does not execute.
+ *
+ * THE FOUR VALUES THAT COME BACK FROM A CALL.  fdps_get_spell_record and
+ * fdps_get_unit_record hand back pointers that are dereferenced at once.
+ * fdps_unit_apply_heal's EAX is stored at 00028b33 and floated over the target;
+ * it is the roll and not the HP the target actually gained (unitstat.h).
+ * fdps_spell_damage_unit's EAX is stored at 00028e57 and decides between the
+ * number and the MISS.  fdps_unit_apply_status_effect's EAX is NOT stored
+ * anywhere -- TEST EAX,EAX at 00028cf4, 00028d54 and 00028dcc test the register
+ * the CALL left -- so it is used straight out of the condition here as well.
+ *
+ * THE ANIMATION IS PLAYED TWICE FOR 傳送術 and once for everything else: the
+ * second call at 00028bb6 comes after the target's tile position has been
+ * rewritten, so the same clip is drawn again on the cell the target arrived at.
+ * Only the first target is moved, and the array's remaining entries are still
+ * handed to the second playback, so a multi-target teleport draws the arrival
+ * clip over units that did not move.  That is what the original does.
+ *
+ * THE MP IS CHARGED BEFORE ANYTHING IS PRESENTED and it is charged whatever
+ * happens afterwards -- a spell that misses every target still costs its full
+ * MP.  Nothing here tests whether the caster can afford it, and the
+ * subtraction has no floor (fdps_spell_deduct_mp_cost above).
+ *
+ * WHAT THE CURSOR GLOBAL IS LEFT AT.  The mode is cleared to 0 at the very top,
+ * before the flash, and set to 1 at the very bottom, so a caller that had the
+ * selection cursor up before the cast does not get it back: it gets the plain
+ * one.  Every branch converges on that single tail. */
+void fdps_cast_spell_on_targets(int caster_unit_index, int spell_id,
+                                int target_count,
+                                unsigned char *target_unit_indices)
+{
+    /* MISC.VFS's EarQu.wav while a ground-shock spell is playing and NULL on
+       every other path.  The test at the bottom is what makes one free() serve
+       both, so the initialiser at 000288fc is load-bearing. */
+    void *quake_sample = NULL;
+    /* One four-byte group per 神之祝福 slot, copied out of the initialiser
+       image at 00027668 by the three MOVSD at 0002890b.  Three floating sprite
+       ids and a 0 terminator each. */
+    unsigned char buff_sprites[BUFF_SLOT_COUNT][BUFF_SPRITE_CELLS] = {
+        { 0x3b, 0x3c, 0x3c, 0x00 },
+        { 0x3d, 0x3e, 0x3f, 0x00 },
+        { 0x3d, 0x3e, 0x40, 0x00 }
+    };
+    /* "Emg%02d.saf" resolved for this spell, and the buffer sprintf builds it
+       in.  It is handed on to fdps_vfs_load_entry, which upper-cases it where
+       it lies, so it has to be this writable stack buffer. */
+    char anim_name[SPELL_ANIM_NAME_MAX];
+    /* 鎮魂之歌's extra clip, loaded, played and freed on the spot. */
+    void *requiem_clip;
+    /* The record of the spell being cast: its MP cost at the top and, in the
+       healing loop, its power. */
+    struct fdps_spell_effect *spell;
+    /* The unit paying for the cast, and the target currently being resolved. */
+    struct fdps_unit_record *caster;
+    struct fdps_unit_record *target;
+    /* The caster's MP before the cost comes off. */
+    int current_mp;
+    /* The healing spell's power word, widened signed out of the record. */
+    int heal_power;
+    /* The target index the healing expansion works from, taken out of the
+       array once and used for the heal itself. */
+    int target_index;
+    /* The figure that floats over the target: what the heal rolled, or what
+       the damage came to. */
+    int amount;
+    /* Where the view sat before the shake, and where it is put back to. */
+    int saved_origin_x;
+    int saved_origin_y;
+    /* This shake frame's offset from that, -2 to +1 on each axis. */
+    int shake_offset_x;
+    int shake_offset_y;
+    /* Which entry of target_unit_indices is being worked on, and during the
+       shake which of the 25 frames is being rendered -- one slot in the frame,
+       [EBP-0x20], serves both. */
+    int i;
+    /* Which of 神之祝福's three slots this pass is rolling. */
+    int buff_slot;
+
+    data_fdps_map_cursor_draw_mode = MAP_CURSOR_OFF;
+    fdps_play_spell_palette_flash(spell_id);
+
+    /* fdps_spell_deduct_mp_cost expanded here: the spell record before the
+       unit record, the caster's current MP widened as a signed word, the
+       record's cost byte zero extended, and the difference stored back as a
+       word. */
+    spell = fdps_get_spell_record(spell_id);
+    caster = fdps_get_unit_record(caster_unit_index);
+    current_mp = caster->mp_current;
+    caster->mp_current = (short) (current_mp - spell->mp_cost);
+
+    if (spell_id == SPELL_GREAT_QUAKE) {
+        sprintf(anim_name, SPELL_MAP_ANIM_FORMAT, spell_id - 1);
+    } else {
+        sprintf(anim_name, SPELL_MAP_ANIM_FORMAT, spell_id);
+    }
+
+    /* The id is tested a second time rather than the two branches above being
+       reused: CMP dword ptr [EBP+0x18],0xb at 000289ab. */
+    if (spell_id == SPELL_GREAT_QUAKE) {
+        fdps_play_spell_11_cutscene();
+    } else if (spell_id == SPELL_REQUIEM) {
+        requiem_clip = fdps_vfs_load_entry(SPELL_MAP_ARCHIVE,
+                                           SPELL_REQUIEM_CLIP);
+        fdps_saf_play_over_scene(requiem_clip);
+        free(requiem_clip);
+    }
+
+    if (spell_id == SPELL_QUAKE || spell_id == SPELL_GREAT_QUAKE) {
+        quake_sample = fdps_vfs_load_entry(SPELL_MAP_ARCHIVE,
+                                           SPELL_QUAKE_SAMPLE);
+        fdps_audio_start_wav(quake_sample, SPELL_SAMPLE_PLAY_ONCE,
+                             SFX_WAV_RATE_FROM_HEADER,
+                             SFX_WAV_VOLUME_FROM_DEFAULT);
+
+        saved_origin_x = data_fdps_battle_view_window_origin_x;
+        saved_origin_y = data_fdps_battle_view_window_origin_y;
+
+        for (i = 0; i < SPELL_SHAKE_FRAMES; i++) {
+            /* Both draws are taken before either origin is written, and both
+               are taken every frame, so the shake costs the shared rand()
+               stream exactly fifty values. */
+            shake_offset_x = rand() % SPELL_SHAKE_SPREAD - SPELL_SHAKE_BIAS;
+            shake_offset_y = rand() % SPELL_SHAKE_SPREAD - SPELL_SHAKE_BIAS;
+            data_fdps_battle_view_window_origin_x =
+                saved_origin_x + shake_offset_x;
+            data_fdps_battle_view_window_origin_y =
+                saved_origin_y + shake_offset_y;
+            fdps_render_view_frame();
+        }
+
+        data_fdps_battle_view_window_origin_x = saved_origin_x;
+        data_fdps_battle_view_window_origin_y = saved_origin_y;
+    }
+
+    fdps_play_vfs_animation_over_units(target_count, target_unit_indices,
+                                       anim_name);
+
+    if ((spell_id >= SPELL_FIRST_HEAL && spell_id <= SPELL_LAST_HEAL)
+        || spell_id == SPELL_REQUIEM) {
+        for (i = 0; i < target_count; i++) {
+            /* fdps_spell_heal_unit expanded here.  The record is fetched
+               afresh inside the loop, once per target. */
+            target_index = target_unit_indices[i];
+            spell = fdps_get_spell_record(spell_id);
+            heal_power = spell->power;
+            amount = fdps_unit_apply_heal(target_index, heal_power);
+
+            fdps_show_number_indicator(amount, HEAL_GLYPH_BASE,
+                                       target_unit_indices[i]);
+        }
+    } else if (spell_id == SPELL_TELEPORT) {
+        fdps_map_cursor_move_to(
+            data_fdps_battle_teleport_dest_tile_x * MAP_TILE_SIZE,
+            data_fdps_teleport_destination_tile_y * MAP_TILE_SIZE);
+
+        target = fdps_get_unit_record((int) target_unit_indices[0]);
+        target->pos_x = (unsigned char) data_fdps_battle_teleport_dest_tile_x;
+        target->pos_y = (unsigned char) data_fdps_teleport_destination_tile_y;
+
+        fdps_play_vfs_animation_over_units(target_count, target_unit_indices,
+                                           anim_name);
+    } else if (spell_id == SPELL_HASTE) {
+        for (i = 0; i < target_count; i++) {
+            target = fdps_get_unit_record((int) target_unit_indices[i]);
+            target->flags &= UNIT_NOT_DONE_MASK;
+        }
+    } else if (spell_id == SPELL_REVIVE) {
+        for (i = 0; i < target_count; i++) {
+            target = fdps_get_unit_record((int) target_unit_indices[i]);
+
+            /* The popup is queued only for a target that had something to
+               cure; the clear runs on every target either way. */
+            if (target->status_timers[AILMENT_FIRST_TIMER_SLOT] != 0
+                || target->status_timers[AILMENT_FIRST_TIMER_SLOT + 1] != 0
+                || target->status_timers[AILMENT_FIRST_TIMER_SLOT + 2] != 0) {
+                fdps_show_cure_indicator((int) target_unit_indices[i]);
+            }
+
+            memset(&target->status_timers[AILMENT_FIRST_TIMER_SLOT], 0,
+                   (size_t) AILMENT_TIMER_SLOTS);
+        }
+    } else if (spell_id == SPELL_SEAL) {
+        /* Two washes back to back, the same call written out twice. */
+        fdps_flash_units_in_color(target_count, target_unit_indices,
+                                  SEAL_FLASH_COLOR);
+        fdps_flash_units_in_color(target_count, target_unit_indices,
+                                  SEAL_FLASH_COLOR);
+
+        for (i = 0; i < target_count; i++) {
+            if (fdps_unit_apply_status_effect(SPELL_SEAL,
+                                              (int) target_unit_indices[i])
+                    == 0) {
+                fdps_show_miss_indicator((int) target_unit_indices[i]);
+            }
+        }
+    } else if (spell_id == SPELL_POISON || spell_id == SPELL_PARALYSIS) {
+        for (i = 0; i < target_count; i++) {
+            if (fdps_unit_apply_status_effect(spell_id,
+                                              (int) target_unit_indices[i])
+                    == 0) {
+                fdps_show_miss_indicator((int) target_unit_indices[i]);
+            }
+        }
+    } else if (spell_id == SPELL_BLESSING) {
+        for (buff_slot = 0; buff_slot < BUFF_SLOT_COUNT; buff_slot++) {
+            for (i = 0; i < target_count; i++) {
+                /* The slot index is what is passed as the effect id, which is
+                   also the status_timers slot it lands in (unitstat.h).  A
+                   slot that misses gets no popup and no MISS either. */
+                if (fdps_unit_apply_status_effect(
+                        buff_slot, (int) target_unit_indices[i]) != 0) {
+                    fdps_show_sprite_indicator((int) target_unit_indices[i],
+                                               buff_sprites[buff_slot]);
+                    fdps_unit_recompute_combat_stats(
+                        (int) target_unit_indices[i]);
+                }
+            }
+
+            /* One slot's popups are played out before the next slot is
+               rolled, so the three buffs float one after another rather than
+               together. */
+            fdps_play_indicator_queue();
+        }
+    } else {
+        for (i = 0; i < target_count; i++) {
+            amount = fdps_spell_damage_unit(caster_unit_index,
+                                            (int) target_unit_indices[i],
+                                            spell_id);
+            if (amount != 0) {
+                fdps_show_number_indicator(amount, DAMAGE_GLYPH_BASE,
+                                           target_unit_indices[i]);
+                if (spell_id == SPELL_NECROMANCY) {
+                    fdps_unit_inflict_random_ailments(
+                        (int) target_unit_indices[i]);
+                }
+            } else {
+                fdps_show_miss_indicator((int) target_unit_indices[i]);
+            }
+        }
+    }
+
+    /* 神之祝福 has already drained the queue three times and leaves nothing
+       for this one; every other branch is played out here. */
+    fdps_play_indicator_queue();
+    data_fdps_map_cursor_draw_mode = MAP_CURSOR_PLAIN;
+
+    if (quake_sample != NULL) {
+        free(quake_sample);
     }
 }
 
