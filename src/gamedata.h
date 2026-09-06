@@ -1023,6 +1023,28 @@ extern int data_fdps_battle_turn_counter;
    Char and not unsigned char: it is a string, and every use is a %s. */
 extern char data_fdps_cdrom_path[3];
 
+/* 000643eb.  "The player has asked to leave what he is in": main clears it
+   once at startup, MOV byte ptr [0x000643eb],0x0 at 00029347, and then runs
+   its outer loop for as long as it stays clear, CMP at 0002935d.  Nothing ever
+   clears it again, so setting it ends the session.
+
+   FIVE PLACES RAISE IT AND THE FLAG CARRIES NO REASON, so nothing downstream
+   can tell them apart: fdps_battle_system_submenu when the player confirms
+   quitting a battle (00015014), fdps_title_screen (0002a8f7), fdps_run_bar_shop
+   (00035ef0), and fdps_chapter_27_end and fdps_chapter_30_end at the end of the
+   story (0003b981, 0003bad2).
+
+   THE INNER LOOPS READ IT TOO, so the flag is how a quit confirmed several
+   levels down unwinds: fdps_run_village_phase tests it at three separate
+   points of its own loop (00031228, 00031491, 000314f0) and leaves rather than
+   drawing another frame.
+
+   Every access in the image is byte wide -- six MOV byte ptr immediates (the
+   one clearing store at 00029347 and the five raising ones) and four CMP byte
+   ptr -- and every test is against zero, so nothing distinguishes one non-zero
+   value from another. */
+extern unsigned char data_fdps_shared_quit_game_requested;
+
 /* 00069de8.  Flat linear address of the 512-byte DOS real-mode block the
    MSCDEX request header is built in.  It is the real-mode segment
    fdps_cd_alloc_dos_buffers got back from DPMI, shifted left four: DOS/4GW

@@ -2047,5 +2047,33 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "00014ea0": [
+    {
+      "what": "The save arm's image is not exercised by any unit test. Everything from the malloc at 000150c7 to the free at 0001530d -- reading the existing file back so the four chapter slots survive, the four block copies, the eighteen-byte scalar header, the checksum at +0x59c7 and the encrypt-then-write -- runs only when the prompt is confirmed, and confirming it overwrites FDE.SAV. That file is the shipped save tests/savefile.c decrypts and checksums, staged next to the test executable from tests/gamefile.lst, and restoring it afterwards is not crash safe: the image this function writes is exactly 0x59cb bytes (PUSH 0x59cb at 000150c7 and 000152ea), the same LENGTH as the shipped file, so build_emit.py's staging (which re-copies only when the size differs) would carry a damaged file silently into every later run of tests/savefile.c. What IS established without running it: the emitted object reproduces the original's five folded displacements and its four signed divides (WDISASM on workspace/code_emit/out/objs/BTLMENU.OBJ), and every offset and length is the same one fdps_load_savegame reads back, which tests/savefile.c holds against the shipped file from the reading side.",
+      "needs": "Either a playtest -- open the system menu mid-battle, save, quit, and load the save back, checking that the turn, the unit positions, the view origin, the cursor tile, the gold and the four option toggles all come back -- or a test harness that can run a case in a scratch working directory with its own copy of FDE.SAV, so that a written file cannot reach the staged one.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "The objectives entry (slot 0, CALL fdps_battle_show_win_fail_window at 0001506a) and the confirmed load (CALL fdps_load_savegame at 00015413) are dispatched by no test case. Each is a single unconditional call followed by MOV [EBP-0x4],0x0 and a jump to the epilogue, so what is untested is the dispatch reaching them and not any arithmetic on either path; the reason no case selects them is that each would run a subject belonging to another file and leave its globals behind -- the win/fail window reloads the nine data tables out of MISC.VFS, and the loader installs a whole battle over the live globals and then blocks on the CD check (savefile.h). The negative direction is covered already: every case that ends at -1 or in the save/load arms proves the chain did not fall into slot 0.",
+      "needs": "A playtest: open the system menu in a battle and choose each of the two entries, confirming that the objectives window comes up and closes back to the map, and that the load entry resumes the saved battle. Nothing a unit test can stage settles it, because what would be checked is exactly the side effects on globals that the test image needs left alone.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed the emitter's account of the untested save arm and added one piece of evidence it did not have: after the run the staged FDE.SAV is byte-identical to the shipped one, so the confirmed arm demonstrably never executed, and the risk it describes (a 0x59cb-byte write landing on a file build_emit.py re-stages only on a size change) is the reason it cannot execute here. I read the whole arm from the assembly myself and every offset, length and ordering matches what the emitted C writes; what remains unmeasured is the round trip through fdps_load_savegame, which no unit test in this image can stage.",
+      "needs": "As emit#0: a playtest of save-then-load mid-battle, or a harness that can run a case in a scratch working directory with its own copy of FDE.SAV.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Reached the same gap independently -- no case selects slot 0 (fdps_battle_show_win_fail_window at 0001506a) or confirms the load (fdps_load_savegame at 00015413) -- and I add nothing to the emitter's entry beyond confirming from the dispatch chain that each is a single unconditional call followed by MOV [EBP-0x4],0x0, so nothing arithmetic is going untested.",
+      "needs": "As emit#1: a playtest of the two entries.",
+      "same_as": "emit#1",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }
