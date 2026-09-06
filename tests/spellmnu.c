@@ -884,6 +884,342 @@ static void an_accepted_code_takes_no_heap(void)
     CHECK_EQ(_heapchk(), _HEAPOK);
 }
 
+/* ------------------------------------------------------------------
+ * fdps_spell_list_select_loop @ 00028130
+ * ------------------------------------------------------------------
+ *
+ * ONLY THE PASS THAT ENDS THE LOOP CAN BE OBSERVED, AND THAT IS STRUCTURAL.
+ * The loop's exit is fdps_spell_list_window_wait_input, whose reader
+ * fdps_read_scancode_auto_repeat reports the latched byte only when it differs
+ * from data_fdps_input_key_repeat_prev_scancode; the reader then records the
+ * code it reported, and nothing inside a call can change the latch again,
+ * because only the INT 09h handler writes it and no test installs one.  A
+ * second wait in the same call therefore polls 0xff for ever, and the frame
+ * that would end that spin is never drawn either, because a frame needs the
+ * timer tick to move and the tick is written by an interrupt as well.  So a
+ * case can drive exactly one make code into one call, and the four branches
+ * that repaint and go round again -- the two cursor moves, the silent refusal
+ * of a spell the caster cannot pay for, and every unrecognised code -- cannot
+ * be reached and returned from at all.  What they do is a playtest contract.
+ *
+ * TWO CASES BELOW DISTINGUISH BY NOT COMING BACK.  The confirm looks the cost
+ * up with ids[*cursor_index]; a body that indexed the collected buffer with
+ * the row, with the scroll position or with zero would find a spell the caster
+ * cannot afford, and a refusal repaints and waits again, so the failure shows
+ * up as the case hanging with the heartbeat frozen on its name rather than as
+ * a check that did not hold.
+ *
+ * Expected values come from the assembly at 00028130: PUSH 0x95 / PUSH 0x97 /
+ * PUSH 0x140 / ADD EAX,0x3b58 / PUSH 0x97 at 00028169 for the panel blit, PUSH
+ * 0x140 / ADD EAX,0x3b58 / PUSH dword ptr [EAX] at 00028192 for the page, the
+ * six CMPs against 0x48, 0x50, 0x1c, 0x39, 0x1 and 0x53, MOV AL,byte ptr
+ * [EAX+EBP*1-0x44] / AND EAX,0xff at 00028248 for the id, MOV AL,byte ptr
+ * [EDX+0x5] at 00028264 for the cost and MOVSX EAX,word ptr [EAX+0x44] / CMP /
+ * JL at 0002826d for the payment test.  The row geometry inside the list area
+ * is fdps_draw_spell_list_page's and is read back through the same fabricated
+ * artwork the cases above use.
+ */
+
+/* The window image the menu is composed into: the 320x200 page at pitch 0x140
+   both shipped callers hand in, plus eight guard rows the shipped page does
+   not have.  Row 7's MP caption reaches list-area scanline 153, which is
+   absolute row 200 -- one past a real page -- and the fabricated Command.cel
+   sprite skips every row but its first, so nothing should be stored there; the
+   guard is what says so rather than letting a stray byte land in another
+   test's fixture. */
+#define SEL_PITCH 0x140
+#define SEL_ROWS 0xc8
+#define SEL_GUARD_ROWS 8
+#define SEL_BYTES (SEL_PITCH * (SEL_ROWS + SEL_GUARD_ROWS))
+#define SEL_LIST_AT 0x3b58
+#define SEL_PANEL_W 0x97
+#define SEL_PANEL_H 0x95
+#define SEL_PANEL_BYTES (SEL_PANEL_W * SEL_PANEL_H)
+
+/* What an untouched byte of the window reads back as.  It is not a colour any
+   fabricated sprite, glyph or panel byte can produce. */
+#define SEL_WINDOW_FILL 0x11
+
+/* The make codes the cases drive in.  The two cursor keys, 0x48 and 0x50, are
+   not among them: their branches go round again and cannot return. */
+#define SEL_KEY_ENTER 0x1c
+#define SEL_KEY_SPACE 0x39
+#define SEL_KEY_ESC 0x01
+#define SEL_KEY_DELETE 0x53
+
+static unsigned char sel_window[SEL_BYTES];
+static unsigned char sel_panel[SEL_PANEL_BYTES];
+
+/* The panel's byte at an offset.  Every value is in 0x20..0x5f, which is clear
+   of the fill, of the selection bar's 0x7f, of the Command.cel colours from
+   0x80 up, of the text foreground 0xd0 and of the figure glyph colours 1..13,
+   so a byte says on its own what put it there; and the low bits change with
+   the offset, so a row copied at the wrong stride reads back as a different
+   byte rather than matching anyway. */
+static int sel_panel_pixel(int at)
+{
+    return 0x20 + (at % 0x40);
+}
+
+/* The window painted to its fill, the panel painted to its pattern, the tables
+   published with every unit's bitmap cleared, and one make code latched for
+   the next poll to report. */
+static void sel_stage(unsigned int scancode)
+{
+    int index;
+
+    spell_reset();
+    for (index = 0; index < SEL_BYTES; index++) {
+        sel_window[index] = (unsigned char) SEL_WINDOW_FILL;
+    }
+    for (index = 0; index < SEL_PANEL_BYTES; index++) {
+        sel_panel[index] = (unsigned char) sel_panel_pixel(index);
+    }
+    wait_arm_scancode(scancode);
+}
+
+/* A byte of the window read at a position inside the list area. */
+static int sel_pixel(int row, int column)
+{
+    return sel_window[SEL_LIST_AT + row * SEL_PITCH + column];
+}
+
+/* The selection bar's byte on one drawn row, and the four-digit MP figure and
+   the spell-name run on it -- the same three readings the page cases make,
+   taken through the window's 0x140 pitch instead of the narrow page's. */
+static int sel_row_bar(int row)
+{
+    return sel_pixel(row * SPELL_ROW_PITCH + SPELL_BAR_Y, SPELL_BAR_X);
+}
+
+static int sel_row_figure(int row)
+{
+    int digit_index;
+    int value;
+    int color;
+
+    value = 0;
+    for (digit_index = 0; digit_index < SPELL_FIGURE_DIGITS; digit_index++) {
+        color = sel_pixel(row * SPELL_ROW_PITCH + SPELL_MP_Y,
+                          SPELL_FIGURE_X + digit_index * SPELL_NUM_CELL_W);
+        value = value * 10 + (color - SPELL_GLYPH_DIGIT_0);
+    }
+    return value;
+}
+
+/* Bytes of the guard rows -- everything past a real 320x200 page -- that no
+   longer hold the fill. */
+static int sel_guard_touched(void)
+{
+    int index;
+    int touched;
+
+    touched = 0;
+    for (index = SEL_PITCH * SEL_ROWS; index < SEL_BYTES; index++) {
+        if (sel_window[index] != (unsigned char) SEL_WINDOW_FILL) {
+            touched++;
+        }
+    }
+    return touched;
+}
+
+static int sel_row_name_run(int row)
+{
+    int column;
+    int run;
+
+    run = 0;
+    for (column = 0; column < 6; column++) {
+        if (sel_pixel(row * SPELL_ROW_PITCH + SPELL_NAME_Y,
+                      SPELL_NAME_X + column) != SPELL_TEXT_FG) {
+            break;
+        }
+        run++;
+    }
+    return run;
+}
+
+/* Escape answers -1 and leaves both of the caller's indices exactly as they
+   were: MOV dword ptr [EBP-0x4],0xffffffff at 0002828d, with nothing written
+   through [EBP+0x20] or [EBP+0x24] on that path. */
+static void escape_cancels_and_leaves_the_scroll_and_the_cursor_alone(void)
+{
+    int list_top;
+    int cursor_index;
+
+    sel_stage(SEL_KEY_ESC);
+    spell_give(0, spell_set_bitmap);
+    list_top = 2;
+    cursor_index = 5;
+
+    CHECK_EQ(fdps_spell_list_select_loop(0, sel_window, sel_panel, &list_top,
+                                         &cursor_index), -1);
+    CHECK_EQ(list_top, 2);
+    CHECK_EQ(cursor_index, 5);
+}
+
+/* Delete reaches the same store: CMP dword ptr [EBP-0x1c],0x53 / JNZ at
+   00028287 falls into the branch escape took. */
+static void delete_cancels_the_same_way_escape_does(void)
+{
+    int list_top;
+    int cursor_index;
+
+    sel_stage(SEL_KEY_DELETE);
+    spell_give(0, spell_set_bitmap);
+    list_top = 1;
+    cursor_index = 3;
+
+    CHECK_EQ(fdps_spell_list_select_loop(0, sel_window, sel_panel, &list_top,
+                                         &cursor_index), -1);
+    CHECK_EQ(list_top, 1);
+    CHECK_EQ(cursor_index, 3);
+}
+
+/* The confirm costs the spell ids[*cursor_index] names, and MP equal to the
+   cost pays: the refusal is JL, strictly less, so a caster with 0 MP confirms
+   a spell that costs 0.
+   THIS CASE DISTINGUISHES BY NOT COMING BACK.  The cursor is on list entry 5,
+   spell 27, whose cost is 0; entry 0 costs 7, the scroll position's entry 2
+   costs 99, the drawn row's entry 3 costs 100 and their sum's entry 7 costs
+   40, so a body that indexed the buffer any other way would refuse and would
+   never return.  Neither index is written on the confirm path either. */
+static void enter_confirms_the_spell_the_cursor_names(void)
+{
+    int list_top;
+    int cursor_index;
+
+    sel_stage(SEL_KEY_ENTER);
+    spell_give(0, spell_set_bitmap);
+    spell_units[0].mp_current = (short) 0;
+    list_top = 2;
+    cursor_index = 5;
+
+    CHECK_EQ(fdps_spell_list_select_loop(0, sel_window, sel_panel, &list_top,
+                                         &cursor_index), 1);
+    CHECK_EQ(list_top, 2);
+    CHECK_EQ(cursor_index, 5);
+}
+
+/* Space is the second half of the same test: CMP dword ptr [EBP-0x1c],0x39 /
+   JNZ at 0002823f falls into the branch enter took. */
+static void space_confirms_the_same_way_enter_does(void)
+{
+    int list_top;
+    int cursor_index;
+
+    sel_stage(SEL_KEY_SPACE);
+    spell_give(0, spell_set_bitmap);
+    spell_units[0].mp_current = (short) 0;
+    list_top = 2;
+    cursor_index = 5;
+
+    CHECK_EQ(fdps_spell_list_select_loop(0, sel_window, sel_panel, &list_top,
+                                         &cursor_index), 1);
+    CHECK_EQ(cursor_index, 5);
+}
+
+/* MP above the cost pays as well, and the caster's MP is the one read out of
+   its own record: the cursor is on list entry 6, spell 31, which costs 5, and
+   the caster is given 6.
+   THIS CASE ALSO DISTINGUISHES BY NOT COMING BACK -- entry 0 costs 7, one more
+   than the caster holds, so a body that read the buffer from its base would
+   refuse and spin. */
+static void mp_above_the_cost_pays_too(void)
+{
+    int list_top;
+    int cursor_index;
+
+    sel_stage(SEL_KEY_ENTER);
+    spell_give(0, spell_set_bitmap);
+    spell_units[0].mp_current = (short) 6;
+    list_top = 0;
+    cursor_index = 6;
+
+    CHECK_EQ(fdps_spell_list_select_loop(0, sel_window, sel_panel, &list_top,
+                                         &cursor_index), 1);
+    CHECK_EQ(cursor_index, 6);
+}
+
+/* The panel is laid back over the list area before the wait, out of a source
+   at its own 0x97 stride into the window at 0x140 from byte 0x3b58.  The
+   caster knows nothing here, so the page drawer paints nothing over it and the
+   whole rectangle reads back as the panel.  That the rectangle holds panel
+   bytes at all on a pass that returned is what pins the order: the wait that
+   ended this call drew nothing, so the blit must have come first. */
+static void the_panel_is_laid_back_over_the_list_area(void)
+{
+    int list_top;
+    int cursor_index;
+
+    sel_stage(SEL_KEY_ESC);
+    list_top = 0;
+    cursor_index = 0;
+
+    CHECK_EQ(fdps_spell_list_select_loop(0, sel_window, sel_panel, &list_top,
+                                         &cursor_index), -1);
+
+    CHECK_EQ(sel_pixel(0, 0), sel_panel_pixel(0));
+    CHECK_EQ(sel_pixel(0, SEL_PANEL_W - 1), sel_panel_pixel(SEL_PANEL_W - 1));
+    CHECK_EQ(sel_pixel(1, 0), sel_panel_pixel(SEL_PANEL_W));
+    CHECK_EQ(sel_pixel(SEL_PANEL_H - 1, SEL_PANEL_W - 1),
+             sel_panel_pixel((SEL_PANEL_H - 1) * SEL_PANEL_W
+                             + SEL_PANEL_W - 1));
+}
+
+/* Nothing outside the 0x97 by 0x95 rectangle is touched: the byte in front of
+   it, the column past its width on the first and last rows, the first row past
+   its height, and the guard rows past the end of a real page. */
+static void the_panel_blit_stops_at_the_rectangles_edges(void)
+{
+    int list_top;
+    int cursor_index;
+
+    sel_stage(SEL_KEY_ESC);
+    list_top = 0;
+    cursor_index = 0;
+
+    CHECK_EQ(fdps_spell_list_select_loop(0, sel_window, sel_panel, &list_top,
+                                         &cursor_index), -1);
+
+    CHECK_EQ(sel_window[SEL_LIST_AT - 1], SEL_WINDOW_FILL);
+    CHECK_EQ(sel_pixel(0, SEL_PANEL_W), SEL_WINDOW_FILL);
+    CHECK_EQ(sel_pixel(SEL_PANEL_H - 1, SEL_PANEL_W), SEL_WINDOW_FILL);
+    CHECK_EQ(sel_pixel(SEL_PANEL_H, 0), SEL_WINDOW_FILL);
+}
+
+/* The page goes down over the restored panel, at the caller's scroll position
+   and with the bar on the caller's cursor.  list_top is 1 and the cursor is on
+   entry 4, so drawn row 0 is list entry 1 -- spell 5, whose name is
+   0x1be + 5 and whose cost is 12 -- row 1 is entry 2, spell 9 costing 99, and
+   the bar is on row 3.  A body that passed the two indices the other way round
+   would put the bar on row 0 and start the list at entry 4; a body that passed
+   the pointers themselves would draw nothing recognisable at all.  Row 0's bar
+   position is checked to still hold the panel, and the guard rows past a real
+   page to still hold the fill. */
+static void the_page_is_drawn_with_the_callers_scroll_and_cursor(void)
+{
+    int list_top;
+    int cursor_index;
+
+    sel_stage(SEL_KEY_ESC);
+    spell_give(0, spell_set_bitmap);
+    list_top = 1;
+    cursor_index = 4;
+
+    CHECK_EQ(fdps_spell_list_select_loop(0, sel_window, sel_panel, &list_top,
+                                         &cursor_index), -1);
+
+    CHECK_EQ(sel_row_bar(3), SPELL_BAR_COLOR);
+    CHECK_EQ(sel_row_bar(0),
+             sel_panel_pixel((0 * SPELL_ROW_PITCH + SPELL_BAR_Y)
+                             * SEL_PANEL_W + SPELL_BAR_X));
+    CHECK_EQ(sel_row_figure(0), spell_mp_costs[spell_set_ids[1]]);
+    CHECK_EQ(sel_row_figure(1), spell_mp_costs[spell_set_ids[2]]);
+    CHECK_EQ(sel_row_name_run(0), spell_name_glyphs(spell_set_ids[1]));
+    CHECK_EQ(sel_guard_touched(), 0);
+}
+
 void run_spellmnu_tests(void)
 {
     RUN_TEST(empty_spell_list_draws_nothing);
@@ -901,4 +1237,13 @@ void run_spellmnu_tests(void)
     RUN_TEST(an_accepted_code_draws_no_frame);
     RUN_TEST(the_accepted_code_costs_exactly_one_poll);
     RUN_TEST(an_accepted_code_takes_no_heap);
+
+    RUN_TEST(escape_cancels_and_leaves_the_scroll_and_the_cursor_alone);
+    RUN_TEST(delete_cancels_the_same_way_escape_does);
+    RUN_TEST(enter_confirms_the_spell_the_cursor_names);
+    RUN_TEST(space_confirms_the_same_way_enter_does);
+    RUN_TEST(mp_above_the_cost_pays_too);
+    RUN_TEST(the_panel_is_laid_back_over_the_list_area);
+    RUN_TEST(the_panel_blit_stops_at_the_rectangles_edges);
+    RUN_TEST(the_page_is_drawn_with_the_callers_scroll_and_cursor);
 }

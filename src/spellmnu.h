@@ -119,4 +119,43 @@ extern int fdps_spell_list_window_wait_input(unsigned char *window_buf,
                                              int cursor_index);
 #pragma aux fdps_spell_list_window_wait_input "*" parm caller [];
 
+/* Runs the battle spell submenu's selection loop: repaints the list, waits for
+   a key and acts on it, until the player either confirms a spell the caster
+   can pay for or cancels.  1 for a confirm, -1 for a cancel, and no other
+   value: those two stores are the only ways out of a loop that has no exit
+   condition of its own.
+
+   THE CHOICE COMES BACK THROUGH cursor_index, AND SO DOES THE SCROLL THROUGH
+   list_top.  Both are in/out and both are dereferenced afresh on every repaint
+   and every key, so the caller sees the position the player left the cursor in
+   and recovers the spell by collecting the ids again and reading
+   ids[*cursor_index].  Neither is bounded on the way in: the up key stops at 0
+   and the down key at the collected count - 1, but a cursor that arrives above
+   that count keeps its value until the player walks it down.
+
+   The eight-row window follows the cursor only when the cursor leaves it --
+   the scroll goes to the cursor at the top edge, and to cursor - 7 at the
+   bottom -- so an entry made with the cursor already off the page shows the
+   caller's page until an edge is crossed.
+
+   THE SPELL COUNT IS COLLECTED ONCE, BEFORE THE LOOP.  A spell learned or lost
+   while the menu is up does not change how far the cursor may travel, although
+   the list drawn under it does change, because the page drawer collects afresh
+   on every frame.
+
+   A CONFIRM THE CASTER CANNOT PAY FOR IS SILENT.  The MP cost is compared with
+   the caster's current MP as signed values and equal MP pays; a shortfall
+   makes no sound, prints nothing and does not move the cursor, it simply goes
+   round again.  Nothing here spends MP.
+
+   window_buf is the 320x200 window image the menu is composed into, read and
+   written, and panel_src the pristine 151 x 149 copy of its list area laid
+   back over it before every repaint.  Neither is checked for null, and
+   unit_index is not range checked. */
+extern int fdps_spell_list_select_loop(int unit_index,
+                                       unsigned char *window_buf,
+                                       unsigned char *panel_src, int *list_top,
+                                       int *cursor_index);
+#pragma aux fdps_spell_list_select_loop "*" parm caller [];
+
 #endif

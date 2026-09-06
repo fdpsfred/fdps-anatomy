@@ -465,3 +465,138 @@ int fdps_spell_list_window_wait_input(unsigned char *window_buf,
 
     return input_code;
 }
+
+/* The six make codes the selection loop acts on: CMP dword ptr [EBP-0x1c],0x48
+   at 000281d7, 0x50 at 00028205, 0x1c at 00028239, 0x39 at 0002823f, 0x1 at
+   00028281 and 0x53 at 00028287.  Every other code falls through to the
+   redraw. */
+#define SCANCODE_UP 0x48
+#define SCANCODE_DOWN 0x50
+#define SCANCODE_ENTER 0x1c
+#define SCANCODE_SPACE 0x39
+#define SCANCODE_ESC 0x01
+#define SCANCODE_DELETE 0x53
+
+/* The two answers: MOV dword ptr [EBP-0x4],0x1 at 00028276 and MOV dword ptr
+   [EBP-0x4],0xffffffff at 0002828d. */
+#define SPELL_SELECT_CONFIRMED 1
+#define SPELL_SELECT_CANCELLED (-1)
+
+/* How far the scroll position is dragged when the cursor walks off the bottom
+   of the page: SUB EAX,0x7 at 0002822f, one row less than the page, so the
+   cursor comes to rest on the last visible row rather than on the first. */
+#define SPELL_LIST_SCROLL_BACK (SPELL_LIST_ROWS - 1)
+
+/* 00028130.  Five stack arguments, caller-cleaned: the one call site at
+   00027d2e pushes five dwords right to left and follows the CALL with ADD
+   ESP,0x14, the body reads them at [EBP+0x14] through [EBP+0x24] behind PUSH
+   EBX/ESI/EDI/EBP and the return address, and RET carries no immediate.  The
+   answer is EAX and the caller keeps it (MOV dword ptr [EBP-0x3c],EAX at
+   00027d36).
+
+   THE LOOP HAS NO EXIT CONDITION.  JMP 0x00028169 at 00028296 is unconditional
+   and the only two ways out are the two stores into [EBP-0x4]: a confirm the
+   caster can pay for, and a cancel.  A code the dispatch does not name -- and
+   the 0xff the reader answers with when nothing is down never gets this far,
+   the wait swallowing everything above 0x7f -- simply repaints and waits
+   again.
+
+   BOTH INDICES ARE READ AND WRITTEN THROUGH THE CALLER'S POINTERS, EVERY TIME.
+   Nothing is cached in a local: each redraw and each key dereferences them
+   afresh, which is what lets the caller see the cursor the player left behind
+   and recover the chosen spell from it.  The scroll follows the cursor only
+   when the cursor has left the page -- CMP EDX,[EAX] / JLE at 000281f2 for the
+   top and the +8 compare at 00028226 for the bottom -- so a caller that opens
+   the menu with a cursor already off the page keeps that page until the cursor
+   crosses an edge.
+
+   THE COUNT IS COLLECTED ONCE, BEFORE THE LOOP, and only the down key reads
+   it: a spell learned or lost while the menu is up neither extends nor
+   shortens the travel, and the up key is bounded by zero alone.
+
+   THE CONFIRM READS THE ID WITH *cursor_index AND NOT WITH THE ROW.  MOV
+   EAX,[EAX] / MOV AL,byte ptr [EAX+EBP*1-0x44] / AND EAX,0xff at 00028248
+   addresses the collected buffer with the whole list index and widens the byte
+   without sign.  The cost is byte +5 of the MAGICDAT.DAT record, also
+   zero-extended (MOV AL,byte ptr [EDX+0x5] at 00028264), and the caster's MP
+   is the SIGNED word at record +0x44 (MOVSX EAX,word ptr [EAX+0x44] at
+   0002826d) compared with a signed JL -- so a cost of 0x80 or more is a real
+   cost of 128 or more and not a negative one that every caster could pay.
+   Equal MP pays: the refusal is JL, strictly less.
+
+   A refusal is silent.  No sound, no message, no cursor move -- straight back
+   to the top of the loop, which is why a player who cannot afford the spell
+   sees the list simply not respond.  Nothing here spends the MP either; the
+   deduction is fdps_spell_deduct_mp_cost's job, later in the caller.
+
+   Nothing is read after any call except the collector's count, the record
+   pointers from fdps_get_unit_record and fdps_get_spell_record, and the wait's
+   code.  fdps_blit_rect and the page drawer return nothing. */
+int fdps_spell_list_select_loop(int unit_index, unsigned char *window_buf,
+                                unsigned char *panel_src, int *list_top,
+                                int *cursor_index)
+{
+    /* The ids the collector writes, in ascending id order.  Forty is the most
+       five bitmap bytes can hold, so the buffer is exactly full-sized and
+       nothing bounds the write (unitstat.h). */
+    unsigned char spell_ids[SPELL_LIST_ID_BUFFER_BYTES];
+    /* The casting unit's record, fetched once and read for its MP alone. */
+    struct fdps_unit_record *caster;
+    /* The MAGICDAT.DAT record of the spell being confirmed. */
+    struct fdps_spell_effect *spell;
+    /* Record +0x02, the caster's sprite cache slot.  Assigned at 00028166 and
+       never read -- fdps_battle_spell_command does the same with the same
+       byte, and the wait loop looks it up again for itself. */
+    int sprite_cache_slot;
+    /* How many spells the caster knows, collected once on the way in; the down
+       key's travel limit and nothing else. */
+    int spell_count;
+    /* The make code the last wait came back with, held signed and compared as
+       a full int. */
+    int scancode;
+    /* The MP the selected spell costs, widened out of the record byte without
+       sign. */
+    int mp_cost;
+
+    spell_count = fdps_unit_collect_known_spells(unit_index, spell_ids);
+    caster = fdps_get_unit_record(unit_index);
+    sprite_cache_slot = (int) caster->sprite_cache_slot;
+
+    for (;;) {
+        /* The background first and the page over it, so the previous frame's
+           rows are erased rather than drawn on top of. */
+        fdps_blit_rect((unsigned int) panel_src, PANEL_STRIDE,
+                       window_buf + LIST_AREA_AT, VGA_SCREEN_PITCH,
+                       PANEL_W, PANEL_H);
+        fdps_draw_spell_list_page(unit_index, *list_top, *cursor_index,
+                                  window_buf + LIST_AREA_AT,
+                                  VGA_SCREEN_PITCH);
+        scancode = fdps_spell_list_window_wait_input(window_buf, panel_src,
+                                                     unit_index, *list_top,
+                                                     *cursor_index);
+
+        if (scancode == SCANCODE_UP) {
+            if (*cursor_index != 0) {
+                *cursor_index = *cursor_index - 1;
+                if (*list_top > *cursor_index) {
+                    *list_top = *cursor_index;
+                }
+            }
+        } else if (scancode == SCANCODE_DOWN) {
+            if (spell_count - 1 > *cursor_index) {
+                *cursor_index = *cursor_index + 1;
+                if (*list_top + SPELL_LIST_ROWS <= *cursor_index) {
+                    *list_top = *cursor_index - SPELL_LIST_SCROLL_BACK;
+                }
+            }
+        } else if (scancode == SCANCODE_ENTER || scancode == SCANCODE_SPACE) {
+            spell = fdps_get_spell_record((int) spell_ids[*cursor_index]);
+            mp_cost = (int) spell->mp_cost;
+            if ((int) caster->mp_current >= mp_cost) {
+                return SPELL_SELECT_CONFIRMED;
+            }
+        } else if (scancode == SCANCODE_ESC || scancode == SCANCODE_DELETE) {
+            return SPELL_SELECT_CANCELLED;
+        }
+    }
+}
