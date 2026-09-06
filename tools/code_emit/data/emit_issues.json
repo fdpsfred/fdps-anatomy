@@ -1951,5 +1951,13 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "00010760": [
+    {
+      "from": "review",
+      "what": "The provenance of the two anchor pairs (5, 12) and (15, 13) and of the phrase 'wave 4' in the function's name cannot be checked from anywhere in this repository yet. Both the plate and the emitted comments say the anchors are the placement records map29.cod gives character ids 0x55 and 0x6a and that those two ids are chapter 30's wave 4, but chapters/ holds only its _index.md, resource_info/ has no map or .cod format page, and no map29 file is unpacked under fdps_game_files/ -- the map container has not been opened by any ticket. Nothing in the emitted behaviour depends on this: the code carries the four numbers as literals exactly as the assembly does, and the claim is only about where the original author got them.",
+      "needs": "The chapter/map data work that parses map29 out of its container and records the two types' placement records and their wave tag; the anchors and the 'wave 4' name can then be confirmed or the comments corrected.",
+      "status": "open"
+    }
   ]
 }

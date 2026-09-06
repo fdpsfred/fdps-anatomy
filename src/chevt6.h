@@ -1,11 +1,16 @@
 /* chevt6.h -- the scripted chapter-event handlers of chapters 28 to 30.
  *
- * Every entry point here is a slot of the chapter-event handler table at
- * 000601c4, so they all share one function-pointer type: one int argument, no
+ * Most entry points here are slots of the chapter-event handler table at
+ * 000601c4, so they share one function-pointer type: one int argument, no
  * result.  The argument is the battle unit index the event fired for, and most
  * handlers of the family ignore it -- these later chapters are where that stops
  * being true, because a tile trigger fires for whichever unit walked over the
  * tile and the handler has to decide whether that unit was one of the party's.
+ *
+ * The exception is fdps_chapter_30_revive_wave_4_undead at the bottom, which is
+ * not in the table at all: it is called straight out of the AI's behaviour-mode
+ * 11 branch and takes no argument.  It is here because it is chapter 30's
+ * scripted behaviour and belongs with that chapter's other handlers.
  *
  * chevt1.h holds the same family for chapters 2 to 7, chevt2.h for 8 to 14 and
  * chevt3.h for 15 to 19.  Nothing here owns state.
@@ -154,5 +159,43 @@ extern void fdps_chapter_29_event_activate_all_enemies(int unit_index);
    record holding its third form. */
 extern void fdps_chapter_30_event_deploy_wave_3(int unit_index);
 #pragma aux fdps_chapter_30_event_deploy_wave_3 "*" parm caller [];
+
+/* Chapter 30's undead top-up, and the reason that chapter's reinforcements can
+   never be cleared out: every 死靈 (character id 0x55) and 白骨戰士
+   (character id 0x6a) on the map that has been killed is put straight back on
+   the battlefield at full health.
+
+   It sweeps the whole live unit array and touches a record only when its
+   character id is one of those two AND fdps_unit_is_retired says the unit is
+   already dead, so a living one of either type is left alone and no other type
+   is ever considered.
+
+   Each revival gets its own tile.  The occupancy grid is rebuilt first -- a
+   reset, then the two zone-of-control marking passes, which between them stamp
+   the 0x40 "a unit stands here" bit on the tile of every unit still in play --
+   and then the whole grid is scanned row by row for the free walkable cell
+   closest, in Manhattan distance, to the type's scripted spawn point in
+   map29.cod: (5, 12) for 死靈 and (15, 13) for 白骨戰士.  A cell carrying
+   0x40 is skipped and a cell whose terrain movement cost is 5 or more is
+   rejected.  Among cells that tie at the shortest distance THE LAST ONE IN
+   ROW-MAJOR ORDER WINS, not the first (see the definition in chevt6.c).
+
+   The revival is then played out once per unit: the cursor scrolls onto it, the
+   screen snaps to white and fades back over 65 palette steps, and the Posion.saf
+   effect from MISC.VFS plays over that one unit.  Only after that does the
+   record change -- the whole flag byte at +5 goes to 0, which drops the retired
+   bit and the per-turn redraw bit together, and max HP is copied over current HP
+   -- and the grid is left blank again for the movement code.
+
+   Nothing latches and nothing is deducted: run it again on the same map and
+   every one of those units that has died since is revived again.
+
+   The only caller is fdps_map_actor_behavior_step, out of its behaviour-mode 11
+   branch and only for an acting unit whose character id is 0x3c, 0x3d or 0x3e --
+   the three forms of 平衡之神 -- so in the shipped data this runs on every
+   behaviour step the chapter 30 boss takes.  It is called with no argument at
+   all: PUSH nothing, CALL, and no stack adjust after it. */
+extern void fdps_chapter_30_revive_wave_4_undead(void);
+#pragma aux fdps_chapter_30_revive_wave_4_undead "*" parm caller [];
 
 #endif

@@ -1,17 +1,25 @@
 /* chevt6.c -- the scripted chapter-event handlers of chapters 28 to 30.
  *
- * These are slots of the chapter-event handler table at 000601c4, called only
+ * Most are slots of the chapter-event handler table at 000601c4, called only
  * through it: a byte out of the loaded map file picks the slot and the
  * dispatchers -- the turn-event runner, the tile-trigger hand-off slot and the
  * death-script runner -- call it indirectly, so none of them appears as a
- * static caller.
+ * static caller.  The undead top-up at the bottom of the file is the one that
+ * is not: fdps_map_actor_behavior_step calls it directly and by name.
  *
  * See chevt6.h for what each handler does.  chevt1.c is the same family for
  * chapters 2 to 7, chevt2.c for 8 to 14 and chevt3.c for 15 to 19.  Nothing
  * here owns state.
  */
+#include <stdlib.h>
+#include <i86.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "anim.h"
+#include "mapcur.h"
+#include "maptile.h"
+#include "movegrid.h"
+#include "palette.h"
 #include "unit.h"
 #include "deploy.h"
 #include "chevt6.h"
@@ -285,4 +293,225 @@ void fdps_chapter_30_event_deploy_wave_3(int unit_index)
     fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
                      CH30_WAVE3_WAVE_NO,
                      CH30_WAVE3_PLACE_EXACT);
+}
+
+/* The two character ids the revival accepts, out of CMP EAX,0x55 at 000107a5
+   and CMP EAX,0x6a at 000107b5.  0x55 is 死靈 and 0x6a is 白骨戰士, the two
+   undead types map29.dat tags as chapter 30's wave 4; the assets/ tables name
+   them.  Both loads are MOV AL,byte ptr [EAX+0x7] followed by AND EAX,0xff, so
+   the byte is widened UNSIGNED and the compare is an equality on 0..255. */
+#define CH30_REVIVE_WRAITH_CHAR_ID   0x55
+#define CH30_REVIVE_SKELETON_CHAR_ID 0x6a
+
+/* Where each type is put back, out of the four literals at 0001080f..00010826.
+   They are the spawn coordinates map29.cod gives the two types' own placement
+   records, and they are hard-coded here rather than read from the record the
+   unit was deployed from -- a revived unit therefore heads back to the type's
+   scripted corner of the map and not to where it died. */
+#define CH30_REVIVE_WRAITH_ANCHOR_X    5
+#define CH30_REVIVE_WRAITH_ANCHOR_Y    12
+#define CH30_REVIVE_SKELETON_ANCHOR_X  15
+#define CH30_REVIVE_SKELETON_ANCHOR_Y  13
+
+/* The movement grid's two-byte cells start after its 4-byte header, and byte 0
+   of a cell carries 0x40 when a unit stands on the tile: ADD EAX,EDX / MOV
+   AL,byte ptr [EAX + 0x4] / AND AL,0x40 at 0001087e.  The same two numbers are
+   spelled out in src/deploy.c for the same search; neither header owns them,
+   because the grid's layout is movegrid.h's prose and not a C declaration. */
+#define CH30_REVIVE_GRID_CELL_BASE 4
+#define CH30_REVIVE_GRID_OCCUPIED  0x40
+
+/* What the best-so-far distance starts at, MOV dword ptr [EBP-0x10],0xff at
+   0001082d.  It is a distance and not a sentinel, so a map whose every free
+   walkable cell is further than 255 tiles from the anchor finds nothing. */
+#define CH30_REVIVE_START_DISTANCE 0xff
+
+/* The terrain movement cost the search will still stand a unit on: CMP EAX,0x5
+   / JGE at 000108ce, so 0..4 are accepted and 5 and above are not.  Same bound
+   as fdps_deploy_unit's own search. */
+#define CH30_REVIVE_TERRAIN_LIMIT 5
+
+/* The white flash: the bias starts at 0x40 (MOV dword ptr [EBP-0xc],0x40 at
+   0001092b) and steps down to 0 inclusive, which is 65 uploads of the palette,
+   each followed by delay(4) (PUSH 0x4 at 00010963).  fdps_set_palette_range
+   clamps every biased channel to 63, so a bias of 0x40 forces all 256 entries
+   to white however dark the palette under it was, and the fade back is what the
+   next 64 steps do.  The whole DAC is rewritten every step: 0 and 0xff are the
+   first and last entry pushed at 00010953 and 0001094e. */
+#define CH30_REVIVE_FLASH_BIAS_START 0x40
+#define CH30_REVIVE_FLASH_STEP_MS    4
+#define CH30_REVIVE_DAC_FIRST_ENTRY  0
+#define CH30_REVIVE_DAC_LAST_ENTRY   0xff
+
+/* The effect that plays over the unit that came back, the string at 0006155c,
+   and the one unit it plays over -- PUSH 0x1 at 0001097f.  The container the
+   member is pulled from is MISC.VFS, a literal inside
+   fdps_play_vfs_animation_over_units and not named here.  The same clip is the
+   healing effect src/item.c plays; the misspelling is the shipped member's
+   name. */
+#define CH30_REVIVE_EFFECT_CLIP  "Posion.saf"
+#define CH30_REVIVE_EFFECT_UNITS 1
+
+/* 00010760.  See chevt6.h for what this does to a battle.  The frame is the
+   standard Watcom four-push one with SUB ESP,0x34, no argument slot is read and
+   nothing sets EAX before the RET at 000109ae, so it is void(void); the one
+   call site at 0001067e pushes nothing and adjusts nothing afterwards.
+
+   THE NEAREST-TILE SEARCH KEEPS THE LAST TIE, NOT THE FIRST.  CMP EAX,[EBP-0x10]
+   / JLE at 000108b0 accepts a candidate whose distance merely EQUALS the best so
+   far, so in a row-major scan the winning cell is the last one at the winning
+   distance.  Writing the obvious "distance < best_distance" moves the revived
+   unit to a different tile on any map where more than one free cell ties, which
+   on map29 is the normal case because the anchor tile itself is usually
+   occupied.  fdps_deploy_unit's search carries the identical quirk.
+
+   THE RECOMPUTE INSIDE THE ACCEPT BRANCH IS NOT REPRODUCED.  The original calls
+   abs twice more at 000108da and 000108eb to rebuild the distance it already has
+   in EAX; abs is a pure function of two values nothing between the two
+   computations changes, so assigning the distance in hand is the same arithmetic
+   (ADR-0001).  Same call for the same reason in src/deploy.c.
+
+   THE CHOSEN CELL IS LEFT UNINITIALISED WHEN THE SEARCH FINDS NOTHING.  The two
+   slots at [EBP-0x18] and [EBP-0x14] are written only from inside the accept
+   branch at 000108f8, and the stores into the record at 0001090e run whatever
+   happened, so an entirely occupied or entirely unwalkable map puts stack
+   residue into the unit's tile bytes.  Seeding them with the anchor is the
+   obvious repair and it would place a unit the original places elsewhere.
+
+   THE RECORD POINTER IS NOT RE-RESOLVED after the four calls in the middle of
+   the body: [EBP-0x8] is loaded once at 00010797 and still used at 00010989.
+   Nothing in this body moves the unit array, which is what makes that safe here;
+   fdps_get_unit_record's own note says why a pointer held across
+   fdps_relocate_unit_array would not be.
+
+   THE GRID IS REBUILT PER REVIVAL AND LEFT BLANK AFTERWARDS.  Everything from
+   the reset at 000107cf to the reset at 0001099e runs once for each unit that
+   qualifies, so two dead undead cost two white flashes and two effect
+   animations, and the second search sees the first unit's new tile marked.  The
+   trailing reset is what the movement code expects to find.
+
+   THE STATUS BYTE IS ASSIGNED 0, NOT MASKED.  MOV byte ptr [EAX + 0x5],0x0 at
+   0001098c, the whole byte, so the per-turn redraw bit 0x80 goes down with the
+   retired bit 0.  A "&= ~1" would leave a revived unit carrying it.
+
+   Contract C is live on the two grid dimensions: both arrive through MOVSX at
+   000107ed and 000107f8 and both loop bounds are the signed JL, so a header word
+   of 0xffff is -1 and the scan runs zero rows.  Read unsigned it is 65535 and
+   the scan walks off the block.
+
+   The character id, the tile bytes and the terrain code all arrive zero-extended
+   out of bytes (AND EAX,0xff at 000107a0 and 000107b0, XOR EAX,EAX / MOV AL at
+   000108c7), which is what struct fdps_unit_record's unsigned char fields and
+   data_fdps_map_tile_terrain_type's unsigned char give without a cast. */
+void fdps_chapter_30_revive_wave_4_undead(void)
+{
+    /* The record being considered, resolved once per index and then held
+       across the whole revival. */
+    struct fdps_unit_record *unit;
+    /* The movement-grid cell the scan is standing on. */
+    struct fdps_move_grid_cell *cell;
+    /* Which unit of the live array the sweep has reached. */
+    int unit_index;
+    /* The grid header's two dimensions, in tiles. */
+    int grid_width;
+    int grid_height;
+    /* The type's scripted spawn tile, which the search measures from. */
+    int anchor_x;
+    int anchor_y;
+    /* Where the scan is. */
+    int scan_x;
+    int scan_y;
+    /* This cell's Manhattan distance from the anchor, and the shortest one any
+       accepted cell has had so far. */
+    int distance;
+    int best_distance;
+    /* The tile the search settled on. */
+    int chosen_x;
+    int chosen_y;
+    /* How much white this step of the flash adds to every DAC channel. */
+    int flash_bias;
+    /* The one-entry unit list the effect animation is played over.  Its address
+       is what the call takes, which is why it is a variable and not the index
+       itself. */
+    unsigned char revived_unit_id;
+
+    for (unit_index = 0;
+         unit_index < data_fdps_map_unit_count;
+         unit_index++) {
+        unit = fdps_get_unit_record(unit_index);
+        if (unit->portrait_id != CH30_REVIVE_WRAITH_CHAR_ID
+            && unit->portrait_id != CH30_REVIVE_SKELETON_CHAR_ID) {
+            continue;
+        }
+        if (fdps_unit_is_retired(unit_index) == 0) {
+            continue;
+        }
+
+        /* The occupancy this search reads is rebuilt rather than trusted: the
+           reset clears both zone bits off every cell and the two marking passes
+           -- one per side select -- put 0x40 back on the tile of every unit
+           still in play.  The unit being revived is retired, so neither pass
+           marks it and its own old tile is a candidate again. */
+        fdps_map_grid_reset();
+        fdps_move_grid_mark_opposing_zones_of_control(0);
+        fdps_move_grid_mark_opposing_zones_of_control(1);
+
+        grid_width = (int) *(short *) data_fdps_battle_move_grid_ptr;
+        grid_height = (int) *(short *) (data_fdps_battle_move_grid_ptr + 2);
+
+        if (unit->portrait_id == CH30_REVIVE_WRAITH_CHAR_ID) {
+            anchor_x = CH30_REVIVE_WRAITH_ANCHOR_X;
+            anchor_y = CH30_REVIVE_WRAITH_ANCHOR_Y;
+        } else {
+            anchor_x = CH30_REVIVE_SKELETON_ANCHOR_X;
+            anchor_y = CH30_REVIVE_SKELETON_ANCHOR_Y;
+        }
+
+        best_distance = CH30_REVIVE_START_DISTANCE;
+        for (scan_y = 0; scan_y < grid_height; scan_y++) {
+            for (scan_x = 0; scan_x < grid_width; scan_x++) {
+                cell = (struct fdps_move_grid_cell *)
+                       (data_fdps_battle_move_grid_ptr +
+                        CH30_REVIVE_GRID_CELL_BASE) +
+                       (scan_y * grid_width + scan_x);
+                if ((cell->flags & CH30_REVIVE_GRID_OCCUPIED) != 0) {
+                    continue;
+                }
+                distance = abs(scan_x - anchor_x) + abs(scan_y - anchor_y);
+                if (distance > best_distance) {
+                    continue;
+                }
+                fdps_map_load_tile_info(scan_x, scan_y);
+                if (data_fdps_map_tile_terrain_type
+                        < CH30_REVIVE_TERRAIN_LIMIT) {
+                    best_distance = distance;
+                    chosen_x = scan_x;
+                    chosen_y = scan_y;
+                }
+            }
+        }
+
+        unit->pos_x = (unsigned char) chosen_x;
+        unit->pos_y = (unsigned char) chosen_y;
+        fdps_map_cursor_move_to_unit(unit_index);
+
+        for (flash_bias = CH30_REVIVE_FLASH_BIAS_START;
+             flash_bias >= 0;
+             flash_bias--) {
+            fdps_set_palette_range(
+                (struct fdps_palette_entry *) data_fdps_vga_main_palette_ptr,
+                CH30_REVIVE_DAC_FIRST_ENTRY, CH30_REVIVE_DAC_LAST_ENTRY,
+                flash_bias, flash_bias, flash_bias);
+            delay((unsigned int) CH30_REVIVE_FLASH_STEP_MS);
+        }
+
+        revived_unit_id = (unsigned char) unit_index;
+        fdps_play_vfs_animation_over_units(CH30_REVIVE_EFFECT_UNITS,
+                                           &revived_unit_id,
+                                           CH30_REVIVE_EFFECT_CLIP);
+
+        unit->flags = 0;
+        unit->hp_current = unit->hp_max;
+        fdps_map_grid_reset();
+    }
 }

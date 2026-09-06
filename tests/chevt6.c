@@ -49,10 +49,27 @@
  * is one deployment call, so the ch30w3_ cases run that deployment for real and
  * read back which record landed on which tile.  They need ICON.CEL and FIELD.VFS
  * next to the executable and skip themselves without them.
+ *
+ * The undead top-up at 00010760 shares none of it either, and it is the only
+ * function in this file with arithmetic in it.  Its ch30rev_ cases split in two.
+ * The gate cases -- which character ids are accepted, whether the unit has to be
+ * dead, and where the sweep stops -- stage records that qualify for nothing, so
+ * the body never starts and they cost nothing and need no game file.  The search
+ * cases have to run the whole thing, because the tile the search picks is only
+ * readable off the record it is written into, and everything between the search
+ * and that write is real hardware work: the cursor walk, 65 palette uploads and
+ * the Posion.saf effect out of MISC.VFS.  They stage what the game stages -- the
+ * adapter in mode 13h and an IRQ0 handler advancing data_fdps_timer_tick_counter
+ * -- the way tests/item.c does for the same clip, and skip themselves when the
+ * container is not staged next to the executable (tests/gamefile.lst).
  */
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <conio.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -1076,6 +1093,600 @@ static void ch30w3_has_no_one_shot_latch(void)
     CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH29_LATCH_SLOT], 1);
 }
 
+/* ---- fdps_chapter_30_revive_wave_4_undead, 00010760 ----------------------
+ *
+ * Every expected value below is read off the assembly at 00010760: the CMP
+ * EAX,0x55 at 000107a5 and CMP EAX,0x6a at 000107b5 that pick the two character
+ * ids out of record byte +7; the CALL 0x000109b0 / TEST EAX,EAX / JNZ at
+ * 000107be that makes the second half of the gate the retired predicate, which
+ * is bit 0 of byte +5 alone; the CMP EAX,[0x00060150] / JL at 00010776 that
+ * bounds the sweep; the four anchor literals at 0001080f..00010826; the AND
+ * AL,0x40 at 00010883 that skips an occupied cell; the CMP EAX,[EBP-0x10] / JLE
+ * at 000108b0 that keeps a candidate whose distance merely ties; the CMP EAX,0x5
+ * / JGE at 000108ce that rejects terrain 5 and above; the CMP dword ptr
+ * [EBP-0xc],0x0 / JGE at 00010932 that runs the flash down to a bias of 0
+ * inclusive; and the MOV byte ptr [EAX+0x5],0x0 and MOV DX,[EAX+0x42] / MOV
+ * [EAX+0x40],DX at 0001098c..0001099a that put the unit back in play.  None of
+ * them is read off the emitted C.
+ *
+ * WHY THE SEARCH CASES DRIVE THE REAL HARDWARE.  The tile the search settles on
+ * is written into the record and nowhere else, and between the search and that
+ * write the function walks the cursor, uploads the palette 65 times and plays a
+ * VFS clip.  None of those can be stood in for -- the container's name is a
+ * literal inside fdps_play_vfs_animation_over_units and a member it cannot find
+ * ends the process -- so the cases put the adapter in mode 13h, install an IRQ0
+ * handler so the clip's frame waits can end, and skip themselves when MISC.VFS
+ * is not staged next to the executable.
+ *
+ * WHY THE MAP IS EIGHT BY SIX.  Both anchors are off it -- (5, 12) and (15, 13)
+ * against a map six rows deep -- which is what makes the search's answer a
+ * single cell on the bottom row that can be worked out by hand, and it is also
+ * the shape the real map puts the search in, because on map29 the anchor tile is
+ * normally occupied.  Every cell of it is walkable unless a case says otherwise.
+ *
+ * WHY NOTHING IS EVER DRAWN.  The clip's own compositor repaints the scene on
+ * every tick, and with no scene layers and no sprite cache staged the only thing
+ * that could reach a sprite sheet is a map unit.  The unit being revived is
+ * still retired while the clip plays -- the flag byte is cleared afterwards, at
+ * 0001098c -- and fdps_draw_map_unit returns on a retired record; every other
+ * staged unit carries portrait id 0x80, which that function returns on one line
+ * earlier.  So no case here needs ICON.CEL.
+ *
+ * WHY THE CURSOR NEVER SCROLLS THE VIEW.  Every case starts the cursor at world
+ * (120, 96) with the view at the map origin and the cursor switched off, and
+ * every tile the search can settle on in these fixtures is world (96..168, 120):
+ * the whole walk stays inside the 24..216 by 24..144 band fdps_map_cursor_move_to
+ * holds it in, so no step moves the view and no frame is composed (tests/mapcur.c
+ * stages the walk's own cases the same way).
+ *
+ * WHAT IS NOT COVERED.  Which pixels the flash and the clip put on the screen is
+ * palette.c's and anim.c's business and is covered in their own files.  What is
+ * asserted of the flash here is only its last step, read back off the DAC.
+ * ------------------------------------------------------------------ */
+
+/* The two character ids at record +7 that the revival accepts, and the four
+   ids either side of them, which it must not. */
+#define CH30REV_WRAITH_ID    0x55
+#define CH30REV_SKELETON_ID  0x6a
+
+/* The scripted spawn tiles the two types are measured from. */
+#define CH30REV_WRAITH_ANCHOR_X   5
+#define CH30REV_WRAITH_ANCHOR_Y   12
+#define CH30REV_SKELETON_ANCHOR_X 15
+#define CH30REV_SKELETON_ANCHOR_Y 13
+
+/* The staged map.  Both anchors are below its bottom row on purpose. */
+#define CH30REV_GRID_W 8
+#define CH30REV_GRID_H 6
+
+/* The scene-layer offsets fdps_map_load_tile_info reads through, the same ones
+   the ch30w3_ fixture above uses. */
+#define CH30REV_TILE_MAP_WIDTH_OFFSET   7
+#define CH30REV_TILE_MAP_IDS_OFFSET     0xb
+#define CH30REV_TILE_ATTR_ROWS_OFFSET   0x11
+#define CH30REV_EVENT_LAYER_WIDTH_OFFSET 7
+#define CH30REV_EVENT_LAYER_CELLS_OFFSET 0x10
+#define CH30REV_TILE_ATTR_ROWS 16
+
+/* Terrain codes either side of the CMP EAX,0x5 / JGE at 000108ce: 4 is the
+   highest the search still accepts and 5 the lowest it rejects. */
+#define CH30REV_TERRAIN_WALKABLE 1
+#define CH30REV_TERRAIN_HIGHEST_ACCEPTED 4
+#define CH30REV_TERRAIN_REJECTED 5
+
+/* Tile ids the cases give one cell so that cell can carry its own terrain: id 0
+   is the walkable one every other cell keeps. */
+#define CH30REV_TILE_ID_ACCEPTED 2
+#define CH30REV_TILE_ID_REJECTED 1
+
+/* The movement grid's cell array starts after its 4-byte header and a cell is
+   two bytes; bit 0x40 of byte 0 is "a unit stands here" and bit 0x80 is the
+   zone-of-control mark.  fdps_map_grid_reset clears both and keeps the low six
+   bits, so a blank grid reads 0 here. */
+#define CH30REV_GRID_CELL_BASE 4
+#define CH30REV_GRID_ZONE_BITS 0xc0
+
+/* Record state the cases stage and read back.  The flag byte carries the
+   retired bit 0 and the acted bit 0x80 together, so a revival that masked
+   instead of assigning would leave 0x80 standing. */
+#define CH30REV_FLAGS_DEAD_AND_ACTED 0x81
+#define CH30REV_FLAGS_ACTED_ONLY     0x80
+#define CH30REV_FLAGS_IN_PLAY        0x00
+#define CH30REV_START_HP 0
+#define CH30REV_MAX_HP   37
+
+/* The portrait id fdps_draw_map_unit returns on before it touches a sprite
+   sheet, which is what keeps the staged blockers out of the clip's repaint. */
+#define CH30REV_PORTRAIT_NO_SPRITE 0x80
+
+/* Where the cursor starts every case, and the tile pitch it walks in. */
+#define CH30REV_CURSOR_START_X 120
+#define CH30REV_CURSOR_START_Y 96
+#define CH30REV_TILE_PIXELS 24
+
+/* Where the dead unit is parked before the revival, well clear of both anchors
+   and of every cell a case blocks. */
+#define CH30REV_DEAD_START_X 2
+#define CH30REV_DEAD_START_Y 3
+
+/* The DAC entry the flash's last step is read back off, and the colour staged
+   there.  All three components are below 63, so a bias of 0 uploads them
+   unchanged and any bias above 0 does not. */
+#define CH30REV_DAC_PROBE_ENTRY 200
+#define CH30REV_DAC_PROBE_RED   10
+#define CH30REV_DAC_PROBE_GREEN 20
+#define CH30REV_DAC_PROBE_BLUE  30
+#define CH30REV_DAC_READ_INDEX 0x3c7
+#define CH30REV_DAC_DATA 0x3c9
+
+/* IRQ0, and the two adapter modes.  DOS/4GW reflects a hardware interrupt taken
+   in protected mode to the protected-mode vector, so the handler installed here
+   is the one that runs while the clip spins on the tick counter. */
+#define CH30REV_TIMER_VECTOR 8
+#define CH30REV_MODE_TEXT 0x03
+#define CH30REV_MODE_320X200X256 0x13
+
+#define CH30REV_ARCHIVE "MISC.VFS"
+#define CH30REV_STAGE_UNITS 4
+
+static unsigned char ch30rev_grid[CH30REV_GRID_CELL_BASE +
+                                  CH30REV_GRID_W * CH30REV_GRID_H * 2];
+static unsigned char ch30rev_tile_map[CH30REV_TILE_MAP_IDS_OFFSET +
+                                      CH30REV_GRID_W * CH30REV_GRID_H * 2];
+static unsigned char ch30rev_tile_attr[CH30REV_TILE_ATTR_ROWS_OFFSET +
+                                       CH30REV_TILE_ATTR_ROWS * 4];
+static unsigned char ch30rev_event_layer[CH30REV_EVENT_LAYER_CELLS_OFFSET +
+                                         CH30REV_GRID_W * CH30REV_GRID_H];
+static struct fdps_unit_record ch30rev_units[CH30REV_STAGE_UNITS];
+static struct fdps_palette_entry ch30rev_palette[256];
+
+static int ch30rev_archive_checked = 0;
+static int ch30rev_archive_ready = 0;
+
+static void (__interrupt __far *ch30rev_saved_timer)();
+
+/* What the DAC held for the probe entry when the call came back, sampled while
+   the adapter is still in mode 13h. */
+static int ch30rev_dac_red;
+static int ch30rev_dac_green;
+static int ch30rev_dac_blue;
+
+static void __interrupt __far ch30rev_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(ch30rev_saved_timer);
+}
+
+/* Only the container's presence is tested: the member name is a literal inside
+   fdps_play_vfs_animation_over_units, so there is nothing to point at a smaller
+   file, and a member it cannot find ends the process rather than failing a
+   check. */
+static void ch30rev_ensure_archive(void)
+{
+    FILE *fp;
+
+    if (ch30rev_archive_checked) {
+        return;
+    }
+    ch30rev_archive_checked = 1;
+    fp = fopen(CH30REV_ARCHIVE, "rb");
+    if (fp == NULL) {
+        return;
+    }
+    fclose(fp);
+    ch30rev_archive_ready = 1;
+}
+
+static void ch30rev_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+static struct fdps_move_grid_cell *ch30rev_cell(int tile_x, int tile_y)
+{
+    return (struct fdps_move_grid_cell *)
+           (ch30rev_grid + CH30REV_GRID_CELL_BASE) +
+           (tile_y * CH30REV_GRID_W + tile_x);
+}
+
+static void ch30rev_set_terrain(int tile_id, int terrain)
+{
+    struct fdps_tile_attr_entry *rows;
+
+    rows = (struct fdps_tile_attr_entry *)
+           (ch30rev_tile_attr + CH30REV_TILE_ATTR_ROWS_OFFSET);
+    rows[tile_id].terrain_type = (unsigned char) terrain;
+}
+
+static void ch30rev_set_tile_id(int tile_x, int tile_y, int tile_id)
+{
+    short *tile_ids;
+
+    tile_ids = (short *) (ch30rev_tile_map + CH30REV_TILE_MAP_IDS_OFFSET);
+    tile_ids[tile_y * CH30REV_GRID_W + tile_x] = (short) tile_id;
+}
+
+/* A blank walkable eight by six map with the dead undead of the given character
+   id at index 0 and nothing else on it, the cursor parked at its start position
+   with the view at the map origin, and a palette whose probe entry carries a
+   colour the DAC can hold unchanged.
+
+   unit_count is what data_fdps_map_unit_count is left on, so a case can stage a
+   record the sweep must not reach by putting it above the count. */
+static void ch30rev_stage(int char_id, int unit_count)
+{
+    int i;
+
+    memset(ch30rev_grid, 0, sizeof(ch30rev_grid));
+    memset(ch30rev_tile_map, 0, sizeof(ch30rev_tile_map));
+    memset(ch30rev_tile_attr, 0, sizeof(ch30rev_tile_attr));
+    memset(ch30rev_event_layer, 0, sizeof(ch30rev_event_layer));
+    memset(ch30rev_units, 0, sizeof(ch30rev_units));
+
+    *(short *) ch30rev_grid = (short) CH30REV_GRID_W;
+    *(short *) (ch30rev_grid + 2) = (short) CH30REV_GRID_H;
+
+    *(short *) (ch30rev_tile_map + CH30REV_TILE_MAP_WIDTH_OFFSET) =
+        (short) CH30REV_GRID_W;
+    for (i = 0; i < CH30REV_TILE_ATTR_ROWS; i++) {
+        ch30rev_set_terrain(i, CH30REV_TERRAIN_WALKABLE);
+    }
+
+    *(short *) (ch30rev_event_layer + CH30REV_EVENT_LAYER_WIDTH_OFFSET) =
+        (short) CH30REV_GRID_W;
+
+    for (i = 0; i < 256; i++) {
+        ch30rev_palette[i].red = 0;
+        ch30rev_palette[i].green = 0;
+        ch30rev_palette[i].blue = 0;
+    }
+    ch30rev_palette[CH30REV_DAC_PROBE_ENTRY].red = CH30REV_DAC_PROBE_RED;
+    ch30rev_palette[CH30REV_DAC_PROBE_ENTRY].green = CH30REV_DAC_PROBE_GREEN;
+    ch30rev_palette[CH30REV_DAC_PROBE_ENTRY].blue = CH30REV_DAC_PROBE_BLUE;
+
+    ch30rev_units[0].portrait_id = (unsigned char) char_id;
+    ch30rev_units[0].flags = CH30REV_FLAGS_DEAD_AND_ACTED;
+    ch30rev_units[0].pos_x = CH30REV_DEAD_START_X;
+    ch30rev_units[0].pos_y = CH30REV_DEAD_START_Y;
+    ch30rev_units[0].hp_current = CH30REV_START_HP;
+    ch30rev_units[0].hp_max = CH30REV_MAX_HP;
+
+    data_fdps_battle_move_grid_ptr = ch30rev_grid;
+    data_fdps_scene_layer_tile_map_ptrs[0] = ch30rev_tile_map;
+    data_fdps_scene_layer_tile_attr_ptr[0] = ch30rev_tile_attr;
+    data_fdps_map_cell_event_code_layer_ptr = ch30rev_event_layer;
+    data_fdps_vga_main_palette_ptr = (unsigned char *) ch30rev_palette;
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch30rev_units;
+    data_fdps_map_unit_count = unit_count;
+
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_map_unit_walk_anim_counter = 0;
+    data_fdps_map_cursor_world_x = CH30REV_CURSOR_START_X;
+    data_fdps_map_cursor_world_y = CH30REV_CURSOR_START_Y;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+}
+
+/* A unit still in play, which is what puts the 0x40 bit on its tile when the
+   two marking passes run.  Its portrait id keeps it out of the clip's repaint,
+   and its side decides which of the two passes marks it -- side 0 is marked by
+   the pass with a non-zero selector and every other side by the pass with 0 --
+   so a fixture that uses both sides needs both passes to have run. */
+static void ch30rev_set_blocker(int index, int tile_x, int tile_y, int side)
+{
+    ch30rev_units[index].portrait_id = CH30REV_PORTRAIT_NO_SPRITE;
+    ch30rev_units[index].flags = CH30REV_FLAGS_IN_PLAY;
+    ch30rev_units[index].side = (unsigned char) side;
+    ch30rev_units[index].pos_x = (unsigned char) tile_x;
+    ch30rev_units[index].pos_y = (unsigned char) tile_y;
+}
+
+/* Put the staged globals back the way a freshly started program has them, for
+   the reason tests/anim.c gives: a later unit that expects an empty battle would
+   otherwise inherit this fixture through the array pointer. */
+static void ch30rev_unstage(void)
+{
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_map_unit_count = 0;
+    data_fdps_battle_move_grid_ptr = NULL;
+    data_fdps_vga_main_palette_ptr = NULL;
+    data_fdps_scene_layer_tile_map_ptrs[0] = NULL;
+    data_fdps_scene_layer_tile_attr_ptr[0] = NULL;
+    data_fdps_map_cell_event_code_layer_ptr = NULL;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+}
+
+/* One whole call with the adapter in the mode the game plays it in and a timer
+   interrupt running, sampling the DAC's probe entry before the mode goes back so
+   the flash's last upload is still on the hardware. */
+static void ch30rev_run(void)
+{
+    ch30rev_set_mode(CH30REV_MODE_320X200X256);
+    ch30rev_saved_timer = _dos_getvect(CH30REV_TIMER_VECTOR);
+    _dos_setvect(CH30REV_TIMER_VECTOR, ch30rev_timer_isr);
+
+    fdps_chapter_30_revive_wave_4_undead();
+
+    outp(CH30REV_DAC_READ_INDEX, CH30REV_DAC_PROBE_ENTRY);
+    ch30rev_dac_red = inp(CH30REV_DAC_DATA);
+    ch30rev_dac_green = inp(CH30REV_DAC_DATA);
+    ch30rev_dac_blue = inp(CH30REV_DAC_DATA);
+
+    _dos_setvect(CH30REV_TIMER_VECTOR, ch30rev_saved_timer);
+    ch30rev_set_mode(CH30REV_MODE_TEXT);
+}
+
+/* The fields the cases read back and the stride they are indexed by.  The
+   character id the gate tests is record byte +7, which struct fdps_unit_record
+   names portrait_id -- fdps_deploy_unit writes the deployment record's character
+   id into both +7 and +8, so the two carry the same number and only +7 is what
+   this function loads. */
+static void ch30rev_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 1);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 5);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, portrait_id), 7);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_current), 0x40);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_max), 0x42);
+    CHECK_EQ((int) sizeof(struct fdps_move_grid_cell), 2);
+}
+
+/* The two accepted ids are equality tests and not a range: the four ids either
+   side of them are staged dead, one at a time, and none of them is touched.
+   0x54 and 0x56 straddle 死靈 and 0x69 and 0x6b straddle 白骨戰士, so an
+   off-by-one on either compare, or a range test written across the pair, would
+   show here.  Nothing runs, so this case needs no game file. */
+static void ch30rev_only_the_two_undead_ids_are_revived(void)
+{
+    static int rejected_ids[4] = {0x54, 0x56, 0x69, 0x6b};
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        ch30rev_stage(rejected_ids[i], 1);
+
+        fdps_chapter_30_revive_wave_4_undead();
+
+        CHECK_EQ((int) ch30rev_units[0].pos_x, CH30REV_DEAD_START_X);
+        CHECK_EQ((int) ch30rev_units[0].pos_y, CH30REV_DEAD_START_Y);
+        CHECK_EQ((int) ch30rev_units[0].flags, CH30REV_FLAGS_DEAD_AND_ACTED);
+        CHECK_EQ((int) ch30rev_units[0].hp_current, CH30REV_START_HP);
+    }
+    ch30rev_unstage();
+}
+
+/* The second half of the gate is the retired predicate, which is bit 0 of the
+   flag byte alone.  Both accepted ids are staged twice: once with a clear flag
+   byte and once with only the acted bit 0x80 up, which is the value that would
+   pass a gate written as "the flag byte is non-zero".  Neither is revived, so
+   nothing runs and no game file is needed. */
+static void ch30rev_a_living_undead_is_left_alone(void)
+{
+    static int accepted_ids[2] = {CH30REV_WRAITH_ID, CH30REV_SKELETON_ID};
+    static int living_flags[2] = {CH30REV_FLAGS_IN_PLAY,
+                                  CH30REV_FLAGS_ACTED_ONLY};
+    int id;
+    int flag;
+
+    for (id = 0; id < 2; id++) {
+        for (flag = 0; flag < 2; flag++) {
+            ch30rev_stage(accepted_ids[id], 1);
+            ch30rev_units[0].flags = (unsigned char) living_flags[flag];
+
+            fdps_chapter_30_revive_wave_4_undead();
+
+            CHECK_EQ((int) ch30rev_units[0].pos_x, CH30REV_DEAD_START_X);
+            CHECK_EQ((int) ch30rev_units[0].pos_y, CH30REV_DEAD_START_Y);
+            CHECK_EQ((int) ch30rev_units[0].flags, living_flags[flag]);
+            CHECK_EQ((int) ch30rev_units[0].hp_current, CH30REV_START_HP);
+        }
+    }
+    ch30rev_unstage();
+}
+
+/* The sweep is bounded by data_fdps_map_unit_count and by nothing else: a dead
+   死靈 is staged at index 1 with the count left on 1, so the record exists and
+   qualifies but is one past the bound.  A walk that ran to the end of the array,
+   or one that used <= against the count, would revive it. */
+static void ch30rev_the_sweep_stops_at_the_unit_count(void)
+{
+    ch30rev_stage(CH30REV_WRAITH_ID, 1);
+    ch30rev_units[0].portrait_id = CH30REV_PORTRAIT_NO_SPRITE;
+    ch30rev_units[1].portrait_id = CH30REV_WRAITH_ID;
+    ch30rev_units[1].flags = CH30REV_FLAGS_DEAD_AND_ACTED;
+    ch30rev_units[1].pos_x = CH30REV_DEAD_START_X;
+    ch30rev_units[1].pos_y = CH30REV_DEAD_START_Y;
+    ch30rev_units[1].hp_max = CH30REV_MAX_HP;
+
+    fdps_chapter_30_revive_wave_4_undead();
+
+    CHECK_EQ((int) ch30rev_units[1].pos_x, CH30REV_DEAD_START_X);
+    CHECK_EQ((int) ch30rev_units[1].pos_y, CH30REV_DEAD_START_Y);
+    CHECK_EQ((int) ch30rev_units[1].flags, CH30REV_FLAGS_DEAD_AND_ACTED);
+    CHECK_EQ((int) ch30rev_units[1].hp_current, CH30REV_START_HP);
+    ch30rev_unstage();
+}
+
+/* One dead 死靈 on an empty map.  Its anchor is (5, 12), the map is six rows
+   deep and every cell is free and walkable, so the shortest Manhattan distance
+   any cell can reach is 7 and exactly one cell reaches it: (5, 5).  That is the
+   whole revival read back at once -- the tile, the cursor walked onto it, the
+   flag byte assigned 0 rather than masked, max HP copied over current HP, and
+   the grid left blank behind it.
+   The cursor is the ordering assertion: it is walked to the unit AFTER the tile
+   bytes are written, so a cursor that ended at the record's old tile (2, 3)
+   would say the two had swapped.
+   The DAC probe is the flash's last step: the fade runs the bias down to 0
+   inclusive, so the final upload is the staged palette unbiased.  A loop that
+   stopped at 1 would leave every component one higher. */
+static void ch30rev_the_wraith_lands_on_the_nearest_free_walkable_tile(void)
+{
+    ch30rev_ensure_archive();
+    if (!ch30rev_archive_ready) {
+        return;
+    }
+
+    ch30rev_stage(CH30REV_WRAITH_ID, 1);
+
+    ch30rev_run();
+
+    CHECK_EQ((int) ch30rev_units[0].pos_x, 5);
+    CHECK_EQ((int) ch30rev_units[0].pos_y, 5);
+    CHECK_EQ((int) ch30rev_units[0].flags, CH30REV_FLAGS_IN_PLAY);
+    CHECK_EQ((int) ch30rev_units[0].hp_current, CH30REV_MAX_HP);
+    CHECK_EQ((int) ch30rev_units[0].hp_max, CH30REV_MAX_HP);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 5 * CH30REV_TILE_PIXELS);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 5 * CH30REV_TILE_PIXELS);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    CHECK_EQ(ch30rev_cell(5, 5)->flags & CH30REV_GRID_ZONE_BITS, 0);
+    CHECK_EQ(ch30rev_dac_red, CH30REV_DAC_PROBE_RED);
+    CHECK_EQ(ch30rev_dac_green, CH30REV_DAC_PROBE_GREEN);
+    CHECK_EQ(ch30rev_dac_blue, CH30REV_DAC_PROBE_BLUE);
+    ch30rev_unstage();
+}
+
+/* The tie-break, and the one thing here that cannot be got right by writing the
+   obvious comparison.  Two units still in play stand on (5, 5) and (5, 4), which
+   the two marking passes turn into the 0x40 bit the search skips -- one is on
+   the enemy side and one on the player side, so both passes have to have run for
+   the pair to be blocked.  That leaves three cells tied at distance 8: (5, 3) is
+   not one of them, but (4, 5) and (6, 5) are, and so is (4, 4) at distance 9
+   which loses.  In row-major order (4, 5) comes before (6, 5), and the accepting
+   compare is "no greater than", so (6, 5) is the tile.  A search written with
+   "<" keeps (4, 5) instead. */
+static void ch30rev_a_tie_at_the_shortest_distance_keeps_the_last_cell(void)
+{
+    ch30rev_ensure_archive();
+    if (!ch30rev_archive_ready) {
+        return;
+    }
+
+    ch30rev_stage(CH30REV_WRAITH_ID, 3);
+    ch30rev_set_blocker(1, 5, 5, 0);
+    ch30rev_set_blocker(2, 5, 4, 2);
+
+    ch30rev_run();
+
+    CHECK_EQ((int) ch30rev_units[0].pos_x, 6);
+    CHECK_EQ((int) ch30rev_units[0].pos_y, 5);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 6 * CH30REV_TILE_PIXELS);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 5 * CH30REV_TILE_PIXELS);
+    CHECK_EQ((int) ch30rev_units[1].pos_x, 5);
+    CHECK_EQ((int) ch30rev_units[1].pos_y, 5);
+    CHECK_EQ((int) ch30rev_units[2].pos_x, 5);
+    CHECK_EQ((int) ch30rev_units[2].pos_y, 4);
+    CHECK_EQ(ch30rev_cell(5, 5)->flags & CH30REV_GRID_ZONE_BITS, 0);
+    CHECK_EQ(ch30rev_cell(4, 5)->flags & CH30REV_GRID_ZONE_BITS, 0);
+    ch30rev_unstage();
+}
+
+/* The terrain bound is "below 5" and not "5 or below".  The fixture is the tie
+   above, whose winner is (6, 5); giving that one cell a tile id whose attribute
+   row says 5 takes it out of the search and the tile falls back to (4, 5), and
+   giving the same cell 4 instead leaves it the winner.  The rejected run also
+   shows that a rejected cell does not move the best-so-far distance: (7, 5) sits
+   one further out at distance 9 and is still not taken. */
+static void ch30rev_a_tile_over_the_terrain_limit_is_rejected(void)
+{
+    ch30rev_ensure_archive();
+    if (!ch30rev_archive_ready) {
+        return;
+    }
+
+    ch30rev_stage(CH30REV_WRAITH_ID, 3);
+    ch30rev_set_blocker(1, 5, 5, 0);
+    ch30rev_set_blocker(2, 5, 4, 2);
+    ch30rev_set_tile_id(6, 5, CH30REV_TILE_ID_REJECTED);
+    ch30rev_set_terrain(CH30REV_TILE_ID_REJECTED, CH30REV_TERRAIN_REJECTED);
+
+    ch30rev_run();
+
+    CHECK_EQ((int) ch30rev_units[0].pos_x, 4);
+    CHECK_EQ((int) ch30rev_units[0].pos_y, 5);
+
+    ch30rev_stage(CH30REV_WRAITH_ID, 3);
+    ch30rev_set_blocker(1, 5, 5, 0);
+    ch30rev_set_blocker(2, 5, 4, 2);
+    ch30rev_set_tile_id(6, 5, CH30REV_TILE_ID_ACCEPTED);
+    ch30rev_set_terrain(CH30REV_TILE_ID_ACCEPTED,
+                        CH30REV_TERRAIN_HIGHEST_ACCEPTED);
+
+    ch30rev_run();
+
+    CHECK_EQ((int) ch30rev_units[0].pos_x, 6);
+    CHECK_EQ((int) ch30rev_units[0].pos_y, 5);
+    ch30rev_unstage();
+}
+
+/* The two types measure from two different anchors, and which one is used comes
+   off the same record byte the gate tested.  A dead 白骨戰士 on the same empty
+   map is measured from (15, 13) rather than (5, 12), so the nearest free
+   walkable cell is the bottom right corner (7, 5) and not (5, 5) -- the tile the
+   死靈 case above gets off the identical fixture. */
+static void ch30rev_the_skeleton_measures_from_its_own_anchor(void)
+{
+    ch30rev_ensure_archive();
+    if (!ch30rev_archive_ready) {
+        return;
+    }
+
+    ch30rev_stage(CH30REV_SKELETON_ID, 1);
+
+    ch30rev_run();
+
+    CHECK_EQ((int) ch30rev_units[0].pos_x, 7);
+    CHECK_EQ((int) ch30rev_units[0].pos_y, 5);
+    CHECK_EQ((int) ch30rev_units[0].flags, CH30REV_FLAGS_IN_PLAY);
+    CHECK_EQ((int) ch30rev_units[0].hp_current, CH30REV_MAX_HP);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 7 * CH30REV_TILE_PIXELS);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 5 * CH30REV_TILE_PIXELS);
+    ch30rev_unstage();
+}
+
+/* Nothing latches, and the only thing that stops a second pass is the gate
+   itself.  The same fixture is run twice: the first call revives the unit, and
+   the second finds a record that is no longer retired and leaves the whole map
+   alone.  The cursor is parked somewhere the walk would have to move it away
+   from before the second call, so a body that ran again would say so even if it
+   settled on the same tile. */
+static void ch30rev_a_revived_unit_is_not_revived_again(void)
+{
+    ch30rev_ensure_archive();
+    if (!ch30rev_archive_ready) {
+        return;
+    }
+
+    ch30rev_stage(CH30REV_WRAITH_ID, 1);
+
+    ch30rev_run();
+
+    CHECK_EQ((int) ch30rev_units[0].pos_x, 5);
+    CHECK_EQ((int) ch30rev_units[0].pos_y, 5);
+    CHECK_EQ((int) ch30rev_units[0].flags, CH30REV_FLAGS_IN_PLAY);
+
+    ch30rev_units[0].hp_current = CH30REV_START_HP;
+    data_fdps_map_cursor_world_x = CH30REV_CURSOR_START_X;
+    data_fdps_map_cursor_world_y = CH30REV_CURSOR_START_Y;
+
+    fdps_chapter_30_revive_wave_4_undead();
+
+    CHECK_EQ((int) ch30rev_units[0].pos_x, 5);
+    CHECK_EQ((int) ch30rev_units[0].pos_y, 5);
+    CHECK_EQ((int) ch30rev_units[0].hp_current, CH30REV_START_HP);
+    CHECK_EQ(data_fdps_map_cursor_world_x, CH30REV_CURSOR_START_X);
+    CHECK_EQ(data_fdps_map_cursor_world_y, CH30REV_CURSOR_START_Y);
+    ch30rev_unstage();
+}
+
 void run_chevt6_tests(void)
 {
     RUN_TEST(ch29_record_shape_matches_the_offsets);
@@ -1103,4 +1714,13 @@ void run_chevt6_tests(void)
     RUN_TEST(ch30w3_map_number_comes_from_the_chapter_global);
     RUN_TEST(ch30w3_ignores_the_unit_index_argument);
     RUN_TEST(ch30w3_has_no_one_shot_latch);
+    RUN_TEST(ch30rev_record_shape_matches_the_offsets);
+    RUN_TEST(ch30rev_only_the_two_undead_ids_are_revived);
+    RUN_TEST(ch30rev_a_living_undead_is_left_alone);
+    RUN_TEST(ch30rev_the_sweep_stops_at_the_unit_count);
+    RUN_TEST(ch30rev_the_wraith_lands_on_the_nearest_free_walkable_tile);
+    RUN_TEST(ch30rev_a_tie_at_the_shortest_distance_keeps_the_last_cell);
+    RUN_TEST(ch30rev_a_tile_over_the_terrain_limit_is_rejected);
+    RUN_TEST(ch30rev_the_skeleton_measures_from_its_own_anchor);
+    RUN_TEST(ch30rev_a_revived_unit_is_not_revived_again);
 }

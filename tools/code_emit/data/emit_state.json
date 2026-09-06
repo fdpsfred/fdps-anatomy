@@ -2719,6 +2719,14 @@
       "status": "committed",
       "emitted_against": "0x47",
       "rounds": 0
+    },
+    "00010760": {
+      "name": "fdps_chapter_30_revive_wave_4_undead",
+      "target": "chevt6.c",
+      "body_size": "0x24f",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x24f"
     }
   }
 }
