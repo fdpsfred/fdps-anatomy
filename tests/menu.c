@@ -42,6 +42,7 @@
 #include "gamedata.h"
 #include "keybd.h"
 #include "mapdraw.h"
+#include "palcycle.h"
 #include "testharn.h"
 #include "menu.h"
 
@@ -1948,6 +1949,255 @@ static void options_reopens_on_the_toggled_switch_with_its_new_label(void)
     options_unstage();
 }
 
+/* --- fdps_menu_draw_command_icons ---------------------------------------
+ *
+ * This one draws straight to the mode 13h screen and takes no page at all, so
+ * every case here sets mode 13h, fills the frame with the border sentinel,
+ * calls, snapshots the 64,000 bytes and returns to text mode.  The synthetic
+ * sheet built above is what makes the snapshot readable: a cell shows its icon
+ * id on its first row and its frame id on the twenty-one rows below, so one
+ * pixel names the frame and one names the icon.
+ *
+ * The geometry every expected column comes from is the assembly at 000324dc
+ * and 0003251b: left edge 0x12b - 26 * count, cell pitch 26, destination base
+ * 0xa8480 which is 0xa0000 + 106 * 320, and the 25 x 22 the blitter hardwires.
+ * Four entries put the first cell on column 195 and six put it on 143, and
+ * both end with the last cell on column 273 -- last pixel column 297, with 298
+ * the far-right seam nothing writes.
+ */
+#define ICONS_ROW 0x6a
+#define ICONS_CELL_PITCH 0x1a
+#define ICONS_FOUR_LEFT 195
+#define ICONS_SIX_LEFT 143
+#define ICONS_LAST_COL 297
+#define ICONS_LAST_ROW 127
+#define ICONS_CELL_PIXELS (RING_SPRITE_W * RING_SPRITE_H)
+
+/* The church screen's four icons, named in the plate comment at 000324d0, and
+   two more ids to make a six-entry row.  None of them is in the plate range
+   0x1a..0x1c, so each paints its top row only. */
+static void icons_church_row(int *icon_ids)
+{
+    icon_ids[0] = 0x24;
+    icon_ids[1] = 0x12;
+    icon_ids[2] = 0x04;
+    icon_ids[3] = 0x10;
+}
+
+static void icons_six_row(int *icon_ids)
+{
+    icons_church_row(icon_ids);
+    icon_ids[4] = 0x0d;
+    icon_ids[5] = 0x0e;
+}
+
+static void icons_run(int *icon_ids, int icon_count, int selected_index)
+{
+    ring_build_sheet();
+    data_fdps_command_sprite_sheet_ptr = ring_sheet;
+    ring_set_mode(RING_MODE_320X200X256);
+    memset((void *) RING_VGA_BASE, RING_BORDER_FILL,
+           (size_t) RING_SCREEN_BYTES);
+    fdps_menu_draw_command_icons(icon_ids, icon_count, selected_index);
+    memmove(ring_screen, (void *) RING_VGA_BASE, (size_t) RING_SCREEN_BYTES);
+    ring_set_mode(RING_MODE_TEXT);
+    data_fdps_command_sprite_sheet_ptr = NULL;
+}
+
+/* Where the strip lands and how much of the screen it is allowed to reach.
+   The corners pin the rectangle and the border count pins that the four cells
+   wrote 2200 pixels and not one more: a strip a row out or a cell wide would
+   still pass the corner checks on their own. */
+static void command_icons_strip_is_row_106_and_ends_on_column_297(void)
+{
+    int icon_ids[4];
+
+    icons_church_row(icon_ids);
+    icons_run(icon_ids, 4, -1);
+
+    CHECK_EQ(ring_pixel(ICONS_ROW, ICONS_FOUR_LEFT), RING_COLOR(0x24));
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_FOUR_LEFT),
+             RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(ring_pixel(ICONS_LAST_ROW, ICONS_LAST_COL),
+             RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_FOUR_LEFT - 1),
+             RING_BORDER_FILL);
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_LAST_COL + 1), RING_BORDER_FILL);
+    CHECK_EQ(ring_pixel(ICONS_ROW - 1, ICONS_FOUR_LEFT), RING_BORDER_FILL);
+    CHECK_EQ(ring_pixel(ICONS_LAST_ROW + 1, ICONS_FOUR_LEFT),
+             RING_BORDER_FILL);
+    CHECK_EQ(ring_count(RING_BORDER_FILL),
+             RING_SCREEN_BYTES - 4 * ICONS_CELL_PIXELS);
+}
+
+/* MOV EDX,0x12b / SUB EDX,EAX: the count is subtracted from a fixed right-hand
+   end, so two more entries move the left edge two cells left and leave the
+   last cell exactly where the four-entry row left it.  A left edge computed
+   the other way round -- a fixed left plus the count -- passes none of this. */
+static void command_icons_right_end_is_fixed_and_the_left_edge_moves(void)
+{
+    int icon_ids[6];
+
+    icons_six_row(icon_ids);
+    icons_run(icon_ids, 6, -1);
+
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_SIX_LEFT),
+             RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_SIX_LEFT - 1), RING_BORDER_FILL);
+    CHECK_EQ(ring_pixel(ICONS_LAST_ROW, ICONS_LAST_COL),
+             RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_LAST_COL + 1), RING_BORDER_FILL);
+    CHECK_EQ(ring_count(RING_BORDER_FILL),
+             RING_SCREEN_BYTES - 6 * ICONS_CELL_PIXELS);
+}
+
+/* CMP EAX,dword ptr [EBP + -0xc] / JNZ picks 0x1a for the matching index and
+   0x1b for every other, so exactly one cell out of the four carries the
+   highlight and it is the one the caller named. */
+static void command_icons_only_the_selected_cell_is_highlighted(void)
+{
+    int icon_ids[4];
+
+    icons_church_row(icon_ids);
+    icons_run(icon_ids, 4, 2);
+
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_FOUR_LEFT),
+             RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_FOUR_LEFT + ICONS_CELL_PITCH),
+             RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_FOUR_LEFT + 2 * ICONS_CELL_PITCH),
+             RING_COLOR(RING_PLATE_HI));
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_FOUR_LEFT + 3 * ICONS_CELL_PITCH),
+             RING_COLOR(RING_PLATE_PLAIN));
+    CHECK_EQ(ring_count(RING_COLOR(RING_PLATE_HI)),
+             ICONS_CELL_PIXELS - RING_SPRITE_W);
+}
+
+/* -1 is what fdps_menu_command_icon_select_loop writes into the cursor when
+   the player cancels, and the equality test is what makes it highlight nothing
+   rather than wrapping onto a cell. */
+static void command_icons_minus_one_highlights_nothing(void)
+{
+    int icon_ids[4];
+
+    icons_church_row(icon_ids);
+    icons_run(icon_ids, 4, -1);
+
+    CHECK_EQ(ring_count(RING_COLOR(RING_PLATE_HI)), 0);
+    CHECK_EQ(ring_count(RING_COLOR(RING_PLATE_PLAIN)),
+             4 * (ICONS_CELL_PIXELS - RING_SPRITE_W));
+}
+
+/* It is an equality against the loop index and not a range check, so an index
+   one past the last entry is no more special than -1. */
+static void command_icons_index_past_the_row_highlights_nothing(void)
+{
+    int icon_ids[4];
+
+    icons_church_row(icon_ids);
+    icons_run(icon_ids, 4, 4);
+
+    CHECK_EQ(ring_count(RING_COLOR(RING_PLATE_HI)), 0);
+}
+
+/* Each cell resolves its own icon_ids[i], and the icon goes down second: the
+   frame's own top row is under it, so a cell's first row names the icon and
+   never the frame.  Drawing the two the other way round leaves the frame
+   colour on row 106 and fails the first four checks. */
+static void command_icons_each_cell_shows_its_icon_over_the_frame(void)
+{
+    int icon_ids[4];
+
+    icons_church_row(icon_ids);
+    icons_run(icon_ids, 4, -1);
+
+    CHECK_EQ(ring_pixel(ICONS_ROW, ICONS_FOUR_LEFT), RING_COLOR(0x24));
+    CHECK_EQ(ring_pixel(ICONS_ROW, ICONS_FOUR_LEFT + ICONS_CELL_PITCH),
+             RING_COLOR(0x12));
+    CHECK_EQ(ring_pixel(ICONS_ROW, ICONS_FOUR_LEFT + 2 * ICONS_CELL_PITCH),
+             RING_COLOR(0x04));
+    CHECK_EQ(ring_pixel(ICONS_ROW, ICONS_FOUR_LEFT + 3 * ICONS_CELL_PITCH),
+             RING_COLOR(0x10));
+    CHECK_EQ(ring_count(RING_COLOR(0x24)), RING_SPRITE_W);
+    CHECK_EQ(ring_count(RING_COLOR(0x10)), RING_SPRITE_W);
+}
+
+/* The cell pitch is 26 and the sprite is 25 wide, so the column between two
+   cells is never written and keeps whatever the screen already held.  It is
+   the tell that the pitch is not the sprite width. */
+static void command_icons_seam_between_cells_is_never_written(void)
+{
+    int icon_ids[4];
+
+    icons_church_row(icon_ids);
+    icons_run(icon_ids, 4, -1);
+
+    CHECK_EQ(ring_pixel(ICONS_ROW, ICONS_FOUR_LEFT + RING_SPRITE_W),
+             RING_BORDER_FILL);
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1, ICONS_FOUR_LEFT + RING_SPRITE_W),
+             RING_BORDER_FILL);
+    CHECK_EQ(ring_pixel(ICONS_LAST_ROW,
+                        ICONS_FOUR_LEFT + ICONS_CELL_PITCH + RING_SPRITE_W),
+             RING_BORDER_FILL);
+    CHECK_EQ(ring_pixel(ICONS_ROW + 1,
+                        ICONS_FOUR_LEFT + 2 * ICONS_CELL_PITCH
+                        + RING_SPRITE_W),
+             RING_BORDER_FILL);
+}
+
+/* CMP EAX,dword ptr [EBP + 0x18] / JL is the signed compare and the loop is
+   entered on the count alone, so a count of zero draws nothing at all -- and
+   still pays for the retrace wait below. */
+static void command_icons_zero_entries_draws_nothing(void)
+{
+    int icon_ids[4];
+
+    icons_church_row(icon_ids);
+    data_fdps_ui_palette_cycle_phase = 6;
+    data_fdps_timer_tick_counter = 40;
+    data_fdps_ui_palette_last_cycle_tick = 39;
+
+    icons_run(icon_ids, 0, 0);
+
+    CHECK_EQ(ring_count(RING_BORDER_FILL), RING_SCREEN_BYTES);
+    CHECK_EQ(data_fdps_ui_palette_last_cycle_tick, 40);
+    CHECK_EQ(data_fdps_ui_palette_cycle_phase, 5);
+}
+
+/* CALL 0x00015be0 sits after the loop, so the palette animation is serviced
+   once per call however many cells were drawn.  The latch and the phase step
+   are what fdps_cycle_ui_palette leaves behind on a tick it has not seen
+   (palcycle.h), and they are the only readable trace it leaves. */
+static void command_icons_cycles_the_ui_palette_after_the_row(void)
+{
+    int icon_ids[4];
+
+    icons_church_row(icon_ids);
+    data_fdps_ui_palette_cycle_phase = 9;
+    data_fdps_timer_tick_counter = 5;
+    data_fdps_ui_palette_last_cycle_tick = 4;
+
+    icons_run(icon_ids, 4, 1);
+
+    CHECK_EQ(data_fdps_ui_palette_last_cycle_tick, 5);
+    CHECK_EQ(data_fdps_ui_palette_cycle_phase, 8);
+}
+
+/* The id array is read and never written: the only store in the loop is to the
+   frame slot on the stack. */
+static void command_icons_does_not_write_the_id_array(void)
+{
+    int icon_ids[4];
+    int before[4];
+
+    icons_church_row(icon_ids);
+    memmove(before, icon_ids, sizeof(before));
+
+    icons_run(icon_ids, 4, 0);
+
+    CHECK_EQ(memcmp(icon_ids, before, sizeof(before)), 0);
+}
+
 void run_menu_tests(void)
 {
     RUN_TEST(menu_first_entry_wins);
@@ -1996,4 +2246,14 @@ void run_menu_tests(void)
     RUN_TEST(options_toggle_is_an_xor_of_bit_zero);
     RUN_TEST(options_confirm_does_not_end_the_menu);
     RUN_TEST(options_reopens_on_the_toggled_switch_with_its_new_label);
+    RUN_TEST(command_icons_strip_is_row_106_and_ends_on_column_297);
+    RUN_TEST(command_icons_right_end_is_fixed_and_the_left_edge_moves);
+    RUN_TEST(command_icons_only_the_selected_cell_is_highlighted);
+    RUN_TEST(command_icons_minus_one_highlights_nothing);
+    RUN_TEST(command_icons_index_past_the_row_highlights_nothing);
+    RUN_TEST(command_icons_each_cell_shows_its_icon_over_the_frame);
+    RUN_TEST(command_icons_seam_between_cells_is_never_written);
+    RUN_TEST(command_icons_zero_entries_draws_nothing);
+    RUN_TEST(command_icons_cycles_the_ui_palette_after_the_row);
+    RUN_TEST(command_icons_does_not_write_the_id_array);
 }

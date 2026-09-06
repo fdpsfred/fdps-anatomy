@@ -2828,6 +2828,14 @@
       "status": "committed",
       "emitted_against": "0x6f",
       "rounds": 0
+    },
+    "000324d0": {
+      "name": "fdps_menu_draw_command_icons",
+      "target": "menu.c",
+      "body_size": "0xa0",
+      "status": "committed",
+      "emitted_against": "0xa0",
+      "rounds": 0
     }
   }
 }

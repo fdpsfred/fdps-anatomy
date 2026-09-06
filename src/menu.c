@@ -3,6 +3,10 @@
  * See menu.h for what a menu descriptor is.  Everything in this file works on
  * a caller-supplied descriptor; there is no menu state of its own here.
  *
+ * The village screens' horizontal command-icon strip is here too: same
+ * Command.cel plates and icons as the ring menu, but a count and a plain array
+ * of icon ids instead of a four-slot descriptor.
+ *
  * malloc and free come from <stdlib.h>, cos and sin from <math.h> and delay
  * from <i86.h>.  All five are real calls in the original and the vendor
  * headers are what declare them, so nothing here declares one of its own.
@@ -17,6 +21,7 @@
 #include "keybd.h"
 #include "mapdraw.h"
 #include "palcycle.h"
+#include "sprite.h"
 #include "unit.h"
 #include "menu.h"
 
@@ -680,4 +685,68 @@ void fdps_options_menu(void)
             data_fdps_audio_sfx_enabled_flag ^= 1;
         }
     }
+}
+
+/* The strip is anchored on its right-hand end, not its left: the left edge is
+   0x12b - 26 * icon_count (IMUL EAX,[EBP+0x18],0x1a / MOV EDX,0x12b / SUB
+   EDX,EAX at 000324dc), so a six-entry row grows leftwards out of the same
+   final column a four-entry row ends on.  26 is the cell pitch; the sprite
+   itself is 25 wide (sprite.h), which leaves the one-column seam between
+   neighbouring cells that nothing here writes. */
+#define COMMAND_STRIP_RIGHT_EDGE 0x12b
+#define COMMAND_CELL_PITCH 0x1a
+
+/* Screen row 106.  0xa8480 in the assembly is the mode 13h base plus
+   106 * 320, folded into the one displacement at 00032522; the strip goes on
+   the visible screen and never on an offscreen page. */
+#define COMMAND_STRIP_ROW 0x6a
+
+/* The two cell frames, the same pair of Command.cel sub-images the ring menu
+   plates its slots with.  0x1a being also the cell pitch above is a
+   coincidence of two unrelated numbers: this one is a sub-image id. */
+#define COMMAND_CELL_FRAME_SELECTED 0x1a
+#define COMMAND_CELL_FRAME_PLAIN 0x1b
+
+/* 000324d0.  The highlight test is CMP EAX,[EBP-0xc] / JNZ against the loop
+   index, so it is an equality and not a range check: -1 highlights nothing,
+   and so does any other index the row does not contain.
+
+   THE ICON GOES DOWN SECOND AND THAT IS THE WHOLE COMPOSITION.  Both calls
+   address the same byte with the same 320 pitch; the frame covers the cell
+   opaquely and the icon then shows through only where its own stream writes,
+   because fdps_blit_command_sprite draws through the mode 0 kernel whose skip
+   op steps over a run without touching the destination (sprite.h).  Swapping
+   the two calls would paint the icon out.
+
+   Nothing erases the strip first.  The frame's 550 opaque pixels are what
+   remove the previous pass's icon, so a version that cleared the cell would be
+   drawing something the original never draws. */
+void fdps_menu_draw_command_icons(int *icon_ids, int icon_count,
+                                  int selected_index)
+{
+    int strip_left;
+    int entry;
+    int frame_sprite;
+    unsigned char *cell_dst;
+
+    strip_left = COMMAND_STRIP_RIGHT_EDGE - COMMAND_CELL_PITCH * icon_count;
+
+    for (entry = 0; entry < icon_count; entry++) {
+        if (selected_index == entry) {
+            frame_sprite = COMMAND_CELL_FRAME_SELECTED;
+        } else {
+            frame_sprite = COMMAND_CELL_FRAME_PLAIN;
+        }
+
+        cell_dst = (unsigned char *)
+                   (VGA_SCREEN_BASE + COMMAND_STRIP_ROW * VGA_SCREEN_PITCH
+                    + strip_left + COMMAND_CELL_PITCH * entry);
+        fdps_blit_command_sprite(cell_dst, VGA_SCREEN_PITCH, frame_sprite);
+        fdps_blit_command_sprite(cell_dst, VGA_SCREEN_PITCH, icon_ids[entry]);
+    }
+
+    /* Outside the loop, once per call, and it is the frame pace: it spins on
+       the vertical retrace before it looks at anything (palcycle.h).  A row
+       with no entries at all still pays for it. */
+    fdps_cycle_ui_palette();
 }

@@ -5,6 +5,10 @@
  * selectable, non-zero means it is greyed out.  The descriptor is supplied by
  * the caller -- fdps_battle_item_menu copies a static one and patches it,
  * fdps_battle_action_menu fills its own from the per-command legality probes.
+ *
+ * The village screens' horizontal command-icon strip is here too.  It shares
+ * the Command.cel plates and icons with the ring menu but not its descriptor:
+ * it takes a count and a plain array of icon ids, and greys nothing out.
  */
 #ifndef MENU_H
 #define MENU_H
@@ -137,5 +141,38 @@ extern int fdps_menu_cursor_input_loop(int *cmd_icons, int *cmd_disabled,
    as the primitives it is built from do. */
 extern void fdps_options_menu(void);
 #pragma aux fdps_options_menu "*" parm caller [];
+
+/* Draws the row of command icons a village screen puts along the bottom of the
+   picture, with the entry at selected_index on the highlighted cell frame, and
+   then cycles the UI palette.  Returns nothing and writes none of its
+   arguments back.
+
+   icon_ids is an array of icon_count Command.cel sub-image ids, one per menu
+   entry, left to right; the callers build it on their own stack.  icon_count is
+   the number of entries, and sets the strip's left edge as well as the loop
+   bound: the left edge is 0x12b - 26 * icon_count, so however many entries
+   there are the row always ends at the same right-hand column.
+   selected_index is the entry to highlight, or -1 for none.  The test is an
+   equality against the loop index and not a range check, so any value outside
+   0..icon_count-1 simply highlights nothing.
+
+   IT DRAWS STRAIGHT TO THE ADAPTER AND TAKES NO PAGE.  The destination is the
+   mode 13h aperture at row 106, not a surface the caller chose, and the
+   neighbouring village-screen routines that do take a page pointer are no
+   guide: nothing presents a page while the icon-strip loop is running, so a
+   strip composed into the caller's page would never reach the display.
+
+   NOTHING CLEARS THE STRIP AND NOTHING NEEDS TO.  Both cell frames cover the
+   whole 25 x 22 cell opaquely, so each pass paints out the icon the previous
+   pass left behind.  The one-column seam between neighbouring cells is never
+   written and keeps whatever the screen already held.
+
+   IT IS ALSO A FRAME OF PACING.  The closing fdps_cycle_ui_palette waits for
+   the vertical retrace (palcycle.h), so one call is one displayed frame and it
+   is what holds the caller's input loop to the refresh rate.  A caller cannot
+   treat the DAC as untouched across this call. */
+extern void fdps_menu_draw_command_icons(int *icon_ids, int icon_count,
+                                         int selected_index);
+#pragma aux fdps_menu_draw_command_icons "*" parm caller [];
 
 #endif
