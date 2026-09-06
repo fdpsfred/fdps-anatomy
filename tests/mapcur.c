@@ -1528,6 +1528,88 @@ static void test_a_target_that_does_not_divide_evenly_is_undershot(void)
     move_restore();
 }
 
+
+/* ---------------------------------------------------------------------------
+ * 0002b4f0, the cursor select loop.
+ *
+ * THE LOOP CANNOT BE ENTERED AND LEFT FROM A TEST, AND THAT IS STRUCTURAL
+ * RATHER THAN A GAP IN THE FIXTURE.  Two facts about the assembly settle it
+ * together.
+ *
+ * The first is that the function throws the input latch away before its loop
+ * begins: 0002b5bd calls fdps_keyboard_scancode_ptr and 0002b5c8 writes 0xff
+ * through the pointer it got back.  So a make code staged by a case before the
+ * call -- the way tests/unititem.c drives fdps_unit_item_select_loop, and the
+ * way tests/walk.c drives the animation skips -- is gone by the time the first
+ * pass reads the byte.  Nothing inside the loop can put one back either: the
+ * only writer of that byte is the INT 09h handler and no test installs one, so
+ * every pass reads 0xff, and 0xff matches none of the ten make codes the
+ * dispatch names.
+ *
+ * The second is that every pass that does not confirm ends in
+ * fdps_render_view_frame at 0002b9db, which blits to the VGA aperture and
+ * spins on the retrace bit twice (mapdraw.c).  So the spin is not merely
+ * endless, it is endless while drawing.
+ *
+ * Between them there is no argument, no global and no staged file that makes
+ * the call return, so no case here calls it.  What that leaves uncovered --
+ * the cancel and confirm arms, the list cycling, the four cursor steps, the
+ * hold counter's five-frame suppression and the four view nudges -- is
+ * settled in the assembly and is a playtest observation, exactly as the four
+ * view clamps of fdps_map_cursor_move_to above are.
+ *
+ * What can still be pinned down here is the record geometry the loop reads
+ * through, because getting one of those offsets wrong is the failure that
+ * would compile clean and mis-read a unit or a class row at run time.  The
+ * expected offsets come from the assembly's displacements -- byte ptr [EAX] and
+ * [EAX+0x1] for the two tile coordinates at 0002b56d and 0002b598, [EAX+0x7]
+ * for the portrait id at 0002b570, [EAX+0x20] for the class code at 0002b6ef,
+ * and the IMUL ...,0x50 that strides between records -- and from the ADD
+ * EAX,[EBP-0x24] at 0002b742, which adds the terrain type straight onto the
+ * class row's base.
+ */
+
+/* The stride between unit records, from IMUL EAX,...,0x50 at 0002b55e,
+   0002b589, 0002b668, 0002b6d8, 0002b841 and 0002b85c. */
+#define SELECT_UNIT_STRIDE 0x50
+
+/* PROMAP.DAT's row stride, from the base + index * 10 the class accessor
+   forms (table.h), and how many terrain columns a row declares. */
+#define SELECT_CLASS_ROW_BYTES 10
+#define SELECT_TERRAIN_COLUMNS 8
+
+/* The four record fields the loop reads, and the stride it walks the array
+   with.  A record that put any of them elsewhere would send the cursor to the
+   wrong tile, skip the wrong candidate or price the wrong class. */
+static void test_the_unit_fields_the_select_loop_reads(void)
+{
+    struct fdps_unit_record probe;
+
+    CHECK_EQ((char *) &probe.pos_x - (char *) &probe, 0);
+    CHECK_EQ((char *) &probe.pos_y - (char *) &probe, 1);
+    CHECK_EQ((char *) &probe.portrait_id - (char *) &probe, 7);
+    CHECK_EQ((char *) &probe.clazz - (char *) &probe, 0x20);
+    CHECK_EQ(sizeof(struct fdps_unit_record), SELECT_UNIT_STRIDE);
+}
+
+/* The mode 6 confirm adds the terrain type onto the class row's base with no
+   bound of any kind, so the row's own geometry decides what a terrain type
+   above 7 reads: the critical rate at +8 and the magic-resistance complement
+   at +9 of the SAME row, never the next class's costs.  That is the same
+   unbounded index fdps_move_grid_flood_fill_range makes (movegrid.h). */
+static void test_the_class_row_the_move_test_indexes(void)
+{
+    struct fdps_class_record probe;
+
+    CHECK_EQ((char *) &probe.move_cost[0] - (char *) &probe, 0);
+    CHECK_EQ((char *) &probe.critical - (char *) &probe,
+             SELECT_TERRAIN_COLUMNS);
+    CHECK_EQ((char *) &probe.magic_resist_complement - (char *) &probe,
+             SELECT_TERRAIN_COLUMNS + 1);
+    CHECK_EQ(sizeof(struct fdps_class_record), SELECT_CLASS_ROW_BYTES);
+    CHECK_EQ(sizeof(probe.move_cost), SELECT_TERRAIN_COLUMNS);
+}
+
 void run_mapcur_tests(void)
 {
     mapcur_stage_sheet();
@@ -1578,4 +1660,7 @@ void run_mapcur_tests(void)
     RUN_TEST(test_the_larger_delta_is_the_axis_that_paces_the_walk);
     RUN_TEST(test_a_walk_up_and_left_takes_the_same_number_of_steps);
     RUN_TEST(test_a_target_that_does_not_divide_evenly_is_undershot);
+
+    RUN_TEST(test_the_unit_fields_the_select_loop_reads);
+    RUN_TEST(test_the_class_row_the_move_test_indexes);
 }

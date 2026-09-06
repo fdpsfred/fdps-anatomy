@@ -1936,5 +1936,20 @@
       "from": "review",
       "same_as": "emit#0"
     }
+  ],
+  "0002b4f0": [
+    {
+      "from": "emit",
+      "what": "What portrait id 0x79 identifies, and therefore what the opening cursor snap is refusing to move onto. Established: byte +7 of a unit record is portrait_id; ids below 0x3c are playable characters and 0x3c upwards are ENEMYDAT.DAT rows indexed as id - 0x3c (table.h), so 0x79 is enemy row 61 of the 91 the 910-byte file holds; and a search_instructions sweep for CMP against 0x79 over all 89,420 instructions in the image finds exactly one match, this one at 0002b578, so it is a one-off and not a shared sentinel. The emitted C does not depend on the answer -- the test is a literal comparison either way -- but the code comment cannot say which unit it is, and neither the knowledge base (assets/characters.md covers ids 0x00-0x3b only) nor ENEMYDAT.DAT itself carries a name column.",
+      "needs": "A mapping from ENEMYDAT.DAT row number to the creature's in-game name -- the enemy name table in the shipped text resources, or a strategy-guide page under docs/guide/ that lists enemy forms in file order. With that, row 61 names the unit and the comment at src/mapcur.c's SELECT_SNAP_SKIP_PORTRAIT can say what the snap is dodging.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed independently and added nothing that changes the emit: assets/characters.md line 27 says a portrait id of 60 or above indexes ENEMYDAT.DAT as id - 60, and resource_info/data_tables.md line 19 records ENEMYDAT.DAT as 910 bytes, 10-byte stride, 91 rows, loaded at 0x18b10, and marks its contents 尚未解讀 -- so the knowledge base has no row-to-name column at all, not merely none for row 61. That is what makes this an honest gap rather than a lookup the emitter skipped. The emitted C does not depend on the answer: the test at 0002b578 is a literal comparison either way, and the only thing waiting on it is the comment at SELECT_SNAP_SKIP_PORTRAIT.",
+      "needs": "An ENEMYDAT.DAT row-to-name mapping -- the enemy name table in the shipped text resources, or a docs/guide/ page listing enemy forms in file order.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

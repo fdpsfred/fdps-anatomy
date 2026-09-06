@@ -111,4 +111,47 @@ extern short data_fdps_ui_terrain_hud_panel_offset;
 extern void fdps_draw_cursor_info_panel(unsigned char *scene_buffer);
 #pragma aux fdps_draw_cursor_info_panel "*" parm caller [];
 
+/* Hands the map cursor to the player and does not come back until he has
+   either confirmed a tile -- returning 1 -- or cancelled, returning -1.  The
+   chosen tile is left in data_fdps_map_cursor_world_x / _y (gamedata.h);
+   nothing else is handed back.
+
+   Esc (0x01) and Delete (0x53) cancel.  Space (0x39) and Enter (0x1c) confirm,
+   through a test that depends on select_mode.  Z (0x2c) and keypad 5 (0x4c)
+   step to the next entry of the candidate list and walk the cursor onto that
+   unit.  The four arrow keys move the cursor one 24-pixel tile inside the map
+   and play Beep.wav; a key held down moves once, then nothing for five frames,
+   then once per frame.  Every other make code, and no key at all, does
+   nothing but redraw.
+
+   select_mode decides what a confirm has to satisfy:
+
+     6  a movement destination.  No unit that is still on the field may be
+        standing on the tile, and the acting unit's class must have a movement
+        cost under 20 for the tile's terrain.  On this mode list_count is NOT a
+        list length: it carries the acting unit's index and is forced to zero
+        inside, which also disables the list cycling keys.
+     5  nothing confirms.  The loop can only be left by cancelling.
+     4  any tile the movement grid has marked -- that is, whose marker byte is
+        not 0xff.
+     other  the tile must be marked as above AND
+        fdps_collect_targets_in_area (aitarget.h) must find at least one unit
+        this same mode accepts within the cursor's own overlay radius; the mode
+        is passed straight through to it as its select_mode.
+
+   candidate_list is an array of list_count unit indices, or NULL when
+   list_count is zero.  When it is not empty the cursor is walked onto the
+   first entry before the loop starts -- unless that unit's portrait id is
+   0x79, which suppresses the opening move but nothing else.
+
+   IT REDRAWS THE WHOLE VIEW ONCE A PASS.  fdps_render_view_frame (mapdraw.h)
+   runs at the bottom of every pass, so the loop is paced by the display and
+   the cursor overlay, the information panel and the map are all repainted
+   while the player holds a key.  The view origin is nudged one tile at a time
+   to keep the cursor between 24 and 264 pixels from the view's left edge and
+   between 24 and 144 from its top, never past the map's own far edge. */
+extern int fdps_map_cursor_select_loop(int select_mode, int list_count,
+                                       unsigned char *candidate_list);
+#pragma aux fdps_map_cursor_select_loop "*" parm caller [];
+
 #endif

@@ -8,12 +8,17 @@
 #include <stdlib.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "aitarget.h"
+#include "audio.h"
 #include "blit.h"
+#include "cdaudio.h"
+#include "keybd.h"
 #include "mapcur.h"
 #include "mapdraw.h"
 #include "maptile.h"
 #include "movegrid.h"
 #include "sprite.h"
+#include "table.h"
 #include "text.h"
 #include "unit.h"
 
@@ -614,4 +619,327 @@ void fdps_draw_cursor_info_panel(unsigned char *scene_buffer)
                      PANEL_BUF_PITCH, hp_current,
                      PANEL_HP_DIGITS, PANEL_HP_SHOW_PLUS);
     data_fdps_number_glyph_color_row = 0;
+}
+
+/* The make codes the select loop answers to.  Every one is compared as a full
+   int against the latched byte widened without sign (keybd.h). */
+#define SCANCODE_ESC 0x01
+#define SCANCODE_ENTER 0x1c
+#define SCANCODE_Z 0x2c
+#define SCANCODE_SPACE 0x39
+#define SCANCODE_UP 0x48
+#define SCANCODE_LEFT 0x4b
+#define SCANCODE_KEYPAD_5 0x4c
+#define SCANCODE_RIGHT 0x4d
+#define SCANCODE_DOWN 0x50
+#define SCANCODE_DELETE 0x53
+#define SCANCODE_NONE 0xff
+
+/* The sound every accepted cursor step plays.  It is the copy of the string at
+   0x61e78 that this function pushes -- MOV EAX,0x61e78 ahead of all four calls
+   -- and not the one at 0x61b04 that audio.c and save.c name; the two are
+   separate literals holding the same eight characters. */
+#define CURSOR_MOVE_SFX "Beep.wav"
+
+/* The three select modes the loop settles itself rather than forwarding to
+   fdps_collect_targets_in_area (aitarget.h), from CMP dword ptr [EBP+0x14]
+   against 6, 5 and 4 at 0002b62f, 0002b762 and 0002b7ae. */
+#define SELECT_MODE_MARKED_TILE 4
+#define SELECT_MODE_CANCEL_ONLY 5
+#define SELECT_MODE_MOVE_DEST 6
+
+/* How many passes of the same held make code are swallowed before the cursor
+   starts stepping again: CMP dword ptr [EBP-0x34],0x5 / JLE at 0002b896, so
+   passes 1 through 5 move nothing and pass 6 onwards repeats. */
+#define SELECT_HOLD_SUPPRESS_PASSES 5
+
+/* The portrait id whose presence on the first candidate cancels the opening
+   snap, CMP EAX,0x79 at 0002b578.  It is the only comparison against 0x79 in
+   the whole image. */
+#define SELECT_SNAP_SKIP_PORTRAIT 0x79
+
+/* What the movement grid's marker byte holds for a tile the flood fill never
+   reached (movegrid.h); the confirm arm treats it as "not a legal tile". */
+#define MOVE_GRID_MARKER_UNREACHABLE 0xff
+
+/* The movement cost a terrain has to come in under for mode 6 to accept the
+   tile, CMP EAX,0x14 / JGE at 0002b74c.  PROMAP.DAT's real costs are small
+   numbers and its impassable terrains are 0xFF (assets/tables/classes.md), so
+   in play the test admits everything the acting class can walk on and rejects
+   exactly the impassable rows. */
+#define SELECT_MOVE_COST_LIMIT 0x14
+
+/* How far the cursor may get from the view's left edge and from its top before
+   the view is nudged after it.  These are NOT fdps_map_cursor_move_to's
+   limits: the far edge across is 0x108 here against that function's 0xd8 (CMP
+   dword ptr [EBP-0xc],0x108 / JLE at 0002b97f), while the near limit and the
+   far edge down are the same numbers.  The nudge is a different action as
+   well -- one tile at a time rather than a snap onto the limit. */
+#define SELECT_VIEW_MAX_OFFSET_X 0x108
+#define SELECT_VIEW_MAX_OFFSET_Y 0x90
+
+/* 0002b4f0.  The player driving the map cursor: see mapcur.h for what each
+   select mode confirms on and what the two return values mean.
+
+   ITS PACING IS ONE FRAME A PASS AND THAT IS THE CONTRACT.  Every pass ends in
+   fdps_render_view_frame (0002b9db), which spins on the VGA retrace twice, so
+   the loop runs at the display's frame rate and the hold counter below counts
+   frames rather than instructions.  Nothing here polls a timer.
+
+   THE HOLD COUNTER STARTS ON WHATEVER THE STACK HELD.  Neither the previous
+   make code at [EBP-0x1c] nor the counter at [EBP-0x34] is written before the
+   loop -- the prologue's two stores, at 0002b4fc and 0002b503, reach other
+   slots -- so the first pass compares the freshly cleared 0xff against
+   garbage.  It settles on its own: 0xff matches no arm, and the first real key
+   differs from whatever the previous code became and resets the counter to 0.
+   Seeding either one would be a store the original does not make.
+
+   THE LATCH IS CLEARED ONCE, BEFORE THE LOOP.  0002b5c8 writes 0xff through
+   the pointer fdps_keyboard_scancode_ptr handed back, so a key pressed for the
+   screen before this one is discarded; inside the loop only the cancel arm
+   clears it again, and every other pass reads whatever the INT 09h handler has
+   left there since.  A held key therefore reads the same code pass after pass,
+   which is what the hold counter is counting.
+
+   THE TWO EXITS ARE NOT THE SAME SHAPE.  A confirm on mode 4 or mode 6 returns
+   1 from where it stands (MOV [EBP-0x20],0x1 / JMP 0002b9eb at 0002b7b4 and
+   0002b751), so that pass draws no frame at all.  A cancel, and a confirm that
+   went through fdps_collect_targets_in_area, instead park the answer in
+   [EBP-0x14] and carry on: the rest of that pass still runs the cursor
+   movement gate, the view scroll and one more frame, and the value is returned
+   at the top of the NEXT pass.  Collapsing those into an immediate return
+   loses that trailing frame.
+
+   MODE 6 REUSES THE COUNT ARGUMENT AS THE ACTING UNIT'S INDEX.  0002b52d moves
+   it aside and then forces the count to 0, which is what shuts the list
+   cycling arm off on that path; both mode 6 call sites, 00025624 in
+   fdps_battle_item_menu and 00027ff9 in fdps_battle_spell_command, push a unit
+   index there and a null list.  On every other mode the saved slot is never
+   written, and the one place that still reads it -- the dead recomputation of
+   `unit` at 0002b841 -- never dereferences what it builds.
+
+   THE BLOCKER SWEEP DOES NOT STOP.  It walks the whole unit array with no
+   break (JMP 0002b654 at 0002b6c0), so a match late in the array is found
+   after one early in it; the flag is only ever set and never cleared, so the
+   answer is the same either way and the cost is the full walk on every
+   confirm.
+
+   THE MOVE COST IS INDEXED BY THE TERRAIN TYPE WITH NO BOUND.  move_cost holds
+   eight entries and the terrain byte is not checked, exactly as in
+   fdps_move_grid_flood_fill_range (movegrid.c): a terrain type above 7 reads
+   the critical rate or the magic-resistance complement of the same 10-byte
+   record instead. */
+int fdps_map_cursor_select_loop(int select_mode, int list_count,
+                                unsigned char *candidate_list)
+{
+    /* The map's full extent in pixels, from the two signed 16-bit tile
+       dimensions in the movement grid's header (movegrid.h). */
+    int map_pixel_width;
+    int map_pixel_height;
+    /* Mode 6's acting unit, taken out of list_count before that is forced to
+       zero.  Written on no other path, and read on no other path either. */
+    int actor_unit_index;
+    /* The exclusive Manhattan distance handed to fdps_collect_targets_in_area:
+       the cursor's own draw mode, less one while that is above 1, which is
+       what makes the area accepted match the diamond fdps_draw_map_cursor is
+       painting. */
+    int target_max_dist;
+    /* Which entry of candidate_list the cursor is parked on. */
+    int list_pos;
+    /* The answer the loop has settled on but not yet returned: 0 while it
+       keeps running, 1 for a confirmed selection, -1 for a cancel. */
+    int exit_code;
+    /* The latched make code the keyboard ISR writes (keybd.h). */
+    unsigned char *scancode_latch;
+    /* What that byte held this pass, widened without sign. */
+    int scancode;
+    /* What it held on the previous pass, and how many passes in a row have now
+       read the same code.  Deliberately left uninitialised -- see above. */
+    int prev_scancode;
+    int hold_count;
+    /* The unit record the arm being taken is looking at. */
+    struct fdps_unit_record *unit;
+    /* The unit record the cursor is being snapped onto. */
+    struct fdps_unit_record *snap_unit;
+    /* The unit index the candidate list gave for that snap. */
+    int list_unit_index;
+    /* Whether a unit that has not left the field stands on the cursor's tile.
+       Held in a byte, as the original's MOV byte ptr [EBP-0x4] does. */
+    unsigned char blocker_on_cursor_tile;
+    /* Which record the blocker sweep is looking at. */
+    int scan_index;
+    /* The acting unit's class code, and the PROMAP.DAT row it selects. */
+    unsigned char actor_class;
+    struct fdps_class_record *actor_class_record;
+    /* Where the cursor sits inside the view window, measured once a pass. */
+    int cursor_screen_x;
+    int cursor_screen_y;
+
+    list_pos = 0;
+    exit_code = 0;
+
+    map_pixel_width = (int) *(short *) data_fdps_battle_move_grid_ptr
+                      * CURSOR_TILE_STEP;
+    map_pixel_height = (int) *(short *) (data_fdps_battle_move_grid_ptr + 2)
+                       * CURSOR_TILE_STEP;
+
+    if (select_mode == SELECT_MODE_MOVE_DEST) {
+        actor_unit_index = list_count;
+        list_count = 0;
+    }
+
+    target_max_dist = data_fdps_map_cursor_draw_mode;
+    if (target_max_dist > 1) {
+        target_max_dist--;
+    }
+
+    if (list_count != 0) {
+        list_unit_index = (int) candidate_list[0];
+        unit = (struct fdps_unit_record *) data_fdps_map_unit_array_ptr
+               + list_unit_index;
+        if ((int) unit->portrait_id != SELECT_SNAP_SKIP_PORTRAIT) {
+            snap_unit = (struct fdps_unit_record *)
+                            data_fdps_map_unit_array_ptr + list_unit_index;
+            fdps_map_cursor_move_to((int) snap_unit->pos_x * CURSOR_TILE_STEP,
+                                    (int) snap_unit->pos_y * CURSOR_TILE_STEP);
+        }
+    }
+
+    scancode_latch = fdps_keyboard_scancode_ptr();
+    *scancode_latch = (unsigned char) SCANCODE_NONE;
+
+    for (;;) {
+        if (exit_code != 0) {
+            return exit_code;
+        }
+        fdps_cd_music_repeat_poll();
+
+        scancode = (int) *scancode_latch;
+        if (scancode == prev_scancode) {
+            hold_count++;
+        } else {
+            prev_scancode = scancode;
+            hold_count = 0;
+        }
+
+        if (scancode == SCANCODE_ESC || scancode == SCANCODE_DELETE) {
+            exit_code = -1;
+            *scancode_latch = (unsigned char) SCANCODE_NONE;
+        } else if (scancode == SCANCODE_SPACE || scancode == SCANCODE_ENTER) {
+            if (select_mode == SELECT_MODE_MOVE_DEST) {
+                blocker_on_cursor_tile = 0;
+                for (scan_index = 0;
+                     scan_index < data_fdps_map_unit_count;
+                     scan_index++) {
+                    unit = (struct fdps_unit_record *)
+                               data_fdps_map_unit_array_ptr + scan_index;
+                    if ((int) unit->pos_x * CURSOR_TILE_STEP
+                            == data_fdps_map_cursor_world_x
+                        && (int) unit->pos_y * CURSOR_TILE_STEP
+                            == data_fdps_map_cursor_world_y
+                        && fdps_unit_is_retired(scan_index) == 0) {
+                        blocker_on_cursor_tile = 1;
+                    }
+                }
+
+                if (blocker_on_cursor_tile == 0) {
+                    unit = (struct fdps_unit_record *)
+                               data_fdps_map_unit_array_ptr
+                           + actor_unit_index;
+                    actor_class = unit->clazz;
+                    actor_class_record =
+                        fdps_get_class_record((int) actor_class + 1);
+                    fdps_map_load_tile_info(
+                        data_fdps_map_cursor_world_x / CURSOR_TILE_STEP,
+                        data_fdps_map_cursor_world_y / CURSOR_TILE_STEP);
+                    if ((int) actor_class_record->move_cost[
+                                  data_fdps_map_tile_terrain_type]
+                        < SELECT_MOVE_COST_LIMIT) {
+                        return 1;
+                    }
+                }
+            } else if (select_mode != SELECT_MODE_CANCEL_ONLY) {
+                fdps_map_load_tile_info(
+                    data_fdps_map_cursor_world_x / CURSOR_TILE_STEP,
+                    data_fdps_map_cursor_world_y / CURSOR_TILE_STEP);
+                if ((int) data_fdps_map_current_move_grid_marker
+                    != MOVE_GRID_MARKER_UNREACHABLE) {
+                    if (select_mode == SELECT_MODE_MARKED_TILE) {
+                        return 1;
+                    }
+                    if (fdps_collect_targets_in_area(
+                            data_fdps_map_cursor_world_x / CURSOR_TILE_STEP,
+                            data_fdps_map_cursor_world_y / CURSOR_TILE_STEP,
+                            target_max_dist, NULL, select_mode) != 0) {
+                        exit_code = 1;
+                    }
+                }
+            }
+        } else if ((scancode == SCANCODE_Z || scancode == SCANCODE_KEYPAD_5)
+                   && list_count != 0) {
+            list_pos++;
+            if (list_pos == list_count) {
+                list_pos = 0;
+            }
+            list_unit_index = (int) candidate_list[list_pos];
+            /* 0002b841 recomputes `unit` from the acting unit's index and then
+               never reads it again on any path.  It is kept because it is what
+               the original does; it dereferences nothing, which is why it is
+               harmless on the modes that leave actor_unit_index unwritten. */
+            unit = (struct fdps_unit_record *) data_fdps_map_unit_array_ptr
+                   + actor_unit_index;
+            snap_unit = (struct fdps_unit_record *)
+                            data_fdps_map_unit_array_ptr + list_unit_index;
+            fdps_map_cursor_move_to((int) snap_unit->pos_x * CURSOR_TILE_STEP,
+                                    (int) snap_unit->pos_y * CURSOR_TILE_STEP);
+        }
+
+        if (hold_count == 0 || hold_count > SELECT_HOLD_SUPPRESS_PASSES) {
+            if (scancode == SCANCODE_UP
+                && data_fdps_map_cursor_world_y >= CURSOR_TILE_STEP) {
+                data_fdps_map_cursor_world_y -= CURSOR_TILE_STEP;
+                fdps_play_sfx(CURSOR_MOVE_SFX);
+            } else if (scancode == SCANCODE_DOWN
+                       && map_pixel_height - CURSOR_TILE_STEP
+                              > data_fdps_map_cursor_world_y) {
+                data_fdps_map_cursor_world_y += CURSOR_TILE_STEP;
+                fdps_play_sfx(CURSOR_MOVE_SFX);
+            } else if (scancode == SCANCODE_LEFT
+                       && data_fdps_map_cursor_world_x >= CURSOR_TILE_STEP) {
+                data_fdps_map_cursor_world_x -= CURSOR_TILE_STEP;
+                fdps_play_sfx(CURSOR_MOVE_SFX);
+            } else if (scancode == SCANCODE_RIGHT
+                       && map_pixel_width - CURSOR_TILE_STEP
+                              > data_fdps_map_cursor_world_x) {
+                data_fdps_map_cursor_world_x += CURSOR_TILE_STEP;
+                fdps_play_sfx(CURSOR_MOVE_SFX);
+            }
+        }
+
+        cursor_screen_x = data_fdps_map_cursor_world_x
+                          - data_fdps_battle_view_window_origin_x;
+        cursor_screen_y = data_fdps_map_cursor_world_y
+                          - data_fdps_battle_view_window_origin_y;
+
+        if (data_fdps_battle_view_window_origin_x >= CURSOR_VIEW_MIN_OFFSET
+            && cursor_screen_x < CURSOR_VIEW_MIN_OFFSET) {
+            data_fdps_battle_view_window_origin_x -= CURSOR_TILE_STEP;
+        }
+        if (cursor_screen_x > SELECT_VIEW_MAX_OFFSET_X
+            && map_pixel_width - MAP_VIEW_WIDTH
+                   > data_fdps_battle_view_window_origin_x) {
+            data_fdps_battle_view_window_origin_x += CURSOR_TILE_STEP;
+        }
+        if (data_fdps_battle_view_window_origin_y >= CURSOR_VIEW_MIN_OFFSET
+            && cursor_screen_y < CURSOR_VIEW_MIN_OFFSET) {
+            data_fdps_battle_view_window_origin_y -= CURSOR_TILE_STEP;
+        }
+        if (cursor_screen_y > SELECT_VIEW_MAX_OFFSET_Y
+            && map_pixel_height - MAP_VIEW_HEIGHT
+                   > data_fdps_battle_view_window_origin_y) {
+            data_fdps_battle_view_window_origin_y += CURSOR_TILE_STEP;
+        }
+
+        fdps_render_view_frame();
+    }
 }
