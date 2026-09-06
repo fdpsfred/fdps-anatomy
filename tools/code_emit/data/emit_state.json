@@ -2711,6 +2711,14 @@
       "status": "committed",
       "emitted_against": "0x505",
       "rounds": 0
+    },
+    "0002da50": {
+      "name": "fdps_map_cursor_move_to_unit",
+      "target": "mapcur.c",
+      "body_size": "0x47",
+      "status": "committed",
+      "emitted_against": "0x47",
+      "rounds": 0
     }
   }
 }

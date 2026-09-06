@@ -154,4 +154,23 @@ extern int fdps_map_cursor_select_loop(int select_mode, int list_count,
                                        unsigned char *candidate_list);
 #pragma aux fdps_map_cursor_select_loop "*" parm caller [];
 
+/* Walks the cursor onto the tile the unit at unit_index is standing on, by
+   reading that unit's tile coordinates out of the map unit array
+   (data_fdps_map_unit_array_ptr, gamedata.h), scaling both by the 24-pixel
+   tile and handing them to fdps_map_cursor_move_to above.  The move is
+   therefore animated on exactly the same terms: it draws a frame per step
+   unless the cursor is switched off and the view does not scroll, and it
+   returns at once if the cursor is already on that tile.
+
+   unit_index IS NOT CHECKED against data_fdps_map_unit_count, and the chapter
+   init functions rely on that: they pass literal indices as high as 0x2a to
+   park the cursor on a unit the battle has not deployed.  Both coordinate
+   bytes are read unsigned, so a coordinate of 0x80 or above is a large
+   positive pixel offset rather than a negative one.
+
+   Nothing is handed back; where the cursor ended up is in
+   data_fdps_map_cursor_world_x / _y as always. */
+extern void fdps_map_cursor_move_to_unit(int unit_index);
+#pragma aux fdps_map_cursor_move_to_unit "*" parm caller [];
+
 #endif

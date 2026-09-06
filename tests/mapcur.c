@@ -1610,6 +1610,196 @@ static void test_the_class_row_the_move_test_indexes(void)
     CHECK_EQ(sizeof(probe.move_cost), SELECT_TERRAIN_COLUMNS);
 }
 
+/* fdps_map_cursor_move_to_unit at 0002da50.
+ *
+ * The whole function is an index, two byte loads and a call, so it is driven
+ * against the real fdps_map_cursor_move_to above and read off the cursor
+ * globals it leaves behind.  Every case keeps the cursor inside the 24..216
+ * by 24..144 band the walk holds it in, so no step scrolls the view and the
+ * cursor is left switched off, which together keep fdps_render_view_frame out
+ * of it -- the walk's own cases above are staged the same way and for the
+ * same reason.
+ *
+ * Expected values come from the assembly: IMUL EAX,[EBP+0x14],0x50 for the
+ * stride, byte ptr [EAX] and byte ptr [EAX+0x1] for x and then y, AND EAX,0xff
+ * for the widening, and IMUL EAX,EAX,0x18 for the scale.
+ */
+
+/* How many records the staged array holds; index 3 is used deliberately with
+   a unit count of 0 below. */
+#define UNITMOVE_RECORDS 4
+
+static struct fdps_unit_record unitmove_records[UNITMOVE_RECORDS];
+
+static struct {
+    unsigned char *array_ptr;
+    int unit_count;
+} unitmove_saved;
+
+/* Points the map unit array at the staged records with every coordinate byte
+   poisoned, so a read of the wrong record shows up as a walk to the wrong
+   tile rather than to the same one. */
+static void unitmove_stage(void)
+{
+    int record;
+
+    unitmove_saved.array_ptr = data_fdps_map_unit_array_ptr;
+    unitmove_saved.unit_count = data_fdps_map_unit_count;
+
+    for (record = 0; record < UNITMOVE_RECORDS; record++) {
+        unitmove_records[record].pos_x = (unsigned char) 9;
+        unitmove_records[record].pos_y = (unsigned char) 9;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) unitmove_records;
+    data_fdps_map_unit_count = UNITMOVE_RECORDS;
+}
+
+static void unitmove_restore(void)
+{
+    data_fdps_map_unit_array_ptr = unitmove_saved.array_ptr;
+    data_fdps_map_unit_count = unitmove_saved.unit_count;
+}
+
+/* Byte 0 of the record is the x tile and byte 1 the y: the push at 0002da87
+   carries [EAX], the one at 0002da79 carries [EAX+0x1], and the stack
+   convention puts the last push first, so [EAX] is the x argument.  A record
+   at (2, 5) therefore walks the cursor down three tiles and not right three:
+   72 / 0x18 = 3 steps of 24 on the dominant y axis. */
+static void test_the_first_record_byte_is_the_x_tile(void)
+{
+    move_save();
+    unitmove_stage();
+    move_place(48, 48, 0, 0);
+    unitmove_records[0].pos_x = (unsigned char) 2;
+    unitmove_records[0].pos_y = (unsigned char) 5;
+
+    fdps_map_cursor_move_to_unit(0);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 48);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 120);
+    unitmove_restore();
+    move_restore();
+}
+
+/* Both coordinates are scaled by the 24-pixel tile before the call, so tile
+   (4, 3) is world pixel (96, 72).  Reaching it from (48, 48) is a two-step
+   walk with x dominant, which is the shape the walk's own cases pin down. */
+static void test_the_tile_coordinates_are_scaled_to_world_pixels(void)
+{
+    move_save();
+    unitmove_stage();
+    move_place(48, 48, 0, 0);
+    unitmove_records[0].pos_x = (unsigned char) 4;
+    unitmove_records[0].pos_y = (unsigned char) 3;
+
+    fdps_map_cursor_move_to_unit(0);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 96);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 72);
+    unitmove_restore();
+    move_restore();
+}
+
+/* The index strides by the 0x50-byte record, so index 2 reads the third
+   record and not the first.  Record 0 is left on the poison tile (9, 9),
+   which a stride of 0 or of one byte would walk to instead. */
+static void test_the_index_strides_by_the_whole_record(void)
+{
+    move_save();
+    unitmove_stage();
+    move_place(48, 48, 0, 0);
+    unitmove_records[2].pos_x = (unsigned char) 4;
+    unitmove_records[2].pos_y = (unsigned char) 3;
+
+    fdps_map_cursor_move_to_unit(2);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 96);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 72);
+    unitmove_restore();
+    move_restore();
+}
+
+/* AND EAX,0xff at 0002da7f widens the x byte, so tile 0x80 is world pixel
+   3072 and not the -3072 a signed char would give.  The cursor starts one
+   tile short of it with the view carried along, so the single step stays
+   inside the band and draws no frame. */
+static void test_a_high_x_tile_widens_unsigned(void)
+{
+    move_save();
+    unitmove_stage();
+    move_place(127 * 24, 48, 120 * 24, 24);
+    unitmove_records[0].pos_x = (unsigned char) 0x80;
+    unitmove_records[0].pos_y = (unsigned char) 2;
+
+    fdps_map_cursor_move_to_unit(0);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 0x80 * 24);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 48);
+    unitmove_restore();
+    move_restore();
+}
+
+/* The same widening on the y byte, from AND EAX,0xff at 0002da71: tile 0x90
+   is world pixel 3456. */
+static void test_a_high_y_tile_widens_unsigned(void)
+{
+    move_save();
+    unitmove_stage();
+    move_place(48, 143 * 24, 24, 138 * 24);
+    unitmove_records[0].pos_x = (unsigned char) 2;
+    unitmove_records[0].pos_y = (unsigned char) 0x90;
+
+    fdps_map_cursor_move_to_unit(0);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 48);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 0x90 * 24);
+    unitmove_restore();
+    move_restore();
+}
+
+/* Nothing in the function reads data_fdps_map_unit_count -- there is no CMP
+   against 0x00060150 anywhere in the 0x47 bytes -- so an index past the count
+   still moves the cursor.  The chapter init functions depend on it: they park
+   the cursor on literal indices as high as 0x2a.  A guard added in the
+   rewrite would leave the cursor at (48, 48) here. */
+static void test_an_index_past_the_unit_count_still_moves(void)
+{
+    move_save();
+    unitmove_stage();
+    move_place(48, 48, 0, 0);
+    data_fdps_map_unit_count = 0;
+    unitmove_records[3].pos_x = (unsigned char) 4;
+    unitmove_records[3].pos_y = (unsigned char) 3;
+
+    fdps_map_cursor_move_to_unit(3);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 96);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 72);
+    unitmove_restore();
+    move_restore();
+}
+
+/* A unit already standing on the cursor's tile takes the walk's early return
+   at 0002d80b, so the cursor is left exactly where it was and the view is
+   never looked at. */
+static void test_a_unit_on_the_cursor_tile_moves_nothing(void)
+{
+    move_save();
+    unitmove_stage();
+    move_place(48, 48, 0, 0);
+    unitmove_records[0].pos_x = (unsigned char) 2;
+    unitmove_records[0].pos_y = (unsigned char) 2;
+
+    fdps_map_cursor_move_to_unit(0);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, 48);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 48);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    unitmove_restore();
+    move_restore();
+}
+
 void run_mapcur_tests(void)
 {
     mapcur_stage_sheet();
@@ -1663,4 +1853,12 @@ void run_mapcur_tests(void)
 
     RUN_TEST(test_the_unit_fields_the_select_loop_reads);
     RUN_TEST(test_the_class_row_the_move_test_indexes);
+
+    RUN_TEST(test_the_first_record_byte_is_the_x_tile);
+    RUN_TEST(test_the_tile_coordinates_are_scaled_to_world_pixels);
+    RUN_TEST(test_the_index_strides_by_the_whole_record);
+    RUN_TEST(test_a_high_x_tile_widens_unsigned);
+    RUN_TEST(test_a_high_y_tile_widens_unsigned);
+    RUN_TEST(test_an_index_past_the_unit_count_still_moves);
+    RUN_TEST(test_a_unit_on_the_cursor_tile_moves_nothing);
 }

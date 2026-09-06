@@ -943,3 +943,41 @@ int fdps_map_cursor_select_loop(int select_mode, int list_count,
         fdps_render_view_frame();
     }
 }
+
+/* 0002da50.  IMUL EAX,dword ptr [EBP+0x14],0x50 at 0002da5c scales the index
+   by the record stride, MOV EDX,dword ptr [0x00069cd8] / ADD EDX,EAX at
+   0002da60 adds the array base to it, and the sum is parked in the one stack
+   slot the function has.  It is reloaded twice, once for each coordinate:
+   MOV AL,byte ptr [EAX+0x1] then AND EAX,0xff then IMUL EAX,EAX,0x18 pushes
+   the y argument, and the same three instructions against byte ptr [EAX]
+   push the x argument.  ADD ESP,0x8 after the CALL is the caller cleaning up
+   its own two arguments.
+
+   THE INDEX IS NOT CHECKED AND MUST NOT BE.  Nothing here reads
+   data_fdps_map_unit_count, and the 48 call sites include the whole chapter
+   init family passing literals as high as 0x2a -- indices that name a unit
+   the battle has not deployed yet on the map the count describes.  An
+   `if (unit_index < data_fdps_map_unit_count)` guard, which is the obvious
+   thing to write, would silently drop cursor moves the original performs
+   (rebuild_info/pitfalls.md).
+
+   BOTH COORDINATE BYTES ARE ZERO-EXTENDED.  AND EAX,0xff at 0002da71 and
+   0002da7f is what widens them, so a coordinate of 0x80 or above scales to a
+   large positive pixel offset rather than a negative one; reading them
+   through Watcom's default signed char would sign-extend instead.  They are
+   unsigned char in struct fdps_unit_record, which is the same widening.
+
+   It hands the walk to fdps_map_cursor_move_to above, so the cursor animates
+   across to the unit rather than jumping, and everything that function says
+   about frames, view scrolling and a target less than one tile away applies
+   unchanged. */
+void fdps_map_cursor_move_to_unit(int unit_index)
+{
+    /* The record of the unit the cursor is being sent to. */
+    struct fdps_unit_record *unit;
+
+    unit = (struct fdps_unit_record *) data_fdps_map_unit_array_ptr
+           + unit_index;
+    fdps_map_cursor_move_to((int) unit->pos_x * CURSOR_TILE_STEP,
+                            (int) unit->pos_y * CURSOR_TILE_STEP);
+}
