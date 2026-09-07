@@ -1530,6 +1530,316 @@ static void sell_a_cancelled_list_publishes_nothing(void)
     sell_done();
 }
 
+/* The hand-over loop at 00034210.  It runs on the same fixture the sell
+   counter above does -- the same picker, the same inventory window, the same
+   village aliases -- so the cases below stage with sell_stage and clear with
+   sell_done and add only what the counter had no use for: a second dialogue
+   slot to watch and a pair of members to move an entry between.
+
+   THE LATCH IS THE ONLY INPUT CHANNEL HERE.  This loop has no yes/no prompt,
+   so both pickers and the inventory list all read through the auto-repeat
+   filter, and vil_timer_isr -- which feeds the latch and nothing else -- is
+   the right interrupt to run it under.
+
+   Expected values come from the assembly at 00034210: the giver's record read
+   at 00034264 and its byte +8 plus one stored to 0x00064030 at 0003427b ahead
+   of the count at 00034296; the item id plus 0xc9 stored to 0x00064034 at
+   00034339 ahead of the receiver's picker at 00034373; the receiver's refusal
+   on CMP EAX,0x8 / JNZ at 00034391; and the three calls the accepted arm makes
+   in the order fdps_unit_remove_item, fdps_unit_recompute_combat_stats,
+   fdps_unit_add_item at 000343e7, 000343f3 and 00034403. */
+
+/* The two members every hand-over case moves an entry between: adjacent, so
+   one press of the right arrow takes the receiver picker from the giver to the
+   receiver, and neither is roster slot 3, so the picker's locked-slot rule
+   decides nothing here. */
+#define XFER_GIVER 1
+#define XFER_RECEIVER 2
+
+/* The entry that is handed over.  It is parked EQUIPPED in the giver's bag --
+   the flag byte's bit 0x40 (unititem.h) -- which is the whole point of the
+   case: the receiver has to end up holding the id with a zeroed flag byte. */
+#define XFER_ITEM 5
+#define XFER_SLOT_EQUIPPED 0x40
+
+/* An item whose attack modifier is not zero, so that "the giver's stats were
+   reworked after the entry left" is a comparison and not an assumption.  The
+   giver's ap is parked at a value no recomputation could produce, and a
+   recomputation over a bag with nothing equipped in it must put ap_base back
+   in its place. */
+#define XFER_ITEM_AP 7
+#define XFER_GIVER_AP_BASE 10
+#define XFER_AP_SENTINEL 1234
+
+/* Parked in data_fdps_dialog_subst_text_id_2 before a run, so that "this arm
+   never wrote it" is a single comparison.  It is not a value any arm could
+   leave: the item slot only ever takes an id plus 0xc9, and the highest id
+   this file stages is 5. */
+#define XFER_SUBST_SENTINEL 0x7e7e
+
+/* The eight ids that fill a receiver's bag for the refusal case: any eight
+   entries whose flag byte is not 0x80 make fdps_unit_item_count answer the
+   exact eight the refusal tests for. */
+#define XFER_FILLER_ITEM 1
+
+/* Everything the sell counter stages, plus the second dialogue slot and the
+   two stat seeds the accepted arm is measured with.  The picker's own two
+   globals are NOT reset -- where the cursor starts is what places the
+   giver. */
+static void xfer_stage(void)
+{
+    sell_stage();
+    data_fdps_dialog_subst_text_id_2 = XFER_SUBST_SENTINEL;
+
+    sell_items[XFER_ITEM].ap = (short) XFER_ITEM_AP;
+    vil_roster[XFER_GIVER].ap_base = (short) XFER_GIVER_AP_BASE;
+    vil_roster[XFER_GIVER].ap = (short) XFER_AP_SENTINEL;
+    vil_roster[XFER_RECEIVER].ap_base = (short) XFER_GIVER_AP_BASE;
+    vil_roster[XFER_RECEIVER].ap = (short) XFER_AP_SENTINEL;
+}
+
+/* One whole visit to the hand-over screen, with the adapter in the mode the
+   game draws it in and the timer interrupt pacing the frames and playing the
+   keys.  The fixture is NOT staged here: a case calls xfer_stage first and
+   then fills the bags it is about. */
+static void xfer_go(unsigned char *codes, int count)
+{
+    int index;
+
+    sell_page = (unsigned char *) malloc((size_t) SELL_PAGE_BYTES);
+    CHECK_EQ(sell_page != NULL, 1);
+    if (sell_page == NULL) {
+        return;
+    }
+    memset(sell_page, SELL_PAGE_FILL, (size_t) SELL_PAGE_BYTES);
+    data_fdps_village_backdrop_page_ptr = sell_page;
+
+    for (index = 0; index < count; index++) {
+        vil_script[index] = codes[index];
+    }
+    vil_script_len = count;
+    vil_script_next = 0;
+
+    data_fdps_input_last_scancode = VIL_KEY_NONE;
+    data_fdps_input_key_repeat_prev_scancode = VIL_KEY_NONE;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_ui_palette_last_cycle_tick = 0;
+    data_fdps_ui_palette_cycle_phase = 0;
+    data_fdps_audio_cd_repeat_last_tick = 0;
+    data_fdps_audio_cd_repeat_tick_counter = 0;
+
+    vil_set_mode(VIL_MODE_320X200X256);
+    vil_saved_timer = _dos_getvect(VIL_TIMER_VECTOR);
+    _dos_setvect(VIL_TIMER_VECTOR, vil_timer_isr);
+    fdps_village_item_transfer_loop(sell_page);
+    _dos_setvect(VIL_TIMER_VECTOR, vil_saved_timer);
+    vil_set_mode(VIL_MODE_TEXT);
+}
+
+/* The seed is zero and the entry test is against -1, so the giver picker is
+   opened before anything has been picked; the cancel that comes back out of it
+   is the loop's exit and nothing else runs.  Neither dialogue slot is written
+   on that path, which is what the two sentinels show. */
+static void xfer_a_cancel_ends_the_first_pass(void)
+{
+    unsigned char script[1];
+
+    script[0] = VIL_KEY_ESC;
+    vil_place(XFER_GIVER, 0);
+    xfer_stage();
+    xfer_go(script, 1);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, SELL_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, XFER_SUBST_SENTINEL);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, XFER_GIVER);
+    CHECK_EQ(sell_page_untouched(), 1);
+    sell_done();
+}
+
+/* A giver carrying nothing is refused: the name substitution is that member's
+   character id plus one -- the message table's bias for a character name --
+   the item slot is never written, and the bag is not touched.  A body that
+   published the id itself, or that took the bias the item names use, would
+   miss here by exactly one and by exactly 0xc8. */
+static void xfer_an_empty_bag_publishes_the_giver_name(void)
+{
+    unsigned char script[2];
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_ESC;
+    vil_place(XFER_GIVER, 0);
+    xfer_stage();
+    xfer_go(script, 2);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param,
+             (int) vil_char_ids[XFER_GIVER] + 1);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, XFER_SUBST_SENTINEL);
+    CHECK_EQ(sell_carried(XFER_GIVER), 0);
+    CHECK_EQ(sell_page_untouched(), 1);
+    sell_done();
+}
+
+/* And the refusal is not the end of the call: the arm falls to the back edge,
+   so the giver picker opens again.  The second visit moves the cursor one cell
+   before cancelling, and that move is only reachable if the picker really was
+   reopened. */
+static void xfer_a_refusal_reopens_the_picker(void)
+{
+    unsigned char script[3];
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_RIGHT;
+    script[2] = VIL_KEY_ESC;
+    vil_place(XFER_GIVER, 0);
+    xfer_stage();
+    xfer_go(script, 3);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, XFER_GIVER + 1);
+    CHECK_EQ(sell_carried(XFER_GIVER), 0);
+    sell_done();
+}
+
+/* The name is published before the bag is counted, so a giver who is carrying
+   something has already had it written by the time the list opens -- and it
+   stays written when the list is backed out of.  The item slot is untouched on
+   that path, because the -1 the list answers with jumps to the back edge ahead
+   of the id lookup, and the entry stays where it was. */
+static void xfer_the_name_is_published_before_the_bag_is_counted(void)
+{
+    unsigned char script[5];
+
+    if (sell_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_NONE;
+    script[2] = VIL_KEY_ESC;
+    script[3] = VIL_KEY_NONE;
+    script[4] = VIL_KEY_ESC;
+
+    vil_place(XFER_GIVER, 0);
+    xfer_stage();
+    sell_put(XFER_GIVER, 0, SELL_SLOT_CARRIED, XFER_ITEM);
+    xfer_go(script, 5);
+
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param,
+             (int) vil_char_ids[XFER_GIVER] + 1);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, XFER_SUBST_SENTINEL);
+    CHECK_EQ(sell_carried(XFER_GIVER), 1);
+    CHECK_EQ(vil_roster[XFER_GIVER].ap, XFER_AP_SENTINEL);
+    sell_done();
+}
+
+/* A settled hand-over.  The item substitution is the id plus 0xc9 and not the
+   character bias; the entry leaves the giver and arrives in the receiver's
+   first free entry as a BARE ID -- the equipped bit the giver's entry carried
+   does not cross, which is the difference between handing over an item and
+   copying the two-byte entry; the giver's derived attack is reworked back to
+   its base now that nothing is equipped, and the receiver's is left exactly as
+   it stood. */
+static void xfer_a_settled_hand_over_moves_the_bare_id(void)
+{
+    unsigned char script[6];
+
+    if (sell_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_NONE;
+    script[2] = VIL_KEY_ENTER;
+    script[3] = VIL_KEY_RIGHT;
+    script[4] = VIL_KEY_ENTER;
+    script[5] = VIL_KEY_ESC;
+
+    vil_place(XFER_GIVER, 0);
+    xfer_stage();
+    sell_put(XFER_GIVER, 0, XFER_SLOT_EQUIPPED, XFER_ITEM);
+    xfer_go(script, 6);
+
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, XFER_ITEM + 0xc9);
+    CHECK_EQ(sell_carried(XFER_GIVER), 0);
+    CHECK_EQ(sell_carried(XFER_RECEIVER), 1);
+    CHECK_EQ(vil_roster[XFER_RECEIVER].inventory_slots[0], 0);
+    CHECK_EQ(vil_roster[XFER_RECEIVER].inventory_slots[1], XFER_ITEM);
+    CHECK_EQ(vil_roster[XFER_GIVER].ap, XFER_GIVER_AP_BASE);
+    CHECK_EQ(vil_roster[XFER_RECEIVER].ap, XFER_AP_SENTINEL);
+    CHECK_EQ(sell_page_untouched(), 1);
+    sell_done();
+}
+
+/* A receiver already holding eight entries is refused and nothing moves: the
+   giver keeps the entry, equipped bit and all, and its stats are not reworked
+   because nothing left the bag.  The item name was published before the
+   receiver was even asked for, so it stands either way. */
+static void xfer_a_full_bag_refuses_the_move(void)
+{
+    unsigned char script[7];
+    int slot;
+
+    if (sell_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_NONE;
+    script[2] = VIL_KEY_ENTER;
+    script[3] = VIL_KEY_RIGHT;
+    script[4] = VIL_KEY_ENTER;
+    script[5] = VIL_KEY_NONE;
+    script[6] = VIL_KEY_ESC;
+
+    vil_place(XFER_GIVER, 0);
+    xfer_stage();
+    sell_put(XFER_GIVER, 0, XFER_SLOT_EQUIPPED, XFER_ITEM);
+    for (slot = 0; slot < SELL_SLOTS; slot++) {
+        sell_put(XFER_RECEIVER, slot, SELL_SLOT_CARRIED, XFER_FILLER_ITEM);
+    }
+    xfer_go(script, 7);
+
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, XFER_ITEM + 0xc9);
+    CHECK_EQ(sell_carried(XFER_GIVER), 1);
+    CHECK_EQ(vil_roster[XFER_GIVER].inventory_slots[0], XFER_SLOT_EQUIPPED);
+    CHECK_EQ(vil_roster[XFER_GIVER].inventory_slots[1], XFER_ITEM);
+    CHECK_EQ(sell_carried(XFER_RECEIVER), SELL_SLOTS);
+    CHECK_EQ(vil_roster[XFER_GIVER].ap, XFER_AP_SENTINEL);
+    sell_done();
+}
+
+/* Backing out of the receiver picker ends the pass with the item where it
+   was.  The name and the item slot were both published before that picker ran
+   and no arm puts them back, so they still hold what the message printed. */
+static void xfer_a_cancelled_receiver_leaves_everything(void)
+{
+    unsigned char script[6];
+
+    if (sell_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_NONE;
+    script[2] = VIL_KEY_ENTER;
+    script[3] = VIL_KEY_ESC;
+    script[4] = VIL_KEY_NONE;
+    script[5] = VIL_KEY_ESC;
+
+    vil_place(XFER_GIVER, 0);
+    xfer_stage();
+    sell_put(XFER_GIVER, 0, XFER_SLOT_EQUIPPED, XFER_ITEM);
+    xfer_go(script, 6);
+
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param,
+             (int) vil_char_ids[XFER_GIVER] + 1);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, XFER_ITEM + 0xc9);
+    CHECK_EQ(sell_carried(XFER_GIVER), 1);
+    CHECK_EQ(sell_carried(XFER_RECEIVER), 0);
+    CHECK_EQ(vil_roster[XFER_GIVER].ap, XFER_AP_SENTINEL);
+    sell_done();
+}
+
 void run_vilmenu_tests(void)
 {
     RUN_TEST(vil_escape_cancels);
@@ -1566,4 +1876,11 @@ void run_vilmenu_tests(void)
     RUN_TEST(sell_a_settled_sale_pays_three_quarters);
     RUN_TEST(sell_a_declined_offer_leaves_the_bag_alone);
     RUN_TEST(sell_a_cancelled_list_publishes_nothing);
+    RUN_TEST(xfer_a_cancel_ends_the_first_pass);
+    RUN_TEST(xfer_an_empty_bag_publishes_the_giver_name);
+    RUN_TEST(xfer_a_refusal_reopens_the_picker);
+    RUN_TEST(xfer_the_name_is_published_before_the_bag_is_counted);
+    RUN_TEST(xfer_a_settled_hand_over_moves_the_bare_id);
+    RUN_TEST(xfer_a_full_bag_refuses_the_move);
+    RUN_TEST(xfer_a_cancelled_receiver_leaves_everything);
 }

@@ -754,3 +754,209 @@ void fdps_village_item_sell_loop(unsigned char *screen_page)
         }
     }
 }
+
+/* The village text box all three of the hand-over messages are painted into,
+   PUSH 0xaa3d4 at 000342bf, 0003435b and 000343c5: the mode 13h framebuffer
+   plus row 131, column 20.  The box and the colour trio are the same ones the
+   sell counter above draws its two messages in; they are stated again here
+   because these are this function's own literals and not a constant it
+   borrows from the counter. */
+#define TRANSFER_MESSAGE_SCREEN_AT 0xa3d4
+#define TRANSFER_TEXT_FG_COLOR 0xd0
+#define TRANSFER_TEXT_BG_COLOR 0
+#define TRANSFER_TEXT_OUTLINE_COLOR 0x6d
+
+/* The three entries of data_fdps_all_game_text_ptr this loop can draw.  0x1fb
+   is the refusal a giver with an empty bag gets and is the same entry the sell
+   counter refuses with; 0x1fd asks who the item is for and is the only message
+   with two substitutions in it, the giver's name and the item's; 0x1fa is the
+   receiver's bag being full. */
+#define TRANSFER_EMPTY_BAG_TEXT_ID 0x1fb
+#define TRANSFER_ASK_RECEIVER_TEXT_ID 0x1fd
+#define TRANSFER_BAG_FULL_TEXT_ID 0x1fa
+
+/* fdps_unit_item_select_window's second argument: 0 lists every entry rather
+   than only the ones with a use effect (unititem.h). */
+#define TRANSFER_LIST_EVERY_ENTRY 0
+
+/* CMP EAX,0x8 at 00034391.  The receiver is refused on an EXACT eight, which
+   is the count a bag with all eight entries occupied answers -- the test is an
+   equality and not a >=, so a bag that somehow held more would be handed the
+   item rather than refused. */
+#define INVENTORY_SLOTS_FULL 8
+
+/* 00034210.  One stack argument, caller-cleaned: the body reads the page at
+   [EBP+0x14] behind PUSH EBX/ESI/EDI/EBP and the return address, RET carries
+   no immediate, and every call site -- fdps_village_item_menu, the church, the
+   weapon shop and the secret menu, each pushing the page it blitted its own
+   backdrop into -- follows the CALL with ADD ESP,0x4.  EAX is never set before
+   the epilogue and no caller looks at it.
+
+   The control flow is one loop with five tests nested inside it.  The entry
+   test CMP dword ptr [EBP-0x14],-0x1 / JZ at 00034235 is the top of the loop
+   and the JMP at 0003440b is its back edge, so the condition is checked before
+   the first pass -- which is why the giver slot is seeded with zero at
+   0003421c rather than with a member index: zero is simply a value that is not
+   -1.  Every arm inside, taken or not, falls to that same back edge, so
+   cancelling in the member picker is the only way to reach the epilogue, and
+   the window is left open on the way out for the caller to close.
+
+   THE INNER `picked_giver_index != GRID_CANCELLED` IS ALREADY TRUE AND IT IS
+   STILL THERE.  CMP dword ptr [EBP-0x14],-0x1 / JZ at 000342f9 sits between
+   the slot seed and the call to the inventory list, inside an arm the outer
+   test at 00034256 has already established the index is not -1 in.  At -od
+   nothing folds it away, and the short-circuit shape is visible in the
+   assembly -- the failed compare and the list's own -1 land on the same
+   address.  It is written out because that is the program; it costs one
+   compare per hand-over and decides nothing.  The sell counter above carries
+   the identical dead test in the identical place.
+
+   THE GIVER'S NAME IS PUBLISHED BEFORE THE BAG IS COUNTED, at 0003427b, on
+   every confirmed pick and not only on the refusal.  The record is fetched at
+   00034264 the moment the picker answers and byte +8 plus one goes into
+   data_fdps_dialog_last_action_text_id_param before the count at 00034296
+   chooses an arm, so a pass that goes on to a real hand-over has already left
+   the giver's name in that slot -- which is what message 0x1fd's -4 code then
+   expands.  Publishing it inside the empty-bag arm instead, the way the sell
+   counter does, would leave 0x1fd naming whoever the previous message named.
+
+   THE WINDOW IS CLOSED AND REOPENED TO WIPE THE PICKER GRID OFF IT.  The zoom
+   with 1 at 0003428a and the one with 0 that opens the next message are a
+   pair: the grid is drawn into the open window, so a message can only be shown
+   on a clean one.  The full-bag arm at 00034396 does the same pair a second
+   time for exactly that reason, closing a window that is already open because
+   the receiver's picker has just drawn its grid into it.
+
+   THE BACKDROP COPY IS NOT A REDRAW AND CANNOT BE DROPPED.  The inventory
+   window snapshots the live screen on the way in and paints that snapshot back
+   on the way out (unititem.h), so what this memmove puts on the adapter is
+   what the player is left looking at once the list closes.
+
+   THE ITEM CROSSES AS A BARE ID.  fdps_unit_get_item_id reads the id out of
+   the giver's entry and fdps_unit_add_item stores that id into the receiver's
+   first free entry with a zeroed flag byte (unititem.h), so an equipped item
+   arrives unequipped.  Moving the giver's two-byte entry across instead would
+   carry the equipped bit 0x40 with it, and since only the giver's stats are
+   reworked the receiver would gain the item's modifiers without ever wearing
+   it.
+
+   ONLY THE GIVER'S STATS ARE REWORKED.  fdps_unit_recompute_combat_stats runs
+   on the giver at 000343f3 because what left the bag may have been equipped;
+   nothing recomputes the receiver, and nothing recomputes on any of the four
+   arms that move no item.
+
+   The values used after a CALL are five.  fdps_village_select_member's EAX is
+   a roster index, stored to the loop's giver slot by MOV dword ptr
+   [EBP-0x14],EAX at 00034253 on the first call and to the receiver slot by MOV
+   dword ptr [EBP-0x8],EAX at 00034378 on the second.  fdps_get_unit_record's
+   EAX is the giver's record, MOV dword ptr [EBP-0x4],EAX at 0003426c, and only
+   its char_id byte at +8 is ever read -- MOV AL,byte ptr [EAX+0x8] / AND
+   EAX,0xff, an unsigned byte.  fdps_unit_item_count's EAX is tested where it
+   stands, TEST EAX,EAX / JNZ at 0003429e for the giver and CMP EAX,0x8 / JNZ
+   at 00034391 for the receiver, so the count is a branch and never a value.
+   fdps_unit_item_select_window's EAX is likewise compared where it stands, CMP
+   EAX,-0x1 / JZ at 00034315, and the slot it chose comes back through the
+   pointer at [EBP-0x10] instead.  fdps_unit_get_item_id's EAX is the item id,
+   MOV dword ptr [EBP-0xc],EAX at 0003432e, used for the message substitution
+   and pushed whole to fdps_unit_add_item at 000343fb.  fdps_draw_text answers a
+   pen position that this caller drops -- ADD ESP,0x1c with no use of EAX at
+   000342d4, 00034370 and 000343da -- and the zoom, memmove, the removal, the
+   stat recomputation and the addition return nothing this function looks
+   at. */
+void fdps_village_item_transfer_loop(unsigned char *screen_page)
+{
+    /* Which party member the player last confirmed as the giver, and the
+       loop's only exit: -1 is the picker's cancel and nothing else stops
+       this.  It survives a completed hand-over, so the next pass simply asks
+       for another giver. */
+    int picked_giver_index;
+    /* Which of the giver's eight inventory entries the list came back on.
+       Seeded to zero before the visit, which is where the list's cursor
+       starts. */
+    int picked_slot;
+    /* The ITEM.DAT id standing in that entry, read once and used both for the
+       message substitution and for the entry the receiver is given. */
+    int item_id;
+    /* Which party member the player confirmed as the receiver. */
+    int picked_receiver_index;
+    /* The giver's own record, read only for its character id. */
+    struct fdps_unit_record *giver;
+
+    picked_giver_index = 0;
+    fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+
+    while (picked_giver_index != GRID_CANCELLED) {
+        fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_OPEN);
+        picked_giver_index = fdps_village_select_member();
+
+        if (picked_giver_index != GRID_CANCELLED) {
+            giver = fdps_get_unit_record(picked_giver_index);
+            data_fdps_dialog_last_action_text_id_param =
+                giver->char_id + NAME_TEXT_ID_BIAS;
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+
+            if (fdps_unit_item_count(picked_giver_index) == 0) {
+                fdps_village_animate_window_zoom(screen_page,
+                                                 WINDOW_ZOOM_OPEN);
+                fdps_draw_text(data_fdps_all_game_text_ptr,
+                               TRANSFER_EMPTY_BAG_TEXT_ID,
+                               (unsigned char *) (VGA_SCREEN_BASE
+                                                  + TRANSFER_MESSAGE_SCREEN_AT),
+                               VGA_SCREEN_PITCH, TRANSFER_TEXT_FG_COLOR,
+                               TRANSFER_TEXT_BG_COLOR,
+                               TRANSFER_TEXT_OUTLINE_COLOR);
+            } else {
+                memmove((void *) VGA_SCREEN_BASE, screen_page,
+                        (size_t) VGA_SCREEN_BYTES);
+                picked_slot = 0;
+
+                if (picked_giver_index != GRID_CANCELLED
+                    && fdps_unit_item_select_window(picked_giver_index,
+                                                    TRANSFER_LIST_EVERY_ENTRY,
+                                                    &picked_slot)
+                       != ITEM_LIST_CANCELLED) {
+                    item_id = fdps_unit_get_item_id(picked_giver_index,
+                                                    picked_slot);
+                    data_fdps_dialog_subst_text_id_2 =
+                        item_id + ITEM_TEXT_ID_BIAS;
+                    fdps_village_animate_window_zoom(screen_page,
+                                                     WINDOW_ZOOM_OPEN);
+                    fdps_draw_text(data_fdps_all_game_text_ptr,
+                                   TRANSFER_ASK_RECEIVER_TEXT_ID,
+                                   (unsigned char *)
+                                       (VGA_SCREEN_BASE
+                                        + TRANSFER_MESSAGE_SCREEN_AT),
+                                   VGA_SCREEN_PITCH, TRANSFER_TEXT_FG_COLOR,
+                                   TRANSFER_TEXT_BG_COLOR,
+                                   TRANSFER_TEXT_OUTLINE_COLOR);
+                    picked_receiver_index = fdps_village_select_member();
+
+                    if (picked_receiver_index != GRID_CANCELLED) {
+                        if (fdps_unit_item_count(picked_receiver_index)
+                            == INVENTORY_SLOTS_FULL) {
+                            fdps_village_animate_window_zoom(screen_page,
+                                                             WINDOW_ZOOM_CLOSE);
+                            fdps_village_animate_window_zoom(screen_page,
+                                                             WINDOW_ZOOM_OPEN);
+                            fdps_draw_text(data_fdps_all_game_text_ptr,
+                                           TRANSFER_BAG_FULL_TEXT_ID,
+                                           (unsigned char *)
+                                               (VGA_SCREEN_BASE
+                                                + TRANSFER_MESSAGE_SCREEN_AT),
+                                           VGA_SCREEN_PITCH,
+                                           TRANSFER_TEXT_FG_COLOR,
+                                           TRANSFER_TEXT_BG_COLOR,
+                                           TRANSFER_TEXT_OUTLINE_COLOR);
+                        } else {
+                            fdps_unit_remove_item(picked_giver_index,
+                                                  picked_slot);
+                            fdps_unit_recompute_combat_stats(
+                                picked_giver_index);
+                            fdps_unit_add_item(picked_receiver_index, item_id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

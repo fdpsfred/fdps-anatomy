@@ -120,4 +120,44 @@ extern void fdps_village_member_status_loop(unsigned char *screen_page);
 extern void fdps_village_item_sell_loop(unsigned char *screen_page);
 #pragma aux fdps_village_item_sell_loop "*" parm caller [];
 
+/* 00034210.  The item hand-over the item screen, the church, the weapon shop
+   and the secret screen all offer: open the member picker for a giver, run
+   that member's bag, open the picker again for a receiver, move the chosen
+   item across, and start over until the player cancels out of the picker.  It
+   answers nothing, and the only way it ever returns is that cancel -- a
+   completed hand-over sends the player back to the giver picker rather than
+   into the same bag again.  The window is open when it returns, because the
+   cancel comes out of a picker that has just drawn its grid into it.
+
+   screen_page is the caller's own 320x200 8bpp page holding that screen's
+   backdrop.  It is only read: the window animation composes every frame on a
+   private page, and this loop copies the backdrop straight onto the adapter
+   before it opens the inventory list.
+
+   A GIVER CARRYING NOTHING IS REFUSED AND THE REFUSAL IS ALL THAT HAPPENS.
+   The member can still be confirmed in the picker; what follows is message
+   0x1fb with the member's name substituted into it, and then the picker again.
+
+   THE GIVER'S NAME IS PUBLISHED ON EVERY CONFIRMED PICK, not only on the
+   refusal: data_fdps_dialog_last_action_text_id_param takes the giver's
+   character id plus one before the bag is counted, and it is still that name
+   the "who is it for" message expands two calls later.  The item's own name
+   goes into data_fdps_dialog_subst_text_id_2 as its id plus 0xc9 once the list
+   has been answered, and neither slot is put back afterwards.
+
+   A FULL RECEIVER IS REFUSED ON AN EXACT EIGHT.  The bag-full message 0x1fa is
+   shown and nothing moves; the giver keeps the item and no stats are reworked.
+
+   THE ITEM CROSSES AS A BARE ID AND SO ARRIVES UNEQUIPPED.  What the giver had
+   equipped the receiver has merely got, because the addition zeroes the
+   receiving entry's flag byte -- and only the giver's derived stats are
+   recomputed, so an entry that carried the equipped bit across would give the
+   receiver its modifiers for nothing.
+
+   IT NEEDS THE VILLAGE'S UNIT-ARRAY ALIAS IN PLACE, exactly as the two loops
+   above do: both pickers answer roster indices and every fdps_unit_* accessor
+   here resolves them against data_fdps_map_unit_array_ptr (gamedata.h). */
+extern void fdps_village_item_transfer_loop(unsigned char *screen_page);
+#pragma aux fdps_village_item_transfer_loop "*" parm caller [];
+
 #endif
