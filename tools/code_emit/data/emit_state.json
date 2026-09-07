@@ -2993,6 +2993,14 @@
       "status": "committed",
       "emitted_against": "0x233",
       "rounds": 0
+    },
+    "00036460": {
+      "name": "fdps_run_bonus_lottery",
+      "target": "vilshop.c",
+      "body_size": "0x689",
+      "status": "committed",
+      "emitted_against": "0x689",
+      "rounds": 0
     }
   }
 }

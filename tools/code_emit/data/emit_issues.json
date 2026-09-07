@@ -2148,5 +2148,33 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "00036460": [
+    {
+      "from": "emit",
+      "what": "Which prize the REBUILD hands out on 28 January 1998 is not known and cannot be made known from here. The original's four-armed test at 0003691a reads [EBP-0xc], and the only store to that slot is at 00036a05, after the test; the plate comment's rebuild note records that in the original the player always receives the consolation 藥草 while the message names the class the reel really stopped on. What I established: the C reproduces the shape exactly -- prize_class is declared and read before it is assigned, and the assignment that gives it the reel's answer is kept where the assembly has it -- but WHAT that unwritten local holds is decided by the compiler's frame layout and by whatever ran before the call, which ADR-0001 explicitly puts outside the equivalence standard. The rebuild's frame is not the original's (five separate named locals are emitted where the original reuses one slot at [EBP-0x1c] for the fade level, the two spin holds, the audio voice and the crystal counter, which is behaviour-neutral but moves the frame), so the rebuild may well take the sword, crystal or gold arm where the original takes the herb. Nothing in a unit test can settle it: an assertion about the slot would be an assertion about this compiler's stack allocation.",
+      "needs": "A playtest of both executables under DOSBox-X with the guest date set to 1998-01-28, entering the bar with the run-once flag clear, and a comparison of what the party actually receives -- the original against the rebuild. That measurement is the only thing that says whether the two agree, and it is also the only place the question can be decided, since the value is uninitialised by construction.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "Everything inside the guard is uncovered by the unit tests: the six-step fade-in, the two spin walks and their rand()-driven frame counts, the keyboard-stopped middle loop, the four prize arms, the two announcement messages and the four frees. The four cases below the guard pin only that the draw does not open. The body cannot be run from the harness with anything asserted about it, because the arm it takes is the unwritten slot above and because the reel is a 280-tick animation over the real BONUS-1.SAF whose only exit is a make code from the scancode ring.",
+      "needs": "The manual playtest ADR-0003 puts this class of behaviour in: with the guest date set to 1998-01-28, the reel should fade in over six steps, accelerate, stop on the first key, coast to a stop, and then show message 0x225 + the class of the frame it stopped on followed by message 0x229. Anything that differs -- a reel that never fades, one that will not stop, an announcement naming the wrong prize -- is what that session is looking for.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed independently from the built object, and I can now put a number on the difference the emitter could only describe: the original reads the prize slot at [EBP-0xc] and the rebuild reads it at -30H[ebp], and both take three reads before the single store. So the two executables are reading different stack addresses on the same code path, and which of the four arms each lands on is decided by what the previous call left at its own address. Nothing static settles it and no assertion can be written about it, because an assertion would be pinning this compiler's frame layout. My pass adds only the measurement; I agree with the emitter that the C is right to leave prize_class unset and to keep the later store where the assembly has it, and I specifically agree that seeding it to make the herb arm reliable would be inventing behaviour.",
+      "needs": "The playtest the emitter names: both executables under DOSBox-X with the guest date at 1998-01-28 and the run-once flag clear, entering the bar, comparing what the party actually receives.",
+      "status": "open",
+      "same_as": "emit#0"
+    },
+    {
+      "from": "review",
+      "what": "Nothing my pass adds. I reached the same conclusion for the same reason -- the body cannot be entered from the harness with anything asserted about it, because the arm it takes is the unwritten slot and the reel is a keyboard-stopped animation over the real BONUS-1.SAF -- and ADR-0003 puts that class of behaviour in the manual playtest.",
+      "needs": "As emit#1.",
+      "status": "open",
+      "same_as": "emit#1"
+    }
   ]
 }
