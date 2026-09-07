@@ -65,6 +65,7 @@
 #include "cdaudio.h"
 #include "keybd.h"
 #include "palcycle.h"
+#include "shop.h"
 #include "statunit.h"
 #include "statwin.h"
 #include "vilmenu.h"
@@ -774,6 +775,446 @@ static void chr_the_transfer_command_is_the_second_arm(void)
     chr_done();
 }
 
+/* ---- fdps_run_weapon_shop, 00035fd0 --------------------------------------
+ *
+ * Expected values come from the assembly at 00035fd0 and from nothing else:
+ * the seed MOV dword ptr [EBP-0x8],0x0 at 00035fdc in front of the entry test
+ * CMP dword ptr [EBP-0x8],-0x1 / JNZ at 000360ac, so the first pass always
+ * runs; the five-dword template copied onto the frame by REP MOVSD at 00035ff0
+ * -- 0x24, 0x14, 0x15, 0x04, 0x06 at 000311b4 -- and PUSH 0x5 at 000360d0 for
+ * the row's length; the unsigned bound CMP dword ptr [EBP-0x8],0x4 / JA at
+ * 000360de in front of JMP dword ptr CS:[EAX*4 + 0x360b8], whose five entries
+ * are 000360f9, 0003613f, 00036153, 00036161 and 0003616f; the calls those
+ * arms make -- two window sweeps and fdps_draw_text on the CHAPTER text block
+ * at 00036135, fdps_shop_buy_loop with MOV EAX,0x1 for the shop index at
+ * 0003613f, then fdps_village_item_sell_loop, fdps_village_item_transfer_loop
+ * and fdps_village_member_equip_loop -- and the two-armed test CMP dword ptr
+ * [EBP-0x8],-0x1 / JNZ at 0003617b whose arms both fall to the back edge JMP
+ * 0x000360ac at 000361dc.  None of it is read off the emitted C.
+ *
+ * WHAT THE CASES ARE ABOUT.  Everything this screen draws is somebody else's
+ * behaviour and nothing it computes comes back as a value, so what is pinned
+ * here is the dispatch: that the answer the command row writes selects the arm
+ * the jump table selects, in that order, that the row is FIVE entries long and
+ * not the church's four, that the buy counter is opened against shop row 1,
+ * and that the row is reopened after every arm until the row itself is
+ * cancelled.  Each arm is told from the others by something only it leaves
+ * behind -- the shop item picker's two globals for the buy counter, a
+ * published OFFER FIGURE for the sell counter, an entry moved between two
+ * members for the hand-over, and the status window's unit index with the name
+ * slot untouched for the equip counter, which is what the reprint arm and the
+ * cancel leave as well while opening no picker at all.
+ *
+ * IT RUNS ON THE CHURCH SCREEN'S FIXTURE, because the two screens draw through
+ * the same sheets and tables: chr_stage above already puts up everything the
+ * frame, the icon row, the member picker and the messages need, and
+ * wep_stage adds only the three things this screen reaches that the church
+ * does not -- the ITEM.DAT records the sell counter prices and the equip
+ * window lists, the status gauge sheet that window's panel draws, and a shop
+ * stock table with row 1 empty between two stocked rows.
+ *
+ * WHY ROW 1 IS THE EMPTY ONE.  The item picker resets its saved cursor and
+ * window top only when the cursor is at or past the end of THIS shop's stock
+ * (shop.h), so a parked cursor of 7 comes back as 0 from an empty row and
+ * stands unchanged from a row of twelve.  Rows 0 and 2 are stocked, so the
+ * pair of zeroes says the counter was opened against row 1 and not against the
+ * item screen's row 0 or the secret shop's row 2 -- and a wrong index draws
+ * real entries out of the staged item table rather than faulting.
+ *
+ * THE PROMPT IS ALWAYS DECLINED.  chr_timer_isr appends Escape to the scancode
+ * ring on every tick, so the sell counter's offer is refused and no sale
+ * settles; what the case reads is the offer the counter published before it
+ * asked, which is written whatever the answer turns out to be (vilmenu.h).
+ *
+ * THE THREE CASES THAT OPEN AN INVENTORY LIST NEED THE REAL MISC.VFS AND
+ * FACE.CEL, because fdps_unit_item_select_window composes its frame out of
+ * Status.cel and the member's portrait and both loaders name their file with a
+ * literal (unititem.h).  They probe for the two files and skip themselves
+ * rather than dereferencing what a failed load leaves behind.
+ */
+
+/* The ITEM.DAT records the cases use.  The sold item's price is deliberately
+   not a multiple of four -- 101 * 3 / 4 is 75.75 -- so the offer the sell
+   counter publishes pins the truncation and not just the ratio (vilmenu.h).
+   The filler is what the two stocked shop rows hold, and it is a different id
+   so that a picker opened against the wrong row draws something the case can
+   see it drew. */
+#define WEP_ITEM_RECORDS 16
+#define WEP_ITEM 5
+#define WEP_ITEM_PRICE 101
+#define WEP_ITEM_OFFER 75
+#define WEP_STOCK_FILLER_ITEM 1
+
+/* The shop stock table: three rows of twelve bytes, 0xff for an empty slot
+   (shop.h).  Row 1 is this screen's and is the empty one. */
+#define WEP_SHOP_ROWS 3
+#define WEP_SHOP_ROW_SLOTS 12
+#define WEP_SHOP_EMPTY_SLOT 0xff
+#define WEP_WEAPON_SHOP_ROW 1
+
+/* Parked in the item picker's two globals before every run.  Both are past the
+   end of an empty row and inside a row of twelve, which is what makes the pair
+   of zeroes the buy counter's fingerprint. */
+#define WEP_SHOP_CURSOR_SENTINEL 7
+#define WEP_SHOP_SCROLL_SENTINEL 9
+
+/* The status panel's two gauges: three graphics of 0x75 by 8 raw pixels,
+   0x3a8 bytes apart (gauge.h). */
+#define WEP_BAR_STRIDE 0x3a8
+#define WEP_BAR_BYTES (3 * WEP_BAR_STRIDE)
+
+/* The members the cases use.  Neither is roster slot 3, so the picker's
+   locked-slot rule decides nothing here. */
+#define WEP_GIVER 1
+#define WEP_RECEIVER 2
+
+/* The portrait sheet the equip window's frame cannot be composed without. */
+#define WEP_WINDOW_PORTRAIT "FACE.CEL"
+
+static struct fdps_item_effect wep_items[WEP_ITEM_RECORDS];
+static unsigned char wep_bar_sheet[WEP_BAR_BYTES];
+static unsigned char wep_shop_stock[WEP_SHOP_ROWS * WEP_SHOP_ROW_SLOTS];
+
+/* MISC.VFS carries both the backdrop and the equip window's Status.cel, so the
+   two files below are what every case that opens an inventory list needs. */
+static int wep_window_files_present(void)
+{
+    FILE *probe;
+
+    if (chr_backdrop_file_present() == 0) {
+        return 0;
+    }
+
+    probe = fopen(WEP_WINDOW_PORTRAIT, "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+    return 1;
+}
+
+/* The church screen's fixture plus the three things only this screen reaches.
+   The member picker's own two globals are NOT reset here -- where its cursor
+   starts is what places the member a case is about. */
+static void wep_stage(void)
+{
+    int row;
+    int slot;
+
+    chr_stage();
+
+    memset(wep_items, 0, sizeof(wep_items));
+    wep_items[WEP_ITEM].price = (unsigned short) WEP_ITEM_PRICE;
+    data_fdps_item_effect_table_ptr = (unsigned char *) wep_items;
+
+    memset(wep_bar_sheet, 0x01, sizeof(wep_bar_sheet));
+    data_fdps_status_gauge_bar_sheet_ptr = wep_bar_sheet;
+
+    for (row = 0; row < WEP_SHOP_ROWS; row++) {
+        for (slot = 0; slot < WEP_SHOP_ROW_SLOTS; slot++) {
+            wep_shop_stock[row * WEP_SHOP_ROW_SLOTS + slot] =
+                (unsigned char) (row == WEP_WEAPON_SHOP_ROW
+                                 ? WEP_SHOP_EMPTY_SLOT
+                                 : WEP_STOCK_FILLER_ITEM);
+        }
+    }
+    data_fdps_shop_stock_table_ptr = wep_shop_stock;
+    data_fdps_shop_item_picker_cursor_idx = WEP_SHOP_CURSOR_SENTINEL;
+    data_fdps_shop_item_list_scroll_offset = WEP_SHOP_SCROLL_SENTINEL;
+}
+
+/* Puts one entry into one member's bag, flag byte and id byte (unititem.h). */
+static void wep_put(int member, int slot, int flag, int item_id)
+{
+    chr_roster[member].inventory_slots[slot * 2] = (unsigned char) flag;
+    chr_roster[member].inventory_slots[slot * 2 + 1] = (unsigned char) item_id;
+}
+
+static int wep_carried(int member)
+{
+    int slot;
+    int count;
+
+    count = 0;
+    for (slot = 0; slot < CHR_SLOTS; slot++) {
+        if ((chr_roster[member].inventory_slots[slot * 2] & CHR_SLOT_EMPTY)
+            == 0) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/* One whole visit to the weapon shop, with the adapter in the mode the game
+   draws it in and the timer interrupt pacing the frames and playing both input
+   channels.  It runs on the script machinery at the top of this file, so no
+   case here may script more than CHR_SCRIPT_MAX codes -- the longest below is
+   exactly that.  The fixture is NOT staged here: a case calls wep_stage first
+   and then fills the bag it is about, and the two steps have to stay apart for
+   that. */
+static void wep_go(unsigned char *codes, int count)
+{
+    int index;
+
+    for (index = 0; index < count; index++) {
+        chr_script[index] = codes[index];
+    }
+    chr_script_len = count;
+    chr_script_next = 0;
+
+    data_fdps_village_backdrop_page_ptr = chr_page_sentinel;
+    data_fdps_portrait_sprite_buf_ptr =
+        (unsigned char *) malloc((size_t) CHR_PORTRAIT_BUF_BYTES);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr != NULL, 1);
+
+    data_fdps_input_last_scancode = CHR_KEY_NONE;
+    data_fdps_input_key_repeat_prev_scancode = CHR_KEY_NONE;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_ui_palette_last_cycle_tick = 0;
+    data_fdps_ui_palette_cycle_phase = 0;
+    data_fdps_audio_cd_repeat_last_tick = 0;
+    data_fdps_audio_cd_repeat_tick_counter = 0;
+
+    chr_set_mode(CHR_MODE_320X200X256);
+    chr_saved_timer = _dos_getvect(CHR_TIMER_VECTOR);
+    _dos_setvect(CHR_TIMER_VECTOR, chr_timer_isr);
+    fdps_run_weapon_shop();
+    _dos_setvect(CHR_TIMER_VECTOR, chr_saved_timer);
+    chr_set_mode(CHR_MODE_TEXT);
+}
+
+/* The church teardown plus this screen's own three globals, for the same
+   reason: a pointer left naming a static in this file is a free() of storage
+   that never came from the heap the next time a chapter loader runs. */
+static void wep_done(void)
+{
+    data_fdps_item_effect_table_ptr = NULL;
+    data_fdps_status_gauge_bar_sheet_ptr = NULL;
+    data_fdps_shop_stock_table_ptr = NULL;
+    data_fdps_shop_item_picker_cursor_idx = 0;
+    data_fdps_shop_item_list_scroll_offset = 0;
+    chr_done();
+}
+
+/* Backing out of the command row is the screen's only exit, and it is reached
+   on the first pass because the answer slot is seeded with zero and the entry
+   test is against -1.  What the run leaves behind is the page: the global no
+   longer names the sentinel parked in it, so a page really was taken and
+   published, and it is not put back to null on the way out.  The portrait
+   buffer is gone because the window sweep releases it unconditionally
+   (village.h), which is how a frame that really opened is told from one that
+   was skipped.  Nothing else ran -- no picker moved, no dialogue slot was
+   written and the shop picker's cursor still holds what it was parked with. */
+static void wep_a_cancel_at_the_command_row_ends_the_screen(void)
+{
+    unsigned char script[1];
+
+    if (chr_backdrop_file_present() == 0) {
+        return;
+    }
+
+    script[0] = CHR_KEY_ESC;
+    wep_stage();
+    chr_place(2, 0);
+    wep_go(script, 1);
+
+    CHECK_EQ(data_fdps_village_backdrop_page_ptr != chr_page_sentinel, 1);
+    CHECK_EQ(data_fdps_village_backdrop_page_ptr != NULL, 1);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 1);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, 2);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, CHR_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, WEP_SHOP_CURSOR_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CHR_START_GOLD);
+    wep_done();
+}
+
+/* The row opens on entry 0, so a confirmation with no movement in front of it
+   takes the first jump-table slot.  That arm opens no submenu of any kind: it
+   sweeps the window shut and open again and writes one line, so every global
+   the other four arms move is still where it was parked.  A table whose first
+   slot named one of the four loops would move at least one of them, and the
+   trailing Escape is only reached because the arm fell to the back edge
+   instead of out. */
+static void wep_the_reprint_command_opens_no_submenu(void)
+{
+    unsigned char script[2];
+
+    if (chr_backdrop_file_present() == 0) {
+        return;
+    }
+
+    script[0] = CHR_KEY_ENTER;
+    script[1] = CHR_KEY_ESC;
+    wep_stage();
+    chr_place(2, 0);
+    wep_go(script, 2);
+
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, 2);
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, WEP_SHOP_CURSOR_SENTINEL);
+    CHECK_EQ(data_fdps_shop_item_list_scroll_offset, WEP_SHOP_SCROLL_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, CHR_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, CHR_SUBST_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, CHR_VALUE_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CHR_START_GOLD);
+    wep_done();
+}
+
+/* One step right and a confirmation takes slot 1, which is the buy counter,
+   and the shop index it is opened with is what the pair of zeroes names.  The
+   item picker resets its saved cursor and window top only when the cursor is
+   past the end of the row it was given: row 1 is empty here and rows 0 and 2
+   hold twelve entries each, so a counter opened against either of those would
+   have left the parked 7 and 9 standing.  One Escape then backs out of the
+   picker and ends the counter.  The member picker never runs on this path,
+   which is what separates the buy counter from the three loops that start with
+   one. */
+static void wep_the_buy_command_opens_shop_row_one(void)
+{
+    unsigned char script[5];
+
+    if (chr_backdrop_file_present() == 0) {
+        return;
+    }
+
+    script[0] = CHR_KEY_RIGHT;
+    script[1] = CHR_KEY_ENTER;
+    script[2] = CHR_KEY_ESC;
+    script[3] = CHR_KEY_NONE;
+    script[4] = CHR_KEY_ESC;
+    wep_stage();
+    chr_place(2, 0);
+    wep_go(script, 5);
+
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, 0);
+    CHECK_EQ(data_fdps_shop_item_list_scroll_offset, 0);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, 2);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, CHR_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CHR_START_GOLD);
+    wep_done();
+}
+
+/* Two steps right and a confirmation takes slot 2, which is the sell counter:
+   the member picker, then that member's bag, then the offer.  The figure it
+   publishes is three quarters of the listed price truncated, and no other arm
+   of this screen writes a figure at all, so it is what names the counter.  The
+   offer is declined through the ring, so the entry stays in the bag and the
+   purse does not move -- what stands afterwards is the offer itself, which is
+   written before the prompt runs and put back by nothing (vilmenu.h).  The
+   hand-over's second dialogue slot is untouched, which separates this arm from
+   slot 3. */
+static void wep_the_sell_command_publishes_an_offer(void)
+{
+    unsigned char script[8];
+
+    if (wep_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = CHR_KEY_RIGHT;
+    script[1] = CHR_KEY_NONE;
+    script[2] = CHR_KEY_RIGHT;
+    script[3] = CHR_KEY_ENTER;
+    script[4] = CHR_KEY_NONE;
+    script[5] = CHR_KEY_ENTER;
+    script[6] = CHR_KEY_NONE;
+    script[7] = CHR_KEY_ENTER;
+    wep_stage();
+    chr_place(WEP_GIVER, 0);
+    wep_put(WEP_GIVER, 0, 0, WEP_ITEM);
+    wep_go(script, 8);
+
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, WEP_ITEM_OFFER);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, WEP_ITEM + 0xc9);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, CHR_SUBST_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CHR_START_GOLD);
+    CHECK_EQ(wep_carried(WEP_GIVER), 1);
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, WEP_SHOP_CURSOR_SENTINEL);
+    wep_done();
+}
+
+/* Three steps right and a confirmation takes slot 3, and a whole hand-over
+   settles through it: the entry leaves the giver, arrives in the receiver's
+   bag with a zeroed flag byte, and the item's own name id stands in the SECOND
+   dialogue slot.  No other arm of this screen moves an entry between two
+   members, and the sell counter's figure slot is untouched, which is the pair
+   that separates slot 3 from slot 2. */
+static void wep_the_hand_over_command_moves_an_entry(void)
+{
+    unsigned char script[12];
+
+    if (wep_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = CHR_KEY_RIGHT;
+    script[1] = CHR_KEY_NONE;
+    script[2] = CHR_KEY_RIGHT;
+    script[3] = CHR_KEY_NONE;
+    script[4] = CHR_KEY_RIGHT;
+    script[5] = CHR_KEY_ENTER;
+    script[6] = CHR_KEY_NONE;
+    script[7] = CHR_KEY_ENTER;
+    script[8] = CHR_KEY_NONE;
+    script[9] = CHR_KEY_ENTER;
+    script[10] = CHR_KEY_RIGHT;
+    script[11] = CHR_KEY_ENTER;
+    wep_stage();
+    chr_place(WEP_GIVER, 0);
+    wep_put(WEP_GIVER, 0, 0, WEP_ITEM);
+    wep_go(script, 12);
+
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, WEP_ITEM + 0xc9);
+    CHECK_EQ(wep_carried(WEP_GIVER), 0);
+    CHECK_EQ(wep_carried(WEP_RECEIVER), 1);
+    CHECK_EQ(chr_roster[WEP_RECEIVER].inventory_slots[0], 0);
+    CHECK_EQ(chr_roster[WEP_RECEIVER].inventory_slots[1], WEP_ITEM);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, CHR_VALUE_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CHR_START_GOLD);
+    wep_done();
+}
+
+/* Three things at once, and each of them is only reachable if the one before
+   it held.  The reprint arm falls to the back edge and not out, so the row
+   opens a second time; the row's answer slot is kept, so that second row
+   starts on entry 0 again and one Left step wraps it against the row's length
+   -- which is five here and not the church's four, so the wrap lands on entry
+   4; and slot 4 of the jump table is the equip counter, which is the arm this
+   screen has and the item screen does not.  The equip window publishes the
+   member the picker answered with, and it is the ONLY arm that reaches a
+   member's bag without publishing his name: a hand-over in slot 4 would have
+   written the name slot on the same confirmed pick.  A row of four would have
+   wrapped to the hand-over instead, and a row of six to an entry the table
+   does not have. */
+static void wep_the_row_is_five_wide_and_wraps_to_the_equip_counter(void)
+{
+    unsigned char script[5];
+
+    if (wep_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = CHR_KEY_ENTER;
+    script[1] = CHR_KEY_LEFT;
+    script[2] = CHR_KEY_ENTER;
+    script[3] = CHR_KEY_NONE;
+    script[4] = CHR_KEY_ENTER;
+    wep_stage();
+    chr_place(WEP_GIVER, 0);
+    wep_put(WEP_GIVER, 0, 0, WEP_ITEM);
+    wep_go(script, 5);
+
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, WEP_GIVER);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, CHR_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, CHR_SUBST_SENTINEL);
+    CHECK_EQ(wep_carried(WEP_GIVER), 1);
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, WEP_SHOP_CURSOR_SENTINEL);
+    wep_done();
+}
+
 void run_vilshop_tests(void)
 {
     RUN_TEST(chr_a_cancel_at_the_command_row_ends_the_screen);
@@ -781,4 +1222,10 @@ void run_vilshop_tests(void)
     RUN_TEST(chr_the_row_is_four_wide_and_wraps_to_the_status_browser);
     RUN_TEST(chr_the_promote_command_is_the_first_arm);
     RUN_TEST(chr_the_transfer_command_is_the_second_arm);
+    RUN_TEST(wep_a_cancel_at_the_command_row_ends_the_screen);
+    RUN_TEST(wep_the_reprint_command_opens_no_submenu);
+    RUN_TEST(wep_the_buy_command_opens_shop_row_one);
+    RUN_TEST(wep_the_sell_command_publishes_an_offer);
+    RUN_TEST(wep_the_hand_over_command_moves_an_entry);
+    RUN_TEST(wep_the_row_is_five_wide_and_wraps_to_the_equip_counter);
 }

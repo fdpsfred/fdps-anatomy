@@ -2977,6 +2977,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x20e"
+    },
+    "00035fd0": {
+      "name": "fdps_run_weapon_shop",
+      "target": "vilshop.c",
+      "body_size": "0x225",
+      "status": "committed",
+      "emitted_against": "0x225",
+      "rounds": 0
     }
   }
 }
