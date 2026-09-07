@@ -2969,6 +2969,14 @@
       "status": "committed",
       "emitted_against": "0x222",
       "rounds": 0
+    },
+    "00035aa0": {
+      "name": "fdps_run_church_screen",
+      "target": "vilshop.c",
+      "body_size": "0x20e",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x20e"
     }
   }
 }
