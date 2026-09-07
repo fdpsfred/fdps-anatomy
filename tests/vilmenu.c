@@ -1840,6 +1840,235 @@ static void xfer_a_cancelled_receiver_leaves_everything(void)
     sell_done();
 }
 
+
+/* ---- fdps_village_member_equip_loop @ 00034420 --------------------------
+ *
+ * The same fixture the sell counter and the hand-over above run on, because
+ * this loop reaches the same picker, the same message table and the same unit
+ * accessors.  What is different is the arm that is NOT a refusal: it opens
+ * fdps_unit_equip_window, and that screen publishes the unit index it drew its
+ * status panel for in data_fdps_village_status_window_unit_idx (statunit.h,
+ * unititem.h).  Nothing else in this call writes that global, and sell_stage
+ * seeds it with -1, so it is the observable for "the equip screen was opened,
+ * and on this member".
+ *
+ * ONE MAKE CODE IS ALL THE EQUIP SCREEN IS GIVEN, and it is Escape.  Its
+ * cursor loop's other exits either equip something and go round again or are
+ * refused in silence and go round again (unititem.h), so a confirm inside it
+ * can never come back on a script this file can play; the cancel is the exit
+ * that returns.  What the equip screen does once an item is confirmed is
+ * pinned in tests/unititem.c and tests/unit.c and is not restated here.
+ *
+ * Expected values come from the assembly at 00034420: MOV dword ptr
+ * [EBP-0x8],0x0 at 0003442c for the seed, CMP dword ptr [EBP-0x8],-0x1 / JZ at
+ * 00034445 for the loop test and again at 00034466 for the inner one, TEST
+ * EAX,EAX / JNZ at 0003447c for the count branch, MOV AL,byte ptr [EAX+0x8] /
+ * AND EAX,0xff / INC EAX / MOV [0x00064030],EAX at 000344a1 for the name
+ * substitution, PUSH 0x1fb at 000344c2 for the message entry, and PUSH 0xa0000
+ * / PUSH [EBP+0x14] / PUSH 0xfa00 around the memmove at 000344e9 for the
+ * direction of the backdrop copy.  None of it is read off the emitted C.
+ */
+
+/* Two members far from the locked slot, so the picker confirms both.  One is
+   given an entry and one is left with an empty bag; which arm a pass takes is
+   decided by nothing else. */
+#define EQUIP_MEMBER 1
+#define EQUIP_OTHER_MEMBER 2
+
+/* The entry a member carries on the arm that reaches the equip screen.  Its
+   item record's use effect stays 0, which is what keeps the screen's own list
+   willing to show it. */
+#define EQUIP_ITEM 5
+
+/* What sell_stage leaves in data_fdps_village_status_window_unit_idx, and so
+   what "the equip screen never ran" reads as.  It is not an index any pass
+   could publish, because the picker only answers 0 upwards. */
+#define EQUIP_PANEL_UNSET (-1)
+
+/* One whole visit to the equip counter, with the adapter in the mode the game
+   draws it in and the timer interrupt pacing the frames and playing the keys.
+   The fixture is NOT staged here: a case calls sell_stage first and then fills
+   the bag it is about. */
+static void equip_go(unsigned char *codes, int count)
+{
+    int index;
+
+    sell_page = (unsigned char *) malloc((size_t) SELL_PAGE_BYTES);
+    CHECK_EQ(sell_page != NULL, 1);
+    if (sell_page == NULL) {
+        return;
+    }
+    memset(sell_page, SELL_PAGE_FILL, (size_t) SELL_PAGE_BYTES);
+    data_fdps_village_backdrop_page_ptr = sell_page;
+
+    for (index = 0; index < count; index++) {
+        vil_script[index] = codes[index];
+    }
+    vil_script_len = count;
+    vil_script_next = 0;
+
+    data_fdps_input_last_scancode = VIL_KEY_NONE;
+    data_fdps_input_key_repeat_prev_scancode = VIL_KEY_NONE;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_ui_palette_last_cycle_tick = 0;
+    data_fdps_ui_palette_cycle_phase = 0;
+    data_fdps_audio_cd_repeat_last_tick = 0;
+    data_fdps_audio_cd_repeat_tick_counter = 0;
+
+    vil_set_mode(VIL_MODE_320X200X256);
+    vil_saved_timer = _dos_getvect(VIL_TIMER_VECTOR);
+    _dos_setvect(VIL_TIMER_VECTOR, vil_timer_isr);
+    fdps_village_member_equip_loop(sell_page);
+    _dos_setvect(VIL_TIMER_VECTOR, vil_saved_timer);
+    vil_set_mode(VIL_MODE_TEXT);
+}
+
+/* The seed is zero and the entry test is against -1, so the picker is opened
+   before anything has been picked; the cancel that comes back out of it is the
+   loop's exit and nothing else runs.  Neither arm was entered, which the
+   untouched dialogue slot and the unset panel index both say. */
+static void equip_a_cancel_ends_the_first_pass(void)
+{
+    unsigned char script[1];
+
+    script[0] = VIL_KEY_ESC;
+    vil_place(EQUIP_MEMBER, 0);
+    sell_stage();
+    equip_go(script, 1);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, SELL_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, EQUIP_PANEL_UNSET);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, EQUIP_MEMBER);
+    CHECK_EQ(sell_page_untouched(), 1);
+    sell_done();
+}
+
+/* A member carrying nothing is refused: the name substitution is that member's
+   character id plus one -- the message table's bias for a character name --
+   and the equip screen is never reached, so the panel index stays unset.  A
+   body that published the id itself, or that took the bias the item names use,
+   would miss here by exactly one and by exactly 0xc8. */
+static void equip_an_empty_bag_publishes_the_member_name(void)
+{
+    unsigned char script[2];
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_ESC;
+    vil_place(EQUIP_MEMBER, 0);
+    sell_stage();
+    equip_go(script, 2);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param,
+             (int) vil_char_ids[EQUIP_MEMBER] + 1);
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, EQUIP_PANEL_UNSET);
+    CHECK_EQ(sell_carried(EQUIP_MEMBER), 0);
+    CHECK_EQ(sell_page_untouched(), 1);
+    sell_done();
+}
+
+/* And the refusal is not the end of the call: the arm falls to the back edge,
+   so the picker opens again.  The second visit moves the cursor one cell
+   before cancelling, and that move is only reachable if the picker really was
+   reopened. */
+static void equip_a_refusal_reopens_the_picker(void)
+{
+    unsigned char script[3];
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_RIGHT;
+    script[2] = VIL_KEY_ESC;
+    vil_place(EQUIP_MEMBER, 0);
+    sell_stage();
+    equip_go(script, 3);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, EQUIP_MEMBER + 1);
+    CHECK_EQ(sell_carried(EQUIP_MEMBER), 0);
+    sell_done();
+}
+
+/* Two refusals in a row: every arm falls to the same back edge, so the loop
+   keeps handing the picker back until the picker itself cancels.  The cursor
+   has moved twice, which needs three visits to the picker and therefore two
+   completed passes through the refusal arm -- and the name left behind is the
+   SECOND member's, so the later pass really did run the arm again rather than
+   the first one's write standing unchanged. */
+static void equip_it_keeps_reopening_until_a_cancel(void)
+{
+    unsigned char script[5];
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_RIGHT;
+    script[2] = VIL_KEY_ENTER;
+    script[3] = VIL_KEY_RIGHT;
+    script[4] = VIL_KEY_ESC;
+    vil_place(EQUIP_MEMBER, 0);
+    sell_stage();
+    equip_go(script, 5);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, EQUIP_MEMBER + 2);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param,
+             (int) vil_char_ids[EQUIP_MEMBER + 1] + 1);
+    sell_done();
+}
+
+/* A member carrying something takes the other arm: the equip screen runs, and
+   it runs on the index the picker answered with -- which is what the published
+   panel index says.  Nothing is published into the dialogue slot on this path,
+   unlike the hand-over's giver, so the sentinel is still there afterwards; and
+   backing out of the equip screen leaves the entry exactly as it was, still
+   marked carried and still holding its own id. */
+static void equip_a_carried_bag_opens_the_equip_screen(void)
+{
+    unsigned char script[5];
+
+    if (sell_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_NONE;
+    script[2] = VIL_KEY_ESC;
+    script[3] = VIL_KEY_NONE;
+    script[4] = VIL_KEY_ESC;
+    vil_place(EQUIP_MEMBER, 0);
+    sell_stage();
+    sell_put(EQUIP_MEMBER, 0, SELL_SLOT_CARRIED, EQUIP_ITEM);
+    equip_go(script, 5);
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, EQUIP_MEMBER);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, SELL_TEXT_SENTINEL);
+    CHECK_EQ(sell_carried(EQUIP_MEMBER), 1);
+    CHECK_EQ(vil_roster[EQUIP_MEMBER].inventory_slots[0], SELL_SLOT_CARRIED);
+    CHECK_EQ(vil_roster[EQUIP_MEMBER].inventory_slots[1], EQUIP_ITEM);
+    sell_done();
+}
+
+/* The index is handed on rather than being a literal anywhere: the same run on
+   a different member publishes that member instead.  And the backdrop page
+   comes out of the pass byte for byte, which is the direction of the memmove
+   -- a copy written the other way round would have filled the page with the
+   frame the equip screen left on the adapter. */
+static void equip_the_screen_opens_on_the_member_the_picker_answered(void)
+{
+    unsigned char script[5];
+
+    if (sell_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_NONE;
+    script[2] = VIL_KEY_ESC;
+    script[3] = VIL_KEY_NONE;
+    script[4] = VIL_KEY_ESC;
+    vil_place(EQUIP_OTHER_MEMBER, 0);
+    sell_stage();
+    sell_put(EQUIP_OTHER_MEMBER, 0, SELL_SLOT_CARRIED, EQUIP_ITEM);
+    equip_go(script, 5);
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, EQUIP_OTHER_MEMBER);
+    CHECK_EQ(sell_page_untouched(), 1);
+    sell_done();
+}
+
 void run_vilmenu_tests(void)
 {
     RUN_TEST(vil_escape_cancels);
@@ -1883,4 +2112,10 @@ void run_vilmenu_tests(void)
     RUN_TEST(xfer_a_settled_hand_over_moves_the_bare_id);
     RUN_TEST(xfer_a_full_bag_refuses_the_move);
     RUN_TEST(xfer_a_cancelled_receiver_leaves_everything);
+    RUN_TEST(equip_a_cancel_ends_the_first_pass);
+    RUN_TEST(equip_an_empty_bag_publishes_the_member_name);
+    RUN_TEST(equip_a_refusal_reopens_the_picker);
+    RUN_TEST(equip_it_keeps_reopening_until_a_cancel);
+    RUN_TEST(equip_a_carried_bag_opens_the_equip_screen);
+    RUN_TEST(equip_the_screen_opens_on_the_member_the_picker_answered);
 }

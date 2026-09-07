@@ -160,4 +160,41 @@ extern void fdps_village_item_sell_loop(unsigned char *screen_page);
 extern void fdps_village_item_transfer_loop(unsigned char *screen_page);
 #pragma aux fdps_village_item_transfer_loop "*" parm caller [];
 
+/* 00034420.  The equip counter the weapon shop and the secret screen offer:
+   open the member picker, run the chosen member's equip screen, and start over
+   until the player cancels out of the picker.  It answers nothing, and the
+   only way it ever returns is that cancel -- leaving the picker's window OPEN,
+   because the cancel comes out of a picker that has just drawn its grid into
+   it.
+
+   screen_page is the caller's own 320x200 8bpp page holding that screen's
+   backdrop.  It is only read: the window animation composes every frame on a
+   private page, and this loop copies the backdrop straight onto the adapter
+   before it opens the equip screen.
+
+   A MEMBER CARRYING NOTHING IS REFUSED AND THE REFUSAL IS ALL THAT HAPPENS.
+   The member can still be confirmed in the picker; what follows is message
+   0x1fb with the member's name substituted into it, and then the picker again.
+   The equip screen has an empty-bag exit of its own (unititem.h) and this
+   refusal is why it is never reached from here.
+
+   THE NAME IS PUBLISHED ONLY ON THE REFUSAL.  Unlike the hand-over above,
+   which writes data_fdps_dialog_last_action_text_id_param on every confirmed
+   pick, this loop writes it inside the empty-bag arm alone -- so a member who
+   is carrying something reaches the equip screen with whatever the previous
+   message left in that slot.
+
+   THE WINDOW IS REOPENED RATHER THAN CLOSED BEFORE THE REFUSAL.  The open
+   animation rebuilds each step from screen_page, so replaying it on a window
+   that is already open is what clears the picker's grid off the frame the
+   message is then written into; the other two loops reach the same clean
+   window by closing first and opening after (rebuild_info/pitfalls.md).
+
+   IT NEEDS THE VILLAGE'S UNIT-ARRAY ALIAS IN PLACE, exactly as the three loops
+   above do: the picker answers a roster index and the bag count, the record
+   lookup and the equip screen all resolve it against
+   data_fdps_map_unit_array_ptr (gamedata.h). */
+extern void fdps_village_member_equip_loop(unsigned char *screen_page);
+#pragma aux fdps_village_member_equip_loop "*" parm caller [];
+
 #endif

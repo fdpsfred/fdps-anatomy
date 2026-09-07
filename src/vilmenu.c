@@ -960,3 +960,126 @@ void fdps_village_item_transfer_loop(unsigned char *screen_page)
         }
     }
 }
+
+/* ------------------------------------------------------------------
+ * fdps_village_member_equip_loop @ 00034420
+ * ------------------------------------------------------------------ */
+
+/* Where the refusal is written: 0xaa3d4, column 20, row 131 of the mode 13h
+   screen, inside the window frame the zoom has just opened.  It is the same
+   box and the same colour trio the sell counter and the hand-over above draw
+   their messages in; they are stated again because these are this function's
+   own literals -- PUSH 0xaa3d4 at 000344bd, PUSH 0x140, 0xd0, 0 and 0x6d at
+   000344b8 to 000344af -- and not constants it borrows from either of them. */
+#define EQUIP_MESSAGE_SCREEN_AT 0xa3d4
+#define EQUIP_TEXT_FG_COLOR 0xd0
+#define EQUIP_TEXT_BG_COLOR 0
+#define EQUIP_TEXT_OUTLINE_COLOR 0x6d
+
+/* The one entry this loop can draw, PUSH 0x1fb at 000344c2: the refusal a
+   member with an empty bag gets, which is the same entry the sell counter and
+   the hand-over refuse with.  It prints one substitution, the member's name,
+   and ends in the page-break token, so fdps_draw_text does not come back until
+   a key is pressed (text.h). */
+#define EQUIP_EMPTY_BAG_TEXT_ID 0x1fb
+
+/* 00034420.  One stack argument, caller-cleaned: both call sites --
+   fdps_run_weapon_shop at 00036173 and fdps_run_secret_menu at 000363b7 --
+   push the page they blitted their own backdrop into and follow the CALL with
+   ADD ESP,0x4, and the body reads it at [EBP+0x14] behind PUSH
+   EBX/ESI/EDI/EBP and the return address.  RET carries no immediate, EAX is
+   never set before the epilogue and neither call site looks at it.
+
+   The control flow is one loop with two tests nested inside it.  The entry
+   test CMP dword ptr [EBP-0x8],-0x1 / JZ at 00034445 is the top of the loop
+   and the JMP at 0003450b is its back edge, so the condition is checked before
+   the first pass -- which is why the slot is seeded with zero at 0003442c
+   rather than with a member index: zero is simply a value that is not -1.
+   Both arms of the count test, taken or not, fall to that same back edge, so
+   cancelling in the picker is the only way to reach the epilogue -- and the
+   pick that cancels reaches the epilogue through the loop test rather than
+   directly, which is what leaves the window open on the way out for the caller
+   to close or to reopen.
+
+   THE TWO ARMS RUN THE ANIMATION IN OPPOSITE DIRECTIONS AND THAT IS NOT A
+   MISTAKE.  XOR EAX,EAX / PUSH EAX at 00034480 opens a window that the picker
+   has just drawn its grid into and is therefore already open; MOV EAX,0x1 /
+   PUSH EAX at 000344d7 closes it.  The open animation rebuilds every step from
+   screen_page (village.h), so replaying it is how the grid is wiped off the
+   frame before the message is written into it -- the sell counter and the
+   hand-over reach the same clean window by closing first and opening after,
+   and this one saves the close.  Substituting the pair here draws the message
+   over the grid.
+
+   THE BACKDROP COPY IS NOT A REDRAW AND CANNOT BE DROPPED.
+   fdps_unit_equip_window snapshots the live screen on the way in and paints
+   that snapshot back on the way out (unititem.h), so what this memmove puts on
+   the adapter is what the player is left looking at once the equip screen
+   closes.  Leaving it out because the picture on screen already looks right
+   makes the window save the closing zoom's last frame and restore that
+   instead.
+
+   THE INDEX IS FED TO THE BATTLE UNIT ARRAY AND NOT TO THE ROSTER, exactly as
+   in the three loops above: fdps_village_select_member answers an index into
+   the roster and fdps_unit_item_count, fdps_get_unit_record and
+   fdps_unit_equip_window all resolve it against data_fdps_map_unit_array_ptr,
+   which the field and village bring-up has pointed at the roster base
+   (gamedata.h).
+
+   NOTHING IS PUBLISHED ON THE PATH THAT EQUIPS.
+   data_fdps_dialog_last_action_text_id_param is written inside the refusal arm
+   only, at 000344aa, unlike the hand-over above which writes it on every
+   confirmed pick.  A body that hoisted it out of the arm would leave the equip
+   screen's own messages naming this member.
+
+   The values used after a CALL are three.  fdps_village_select_member's EAX is
+   the roster index, stored to the loop's slot by MOV dword ptr [EBP-0x8],EAX
+   at 00034463 and compared and passed on from there.  fdps_unit_item_count's
+   EAX is tested where it stands -- TEST EAX,EAX / JNZ at 0003447c with no
+   store -- so the count is a branch and never a value.  fdps_get_unit_record's
+   EAX is the member's record, MOV dword ptr [EBP-0x4],EAX at 0003449b, and
+   only its char_id byte at +8 is read -- MOV AL,byte ptr [EAX+0x8] / AND
+   EAX,0xff / INC EAX, an unsigned byte plus one.  fdps_draw_text answers a pen
+   position that this caller drops (ADD ESP,0x1c at 000344d2 with no use of
+   EAX), and the zoom, memmove and fdps_unit_equip_window return nothing this
+   function looks at. */
+void fdps_village_member_equip_loop(unsigned char *screen_page)
+{
+    /* The member's own record, taken only on the refusal path and read only
+       for its character id. */
+    struct fdps_unit_record *member;
+    /* Which party member the player last confirmed in the picker, and the
+       loop's only exit: -1 is the picker's cancel and nothing else stops
+       this. */
+    int picked_member_index;
+
+    picked_member_index = 0;
+    fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+
+    while (picked_member_index != GRID_CANCELLED) {
+        fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_OPEN);
+        picked_member_index = fdps_village_select_member();
+
+        if (picked_member_index != GRID_CANCELLED) {
+            if (fdps_unit_item_count(picked_member_index) == 0) {
+                fdps_village_animate_window_zoom(screen_page,
+                                                 WINDOW_ZOOM_OPEN);
+                member = fdps_get_unit_record(picked_member_index);
+                data_fdps_dialog_last_action_text_id_param =
+                    member->char_id + NAME_TEXT_ID_BIAS;
+                fdps_draw_text(data_fdps_all_game_text_ptr,
+                               EQUIP_EMPTY_BAG_TEXT_ID,
+                               (unsigned char *) (VGA_SCREEN_BASE
+                                                  + EQUIP_MESSAGE_SCREEN_AT),
+                               VGA_SCREEN_PITCH, EQUIP_TEXT_FG_COLOR,
+                               EQUIP_TEXT_BG_COLOR, EQUIP_TEXT_OUTLINE_COLOR);
+            } else {
+                fdps_village_animate_window_zoom(screen_page,
+                                                 WINDOW_ZOOM_CLOSE);
+                memmove((void *) VGA_SCREEN_BASE, screen_page,
+                        (size_t) VGA_SCREEN_BYTES);
+                fdps_unit_equip_window(picked_member_index);
+            }
+        }
+    }
+}
