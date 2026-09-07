@@ -803,6 +803,151 @@ void fdps_chapter_05_event_enemies_advance(int unit_index)
     }
 }
 
+/* The wave the ambush brings on: PUSH 0x2 at 0003717f, matched against byte
+   0x15 of each 0x1a-byte deployment record of the resident MAP%02d.DAT block.
+   Seven of map05.dat's 32 records carry it -- three of id 0x62 at level 10, two
+   of id 0x5d at level 9, one of id 0x58 at level 8 and one of id 0x66 at level
+   10 -- appended at unit indices 0x1d..0x23. */
+#define CH06_ARRIVAL_WAVE 2
+
+/* How that wave is placed: XOR EAX,EAX / PUSH EAX at 0003717c, so
+   fdps_deploy_wave passes 0 on to fdps_deploy_unit and each arrival goes on the
+   nearest free walkable tile to its placement record's coordinates rather than
+   on the coordinates themselves.  It has to be 0 here: the seven MAP05.COD
+   anchors are the block (2..5, 8..9) in the lower left and the wave-0 guest
+   hero already stands at (3, 8), inside it. */
+#define CH06_PLACE_EXACT 0
+
+/* Which unit the map cursor is parked on before the arrivals are held on
+   screen: PUSH 0x1e at 0003718f.  It is the second of the seven records the
+   deployment on the line above has just appended, so the value is only correct
+   after that call and only against map05.dat's own unit count. */
+#define CH06_ARRIVAL_CURSOR_UNIT 0x1e
+
+/* How long the view is held over them: CMP dword ptr [EBP+0x14],0xc / JL at
+   000371a0, so twelve composed frames, the same hold the chapter 4 handler
+   gives its own arrivals.  fdps_render_view_frame paces itself to one timer
+   tick a frame, which is what makes this a duration. */
+#define CH06_ARRIVAL_HOLD_FRAMES 0xc
+
+/* The line spoken over the arrivals: PUSH 0xd at 000371ca, the last of the 14
+   entries of chapter 6's own FDETXT%02d.TXT block.  The entry opens with the
+   portrait control code -0x11 followed by 12, so it is spoken by character
+   0x0c -- map05.dat's one side-1 record, the chapter's guest hero. */
+#define CH06_ARRIVAL_TEXT_ID 0x0d
+
+/* The inclusive index range the behaviour merge walks, off the constants staged
+   at 000371da and 000371e1, with the compare at 0003720a being the signed
+   inclusive JLE.  4 is the first index past chapter 6's four party slots and
+   0x22 is one short of the last arrival, so the range takes in the guest hero
+   at index 5 as well as every enemy -- the chapter 5 handler's copy of the same
+   loop starts at 6 instead, to leave its own hero alone. */
+#define CH06_ADVANCE_FIRST_INDEX 4
+#define CH06_ADVANCE_LAST_INDEX 0x22
+
+/* 00037170.  Chapter 6's cavalry-death ambush: the enemy cavalryman posted in
+   the lower right of the map is killed, the map's second wave of reinforcements
+   marches in at the lower left, the chapter's guest hero speaks over it and
+   every unit already on the field is released from hold-position into the
+   all-out attack.
+
+   The frame is the family's four-push one with a local area -- PUSH EBX / PUSH
+   ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x20 at
+   00037170..00037176 -- because the inline range walk needs its argument,
+   parameter and record slots.  Every caller-clean in the body is this
+   function's own (ADD ESP,0xc after the deployment, ADD ESP,0x4 after the
+   cursor move and after each record lookup, ADD ESP,0x1c after the draw), the
+   RET at 00037240 carries no immediate, and the death-script runner pushes one
+   dword and drops it with ADD ESP,0x4 at 0001dcb4, so the convention is the
+   stack one at both ends of the call.
+
+   THERE IS NO GUARD OF ANY KIND IN THE BODY: no one-shot latch, no test of
+   data_fdps_battle_turn_counter and no compare anywhere except the two loop
+   bounds.  What makes the event happen once is the data -- map05.dat gives the
+   death script naming this slot to exactly one of its records -- so a second
+   call would deploy the wave a second time.
+
+   The four statements run in this order and the order is what the player sees:
+   the arrivals are appended first (CALL 0x00023830 at 00037187), the cursor is
+   walked onto one of them second (CALL 0x0002da50 at 00037191), the view is
+   held over them third (CALL 0x0002beb0 at 000371b0, twelve times), and only
+   then is the line drawn (CALL 0x0001ff60 at 000371d2) -- drawing it earlier
+   would speak over enemies the player has not been shown.
+
+   THE MAP NUMBER IS THE CHAPTER GLOBAL AND NOT A LITERAL.  PUSH dword ptr
+   [0x00069cf4] at 00037181 is data_fdps_chapter_current_chapter_id, the same
+   argument the chapter 4 handler above reads and the opposite of the four
+   chapter 3 handlers, which push the literal 2.  The deployment records still
+   come from whichever MAP%02d.DAT is resident; what the number chooses is the
+   MAP%02d.COD coordinates the arrivals are put down at.
+
+   THE FRAME COUNTER IS THE ARGUMENT SLOT.  MOV dword ptr [EBP+0x14],0x0 at
+   00037199 writes zero over the incoming argument -- after the deployment and
+   the cursor move, not before them -- and the loop compares and INCs that same
+   slot, so the counter and the parameter are one storage location.  Which unit
+   the event fired for is therefore gone by the time the loop starts and nothing
+   read it before that; the store has no observable effect on the caller either,
+   the slot belonging to its outgoing argument area.
+
+   The range walk is fdps_object_set_field34_low_nibble_range (00036b60)
+   expanded inline with the constant argument triple (4, 0x22, 0), the same
+   expansion the chapter 2, 5 and 7 handlers carry and with the same
+   fingerprint: the three constants are parked at [EBP-0x20], [EBP-0x1c] and
+   [EBP-0x18] (000371da..000371e8), copied into a second set of slots at
+   [EBP-0xc], [EBP-0x10] and [EBP-0x14] (000371ef..000371fe), and only then is
+   the counter at [EBP-0x8] seeded from the first of them.  There is no CALL to
+   that helper in the body; the only CALL in the loop is fdps_get_unit_record,
+   once per iteration, so writing the range as a call to it would put a CALL in
+   the rebuild that the original does not make.
+
+   The merge is a read-modify-write of the one byte -- MOV DL,[EAX+0x34] / AND
+   DL,0xf0 / MOV DH,[EBP-0x14] / OR DH,DL / MOV [EAX+0x34],DH at
+   00037227..00037235 -- so the behaviour code goes to 0 and the two AI flag
+   bits in the high nibble are carried across untouched.  Nothing bounds the
+   indices and nothing reads data_fdps_map_unit_count; 4 and 0x22 are literals
+   in the instruction stream, correct for map05's own deployment, which ends at
+   unit 0x23.
+
+   fdps_deploy_wave, fdps_map_cursor_move_to_unit and fdps_render_view_frame
+   leave nothing this body reads, and the cursor fdps_draw_text hands back in
+   EAX is discarded -- the next instruction after its stack cleanup is MOV dword
+   ptr [EBP-0x20],0x4.  fdps_get_unit_record's result is the only value the body
+   keeps off a CALL: stored to [EBP-0x4] at 00037221, then reloaded for the load
+   and again for the store, so both halves of the merge address the record that
+   iteration fetched.  Nothing sets EAX before the RET and the death-script
+   runner ignores what comes back, so the result is void. */
+void fdps_chapter_06_event_deploy_wave_2(int unit_index)
+{
+    /* The record the behaviour merge is standing on, refetched per index. */
+    struct fdps_unit_record *unit;
+    /* Which unit of the range the merge has reached. */
+    int advancing_unit_index;
+
+    fdps_deploy_wave(data_fdps_chapter_current_chapter_id, CH06_ARRIVAL_WAVE,
+                     CH06_PLACE_EXACT);
+    fdps_map_cursor_move_to_unit(CH06_ARRIVAL_CURSOR_UNIT);
+
+    /* The argument slot is the counter, as the assembly has it. */
+    for (unit_index = 0;
+         unit_index < CH06_ARRIVAL_HOLD_FRAMES;
+         unit_index++) {
+        fdps_render_view_frame();
+    }
+
+    fdps_draw_text(data_fdps_current_chapter_text_ptr, CH06_ARRIVAL_TEXT_ID,
+                   (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                   MESSAGE_FG_COLOR, MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+
+    for (advancing_unit_index = CH06_ADVANCE_FIRST_INDEX;
+         advancing_unit_index <= CH06_ADVANCE_LAST_INDEX;
+         advancing_unit_index++) {
+        unit = fdps_get_unit_record(advancing_unit_index);
+        unit->ai_behavior = (unsigned char)
+            ((unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+             AI_BEHAVIOR_MODE_ADVANCE);
+    }
+}
+
 /* 00037250.  Chapter 7's turn-2 event: the arena's five opponents stop holding
    position and start advancing on the player.
 

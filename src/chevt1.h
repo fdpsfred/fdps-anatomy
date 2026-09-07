@@ -295,6 +295,56 @@ extern void fdps_chapter_04_event_for_turn(int unit_index);
 extern void fdps_chapter_05_event_enemies_advance(int unit_index);
 #pragma aux fdps_chapter_05_event_enemies_advance "*" parm caller [];
 
+/* Chapter 6's cavalry-death ambush: the map's second wave of enemy
+   reinforcements marches in at the lower left, the chapter's guest hero speaks
+   over it, and every unit already on the field is released from hold-position
+   into the all-out attack.
+
+   It runs in four steps and the order is what the player sees: the wave-2
+   records of the resident MAP%02d.DAT are appended through fdps_deploy_wave
+   (deploy.h), the map cursor and with it the view is walked onto unit 0x1e --
+   the second of the seven arrivals, so the index is only correct after that
+   deployment -- the view is held there for twelve composed frames, and only
+   then is text entry 0x0d drawn through fdps_draw_text (text.h) straight onto
+   the mode 13h aperture in the standard message colours.  Entry 0x0d opens with
+   the portrait code -0x11 and character id 0x0c, map05.dat's one side-1 record,
+   so the guest hero is the speaker.
+
+   The map number handed to the deployment is
+   data_fdps_chapter_current_chapter_id and not a literal, as it is for the
+   chapter 4 handler and unlike the four chapter 3 ones, so the arrivals take
+   the loaded chapter's own MAP%02d.COD coordinates.  They are placed with the
+   flag that searches for the nearest free walkable tile rather than the one
+   that takes the record's tile as given, which matters here because the guest
+   hero already stands inside the block those seven records name.
+
+   The behaviour rewrite is unit indices 4 through 0x22 inclusive, and it is a
+   merge and not an assignment: the low nibble of the ai_behavior byte at record
+   offset 0x34 goes to 0 and the high nibble is carried across, because bits
+   0x40 and 0x80 of that byte are independent AI flags other code reads on their
+   own.  Nothing is range checked and data_fdps_map_unit_count is not consulted,
+   so the two bounds are only correct against chapter 6's own deployment, which
+   puts 4 party records at indices 0..3 and everything else at 4..0x23; each
+   record is resolved through fdps_get_unit_record per iteration, so the array
+   base is re-read.  THE LOW BOUND IS 4 AND NOT 6: the range takes in the guest
+   hero at index 5 and pulls him out of the behaviour mode he deployed in, which
+   is the one place this handler differs from chapter 5's copy of the same loop.
+
+   There is no guard of any kind -- no one-shot latch, no turn test -- so a
+   second call deploys the wave a second time.  What makes it fire once is the
+   map file naming the slot on one unit's death script.
+
+   unit_index is the handler table's shared parameter and is ignored: it is
+   overwritten with 0 after the deployment and the cursor move and then used as
+   the twelve-frame counter, so nothing reads what came in.
+
+   Table slot 8, named by map05.dat's deployment record 7 as the {opcode 2,
+   operand 8} death script of the level-8 cavalryman it puts at unit index 0x0c
+   on tile (23, 8) in the lower right, and by nothing else in the shipped data.
+   The death-script runner is the only dispatcher that reaches it. */
+extern void fdps_chapter_06_event_deploy_wave_2(int unit_index);
+#pragma aux fdps_chapter_06_event_deploy_wave_2 "*" parm caller [];
+
 /* Chapter 7's turn-2 event: takes unit indices 4 through 8 inclusive off the
    hold-position behaviour and puts them on the default one, which paths a unit
    toward the nearest opposing unit, so the arena's champion stops holding her

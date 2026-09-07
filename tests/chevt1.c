@@ -2600,6 +2600,400 @@ static void ch04_ignores_the_unit_index_argument(void)
     }
 }
 
+/* ---- fdps_chapter_06_event_deploy_wave_2, 00037170 --------------------- */
+
+/* Chapter 6's cavalry-death ambush.
+ *
+ * It is the chapter 4 arrival path with the turn test taken away, so it is
+ * staged through the same fixture and run through the same helpers: ch03_stage
+ * for the map, the deployment table and the empty-stream text block, and
+ * ch04_run for the timer interrupt and the adapter mode the twelve frames need.
+ * The chapter 3 text block covers entry 0x0d, which is the only one this
+ * handler names, so no longer block is added.
+ *
+ * WHAT THE STAGED UNIT ARRAY HAS TO COVER: the handler rewrites the AI byte of
+ * indices 4 through 0x22 and none of it is range checked, so the block holds
+ * 0x25 records -- indices 0..3 below the range, 0x23 and 0x24 above it, and the
+ * cursor unit 0x1e inside it -- and the arrival is appended at 0x25 past all of
+ * them.  It is malloc'd for the reason the fixture's own is: a deployment
+ * reallocs it.
+ *
+ * THE FIXTURE'S OWN RECORD 2 IS TAGGED WAVE 2 AS WELL, so ch06_stage moves it
+ * to a wave nothing asks for before adding this section's three records.  What
+ * arrives has to be the record this section planted, and exactly one unit has
+ * to arrive.
+ *
+ * WHICH TEXT ENTRY THE DRAW ASKS FOR IS NOT ASSERTED, for the reason the
+ * chapter 3 and chapter 4 sections give -- fdps_draw_text takes its whole
+ * effect through pixels at the VGA aperture and keeps no state -- so PUSH 0xd
+ * at 000371ca stands on the reviewer's reading of the instruction stream.  Nor
+ * is HOW MANY frames are rendered: a frame consumes one timer tick and a test
+ * cannot count them without racing the interrupt, so twelve is a playtest
+ * contract.  What is exactly observable is whether any frame ran, because
+ * fdps_render_view_frame latches the tick counter into
+ * data_fdps_view_frame_last_tick as the last thing it does.
+ *
+ * Every case here reaches the deployment, which opens ICON.CEL and FIELD.VFS
+ * for itself, so every case skips itself without them.
+ */
+
+/* The wave the handler asks for, PUSH 0x2 at 0003717f, with the wave either
+   side of it left in the table underneath it so a handler that asked for 1 or 3
+   lands on a different tile carrying a different level.  Placement record and
+   table index are the same number, as they are for the chapter 3 and chapter 4
+   cases, and record 5 is the one whose MAP00.COD and MAP01.COD coordinates the
+   chapter 4 cases already read back. */
+#define CH06_ARRIVAL_WAVE 2
+#define CH06_WAVE2_RECORD 5
+#define CH06_WAVE1_RECORD 6
+#define CH06_WAVE3_RECORD 7
+#define CH06_SPAWN_RECORD_COUNT 8
+
+/* Where the fixture's own wave-2 record is moved to: a wave no case below asks
+   for, so it stays in the table as a record that must not arrive. */
+#define CH06_UNUSED_WAVE 9
+
+/* Which record arrived is read off its level and not off its character id, for
+   the reason the chapter 4 section gives: the twelve frames run the whole map
+   compositor and every unit on the map has to be one fdps_draw_map_unit drops,
+   which is portrait id 0x80. */
+#define CH06_ARRIVAL_CHAR_ID 0x80
+#define CH06_WAVE1_LEVEL 4
+#define CH06_WAVE2_LEVEL 5
+#define CH06_WAVE3_LEVEL 6
+
+/* Placement record 5 of MAP00.COD and of MAP01.COD.  This handler pushes
+   data_fdps_chapter_current_chapter_id at the map number, so the two files are
+   what separate it from a handler that pushed a literal. */
+#define CH06_MAP00_TILE_X 14
+#define CH06_MAP00_TILE_Y 6
+#define CH06_MAP01_TILE_X 9
+#define CH06_MAP01_TILE_Y 5
+
+/* The staged array: 0..3 are chapter 6's party slots, which the range starts
+   above, and 0x23 and 0x24 are the records an off-by-one at the top end would
+   land on. */
+#define CH06_STAGED_UNITS 0x25
+
+/* The inclusive range the merge walks, off the constants staged at 000371da
+   and 000371e1 with the compare at 0003720a being the signed inclusive JLE. */
+#define CH06_FIRST_ADVANCED 4
+#define CH06_LAST_ADVANCED 0x22
+
+/* The unit the cursor is sent to, PUSH 0x1e at 0003718f, and the tile it is
+   staged on.  Every other staged record is left at (0, 0), so a handler that
+   named any other index walks the cursor somewhere else -- or nowhere, since
+   the walk takes a zero-delta early return. */
+#define CH06_CURSOR_UNIT 0x1e
+#define CH06_CURSOR_TILE_X 4
+#define CH06_CURSOR_TILE_Y 2
+
+/* The AI byte every record is staged with and what the merge has to leave, and
+   the same pair again with both flag bits the merge must not clear set. */
+#define CH06_STAGED_AI_BYTE 0x52
+#define CH06_ADVANCED_AI_BYTE 0x50
+#define CH06_FLAGGED_AI_BYTE 0xcd
+#define CH06_FLAGGED_ADVANCED_AI_BYTE 0xc0
+
+/* Three turns the handler has to treat alike, because it never reads the turn
+   counter: the turn its chapter 4 sibling speaks on rather than reinforcing,
+   the one that sibling reinforces on, and one far past either. */
+#define CH06_SPEAK_TURN 3
+#define CH06_ARRIVAL_TURN 5
+#define CH06_LATE_TURN 20
+
+static struct fdps_unit_record *ch06_unit(int unit_index)
+{
+    return (struct fdps_unit_record *)
+           (data_fdps_map_unit_array_ptr + unit_index * CH03_UNIT_STRIDE);
+}
+
+/* Whether the handler's one range reaches an index: 4 through 0x22 inclusive. */
+static int ch06_index_is_advanced(int unit_index)
+{
+    return unit_index >= CH06_FIRST_ADVANCED && unit_index <= CH06_LAST_ADVANCED;
+}
+
+/* The chapter 3 fixture with the wave-1, wave-2 and wave-3 records added behind
+   its five, its own wave-2 record moved out of the way, a 0x25-record unit array
+   carrying the given AI byte, and the compositor given nothing to draw.  The
+   cursor is left standing on the tile of the unit the handler sends it to, so
+   the walk takes its zero-delta early return; the one case that watches the
+   cursor move puts it elsewhere itself. */
+static void ch06_stage(int battle_turn, int ai_behavior)
+{
+    int i;
+
+    ch03_stage(battle_turn);
+
+    ch03_set_spawn(CH03_WAVE2_RECORD, CH03_WAVE2_CHAR_ID, CH06_UNUSED_WAVE);
+    ch03_set_spawn(CH06_WAVE2_RECORD, CH06_ARRIVAL_CHAR_ID, CH06_ARRIVAL_WAVE);
+    ch03_set_spawn(CH06_WAVE1_RECORD, CH06_ARRIVAL_CHAR_ID,
+                   CH06_ARRIVAL_WAVE - 1);
+    ch03_set_spawn(CH06_WAVE3_RECORD, CH06_ARRIVAL_CHAR_ID,
+                   CH06_ARRIVAL_WAVE + 1);
+    ch03_spawn_at(CH06_WAVE2_RECORD)->level = (unsigned char) CH06_WAVE2_LEVEL;
+    ch03_spawn_at(CH06_WAVE1_RECORD)->level = (unsigned char) CH06_WAVE1_LEVEL;
+    ch03_spawn_at(CH06_WAVE3_RECORD)->level = (unsigned char) CH06_WAVE3_LEVEL;
+    ch03_spawn_table[CH03_SPAWN_TABLE_COUNT_OFFSET] = CH06_SPAWN_RECORD_COUNT;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *)
+        malloc((size_t) (CH06_STAGED_UNITS * CH03_UNIT_STRIDE));
+    ch03_zero_bytes(data_fdps_map_unit_array_ptr,
+                    CH06_STAGED_UNITS * CH03_UNIT_STRIDE);
+    data_fdps_map_unit_count = CH06_STAGED_UNITS;
+    for (i = 0; i < CH06_STAGED_UNITS; i++) {
+        ch06_unit(i)->ai_behavior = (unsigned char) ai_behavior;
+        ch06_unit(i)->portrait_id = (unsigned char) CH06_ARRIVAL_CHAR_ID;
+    }
+    ch06_unit(CH06_CURSOR_UNIT)->pos_x = (unsigned char) CH06_CURSOR_TILE_X;
+    ch06_unit(CH06_CURSOR_UNIT)->pos_y = (unsigned char) CH06_CURSOR_TILE_Y;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+
+    data_fdps_map_cursor_world_x = CH06_CURSOR_TILE_X * CH04_TILE_STEP;
+    data_fdps_map_cursor_world_y = CH06_CURSOR_TILE_Y * CH04_TILE_STEP;
+
+    data_fdps_view_frame_last_tick = CH04_FRAME_SENTINEL;
+}
+
+/* One call with the timer running and the adapter in the mode the frames
+   present through -- the chapter 4 section's runner, because this handler
+   renders the same twelve frames through the same routine. */
+static void ch06_run(int argument)
+{
+    ch04_set_mode(CH04_MODE_13H);
+    ch04_saved_timer = _dos_getvect(CH04_TIMER_VECTOR);
+    _dos_setvect(CH04_TIMER_VECTOR, ch04_timer_isr);
+    fdps_chapter_06_event_deploy_wave_2(argument);
+    _dos_setvect(CH04_TIMER_VECTOR, ch04_saved_timer);
+    ch04_set_mode(CH04_MODE_TEXT);
+}
+
+/* The fields the cases below read back and the stride they are indexed by.  The
+   AI byte is the one the merge addresses as byte ptr [EAX+0x34] and the stride
+   is the IMUL 0x50 inside fdps_get_unit_record. */
+static void ch06_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), CH03_UNIT_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ai_behavior), 0x34);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 1);
+}
+
+/* The wave brought on is the literal 2: the wave-2 record, table index 5, lands
+   on MAP00.COD's record 5 carrying level 5, and exactly one unit arrives.  The
+   wave-1 record underneath it and the wave-3 record above it would each carry a
+   different level and land on a different placement record's tile, so either
+   neighbour is visible twice over, and one arrival is what rules out a handler
+   that deployed more than the wave it named -- the fixture's own wave-2 record
+   having been moved aside. */
+static void ch06_deploys_wave_two(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch06_stage(CH06_ARRIVAL_TURN, CH06_STAGED_AI_BYTE);
+    ch06_run(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH06_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch06_unit(CH06_STAGED_UNITS)->level, CH06_WAVE2_LEVEL);
+    CHECK_EQ((int) ch06_unit(CH06_STAGED_UNITS)->pos_x, CH06_MAP00_TILE_X);
+    CHECK_EQ((int) ch06_unit(CH06_STAGED_UNITS)->pos_y, CH06_MAP00_TILE_Y);
+}
+
+/* The map the wave is placed under is data_fdps_chapter_current_chapter_id --
+   PUSH dword ptr [0x00069cf4] at 00037181 -- and not a literal.  The same
+   wave-2 record lands on (14, 6) with the global on 0 and on (9, 5) with it on
+   1, because those are MAP00.COD's and MAP01.COD's record 5; a handler that
+   pushed a literal would land on the same tile both times. */
+static void ch06_map_number_is_the_chapter_global(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch06_stage(CH06_ARRIVAL_TURN, CH06_STAGED_AI_BYTE);
+    data_fdps_chapter_current_chapter_id = 0;
+    ch06_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, CH06_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch06_unit(CH06_STAGED_UNITS)->pos_x, CH06_MAP00_TILE_X);
+    CHECK_EQ((int) ch06_unit(CH06_STAGED_UNITS)->pos_y, CH06_MAP00_TILE_Y);
+
+    ch06_stage(CH06_ARRIVAL_TURN, CH06_STAGED_AI_BYTE);
+    data_fdps_chapter_current_chapter_id = 1;
+    ch06_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, CH06_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch06_unit(CH06_STAGED_UNITS)->pos_x, CH06_MAP01_TILE_X);
+    CHECK_EQ((int) ch06_unit(CH06_STAGED_UNITS)->pos_y, CH06_MAP01_TILE_Y);
+}
+
+/* Exactly indices 4 through 0x22 are rewritten and every record either side of
+   the range keeps the byte it went in with.  This is the case that pins both
+   bounds: 0..3 are the party slots the low bound starts above and 0x23 and 0x24
+   are past the top of the range, so a bound one short at either end is visible.
+   THE LOW BOUND BEING 4 AND NOT 6 IS WHAT SEPARATES THIS HANDLER FROM CHAPTER
+   5'S COPY OF THE SAME LOOP: index 5, the chapter's guest hero, is inside this
+   range and outside that one. */
+static void ch06_advances_exactly_the_range(void)
+{
+    int i;
+
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch06_stage(CH06_ARRIVAL_TURN, CH06_STAGED_AI_BYTE);
+    ch06_run(0);
+
+    for (i = 0; i < CH06_STAGED_UNITS; i++) {
+        if (ch06_index_is_advanced(i)) {
+            CHECK_EQ((int) ch06_unit(i)->ai_behavior, CH06_ADVANCED_AI_BYTE);
+        } else {
+            CHECK_EQ((int) ch06_unit(i)->ai_behavior, CH06_STAGED_AI_BYTE);
+        }
+    }
+}
+
+/* The merge is a read-modify-write masked with 0xf0 and not an assignment: a
+   record carrying both AI flag bits keeps both of them and loses only the
+   behaviour code.  Writing the mode whole would leave 0 here, which is what the
+   rebuild note on the emitted function warns about, and it would change how the
+   two scorers that read bits 0x40 and 0x80 treat every unit on the map for the
+   rest of the battle. */
+static void ch06_keeps_the_high_nibble(void)
+{
+    int i;
+
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch06_stage(CH06_ARRIVAL_TURN, CH06_FLAGGED_AI_BYTE);
+    ch06_run(0);
+
+    for (i = 0; i < CH06_STAGED_UNITS; i++) {
+        if (ch06_index_is_advanced(i)) {
+            CHECK_EQ((int) ch06_unit(i)->ai_behavior,
+                     CH06_FLAGGED_ADVANCED_AI_BYTE);
+        } else {
+            CHECK_EQ((int) ch06_unit(i)->ai_behavior, CH06_FLAGGED_AI_BYTE);
+        }
+    }
+}
+
+/* The cursor is walked onto unit 0x1e and frames are composed.  The cursor is
+   put at the origin first so the walk has a real delta to cover: unit 0x1e is
+   staged at tile (4, 2), which is world pixel (96, 48), and every other staged
+   record sits at (0, 0), so a handler that named a different index would leave
+   the cursor where it started.  The frame latch losing the sentinel is what
+   says frames were composed at all; how many is a playtest contract. */
+static void ch06_parks_the_cursor_on_unit_1e(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch06_stage(CH06_ARRIVAL_TURN, CH06_STAGED_AI_BYTE);
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    ch06_run(0);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x,
+             CH06_CURSOR_TILE_X * CH04_TILE_STEP);
+    CHECK_EQ(data_fdps_map_cursor_world_y,
+             CH06_CURSOR_TILE_Y * CH04_TILE_STEP);
+    CHECK_EQ(data_fdps_view_frame_last_tick == CH04_FRAME_SENTINEL, 0);
+}
+
+/* There is no guard of any kind in the body: neither of the two latch slots the
+   rest of the family shares blocks it, and a second call deploys a second time
+   rather than being refused.  Both latches are raised before the call because
+   they are ticket 23 symbols whose starting value nothing here may assume. */
+static void ch06_has_no_one_shot_latch(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch06_stage(CH06_ARRIVAL_TURN, CH06_STAGED_AI_BYTE);
+    data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT] = 1;
+    data_fdps_map_cell_event_triggered_flags[CH03_REINFORCE_LATCH_SLOT] = 1;
+    ch06_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, CH06_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch06_unit(CH06_STAGED_UNITS)->level, CH06_WAVE2_LEVEL);
+
+    ch06_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, CH06_STAGED_UNITS + 2);
+    CHECK_EQ((int) ch06_unit(CH06_STAGED_UNITS + 1)->level, CH06_WAVE2_LEVEL);
+}
+
+/* The turn counter is never read: there is no compare against it anywhere in
+   the body, unlike the chapter 4 handler, which stops at a draw on turn 3.  The
+   turn that sibling speaks on, the turn it reinforces on and a turn far past
+   both have to deploy the same record and advance the same units. */
+static void ch06_ignores_the_turn_counter(void)
+{
+    static int turns[3] = {CH06_SPEAK_TURN, CH06_ARRIVAL_TURN, CH06_LATE_TURN};
+    int i;
+
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 3; i++) {
+        ch06_stage(turns[i], CH06_STAGED_AI_BYTE);
+        ch06_run(0);
+
+        CHECK_EQ(data_fdps_map_unit_count, CH06_STAGED_UNITS + 1);
+        CHECK_EQ((int) ch06_unit(CH06_STAGED_UNITS)->level, CH06_WAVE2_LEVEL);
+        CHECK_EQ((int) ch06_unit(CH06_FIRST_ADVANCED)->ai_behavior,
+                 CH06_ADVANCED_AI_BYTE);
+    }
+}
+
+/* The incoming argument cannot reach anything: it is overwritten with 0 at
+   00037199 and used as the frame counter, so an index the death-script runner
+   passed -- and it passes the real index of the unit that just died, unchecked
+   -- deploys the same record and advances the same units.  A handler that had
+   kept the incoming value as the counter would render a different number of
+   frames for -1 than for 7, and would still have to leave these. */
+static void ch06_ignores_the_unit_index_argument(void)
+{
+    static int arguments[2] = {7, -1};
+    int i;
+
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 2; i++) {
+        ch06_stage(CH06_ARRIVAL_TURN, CH06_STAGED_AI_BYTE);
+        ch06_run(arguments[i]);
+
+        CHECK_EQ(data_fdps_map_unit_count, CH06_STAGED_UNITS + 1);
+        CHECK_EQ((int) ch06_unit(CH06_STAGED_UNITS)->level, CH06_WAVE2_LEVEL);
+        CHECK_EQ((int) ch06_unit(CH06_LAST_ADVANCED)->ai_behavior,
+                 CH06_ADVANCED_AI_BYTE);
+        CHECK_EQ((int) ch06_unit(CH06_LAST_ADVANCED + 1)->ai_behavior,
+                 CH06_STAGED_AI_BYTE);
+    }
+}
+
 void run_chevt1_tests(void)
 {
     RUN_TEST(set_game_over_from_running);
@@ -2672,4 +3066,13 @@ void run_chevt1_tests(void)
     RUN_TEST(ch04_arrival_has_no_one_shot_latch);
     RUN_TEST(ch04_every_turn_but_three_reinforces);
     RUN_TEST(ch04_ignores_the_unit_index_argument);
+    RUN_TEST(ch06_record_shape_matches_the_offsets);
+    RUN_TEST(ch06_deploys_wave_two);
+    RUN_TEST(ch06_map_number_is_the_chapter_global);
+    RUN_TEST(ch06_advances_exactly_the_range);
+    RUN_TEST(ch06_keeps_the_high_nibble);
+    RUN_TEST(ch06_parks_the_cursor_on_unit_1e);
+    RUN_TEST(ch06_has_no_one_shot_latch);
+    RUN_TEST(ch06_ignores_the_turn_counter);
+    RUN_TEST(ch06_ignores_the_unit_index_argument);
 }
