@@ -2897,6 +2897,14 @@
       "status": "committed",
       "rounds": 1,
       "emitted_against": "0x493"
+    },
+    "00033b80": {
+      "name": "fdps_shop_buy_loop",
+      "target": "shop.c",
+      "body_size": "0x3fb",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x3fb"
     }
   }
 }

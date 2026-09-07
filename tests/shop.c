@@ -1391,6 +1391,820 @@ static void bt_window_is_not_seeded_on_entry(void)
     bt_unstage();
 }
 
+/* ---- fdps_shop_buy_loop, 00033b80 ----------------------------------------
+ *
+ * Expected values come from the assembly at 00033b80 and from nothing else:
+ * the price store MOV AX,word ptr [EAX+0x13] / AND EAX,0xffff / MOV
+ * [0x00064038],EAX at 00033cb1; the trade-in guard CMP dword ptr
+ * [EBP-0x24],-0x1 / JZ at 00033cc2 with the SECOND CALL to
+ * fdps_unit_can_equip_item behind it at 00033cd0; the want_armor choice CMP
+ * dword ptr [EBP-0x2c],0x15 / JG at 00033c84; the credit LEA
+ * EDX,[EDX+EDX*0x2] / SAR EDX,0x1f / SHL EDX,0x2 / SBB EAX,EDX / SAR EAX,0x2
+ * and the SUB dword ptr [0x00064038],EAX at 00033d83; the bag test CMP
+ * byte ptr [EBP-0x4],0x0 / JNZ at 00033d89 in FRONT of CALL
+ * fdps_unit_item_count / CMP EAX,0x8 / JZ; the balance chain CMP dword ptr
+ * [0x00064038],0x0 / JLE at 00033dd9 and CMP EAX,dword ptr [0x000643a4] / JG
+ * at 00033deb; the two purses SUB dword ptr [0x000643a4],EAX at 00033e3d and
+ * ADD dword ptr [0x000643a4],EAX at 00033ee8 behind NEG dword ptr
+ * [0x00064038] at 00033e98; the two substitution stores MOV AL,byte ptr
+ * [EAX+0x8] / INC EAX / MOV [0x00064030],EAX at 00033d19 and ADD EAX,0xc9 /
+ * MOV [0x00064034],EAX at 00033d2a; and the settled-payment block at 00033f11,
+ * whose fdps_unit_equip_slot is handed fdps_unit_item_count(target) - 1.
+ * None of it is read off the emitted C.
+ *
+ * HOW A LOOP THIS DEEP IS RUN FROM OUTSIDE.  fdps_shop_buy_loop answers
+ * nothing at all: everything it does is in the purse, in three dialogue
+ * globals and in one member's inventory record, and everything it asks is
+ * asked through two modal pickers and up to two modal prompts.  So every case
+ * below stages the sheets and tables all four of those screens draw through,
+ * places both pickers' cursors on the entries the case wants chosen, installs
+ * a timer interrupt that advances the game's clock and answers both input
+ * channels, calls, and then reads the purse, the globals and the record.
+ *
+ * THE TWO INPUT CHANNELS ARE SEPARATE AND THE INTERRUPT SERVES BOTH.  The two
+ * pickers read through fdps_read_scancode_auto_repeat, which answers from
+ * data_fdps_input_last_scancode and THROWS THE RING AWAY on every poll;
+ * fdps_prompt_two_choice reads the ring itself and flushes it once on entry
+ * (keybd.h, msgwin.h).  The handler therefore plays the picker keys into the
+ * latch exactly as tests above do, and the prompt answers into the ring -- but
+ * it may only advance the answer list when an answer was really READ, never
+ * when a picker's poll merely flushed it.  It can tell the two apart because a
+ * read moves the ring's read index and a flush moves the write index back onto
+ * it: the handler remembers the read index it pushed at, and advances only
+ * when that index has since changed.  With that one test the answer list holds
+ * one entry per prompt and needs no fillers, and the many hundreds of picker
+ * polls in between cost it nothing.
+ *
+ * WHY EVERY PICKER KEY HAS A FILLER BEHIND IT.  The auto-repeat filter reports
+ * a code because it CHANGED, so two confirms in a row need something between
+ * them; 0xff is the filter's own no-key answer and neither picker has an arm
+ * for it.  Past the end of a script the handler alternates Escape and 0xff, so
+ * a run that got away from its script cancels out of the item list and fails
+ * an assertion instead of hanging the test image.
+ *
+ * NO CASE PRESSES AN ARROW IN THE BUY-TARGET PICKER, and that is not laziness.
+ * A move that changes the visible row draws its slide out of the entry grid
+ * the PREVIOUS pass allocated, and on the first pass there is no previous one
+ * (shop.c).  Both cursors are placed before the call instead, which is what
+ * the two pickers' surviving globals are for.
+ *
+ * THE WINDOW SHEET IS A REAL PICTURE HERE AND THE OTHER SHEETS ARE NOT.
+ * fdps_village_animate_window_zoom scales sprite 0 of the village window sheet
+ * into a full 320x200 page nine times per sweep, so that one sheet is a flat
+ * 312 x 76 fill of the size the opened window is -- the shape tests/village.c
+ * proves the scaler handles.  Every other sheet staged is a skip-only RLE
+ * stream that steps its destination and writes no pixel, which keeps the item
+ * picker's deliberately overrunning down arrow (shop.c) from writing past the
+ * page it is drawn into.
+ *
+ * WHAT IS NOT ASSERTED, AND WHY.  Nothing is read back off the screen: which
+ * of the five messages was drawn, and where the 0x26-row shift put it, is
+ * fdps_draw_text's behaviour over a text block this file stages as empty
+ * entries.  What the messages are ABOUT is still pinned, because each of them
+ * stands on its own arm of the balance chain and the arms have different
+ * effects on the purse and the bag.
+ */
+
+/* Four members is one more than the buy-target picker's row of three, so a
+   cursor can be placed anywhere in the list without a slide ever being asked
+   for. */
+#define BUY_MEMBER_COUNT 4
+
+/* Chapter index below fdps_shop_select_buy_target's locked-slot boundary
+   (0x17), so every roster slot can be confirmed and the chapter decides
+   nothing else here. */
+#define BUY_CHAPTER 0x10
+
+/* The two class rows of the equipment table.  Row 0 names the two types the
+   cases offer, so a member of that class may wear either; row 1 is left at
+   0xff, which no item type is, so a member of that class may wear nothing. */
+#define BUY_CLASS_COUNT 2
+#define BUY_CLASS_EQUIPS_BOTH 0
+#define BUY_CLASS_EQUIPS_NOTHING 1
+
+/* Which roster slot carries the class that can wear nothing.  It is what makes
+   the auto-equip flag and the trade-in guard observable: both are the answer
+   of fdps_unit_can_equip_item for the member being bought for. */
+#define BUY_UNSKILLED_MEMBER 1
+#define BUY_SKILLED_MEMBER 0
+
+/* The ITEM.DAT records the cases trade in and buy.  The old weapon's price is
+   deliberately not a multiple of four -- 101 * 3 / 4 is 75.75 -- so the credit
+   pins the truncation and not just the ratio.  The old armour's credit, 750,
+   is larger than the new armour's 300 price, which is the only way to reach
+   the negate-and-pay-out arm. */
+#define BUY_ITEM_RECORDS 16
+#define BUY_NEW_WEAPON 5
+#define BUY_NEW_WEAPON_TYPE 3
+#define BUY_NEW_WEAPON_PRICE 500
+#define BUY_OLD_WEAPON 6
+#define BUY_OLD_WEAPON_TYPE 3
+#define BUY_OLD_WEAPON_PRICE 101
+#define BUY_OLD_WEAPON_CREDIT 75
+#define BUY_NEW_ARMOUR 7
+#define BUY_NEW_ARMOUR_TYPE 0x18
+#define BUY_NEW_ARMOUR_PRICE 300
+#define BUY_OLD_ARMOUR 8
+#define BUY_OLD_ARMOUR_TYPE 0x18
+#define BUY_OLD_ARMOUR_PRICE 1000
+#define BUY_OLD_ARMOUR_CREDIT 750
+#define BUY_FILLER_ITEM 9
+#define BUY_FILLER_TYPE 3
+#define BUY_FILLER_PRICE 10
+
+/* Where those ids sit in the shop's stock row, which is what the item picker's
+   cursor selects between. */
+#define BUY_SHOP 0
+#define BUY_STOCK_NEW_WEAPON 0
+#define BUY_STOCK_NEW_ARMOUR 2
+
+/* One unit record's inventory: eight two-byte entries, a flag byte and an id
+   byte each, with 0x80 for empty and 0x40 for equipped (unititem.h). */
+#define BUY_SLOTS 8
+#define BUY_SLOT_EMPTY 0x80
+#define BUY_SLOT_CARRIED 0
+#define BUY_SLOT_EQUIPPED 0x40
+
+/* The text block, sized past 0x213 -- the cannot-afford line, which is the
+   highest entry this loop asks for.  Every entry names one lone terminator, so
+   drawing any of them paints nothing and no font is needed. */
+#define BUY_TEXT_ENTRIES 0x220
+#define BUY_TEXT_TERMINATOR (-1)
+
+/* The number sheet needs four colour rows and not one: the buy-target picker's
+   entry painter stores 0, 2 and 3 into data_fdps_number_glyph_color_row before
+   its figures, and fdps_draw_number reaches the glyph's offset at
+   (row * 13 + glyph) * 4 + 0x0f (text.c), so a sheet with one row's worth of
+   table would read a stream byte as an offset. */
+#define BUY_NUM_ROWS 4
+#define BUY_NUM_GLYPHS 13
+#define BUY_NUM_SPRITES (BUY_NUM_ROWS * BUY_NUM_GLYPHS)
+#define BUY_NUM_STREAMS_AT (PICKER_CEL_TABLE_AT + BUY_NUM_SPRITES * 4)
+#define BUY_NUM_BYTES (BUY_NUM_STREAMS_AT + BUY_NUM_SPRITES * PICKER_NUM_H)
+
+/* The village window sheet: one sprite the size of the opened window, a flat
+   fill, spelled as four 64-pixel runs and one of 56 because a run carries at
+   most 64 (resource_info/cel.md).  It is the only sheet here that paints. */
+#define BUY_WIN_SPRITES 1
+#define BUY_WIN_W 0x138
+#define BUY_WIN_H 0x4c
+#define BUY_WIN_TABLE_AT 0x0f
+#define BUY_WIN_STREAM_AT (BUY_WIN_TABLE_AT + (BUY_WIN_SPRITES + 1) * 4)
+#define BUY_WIN_CMD_64 0x3f
+#define BUY_WIN_CMD_56 0x37
+#define BUY_WIN_FULL_RUNS 4
+#define BUY_WIN_ROW_BYTES ((BUY_WIN_FULL_RUNS + 1) * 2)
+#define BUY_WIN_BYTES (BUY_WIN_STREAM_AT + BUY_WIN_H * BUY_WIN_ROW_BYTES)
+#define BUY_WIN_COLOR 0x51
+
+/* The caller's own screen page, which the sweeps only ever read. */
+#define BUY_SCREEN_BYTES 0xfa00
+
+/* How many picker keys and how many prompt answers one case may script. */
+#define BUY_SCRIPT_MAX 12
+#define BUY_REPLY_MAX 4
+
+/* A value parked in the dialogue figure global before a run that must not
+   reach the store at 00033cb1. */
+#define BUY_VALUE_SENTINEL 0x5a5a
+
+static unsigned char buy_table[36] = {
+    BUY_NEW_WEAPON, BUY_OLD_WEAPON, BUY_NEW_ARMOUR, BUY_OLD_ARMOUR,
+    BUY_FILLER_ITEM, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
+};
+
+static unsigned char buy_num_cel[BUY_NUM_BYTES];
+static unsigned char buy_win_sheet[BUY_WIN_BYTES];
+static short buy_text[BUY_TEXT_ENTRIES + 1];
+static struct fdps_unit_record buy_roster[BUY_MEMBER_COUNT];
+static struct fdps_item_effect buy_items[BUY_ITEM_RECORDS];
+static struct fdps_class_equip_record buy_class_equip[BUY_CLASS_COUNT];
+static unsigned char *buy_screen_page;
+
+static unsigned char buy_keys[BUY_SCRIPT_MAX];
+static int buy_key_len;
+static int buy_key_next;
+static unsigned char buy_replies[BUY_REPLY_MAX];
+static int buy_reply_len;
+static int buy_reply_next;
+static int buy_reply_pending;
+static int buy_reply_head_at_push;
+static void (__interrupt __far *buy_saved_timer)();
+
+/* Advances the game's clock and answers both input channels.
+   The latch half is the picker script, presented only once the filter has
+   taken the code already there.  The ring half is the prompt answer list: an
+   answer is pushed whenever the ring is empty, and the list only moves on when
+   the read index has changed since the push, which is what separates a
+   prompt's read from a picker poll's flush (see the section head). */
+static void __interrupt __far buy_timer_isr(void)
+{
+    int slot;
+    unsigned char code;
+
+    ++data_fdps_timer_tick_counter;
+
+    if (data_fdps_input_key_repeat_prev_scancode
+            == (unsigned int) data_fdps_input_last_scancode) {
+        if (buy_key_next < buy_key_len) {
+            code = buy_keys[buy_key_next];
+            buy_key_next++;
+        } else if (data_fdps_input_last_scancode == PICKER_KEY_ESC) {
+            code = PICKER_KEY_NONE;
+        } else {
+            code = PICKER_KEY_ESC;
+        }
+        data_fdps_input_last_scancode = code;
+    }
+
+    if (data_fdps_input_scancode_queue_head
+            == data_fdps_input_scancode_queue_write_index) {
+        if (buy_reply_pending != 0
+            && data_fdps_input_scancode_queue_head != buy_reply_head_at_push) {
+            buy_reply_next++;
+        }
+        if (buy_reply_next < buy_reply_len) {
+            code = buy_replies[buy_reply_next];
+        } else {
+            code = PICKER_KEY_ESC;
+        }
+        slot = data_fdps_input_scancode_queue_write_index;
+        data_fdps_input_scancode_queue[slot] = code;
+        buy_reply_head_at_push = data_fdps_input_scancode_queue_head;
+        buy_reply_pending = 1;
+        slot++;
+        if (slot == SCANCODE_QUEUE_LEN) {
+            slot = 0;
+        }
+        data_fdps_input_scancode_queue_write_index = slot;
+    }
+
+    _chain_intr(buy_saved_timer);
+}
+
+/* One flat sprite of 0x138 by 0x4c behind a header that states that size, and
+   an offset table whose entries are measured from the start of the file. */
+static void buy_build_window_sheet(void)
+{
+    struct fdps_cel_header *header;
+    int row;
+    int run;
+    int at;
+
+    memset(buy_win_sheet, 0, sizeof(buy_win_sheet));
+    header = (struct fdps_cel_header *) buy_win_sheet;
+    header->magic[0] = 'C';
+    header->magic[1] = 'E';
+    header->magic[2] = 'L';
+    header->sprite_width = BUY_WIN_W;
+    header->sprite_height = BUY_WIN_H;
+    header->sprite_count = BUY_WIN_SPRITES;
+
+    at = BUY_WIN_STREAM_AT;
+    picker_u32(buy_win_sheet, BUY_WIN_TABLE_AT, (unsigned long) at);
+    picker_u32(buy_win_sheet, BUY_WIN_TABLE_AT + 4,
+               (unsigned long) BUY_WIN_BYTES);
+    for (row = 0; row < BUY_WIN_H; row++) {
+        for (run = 0; run <= BUY_WIN_FULL_RUNS; run++) {
+            if (run < BUY_WIN_FULL_RUNS) {
+                buy_win_sheet[at + row * BUY_WIN_ROW_BYTES + run * 2] =
+                    BUY_WIN_CMD_64;
+            } else {
+                buy_win_sheet[at + row * BUY_WIN_ROW_BYTES + run * 2] =
+                    BUY_WIN_CMD_56;
+            }
+            buy_win_sheet[at + row * BUY_WIN_ROW_BYTES + run * 2 + 1] =
+                BUY_WIN_COLOR;
+        }
+    }
+}
+
+/* Everything the four screens draw through, with every member's bag empty and
+   both pickers' globals left for the case to place. */
+static void buy_stage(void)
+{
+    int entry;
+    int member;
+    int slot;
+
+    memset(picker_cel, 0, sizeof(picker_cel));
+    picker_build_cel(picker_cel, PICKER_CEL_SPRITES, PICKER_CEL_W,
+                     PICKER_CEL_H, PICKER_CEL_STREAMS_AT,
+                     PICKER_CEL_SKIP_CMD);
+    memset(buy_num_cel, 0, sizeof(buy_num_cel));
+    picker_build_cel(buy_num_cel, BUY_NUM_SPRITES, PICKER_NUM_W,
+                     PICKER_NUM_H, BUY_NUM_STREAMS_AT, PICKER_NUM_SKIP_CMD);
+    bt_build_icon_cache();
+    buy_build_window_sheet();
+
+    /* No member carries character id 1, so no entry takes the buy-target
+       painter's ghosting arm and the chapter decides nothing. */
+    memset(buy_roster, 0, sizeof(buy_roster));
+    for (member = 0; member < BUY_MEMBER_COUNT; member++) {
+        buy_roster[member].char_id = (unsigned char) (member + 2);
+        if (member == BUY_UNSKILLED_MEMBER) {
+            buy_roster[member].clazz = (unsigned char) BUY_CLASS_EQUIPS_NOTHING;
+        } else {
+            buy_roster[member].clazz = (unsigned char) BUY_CLASS_EQUIPS_BOTH;
+        }
+        for (slot = 0; slot < BUY_SLOTS; slot++) {
+            buy_roster[member].inventory_slots[slot * 2] =
+                (unsigned char) BUY_SLOT_EMPTY;
+            buy_roster[member].inventory_slots[slot * 2 + 1] = 0;
+        }
+    }
+
+    memset(buy_items, 0, sizeof(buy_items));
+    buy_items[BUY_NEW_WEAPON].type = (unsigned char) BUY_NEW_WEAPON_TYPE;
+    buy_items[BUY_NEW_WEAPON].price = (unsigned short) BUY_NEW_WEAPON_PRICE;
+    buy_items[BUY_OLD_WEAPON].type = (unsigned char) BUY_OLD_WEAPON_TYPE;
+    buy_items[BUY_OLD_WEAPON].price = (unsigned short) BUY_OLD_WEAPON_PRICE;
+    buy_items[BUY_NEW_ARMOUR].type = (unsigned char) BUY_NEW_ARMOUR_TYPE;
+    buy_items[BUY_NEW_ARMOUR].price = (unsigned short) BUY_NEW_ARMOUR_PRICE;
+    buy_items[BUY_OLD_ARMOUR].type = (unsigned char) BUY_OLD_ARMOUR_TYPE;
+    buy_items[BUY_OLD_ARMOUR].price = (unsigned short) BUY_OLD_ARMOUR_PRICE;
+    buy_items[BUY_FILLER_ITEM].type = (unsigned char) BUY_FILLER_TYPE;
+    buy_items[BUY_FILLER_ITEM].price = (unsigned short) BUY_FILLER_PRICE;
+
+    memset(buy_class_equip, 0xff, sizeof(buy_class_equip));
+    buy_class_equip[BUY_CLASS_EQUIPS_BOTH].allowed_item_type[0] =
+        (unsigned char) BUY_NEW_WEAPON_TYPE;
+    buy_class_equip[BUY_CLASS_EQUIPS_BOTH].allowed_item_type[1] =
+        (unsigned char) BUY_NEW_ARMOUR_TYPE;
+
+    for (entry = 0; entry < BUY_TEXT_ENTRIES; entry++) {
+        buy_text[entry] = (short) (BUY_TEXT_ENTRIES * 2);
+    }
+    buy_text[BUY_TEXT_ENTRIES] = BUY_TEXT_TERMINATOR;
+
+    memset(picker_wav_bank, 0, sizeof(picker_wav_bank));
+
+    data_fdps_shop_stock_table_ptr = buy_table;
+    data_fdps_village_window_sheet_ptr = buy_win_sheet;
+    data_fdps_selection_bar_sheet_ptr = picker_cel;
+    data_fdps_command_sprite_sheet_ptr = picker_cel;
+    data_fdps_shadow_sprite_sheet_ptr = picker_cel;
+    data_fdps_number_glyph_sheet_ptr = buy_num_cel;
+    data_fdps_number_glyph_color_row = 0;
+    data_fdps_all_game_text_ptr = (unsigned char *) buy_text;
+    data_fdps_item_effect_table_ptr = (unsigned char *) buy_items;
+    data_fdps_class_equip_table_ptr = (unsigned char *) buy_class_equip;
+    data_fdps_cel_sprite_cache_ptr = bt_icon_cache;
+
+    /* The village phase points the map unit array at the roster block, which
+       is what lets the fdps_unit_* accessors reach the record
+       fdps_get_roster_record hands back (shop.c). */
+    data_fdps_roster_array_ptr = (unsigned char *) buy_roster;
+    data_fdps_map_unit_array_ptr = (unsigned char *) buy_roster;
+    data_fdps_roster_member_count = BUY_MEMBER_COUNT;
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = picker_wav_bank;
+    data_fdps_chapter_current_chapter_id = BUY_CHAPTER;
+
+    /* Village mode, so the prompt puts the visible page back behind itself
+       instead of recomposing a battle scene (msgwin.h), and no portrait, so
+       the sweep's unconditional release has nothing to give back. */
+    data_fdps_village_mode_flag = 1;
+    data_fdps_portrait_sprite_buf_ptr = NULL;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+
+    /* Both halves of fdps_cd_music_repeat_poll's inner guard, so the poll the
+       pickers make on every pass never reaches the drive (cdaudio.c). */
+    data_fdps_audio_bgm_enabled_flag = 0;
+    data_fdps_audio_cd_current_music_index = -1;
+}
+
+/* Back to the state a freshly started program has these in: the chapter
+   loaders and the shutdown path free most of these pointers unguarded, so a
+   case that walked away leaving one of them naming a static here would hand a
+   later test a free of storage that never came from the heap. */
+static void buy_unstage(void)
+{
+    data_fdps_shop_stock_table_ptr = NULL;
+    data_fdps_village_window_sheet_ptr = NULL;
+    data_fdps_selection_bar_sheet_ptr = NULL;
+    data_fdps_command_sprite_sheet_ptr = NULL;
+    data_fdps_shadow_sprite_sheet_ptr = NULL;
+    data_fdps_number_glyph_sheet_ptr = NULL;
+    data_fdps_all_game_text_ptr = NULL;
+    data_fdps_item_effect_table_ptr = NULL;
+    data_fdps_class_equip_table_ptr = NULL;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_roster_array_ptr = NULL;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_roster_member_count = 0;
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = NULL;
+    data_fdps_chapter_current_chapter_id = 0;
+    data_fdps_village_mode_flag = 0;
+    data_fdps_portrait_sprite_buf_ptr = NULL;
+    data_fdps_input_last_scancode = PICKER_KEY_NONE;
+    data_fdps_input_key_repeat_prev_scancode = PICKER_KEY_NONE;
+}
+
+static void buy_put(int member, int slot, int flag, int item_id)
+{
+    buy_roster[member].inventory_slots[slot * 2] = (unsigned char) flag;
+    buy_roster[member].inventory_slots[slot * 2 + 1] = (unsigned char) item_id;
+}
+
+static int buy_flag(int member, int slot)
+{
+    return (int) buy_roster[member].inventory_slots[slot * 2];
+}
+
+static int buy_id(int member, int slot)
+{
+    return (int) buy_roster[member].inventory_slots[slot * 2 + 1];
+}
+
+/* One whole visit to a shop, with the adapter in the mode the game runs it in,
+   both pickers standing where the case put them, and the timer interrupt
+   answering both channels. */
+static void buy_go(int item_cursor, int target_cursor,
+                   unsigned char *keys, int key_count,
+                   unsigned char *replies, int reply_count)
+{
+    int index;
+
+    buy_screen_page = (unsigned char *) malloc((size_t) BUY_SCREEN_BYTES);
+    CHECK_EQ(buy_screen_page != NULL, 1);
+    if (buy_screen_page == NULL) {
+        return;
+    }
+    memset(buy_screen_page, 0, (size_t) BUY_SCREEN_BYTES);
+
+    data_fdps_shop_item_picker_cursor_idx = item_cursor;
+    data_fdps_shop_item_list_scroll_offset = 0;
+    data_fdps_shop_buy_target_cursor_idx = target_cursor;
+    data_fdps_shop_buy_target_scroll_offset =
+        (target_cursor / 3) * 3;
+
+    for (index = 0; index < key_count; index++) {
+        buy_keys[index] = keys[index];
+    }
+    buy_key_len = key_count;
+    buy_key_next = 0;
+    for (index = 0; index < reply_count; index++) {
+        buy_replies[index] = replies[index];
+    }
+    buy_reply_len = reply_count;
+    buy_reply_next = 0;
+    buy_reply_pending = 0;
+    buy_reply_head_at_push = 0;
+
+    data_fdps_input_last_scancode = PICKER_KEY_NONE;
+    data_fdps_input_key_repeat_prev_scancode = PICKER_KEY_NONE;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_ui_palette_last_cycle_tick = 0;
+    data_fdps_ui_palette_cycle_phase = 0;
+    data_fdps_audio_cd_repeat_last_tick = 0;
+    data_fdps_audio_cd_repeat_tick_counter = 0;
+
+    picker_set_mode(PICKER_MODE_320X200X256);
+    buy_saved_timer = _dos_getvect(PICKER_TIMER_VECTOR);
+    _dos_setvect(PICKER_TIMER_VECTOR, buy_timer_isr);
+    fdps_shop_buy_loop(buy_screen_page, (unsigned char) BUY_SHOP);
+    _dos_setvect(PICKER_TIMER_VECTOR, buy_saved_timer);
+    picker_set_mode(PICKER_MODE_TEXT);
+
+    free(buy_screen_page);
+    buy_screen_page = NULL;
+}
+
+/* The picker script for one purchase and then a cancel out of the item list:
+   confirm the item, confirm the member, then Escape the item list.  The 0xff
+   between each pair is the filler the auto-repeat filter needs to see a
+   change. */
+static unsigned char buy_keys_one_buy[5] = {
+    PICKER_KEY_ENTER, PICKER_KEY_NONE,
+    PICKER_KEY_ENTER, PICKER_KEY_NONE,
+    PICKER_KEY_ESC
+};
+
+/* ---------------------------------------------------------------------- */
+
+/* The price the pass publishes is the offered item's own 16-bit price field,
+   and an accepted purchase charges exactly that: the store at 00033cb1 and the
+   SUB at 00033e3d are one number.  The bought item lands in the first free
+   entry and the auto-equip flag, latched from the first
+   fdps_unit_can_equip_item at 00033c4d, puts the equipped bit on it. */
+static void buy_charges_the_price_and_hands_over_the_item(void)
+{
+    unsigned char replies[1];
+
+    replies[0] = PICKER_KEY_ENTER;
+    buy_stage();
+    data_fdps_shared_party_total_gold = 1000;
+    buy_go(BUY_STOCK_NEW_WEAPON, BUY_SKILLED_MEMBER, buy_keys_one_buy, 5,
+           replies, 1);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, BUY_NEW_WEAPON_PRICE);
+    CHECK_EQ(data_fdps_shared_party_total_gold, 1000 - BUY_NEW_WEAPON_PRICE);
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 0), BUY_SLOT_EQUIPPED);
+    CHECK_EQ(buy_id(BUY_SKILLED_MEMBER, 0), BUY_NEW_WEAPON);
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 1), BUY_SLOT_EMPTY);
+    buy_unstage();
+}
+
+/* A declined prompt leaves the flag at 00033f11 clear, so not one of the four
+   inventory calls behind it runs and the purse is untouched.  The price is
+   still published, because that store is in front of the whole chain. */
+static void buy_declined_offer_moves_nothing(void)
+{
+    unsigned char replies[1];
+
+    replies[0] = PICKER_KEY_ESC;
+    buy_stage();
+    data_fdps_shared_party_total_gold = 1000;
+    buy_go(BUY_STOCK_NEW_WEAPON, BUY_SKILLED_MEMBER, buy_keys_one_buy, 5,
+           replies, 1);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, BUY_NEW_WEAPON_PRICE);
+    CHECK_EQ(data_fdps_shared_party_total_gold, 1000);
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 0), BUY_SLOT_EMPTY);
+    buy_unstage();
+}
+
+/* CMP EAX,dword ptr [0x000643a4] / JG at 00033deb refuses only when the price
+   is GREATER than the purse, so a purse of exactly the price buys and leaves
+   nothing behind. */
+static void buy_a_purse_equal_to_the_price_is_enough(void)
+{
+    unsigned char replies[1];
+
+    replies[0] = PICKER_KEY_ENTER;
+    buy_stage();
+    data_fdps_shared_party_total_gold = BUY_NEW_WEAPON_PRICE;
+    buy_go(BUY_STOCK_NEW_WEAPON, BUY_SKILLED_MEMBER, buy_keys_one_buy, 5,
+           replies, 1);
+    CHECK_EQ(data_fdps_shared_party_total_gold, 0);
+    CHECK_EQ(buy_id(BUY_SKILLED_MEMBER, 0), BUY_NEW_WEAPON);
+    buy_unstage();
+}
+
+/* One coin short takes the other side of that branch: message 0x213 is drawn
+   and NO prompt is put up at all, so the answer list is never touched and
+   nothing moves. */
+static void buy_a_purse_one_short_refuses(void)
+{
+    unsigned char replies[1];
+
+    replies[0] = PICKER_KEY_ENTER;
+    buy_stage();
+    data_fdps_shared_party_total_gold = BUY_NEW_WEAPON_PRICE - 1;
+    buy_go(BUY_STOCK_NEW_WEAPON, BUY_SKILLED_MEMBER, buy_keys_one_buy, 5,
+           replies, 1);
+    CHECK_EQ(data_fdps_shared_party_total_gold, BUY_NEW_WEAPON_PRICE - 1);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, BUY_NEW_WEAPON_PRICE);
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 0), BUY_SLOT_EMPTY);
+    buy_unstage();
+}
+
+/* The trade-in.  101 * 3 / 4 is 75 and not 76, so the balance is 425 and the
+   purse pays 425; the traded entry is dropped by fdps_unit_remove_item before
+   the bought one is added, so the bag holds one thing at the end.  The two
+   substitution globals are the offer's own arithmetic: the member's name is
+   its character id plus one and the old item's is its id plus 0xc9. */
+static void buy_trade_in_credits_three_quarters_truncated(void)
+{
+    unsigned char replies[2];
+
+    replies[0] = PICKER_KEY_ENTER;
+    replies[1] = PICKER_KEY_ENTER;
+    buy_stage();
+    data_fdps_shared_party_total_gold = 1000;
+    buy_put(BUY_SKILLED_MEMBER, 0, BUY_SLOT_EQUIPPED, BUY_OLD_WEAPON);
+    buy_go(BUY_STOCK_NEW_WEAPON, BUY_SKILLED_MEMBER, buy_keys_one_buy, 5,
+           replies, 2);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param,
+             BUY_NEW_WEAPON_PRICE - BUY_OLD_WEAPON_CREDIT);
+    CHECK_EQ(data_fdps_shared_party_total_gold,
+             1000 - (BUY_NEW_WEAPON_PRICE - BUY_OLD_WEAPON_CREDIT));
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param,
+             (int) buy_roster[BUY_SKILLED_MEMBER].char_id + 1);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, BUY_OLD_WEAPON + 0xc9);
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 0), BUY_SLOT_EQUIPPED);
+    CHECK_EQ(buy_id(BUY_SKILLED_MEMBER, 0), BUY_NEW_WEAPON);
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 1), BUY_SLOT_EMPTY);
+    buy_unstage();
+}
+
+/* Declining the trade-in leaves the balance at the full price and leaves the
+   old item in the bag: the credit is subtracted inside the accepted arm at
+   00033d66 and nowhere else.  The old weapon is still taken OFF, because
+   fdps_unit_equip_slot unequips whatever is worn in the same category
+   (unititem.h) -- that is the auto-equip's doing and not the trade-in's. */
+static void buy_declined_trade_in_leaves_the_price_alone(void)
+{
+    unsigned char replies[2];
+
+    replies[0] = PICKER_KEY_ESC;
+    replies[1] = PICKER_KEY_ENTER;
+    buy_stage();
+    data_fdps_shared_party_total_gold = 1000;
+    buy_put(BUY_SKILLED_MEMBER, 0, BUY_SLOT_EQUIPPED, BUY_OLD_WEAPON);
+    buy_go(BUY_STOCK_NEW_WEAPON, BUY_SKILLED_MEMBER, buy_keys_one_buy, 5,
+           replies, 2);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, BUY_NEW_WEAPON_PRICE);
+    CHECK_EQ(data_fdps_shared_party_total_gold, 1000 - BUY_NEW_WEAPON_PRICE);
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 0), BUY_SLOT_CARRIED);
+    CHECK_EQ(buy_id(BUY_SKILLED_MEMBER, 0), BUY_OLD_WEAPON);
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 1), BUY_SLOT_EQUIPPED);
+    CHECK_EQ(buy_id(BUY_SKILLED_MEMBER, 1), BUY_NEW_WEAPON);
+    buy_unstage();
+}
+
+/* A credit larger than the price sends the balance below zero, which NEG dword
+   ptr [0x00064038] at 00033e98 turns into what the shop pays out: 1000 * 3 / 4
+   is 750, the armour costs 300, and an accepted prompt ADDS the 450 difference
+   to the purse instead of taking anything out of it. */
+static void buy_a_credit_above_the_price_is_paid_out(void)
+{
+    unsigned char replies[2];
+
+    replies[0] = PICKER_KEY_ENTER;
+    replies[1] = PICKER_KEY_ENTER;
+    buy_stage();
+    data_fdps_shared_party_total_gold = 1000;
+    buy_put(BUY_SKILLED_MEMBER, 0, BUY_SLOT_EQUIPPED, BUY_OLD_ARMOUR);
+    buy_go(BUY_STOCK_NEW_ARMOUR, BUY_SKILLED_MEMBER, buy_keys_one_buy, 5,
+           replies, 2);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param,
+             BUY_OLD_ARMOUR_CREDIT - BUY_NEW_ARMOUR_PRICE);
+    CHECK_EQ(data_fdps_shared_party_total_gold,
+             1000 + (BUY_OLD_ARMOUR_CREDIT - BUY_NEW_ARMOUR_PRICE));
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 0), BUY_SLOT_EQUIPPED);
+    CHECK_EQ(buy_id(BUY_SKILLED_MEMBER, 0), BUY_NEW_ARMOUR);
+    buy_unstage();
+}
+
+/* want_armor is chosen from the OFFERED item's type and nothing else: a weapon
+   asks fdps_unit_find_equipped_slot for the equipped weapon, so a member
+   wearing armour and no weapon gets no offer and pays the full price.  Were
+   the test the other way round the armour would be offered, the credit would
+   be 750 and the purse would go UP rather than down. */
+static void buy_a_weapon_ignores_the_armour_being_worn(void)
+{
+    unsigned char replies[1];
+
+    replies[0] = PICKER_KEY_ENTER;
+    buy_stage();
+    data_fdps_shared_party_total_gold = 1000;
+    buy_put(BUY_SKILLED_MEMBER, 0, BUY_SLOT_EQUIPPED, BUY_OLD_ARMOUR);
+    buy_go(BUY_STOCK_NEW_WEAPON, BUY_SKILLED_MEMBER, buy_keys_one_buy, 5,
+           replies, 1);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, BUY_NEW_WEAPON_PRICE);
+    CHECK_EQ(data_fdps_shared_party_total_gold, 1000 - BUY_NEW_WEAPON_PRICE);
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 0), BUY_SLOT_EQUIPPED);
+    CHECK_EQ(buy_id(BUY_SKILLED_MEMBER, 0), BUY_OLD_ARMOUR);
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 1), BUY_SLOT_EQUIPPED);
+    CHECK_EQ(buy_id(BUY_SKILLED_MEMBER, 1), BUY_NEW_WEAPON);
+    buy_unstage();
+}
+
+/* A member already holding eight things and trading nothing in is refused with
+   0x1fa and the pass ends there: no prompt is put up and the purse is not
+   touched.  The price is still published, because the bag test is behind that
+   store. */
+static void buy_a_full_bag_refuses_without_a_trade_in(void)
+{
+    unsigned char replies[1];
+    int slot;
+
+    replies[0] = PICKER_KEY_ENTER;
+    buy_stage();
+    data_fdps_shared_party_total_gold = 1000;
+    for (slot = 0; slot < BUY_SLOTS; slot++) {
+        buy_put(BUY_SKILLED_MEMBER, slot, BUY_SLOT_CARRIED, BUY_FILLER_ITEM);
+    }
+    buy_go(BUY_STOCK_NEW_WEAPON, BUY_SKILLED_MEMBER, buy_keys_one_buy, 5,
+           replies, 1);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, BUY_NEW_WEAPON_PRICE);
+    CHECK_EQ(data_fdps_shared_party_total_gold, 1000);
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 0), BUY_SLOT_CARRIED);
+    CHECK_EQ(buy_id(BUY_SKILLED_MEMBER, 0), BUY_FILLER_ITEM);
+    CHECK_EQ(buy_id(BUY_SKILLED_MEMBER, 7), BUY_FILLER_ITEM);
+    buy_unstage();
+}
+
+/* And the same full bag DOES buy once the trade-in is accepted, because the
+   traded item leaves the bag first: CMP byte ptr [EBP-0x4],0x0 / JNZ at
+   00033d89 jumps over the count entirely.  The equipped entry is slot 0, the
+   shift packs the other seven down, and the bought item lands in the entry the
+   shift emptied -- slot 7, which is where fdps_unit_item_count - 1 points. */
+static void buy_a_full_bag_still_buys_after_a_trade_in(void)
+{
+    unsigned char replies[2];
+    int slot;
+
+    replies[0] = PICKER_KEY_ENTER;
+    replies[1] = PICKER_KEY_ENTER;
+    buy_stage();
+    data_fdps_shared_party_total_gold = 1000;
+    buy_put(BUY_SKILLED_MEMBER, 0, BUY_SLOT_EQUIPPED, BUY_OLD_WEAPON);
+    for (slot = 1; slot < BUY_SLOTS; slot++) {
+        buy_put(BUY_SKILLED_MEMBER, slot, BUY_SLOT_CARRIED, BUY_FILLER_ITEM);
+    }
+    buy_go(BUY_STOCK_NEW_WEAPON, BUY_SKILLED_MEMBER, buy_keys_one_buy, 5,
+           replies, 2);
+    CHECK_EQ(data_fdps_shared_party_total_gold,
+             1000 - (BUY_NEW_WEAPON_PRICE - BUY_OLD_WEAPON_CREDIT));
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 0), BUY_SLOT_CARRIED);
+    CHECK_EQ(buy_id(BUY_SKILLED_MEMBER, 0), BUY_FILLER_ITEM);
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 7), BUY_SLOT_EQUIPPED);
+    CHECK_EQ(buy_id(BUY_SKILLED_MEMBER, 7), BUY_NEW_WEAPON);
+    buy_unstage();
+}
+
+/* A member whose class may wear nothing gets neither half of what
+   fdps_unit_can_equip_item decides: the trade-in guard's second call refuses
+   the offer although the member IS wearing a weapon, and the auto-equip flag
+   latched from the first call leaves the bought item merely carried.  The
+   worn item is left exactly as it was. */
+static void buy_a_member_who_cannot_equip_gets_neither_half(void)
+{
+    unsigned char replies[1];
+
+    replies[0] = PICKER_KEY_ENTER;
+    buy_stage();
+    data_fdps_shared_party_total_gold = 1000;
+    buy_put(BUY_UNSKILLED_MEMBER, 0, BUY_SLOT_EQUIPPED, BUY_OLD_WEAPON);
+    buy_go(BUY_STOCK_NEW_WEAPON, BUY_UNSKILLED_MEMBER, buy_keys_one_buy, 5,
+           replies, 1);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, BUY_NEW_WEAPON_PRICE);
+    CHECK_EQ(data_fdps_shared_party_total_gold, 1000 - BUY_NEW_WEAPON_PRICE);
+    CHECK_EQ(buy_flag(BUY_UNSKILLED_MEMBER, 0), BUY_SLOT_EQUIPPED);
+    CHECK_EQ(buy_id(BUY_UNSKILLED_MEMBER, 0), BUY_OLD_WEAPON);
+    CHECK_EQ(buy_flag(BUY_UNSKILLED_MEMBER, 1), BUY_SLOT_CARRIED);
+    CHECK_EQ(buy_id(BUY_UNSKILLED_MEMBER, 1), BUY_NEW_WEAPON);
+    buy_unstage();
+}
+
+/* ONE CALL IS A WHOLE VISIT.  The loop only ends when the item picker cancels,
+   so a script that confirms twice buys twice out of one call, and the picker's
+   surviving cursor means the second purchase is the same item.  The member
+   here is the one that can wear nothing, so neither pass is offered a
+   trade-in and both charge the full price. */
+static void buy_the_loop_buys_again_until_the_list_is_cancelled(void)
+{
+    unsigned char keys[9];
+    unsigned char replies[2];
+
+    keys[0] = PICKER_KEY_ENTER;
+    keys[1] = PICKER_KEY_NONE;
+    keys[2] = PICKER_KEY_ENTER;
+    keys[3] = PICKER_KEY_NONE;
+    keys[4] = PICKER_KEY_ENTER;
+    keys[5] = PICKER_KEY_NONE;
+    keys[6] = PICKER_KEY_ENTER;
+    keys[7] = PICKER_KEY_NONE;
+    keys[8] = PICKER_KEY_ESC;
+    replies[0] = PICKER_KEY_ENTER;
+    replies[1] = PICKER_KEY_ENTER;
+    buy_stage();
+    data_fdps_shared_party_total_gold = 1200;
+    buy_go(BUY_STOCK_NEW_WEAPON, BUY_UNSKILLED_MEMBER, keys, 9, replies, 2);
+    CHECK_EQ(data_fdps_shared_party_total_gold,
+             1200 - 2 * BUY_NEW_WEAPON_PRICE);
+    CHECK_EQ(buy_flag(BUY_UNSKILLED_MEMBER, 0), BUY_SLOT_CARRIED);
+    CHECK_EQ(buy_id(BUY_UNSKILLED_MEMBER, 0), BUY_NEW_WEAPON);
+    CHECK_EQ(buy_flag(BUY_UNSKILLED_MEMBER, 1), BUY_SLOT_CARRIED);
+    CHECK_EQ(buy_id(BUY_UNSKILLED_MEMBER, 1), BUY_NEW_WEAPON);
+    CHECK_EQ(buy_flag(BUY_UNSKILLED_MEMBER, 2), BUY_SLOT_EMPTY);
+    buy_unstage();
+}
+
+/* A cancel out of the BUY-TARGET picker ends that pass alone and the item list
+   comes back: CMP dword ptr [EBP-0x30],-0x1 / JZ at 00033c3b jumps to the
+   loop's back edge and not out of it.  Everything after that test is skipped,
+   the price store included, so the figure global still holds what was parked
+   in it before the call. */
+static void buy_cancelling_the_target_ends_only_the_pass(void)
+{
+    unsigned char keys[5];
+    unsigned char replies[1];
+
+    keys[0] = PICKER_KEY_ENTER;
+    keys[1] = PICKER_KEY_NONE;
+    keys[2] = PICKER_KEY_ESC;
+    keys[3] = PICKER_KEY_NONE;
+    keys[4] = PICKER_KEY_ESC;
+    replies[0] = PICKER_KEY_ENTER;
+    buy_stage();
+    data_fdps_shared_party_total_gold = 1000;
+    data_fdps_dialog_last_action_value_param = BUY_VALUE_SENTINEL;
+    buy_go(BUY_STOCK_NEW_WEAPON, BUY_SKILLED_MEMBER, keys, 5, replies, 1);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, BUY_VALUE_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, 1000);
+    CHECK_EQ(buy_flag(BUY_SKILLED_MEMBER, 0), BUY_SLOT_EMPTY);
+    buy_unstage();
+}
+
 void run_shop_tests(void)
 {
     RUN_TEST(shop_skips_holes_between_stock);
@@ -1444,4 +2258,18 @@ void run_shop_tests(void)
     RUN_TEST(bt_locked_slot_is_still_walked_over);
     RUN_TEST(bt_cursor_survives_between_visits);
     RUN_TEST(bt_window_is_not_seeded_on_entry);
+
+    RUN_TEST(buy_charges_the_price_and_hands_over_the_item);
+    RUN_TEST(buy_declined_offer_moves_nothing);
+    RUN_TEST(buy_a_purse_equal_to_the_price_is_enough);
+    RUN_TEST(buy_a_purse_one_short_refuses);
+    RUN_TEST(buy_trade_in_credits_three_quarters_truncated);
+    RUN_TEST(buy_declined_trade_in_leaves_the_price_alone);
+    RUN_TEST(buy_a_credit_above_the_price_is_paid_out);
+    RUN_TEST(buy_a_weapon_ignores_the_armour_being_worn);
+    RUN_TEST(buy_a_full_bag_refuses_without_a_trade_in);
+    RUN_TEST(buy_a_full_bag_still_buys_after_a_trade_in);
+    RUN_TEST(buy_a_member_who_cannot_equip_gets_neither_half);
+    RUN_TEST(buy_the_loop_buys_again_until_the_list_is_cancelled);
+    RUN_TEST(buy_cancelling_the_target_ends_only_the_pass);
 }

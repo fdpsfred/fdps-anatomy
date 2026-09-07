@@ -127,4 +127,55 @@ extern int data_fdps_shop_buy_target_scroll_offset;
 extern int fdps_shop_select_buy_target(int item_id);
 #pragma aux fdps_shop_select_buy_target "*" parm caller [];
 
+/* Runs a shop's whole buying session and returns only when the player backs
+   out of the item list.  One call is one visit: the player buys item after
+   item, for any member and in any order, and nothing is handed back.
+
+   screen_page is the caller's own 320x200 8bpp page holding the shop screen
+   the menu window opens over.  It is only ever read, and only by
+   fdps_village_animate_window_zoom (village.h), which this loop calls once to
+   sweep the caller's window shut on the way in and again before every picker
+   to sweep it back open.  shop_index is 0 the item shop, 1 the weapon shop and
+   2 the secret shop and goes straight to fdps_shop_select_item.
+
+   ONE PURCHASE IS UP TO THREE MODAL SCREENS AND UP TO TWO PROMPTS: the item
+   picker, the buy-target picker, and then the trade-in offer and the buy
+   offer.  Backing out of the item picker ends the whole visit; backing out of
+   the buy-target picker ends only that purchase and the item list comes back.
+
+   THE TRADE-IN IS THE HEART OF IT.  When the member already wears gear of the
+   kind the offered item is -- weapon for item types up to 0x15 and armour for
+   everything above -- AND may equip the offered item, the shop offers to take
+   the old one in for three quarters of its own price, truncated toward zero,
+   and the balance is what the player is then charged.  A credit larger than
+   the price turns the purchase into a payout: the balance is negated and the
+   shop pays the difference into the purse.
+
+   WHAT ACTUALLY CHANGES, AND ONLY WHEN MONEY HAS MOVED.  A declined offer, a
+   price the party cannot afford and a full bag all leave the member's
+   inventory and the purse exactly as they were.  When the payment settles: the
+   traded-in slot is emptied first, the bought item goes into the first free
+   slot, it is equipped straight away if the member may wear it, and the
+   member's derived combat stats are recomputed.
+
+   A FULL BAG REFUSES THE PURCHASE ONLY WHEN THERE WAS NO TRADE-IN, because the
+   traded item leaves the bag before the bought one arrives.  A member carrying
+   eight things can still buy a replacement for what it is wearing.
+
+   WHAT IT NEEDS IN PLACE.  Everything the two pickers need (above), plus the
+   village window sheet the sweeps draw, the resident text block the five
+   messages come out of, the Shadow.cel sheet the prompt's option cells are
+   drawn from, and data_fdps_map_unit_array_ptr pointing at the roster block --
+   the member index goes to fdps_get_roster_record and to the fdps_unit_*
+   accessors unchanged, and during the village phase both reach one record.
+
+   WHAT IT LEAVES BEHIND.  data_fdps_shared_party_total_gold carries the purse,
+   and the three dialogue substitution globals (gamedata.h) hold the last
+   figure and the last two names the messages were drawn with; nothing clears
+   them on the way out.  The two pickers' cursors stay where the player left
+   them, which is where the next visit opens. */
+extern void fdps_shop_buy_loop(unsigned char *screen_page,
+                               unsigned char shop_index);
+#pragma aux fdps_shop_buy_loop "*" parm caller [];
+
 #endif
