@@ -1325,6 +1325,279 @@ static void ch08e_only_bit_zero_counts_as_out(void)
     CHECK_EQ(ch08e_bag_id(CH08E_MAGE_INDEX, 0), CH08E_REWARD_FOUR);
 }
 
+/* Chapter 9's reinforcement handler at 00037730, from here down.
+ *
+ * Its body is two calls and a return with no branch in it, so everything worth
+ * pinning is an argument: which wave the deployment asks for, where the map
+ * number comes from, what the placement flag is, and that neither call is
+ * guarded.  All four are read back through the deployment's own effect on
+ * data_fdps_map_unit_array_ptr and data_fdps_map_unit_count.
+ *
+ * The map fixture is the chapter 10 section's, reused rather than copied: it
+ * stages the resident MAP%02d.DAT deployment block, the scene layers and the
+ * tables fdps_deploy_unit reads, none of which is about a particular chapter,
+ * and both handlers reach the same fdps_deploy_wave through it.  So these
+ * cases need the same real files -- ICON.CEL and FIELD.VFS, which cannot be
+ * stood in for -- and skip themselves without them.  The coordinates they
+ * expect are MAP00.COD's and MAP01.COD's own placement records: record 0 at
+ * (18, 0), record 1 at (22, 12), and MAP01.COD's record 0 at (9, 4).
+ *
+ * WHICH TEXT ENTRY THE DRAW ASKS FOR IS NOT ASSERTED HERE, for the reason the
+ * chapter 8 sections give: fdps_draw_text takes its whole effect through
+ * pixels at the VGA aperture, keeps no state and returns a cursor this handler
+ * discards.  The entry id is a literal in the instruction stream (PUSH 0x17 at
+ * 00037769) and the reviewer's reading of it is what stands behind the emitted
+ * C.  The chapter's text block is staged as a fixture whose every entry is a
+ * lone -1 terminator, so the draw walks it, paints nothing and returns at once
+ * instead of standing a modal wait on a keyboard nothing is typing at.  What
+ * the cases do pin about the draw is that it does not stop the deployment:
+ * every one of them runs to the end of the function.
+ */
+
+/* The wave the handler asks for, PUSH 0x1 at 00037746, and the turn chapter 9
+   schedules the event on.  The two are staged apart on purpose: a handler that
+   passed the turn counter instead of the literal would deploy a different set
+   of records. */
+#define CH09_ARRIVAL_WAVE 1
+#define CH09_EVENT_TURN 15
+
+/* Enough entries for the id the draw asks for, 0x17, plus the terminator every
+   entry points at.  That is fdetxt09.txt's own entry count. */
+#define CH09_TEXT_ENTRY_COUNT 0x18
+
+/* The shared one-shot latch slot.  This handler does not use it, and that is
+   what is asserted. */
+#define CH09_LATCH_SLOT 0x10
+
+static short ch09_text_block[CH09_TEXT_ENTRY_COUNT + 1];
+
+/* The chapter 10 section's map fixture plus a text block whose every id
+   resolves to a lone terminator. */
+static void ch09_stage(int unit_count)
+{
+    int i;
+
+    ch10_stage(unit_count);
+
+    for (i = 0; i < CH09_TEXT_ENTRY_COUNT; i++) {
+        ch09_text_block[i] = (short) (CH09_TEXT_ENTRY_COUNT * 2);
+    }
+    ch09_text_block[CH09_TEXT_ENTRY_COUNT] = -1;
+    data_fdps_current_chapter_text_ptr = (unsigned char *) ch09_text_block;
+}
+
+/* The wave asked for is 1 and nothing else: three records tagged 0, 1 and 2
+   leave exactly the middle one deployed, carrying record 1's character id and
+   record 1's MAP00.COD coordinates.  A wave of 0 would bring the whole opening
+   group on a second time and a wave of 2 would bring a different record. */
+static void ch09_deploys_the_records_tagged_wave_1(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+    ch09_stage(1);
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 3;
+    ch10_set_spawn(0, 5, CH09_ARRIVAL_WAVE - 1);
+    ch10_set_spawn(1, 6, CH09_ARRIVAL_WAVE);
+    ch10_set_spawn(2, 7, CH09_ARRIVAL_WAVE + 1);
+
+    fdps_chapter_09_event_deploy_wave_1(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch10_unit(1)->char_id, 6);
+    CHECK_EQ((int) ch10_unit(1)->pos_x, 22);
+    CHECK_EQ((int) ch10_unit(1)->pos_y, 12);
+}
+
+/* The wave is the literal 1 and not the battle turn counter, which is what
+   separates this handler from chapter 3's turn-scheduled one: with the counter
+   parked on 15, the turn chapter 9 schedules this event for, the record tagged
+   1 is still the only one that comes on, and the records tagged 15 and 14 --
+   the counter and the counter less one, the two values a turn-driven handler
+   would ask for -- are left where they are. */
+static void ch09_wave_is_a_literal_and_not_the_turn_counter(void)
+{
+    int saved_turn;
+
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+    saved_turn = data_fdps_battle_turn_counter;
+
+    ch09_stage(1);
+    data_fdps_battle_turn_counter = CH09_EVENT_TURN;
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 3;
+    ch10_set_spawn(0, 5, CH09_ARRIVAL_WAVE);
+    ch10_set_spawn(1, 6, CH09_EVENT_TURN);
+    ch10_set_spawn(2, 7, CH09_EVENT_TURN - 1);
+
+    fdps_chapter_09_event_deploy_wave_1(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch10_unit(1)->char_id, 5);
+    CHECK_EQ((int) ch10_unit(1)->pos_x, 18);
+    CHECK_EQ((int) ch10_unit(1)->pos_y, 0);
+
+    data_fdps_battle_turn_counter = saved_turn;
+}
+
+/* The map the wave is deployed under is read from
+   data_fdps_chapter_current_chapter_id at the call site and is not a literal:
+   the same deployment record placed while that global says 1 lands on
+   MAP01.COD's record 0 at (9, 4) instead of MAP00.COD's (18, 0). */
+static void ch09_map_number_comes_from_the_chapter_global(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+    ch09_stage(1);
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 1;
+    ch10_set_spawn(0, 5, CH09_ARRIVAL_WAVE);
+
+    fdps_chapter_09_event_deploy_wave_1(0);
+    CHECK_EQ((int) ch10_unit(1)->pos_x, 18);
+    CHECK_EQ((int) ch10_unit(1)->pos_y, 0);
+
+    ch09_stage(1);
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 1;
+    ch10_set_spawn(0, 5, CH09_ARRIVAL_WAVE);
+    data_fdps_chapter_current_chapter_id = 1;
+
+    fdps_chapter_09_event_deploy_wave_1(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch10_unit(1)->pos_x, 9);
+    CHECK_EQ((int) ch10_unit(1)->pos_y, 4);
+}
+
+/* The placement flag is 0 -- XOR EAX,EAX / PUSH EAX at 00037743 -- so the
+   arrivals are put on the nearest free walkable tile to their placement record
+   rather than on the record's own tile.  MAP00.COD record 1 names (22, 12);
+   giving that one cell a tile id whose attribute row is terrain 5 takes it out
+   of the search and the unit lands one tile away, at (22, 13), the last of the
+   four candidates at distance 1 the row-major scan accepts.  A flag of 1 would
+   drop it on (22, 12) whatever the terrain there. */
+static void ch09_places_on_the_nearest_free_tile(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+    ch09_stage(1);
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 2;
+    ch10_set_spawn(0, 5, CH09_ARRIVAL_WAVE - 1);
+    ch10_set_spawn(1, 6, CH09_ARRIVAL_WAVE);
+    ch10_set_tile_id(22, 12, 1);
+    ch10_set_terrain(1, CH10_TERRAIN_BLOCKED);
+
+    fdps_chapter_09_event_deploy_wave_1(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch10_unit(1)->char_id, 6);
+    CHECK_EQ((int) ch10_unit(1)->pos_x, 22);
+    CHECK_EQ((int) ch10_unit(1)->pos_y, 13);
+}
+
+/* Nothing guards either call: the instruction after the argument-slot store at
+   0003773c is the XOR that builds the deployment's third argument, with no
+   compare between them.  The shared one-shot latch is put up before the call
+   and the wave still arrives, and the slot comes back holding what it held --
+   a handler that had grown a latch would have written it. */
+static void ch09_has_no_one_shot_latch(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+    ch09_stage(1);
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 1;
+    ch10_set_spawn(0, 5, CH09_ARRIVAL_WAVE);
+    data_fdps_map_cell_event_triggered_flags[CH09_LATCH_SLOT] = 1;
+
+    fdps_chapter_09_event_deploy_wave_1(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH09_LATCH_SLOT], 1);
+}
+
+/* Nothing records that the handler ran either, so a second call appends the
+   same records a second time: the wave walk only ever appends and never asks
+   whether the wave is already on the map.  That is the original's behaviour
+   and what makes the data -- one turn of one chapter naming this slot -- the
+   only thing keeping the event to one firing. */
+static void ch09_fires_again_on_every_call(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+    ch09_stage(1);
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 1;
+    ch10_set_spawn(0, 5, CH09_ARRIVAL_WAVE);
+
+    fdps_chapter_09_event_deploy_wave_1(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+
+    fdps_chapter_09_event_deploy_wave_1(0);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+
+    fdps_chapter_09_event_deploy_wave_1(0);
+    CHECK_EQ(data_fdps_map_unit_count, 4);
+}
+
+/* A wave the table does not carry is not an error: the walk matches nothing,
+   the file open and release still happen and nothing is appended.  Staged with
+   every record on wave 0, which is what would come on if the handler asked for
+   the opening wave instead of 1. */
+static void ch09_a_wave_no_record_carries_deploys_nothing(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+    ch09_stage(1);
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 3;
+    ch10_set_spawn(0, 5, 0);
+    ch10_set_spawn(1, 6, 0);
+    ch10_set_spawn(2, 7, 0);
+
+    fdps_chapter_09_event_deploy_wave_1(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 1);
+}
+
+/* The incoming argument slot is overwritten with 0 at 0003773c and never read,
+   and neither call takes anything from it, so the index the dispatcher passes
+   cannot reach the result.  The turn-event dispatcher is the only path that
+   reaches this slot and it pushes a literal 0; -1, 30000 and a real unit index
+   are the arguments an argument-driven handler would betray itself on, and
+   none of them reaches fdps_get_unit_record, which is why 30000 is safe to
+   pass.  Each call deploys the same record onto the same tile. */
+static void ch09_ignores_the_unit_index_argument(void)
+{
+    static int arguments[4] = {0, -1, 30000, 1};
+    int i;
+
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+    for (i = 0; i < 4; i++) {
+        ch09_stage(2);
+        ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] = 1;
+        ch10_set_spawn(0, 6, CH09_ARRIVAL_WAVE);
+
+        fdps_chapter_09_event_deploy_wave_1(arguments[i]);
+
+        CHECK_EQ(data_fdps_map_unit_count, 3);
+        CHECK_EQ((int) ch10_unit(2)->char_id, 6);
+        CHECK_EQ((int) ch10_unit(2)->pos_x, 18);
+        CHECK_EQ((int) ch10_unit(2)->pos_y, 0);
+    }
+}
+
 void run_chevt2_tests(void)
 {
     RUN_TEST(ch08_sends_exactly_the_guest_mage);
@@ -1362,4 +1635,12 @@ void run_chevt2_tests(void)
     RUN_TEST(ch08e_has_no_latch);
     RUN_TEST(ch08e_the_escape_count_is_an_unsigned_byte);
     RUN_TEST(ch08e_only_bit_zero_counts_as_out);
+    RUN_TEST(ch09_deploys_the_records_tagged_wave_1);
+    RUN_TEST(ch09_wave_is_a_literal_and_not_the_turn_counter);
+    RUN_TEST(ch09_map_number_comes_from_the_chapter_global);
+    RUN_TEST(ch09_places_on_the_nearest_free_tile);
+    RUN_TEST(ch09_has_no_one_shot_latch);
+    RUN_TEST(ch09_fires_again_on_every_call);
+    RUN_TEST(ch09_a_wave_no_record_carries_deploys_nothing);
+    RUN_TEST(ch09_ignores_the_unit_index_argument);
 }

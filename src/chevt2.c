@@ -333,6 +333,85 @@ void fdps_chapter_08_event_villager_escapes(int unit_index)
     }
 }
 
+/* The wave chapter 9's reinforcements carry: PUSH 0x1 at 00037746, matched
+   against byte 0x15 of each 0x1a-byte deployment record of the resident
+   MAP%02d.DAT block.  It is a literal with no arithmetic and no read of
+   data_fdps_battle_turn_counter anywhere in the body, so this handler always
+   asks for wave 1 whenever it is run.  Six of map08.dat's 31 records carry it
+   -- character ids 0x4c, 0x56 and 0x5d, two of each at level 13 and all on
+   side 0 -- against the 24 wave-0 records the map opens with. */
+#define CH09_ARRIVAL_WAVE 1
+
+/* How that wave is placed: XOR EAX,EAX / PUSH EAX at 00037743..00037745, so
+   fdps_deploy_wave passes 0 on to fdps_deploy_unit and each arrival goes on
+   the nearest free walkable tile to its placement record's coordinates rather
+   than on the coordinates themselves. */
+#define CH09_PLACE_EXACT 0
+
+/* The line spoken over the arrivals: PUSH 0x17 at 00037769, the last of the 24
+   entries of chapter 9's own FDETXT%02d.TXT block -- its 24-word offset table
+   ends at 0x742, which is that entry.  The entry opens with the portrait
+   control code -0x11 followed by 0x4c, so it is spoken by character 0x4c, one
+   of the six units the deployment on the line above has just brought on. */
+#define CH09_ARRIVAL_TEXT_ID 0x17
+
+/* 00037730.  Chapter 9's scheduled reinforcement wave: the map's six wave-1
+   enemies march on and the line announcing them is painted over them.
+
+   The frame is the family's standard Watcom four-push one with an empty local
+   area -- PUSH EBX / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB
+   ESP,0x0 at 00037730..00037736 -- so there is no local here at all and every
+   argument is computed straight into the pushes.  The two caller-cleans, ADD
+   ESP,0xc after the deployment and ADD ESP,0x1c after the draw, are this
+   function's own, and the RET at 0003777d carries no immediate, so the
+   convention is the stack one at both ends of the call.
+
+   THERE IS NO GUARD OF ANY KIND IN THE BODY: no one-shot latch, no test of
+   data_fdps_battle_turn_counter and no compare anywhere -- the instruction
+   after the argument-slot store at 0003773c is the XOR that builds the
+   deployment's third argument.  What makes the event happen once is the data:
+   map08.dat's turn-event table, the sixteen 3-byte entries
+   fdps_battle_run_turn_events walks from offset 3 of the chapter script, names
+   handler 0x0e in one entry only -- turn 0x0f, side 0 -- so a second call
+   would append the same six records a second time and nothing here would stop
+   it.
+
+   The two calls are unconditional and in this order -- CALL 0x00023830 at
+   0003774e, CALL 0x0001ff60 at 00037771 -- so the enemies are on the map
+   before the line is spoken, the opposite of chapter 3's ambush handler, which
+   speaks first.  It is also what makes the portrait in the message name a unit
+   that is already standing on the field.
+
+   THE MAP NUMBER IS THE CHAPTER GLOBAL AND NOT A LITERAL.  PUSH dword ptr
+   [0x00069cf4] at 00037748 is data_fdps_chapter_current_chapter_id, the same
+   argument the chapter 4, 6 and 10 handlers read and the opposite of the four
+   chapter 3 handlers, which push the literal 2.  The deployment records still
+   come from whichever MAP%02d.DAT is resident; what the number chooses is the
+   MAP%02d.COD coordinates the arrivals are put down at.
+
+   fdps_deploy_wave leaves nothing this body reads, and the cursor
+   fdps_draw_text hands back in EAX is discarded: the ADD ESP,0x1c at 00037776
+   is followed straight by the four POPs and the RET, with nothing in between
+   that touches EAX.  Nothing sets EAX before that RET and no dispatcher reads
+   what comes back, so the result is void.
+
+   unit_index is the handler table's shared parameter.  MOV dword ptr
+   [EBP+0x14],0x0 at 0003773c writes zero over the incoming slot before either
+   call and nothing ever reads it back, so which unit the event fired for
+   cannot reach anything this handler does; the store has no observable effect,
+   because the slot belongs to the caller's outgoing argument area and the
+   turn-event dispatcher drops it with its own stack cleanup. */
+void fdps_chapter_09_event_deploy_wave_1(int unit_index)
+{
+    unit_index = 0;
+
+    fdps_deploy_wave(data_fdps_chapter_current_chapter_id, CH09_ARRIVAL_WAVE,
+                     CH09_PLACE_EXACT);
+    fdps_draw_text(data_fdps_current_chapter_text_ptr, CH09_ARRIVAL_TEXT_ID,
+                   (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                   MESSAGE_FG_COLOR, MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+}
+
 /* The wave the ambush brings on: PUSH 0xa at 000378d9, matched against byte
    0x15 of each 0x1a-byte deployment record of the resident MAP%02d.DAT block.
    Ten of MAP09.DAT's records carry it. */

@@ -106,6 +106,49 @@ extern void fdps_chapter_08_event_send_guest_mage_to_cells(int unit_index);
 extern void fdps_chapter_08_event_villager_escapes(int unit_index);
 #pragma aux fdps_chapter_08_event_villager_escapes "*" parm caller [];
 
+/* Chapter 9's scheduled reinforcement wave: brings the map's six wave-1
+   enemies onto the battlefield and paints the line that announces them.
+
+   The body is two calls and a return, with no branch, no loop and no compare
+   in it at all.  fdps_deploy_wave (deploy.h) is asked for wave 1 with
+   place_exact 0, so the arrivals land on the nearest free walkable tile to
+   their MAP%02d.COD placement records rather than on the records' own
+   coordinates; map08.dat carries six records tagged wave 1 -- character ids
+   0x4c, 0x56 and 0x5d, two of each at level 13 -- against the 24 wave-0
+   records the map opens with.  The map number is read from
+   data_fdps_chapter_current_chapter_id (gamedata.h) at the call, not from
+   anything the handler holds.
+
+   Then text entry 0x17 of the loaded chapter's block, through fdps_draw_text
+   (text.h) straight onto the mode 13h aperture at 0xa0000, pitch 0x140, in the
+   standard message colours.  It is the last of the 24 entries of
+   fdetxt09.txt and it opens with the portrait code -0x11 naming character
+   0x4c, one of the units the deployment just brought on.  The cursor the draw
+   returns is discarded.
+
+   THE DEPLOY COMES FIRST AND THE DRAW SECOND, the opposite of chapter 3's
+   ambush handler: the enemies are on the map before the portrait names one of
+   them.
+
+   THERE IS NO LATCH AND NO TURN TEST.  Nothing in the body guards either call
+   and nothing records that it ran, so a second call appends the same six
+   records again.  What makes it happen once is the data: map08.dat's turn-event
+   table, the sixteen 3-byte entries fdps_battle_run_turn_events walks from
+   offset 3 of the chapter script, names this slot in one entry only -- turn
+   0x0f, handler 0x0e, side 0 -- so the wave arrives at the top of turn 15's
+   enemy phase and the fifteen remaining entries are the unreachable
+   00 ff ff filler.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with 0 before either call and never read, so
+   any index, in range or not, behaves the same.  The turn-event dispatcher is
+   the only path that reaches this slot in the shipped data and it passes a
+   literal 0.
+
+   Table slot 14, the entry at 000601fc. */
+extern void fdps_chapter_09_event_deploy_wave_1(int unit_index);
+#pragma aux fdps_chapter_09_event_deploy_wave_1 "*" parm caller [];
+
 /* Chapter 10's stairway ambush: brings on the ten enemy reinforcements the
    chapter's map tags as wave 10, once.
 
