@@ -59,6 +59,7 @@
 #include "cdaudio.h"
 #include "keybd.h"
 #include "palcycle.h"
+#include "shop.h"
 #include "statunit.h"
 #include "vilmenu.h"
 
@@ -155,8 +156,10 @@ static unsigned char vil_char_ids[VIL_MEMBER_COUNT] = {
    fdps_play_sfx finds no clip and starts no sample (audio.c). */
 #define VIL_WAV_BANK_BYTES 16
 
-/* How many codes one script can hold. */
-#define VIL_SCRIPT_MAX 8
+/* How many codes one script can hold.  The item screen's cases are the long
+   ones: they walk the command row to the entry they are about and then play a
+   whole submenu's own script through the same channel. */
+#define VIL_SCRIPT_MAX 16
 
 static unsigned char vil_cel[VIL_CEL_BYTES];
 static unsigned char vil_icon_cache[VIL_ICON_BYTES];
@@ -2069,6 +2072,433 @@ static void equip_the_screen_opens_on_the_member_the_picker_answered(void)
     sell_done();
 }
 
+/* ---- fdps_village_item_menu, 00035860 ------------------------------------
+ *
+ * Expected values come from the assembly at 00035860 and from nothing else:
+ * the seed MOV dword ptr [EBP-0x8],0x0 at 0003586c in front of the entry test
+ * CMP dword ptr [EBP-0x8],-0x1 / JNZ at 0003593c, so the first pass always
+ * runs; the five-dword template copied onto the frame by REP MOVSD at 00035880
+ * -- 0x24, 0x14, 0x15, 0x04, 0x10 at 00031180 -- and PUSH 0x5 at 00035960 for
+ * the row's length; the unsigned bound CMP dword ptr [EBP-0x8],0x4 / JA at
+ * 0003596e in front of JMP dword ptr CS:[EAX*4 + 0x35948], whose five entries
+ * are 00035989, 000359cf, 000359e0, 000359ee and 000359fc; the calls those arms
+ * make -- two window sweeps and fdps_draw_text on the CHAPTER text block at
+ * 000359bf, fdps_shop_buy_loop with PUSH 0x0 for the shop index at 000359cf,
+ * then fdps_village_item_sell_loop, fdps_village_item_transfer_loop and
+ * fdps_village_member_status_loop -- and the two-armed test CMP dword ptr
+ * [EBP-0x8],-0x1 / JNZ at 00035a08 whose arms both fall to the back edge JMP
+ * 0x0003593c at 00035a69.  None of it is read off the emitted C.
+ *
+ * WHAT THE CASES ARE ABOUT.  Everything this function draws is somebody else's
+ * behaviour and nothing it computes comes back as a value, so what is pinned
+ * here is the dispatch: that the answer the command row writes selects the arm
+ * the jump table selects, in that order, and that the row is reopened after
+ * every arm until the row itself is cancelled.  Each arm is told from the
+ * others by something only it leaves behind -- the shop item picker's two
+ * globals for the buy counter, the purse and a bag for the sell counter, a
+ * moved entry for the hand-over, and the member picker's surviving cursor with
+ * both dialogue slots untouched for the status browser, which is what the
+ * reprint arm and the cancel leave as well while moving no cursor at all.
+ *
+ * IT RUNS ON THE SELL COUNTER'S FIXTURE, because it reaches the sell counter:
+ * sell_stage and xfer_stage above already put up everything the four submenus
+ * draw through, and item_stage adds only what this screen needs on top -- the
+ * master palette the zoom transition uploads, the chapter text block the
+ * reprint arm draws from, and an empty shop stock row so the buy counter's
+ * picker can be opened and backed out of without a shop table.
+ *
+ * EVERY CASE NEEDS THE REAL MISC.VFS, because the backdrop is loaded by name
+ * out of it with the result untested -- a container or a member that cannot be
+ * found ends the process inside fdps_vfs_load_entry rather than failing an
+ * assertion (vfs.h).  The two cases that open an inventory list need FACE.CEL
+ * as well, for the reason the sell counter's own cases do.  Both are probed and
+ * the case skips itself rather than dereferencing what a failed load leaves.
+ *
+ * WHY THE PAGE IS NOT READ BACK.  This screen allocates its own page and frees
+ * it before returning, so there is nothing left to compare afterwards; what the
+ * cases assert about it instead is that the global it was published in no
+ * longer holds the value they parked there, which is the observable half of
+ * "it took a page of its own and published it".
+ */
+
+/* Parked in data_fdps_village_backdrop_page_ptr before every run.  It is the
+   address of a static in this file, so a run that published its own page leaves
+   the global holding something else and a run that published nothing leaves it
+   holding this. */
+static unsigned char item_page_sentinel[1];
+
+/* The master palette the zoom transition uploads over the whole DAC on each of
+   its nine steps (transit.h).  256 entries of three bytes; the contents decide
+   only what the screen looks like. */
+#define ITEM_PALETTE_BYTES 768
+
+/* The loaded chapter's text block, which is a different table from the
+   resident one and is where the reprint arm's entry 4 lives.  Sized past that
+   with every entry naming one lone terminator, so drawing it paints nothing. */
+#define ITEM_CHAPTER_TEXT_ENTRIES 0x20
+#define ITEM_CHAPTER_TEXT_TERMINATOR (-1)
+
+/* One row of the shop stock table with all twelve slots empty.  0xff is the
+   empty marker fdps_shop_collect_stock_items skips (shop.h), so the buy
+   counter's picker opens on nothing, draws no cell and no scroll arrow, and can
+   be backed out of with one key. */
+#define ITEM_SHOP_STOCK_SLOTS 12
+#define ITEM_SHOP_STOCK_EMPTY 0xff
+
+/* Parked in the shop item picker's two globals before a run.  Both are past an
+   empty stock, so the picker's entry guard puts them back to zero -- and that
+   pair of zeroes is the buy counter's fingerprint, because nothing else this
+   screen can reach touches either global. */
+#define ITEM_SHOP_CURSOR_SENTINEL 7
+#define ITEM_SHOP_SCROLL_SENTINEL 9
+
+/* The command row's five entries, which are indices into the row and not
+   sub-image ids: the answer the row writes and the jump table's five slots. */
+#define ITEM_ENTRY_TALK 0
+#define ITEM_ENTRY_BUY 1
+#define ITEM_ENTRY_SELL 2
+#define ITEM_ENTRY_TRANSFER 3
+#define ITEM_ENTRY_STATUS 4
+
+/* The container the backdrop is taken out of. */
+#define ITEM_BACKDROP_CONTAINER "MISC.VFS"
+
+static unsigned char item_palette[ITEM_PALETTE_BYTES];
+static short item_chapter_text[ITEM_CHAPTER_TEXT_ENTRIES + 1];
+static unsigned char item_shop_stock[ITEM_SHOP_STOCK_SLOTS];
+
+/* The one shipped file every case on this path needs. */
+static int item_backdrop_file_present(void)
+{
+    FILE *probe;
+
+    probe = fopen(ITEM_BACKDROP_CONTAINER, "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+    return 1;
+}
+
+/* Everything the four submenus stage, plus the three things this screen needs
+   that none of them does, plus the two shop-picker sentinels and a portrait
+   buffer for the window sweep to release.  The member picker's own two globals
+   are NOT reset -- where its cursor starts is what places the member a case is
+   about. */
+static void item_stage(void)
+{
+    int entry;
+    int slot;
+
+    xfer_stage();
+
+    /* Before the chapter that locks roster slot 3 and ghosts one member, so
+       neither rule decides anything in the pickers these cases walk. */
+    data_fdps_chapter_current_chapter_id = VIL_CHAPTER_BEFORE_LOCK;
+
+    /* A portrait id the status window refuses to draw anything for, so the
+       status browser's confirmation is a record lookup and a return. */
+    for (slot = 0; slot < VIL_MEMBER_COUNT; slot++) {
+        vil_roster[slot].portrait_id = VST_NO_WINDOW_PORTRAIT;
+    }
+
+    for (entry = 0; entry < ITEM_CHAPTER_TEXT_ENTRIES; entry++) {
+        item_chapter_text[entry] = (short) (ITEM_CHAPTER_TEXT_ENTRIES * 2);
+    }
+    item_chapter_text[ITEM_CHAPTER_TEXT_ENTRIES] =
+        ITEM_CHAPTER_TEXT_TERMINATOR;
+    data_fdps_current_chapter_text_ptr = (unsigned char *) item_chapter_text;
+
+    memset(item_palette, 0, sizeof(item_palette));
+    data_fdps_vga_main_palette_ptr = item_palette;
+
+    memset(item_shop_stock, ITEM_SHOP_STOCK_EMPTY, sizeof(item_shop_stock));
+    data_fdps_shop_stock_table_ptr = item_shop_stock;
+    data_fdps_shop_item_picker_cursor_idx = ITEM_SHOP_CURSOR_SENTINEL;
+    data_fdps_shop_item_list_scroll_offset = ITEM_SHOP_SCROLL_SENTINEL;
+
+    /* This screen owns its page, so the shared one the submenu cases allocate
+       must not be left behind for the teardown to free. */
+    sell_page = NULL;
+    data_fdps_village_backdrop_page_ptr = item_page_sentinel;
+
+    data_fdps_portrait_sprite_buf_ptr =
+        (unsigned char *) malloc((size_t) VST_PORTRAIT_BUF_BYTES);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr != NULL, 1);
+}
+
+/* One whole visit to the item screen, with the adapter in the mode the game
+   draws it in and the timer interrupt pacing the frames and answering both
+   input channels -- the latch for the command row and every picker, the ring
+   for the sell counter's yes/no prompt. */
+static void item_go(unsigned char *codes, int count,
+                    unsigned char *replies, int reply_count)
+{
+    int index;
+
+    for (index = 0; index < count; index++) {
+        vil_script[index] = codes[index];
+    }
+    vil_script_len = count;
+    vil_script_next = 0;
+
+    for (index = 0; index < reply_count; index++) {
+        sell_replies[index] = replies[index];
+    }
+    sell_reply_len = reply_count;
+    sell_reply_next = 0;
+    sell_reply_pending = 0;
+    sell_reply_head_at_push = 0;
+
+    data_fdps_input_last_scancode = VIL_KEY_NONE;
+    data_fdps_input_key_repeat_prev_scancode = VIL_KEY_NONE;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_ui_palette_last_cycle_tick = 0;
+    data_fdps_ui_palette_cycle_phase = 0;
+    data_fdps_audio_cd_repeat_last_tick = 0;
+    data_fdps_audio_cd_repeat_tick_counter = 0;
+
+    vil_set_mode(VIL_MODE_320X200X256);
+    vil_saved_timer = _dos_getvect(VIL_TIMER_VECTOR);
+    _dos_setvect(VIL_TIMER_VECTOR, sell_timer_isr);
+    fdps_village_item_menu();
+    _dos_setvect(VIL_TIMER_VECTOR, vil_saved_timer);
+    vil_set_mode(VIL_MODE_TEXT);
+}
+
+/* The published page is freed by the screen itself, so the global naming it is
+   cleared and never freed here. */
+static void item_done(void)
+{
+    data_fdps_village_backdrop_page_ptr = NULL;
+    data_fdps_current_chapter_text_ptr = NULL;
+    data_fdps_vga_main_palette_ptr = NULL;
+    data_fdps_shop_stock_table_ptr = NULL;
+    data_fdps_shop_item_picker_cursor_idx = 0;
+    data_fdps_shop_item_list_scroll_offset = 0;
+    sell_done();
+}
+
+/* Backing out of the command row is the screen's only exit, and it is reached
+   on the first pass because the answer slot is seeded with zero and the entry
+   test is against -1.  What the run leaves behind is the page: the global no
+   longer names the sentinel parked in it, so a page really was taken and
+   published, and it is not put back to null on the way out.  Nothing else ran
+   -- no picker moved, no dialogue slot was written and the shop picker's two
+   globals still hold what they were parked with.  The portrait buffer is gone
+   because the window sweep releases it unconditionally (village.h), which is
+   how a frame that really opened is told from one that was skipped. */
+static void item_a_cancel_at_the_command_row_ends_the_screen(void)
+{
+    unsigned char script[1];
+
+    if (item_backdrop_file_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_ESC;
+    vil_place(SELL_EMPTY_HANDED, 0);
+    item_stage();
+    item_go(script, 1, NULL, 0);
+
+    CHECK_EQ(data_fdps_village_backdrop_page_ptr != item_page_sentinel, 1);
+    CHECK_EQ(data_fdps_village_backdrop_page_ptr != NULL, 1);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 1);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, SELL_EMPTY_HANDED);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, SELL_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, SELL_VALUE_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SELL_START_GOLD);
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, ITEM_SHOP_CURSOR_SENTINEL);
+    item_done();
+}
+
+/* The row opens on entry 0, so a confirmation with no movement in front of it
+   takes the first jump-table slot.  That arm opens no submenu of any kind: it
+   sweeps the window shut and open again and writes one line, so every global
+   the other four arms move is still where it was parked.  A table whose first
+   slot named one of the loops would move at least one of them. */
+static void item_the_reprint_command_opens_no_submenu(void)
+{
+    unsigned char script[2];
+
+    if (item_backdrop_file_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_ESC;
+    vil_place(SELL_EMPTY_HANDED, 0);
+    item_stage();
+    item_go(script, 2, NULL, 0);
+
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, SELL_EMPTY_HANDED);
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, ITEM_SHOP_CURSOR_SENTINEL);
+    CHECK_EQ(data_fdps_shop_item_list_scroll_offset, ITEM_SHOP_SCROLL_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, SELL_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, SELL_VALUE_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SELL_START_GOLD);
+    CHECK_EQ(sell_carried(SELL_EMPTY_HANDED), 0);
+    item_done();
+}
+
+/* Three things at once, and each of them is only reachable if the one before it
+   held.  The reprint arm falls to the back edge and not out, so the row opens a
+   second time; the row's answer slot is kept, so that second row starts on
+   entry 0 again and one Left step wraps it to entry 4; and slot 4 of the jump
+   table is the status browser, which is the arm that opens the member picker
+   and writes neither dialogue slot.  The picker's surviving cursor is the
+   witness -- it can only have moved inside a picker that was really opened. */
+static void item_the_row_reopens_and_wraps_back_to_the_status_browser(void)
+{
+    unsigned char script[5];
+
+    if (item_backdrop_file_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_LEFT;
+    script[2] = VIL_KEY_ENTER;
+    script[3] = VIL_KEY_RIGHT;
+    script[4] = VIL_KEY_ESC;
+    vil_place(0, 0);
+    item_stage();
+    item_go(script, 5, NULL, 0);
+
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, 1);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, SELL_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, SELL_VALUE_SENTINEL);
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, ITEM_SHOP_CURSOR_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SELL_START_GOLD);
+    item_done();
+}
+
+/* One step right and a confirmation takes slot 1, which is the buy counter.
+   Its item picker is the only thing on this screen that touches the two shop
+   globals: opened against an empty stock row it finds the parked cursor past
+   the end and puts both back to zero, and then one Escape backs out of it and
+   ends the counter.  The member picker never runs on this path, which is what
+   separates the buy counter from the three loops that start with one. */
+static void item_the_buy_command_opens_the_shop_counter(void)
+{
+    unsigned char script[5];
+
+    if (item_backdrop_file_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_RIGHT;
+    script[1] = VIL_KEY_ENTER;
+    script[2] = VIL_KEY_ESC;
+    script[3] = VIL_KEY_NONE;
+    script[4] = VIL_KEY_ESC;
+    vil_place(SELL_EMPTY_HANDED, 0);
+    item_stage();
+    item_go(script, 5, NULL, 0);
+
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, 0);
+    CHECK_EQ(data_fdps_shop_item_list_scroll_offset, 0);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, SELL_EMPTY_HANDED);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, SELL_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, SELL_VALUE_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SELL_START_GOLD);
+    item_done();
+}
+
+/* Two steps right and a confirmation takes slot 2, and a whole sale settles
+   through it: the offer is three quarters of the listed price truncated, the
+   entry leaves the bag and the purse grows by exactly that.  No other arm of
+   this screen can move the purse, so the figure is what names the counter.  The
+   trailing Escape backs out of the command row, which is what proves the screen
+   did not end when the counter did. */
+static void item_the_sell_command_reaches_the_sell_counter(void)
+{
+    unsigned char script[12];
+    unsigned char replies[1];
+
+    if (sell_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_RIGHT;
+    script[1] = VIL_KEY_NONE;
+    script[2] = VIL_KEY_RIGHT;
+    script[3] = VIL_KEY_ENTER;
+    script[4] = VIL_KEY_NONE;
+    script[5] = VIL_KEY_ENTER;
+    script[6] = VIL_KEY_NONE;
+    script[7] = VIL_KEY_ENTER;
+    script[8] = VIL_KEY_RIGHT;
+    script[9] = VIL_KEY_ESC;
+    script[10] = VIL_KEY_NONE;
+    script[11] = VIL_KEY_ESC;
+    replies[0] = VIL_KEY_ENTER;
+
+    vil_place(SELL_SELLER, 0);
+    item_stage();
+    sell_put(SELL_SELLER, 0, SELL_SLOT_CARRIED, SELL_ITEM_SOLD);
+    item_go(script, 12, replies, 1);
+
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, SELL_ITEM_SOLD_OFFER);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param,
+             SELL_ITEM_SOLD + 0xc9);
+    CHECK_EQ(data_fdps_shared_party_total_gold,
+             SELL_START_GOLD + SELL_ITEM_SOLD_OFFER);
+    CHECK_EQ(sell_carried(SELL_SELLER), 0);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, SELL_SELLER + 1);
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, ITEM_SHOP_CURSOR_SENTINEL);
+    item_done();
+}
+
+/* Three steps right and a confirmation takes slot 3, and a whole hand-over
+   settles through it: the entry leaves the giver, arrives in the receiver's bag
+   with a zeroed flag byte, and the item's own name id stands in the second
+   dialogue slot.  No other arm of this screen moves an entry between two
+   members, so that is what names the hand-over.  The purse is untouched, which
+   is what separates it from the sell counter above. */
+static void item_the_hand_over_command_reaches_the_transfer_loop(void)
+{
+    unsigned char script[15];
+
+    if (sell_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_RIGHT;
+    script[1] = VIL_KEY_NONE;
+    script[2] = VIL_KEY_RIGHT;
+    script[3] = VIL_KEY_NONE;
+    script[4] = VIL_KEY_RIGHT;
+    script[5] = VIL_KEY_ENTER;
+    script[6] = VIL_KEY_NONE;
+    script[7] = VIL_KEY_ENTER;
+    script[8] = VIL_KEY_NONE;
+    script[9] = VIL_KEY_ENTER;
+    script[10] = VIL_KEY_RIGHT;
+    script[11] = VIL_KEY_ENTER;
+    script[12] = VIL_KEY_ESC;
+    script[13] = VIL_KEY_NONE;
+    script[14] = VIL_KEY_ESC;
+
+    vil_place(XFER_GIVER, 0);
+    item_stage();
+    sell_put(XFER_GIVER, 0, XFER_SLOT_EQUIPPED, XFER_ITEM);
+    item_go(script, 15, NULL, 0);
+
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, XFER_ITEM + 0xc9);
+    CHECK_EQ(sell_carried(XFER_GIVER), 0);
+    CHECK_EQ(sell_carried(XFER_RECEIVER), 1);
+    CHECK_EQ(vil_roster[XFER_RECEIVER].inventory_slots[0], 0);
+    CHECK_EQ(vil_roster[XFER_RECEIVER].inventory_slots[1], XFER_ITEM);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SELL_START_GOLD);
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, ITEM_SHOP_CURSOR_SENTINEL);
+    item_done();
+}
+
 void run_vilmenu_tests(void)
 {
     RUN_TEST(vil_escape_cancels);
@@ -2118,4 +2548,10 @@ void run_vilmenu_tests(void)
     RUN_TEST(equip_it_keeps_reopening_until_a_cancel);
     RUN_TEST(equip_a_carried_bag_opens_the_equip_screen);
     RUN_TEST(equip_the_screen_opens_on_the_member_the_picker_answered);
+    RUN_TEST(item_a_cancel_at_the_command_row_ends_the_screen);
+    RUN_TEST(item_the_reprint_command_opens_no_submenu);
+    RUN_TEST(item_the_row_reopens_and_wraps_back_to_the_status_browser);
+    RUN_TEST(item_the_buy_command_opens_the_shop_counter);
+    RUN_TEST(item_the_sell_command_reaches_the_sell_counter);
+    RUN_TEST(item_the_hand_over_command_reaches_the_transfer_loop);
 }

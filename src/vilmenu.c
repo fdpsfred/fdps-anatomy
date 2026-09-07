@@ -1,12 +1,13 @@
 /* vilmenu.c -- the village's party-member picker and the item loops built on
  * it.
  *
- * See vilmenu.h for what the picker is asked and what it answers.  Nothing
- * here owns a resource: the window frame, the selection bar, the command
- * sprite sheet, the walking-icon cache, the roster array and the message
- * table are all globals the chapter loader filled (gamedata.h), and the only
- * storage this file allocates is the one offscreen page a pass draws into and
- * frees again before it ends.
+ * See vilmenu.h for what the picker is asked and what it answers.  The window
+ * frame, the selection bar, the command sprite sheet, the walking-icon cache,
+ * the roster array and the message table are all globals the chapter loader
+ * filled (gamedata.h) and none of them is owned here.  Two things are
+ * allocated: the offscreen page one pass of the picker draws into and frees
+ * again before it ends, and the item screen's own backdrop page, which lives
+ * for as long as that screen is up.
  */
 #include <stdlib.h>
 #include <string.h>
@@ -17,15 +18,19 @@
 #include "blit.h"
 #include "cdaudio.h"
 #include "keybd.h"
+#include "menu.h"
 #include "msgwin.h"
 #include "palcycle.h"
+#include "shop.h"
 #include "sprite.h"
 #include "statwin.h"
 #include "table.h"
 #include "text.h"
+#include "transit.h"
 #include "unit.h"
 #include "unititem.h"
 #include "audio.h"
+#include "vfs.h"
 #include "village.h"
 #include "vilmenu.h"
 
@@ -1082,4 +1087,236 @@ void fdps_village_member_equip_loop(unsigned char *screen_page)
             }
         }
     }
+}
+
+/* ------------------------------------------------------------------
+ * fdps_village_item_menu @ 00035860
+ * ------------------------------------------------------------------ */
+
+/* The backdrop and where it is taken from, PUSH 0x60128 and PUSH 0x61fa4 at
+   00035882.  Both are plain writable literals and have to stay that way:
+   fdps_vfs_load_entry upper-cases the caller's own storage in place (vfs.h), so
+   the original's two strings read "MISC.VFS" and "ITEM.CEL" from the first call
+   onward and a copy placed in read-only storage would fault instead
+   (rebuild_info/pitfalls.md). */
+#define ITEM_SCREEN_ARCHIVE "MISC.VFS"
+#define ITEM_SCREEN_BACKDROP "Item.cel"
+
+/* The backdrop is sprite 0 of that sheet, drawn at the page's origin through
+   the opaque pass-through kernel: PUSH 0x0 five times and PUSH 0x140 for the
+   pitch at 000358b1.  A 320x200 sheet at pitch 0x140 fills the page exactly. */
+#define ITEM_BACKDROP_SPRITE 0
+#define ITEM_BACKDROP_X 0
+#define ITEM_BACKDROP_Y 0
+#define ITEM_BACKDROP_BLIT_OPERAND 0
+#define ITEM_BACKDROP_BLIT_MODE 0
+
+/* The point the opening and closing transitions are magnified about, PUSH 0x9f
+   and PUSH 0x63 at 000358e2 and 00035a71: the screen centre, so this screen
+   gets a straight pull-back and not the swing the signboard menu gets
+   (transit.h). */
+#define ITEM_TRANSITION_CENTER_X 0x9f
+#define ITEM_TRANSITION_CENTER_Y 0x63
+
+/* fdps_transition_zoom's direction byte, which is read as "non-zero pulls the
+   picture back" -- MOV EAX,0x1 at 000358dc on the way in, XOR EAX,EAX at
+   00035a6e on the way out.  The closing one leaves the aperture cleared. */
+#define TRANSITION_ZOOM_OUT 1
+#define TRANSITION_ZOOM_IN 0
+
+/* Where this screen's two messages are written: 0xaa3d4, column 20 and row 131
+   of the mode 13h screen, inside the window frame the zoom has just opened; and
+   where the gold readout goes: 0xa8208, column 8 and row 104.  The colour trio
+   is the standard one.  All five are this function's own literals -- PUSH
+   0xaa3d4 at 00035924, 000359b8 and 00035a3f, PUSH 0xa8208 at 00035909 and
+   00035a5c, PUSH 0xd0 / PUSH 0x0 / PUSH 0x6d in front of each message -- and
+   are stated again here rather than borrowed from the counters above.  Both
+   offsets sit on VGA_SCREEN_BASE for the reason that base is a literal: they
+   are positions on the adapter and not the addresses of anything the linker
+   places. */
+#define ITEM_MESSAGE_SCREEN_AT 0xa3d4
+#define ITEM_GOLD_READOUT_SCREEN_AT 0x8208
+#define ITEM_TEXT_FG_COLOR 0xd0
+#define ITEM_TEXT_BG_COLOR 0
+#define ITEM_TEXT_OUTLINE_COLOR 0x6d
+
+/* The two entries of the resident text block this screen draws, PUSH 0x1f4 at
+   00035929 and PUSH 0x1f5 at 00035a44.  The first goes up once when the screen
+   opens; the second replaces it after every command that was not the cancel.
+   Neither is drawn anywhere else in the image. */
+#define ITEM_OPENING_TEXT_ID 0x1f4
+#define ITEM_AFTER_COMMAND_TEXT_ID 0x1f5
+
+/* And the entry of the LOADED CHAPTER's own text block that the first command
+   reprints, PUSH 0x4 at 000359bd in front of data_fdps_current_chapter_text_ptr
+   rather than the resident table.  The five village screens take one entry each
+   out of that block and they are consecutive: 4 here, 5 in fdps_run_weapon_shop
+   at 0003612d, 6 in fdps_run_bar_shop at 00035e1d, 7 in fdps_run_church_screen
+   at 00035bf5 and 8 in fdps_run_secret_menu at 00036371. */
+#define ITEM_SCREEN_CHAPTER_TEXT_ID 4
+
+/* The row of commands: how many entries it has, PUSH 0x5 at 00035960, and the
+   Command.cel sub-image id of each, which is the five-dword template the
+   original copies onto the frame with REP MOVSD at 00035880 -- an initialised
+   automatic array, not a global, and with no other reader.  The order is the
+   order the row draws them, left to right. */
+#define ITEM_COMMAND_COUNT 5
+#define ITEM_ICON_TALK 0x24
+#define ITEM_ICON_BUY 0x14
+#define ITEM_ICON_SELL 0x15
+#define ITEM_ICON_TRANSFER 0x04
+#define ITEM_ICON_STATUS 0x10
+
+/* The answer the row hands back, which is an index into that table.  The five
+   arms are the five entries of the CS-relative jump table at 00035948, in this
+   order. */
+#define ITEM_COMMAND_TALK 0
+#define ITEM_COMMAND_BUY 1
+#define ITEM_COMMAND_SELL 2
+#define ITEM_COMMAND_TRANSFER 3
+#define ITEM_COMMAND_STATUS 4
+
+/* And what the row writes into it when the player backs out, which is the
+   loop's only exit (menu.h). */
+#define ITEM_COMMAND_CANCELLED (-1)
+
+/* Which shop table the buy counter is opened against, XOR EAX,EAX / PUSH EAX at
+   000359cf.  It is a byte argument and the item screen is shop 0. */
+#define ITEM_SHOP_INDEX 0
+
+/* 00035860.  No arguments and no answer: the one call site, in
+   fdps_run_village_phase at 00031473, pushes nothing and follows the CALL with
+   a JMP rather than a stack adjustment, nothing above EBP is read, EAX is not
+   set before the epilogue and the RET carries no immediate.
+
+   The control flow is one loop with a five-way switch and one two-armed test in
+   it.  The entry test CMP dword ptr [EBP-0x8],-0x1 / JNZ at 0003593c is the top
+   of the loop and the JMP at 00035a69 is its back edge, so this is a while
+   whose condition is checked before the first pass -- which is why the answer
+   slot is seeded with zero at 0003586c rather than with a command: zero is
+   simply a value that is not -1.  The switch is CMP dword ptr [EBP-0x8],0x4 /
+   JA at 0003596e in front of JMP dword ptr CS:[EAX*4 + 0x35948], and the bound
+   is UNSIGNED, which is how the cancel's -1 falls past all five arms and lands
+   on the same address a taken arm falls to.  Every arm reaches the two-armed
+   test at 00035a08 and that test's arms both reach the back edge, so backing
+   out of the icon row is the only way to the epilogue.
+
+   THE TWO OPENING DRAWS ARE IN THE OTHER ORDER FROM THE TWO CLOSING ONES.  On
+   the way in the gold readout goes down first and the message second (00035904
+   then 00035916); after a command it is the message first and the readout
+   second (00035a31 then 00035a57).  They do not overlap -- row 104 against row
+   131 -- so the order is not load-bearing, but it is what the assembly does and
+   there is nothing to be gained by tidying it.
+
+   THE TALK ARM CLOSES THE WINDOW BEFORE IT REOPENS IT.  MOV EAX,0x1 at 00035989
+   then XOR EAX,EAX at 0003599b: the frame is swept shut and open again, which
+   is what clears the icon row's own painting off the frame before the line is
+   written into it.  The arm then falls into the same test every other arm does,
+   so its answer is still 0 and the window is opened a second time and the
+   resident message drawn over the chapter line it just put up.
+
+   The one value used after a CALL is fdps_vfs_load_entry's EAX, stored to
+   [EBP-0x4] at 00035896 and handed to the blit and then to free.  malloc's EAX
+   is stored to [EBP-0xc] at 000358a6 and copied to the global from there --
+   MOV EAX,[EBP-0xc] / MOV [0x00063fb4],EAX at 000358a9, so the page is the
+   local's value and not a second read of the global.  Nothing else is read:
+   fdps_menu_command_icon_select_loop's answer comes back through the pointer
+   and its EAX is dropped (ADD ESP,0xc at 0003596b with no use of it), and the
+   blit, the two transitions, the zooms, the readout, fdps_draw_text and the
+   four submenus are each followed straight by their stack cleanup.
+
+   NOTHING IS CHECKED.  The load is not tested -- a container or a member that
+   cannot be found ends the process inside fdps_vfs_load_entry (vfs.h) -- and
+   neither is malloc's answer, which is written to the global and then blitted
+   into. */
+void fdps_village_item_menu(void)
+{
+    /* The unpacked "Item.cel" sheet, alive only long enough to be drawn into
+       the page. */
+    unsigned char *backdrop_cel;
+    /* Which command the icon row last came back on, and the screen's only
+       exit: -1 is the row's cancel and nothing else stops this.  It is kept
+       across passes, so the row reopens on the command it was last used
+       from. */
+    int selected_command = 0;
+    /* This screen's own 320x200 page, published as the village backdrop for as
+       long as the screen is up. */
+    unsigned char *screen_page;
+    /* The row's five Command.cel sub-image ids, left to right. */
+    int command_icon_ids[ITEM_COMMAND_COUNT] = {
+        ITEM_ICON_TALK, ITEM_ICON_BUY, ITEM_ICON_SELL,
+        ITEM_ICON_TRANSFER, ITEM_ICON_STATUS
+    };
+
+    backdrop_cel = (unsigned char *) fdps_vfs_load_entry(ITEM_SCREEN_ARCHIVE,
+                                                         ITEM_SCREEN_BACKDROP);
+    screen_page = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+    data_fdps_village_backdrop_page_ptr = screen_page;
+    fdps_cel_blit_sprite(backdrop_cel, ITEM_BACKDROP_SPRITE, screen_page,
+                         VGA_SCREEN_PITCH, ITEM_BACKDROP_X, ITEM_BACKDROP_Y,
+                         ITEM_BACKDROP_BLIT_OPERAND, ITEM_BACKDROP_BLIT_MODE);
+    free(backdrop_cel);
+
+    fdps_transition_zoom(screen_page, ITEM_TRANSITION_CENTER_X,
+                         ITEM_TRANSITION_CENTER_Y, TRANSITION_ZOOM_OUT);
+    fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_OPEN);
+    fdps_draw_party_gold((unsigned char *) (VGA_SCREEN_BASE
+                                            + ITEM_GOLD_READOUT_SCREEN_AT),
+                         VGA_SCREEN_PITCH);
+    fdps_draw_text(data_fdps_all_game_text_ptr, ITEM_OPENING_TEXT_ID,
+                   (unsigned char *) (VGA_SCREEN_BASE
+                                      + ITEM_MESSAGE_SCREEN_AT),
+                   VGA_SCREEN_PITCH, ITEM_TEXT_FG_COLOR, ITEM_TEXT_BG_COLOR,
+                   ITEM_TEXT_OUTLINE_COLOR);
+
+    while (selected_command != ITEM_COMMAND_CANCELLED) {
+        fdps_menu_command_icon_select_loop(command_icon_ids,
+                                           ITEM_COMMAND_COUNT,
+                                           &selected_command);
+
+        switch (selected_command) {
+        case ITEM_COMMAND_TALK:
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_OPEN);
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           ITEM_SCREEN_CHAPTER_TEXT_ID,
+                           (unsigned char *) (VGA_SCREEN_BASE
+                                              + ITEM_MESSAGE_SCREEN_AT),
+                           VGA_SCREEN_PITCH, ITEM_TEXT_FG_COLOR,
+                           ITEM_TEXT_BG_COLOR, ITEM_TEXT_OUTLINE_COLOR);
+            break;
+        case ITEM_COMMAND_BUY:
+            fdps_shop_buy_loop(screen_page, ITEM_SHOP_INDEX);
+            break;
+        case ITEM_COMMAND_SELL:
+            fdps_village_item_sell_loop(screen_page);
+            break;
+        case ITEM_COMMAND_TRANSFER:
+            fdps_village_item_transfer_loop(screen_page);
+            break;
+        case ITEM_COMMAND_STATUS:
+            fdps_village_member_status_loop(screen_page);
+            break;
+        }
+
+        if (selected_command == ITEM_COMMAND_CANCELLED) {
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+        } else {
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_OPEN);
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           ITEM_AFTER_COMMAND_TEXT_ID,
+                           (unsigned char *) (VGA_SCREEN_BASE
+                                              + ITEM_MESSAGE_SCREEN_AT),
+                           VGA_SCREEN_PITCH, ITEM_TEXT_FG_COLOR,
+                           ITEM_TEXT_BG_COLOR, ITEM_TEXT_OUTLINE_COLOR);
+            fdps_draw_party_gold((unsigned char *)
+                                     (VGA_SCREEN_BASE
+                                      + ITEM_GOLD_READOUT_SCREEN_AT),
+                                 VGA_SCREEN_PITCH);
+        }
+    }
+
+    fdps_transition_zoom(screen_page, ITEM_TRANSITION_CENTER_X,
+                         ITEM_TRANSITION_CENTER_Y, TRANSITION_ZOOM_IN);
+    free(screen_page);
 }

@@ -2961,6 +2961,14 @@
       "status": "committed",
       "emitted_against": "0x667",
       "rounds": 1
+    },
+    "00035860": {
+      "name": "fdps_village_item_menu",
+      "target": "vilmenu.c",
+      "body_size": "0x222",
+      "status": "committed",
+      "emitted_against": "0x222",
+      "rounds": 0
     }
   }
 }
