@@ -250,7 +250,7 @@
 0002cc20 | 0xb0 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_blit_cursor_tile(int map_x, int map_y, int sprite_index, void * dest)
 0002ccd0 | 0xce | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | int __cdecl fdps_unit_select_status_icon(int unit_index, int cycle)
 0002cda0 | 0x464 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_draw_map_unit(int unit_index, int dest_base_offset, uchar flag)
-0002d210 | 0x25 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,shared_helper,subsys_battle | void * __cdecl fdps_get_unit_record(int index)
+0002d210 | 0x25 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,shared_helper,subsys_battle | fdps_unit_record * __cdecl fdps_get_unit_record(int index)
 0002d240 | 0x89 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_draw_map_units(int dest_base_offset, uchar flag)
 0002d2d0 | 0x83 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | void __cdecl fdps_animate_move_path(int unit_index, uchar * path, int step_count)
 0002d360 | 0x11e | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_walk_step_down(int unit_index)

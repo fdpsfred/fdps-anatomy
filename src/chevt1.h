@@ -133,6 +133,46 @@ extern void fdps_chapter_event_set_game_over(int unit_index);
 extern void fdps_chapter_02_event_enemies_advance(int unit_index);
 #pragma aux fdps_chapter_02_event_enemies_advance "*" parm caller [];
 
+/* Chapter 3's tile-triggered reinforcement: brings on the four enemies map 2
+   tags as wave 14, once, and speaks a line of the chapter's own text as they
+   arrive.
+
+   It fires only while both of two conditions hold: its one-shot latch, element
+   0x11 of data_fdps_map_cell_event_triggered_flags (gamedata.h), is still 0,
+   and the record unit_index names is not on side 0.  The side test is a plain
+   test against 0 over the whole unsigned byte, and side 0 is the enemy, 1 the
+   guest and 2 the player's roster -- so what it keeps out is an enemy stopping
+   on the trigger tile, while the player's units and the guests spring it
+   alike.  The record is resolved through fdps_get_unit_record (unit.h) before
+   either test and is not range checked, so an index outside the live unit array
+   reads whatever lies at that stride; the latch is tested first, so a refused
+   call never dereferences it.
+
+   When it fires it puts the latch up first, then draws text entry 0x16 through
+   fdps_draw_text (text.h) straight onto the mode 13h aperture, then calls
+   fdps_deploy_wave (deploy.h) with map number 2, wave 14 and place_exact 0 --
+   so the line is on screen before the enemies appear, and they land on the
+   nearest free walkable tile to their placement records rather than on the
+   records' own coordinates.  The map number is the literal 2 and not the
+   chapter global the chapter 10, 17 and 18 handlers read there.
+
+   The latch slot is 0x11 and not the 0x10 the rest of the family shares,
+   because map02.dat names two handlers at once -- cell event code 1 reaches the
+   ambush above and code 2 reaches this one -- so the two are live together and
+   one shared byte would let whichever fired first suppress the other.  Being
+   inside the flag array is what makes the latch survive a save and what gets it
+   cleared when the next chapter starts; neither survives rewriting it as a
+   function-local static.
+
+   Table slot 4, named by MAP02.DAT's cell event code 2 with trigger kind 0 and
+   by no other shipped map, which is what makes this chapter 3.  Kind 0 is the
+   occasion a unit finishes stepping onto the cell during movement
+   (maptile.h), so the dispatchers that reach it are the ones that pass a real
+   unit index; the turn-event runner, which passes a constant 0, does not name
+   this slot in the shipped data. */
+extern void fdps_chapter_03_event_deploy_wave_14(int unit_index);
+#pragma aux fdps_chapter_03_event_deploy_wave_14 "*" parm caller [];
+
 /* Chapter 5's ambush: takes unit indices 6 through 0x22 inclusive off the
    hold-position behaviour the map deploys them in and puts them on the default
    one, which paths a unit toward the nearest opposing unit, so the whole

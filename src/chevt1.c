@@ -367,6 +367,104 @@ void fdps_chapter_02_event_enemies_advance(int unit_index)
     }
 }
 
+/* The slot of data_fdps_map_cell_event_triggered_flags (gamedata.h) the
+   handler below latches: byte ptr [0x000640e9], element 0x11 of the same
+   32-entry array based at 0x000640d8, one past the slot every other one-shot
+   handler of this family shares.
+
+   It has to be a different slot, and this is the one place in the family where
+   that matters: map02.dat's tile-event table names two handlers at once --
+   cell event code 1 goes to table slot 1, chapter 3's ambush above, and code 2
+   to table slot 4, the handler below -- so the two events are live on the same
+   map at the same time and a shared latch would let whichever fired first
+   suppress the other.  Codes 0 to 15 are all the shipped M%02d.DTL event
+   planes reach, so 0x11 is as unreachable by a cell as 0x10 is.
+
+   Everything else about it is the shared slot's story: fdps_chapter_state_reset
+   memsets the whole array when a chapter starts, and the save and load paths
+   move all 0x20 bytes to and from the slot image, so the latch is cleared
+   between chapters and carried across a save.  The chapter 8, 19, 21, 24 and
+   25 handlers name this same byte for their own purposes. */
+#define CHAPTER_EVENT_SECOND_ONE_SHOT_SLOT 0x11
+
+/* The line the tile-triggered reinforcement speaks: PUSH 0x16 at 00036ee9, one
+   entry past the 0x13, 0x14 and 0x15 the two handlers above draw out of the
+   same FDETXT%02d.TXT block. */
+#define CH03_REINFORCE_TEXT_ID 0x16
+
+/* The wave it brings on: PUSH 0xe at 00036efc, matched against byte 0x15 of
+   each 0x1a-byte deployment record of the resident MAP%02d.DAT block.  Four of
+   map02.dat's eighty records carry it -- table indices 20 to 23, all on side 0
+   and all character id 71 at level 6 -- so this is four enemy units. */
+#define CH03_REINFORCE_WAVE 0xe
+
+/* 00036ea0.  Chapter 3's tile-triggered reinforcement: the first unit that is
+   not on side 0 to step onto the map's second trigger region brings on the four
+   wave-14 enemies, and the chapter speaks a line as they arrive.
+
+   The frame is the family's four-push one, but with a local this time -- SUB
+   ESP,0x4 at 00036ea6 -- because the record pointer has to survive the two
+   compares.  The two caller-cleans, ADD ESP,0x1c after the draw and ADD ESP,0xc
+   after the deployment, are this function's own, as is the ADD ESP,0x4 after
+   the record lookup, so the convention is the stack one at both ends.
+
+   fdps_get_unit_record is called first and unconditionally -- PUSH dword ptr
+   [EBP+0x14] / CALL 0x0002d210 at 00036eac, the result stored to [EBP-0x4] at
+   00036eb8 -- so the lookup happens even on a call the latch is going to
+   refuse.  It is the only value this function takes off a CALL, and it is read
+   for one byte only, the side at record+6.
+
+   The two tests are the JNZ at 00036ec2 over the latch and the JNZ at 00036ecb
+   over that byte, and both paths that fail land on the same epilogue, which is
+   the short circuit written here: a non-zero latch means the side byte is
+   never loaded, so a stale record pointer cannot be dereferenced on a refused
+   call.  The side test is CMP byte ptr [EAX+0x6],0x0 / JNZ, a plain test
+   against 0 over the whole unsigned byte and not a sign test.  Side 0 is the
+   enemy, 1 the guest and 2 the player's roster, so what it keeps out is an
+   enemy walking over the trigger tile.
+
+   The latch is raised at 00036ecf, before either call rather than after the
+   deployment, so a handler re-entered from inside either call could not run the
+   body twice; it is tested against 0 rather than against 1, so any non-zero
+   value in the slot blocks the body.
+
+   Past the guard both calls are unconditional and in this order -- CALL
+   0x0001ff60 at 00036ef1, CALL 0x00023830 at 00036f00 -- so the line is on
+   screen before the enemies appear.
+
+   The map number handed to fdps_deploy_wave is the literal 2 pushed at
+   00036efe and not data_fdps_chapter_current_chapter_id, which the chapter 10,
+   17 and 18 handlers read at the same argument, so the arrivals take map 2's
+   MAP02.COD coordinates whatever chapter is loaded.  The placement flag is the
+   zeroed EAX pushed at 00036ef9, so each unit goes on the nearest free walkable
+   tile to its placement record rather than on the record's own tile.
+
+   fdps_draw_text hands back a cursor in EAX and this handler discards it: the
+   XOR EAX,EAX at 00036ef9 overwrites the register to build the deployment's
+   third argument and nothing between the ADD ESP,0x1c and that XOR reads it.
+   Nothing sets EAX between the second CALL's return and the RET at 00036f0e,
+   and no dispatcher reads what comes back, so the result is void. */
+void fdps_chapter_03_event_deploy_wave_14(int unit_index)
+{
+    struct fdps_unit_record *triggering_unit;
+
+    triggering_unit = fdps_get_unit_record(unit_index);
+
+    if ((data_fdps_map_cell_event_triggered_flags[
+             CHAPTER_EVENT_SECOND_ONE_SHOT_SLOT] == 0) &&
+        (triggering_unit->side != 0)) {
+        data_fdps_map_cell_event_triggered_flags[
+            CHAPTER_EVENT_SECOND_ONE_SHOT_SLOT] = 1;
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH03_REINFORCE_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_deploy_wave(CH03_PLACEMENT_MAP_NO, CH03_REINFORCE_WAVE,
+                         CH03_PLACE_EXACT);
+    }
+}
+
 /* 000370e0.  Chapter 5's ambush: every unit the map has deployed beyond the
    player's own five and the guest hero stops holding position and starts
    advancing, so the imperial army attacks all at once.

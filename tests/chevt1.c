@@ -42,6 +42,12 @@
  * its own note: its payload is a call into fdps_deploy_wave, which opens
  * ICON.CEL and FIELD.VFS for itself, so the cases need those files and skip
  * themselves without them.
+ *
+ * The chapter 3 handler at 00036ea0 is the only one of the family that reads
+ * the unit its argument names, so its cases stage two units with a side byte
+ * each and call with the index of each in turn; everything else about its
+ * staging is the same fixture, and its latch is element 0x11 rather than the
+ * 0x10 the rest of the family shares.
  */
 #include <stddef.h>
 #include <stdio.h>
@@ -788,13 +794,14 @@ static void ch07_advance_ignores_the_unit_index_argument(void)
 #define CH03_WAVE_FF_CHAR_ID 10
 #define CH03_SPAWN_RECORD_COUNT 5
 
-/* The chapter text block the three draws are pointed at.  0x16 entries covers
-   every id the handler names -- 0x13, 0x14 and 0x15 -- and every one of them
-   holds the same offset, so whichever entry a draw resolves it lands on the
-   lone -1 that follows the table and the stream ends before a glyph is drawn.
-   The offset is added to the block's own base and not to the slot it was read
-   from (src/text.c). */
-#define CH03_TEXT_ENTRY_COUNT 0x16
+/* The chapter text block every draw in this file is pointed at.  0x17 entries
+   covers every id the three chapter 3 handlers name -- 0x13, 0x14 and 0x15 from
+   the turn-scheduled one, 0x12 from the ambush and 0x16 from the tile-triggered
+   reinforcement -- and every one of them holds the same offset, so whichever
+   entry a draw resolves it lands on the lone -1 that follows the table and the
+   stream ends before a glyph is drawn.  The offset is added to the block's own
+   base and not to the slot it was read from (src/text.c). */
+#define CH03_TEXT_ENTRY_COUNT 0x17
 
 static unsigned char ch03_grid[4 + CH03_GRID_W * CH03_GRID_H * 2];
 static unsigned char ch03_spawn_table[CH03_SPAWN_TABLE_RECORD_BASE + 8 * 0x1a];
@@ -1459,6 +1466,337 @@ static void ch03_ambush_ignores_the_unit_index_argument(void)
     }
 }
 
+/* ---- fdps_chapter_03_event_deploy_wave_14, 00036ea0 -------------------- */
+
+/* Chapter 3's tile-triggered reinforcement.
+ *
+ * It is staged through the same fixture as the two handlers above, and for the
+ * same reason: neither the wave, the map number nor the placement flag it hands
+ * fdps_deploy_wave is left anywhere afterwards, so the only way to read any of
+ * them back is to let the deployment happen against the real MAP02.COD inside
+ * FIELD.VFS.  Two deployment records are added to the five ch03_stage plants,
+ * at table indices 5 and 6 and tagged waves 14 and 15, so the wave either side
+ * of the one asked for is present as well: MAP02.COD record 5 is (25, 13) and
+ * record 6 is (22, 15), and the five records ch03_stage leaves at indices 0 to
+ * 4 cover waves 0, 1, 2, 13 and 0xff on tiles of their own.
+ *
+ * What separates this handler from the ambush above is the record lookup in
+ * front of the latch, so the unit array is staged with two units rather than
+ * one, each with its own side byte, and the cases below call with the index of
+ * each in turn.  A deployment reallocs that array, so it is malloc'd and never
+ * freed, exactly as ch03_stage's own is.
+ *
+ * The cases that get past both tests need ICON.CEL and FIELD.VFS and skip
+ * themselves without them.  The ones that do not get past them are not gated: a
+ * refused call returns before either CALL, so it opens nothing.
+ *
+ * WHICH TEXT ENTRY THE DRAW ASKS FOR IS NOT ASSERTED, for the reason the
+ * sections above give -- fdps_draw_text takes its whole effect through pixels
+ * at the VGA aperture and keeps no state -- so PUSH 0x16 at 00036ee9 stands on
+ * the reviewer's reading of the instruction stream.  What the cases do pin
+ * about the draw is that it does not stop the deployment and that it is inside
+ * the guard rather than in front of it.
+ */
+
+/* The latch this handler tests and raises: byte ptr [0x000640e9] at 00036ebb
+   and 00036ecf, element 0x11 of the 32-byte flag array based at 0x000640d8 --
+   one past CH05_LATCH_SLOT, which is the slot every other one-shot handler of
+   the family shares. */
+#define CH03_REINFORCE_LATCH_SLOT 0x11
+
+/* The wave the handler asks for: PUSH 0xe at 00036efc. */
+#define CH03_REINFORCE_WAVE 0xe
+
+/* The two records added on top of ch03_stage's five, and the character ids that
+   tell them apart from those five and from each other.  Table index and
+   placement record are the same number, so which one was deployed is readable
+   twice over: off the character id and off the tile it landed on. */
+#define CH03_WAVE14_RECORD 5
+#define CH03_WAVE15_RECORD 6
+#define CH03_WAVE14_CHAR_ID 11
+#define CH03_WAVE15_CHAR_ID 12
+#define CH03_REINFORCE_SPAWN_COUNT 7
+
+/* MAP02.COD's placement records 5 and 6, the tiles the two added deployment
+   records land on.  MAP00.COD's record 5 is (14, 6) and MAP01.COD's is (9, 5),
+   which is what makes the map number readable off the tile. */
+#define CH03_WAVE14_TILE_X 25
+#define CH03_WAVE14_TILE_Y 13
+#define CH03_WAVE15_TILE_X 22
+#define CH03_WAVE15_TILE_Y 15
+
+/* The three side codes the handler's test sorts: 0 is the enemy, which the test
+   keeps out, and 1 the guest and 2 the player's roster, which both spring it.
+   0xff is not a side any deployment writes; it is here because the compare is
+   against 0 over the whole unsigned byte, so the top of the range has to behave
+   like the middle of it. */
+#define SIDE_ENEMY 0
+#define SIDE_GUEST 1
+#define SIDE_PLAYER 2
+#define SIDE_HIGH_BIT_SET 0xff
+
+/* Two units on the map, each with its own side byte, so a case can ask which
+   record the handler read; the latch slot is written along with both its
+   neighbours, because it is a ticket 23 symbol whose starting value nothing
+   here may assume.  The turn counter is left on a quiet turn: this handler has
+   no CMP against data_fdps_battle_turn_counter anywhere in its 0x6f bytes.
+
+   The two units stand at (0, 0) and (1, 0), clear of every placement record
+   these cases read back. */
+static void ch03_reinforce_stage(int latch, int side_0, int side_1)
+{
+    ch03_stage(CH03_QUIET_TURN);
+
+    ch03_set_spawn(CH03_WAVE14_RECORD, CH03_WAVE14_CHAR_ID,
+                   CH03_REINFORCE_WAVE);
+    ch03_set_spawn(CH03_WAVE15_RECORD, CH03_WAVE15_CHAR_ID,
+                   CH03_REINFORCE_WAVE + 1);
+    ch03_spawn_table[CH03_SPAWN_TABLE_COUNT_OFFSET] =
+        CH03_REINFORCE_SPAWN_COUNT;
+
+    data_fdps_map_unit_array_ptr =
+        (unsigned char *) malloc(2 * CH03_UNIT_STRIDE);
+    ch03_zero_bytes(data_fdps_map_unit_array_ptr, 2 * CH03_UNIT_STRIDE);
+    data_fdps_map_unit_count = 2;
+    ch03_unit(0)->side = (unsigned char) side_0;
+    ch03_unit(1)->side = (unsigned char) side_1;
+    ch03_unit(1)->pos_x = 1;
+
+    data_fdps_map_cell_event_triggered_flags[CH03_REINFORCE_LATCH_SLOT - 1] = 0;
+    data_fdps_map_cell_event_triggered_flags[CH03_REINFORCE_LATCH_SLOT] =
+        (unsigned char) latch;
+    data_fdps_map_cell_event_triggered_flags[CH03_REINFORCE_LATCH_SLOT + 1] = 0;
+}
+
+/* The byte the handler reads off the record it looked up is the side at
+   offset 6 -- CMP byte ptr [EAX+0x6],0x0 at 00036ec7 -- and the record it
+   indexes is 0x50 bytes wide.  Both would agree with themselves while
+   addressing another field if the layout were wrong. */
+static void ch03_reinforce_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), CH03_UNIT_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 6);
+    CHECK_EQ((int) offsetof(struct fdps_char_spawn_record, wave_no), 0x15);
+}
+
+/* The wave brought on is the literal 14: the wave-14 record, table index 5,
+   lands on MAP02.COD record 5 at (25, 13) carrying CH03_WAVE14_CHAR_ID.  The
+   wave-15 record next to it would land on (22, 15) and the wave-13 record
+   ch03_stage plants at index 3 on (25, 15), so a handler that asked for either
+   neighbour would be visible twice over -- on the tile and on the id. */
+static void ch03_reinforce_deploys_wave_fourteen(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_reinforce_stage(0, SIDE_PLAYER, SIDE_ENEMY);
+    fdps_chapter_03_event_deploy_wave_14(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ((int) ch03_unit(2)->char_id, CH03_WAVE14_CHAR_ID);
+    CHECK_EQ((int) ch03_unit(2)->pos_x, CH03_WAVE14_TILE_X);
+    CHECK_EQ((int) ch03_unit(2)->pos_y, CH03_WAVE14_TILE_Y);
+}
+
+/* A unit on side 0 does not fire it: the JNZ at 00036ecb falls through to the
+   epilogue, so nothing is drawn, nothing is deployed and -- the part that
+   matters for the next unit onto the tile -- the latch is left down.  A handler
+   that raised the latch before the side test would have disarmed the event for
+   the rest of the chapter the first time an enemy walked over it.  Not gated on
+   the game files, because the refused call opens none. */
+static void ch03_reinforce_ignores_a_unit_on_side_zero(void)
+{
+    ch03_reinforce_stage(0, SIDE_ENEMY, SIDE_PLAYER);
+    fdps_chapter_03_event_deploy_wave_14(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[
+                 CH03_REINFORCE_LATCH_SLOT], 0);
+}
+
+/* The side test is a test against 0 and not a test for one particular side:
+   the guest side 1, the player's own side 2 and a byte with its top bit set all
+   get through it.  0xff is the one that separates the unsigned compare the
+   assembly makes from a signed one -- read as a signed char it is -1, which a
+   "greater than 0" test would refuse. */
+static void ch03_reinforce_fires_on_every_non_zero_side(void)
+{
+    static int sides[3] = {SIDE_GUEST, SIDE_PLAYER, SIDE_HIGH_BIT_SET};
+    int i;
+
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 3; i++) {
+        ch03_reinforce_stage(0, sides[i], SIDE_ENEMY);
+        fdps_chapter_03_event_deploy_wave_14(0);
+
+        CHECK_EQ(data_fdps_map_unit_count, 3);
+        CHECK_EQ((int) ch03_unit(2)->char_id, CH03_WAVE14_CHAR_ID);
+        CHECK_EQ((int) ch03_unit(2)->pos_x, CH03_WAVE14_TILE_X);
+    }
+}
+
+/* The side read is the side of the unit the argument names, not of a fixed one:
+   fdps_get_unit_record is called with the incoming slot at 00036eac and the
+   compare is made on what it hands back.  With side 0 on unit 0 and side 2 on
+   unit 1, index 1 fires the event and index 0 refuses it, and swapping which
+   unit carries which side swaps which index fires.  A handler that had ignored
+   the argument -- the way the two chapter 3 handlers above do, both of which
+   overwrite the slot with 0 first -- would behave the same for both. */
+static void ch03_reinforce_reads_the_side_of_the_named_unit(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_reinforce_stage(0, SIDE_ENEMY, SIDE_PLAYER);
+    fdps_chapter_03_event_deploy_wave_14(1);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ((int) ch03_unit(2)->char_id, CH03_WAVE14_CHAR_ID);
+
+    ch03_reinforce_stage(0, SIDE_ENEMY, SIDE_PLAYER);
+    fdps_chapter_03_event_deploy_wave_14(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[
+                 CH03_REINFORCE_LATCH_SLOT], 0);
+
+    ch03_reinforce_stage(0, SIDE_PLAYER, SIDE_ENEMY);
+    fdps_chapter_03_event_deploy_wave_14(1);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[
+                 CH03_REINFORCE_LATCH_SLOT], 0);
+}
+
+/* A latch already up refuses the body whatever the side byte says, and it is
+   tested against 0 rather than against 1 -- CMP byte ptr [0x000640e9],0x0 /
+   JNZ at 00036ebb -- so a slot holding 2 blocks it just as a slot holding 1
+   does.  Neither call is reached, so this one is not gated on the game files
+   either. */
+static void ch03_reinforce_is_blocked_by_a_raised_latch(void)
+{
+    ch03_reinforce_stage(1, SIDE_PLAYER, SIDE_ENEMY);
+    fdps_chapter_03_event_deploy_wave_14(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[
+                 CH03_REINFORCE_LATCH_SLOT], 1);
+
+    ch03_reinforce_stage(2, SIDE_PLAYER, SIDE_ENEMY);
+    fdps_chapter_03_event_deploy_wave_14(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[
+                 CH03_REINFORCE_LATCH_SLOT], 2);
+}
+
+/* The slot latched is element 0x11 and no other, which is the one thing about
+   this handler that could not be copied from the ambush above: both events are
+   live on map02 at the same time -- its tile-event table sends cell code 1 to
+   the ambush and code 2 to this handler -- so a shared byte would let whichever
+   fired first suppress the other.  Both neighbours, 0x10 and 0x12, are put up
+   before the call and neither blocks the body, which is what pins the index,
+   and neither is written, which pins the width of the store to one byte. */
+static void ch03_reinforce_raises_only_its_own_latch_slot(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_reinforce_stage(0, SIDE_PLAYER, SIDE_ENEMY);
+    data_fdps_map_cell_event_triggered_flags[CH03_REINFORCE_LATCH_SLOT - 1] = 1;
+    data_fdps_map_cell_event_triggered_flags[CH03_REINFORCE_LATCH_SLOT + 1] = 1;
+
+    fdps_chapter_03_event_deploy_wave_14(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[
+                 CH03_REINFORCE_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[
+                 CH03_REINFORCE_LATCH_SLOT - 1], 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[
+                 CH03_REINFORCE_LATCH_SLOT + 1], 1);
+}
+
+/* Once the latch is up the handler does nothing at all, which is what makes the
+   reinforcement one-shot: the trigger region can be walked over again on every
+   turn that follows.  The second call is made with the array left exactly as
+   the first call left it, so a second deployment would show as a fourth unit. */
+static void ch03_reinforce_runs_once_per_chapter(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_reinforce_stage(0, SIDE_PLAYER, SIDE_ENEMY);
+    fdps_chapter_03_event_deploy_wave_14(0);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+
+    fdps_chapter_03_event_deploy_wave_14(0);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[
+                 CH03_REINFORCE_LATCH_SLOT], 1);
+}
+
+/* The map the wave is placed under is the literal 2 pushed at 00036efe and not
+   data_fdps_chapter_current_chapter_id, which the chapter 10, 17 and 18
+   handlers push at the same argument.  The wave-14 record lands on MAP02.COD's
+   record 5 at (25, 13) with that global on 0 and again with it on 1 --
+   MAP00.COD's record 5 is (14, 6) and MAP01.COD's is (9, 5), so a handler that
+   read the global would land somewhere else in both. */
+static void ch03_reinforce_map_number_is_the_literal_two(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_reinforce_stage(0, SIDE_PLAYER, SIDE_ENEMY);
+    data_fdps_chapter_current_chapter_id = 0;
+    fdps_chapter_03_event_deploy_wave_14(0);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ((int) ch03_unit(2)->pos_x, CH03_WAVE14_TILE_X);
+    CHECK_EQ((int) ch03_unit(2)->pos_y, CH03_WAVE14_TILE_Y);
+
+    ch03_reinforce_stage(0, SIDE_PLAYER, SIDE_ENEMY);
+    data_fdps_chapter_current_chapter_id = 1;
+    fdps_chapter_03_event_deploy_wave_14(0);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ((int) ch03_unit(2)->pos_x, CH03_WAVE14_TILE_X);
+    CHECK_EQ((int) ch03_unit(2)->pos_y, CH03_WAVE14_TILE_Y);
+}
+
+/* The placement flag is 0 -- XOR EAX,EAX / PUSH EAX at 00036ef9 -- so the
+   arrivals are put on the nearest free walkable tile to their placement record
+   rather than on the record's own tile.  Taking (25, 13) out of the search by
+   giving that one cell a tile id whose attribute row is terrain 5 moves the
+   unit one tile down: the scan is row-major over the whole grid and a tie is
+   accepted, so the last candidate at the best distance wins.  A flag of 1 would
+   drop it on (25, 13) regardless of the terrain there. */
+static void ch03_reinforce_places_on_the_nearest_free_tile(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_reinforce_stage(0, SIDE_PLAYER, SIDE_ENEMY);
+    ch03_set_tile_id(CH03_WAVE14_TILE_X, CH03_WAVE14_TILE_Y, 1);
+    ch03_set_terrain(1, CH03_TERRAIN_BLOCKED);
+
+    fdps_chapter_03_event_deploy_wave_14(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ((int) ch03_unit(2)->char_id, CH03_WAVE14_CHAR_ID);
+    CHECK_EQ((int) ch03_unit(2)->pos_x, CH03_WAVE14_TILE_X);
+    CHECK_EQ((int) ch03_unit(2)->pos_y, CH03_WAVE14_TILE_Y + 1);
+}
+
 void run_chevt1_tests(void)
 {
     RUN_TEST(set_game_over_from_running);
@@ -1502,4 +1840,14 @@ void run_chevt1_tests(void)
     RUN_TEST(ch03_ambush_map_number_is_the_literal_two);
     RUN_TEST(ch03_ambush_places_on_the_nearest_free_tile);
     RUN_TEST(ch03_ambush_ignores_the_unit_index_argument);
+    RUN_TEST(ch03_reinforce_record_shape_matches_the_offsets);
+    RUN_TEST(ch03_reinforce_deploys_wave_fourteen);
+    RUN_TEST(ch03_reinforce_ignores_a_unit_on_side_zero);
+    RUN_TEST(ch03_reinforce_fires_on_every_non_zero_side);
+    RUN_TEST(ch03_reinforce_reads_the_side_of_the_named_unit);
+    RUN_TEST(ch03_reinforce_is_blocked_by_a_raised_latch);
+    RUN_TEST(ch03_reinforce_raises_only_its_own_latch_slot);
+    RUN_TEST(ch03_reinforce_runs_once_per_chapter);
+    RUN_TEST(ch03_reinforce_map_number_is_the_literal_two);
+    RUN_TEST(ch03_reinforce_places_on_the_nearest_free_tile);
 }
