@@ -684,6 +684,253 @@ static void vil_does_not_modify_the_roster(void)
     vil_unstage();
 }
 
+/* ---- fdps_village_member_status_loop, 00033f80 --------------------------
+ *
+ * Expected values come from the assembly at 00033f80 and from nothing else:
+ * the seed MOV dword ptr [EBP-0x4],0x0 at 00033f8c in front of the entry test
+ * CMP dword ptr [EBP-0x4],-0x1 / JZ at 00033f93, so the first pass always
+ * runs; the two zoom calls with 0 and 1 as their second argument at 00033f99
+ * and 00033fb0, either side of CALL fdps_village_select_member at 00033fa8
+ * whose EAX is stored to the loop slot at 00033fad; the inner test CMP dword
+ * ptr [EBP-0x4],-0x1 / JZ 0x00033fea at 00033fc2, whose taken arm jumps to the
+ * back edge and not out of the loop; and the back edge JMP 0x00033f93 at
+ * 00033fea, which is the only path out of a confirmation.  None of it is read
+ * off the emitted C.
+ *
+ * HOW A LOOP AROUND A MODAL PICKER IS RUN FROM OUTSIDE.  The loop answers
+ * nothing and its two visible effects -- the frame it puts on the adapter and
+ * the window the status call draws -- are both other functions' behaviour.
+ * What is left, and what the cases below assert, is the shape of the loop
+ * itself: that a cancel ends it, that a confirmation does not, and that the
+ * caller's page comes back untouched however many passes ran.  The picker's
+ * surviving cursor is what counts the passes: a case confirms, then moves the
+ * cursor one cell, then cancels, and where the cursor ends up says how many
+ * times the picker was reopened.
+ *
+ * WHY THE STATUS WINDOW IS SAFE TO REACH HERE.
+ * fdps_battle_show_unit_status_window resolves the index and returns without
+ * drawing anything for portrait ids 0x24..0x27 (statwin.c), so a party staged
+ * inside that range makes every confirmation a record lookup and a return.
+ * That is a real call into the real function and not a stand-in: the arm it
+ * takes is the one the game itself takes for those four ids.
+ *
+ * WHY THE UNIT ARRAY IS POINTED AT THE ROSTER.  The picker answers a roster
+ * index and the status window resolves it through fdps_get_unit_record against
+ * data_fdps_map_unit_array_ptr, which is the alias
+ * fdps_load_field_chapter_resources leaves in place for the whole village
+ * phase (vilmenu.h).  Staging the two apart would be staging a state the game
+ * cannot be in when this loop runs.
+ *
+ * WHAT IS NOT ASSERTED, AND WHY.  Which index reached the status window, and
+ * that the backdrop reached the adapter before it did, are not observable from
+ * outside: the refusing arm has no effect to read, and every zoom frame writes
+ * the same page to the adapter afterwards anyway.  Both are settled by reading
+ * 00033fc8-00033fe7, where the memmove of 0xfa00 bytes from the page to
+ * 0xa0000 stands between the confirmation test and the call.
+ */
+
+/* The backdrop page the three village screens hand this loop: a whole mode 13h
+   frame, which is the count the memmove at 00033fc8 carries and the count the
+   window animation copies out of it every frame.  It is filled with one value
+   so that "the page was only read" is a single comparison. */
+#define VST_PAGE_BYTES 0xfa00
+#define VST_PAGE_FILL 0x5a
+
+/* A portrait id inside the closed range 0x24..0x27 that
+   fdps_battle_show_unit_status_window draws no window for. */
+#define VST_NO_WINDOW_PORTRAIT 0x25
+
+/* Something for the window animation to release on its first frame, so that
+   the free at the top of it is a free of real heap storage and not of whatever
+   an earlier case left in the global. */
+#define VST_PORTRAIT_BUF_BYTES 16
+
+static unsigned char *vst_page;
+
+/* One whole visit to the status browser, staged the way the village phase
+   leaves things: the picker's sheets and tables as every case above stages
+   them, the unit array aliased onto the roster, and every member carrying a
+   portrait id the status window refuses.  The two grid globals are NOT reset
+   here -- where the cursor starts is what the cases are about. */
+static void vst_run(int chapter, unsigned char *codes, int count)
+{
+    int index;
+    int slot;
+
+    vil_stage();
+    data_fdps_chapter_current_chapter_id = chapter;
+    for (slot = 0; slot < VIL_MEMBER_COUNT; slot++) {
+        vil_roster[slot].portrait_id = VST_NO_WINDOW_PORTRAIT;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) vil_roster;
+    data_fdps_portrait_sprite_buf_ptr =
+        (unsigned char *) malloc((size_t) VST_PORTRAIT_BUF_BYTES);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr != NULL, 1);
+
+    vst_page = (unsigned char *) malloc((size_t) VST_PAGE_BYTES);
+    CHECK_EQ(vst_page != NULL, 1);
+    if (vst_page == NULL) {
+        return;
+    }
+    memset(vst_page, VST_PAGE_FILL, (size_t) VST_PAGE_BYTES);
+
+    for (index = 0; index < count; index++) {
+        vil_script[index] = codes[index];
+    }
+    vil_script_len = count;
+    vil_script_next = 0;
+
+    data_fdps_input_last_scancode = VIL_KEY_NONE;
+    data_fdps_input_key_repeat_prev_scancode = VIL_KEY_NONE;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_ui_palette_last_cycle_tick = 0;
+    data_fdps_ui_palette_cycle_phase = 0;
+    data_fdps_audio_cd_repeat_last_tick = 0;
+    data_fdps_audio_cd_repeat_tick_counter = 0;
+
+    vil_set_mode(VIL_MODE_320X200X256);
+    vil_saved_timer = _dos_getvect(VIL_TIMER_VECTOR);
+    _dos_setvect(VIL_TIMER_VECTOR, vil_timer_isr);
+    fdps_village_member_status_loop(vst_page);
+    _dos_setvect(VIL_TIMER_VECTOR, vil_saved_timer);
+    vil_set_mode(VIL_MODE_TEXT);
+}
+
+/* 1 when every byte of the page still holds what the run filled it with. */
+static int vst_page_untouched(void)
+{
+    int index;
+
+    if (vst_page == NULL) {
+        return 0;
+    }
+    for (index = 0; index < VST_PAGE_BYTES; index++) {
+        if (vst_page[index] != (unsigned char) VST_PAGE_FILL) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void vst_done(void)
+{
+    if (vst_page != NULL) {
+        free(vst_page);
+        vst_page = NULL;
+    }
+    if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+        free(data_fdps_portrait_sprite_buf_ptr);
+        data_fdps_portrait_sprite_buf_ptr = NULL;
+    }
+    data_fdps_map_unit_array_ptr = NULL;
+    vil_unstage();
+}
+
+/* The seed is zero and the entry test is against -1, so the picker is opened
+   before anything has been picked; the cancel that comes back out of it is the
+   loop's exit and nothing else runs.  The cancel arm of the picker moves
+   neither of its globals, so the cursor is still where the case put it. */
+static void vst_a_cancel_ends_the_first_pass(void)
+{
+    unsigned char script[1];
+
+    script[0] = VIL_KEY_ESC;
+    vil_place(2, 0);
+    vst_run(VIL_CHAPTER_BEFORE_LOCK, script, 1);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, 2);
+    CHECK_EQ(data_fdps_village_member_grid_scroll_offset, 0);
+    CHECK_EQ(vst_page_untouched(), 1);
+    vst_done();
+}
+
+/* The confirmation arm jumps to the back edge and not out of the frame, so a
+   confirmed member is followed by another picker.  The second one moves the
+   cursor one cell before cancelling, and that move is only reachable if the
+   picker really was opened a second time. */
+static void vst_a_confirmation_reopens_the_picker(void)
+{
+    unsigned char script[3];
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_RIGHT;
+    script[2] = VIL_KEY_ESC;
+    vil_place(0, 0);
+    vst_run(VIL_CHAPTER_BEFORE_LOCK, script, 3);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, 1);
+    vst_done();
+}
+
+/* And it is a loop and not a second pass: two confirmations in a row each get
+   their own picker, so the cursor is two cells along by the time the cancel
+   arrives. */
+static void vst_it_keeps_reopening_until_a_cancel(void)
+{
+    unsigned char script[5];
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_RIGHT;
+    script[2] = VIL_KEY_ENTER;
+    script[3] = VIL_KEY_RIGHT;
+    script[4] = VIL_KEY_ESC;
+    vil_place(0, 0);
+    vst_run(VIL_CHAPTER_BEFORE_LOCK, script, 5);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, 2);
+    vst_done();
+}
+
+/* The page is a source and never a destination, on the pass that memmoves it
+   to the adapter as much as on the pass that does not: the animation composes
+   on a page of its own and the memmove reads this one.  A run with a
+   confirmation in it exercises both. */
+static void vst_the_backdrop_page_is_only_read(void)
+{
+    unsigned char script[2];
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_ESC;
+    vil_place(0, 0);
+    vst_run(VIL_CHAPTER_BEFORE_LOCK, script, 2);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, 0);
+    CHECK_EQ(vst_page_untouched(), 1);
+    vst_done();
+}
+
+/* The window animation is really entered and not skipped past: it releases the
+   portrait buffer unconditionally on its way to the first frame (village.h),
+   and nothing else in this loop or in the picker touches that global. */
+static void vst_the_window_animation_runs(void)
+{
+    unsigned char script[1];
+
+    script[0] = VIL_KEY_ESC;
+    vil_place(0, 0);
+    vst_run(VIL_CHAPTER_BEFORE_LOCK, script, 1);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 1);
+    vst_done();
+}
+
+/* Nothing on this path writes a unit record.  The picker only reads char_id
+   and the status window's refusing arm only reads portrait_id, so the party
+   comes out of a run with a confirmation in it exactly as it went in. */
+static void vst_it_does_not_modify_the_party(void)
+{
+    unsigned char script[2];
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_ESC;
+    vil_place(0, 0);
+    vst_run(VIL_CHAPTER_BEFORE_LOCK, script, 2);
+    CHECK_EQ(vil_roster[0].portrait_id, VST_NO_WINDOW_PORTRAIT);
+    CHECK_EQ(vil_roster[0].char_id, vil_char_ids[0]);
+    CHECK_EQ(vil_roster[0].hp_current, 0);
+    CHECK_EQ(data_fdps_roster_member_count, VIL_MEMBER_COUNT);
+    vst_done();
+}
+
 void run_vilmenu_tests(void)
 {
     RUN_TEST(vil_escape_cancels);
@@ -708,4 +955,10 @@ void run_vilmenu_tests(void)
     RUN_TEST(vil_cursor_survives_between_visits);
     RUN_TEST(vil_window_past_the_party_is_left_alone);
     RUN_TEST(vil_does_not_modify_the_roster);
+    RUN_TEST(vst_a_cancel_ends_the_first_pass);
+    RUN_TEST(vst_a_confirmation_reopens_the_picker);
+    RUN_TEST(vst_it_keeps_reopening_until_a_cancel);
+    RUN_TEST(vst_the_backdrop_page_is_only_read);
+    RUN_TEST(vst_the_window_animation_runs);
+    RUN_TEST(vst_it_does_not_modify_the_party);
 }

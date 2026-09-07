@@ -60,4 +60,29 @@ extern int data_fdps_village_member_grid_scroll_offset;
 extern int fdps_village_select_member(void);
 #pragma aux fdps_village_select_member "*" parm caller [];
 
+/* 00033f80.  The status browser the item, church and secret screens all offer:
+   open the member picker, show the member the player confirms, and start over
+   until the player cancels out of the picker.  It answers nothing, and the
+   only way it ever returns is that cancel.
+
+   screen_page is the caller's own 320x200 8bpp page holding that screen's
+   backdrop.  It is only read.  The window animation composes every frame on a
+   private page, and this loop copies the backdrop straight onto the adapter
+   before each status window -- because the status window snapshots the live
+   screen and restores that snapshot when it closes (statwin.h), so what is on
+   the adapter at that moment is what the player is left with afterwards.
+
+   IT SHOWS NOTHING FOR PORTRAIT IDS 0x24..0x27.
+   fdps_battle_show_unit_status_window returns without drawing for those, and
+   this loop neither tests for it nor is told, so such a pick simply reopens
+   the picker.
+
+   IT NEEDS THE VILLAGE'S UNIT-ARRAY ALIAS IN PLACE.  The picker's answer is a
+   roster index and the status window resolves it against
+   data_fdps_map_unit_array_ptr, which fdps_load_field_chapter_resources has
+   pointed at the roster base for the duration of the phase (gamedata.h).
+   Called with that alias undone, the window shows a different member. */
+extern void fdps_village_member_status_loop(unsigned char *screen_page);
+#pragma aux fdps_village_member_status_loop "*" parm caller [];
+
 #endif

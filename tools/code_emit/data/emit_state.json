@@ -2905,6 +2905,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x3fb"
+    },
+    "00033f80": {
+      "name": "fdps_village_member_status_loop",
+      "target": "vilmenu.c",
+      "body_size": "0x73",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x73"
     }
   }
 }

@@ -9,6 +9,7 @@
  * frees again before it ends.
  */
 #include <stdlib.h>
+#include <string.h>
 #include <conio.h>
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -17,9 +18,11 @@
 #include "keybd.h"
 #include "palcycle.h"
 #include "sprite.h"
+#include "statwin.h"
 #include "table.h"
 #include "text.h"
 #include "audio.h"
+#include "village.h"
 #include "vilmenu.h"
 
 /* The grid's offscreen page: 312 bytes to a row, 76 rows, and the 0x5ca0 a
@@ -445,4 +448,86 @@ int fdps_village_select_member(void)
     }
 
     return selected_member_index;
+}
+
+/* ------------------------------------------------------------------
+ * fdps_village_member_status_loop @ 00033f80
+ * ------------------------------------------------------------------ */
+
+/* The whole mode 13h frame, PUSH 0xfa00 as memmove's count at 00033fc8 over a
+   destination of PUSH 0xa0000.  0xa0000 is where the adapter answers and not
+   the address of anything the linker places, so it stays the literal
+   VGA_SCREEN_BASE already defined above. */
+#define VGA_SCREEN_BYTES 0xfa00
+
+/* fdps_village_animate_window_zoom's second argument, which is only tested
+   against zero (CMP byte ptr [EBP+0x18],0x0 at 000325de): the sweep runs open
+   before the picker and shut after it.  XOR EAX,EAX / PUSH EAX at 00033f99 and
+   MOV EAX,0x1 / PUSH EAX at 00033fb0. */
+#define WINDOW_ZOOM_OPEN 0
+#define WINDOW_ZOOM_CLOSE 1
+
+/* 00033f80.  One stack argument, caller-cleaned: all three call sites --
+   fdps_village_item_menu at 00035a00, fdps_run_church_screen at 00035c27 and
+   fdps_run_secret_menu at 000363c5 -- push their own page and follow the CALL
+   with ADD ESP,0x4, and the body reads it at [EBP+0x14] behind PUSH
+   EBX/ESI/EDI/EBP and the return address.  RET carries no immediate, EAX is
+   never set before the epilogue and none of the three call sites looks at it.
+
+   The control flow is one loop with one test in it.  The entry test CMP dword
+   ptr [EBP-0x4],-0x1 / JZ at 00033f93 is the top of the loop and the JMP at
+   00033fea is its back edge, so this is a while whose condition is checked
+   before the first pass -- which is why the slot is seeded with zero at
+   00033f8c rather than with a member index: zero is simply the value that is
+   not -1.  The second test at 00033fc2 is the if, and its taken arm jumps to
+   the back edge rather than out.  Cancelling in the picker is the only way to
+   reach the epilogue.
+
+   The one value used after a CALL is fdps_village_select_member's EAX, stored
+   to the loop's slot by MOV dword ptr [EBP-0x4],EAX at 00033fad and then
+   compared and passed on from there.  The two zoom calls, memmove and
+   fdps_battle_show_unit_status_window are each followed straight by their
+   stack cleanup with EAX untouched, so nothing they answer is read here -- in
+   particular this function never learns whether a status window was actually
+   drawn.
+
+   THE INDEX IS FED TO THE BATTLE UNIT ARRAY AND NOT TO THE ROSTER.
+   fdps_village_select_member answers an index into the roster
+   (data_fdps_roster_array_ptr, bounded by data_fdps_roster_member_count) and
+   fdps_battle_show_unit_status_window resolves it through fdps_get_unit_record
+   against data_fdps_map_unit_array_ptr.  The two agree only because
+   fdps_load_field_chapter_resources points data_fdps_map_unit_array_ptr at the
+   roster base for the whole field and village phase, and every caller of this
+   function is reached from fdps_run_village_phase behind that assignment.
+   Resolving the pick here instead -- through fdps_get_roster_record, or
+   through a village-local array -- shows a different member
+   (rebuild_info/pitfalls.md).
+
+   THE BACKDROP COPY IS NOT A REDRAW AND CANNOT BE DROPPED.
+   fdps_battle_show_unit_status_window snapshots the live screen on the way in
+   and paints that snapshot back on the way out (statwin.h), so what this
+   memmove puts on the adapter is what the player is left looking at once the
+   window closes.  Leaving it out because the picture on screen already looks
+   right makes the window save the closing zoom's last frame and restore that
+   instead. */
+void fdps_village_member_status_loop(unsigned char *screen_page)
+{
+    /* Which party member the player last confirmed in the picker, and the
+       loop's only exit: -1 is the picker's cancel and nothing else stops
+       this. */
+    int picked_member_index;
+
+    picked_member_index = 0;
+
+    while (picked_member_index != GRID_CANCELLED) {
+        fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_OPEN);
+        picked_member_index = fdps_village_select_member();
+        fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+
+        if (picked_member_index != GRID_CANCELLED) {
+            memmove((void *) VGA_SCREEN_BASE, screen_page,
+                    (size_t) VGA_SCREEN_BYTES);
+            fdps_battle_show_unit_status_window(picked_member_index);
+        }
+    }
 }
