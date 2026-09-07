@@ -50,6 +50,44 @@
 extern void fdps_chapter_03_event_deploy_wave_for_turn(int unit_index);
 #pragma aux fdps_chapter_03_event_deploy_wave_for_turn "*" parm caller [];
 
+/* Chapter 3's ambush: the first unit to step onto the trigger region in the
+   middle of map 2 sets off one line of the chapter's own text block and brings
+   the resident map's wave 1 onto the field.
+
+   It fires at most once per chapter.  Element 0x10 of
+   data_fdps_map_cell_event_triggered_flags (gamedata.h) is the latch: the
+   handler returns without touching anything when it is already non-zero, and
+   sets it to 1 before it draws or deploys.  The chapter state reset clears that
+   array, so a later chapter's handler starts from a clean latch; the save image
+   carries it, so a chapter reloaded after the ambush fired does not fire it
+   again.  It is the same slot chapter 5's ambush latches, which is safe only
+   because one chapter is loaded at a time.
+
+   The line is entry 0x12, drawn straight onto the mode 13h screen in the
+   standard message colours before the deployment, so it is on screen by the
+   time the enemies appear; whether a portrait panel opens around it is decided
+   by that entry's own token stream rather than here.
+
+   The wave asked for is the literal 1 -- nothing here reads the turn counter --
+   and the placement file is the literal "map02.cod" and not the chapter global
+   the chapter 10, 17 and 18 handlers read, so the arriving units take map 2's
+   coordinates whatever chapter is loaded.  Which units arrive is not map 2's to
+   say: the deployment records come from whichever MAP%02d.DAT is resident, and
+   in chapter 3 the wave-1 records are five level-5 units of enemy id 0x52.
+   They are placed with the flag that searches for the nearest free walkable
+   tile rather than the flag that takes the placement record's own tile as
+   given.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with 0 before the latch is even tested and never
+   read back, so any index, in range or not, behaves the same.
+
+   Table slot 1, and chapter 3's map02.dat is the only shipped file that names
+   it -- one tile trigger, occasion 0, over the 24 cells of M02.DTL that carry
+   event code 1, so the event trips on the step onto any of them. */
+extern void fdps_chapter_03_event_deploy_wave_1(int unit_index);
+#pragma aux fdps_chapter_03_event_deploy_wave_1 "*" parm caller [];
+
 /* Scripted defeat: ends the current battle as a loss.  Stores 1 -- the defeat
    code -- into data_fdps_chapter_event_or_battle_end_code (gamedata.h) and
    returns, with no test of any kind in front of the store, so calling it ends

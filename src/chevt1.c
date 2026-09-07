@@ -144,6 +144,94 @@ void fdps_chapter_03_event_deploy_wave_for_turn(int unit_index)
     }
 }
 
+/* The slot of data_fdps_map_cell_event_triggered_flags (gamedata.h) that the
+   one-shot handlers latch: byte ptr [0x000640e8], which is element 0x10 of the
+   32-entry array based at 0x000640d8.
+
+   The array's own indexer is a cell's raw event code and the shipped M%02d.DTL
+   event planes only ever use codes 0 to 15, so element 0x10 is the first slot
+   no map cell can reach and the handlers use it as private storage.  It is one
+   slot shared by all of them -- fdps_chapter_03_event_deploy_wave_1 at
+   00036c83, fdps_chapter_05_event_enemies_advance at 000370f3, the chapter 8,
+   10, 15, 16, 19, 21, 23, 25, 26 and 30 handlers, and the chapter 15 and 26
+   post-action checks all name the same address -- which is safe only because
+   one chapter is loaded at a time and fdps_chapter_state_reset memsets the
+   whole array when a chapter starts.
+
+   Being inside the array is also what makes the latch survive a save: the save
+   and load paths move all 0x20 bytes to and from offset 0x30a3 of the slot
+   image, so a chapter reloaded after its event fired does not fire it again. */
+#define CHAPTER_EVENT_ONE_SHOT_SLOT 0x10
+
+/* The line the ambush speaks: PUSH 0x12 at 00036ca6, an entry of the same
+   FDETXT%02d.TXT block the turn-scheduled handler above draws 0x13, 0x14 and
+   0x15 out of. */
+#define CH03_AMBUSH_TEXT_ID 0x12
+
+/* The wave the ambush brings on: PUSH 0x1 at 00036cb9.  It is a literal, with
+   no arithmetic and no read of data_fdps_battle_turn_counter anywhere in the
+   body, which is what separates this handler from the turn-scheduled one
+   above -- the ambush always asks for wave 1 whenever it is tripped. */
+#define CH03_AMBUSH_WAVE 1
+
+/* 00036c70.  Chapter 3's ambush trigger: the first time a unit steps onto the
+   trigger region in the middle of map 2 the chapter speaks one line and the
+   five wave-1 enemies arrive.
+
+   The frame is the family's standard Watcom four-push one with an empty local
+   area -- PUSH EBX / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x0
+   at 00036c70..00036c76 -- so there is no local here at all and every argument
+   is computed straight into the pushes.  The two caller-cleans, ADD ESP,0x1c
+   after the draw and ADD ESP,0xc after the deployment, are this function's own,
+   and the RET at 00036cc9 carries no immediate, so the convention is the stack
+   one at both ends of the call.
+
+   The guard is the shared one-shot latch: CMP byte ptr [0x000640e8],0x0 / JNZ
+   straight to the epilogue at 00036c83..00036c8a, then MOV byte ptr
+   [0x000640e8],0x1 at 00036c8c.  The test is against 0 and not against 1, so
+   any non-zero value in the slot blocks the body, and the latch is raised
+   before the draw rather than after the deployment, so a handler re-entered
+   from inside either call could not run the body twice either.
+
+   Past the guard both calls are unconditional and they are in this order --
+   CALL 0x0001ff60 at 00036cae, CALL 0x00023830 at 00036cbd -- so the line is on
+   screen before the enemies appear.
+
+   The map number is the literal 2 pushed at 00036cbb and not the chapter global
+   the chapter 10, 17 and 18 handlers read, so the arrivals take map 2's
+   coordinates whatever chapter is loaded, and the placement flag is the zeroed
+   EAX pushed at 00036cb6..00036cb8, so each unit goes on the nearest free
+   walkable tile to its placement record rather than on the record's own tile.
+
+   fdps_draw_text hands back a cursor in EAX and this handler discards it: the
+   XOR EAX,EAX at 00036cb6 overwrites the register to build the deployment's
+   third argument, and nothing between the ADD ESP,0x1c and that XOR reads it.
+   Nothing sets EAX between the second CALL's return and the RET, and no
+   dispatcher reads what comes back, so the result is void.
+
+   unit_index is the handler table's shared parameter.  MOV dword ptr
+   [EBP+0x14],0x0 at 00036c7c writes zero over the incoming slot before the
+   latch is even tested and nothing ever reads it back, so which unit walked
+   onto the trigger tile cannot reach anything this handler does; the store has
+   no observable effect, because the slot belongs to the caller's outgoing
+   argument area and the caller drops it with ADD ESP,0x4. */
+void fdps_chapter_03_event_deploy_wave_1(int unit_index)
+{
+    unit_index = 0;
+
+    if (data_fdps_map_cell_event_triggered_flags[
+            CHAPTER_EVENT_ONE_SHOT_SLOT] != 0) {
+        return;
+    }
+    data_fdps_map_cell_event_triggered_flags[CHAPTER_EVENT_ONE_SHOT_SLOT] = 1;
+
+    fdps_draw_text(data_fdps_current_chapter_text_ptr, CH03_AMBUSH_TEXT_ID,
+                   (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                   MESSAGE_FG_COLOR, MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+    fdps_deploy_wave(CH03_PLACEMENT_MAP_NO, CH03_AMBUSH_WAVE,
+                     CH03_PLACE_EXACT);
+}
+
 /* 00036cd0.  Two stores and a return, with no branch in the body at all.
 
    The store that matters is MOV dword ptr [0x00069da0],0x1 at 00036ce3: an
@@ -278,24 +366,6 @@ void fdps_chapter_02_event_enemies_advance(int unit_index)
              AI_BEHAVIOR_MODE_ADVANCE);
     }
 }
-
-/* The slot of data_fdps_map_cell_event_triggered_flags (gamedata.h) that the
-   one-shot handlers latch: byte ptr [0x000640e8], which is element 0x10 of the
-   32-entry array based at 0x000640d8.
-
-   The array's own indexer is a cell's raw event code and the shipped M%02d.DTL
-   event planes only ever use codes 0 to 15, so element 0x10 is the first slot
-   no map cell can reach and the handlers use it as private storage.  It is one
-   slot shared by all of them -- fdps_chapter_03_event_deploy_wave_1 at
-   00036c83, this handler, the chapter 8, 10, 15, 16, 19, 21, 23, 25, 26 and 30
-   handlers, and the chapter 15 and 26 post-action checks all name the same
-   address -- which is safe only because one chapter is loaded at a time and
-   fdps_chapter_state_reset memsets the whole array when a chapter starts.
-
-   Being inside the array is also what makes the latch survive a save: the save
-   and load paths move all 0x20 bytes to and from offset 0x30a3 of the slot
-   image, so a chapter reloaded after its event fired does not fire it again. */
-#define CHAPTER_EVENT_ONE_SHOT_SLOT 0x10
 
 /* 000370e0.  Chapter 5's ambush: every unit the map has deployed beyond the
    player's own five and the guest hero stops holding position and starts

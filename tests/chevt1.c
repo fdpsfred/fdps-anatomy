@@ -1186,6 +1186,279 @@ static void ch03_ignores_the_unit_index_argument(void)
     }
 }
 
+/* ---- fdps_chapter_03_event_deploy_wave_1, 00036c70 --------------------- */
+
+/* Chapter 3's ambush.
+ *
+ * It is staged through the same fixture as the turn-scheduled handler above,
+ * for the same reason: neither of the three values it hands fdps_deploy_wave --
+ * PUSH 0x2, PUSH 0x1 and a zeroed EAX at 00036cb6..00036cbb -- is left anywhere
+ * afterwards, so the only way to see any of them is to let the deployment
+ * happen against the real MAP02.COD inside FIELD.VFS.  ch03_stage's wave-1
+ * record is table index 1 with character id CH03_WAVE1_CHAR_ID, and MAP02.COD's
+ * record 1 is (5, 4); the records tagged waves 0, 2, 13 and 0xff either side of
+ * it land on different tiles with different ids, so an ambush that asked for
+ * the wrong wave is visible twice over.
+ *
+ * The cases that get past the latch need ICON.CEL and FIELD.VFS and skip
+ * themselves without them, exactly as the ones above do.  The two that do not
+ * get past it are not gated: a latched call returns before either CALL, so it
+ * opens nothing.
+ *
+ * WHICH TEXT ENTRY THE DRAW ASKS FOR IS NOT ASSERTED ANYWHERE BELOW, for the
+ * reason the section above gives -- fdps_draw_text takes its whole effect
+ * through pixels at the VGA aperture and keeps no state -- so PUSH 0x12 at
+ * 00036ca6 stands on the reviewer's reading of the instruction stream.  What
+ * the cases do pin about the draw is that it does not stop the deployment and
+ * that it is inside the latch rather than in front of it.  ch03_stage's text
+ * block is the same empty-stream fixture, every entry resolving to a lone -1,
+ * so a draw paints nothing and cannot stand a modal wait on a keyboard nothing
+ * is typing at.
+ */
+
+/* Five turn counters spanning everything the sibling handler's DEC EAX cares
+   about -- the two it compares against, one either side, and one past the last
+   turn map02.dat schedules.  This handler has no CMP against
+   data_fdps_battle_turn_counter anywhere in its 0x5a bytes, so all five have to
+   deploy the same wave. */
+#define CH03_AMBUSH_TURN_COUNT 5
+
+/* Put the latch down and every neighbouring flag with it, so a case that reads
+   one of them back is reading what it wrote.  ch03_stage does not touch the
+   flag array -- it is a ticket 23 symbol whose starting value nothing here may
+   assume -- so the latch is always set explicitly before a call. */
+static void ch03_ambush_stage(int battle_turn, int latch)
+{
+    ch03_stage(battle_turn);
+    data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT - 1] = 0;
+    data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT] =
+        (unsigned char) latch;
+    data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT + 1] = 0;
+}
+
+/* The wave brought on is the literal 1: the wave-1 record, table index 1, lands
+   on MAP02.COD's record 1 at (5, 4) carrying CH03_WAVE1_CHAR_ID.  The wave-0
+   record would land on (24, 17) with id CH03_WAVE0_CHAR_ID and the wave-2
+   record on (23, 16) with id CH03_WAVE2_CHAR_ID, so a handler that had copied
+   the sibling's turn arithmetic, or that had read the counter at all, would
+   land somewhere else with something else on it. */
+static void ch03_ambush_deploys_wave_one(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_ambush_stage(CH03_QUIET_TURN, 0);
+    fdps_chapter_03_event_deploy_wave_1(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch03_unit(1)->char_id, CH03_WAVE1_CHAR_ID);
+    CHECK_EQ((int) ch03_unit(1)->pos_x, 5);
+    CHECK_EQ((int) ch03_unit(1)->pos_y, 4);
+}
+
+/* The latch is raised by the run, and it is element 0x10 and no other: the CMP
+   and the MOV at 00036c83 and 00036c8c name byte ptr [0x000640e8], one byte
+   inside the 32-byte array based at 0x000640d8.  Both neighbours are put up
+   before the call and neither blocks the body, which is what pins the index --
+   a handler reading 0x0f or 0x11 instead would have returned at once -- and
+   neither is written, which is what pins the width of the store to one byte. */
+static void ch03_ambush_raises_only_its_own_latch_slot(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_ambush_stage(CH03_QUIET_TURN, 0);
+    data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT - 1] = 1;
+    data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT + 1] = 1;
+
+    fdps_chapter_03_event_deploy_wave_1(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT - 1], 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT + 1], 1);
+}
+
+/* Once the latch is up the handler does nothing at all, which is what makes the
+   ambush one-shot: the trigger region is 24 cells wide and a unit can walk back
+   onto it every turn for the rest of the chapter.  The second call is made with
+   the array left exactly as the first call left it, so anything the handler did
+   twice would show as a third unit. */
+static void ch03_ambush_runs_once_per_chapter(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_ambush_stage(CH03_QUIET_TURN, 0);
+    fdps_chapter_03_event_deploy_wave_1(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT], 1);
+
+    fdps_chapter_03_event_deploy_wave_1(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch03_unit(1)->char_id, CH03_WAVE1_CHAR_ID);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT], 1);
+}
+
+/* The guard compares against 0, not against 1, so any non-zero value in the
+   slot blocks the body and the slot is not overwritten on the way out.  This is
+   the case that would come out differently if the emitted C had tested for
+   equality with 1.  It is not gated on the game files: a blocked call returns
+   before either CALL and opens nothing, which is itself part of what is being
+   asserted. */
+static void ch03_ambush_latch_tests_against_zero(void)
+{
+    ch03_ambush_stage(CH03_QUIET_TURN, 2);
+    fdps_chapter_03_event_deploy_wave_1(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT], 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT - 1], 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT + 1], 0);
+}
+
+/* Both CALLs are inside the guard: the JNZ at 00036c8a jumps past the draw as
+   well as the deployment, straight to the epilogue.  With the latch on the
+   value the handler's own successful run leaves behind, nothing is deployed,
+   the unit already on the map is untouched and the latch is not rewritten.
+   Not gated, for the same reason as the case above. */
+static void ch03_ambush_blocked_call_does_nothing(void)
+{
+    ch03_ambush_stage(CH03_QUIET_TURN, 1);
+    fdps_chapter_03_event_deploy_wave_1(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 1);
+    CHECK_EQ((int) ch03_unit(0)->char_id, 0);
+    CHECK_EQ((int) ch03_unit(0)->pos_x, 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT - 1], 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT + 1], 0);
+}
+
+/* Nothing in the body reads data_fdps_battle_turn_counter -- there is no CMP
+   against it in the 0x5a bytes -- so the wave brought on is the same on every
+   turn.  The five staged here are the two the sibling handler compares against,
+   the turn either side of the first of them, the turn the counter is reset to,
+   and one past the last turn map02.dat schedules; a handler carrying the
+   sibling's DEC EAX would deploy a different record on four of the five and
+   nothing at all on the turn-0 one. */
+static void ch03_ambush_ignores_the_turn_counter(void)
+{
+    static int turns[CH03_AMBUSH_TURN_COUNT] = {CH03_ZERO_TURN,
+                                                CH03_EARLIEST_TURN,
+                                                CH03_QUIET_TURN,
+                                                CH03_FIRST_WAVE_TURN,
+                                                CH03_UNSCHEDULED_TURN};
+    int i;
+
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < CH03_AMBUSH_TURN_COUNT; i++) {
+        ch03_ambush_stage(turns[i], 0);
+        fdps_chapter_03_event_deploy_wave_1(0);
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch03_unit(1)->char_id, CH03_WAVE1_CHAR_ID);
+        CHECK_EQ((int) ch03_unit(1)->pos_x, 5);
+        CHECK_EQ((int) ch03_unit(1)->pos_y, 4);
+    }
+}
+
+/* The map the wave is placed under is the literal 2 pushed at 00036cbb and not
+   data_fdps_chapter_current_chapter_id, which is what the chapter 10, 17 and 18
+   handlers push at the same argument.  The same wave-1 record lands on
+   MAP02.COD's record 1 at (5, 4) with that global on 0 and again with it on 1 --
+   MAP00.COD's record 0 is (18, 0) and MAP01.COD's is (9, 4), so a handler that
+   read the global would land somewhere else in at least one of the two. */
+static void ch03_ambush_map_number_is_the_literal_two(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_ambush_stage(CH03_QUIET_TURN, 0);
+    data_fdps_chapter_current_chapter_id = 0;
+    fdps_chapter_03_event_deploy_wave_1(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch03_unit(1)->pos_x, 5);
+    CHECK_EQ((int) ch03_unit(1)->pos_y, 4);
+
+    ch03_ambush_stage(CH03_QUIET_TURN, 0);
+    data_fdps_chapter_current_chapter_id = 1;
+    fdps_chapter_03_event_deploy_wave_1(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch03_unit(1)->pos_x, 5);
+    CHECK_EQ((int) ch03_unit(1)->pos_y, 4);
+}
+
+/* The placement flag is 0 -- XOR EAX,EAX / PUSH EAX at 00036cb6 -- so the
+   ambushers are put on the nearest free walkable tile to their placement record
+   rather than on the record's own tile.  MAP02.COD record 1 names (5, 4);
+   giving that one cell a tile id whose attribute row is terrain 5 takes it out
+   of the search and the unit lands one tile away.  A flag of 1 would drop it on
+   (5, 4) regardless of the terrain there.
+
+   (5, 5) is which of the four tiles at distance 1 it lands on, because the scan
+   is row-major over the whole grid and a tie is accepted, so the last candidate
+   at the best distance wins. */
+static void ch03_ambush_places_on_the_nearest_free_tile(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_ambush_stage(CH03_QUIET_TURN, 0);
+    ch03_set_tile_id(5, 4, 1);
+    ch03_set_terrain(1, CH03_TERRAIN_BLOCKED);
+
+    fdps_chapter_03_event_deploy_wave_1(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch03_unit(1)->char_id, CH03_WAVE1_CHAR_ID);
+    CHECK_EQ((int) ch03_unit(1)->pos_x, 5);
+    CHECK_EQ((int) ch03_unit(1)->pos_y, 5);
+}
+
+/* The incoming argument slot is overwritten with 0 at 00036c7c, before the
+   latch is even tested, and never read back, so the index of the unit that
+   walked onto the trigger tile cannot reach the wave asked for, the map asked
+   for or the placement flag.  This slot is reached through the four
+   movement-step routines, which report occasion 0 and then let the turn driver
+   push the acting unit's real index, so the argument is a live value here
+   rather than the literal 0 the turn-event dispatcher passes; the values put
+   through below are that 0, two real unit indices, and two that are not indices
+   at all. */
+static void ch03_ambush_ignores_the_unit_index_argument(void)
+{
+    static int arguments[5] = {0, 1, 7, -1, 30000};
+    int i;
+
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 5; i++) {
+        ch03_ambush_stage(CH03_QUIET_TURN, 0);
+        fdps_chapter_03_event_deploy_wave_1(arguments[i]);
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch03_unit(1)->char_id, CH03_WAVE1_CHAR_ID);
+        CHECK_EQ((int) ch03_unit(1)->pos_x, 5);
+        CHECK_EQ((int) ch03_unit(1)->pos_y, 4);
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT], 1);
+    }
+}
+
 void run_chevt1_tests(void)
 {
     RUN_TEST(set_game_over_from_running);
@@ -1220,4 +1493,13 @@ void run_chevt1_tests(void)
     RUN_TEST(ch03_places_on_the_nearest_free_tile);
     RUN_TEST(ch03_has_no_one_shot_latch);
     RUN_TEST(ch03_ignores_the_unit_index_argument);
+    RUN_TEST(ch03_ambush_deploys_wave_one);
+    RUN_TEST(ch03_ambush_raises_only_its_own_latch_slot);
+    RUN_TEST(ch03_ambush_runs_once_per_chapter);
+    RUN_TEST(ch03_ambush_latch_tests_against_zero);
+    RUN_TEST(ch03_ambush_blocked_call_does_nothing);
+    RUN_TEST(ch03_ambush_ignores_the_turn_counter);
+    RUN_TEST(ch03_ambush_map_number_is_the_literal_two);
+    RUN_TEST(ch03_ambush_places_on_the_nearest_free_tile);
+    RUN_TEST(ch03_ambush_ignores_the_unit_index_argument);
 }
