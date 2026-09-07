@@ -2985,6 +2985,14 @@
       "status": "committed",
       "emitted_against": "0x225",
       "rounds": 0
+    },
+    "00036210": {
+      "name": "fdps_run_secret_menu",
+      "target": "vilshop.c",
+      "body_size": "0x233",
+      "status": "committed",
+      "emitted_against": "0x233",
+      "rounds": 0
     }
   }
 }

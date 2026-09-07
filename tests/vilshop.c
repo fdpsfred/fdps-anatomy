@@ -1215,6 +1215,367 @@ static void wep_the_row_is_five_wide_and_wraps_to_the_equip_counter(void)
     wep_done();
 }
 
+/* ---- fdps_run_secret_menu, 00036210 --------------------------------------
+ *
+ * Expected values come from the assembly at 00036210 and from nothing else:
+ * the seed MOV dword ptr [EBP-0x8],0x0 at 0003621c in front of the entry test
+ * CMP dword ptr [EBP-0x8],-0x1 / JNZ at 000362ec, so the first pass always
+ * runs; the six-dword template copied onto the frame by REP MOVSD at 00036230
+ * -- 0x24, 0x14, 0x15, 0x04, 0x06, 0x10 at 000311c8 -- and PUSH 0x6 at
+ * 00036314 for the row's length; the unsigned bound CMP dword ptr
+ * [EBP-0x8],0x5 / JA at 00036322 in front of JMP dword ptr CS:[EAX*4 +
+ * 0x362f8], whose six entries are 0003633d, 00036383, 00036397, 000363a5,
+ * 000363b3 and 000363c1; the calls those arms make -- two window sweeps and
+ * fdps_draw_text on the CHAPTER text block at 00036379, fdps_shop_buy_loop
+ * with MOV EAX,0x2 for the shop index at 00036383, then
+ * fdps_village_item_sell_loop, fdps_village_item_transfer_loop,
+ * fdps_village_member_equip_loop and fdps_village_member_status_loop -- and
+ * the two-armed test CMP dword ptr [EBP-0x8],-0x1 / JNZ at 000363cd whose arms
+ * both fall to the back edge JMP 0x000362ec at 0003642e.  None of it is read
+ * off the emitted C.
+ *
+ * WHAT THE CASES ARE ABOUT.  Everything this screen draws is somebody else's
+ * behaviour and nothing it computes comes back as a value, so what is pinned
+ * here is the dispatch: that the answer the command row writes selects the arm
+ * the jump table selects, in that order, that the row is SIX entries long --
+ * the weapon shop's five with the status browser added on the end -- that the
+ * buy counter is opened against shop row 2 and not the weapon shop's row 1,
+ * and that the row is reopened after every arm until the row itself is
+ * cancelled.
+ *
+ * THE FIXTURE IS THE WEAPON SHOP'S, because this screen reaches everything
+ * that screen reaches and the status browser besides, which the church
+ * fixture underneath it already stages.  The one thing that differs is which
+ * shop row is left empty: row 2 here, so that a counter opened against the
+ * wrong row leaves the parked picker globals standing.
+ */
+
+/* This screen's row of SHOP%02d.DAT, and the two the fixture fills instead. */
+#define SEC_SECRET_SHOP_ROW 2
+
+/* The member the arms that open a picker are pointed at, and the two members
+   the hand-over moves an entry between.  They are the weapon shop's, because
+   they are the same roster. */
+#define SEC_PICKED WEP_GIVER
+
+/* The weapon shop's fixture with the empty shop row moved to row 2, which is
+   the row this screen's buy counter is opened against.  Rows 0 and 1 are left
+   holding twelve entries each, so a counter opened against either of them
+   would find the parked cursor inside its row and leave it alone. */
+static void sec_stage(void)
+{
+    int row;
+    int slot;
+
+    wep_stage();
+
+    for (row = 0; row < WEP_SHOP_ROWS; row++) {
+        for (slot = 0; slot < WEP_SHOP_ROW_SLOTS; slot++) {
+            wep_shop_stock[row * WEP_SHOP_ROW_SLOTS + slot] =
+                (unsigned char) (row == SEC_SECRET_SHOP_ROW
+                                 ? WEP_SHOP_EMPTY_SLOT
+                                 : WEP_STOCK_FILLER_ITEM);
+        }
+    }
+}
+
+/* One whole visit to the secret shop, on the same machinery every other case
+   in this file runs on: the adapter in the mode the game draws it in, the
+   timer interrupt pacing the frames and playing both input channels, and no
+   more than CHR_SCRIPT_MAX codes to a script.  The fixture is NOT staged here:
+   a case calls sec_stage first and then fills the bag it is about. */
+static void sec_go(unsigned char *codes, int count)
+{
+    int index;
+
+    for (index = 0; index < count; index++) {
+        chr_script[index] = codes[index];
+    }
+    chr_script_len = count;
+    chr_script_next = 0;
+
+    data_fdps_village_backdrop_page_ptr = chr_page_sentinel;
+    data_fdps_portrait_sprite_buf_ptr =
+        (unsigned char *) malloc((size_t) CHR_PORTRAIT_BUF_BYTES);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr != NULL, 1);
+
+    data_fdps_input_last_scancode = CHR_KEY_NONE;
+    data_fdps_input_key_repeat_prev_scancode = CHR_KEY_NONE;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_ui_palette_last_cycle_tick = 0;
+    data_fdps_ui_palette_cycle_phase = 0;
+    data_fdps_audio_cd_repeat_last_tick = 0;
+    data_fdps_audio_cd_repeat_tick_counter = 0;
+
+    chr_set_mode(CHR_MODE_320X200X256);
+    chr_saved_timer = _dos_getvect(CHR_TIMER_VECTOR);
+    _dos_setvect(CHR_TIMER_VECTOR, chr_timer_isr);
+    fdps_run_secret_menu();
+    _dos_setvect(CHR_TIMER_VECTOR, chr_saved_timer);
+    chr_set_mode(CHR_MODE_TEXT);
+}
+
+/* Backing out of the command row is the screen's only exit, and it is reached
+   on the first pass because the answer slot is seeded with zero and the entry
+   test is against -1.  What the run leaves behind is the page: the global no
+   longer names the sentinel parked in it, so a page really was taken and
+   published, and it is not put back to null on the way out.  The portrait
+   buffer is gone because the window sweep releases it unconditionally
+   (village.h), which is how a frame that really opened is told from one that
+   was skipped.  Nothing else ran -- no picker moved, no dialogue slot was
+   written and the shop picker's cursor still holds what it was parked with. */
+static void sec_a_cancel_at_the_command_row_ends_the_screen(void)
+{
+    unsigned char script[1];
+
+    if (chr_backdrop_file_present() == 0) {
+        return;
+    }
+
+    script[0] = CHR_KEY_ESC;
+    sec_stage();
+    chr_place(2, 0);
+    sec_go(script, 1);
+
+    CHECK_EQ(data_fdps_village_backdrop_page_ptr != chr_page_sentinel, 1);
+    CHECK_EQ(data_fdps_village_backdrop_page_ptr != NULL, 1);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 1);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, 2);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, CHR_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, WEP_SHOP_CURSOR_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CHR_START_GOLD);
+    wep_done();
+}
+
+/* The row opens on entry 0, so a confirmation with no movement in front of it
+   takes the first jump-table slot.  That arm opens no submenu of any kind: it
+   sweeps the window shut and open again and writes one line, so every global
+   the other five arms move is still where it was parked.  A table whose first
+   slot named one of the five loops would move at least one of them, and the
+   trailing Escape is only reached because the arm fell to the back edge
+   instead of out. */
+static void sec_the_reprint_command_opens_no_submenu(void)
+{
+    unsigned char script[2];
+
+    if (chr_backdrop_file_present() == 0) {
+        return;
+    }
+
+    script[0] = CHR_KEY_ENTER;
+    script[1] = CHR_KEY_ESC;
+    sec_stage();
+    chr_place(2, 0);
+    sec_go(script, 2);
+
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, 2);
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, WEP_SHOP_CURSOR_SENTINEL);
+    CHECK_EQ(data_fdps_shop_item_list_scroll_offset, WEP_SHOP_SCROLL_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, CHR_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, CHR_SUBST_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, CHR_VALUE_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CHR_START_GOLD);
+    wep_done();
+}
+
+/* One step right and a confirmation takes slot 1, which is the buy counter,
+   and the shop index it is opened with is what the pair of zeroes names.  The
+   item picker resets its saved cursor and window top only when the cursor is
+   past the end of the row it was given: row 2 is empty here and rows 0 and 1
+   hold twelve entries each, so a counter opened against the weapon shop's row
+   1 or the item screen's row 0 would have left the parked 7 and 9 standing.
+   One Escape then backs out of the picker and ends the counter.  The member
+   picker never runs on this path, which is what separates the buy counter from
+   the four loops that start with one. */
+static void sec_the_buy_command_opens_shop_row_two(void)
+{
+    unsigned char script[5];
+
+    if (chr_backdrop_file_present() == 0) {
+        return;
+    }
+
+    script[0] = CHR_KEY_RIGHT;
+    script[1] = CHR_KEY_ENTER;
+    script[2] = CHR_KEY_ESC;
+    script[3] = CHR_KEY_NONE;
+    script[4] = CHR_KEY_ESC;
+    sec_stage();
+    chr_place(2, 0);
+    sec_go(script, 5);
+
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, 0);
+    CHECK_EQ(data_fdps_shop_item_list_scroll_offset, 0);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, 2);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, CHR_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CHR_START_GOLD);
+    wep_done();
+}
+
+/* Two steps right and a confirmation takes slot 2, which is the sell counter:
+   the member picker, then that member's bag, then the offer.  The figure it
+   publishes is three quarters of the listed price truncated (vilmenu.h), and
+   no other arm of this screen writes a figure at all, so it is what names the
+   counter.  The offer is declined through the ring, so the entry stays in the
+   bag and the purse does not move.  The hand-over's second dialogue slot is
+   untouched, which separates this arm from slot 3. */
+static void sec_the_sell_command_publishes_an_offer(void)
+{
+    unsigned char script[8];
+
+    if (wep_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = CHR_KEY_RIGHT;
+    script[1] = CHR_KEY_NONE;
+    script[2] = CHR_KEY_RIGHT;
+    script[3] = CHR_KEY_ENTER;
+    script[4] = CHR_KEY_NONE;
+    script[5] = CHR_KEY_ENTER;
+    script[6] = CHR_KEY_NONE;
+    script[7] = CHR_KEY_ENTER;
+    sec_stage();
+    chr_place(SEC_PICKED, 0);
+    wep_put(SEC_PICKED, 0, 0, WEP_ITEM);
+    sec_go(script, 8);
+
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, WEP_ITEM_OFFER);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, WEP_ITEM + 0xc9);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, CHR_SUBST_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CHR_START_GOLD);
+    CHECK_EQ(wep_carried(SEC_PICKED), 1);
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, WEP_SHOP_CURSOR_SENTINEL);
+    wep_done();
+}
+
+/* Three steps right and a confirmation takes slot 3, and a whole hand-over
+   settles through it: the entry leaves the giver, arrives in the receiver's
+   bag with a zeroed flag byte, and the item's own name id stands in the SECOND
+   dialogue slot.  No other arm of this screen moves an entry between two
+   members, and the sell counter's figure slot is untouched, which is the pair
+   that separates slot 3 from slot 2. */
+static void sec_the_hand_over_command_moves_an_entry(void)
+{
+    unsigned char script[12];
+
+    if (wep_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = CHR_KEY_RIGHT;
+    script[1] = CHR_KEY_NONE;
+    script[2] = CHR_KEY_RIGHT;
+    script[3] = CHR_KEY_NONE;
+    script[4] = CHR_KEY_RIGHT;
+    script[5] = CHR_KEY_ENTER;
+    script[6] = CHR_KEY_NONE;
+    script[7] = CHR_KEY_ENTER;
+    script[8] = CHR_KEY_NONE;
+    script[9] = CHR_KEY_ENTER;
+    script[10] = CHR_KEY_RIGHT;
+    script[11] = CHR_KEY_ENTER;
+    sec_stage();
+    chr_place(WEP_GIVER, 0);
+    wep_put(WEP_GIVER, 0, 0, WEP_ITEM);
+    sec_go(script, 12);
+
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, WEP_ITEM + 0xc9);
+    CHECK_EQ(wep_carried(WEP_GIVER), 0);
+    CHECK_EQ(wep_carried(WEP_RECEIVER), 1);
+    CHECK_EQ(chr_roster[WEP_RECEIVER].inventory_slots[0], 0);
+    CHECK_EQ(chr_roster[WEP_RECEIVER].inventory_slots[1], WEP_ITEM);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, CHR_VALUE_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CHR_START_GOLD);
+    wep_done();
+}
+
+/* Four steps right and a confirmation takes slot 4, which is the equip
+   counter.  It opens the member picker, and a member whose bag is not empty
+   goes straight into the equip window, which publishes the member it was
+   opened for.  That is the arm's fingerprint: the status browser next to it
+   publishes nothing for these members, and the equip counter's own refusal
+   path -- an empty bag -- writes the name slot instead of the window slot, so
+   an untouched name slot with the window slot set is this arm and nothing
+   else. */
+static void sec_the_equip_command_is_the_fifth_arm(void)
+{
+    unsigned char script[10];
+
+    if (wep_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = CHR_KEY_RIGHT;
+    script[1] = CHR_KEY_NONE;
+    script[2] = CHR_KEY_RIGHT;
+    script[3] = CHR_KEY_NONE;
+    script[4] = CHR_KEY_RIGHT;
+    script[5] = CHR_KEY_NONE;
+    script[6] = CHR_KEY_RIGHT;
+    script[7] = CHR_KEY_ENTER;
+    script[8] = CHR_KEY_NONE;
+    script[9] = CHR_KEY_ENTER;
+    sec_stage();
+    chr_place(SEC_PICKED, 0);
+    wep_put(SEC_PICKED, 0, 0, WEP_ITEM);
+    sec_go(script, 10);
+
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, SEC_PICKED);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, CHR_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, CHR_SUBST_SENTINEL);
+    CHECK_EQ(wep_carried(SEC_PICKED), 1);
+    CHECK_EQ(data_fdps_shop_item_picker_cursor_idx, WEP_SHOP_CURSOR_SENTINEL);
+    wep_done();
+}
+
+/* Three things at once, and each of them is only reachable if the one before
+   it held.  The reprint arm falls to the back edge and not out, so the row
+   opens a second time; the row's answer slot is kept, so that second row
+   starts on entry 0 again and one Left step wraps it against the row's length
+   -- which is six here and not the weapon shop's five, so the wrap lands on
+   entry 5; and slot 5 of the jump table is the status browser, which is the
+   arm this screen has and the weapon shop does not.
+
+   The member picker's moved cursor is what says a picker was opened at all,
+   and the window slot is what says WHICH one: these members carry a portrait
+   id fdps_battle_show_unit_status_window draws no window for, so a confirmed
+   pick inside the status browser is a lookup and a return and the slot keeps
+   the -1 the fixture parked; the equip counter a five-wide row would have
+   wrapped to instead publishes the member on the same confirmed pick, and the
+   bag it is given is not empty, so it would have reached its window and not
+   its refusal. */
+static void sec_the_row_is_six_wide_and_wraps_to_the_status_browser(void)
+{
+    unsigned char script[5];
+
+    if (chr_backdrop_file_present() == 0) {
+        return;
+    }
+
+    script[0] = CHR_KEY_ENTER;
+    script[1] = CHR_KEY_LEFT;
+    script[2] = CHR_KEY_ENTER;
+    script[3] = CHR_KEY_RIGHT;
+    script[4] = CHR_KEY_ENTER;
+    sec_stage();
+    chr_place(0, 0);
+    wep_put(SEC_PICKED, 0, 0, WEP_ITEM);
+    sec_go(script, 5);
+
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, SEC_PICKED);
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, -1);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, CHR_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, CHR_SUBST_SENTINEL);
+    CHECK_EQ(wep_carried(SEC_PICKED), 1);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CHR_START_GOLD);
+    wep_done();
+}
+
 void run_vilshop_tests(void)
 {
     RUN_TEST(chr_a_cancel_at_the_command_row_ends_the_screen);
@@ -1228,4 +1589,11 @@ void run_vilshop_tests(void)
     RUN_TEST(wep_the_sell_command_publishes_an_offer);
     RUN_TEST(wep_the_hand_over_command_moves_an_entry);
     RUN_TEST(wep_the_row_is_five_wide_and_wraps_to_the_equip_counter);
+    RUN_TEST(sec_a_cancel_at_the_command_row_ends_the_screen);
+    RUN_TEST(sec_the_reprint_command_opens_no_submenu);
+    RUN_TEST(sec_the_buy_command_opens_shop_row_two);
+    RUN_TEST(sec_the_sell_command_publishes_an_offer);
+    RUN_TEST(sec_the_hand_over_command_moves_an_entry);
+    RUN_TEST(sec_the_equip_command_is_the_fifth_arm);
+    RUN_TEST(sec_the_row_is_six_wide_and_wraps_to_the_status_browser);
 }
