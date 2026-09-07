@@ -830,3 +830,99 @@ void fdps_chapter_13_event_enemies_advance(int unit_index)
              AI_BEHAVIOR_MODE_ADVANCE);
     }
 }
+
+/* The wave the handler brings on, PUSH 0x4 at 00037a66, and how it places it,
+   XOR EAX,EAX / PUSH EAX at 00037a63: fdps_deploy_wave settles each arrival on
+   the nearest free walkable tile to its placement record rather than on the
+   record's own coordinates. */
+#define CH14_ARRIVAL_WAVE 4
+#define CH14_PLACE_EXACT 0
+
+/* The two units the pans walk the cursor onto, PUSH 0x24 at 00037a76 and PUSH
+   0x2a at 00037a9e, in that order.  Both are literals and neither is range
+   checked; they land on one warrior of each of the wave's two bottom-edge
+   blocks only because the chapter's own force and the map's earlier waves are
+   already in the unit array ahead of wave 4. */
+#define CH14_LEFT_GROUP_UNIT_INDEX 0x24
+#define CH14_RIGHT_GROUP_UNIT_INDEX 0x2a
+
+/* How long each pan holds, CMP dword ptr [EBP+0x14],0xc / JL at 00037a87 and
+   at 00037aaf.  A composed frame costs one timer tick, so the count is how
+   long the view stays on each block and not a number of anything drawn. */
+#define CH14_PAN_HOLD_FRAMES 0xc
+
+/* The line the handler speaks, PUSH 0x11 at 00037ad9. */
+#define CH14_ARRIVAL_TEXT_ID 0x11
+
+/* 00037a50.  Chapter 14's turn-6 event: brings on the map's wave 4 -- the
+   sixteen level-13 warriors that arrive in two blocks along the bottom edge
+   and the level-17 werewolf that comes in at the top left after the treasure
+   -- pans the view onto one warrior of each block in turn, and speaks the line
+   that announces them.
+
+   THE BODY IS UNCONDITIONAL.  Between the argument-slot store at 00037a5c and
+   the RET at 00037aed there is no compare against anything: no turn test, no
+   side test and no read or write of the family's one-shot latch slot, so every
+   call runs the whole of it and a second call appends wave 4 a second time.
+   What keeps it to one firing is MAP13.DAT's turn table, which names this slot
+   once.
+
+   THE MAP NUMBER IS THE CHAPTER GLOBAL AND NOT A LITERAL.  PUSH dword ptr
+   [0x00069cf4] at 00037a68 is data_fdps_chapter_current_chapter_id, so which
+   MAP%02d.COD supplies the placement coordinates follows the loaded chapter.
+   The deployment records themselves still come from whichever MAP%02d.DAT is
+   resident.
+
+   THE FRAME COUNTER IS THE ARGUMENT SLOT.  The frame is built with SUB ESP,0x0
+   at 00037a56, so there is no local area at all: MOV dword ptr [EBP+0x14],0x0
+   at 00037a5c writes zero over the incoming argument before the deployment,
+   and 00037a80 and 00037aa8 write it again as each loop starts.  Both loops
+   are the -od shape of a for statement -- the compare at the top, a dead MOV
+   EAX,[EBP+0x14] ahead of the INC, and the body reached by a JL past the exit
+   jump -- and both are signed and stop at 12.  None of the three stores can be
+   seen by the caller, because the slot belongs to its outgoing argument area
+   and the turn-event runner drops it with its own ADD ESP,0x4.
+
+   THE PANS RUN AFTER THE DEPLOYMENT AND READ THE ARRAY AS IT THEN STANDS.  The
+   deployment call at 00037a6e comes first, so the two indices below are read
+   out of an array the wave has already been appended to.
+
+   fdps_deploy_wave, fdps_map_cursor_move_to_unit and fdps_render_view_frame
+   all leave nothing this body reads: the instruction after each of their stack
+   cleanups is a PUSH of the next call's argument or the store that reseeds the
+   counter, and the frame call's successor at 00037a8f overwrites EAX with the
+   counter.  fdps_draw_text hands back a cursor in EAX and it is discarded --
+   the ADD ESP,0x1c at 00037ae6 is followed straight by the four POPs and the
+   RET.  Nothing sets EAX before that RET and no dispatcher reads what comes
+   back, so the result is void.
+
+   unit_index is the handler table's shared parameter.  The turn-event runner
+   is the only dispatcher that reaches slot 19 and it pushes a literal 0, and
+   nothing reads the incoming value before the store at 00037a5c overwrites it,
+   so nothing a caller passes can change what the handler does. */
+void fdps_chapter_14_event_deploy_wave_4(int unit_index)
+{
+    unit_index = 0;
+
+    fdps_deploy_wave(data_fdps_chapter_current_chapter_id, CH14_ARRIVAL_WAVE,
+                     CH14_PLACE_EXACT);
+
+    fdps_map_cursor_move_to_unit(CH14_LEFT_GROUP_UNIT_INDEX);
+    /* The argument slot is the counter, as the assembly has it. */
+    for (unit_index = 0;
+         unit_index < CH14_PAN_HOLD_FRAMES;
+         unit_index++) {
+        fdps_render_view_frame();
+    }
+
+    fdps_map_cursor_move_to_unit(CH14_RIGHT_GROUP_UNIT_INDEX);
+    for (unit_index = 0;
+         unit_index < CH14_PAN_HOLD_FRAMES;
+         unit_index++) {
+        fdps_render_view_frame();
+    }
+
+    fdps_draw_text(data_fdps_current_chapter_text_ptr, CH14_ARRIVAL_TEXT_ID,
+                   (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                   MESSAGE_FG_COLOR, MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+}

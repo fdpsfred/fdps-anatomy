@@ -2486,6 +2486,406 @@ static void ch11t_ignores_the_event_argument(void)
     }
 }
 
+/* Chapter 14's turn-6 handler at 00037a50 is the chapter 11 handler's
+ * fall-through arm with no branch in front of it, and it is staged the same
+ * way: the chapter 10 ambush fixture with a unit array, a deployment table and
+ * a text block under it, MAP%02d.COD read from the real game files for the
+ * placement coordinates, and the timer running so the frame holds can finish.
+ *
+ * THE FIXTURE PUTS THE ARRIVAL ON THE SECOND PAN'S OWN INDEX.  It stages 0x2a
+ * units, indices 0 through 0x29, so the one record the wave brings on becomes
+ * unit index 0x2a -- exactly the index the second pan names.  That is what
+ * lets the cases see two things at once: which index the pan ends on, and that
+ * the deployment ran before it, because index 0x2a is not a live record until
+ * the wave has appended it.
+ *
+ * WHERE THE FIRST PAN GOES CANNOT BE SEEN FROM OUTSIDE, for the same reason as
+ * in the chapter 11 section: the second move overwrites the position the first
+ * one left, so PUSH 0x24 at 00037a76 stands on the reading of the instruction
+ * stream.  What the cases pin is that the cursor ends on unit 0x2a's tile and
+ * not on unit 0x24's.
+ *
+ * HOW LONG EACH HOLD LASTS IS PINNED THROUGH THE TIMER.  fdps_render_view_frame
+ * blocks until the tick counter moves and then latches it, so 24 composed
+ * frames cannot pass with fewer than 23 ticks between the first and the last.
+ * The bound is one-sided on purpose -- a slow machine spends more ticks, never
+ * fewer -- so it cannot fail spuriously, and a rebuild that dropped one of the
+ * two loops cannot meet it at any sane speed.
+ *
+ * Every case reaches the deployment, which opens ICON.CEL and FIELD.VFS for
+ * itself, so every case skips itself without them.
+ */
+
+/* The wave the handler asks for, PUSH 0x4 at 00037a66. */
+#define CH14_WAVE 4
+
+/* The two units the pans visit, PUSH 0x24 at 00037a76 and PUSH 0x2a at
+   00037a9e, and the tile step fdps_map_cursor_move_to_unit scales their
+   coordinates by, IMUL EAX,EAX,0x18 at 0002da76. */
+#define CH14_LEFT_GROUP_UNIT_INDEX 0x24
+#define CH14_RIGHT_GROUP_UNIT_INDEX 0x2a
+#define CH14_TILE_STEP 24
+
+/* How long each hold lasts, CMP dword ptr [EBP+0x14],0xc at 00037a87 and at
+   00037aaf, and the least the tick counter can move across both of them. */
+#define CH14_PAN_HOLD_FRAMES 0xc
+#define CH14_LEAST_HOLD_TICKS (2 * CH14_PAN_HOLD_FRAMES - 1)
+
+/* Units already on the map when the handler runs: one short of the second
+   pan's index, so the record the wave brings on becomes that index.  They are
+   laid out seven to a row, which puts 0x24 on tile (1, 5) and leaves every
+   placement coordinate these cases read back clear of them. */
+#define CH14_STAGED_UNITS CH14_RIGHT_GROUP_UNIT_INDEX
+#define CH14_STAGE_ROW_WIDTH 7
+#define CH14_ARRIVAL_UNIT_INDEX CH14_STAGED_UNITS
+
+/* One deployment record per wave the cases ask about, at the table index that
+   is also its MAP%02d.COD placement record.  The wave the handler names sits
+   on record 0, whose coordinates the ambush cases above already read back out
+   of the real files, and the waves either side of it sit on records the cases
+   only ever check are left behind. */
+#define CH14_WAVE4_RECORD 0
+#define CH14_WAVE3_RECORD 1
+#define CH14_WAVE5_RECORD 2
+#define CH14_UNASKED_RECORD 3
+#define CH14_SPAWN_RECORD_COUNT 4
+
+/* A wave nothing in the handler asks for, parked on the spare record. */
+#define CH14_UNASKED_WAVE 0xff
+
+/* The level each record carries, which is how the cases tell which one
+   arrived: the character id cannot do it, because every record has to carry
+   the one id the compositor drops.  The wave-4 record's level is deliberately
+   not its wave number, so a rebuild that deployed the wave it was handed and
+   one that deployed something else are told apart by two fields and not one. */
+#define CH14_WAVE4_LEVEL 7
+#define CH14_WAVE3_LEVEL 3
+#define CH14_WAVE5_LEVEL 5
+#define CH14_UNASKED_LEVEL 6
+
+/* MAP00.COD's placement record 0 and MAP01.COD's record 0 -- the same
+   coordinates the ambush cases above read back out of the real files. */
+#define CH14_MAP00_RECORD0_X 18
+#define CH14_MAP00_RECORD0_Y 0
+#define CH14_MAP01_RECORD0_X 9
+#define CH14_MAP01_RECORD0_Y 4
+
+/* The id the compositor drops, PORTRAIT_ID_NO_MAP_SPRITE at 00033c56. */
+#define CH14_ARRIVAL_CHAR_ID 0x80
+
+/* The one id the handler names plus the terminator every entry points at. */
+#define CH14_TEXT_ENTRY_COUNT 0x12
+
+/* A value the tick counter cannot legitimately hold on entry, parked in the
+   frame latch so a run that composed nothing is distinguishable from one that
+   did. */
+#define CH14_FRAME_SENTINEL 0x5a5a5a5aU
+
+/* The turn the map schedules this handler for.  Nothing in the body reads the
+   counter; it is staged so a rebuild that did read it has a value to be caught
+   deploying. */
+#define CH14_SCHEDULED_TURN 6
+
+/* Any other turn, staged to show the body has no turn test in it at all. */
+#define CH14_OTHER_TURN 5
+
+static short ch14_text_block[CH14_TEXT_ENTRY_COUNT + 1];
+static unsigned int ch14_ticks_before;
+static unsigned int ch14_ticks_after;
+
+/* The ambush section's map fixture with 0x2a units on it, every one of them
+   wearing the dropped portrait id and standing seven to a row, one deployment
+   record per wave the cases ask about, the text block and the frame latch
+   sentinel.  The cursor starts at the origin so both pans have a real distance
+   to cover on both axes. */
+static void ch14_stage(int battle_turn)
+{
+    int i;
+
+    ch10_stage(CH14_STAGED_UNITS);
+
+    for (i = 0; i < CH14_STAGED_UNITS; i++) {
+        ch10_unit(i)->portrait_id = (unsigned char) CH14_ARRIVAL_CHAR_ID;
+        ch10_unit(i)->pos_x = (unsigned char) (i % CH14_STAGE_ROW_WIDTH);
+        ch10_unit(i)->pos_y = (unsigned char) (i / CH14_STAGE_ROW_WIDTH);
+    }
+
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] =
+        (unsigned char) CH14_SPAWN_RECORD_COUNT;
+    ch10_set_spawn(CH14_WAVE4_RECORD, CH14_ARRIVAL_CHAR_ID, CH14_WAVE);
+    ch10_set_spawn(CH14_WAVE3_RECORD, CH14_ARRIVAL_CHAR_ID, 3);
+    ch10_set_spawn(CH14_WAVE5_RECORD, CH14_ARRIVAL_CHAR_ID, 5);
+    ch10_set_spawn(CH14_UNASKED_RECORD, CH14_ARRIVAL_CHAR_ID,
+                   CH14_UNASKED_WAVE);
+    ch10_spawn_at(CH14_WAVE4_RECORD)->level = (unsigned char) CH14_WAVE4_LEVEL;
+    ch10_spawn_at(CH14_WAVE3_RECORD)->level = (unsigned char) CH14_WAVE3_LEVEL;
+    ch10_spawn_at(CH14_WAVE5_RECORD)->level = (unsigned char) CH14_WAVE5_LEVEL;
+    ch10_spawn_at(CH14_UNASKED_RECORD)->level =
+        (unsigned char) CH14_UNASKED_LEVEL;
+
+    for (i = 0; i < CH14_TEXT_ENTRY_COUNT; i++) {
+        ch14_text_block[i] = (short) (CH14_TEXT_ENTRY_COUNT * 2);
+    }
+    ch14_text_block[CH14_TEXT_ENTRY_COUNT] = -1;
+    data_fdps_current_chapter_text_ptr = (unsigned char *) ch14_text_block;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_view_frame_last_tick = CH14_FRAME_SENTINEL;
+
+    data_fdps_battle_turn_counter = battle_turn;
+}
+
+/* One call with the timer running and the adapter in the mode the frames
+   present through, with the tick counter sampled either side so the length of
+   the two holds can be read back. */
+static void ch14_run(int unit_index)
+{
+    ch10t_set_mode(CH10T_MODE_13H);
+    ch10t_saved_timer = _dos_getvect(CH10T_TIMER_VECTOR);
+    _dos_setvect(CH10T_TIMER_VECTOR, ch10t_timer_isr);
+    ch14_ticks_before = data_fdps_timer_tick_counter;
+    fdps_chapter_14_event_deploy_wave_4(unit_index);
+    ch14_ticks_after = data_fdps_timer_tick_counter;
+    _dos_setvect(CH10T_TIMER_VECTOR, ch10t_saved_timer);
+    ch10t_set_mode(CH10T_MODE_TEXT);
+}
+
+/* The wave is 4: the one record tagged 4 arrives, carrying its own level and
+   MAP00.COD record 0's coordinates, and the records tagged 3, 5 and 0xff are
+   left where they are.  The unit count moves by exactly one, which is what
+   says the neighbours in the table stayed put. */
+static void ch14_deploys_the_records_tagged_wave_four(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    ch14_stage(CH14_SCHEDULED_TURN);
+    ch14_run(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH14_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch10_unit(CH14_ARRIVAL_UNIT_INDEX)->level, CH14_WAVE4_LEVEL);
+    CHECK_EQ((int) ch10_unit(CH14_ARRIVAL_UNIT_INDEX)->pos_x,
+             CH14_MAP00_RECORD0_X);
+    CHECK_EQ((int) ch10_unit(CH14_ARRIVAL_UNIT_INDEX)->pos_y,
+             CH14_MAP00_RECORD0_Y);
+}
+
+/* The wave number is the literal 4 and not the turn counter, nor the turn less
+   anything: the same record arrives whether the counter says 6 -- the turn
+   MAP13.DAT schedules the handler for -- or 5, and no record tagged with
+   either of those numbers exists for a rebuild that read the counter to find. */
+static void ch14_wave_is_a_literal_and_not_the_turn_counter(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    ch14_stage(CH14_SCHEDULED_TURN);
+    ch14_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, CH14_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch10_unit(CH14_ARRIVAL_UNIT_INDEX)->level, CH14_WAVE4_LEVEL);
+
+    ch14_stage(CH14_OTHER_TURN);
+    ch14_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, CH14_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch10_unit(CH14_ARRIVAL_UNIT_INDEX)->level, CH14_WAVE4_LEVEL);
+}
+
+/* The map the wave is placed under is read from
+   data_fdps_chapter_current_chapter_id at the call site and is not a literal:
+   the same record placed while that global says 1 lands on MAP01.COD's record
+   0 at (9, 4) instead of MAP00.COD's (18, 0). */
+static void ch14_map_number_comes_from_the_chapter_global(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    ch14_stage(CH14_SCHEDULED_TURN);
+    ch14_run(0);
+    CHECK_EQ((int) ch10_unit(CH14_ARRIVAL_UNIT_INDEX)->pos_x,
+             CH14_MAP00_RECORD0_X);
+    CHECK_EQ((int) ch10_unit(CH14_ARRIVAL_UNIT_INDEX)->pos_y,
+             CH14_MAP00_RECORD0_Y);
+
+    ch14_stage(CH14_SCHEDULED_TURN);
+    data_fdps_chapter_current_chapter_id = 1;
+    ch14_run(0);
+    CHECK_EQ((int) ch10_unit(CH14_ARRIVAL_UNIT_INDEX)->pos_x,
+             CH14_MAP01_RECORD0_X);
+    CHECK_EQ((int) ch10_unit(CH14_ARRIVAL_UNIT_INDEX)->pos_y,
+             CH14_MAP01_RECORD0_Y);
+}
+
+/* The placement flag is 0 -- XOR EAX,EAX / PUSH EAX at 00037a63 -- so the
+   arrivals are put on the nearest free walkable tile to their placement record
+   rather than on the record's own tile.  MAP00.COD record 0 names (18, 0);
+   giving that one cell a tile id whose attribute row is terrain 5 takes it out
+   of the search and the unit lands one tile away.  A flag of 1 would drop it on
+   (18, 0) regardless of the terrain there.
+
+   (18, 1) is which of the three tiles at distance 1 it lands on, for the reason
+   the ambush section's own case gives: the scan is row-major over the whole
+   grid and a tie is accepted, so the last candidate at the best distance wins,
+   and (18, 1) is a row below (17, 0) and (19, 0). */
+static void ch14_places_on_the_nearest_free_tile(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    ch14_stage(CH14_SCHEDULED_TURN);
+    ch10_set_tile_id(CH14_MAP00_RECORD0_X, CH14_MAP00_RECORD0_Y, 1);
+    ch10_set_terrain(1, CH10_TERRAIN_BLOCKED);
+
+    ch14_run(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH14_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch10_unit(CH14_ARRIVAL_UNIT_INDEX)->level, CH14_WAVE4_LEVEL);
+    CHECK_EQ((int) ch10_unit(CH14_ARRIVAL_UNIT_INDEX)->pos_x,
+             CH14_MAP00_RECORD0_X);
+    CHECK_EQ((int) ch10_unit(CH14_ARRIVAL_UNIT_INDEX)->pos_y,
+             CH14_MAP00_RECORD0_Y + 1);
+}
+
+/* The pan ends on unit 0x2a and not on unit 0x24: the fixture leaves 0x24 on
+   tile (1, 5) and the wave puts 0x2a on (18, 0), and the cursor is left on the
+   world pixel the second of those scales to.  A body that stopped after the
+   first move, or that visited the two in the other order, would leave the
+   cursor on 0x24's tile instead, and one that composed no frames at all would
+   leave the sentinel in the latch. */
+static void ch14_pan_ends_on_the_right_hand_group(void)
+{
+    int left_tile_x;
+    int left_tile_y;
+
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    left_tile_x = CH14_LEFT_GROUP_UNIT_INDEX % CH14_STAGE_ROW_WIDTH;
+    left_tile_y = CH14_LEFT_GROUP_UNIT_INDEX / CH14_STAGE_ROW_WIDTH;
+
+    ch14_stage(CH14_SCHEDULED_TURN);
+    ch14_run(0);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x,
+             CH14_MAP00_RECORD0_X * CH14_TILE_STEP);
+    CHECK_EQ(data_fdps_map_cursor_world_y,
+             CH14_MAP00_RECORD0_Y * CH14_TILE_STEP);
+    CHECK_EQ(data_fdps_map_cursor_world_x == left_tile_x * CH14_TILE_STEP, 0);
+    CHECK_EQ(data_fdps_map_cursor_world_y == left_tile_y * CH14_TILE_STEP, 0);
+    CHECK_EQ(data_fdps_view_frame_last_tick == CH14_FRAME_SENTINEL, 0);
+}
+
+/* The deployment runs before the pans and they read the array as it then
+   stands.  Unit index 0x2a is not a live record on entry -- the fixture stages
+   0x2a units, so the highest live index is 0x29 -- and the cursor still ends on
+   the tile the wave put that record on, which can only happen if the arrival
+   was appended first. */
+static void ch14_pans_after_the_deployment(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    ch14_stage(CH14_SCHEDULED_TURN);
+    CHECK_EQ(data_fdps_map_unit_count, CH14_RIGHT_GROUP_UNIT_INDEX);
+
+    ch14_run(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH14_RIGHT_GROUP_UNIT_INDEX + 1);
+    CHECK_EQ(data_fdps_map_cursor_world_x,
+             CH14_MAP00_RECORD0_X * CH14_TILE_STEP);
+    CHECK_EQ(data_fdps_map_cursor_world_y,
+             CH14_MAP00_RECORD0_Y * CH14_TILE_STEP);
+}
+
+/* Both holds run, twelve frames each.  Every frame after the first blocks
+   until the tick counter moves, so 24 of them cannot pass in fewer than 23
+   ticks; a body carrying one hold instead of two spends about half that. */
+static void ch14_holds_both_pans_for_twelve_frames(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    ch14_stage(CH14_SCHEDULED_TURN);
+    ch14_run(0);
+
+    CHECK_EQ(ch14_ticks_after - ch14_ticks_before >=
+             (unsigned int) CH14_LEAST_HOLD_TICKS, 1);
+    CHECK_EQ(data_fdps_view_frame_last_tick == CH14_FRAME_SENTINEL, 0);
+}
+
+/* No latch and no other guard: the handler fires in full on every call, so a
+   second call appends the same record again, and a one-shot slot standing up
+   makes no difference.  The wave walk appends and never checks whether the
+   wave is already on the map, so this is what the original does. */
+static void ch14_has_no_latch_and_fires_every_call(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    ch14_stage(CH14_SCHEDULED_TURN);
+    data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT] = 1;
+
+    ch14_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, CH14_STAGED_UNITS + 1);
+    ch14_run(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH14_STAGED_UNITS + 2);
+    CHECK_EQ((int) ch10_unit(CH14_STAGED_UNITS + 1)->level, CH14_WAVE4_LEVEL);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT], 1);
+}
+
+/* The incoming argument cannot reach anything: it is overwritten with 0 at
+   00037a5c before the deployment and then used as the frame counter of both
+   holds, so an argument of 7 and one of -1 deploy the same record and end the
+   pan on the same pixel.  A handler that had kept the incoming value as its
+   counter would hold the view for a different length of time for each of them,
+   and -1 would run the first hold 13 times rather than 12. */
+static void ch14_ignores_the_unit_index_argument(void)
+{
+    static int arguments[2] = {7, -1};
+    int i;
+
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 2; i++) {
+        ch14_stage(CH14_SCHEDULED_TURN);
+        ch14_run(arguments[i]);
+
+        CHECK_EQ(data_fdps_map_unit_count, CH14_STAGED_UNITS + 1);
+        CHECK_EQ((int) ch10_unit(CH14_ARRIVAL_UNIT_INDEX)->level,
+                 CH14_WAVE4_LEVEL);
+        CHECK_EQ(data_fdps_map_cursor_world_x,
+                 CH14_MAP00_RECORD0_X * CH14_TILE_STEP);
+        CHECK_EQ(data_fdps_map_cursor_world_y,
+                 CH14_MAP00_RECORD0_Y * CH14_TILE_STEP);
+    }
+}
+
 void run_chevt2_tests(void)
 {
     RUN_TEST(ch08_sends_exactly_the_guest_mage);
@@ -2548,4 +2948,13 @@ void run_chevt2_tests(void)
     RUN_TEST(ch11t_places_on_the_nearest_free_tile);
     RUN_TEST(ch11t_has_no_latch_and_fires_every_call);
     RUN_TEST(ch11t_ignores_the_event_argument);
+    RUN_TEST(ch14_deploys_the_records_tagged_wave_four);
+    RUN_TEST(ch14_wave_is_a_literal_and_not_the_turn_counter);
+    RUN_TEST(ch14_map_number_comes_from_the_chapter_global);
+    RUN_TEST(ch14_places_on_the_nearest_free_tile);
+    RUN_TEST(ch14_pan_ends_on_the_right_hand_group);
+    RUN_TEST(ch14_pans_after_the_deployment);
+    RUN_TEST(ch14_holds_both_pans_for_twelve_frames);
+    RUN_TEST(ch14_has_no_latch_and_fires_every_call);
+    RUN_TEST(ch14_ignores_the_unit_index_argument);
 }

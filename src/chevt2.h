@@ -315,4 +315,42 @@ extern void fdps_chapter_11_event_deploy_wave_for_turn(int event_arg);
 extern void fdps_chapter_13_event_enemies_advance(int unit_index);
 #pragma aux fdps_chapter_13_event_enemies_advance "*" parm caller [];
 
+/* Chapter 14's turn-6 event: brings on the map's wave 4 -- the sixteen
+   level-13 warriors that arrive in two blocks along the bottom edge, plus the
+   level-17 werewolf that comes in at the top left after the map's treasure --
+   pans the view onto one unit of each warrior block in turn, and speaks the
+   line that announces them.
+
+   The deployment is fdps_deploy_wave (deploy.h) with wave 4 and place_exact 0,
+   so the arrivals settle on the nearest free walkable tile to their placement
+   records rather than on the records' own coordinates.  The map number is read
+   from data_fdps_chapter_current_chapter_id (gamedata.h) at the call and is not
+   a literal, so which MAP%02d.COD supplies those coordinates follows the loaded
+   chapter.
+
+   The pan is fdps_map_cursor_move_to_unit (mapcur.h) on unit index 0x24 held
+   for twelve frames through fdps_render_view_frame (mapdraw.h), then the same
+   on unit index 0x2a.  Both indices are literals and neither is range checked;
+   they name one warrior of each block only because chapter 14's own force and
+   the map's earlier waves are already in the unit array ahead of wave 4.  The
+   werewolf, the last unit the wave appends, is never shown.
+
+   The line is text entry 0x11 of the loaded chapter's block, through
+   fdps_draw_text (text.h) straight onto the mode 13h aperture in the standard
+   message colours; the cursor it returns is discarded.
+
+   THE BODY IS UNCONDITIONAL.  There is no turn test, no side test and no
+   one-shot latch, so every call the turn table makes runs the whole of it and
+   a second call would append wave 4 again.  What keeps it to one firing is the
+   data: MAP13.DAT's turn table names this slot once.
+
+   Table slot 19, and MAP13.DAT is the only shipped file that names it -- turn
+   6, phase 2, the start of the player's sixth turn -- which is what makes this
+   chapter 14.  unit_index is the handler table's shared parameter and is
+   ignored: the incoming slot is overwritten with 0 before anything else and
+   then used as the frame counter of both holds, so any index behaves the
+   same. */
+extern void fdps_chapter_14_event_deploy_wave_4(int unit_index);
+#pragma aux fdps_chapter_14_event_deploy_wave_4 "*" parm caller [];
+
 #endif
