@@ -2314,7 +2314,7 @@
     },
     "00035cc0": {
       "name": "fdps_run_bar_shop",
-      "target": "vilshop.c",
+      "target": "vilbar.c",
       "est_lines": 115,
       "body_size": 764,
       "status": "pending"
@@ -2335,7 +2335,7 @@
     },
     "00036460": {
       "name": "fdps_run_bonus_lottery",
-      "target": "vilshop.c",
+      "target": "vilbar.c",
       "est_lines": 266,
       "body_size": 1673,
       "status": "pending"
@@ -3843,10 +3843,11 @@
         "main.c",
         "rsrc.c",
         "title.c",
+        "vilbar.c",
         "vilmenu.c",
         "vilshop.c"
       ],
-      "reason": "read from 17 files: btlend.c, chend2.c, chevt1.c, chevt2.c, chevt3.c, chevt4.c, chevt5.c, chevt6.c, chpost1.c, chpost2.c, death.c, icon.c, main.c, rsrc.c, title.c, vilmenu.c, vilshop.c",
+      "reason": "read from 18 files: btlend.c, chend2.c, chevt1.c, chevt2.c, chevt3.c, chevt4.c, chevt5.c, chevt6.c, chpost1.c, chpost2.c, death.c, icon.c, main.c, rsrc.c, title.c, vilbar.c, vilmenu.c, vilshop.c",
       "status": "pending"
     },
     "00060131": {
@@ -4583,10 +4584,11 @@
       "reader_files": [
         "spellmnu.c",
         "statwin.c",
+        "vilbar.c",
         "vilmenu.c",
         "vilshop.c"
       ],
-      "reason": "read from 4 files: spellmnu.c, statwin.c, vilmenu.c, vilshop.c",
+      "reason": "read from 5 files: spellmnu.c, statwin.c, vilbar.c, vilmenu.c, vilshop.c",
       "status": "pending"
     },
     "00063fb8": {
@@ -5144,9 +5146,9 @@
       "reader_files": [
         "save.c",
         "title.c",
-        "vilshop.c"
+        "vilbar.c"
       ],
-      "reason": "read from 3 files: save.c, title.c, vilshop.c",
+      "reason": "read from 3 files: save.c, title.c, vilbar.c",
       "status": "pending"
     },
     "00064114": {
@@ -5342,11 +5344,11 @@
         "save.c",
         "savefile.c",
         "shop.c",
+        "vilbar.c",
         "village.c",
-        "vilmenu.c",
-        "vilshop.c"
+        "vilmenu.c"
       ],
-      "reason": "read from 12 files: btlend.c, btlmenu.c, chevt3.c, chevt5.c, death.c, roster.c, save.c, savefile.c, shop.c, village.c, vilmenu.c, vilshop.c",
+      "reason": "read from 12 files: btlend.c, btlmenu.c, chevt3.c, chevt5.c, death.c, roster.c, save.c, savefile.c, shop.c, vilbar.c, village.c, vilmenu.c",
       "status": "pending"
     },
     "000643a8": {
@@ -5499,10 +5501,11 @@
         "statunit.c",
         "text.c",
         "unitstat.c",
+        "vilbar.c",
         "vilmenu.c",
         "vilshop.c"
       ],
-      "reason": "read from 17 files: btlmenu.c, cdaudio.c, church.c, death.c, item.c, main.c, roster.c, savefile.c, savepnl.c, shop.c, shopdraw.c, spellmnu.c, statunit.c, text.c, unitstat.c, vilmenu.c, vilshop.c",
+      "reason": "read from 18 files: btlmenu.c, cdaudio.c, church.c, death.c, item.c, main.c, roster.c, savefile.c, savepnl.c, shop.c, shopdraw.c, spellmnu.c, statunit.c, text.c, unitstat.c, vilbar.c, vilmenu.c, vilshop.c",
       "status": "pending"
     },
     "000643c8": {
@@ -5662,10 +5665,10 @@
         "chend2.c",
         "main.c",
         "title.c",
-        "village.c",
-        "vilshop.c"
+        "vilbar.c",
+        "village.c"
       ],
-      "reason": "read from 6 files: btlmenu.c, chend2.c, main.c, title.c, village.c, vilshop.c",
+      "reason": "read from 6 files: btlmenu.c, chend2.c, main.c, title.c, vilbar.c, village.c",
       "status": "pending"
     },
     "000643ec": {
@@ -5706,11 +5709,11 @@
         "statwin.c",
         "title.c",
         "unitstat.c",
+        "vilbar.c",
         "village.c",
-        "vilmenu.c",
-        "vilshop.c"
+        "vilmenu.c"
       ],
-      "reason": "read from 18 files: anim.c, church.c, cmbspell.c, combat.c, gauge.c, main.c, mapdraw.c, msgwin.c, palette.c, shopdraw.c, spell.c, sprite.c, statwin.c, title.c, unitstat.c, village.c, vilmenu.c, vilshop.c",
+      "reason": "read from 18 files: anim.c, church.c, cmbspell.c, combat.c, gauge.c, main.c, mapdraw.c, msgwin.c, palette.c, shopdraw.c, spell.c, sprite.c, statwin.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c",
       "status": "pending"
     },
     "000653f0": {
@@ -5737,11 +5740,11 @@
         "statwin.c",
         "title.c",
         "unitstat.c",
+        "vilbar.c",
         "village.c",
-        "vilmenu.c",
-        "vilshop.c"
+        "vilmenu.c"
       ],
-      "reason": "read from 18 files: anim.c, church.c, cmbspell.c, combat.c, gauge.c, main.c, mapdraw.c, msgwin.c, palette.c, shopdraw.c, spell.c, sprite.c, statwin.c, title.c, unitstat.c, village.c, vilmenu.c, vilshop.c",
+      "reason": "read from 18 files: anim.c, church.c, cmbspell.c, combat.c, gauge.c, main.c, mapdraw.c, msgwin.c, palette.c, shopdraw.c, spell.c, sprite.c, statwin.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c",
       "status": "pending"
     },
     "00069bf0": {
@@ -6202,11 +6205,11 @@
         "shopdraw.c",
         "title.c",
         "unitstat.c",
+        "vilbar.c",
         "village.c",
-        "vilmenu.c",
-        "vilshop.c"
+        "vilmenu.c"
       ],
-      "reason": "read from 28 files: btlend.c, btlmenu.c, btlturn.c, chapter.c, chend1.c, chend2.c, chevt1.c, chevt2.c, chevt3.c, chevt4.c, chevt5.c, chevt6.c, chpost2.c, icon.c, main.c, menu.c, palcycle.c, roster.c, rsrc.c, save.c, savefile.c, shop.c, shopdraw.c, title.c, unitstat.c, village.c, vilmenu.c, vilshop.c",
+      "reason": "read from 28 files: btlend.c, btlmenu.c, btlturn.c, chapter.c, chend1.c, chend2.c, chevt1.c, chevt2.c, chevt3.c, chevt4.c, chevt5.c, chevt6.c, chpost2.c, icon.c, main.c, menu.c, palcycle.c, roster.c, rsrc.c, save.c, savefile.c, shop.c, shopdraw.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c",
       "status": "pending"
     },
     "00069cf8": {
@@ -6545,11 +6548,11 @@
         "title.c",
         "transit.c",
         "unitstat.c",
+        "vilbar.c",
         "village.c",
-        "vilmenu.c",
-        "vilshop.c"
+        "vilmenu.c"
       ],
-      "reason": "read from 31 files: anim.c, audio.c, btlend.c, cdaudio.c, church.c, cmbblow.c, cmbspell.c, combat.c, death.c, gauge.c, indicat.c, keybd.c, mapcur.c, mapdraw.c, msgwin.c, overview.c, palcycle.c, roster.c, saf.c, save.c, shop.c, shopdraw.c, spell.c, spellmnu.c, statunit.c, title.c, transit.c, unitstat.c, village.c, vilmenu.c, vilshop.c",
+      "reason": "read from 31 files: anim.c, audio.c, btlend.c, cdaudio.c, church.c, cmbblow.c, cmbspell.c, combat.c, death.c, gauge.c, indicat.c, keybd.c, mapcur.c, mapdraw.c, msgwin.c, overview.c, palcycle.c, roster.c, saf.c, save.c, shop.c, shopdraw.c, spell.c, spellmnu.c, statunit.c, title.c, transit.c, unitstat.c, vilbar.c, village.c, vilmenu.c",
       "status": "pending"
     },
     "00069d68": {
@@ -8656,7 +8659,7 @@
         "fdps_run_bar_shop"
       ],
       "carried_in": [
-        "vilshop.c"
+        "vilbar.c"
       ],
       "reason": "The compiler's read-only copy of a function-local array initialiser. It comes back from declaring that local with its initialiser inside the owning function, which is where its contents belong.",
       "status": "skip"
@@ -8698,7 +8701,7 @@
         "fdps_run_bonus_lottery"
       ],
       "carried_in": [
-        "vilshop.c"
+        "vilbar.c"
       ],
       "reason": "The compiler's read-only copy of a function-local array initialiser. It comes back from declaring that local with its initialiser inside the owning function, which is where its contents belong.",
       "status": "skip"
@@ -8754,7 +8757,7 @@
         "fdps_run_bar_shop"
       ],
       "carried_in": [
-        "vilshop.c"
+        "vilbar.c"
       ],
       "reason": "A jump table the compiler emits for a switch statement. It comes back from the switch itself; writing it out by hand would pin the rebuild to Ghidra's reading of the original codegen.",
       "status": "skip"

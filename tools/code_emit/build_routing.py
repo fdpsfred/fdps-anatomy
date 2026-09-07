@@ -196,8 +196,14 @@ RULES = [
      "village.c"),
     (r"^fdps_village_(select_member|member_status_loop|item_sell_loop|"
      r"item_transfer_loop|member_equip_loop|item_menu)$", "vilmenu.c"),
-    (r"^fdps_run_(church_screen|bar_shop|weapon_shop|secret_menu|"
-     r"bonus_lottery)$", "vilshop.c"),
+    # The five village buildings split at the bar's door.  vilshop.c keeps the
+    # three screens whose command row dispatches into the party's shared
+    # counters -- promote, buy, sell, hand over, equip, status.  The bar's row
+    # is the save, load and quit-to-title commands instead, and it is the only
+    # caller of the lucky draw it opens on the way in, so the two travel
+    # together in vilbar.c (rebuild_info/code_layout.md).
+    (r"^fdps_run_(church_screen|weapon_shop|secret_menu)$", "vilshop.c"),
+    (r"^fdps_run_(bar_shop|bonus_lottery)$", "vilbar.c"),
     (r"^fdps_shop_(collect_stock_items|select_item|select_buy_target|"
      r"buy_loop)$", "shop.c"),
     (r"^fdps_shop_(draw_item_entry|render_buy_target_frame|"

@@ -26,7 +26,7 @@ emit 是序列的，一次一支 function，每支各自 commit。檔案落點�
 
 **每個檔的預估行數不超過 1000。** 這不是程式的性質，是模型讀寫的效率界線：超過之後每次改一行都要把整個檔讀進 context。
 
-預估值的來源是 **Ghidra decompiled code 的行數**，由 `tools/code_emit/DumpRoutingInputs.java` 產生。全部 514 支合計約 50,000 行，分成 79 個 `.c`。這是估計不是保證——實際 emit 出來的 C 會偏離，處置規則見下面「超標了怎麼辦」。
+預估值的來源是 **Ghidra decompiled code 的行數**，由 `tools/code_emit/DumpRoutingInputs.java` 產生。全部 514 支合計約 50,000 行，分成 80 個 `.c`。這是估計不是保證——實際 emit 出來的 C 會偏離，處置規則見下面「超標了怎麼辦」。
 
 ## 資料符號歸誰
 
@@ -87,7 +87,7 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 
 ## 檔案表
 
-79 個 `.c`，各自配一個同名 `.h`。逐檔的 function 清單與行數在 `tools/code_emit/data/routing.md`。
+80 個 `.c`，各自配一個同名 `.h`。逐檔的 function 清單與行數在 `tools/code_emit/data/routing.md`。
 
 ### 戰鬥地圖 AI
 
@@ -158,7 +158,8 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 | --- | --- |
 | `village.c` | 村莊階段主迴圈、招牌選單、行走與縮放動畫、金錢顯示 |
 | `vilmenu.c` | 隊員選擇與道具的販售／轉移／裝備迴圈 |
-| `vilshop.c` | 教會、酒館、武器店、隱藏選單、抽獎的畫面 |
+| `vilshop.c` | 教會、武器店、隱藏選單三個畫面：指令列全部通往隊伍共用的櫃檯 |
+| `vilbar.c` | 酒館畫面——指令列是存檔、讀檔與離開遊戲——以及它進場時開的抽獎 |
 | `shop.c` | 商店的選貨與購買流程 |
 | `shopdraw.c` | 商店清單與隊員列的繪製 |
 | `church.c` | 轉職流程與候選人選擇 |

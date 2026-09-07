@@ -2996,7 +2996,7 @@
     },
     "00036460": {
       "name": "fdps_run_bonus_lottery",
-      "target": "vilshop.c",
+      "target": "vilbar.c",
       "body_size": "0x689",
       "status": "committed",
       "emitted_against": "0x689",
