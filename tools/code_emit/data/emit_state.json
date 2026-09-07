@@ -2937,6 +2937,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0xf7"
+    },
+    "00034c10": {
+      "name": "fdps_church_promote_unit",
+      "target": "church.c",
+      "body_size": "0x6a5",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x6a5"
     }
   }
 }
