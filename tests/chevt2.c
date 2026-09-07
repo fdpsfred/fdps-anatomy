@@ -22,10 +22,14 @@
  * the boundary the cases below pin hardest, because every obvious rewrite of
  * the loop would sweep it in too.
  *
- * The chapter 10 cases in the second half of the file stage differently and
- * say why in their own note: that handler's payload is a call into
- * fdps_deploy_wave, which opens ICON.CEL and FIELD.VFS for itself, so the
- * cases that let it fire need those files and skip themselves without them.
+ * The chapter 10 cases in the middle of the file stage differently and say why
+ * in their own note: that handler's payload is a call into fdps_deploy_wave,
+ * which opens ICON.CEL and FIELD.VFS for itself, so the cases that let it fire
+ * need those files and skip themselves without them.
+ *
+ * The chapter 8 cases at the end of the file stage like the chapter 13 ones,
+ * plus a text-block fixture for the draw on the end of that handler; their own
+ * note says what the draw can and cannot be asserted about.
  */
 #include <stddef.h>
 #include <stdio.h>
@@ -697,8 +701,275 @@ static void ch10_fires_once_only(void)
     CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH10_LATCH_SLOT], 1);
 }
 
+/* Chapter 8's guard-death handler at 00037440, from here down.
+ *
+ * It is the chapter 13 handler's shape with the range 0x13..0x13 in place of
+ * 9..0x2c and a behaviour code of 4 in place of 0, plus one draw on the end,
+ * so it is covered the same way: both bounds and the mode are literals in its
+ * instruction stream -- MOV dword ptr [EBP-0x20],0x13 at 00037453, MOV dword
+ * ptr [EBP-0x1c],0x13 at 0003745a, MOV dword ptr [EBP-0x18],0x4 at 00037461,
+ * with the signed inclusive CMP EAX,[EBP-0x10] / JLE at 00037483 -- and the
+ * absence of any guard in front of the walk is asserted by putting the shared
+ * one-shot latch slot up, and by taking the live unit count down to zero, and
+ * watching it write anyway.
+ *
+ * WHICH TEXT ENTRY THE DRAW ASKS FOR IS NOT ASSERTED HERE, for the reason the
+ * chapter 3 section of tests/chevt1.c gives: fdps_draw_text takes its whole
+ * effect through pixels at the VGA aperture, keeps no state and returns a
+ * cursor this handler discards, so a unit test has nothing to read back.  The
+ * entry id is a literal in the instruction stream (PUSH 0xf at 000374c6) and
+ * the reviewer's reading of it is what stands behind the emitted C.  What the
+ * cases below do pin about the draw is that it does not stop the re-aim: every
+ * case runs to the end of the function.
+ *
+ * So the chapter's text block is staged as a fixture whose every entry is a
+ * lone -1 terminator.  fdps_draw_text walks it, draws nothing, touches no
+ * global and returns at once, which is what keeps a case from painting the
+ * screen and standing a modal wait on a keyboard nothing is typing at.
+ */
+
+/* The one index the handler re-aims, read off the two bound constants at
+   00037453 and 0003745a, and the behaviour code the merge ORs in, read off
+   00037461. */
+#define CH08_MAGE_INDEX 0x13
+#define CH08_MODE_WALK_TO_DEST 4
+
+/* Two records past the one that moves, so an off-by-one at either end of the
+   one-element range has somewhere visible to land. */
+#define CH08_STAGE_UNITS 0x16
+
+/* The unit-record stride, the IMUL 0x50 inside fdps_get_unit_record. */
+#define CH08_UNIT_STRIDE 0x50
+
+/* The shared one-shot latch slot.  This handler does not use it, and that is
+   what is asserted. */
+#define CH08_LATCH_SLOT 0x10
+
+/* Enough entries for the id the draw asks for, 0xf, plus the terminator every
+   entry points at. */
+#define CH08_TEXT_ENTRY_COUNT 0x10
+
+static struct fdps_unit_record ch08_units[CH08_STAGE_UNITS];
+static short ch08_text_block[CH08_TEXT_ENTRY_COUNT + 1];
+
+/* Give every record the same AI byte, point the array global at the block and
+   give the draw an entry table whose every id resolves to a lone terminator.
+   The staged value carries a high nibble as well as a behaviour code, because
+   the whole point of the merge is that only one of the two moves. */
+static void stage_ch08_units(int ai_behavior)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) ch08_units;
+    for (i = 0; i < (int) sizeof(ch08_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < CH08_STAGE_UNITS; i++) {
+        ch08_units[i].ai_behavior = (unsigned char) ai_behavior;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch08_units;
+
+    for (i = 0; i < CH08_TEXT_ENTRY_COUNT; i++) {
+        ch08_text_block[i] = (short) (CH08_TEXT_ENTRY_COUNT * 2);
+    }
+    ch08_text_block[CH08_TEXT_ENTRY_COUNT] = -1;
+    data_fdps_current_chapter_text_ptr = (unsigned char *) ch08_text_block;
+}
+
+/* Exactly index 0x13 is rewritten and every record either side of it is left
+   as it was.  The staged 0x52 is behaviour code 2 -- hold position -- under a
+   high nibble of 0x50; index 0x13 comes out 0x54 because the mode ORed in is
+   4, and the rest keep 0x52.  Index 0x12 is the last of the 19 records
+   chapter 8's map opens with and 0x14 is one past the mage, so both ends of
+   the one-element range have a witness. */
+static void ch08_sends_exactly_the_guest_mage(void)
+{
+    int i;
+
+    stage_ch08_units(0x52);
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+
+    for (i = 0; i < CH08_STAGE_UNITS; i++) {
+        if (i == CH08_MAGE_INDEX) {
+            CHECK_EQ(ch08_units[i].ai_behavior, 0x54);
+        } else {
+            CHECK_EQ(ch08_units[i].ai_behavior, 0x52);
+        }
+    }
+}
+
+/* The high nibble is carried across untouched by the AND 0xf0 at 000374a3 and
+   the low nibble ends at 4 whatever it held.  0x40 and 0x80 are the two AI
+   flags read elsewhere, so a merge that assigned the mode whole -- or that
+   masked with anything wider -- would drop them.  Expected values are the
+   staged byte ANDed with 0xf0 and ORed with 4; the last pair is already in
+   mode 4 and has to come back unchanged. */
+static void ch08_keeps_the_high_nibble(void)
+{
+    stage_ch08_units(0);
+    ch08_units[CH08_MAGE_INDEX].ai_behavior = 0xc2;
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0xc4);
+
+    stage_ch08_units(0);
+    ch08_units[CH08_MAGE_INDEX].ai_behavior = 0x00;
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x04);
+
+    stage_ch08_units(0);
+    ch08_units[CH08_MAGE_INDEX].ai_behavior = 0xff;
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0xf4);
+
+    stage_ch08_units(0);
+    ch08_units[CH08_MAGE_INDEX].ai_behavior = 0x8b;
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x84);
+
+    stage_ch08_units(0);
+    ch08_units[CH08_MAGE_INDEX].ai_behavior = 0x44;
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x44);
+}
+
+/* One byte of one record moves and nothing either side of it does.  Every byte
+   of the block is stamped 0x55 first, so a store that landed at +0x33 or +0x35
+   -- the death-script operand's high byte and ai_dest_x -- is visible; 0x55 is
+   also a value whose low nibble is not already 4, so the write that should
+   happen is visible too.  The record the store lands in is the one the IMUL
+   0x50 inside fdps_get_unit_record picks, and 0x13 is far enough from the base
+   that a wrong stride misses it. */
+static void ch08_touches_no_neighbouring_byte(void)
+{
+    unsigned char *bytes;
+    int i;
+
+    stage_ch08_units(0);
+    bytes = (unsigned char *) ch08_units;
+    for (i = 0; i < (int) sizeof(ch08_units); i++) {
+        bytes[i] = 0x55;
+    }
+    data_fdps_map_unit_array_ptr = bytes;
+
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+
+    CHECK_EQ(bytes[CH08_MAGE_INDEX * CH08_UNIT_STRIDE + 0x34], 0x54);
+    CHECK_EQ(bytes[CH08_MAGE_INDEX * CH08_UNIT_STRIDE + 0x33], 0x55);
+    CHECK_EQ(bytes[CH08_MAGE_INDEX * CH08_UNIT_STRIDE + 0x35], 0x55);
+    CHECK_EQ(bytes[0x12 * CH08_UNIT_STRIDE + 0x34], 0x55);
+    CHECK_EQ(bytes[0x14 * CH08_UNIT_STRIDE + 0x34], 0x55);
+}
+
+/* Nothing guards the walk: the instruction after the argument-slot store at
+   0003744c is the first of the three constant stores, with no compare between
+   them, so this handler has no one-shot latch and re-aims the mage every time
+   it is called.  The latch slot is put up before the call and the mage still
+   moves; the slot is also asserted unchanged, because a handler that had grown
+   a latch would have written it. */
+static void ch08_has_no_one_shot_latch(void)
+{
+    stage_ch08_units(0x52);
+    data_fdps_map_cell_event_triggered_flags[CH08_LATCH_SLOT] = 1;
+
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x54);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08_LATCH_SLOT], 1);
+
+    stage_ch08_units(0x52);
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x54);
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x54);
+}
+
+/* data_fdps_map_unit_count is not consulted: nothing in the instruction stream
+   reads 0x00060150, and the write goes ahead with the count at zero and with
+   it at 0x13, the value it holds for the whole of chapter 8 before the turn-3
+   cutscene deploys the mage.  That is the case the original writes one record
+   past the end of the live array in, and adding the guard that would stop it
+   is the divergence this case exists to catch.  The count is restored so the
+   later chapter 10 cases stage from where they expect. */
+static void ch08_writes_without_a_unit_count_check(void)
+{
+    int saved_count;
+
+    saved_count = data_fdps_map_unit_count;
+
+    stage_ch08_units(0x52);
+    data_fdps_map_unit_count = 0;
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x54);
+
+    stage_ch08_units(0x52);
+    data_fdps_map_unit_count = CH08_MAGE_INDEX;
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x54);
+
+    data_fdps_map_unit_count = saved_count;
+}
+
+/* The incoming argument slot is overwritten with 0 at 0003744c and never read,
+   and neither bound of the walk comes from it, so the index the dispatcher
+   passes cannot reach the result.  The death-script runner is the only path
+   this slot is reached by in the shipped data and it pushes the index of the
+   unit whose death is being resolved -- 14 for map07.dat's record 18, the
+   soldier posted by the cells -- so that index is the realistic argument; 0,
+   the mage's own index, -1 and 30000 are the ones an argument-driven handler
+   would betray itself on, and index 0x12 is asserted unchanged throughout. */
+static void ch08_ignores_the_unit_index_argument(void)
+{
+    stage_ch08_units(0x52);
+    fdps_chapter_08_event_send_guest_mage_to_cells(14);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x54);
+    CHECK_EQ(ch08_units[14].ai_behavior, 0x52);
+
+    stage_ch08_units(0x52);
+    fdps_chapter_08_event_send_guest_mage_to_cells(CH08_MAGE_INDEX);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x54);
+    CHECK_EQ(ch08_units[0x12].ai_behavior, 0x52);
+
+    stage_ch08_units(0x52);
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x54);
+    CHECK_EQ(ch08_units[0].ai_behavior, 0x52);
+
+    stage_ch08_units(0x52);
+    fdps_chapter_08_event_send_guest_mage_to_cells(-1);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x54);
+    CHECK_EQ(ch08_units[0x12].ai_behavior, 0x52);
+
+    stage_ch08_units(0x52);
+    fdps_chapter_08_event_send_guest_mage_to_cells(30000);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x54);
+    CHECK_EQ(ch08_units[0x12].ai_behavior, 0x52);
+}
+
+/* The behaviour code the merge leaves behind is 4 and not any of the codes the
+   handler's siblings write: mode 0 advances on the nearest opposing unit, mode
+   2 holds position, and only mode 4 makes
+   fdps_map_actor_behavior_step walk the unit toward the destination tile in
+   its own record, which is what sends the mage to the cage.  Asserted against
+   the low nibble on its own so the case says which half of the byte carries
+   it. */
+static void ch08_mode_is_walk_to_destination(void)
+{
+    stage_ch08_units(0);
+    fdps_chapter_08_event_send_guest_mage_to_cells(0);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior & 0x0f,
+             CH08_MODE_WALK_TO_DEST);
+    CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x04);
+}
+
 void run_chevt2_tests(void)
 {
+    RUN_TEST(ch08_sends_exactly_the_guest_mage);
+    RUN_TEST(ch08_keeps_the_high_nibble);
+    RUN_TEST(ch08_touches_no_neighbouring_byte);
+    RUN_TEST(ch08_has_no_one_shot_latch);
+    RUN_TEST(ch08_writes_without_a_unit_count_check);
+    RUN_TEST(ch08_ignores_the_unit_index_argument);
+    RUN_TEST(ch08_mode_is_walk_to_destination);
     RUN_TEST(ch13_record_shape_matches_the_offsets);
     RUN_TEST(ch13_advance_clears_exactly_the_range);
     RUN_TEST(ch13_advance_leaves_the_last_deployed_unit);

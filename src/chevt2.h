@@ -13,6 +13,50 @@
 #ifndef CHEVT2_H
 #define CHEVT2_H
 
+/* Chapter 8's guard-death event: sends the chapter's guest mage walking to the
+   cell block and paints the line that goes with it.
+
+   It re-aims exactly one unit, battle index 0x13 -- both bounds of its inline
+   range walk hold that literal, and the compare between them is signed and
+   inclusive, so the walk runs once.  Index 0x13 is the guest mage 費塔加:
+   map07.dat's deployment record 19 is the file's only wave-1 record, so the
+   turn-3 cutscene brings him on as the first index past the 19 units the map
+   opens with.
+
+   It rewrites the low nibble -- the behaviour code -- of that record's
+   ai_behavior byte at offset 0x34 to 4 and leaves the high nibble alone,
+   because bits 0x40 and 0x80 of it are independent AI flags other code reads
+   on their own.  Mode 4 moves the map cursor to the unit and then walks it
+   toward the destination tile held in its own record, so the mage stops
+   fighting and heads for the cage.  The record is resolved through
+   fdps_get_unit_record (unit.h).
+
+   NOTHING IS RANGE CHECKED AND THERE IS NO LATCH.  data_fdps_map_unit_count is
+   not consulted, so a call made before the cutscene has deployed unit 0x13
+   writes one byte past the live array; that is what the original does, and
+   adding the guard would take the write away rather than change what the
+   player sees -- the mage is not on the map to walk either way, which is the
+   guide's "clear the enemies before 費塔加 appears and he never goes to open
+   the cell".  And nothing records that the handler ran, so calling it again
+   runs it again; the merge is idempotent, but a unit the AI has since moved
+   into another behaviour mode would be pushed back to mode 4.
+
+   The re-aim happens first and the draw second: text entry 0x0f of the loaded
+   chapter's block, through fdps_draw_text (text.h) straight onto the mode 13h
+   aperture at 0xa0000, pitch 0x140, in the standard message colours.  The
+   cursor it returns is discarded.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with 0 before anything else and never read, so
+   any index, in range or not, behaves the same.
+
+   Table slot 11, named by the opcode-2 unit script of map07.dat's deployment
+   record 18 -- the soldier that becomes battle unit 14 -- so the event fires
+   when that soldier is killed.  fdps_chapter_08_event_villagers_leave_cells
+   re-aims the same unit when the cage is opened. */
+extern void fdps_chapter_08_event_send_guest_mage_to_cells(int unit_index);
+#pragma aux fdps_chapter_08_event_send_guest_mage_to_cells "*" parm caller [];
+
 /* Chapter 10's stairway ambush: brings on the ten enemy reinforcements the
    chapter's map tags as wave 10, once.
 

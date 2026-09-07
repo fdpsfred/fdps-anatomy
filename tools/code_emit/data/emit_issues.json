@@ -2176,5 +2176,20 @@
       "status": "open",
       "same_as": "emit#1"
     }
+  ],
+  "00037440": [
+    {
+      "from": "emit",
+      "what": "The handler writes unit index 0x13 with no existence check, and the rebuild's heap will not put the same thing after the unit array that the original's did. fdps_deploy_unit sizes the array at exactly data_fdps_map_unit_count * 0x50; until chapter 8's turn-3 cutscene deploys map07.dat's single wave-1 record the battle holds 19 records at indices 0..0x12, so a player who kills the soldier of deployment record 18 before turn 3 makes the original read-modify-write offset 0x13 * 0x50 + 0x34 = 0x624 of a 0x5f0-byte block. The emitted C reproduces that write exactly rather than guarding it (adding the guard would remove behaviour the original has, and the guide's account -- clear the enemies before 費塔加 appears and he never goes to open the cell -- is satisfied either way, because the mage is not on the map to be re-aimed). What cannot be settled from here is what those 0x34 bytes past the end land on: it is whatever the DOS/4G heap placed after the block, and the rebuild's allocation order need not match the original's. If the original happened to land on padding and the rebuild lands on a live structure, the two diverge on that one path even though the source is faithful.",
+      "needs": "A real-machine playtest of chapter 8 in which the soldier posted by the cell block is killed before turn 3, run against both the original FDPS.LE and the rebuild, watching for a difference in what happens afterwards. Settling it statically instead would need the heap layout at that moment in both builds -- the sequence of allocations fdps_deploy_unit and the chapter loader make before the array, which no function emitted so far pins down.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached the same concern independently and confirmed the window it depends on is real: MAP07.DAT's only wave-1 record is the guest mage, and the record before it carries death-script opcode 2 with operand 11, this handler's table slot -- so killing that soldier before the turn-3 cutscene genuinely does drive the unguarded write at index 0x13. What my pass adds is only that confirmation; I could not narrow the heap question either, and nothing reachable from here (Ghidra, the resource dumps, the knowledge base, the object file) pins the allocation order around the unit array in either build.",
+      "needs": "As the emitter states.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

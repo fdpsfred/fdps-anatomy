@@ -3057,6 +3057,14 @@
       "status": "committed",
       "emitted_against": "0xd1",
       "rounds": 0
+    },
+    "00037440": {
+      "name": "fdps_chapter_08_event_send_guest_mage_to_cells",
+      "target": "chevt2.c",
+      "body_size": "0x9d",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x9d"
     }
   }
 }

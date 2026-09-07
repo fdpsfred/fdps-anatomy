@@ -12,6 +12,7 @@
 #include "gamedata.h"
 #include "unit.h"
 #include "deploy.h"
+#include "text.h"
 #include "chevt2.h"
 
 /* The slot of data_fdps_map_cell_event_triggered_flags (gamedata.h) the
@@ -28,6 +29,130 @@
    src/chevt1.c and src/chpost2.c spell the same slot out for the same reason;
    it stays file-local at all three ends because no header owns it. */
 #define CHAPTER_EVENT_ONE_SHOT_SLOT 0x10
+
+/* The half of the AI byte the two merges in this file keep: AND DL,0xf0 at
+   000374a3 in the chapter 8 handler and at 00037a33 in the chapter 13 one.
+   The four bits it preserves are flags other code reads on their own -- 0x40
+   in fdps_map_actor_take_best_action and 0x80 in fdps_score_targets_for_item
+   -- while the four it drops are the behaviour code
+   fdps_map_actor_behavior_step isolates with AND AL,0xf and dispatches on.
+   src/unit.c, src/chevt1.c and src/chevt3.c spell the same mask out for the
+   same field; it stays file-local at every end because no header owns it. */
+#define AI_BEHAVIOR_FLAG_NIBBLE 0xf0
+
+/* The mode 13h aperture and its row stride, PUSH 0xa0000 at 000374c1 and
+   PUSH 0x140 at 000374bc.  0xa0000 stays a literal because it is where the
+   display adapter answers and not the address of anything the linker places
+   (rebuild_info/pitfalls.md, contract E). */
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_PITCH 0x140
+
+/* The standard message colours, PUSH 0xd0 / PUSH 0x0 / PUSH 0x6d at 000374b7,
+   000374b5 and 000374b3: glyph fill, no cell background, and the shadow the
+   outline colour becomes while the font's outline flag is clear.  Every
+   ordinary line of spoken game text is drawn with these three. */
+#define MESSAGE_FG_COLOR 0xd0
+#define MESSAGE_BG_COLOR 0
+#define MESSAGE_OUTLINE_COLOR 0x6d
+
+/* The one unit index chapter 8's guard-death handler re-aims.  0x13 is parked
+   twice, at [EBP-0x20] (00037453) and at [EBP-0x1c] (0003745a), because the
+   inline range walk keeps a first and a last bound, and here they are the same
+   constant -- so the loop runs exactly once.  Unit 0x13 is the guest mage
+   費塔加: map07.dat's deployment record 19 is the file's only wave-1 record and
+   it comes on as the first index past the 19 units the map opens with. */
+#define CH08_GUEST_MAGE_UNIT_INDEX 0x13
+
+/* The behaviour code the chapter 8 merge ORs in: the constant parked at
+   [EBP-0x18] at 00037461, copied on into [EBP-0x14] at 00037477, which is the
+   slot MOV DH,byte ptr [EBP-0x14] at 000374a9 reads.  Mode 4 is the one
+   fdps_map_actor_behavior_step handles by moving the map cursor to the unit
+   and then walking it toward the destination tile held in its own record
+   (ai_dest_x, ai_dest_y), so the unit stops fighting and heads for a place.
+   For unit 0x13 that tile is map 7's cell block on the right edge. */
+#define AI_BEHAVIOR_MODE_WALK_TO_DEST 4
+
+/* Which line the handler speaks: PUSH 0xf at 000374c6, an index into the
+   chapter's own FDETXT block rather than the shared one. */
+#define CH08_CELL_ORDER_TEXT_ID 0x0f
+
+/* 00037440.  Chapter 8's guard-death event: the enemy soldier posted by the
+   cell block has been killed, so the chapter's guest mage is sent walking to
+   the cage and the line that goes with it is painted.
+
+   The body is one copy of the inline expansion the chapter 2, 5 and 7
+   handlers in chevt1.c and the chapter 13 one below carry --
+   fdps_object_set_field34_low_nibble_range (00036b60) with
+   the constant argument triple (0x13, 0x13, 4) -- and it has the same
+   fingerprint: the three constants are parked at [EBP-0x20], [EBP-0x1c] and
+   [EBP-0x18] (00037453..00037461), copied into a second set of slots at
+   [EBP-0xc], [EBP-0x10] and [EBP-0x14] (00037468..00037477), and only then is
+   the counter at [EBP-0x8] seeded from the first of them.  There is no CALL to
+   that helper in the body; the only calls are fdps_get_unit_record at 00037492
+   and fdps_draw_text at 000374ce, so writing the range as a call to the helper
+   would put a CALL in the rebuild that the original does not make.
+
+   The compare at 00037483 -- CMP EAX,dword ptr [EBP-0x10] / JLE 0003748f -- is
+   signed and inclusive, and both bounds hold 0x13, so the walk touches exactly
+   one record and index 0x13 is written rather than skipped.
+
+   The merge is the read-modify-write of the one byte its siblings do -- MOV
+   DL,[EAX+0x34] / AND DL,0xf0 / MOV DH,[EBP-0x14] / OR DH,DL / MOV
+   [EAX+0x34],DH at 0003749d..000374ae -- so the behaviour code goes to 4 and
+   the two AI flag bits in the high nibble are carried across untouched.
+   Assigning the whole byte instead would clear the 0x40 and 0x80 bits
+   fdps_map_actor_take_best_action and fdps_score_targets_for_item read, which
+   sends the unit down a different AI path.
+
+   The record pointer comes back in EAX from the CALL at 00037492 and is stored
+   to [EBP-0x4] at 0003749a, then re-read at 0003749d for the load and again at
+   000374a6 for the store, so both halves of the merge address the record that
+   iteration fetched.
+
+   NOTHING GUARDS THE WRITE.  There is no latch, no compare in front of the
+   loop and no test against data_fdps_map_unit_count: the instruction after the
+   argument-slot store at 0003744c is the first of the three constant stores.
+   The unit array is sized at exactly data_fdps_map_unit_count * 0x50, and
+   until chapter 8's turn-3 cutscene deploys map07.dat's single wave-1 record
+   the battle holds 19 records at indices 0..0x12 -- so a soldier that dies
+   before then makes the original write offset 0x13 * 0x50 + 0x34 of a
+   0x5f0-byte block.  Adding the natural `if (0x13 < data_fdps_map_unit_count)`
+   would remove a write the original performs, and it is not why the mage stays
+   put in that case: he is not on the map to be re-aimed either way, which is
+   the guide's 如果在費塔加出現前就已經清光敵人，那麼他便不會去開牢門.
+
+   The draw is unconditional and follows the walk (CALL 0x0001ff60 at
+   000374ce), so the order is re-aim first, speak second.  fdps_draw_text hands
+   back a cursor in EAX and this handler discards it: nothing between the ADD
+   ESP,0x1c at 000374d3 and the RET at 000374dc reads EAX, and no dispatcher
+   reads what comes back, so the result is void.
+
+   unit_index is the handler table's shared parameter.  MOV dword ptr
+   [EBP+0x14],0x0 at 0003744c writes zero over the incoming slot before
+   anything else and nothing ever reads it back, so which unit died cannot
+   reach anything this handler does; the store has no observable effect,
+   because the slot belongs to the caller's outgoing argument area and the
+   death-script runner drops it with ADD ESP,0x4 at 0001dcb4. */
+void fdps_chapter_08_event_send_guest_mage_to_cells(int unit_index)
+{
+    struct fdps_unit_record *guest_mage;
+    int mage_unit_index;
+
+    unit_index = 0;
+
+    for (mage_unit_index = CH08_GUEST_MAGE_UNIT_INDEX;
+         mage_unit_index <= CH08_GUEST_MAGE_UNIT_INDEX;
+         mage_unit_index++) {
+        guest_mage = fdps_get_unit_record(mage_unit_index);
+        guest_mage->ai_behavior = (unsigned char)
+            ((guest_mage->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+             AI_BEHAVIOR_MODE_WALK_TO_DEST);
+    }
+
+    fdps_draw_text(data_fdps_current_chapter_text_ptr, CH08_CELL_ORDER_TEXT_ID,
+                   (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                   MESSAGE_FG_COLOR, MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+}
 
 /* The wave the ambush brings on: PUSH 0xa at 000378d9, matched against byte
    0x15 of each 0x1a-byte deployment record of the resident MAP%02d.DAT block.
@@ -87,15 +212,6 @@ void fdps_chapter_10_event_deploy_wave_10(int unit_index)
                          AMBUSH_PLACE_EXACT);
     }
 }
-
-/* The half of the AI byte the merge below keeps: AND DL,0xf0 at 00037a33.  The
-   four bits it preserves are flags other code reads on their own -- 0x40 in
-   fdps_map_actor_take_best_action and 0x80 in fdps_score_targets_for_item --
-   while the four it drops are the behaviour code fdps_map_actor_behavior_step
-   isolates with AND AL,0xf and dispatches on.  src/unit.c and src/chevt1.c
-   spell the same mask out for the same field; it stays file-local at all three
-   ends because no header owns it. */
-#define AI_BEHAVIOR_FLAG_NIBBLE 0xf0
 
 /* The behaviour code the merge ORs in, and it is 0: the constant parked at
    [EBP-0x18] at 000379f1 is 0x0, copied on into [EBP-0x14], which is the slot
