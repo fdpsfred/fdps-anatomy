@@ -11,7 +11,10 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "unit.h"
+#include "unititem.h"
 #include "deploy.h"
+#include "msgwin.h"
+#include "text.h"
 #include "chevt3.h"
 
 /* The half of the AI byte the merge below keeps: AND DL,0xf0 at 00037b53.  The
@@ -99,6 +102,294 @@ void fdps_chapter_15_event_activate_enemy_group(int unit_index)
         unit->ai_behavior = (unsigned char)
             ((unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
              AI_BEHAVIOR_MODE_ADVANCE);
+    }
+}
+
+/* The mode 13h pen the message panel's own text sits at and the screen's row
+   stride: PUSH 0xaa44a and PUSH 0x140 in front of every one of the ten draws
+   the smith event below makes (00037d1d / 00037d18 and the nine that repeat
+   them).  0xaa44a is screen (138, 131), the origin fdps_draw_text puts the pen
+   back to on a page break, and it stays a literal because it is an address
+   inside the display adapter's aperture rather than the address of anything the
+   linker places (rebuild_info/pitfalls.md, contract E). */
+#define PANEL_TEXT_ORIGIN 0x000aa44a
+#define VGA_SCREEN_PITCH 0x140
+
+/* The standard message colours, PUSH 0xd0 / PUSH 0x0 / PUSH 0x6d in front of
+   each of those draws (00037d13, 00037d11 and 00037d0f and their repeats):
+   glyph fill, no cell background, and the shadow the outline colour becomes
+   while the font's outline flag is clear. */
+#define MESSAGE_FG_COLOR 0xd0
+#define MESSAGE_BG_COLOR 0
+#define MESSAGE_OUTLINE_COLOR 0x6d
+
+/* The speaker under whose portrait the whole scene is played: FACE.CEL record
+   129, PUSH 0x81 in front of every one of the ten window opens. */
+#define CH16_SMITH_FACE_INDEX 0x81
+
+/* The only unit that can spring the event, CMP dword ptr [EBP+0x14],0x0 at
+   00037ce3.  Battle unit 0 is Randis, always the first unit deployed, and the
+   swords the smith asks after are his. */
+#define CH16_SMITH_UNIT_INDEX 0
+
+/* The last battle turn the event still fires on: CMP dword ptr
+   [0x00069ce8],0x14 / JLE at 00037cf4, a signed inclusive compare, so turn 20
+   is inside the window and turn 21 is not. */
+#define CH16_SMITH_LAST_TURN 0x14
+
+/* The element of data_fdps_map_cell_event_triggered_flags (gamedata.h) this
+   event latches: byte ptr [0x000640e8], element 0x10 of the 32-entry array
+   based at 0x000640d8 -- the same slot the one-shot handlers of this family
+   share, and the first the map's own event codes cannot reach. */
+#define CH16_SMITH_LATCH_SLOT 0x10
+
+/* The two swords the smith reacts to and the line he speaks for each, PUSH
+   0x58 at 00037d3e with MOV [EBP-0x4],0xd at 00037d53, and PUSH 0x59 at
+   00037d5c with MOV [EBP-0x4],0xe at 00037d71.  Item 0x58 is 修佩魯 and 0x59
+   is 雷德 (assets/items.md); the line id doubles as which of them was found,
+   because the frame slot starts at 0 and only these two writes ever change
+   it. */
+#define CH16_REFORGEABLE_SWORD_ITEM_ID 0x58
+#define CH16_BREAKING_SWORD_ITEM_ID 0x59
+#define CH16_REFORGEABLE_SWORD_REPLY 0x0d
+#define CH16_BREAKING_SWORD_REPLY 0x0e
+
+/* The state the reply slot is left in when Randis carries neither sword, MOV
+   dword ptr [EBP-0x4],0x0 at 00037cdc, and the test that reads it back at
+   00037d78.  Zero is not a text id here, it is "no sword found". */
+#define CH16_NO_SWORD_FOUND 0
+
+/* What fdps_unit_find_item_slot answers when the unit is not carrying the item
+   at all, the -1 both compares at 00037d4d and 00037d6b are against. */
+#define CH16_ITEM_NOT_CARRIED (-1)
+
+/* The lines of the scene that are not one of the two replies above, each a
+   PUSH of its id into the draw: the greeting at 00037d22, the offer question at
+   00037dd9, the parting line at 00037fff and 00037fbe, the two forging lines at
+   00037e20 and 00037e57, the finished sword at 00037e9e, the failure at
+   00037ee7, the second question at 00037f26 and the seal at 00037f69.  They are
+   entries of the chapter's own FDETXT16.TXT block, which carries 23 strings, so
+   0x16 is its last. */
+#define CH16_GREETING_TEXT_ID 0x0c
+#define CH16_OFFER_QUESTION_TEXT_ID 0x0f
+#define CH16_PARTING_TEXT_ID 0x10
+#define CH16_FORGE_OPENING_TEXT_ID 0x11
+#define CH16_FORGE_WORKING_TEXT_ID 0x12
+#define CH16_FORGE_SUCCEEDED_TEXT_ID 0x13
+#define CH16_FORGE_FAILED_TEXT_ID 0x14
+#define CH16_COMPENSATION_QUESTION_TEXT_ID 0x15
+#define CH16_SEAL_GIVEN_TEXT_ID 0x16
+
+/* The answer that accepts: fdps_prompt_two_choice's 0 is the left option and
+   the only value either test here matches (CMP dword ptr [EBP+0x14],0x0 / JNZ
+   at 00037df6 and 00037f43).  Its 1 and its -1 both fall into the other arm, so
+   a cancel declines rather than accepting (msgwin.h). */
+#define CH16_ANSWER_ACCEPT 0
+
+/* What the sword becomes, what the failed forging pays and what it hands over
+   instead: PUSH 0xa0 at 00037eb3 -- 灼烈之劍 -- ADD dword ptr
+   [0x000643a4],0x1388 at 00037efc, PUSH 0xa9 at 00037f7e -- 神的聖印 -- and
+   PUSH 0xa3 at 00037f8f -- 金屬礦 (assets/items.md). */
+#define CH16_REFORGED_SWORD_ITEM_ID 0xa0
+#define CH16_COMPENSATION_GOLD 0x1388
+#define CH16_SEAL_ITEM_ID 0xa9
+#define CH16_ORE_ITEM_ID 0xa3
+
+/* 00037cd0.  Chapter 16's wandering-smith event: Randis has ended his turn on
+   the smith's tile, and if he is still carrying one of the two named swords
+   inside the first twenty battle turns the smith offers to reforge it --
+   修佩魯 comes back as 灼烈之劍, 雷德 breaks and is paid off with 5000 gold
+   and the player's pick of 神的聖印 or 金屬礦.
+
+   THE THREE GATES ARE ONE SHORT-CIRCUIT CHAIN and the whole body is skipped
+   unless all three pass: CMP dword ptr [EBP+0x14],0x0 / JNZ at 00037ce3, CMP
+   byte ptr [0x000640e8],0x0 / JZ at 00037ce9 and CMP dword ptr
+   [0x00069ce8],0x14 / JLE at 00037cf4, each failure jumping to the same exit at
+   00038014.  The turn compare is signed and inclusive.
+
+   Every line is spoken the same way -- fdps_message_window_open(0x81),
+   fdps_draw_text into the standing panel, fdps_message_window_close -- and each
+   of the ten is a separate copy of those calls in the instruction stream.  The
+   two questions are the exception: the panel carrying message 0xf and the one
+   carrying 0x15 are left standing while fdps_prompt_two_choice runs, and are
+   retracted only after the answer comes back (CALL 00017990 at 00037de9 and
+   00037f36, each followed by the close at 00037df1 and 00037f3e).
+
+   THE LATCH IS RAISED AFTER THE GREETING AND BEFORE THE INVENTORY IS SEARCHED,
+   at 00037d37, so a Randis who reaches the tile carrying neither sword burns
+   the encounter for the rest of the chapter (chevt3.h).
+
+   The two lookups are an else-chain, not two independent tests: a hit on
+   0x58 sets the reply to 0xd and jumps over the second lookup at 00037d5a, so
+   0x59 is only asked after 0x58 has missed, and the slot the second lookup
+   leaves is the one used.  With neither sword the reply is still 0 and the
+   handler returns at 00037d7c.
+
+   The three inventory calls and the stat rebuild all push a literal 0 rather
+   than the argument (00037e6e, 00037eb8, 00037f83, 00037f8f and 00037fd3);
+   the entry gate has already forced the two to be equal.
+
+   Both prompt answers land in the incoming argument slot at 00037dee and
+   00037f3b, which is dead from the entry test onwards; they are a local here,
+   because what the slot holds after the first store is an answer and not a unit
+   index.
+
+   fdps_draw_text hands back a cursor and fdps_unit_add_item an "it fitted"
+   flag; nothing between either CALL and the next instruction reads EAX, so both
+   results are discarded.  Nothing sets EAX before the RET at 0003801a and no
+   dispatcher reads what comes back, so the result is void.
+
+   unit_index is the handler table's shared parameter: the battle unit that
+   ended its turn on the trigger tile.  It is read once, by the first gate, and
+   never again. */
+void fdps_chapter_16_event_wandering_smith_forge(int unit_index)
+{
+    /* Which line the smith speaks about what he was handed, and which sword
+       that is: 0xd for 修佩魯, 0xe for 雷德, and 0 while neither has been
+       found. */
+    int smith_reply_text_id;
+    /* Which of the eight inventory entries that sword sits in, as
+       fdps_unit_find_item_slot answers it, or -1 for not carried. */
+    int sword_slot;
+    /* The answer to the question just asked: 0 accepts, 1 declines, -1 is a
+       cancel.  The same slot carries both questions' answers. */
+    int answer;
+
+    smith_reply_text_id = CH16_NO_SWORD_FOUND;
+
+    if (unit_index == CH16_SMITH_UNIT_INDEX &&
+        data_fdps_map_cell_event_triggered_flags[CH16_SMITH_LATCH_SLOT] == 0 &&
+        data_fdps_battle_turn_counter <= CH16_SMITH_LAST_TURN) {
+        fdps_message_window_open(CH16_SMITH_FACE_INDEX);
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH16_GREETING_TEXT_ID,
+                       (unsigned char *) PANEL_TEXT_ORIGIN, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_message_window_close();
+
+        data_fdps_map_cell_event_triggered_flags[CH16_SMITH_LATCH_SLOT] = 1;
+
+        sword_slot = fdps_unit_find_item_slot(CH16_SMITH_UNIT_INDEX,
+                                              CH16_REFORGEABLE_SWORD_ITEM_ID);
+        if (sword_slot == CH16_ITEM_NOT_CARRIED) {
+            sword_slot = fdps_unit_find_item_slot(CH16_SMITH_UNIT_INDEX,
+                                                  CH16_BREAKING_SWORD_ITEM_ID);
+            if (sword_slot != CH16_ITEM_NOT_CARRIED) {
+                smith_reply_text_id = CH16_BREAKING_SWORD_REPLY;
+            }
+        } else {
+            smith_reply_text_id = CH16_REFORGEABLE_SWORD_REPLY;
+        }
+
+        if (smith_reply_text_id != CH16_NO_SWORD_FOUND) {
+            fdps_message_window_open(CH16_SMITH_FACE_INDEX);
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           smith_reply_text_id,
+                           (unsigned char *) PANEL_TEXT_ORIGIN,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+            fdps_message_window_close();
+
+            fdps_message_window_open(CH16_SMITH_FACE_INDEX);
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CH16_OFFER_QUESTION_TEXT_ID,
+                           (unsigned char *) PANEL_TEXT_ORIGIN,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+            answer = fdps_prompt_two_choice();
+            fdps_message_window_close();
+
+            if (answer == CH16_ANSWER_ACCEPT) {
+                fdps_message_window_open(CH16_SMITH_FACE_INDEX);
+                fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                               CH16_FORGE_OPENING_TEXT_ID,
+                               (unsigned char *) PANEL_TEXT_ORIGIN,
+                               VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                               MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+                fdps_message_window_close();
+
+                fdps_message_window_open(CH16_SMITH_FACE_INDEX);
+                fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                               CH16_FORGE_WORKING_TEXT_ID,
+                               (unsigned char *) PANEL_TEXT_ORIGIN,
+                               VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                               MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+                fdps_message_window_close();
+
+                fdps_unit_remove_item(CH16_SMITH_UNIT_INDEX, sword_slot);
+
+                if (smith_reply_text_id == CH16_REFORGEABLE_SWORD_REPLY) {
+                    fdps_message_window_open(CH16_SMITH_FACE_INDEX);
+                    fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                                   CH16_FORGE_SUCCEEDED_TEXT_ID,
+                                   (unsigned char *) PANEL_TEXT_ORIGIN,
+                                   VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                                   MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+                    fdps_message_window_close();
+
+                    fdps_unit_add_item(CH16_SMITH_UNIT_INDEX,
+                                       CH16_REFORGED_SWORD_ITEM_ID);
+                } else {
+                    fdps_message_window_open(CH16_SMITH_FACE_INDEX);
+                    fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                                   CH16_FORGE_FAILED_TEXT_ID,
+                                   (unsigned char *) PANEL_TEXT_ORIGIN,
+                                   VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                                   MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+                    fdps_message_window_close();
+
+                    data_fdps_shared_party_total_gold =
+                        data_fdps_shared_party_total_gold +
+                        CH16_COMPENSATION_GOLD;
+
+                    fdps_message_window_open(CH16_SMITH_FACE_INDEX);
+                    fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                                   CH16_COMPENSATION_QUESTION_TEXT_ID,
+                                   (unsigned char *) PANEL_TEXT_ORIGIN,
+                                   VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                                   MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+                    answer = fdps_prompt_two_choice();
+                    fdps_message_window_close();
+
+                    if (answer == CH16_ANSWER_ACCEPT) {
+                        fdps_message_window_open(CH16_SMITH_FACE_INDEX);
+                        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                                       CH16_SEAL_GIVEN_TEXT_ID,
+                                       (unsigned char *) PANEL_TEXT_ORIGIN,
+                                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                                       MESSAGE_BG_COLOR,
+                                       MESSAGE_OUTLINE_COLOR);
+                        fdps_message_window_close();
+
+                        fdps_unit_add_item(CH16_SMITH_UNIT_INDEX,
+                                           CH16_SEAL_ITEM_ID);
+                    } else {
+                        fdps_unit_add_item(CH16_SMITH_UNIT_INDEX,
+                                           CH16_ORE_ITEM_ID);
+
+                        fdps_message_window_open(CH16_SMITH_FACE_INDEX);
+                        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                                       CH16_PARTING_TEXT_ID,
+                                       (unsigned char *) PANEL_TEXT_ORIGIN,
+                                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                                       MESSAGE_BG_COLOR,
+                                       MESSAGE_OUTLINE_COLOR);
+                        fdps_message_window_close();
+                    }
+                }
+
+                fdps_unit_recompute_combat_stats(CH16_SMITH_UNIT_INDEX);
+            } else {
+                fdps_message_window_open(CH16_SMITH_FACE_INDEX);
+                fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                               CH16_PARTING_TEXT_ID,
+                               (unsigned char *) PANEL_TEXT_ORIGIN,
+                               VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                               MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+                fdps_message_window_close();
+            }
+        }
     }
 }
 

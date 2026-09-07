@@ -32,6 +32,13 @@
  * because the inclusive top bound is what every obvious rewrite of the loop
  * gets wrong at exactly one record.
  *
+ * The chapter 16 wandering-smith cases in the middle of the file stage
+ * differently again and say why in their own banner: that handler plays a
+ * scripted scene of message windows and two-option prompts, so its cases run
+ * the whole scene in mode 13h with a timer interrupt playing the player's keys
+ * and read back the state it left -- the one-shot byte, Randis's inventory, the
+ * purse and the stats the rebuild rewrites.
+ *
  * The chapter 17 cases in the last third of the file stage differently and say
  * why in their own note: that handler's whole body is a call into
  * fdps_deploy_wave, which opens ICON.CEL and FIELD.VFS for itself, so the
@@ -40,9 +47,13 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "keybd.h"
 #include "unit.h"
 #include "chevt3.h"
 
@@ -273,6 +284,760 @@ static void ch15_activate_ignores_the_unit_index_argument(void)
     fdps_chapter_15_event_activate_enemy_group(30000);
     CHECK_EQ(ch15_units[CH15_LAST_INDEX].ai_behavior, 0x50);
     CHECK_EQ(ch15_units[0].ai_behavior, 0x52);
+}
+
+/* ---- fdps_chapter_16_event_wandering_smith_forge, 00037cd0 ---------------
+ *
+ * Expected values come from the assembly and from assets/items.md, never from
+ * the emitted C: CMP dword ptr [EBP+0x14],0x0 / JNZ at 00037ce3, CMP byte ptr
+ * [0x000640e8],0x0 / JZ at 00037ce9 and CMP dword ptr [0x00069ce8],0x14 / JLE
+ * at 00037cf4 for the three gates; MOV byte ptr [0x000640e8],0x1 at 00037d37
+ * for where the latch is raised; PUSH 0x58 at 00037d3e and PUSH 0x59 at
+ * 00037d5c for the two swords looked for and the order they are looked for in;
+ * the two CMP dword ptr [EBP+0x14],0x0 / JNZ at 00037df6 and 00037f43 for the
+ * answers that accept; ADD dword ptr [0x000643a4],0x1388 at 00037efc for the
+ * payment; and PUSH 0xa0, PUSH 0xa9 and PUSH 0xa3 at 00037eb3, 00037f7e and
+ * 00037f8f for what is handed over.  Item ids 0x58 修佩魯, 0x59 雷德,
+ * 0xa0 灼烈之劍, 0xa9 神的聖印 and 0xa3 金屬礦 are assets/items.md's.
+ *
+ * WHAT THE HANDLER IS OBSERVED THROUGH.  It returns nothing and paints its
+ * whole scene, so what a case reads back afterwards is the state it left: the
+ * one-shot byte, Randis's eight inventory entries, the party purse and the four
+ * derived combat stats fdps_unit_recompute_combat_stats rewrites.  Those stats
+ * are the witness that the rebuild ran at all -- each case stamps ap, dp, hit
+ * and ev with a sentinel first, and a path that reached the rebuild replaces
+ * them with the record's own bases while a path that did not leaves the
+ * sentinel standing.
+ *
+ * THE SCENE IS PLAYED FOR REAL, the way tests/icon.c plays
+ * fdps_icon_script_prompt_three_way_choice: the run is made in mode 13h with a
+ * timer interrupt in place, because both the panel slides and
+ * fdps_prompt_two_choice pace themselves on data_fdps_timer_tick_counter, which
+ * nothing advances in a test image.  Message.cel and Shadow.cel are stood in
+ * for with generated sheets, the chapter text block is one whose every entry is
+ * a lone terminator, and the scene is left empty so the close's recomposition
+ * draws nothing.
+ *
+ * HOW THE KEYS ARE PLAYED, and why this feeder is tests/icon.c's rather than
+ * tests/msgwin.c's: a run here contains up to two prompts, every prompt opens
+ * with fdps_flush_keyboard_queue, and the window between the two is many timer
+ * ticks long, so a feeder that appended one code per tick would lose the second
+ * prompt's key and hang.  This one appends only while the ring is EMPTY and
+ * steps through the case's list only when the read index has moved, which only
+ * fdps_read_keyboard_queue moves.  Past the end of the list the last code is
+ * held, so a run that asks for one more prompt than the case staged answers it
+ * and fails an assertion instead of spinning forever.  How many codes the run
+ * consumed is therefore how many prompts it ran, which is what separates the
+ * one-question path from the two-question one.
+ *
+ * WHICH TEXT ENTRY EACH DRAW ASKS FOR IS NOT ASSERTED, for the reason the
+ * chapter 8 section of tests/chevt2.c gives and one more of this handler's own:
+ * fdps_draw_text takes its whole effect through pixels and returns a cursor
+ * this handler discards, and every one of the ten draws here is followed by
+ * fdps_message_window_close, which repaints the whole visible page -- so not
+ * one of them is still on screen when the handler returns.  The ten ids are
+ * literals in the instruction stream and the reviewer's reading of them is what
+ * stands behind the emitted C.  What the cases do pin about the draws is that
+ * they do not stop the trade: every case runs to the end of the function.
+ *
+ * FACE.CEL HAS TO BE THERE.  Every panel reveal passes face 0x81, and
+ * fdps_message_window_open sends a non-negative face straight to
+ * fdps_load_and_draw_portrait, which ends the process at exit(1) on a sheet it
+ * cannot open rather than failing an assertion.  Every case below skips itself
+ * when the sheet is not next to the executable.
+ * ------------------------------------------------------------------ */
+
+#define SMITH_VGA_BASE 0x000a0000
+#define SMITH_MODE_TEXT 0x03
+#define SMITH_MODE_320X200X256 0x13
+#define SMITH_FACE_SHEET "FACE.CEL"
+#define SMITH_TIMER_VECTOR 8
+
+/* The make codes the prompt answers to: Enter confirms the highlighted cell,
+   which is the left one on entry, the right arrow moves to the other cell, and
+   Esc cancels with -1 (msgwin.h). */
+#define SMITH_KEY_ESC 0x01
+#define SMITH_KEY_ENTER 0x1c
+#define SMITH_KEY_RIGHT 0x4d
+#define SMITH_KEYS_MAX 4
+
+/* The element of data_fdps_map_cell_event_triggered_flags the handler latches,
+   byte ptr [0x000640e8] -- element 0x10 of the array based at 0x000640d8. */
+#define SMITH_LATCH_SLOT 0x10
+
+/* The last turn the event still fires on, CMP 0x14 / JLE at 00037cf4, and the
+   first turn it does not. */
+#define SMITH_LAST_TURN 0x14
+#define SMITH_FIRST_LATE_TURN 0x15
+
+/* The five item ids the scene moves, all of them literals in the instruction
+   stream and all named in assets/items.md. */
+#define SMITH_REFORGEABLE_SWORD 0x58
+#define SMITH_BREAKING_SWORD 0x59
+#define SMITH_REFORGED_SWORD 0xa0
+#define SMITH_SEAL 0xa9
+#define SMITH_ORE 0xa3
+
+/* What the broken sword is paid for, ADD dword ptr [0x000643a4],0x1388. */
+#define SMITH_COMPENSATION_GOLD 5000
+
+/* The purse each case starts from.  Any value does; a round one just makes the
+   5000 obvious in a failure line. */
+#define SMITH_START_GOLD 1000
+
+/* An inventory entry nobody is carrying: flag bit 0x80 is what
+   fdps_unit_item_count and fdps_unit_add_item read as empty, and the stale id
+   beside it is the 0xff a deployment leaves (unititem.h). */
+#define SMITH_EMPTY_FLAG 0x80
+#define SMITH_EMPTY_ID 0xff
+
+/* An entry that is carried but not equipped: bit 0x40 clear, so
+   fdps_unit_recompute_combat_stats adds no item modifier and the four stats it
+   writes are the record's own bases. */
+#define SMITH_CARRIED_FLAG 0x00
+
+/* Randis's base stats and the sentinel the four derived stats are stamped with
+   before each run.  The bases are arbitrary and only have to differ from each
+   other and from the sentinel; with no equipped entry and no status timer the
+   rebuild writes ap = ap_base, dp = dp_base and both hit and ev = dx_base
+   (unit.h). */
+#define SMITH_AP_BASE 40
+#define SMITH_DP_BASE 30
+#define SMITH_DX_BASE 20
+#define SMITH_STAT_SENTINEL 0x7777
+
+/* How many inventory entries a record has, and the array's stride. */
+#define SMITH_INVENTORY_ENTRIES 8
+#define SMITH_STAGE_UNITS 2
+
+/* The chapter text block: 23 entries, which is what FDETXT16.TXT carries, every
+   one of them pointing at the same lone terminator so that a draw walks it,
+   paints nothing and returns at once. */
+#define SMITH_TEXT_IDS 0x17
+#define SMITH_TEXT_EMPTY_AT 0x40
+#define SMITH_TEXT_BLOCK_BYTES (SMITH_TEXT_EMPTY_AT + 2)
+#define SMITH_TEXT_END (-1)
+
+/* The Message.cel stand-in: one 302 x 73 sprite encoded as five fill runs per
+   row, because a fill run cannot be longer than 64 pixels. */
+#define SMITH_PANEL_W 302
+#define SMITH_PANEL_H 73
+#define SMITH_PANEL_FILL_MAX 64
+#define SMITH_PANEL_SEGMENTS 5
+#define SMITH_PANEL_LAST_SEGMENT_W 46
+#define SMITH_PANEL_ROW_BYTES (SMITH_PANEL_SEGMENTS * 2)
+#define SMITH_PANEL_STREAM_AT 0x40
+#define SMITH_PANEL_SHEET_BYTES (SMITH_PANEL_STREAM_AT \
+                                 + SMITH_PANEL_H * SMITH_PANEL_ROW_BYTES)
+#define SMITH_PANEL_COLOR 0x40
+
+/* The Shadow.cel stand-in the prompt draws its two option cells out of:
+   fourteen 24 x 24 sprites, one fill run per row, sprite i filled with i. */
+#define SMITH_SHADOW_SPRITES 14
+#define SMITH_SHADOW_SPRITE_W 24
+#define SMITH_SHADOW_SPRITE_H 24
+#define SMITH_SHADOW_STREAM_BYTES (SMITH_SHADOW_SPRITE_H * 2)
+#define SMITH_SHADOW_STREAM_AT 0x50
+#define SMITH_SHADOW_SHEET_BYTES (SMITH_SHADOW_STREAM_AT \
+                                  + SMITH_SHADOW_SPRITES \
+                                    * SMITH_SHADOW_STREAM_BYTES)
+
+/* The .CEL header fields both fixtures carry, and a table position neither
+   reader may consult: both hardwire the table at 0x0f. */
+#define SMITH_CEL_TABLE_AT 0x0f
+#define SMITH_CEL_DECOY_TABLE_AT 0x100
+#define SMITH_CEL_VERSION 1
+#define SMITH_CEL_PIXEL_FORMAT 2
+
+/* Every item id is a valid index into the staged item table:
+   fdps_unit_recompute_combat_stats follows an equipped flag into
+   fdps_get_item_record without a bounds check. */
+#define SMITH_ITEM_TABLE_ROWS 256
+
+static unsigned char smith_panel_sheet[SMITH_PANEL_SHEET_BYTES];
+static unsigned char smith_shadow_sheet[SMITH_SHADOW_SHEET_BYTES];
+static unsigned char smith_text_block[SMITH_TEXT_BLOCK_BYTES];
+static struct fdps_unit_record smith_units[SMITH_STAGE_UNITS];
+static struct fdps_item_effect smith_items[SMITH_ITEM_TABLE_ROWS];
+static unsigned char smith_keys[SMITH_KEYS_MAX];
+static volatile int smith_key_count;
+static volatile int smith_keys_read;
+static volatile int smith_last_head;
+static int smith_fixtures_staged = 0;
+static void (__interrupt __far *smith_saved_timer)();
+
+static void smith_u16(unsigned char *image, int at, unsigned int value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void smith_u32(unsigned char *image, int at, unsigned long value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    image[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    image[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+static int smith_sheet_present(void)
+{
+    FILE *probe;
+
+    probe = fopen(SMITH_FACE_SHEET, "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+    return 1;
+}
+
+static void smith_cel_header(unsigned char *sheet, int width, int height,
+                             int sprites)
+{
+    sheet[0] = 'C';
+    sheet[1] = 'E';
+    sheet[2] = 'L';
+    smith_u16(sheet, 0x03, SMITH_CEL_VERSION);
+    smith_u16(sheet, 0x05, SMITH_CEL_DECOY_TABLE_AT);
+    smith_u16(sheet, 0x07, (unsigned int) width);
+    smith_u16(sheet, 0x09, (unsigned int) height);
+    smith_u16(sheet, 0x0b, (unsigned int) sprites);
+    smith_u16(sheet, 0x0d, SMITH_CEL_PIXEL_FORMAT);
+}
+
+/* The two sheets and the text block.  None of them changes between cases, so
+   they are built once. */
+static void smith_stage_fixtures(void)
+{
+    int row;
+    int segment;
+    int cursor;
+    int run;
+    int sprite;
+    int stream_at;
+    int text_id;
+
+    if (smith_fixtures_staged) {
+        return;
+    }
+    smith_fixtures_staged = 1;
+
+    memset(smith_panel_sheet, 0, (size_t) SMITH_PANEL_SHEET_BYTES);
+    smith_cel_header(smith_panel_sheet, SMITH_PANEL_W, SMITH_PANEL_H, 1);
+    smith_u32(smith_panel_sheet, SMITH_CEL_TABLE_AT,
+              (unsigned long) SMITH_PANEL_STREAM_AT);
+    smith_u32(smith_panel_sheet, SMITH_CEL_TABLE_AT + 4,
+              (unsigned long) SMITH_PANEL_SHEET_BYTES);
+    for (row = 0; row < SMITH_PANEL_H; row++) {
+        cursor = SMITH_PANEL_STREAM_AT + row * SMITH_PANEL_ROW_BYTES;
+        for (segment = 0; segment < SMITH_PANEL_SEGMENTS; segment++) {
+            if (segment == SMITH_PANEL_SEGMENTS - 1) {
+                run = SMITH_PANEL_LAST_SEGMENT_W;
+            } else {
+                run = SMITH_PANEL_FILL_MAX;
+            }
+            smith_panel_sheet[cursor] = (unsigned char) (run - 1);
+            smith_panel_sheet[cursor + 1] = SMITH_PANEL_COLOR;
+            cursor += 2;
+        }
+    }
+
+    memset(smith_shadow_sheet, 0, (size_t) SMITH_SHADOW_SHEET_BYTES);
+    smith_cel_header(smith_shadow_sheet, SMITH_SHADOW_SPRITE_W,
+                     SMITH_SHADOW_SPRITE_H, SMITH_SHADOW_SPRITES);
+    for (sprite = 0; sprite < SMITH_SHADOW_SPRITES; sprite++) {
+        stream_at = SMITH_SHADOW_STREAM_AT
+                    + sprite * SMITH_SHADOW_STREAM_BYTES;
+        smith_u32(smith_shadow_sheet, SMITH_CEL_TABLE_AT + sprite * 4,
+                  (unsigned long) stream_at);
+        for (row = 0; row < SMITH_SHADOW_SPRITE_H; row++) {
+            smith_shadow_sheet[stream_at + row * 2] =
+                (unsigned char) (SMITH_SHADOW_SPRITE_W - 1);
+            smith_shadow_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) sprite;
+        }
+    }
+    smith_u32(smith_shadow_sheet,
+              SMITH_CEL_TABLE_AT + SMITH_SHADOW_SPRITES * 4,
+              (unsigned long) SMITH_SHADOW_SHEET_BYTES);
+
+    memset(smith_text_block, 0, (size_t) SMITH_TEXT_BLOCK_BYTES);
+    *(short *) (smith_text_block + SMITH_TEXT_EMPTY_AT) = (short) SMITH_TEXT_END;
+    for (text_id = 0; text_id < SMITH_TEXT_IDS; text_id++) {
+        *(short *) (smith_text_block + text_id * 2) =
+            (short) SMITH_TEXT_EMPTY_AT;
+    }
+}
+
+/* Everything the callees read that this section has to make definite: the text
+   block, the two sheets, an item table for the stat rebuild, an empty scene so
+   the close's recomposition draws nothing, and village mode so the prompt lifts
+   its backdrop off the visible page instead of composing one. */
+static void smith_stage_globals(void)
+{
+    smith_stage_fixtures();
+
+    data_fdps_current_chapter_text_ptr = smith_text_block;
+    data_fdps_message_window_sheet_ptr = smith_panel_sheet;
+    data_fdps_shadow_sprite_sheet_ptr = smith_shadow_sheet;
+    data_fdps_item_effect_table_ptr = (unsigned char *) smith_items;
+
+    data_fdps_village_mode_flag = 1;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_timer_tick_counter = 0;
+}
+
+/* Randis's record: an empty eight-entry inventory carrying whichever items the
+   case names, the three stat bases the rebuild reads and the sentinel in the
+   four stats it writes.  Item ids are given as -1 for "carry nothing here". */
+static void smith_stage_unit(int first_item, int second_item)
+{
+    int entry;
+
+    memset(smith_units, 0, sizeof(smith_units));
+    memset(smith_items, 0, sizeof(smith_items));
+
+    for (entry = 0; entry < SMITH_INVENTORY_ENTRIES; entry++) {
+        smith_units[0].inventory_slots[entry * 2] = SMITH_EMPTY_FLAG;
+        smith_units[0].inventory_slots[entry * 2 + 1] = SMITH_EMPTY_ID;
+    }
+    if (first_item >= 0) {
+        smith_units[0].inventory_slots[0] = SMITH_CARRIED_FLAG;
+        smith_units[0].inventory_slots[1] = (unsigned char) first_item;
+    }
+    if (second_item >= 0) {
+        smith_units[0].inventory_slots[2] = SMITH_CARRIED_FLAG;
+        smith_units[0].inventory_slots[3] = (unsigned char) second_item;
+    }
+
+    smith_units[0].ap_base = SMITH_AP_BASE;
+    smith_units[0].dp_base = SMITH_DP_BASE;
+    smith_units[0].dx_base = SMITH_DX_BASE;
+    smith_units[0].ap = SMITH_STAT_SENTINEL;
+    smith_units[0].dp = SMITH_STAT_SENTINEL;
+    smith_units[0].hit = SMITH_STAT_SENTINEL;
+    smith_units[0].ev = SMITH_STAT_SENTINEL;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) smith_units;
+}
+
+/* The three globals the entry gates and the payment read. */
+static void smith_stage_state(int battle_turn, int latch)
+{
+    data_fdps_battle_turn_counter = battle_turn;
+    data_fdps_map_cell_event_triggered_flags[SMITH_LATCH_SLOT] =
+        (unsigned char) latch;
+    data_fdps_shared_party_total_gold = SMITH_START_GOLD;
+}
+
+/* Loads the codes this case plays, in the order the prompts read them. */
+static void smith_stage_keys(int count, int first, int second, int third)
+{
+    smith_keys[0] = (unsigned char) first;
+    smith_keys[1] = (unsigned char) second;
+    smith_keys[2] = (unsigned char) third;
+    smith_keys[3] = (unsigned char) third;
+    smith_key_count = count;
+    smith_keys_read = 0;
+}
+
+static void smith_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* The player.  It advances the game's clock like the real timer handler and
+   appends the case's next make code the way fdps_keyboard_isr does, but only
+   while the ring is empty, and it steps through the list on the read index
+   moving rather than on ticks -- see the note at the top of this section. */
+static void __interrupt __far smith_timer_isr(void)
+{
+    int slot;
+    int next_key;
+
+    ++data_fdps_timer_tick_counter;
+
+    if (data_fdps_input_scancode_queue_head != smith_last_head) {
+        smith_last_head = data_fdps_input_scancode_queue_head;
+        smith_keys_read++;
+    }
+
+    if (data_fdps_input_scancode_queue_head
+            == data_fdps_input_scancode_queue_write_index) {
+        next_key = smith_keys_read;
+        if (next_key >= smith_key_count) {
+            next_key = smith_key_count - 1;
+        }
+        slot = data_fdps_input_scancode_queue_write_index;
+        data_fdps_input_scancode_queue[slot] = smith_keys[next_key];
+        slot++;
+        if (slot == SCANCODE_QUEUE_LEN) {
+            slot = 0;
+        }
+        data_fdps_input_scancode_queue_write_index = slot;
+    }
+
+    _chain_intr(smith_saved_timer);
+}
+
+/* One whole firing: the adapter in the mode the game runs it in, the feeder
+   installed, and text mode back before anything is asserted so that a failure
+   prints on a readable screen. */
+static void smith_run(int unit_index)
+{
+    smith_stage_globals();
+
+    smith_last_head = 0;
+    smith_keys_read = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+
+    smith_set_mode(SMITH_MODE_320X200X256);
+    smith_saved_timer = _dos_getvect(SMITH_TIMER_VECTOR);
+    _dos_setvect(SMITH_TIMER_VECTOR, smith_timer_isr);
+    fdps_chapter_16_event_wandering_smith_forge(unit_index);
+    _dos_setvect(SMITH_TIMER_VECTOR, smith_saved_timer);
+    smith_set_mode(SMITH_MODE_TEXT);
+
+    if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+        free(data_fdps_portrait_sprite_buf_ptr);
+        data_fdps_portrait_sprite_buf_ptr = NULL;
+    }
+    data_fdps_village_mode_flag = 0;
+}
+
+static int smith_entry_flag(int entry)
+{
+    return (int) smith_units[0].inventory_slots[entry * 2];
+}
+
+static int smith_entry_id(int entry)
+{
+    return (int) smith_units[0].inventory_slots[entry * 2 + 1];
+}
+
+/* Whether any of the eight entries holds that id, flag byte disregarded, which
+   is how a case says an item was or was not handed over. */
+static int smith_carries(int item_id)
+{
+    int entry;
+
+    for (entry = 0; entry < SMITH_INVENTORY_ENTRIES; entry++) {
+        if (smith_entry_flag(entry) != SMITH_EMPTY_FLAG
+                && smith_entry_id(entry) == item_id) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* ---------------------------------------------------------------------- */
+
+/* The record fields these cases read back and the stride they are indexed by.
+   Every one of them would agree with itself while addressing another byte if
+   the layout were wrong. */
+static void smith_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, inventory_slots), 0x0a);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ap), 0x48);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ev), 0x4e);
+}
+
+/* 修佩魯 accepted: the sword leaves the bag and 灼烈之劍 takes its place, the
+   purse is not touched because that branch pays nothing, the latch is up and
+   the stat rebuild has run.  The new entry is at index 0 because
+   fdps_unit_remove_item packs the entries down before fdps_unit_add_item looks
+   for the first empty one.  Exactly one prompt runs, which is what says the
+   0x59 arm was not entered. */
+static void smith_reforges_the_first_sword(void)
+{
+    if (!smith_sheet_present()) {
+        return;
+    }
+    smith_stage_unit(SMITH_REFORGEABLE_SWORD, -1);
+    smith_stage_state(1, 0);
+    smith_stage_keys(1, SMITH_KEY_ENTER, 0, 0);
+
+    smith_run(0);
+
+    CHECK_EQ(smith_keys_read, 1);
+    CHECK_EQ(smith_carries(SMITH_REFORGEABLE_SWORD), 0);
+    CHECK_EQ(smith_carries(SMITH_REFORGED_SWORD), 1);
+    CHECK_EQ(smith_entry_id(0), SMITH_REFORGED_SWORD);
+    CHECK_EQ(smith_entry_flag(0), SMITH_CARRIED_FLAG);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SMITH_START_GOLD);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[SMITH_LATCH_SLOT], 1);
+    CHECK_EQ(smith_units[0].ap, SMITH_AP_BASE);
+    CHECK_EQ(smith_units[0].dp, SMITH_DP_BASE);
+    CHECK_EQ(smith_units[0].hit, SMITH_DX_BASE);
+    CHECK_EQ(smith_units[0].ev, SMITH_DX_BASE);
+}
+
+/* 雷德 accepted, and the second question accepted too: the sword is gone, the
+   purse has gained exactly 5000 and 神的聖印 is what came back.  Two prompts
+   run, which is the difference between this branch and the one above; the
+   metal ore must NOT be there, because the two gifts are the two arms of the
+   same test. */
+static void smith_breaks_the_second_sword_and_pays(void)
+{
+    if (!smith_sheet_present()) {
+        return;
+    }
+    smith_stage_unit(SMITH_BREAKING_SWORD, -1);
+    smith_stage_state(1, 0);
+    smith_stage_keys(2, SMITH_KEY_ENTER, SMITH_KEY_ENTER, 0);
+
+    smith_run(0);
+
+    CHECK_EQ(smith_keys_read, 2);
+    CHECK_EQ(smith_carries(SMITH_BREAKING_SWORD), 0);
+    CHECK_EQ(smith_carries(SMITH_SEAL), 1);
+    CHECK_EQ(smith_carries(SMITH_ORE), 0);
+    CHECK_EQ(smith_carries(SMITH_REFORGED_SWORD), 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold,
+             SMITH_START_GOLD + SMITH_COMPENSATION_GOLD);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[SMITH_LATCH_SLOT], 1);
+    CHECK_EQ(smith_units[0].ap, SMITH_AP_BASE);
+}
+
+/* The second question declined gives the ore instead, and the 5000 is paid
+   either way: the payment is above the question, not inside its yes arm.  The
+   run takes three codes -- Enter for the offer, then right and Enter for the
+   second question -- which is one more code and the same two prompts as the
+   case above. */
+static void smith_second_question_declined_gives_the_ore(void)
+{
+    if (!smith_sheet_present()) {
+        return;
+    }
+    smith_stage_unit(SMITH_BREAKING_SWORD, -1);
+    smith_stage_state(1, 0);
+    smith_stage_keys(3, SMITH_KEY_ENTER, SMITH_KEY_RIGHT, SMITH_KEY_ENTER);
+
+    smith_run(0);
+
+    CHECK_EQ(smith_keys_read, 3);
+    CHECK_EQ(smith_carries(SMITH_BREAKING_SWORD), 0);
+    CHECK_EQ(smith_carries(SMITH_ORE), 1);
+    CHECK_EQ(smith_carries(SMITH_SEAL), 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold,
+             SMITH_START_GOLD + SMITH_COMPENSATION_GOLD);
+    CHECK_EQ(smith_units[0].ap, SMITH_AP_BASE);
+}
+
+/* The offer declined leaves everything alone but the latch: the sword is still
+   in entry 0, nothing was handed over, the purse is untouched and the four
+   stats still carry the sentinel, because the rebuild sits inside the accepted
+   arm.  The latch is up all the same -- it was raised before the inventory was
+   even searched. */
+static void smith_offer_declined_keeps_the_sword(void)
+{
+    if (!smith_sheet_present()) {
+        return;
+    }
+    smith_stage_unit(SMITH_REFORGEABLE_SWORD, -1);
+    smith_stage_state(1, 0);
+    smith_stage_keys(2, SMITH_KEY_RIGHT, SMITH_KEY_ENTER, 0);
+
+    smith_run(0);
+
+    CHECK_EQ(smith_keys_read, 2);
+    CHECK_EQ(smith_entry_id(0), SMITH_REFORGEABLE_SWORD);
+    CHECK_EQ(smith_entry_flag(0), SMITH_CARRIED_FLAG);
+    CHECK_EQ(smith_carries(SMITH_REFORGED_SWORD), 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SMITH_START_GOLD);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[SMITH_LATCH_SLOT], 1);
+    CHECK_EQ(smith_units[0].ap, SMITH_STAT_SENTINEL);
+    CHECK_EQ(smith_units[0].dp, SMITH_STAT_SENTINEL);
+}
+
+/* A cancel is not the right-hand option but it declines exactly as one: Esc
+   answers -1 and the test the handler makes is against 0, so the sword stays.
+   This is the case a rewrite as "answer == 1 means no" would fail, by treating
+   the cancel as an acceptance and forging the sword the player backed out
+   of. */
+static void smith_cancel_declines_like_the_right_option(void)
+{
+    if (!smith_sheet_present()) {
+        return;
+    }
+    smith_stage_unit(SMITH_REFORGEABLE_SWORD, -1);
+    smith_stage_state(1, 0);
+    smith_stage_keys(1, SMITH_KEY_ESC, 0, 0);
+
+    smith_run(0);
+
+    CHECK_EQ(smith_keys_read, 1);
+    CHECK_EQ(smith_entry_id(0), SMITH_REFORGEABLE_SWORD);
+    CHECK_EQ(smith_carries(SMITH_REFORGED_SWORD), 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SMITH_START_GOLD);
+    CHECK_EQ(smith_units[0].ap, SMITH_STAT_SENTINEL);
+}
+
+/* The two lookups are an else-chain and 修佩魯 is asked for first: a Randis
+   holding both swords has 修佩魯 taken and 灼烈之劍 given, and 雷德 is still
+   in the bag afterwards.  One prompt and an untouched purse are the other half
+   of the same statement -- the 雷德 arm asks a second question and pays 5000,
+   and neither happened. */
+static void smith_prefers_the_first_sword_when_both_are_carried(void)
+{
+    if (!smith_sheet_present()) {
+        return;
+    }
+    smith_stage_unit(SMITH_REFORGEABLE_SWORD, SMITH_BREAKING_SWORD);
+    smith_stage_state(1, 0);
+    smith_stage_keys(1, SMITH_KEY_ENTER, 0, 0);
+
+    smith_run(0);
+
+    CHECK_EQ(smith_keys_read, 1);
+    CHECK_EQ(smith_carries(SMITH_REFORGEABLE_SWORD), 0);
+    CHECK_EQ(smith_carries(SMITH_BREAKING_SWORD), 1);
+    CHECK_EQ(smith_carries(SMITH_REFORGED_SWORD), 1);
+    CHECK_EQ(smith_entry_id(0), SMITH_BREAKING_SWORD);
+    CHECK_EQ(smith_entry_id(1), SMITH_REFORGED_SWORD);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SMITH_START_GOLD);
+}
+
+/* THE LATCH IS SPENT BY A RANDIS CARRYING NEITHER SWORD.  It is raised
+   immediately after the greeting and before the inventory is searched, so the
+   encounter is over for the rest of the chapter and the second visit below
+   proves it: the same Randis, now holding 修佩魯, is refused.  A handler that
+   latched where the trade happens -- which is what the sibling events do and
+   what the obvious C would write -- would forge the sword on that second
+   visit.
+
+   No prompt runs on either visit, which is what the consumed-code count says,
+   and the stat sentinel stands because the rebuild was never reached. */
+static void smith_with_no_sword_spends_the_latch(void)
+{
+    if (!smith_sheet_present()) {
+        return;
+    }
+    smith_stage_unit(-1, -1);
+    smith_stage_state(1, 0);
+    smith_stage_keys(1, SMITH_KEY_ENTER, 0, 0);
+
+    smith_run(0);
+
+    CHECK_EQ(smith_keys_read, 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[SMITH_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SMITH_START_GOLD);
+    CHECK_EQ(smith_units[0].ap, SMITH_STAT_SENTINEL);
+
+    smith_stage_unit(SMITH_REFORGEABLE_SWORD, -1);
+    smith_stage_keys(1, SMITH_KEY_ENTER, 0, 0);
+
+    smith_run(0);
+
+    CHECK_EQ(smith_keys_read, 0);
+    CHECK_EQ(smith_entry_id(0), SMITH_REFORGEABLE_SWORD);
+    CHECK_EQ(smith_carries(SMITH_REFORGED_SWORD), 0);
+    CHECK_EQ(smith_units[0].ap, SMITH_STAT_SENTINEL);
+}
+
+/* The turn bound is inclusive, because the compare at 00037cf4 is JLE: turn 20
+   still fires and turn 21 does not.  Both sides are asserted through the latch,
+   which the body raises before it looks at anything else, and the sword is left
+   untouched on the firing side because no prompt is answered there -- the
+   twentieth-turn visit is made with an empty bag, so it stops at the greeting.
+   A rewrite as `< 0x14` would refuse the twentieth turn and this is the case
+   that would catch it. */
+static void smith_fires_on_the_last_turn_and_not_after(void)
+{
+    static int late_turns[4] = {SMITH_FIRST_LATE_TURN, 0x16, 100, 30000};
+    int i;
+
+    if (!smith_sheet_present()) {
+        return;
+    }
+    smith_stage_unit(-1, -1);
+    smith_stage_state(SMITH_LAST_TURN, 0);
+    smith_stage_keys(1, SMITH_KEY_ENTER, 0, 0);
+
+    smith_run(0);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[SMITH_LATCH_SLOT], 1);
+    CHECK_EQ(smith_keys_read, 0);
+
+    for (i = 0; i < 4; i++) {
+        smith_stage_unit(SMITH_REFORGEABLE_SWORD, -1);
+        smith_stage_state(late_turns[i], 0);
+        smith_stage_keys(1, SMITH_KEY_ENTER, 0, 0);
+
+        smith_run(0);
+
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[SMITH_LATCH_SLOT], 0);
+        CHECK_EQ(smith_keys_read, 0);
+        CHECK_EQ(smith_entry_id(0), SMITH_REFORGEABLE_SWORD);
+        CHECK_EQ(smith_carries(SMITH_REFORGED_SWORD), 0);
+        CHECK_EQ(data_fdps_shared_party_total_gold, SMITH_START_GOLD);
+        CHECK_EQ(smith_units[0].ap, SMITH_STAT_SENTINEL);
+    }
+}
+
+/* Only battle unit 0 springs it.  The gate is an equality against 0 -- unit 0
+   is Randis, always the first unit deployed -- so every other index, in range
+   or not, leaves the handler doing nothing at all: the latch stays down, which
+   means the encounter is still there for Randis himself. */
+static void smith_fires_for_no_unit_but_randis(void)
+{
+    static int other_units[5] = {1, 2, 9, -1, 30000};
+    int i;
+
+    if (!smith_sheet_present()) {
+        return;
+    }
+    for (i = 0; i < 5; i++) {
+        smith_stage_unit(SMITH_REFORGEABLE_SWORD, -1);
+        smith_stage_state(1, 0);
+        smith_stage_keys(1, SMITH_KEY_ENTER, 0, 0);
+
+        smith_run(other_units[i]);
+
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[SMITH_LATCH_SLOT], 0);
+        CHECK_EQ(smith_keys_read, 0);
+        CHECK_EQ(smith_entry_id(0), SMITH_REFORGEABLE_SWORD);
+        CHECK_EQ(smith_carries(SMITH_REFORGED_SWORD), 0);
+        CHECK_EQ(data_fdps_shared_party_total_gold, SMITH_START_GOLD);
+        CHECK_EQ(smith_units[0].ap, SMITH_STAT_SENTINEL);
+    }
+}
+
+/* A latch that is already up refuses the whole scene, greeting included: the
+   byte the gate reads is element 0x10 of the array and the handler leaves it
+   as it found it.  The two neighbouring elements are put up as well and then
+   asserted untouched, because a gate reading one byte to either side would
+   pass here and fail nothing. */
+static void smith_does_not_fire_twice(void)
+{
+    if (!smith_sheet_present()) {
+        return;
+    }
+    smith_stage_unit(SMITH_REFORGEABLE_SWORD, -1);
+    smith_stage_state(1, 1);
+    data_fdps_map_cell_event_triggered_flags[SMITH_LATCH_SLOT - 1] = 1;
+    data_fdps_map_cell_event_triggered_flags[SMITH_LATCH_SLOT + 1] = 1;
+    smith_stage_keys(1, SMITH_KEY_ENTER, 0, 0);
+
+    smith_run(0);
+
+    CHECK_EQ(smith_keys_read, 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[SMITH_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[SMITH_LATCH_SLOT - 1], 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[SMITH_LATCH_SLOT + 1], 1);
+    CHECK_EQ(smith_entry_id(0), SMITH_REFORGEABLE_SWORD);
+    CHECK_EQ(smith_carries(SMITH_REFORGED_SWORD), 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SMITH_START_GOLD);
+    CHECK_EQ(smith_units[0].ap, SMITH_STAT_SENTINEL);
 }
 
 /* The two inclusive ranges the chapter 16 handler's two inline loops cover,
@@ -1244,6 +2009,17 @@ void run_chevt3_tests(void)
     RUN_TEST(ch15_activate_has_no_one_shot_latch);
     RUN_TEST(ch15_activate_touches_no_neighbouring_byte);
     RUN_TEST(ch15_activate_ignores_the_unit_index_argument);
+    RUN_TEST(smith_record_shape_matches_the_offsets);
+    RUN_TEST(smith_reforges_the_first_sword);
+    RUN_TEST(smith_breaks_the_second_sword_and_pays);
+    RUN_TEST(smith_second_question_declined_gives_the_ore);
+    RUN_TEST(smith_offer_declined_keeps_the_sword);
+    RUN_TEST(smith_cancel_declines_like_the_right_option);
+    RUN_TEST(smith_prefers_the_first_sword_when_both_are_carried);
+    RUN_TEST(smith_with_no_sword_spends_the_latch);
+    RUN_TEST(smith_fires_on_the_last_turn_and_not_after);
+    RUN_TEST(smith_fires_for_no_unit_but_randis);
+    RUN_TEST(smith_does_not_fire_twice);
     RUN_TEST(ch16_turn5_clears_the_second_wave_block);
     RUN_TEST(ch16_other_turn_clears_the_opening_block);
     RUN_TEST(ch16_both_ranges_include_their_last_index);

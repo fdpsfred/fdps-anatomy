@@ -3102,6 +3102,14 @@
       "status": "committed",
       "emitted_against": "0x9e",
       "rounds": 0
+    },
+    "00037cd0": {
+      "name": "fdps_chapter_16_event_wandering_smith_forge",
+      "target": "chevt3.c",
+      "body_size": "0x34b",
+      "status": "committed",
+      "emitted_against": "0x34b",
+      "rounds": 0
     }
   }
 }

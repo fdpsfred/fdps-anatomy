@@ -2214,5 +2214,20 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "00037cd0": [
+    {
+      "from": "emit",
+      "status": "open",
+      "what": "Which of FDETXT16.TXT's 23 entries each of the ten draws puts on screen is not covered by any assertion. The ids are literals in the instruction stream (0xc, the reply 0xd or 0xe, 0xf, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16) and the emitted C carries them one for one, but they cannot be read back in a unit test: every draw is followed by fdps_message_window_close, which repaints the whole visible page, so not one of them is still on screen when the handler returns. A pair of ids swapped between two draws would compile, pass all 121 checks and show the player the wrong line.",
+      "needs": "A playtest of chapter 16 in DOSBox-X -- walk Randis onto map15's cell (2,12) inside the first twenty turns carrying 修佩魯, and again carrying 雷德, and read the ten lines against the original executable doing the same. That is the only thing that observes text the close wipes."
+    },
+    {
+      "from": "review",
+      "status": "open",
+      "what": "Reached the same place independently and can narrow it. The half about whether the emitted C carries the right ids is settled and needs no playtest: I read the eleven ids out of the original's instruction stream (0xc at 00037d22, the reply at 00037da5, 0xf at 00037dd9, 0x11 at 00037e20, 0x12 at 00037e57, 0x13 at 00037e9e, 0x14 at 00037ee7, 0x15 at 00037f26, 0x16 at 00037f69, 0x10 at 00037fbe and 00037fff) and then out of the emitted CHEVT3.OBJ, and they agree one for one in the same order -- so a swapped pair would already be visible today by disassembling the object, not only by playing the chapter. What is genuinely open is narrower: which Chinese line each id actually holds, i.e. whether the plate's and the header's labels for them (greeting, verdict, offer, parting, forging, finished sword, failure, second question, seal) are the right words. That cannot be read out of the executable at all.",
+      "needs": "Either a dump of FDETXT16.TXT's 23 entries out of Field.vfs read against the labels, which would settle it without a machine, or the chapter 16 playtest the emitter describes. The object comparison above already covers the ids themselves and can be repeated whenever this file is touched.",
+      "same_as": "emit#0"
+    }
   ]
 }

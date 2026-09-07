@@ -9788,7 +9788,7 @@ The order of events:
    - Reaction line 0xe (雷德): message 0x14 says the forging failed, DAT_000643a4 -- the party gold global fdps_draw_party_gold prints -- gains 0x1388 = 5000, and message 0x15 asks whether to try again on something else. Answer 0 gives message 0x16 and fdps_unit_add_item(0, 0xa9), 神的聖印; any other answer gives fdps_unit_add_item(0, 0xa3), 金屬礦, followed by the same parting line 0x10.
    Then fdps_unit_recompute_combat_stats(0) rebuilds Randis's four derived combat stats, the weapon he is carrying having changed.
 
-The three inventory calls and the stat rebuild all pass a literal 0 rather than unit_index; the entry gate has already forced the two to be equal.
+The four inventory calls and the stat rebuild all pass a literal 0 rather than unit_index; the entry gate has already forced the two to be equal.
 
 The entry is never called by name. Its address sits in the pointer at 0x0006021c, slot 22 of the chapter-event handler pointer table based at 0x000601c4. MAP15.DAT is the only map image that names handler 22: the first entry of its tile-event table (image offset 0x33, two bytes per entry, indexed by the cell's event code minus one), with occasion 1. Occasion 1 is what fdps_map_set_pending_tile_event is given immediately after fdps_battle_mark_unit_done, i.e. a unit ending its turn on the cell; that function leaves the handler index in DAT_00069d90 and the battle loop calls 0x000601c4[index](unit_index) once the unit is done. Map number 15 is chapter index 15, the player's chapter 16, and M15.DTL marks cell (2,12) with event code 1.
 

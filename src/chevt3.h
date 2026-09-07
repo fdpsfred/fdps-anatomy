@@ -56,6 +56,55 @@
 extern void fdps_chapter_15_event_activate_enemy_group(int unit_index);
 #pragma aux fdps_chapter_15_event_activate_enemy_group "*" parm caller [];
 
+/* Chapter 16's wandering-smith event: Randis has ended his turn on the smith's
+   tile, and the smith offers to reforge one of two named swords if he is still
+   carrying it.  修佩魯 comes back as 灼烈之劍; 雷德 breaks in the forge and is
+   paid off with 5000 gold and the player's choice of 神的聖印 or 金屬礦.
+
+   Nothing happens at all unless three conditions hold together: the unit that
+   ended its turn is battle unit 0, which is Randis; element 0x10 of
+   data_fdps_map_cell_event_triggered_flags is still clear; and the battle turn
+   counter is 20 or less, a signed inclusive bound, so turn 20 still triggers it
+   and turn 21 does not.
+
+   THE ONE-SHOT LATCH IS RAISED IMMEDIATELY AFTER THE GREETING, before the
+   inventory is searched.  So a Randis who steps on the tile carrying neither
+   sword spends the encounter on the greeting alone and can never come back with
+   the right weapon -- the chapter's 灼烈之劍, and with it the 真炎龍劍 that
+   chapter 25 makes out of it, is lost for that playthrough.  Raising the latch
+   where the trade happens, which is what the sibling handlers do, would hand the
+   player a second chance the original does not give.
+
+   The sword is looked for as an else-chain: 修佩魯 first, and 雷德 only when
+   the first is not carried, so a Randis holding both is treated as holding
+   修佩魯.  Either way the slot found is the one the trade takes out of his bag,
+   through fdps_unit_remove_item, before fdps_unit_add_item puts the new item in
+   -- which is what keeps a full eight-entry inventory from losing the reward.
+   fdps_unit_recompute_combat_stats then rebuilds the four derived combat stats
+   on every accepted trade, the weapon he carries having changed.
+
+   Both questions are answered by fdps_prompt_two_choice and both are tested for
+   0, its affirmative: a cancel answers -1 and declines, exactly as the right
+   option does (msgwin.h).  Declining the first question ends the scene on the
+   parting line with the sword untouched -- and with the latch already spent.
+   Declining the second, after 雷德 has broken, is not a refusal of the payment:
+   the 5000 gold has already been added and the answer only picks 金屬礦 over
+   神的聖印.
+
+   The scene speaks ten lines out of the chapter's own FDETXT16.TXT under
+   FACE.CEL portrait 129, each in a message window of its own; the two questions
+   are asked with their window still standing.
+
+   unit_index is the handler table's shared parameter, the battle unit that
+   ended its turn on the trigger tile.  It is read once, by the first gate, and
+   any index other than 0 leaves the handler doing nothing whatever.
+
+   Table slot 22, and chapter 16's map15.dat is the only shipped file that names
+   it: the first entry of its tile-event table, with occasion 1 -- a unit ending
+   its turn on the cell -- and M15.DTL marks cell (2,12) with that event code. */
+extern void fdps_chapter_16_event_wandering_smith_forge(int unit_index);
+#pragma aux fdps_chapter_16_event_wandering_smith_forge "*" parm caller [];
+
 /* Chapter 16's turn-scheduled release event: it takes one block of the map's
    enemies off the hold-position behaviour the map deployed them in and puts
    them on the default one, which paths a unit toward the nearest opposing
