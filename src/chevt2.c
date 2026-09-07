@@ -637,6 +637,128 @@ void fdps_chapter_10_event_deploy_wave_10(int unit_index)
     }
 }
 
+/* The turn the four-corner wave is scheduled for, CMP dword ptr [0x00069ce8],
+   0x4 / JNZ at 000378fc.  It is the only turn the equality test names; every
+   other turn the map's table sends here falls through to the other arm. */
+#define CH11_FOUR_CORNER_TURN 4
+
+/* The two waves, and they are crossed over: PUSH 0x5 at 00037908 is what the
+   turn-4 arm deploys and PUSH 0x4 at 00037943 is what the fall-through arm
+   deploys.  Wave 5 is the sixteen records spread around the four corners of
+   the map, wave 4 the sixteen that arrive as two tight groups along the top
+   edge.  Writing the pair the way round the turn numbers suggest swaps what
+   arrives on each turn AND sends both pans to the wrong units, because the two
+   pan indices below only land on wave-4 units once wave 5 has already been
+   appended to the array (rebuild_info/pitfalls.md). */
+#define CH11_FOUR_CORNER_WAVE 5
+#define CH11_TOP_GROUPS_WAVE 4
+
+/* How both arms place what they bring on: XOR EAX,EAX / PUSH EAX at 00037905
+   and at 00037940, so fdps_deploy_wave settles each unit on the nearest free
+   walkable tile to its placement record's coordinates rather than on the
+   coordinates themselves. */
+#define CH11_TURN_PLACE_EXACT 0
+
+/* The text entry both arms speak, PUSH 0xf at 0003792b and at 000379b6. */
+#define CH11_ARRIVAL_TEXT_ID 0x0f
+
+/* The two units the fall-through arm walks the cursor onto, PUSH 0x34 at
+   00037953 and PUSH 0x2c at 0003797b, in that order.  They are the eleventh
+   and the third record of wave 4, which lands on unit indices 0x2a..0x39 once
+   the chapter's own force and the turn-4 wave are in the array ahead of it, so
+   the first pan shows the top-left group and the second the top-right one.
+   Both are literals in the instruction stream and neither is range checked. */
+#define CH11_TOP_LEFT_GROUP_UNIT_INDEX 0x34
+#define CH11_TOP_RIGHT_GROUP_UNIT_INDEX 0x2c
+
+/* How long each pan holds, CMP dword ptr [EBP+0x14],0xc / JL at 00037964 and
+   at 0003798c.  A composed frame costs one timer tick, so the count is how
+   long the view stays on each group and not a number of anything drawn. */
+#define CH11_PAN_HOLD_FRAMES 0xc
+
+/* 000378f0.  Chapter 11's turn-scheduled reinforcements: on turn 4 the enemy
+   wave that comes in around the four corners of the map, on any other turn --
+   turn 7 is the only other one map10.dat schedules -- the two groups along the
+   top edge, with the view panned onto each of them in turn.  Both arms end on
+   the same spoken line.
+
+   THE TURN TEST IS ONE EQUALITY AND THE FALL-THROUGH IS UNGUARDED.  CMP dword
+   ptr [0x00069ce8],0x4 / JNZ at 000378fc..00037903 is the whole of the branch:
+   every turn that is not 4 runs the second arm in full, and nothing in the
+   body tests for turn 7.  What keeps the second arm off the other turns is the
+   turn table in map10.dat, which names this handler slot twice and no more.
+
+   THE WAVE NUMBERS ARE CROSSED RELATIVE TO THE TURNS.  Turn 4 asks for wave 5
+   and the fall-through asks for wave 4; see the two defines above for why
+   putting them the intuitive way round breaks the pans as well as the
+   arrivals.
+
+   THE MAP NUMBER IS THE CHAPTER GLOBAL AND NOT A LITERAL.  PUSH dword ptr
+   [0x00069cf4] at 0003790a and 00037945 is
+   data_fdps_chapter_current_chapter_id, so what the arrivals are placed by is
+   whichever MAP%02d.COD the loaded chapter names.
+
+   THE FRAME COUNTER IS THE ARGUMENT SLOT.  The frame is built with SUB ESP,0x0
+   at 000378f6, so there is no local area at all: MOV dword ptr [EBP+0x14],0x0
+   at 0003795d and again at 00037985 writes zero over the incoming argument and
+   each loop compares and INCs that same slot.  Both loops are the -od shape of
+   a for statement -- the compare at the top, a dead MOV EAX,[EBP+0x14] ahead
+   of the INC, and the body reached by a JL past the exit jump -- and both are
+   signed and stop at 12.  The store cannot be seen by the caller, because the
+   slot belongs to its outgoing argument area and the turn-event runner drops
+   it with its own ADD ESP,0x4.
+
+   THERE IS NO LATCH.  Nothing in the body tests or writes the family's
+   one-shot slot, so every call the turn table makes fires in full.
+
+   fdps_deploy_wave, fdps_map_cursor_move_to_unit and fdps_render_view_frame
+   all leave nothing this body reads.  fdps_draw_text hands back a cursor in
+   EAX and both call sites discard it: after the first the next instruction is
+   the JMP to the epilogue at 0003793b and after the second it is the epilogue
+   itself.  Nothing sets EAX before the RET at 000379ca and no dispatcher reads
+   what comes back, so the result is void.
+
+   event_arg is the handler table's shared parameter.  The turn-event runner is
+   the only dispatcher that reaches slot 17 and it pushes a literal 0, and
+   neither arm reads the incoming value before overwriting it, so nothing a
+   caller passes can change what the handler does. */
+void fdps_chapter_11_event_deploy_wave_for_turn(int event_arg)
+{
+    if (data_fdps_battle_turn_counter == CH11_FOUR_CORNER_TURN) {
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                         CH11_FOUR_CORNER_WAVE, CH11_TURN_PLACE_EXACT);
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH11_ARRIVAL_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+    } else {
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                         CH11_TOP_GROUPS_WAVE, CH11_TURN_PLACE_EXACT);
+
+        fdps_map_cursor_move_to_unit(CH11_TOP_LEFT_GROUP_UNIT_INDEX);
+        /* The argument slot is the counter, as the assembly has it. */
+        for (event_arg = 0;
+             event_arg < CH11_PAN_HOLD_FRAMES;
+             event_arg++) {
+            fdps_render_view_frame();
+        }
+
+        fdps_map_cursor_move_to_unit(CH11_TOP_RIGHT_GROUP_UNIT_INDEX);
+        for (event_arg = 0;
+             event_arg < CH11_PAN_HOLD_FRAMES;
+             event_arg++) {
+            fdps_render_view_frame();
+        }
+
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH11_ARRIVAL_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+    }
+}
+
 /* The behaviour code the merge ORs in, and it is 0: the constant parked at
    [EBP-0x18] at 000379f1 is 0x0, copied on into [EBP-0x14], which is the slot
    the OR reads.  Mode 0 is the default chain that paths a unit toward the

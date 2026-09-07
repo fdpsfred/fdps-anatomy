@@ -244,6 +244,41 @@ extern void fdps_chapter_10_event_deploy_wave_for_turn(int event_arg);
 extern void fdps_chapter_10_event_deploy_wave_10(int unit_index);
 #pragma aux fdps_chapter_10_event_deploy_wave_10 "*" parm caller [];
 
+/* Chapter 11's turn-scheduled reinforcements: on turn 4 the enemy wave that
+   comes in around the four corners of the map, on any other turn the two
+   groups along the top edge, with the view panned onto each of them.  Both
+   arms end on the same spoken line, text entry 0x0f of the loaded chapter's
+   block, through fdps_draw_text (text.h) straight onto the mode 13h aperture.
+
+   THE TURN AND THE WAVE DO NOT MATCH.  Turn 4 deploys wave 5 and every other
+   turn deploys wave 4.  Map10.dat's turn table names this slot on turn 4 and
+   turn 7 and on no other turn, so the second arm is the turn-7 one in
+   practice, but the code tests only `turn == 4` and has no bound of any kind
+   under it: any turn a map scheduled would run the second arm in full.
+
+   Both deployments go through fdps_deploy_wave (deploy.h) with place_exact 0,
+   so the arrivals settle on the nearest free walkable tile to their placement
+   records rather than on the records' own coordinates, and the map number is
+   read from data_fdps_chapter_current_chapter_id (gamedata.h) at the call and
+   is not a literal.
+
+   The second arm's pan is fdps_map_cursor_move_to_unit (mapcur.h) on unit
+   index 0x34 held for twelve frames through fdps_render_view_frame
+   (mapdraw.h), then the same on unit index 0x2c.  Both indices are literals
+   and neither is range checked; they name wave-4 units only because wave 5
+   went into the array on the earlier turn, so the two waves cannot be swapped
+   without moving the pans as well.
+
+   There is no one-shot latch and nothing else guards the body, so every call
+   fires in full.
+
+   Table slot 17, named by MAP10.DAT's turn table and by no other shipped map,
+   which is what makes this chapter 11.  event_arg is the shared parameter and
+   is dead: the turn-event runner passes a literal 0 and both frame loops
+   overwrite the slot before anything reads it. */
+extern void fdps_chapter_11_event_deploy_wave_for_turn(int event_arg);
+#pragma aux fdps_chapter_11_event_deploy_wave_for_turn "*" parm caller [];
+
 /* Chapter 13's death-triggered event: takes unit indices 9 through 0x2c
    inclusive off the hold-position behaviour the map deploys them in and puts
    them on the default one, which paths a unit toward the nearest opposing

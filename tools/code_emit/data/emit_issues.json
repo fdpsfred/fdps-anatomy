@@ -2199,5 +2199,20 @@
       "needs": "Chapter 8's deployment table read out of map07.dat: records 15..18 and the character or portrait id in each. chapters/ currently holds only _index.md, so the chapter pages that would answer this have not been written yet, and the record layout work is another ticket's. When that lands, either the macro name is confirmed or the two ids swap.",
       "status": "open"
     }
+  ],
+  "000378f0": [
+    {
+      "from": "emit",
+      "what": "Twelve is the number of frames each of the two pans holds the view for, and nothing in the unit suite proves the emitted loops hold for twelve rather than eleven or thirteen. Each iteration calls fdps_render_view_frame, whose pacing wait ends only when data_fdps_timer_tick_counter moves, so the hold is twelve timer ticks -- about two thirds of a second at the standard rate -- and the count is contract D, an equivalent-but-shorter loop would change what the player sees. What the assembly settles is the count itself (CMP dword ptr [EBP+0x14],0xc / JL at 00037964 and 0003798c, signed, exclusive) and that is what is emitted; what is not settled is the wall-clock result on a real machine, because a test cannot count frames without racing the interrupt that drives them and the emulator's cycle setting moves the drawing cost but not the tick rate. The tests therefore assert only that frames were composed at all, through a sentinel in data_fdps_view_frame_last_tick.",
+      "needs": "A playtest of chapter 11 turn 7 in DOSBox-X against the original executable, watching whether the view rests on each of the two top-edge groups for the same length of time in both builds. The identical question is already open on the chapter 10 turn handler's door pans and on the chapter 2, 5 and 7 handlers in chevt1.c, so one playtest session covers the family.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "I reached the twelve-frame hold independently and confirm the count is settled by the assembly (CMP dword ptr [EBP+0x14],0xc / JL at 00037964 and 0003798c, signed and exclusive) while the wall-clock result is not settleable from here. What my pass adds: the pan is not twelve frames of hold plus nothing else -- fdps_map_cursor_move_to_unit's walk at 0002d7c0 composes its own frames while it scrolls (CALL 0x0002beb0 at 0002da3e), so the length a player sees on each group is the walk from the previous cursor position plus twelve, and the walk's length depends on where the cursor happened to be. A playtest comparing the two builds therefore has to start from the same cursor position on both, or the hold will look different for a reason that has nothing to do with this function.",
+      "needs": "A playtest of chapter 11 turn 7 in DOSBox-X against the original executable with the cursor parked in the same place before the turn ends, watching how long the view rests on each of the two top-edge groups. Same session covers the chapter 10 door pans and the chapter 2, 5 and 7 handlers in chevt1.c.",
+      "status": "open",
+      "same_as": "emit#0"
+    }
   ]
 }

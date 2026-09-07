@@ -3089,6 +3089,11 @@
       "status": "committed",
       "emitted_against": "0x111",
       "rounds": 0
+    },
+    "000378f0": {
+      "status": "committed",
+      "emitted_against": "0xdb",
+      "rounds": 0
     }
   }
 }
