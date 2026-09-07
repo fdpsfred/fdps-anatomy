@@ -11,6 +11,53 @@
 #ifndef VILBAR_H
 #define VILBAR_H
 
+/* 00035cc0.  One whole visit to the bar: it loads "BarShop.cel" out of
+   "MISC.VFS", takes a 64,000-byte page of its own, draws the backdrop into it,
+   publishes it in data_fdps_village_backdrop_page_ptr, zooms the picture out
+   onto the adapter and then runs a four-entry command row over it until the
+   row itself is backed out of or a command ends the visit.  It takes nothing
+   and answers nothing; its one call site is fdps_run_village_phase.
+
+   THE LUCKY DRAW IS OPENED ON THE WAY IN, unconditionally, between the opening
+   zoom and the first window sweep -- fdps_run_bonus_lottery below decides for
+   itself that today is not the day.  Nothing about the bar depends on what it
+   did, and on the one day it runs it leaves its own stopped reel on the
+   adapter for the window sweep that follows to open over.
+
+   THE FOUR COMMANDS ARE TALK, SAVE, LOAD AND QUIT, in that order, and only two
+   of them can end the visit.  Talk sweeps the window shut and open again and
+   reprints entry 6 of the LOADED CHAPTER's text block.  Save opens
+   fdps_save_game_screen and always comes back to the row.  Load opens
+   fdps_load_game_screen and ends the visit ONLY on its answer of 1, a load
+   that really happened, after calling fdps_load_field_chapter_resources to
+   refill the chapter's field resources behind the state that was just
+   installed; a cancelled load answers -1 and the row reopens.  Quit puts the
+   yes/no question up and, on the affirmative 0 and on nothing else, raises
+   data_fdps_shared_quit_game_requested, prints the acknowledgement, holds it
+   for 300 ms and ends the visit.
+
+   RAISING THE QUIT FLAG IS ALL THE QUIT COMMAND DOES.  The process is not
+   ended here and neither is the village phase's own loop stopped by anything
+   this function returns -- the flag is read three times by
+   fdps_run_village_phase and once by main (gamedata.h), and those are its only
+   readers in the image, so the bar simply returns like any other visit.
+
+   WHAT IT NEEDS IN PLACE.  MISC.VFS has to hold "BarShop.cel" -- a container
+   or a member that cannot be found ends the process inside fdps_vfs_load_entry
+   (vfs.h), and neither the load nor malloc's answer is tested.  The adapter
+   has to be in mode 13h: the transitions, the window frame, the command row
+   and every message go straight to the aperture.  The window sheet, the
+   command sheet, the number sheet, the roster and both text blocks are the
+   chapter loader's (gamedata.h).  The timer interrupt has to be running,
+   because every frame of the row and of the save and load screens is paced on
+   it.
+
+   IT FREES ITS PAGE AND LEAVES THE GLOBAL POINTING AT IT.
+   data_fdps_village_backdrop_page_ptr still names the freed page when this
+   returns; the next screen to publish one overwrites it. */
+extern void fdps_run_bar_shop(void);
+#pragma aux fdps_run_bar_shop "*" parm caller [];
+
 /* 00036460.  The bar's hidden lucky draw: a ten-frame reel that spins up, is
    stopped by a key press, spins down again, hands out a prize and announces
    what it landed on.  It takes nothing, answers nothing, and its one call site

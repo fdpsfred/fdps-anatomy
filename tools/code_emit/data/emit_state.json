@@ -3001,6 +3001,14 @@
       "status": "committed",
       "emitted_against": "0x689",
       "rounds": 0
+    },
+    "00035cc0": {
+      "name": "fdps_run_bar_shop",
+      "target": "vilbar.c",
+      "body_size": "0x2fc",
+      "status": "committed",
+      "emitted_against": "0x2fc",
+      "rounds": 0
     }
   }
 }

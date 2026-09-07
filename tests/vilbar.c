@@ -1,5 +1,10 @@
 /* tests/vilbar.c -- cover for src/vilbar.c.
  *
+ * Two sections, one per function: the bar screen's own cases are at the bottom
+ * of the file behind their own banner and their own note, and the draw's are
+ * here.  The fixture between them is shared, because the bar opens the draw on
+ * its way in and both read the same village globals.
+ *
  * THE DRAW'S CASES ARE ITS GUARD AND ONLY ITS GUARD.  fdps_run_bonus_lottery
  * opens on one date, 28 January 1998, and the four cases below drive the DOS
  * date across that boundary and put the machine's own date back afterwards.
@@ -29,14 +34,20 @@
  * a guard that had stopped working would run the whole draw, and it has to
  * find the village's own globals in place rather than walk off a null.
  */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "audio.h"
+#include "cdaudio.h"
 #include "keybd.h"
+#include "palcycle.h"
+#include "rsrc.h"
+#include "save.h"
 #include "statunit.h"
 #include "vilbar.h"
 
@@ -49,10 +60,19 @@
    neither rule decides anything about the roster these cases stage. */
 #define BAR_CHAPTER_BEFORE_LOCK 0x16
 
-/* The one make code the handler below presents, and the filter's no-key
-   answer. */
+/* The make codes the command row, the slot cursors and the quit question know,
+   and the filter's no-key answer. */
 #define BAR_KEY_ESC 0x01
+#define BAR_KEY_ENTER 0x1c
+#define BAR_KEY_LEFT 0x4b
+#define BAR_KEY_RIGHT 0x4d
 #define BAR_KEY_NONE 0xff
+
+/* The adapter and the two modes a bar case moves between.  Mode 13h is not
+   optional: the zoom transitions, the window frame, the command row and every
+   message go straight to the aperture. */
+#define BAR_MODE_TEXT 0x03
+#define BAR_MODE_320X200X256 0x13
 
 /* IRQ0.  DOS/4GW reflects a hardware interrupt taken in protected mode to the
    protected-mode vector, so the handler installed here is the one that runs
@@ -168,6 +188,25 @@
 /* How many codes one script can hold. */
 #define BAR_SCRIPT_MAX 12
 
+/* Something for the window animation to release on its first frame, so that
+   the free at the top of it is a free of real heap storage and not of whatever
+   an earlier case left in the global. */
+#define BAR_PORTRAIT_BUF_BYTES 16
+
+/* The four shipped files the bar screen and its two save-system arms reach
+   for: the container the backdrop is named out of, and the sheet, the
+   container and the save file the three-slot panel is built from. */
+#define BAR_BACKDROP_CONTAINER "MISC.VFS"
+#define BAR_PANEL_ICON_SHEET "ICON.CEL"
+#define BAR_PANEL_CHAPTER_ARCHIVE "FIELD.VFS"
+#define BAR_PANEL_SAVE_FILE "FDE.SAV"
+
+/* What data_fdps_ui_saveload_is_load_mode is parked at before a run.  Neither
+   screen can leave it here -- the save screen writes 0 and the load screen 1
+   on the way in (save.h) -- so it says which of the two arms was taken and
+   whether either was. */
+#define BAR_SAVELOAD_MODE_SENTINEL (-1)
+
 static struct fdps_unit_record bar_roster[BAR_MEMBER_COUNT];
 
 static unsigned char bar_char_ids[BAR_MEMBER_COUNT] = { 0, 2, 3, 4, 5, 6 };
@@ -183,15 +222,28 @@ static unsigned char bar_font[BAR_FONT_BYTES];
 static unsigned char bar_promo[BAR_CHARACTERS * BAR_PROMOTION_STRIDE];
 static unsigned char bar_growth[BAR_FORMS * BAR_GROWTH_STRIDE];
 
+/* Parked in data_fdps_village_backdrop_page_ptr before every bar run.  It is
+   the address of a static in this file, so a run that published its own page
+   leaves the global holding something else and a run that published nothing
+   leaves it holding this. */
+static unsigned char bar_page_sentinel[1];
+
 static unsigned char bar_script[BAR_SCRIPT_MAX];
 static int bar_script_len;
 static int bar_script_next;
+
+/* What the handler below appends to the scancode ring, which is the channel
+   the quit question reads (msgwin.h).  Escape declines it and Enter confirms
+   the left cell, which is the affirmative.  bar_stage puts it back to Escape,
+   so a case that wants the affirmative says so itself. */
+static unsigned char bar_ring_code = BAR_KEY_ESC;
+
 static void (__interrupt __far *bar_saved_timer)();
 
 /* Advances the game's clock, refills the auto-repeat filter's latch once the
-   filter has taken what was there, and appends one Escape per tick to the
-   scancode ring the way fdps_keyboard_isr does -- which is the answer that
-   declines a yes/no question. */
+   filter has taken what was there, and appends one code per tick to the
+   scancode ring the way fdps_keyboard_isr does -- which is the channel a
+   yes/no question is answered on. */
 static void __interrupt __far bar_timer_isr(void)
 {
     unsigned char code;
@@ -213,7 +265,7 @@ static void __interrupt __far bar_timer_isr(void)
     }
 
     slot = data_fdps_input_scancode_queue_write_index;
-    data_fdps_input_scancode_queue[slot] = (unsigned char) BAR_KEY_ESC;
+    data_fdps_input_scancode_queue[slot] = bar_ring_code;
     slot++;
     if (slot == SCANCODE_QUEUE_LEN) {
         slot = 0;
@@ -379,7 +431,16 @@ static void bar_stage(void)
     data_fdps_selection_bar_sheet_ptr = bar_cel;
     data_fdps_command_sprite_sheet_ptr = bar_cel;
     data_fdps_shadow_sprite_sheet_ptr = bar_cel;
+
+    /* The cache is published with a count of zero on purpose.  The save and
+       load panels release the block against a NON-ZERO count before they build
+       their own (savepnl.c), and the block published here is a static in this
+       file: a count left standing by an earlier case would have them free
+       it. */
     data_fdps_cel_sprite_cache_ptr = bar_icon_cache;
+    data_fdps_cel_sprite_cache_count = 0;
+    data_fdps_cel_sprite_cache_buffer_used = 0;
+
     data_fdps_number_glyph_sheet_ptr = bar_num_cel;
     data_fdps_number_glyph_color_row = 0;
     data_fdps_all_game_text_ptr = (unsigned char *) bar_text;
@@ -422,6 +483,9 @@ static void bar_stage(void)
     }
 
     data_fdps_shared_party_total_gold = BAR_START_GOLD;
+    data_fdps_shared_quit_game_requested = 0;
+    data_fdps_ui_saveload_is_load_mode = BAR_SAVELOAD_MODE_SENTINEL;
+    bar_ring_code = (unsigned char) BAR_KEY_ESC;
     data_fdps_dialog_last_action_text_id_param = BAR_TEXT_SENTINEL;
     data_fdps_dialog_subst_text_id_2 = BAR_SUBST_SENTINEL;
     data_fdps_dialog_last_action_value_param = BAR_VALUE_SENTINEL;
@@ -447,7 +511,18 @@ static void bar_done(void)
     data_fdps_selection_bar_sheet_ptr = NULL;
     data_fdps_command_sprite_sheet_ptr = NULL;
     data_fdps_shadow_sprite_sheet_ptr = NULL;
+
+    /* A non-zero count means a save or load panel built a cache of its own and
+       the pointer no longer names the static this file published, so the block
+       it allocated is given back here.  A zero count means the pointer is
+       still that static and must not be freed. */
+    if (data_fdps_cel_sprite_cache_count != 0) {
+        free(data_fdps_cel_sprite_cache_ptr);
+        data_fdps_cel_sprite_cache_count = 0;
+        data_fdps_cel_sprite_cache_buffer_used = 0;
+    }
     data_fdps_cel_sprite_cache_ptr = NULL;
+
     data_fdps_number_glyph_sheet_ptr = NULL;
     data_fdps_all_game_text_ptr = NULL;
     data_fdps_current_chapter_text_ptr = NULL;
@@ -460,6 +535,8 @@ static void bar_done(void)
     data_fdps_village_mode_flag = 0;
     data_fdps_chapter_current_chapter_id = 0;
     data_fdps_shared_party_total_gold = 0;
+    data_fdps_shared_quit_game_requested = 0;
+    bar_ring_code = (unsigned char) BAR_KEY_ESC;
     data_fdps_input_last_scancode = BAR_KEY_NONE;
     data_fdps_input_key_repeat_prev_scancode = BAR_KEY_NONE;
 }
@@ -640,10 +717,335 @@ static void bon_the_wrong_year_draws_nothing(void)
     CHECK_EQ(bon_carried(BON_WATCHED_MEMBER), 0);
     bar_done();
 }
+/* ------------------------------------------------------------------
+ * fdps_run_bar_shop @ 00035cc0
+ * ------------------------------------------------------------------ */
+
+/* Expected values come from the assembly at 00035cc0 and from nothing else:
+ * the seed MOV dword ptr [EBP-0x4],0x0 at 00035ccc in front of the entry test
+ * CMP dword ptr [EBP-0x4],-0x1 / JNZ at 00035d9e, so the first pass always
+ * runs; the four-dword template copied onto the frame by the four MOVSD at
+ * 00035cdb -- 0x24, 9, 0xa, 8 at 000311a4 -- and PUSH 0x4 at 00035dc0 for the
+ * row's length; the unsigned bound CMP dword ptr [EBP-0x4],0x3 / JA at
+ * 00035dce in front of JMP dword ptr CS:[EAX*4 + 0x35dac], whose four entries
+ * are 00035de9, 00035e32, 00035e55 and 00035e89; the calls those arms make --
+ * two window sweeps and fdps_draw_text on the CHAPTER text block at 00035e25,
+ * then fdps_save_game_screen, then fdps_load_game_screen with CMP EAX,0x1 at
+ * 00035e73 over fdps_load_field_chapter_resources and the -1 store at
+ * 00035e7d, then fdps_prompt_two_choice with CMP dword ptr [EBP-0x8],0x0 at
+ * 00035eea over MOV byte ptr [0x000643eb],0x1 at 00035ef0 and the -1 store at
+ * 00035f39 -- and the two-armed test CMP dword ptr [EBP-0x4],-0x1 / JNZ at
+ * 00035f40 whose arms both fall to the back edge JMP 0x00035d9e at 00035fa1.
+ * None of it is read off the emitted C.
+ *
+ * WHAT THE CASES ARE ABOUT.  Everything this function draws is somebody else's
+ * behaviour and nothing it computes comes back as a value, so what is pinned
+ * here is the dispatch: that the answer the command row writes selects the arm
+ * the jump table selects, in that order, that the row is four entries long,
+ * and which arms end the visit and which send it round again.  The two save
+ * system arms are told apart by data_fdps_ui_saveload_is_load_mode, which the
+ * save screen writes 0 into and the load screen 1 (save.h) and which is parked
+ * at -1 beforehand, so it names the arm that ran and says when neither did.
+ * The quit arm is told by data_fdps_shared_quit_game_requested, which nothing
+ * else reachable from this screen writes.
+ *
+ * EVERY CASE NEEDS THE REAL MISC.VFS, because the backdrop is loaded by name
+ * out of it with the result untested -- a container or a member that cannot be
+ * found ends the process inside fdps_vfs_load_entry rather than failing an
+ * assertion (vfs.h).  The two save system arms need ICON.CEL, FIELD.VFS and
+ * FDE.SAV as well, for the same reason: the three-slot panel loads the sheet,
+ * the chapter text and the save image itself.  Each case probes what it needs
+ * and skips itself rather than dereferencing what a failed load leaves.
+ *
+ * NEITHER SAVE SYSTEM ARM IS CARRIED THROUGH TO A WRITE OR A LOAD.  The slot
+ * cursor is cancelled in both, so the save arm leaves FDE.SAV untouched and
+ * the load arm answers -1, which fails the test at 00035e73 -- the arm and the
+ * end-of-visit it can cause are separate facts and only the first of them is
+ * assertable here.  Installing a slot would replace the roster, the chapter
+ * and the purse this file staged and then reload the chapter's field
+ * resources, which is a whole village phase and not a case.
+ *
+ * WHY THE PAGE IS NOT READ BACK.  This screen allocates its own page and frees
+ * it before returning, so there is nothing left to compare afterwards; what
+ * the cases assert about it instead is that the global it was published in no
+ * longer holds the value they parked there.
+ */
+
+static void bar_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+static int bar_file_present(char *name)
+{
+    FILE *probe;
+
+    probe = fopen(name, "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+    return 1;
+}
+
+/* All four files or none: a case that reached a save system arm with one of
+   them missing would not fail, it would end the process inside the loader. */
+static int bar_panel_files_present(void)
+{
+    return bar_file_present(BAR_BACKDROP_CONTAINER)
+           && bar_file_present(BAR_PANEL_ICON_SHEET)
+           && bar_file_present(BAR_PANEL_CHAPTER_ARCHIVE)
+           && bar_file_present(BAR_PANEL_SAVE_FILE);
+}
+
+/* One whole visit to the bar, with the adapter in the mode the game draws it
+   in and the timer interrupt pacing the frames and playing both input
+   channels.  The fixture is NOT staged here: a case calls bar_stage first and
+   then says what it wants on the ring, and the two steps have to stay
+   apart. */
+static void bar_go(unsigned char *codes, int count)
+{
+    int index;
+
+    for (index = 0; index < count; index++) {
+        bar_script[index] = codes[index];
+    }
+    bar_script_len = count;
+    bar_script_next = 0;
+
+    data_fdps_village_backdrop_page_ptr = bar_page_sentinel;
+    data_fdps_portrait_sprite_buf_ptr =
+        (unsigned char *) malloc((size_t) BAR_PORTRAIT_BUF_BYTES);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr != NULL, 1);
+
+    data_fdps_input_last_scancode = BAR_KEY_NONE;
+    data_fdps_input_key_repeat_prev_scancode = BAR_KEY_NONE;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_ui_palette_last_cycle_tick = 0;
+    data_fdps_ui_palette_cycle_phase = 0;
+    data_fdps_audio_cd_repeat_last_tick = 0;
+    data_fdps_audio_cd_repeat_tick_counter = 0;
+
+    bar_set_mode(BAR_MODE_320X200X256);
+    bar_saved_timer = _dos_getvect(BAR_TIMER_VECTOR);
+    _dos_setvect(BAR_TIMER_VECTOR, bar_timer_isr);
+    fdps_run_bar_shop();
+    _dos_setvect(BAR_TIMER_VECTOR, bar_saved_timer);
+    bar_set_mode(BAR_MODE_TEXT);
+}
+
+/* Backing out of the command row is one of the three ways out, and it is
+   reached on the first pass because the answer slot is seeded with zero and
+   the entry test is against -1.  What the run leaves behind is the page: the
+   global no longer names the sentinel parked in it, so a page really was taken
+   and published, and it is not put back to null on the way out.  The portrait
+   buffer is gone because the window sweep releases it unconditionally
+   (village.h), which is how a frame that really opened is told from one that
+   was skipped.  Nothing else ran -- neither save system screen touched the
+   mode flag, the quit flag is clear and the purse is where it was staged. */
+static void bar_a_cancel_at_the_command_row_ends_the_screen(void)
+{
+    unsigned char script[1];
+
+    if (bar_file_present(BAR_BACKDROP_CONTAINER) == 0) {
+        return;
+    }
+
+    script[0] = (unsigned char) BAR_KEY_ESC;
+    bar_stage();
+    bar_go(script, 1);
+
+    CHECK_EQ(data_fdps_village_backdrop_page_ptr != bar_page_sentinel, 1);
+    CHECK_EQ(data_fdps_village_backdrop_page_ptr != NULL, 1);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr == NULL, 1);
+    CHECK_EQ(data_fdps_ui_saveload_is_load_mode, BAR_SAVELOAD_MODE_SENTINEL);
+    CHECK_EQ((int) data_fdps_shared_quit_game_requested, 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold, BAR_START_GOLD);
+    bar_done();
+}
+
+/* The row opens on entry 0, so a confirmation with no movement in front of it
+   takes the first jump-table slot.  That arm opens no screen of any kind: it
+   sweeps the window shut and open again and writes one line out of the CHAPTER
+   block, so a table whose first slot named either save system screen would
+   move the mode flag and one that named the quit question would raise the quit
+   flag.  The second Escape is only reached because the arm fell to the back
+   edge instead of out, and the run really did take both codes -- a run that
+   ended on the confirmation would have left the second one unconsumed. */
+static void bar_the_talk_command_opens_no_screen(void)
+{
+    unsigned char script[2];
+
+    if (bar_file_present(BAR_BACKDROP_CONTAINER) == 0) {
+        return;
+    }
+
+    script[0] = (unsigned char) BAR_KEY_ENTER;
+    script[1] = (unsigned char) BAR_KEY_ESC;
+    bar_stage();
+    bar_go(script, 2);
+
+    CHECK_EQ(data_fdps_ui_saveload_is_load_mode, BAR_SAVELOAD_MODE_SENTINEL);
+    CHECK_EQ((int) data_fdps_shared_quit_game_requested, 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold, BAR_START_GOLD);
+    CHECK_EQ(data_fdps_roster_member_count, BAR_MEMBER_COUNT);
+    bar_done();
+}
+
+/* One step right and a confirmation takes slot 1, which is the save screen.
+   It writes 0 into the mode flag on the way in and that is a value neither the
+   sentinel nor the load screen can leave there.  The slot cursor is then
+   cancelled off the end of the script, which leaves FDE.SAV untouched, and the
+   row is cancelled after it -- the save arm always comes back to the row, so
+   the run cannot have ended on the confirmation. */
+static void bar_the_save_command_is_the_first_arm(void)
+{
+    unsigned char script[2];
+
+    if (bar_panel_files_present() == 0) {
+        return;
+    }
+
+    script[0] = (unsigned char) BAR_KEY_RIGHT;
+    script[1] = (unsigned char) BAR_KEY_ENTER;
+    bar_stage();
+    bar_go(script, 2);
+
+    CHECK_EQ(data_fdps_ui_saveload_is_load_mode, 0);
+    CHECK_EQ((int) data_fdps_shared_quit_game_requested, 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold, BAR_START_GOLD);
+    bar_done();
+}
+
+/* Two steps right and a confirmation takes slot 2, the load screen, which
+   writes 1 into the same flag.  The cursor is cancelled, so the screen answers
+   -1, the test against 1 fails and nothing is installed: the roster the
+   fixture staged is still the roster and the purse is still the purse, both of
+   which a confirmed load would have replaced out of the save image (save.h).
+   The filler between the two Rights is what makes the second of them a change
+   the auto-repeat filter reports (keybd.h). */
+static void bar_the_load_command_is_the_second_arm(void)
+{
+    unsigned char script[4];
+
+    if (bar_panel_files_present() == 0) {
+        return;
+    }
+
+    script[0] = (unsigned char) BAR_KEY_RIGHT;
+    script[1] = (unsigned char) BAR_KEY_NONE;
+    script[2] = (unsigned char) BAR_KEY_RIGHT;
+    script[3] = (unsigned char) BAR_KEY_ENTER;
+    bar_stage();
+    bar_go(script, 4);
+
+    CHECK_EQ(data_fdps_ui_saveload_is_load_mode, 1);
+    CHECK_EQ((int) data_fdps_shared_quit_game_requested, 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold, BAR_START_GOLD);
+    CHECK_EQ(data_fdps_roster_member_count, BAR_MEMBER_COUNT);
+    bar_done();
+}
+
+/* Three steps right and a confirmation takes slot 3, the quit question, and
+   the ring is loaded with Enter so the question is answered on its left cell
+   -- the affirmative 0 the arm tests for.  The flag is raised and the visit
+   ends; neither save system screen ran, which is what separates this arm from
+   the other three. */
+static void bar_a_confirmed_quit_raises_the_flag(void)
+{
+    unsigned char script[6];
+
+    if (bar_file_present(BAR_BACKDROP_CONTAINER) == 0) {
+        return;
+    }
+
+    script[0] = (unsigned char) BAR_KEY_RIGHT;
+    script[1] = (unsigned char) BAR_KEY_NONE;
+    script[2] = (unsigned char) BAR_KEY_RIGHT;
+    script[3] = (unsigned char) BAR_KEY_NONE;
+    script[4] = (unsigned char) BAR_KEY_RIGHT;
+    script[5] = (unsigned char) BAR_KEY_ENTER;
+    bar_stage();
+    bar_ring_code = (unsigned char) BAR_KEY_ENTER;
+    bar_go(script, 6);
+
+    CHECK_EQ((int) data_fdps_shared_quit_game_requested, 1);
+    CHECK_EQ(data_fdps_ui_saveload_is_load_mode, BAR_SAVELOAD_MODE_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, BAR_START_GOLD);
+    bar_done();
+}
+
+/* The same walk with Escape on the ring, which answers the question with the
+   cancel's -1.  That is not the affirmative, so the flag stays clear and the
+   whole of the rest of the arm -- the acknowledgement, the hold and the store
+   that ends the visit -- is skipped.  The row is then cancelled off the end of
+   the script, so the declining answer really did fall to the back edge. */
+static void bar_a_declined_quit_leaves_the_game_running(void)
+{
+    unsigned char script[6];
+
+    if (bar_file_present(BAR_BACKDROP_CONTAINER) == 0) {
+        return;
+    }
+
+    script[0] = (unsigned char) BAR_KEY_RIGHT;
+    script[1] = (unsigned char) BAR_KEY_NONE;
+    script[2] = (unsigned char) BAR_KEY_RIGHT;
+    script[3] = (unsigned char) BAR_KEY_NONE;
+    script[4] = (unsigned char) BAR_KEY_RIGHT;
+    script[5] = (unsigned char) BAR_KEY_ENTER;
+    bar_stage();
+    bar_go(script, 6);
+
+    CHECK_EQ((int) data_fdps_shared_quit_game_requested, 0);
+    CHECK_EQ(data_fdps_ui_saveload_is_load_mode, BAR_SAVELOAD_MODE_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, BAR_START_GOLD);
+    bar_done();
+}
+
+/* One step LEFT from the entry the row opens on wraps against the row's own
+   length, so a four-entry row lands on entry 3 -- the quit question, which the
+   ring then confirms.  A row of five would have wrapped to entry 4, which the
+   unsigned bound at 00035dce sends straight past all four arms, and the flag
+   would still be clear. */
+static void bar_the_row_is_four_wide_and_wraps_to_the_quit_question(void)
+{
+    unsigned char script[2];
+
+    if (bar_file_present(BAR_BACKDROP_CONTAINER) == 0) {
+        return;
+    }
+
+    script[0] = (unsigned char) BAR_KEY_LEFT;
+    script[1] = (unsigned char) BAR_KEY_ENTER;
+    bar_stage();
+    bar_ring_code = (unsigned char) BAR_KEY_ENTER;
+    bar_go(script, 2);
+
+    CHECK_EQ((int) data_fdps_shared_quit_game_requested, 1);
+    CHECK_EQ(data_fdps_ui_saveload_is_load_mode, BAR_SAVELOAD_MODE_SENTINEL);
+    bar_done();
+}
+
 void run_vilbar_tests(void)
 {
     RUN_TEST(bon_a_draw_already_taken_is_not_taken_again);
     RUN_TEST(bon_the_day_before_draws_nothing);
     RUN_TEST(bon_the_wrong_month_draws_nothing);
     RUN_TEST(bon_the_wrong_year_draws_nothing);
+    RUN_TEST(bar_a_cancel_at_the_command_row_ends_the_screen);
+    RUN_TEST(bar_the_talk_command_opens_no_screen);
+    RUN_TEST(bar_the_save_command_is_the_first_arm);
+    RUN_TEST(bar_the_load_command_is_the_second_arm);
+    RUN_TEST(bar_a_confirmed_quit_raises_the_flag);
+    RUN_TEST(bar_a_declined_quit_leaves_the_game_running);
+    RUN_TEST(bar_the_row_is_four_wide_and_wraps_to_the_quit_question);
 }

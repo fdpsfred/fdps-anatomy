@@ -13,16 +13,22 @@
  */
 #include <conio.h>
 #include <dos.h>
+#include <i86.h>
 #include <stdlib.h>
 #include <string.h>
 #include "gamedata.h"
 #include "audio.h"
 #include "blit.h"
 #include "keybd.h"
+#include "menu.h"
+#include "msgwin.h"
 #include "roster.h"
+#include "rsrc.h"
 #include "saf.h"
+#include "save.h"
 #include "sprite.h"
 #include "text.h"
+#include "transit.h"
 #include "vfs.h"
 #include "village.h"
 #include "vilbar.h"
@@ -48,6 +54,284 @@
    alternate between them. */
 #define WINDOW_ZOOM_OPEN 0
 #define WINDOW_ZOOM_CLOSE 1
+
+/* ------------------------------------------------------------------
+ * fdps_run_bar_shop @ 00035cc0
+ * ------------------------------------------------------------------ */
+
+/* The backdrop and where it is taken from, PUSH 0x61fbc and PUSH 0x60128 at
+   00035cdf.  Both are plain writable literals and have to stay that way:
+   fdps_vfs_load_entry upper-cases the caller's own storage in place (vfs.h),
+   so the original's two strings read "MISC.VFS" and "BARSHOP.CEL" from the
+   first call onward and a copy placed in read-only storage would fault instead
+   (rebuild_info/pitfalls.md). */
+#define BAR_SHOP_ARCHIVE "MISC.VFS"
+#define BAR_SHOP_BACKDROP "BarShop.cel"
+
+/* The backdrop is sprite 0 of that sheet, drawn at the page's origin through
+   the opaque pass-through kernel: PUSH 0x0 five times and PUSH 0x140 for the
+   pitch at 00035d0e. */
+#define BAR_BACKDROP_SPRITE 0
+#define BAR_BACKDROP_X 0
+#define BAR_BACKDROP_Y 0
+#define BAR_BACKDROP_BLIT_OPERAND 0
+#define BAR_BACKDROP_BLIT_MODE 0
+
+/* The point the opening and closing transitions are magnified about, PUSH 0x9f
+   and PUSH 0x63 at 00035d3f and 00035fa9: the screen centre, so this screen
+   gets a straight pull-back and not the swing the signboard menu gets
+   (transit.h). */
+#define BAR_TRANSITION_CENTER_X 0x9f
+#define BAR_TRANSITION_CENTER_Y 0x63
+
+/* fdps_transition_zoom's direction byte, which is read as "non-zero pulls the
+   picture back" -- MOV EAX,0x1 at 00035d39 on the way in, XOR EAX,EAX at
+   00035fa6 on the way out.  The closing one leaves the aperture cleared. */
+#define TRANSITION_ZOOM_OUT 1
+#define TRANSITION_ZOOM_IN 0
+
+/* Where this screen's messages are written: 0xaa3d4, column 20 and row 131 of
+   the mode 13h screen, inside the window frame the sweep has just opened; and
+   where the gold readout goes: 0xa8208, column 8 and row 104.  The colour trio
+   is the standard one, PUSH 0xd0 / PUSH 0x0 / PUSH 0x6d in front of each
+   message.  Both offsets sit on VGA_SCREEN_BASE above. */
+#define BAR_MESSAGE_SCREEN_AT 0xa3d4
+#define BAR_GOLD_READOUT_SCREEN_AT 0x8208
+#define BAR_TEXT_FG_COLOR 0xd0
+#define BAR_TEXT_BG_COLOR 0
+#define BAR_TEXT_OUTLINE_COLOR 0x6d
+
+/* The four entries of the resident text block this screen draws.  0x200 at
+   00035d8b goes up once when the screen opens and 0x201 at 00035f7c replaces
+   it after every command that did not end the visit; 0x1f0 at 00035ebd is the
+   quit question and 0x1f1 at 00035f19 the acknowledgement that follows an
+   affirmative answer. */
+#define BAR_OPENING_TEXT_ID 0x200
+#define BAR_AFTER_COMMAND_TEXT_ID 0x201
+#define BAR_QUIT_QUESTION_TEXT_ID 0x1f0
+#define BAR_QUIT_CONFIRMED_TEXT_ID 0x1f1
+
+/* And the entry of the LOADED CHAPTER's own text block that the first command
+   reprints, PUSH 0x6 at 00035e1d in front of data_fdps_current_chapter_text_ptr
+   rather than the resident table.  The five village screens take one entry each
+   out of that block and they are consecutive: 4 in fdps_village_item_menu
+   (vilmenu.c), 5 in fdps_run_weapon_shop, 6 here, 7 in fdps_run_church_screen
+   and 8 in fdps_run_secret_menu (vilshop.c). */
+#define BAR_SHOP_CHAPTER_TEXT_ID 6
+
+/* The row of commands: how many entries it has, PUSH 0x4 at 00035dc0, and the
+   Command.cel sub-image id of each, which is the four-dword template the
+   original copies onto the frame with four MOVSD at 00035cdb -- 0x24, 9, 0xa,
+   8 at 000311a4, an initialised automatic array, not a global, and with no
+   other reader.  The order is the order the row draws them, left to right. */
+#define BAR_COMMAND_COUNT 4
+#define BAR_ICON_TALK 0x24
+#define BAR_ICON_SAVE 0x09
+#define BAR_ICON_LOAD 0x0a
+#define BAR_ICON_QUIT 0x08
+
+/* The answer the row hands back, which is an index into that table.  The four
+   arms are the four entries of the CS-relative jump table at 00035dac --
+   00035de9, 00035e32, 00035e55 and 00035e89 -- in this order. */
+#define BAR_COMMAND_TALK 0
+#define BAR_COMMAND_SAVE 1
+#define BAR_COMMAND_LOAD 2
+#define BAR_COMMAND_QUIT 3
+
+/* And what the row writes into it when the player backs out, which is one of
+   the three ways out of the loop (menu.h). */
+#define BAR_COMMAND_CANCELLED (-1)
+
+/* The load screen's answer that means a slot was really installed, CMP EAX,0x1
+   at 00035e73.  Its other answer is the cancel's -1, which fails this test and
+   leaves the visit running (save.h). */
+#define BAR_LOAD_HAPPENED 1
+
+/* And the prompt's answer that means yes, CMP dword ptr [EBP-0x8],0x0 at
+   00035eea.  0 is the left cell, which is the one selected on entry; the right
+   cell's 1 and the cancel's -1 both decline (msgwin.h). */
+#define BAR_QUIT_CONFIRMED 0
+
+/* How long the acknowledgement is held before the visit ends, PUSH 0x12c at
+   00035f2c into the CRT's delay(). */
+#define BAR_QUIT_MESSAGE_HOLD_MS 0x12c
+
+/* 00035cc0.  No arguments and no answer: the one call site, in
+   fdps_run_village_phase at 00031210, pushes nothing, nothing above EBP is
+   read, EAX is not set before the epilogue and the RET carries no immediate.
+
+   The control flow is one loop with a four-way switch and one two-armed test
+   in it.  The entry test CMP dword ptr [EBP-0x4],-0x1 / JNZ at 00035d9e is the
+   top of the loop and the JMP at 00035fa1 is its back edge, so this is a while
+   whose condition is checked before the first pass -- which is why the answer
+   slot is seeded with zero at 00035ccc rather than with a command: zero is
+   simply a value that is not -1.  The switch is CMP dword ptr [EBP-0x4],0x3 /
+   JA at 00035dce in front of JMP dword ptr CS:[EAX*4 + 0x35dac], and the bound
+   is UNSIGNED, which is how the cancel's -1 falls past all four arms and lands
+   on the same address a taken arm falls to.  Every arm reaches the two-armed
+   test at 00035f40 and that test's arms both reach the back edge, so the loop
+   is left only through the answer slot holding -1 -- which the row's cancel,
+   the load arm and the quit arm are the three ways of arranging.
+
+   THE LUCKY DRAW SITS BETWEEN THE OPENING ZOOM AND THE FIRST WINDOW SWEEP.
+   CALL 0x36460 at 00035d52 is unconditional and is followed straight by the
+   sweep at 00035d5e, so on the one day the draw opens the sweep opens over the
+   reel the draw left on the adapter rather than over the bar.
+
+   THE OPENING DRAWS ARE IN THE OTHER ORDER FROM THE ONES AFTER A COMMAND.  On
+   the way in the gold readout goes down first and the message second (00035d70
+   then 00035d96); after a command it is the message first and the readout
+   second (00035f87 then 00035f99).  They do not overlap -- row 104 against row
+   131 -- so the order is not load-bearing, but it is what the assembly does.
+
+   THE TALK ARM CLOSES THE WINDOW BEFORE IT REOPENS IT.  MOV EAX,0x1 at
+   00035de9 then XOR EAX,EAX at 00035dfb: the frame is swept shut and open
+   again, which is what clears the command row's own painting off the frame
+   before the line is written into it.  The quit arm opens with the same pair
+   at 00035e89 and 00035e9b for the same reason.
+
+   THE QUIT ARM SWEEPS THE WINDOW SHUT BEFORE IT LOOKS AT THE ANSWER.  MOV
+   EAX,0x1 at 00035ed8 runs between the CALL at 00035ed0 and the test at
+   00035eea, so the question's window is taken down whichever way the player
+   answered, and the affirmative arm opens a fresh one for the acknowledgement.
+   The declining answer then falls into the common test with the slot still
+   holding the command, so the row is reopened exactly as it is after the talk
+   arm.
+
+   The values used after a CALL are fdps_vfs_load_entry's EAX, stored to
+   [EBP-0x10] at 00035cf3 and handed to the blit and then to free; malloc's
+   EAX, stored to [EBP-0xc] at 00035d03 and copied to the global from there --
+   MOV EAX,[EBP-0xc] / MOV [0x00063fb4],EAX at 00035d06, so every later use is
+   the local's value and not a second read of the global; fdps_load_game_screen's
+   EAX, compared against 1 at 00035e73 with no slot of its own; and
+   fdps_prompt_two_choice's EAX, stored to [EBP-0x8] at 00035ed5 and tested
+   against 0 after the window has been swept shut.  Nothing else is read:
+   fdps_menu_command_icon_select_loop's answer comes back through the pointer
+   and its EAX is dropped (ADD ESP,0xc at 00035dcb with no use of it), and the
+   blit, the two transitions, the window sweeps, the readout, fdps_draw_text,
+   the draw, the save screen, the chapter reload and delay are each followed
+   straight by their stack cleanup.
+
+   NOTHING IS CHECKED.  The load is not tested -- a container or a member that
+   cannot be found ends the process inside fdps_vfs_load_entry (vfs.h) -- and
+   neither is malloc's answer, which is written to the global and then blitted
+   into. */
+void fdps_run_bar_shop(void)
+{
+    /* The unpacked "BarShop.cel" sheet, alive only long enough to be drawn
+       into the page. */
+    unsigned char *backdrop_cel;
+    /* Which command the row last came back on, and what says whether the visit
+       is over: the row's cancel, a load that happened and a confirmed quit all
+       put -1 here and nothing else stops the loop.  It is kept across passes,
+       so the row reopens on the command it was last used from. */
+    int selected_command = 0;
+    /* This screen's own 320x200 page, published as the village backdrop for as
+       long as the screen is up. */
+    unsigned char *screen_page;
+    /* What the player answered the quit question, 0 for yes and both other
+       values for no. */
+    int quit_answer;
+    /* The row's four Command.cel sub-image ids, left to right. */
+    int command_icon_ids[BAR_COMMAND_COUNT] = {
+        BAR_ICON_TALK, BAR_ICON_SAVE, BAR_ICON_LOAD, BAR_ICON_QUIT
+    };
+
+    backdrop_cel = (unsigned char *)
+        fdps_vfs_load_entry(BAR_SHOP_ARCHIVE, BAR_SHOP_BACKDROP);
+    screen_page = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+    data_fdps_village_backdrop_page_ptr = screen_page;
+    fdps_cel_blit_sprite(backdrop_cel, BAR_BACKDROP_SPRITE, screen_page,
+                         VGA_SCREEN_PITCH, BAR_BACKDROP_X, BAR_BACKDROP_Y,
+                         BAR_BACKDROP_BLIT_OPERAND, BAR_BACKDROP_BLIT_MODE);
+    free(backdrop_cel);
+
+    fdps_transition_zoom(screen_page, BAR_TRANSITION_CENTER_X,
+                         BAR_TRANSITION_CENTER_Y, TRANSITION_ZOOM_OUT);
+    fdps_run_bonus_lottery();
+    fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_OPEN);
+    fdps_draw_party_gold((unsigned char *) (VGA_SCREEN_BASE
+                                            + BAR_GOLD_READOUT_SCREEN_AT),
+                         VGA_SCREEN_PITCH);
+    fdps_draw_text(data_fdps_all_game_text_ptr, BAR_OPENING_TEXT_ID,
+                   (unsigned char *) (VGA_SCREEN_BASE + BAR_MESSAGE_SCREEN_AT),
+                   VGA_SCREEN_PITCH, BAR_TEXT_FG_COLOR, BAR_TEXT_BG_COLOR,
+                   BAR_TEXT_OUTLINE_COLOR);
+
+    while (selected_command != BAR_COMMAND_CANCELLED) {
+        fdps_menu_command_icon_select_loop(command_icon_ids, BAR_COMMAND_COUNT,
+                                           &selected_command);
+
+        switch (selected_command) {
+        case BAR_COMMAND_TALK:
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_OPEN);
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           BAR_SHOP_CHAPTER_TEXT_ID,
+                           (unsigned char *) (VGA_SCREEN_BASE
+                                              + BAR_MESSAGE_SCREEN_AT),
+                           VGA_SCREEN_PITCH, BAR_TEXT_FG_COLOR,
+                           BAR_TEXT_BG_COLOR, BAR_TEXT_OUTLINE_COLOR);
+            break;
+        case BAR_COMMAND_SAVE:
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+            fdps_save_game_screen(screen_page);
+            break;
+        case BAR_COMMAND_LOAD:
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+            if (fdps_load_game_screen(screen_page) == BAR_LOAD_HAPPENED) {
+                fdps_load_field_chapter_resources();
+                selected_command = BAR_COMMAND_CANCELLED;
+            }
+            break;
+        case BAR_COMMAND_QUIT:
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_OPEN);
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           BAR_QUIT_QUESTION_TEXT_ID,
+                           (unsigned char *) (VGA_SCREEN_BASE
+                                              + BAR_MESSAGE_SCREEN_AT),
+                           VGA_SCREEN_PITCH, BAR_TEXT_FG_COLOR,
+                           BAR_TEXT_BG_COLOR, BAR_TEXT_OUTLINE_COLOR);
+            quit_answer = fdps_prompt_two_choice();
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+            if (quit_answer == BAR_QUIT_CONFIRMED) {
+                data_fdps_shared_quit_game_requested = 1;
+                fdps_village_animate_window_zoom(screen_page,
+                                                 WINDOW_ZOOM_OPEN);
+                fdps_draw_text(data_fdps_all_game_text_ptr,
+                               BAR_QUIT_CONFIRMED_TEXT_ID,
+                               (unsigned char *) (VGA_SCREEN_BASE
+                                                  + BAR_MESSAGE_SCREEN_AT),
+                               VGA_SCREEN_PITCH, BAR_TEXT_FG_COLOR,
+                               BAR_TEXT_BG_COLOR, BAR_TEXT_OUTLINE_COLOR);
+                delay((unsigned int) BAR_QUIT_MESSAGE_HOLD_MS);
+                selected_command = BAR_COMMAND_CANCELLED;
+            }
+            break;
+        }
+
+        if (selected_command == BAR_COMMAND_CANCELLED) {
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+        } else {
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_OPEN);
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           BAR_AFTER_COMMAND_TEXT_ID,
+                           (unsigned char *) (VGA_SCREEN_BASE
+                                              + BAR_MESSAGE_SCREEN_AT),
+                           VGA_SCREEN_PITCH, BAR_TEXT_FG_COLOR,
+                           BAR_TEXT_BG_COLOR, BAR_TEXT_OUTLINE_COLOR);
+            fdps_draw_party_gold((unsigned char *)
+                                     (VGA_SCREEN_BASE
+                                      + BAR_GOLD_READOUT_SCREEN_AT),
+                                 VGA_SCREEN_PITCH);
+        }
+    }
+
+    fdps_transition_zoom(screen_page, BAR_TRANSITION_CENTER_X,
+                         BAR_TRANSITION_CENTER_Y, TRANSITION_ZOOM_IN);
+    free(screen_page);
+}
 
 /* ------------------------------------------------------------------
  * fdps_run_bonus_lottery @ 00036460
