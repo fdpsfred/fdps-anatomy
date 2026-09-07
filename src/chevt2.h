@@ -149,6 +149,66 @@ extern void fdps_chapter_08_event_villager_escapes(int unit_index);
 extern void fdps_chapter_09_event_deploy_wave_1(int unit_index);
 #pragma aux fdps_chapter_09_event_deploy_wave_1 "*" parm caller [];
 
+/* Chapter 10's turn-scheduled reinforcements: three different arrivals chosen
+   by one read of data_fdps_battle_turn_counter (gamedata.h).
+
+   Turn 3 brings on the map's wave-1 group and speaks text entry 0x12 over it,
+   and stops there -- no cursor move and no frame.
+
+   Any turn of 13 or less that is not 3 brings on the wave numbered turn - 4
+   and then shows the player where it landed: the map cursor walks to world
+   pixel (72, 216), twelve frames are composed there, the cursor walks on to
+   (360, 216) and twelve more are composed.  Those are tiles (3, 9) and
+   (15, 9) at the 24-pixel tile step, which is where every record of map09's
+   waves 2 through 9 spawns -- one enemy at each of the two mid-map doors.
+   Nothing is drawn and nothing is said on this arm.
+
+   Any turn above 13 brings on wave 11, the last and largest group, and speaks
+   entry 0x13 exactly as turn 3 speaks 0x12.
+
+   THE MIDDLE ARM HAS NO LOWER BOUND.  CMP dword ptr [0x00069ce8],0xd / JG at
+   000377d0 is the whole of the second test, so a turn of 0 asks for wave -4
+   and a turn of 2 for wave -2; neither matches any deployment record, so
+   nothing arrives, and both still walk the cursor across both doors and
+   compose the twenty-four frames.  What keeps the arm inside waves 2 through 9
+   is the data: map09.dat's turn table names this slot on turns 3, 6, 7, 8, 9,
+   10, 11, 12, 13 and 19 and on no other, so turns 4 and 5 -- the two that would
+   ask for wave 0 and wave 1 a second time -- never reach it.
+
+   The compare is signed, and so is the subtraction: a turn counter the save
+   image brought back negative would take the middle arm and ask for a negative
+   wave rather than wrapping into a large unsigned one.
+
+   THE TWELVE-FRAME HOLDS ARE THE PAUSE THE PLAYER SEES.  Each frame costs one
+   timer tick inside fdps_render_view_frame (mapdraw.h), so the count is how
+   long the view rests on each door, not a redraw that could be folded into
+   one.
+
+   The map number both deployments are placed under is read from
+   data_fdps_chapter_current_chapter_id at each call and is not a literal, as
+   it is for the chapter 4, 6 and 9 handlers; the placement flag is 0, so each
+   arrival lands on the nearest free walkable tile to its record's coordinates
+   rather than on the coordinates themselves.  Both draws go straight to the
+   mode 13h aperture at 0xa0000 with pitch 0x140 in the standard message
+   colours, and the cursor each returns is discarded.
+
+   THERE IS NO LATCH AND NO OTHER GUARD.  Nothing in the body records that it
+   ran, so every call the turn table makes fires in full; the ten scheduled
+   turns are what make the ten arrivals.
+
+   event_arg is the handler table's shared parameter and cannot reach anything.
+   The turn-event runner is the only dispatcher that names this slot in the
+   shipped data and it pushes a literal 0; the middle arm overwrites the
+   incoming slot with 0 and uses it as its own 0..11 frame counter, and the
+   other two arms never touch it.  It is spelled event_arg rather than the
+   family's usual unit_index because no path that reaches this slot passes a
+   unit index.
+
+   Table slot 15, the entry at 00060200.  Chapter 10's other handler, slot 16,
+   is the same map's tile-triggered ambush above. */
+extern void fdps_chapter_10_event_deploy_wave_for_turn(int event_arg);
+#pragma aux fdps_chapter_10_event_deploy_wave_for_turn "*" parm caller [];
+
 /* Chapter 10's stairway ambush: brings on the ten enemy reinforcements the
    chapter's map tags as wave 10, once.
 

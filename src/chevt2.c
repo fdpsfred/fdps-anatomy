@@ -14,6 +14,8 @@
 #include "deploy.h"
 #include "unititem.h"
 #include "text.h"
+#include "mapcur.h"
+#include "mapdraw.h"
 #include "chevt2.h"
 
 /* The slot of data_fdps_map_cell_event_triggered_flags (gamedata.h) the
@@ -410,6 +412,170 @@ void fdps_chapter_09_event_deploy_wave_1(int unit_index)
     fdps_draw_text(data_fdps_current_chapter_text_ptr, CH09_ARRIVAL_TEXT_ID,
                    (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
                    MESSAGE_FG_COLOR, MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+}
+
+/* The one turn the body compares for equality, CMP dword ptr
+   [0x00069ce8],0x3 / JNZ at 0003778c, and the wave that turn brings on, PUSH
+   0x1 at 00037798.  map09.dat carries eight records tagged wave 1, all
+   spawning at tile (13, 2) -- the door the chapter opens behind. */
+#define CH10_ANNOUNCED_WAVE_TURN 3
+#define CH10_ANNOUNCED_WAVE 1
+
+/* The upper bound of the middle arm, CMP dword ptr [0x00069ce8],0xd / JG at
+   000377d0.  It is a SIGNED compare and it is the only test the arm has: there
+   is no lower bound, so every turn from 13 downwards that is not 3 runs this
+   path and asks for whatever wave the subtraction below produces. */
+#define CH10_LAST_DOOR_TURN 0xd
+
+/* What the turn counter is reduced by to name the wave, SUB EAX,0x4 at
+   000377e5.  The scheduled turns 6 through 13 map onto waves 2 through 9, the
+   eight pairs of records map09.dat puts at the two mid-map doors. */
+#define CH10_DOOR_WAVE_TURN_BIAS 4
+
+/* The wave every turn past 13 brings on, PUSH 0xb at 00037859: map09.dat's six
+   wave-11 records, which spawn at tiles (3..5, 1..2).  Wave 10 is not this
+   handler's -- it belongs to the same map's tile trigger above. */
+#define CH10_LAST_WAVE 0xb
+
+/* How all three deployments are placed: XOR EAX,EAX / PUSH EAX at 00037795,
+   000377dd and 00037856, so fdps_deploy_wave passes 0 on to fdps_deploy_unit
+   and each arrival goes on the nearest free walkable tile to its placement
+   record's coordinates rather than on the coordinates themselves. */
+#define CH10_TURN_PLACE_EXACT 0
+
+/* The two lines this handler speaks: PUSH 0x12 at 000377bb for the wave-1
+   arrival and PUSH 0x13 at 0003787c for the wave-11 one, both entries of the
+   chapter's own FDETXT%02d.TXT block.  The middle arm speaks neither. */
+#define CH10_ANNOUNCED_WAVE_TEXT_ID 0x12
+#define CH10_LAST_WAVE_TEXT_ID 0x13
+
+/* The two world pixels the cursor is walked to, PUSH 0x48 / PUSH 0xd8 at
+   000377f7 and PUSH 0x168 / PUSH 0xd8 at 00037824.  At the 24-pixel tile step
+   they are tiles (3, 9) and (15, 9), the two doors every record of waves 2
+   through 9 spawns at.  fdps_map_cursor_move_to takes world pixels, not
+   tiles. */
+#define CH10_LEFT_DOOR_WORLD_X 0x48
+#define CH10_RIGHT_DOOR_WORLD_X 0x168
+#define CH10_DOOR_WORLD_Y 0xd8
+
+/* How long the view rests on each door: the CMP against 0xc at 0003780d and
+   0003783d.  Each frame costs one timer tick inside fdps_render_view_frame, so
+   twelve is the length of the pause and not a repaint count. */
+#define CH10_DOOR_HOLD_FRAMES 0xc
+
+/* 00037780.  Chapter 10's turn-scheduled reinforcements: the wave-1 group with
+   its announcement on turn 3, one enemy at each of the two mid-map doors with
+   the view panning onto both of them on every turn from 6 to 13, and the
+   wave-11 group with its own line on turn 19.
+
+   The frame is the family's four-push one with an empty local area -- PUSH EBX
+   / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x0 at
+   00037780..00037786 -- so there is no local here at all and the frame counter
+   has nowhere to live but the incoming argument slot.  Every caller-clean in
+   the body is this function's own (ADD ESP,0xc after each deployment, ADD
+   ESP,0x1c after each draw, ADD ESP,0x8 after each cursor move), the RET at
+   00037890 carries no immediate, and the turn-event runner pushes one dword
+   and drops it with ADD ESP,0x4 at 0002e146, so the convention is the stack
+   one at both ends of the call.
+
+   THE THREE ARMS ARE TWO TESTS, NOT A RANGE.  CMP dword ptr [0x00069ce8],0x3 /
+   JNZ at 0003778c picks the announced arm, and CMP dword ptr [0x00069ce8],0xd
+   / JG at 000377d0 picks between the door arm and the last-wave arm.  The
+   second compare is signed and has no partner below it, so the door arm is
+   every turn of 13 or less except 3 -- turn 0 asks for wave -4 and turn 2 for
+   wave -2.  Neither matches a deployment record, so nothing arrives, but the
+   cursor still crosses both doors and twenty-four frames are still composed.
+   What confines the arm to waves 2 through 9 is map09.dat's turn table, which
+   names this slot on turns 3, 6..13 and 19 only.
+
+   THE WAVE THE MIDDLE ARM ASKS FOR IS SIGNED ARITHMETIC ON A SIGNED COUNTER.
+   MOV EAX,[0x00069ce8] / SUB EAX,0x4 at 000377e0 pushes the difference as a
+   full dword, so a counter below 4 sends a negative wave into
+   fdps_deploy_wave, which compares it against each record's unsigned wave byte
+   and matches nothing.  Widening either side to unsigned would turn that into
+   a very large wave number instead, which still matches nothing -- but it also
+   turns the JG into an unsigned test, and then a negative counter would take
+   the last-wave arm and bring wave 11 on early.
+
+   THE ORDER WITHIN EACH ARM IS WHAT THE PLAYER SEES.  The announced arms
+   deploy first and draw second (CALL 0x00023830 then CALL 0x0001ff60), so the
+   line is spoken over enemies already standing on the field; the door arm
+   deploys first as well, then walks the cursor onto each door in turn and
+   holds the view there, so the arrivals are on the map before the pan starts.
+
+   THE MAP NUMBER IS THE CHAPTER GLOBAL AND NOT A LITERAL.  PUSH dword ptr
+   [0x00069cf4] at 0003779a, 000377e9 and 0003785b is
+   data_fdps_chapter_current_chapter_id, the same argument the chapter 4, 6 and
+   9 handlers read.  The deployment records still come from whichever
+   MAP%02d.DAT is resident; what the number chooses is the MAP%02d.COD
+   coordinates the arrivals are put down at.
+
+   THE FRAME COUNTER IS THE ARGUMENT SLOT.  MOV dword ptr [EBP+0x14],0x0 at
+   00037806 and again at 00037836 writes zero over the incoming argument, and
+   each loop compares and INCs that same slot, so the counter and the parameter
+   are one storage location and there is no local frame to hold anything else.
+   The other two arms never touch the slot.  The store has no observable effect
+   on the caller either, because the slot belongs to its outgoing argument area
+   and the turn-event runner drops it with its own ADD ESP,0x4.
+
+   Both loops are the -od shape of a for statement: the compare at the top, a
+   dead MOV EAX,[EBP+0x14] ahead of the INC, and the body reached by a JL past
+   the exit jump.  Both are signed (JL) and both stop at 12.
+
+   THERE IS NO LATCH AND NO OTHER GUARD.  Nothing in the body tests or writes
+   the family's one-shot slot and nothing records that the handler ran, so
+   every call the turn table makes fires in full.
+
+   fdps_deploy_wave, fdps_map_cursor_move_to and fdps_render_view_frame all
+   leave nothing this body reads.  fdps_draw_text hands back a cursor in EAX
+   and both call sites discard it: after the first the next instruction is the
+   JMP to the epilogue at 000377cb and after the second it is the epilogue
+   itself.  Nothing sets EAX before the RET and no dispatcher reads what comes
+   back, so the result is void.
+
+   event_arg is the handler table's shared parameter.  The turn-event runner is
+   the only dispatcher that reaches this slot and it pushes a literal 0 at
+   0002e13e, and no arm reads the incoming value before overwriting it, so
+   nothing a caller passes can change what the handler does. */
+void fdps_chapter_10_event_deploy_wave_for_turn(int event_arg)
+{
+    if (data_fdps_battle_turn_counter == CH10_ANNOUNCED_WAVE_TURN) {
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                         CH10_ANNOUNCED_WAVE, CH10_TURN_PLACE_EXACT);
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH10_ANNOUNCED_WAVE_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+    } else if (data_fdps_battle_turn_counter <= CH10_LAST_DOOR_TURN) {
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                         data_fdps_battle_turn_counter -
+                             CH10_DOOR_WAVE_TURN_BIAS,
+                         CH10_TURN_PLACE_EXACT);
+
+        fdps_map_cursor_move_to(CH10_LEFT_DOOR_WORLD_X, CH10_DOOR_WORLD_Y);
+        /* The argument slot is the counter, as the assembly has it. */
+        for (event_arg = 0;
+             event_arg < CH10_DOOR_HOLD_FRAMES;
+             event_arg++) {
+            fdps_render_view_frame();
+        }
+
+        fdps_map_cursor_move_to(CH10_RIGHT_DOOR_WORLD_X, CH10_DOOR_WORLD_Y);
+        for (event_arg = 0;
+             event_arg < CH10_DOOR_HOLD_FRAMES;
+             event_arg++) {
+            fdps_render_view_frame();
+        }
+    } else {
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id, CH10_LAST_WAVE,
+                         CH10_TURN_PLACE_EXACT);
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH10_LAST_WAVE_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+    }
 }
 
 /* The wave the ambush brings on: PUSH 0xa at 000378d9, matched against byte
