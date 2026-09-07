@@ -57,6 +57,55 @@
 extern void fdps_chapter_08_event_send_guest_mage_to_cells(int unit_index);
 #pragma aux fdps_chapter_08_event_send_guest_mage_to_cells "*" parm caller [];
 
+/* Chapter 8's villager-escape event: one of the four captive villagers walks
+   off the battlefield and speaks its line, and when the last of the four goes
+   the chapter's reward item lands in the guest mage's bag, scaled to how many
+   villagers got out alive.
+
+   It acts only for unit indices 0xf through 0x12 inclusive, chapter 8's four
+   captives -- two 村民 at 0xf and 0x10, two 村婦 at 0x11 and 0x12 -- and both
+   bounds are signed compares, so every other index, negative ones included,
+   returns without touching anything.
+
+   Escapes are counted in element 0x11 of data_fdps_map_cell_event_triggered_
+   flags (gamedata.h), the same 32-byte block the one-shot latch at element
+   0x10 lives in: it is bumped by one on every escape and is what
+   fdps_chapter_08_post_action reads to tell the chapter's win from its loss --
+   all four villagers retired with the count non-zero is a win, all four
+   retired with it still zero is a rout.  A dozen other chapters keep an
+   unrelated flag in the same element; that is safe because one chapter is
+   loaded at a time and fdps_chapter_state_reset clears the whole block on
+   chapter entry, and it is what makes the count survive a save, because the
+   save image carries all 0x20 bytes.
+
+   The escaping villager's own line is text entry unit_index + 0xd, so 0x1c
+   through 0x1f, one per villager, drawn through fdps_draw_text (text.h)
+   straight onto the mode 13h aperture in the standard message colours.  The
+   cursor it returns is discarded.
+
+   THE REWARD IS DECIDED BEFORE THIS VILLAGER IS MARKED RETIRED.  The handler
+   asks fdps_unit_is_retired (unit.h) about each of 0xf..0x12 and requires the
+   answer to be exactly 3, which is how it recognises that the villager it was
+   called for is the last one still in the battle; only then, and only when the
+   escape count has passed 1, does it draw the closing line -- 0x20 when the
+   last one out is one of the two 村民, 0x21 when it is one of the two 村婦 --
+   and hand fdps_unit_add_item (unititem.h) the reward for unit 0x13, the guest
+   mage 費塔加: 0xc8 炎之寶石 for two escapes, 0xda 速度藥水 for three, 0xdd
+   風精之羽 for all four, which is the guide's 若四個村民全被救出，結束後會得
+   到風精之羽（在費塔加身上）.  Nothing reads what add_item answers, so a full
+   bag loses the reward in silence.
+
+   Retiring is the whole-byte store record->flags = 1, not a bit set, so it
+   also drops the per-turn flag bit 7 that may be standing in the same byte.
+   It happens on every in-range call, whether or not the reward fired.
+
+   Nothing is range checked beyond the 0xf..0x12 test itself and there is no
+   latch, so calling it twice for the same villager counts two escapes.
+
+   Table slot 13, the entry at 000601f8. */
+extern void fdps_chapter_08_event_villager_escapes(int unit_index);
+#pragma aux fdps_chapter_08_event_villager_escapes "*" parm caller [];
+
 /* Chapter 10's stairway ambush: brings on the ten enemy reinforcements the
    chapter's map tags as wave 10, once.
 

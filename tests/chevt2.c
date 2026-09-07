@@ -29,7 +29,10 @@
  *
  * The chapter 8 cases at the end of the file stage like the chapter 13 ones,
  * plus a text-block fixture for the draw on the end of that handler; their own
- * note says what the draw can and cannot be asserted about.
+ * note says what the draw can and cannot be asserted about.  There are two
+ * chapter 8 sections: the guard-death handler's, and after the chapter 10
+ * block the villager-escape handler's, which stages bag entries and the
+ * chapter's escape counter as well.
  */
 #include <stddef.h>
 #include <stdio.h>
@@ -961,6 +964,367 @@ static void ch08_mode_is_walk_to_destination(void)
     CHECK_EQ(ch08_units[CH08_MAGE_INDEX].ai_behavior, 0x04);
 }
 
+/* Chapter 8's villager-escape handler at 00037600, from here down.
+ *
+ * It is staged like the two sections above -- a local block of unit records
+ * under data_fdps_map_unit_array_ptr, and a chapter text block whose every
+ * entry is a lone -1 terminator, so fdps_draw_text walks it, draws nothing and
+ * returns at once instead of painting the VGA aperture and standing a modal
+ * wait on a keyboard nothing is typing at.  WHICH text entry either draw asks
+ * for is not asserted, for the reason the chapter 3 section of
+ * tests/chevt1.c gives: the draw takes its whole effect through pixels, keeps
+ * no state and returns a cursor this handler discards.  The entry ids are
+ * literals in the instruction stream -- ADD EAX,0xd at 00037640 and the 0x20 /
+ * 0x21 pair at 0003769e and 000376a7 -- and the reviewer's reading of them is
+ * what stands behind the emitted C.
+ *
+ * What IS readable afterwards is all three of the handler's real effects: the
+ * escape count in element 0x11 of data_fdps_map_cell_event_triggered_flags,
+ * the retired flag written into the escaping villager's record, and the reward
+ * item fdps_unit_add_item puts in the guest mage's first free bag entry.  The
+ * cases below stage each of them and read them back.
+ *
+ * Every record is staged with a flags byte of 0x80 -- the acted-this-turn bit,
+ * with the retired bit clear -- so a case can tell an assignment of 1 from an
+ * OR of 1, and so fdps_unit_is_retired answers 0 for a villager the case did
+ * not deliberately retire.
+ */
+
+/* The inclusive range the handler acts for, off the two bound compares at
+   00037613 and 00037619, and the guest mage the reward goes to, off PUSH 0x13
+   at 00037708. */
+#define CH08E_FIRST_VILLAGER 0x0f
+#define CH08E_LAST_VILLAGER 0x12
+#define CH08E_MAGE_INDEX 0x13
+
+/* Two records past the mage, so a write that ran off either end of the range
+   has somewhere visible to land. */
+#define CH08E_STAGE_UNITS 0x16
+
+/* The element of data_fdps_map_cell_event_triggered_flags the escapes are
+   counted in -- byte ptr [0x000640e9], element 0x11 -- and the two elements
+   either side of it, which the cases watch for collateral damage.  Element
+   0x10 is the one-shot latch the rest of this file's handlers use. */
+#define CH08E_COUNT_SLOT 0x11
+#define CH08E_SLOT_BELOW 0x10
+#define CH08E_SLOT_ABOVE 0x12
+
+/* Sentinels for those two neighbours; neither is a value the handler could
+   write. */
+#define CH08E_SENTINEL_BELOW 0x5a
+#define CH08E_SENTINEL_ABOVE 0xa5
+
+/* The flags byte a staged, still-fighting unit carries: bit 7 up, the retired
+   bit 0 clear.  If the handler ORed its 1 in rather than assigning it, a
+   retired villager would come out 0x81. */
+#define CH08E_ACTED_THIS_TURN 0x80
+
+/* What the handler writes over the whole flags byte, MOV byte ptr [EAX+0x5],
+   0x1 at 00037724. */
+#define CH08E_RETIRED 1
+
+/* An inventory entry's empty bit, the 0x80 fdps_unit_add_item scans for, and
+   the flag byte it leaves behind when it takes a slot -- a whole zero. */
+#define CH08E_BAG_EMPTY 0x80
+#define CH08E_BAG_TAKEN 0
+
+/* The three rewards, off the constants at 000376df, 000376f4 and 000376fd:
+   炎之寶石, 速度藥水 and 風精之羽 (assets/items.md). */
+#define CH08E_REWARD_TWO 0xc8
+#define CH08E_REWARD_THREE 0xda
+#define CH08E_REWARD_FOUR 0xdd
+
+/* Enough entries for the highest id either draw asks for, 0x21, plus the
+   terminator every entry points at. */
+#define CH08E_TEXT_ENTRY_COUNT 0x22
+
+static struct fdps_unit_record ch08e_units[CH08E_STAGE_UNITS];
+static short ch08e_text_block[CH08E_TEXT_ENTRY_COUNT + 1];
+
+/* Zero the block, give every record a still-fighting flags byte and eight
+   empty bag entries, retire the villagers named by retired_mask -- bit 0 is
+   unit 0xf and bit 3 is unit 0x12 -- and park escaped_count in the count slot
+   with a sentinel in each neighbour.  The text block is rebuilt every time so
+   a case that ran before cannot leave it pointing anywhere else. */
+static void stage_ch08e(int escaped_count, int retired_mask)
+{
+    unsigned char *bytes;
+    int i;
+    int slot;
+
+    bytes = (unsigned char *) ch08e_units;
+    for (i = 0; i < (int) sizeof(ch08e_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < CH08E_STAGE_UNITS; i++) {
+        ch08e_units[i].flags = CH08E_ACTED_THIS_TURN;
+        for (slot = 0; slot < 8; slot++) {
+            ch08e_units[i].inventory_slots[slot * 2] = CH08E_BAG_EMPTY;
+            ch08e_units[i].inventory_slots[slot * 2 + 1] = 0;
+        }
+    }
+    for (i = CH08E_FIRST_VILLAGER; i <= CH08E_LAST_VILLAGER; i++) {
+        if ((retired_mask & (1 << (i - CH08E_FIRST_VILLAGER))) != 0) {
+            ch08e_units[i].flags = CH08E_RETIRED;
+        }
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch08e_units;
+
+    for (i = 0; i < CH08E_TEXT_ENTRY_COUNT; i++) {
+        ch08e_text_block[i] = (short) (CH08E_TEXT_ENTRY_COUNT * 2);
+    }
+    ch08e_text_block[CH08E_TEXT_ENTRY_COUNT] = -1;
+    data_fdps_current_chapter_text_ptr = (unsigned char *) ch08e_text_block;
+
+    data_fdps_map_cell_event_triggered_flags[CH08E_SLOT_BELOW] =
+        CH08E_SENTINEL_BELOW;
+    data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT] =
+        (unsigned char) escaped_count;
+    data_fdps_map_cell_event_triggered_flags[CH08E_SLOT_ABOVE] =
+        CH08E_SENTINEL_ABOVE;
+}
+
+/* The id byte of one bag entry, and its flag byte beside it. */
+static int ch08e_bag_id(int unit_index, int slot)
+{
+    return ch08e_units[unit_index].inventory_slots[slot * 2 + 1];
+}
+
+static int ch08e_bag_flag(int unit_index, int slot)
+{
+    return ch08e_units[unit_index].inventory_slots[slot * 2];
+}
+
+/* Every index outside 0xf..0x12 falls straight through the range test and
+   nothing at all happens.  The state staged here is the one an in-range call
+   would pay the reward from -- three villagers already out and a count that
+   would come up to 2 -- so what each of these indices proves is that the guard
+   and not some later test is what stops it.  0x13 is the guest mage himself
+   and 30000 is far outside the staged array: neither reaches
+   fdps_get_unit_record, which is the only reason the second one is safe to
+   pass. */
+static void ch08e_ignores_every_index_outside_the_four(void)
+{
+    static int outside[6] = {-1, 0, 0x0e, 0x13, 0x14, 30000};
+    int i;
+
+    for (i = 0; i < 6; i++) {
+        stage_ch08e(1, 0x7);
+        fdps_chapter_08_event_villager_escapes(outside[i]);
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 1);
+        CHECK_EQ(ch08e_bag_flag(CH08E_MAGE_INDEX, 0), CH08E_BAG_EMPTY);
+        CHECK_EQ(ch08e_units[CH08E_MAGE_INDEX].flags, CH08E_ACTED_THIS_TURN);
+        CHECK_EQ(ch08e_units[CH08E_LAST_VILLAGER].flags,
+                 CH08E_ACTED_THIS_TURN);
+    }
+}
+
+/* An in-range call bumps the escape count by exactly one and takes that one
+   villager out of the battle, leaving the other three where they were. */
+static void ch08e_counts_the_escape_and_retires_the_villager(void)
+{
+    stage_ch08e(0, 0);
+    fdps_chapter_08_event_villager_escapes(CH08E_FIRST_VILLAGER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 1);
+    CHECK_EQ(ch08e_units[0x0f].flags, CH08E_RETIRED);
+    CHECK_EQ(ch08e_units[0x10].flags, CH08E_ACTED_THIS_TURN);
+    CHECK_EQ(ch08e_units[0x11].flags, CH08E_ACTED_THIS_TURN);
+    CHECK_EQ(ch08e_units[0x12].flags, CH08E_ACTED_THIS_TURN);
+}
+
+/* All four of 0xf..0x12 are inside the range, so both bounds are inclusive and
+   neither end is off by one.  0xe and 0x13 either side of them are covered by
+   the out-of-range case above. */
+static void ch08e_all_four_villagers_are_in_range(void)
+{
+    int villager;
+
+    for (villager = CH08E_FIRST_VILLAGER; villager <= CH08E_LAST_VILLAGER;
+         villager++) {
+        stage_ch08e(0, 0);
+        fdps_chapter_08_event_villager_escapes(villager);
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 1);
+        CHECK_EQ(ch08e_units[villager].flags, CH08E_RETIRED);
+    }
+}
+
+/* The retired flag is written over the WHOLE byte and is not ORed in: a
+   villager carrying the acted-this-turn bit comes out holding 1 and not 0x81,
+   and one carrying every bit comes out holding 1 as well. */
+static void ch08e_retire_is_a_whole_byte_assignment(void)
+{
+    stage_ch08e(0, 0);
+    CHECK_EQ(ch08e_units[0x10].flags, CH08E_ACTED_THIS_TURN);
+    fdps_chapter_08_event_villager_escapes(0x10);
+    CHECK_EQ(ch08e_units[0x10].flags, CH08E_RETIRED);
+
+    stage_ch08e(0, 0);
+    ch08e_units[0x11].flags = 0xff;
+    fdps_chapter_08_event_villager_escapes(0x11);
+    CHECK_EQ(ch08e_units[0x11].flags, CH08E_RETIRED);
+}
+
+/* The reward is paid only when EXACTLY three of the four are already out, and
+   the count is taken before this villager is marked, so three means "the one
+   leaving now is the last one still in".  Two out is too few and four out --
+   which happens when the handler is called a second time for a villager that
+   has already gone -- is too many, and neither pays. */
+static void ch08e_reward_needs_exactly_three_already_out(void)
+{
+    stage_ch08e(1, 0x7);
+    fdps_chapter_08_event_villager_escapes(CH08E_LAST_VILLAGER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 2);
+    CHECK_EQ(ch08e_bag_flag(CH08E_MAGE_INDEX, 0), CH08E_BAG_TAKEN);
+    CHECK_EQ(ch08e_bag_id(CH08E_MAGE_INDEX, 0), CH08E_REWARD_TWO);
+
+    stage_ch08e(2, 0x3);
+    fdps_chapter_08_event_villager_escapes(0x11);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 3);
+    CHECK_EQ(ch08e_bag_flag(CH08E_MAGE_INDEX, 0), CH08E_BAG_EMPTY);
+    CHECK_EQ(ch08e_bag_id(CH08E_MAGE_INDEX, 0), 0);
+
+    stage_ch08e(3, 0xf);
+    fdps_chapter_08_event_villager_escapes(CH08E_LAST_VILLAGER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 4);
+    CHECK_EQ(ch08e_bag_flag(CH08E_MAGE_INDEX, 0), CH08E_BAG_EMPTY);
+    CHECK_EQ(ch08e_bag_id(CH08E_MAGE_INDEX, 0), 0);
+}
+
+/* The escape count has to pass 1, not reach it: three villagers killed and the
+   fourth walking out leaves the count at 1 and pays nothing, even though it is
+   the last one out.  The villager still retires and the count still stands. */
+static void ch08e_reward_needs_more_than_one_escape(void)
+{
+    stage_ch08e(0, 0x7);
+    fdps_chapter_08_event_villager_escapes(CH08E_LAST_VILLAGER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 1);
+    CHECK_EQ(ch08e_bag_flag(CH08E_MAGE_INDEX, 0), CH08E_BAG_EMPTY);
+    CHECK_EQ(ch08e_units[CH08E_LAST_VILLAGER].flags, CH08E_RETIRED);
+}
+
+/* Which item is paid is decided on the escape count AFTER this escape has been
+   added: two escapes give 炎之寶石, three 速度藥水 and all four 風精之羽, the
+   last being the guide's 若四個村民全被救出，結束後會得到風精之羽（在費塔加
+   身上）. */
+static void ch08e_reward_scales_with_the_escape_count(void)
+{
+    stage_ch08e(1, 0x7);
+    fdps_chapter_08_event_villager_escapes(CH08E_LAST_VILLAGER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 2);
+    CHECK_EQ(ch08e_bag_id(CH08E_MAGE_INDEX, 0), CH08E_REWARD_TWO);
+
+    stage_ch08e(2, 0x7);
+    fdps_chapter_08_event_villager_escapes(CH08E_LAST_VILLAGER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 3);
+    CHECK_EQ(ch08e_bag_id(CH08E_MAGE_INDEX, 0), CH08E_REWARD_THREE);
+
+    stage_ch08e(3, 0x7);
+    fdps_chapter_08_event_villager_escapes(CH08E_LAST_VILLAGER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 4);
+    CHECK_EQ(ch08e_bag_id(CH08E_MAGE_INDEX, 0), CH08E_REWARD_FOUR);
+}
+
+/* The reward goes to unit 0x13, the guest mage, and to no one else: the
+   villager that just walked out keeps an empty bag, and so do the other
+   three. */
+static void ch08e_reward_goes_to_the_guest_mage(void)
+{
+    int villager;
+
+    stage_ch08e(3, 0x7);
+    fdps_chapter_08_event_villager_escapes(CH08E_LAST_VILLAGER);
+
+    CHECK_EQ(ch08e_bag_id(CH08E_MAGE_INDEX, 0), CH08E_REWARD_FOUR);
+    CHECK_EQ(ch08e_bag_flag(CH08E_MAGE_INDEX, 1), CH08E_BAG_EMPTY);
+    for (villager = CH08E_FIRST_VILLAGER; villager <= CH08E_LAST_VILLAGER;
+         villager++) {
+        CHECK_EQ(ch08e_bag_flag(villager, 0), CH08E_BAG_EMPTY);
+        CHECK_EQ(ch08e_bag_id(villager, 0), 0);
+    }
+}
+
+/* The count is kept in element 0x11 and the two elements either side of it are
+   left alone -- element 0x10 in particular, which is the one-shot latch the
+   other handlers in this file share. */
+static void ch08e_touches_no_neighbouring_flag_slot(void)
+{
+    stage_ch08e(1, 0);
+    fdps_chapter_08_event_villager_escapes(CH08E_FIRST_VILLAGER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_SLOT_BELOW],
+             CH08E_SENTINEL_BELOW);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_SLOT_ABOVE],
+             CH08E_SENTINEL_ABOVE);
+}
+
+/* Nothing latches the handler, so calling it again for a villager that has
+   already gone counts another escape: the count is the number of in-range
+   calls made and not the number of distinct villagers out.  That is what the
+   original does, and a guard on the record's own retired flag would take
+   escapes away rather than add any. */
+static void ch08e_has_no_latch(void)
+{
+    stage_ch08e(0, 0);
+
+    fdps_chapter_08_event_villager_escapes(CH08E_FIRST_VILLAGER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 1);
+    CHECK_EQ(ch08e_units[CH08E_FIRST_VILLAGER].flags, CH08E_RETIRED);
+
+    fdps_chapter_08_event_villager_escapes(CH08E_FIRST_VILLAGER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 2);
+
+    fdps_chapter_08_event_villager_escapes(CH08E_FIRST_VILLAGER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 3);
+    CHECK_EQ(ch08e_bag_flag(CH08E_MAGE_INDEX, 0), CH08E_BAG_EMPTY);
+}
+
+/* The count slot is read as an unsigned byte -- XOR EAX,EAX / MOV AL at
+   00037689, 000376d5 and 000376ea -- so a value with bit 7 up is a large
+   positive number and not a negative one.  Staged at 0xff it comes up to 0
+   through the byte-wide INC, which fails the "more than one" test; staged at
+   0xfe it comes up to 0xff, which passes it and falls past both named counts
+   to the 風精之羽 branch.  Read as a signed char, 0xff would be -1 and both
+   would take the other arm. */
+static void ch08e_the_escape_count_is_an_unsigned_byte(void)
+{
+    stage_ch08e(0xff, 0x7);
+    fdps_chapter_08_event_villager_escapes(CH08E_LAST_VILLAGER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 0);
+    CHECK_EQ(ch08e_bag_flag(CH08E_MAGE_INDEX, 0), CH08E_BAG_EMPTY);
+
+    stage_ch08e(0xfe, 0x7);
+    fdps_chapter_08_event_villager_escapes(CH08E_LAST_VILLAGER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 0xff);
+    CHECK_EQ(ch08e_bag_id(CH08E_MAGE_INDEX, 0), CH08E_REWARD_FOUR);
+}
+
+/* The retired count comes from fdps_unit_is_retired, which reads bit 0 of the
+   flags byte on its own, so a villager carrying only the acted-this-turn bit
+   0x80 does not count as out.  Three villagers staged at 0x80 and one at 1
+   leaves one out, not four, and the reward stays unpaid. */
+static void ch08e_only_bit_zero_counts_as_out(void)
+{
+    stage_ch08e(3, 0);
+    ch08e_units[0x0f].flags = CH08E_RETIRED;
+    ch08e_units[0x10].flags = 0x80;
+    ch08e_units[0x11].flags = 0x80;
+    fdps_chapter_08_event_villager_escapes(CH08E_LAST_VILLAGER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08E_COUNT_SLOT], 4);
+    CHECK_EQ(ch08e_bag_flag(CH08E_MAGE_INDEX, 0), CH08E_BAG_EMPTY);
+    CHECK_EQ(ch08e_units[CH08E_LAST_VILLAGER].flags, CH08E_RETIRED);
+
+    stage_ch08e(3, 0);
+    ch08e_units[0x0f].flags = 0x81;
+    ch08e_units[0x10].flags = 0x81;
+    ch08e_units[0x11].flags = 0x81;
+    fdps_chapter_08_event_villager_escapes(CH08E_LAST_VILLAGER);
+    CHECK_EQ(ch08e_bag_id(CH08E_MAGE_INDEX, 0), CH08E_REWARD_FOUR);
+}
+
 void run_chevt2_tests(void)
 {
     RUN_TEST(ch08_sends_exactly_the_guest_mage);
@@ -986,4 +1350,16 @@ void run_chevt2_tests(void)
     RUN_TEST(ch10_places_on_the_nearest_free_tile);
     RUN_TEST(ch10_side_test_is_unsigned);
     RUN_TEST(ch10_fires_once_only);
+    RUN_TEST(ch08e_ignores_every_index_outside_the_four);
+    RUN_TEST(ch08e_counts_the_escape_and_retires_the_villager);
+    RUN_TEST(ch08e_all_four_villagers_are_in_range);
+    RUN_TEST(ch08e_retire_is_a_whole_byte_assignment);
+    RUN_TEST(ch08e_reward_needs_exactly_three_already_out);
+    RUN_TEST(ch08e_reward_needs_more_than_one_escape);
+    RUN_TEST(ch08e_reward_scales_with_the_escape_count);
+    RUN_TEST(ch08e_reward_goes_to_the_guest_mage);
+    RUN_TEST(ch08e_touches_no_neighbouring_flag_slot);
+    RUN_TEST(ch08e_has_no_latch);
+    RUN_TEST(ch08e_the_escape_count_is_an_unsigned_byte);
+    RUN_TEST(ch08e_only_bit_zero_counts_as_out);
 }

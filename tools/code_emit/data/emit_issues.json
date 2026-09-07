@@ -2191,5 +2191,13 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "00037600": [
+    {
+      "from": "review",
+      "what": "Which of the four captives at unit indices 0xf..0x12 are the two 村民 and which the two 村婦 is not established. The assembly settles only that the closing line splits at 0x11 (CMP [EBP+0x14],0x11 / JGE at 00037698, 0x20 below and 0x21 at or above), and src/chevt2.c's macro CH08_LAST_VILLAGER_IS_A_WOMAN_FROM plus the surrounding comments assert that 0xf and 0x10 are the 村民 and 0x11 and 0x12 the 村婦. The support for that is the guide listing them in that order (docs/guide/fdps/walkthrough.txt lines 455-456, LV12村民x2 then LV12村婦x2), which is suggestive but is not the deployment order. Nothing behavioural rests on it -- the two text ids are picked by index either way -- so this is not a blocking finding, and I am recording it rather than asking for the macro to be renamed.",
+      "needs": "Chapter 8's deployment table read out of map07.dat: records 15..18 and the character or portrait id in each. chapters/ currently holds only _index.md, so the chapter pages that would answer this have not been written yet, and the record layout work is another ticket's. When that lands, either the macro name is confirmed or the two ids swap.",
+      "status": "open"
+    }
   ]
 }

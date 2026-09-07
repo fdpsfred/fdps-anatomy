@@ -3065,6 +3065,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x9d"
+    },
+    "00037600": {
+      "name": "fdps_chapter_08_event_villager_escapes",
+      "target": "chevt2.c",
+      "body_size": "0x12f",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x12f"
     }
   }
 }

@@ -12,6 +12,7 @@
 #include "gamedata.h"
 #include "unit.h"
 #include "deploy.h"
+#include "unititem.h"
 #include "text.h"
 #include "chevt2.h"
 
@@ -152,6 +153,184 @@ void fdps_chapter_08_event_send_guest_mage_to_cells(int unit_index)
     fdps_draw_text(data_fdps_current_chapter_text_ptr, CH08_CELL_ORDER_TEXT_ID,
                    (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
                    MESSAGE_FG_COLOR, MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+}
+
+/* The inclusive range of unit indices chapter 8's villager-escape handler
+   acts for, the two literals of CMP dword ptr [EBP+0x14],0xf / JL at 00037613
+   and CMP dword ptr [EBP+0x14],0x12 / JLE at 00037619.  Both compares are
+   signed, so a negative index falls out at the first of them.  These are the
+   four captives map07.dat deploys: the guide's LV12村民x2 and LV12村婦x2. */
+#define CH08_FIRST_VILLAGER_UNIT_INDEX 0x0f
+#define CH08_LAST_VILLAGER_UNIT_INDEX 0x12
+
+/* The element of data_fdps_map_cell_event_triggered_flags (gamedata.h) this
+   chapter counts escapes in: byte ptr [0x000640e9], element 0x11 of the
+   32-entry array based at 0x000640d8, one past the shared one-shot latch.
+   That the byte really is inside that array and not a global of its own is
+   settled by fdps_chapter_state_reset, which memsets 0x20 bytes from 0x640d8
+   at 00022782, and by fdps_load_savegame, which moves the same 0x20 bytes at
+   00024062.  fdps_chapter_08_post_action reads this element to tell the
+   chapter's win from its loss. */
+#define CH08_ESCAPED_VILLAGER_COUNT_SLOT 0x11
+
+/* What turns a villager's unit index into the text entry that villager speaks
+   as it leaves: ADD EAX,0xd at 00037640, so 0xf..0x12 speak 0x1c..0x1f. */
+#define CH08_VILLAGER_LINE_TEXT_ID_BIAS 0x0d
+
+/* Which of the two closing lines the last villager out speaks, and the index
+   that separates them: CMP dword ptr [EBP+0x14],0x11 / JGE at 00037698, with
+   0x20 stored below it and 0x21 at or above.  The split falls exactly between
+   the map's two 村民 at 0xf and 0x10 and its two 村婦 at 0x11 and 0x12, so the
+   line matches who is speaking it. */
+#define CH08_LAST_VILLAGER_IS_A_WOMAN_FROM 0x11
+#define CH08_LAST_VILLAGER_MAN_TEXT_ID 0x20
+#define CH08_LAST_VILLAGER_WOMAN_TEXT_ID 0x21
+
+/* How many of the four have to be out already for the reward test to pass:
+   CMP dword ptr [EBP-0x8],0x3 / JNZ at 00037681.  The count is taken before
+   this villager is marked retired, so 3 means "the one that is leaving now is
+   the last one still in".  The test is an equality and not a `>=`: raising the
+   mark above the count without also making this a 4 puts the reward out of
+   reach for good. */
+#define CH08_VILLAGERS_OUT_BEFORE_THE_LAST 3
+
+/* How many escapes the reward needs, CMP EAX,0x1 / JG at 0003768e: strictly
+   more than one, so the chapter pays nothing when three of the four were
+   killed and only the fourth walked out. */
+#define CH08_MIN_ESCAPES_FOR_REWARD 1
+
+/* What 費塔加 is handed, the three constants stored to [EBP-0x4] at 000376df,
+   000376f4 and 000376fd against the escape counts 2, 3 and otherwise: 炎之寶石
+   worth 1500, 速度藥水 worth 5000, 風精之羽 worth 12000 (assets/items.md).
+   The last is the guide's 若四個村民全被救出，結束後會得到風精之羽（在費塔加
+   身上）. */
+#define CH08_REWARD_TWO_ESCAPED 0xc8
+#define CH08_REWARD_THREE_ESCAPED 0xda
+#define CH08_REWARD_ALL_FOUR_ESCAPED 0xdd
+
+/* The escape counts the two named rewards are selected on, CMP EAX,0x2 at
+   000376da and CMP EAX,0x3 at 000376ef.  Both are equality tests against the
+   zero-extended byte, so a count that somehow ran past 4 would take the
+   風精之羽 branch as well. */
+#define CH08_TWO_ESCAPED 2
+#define CH08_THREE_ESCAPED 3
+
+/* The value written over the whole flags byte at record offset 5, MOV byte ptr
+   [EAX+0x5],0x1 at 00037724.  It is an assignment of the literal and not an OR
+   (the encoding is c6 40 05 01; an OR would be 80 48 05 01), so retiring a
+   villager also clears bit 7, the acted-this-turn flag, along with anything
+   else that byte was carrying. */
+#define UNIT_FLAGS_RETIRED 1
+
+/* 00037600.  Chapter 8's villager-escape event: one of the four captives walks
+   off the battlefield and speaks its line, and once the last of them is gone
+   the chapter's reward lands in the guest mage's bag.
+
+   The whole body sits inside one range test, CMP [EBP+0x14],0xf / JL and CMP
+   [EBP+0x14],0x12 / JLE at 00037613..0003761d, whose failing arm jumps to the
+   epilogue at 00037728.  Both compares are signed, so this is a plain signed
+   inclusive range and not the unsigned one-compare idiom.
+
+   The escape count is bumped with a read-modify-write of one byte, INC byte
+   ptr [0x000640e9] at 00037624, and is read back three times, each time as
+   XOR EAX,EAX / MOV AL,[0x000640e9] -- a zero-extending byte load, so the
+   comparisons that follow are unsigned in effect even though the JG at
+   00037691 is a signed jump.  Declaring the array as anything wider or signed
+   changes which branch a count above 0x7f takes.
+
+   THE RETIRED COUNT IS TAKEN BEFORE THIS VILLAGER IS MARKED RETIRED, which is
+   why the test that follows reads == 3 rather than == 4: the loop at
+   00037652..0003767f asks fdps_unit_is_retired about all four captives
+   including the one this call is for, and that one is still in the battle at
+   this point.  Moving the mark at 00037724 above the loop without also making
+   the 3 a 4 makes the reward unreachable.  The loop's own shape is the -od
+   for-statement layout -- seed, test-and-jump, a separate increment block the
+   body jumps back to -- and the MOV EAX,[EBP-0xc] in front of each INC is the
+   discarded old value of a postfix increment, not a use.
+
+   fdps_unit_is_retired's answer is tested with TEST EAX,EAX / JZ at
+   00037675 and is never stored, and neither is fdps_draw_text's cursor: the
+   only CALL result this function keeps is fdps_get_unit_record's, stored to
+   [EBP-0x10] at 0003771e and read straight back for the flags store.
+
+   ONE STACK SLOT CARRIES BOTH THE CLOSING LINE AND THE REWARD ID.  SUB
+   ESP,0x10 makes room for exactly four locals, and [EBP-0x4] holds the text id
+   0x20 or 0x21 for the draw at 000376cb and is then overwritten with the item
+   id for the call at 0003770a, so one variable spans both uses rather than
+   two.
+
+   fdps_unit_add_item's answer is discarded (ADD ESP,0x8 at 0003770f and
+   nothing reads EAX), so a guest mage whose eight bag entries are all full
+   loses the reward without a word.  The reward goes to unit 0x13 and not to
+   the villager: PUSH 0x13 at 00037708.
+
+   Nothing latches.  Calling this twice for the same villager counts two
+   escapes and draws the line twice, and the count is the number of calls made
+   for indices 0xf..0x12 rather than the number of distinct villagers out. */
+void fdps_chapter_08_event_villager_escapes(int unit_index)
+{
+    struct fdps_unit_record *escaping_villager;
+    int closing_line_or_reward_id;
+    int retired_villager_count;
+    int villager_unit_index;
+
+    retired_villager_count = 0;
+
+    if (unit_index >= CH08_FIRST_VILLAGER_UNIT_INDEX &&
+        unit_index <= CH08_LAST_VILLAGER_UNIT_INDEX) {
+
+        data_fdps_map_cell_event_triggered_flags
+            [CH08_ESCAPED_VILLAGER_COUNT_SLOT]++;
+
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       unit_index + CH08_VILLAGER_LINE_TEXT_ID_BIAS,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+
+        for (villager_unit_index = CH08_FIRST_VILLAGER_UNIT_INDEX;
+             villager_unit_index <= CH08_LAST_VILLAGER_UNIT_INDEX;
+             villager_unit_index++) {
+            if (fdps_unit_is_retired(villager_unit_index) != 0) {
+                retired_villager_count++;
+            }
+        }
+
+        if (retired_villager_count == CH08_VILLAGERS_OUT_BEFORE_THE_LAST &&
+            data_fdps_map_cell_event_triggered_flags
+                [CH08_ESCAPED_VILLAGER_COUNT_SLOT] >
+                    CH08_MIN_ESCAPES_FOR_REWARD) {
+
+            if (unit_index < CH08_LAST_VILLAGER_IS_A_WOMAN_FROM) {
+                closing_line_or_reward_id = CH08_LAST_VILLAGER_MAN_TEXT_ID;
+            } else {
+                closing_line_or_reward_id = CH08_LAST_VILLAGER_WOMAN_TEXT_ID;
+            }
+
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           closing_line_or_reward_id,
+                           (unsigned char *) VGA_SCREEN_BASE,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+
+            if (data_fdps_map_cell_event_triggered_flags
+                    [CH08_ESCAPED_VILLAGER_COUNT_SLOT] == CH08_TWO_ESCAPED) {
+                closing_line_or_reward_id = CH08_REWARD_TWO_ESCAPED;
+            } else if (data_fdps_map_cell_event_triggered_flags
+                           [CH08_ESCAPED_VILLAGER_COUNT_SLOT] ==
+                               CH08_THREE_ESCAPED) {
+                closing_line_or_reward_id = CH08_REWARD_THREE_ESCAPED;
+            } else {
+                closing_line_or_reward_id = CH08_REWARD_ALL_FOUR_ESCAPED;
+            }
+
+            fdps_unit_add_item(CH08_GUEST_MAGE_UNIT_INDEX,
+                               closing_line_or_reward_id);
+        }
+
+        escaping_villager = fdps_get_unit_record(unit_index);
+        escaping_villager->flags = UNIT_FLAGS_RETIRED;
+    }
 }
 
 /* The wave the ambush brings on: PUSH 0xa at 000378d9, matched against byte
