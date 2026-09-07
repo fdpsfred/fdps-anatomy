@@ -214,6 +214,54 @@ extern void fdps_chapter_03_event_deploy_wave_14(int unit_index);
 extern void fdps_chapter_03_event_turn_limit_game_over(int unit_index);
 #pragma aux fdps_chapter_03_event_turn_limit_game_over "*" parm caller [];
 
+/* Chapter 4's turn-scheduled event, and the only handler of the family that
+   does two different things on two different turns.
+
+   On turn 3 it draws one entry of the chapter's own text block and returns,
+   deploying nothing and touching no unit.  On every other turn -- turn 5 is the
+   only other one map03.dat schedules it for -- it brings the resident map's
+   wave-5 records onto the battlefield, walks the map cursor onto unit 0x1f so
+   the view sits over the arrivals, holds it there for twelve composed frames,
+   draws the announcement entry, and then puts unit indices 0x0f through 0x12
+   inclusive and unit index 0x0d onto the advancing behaviour.
+
+   THE ONLY TURN IT COMPARES AGAINST IS 3.  There is no test for 5 and no
+   one-shot latch, so any turn other than 3 runs the whole reinforcement path;
+   what limits it to two firings is the map file naming the slot twice.
+
+   The map number handed to the deployment is
+   data_fdps_chapter_current_chapter_id and not a literal, unlike the four
+   chapter 3 handlers above, so the arrivals take the loaded chapter's own
+   MAP%02d.COD coordinates.  They are placed with the flag that searches for the
+   nearest free walkable tile rather than the one that takes the record's tile
+   as given.
+
+   The behaviour rewrite is a merge and not an assignment: the low nibble of the
+   ai_behavior byte at record offset 0x34 goes to 0 and the high nibble is
+   carried across, because bits 0x40 and 0x80 of that byte are independent AI
+   flags other code reads on their own.  Both ranges are inclusive of their last
+   index.  Nothing is range checked and data_fdps_map_unit_count is not
+   consulted, so the five indices are only correct against map03's own
+   deployment; each record is resolved through fdps_get_unit_record per
+   iteration, so the array base is re-read.
+
+   The cursor unit, 0x1f, is one of the seven records the deployment on the line
+   before it has just appended, so it only names an arrival when the call that
+   precedes it actually deployed.
+
+   unit_index is the handler table's shared parameter and is ignored, but for a
+   different reason from the rest of the family: on the reinforcement path the
+   incoming slot is overwritten with 0 and used as the twelve-frame counter, and
+   on the speaking path it is never touched at all.  Either way nothing reads
+   what came in, and the turn-event runner pushes a literal 0.
+
+   Table slot 6, and chapter 4's map03.dat is the only shipped file that names
+   it -- two turn-event records, turns 3 and 5, both phase 0, so both firings
+   are on the enemy pass, immediately after the player's third and fifth turns
+   end. */
+extern void fdps_chapter_04_event_for_turn(int unit_index);
+#pragma aux fdps_chapter_04_event_for_turn "*" parm caller [];
+
 /* Chapter 5's ambush: takes unit indices 6 through 0x22 inclusive off the
    hold-position behaviour the map deploys them in and puts them on the default
    one, which paths a unit toward the nearest opposing unit, so the whole

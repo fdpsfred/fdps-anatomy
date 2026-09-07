@@ -13,6 +13,8 @@
 #include "deploy.h"
 #include "text.h"
 #include "unit.h"
+#include "mapcur.h"
+#include "mapdraw.h"
 #include "chevt1.h"
 
 /* The mode 13h aperture and its row stride, PUSH 0xa0000 and PUSH 0x140 in
@@ -541,6 +543,194 @@ void fdps_chapter_03_event_turn_limit_game_over(int unit_index)
     fdps_deploy_wave(CH03_PLACEMENT_MAP_NO, CH03_TURN_LIMIT_WAVE,
                      CH03_PLACE_EXACT);
     data_fdps_chapter_event_or_battle_end_code = 1;
+}
+
+/* The turn the chapter speaks on rather than reinforcing: CMP dword ptr
+   [0x00069ce8],0x3 at 00036f7c.  It is one of the two turns map03.dat's
+   turn-event table names for this slot -- the three-byte (turn, handler, side)
+   records (3, 6, 0) and (5, 6, 0) at file offset 3 -- and this compare is the
+   only thing that tells the two firings apart.  There is no compare against the
+   other one: every turn that is not 3 takes the reinforcement path. */
+#define CH04_SPEAK_TURN 3
+
+/* The two entries of chapter 4's own FDETXT%02d.TXT block the handler draws:
+   PUSH 0x17 at 00036f98 on the speaking turn and PUSH 0x18 at 00036ffb behind
+   the arrivals.  0x17 opens with the portrait control code -0x11 followed by 98
+   and switches to -0x11 101 half way through, so it is an exchange between
+   enemy templates 0x62 and 0x65; 0x18 is the announcement line and is spoken by
+   0x65 alone. */
+#define CH04_SPEAK_TEXT_ID 0x17
+#define CH04_ARRIVAL_TEXT_ID 0x18
+
+/* The wave the reinforcement asks for: PUSH 0x5 at 00036fb0, matched against
+   byte 0x15 of each 0x1a-byte deployment record of the resident MAP%02d.DAT
+   block.  Seven of map03.dat's records carry it -- one level-8 mage at template
+   0x66, four level-7 infantry at 0x62 and two level-6 cavalry at 0x58 --
+   scripted along the low-x, high-y edge of the map. */
+#define CH04_ARRIVAL_WAVE 5
+
+/* How that wave is placed: XOR EAX,EAX / PUSH EAX at 00036fad, so
+   fdps_deploy_wave passes 0 on to fdps_deploy_unit and each arrival goes on the
+   nearest free walkable tile to its placement record's coordinates rather than
+   on the coordinates themselves. */
+#define CH04_PLACE_EXACT 0
+
+/* Which unit the map cursor is parked on before the arrivals are held on
+   screen: PUSH 0x1f at 00036fc0.  It is one of the seven records the
+   deployment on the line above has just appended, so the value is only correct
+   after that call and only against map03.dat's own unit count. */
+#define CH04_ARRIVAL_CURSOR_UNIT 0x1f
+
+/* How long the view is held over them: CMP dword ptr [EBP+0x14],0xc / JL at
+   00036fd1, so twelve composed frames.  fdps_render_view_frame paces itself to
+   one timer tick a frame, which is what makes this a duration and not just
+   twelve repaints. */
+#define CH04_ARRIVAL_HOLD_FRAMES 0xc
+
+/* The two inclusive index ranges the behaviour merge walks, off the constants
+   staged at 0003700b/00037012 and 0003706b/00037072.  The first is four units
+   and the second is one, and both are inclusive of their last index -- the
+   compares at 0003703b and 0003709b are CMP EAX,<last> / JLE, signed and
+   inclusive -- so a half-open first range drops unit 0x12 and a half-open
+   second range skips unit 0x0d altogether. */
+#define CH04_ADVANCE_FIRST_INDEX 0x0f
+#define CH04_ADVANCE_LAST_INDEX 0x12
+#define CH04_ADVANCE_LONE_INDEX 0x0d
+
+/* 00036f70.  Chapter 4's turn-scheduled event: on the enemy pass of turn 3 it
+   speaks the chapter's scripted line and stops there, and on the enemy pass of
+   turn 5 it brings the map's wave-5 enemies onto the battlefield, holds the
+   view over them, announces them and puts five of the map's units onto the
+   advancing behaviour.
+
+   The frame is the family's four-push one with a local area this time -- PUSH
+   EBX / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x40 at
+   00036f70..00036f76 -- because the two inline range walks each need their own
+   argument, parameter and record slots.  Every caller-clean in the body is this
+   function's own (ADD ESP,0x1c after each draw, ADD ESP,0xc after the
+   deployment, ADD ESP,0x4 after the cursor move and after each record lookup),
+   the RET at 000370d1 carries no immediate, and the only dispatcher that
+   reaches the slot pushes one dword and drops it with ADD ESP,0x4 at 0002e146,
+   so the convention is the stack one at both ends of the call.
+
+   THE ONLY TEST IN THE BODY IS AGAINST TURN 3.  CMP dword ptr
+   [0x00069ce8],0x3 / JNZ at 00036f7c is the whole of it: there is no compare
+   against 5 anywhere, no one-shot latch and no test of the battle-end global,
+   so every turn that is not 3 runs the reinforcement path in full.  What makes
+   the handler fire twice and only twice is map03.dat's turn table, which names
+   slot 6 in exactly two records.
+
+   The speaking path is one draw and a jump straight to the epilogue at
+   00036fa8, so turn 3 deploys nothing, moves no cursor, renders no frame and
+   leaves every unit's behaviour byte alone.
+
+   The reinforcement path runs in this order and the order is what the player
+   sees: the arrivals are appended first (CALL 0x00023830 at 00036fb8), the
+   cursor is walked onto one of them second (CALL 0x0002da50 at 00036fc2), the
+   view is held over them for twelve frames third (CALL 0x0002beb0 at 00036fe1,
+   twelve times), and only then is the announcement drawn (CALL 0x0001ff60 at
+   00037003).  Drawing the line before the frames would announce enemies the
+   player has not been shown yet.
+
+   THE MAP NUMBER IS THE CHAPTER GLOBAL AND NOT A LITERAL.  PUSH dword ptr
+   [0x00069cf4] at 00036fb2 is data_fdps_chapter_current_chapter_id, the same
+   argument the chapter 10, 17 and 18 handlers read and the opposite of the four
+   chapter 3 handlers above, which push the literal 2.  The placement records
+   still come from whichever MAP%02d.DAT is resident; what the number chooses is
+   the MAP%02d.COD coordinates the arrivals are put down at.
+
+   THE FRAME COUNTER IS THE ARGUMENT SLOT.  MOV dword ptr [EBP+0x14],0x0 at
+   00036fca writes zero over the incoming argument before the first compare and
+   the loop then compares and INCs that same slot, so the counter and the
+   parameter are one storage location.  Which unit the event fired for is
+   therefore gone by the time the loop starts, and it was never read before
+   that: the turn-event runner pushes a literal 0 at 0002e13e anyway.  The store
+   has no observable effect on the caller either, because the slot belongs to
+   its outgoing argument area and it drops it with ADD ESP,0x4.
+
+   The two behaviour merges are read-modify-writes of one byte -- MOV DL,byte
+   ptr [EAX+0x34] / AND DL,0xf0 / MOV DH,byte ptr [EBP-0x14] / OR DH,DL / MOV
+   byte ptr [EAX+0x34],DH at 00037058..00037066 and the same again at
+   000370b8..000370c6 -- so the behaviour code goes to 0 and the two AI flag
+   bits in the high nibble are carried across untouched.  Storing the mode whole
+   would clear bits 0x40 and 0x80, which fdps_map_actor_take_best_action and
+   fdps_score_targets_for_item read on their own.
+
+   Both ranges are fdps_object_set_field34_low_nibble_range (00036b60) expanded
+   inline with a constant argument triple -- (0xf, 0x12, 0) and (0xd, 0xd, 0) --
+   the same expansion the chapter 2 and chapter 5 handlers carry and with the
+   same fingerprint: three constants parked in one set of slots, copied into a
+   second set, and only then the counter seeded from the first of them.  There
+   is no CALL to that helper anywhere in the body; the only CALL in either loop
+   is fdps_get_unit_record, once per iteration, so writing the ranges as calls
+   to the helper would put a CALL in the rebuild that the original does not
+   make.  That is also why the one-unit second range is written with a first and
+   a last index that are equal.
+
+   Nothing bounds the five indices and nothing reads data_fdps_map_unit_count;
+   they are literals in the instruction stream and they are correct for map03's
+   own deployment.  map03.dat already authors all five at behaviour code 0
+   (deployment record byte 0x11, copied into record byte 0x34 at 0002379d), so
+   against the shipped data the merges change nothing unless play has moved one
+   of those units off mode 0.
+
+   fdps_draw_text hands back a cursor in EAX and both call sites discard it:
+   after the first the next instruction is the JMP to the epilogue, and after
+   the second it is MOV dword ptr [EBP-0x20],0xf.  fdps_get_unit_record's result
+   is the only value the body keeps off a CALL -- stored to [EBP-0x4] at
+   00037052 and to [EBP-0x40] at 000370b2, then reloaded for the load and again
+   for the store, so both halves of each merge address the record that
+   iteration fetched.  Nothing sets EAX before the RET and no dispatcher reads
+   what comes back, so the result is void. */
+void fdps_chapter_04_event_for_turn(int unit_index)
+{
+    /* The record a behaviour merge is standing on, refetched per index. */
+    struct fdps_unit_record *unit;
+    /* Which unit of the two ranges the merge has reached. */
+    int advancing_unit_index;
+
+    if (data_fdps_battle_turn_counter == CH04_SPEAK_TURN) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH04_SPEAK_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        return;
+    }
+
+    fdps_deploy_wave(data_fdps_chapter_current_chapter_id, CH04_ARRIVAL_WAVE,
+                     CH04_PLACE_EXACT);
+    fdps_map_cursor_move_to_unit(CH04_ARRIVAL_CURSOR_UNIT);
+
+    /* The argument slot is the counter, as the assembly has it. */
+    for (unit_index = 0;
+         unit_index < CH04_ARRIVAL_HOLD_FRAMES;
+         unit_index++) {
+        fdps_render_view_frame();
+    }
+
+    fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                   CH04_ARRIVAL_TEXT_ID,
+                   (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                   MESSAGE_FG_COLOR, MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+
+    for (advancing_unit_index = CH04_ADVANCE_FIRST_INDEX;
+         advancing_unit_index <= CH04_ADVANCE_LAST_INDEX;
+         advancing_unit_index++) {
+        unit = fdps_get_unit_record(advancing_unit_index);
+        unit->ai_behavior = (unsigned char)
+            ((unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+             AI_BEHAVIOR_MODE_ADVANCE);
+    }
+
+    for (advancing_unit_index = CH04_ADVANCE_LONE_INDEX;
+         advancing_unit_index <= CH04_ADVANCE_LONE_INDEX;
+         advancing_unit_index++) {
+        unit = fdps_get_unit_record(advancing_unit_index);
+        unit->ai_behavior = (unsigned char)
+            ((unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+             AI_BEHAVIOR_MODE_ADVANCE);
+    }
 }
 
 /* 000370e0.  Chapter 5's ambush: every unit the map has deployed beyond the

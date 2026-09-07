@@ -60,10 +60,13 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "unit.h"
+#include "mapdraw.h"
 #include "chevt1.h"
 
 /* The three codes the battle-end global carries, from the stores across the
@@ -2103,6 +2106,500 @@ static void ch03_gameover_ignores_the_unit_index_argument(void)
     }
 }
 
+/* ---- fdps_chapter_04_event_for_turn, 00036f70 -------------------------- */
+
+/* Chapter 4's turn-scheduled event.
+ *
+ * It is staged through the chapter 3 fixture above -- the same blank walkable
+ * map, the same deployment table and the same empty-stream text block -- with
+ * three things added that the chapter 3 handlers do not need.
+ *
+ * A REAL UNIT ARRAY OF 0x20 RECORDS, in place of the fixture's single one.  The
+ * handler walks the map cursor onto unit 0x1f and then rewrites the AI byte of
+ * units 0x0d and 0x0f..0x12, none of which is range checked, so a one-record
+ * array would be indexed a long way off its end.  The block is malloc'd for the
+ * reason the fixture's own is: a deployment reallocs it.
+ *
+ * A TEXT BLOCK ONE ENTRY LONGER, 0x19 rather than 0x18 entries, because this
+ * handler names entry 0x18 and the chapter 3 block ends at 0x17.  Every entry
+ * still holds the same offset, so whichever one a draw resolves it lands on the
+ * lone -1 past the table and the stream ends before a glyph is drawn.
+ *
+ * A REAL TIMER INTERRUPT for the duration of every call.  The handler renders
+ * twelve frames through fdps_render_view_frame, whose wait ends only when
+ * data_fdps_timer_tick_counter moves (mapdraw.h), and nothing advances that
+ * counter in a test image, so the second frame would never end.  Each run hooks
+ * IRQ0 with a handler that increments the counter and chains to the one that
+ * was there, exactly as tests/death.c and tests/icon.c do.  Nothing the frames
+ * compose is looked at: the scene layer count, the cursor draw mode and the two
+ * HUD flags are all zero, so the compositor writes nothing.
+ *
+ * HOW MANY FRAMES ARE RENDERED IS NOT ASSERTED.  A frame consumes one timer
+ * tick and a test cannot say how many ticks elapsed inside the call without
+ * racing the interrupt, which is the position tests/icon.c leaves the same
+ * question in; twelve is a playtest contract.  What IS an exact observable is
+ * whether any frame ran at all, because fdps_render_view_frame latches the tick
+ * counter into data_fdps_view_frame_last_tick as the last thing it does, so a
+ * sentinel staged into that latch survives a run that renders nothing and is
+ * gone after a run that renders.
+ *
+ * WHICH TEXT ENTRY EACH DRAW ASKS FOR IS NOT ASSERTED, for the reason the
+ * chapter 3 sections above give -- fdps_draw_text takes its whole effect
+ * through pixels at the VGA aperture and keeps no state -- so PUSH 0x17 at
+ * 00036f98 and PUSH 0x18 at 00036ffb stand on the reviewer's reading of the
+ * instruction stream.  What the cases do pin about the draws is that neither
+ * stops what follows it.
+ *
+ * Every case that reaches the deployment needs ICON.CEL and FIELD.VFS and skips
+ * itself without them.  The speaking-turn cases do not: turn 3 draws and
+ * returns, and the empty-stream block needs no file at all.
+ */
+
+/* The one turn the handler compares against, CMP dword ptr [0x00069ce8],0x3 at
+   00036f7c, and the other turn map03.dat schedules the slot for, which the body
+   has no compare for at all. */
+#define CH04_SPEAK_TURN 3
+#define CH04_ARRIVAL_TURN 5
+
+/* Three turns nothing in the shipped data reaches: one either side of the
+   speaking turn and one far past the last turn the map schedules.  All three
+   have to reinforce, because the only test in the body is against 3. */
+#define CH04_ZERO_TURN 0
+#define CH04_UNSCHEDULED_TURN 4
+#define CH04_LATE_TURN 20
+
+/* The wave the handler asks for, PUSH 0x5 at 00036fb0, with the wave either
+   side of it left in the table underneath it so a handler that asked for 4 or 6
+   lands on a different tile carrying a different level.  Placement record and
+   table index are the same number, as they are for the chapter 3 cases. */
+#define CH04_ARRIVAL_WAVE 5
+#define CH04_WAVE5_RECORD 5
+#define CH04_WAVE4_RECORD 6
+#define CH04_WAVE6_RECORD 7
+#define CH04_SPAWN_RECORD_COUNT 8
+
+/* WHICH RECORD ARRIVED IS READ OFF ITS LEVEL AND NOT OFF ITS CHARACTER ID,
+   because the character id is also the portrait id fdps_draw_map_unit
+   dispatches on and every unit on this map has to be one that routine drops:
+   the twelve frames the handler composes run the whole map compositor, and a
+   unit it does not drop is blitted out of the sprite cache and the shadow
+   sheet, neither of which a test image has.  0x80 is the id it drops at
+   00033c56 (src/mapdraw.c), so all three records carry it and are told apart by
+   fdps_deploy_unit copying the record's level byte into the unit instead --
+   which nothing draws.  This is the same reason tests/death.c gives every unit
+   it stages portrait id 0x80 and tests/icon.c renders with a unit count of 0. */
+#define CH04_ARRIVAL_CHAR_ID 0x80
+#define CH04_WAVE4_LEVEL 4
+#define CH04_WAVE5_LEVEL 5
+#define CH04_WAVE6_LEVEL 6
+
+/* Placement record 5 of MAP00.COD and of MAP01.COD, the same two files the
+   chapter 3 tile-triggered case above reads them out of when it proves its own
+   handler ignores the chapter global.  This handler pushes the global, so the
+   two files are what separate a handler that read it from one that did not. */
+#define CH04_MAP00_TILE_X 14
+#define CH04_MAP00_TILE_Y 6
+#define CH04_MAP01_TILE_X 9
+#define CH04_MAP01_TILE_Y 5
+
+/* The staged array holds every index the handler reaches -- 0x0d, 0x0f..0x12
+   and 0x1f -- with 0x0c, 0x0e and 0x13 present as the records an off-by-one at
+   either end of either range would land on, and the arrival appended at 0x20
+   past all of them. */
+#define CH04_STAGED_UNITS 0x20
+
+/* The two inclusive ranges the merges walk, off the constants staged at
+   0003700b/00037012 and 0003706b/00037072, with the compares at 0003703b and
+   0003709b being the signed inclusive JLE. */
+#define CH04_FIRST_ADVANCED 0x0f
+#define CH04_LAST_ADVANCED 0x12
+#define CH04_LONE_ADVANCED 0x0d
+
+/* The unit the cursor is sent to, PUSH 0x1f at 00036fc0, and the tile it is
+   staged on.  Every other staged record is left at (0, 0), so a handler that
+   named any other index walks the cursor somewhere else -- or nowhere, since
+   the walk takes a zero-delta early return.  24 is the cursor's tile step, IMUL
+   EAX,EAX,0x18 at 0002da74 (src/mapcur.c). */
+#define CH04_CURSOR_UNIT 0x1f
+#define CH04_CURSOR_TILE_X 4
+#define CH04_CURSOR_TILE_Y 2
+#define CH04_TILE_STEP 24
+
+/* The chapter text block: 0x19 entries covers both ids this handler names, 0x17
+   and 0x18, and every one of them holds the same offset onto the lone -1 that
+   follows the table.  The offset is added to the block's own base and not to
+   the slot it was read from (src/text.c). */
+#define CH04_TEXT_ENTRY_COUNT 0x19
+
+/* The AI byte every record is staged with and what the merge has to leave: a
+   behaviour code of 2 -- hold position -- under a high nibble that has to
+   survive, and the same high nibble with the code gone. */
+#define CH04_STAGED_AI_BYTE 0x52
+#define CH04_ADVANCED_AI_BYTE 0x50
+
+/* A second staging pair with both of the flag bits the merge must not clear
+   set: 0x80 is what fdps_score_targets_for_item reads and 0x40 is what
+   fdps_map_actor_take_best_action reads, and the low nibble under them is a
+   behaviour code of 13 rather than 2 so a merge that ORed something other than
+   0 in is visible as well. */
+#define CH04_FLAGGED_AI_BYTE 0xcd
+#define CH04_FLAGGED_ADVANCED_AI_BYTE 0xc0
+
+/* A value the tick counter cannot legitimately hold on entry, parked in the
+   frame latch so a run that rendered nothing is distinguishable from one that
+   did. */
+#define CH04_FRAME_SENTINEL 0x5a5a5a5aU
+
+#define CH04_TIMER_VECTOR 8
+#define CH04_MODE_13H 0x13
+#define CH04_MODE_TEXT 0x03
+
+static short ch04_text_block[CH04_TEXT_ENTRY_COUNT + 1];
+static void (__interrupt __far *ch04_saved_timer)();
+
+static void __interrupt __far ch04_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(ch04_saved_timer);
+}
+
+static void ch04_set_mode(int mode)
+{
+    union REGS regs;
+
+    ch03_zero_bytes(&regs, (int) sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+static struct fdps_unit_record *ch04_unit(int unit_index)
+{
+    return (struct fdps_unit_record *)
+           (data_fdps_map_unit_array_ptr + unit_index * CH03_UNIT_STRIDE);
+}
+
+/* Whether the handler's two ranges reach an index: 0x0f through 0x12 inclusive
+   from the first merge and 0x0d alone from the second. */
+static int ch04_index_is_advanced(int unit_index)
+{
+    if (unit_index >= CH04_FIRST_ADVANCED
+        && unit_index <= CH04_LAST_ADVANCED) {
+        return 1;
+    }
+    return unit_index == CH04_LONE_ADVANCED;
+}
+
+/* The chapter 3 fixture with the wave-4, wave-5 and wave-6 records added behind
+   its five, a 0x20-record unit array carrying the given AI byte, the longer
+   text block, and the compositor given nothing to draw.  The cursor is left
+   standing on the tile of the unit the handler sends it to, so the walk takes
+   its zero-delta early return and the only frames a run costs are the handler's
+   own twelve; the one case that watches the cursor move puts it elsewhere
+   itself. */
+static void ch04_stage(int battle_turn, int ai_behavior)
+{
+    int i;
+
+    ch03_stage(battle_turn);
+
+    ch03_set_spawn(CH04_WAVE5_RECORD, CH04_ARRIVAL_CHAR_ID, CH04_ARRIVAL_WAVE);
+    ch03_set_spawn(CH04_WAVE4_RECORD, CH04_ARRIVAL_CHAR_ID,
+                   CH04_ARRIVAL_WAVE - 1);
+    ch03_set_spawn(CH04_WAVE6_RECORD, CH04_ARRIVAL_CHAR_ID,
+                   CH04_ARRIVAL_WAVE + 1);
+    ch03_spawn_at(CH04_WAVE5_RECORD)->level = (unsigned char) CH04_WAVE5_LEVEL;
+    ch03_spawn_at(CH04_WAVE4_RECORD)->level = (unsigned char) CH04_WAVE4_LEVEL;
+    ch03_spawn_at(CH04_WAVE6_RECORD)->level = (unsigned char) CH04_WAVE6_LEVEL;
+    ch03_spawn_table[CH03_SPAWN_TABLE_COUNT_OFFSET] = CH04_SPAWN_RECORD_COUNT;
+
+    for (i = 0; i < CH04_TEXT_ENTRY_COUNT; i++) {
+        ch04_text_block[i] = (short) (CH04_TEXT_ENTRY_COUNT * 2);
+    }
+    ch04_text_block[CH04_TEXT_ENTRY_COUNT] = -1;
+    data_fdps_current_chapter_text_ptr = (unsigned char *) ch04_text_block;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *)
+        malloc((size_t) (CH04_STAGED_UNITS * CH03_UNIT_STRIDE));
+    ch03_zero_bytes(data_fdps_map_unit_array_ptr,
+                    CH04_STAGED_UNITS * CH03_UNIT_STRIDE);
+    data_fdps_map_unit_count = CH04_STAGED_UNITS;
+    for (i = 0; i < CH04_STAGED_UNITS; i++) {
+        ch04_unit(i)->ai_behavior = (unsigned char) ai_behavior;
+        ch04_unit(i)->portrait_id = (unsigned char) CH04_ARRIVAL_CHAR_ID;
+    }
+    ch04_unit(CH04_CURSOR_UNIT)->pos_x = (unsigned char) CH04_CURSOR_TILE_X;
+    ch04_unit(CH04_CURSOR_UNIT)->pos_y = (unsigned char) CH04_CURSOR_TILE_Y;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+
+    data_fdps_map_cursor_world_x = CH04_CURSOR_TILE_X * CH04_TILE_STEP;
+    data_fdps_map_cursor_world_y = CH04_CURSOR_TILE_Y * CH04_TILE_STEP;
+
+    data_fdps_view_frame_last_tick = CH04_FRAME_SENTINEL;
+}
+
+/* One call with the timer running and the adapter in the mode the frames
+   present through, so the two retrace spins inside fdps_render_view_frame see a
+   real retrace and the pacing spin sees a moving counter. */
+static void ch04_run(int argument)
+{
+    ch04_set_mode(CH04_MODE_13H);
+    ch04_saved_timer = _dos_getvect(CH04_TIMER_VECTOR);
+    _dos_setvect(CH04_TIMER_VECTOR, ch04_timer_isr);
+    fdps_chapter_04_event_for_turn(argument);
+    _dos_setvect(CH04_TIMER_VECTOR, ch04_saved_timer);
+    ch04_set_mode(CH04_MODE_TEXT);
+}
+
+/* The fields the cases below read back and the stride they are indexed by.  The
+   AI byte is the one the two merges address as byte ptr [EAX+0x34], and the
+   stride is the IMUL 0x50 inside fdps_get_unit_record. */
+static void ch04_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), CH03_UNIT_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ai_behavior), 0x34);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 1);
+}
+
+/* Turn 3 draws and returns: nothing is deployed, no AI byte moves, the cursor
+   stays where it stood and the frame latch still holds the sentinel, so no
+   frame was composed.  This is the case that would come out differently if the
+   JNZ at 00036f83 had been read the other way round, and it is the only one in
+   the section that needs no game file, because nothing past the draw runs. */
+static void ch04_speaking_turn_stops_at_the_draw(void)
+{
+    int i;
+
+    ch04_stage(CH04_SPEAK_TURN, CH04_STAGED_AI_BYTE);
+    ch04_run(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH04_STAGED_UNITS);
+    for (i = 0; i < CH04_STAGED_UNITS; i++) {
+        CHECK_EQ((int) ch04_unit(i)->ai_behavior, CH04_STAGED_AI_BYTE);
+    }
+    CHECK_EQ(data_fdps_map_cursor_world_x,
+             CH04_CURSOR_TILE_X * CH04_TILE_STEP);
+    CHECK_EQ(data_fdps_map_cursor_world_y,
+             CH04_CURSOR_TILE_Y * CH04_TILE_STEP);
+    CHECK_EQ(data_fdps_view_frame_last_tick == CH04_FRAME_SENTINEL, 1);
+}
+
+/* The wave brought on is the literal 5: the wave-5 record, table index 5, lands
+   on MAP00.COD's record 5 carrying level 5, and exactly one unit arrives.  The
+   wave-4 record underneath it and the wave-6 record above it would each carry a
+   different level and land on a different placement record's tile, so either
+   neighbour is visible twice over, and one arrival is what rules out a handler
+   that deployed more than the wave it named. */
+static void ch04_arrival_deploys_wave_five(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch04_stage(CH04_ARRIVAL_TURN, CH04_STAGED_AI_BYTE);
+    ch04_run(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH04_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch04_unit(CH04_STAGED_UNITS)->level, CH04_WAVE5_LEVEL);
+    CHECK_EQ((int) ch04_unit(CH04_STAGED_UNITS)->pos_x, CH04_MAP00_TILE_X);
+    CHECK_EQ((int) ch04_unit(CH04_STAGED_UNITS)->pos_y, CH04_MAP00_TILE_Y);
+}
+
+/* The map the wave is placed under is data_fdps_chapter_current_chapter_id --
+   PUSH dword ptr [0x00069cf4] at 00036fb2 -- and not a literal, which is what
+   separates this handler from the four chapter 3 ones above.  The same wave-5
+   record lands on (14, 6) with the global on 0 and on (9, 5) with it on 1,
+   because those are MAP00.COD's and MAP01.COD's record 5; a handler that pushed
+   a literal would land on the same tile both times. */
+static void ch04_arrival_map_number_is_the_chapter_global(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch04_stage(CH04_ARRIVAL_TURN, CH04_STAGED_AI_BYTE);
+    data_fdps_chapter_current_chapter_id = 0;
+    ch04_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, CH04_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch04_unit(CH04_STAGED_UNITS)->pos_x, CH04_MAP00_TILE_X);
+    CHECK_EQ((int) ch04_unit(CH04_STAGED_UNITS)->pos_y, CH04_MAP00_TILE_Y);
+
+    ch04_stage(CH04_ARRIVAL_TURN, CH04_STAGED_AI_BYTE);
+    data_fdps_chapter_current_chapter_id = 1;
+    ch04_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, CH04_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch04_unit(CH04_STAGED_UNITS)->pos_x, CH04_MAP01_TILE_X);
+    CHECK_EQ((int) ch04_unit(CH04_STAGED_UNITS)->pos_y, CH04_MAP01_TILE_Y);
+}
+
+/* Exactly five records are rewritten -- 0x0d and 0x0f through 0x12 -- and every
+   other staged record keeps the byte it went in with.  This is the case that
+   pins both range boundaries: 0x0e and 0x13 sit either side of the four-unit
+   range and 0x0c and 0x0e either side of the lone one, and all of them are in
+   the block.  A half-open first range would leave 0x12 on 0x52 and a half-open
+   second range would leave 0x0d on it. */
+static void ch04_arrival_advances_exactly_the_five_indices(void)
+{
+    int i;
+
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch04_stage(CH04_ARRIVAL_TURN, CH04_STAGED_AI_BYTE);
+    ch04_run(0);
+
+    for (i = 0; i < CH04_STAGED_UNITS; i++) {
+        if (ch04_index_is_advanced(i)) {
+            CHECK_EQ((int) ch04_unit(i)->ai_behavior, CH04_ADVANCED_AI_BYTE);
+        } else {
+            CHECK_EQ((int) ch04_unit(i)->ai_behavior, CH04_STAGED_AI_BYTE);
+        }
+    }
+}
+
+/* The merge is a read-modify-write masked with 0xf0 and not an assignment: a
+   record carrying both AI flag bits keeps both of them and loses only the
+   behaviour code.  Writing the mode whole would leave 0 here, which is what the
+   rebuild note on the emitted function warns about, and it would change how
+   FUN_00012c10 and FUN_000132b0 treat those five units for the rest of the
+   battle. */
+static void ch04_arrival_keeps_the_high_nibble(void)
+{
+    int i;
+
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch04_stage(CH04_ARRIVAL_TURN, CH04_FLAGGED_AI_BYTE);
+    ch04_run(0);
+
+    for (i = 0; i < CH04_STAGED_UNITS; i++) {
+        if (ch04_index_is_advanced(i)) {
+            CHECK_EQ((int) ch04_unit(i)->ai_behavior,
+                     CH04_FLAGGED_ADVANCED_AI_BYTE);
+        } else {
+            CHECK_EQ((int) ch04_unit(i)->ai_behavior, CH04_FLAGGED_AI_BYTE);
+        }
+    }
+}
+
+/* The cursor is walked onto unit 0x1f and frames are composed.  The cursor is
+   put at the origin first so the walk has a real delta to cover: unit 0x1f is
+   staged at tile (4, 2), which is world pixel (96, 48), and every other staged
+   record sits at (0, 0), so a handler that named a different index would leave
+   the cursor where it started.  The frame latch losing the sentinel is what
+   says frames were composed at all; how many is a playtest contract. */
+static void ch04_arrival_parks_the_cursor_on_unit_1f(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch04_stage(CH04_ARRIVAL_TURN, CH04_STAGED_AI_BYTE);
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    ch04_run(0);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x,
+             CH04_CURSOR_TILE_X * CH04_TILE_STEP);
+    CHECK_EQ(data_fdps_map_cursor_world_y,
+             CH04_CURSOR_TILE_Y * CH04_TILE_STEP);
+    CHECK_EQ(data_fdps_view_frame_last_tick == CH04_FRAME_SENTINEL, 0);
+}
+
+/* There is no guard of any kind in the body: neither of the two latch slots the
+   rest of the family shares blocks it, and a second call deploys a second time
+   rather than being refused.  Both latches are raised before the call because
+   they are ticket 23 symbols whose starting value nothing here may assume. */
+static void ch04_arrival_has_no_one_shot_latch(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch04_stage(CH04_ARRIVAL_TURN, CH04_STAGED_AI_BYTE);
+    data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT] = 1;
+    data_fdps_map_cell_event_triggered_flags[
+        CH03_REINFORCE_LATCH_SLOT] = 1;
+    ch04_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, CH04_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch04_unit(CH04_STAGED_UNITS)->level, CH04_WAVE5_LEVEL);
+
+    ch04_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, CH04_STAGED_UNITS + 2);
+    CHECK_EQ((int) ch04_unit(CH04_STAGED_UNITS + 1)->level, CH04_WAVE5_LEVEL);
+}
+
+/* Every turn that is not 3 reinforces, because 3 is the only value the body
+   compares against.  Turn 0, the turn before the speaking one, the turn after
+   it and a turn far past anything map03.dat schedules all deploy the same
+   wave-5 record on the same tile. */
+static void ch04_every_turn_but_three_reinforces(void)
+{
+    static int turns[3] = {CH04_ZERO_TURN, CH04_UNSCHEDULED_TURN,
+                           CH04_LATE_TURN};
+    int i;
+
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 3; i++) {
+        ch04_stage(turns[i], CH04_STAGED_AI_BYTE);
+        ch04_run(0);
+
+        CHECK_EQ(data_fdps_map_unit_count, CH04_STAGED_UNITS + 1);
+        CHECK_EQ((int) ch04_unit(CH04_STAGED_UNITS)->level, CH04_WAVE5_LEVEL);
+        CHECK_EQ((int) ch04_unit(CH04_LONE_ADVANCED)->ai_behavior,
+                 CH04_ADVANCED_AI_BYTE);
+    }
+}
+
+/* The incoming argument cannot reach anything: on the reinforcement path it is
+   overwritten with 0 at 00036fca and used as the frame counter, so an index the
+   dispatcher passed -- the cell search and the death-script runner push a real
+   one, and a scripted index out of the map file is not range checked on the way
+   in -- deploys the same record and advances the same five units.  A handler
+   that had kept the incoming value as the counter would render a different
+   number of frames for -1 than for 7, and would still have to leave these. */
+static void ch04_ignores_the_unit_index_argument(void)
+{
+    static int arguments[2] = {7, -1};
+    int i;
+
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 2; i++) {
+        ch04_stage(CH04_ARRIVAL_TURN, CH04_STAGED_AI_BYTE);
+        ch04_run(arguments[i]);
+
+        CHECK_EQ(data_fdps_map_unit_count, CH04_STAGED_UNITS + 1);
+        CHECK_EQ((int) ch04_unit(CH04_STAGED_UNITS)->level, CH04_WAVE5_LEVEL);
+        CHECK_EQ((int) ch04_unit(CH04_LAST_ADVANCED)->ai_behavior,
+                 CH04_ADVANCED_AI_BYTE);
+        CHECK_EQ((int) ch04_unit(CH04_LAST_ADVANCED + 1)->ai_behavior,
+                 CH04_STAGED_AI_BYTE);
+    }
+}
+
 void run_chevt1_tests(void)
 {
     RUN_TEST(set_game_over_from_running);
@@ -2165,4 +2662,14 @@ void run_chevt1_tests(void)
     RUN_TEST(ch03_gameover_places_on_the_nearest_free_tile);
     RUN_TEST(ch03_gameover_ignores_the_turn_counter);
     RUN_TEST(ch03_gameover_ignores_the_unit_index_argument);
+    RUN_TEST(ch04_record_shape_matches_the_offsets);
+    RUN_TEST(ch04_speaking_turn_stops_at_the_draw);
+    RUN_TEST(ch04_arrival_deploys_wave_five);
+    RUN_TEST(ch04_arrival_map_number_is_the_chapter_global);
+    RUN_TEST(ch04_arrival_advances_exactly_the_five_indices);
+    RUN_TEST(ch04_arrival_keeps_the_high_nibble);
+    RUN_TEST(ch04_arrival_parks_the_cursor_on_unit_1f);
+    RUN_TEST(ch04_arrival_has_no_one_shot_latch);
+    RUN_TEST(ch04_every_turn_but_three_reinforces);
+    RUN_TEST(ch04_ignores_the_unit_index_argument);
 }
