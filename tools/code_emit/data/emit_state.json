@@ -2913,6 +2913,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x73"
+    },
+    "00034000": {
+      "name": "fdps_village_item_sell_loop",
+      "target": "vilmenu.c",
+      "body_size": "0x20f",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x20f"
     }
   }
 }

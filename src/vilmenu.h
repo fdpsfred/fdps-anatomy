@@ -85,4 +85,39 @@ extern int fdps_village_select_member(void);
 extern void fdps_village_member_status_loop(unsigned char *screen_page);
 #pragma aux fdps_village_member_status_loop "*" parm caller [];
 
+/* 00034000.  The sell counter the item screen, the weapon shop and the secret
+   screen all offer: open the member picker, run the chosen member's bag, buy
+   one entry back at three quarters of its listed price, and start over until
+   the player cancels out of the picker.  It answers nothing, and the only way
+   it ever returns is that cancel -- a completed sale sends the player to the
+   member picker again rather than back into the same member's bag.
+
+   screen_page is the caller's own 320x200 8bpp page holding that screen's
+   backdrop.  It is only read: the window animation composes every frame on a
+   private page, and this loop copies the backdrop straight onto the adapter
+   before it opens the inventory list.
+
+   A MEMBER CARRYING NOTHING IS REFUSED AND THE REFUSAL IS ALL THAT HAPPENS.
+   The member can still be confirmed in the picker; what follows is message
+   0x1fb with the member's name substituted into it, and then the picker again.
+
+   THREE QUARTERS, TRUNCATED, OF THE LISTED PRICE.  The offer is the ITEM.DAT
+   price times three divided by four in int arithmetic, so a price that is not
+   a multiple of four loses the remainder -- 101 is offered at 75.  It is left
+   in data_fdps_dialog_last_action_value_param for the confirmation message to
+   print and is read back FROM THERE when the sale settles, so the purse and
+   the printed figure cannot disagree.
+
+   ONLY THE LEFT CELL OF THE PROMPT SELLS.  A cancel and the right cell both
+   leave the entry where it is; the offer already published in the dialogue
+   globals stays there either way, because it is written before the prompt runs
+   and nothing puts it back.
+
+   IT NEEDS THE VILLAGE'S UNIT-ARRAY ALIAS IN PLACE, exactly as the status
+   browser above does: the picker's answer is a roster index and every
+   fdps_unit_* accessor here resolves it against data_fdps_map_unit_array_ptr
+   (gamedata.h). */
+extern void fdps_village_item_sell_loop(unsigned char *screen_page);
+#pragma aux fdps_village_item_sell_loop "*" parm caller [];
+
 #endif

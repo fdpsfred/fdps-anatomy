@@ -49,6 +49,7 @@
  * they assert is that the answer is unaffected, which is the observable half.
  */
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <dos.h>
 #include <i86.h>
@@ -58,6 +59,7 @@
 #include "cdaudio.h"
 #include "keybd.h"
 #include "palcycle.h"
+#include "statunit.h"
 #include "vilmenu.h"
 
 /* The party this file offers the grid.  Eight members is longer than the six
@@ -931,6 +933,603 @@ static void vst_it_does_not_modify_the_party(void)
     vst_done();
 }
 
+/* ---- fdps_village_item_sell_loop, 00034000 -------------------------------
+ *
+ * Expected values come from the assembly at 00034000 and from nothing else:
+ * the seed MOV dword ptr [EBP-0x14],0x0 at 0003400c in front of the entry test
+ * CMP dword ptr [EBP-0x14],-0x1 / JZ at 00034025, so the first pass always
+ * runs; the four zoom calls with 1, 0, 1 and 0 as their second argument at
+ * 00034013, 0003402f, 00034050 and 00034072; CALL fdps_unit_item_count / TEST
+ * EAX,EAX / JNZ at 00034066 for the empty-bag split; MOV AL,byte ptr [EAX+0x8]
+ * / AND EAX,0xff / INC EAX / MOV [0x00064030],EAX at 00034093 for the name
+ * substitution and PUSH 0x1fb at 000340b4 for the message it is printed in;
+ * MOV dword ptr [EBP-0x10],0x0 at 000340e2 for the slot seed; CMP EAX,-0x1 /
+ * JZ at 00034105 for the list's cancel; ADD EAX,0xc9 / MOV [0x00064030],EAX at
+ * 00034145 for the item substitution and PUSH 0x1fc at 0003418e for its
+ * message; MOV DX,word ptr [EDX+0x13] / AND EDX,0xffff / LEA EDX,[EDX+EDX*0x2]
+ * / SAR EDX,0x1f / SHL EDX,0x2 / SBB EAX,EDX / SAR EAX,0x2 / MOV
+ * [0x00064038],EAX at 00034161 for the offer; TEST EAX,EAX / JNZ at 000341ab
+ * for the prompt's one selling answer; and MOV EAX,[0x00064038] / ADD dword
+ * ptr [0x000643a4],EAX at 000341cd for the purse taking the figure back out of
+ * the global rather than recomputing it.  None of it is read off the emitted C.
+ *
+ * HOW A LOOP THIS DEEP IS RUN FROM OUTSIDE.  The function answers nothing:
+ * everything it does is in the purse, in two dialogue globals and in one
+ * member's inventory, and everything it asks is asked through two modal
+ * pickers and one modal prompt.  So every case stages what all of those draw
+ * through, places the member picker's cursor on the member the case is about,
+ * installs a timer interrupt that advances the game's clock and answers both
+ * input channels, calls, and then reads the purse, the globals and the record.
+ *
+ * THE TWO INPUT CHANNELS ARE SEPARATE AND THE INTERRUPT SERVES BOTH, exactly
+ * as tests/shop.c's cover for fdps_shop_buy_loop describes.  The member picker
+ * and the inventory list both read through fdps_read_scancode_auto_repeat,
+ * which answers from data_fdps_input_last_scancode and THROWS THE RING AWAY on
+ * every poll; fdps_prompt_two_choice reads the ring itself and flushes it once
+ * on entry (keybd.h, msgwin.h).  The handler plays the picker keys into the
+ * latch the way vil_timer_isr above does and the prompt answers into the ring,
+ * advancing the answer list only when the ring's READ index has moved since
+ * the push -- which is what tells a prompt's read from a picker poll's flush.
+ *
+ * PAST THE END OF A SCRIPT THE HANDLER ALTERNATES ESCAPE AND THE NO-KEY VALUE
+ * on the latch and answers Escape on the ring, so a run that got away from its
+ * script backs out of everything and fails an assertion instead of hanging the
+ * test image.
+ *
+ * THE THREE CASES THAT REACH THE INVENTORY LIST NEED THE REAL MISC.VFS AND
+ * FACE.CEL.  fdps_unit_item_select_window composes its frame out of Status.cel
+ * and the unit's portrait, and both loaders name their file with a literal and
+ * take no argument, so there is nothing to point at a fixture (unititem.h).
+ * Those cases probe for the two files and skip themselves rather than
+ * dereferencing what a failed load leaves behind; the cases that stop at the
+ * refusal do not need them and always run.
+ *
+ * WHAT IS NOT ASSERTED, AND WHY.  Nothing is read back off the screen.  Which
+ * of the two messages was drawn, and where, is fdps_draw_text's behaviour over
+ * a text block staged here as empty entries; the gold readout is
+ * fdps_draw_party_gold's.  What the messages are ABOUT is still pinned,
+ * because each stands on its own arm and the arms leave different things
+ * behind: the refusal publishes a NAME id and no figure, the offer publishes
+ * an ITEM id and a figure.
+ */
+
+/* The text block, sized past 0x1fc -- the offer, which is the highest entry
+   this loop asks for -- and past 0xc9 + the highest item id staged below.
+   Every entry names one lone terminator, so drawing any of them paints nothing
+   and no font is needed.  It replaces vil_text, which is only big enough for
+   the member names the grid draws. */
+#define SELL_TEXT_ENTRIES 0x220
+#define SELL_TEXT_TERMINATOR (-1)
+
+/* The ITEM.DAT records the cases sell.  The sold item's price is deliberately
+   not a multiple of four -- 101 * 3 / 4 is 75.75 -- so the offer pins the
+   truncation and not just the ratio. */
+#define SELL_ITEM_RECORDS 16
+#define SELL_ITEM_SOLD 5
+#define SELL_ITEM_SOLD_PRICE 101
+#define SELL_ITEM_SOLD_OFFER 75
+
+/* One unit record's inventory: eight two-byte entries, a flag byte and an id
+   byte each, with 0x80 for empty (unititem.h). */
+#define SELL_SLOTS 8
+#define SELL_SLOT_EMPTY 0x80
+#define SELL_SLOT_CARRIED 0
+
+/* The purse every run starts with, and the two members the cases use: one
+   carrying the item in its first entry, one carrying nothing.  Neither is
+   roster slot 3, so the picker's locked-slot rule decides nothing here. */
+#define SELL_START_GOLD 1000
+#define SELL_SELLER 1
+#define SELL_EMPTY_HANDED 2
+
+/* Values parked in the two dialogue globals before a run, so that "this arm
+   never wrote it" is a single comparison.  Neither is a value any arm below
+   could leave: the name ids are small and the offer is 75. */
+#define SELL_TEXT_SENTINEL 0x5a5a
+#define SELL_VALUE_SENTINEL 0x3c3c
+
+/* The number sheet the gold readout and the status panel draw figures
+   through: five colour rows of thirteen 6 by 8 glyphs, because the panel
+   selects rows other than 0 and fdps_draw_number reaches a glyph's offset at
+   (row * 13 + glyph) * 4 + 0x0f (text.c), so a sheet with one row's worth of
+   table would read a stream byte as an offset.  Every glyph is one skip run
+   per row and paints nothing. */
+#define SELL_NUM_ROWS 5
+#define SELL_NUM_GLYPHS 13
+#define SELL_NUM_SPRITES (SELL_NUM_ROWS * SELL_NUM_GLYPHS)
+#define SELL_NUM_W 6
+#define SELL_NUM_H 8
+#define SELL_NUM_TABLE_AT 0x0f
+#define SELL_NUM_SKIP_CMD (0xc0 | (SELL_NUM_W - 1))
+#define SELL_NUM_STREAMS_AT (SELL_NUM_TABLE_AT + SELL_NUM_SPRITES * 4)
+#define SELL_NUM_BYTES (SELL_NUM_STREAMS_AT + SELL_NUM_SPRITES * SELL_NUM_H)
+
+/* The status panel's two gauges: three graphics of 0x75 by 8 raw pixels,
+   0x3a8 bytes apart (gauge.h). */
+#define SELL_BAR_STRIDE 0x3a8
+#define SELL_BAR_BYTES (3 * SELL_BAR_STRIDE)
+
+/* One glyph of the font the panel would draw with if any staged text entry
+   held anything. */
+#define SELL_GLYPH_WIDTH 8
+#define SELL_GLYPH_ROWS 1
+#define SELL_FONT_BYTES 256
+
+/* The backdrop page the three village screens hand this loop, filled with one
+   value so that "the page was only read" is a single comparison.  It is also
+   what the loop publishes as the village backdrop, which is where the
+   inventory window's close takes the picture it puts back (statwin.c) -- the
+   same page in both places, as the callers leave it. */
+#define SELL_PAGE_BYTES 0xfa00
+#define SELL_PAGE_FILL 0x5a
+
+/* How many picker keys and how many prompt answers one case may script. */
+#define SELL_SCRIPT_MAX 8
+#define SELL_REPLY_MAX 4
+
+/* The two containers the inventory window cannot be opened without. */
+#define SELL_WINDOW_CONTAINER "MISC.VFS"
+#define SELL_WINDOW_PORTRAIT "FACE.CEL"
+
+static short sell_text[SELL_TEXT_ENTRIES + 1];
+static struct fdps_item_effect sell_items[SELL_ITEM_RECORDS];
+static unsigned char sell_num_cel[SELL_NUM_BYTES];
+static unsigned char sell_bar_sheet[SELL_BAR_BYTES];
+static unsigned char sell_font[SELL_FONT_BYTES];
+static unsigned char *sell_page;
+
+static unsigned char sell_replies[SELL_REPLY_MAX];
+static int sell_reply_len;
+static int sell_reply_next;
+static int sell_reply_pending;
+static int sell_reply_head_at_push;
+
+/* Advances the game's clock and answers both input channels.  The latch half
+   is vil_timer_isr's, unchanged.  The ring half pushes an answer whenever the
+   ring is empty and moves the answer list on only when the read index has
+   changed since the push, which is what separates a prompt's read from a
+   picker poll's flush. */
+static void __interrupt __far sell_timer_isr(void)
+{
+    int slot;
+    unsigned char code;
+
+    ++data_fdps_timer_tick_counter;
+
+    if (data_fdps_input_key_repeat_prev_scancode
+            == (unsigned int) data_fdps_input_last_scancode) {
+        if (vil_script_next < vil_script_len) {
+            code = vil_script[vil_script_next];
+            vil_script_next++;
+        } else if (data_fdps_input_last_scancode == VIL_KEY_ESC) {
+            code = VIL_KEY_NONE;
+        } else {
+            code = VIL_KEY_ESC;
+        }
+        data_fdps_input_last_scancode = code;
+    }
+
+    if (data_fdps_input_scancode_queue_head
+            == data_fdps_input_scancode_queue_write_index) {
+        if (sell_reply_pending != 0
+            && data_fdps_input_scancode_queue_head != sell_reply_head_at_push) {
+            sell_reply_next++;
+        }
+        if (sell_reply_next < sell_reply_len) {
+            code = sell_replies[sell_reply_next];
+        } else {
+            code = VIL_KEY_ESC;
+        }
+        slot = data_fdps_input_scancode_queue_write_index;
+        data_fdps_input_scancode_queue[slot] = code;
+        sell_reply_head_at_push = data_fdps_input_scancode_queue_head;
+        sell_reply_pending = 1;
+        slot++;
+        if (slot == SCANCODE_QUEUE_LEN) {
+            slot = 0;
+        }
+        data_fdps_input_scancode_queue_write_index = slot;
+    }
+
+    _chain_intr(vil_saved_timer);
+}
+
+/* Both shipped files the inventory window needs, probed rather than
+   assumed. */
+static int sell_window_files_present(void)
+{
+    FILE *probe;
+
+    probe = fopen(SELL_WINDOW_CONTAINER, "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+
+    probe = fopen(SELL_WINDOW_PORTRAIT, "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+    return 1;
+}
+
+/* A skip-only number sheet: one run per row, six pixels wide, which is the
+   width fdps_draw_number tells the decoder to cover. */
+static void sell_build_number_sheet(void)
+{
+    int sprite_id;
+    int row;
+    int stream_at;
+
+    memset(sell_num_cel, 0, sizeof(sell_num_cel));
+    sell_num_cel[0] = 'C';
+    sell_num_cel[1] = 'E';
+    sell_num_cel[2] = 'L';
+    vil_u16(sell_num_cel, 0x07, (unsigned int) SELL_NUM_W);
+    vil_u16(sell_num_cel, 0x09, (unsigned int) SELL_NUM_H);
+    vil_u16(sell_num_cel, 0x0b, (unsigned int) SELL_NUM_SPRITES);
+
+    for (sprite_id = 0; sprite_id < SELL_NUM_SPRITES; sprite_id++) {
+        stream_at = SELL_NUM_STREAMS_AT + sprite_id * SELL_NUM_H;
+        vil_u32(sell_num_cel, SELL_NUM_TABLE_AT + sprite_id * 4,
+                (unsigned long) stream_at);
+        for (row = 0; row < SELL_NUM_H; row++) {
+            sell_num_cel[stream_at + row] = (unsigned char) SELL_NUM_SKIP_CMD;
+        }
+    }
+}
+
+/* Everything the four screens on this path draw through, on top of the picker
+   fixture every case above already uses: the bigger text block the two
+   messages are in, the item table the offer is worked out of, the number and
+   gauge sheets the readout and the panel need, the village branch of the
+   prompt and of the window close, and a bag for each member.  The picker's own
+   two globals are NOT reset -- where the cursor starts is what places the
+   case's member. */
+static void sell_stage(void)
+{
+    int entry;
+    int member;
+    int slot;
+
+    vil_stage();
+    sell_build_number_sheet();
+
+    for (entry = 0; entry < SELL_TEXT_ENTRIES; entry++) {
+        sell_text[entry] = (short) (SELL_TEXT_ENTRIES * 2);
+    }
+    sell_text[SELL_TEXT_ENTRIES] = SELL_TEXT_TERMINATOR;
+    data_fdps_all_game_text_ptr = (unsigned char *) sell_text;
+
+    memset(sell_items, 0, sizeof(sell_items));
+    sell_items[SELL_ITEM_SOLD].price = (unsigned short) SELL_ITEM_SOLD_PRICE;
+    data_fdps_item_effect_table_ptr = (unsigned char *) sell_items;
+
+    memset(sell_bar_sheet, 0x01, sizeof(sell_bar_sheet));
+    memset(sell_font, 0, sizeof(sell_font));
+
+    data_fdps_number_glyph_sheet_ptr = sell_num_cel;
+    data_fdps_number_glyph_color_row = 0;
+    data_fdps_status_gauge_bar_sheet_ptr = sell_bar_sheet;
+    data_fdps_shadow_sprite_sheet_ptr = vil_cel;
+    data_fdps_font_sheet_ptr = sell_font;
+    data_fdps_font_glyph_width = (unsigned char) SELL_GLYPH_WIDTH;
+    data_fdps_glyph_cell_height = (unsigned char) SELL_GLYPH_ROWS;
+    data_fdps_font_glyph_stride_bytes = 1;
+    data_fdps_font_outline_enabled_flag = 0;
+    data_fdps_glyph_shadow_row_offset = 0;
+    data_fdps_font_shadow_offset_x = 0;
+    data_fdps_glyph_advance_x = SELL_GLYPH_WIDTH;
+    data_fdps_font_line_height = SELL_GLYPH_ROWS;
+
+    /* Every bag empty; the case that sells puts one entry back. */
+    for (member = 0; member < VIL_MEMBER_COUNT; member++) {
+        for (slot = 0; slot < SELL_SLOTS; slot++) {
+            vil_roster[member].inventory_slots[slot * 2] =
+                (unsigned char) SELL_SLOT_EMPTY;
+            vil_roster[member].inventory_slots[slot * 2 + 1] = 0;
+        }
+    }
+
+    /* The village phase points the map unit array at the roster block, which
+       is what lets every fdps_unit_* accessor here reach the record the picker
+       answered with (vilmenu.h). */
+    data_fdps_map_unit_array_ptr = (unsigned char *) vil_roster;
+
+    /* Village mode, so the prompt puts the visible page back behind itself and
+       the window close takes its picture out of the backdrop page instead of
+       recomposing a battle scene (msgwin.h, statwin.h). */
+    data_fdps_village_mode_flag = 1;
+    data_fdps_portrait_sprite_buf_ptr = NULL;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_village_status_window_unit_idx = -1;
+    data_fdps_unit_status_window_last_tick = -1;
+
+    data_fdps_shared_party_total_gold = SELL_START_GOLD;
+    data_fdps_dialog_last_action_text_id_param = SELL_TEXT_SENTINEL;
+    data_fdps_dialog_last_action_value_param = SELL_VALUE_SENTINEL;
+}
+
+static void sell_put(int member, int slot, int flag, int item_id)
+{
+    vil_roster[member].inventory_slots[slot * 2] = (unsigned char) flag;
+    vil_roster[member].inventory_slots[slot * 2 + 1] = (unsigned char) item_id;
+}
+
+/* One whole visit to the sell counter, with the adapter in the mode the game
+   draws it in and the timer interrupt pacing the frames and answering both
+   channels.  The fixture is NOT staged here: a case calls sell_stage first and
+   then fills the bag it is about, and the two steps have to stay apart for
+   that. */
+static void sell_go(unsigned char *codes, int count,
+                    unsigned char *replies, int reply_count)
+{
+    int index;
+
+    sell_page = (unsigned char *) malloc((size_t) SELL_PAGE_BYTES);
+    CHECK_EQ(sell_page != NULL, 1);
+    if (sell_page == NULL) {
+        return;
+    }
+    memset(sell_page, SELL_PAGE_FILL, (size_t) SELL_PAGE_BYTES);
+    data_fdps_village_backdrop_page_ptr = sell_page;
+
+    for (index = 0; index < count; index++) {
+        vil_script[index] = codes[index];
+    }
+    vil_script_len = count;
+    vil_script_next = 0;
+
+    for (index = 0; index < reply_count; index++) {
+        sell_replies[index] = replies[index];
+    }
+    sell_reply_len = reply_count;
+    sell_reply_next = 0;
+    sell_reply_pending = 0;
+    sell_reply_head_at_push = 0;
+
+    data_fdps_input_last_scancode = VIL_KEY_NONE;
+    data_fdps_input_key_repeat_prev_scancode = VIL_KEY_NONE;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_ui_palette_last_cycle_tick = 0;
+    data_fdps_ui_palette_cycle_phase = 0;
+    data_fdps_audio_cd_repeat_last_tick = 0;
+    data_fdps_audio_cd_repeat_tick_counter = 0;
+
+    vil_set_mode(VIL_MODE_320X200X256);
+    vil_saved_timer = _dos_getvect(VIL_TIMER_VECTOR);
+    _dos_setvect(VIL_TIMER_VECTOR, sell_timer_isr);
+    fdps_village_item_sell_loop(sell_page);
+    _dos_setvect(VIL_TIMER_VECTOR, vil_saved_timer);
+    vil_set_mode(VIL_MODE_TEXT);
+}
+
+/* 1 when every byte of the page still holds what the run filled it with. */
+static int sell_page_untouched(void)
+{
+    int index;
+
+    if (sell_page == NULL) {
+        return 0;
+    }
+    for (index = 0; index < SELL_PAGE_BYTES; index++) {
+        if (sell_page[index] != (unsigned char) SELL_PAGE_FILL) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* How many of a member's eight entries still hold something, counted here
+   rather than through fdps_unit_item_count so that the assertion does not lean
+   on the same accessor the code under test branches on. */
+static int sell_carried(int member)
+{
+    int slot;
+    int count;
+
+    count = 0;
+    for (slot = 0; slot < SELL_SLOTS; slot++) {
+        if ((vil_roster[member].inventory_slots[slot * 2]
+             & SELL_SLOT_EMPTY) == 0) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static void sell_done(void)
+{
+    if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+        free(data_fdps_portrait_sprite_buf_ptr);
+        data_fdps_portrait_sprite_buf_ptr = NULL;
+    }
+    if (sell_page != NULL) {
+        free(sell_page);
+        sell_page = NULL;
+    }
+    data_fdps_village_backdrop_page_ptr = NULL;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_item_effect_table_ptr = NULL;
+    data_fdps_number_glyph_sheet_ptr = NULL;
+    data_fdps_status_gauge_bar_sheet_ptr = NULL;
+    data_fdps_shadow_sprite_sheet_ptr = NULL;
+    data_fdps_font_sheet_ptr = NULL;
+    data_fdps_village_mode_flag = 0;
+    data_fdps_shared_party_total_gold = 0;
+    vil_unstage();
+}
+
+/* The seed is zero and the entry test is against -1, so the picker is opened
+   before anything has been picked; the cancel that comes back out of it is the
+   loop's exit and nothing else runs.  Neither dialogue global is written on
+   that path, which is what the two sentinels show. */
+static void sell_a_cancel_ends_the_first_pass(void)
+{
+    unsigned char script[1];
+
+    script[0] = VIL_KEY_ESC;
+    vil_place(SELL_EMPTY_HANDED, 0);
+    sell_stage();
+    sell_go(script, 1, NULL, 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SELL_START_GOLD);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, SELL_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, SELL_VALUE_SENTINEL);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, SELL_EMPTY_HANDED);
+    CHECK_EQ(sell_page_untouched(), 1);
+    sell_done();
+}
+
+/* A member carrying nothing is refused: the name substitution is that member's
+   character id plus one -- the message table's bias for a character name --
+   the figure slot is never written, and the purse does not move.  A body that
+   published the id itself, or that took the bias the item names use, would
+   miss here by exactly one and by exactly 0xc8. */
+static void sell_an_empty_bag_publishes_the_member_name(void)
+{
+    unsigned char script[2];
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_ESC;
+    vil_place(SELL_EMPTY_HANDED, 0);
+    sell_stage();
+    sell_go(script, 2, NULL, 0);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param,
+             (int) vil_char_ids[SELL_EMPTY_HANDED] + 1);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, SELL_VALUE_SENTINEL);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SELL_START_GOLD);
+    CHECK_EQ(sell_carried(SELL_EMPTY_HANDED), 0);
+    CHECK_EQ(sell_page_untouched(), 1);
+    sell_done();
+}
+
+/* And the refusal is not the end of the call: the arm falls to the back edge,
+   so the picker opens again.  The second visit moves the cursor one cell
+   before cancelling, and that move is only reachable if the picker really was
+   reopened. */
+static void sell_a_refusal_reopens_the_picker(void)
+{
+    unsigned char script[3];
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_RIGHT;
+    script[2] = VIL_KEY_ESC;
+    vil_place(SELL_EMPTY_HANDED, 0);
+    sell_stage();
+    sell_go(script, 3, NULL, 0);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx,
+             SELL_EMPTY_HANDED + 1);
+    CHECK_EQ(data_fdps_shared_party_total_gold, SELL_START_GOLD);
+    sell_done();
+}
+
+/* A settled sale.  The offer is three quarters of the listed price truncated
+   -- 101 becomes 75 and not 76 -- the name substitution is the item id plus
+   0xc9 and not the character bias, the entry leaves the bag, and the purse
+   grows by the offer that was published, taken back out of the figure global
+   rather than worked out a second time.  The cursor moving after the sale is
+   the loop going round again rather than back into the same bag. */
+static void sell_a_settled_sale_pays_three_quarters(void)
+{
+    unsigned char script[5];
+    unsigned char replies[1];
+
+    if (sell_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_NONE;
+    script[2] = VIL_KEY_ENTER;
+    script[3] = VIL_KEY_RIGHT;
+    script[4] = VIL_KEY_ESC;
+    replies[0] = VIL_KEY_ENTER;
+
+    vil_place(SELL_SELLER, 0);
+    sell_stage();
+    sell_put(SELL_SELLER, 0, SELL_SLOT_CARRIED, SELL_ITEM_SOLD);
+    sell_go(script, 5, replies, 1);
+
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, SELL_ITEM_SOLD_OFFER);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param,
+             SELL_ITEM_SOLD + 0xc9);
+    CHECK_EQ(data_fdps_shared_party_total_gold,
+             SELL_START_GOLD + SELL_ITEM_SOLD_OFFER);
+    CHECK_EQ(sell_carried(SELL_SELLER), 0);
+    CHECK_EQ(data_fdps_village_member_select_cursor_idx, SELL_SELLER + 1);
+    CHECK_EQ(sell_page_untouched(), 1);
+    sell_done();
+}
+
+/* The prompt's other answers do not sell.  A cancel out of it leaves the entry
+   in the bag and the purse where it was -- but the offer it was asked about
+   still stands in the figure global, because that is written before the prompt
+   runs and no arm puts it back. */
+static void sell_a_declined_offer_leaves_the_bag_alone(void)
+{
+    unsigned char script[5];
+    unsigned char replies[1];
+
+    if (sell_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_NONE;
+    script[2] = VIL_KEY_ENTER;
+    script[3] = VIL_KEY_NONE;
+    script[4] = VIL_KEY_ESC;
+    replies[0] = VIL_KEY_ESC;
+
+    vil_place(SELL_SELLER, 0);
+    sell_stage();
+    sell_put(SELL_SELLER, 0, SELL_SLOT_CARRIED, SELL_ITEM_SOLD);
+    sell_go(script, 5, replies, 1);
+
+    CHECK_EQ(data_fdps_shared_party_total_gold, SELL_START_GOLD);
+    CHECK_EQ(sell_carried(SELL_SELLER), 1);
+    CHECK_EQ(vil_roster[SELL_SELLER].inventory_slots[1], SELL_ITEM_SOLD);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, SELL_ITEM_SOLD_OFFER);
+    sell_done();
+}
+
+/* Backing out of the inventory list skips the whole sale arm, offer included:
+   the -1 the list answers with jumps to the back edge ahead of the gold
+   readout, so neither dialogue global is written and the picker simply opens
+   again. */
+static void sell_a_cancelled_list_publishes_nothing(void)
+{
+    unsigned char script[5];
+
+    if (sell_window_files_present() == 0) {
+        return;
+    }
+
+    script[0] = VIL_KEY_ENTER;
+    script[1] = VIL_KEY_NONE;
+    script[2] = VIL_KEY_ESC;
+    script[3] = VIL_KEY_NONE;
+    script[4] = VIL_KEY_ESC;
+
+    vil_place(SELL_SELLER, 0);
+    sell_stage();
+    sell_put(SELL_SELLER, 0, SELL_SLOT_CARRIED, SELL_ITEM_SOLD);
+    sell_go(script, 5, NULL, 0);
+
+    CHECK_EQ(data_fdps_shared_party_total_gold, SELL_START_GOLD);
+    CHECK_EQ(sell_carried(SELL_SELLER), 1);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, SELL_TEXT_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, SELL_VALUE_SENTINEL);
+    sell_done();
+}
+
 void run_vilmenu_tests(void)
 {
     RUN_TEST(vil_escape_cancels);
@@ -961,4 +1560,10 @@ void run_vilmenu_tests(void)
     RUN_TEST(vst_the_backdrop_page_is_only_read);
     RUN_TEST(vst_the_window_animation_runs);
     RUN_TEST(vst_it_does_not_modify_the_party);
+    RUN_TEST(sell_a_cancel_ends_the_first_pass);
+    RUN_TEST(sell_an_empty_bag_publishes_the_member_name);
+    RUN_TEST(sell_a_refusal_reopens_the_picker);
+    RUN_TEST(sell_a_settled_sale_pays_three_quarters);
+    RUN_TEST(sell_a_declined_offer_leaves_the_bag_alone);
+    RUN_TEST(sell_a_cancelled_list_publishes_nothing);
 }

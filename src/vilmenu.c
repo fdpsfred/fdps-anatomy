@@ -11,16 +11,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <conio.h>
+#include <i86.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "blit.h"
 #include "cdaudio.h"
 #include "keybd.h"
+#include "msgwin.h"
 #include "palcycle.h"
 #include "sprite.h"
 #include "statwin.h"
 #include "table.h"
 #include "text.h"
+#include "unit.h"
+#include "unititem.h"
 #include "audio.h"
 #include "village.h"
 #include "vilmenu.h"
@@ -528,6 +532,225 @@ void fdps_village_member_status_loop(unsigned char *screen_page)
             memmove((void *) VGA_SCREEN_BASE, screen_page,
                     (size_t) VGA_SCREEN_BYTES);
             fdps_battle_show_unit_status_window(picked_member_index);
+        }
+    }
+}
+
+/* ------------------------------------------------------------------
+ * fdps_village_item_sell_loop @ 00034000
+ * ------------------------------------------------------------------ */
+
+/* Where both sell messages are written: 0xaa3d4, which is column 20, row 131
+   of the mode 13h screen, inside the window frame the zoom has just opened.
+   And where the gold readout is repainted: 0xa8208, column 8, row 104, the one
+   place all seven village and shop screens draw it (village.h).  Both are
+   literals on top of VGA_SCREEN_BASE for the reason that base is one -- they
+   are positions on the adapter and not the addresses of anything the linker
+   places. */
+#define SELL_MESSAGE_SCREEN_AT 0xa3d4
+#define GOLD_READOUT_SCREEN_AT 0x8208
+
+/* The two message entries this screen draws.  0x1fb is the refusal a member
+   with an empty bag gets, and prints one substitution -- the member's name;
+   0x1fc is the offer, and prints both -- the item's name and the figure. */
+#define SELL_REFUSED_TEXT_ID 0x1fb
+#define SELL_OFFER_TEXT_ID 0x1fc
+
+/* Where the name substitution's contents come from.  Item names live at
+   message entry 0xc9 + item id; character names live at 1 + character id,
+   which is the NAME_TEXT_ID_BIAS the grid above already draws with -- it is
+   one table and one bias, not two that happen to agree. */
+#define ITEM_TEXT_ID_BIAS 0xc9
+
+/* The colours both messages are drawn in: the same standard glyph, background
+   and outline trio the grid's member names use. */
+#define SELL_TEXT_FG_COLOR 0xd0
+#define SELL_TEXT_BG_COLOR 0
+#define SELL_TEXT_OUTLINE_COLOR 0x6d
+
+/* Three quarters of the listed price, truncated.  THE MULTIPLICATION IS SIGNED
+   AND THE DIVISION IS TOO, over a price that is not: the field at +0x13 of the
+   ITEM.DAT record is an unsigned 16-bit price, zero-extended (MOV DX,word ptr
+   [EDX+0x13] / AND EDX,0xffff at 00034161), and what is then divided is the
+   int the promotion produced -- LEA EDX,[EDX+EDX*0x2] for the times three and
+   SAR EDX,0x1f / SHL EDX,0x2 / SBB EAX,EDX / SAR EAX,0x2 at 00034170 for the
+   divide by four, which is the round-toward-zero idiom and not a plain shift.
+   The value can never be negative here, so the two agree on every input; the
+   division is written as a division because that is what the assembly does. */
+#define SELL_PRICE_NUMERATOR 3
+#define SELL_PRICE_DENOMINATOR 4
+
+/* fdps_unit_item_select_window's second argument: 0 lists every entry rather
+   than only the ones with a use effect (unititem.h). */
+#define SELL_LIST_EVERY_ENTRY 0
+
+/* What the inventory list answers when the player backs out of it, and the one
+   answer of the yes/no prompt that sells -- the left cell, which is also the
+   one highlighted on entry (msgwin.h). */
+#define ITEM_LIST_CANCELLED (-1)
+#define PROMPT_ANSWER_YES 0
+
+/* The sound a settled sale plays, MOV EAX,0x61f58 in front of the call.  It is
+   the same literal shop.c names for a settled payment. */
+#define SELL_PAYMENT_SFX "Incom.wav"
+
+/* How long the screen holds after a settled sale, PUSH 0xc8 at 000341ea: 200
+   milliseconds with the gold readout already repainted, so the player sees the
+   new purse before the picker comes back. */
+#define SELL_PAYMENT_HOLD_MS 200
+
+/* 00034000.  One stack argument, caller-cleaned: all three call sites --
+   fdps_village_item_menu at 000359e4, fdps_run_weapon_shop at 00036157 and
+   fdps_run_secret_menu at 0003639b -- push their own page and follow the CALL
+   with ADD ESP,0x4, and the body reads it at [EBP+0x14] behind PUSH
+   EBX/ESI/EDI/EBP and the return address.  RET carries no immediate, EAX is
+   never set before the epilogue and none of the three call sites looks at it.
+
+   The control flow is one loop with three tests nested inside it.  The entry
+   test CMP dword ptr [EBP-0x14],-0x1 / JZ at 00034025 is the top of the loop
+   and the JMP at 00034203 is its back edge, so this is a while whose condition
+   is checked before the first pass -- which is why the slot is seeded with
+   zero at 0003400c rather than with a member index: zero is simply the value
+   that is not -1.  Every arm inside, taken or not, falls to that same back
+   edge, so cancelling in the picker is the only way to reach the epilogue.
+
+   THE INNER `picked_member_index != GRID_CANCELLED` IS ALREADY TRUE AND IT IS
+   STILL THERE.  CMP dword ptr [EBP-0x14],-0x1 / JZ at 000340e9 sits between
+   the slot seed and the call to the inventory list, inside an arm the outer
+   test at 0003404a has already established the index is not -1 in.  At -od
+   nothing folds it away, and the short-circuit shape is visible in the
+   assembly -- the failed compare and the list's own -1 land on the same
+   address.  It is written out because that is the program; it costs one
+   compare per sale and decides nothing.
+
+   THE SLOT IS SEEDED TO ZERO BEFORE EVERY VISIT TO THE LIST, at 000340e2, and
+   the list's cursor starts from what the caller left there (unititem.h), so
+   the bag always opens on the first entry however the last visit ended.
+
+   THE OFFER IS PUBLISHED BEFORE THE PROMPT AND READ BACK OUT OF THE GLOBAL
+   AFTERWARDS.  MOV [0x00064038],EAX at 0003417b writes it and MOV
+   EAX,[0x00064038] / ADD dword ptr [0x000643a4],EAX at 000341cd adds that same
+   slot to the purse, so the figure the confirmation message printed and the
+   figure the player is paid are one value and not two computations of it.
+   Recomputing the price at the payment instead would be a different program
+   the moment anything between the two touched the slot.
+
+   THE STATS ARE REWORKED AFTER THE SALE AND ONLY AFTER A SALE.  What was sold
+   may have been equipped -- fdps_unit_remove_item unequips it (unititem.h) --
+   so fdps_unit_recompute_combat_stats closes the arm; nothing recomputes on
+   the declined or cancelled paths because nothing changed on them.
+
+   THE BACKDROP COPY IS NOT A REDRAW AND CANNOT BE DROPPED.  The inventory
+   window snapshots the live screen on the way in and paints that snapshot back
+   on the way out (unititem.h), so what this memmove puts on the adapter is
+   what the player is left looking at once the list closes.
+
+   The values used after a CALL are five.  fdps_village_select_member's EAX is
+   the roster index, stored to the loop's slot by MOV dword ptr [EBP-0x14],EAX
+   at 00034043 and compared and passed on from there.  fdps_unit_item_count's
+   EAX is tested where it stands -- TEST EAX,EAX / JNZ at 0003406e with no
+   store -- so the count is a branch and never a value.  fdps_get_unit_record's
+   EAX is the member record, MOV dword ptr [EBP-0x8],EAX at 0003408d, and only
+   its char_id byte at +8 is ever read.  fdps_unit_item_select_window's EAX is
+   likewise compared where it stands, CMP EAX,-0x1 / JZ at 00034105, and the
+   slot it chose comes back through the pointer instead.
+   fdps_unit_get_item_id's EAX is the item id, MOV dword ptr [EBP-0xc],EAX at
+   0003413f, used for the message entry and for the record lookup;
+   fdps_get_item_record's EAX is that record, MOV dword ptr [EBP-0x4],EAX at
+   0003415b, read only for its price.  fdps_prompt_two_choice's EAX is tested
+   in place, TEST EAX,EAX / JNZ at 000341ab.  fdps_draw_text answers a pen
+   position that this caller drops (ADD ESP,0x1c at 000341a3 with no use of
+   EAX), and the zoom, the gold readout, memmove, the removal, the sound, the
+   delay and the stat recomputation return nothing this function looks at. */
+void fdps_village_item_sell_loop(unsigned char *screen_page)
+{
+    /* Which party member the player last confirmed in the picker, and the
+       loop's only exit: -1 is the picker's cancel and nothing else stops
+       this. */
+    int picked_member_index;
+    /* Which of that member's eight inventory entries the list came back on.
+       Seeded to zero before every visit, which is where the list's cursor
+       starts. */
+    int picked_slot;
+    /* The ITEM.DAT id of the entry standing in that slot. */
+    int item_id;
+    /* The member's own record, taken only on the refusal path and read only
+       for its character id. */
+    struct fdps_unit_record *member;
+    /* The item's own record, read only for its price. */
+    struct fdps_item_effect *item;
+
+    picked_member_index = 0;
+    fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+
+    while (picked_member_index != GRID_CANCELLED) {
+        fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_OPEN);
+        picked_member_index = fdps_village_select_member();
+
+        if (picked_member_index != GRID_CANCELLED) {
+            fdps_village_animate_window_zoom(screen_page, WINDOW_ZOOM_CLOSE);
+
+            if (fdps_unit_item_count(picked_member_index) == 0) {
+                fdps_village_animate_window_zoom(screen_page,
+                                                 WINDOW_ZOOM_OPEN);
+                member = fdps_get_unit_record(picked_member_index);
+                data_fdps_dialog_last_action_text_id_param =
+                    member->char_id + NAME_TEXT_ID_BIAS;
+                fdps_draw_text(data_fdps_all_game_text_ptr,
+                               SELL_REFUSED_TEXT_ID,
+                               (unsigned char *) (VGA_SCREEN_BASE
+                                                  + SELL_MESSAGE_SCREEN_AT),
+                               VGA_SCREEN_PITCH, SELL_TEXT_FG_COLOR,
+                               SELL_TEXT_BG_COLOR, SELL_TEXT_OUTLINE_COLOR);
+            } else {
+                memmove((void *) VGA_SCREEN_BASE, screen_page,
+                        (size_t) VGA_SCREEN_BYTES);
+                picked_slot = 0;
+
+                if (picked_member_index != GRID_CANCELLED
+                    && fdps_unit_item_select_window(picked_member_index,
+                                                    SELL_LIST_EVERY_ENTRY,
+                                                    &picked_slot)
+                       != ITEM_LIST_CANCELLED) {
+                    fdps_village_animate_window_zoom(screen_page,
+                                                     WINDOW_ZOOM_OPEN);
+                    fdps_draw_party_gold((unsigned char *)
+                                             (VGA_SCREEN_BASE
+                                              + GOLD_READOUT_SCREEN_AT),
+                                         VGA_SCREEN_PITCH);
+                    item_id = fdps_unit_get_item_id(picked_member_index,
+                                                    picked_slot);
+                    data_fdps_dialog_last_action_text_id_param =
+                        item_id + ITEM_TEXT_ID_BIAS;
+                    item = fdps_get_item_record(item_id);
+                    data_fdps_dialog_last_action_value_param =
+                        item->price * SELL_PRICE_NUMERATOR
+                        / SELL_PRICE_DENOMINATOR;
+                    fdps_draw_text(data_fdps_all_game_text_ptr,
+                                   SELL_OFFER_TEXT_ID,
+                                   (unsigned char *)
+                                       (VGA_SCREEN_BASE
+                                        + SELL_MESSAGE_SCREEN_AT),
+                                   VGA_SCREEN_PITCH, SELL_TEXT_FG_COLOR,
+                                   SELL_TEXT_BG_COLOR,
+                                   SELL_TEXT_OUTLINE_COLOR);
+
+                    if (fdps_prompt_two_choice() == PROMPT_ANSWER_YES) {
+                        fdps_unit_remove_item(picked_member_index,
+                                              picked_slot);
+                        fdps_play_sfx(SELL_PAYMENT_SFX);
+                        data_fdps_shared_party_total_gold =
+                            data_fdps_shared_party_total_gold
+                            + data_fdps_dialog_last_action_value_param;
+                        fdps_draw_party_gold((unsigned char *)
+                                                 (VGA_SCREEN_BASE
+                                                  + GOLD_READOUT_SCREEN_AT),
+                                             VGA_SCREEN_PITCH);
+                        delay(SELL_PAYMENT_HOLD_MS);
+                        fdps_unit_recompute_combat_stats(picked_member_index);
+                    }
+                }
+            }
         }
     }
 }
