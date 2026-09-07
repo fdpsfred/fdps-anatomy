@@ -2133,5 +2133,20 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "00032c40": [
+    {
+      "from": "emit",
+      "what": "What the seven slide frames actually draw on the first pass of a visit. The grid is allocated at the BOTTOM of the loop (malloc at 00032fb3, stored to [EBP-0x2c] at 00032fbb) and the slide at the top of the next pass reads the pointer left in that slot, so the animation blits out of a block free() at 00033092 has already taken back -- and on the very first pass out of an uninitialised stack slot, which is reachable in play because the shop's item picker hands this screen a scancode that may already be an arrow. I established that the emitted C reproduces the original's shape exactly (allocation at the bottom, no clear after the free, no hoist) and confirmed it at the object level: WDISASM of workspace/code_emit/out/objs/SHOP.OBJ shows the slide call sites pushing -4H[ebp] before the store into that slot at 072f and the free at 07f8, with no clear anywhere. So nothing about the C is in question; what is not settled is whether the rebuild's near heap hands the same 0x19848 block back to the next malloc with its contents intact, which is what makes the slide show the previous frame rather than noise.",
+      "needs": "A playtest of the village shop's buy-target screen in DOSBox-X on both executables: enter it with an arrow key already held so the first pass slides, and compare what the seven-frame scroll shows. A heap-level answer would come from watching the address malloc returns on two consecutive passes of the loop.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed independently that the emitted C reproduces the freed-block slide and did not settle the heap question either. My addition: the object file makes the ordering unambiguous -- in workspace/code_emit/out/objs/SHOP.OBJ the slide's first argument is `push -4H[ebp]` at 050d (and at the three other slide sites), while the only write to that slot is `mov -4H[ebp],eax` at 072f after the malloc at 0727, and the free consumes the same slot at 07f8; nothing clears it. So the pointer read at the top of a pass is the block freed at the bottom of the previous one, and on the first pass it is whatever the frame slot held. What remains open is the rebuild's near-heap behaviour, not the C.",
+      "needs": "The playtest the emitter describes: enter the village shop's buy-target screen with an arrow held so the first pass slides, on both executables, and compare what the seven frames show. A heap-level answer would come from watching the address malloc returns on two consecutive passes.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

@@ -6,6 +6,7 @@
  * (gamedata.h); nothing here allocates or frees it.
  */
 #include <stdlib.h>
+#include <string.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "audio.h"
@@ -15,6 +16,8 @@
 #include "palcycle.h"
 #include "shopdraw.h"
 #include "sprite.h"
+#include "table.h"
+#include "vilmenu.h"
 #include "shop.h"
 
 /* 00031700.  Walks one twelve-byte row of the shop stock table and packs the
@@ -346,4 +349,344 @@ int fdps_shop_select_item(int shop_index)
     }
 
     return selected_item_id;
+}
+
+/* ------------------------------------------------------------------------
+   fdps_shop_select_buy_target, 00032c40
+   ------------------------------------------------------------------------ */
+
+/* The second cancel code.  The item picker above answers to Escape alone; this
+   one takes Delete as well, CMP dword ptr [EBP-0x20],0x53 at 00032ca9 joining
+   Escape's store. */
+#define KEY_DELETE 0x53
+
+/* What the item's type byte decides.  0x01 through 0x27 is equipment --
+   weapons 0x01-0x15 and armour 0x16-0x27 (unititem.h) -- and gets the picker
+   below, which previews what each member's combat stats would become.
+   Everything else, type 0 and the 0x28 consumables and the 0x29-0x2c badges
+   and plot items above them, has no stats to preview and is handed to the
+   village's plain member grid instead.
+
+   THE TEST IS A ZERO TEST AND A SIGNED UPPER BOUND, not a range: CMP dword ptr
+   [EBP-0xc],0x0 / JZ at 00032c73 and CMP ...,0x27 / JLE at 00032c79.  Type 0
+   therefore leaves on the FIRST branch and never reaches the bound. */
+#define BUY_TARGET_LAST_EQUIPMENT_TYPE 0x27
+
+/* The offscreen grid every member's entry is drawn into: 312 bytes to a row,
+   335 rows, and the 0x19848 the pass mallocs is exactly that product.  It is
+   not the page the frame is composed on -- fdps_shop_render_buy_target_frame
+   allocates its own 312 x 76 one (shopdraw.h) -- it is the whole list, of which
+   that routine copies one 0x43-row strip. */
+#define BUY_TARGET_GRID_PITCH 0x138
+#define BUY_TARGET_GRID_BYTES 0x19848
+
+/* The grid's layout: three entries to a row, an entry 0x43 rows tall and 0x65
+   columns wide, and the first entry's top-left corner at row 0xc column 9.
+   Three is also the step both the cursor's vertical moves and the scroll top
+   take, and the divisor that turns a roster index into its row and column. */
+#define BUY_TARGET_ENTRIES_PER_ROW 3
+#define BUY_TARGET_ENTRY_ROW_HEIGHT 0x43
+#define BUY_TARGET_ENTRY_COLUMN_STRIDE 0x65
+#define BUY_TARGET_ENTRY_ROW_ORIGIN 0x0c
+#define BUY_TARGET_ENTRY_COLUMN_ORIGIN 9
+
+/* Where the selection bar goes: the cursor's column in the grid, but measured
+   from 5 rather than from the entries' own 9, so the bar sits four pixels left
+   of the entry it is behind. */
+#define BUY_TARGET_CURSOR_COLUMN_ORIGIN 5
+
+/* The slide.  A move that changes the visible row is drawn as seven extra
+   frames whose source row is stepped by step * 0x43 / 8, so the 67-pixel row
+   scrolls in eight sub-steps and the eighth is the settled frame the pass draws
+   anyway.  The divide is signed, IDIV-shaped SAR EAX,0x3 with the SBB
+   correction at 00032d67, which costs nothing here because the step is always
+   positive but is what the expression means. */
+#define BUY_TARGET_SLIDE_STEPS 8
+
+/* The roster slot that cannot be confirmed from chapter index 0x17 on, and the
+   chapter that starts it.  Slot 3 is 法蓮娜, who has left the party by then.
+   fdps_village_select_member locks the same slot from the same chapter
+   (vilmenu.h) and fdps_shop_draw_member_entry ghosts the same member by a
+   separate test on the record's character id (shopdraw.h). */
+#define BUY_TARGET_LOCKED_FIRST_CHAPTER 0x17
+#define BUY_TARGET_LOCKED_SLOT 3
+
+/* What the loop's own result slot holds.  It doubles as the answer for the
+   cancelled case: the epilogue hands -1 back for anything that is not a
+   confirmation, which is the same -1 Escape and Delete put here. */
+#define BUY_TARGET_RUNNING 0
+#define BUY_TARGET_CANCELLED (-1)
+#define BUY_TARGET_CONFIRMED 1
+
+/* 00032c40.  One stack argument, caller-cleaned: the single call site inside
+   the shop transaction loop at 00033b80 pushes the item id and follows the CALL
+   with ADD ESP,0x4, and the body reads it at [EBP+0x14] behind PUSH
+   EBX/ESI/EDI/EBP and the return address.  RET carries no immediate and the
+   caller keeps EAX, which is the roster index.
+
+   TWO PICKERS, ONE ENTRY POINT.  The item's type byte decides which, and for a
+   non-equipment item the whole screen belongs to fdps_village_select_member:
+   its answer is stored straight into the result slot at 00032c84 and returned
+   unchanged, so a cancel there is this function's cancel and a roster index
+   there is this function's roster index.  Nothing else in the non-equipment
+   path runs -- neither global below is read, no frame is drawn, and the loop is
+   not entered.
+
+   THE CURSOR AND THE SCROLL TOP ARE NOT SEEDED HERE.  Both are globals that no
+   other function in the image touches (shop.h) and this one neither clears nor
+   clamps them on entry, so the screen reopens on the member picked last time
+   even if the party has shrunk since.  Seeding either -- the obvious way to
+   open a menu -- loses that.
+
+   THE KEY CHAIN IS SHORT-CIRCUIT AND ITS ORDER IS THE ASSEMBLY'S: cancel,
+   confirm, then right, left, up, down, each arrow arm one `if (code == k &&
+   bound)` whose failure falls into the NEXT code's test -- JNZ and the failed
+   bound both land on the same address.  No two codes can be equal so the
+   ordering is not observable, but the guards are: a blocked move plays no sound
+   and costs nothing but a frame.
+
+   THE CONFIRM GATE IS WRITTEN AS TWO LITERALS AND NOT AS A PARTY TEST.  CMP
+   dword ptr [0x00069cf4],0x17 / JL at 00032cc7 and CMP dword ptr
+   [0x000601b4],0x3 / JZ at 00032cd0: from chapter index 0x17 on, a confirm with
+   the cursor on roster slot 3 is dropped and the loop simply keeps running.
+   The chapter test has NO UPPER BOUND, so rewriting it as "this member has left
+   the party" would let 法蓮娜 be bought for again once she rejoins for the end
+   of the game (rebuild_info/pitfalls.md).  It is only the confirm that is
+   refused: the entry is still drawn and the cursor still stops on it.
+
+   THE SLIDE BLITS FROM THE PREVIOUS PASS'S GRID, WHICH HAS ALREADY BEEN FREED.
+   The grid is allocated at the BOTTOM of the loop and the slide frames at the
+   top of the next one read the pointer left in the slot, so the animation draws
+   out of a block that free() has already taken back -- and on the very first
+   pass out of an uninitialised stack slot.  It works because Watcom's near heap
+   hands the same block back to the next malloc of the same size with its
+   contents intact.  Hoisting the allocation out of the loop, or clearing the
+   pointer after the free, changes what the animation draws
+   (rebuild_info/pitfalls.md).
+
+   THE VERTICAL MOVES ALWAYS SLIDE AND THE HORIZONTAL ONES ONLY SOMETIMES.  Up
+   and down step a whole row, so the visible row always changes; right and left
+   slide only when the cursor has left the three entries the row shows, which is
+   scroll + 3 <= cursor going forward and cursor < scroll coming back.
+
+   THE PACE LATCH IS DELIBERATELY NOT INITIALISED, exactly as in
+   fdps_shop_select_item above: every pass ends by spinning until
+   data_fdps_timer_tick_counter differs from `last_tick` and then re-latching it,
+   and `last_tick` is never seeded, so the first pass compares stack garbage and
+   normally falls straight through the wait.  data_fdps_timer_tick_counter is
+   volatile at its declaration (gamedata.h) because of that wait: nothing inside
+   it writes the counter, so a build allowed to hoist the load would spin here
+   forever.
+
+   The values used after a CALL are three.  fdps_get_item_record's EAX is the
+   item record, MOV dword ptr [EBP-0x28],EAX at 00032c66, and the only thing
+   read through it is byte +0x00 -- XOR EAX,EAX / MOV AL,byte ptr [EDX] at
+   00032c6e, zero-extended into an int slot, so the type is unsigned however the
+   compare that follows is written.  fdps_village_select_member's EAX is the
+   answer for the non-equipment path and is stored to the result slot with
+   nothing between the CALL and the store.  fdps_read_scancode_auto_repeat's EAX
+   is the scancode and goes to [EBP-0x20].  malloc's EAX is the entry grid, MOV
+   dword ptr [EBP-0x2c],EAX at 00032fbb, used unchecked -- there is no test for
+   NULL anywhere.  Nothing else here reads a return value: the CD poll, the
+   sound, the two drawing calls, memset and free return nothing this function
+   looks at.
+
+   The slide counter and the draw loop's roster index are ONE stack slot in the
+   original, [EBP-0x24], which under -od means one variable in the source since
+   Watcom gives every declared local its own slot and does not coalesce.  They
+   are two locals here because the two loops count different things and a name
+   cannot say both; a second slot costs nothing observable (ADR-0001). */
+int fdps_shop_select_buy_target(int item_id)
+{
+    /* The grid every member's entry is drawn into, rebuilt at the bottom of
+       each pass and freed again before the next one reads it. */
+    unsigned char *entry_grid;
+    /* The offered item's ITEM.DAT record, read for its type byte alone. */
+    struct fdps_item_effect *item_record;
+    /* 1 to 7: which sub-step of a row slide is being drawn. */
+    int slide_step;
+    /* Which roster member's entry the draw loop is putting in the grid. */
+    int member_index;
+    /* One poll of the auto-repeat filter: a make code, or 0xff for nothing. */
+    unsigned int scancode;
+    /* Whether the loop is still running, and if not, how it stopped. */
+    int loop_result;
+    /* How big the entry grid is, in bytes -- the size handed to both malloc and
+       the memset that clears it. */
+    int grid_bytes;
+    /* The member entry's top-left corner in the grid. */
+    int entry_column;
+    int entry_row;
+    /* The offered item's type byte, widened without sign. */
+    int item_type;
+    /* The tick the previous pass finished on. */
+    unsigned int last_tick;
+    /* The answer, filled in once the loop has stopped. */
+    int chosen_index;
+
+    loop_result = BUY_TARGET_RUNNING;
+    grid_bytes = BUY_TARGET_GRID_BYTES;
+
+    item_record = fdps_get_item_record(item_id);
+    item_type = (int) item_record->type;
+
+    if (item_type == 0 || item_type > BUY_TARGET_LAST_EQUIPMENT_TYPE) {
+        chosen_index = fdps_village_select_member();
+        return chosen_index;
+    }
+
+    while (loop_result == BUY_TARGET_RUNNING) {
+        fdps_cd_music_repeat_poll();
+        scancode = fdps_read_scancode_auto_repeat();
+
+        if (scancode == KEY_ESCAPE || scancode == KEY_DELETE) {
+            loop_result = BUY_TARGET_CANCELLED;
+        } else if (scancode == KEY_ENTER || scancode == KEY_SPACE) {
+            if (data_fdps_chapter_current_chapter_id
+                    < BUY_TARGET_LOCKED_FIRST_CHAPTER
+                || data_fdps_shop_buy_target_cursor_idx
+                   != BUY_TARGET_LOCKED_SLOT) {
+                loop_result = BUY_TARGET_CONFIRMED;
+            }
+        } else if (scancode == KEY_RIGHT
+                   && data_fdps_roster_member_count - 1
+                      > data_fdps_shop_buy_target_cursor_idx) {
+            fdps_play_sfx(PICKER_MOVE_SFX);
+            data_fdps_shop_buy_target_cursor_idx++;
+            if (data_fdps_shop_buy_target_scroll_offset
+                    + BUY_TARGET_ENTRIES_PER_ROW
+                <= data_fdps_shop_buy_target_cursor_idx) {
+                for (slide_step = 1; slide_step < BUY_TARGET_SLIDE_STEPS;
+                     slide_step++) {
+                    fdps_shop_render_buy_target_frame(
+                        entry_grid,
+                        (data_fdps_shop_buy_target_cursor_idx
+                         % BUY_TARGET_ENTRIES_PER_ROW)
+                            * BUY_TARGET_ENTRY_COLUMN_STRIDE
+                            + BUY_TARGET_CURSOR_COLUMN_ORIGIN,
+                        (data_fdps_shop_buy_target_scroll_offset
+                         / BUY_TARGET_ENTRIES_PER_ROW)
+                            * BUY_TARGET_ENTRY_ROW_HEIGHT
+                            + slide_step * BUY_TARGET_ENTRY_ROW_HEIGHT
+                              / BUY_TARGET_SLIDE_STEPS,
+                        data_fdps_shop_buy_target_scroll_offset);
+                }
+                data_fdps_shop_buy_target_scroll_offset +=
+                    BUY_TARGET_ENTRIES_PER_ROW;
+            }
+        } else if (scancode == KEY_LEFT
+                   && data_fdps_shop_buy_target_cursor_idx > 0) {
+            fdps_play_sfx(PICKER_MOVE_SFX);
+            data_fdps_shop_buy_target_cursor_idx--;
+            if (data_fdps_shop_buy_target_cursor_idx
+                < data_fdps_shop_buy_target_scroll_offset) {
+                for (slide_step = 1; slide_step < BUY_TARGET_SLIDE_STEPS;
+                     slide_step++) {
+                    fdps_shop_render_buy_target_frame(
+                        entry_grid,
+                        (data_fdps_shop_buy_target_cursor_idx
+                         % BUY_TARGET_ENTRIES_PER_ROW)
+                            * BUY_TARGET_ENTRY_COLUMN_STRIDE
+                            + BUY_TARGET_CURSOR_COLUMN_ORIGIN,
+                        (data_fdps_shop_buy_target_scroll_offset
+                         / BUY_TARGET_ENTRIES_PER_ROW)
+                            * BUY_TARGET_ENTRY_ROW_HEIGHT
+                            - slide_step * BUY_TARGET_ENTRY_ROW_HEIGHT
+                              / BUY_TARGET_SLIDE_STEPS,
+                        data_fdps_shop_buy_target_scroll_offset);
+                }
+                data_fdps_shop_buy_target_scroll_offset -=
+                    BUY_TARGET_ENTRIES_PER_ROW;
+            }
+        } else if (scancode == KEY_UP
+                   && data_fdps_shop_buy_target_cursor_idx
+                      > BUY_TARGET_ENTRIES_PER_ROW - 1) {
+            fdps_play_sfx(PICKER_MOVE_SFX);
+            for (slide_step = 1; slide_step < BUY_TARGET_SLIDE_STEPS;
+                 slide_step++) {
+                fdps_shop_render_buy_target_frame(
+                    entry_grid,
+                    (data_fdps_shop_buy_target_cursor_idx
+                     % BUY_TARGET_ENTRIES_PER_ROW)
+                        * BUY_TARGET_ENTRY_COLUMN_STRIDE
+                        + BUY_TARGET_CURSOR_COLUMN_ORIGIN,
+                    (data_fdps_shop_buy_target_scroll_offset
+                     / BUY_TARGET_ENTRIES_PER_ROW)
+                        * BUY_TARGET_ENTRY_ROW_HEIGHT
+                        - slide_step * BUY_TARGET_ENTRY_ROW_HEIGHT
+                          / BUY_TARGET_SLIDE_STEPS,
+                    data_fdps_shop_buy_target_scroll_offset);
+            }
+            data_fdps_shop_buy_target_cursor_idx -= BUY_TARGET_ENTRIES_PER_ROW;
+            data_fdps_shop_buy_target_scroll_offset -=
+                BUY_TARGET_ENTRIES_PER_ROW;
+        } else if (scancode == KEY_DOWN
+                   && data_fdps_roster_member_count
+                      - BUY_TARGET_ENTRIES_PER_ROW
+                      > data_fdps_shop_buy_target_cursor_idx) {
+            fdps_play_sfx(PICKER_MOVE_SFX);
+            for (slide_step = 1; slide_step < BUY_TARGET_SLIDE_STEPS;
+                 slide_step++) {
+                fdps_shop_render_buy_target_frame(
+                    entry_grid,
+                    (data_fdps_shop_buy_target_cursor_idx
+                     % BUY_TARGET_ENTRIES_PER_ROW)
+                        * BUY_TARGET_ENTRY_COLUMN_STRIDE
+                        + BUY_TARGET_CURSOR_COLUMN_ORIGIN,
+                    (data_fdps_shop_buy_target_scroll_offset
+                     / BUY_TARGET_ENTRIES_PER_ROW)
+                        * BUY_TARGET_ENTRY_ROW_HEIGHT
+                        + slide_step * BUY_TARGET_ENTRY_ROW_HEIGHT
+                          / BUY_TARGET_SLIDE_STEPS,
+                    data_fdps_shop_buy_target_scroll_offset);
+            }
+            data_fdps_shop_buy_target_cursor_idx += BUY_TARGET_ENTRIES_PER_ROW;
+            data_fdps_shop_buy_target_scroll_offset +=
+                BUY_TARGET_ENTRIES_PER_ROW;
+        }
+
+        entry_grid = (unsigned char *) malloc((size_t) grid_bytes);
+        memset(entry_grid, 0, (size_t) grid_bytes);
+
+        for (member_index = 0;
+             member_index < data_fdps_roster_member_count;
+             member_index++) {
+            entry_column = (member_index % BUY_TARGET_ENTRIES_PER_ROW)
+                               * BUY_TARGET_ENTRY_COLUMN_STRIDE
+                           + BUY_TARGET_ENTRY_COLUMN_ORIGIN;
+            entry_row = (member_index / BUY_TARGET_ENTRIES_PER_ROW)
+                        * BUY_TARGET_ENTRY_ROW_HEIGHT;
+            fdps_shop_draw_member_entry(
+                entry_grid
+                    + (entry_row + BUY_TARGET_ENTRY_ROW_ORIGIN)
+                      * BUY_TARGET_GRID_PITCH
+                    + entry_column,
+                BUY_TARGET_GRID_PITCH, member_index, item_id);
+        }
+
+        fdps_shop_render_buy_target_frame(
+            entry_grid,
+            (data_fdps_shop_buy_target_cursor_idx
+             % BUY_TARGET_ENTRIES_PER_ROW)
+                * BUY_TARGET_ENTRY_COLUMN_STRIDE
+                + BUY_TARGET_CURSOR_COLUMN_ORIGIN,
+            (data_fdps_shop_buy_target_scroll_offset
+             / BUY_TARGET_ENTRIES_PER_ROW)
+                * BUY_TARGET_ENTRY_ROW_HEIGHT,
+            data_fdps_shop_buy_target_scroll_offset);
+
+        free(entry_grid);
+
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
+
+    if (loop_result > BUY_TARGET_RUNNING) {
+        chosen_index = data_fdps_shop_buy_target_cursor_idx;
+    } else {
+        chosen_index = BUY_TARGET_CANCELLED;
+    }
+
+    return chosen_index;
 }
