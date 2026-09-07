@@ -93,4 +93,50 @@ extern int fdps_church_select_promote_candidate(int candidate_count,
                                                 int *promotion_choices);
 #pragma aux fdps_church_select_promote_candidate "*" parm caller [];
 
+/* The church screen's whole class-change session: it promotes one member after
+   another until the player cancels or nobody eligible is left.
+
+   It is modal and it does not return until the session is over.  Every pass
+   rebuilds the candidate list from scratch off the roster, so a member promoted
+   on one pass has left the list by the next -- his level is back to 1 -- and a
+   member whose badge was consumed is offered only his free route afterwards.
+
+   WHO IS ELIGIBLE: level 20 or over AND a portrait id below 9.  The second test
+   is on the portrait id at record +0x07 and not on the class code at +0x20, and
+   it is what keeps out both the three characters RankUp.dat has no record for
+   and everybody who has already been promoted -- promoted forms carry portrait
+   ids 0x0f and up (rebuild_info/pitfalls.md).
+
+   WHICH ROUTE A MEMBER IS OFFERED comes from his bag, one route each and never
+   a choice between two: portrait id 0 (蘭迪斯) holding 0xdb 勇者徽章 gets
+   route 3, otherwise 0xe0 光之徽章 gets route 1, 0xe1 暗之徽章 gets route
+   2, and a member holding none of them gets route 0, the free promotion.  The
+   badge is consumed only when the route it bought leads somewhere route 0 does
+   not, so a badge that duplicates the free promotion is kept.
+
+   WHAT IT WRITES INTO THE RECORD besides what fdps_church_promote_unit above
+   writes: the route's movement bonus is added to +0x3b, the five maximum-growth
+   bytes of the FRILEVUP.DAT row of the form being ENTERED are added to AP, DP,
+   DX, HP and MP -- HP and MP to both the current and the maximum -- the level
+   is reset to 1, and fdps_unit_recompute_combat_stats then refreshes the
+   derived stats.
+
+   THE SWEEP READS THE MAP UNIT ARRAY AND THE PICKER READS THE ROSTER.  This
+   body resolves records through fdps_get_unit_record (src/unit.h) while the
+   candidate list it hands the indices to resolves them through
+   fdps_get_roster_record (src/table.h).  The two agree on the village screens
+   and only there, because fdps_load_field_chapter_resources points
+   data_fdps_map_unit_array_ptr at data_fdps_roster_array_ptr.
+
+   `screen_page` is the caller's 320x200 8bpp page holding the church screen the
+   window opens over.  It is handed straight to
+   fdps_village_animate_window_zoom (src/village.h) and is also the memmove
+   source that repaints the screen after each transformation animation, so it
+   has to hold the full 64,000 bytes and it is only ever read.
+
+   Nothing is returned.  On the way out the window is closed and the adapter is
+   left holding the zoom's last frame. */
+extern void fdps_church_promote_loop(unsigned char *screen_page);
+#pragma aux fdps_church_promote_loop "*" parm caller [];
+
 #endif

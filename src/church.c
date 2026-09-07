@@ -24,11 +24,14 @@
 #include "table.h"
 #include "blit.h"
 #include "keybd.h"
+#include "msgwin.h"
 #include "palcycle.h"
 #include "saf.h"
 #include "sprite.h"
 #include "text.h"
+#include "unititem.h"
 #include "vfs.h"
+#include "village.h"
 #include "palette.h"
 #include "church.h"
 
@@ -798,4 +801,396 @@ int fdps_church_select_promote_candidate(int candidate_count,
     }
 
     return picked_candidate;
+}
+
+/* ------------------------------------------------------------------
+ * fdps_church_promote_loop @ 000345a0
+ * ------------------------------------------------------------------ */
+
+/* The two parallel candidate arrays, ten ints each: the frame's SUB ESP,0x70
+   leaves the roster indices at EBP-0x70 and the routes at EBP-0x48, both
+   addressed with LEA ...,[EAX*0x4 + 0x0].  The sweep carries no bound of its
+   own, but the tenth slot is unreachable and nine is the most that can ever be
+   filled.  Only portrait ids 0 to 8 clear CMP EAX,0x9 / JL at 0003462e, and no
+   two roster entries can carry the same portrait id: every one of the 24 calls
+   to fdps_roster_add_character in the image enrols a distinct character -- the
+   twelve chapter inits pass 0,6,4,1,3,2,8,9,7,5,0xb,0xa and the twelve in
+   fdps_title_demo pass 0,1,8,9,2,0xa,3,0xb,4,0xc,5,6 -- and that function
+   writes its one argument into both portrait_id (+0x07) and char_id (+0x08). */
+#define PROMOTE_CANDIDATES_MAX 10
+
+/* Who the church will promote.  CMP EAX,0x14 / JL at 0003461e is the level
+   floor and CMP EAX,0x9 / JL at 0003462e is the form ceiling, and the second
+   reads the PORTRAIT id at +0x07 rather than the class code at +0x20
+   (rebuild_info/pitfalls.md). */
+#define PROMOTE_MIN_LEVEL 0x14
+#define PROMOTABLE_PORTRAIT_COUNT 9
+
+/* The three badges and the route each buys, and the route every eligible
+   member gets for nothing.  The 勇者徽章 arm is guarded by CMP byte ptr
+   [EAX + 0x7],0x0 at 0003464c, so only 蘭迪斯 can take it however many of
+   them another bag holds. */
+#define ITEM_HERO_BADGE 0xdb
+#define ITEM_LIGHT_BADGE 0xe0
+#define ITEM_DARK_BADGE 0xe1
+#define HERO_BADGE_PORTRAIT_ID 0
+#define PROMOTE_ROUTE_NO_BADGE 0
+#define PROMOTE_ROUTE_LIGHT_BADGE 1
+#define PROMOTE_ROUTE_DARK_BADGE 2
+#define PROMOTE_ROUTE_HERO_BADGE 3
+
+/* Byte 2 of a route, the movement bonus, which this body reads and the
+   transformation above does not. */
+#define PROMOTION_ROUTE_MOVE 2
+
+/* What fdps_unit_find_item_slot answers for a bag that is not carrying the item
+   (src/unititem.h).  All six probes below test against it. */
+#define NO_ITEM_SLOT (-1)
+
+/* fdps_prompt_two_choice's affirmative.  1 is the right cell and -1 is a
+   cancel, and this call site tests for 0 alone, so both of the others decline
+   (src/msgwin.h). */
+#define PROMOTE_ACCEPTED 0
+
+/* The three text rows of the village text box, as offsets on top of
+   VGA_SCREEN_BASE: 0xaa3d4, 0xabb94 and 0xad354, which are column 20 of rows
+   131, 150 and 169.  They are positions on the adapter and not the addresses of
+   anything the linker places, so they stay literals for the same reason the
+   base does (contract E). */
+#define MESSAGE_ROW_1_AT 0xa3d4
+#define MESSAGE_ROW_2_AT 0xbb94
+#define MESSAGE_ROW_3_AT 0xd354
+
+/* The colour trio every one of the nine messages is drawn in: the standard
+   glyph colour over no background with the standard outline, PUSH 0xd0 / PUSH 0
+   / PUSH 0x6d ahead of each call.  They are this function's own literals and
+   not the candidate list's. */
+#define PROMOTE_TEXT_FG_COLOR 0xd0
+#define PROMOTE_TEXT_BG_COLOR 0
+#define PROMOTE_TEXT_OUTLINE_COLOR 0x6d
+
+/* The nine entries of the resident Fdetxt00.txt table this screen draws: the
+   refusal when nobody is eligible, the question, the announcement, and then one
+   line per gain -- movement, AP, DP, DX, HP and MP, in the order they are paid
+   out. */
+#define NO_CANDIDATE_TEXT_ID 0x214
+#define PROMOTE_ASK_TEXT_ID 0x215
+#define PROMOTE_DONE_TEXT_ID 0x216
+#define MOVE_GAIN_TEXT_ID 0x217
+#define AP_GAIN_TEXT_ID 0x218
+#define DP_GAIN_TEXT_ID 0x219
+#define DX_GAIN_TEXT_ID 0x21a
+#define HP_GAIN_TEXT_ID 0x21b
+#define MP_GAIN_TEXT_ID 0x21c
+
+/* The two substitution slots the question at 0x215 prints, and the biases that
+   turn a form id and a class code into the message entry naming each.  They are
+   the same two biases the candidate list draws its slots with -- one table and
+   one pair of biases, not two that happen to agree -- but these are this
+   function's own stores, MOV [0x00064030],EAX at 000347b7 and MOV
+   [0x00064034],EAX at 000347dd. */
+#define PROMOTE_NAME_TEXT_ID_BIAS 1
+#define PROMOTE_CLASS_TEXT_ID_BIAS 0xa1
+
+/* What the level is reset to once the new form's stats have been paid out: MOV
+   byte ptr [EAX + 0x21],0x1 at 00034b94.  The promoted unit starts again at
+   level 1 and climbs the new form's growth table from there. */
+#define PROMOTED_LEVEL 1
+
+/* fdps_village_animate_window_zoom's second argument (src/village.h): non-zero
+   closes the window frame and zero opens it.  Every close here is a literal 1,
+   MOV EAX,0x1 / PUSH EAX, and every open a literal 0, XOR EAX,EAX / PUSH
+   EAX. */
+#define WINDOW_CLOSE 1
+#define WINDOW_OPEN 0
+
+/* 000345a0.  One stack argument, caller-cleaned: the page is read at [EBP+0x14]
+   behind the ordinary PUSH EBX/ESI/EDI/EBP and the return address, RET carries
+   no immediate, and the sole call site at 00035c0b pushes the page, calls and
+   then ADD ESP,0x4 without looking at EAX.
+
+   THE SESSION IS ONE LOOP AND EVERY PASS STARTS OVER.  The candidate arrays are
+   rebuilt from the roster on each pass rather than being filtered down, which is
+   what drops a member who has just been promoted -- his level is 1 again -- and
+   what re-reads the bag of a member whose badge was consumed.  The loop is
+   top-tested on a flag only two arms set: an empty candidate list, and a cancel
+   out of the picker.
+
+   THE WINDOW IS CLOSED AND REOPENED AROUND EVERY MESSAGE PAGE, which is how the
+   text box is cleared between pages -- nothing here paints the box background
+   itself.  The pairs are (close, open) except at the two exits, where the close
+   is the last thing that happens.
+
+   THE ELIGIBILITY TEST IS ON THE PORTRAIT ID AND NOT THE CLASS CODE.  Writing
+   the obvious `clazz < 9` lets 蓋亞, 珊 and 蘭斯洛特 through, and every
+   already-promoted unit with them, and then indexes a RankUp.dat that holds
+   nine records out of bounds (rebuild_info/pitfalls.md).
+
+   THE STAT BONUSES ARE THE RAW *_max BYTES of the FRILEVUP.DAT row, which are
+   one greater than the growth maximum the tables print, and they are added
+   whole.  A rebuild whose parse normalised those bytes down by one would hand
+   out one point less on every stat.
+
+   THE GROWTH ROW IS THE ONE OF THE FORM BEING ENTERED, byte 0 of the chosen
+   route -- not the form the member is leaving, and not the character id at +0x08
+   the RankUp.dat record itself was fetched with.
+
+   THE FIGURE EACH GAIN LINE PRINTS IS STAGED THROUGH A GLOBAL.  All six go into
+   data_fdps_dialog_last_action_value_param first, and the record is then updated
+   by reading that global back rather than the byte it came from -- its low byte
+   for movement, MOV DL,byte ptr at 000349ac, and its low word for the five
+   stats, MOV DX,word ptr at 00034a10 and after.  The global is a full dword
+   (gamedata.h) and the narrowing is the reader's.
+
+   The values used after a CALL are six.  fdps_get_unit_record's EAX is the
+   record and is stored at [EBP-0xc] twice, once per sweep entry and once for the
+   member being promoted.  fdps_unit_find_item_slot's EAX is a slot index or -1,
+   tested against -1 in the sweep and kept at [EBP-0x10] for the removal.
+   fdps_church_select_promote_candidate's EAX is the chosen array slot or -1, at
+   [EBP-0x1c].  fdps_get_promotion_record's EAX is the character's twelve bytes,
+   at [EBP-0x8].  fdps_prompt_two_choice's EAX is the answer, TEST EAX,EAX at
+   0003480d.  fdps_get_growth_record's EAX is the new form's row, at [EBP-0x4].
+   fdps_draw_text answers a pen position all nine call sites drop (ADD ESP,0x1c
+   with no use of EAX) and memmove answers its destination, which nothing
+   reads. */
+void fdps_church_promote_loop(unsigned char *screen_page)
+{
+    /* The pass's candidate list: one roster index and one promotion route per
+       entry, filled in step and handed to the picker as two arrays. */
+    int candidate_unit_index[PROMOTE_CANDIDATES_MAX];
+    int candidate_route[PROMOTE_CANDIDATES_MAX];
+    /* 0 while the screen is still offering promotions, 1 once the player has
+       cancelled or a pass has found nobody eligible. */
+    int finished;
+    /* How many entries the pass put in the two arrays. */
+    int candidate_count;
+    /* Which of those entries the picker answered with, or -1 for a cancel. */
+    int chosen_slot;
+    /* The roster index and the promotion route that entry names. */
+    int chosen_unit_index;
+    int chosen_route;
+    /* The sweep's cursor over the roster. */
+    int roster_index;
+    /* Which inventory entry the badge being consumed sits in. */
+    int badge_slot;
+    /* The record the sweep is looking at, and then the record being promoted --
+       one slot in the original, reused for both. */
+    struct fdps_unit_record *member;
+    /* The character's whole RankUp.dat record, and the three bytes of it the
+       chosen route picks out.  Both are needed: the badge is consumed only when
+       the route's form id differs from route 0's, which is byte 0 of the record
+       itself. */
+    struct fdps_promotion_record *promotion_record;
+    unsigned char *promotion_route;
+    /* The FRILEVUP.DAT row of the form being entered. */
+    struct fdps_character_growth *growth;
+
+    finished = 0;
+    fdps_village_animate_window_zoom(screen_page, WINDOW_CLOSE);
+    fdps_village_animate_window_zoom(screen_page, WINDOW_OPEN);
+
+    while (finished == 0) {
+        candidate_count = 0;
+
+        for (roster_index = 0;
+             roster_index < data_fdps_roster_member_count;
+             roster_index++) {
+            member = fdps_get_unit_record(roster_index);
+            if (member->level >= PROMOTE_MIN_LEVEL
+                && member->portrait_id < PROMOTABLE_PORTRAIT_COUNT) {
+                candidate_unit_index[candidate_count] = roster_index;
+                if (member->portrait_id == HERO_BADGE_PORTRAIT_ID
+                    && fdps_unit_find_item_slot(roster_index, ITEM_HERO_BADGE)
+                       != NO_ITEM_SLOT) {
+                    candidate_route[candidate_count] =
+                        PROMOTE_ROUTE_HERO_BADGE;
+                } else if (fdps_unit_find_item_slot(roster_index,
+                                                    ITEM_LIGHT_BADGE)
+                           != NO_ITEM_SLOT) {
+                    candidate_route[candidate_count] =
+                        PROMOTE_ROUTE_LIGHT_BADGE;
+                } else if (fdps_unit_find_item_slot(roster_index,
+                                                    ITEM_DARK_BADGE)
+                           != NO_ITEM_SLOT) {
+                    candidate_route[candidate_count] =
+                        PROMOTE_ROUTE_DARK_BADGE;
+                } else {
+                    candidate_route[candidate_count] = PROMOTE_ROUTE_NO_BADGE;
+                }
+                candidate_count++;
+            }
+        }
+
+        if (candidate_count == 0) {
+            fdps_draw_text(data_fdps_all_game_text_ptr, NO_CANDIDATE_TEXT_ID,
+                           (unsigned char *) (VGA_SCREEN_BASE
+                                              + MESSAGE_ROW_1_AT),
+                           VGA_SCREEN_PITCH, PROMOTE_TEXT_FG_COLOR,
+                           PROMOTE_TEXT_BG_COLOR, PROMOTE_TEXT_OUTLINE_COLOR);
+            fdps_village_animate_window_zoom(screen_page, WINDOW_CLOSE);
+            finished = 1;
+        } else {
+            chosen_slot = fdps_church_select_promote_candidate(
+                              candidate_count, candidate_unit_index,
+                              candidate_route);
+            fdps_village_animate_window_zoom(screen_page, WINDOW_CLOSE);
+
+            if (chosen_slot == LIST_CANCELLED) {
+                finished = 1;
+            } else {
+                fdps_village_animate_window_zoom(screen_page, WINDOW_OPEN);
+                chosen_unit_index = candidate_unit_index[chosen_slot];
+                chosen_route = candidate_route[chosen_slot];
+                member = fdps_get_unit_record(chosen_unit_index);
+                promotion_record =
+                    fdps_get_promotion_record((int) member->char_id);
+                promotion_route = (unsigned char *) promotion_record
+                                  + chosen_route * PROMOTION_ROUTE_BYTES;
+                data_fdps_dialog_last_action_text_id_param =
+                    (int) member->portrait_id + PROMOTE_NAME_TEXT_ID_BIAS;
+                data_fdps_dialog_subst_text_id_2 =
+                    (int) promotion_route[PROMOTION_ROUTE_CLASS]
+                    + PROMOTE_CLASS_TEXT_ID_BIAS;
+                fdps_draw_text(data_fdps_all_game_text_ptr,
+                               PROMOTE_ASK_TEXT_ID,
+                               (unsigned char *) (VGA_SCREEN_BASE
+                                                  + MESSAGE_ROW_1_AT),
+                               VGA_SCREEN_PITCH, PROMOTE_TEXT_FG_COLOR,
+                               PROMOTE_TEXT_BG_COLOR,
+                               PROMOTE_TEXT_OUTLINE_COLOR);
+
+                if (fdps_prompt_two_choice() == PROMOTE_ACCEPTED) {
+                    fdps_village_animate_window_zoom(screen_page,
+                                                     WINDOW_CLOSE);
+                    fdps_church_promote_unit(chosen_unit_index, chosen_route);
+                    memmove((void *) VGA_SCREEN_BASE, screen_page,
+                            (size_t) VGA_SCREEN_BYTES);
+
+                    if (chosen_route != PROMOTE_ROUTE_NO_BADGE
+                        && promotion_record->default_portrait_id
+                           != promotion_route[PROMOTION_ROUTE_PORTRAIT]) {
+                        if (chosen_route == PROMOTE_ROUTE_HERO_BADGE) {
+                            badge_slot =
+                                fdps_unit_find_item_slot(chosen_unit_index,
+                                                         ITEM_HERO_BADGE);
+                        } else if (chosen_route
+                                   == PROMOTE_ROUTE_LIGHT_BADGE) {
+                            badge_slot =
+                                fdps_unit_find_item_slot(chosen_unit_index,
+                                                         ITEM_LIGHT_BADGE);
+                        } else {
+                            badge_slot =
+                                fdps_unit_find_item_slot(chosen_unit_index,
+                                                         ITEM_DARK_BADGE);
+                        }
+                        fdps_unit_remove_item(chosen_unit_index, badge_slot);
+                    }
+
+                    fdps_village_animate_window_zoom(screen_page, WINDOW_OPEN);
+                    fdps_draw_text(data_fdps_all_game_text_ptr,
+                                   PROMOTE_DONE_TEXT_ID,
+                                   (unsigned char *) (VGA_SCREEN_BASE
+                                                      + MESSAGE_ROW_1_AT),
+                                   VGA_SCREEN_PITCH, PROMOTE_TEXT_FG_COLOR,
+                                   PROMOTE_TEXT_BG_COLOR,
+                                   PROMOTE_TEXT_OUTLINE_COLOR);
+                    data_fdps_dialog_last_action_value_param =
+                        (int) promotion_route[PROMOTION_ROUTE_MOVE];
+                    fdps_draw_text(data_fdps_all_game_text_ptr,
+                                   MOVE_GAIN_TEXT_ID,
+                                   (unsigned char *) (VGA_SCREEN_BASE
+                                                      + MESSAGE_ROW_2_AT),
+                                   VGA_SCREEN_PITCH, PROMOTE_TEXT_FG_COLOR,
+                                   PROMOTE_TEXT_BG_COLOR,
+                                   PROMOTE_TEXT_OUTLINE_COLOR);
+                    member->move += (unsigned char)
+                        data_fdps_dialog_last_action_value_param;
+                    fdps_village_animate_window_zoom(screen_page,
+                                                     WINDOW_CLOSE);
+                    fdps_village_animate_window_zoom(screen_page, WINDOW_OPEN);
+
+                    growth = fdps_get_growth_record(
+                        (int) promotion_route[PROMOTION_ROUTE_PORTRAIT]);
+
+                    data_fdps_dialog_last_action_value_param =
+                        (int) growth->ap_max;
+                    member->ap_base += (short)
+                        data_fdps_dialog_last_action_value_param;
+                    fdps_draw_text(data_fdps_all_game_text_ptr,
+                                   AP_GAIN_TEXT_ID,
+                                   (unsigned char *) (VGA_SCREEN_BASE
+                                                      + MESSAGE_ROW_1_AT),
+                                   VGA_SCREEN_PITCH, PROMOTE_TEXT_FG_COLOR,
+                                   PROMOTE_TEXT_BG_COLOR,
+                                   PROMOTE_TEXT_OUTLINE_COLOR);
+
+                    data_fdps_dialog_last_action_value_param =
+                        (int) growth->dp_max;
+                    member->dp_base += (short)
+                        data_fdps_dialog_last_action_value_param;
+                    fdps_draw_text(data_fdps_all_game_text_ptr,
+                                   DP_GAIN_TEXT_ID,
+                                   (unsigned char *) (VGA_SCREEN_BASE
+                                                      + MESSAGE_ROW_2_AT),
+                                   VGA_SCREEN_PITCH, PROMOTE_TEXT_FG_COLOR,
+                                   PROMOTE_TEXT_BG_COLOR,
+                                   PROMOTE_TEXT_OUTLINE_COLOR);
+
+                    data_fdps_dialog_last_action_value_param =
+                        (int) growth->dx_max;
+                    member->dx_base += (short)
+                        data_fdps_dialog_last_action_value_param;
+                    fdps_draw_text(data_fdps_all_game_text_ptr,
+                                   DX_GAIN_TEXT_ID,
+                                   (unsigned char *) (VGA_SCREEN_BASE
+                                                      + MESSAGE_ROW_3_AT),
+                                   VGA_SCREEN_PITCH, PROMOTE_TEXT_FG_COLOR,
+                                   PROMOTE_TEXT_BG_COLOR,
+                                   PROMOTE_TEXT_OUTLINE_COLOR);
+
+                    fdps_village_animate_window_zoom(screen_page,
+                                                     WINDOW_CLOSE);
+                    fdps_village_animate_window_zoom(screen_page, WINDOW_OPEN);
+
+                    data_fdps_dialog_last_action_value_param =
+                        (int) growth->hp_max;
+                    member->hp_current += (short)
+                        data_fdps_dialog_last_action_value_param;
+                    member->hp_max += (short)
+                        data_fdps_dialog_last_action_value_param;
+                    fdps_draw_text(data_fdps_all_game_text_ptr,
+                                   HP_GAIN_TEXT_ID,
+                                   (unsigned char *) (VGA_SCREEN_BASE
+                                                      + MESSAGE_ROW_1_AT),
+                                   VGA_SCREEN_PITCH, PROMOTE_TEXT_FG_COLOR,
+                                   PROMOTE_TEXT_BG_COLOR,
+                                   PROMOTE_TEXT_OUTLINE_COLOR);
+
+                    data_fdps_dialog_last_action_value_param =
+                        (int) growth->mp_max;
+                    member->mp_current += (short)
+                        data_fdps_dialog_last_action_value_param;
+                    member->mp_max += (short)
+                        data_fdps_dialog_last_action_value_param;
+                    fdps_draw_text(data_fdps_all_game_text_ptr,
+                                   MP_GAIN_TEXT_ID,
+                                   (unsigned char *) (VGA_SCREEN_BASE
+                                                      + MESSAGE_ROW_2_AT),
+                                   VGA_SCREEN_PITCH, PROMOTE_TEXT_FG_COLOR,
+                                   PROMOTE_TEXT_BG_COLOR,
+                                   PROMOTE_TEXT_OUTLINE_COLOR);
+
+                    member->level = PROMOTED_LEVEL;
+                    fdps_unit_recompute_combat_stats(chosen_unit_index);
+                    fdps_village_animate_window_zoom(screen_page,
+                                                     WINDOW_CLOSE);
+                    fdps_village_animate_window_zoom(screen_page, WINDOW_OPEN);
+                } else {
+                    fdps_village_animate_window_zoom(screen_page,
+                                                     WINDOW_CLOSE);
+                    fdps_village_animate_window_zoom(screen_page, WINDOW_OPEN);
+                }
+            }
+        }
+    }
 }

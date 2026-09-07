@@ -2953,6 +2953,14 @@
       "status": "committed",
       "emitted_against": "0x4dc",
       "rounds": 0
+    },
+    "000345a0": {
+      "name": "fdps_church_promote_loop",
+      "target": "church.c",
+      "body_size": "0x667",
+      "status": "committed",
+      "emitted_against": "0x667",
+      "rounds": 1
     }
   }
 }

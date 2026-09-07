@@ -68,6 +68,7 @@
 #include "palcycle.h"
 #include "unit.h"
 #include "table.h"
+#include "unititem.h"
 #include "church.h"
 
 /* The strides the two accessors in src/unit.c and src/table.c multiply by. */
@@ -1288,6 +1289,757 @@ static void a_different_route_names_a_different_class(void)
     sel_unstage();
 }
 
+
+/* ---- fdps_church_promote_loop, 000345a0 ----------------------------------
+ *
+ * Expected values come from the assembly of the loop and from the record
+ * layouts in src/fdpstype.h, never from the emitted C: CMP EAX,0x14 / JL at
+ * 0003461e and CMP EAX,0x9 / JL at 0003462e for the two eligibility tests, CMP
+ * byte ptr [EAX + 0x7],0x0 at 0003464c and the three PUSH 0xdb / 0xe0 / 0xe1
+ * probes at 00034652, 0003467e and 000346a8 for the route a bag buys, MOV AL,
+ * byte ptr [EAX + 0x8] at 00034797 for the id the RankUp.dat record is fetched
+ * with, INC EAX / MOV [0x00064030],EAX at 000347b6 for the name slot, MOV AL,
+ * byte ptr [EAX + 0x1] / ADD EAX,0xa1 / MOV [0x00064034],EAX at 000347d0 for
+ * the class slot, TEST EAX,EAX / JNZ at 0003480d for the answer that declines,
+ * CMP dword ptr [...],0x0 / CMP AL,byte ptr [EDX] at 00034861 and 0003488d for
+ * the badge that is kept, and the six store-then-add pairs from 00034965 to
+ * 00034b67 for the gains.
+ *
+ * HOW THE TWO ANSWERS THE SESSION NEEDS ARE PLAYED.  One interrupt handler
+ * feeds both input paths, because the two callees read different ones.  The
+ * candidate list reads the auto-repeat filter's latch
+ * (data_fdps_input_last_scancode), which the handler refills only once the
+ * filter has taken what is there -- an equal latch and previous code, exactly
+ * as tests for fdps_church_select_promote_candidate above do it.  The prompt
+ * reads the scancode ring, so the handler also appends one code per tick the
+ * way fdps_keyboard_isr does; the ring is flushed by the filter on every poll
+ * and again by the prompt on entry, so the two never cross.  When the list
+ * script runs out the handler feeds Escape for ever, which is what ends every
+ * session below.
+ *
+ * WHAT IS OBSERVED, AND WHY IT IS NOT THE SCREEN.  Every message this function
+ * draws is painted straight onto the visible page and the very next thing it
+ * does is a window close, whose first frame repaints the whole screen from the
+ * caller's page -- one vertical retrace later, well inside a single timer tick.
+ * There is therefore no moment an interrupt could reliably sample, and no text
+ * assertion below is made from pixels.  What survives the call instead is the
+ * pair of substitution slots the question at 0x215 is composed from:
+ * data_fdps_dialog_last_action_text_id_param takes the chosen member's PORTRAIT
+ * id plus one and data_fdps_dialog_subst_text_id_2 the chosen ROUTE's class
+ * code plus 0xa1, and nothing in the rest of the session writes either.  Both
+ * are seeded with a sentinel before each run, so "the list was never opened"
+ * and "this member on this route was named" are different readings of the same
+ * two numbers.
+ *
+ * data_fdps_input_key_repeat_prev_scancode is the second witness: the handler
+ * seeds it and the latch alike, and only fdps_read_scancode_auto_repeat ever
+ * moves it, so a run that comes back with it still at 0xff is a run in which
+ * the candidate list never polled -- which is what the refusal arm has to do.
+ *
+ * WHAT THE STAGED TABLES ARE.  The unit array, the party roster and the
+ * RankUp.dat and FRILEVUP.DAT tables are blocks built here, with every route of
+ * every character carrying a class code no other route of any character carries
+ * -- 0x10 + character * 4 + route -- so a name slot that read the wrong record,
+ * the wrong route or the wrong byte of the right one cannot land on the value a
+ * case expects.  The text table is 0x21d entries of a lone terminator, which
+ * draws nothing and asks for no substitution, so the id an entry carries is
+ * never resolved and the sheets only have to be well-formed.
+ *
+ * WHAT THE TWO FULL PROMOTIONS COST AND WHY THEY ARE HERE.  Accepting runs
+ * fdps_church_promote_unit, six seconds of clip playback that needs the shipped
+ * Fight.vfs, Misc.vfs and the four blend tables (tests/gamefile.lst), and the
+ * two cases that do it are the only way to reach the stat payout at all -- it
+ * sits behind the accept.  They are skipped whole when those files are not
+ * beside the executable.
+ * ------------------------------------------------------------------ */
+
+/* How many roster slots and how many RankUp.dat and FRILEVUP.DAT rows are
+   staged.  Six members is more than any case fills and every roster index used
+   is below the twelve the walking-icon cache above holds. */
+#define LOOP_MEMBERS 6
+#define LOOP_CHARACTERS 16
+#define LOOP_FORMS 16
+#define LOOP_ROUTES 4
+#define CHARACTER_GROWTH_STRIDE 0x0b
+
+/* Every route of every character gets its own class code, so no two of the 64
+   can be confused, and the biggest of them plus 0xa1 is still inside the text
+   table.  The form ids are equally distinct but are only read by the cases that
+   do not run the animation; the two that do overwrite the record they use with
+   ids Fight.vfs really holds. */
+#define LOOP_ROUTE_CLASS_BASE 0x10
+#define LOOP_ROUTE_FORM_BASE 0x40
+#define LOOP_ROUTE_MOVE_BASE 1
+#define LOOP_CLASS_OF(character, route) \
+    (LOOP_ROUTE_CLASS_BASE + (character) * LOOP_ROUTES + (route))
+
+/* The five maximum-growth bytes of form f, each stat on its own base so that a
+   payout which crossed two of them would miss by a value no case accepts. */
+#define LOOP_AP_MAX_BASE 3
+#define LOOP_DP_MAX_BASE 5
+#define LOOP_DX_MAX_BASE 7
+#define LOOP_HP_MAX_BASE 11
+#define LOOP_MP_MAX_BASE 13
+
+/* Where the five bytes sit in a FRILEVUP.DAT row (src/fdpstype.h). */
+#define GROWTH_AP_MAX_AT 1
+#define GROWTH_DP_MAX_AT 3
+#define GROWTH_DX_MAX_AT 5
+#define GROWTH_HP_MAX_AT 7
+#define GROWTH_MP_MAX_AT 9
+
+/* The two biases the question is composed with. */
+#define LOOP_NAME_TEXT_BIAS 1
+#define LOOP_CLASS_TEXT_BIAS 0xa1
+
+/* The three badge item ids and the level floor and form ceiling. */
+#define LOOP_HERO_BADGE 0xdb
+#define LOOP_LIGHT_BADGE 0xe0
+#define LOOP_DARK_BADGE 0xe1
+#define LOOP_MIN_LEVEL 20
+#define LOOP_FIRST_REFUSED_PORTRAIT 9
+
+/* The text table: 0x21d entries so that message 0x21c, the last one this
+   screen draws, is inside it, every one of them naming the lone terminator that
+   follows the table. */
+#define LOOP_TEXT_ENTRIES 0x21d
+#define LOOP_TEXT_TERMINATOR (-1)
+#define LOOP_TEXT_EMPTY_AT (LOOP_TEXT_ENTRIES * 2)
+#define LOOP_TEXT_SLOTS (LOOP_TEXT_ENTRIES + 1)
+
+/* What the two substitution slots hold before a run.  Outside every id either
+   of them can legitimately take. */
+#define LOOP_SENTINEL (-999)
+
+/* How many list keys one case plays. */
+#define LOOP_SCRIPT_MAX 4
+
+/* The member the single-member cases stage, and its starting stat line.  The
+   five stats are far apart and none of them is a value any growth byte could
+   turn another into. */
+#define LOOP_BASE_MOVE 5
+#define LOOP_BASE_AP 100
+#define LOOP_BASE_DP 200
+#define LOOP_BASE_DX 300
+#define LOOP_BASE_HP_CURRENT 400
+#define LOOP_BASE_HP_MAX 500
+#define LOOP_BASE_MP_CURRENT 30
+#define LOOP_BASE_MP_MAX 40
+
+/* The character and the two routes the two full promotions use.  Route 0 and
+   route 1 name different forms in the first, so the light badge is consumed,
+   and the same form in the second, so it is kept.  Both forms are members
+   Fight.vfs holds and both class codes are inside the 25-entry effect table
+   the animation indexes. */
+#define LOOP_ANIM_CHARACTER 0
+#define LOOP_ANIM_FREE_FORM 3
+#define LOOP_ANIM_FREE_CLASS 6
+#define LOOP_ANIM_FREE_MOVE 1
+#define LOOP_ANIM_BADGE_FORM 4
+#define LOOP_ANIM_BADGE_CLASS 7
+#define LOOP_ANIM_BADGE_MOVE 2
+
+static unsigned char loop_units[LOOP_MEMBERS * UNIT_RECORD_STRIDE];
+static unsigned char loop_promo[LOOP_CHARACTERS * PROMOTION_RECORD_STRIDE];
+static unsigned char loop_growth[LOOP_FORMS * CHARACTER_GROWTH_STRIDE];
+static short loop_text[LOOP_TEXT_SLOTS];
+static struct fdps_palette_entry loop_palette[CHURCH_DAC_ENTRIES];
+static unsigned char loop_page[CHURCH_SCREEN_BYTES];
+
+/* Which pair of routes character LOOP_ANIM_CHARACTER carries: 0 leaves the
+   generated table alone, 1 makes route 1 lead to a different form from route 0
+   and 2 makes it lead to the same one. */
+#define LOOP_ANIM_ROUTES_NONE 0
+#define LOOP_ANIM_ROUTES_DIFFERENT_FORM 1
+#define LOOP_ANIM_ROUTES_SAME_FORM 2
+
+static int loop_anim_routes;
+static unsigned char loop_script[LOOP_SCRIPT_MAX];
+static int loop_script_len;
+static int loop_script_next;
+static int loop_prompt_code;
+static void (__interrupt __far *loop_saved_timer)();
+
+static struct fdps_unit_record *loop_unit(int roster_index)
+{
+    return (struct fdps_unit_record *)
+        (loop_units + roster_index * UNIT_RECORD_STRIDE);
+}
+
+/* Advances the game's clock, refills the auto-repeat filter's latch once the
+   filter has taken what was in it, and appends one code per tick to the
+   scancode ring the way fdps_keyboard_isr does. */
+static void __interrupt __far loop_timer_isr(void)
+{
+    int slot;
+
+    ++data_fdps_timer_tick_counter;
+
+    if (data_fdps_input_key_repeat_prev_scancode
+            == (unsigned int) data_fdps_input_last_scancode) {
+        if (loop_script_next < loop_script_len) {
+            data_fdps_input_last_scancode = loop_script[loop_script_next];
+            loop_script_next++;
+        } else {
+            data_fdps_input_last_scancode = (unsigned char) SEL_KEY_ESC;
+        }
+    }
+
+    slot = data_fdps_input_scancode_queue_write_index;
+    data_fdps_input_scancode_queue[slot] = (unsigned char) loop_prompt_code;
+    slot++;
+    if (slot == SCANCODE_QUEUE_LEN) {
+        slot = 0;
+    }
+    data_fdps_input_scancode_queue_write_index = slot;
+
+    _chain_intr(loop_saved_timer);
+}
+
+/* Empties every roster slot and every bag.  A flag byte of zero is an OCCUPIED
+   entry (src/unititem.h), so a cleared record carries eight things whose ids
+   are all zero -- which is what makes a bag with no badge in it still get
+   searched all the way through. */
+static void loop_clear_units(void)
+{
+    memset(loop_units, 0, (size_t) sizeof(loop_units));
+}
+
+/* Puts one member on the roster.  `badge_a` and `badge_b` are item ids for the
+   first two inventory entries, or zero for none. */
+static void loop_member(int roster_index, int level, int portrait_id,
+                        int char_id, int badge_a, int badge_b)
+{
+    struct fdps_unit_record *member;
+
+    member = loop_unit(roster_index);
+    member->level = (unsigned char) level;
+    member->portrait_id = (unsigned char) portrait_id;
+    member->char_id = (unsigned char) char_id;
+    member->inventory_slots[1] = (unsigned char) badge_a;
+    member->inventory_slots[3] = (unsigned char) badge_b;
+    member->move = (unsigned char) LOOP_BASE_MOVE;
+    member->ap_base = (short) LOOP_BASE_AP;
+    member->dp_base = (short) LOOP_BASE_DP;
+    member->dx_base = (short) LOOP_BASE_DX;
+    member->hp_current = (short) LOOP_BASE_HP_CURRENT;
+    member->hp_max = (short) LOOP_BASE_HP_MAX;
+    member->mp_current = (short) LOOP_BASE_MP_CURRENT;
+    member->mp_max = (short) LOOP_BASE_MP_MAX;
+}
+
+/* Overwrites one 3-byte route of one RankUp.dat record. */
+static void loop_set_route(int character, int route, int form, int class_id,
+                           int move_bonus)
+{
+    unsigned char *entry;
+
+    entry = loop_promo + character * PROMOTION_RECORD_STRIDE
+            + route * SEL_ROUTE_BYTES;
+    entry[SEL_ROUTE_FORM_AT] = (unsigned char) form;
+    entry[SEL_ROUTE_CLASS_AT] = (unsigned char) class_id;
+    entry[SEL_ROUTE_MOVE_AT] = (unsigned char) move_bonus;
+}
+
+/* Rebuilds the two tables and republishes every global the session and its
+   callees read.  The sheets, the font and the walking-icon cache are the ones
+   the candidate list's own cases build; only the text table, the roster, the
+   two data tables and the prompt's sheet are this subject's. */
+static void loop_stage(void)
+{
+    int character;
+    int route;
+    int form;
+    int entry;
+
+    sel_build_cel();
+    sel_build_icons();
+    sel_build_digits();
+
+    memset(loop_promo, 0, (size_t) sizeof(loop_promo));
+    for (character = 0; character < LOOP_CHARACTERS; character++) {
+        for (route = 0; route < LOOP_ROUTES; route++) {
+            loop_set_route(character, route,
+                           LOOP_ROUTE_FORM_BASE + character * LOOP_ROUTES
+                               + route,
+                           LOOP_CLASS_OF(character, route),
+                           LOOP_ROUTE_MOVE_BASE + route);
+        }
+    }
+
+    if (loop_anim_routes != LOOP_ANIM_ROUTES_NONE) {
+        loop_set_route(LOOP_ANIM_CHARACTER, 0, LOOP_ANIM_FREE_FORM,
+                       LOOP_ANIM_FREE_CLASS, LOOP_ANIM_FREE_MOVE);
+        if (loop_anim_routes == LOOP_ANIM_ROUTES_DIFFERENT_FORM) {
+            loop_set_route(LOOP_ANIM_CHARACTER, 1, LOOP_ANIM_BADGE_FORM,
+                           LOOP_ANIM_BADGE_CLASS, LOOP_ANIM_BADGE_MOVE);
+        } else {
+            loop_set_route(LOOP_ANIM_CHARACTER, 1, LOOP_ANIM_FREE_FORM,
+                           LOOP_ANIM_BADGE_CLASS, LOOP_ANIM_BADGE_MOVE);
+        }
+    }
+
+    memset(loop_growth, 0, (size_t) sizeof(loop_growth));
+    for (form = 0; form < LOOP_FORMS; form++) {
+        loop_growth[form * CHARACTER_GROWTH_STRIDE + GROWTH_AP_MAX_AT] =
+            (unsigned char) (LOOP_AP_MAX_BASE + form);
+        loop_growth[form * CHARACTER_GROWTH_STRIDE + GROWTH_DP_MAX_AT] =
+            (unsigned char) (LOOP_DP_MAX_BASE + form);
+        loop_growth[form * CHARACTER_GROWTH_STRIDE + GROWTH_DX_MAX_AT] =
+            (unsigned char) (LOOP_DX_MAX_BASE + form);
+        loop_growth[form * CHARACTER_GROWTH_STRIDE + GROWTH_HP_MAX_AT] =
+            (unsigned char) (LOOP_HP_MAX_BASE + form);
+        loop_growth[form * CHARACTER_GROWTH_STRIDE + GROWTH_MP_MAX_AT] =
+            (unsigned char) (LOOP_MP_MAX_BASE + form);
+    }
+
+    for (entry = 0; entry < LOOP_TEXT_ENTRIES; entry++) {
+        loop_text[entry] = (short) LOOP_TEXT_EMPTY_AT;
+    }
+    loop_text[LOOP_TEXT_ENTRIES] = LOOP_TEXT_TERMINATOR;
+
+    memset(sel_font, 0, sizeof(sel_font));
+    for (entry = 0; entry < SEL_FONT_H; entry++) {
+        sel_font[SEL_FONT_SOLID_GLYPH * SEL_FONT_STRIDE + entry] = 0xff;
+    }
+    memset(sel_wav_bank, 0, sizeof(sel_wav_bank));
+    memset(loop_page, 0, (size_t) sizeof(loop_page));
+
+    for (entry = 0; entry < CHURCH_DAC_ENTRIES; entry++) {
+        loop_palette[entry].red =
+            (unsigned char) (entry % CHURCH_PALETTE_SPAN);
+        loop_palette[entry].green =
+            (unsigned char) ((entry + 7) % CHURCH_PALETTE_SPAN);
+        loop_palette[entry].blue =
+            (unsigned char) ((entry + 14) % CHURCH_PALETTE_SPAN);
+    }
+
+    data_fdps_map_unit_array_ptr = loop_units;
+    data_fdps_roster_array_ptr = loop_units;
+    data_fdps_promotion_table_ptr = loop_promo;
+    data_fdps_battle_character_growth_table_ptr = loop_growth;
+    data_fdps_village_window_sheet_ptr = sel_cel;
+    data_fdps_selection_bar_sheet_ptr = sel_cel;
+    data_fdps_command_sprite_sheet_ptr = sel_cel;
+    data_fdps_shadow_sprite_sheet_ptr = sel_cel;
+    data_fdps_number_glyph_sheet_ptr = sel_digits;
+    data_fdps_number_glyph_color_row = 0;
+    data_fdps_cel_sprite_cache_ptr = sel_icons;
+    data_fdps_all_game_text_ptr = (unsigned char *) loop_text;
+    data_fdps_font_sheet_ptr = sel_font;
+    data_fdps_font_glyph_width = SEL_FONT_W;
+    data_fdps_glyph_cell_height = SEL_FONT_H;
+    data_fdps_font_glyph_stride_bytes = SEL_FONT_STRIDE;
+    data_fdps_font_outline_enabled_flag = 0;
+    data_fdps_font_shadow_offset_x = 0;
+    data_fdps_glyph_shadow_row_offset = 0;
+    data_fdps_glyph_advance_x = SEL_FONT_W;
+    data_fdps_font_line_height = SEL_FONT_H;
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = sel_wav_bank;
+    data_fdps_vga_fight_palette_ptr = (unsigned char *) loop_palette;
+    data_fdps_vga_main_palette_ptr = (unsigned char *) loop_palette;
+    data_fdps_portrait_sprite_buf_ptr = NULL;
+
+    /* The prompt draws over a copy of the visible page rather than over the
+       scene layers, which is what every village screen puts it in. */
+    data_fdps_village_mode_flag = 1;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+
+    /* Both audio gates closed, so nothing the list or the animation asks for
+       is played. */
+    data_fdps_audio_sfx_enabled_flag = 0;
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    for (entry = 0; entry < SFX_SAMPLE_SLOT_COUNT; entry++) {
+        data_fdps_audio_sample_handle_table[entry] = NULL;
+    }
+}
+
+/* Back to what a freshly started program has these in, for the reason the
+   candidate list's own teardown gives: several of these pointers are freed
+   unguarded elsewhere. */
+static void loop_unstage(void)
+{
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_roster_array_ptr = NULL;
+    data_fdps_promotion_table_ptr = NULL;
+    data_fdps_battle_character_growth_table_ptr = NULL;
+    data_fdps_village_window_sheet_ptr = NULL;
+    data_fdps_selection_bar_sheet_ptr = NULL;
+    data_fdps_command_sprite_sheet_ptr = NULL;
+    data_fdps_shadow_sprite_sheet_ptr = NULL;
+    data_fdps_number_glyph_sheet_ptr = NULL;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_all_game_text_ptr = NULL;
+    data_fdps_font_sheet_ptr = NULL;
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = NULL;
+    data_fdps_vga_fight_palette_ptr = NULL;
+    data_fdps_vga_main_palette_ptr = NULL;
+    data_fdps_village_mode_flag = 0;
+    data_fdps_input_last_scancode = SEL_KEY_NONE;
+    data_fdps_input_key_repeat_prev_scancode = SEL_KEY_NONE;
+}
+
+/* One whole session, with the adapter in the mode the screen runs in and the
+   timer interrupt playing both input paths.  `member_count` is what the sweep
+   walks; `codes` is what the candidate list is given, and Escape follows for
+   ever once they run out; `prompt_code` is the answer the prompt reads on every
+   pass it takes. */
+static void loop_run(int member_count, unsigned char *codes, int code_count,
+                     int prompt_code)
+{
+    int index;
+
+    loop_stage();
+    data_fdps_roster_member_count = member_count;
+
+    for (index = 0; index < code_count; index++) {
+        loop_script[index] = codes[index];
+    }
+    loop_script_len = code_count;
+    loop_script_next = 0;
+    loop_prompt_code = prompt_code;
+
+    data_fdps_dialog_last_action_text_id_param = LOOP_SENTINEL;
+    data_fdps_dialog_subst_text_id_2 = LOOP_SENTINEL;
+    data_fdps_dialog_last_action_value_param = LOOP_SENTINEL;
+
+    data_fdps_input_last_scancode = SEL_KEY_NONE;
+    data_fdps_input_key_repeat_prev_scancode = SEL_KEY_NONE;
+    data_fdps_input_key_repeat_counter = 0;
+    data_fdps_input_key_repeat_last_tick = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_ui_palette_last_cycle_tick = 0;
+    data_fdps_ui_palette_cycle_phase = 0;
+
+    set_mode(CHURCH_MODE_320X200X256);
+    loop_saved_timer = _dos_getvect(CHURCH_TIMER_VECTOR);
+    _dos_setvect(CHURCH_TIMER_VECTOR, loop_timer_isr);
+    fdps_church_promote_loop(loop_page);
+    _dos_setvect(CHURCH_TIMER_VECTOR, loop_saved_timer);
+    set_mode(CHURCH_MODE_TEXT);
+}
+
+/* Did the candidate list ever poll?  Only fdps_read_scancode_auto_repeat writes
+   the previous-code slot, and loop_run seeds it with the filter's no-key
+   marker. */
+static int loop_list_opened(void)
+{
+    return data_fdps_input_key_repeat_prev_scancode
+           != (unsigned int) SEL_KEY_NONE;
+}
+
+/* A sweep that finds nobody prints its refusal and ends the session without
+   ever opening the list, so neither substitution slot is written and the
+   filter is never polled.  Both members are one level short of the floor. */
+static void nobody_eligible_never_opens_the_list(void)
+{
+    loop_clear_units();
+    loop_member(0, LOOP_MIN_LEVEL - 1, 1, 1, 0, 0);
+    loop_member(1, LOOP_MIN_LEVEL - 1, 2, 2, 0, 0);
+    loop_run(2, NULL, 0, SEL_KEY_ESC);
+    CHECK_EQ(loop_list_opened(), 0);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, LOOP_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, LOOP_SENTINEL);
+    loop_unstage();
+}
+
+/* The form ceiling is on the PORTRAIT id at +0x07 and not on the class code at
+   +0x20.  This member is level 30 with a class code of 3, which any test
+   written against the class would admit, and a portrait id of 0x0f, which is
+   what a unit that has already been promoted carries. */
+static void an_already_promoted_unit_is_refused(void)
+{
+    loop_clear_units();
+    loop_member(0, 30, 0x0f, 1, 0, 0);
+    loop_unit(0)->clazz = 3;
+    loop_run(1, NULL, 0, SEL_KEY_ESC);
+    CHECK_EQ(loop_list_opened(), 0);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, LOOP_SENTINEL);
+    loop_unstage();
+}
+
+/* Where the ceiling actually falls: portrait id 8 is offered and 9 is not. */
+static void portrait_nine_is_the_first_form_refused(void)
+{
+    unsigned char script[1];
+
+    script[0] = SEL_KEY_ENTER;
+
+    loop_clear_units();
+    loop_member(0, 30, LOOP_FIRST_REFUSED_PORTRAIT, 1, 0, 0);
+    loop_run(1, NULL, 0, SEL_KEY_ESC);
+    CHECK_EQ(loop_list_opened(), 0);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, LOOP_SENTINEL);
+    loop_unstage();
+
+    loop_clear_units();
+    loop_member(0, 30, LOOP_FIRST_REFUSED_PORTRAIT - 1, 1, 0, 0);
+    loop_run(1, script, 1, SEL_KEY_ESC);
+    CHECK_EQ(loop_list_opened(), 1);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param,
+             LOOP_FIRST_REFUSED_PORTRAIT - 1 + LOOP_NAME_TEXT_BIAS);
+    loop_unstage();
+}
+
+/* Where the level floor falls, and that the list is built in roster order:
+   member 0 is one level short and member 1 is exactly at it, so the confirm on
+   the first candidate names member 1. */
+static void level_twenty_is_the_floor(void)
+{
+    unsigned char script[1];
+
+    script[0] = SEL_KEY_ENTER;
+    loop_clear_units();
+    loop_member(0, LOOP_MIN_LEVEL - 1, 1, 1, 0, 0);
+    loop_member(1, LOOP_MIN_LEVEL, 2, 2, 0, 0);
+    loop_run(2, script, 1, SEL_KEY_ESC);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param,
+             2 + LOOP_NAME_TEXT_BIAS);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2,
+             LOOP_CLASS_OF(2, 0) + LOOP_CLASS_TEXT_BIAS);
+    loop_unstage();
+}
+
+/* A bag with none of the three badges in it takes route 0, the free promotion.
+   The member's eight inventory entries are all occupied and all hold item id
+   zero, so the search really walks the whole bag and finds nothing. */
+static void an_empty_bag_takes_the_free_route(void)
+{
+    unsigned char script[1];
+
+    script[0] = SEL_KEY_ENTER;
+    loop_clear_units();
+    loop_member(0, 25, 3, 5, 0, 0);
+    loop_run(1, script, 1, SEL_KEY_ESC);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2,
+             LOOP_CLASS_OF(5, 0) + LOOP_CLASS_TEXT_BIAS);
+    loop_unstage();
+}
+
+/* 0xe0 光之徽章 buys route 1 and 0xe1 暗之徽章 route 2, and neither is
+   available to the character the hero badge arm is written for -- the member
+   here carries portrait id 3. */
+static void the_two_element_badges_buy_routes_one_and_two(void)
+{
+    unsigned char script[1];
+
+    script[0] = SEL_KEY_ENTER;
+
+    loop_clear_units();
+    loop_member(0, 25, 3, 5, LOOP_LIGHT_BADGE, 0);
+    loop_run(1, script, 1, SEL_KEY_ESC);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2,
+             LOOP_CLASS_OF(5, 1) + LOOP_CLASS_TEXT_BIAS);
+    loop_unstage();
+
+    loop_clear_units();
+    loop_member(0, 25, 3, 5, LOOP_DARK_BADGE, 0);
+    loop_run(1, script, 1, SEL_KEY_ESC);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2,
+             LOOP_CLASS_OF(5, 2) + LOOP_CLASS_TEXT_BIAS);
+    loop_unstage();
+}
+
+/* The 勇者徽章 arm is guarded by CMP byte ptr [EAX + 0x7],0x0, so only the
+   member whose portrait id is 0 can take route 3.  The same bag on a member
+   whose portrait id is 1 falls through all three probes to the free route. */
+static void only_the_first_form_can_use_the_hero_badge(void)
+{
+    unsigned char script[1];
+
+    script[0] = SEL_KEY_ENTER;
+
+    loop_clear_units();
+    loop_member(0, 25, 0, 5, LOOP_HERO_BADGE, 0);
+    loop_run(1, script, 1, SEL_KEY_ESC);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2,
+             LOOP_CLASS_OF(5, 3) + LOOP_CLASS_TEXT_BIAS);
+    loop_unstage();
+
+    loop_clear_units();
+    loop_member(0, 25, 1, 5, LOOP_HERO_BADGE, 0);
+    loop_run(1, script, 1, SEL_KEY_ESC);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2,
+             LOOP_CLASS_OF(5, 0) + LOOP_CLASS_TEXT_BIAS);
+    loop_unstage();
+}
+
+/* The chain is short-circuit and its order is the assembly's: a bag holding the
+   hero badge AND the light one gives route 3 to the member who can take it, and
+   a bag holding the light badge AND the dark one gives route 1 to anybody. */
+static void the_badge_chain_stops_at_the_first_match(void)
+{
+    unsigned char script[1];
+
+    script[0] = SEL_KEY_ENTER;
+
+    loop_clear_units();
+    loop_member(0, 25, 0, 5, LOOP_HERO_BADGE, LOOP_LIGHT_BADGE);
+    loop_run(1, script, 1, SEL_KEY_ESC);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2,
+             LOOP_CLASS_OF(5, 3) + LOOP_CLASS_TEXT_BIAS);
+    loop_unstage();
+
+    loop_clear_units();
+    loop_member(0, 25, 1, 5, LOOP_LIGHT_BADGE, LOOP_DARK_BADGE);
+    loop_run(1, script, 1, SEL_KEY_ESC);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2,
+             LOOP_CLASS_OF(5, 1) + LOOP_CLASS_TEXT_BIAS);
+    loop_unstage();
+}
+
+/* The two identity bytes are different bytes and this pass reads both: the
+   RankUp.dat record is fetched with the CHARACTER id at +0x08 while the name
+   the question prints is the PORTRAIT id at +0x07 plus one.  The member here
+   holds 6 and 2, and character 2's route 0 names a class no route of character
+   6 does. */
+static void the_record_is_by_character_and_the_name_by_portrait(void)
+{
+    unsigned char script[1];
+
+    script[0] = SEL_KEY_ENTER;
+    loop_clear_units();
+    loop_member(0, 25, 6, 2, 0, 0);
+    loop_run(1, script, 1, SEL_KEY_ESC);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param,
+             6 + LOOP_NAME_TEXT_BIAS);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2,
+             LOOP_CLASS_OF(2, 0) + LOOP_CLASS_TEXT_BIAS);
+    loop_unstage();
+}
+
+/* Declining the question does not end the session: the sweep runs again and the
+   list opens again.  The script confirms the first candidate, then on the
+   second pass steps right and confirms the second, and the two members carry
+   different portrait ids and different characters -- so the pair of slots left
+   behind is the SECOND member's, which only a second pass could have written.
+   The third pass gets Escape and ends it. */
+static void declining_asks_again_and_the_last_answer_stands(void)
+{
+    unsigned char script[3];
+
+    script[0] = SEL_KEY_ENTER;
+    script[1] = SEL_KEY_RIGHT;
+    script[2] = SEL_KEY_ENTER;
+    loop_clear_units();
+    loop_member(0, 25, 2, 2, 0, 0);
+    loop_member(1, 25, 3, 3, 0, 0);
+    loop_run(2, script, 3, SEL_KEY_ESC);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param,
+             3 + LOOP_NAME_TEXT_BIAS);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2,
+             LOOP_CLASS_OF(3, 0) + LOOP_CLASS_TEXT_BIAS);
+    loop_unstage();
+}
+
+/* Cancelling the list ends the session before anything is named, and it is a
+   different ending from the refusal above: the list was opened here. */
+static void cancelling_the_list_ends_the_session(void)
+{
+    loop_clear_units();
+    loop_member(0, 25, 2, 2, 0, 0);
+    loop_run(1, NULL, 0, SEL_KEY_ESC);
+    CHECK_EQ(loop_list_opened(), 1);
+    CHECK_EQ(data_fdps_dialog_last_action_text_id_param, LOOP_SENTINEL);
+    CHECK_EQ(data_fdps_dialog_subst_text_id_2, LOOP_SENTINEL);
+    loop_unstage();
+}
+
+/* One whole promotion: the light badge's route on a character whose free route
+   leads somewhere else, accepted at the prompt.  The session then sweeps again,
+   finds the member back at level 1 and ends on the refusal, so no further key
+   is needed.
+
+   Every expected figure is the staged table's own: the movement bonus is byte 2
+   of route 1 and the five stat gains are the five maximum-growth bytes of the
+   row of the form route 1 ENTERS, added whole.  HP and MP go on both the
+   current and the maximum, the level comes back to 1, and the derived stats are
+   recomputed afterwards -- with nothing equipped and no status running, that
+   makes AP and DP the two bases and hit and evade both the dexterity base. */
+static void a_promotion_pays_out_the_entered_forms_growth_row(void)
+{
+    unsigned char script[1];
+    struct fdps_unit_record *member;
+    int form;
+
+    ensure_inputs();
+    if (inputs_ready == 0) {
+        return;
+    }
+
+    script[0] = SEL_KEY_ENTER;
+    form = LOOP_ANIM_BADGE_FORM;
+
+    loop_clear_units();
+    loop_member(0, 25, 0, LOOP_ANIM_CHARACTER, LOOP_LIGHT_BADGE, 0);
+    loop_anim_routes = LOOP_ANIM_ROUTES_DIFFERENT_FORM;
+    loop_run(1, script, 1, SEL_KEY_ENTER);
+    loop_anim_routes = LOOP_ANIM_ROUTES_NONE;
+
+    member = loop_unit(0);
+    CHECK_EQ((int) member->portrait_id, LOOP_ANIM_BADGE_FORM);
+    CHECK_EQ((int) member->clazz, LOOP_ANIM_BADGE_CLASS);
+    CHECK_EQ((int) member->move, LOOP_BASE_MOVE + LOOP_ANIM_BADGE_MOVE);
+    CHECK_EQ((int) member->ap_base, LOOP_BASE_AP + LOOP_AP_MAX_BASE + form);
+    CHECK_EQ((int) member->dp_base, LOOP_BASE_DP + LOOP_DP_MAX_BASE + form);
+    CHECK_EQ((int) member->dx_base, LOOP_BASE_DX + LOOP_DX_MAX_BASE + form);
+    CHECK_EQ((int) member->hp_current,
+             LOOP_BASE_HP_CURRENT + LOOP_HP_MAX_BASE + form);
+    CHECK_EQ((int) member->hp_max,
+             LOOP_BASE_HP_MAX + LOOP_HP_MAX_BASE + form);
+    CHECK_EQ((int) member->mp_current,
+             LOOP_BASE_MP_CURRENT + LOOP_MP_MAX_BASE + form);
+    CHECK_EQ((int) member->mp_max,
+             LOOP_BASE_MP_MAX + LOOP_MP_MAX_BASE + form);
+    CHECK_EQ((int) member->level, 1);
+    CHECK_EQ((int) member->ap, (int) member->ap_base);
+    CHECK_EQ((int) member->dp, (int) member->dp_base);
+    CHECK_EQ((int) member->hit, (int) member->dx_base);
+    CHECK_EQ((int) member->ev, (int) member->dx_base);
+    /* The badge bought a form the free route does not lead to, so it is gone. */
+    CHECK_EQ(fdps_unit_find_item_slot(0, LOOP_LIGHT_BADGE), -1);
+    loop_unstage();
+}
+
+/* The other half of the badge claim: with route 1 naming the SAME form as route
+   0, the two form bytes compare equal and the badge is not taken.  Everything
+   else about the promotion is unchanged -- route 1's own class code and its own
+   movement bonus are still what is applied -- so the case also shows that the
+   comparison guards the removal alone. */
+static void a_badge_leading_where_the_free_route_leads_is_kept(void)
+{
+    unsigned char script[1];
+    struct fdps_unit_record *member;
+    int form;
+
+    ensure_inputs();
+    if (inputs_ready == 0) {
+        return;
+    }
+
+    script[0] = SEL_KEY_ENTER;
+    form = LOOP_ANIM_FREE_FORM;
+
+    loop_clear_units();
+    loop_member(0, 25, 0, LOOP_ANIM_CHARACTER, LOOP_LIGHT_BADGE, 0);
+    loop_anim_routes = LOOP_ANIM_ROUTES_SAME_FORM;
+    loop_run(1, script, 1, SEL_KEY_ENTER);
+    loop_anim_routes = LOOP_ANIM_ROUTES_NONE;
+
+    member = loop_unit(0);
+    CHECK_EQ(fdps_unit_find_item_slot(0, LOOP_LIGHT_BADGE), 0);
+    CHECK_EQ((int) member->portrait_id, LOOP_ANIM_FREE_FORM);
+    CHECK_EQ((int) member->clazz, LOOP_ANIM_BADGE_CLASS);
+    CHECK_EQ((int) member->move, LOOP_BASE_MOVE + LOOP_ANIM_BADGE_MOVE);
+    CHECK_EQ((int) member->ap_base, LOOP_BASE_AP + LOOP_AP_MAX_BASE + form);
+    CHECK_EQ((int) member->level, 1);
+    loop_unstage();
+}
+
 void run_church_tests(void)
 {
     RUN_TEST(the_record_offsets_the_promotion_uses);
@@ -1309,4 +2061,17 @@ void run_church_tests(void)
     RUN_TEST(the_window_follows_the_cursor_down);
     RUN_TEST(the_slot_spells_out_the_class_the_route_names);
     RUN_TEST(a_different_route_names_a_different_class);
+    RUN_TEST(nobody_eligible_never_opens_the_list);
+    RUN_TEST(an_already_promoted_unit_is_refused);
+    RUN_TEST(portrait_nine_is_the_first_form_refused);
+    RUN_TEST(level_twenty_is_the_floor);
+    RUN_TEST(an_empty_bag_takes_the_free_route);
+    RUN_TEST(the_two_element_badges_buy_routes_one_and_two);
+    RUN_TEST(only_the_first_form_can_use_the_hero_badge);
+    RUN_TEST(the_badge_chain_stops_at_the_first_match);
+    RUN_TEST(the_record_is_by_character_and_the_name_by_portrait);
+    RUN_TEST(declining_asks_again_and_the_last_answer_stands);
+    RUN_TEST(cancelling_the_list_ends_the_session);
+    RUN_TEST(a_promotion_pays_out_the_entered_forms_growth_row);
+    RUN_TEST(a_badge_leading_where_the_free_route_leads_is_kept);
 }
