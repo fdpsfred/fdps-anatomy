@@ -50,4 +50,47 @@
 extern void fdps_church_promote_unit(int unit_index, int promotion_entry);
 #pragma aux fdps_church_promote_unit "*" parm caller [];
 
+/* Runs the church's class-change candidate list: shows up to three of the
+   caller's candidates side by side with their walking icon, name, target class
+   and level, and answers which one the player picked.
+
+   It is modal and it draws its own frames.  Each pass takes one code from
+   fdps_read_scancode_auto_repeat (src/keybd.h): Escape cancels, Enter and
+   Space confirm, and the four arrow keys move the cursor -- right and left by
+   one, down and up by three -- each guarded against the ends of the list and
+   each playing Beep.wav.  The pass then composes the whole panel onto a page it
+   mallocs and frees, presents it across one vertical retrace and waits for the
+   timer tick to move on.
+
+   `candidate_count` is how many entries the two arrays hold and is the only
+   bound: nothing checks it against the roster, and a count of zero would draw
+   an empty panel that still answers 0 on a confirm.  The sole caller,
+   fdps_church_promote_loop, never hands over a zero -- it prints its own "no
+   candidates" message instead -- so that arm is unreachable in the shipped
+   game.
+
+   `roster_indices` holds one party-roster index per candidate.  Each is
+   resolved through fdps_get_roster_record (src/table.h) for the name and the
+   level, AND is used unchanged as the walking icon's group in the sprite cache
+   -- the two uses are the same number, so a caller cannot separate them.
+
+   `promotion_choices` holds one route number per candidate, 0 to 3, picking
+   which 3-byte entry of that character's RankUp.dat record names the target
+   class the slot spells out.  Neither array is range checked at either end.
+
+   THE CURSOR AND THE WINDOW ARE LOCAL AND ALWAYS START AT 0, so the list
+   opens on the first candidate every time; the village member grid, which
+   looks the same on screen, instead remembers where it was left.
+
+   Returns the index into both arrays of the candidate the player confirmed, or
+   -1 when the player cancelled.
+
+   THE ADAPTER IS LEFT SHOWING THE LAST FRAME: the panel is presented once more
+   after the key that ends the loop, and nothing here clears it.  The caller
+   repaints. */
+extern int fdps_church_select_promote_candidate(int candidate_count,
+                                                int *roster_indices,
+                                                int *promotion_choices);
+#pragma aux fdps_church_select_promote_candidate "*" parm caller [];
+
 #endif

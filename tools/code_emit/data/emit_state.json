@@ -2945,6 +2945,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x6a5"
+    },
+    "000352c0": {
+      "name": "fdps_church_select_promote_candidate",
+      "target": "church.c",
+      "body_size": "0x4dc",
+      "status": "committed",
+      "emitted_against": "0x4dc",
+      "rounds": 0
     }
   }
 }

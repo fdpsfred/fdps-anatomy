@@ -1,5 +1,6 @@
-/* church.c -- the village church: the class change and the transformation
- * animation that shows it happening.
+/* church.c -- the village church: the candidate list the player picks a
+ * promotion from, the class change itself and the transformation animation
+ * that shows it happening.
  *
  * See church.h for what a caller has to know.  This file owns no state of its
  * own: everything it touches is either the unit record it was pointed at or a
@@ -18,11 +19,15 @@
 #include <string.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "audio.h"
 #include "unit.h"
 #include "table.h"
 #include "blit.h"
+#include "keybd.h"
+#include "palcycle.h"
 #include "saf.h"
 #include "sprite.h"
+#include "text.h"
 #include "vfs.h"
 #include "palette.h"
 #include "church.h"
@@ -383,4 +388,414 @@ void fdps_church_promote_unit(int unit_index, int promotion_entry)
     fread(data_fdps_inverse_palette_cube, 1, (size_t) PALETTE_CUBE_BYTES,
           blend_table_file);
     fclose(blend_table_file);
+}
+
+/* ------------------------------------------------------------------
+ * fdps_church_select_promote_candidate @ 000352c0
+ * ------------------------------------------------------------------ */
+
+/* The list's offscreen page: 312 bytes to a row, 76 rows, and the 0x5ca0 a
+   pass mallocs is exactly that product.  It is rebuilt from nothing every pass
+   and freed at the end of it, so no state carries in the pixels. */
+#define LIST_PAGE_PITCH 0x138
+#define LIST_PAGE_BYTES 0x5ca0
+
+/* The panel as it reaches the visible screen: 304 by 67 read from page offset
+   0x3ad, which is page (5, 3), and written at 0xa9c48, which is screen
+   (8, 125) on the mode 13h framebuffer.  The page offsets stay literals for
+   the same reason VGA_SCREEN_BASE above does -- they are positions inside a
+   block this function allocated, not addresses of anything the linker
+   places. */
+#define LIST_PANEL_PAGE_AT 0x3ad
+#define LIST_PANEL_SCREEN_AT 0x9c48
+#define LIST_PANEL_W 0x130
+#define LIST_PANEL_H 0x43
+
+/* The three slots: one row of three, 0x65 apart starting at x 0x0b, at y 0x09.
+   Three is also the distance the window base keeps from the cursor and the
+   step both the window and the vertical cursor moves take.
+
+   The column and the row come out of ONE signed division of the slot number by
+   three, remainder for the column and quotient for the row (MOV EBX,0x3 /
+   SAR EDX,0x1f / IDIV EBX at 000354ad and again at 000354c6).  With three
+   slots the row is always 0 and the column always the slot number; the divide
+   is in the original all the same, and the y stride it scales is the same
+   0x1b the village grid lays its two rows out on. */
+#define LIST_VISIBLE_SLOTS 3
+#define LIST_COLUMNS 3
+#define LIST_ROW_STEP 3
+#define LIST_SLOT_X_BASE 0x0b
+#define LIST_SLOT_X_STRIDE 0x65
+#define LIST_SLOT_Y_BASE 0x09
+#define LIST_SLOT_Y_STRIDE 0x1b
+
+/* Sprite 0 of the village window sheet is the panel frame and sprite 2 of
+   SelBar.Cel is the highlight behind the slot the cursor stands on, hung six
+   pixels left of the slot and five below its top.  Both go through
+   fdps_cel_blit_sprite in its plain opaque mode with no operand. */
+#define LIST_WINDOW_SPRITE 0
+#define LIST_HIGHLIGHT_SPRITE 2
+#define HIGHLIGHT_X_LIFT 6
+#define HIGHLIGHT_Y_DROP 5
+#define LIST_BLIT_OPERAND 0
+#define LIST_BLIT_MODE 0
+
+/* Command.cel sprites 0x2a and 0x2b are the left and right halves of the stand
+   the walking icon is posed on, laid 0x10 scanlines below the slot top with
+   their halves 0x17 apart and the pair starting two pixels left of the slot.
+   fdps_blit_command_sprite puts a fixed 25 by 22 block down with no clipping
+   (sprite.h). */
+#define STAND_LEFT_SPRITE 0x2a
+#define STAND_RIGHT_SPRITE 0x2b
+#define STAND_X_LIFT 2
+#define STAND_RIGHT_X_OFFSET 0x17
+#define STAND_Y_DROP 0x10
+
+/* The walking icon.  The sprite cache holds twelve stream offsets per member,
+   four facings of three walk frames, and ITS offset table starts at the base
+   rather than at a .CEL file's +0x0f (mapdraw.c).  The slot is the ROSTER
+   INDEX the caller named, IMUL EAX,dword ptr [EBP-0x2c],0xc at 00035584, and
+   not the record's own sprite_cache_slot.
+
+   The frame is (tick / 6) & 3 with the value 3 folded back onto 1, which rocks
+   the icon 0, 1, 2, 1 instead of jumping from 2 to 0.  The divide is DIV and
+   not IDIV (MOV EBX,0x6 / XOR EDX,EDX / DIV EBX at 00035563), which is why
+   data_fdps_timer_tick_counter is unsigned at its declaration. */
+#define MEMBER_SPRITES_PER_CACHE_SLOT 0x0c
+#define CEL_SUB_IMAGE_ENTRY_BYTES 4
+#define WALK_FRAME_TICKS 6
+#define WALK_FRAME_MASK 3
+#define WALK_FRAME_FOLD_FROM 3
+#define WALK_FRAME_FOLD_TO 1
+#define MEMBER_ICON_W 0x18
+#define MEMBER_ICON_H 0x18
+
+/* The two lines of text, both out of the resident Fdetxt00.txt table and both
+   in the standard glyph colour 0xd0 over no background with outline 0x6d.  The
+   name is message entry char_id + 1, drawn 0x1c right and six down from the
+   slot; the target class is message entry class_code + 0xa1, drawn 0x24 right
+   and 0x1e down. */
+#define NAME_X_OFFSET 0x1c
+#define NAME_Y_OFFSET 6
+#define NAME_TEXT_ID_BIAS 1
+#define CLASS_X_OFFSET 0x24
+#define CLASS_Y_OFFSET 0x1e
+#define CLASS_TEXT_ID_BIAS 0xa1
+#define LIST_TEXT_FG_COLOR 0xd0
+#define LIST_TEXT_BG_COLOR 0
+#define LIST_TEXT_OUTLINE_COLOR 0x6d
+
+/* The level plate: Command.cel sprite 0x3a two pixels left of the slot and
+   0x22 scanlines down, with the member's level printed 0x14 right of the slot
+   on the same line as a zero-padded two-digit figure and no leading sign. */
+#define LEVEL_PLATE_SPRITE 0x3a
+#define LEVEL_PLATE_X_LIFT 2
+#define LEVEL_PLATE_Y_DROP 0x22
+#define LEVEL_X_OFFSET 0x14
+#define LEVEL_DIGITS 2
+#define LEVEL_SHOW_PLUS 0
+
+/* The two scroll arrows: Command.cel sprites 0x44/0x45 for up and 0x46/0x47
+   for down, the second of each pair being the lit frame.  Which one is drawn
+   is (tick / 5) & 1, so each frame of the blink lasts five timer ticks.
+
+   THE DOWN ARROW IS DRAWN OFF THE END OF THE PAGE, exactly as the village
+   grid's is: fdps_blit_command_sprite puts a fixed 25 by 22 block down with no
+   clipping (sprite.h) and page offset 0x4e96 is row 64 of the 76 the page has,
+   so its last ten rows run past the 0x5ca0 block.  It stays where it is: the
+   screen window only ever shows its top six rows, so moving it to fit the page
+   changes the picture (rebuild_info/pitfalls.md). */
+#define ARROW_BLINK_TICKS 5
+#define ARROW_BLINK_MASK 1
+#define ARROW_UP_SPRITE 0x44
+#define ARROW_DOWN_SPRITE 0x46
+#define ARROW_UP_PAGE_AT 0x6ae
+#define ARROW_DOWN_PAGE_AT 0x4e96
+
+/* The make codes the list acts on.  Everything else, the filter's 0xff "no key
+   this poll" included, falls through the chain and only costs a frame. */
+#define KEY_ESCAPE 0x01
+#define KEY_ENTER 0x1c
+#define KEY_SPACE 0x39
+#define KEY_UP 0x48
+#define KEY_LEFT 0x4b
+#define KEY_RIGHT 0x4d
+#define KEY_DOWN 0x50
+
+/* What the loop's own result slot holds.  The epilogue hands -1 back for
+   anything that is not a confirmation, which is the same -1 a cancel put
+   there. */
+#define LIST_RUNNING 0
+#define LIST_CANCELLED (-1)
+#define LIST_CONFIRMED 1
+
+/* The sound every accepted cursor move plays.  This function pushes the copy
+   of the string at 0x61f4c -- MOV EAX,0x61f4c ahead of all four calls -- which
+   is the same literal village.c and vilmenu.c name. */
+#define LIST_MOVE_SFX "Beep.wav"
+
+/* 000352c0.  Three arguments and caller-cleaned: its one call site at 00034745
+   pushes the promotion-choice array, the roster-index array and the count, then
+   ADD ESP,0xc, and takes the answer out of EAX.  The prologue is the ordinary
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x40 and the three arguments are
+   read at [EBP+0x14], [EBP+0x18] and [EBP+0x1c].
+
+   THE CURSOR AND THE WINDOW ARE LOCALS AND BOTH START AT 0, unlike the village
+   grid's, which are file globals that remember where the last visit left them.
+   MOV dword ptr [EBP-0x24],0x0 and MOV dword ptr [EBP-0x20],0x0 at 000352cc
+   and 000352d3 are the whole of their seeding, so this list always opens on
+   the first candidate.
+
+   THE KEY CHAIN IS SHORT-CIRCUIT AND ITS ORDER IS THE ASSEMBLY'S: cancel,
+   confirm, right, left, up, down.  Each arrow arm is one `if (code == k &&
+   bound)` whose failure falls into the NEXT code's test -- the JNZ and the
+   failed bound both land on the same address.  No two codes can be equal so
+   the ordering is not observable, but the guards are: a blocked move plays no
+   sound and costs nothing but a frame.
+
+   THE VERTICAL MOVES ARE NOT CLAMPED AGAINST THE ROW, ONLY AGAINST THE LIST.
+   Up needs a cursor of 3 or more and Down needs three more candidates to
+   exist, so in a list whose length is not a multiple of three the last entries
+   are reachable by Right from the one before them but not by Down.
+
+   THE RECORD IS RESOLVED INSIDE THE COUNT TEST HERE, unlike the village grid,
+   which resolves one for every visible cell whether or not the party reaches
+   it: the CMP at 00035442 and its JGE jump past the CALL 00023950 at
+   0003545a.
+
+   THE FRAME IS DRAWN AFTER THE KEY IS HANDLED AND BEFORE THE LOOP TEST, so the
+   pass that reads a cancel or a confirm still builds, presents and paces a
+   whole frame before the function returns.
+
+   THE PACE LATCH IS DELIBERATELY NOT INITIALISED.  Every pass ends by spinning
+   until data_fdps_timer_tick_counter differs from `last_tick` and then
+   re-latching it, and `last_tick` is never seeded, so the first pass compares
+   stack garbage and normally falls straight through the wait.  Seeding it adds
+   a tick to the opening of every list (rebuild_info/pitfalls.md).
+   data_fdps_timer_tick_counter is volatile at its declaration (gamedata.h)
+   because of that wait: nothing inside the loop writes the counter, so a build
+   allowed to hoist the load would spin here forever.
+
+   The values used after a CALL are four.  fdps_read_scancode_auto_repeat's EAX
+   is the scancode and goes to [EBP-0x14] at 000352f0.  malloc's EAX is the
+   page, MOV dword ptr [EBP-0x40],EAX at 000353f8, used unchecked -- there is
+   no test for NULL anywhere -- and freed at the end of the pass.
+   fdps_get_roster_record's EAX is the member record, MOV dword ptr
+   [EBP-0x38],EAX at 00035462, and only its char_id byte at +8 and its level
+   byte at +0x21 are read, both zero-extended.  fdps_get_promotion_record's EAX
+   is that character's RankUp.dat record, MOV dword ptr [EBP-0x34],EAX at
+   00035479, and only byte 1 of the route the caller chose is read from it.
+   fdps_draw_text answers a pen position that this caller drops (ADD ESP,0x1c
+   at 0003560d and 0003564a with no use of EAX), and inp's answer is tested and
+   not kept.  The drawing, sound and palette calls return nothing this function
+   looks at. */
+int fdps_church_select_promote_candidate(int candidate_count,
+                                         int *roster_indices,
+                                         int *promotion_choices)
+{
+    /* The answer, filled in once the loop has stopped. */
+    int picked_candidate;
+    /* Whether the loop is still running, and if not, how it stopped. */
+    int loop_result;
+    /* One poll of the auto-repeat filter: a make code, or 0xff for nothing. */
+    unsigned int scancode;
+    /* Which candidate the cursor stands on, and which candidate the leftmost
+       of the three visible slots is showing. */
+    int cursor;
+    int window_base;
+    /* The pass's offscreen page. */
+    unsigned char *page;
+    /* Which of the three visible slots is being drawn, 0 to 2. */
+    int slot_index;
+    /* Which candidate that slot is showing, and the roster index the caller's
+       array gives for it. */
+    int candidate_index;
+    int roster_index;
+    /* That roster entry's record, the source of the name and the level. */
+    struct fdps_unit_record *member;
+    /* The three bytes of the promotion route this candidate's choice picks out
+       of the character's RankUp.dat record, and the class code byte 1 of them
+       names -- which is what the second line of the slot spells out. */
+    unsigned char *promotion_route;
+    int target_class_id;
+    /* The slot's top left corner in the page. */
+    int slot_x;
+    int slot_y;
+    /* 0, 1, 2 or 1: which frame of the member's walk cycle this pass shows,
+       that frame's entry in the sprite cache and the RLE stream it names. */
+    int walk_frame;
+    int sprite_index;
+    unsigned char *icon_stream;
+    /* 0 or 1: which frame of the two-frame scroll arrows this pass shows. */
+    int arrow_blink_phase;
+    /* The tick the previous pass finished on.  Deliberately not initialised --
+       see the note above. */
+    unsigned int last_tick;
+
+    window_base = 0;
+    cursor = 0;
+    loop_result = LIST_RUNNING;
+
+    while (loop_result == LIST_RUNNING) {
+        scancode = fdps_read_scancode_auto_repeat();
+
+        if (scancode == KEY_ESCAPE) {
+            loop_result = LIST_CANCELLED;
+        } else if (scancode == KEY_ENTER || scancode == KEY_SPACE) {
+            loop_result = LIST_CONFIRMED;
+        } else if (scancode == KEY_RIGHT && cursor < candidate_count - 1) {
+            cursor++;
+            if (window_base + LIST_VISIBLE_SLOTS <= cursor) {
+                window_base += LIST_ROW_STEP;
+            }
+            fdps_play_sfx(LIST_MOVE_SFX);
+        } else if (scancode == KEY_LEFT && cursor > 0) {
+            cursor--;
+            if (cursor < window_base) {
+                window_base -= LIST_ROW_STEP;
+            }
+            fdps_play_sfx(LIST_MOVE_SFX);
+        } else if (scancode == KEY_UP && cursor > LIST_ROW_STEP - 1) {
+            cursor -= LIST_ROW_STEP;
+            if (cursor < window_base) {
+                window_base -= LIST_ROW_STEP;
+            }
+            fdps_play_sfx(LIST_MOVE_SFX);
+        } else if (scancode == KEY_DOWN
+                   && cursor < candidate_count - LIST_ROW_STEP) {
+            cursor += LIST_ROW_STEP;
+            if (window_base + LIST_VISIBLE_SLOTS <= cursor) {
+                window_base += LIST_ROW_STEP;
+            }
+            fdps_play_sfx(LIST_MOVE_SFX);
+        }
+
+        page = (unsigned char *) malloc(LIST_PAGE_BYTES);
+        fdps_cel_blit_sprite(data_fdps_village_window_sheet_ptr,
+                             LIST_WINDOW_SPRITE, page, LIST_PAGE_PITCH,
+                             0, 0, LIST_BLIT_OPERAND, LIST_BLIT_MODE);
+
+        for (slot_index = 0; slot_index < LIST_VISIBLE_SLOTS; slot_index++) {
+            candidate_index = window_base + slot_index;
+
+            if (candidate_index < candidate_count) {
+                member = fdps_get_roster_record(
+                             roster_indices[candidate_index]);
+                promotion_route = (unsigned char *)
+                                      fdps_get_promotion_record(
+                                          (int) member->char_id)
+                                  + promotion_choices[candidate_index]
+                                    * PROMOTION_ROUTE_BYTES;
+                target_class_id = (int) promotion_route[PROMOTION_ROUTE_CLASS];
+                roster_index = roster_indices[candidate_index];
+
+                slot_x = (slot_index % LIST_COLUMNS) * LIST_SLOT_X_STRIDE
+                         + LIST_SLOT_X_BASE;
+                slot_y = (slot_index / LIST_COLUMNS) * LIST_SLOT_Y_STRIDE
+                         + LIST_SLOT_Y_BASE;
+
+                if (candidate_index == cursor) {
+                    fdps_cel_blit_sprite(data_fdps_selection_bar_sheet_ptr,
+                                         LIST_HIGHLIGHT_SPRITE, page,
+                                         LIST_PAGE_PITCH,
+                                         slot_x - HIGHLIGHT_X_LIFT,
+                                         slot_y + HIGHLIGHT_Y_DROP,
+                                         LIST_BLIT_OPERAND, LIST_BLIT_MODE);
+                }
+
+                fdps_blit_command_sprite(page
+                                             + (slot_y + STAND_Y_DROP)
+                                               * LIST_PAGE_PITCH
+                                             + slot_x - STAND_X_LIFT,
+                                         LIST_PAGE_PITCH, STAND_LEFT_SPRITE);
+                fdps_blit_command_sprite(page
+                                             + (slot_y + STAND_Y_DROP)
+                                               * LIST_PAGE_PITCH
+                                             + slot_x + STAND_RIGHT_X_OFFSET,
+                                         LIST_PAGE_PITCH, STAND_RIGHT_SPRITE);
+
+                walk_frame = (int) ((data_fdps_timer_tick_counter
+                                     / WALK_FRAME_TICKS) & WALK_FRAME_MASK);
+                if (walk_frame == WALK_FRAME_FOLD_FROM) {
+                    walk_frame = WALK_FRAME_FOLD_TO;
+                }
+                sprite_index = walk_frame
+                               + roster_index * MEMBER_SPRITES_PER_CACHE_SLOT;
+                icon_stream = data_fdps_cel_sprite_cache_ptr
+                    + *(int *) (data_fdps_cel_sprite_cache_ptr
+                                + sprite_index * CEL_SUB_IMAGE_ENTRY_BYTES);
+                fdps_blit_dispatch(icon_stream,
+                                   page + slot_y * LIST_PAGE_PITCH + slot_x,
+                                   MEMBER_ICON_W, MEMBER_ICON_H,
+                                   LIST_PAGE_PITCH, LIST_BLIT_OPERAND,
+                                   LIST_BLIT_MODE);
+
+                fdps_draw_text(data_fdps_all_game_text_ptr,
+                               member->char_id + NAME_TEXT_ID_BIAS,
+                               page + (slot_y + NAME_Y_OFFSET)
+                                   * LIST_PAGE_PITCH
+                                   + slot_x + NAME_X_OFFSET,
+                               LIST_PAGE_PITCH, LIST_TEXT_FG_COLOR,
+                               LIST_TEXT_BG_COLOR, LIST_TEXT_OUTLINE_COLOR);
+                fdps_draw_text(data_fdps_all_game_text_ptr,
+                               target_class_id + CLASS_TEXT_ID_BIAS,
+                               page + (slot_y + CLASS_Y_OFFSET)
+                                   * LIST_PAGE_PITCH
+                                   + slot_x + CLASS_X_OFFSET,
+                               LIST_PAGE_PITCH, LIST_TEXT_FG_COLOR,
+                               LIST_TEXT_BG_COLOR, LIST_TEXT_OUTLINE_COLOR);
+
+                fdps_blit_command_sprite(page
+                                             + (slot_y + LEVEL_PLATE_Y_DROP)
+                                               * LIST_PAGE_PITCH
+                                             + slot_x - LEVEL_PLATE_X_LIFT,
+                                         LIST_PAGE_PITCH, LEVEL_PLATE_SPRITE);
+                fdps_draw_number(page + (slot_y + LEVEL_PLATE_Y_DROP)
+                                     * LIST_PAGE_PITCH
+                                     + slot_x + LEVEL_X_OFFSET,
+                                 LIST_PAGE_PITCH, (int) member->level,
+                                 LEVEL_DIGITS, LEVEL_SHOW_PLUS);
+            }
+        }
+
+        arrow_blink_phase = (int) ((data_fdps_timer_tick_counter
+                                    / ARROW_BLINK_TICKS) & ARROW_BLINK_MASK);
+
+        if (window_base != 0) {
+            fdps_blit_command_sprite(page + ARROW_UP_PAGE_AT, LIST_PAGE_PITCH,
+                                     arrow_blink_phase + ARROW_UP_SPRITE);
+        }
+
+        if (window_base + LIST_VISIBLE_SLOTS < candidate_count) {
+            fdps_blit_command_sprite(page + ARROW_DOWN_PAGE_AT,
+                                     LIST_PAGE_PITCH,
+                                     arrow_blink_phase + ARROW_DOWN_SPRITE);
+        }
+
+        fdps_cycle_ui_palette();
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins, so the frame that has just been
+               composed is the one the monitor shows whole. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends, so the present starts clear of it. */
+        }
+        fdps_blit_rect((unsigned int) (page + LIST_PANEL_PAGE_AT),
+                       LIST_PAGE_PITCH,
+                       (void *) (VGA_SCREEN_BASE + LIST_PANEL_SCREEN_AT),
+                       VGA_SCREEN_PITCH, LIST_PANEL_W, LIST_PANEL_H);
+        free(page);
+
+        while (last_tick == data_fdps_timer_tick_counter) {
+        }
+        last_tick = data_fdps_timer_tick_counter;
+    }
+
+    if (loop_result > LIST_RUNNING) {
+        picked_candidate = cursor;
+    } else {
+        picked_candidate = LIST_CANCELLED;
+    }
+
+    return picked_candidate;
 }
