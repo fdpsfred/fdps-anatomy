@@ -173,6 +173,47 @@ extern void fdps_chapter_02_event_enemies_advance(int unit_index);
 extern void fdps_chapter_03_event_deploy_wave_14(int unit_index);
 #pragma aux fdps_chapter_03_event_deploy_wave_14 "*" parm caller [];
 
+/* Chapter 3's turn-limit defeat: speaks the chapter's last line, brings on the
+   resident map's wave 15 and marks the battle lost, in that order and with
+   nothing between them.
+
+   It has no guard at all -- no one-shot latch, no turn test and no test of the
+   battle-end code it is about to write -- so every call draws, deploys and
+   stores again.  What makes it fire once is map02.dat's turn-event table, which
+   names this slot in a single record, turn 0x16 on side 0, and nothing else in
+   the shipped data names slot 5.
+
+   The store is the literal 1, the defeat code of
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h), written
+   unconditionally: a chapter already marked cleared becomes a defeat.  It is
+   only a flag, so the handler returns normally and the phase loop it returns
+   into is what stops.
+
+   The deployment is fdps_deploy_wave (deploy.h) with map number 2, wave 15 and
+   place_exact 0 -- the literal 2 and not the chapter global the chapter 10, 17
+   and 18 handlers read there, so the arrivals take map 2's coordinates whatever
+   chapter is loaded, and they land on the nearest free walkable tile to their
+   placement records rather than on the records' own coordinates.  Map 2 tags 44
+   records with wave 15, which is the largest arrival the family asks for.
+
+   THE HANDLER NEVER SHOWS WHAT IT DEPLOYED.  The store to the battle-end code
+   is the instruction after the deployment and the handler then returns, so on
+   the code alone the 44 units enter the array and the battle ends; whatever the
+   player sees at that point comes from the battle-end path.  The sibling that
+   does want its arrivals seen -- the chapter 4 turn handler -- spells the cursor
+   move and the render frames out, so a redraw added here would be a frame the
+   original does not draw.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with 0 before anything else and never read back,
+   so any index, in range or not, behaves the same.
+
+   Table slot 5, and chapter 3's map02.dat is the only shipped file that names
+   it -- one turn-event record, turn 0x16, side 0, so the event fires on the
+   enemy pass of turn 22, the turn the chapter's stated deadline expires on. */
+extern void fdps_chapter_03_event_turn_limit_game_over(int unit_index);
+#pragma aux fdps_chapter_03_event_turn_limit_game_over "*" parm caller [];
+
 /* Chapter 5's ambush: takes unit indices 6 through 0x22 inclusive off the
    hold-position behaviour the map deploys them in and puts them on the default
    one, which paths a unit toward the nearest opposing unit, so the whole

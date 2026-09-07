@@ -48,6 +48,14 @@
  * each and call with the index of each in turn; everything else about its
  * staging is the same fixture, and its latch is element 0x11 rather than the
  * 0x10 the rest of the family shares.
+ *
+ * The chapter 3 handler at 00036f10 is the ambush's shape with the latch taken
+ * away and a store to the battle-end global added behind the deployment, and it
+ * uses the same fixture: the wave, the map number and the placement flag are
+ * only readable off a real deployment, and the code it stores is read straight
+ * back off the global.  Having no guard of any kind is asserted by putting both
+ * of the family's latch slots up and watching it run anyway, and by calling it
+ * twice.
  */
 #include <stddef.h>
 #include <stdio.h>
@@ -794,14 +802,15 @@ static void ch07_advance_ignores_the_unit_index_argument(void)
 #define CH03_WAVE_FF_CHAR_ID 10
 #define CH03_SPAWN_RECORD_COUNT 5
 
-/* The chapter text block every draw in this file is pointed at.  0x17 entries
-   covers every id the three chapter 3 handlers name -- 0x13, 0x14 and 0x15 from
-   the turn-scheduled one, 0x12 from the ambush and 0x16 from the tile-triggered
-   reinforcement -- and every one of them holds the same offset, so whichever
-   entry a draw resolves it lands on the lone -1 that follows the table and the
-   stream ends before a glyph is drawn.  The offset is added to the block's own
-   base and not to the slot it was read from (src/text.c). */
-#define CH03_TEXT_ENTRY_COUNT 0x17
+/* The chapter text block every draw in this file is pointed at.  0x18 entries
+   covers every id the four chapter 3 handlers name -- 0x13, 0x14 and 0x15 from
+   the turn-scheduled one, 0x12 from the ambush, 0x16 from the tile-triggered
+   reinforcement and 0x17 from the turn-limit defeat -- and every one of them
+   holds the same offset, so whichever entry a draw resolves it lands on the lone
+   -1 that follows the table and the stream ends before a glyph is drawn.  The
+   offset is added to the block's own base and not to the slot it was read from
+   (src/text.c). */
+#define CH03_TEXT_ENTRY_COUNT 0x18
 
 static unsigned char ch03_grid[4 + CH03_GRID_W * CH03_GRID_H * 2];
 static unsigned char ch03_spawn_table[CH03_SPAWN_TABLE_RECORD_BASE + 8 * 0x1a];
@@ -1797,6 +1806,303 @@ static void ch03_reinforce_places_on_the_nearest_free_tile(void)
     CHECK_EQ((int) ch03_unit(2)->pos_y, CH03_WAVE14_TILE_Y + 1);
 }
 
+/* ---- fdps_chapter_03_event_turn_limit_game_over, 00036f10 -------------- */
+
+/* Chapter 3's turn-limit defeat.
+ *
+ * It is staged through the same fixture as the three handlers above and for the
+ * same reason: neither the wave, the map number nor the placement flag it hands
+ * fdps_deploy_wave is left anywhere afterwards, so the only way to read any of
+ * them back is to let the deployment happen against the real MAP02.COD inside
+ * FIELD.VFS.  Three deployment records are added to ch03_stage's five, at table
+ * indices 5, 6 and 7 and tagged waves 14, 15 and 16, so the wave either side of
+ * the one asked for is present as well: MAP02.COD record 5 is (25, 13) and
+ * record 6 is (22, 15), and the five records ch03_stage leaves at indices 0 to 4
+ * cover waves 0, 1, 2, 13 and 0xff on tiles of their own.  A handler that asked
+ * for 14 or 16 instead of 15 lands a different character id on a different tile,
+ * or nothing at all.
+ *
+ * The battle-end code is written before every call rather than read as it is
+ * found: it is a ticket 23 symbol the build links zero-filled, and the cases
+ * above it in this file leave their own values in it.
+ *
+ * Every case here needs ICON.CEL and FIELD.VFS and skips itself without them.
+ * Unlike the two one-shot handlers above, this one has no path that returns
+ * before the calls, so there is no case that can run ungated.
+ *
+ * WHICH TEXT ENTRY THE DRAW ASKS FOR IS NOT ASSERTED, for the reason the
+ * sections above give -- fdps_draw_text takes its whole effect through pixels at
+ * the VGA aperture and keeps no state -- so PUSH 0x17 at 00036f36 stands on the
+ * reviewer's reading of the instruction stream.  What the cases do pin about the
+ * draw is that it does not stop the deployment or the store that follows it.
+ * ch03_stage's text block is the same empty-stream fixture, now one entry longer
+ * so that 0x17 resolves inside it, so a draw paints nothing and cannot stand a
+ * modal wait on a keyboard nothing is typing at.
+ */
+
+/* The wave the handler asks for: PUSH 0xf at 00036f49.  It is one past the wave
+   the tile-triggered reinforcement above asks for, which is why the record
+   tagged 0xe is left in the table underneath it. */
+#define CH03_TURN_LIMIT_WAVE 0xf
+
+/* The third record added on top of ch03_stage's five, tagged one wave past the
+   one asked for, and the character id that tells it apart from the other two.
+   Its tile is not read back anywhere: it is only ever the record a wrong wave
+   number would have deployed, and the character id alone says that it was. */
+#define CH03_WAVE16_RECORD 7
+#define CH03_WAVE16_CHAR_ID 13
+#define CH03_TURN_LIMIT_SPAWN_COUNT 8
+
+/* Five turn counters spanning everything the sibling turn-scheduled handler's
+   DEC EAX cares about -- the two it compares against, one either side, and one
+   past the last turn map02.dat schedules.  This handler has no CMP against
+   data_fdps_battle_turn_counter anywhere in its 0x54 bytes, so all five have to
+   deploy the same wave. */
+#define CH03_TURN_LIMIT_TURN_COUNT 5
+
+/* ch03_stage's map and its one unit at (0, 0), with the wave-14, wave-15 and
+   wave-16 records added behind its five, and the battle-end code put where the
+   case wants to see it changed from. */
+static void ch03_gameover_stage(int battle_turn, int end_code)
+{
+    ch03_stage(battle_turn);
+
+    ch03_set_spawn(CH03_WAVE14_RECORD, CH03_WAVE14_CHAR_ID,
+                   CH03_TURN_LIMIT_WAVE - 1);
+    ch03_set_spawn(CH03_WAVE15_RECORD, CH03_WAVE15_CHAR_ID,
+                   CH03_TURN_LIMIT_WAVE);
+    ch03_set_spawn(CH03_WAVE16_RECORD, CH03_WAVE16_CHAR_ID,
+                   CH03_TURN_LIMIT_WAVE + 1);
+    ch03_spawn_table[CH03_SPAWN_TABLE_COUNT_OFFSET] =
+        CH03_TURN_LIMIT_SPAWN_COUNT;
+
+    data_fdps_chapter_event_or_battle_end_code = (unsigned int) end_code;
+}
+
+/* The wave brought on is the literal 15: the wave-15 record, table index 6,
+   lands on MAP02.COD record 6 at (22, 15) carrying CH03_WAVE15_CHAR_ID.  The
+   wave-14 record underneath it would land on (25, 13) with CH03_WAVE14_CHAR_ID
+   and the wave-16 record above it would carry CH03_WAVE16_CHAR_ID, so either
+   neighbour is visible twice over -- on the tile and on the id -- and exactly
+   one unit arriving is what rules out a handler that deployed more than the
+   wave it named. */
+static void ch03_gameover_deploys_wave_fifteen(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_gameover_stage(CH03_QUIET_TURN, END_CODE_RUNNING);
+    fdps_chapter_03_event_turn_limit_game_over(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch03_unit(1)->char_id, CH03_WAVE15_CHAR_ID);
+    CHECK_EQ((int) ch03_unit(1)->pos_x, CH03_WAVE15_TILE_X);
+    CHECK_EQ((int) ch03_unit(1)->pos_y, CH03_WAVE15_TILE_Y);
+}
+
+/* The defeat code reaches the global on the same call that deploys, which is
+   what pins the store at 00036f55 as being past both CALLs rather than in front
+   of them or on a path either of them could leave: the count and the code are
+   read back together after one call. */
+static void ch03_gameover_sets_the_defeat_code(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_gameover_stage(CH03_QUIET_TURN, END_CODE_RUNNING);
+    fdps_chapter_03_event_turn_limit_game_over(0);
+
+    CHECK_EQ(data_fdps_chapter_event_or_battle_end_code, END_CODE_DEFEAT);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+}
+
+/* MOV dword ptr [0x00069da0],0x1 is an unconditional store of a literal, not a
+   compare-and-set and not an or, and nothing in the 0x54 bytes reads the global
+   first: a chapter already marked cleared is turned into a defeat by it, and the
+   deployment happens all the same. */
+static void ch03_gameover_overwrites_a_cleared_chapter(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_gameover_stage(CH03_QUIET_TURN, END_CODE_CLEARED);
+    fdps_chapter_03_event_turn_limit_game_over(0);
+
+    CHECK_EQ(data_fdps_chapter_event_or_battle_end_code, END_CODE_DEFEAT);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch03_unit(1)->char_id, CH03_WAVE15_CHAR_ID);
+}
+
+/* There is no one-shot latch: the body carries no CMP against
+   data_fdps_map_cell_event_triggered_flags at all, so the two slots the rest of
+   the family guards itself with -- 0x10, shared by the ambush and the chapter 5
+   handler, and 0x11, the tile-triggered reinforcement's own -- can both be up
+   and the handler still runs.  Neither is written either, which is what says the
+   handler has no latch rather than a latch on a third slot. */
+static void ch03_gameover_has_no_one_shot_latch(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_gameover_stage(CH03_QUIET_TURN, END_CODE_RUNNING);
+    data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT] = 1;
+    data_fdps_map_cell_event_triggered_flags[CH03_REINFORCE_LATCH_SLOT] = 1;
+
+    fdps_chapter_03_event_turn_limit_game_over(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch03_unit(1)->char_id, CH03_WAVE15_CHAR_ID);
+    CHECK_EQ(data_fdps_chapter_event_or_battle_end_code, END_CODE_DEFEAT);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH05_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[
+                 CH03_REINFORCE_LATCH_SLOT], 1);
+}
+
+/* Nothing guards the body and nothing records that it ran, the battle-end code
+   the handler itself just wrote included, so a second call deploys the wave a
+   second time.  What makes the giants arrive once in the game is map02.dat's
+   turn table naming this slot in one record and no other file naming slot 5.
+   The second call is made with the array exactly as the first left it, so the
+   second arrival shows as a third unit; its tile is not asserted because the
+   first giant is standing on (22, 15) by then and the nearest-free-tile search
+   has to put the second one somewhere else. */
+static void ch03_gameover_runs_again_every_time_it_is_called(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_gameover_stage(CH03_QUIET_TURN, END_CODE_RUNNING);
+    fdps_chapter_03_event_turn_limit_game_over(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+
+    fdps_chapter_03_event_turn_limit_game_over(0);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ((int) ch03_unit(2)->char_id, CH03_WAVE15_CHAR_ID);
+    CHECK_EQ(data_fdps_chapter_event_or_battle_end_code, END_CODE_DEFEAT);
+}
+
+/* The map the wave is placed under is the literal 2 pushed at 00036f4b and not
+   data_fdps_chapter_current_chapter_id, which the chapter 10, 17 and 18 handlers
+   push at the same argument.  The wave-15 record lands on MAP02.COD's record 6
+   at (22, 15) with that global on 0 and again with it on 1 -- MAP00.COD's
+   record 6 and MAP01.COD's are tiles of their own, so a handler that read the
+   global would land somewhere else in at least one of the two. */
+static void ch03_gameover_map_number_is_the_literal_two(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_gameover_stage(CH03_QUIET_TURN, END_CODE_RUNNING);
+    data_fdps_chapter_current_chapter_id = 0;
+    fdps_chapter_03_event_turn_limit_game_over(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch03_unit(1)->pos_x, CH03_WAVE15_TILE_X);
+    CHECK_EQ((int) ch03_unit(1)->pos_y, CH03_WAVE15_TILE_Y);
+
+    ch03_gameover_stage(CH03_QUIET_TURN, END_CODE_RUNNING);
+    data_fdps_chapter_current_chapter_id = 1;
+    fdps_chapter_03_event_turn_limit_game_over(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch03_unit(1)->pos_x, CH03_WAVE15_TILE_X);
+    CHECK_EQ((int) ch03_unit(1)->pos_y, CH03_WAVE15_TILE_Y);
+}
+
+/* The placement flag is 0 -- XOR EAX,EAX / PUSH EAX at 00036f46 -- so the giants
+   are put on the nearest free walkable tile to their placement record rather
+   than on the record's own tile.  Taking (22, 15) out of the search by giving
+   that one cell a tile id whose attribute row is terrain 5 moves the unit one
+   tile down: the scan is row-major over the whole grid and a tie is accepted, so
+   the last candidate at the best distance wins.  A flag of 1 would drop it on
+   (22, 15) regardless of the terrain there. */
+static void ch03_gameover_places_on_the_nearest_free_tile(void)
+{
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    ch03_gameover_stage(CH03_QUIET_TURN, END_CODE_RUNNING);
+    ch03_set_tile_id(CH03_WAVE15_TILE_X, CH03_WAVE15_TILE_Y, 1);
+    ch03_set_terrain(1, CH03_TERRAIN_BLOCKED);
+
+    fdps_chapter_03_event_turn_limit_game_over(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch03_unit(1)->char_id, CH03_WAVE15_CHAR_ID);
+    CHECK_EQ((int) ch03_unit(1)->pos_x, CH03_WAVE15_TILE_X);
+    CHECK_EQ((int) ch03_unit(1)->pos_y, CH03_WAVE15_TILE_Y + 1);
+}
+
+/* The turn counter is never read: there is no CMP against
+   data_fdps_battle_turn_counter and no DEC anywhere in the body, so the wave is
+   the literal 15 on every turn.  The five counters below are the ones the
+   turn-scheduled sibling's arithmetic separates -- a handler that had copied it
+   would ask for turn minus one and land on a different record, or on none, at
+   four of the five. */
+static void ch03_gameover_ignores_the_turn_counter(void)
+{
+    static int turns[CH03_TURN_LIMIT_TURN_COUNT] = {
+        CH03_ZERO_TURN, CH03_EARLIEST_TURN, CH03_FIRST_WAVE_TURN,
+        CH03_LAST_WAVE_TURN, CH03_UNSCHEDULED_TURN
+    };
+    int i;
+
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < CH03_TURN_LIMIT_TURN_COUNT; i++) {
+        ch03_gameover_stage(turns[i], END_CODE_RUNNING);
+        fdps_chapter_03_event_turn_limit_game_over(0);
+
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch03_unit(1)->char_id, CH03_WAVE15_CHAR_ID);
+        CHECK_EQ((int) ch03_unit(1)->pos_x, CH03_WAVE15_TILE_X);
+    }
+}
+
+/* The incoming argument slot is overwritten with 0 at 00036f1c, before anything
+   else in the body, and never read back, so the index the dispatcher passes
+   cannot reach the wave asked for, the map asked for, the placement flag or the
+   code stored.  The turn-event runner is the only path this slot is reached by
+   in the shipped data and it pushes a literal 0; the values put through below
+   are that 0, two real unit indices of the kind the tile, cell-search and
+   death-script dispatchers of the same table forward, and two that are not
+   indices at all. */
+static void ch03_gameover_ignores_the_unit_index_argument(void)
+{
+    static int arguments[5] = {0, 1, 7, -1, 30000};
+    int i;
+
+    ch03_ensure_game_files();
+    if (!ch03_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 5; i++) {
+        ch03_gameover_stage(CH03_QUIET_TURN, END_CODE_RUNNING);
+        fdps_chapter_03_event_turn_limit_game_over(arguments[i]);
+
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch03_unit(1)->char_id, CH03_WAVE15_CHAR_ID);
+        CHECK_EQ((int) ch03_unit(1)->pos_x, CH03_WAVE15_TILE_X);
+        CHECK_EQ(data_fdps_chapter_event_or_battle_end_code, END_CODE_DEFEAT);
+    }
+}
+
 void run_chevt1_tests(void)
 {
     RUN_TEST(set_game_over_from_running);
@@ -1850,4 +2156,13 @@ void run_chevt1_tests(void)
     RUN_TEST(ch03_reinforce_runs_once_per_chapter);
     RUN_TEST(ch03_reinforce_map_number_is_the_literal_two);
     RUN_TEST(ch03_reinforce_places_on_the_nearest_free_tile);
+    RUN_TEST(ch03_gameover_deploys_wave_fifteen);
+    RUN_TEST(ch03_gameover_sets_the_defeat_code);
+    RUN_TEST(ch03_gameover_overwrites_a_cleared_chapter);
+    RUN_TEST(ch03_gameover_has_no_one_shot_latch);
+    RUN_TEST(ch03_gameover_runs_again_every_time_it_is_called);
+    RUN_TEST(ch03_gameover_map_number_is_the_literal_two);
+    RUN_TEST(ch03_gameover_places_on_the_nearest_free_tile);
+    RUN_TEST(ch03_gameover_ignores_the_turn_counter);
+    RUN_TEST(ch03_gameover_ignores_the_unit_index_argument);
 }

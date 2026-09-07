@@ -465,6 +465,84 @@ void fdps_chapter_03_event_deploy_wave_14(int unit_index)
     }
 }
 
+/* The line the turn-limit defeat speaks: PUSH 0x17 at 00036f36, the last of the
+   24 entries of the same FDETXT%02d.TXT block the three handlers above draw
+   0x12, 0x13, 0x14, 0x15 and 0x16 out of.  The entry opens with the speaker
+   code -0x11 followed by 102, so the line is spoken by character 0x66, the
+   chapter's mage -- which portrait opens around it is that entry's own token
+   stream and not anything decided here. */
+#define CH03_TURN_LIMIT_TEXT_ID 0x17
+
+/* The wave it brings on: PUSH 0xf at 00036f49, matched against byte 0x15 of
+   each 0x1a-byte deployment record of the resident MAP%02d.DAT block.  44 of
+   map02.dat's records carry it, all of them character id 0x47 at level 6 -- the
+   sealed 石巨神 -- so this is by far the largest arrival any handler of the
+   family asks for. */
+#define CH03_TURN_LIMIT_WAVE 0xf
+
+/* 00036f10.  Chapter 3's turn-limit defeat: the deadline for killing the
+   chapter's mage runs out, the chapter speaks its last line, the sealed 石巨神
+   pour onto the map and the battle ends in defeat.
+
+   The frame is the family's standard four-push one with an empty local area --
+   PUSH EBX / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x0 at
+   00036f10..00036f16 -- so there is no local here at all and every argument is
+   computed straight into the pushes.  The two caller-cleans, ADD ESP,0x1c after
+   the draw at 00036f43 and ADD ESP,0xc after the deployment at 00036f52, are
+   this function's own, and the RET at 00036f63 carries no immediate, so the
+   convention is the stack one at both ends of the call.
+
+   There is no branch anywhere in the body and no guard of any kind: no one-shot
+   latch, no test of data_fdps_battle_turn_counter and no test of the battle-end
+   global it is about to write.  What makes it fire once is map02.dat's turn
+   table, which names this slot in a single record -- turn 0x16, side 0 -- and
+   nothing else in the shipped data names slot 5 at all.
+
+   The three statements are in this order and the order is load bearing.  CALL
+   0x0001ff60 at 00036f3e puts the line on screen first, CALL 0x00023830 at
+   00036f4d brings the giants on second, and MOV dword ptr [0x00069da0],0x1 at
+   00036f55 is the instruction straight after the deployment's stack cleanup.
+   Nothing redraws the map between the deployment and the store, so the 44 units
+   enter the array and the battle ends without the handler ever showing them --
+   see the note in chevt1.h.  The store is an unconditional write of the literal
+   1, the defeat code, not a compare-and-set and not an or, so a chapter already
+   marked cleared is turned into a defeat by it.
+
+   The map number handed to fdps_deploy_wave is the literal 2 pushed at
+   00036f4b and not data_fdps_chapter_current_chapter_id, which the chapter 10,
+   17 and 18 handlers push at the same argument, so the arrivals take map 2's
+   MAP02.COD coordinates whatever chapter is loaded.  The placement flag is the
+   zeroed EAX pushed at 00036f46..00036f48, so each giant goes on the nearest
+   free walkable tile to its placement record rather than on the record's own
+   tile.
+
+   fdps_draw_text hands back a cursor in EAX and this handler discards it: the
+   XOR EAX,EAX at 00036f46 overwrites the register to build the deployment's
+   third argument, and nothing between the ADD ESP,0x1c and that XOR reads it.
+   fdps_deploy_wave returns nothing, and the only instruction between its return
+   and the RET is the store to the battle-end global, which is a store to memory
+   and does not touch EAX -- so nothing sets EAX for the return either, and no
+   dispatcher reads what comes back.  The result is void.
+
+   unit_index is the handler table's shared parameter.  MOV dword ptr
+   [EBP+0x14],0x0 at 00036f1c writes zero over the incoming slot before anything
+   else happens and nothing ever reads it back, so which unit the event fired
+   for cannot reach anything this handler does; the store has no observable
+   effect, because the slot belongs to the caller's outgoing argument area and
+   the turn-event runner drops it with ADD ESP,0x4 at 0002e146. */
+void fdps_chapter_03_event_turn_limit_game_over(int unit_index)
+{
+    unit_index = 0;
+
+    fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                   CH03_TURN_LIMIT_TEXT_ID,
+                   (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                   MESSAGE_FG_COLOR, MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+    fdps_deploy_wave(CH03_PLACEMENT_MAP_NO, CH03_TURN_LIMIT_WAVE,
+                     CH03_PLACE_EXACT);
+    data_fdps_chapter_event_or_battle_end_code = 1;
+}
+
 /* 000370e0.  Chapter 5's ambush: every unit the map has deployed beyond the
    player's own five and the guest hero stops holding position and starts
    advancing, so the imperial army attacks all at once.
