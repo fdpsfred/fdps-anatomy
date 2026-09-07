@@ -10,8 +10,139 @@
  */
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "deploy.h"
+#include "text.h"
 #include "unit.h"
 #include "chevt1.h"
+
+/* The mode 13h aperture and its row stride, PUSH 0xa0000 and PUSH 0x140 in
+   front of all three of the chapter 3 handler's draws (00036bda / 00036bd5,
+   00036c08 / 00036c03 and 00036c48 / 00036c43).  0xa0000 stays a literal here
+   because it is where the display adapter answers and not the address of
+   anything the linker places (rebuild_info/pitfalls.md, contract E). */
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_PITCH 0x140
+
+/* The standard message colours, PUSH 0xd0 / PUSH 0x0 / PUSH 0x6d in front of
+   each of the same three draws: glyph fill, no cell background, and the shadow
+   the outline colour becomes while the font's outline flag is clear.  Every
+   ordinary line of spoken game text is drawn with these three. */
+#define MESSAGE_FG_COLOR 0xd0
+#define MESSAGE_BG_COLOR 0
+#define MESSAGE_OUTLINE_COLOR 0x6d
+
+/* The two turn numbers the chapter 3 handler tests for, CMP dword ptr
+   [0x00069ce8],0x3 at 00036bc3 and CMP dword ptr [0x00069ce8],0xe at 00036bf1.
+   They are the first and the last of the twelve turns map02.dat's turn-event
+   table schedules this slot for, so the chapter speaks as the reinforcements
+   start arriving and again as the last of them arrives. */
+#define CH03_FIRST_WAVE_TURN 3
+#define CH03_LAST_WAVE_TURN 0xe
+
+/* The three entries of the chapter's own FDETXT03.TXT block the handler draws:
+   PUSH 0x13 at 00036bdf, PUSH 0x15 at 00036c0d and PUSH 0x14 at 00036c4d.
+   0x13 and 0x15 are the 魔導士's lines, spoken on the first and the last of the
+   scheduled turns; 0x14 is 尤利安's answer, drawn after the deployment. */
+#define CH03_FIRST_TURN_TEXT_ID 0x13
+#define CH03_LAST_TURN_TEXT_ID 0x15
+#define CH03_AFTER_DEPLOY_TEXT_ID 0x14
+
+/* What the handler takes off the battle turn counter to get the wave it asks
+   for: DEC EAX at 00036c25, on the dword loaded from
+   data_fdps_battle_turn_counter one instruction earlier.  The turn-event runner
+   fires while the counter still holds the turn whose phase has just ended, so
+   the map's turn 3 record asks for wave 2 and its turn 14 record for wave 13. */
+#define CH03_WAVE_TURN_OFFSET 1
+
+/* The placement file the wave is put down through: PUSH 0x2 at 00036c27, a
+   literal and not the chapter global the chapter 10, 17 and 18 handlers read.
+   It names "map02.cod" only -- the deployment records themselves come from
+   whichever MAP%02d.DAT is resident -- so getting it wrong moves the arriving
+   units to another map's coordinates without changing which of them arrive. */
+#define CH03_PLACEMENT_MAP_NO 2
+
+/* How that wave is placed: XOR EAX,EAX / PUSH EAX at 00036c1d, so
+   fdps_deploy_wave passes 0 on to fdps_deploy_unit and each unit goes on the
+   nearest free walkable tile to its placement record's coordinates rather than
+   on the coordinates themselves. */
+#define CH03_PLACE_EXACT 0
+
+/* 00036bb0.  Chapter 3's turn-scheduled reinforcement event: on each of the
+   player turns 3 through 14 it brings that turn's wave of 石巨神 onto the map,
+   and on the first and the last of those turns the chapter speaks as well.
+
+   The frame is the standard Watcom four-push one with an empty local area --
+   PUSH EBX / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x0 at
+   00036bb0..00036bb6 -- so there is no local here at all and every argument is
+   computed straight into the pushes.  The caller-cleans ADD ESP,0x1c after each
+   draw and ADD ESP,0xc after the deployment are this function's own, which is
+   what makes the convention the stack one.
+
+   Everything it does is decided by data_fdps_battle_turn_counter: the chapter
+   state reset sets it to 1, the save load restores it, and the turn driver
+   raises it once per turn cycle.
+
+   The two speech tests are one if/else -- the JNZ at 00036bca falls into the
+   0xe test and the first arm's JMP at 00036bef jumps over it -- so at most one
+   of the two lines is drawn.  They cannot both be reached anyway, 3 and 0xe
+   being different values, but the shape is the assembly's.
+
+   The deployment is unconditional and sits between the two halves of the
+   chapter 3 test.  THE TEST FOR TURN 3 IS WRITTEN TWICE ON PURPOSE, once at
+   00036bc3 and again at 00036c31, because entry 0x13 is spoken before the
+   giants arrive and entry 0x14 after them.  Collapsing the two into one
+   if-block puts both lines on screen before the units appear.
+
+   The wave key is the raw decrement with nothing on either side of it: no
+   compare, no table and no lower bound.  A counter of 0 would give a negative
+   key, which matches no deployment record -- fdps_deploy_wave compares an
+   unsigned wave byte against this int -- and a key clamped to 0 would instead
+   match the map's whole opening army and deploy it a second time.
+
+   Nothing guards the deployment and nothing records that it ran, so the handler
+   fires its wave every time it is reached; what makes each wave arrive once is
+   map02.dat's turn table naming the slot once per turn, twelve times, for turns
+   3 through 14.
+
+   unit_index is the handler table's shared parameter.  MOV dword ptr
+   [EBP+0x14],0x0 at 00036bbc writes zero over the incoming slot before the
+   counter is read and nothing ever reads it back, so which unit the event fired
+   for cannot reach anything this handler does; the store has no observable
+   effect, because the slot belongs to the caller's outgoing argument area and
+   the turn-event runner drops it with ADD ESP,0x4 at 0002e146.
+
+   Nothing sets EAX between the last CALL's return and the RET at 00036c61, and
+   no dispatcher reads what comes back, so the result is void. */
+void fdps_chapter_03_event_deploy_wave_for_turn(int unit_index)
+{
+    unit_index = 0;
+
+    if (data_fdps_battle_turn_counter == CH03_FIRST_WAVE_TURN) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH03_FIRST_TURN_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+    } else if (data_fdps_battle_turn_counter == CH03_LAST_WAVE_TURN) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH03_LAST_TURN_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+    }
+
+    fdps_deploy_wave(CH03_PLACEMENT_MAP_NO,
+                     data_fdps_battle_turn_counter - CH03_WAVE_TURN_OFFSET,
+                     CH03_PLACE_EXACT);
+
+    if (data_fdps_battle_turn_counter == CH03_FIRST_WAVE_TURN) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH03_AFTER_DEPLOY_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+    }
+}
 
 /* 00036cd0.  Two stores and a return, with no branch in the body at all.
 

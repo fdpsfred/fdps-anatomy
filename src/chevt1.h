@@ -13,6 +13,43 @@
 #ifndef CHEVT1_H
 #define CHEVT1_H
 
+/* Chapter 3's turn-scheduled reinforcement event: brings on the wave of the
+   resident map's deployment table that is due for the turn just played, and on
+   the first and the last of the scheduled turns speaks a line of the chapter's
+   own text block around it.
+
+   The wave asked for is the battle turn counter less one, with no compare, no
+   table and no bound on either side of the subtraction, so a counter of 0 asks
+   for a negative wave that matches nothing.  map02.dat schedules this slot for
+   the enemy phase of turns 3 through 14, which reach waves 2 through 13: 25
+   石巨神 in twelve arrivals.
+
+   The placement file is the literal "map02.cod" and not the chapter global the
+   chapter 10, 17 and 18 handlers read, so the arriving units take map 2's
+   coordinates whatever chapter is loaded.  They are placed with the flag that
+   searches for the nearest free walkable tile rather than the flag that takes
+   the placement record's own tile as given.  Which units arrive is not map 2's
+   to say: the deployment records come from whichever MAP%02d.DAT is resident.
+
+   On turn 3 it draws text entry 0x13 before the deployment and entry 0x14 after
+   it, and on turn 14 entry 0x15 before it; the two turn tests are mutually
+   exclusive.  All three go straight onto the mode 13h screen in the standard
+   message colours, and whether a portrait panel opens around a line is decided
+   by that entry's own token stream rather than here.
+
+   Nothing guards the deployment and nothing records that it ran, so calling it
+   again deploys the same wave again; what makes each wave arrive once is the
+   map's turn table naming the slot once per turn.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with 0 before the counter is read and never read
+   back, so any index, in range or not, behaves the same.
+
+   Table slot 0, and map02.dat's turn-event table is the only shipped file that
+   names it -- twelve records, {3, 0, 0} through {14, 0, 0}. */
+extern void fdps_chapter_03_event_deploy_wave_for_turn(int unit_index);
+#pragma aux fdps_chapter_03_event_deploy_wave_for_turn "*" parm caller [];
+
 /* Scripted defeat: ends the current battle as a loss.  Stores 1 -- the defeat
    code -- into data_fdps_chapter_event_or_battle_end_code (gamedata.h) and
    returns, with no test of any kind in front of the store, so calling it ends
