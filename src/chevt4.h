@@ -178,4 +178,32 @@ extern void fdps_chapter_21_event_deploy_wave_2(int unit_index);
 extern void fdps_chapter_22_event_for_turn(int event_arg);
 #pragma aux fdps_chapter_22_event_for_turn "*" parm caller [];
 
+/* Chapter 22's boss-death event: the chapter is won, and if 法蓮娜 struck the
+   killing blow with room in her bag the dying 巫湯婆婆 speaks her line and
+   死神契約 changes hands.
+
+   The two gates are the acting unit's character id -- 1, 法蓮娜 -- and her bag
+   count, which must not be 8; either failing skips the line, the gift and the
+   store into the boss's record.  What is NOT skipped is the last thing the
+   handler does: the battle end code is set to the chapter-cleared value on
+   every path, and that store is chapter 22's whole victory condition, because
+   the chapter's post-action handler only tests for defeat.
+
+   A full bag loses the item silently, and that is the original behaviour: the
+   reward chapter 23 hands out for another killing blow by 法蓮娜 is given only
+   to a 法蓮娜 carrying 死神契約, and that reward is what opens the hidden
+   chapter.
+
+   The boss is unit index 0x0b and her whole flags byte is cleared before the
+   line is drawn.  It reads like a poke at a corpse and is not: it takes back
+   the removed bit the death sequence has just set, and the line's portrait
+   token looks its speaker up through a search that skips retired units, so
+   without the store the dying line is spoken by nobody.
+
+   Table slot 32, reached only through the table: the boss's deployment record
+   in MAP21.DAT carries the death script that names it, and the runner passes
+   the index of the unit that was acting when she died. */
+extern void fdps_chapter_22_event_boss_defeat(int unit_index);
+#pragma aux fdps_chapter_22_event_boss_defeat "*" parm caller [];
+
 #endif

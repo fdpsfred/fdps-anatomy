@@ -700,3 +700,116 @@ void fdps_chapter_22_event_for_turn(int event_arg)
         }
     }
 }
+
+/* Who the reward is for, MOV AL,byte ptr [EAX+0x8] / AND EAX,0xff / CMP EAX,0x1
+   / JNZ at 000388ce..000388d9.  The byte read is struct fdps_unit_record's
+   char_id at record offset 8 -- the id fdps_roster_add_character stamps in --
+   and character id 1 is 法蓮娜 (assets/characters.md), so the gate follows her
+   whatever index the deployment gave her rather than naming a position. */
+#define CH22_CONTRACT_CHAR_ID 1
+
+/* The bag count that refuses the award, CMP EAX,0x8 / JNZ at 000388e7.
+   fdps_unit_item_count answers 8 when none of the unit's eight inventory
+   entries carries the empty bit 0x80 (unititem.h), so 8 is "no room".  The test
+   is an inequality against that one value and not a "< 8", which is the same
+   answer only because 8 is the count's maximum. */
+#define CH22_BAG_FULL_COUNT 8
+
+/* The dead boss's own unit index, PUSH 0xb at 000388ee: 巫湯婆婆, the map's
+   single wave-0 record.  MAP21.COD places 66 units against MAP21.DAT's 55
+   deployment records, so unit indices 0..0x0a are the player's roster and the
+   boss is appended behind it at 0x0b -- the same index the turn-9 branch above
+   walks as the first of its two ranges. */
+#define CH22_BOSS_UNIT_INDEX 0x0b
+
+/* The entry of the chapter's own text block the dying boss speaks, PUSH 0x12 at
+   00038915, out of the FDETXT22.TXT block data_fdps_current_chapter_text_ptr
+   holds: the entry after the six the turn handler above speaks.  It is drawn at
+   the top-left corner of the visible mode-13h page, PUSH 0xa0000 at 00038910,
+   which stays a literal because it is an address inside the display adapter's
+   aperture rather than the address of anything the linker places
+   (rebuild_info/pitfalls.md, contract E). */
+#define CH22_BOSS_DEFEAT_TEXT_ID 0x12
+#define CH22_BOSS_DEFEAT_TEXT_DEST 0x000a0000
+
+/* What she is handed, PUSH 0xba at 00038925: 死神契約 (assets/items.md).  It is
+   carried and never used -- chapter 23's 死神 gives up 反禁制器 for a killing
+   blow struck by a 法蓮娜 who has this in her bag, and 反禁制器 is what opens
+   the hidden chapter (docs/guide/fdps/walkthrough.txt). */
+#define CH22_REAPER_CONTRACT_ITEM_ID 0xba
+
+/* 000388b0.  Chapter 22's boss-death event: the chapter is won, and if 法蓮娜
+   struck the killing blow with room in her bag the dying 巫湯婆婆 speaks her
+   line and 死神契約 changes hands.
+
+   The frame is the family's four-push one with a single 4-byte local -- PUSH
+   EBX / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x4 at
+   000388b0..000388b6 -- so the one incoming dword sits at [EBP+0x14].  Every
+   caller-clean in the body is this function's own (ADD ESP,0x4 after each of
+   the two record lookups and after the bag count, ADD ESP,0x1c after the draw
+   and ADD ESP,0x8 after the award), the RET at 00038946 carries no immediate,
+   and the dispatcher pushes one dword and drops it with ADD ESP,0x4 at
+   0001dcb4, so the convention is the stack one at both ends of the call.
+
+   THE VICTORY IS UNCONDITIONAL AND THE GIFT IS NOT.  Both gates jump to
+   00038936, which is the store of the end code, so a firing that hands nothing
+   over still clears the chapter.  This store is chapter 22's whole victory
+   condition: fdps_chapter_22_post_action only ever tests for defeat, so moving
+   the store inside the branch leaves a won chapter running with its boss dead.
+
+   THE SILENT SKIP ON A FULL BAG IS THE ORIGINAL BEHAVIOUR.  With all eight
+   entries occupied the item is simply not given and the player is told nothing
+   -- and that is what shuts the hidden chapter, because chapter 23's reward is
+   only handed to a 法蓮娜 carrying this one.  A swap prompt, a forced grant or
+   a drop on the floor in its place all change what the run can reach.
+
+   THE STORE INTO THE BOSS'S RECORD IS LOAD-BEARING AND MUST STAY AHEAD OF THE
+   LINE.  MOV byte ptr [EAX+0x5],0x0 at 000388fe clears the WHOLE flags byte of
+   unit 0x0b, and it looks like a pointless poke at a unit that is already dead:
+   the death sequence has just set bit 0, the removed bit fdps_unit_is_retired
+   reads.  Text entry 0x12 opens with the portrait token, which raises its
+   speaker through fdps_battle_find_unit_by_character_id -- and that search
+   skips retired units.  So clearing the byte is what gives the line a face, and
+   narrowing the store to bit 0, or moving it after the draw, silently renders
+   the dying line with no speaker.
+
+   Two values are used after a CALL and both are fdps_get_unit_record's: the
+   acting unit's record, stored to [EBP-0x4] at 000388c8 and reloaded at
+   000388cb for the char_id byte, and the boss's, stored to the same slot at
+   000388f8 and reloaded at 000388fb for the flags store.  fdps_unit_item_count's
+   EAX is the bag count and is compared where it lands, at 000388e7;
+   fdps_draw_text's cursor is discarded -- the next instruction is a PUSH -- and
+   fdps_unit_add_item's 1-or-(-1) is discarded likewise, the bag count having
+   already answered the question it reports.  Nothing sets EAX before the RET
+   and the dispatcher reads nothing back, so the result is void.
+
+   Table slot 32, reached only through the table: the boss's deployment record
+   in MAP21.DAT carries the death script (opcode 2, operand 32),
+   fdps_collect_defeated_unit_events collects it once her HP reaches 0, and the
+   death-script runner calls the slot with the index of the unit that was
+   acting. */
+void fdps_chapter_22_event_boss_defeat(int unit_index)
+{
+    /* The unit that struck the killing blow, and then the boss it killed -- two
+       names here for the one slot [EBP-0x4] the original keeps them in. */
+    struct fdps_unit_record *acting_unit;
+    struct fdps_unit_record *boss_unit;
+
+    acting_unit = fdps_get_unit_record(unit_index);
+
+    if (acting_unit->char_id == CH22_CONTRACT_CHAR_ID
+            && fdps_unit_item_count(unit_index) != CH22_BAG_FULL_COUNT) {
+        boss_unit = fdps_get_unit_record(CH22_BOSS_UNIT_INDEX);
+        /* The whole byte, and before the line is spoken. */
+        boss_unit->flags = 0;
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH22_BOSS_DEFEAT_TEXT_ID,
+                       (unsigned char *) CH22_BOSS_DEFEAT_TEXT_DEST,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_unit_add_item(unit_index, CH22_REAPER_CONTRACT_ITEM_ID);
+    }
+
+    /* 2 is the chapter cleared (gamedata.h), written on the skipped path too. */
+    data_fdps_chapter_event_or_battle_end_code = 2;
+}

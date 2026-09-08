@@ -1581,6 +1581,358 @@ static void ch22_map_number_comes_from_the_chapter_global(void)
     CHECK_EQ((int) ch21_unit(1)->pos_y, CH22_MAP01_RECORD_0_Y);
 }
 
+/* ---------------------------------------------------------------------- */
+
+/* fdps_chapter_22_event_boss_defeat at 000388b0.
+ *
+ * Everything this handler does is visible in memory: two unit records and one
+ * global.  So the unit array is staged locally, as the ch20 cases stage theirs,
+ * and the array has to reach index 0x0b because the boss's record is named by a
+ * literal and not by the argument.  What the globals hold at rest is ticket
+ * 23's and is never asserted -- every case writes the state it wants to watch
+ * change.
+ *
+ * The line the boss speaks is drawn for real, through a text block whose every
+ * entry points at one lone terminator, so fdps_draw_text walks the entry,
+ * paints nothing and returns without needing a font, a panel or mode 13h.  The
+ * text id itself is read off PUSH 0x12 at 00038915 and is not asserted here,
+ * because a draw that paints nothing leaves nothing behind to tell one entry
+ * from another.
+ *
+ * The four things the cases are really for are the four ways an obvious rewrite
+ * goes wrong: the end code is stored on the skipped path as well as the taken
+ * one, the bag test refuses at exactly 8 and at nothing below it, the flags byte
+ * of unit 0x0b is cleared WHOLE and only on the taken path, and the item goes to
+ * the unit the argument names rather than to a fixed index.
+ */
+
+/* The staged array reaches two indices past the boss so that the neighbours of
+   the record the handler names by literal can be watched as well. */
+#define CH22D_UNIT_COUNT 14
+#define CH22D_BOSS_UNIT 0x0b
+#define CH22D_BELOW_BOSS_UNIT 0x0a
+#define CH22D_ABOVE_BOSS_UNIT 0x0c
+
+/* The unit the argument names, deliberately not 0 and not the boss, and one on
+   either side of it so a case can say the award followed the argument. */
+#define CH22D_ACTING_UNIT 4
+#define CH22D_NEXT_UNIT 5
+#define CH22D_PREV_UNIT 3
+
+/* The character id the gate at 000388d6 admits -- 1, 法蓮娜
+   (assets/characters.md) -- and one it must refuse. */
+#define CH22D_FLARENA_CHAR_ID 1
+#define CH22D_OTHER_CHAR_ID 2
+
+/* What is handed over, PUSH 0xba at 00038925: 死神契約 (assets/items.md).  The
+   filler is 0xa3, 金屬礦, a plain carried item, so a case can tell the entries
+   that were already there from the one that arrived. */
+#define CH22D_CONTRACT_ITEM 0xba
+#define CH22D_FILLER_ITEM 0xa3
+
+/* An inventory entry nobody is carrying and one that is carried but not
+   equipped, the flag bytes fdps_unit_item_count and fdps_unit_add_item read
+   (unititem.h). */
+#define CH22D_EMPTY_FLAG 0x80
+#define CH22D_EMPTY_ID 0xff
+#define CH22D_CARRIED_FLAG 0x00
+#define CH22D_INVENTORY_ENTRIES 8
+
+/* The bag counts either side of the refusal, CMP EAX,0x8 at 000388e7. */
+#define CH22D_BAG_FULL 8
+#define CH22D_BAG_ONE_SHORT 7
+
+/* What the flags byte of a record holds before the run.  0xff is every bit,
+   including the removed bit 0 the death sequence sets, so a case can say the
+   store at 000388fe clears the whole byte and not just that bit; the
+   neighbours' value is arbitrary and only has to survive. */
+#define CH22D_FLAGS_BEFORE 0xff
+#define CH22D_FLAGS_CLEARED 0
+#define CH22D_NEIGHBOUR_FLAGS 0x35
+
+/* The end code before and after, MOV dword ptr [0x00069da0],0x2 at 00038936: 0
+   is the battle still running and 2 is the chapter cleared (gamedata.h). */
+#define CH22D_END_CODE_RUNNING 0
+#define CH22D_END_CODE_CLEARED 2
+
+/* The chapter text block: entries 0 through 0x12, which is as far as the PUSH
+   at 00038915 reaches, every one of them pointing at the same lone terminator
+   so that a draw walks it, paints nothing and returns at once. */
+#define CH22D_TEXT_IDS 0x13
+#define CH22D_TEXT_EMPTY_AT 0x40
+#define CH22D_TEXT_BLOCK_BYTES (CH22D_TEXT_EMPTY_AT + 2)
+#define CH22D_TEXT_END (-1)
+
+static unsigned char ch22d_text_block[CH22D_TEXT_BLOCK_BYTES];
+static struct fdps_unit_record ch22d_units[CH22D_UNIT_COUNT];
+
+static void ch22d_stage_text(void)
+{
+    int text_id;
+
+    memset(ch22d_text_block, 0, (size_t) CH22D_TEXT_BLOCK_BYTES);
+    *(short *) (ch22d_text_block + CH22D_TEXT_EMPTY_AT) = (short) CH22D_TEXT_END;
+    for (text_id = 0; text_id < CH22D_TEXT_IDS; text_id++) {
+        *(short *) (ch22d_text_block + text_id * 2) =
+            (short) CH22D_TEXT_EMPTY_AT;
+    }
+}
+
+/* Every record blank, every bag empty, every flags byte marked, the text block
+   staged and the end code parked on "still running" so that the store at the
+   end of the handler is visible whichever path it was reached by. */
+static void ch22d_stage(void)
+{
+    int unit_index;
+    int entry;
+
+    ch22d_stage_text();
+    memset(ch22d_units, 0, sizeof(ch22d_units));
+
+    for (unit_index = 0; unit_index < CH22D_UNIT_COUNT; unit_index++) {
+        for (entry = 0; entry < CH22D_INVENTORY_ENTRIES; entry++) {
+            ch22d_units[unit_index].inventory_slots[entry * 2] =
+                CH22D_EMPTY_FLAG;
+            ch22d_units[unit_index].inventory_slots[entry * 2 + 1] =
+                CH22D_EMPTY_ID;
+        }
+        ch22d_units[unit_index].flags = CH22D_NEIGHBOUR_FLAGS;
+    }
+    ch22d_units[CH22D_BOSS_UNIT].flags = CH22D_FLAGS_BEFORE;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch22d_units;
+    data_fdps_current_chapter_text_ptr = ch22d_text_block;
+    data_fdps_chapter_event_or_battle_end_code = CH22D_END_CODE_RUNNING;
+}
+
+/* Fill the first `count` entries of a unit's bag, which is what makes
+   fdps_unit_item_count answer `count`. */
+static void ch22d_fill_bag(int unit_index, int count)
+{
+    int entry;
+
+    for (entry = 0; entry < count; entry++) {
+        ch22d_units[unit_index].inventory_slots[entry * 2] = CH22D_CARRIED_FLAG;
+        ch22d_units[unit_index].inventory_slots[entry * 2 + 1] =
+            CH22D_FILLER_ITEM;
+    }
+}
+
+/* Which entry holds that item id, flag byte disregarded, or -1. */
+static int ch22d_entry_holding(int unit_index, int item_id)
+{
+    int entry;
+
+    for (entry = 0; entry < CH22D_INVENTORY_ENTRIES; entry++) {
+        if (ch22d_units[unit_index].inventory_slots[entry * 2]
+                != CH22D_EMPTY_FLAG
+                && (int) ch22d_units[unit_index].inventory_slots[entry * 2 + 1]
+                   == item_id) {
+            return entry;
+        }
+    }
+    return -1;
+}
+
+/* The record fields these cases read back and the stride they are indexed by.
+   Every one of them would agree with itself while addressing another byte if
+   the layout were wrong. */
+static void ch22d_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 0x05);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, char_id), 0x08);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, inventory_slots), 0x0a);
+}
+
+/* The whole taken path.  法蓮娜 kills the boss with an empty bag: 死神契約
+   lands in her first entry, the boss's flags byte is cleared to zero and the
+   chapter is marked cleared. */
+static void ch22d_awards_the_contract_to_flarena(void)
+{
+    ch22d_stage();
+    ch22d_units[CH22D_ACTING_UNIT].char_id = CH22D_FLARENA_CHAR_ID;
+
+    fdps_chapter_22_event_boss_defeat(CH22D_ACTING_UNIT);
+
+    CHECK_EQ(ch22d_entry_holding(CH22D_ACTING_UNIT, CH22D_CONTRACT_ITEM), 0);
+    CHECK_EQ((int) ch22d_units[CH22D_BOSS_UNIT].flags, CH22D_FLAGS_CLEARED);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH22D_END_CODE_CLEARED);
+}
+
+/* The item goes into the first entry that is empty and the entries already in
+   use are left alone: with seven filled the contract lands in entry 7, which is
+   also the boundary of the bag test -- a count of 7 is not 8. */
+static void ch22d_a_bag_one_short_still_takes_the_contract(void)
+{
+    ch22d_stage();
+    ch22d_units[CH22D_ACTING_UNIT].char_id = CH22D_FLARENA_CHAR_ID;
+    ch22d_fill_bag(CH22D_ACTING_UNIT, CH22D_BAG_ONE_SHORT);
+
+    fdps_chapter_22_event_boss_defeat(CH22D_ACTING_UNIT);
+
+    CHECK_EQ(ch22d_entry_holding(CH22D_ACTING_UNIT, CH22D_CONTRACT_ITEM),
+             CH22D_BAG_ONE_SHORT);
+    CHECK_EQ((int) ch22d_units[CH22D_ACTING_UNIT].inventory_slots[0 * 2 + 1],
+             CH22D_FILLER_ITEM);
+    CHECK_EQ((int) ch22d_units[CH22D_ACTING_UNIT].inventory_slots[6 * 2 + 1],
+             CH22D_FILLER_ITEM);
+    CHECK_EQ((int) ch22d_units[CH22D_BOSS_UNIT].flags, CH22D_FLAGS_CLEARED);
+}
+
+/* A full bag loses the item and says nothing: all eight entries keep the filler,
+   the boss's flags byte is not touched -- the store is inside the branch -- and
+   the chapter is still marked cleared. */
+static void ch22d_a_full_bag_gets_nothing_and_still_clears_the_chapter(void)
+{
+    ch22d_stage();
+    ch22d_units[CH22D_ACTING_UNIT].char_id = CH22D_FLARENA_CHAR_ID;
+    ch22d_fill_bag(CH22D_ACTING_UNIT, CH22D_BAG_FULL);
+
+    fdps_chapter_22_event_boss_defeat(CH22D_ACTING_UNIT);
+
+    CHECK_EQ(ch22d_entry_holding(CH22D_ACTING_UNIT, CH22D_CONTRACT_ITEM), -1);
+    CHECK_EQ((int) ch22d_units[CH22D_ACTING_UNIT].inventory_slots[7 * 2 + 1],
+             CH22D_FILLER_ITEM);
+    CHECK_EQ((int) ch22d_units[CH22D_BOSS_UNIT].flags, CH22D_FLAGS_BEFORE);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH22D_END_CODE_CLEARED);
+}
+
+/* Anyone else who lands the killing blow gets nothing, and the chapter is won
+   all the same: the character id is read from the acting unit's record and
+   compared with 1, so a unit with an empty bag and the wrong id is refused. */
+static void ch22d_another_character_gets_nothing(void)
+{
+    ch22d_stage();
+    ch22d_units[CH22D_ACTING_UNIT].char_id = CH22D_OTHER_CHAR_ID;
+
+    fdps_chapter_22_event_boss_defeat(CH22D_ACTING_UNIT);
+
+    CHECK_EQ(ch22d_entry_holding(CH22D_ACTING_UNIT, CH22D_CONTRACT_ITEM), -1);
+    CHECK_EQ((int) ch22d_units[CH22D_BOSS_UNIT].flags, CH22D_FLAGS_BEFORE);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH22D_END_CODE_CLEARED);
+}
+
+/* The record the id is read from is the one the argument names.  法蓮娜 is at
+   index 4 and the units either side of her are somebody else: firing for one of
+   them awards nothing, and firing for her leaves their bags alone. */
+static void ch22d_reads_the_record_the_index_names(void)
+{
+    ch22d_stage();
+    ch22d_units[CH22D_ACTING_UNIT].char_id = CH22D_FLARENA_CHAR_ID;
+    ch22d_units[CH22D_PREV_UNIT].char_id = CH22D_OTHER_CHAR_ID;
+    ch22d_units[CH22D_NEXT_UNIT].char_id = CH22D_OTHER_CHAR_ID;
+
+    fdps_chapter_22_event_boss_defeat(CH22D_NEXT_UNIT);
+
+    CHECK_EQ(ch22d_entry_holding(CH22D_NEXT_UNIT, CH22D_CONTRACT_ITEM), -1);
+    CHECK_EQ(ch22d_entry_holding(CH22D_ACTING_UNIT, CH22D_CONTRACT_ITEM), -1);
+
+    ch22d_stage();
+    ch22d_units[CH22D_ACTING_UNIT].char_id = CH22D_FLARENA_CHAR_ID;
+    ch22d_units[CH22D_PREV_UNIT].char_id = CH22D_OTHER_CHAR_ID;
+    ch22d_units[CH22D_NEXT_UNIT].char_id = CH22D_OTHER_CHAR_ID;
+
+    fdps_chapter_22_event_boss_defeat(CH22D_ACTING_UNIT);
+
+    CHECK_EQ(ch22d_entry_holding(CH22D_ACTING_UNIT, CH22D_CONTRACT_ITEM), 0);
+    CHECK_EQ(ch22d_entry_holding(CH22D_PREV_UNIT, CH22D_CONTRACT_ITEM), -1);
+    CHECK_EQ(ch22d_entry_holding(CH22D_NEXT_UNIT, CH22D_CONTRACT_ITEM), -1);
+}
+
+/* The record that is un-retired is unit 0x0b and no other, and the whole byte
+   goes: 0xff becomes 0, while the records either side of it keep the flags they
+   were staged with.  The acting unit is not the boss and its own flags byte is
+   left alone too. */
+static void ch22d_clears_the_whole_flags_byte_of_unit_eleven(void)
+{
+    ch22d_stage();
+    ch22d_units[CH22D_ACTING_UNIT].char_id = CH22D_FLARENA_CHAR_ID;
+
+    fdps_chapter_22_event_boss_defeat(CH22D_ACTING_UNIT);
+
+    CHECK_EQ((int) ch22d_units[CH22D_BOSS_UNIT].flags, CH22D_FLAGS_CLEARED);
+    CHECK_EQ((int) ch22d_units[CH22D_BELOW_BOSS_UNIT].flags,
+             CH22D_NEIGHBOUR_FLAGS);
+    CHECK_EQ((int) ch22d_units[CH22D_ABOVE_BOSS_UNIT].flags,
+             CH22D_NEIGHBOUR_FLAGS);
+    CHECK_EQ((int) ch22d_units[CH22D_ACTING_UNIT].flags, CH22D_NEIGHBOUR_FLAGS);
+}
+
+/* Nothing stops the acting index being the boss's own, and then both record
+   lookups land on the same record: the flags store still clears her byte, and
+   the award still goes to the unit the argument names, which is her.  The two
+   lookups are separate calls with separate arguments and neither is cached
+   across the other. */
+static void ch22d_the_boss_firing_for_herself_clears_her_own_flags(void)
+{
+    ch22d_stage();
+    ch22d_units[CH22D_BOSS_UNIT].char_id = CH22D_FLARENA_CHAR_ID;
+
+    fdps_chapter_22_event_boss_defeat(CH22D_BOSS_UNIT);
+
+    CHECK_EQ((int) ch22d_units[CH22D_BOSS_UNIT].flags, CH22D_FLAGS_CLEARED);
+    CHECK_EQ(ch22d_entry_holding(CH22D_BOSS_UNIT, CH22D_CONTRACT_ITEM), 0);
+}
+
+/* The end code is a store and not an accumulation: whatever it held before, it
+   holds 2 afterwards, on the taken path and on both skipped ones. */
+static void ch22d_end_code_is_stored_on_every_path(void)
+{
+    ch22d_stage();
+    ch22d_units[CH22D_ACTING_UNIT].char_id = CH22D_FLARENA_CHAR_ID;
+    data_fdps_chapter_event_or_battle_end_code = 1;
+
+    fdps_chapter_22_event_boss_defeat(CH22D_ACTING_UNIT);
+
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH22D_END_CODE_CLEARED);
+
+    ch22d_stage();
+    ch22d_units[CH22D_ACTING_UNIT].char_id = CH22D_OTHER_CHAR_ID;
+    data_fdps_chapter_event_or_battle_end_code = 1;
+
+    fdps_chapter_22_event_boss_defeat(CH22D_ACTING_UNIT);
+
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH22D_END_CODE_CLEARED);
+
+    ch22d_stage();
+    ch22d_units[CH22D_ACTING_UNIT].char_id = CH22D_FLARENA_CHAR_ID;
+    ch22d_fill_bag(CH22D_ACTING_UNIT, CH22D_BAG_FULL);
+    data_fdps_chapter_event_or_battle_end_code = 1;
+
+    fdps_chapter_22_event_boss_defeat(CH22D_ACTING_UNIT);
+
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH22D_END_CODE_CLEARED);
+}
+
+/* There is no one-shot latch anywhere in the body: the handler consults none of
+   the shared event flags and raises none, so a second firing hands 法蓮娜 a
+   second 死神契約.  Adding a latch would be a behaviour the original does not
+   have. */
+static void ch22d_has_no_one_shot_latch(void)
+{
+    ch22d_stage();
+    ch22d_units[CH22D_ACTING_UNIT].char_id = CH22D_FLARENA_CHAR_ID;
+    data_fdps_map_cell_event_triggered_flags[CH20_LATCH_SLOT] =
+        CH20_LATCH_RAISED;
+
+    fdps_chapter_22_event_boss_defeat(CH22D_ACTING_UNIT);
+    CHECK_EQ(ch22d_entry_holding(CH22D_ACTING_UNIT, CH22D_CONTRACT_ITEM), 0);
+
+    ch22d_units[CH22D_BOSS_UNIT].flags = CH22D_FLAGS_BEFORE;
+    fdps_chapter_22_event_boss_defeat(CH22D_ACTING_UNIT);
+
+    CHECK_EQ((int) ch22d_units[CH22D_ACTING_UNIT].inventory_slots[1 * 2 + 1],
+             CH22D_CONTRACT_ITEM);
+    CHECK_EQ((int) ch22d_units[CH22D_BOSS_UNIT].flags, CH22D_FLAGS_CLEARED);
+}
+
 void run_chevt4_tests(void)
 {
     RUN_TEST(ch20_record_shape_matches_the_offsets);
@@ -1620,4 +1972,14 @@ void run_chevt4_tests(void)
     RUN_TEST(ch22_ignores_the_incoming_argument);
     RUN_TEST(ch22_has_no_one_shot_latch);
     RUN_TEST(ch22_map_number_comes_from_the_chapter_global);
+    RUN_TEST(ch22d_record_shape_matches_the_offsets);
+    RUN_TEST(ch22d_awards_the_contract_to_flarena);
+    RUN_TEST(ch22d_a_bag_one_short_still_takes_the_contract);
+    RUN_TEST(ch22d_a_full_bag_gets_nothing_and_still_clears_the_chapter);
+    RUN_TEST(ch22d_another_character_gets_nothing);
+    RUN_TEST(ch22d_reads_the_record_the_index_names);
+    RUN_TEST(ch22d_clears_the_whole_flags_byte_of_unit_eleven);
+    RUN_TEST(ch22d_the_boss_firing_for_herself_clears_her_own_flags);
+    RUN_TEST(ch22d_end_code_is_stored_on_every_path);
+    RUN_TEST(ch22d_has_no_one_shot_latch);
 }
