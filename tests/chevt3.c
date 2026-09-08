@@ -47,6 +47,12 @@
  * The chapter 19 cases at the end stand on that same fixture with one thing
  * added -- a chapter text block, because that handler speaks after it deploys
  * -- and say the rest in their own banner.
+ *
+ * The chapter 15 boss-death cases are LAST rather than in address order,
+ * because they stand on both of those fixtures at once -- the deployment one
+ * for the wave the handler brings on, and the smith section key feeder for the
+ * prompt it puts the offer through -- and both are built further down the
+ * file.  Their own banner says the rest.
  */
 #include <stddef.h>
 #include <stdio.h>
@@ -2727,6 +2733,481 @@ static void ch19w6_fires_once_only(void)
     CHECK_EQ(data_fdps_view_frame_last_tick == CH19W6_FRAME_SENTINEL, 1);
 }
 
+/* ------------------------------------------------------------------
+ * Chapter 15's boss-death event at 00037b70.
+ *
+ * THIS SECTION IS LAST RATHER THAN IN ADDRESS ORDER because it stands on two
+ * fixtures that are built further up: the chapter 17 deployment fixture -- a
+ * blank walkable 32 x 16 map, a spawn table whose records are also their own
+ * MAP%02d.COD placement records, and the real MAP00.COD read off disk -- and
+ * the smith section's mode 13h key feeder, which is what answers the prompt.
+ *
+ * WHAT EACH PATH COSTS DECIDES HOW IT IS COVERED.  The two refused gates run no
+ * files and compose no frames, because fdps_battle_destroy_remaining_enemies
+ * returns from its own sweep the moment it finds no unit at zero hit points, so
+ * those cases are free and sweep several turns and several arguments.  The
+ * three that reach the body deploy a unit out of FIELD.VFS, slide the panel in
+ * and out over twelve retrace-paced frames and run a modal prompt, so they cost
+ * seconds apiece and each one carries every claim its path can settle.
+ *
+ * WHY THE STAGED UNITS ALL CARRY PORTRAIT 0x80: fdps_message_window_close
+ * recomposes the scene behind the panel, which walks the whole unit array, and
+ * 0x80 is PORTRAIT_ID_NO_MAP_SPRITE -- the id the compositor drops.  The
+ * arriving record carries character id 0x80 for the same reason, which is why
+ * the enemy table staged here is long enough to reach that row.
+ *
+ * WHICH TEXT ENTRY EACH DRAW ASKS FOR IS NOT ASSERTED, for the reason the
+ * chapter 19 sections above give: a draw takes its whole effect through pixels
+ * at the VGA aperture, keeps no state and returns a cursor this handler
+ * discards, and the panel is retracted over the top of two of them anyway.  The
+ * four ids are literals in the instruction stream -- PUSH 0x12 at 00037bc3,
+ * PUSH 0x13 at 00037bf0, PUSH 0x14 at 00037c2a and PUSH 0x15 at 00037c9f -- and
+ * the text block is staged as entries that are a lone terminator so a draw
+ * walks it, paints nothing and returns at once.
+ *
+ * FACE.CEL AND THE DEPLOYMENT FILES HAVE TO BE THERE for the three that reach
+ * the body: the panel reveal passes face 3 to fdps_load_and_draw_portrait, which
+ * ends the process at exit(1) on a sheet it cannot open, and a missing
+ * FIELD.VFS sends fdps_deploy_wave into fdps_wait_any_key, which spins forever.
+ * Neither failure is one an assertion can catch, so those cases skip themselves.
+ * ------------------------------------------------------------------ */
+
+/* The last turn the duel is still offered on, CMP dword ptr [0x00069ce8],0x19 /
+   JG at 00037b81, and the first turn it is not.  The compare is signed and
+   inclusive, so 25 is inside the window: a rebuild that wrote < 25 would take
+   the 妖刀村雨 away from a 25-turn clear and nothing else would say so. */
+#define CH15D_LAST_TURN 0x19
+#define CH15D_FIRST_LATE_TURN 0x1a
+
+/* The unit the second gate asks about, PUSH 0x4 at 00037b8a, and the two
+   indices the accepted branch treats specially: the loop bound at 00037c41 and
+   the literal at 00037c6f. */
+#define CH15D_HEROINE_UNIT_INDEX 4
+#define CH15D_ROSTER_UNITS 9
+#define CH15D_ARCHER_UNIT_INDEX 0x34
+
+/* How many records the array is staged with -- one more than the highest index
+   the handler touches -- and the index the arriving challenger therefore lands
+   on.  0x35 is also what chapter 15's own map leaves standing: 9 roster units,
+   43 wave-0 records and the wave-1 archer. */
+#define CH15D_STAGED_UNITS 0x35
+#define CH15D_ARRIVAL_UNIT_INDEX 0x35
+
+/* The wave the handler asks for, PUSH 0x2 at 00037ba0, and the two parked
+   either side of it so that asking for the wrong one is visible as a different
+   tile and a different level. */
+#define CH15D_WAVE 2
+#define CH15D_WAVE_BELOW 1
+#define CH15D_WAVE_ABOVE 3
+
+/* Which spawn-table index each of the three sits on.  Table index and
+   MAP%02d.COD placement record are the same number, so the wave the handler
+   asks for is MAP00.COD record 2 -- the (8, 10) the chapter 17 cases above
+   already read back out of the real file -- and the two decoys are records 0
+   and 1, at (18, 0) and (22, 12). */
+#define CH15D_WAVE_RECORD 2
+#define CH15D_WAVE_BELOW_RECORD 1
+#define CH15D_WAVE_ABOVE_RECORD 0
+#define CH15D_SPAWN_RECORD_COUNT 3
+#define CH15D_MAP00_RECORD2_X 8
+#define CH15D_MAP00_RECORD2_Y 10
+
+/* The level each record carries, which is the second reading of which one
+   arrived.  17 is the level map14.dat gives the real opponent; the decoys carry
+   levels that are neither it nor their own wave numbers. */
+#define CH15D_ARRIVAL_LEVEL 17
+#define CH15D_WAVE_BELOW_LEVEL 3
+#define CH15D_WAVE_ABOVE_LEVEL 9
+
+/* The id the compositor drops, and how many enemy rows a table needs for
+   fdps_deploy_unit to resolve it: 0x80 - ENEMY_CHAR_ID_BASE + 1. */
+#define CH15D_ARRIVAL_CHAR_ID 0x80
+#define CH15D_ENEMY_TABLE_ROWS (0x80 - 0x3c + 1)
+
+/* Where the staged units stand: three rows along the bottom of the 32 x 16
+   grid, clear of all three placement records the cases read back, so the
+   nearest-free-tile search a place_exact of 0 runs finds the record's own tile
+   free and leaves the arrival on it. */
+#define CH15D_STAGE_ROW_WIDTH 32
+#define CH15D_STAGE_FIRST_ROW 13
+
+/* The hit points every staged unit starts with.  Any non-zero value does: what
+   it buys is that fdps_play_death_animation_and_mark_dead, which
+   fdps_battle_destroy_remaining_enemies calls unconditionally, finds nothing to
+   destroy and returns before it needs a graphics mode or BaseAni.vfs. */
+#define CH15D_LIVE_HP 100
+
+/* The flags byte every staged unit starts with: the has-acted bit alone, which
+   leaves the retired bit clear so the second gate passes.  It is what makes the
+   store on the accepted branch readable as a store -- a byte that came out 0x81
+   would be an OR and a byte that came out 1 is the whole-byte MOV the assembly
+   has at 00037c69 and 00037c7f. */
+#define CH15D_STAGED_FLAGS 0x80
+#define CH15D_RETIRED_FLAGS 1
+
+/* The side every staged unit is put on: 2, the player's own roster, so that
+   fdps_battle_destroy_remaining_enemies leaves their hit points alone and the
+   one enemy a case plants is the only thing it can touch. */
+#define CH15D_SIDE_PLAYER 2
+#define CH15D_SIDE_ENEMY 0
+
+/* The element of data_fdps_map_cell_event_triggered_flags the accepted branch
+   raises, MOV byte ptr [0x000640e8],0x1 at 00037c83. */
+#define CH15D_LATCH_SLOT 0x10
+
+/* What the battle-end global is parked with before every run, and what the two
+   chapter-ending exits leave in it.  The sentinel is neither of the values the
+   handler can write, so "left alone" and "written with the cleared code" are
+   told apart -- which is the whole of the accepted branch's contract. */
+#define CH15D_END_CODE_SENTINEL 0x77
+#define CH15D_END_CODE_CLEARED 2
+
+/* The chapter's text block: 0x16 entries, which is one past the highest id the
+   handler asks for, every one of them a lone terminator. */
+#define CH15D_TEXT_IDS 0x16
+#define CH15D_TEXT_EMPTY_AT 0x40
+#define CH15D_TEXT_BLOCK_BYTES (CH15D_TEXT_EMPTY_AT + 2)
+#define CH15D_TEXT_END (-1)
+
+static struct fdps_enemy_data ch15d_enemy[CH15D_ENEMY_TABLE_ROWS];
+static unsigned char ch15d_text_block[CH15D_TEXT_BLOCK_BYTES];
+
+/* Everything the handler and its callees read.  The chapter 17 fixture goes
+   down first for the map, the spawn table and the tables a deployment resolves
+   through, then the unit array, the enemy table and the text block are replaced
+   with ones this section's indices and ids reach. */
+static void ch15d_stage(int battle_turn)
+{
+    int i;
+    int text_id;
+
+    ch19_stage(battle_turn);
+    smith_stage_fixtures();
+
+    memset(ch15d_enemy, 0, sizeof(ch15d_enemy));
+    data_fdps_battle_enemy_data_table_ptr = (unsigned char *) ch15d_enemy;
+
+    memset(ch15d_text_block, 0, (size_t) CH15D_TEXT_BLOCK_BYTES);
+    *(short *) (ch15d_text_block + CH15D_TEXT_EMPTY_AT) = (short) CH15D_TEXT_END;
+    for (text_id = 0; text_id < CH15D_TEXT_IDS; text_id++) {
+        *(short *) (ch15d_text_block + text_id * 2) = (short) CH15D_TEXT_EMPTY_AT;
+    }
+    data_fdps_current_chapter_text_ptr = ch15d_text_block;
+
+    data_fdps_message_window_sheet_ptr = smith_panel_sheet;
+    data_fdps_shadow_sprite_sheet_ptr = smith_shadow_sheet;
+
+    data_fdps_map_unit_array_ptr =
+        (unsigned char *) malloc(CH15D_STAGED_UNITS * CH17_UNIT_STRIDE);
+    memset(data_fdps_map_unit_array_ptr, 0,
+           (size_t) (CH15D_STAGED_UNITS * CH17_UNIT_STRIDE));
+    data_fdps_map_unit_count = CH15D_STAGED_UNITS;
+    for (i = 0; i < CH15D_STAGED_UNITS; i++) {
+        ch17_unit(i)->portrait_id = (unsigned char) CH15D_ARRIVAL_CHAR_ID;
+        ch17_unit(i)->side = (unsigned char) CH15D_SIDE_PLAYER;
+        ch17_unit(i)->flags = (unsigned char) CH15D_STAGED_FLAGS;
+        ch17_unit(i)->hp_current = (short) CH15D_LIVE_HP;
+        ch17_unit(i)->pos_x = (unsigned char) (i % CH15D_STAGE_ROW_WIDTH);
+        ch17_unit(i)->pos_y = (unsigned char)
+            (CH15D_STAGE_FIRST_ROW + i / CH15D_STAGE_ROW_WIDTH);
+    }
+
+    ch17_spawn_table[CH17_SPAWN_TABLE_COUNT_OFFSET] =
+        (unsigned char) CH15D_SPAWN_RECORD_COUNT;
+    ch17_set_spawn(CH15D_WAVE_RECORD, CH15D_ARRIVAL_CHAR_ID, CH15D_WAVE);
+    ch17_set_spawn(CH15D_WAVE_BELOW_RECORD, CH15D_ARRIVAL_CHAR_ID,
+                   CH15D_WAVE_BELOW);
+    ch17_set_spawn(CH15D_WAVE_ABOVE_RECORD, CH15D_ARRIVAL_CHAR_ID,
+                   CH15D_WAVE_ABOVE);
+    ch17_spawn_at(CH15D_WAVE_RECORD)->level = (unsigned char) CH15D_ARRIVAL_LEVEL;
+    ch17_spawn_at(CH15D_WAVE_BELOW_RECORD)->level =
+        (unsigned char) CH15D_WAVE_BELOW_LEVEL;
+    ch17_spawn_at(CH15D_WAVE_ABOVE_RECORD)->level =
+        (unsigned char) CH15D_WAVE_ABOVE_LEVEL;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_timer_tick_counter = 0;
+
+    data_fdps_map_cell_event_triggered_flags[CH15D_LATCH_SLOT] = 0;
+    data_fdps_chapter_event_or_battle_end_code = CH15D_END_CODE_SENTINEL;
+}
+
+/* One firing of the whole scene: the adapter in the mode the panel presents
+   through, the smith section's key feeder installed so the prompt has a player,
+   and text mode back before anything is asserted so a failure prints on a
+   readable screen. */
+static void ch15d_run(int unit_index)
+{
+    smith_last_head = 0;
+    smith_keys_read = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+
+    data_fdps_village_mode_flag = 1;
+
+    smith_set_mode(SMITH_MODE_320X200X256);
+    smith_saved_timer = _dos_getvect(SMITH_TIMER_VECTOR);
+    _dos_setvect(SMITH_TIMER_VECTOR, smith_timer_isr);
+    fdps_chapter_15_event_boss_defeat(unit_index);
+    _dos_setvect(SMITH_TIMER_VECTOR, smith_saved_timer);
+    smith_set_mode(SMITH_MODE_TEXT);
+
+    if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+        free(data_fdps_portrait_sprite_buf_ptr);
+        data_fdps_portrait_sprite_buf_ptr = NULL;
+    }
+    data_fdps_village_mode_flag = 0;
+}
+
+static int ch15d_body_can_run(void)
+{
+    ch17_ensure_game_files();
+    return ch17_files_ready && smith_sheet_present();
+}
+
+/* The three record fields these cases read back and the stride they are indexed
+   by.  The flags byte is where MOV byte ptr [EAX+0x5],0x1 at 00037c69 stores
+   and where fdps_unit_is_retired reads the second gate from, the side byte is
+   what fdps_battle_destroy_remaining_enemies selects on, and the hit-point word
+   is what it writes -- every one of them would agree with itself while
+   addressing another byte if the layout were wrong. */
+static void ch15d_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), CH17_UNIT_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 5);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 6);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_current), 0x40);
+}
+
+/* Past turn 25 the chapter is simply cleared: the battle-end global takes the
+   cleared code over the sentinel, no wave is deployed, the latch stays down and
+   not one flags byte moves.  Three late turns are put through -- the first one
+   outside the window and two well past it -- because the gate is a compare
+   against a literal and a rebuild that had it as an equality would pass on 26
+   alone. */
+static void ch15d_late_turn_ends_the_chapter(void)
+{
+    static int late_turns[3] = {CH15D_FIRST_LATE_TURN, 0x1b, 100};
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        ch15d_stage(late_turns[i]);
+
+        fdps_chapter_15_event_boss_defeat(0);
+
+        CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+                 CH15D_END_CODE_CLEARED);
+        CHECK_EQ(data_fdps_map_unit_count, CH15D_STAGED_UNITS);
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15D_LATCH_SLOT], 0);
+        CHECK_EQ((int) ch17_unit(0)->flags, CH15D_STAGED_FLAGS);
+        CHECK_EQ((int) ch17_unit(CH15D_ROSTER_UNITS - 1)->flags,
+                 CH15D_STAGED_FLAGS);
+        CHECK_EQ((int) ch17_unit(CH15D_ARCHER_UNIT_INDEX)->flags,
+                 CH15D_STAGED_FLAGS);
+    }
+}
+
+/* 裘娜 already retired clears the chapter too, on a turn the first gate lets
+   through.  The gate reads bit 0 of unit 4's flags byte and nothing else, so
+   the retired bit is put up on its own and then under the has-acted bit as
+   well, and both refuse; the has-acted bit on its own is what every other case
+   here runs with and it does not refuse. */
+static void ch15d_retired_heroine_ends_the_chapter(void)
+{
+    static int retired_flags[2] = {CH15D_RETIRED_FLAGS, 0x81};
+    int i;
+
+    for (i = 0; i < 2; i++) {
+        ch15d_stage(CH15D_LAST_TURN);
+        ch17_unit(CH15D_HEROINE_UNIT_INDEX)->flags =
+            (unsigned char) retired_flags[i];
+
+        fdps_chapter_15_event_boss_defeat(0);
+
+        CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+                 CH15D_END_CODE_CLEARED);
+        CHECK_EQ(data_fdps_map_unit_count, CH15D_STAGED_UNITS);
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15D_LATCH_SLOT], 0);
+        CHECK_EQ((int) ch17_unit(0)->flags, CH15D_STAGED_FLAGS);
+    }
+}
+
+/* The destroy runs ahead of both gates and unconditionally, which is the claim
+   the rebuild note is about: fdps_chapter_15_end has no destroy of its own, so
+   a refused gate that skipped this one would hand it a map full of live
+   enemies.  It is asserted on both refusals -- the late turn and the retired
+   heroine -- by planting one enemy-side unit and one player-side unit with the
+   same hit points and watching only the enemy's reach zero.  The enemy carries
+   the retired bit as well, which fdps_battle_destroy_remaining_enemies ignores
+   and fdps_play_death_animation_and_mark_dead needs clear, so the zeroing
+   happens without any of the animation the destroy would otherwise play. */
+static void ch15d_destroys_enemies_before_both_gates(void)
+{
+    static int refusing_turns[2] = {CH15D_FIRST_LATE_TURN, CH15D_LAST_TURN};
+    int i;
+
+    for (i = 0; i < 2; i++) {
+        ch15d_stage(refusing_turns[i]);
+        if (i == 1) {
+            ch17_unit(CH15D_HEROINE_UNIT_INDEX)->flags =
+                (unsigned char) CH15D_RETIRED_FLAGS;
+        }
+        ch17_unit(CH15D_ROSTER_UNITS)->side = (unsigned char) CH15D_SIDE_ENEMY;
+        ch17_unit(CH15D_ROSTER_UNITS)->flags =
+            (unsigned char) CH15D_RETIRED_FLAGS;
+
+        fdps_chapter_15_event_boss_defeat(0);
+
+        CHECK_EQ((int) ch17_unit(CH15D_ROSTER_UNITS)->hp_current, 0);
+        CHECK_EQ((int) ch17_unit(CH15D_ROSTER_UNITS + 1)->hp_current,
+                 CH15D_LIVE_HP);
+        CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+                 CH15D_END_CODE_CLEARED);
+    }
+}
+
+/* The incoming argument cannot reach anything: it is overwritten with the
+   prompt answer at 00037c05 and with the loop counter at 00037c3a and never
+   read before either.  The refused path is what sweeps it, because it is the
+   one that costs nothing -- the index that names 裘娜 herself, the index that
+   names the archer the accepted branch retires, one past the staged array, and
+   -1 and 30000 all reach the same clearing. */
+static void ch15d_ignores_the_unit_index_argument(void)
+{
+    static int arguments[5] = {CH15D_HEROINE_UNIT_INDEX,
+                               CH15D_ARCHER_UNIT_INDEX, CH15D_STAGED_UNITS,
+                               -1, 30000};
+    int i;
+
+    for (i = 0; i < 5; i++) {
+        ch15d_stage(CH15D_FIRST_LATE_TURN);
+
+        fdps_chapter_15_event_boss_defeat(arguments[i]);
+
+        CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+                 CH15D_END_CODE_CLEARED);
+        CHECK_EQ(data_fdps_map_unit_count, CH15D_STAGED_UNITS);
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15D_LATCH_SLOT], 0);
+    }
+}
+
+/* The duel accepted, run on turn 25 exactly, which is the turn the whole gate
+   turns on.  Everything this path settles is asserted out of the one firing:
+   the gate lets 25 through and the wave-2 record arrives on MAP00.COD record
+   2's tile carrying its own level, so neither decoy wave was asked for; the
+   eight roster units either side of 裘娜 and the archer at 0x34 come out
+   holding exactly 1, so the store is the whole-byte MOV and not an OR that
+   would have left 0x81; 裘娜 and everything the map deployed behind the roster
+   keep the byte they were staged with; the latch is up; and the battle-end
+   global still holds the sentinel, which is the one thing that keeps the battle
+   running for the duel.  The argument passed is the boss's own unit index
+   rather than 0, so the body is shown not to read it either.  One key is
+   consumed, which is what says one prompt ran. */
+static void ch15d_accepted_duel_leaves_the_battle_running(void)
+{
+    int i;
+
+    if (!ch15d_body_can_run()) {
+        return;
+    }
+
+    ch15d_stage(CH15D_LAST_TURN);
+    smith_stage_keys(1, SMITH_KEY_ENTER, 0, 0);
+
+    ch15d_run(0x1b);
+
+    CHECK_EQ(smith_keys_read, 1);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH15D_END_CODE_SENTINEL);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15D_LATCH_SLOT], 1);
+
+    for (i = 0; i < CH15D_ROSTER_UNITS; i++) {
+        if (i == CH15D_HEROINE_UNIT_INDEX) {
+            CHECK_EQ((int) ch17_unit(i)->flags, CH15D_STAGED_FLAGS);
+        } else {
+            CHECK_EQ((int) ch17_unit(i)->flags, CH15D_RETIRED_FLAGS);
+        }
+    }
+    CHECK_EQ((int) ch17_unit(CH15D_ARCHER_UNIT_INDEX)->flags,
+             CH15D_RETIRED_FLAGS);
+    CHECK_EQ((int) ch17_unit(CH15D_ROSTER_UNITS)->flags, CH15D_STAGED_FLAGS);
+    CHECK_EQ((int) ch17_unit(CH15D_ARCHER_UNIT_INDEX - 1)->flags,
+             CH15D_STAGED_FLAGS);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH15D_ARRIVAL_UNIT_INDEX + 1);
+    CHECK_EQ((int) ch17_unit(CH15D_ARRIVAL_UNIT_INDEX)->pos_x,
+             CH15D_MAP00_RECORD2_X);
+    CHECK_EQ((int) ch17_unit(CH15D_ARRIVAL_UNIT_INDEX)->pos_y,
+             CH15D_MAP00_RECORD2_Y);
+    CHECK_EQ((int) ch17_unit(CH15D_ARRIVAL_UNIT_INDEX)->level,
+             CH15D_ARRIVAL_LEVEL);
+}
+
+/* The duel declined -- the right cell, reached with one arrow and committed
+   with Enter, so fdps_prompt_two_choice answers 1.  The chapter is cleared, no
+   flags byte moves and the latch stays down, but the challenger has already
+   arrived: the deployment happens before the offer is put and nothing takes it
+   back.  Two keys are consumed, which is what says the arrow reached the prompt
+   rather than the window underneath it. */
+static void ch15d_declined_duel_ends_the_chapter(void)
+{
+    if (!ch15d_body_can_run()) {
+        return;
+    }
+
+    ch15d_stage(CH15D_LAST_TURN);
+    smith_stage_keys(2, SMITH_KEY_RIGHT, SMITH_KEY_ENTER, 0);
+
+    ch15d_run(0);
+
+    CHECK_EQ(smith_keys_read, 2);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH15D_END_CODE_CLEARED);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15D_LATCH_SLOT], 0);
+    CHECK_EQ((int) ch17_unit(0)->flags, CH15D_STAGED_FLAGS);
+    CHECK_EQ((int) ch17_unit(CH15D_HEROINE_UNIT_INDEX)->flags,
+             CH15D_STAGED_FLAGS);
+    CHECK_EQ((int) ch17_unit(CH15D_ARCHER_UNIT_INDEX)->flags,
+             CH15D_STAGED_FLAGS);
+    CHECK_EQ(data_fdps_map_unit_count, CH15D_ARRIVAL_UNIT_INDEX + 1);
+    CHECK_EQ((int) ch17_unit(CH15D_ARRIVAL_UNIT_INDEX)->pos_x,
+             CH15D_MAP00_RECORD2_X);
+    CHECK_EQ((int) ch17_unit(CH15D_ARRIVAL_UNIT_INDEX)->pos_y,
+             CH15D_MAP00_RECORD2_Y);
+}
+
+/* A cancel is not the accepting answer.  Esc makes fdps_prompt_two_choice
+   answer -1 and the test at 00037c0d is an equality against 0, so -1 falls into
+   the declining arm exactly as 1 does -- the one place a rebuild that tested
+   for truth, or that treated the negative as its own case, would come apart. */
+static void ch15d_cancel_declines_like_the_right_option(void)
+{
+    if (!ch15d_body_can_run()) {
+        return;
+    }
+
+    ch15d_stage(CH15D_LAST_TURN);
+    smith_stage_keys(1, SMITH_KEY_ESC, 0, 0);
+
+    ch15d_run(0);
+
+    CHECK_EQ(smith_keys_read, 1);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH15D_END_CODE_CLEARED);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15D_LATCH_SLOT], 0);
+    CHECK_EQ((int) ch17_unit(0)->flags, CH15D_STAGED_FLAGS);
+    CHECK_EQ((int) ch17_unit(CH15D_ARCHER_UNIT_INDEX)->flags,
+             CH15D_STAGED_FLAGS);
+    CHECK_EQ(data_fdps_map_unit_count, CH15D_ARRIVAL_UNIT_INDEX + 1);
+}
+
 void run_chevt3_tests(void)
 {
     RUN_TEST(ch15_record_shape_matches_the_offsets);
@@ -2784,4 +3265,12 @@ void run_chevt3_tests(void)
     RUN_TEST(ch19w6_places_on_the_nearest_free_tile);
     RUN_TEST(ch19w6_pan_ends_on_the_right_flank_after_three_holds);
     RUN_TEST(ch19w6_fires_once_only);
+    RUN_TEST(ch15d_record_shape_matches_the_offsets);
+    RUN_TEST(ch15d_late_turn_ends_the_chapter);
+    RUN_TEST(ch15d_retired_heroine_ends_the_chapter);
+    RUN_TEST(ch15d_destroys_enemies_before_both_gates);
+    RUN_TEST(ch15d_ignores_the_unit_index_argument);
+    RUN_TEST(ch15d_accepted_duel_leaves_the_battle_running);
+    RUN_TEST(ch15d_declined_duel_ends_the_chapter);
+    RUN_TEST(ch15d_cancel_declines_like_the_right_option);
 }

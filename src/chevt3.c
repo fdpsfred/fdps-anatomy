@@ -10,6 +10,7 @@
  */
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "btlend.h"
 #include "unit.h"
 #include "unititem.h"
 #include "deploy.h"
@@ -108,9 +109,12 @@ void fdps_chapter_15_event_activate_enemy_group(int unit_index)
 }
 
 /* The mode 13h pen the message panel's own text sits at and the screen's row
-   stride: PUSH 0xaa44a and PUSH 0x140 in front of every one of the ten draws
-   the smith event below makes (00037d1d / 00037d18 and the nine that repeat
-   them).  0xaa44a is screen (138, 131), the origin fdps_draw_text puts the pen
+   stride: PUSH 0xaa44a and PUSH 0x140 in front of the panel-interior draws the
+   two events below make (00037beb / 00037be6 in the boss-defeat event, and
+   00037d1d / 00037d18 with the nine that repeat them in the smith event).  The
+   pitch is the screen's, so it stands in front of the full-screen draws of both
+   events as well.  0xaa44a is screen (138, 131), the origin fdps_draw_text puts
+   the pen
    back to on a page break, and it stays a literal because it is an address
    inside the display adapter's aperture rather than the address of anything the
    linker places (rebuild_info/pitfalls.md, contract E). */
@@ -118,12 +122,216 @@ void fdps_chapter_15_event_activate_enemy_group(int unit_index)
 #define VGA_SCREEN_PITCH 0x140
 
 /* The standard message colours, PUSH 0xd0 / PUSH 0x0 / PUSH 0x6d in front of
-   each of those draws (00037d13, 00037d11 and 00037d0f and their repeats):
+   every one of those draws (00037bb4, 00037bb2 and 00037bb0 and their three
+   repeats, then 00037d13, 00037d11 and 00037d0f and their nine):
    glyph fill, no cell background, and the shadow the outline colour becomes
    while the font's outline flag is clear. */
 #define MESSAGE_FG_COLOR 0xd0
 #define MESSAGE_BG_COLOR 0
 #define MESSAGE_OUTLINE_COLOR 0x6d
+
+/* The mode 13h page the three full-screen lines are written straight onto,
+   PUSH 0xa0000 at 00037bbe, 00037c25 and 00037c9a in the boss-defeat event
+   below.  It is the display adapter's aperture and not the address of anything
+   the linker places, so it stays a literal (rebuild_info/pitfalls.md,
+   contract E). */
+#define CH15_DUEL_SCREEN_TEXT_DEST 0x000a0000
+
+/* The last battle turn the duel is still offered on: CMP dword ptr
+   [0x00069ce8],0x19 / JG at 00037b81, a signed inclusive compare, so a cannon
+   that falls on turn 25 still brings the challenger out and turn 26 does not.
+   THE TEST IS <= 25 AND NOT < 25 -- the stricter comparison silently takes the
+   妖刀村雨 away from a 25-turn clear. */
+#define CH15_DUEL_LAST_TURN 0x19
+
+/* 裘娜, the unit the challenger asks for and the only one of the party left on
+   the map if the offer is taken: PUSH 0x4 at 00037b8a.  Chapter 15 lays 9
+   roster records down at unit indices 0..8 and she is the fifth of them. */
+#define CH15_DUEL_HEROINE_UNIT_INDEX 4
+
+/* The wave the challenger arrives in and how his tile is chosen: PUSH 0x2 at
+   00037ba0 and XOR EAX,EAX / PUSH EAX at 00037b9d..00037b9f.  Zero is the
+   value that does NOT take the placement record's tile as given -- it sends
+   fdps_deploy_unit off to find the nearest unoccupied walkable tile to those
+   coordinates and put him there instead. */
+#define CH15_DUEL_WAVE 2
+#define CH15_DUEL_PLACE_NEAREST_FREE_TILE 0
+
+/* The speaker the offer is put under, PUSH 0x3 at 00037bd3: FACE.CEL record
+   3. */
+#define CH15_DUEL_SPEAKER_FACE_INDEX 3
+
+/* The four lines of the scene, each a PUSH of its id into a draw: the
+   challenge at 00037bc3, the question inside the standing panel at 00037bf0,
+   the acceptance at 00037c2a and the refusal at 00037c9f.  They are entries of
+   the chapter's own FDETXT15.TXT block, which
+   fdps_load_field_chapter_resources leaves in
+   data_fdps_current_chapter_text_ptr. */
+#define CH15_DUEL_CHALLENGE_TEXT_ID 0x12
+#define CH15_DUEL_QUESTION_TEXT_ID 0x13
+#define CH15_DUEL_ACCEPTED_TEXT_ID 0x14
+#define CH15_DUEL_DECLINED_TEXT_ID 0x15
+
+/* The answer that accepts, CMP dword ptr [EBP+0x14],0x0 / JNZ at 00037c0d:
+   fdps_prompt_two_choice's 0 is the left cell.  Its 1 and its -1 both fall
+   into the other arm, so a cancel declines rather than accepting
+   (msgwin.h). */
+#define CH15_DUEL_ANSWER_ACCEPT 0
+
+/* How many records the retire loop walks, CMP dword ptr [EBP+0x14],0x9 / JL at
+   00037c41: unit indices 0..8, the roster block map14.dat's header byte +1
+   sizes at 9. */
+#define CH15_DUEL_ROSTER_UNIT_COUNT 9
+
+/* The one unit outside that block taken off the map as well, PUSH 0x34 at
+   00037c6f: map14.dat's wave-1 record, the level 20 archer 瑪麗安 that
+   Icon14.dat deploys during the opening cutscene, sitting behind the 9 roster
+   units and the 43 wave-0 records. */
+#define CH15_DUEL_ARCHER_UNIT_INDEX 0x34
+
+/* What each of those records' flags byte is left holding, MOV byte ptr
+   [EAX+0x5],0x1 at 00037c69 and 00037c7f.  IT IS A WHOLE-BYTE STORE AND NOT AN
+   OR: it raises the retired bit 0x01 that fdps_unit_is_retired reads and drops
+   the has-acted bit 0x80 along with everything else the byte was holding. */
+#define CH15_DUEL_RETIRED_FLAG_BYTE 1
+
+/* The element of data_fdps_map_cell_event_triggered_flags (gamedata.h) an
+   accepted duel raises, MOV byte ptr [0x000640e8],0x1 at 00037c83 -- element
+   0x10 of the 32-entry array based at 0x000640d8, the slot this family's
+   one-shot handlers share.  fdps_chapter_15_post_action and
+   fdps_chapter_15_end both branch on it. */
+#define CH15_DUEL_LATCH_SLOT 0x10
+
+/* What the battle-end global is left holding on the two exits that end the
+   chapter, MOV dword ptr [0x00069da0],0x2 at 00037caf and 00037cbb: the code
+   that means the chapter is cleared. */
+#define CH15_BATTLE_END_CHAPTER_CLEARED 2
+
+/* 00037b70.  Chapter 15's boss-death event: the fortress cannon has fallen, so
+   the chapter is over -- except that when it fell on turn 25 or earlier with
+   裘娜 still standing, a challenger walks onto the cleared map first and offers
+   her a duel.
+
+   fdps_battle_destroy_remaining_enemies (btlend.h) runs first, unconditionally
+   and ahead of both gates, zeroing the hit points of every unit still on the
+   enemy side and playing them off the map.  That is why fdps_chapter_15_end,
+   alone in its family, has no destroy call of its own.
+
+   THE TWO GATES ARE ONE SHORT-CIRCUIT CHAIN, each failure reaching the same
+   store: CMP dword ptr [0x00069ce8],0x19 / JG at 00037b81 and the TEST EAX,EAX
+   / JZ at 00037b94 on what fdps_unit_is_retired(4) answered, both jumping to
+   00037cbb.  The turn compare is signed and inclusive, so turn 25 itself still
+   qualifies.
+
+   Both gates passing, fdps_deploy_wave brings on the current map's wave 2.  In
+   map14.dat that is deployment record 44 alone, the level 17 unit of enemy id
+   0x23 the guide lists as the chapter's unnamed opponent, and it is appended
+   as unit 0x35: 9 roster units, then the 43 wave-0 records the chapter start
+   brings on, then the wave-1 unit Icon14.dat deploys during the opening
+   cutscene.
+
+   The offer is then put to the player: the challenge is written straight onto
+   the visible page, the message panel is revealed under FACE.CEL record 3, the
+   question is written into the panel's interior at 0xaa44a -- VGA offset
+   0xa44a, row 131 column 138 -- fdps_prompt_two_choice runs the modal prompt,
+   and the panel is retracted before the answer is looked at.
+
+   THE ACCEPTED BRANCH MUST LEAVE data_fdps_chapter_event_or_battle_end_code
+   ALONE.  Two of the three exits store the cleared code into it and the
+   control flow invites folding that into one store at the end; do that and
+   chapter 15's duel ends the chapter the instant the player says yes.  What
+   the accepted branch writes instead is the retirement of everyone who is not
+   one of the two duellists -- indices 0..8 except 裘娜's, then unit 0x34 --
+   and the chapter-event flag byte, which is what
+   fdps_chapter_15_post_action reads to settle the duel and award the
+   妖刀村雨.
+
+   Any other answer, the -1 fdps_prompt_two_choice returns on a cancel
+   included, declines: the refusal line is written and the chapter is closed
+   without the duel.
+
+   Every one of the four draws hands back a cursor and nothing between the CALL
+   and the next instruction reads EAX, so all four results are discarded;
+   fdps_prompt_two_choice's is the only return value used, stored at 00037c05.
+   Nothing sets EAX before the RET at 00037ccb and no dispatcher reads what
+   comes back, so the result is void.
+
+   unit_index is the handler table's shared parameter: the unit the death-script
+   runner was acting on when the cannon died.  IT IS NEVER READ.  The slot is
+   overwritten at 00037c05 with the prompt answer and again at 00037c3a as the
+   retire loop's counter, so which unit the event fired for cannot reach
+   anything this handler does.
+
+   Table slot 21, and chapter 15's map14.dat is the only shipped file that
+   names it -- as the death script of deployment record 27, the level 16 unit
+   of enemy id 0x80 that is the chapter's victory condition.  That file carries
+   no turn events and no tile triggers at all, so the death script is the only
+   route to this slot. */
+void fdps_chapter_15_event_boss_defeat(int unit_index)
+{
+    /* The record the two stores below are made through, [EBP-0x4]. */
+    struct fdps_unit_record *unit;
+    /* Which cell of the offer the player committed to: 0 accepts, 1 declines
+       and -1 is a cancel.  The original keeps it in the argument slot at
+       [EBP+0x14]; it is a local here, because what that slot holds from
+       00037c05 onwards is an answer and not a unit index. */
+    int duel_answer;
+
+    fdps_battle_destroy_remaining_enemies();
+
+    if (data_fdps_battle_turn_counter <= CH15_DUEL_LAST_TURN &&
+        fdps_unit_is_retired(CH15_DUEL_HEROINE_UNIT_INDEX) == 0) {
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                         CH15_DUEL_WAVE, CH15_DUEL_PLACE_NEAREST_FREE_TILE);
+
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH15_DUEL_CHALLENGE_TEXT_ID,
+                       (unsigned char *) CH15_DUEL_SCREEN_TEXT_DEST,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_message_window_open(CH15_DUEL_SPEAKER_FACE_INDEX);
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH15_DUEL_QUESTION_TEXT_ID,
+                       (unsigned char *) PANEL_TEXT_ORIGIN,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        duel_answer = fdps_prompt_two_choice();
+        fdps_message_window_close();
+
+        if (duel_answer == CH15_DUEL_ANSWER_ACCEPT) {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CH15_DUEL_ACCEPTED_TEXT_ID,
+                           (unsigned char *) CH15_DUEL_SCREEN_TEXT_DEST,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+
+            /* The argument slot is the counter, as the assembly has it. */
+            for (unit_index = 0;
+                 unit_index < CH15_DUEL_ROSTER_UNIT_COUNT;
+                 unit_index++) {
+                if (unit_index != CH15_DUEL_HEROINE_UNIT_INDEX) {
+                    unit = fdps_get_unit_record(unit_index);
+                    unit->flags = CH15_DUEL_RETIRED_FLAG_BYTE;
+                }
+            }
+            unit = fdps_get_unit_record(CH15_DUEL_ARCHER_UNIT_INDEX);
+            unit->flags = CH15_DUEL_RETIRED_FLAG_BYTE;
+
+            data_fdps_map_cell_event_triggered_flags[CH15_DUEL_LATCH_SLOT] = 1;
+        } else {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CH15_DUEL_DECLINED_TEXT_ID,
+                           (unsigned char *) CH15_DUEL_SCREEN_TEXT_DEST,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+            data_fdps_chapter_event_or_battle_end_code =
+                CH15_BATTLE_END_CHAPTER_CLEARED;
+        }
+    } else {
+        data_fdps_chapter_event_or_battle_end_code =
+            CH15_BATTLE_END_CHAPTER_CLEARED;
+    }
+}
 
 /* The speaker under whose portrait the whole scene is played: FACE.CEL record
    129, PUSH 0x81 in front of every one of the ten window opens. */

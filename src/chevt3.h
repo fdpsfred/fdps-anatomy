@@ -56,6 +56,58 @@
 extern void fdps_chapter_15_event_activate_enemy_group(int unit_index);
 #pragma aux fdps_chapter_15_event_activate_enemy_group "*" parm caller [];
 
+/* Chapter 15's boss-death event: the fortress cannon that is the chapter's
+   victory condition has fallen, so the chapter is over -- except that when it
+   fell on battle turn 25 or earlier with 裘娜 still on the map, a challenger is
+   brought on first and offers her a duel.
+
+   Every enemy still standing is destroyed first, unconditionally and before
+   either gate is looked at, through fdps_battle_destroy_remaining_enemies
+   (btlend.h).  That is why fdps_chapter_15_end, alone in its family, has no
+   destroy call of its own, and why an over-25-turn clear must not be allowed to
+   skip it.
+
+   The two gates are the battle turn counter at 25 or below, a signed inclusive
+   compare, and fdps_unit_is_retired(4) answering 0 -- unit 4 being 裘娜, the
+   fifth of the nine roster records chapter 15 lays down at indices 0..8.
+   Either one failing ends the chapter with the cleared code in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h) and nothing else
+   done.
+
+   Both passing, the map's wave 2 is deployed -- map14.dat carries one record
+   there, the level 17 opponent, appended as unit 0x35 -- and the offer is put
+   to the player over the message panel under FACE.CEL record 3.
+
+   ACCEPTING LEAVES THE BATTLE RUNNING.  The battle-end global is deliberately
+   not written on that arm: instead every unit at indices 0..8 except 裘娜's,
+   and unit 0x34 -- the archer 瑪麗安 the opening cutscene deployed -- has its
+   flags byte STORED to 1, which retires it and clears the has-acted bit with
+   it, and element 0x10 of data_fdps_map_cell_event_triggered_flags is raised.
+   The duel then plays out between unit 4 and unit 0x35, and
+   fdps_chapter_15_post_action, which branches on that same flag, settles it and
+   awards the 妖刀村雨.
+
+   Declining, and a cancel answers the same way, writes the refusal line and
+   ends the chapter with the cleared code.
+
+   There is no one-shot latch on the way in: the flag the accepted branch raises
+   is written and never read here, so a second firing would run the whole scene
+   again.  Nothing in the shipped data can produce one -- the only route in is
+   one unit's death script.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with the prompt answer and then with the retire
+   loop's counter, and it is never read before either store, so any index, in
+   range or not, behaves the same.
+
+   Table slot 21, and chapter 15's map14.dat is the only shipped file that names
+   it -- as the death script of deployment record 27, the level 16 unit of enemy
+   id 0x80 that is the chapter's victory condition.  That file carries no turn
+   events and no tile triggers at all, so that death is the only route to this
+   slot. */
+extern void fdps_chapter_15_event_boss_defeat(int unit_index);
+#pragma aux fdps_chapter_15_event_boss_defeat "*" parm caller [];
+
 /* Chapter 16's wandering-smith event: Randis has ended his turn on the smith's
    tile, and the smith offers to reforge one of two named swords if he is still
    carrying it.  修佩魯 comes back as 灼烈之劍; 雷德 breaks in the forge and is
