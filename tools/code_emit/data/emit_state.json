@@ -3230,6 +3230,14 @@
       "status": "committed",
       "emitted_against": "0x9d",
       "rounds": 0
+    },
+    "00039230": {
+      "name": "fdps_chapter_26_event_deploy_waves_2_and_3",
+      "target": "chevt5.c",
+      "body_size": "0x17a",
+      "status": "committed",
+      "emitted_against": "0x17a",
+      "rounds": 0
     }
   }
 }

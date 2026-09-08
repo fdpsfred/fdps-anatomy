@@ -216,4 +216,45 @@ extern void fdps_chapter_25_event_marian_buys_wind_god_bow(int unit_index);
 extern void fdps_chapter_26_event_enemies_advance(int unit_index);
 #pragma aux fdps_chapter_26_event_enemies_advance "*" parm caller [];
 
+/* Chapter 26's mid-map ambush: the first time a unit on the player's side
+   walks onto the map's trigger tile, the enemy wave and the allied relief wave
+   both come onto the battlefield and the lower half of the deployment block
+   stops holding position.
+
+   TWO GATES, BOTH REFUSING THE WHOLE BODY: the shared one-shot latch must
+   still be clear, and the triggering unit's side byte must be 2, the player's
+   own roster.  An enemy or a guest crossing the tile changes nothing and
+   leaves the ambush armed for the unit that comes next.  The latch is the same
+   element fdps_chapter_25_event_deploy_wave_1 uses; the two events live on
+   different maps and the block is cleared between chapters, so they cannot
+   collide.
+
+   THE ORDER IS ENEMY WAVE, LINE, PAN AND HOLD, LINE, ALLIED WAVE, LINE.  The
+   enemy wave is already standing when its line is spoken; the allied wave is
+   announced before it arrives.  The pan hides the cursor, walks the view to
+   the bottom of the map, holds it there for twelve composed frames and then
+   puts the cursor back -- as a literal 1, not as whatever it found.
+
+   THE RELEASE RANGE IS TWO LITERALS, 0x0c..0x4f INCLUSIVE, and not the unit
+   count: the twelve party slots below it and every unit from 0x50 upward keep
+   the behaviour mode they already carry.  On MAP25.DAT the two literals cover
+   the map's wave-0 block exactly -- 68 of its 80 deployment records are tagged
+   wave 0, seven wave 2 and five wave 3 -- so what is released is the garrison
+   alone, and neither the enemy wave nor the allied wave this handler has just
+   brought on starts moving with it.
+
+   ONLY THE BEHAVIOUR NIBBLE IS WRITTEN.  Each released record's AI byte is
+   merged, not stored: the low nibble goes to 0 and the high nibble is carried
+   across because two of its bits are per-unit flags the target scorers read on
+   their own.
+
+   unit_index is the handler table's shared parameter: the index of the unit
+   that tripped the tile event, not range checked.  It is read once, resolved
+   through fdps_get_unit_record (unit.h) for the side byte, and nothing else in
+   the body looks at it.
+
+   Table slot 41 at 00060268. */
+extern void fdps_chapter_26_event_deploy_waves_2_and_3(int unit_index);
+#pragma aux fdps_chapter_26_event_deploy_waves_2_and_3 "*" parm caller [];
+
 #endif
