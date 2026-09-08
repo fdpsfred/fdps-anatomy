@@ -22,6 +22,7 @@
 #include "palette.h"
 #include "unit.h"
 #include "deploy.h"
+#include "mapdraw.h"
 #include "chevt6.h"
 
 /* The half of the AI byte the merge below keeps: AND DL,0xf0 at 0003964b.  The
@@ -57,6 +58,113 @@
    spell the same constant out; it stays file-local at every end because no
    header owns it. */
 #define PLAYER_SIDE 2
+
+/* What the battle turn counter is divided by to name the wave, and it is a
+   plain signed halving: MOV EAX,[0x00069ce8] / MOV EDX,[0x00069ce8] /
+   SAR EDX,0x1f / SUB EAX,EDX / SAR EAX,0x1 at 0003955f..00039571, the -od
+   expansion of a signed divide by two, which truncates toward zero.  The bias
+   by the sign is the whole difference from an unsigned shift and it is
+   behaviour: it is what makes turn 7 come out at wave 3 rather than at wave 4,
+   and map27.dat schedules turn 7.  Rounding it, or writing it as a shift of an
+   unsigned counter, changes which wave arrives (rebuild_info/pitfalls.md,
+   contract C). */
+#define CH28_WAVE_TURN_DIVISOR 2
+
+/* How the wave is placed: XOR EAX,EAX / PUSH EAX at 0003955c, so
+   fdps_deploy_wave passes 0 on to fdps_deploy_unit and each unit goes to the
+   nearest unoccupied walkable tile around the coordinates map%02d.cod names for
+   it, rather than onto them exactly.  All three of chapter 28's spawn tiles are
+   on the top edge and the wave is three units wide, so a placement flag of 1
+   here would stack the wave's units on top of one another whenever the tile the
+   script picked is already taken. */
+#define CH28_PLACE_ON_NEAREST_FREE_TILE 0
+
+/* What data_fdps_map_cursor_draw_mode is parked at while the view is panned and
+   what it is left on afterwards, MOV dword ptr [0x00069cd0],0x0 at 00039580 and
+   MOV dword ptr [0x00069cd0],0x1 at 000395b7.  Zero is the mode
+   fdps_draw_map_cursor paints nothing in, so the cursor is off the screen for
+   the whole pan; 1 is the ordinary battle cursor.  The 1 is a literal store and
+   not the mode the call found, so the entry value is lost either way. */
+#define CH28_MAP_CURSOR_BLANK 0
+#define CH28_MAP_CURSOR_NORMAL 1
+
+/* Where the view is panned to, PUSH 0x0 / PUSH 0x120 at 0003958a, and they are
+   map pixels rather than tiles: fdps_map_cursor_move_to walks at 0x18 pixels per
+   tile, so 0x120 is tile column 12 and 0 is row 0.  That is the rightmost of the
+   three top-edge tiles -- (10, 0), (11, 0) and (12, 0) -- that map27.cod gives
+   every one of chapter 28's wave records. */
+#define CH28_PAN_SPAWN_X 0x120
+#define CH28_PAN_SPAWN_Y 0
+
+/* How long the view is held there, CMP dword ptr [EBP+0x14],0xc / JL at
+   000395a0: twelve calls into fdps_render_view_frame, each of which spins until
+   the timer tick moves, so the count IS the dwell and not an instruction budget
+   (rebuild_info/pitfalls.md, contract D).  Shortening it shortens the pause the
+   player gets to see the reinforcements by exactly that many ticks. */
+#define CH28_PAN_HOLD_FRAMES 0xc
+
+/* 00039550.  Chapter 28's turn-scheduled reinforcement event: the wave the turn
+   just played is due arrives, and the view pans to the top edge to show it.
+
+   The frame is the standard Watcom four-push one with an empty local area --
+   PUSH EBX / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x0 at
+   00039550..00039556 -- so there is no local in this function at all.  Both
+   calls that take arguments push them and clean them themselves, ADD ESP,0xc at
+   0003957d and ADD ESP,0x8 at 00039596, which is what makes the convention the
+   stack one.
+
+   THE WAVE KEY IS THE TURN COUNTER HALVED, AND IT IS READ BEFORE THE COUNTER
+   MOVES.  fdps_battle_advance_turn dispatches the phase-0 turn events at
+   0001e5bc and only increments data_fdps_battle_turn_counter afterwards at
+   0001e5fd, so the value halved here still names the turn whose player phase has
+   just ended.  Making the counter 0-based, or moving the increment ahead of the
+   dispatch, shifts every one of chapter 28's reinforcement waves by a turn.
+
+   WHICH WAVES THAT ACTUALLY DEPLOYS.  map27.dat schedules this slot on turns 2,
+   4, 6, 7, 10, 12, 14, 16 and 18, and halving those gives waves 1, 2, 3, 3, 5,
+   6, 7, 8 and 9.  Turn 7 truncates onto wave 3 a second time, so the shipped
+   game deploys map27.dat's wave 3 twice and never deploys its wave 4 -- three
+   enemies the chapter has data for and never spawns.  That is the original's
+   behaviour and not a defect to correct here.
+
+   THE PAN IS NOT CONDITIONAL ON ANYTHING.  There is no test of the turn, of the
+   wave, or of whether the deployment appended anything, so a turn whose wave
+   number matches no record still blanks the cursor, walks the view to the top
+   edge and holds it there for twelve frames.
+
+   THE ARGUMENT SLOT IS THE HOLD COUNTER.  MOV dword ptr [EBP+0x14],0x0 at
+   00039599 writes zero over the incoming argument before the loop and the slot
+   is only ever the counter after that, so nothing about the acting unit reaches
+   the wave asked for, the map asked for or the pan.  The store has no observable
+   effect on the caller, because the slot belongs to the caller's outgoing
+   argument area and fdps_battle_run_turn_events drops it after the call.
+
+   NO VALUE IS USED AFTER A CALL.  fdps_deploy_wave, fdps_map_cursor_move_to and
+   fdps_render_view_frame all return nothing, and the instruction after each of
+   the first two CALLs is the ADD ESP that cleans its arguments.  The MOV
+   EAX,[EBP+0x14] at 000395a8 loads the counter into EAX and nothing reads it --
+   it is the -od expansion of the loop's own increment, not a use of anything the
+   CALL left behind.  Nothing sets EAX before the RET and no dispatcher reads
+   what comes back, so the result is void. */
+void fdps_chapter_28_event_deploy_wave_for_turn(int unit_index)
+{
+    fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                     data_fdps_battle_turn_counter / CH28_WAVE_TURN_DIVISOR,
+                     CH28_PLACE_ON_NEAREST_FREE_TILE);
+
+    data_fdps_map_cursor_draw_mode = CH28_MAP_CURSOR_BLANK;
+
+    fdps_map_cursor_move_to(CH28_PAN_SPAWN_X, CH28_PAN_SPAWN_Y);
+
+    /* The argument slot is the counter, as the assembly has it. */
+    for (unit_index = 0;
+         unit_index < CH28_PAN_HOLD_FRAMES;
+         unit_index++) {
+        fdps_render_view_frame();
+    }
+
+    data_fdps_map_cursor_draw_mode = CH28_MAP_CURSOR_NORMAL;
+}
 
 /* 000395d0.  Chapter 29's mid-map ambush trigger: the enemy groups holding the
    right, lower-right and upper-middle of the map stop guarding their ground and

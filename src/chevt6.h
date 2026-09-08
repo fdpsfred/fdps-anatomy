@@ -18,6 +18,36 @@
 #ifndef CHEVT6_H
 #define CHEVT6_H
 
+/* Chapter 28's turn-scheduled reinforcement event: brings on the wave of the
+   current map's deployment table that the turn just played is due, then pans the
+   view up to the spawn point so the player sees the arrival.
+
+   The wave asked for is the battle turn counter halved by a plain signed
+   integer divide, so it truncates toward zero and two consecutive turns select
+   the same wave.  The counter is read while it still names the turn whose
+   player phase has just ended, because fdps_battle_run_turn_events dispatches
+   the phase-0 events before fdps_battle_advance_turn raises it.
+
+   Which turns reach this slot is map27.dat's turn-event table -- 2, 4, 6, 7, 10,
+   12, 14, 16 and 18 -- so the waves it deploys are 1, 2, 3, 3, 5, 6, 7, 8 and 9:
+   turn 7 halves down onto wave 3 again, so map27.dat's wave 3 arrives twice and
+   its wave 4 never arrives at all.  The units are placed on the nearest free
+   walkable tile to their scripted spawn point rather than on it exactly.
+
+   The arrival is then shown: the map cursor's draw mode is parked at 0 so
+   nothing of the cursor is painted, the view is walked to map pixel (0x120, 0)
+   -- tile (12, 0), the rightmost of the three spawn tiles map27.cod names -- and
+   held there for twelve frames, and the draw mode is left on 1.  That 1 is a
+   fixed value and not the mode the call found, so whatever a caller had parked
+   there is lost.
+
+   unit_index is the handler table's shared argument.  This handler writes 0 over
+   the incoming slot before anything else and reuses it as the frame counter, so
+   nothing about the acting unit reaches the wave, the map or the pan; the only
+   dispatcher that reaches this slot pushes a literal 0 anyway. */
+extern void fdps_chapter_28_event_deploy_wave_for_turn(int unit_index);
+#pragma aux fdps_chapter_28_event_deploy_wave_for_turn "*" parm caller [];
+
 /* Chapter 29's mid-map ambush trigger: it takes unit indices 0x24 through 0x59
    inclusive off the hold-position behaviour the map deploys them in and puts
    them on the default one, which paths a unit toward the nearest opposing unit,

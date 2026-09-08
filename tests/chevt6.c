@@ -50,6 +50,13 @@
  * read back which record landed on which tile.  They need ICON.CEL and FIELD.VFS
  * next to the executable and skip themselves without them.
  *
+ * The chapter 28 handler at 00039550 is the same deployment with a pan behind
+ * it, so its ch28_ cases reuse the chapter 30 fixture for the deployment half
+ * and add the half the ch30w3_ cases cannot show: a wave number computed from
+ * the battle turn counter rather than written as a literal, and a view that is
+ * walked to a fixed map pixel and held there.  They are defined after the
+ * ch30w3_ block because they are built on its staging helpers.
+ *
  * The undead top-up at 00010760 shares none of it either, and it is the only
  * function in this file with arithmetic in it.  Its ch30rev_ cases split in two.
  * The gate cases -- which character ids are accepted, whether the unit has to be
@@ -74,6 +81,7 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "unit.h"
+#include "mapdraw.h"
 #include "chevt6.h"
 
 /* The single inclusive range the one inline loop covers, read off the constants
@@ -1093,6 +1101,366 @@ static void ch30w3_has_no_one_shot_latch(void)
     CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH29_LATCH_SLOT], 1);
 }
 
+/* ---- fdps_chapter_28_event_deploy_wave_for_turn, 00039550 ----------------
+ *
+ * The handler is one deployment followed by a pan, and both halves are read off
+ * the assembly at 00039550: the SAR EDX,0x1f / SUB EAX,EDX / SAR EAX,0x1 at
+ * 0003956a..00039571 that halves the turn counter with a signed divide, the XOR
+ * EAX,EAX / PUSH EAX at 0003955c that asks for the nearest-free-tile placement,
+ * the PUSH 0x0 / PUSH 0x120 at 0003958a that names the pan target, the CMP dword
+ * ptr [EBP+0x14],0xc / JL at 000395a0 that counts the hold, and the two literal
+ * stores into the cursor draw mode at 00039580 and 000395b7.
+ *
+ * The cases run the deployment for real off the ch30w3_ fixture above -- the
+ * same blank walkable map, the same three deployment records at table indices 0,
+ * 1 and 2, the same MAP00.COD placement records -- because the wave the handler
+ * asked for is only readable off the record that arrived.  The middle record
+ * carries the wave under test and the other two carry one wave either side of
+ * it, so a key that drifted in either direction deploys a different character id
+ * onto a different tile, and a key that matches nothing deploys nothing at all.
+ *
+ * They also run the pan for real, which the ch30w3_ cases never do: the adapter
+ * goes into mode 13h and a timer interrupt is installed for the length of every
+ * call, because fdps_render_view_frame spins until the tick counter moves and
+ * would otherwise never come back.  The cursor is parked one whole tile west of
+ * the pan target, which is the shortest walk fdps_map_cursor_move_to accepts --
+ * less than one tile on the dominant axis divides by zero inside it.
+ *
+ * The unit the fixture already has on the map is given portrait id 0x80, the id
+ * fdps_draw_map_unit returns on before it reads anything else off a record, so
+ * the twelve composed frames do not depend on what a sprite cache slot holds.
+ * The units that arrive land on row 12, which is below the view, so they are
+ * skipped by the compositor's own vertical range test rather than by anything
+ * the fixture arranges.
+ */
+
+/* How long the view is held, CMP dword ptr [EBP+0x14],0xc / JL at 000395a0, and
+   the least the tick counter can move across the call.  The bound is one-sided
+   on purpose -- a slow machine spends more ticks than this, never fewer, and the
+   frame the pan itself composes is on top of it -- so it cannot fail spuriously,
+   while a rebuild that dropped the loop cannot reach it at any sane speed. */
+#define CH28_HOLD_FRAMES 0xc
+#define CH28_LEAST_HOLD_TICKS (CH28_HOLD_FRAMES - 1)
+
+/* Where the pan ends, PUSH 0x0 / PUSH 0x120 at 0003958a, and where the cursor
+   starts.  The start is one whole tile west of the target, so the walk runs and
+   arrives on the target exactly: 0x120 is a whole multiple of the 24-pixel tile
+   the walk steps by (mapcur.h). */
+#define CH28_PAN_TARGET_X 0x120
+#define CH28_PAN_TARGET_Y 0
+#define CH28_PAN_START_X (CH28_PAN_TARGET_X - 0x18)
+#define CH28_PAN_START_Y 0
+
+/* The cursor mode the fixture parks before every run: neither of the two values
+   the handler writes, so a run that left the global alone, one that hid the
+   cursor and never put it back, and one that restored what it found are all told
+   apart from the 1 the handler is required to leave behind. */
+#define CH28_STAGED_CURSOR_MODE 4
+#define CH28_CURSOR_MODE_NORMAL 1
+
+/* Portrait id 0x80 is the one fdps_draw_map_unit returns on immediately, which
+   is how the unit already on the map is kept out of the composed frames. */
+#define CH28_PORTRAIT_NO_SPRITE 0x80
+
+/* A value the frame latch cannot legitimately hold, so a run that composed
+   nothing is distinguishable from one that did. */
+#define CH28_FRAME_SENTINEL 0x5a5a5a5aU
+
+/* Where MAP00.COD's placement record 1 puts a unit, which is the record table
+   index 1 carries.  The tile is free and walkable in this fixture, so the
+   nearest-free-tile search settles on the recorded tile itself. */
+#define CH28_MAP00_RECORD1_X 22
+#define CH28_MAP00_RECORD1_Y 12
+
+/* The three staged records: the middle one carries the wave under test and the
+   other two one wave either side of it.  The character ids are the ch30w3_
+   fixture's own and only have to differ from each other. */
+#define CH28_BELOW_CHAR_ID CH30W3_WAVE2_CHAR_ID
+#define CH28_TAGGED_CHAR_ID CH30W3_WAVE3_CHAR_ID
+#define CH28_ABOVE_CHAR_ID CH30W3_WAVE4_CHAR_ID
+
+/* A wave tag no key these cases produce can select, used for the record below
+   wave 0 and for the case where nothing matches at all. */
+#define CH28_UNSELECTED_WAVE 0x30
+
+#define CH28_MODE_TEXT 0x03
+#define CH28_MODE_320X200X256 0x13
+#define CH28_TIMER_VECTOR 8
+
+/* The nine turns map27.dat schedules this slot on and the wave each of them
+   halves down to.  Turn 7 comes out at 3 for the same reason turn 6 does, which
+   is why wave 3 arrives twice in the shipped chapter and wave 4 never does. */
+#define CH28_SCHEDULED_TURNS 9
+
+static int ch28_schedule_turns[CH28_SCHEDULED_TURNS] = {
+    2, 4, 6, 7, 10, 12, 14, 16, 18
+};
+
+static int ch28_schedule_waves[CH28_SCHEDULED_TURNS] = {
+    1, 2, 3, 3, 5, 6, 7, 8, 9
+};
+
+static void (__interrupt __far *ch28_saved_timer)();
+static unsigned int ch28_ticks_before;
+static unsigned int ch28_ticks_after;
+
+static void __interrupt __far ch28_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(ch28_saved_timer);
+}
+
+static void ch28_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* The three deployment records, tagged around the wave the case expects.  Below
+   wave 0 there is no lower neighbour to lay down, and none is needed: the keys a
+   broken halving would produce at turns 0 and 1 are all above 0, so the upper
+   decoy catches them. */
+static void ch28_tag_decoys(int wave_no)
+{
+    int wave_below;
+
+    wave_below = wave_no - 1;
+    if (wave_below < 0) {
+        wave_below = CH28_UNSELECTED_WAVE;
+    }
+    ch30w3_set_spawn(CH30W3_WAVE2_RECORD, CH28_BELOW_CHAR_ID, wave_below);
+    ch30w3_set_spawn(CH30W3_WAVE3_RECORD, CH28_TAGGED_CHAR_ID, wave_no);
+    ch30w3_set_spawn(CH30W3_WAVE4_RECORD, CH28_ABOVE_CHAR_ID, wave_no + 1);
+}
+
+/* The ch30w3_ fixture on the given turn, with the decoys laid down around the
+   wave under test and the compositor's own globals put where a frame can be
+   composed against them. */
+static void ch28_stage(int battle_turn, int wave_no)
+{
+    ch30w3_stage(battle_turn);
+    ch28_tag_decoys(wave_no);
+
+    ch30w3_unit(0)->portrait_id = CH28_PORTRAIT_NO_SPRITE;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_map_unit_walk_anim_counter = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_world_x = CH28_PAN_START_X;
+    data_fdps_map_cursor_world_y = CH28_PAN_START_Y;
+    data_fdps_view_frame_last_tick = CH28_FRAME_SENTINEL;
+    data_fdps_map_cursor_draw_mode = CH28_STAGED_CURSOR_MODE;
+}
+
+/* One whole call with the adapter in the mode the game plays it in and a timer
+   interrupt running, with the tick counter sampled either side so the length of
+   the hold can be read back.  Text mode is back before anything is asserted, so
+   a failure prints on a readable screen. */
+static void ch28_run(int unit_index)
+{
+    ch28_set_mode(CH28_MODE_320X200X256);
+    ch28_saved_timer = _dos_getvect(CH28_TIMER_VECTOR);
+    _dos_setvect(CH28_TIMER_VECTOR, ch28_timer_isr);
+    ch28_ticks_before = data_fdps_timer_tick_counter;
+    fdps_chapter_28_event_deploy_wave_for_turn(unit_index);
+    ch28_ticks_after = data_fdps_timer_tick_counter;
+    _dos_setvect(CH28_TIMER_VECTOR, ch28_saved_timer);
+    ch28_set_mode(CH28_MODE_TEXT);
+}
+
+/* Put the compositor's globals back the way a freshly started program has them,
+   for the reason tests/anim.c gives: a later unit that expects an empty battle
+   would otherwise inherit this fixture. */
+static void ch28_unstage(void)
+{
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_view_frame_last_tick = 0;
+}
+
+/* Each of the nine turns map27.dat schedules brings on the wave that turn halves
+   to and no other: turn 2 wave 1, turn 4 wave 2, turns 6 and 7 wave 3, turn 10
+   wave 5, and so on up to turn 18 and wave 9.  Every turn is staged against
+   three records tagged one wave below, the wave itself and one above, so only
+   the middle one may arrive; the count moves by exactly one and the character id
+   and the tile both say which record it was.  Turn 7 is the case the halving is
+   really about -- a rebuild that rounded it up, or that read the counter after
+   the increment, would deploy the record tagged 4 instead. */
+static void ch28_each_scheduled_turn_deploys_the_wave_it_halves_to(void)
+{
+    int i;
+
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < CH28_SCHEDULED_TURNS; i++) {
+        ch28_stage(ch28_schedule_turns[i], ch28_schedule_waves[i]);
+
+        ch28_run(0);
+
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch30w3_unit(1)->char_id, CH28_TAGGED_CHAR_ID);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH28_MAP00_RECORD1_X);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH28_MAP00_RECORD1_Y);
+    }
+    ch28_unstage();
+}
+
+/* The divide truncates toward zero, so consecutive turns pair onto one wave and
+   an odd turn takes the wave below it: turns 0 and 1 both ask for wave 0 and
+   turns 2 and 3 both ask for wave 1.  A key taken from the counter itself, or
+   one rounded up, deploys the record tagged one above on every odd turn, and
+   the fixture has that record laid down to catch it. */
+static void ch28_odd_turns_truncate_down(void)
+{
+    static int turns[4] = {0, 1, 2, 3};
+    static int waves[4] = {0, 0, 1, 1};
+    int i;
+
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 4; i++) {
+        ch28_stage(turns[i], waves[i]);
+
+        ch28_run(0);
+
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch30w3_unit(1)->char_id, CH28_TAGGED_CHAR_ID);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH28_MAP00_RECORD1_X);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH28_MAP00_RECORD1_Y);
+    }
+    ch28_unstage();
+}
+
+/* The pan goes to map pixel (0x120, 0) and the view is held there.  The cursor
+   arrives on the target exactly, the draw mode afterwards is 1 -- not the 4 the
+   fixture parked and not the 0 the pan ran under, so neither a run that saved
+   and restored the mode nor one that left the blank behind passes -- the frame
+   latch has moved off its sentinel, and the tick counter has moved by at least
+   eleven, which no rebuild missing the hold loop can reach. */
+static void ch28_pans_to_the_spawn_tile_and_holds(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch28_stage(ch28_schedule_turns[0], ch28_schedule_waves[0]);
+
+    ch28_run(0);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, CH28_PAN_TARGET_X);
+    CHECK_EQ(data_fdps_map_cursor_world_y, CH28_PAN_TARGET_Y);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, CH28_CURSOR_MODE_NORMAL);
+    CHECK_EQ(data_fdps_view_frame_last_tick == CH28_FRAME_SENTINEL, 0);
+    CHECK_EQ(ch28_ticks_after - ch28_ticks_before
+                 >= (unsigned int) CH28_LEAST_HOLD_TICKS,
+             1);
+    ch28_unstage();
+}
+
+/* Nothing in the body tests whether the deployment found anything, so a turn
+   whose wave matches no record still blanks the cursor, walks the view to the
+   top edge and holds it there.  All three records are tagged well away from the
+   key this turn produces: the unit count does not move and the pan runs
+   anyway. */
+static void ch28_pans_even_when_no_record_matches(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch28_stage(40, CH28_UNSELECTED_WAVE);
+
+    ch28_run(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 1);
+    CHECK_EQ(data_fdps_map_cursor_world_x, CH28_PAN_TARGET_X);
+    CHECK_EQ(data_fdps_map_cursor_world_y, CH28_PAN_TARGET_Y);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, CH28_CURSOR_MODE_NORMAL);
+    CHECK_EQ(ch28_ticks_after - ch28_ticks_before
+                 >= (unsigned int) CH28_LEAST_HOLD_TICKS,
+             1);
+    ch28_unstage();
+}
+
+/* The incoming argument slot is overwritten with 0 at 00039599 and is only the
+   hold counter after that, so the index the dispatcher passes cannot reach the
+   wave asked for, the map asked for or the pan.  The turn-event runner is the
+   only path this slot is reached by in the shipped data and it pushes a literal
+   0; the values put through here are that 0, an index that names the unit
+   already on the map, one past the array, and -1 and 30000, which are the ones
+   an argument-driven handler would betray itself on. */
+static void ch28_ignores_the_unit_index_argument(void)
+{
+    static int arguments[5] = {0, 1, 2, -1, 30000};
+    int i;
+
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 5; i++) {
+        ch28_stage(ch28_schedule_turns[2], ch28_schedule_waves[2]);
+
+        ch28_run(arguments[i]);
+
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch30w3_unit(1)->char_id, CH28_TAGGED_CHAR_ID);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH28_MAP00_RECORD1_X);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH28_MAP00_RECORD1_Y);
+        CHECK_EQ(data_fdps_map_cursor_world_x, CH28_PAN_TARGET_X);
+        CHECK_EQ(data_fdps_map_cursor_draw_mode, CH28_CURSOR_MODE_NORMAL);
+    }
+    ch28_unstage();
+}
+
+/* Nothing guards the call: there is no compare anywhere in the body and no latch
+   is written, so a second firing on the same turn appends a second copy of the
+   wave rather than being refused.  The slot the one-shot handlers of this family
+   latch is put up beforehand and the wave still arrives, and the slot is
+   asserted unchanged because a handler that had grown a latch would have written
+   it.  The second arrival lands one tile south of the first, which is what the
+   nearest-free-tile search does with a scripted tile that is now occupied. */
+static void ch28_has_no_one_shot_latch(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch28_stage(ch28_schedule_turns[0], ch28_schedule_waves[0]);
+    data_fdps_map_cell_event_triggered_flags[CH29_LATCH_SLOT] = 1;
+
+    ch28_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH29_LATCH_SLOT], 1);
+
+    ch28_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ((int) ch30w3_unit(2)->char_id, CH28_TAGGED_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(2)->pos_x, CH28_MAP00_RECORD1_X);
+    CHECK_EQ((int) ch30w3_unit(2)->pos_y, CH28_MAP00_RECORD1_Y + 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH29_LATCH_SLOT], 1);
+    ch28_unstage();
+}
+
 /* ---- fdps_chapter_30_revive_wave_4_undead, 00010760 ----------------------
  *
  * Every expected value below is read off the assembly at 00010760: the CMP
@@ -1714,6 +2082,12 @@ void run_chevt6_tests(void)
     RUN_TEST(ch30w3_map_number_comes_from_the_chapter_global);
     RUN_TEST(ch30w3_ignores_the_unit_index_argument);
     RUN_TEST(ch30w3_has_no_one_shot_latch);
+    RUN_TEST(ch28_each_scheduled_turn_deploys_the_wave_it_halves_to);
+    RUN_TEST(ch28_odd_turns_truncate_down);
+    RUN_TEST(ch28_pans_to_the_spawn_tile_and_holds);
+    RUN_TEST(ch28_pans_even_when_no_record_matches);
+    RUN_TEST(ch28_ignores_the_unit_index_argument);
+    RUN_TEST(ch28_has_no_one_shot_latch);
     RUN_TEST(ch30rev_record_shape_matches_the_offsets);
     RUN_TEST(ch30rev_only_the_two_undead_ids_are_revived);
     RUN_TEST(ch30rev_a_living_undead_is_left_alone);
