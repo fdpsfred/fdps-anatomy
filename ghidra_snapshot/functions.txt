@@ -1,7 +1,7 @@
 # address | body size | calling convention | signature source | stack purge | flags | tags | prototype
 # An indented 'var' line follows a function for each explicitly named local variable.
 00010000 | 0x3 | __watcall | USER_DEFINED | 0x0 | - | orphan_block,pool_crt | void __watcall FUN_00010000(void)
-00010010 | 0x745 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | void __cdecl fdps_map_actor_behavior_step(int actor_index, int context)
+00010010 | 0x745 | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | void __cdecl fdps_map_actor_behavior_step(int actor_index, int side_select)
 00010760 | 0x24f | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_chapter_30_revive_wave_4_undead(void)
 000109b0 | 0x35 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps,shared_helper | int __cdecl fdps_unit_is_retired(int unit_index)
 000109f0 | 0x12b | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | int __cdecl fdps_collect_targets_in_area(int tile_x, int tile_y, int max_dist, uchar * out_indices, int select_mode)

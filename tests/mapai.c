@@ -28,6 +28,7 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "keybd.h"
+#include "mapdraw.h"
 #include "maptile.h"
 #include "mapai.h"
 
@@ -873,6 +874,118 @@ static void sl_terrain_cost_does_not_reach_the_search(void)
     CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
 }
 
+/* ---- fdps_map_actor_behavior_step, 00010010 -------------------------------
+ *
+ * Only the two paths that RETURN BEFORE THE TAIL are driven here, and the tail
+ * is why.  Every one of the eleven behaviour arms falls into it, and it ends in
+ * fdps_render_view_frame (mapdraw.h), which spins on the VGA retrace bit and
+ * then holds the caller until data_fdps_timer_tick_counter moves -- and nothing
+ * in a test process moves it, because no timer handler is installed.  So the
+ * arms are not reachable from a unit test at all; what is reachable, and what
+ * the three cases below pin, is the retired gate, the low-nibble mask and
+ * behaviour 8's jump straight past the tail to the epilogue.
+ *
+ * All three therefore assert an ABSENCE, and the flags byte is what carries it:
+ * bit 7 is set by fdps_battle_mark_unit_done (btlturn.h) in the tail and by
+ * nothing else on any of these paths, so a flags byte that still reads what the
+ * case staged is the evidence that the function returned where it should have.
+ *
+ * bs_guard_the_tail below is not part of any expectation.  It parks
+ * data_fdps_view_frame_last_tick off the tick counter so that a build which
+ * wrongly reaches the tail comes back and FAILS a check, instead of spinning in
+ * the frame clock forever and taking the whole run with it.
+ *
+ * Expected values come from the assembly at 00010010 -- AND AL,0x1 /
+ * CMP dword ptr [EBP-0x34],0x0 / JNZ 0x0001074e at 0001004b..00010059 for the
+ * gate, AND AL,0xf at 00010065 for the mask, CMP dword ptr [EBP-0x14],0x8 /
+ * JZ 0x0001074e at 000104c1 for the idle arm, and OR byte ptr [EAX+0x5],0x80
+ * at 00010745 for the bit the tail would have set -- and from the record layout
+ * ticket 17 settled.  None of them is read off the emitted C.
+ */
+
+static void bs_guard_the_tail(void)
+{
+    data_fdps_view_frame_last_tick = 1;
+}
+
+/* Bit 0 of the flags byte retires a unit, and the gate reads nothing else.
+   Behaviour 0 is the busiest arm there is -- three handlers and then a rest --
+   so an actor that comes back on its own tile with its own flags byte came
+   back through the gate, and not out of an arm that happened to decline it.
+   The grid marker is checked too: the first of those three handlers floods the
+   whole map, and this fixture's marker sentinel would not survive it. */
+static void bs_a_retired_actor_is_left_alone(void)
+{
+    ai_stage();
+    bs_guard_the_tail();
+    ai_place(0, 2, 2, 0, 0, 3);
+    ai_units[0].flags = 0x01;
+    ai_units[0].ai_behavior = 0x00;
+
+    fdps_map_actor_behavior_step(0, 0);
+
+    CHECK_EQ((int) ai_units[0].flags, 0x01);
+    CHECK_EQ((int) ai_units[0].pos_x, 2);
+    CHECK_EQ((int) ai_units[0].pos_y, 2);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AI_DRAW_MODE_SENTINEL);
+    CHECK_EQ(ai_marker(2, 2), 0xff);
+}
+
+/* Behaviour 8 is live -- the gate let it through, the flags byte is clear --
+   and it does nothing whatever, the tail included.  The flags byte still has to
+   read 0: bit 7 is set in the tail, which the JZ at 000104c1 jumps over.  The
+   neighbours of record byte 0x34 are staged with values that are not 8 so that
+   the case says which byte it means: 0x35 and 0x36 carry a destination and 0x3d
+   an event slot, and none of the three is the behaviour. */
+static void bs_behavior_eight_does_nothing_and_skips_the_tail(void)
+{
+    ai_stage();
+    bs_guard_the_tail();
+    ai_place(0, 2, 2, 0, 0, 3);
+    ai_units[0].flags = 0x00;
+    ai_units[0].ai_behavior = 0x08;
+    ai_units[0].ai_dest_x = 3;
+    ai_units[0].ai_dest_y = 5;
+    ai_units[0].event_slot = 1;
+
+    fdps_map_actor_behavior_step(0, 0);
+
+    CHECK_EQ((int) ai_units[0].flags, 0x00);
+    CHECK_EQ((int) ai_units[0].pos_x, 2);
+    CHECK_EQ((int) ai_units[0].pos_y, 2);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AI_DRAW_MODE_SENTINEL);
+}
+
+/* The behaviour is the low nibble of byte 0x34 and the high nibble is no part
+   of it.  0xf8 and 0x28 both have to be read as 8, and the byte must come back
+   holding what it was given: this path writes nothing, so a build that masked
+   the byte in place rather than in a copy would show up here. */
+static void bs_the_behavior_is_the_low_nibble_of_byte_0x34(void)
+{
+    ai_stage();
+    bs_guard_the_tail();
+    ai_place(0, 2, 2, 0, 0, 3);
+    ai_units[0].flags = 0x00;
+    ai_units[0].ai_behavior = 0xf8;
+
+    fdps_map_actor_behavior_step(0, 0);
+
+    CHECK_EQ((int) ai_units[0].flags, 0x00);
+    CHECK_EQ((int) ai_units[0].ai_behavior, 0xf8);
+    CHECK_EQ((int) ai_units[0].pos_x, 2);
+
+    ai_stage();
+    bs_guard_the_tail();
+    ai_place(0, 2, 2, 0, 0, 3);
+    ai_units[0].flags = 0x00;
+    ai_units[0].ai_behavior = 0x28;
+
+    fdps_map_actor_behavior_step(0, 0);
+
+    CHECK_EQ((int) ai_units[0].flags, 0x00);
+    CHECK_EQ((int) ai_units[0].ai_behavior, 0x28);
+}
+
 void run_mapai_tests(void)
 {
     RUN_TEST(finds_the_chest_and_returns_zero);
@@ -905,6 +1018,10 @@ void run_mapai_tests(void)
     RUN_TEST(sl_scan_stops_at_the_unit_count);
     RUN_TEST(sl_terrain_cost_does_not_reach_the_search);
 
+    RUN_TEST(bs_a_retired_actor_is_left_alone);
+    RUN_TEST(bs_behavior_eight_does_nothing_and_skips_the_tail);
+    RUN_TEST(bs_the_behavior_is_the_low_nibble_of_byte_0x34);
+
     /* Put the globals back before leaving.  stage() points four of them at
        this file's own arrays and the runners share one process: a later unit
        that expects an unallocated map would inherit live pointers into another
@@ -926,4 +1043,5 @@ void run_mapai_tests(void)
     data_fdps_battle_view_window_origin_x = 0;
     data_fdps_battle_view_window_origin_y = 0;
     data_fdps_input_last_scancode = 0;
+    data_fdps_view_frame_last_tick = 0;
 }

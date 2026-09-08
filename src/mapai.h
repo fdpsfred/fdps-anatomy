@@ -8,6 +8,40 @@
 #ifndef MAPAI_H
 #define MAPAI_H
 
+/* Runs the actor at unit_index through one whole turn of its own behaviour,
+   and shows the result.
+
+   The behaviour is the LOW NIBBLE of unit record byte 0x34; the high nibble is
+   no part of it.  Eleven of the sixteen values name an arm -- 0, 1 and 2 are
+   the plain fighters, 3 and 9 chase a named character, 4 and 7 walk to the
+   destination in record bytes 0x35 and 0x36, 5 opens the chest belonging to
+   the actor's event slot, and 10 and 11 are the item- and spell-carrying
+   fighters.  8 is the idle one and 6, 12, 13, 14 and 15 name no arm at all.
+
+   A retired actor -- bit 0 of the flags byte -- is left alone entirely.  So is
+   an actor in behaviour 8: it is the ONE live behaviour that skips the tail
+   below, which is what makes it idle rather than merely inactive.
+
+   Every other path, including the five behaviours that name no arm, ends by
+   reporting the tile the actor is now standing on as a turn-end tile event,
+   marking the actor for redraw and drawing one view frame.
+
+   side_select is the acting side and is forwarded unchanged to every handler
+   this dispatches to.  The two turn drivers pass 0 for the enemy phase and 1
+   for the NPC phase; the title demo passes the actor's own side byte. */
+extern void fdps_map_actor_behavior_step(int actor_index, int side_select);
+#pragma aux fdps_map_actor_behavior_step "*" parm caller [];
+
+/* Takes the best of the three actions src/aiscore.c has scored -- the physical
+   attack, the spell and the item -- and answers 1 once one of them has been
+   carried out, 0 when none of the three scored high enough to be worth taking.
+
+   The three searches are run first, so this both decides and acts; a caller
+   that reads 0 has had all three searches run for it and may go on to a
+   movement fallback. */
+extern int fdps_map_actor_take_best_action(int unit_index, int side_select);
+#pragma aux fdps_map_actor_take_best_action "*" parm caller [];
+
 /* Walks the actor at unit_index toward the opposing unit that is nearest to it
    OVER WALKABLE TERRAIN, and answers whether it moved.
 

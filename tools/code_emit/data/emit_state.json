@@ -3291,6 +3291,14 @@
       "status": "committed",
       "emitted_against": "0x15c",
       "rounds": 0
+    },
+    "00010010": {
+      "name": "fdps_map_actor_behavior_step",
+      "target": "mapai.c",
+      "body_size": "0x745",
+      "status": "committed",
+      "emitted_against": "0x745",
+      "rounds": 0
     }
   }
 }

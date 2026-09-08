@@ -8,11 +8,20 @@
 #include <stdlib.h>
 #include "gamedata.h"
 #include "fdpstype.h"
+#include "aiact.h"
+#include "aiscore.h"
+#include "anim.h"
+#include "audio.h"
+#include "btlturn.h"
+#include "chevt6.h"
 #include "mapcur.h"
+#include "mapdraw.h"
 #include "maptile.h"
 #include "movegrid.h"
 #include "table.h"
 #include "unit.h"
+#include "unitatk.h"
+#include "unititem.h"
 #include "mapai.h"
 
 /* The two values this handler stores into data_fdps_map_cursor_draw_mode
@@ -22,6 +31,325 @@
    caller that was in any other mode comes back in the ordinary box mode. */
 #define CURSOR_DRAW_MODE_HIDDEN 0
 #define CURSOR_DRAW_MODE_BOX 1
+
+/* The score a search has to reach before the behaviour dispatcher spends the
+   actor's turn on it: CMP dword ptr [0x00063f8c],0x6 at 000105e9 and the same
+   compare against the physical score at 00010612 and 000106bc and against the
+   spell score at 00010693.  All four are JL, the signed compare, and the three
+   scores are tiers on one scale (gamedata.h). */
+#define MAP_AI_ACTION_SCORE_THRESHOLD 6
+
+/* The occasion fdps_map_set_pending_tile_event (maptile.h) is told about at
+   the end of a turn, PUSH 0x1 at 00010706: the actor has ENDED ITS TURN on the
+   tile, not stepped onto it. */
+#define TILE_EVENT_ON_TURN_END 1
+
+/* Where the map block's per-event-code result table sits and how wide an entry
+   is: base + slot * 3 + 0x53 for the opcode byte and + 0x54 for the operand
+   word, from MOV EDX,[0x0006013c] / LEA EAX,[EAX+EAX*2] / MOV AL,byte ptr
+   [EDX+0x53] at 0001032e and the MOVSX word ptr [EAX+0x54] at 00010352.  The
+   player's own search action reads the same three bytes of the same entry at
+   000185f2..0001861a. */
+#define CHEST_RESULT_TABLE_BASE 0x53
+#define CHEST_RESULT_ENTRY_STRIDE 3
+
+/* The two opcodes the chest result table carries that the actor records, and
+   the one of those that also hands the item over on the spot.  CMP dword ptr
+   [EBP-0x18],0x2 / JGE at 00010359 skips both stores for anything above 1, and
+   CMP ...,0x0 / JNZ at 00010372 gates the give. */
+#define CHEST_OPCODE_ITEM 0
+#define CHEST_OPCODE_LIMIT 2
+
+/* The behaviour the actor is switched to once it has opened its chest, MOV
+   byte ptr [EAX+0x34],0x7 at 0001039a: walk to the stored destination and
+   retire on arrival.  The write is a whole byte, so the high nibble of 0x34
+   goes to zero with it. */
+#define AI_BEHAVIOR_WALK_THEN_RETIRE 7
+
+/* The portrait ids that make an arriving behaviour-7 actor play "Posion.saf"
+   before it retires: CMP EAX,0x24 / JL and CMP EAX,0x27 / JLE at 00010470 and
+   00010480, on the zero-extended record byte 7. */
+#define POISON_ANIM_PORTRAIT_FIRST 0x24
+#define POISON_ANIM_PORTRAIT_LAST 0x27
+
+/* The portrait ids that make a behaviour-11 actor run chapter 30's undead
+   revival first: CMP EAX,0x3c / JL and CMP EAX,0x3e / JLE at 00010667 and
+   00010677, on the same zero-extended record byte 7. */
+#define UNDEAD_REVIVE_PORTRAIT_FIRST 0x3c
+#define UNDEAD_REVIVE_PORTRAIT_LAST 0x3e
+
+/* 00010010.  One computer-controlled actor's whole turn.
+ *
+ * Three things about it are behaviour rather than shape, and all three are
+ * playtest contracts (rebuild_info/pitfalls.md).
+ *
+ * BEHAVIOUR 8 IS THE ONLY LIVE ARM THAT SKIPS THE TAIL.  CMP dword ptr
+ * [EBP-0x14],0x8 / JZ 0x0001074e at 000104c1 jumps to the EPILOGUE, past the
+ * turn-end tile event, past the redraw mark and past the frame.  Every other
+ * value reaches the tail, INCLUDING the five -- 6, 12, 13, 14 and 15 -- that
+ * match no arm at all and fall off the end of the chain having done nothing.
+ * Folding 8 in with those five as "another value that does nothing" gives an
+ * idle actor a tile event and a redrawn frame it never had.
+ *
+ * THE BEHAVIOUR IS THE LOW NIBBLE AND NOTHING ELSE.  AND AL,0xf at 00010065.
+ * The high nibble of record byte 0x34 rides along untouched and is not part of
+ * any comparison here, so an actor whose byte reads 0xf8 is behaviour 8.
+ *
+ * THE STORES TO data_fdps_map_cursor_draw_mode ARE ZERO AND NEVER A RESTORE.
+ * Behaviours 3, 4, 5 and 7 write 0 (00010239, 0001029e, 000103f1) or, in
+ * behaviour 3's chase arm, write it AFTER the walk at 000101ee.  None of the
+ * four reads the entry value and none of them puts anything back, so an actor
+ * that took one of those arms leaves the cursor overlay switched off for
+ * whatever runs next.
+ *
+ * The destination pair and the event slot are latched from the record ONCE, at
+ * 0001006f..0001008d, before any handler runs.  Behaviour 7's arrival test at
+ * 0001043e compares the RE-READ record's tile against those latched values, so
+ * a handler that moved the actor is measured against where it was told to go
+ * and not against a destination it might have rewritten.
+ *
+ * Three stretches of this body are inline expansions and are emitted as the
+ * calls they expand, which is what the rest of this file already does with
+ * fdps_unit_is_retired: the retired gate at 00010031..00010052 replays
+ * fdps_unit_is_retired (000109b0) instruction for instruction, the store at
+ * 0001049b..000104b8 replays fdps_unit_mark_retired (000138f0), and the tail's
+ * 00010727..00010745 replays fdps_battle_mark_unit_done (000119b0), which is
+ * why the redraw bit is set through the unit array base rather than through
+ * the record this function already holds.
+ *
+ * The actor record is fetched afresh after every handler that could have moved
+ * the actor, because a handler may walk it and the array itself may move
+ * (fdps_relocate_unit_array, unit.h). */
+void fdps_map_actor_behavior_step(int actor_index, int side_select)
+{
+    /* The acting unit's record.  Re-fetched after each arm that walks it. */
+    struct fdps_unit_record *actor;
+    /* The record of the character behaviours 3 and 9 chase. */
+    struct fdps_unit_record *chase_target;
+    /* Where fdps_battle_find_unit_by_character_id publishes the record it
+       matched.  It must not be null -- the callee writes it before anything
+       else (unit.h) -- but nothing here ever reads it back. */
+    struct fdps_unit_record *matched_record;
+    /* The low nibble of record byte 0x34: which arm below runs. */
+    int behavior_mode;
+    /* The tile behaviours 4 and 7 walk to and the character id behaviours 3
+       and 9 chase, latched from record bytes 0x35 and 0x36 on entry. */
+    int dest_x;
+    int dest_y;
+    /* Record byte 0x3d: which map cell event this actor belongs to, and so
+       which entry of the trigger table and of the chest result table is its
+       own. */
+    int event_slot;
+    /* The unit index the chase found, or -1 for no such character. */
+    int chase_index;
+    /* Column then row of the chest behaviour 5 walks to, the two bytes
+       fdps_map_find_chest_cell writes. */
+    unsigned char chest_xy[2];
+    /* The one-entry unit list the poison animation is played over. */
+    unsigned char anim_unit_ids[1];
+    /* The chest result entry: what the opened chest does, and the value it
+       does it with.  Both are copied into the actor's death-script fields and
+       the value is the item id when the opcode is 0. */
+    int chest_script_opcode;
+    int chest_script_operand;
+
+    actor = fdps_get_unit_record(actor_index);
+    if (fdps_unit_is_retired(actor_index) != 0) {
+        return;
+    }
+
+    behavior_mode = (int) (actor->ai_behavior & 0x0f);
+    dest_x = (int) actor->ai_dest_x;
+    dest_y = (int) actor->ai_dest_y;
+    event_slot = (int) actor->event_slot;
+
+    if (behavior_mode == 0) {
+        if (fdps_map_actor_take_best_action(actor_index, side_select) == 0 &&
+            fdps_map_actor_move_toward_nearest_reachable_opponent(
+                actor_index, side_select) == 0 &&
+            fdps_map_actor_move_toward_nearest_opponent(actor_index,
+                                                        side_select) == 0) {
+            fdps_unit_rest(actor_index);
+        }
+    } else if (behavior_mode == 1) {
+        if (fdps_map_actor_take_best_action(actor_index, side_select) == 0 &&
+            fdps_map_actor_move_toward_nearest_reachable_opponent(
+                actor_index, side_select) == 0) {
+            fdps_unit_rest(actor_index);
+        }
+    } else if (behavior_mode == 2) {
+        if (fdps_map_actor_take_best_action(actor_index, side_select) == 0 &&
+            fdps_map_actor_score_best_attack(actor_index, side_select) == 0) {
+            fdps_unit_rest(actor_index);
+        }
+    } else if (behavior_mode == 3) {
+        if (fdps_map_actor_take_best_action(actor_index, side_select) == 0) {
+            chase_index = fdps_battle_find_unit_by_character_id(
+                              dest_x, &matched_record);
+            if (chase_index == -1) {
+                if (fdps_map_actor_move_toward_nearest_reachable_opponent(
+                        actor_index, side_select) == 0 &&
+                    fdps_map_actor_move_toward_nearest_opponent(
+                        actor_index, side_select) == 0) {
+                    fdps_unit_rest(actor_index);
+                }
+            } else {
+                chase_target = fdps_get_unit_record(chase_index);
+                fdps_map_cursor_move_to_unit(actor_index);
+                if (fdps_battle_move_unit_toward((int) chase_target->pos_x,
+                                                 (int) chase_target->pos_y,
+                                                 actor_index,
+                                                 side_select) == 0) {
+                    fdps_unit_rest(actor_index);
+                }
+                data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;
+            }
+        }
+    } else if (behavior_mode == 4) {
+        data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;
+        fdps_map_cursor_move_to_unit(actor_index);
+        if (fdps_battle_move_unit_toward(dest_x, dest_y, actor_index,
+                                         side_select) == 0) {
+            fdps_unit_rest(actor_index);
+        }
+    } else if (behavior_mode == 5) {
+        if (fdps_map_actor_take_best_action(actor_index, side_select) == 0) {
+            data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;
+            fdps_map_cursor_move_to_unit(actor_index);
+
+            if (data_fdps_map_cell_event_triggered_flags[event_slot] == 0 &&
+                fdps_map_find_chest_cell(event_slot, chest_xy) == 0) {
+                if (fdps_battle_move_unit_toward((int) chest_xy[0],
+                                                 (int) chest_xy[1],
+                                                 actor_index,
+                                                 side_select) == 0) {
+                    fdps_unit_rest(actor_index);
+                }
+
+                actor = fdps_get_unit_record(actor_index);
+                if (actor->pos_x == chest_xy[0] &&
+                    actor->pos_y == chest_xy[1]) {
+                    chest_script_opcode = (int)
+                        data_fdps_tile_event_data_table_ptr[
+                            event_slot * CHEST_RESULT_ENTRY_STRIDE +
+                            CHEST_RESULT_TABLE_BASE];
+                    chest_script_operand = (int) *(short *)
+                        (data_fdps_tile_event_data_table_ptr +
+                         event_slot * CHEST_RESULT_ENTRY_STRIDE +
+                         CHEST_RESULT_TABLE_BASE + 1);
+
+                    if (chest_script_opcode < CHEST_OPCODE_LIMIT) {
+                        actor->death_script_opcode =
+                            (unsigned char) chest_script_opcode;
+                        actor->death_script_operand =
+                            (short) chest_script_operand;
+                        if (chest_script_opcode == CHEST_OPCODE_ITEM) {
+                            fdps_unit_add_item(actor_index,
+                                               chest_script_operand);
+                        }
+                    }
+
+                    data_fdps_map_cell_event_triggered_flags[event_slot] = 1;
+                    fdps_map_apply_triggered_cell_changes();
+                    actor->ai_behavior = AI_BEHAVIOR_WALK_THEN_RETIRE;
+                    fdps_play_sfx("Chess.wav");
+                }
+            } else {
+                if (fdps_map_actor_move_toward_nearest_reachable_opponent(
+                        actor_index, side_select) == 0 &&
+                    fdps_map_actor_move_toward_nearest_opponent(
+                        actor_index, side_select) == 0) {
+                    fdps_unit_rest(actor_index);
+                }
+            }
+        }
+    } else if (behavior_mode == 7) {
+        data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;
+        fdps_map_cursor_move_to_unit(actor_index);
+        if (fdps_battle_move_unit_toward(dest_x, dest_y, actor_index,
+                                         side_select) == 0) {
+            fdps_unit_rest(actor_index);
+        }
+
+        actor = fdps_get_unit_record(actor_index);
+        if ((int) actor->pos_x == dest_x && (int) actor->pos_y == dest_y) {
+            anim_unit_ids[0] = (unsigned char) actor_index;
+            if ((int) actor->portrait_id >= POISON_ANIM_PORTRAIT_FIRST &&
+                (int) actor->portrait_id <= POISON_ANIM_PORTRAIT_LAST) {
+                fdps_play_vfs_animation_over_units(1, anim_unit_ids,
+                                                   "Posion.saf");
+            }
+            fdps_unit_mark_retired(actor_index);
+        }
+    } else if (behavior_mode == 8) {
+        return;
+    } else if (behavior_mode == 9) {
+        chase_index = fdps_battle_find_unit_by_character_id(dest_x,
+                                                            &matched_record);
+        if (chase_index == -1) {
+            if (fdps_map_actor_take_best_action(actor_index,
+                                                side_select) == 0 &&
+                fdps_map_actor_move_toward_nearest_reachable_opponent(
+                    actor_index, side_select) == 0 &&
+                fdps_map_actor_move_toward_nearest_opponent(
+                    actor_index, side_select) == 0) {
+                fdps_unit_rest(actor_index);
+            }
+        } else {
+            chase_target = fdps_get_unit_record(chase_index);
+            fdps_map_cursor_move_to_unit(actor_index);
+            if (fdps_battle_move_unit_toward((int) chase_target->pos_x,
+                                             (int) chase_target->pos_y,
+                                             actor_index, side_select) == 0 &&
+                fdps_map_actor_take_best_action(actor_index,
+                                                side_select) == 0 &&
+                fdps_map_actor_move_toward_nearest_reachable_opponent(
+                    actor_index, side_select) == 0 &&
+                fdps_map_actor_move_toward_nearest_opponent(
+                    actor_index, side_select) == 0) {
+                fdps_unit_rest(actor_index);
+            }
+        }
+    } else if (behavior_mode == 10) {
+        fdps_map_actor_score_best_item(actor_index, side_select);
+        if (data_fdps_battle_ai_best_item_score >=
+                MAP_AI_ACTION_SCORE_THRESHOLD) {
+            fdps_map_actor_use_item(actor_index, side_select);
+        }
+        fdps_map_actor_score_best_attack(actor_index, side_select);
+        if (data_fdps_battle_ai_best_physical_score >=
+                MAP_AI_ACTION_SCORE_THRESHOLD) {
+            fdps_map_actor_move_and_attack(actor_index, side_select);
+        } else if (fdps_map_actor_move_toward_nearest_reachable_opponent(
+                       actor_index, side_select) == 0) {
+            fdps_unit_rest(actor_index);
+        }
+    } else if (behavior_mode == 11) {
+        if ((int) actor->portrait_id >= UNDEAD_REVIVE_PORTRAIT_FIRST &&
+            (int) actor->portrait_id <= UNDEAD_REVIVE_PORTRAIT_LAST) {
+            fdps_chapter_30_revive_wave_4_undead();
+        }
+        fdps_map_actor_score_best_spell(actor_index, side_select);
+        if (data_fdps_battle_ai_best_spell_score >=
+                MAP_AI_ACTION_SCORE_THRESHOLD) {
+            fdps_map_actor_cast_chosen_spell(actor_index, side_select);
+        }
+        fdps_map_actor_score_best_attack(actor_index, side_select);
+        if (data_fdps_battle_ai_best_physical_score >=
+                MAP_AI_ACTION_SCORE_THRESHOLD) {
+            fdps_map_actor_move_and_attack(actor_index, side_select);
+        } else if (fdps_map_actor_move_toward_nearest_reachable_opponent(
+                       actor_index, side_select) == 0) {
+            fdps_unit_rest(actor_index);
+        }
+    }
+
+    actor = fdps_get_unit_record(actor_index);
+    fdps_map_set_pending_tile_event((int) actor->pos_x, (int) actor->pos_y,
+                                    TILE_EVENT_ON_TURN_END);
+    fdps_battle_mark_unit_done(actor_index);
+    fdps_render_view_frame();
+}
 
 /* The allowance handed to the flood fill, PUSH 0x64 at 00012701.  It is not a
    unit's real movement allowance: it is large enough to cover any map in the
