@@ -67,6 +67,14 @@ def chapter_event_file(n):
     The boundaries are cut so that no file passes the line budget, which is
     why they are uneven: chapter 8's four handlers are worth as much as
     chapters 9 to 14 put together.
+
+    chevt5b.c is the second half of what chapters 24 to 27 were routed to as
+    one file: the four handlers of chapters 24 and 25 alone came out at 1113
+    emitted lines, so chapters 26 and 27 were cut off into a file of their own
+    rather than let chapter 27's handler land on top of that.  It is named for
+    the range it was split out of and not chevt7.c, because chevt6.c is
+    chapters 28 to 30 and already emitted: the letter keeps the family in
+    chapter order.
     """
     if n <= 7:
         return "chevt1.c"
@@ -76,8 +84,10 @@ def chapter_event_file(n):
         return "chevt3.c"
     if n <= 23:
         return "chevt4.c"
-    if n <= 27:
+    if n <= 25:
         return "chevt5.c"
+    if n <= 27:
+        return "chevt5b.c"
     return "chevt6.c"
 
 

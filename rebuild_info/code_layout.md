@@ -26,7 +26,7 @@ emit 是序列的，一次一支 function，每支各自 commit。檔案落點�
 
 **每個檔的預估行數不超過 1000。** 這不是程式的性質，是模型讀寫的效率界線：超過之後每次改一行都要把整個檔讀進 context。
 
-預估值的來源是 **Ghidra decompiled code 的行數**，由 `tools/code_emit/DumpRoutingInputs.java` 產生。全部 514 支合計約 50,000 行，分成 80 個 `.c`。這是估計不是保證——實際 emit 出來的 C 會偏離，處置規則見下面「超標了怎麼辦」。
+預估值的來源是 **Ghidra decompiled code 的行數**，由 `tools/code_emit/DumpRoutingInputs.java` 產生。全部 514 支合計約 50,000 行，分成 81 個 `.c`。這是估計不是保證——實際 emit 出來的 C 會偏離，處置規則見下面「超標了怎麼辦」。
 
 ## 資料符號歸誰
 
@@ -87,7 +87,7 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 
 ## 檔案表
 
-80 個 `.c`，各自配一個同名 `.h`。逐檔的 function 清單與行數在 `tools/code_emit/data/routing.md`。
+81 個 `.c`，各自配一個同名 `.h`。逐檔的 function 清單與行數在 `tools/code_emit/data/routing.md`。
 
 ### 戰鬥地圖 AI
 
@@ -149,7 +149,8 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 | `chinit1.c` / `chinit2.c` | 第 1–15 章／第 16–30 章的 init handler |
 | `chpost1.c` / `chpost2.c` | 同上兩段的 post-action handler |
 | `chend1.c` / `chend2.c` | 同上兩段的 end handler |
-| `chevt1.c` … `chevt6.c` | 章節腳本事件 handler，依章號切成六段；切點不平均，因為第 8 章一章的四支 handler 就抵得上第 9–14 章的總和 |
+| `chevt1.c` … `chevt6.c` | 章節腳本事件 handler，依章號切段；切點不平均，因為第 8 章一章的四支 handler 就抵得上第 9–14 章的總和 |
+| `chevt5b.c` | 第 26、27 章的事件 handler。`chevt5.c` 原本涵蓋第 24–27 章，光第 24、25 章的四支就寫到 1113 行，於是把後兩章切出來自成一檔；不叫 `chevt7.c` 是因為 `chevt6.c` 已經是第 28–30 章，用字母後綴才能讓檔名維持章序 |
 | `icon.c` | ICON 腳本直譯器與它的指令實作（過場演出） |
 
 ### 村莊與商店

@@ -240,7 +240,7 @@ extern void fdps_chapter_25_post_action(void);
    The first defeat is unit slot 0, 蘭迪斯.  The second is unit slot 0x5b, and it
    is asked only while data_fdps_map_cell_event_triggered_flags[0x10]
    (gamedata.h) holds exactly 1 -- the one-shot latch
-   fdps_chapter_26_event_deploy_waves_2_and_3 (chevt5.h) sets when it brings the
+   fdps_chapter_26_event_deploy_waves_2_and_3 (chevt5b.h) sets when it brings the
    map's reinforcements on.  Slot 0x5b does not exist before that event runs, so
    the gate is what keeps the test inside the unit array rather than a redundant
    guard, and it is an equality against 1 and not a non-zero test.

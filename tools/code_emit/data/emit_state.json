@@ -3225,7 +3225,7 @@
     },
     "00039190": {
       "name": "fdps_chapter_26_event_enemies_advance",
-      "target": "chevt5.c",
+      "target": "chevt5b.c",
       "body_size": "0x9d",
       "status": "committed",
       "emitted_against": "0x9d",
@@ -3233,7 +3233,7 @@
     },
     "00039230": {
       "name": "fdps_chapter_26_event_deploy_waves_2_and_3",
-      "target": "chevt5.c",
+      "target": "chevt5b.c",
       "body_size": "0x17a",
       "status": "committed",
       "emitted_against": "0x17a",
@@ -3241,7 +3241,7 @@
     },
     "000393b0": {
       "name": "fdps_chapter_26_event_wave_2_defeated_line",
-      "target": "chevt5.c",
+      "target": "chevt5b.c",
       "body_size": "0x86",
       "status": "committed",
       "emitted_against": "0x86",
