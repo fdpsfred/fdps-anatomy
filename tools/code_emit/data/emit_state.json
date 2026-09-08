@@ -3126,6 +3126,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x117"
+    },
+    "000382f0": {
+      "name": "fdps_chapter_20_event_upgrade_randis_sword",
+      "target": "chevt4.c",
+      "body_size": "0x8e",
+      "status": "committed",
+      "emitted_against": "0x8e",
+      "rounds": 0
     }
   }
 }
