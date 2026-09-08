@@ -50,6 +50,13 @@
  * read back which record landed on which tile.  They need ICON.CEL and FIELD.VFS
  * next to the executable and skip themselves without them.
  *
+ * The chapter 30 handler at 00039840 is a third deployment with two spoken lines
+ * and a terrain change around it, so its ch30w2_ cases reuse the same fixture
+ * for the deployment half and add the half no other handler in this file has:
+ * a write into the shared cell-trigger table that only means anything through
+ * the sweep called on the next line.  They are defined last because they are
+ * built on both the ch30w3_ staging helpers and the ch30w4_ decoy tagging.
+ *
  * The chapter 28 handler at 00039550 is the same deployment with a pan behind
  * it, so its ch28_ cases reuse the chapter 30 fixture for the deployment half
  * and add the half the ch30w3_ cases cannot show: a wave number computed from
@@ -2542,6 +2549,591 @@ static void ch30w4_ignores_the_unit_index_argument(void)
     ch30w4_unstage();
 }
 
+/* ---- fdps_chapter_30_event_deploy_wave_2, 00039840 -----------------------
+ *
+ * Every expected value below is read off the assembly at 00039840: the two
+ * seven-push draws at 00039853..0003986e and 00039898..000398b3 that name text
+ * entries 0x0f and 0x10, the aperture origin, the row stride and the three
+ * message colours; the MOV byte ptr [0x000640da],0x1 at 00039876 that marks map
+ * cell event code 2 in data_fdps_map_cell_event_triggered_flags and the CALL to
+ * fdps_map_apply_triggered_cell_changes at 0003987d that makes the mark visible;
+ * and the MOV EAX,0x1 / PUSH EAX / PUSH 0x2 / PUSH dword ptr [0x00069cf4] at
+ * 00039882..0003988a that name the placement, the wave and the map.  There is no
+ * compare anywhere in the body, so nothing here is conditional.
+ *
+ * The deployment cases reuse the ch30w3_ fixture -- the same blank walkable map,
+ * the same three deployment records at table indices 0, 1 and 2, the same
+ * MAP00.COD and MAP01.COD placement records -- because the wave the handler
+ * asked for is only readable off the record that arrived.  ch30w4_tag_decoys
+ * lays a record at the wave under test with one wave either side of it, so a key
+ * that drifted in either direction deploys a different character id onto a
+ * different tile.  They run the real deployment and so need ICON.CEL and
+ * FIELD.VFS next to the executable (tests/gamefile.lst) and skip themselves
+ * without them.
+ *
+ * THE TERRAIN CASES ARE WHAT SEPARATE THE TRIGGER TABLE FROM A FLAG.  The store
+ * at 00039876 is into element 2 of a shared table and not into a variable of its
+ * own, and the difference is only visible through the call on the next line:
+ * fdps_map_apply_triggered_cell_changes reads the table with each cell's event
+ * code and bumps the tile id of every searchable cell whose code is marked.  So
+ * the fixture puts a searchable cell carrying event code 2 on the map and reads
+ * the tile id and the event-code byte back afterwards.  A rebuild that wrote a
+ * private flag leaves both untouched, which is chapter 30's map keeping its old
+ * tiles when the boss's first form dies.  The tile map's height word has to be
+ * staged for these -- ch30w3_stage leaves it 0 and the sweep is a loop over it.
+ *
+ * The control cells are the other half of the same reading: one searchable cell
+ * carrying event code 3 and one non-searchable cell carrying event code 2, both
+ * of which must come out unchanged.  Between them they pin that the mark went
+ * into element 2 and nowhere else and that the sweep's kind test is still there.
+ *
+ * THE TEXT BLOCK IS SILENT BY DEFAULT, the way tests/chevt1.c stages the same
+ * family's: every entry points at a lone terminator, so fdps_draw_text walks it,
+ * draws nothing and returns.  That is what lets every case but one run with the
+ * adapter in text mode, where the aperture at 0xa0000 answers nothing and a draw
+ * would be measuring memory the console does not show.
+ *
+ * WHY THE LINES ARE READ BACK OFF THE SCREEN.  fdps_draw_text writes to the
+ * address the handler hands it, keeps no state and returns a cursor this handler
+ * discards, so the only place a draw is visible is video memory.  The one case
+ * that asserts the draws points entry 0x0f at a glyph whose only set row is row 0
+ * and entry 0x10 at a glyph whose only set row is row 4, and puts the adapter in
+ * mode 13h: the two draws land at the same origin without overwriting each other
+ * -- the cell background fill is off at background colour 0 -- so each is
+ * readable on its own row.  Row 2 is sampled as well and must still hold the
+ * sentinel, which is what says nothing painted a solid cell.  Every other entry
+ * stays a lone terminator, so a draw that asked for a neighbouring entry paints
+ * nothing and its row comes back as the sentinel.  The pixels are read before the
+ * adapter goes back to text mode, because that mode set clears them.
+ */
+
+/* The wave asked for, PUSH 0x2 at 00039888. */
+#define CH30W2_WAVE 2
+
+/* The cell event code marked at 00039876: 0x000640da is element 2 of the table
+   based at 0x000640d8.  The elements around it are read back to say the write
+   did not spill, and the table's declared length (gamedata.h) is what the
+   fixture puts down and back up. */
+#define CH30W2_TERRAIN_CELL_CODE 2
+#define CH30W2_UNMARKED_CELL_CODE 3
+#define CH30W2_TRIGGER_TABLE_SLOTS 32
+
+/* The two text entries spoken, PUSH 0xf at 00039866 and PUSH 0x10 at
+   000398ab. */
+#define CH30W2_FALL_TEXT_ID 0x0f
+#define CH30W2_ARRIVAL_TEXT_ID 0x10
+
+/* The staged text block: 0x11 offset entries, then the lone terminator every
+   entry points at by default, then the two one-glyph streams the painting case
+   moves entries 0x0f and 0x10 onto. */
+#define CH30W2_TEXT_ENTRIES 0x11
+#define CH30W2_TEXT_TERMINATOR (-1)
+#define CH30W2_TEXT_EMPTY_AT (CH30W2_TEXT_ENTRIES * 2)
+#define CH30W2_TEXT_FALL_AT ((CH30W2_TEXT_ENTRIES + 1) * 2)
+#define CH30W2_TEXT_ARRIVAL_AT ((CH30W2_TEXT_ENTRIES + 3) * 2)
+#define CH30W2_TEXT_SLOTS (CH30W2_TEXT_ENTRIES + 5)
+
+/* The synthetic font: one 8 by 8 cell per glyph, one byte to the row and the
+   most significant bit leftmost.  Glyph 0 is blank, glyph 1 has row 0 solid and
+   glyph 2 has row 4 solid, so which of the two entries was drawn is readable off
+   which screen row came out at the foreground colour.  With the outline flag
+   clear and both shadow offsets zero the shadow lands on the cell itself and the
+   body is drawn over it. */
+#define CH30W2_FONT_GLYPHS 3
+#define CH30W2_FONT_W 8
+#define CH30W2_FONT_H 8
+#define CH30W2_FONT_STRIDE 8
+#define CH30W2_FALL_GLYPH 1
+#define CH30W2_ARRIVAL_GLYPH 2
+#define CH30W2_FALL_GLYPH_ROW 0
+#define CH30W2_ARRIVAL_GLYPH_ROW 4
+#define CH30W2_BLANK_ROW 2
+
+/* The aperture the lines are drawn at and its row stride, PUSH 0xa0000 and PUSH
+   0x140 at 00039861 and 0003985c, and the foreground colour, PUSH 0xd0 at
+   00039857. */
+#define CH30W2_VGA_ORIGIN 0x000a0000
+#define CH30W2_VGA_PITCH 0x140
+#define CH30W2_TEXT_FG_COLOR 0xd0
+
+/* A pixel value no glyph of this font can leave behind, stamped on each sampled
+   row before the painting run so a row nothing painted is visible as itself. */
+#define CH30W2_SCREEN_SENTINEL 0x11
+
+/* Where the tile map's height word sits, which
+   fdps_map_apply_triggered_cell_changes reads to bound its sweep
+   (src/maptile.c).  ch30w3_stage stages the width and leaves this 0, which makes
+   the sweep a loop over nothing. */
+#define CH30W2_TILE_MAP_HEIGHT_OFFSET 9
+
+/* The attribute-row flag value the sweep accepts as a searchable cell of kind
+   0x20, and the tile ids the terrain cases hang off: one row given those flags
+   and one left without them. */
+#define CH30W2_TILE_KIND_SEARCHABLE 0x20
+#define CH30W2_SEARCHABLE_TILE_ID 3
+#define CH30W2_PLAIN_TILE_ID 5
+
+/* The three cells the terrain cases stage, all clear of the placement records
+   these cases read back: the one that must change and the two that must not. */
+#define CH30W2_MARKED_CELL_X 4
+#define CH30W2_MARKED_CELL_Y 5
+#define CH30W2_OTHER_CODE_CELL_X 6
+#define CH30W2_OTHER_CODE_CELL_Y 5
+#define CH30W2_PLAIN_CELL_X 8
+#define CH30W2_PLAIN_CELL_Y 5
+
+/* Where MAP00.COD's placement records 0 and 1 and MAP01.COD's record 0 put a
+   unit, the same coordinates the ch30w3_ and ch30w4_ cases read back. */
+#define CH30W2_MAP00_RECORD0_X 18
+#define CH30W2_MAP00_RECORD0_Y 0
+#define CH30W2_MAP00_RECORD1_X 22
+#define CH30W2_MAP00_RECORD1_Y 12
+#define CH30W2_MAP01_RECORD0_X 9
+#define CH30W2_MAP01_RECORD0_Y 4
+
+static short ch30w2_text[CH30W2_TEXT_SLOTS];
+static unsigned char ch30w2_font[CH30W2_FONT_GLYPHS * CH30W2_FONT_STRIDE];
+static unsigned char ch30w2_fall_pixel;
+static unsigned char ch30w2_blank_pixel;
+static unsigned char ch30w2_arrival_pixel;
+
+/* The chapter text block with every entry silent, and the font under it.  The
+   two one-glyph streams are laid down in the tail here as well; nothing points
+   at them until a case asks for it. */
+static void ch30w2_stage_text(void)
+{
+    int entry;
+
+    for (entry = 0; entry < CH30W2_TEXT_ENTRIES; entry++) {
+        ch30w2_text[entry] = (short) CH30W2_TEXT_EMPTY_AT;
+    }
+    ch30w2_text[CH30W2_TEXT_ENTRIES] = (short) CH30W2_TEXT_TERMINATOR;
+    ch30w2_text[CH30W2_TEXT_ENTRIES + 1] = (short) CH30W2_FALL_GLYPH;
+    ch30w2_text[CH30W2_TEXT_ENTRIES + 2] = (short) CH30W2_TEXT_TERMINATOR;
+    ch30w2_text[CH30W2_TEXT_ENTRIES + 3] = (short) CH30W2_ARRIVAL_GLYPH;
+    ch30w2_text[CH30W2_TEXT_ENTRIES + 4] = (short) CH30W2_TEXT_TERMINATOR;
+
+    memset(ch30w2_font, 0, sizeof(ch30w2_font));
+    ch30w2_font[CH30W2_FALL_GLYPH * CH30W2_FONT_STRIDE +
+                CH30W2_FALL_GLYPH_ROW] = 0xff;
+    ch30w2_font[CH30W2_ARRIVAL_GLYPH * CH30W2_FONT_STRIDE +
+                CH30W2_ARRIVAL_GLYPH_ROW] = 0xff;
+
+    data_fdps_current_chapter_text_ptr = (unsigned char *) ch30w2_text;
+    data_fdps_font_sheet_ptr = ch30w2_font;
+    data_fdps_font_glyph_width = CH30W2_FONT_W;
+    data_fdps_glyph_cell_height = CH30W2_FONT_H;
+    data_fdps_font_glyph_stride_bytes = CH30W2_FONT_STRIDE;
+    data_fdps_font_outline_enabled_flag = 0;
+    data_fdps_font_shadow_offset_x = 0;
+    data_fdps_glyph_shadow_row_offset = 0;
+    data_fdps_glyph_advance_x = CH30W2_FONT_W;
+    data_fdps_font_line_height = CH30W2_FONT_H;
+}
+
+/* Point the two entries the handler speaks at their glyph streams, so a draw of
+   either becomes a pixel.  Only the case that puts the adapter in a graphics
+   mode calls this. */
+static void ch30w2_make_the_lines_paint(void)
+{
+    ch30w2_text[CH30W2_FALL_TEXT_ID] = (short) CH30W2_TEXT_FALL_AT;
+    ch30w2_text[CH30W2_ARRIVAL_TEXT_ID] = (short) CH30W2_TEXT_ARRIVAL_AT;
+}
+
+/* One attribute row's flag byte, which is what the sweep's kind test reads. */
+static void ch30w2_set_tile_flags(int tile_id, int flags)
+{
+    struct fdps_tile_attr_entry *rows;
+
+    rows = (struct fdps_tile_attr_entry *)
+           (ch30w3_tile_attr + CH30W3_TILE_ATTR_ROWS_OFFSET);
+    rows[tile_id].flags = (unsigned char) flags;
+}
+
+static int ch30w2_tile_id_at(int tile_x, int tile_y)
+{
+    short *tile_ids;
+
+    tile_ids = (short *) (ch30w3_tile_map + CH30W3_TILE_MAP_IDS_OFFSET);
+    return (int) tile_ids[tile_y * CH30W3_GRID_W + tile_x];
+}
+
+static void ch30w2_set_cell_event_code(int tile_x, int tile_y, int code)
+{
+    ch30w3_event_layer[CH30W3_EVENT_LAYER_CELLS_OFFSET +
+                       tile_y * CH30W3_GRID_W + tile_x] =
+        (unsigned char) code;
+}
+
+static int ch30w2_cell_event_code_at(int tile_x, int tile_y)
+{
+    return (int) ch30w3_event_layer[CH30W3_EVENT_LAYER_CELLS_OFFSET +
+                                    tile_y * CH30W3_GRID_W + tile_x];
+}
+
+/* The ch30w3_ fixture with the decoys laid down around wave 2, a silent text
+   block and a font under it so both draws have something safe to walk, the tile
+   map's height word filled in so the terrain sweep has rows to walk, and the
+   whole trigger table down. */
+static void ch30w2_stage(int battle_turn)
+{
+    int slot;
+
+    ch30w3_stage(battle_turn);
+    ch30w4_tag_decoys(CH30W2_WAVE);
+    ch30w2_stage_text();
+
+    *(short *) (ch30w3_tile_map + CH30W2_TILE_MAP_HEIGHT_OFFSET) =
+        (short) CH30W3_GRID_H;
+
+    for (slot = 0; slot < CH30W2_TRIGGER_TABLE_SLOTS; slot++) {
+        data_fdps_map_cell_event_triggered_flags[slot] = 0;
+    }
+}
+
+/* Move the wave-2 tag onto table index 0, so the record the handler deploys is
+   placement record 0 -- the one record of MAP01.COD these cases know the
+   coordinates of. */
+static void ch30w2_tag_first_record_as_the_wave(void)
+{
+    ch30w3_set_spawn(CH30W3_WAVE2_RECORD, CH30W3_WAVE2_CHAR_ID, CH30W2_WAVE);
+    ch30w3_set_spawn(CH30W3_WAVE3_RECORD, CH30W3_WAVE3_CHAR_ID,
+                     CH30W2_WAVE + 1);
+    ch30w3_set_spawn(CH30W3_WAVE4_RECORD, CH30W3_WAVE4_CHAR_ID,
+                     CH30W2_WAVE + 2);
+}
+
+/* The three cells the terrain cases read back: a searchable cell carrying the
+   marked code, a searchable cell carrying another code, and a cell of a kind the
+   sweep rejects carrying the marked code. */
+static void ch30w2_stage_terrain_cells(void)
+{
+    ch30w2_set_tile_flags(CH30W2_SEARCHABLE_TILE_ID,
+                          CH30W2_TILE_KIND_SEARCHABLE);
+    ch30w2_set_tile_flags(CH30W2_PLAIN_TILE_ID, 0);
+
+    ch30w3_set_tile_id(CH30W2_MARKED_CELL_X, CH30W2_MARKED_CELL_Y,
+                       CH30W2_SEARCHABLE_TILE_ID);
+    ch30w2_set_cell_event_code(CH30W2_MARKED_CELL_X, CH30W2_MARKED_CELL_Y,
+                               CH30W2_TERRAIN_CELL_CODE);
+
+    ch30w3_set_tile_id(CH30W2_OTHER_CODE_CELL_X, CH30W2_OTHER_CODE_CELL_Y,
+                       CH30W2_SEARCHABLE_TILE_ID);
+    ch30w2_set_cell_event_code(CH30W2_OTHER_CODE_CELL_X,
+                               CH30W2_OTHER_CODE_CELL_Y,
+                               CH30W2_UNMARKED_CELL_CODE);
+
+    ch30w3_set_tile_id(CH30W2_PLAIN_CELL_X, CH30W2_PLAIN_CELL_Y,
+                       CH30W2_PLAIN_TILE_ID);
+    ch30w2_set_cell_event_code(CH30W2_PLAIN_CELL_X, CH30W2_PLAIN_CELL_Y,
+                               CH30W2_TERRAIN_CELL_CODE);
+}
+
+/* One whole call with the adapter in the mode the game plays it in, the three
+   sampled rows stamped with the sentinel beforehand and read back before the
+   adapter leaves graphics mode. */
+static void ch30w2_run(int unit_index)
+{
+    ch28_set_mode(CH28_MODE_320X200X256);
+    *(unsigned char *) (CH30W2_VGA_ORIGIN +
+                        CH30W2_FALL_GLYPH_ROW * CH30W2_VGA_PITCH) =
+        CH30W2_SCREEN_SENTINEL;
+    *(unsigned char *) (CH30W2_VGA_ORIGIN +
+                        CH30W2_BLANK_ROW * CH30W2_VGA_PITCH) =
+        CH30W2_SCREEN_SENTINEL;
+    *(unsigned char *) (CH30W2_VGA_ORIGIN +
+                        CH30W2_ARRIVAL_GLYPH_ROW * CH30W2_VGA_PITCH) =
+        CH30W2_SCREEN_SENTINEL;
+
+    fdps_chapter_30_event_deploy_wave_2(unit_index);
+
+    ch30w2_fall_pixel = *(unsigned char *)
+        (CH30W2_VGA_ORIGIN + CH30W2_FALL_GLYPH_ROW * CH30W2_VGA_PITCH);
+    ch30w2_blank_pixel = *(unsigned char *)
+        (CH30W2_VGA_ORIGIN + CH30W2_BLANK_ROW * CH30W2_VGA_PITCH);
+    ch30w2_arrival_pixel = *(unsigned char *)
+        (CH30W2_VGA_ORIGIN + CH30W2_ARRIVAL_GLYPH_ROW * CH30W2_VGA_PITCH);
+    ch28_set_mode(CH28_MODE_TEXT);
+}
+
+/* Back to the state a freshly started program has these in, for the reason
+   ch28_unstage gives, plus the trigger table -- which this handler raises and
+   never lowers, so a later unit would inherit a map cell code already marked. */
+static void ch30w2_unstage(void)
+{
+    int slot;
+
+    ch28_unstage();
+    data_fdps_current_chapter_text_ptr = NULL;
+    data_fdps_font_sheet_ptr = NULL;
+    for (slot = 0; slot < CH30W2_TRIGGER_TABLE_SLOTS; slot++) {
+        data_fdps_map_cell_event_triggered_flags[slot] = 0;
+    }
+}
+
+/* The wave asked for is 2 and only the record tagged with it arrives: of the
+   three staged records exactly one deploys, it is table index 1, and it lands on
+   MAP00.COD record 1 at (22, 12) with the character id that record carries.  The
+   records at waves 1 and 3 sit either side of it, so an off-by-one in either
+   direction would put a different character on a different tile. */
+static void ch30w2_deploys_the_wave_two_record(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w2_stage(0);
+
+    fdps_chapter_30_event_deploy_wave_2(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE3_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH30W2_MAP00_RECORD1_X);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH30W2_MAP00_RECORD1_Y);
+    ch30w2_unstage();
+}
+
+/* The wave is the literal 2 and not a number derived from the battle turn
+   counter: the same record arrives on turn 0, turn 1, turn 4 -- which a handler
+   halving the counter would turn into wave 2 by accident -- turn 7 and turn 18.
+   This is the assertion that separates this handler from the turn-scheduled
+   reinforcement handlers of chapters 17, 18, 23, 24 and 28. */
+static void ch30w2_wave_number_is_a_literal(void)
+{
+    static int turns[5] = {0, 1, 4, 7, 18};
+    int i;
+
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 5; i++) {
+        ch30w2_stage(turns[i]);
+
+        fdps_chapter_30_event_deploy_wave_2(0);
+
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE3_CHAR_ID);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH30W2_MAP00_RECORD1_X);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH30W2_MAP00_RECORD1_Y);
+    }
+    ch30w2_unstage();
+}
+
+/* The map the wave is deployed under is read from
+   data_fdps_chapter_current_chapter_id at the call site and is not a literal:
+   the wave-2 record is moved onto table index 0 and deployed twice, once with
+   that global on 0 and once on 1, and it lands on MAP00.COD's record 0 at
+   (18, 0) and then on MAP01.COD's record 0 at (9, 4). */
+static void ch30w2_map_number_comes_from_the_chapter_global(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w2_stage(0);
+    ch30w2_tag_first_record_as_the_wave();
+
+    fdps_chapter_30_event_deploy_wave_2(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE2_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH30W2_MAP00_RECORD0_X);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH30W2_MAP00_RECORD0_Y);
+
+    ch30w2_stage(0);
+    ch30w2_tag_first_record_as_the_wave();
+    data_fdps_chapter_current_chapter_id = 1;
+
+    fdps_chapter_30_event_deploy_wave_2(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE2_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH30W2_MAP01_RECORD0_X);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH30W2_MAP01_RECORD0_Y);
+    ch30w2_unstage();
+}
+
+/* The placement flag is 1, so the record's own tile is used verbatim: the tile
+   MAP00.COD record 1 names is given a terrain the free-tile search rejects and
+   the unit still lands on it.  A flag of 0 would send the search out to the
+   nearest walkable tile instead, which the chapter 28 handler's cases in this
+   file show landing on (22, 13) off the same fixture. */
+static void ch30w2_places_on_the_scripted_tile(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w2_stage(0);
+    ch30w3_set_tile_id(CH30W2_MAP00_RECORD1_X, CH30W2_MAP00_RECORD1_Y, 1);
+    ch30w3_set_terrain(1, CH30W3_TERRAIN_BLOCKED);
+
+    fdps_chapter_30_event_deploy_wave_2(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE3_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH30W2_MAP00_RECORD1_X);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH30W2_MAP00_RECORD1_Y);
+    ch30w2_unstage();
+}
+
+/* The store at 00039876 is element 2 of the shared trigger table and the call
+   after it turns that mark into the map's terrain change: the searchable cell
+   carrying event code 2 comes back with its tile id bumped by one and its
+   event-code byte cleared, and element 2 of the table is left raised.  A rebuild
+   that wrote a flag of its own leaves the tile id and the event byte exactly as
+   staged, which is the map keeping its old tiles. */
+static void ch30w2_marks_cell_code_two_and_applies_the_terrain_change(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w2_stage(0);
+    ch30w2_stage_terrain_cells();
+
+    fdps_chapter_30_event_deploy_wave_2(0);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[
+                 CH30W2_TERRAIN_CELL_CODE], 1);
+    CHECK_EQ(ch30w2_tile_id_at(CH30W2_MARKED_CELL_X, CH30W2_MARKED_CELL_Y),
+             CH30W2_SEARCHABLE_TILE_ID + 1);
+    CHECK_EQ(ch30w2_cell_event_code_at(CH30W2_MARKED_CELL_X,
+                                       CH30W2_MARKED_CELL_Y), 0);
+    ch30w2_unstage();
+}
+
+/* Only element 2 is marked and only cells matching it change.  The elements
+   around it stay down, a searchable cell carrying event code 3 keeps both its
+   tile id and its event byte, and a cell of a kind the sweep rejects keeps them
+   too even though it carries the marked code.  Between them these say the write
+   landed on element 2 rather than spilling into a neighbour, and that the sweep's
+   kind test is still in front of the change. */
+static void ch30w2_leaves_other_codes_and_other_kinds_alone(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w2_stage(0);
+    ch30w2_stage_terrain_cells();
+
+    fdps_chapter_30_event_deploy_wave_2(0);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[0], 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[1], 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[3], 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[4], 0);
+
+    CHECK_EQ(ch30w2_tile_id_at(CH30W2_OTHER_CODE_CELL_X,
+                               CH30W2_OTHER_CODE_CELL_Y),
+             CH30W2_SEARCHABLE_TILE_ID);
+    CHECK_EQ(ch30w2_cell_event_code_at(CH30W2_OTHER_CODE_CELL_X,
+                                       CH30W2_OTHER_CODE_CELL_Y),
+             CH30W2_UNMARKED_CELL_CODE);
+
+    CHECK_EQ(ch30w2_tile_id_at(CH30W2_PLAIN_CELL_X, CH30W2_PLAIN_CELL_Y),
+             CH30W2_PLAIN_TILE_ID);
+    CHECK_EQ(ch30w2_cell_event_code_at(CH30W2_PLAIN_CELL_X,
+                                       CH30W2_PLAIN_CELL_Y),
+             CH30W2_TERRAIN_CELL_CODE);
+    ch30w2_unstage();
+}
+
+/* Both lines are spoken and they are entries 0x0f and 0x10.  Entry 0x0f paints
+   screen row 0 and entry 0x10 paints screen row 4, so each draw is readable on
+   its own row; row 2 still holds the sentinel, which says nothing else painted a
+   solid cell. */
+static void ch30w2_speaks_both_lines(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w2_stage(0);
+    ch30w2_make_the_lines_paint();
+
+    ch30w2_run(0);
+
+    CHECK_EQ((int) ch30w2_fall_pixel, CH30W2_TEXT_FG_COLOR);
+    CHECK_EQ((int) ch30w2_arrival_pixel, CH30W2_TEXT_FG_COLOR);
+    CHECK_EQ((int) ch30w2_blank_pixel, CH30W2_SCREEN_SENTINEL);
+    ch30w2_unstage();
+}
+
+/* The incoming argument slot is overwritten with 0 at 0003984c before anything
+   else happens and never read back, so the index the dispatcher passes cannot
+   reach the entries drawn, the cell code marked, the map asked for, the wave
+   asked for or the placement flag.  In the shipped data this handler is reached
+   from fdps_run_death_scripts, which passes the index of the unit that just
+   died; the values put through here are the 0 the turn-event runner would pass,
+   an index that names the unit already on the map, one past the array, and -1 and
+   30000, which are the ones an argument-driven handler would betray itself on. */
+static void ch30w2_ignores_the_unit_index_argument(void)
+{
+    static int arguments[5] = {0, 1, 2, -1, 30000};
+    int i;
+
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 5; i++) {
+        ch30w2_stage(0);
+        ch30w2_stage_terrain_cells();
+
+        fdps_chapter_30_event_deploy_wave_2(arguments[i]);
+
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE3_CHAR_ID);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH30W2_MAP00_RECORD1_X);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH30W2_MAP00_RECORD1_Y);
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[
+                     CH30W2_TERRAIN_CELL_CODE], 1);
+        CHECK_EQ(ch30w2_tile_id_at(CH30W2_MARKED_CELL_X,
+                                   CH30W2_MARKED_CELL_Y),
+                 CH30W2_SEARCHABLE_TILE_ID + 1);
+    }
+    ch30w2_unstage();
+}
+
+/* Nothing guards the call: there is no compare anywhere in the body, and the
+   byte this handler writes is element 2 of the trigger table rather than the
+   one-shot slot its siblings gate on.  So the slot those siblings latch is put up
+   beforehand and the wave still arrives, and a second call appends a second copy
+   of it rather than being refused.  Element 2 being already raised does not
+   refuse it either -- the second run marks it again and deploys again. */
+static void ch30w2_has_no_one_shot_latch(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w2_stage(0);
+    data_fdps_map_cell_event_triggered_flags[CH29_LATCH_SLOT] = 1;
+
+    fdps_chapter_30_event_deploy_wave_2(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH29_LATCH_SLOT], 1);
+
+    fdps_chapter_30_event_deploy_wave_2(0);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ((int) ch30w3_unit(2)->char_id, CH30W3_WAVE3_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(2)->pos_x, CH30W2_MAP00_RECORD1_X);
+    CHECK_EQ((int) ch30w3_unit(2)->pos_y, CH30W2_MAP00_RECORD1_Y);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[
+                 CH30W2_TERRAIN_CELL_CODE], 1);
+    ch30w2_unstage();
+}
+
 void run_chevt6_tests(void)
 {
     RUN_TEST(ch29_record_shape_matches_the_offsets);
@@ -2591,4 +3183,13 @@ void run_chevt6_tests(void)
     RUN_TEST(ch30w4_pans_even_when_no_record_matches);
     RUN_TEST(ch30w4_fires_only_once);
     RUN_TEST(ch30w4_ignores_the_unit_index_argument);
+    RUN_TEST(ch30w2_deploys_the_wave_two_record);
+    RUN_TEST(ch30w2_wave_number_is_a_literal);
+    RUN_TEST(ch30w2_map_number_comes_from_the_chapter_global);
+    RUN_TEST(ch30w2_places_on_the_scripted_tile);
+    RUN_TEST(ch30w2_marks_cell_code_two_and_applies_the_terrain_change);
+    RUN_TEST(ch30w2_leaves_other_codes_and_other_kinds_alone);
+    RUN_TEST(ch30w2_speaks_both_lines);
+    RUN_TEST(ch30w2_ignores_the_unit_index_argument);
+    RUN_TEST(ch30w2_has_no_one_shot_latch);
 }

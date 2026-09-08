@@ -504,6 +504,101 @@ void fdps_chapter_30_event_deploy_wave_4(int unit_index)
     }
 }
 
+/* The two entries of the chapter's own text block the handler below speaks:
+   PUSH 0xf at 00039866 and PUSH 0x10 at 000398ab.  Both are drawn at the same
+   aperture origin in the same colours, so the second lands over the first. */
+#define CH30_WAVE2_FALL_TEXT_ID 0x0f
+#define CH30_WAVE2_ARRIVAL_TEXT_ID 0x10
+
+/* The map cell event code the scripted terrain change is keyed on.  MOV byte
+   ptr [0x000640da],0x1 at 00039876 reads like a flag of its own, because Ghidra
+   labels the target DAT_000640da, but 0x000640da is element 2 of
+   data_fdps_map_cell_event_triggered_flags, whose base is 0x000640d8: the table
+   fdps_map_apply_triggered_cell_changes indexes with each cell's event code
+   (CMP byte ptr [EAX + 0x640d8],0x0 at 0002e9b0) and that
+   fdps_map_actor_behavior_step, fdps_battle_search_cell_at_cursor and
+   fdps_icon_script_run address as base + index.  Written as a separate flag the
+   table stays untouched and the call on the next line then changes no terrain at
+   all, so chapter 30's map would keep its old tiles when the first form dies
+   (rebuild_info/pitfalls.md, contract H). */
+#define CH30_WAVE2_TERRAIN_CELL_CODE 2
+
+/* The wave the handler asks for, PUSH 0x2 at 00039888.  A literal, like the
+   wave-3 handler's below and unlike the turn-scheduled handlers of chapters 17,
+   18, 23, 24 and 28, which push the battle turn counter instead. */
+#define CH30_WAVE2_WAVE_NO 2
+
+/* How that wave is placed: MOV EAX,0x1 / PUSH EAX at 00039882, the same
+   exact-tile flag the wave-3 handler passes, so the arriving form is put on the
+   tile its own placement record names rather than beside it. */
+#define CH30_WAVE2_PLACE_EXACT 1
+
+/* 00039840.  Chapter 30's "the first form has fallen" event: the chapter's line
+   is spoken, the map's scripted terrain change is applied, the second form of
+   平衡之神 is deployed and a second line is spoken.
+
+   The frame is the family's four-push one with an empty local area -- PUSH EBX /
+   PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x0 at
+   00039840..00039846 -- so there is no local in this function at all.  Every
+   caller-clean in the body is this function's own (ADD ESP,0x1c after each draw
+   and ADD ESP,0xc after the deployment) and the RET at 000398bf carries no
+   immediate, so the convention is the stack one.
+
+   THERE IS NO GATE AND NO LATCH.  The body has no compare and no conditional
+   jump in it, and it is the one handler of this family whose trigger-table write
+   is not the shared one-shot slot: 0x000640da is element 2 and the one-shot
+   handlers all use 0x000640e8 or 0x000640e9.  So this handler runs its whole
+   body every time it is reached, and reaching it twice speaks both lines twice
+   and appends a second copy of the wave.
+
+   THE STORE AND THE CALL AFTER IT ARE ONE OPERATION.  Element 2 of the trigger
+   table is the terrain change's key and
+   fdps_map_apply_triggered_cell_changes is what makes it visible; the mark is
+   the state that persists across a save and the call is the view of it.  See
+   CH30_WAVE2_TERRAIN_CELL_CODE above for why it cannot be a variable of its own.
+
+   THE ARGUMENT SLOT IS OVERWRITTEN FIRST.  MOV dword ptr [EBP+0x14],0x0 at
+   0003984c is the first instruction after the frame and nothing reads the slot
+   afterwards, so which unit died cannot reach the entry drawn, the cell code
+   marked, the map asked for, the wave asked for or the placement flag.  The
+   store has no observable effect on the caller, because the slot belongs to its
+   outgoing argument area and fdps_run_death_scripts drops it with its own ADD
+   ESP,0x4.
+
+   NO VALUE IS USED AFTER A CALL.  fdps_map_apply_triggered_cell_changes and
+   fdps_deploy_wave return nothing, and the instruction after the deployment's
+   CALL is the ADD ESP that cleans its arguments.  fdps_draw_text does hand back
+   the cursor it stopped at, and both times it is discarded: the instruction
+   after the CALL at 0003986e is the ADD ESP,0x1c and then the trigger store,
+   and after the CALL at 000398b3 it is the ADD ESP,0x1c and then the epilogue,
+   none of which reads EAX.  The MOV EAX,0x1 at 00039882 is the placement flag
+   being loaded for its PUSH and not a use of anything a CALL left behind.
+   Nothing sets EAX before the RET and no dispatcher reads what comes back, so
+   the result is void. */
+void fdps_chapter_30_event_deploy_wave_2(int unit_index)
+{
+    unit_index = 0;
+
+    fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                   CH30_WAVE2_FALL_TEXT_ID,
+                   (unsigned char *) VGA_SCREEN_BASE,
+                   VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                   MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+
+    data_fdps_map_cell_event_triggered_flags[CH30_WAVE2_TERRAIN_CELL_CODE] = 1;
+    fdps_map_apply_triggered_cell_changes();
+
+    fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                     CH30_WAVE2_WAVE_NO,
+                     CH30_WAVE2_PLACE_EXACT);
+
+    fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                   CH30_WAVE2_ARRIVAL_TEXT_ID,
+                   (unsigned char *) VGA_SCREEN_BASE,
+                   VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                   MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+}
+
 /* The wave the chapter 30 handler below asks for: PUSH 0x3 at 000398d9, a
    literal and not a value read from anywhere.  That is the whole difference
    between this handler and the turn-scheduled ones of chapters 17, 18, 23 and

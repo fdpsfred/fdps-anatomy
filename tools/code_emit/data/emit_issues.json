@@ -2259,5 +2259,13 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "00039840": [
+    {
+      "from": "review",
+      "what": "What the two lines this handler speaks actually say is unestablished. The ids are settled -- entry 0x0f before the deployment and 0x10 after, out of the chapter's own text block -- but the strings are not: the FDETXT%02d.TXT streams are not Big5 and no decoder for them exists in the project, so the names CH30_WAVE2_FALL_TEXT_ID and CH30_WAVE2_ARRIVAL_TEXT_ID rest on the handler's narrative role, not on read text. Nothing about equivalence turns on this; a reader could be misled about which line is which.",
+      "needs": "The encoding of an FDETXT block's message streams and its glyph-index-to-character mapping through FDETXT.FON, which nothing in resource_info/ documents yet. Once a message can be read, entries 0x0f and 0x10 of FDETXT30.TXT settle the two names one way or the other.",
+      "status": "open"
+    }
   ]
 }

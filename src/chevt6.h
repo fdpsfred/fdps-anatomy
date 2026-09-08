@@ -211,6 +211,49 @@ extern void fdps_chapter_29_event_activate_all_enemies(int unit_index);
 extern void fdps_chapter_30_event_deploy_wave_4(int unit_index);
 #pragma aux fdps_chapter_30_event_deploy_wave_4 "*" parm caller [];
 
+/* Chapter 30's "the first form has fallen" event: it speaks a line, opens the
+   map up, brings on the second form of 平衡之神 and speaks a second line.
+   Nothing in it is conditional and nothing it does is guarded.
+
+   The line before is entry 0x0f of the loaded chapter's text block and the line
+   after is entry 0x10, both through fdps_draw_text (text.h) straight onto the
+   mode 13h aperture in the standard message colours.  Both results are
+   discarded, and because both are drawn at the same origin the second lands over
+   the first.
+
+   Between them is the terrain change, and it is two steps that only work
+   together.  Map cell event code 2 is marked in
+   data_fdps_map_cell_event_triggered_flags (gamedata.h) and
+   fdps_map_apply_triggered_cell_changes (maptile.h) is then called, which walks
+   every cell of the loaded map and, on each searchable cell whose event code is
+   marked, bumps the cell's tile id by one and clears its byte in the event-code
+   layer.  The mark is what persists -- it is saved and restored with the game
+   and cleared at every chapter start -- and the call is what makes it visible.
+
+   The deployment is wave 2 of the current map, fdps_deploy_wave (deploy.h) with
+   the map number read out of data_fdps_chapter_current_chapter_id, the wave
+   number as the literal 2 and the placement flag as 1.  The literal wave is what
+   separates this handler from the turn-scheduled reinforcement handlers, which
+   push the battle turn counter instead; the placement flag of 1 puts the unit on
+   the tile its MAP%02d.COD record names exactly, with no search for a free
+   walkable tile, which is how the second form appears where the first one stood.
+
+   Nothing guards any of it: reaching the handler twice speaks the lines twice
+   and appends a second copy of the wave.  What makes the form arrive once in
+   play is that a unit's death script is collected once, before the unit is
+   marked removed.
+
+   unit_index is the handler table's shared parameter and this handler ignores
+   it: the incoming slot is overwritten with 0 on entry and never read.  In the
+   shipped data it is the index of the unit whose death ran the script.
+
+   Table slot 48, and the only thing that names it in the shipped data is the
+   death script of map29.dat's deployment record 0 -- the level 40 character id
+   60 that is the first form of 平衡之神 -- whose wave 2 is the single record
+   carrying its second form. */
+extern void fdps_chapter_30_event_deploy_wave_2(int unit_index);
+#pragma aux fdps_chapter_30_event_deploy_wave_2 "*" parm caller [];
+
 /* Chapter 30's "the second form has fallen" event: one call and nothing else.
    It deploys wave 3 of the current map -- fdps_deploy_wave with the map number
    read out of data_fdps_chapter_current_chapter_id, the wave number as the
