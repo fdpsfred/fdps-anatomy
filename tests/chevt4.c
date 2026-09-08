@@ -521,10 +521,11 @@ static void ch20_touches_no_other_unit(void)
    000232cc, and the stride fdps_get_unit_record multiplies the index by. */
 #define CH21_UNIT_STRIDE 0x50
 
-/* The chapter text block the line is spoken from: 0x15 entries, because
-   PUSH 0x14 at 000383dc asks for the last of them, each pointing at the same
-   lone terminator so that a draw walks it, paints nothing and returns. */
-#define CH21_TEXT_IDS 0x15
+/* The chapter text block the two ambush lines are spoken from: 0x16 entries,
+   because PUSH 0x14 at 000383dc and PUSH 0x15 at 0003845f between them ask for
+   the last of them, each pointing at the same lone terminator so that a draw
+   walks it, paints nothing and returns. */
+#define CH21_TEXT_IDS 0x16
 #define CH21_TEXT_EMPTY_AT 0x40
 #define CH21_TEXT_BLOCK_BYTES (CH21_TEXT_EMPTY_AT + 2)
 #define CH21_TEXT_END (-1)
@@ -891,6 +892,376 @@ static void ch21_fires_once_and_the_latch_is_the_shared_slot(void)
              1);
 }
 
+/* ---------------------------------------------------------------------- */
+
+/* Chapter 21's second ambush at 00038400, from here down.
+ *
+ * It shares both gates and the whole deployment shape with the wave-1 handler
+ * above, so the cases here are about the three things that differ, and the
+ * fixture above is reused for everything else.
+ *
+ * The latch is a DIFFERENT byte -- 0x000640e9 against the array base
+ * 0x000640d8, so element 0x11 where the handler above uses 0x10.  Both tiles
+ * are armed on the same map at the same time, so a rebuild that copied the
+ * neighbour's slot would let the first unit to trip either tile disarm both:
+ * that is asserted from both sides, by firing with the wave-1 slot already up
+ * and by watching this handler leave that slot alone.
+ *
+ * The tail is the inline expansion of fdps_object_set_field34_low_nibble_range
+ * over unit indices 0x0b..0x50 INCLUSIVE, and both ends of that range are
+ * asserted from both sides, because the idiomatic half-open loop is wrong at
+ * exactly one unit -- the map's last -- and a unit left in mode 2 holds
+ * position instead of advancing, which nothing else in a run would report.  The
+ * merge keeps the high nibble, so a case walks bytes whose high nibbles differ.
+ *
+ * Every firing case has to stage at least 0x52 units, because the loop resolves
+ * every index in its range through fdps_get_unit_record and nothing bounds it
+ * against data_fdps_map_unit_count: a shorter array is not a smaller fixture,
+ * it is writes past the end of the block.  ch21b_stage lays those units out
+ * eight to a row so the placement records these cases read back -- MAP00.COD
+ * record 1 at (22, 12) and MAP01.COD record 0 at (9, 4) -- stay clear of them.
+ *
+ * A firing runs fdps_deploy_wave for real, which opens ICON.CEL and FIELD.VFS
+ * for itself, so each firing case skips itself when those are not staged;
+ * without them the handler would not fail a check, it would hang in
+ * fdps_wait_any_key.
+ */
+
+/* The slot this handler latches, MOV byte ptr [0x000640e9],0x1 at 0003846f
+   against the array base 0x000640d8 -- one past the slot the wave-1 cases
+   above use. */
+#define CH21B_LATCH_SLOT 0x11
+
+/* The wave key the handler asks for, PUSH 0x2 at 0003843c.  The cases stage a
+   record either side of it so a record tagged 1 or 3 is present to be left
+   behind. */
+#define CH21B_WAVE 2
+
+/* The inclusive ends of the advance, the 0xb at 00038476 and the 0x50 at
+   0003847d, and the two indices either side of them that have to come through
+   untouched. */
+#define CH21B_FIRST_ADVANCED 0x0b
+#define CH21B_LAST_ADVANCED 0x50
+#define CH21B_BELOW_FIRST (CH21B_FIRST_ADVANCED - 1)
+#define CH21B_ABOVE_LAST (CH21B_LAST_ADVANCED + 1)
+
+/* One more unit than the last index the loop writes, which is the shortest
+   array a firing may be given. */
+#define CH21B_STAGED_UNITS (CH21B_ABOVE_LAST + 1)
+
+/* How wide ch21b_stage lays the staged units out.  Eight columns keeps every
+   one of them at x < 8, clear of both placement records these cases read
+   back, and keeps the tallest column inside the grid's 16 rows. */
+#define CH21B_STAGE_COLUMNS 8
+
+/* A behaviour byte in the state MAP20.DAT deploys the chapter's enemies in --
+   mode 2, holding position -- with two high-nibble flag bits set, and what the
+   merge must leave behind: the same high nibble over mode 0. */
+#define CH21B_HOLDING 0xa2
+#define CH21B_ADVANCING 0xa0
+
+/* Four more behaviour bytes whose high nibbles differ, and what the merge
+   makes of each: the mask is 0xf0 and the value merged in is 0. */
+#define CH21B_NIBBLE_IN_0 0x00
+#define CH21B_NIBBLE_IN_1 0xff
+#define CH21B_NIBBLE_IN_2 0x42
+#define CH21B_NIBBLE_IN_3 0x0f
+#define CH21B_NIBBLE_OUT_0 0x00
+#define CH21B_NIBBLE_OUT_1 0xf0
+#define CH21B_NIBBLE_OUT_2 0x40
+#define CH21B_NIBBLE_OUT_3 0x00
+
+/* The wave-1 fixture with the units re-laid onto a block of columns, this
+   handler's own latch put down, and every unit in the advance range holding
+   position, which is the state the chapter's map deploys them in. */
+static void ch21b_stage(int unit_count)
+{
+    int i;
+
+    ch21_stage(unit_count);
+    for (i = 0; i < unit_count; i++) {
+        ch21_unit(i)->pos_x = (unsigned char) (i % CH21B_STAGE_COLUMNS);
+        ch21_unit(i)->pos_y = (unsigned char) (i / CH21B_STAGE_COLUMNS);
+        ch21_unit(i)->ai_behavior = CH21B_HOLDING;
+    }
+    data_fdps_map_cell_event_triggered_flags[CH21B_LATCH_SLOT] = 0;
+}
+
+/* The gate admits side 2 alone, exactly as the wave-1 gate does: the enemy,
+   the guest and a byte with its top bit set are all refused, and a refusal
+   leaves the latch down and the garrison holding position.  Nothing is
+   deployed on any of these, so no game file is needed. */
+static void ch21b_fires_for_the_player_side_only(void)
+{
+    static int refused_sides[3] = {CH21_ENEMY_SIDE, CH21_GUEST_SIDE,
+                                   CH21_HIGH_SIDE};
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        ch21b_stage(CH21B_STAGED_UNITS);
+        ch21_unit(0)->side = (unsigned char) refused_sides[i];
+        ch21_spawn_table[CH21_SPAWN_TABLE_COUNT_OFFSET] = 1;
+        ch21_set_spawn(0, 5, CH21B_WAVE);
+
+        fdps_chapter_21_event_deploy_wave_2(0);
+
+        CHECK_EQ(data_fdps_map_unit_count, CH21B_STAGED_UNITS);
+        CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[
+                     CH21B_LATCH_SLOT], 0);
+        CHECK_EQ((int) ch21_unit(CH21B_FIRST_ADVANCED)->ai_behavior,
+                 CH21B_HOLDING);
+    }
+}
+
+/* The latch is tested against 0 and not against 1, so any non-zero value in
+   this handler's own slot blocks the body for a unit that would otherwise
+   qualify, and the slot is left exactly as it was found. */
+static void ch21b_any_non_zero_latch_blocks(void)
+{
+    static int raised_values[3] = {1, 2, 0xff};
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        ch21b_stage(CH21B_STAGED_UNITS);
+        ch21_unit(0)->side = CH21_PLAYER_SIDE;
+        ch21_spawn_table[CH21_SPAWN_TABLE_COUNT_OFFSET] = 1;
+        ch21_set_spawn(0, 5, CH21B_WAVE);
+        data_fdps_map_cell_event_triggered_flags[CH21B_LATCH_SLOT] =
+            (unsigned char) raised_values[i];
+
+        fdps_chapter_21_event_deploy_wave_2(0);
+
+        CHECK_EQ(data_fdps_map_unit_count, CH21B_STAGED_UNITS);
+        CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[
+                     CH21B_LATCH_SLOT], raised_values[i]);
+        CHECK_EQ((int) ch21_unit(CH21B_FIRST_ADVANCED)->ai_behavior,
+                 CH21B_HOLDING);
+    }
+}
+
+/* The two ambushes on this map do NOT share a latch: with the wave-1 slot
+   already up this handler still fires, and it leaves that slot alone while
+   raising its own.  A rebuild that copied the neighbour's slot number would
+   fail both halves of this. */
+static void ch21b_latch_is_not_the_wave_1_slot(void)
+{
+    ch21_ensure_game_files();
+    if (!ch21_files_ready) {
+        return;
+    }
+    ch21b_stage(CH21B_STAGED_UNITS);
+    ch21_unit(0)->side = CH21_PLAYER_SIDE;
+    data_fdps_map_cell_event_triggered_flags[CH21_LATCH_SLOT] = 1;
+
+    fdps_chapter_21_event_deploy_wave_2(0);
+
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH21B_LATCH_SLOT],
+             1);
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH21_LATCH_SLOT],
+             1);
+    CHECK_EQ((int) ch21_unit(CH21B_FIRST_ADVANCED)->ai_behavior,
+             CH21B_ADVANCING);
+}
+
+/* The wave key is 2: of three records tagged 1, 2 and 3 only the middle one is
+   deployed, it is appended behind the units already on the map, and it lands
+   on MAP00.COD record 1's tile (22, 12).  The latch comes up to exactly 1. */
+static void ch21b_deploys_the_records_tagged_wave_2(void)
+{
+    ch21_ensure_game_files();
+    if (!ch21_files_ready) {
+        return;
+    }
+    ch21b_stage(CH21B_STAGED_UNITS);
+    ch21_unit(0)->side = CH21_PLAYER_SIDE;
+    ch21_spawn_table[CH21_SPAWN_TABLE_COUNT_OFFSET] = 3;
+    ch21_set_spawn(0, 5, CH21B_WAVE - 1);
+    ch21_set_spawn(1, 6, CH21B_WAVE);
+    ch21_set_spawn(2, 7, CH21B_WAVE + 1);
+
+    fdps_chapter_21_event_deploy_wave_2(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH21B_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch21_unit(CH21B_STAGED_UNITS)->char_id, 6);
+    CHECK_EQ((int) ch21_unit(CH21B_STAGED_UNITS)->pos_x, 22);
+    CHECK_EQ((int) ch21_unit(CH21B_STAGED_UNITS)->pos_y, 12);
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH21B_LATCH_SLOT],
+             1);
+}
+
+/* The map number comes from data_fdps_chapter_current_chapter_id read at the
+   call site and not from anything the handler holds: with the global on 1 the
+   deployment reads MAP01.COD, whose record 0 is (9, 4), where map 0's record 0
+   is (18, 0). */
+static void ch21b_map_number_comes_from_the_chapter_global(void)
+{
+    ch21_ensure_game_files();
+    if (!ch21_files_ready) {
+        return;
+    }
+    ch21b_stage(CH21B_STAGED_UNITS);
+    ch21_unit(0)->side = CH21_PLAYER_SIDE;
+    ch21_spawn_table[CH21_SPAWN_TABLE_COUNT_OFFSET] = 1;
+    ch21_set_spawn(0, 5, CH21B_WAVE);
+    data_fdps_chapter_current_chapter_id = 1;
+
+    fdps_chapter_21_event_deploy_wave_2(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH21B_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch21_unit(CH21B_STAGED_UNITS)->pos_x, 9);
+    CHECK_EQ((int) ch21_unit(CH21B_STAGED_UNITS)->pos_y, 4);
+}
+
+/* The placement flag is 0, so the arrival goes on the nearest free walkable
+   tile to its record's coordinates rather than on the coordinates themselves:
+   with (22, 12) made unwalkable the unit lands at (22, 13) instead of standing
+   on the blocked tile, which is what a place_exact of 1 would have done. */
+static void ch21b_places_on_the_nearest_free_tile(void)
+{
+    ch21_ensure_game_files();
+    if (!ch21_files_ready) {
+        return;
+    }
+    ch21b_stage(CH21B_STAGED_UNITS);
+    ch21_unit(0)->side = CH21_PLAYER_SIDE;
+    ch21_spawn_table[CH21_SPAWN_TABLE_COUNT_OFFSET] = 2;
+    ch21_set_spawn(0, 5, CH21B_WAVE - 1);
+    ch21_set_spawn(1, 6, CH21B_WAVE);
+    ch21_set_tile_id(22, 12, 1);
+    ch21_set_terrain(1, CH21_TERRAIN_BLOCKED);
+
+    fdps_chapter_21_event_deploy_wave_2(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH21B_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch21_unit(CH21B_STAGED_UNITS)->char_id, 6);
+    CHECK_EQ((int) ch21_unit(CH21B_STAGED_UNITS)->pos_x, 22);
+    CHECK_EQ((int) ch21_unit(CH21B_STAGED_UNITS)->pos_y, 13);
+}
+
+/* The advance covers unit indices 0x0b through 0x50 and both ends are
+   inclusive.  0x0a is the last party member and comes through holding
+   position, 0x0b is the first unit moved, 0x50 is the LAST unit moved -- the
+   half-open loop every rewrite reaches for leaves that one holding position --
+   and 0x51 is past the end and untouched.  Nothing is deployed here, so the
+   array the loop walks is exactly the one staged. */
+static void ch21b_advance_range_is_inclusive_at_both_ends(void)
+{
+    ch21_ensure_game_files();
+    if (!ch21_files_ready) {
+        return;
+    }
+    ch21b_stage(CH21B_STAGED_UNITS);
+    ch21_unit(0)->side = CH21_PLAYER_SIDE;
+
+    fdps_chapter_21_event_deploy_wave_2(0);
+
+    CHECK_EQ((int) ch21_unit(CH21B_BELOW_FIRST)->ai_behavior, CH21B_HOLDING);
+    CHECK_EQ((int) ch21_unit(CH21B_FIRST_ADVANCED)->ai_behavior,
+             CH21B_ADVANCING);
+    CHECK_EQ((int) ch21_unit(CH21B_FIRST_ADVANCED + 1)->ai_behavior,
+             CH21B_ADVANCING);
+    CHECK_EQ((int) ch21_unit(CH21B_LAST_ADVANCED - 1)->ai_behavior,
+             CH21B_ADVANCING);
+    CHECK_EQ((int) ch21_unit(CH21B_LAST_ADVANCED)->ai_behavior,
+             CH21B_ADVANCING);
+    CHECK_EQ((int) ch21_unit(CH21B_ABOVE_LAST)->ai_behavior, CH21B_HOLDING);
+    CHECK_EQ((int) ch21_unit(0)->ai_behavior, CH21B_HOLDING);
+}
+
+/* The store is a read-modify-write of the low nibble alone: the byte is masked
+   with 0xf0 and 0 is merged in, so the two AI flag bits the scorers read out of
+   the high nibble survive.  Writing the mode whole would flatten all four
+   bytes to 0. */
+static void ch21b_advance_preserves_the_high_nibble(void)
+{
+    ch21_ensure_game_files();
+    if (!ch21_files_ready) {
+        return;
+    }
+    ch21b_stage(CH21B_STAGED_UNITS);
+    ch21_unit(0)->side = CH21_PLAYER_SIDE;
+    ch21_unit(CH21B_FIRST_ADVANCED)->ai_behavior = CH21B_NIBBLE_IN_0;
+    ch21_unit(CH21B_FIRST_ADVANCED + 1)->ai_behavior = CH21B_NIBBLE_IN_1;
+    ch21_unit(CH21B_FIRST_ADVANCED + 2)->ai_behavior = CH21B_NIBBLE_IN_2;
+    ch21_unit(CH21B_FIRST_ADVANCED + 3)->ai_behavior = CH21B_NIBBLE_IN_3;
+
+    fdps_chapter_21_event_deploy_wave_2(0);
+
+    CHECK_EQ((int) ch21_unit(CH21B_FIRST_ADVANCED)->ai_behavior,
+             CH21B_NIBBLE_OUT_0);
+    CHECK_EQ((int) ch21_unit(CH21B_FIRST_ADVANCED + 1)->ai_behavior,
+             CH21B_NIBBLE_OUT_1);
+    CHECK_EQ((int) ch21_unit(CH21B_FIRST_ADVANCED + 2)->ai_behavior,
+             CH21B_NIBBLE_OUT_2);
+    CHECK_EQ((int) ch21_unit(CH21B_FIRST_ADVANCED + 3)->ai_behavior,
+             CH21B_NIBBLE_OUT_3);
+}
+
+/* The gate reads the record the argument names and not unit 0, and it is the
+   record's byte at +6: units 0, 1 and 3 are the enemy and only unit 2 is the
+   player's, so a firing for 2 goes through and a firing for any of the others
+   does not. */
+static void ch21b_reads_the_record_the_index_names(void)
+{
+    ch21b_stage(CH21B_STAGED_UNITS);
+    ch21_unit(0)->side = CH21_ENEMY_SIDE;
+    ch21_unit(1)->side = CH21_ENEMY_SIDE;
+    ch21_unit(2)->side = CH21_PLAYER_SIDE;
+    ch21_unit(3)->side = CH21_ENEMY_SIDE;
+
+    fdps_chapter_21_event_deploy_wave_2(0);
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH21B_LATCH_SLOT],
+             0);
+    fdps_chapter_21_event_deploy_wave_2(3);
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH21B_LATCH_SLOT],
+             0);
+
+    ch21_ensure_game_files();
+    if (!ch21_files_ready) {
+        return;
+    }
+
+    fdps_chapter_21_event_deploy_wave_2(2);
+
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH21B_LATCH_SLOT],
+             1);
+    CHECK_EQ((int) ch21_unit(CH21B_FIRST_ADVANCED)->ai_behavior,
+             CH21B_ADVANCING);
+}
+
+/* The latch the handler raises is the one it reads, so a second firing on the
+   same map does nothing more -- and the latch it raises is the shared array
+   element rather than a private static, which is what the chapter reset clears
+   and the save file carries.  Clearing that element by hand re-arms the event,
+   which a static could not be made to do. */
+static void ch21b_fires_once_and_the_latch_is_the_shared_slot(void)
+{
+    ch21_ensure_game_files();
+    if (!ch21_files_ready) {
+        return;
+    }
+    ch21b_stage(CH21B_STAGED_UNITS);
+    ch21_unit(0)->side = CH21_PLAYER_SIDE;
+
+    fdps_chapter_21_event_deploy_wave_2(0);
+    CHECK_EQ((int) ch21_unit(CH21B_FIRST_ADVANCED)->ai_behavior,
+             CH21B_ADVANCING);
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH21B_LATCH_SLOT],
+             1);
+
+    ch21_unit(CH21B_FIRST_ADVANCED)->ai_behavior = CH21B_HOLDING;
+    fdps_chapter_21_event_deploy_wave_2(0);
+    CHECK_EQ((int) ch21_unit(CH21B_FIRST_ADVANCED)->ai_behavior,
+             CH21B_HOLDING);
+
+    data_fdps_map_cell_event_triggered_flags[CH21B_LATCH_SLOT] = 0;
+    fdps_chapter_21_event_deploy_wave_2(0);
+    CHECK_EQ((int) ch21_unit(CH21B_FIRST_ADVANCED)->ai_behavior,
+             CH21B_ADVANCING);
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH21B_LATCH_SLOT],
+             1);
+}
+
 void run_chevt4_tests(void)
 {
     RUN_TEST(ch20_record_shape_matches_the_offsets);
@@ -911,4 +1282,14 @@ void run_chevt4_tests(void)
     RUN_TEST(ch21_map_number_comes_from_the_chapter_global);
     RUN_TEST(ch21_places_on_the_nearest_free_tile);
     RUN_TEST(ch21_fires_once_and_the_latch_is_the_shared_slot);
+    RUN_TEST(ch21b_fires_for_the_player_side_only);
+    RUN_TEST(ch21b_any_non_zero_latch_blocks);
+    RUN_TEST(ch21b_reads_the_record_the_index_names);
+    RUN_TEST(ch21b_latch_is_not_the_wave_1_slot);
+    RUN_TEST(ch21b_deploys_the_records_tagged_wave_2);
+    RUN_TEST(ch21b_map_number_comes_from_the_chapter_global);
+    RUN_TEST(ch21b_places_on_the_nearest_free_tile);
+    RUN_TEST(ch21b_advance_range_is_inclusive_at_both_ends);
+    RUN_TEST(ch21b_advance_preserves_the_high_nibble);
+    RUN_TEST(ch21b_fires_once_and_the_latch_is_the_shared_slot);
 }

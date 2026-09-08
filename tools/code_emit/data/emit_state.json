@@ -3142,6 +3142,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x7a"
+    },
+    "00038400": {
+      "name": "fdps_chapter_21_event_deploy_wave_2",
+      "target": "chevt4.c",
+      "body_size": "0xdd",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0xdd"
     }
   }
 }
