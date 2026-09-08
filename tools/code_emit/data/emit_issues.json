@@ -2244,5 +2244,20 @@
       "needs": "The chapter 23 playtest the emitter describes, in DOSBox-X against the rebuilt executable, plus the full-bag repeat that checks the latch stayed down.",
       "same_as": "emit#0"
     }
+  ],
+  "00038cc0": [
+    {
+      "from": "emit",
+      "what": "The order of fdps_draw_text against fdps_deploy_wave inside a case is behaviour and is not reachable by any assertion here. The emitted C makes the calls in each case's own assembly order -- draw then deploy on turns 5, 13 and 15, deploy then draw on turns 7 and 10 -- and that is settled from the instruction stream, so nothing about the code is in doubt. What is unwitnessed is the effect: what the player sees is a spoken line over a map the wave has not arrived on yet, or over one it has, and a unit test cannot see it because the draw is staged against a text block that paints nothing (a real draw needs a font, the message panel and mode 13h, and three of fdps_draw_text's control codes stand a modal wait on the keyboard). Turn 7 is the case where it shows most, since the arrival is 珊 the 法師 joining the party as a guest -- MAP23.DAT's one side-2 deployment record, character id 0x0a -- and she is on the map before her line is spoken.",
+      "needs": "A playtest of chapter 24 in DOSBox-X reaching turns 5, 7, 10, 13 and 15, watching whether the reinforcements are on screen before or after the line on each; or a frame capture at each of the five events compared against the original executable. Neither is available to this stage.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed independently and added nothing the emitter missed: the draw-against-deploy order inside a case is settled from the instruction stream (turns 5, 13, 15 draw at 00038cf7 / 00038df4 / 00038e35 before deploying at 00038d0a / 00038e07 / 00038e48; turns 7 and 10 deploy at 00038d5c / 00038da0 before drawing at 00038d7f / 00038dc3), and I additionally verified the emitted object preserves that order per case -- CHEVT5.OBJ has call fdps_draw_text at 0037 before call fdps_deploy_wave at 004a in the turn-5 case, and call fdps_deploy_wave at 00e0 before call fdps_draw_text at 0103 in the turn-10 case. So the code is not in doubt; what is unwitnessed is only the on-screen effect, which no unit test can reach.",
+      "needs": "As the emitter states: a DOSBox-X playtest of chapter 24 through turns 5, 7, 10, 13 and 15, or a frame capture at each event compared against the original executable.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

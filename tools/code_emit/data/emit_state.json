@@ -3190,6 +3190,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x15f"
+    },
+    "00038cc0": {
+      "name": "fdps_chapter_24_event_deploy_wave_for_turn",
+      "target": "chevt5.c",
+      "body_size": "0x195",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x195"
     }
   }
 }
