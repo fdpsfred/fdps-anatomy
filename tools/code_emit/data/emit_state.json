@@ -3166,6 +3166,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x97"
+    },
+    "00038950": {
+      "name": "fdps_chapter_23_event_boss_defeat",
+      "target": "chevt4.c",
+      "body_size": "0xd3",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0xd3"
     }
   }
 }

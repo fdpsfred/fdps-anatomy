@@ -1933,6 +1933,393 @@ static void ch22d_has_no_one_shot_latch(void)
     CHECK_EQ((int) ch22d_units[CH22D_BOSS_UNIT].flags, CH22D_FLAGS_CLEARED);
 }
 
+
+/* ---------------------------------------------------------------------- */
+
+/* fdps_chapter_23_event_boss_defeat at 00038950.
+ *
+ * Everything this handler does is visible in memory: two unit records and one
+ * global.  So the unit array is staged locally, as the ch20 and ch22d cases
+ * stage theirs, and the array has to reach index 0x20 because the boss's record
+ * is named by a literal and not by the argument.  What the globals hold at rest
+ * is ticket 23's and is never asserted -- every case writes the state it wants
+ * to watch change.
+ *
+ * Both lines are drawn for real, through a text block whose every entry points
+ * at one lone terminator, so fdps_draw_text walks the entry, paints nothing and
+ * returns without needing a font, a panel or mode 13h.  The two text ids are
+ * read off PUSH 0x1a at 00038983 and PUSH 0x1b at 000389e1 and are not asserted
+ * here, because a draw that paints nothing leaves nothing behind to tell one
+ * entry from another.
+ *
+ * What separates this handler from chapter 22's, and what the cases are really
+ * for, is where the branch starts.  The flags store, the dying line and the end
+ * code are all OUTSIDE it -- a firing by the wrong character still un-retires
+ * the boss and still clears the chapter -- and only the exchange is gated.  The
+ * exchange itself is a remove followed by an add, so the new item lands in the
+ * entry the repack leaves free rather than in the one the contract vacated.
+ *
+ * Every staged bag is packed at the front with no holes, because that is the
+ * invariant fdps_unit_find_item_slot depends on: its scan is bounded by
+ * fdps_unit_item_count and not by the eight physical entries (unititem.h).
+ */
+
+/* The staged array reaches one index past the boss so that the records either
+   side of the one the handler names by literal can be watched as well. */
+#define CH23D_BOSS_UNIT 0x20
+#define CH23D_BELOW_BOSS_UNIT 0x1f
+#define CH23D_ABOVE_BOSS_UNIT 0x21
+#define CH23D_UNIT_COUNT (CH23D_ABOVE_BOSS_UNIT + 1)
+
+/* The unit the argument names, deliberately not 0 and not the boss, and one on
+   either side of it so a case can say the exchange followed the argument. */
+#define CH23D_ACTING_UNIT 4
+#define CH23D_NEXT_UNIT 5
+#define CH23D_PREV_UNIT 3
+
+/* The character id the gate at 000389c4 admits -- 1, 法蓮娜
+   (assets/characters.md) -- and one it must refuse. */
+#define CH23D_FLARENA_CHAR_ID 1
+#define CH23D_OTHER_CHAR_ID 2
+
+/* What is taken and what is given, PUSH 0xba at 000389a2 and PUSH 0xdc at
+   00038a01: 死神契約 and 反禁制器 (assets/items.md).  The filler ids run from
+   0xa3, 金屬礦, upwards, one per entry, so a case can name which entry each
+   surviving item came from after the repack. */
+#define CH23D_CONTRACT_ITEM 0xba
+#define CH23D_SEAL_BREAKER_ITEM 0xdc
+#define CH23D_FILLER_BASE 0xa3
+#define CH23D_FILLER_FOR(entry) (CH23D_FILLER_BASE + (entry))
+
+/* An inventory entry nobody is carrying and one that is carried but not
+   equipped, the flag bytes fdps_unit_item_count and fdps_unit_add_item read
+   (unititem.h). */
+#define CH23D_EMPTY_FLAG 0x80
+#define CH23D_EMPTY_ID 0xff
+#define CH23D_CARRIED_FLAG 0x00
+#define CH23D_INVENTORY_ENTRIES 8
+
+/* What the flags byte of a record holds before the run.  0xff is every bit,
+   including the removed bit 0 the death sequence sets, so a case can say the
+   store at 0003896c clears the whole byte and not just that bit; the
+   neighbours' value is arbitrary and only has to survive. */
+#define CH23D_FLAGS_BEFORE 0xff
+#define CH23D_FLAGS_CLEARED 0
+#define CH23D_NEIGHBOUR_FLAGS 0x35
+
+/* The end code before and after, MOV dword ptr [0x00069da0],0x2 at 00038a12: 0
+   is the battle still running, 1 is the value the defeat paths write and 2 is
+   the chapter cleared (gamedata.h). */
+#define CH23D_END_CODE_RUNNING 0
+#define CH23D_END_CODE_DEFEAT 1
+#define CH23D_END_CODE_CLEARED 2
+
+/* The chapter text block: entries 0 through 0x1b, which is as far as the PUSH
+   at 000389e1 reaches and exactly what FDETXT23.TXT carries, every one of them
+   pointing at the same lone terminator so that a draw walks it, paints nothing
+   and returns at once. */
+#define CH23D_TEXT_IDS 0x1c
+#define CH23D_TEXT_EMPTY_AT 0x40
+#define CH23D_TEXT_BLOCK_BYTES (CH23D_TEXT_EMPTY_AT + 2)
+#define CH23D_TEXT_END (-1)
+
+static unsigned char ch23d_text_block[CH23D_TEXT_BLOCK_BYTES];
+static struct fdps_unit_record ch23d_units[CH23D_UNIT_COUNT];
+
+static void ch23d_stage_text(void)
+{
+    int text_id;
+
+    memset(ch23d_text_block, 0, (size_t) CH23D_TEXT_BLOCK_BYTES);
+    *(short *) (ch23d_text_block + CH23D_TEXT_EMPTY_AT) = (short) CH23D_TEXT_END;
+    for (text_id = 0; text_id < CH23D_TEXT_IDS; text_id++) {
+        *(short *) (ch23d_text_block + text_id * 2) =
+            (short) CH23D_TEXT_EMPTY_AT;
+    }
+}
+
+/* Every record blank, every bag empty, every flags byte marked, the text block
+   staged and the end code parked on "still running" so that the store at the
+   end of the handler is visible whichever path it was reached by. */
+static void ch23d_stage(void)
+{
+    int unit_index;
+    int entry;
+
+    ch23d_stage_text();
+    memset(ch23d_units, 0, sizeof(ch23d_units));
+
+    for (unit_index = 0; unit_index < CH23D_UNIT_COUNT; unit_index++) {
+        for (entry = 0; entry < CH23D_INVENTORY_ENTRIES; entry++) {
+            ch23d_units[unit_index].inventory_slots[entry * 2] =
+                CH23D_EMPTY_FLAG;
+            ch23d_units[unit_index].inventory_slots[entry * 2 + 1] =
+                CH23D_EMPTY_ID;
+        }
+        ch23d_units[unit_index].flags = CH23D_NEIGHBOUR_FLAGS;
+    }
+    ch23d_units[CH23D_BOSS_UNIT].flags = CH23D_FLAGS_BEFORE;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch23d_units;
+    data_fdps_current_chapter_text_ptr = ch23d_text_block;
+    data_fdps_chapter_event_or_battle_end_code = CH23D_END_CODE_RUNNING;
+}
+
+/* Put one item into one entry of a bag, carried and not equipped. */
+static void ch23d_put(int unit_index, int entry, int item_id)
+{
+    ch23d_units[unit_index].inventory_slots[entry * 2] = CH23D_CARRIED_FLAG;
+    ch23d_units[unit_index].inventory_slots[entry * 2 + 1] =
+        (unsigned char) item_id;
+}
+
+/* Pack `count` entries at the front of a bag with the contract at `at` and a
+   distinct filler in every other entry, which is the shape
+   fdps_unit_find_item_slot's count-bounded scan needs to see. */
+static void ch23d_pack_bag_with_contract(int unit_index, int count, int at)
+{
+    int entry;
+
+    for (entry = 0; entry < count; entry++) {
+        ch23d_put(unit_index, entry,
+                  entry == at ? CH23D_CONTRACT_ITEM : CH23D_FILLER_FOR(entry));
+    }
+}
+
+/* Which entry holds that item id, flag byte disregarded, or -1. */
+static int ch23d_entry_holding(int unit_index, int item_id)
+{
+    int entry;
+
+    for (entry = 0; entry < CH23D_INVENTORY_ENTRIES; entry++) {
+        if (ch23d_units[unit_index].inventory_slots[entry * 2]
+                != CH23D_EMPTY_FLAG
+                && (int) ch23d_units[unit_index].inventory_slots[entry * 2 + 1]
+                   == item_id) {
+            return entry;
+        }
+    }
+    return -1;
+}
+
+/* The whole taken path.  法蓮娜 kills the boss carrying nothing but 死神契約:
+   the contract leaves her bag, 反禁制器 takes the only entry that is free after
+   the repack, the boss's flags byte is cleared to zero and the chapter is
+   marked cleared. */
+static void ch23d_trades_the_contract_for_the_seal_breaker(void)
+{
+    ch23d_stage();
+    ch23d_units[CH23D_ACTING_UNIT].char_id = CH23D_FLARENA_CHAR_ID;
+    ch23d_pack_bag_with_contract(CH23D_ACTING_UNIT, 1, 0);
+
+    fdps_chapter_23_event_boss_defeat(CH23D_ACTING_UNIT);
+
+    CHECK_EQ(ch23d_entry_holding(CH23D_ACTING_UNIT, CH23D_CONTRACT_ITEM), -1);
+    CHECK_EQ(ch23d_entry_holding(CH23D_ACTING_UNIT, CH23D_SEAL_BREAKER_ITEM), 0);
+    CHECK_EQ((int) ch23d_units[CH23D_BOSS_UNIT].flags, CH23D_FLAGS_CLEARED);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH23D_END_CODE_CLEARED);
+}
+
+/* The exchange is a remove and then an add, so the entries above the contract
+   move down and the new item goes to the first entry the repack leaves free.
+   Three carried entries with the contract in the middle: 反禁制器 ends at entry
+   2, the filler that was at entry 2 has moved to entry 1, and the filler at
+   entry 0 has not moved. */
+static void ch23d_the_new_item_lands_where_the_repack_leaves_room(void)
+{
+    ch23d_stage();
+    ch23d_units[CH23D_ACTING_UNIT].char_id = CH23D_FLARENA_CHAR_ID;
+    ch23d_pack_bag_with_contract(CH23D_ACTING_UNIT, 3, 1);
+
+    fdps_chapter_23_event_boss_defeat(CH23D_ACTING_UNIT);
+
+    CHECK_EQ(ch23d_entry_holding(CH23D_ACTING_UNIT, CH23D_SEAL_BREAKER_ITEM), 2);
+    CHECK_EQ((int) ch23d_units[CH23D_ACTING_UNIT].inventory_slots[0 * 2 + 1],
+             CH23D_FILLER_FOR(0));
+    CHECK_EQ((int) ch23d_units[CH23D_ACTING_UNIT].inventory_slots[1 * 2 + 1],
+             CH23D_FILLER_FOR(2));
+    CHECK_EQ(ch23d_entry_holding(CH23D_ACTING_UNIT, CH23D_CONTRACT_ITEM), -1);
+}
+
+/* A bag with all eight entries occupied is still served, because this handler
+   makes room before it asks for any: the contract at entry 3 is removed, the
+   four fillers above it drop by one and 反禁制器 takes the entry 7 that the
+   repack emptied. */
+static void ch23d_a_full_bag_is_served_by_the_removal(void)
+{
+    ch23d_stage();
+    ch23d_units[CH23D_ACTING_UNIT].char_id = CH23D_FLARENA_CHAR_ID;
+    ch23d_pack_bag_with_contract(CH23D_ACTING_UNIT,
+                                 CH23D_INVENTORY_ENTRIES, 3);
+
+    fdps_chapter_23_event_boss_defeat(CH23D_ACTING_UNIT);
+
+    CHECK_EQ(ch23d_entry_holding(CH23D_ACTING_UNIT, CH23D_SEAL_BREAKER_ITEM),
+             CH23D_INVENTORY_ENTRIES - 1);
+    CHECK_EQ((int) ch23d_units[CH23D_ACTING_UNIT].inventory_slots[3 * 2 + 1],
+             CH23D_FILLER_FOR(4));
+    CHECK_EQ((int) ch23d_units[CH23D_ACTING_UNIT].inventory_slots[2 * 2 + 1],
+             CH23D_FILLER_FOR(2));
+    CHECK_EQ(ch23d_entry_holding(CH23D_ACTING_UNIT, CH23D_CONTRACT_ITEM), -1);
+}
+
+/* Anyone else who lands the killing blow gets nothing -- and still un-retires
+   the boss and still wins the chapter, because the flags store and the end code
+   sit outside the branch.  This is what separates the handler from chapter 22's,
+   whose flags store is inside it. */
+static void ch23d_another_character_gets_nothing_but_still_wins(void)
+{
+    ch23d_stage();
+    ch23d_units[CH23D_ACTING_UNIT].char_id = CH23D_OTHER_CHAR_ID;
+    ch23d_pack_bag_with_contract(CH23D_ACTING_UNIT, 1, 0);
+
+    fdps_chapter_23_event_boss_defeat(CH23D_ACTING_UNIT);
+
+    CHECK_EQ(ch23d_entry_holding(CH23D_ACTING_UNIT, CH23D_SEAL_BREAKER_ITEM),
+             -1);
+    CHECK_EQ(ch23d_entry_holding(CH23D_ACTING_UNIT, CH23D_CONTRACT_ITEM), 0);
+    CHECK_EQ((int) ch23d_units[CH23D_BOSS_UNIT].flags, CH23D_FLAGS_CLEARED);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH23D_END_CODE_CLEARED);
+}
+
+/* 法蓮娜 without the contract gets nothing either, and the same two
+   unconditional effects still happen.  Her bag is left exactly as it was. */
+static void ch23d_flarena_without_the_contract_gets_nothing(void)
+{
+    ch23d_stage();
+    ch23d_units[CH23D_ACTING_UNIT].char_id = CH23D_FLARENA_CHAR_ID;
+    ch23d_put(CH23D_ACTING_UNIT, 0, CH23D_FILLER_FOR(0));
+
+    fdps_chapter_23_event_boss_defeat(CH23D_ACTING_UNIT);
+
+    CHECK_EQ(ch23d_entry_holding(CH23D_ACTING_UNIT, CH23D_SEAL_BREAKER_ITEM),
+             -1);
+    CHECK_EQ((int) ch23d_units[CH23D_ACTING_UNIT].inventory_slots[0 * 2 + 1],
+             CH23D_FILLER_FOR(0));
+    CHECK_EQ((int) ch23d_units[CH23D_BOSS_UNIT].flags, CH23D_FLAGS_CLEARED);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH23D_END_CODE_CLEARED);
+}
+
+/* The record that is un-retired is unit 0x20 and no other, and the whole byte
+   goes: 0xff becomes 0, while the records either side of it keep the flags they
+   were staged with and the acting unit's own byte is left alone. */
+static void ch23d_clears_the_whole_flags_byte_of_unit_thirty_two(void)
+{
+    ch23d_stage();
+    ch23d_units[CH23D_ACTING_UNIT].char_id = CH23D_FLARENA_CHAR_ID;
+    ch23d_pack_bag_with_contract(CH23D_ACTING_UNIT, 1, 0);
+
+    fdps_chapter_23_event_boss_defeat(CH23D_ACTING_UNIT);
+
+    CHECK_EQ((int) ch23d_units[CH23D_BOSS_UNIT].flags, CH23D_FLAGS_CLEARED);
+    CHECK_EQ((int) ch23d_units[CH23D_BELOW_BOSS_UNIT].flags,
+             CH23D_NEIGHBOUR_FLAGS);
+    CHECK_EQ((int) ch23d_units[CH23D_ABOVE_BOSS_UNIT].flags,
+             CH23D_NEIGHBOUR_FLAGS);
+    CHECK_EQ((int) ch23d_units[CH23D_ACTING_UNIT].flags, CH23D_NEIGHBOUR_FLAGS);
+}
+
+/* The exchange follows the argument and not a fixed index: with 法蓮娜 staged
+   at three consecutive indices, all three carrying the contract, firing for the
+   middle one trades only hers and leaves the other two holding theirs. */
+static void ch23d_trades_for_the_unit_the_index_names(void)
+{
+    ch23d_stage();
+    ch23d_units[CH23D_PREV_UNIT].char_id = CH23D_FLARENA_CHAR_ID;
+    ch23d_units[CH23D_ACTING_UNIT].char_id = CH23D_FLARENA_CHAR_ID;
+    ch23d_units[CH23D_NEXT_UNIT].char_id = CH23D_FLARENA_CHAR_ID;
+    ch23d_pack_bag_with_contract(CH23D_PREV_UNIT, 1, 0);
+    ch23d_pack_bag_with_contract(CH23D_ACTING_UNIT, 1, 0);
+    ch23d_pack_bag_with_contract(CH23D_NEXT_UNIT, 1, 0);
+
+    fdps_chapter_23_event_boss_defeat(CH23D_ACTING_UNIT);
+
+    CHECK_EQ(ch23d_entry_holding(CH23D_ACTING_UNIT, CH23D_SEAL_BREAKER_ITEM), 0);
+    CHECK_EQ(ch23d_entry_holding(CH23D_PREV_UNIT, CH23D_SEAL_BREAKER_ITEM), -1);
+    CHECK_EQ(ch23d_entry_holding(CH23D_NEXT_UNIT, CH23D_SEAL_BREAKER_ITEM), -1);
+    CHECK_EQ(ch23d_entry_holding(CH23D_PREV_UNIT, CH23D_CONTRACT_ITEM), 0);
+    CHECK_EQ(ch23d_entry_holding(CH23D_NEXT_UNIT, CH23D_CONTRACT_ITEM), 0);
+}
+
+/* Nothing stops the acting index being the boss's own, and then both record
+   lookups land on the same record: the flags store still clears its byte, and
+   the exchange still goes to the unit the argument names, which is it.  The two
+   lookups are separate calls with separate arguments and neither is cached
+   across the other. */
+static void ch23d_the_boss_firing_for_itself_clears_its_own_flags(void)
+{
+    ch23d_stage();
+    ch23d_units[CH23D_BOSS_UNIT].char_id = CH23D_FLARENA_CHAR_ID;
+    ch23d_pack_bag_with_contract(CH23D_BOSS_UNIT, 1, 0);
+
+    fdps_chapter_23_event_boss_defeat(CH23D_BOSS_UNIT);
+
+    CHECK_EQ((int) ch23d_units[CH23D_BOSS_UNIT].flags, CH23D_FLAGS_CLEARED);
+    CHECK_EQ(ch23d_entry_holding(CH23D_BOSS_UNIT, CH23D_SEAL_BREAKER_ITEM), 0);
+}
+
+/* The end code is a store and not an accumulation: whatever it held before, it
+   holds 2 afterwards, on the taken path and on both skipped ones. */
+static void ch23d_end_code_is_stored_on_every_path(void)
+{
+    ch23d_stage();
+    ch23d_units[CH23D_ACTING_UNIT].char_id = CH23D_FLARENA_CHAR_ID;
+    ch23d_pack_bag_with_contract(CH23D_ACTING_UNIT, 1, 0);
+    data_fdps_chapter_event_or_battle_end_code = CH23D_END_CODE_DEFEAT;
+
+    fdps_chapter_23_event_boss_defeat(CH23D_ACTING_UNIT);
+
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH23D_END_CODE_CLEARED);
+
+    ch23d_stage();
+    ch23d_units[CH23D_ACTING_UNIT].char_id = CH23D_OTHER_CHAR_ID;
+    ch23d_pack_bag_with_contract(CH23D_ACTING_UNIT, 1, 0);
+    data_fdps_chapter_event_or_battle_end_code = CH23D_END_CODE_DEFEAT;
+
+    fdps_chapter_23_event_boss_defeat(CH23D_ACTING_UNIT);
+
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH23D_END_CODE_CLEARED);
+
+    ch23d_stage();
+    ch23d_units[CH23D_ACTING_UNIT].char_id = CH23D_FLARENA_CHAR_ID;
+    data_fdps_chapter_event_or_battle_end_code = CH23D_END_CODE_DEFEAT;
+
+    fdps_chapter_23_event_boss_defeat(CH23D_ACTING_UNIT);
+
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             CH23D_END_CODE_CLEARED);
+}
+
+/* There is no one-shot latch anywhere in the body: the handler consults none of
+   the shared event flags and raises none, so a 法蓮娜 handed a second contract
+   is handed a second 反禁制器.  Adding a latch would be a behaviour the
+   original does not have. */
+static void ch23d_has_no_one_shot_latch(void)
+{
+    ch23d_stage();
+    ch23d_units[CH23D_ACTING_UNIT].char_id = CH23D_FLARENA_CHAR_ID;
+    ch23d_pack_bag_with_contract(CH23D_ACTING_UNIT, 1, 0);
+    data_fdps_map_cell_event_triggered_flags[CH20_LATCH_SLOT] =
+        CH20_LATCH_RAISED;
+
+    fdps_chapter_23_event_boss_defeat(CH23D_ACTING_UNIT);
+    CHECK_EQ(ch23d_entry_holding(CH23D_ACTING_UNIT, CH23D_SEAL_BREAKER_ITEM), 0);
+
+    ch23d_units[CH23D_BOSS_UNIT].flags = CH23D_FLAGS_BEFORE;
+    ch23d_put(CH23D_ACTING_UNIT, 1, CH23D_CONTRACT_ITEM);
+
+    fdps_chapter_23_event_boss_defeat(CH23D_ACTING_UNIT);
+
+    CHECK_EQ((int) ch23d_units[CH23D_ACTING_UNIT].inventory_slots[1 * 2 + 1],
+             CH23D_SEAL_BREAKER_ITEM);
+    CHECK_EQ((int) ch23d_units[CH23D_BOSS_UNIT].flags, CH23D_FLAGS_CLEARED);
+}
+
 void run_chevt4_tests(void)
 {
     RUN_TEST(ch20_record_shape_matches_the_offsets);
@@ -1982,4 +2369,14 @@ void run_chevt4_tests(void)
     RUN_TEST(ch22d_the_boss_firing_for_herself_clears_her_own_flags);
     RUN_TEST(ch22d_end_code_is_stored_on_every_path);
     RUN_TEST(ch22d_has_no_one_shot_latch);
+    RUN_TEST(ch23d_trades_the_contract_for_the_seal_breaker);
+    RUN_TEST(ch23d_the_new_item_lands_where_the_repack_leaves_room);
+    RUN_TEST(ch23d_a_full_bag_is_served_by_the_removal);
+    RUN_TEST(ch23d_another_character_gets_nothing_but_still_wins);
+    RUN_TEST(ch23d_flarena_without_the_contract_gets_nothing);
+    RUN_TEST(ch23d_clears_the_whole_flags_byte_of_unit_thirty_two);
+    RUN_TEST(ch23d_trades_for_the_unit_the_index_names);
+    RUN_TEST(ch23d_the_boss_firing_for_itself_clears_its_own_flags);
+    RUN_TEST(ch23d_end_code_is_stored_on_every_path);
+    RUN_TEST(ch23d_has_no_one_shot_latch);
 }

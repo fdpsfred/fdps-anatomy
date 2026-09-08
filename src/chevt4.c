@@ -813,3 +813,142 @@ void fdps_chapter_22_event_boss_defeat(int unit_index)
     /* 2 is the chapter cleared (gamedata.h), written on the skipped path too. */
     data_fdps_chapter_event_or_battle_end_code = 2;
 }
+
+/* Who the reward is for, MOV AL,byte ptr [EAX+0x8] / AND EAX,0xff / CMP EAX,0x1
+   / JNZ at 000389b9..000389c4.  The byte read is struct fdps_unit_record's
+   char_id at record offset 8 and character id 1 is 法蓮娜
+   (assets/characters.md), so the gate follows her whatever index the deployment
+   gave her.  The read is zero-extended before the compare, so the id is an
+   unsigned byte and no value of it can be mistaken for a negative. */
+#define CH23_REWARD_CHAR_ID 1
+
+/* What she has to be carrying, PUSH 0xba at 000389a2: 死神契約
+   (assets/items.md), which chapter 22's boss hands her for the same kind of
+   killing blow.  fdps_unit_find_item_slot answers -1 when the item is not in
+   the bag (unititem.h), and that is the second gate, CMP dword ptr
+   [EBP-0x4],-0x1 / JNZ at 000389c6. */
+#define CH23_REAPER_CONTRACT_ITEM_ID 0xba
+#define CH23_CONTRACT_NOT_CARRIED (-1)
+
+/* What she gets in exchange, PUSH 0xdc at 00038a01: 反禁制器
+   (assets/items.md), the item the game wants carried before it will open its
+   hidden chapters (docs/guide/fdps/walkthrough.txt). */
+#define CH23_SEAL_BREAKER_ITEM_ID 0xdc
+
+/* The dead boss's own unit index, PUSH 0x20 at 0003895c: 死神.  MAP22.DAT holds
+   eighty 0x1a-byte deployment records behind a 131-byte header and record 52 --
+   enemy id 0x48 at level 23 -- is the only one of the eighty whose death script
+   at record +0x16 is opcode 2 with operand 33, this handler's table slot.  The
+   same index is what fdps_chapter_23_event_deploy_wave_for_turn drives into
+   behaviour mode 0x0b on turn 15, MOV dword ptr [EBP-0x20],0x20 at 00038af4. */
+#define CH23_BOSS_UNIT_INDEX 0x20
+
+/* The two entries of the chapter's own text block this handler speaks, PUSH
+   0x1a at 00038983 and PUSH 0x1b at 000389e1, out of the FDETXT23.TXT block
+   data_fdps_current_chapter_text_ptr holds: the last two of that file's
+   twenty-eight.  0x1a opens with the portrait token -0x11 followed by character
+   id 0x48, the boss's own; 0x1b raises 0x48, 4 (亞克) and 1 (法蓮娜) in turn.
+   Both are drawn at the top-left corner of the visible mode-13h page, PUSH
+   0xa0000 at 0003897e and 000389dc, which stays a literal because it is an
+   address inside the display adapter's aperture rather than the address of
+   anything the linker places (rebuild_info/pitfalls.md, contract E). */
+#define CH23_BOSS_DEFEAT_TEXT_ID 0x1a
+#define CH23_EXCHANGE_TEXT_ID 0x1b
+#define CH23_BOSS_DEFEAT_TEXT_DEST 0x000a0000
+
+/* 00038950.  Chapter 23's boss-death event: the chapter is won and the dying
+   死神 speaks its line, and if 法蓮娜 struck the killing blow carrying
+   死神契約 the contract is taken off her and 反禁制器 put in its place.
+
+   The frame is the family's four-push one with two 4-byte locals -- PUSH EBX /
+   PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x8 at
+   00038950..00038956 -- so the one incoming dword sits at [EBP+0x14].  Every
+   caller-clean in the body is this function's own (ADD ESP,0x4 after each
+   record lookup, ADD ESP,0x8 after the slot search and after each of the two
+   inventory calls, ADD ESP,0x1c after each draw), the RET at 00038a22 carries
+   no immediate, and the death-script dispatcher pushes one dword and drops it
+   with ADD ESP,0x4 at 0001dcb4, so the convention is the stack one at both ends
+   of the call.
+
+   THE LINE AND THE VICTORY ARE UNCONDITIONAL AND THE EXCHANGE IS NOT.  Unlike
+   chapter 22's handler, which puts its draw inside the branch, this one clears
+   the boss's flags byte and speaks entry 0x1a before either gate is tested, and
+   both gates jump to 00038a12, the store of the end code.  So every firing
+   plays the dying line and clears the chapter; only the second draw, the
+   removal and the award sit behind the gates.  The store is chapter 23's whole
+   victory condition -- killing the 死神 is what wins the map.
+
+   THE STORE INTO THE BOSS'S RECORD IS LOAD-BEARING AND MUST STAY AHEAD OF THE
+   LINE.  MOV byte ptr [EAX+0x5],0x0 at 0003896c clears the WHOLE flags byte of
+   unit 0x20, and it looks like a pointless poke at a unit that is already dead:
+   the death sequence has just set bit 0, the removed bit fdps_unit_is_retired
+   reads.  Text entry 0x1a opens with the portrait token, which raises its
+   speaker through fdps_battle_find_unit_by_character_id -- and that search
+   skips retired units.  So clearing the byte is what gives the dying line a
+   face, and narrowing the store to bit 0, or moving it after the draw, silently
+   renders the line with no speaker.
+
+   THE SEARCH RUNS WHETHER OR NOT THE CHARACTER MATCHES.  CALL 0x00034520 at
+   000389ab is reached unconditionally and its result is parked in [EBP-0x4]
+   before either compare; only then does the char_id test at 000389c4 run.
+   Writing the two gates as a short-circuit that calls the search second would
+   skip a call the original always makes.
+
+   THE EXCHANGE IS A REMOVE THEN AN ADD, NOT AN IN-PLACE SWAP.
+   fdps_unit_remove_item packs the entries above the vacated one down and empties
+   the last, and fdps_unit_add_item then takes the first empty entry, so with a
+   full bag 反禁制器 lands back in the contract's old slot and with a gappy one
+   it lands in the first hole instead.  Storing 0xdc over the slot the search
+   returned would give the player a different slot order.
+
+   Three values are used after a CALL.  fdps_get_unit_record's record pointer is
+   stored to [EBP-0x8] at 00038966 and reloaded at 00038969 for the flags store,
+   then the second lookup overwrites the same slot at 0003899f and is reloaded
+   at 000389b6 for the char_id byte.  fdps_unit_find_item_slot's EAX is the slot
+   and is stored to [EBP-0x4] at 000389b3.  fdps_draw_text's cursor is discarded
+   both times -- the next instruction is an ADD ESP -- and fdps_unit_add_item's
+   1-or-(-1) is discarded likewise; nothing sets EAX after it before the RET and
+   the dispatcher reads nothing back, so the result is void.
+
+   Table slot 33 at 00060248, reached only through the table: the boss's
+   deployment record in MAP22.DAT carries the death script (opcode 2, operand
+   33), fdps_collect_defeated_unit_events collects it once its HP reaches 0, and
+   the death-script runner calls the slot with the index of the unit that was
+   acting. */
+void fdps_chapter_23_event_boss_defeat(int unit_index)
+{
+    /* The boss whose death fired the event, and then the unit that killed it --
+       two names here for the one slot [EBP-0x8] the original keeps them in. */
+    struct fdps_unit_record *boss_unit;
+    struct fdps_unit_record *acting_unit;
+    /* Where 死神契約 sits in the killer's bag, or -1. */
+    int contract_slot;
+
+    boss_unit = fdps_get_unit_record(CH23_BOSS_UNIT_INDEX);
+    /* The whole byte, and before the line is spoken. */
+    boss_unit->flags = 0;
+    fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                   CH23_BOSS_DEFEAT_TEXT_ID,
+                   (unsigned char *) CH23_BOSS_DEFEAT_TEXT_DEST,
+                   VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                   MESSAGE_OUTLINE_COLOR);
+
+    acting_unit = fdps_get_unit_record(unit_index);
+    /* Searched before either gate is tested, as the original searches it. */
+    contract_slot = fdps_unit_find_item_slot(unit_index,
+                                            CH23_REAPER_CONTRACT_ITEM_ID);
+
+    if (acting_unit->char_id == CH23_REWARD_CHAR_ID
+            && contract_slot != CH23_CONTRACT_NOT_CARRIED) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH23_EXCHANGE_TEXT_ID,
+                       (unsigned char *) CH23_BOSS_DEFEAT_TEXT_DEST,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_unit_remove_item(unit_index, contract_slot);
+        fdps_unit_add_item(unit_index, CH23_SEAL_BREAKER_ITEM_ID);
+    }
+
+    /* 2 is the chapter cleared (gamedata.h), written on the skipped path too. */
+    data_fdps_chapter_event_or_battle_end_code = 2;
+}

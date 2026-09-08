@@ -206,4 +206,31 @@ extern void fdps_chapter_22_event_for_turn(int event_arg);
 extern void fdps_chapter_22_event_boss_defeat(int unit_index);
 #pragma aux fdps_chapter_22_event_boss_defeat "*" parm caller [];
 
+/* Chapter 23's boss-death event: the chapter is won and the dying 死神 speaks
+   its line, and if 法蓮娜 struck the killing blow carrying 死神契約 the
+   contract is taken off her and 反禁制器 put in its place.
+
+   What happens on every firing is the dying line and the victory: the boss's
+   record is un-retired, its line is drawn, and the battle end code is set to
+   the chapter-cleared value.  Killing the 死神 is chapter 23's whole victory
+   condition.  Only the exchange is gated, on two tests -- the acting unit's
+   character id must be 1, 法蓮娜, and 死神契約 must really be in her bag --
+   and the search for the contract runs whether or not the id matched.
+
+   The boss is unit index 0x20 and its whole flags byte is cleared before the
+   line is drawn.  It reads like a poke at a corpse and is not: it takes back
+   the removed bit the death sequence has just set, and the line's portrait
+   token looks its speaker up through a search that skips retired units, so
+   without the store the dying line is spoken by nobody.
+
+   反禁制器 is handed over by removing the contract and adding the new item, so
+   it lands in the first entry left empty by the repack rather than in the slot
+   the contract vacated -- the same slot only when the bag has no other hole.
+
+   Table slot 33, reached only through the table: the boss's deployment record
+   in MAP22.DAT carries the death script that names it, and the runner passes
+   the index of the unit that was acting when it died. */
+extern void fdps_chapter_23_event_boss_defeat(int unit_index);
+#pragma aux fdps_chapter_23_event_boss_defeat "*" parm caller [];
+
 #endif
