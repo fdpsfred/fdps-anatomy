@@ -43,6 +43,10 @@
  * why in their own note: that handler's whole body is a call into
  * fdps_deploy_wave, which opens ICON.CEL and FIELD.VFS for itself, so the
  * cases need those files and skip themselves without them.
+ *
+ * The chapter 19 cases at the end stand on that same fixture with one thing
+ * added -- a chapter text block, because that handler speaks after it deploys
+ * -- and say the rest in their own banner.
  */
 #include <stddef.h>
 #include <stdio.h>
@@ -2000,6 +2004,271 @@ static void ch18_ignores_the_unit_index_argument(void)
     }
 }
 
+/* ------------------------------------------------------------------
+ * The chapter 19 arrival handler at 00038180.
+ *
+ * It is the chapter 17 and 18 handlers' shape with the wave key made a literal
+ * and a spoken line added, so the cases below stand on the same fixture:
+ * ch17_stage lays down three deployment records tagged waves 0, 1 and 2 at
+ * table indices 0, 1 and 2 on a blank walkable map with one unit already on
+ * it, and MAP00.COD's own records 0, 1 and 2 name (18, 0), (22, 12) and
+ * (8, 10).  What the cases have to show is that the wave asked for is the
+ * literal 1 and not a number taken off the turn counter, which is the only
+ * arithmetic difference between this handler and its two neighbours, so the
+ * counter is moved under it and the same record has to keep arriving.
+ *
+ * ONE THING IS ADDED TO THE FIXTURE: data_fdps_current_chapter_text_ptr, which
+ * the chapter 17 and 18 cases never needed because those handlers do not
+ * speak.  It is staged the way the smith cases above stage theirs, as a block
+ * whose every entry is a lone -1 terminator: fdps_draw_text walks it, draws
+ * nothing, touches no global and returns at once, which is what keeps a case
+ * from painting the VGA aperture and standing a modal wait on a keyboard
+ * nothing is typing at.
+ *
+ * WHICH TEXT ENTRY THE DRAW ASKS FOR IS NOT ASSERTED, for the reason the
+ * chapter 3 section of tests/chevt1.c gives: the draw takes its whole effect
+ * through pixels at the VGA aperture, keeps no state, and returns a cursor
+ * this handler discards, so a unit test has nothing to read back.  The entry
+ * id and the three colours are literals in the instruction stream (PUSH 0xa at
+ * 000381b9 and PUSH 0xd0 / PUSH 0x0 / PUSH 0x6d at 000381aa, 000381a8 and
+ * 000381a6) and the reviewer's reading of them is what stands behind the
+ * emitted C.  What the cases do pin about the draw is that it does not stop
+ * the deployment: every one of them runs the whole handler and reads the unit
+ * back afterwards.
+ *
+ * The order of the two calls is not assertable here either, for the same
+ * reason: what makes the deployment have to come first is that entry 10's
+ * speaker code looks the arriving unit up on the map, and a fixture whose
+ * entries are terminators carries no speaker code.  Reversing the calls in
+ * src/chevt3.c would leave every case below green.
+ * ------------------------------------------------------------------ */
+
+/* The wave the handler asks for, PUSH 0x1 at 00038196, and a wave number no
+   staged record carries, used to move the fixture's wave-1 tag onto another
+   table index. */
+#define CH19_ARRIVING_WAVE 1
+#define CH19_UNUSED_WAVE 5
+
+/* Turn counter values the cases sweep: the turn map18.dat schedules the slot
+   for, the one chapter 18's shape would turn into wave 6, the one chapter
+   17's would turn into a negative key, and a value no counter legitimately
+   holds.  All four have to reach the same record. */
+#define CH19_SCHEDULED_TURN 6
+#define CH19_EARLY_TURN 1
+#define CH19_LATE_TURN 20
+#define CH19_ZERO_TURN 0
+
+/* The chapter text block: 20 entries, which is what FDETXT19.TXT carries --
+   its first offset is 40, and a block's offsets are 2 bytes each -- every one
+   of them pointing at the same lone terminator so that a draw walks it, paints
+   nothing and returns at once.  The real entry 10 opens with the speaker
+   tokens -0x11 and 0x0b instead, which is exactly what a fixture must not
+   carry: that code stands a modal wait on a keyboard nothing is typing at. */
+#define CH19_TEXT_IDS 20
+#define CH19_TEXT_EMPTY_AT 0x40
+#define CH19_TEXT_BLOCK_BYTES (CH19_TEXT_EMPTY_AT + 2)
+#define CH19_TEXT_END (-1)
+
+static unsigned char ch19_text_block[CH19_TEXT_BLOCK_BYTES];
+
+/* The chapter 17 fixture plus the text block the speech needs.  The turn
+   counter ch17_stage sets is deliberately varied by the cases even though this
+   handler must not read it. */
+static void ch19_stage(int battle_turn)
+{
+    int text_id;
+
+    ch17_stage(battle_turn);
+
+    memset(ch19_text_block, 0, (size_t) CH19_TEXT_BLOCK_BYTES);
+    *(short *) (ch19_text_block + CH19_TEXT_EMPTY_AT) = (short) CH19_TEXT_END;
+    for (text_id = 0; text_id < CH19_TEXT_IDS; text_id++) {
+        *(short *) (ch19_text_block + text_id * 2) = (short) CH19_TEXT_EMPTY_AT;
+    }
+
+    data_fdps_current_chapter_text_ptr = ch19_text_block;
+}
+
+/* The same fixture with the wave the handler asks for moved onto table index
+   0, so the record it brings on is placed by MAP%02d.COD record 0 -- the one
+   record both MAP00.COD and MAP01.COD are known to name, at (18, 0) and
+   (9, 4).  The record that carried the tag is retagged to a wave nothing asks
+   for, so exactly one record still matches. */
+static void ch19_stage_arrival_at_record_zero(int battle_turn)
+{
+    ch19_stage(battle_turn);
+    ch17_set_spawn(CH17_WAVE0_RECORD, CH17_WAVE0_CHAR_ID, CH19_ARRIVING_WAVE);
+    ch17_set_spawn(CH17_WAVE1_RECORD, CH17_WAVE1_CHAR_ID, CH19_UNUSED_WAVE);
+}
+
+/* Wave 1 is what arrives, and it is the fixture's table index 1 -- MAP00.COD
+   record 1 at (22, 12), character id 6.  Wave 0 would put the map's opening
+   army down again at (18, 0) and wave 2 the record at (8, 10), so both the
+   character id and the tile say which key was used. */
+static void ch19_deploys_wave_one(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch19_stage(CH19_SCHEDULED_TURN);
+
+    fdps_chapter_19_event_lancelot_joins(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch17_unit(1)->char_id, CH17_WAVE1_CHAR_ID);
+    CHECK_EQ((int) ch17_unit(1)->pos_x, 22);
+    CHECK_EQ((int) ch17_unit(1)->pos_y, 12);
+}
+
+/* The wave key is a literal and the battle turn counter is not read at all,
+   which is the whole difference between this handler and the two above it.
+   The counter is swept over four values and the same wave-1 record has to
+   arrive every time: chapter 18's shape would ask for waves 6, 1, 20 and 0 and
+   chapter 17's for -1, -6, 13 and -7, and only the turn 1 run of chapter 18's
+   shape would agree with this fixture -- which is why more than one turn is
+   put through. */
+static void ch19_wave_key_is_a_literal_not_the_turn_counter(void)
+{
+    static int turns[4] = {CH19_SCHEDULED_TURN, CH19_EARLY_TURN,
+                           CH19_LATE_TURN, CH19_ZERO_TURN};
+    int i;
+
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 4; i++) {
+        ch19_stage(turns[i]);
+
+        fdps_chapter_19_event_lancelot_joins(0);
+
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch17_unit(1)->char_id, CH17_WAVE1_CHAR_ID);
+        CHECK_EQ((int) ch17_unit(1)->pos_x, 22);
+        CHECK_EQ((int) ch17_unit(1)->pos_y, 12);
+    }
+}
+
+/* The map the wave is deployed under is read from
+   data_fdps_chapter_current_chapter_id at the call site and is not a literal:
+   the same record placed while that global says 0 lands on MAP00.COD's record
+   0 at (18, 0) and while it says 1 on MAP01.COD's record 0 at (9, 4). */
+static void ch19_map_number_comes_from_the_chapter_global(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch19_stage_arrival_at_record_zero(CH19_SCHEDULED_TURN);
+    data_fdps_chapter_current_chapter_id = 0;
+
+    fdps_chapter_19_event_lancelot_joins(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch17_unit(1)->char_id, CH17_WAVE0_CHAR_ID);
+    CHECK_EQ((int) ch17_unit(1)->pos_x, 18);
+    CHECK_EQ((int) ch17_unit(1)->pos_y, 0);
+
+    ch19_stage_arrival_at_record_zero(CH19_SCHEDULED_TURN);
+    data_fdps_chapter_current_chapter_id = 1;
+
+    fdps_chapter_19_event_lancelot_joins(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch17_unit(1)->char_id, CH17_WAVE0_CHAR_ID);
+    CHECK_EQ((int) ch17_unit(1)->pos_x, 9);
+    CHECK_EQ((int) ch17_unit(1)->pos_y, 4);
+}
+
+/* The placement flag is 0, so the arriving unit is put on the nearest free
+   walkable tile to its placement record rather than on the record's own tile.
+   MAP00.COD record 1 names (22, 12); giving that one cell a tile id whose
+   attribute row is terrain 5 takes it out of the search and the unit lands one
+   tile away.  A flag of 1 would drop it on (22, 12) regardless of the terrain
+   there, which is what would put the paladin on top of whatever is standing on
+   his arrival tile.
+
+   (22, 13) is which of the four tiles at distance 1 it lands on, because the
+   scan is row-major over the whole grid and a tie is accepted, so the last
+   candidate at the best distance wins. */
+static void ch19_places_on_the_nearest_free_tile(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch19_stage(CH19_SCHEDULED_TURN);
+    ch17_set_tile_id(22, 12, 1);
+    ch17_set_terrain(1, CH17_TERRAIN_BLOCKED);
+
+    fdps_chapter_19_event_lancelot_joins(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch17_unit(1)->char_id, CH17_WAVE1_CHAR_ID);
+    CHECK_EQ((int) ch17_unit(1)->pos_x, 22);
+    CHECK_EQ((int) ch17_unit(1)->pos_y, 13);
+}
+
+/* Nothing guards the calls: there is no compare anywhere in the body and no
+   latch is written, so a second firing brings the same unit on again rather
+   than being refused.  The slot the one-shot handlers of this family latch is
+   put up beforehand and the arrival still happens, and the slot is asserted
+   unchanged because a handler that had grown a latch would have written it. */
+static void ch19_has_no_one_shot_latch(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch19_stage(CH19_SCHEDULED_TURN);
+    data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT] = 1;
+
+    fdps_chapter_19_event_lancelot_joins(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT], 1);
+
+    fdps_chapter_19_event_lancelot_joins(0);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+    CHECK_EQ((int) ch17_unit(2)->char_id, CH17_WAVE1_CHAR_ID);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT], 1);
+}
+
+/* The incoming argument slot is overwritten with 0 at 0003818c before either
+   call and never read back, so the index the dispatcher passes cannot reach
+   the wave asked for, the map asked for, the placement flag or the text entry
+   spoken.  The turn-event runner is the only path this slot is reached by in
+   the shipped data and it pushes a literal 0; the values passed here are that
+   0, an index that names the unit already on the map, one past the array, and
+   -1 and 30000, which are the ones an argument-driven handler would betray
+   itself on. */
+static void ch19_ignores_the_unit_index_argument(void)
+{
+    static int arguments[5] = {0, 1, 2, -1, 30000};
+    int i;
+
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 5; i++) {
+        ch19_stage(CH19_SCHEDULED_TURN);
+
+        fdps_chapter_19_event_lancelot_joins(arguments[i]);
+
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch17_unit(1)->char_id, CH17_WAVE1_CHAR_ID);
+        CHECK_EQ((int) ch17_unit(1)->pos_x, 22);
+        CHECK_EQ((int) ch17_unit(1)->pos_y, 12);
+    }
+}
+
 void run_chevt3_tests(void)
 {
     RUN_TEST(ch15_record_shape_matches_the_offsets);
@@ -2043,4 +2312,10 @@ void run_chevt3_tests(void)
     RUN_TEST(ch18_places_on_the_nearest_free_tile);
     RUN_TEST(ch18_has_no_one_shot_latch);
     RUN_TEST(ch18_ignores_the_unit_index_argument);
+    RUN_TEST(ch19_deploys_wave_one);
+    RUN_TEST(ch19_wave_key_is_a_literal_not_the_turn_counter);
+    RUN_TEST(ch19_map_number_comes_from_the_chapter_global);
+    RUN_TEST(ch19_places_on_the_nearest_free_tile);
+    RUN_TEST(ch19_has_no_one_shot_latch);
+    RUN_TEST(ch19_ignores_the_unit_index_argument);
 }

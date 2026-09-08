@@ -596,3 +596,103 @@ void fdps_chapter_18_event_deploy_wave_for_turn(int unit_index)
                      data_fdps_battle_turn_counter,
                      CH18_PLACE_NEAREST_FREE_TILE);
 }
+
+/* The wave the chapter 19 handler below brings on, PUSH 0x1 at 00038196.  It
+   is a literal and not the turn counter: the counter is never read anywhere in
+   the body, which is the whole difference between this handler and the two
+   above it.  Wave 1 of map18.dat is a single deployment record, its index 42:
+   side 2, character id 0x0b, level 2, items 0x29 and 0x6a in its two equipped
+   slots and nothing carried.  The wave number is how that one unit is named. */
+#define CH19_LANCELOT_WAVE 1
+
+/* The place_exact argument the handler hands fdps_deploy_wave: XOR EAX,EAX /
+   PUSH EAX at 00038193, so zero.  Zero is the value that does NOT take the
+   placement record's tile as given -- it sends fdps_deploy_unit off to search
+   the map for the nearest unoccupied walkable tile to those coordinates and
+   put the unit there instead, which is what keeps the arriving paladin off a
+   tile the party is already standing on. */
+#define CH19_PLACE_NEAREST_FREE_TILE 0
+
+/* The entry of the chapter's own text block the arrival line is spoken from,
+   PUSH 0xa at 000381b9. */
+#define CH19_ARRIVAL_TEXT_ID 10
+
+/* The destination the handler hands fdps_draw_text, PUSH 0xa0000 at 000381b4:
+   the top-left corner of the visible page.  It stays a literal because it is
+   an address inside the display adapter's aperture rather than the address of
+   anything the linker places (rebuild_info/pitfalls.md, contract E).
+
+   Nothing is drawn there.  Entry 10 of the chapter's FDETXT19.TXT opens with
+   the two tokens -0x11 and 0x0b -- speaker by character id, and the character
+   id of the very record wave 1 deploys -- and that speaker token overwrites
+   fdps_draw_text's own pen with the message panel's origin before a single
+   glyph is painted (text.h), so this value only decides where an entry
+   carrying no such token would start. */
+#define CH19_ARRIVAL_TEXT_DEST 0x000a0000
+
+/* 00038180.  Chapter 19's turn-scheduled arrival event: the paladin 蘭斯洛特
+   joins the party in the middle of the battle, deployed onto the map as a
+   player-side unit and then speaking his arrival line under his own portrait.
+
+   The body is two calls and nothing else.  The frame is the standard Watcom
+   four-push one with an empty local area -- PUSH EBX / PUSH ESI / PUSH EDI /
+   PUSH EBP / MOV EBP,ESP / SUB ESP,0x0 at 00038180..00038186 -- so there is no
+   local here at all and every argument of both calls is either a literal
+   pushed straight or a global read at the push.  The two caller-cleans, ADD
+   ESP,0xc at 000381a3 and ADD ESP,0x1c at 000381c6, are this function's own,
+   which is what makes the convention the stack one.
+
+   THE DEPLOYMENT HAS TO COME FIRST AND THE ORDER IS NOT COSMETIC.  Entry 10
+   of the chapter's FDETXT19.TXT begins with the tokens -0x11 and 0x0b, and the
+   first of them sends fdps_draw_text off to
+   fdps_battle_find_unit_by_character_id to find character 0x0b among the units
+   standing on the map and raise his portrait from the record it finds --
+   0x0b being the character id of the one deployment record wave 1 carries, so
+   the unit the line looks for is the unit the line above brought on.  With the
+   deployment not yet done there is no such unit and no portrait to raise.
+   Swapping the two calls is the one rewrite of this function that compiles and
+   reads the same and does not behave the same.
+
+   This is the sibling of the two reinforcement handlers above it with the
+   wave key made a literal: the turn counter is not read here at all, so the
+   wave asked for is 1 on whatever turn the handler is reached.  The map
+   number is data_fdps_chapter_current_chapter_id read at the call site, so it
+   is whichever chapter is loaded rather than anything this handler holds, and
+   a placement flag of 0 puts the unit on the nearest free walkable tile to the
+   coordinates its MAP%02d.COD record names.
+
+   fdps_draw_text hands back the cursor it stopped at.  Nothing here reads it:
+   EAX is not touched between the CALL at 000381c1 and the RET at 000381cd, and
+   no dispatcher reads what comes back either, so the result is void.
+
+   There is no one-shot latch and nothing records that the handler has run.
+   Calling it twice deploys wave 1 twice, because the wave walk appends and
+   never checks whether those records are already on the map; the map's turn
+   table naming the slot once is what makes the paladin arrive once.
+
+   unit_index is the handler table's shared parameter.  MOV dword ptr
+   [EBP+0x14],0x0 at 0003818c writes zero over the incoming slot before either
+   call and nothing ever reads it back, so which unit the event fired for
+   cannot reach anything this handler does; the store has no observable effect,
+   because the slot belongs to the caller's outgoing argument area and the
+   turn-event runner drops it with ADD ESP,0x4 at 0002e146.
+
+   Table slot 26, and chapter 19's map18.dat is the only shipped thing that
+   names it, with the single turn-event record {turn 6, slot 26, phase 2} --
+   phase 2 being the one fdps_battle_advance_turn runs at the top of a player
+   phase, just after it has incremented the turn counter.  No tile trigger,
+   terrain cell or death script in any MAP*.DAT reaches the slot, so turn 6 of
+   chapter 19 is the only way in. */
+void fdps_chapter_19_event_lancelot_joins(int unit_index)
+{
+    unit_index = 0;
+
+    fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                     CH19_LANCELOT_WAVE,
+                     CH19_PLACE_NEAREST_FREE_TILE);
+    fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                   CH19_ARRIVAL_TEXT_ID,
+                   (unsigned char *) CH19_ARRIVAL_TEXT_DEST,
+                   VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                   MESSAGE_OUTLINE_COLOR);
+}

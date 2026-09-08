@@ -3110,6 +3110,14 @@
       "status": "committed",
       "emitted_against": "0x34b",
       "rounds": 0
+    },
+    "00038180": {
+      "name": "fdps_chapter_19_event_lancelot_joins",
+      "target": "chevt3.c",
+      "body_size": "0x4e",
+      "status": "committed",
+      "emitted_against": "0x4e",
+      "rounds": 0
     }
   }
 }

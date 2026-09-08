@@ -235,4 +235,39 @@ extern void fdps_chapter_17_event_deploy_wave_for_turn(int unit_index);
 extern void fdps_chapter_18_event_deploy_wave_for_turn(int unit_index);
 #pragma aux fdps_chapter_18_event_deploy_wave_for_turn "*" parm caller [];
 
+/* Chapter 19's turn-scheduled arrival event: the paladin 蘭斯洛特 joins the
+   party in the middle of the battle.  It deploys wave 1 of the current map's
+   deployment table -- in map18.dat one record, a player-side level 2 unit of
+   character id 0x0b with items 0x29 and 0x6a equipped -- onto the nearest free
+   walkable tile to the coordinates MAP%02d.COD names for it, and then speaks
+   entry 10 of the chapter's own text block.
+
+   It is the two reinforcement handlers above it with the wave key made a
+   literal: the battle turn counter is not read anywhere in the body, so the
+   wave asked for is 1 whatever turn the handler is reached on.  The map number
+   is read from data_fdps_chapter_current_chapter_id at the call site, so it is
+   whichever chapter is loaded.
+
+   THE TWO CALLS ARE ORDERED AND THE ORDER IS LOAD-BEARING.  Entry 10 opens
+   with the -0x11 speaker code, so the draw goes looking for the speaker among
+   the units standing on the map and raises his portrait from the record it
+   finds; the deployment is what puts him there to be found.  Speaking before
+   deploying finds no unit.
+
+   There is no one-shot latch and nothing records that the handler has run, so
+   a second firing deploys wave 1 a second time; the map's turn table naming
+   the slot once is what makes the arrival happen once.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with 0 before either call and never read back,
+   so any index behaves the same.
+
+   Table slot 26, and chapter 19's map18.dat is the only shipped file that
+   names it, with the single turn-event record {turn 6, slot 26, phase 2} --
+   the phase the turn runner is called for at the top of a player phase, just
+   after the turn counter has been incremented.  No tile trigger and no death
+   script in any MAP*.DAT reaches the slot. */
+extern void fdps_chapter_19_event_lancelot_joins(int unit_index);
+#pragma aux fdps_chapter_19_event_lancelot_joins "*" parm caller [];
+
 #endif
