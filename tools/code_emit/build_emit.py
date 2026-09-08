@@ -967,9 +967,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("stage", nargs="?", default="all",
                     choices=("build", "run", "all", "selftest"))
-    ap.add_argument("--timeout", type=int, default=600,
+    ap.add_argument("--timeout", type=int, default=1800,
                     help="backstop seconds per stage; the heartbeat normally "
-                         "ends a hung stage long before this")
+                         "ends a hung stage long before this, so this only "
+                         "has to sit above the healthy run of the whole "
+                         "suite, which grows with every emitted function")
     ap.add_argument("--json", action="store_true",
                     help="print the structured verdict on stdout as well")
     args = ap.parse_args()
