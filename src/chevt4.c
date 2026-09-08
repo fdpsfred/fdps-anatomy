@@ -952,3 +952,181 @@ void fdps_chapter_23_event_boss_defeat(int unit_index)
     /* 2 is the chapter cleared (gamedata.h), written on the skipped path too. */
     data_fdps_chapter_event_or_battle_end_code = 2;
 }
+
+/* The turn the first test closes at, CMP dword ptr [0x00069ce8],0x5 / JG at
+   00038a43: the compare is signed and the jump leaves the body, so turn 5 still
+   brings a wave on and turn 6 is the first that does not.  The counter starts a
+   battle at 1, which is what fdps_chapter_state_reset writes. */
+#define CH23_LAST_ARRIVAL_TURN 5
+
+/* What that test turns the turn number into, ADD EAX,0x4 at 00038a54 on the
+   counter it has just loaded.  So turns 1 to 5 ask for waves 5, 6, 7, 8 and 9
+   in that order and the mapping is an offset rather than the identity: asking
+   for wave N on turn N would put MAP22.DAT's waves 1 to 5 on instead, which are
+   not the records these turns bring. */
+#define CH23_ARRIVAL_WAVE_BIAS 4
+
+/* The two turns the chain below names for a wave of their own, CMP dword ptr
+   [0x00069ce8],0x3 / JNZ at 00038a66 and CMP ...,0x7 / JNZ at 00038aaa, and the
+   turn it names for the behaviour switch, CMP ...,0xf / JNZ at 00038aeb.  All
+   three are equalities and the last JNZ goes straight to the epilogue, so the
+   chain has no default branch. */
+#define CH23_WAVE_3_TURN 3
+#define CH23_WAVE_4_TURN 7
+#define CH23_BEHAVIOR_SWITCH_TURN 0x0f
+
+/* The waves the chain's own two branches ask for, PUSH 0x3 at 00038a95 and PUSH
+   0x4 at 00038ad9: matched by fdps_deploy_wave against byte 0x15 of each
+   0x1a-byte deployment record of the resident MAP%02d.DAT block. */
+#define CH23_WAVE_3 3
+#define CH23_WAVE_4 4
+
+/* How every wave here is placed, XOR EAX,EAX / PUSH EAX before each of the
+   three deployment calls: zero, so fdps_deploy_wave passes 0 on to
+   fdps_deploy_unit and each arrival settles on the nearest free walkable tile
+   to its placement record's coordinates rather than on those coordinates
+   themselves. */
+#define CH23_TURN_PLACE_ON_NEAREST_FREE_TILE 0
+
+/* The entries of the chapter's own text block the two lines are spoken from,
+   PUSH 0x15 at 00038a82 and PUSH 0x16 at 00038ac6, out of the FDETXT23.TXT
+   block data_fdps_current_chapter_text_ptr holds.  They are drawn at the
+   top-left corner of the visible mode-13h page, PUSH 0xa0000 at 00038a7d and
+   00038ac1, which stays a literal because it is an address inside the display
+   adapter's aperture rather than the address of anything the linker places
+   (rebuild_info/pitfalls.md, contract E). */
+#define CH23_WAVE_3_TEXT_ID 0x15
+#define CH23_WAVE_4_TEXT_ID 0x16
+#define CH23_TURN_TEXT_DEST 0x000a0000
+
+/* The behaviour mode turn 15 drives the boss into, the 0xb parked at [EBP-0x18]
+   at 00038b02 and merged in at 00038b4a: one of the two driven branches
+   fdps_map_actor_behavior_step dispatches on the low nibble of the same byte.
+   The mask the merge keeps is the AI_BEHAVIOR_FLAG_NIBBLE the chapter 21 and 22
+   handlers above already spell out. */
+#define CH23_BOSS_BEHAVIOR_MODE 0x0b
+
+/* The inclusive index range turn 15 walks, the 0x20 parked at [EBP-0x20] and
+   [EBP-0x1c] at 00038af4 and 00038afb.  Both ends are the same index, so the
+   loop body runs exactly once, on unit 0x20 -- the 死神 whose own death script
+   is fdps_chapter_23_event_boss_defeat above.  Both are literals in the
+   instruction stream and neither is bounded against data_fdps_map_unit_count. */
+#define CH23_BOSS_FIRST_UNIT_INDEX 0x20
+#define CH23_BOSS_LAST_UNIT_INDEX 0x20
+
+/* 00038a30.  Chapter 23's turn-scheduled event handler: the one slot MAP22.DAT
+   names for all seven of the chapter's turn events, running whichever of them
+   is due for the turn that has just been finished.
+
+   The frame is the family's four-push one -- PUSH EBX / PUSH ESI / PUSH EDI /
+   PUSH EBP / MOV EBP,ESP / SUB ESP,0x20 at 00038a30..00038a36 -- so the one
+   incoming dword sits at [EBP+0x14].  Every caller-clean in the body is this
+   function's own (ADD ESP,0xc after each deployment, ADD ESP,0x1c after each
+   draw and ADD ESP,0x4 after the record lookup), the RET at 00038b5a carries no
+   immediate, and the dispatcher pushes one dword and drops it with ADD ESP,0x4
+   at 0002e146, so the convention is the stack one at both ends of the call.
+
+   THE TWO TESTS ARE NOT AN IF/ELSE AND TURN 3 DEPLOYS TWICE.  The JG at
+   00038a4a on the turn <= 5 test jumps to 00038a66, which is the first compare
+   of the chain, and the tail of the taken path falls into the same address; the
+   chain is a separate statement and not the else of the first test.  So turn 3
+   brings on wave 7 from the first test and then wave 3 from the chain, two
+   deployments in that order, and folding the two into one ladder loses wave 3's
+   records on the chapter's third turn.
+
+   THE WAVE KEY IS THE TURN PLUS FOUR AND NOT THE TURN.  See
+   CH23_ARRIVAL_WAVE_BIAS above.
+
+   THE CHAIN HAS NO DEFAULT BRANCH.  Three equality tests, each falling through
+   a JNZ into the next, and the last JNZ at 00038af2 goes to the epilogue.  So a
+   turn past 5 that the chain does not name leaves the whole body having done
+   nothing.
+
+   THE INCOMING ARGUMENT IS NEVER READ.  MOV dword ptr [EBP+0x14],0x0 at
+   00038a3c is the only access to the slot in the whole body and nothing loads
+   it afterwards -- unlike the chapter 22 handler, which counts its pan holds
+   there, this one just clears it.  fdps_battle_run_turn_events, the only
+   dispatcher that reaches this table slot, pushes a literal 0 at 0002e13e, so
+   no value is lost by that.
+
+   THE TURN-15 RANGE IS AN INLINE EXPANSION AND NOT A CALL.  It carries
+   fdps_object_set_field34_low_nibble_range's whole fingerprint: the three
+   constants parked at [EBP-0x20], [EBP-0x1c] and [EBP-0x18]
+   (00038af4..00038b02), copied into a second set of slots at [EBP-0xc],
+   [EBP-0x10] and [EBP-0x14] (00038b09..00038b18), and only then the counter at
+   [EBP-0x8] seeded from the first of them at 00038b1b.  There is no CALL to
+   that helper anywhere in the body -- the only CALLs are fdps_deploy_wave,
+   fdps_draw_text and fdps_get_unit_record -- so writing the range as a call to
+   it would put a CALL in the rebuild that the original does not make.
+
+   THE RANGE IS INCLUSIVE AT BOTH ENDS.  CMP EAX,dword ptr [EBP-0x10] / JLE at
+   00038b24 is a signed compare and the jump is taken into the body, so unit
+   index 0x20 is written and is not one past the end; the idiomatic half-open
+   spelling leaves the 死神 on the behaviour MAP22.DAT authored it in.
+
+   THE MERGE IS A READ-MODIFY-WRITE AND NOT AN ASSIGNMENT: MOV DL,byte ptr
+   [EAX+0x34] / AND DL,0xf0 / MOV DH,byte ptr [EBP-0x14] / OR DH,DL / MOV byte
+   ptr [EAX+0x34],DH at 00038b41..00038b4f.  Storing the mode whole would clear
+   the two AI flag bits the scorers read out of the high nibble.
+
+   The map number handed to fdps_deploy_wave is read out of
+   data_fdps_chapter_current_chapter_id at each call site (PUSH dword ptr
+   [0x00069cf4] at 00038a58, 00038a97 and 00038adb) and not out of anything this
+   handler holds, so it is whichever chapter is loaded -- 22 for this one, which
+   is the map this handler's table slot is only ever named from.
+
+   Only one value is used after a CALL and it is fdps_get_unit_record's: stored
+   to [EBP-0x4] at 00038b3b and reloaded at 00038b3e and 00038b47 for the read
+   and the write of the one byte.  fdps_deploy_wave leaves nothing this body
+   reads, and each fdps_draw_text cursor is discarded -- the next instruction is
+   the ADD ESP that cleans its arguments.  Nothing sets EAX before the RET and
+   no dispatcher reads what comes back, so the result is void.
+
+   Table slot 34 at 0006024c, reached only through the table: all seven live
+   entries of MAP22.DAT's turn-event table route to this slot, on turns 1 to 5,
+   7 and 15. */
+void fdps_chapter_23_event_deploy_wave_for_turn(int event_arg)
+{
+    struct fdps_unit_record *boss_unit;
+    int boss_unit_index;
+
+    /* The store the original makes over its own argument slot and never reads
+       back; nothing here counts in it. */
+    event_arg = 0;
+
+    if (data_fdps_battle_turn_counter <= CH23_LAST_ARRIVAL_TURN) {
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                         data_fdps_battle_turn_counter
+                         + CH23_ARRIVAL_WAVE_BIAS,
+                         CH23_TURN_PLACE_ON_NEAREST_FREE_TILE);
+    }
+
+    /* A separate statement, not the else of the test above: turn 3 arrives
+       here having already deployed wave 7. */
+    if (data_fdps_battle_turn_counter == CH23_WAVE_3_TURN) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH23_WAVE_3_TEXT_ID,
+                       (unsigned char *) CH23_TURN_TEXT_DEST,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id, CH23_WAVE_3,
+                         CH23_TURN_PLACE_ON_NEAREST_FREE_TILE);
+    } else if (data_fdps_battle_turn_counter == CH23_WAVE_4_TURN) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH23_WAVE_4_TEXT_ID,
+                       (unsigned char *) CH23_TURN_TEXT_DEST,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id, CH23_WAVE_4,
+                         CH23_TURN_PLACE_ON_NEAREST_FREE_TILE);
+    } else if (data_fdps_battle_turn_counter == CH23_BEHAVIOR_SWITCH_TURN) {
+        for (boss_unit_index = CH23_BOSS_FIRST_UNIT_INDEX;
+             boss_unit_index <= CH23_BOSS_LAST_UNIT_INDEX;
+             boss_unit_index++) {
+            boss_unit = fdps_get_unit_record(boss_unit_index);
+            boss_unit->ai_behavior = (unsigned char)
+                ((boss_unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+                 CH23_BOSS_BEHAVIOR_MODE);
+        }
+    }
+}

@@ -10137,7 +10137,7 @@ Speaking a line is FUN_0001ff60(DAT_00060124, message, 0xa0000, 0x140, 0xd0, 0, 
 The handler is reached only through slot 34 of the vector at 0x000601c4. map22.dat's turn-event table schedules that slot on turns 1, 2, 3, 4 and 5 of the enemy phase, turn 7 of the player phase and turn 15 of the enemy phase, and it is the chapter's only scheduled turn event; the chapter's tile trigger goes to slot 35 instead.
 
 Parameters:
-  unit_index -- the single dword every slot of the handler vector at 0x000601c4 receives. fdps_battle_run_turn_events, the only dispatcher that reaches this entry, pushes a literal 0, and this handler stores 0 over the slot on entry and never reads it.
+  event_arg -- the single dword every slot of the handler vector at 0x000601c4 receives. fdps_battle_run_turn_events, the only dispatcher that reaches this entry, pushes a literal 0, and this handler stores 0 over the slot on entry and never reads it.
 
 Returns:
   Nothing.

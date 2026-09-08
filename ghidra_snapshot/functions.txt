@@ -369,7 +369,7 @@
 000384e0 | 0x3c2 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_chapter_22_event_for_turn(int event_arg)
 000388b0 | 0x97 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_chapter_22_event_boss_defeat(int unit_index)
 00038950 | 0xd3 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_chapter_23_event_boss_defeat(int unit_index)
-00038a30 | 0x12b | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_chapter_23_event_deploy_wave_for_turn(int unit_index)
+00038a30 | 0x12b | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_chapter_23_event_deploy_wave_for_turn(int event_arg)
 00038b60 | 0x15f | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_chapter_23_event_give_martial_artist_ring(int unit_index)
 00038cc0 | 0x195 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_chapter_24_event_deploy_wave_for_turn(int unit_index)
 00038e60 | 0x170 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_chapter_25_event_deploy_wave_1(int unit_index)

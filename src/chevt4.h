@@ -233,4 +233,45 @@ extern void fdps_chapter_22_event_boss_defeat(int unit_index);
 extern void fdps_chapter_23_event_boss_defeat(int unit_index);
 #pragma aux fdps_chapter_23_event_boss_defeat "*" parm caller [];
 
+/* Chapter 23's turn-scheduled event: the one handler MAP22.DAT names for all
+   seven of the chapter's turn events, running whichever of them is due for the
+   turn that has just been finished.
+
+   It is two statements and not one ladder, and that is the whole shape of it.
+   The first brings a wave on for every turn up to and including 5, and the wave
+   it asks for is the turn plus four -- turns 1 to 5 bring on waves 5, 6, 7, 8
+   and 9.  The second is an if/else chain of three equalities with no default
+   branch, and it runs whatever the first one did:
+
+   turn 3  -- speaks the chapter's line 0x15 and brings on wave 3.
+   turn 7  -- line 0x16 and wave 4.
+   turn 15 -- no line and no deployment.  Unit index 0x20, the 死神, is moved to
+   behaviour mode 0x0b, its own driven chase.
+
+   SO TURN 3 DEPLOYS TWICE: wave 7 from the first statement and then wave 3 from
+   the chain, in that order.  Writing the two as one ladder is the obvious
+   tidy-up and it loses wave 3 on the chapter's third turn.
+
+   The incoming argument is never read: the dispatcher pushes 0 for a
+   turn-scheduled event and the handler stores 0 over the slot on entry.
+
+   THE BEHAVIOUR WRITE IS A READ-MODIFY-WRITE ON THE LOW NIBBLE.  Byte 0x34 of a
+   unit record is packed: the low nibble is the behaviour mode and the high
+   nibble carries AI flags other code tests, so assigning the mode whole clears
+   them.  The index range is inclusive at both ends -- both ends are 0x20, so it
+   is one record -- and it is not bounded against the map's unit count.
+
+   Every wave is placed on the nearest free walkable tile to its record's
+   coordinates rather than on those coordinates verbatim, and the map the
+   records are read from is whichever chapter is loaded rather than a number
+   this handler holds.
+
+   Table slot 34, and chapter 23's map22.dat is the only shipped file that names
+   it: all seven live entries of its turn-event table route to this slot -- five
+   of the enemy phase on turns 1 to 5, one of the player phase on turn 7 and one
+   of the enemy phase on turn 15.  The chapter's tile trigger goes to slot 35
+   instead. */
+extern void fdps_chapter_23_event_deploy_wave_for_turn(int event_arg);
+#pragma aux fdps_chapter_23_event_deploy_wave_for_turn "*" parm caller [];
+
 #endif
