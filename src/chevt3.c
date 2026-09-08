@@ -15,6 +15,8 @@
 #include "deploy.h"
 #include "msgwin.h"
 #include "text.h"
+#include "mapcur.h"
+#include "mapdraw.h"
 #include "chevt3.h"
 
 /* The half of the AI byte the merge below keeps: AND DL,0xf0 at 00037b53.  The
@@ -695,4 +697,179 @@ void fdps_chapter_19_event_lancelot_joins(int unit_index)
                    (unsigned char *) CH19_ARRIVAL_TEXT_DEST,
                    VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
                    MESSAGE_OUTLINE_COLOR);
+}
+
+/* The element of data_fdps_map_cell_event_triggered_flags the ambush below
+   latches: the byte at 0x000640e8, which is 0x10 past the block's base at
+   0x000640d8 -- CMP byte ptr [0x000640e8],0x0 at 000381dc and MOV byte ptr
+   [0x000640e8],0x1 at 000382d9.  It is the same slot the chapter 16 smith
+   scene above and the chapter 10 ambush in chevt2.c use, because the block is
+   cleared at every chapter start and only one chapter is ever loaded. */
+#define CH19_AMBUSH_LATCH_SLOT 0x10
+
+/* The wave the ambush brings on, PUSH 0x6 at 00038212, matched against byte
+   0x15 of each 0x1a-byte deployment record of the resident MAP%02d.DAT block.
+   Twenty-two of MAP18.DAT's records carry it: fourteen of character id 0x60 at
+   level 17 and eight of character id 0x6d at level 15. */
+#define CH19_AMBUSH_WAVE 6
+
+/* How those twenty-two are placed: XOR EAX,EAX / PUSH EAX at 0003820f, so
+   fdps_deploy_wave passes 0 on to fdps_deploy_unit and each unit goes on the
+   nearest free walkable tile to its placement record's coordinates rather than
+   on the coordinates themselves. */
+#define CH19_AMBUSH_PLACE_NEAREST_FREE_TILE 0
+
+/* The two values the handler leaves in data_fdps_map_cursor_draw_mode: 0
+   before the deployment (MOV dword ptr [0x00069cd0],0x0 at 00038205), which
+   matches none of fdps_draw_map_cursor's cases so nothing is painted for the
+   whole sequence, and 1 after the last pan (MOV dword ptr [0x00069cd0],0x1 at
+   000382ac), which is the plain box.  The second is a literal and not the mode
+   the handler found on entry. */
+#define CURSOR_DRAW_MODE_HIDDEN 0
+#define CURSOR_DRAW_MODE_BOX 1
+
+/* The three world pixels the view is walked to, in the order the pans visit
+   them: PUSH 0x0 / PUSH 0x108 at 00038222, PUSH 0x210 / PUSH 0x0 at 0003824f
+   and PUSH 0x210 / PUSH 0x300 at 0003827c.  fdps_map_cursor_move_to takes
+   world pixels, not tiles, so at the 24-pixel tile step they are tiles
+   (11, 0), (0, 22) and (32, 22) -- the top edge, the left flank and the right
+   flank, the three areas map18.cod's wave-6 spawn points lie in.  The last two
+   are past the far edge of chapter 19's playfield; the cursor still ends on
+   them and it is the view that stops at the map's own boundary. */
+#define CH19_AMBUSH_TOP_EDGE_WORLD_X 0x108
+#define CH19_AMBUSH_TOP_EDGE_WORLD_Y 0
+#define CH19_AMBUSH_LEFT_FLANK_WORLD_X 0
+#define CH19_AMBUSH_LEFT_FLANK_WORLD_Y 0x210
+#define CH19_AMBUSH_RIGHT_FLANK_WORLD_X 0x300
+#define CH19_AMBUSH_RIGHT_FLANK_WORLD_Y 0x210
+
+/* How long the view rests on each of the three, the CMP against 0xc at
+   00038238, 00038265 and 00038295.  Each composed frame costs one timer tick
+   inside fdps_render_view_frame, so twelve is the length of the pause and not
+   a repaint count. */
+#define CH19_AMBUSH_HOLD_FRAMES 0xc
+
+/* The entry of the chapter's own text block the ambush line is spoken from,
+   PUSH 0x13 at 000382c9. */
+#define CH19_AMBUSH_TEXT_ID 0x13
+
+/* The destination the handler hands fdps_draw_text, PUSH 0xa0000 at 000382c4:
+   the top-left corner of the visible page.  It stays a literal because it is
+   an address inside the display adapter's aperture rather than the address of
+   anything the linker places (rebuild_info/pitfalls.md, contract E). */
+#define CH19_AMBUSH_TEXT_DEST 0x000a0000
+
+/* 000381d0.  Chapter 19's flank ambush: the first unit that is not on side 0
+   to finish a step onto the map's trigger tile brings on the twenty-two
+   enemies tagged wave 6, the view is panned over the three places they arrive
+   and the chapter's line about them is spoken.
+
+   The frame is the family's four-push one with a single 4-byte local -- PUSH
+   EBX / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x4 at
+   000381d0..000381d6 -- and that local is the unit record pointer at [EBP-4].
+   Every caller-clean in the body is this function's own (ADD ESP,0x4 after the
+   record lookup, ADD ESP,0xc after the deployment, ADD ESP,0x8 after each
+   cursor move and ADD ESP,0x1c after the draw), the RET at 000382e6 carries no
+   immediate, and the dispatcher pushes one dword and drops it with ADD ESP,0x4
+   at 0001583f, so the convention is the stack one at both ends of the call.
+
+   THE TWO GATES ARE ORDERED AND THE SECOND ONE COSTS A CALL.  CMP byte ptr
+   [0x000640e8],0x0 / JNZ at 000381dc jumps straight to the epilogue, so a
+   latch that is already up means fdps_get_unit_record is never reached; only
+   when it is clear is the record fetched and CMP byte ptr [EAX+0x6],0x0 / JZ
+   at 000381fb taken.  Writing the pair as one condition over a record fetched
+   up front -- which is what the chapter 10 ambush in chevt2.c really does --
+   would call into the unit array on a firing that is already spent.
+
+   The side test is JZ over the whole byte, so it is a plain "not 0" and not a
+   sign test: side 0 is the enemy, 1 the guest and 2 the player's own roster,
+   and what the gate keeps out is an enemy springing the chapter's own ambush.
+
+   THE CURSOR MODE IS SET TWICE AND THE SECOND STORE IS A LITERAL.  The 0 that
+   goes in before the deployment hides the cursor for the whole sequence, and
+   it also decides how much is drawn: fdps_map_cursor_move_to composes a frame
+   at a step only when the cursor is visible or the view scrolled, so with the
+   mode at 0 the three pans compose a frame only on the steps that dragged the
+   view.  The 1 that goes in after the last pan is the plain box and not
+   whatever the mode held on entry, so the obvious save/restore pair around the
+   pans changes what the cursor wears once the ambush is over.
+
+   THE DEPLOYMENT COMES BEFORE THE PANS and the order is what the player sees:
+   the twenty-two are standing on the map before the view starts crossing the
+   places they arrived at.  The map number is
+   data_fdps_chapter_current_chapter_id read at the call site and not anything
+   this handler holds, so it is whichever chapter is loaded.
+
+   THE FRAME COUNTER IS THE ARGUMENT SLOT.  MOV dword ptr [EBP+0x14],0x0 at
+   00038231, 0003825e and 0003828e writes zero over the incoming argument and
+   each loop compares and INCs that same slot, so the counter and the parameter
+   are one storage location -- the one local the frame has is spent on the unit
+   record pointer.  The store has no observable effect on the caller, because
+   the slot belongs to its outgoing argument area and the dispatcher drops it
+   with its own ADD ESP,0x4.  All three loops are the -od shape of a for
+   statement: the compare at the top, a dead MOV EAX,[EBP+0x14] ahead of the
+   INC, and the body reached by a JL past the exit jump.  All three are signed
+   and all three stop at 12.
+
+   Only one value is used after a CALL: fdps_get_unit_record's, stored to
+   [EBP-0x4] at 000381f5 and reloaded at 000381f8 for the one byte the gate
+   reads.  fdps_deploy_wave, fdps_map_cursor_move_to and fdps_render_view_frame
+   leave nothing this body reads, and fdps_draw_text's cursor is discarded --
+   the next instruction is the latch store.  Nothing sets EAX before the RET
+   and no dispatcher reads what comes back, so the result is void.
+
+   The latch is raised last, after the line has been spoken, which is the
+   opposite end of the body from the chapter 10 ambush's and from the chapter
+   16 smith scene's: nothing this handler calls can re-enter it, so the two
+   placements are indistinguishable from outside and the emitted one is where
+   the original puts it. */
+void fdps_chapter_19_event_deploy_wave_6(int unit_index)
+{
+    struct fdps_unit_record *triggering_unit;
+
+    if (data_fdps_map_cell_event_triggered_flags[CH19_AMBUSH_LATCH_SLOT]
+        == 0) {
+        triggering_unit = fdps_get_unit_record(unit_index);
+        if (triggering_unit->side != 0) {
+            data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;
+
+            fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                             CH19_AMBUSH_WAVE,
+                             CH19_AMBUSH_PLACE_NEAREST_FREE_TILE);
+
+            fdps_map_cursor_move_to(CH19_AMBUSH_TOP_EDGE_WORLD_X,
+                                    CH19_AMBUSH_TOP_EDGE_WORLD_Y);
+            /* The argument slot is the counter, as the assembly has it. */
+            for (unit_index = 0;
+                 unit_index < CH19_AMBUSH_HOLD_FRAMES;
+                 unit_index++) {
+                fdps_render_view_frame();
+            }
+
+            fdps_map_cursor_move_to(CH19_AMBUSH_LEFT_FLANK_WORLD_X,
+                                    CH19_AMBUSH_LEFT_FLANK_WORLD_Y);
+            for (unit_index = 0;
+                 unit_index < CH19_AMBUSH_HOLD_FRAMES;
+                 unit_index++) {
+                fdps_render_view_frame();
+            }
+
+            fdps_map_cursor_move_to(CH19_AMBUSH_RIGHT_FLANK_WORLD_X,
+                                    CH19_AMBUSH_RIGHT_FLANK_WORLD_Y);
+            for (unit_index = 0;
+                 unit_index < CH19_AMBUSH_HOLD_FRAMES;
+                 unit_index++) {
+                fdps_render_view_frame();
+            }
+
+            data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_BOX;
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CH19_AMBUSH_TEXT_ID,
+                           (unsigned char *) CH19_AMBUSH_TEXT_DEST,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+            data_fdps_map_cell_event_triggered_flags[CH19_AMBUSH_LATCH_SLOT] =
+                1;
+        }
+    }
 }

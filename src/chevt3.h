@@ -270,4 +270,60 @@ extern void fdps_chapter_18_event_deploy_wave_for_turn(int unit_index);
 extern void fdps_chapter_19_event_lancelot_joins(int unit_index);
 #pragma aux fdps_chapter_19_event_lancelot_joins "*" parm caller [];
 
+/* Chapter 19's flank ambush: the first unit that is not on side 0 to finish a
+   step onto the map's trigger tile brings on the twenty-two enemies tagged
+   wave 6, the view is panned across the three places they arrive, and the
+   chapter's line about them is spoken.
+
+   Two gates, both jumping to the same exit and in this order: element 0x10 of
+   data_fdps_map_cell_event_triggered_flags must still be 0, and only then is
+   the acting unit's record fetched and its side byte tested for non-zero.  A
+   latch that is already up means the record is never even looked up.  Side 0
+   is the enemy's, so an enemy walking over the tile cannot spring the ambush;
+   the player's units and the guests both can.  The side test is a plain
+   equality against 0 over the whole byte, not a sign test and not a range.
+
+   THE CURSOR MODE IS SET TWICE AND THE SECOND STORE IS A LITERAL 1, NOT A
+   RESTORE.  0 goes into data_fdps_map_cursor_draw_mode before the deployment,
+   which is a mode fdps_draw_map_cursor matches none of its cases for, so no
+   cursor is painted for the whole sequence -- and it also makes
+   fdps_map_cursor_move_to skip the frame on any step that did not scroll the
+   view, so the three pans compose fewer frames than they take steps.  1 goes
+   in after the last pan whatever the mode was on entry.  Writing the pair as
+   the save/restore it looks like changes what the cursor wears afterwards.
+
+   THE LATCH IS NOT PRIVATE TO THIS HANDLER.  It is element 0x10 of the
+   chapter-event flag block fdps_chapter_state_reset clears at every chapter
+   start and fdps_load_savegame restores from the save image, and a dozen
+   handlers of other chapters latch the same byte.  A function-local static
+   would fire the ambush once per process instead of once per chapter, so
+   replaying chapter 19 after a Game Over, or loading a save made before the
+   trigger, would silently skip the reinforcements.
+
+   The deployment is fdps_deploy_wave (deploy.h) with wave 6 and place_exact 0,
+   the map number read from data_fdps_chapter_current_chapter_id at the call
+   site, so each arrival goes on the nearest free walkable tile to the
+   coordinates its MAP%02d.COD record names.  The three pans are world pixels
+   and not tiles -- (264, 0), (0, 528) and (768, 528), tiles (11, 0), (0, 22)
+   and (32, 22) -- and each is followed by twelve calls to
+   fdps_render_view_frame, which is a pause of twelve retrace-paced frames
+   rather than a repaint count.  The line is entry 0x13 of the chapter's own
+   text block.
+
+   The order is load-bearing at one point: the deployment runs before the pans,
+   so the reinforcements are standing on the map by the time the view reaches
+   them.
+
+   unit_index is the handler table's shared parameter and it is read exactly
+   once, by the side gate.  The incoming slot is then overwritten with 0 and
+   reused as the counter of all three frame loops, so nothing past the gate can
+   see which unit fired the event.
+
+   Table slot 27, and chapter 19's map18.dat is the only shipped file that
+   names it: its tile-event table entry for cell event code 1, with occasion 0
+   -- the occasion a unit reports as it finishes stepping onto a cell.  No turn
+   event and no death script in any MAP*.DAT reaches the slot. */
+extern void fdps_chapter_19_event_deploy_wave_6(int unit_index);
+#pragma aux fdps_chapter_19_event_deploy_wave_6 "*" parm caller [];
+
 #endif

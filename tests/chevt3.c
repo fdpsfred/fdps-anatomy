@@ -58,6 +58,7 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "keybd.h"
+#include "mapdraw.h"
 #include "unit.h"
 #include "chevt3.h"
 
@@ -2269,6 +2270,463 @@ static void ch19_ignores_the_unit_index_argument(void)
     }
 }
 
+/* ------------------------------------------------------------------
+ * The chapter 19 flank ambush at 000381d0.
+ *
+ * It is the chapter 10 ambush of tests/chevt2.c with three pans and a spoken
+ * line added, so the cases below stand on the chapter 17 fixture the rest of
+ * this file uses -- a blank walkable 32 x 16 map, a deployment table whose
+ * records are also their own MAP%02d.COD placement records, and the real
+ * MAP00.COD and MAP01.COD read off disk -- with three things added:
+ *
+ *   a unit array of four records, so an index really names one record out of
+ *   several and the side gate can be shown reading the one it was handed;
+ *
+ *   the globals the frame compositor reads, staged the way the pan-bearing
+ *   cases of tests/chevt2.c stage them: no scene layers, both HUD flags down,
+ *   the view and the cursor at the origin, and a sentinel in the frame latch
+ *   that a run composing no frame at all would leave behind;
+ *
+ *   an enemy table long enough for character id 0x80, which is the id every
+ *   staged deployment record carries because it is the one the compositor
+ *   drops -- 0x80 is 68 rows past ENEMY_CHAR_ID_BASE, and the eight-row table
+ *   the chapter 17 fixture points at is not that long.
+ *
+ * WHICH RECORD ARRIVED IS READ OFF ITS LEVEL AND NOT ITS CHARACTER ID, for
+ * that same reason: every record has to carry the dropped id, so the level is
+ * what tells the wave-6 record from the wave-5 and wave-7 records either side
+ * of it.
+ *
+ * THE CASES THAT REACH THE BODY RUN WITH THE TIMER INSTALLED AND THE ADAPTER
+ * IN MODE 13H, because the three twelve-frame holds spin on the tick counter
+ * inside fdps_render_view_frame and nothing else advances it.  They also reach
+ * fdps_deploy_wave, which opens ICON.CEL and FIELD.VFS for itself, so they
+ * skip themselves when those are not staged.  The cases whose gate refuses the
+ * body need none of that: nothing is opened and no frame is composed, so they
+ * cost nothing and are free to sweep several arguments.
+ *
+ * EACH FIRING COSTS SEVERAL SECONDS OF REAL TIME and that is why so many
+ * claims are asserted out of one of them.  A firing composes the thirty-six
+ * held frames plus a frame for every pan step that dragged the view, and every
+ * composed frame waits for a timer tick, so a case that fires cannot be made
+ * cheaper -- only the number of firings can.  Grouping is therefore deliberate
+ * here, not carelessness, and each case's comment says which claims it carries.
+ *
+ * WHICH TEXT ENTRY THE DRAW ASKS FOR IS NOT ASSERTED, for the reason the
+ * chapter 19 arrival section above gives: the draw takes its whole effect
+ * through pixels at the VGA aperture, keeps no state and returns a cursor this
+ * handler discards.  The entry id and the three colours are literals in the
+ * instruction stream (PUSH 0x13 at 000382c9 and PUSH 0xd0 / PUSH 0x0 /
+ * PUSH 0x6d at 000382ba, 000382b8 and 000382b6).  The text block is staged as
+ * entries that are a lone terminator so the draw walks it, paints nothing and
+ * returns at once.
+ * ------------------------------------------------------------------ */
+
+/* The wave the ambush asks for, PUSH 0x6 at 00038212, and the two waves parked
+   either side of it so that asking for the wrong one is visible. */
+#define CH19W6_WAVE 6
+#define CH19W6_WAVE_BELOW 5
+#define CH19W6_WAVE_ABOVE 7
+
+/* Which table index each of the three sits on.  The wave the handler asks for
+   is on record 0, whose MAP00.COD and MAP01.COD coordinates the cases above
+   already read back out of the real files. */
+#define CH19W6_WAVE6_RECORD 0
+#define CH19W6_WAVE5_RECORD 1
+#define CH19W6_WAVE7_RECORD 2
+#define CH19W6_SPAWN_RECORD_COUNT 3
+
+/* The level each record carries, which is how the cases tell which one
+   arrived.  The wave-6 record's level is deliberately not its wave number. */
+#define CH19W6_WAVE6_LEVEL 17
+#define CH19W6_WAVE5_LEVEL 5
+#define CH19W6_WAVE7_LEVEL 7
+
+/* The id the compositor drops, PORTRAIT_ID_NO_MAP_SPRITE at 00033c56, and how
+   many enemy rows a table has to have for fdps_deploy_unit to resolve it
+   inside itself: 0x80 - ENEMY_CHAR_ID_BASE + 1. */
+#define CH19W6_ARRIVAL_CHAR_ID 0x80
+#define CH19W6_ENEMY_TABLE_ROWS (0x80 - 0x3c + 1)
+
+/* MAP00.COD's placement record 0 and MAP01.COD's record 0. */
+#define CH19W6_MAP00_RECORD0_X 18
+#define CH19W6_MAP00_RECORD0_Y 0
+#define CH19W6_MAP01_RECORD0_X 9
+#define CH19W6_MAP01_RECORD0_Y 4
+
+/* Units already on the map when the handler runs, and the index the arrival
+   therefore lands on.  Four is enough for an index to name one record out of
+   several, and they stand along the top row clear of every placement record
+   the cases read back. */
+#define CH19W6_STAGED_UNITS 4
+#define CH19W6_ARRIVAL_UNIT_INDEX CH19W6_STAGED_UNITS
+
+/* The unit the fixture puts on the side that springs the ambush, and the
+   sides themselves: 0 is the enemy's, 2 the player's own roster.  0x80 is the
+   value that tells a plain non-zero test from a signed one. */
+#define CH19W6_TRIGGERING_UNIT_INDEX 2
+#define CH19W6_SIDE_ENEMY 0
+#define CH19W6_SIDE_PLAYER 2
+#define CH19W6_SIDE_HIGH_BIT 0x80
+
+/* The cursor mode the fixture parks in data_fdps_map_cursor_draw_mode before
+   every run: neither of the two values the handler writes, so a run that left
+   it alone, a run that hid the cursor and never put it back, and a run that
+   restored what it found are all told apart from the mode the handler is
+   supposed to leave behind. */
+#define CH19W6_STAGED_CURSOR_MODE 4
+
+/* The two modes the handler itself writes: 0 at 00038205 and 1 at 000382ac. */
+#define CH19W6_CURSOR_MODE_HIDDEN 0
+#define CH19W6_CURSOR_MODE_BOX 1
+
+/* The three world pixels the pans walk to, PUSH 0x0 / PUSH 0x108 at 00038222,
+   PUSH 0x210 / PUSH 0x0 at 0003824f and PUSH 0x210 / PUSH 0x300 at
+   0003827c. */
+#define CH19W6_TOP_EDGE_WORLD_X 0x108
+#define CH19W6_TOP_EDGE_WORLD_Y 0
+#define CH19W6_LEFT_FLANK_WORLD_X 0
+#define CH19W6_LEFT_FLANK_WORLD_Y 0x210
+#define CH19W6_RIGHT_FLANK_WORLD_X 0x300
+#define CH19W6_RIGHT_FLANK_WORLD_Y 0x210
+
+/* How long each hold lasts, CMP dword ptr [EBP+0x14],0xc at 00038238, 00038265
+   and 00038295, and the least the tick counter can move across all three of
+   them.  The bound is one-sided on purpose -- a slow machine spends more ticks
+   than this, never fewer, and the frames the pans themselves compose are on
+   top of it -- so it cannot fail spuriously, while a rebuild that dropped one
+   of the three loops cannot meet it at any sane speed. */
+#define CH19W6_HOLD_FRAMES 0xc
+#define CH19W6_LEAST_HOLD_TICKS (3 * CH19W6_HOLD_FRAMES - 1)
+
+/* A value the tick counter cannot legitimately hold, parked in the frame latch
+   so a run that composed nothing is distinguishable from one that did. */
+#define CH19W6_FRAME_SENTINEL 0x5a5a5a5aU
+
+/* Any turn at all: nothing in this handler reads the turn counter, and the
+   fixture sets one because the chapter 17 stage it is built on wants one. */
+#define CH19W6_ANY_TURN 4
+
+static struct fdps_enemy_data ch19w6_enemy[CH19W6_ENEMY_TABLE_ROWS];
+static unsigned int ch19w6_ticks_before;
+static unsigned int ch19w6_ticks_after;
+static void (__interrupt __far *ch19w6_saved_timer)();
+
+static void __interrupt __far ch19w6_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(ch19w6_saved_timer);
+}
+
+/* The chapter 19 arrival fixture -- the chapter 17 map with a text block over
+   it -- given a four-record unit array every one of whose units is on the
+   player's side and wears the dropped portrait id, three deployment records at
+   the waves the cases ask about, an enemy table long enough for the id they
+   carry, and the compositor's own globals. */
+static void ch19w6_stage(void)
+{
+    int i;
+
+    ch19_stage(CH19W6_ANY_TURN);
+
+    memset(ch19w6_enemy, 0, sizeof(ch19w6_enemy));
+    data_fdps_battle_enemy_data_table_ptr = (unsigned char *) ch19w6_enemy;
+
+    data_fdps_map_unit_array_ptr =
+        (unsigned char *) malloc(CH19W6_STAGED_UNITS * CH17_UNIT_STRIDE);
+    memset(data_fdps_map_unit_array_ptr, 0,
+           (size_t) (CH19W6_STAGED_UNITS * CH17_UNIT_STRIDE));
+    data_fdps_map_unit_count = CH19W6_STAGED_UNITS;
+    for (i = 0; i < CH19W6_STAGED_UNITS; i++) {
+        ch17_unit(i)->portrait_id = (unsigned char) CH19W6_ARRIVAL_CHAR_ID;
+        ch17_unit(i)->side = (unsigned char) CH19W6_SIDE_PLAYER;
+        ch17_unit(i)->pos_x = (unsigned char) i;
+        ch17_unit(i)->pos_y = 0;
+    }
+
+    ch17_spawn_table[CH17_SPAWN_TABLE_COUNT_OFFSET] =
+        (unsigned char) CH19W6_SPAWN_RECORD_COUNT;
+    ch17_set_spawn(CH19W6_WAVE6_RECORD, CH19W6_ARRIVAL_CHAR_ID, CH19W6_WAVE);
+    ch17_set_spawn(CH19W6_WAVE5_RECORD, CH19W6_ARRIVAL_CHAR_ID,
+                   CH19W6_WAVE_BELOW);
+    ch17_set_spawn(CH19W6_WAVE7_RECORD, CH19W6_ARRIVAL_CHAR_ID,
+                   CH19W6_WAVE_ABOVE);
+    ch17_spawn_at(CH19W6_WAVE6_RECORD)->level =
+        (unsigned char) CH19W6_WAVE6_LEVEL;
+    ch17_spawn_at(CH19W6_WAVE5_RECORD)->level =
+        (unsigned char) CH19W6_WAVE5_LEVEL;
+    ch17_spawn_at(CH19W6_WAVE7_RECORD)->level =
+        (unsigned char) CH19W6_WAVE7_LEVEL;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_view_frame_last_tick = CH19W6_FRAME_SENTINEL;
+    data_fdps_map_cursor_draw_mode = CH19W6_STAGED_CURSOR_MODE;
+
+    data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT] = 0;
+}
+
+/* One firing, with the timer running and the adapter in the mode the frames
+   present through, and the tick counter sampled either side so the length of
+   the three holds can be read back.  Text mode is back before anything is
+   asserted, so a failure prints on a readable screen. */
+static void ch19w6_run(int unit_index)
+{
+    smith_set_mode(SMITH_MODE_320X200X256);
+    ch19w6_saved_timer = _dos_getvect(SMITH_TIMER_VECTOR);
+    _dos_setvect(SMITH_TIMER_VECTOR, ch19w6_timer_isr);
+    ch19w6_ticks_before = data_fdps_timer_tick_counter;
+    fdps_chapter_19_event_deploy_wave_6(unit_index);
+    ch19w6_ticks_after = data_fdps_timer_tick_counter;
+    _dos_setvect(SMITH_TIMER_VECTOR, ch19w6_saved_timer);
+    smith_set_mode(SMITH_MODE_TEXT);
+}
+
+/* The two fields the gate reads and the stride they are indexed by.  The side
+   byte is the whole of the second gate, and CMP byte ptr [EAX+0x6],0x0 at
+   000381fb is the offset it has to be at; the wave byte is what the deployment
+   walk matches 6 against. */
+static void ch19w6_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), CH17_UNIT_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 6);
+    CHECK_EQ((int) offsetof(struct fdps_char_spawn_record, wave_no), 0x15);
+}
+
+/* A latch that is already up refuses the whole body, and it is tested against
+   0 rather than against 1 -- CMP byte ptr [0x000640e8],0x0 / JNZ at 000381dc
+   -- so any non-zero value in the slot blocks it.  Nothing is deployed, no
+   frame is composed and the cursor mode is left exactly as it was found, which
+   is what says the store of 0 at 00038205 is inside the gate and not ahead of
+   it. */
+static void ch19w6_latch_blocks_the_whole_body(void)
+{
+    static int latch_values[2] = {1, 0x7f};
+    int i;
+
+    for (i = 0; i < 2; i++) {
+        ch19w6_stage();
+        data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT] =
+            (unsigned char) latch_values[i];
+
+        ch19w6_run(CH19W6_TRIGGERING_UNIT_INDEX);
+
+        CHECK_EQ(data_fdps_map_unit_count, CH19W6_STAGED_UNITS);
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT],
+                 latch_values[i]);
+        CHECK_EQ(data_fdps_map_cursor_draw_mode, CH19W6_STAGED_CURSOR_MODE);
+        CHECK_EQ(data_fdps_view_frame_last_tick == CH19W6_FRAME_SENTINEL, 1);
+    }
+}
+
+/* A unit on side 0 cannot spring the ambush: the second gate is CMP byte ptr
+   [EAX+0x6],0x0 / JZ at 000381fb, so a zero side byte jumps to the same exit
+   the latch does.  Nothing is deployed, the latch is NOT spent, no frame is
+   composed and the cursor mode is untouched -- an enemy walking over the tile
+   leaves the ambush armed for the unit that comes next. */
+static void ch19w6_side_zero_does_not_fire(void)
+{
+    ch19w6_stage();
+    ch17_unit(CH19W6_TRIGGERING_UNIT_INDEX)->side =
+        (unsigned char) CH19W6_SIDE_ENEMY;
+
+    ch19w6_run(CH19W6_TRIGGERING_UNIT_INDEX);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH19W6_STAGED_UNITS);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT], 0);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, CH19W6_STAGED_CURSOR_MODE);
+    CHECK_EQ(data_fdps_view_frame_last_tick == CH19W6_FRAME_SENTINEL, 1);
+}
+
+/* Three claims out of one firing, because a firing is expensive.
+
+   THE SIDE BYTE READ BELONGS TO THE RECORD THE ARGUMENT NAMES.  Three of the
+   four staged units are put on side 0 and the fourth is left able to spring
+   the ambush; the three indices that name a side-0 unit are refused one after
+   another -- they leave the latch down, which is what lets them run without
+   restaging -- and only the index that names the fourth fires.  A handler that
+   read unit 0, or the last unit, or ignored the argument, would fire on the
+   wrong one of these four calls.
+
+   THE SIDE TEST IS A PLAIN NON-ZERO TEST AND NOT A SIGNED ONE.  The unit that
+   springs it is put on side 0x80, which is negative read as a signed char, so
+   a rebuild that had written the gate as "side > 0" would refuse this firing.
+   Side 2, the ordinary player side, is what every other firing in this section
+   uses.
+
+   WAVE 6 IS WHAT ARRIVES.  The one record tagged 6 is deployed, carrying its
+   own level and MAP00.COD record 0's coordinates, and the records tagged 5 and
+   7 are left where they are: the unit count moves by exactly one, and the
+   level is what says which record moved, every record carrying the same
+   character id. */
+static void ch19w6_deploys_wave_six_for_the_record_the_index_names(void)
+{
+    static int enemy_indices[3] = {0, 1, 3};
+    int i;
+
+    ch19w6_stage();
+    for (i = 0; i < 3; i++) {
+        ch17_unit(enemy_indices[i])->side = (unsigned char) CH19W6_SIDE_ENEMY;
+    }
+    ch17_unit(CH19W6_TRIGGERING_UNIT_INDEX)->side =
+        (unsigned char) CH19W6_SIDE_HIGH_BIT;
+
+    for (i = 0; i < 3; i++) {
+        ch19w6_run(enemy_indices[i]);
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT], 0);
+        CHECK_EQ(data_fdps_map_unit_count, CH19W6_STAGED_UNITS);
+    }
+
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch19w6_run(CH19W6_TRIGGERING_UNIT_INDEX);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_unit_count, CH19W6_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch17_unit(CH19W6_ARRIVAL_UNIT_INDEX)->level,
+             CH19W6_WAVE6_LEVEL);
+    CHECK_EQ((int) ch17_unit(CH19W6_ARRIVAL_UNIT_INDEX)->pos_x,
+             CH19W6_MAP00_RECORD0_X);
+    CHECK_EQ((int) ch17_unit(CH19W6_ARRIVAL_UNIT_INDEX)->pos_y,
+             CH19W6_MAP00_RECORD0_Y);
+}
+
+/* The map the wave is placed under is read from
+   data_fdps_chapter_current_chapter_id at the call site and is not a literal:
+   the same record placed while that global says 1 lands on MAP01.COD's record
+   0 at (9, 4), where the case above -- which fires with that global on 0 --
+   has it landing on MAP00.COD's (18, 0).  The two halves of the claim are in
+   two cases because each of them costs a firing. */
+static void ch19w6_map_number_comes_from_the_chapter_global(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch19w6_stage();
+    data_fdps_chapter_current_chapter_id = 1;
+
+    ch19w6_run(CH19W6_TRIGGERING_UNIT_INDEX);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH19W6_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch17_unit(CH19W6_ARRIVAL_UNIT_INDEX)->level,
+             CH19W6_WAVE6_LEVEL);
+    CHECK_EQ((int) ch17_unit(CH19W6_ARRIVAL_UNIT_INDEX)->pos_x,
+             CH19W6_MAP01_RECORD0_X);
+    CHECK_EQ((int) ch17_unit(CH19W6_ARRIVAL_UNIT_INDEX)->pos_y,
+             CH19W6_MAP01_RECORD0_Y);
+}
+
+/* The placement flag is 0 -- XOR EAX,EAX / PUSH EAX at 0003820f -- so each
+   arrival is put on the nearest free walkable tile to its placement record
+   rather than on the record's own tile.  MAP00.COD record 0 names (18, 0);
+   giving that one cell a tile id whose attribute row is terrain 5 takes it out
+   of the search and the unit lands one tile away.  A flag of 1 would drop it
+   on (18, 0) regardless of the terrain there, which is what would put an
+   arriving enemy on top of whatever is already standing on its spawn tile.
+
+   (18, 1) is which of the three tiles at distance 1 it lands on: the scan is
+   row-major over the whole grid and a tie is accepted, so the last candidate
+   at the best distance wins, and (18, 1) is a row below (17, 0) and (19, 0). */
+static void ch19w6_places_on_the_nearest_free_tile(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch19w6_stage();
+    ch17_set_tile_id(CH19W6_MAP00_RECORD0_X, CH19W6_MAP00_RECORD0_Y, 1);
+    ch17_set_terrain(1, CH17_TERRAIN_BLOCKED);
+
+    ch19w6_run(CH19W6_TRIGGERING_UNIT_INDEX);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH19W6_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch17_unit(CH19W6_ARRIVAL_UNIT_INDEX)->level,
+             CH19W6_WAVE6_LEVEL);
+    CHECK_EQ((int) ch17_unit(CH19W6_ARRIVAL_UNIT_INDEX)->pos_x,
+             CH19W6_MAP00_RECORD0_X);
+    CHECK_EQ((int) ch17_unit(CH19W6_ARRIVAL_UNIT_INDEX)->pos_y,
+             CH19W6_MAP00_RECORD0_Y + 1);
+}
+
+/* Everything about the pan sequence, out of the one firing it costs.
+
+   THE THREE PANS RUN IN THE ORDER THE INSTRUCTION STREAM HAS THEM AND THE LAST
+   IS THE RIGHT FLANK.  The cursor starts at the origin and is left on world
+   pixel (768, 528) exactly, which is tile (32, 22).  A run that stopped after
+   the first pan would leave it on (264, 0) and one that stopped after the
+   second on (0, 528); both are asserted against.  The frame latch has lost its
+   sentinel, so frames really were composed.
+
+   ALL THREE HOLDS ARE TWELVE FRAMES LONG AND ALL THREE ARE THERE.  A composed
+   frame costs at least one timer tick, so thirty-six of them cannot pass in
+   fewer than thirty-five ticks, and the frames the pans themselves compose are
+   on top of that.  A rebuild that held only two of the three, or that held each
+   for fewer frames, spends fewer ticks than any machine can excuse.
+
+   THE CURSOR MODE IS LEFT ON 1 AND NOT ON THE 4 THE FIXTURE PARKED THERE,
+   which is the whole of the second store at 000382ac: the handler does not
+   restore the mode it found, it writes the plain box over it.  A rebuild that
+   saved and restored would leave 4 here and one that only ever hid the cursor
+   would leave 0. */
+static void ch19w6_pan_ends_on_the_right_flank_after_three_holds(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch19w6_stage();
+    ch19w6_run(CH19W6_TRIGGERING_UNIT_INDEX);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, CH19W6_RIGHT_FLANK_WORLD_X);
+    CHECK_EQ(data_fdps_map_cursor_world_y, CH19W6_RIGHT_FLANK_WORLD_Y);
+    CHECK_EQ(data_fdps_map_cursor_world_x == CH19W6_TOP_EDGE_WORLD_X, 0);
+    CHECK_EQ(data_fdps_map_cursor_world_x == CH19W6_LEFT_FLANK_WORLD_X, 0);
+    CHECK_EQ(data_fdps_view_frame_last_tick == CH19W6_FRAME_SENTINEL, 0);
+    CHECK_EQ((int) (ch19w6_ticks_after - ch19w6_ticks_before)
+                 >= CH19W6_LEAST_HOLD_TICKS, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, CH19W6_CURSOR_MODE_BOX);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode == CH19W6_STAGED_CURSOR_MODE, 0);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode == CH19W6_CURSOR_MODE_HIDDEN, 0);
+}
+
+/* The ambush fires once and the latch it leaves behind is what stops it: a
+   second call on the same map deploys nothing, composes no frame and leaves
+   the cursor mode alone.  The mode is parked at 4 again between the two calls,
+   so a second firing would be visible in it even if the deployment somehow
+   were not. */
+static void ch19w6_fires_once_only(void)
+{
+    ch17_ensure_game_files();
+    if (!ch17_files_ready) {
+        return;
+    }
+
+    ch19w6_stage();
+    ch19w6_run(CH19W6_TRIGGERING_UNIT_INDEX);
+    CHECK_EQ(data_fdps_map_unit_count, CH19W6_STAGED_UNITS + 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT], 1);
+
+    data_fdps_map_cursor_draw_mode = CH19W6_STAGED_CURSOR_MODE;
+    data_fdps_view_frame_last_tick = CH19W6_FRAME_SENTINEL;
+
+    ch19w6_run(CH19W6_TRIGGERING_UNIT_INDEX);
+    CHECK_EQ(data_fdps_map_unit_count, CH19W6_STAGED_UNITS + 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, CH19W6_STAGED_CURSOR_MODE);
+    CHECK_EQ(data_fdps_view_frame_last_tick == CH19W6_FRAME_SENTINEL, 1);
+}
+
 void run_chevt3_tests(void)
 {
     RUN_TEST(ch15_record_shape_matches_the_offsets);
@@ -2318,4 +2776,12 @@ void run_chevt3_tests(void)
     RUN_TEST(ch19_places_on_the_nearest_free_tile);
     RUN_TEST(ch19_has_no_one_shot_latch);
     RUN_TEST(ch19_ignores_the_unit_index_argument);
+    RUN_TEST(ch19w6_record_shape_matches_the_offsets);
+    RUN_TEST(ch19w6_latch_blocks_the_whole_body);
+    RUN_TEST(ch19w6_side_zero_does_not_fire);
+    RUN_TEST(ch19w6_deploys_wave_six_for_the_record_the_index_names);
+    RUN_TEST(ch19w6_map_number_comes_from_the_chapter_global);
+    RUN_TEST(ch19w6_places_on_the_nearest_free_tile);
+    RUN_TEST(ch19w6_pan_ends_on_the_right_flank_after_three_holds);
+    RUN_TEST(ch19w6_fires_once_only);
 }
