@@ -54,4 +54,37 @@
 extern void fdps_chapter_20_event_upgrade_randis_sword(int unit_index);
 #pragma aux fdps_chapter_20_event_upgrade_randis_sword "*" parm caller [];
 
+/* Chapter 21's first ambush: a unit of the player's own side finishes a step
+   onto the map's trigger tile, the sixteen enemies MAP20.DAT tags wave 1 come
+   on, and the chapter's line about them is spoken.
+
+   Two things have to hold and the handler does nothing at all unless both do:
+   the shared one-shot latch is still down, and the unit that stepped on the
+   tile is on side 2.  THE SIDE TEST IS AN EQUALITY AND NOT THE FAMILY'S "NOT
+   0": side 1, the guest side, is refused here where the chapter 10 and chapter
+   19 ambushes admit it, so a guest walking over the tile leaves it armed.  The
+   record is fetched before either test is made, so a firing that goes no
+   further still costs one lookup in the unit array.
+
+   The sixteen are placed on the nearest free walkable tile to each record's
+   scripted coordinates rather than on those coordinates verbatim, and they are
+   appended to the unit array, so whatever is already on the map stays on it.
+   The map they are read from is whichever chapter is loaded, not a number this
+   handler holds.  The line is entry 0x14 of the chapter's own text block and it
+   is spoken after the deployment, so the enemies are already standing on the
+   map behind the message.
+
+   The latch is raised last, after the line.  It is the shared byte the
+   chapter reset clears and the save file carries, NOT a flag private to this
+   handler -- a static in its place would leave the ambush spent across a
+   chapter restart and across a reload.  Any non-zero value in the slot blocks
+   the body, and the handler writes exactly 1.
+
+   Table slot 29, and chapter 21's map20.dat is the only shipped file that names
+   it: tile-event entry 1, with occasion 0 -- the occasion a unit reports as it
+   finishes stepping onto a cell.  The same map's entry 2 routes to slot 30,
+   fdps_chapter_21_event_deploy_wave_2. */
+extern void fdps_chapter_21_event_deploy_wave_1(int unit_index);
+#pragma aux fdps_chapter_21_event_deploy_wave_1 "*" parm caller [];
+
 #endif
