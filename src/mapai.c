@@ -598,6 +598,156 @@ int fdps_map_actor_move_toward_nearest_opponent(int unit_index, int side_select)
     return moved;
 }
 
+/* Bit 0x40 of the actor's behaviour byte, AND AL,0x40 at 00012c72.  It is not
+   part of the behaviour nibble the dispatcher above reads; here it is the flag
+   that decides the two ties below in the physical attack's favour.  Nothing in
+   the shipped game can raise it -- every write to record byte 0x34 anywhere in
+   the image either stores an immediate with the bit clear or merges a low
+   nibble into (old & 0xf0), and across all 63 MAP*.DAT files the deployment
+   byte it is seeded from never exceeds the low nibble -- so both ties always
+   take their clear-bit arm.  It is still read here because the original reads
+   it. */
+#define AI_BEHAVIOR_PHYSICAL_TIE_BIT 0x40
+
+/* CMP dword ptr [0x00063f90],0x12 / JGE at 00012d1b: below this spell id the
+   attack-versus-spell tie is settled by comparing the spell's power word with
+   the physical damage estimate, and at it and above by the flag bit instead.
+   It is not a boundary in the spell table -- plain HP powers sit on both sides
+   of it -- but a literal the author chose, and its effect is that above it the
+   tie is decided by a flag that is always clear and the physical attack never
+   wins it. */
+#define MAP_AI_SPELL_POWER_TIE_LIMIT 0x12
+
+/* 00012c10.  Runs all three action searches for one AI actor and carries out
+   the one the five comparisons below pick, or reports that none was worth
+   taking.
+ *
+ * THE DISPATCH IS FIVE EXPLICIT COMPARISONS AND NOT A SELECTION OF THE
+ * MAXIMUM.  When all three scores are equal and at least one of them reaches
+ * the threshold, every one of the five conditions is false and NO action
+ * routine runs at all -- yet the cursor overlay is still cleared and 1 is
+ * still returned, so fdps_map_actor_behavior_step believes the actor acted,
+ * skips its fallbacks, and the unit stands still for the turn.  Writing the
+ * obvious "run whichever option scored highest" gives that case an action and
+ * changes enemy behaviour (rebuild_info/pitfalls.md).
+ *
+ * BOTH UNIT RECORDS, THE FLAG BIT AND THE DAMAGE ESTIMATE ARE COMPUTED BEFORE
+ * ANY BRANCH.  The second fdps_get_unit_record is handed
+ * data_fdps_battle_ai_best_physical_target_idx, which no scorer zeroes -- it is
+ * written only when an attack was actually found -- so on a turn where the
+ * attack search found nobody this resolves whatever the PREVIOUS actor left
+ * there and reads its defence word.  That is harmless because the estimate is
+ * used only in the attack-versus-spell tie, which cannot be reached unless the
+ * attack score is at least 6 and so the index is fresh; moving the fetch inside
+ * that arm would still be a different program, and it is left where the
+ * original put it.
+ *
+ * The threshold compares are CMP ...,0x6 with JGE and JL, the signed ones, and
+ * the three scores are tiers on one scale: the attack search publishes 0, 8 or
+ * 0x12 and the spell and item searches publish sums of their own per-target
+ * tiers (aiscore.h).
+ *
+ * fdps_get_spell_record is called on the tie arm BEFORE the 0x12 test and
+ * whatever that test then decides, so the record is resolved even on the arm
+ * that never dereferences it.
+ *
+ * The damage estimate is the actor's attack word less the attack target's
+ * defence word, both MOVSX at 00012c7f and 00012c86, so a stat that has gone
+ * negative stays negative; the compare against the spell's power word at
+ * 00012d30 is JLE, so an estimate that merely equals the power leaves the tie
+ * with the spell. */
+int fdps_map_actor_take_best_action(int unit_index, int side_select)
+{
+    /* The acting unit's record. */
+    struct fdps_unit_record *actor;
+    /* The record of the unit the attack search picked out.  Stale whenever
+       that search published nothing this turn -- see the note above. */
+    struct fdps_unit_record *attack_target;
+    /* The record of the spell the spell search picked out.  Only the power
+       word of it is ever read. */
+    struct fdps_spell_effect *chosen_spell;
+    /* Behaviour-byte bit 0x40: when set, both of the ties below go to the
+       physical attack instead of to the spell or the item. */
+    int physical_wins_tie_flag;
+    /* What the physical attack is expected to take off the attack target:
+       the actor's attack stat less that target's defence stat. */
+    int physical_damage_estimate;
+    /* The chosen spell's power word, what the estimate is weighed against. */
+    int chosen_spell_power;
+    /* The answer: 1 once the dispatch has been entered. */
+    int acted;
+
+    fdps_map_actor_score_best_attack(unit_index, side_select);
+    fdps_map_actor_score_best_spell(unit_index, side_select);
+    fdps_map_actor_score_best_item(unit_index, side_select);
+
+    actor = fdps_get_unit_record(unit_index);
+    attack_target =
+        fdps_get_unit_record(data_fdps_battle_ai_best_physical_target_idx);
+    physical_wins_tie_flag =
+        (int) (actor->ai_behavior & AI_BEHAVIOR_PHYSICAL_TIE_BIT);
+    physical_damage_estimate = (int) actor->ap - (int) attack_target->dp;
+
+    if (data_fdps_battle_ai_best_physical_score <
+            MAP_AI_ACTION_SCORE_THRESHOLD &&
+        data_fdps_battle_ai_best_spell_score <
+            MAP_AI_ACTION_SCORE_THRESHOLD &&
+        data_fdps_battle_ai_best_item_score <
+            MAP_AI_ACTION_SCORE_THRESHOLD) {
+        acted = 0;
+    } else {
+        if (data_fdps_battle_ai_best_physical_score >
+                data_fdps_battle_ai_best_spell_score &&
+            data_fdps_battle_ai_best_physical_score >
+                data_fdps_battle_ai_best_item_score) {
+            fdps_map_actor_move_and_attack(unit_index, side_select);
+        } else if (data_fdps_battle_ai_best_physical_score ==
+                       data_fdps_battle_ai_best_spell_score &&
+                   data_fdps_battle_ai_best_spell_score >
+                       data_fdps_battle_ai_best_item_score) {
+            chosen_spell =
+                fdps_get_spell_record(data_fdps_map_ai_best_spell_id);
+            if (data_fdps_map_ai_best_spell_id <
+                    MAP_AI_SPELL_POWER_TIE_LIMIT) {
+                chosen_spell_power = (int) chosen_spell->power;
+                if (physical_damage_estimate > chosen_spell_power) {
+                    fdps_map_actor_move_and_attack(unit_index, side_select);
+                } else {
+                    fdps_map_actor_cast_chosen_spell(unit_index, side_select);
+                }
+            } else if (physical_wins_tie_flag == 0) {
+                fdps_map_actor_cast_chosen_spell(unit_index, side_select);
+            } else {
+                fdps_map_actor_move_and_attack(unit_index, side_select);
+            }
+        } else if (data_fdps_battle_ai_best_physical_score ==
+                       data_fdps_battle_ai_best_item_score &&
+                   data_fdps_battle_ai_best_item_score >
+                       data_fdps_battle_ai_best_spell_score) {
+            if (physical_wins_tie_flag == 0) {
+                fdps_map_actor_use_item(unit_index, side_select);
+            } else {
+                fdps_map_actor_move_and_attack(unit_index, side_select);
+            }
+        } else if (data_fdps_battle_ai_best_spell_score >
+                       data_fdps_battle_ai_best_physical_score &&
+                   data_fdps_battle_ai_best_spell_score >=
+                       data_fdps_battle_ai_best_item_score) {
+            fdps_map_actor_cast_chosen_spell(unit_index, side_select);
+        } else if (data_fdps_battle_ai_best_item_score >
+                       data_fdps_battle_ai_best_physical_score &&
+                   data_fdps_battle_ai_best_item_score >
+                       data_fdps_battle_ai_best_spell_score) {
+            fdps_map_actor_use_item(unit_index, side_select);
+        }
+
+        data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;
+        acted = 1;
+    }
+
+    return acted;
+}
+
 /* 00013e10.  The map dimensions come from the MOVEMENT GRID's header -- MOVSX
    word ptr [EAX] and MOVSX word ptr [EAX+2] on data_fdps_battle_move_grid_ptr
    at 00013e21 and 00013e2c -- and not from the terrain layer's header at +7,

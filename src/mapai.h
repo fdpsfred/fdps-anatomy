@@ -38,7 +38,28 @@ extern void fdps_map_actor_behavior_step(int actor_index, int side_select);
 
    The three searches are run first, so this both decides and acts; a caller
    that reads 0 has had all three searches run for it and may go on to a
-   movement fallback. */
+   movement fallback.
+
+   "High enough" is a score of 6 or more on the shared tier scale, and it is
+   enough for ONE of the three to reach it.  Below that nothing is done, the
+   cursor overlay is left as it was and the answer is 0.
+
+   Which of the three is taken is decided by a chain of five comparisons and
+   NOT by picking the largest score.  When all three scores are equal and at
+   least one of them reaches 6 none of the five holds, so no action is carried
+   out at all -- and the answer is still 1, so the caller believes the actor
+   acted and the unit stands still for the turn.
+
+   Two of the five are ties the actor's behaviour byte can settle: bit 0x40 of
+   record byte 0x34 sends a tie to the physical attack rather than to the spell
+   or the item.  Nothing in the shipped game can set that bit, so the spell wins
+   its tie from spell id 0x12 upward and a tied item always wins.  Below spell
+   id 0x12 that tie is settled instead by weighing the spell's power word
+   against the actor's attack stat less the chosen attack target's defence.
+
+   Whenever the dispatch was entered the map cursor's overlay mode is cleared to
+   0, so nothing is left drawn over the actor.  It is a plain store and not a
+   restore, and it does not happen at all on the 0 answer. */
 extern int fdps_map_actor_take_best_action(int unit_index, int side_select);
 #pragma aux fdps_map_actor_take_best_action "*" parm caller [];
 

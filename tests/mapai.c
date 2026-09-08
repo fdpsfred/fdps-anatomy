@@ -986,6 +986,473 @@ static void bs_the_behavior_is_the_low_nibble_of_byte_0x34(void)
     CHECK_EQ((int) ai_units[0].ai_behavior, 0x28);
 }
 
+/* ---- fdps_map_actor_take_best_action, 00012c10 ----------------------------
+ *
+ * This one runs the three real scorers in src/aiscore.c and then dispatches to
+ * src/aiact.c, which is NOT EMITTED YET: fdps_map_actor_move_and_attack,
+ * fdps_map_actor_cast_chosen_spell and fdps_map_actor_use_item are all
+ * zero-returning stubs with no side effects, so which of the five arms was
+ * taken cannot be seen from outside this call.  What can be seen, and what
+ * every case below reads back, is the pair the function itself produces: the
+ * answer, and data_fdps_map_cursor_draw_mode, which is written 0 on the
+ * dispatch path and not touched at all on the other.  The three score globals
+ * are read back too, because they are what the decision was taken on and they
+ * are what the fixture has to have arranged for the case to mean anything.
+ *
+ * Every case parks all three score globals on TBA_SCORE_SENTINEL first, which
+ * is 0x5a and so well above the threshold.  Each scorer zeroes its own global
+ * on entry, so a build that dropped one of the three calls would leave 0x5a
+ * standing there and dispatch when the case expects 0 -- which is why the
+ * no-score case below is also the test that all three searches are run.
+ *
+ * Expected values come from the assembly at 00012c10 -- the three CALLs at
+ * 00012c24, 00012c34 and 00012c44 each passed [EBP+0x14] and [EBP+0x18]
+ * unchanged, the two fdps_get_unit_record calls at 00012c50 and 00012c61 with
+ * the second handed [0x00063f74], AND AL,0x40 at 00012c72, the MOVSX pair at
+ * 00012c7f and 00012c86 with SUB EDX,EAX, the three CMP ...,0x6 with JGE / JL
+ * at 00012c8f..00012caa, the five comparison pairs at 00012cba, 00012ceb,
+ * 00012d86, 00012dcc and 00012dfa, CMP [0x00063f90],0x12 / JGE at 00012d1b,
+ * CMP EAX,[EBP-0x14] / JLE at 00012d30, and
+ * MOV dword ptr [0x00069cd0],0x0 / MOV dword ptr [EBP-0x4],0x1 at 00012e26 --
+ * and by walking the documented behaviour of the three scorers over the fixture
+ * by hand.  None of them is read off the emitted C.
+ */
+
+#define TBA_W 4
+#define TBA_H 4
+#define TBA_CELLS 32
+#define TBA_ATTR_ROWS 32
+#define TBA_UNITS 4
+#define TBA_ITEMS 4
+#define TBA_SPELLS 8
+#define TBA_CLASSES 4
+#define TBA_CLASS_STRIDE 0x0a
+
+/* The equipped bit of an inventory entry's flag byte, the one
+   fdps_unit_find_equipped_slot tests, and the empty bit the one
+   fdps_unit_item_count tests.  An entry whose flag byte is plain 0 is carried
+   but not equipped: counted by the bag walk, invisible to the weapon search. */
+#define TBA_EQUIPPED 0x40
+#define TBA_SLOT_EMPTY 0x80
+
+/* An ITEM.DAT type inside the weapon span 1..0x15, so the equipped-slot search
+   accepts the entry as a weapon. */
+#define TBA_WEAPON_TYPE 1
+
+/* The two ITEM.DAT use effects fdps_score_targets_for_item has a walk for:
+   0x0b restores HP and scores 0, 3 or 8 a target on how hurt it is, 0x1e does
+   damage and scores 8 or 0x12. */
+#define TBA_USE_EFFECT_HEAL 0x0b
+#define TBA_USE_EFFECT_DAMAGE 0x1e
+
+/* A use_target byte that is neither 0 nor 1.  On the enemy phase the item
+   scorer replaces it with (byte == 0), so 3 becomes select_mode 0 and keeps
+   side 0 -- the actor's own side here -- and on the NPC phase it goes through
+   unchanged, where select_mode 3 keeps side 2 and nothing in the fixture is on
+   it (aitarget.h). */
+#define TBA_USE_TARGET_OWN_SIDE 3
+
+/* What the three score globals hold going in: a value no search below could
+   produce, and one well above the threshold so that a search which never ran
+   would change the answer rather than hide behind a 0. */
+#define TBA_SCORE_SENTINEL 0x5a
+
+/* What data_fdps_map_cursor_draw_mode holds going in: neither 0, the value the
+   dispatch path stores, nor 1, so "untouched" and "stored" are told apart. */
+#define TBA_DRAW_SENTINEL 7
+
+/* Any char_id other than 0, so the attack scorer's protagonist weighting stays
+   out of every expected value below. */
+#define TBA_NOBODY 5
+
+static unsigned char tba_tilemap[TERRAIN_CELLS_AT + TBA_CELLS * 2];
+static unsigned char tba_attr[ATTR_ROWS_AT + TBA_ATTR_ROWS * 4];
+static unsigned char tba_event[EVENT_CELLS_AT + TBA_CELLS];
+static unsigned char tba_grid[4 + TBA_CELLS * 2];
+static unsigned char tba_classes[TBA_CLASSES * TBA_CLASS_STRIDE];
+static struct fdps_unit_record tba_units[TBA_UNITS];
+static struct fdps_item_effect tba_items[TBA_ITEMS];
+static struct fdps_spell_effect tba_spells[TBA_SPELLS];
+
+static void tba_zero(unsigned char *block, int bytes)
+{
+    int i;
+
+    for (i = 0; i < bytes; i++) {
+        block[i] = 0;
+    }
+}
+
+/* A 4x4 battle over uniform terrain 0 with every class row costing 1 a step,
+   an empty item table, an empty spell table, no units, and the grid in the
+   state fdps_map_grid_reset leaves it in.  The three score globals go on their
+   sentinel, the attack target index on unit 0 -- this function resolves that
+   record whether or not the attack search published anything, so it has to
+   name a record that exists -- and the cursor draw mode on its own. */
+static void tba_stage(void)
+{
+    int i;
+    int terrain;
+
+    tba_zero(tba_tilemap, (int) sizeof(tba_tilemap));
+    for (i = 0; i < TERRAIN_CELLS_AT; i++) {
+        tba_tilemap[i] = 0xaa;
+    }
+    *(short *) (tba_tilemap + 7) = (short) TBA_W;
+    for (i = 0; i < TBA_CELLS; i++) {
+        *(short *) (tba_tilemap + TERRAIN_CELLS_AT + i * 2) = (short) i;
+    }
+
+    tba_zero(tba_attr, (int) sizeof(tba_attr));
+    for (i = 0; i < ATTR_ROWS_AT; i++) {
+        tba_attr[i] = 0xaa;
+    }
+
+    tba_zero(tba_event, (int) sizeof(tba_event));
+    for (i = 0; i < EVENT_CELLS_AT; i++) {
+        tba_event[i] = 0xaa;
+    }
+    *(short *) (tba_event + 7) = (short) TBA_W;
+
+    tba_zero(tba_grid, (int) sizeof(tba_grid));
+    *(short *) tba_grid = (short) TBA_W;
+    *(short *) (tba_grid + 2) = (short) TBA_H;
+    for (i = 0; i < TBA_CELLS; i++) {
+        tba_grid[4 + i * 2] = 0x00;
+        tba_grid[4 + i * 2 + 1] = 0xff;
+    }
+
+    tba_zero(tba_classes, (int) sizeof(tba_classes));
+    for (i = 0; i < TBA_CLASSES; i++) {
+        for (terrain = 0; terrain < 8; terrain++) {
+            tba_classes[i * TBA_CLASS_STRIDE + terrain] = 1;
+        }
+    }
+
+    tba_zero((unsigned char *) tba_units, (int) sizeof(tba_units));
+    tba_zero((unsigned char *) tba_items, (int) sizeof(tba_items));
+    tba_zero((unsigned char *) tba_spells, (int) sizeof(tba_spells));
+
+    data_fdps_scene_layer_tile_map_ptrs[0] = tba_tilemap;
+    data_fdps_scene_layer_tile_attr_ptr[0] = tba_attr;
+    data_fdps_battle_move_grid_ptr = tba_grid;
+    data_fdps_map_cell_event_code_layer_ptr = tba_event;
+    data_fdps_class_table_ptr = tba_classes;
+    data_fdps_map_unit_array_ptr = (unsigned char *) tba_units;
+    data_fdps_item_effect_table_ptr = (unsigned char *) tba_items;
+    data_fdps_battle_spell_effect_table_ptr = (unsigned char *) tba_spells;
+    data_fdps_map_unit_count = 0;
+
+    data_fdps_battle_ai_best_physical_score = TBA_SCORE_SENTINEL;
+    data_fdps_battle_ai_best_spell_score = TBA_SCORE_SENTINEL;
+    data_fdps_battle_ai_best_item_score = TBA_SCORE_SENTINEL;
+    data_fdps_battle_ai_best_physical_target_idx = 0;
+    data_fdps_map_ai_best_spell_id = 0;
+    data_fdps_map_cursor_draw_mode = TBA_DRAW_SENTINEL;
+}
+
+static void tba_unit(int index, int x, int y, int side, int ap, int dp,
+                     int hp_current, int hp_max)
+{
+    tba_units[index].pos_x = (unsigned char) x;
+    tba_units[index].pos_y = (unsigned char) y;
+    tba_units[index].side = (unsigned char) side;
+    tba_units[index].char_id = (unsigned char) TBA_NOBODY;
+    tba_units[index].ap = (short) ap;
+    tba_units[index].dp = (short) dp;
+    tba_units[index].hp_current = (short) hp_current;
+    tba_units[index].hp_max = (short) hp_max;
+    if (index + 1 > data_fdps_map_unit_count) {
+        data_fdps_map_unit_count = index + 1;
+    }
+}
+
+/* Mark all eight bag entries empty, which is what makes fdps_unit_item_count
+   answer 0 and the item search return before it scores anything.  A zeroed
+   record does NOT do that: a flag byte of 0 is an occupied entry. */
+static void tba_empty_bag(int unit_index)
+{
+    int slot;
+
+    for (slot = 0; slot < 8; slot++) {
+        tba_units[unit_index].inventory_slots[slot * 2] = TBA_SLOT_EMPTY;
+        tba_units[unit_index].inventory_slots[slot * 2 + 1] = 0;
+    }
+}
+
+/* Occupy one bag entry.  `equipped` puts the 0x40 the weapon search looks for
+   on the flag byte; without it the entry is carried but not wielded. */
+static void tba_carry(int unit_index, int slot, int item_id, int equipped)
+{
+    tba_units[unit_index].inventory_slots[slot * 2] =
+        (unsigned char) (equipped != 0 ? TBA_EQUIPPED : 0);
+    tba_units[unit_index].inventory_slots[slot * 2 + 1] =
+        (unsigned char) item_id;
+}
+
+static void tba_weapon(int item_id, int range_min, int range_max)
+{
+    tba_items[item_id].type = (unsigned char) TBA_WEAPON_TYPE;
+    tba_items[item_id].range_min = (unsigned char) range_min;
+    tba_items[item_id].range_max = (unsigned char) range_max;
+}
+
+static void tba_usable(int item_id, int use_effect, int use_amount,
+                       int use_distance, int use_target, int use_radius)
+{
+    tba_items[item_id].use_effect = (unsigned char) use_effect;
+    tba_items[item_id].use_amount = (short) use_amount;
+    tba_items[item_id].use_distance = (unsigned char) use_distance;
+    tba_items[item_id].use_target = (unsigned char) use_target;
+    tba_items[item_id].use_radius = (unsigned char) use_radius;
+}
+
+static void tba_spell(int spell_id, int power, int cast_range, int area,
+                      int mp_cost, int target_side)
+{
+    tba_spells[spell_id].power = (short) power;
+    tba_spells[spell_id].cast_range_flags = (unsigned char) cast_range;
+    tba_spells[spell_id].area = (unsigned char) area;
+    tba_spells[spell_id].mp_cost = (unsigned char) mp_cost;
+    tba_spells[spell_id].target_side = (unsigned char) target_side;
+}
+
+/* Set one learned bit in the five-byte bitmap at record +0x1a, the way
+   fdps_unit_collect_known_spells reads it. */
+static void tba_learns(int unit_index, int spell_id)
+{
+    tba_units[unit_index].spells_known_bitmap[spell_id / 8] |=
+        (unsigned char) (1 << (spell_id % 8));
+}
+
+/* The record fields this function reads for itself, as opposed to the ones its
+   three scorers read: the behaviour byte the tie flag is masked out of, and the
+   two signed stat words the damage estimate is the difference of.  The spell
+   record's power word is the other one -- it is read as the FIRST field of
+   whatever fdps_get_spell_record answers, MOVSX word ptr [EAX] with no
+   displacement, so a record whose power moved would feed the tie a different
+   number. */
+static void tba_reads_these_record_fields(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ai_behavior), 0x34);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ap), 0x48);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, dp), 0x4a);
+    CHECK_EQ((int) offsetof(struct fdps_spell_effect, power), 0x00);
+}
+
+/* Nothing to attack, nothing to cast, nothing to use.  The actor has no weapon
+   equipped, so the attack search leaves at 00012288; it knows no spell, so the
+   spell search leaves at 00013493; its bag is empty, so the item search leaves
+   at 000130bd.  All three globals therefore come back 0, the three CMP ...,0x6
+   all take their JL, and the exit at 00012cae loads 0 without ever reaching the
+   store to the cursor mode -- so the sentinel survives.
+ *
+ * That the three globals read 0 rather than 0x5a is the evidence that all three
+ * searches were actually run: each of them zeroes its own global on entry and
+ * nothing else in this function writes any of the three.
+ *
+ * The attack target index is read back too.  This function resolves a record
+ * through it unconditionally and never writes it, so the 0 the fixture parked
+ * there has to still be there. */
+static void tba_no_score_reaches_the_threshold(void)
+{
+    tba_stage();
+    tba_unit(0, 1, 1, 0, 10, 5, 100, 100);
+    tba_empty_bag(0);
+
+    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_physical_score, 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
+    CHECK_EQ(data_fdps_battle_ai_best_physical_target_idx, 0);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, TBA_DRAW_SENTINEL);
+}
+
+/* The physical score alone carries the decision.  The actor wields a reach-1
+   weapon and cannot move, so its one candidate tile is its own and the enemy
+   beside it is in reach: attack 10 against defence 3 is an estimate of 7, above
+   the wound threshold and below the target's 100 HP, so the tier is 8.  It
+   knows no spell and its only bag entry holds that same weapon, whose
+   use_effect is 0, so the other two searches score 0.
+ *
+ * 8 > 0 and 8 > 0 is the first of the five comparisons, and the answer is 1
+ * with the cursor mode stored 0 over the sentinel. */
+static void tba_a_physical_score_alone_acts(void)
+{
+    tba_stage();
+    tba_weapon(1, 1, 1);
+    tba_unit(0, 0, 0, 0, 10, 5, 100, 100);
+    tba_empty_bag(0);
+    tba_carry(0, 0, 1, 1);
+    tba_unit(1, 1, 0, 1, 0, 3, 100, 100);
+
+    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 1);
+    CHECK_EQ(data_fdps_battle_ai_best_physical_score, 8);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 0);
+}
+
+/* The spell score alone carries the decision, which is the fourth comparison:
+   the spell beats the physical score and is at least the item score.  The actor
+   wields nothing and carries nothing, so those two searches score 0; it knows
+   spell 1, a power-10 spell with a cast range of 3, no MP cost and target_side
+   0, which the enemy-phase fork turns into "every non-zero side" -- the unit
+   beside it.  100 HP is not below a power of 10, so the spell wounds and scores
+   8. */
+static void tba_a_spell_score_alone_acts(void)
+{
+    tba_stage();
+    tba_spell(1, 10, 3, 0, 0, 0);
+    tba_unit(0, 0, 0, 0, 10, 5, 100, 100);
+    tba_units[0].mp_current = 10;
+    tba_empty_bag(0);
+    tba_learns(0, 1);
+    tba_unit(1, 1, 0, 1, 0, 3, 100, 100);
+
+    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 1);
+    CHECK_EQ(data_fdps_battle_ai_best_physical_score, 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 8);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 0);
+}
+
+/* The threshold is 6 and the compare is JL, so a score OF EXACTLY 6 acts.
+ *
+ * The actor carries a healing item aimed at its own tile with a radius of 1 and
+ * a use_target of 3, which on the enemy phase selects its own side; it wields
+ * nothing and knows no spell, so the item score is the whole decision.  Both
+ * side-0 units sit on 40 of 100 HP, which is above a third and not above a
+ * half, so fdps_score_targets_for_item scores each of them 3.
+ *
+ * First half: the unit count is cut to 1, so the collector sees only the actor,
+ * the total is 3 and the three JL branches all hold -- 0 comes back and the
+ * cursor mode is untouched.  Second half: the same map with both units visible
+ * totals 6, the first CMP ...,0x6 / JGE holds, and 1 comes back with the cursor
+ * mode stored.  A threshold written as strictly greater than 6 would answer 0
+ * in the second half. */
+static void tba_the_threshold_is_six_and_six_acts(void)
+{
+    tba_stage();
+    tba_usable(3, TBA_USE_EFFECT_HEAL, 0, 0, TBA_USE_TARGET_OWN_SIDE, 1);
+    tba_unit(0, 1, 1, 0, 10, 5, 40, 100);
+    tba_empty_bag(0);
+    tba_carry(0, 0, 3, 0);
+    tba_unit(1, 1, 0, 0, 10, 5, 40, 100);
+    data_fdps_map_unit_count = 1;
+
+    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 3);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, TBA_DRAW_SENTINEL);
+
+    tba_stage();
+    tba_usable(3, TBA_USE_EFFECT_HEAL, 0, 0, TBA_USE_TARGET_OWN_SIDE, 1);
+    tba_unit(0, 1, 1, 0, 10, 5, 40, 100);
+    tba_empty_bag(0);
+    tba_carry(0, 0, 3, 0);
+    tba_unit(1, 1, 0, 0, 10, 5, 40, 100);
+
+    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 1);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 6);
+    CHECK_EQ(data_fdps_battle_ai_best_physical_score, 0);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 0);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 0);
+}
+
+/* side_select is forwarded to all three searches unchanged -- the same
+   [EBP+0x18] is pushed ahead of each of the three CALLs -- and the item search
+   is the one that shows it here.  This is the fixture that scores 6 above, run
+   with side_select 1 instead of 0: on the NPC phase the item's use_target byte
+   goes through as it stands, and select_mode 3 keeps side 2 (aitarget.h), which
+   nothing here is on, so no aim tile catches a target, the item score is 0 and
+   the answer falls back to 0 with the cursor mode untouched.  A build that
+   pushed a constant, or the actor's own side, would still score 6 here. */
+static void tba_side_select_reaches_the_searches(void)
+{
+    tba_stage();
+    tba_usable(3, TBA_USE_EFFECT_HEAL, 0, 0, TBA_USE_TARGET_OWN_SIDE, 1);
+    tba_unit(0, 1, 1, 0, 10, 5, 40, 100);
+    tba_empty_bag(0);
+    tba_carry(0, 0, 3, 0);
+    tba_unit(1, 1, 0, 0, 10, 5, 40, 100);
+
+    CHECK_EQ(fdps_map_actor_take_best_action(0, 1), 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, TBA_DRAW_SENTINEL);
+}
+
+/* THE DISPATCH IS FIVE COMPARISONS AND NOT A SELECTION OF THE MAXIMUM.  All
+   three searches score 8 here: the actor wields a reach-1 weapon against an
+   adjacent enemy on 100 HP, knows a power-10 spell that reaches the same enemy,
+   and carries a damage item aimed at its own tile whose use_amount of 0 is
+   below its own 100 HP.  With A == S == I every one of the five conditions is
+   false, so NO action routine is called at all -- and the cursor mode is still
+   stored 0 and 1 is still returned, which is what makes the caller believe the
+   actor acted and skip its movement fallbacks.  An implementation that ran
+   whichever option scored highest, or that answered 0 when no arm matched,
+   fails this case.
+ *
+ * Which arm ran cannot be read back while src/aiact.c is stubbed; what this
+   case pins is the pair that is this function's own -- the answer and the
+   cursor mode -- on the arrangement that reaches none of them. */
+static void tba_three_equal_scores_run_nothing_and_still_report_acted(void)
+{
+    tba_stage();
+    tba_weapon(1, 1, 1);
+    tba_usable(2, TBA_USE_EFFECT_DAMAGE, 0, 0, TBA_USE_TARGET_OWN_SIDE, 0);
+    tba_spell(1, 10, 3, 0, 0, 0);
+    tba_unit(0, 0, 0, 0, 10, 5, 100, 100);
+    tba_units[0].mp_current = 10;
+    tba_empty_bag(0);
+    tba_carry(0, 0, 1, 1);
+    tba_carry(0, 1, 2, 0);
+    tba_learns(0, 1);
+    tba_unit(1, 1, 0, 1, 0, 3, 100, 100);
+
+    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 1);
+    CHECK_EQ(data_fdps_battle_ai_best_physical_score, 8);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 8);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 8);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 0);
+}
+
+/* The attack-versus-spell tie, the second of the five comparisons, driven all
+   the way through fdps_get_spell_record.  The same actor as above without the
+   damage item: the attack and the spell both score 8 and the item scores 0, so
+   A == S and S > I holds and the arm at 00012d0a runs.  The published spell id
+   is 1, below the 0x12 cut, so the tie is settled by weighing the spell's power
+   word against the physical damage estimate -- and that estimate is the actor's
+   attack word less the DEFENCE WORD OF THE UNIT THE ATTACK SEARCH PUBLISHED,
+   read through data_fdps_battle_ai_best_physical_target_idx and not through any
+   argument.
+ *
+ * Which way the tie went is invisible while src/aiact.c is stubbed.  What this
+   case does pin is that the arm is reachable and survives the spell-record
+   fetch -- a fetch that would fault on a null spell table, and that the
+   original makes before the 0x12 test and on both of its outcomes -- and that
+   the function still answers 1 with the cursor mode stored. */
+static void tba_the_attack_and_spell_tie_resolves_the_spell_record(void)
+{
+    tba_stage();
+    tba_weapon(1, 1, 1);
+    tba_spell(1, 10, 3, 0, 0, 0);
+    tba_unit(0, 0, 0, 0, 10, 5, 100, 100);
+    tba_units[0].mp_current = 10;
+    tba_empty_bag(0);
+    tba_carry(0, 0, 1, 1);
+    tba_learns(0, 1);
+    tba_unit(1, 1, 0, 1, 0, 3, 100, 100);
+
+    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 1);
+    CHECK_EQ(data_fdps_battle_ai_best_physical_score, 8);
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, 8);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
+    CHECK_EQ(data_fdps_battle_ai_best_physical_target_idx, 1);
+    CHECK_EQ(data_fdps_map_ai_best_spell_id, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 0);
+}
+
 void run_mapai_tests(void)
 {
     RUN_TEST(finds_the_chest_and_returns_zero);
@@ -1022,6 +1489,15 @@ void run_mapai_tests(void)
     RUN_TEST(bs_behavior_eight_does_nothing_and_skips_the_tail);
     RUN_TEST(bs_the_behavior_is_the_low_nibble_of_byte_0x34);
 
+    RUN_TEST(tba_reads_these_record_fields);
+    RUN_TEST(tba_no_score_reaches_the_threshold);
+    RUN_TEST(tba_a_physical_score_alone_acts);
+    RUN_TEST(tba_a_spell_score_alone_acts);
+    RUN_TEST(tba_the_threshold_is_six_and_six_acts);
+    RUN_TEST(tba_side_select_reaches_the_searches);
+    RUN_TEST(tba_three_equal_scores_run_nothing_and_still_report_acted);
+    RUN_TEST(tba_the_attack_and_spell_tie_resolves_the_spell_record);
+
     /* Put the globals back before leaving.  stage() points four of them at
        this file's own arrays and the runners share one process: a later unit
        that expects an unallocated map would inherit live pointers into another
@@ -1044,4 +1520,14 @@ void run_mapai_tests(void)
     data_fdps_battle_view_window_origin_y = 0;
     data_fdps_input_last_scancode = 0;
     data_fdps_view_frame_last_tick = 0;
+
+    /* And the same for the two data-table pointers and the five AI decision
+       globals that only the take-best-action cases stage. */
+    data_fdps_item_effect_table_ptr = NULL;
+    data_fdps_battle_spell_effect_table_ptr = NULL;
+    data_fdps_battle_ai_best_physical_score = 0;
+    data_fdps_battle_ai_best_spell_score = 0;
+    data_fdps_battle_ai_best_item_score = 0;
+    data_fdps_battle_ai_best_physical_target_idx = 0;
+    data_fdps_map_ai_best_spell_id = 0;
 }

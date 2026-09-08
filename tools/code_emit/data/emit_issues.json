@@ -2282,5 +2282,20 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "00012c10": [
+    {
+      "from": "emit",
+      "what": "Which of the five dispatch arms ran cannot be asserted. All three action routines -- fdps_map_actor_move_and_attack (00012e50), fdps_map_actor_cast_chosen_spell (00013c90) and fdps_map_actor_use_item (00027180) -- are still zero-returning stubs with no side effects, so from outside this call every arm looks alike: the only observables are the answer and data_fdps_map_cursor_draw_mode, which are identical on all five. What the tests therefore establish is the threshold gate, the forwarding of both arguments, that all three searches run, that the tie arm reaches fdps_get_spell_record, and that the all-equal arrangement still reports that the actor acted. What they do not establish is that A>S&&A>I reaches move_and_attack rather than use_item, that the spell-id 0x12 cut sends the tie the way the assembly does, or that the behaviour bit 0x40 arms are wired to the routines the assembly names.",
+      "needs": "The three aiact.c routines emitted, at which point each one has an observable effect (a unit that moved, a spell cast, a bag entry spent) and a fixture can be built for each of the five comparisons and for both sides of the 0x12 cut and of the 0x40 flag. Note that the 0x40 arms cannot be reached from a fixture built out of shipped data -- nothing in the image can raise that bit -- so exercising them means staging the behaviour byte directly.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed independently that the five dispatch arms are indistinguishable from outside this call while src/aiact.c is stubbed: get_function_callees puts move_and_attack at 00012e50, cast_chosen_spell at 00013c90 and use_item at 00027180, and undefined.json lists exactly those three as the only undefined functions in the build, so none of them has an observable effect yet. My pass adds one site the emitter did not name: the 0x12 cut itself is also unobservable, because both of its outcomes reach the same tail at 00012e26 and differ only in which stub is called.",
+      "needs": "The three aiact.c routines emitted.",
+      "status": "open",
+      "same_as": "emit#0"
+    }
   ]
 }
