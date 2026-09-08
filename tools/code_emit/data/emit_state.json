@@ -3198,6 +3198,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x195"
+    },
+    "00038e60": {
+      "name": "fdps_chapter_25_event_deploy_wave_1",
+      "target": "chevt5.c",
+      "body_size": "0x170",
+      "status": "committed",
+      "emitted_against": "0x170",
+      "rounds": 0
     }
   }
 }

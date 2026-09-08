@@ -59,4 +59,54 @@
 extern void fdps_chapter_24_event_deploy_wave_for_turn(int event_arg);
 #pragma aux fdps_chapter_24_event_deploy_wave_for_turn "*" parm caller [];
 
+/* Chapter 25's ambush: the first time a unit on the player's side finishes a
+   step onto the map's trigger tile, the map's wave-1 reinforcements arrive, the
+   chapter speaks two lines while the view is panned over the two corners they
+   land in, and every unit on the map beyond the twelve party slots switches to
+   the fullest map-AI mode so the whole garrison attacks at once.
+
+   In order: entry 0x12 of the chapter's own FDETXT25.TXT block is drawn, wave 1
+   of the resident MAP%02d.DAT deployment table is brought on, the map cursor is
+   hidden, the view is walked to tile (0, 0) and held for twelve frames and then
+   to tile (20, 11) and held for twelve more, the cursor comes back, entry 0x13
+   is drawn, and finally the behaviour sweep runs and the latch is raised.
+
+   TWO GATES, BOTH REFUSING THE WHOLE BODY.  The one-shot latch --
+   data_fdps_map_cell_event_triggered_flags element 0x10 (gamedata.h) -- must
+   still be 0, and the record the argument names must be on side 2.  A unit on
+   any other side leaves the ambush armed rather than spending it, so an enemy
+   crossing the tile first does not consume the event.  The latch lives in the
+   chapter's own flag array and not in a private static, which is what makes it
+   survive a save and be cleared by a chapter restart.
+
+   THE WAVE ARRIVES BEFORE THE SWEEP AND IS SWEPT WITH IT.  The sweep's last
+   index is data_fdps_map_unit_count - 1 read after the deployment has appended
+   the wave, so the arrivals get behaviour mode 0x0b too.  Deploying after the
+   sweep, or reading the count before it, leaves the arriving wave in the mode
+   the map file authored.
+
+   THE SWEEP STARTS AT UNIT 12 AND IS INCLUSIVE.  Indices 0 to 11 are the party
+   slots and are never touched; every index from 12 to the last live unit gets
+   the low nibble of its AI byte replaced with 0x0b while the high nibble, which
+   carries flags the target scorers read, is preserved.  A map with fewer than
+   thirteen units runs the sweep zero times.
+
+   THE CURSOR MODE IS OVERWRITTEN, NOT RESTORED.  Whatever
+   data_fdps_map_cursor_draw_mode held on entry is replaced by 1 at the end of
+   the pan.
+
+   The map number handed to the deployment is read out of
+   data_fdps_chapter_current_chapter_id (gamedata.h) at the call site and is not
+   a literal, so it is whichever chapter is loaded -- 24 for this one, which is
+   the only map whose tile-event table names this slot.
+
+   unit_index is the handler table's shared parameter: the index of the unit
+   that tripped the tile event, not range checked and resolved through
+   fdps_get_unit_record (unit.h) before either gate.  Only the side byte is read
+   from it.
+
+   Table slot 37 at 00060258. */
+extern void fdps_chapter_25_event_deploy_wave_1(int unit_index);
+#pragma aux fdps_chapter_25_event_deploy_wave_1 "*" parm caller [];
+
 #endif
