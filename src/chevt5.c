@@ -17,6 +17,7 @@
 #include "unititem.h"
 #include "mapcur.h"
 #include "mapdraw.h"
+#include "msgwin.h"
 #include "chevt5.h"
 
 /* The destination the handler hands fdps_draw_text and the screen's row
@@ -484,5 +485,171 @@ void fdps_chapter_25_event_upgrade_randis_sword(int unit_index)
         fdps_unit_remove_item(unit_index, sword_slot);
         fdps_unit_add_item(unit_index, CH25_TRUE_DRAGON_SWORD_ITEM_ID);
         fdps_unit_recompute_combat_stats(unit_index);
+    }
+}
+
+/* The character the shop answers to, MOV AL,byte ptr [EAX+0x8] / AND EAX,0xff /
+   CMP EAX,0x5 at 0003907e: the id byte fdps_roster_add_character stamps into
+   record offset 8 when the character joins, and 5 is 瑪麗安 the 弓兵
+   (assets/characters.md).  It is the same byte
+   fdps_battle_find_unit_by_character_id (unit.h) matches its argument against.
+   The load widens the byte with AND EAX,0xff and not with a sign extension, so
+   this is an unsigned equality on the whole byte. */
+#define CH25_MARIAN_CHARACTER_ID 5
+
+/* What the bow costs and what is handed over: CMP dword ptr [0x000643a4],0x7530
+   at 0003908b and SUB dword ptr [0x000643a4],0x7530 at 0003914e, and PUSH 0x4a
+   at 00039140.  Item 0x4a is 風神弓 and 30000 is exactly its list price in
+   assets/items.md, so the merchant asks the shop rate rather than a mark-up.
+
+   THE PURSE TEST IS SIGNED, JGE at 00039095 and not JAE, so the amount is read
+   as an int and a purse that had somehow gone negative fails the gate rather
+   than passing it as a huge unsigned figure (contract C). */
+#define CH25_WIND_GOD_BOW_PRICE 0x7530
+#define CH25_WIND_GOD_BOW_ITEM_ID 0x4a
+
+/* The element of data_fdps_map_cell_event_triggered_flags this offer latches,
+   byte ptr [0x000640e9] -- element 0x11 of the array based at 0x000640d8, and
+   NOT the element 0x10 the chapter 25 ambush above uses.  It is shared: five
+   other handlers latch the same byte for their own one-shot events
+   (fdps_chapter_03_event_deploy_wave_14, fdps_chapter_08_event_villager_escapes,
+   fdps_chapter_21_event_deploy_wave_2, fdps_chapter_19_post_action and
+   fdps_chapter_24_post_action), each of them in a chapter this one cannot share
+   a map with.  fdps_chapter_state_reset clears all 0x20 bytes and the save and
+   load paths move the whole array to and from the slot image, so a
+   function-local static in its place would leave the offer spent across a
+   chapter restart and across a reload (rebuild_info/pitfalls.md). */
+#define CH25_BOW_OFFER_ONE_SHOT_SLOT 0x11
+
+/* The count that means there is no room, CMP EAX,0x8 / JNZ at 000390b0.  A unit
+   record holds eight inventory entries and fdps_unit_item_count answers how
+   many of them are occupied (unititem.h), so eight is a full bag.  The test is
+   an inequality against 8 and not a "< 8", which matters only if the count
+   could ever exceed eight; it cannot, so the two spellings agree, and this one
+   is the instruction's. */
+#define CH25_INVENTORY_FULL 8
+
+/* The two destinations the four draws are handed.  0xa0000 at 000390c8 is the
+   top-left corner of the visible mode-13h page and 0xaa44a at 000390f5,
+   0003912b and 00039168 is screen (138, 131), the pen the message panel's own
+   text sits at.  Both stay literals because they are addresses inside the
+   display adapter's aperture rather than the addresses of anything the linker
+   places (rebuild_info/pitfalls.md, contract E). */
+#define CH25_BOW_TEXT_DEST 0x000a0000
+#define CH25_BOW_PANEL_TEXT_ORIGIN 0x000aa44a
+
+/* The four entries of the chapter's own FDETXT25.TXT block this event speaks,
+   PUSH 0x15 at 000390cd, PUSH 0x16 at 000390fa, PUSH 0x17 at 00039130 and PUSH
+   0x18 at 0003916d: the merchant's pitch, his question, the sale and the
+   refusal.  They are the four entries after the ones the sword upgrade and the
+   ambush above use. */
+#define CH25_BOW_OFFER_TEXT_ID 0x15
+#define CH25_BOW_QUESTION_TEXT_ID 0x16
+#define CH25_BOW_BOUGHT_TEXT_ID 0x17
+#define CH25_BOW_DECLINED_TEXT_ID 0x18
+
+/* The portrait the question's panel is opened with, PUSH 0x77 at 000390dd:
+   FACE.CEL record 0x77, the merchant. */
+#define CH25_MERCHANT_FACE 0x77
+
+/* The prompt answer that buys, CMP dword ptr [EBP-0x4],0x0 / JNZ at 00039117.
+   fdps_prompt_two_choice (msgwin.h) answers 0 for the left cell, 1 for the
+   right and -1 for a cancel, and only 0 is tested for, so the cancel declines
+   along with the right cell. */
+#define CH25_BOW_ANSWER_BUY 0
+
+/* 00039060.  Chapter 25's 風神弓 shop: 瑪麗安 stops on the merchant's tile
+   with the money and the room for the bow, and is offered it once.
+
+   The frame is the family's four-push one with two 4-byte locals -- PUSH EBX /
+   PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x8 at
+   00039060..00039066 -- so the one incoming dword sits at [EBP+0x14].  Every
+   caller-clean in the body is this function's own (ADD ESP,0x4 after each of
+   the three unit calls, ADD ESP,0x1c after each of the four draws) and the RET
+   at 0003918a carries no immediate, so the convention is the stack one at this
+   end.  It is the stack one at the other end too: the seven dispatchers reach
+   this slot as PUSH EAX / CALL dword ptr [EDX + 0x601c4] / ADD ESP,0x4 -- at
+   00015839 in fdps_battle_unit_turn and at 000188d8 in
+   fdps_battle_search_cell_at_cursor, among others -- pushing the unit index and
+   cleaning the one argument themselves.
+
+   THE FOUR GATES ARE A SHORT-CIRCUIT CHAIN AND THEIR ORDER IS THE ASSEMBLY'S.
+   The character id at 00039086, the purse at 0003908b, the latch at 00039099
+   and only then fdps_unit_item_count at 000390a8 -- the count is the one gate
+   that costs a call, and the three cheap tests are ahead of it, so a firing by
+   any unit that is not 瑪麗安 never walks an inventory.  Every failing gate
+   reaches the jump at 000390b5 and leaves the latch clear.
+
+   THE ITEM IS ADDED WITHOUT THE COUNT BEING ASKED AGAIN.  The room test at
+   000390b0 is made before the question is put, and the modal prompt in between
+   cannot change the bag, so fdps_unit_add_item at 00039146 always has an entry
+   to fill and its 1-or--1 answer is discarded.
+
+   THE LATCH IS RAISED ON BOTH ARMS.  MOV byte ptr [0x000640e9],0x1 at 0003917d
+   sits below the join at 00039158, so the decline path passes through it as
+   well as the purchase path.
+
+   Two values are used after a CALL.  fdps_get_unit_record's record pointer
+   comes back in EAX and is stored to [EBP-0x8] at 00039078, then reloaded at
+   0003907b for the character id load; nothing between the two calls can move
+   the unit array.  fdps_prompt_two_choice's answer comes back in EAX and is
+   stored to [EBP-0x4] at 0003910f BEFORE fdps_message_window_close is called at
+   00039112, and it is the saved copy at [EBP-0x4] that 00039117 compares -- the
+   close's own EAX never reaches the test.  Everything else is discarded: each
+   of the four fdps_draw_text cursors is followed straight by the ADD ESP,0x1c
+   that cleans its arguments, fdps_unit_item_count's count is compared in EAX
+   and not kept, fdps_unit_add_item's result is dropped, and
+   fdps_message_window_open and fdps_message_window_close return nothing.
+   Nothing sets EAX before the RET and no dispatcher reads what comes back, so
+   the result is void. */
+void fdps_chapter_25_event_marian_buys_wind_god_bow(int unit_index)
+{
+    /* The unit that stopped on the merchant's tile, resolved before any gate;
+       only its character id byte is read. */
+    struct fdps_unit_record *triggering_unit;
+    /* What the player answered the merchant: 0 buys, and both the right cell's
+       1 and a cancel's -1 decline. */
+    int purchase_answer;
+
+    triggering_unit = fdps_get_unit_record(unit_index);
+
+    if (triggering_unit->char_id == CH25_MARIAN_CHARACTER_ID
+            && data_fdps_shared_party_total_gold >= CH25_WIND_GOD_BOW_PRICE
+            && data_fdps_map_cell_event_triggered_flags[
+                   CH25_BOW_OFFER_ONE_SHOT_SLOT] == 0
+            && fdps_unit_item_count(unit_index) != CH25_INVENTORY_FULL) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH25_BOW_OFFER_TEXT_ID,
+                       (unsigned char *) CH25_BOW_TEXT_DEST, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+
+        fdps_message_window_open(CH25_MERCHANT_FACE);
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH25_BOW_QUESTION_TEXT_ID,
+                       (unsigned char *) CH25_BOW_PANEL_TEXT_ORIGIN,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        purchase_answer = fdps_prompt_two_choice();
+        fdps_message_window_close();
+
+        if (purchase_answer == CH25_BOW_ANSWER_BUY) {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CH25_BOW_BOUGHT_TEXT_ID,
+                           (unsigned char *) CH25_BOW_PANEL_TEXT_ORIGIN,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+            fdps_unit_add_item(unit_index, CH25_WIND_GOD_BOW_ITEM_ID);
+            data_fdps_shared_party_total_gold -= CH25_WIND_GOD_BOW_PRICE;
+        } else {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CH25_BOW_DECLINED_TEXT_ID,
+                           (unsigned char *) CH25_BOW_PANEL_TEXT_ORIGIN,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+        }
+
+        data_fdps_map_cell_event_triggered_flags[
+            CH25_BOW_OFFER_ONE_SHOT_SLOT] = 1;
     }
 }

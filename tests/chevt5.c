@@ -61,6 +61,7 @@
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "keybd.h"
 #include "mapdraw.h"
 #include "chevt5.h"
 
@@ -1352,6 +1353,679 @@ static void ch25u_does_not_fire_twice_off_one_sword(void)
     CHECK_EQ(ch25u_stats_untouched(CH25U_RANDIS), 1);
 }
 
+/* ------------------------------------------------------------------
+ * fdps_chapter_25_event_marian_buys_wind_god_bow @ 00039060
+ *
+ * WHAT THE HANDLER IS OBSERVED THROUGH.  It returns nothing and paints its
+ * whole scene, so what a case reads back is the state it left behind: the
+ * one-shot byte at element 0x11, 瑪麗安's eight inventory entries and the party
+ * purse -- plus how many scancodes the run consumed, which is how many prompts
+ * it ran and therefore whether the four gates let the body through at all.
+ *
+ * THE SCENE IS PLAYED FOR REAL, the way the chapter 16 smith section of
+ * tests/chevt3.c plays its two questions: the run is made in mode 13h with a
+ * timer interrupt in place, because both the panel reveal and
+ * fdps_prompt_two_choice pace themselves on data_fdps_timer_tick_counter, which
+ * nothing advances in a test image.  Message.cel and Shadow.cel are stood in
+ * for with generated sheets, the chapter text block is one whose every entry is
+ * a lone terminator so a draw walks it and paints nothing, and the scene is
+ * left empty so the close's recomposition draws nothing either.
+ *
+ * FACE.CEL HAS TO BE THERE.  The panel reveal passes face 0x77 and
+ * fdps_message_window_open sends a non-negative face straight to
+ * fdps_load_and_draw_portrait, which ends the process at exit(1) on a sheet it
+ * cannot open rather than failing an assertion.  Every case below skips itself
+ * when the sheet is not next to the executable.
+ *
+ * HOW THE KEYS ARE PLAYED.  The feeder is the smith section's: it appends the
+ * case's next make code only while the ring is EMPTY and steps through the list
+ * only when the read index has moved, which only fdps_read_keyboard_queue does.
+ * A run here contains at most one prompt, but the prompt flushes the ring on
+ * entry and reads at the bottom of each pass, so a feeder that appended one
+ * code per tick would answer it before the first frame.  Past the end of the
+ * list the last code is held, so a rebuild that asked one more question than
+ * the case staged answers it and fails an assertion instead of spinning.
+ *
+ * WHICH TEXT ENTRY EACH DRAW ASKS FOR IS NOT ASSERTED.  fdps_draw_text takes
+ * its whole effect through pixels and returns a cursor this handler discards,
+ * and the four ids -- 0x15, 0x16, 0x17 and 0x18, read off PUSH 0x15 at
+ * 000390cd, PUSH 0x16 at 000390fa, PUSH 0x17 at 00039130 and PUSH 0x18 at
+ * 0003916d -- are literals in the instruction stream that a test which paints
+ * nothing cannot tell apart.  What the cases pin about the draws is that none
+ * of them stops the trade.
+ *
+ * WHAT THE EXPECTED VALUES COME FROM.  CMP EAX,0x5 at 00039086 for the
+ * character; CMP dword ptr [0x000643a4],0x7530 at 0003908b and SUB dword ptr
+ * [0x000643a4],0x7530 at 0003914e for the price, which is 風神弓's own list
+ * price in assets/items.md; CMP byte ptr [0x000640e9],0x0 at 00039099 and MOV
+ * byte ptr [0x000640e9],0x1 at 0003917d for the latch and its element; CMP
+ * EAX,0x8 at 000390b0 for the full bag; PUSH 0x4a at 00039140 for what is
+ * handed over; and CMP dword ptr [EBP-0x4],0x0 at 00039117 for the answer that
+ * buys.  Character id 5 瑪麗安 and item id 0x4a 風神弓 are assets/characters.md's
+ * and assets/items.md's.
+ * ------------------------------------------------------------------ */
+
+#define CH25B_FACE_SHEET "FACE.CEL"
+#define CH25B_VGA_MODE_TEXT 0x03
+#define CH25B_VGA_MODE_320X200X256 0x13
+#define CH25B_TIMER_VECTOR 8
+
+/* The make codes the prompt answers to: Enter commits the highlighted cell,
+   which is the left one on entry, the right arrow moves to the other cell, and
+   Esc cancels with -1 (msgwin.h). */
+#define CH25B_KEY_ESC 0x01
+#define CH25B_KEY_ENTER 0x1c
+#define CH25B_KEY_RIGHT 0x4d
+#define CH25B_KEYS_MAX 4
+
+/* The character the offer is made to, and two ids either side of it so that a
+   rebuild written as a range test rather than an equality is caught. */
+#define CH25B_MARIAN_CHAR_ID 5
+#define CH25B_CHAR_ID_BELOW 4
+#define CH25B_CHAR_ID_ABOVE 6
+
+/* The element the offer latches and the element the chapter 25 ambush above
+   latches.  They are different bytes of the same array and the cases have to
+   say so, because the two events sit on the same map. */
+#define CH25B_LATCH_SLOT 0x11
+#define CH25B_AMBUSH_LATCH_SLOT 0x10
+
+/* The price, the purse the cases start from and the two amounts either side of
+   the price.  The start is well clear of the price so a case that is not about
+   the boundary reads a plain difference. */
+#define CH25B_BOW_PRICE 30000
+#define CH25B_START_GOLD 50000
+#define CH25B_GOLD_ONE_SHORT (CH25B_BOW_PRICE - 1)
+
+/* What is handed over, and an item nobody is carrying to fill a bag with. */
+#define CH25B_WIND_GOD_BOW 0x4a
+#define CH25B_FILLER_ITEM 0xa3
+
+/* An inventory entry is a flag byte and an id byte; bit 0x80 of the flag means
+   the entry is empty and a plain 0 means carried and not equipped
+   (unititem.h). */
+#define CH25B_EMPTY_FLAG 0x80
+#define CH25B_EMPTY_ID 0xff
+#define CH25B_CARRIED_FLAG 0x00
+#define CH25B_INVENTORY_ENTRIES 8
+
+/* The unit the offer is made to is neither the first record nor the last, so a
+   handler that read unit 0, or the last unit, or ignored the argument would
+   work on the wrong record. */
+#define CH25B_MARIAN_UNIT 1
+#define CH25B_OTHER_UNIT 2
+#define CH25B_STAGE_UNITS 3
+
+/* The chapter text block: 0x19 entries, which is one more than the highest id
+   the handler asks for, every one of them pointing at the same lone terminator
+   so that a draw walks it, paints nothing and returns at once. */
+#define CH25B_TEXT_IDS 0x19
+#define CH25B_TEXT_EMPTY_AT 0x40
+#define CH25B_TEXT_BLOCK_BYTES (CH25B_TEXT_EMPTY_AT + 2)
+#define CH25B_TEXT_END (-1)
+
+/* The Message.cel stand-in: one 302 x 73 sprite encoded as five fill runs per
+   row, because a fill run cannot be longer than 64 pixels. */
+#define CH25B_PANEL_W 302
+#define CH25B_PANEL_H 73
+#define CH25B_PANEL_FILL_MAX 64
+#define CH25B_PANEL_SEGMENTS 5
+#define CH25B_PANEL_LAST_SEGMENT_W 46
+#define CH25B_PANEL_ROW_BYTES (CH25B_PANEL_SEGMENTS * 2)
+#define CH25B_PANEL_STREAM_AT 0x40
+#define CH25B_PANEL_SHEET_BYTES (CH25B_PANEL_STREAM_AT \
+                                 + CH25B_PANEL_H * CH25B_PANEL_ROW_BYTES)
+#define CH25B_PANEL_COLOR 0x40
+
+/* The Shadow.cel stand-in the prompt draws its two option cells out of:
+   fourteen 24 x 24 sprites, one fill run per row, sprite i filled with i. */
+#define CH25B_SHADOW_SPRITES 14
+#define CH25B_SHADOW_SPRITE_W 24
+#define CH25B_SHADOW_SPRITE_H 24
+#define CH25B_SHADOW_STREAM_BYTES (CH25B_SHADOW_SPRITE_H * 2)
+#define CH25B_SHADOW_STREAM_AT 0x50
+#define CH25B_SHADOW_SHEET_BYTES (CH25B_SHADOW_STREAM_AT \
+                                  + CH25B_SHADOW_SPRITES \
+                                    * CH25B_SHADOW_STREAM_BYTES)
+
+/* The .CEL header fields both fixtures carry, and a table position neither
+   reader may consult: both hardwire the table at 0x0f. */
+#define CH25B_CEL_TABLE_AT 0x0f
+#define CH25B_CEL_DECOY_TABLE_AT 0x100
+#define CH25B_CEL_VERSION 1
+#define CH25B_CEL_PIXEL_FORMAT 2
+
+static unsigned char ch25b_panel_sheet[CH25B_PANEL_SHEET_BYTES];
+static unsigned char ch25b_shadow_sheet[CH25B_SHADOW_SHEET_BYTES];
+static unsigned char ch25b_text_block[CH25B_TEXT_BLOCK_BYTES];
+static struct fdps_unit_record ch25b_units[CH25B_STAGE_UNITS];
+static unsigned char ch25b_keys[CH25B_KEYS_MAX];
+static volatile int ch25b_key_count;
+static volatile int ch25b_keys_read;
+static volatile int ch25b_last_head;
+static int ch25b_fixtures_staged = 0;
+static void (__interrupt __far *ch25b_saved_timer)();
+
+static void ch25b_u16(unsigned char *image, int at, unsigned int value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void ch25b_u32(unsigned char *image, int at, unsigned long value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    image[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    image[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+static int ch25b_sheet_present(void)
+{
+    FILE *probe;
+
+    probe = fopen(CH25B_FACE_SHEET, "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+    return 1;
+}
+
+static void ch25b_cel_header(unsigned char *sheet, int width, int height,
+                             int sprites)
+{
+    sheet[0] = 'C';
+    sheet[1] = 'E';
+    sheet[2] = 'L';
+    ch25b_u16(sheet, 0x03, CH25B_CEL_VERSION);
+    ch25b_u16(sheet, 0x05, CH25B_CEL_DECOY_TABLE_AT);
+    ch25b_u16(sheet, 0x07, (unsigned int) width);
+    ch25b_u16(sheet, 0x09, (unsigned int) height);
+    ch25b_u16(sheet, 0x0b, (unsigned int) sprites);
+    ch25b_u16(sheet, 0x0d, CH25B_CEL_PIXEL_FORMAT);
+}
+
+/* The two sheets and the text block.  None of them changes between cases, so
+   they are built once. */
+static void ch25b_stage_fixtures(void)
+{
+    int row;
+    int segment;
+    int cursor;
+    int run;
+    int sprite;
+    int stream_at;
+    int text_id;
+
+    if (ch25b_fixtures_staged) {
+        return;
+    }
+    ch25b_fixtures_staged = 1;
+
+    memset(ch25b_panel_sheet, 0, (size_t) CH25B_PANEL_SHEET_BYTES);
+    ch25b_cel_header(ch25b_panel_sheet, CH25B_PANEL_W, CH25B_PANEL_H, 1);
+    ch25b_u32(ch25b_panel_sheet, CH25B_CEL_TABLE_AT,
+              (unsigned long) CH25B_PANEL_STREAM_AT);
+    ch25b_u32(ch25b_panel_sheet, CH25B_CEL_TABLE_AT + 4,
+              (unsigned long) CH25B_PANEL_SHEET_BYTES);
+    for (row = 0; row < CH25B_PANEL_H; row++) {
+        cursor = CH25B_PANEL_STREAM_AT + row * CH25B_PANEL_ROW_BYTES;
+        for (segment = 0; segment < CH25B_PANEL_SEGMENTS; segment++) {
+            if (segment == CH25B_PANEL_SEGMENTS - 1) {
+                run = CH25B_PANEL_LAST_SEGMENT_W;
+            } else {
+                run = CH25B_PANEL_FILL_MAX;
+            }
+            ch25b_panel_sheet[cursor] = (unsigned char) (run - 1);
+            ch25b_panel_sheet[cursor + 1] = CH25B_PANEL_COLOR;
+            cursor += 2;
+        }
+    }
+
+    memset(ch25b_shadow_sheet, 0, (size_t) CH25B_SHADOW_SHEET_BYTES);
+    ch25b_cel_header(ch25b_shadow_sheet, CH25B_SHADOW_SPRITE_W,
+                     CH25B_SHADOW_SPRITE_H, CH25B_SHADOW_SPRITES);
+    for (sprite = 0; sprite < CH25B_SHADOW_SPRITES; sprite++) {
+        stream_at = CH25B_SHADOW_STREAM_AT
+                    + sprite * CH25B_SHADOW_STREAM_BYTES;
+        ch25b_u32(ch25b_shadow_sheet, CH25B_CEL_TABLE_AT + sprite * 4,
+                  (unsigned long) stream_at);
+        for (row = 0; row < CH25B_SHADOW_SPRITE_H; row++) {
+            ch25b_shadow_sheet[stream_at + row * 2] =
+                (unsigned char) (CH25B_SHADOW_SPRITE_W - 1);
+            ch25b_shadow_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) sprite;
+        }
+    }
+    ch25b_u32(ch25b_shadow_sheet,
+              CH25B_CEL_TABLE_AT + CH25B_SHADOW_SPRITES * 4,
+              (unsigned long) CH25B_SHADOW_SHEET_BYTES);
+
+    memset(ch25b_text_block, 0, (size_t) CH25B_TEXT_BLOCK_BYTES);
+    *(short *) (ch25b_text_block + CH25B_TEXT_EMPTY_AT) = (short) CH25B_TEXT_END;
+    for (text_id = 0; text_id < CH25B_TEXT_IDS; text_id++) {
+        *(short *) (ch25b_text_block + text_id * 2) =
+            (short) CH25B_TEXT_EMPTY_AT;
+    }
+}
+
+/* Empties one record's eight inventory entries the way a deployment leaves
+   them. */
+static void ch25b_blank_bag(int unit_index)
+{
+    int entry;
+
+    for (entry = 0; entry < CH25B_INVENTORY_ENTRIES; entry++) {
+        ch25b_units[unit_index].inventory_slots[entry * 2] = CH25B_EMPTY_FLAG;
+        ch25b_units[unit_index].inventory_slots[entry * 2 + 1] = CH25B_EMPTY_ID;
+    }
+}
+
+static void ch25b_carry(int unit_index, int entry, int item_id)
+{
+    ch25b_units[unit_index].inventory_slots[entry * 2] = CH25B_CARRIED_FLAG;
+    ch25b_units[unit_index].inventory_slots[entry * 2 + 1] =
+        (unsigned char) item_id;
+}
+
+/* Everything the handler and its callees read.  Three empty-handed records, of
+   which only CH25B_MARIAN_UNIT wears character id 5; both latch elements clear;
+   the purse well clear of the price; the two sheets, the text block, an empty
+   scene so the close's recomposition draws nothing, and village mode so the
+   prompt lifts its backdrop off the visible page instead of composing one. */
+static void ch25b_stage(void)
+{
+    int unit_index;
+
+    ch25b_stage_fixtures();
+
+    memset(ch25b_units, 0, sizeof(ch25b_units));
+    for (unit_index = 0; unit_index < CH25B_STAGE_UNITS; unit_index++) {
+        ch25b_blank_bag(unit_index);
+        ch25b_units[unit_index].char_id = (unsigned char) CH25B_CHAR_ID_ABOVE;
+    }
+    ch25b_units[CH25B_MARIAN_UNIT].char_id = (unsigned char) CH25B_MARIAN_CHAR_ID;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch25b_units;
+    data_fdps_map_unit_count = CH25B_STAGE_UNITS;
+    data_fdps_current_chapter_text_ptr = ch25b_text_block;
+    data_fdps_message_window_sheet_ptr = ch25b_panel_sheet;
+    data_fdps_shadow_sprite_sheet_ptr = ch25b_shadow_sheet;
+
+    data_fdps_shared_party_total_gold = CH25B_START_GOLD;
+    data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT] = 0;
+    data_fdps_map_cell_event_triggered_flags[CH25B_AMBUSH_LATCH_SLOT] = 0;
+
+    data_fdps_village_mode_flag = 1;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_timer_tick_counter = 0;
+}
+
+/* Loads the codes this case plays, in the order the prompt reads them. */
+static void ch25b_stage_keys(int count, int first, int second)
+{
+    ch25b_keys[0] = (unsigned char) first;
+    ch25b_keys[1] = (unsigned char) second;
+    ch25b_keys[2] = (unsigned char) second;
+    ch25b_keys[3] = (unsigned char) second;
+    ch25b_key_count = count;
+    ch25b_keys_read = 0;
+}
+
+static void ch25b_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* The player.  It advances the game's clock like the real timer handler and
+   appends the case's next make code the way fdps_keyboard_isr does, but only
+   while the ring is empty, and it steps through the list on the read index
+   moving rather than on ticks -- see the note at the top of this section. */
+static void __interrupt __far ch25b_timer_isr(void)
+{
+    int slot;
+    int next_key;
+
+    ++data_fdps_timer_tick_counter;
+
+    if (data_fdps_input_scancode_queue_head != ch25b_last_head) {
+        ch25b_last_head = data_fdps_input_scancode_queue_head;
+        ch25b_keys_read++;
+    }
+
+    if (data_fdps_input_scancode_queue_head
+            == data_fdps_input_scancode_queue_write_index) {
+        next_key = ch25b_keys_read;
+        if (next_key >= ch25b_key_count) {
+            next_key = ch25b_key_count - 1;
+        }
+        slot = data_fdps_input_scancode_queue_write_index;
+        data_fdps_input_scancode_queue[slot] = ch25b_keys[next_key];
+        slot++;
+        if (slot == SCANCODE_QUEUE_LEN) {
+            slot = 0;
+        }
+        data_fdps_input_scancode_queue_write_index = slot;
+    }
+
+    _chain_intr(ch25b_saved_timer);
+}
+
+/* One whole firing: the adapter in the mode the game runs it in, the feeder
+   installed, and text mode back before anything is asserted so that a failure
+   prints on a readable screen. */
+static void ch25b_run(int unit_index)
+{
+    ch25b_last_head = 0;
+    ch25b_keys_read = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+
+    ch25b_set_mode(CH25B_VGA_MODE_320X200X256);
+    ch25b_saved_timer = _dos_getvect(CH25B_TIMER_VECTOR);
+    _dos_setvect(CH25B_TIMER_VECTOR, ch25b_timer_isr);
+    fdps_chapter_25_event_marian_buys_wind_god_bow(unit_index);
+    _dos_setvect(CH25B_TIMER_VECTOR, ch25b_saved_timer);
+    ch25b_set_mode(CH25B_VGA_MODE_TEXT);
+
+    if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+        free(data_fdps_portrait_sprite_buf_ptr);
+        data_fdps_portrait_sprite_buf_ptr = NULL;
+    }
+    data_fdps_village_mode_flag = 0;
+}
+
+static int ch25b_entry_flag(int unit_index, int entry)
+{
+    return (int) ch25b_units[unit_index].inventory_slots[entry * 2];
+}
+
+static int ch25b_entry_id(int unit_index, int entry)
+{
+    return (int) ch25b_units[unit_index].inventory_slots[entry * 2 + 1];
+}
+
+/* Whether any occupied entry holds that id, which is how a case says the bow
+   was or was not handed over. */
+static int ch25b_carries(int unit_index, int item_id)
+{
+    int entry;
+
+    for (entry = 0; entry < CH25B_INVENTORY_ENTRIES; entry++) {
+        if (ch25b_entry_flag(unit_index, entry) != CH25B_EMPTY_FLAG
+                && ch25b_entry_id(unit_index, entry) == item_id) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* ---------------------------------------------------------------------- */
+
+/* The two record fields these cases reach through and the stride they are
+   indexed by.  MOV AL,byte ptr [EAX+0x8] at 0003907e is the character id, and
+   the bag fdps_unit_item_count and fdps_unit_add_item work on starts at 0x0a;
+   every assertion below would agree with itself while addressing another byte
+   if the layout were wrong. */
+static void ch25b_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, char_id), 8);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, inventory_slots), 0x0a);
+}
+
+/* The whole taken path.  One prompt runs and is answered with Enter, the bow
+   lands in the first empty entry, exactly 30000 leaves the purse and the latch
+   is up.  The other two records are untouched, which says the handler worked on
+   the index it was given. */
+static void ch25b_buys_the_bow_when_the_offer_is_accepted(void)
+{
+    if (!ch25b_sheet_present()) {
+        return;
+    }
+    ch25b_stage();
+    ch25b_stage_keys(1, CH25B_KEY_ENTER, 0);
+
+    ch25b_run(CH25B_MARIAN_UNIT);
+
+    CHECK_EQ(ch25b_keys_read, 1);
+    CHECK_EQ(ch25b_carries(CH25B_MARIAN_UNIT, CH25B_WIND_GOD_BOW), 1);
+    CHECK_EQ(ch25b_entry_flag(CH25B_MARIAN_UNIT, 0), CH25B_CARRIED_FLAG);
+    CHECK_EQ(ch25b_entry_id(CH25B_MARIAN_UNIT, 0), CH25B_WIND_GOD_BOW);
+    CHECK_EQ(ch25b_entry_flag(CH25B_MARIAN_UNIT, 1), CH25B_EMPTY_FLAG);
+    CHECK_EQ(data_fdps_shared_party_total_gold,
+             CH25B_START_GOLD - CH25B_BOW_PRICE);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT], 1);
+    CHECK_EQ(ch25b_carries(CH25B_OTHER_UNIT, CH25B_WIND_GOD_BOW), 0);
+}
+
+/* The right-hand cell declines: the prompt takes two codes, the bag and the
+   purse are exactly as they were, and the latch is up all the same.  That last
+   assertion is the one that says declining spends the offer -- it is the
+   behaviour the rebuild note in src/chevt5.h warns against tidying away. */
+static void ch25b_declining_still_spends_the_offer(void)
+{
+    if (!ch25b_sheet_present()) {
+        return;
+    }
+    ch25b_stage();
+    ch25b_stage_keys(2, CH25B_KEY_RIGHT, CH25B_KEY_ENTER);
+
+    ch25b_run(CH25B_MARIAN_UNIT);
+
+    CHECK_EQ(ch25b_keys_read, 2);
+    CHECK_EQ(ch25b_carries(CH25B_MARIAN_UNIT, CH25B_WIND_GOD_BOW), 0);
+    CHECK_EQ(ch25b_entry_flag(CH25B_MARIAN_UNIT, 0), CH25B_EMPTY_FLAG);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CH25B_START_GOLD);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT], 1);
+}
+
+/* Esc answers -1 and the test is "not 0", so a cancel goes down the decline arm
+   rather than the buy arm and spends the offer just as the right cell does. */
+static void ch25b_a_cancel_declines_and_spends_it_too(void)
+{
+    if (!ch25b_sheet_present()) {
+        return;
+    }
+    ch25b_stage();
+    ch25b_stage_keys(1, CH25B_KEY_ESC, 0);
+
+    ch25b_run(CH25B_MARIAN_UNIT);
+
+    CHECK_EQ(ch25b_keys_read, 1);
+    CHECK_EQ(ch25b_carries(CH25B_MARIAN_UNIT, CH25B_WIND_GOD_BOW), 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CH25B_START_GOLD);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT], 1);
+}
+
+/* The character gate is an equality on 5 and nothing else.  A record one id
+   below and a record one id above are both refused before the prompt: no code
+   is consumed, nothing moves, and the latch is left clear so the real 瑪麗安
+   can still be offered the bow. */
+static void ch25b_only_character_five_is_offered_it(void)
+{
+    if (!ch25b_sheet_present()) {
+        return;
+    }
+    ch25b_stage();
+    ch25b_units[CH25B_MARIAN_UNIT].char_id = (unsigned char) CH25B_CHAR_ID_BELOW;
+    ch25b_stage_keys(1, CH25B_KEY_ENTER, 0);
+
+    ch25b_run(CH25B_MARIAN_UNIT);
+
+    CHECK_EQ(ch25b_keys_read, 0);
+    CHECK_EQ(ch25b_carries(CH25B_MARIAN_UNIT, CH25B_WIND_GOD_BOW), 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CH25B_START_GOLD);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT], 0);
+
+    ch25b_stage();
+    ch25b_units[CH25B_MARIAN_UNIT].char_id = (unsigned char) CH25B_CHAR_ID_ABOVE;
+    ch25b_stage_keys(1, CH25B_KEY_ENTER, 0);
+
+    ch25b_run(CH25B_MARIAN_UNIT);
+
+    CHECK_EQ(ch25b_keys_read, 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT], 0);
+}
+
+/* The offer is made to the unit the index names.  Both other records carry the
+   wrong id, so a firing for one of them has to do nothing at all even though a
+   record with id 5 is sitting in the same array. */
+static void ch25b_fires_for_the_unit_the_index_names(void)
+{
+    if (!ch25b_sheet_present()) {
+        return;
+    }
+    ch25b_stage();
+    ch25b_stage_keys(1, CH25B_KEY_ENTER, 0);
+
+    ch25b_run(CH25B_OTHER_UNIT);
+
+    CHECK_EQ(ch25b_keys_read, 0);
+    CHECK_EQ(ch25b_carries(CH25B_MARIAN_UNIT, CH25B_WIND_GOD_BOW), 0);
+    CHECK_EQ(ch25b_carries(CH25B_OTHER_UNIT, CH25B_WIND_GOD_BOW), 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT], 0);
+}
+
+/* The purse gate is "at least 30000", JGE and not JG: a purse holding exactly
+   the price buys the bow and is left at nothing, while one a single gold short
+   is refused before the prompt and leaves the offer armed. */
+static void ch25b_thirty_thousand_exactly_is_enough(void)
+{
+    if (!ch25b_sheet_present()) {
+        return;
+    }
+    ch25b_stage();
+    data_fdps_shared_party_total_gold = CH25B_BOW_PRICE;
+    ch25b_stage_keys(1, CH25B_KEY_ENTER, 0);
+
+    ch25b_run(CH25B_MARIAN_UNIT);
+
+    CHECK_EQ(ch25b_keys_read, 1);
+    CHECK_EQ(ch25b_carries(CH25B_MARIAN_UNIT, CH25B_WIND_GOD_BOW), 1);
+    CHECK_EQ(data_fdps_shared_party_total_gold, 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT], 1);
+
+    ch25b_stage();
+    data_fdps_shared_party_total_gold = CH25B_GOLD_ONE_SHORT;
+    ch25b_stage_keys(1, CH25B_KEY_ENTER, 0);
+
+    ch25b_run(CH25B_MARIAN_UNIT);
+
+    CHECK_EQ(ch25b_keys_read, 0);
+    CHECK_EQ(ch25b_carries(CH25B_MARIAN_UNIT, CH25B_WIND_GOD_BOW), 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CH25B_GOLD_ONE_SHORT);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT], 0);
+}
+
+/* The latch refuses the whole body, prompt included, so a second visit to the
+   tile costs nothing and hands nothing over. */
+static void ch25b_the_latch_refuses_a_second_offer(void)
+{
+    if (!ch25b_sheet_present()) {
+        return;
+    }
+    ch25b_stage();
+    data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT] = 1;
+    ch25b_stage_keys(1, CH25B_KEY_ENTER, 0);
+
+    ch25b_run(CH25B_MARIAN_UNIT);
+
+    CHECK_EQ(ch25b_keys_read, 0);
+    CHECK_EQ(ch25b_carries(CH25B_MARIAN_UNIT, CH25B_WIND_GOD_BOW), 0);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CH25B_START_GOLD);
+}
+
+/* The latch is element 0x11 and not the element 0x10 the chapter 25 ambush on
+   the same map uses.  The ambush's element is raised before the run and the
+   offer still goes through, and afterwards the ambush's element is exactly as
+   it was left. */
+static void ch25b_latches_its_own_element_and_not_the_ambushs(void)
+{
+    if (!ch25b_sheet_present()) {
+        return;
+    }
+    ch25b_stage();
+    data_fdps_map_cell_event_triggered_flags[CH25B_AMBUSH_LATCH_SLOT] = 1;
+    ch25b_stage_keys(1, CH25B_KEY_ENTER, 0);
+
+    ch25b_run(CH25B_MARIAN_UNIT);
+
+    CHECK_EQ(ch25b_carries(CH25B_MARIAN_UNIT, CH25B_WIND_GOD_BOW), 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_AMBUSH_LATCH_SLOT],
+             1);
+
+    ch25b_stage();
+    ch25b_stage_keys(1, CH25B_KEY_ENTER, 0);
+
+    ch25b_run(CH25B_MARIAN_UNIT);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_AMBUSH_LATCH_SLOT],
+             0);
+}
+
+/* A full bag is refused before the prompt.  Eight occupied entries make
+   fdps_unit_item_count answer 8, which is the one count the gate turns away, so
+   the money stays in the purse, the eight items stay where they are and the
+   offer stays armed for a later visit with room in the bag. */
+static void ch25b_a_full_bag_is_refused(void)
+{
+    int entry;
+
+    if (!ch25b_sheet_present()) {
+        return;
+    }
+    ch25b_stage();
+    for (entry = 0; entry < CH25B_INVENTORY_ENTRIES; entry++) {
+        ch25b_carry(CH25B_MARIAN_UNIT, entry, CH25B_FILLER_ITEM);
+    }
+    ch25b_stage_keys(1, CH25B_KEY_ENTER, 0);
+
+    ch25b_run(CH25B_MARIAN_UNIT);
+
+    CHECK_EQ(ch25b_keys_read, 0);
+    CHECK_EQ(ch25b_carries(CH25B_MARIAN_UNIT, CH25B_WIND_GOD_BOW), 0);
+    CHECK_EQ(ch25b_entry_id(CH25B_MARIAN_UNIT,
+                            CH25B_INVENTORY_ENTRIES - 1), CH25B_FILLER_ITEM);
+    CHECK_EQ(data_fdps_shared_party_total_gold, CH25B_START_GOLD);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT], 0);
+}
+
+/* Seven occupied entries are not a full bag: the gate is an inequality against
+   8, so the offer is made and the bow lands in the one entry left. */
+static void ch25b_seven_items_still_leave_room(void)
+{
+    int entry;
+
+    if (!ch25b_sheet_present()) {
+        return;
+    }
+    ch25b_stage();
+    for (entry = 0; entry < CH25B_INVENTORY_ENTRIES - 1; entry++) {
+        ch25b_carry(CH25B_MARIAN_UNIT, entry, CH25B_FILLER_ITEM);
+    }
+    ch25b_stage_keys(1, CH25B_KEY_ENTER, 0);
+
+    ch25b_run(CH25B_MARIAN_UNIT);
+
+    CHECK_EQ(ch25b_keys_read, 1);
+    CHECK_EQ(ch25b_entry_id(CH25B_MARIAN_UNIT,
+                            CH25B_INVENTORY_ENTRIES - 1), CH25B_WIND_GOD_BOW);
+    CHECK_EQ(ch25b_entry_flag(CH25B_MARIAN_UNIT,
+                              CH25B_INVENTORY_ENTRIES - 1), CH25B_CARRIED_FLAG);
+    CHECK_EQ(ch25b_entry_id(CH25B_MARIAN_UNIT, 0), CH25B_FILLER_ITEM);
+    CHECK_EQ(data_fdps_shared_party_total_gold,
+             CH25B_START_GOLD - CH25B_BOW_PRICE);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT], 1);
+}
+
 void run_chevt5_tests(void)
 {
     RUN_TEST(ch24t_each_arrival_turn_deploys_its_own_wave);
@@ -1378,4 +2052,16 @@ void run_chevt5_tests(void)
     RUN_TEST(ch25u_fires_for_no_unit_but_randis);
     RUN_TEST(ch25u_has_no_latch_and_no_deadline);
     RUN_TEST(ch25u_does_not_fire_twice_off_one_sword);
+
+    RUN_TEST(ch25b_record_shape_matches_the_offsets);
+    RUN_TEST(ch25b_buys_the_bow_when_the_offer_is_accepted);
+    RUN_TEST(ch25b_declining_still_spends_the_offer);
+    RUN_TEST(ch25b_a_cancel_declines_and_spends_it_too);
+    RUN_TEST(ch25b_only_character_five_is_offered_it);
+    RUN_TEST(ch25b_fires_for_the_unit_the_index_names);
+    RUN_TEST(ch25b_thirty_thousand_exactly_is_enough);
+    RUN_TEST(ch25b_the_latch_refuses_a_second_offer);
+    RUN_TEST(ch25b_latches_its_own_element_and_not_the_ambushs);
+    RUN_TEST(ch25b_a_full_bag_is_refused);
+    RUN_TEST(ch25b_seven_items_still_leave_room);
 }

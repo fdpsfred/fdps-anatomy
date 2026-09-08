@@ -151,4 +151,40 @@ extern void fdps_chapter_25_event_deploy_wave_1(int unit_index);
 extern void fdps_chapter_25_event_upgrade_randis_sword(int unit_index);
 #pragma aux fdps_chapter_25_event_upgrade_randis_sword "*" parm caller [];
 
+/* Chapter 25's 風神弓 shop: 瑪麗安 stops on the merchant's tile with 30000
+   gold and room in her bag, the merchant offers her 風神弓 (item id 0x4a), and
+   if the player says yes the money is taken and the bow handed over.
+
+   FOUR GATES, ALL FOUR REFUSING THE WHOLE BODY: the triggering unit's
+   character id must be 5, which is 瑪麗安; the party purse must hold at least
+   30000, the bow's list price (assets/items.md); the shared one-shot latch must
+   still be clear; and the unit's inventory must not already hold eight entries,
+   because fdps_unit_add_item (unititem.h) stores nothing into a full bag.  A
+   unit that arrives short of money or with a full bag leaves the event armed
+   and can come back later.
+
+   THE OFFER IS SPENT WHETHER OR NOT THE BOW IS BOUGHT.  The latch is raised on
+   the way out of both arms of the question, so declining -- and cancelling the
+   prompt, which answers -1 and which the "not 0" test folds into declining --
+   costs 瑪麗安 her only chance at the bow for the rest of the game.  Raising it
+   only on the purchase is the obvious rewrite and it lets the player be asked
+   again.
+
+   THE FIRST LINE IS DRAWN TO THE SCREEN CORNER AND THE OTHER THREE INTO THE
+   PANEL.  The opening exchange carries its own speaker tokens, which stand a
+   speech panel up and move the pen themselves, so its destination argument is
+   never used; the question is a bare glyph run and needs both the panel
+   fdps_message_window_open puts up for merchant portrait 0x77 and the in-panel
+   pen it is handed.  That is why the question, and only the question, is
+   bracketed by an open and a close.
+
+   unit_index is the handler table's shared parameter: the index of the unit
+   that tripped the tile event, not range checked.  It is read three times --
+   resolved through fdps_get_unit_record (unit.h) for the character id, and
+   handed to fdps_unit_item_count and fdps_unit_add_item (unititem.h).
+
+   Table slot 39 at 00060260. */
+extern void fdps_chapter_25_event_marian_buys_wind_god_bow(int unit_index);
+#pragma aux fdps_chapter_25_event_marian_buys_wind_god_bow "*" parm caller [];
+
 #endif

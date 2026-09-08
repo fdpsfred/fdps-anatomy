@@ -3214,6 +3214,14 @@
       "status": "committed",
       "emitted_against": "0x85",
       "rounds": 0
+    },
+    "00039060": {
+      "name": "fdps_chapter_25_event_marian_buys_wind_god_bow",
+      "target": "chevt5.c",
+      "body_size": "0x12b",
+      "status": "committed",
+      "emitted_against": "0x12b",
+      "rounds": 0
     }
   }
 }
