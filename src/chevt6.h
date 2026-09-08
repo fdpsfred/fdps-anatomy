@@ -160,6 +160,57 @@ extern void fdps_chapter_29_event_activate_enemy_groups(int unit_index);
 extern void fdps_chapter_29_event_activate_all_enemies(int unit_index);
 #pragma aux fdps_chapter_29_event_activate_all_enemies "*" parm caller [];
 
+/* Chapter 30's reinforcement ambush: the first unit to finish a step onto the
+   map's trigger tile brings on the four enemies the chapter's map tags as wave
+   4, the view is panned over both of the places they arrive, and the chapter's
+   line about them is spoken.  It happens once per chapter and there is no side
+   test in front of it -- any unit that walks over the tile springs it.
+
+   The gate is the shared one-shot latch, element 0x10 of
+   data_fdps_map_cell_event_triggered_flags (gamedata.h), and it has to still be
+   0 for anything at all to happen.  The latch is raised last, after the line has
+   been spoken.  It is not this handler's private flag: the whole 32-byte block
+   is cleared at every chapter start and restored from a savegame, which is what
+   makes the ambush fire once per chapter rather than once per process.
+
+   The deployment is fdps_deploy_wave (deploy.h) with wave 4 and place_exact 0,
+   so the arrivals settle on the nearest free walkable tile to their MAP%02d.COD
+   placement records rather than on the records' own coordinates.  The map
+   number is read from data_fdps_chapter_current_chapter_id (gamedata.h) at the
+   call and is not anything this handler holds, and the wave number is a literal
+   -- the battle turn counter is not read anywhere in the body, so the same four
+   units arrive whenever the tile is crossed.
+
+   The arrival is then shown twice.  data_fdps_map_cursor_draw_mode is parked at
+   0 so no cursor is painted for the whole sequence, the view is walked to map
+   pixel (0x60, 0x150) -- tile (4, 14), beside the lower-left arrival point --
+   and held there for twelve frames, then to map pixel (0x198, 0x150) -- tile
+   (17, 14), beside the lower-right one -- and held for twelve more.  Each held
+   frame costs one timer tick inside fdps_render_view_frame (mapdraw.h), so the
+   count is how long the view rests on each group.  The draw mode is then left
+   on the literal 1, the plain cursor box, and not the mode the call found.
+
+   Nothing in the body tests whether the deployment found anything, so a map
+   with no wave-4 record still blanks the cursor, runs both pans and speaks the
+   line.
+
+   The line is text entry 8 of the loaded chapter's block, through
+   fdps_draw_text (text.h) straight onto the mode 13h aperture in the standard
+   message colours.  Its result is discarded.
+
+   unit_index is the handler table's shared parameter and this handler ignores
+   it: the slot is overwritten with 0 as each of the two hold loops starts and
+   is never read as an argument.  In the shipped data it is the index of the
+   unit that stepped onto the trigger tile.
+
+   Table slot 47, and chapter 30's map29.dat is the only shipped file that names
+   it -- as the tile-event entry for cell event code 1, {slot 47, occasion 0}.
+   Occasion 0 is what fdps_map_set_pending_tile_event reports as a unit finishes
+   stepping onto a tile during movement, which is why a unit teleported onto the
+   tile does not spring it. */
+extern void fdps_chapter_30_event_deploy_wave_4(int unit_index);
+#pragma aux fdps_chapter_30_event_deploy_wave_4 "*" parm caller [];
+
 /* Chapter 30's "the second form has fallen" event: one call and nothing else.
    It deploys wave 3 of the current map -- fdps_deploy_wave with the map number
    read out of data_fdps_chapter_current_chapter_id, the wave number as the

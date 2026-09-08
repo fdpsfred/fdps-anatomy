@@ -326,7 +326,11 @@ extern unsigned char data_fdps_map_current_move_grid_marker;
    The writers each set one entry to 1 and then call
    fdps_map_apply_triggered_cell_changes (src/maptile.h) to make the map show
    it: the chest and search paths at 0001038b, 0001868b and 000188aa, the icon
-   script at 00021c8f and the chapter 30 wave event at 00039876. */
+   script at 00021c8f and the chapter 30 wave event at 00039876.
+
+   fdps_chapter_30_event_deploy_wave_4 is the exception: it sets element 0x10 at
+   00039830 and makes no such call, because its body deploys, pans the view and
+   speaks a line and never touches a tile layer. */
 extern unsigned char data_fdps_map_cell_event_triggered_flags[32];
 
 /* 00069d90.  Which chapter-event handler the battle loop still owes a call to:

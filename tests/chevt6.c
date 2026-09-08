@@ -2055,6 +2055,493 @@ static void ch30rev_a_revived_unit_is_not_revived_again(void)
     ch30rev_unstage();
 }
 
+/* ---- fdps_chapter_30_event_deploy_wave_4, 00039770 -----------------------
+ *
+ * Every expected value below is read off the assembly at 00039770: the CMP byte
+ * ptr [0x000640e8],0x0 / JNZ at 0003977c that gates the whole body and the MOV
+ * byte ptr [0x000640e8],0x1 at 00039830 that closes it; the XOR EAX,EAX / PUSH
+ * EAX / PUSH 0x4 / PUSH dword ptr [0x00069cf4] at 00039789..0003978e that name
+ * the wave, the placement and the map; the two literal stores into the cursor
+ * draw mode at 0003979c and 00039803; the PUSH 0x150 / PUSH 0x60 at 000397a6 and
+ * PUSH 0x150 / PUSH 0x198 at 000397d3 that name the two pan targets; the two CMP
+ * dword ptr [EBP+0x14],0xc / JL at 000397bc and 000397ec that count the holds;
+ * and the seven pushes at 0003980d..00039822 that hand text entry 8 to
+ * fdps_draw_text at the aperture origin in the standard message colours.
+ *
+ * The cases reuse the ch30w3_ fixture above -- the same blank walkable map, the
+ * same three deployment records at table indices 0, 1 and 2, the same MAP00.COD
+ * placement records -- because the wave the handler asked for is only readable
+ * off the record that arrived.  The middle record carries wave 4 and the other
+ * two carry one wave either side of it, so a key that drifted in either
+ * direction deploys a different character id onto a different tile.
+ *
+ * WHY THE CURSOR STARTS ON THE SECOND PAN TARGET.  Both pans end where the
+ * assembly says and only the second one's target survives in the cursor
+ * globals, so a final position of (0x198, 0x150) cannot on its own tell two
+ * pans from one.  Starting the cursor exactly on that target is what makes the
+ * difference show up somewhere else: fdps_map_cursor_move_to returns at once
+ * for a target the cursor already stands on, so a handler that had lost the
+ * first pan would move nothing at all and leave the view window on the zeroes
+ * the fixture staged, while the real one walks thirteen tiles west, holds, and
+ * walks thirteen back, dragging the window along behind it.  The two view
+ * origin assertions are what pin that the first pan ran.  Neither the final
+ * cursor position nor the tick bound covers it -- both survive its loss -- so
+ * dropping those two assertions would leave the first pan unasserted.
+ *
+ * WHERE THE VIEW WINDOW ENDS UP.  Only the walks move it: fdps_render_view_frame
+ * reads both origins and writes neither (src/mapdraw.c), so the holds contribute
+ * nothing.  Each walk drags the window on the steps that push the cursor past
+ * the window's far edge, leaving origin_x at cursor_x - 0xd8 and origin_y at
+ * cursor_y - 0x90 (src/mapcur.c, CURSOR_VIEW_MAX_OFFSET_X and _Y); on this
+ * fixture's 32 by 16 map neither of the two clamps against the map's extent
+ * bites.  So a run that made both walks ends on (0x198 - 0xd8, 0x150 - 0x90) =
+ * (0xc0, 0xc0), and a run that made neither ends on the staged (0, 0).
+ *
+ * WHAT THE TICK BOUND SEPARATES.  A run that kept both hold loops from one that
+ * lost a loop, and nothing else.  The two holds are twenty-four calls into
+ * fdps_render_view_frame and each of those waits for the timer tick to move, so
+ * a correct run clears twenty-three and a run down to one hold falls to roughly
+ * half of it.  Twenty-four hold frames clear the bound on their own, so it says
+ * nothing about whether either pan ran.  It is one-sided on purpose -- the walks
+ * compose frames of their own on every step that scrolls the view, so a correct
+ * run always spends more than the two holds' ticks and can never fail here.
+ *
+ * WHY THE LINE IS READ BACK OFF THE SCREEN.  fdps_draw_text writes to the mode
+ * 13h aperture and hands back a cursor this handler discards, so the only place
+ * the draw is visible is video memory.  The staged text block points every entry
+ * at a lone terminator except entry 8, which is one solid glyph, so a draw that
+ * asked for another entry paints nothing and the aperture's first pixel does not
+ * come out at the message foreground colour.  The pixel is sampled before the
+ * adapter goes back to text mode, because that mode set clears it.
+ *
+ * The unit the fixture already has on the map is given portrait id 0x80, the id
+ * fdps_draw_map_unit returns on before it reads anything else off a record, so
+ * the composed frames do not depend on what a sprite cache slot holds.
+ */
+
+/* The slot of data_fdps_map_cell_event_triggered_flags this handler gates on
+   and latches -- element 0x10, the same one CH29_LATCH_SLOT above names. */
+#define CH30W4_LATCH_SLOT CH29_LATCH_SLOT
+
+/* The wave the ambush asks for, PUSH 0x4 at 0003978c, and the two waves the
+   decoy records either side of it carry. */
+#define CH30W4_WAVE 4
+#define CH30W4_WAVE_BELOW 3
+#define CH30W4_WAVE_ABOVE 5
+
+/* A wave tag no reading of this handler can select, used when a case wants the
+   deployment to match nothing at all. */
+#define CH30W4_UNSELECTED_WAVE 0x30
+
+/* The two pan targets, PUSH 0x150 / PUSH 0x60 at 000397a6 and PUSH 0x150 /
+   PUSH 0x198 at 000397d3.  Both are whole multiples of the 24-pixel tile the
+   walk steps by, so the cursor arrives on them exactly (mapcur.h). */
+#define CH30W4_PAN_LEFT_X 0x60
+#define CH30W4_PAN_LEFT_Y 0x150
+#define CH30W4_PAN_RIGHT_X 0x198
+#define CH30W4_PAN_RIGHT_Y 0x150
+
+/* How long each hold is, CMP dword ptr [EBP+0x14],0xc / JL at 000397bc and
+   000397ec, and the least the tick counter can move across a firing call: two
+   holds less one, so a slow machine cannot fail it and a rebuild that lost
+   either loop cannot reach it. */
+#define CH30W4_HOLD_FRAMES 0xc
+#define CH30W4_LEAST_PAN_TICKS (2 * CH30W4_HOLD_FRAMES - 1)
+
+/* How far the cursor may get from the view window's origin before a walk step
+   drags the window after it, src/mapcur.c's CURSOR_VIEW_MAX_OFFSET_X and _Y,
+   and where the two walks together therefore leave the window.  This is the one
+   observable in this fixture that a lost first pan changes: with the cursor
+   parked on the second target a handler missing the first walk moves nothing,
+   so the window stays on the (0, 0) the fixture staged. */
+#define CH30W4_VIEW_MAX_OFFSET_X 0xd8
+#define CH30W4_VIEW_MAX_OFFSET_Y 0x90
+#define CH30W4_END_VIEW_ORIGIN_X (CH30W4_PAN_RIGHT_X - CH30W4_VIEW_MAX_OFFSET_X)
+#define CH30W4_END_VIEW_ORIGIN_Y (CH30W4_PAN_RIGHT_Y - CH30W4_VIEW_MAX_OFFSET_Y)
+
+/* The cursor mode the fixture parks before every run: neither of the two values
+   the handler writes, so a run that left the global alone, one that hid the
+   cursor and never put it back, and one that restored what it found are all told
+   apart from the 1 the handler is required to leave behind. */
+#define CH30W4_STAGED_CURSOR_MODE 4
+#define CH30W4_CURSOR_MODE_NORMAL 1
+
+/* A cursor position that is neither pan target, so a blocked call is
+   distinguishable from a firing one by where the cursor ends up. */
+#define CH30W4_PARKED_CURSOR_X 0x18
+#define CH30W4_PARKED_CURSOR_Y 0x18
+
+/* The entry the line is spoken from, PUSH 0x8 at 00039820, and the block that
+   holds it: entries all pointing at a lone terminator except that one, which
+   points at a single solid glyph followed by a terminator. */
+#define CH30W4_TEXT_ID 8
+#define CH30W4_TEXT_ENTRIES 0x10
+#define CH30W4_TEXT_TERMINATOR (-1)
+#define CH30W4_TEXT_EMPTY_AT (CH30W4_TEXT_ENTRIES * 2)
+#define CH30W4_TEXT_GLYPH_AT ((CH30W4_TEXT_ENTRIES + 1) * 2)
+#define CH30W4_TEXT_SLOTS (CH30W4_TEXT_ENTRIES + 3)
+
+/* The synthetic font: one 8 by 8 cell per glyph, one byte to the row and the
+   most significant bit leftmost, with glyph 1 solid and glyph 0 blank.  With the
+   outline flag clear and both shadow offsets zero, the shadow lands on the cell
+   itself and the body is drawn over it, so a painted pixel comes out at the
+   foreground colour the handler pushes. */
+#define CH30W4_FONT_GLYPHS 2
+#define CH30W4_FONT_W 8
+#define CH30W4_FONT_H 8
+#define CH30W4_FONT_STRIDE 8
+#define CH30W4_FONT_SOLID_GLYPH 1
+
+/* The colours pushed at 00039811, 0003980f and 0003980d, and the aperture the
+   line is drawn at, PUSH 0xa0000 at 0003981b. */
+#define CH30W4_TEXT_FG_COLOR 0xd0
+#define CH30W4_VGA_ORIGIN 0x000a0000
+
+/* A pixel value the glyph cannot leave behind, stamped on the aperture's first
+   byte before a run so a call that painted nothing is visible as itself. */
+#define CH30W4_SCREEN_SENTINEL 0x11
+
+/* Where MAP00.COD's placement records 0 and 1 and MAP01.COD's record 0 put a
+   unit -- the same coordinates the ch30w3_ and ch28_ cases above read back. */
+#define CH30W4_MAP00_RECORD0_X 18
+#define CH30W4_MAP00_RECORD0_Y 0
+#define CH30W4_MAP00_RECORD1_X 22
+#define CH30W4_MAP00_RECORD1_Y 12
+#define CH30W4_MAP01_RECORD0_X 9
+#define CH30W4_MAP01_RECORD0_Y 4
+
+static short ch30w4_text[CH30W4_TEXT_SLOTS];
+static unsigned char ch30w4_font[CH30W4_FONT_GLYPHS * CH30W4_FONT_STRIDE];
+static unsigned int ch30w4_ticks_before;
+static unsigned int ch30w4_ticks_after;
+static unsigned char ch30w4_screen_pixel;
+
+/* The chapter text block and the font under it.  Only entry 8 paints. */
+static void ch30w4_stage_text(void)
+{
+    int entry;
+
+    for (entry = 0; entry < CH30W4_TEXT_ENTRIES; entry++) {
+        ch30w4_text[entry] = (short) CH30W4_TEXT_EMPTY_AT;
+    }
+    ch30w4_text[CH30W4_TEXT_ENTRIES] = (short) CH30W4_TEXT_TERMINATOR;
+    ch30w4_text[CH30W4_TEXT_ENTRIES + 1] = (short) CH30W4_FONT_SOLID_GLYPH;
+    ch30w4_text[CH30W4_TEXT_ENTRIES + 2] = (short) CH30W4_TEXT_TERMINATOR;
+    ch30w4_text[CH30W4_TEXT_ID] = (short) CH30W4_TEXT_GLYPH_AT;
+
+    memset(ch30w4_font, 0, sizeof(ch30w4_font));
+    for (entry = 0; entry < CH30W4_FONT_H; entry++) {
+        ch30w4_font[CH30W4_FONT_SOLID_GLYPH * CH30W4_FONT_STRIDE + entry] =
+            0xff;
+    }
+
+    data_fdps_current_chapter_text_ptr = (unsigned char *) ch30w4_text;
+    data_fdps_font_sheet_ptr = ch30w4_font;
+    data_fdps_font_glyph_width = CH30W4_FONT_W;
+    data_fdps_glyph_cell_height = CH30W4_FONT_H;
+    data_fdps_font_glyph_stride_bytes = CH30W4_FONT_STRIDE;
+    data_fdps_font_outline_enabled_flag = 0;
+    data_fdps_font_shadow_offset_x = 0;
+    data_fdps_glyph_shadow_row_offset = 0;
+    data_fdps_glyph_advance_x = CH30W4_FONT_W;
+    data_fdps_font_line_height = CH30W4_FONT_H;
+}
+
+/* The three deployment records, tagged around the wave the handler must ask
+   for, so a key that drifted either way deploys a different character id onto a
+   different tile. */
+static void ch30w4_tag_decoys(int wave_no)
+{
+    ch30w3_set_spawn(CH30W3_WAVE2_RECORD, CH30W3_WAVE2_CHAR_ID, wave_no - 1);
+    ch30w3_set_spawn(CH30W3_WAVE3_RECORD, CH30W3_WAVE3_CHAR_ID, wave_no);
+    ch30w3_set_spawn(CH30W3_WAVE4_RECORD, CH30W3_WAVE4_CHAR_ID, wave_no + 1);
+}
+
+/* The ch30w3_ fixture on the given turn with the decoys laid down around wave 4,
+   the compositor's globals put where a frame can be composed against them, the
+   cursor parked on the second pan target and the latch down. */
+static void ch30w4_stage(int battle_turn)
+{
+    ch30w3_stage(battle_turn);
+    ch30w4_tag_decoys(CH30W4_WAVE);
+    ch30w4_stage_text();
+
+    ch30w3_unit(0)->portrait_id = CH28_PORTRAIT_NO_SPRITE;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_map_unit_walk_anim_counter = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_world_x = CH30W4_PAN_RIGHT_X;
+    data_fdps_map_cursor_world_y = CH30W4_PAN_RIGHT_Y;
+    data_fdps_map_cursor_draw_mode = CH30W4_STAGED_CURSOR_MODE;
+    data_fdps_map_cell_event_triggered_flags[CH30W4_LATCH_SLOT] = 0;
+}
+
+/* One whole call with the adapter in the mode the game plays it in and a timer
+   interrupt running, with the tick counter sampled either side and the
+   aperture's first pixel read back before the adapter leaves graphics mode. */
+static void ch30w4_run(int unit_index)
+{
+    ch28_set_mode(CH28_MODE_320X200X256);
+    *(unsigned char *) CH30W4_VGA_ORIGIN = CH30W4_SCREEN_SENTINEL;
+    ch28_saved_timer = _dos_getvect(CH28_TIMER_VECTOR);
+    _dos_setvect(CH28_TIMER_VECTOR, ch28_timer_isr);
+    ch30w4_ticks_before = data_fdps_timer_tick_counter;
+    fdps_chapter_30_event_deploy_wave_4(unit_index);
+    ch30w4_ticks_after = data_fdps_timer_tick_counter;
+    _dos_setvect(CH28_TIMER_VECTOR, ch28_saved_timer);
+    ch30w4_screen_pixel = *(unsigned char *) CH30W4_VGA_ORIGIN;
+    ch28_set_mode(CH28_MODE_TEXT);
+}
+
+/* Back to the state a freshly started program has these in, for the reason
+   ch28_unstage gives: a later unit that expects an empty battle, an unloaded
+   chapter and no font would otherwise inherit this fixture. */
+static void ch30w4_unstage(void)
+{
+    ch28_unstage();
+    data_fdps_current_chapter_text_ptr = NULL;
+    data_fdps_font_sheet_ptr = NULL;
+    data_fdps_map_cell_event_triggered_flags[CH30W4_LATCH_SLOT] = 0;
+}
+
+/* A latch that is already up sends the body straight to the epilogue: no
+   deployment, no cursor mode store, no pan and no line.  The compare is against
+   0 with a JNZ, so every non-zero value blocks it and not just the 1 the handler
+   writes; 1, 2 and 0xff are put through and the slot is asserted to come back
+   holding what it was given, because a handler that rewrote it would say so.
+   None of these runs reaches the adapter, so no game file is needed. */
+static void ch30w4_a_raised_latch_blocks_the_whole_body(void)
+{
+    static int latched[3] = {1, 2, 0xff};
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        ch30w4_stage(0);
+        data_fdps_map_cursor_world_x = CH30W4_PARKED_CURSOR_X;
+        data_fdps_map_cursor_world_y = CH30W4_PARKED_CURSOR_Y;
+        data_fdps_map_cell_event_triggered_flags[CH30W4_LATCH_SLOT] =
+            (unsigned char) latched[i];
+
+        fdps_chapter_30_event_deploy_wave_4(0);
+
+        CHECK_EQ(data_fdps_map_unit_count, 1);
+        CHECK_EQ(data_fdps_map_cursor_world_x, CH30W4_PARKED_CURSOR_X);
+        CHECK_EQ(data_fdps_map_cursor_world_y, CH30W4_PARKED_CURSOR_Y);
+        CHECK_EQ(data_fdps_map_cursor_draw_mode, CH30W4_STAGED_CURSOR_MODE);
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH30W4_LATCH_SLOT],
+                 latched[i]);
+    }
+    ch30w4_unstage();
+}
+
+/* The whole body with the latch down: the wave-4 record and no other arrives, on
+   MAP00.COD's record 1 at (22, 12); the cursor ends on the second pan target
+   with the draw mode on 1 -- not the 4 the fixture parked and not the 0 the pans
+   ran under, so neither a run that saved and restored the mode nor one that left
+   the blank behind passes; the view window ends at (0xc0, 0xc0), which only the
+   west walk and the walk back can put it at and which a run that lost the first
+   pan leaves on the staged (0, 0); the tick counter has moved by at least
+   twenty-three, which no run missing a hold loop reaches; the aperture's first
+   pixel is the message foreground colour, so entry 8 was drawn over the
+   sentinel; and the latch is up. */
+static void ch30w4_deploys_wave_four_pans_and_latches(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w4_stage(0);
+
+    ch30w4_run(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE3_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH30W4_MAP00_RECORD1_X);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH30W4_MAP00_RECORD1_Y);
+    CHECK_EQ(data_fdps_map_cursor_world_x, CH30W4_PAN_RIGHT_X);
+    CHECK_EQ(data_fdps_map_cursor_world_y, CH30W4_PAN_RIGHT_Y);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, CH30W4_CURSOR_MODE_NORMAL);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, CH30W4_END_VIEW_ORIGIN_X);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, CH30W4_END_VIEW_ORIGIN_Y);
+    CHECK_EQ(ch30w4_ticks_after - ch30w4_ticks_before
+                 >= (unsigned int) CH30W4_LEAST_PAN_TICKS,
+             1);
+    CHECK_EQ(ch30w4_screen_pixel, CH30W4_TEXT_FG_COLOR);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH30W4_LATCH_SLOT], 1);
+    ch30w4_unstage();
+}
+
+/* The wave is the literal 4 and not the battle turn counter, which is what every
+   turn-scheduled handler of this family pushes instead.  The counter is driven
+   to three values that would each pick a decoy: read raw, turn 3 selects the
+   record below and turn 5 the record above, and halved, turns 0, 3 and 5 select
+   waves 0, 1 and 2 and would deploy nothing at all.  The same wave-4 record
+   arrives on the same tile every time. */
+static void ch30w4_wave_number_is_a_literal(void)
+{
+    static int turns[3] = {0, 3, 5};
+    int i;
+
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 3; i++) {
+        ch30w4_stage(turns[i]);
+
+        ch30w4_run(0);
+
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE3_CHAR_ID);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH30W4_MAP00_RECORD1_X);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH30W4_MAP00_RECORD1_Y);
+    }
+    ch30w4_unstage();
+}
+
+/* The map the wave is deployed under is read from
+   data_fdps_chapter_current_chapter_id at the call site and is not a literal:
+   the wave-4 tag is moved onto table index 0 and the handler run twice, once
+   with that global on 0 and once on 1, and the record lands on MAP00.COD's
+   record 0 at (18, 0) and then on MAP01.COD's record 0 at (9, 4). */
+static void ch30w4_map_number_comes_from_the_chapter_global(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w4_stage(0);
+    ch30w3_set_spawn(CH30W3_WAVE2_RECORD, CH30W3_WAVE2_CHAR_ID, CH30W4_WAVE);
+    ch30w3_set_spawn(CH30W3_WAVE3_RECORD, CH30W3_WAVE3_CHAR_ID,
+                     CH30W4_WAVE_BELOW);
+
+    ch30w4_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE2_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH30W4_MAP00_RECORD0_X);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH30W4_MAP00_RECORD0_Y);
+
+    ch30w4_stage(0);
+    ch30w3_set_spawn(CH30W3_WAVE2_RECORD, CH30W3_WAVE2_CHAR_ID, CH30W4_WAVE);
+    ch30w3_set_spawn(CH30W3_WAVE3_RECORD, CH30W3_WAVE3_CHAR_ID,
+                     CH30W4_WAVE_BELOW);
+    data_fdps_chapter_current_chapter_id = 1;
+
+    ch30w4_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE2_CHAR_ID);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH30W4_MAP01_RECORD0_X);
+    CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH30W4_MAP01_RECORD0_Y);
+    ch30w4_unstage();
+}
+
+/* Nothing in the body tests whether the deployment found anything: with all
+   three records tagged well away from wave 4 the unit count does not move, and
+   the cursor is still blanked, both pans still run -- the west walk shows in the
+   view window ending at (0xc0, 0xc0) rather than the staged (0, 0), the holds in
+   the tick bound -- the line is still spoken and the latch still goes up. */
+static void ch30w4_pans_even_when_no_record_matches(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w4_stage(0);
+    ch30w4_tag_decoys(CH30W4_UNSELECTED_WAVE);
+
+    ch30w4_run(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 1);
+    CHECK_EQ(data_fdps_map_cursor_world_x, CH30W4_PAN_RIGHT_X);
+    CHECK_EQ(data_fdps_map_cursor_world_y, CH30W4_PAN_RIGHT_Y);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, CH30W4_CURSOR_MODE_NORMAL);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, CH30W4_END_VIEW_ORIGIN_X);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, CH30W4_END_VIEW_ORIGIN_Y);
+    CHECK_EQ(ch30w4_ticks_after - ch30w4_ticks_before
+                 >= (unsigned int) CH30W4_LEAST_PAN_TICKS,
+             1);
+    CHECK_EQ(ch30w4_screen_pixel, CH30W4_TEXT_FG_COLOR);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH30W4_LATCH_SLOT], 1);
+    ch30w4_unstage();
+}
+
+/* The latch the firing call raises is what stops the second one: the handler is
+   called again on the same fixture with the cursor parked somewhere neither pan
+   target and the draw mode put back to the staged value, and nothing moves.  A
+   handler that latched at the top of its body instead of the bottom would pass
+   this too -- what this pins is that a second crossing of the trigger tile
+   brings no second wave. */
+static void ch30w4_fires_only_once(void)
+{
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    ch30w4_stage(0);
+
+    ch30w4_run(0);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH30W4_LATCH_SLOT], 1);
+
+    data_fdps_map_cursor_world_x = CH30W4_PARKED_CURSOR_X;
+    data_fdps_map_cursor_world_y = CH30W4_PARKED_CURSOR_Y;
+    data_fdps_map_cursor_draw_mode = CH30W4_STAGED_CURSOR_MODE;
+
+    fdps_chapter_30_event_deploy_wave_4(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ(data_fdps_map_cursor_world_x, CH30W4_PARKED_CURSOR_X);
+    CHECK_EQ(data_fdps_map_cursor_world_y, CH30W4_PARKED_CURSOR_Y);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, CH30W4_STAGED_CURSOR_MODE);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH30W4_LATCH_SLOT], 1);
+    ch30w4_unstage();
+}
+
+/* The incoming argument slot is overwritten with 0 at the head of each hold loop
+   and is never read as an argument, so the index the dispatcher passes cannot
+   reach the wave asked for, the map asked for, the placement flag or either pan.
+   In the shipped data it is the index of the unit that stepped onto the trigger
+   tile; the values put through here are 0, an index that names the unit already
+   on the map, one past the array, and -1 and 30000, which are the ones an
+   argument-driven handler would betray itself on.  There is no side gate in this
+   handler either, so a record's contents cannot matter -- which is what
+   separates it from the chapter 19 and 29 tile triggers. */
+static void ch30w4_ignores_the_unit_index_argument(void)
+{
+    static int arguments[5] = {0, 1, 2, -1, 30000};
+    int i;
+
+    ch30w3_ensure_game_files();
+    if (!ch30w3_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 5; i++) {
+        ch30w4_stage(0);
+
+        ch30w4_run(arguments[i]);
+
+        CHECK_EQ(data_fdps_map_unit_count, 2);
+        CHECK_EQ((int) ch30w3_unit(1)->char_id, CH30W3_WAVE3_CHAR_ID);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_x, CH30W4_MAP00_RECORD1_X);
+        CHECK_EQ((int) ch30w3_unit(1)->pos_y, CH30W4_MAP00_RECORD1_Y);
+        CHECK_EQ(data_fdps_map_cursor_world_x, CH30W4_PAN_RIGHT_X);
+        CHECK_EQ(data_fdps_map_cursor_draw_mode, CH30W4_CURSOR_MODE_NORMAL);
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH30W4_LATCH_SLOT],
+                 1);
+    }
+    ch30w4_unstage();
+}
+
 void run_chevt6_tests(void)
 {
     RUN_TEST(ch29_record_shape_matches_the_offsets);
@@ -2097,4 +2584,11 @@ void run_chevt6_tests(void)
     RUN_TEST(ch30rev_a_tile_over_the_terrain_limit_is_rejected);
     RUN_TEST(ch30rev_the_skeleton_measures_from_its_own_anchor);
     RUN_TEST(ch30rev_a_revived_unit_is_not_revived_again);
+    RUN_TEST(ch30w4_a_raised_latch_blocks_the_whole_body);
+    RUN_TEST(ch30w4_deploys_wave_four_pans_and_latches);
+    RUN_TEST(ch30w4_wave_number_is_a_literal);
+    RUN_TEST(ch30w4_map_number_comes_from_the_chapter_global);
+    RUN_TEST(ch30w4_pans_even_when_no_record_matches);
+    RUN_TEST(ch30w4_fires_only_once);
+    RUN_TEST(ch30w4_ignores_the_unit_index_argument);
 }
