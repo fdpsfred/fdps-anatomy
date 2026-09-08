@@ -2695,6 +2695,312 @@ static void ch26b_one_firing_does_everything(void)
     CHECK_EQ(data_fdps_map_unit_count, CH26B_STAGED_UNITS + 2);
 }
 
+/* ---------------------------------------------------------------------------
+   fdps_chapter_26_event_wave_2_defeated_line @ 000393b0
+
+   The handler has no argument to work on, deploys nothing and moves nothing:
+   it polls seven fixed unit records through fdps_unit_is_retired and, when all
+   seven answer non-zero, speaks one line and raises a one-shot latch.  So the
+   fixture is a unit array and a chapter text block, and the whole of what a
+   case can watch is the latch byte -- the draw itself leaves nothing behind.
+
+   The line is drawn for real, the same way the chapter 24 and 26 cases above
+   draw theirs: the chapter text pointer is aimed at a block whose every entry
+   names one lone terminator, so fdps_draw_text walks the entry, paints nothing
+   and returns without needing a font, a message panel or mode 13h.  The block
+   runs to 0x18 entries because PUSH 0x17 at 00039418 asks for the last of them.
+
+   The latch is a fair proxy for the draw: MOV byte ptr [0x000640ea],0x1 at
+   00039428 sits inside the same guarded block as the CALL at 00039420 and
+   nothing can reach one without the other, so a case that says the latch was
+   raised says the line was spoken.
+
+   What the cases are really for is the poll: which seven records are asked, in
+   what sense their answers are read, and which of the 0x20 latch elements the
+   result is written to.  The seven are indices 0x50..0x56 -- ADD EAX,0x50 at
+   000393e6 over a counter run from 0 to 6 by the CMP dword ptr [EBP+0x14],0x7
+   at 000393d3 -- so the fixture stages records either side of both ends and
+   fires with the block shifted one record each way.
+
+   The unit array is static rather than malloc'd, like the chapter 26 advance
+   fixture above: this handler deploys nothing, so nothing reallocs the block
+   under it.  It reaches index 0x5f so that the records above the polled block
+   can be watched too.
+   --------------------------------------------------------------------------- */
+
+/* The array's stride and the record count the fixture stages.  0x60 records
+   put 0x50 below the polled block and nine above it. */
+#define CH26W_UNIT_STRIDE 0x50
+#define CH26W_STAGED_UNITS 0x60
+
+/* The seven records the poll covers and the two immediately outside it. */
+#define CH26W_FIRST_POLLED 0x50
+#define CH26W_POLLED_COUNT 7
+#define CH26W_LAST_POLLED (CH26W_FIRST_POLLED + CH26W_POLLED_COUNT - 1)
+#define CH26W_BELOW_POLLED (CH26W_FIRST_POLLED - 1)
+#define CH26W_ABOVE_POLLED (CH26W_LAST_POLLED + 1)
+
+/* The latch element this handler owns, byte [0x000640ea] at 000393c3 and
+   00039428 -- element 0x12 of the block at 0x000640d8 -- and the two elements
+   the chapter 25 and 26 ambushes above own, which it must leave alone. */
+#define CH26W_LATCH_SLOT 0x12
+#define CH26W_AMBUSH_LATCH_SLOT 0x10
+#define CH26W_BOW_LATCH_SLOT 0x11
+#define CH26W_LATCH_SLOT_ABOVE 0x13
+
+/* A latch value that is neither 0 nor the 1 the handler writes: the test at
+   000393c3 is against 0, so this has to block the body, and a body that ran
+   anyway would leave 1 behind in its place. */
+#define CH26W_LATCH_ALREADY_UP 2
+
+/* The bit fdps_unit_is_retired reads, AND AL,0x1 at 000109d1 on the flags byte
+   at record offset 5, and a flags byte carrying every other bit but that one --
+   0x80 is the per-turn redraw flag, which a unit standing on the map does carry
+   and which must not read as retirement. */
+#define CH26W_RETIRED_BIT 0x01
+#define CH26W_EVERY_BIT_BUT_RETIRED 0xfe
+#define CH26W_EVERY_BIT 0xff
+
+/* The chapter text block the line is spoken from: 0x18 entries, because PUSH
+   0x17 at 00039418 asks for the last of them, each pointing at the same lone
+   terminator so that a draw walks it, paints nothing and returns. */
+#define CH26W_TEXT_IDS 0x18
+#define CH26W_TEXT_EMPTY_AT 0x40
+#define CH26W_TEXT_BLOCK_BYTES (CH26W_TEXT_EMPTY_AT + 2)
+#define CH26W_TEXT_END (-1)
+
+/* Any line height at all; the draw never reaches a glyph. */
+#define CH26W_FONT_LINE_HEIGHT 16
+
+/* Arguments a case fires with.  The dispatcher pushes the index of the unit
+   that made the killing action, so both of these are indices a real firing
+   could carry: one inside the polled block and one well below it. */
+#define CH26W_ARGUMENT_INSIDE_BLOCK (CH26W_FIRST_POLLED + 1)
+#define CH26W_ARGUMENT_KILLER 3
+
+/* A unit count far short of the polled block, parked in the global so a case
+   can show the block is two literals and not derived from the array length. */
+#define CH26W_SHORT_UNIT_COUNT 4
+
+static unsigned char ch26w_units[CH26W_STAGED_UNITS * CH26W_UNIT_STRIDE];
+static unsigned char ch26w_text_block[CH26W_TEXT_BLOCK_BYTES];
+
+static struct fdps_unit_record *ch26w_unit(int unit_index)
+{
+    return (struct fdps_unit_record *)
+           (data_fdps_map_unit_array_ptr + unit_index * CH26W_UNIT_STRIDE);
+}
+
+/* Ninety-six records with every flags byte clear -- so every one of them is
+   standing -- a text block whose every entry is empty, and a latch block with
+   nothing raised in it. */
+static void ch26w_stage(void)
+{
+    int i;
+
+    memset(ch26w_text_block, 0, (size_t) CH26W_TEXT_BLOCK_BYTES);
+    *(short *) (ch26w_text_block + CH26W_TEXT_EMPTY_AT) = (short) CH26W_TEXT_END;
+    for (i = 0; i < CH26W_TEXT_IDS; i++) {
+        *(short *) (ch26w_text_block + i * 2) = (short) CH26W_TEXT_EMPTY_AT;
+    }
+    data_fdps_current_chapter_text_ptr = ch26w_text_block;
+    data_fdps_font_line_height = CH26W_FONT_LINE_HEIGHT;
+
+    memset(ch26w_units, 0, sizeof(ch26w_units));
+    data_fdps_map_unit_array_ptr = ch26w_units;
+    data_fdps_map_unit_count = CH26W_STAGED_UNITS;
+
+    memset(data_fdps_map_cell_event_triggered_flags, 0,
+           sizeof(data_fdps_map_cell_event_triggered_flags));
+}
+
+/* Takes the seven records starting at first_index out of the battle, so a case
+   can slide the retired block up and down against the block the handler polls. */
+static void ch26w_retire_seven_from(int first_index)
+{
+    int i;
+
+    for (i = 0; i < CH26W_POLLED_COUNT; i++) {
+        ch26w_unit(first_index + i)->flags = (unsigned char) CH26W_RETIRED_BIT;
+    }
+}
+
+/* The two record fields the poll reaches through and the stride it is indexed
+   by.  fdps_unit_is_retired reads byte [EAX+0x5] at 000109ce and
+   fdps_get_unit_record multiplies the index by 0x50 at 0002d21c, so those are
+   the offset and the stride the fixture's own indexing has to agree with. */
+static void ch26w_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), CH26W_UNIT_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 5);
+}
+
+/* All seven retired and the latch clear: the line is spoken and the latch is
+   raised. */
+static void ch26w_the_last_death_speaks_the_line(void)
+{
+    ch26w_stage();
+    ch26w_retire_seven_from(CH26W_FIRST_POLLED);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT], 0);
+    fdps_chapter_26_event_wave_2_defeated_line(CH26W_ARGUMENT_KILLER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT], 1);
+}
+
+/* One survivor anywhere in the seven holds the line back, wherever it stands:
+   the block is retired in full and then one record of it is put back on its
+   feet, once for each of the seven positions.  A rebuild that stopped polling
+   after the first answer, or that read the flag the wrong way round, fires on
+   at least one of these. */
+static void ch26w_one_survivor_anywhere_holds_the_line(void)
+{
+    int survivor;
+    int positions_tested;
+    int fired_anyway;
+
+    positions_tested = 0;
+    fired_anyway = 0;
+    for (survivor = CH26W_FIRST_POLLED; survivor <= CH26W_LAST_POLLED;
+         survivor++) {
+        ch26w_stage();
+        ch26w_retire_seven_from(CH26W_FIRST_POLLED);
+        ch26w_unit(survivor)->flags = 0;
+
+        fdps_chapter_26_event_wave_2_defeated_line(CH26W_ARGUMENT_KILLER);
+
+        if (data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT] != 0) {
+            fired_anyway++;
+        }
+        positions_tested++;
+    }
+    CHECK_EQ(fired_anyway, 0);
+    CHECK_EQ(positions_tested, CH26W_POLLED_COUNT);
+}
+
+/* The polled block is 0x50..0x56 and nothing else.  Retiring exactly those
+   seven fires while the records at 0x4f and 0x57 are still standing; sliding
+   the retired block one record down leaves 0x56 standing and sliding it one
+   record up leaves 0x50 standing, and neither fires. */
+static void ch26w_the_block_is_the_seven_records_from_0x50(void)
+{
+    ch26w_stage();
+    ch26w_retire_seven_from(CH26W_FIRST_POLLED);
+    fdps_chapter_26_event_wave_2_defeated_line(CH26W_ARGUMENT_KILLER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT], 1);
+
+    ch26w_stage();
+    ch26w_retire_seven_from(CH26W_BELOW_POLLED);
+    fdps_chapter_26_event_wave_2_defeated_line(CH26W_ARGUMENT_KILLER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT], 0);
+
+    ch26w_stage();
+    ch26w_retire_seven_from(CH26W_ABOVE_POLLED);
+    fdps_chapter_26_event_wave_2_defeated_line(CH26W_ARGUMENT_KILLER);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT], 0);
+}
+
+/* A latch that is already up refuses the whole body, and it is tested against
+   zero rather than against one: an element staged with 2 comes back holding 2,
+   where a body that ran would have written 1 over it.  That is also what says
+   the line cannot be spoken twice -- the six other deaths of the same seven
+   each run this handler again. */
+static void ch26w_a_raised_latch_refuses_the_body(void)
+{
+    ch26w_stage();
+    ch26w_retire_seven_from(CH26W_FIRST_POLLED);
+    data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT] =
+        (unsigned char) CH26W_LATCH_ALREADY_UP;
+
+    fdps_chapter_26_event_wave_2_defeated_line(CH26W_ARGUMENT_KILLER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT],
+             CH26W_LATCH_ALREADY_UP);
+
+    fdps_chapter_26_event_wave_2_defeated_line(CH26W_ARGUMENT_KILLER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT],
+             CH26W_LATCH_ALREADY_UP);
+}
+
+/* Element 0x12 is written and its neighbours are not: 0x10 is the ambush latch
+   the two handlers above share and 0x11 is the bow offer's, and a rebuild that
+   drifted by one element would spend one of those instead. */
+static void ch26w_latches_its_own_element_and_not_a_neighbour(void)
+{
+    ch26w_stage();
+    ch26w_retire_seven_from(CH26W_FIRST_POLLED);
+
+    fdps_chapter_26_event_wave_2_defeated_line(CH26W_ARGUMENT_KILLER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_AMBUSH_LATCH_SLOT],
+             0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_BOW_LATCH_SLOT], 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT_ABOVE],
+             0);
+}
+
+/* The incoming index is stored over and never read: a firing handed a unit
+   inside the polled block does what a firing handed the killer's index does,
+   and a firing handed the index of the one survivor does not fire either. */
+static void ch26w_ignores_the_incoming_argument(void)
+{
+    ch26w_stage();
+    ch26w_retire_seven_from(CH26W_FIRST_POLLED);
+
+    fdps_chapter_26_event_wave_2_defeated_line(CH26W_ARGUMENT_INSIDE_BLOCK);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT], 1);
+
+    ch26w_stage();
+    ch26w_retire_seven_from(CH26W_FIRST_POLLED);
+    ch26w_unit(CH26W_FIRST_POLLED)->flags = 0;
+
+    fdps_chapter_26_event_wave_2_defeated_line(CH26W_FIRST_POLLED);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT], 0);
+}
+
+/* The block is two literals and not the unit count: a count of four leaves the
+   same seven records polled and the same latch raised.  Nothing in the body
+   reads data_fdps_map_unit_count, unlike the chapter 25 ambush's sweep. */
+static void ch26w_the_block_does_not_follow_the_unit_count(void)
+{
+    ch26w_stage();
+    ch26w_retire_seven_from(CH26W_FIRST_POLLED);
+    data_fdps_map_unit_count = CH26W_SHORT_UNIT_COUNT;
+
+    fdps_chapter_26_event_wave_2_defeated_line(CH26W_ARGUMENT_KILLER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_unit_count, CH26W_SHORT_UNIT_COUNT);
+}
+
+/* Only bit 0 of the flags byte retires a unit.  Seven records carrying every
+   bit but that one are all still standing and the line is held back; the same
+   seven carrying every bit are all retired and it is spoken. */
+static void ch26w_only_bit_zero_of_the_flags_byte_retires_a_unit(void)
+{
+    int i;
+
+    ch26w_stage();
+    for (i = CH26W_FIRST_POLLED; i <= CH26W_LAST_POLLED; i++) {
+        ch26w_unit(i)->flags = (unsigned char) CH26W_EVERY_BIT_BUT_RETIRED;
+    }
+
+    fdps_chapter_26_event_wave_2_defeated_line(CH26W_ARGUMENT_KILLER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT], 0);
+
+    for (i = CH26W_FIRST_POLLED; i <= CH26W_LAST_POLLED; i++) {
+        ch26w_unit(i)->flags = (unsigned char) CH26W_EVERY_BIT;
+    }
+
+    fdps_chapter_26_event_wave_2_defeated_line(CH26W_ARGUMENT_KILLER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT], 1);
+}
+
 void run_chevt5_tests(void)
 {
     RUN_TEST(ch24t_each_arrival_turn_deploys_its_own_wave);
@@ -2747,4 +3053,14 @@ void run_chevt5_tests(void)
     RUN_TEST(ch26b_latch_blocks_the_whole_body);
     RUN_TEST(ch26b_only_the_player_side_fires);
     RUN_TEST(ch26b_one_firing_does_everything);
+
+    RUN_TEST(ch26w_record_shape_matches_the_offsets);
+    RUN_TEST(ch26w_the_last_death_speaks_the_line);
+    RUN_TEST(ch26w_one_survivor_anywhere_holds_the_line);
+    RUN_TEST(ch26w_the_block_is_the_seven_records_from_0x50);
+    RUN_TEST(ch26w_a_raised_latch_refuses_the_body);
+    RUN_TEST(ch26w_latches_its_own_element_and_not_a_neighbour);
+    RUN_TEST(ch26w_ignores_the_incoming_argument);
+    RUN_TEST(ch26w_the_block_does_not_follow_the_unit_count);
+    RUN_TEST(ch26w_only_bit_zero_of_the_flags_byte_retires_a_unit);
 }

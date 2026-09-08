@@ -3238,6 +3238,14 @@
       "status": "committed",
       "emitted_against": "0x17a",
       "rounds": 0
+    },
+    "000393b0": {
+      "name": "fdps_chapter_26_event_wave_2_defeated_line",
+      "target": "chevt5.c",
+      "body_size": "0x86",
+      "status": "committed",
+      "emitted_against": "0x86",
+      "rounds": 0
     }
   }
 }

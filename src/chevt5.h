@@ -257,4 +257,50 @@ extern void fdps_chapter_26_event_enemies_advance(int unit_index);
 extern void fdps_chapter_26_event_deploy_waves_2_and_3(int unit_index);
 #pragma aux fdps_chapter_26_event_deploy_waves_2_and_3 "*" parm caller [];
 
+/* Chapter 26's wave-2 wipe line: the death script the seven enemy
+   reinforcements of the chapter's mid-map ambush all carry, which speaks one
+   line of the chapter's own FDETXT26.TXT block once the last of the seven is
+   gone and then latches itself off.
+
+   The seven are the units at indices 0x50..0x56 --
+   fdps_chapter_26_event_deploy_waves_2_and_3 above appends MAP25.DAT's seven
+   wave-2 records there, on top of the twelve party slots and the map's 68
+   wave-0 records, and brings the five wave-3 allies on behind them at
+   0x57..0x5b.  Every one of the seven carries the same death script, so this
+   handler runs once for each of them as it dies and does nothing until the
+   last run finds all seven retired.
+
+   TWO GATES, BOTH REFUSING THE WHOLE BODY: the one-shot latch must still be 0,
+   and every one of the seven must answer fdps_unit_is_retired (unit.h) with a
+   non-zero.  The latch is element 0x12 of
+   data_fdps_map_cell_event_triggered_flags (gamedata.h) and NOT either of the
+   elements the two handlers above use; the chapter 27 handler at 00039440
+   latches the same element in the chapter that follows, which is safe because
+   one chapter is loaded at a time and fdps_chapter_state_reset clears the
+   whole block when a chapter starts.
+
+   THE POLL IS NOT STOPPED BY THE FIRST SURVIVOR.  All seven are asked on every
+   firing and the answers are gathered into one flag; a rewrite that broke out
+   of the loop asks fewer of them.  fdps_unit_is_retired only reads a record, so
+   nothing observes the difference beyond the call count.
+
+   THE TEST DEPENDS ON THE CALLER'S ORDER.  fdps_map_actor_move_and_attack
+   collects the death scripts of the killed, then marks them retired, and only
+   then runs the scripts, so the seventh unit already reads as retired on the
+   pass that kills it.  Running the scripts before the marking leaves the line
+   permanently unspoken.
+
+   Message 0x17 opens with the -0x11 speaker token carrying character id 0x0c,
+   MAP25.DAT's single wave-3 ally, so the line is the guest hero's.
+
+   unit_index is the handler table's shared parameter.  The dispatcher that
+   reaches this slot, fdps_run_death_scripts, forwards the index of the unit
+   that made the killing action rather than that of the dead unit whose script
+   is running, and this handler reads neither: the incoming value is stored over
+   on entry.
+
+   Table slot 42 at 0006026c. */
+extern void fdps_chapter_26_event_wave_2_defeated_line(int unit_index);
+#pragma aux fdps_chapter_26_event_wave_2_defeated_line "*" parm caller [];
+
 #endif

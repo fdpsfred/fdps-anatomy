@@ -973,3 +973,141 @@ void fdps_chapter_26_event_deploy_waves_2_and_3(int unit_index)
             CHAPTER_EVENT_ONE_SHOT_SLOT] = 1;
     }
 }
+
+/* The element of data_fdps_map_cell_event_triggered_flags the wipe line
+   latches, byte ptr [0x000640ea] at 000393c3 and 00039428 -- element 0x12 of
+   the array based at 0x000640d8, and NOT element 0x10, which the two ambushes
+   above share.  A sweep of the whole image for that address finds four
+   instructions: these two and the pair in fdps_chapter_27_event_deploy_wave_1
+   at 00039453 and 00039533, which latches the same element for its own one-shot
+   event one chapter later.  The two cannot collide because one chapter is
+   loaded at a time and fdps_chapter_state_reset memsets the whole 0x20-byte
+   block when a chapter starts; that memset, and the save and load paths that
+   move the whole block to and from the slot image, are also why the latch has
+   to live in the array and not in a function-local static, which would leave
+   the line spoken across a chapter restart and across a reload
+   (rebuild_info/pitfalls.md). */
+#define CH26_WIPE_ONE_SHOT_SLOT 0x12
+
+/* The seven unit records the wipe watches: ADD EAX,0x50 at 000393e6 over a
+   counter the CMP dword ptr [EBP+0x14],0x7 / JL at 000393d3 runs from 0 to 6,
+   so indices 0x50 through 0x56.  On MAP25.DAT those are exactly the seven
+   wave-2 records fdps_chapter_26_event_deploy_waves_2_and_3 above appends: the
+   twelve party slots occupy 0x00..0x0b, the map's 68 wave-0 records 0x0c..0x4f,
+   and the five wave-3 allies land at 0x57..0x5b behind them.  Both numbers are
+   literals and neither is derived from data_fdps_map_unit_count. */
+#define CH26_WAVE_2_FIRST_UNIT_INDEX 0x50
+#define CH26_WAVE_2_UNIT_COUNT 7
+
+/* The entry of the chapter's own FDETXT26.TXT block the line is spoken from,
+   PUSH 0x17 at 00039418.  Its token stream opens with speaker code -0x11 and
+   operand 0x0c, MAP25.DAT's single wave-3 ally, so the line belongs to the
+   guest hero the allied wave brings on and not to any of the seven it is spoken
+   over. */
+#define CH26_WIPE_TEXT_ID 0x17
+
+/* Where the line is drawn, PUSH 0xa0000 at 00039413: the top-left corner of the
+   visible mode-13h page, kept a literal because it is an address inside the
+   display adapter's aperture rather than the address of anything the linker
+   places (rebuild_info/pitfalls.md, contract E). */
+#define CH26_WIPE_TEXT_DEST 0x000a0000
+
+/* 000393b0.  Chapter 26's wave-2 wipe line: the death script all seven of the
+   chapter's wave-2 reinforcements carry, which speaks one line once the last of
+   them has gone and then latches itself off.
+
+   The frame is the family's four-push one with a single 4-byte local -- PUSH
+   EBX / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x4 at
+   000393b0..000393b6 -- and that local at [EBP-0x4] is the survivor flag, so
+   the one incoming dword sits at [EBP+0x14].  Both caller-cleans in the body
+   are this function's own (ADD ESP,0x4 after each retirement test at 000393ef
+   and ADD ESP,0x1c after the draw at 00039425) and the RET at 00039435 carries
+   no immediate, so the convention is the stack one at this end.  It is the
+   stack one at the other end too: the dispatcher fdps_run_death_scripts reaches
+   this table slot as MOV EAX,[EBP+0x14] / PUSH EAX / CALL dword ptr
+   [EDX + 0x601c4] / ADD ESP,0x4 at 0001dcaa..0001dcb4, pushing one dword and
+   cleaning it itself.
+
+   BOTH GATES LEAVE BY THE SAME EXIT.  The JNZ at 000393ca on the latch and the
+   JNZ at 00039403 on the survivor flag both go to the epilogue at 0003942f, so
+   a firing that finds the line already spoken and a firing that finds one of
+   the seven still standing are refused identically: nothing is drawn and the
+   latch is not touched.
+
+   THE LATCH TEST IS "NOT ZERO" AND NOT "NOT ONE".  CMP byte ptr
+   [0x000640ea],0x0 at 000393c3, so any non-zero value in the element blocks the
+   body.
+
+   THE FLAG IS SEEDED BEFORE THE LATCH IS TESTED.  MOV dword ptr [EBP-0x4],0x0
+   at 000393bc runs ahead of the CMP at 000393c3, which is why it is written
+   above the gate here rather than inside it.  Nothing observes the difference;
+   the store is kept where its own assembly has it.
+
+   THE POLL DOES NOT STOP AT THE FIRST SURVIVOR.  The JNZ at 000393f4 skips only
+   the flag store and the loop runs its full seven passes either way, so every
+   firing costs seven calls.  fdps_unit_is_retired only reads a record, so a
+   rewrite that broke out early would differ in nothing but the call count --
+   and it would still be a different function.
+
+   THE SENSE OF THE TEST IS INVERTED.  TEST EAX,EAX / JNZ at 000393f2 raises the
+   flag when fdps_unit_is_retired answers 0, so the flag means "one of the seven
+   is still standing" and the draw is guarded by it being clear.
+
+   THE RANGE IS SEVEN RECORDS FROM 0x50 AND IS NOT BOUNDED BY THE UNIT COUNT.
+   Both numbers are literals; nothing in the body reads
+   data_fdps_map_unit_count, so on a map with fewer records the loop would read
+   past the live ones.  On MAP25.DAT, the only map whose data reaches this slot,
+   they land on the wave-2 block exactly.
+
+   THE INCOMING ARGUMENT IS NEVER READ.  MOV dword ptr [EBP+0x14],0x0 at
+   000393cc is the seed of the 0..6 counter, which the original keeps in its own
+   argument slot; the value fdps_run_death_scripts pushed -- the index of the
+   unit that made the killing action, not that of the dead unit whose script is
+   running -- is spent by that store and nothing loads the slot before it.  The
+   counter is emitted as a local of its own here; nothing observes the
+   difference.
+
+   ONE VALUE IS USED AFTER A CALL.  fdps_unit_is_retired's answer comes back in
+   EAX and is tested by the TEST EAX,EAX at 000393f2 that follows the ADD ESP
+   cleaning its argument, so it is the call's own result and not a leftover.
+   fdps_draw_text's cursor is discarded -- the next instruction after the CALL
+   at 00039420 is the ADD ESP,0x1c that cleans its arguments.  Nothing sets EAX
+   before the RET and no dispatcher reads what comes back, so the result is
+   void. */
+void fdps_chapter_26_event_wave_2_defeated_line(int unit_index)
+{
+    /* Raised when one of the seven answers the retirement test with 0, so the
+       line is drawn only while it is still clear. */
+    int any_wave_2_unit_still_standing;
+    /* Which of the seven wave-2 records is being asked, 0 to 6. */
+    int wave_2_slot;
+
+    any_wave_2_unit_still_standing = 0;
+
+    /* The original seeds that counter over its own argument slot at 000393cc,
+       which is the only access the body makes to the slot; the counter is a
+       local of its own here, so this is what is left of that store. */
+    unit_index = 0;
+
+    if (data_fdps_map_cell_event_triggered_flags[CH26_WIPE_ONE_SHOT_SLOT]
+            == 0) {
+        for (wave_2_slot = 0;
+             wave_2_slot < CH26_WAVE_2_UNIT_COUNT;
+             wave_2_slot++) {
+            if (fdps_unit_is_retired(CH26_WAVE_2_FIRST_UNIT_INDEX
+                                     + wave_2_slot) == 0) {
+                any_wave_2_unit_still_standing = 1;
+            }
+        }
+
+        if (any_wave_2_unit_still_standing == 0) {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CH26_WIPE_TEXT_ID,
+                           (unsigned char *) CH26_WIPE_TEXT_DEST,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+            data_fdps_map_cell_event_triggered_flags[
+                CH26_WIPE_ONE_SHOT_SLOT] = 1;
+        }
+    }
+}
