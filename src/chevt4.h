@@ -274,4 +274,40 @@ extern void fdps_chapter_23_event_boss_defeat(int unit_index);
 extern void fdps_chapter_23_event_deploy_wave_for_turn(int event_arg);
 #pragma aux fdps_chapter_23_event_deploy_wave_for_turn "*" parm caller [];
 
+/* Chapter 23's keepsake-ring event: 琴琴, the party's 武道家, ends her turn on
+   the map's shrine tile with room in her bag; a spirit walks onto the
+   battlefield, speaks with her, leaves again, and she is handed 形見指環.
+
+   Three gates, and the handler does nothing whatever unless all three pass: the
+   one-shot latch is still down, the unit that tripped the tile is character id
+   7 -- 琴琴 -- and her eight-entry bag is not full.  Any one of them failing
+   skips the entire body INCLUDING THE LATCH, so the scene stays available.
+
+   THE BAG TEST GATES THE WHOLE SCENE, NOT JUST THE GIFT.  Carrying eight items
+   means the spirit never appears and the latch stays down, which is what lets
+   the player come back after dropping something.  Letting the scene play and
+   only skipping the item, or raising the latch at the top of the body, spends
+   the event and puts 形見指環 permanently out of reach.
+
+   THE LATCH IS THE SHARED CHAPTER-EVENT ARRAY AND NOT A PRIVATE STATIC.  It is
+   element 0x10 of data_fdps_map_cell_event_triggered_flags (gamedata.h), the
+   array fdps_chapter_state_reset clears and the save file carries; a
+   function-local static reads correctly on a first run and then survives a
+   chapter restart and a reload, which locks the ring away.
+
+   What the body does, in order: speaks the chapter's line 0x17; brings on wave
+   10, which is MAP22.DAT's single record for the spirit; blanks the map cursor,
+   walks the view to map pixel (672, 0) and holds it there for twelve frames;
+   restores the cursor and speaks line 0x18, the exchange; marks the unit that
+   was just deployed -- the newest record, at the live unit count minus one --
+   retired by storing 1 over its whole flags byte, and holds twelve more frames
+   while it leaves; speaks line 0x19; drops 形見指環 into her first empty entry;
+   and raises the latch last.
+
+   Table slot 35, and MAP22.DAT is the only shipped map that names it: tile-event
+   entry 0, occasion 1, which is a unit having ended its turn on the cell.  The
+   same map's turn events go to slot 34 above. */
+extern void fdps_chapter_23_event_give_martial_artist_ring(int unit_index);
+#pragma aux fdps_chapter_23_event_give_martial_artist_ring "*" parm caller [];
+
 #endif

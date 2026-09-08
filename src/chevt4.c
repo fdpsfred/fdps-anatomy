@@ -1130,3 +1130,190 @@ void fdps_chapter_23_event_deploy_wave_for_turn(int event_arg)
         }
     }
 }
+
+/* The element of data_fdps_map_cell_event_triggered_flags (gamedata.h) the ring
+   event latches: byte ptr [0x000640e8], element 0x10 of the 32-entry array
+   based at 0x000640d8, which is the slot the one-shot handlers of every chapter
+   share.  It is NOT this handler's own byte and it must not become a static:
+   fdps_chapter_state_reset memsets the array at the head of a chapter and the
+   save image carries it, which is what makes the event repeatable across a
+   restart and a reload. */
+#define CH23_RING_LATCH_SLOT 0x10
+
+/* The character id the gate at 00038b8f admits: 7, 琴琴, the party's 武道家 and
+   index 07 of FRIAPRDA.DAT (assets/characters.md).  The byte is read as a whole
+   unsigned char -- MOV AL,byte ptr [EAX+0x8] / AND EAX,0xff -- and compared for
+   equality, so no other member of the party can trip the scene. */
+#define CH23_RING_MARTIAL_ARTIST_CHAR_ID 7
+
+/* The bag count that refuses the scene, CMP EAX,0x8 / JNZ at 00038ba2: eight
+   is every entry of an eight-entry bag occupied.  The compare is an equality
+   and the refusal is the equal side, so anything below eight passes. */
+#define CH23_RING_BAG_FULL 8
+
+/* What she is handed, PUSH 0xb1 at 00038ca0: 形見指環, the ring that restores
+   HP and MP every turn (assets/items.md). */
+#define CH23_RING_ITEM_ID 0xb1
+
+/* The three entries of the chapter's own FDETXT23.TXT block the scene speaks,
+   PUSH 0x17 at 00038bbf, PUSH 0x18 at 00038c36 and PUSH 0x19 at 00038c90: the
+   opening line, the exchange between the two of them and the closing line.
+   They are drawn at the top-left corner of the visible mode-13h page, PUSH
+   0xa0000 at 00038bba, 00038c31 and 00038c8b, which stays a literal because it
+   is an address inside the display adapter's aperture rather than the address
+   of anything the linker places (rebuild_info/pitfalls.md, contract E). */
+#define CH23_RING_OPENING_TEXT_ID 0x17
+#define CH23_RING_EXCHANGE_TEXT_ID 0x18
+#define CH23_RING_CLOSING_TEXT_ID 0x19
+#define CH23_RING_TEXT_DEST 0x000a0000
+
+/* The wave the spirit arrives with, PUSH 0xa at 00038bd2, and how it is placed,
+   XOR EAX,EAX / PUSH EAX at 00038bcf: fdps_deploy_wave matches the key against
+   byte 0x15 of each 0x1a-byte deployment record of the resident MAP%02d.DAT
+   block, and MAP22.DAT holds exactly one record with key 10 -- record 0,
+   character id 13, side 1 -- so exactly one unit is appended.  Zero placement
+   settles it on the nearest free walkable tile to its record's coordinates
+   rather than on those coordinates themselves. */
+#define CH23_RING_SPIRIT_WAVE 10
+#define CH23_RING_PLACE_ON_NEAREST_FREE_TILE 0
+
+/* What data_fdps_map_cursor_draw_mode is parked at for the arrival and what it
+   is put back to afterwards, MOV dword ptr [0x00069cd0],0x0 at 00038be2 and
+   ,0x1 at 00038c19.  Zero is the mode fdps_draw_map_cursor paints nothing in,
+   so no cursor sits over the spirit walking on; 1 is the ordinary battle cursor
+   fdps_chapter_state_reset leaves a chapter running in. */
+#define CH23_RING_MAP_CURSOR_BLANK 0
+#define CH23_RING_MAP_CURSOR_NORMAL 1
+
+/* Where the view is walked to for the arrival, PUSH 0x0 / PUSH 0x2a0 at
+   00038bec: map pixels, not tiles.  fdps_map_cursor_move_to steps the cursor at
+   0x18 pixels per tile and drags the viewport with it, so 0x2a0 is tile column
+   28 and the row is the top edge of the map. */
+#define CH23_RING_SHRINE_VIEW_X 0x2a0
+#define CH23_RING_SHRINE_VIEW_Y 0
+
+/* How long each of the two holds runs, CMP dword ptr [EBP-0x4],0xc / JL at
+   00038c02 and 00038c66: twelve calls into fdps_render_view_frame, each of
+   which spins until the timer tick moves, so the count IS the dwell and not an
+   instruction budget (rebuild_info/pitfalls.md, contract D).  Shortening either
+   loop shortens the pause by exactly that many ticks. */
+#define CH23_RING_HOLD_FRAMES 0xc
+
+/* What the spirit's flags byte is left holding, MOV byte ptr [EAX+0x5],0x1 at
+   00038c5b.  The store is the whole byte and not an OR, and it is the same form
+   fdps_unit_mark_retired writes: bit 0 is the bit fdps_unit_is_retired reads,
+   and the record is one this handler's own deployment created a moment ago, so
+   there is nothing else in the byte to preserve. */
+#define CH23_RING_SPIRIT_RETIRED 1
+
+/* 00038b60.  Chapter 23's keepsake-ring event: 琴琴 ends her turn on the shrine
+   tile, a spirit walks on, the two of them speak, it leaves, and she is handed
+   形見指環.
+
+   The frame is the family's four-push one -- PUSH EBX / PUSH ESI / PUSH EDI /
+   PUSH EBP / MOV EBP,ESP / SUB ESP,0x8 at 00038b60..00038b66 -- so the one
+   incoming dword sits at [EBP+0x14].  Every caller-clean in the body is this
+   function's own (ADD ESP,0x4 after each record lookup and after the bag count,
+   ADD ESP,0x1c after each draw, ADD ESP,0xc after the deployment and ADD
+   ESP,0x8 after the cursor move), the RET at 00038cbe carries no immediate, and
+   the dispatcher pushes one dword and drops it with an ADD ESP,0x4 of its own,
+   so the convention is the stack one at both ends of the call.
+
+   THE THREE GATES SHORT-CIRCUIT IN THIS ORDER AND THE BAG COUNT IS LAST.  The
+   latch test at 00038b7b jumps out before the record is touched, the character
+   test at 00038b8f jumps out before fdps_unit_item_count is called, and only a
+   unit that passed both is counted.  Reordering them costs an inventory walk on
+   every firing that the original does not make.
+
+   THE BAG TEST GATES THE WHOLE SCENE AND THE LATCH IS RAISED LAST.  A full bag
+   leaves the JMP at 00038ba7 straight to the epilogue, so nothing is drawn,
+   nothing is deployed and byte [0x000640e8] is still 0 -- the player drops
+   something and comes back.  Raising the latch at the top of the body, or
+   letting the scene play and only skipping fdps_unit_add_item, spends the event
+   and loses the ring for that save.
+
+   THE LATCH IS THE SHARED ARRAY.  See CH23_RING_LATCH_SLOT above.
+
+   BOTH HOLD LOOPS COUNT AND DO NOTHING ELSE.  [EBP-0x4] is seeded at 0, tested
+   against 0xc and stepped, and the MOV EAX,dword ptr [EBP-0x4] at 00038c0a and
+   00038c6e that precedes each INC is the -od increment shape reading a value
+   nothing consumes.  fdps_render_view_frame takes no arguments and returns
+   none, so the counter is the dwell and nothing else.
+
+   Three values are used after a CALL.  fdps_get_unit_record's record pointer is
+   stored to [EBP-0x8] at 00038b78 and reloaded at 00038b84 for the character
+   byte; the second lookup overwrites the same slot at 00038c55 and is reloaded
+   at 00038c58 for the flags store, so the two pointers share one frame slot and
+   the first is dead by then.  fdps_unit_item_count's EAX is compared at
+   00038ba2 and never stored.  Each fdps_draw_text cursor is discarded -- the
+   next instruction is the ADD ESP that cleans its arguments -- and so is
+   fdps_unit_add_item's 1-or-(-1), which the entry gate has already made a 1.
+   Nothing sets EAX before the RET and the dispatcher reads nothing back, so the
+   result is void.
+
+   Table slot 35 at 00060250, reached only through the table: MAP22.DAT's
+   tile-event entry 0 names it with occasion 1, the occasion
+   fdps_map_set_pending_tile_event is given straight after
+   fdps_battle_mark_unit_done. */
+void fdps_chapter_23_event_give_martial_artist_ring(int unit_index)
+{
+    /* The unit that ended its turn on the shrine tile, and then the spirit the
+       deployment has just appended -- two names for the one slot [EBP-0x8] the
+       original keeps them in. */
+    struct fdps_unit_record *acting_unit;
+    struct fdps_unit_record *spirit_unit;
+    /* The counter of each twelve-frame hold, [EBP-0x4].  It paces the hold and
+       nothing reads it. */
+    int hold_frame;
+
+    acting_unit = fdps_get_unit_record(unit_index);
+
+    if (data_fdps_map_cell_event_triggered_flags[CH23_RING_LATCH_SLOT] == 0
+            && acting_unit->char_id == CH23_RING_MARTIAL_ARTIST_CHAR_ID
+            && fdps_unit_item_count(unit_index) != CH23_RING_BAG_FULL) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH23_RING_OPENING_TEXT_ID,
+                       (unsigned char *) CH23_RING_TEXT_DEST,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                         CH23_RING_SPIRIT_WAVE,
+                         CH23_RING_PLACE_ON_NEAREST_FREE_TILE);
+
+        data_fdps_map_cursor_draw_mode = CH23_RING_MAP_CURSOR_BLANK;
+        fdps_map_cursor_move_to(CH23_RING_SHRINE_VIEW_X,
+                                CH23_RING_SHRINE_VIEW_Y);
+        for (hold_frame = 0;
+             hold_frame < CH23_RING_HOLD_FRAMES;
+             hold_frame++) {
+            fdps_render_view_frame();
+        }
+        data_fdps_map_cursor_draw_mode = CH23_RING_MAP_CURSOR_NORMAL;
+
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH23_RING_EXCHANGE_TEXT_ID,
+                       (unsigned char *) CH23_RING_TEXT_DEST,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+
+        /* The newest record: the deployment above appended exactly one, so the
+           live count minus one is the spirit. */
+        spirit_unit = fdps_get_unit_record(data_fdps_map_unit_count - 1);
+        spirit_unit->flags = CH23_RING_SPIRIT_RETIRED;
+        for (hold_frame = 0;
+             hold_frame < CH23_RING_HOLD_FRAMES;
+             hold_frame++) {
+            fdps_render_view_frame();
+        }
+
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH23_RING_CLOSING_TEXT_ID,
+                       (unsigned char *) CH23_RING_TEXT_DEST,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+
+        fdps_unit_add_item(unit_index, CH23_RING_ITEM_ID);
+        data_fdps_map_cell_event_triggered_flags[CH23_RING_LATCH_SLOT] = 1;
+    }
+}

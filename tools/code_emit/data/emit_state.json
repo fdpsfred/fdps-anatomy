@@ -3182,6 +3182,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x12b"
+    },
+    "00038b60": {
+      "name": "fdps_chapter_23_event_give_martial_artist_ring",
+      "target": "chevt4.c",
+      "body_size": "0x15f",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x15f"
     }
   }
 }

@@ -2666,6 +2666,267 @@ static void ch23t_map_number_comes_from_the_chapter_global(void)
     CHECK_EQ((int) ch21_unit(1)->pos_y, 4);
 }
 
+/* ------------------------------------------------------------------------- *
+ * 00038b60  fdps_chapter_23_event_give_martial_artist_ring                   *
+ * ------------------------------------------------------------------------- *
+ *
+ * The handler has one firing path and it pans the view: twelve calls into
+ * fdps_render_view_frame either side of the exchange, and that function spins
+ * on data_fdps_timer_tick_counter until the tick moves (src/mapdraw.c).  With
+ * no timer interrupt installed the first hold loop never returns, so THE TAKEN
+ * PATH IS NOT DRIVABLE FROM HERE -- the same limitation the chapter 22 turn
+ * cases above run into, and for the same reason.  What the spirit's arrival,
+ * its retirement, the three lines and the ring itself look like is left to the
+ * manual playtest.
+ *
+ * So every case below is a refusal, and that is where the value is anyway: all
+ * three gates and the rebuild trap sit on the refused side.  A full bag has to
+ * leave the latch DOWN, because that is what lets the player drop something and
+ * come back for 形見指環; a raised latch has to block; and the character test
+ * has to be an equality on 7 rather than a range.
+ *
+ * A CASE THAT SHOULD REFUSE AND DOES NOT SHOWS UP AS A HANG, NOT AS A FAILED
+ * CHECK.  There is no way around it: "wrong" here means the handler entered the
+ * body, and the body waits on a tick that never comes.  The cases are written
+ * so that a correct handler never enters it.
+ *
+ * The unit array is staged on a local block, as the chapter 20 and 22 cases
+ * stage theirs; what the globals hold at rest is ticket 23's and is never
+ * asserted.  No text block is staged because no refused path draws.
+ */
+
+/* The staged array, and the unit the argument names -- deliberately not 0, with
+   one on either side so a case can say a refusal left the neighbours alone. */
+#define CH23R_UNIT_COUNT 8
+#define CH23R_ACTING_UNIT 4
+#define CH23R_PREV_UNIT 3
+#define CH23R_NEXT_UNIT 5
+
+/* The character id the gate at 00038b8f admits -- 7, 琴琴 the 武道家
+   (assets/characters.md) -- and the two either side of it, because the compare
+   is an equality and both neighbours have to be refused. */
+#define CH23R_KOTOKOTO_CHAR_ID 7
+#define CH23R_CHAR_ID_BELOW 6
+#define CH23R_CHAR_ID_ABOVE 8
+
+/* The element of data_fdps_map_cell_event_triggered_flags the handler tests,
+   byte ptr [0x000640e8] against the array based at 0x000640d8.  The test is
+   CMP ...,0x0 / JNZ, so any non-zero value blocks and not just 1. */
+#define CH23R_LATCH_SLOT 0x10
+#define CH23R_LATCH_DOWN 0
+#define CH23R_LATCH_RAISED 1
+#define CH23R_LATCH_ODD 0x5c
+
+/* What the scene would hand over, PUSH 0xb1 at 00038ca0: 形見指環
+   (assets/items.md).  The filler is 0xa3, 金屬礦, a plain carried item, so a
+   case can tell an entry that was already there from one that arrived. */
+#define CH23R_RING_ITEM 0xb1
+#define CH23R_FILLER_ITEM 0xa3
+
+/* The inventory entry shapes fdps_unit_item_count and fdps_unit_add_item read
+   (unititem.h), and the two bag counts either side of the refusal at
+   00038ba2. */
+#define CH23R_EMPTY_FLAG 0x80
+#define CH23R_EMPTY_ID 0xff
+#define CH23R_CARRIED_FLAG 0x00
+#define CH23R_INVENTORY_ENTRIES 8
+#define CH23R_BAG_FULL 8
+
+static struct fdps_unit_record ch23r_units[CH23R_UNIT_COUNT];
+
+/* Every record blank with an empty bag, the whole latch array down -- which is
+   the state fdps_chapter_state_reset leaves -- and the array published through
+   the globals the handler resolves its records with. */
+static void ch23r_stage(void)
+{
+    int unit_index;
+    int entry;
+
+    memset(ch23r_units, 0, sizeof(ch23r_units));
+    for (unit_index = 0; unit_index < CH23R_UNIT_COUNT; unit_index++) {
+        for (entry = 0; entry < CH23R_INVENTORY_ENTRIES; entry++) {
+            ch23r_units[unit_index].inventory_slots[entry * 2] =
+                CH23R_EMPTY_FLAG;
+            ch23r_units[unit_index].inventory_slots[entry * 2 + 1] =
+                CH23R_EMPTY_ID;
+        }
+    }
+
+    memset(data_fdps_map_cell_event_triggered_flags, 0, 32);
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch23r_units;
+    data_fdps_map_unit_count = CH23R_UNIT_COUNT;
+}
+
+/* Fill the first `count` entries of a unit's bag, which is what makes
+   fdps_unit_item_count answer `count`. */
+static void ch23r_fill_bag(int unit_index, int count)
+{
+    int entry;
+
+    for (entry = 0; entry < count; entry++) {
+        ch23r_units[unit_index].inventory_slots[entry * 2] =
+            CH23R_CARRIED_FLAG;
+        ch23r_units[unit_index].inventory_slots[entry * 2 + 1] =
+            CH23R_FILLER_ITEM;
+    }
+}
+
+/* Whether any staged unit is carrying that item id, flag byte disregarded. */
+static int ch23r_anyone_carrying(int item_id)
+{
+    int unit_index;
+    int entry;
+
+    for (unit_index = 0; unit_index < CH23R_UNIT_COUNT; unit_index++) {
+        for (entry = 0; entry < CH23R_INVENTORY_ENTRIES; entry++) {
+            if (ch23r_units[unit_index].inventory_slots[entry * 2]
+                    != CH23R_EMPTY_FLAG
+                    && (int) ch23r_units[unit_index]
+                             .inventory_slots[entry * 2 + 1] == item_id) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/* What every refused run has to leave behind: the latch wherever it was put,
+   no ring anywhere and the unit count unmoved, which is what says no wave was
+   deployed. */
+static void ch23r_check_refused(int expected_latch)
+{
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH23R_LATCH_SLOT],
+             expected_latch);
+    CHECK_EQ(ch23r_anyone_carrying(CH23R_RING_ITEM), 0);
+    CHECK_EQ(data_fdps_map_unit_count, CH23R_UNIT_COUNT);
+}
+
+/* The record fields these cases read back and the stride they are indexed by.
+   Every one of them would agree with itself while addressing another byte if
+   the layout were wrong. */
+static void ch23r_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 0x05);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, char_id), 0x08);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, inventory_slots), 0x0a);
+}
+
+/* The one-shot latch, and it is element 0x10 of the shared array rather than
+   anything private: 琴琴 with an empty bag is refused outright once that byte
+   is up, and the array is cleared to zero by the staging first, so no other
+   element can be what the handler read. */
+static void ch23r_a_raised_latch_blocks_the_scene(void)
+{
+    ch23r_stage();
+    ch23r_units[CH23R_ACTING_UNIT].char_id = CH23R_KOTOKOTO_CHAR_ID;
+    data_fdps_map_cell_event_triggered_flags[CH23R_LATCH_SLOT] =
+        CH23R_LATCH_RAISED;
+
+    fdps_chapter_23_event_give_martial_artist_ring(CH23R_ACTING_UNIT);
+
+    ch23r_check_refused(CH23R_LATCH_RAISED);
+}
+
+/* And the test is against zero and not against 1: a byte holding 0x5c blocks
+   just as well, which is what CMP byte ptr [0x000640e8],0x0 / JNZ says.  A save
+   that came back with anything in that slot keeps the scene shut. */
+static void ch23r_any_non_zero_latch_blocks(void)
+{
+    ch23r_stage();
+    ch23r_units[CH23R_ACTING_UNIT].char_id = CH23R_KOTOKOTO_CHAR_ID;
+    data_fdps_map_cell_event_triggered_flags[CH23R_LATCH_SLOT] =
+        CH23R_LATCH_ODD;
+
+    fdps_chapter_23_event_give_martial_artist_ring(CH23R_ACTING_UNIT);
+
+    ch23r_check_refused(CH23R_LATCH_ODD);
+}
+
+/* The character gate is an equality on 7 and not a range: 6 and 8 are both
+   refused with the latch down and an empty bag, and neither of them raises the
+   latch on the way out, so 琴琴 can still trip the tile afterwards. */
+static void ch23r_another_character_gets_nothing(void)
+{
+    ch23r_stage();
+    ch23r_units[CH23R_ACTING_UNIT].char_id = CH23R_CHAR_ID_BELOW;
+
+    fdps_chapter_23_event_give_martial_artist_ring(CH23R_ACTING_UNIT);
+
+    ch23r_check_refused(CH23R_LATCH_DOWN);
+
+    ch23r_stage();
+    ch23r_units[CH23R_ACTING_UNIT].char_id = CH23R_CHAR_ID_ABOVE;
+
+    fdps_chapter_23_event_give_martial_artist_ring(CH23R_ACTING_UNIT);
+
+    ch23r_check_refused(CH23R_LATCH_DOWN);
+}
+
+/* THE REBUILD TRAP.  琴琴 with all eight entries occupied is refused, and the
+   refusal covers the whole scene: no wave, no line and -- the part that matters
+   -- THE LATCH IS STILL DOWN.  Raising it at the head of the body, or playing
+   the scene and only skipping the item, would leave this byte at 1 and put
+   形見指環 out of reach for the rest of the save.  Her bag is also unchanged:
+   the eight fillers are still the eight fillers. */
+static void ch23r_a_full_bag_leaves_the_latch_down(void)
+{
+    int entry;
+
+    ch23r_stage();
+    ch23r_units[CH23R_ACTING_UNIT].char_id = CH23R_KOTOKOTO_CHAR_ID;
+    ch23r_fill_bag(CH23R_ACTING_UNIT, CH23R_BAG_FULL);
+
+    fdps_chapter_23_event_give_martial_artist_ring(CH23R_ACTING_UNIT);
+
+    ch23r_check_refused(CH23R_LATCH_DOWN);
+    for (entry = 0; entry < CH23R_INVENTORY_ENTRIES; entry++) {
+        CHECK_EQ((int) ch23r_units[CH23R_ACTING_UNIT]
+                       .inventory_slots[entry * 2 + 1], CH23R_FILLER_ITEM);
+    }
+}
+
+/* The record the gates are read off is the one the argument names and not a
+   fixed index: unit 0 is staged as 琴琴 with an empty bag, which would pass
+   every gate, and the call names unit 4, who is somebody else.  The run is
+   refused, so the character byte came off record 4.  (A handler that read
+   record 0 instead would enter the body and hang on the first hold loop rather
+   than fail a check -- see the note at the head of this section.) */
+static void ch23r_reads_the_record_the_index_names(void)
+{
+    ch23r_stage();
+    ch23r_units[0].char_id = CH23R_KOTOKOTO_CHAR_ID;
+    ch23r_units[CH23R_ACTING_UNIT].char_id = CH23R_CHAR_ID_BELOW;
+
+    fdps_chapter_23_event_give_martial_artist_ring(CH23R_ACTING_UNIT);
+
+    ch23r_check_refused(CH23R_LATCH_DOWN);
+}
+
+/* A refused run writes nothing anywhere: the neighbours of the record it read
+   keep their flags bytes and their empty bags, and so does the acting record
+   itself -- the retirement store at 00038c5b is inside the body and the body
+   was never entered. */
+static void ch23r_a_refused_run_touches_no_record(void)
+{
+    ch23r_stage();
+    ch23r_units[CH23R_PREV_UNIT].flags = 0x35;
+    ch23r_units[CH23R_ACTING_UNIT].flags = 0x35;
+    ch23r_units[CH23R_NEXT_UNIT].flags = 0x35;
+    ch23r_units[CH23R_UNIT_COUNT - 1].flags = 0x35;
+    ch23r_units[CH23R_ACTING_UNIT].char_id = CH23R_CHAR_ID_ABOVE;
+
+    fdps_chapter_23_event_give_martial_artist_ring(CH23R_ACTING_UNIT);
+
+    ch23r_check_refused(CH23R_LATCH_DOWN);
+    CHECK_EQ((int) ch23r_units[CH23R_PREV_UNIT].flags, 0x35);
+    CHECK_EQ((int) ch23r_units[CH23R_ACTING_UNIT].flags, 0x35);
+    CHECK_EQ((int) ch23r_units[CH23R_NEXT_UNIT].flags, 0x35);
+    CHECK_EQ((int) ch23r_units[CH23R_UNIT_COUNT - 1].flags, 0x35);
+    CHECK_EQ((int) ch23r_units[CH23R_ACTING_UNIT].inventory_slots[0],
+             CH23R_EMPTY_FLAG);
+}
+
 void run_chevt4_tests(void)
 {
     RUN_TEST(ch20_record_shape_matches_the_offsets);
@@ -2736,4 +2997,11 @@ void run_chevt4_tests(void)
     RUN_TEST(ch23t_ignores_the_incoming_argument);
     RUN_TEST(ch23t_has_no_one_shot_latch);
     RUN_TEST(ch23t_map_number_comes_from_the_chapter_global);
+    RUN_TEST(ch23r_record_shape_matches_the_offsets);
+    RUN_TEST(ch23r_a_raised_latch_blocks_the_scene);
+    RUN_TEST(ch23r_any_non_zero_latch_blocks);
+    RUN_TEST(ch23r_another_character_gets_nothing);
+    RUN_TEST(ch23r_a_full_bag_leaves_the_latch_down);
+    RUN_TEST(ch23r_reads_the_record_the_index_names);
+    RUN_TEST(ch23r_a_refused_run_touches_no_record);
 }

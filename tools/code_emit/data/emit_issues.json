@@ -2229,5 +2229,20 @@
       "needs": "Either a dump of FDETXT16.TXT's 23 entries out of Field.vfs read against the labels, which would settle it without a machine, or the chapter 16 playtest the emitter describes. The object comparison above already covers the ids themselves and can be repeated whenever this file is touched.",
       "same_as": "emit#0"
     }
+  ],
+  "00038b60": [
+    {
+      "from": "emit",
+      "status": "open",
+      "what": "The taken path of fdps_chapter_23_event_give_martial_artist_ring has never been seen run. The emitted C for it was verified twice against the assembly -- once by reading 00038bac..00038cb8 instruction by instruction, and once by disassembling the CHEVT4.OBJ this round produced with WDISASM and comparing the two listings, which agree on every instruction bar the frame size and the original's dead counter loads, both of which are allocation and instruction selection and outside ADR-0001. What no automated check can reach is the observable scene, because both twelve-frame holds call fdps_render_view_frame and that function spins on data_fdps_timer_tick_counter until a timer interrupt moves it, which the unit-test harness does not install. So these five observable facts rest on reading alone: that wave 10 of MAP22.DAT brings on exactly the one spirit record, that the view really lands on the shrine at map pixel (672, 0), that storing 1 over byte +5 of the newest record takes the spirit off the field, that entries 0x17, 0x18 and 0x19 of FDETXT23.TXT are the three lines of this scene in this order, and that item 0xb1 arrives in her bag.",
+      "needs": "A playtest of chapter 23 in DOSBox-X against the rebuilt executable: bring 琴琴 to MAP22.DAT's shrine cell with at least one free inventory slot and end her turn on it. Expected -- the opening line, a single unit appearing at the top of the map, the exchange, the unit vanishing, the closing line, and 形見指環 in her bag; then, on a fresh chapter, the same walk with all eight slots full should show no scene at all and should still work after dropping an item, which is the check that the latch stayed down."
+    },
+    {
+      "from": "review",
+      "status": "open",
+      "what": "Reached the same limit independently and confirmed the mechanism rather than the claim: fdps_render_view_frame does not merely draw, it holds at src/mapdraw.c:935 while data_fdps_view_frame_last_tick == data_fdps_timer_tick_counter, and it also spins twice on inp(VGA_INPUT_STATUS_1) and blits into 0xa0000, so with no timer ISR and no adapter the first hold loop never returns and the taken path genuinely cannot be driven from the harness. What my pass adds is that the emitter's issue reads wider than the gap actually is: three of the five facts it lists -- wave 10 of MAP22.DAT naming one record, the pan destination arithmetic (0x2a0 / 24 = tile column 28), and entries 0x17, 0x18 and 0x19 being this scene's three lines -- are settled by the shipped resources and the plate, and I checked the third argument's meaning against deploy.h's place_exact wording. The part no reading can close is the observable scene itself: that the spirit visibly walks on and off, that the view lands where the player expects, and that 形見指環 is in her bag afterwards.",
+      "needs": "The chapter 23 playtest the emitter describes, in DOSBox-X against the rebuilt executable, plus the full-bag repeat that checks the latch stayed down.",
+      "same_as": "emit#0"
+    }
   ]
 }
