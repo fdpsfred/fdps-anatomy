@@ -14,6 +14,7 @@
 #include "text.h"
 #include "deploy.h"
 #include "unit.h"
+#include "unititem.h"
 #include "mapcur.h"
 #include "mapdraw.h"
 #include "chevt5.h"
@@ -392,5 +393,96 @@ void fdps_chapter_25_event_deploy_wave_1(int unit_index)
 
         data_fdps_map_cell_event_triggered_flags[
             CHAPTER_EVENT_ONE_SHOT_SLOT] = 1;
+    }
+}
+
+/* The one unit index the sword upgrade answers to, CMP dword ptr [EBP+0x14],0x0
+   / JNZ at 00038ff0.  Battle unit 0 is Randis: the deployment lays the player's
+   roster down first and he is always its first record, so no chapter can
+   present him at another index.  It is the same index the default defeat test
+   fdps_unit_is_retired(0) watches. */
+#define CH25_RANDIS_UNIT_INDEX 0
+
+/* What fdps_unit_find_item_slot (unititem.h) reports when the item is not in
+   the bag, CMP dword ptr [EBP-0x4],-0x1 / JNZ at 00038ff6. */
+#define CH25_SWORD_NOT_CARRIED (-1)
+
+/* The sword that is taken and the sword that is given, PUSH 0xa1 at 00038fdc
+   and PUSH 0xa2 at 00039031: 火光之劍, which the chapter 20 event
+   fdps_chapter_20_event_upgrade_randis_sword (chevt4.h) hands out in exchange
+   for 灼烈之劍, and 真炎龍劍, the last link of that chain (assets/items.md). */
+#define CH25_FLAME_SWORD_ITEM_ID 0xa1
+#define CH25_TRUE_DRAGON_SWORD_ITEM_ID 0xa2
+
+/* The entry of the chapter's own FDETXT25.TXT block the fire god's line is
+   spoken from, PUSH 0x14 at 00039011.  It is the entry after the two the
+   chapter's ambush speaks. */
+#define CH25_UPGRADE_TEXT_ID 0x14
+
+/* 00038fd0.  Chapter 25's fire-god exchange: Randis finishes a step onto the
+   shrine tile still carrying 火光之劍 and it becomes 真炎龍劍.
+
+   The frame is the family's four-push one with a single 4-byte local -- PUSH
+   EBX / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x4 at
+   00038fd0..00038fd6 -- and that local is the slot number at [EBP-0x4], so the
+   one incoming dword sits at [EBP+0x14].  Every caller-clean in the body is
+   this function's own (ADD ESP,0x8 after the slot search, ADD ESP,0x1c after
+   the draw, ADD ESP,0x8 after each of the two inventory calls and ADD ESP,0x4
+   after the stat rebuild), and the RET at 00039054 carries no immediate, so the
+   convention is the stack one at both ends of the call.
+
+   THE SEARCH RUNS BEFORE BOTH GATES.  fdps_unit_find_item_slot is called at
+   00038fe5, unconditionally, and only then are the two tests made at
+   00038ff0..00038ffa: the unit index first, the search result second.  So every
+   firing -- including a firing by a unit that is not Randis -- costs one walk
+   of that unit's inventory.  Folding the search into the condition, which is
+   what the short-circuit spelling of the same test would do, moves the call
+   inside the gates and skips it on those firings.
+
+   THERE IS NO TURN DEADLINE AND NO ONE-SHOT LATCH.  The chapter 20 link of the
+   same chain closes at turn 20; this one has no turn test at all, and nothing
+   in the body writes data_fdps_map_cell_event_triggered_flags.  What stops the
+   exchange happening twice is the item itself: the search misses once the sword
+   has become 真炎龍劍.  That is also why a unit which is not Randis may walk
+   over the tile without spending the event.
+
+   THE REMOVAL IS AHEAD OF THE ADDITION.  fdps_unit_remove_item at 00039029 and
+   only then fdps_unit_add_item at 0003903a.  fdps_unit_add_item fills the first
+   empty entry of an eight-entry inventory and stores nothing at all when the
+   eight are full, so with the old sword still in the bag a full-handed Randis
+   would be given nothing and then have 火光之劍 taken off him.
+
+   ALL THREE CALLS AFTER THE DRAW TAKE THE PARAMETER.  MOV EAX,dword ptr
+   [EBP+0x14] at 00039025, 00039036 and 00039042 -- unlike the chapter 20 link,
+   whose addition is handed a literal 0.  The gate above has already forced the
+   parameter to be 0, so the two spellings behave alike, and each is kept where
+   its own assembly has it.
+
+   Only one value is used after a CALL: fdps_unit_find_item_slot's, which comes
+   back in EAX and is stored to [EBP-0x4] at 00038fed, then reloaded at 00038ff6
+   for the gate and at 00039021 for the removal.  fdps_draw_text's cursor is
+   discarded -- the next instruction is the ADD ESP,0x1c that cleans its
+   arguments -- fdps_unit_add_item's 1-or--1 result is discarded likewise, and
+   fdps_unit_recompute_combat_stats returns nothing.  Nothing sets EAX before
+   the RET and no dispatcher reads what comes back, so the result is void. */
+void fdps_chapter_25_event_upgrade_randis_sword(int unit_index)
+{
+    /* Which of the triggering unit's inventory entries holds 火光之劍, or -1;
+       searched before either gate and reused as the entry to empty. */
+    int sword_slot;
+
+    sword_slot = fdps_unit_find_item_slot(unit_index,
+                                          CH25_FLAME_SWORD_ITEM_ID);
+
+    if (unit_index == CH25_RANDIS_UNIT_INDEX
+            && sword_slot != CH25_SWORD_NOT_CARRIED) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH25_UPGRADE_TEXT_ID,
+                       (unsigned char *) CH25_TEXT_DEST, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_unit_remove_item(unit_index, sword_slot);
+        fdps_unit_add_item(unit_index, CH25_TRUE_DRAGON_SWORD_ITEM_ID);
+        fdps_unit_recompute_combat_stats(unit_index);
     }
 }

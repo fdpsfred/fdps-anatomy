@@ -980,6 +980,378 @@ static void ch25w1_map_number_comes_from_the_chapter_global(void)
              CH25W1_MAP01_RECORD0_Y);
 }
 
+/* ---------------------------------------------------------------------- */
+
+/* Chapter 25's sword upgrade at 00038fd0.
+ *
+ * This handler needs no game file at all: it takes its whole effect through one
+ * unit record, so the unit array is a local block that
+ * data_fdps_map_unit_array_ptr is aimed at, and the line it speaks is drawn out
+ * of a text block whose every entry names one lone terminator -- fdps_draw_text
+ * walks the entry, paints nothing and returns without a font, a message panel
+ * or mode 13h.  That is all these cases can see of the draw; the text id is
+ * read off PUSH 0x14 at 00039011 and is not assertable here, because a draw
+ * that paints nothing leaves nothing behind to tell one entry from another.
+ *
+ * What the cases are for is the pair of gates and the order of the two
+ * inventory calls.  The gates are CMP dword ptr [EBP+0x14],0x0 at 00038ff0 and
+ * CMP dword ptr [EBP-0x4],-0x1 at 00038ff6, and both refuse the whole body.
+ * There is no turn test anywhere in the body -- unlike the chapter 20 link of
+ * the same chain, which closes at turn 20 -- and no write to
+ * data_fdps_map_cell_event_triggered_flags, so a firing on a late turn and a
+ * firing with the shared latch already raised both have to still happen, and a
+ * re-armed bag has to fire a second time.
+ *
+ * The removal at 00039029 comes before the addition at 0003903a, and with a
+ * full bag that is the difference between keeping the sword and losing it:
+ * fdps_unit_add_item stores nothing when all eight entries are occupied
+ * (unititem.h), so the full-bag case is what pins the order down.
+ *
+ * The expected inventory shape after a firing comes from the two callees: the
+ * removal memmoves the entries above the slot down and empties the last one,
+ * and the add takes the first entry whose flag carries bit 0x80, so the new
+ * sword lands in the entry the old one vacated.
+ */
+
+/* The two swords, read off PUSH 0xa1 at 00038fdc and PUSH 0xa2 at 00039031:
+   火光之劍 and 真炎龍劍 (assets/items.md). */
+#define CH25U_FLAME_SWORD 0xa1
+#define CH25U_TRUE_DRAGON_SWORD 0xa2
+
+/* The sword one link earlier in the chain, 灼烈之劍, and a plain carried item
+   with no combat effect, 金屬礦 -- neither of them is what this handler looks
+   for, so a case can carry them to say which entry moved and which did not. */
+#define CH25U_BLAZING_SWORD 0xa0
+#define CH25U_OTHER_ITEM 0xa3
+
+/* Battle unit 0 is Randis; the other two staged records stand in for units the
+   gate has to refuse. */
+#define CH25U_RANDIS 0
+#define CH25U_OTHER_UNIT_A 1
+#define CH25U_OTHER_UNIT_B 2
+#define CH25U_STAGE_UNITS 3
+
+/* An inventory entry is a flag byte and an id byte; bit 0x80 of the flag means
+   the entry is empty, and a plain 0 flag means carried and not equipped
+   (unititem.h). */
+#define CH25U_EMPTY_FLAG 0x80
+#define CH25U_EMPTY_ID 0xff
+#define CH25U_CARRIED_FLAG 0x00
+#define CH25U_INVENTORY_ENTRIES 8
+
+/* A text block whose 0x15 entries all name one lone terminator, so the draw of
+   entry 0x14 walks it and paints nothing. */
+#define CH25U_TEXT_IDS 0x15
+#define CH25U_TEXT_EMPTY_AT 0x40
+#define CH25U_TEXT_BLOCK_BYTES (CH25U_TEXT_EMPTY_AT + 2)
+#define CH25U_TEXT_END (-1)
+
+/* The base stats the rebuild writes through with nothing equipped, and the
+   sentinel the derived fields start from so a case can say the rebuild ran. */
+#define CH25U_AP_BASE 43
+#define CH25U_DP_BASE 33
+#define CH25U_DX_BASE 23
+#define CH25U_STAT_SENTINEL 0x7777
+
+/* Item.dat has 256 records, and a table of zeros is enough for the rebuild
+   because none of the staged bags holds an equipped entry. */
+#define CH25U_ITEM_TABLE_ROWS 256
+
+/* The shared one-shot latch the sibling chapter events raise; this handler
+   never touches it, so the cases raise it and watch the body run anyway. */
+#define CH25U_LATCH_SLOT 0x10
+#define CH25U_LATCH_RAISED 1
+
+/* A turn well past the chapter 20 link's deadline, to show there is no turn
+   test in this one. */
+#define CH25U_LATE_TURN 99
+
+static unsigned char ch25u_text_block[CH25U_TEXT_BLOCK_BYTES];
+static struct fdps_unit_record ch25u_units[CH25U_STAGE_UNITS];
+static struct fdps_item_effect ch25u_items[CH25U_ITEM_TABLE_ROWS];
+
+static void ch25u_stage_text(void)
+{
+    int text_id;
+
+    memset(ch25u_text_block, 0, (size_t) CH25U_TEXT_BLOCK_BYTES);
+    *(short *) (ch25u_text_block + CH25U_TEXT_EMPTY_AT) = (short) CH25U_TEXT_END;
+    for (text_id = 0; text_id < CH25U_TEXT_IDS; text_id++) {
+        *(short *) (ch25u_text_block + text_id * 2) =
+            (short) CH25U_TEXT_EMPTY_AT;
+    }
+}
+
+static void ch25u_blank_unit(int unit_index)
+{
+    int entry;
+
+    for (entry = 0; entry < CH25U_INVENTORY_ENTRIES; entry++) {
+        ch25u_units[unit_index].inventory_slots[entry * 2] = CH25U_EMPTY_FLAG;
+        ch25u_units[unit_index].inventory_slots[entry * 2 + 1] = CH25U_EMPTY_ID;
+    }
+    ch25u_units[unit_index].ap_base = CH25U_AP_BASE;
+    ch25u_units[unit_index].dp_base = CH25U_DP_BASE;
+    ch25u_units[unit_index].dx_base = CH25U_DX_BASE;
+    ch25u_units[unit_index].ap = CH25U_STAT_SENTINEL;
+    ch25u_units[unit_index].dp = CH25U_STAT_SENTINEL;
+    ch25u_units[unit_index].hit = CH25U_STAT_SENTINEL;
+    ch25u_units[unit_index].ev = CH25U_STAT_SENTINEL;
+}
+
+static void ch25u_carry(int unit_index, int entry, int item_id)
+{
+    ch25u_units[unit_index].inventory_slots[entry * 2] = CH25U_CARRIED_FLAG;
+    ch25u_units[unit_index].inventory_slots[entry * 2 + 1] =
+        (unsigned char) item_id;
+}
+
+/* Everything the handler and its callees read: three blank records, an item
+   table for the stat rebuild, the text block, a turn counter well past the
+   chapter 20 deadline and the shared latch raised, so a body that consulted
+   either of those two would be seen refusing to run. */
+static void ch25u_stage(void)
+{
+    int unit_index;
+
+    ch25u_stage_text();
+
+    memset(ch25u_units, 0, sizeof(ch25u_units));
+    memset(ch25u_items, 0, sizeof(ch25u_items));
+    for (unit_index = 0; unit_index < CH25U_STAGE_UNITS; unit_index++) {
+        ch25u_blank_unit(unit_index);
+    }
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch25u_units;
+    data_fdps_item_effect_table_ptr = (unsigned char *) ch25u_items;
+    data_fdps_current_chapter_text_ptr = ch25u_text_block;
+    data_fdps_battle_turn_counter = CH25U_LATE_TURN;
+    data_fdps_map_cell_event_triggered_flags[CH25U_LATCH_SLOT] =
+        CH25U_LATCH_RAISED;
+}
+
+/* The state most cases start from: every staged unit carrying 火光之劍 in its
+   first entry, so a firing for the wrong index would be visible. */
+static void ch25u_stage_armed(void)
+{
+    ch25u_stage();
+    ch25u_carry(CH25U_RANDIS, 0, CH25U_FLAME_SWORD);
+    ch25u_carry(CH25U_OTHER_UNIT_A, 0, CH25U_FLAME_SWORD);
+    ch25u_carry(CH25U_OTHER_UNIT_B, 0, CH25U_FLAME_SWORD);
+}
+
+static int ch25u_entry_flag(int unit_index, int entry)
+{
+    return (int) ch25u_units[unit_index].inventory_slots[entry * 2];
+}
+
+static int ch25u_entry_id(int unit_index, int entry)
+{
+    return (int) ch25u_units[unit_index].inventory_slots[entry * 2 + 1];
+}
+
+/* Whether any occupied entry holds that id, which is how a case says an item
+   was or was not handed over. */
+static int ch25u_carries(int unit_index, int item_id)
+{
+    int entry;
+
+    for (entry = 0; entry < CH25U_INVENTORY_ENTRIES; entry++) {
+        if (ch25u_entry_flag(unit_index, entry) != CH25U_EMPTY_FLAG
+                && ch25u_entry_id(unit_index, entry) == item_id) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Whether the four derived stats still hold the sentinel, which is how a case
+   says the rebuild did or did not run. */
+static int ch25u_stats_untouched(int unit_index)
+{
+    return (int) ch25u_units[unit_index].ap == CH25U_STAT_SENTINEL
+           && (int) ch25u_units[unit_index].dp == CH25U_STAT_SENTINEL
+           && (int) ch25u_units[unit_index].hit == CH25U_STAT_SENTINEL
+           && (int) ch25u_units[unit_index].ev == CH25U_STAT_SENTINEL;
+}
+
+/* The record fields these cases read back and the stride they are indexed by.
+   Every one of them would agree with itself while addressing another byte if
+   the layout were wrong. */
+static void ch25u_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, inventory_slots), 0x0a);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ap), 0x48);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ev), 0x4e);
+}
+
+/* The whole taken path.  火光之劍 leaves the bag and 真炎龍劍 takes the entry
+   it vacated -- the removal compacts the entries above the slot down and the
+   add takes the first empty entry, which is that one -- the rest of the bag is
+   still empty, and the four derived stats have lost the sentinel and hold the
+   bases the rebuild writes with nothing equipped. */
+static void ch25u_swaps_the_sword_for_randis(void)
+{
+    ch25u_stage_armed();
+
+    fdps_chapter_25_event_upgrade_randis_sword(CH25U_RANDIS);
+
+    CHECK_EQ(ch25u_carries(CH25U_RANDIS, CH25U_FLAME_SWORD), 0);
+    CHECK_EQ(ch25u_carries(CH25U_RANDIS, CH25U_TRUE_DRAGON_SWORD), 1);
+    CHECK_EQ(ch25u_entry_flag(CH25U_RANDIS, 0), CH25U_CARRIED_FLAG);
+    CHECK_EQ(ch25u_entry_id(CH25U_RANDIS, 0), CH25U_TRUE_DRAGON_SWORD);
+    CHECK_EQ(ch25u_entry_flag(CH25U_RANDIS, 1), CH25U_EMPTY_FLAG);
+    CHECK_EQ(ch25u_entry_flag(CH25U_RANDIS, CH25U_INVENTORY_ENTRIES - 1),
+             CH25U_EMPTY_FLAG);
+    CHECK_EQ((int) ch25u_units[CH25U_RANDIS].ap, CH25U_AP_BASE);
+    CHECK_EQ((int) ch25u_units[CH25U_RANDIS].dp, CH25U_DP_BASE);
+    CHECK_EQ((int) ch25u_units[CH25U_RANDIS].hit, CH25U_DX_BASE);
+    CHECK_EQ((int) ch25u_units[CH25U_RANDIS].ev, CH25U_DX_BASE);
+}
+
+/* The item looked for is 0xa1 and nothing else.  A Randis carrying only the
+   previous link of the chain, 灼烈之劍, is refused: the search answers -1, the
+   second gate closes, and neither his bag nor his stats are touched. */
+static void ch25u_only_the_flame_sword_qualifies(void)
+{
+    ch25u_stage();
+    ch25u_carry(CH25U_RANDIS, 0, CH25U_BLAZING_SWORD);
+    ch25u_carry(CH25U_RANDIS, 1, CH25U_OTHER_ITEM);
+
+    fdps_chapter_25_event_upgrade_randis_sword(CH25U_RANDIS);
+
+    CHECK_EQ(ch25u_carries(CH25U_RANDIS, CH25U_TRUE_DRAGON_SWORD), 0);
+    CHECK_EQ(ch25u_entry_id(CH25U_RANDIS, 0), CH25U_BLAZING_SWORD);
+    CHECK_EQ(ch25u_entry_id(CH25U_RANDIS, 1), CH25U_OTHER_ITEM);
+    CHECK_EQ(ch25u_stats_untouched(CH25U_RANDIS), 1);
+}
+
+/* An empty-handed Randis is refused as well, which is the other way the search
+   answers -1. */
+static void ch25u_an_empty_bag_is_refused(void)
+{
+    ch25u_stage();
+
+    fdps_chapter_25_event_upgrade_randis_sword(CH25U_RANDIS);
+
+    CHECK_EQ(ch25u_carries(CH25U_RANDIS, CH25U_TRUE_DRAGON_SWORD), 0);
+    CHECK_EQ(ch25u_entry_flag(CH25U_RANDIS, 0), CH25U_EMPTY_FLAG);
+    CHECK_EQ(ch25u_stats_untouched(CH25U_RANDIS), 1);
+}
+
+/* The removal is given the slot the search returned and not a literal 0: with
+   金屬礦 in the first entry and the sword in the second, it is the second that
+   is emptied and refilled and the first is left exactly as it was. */
+static void ch25u_removes_the_slot_the_search_found(void)
+{
+    ch25u_stage();
+    ch25u_carry(CH25U_RANDIS, 0, CH25U_OTHER_ITEM);
+    ch25u_carry(CH25U_RANDIS, 1, CH25U_FLAME_SWORD);
+
+    fdps_chapter_25_event_upgrade_randis_sword(CH25U_RANDIS);
+
+    CHECK_EQ(ch25u_entry_flag(CH25U_RANDIS, 0), CH25U_CARRIED_FLAG);
+    CHECK_EQ(ch25u_entry_id(CH25U_RANDIS, 0), CH25U_OTHER_ITEM);
+    CHECK_EQ(ch25u_entry_flag(CH25U_RANDIS, 1), CH25U_CARRIED_FLAG);
+    CHECK_EQ(ch25u_entry_id(CH25U_RANDIS, 1), CH25U_TRUE_DRAGON_SWORD);
+    CHECK_EQ(ch25u_carries(CH25U_RANDIS, CH25U_FLAME_SWORD), 0);
+    CHECK_EQ(ch25u_entry_flag(CH25U_RANDIS, 2), CH25U_EMPTY_FLAG);
+}
+
+/* The removal runs before the addition, and a full bag is where the two orders
+   part company.  All eight entries occupied, the sword in the last of them:
+   emptying first leaves the eighth entry free for the add, so Randis ends the
+   firing holding 真炎龍劍 and the seven other items.  Adding first would find
+   the bag full, store nothing, and then take 火光之劍 away for nothing. */
+static void ch25u_removes_before_it_adds(void)
+{
+    int entry;
+
+    ch25u_stage();
+    for (entry = 0; entry < CH25U_INVENTORY_ENTRIES - 1; entry++) {
+        ch25u_carry(CH25U_RANDIS, entry, CH25U_OTHER_ITEM);
+    }
+    ch25u_carry(CH25U_RANDIS, CH25U_INVENTORY_ENTRIES - 1, CH25U_FLAME_SWORD);
+
+    fdps_chapter_25_event_upgrade_randis_sword(CH25U_RANDIS);
+
+    CHECK_EQ(ch25u_carries(CH25U_RANDIS, CH25U_TRUE_DRAGON_SWORD), 1);
+    CHECK_EQ(ch25u_carries(CH25U_RANDIS, CH25U_FLAME_SWORD), 0);
+    CHECK_EQ(ch25u_entry_flag(CH25U_RANDIS, CH25U_INVENTORY_ENTRIES - 1),
+             CH25U_CARRIED_FLAG);
+    CHECK_EQ(ch25u_entry_id(CH25U_RANDIS, CH25U_INVENTORY_ENTRIES - 1),
+             CH25U_TRUE_DRAGON_SWORD);
+    CHECK_EQ(ch25u_entry_id(CH25U_RANDIS, 0), CH25U_OTHER_ITEM);
+}
+
+/* No unit but battle unit 0 springs the event, and carrying the sword is not
+   what qualifies one: both other staged units carry 火光之劍, neither is given
+   真炎龍劍, neither has its stats rebuilt, and Randis's own bag is left alone
+   while they walk over the tile. */
+static void ch25u_fires_for_no_unit_but_randis(void)
+{
+    static int other_units[2] = {CH25U_OTHER_UNIT_A, CH25U_OTHER_UNIT_B};
+    int i;
+
+    for (i = 0; i < 2; i++) {
+        ch25u_stage_armed();
+
+        fdps_chapter_25_event_upgrade_randis_sword(other_units[i]);
+
+        CHECK_EQ(ch25u_carries(other_units[i], CH25U_TRUE_DRAGON_SWORD), 0);
+        CHECK_EQ(ch25u_carries(other_units[i], CH25U_FLAME_SWORD), 1);
+        CHECK_EQ(ch25u_stats_untouched(other_units[i]), 1);
+        CHECK_EQ(ch25u_carries(CH25U_RANDIS, CH25U_FLAME_SWORD), 1);
+        CHECK_EQ(ch25u_carries(CH25U_RANDIS, CH25U_TRUE_DRAGON_SWORD), 0);
+    }
+}
+
+/* There is no latch and no turn deadline.  The shared one-shot byte is up and
+   the turn counter is at 99, well past the chapter 20 link's turn 20, and the
+   exchange happens anyway; the byte is still exactly as the case left it
+   afterwards, so nothing in the body writes it.  Re-arming the bag fires the
+   event a second time, which is what "the item is the flag" means. */
+static void ch25u_has_no_latch_and_no_deadline(void)
+{
+    ch25u_stage_armed();
+
+    fdps_chapter_25_event_upgrade_randis_sword(CH25U_RANDIS);
+
+    CHECK_EQ(ch25u_carries(CH25U_RANDIS, CH25U_TRUE_DRAGON_SWORD), 1);
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH25U_LATCH_SLOT],
+             CH25U_LATCH_RAISED);
+
+    ch25u_stage_armed();
+    data_fdps_map_cell_event_triggered_flags[CH25U_LATCH_SLOT] = 0;
+
+    fdps_chapter_25_event_upgrade_randis_sword(CH25U_RANDIS);
+
+    CHECK_EQ(ch25u_carries(CH25U_RANDIS, CH25U_TRUE_DRAGON_SWORD), 1);
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH25U_LATCH_SLOT],
+             0);
+}
+
+/* A second firing on a bag that now holds 真炎龍劍 does nothing: the search
+   for 火光之劍 misses, so the exchange cannot run twice off one sword and no
+   second 真炎龍劍 appears. */
+static void ch25u_does_not_fire_twice_off_one_sword(void)
+{
+    ch25u_stage_armed();
+
+    fdps_chapter_25_event_upgrade_randis_sword(CH25U_RANDIS);
+    ch25u_units[CH25U_RANDIS].ap = CH25U_STAT_SENTINEL;
+    ch25u_units[CH25U_RANDIS].dp = CH25U_STAT_SENTINEL;
+    ch25u_units[CH25U_RANDIS].hit = CH25U_STAT_SENTINEL;
+    ch25u_units[CH25U_RANDIS].ev = CH25U_STAT_SENTINEL;
+
+    fdps_chapter_25_event_upgrade_randis_sword(CH25U_RANDIS);
+
+    CHECK_EQ(ch25u_entry_id(CH25U_RANDIS, 0), CH25U_TRUE_DRAGON_SWORD);
+    CHECK_EQ(ch25u_entry_flag(CH25U_RANDIS, 1), CH25U_EMPTY_FLAG);
+    CHECK_EQ(ch25u_stats_untouched(CH25U_RANDIS), 1);
+}
+
 void run_chevt5_tests(void)
 {
     RUN_TEST(ch24t_each_arrival_turn_deploys_its_own_wave);
@@ -996,4 +1368,14 @@ void run_chevt5_tests(void)
     RUN_TEST(ch25w1_only_the_player_side_fires);
     RUN_TEST(ch25w1_fires_once_for_the_unit_the_index_names);
     RUN_TEST(ch25w1_map_number_comes_from_the_chapter_global);
+
+    RUN_TEST(ch25u_record_shape_matches_the_offsets);
+    RUN_TEST(ch25u_swaps_the_sword_for_randis);
+    RUN_TEST(ch25u_only_the_flame_sword_qualifies);
+    RUN_TEST(ch25u_an_empty_bag_is_refused);
+    RUN_TEST(ch25u_removes_the_slot_the_search_found);
+    RUN_TEST(ch25u_removes_before_it_adds);
+    RUN_TEST(ch25u_fires_for_no_unit_but_randis);
+    RUN_TEST(ch25u_has_no_latch_and_no_deadline);
+    RUN_TEST(ch25u_does_not_fire_twice_off_one_sword);
 }

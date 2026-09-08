@@ -109,4 +109,46 @@ extern void fdps_chapter_24_event_deploy_wave_for_turn(int event_arg);
 extern void fdps_chapter_25_event_deploy_wave_1(int unit_index);
 #pragma aux fdps_chapter_25_event_deploy_wave_1 "*" parm caller [];
 
+/* Chapter 25's fire-god exchange: Randis finishes a step onto the shrine tile
+   still carrying 火光之劍, the chapter speaks one line, and the sword becomes
+   真炎龍劍.  In order: entry 0x14 of the chapter's own FDETXT25.TXT block is
+   drawn, the entry holding 火光之劍 (item id 0xa1) is taken out of the bag,
+   真炎龍劍 (0xa2) is added, and the unit's derived combat stats are rebuilt so
+   the new weapon's attack power counts at once.
+
+   It is the last link of a three-sword chain: the chapter 16 smith forges
+   灼烈之劍 (0xa0), fdps_chapter_20_event_upgrade_randis_sword (chevt4.h) trades
+   that for 火光之劍 on or before turn 20 of chapter 20, and this trades that
+   for 真炎龍劍.  A player who missed the chapter 20 deadline arrives here
+   carrying the wrong sword and this event does nothing for him.
+
+   TWO GATES, BOTH REFUSING THE WHOLE BODY: the index must be 0, battle unit 0
+   being Randis, and the search for 火光之劍 must have found an entry.  Any
+   other unit, and a Randis who is not carrying the sword, returns having done
+   nothing.
+
+   THE SEARCH IS MADE BEFORE EITHER GATE, so every firing costs one walk of the
+   triggering unit's inventory whether or not the body then runs.
+
+   NO TURN DEADLINE AND NO ONE-SHOT LATCH.  Unlike the chapter 20 link there is
+   no turn test, and nothing is written to
+   data_fdps_map_cell_event_triggered_flags.  The exchange cannot fire twice
+   because the item it looks for is gone afterwards, and a unit that is not
+   Randis crossing the tile leaves the event armed rather than spending it.
+
+   THE OLD SWORD LEAVES THE BAG BEFORE THE NEW ONE IS PUT IN.  fdps_unit_add_item
+   (unititem.h) stores nothing when all eight entries are occupied, so the
+   natural "give the new sword, then take the old one" order loses 真炎龍劍
+   whenever Randis is carrying a full bag.
+
+   unit_index is the handler table's shared parameter: the index of the unit
+   that tripped the tile event, not range checked, handed straight to
+   fdps_unit_find_item_slot, fdps_unit_remove_item, fdps_unit_add_item and
+   fdps_unit_recompute_combat_stats.  No unit record is resolved in this body
+   itself.
+
+   Table slot 38 at 0006025c. */
+extern void fdps_chapter_25_event_upgrade_randis_sword(int unit_index);
+#pragma aux fdps_chapter_25_event_upgrade_randis_sword "*" parm caller [];
+
 #endif
