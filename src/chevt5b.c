@@ -20,13 +20,13 @@
 #include "chevt5b.h"
 
 /* The screen's row stride every handler here hands fdps_draw_text, PUSH 0x140
-   before each of the file's five draws: 000391ac, 00039285, 000392ec, 00039322
-   and 0003940e.  Where each draw sends its glyphs is a define of its own next
-   to the handler that makes it. */
+   before each of the file's six draws: 000391ac, 00039285, 000392ec, 00039322,
+   0003940e and 000394a6.  Where each draw sends its glyphs is a define of its
+   own next to the handler that makes it. */
 #define VGA_SCREEN_PITCH 0x140
 
 /* The standard message colours, PUSH 0xd0 / PUSH 0x0 / PUSH 0x6d before each
-   of those five draws: glyph fill, no cell background, and the shadow the
+   of those six draws: glyph fill, no cell background, and the shadow the
    outline colour becomes while the font's outline flag is clear. */
 #define MESSAGE_FG_COLOR 0xd0
 #define MESSAGE_BG_COLOR 0
@@ -527,6 +527,229 @@ void fdps_chapter_26_event_wave_2_defeated_line(int unit_index)
                            MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
             data_fdps_map_cell_event_triggered_flags[
                 CH26_WIPE_ONE_SHOT_SLOT] = 1;
+        }
+    }
+}
+
+/* The element of data_fdps_map_cell_event_triggered_flags this handler
+   latches, byte ptr [0x000640ea] at 00039453 and 00039533 -- element 0x12 of
+   the array based at 0x000640d8, the same element
+   fdps_chapter_26_event_wave_2_defeated_line above uses and NOT element 0x10,
+   which the ambush and chapter 25's handlers share.  A sweep of the whole image
+   for 0x000640ea finds four instructions and they are those two pairs.  The two
+   handlers cannot collide because one chapter is loaded at a time and
+   fdps_chapter_state_reset memsets the whole 0x20-byte block when a chapter
+   starts; that memset, and the save and load paths that move the whole block to
+   and from the slot image, are also why the latch has to live in the array and
+   not in a function-local static, which would leave the wave undeployed and the
+   boss held in place on a chapter replay after a Game Over or a save load
+   (rebuild_info/pitfalls.md).
+
+   It is spelled separately from CH26_WIPE_ONE_SHOT_SLOT above because the two
+   handlers are two chapters' events that happen to share one element, not one
+   piece of state the two of them keep between them. */
+#define CH27_WAVE_1_ONE_SHOT_SLOT 0x12
+
+/* The four unit records the death script watches: ADD EAX,0xd at 0003947a over
+   a counter the CMP dword ptr [EBP+0x14],0x4 / JL at 00039467 runs from 0 to 3,
+   so indices 0x0d through 0x10.  On MAP26.DAT those are deployment records 1 to
+   4 -- the chapter's four generals -- landing behind the map's twelve party
+   slots at 0x00..0x0b, with record 0, the Mage King himself, at 0x0c.  All four
+   carry the same death script, so this handler runs once per general killed and
+   only the last of the four runs finds the whole group retired.  Both numbers
+   are literals and neither is derived from data_fdps_map_unit_count. */
+#define CH27_GENERALS_FIRST_UNIT_INDEX 0x0d
+#define CH27_GENERALS_COUNT 4
+
+/* Where the line is drawn, PUSH 0xa0000 at 000394ab: the top-left corner of the
+   visible mode-13h page, kept a literal because it is an address inside the
+   display adapter's aperture rather than the address of anything the linker
+   places (rebuild_info/pitfalls.md, contract E). */
+#define CH27_WAVE_1_TEXT_DEST 0x000a0000
+
+/* The entry of the chapter's own FDETXT27.TXT block the line is spoken from,
+   PUSH 0x14 at 000394b0.  Its token stream opens with speaker code -0x11 and
+   operand 0x3f, the Mage King, so the line belongs to the boss the same body
+   releases two statements later and not to any of the four generals it is
+   spoken over. */
+#define CH27_WAVE_1_TEXT_ID 0x14
+
+/* The wave the reinforcements are tagged with, PUSH 0x1 at 000394c3, matched
+   against byte 0x15 of every 0x1a-byte deployment record of the resident
+   MAP%02d.DAT block; on MAP26.DAT that is a block of thirty records.  The map
+   number handed alongside it is data_fdps_chapter_current_chapter_id, read from
+   [0x00069cf4] at 000394c5, which is the map the chapter is playing and is what
+   picks the "map%02d.cod" placement member. */
+#define CH27_REINFORCEMENT_WAVE 1
+
+/* How each arrival is placed, XOR EAX,EAX / PUSH EAX at 000394c0..000394c2: 0
+   searches for the nearest free walkable tile around the placement record's own
+   tile instead of taking that tile as given. */
+#define CH27_PLACE_ON_NEAREST_FREE_TILE 0
+
+/* The record the behaviour merge covers and the mode it writes: 0xc parked at
+   [EBP-0x24] at 000394d3, 0xc again at [EBP-0x20] at 000394da and 0xb at
+   [EBP-0x1c] at 000394e1.  The range is one record wide and it is unit index
+   0x0c, MAP26.DAT's deployment record 0 -- the map's only level-40 unit, the
+   Mage King, the same record fdps_chapter_27_post_action reads to declare the
+   chapter cleared.  Mode 0xb is the spell-first chain that ends in a movement
+   routine; the mode the map file deploys him in is 2, which strikes whatever is
+   already in reach but never leaves its tile, so this is what takes him off his
+   throne. */
+#define CH27_RELEASED_FIRST_UNIT_INDEX 0x0c
+#define CH27_RELEASED_LAST_UNIT_INDEX 0x0c
+#define CH27_RELEASED_BEHAVIOR_MODE 0x0b
+
+/* 00039440.  Chapter 27's four-generals death script: once the last of the Mage
+   King's four generals is gone, his line is spoken, the map's wave-1
+   reinforcements are brought onto the battlefield and he himself comes out of
+   the hold-position behaviour.
+
+   The frame is the family's four-push one with 0x24 bytes of locals -- PUSH EBX
+   / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x24 at
+   00039440..00039446 -- so the one incoming dword sits at [EBP+0x14].  Every
+   caller-clean in the body is this function's own (ADD ESP,0x4 after each
+   retirement test at 00039483, ADD ESP,0x1c after the draw at 000394bd, ADD
+   ESP,0xc after the deployment at 000394d0 and ADD ESP,0x4 after each record
+   fetch at 00039517) and the RET at 00039540 carries no immediate, so the
+   convention is the stack one at this end.  It is the stack one at the other end
+   too: the dispatcher fdps_run_death_scripts reaches this table slot as MOV
+   EAX,[EBP+0x14] / PUSH EAX / CALL dword ptr [EDX + 0x601c4] / ADD ESP,0x4 at
+   0001dcaa..0001dcb4, pushing one dword and cleaning it itself.
+
+   BOTH GATES LEAVE BY THE SAME EXIT.  The JNZ at 0003945a on the latch and the
+   JNZ at 00039497 on the survivor flag both go to the epilogue at 0003953a, so a
+   firing that finds the wave already deployed and a firing that finds one of the
+   four still standing are refused identically: nothing is drawn, nothing is
+   deployed, no behaviour byte is touched and the latch is not written.
+
+   THE LATCH TEST IS "NOT ZERO" AND NOT "NOT ONE".  CMP byte ptr
+   [0x000640ea],0x0 at 00039453, so any non-zero value in the element blocks the
+   body.
+
+   THE FLAG IS SEEDED BEFORE THE LATCH IS TESTED.  MOV dword ptr [EBP-0x4],0x0 at
+   0003944c runs ahead of the CMP at 00039453; nothing observes the difference
+   and the store is kept where its own assembly has it.
+
+   THE POLL DOES NOT STOP AT THE FIRST SURVIVOR.  The JNZ at 00039488 skips only
+   the flag store and the loop runs its full four passes either way, so every
+   firing costs four calls.  fdps_unit_is_retired only reads a record, so a
+   rewrite that broke out early would differ in nothing but the call count -- and
+   it would still be a different function.
+
+   THE SENSE OF THE TEST IS INVERTED.  TEST EAX,EAX / JNZ at 00039486 raises the
+   flag when fdps_unit_is_retired answers 0, so the flag means "one of the four
+   is still standing" and the rest of the body is guarded by it being clear.
+
+   THE BLOCK IS FOUR RECORDS FROM 0x0d AND IS NOT BOUNDED BY THE UNIT COUNT.
+   Both numbers are literals; nothing in the body reads
+   data_fdps_map_unit_count, so on a map with fewer records the poll would read
+   past the live ones.  On MAP26.DAT, the only map whose data reaches this slot,
+   they land on the four generals exactly.
+
+   THE ORDER IS LINE, WAVE, RELEASE, LATCH.  The line is spoken while the
+   reinforcements are still off the board and the boss is still holding, and the
+   latch is written last, after everything else has happened.
+
+   THE SWEEP IS AN INLINE EXPANSION AND NOT A CALL.  The three constants are
+   parked at [EBP-0x24], [EBP-0x20] and [EBP-0x1c] and copied into a second set
+   of slots at [EBP-0x10], [EBP-0x14] and [EBP-0x18] before the counter is seeded
+   -- the fingerprint of fdps_object_set_field34_low_nibble_range expanded in
+   place -- and the only CALL inside the loop is fdps_get_unit_record, once per
+   iteration.  Writing the range as a call to that helper would put a CALL in the
+   rebuild that the original does not make.
+
+   THE SWEEP IS INCLUSIVE AND SIGNED, AND IT IS ONE RECORD WIDE.  MOV
+   EAX,[EBP-0xc] / CMP EAX,[EBP-0x14] / JLE at 00039500..00039506 with both ends
+   holding 0xc, so the loop runs exactly once; a rewrite with a strict less-than
+   would leave the boss holding position.
+
+   THE MERGE KEEPS THE HIGH NIBBLE.  MOV DL,byte ptr [EAX+0x34] / AND DL,0xf0 /
+   MOV DH,byte ptr [EBP-0x18] / OR DH,DL / MOV byte ptr [EAX+0x34],DH at
+   00039520..0003952e reads the byte back, drops only its low four bits and
+   writes the merged value.  Writing the mode as a plain store also wipes bits
+   0x40 and 0x80, which fdps_map_actor_take_best_action (00012c6f) and
+   fdps_score_targets_for_item (0001337d) test as independent per-unit flags
+   (rebuild_info/pitfalls.md).
+
+   THE INCOMING ARGUMENT IS NEVER READ.  MOV dword ptr [EBP+0x14],0x0 at
+   00039460 is the seed of the 0..3 counter, which the original keeps in its own
+   argument slot; the value fdps_run_death_scripts pushed -- the index of the
+   unit that made the killing action, not that of the dead general whose script
+   is running -- is spent by that store and nothing loads the slot before it.
+   The counter is emitted as a local of its own here; nothing observes the
+   difference.
+
+   TWO VALUES ARE USED AFTER A CALL.  fdps_unit_is_retired's answer comes back in
+   EAX and is tested by the TEST EAX,EAX at 00039486 that follows the ADD ESP
+   cleaning its argument, so it is the call's own result and not a leftover, and
+   fdps_get_unit_record's record pointer comes back in EAX and is stored to
+   [EBP-0x8], which is re-read once for the load of the AI byte and again for the
+   store, so both halves of the merge address the record the fetch returned.  The
+   fdps_draw_text cursor is discarded -- the next instruction after the CALL at
+   000394b8 is the ADD ESP,0x1c that cleans its arguments -- and fdps_deploy_wave
+   returns nothing.  Nothing sets EAX before the RET and no dispatcher reads what
+   comes back, so the result is void.
+
+   THE TEST DEPENDS ON THE CALLER'S ORDER.  fdps_run_death_scripts is reached
+   only after fdps_play_death_animation_and_mark_dead has stored the retired bit
+   into record+5, so the fourth general already reads as retired on the pass that
+   kills him.  Running the scripts before the marking leaves the wave forever
+   undeployed (rebuild_info/pitfalls.md).
+
+   Table slot 43 at 00060270. */
+void fdps_chapter_27_event_deploy_wave_1(int unit_index)
+{
+    /* Raised when one of the four answers the retirement test with 0, so the
+       rest of the body runs only while it is still clear. */
+    int any_general_still_standing;
+    /* Which of the four general records is being asked, 0 to 3. */
+    int general_slot;
+    /* The record the behaviour merge is written into, re-resolved on every
+       pass. */
+    struct fdps_unit_record *released_unit;
+    int released_unit_index;
+
+    any_general_still_standing = 0;
+
+    if (data_fdps_map_cell_event_triggered_flags[CH27_WAVE_1_ONE_SHOT_SLOT]
+            == 0) {
+        /* The store the original makes over its own argument slot at 00039460,
+           which is the only access the body makes to the slot; the counter is a
+           local of its own here, so this is what is left of that store. */
+        unit_index = 0;
+
+        for (general_slot = 0;
+             general_slot < CH27_GENERALS_COUNT;
+             general_slot++) {
+            if (fdps_unit_is_retired(CH27_GENERALS_FIRST_UNIT_INDEX
+                                     + general_slot) == 0) {
+                any_general_still_standing = 1;
+            }
+        }
+
+        if (any_general_still_standing == 0) {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CH27_WAVE_1_TEXT_ID,
+                           (unsigned char *) CH27_WAVE_1_TEXT_DEST,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+
+            fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                             CH27_REINFORCEMENT_WAVE,
+                             CH27_PLACE_ON_NEAREST_FREE_TILE);
+
+            for (released_unit_index = CH27_RELEASED_FIRST_UNIT_INDEX;
+                 released_unit_index <= CH27_RELEASED_LAST_UNIT_INDEX;
+                 released_unit_index++) {
+                released_unit = fdps_get_unit_record(released_unit_index);
+                released_unit->ai_behavior = (unsigned char)
+                    ((released_unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+                     CH27_RELEASED_BEHAVIOR_MODE);
+            }
+
+            data_fdps_map_cell_event_triggered_flags[
+                CH27_WAVE_1_ONE_SHOT_SLOT] = 1;
         }
     }
 }

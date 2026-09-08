@@ -3246,6 +3246,14 @@
       "status": "committed",
       "emitted_against": "0x86",
       "rounds": 0
+    },
+    "00039440": {
+      "name": "fdps_chapter_27_event_deploy_wave_1",
+      "target": "chevt5b.c",
+      "body_size": "0x101",
+      "status": "committed",
+      "emitted_against": "0x101",
+      "rounds": 0
     }
   }
 }

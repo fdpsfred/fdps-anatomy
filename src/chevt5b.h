@@ -130,4 +130,58 @@ extern void fdps_chapter_26_event_deploy_waves_2_and_3(int unit_index);
 extern void fdps_chapter_26_event_wave_2_defeated_line(int unit_index);
 #pragma aux fdps_chapter_26_event_wave_2_defeated_line "*" parm caller [];
 
+/* Chapter 27's four-generals death script: the script all four of the Mage
+   King's generals carry, which once the last of them is gone speaks his line,
+   brings the map's wave-1 reinforcements onto the battlefield and takes him out
+   of hold-position behaviour, and then latches itself off.
+
+   The four are the units at indices 0x0d..0x10 -- MAP26.DAT's deployment
+   records 1 to 4, landing behind the map's twelve party slots -- and the unit
+   released is 0x0c, record 0, the Mage King himself.  Every one of the four
+   carries the same death script, so this handler runs once for each of them as
+   it dies and does nothing until the last run finds the whole group retired.
+
+   TWO GATES, BOTH REFUSING THE WHOLE BODY: the one-shot latch must still be 0,
+   and every one of the four must answer fdps_unit_is_retired (unit.h) with a
+   non-zero.  The latch is element 0x12 of
+   data_fdps_map_cell_event_triggered_flags (gamedata.h), the same element
+   fdps_chapter_26_event_wave_2_defeated_line above uses in the chapter before
+   this one, which is safe because one chapter is loaded at a time and
+   fdps_chapter_state_reset clears the whole block when a chapter starts.
+
+   THE POLL IS NOT STOPPED BY THE FIRST SURVIVOR.  All four are asked on every
+   firing and the answers are gathered into one flag; a rewrite that broke out of
+   the loop asks fewer of them.  fdps_unit_is_retired only reads a record, so
+   nothing observes the difference beyond the call count.
+
+   THE ORDER IS LINE, WAVE, RELEASE, LATCH.  The boss's line is spoken while the
+   reinforcements are still off the board and he himself is still holding
+   position, and the latch is written after all three have happened.
+
+   ONLY THE BEHAVIOUR NIBBLE OF THE RELEASED RECORD IS WRITTEN.  The Mage King's
+   AI byte is merged, not stored: the low nibble -- the mode
+   fdps_map_actor_behavior_step dispatches on -- goes to 0x0b, the spell-first
+   chain that ends in a movement routine, and the high nibble is carried across
+   because two of its bits are per-unit flags the target scorers read on their
+   own.  The mode the map file deploys him in is 2, which never leaves its tile.
+
+   THE TEST DEPENDS ON THE CALLER'S ORDER.  fdps_run_death_scripts is reached
+   only after fdps_play_death_animation_and_mark_dead has marked the dead
+   retired, so the fourth general already reads as retired on the pass that kills
+   him.  Running the scripts before the marking leaves the wave permanently
+   undeployed.
+
+   Message 0x14 opens with the -0x11 speaker token carrying character id 0x3f,
+   the chapter's boss, so the line is the Mage King's own.
+
+   unit_index is the handler table's shared parameter.  The dispatcher that
+   reaches this slot, fdps_run_death_scripts, forwards the index of the unit that
+   made the killing action rather than that of the dead unit whose script is
+   running, and this handler reads neither: the incoming value is stored over
+   before anything else in the guarded block happens.
+
+   Table slot 43 at 00060270. */
+extern void fdps_chapter_27_event_deploy_wave_1(int unit_index);
+#pragma aux fdps_chapter_27_event_deploy_wave_1 "*" parm caller [];
+
 #endif

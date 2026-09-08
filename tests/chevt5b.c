@@ -1223,6 +1223,495 @@ static void ch26w_only_bit_zero_of_the_flags_byte_retires_a_unit(void)
     CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH26W_LATCH_SLOT], 1);
 }
 
+
+/* ---------------------------------------------------------------------------
+   fdps_chapter_27_event_deploy_wave_1 @ 00039440
+
+   The death script chapter 27's four generals all carry.  It polls four fixed
+   unit records through fdps_unit_is_retired and, when all four answer non-zero
+   and the one-shot latch is still clear, speaks one line, deploys the map's
+   wave-1 reinforcements and merges the behaviour mode 0x0b into a single unit
+   record, the chapter's boss, before raising the latch.
+
+   TWO FIXTURES, BECAUSE ONE OF THE TWO PATHS DEPLOYS.  Every firing that is
+   refused -- by the latch, or by one of the four still standing -- touches
+   nothing but a static unit array, so those cases run on the light fixture
+   below and need no game files at all.  A firing that goes through reaches
+   fdps_deploy_wave, which opens ICON.CEL and FIELD.VFS for itself whether or
+   not any record matches the wave, so those cases run on the shared map
+   fixture at the top of this file and skip themselves when the two files are
+   not staged.
+
+   The line is drawn for real either way: both fixtures aim the chapter text
+   pointer at a block whose every entry names one lone terminator, so
+   fdps_draw_text walks the entry, paints nothing and returns without needing a
+   font, a message panel or mode 13h.  Both blocks run to 0x15 entries because
+   PUSH 0x14 at 000394b0 asks for the last of them.  A draw that paints nothing
+   leaves nothing behind, which is why no case asserts a text id; that is pinned
+   in src/chevt5b.c against the instruction address instead.
+   --------------------------------------------------------------------------- */
+
+/* The array's stride and the record count the light fixture stages.  0x18
+   records put the boss at 0x0c, the four generals at 0x0d..0x10 and seven
+   records above them. */
+#define CH27D_UNIT_STRIDE 0x50
+#define CH27D_STAGED_UNITS 0x18
+
+/* The four records the poll covers and the two immediately outside it: ADD
+   EAX,0xd at 0003947a over a counter the CMP dword ptr [EBP+0x14],0x4 / JL at
+   00039467 runs from 0 to 3. */
+#define CH27D_FIRST_GENERAL 0x0d
+#define CH27D_GENERAL_COUNT 4
+#define CH27D_LAST_GENERAL (CH27D_FIRST_GENERAL + CH27D_GENERAL_COUNT - 1)
+#define CH27D_BELOW_GENERALS (CH27D_FIRST_GENERAL - 1)
+#define CH27D_ABOVE_GENERALS (CH27D_LAST_GENERAL + 1)
+
+/* The one record the behaviour merge writes, both ends of the inclusive range
+   holding 0xc -- staged at [EBP-0x24] and [EBP-0x20] at 000394d3 and 000394da
+   -- and the record below it, which must not move. */
+#define CH27D_BOSS_UNIT_INDEX 0x0c
+#define CH27D_BELOW_BOSS (CH27D_BOSS_UNIT_INDEX - 1)
+
+/* The latch element this handler owns, byte [0x000640ea] at 00039453 and
+   00039533 -- element 0x12 of the block at 0x000640d8 -- and three neighbours
+   it must leave alone: 0x10 is the chapter 26 ambush's, 0x11 the bow offer's,
+   and 0x13 is simply the element above. */
+#define CH27D_LATCH_SLOT 0x12
+#define CH27D_AMBUSH_LATCH_SLOT 0x10
+#define CH27D_BOW_LATCH_SLOT 0x11
+#define CH27D_LATCH_SLOT_ABOVE 0x13
+
+/* A latch value that is neither 0 nor the 1 the handler writes: the test at
+   00039453 is against 0, so this has to block the body, and a body that ran
+   anyway would leave 1 behind in its place. */
+#define CH27D_LATCH_ALREADY_UP 2
+
+/* The bit fdps_unit_is_retired reads, AND AL,0x1 at 000109d1 on the flags byte
+   at record offset 5, and a flags byte carrying every other bit but that one --
+   0x80 is the per-turn redraw flag, which a unit standing on the map does carry
+   and which must not read as retirement. */
+#define CH27D_RETIRED_BIT 0x01
+#define CH27D_EVERY_BIT_BUT_RETIRED 0xfe
+#define CH27D_EVERY_BIT 0xff
+
+/* What every staged record's AI byte holds before a run and what the merge is
+   required to leave in the boss's.  The low nibble is 2, the hold-position mode
+   MAP26.DAT deploys him in, and the high nibble carries both of the flag bits
+   the target scorers read on their own -- 0x40 in
+   fdps_map_actor_take_best_action and 0x80 in fdps_score_targets_for_item.  A
+   rebuild that wrote the mode as a whole byte would leave 0x0b here instead of
+   0xcb.  The second pair is a different high nibble, so that the whole nibble
+   is shown to survive and not just those two bits. */
+#define CH27D_STAGED_AI_BYTE 0xc2
+#define CH27D_RELEASED_AI_BYTE 0xcb
+#define CH27D_OTHER_STAGED_AI_BYTE 0x5f
+#define CH27D_OTHER_RELEASED_AI_BYTE 0x5b
+
+/* The chapter text block the line is spoken from: 0x15 entries, because PUSH
+   0x14 at 000394b0 asks for the last of them, each pointing at the same lone
+   terminator so that a draw walks it, paints nothing and returns. */
+#define CH27D_TEXT_IDS 0x15
+#define CH27D_TEXT_EMPTY_AT 0x40
+#define CH27D_TEXT_BLOCK_BYTES (CH27D_TEXT_EMPTY_AT + 2)
+#define CH27D_TEXT_END (-1)
+
+/* Any line height at all; the draw never reaches a glyph. */
+#define CH27D_FONT_LINE_HEIGHT 16
+
+/* Arguments a case fires with.  The dispatcher pushes the index of the unit
+   that made the killing action, so both of these are indices a real firing
+   could carry: one well below the polled block and one inside it. */
+#define CH27D_ARGUMENT_KILLER 3
+#define CH27D_ARGUMENT_INSIDE_BLOCK (CH27D_FIRST_GENERAL + 1)
+
+/* A unit count that stops one record short of the top of the polled block,
+   parked in the global so a case can show the four indices are literals and
+   that the record past the count is still asked. */
+#define CH27D_SHORT_UNIT_COUNT 0x0e
+
+/* What the map fixture stages for the deployment: four records, two of them
+   tagged with the wave this handler asks for and one on either side of it, so
+   a walk that matched the wrong wave would bring the wrong units on.  The two
+   arrivals land above the staged array in the order the walk meets them. */
+#define CH27D_ANY_TURN 6
+#define CH27D_SIDE_ENEMY 0
+#define CH27D_SPAWN_RECORD_COUNT 4
+#define CH27D_WAVE_BELOW_RECORD 0
+#define CH27D_FIRST_ARRIVAL_RECORD 1
+#define CH27D_SECOND_ARRIVAL_RECORD 2
+#define CH27D_WAVE_ABOVE_RECORD 3
+#define CH27D_WAVE_BELOW 0
+#define CH27D_REINFORCEMENT_WAVE 1
+#define CH27D_WAVE_ABOVE 2
+#define CH27D_WAVE_BELOW_CHAR_ID 4
+#define CH27D_FIRST_ARRIVAL_CHAR_ID 5
+#define CH27D_SECOND_ARRIVAL_CHAR_ID 6
+#define CH27D_WAVE_ABOVE_CHAR_ID 7
+#define CH27D_FIRST_ARRIVAL_AI_BYTE 0x37
+#define CH27D_SECOND_ARRIVAL_AI_BYTE 0x38
+#define CH27D_FIRST_ARRIVAL_INDEX CH27D_STAGED_UNITS
+#define CH27D_SECOND_ARRIVAL_INDEX (CH27D_STAGED_UNITS + 1)
+
+static unsigned char ch27d_units[CH27D_STAGED_UNITS * CH27D_UNIT_STRIDE];
+static unsigned char ch27d_text_block[CH27D_TEXT_BLOCK_BYTES];
+
+static struct fdps_unit_record *ch27d_unit(int unit_index)
+{
+    return (struct fdps_unit_record *)
+           (data_fdps_map_unit_array_ptr + unit_index * CH27D_UNIT_STRIDE);
+}
+
+/* The light fixture: twenty-four records every one of which is standing and
+   wearing the hold-position byte, a text block whose every entry is empty, and
+   a latch block with nothing raised in it.  Nothing here can deploy, so the
+   array is static. */
+static void ch27d_stage(void)
+{
+    int i;
+
+    memset(ch27d_text_block, 0, (size_t) CH27D_TEXT_BLOCK_BYTES);
+    *(short *) (ch27d_text_block + CH27D_TEXT_EMPTY_AT) = (short) CH27D_TEXT_END;
+    for (i = 0; i < CH27D_TEXT_IDS; i++) {
+        *(short *) (ch27d_text_block + i * 2) = (short) CH27D_TEXT_EMPTY_AT;
+    }
+    data_fdps_current_chapter_text_ptr = ch27d_text_block;
+    data_fdps_font_line_height = CH27D_FONT_LINE_HEIGHT;
+
+    memset(ch27d_units, 0, sizeof(ch27d_units));
+    data_fdps_map_unit_array_ptr = ch27d_units;
+    data_fdps_map_unit_count = CH27D_STAGED_UNITS;
+    for (i = 0; i < CH27D_STAGED_UNITS; i++) {
+        ch27d_unit(i)->ai_behavior = (unsigned char) CH27D_STAGED_AI_BYTE;
+    }
+
+    memset(data_fdps_map_cell_event_triggered_flags, 0,
+           sizeof(data_fdps_map_cell_event_triggered_flags));
+}
+
+/* The map fixture: the shared staging at the top of this file, given a
+   twenty-four record unit array the deployment can grow and a deployment table
+   holding two wave-1 records between one tagged with the wave below and one
+   with the wave above.  The array is malloc'd because the deployment reallocs
+   it. */
+static void ch27d_stage_map(void)
+{
+    int i;
+
+    ch26f_stage(CH27D_ANY_TURN);
+    data_fdps_font_line_height = CH27D_FONT_LINE_HEIGHT;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *)
+        malloc((size_t) (CH27D_STAGED_UNITS * CH26F_UNIT_STRIDE));
+    memset(data_fdps_map_unit_array_ptr, 0,
+           (size_t) (CH27D_STAGED_UNITS * CH26F_UNIT_STRIDE));
+    data_fdps_map_unit_count = CH27D_STAGED_UNITS;
+    for (i = 0; i < CH27D_STAGED_UNITS; i++) {
+        ch26f_unit(i)->side = (unsigned char) CH27D_SIDE_ENEMY;
+        ch26f_unit(i)->ai_behavior = (unsigned char) CH27D_STAGED_AI_BYTE;
+        ch26f_unit(i)->pos_x = 0;
+        ch26f_unit(i)->pos_y = 0;
+    }
+
+    ch26f_spawn_table[CH26F_SPAWN_TABLE_COUNT_OFFSET] =
+        (unsigned char) CH27D_SPAWN_RECORD_COUNT;
+    ch26f_set_spawn(CH27D_WAVE_BELOW_RECORD, CH27D_WAVE_BELOW_CHAR_ID,
+                    CH27D_WAVE_BELOW);
+    ch26f_set_spawn(CH27D_FIRST_ARRIVAL_RECORD, CH27D_FIRST_ARRIVAL_CHAR_ID,
+                    CH27D_REINFORCEMENT_WAVE);
+    ch26f_set_spawn(CH27D_SECOND_ARRIVAL_RECORD, CH27D_SECOND_ARRIVAL_CHAR_ID,
+                    CH27D_REINFORCEMENT_WAVE);
+    ch26f_set_spawn(CH27D_WAVE_ABOVE_RECORD, CH27D_WAVE_ABOVE_CHAR_ID,
+                    CH27D_WAVE_ABOVE);
+    ch26f_spawn_at(CH27D_FIRST_ARRIVAL_RECORD)->ai_class =
+        (unsigned char) CH27D_FIRST_ARRIVAL_AI_BYTE;
+    ch26f_spawn_at(CH27D_SECOND_ARRIVAL_RECORD)->ai_class =
+        (unsigned char) CH27D_SECOND_ARRIVAL_AI_BYTE;
+
+    memset(data_fdps_map_cell_event_triggered_flags, 0,
+           sizeof(data_fdps_map_cell_event_triggered_flags));
+}
+
+/* Takes the four records starting at first_index out of the battle, so a case
+   can slide the retired block up and down against the block the handler polls.
+   The map fixture gets its own version below because it reaches its records
+   through the shared accessor. */
+static void ch27d_retire_four_from(int first_index)
+{
+    int i;
+
+    for (i = 0; i < CH27D_GENERAL_COUNT; i++) {
+        ch27d_unit(first_index + i)->flags = (unsigned char) CH27D_RETIRED_BIT;
+    }
+}
+
+static void ch27d_retire_four_on_map(void)
+{
+    int i;
+
+    for (i = 0; i < CH27D_GENERAL_COUNT; i++) {
+        ch26f_unit(CH27D_FIRST_GENERAL + i)->flags =
+            (unsigned char) CH27D_RETIRED_BIT;
+    }
+}
+
+/* The two record fields the handler reaches through and the stride they are
+   indexed by.  fdps_unit_is_retired reads byte [EAX+0x5] at 000109ce, the merge
+   is applied to byte [EAX+0x34] at 00039520 and 0003952e, and
+   fdps_get_unit_record multiplies the index by 0x50 at 0002d21c, so those are
+   the offsets and the stride the emitted names have to sit at. */
+static void ch27d_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), CH27D_UNIT_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 5);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ai_behavior), 0x34);
+    CHECK_EQ(CH27D_LAST_GENERAL, 0x10);
+}
+
+/* One survivor anywhere in the four holds the whole body back, wherever he
+   stands: the block is retired in full and then one record of it is put back on
+   his feet, once for each of the four positions.  A rebuild that stopped polling
+   after the first answer, or that read the flag the wrong way round, fires on at
+   least one of these -- and a firing shows up in the latch and in the boss's AI
+   byte without any deployment having to happen. */
+static void ch27d_one_survivor_anywhere_holds_the_body(void)
+{
+    int survivor;
+    int positions_tested;
+    int fired_anyway;
+    int boss_moved;
+
+    positions_tested = 0;
+    fired_anyway = 0;
+    boss_moved = 0;
+    for (survivor = CH27D_FIRST_GENERAL; survivor <= CH27D_LAST_GENERAL;
+         survivor++) {
+        ch27d_stage();
+        ch27d_retire_four_from(CH27D_FIRST_GENERAL);
+        ch27d_unit(survivor)->flags = 0;
+
+        fdps_chapter_27_event_deploy_wave_1(CH27D_ARGUMENT_KILLER);
+
+        if (data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT] != 0) {
+            fired_anyway++;
+        }
+        if ((int) ch27d_unit(CH27D_BOSS_UNIT_INDEX)->ai_behavior
+                != CH27D_STAGED_AI_BYTE) {
+            boss_moved++;
+        }
+        positions_tested++;
+    }
+    CHECK_EQ(fired_anyway, 0);
+    CHECK_EQ(boss_moved, 0);
+    CHECK_EQ(positions_tested, CH27D_GENERAL_COUNT);
+}
+
+/* The polled block is 0x0d..0x10 and nothing else.  Sliding the retired block
+   one record down leaves 0x10 standing and sliding it one record up leaves 0x0d
+   standing, and neither fires; the record below the block is the boss himself
+   and the one above it is an ordinary garrison record, so a rebuild that drifted
+   by one at either end shows up here.  That the exact block does fire is the map
+   fixture's case below, because a firing deploys. */
+static void ch27d_the_block_is_the_four_records_from_0x0d(void)
+{
+    ch27d_stage();
+    ch27d_retire_four_from(CH27D_BELOW_GENERALS);
+
+    fdps_chapter_27_event_deploy_wave_1(CH27D_ARGUMENT_KILLER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT], 0);
+    CHECK_EQ((int) ch27d_unit(CH27D_BOSS_UNIT_INDEX)->ai_behavior,
+             CH27D_STAGED_AI_BYTE);
+
+    ch27d_stage();
+    ch27d_retire_four_from(CH27D_FIRST_GENERAL + 1);
+
+    fdps_chapter_27_event_deploy_wave_1(CH27D_ARGUMENT_KILLER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT], 0);
+    CHECK_EQ((int) ch27d_unit(CH27D_BOSS_UNIT_INDEX)->ai_behavior,
+             CH27D_STAGED_AI_BYTE);
+    CHECK_EQ(CH27D_ABOVE_GENERALS, 0x11);
+}
+
+/* A latch that is already up refuses the whole body, and it is tested against
+   zero rather than against one: an element staged with 2 comes back holding 2,
+   where a body that ran would have written 1 over it, and the boss is still
+   holding position.  That is also what says the wave cannot be deployed twice --
+   the three other deaths of the same four each run this handler again. */
+static void ch27d_a_raised_latch_refuses_the_body(void)
+{
+    ch27d_stage();
+    ch27d_retire_four_from(CH27D_FIRST_GENERAL);
+    data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT] =
+        (unsigned char) CH27D_LATCH_ALREADY_UP;
+
+    fdps_chapter_27_event_deploy_wave_1(CH27D_ARGUMENT_KILLER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT],
+             CH27D_LATCH_ALREADY_UP);
+    CHECK_EQ((int) ch27d_unit(CH27D_BOSS_UNIT_INDEX)->ai_behavior,
+             CH27D_STAGED_AI_BYTE);
+
+    fdps_chapter_27_event_deploy_wave_1(CH27D_ARGUMENT_KILLER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT],
+             CH27D_LATCH_ALREADY_UP);
+    CHECK_EQ((int) ch27d_unit(CH27D_BOSS_UNIT_INDEX)->ai_behavior,
+             CH27D_STAGED_AI_BYTE);
+}
+
+/* Only bit 0 of the flags byte retires a unit: four records carrying every bit
+   but that one are all still standing, so the body is refused and the boss keeps
+   the mode he was deployed in. */
+static void ch27d_only_bit_zero_of_the_flags_byte_retires_a_unit(void)
+{
+    int i;
+
+    ch27d_stage();
+    for (i = CH27D_FIRST_GENERAL; i <= CH27D_LAST_GENERAL; i++) {
+        ch27d_unit(i)->flags = (unsigned char) CH27D_EVERY_BIT_BUT_RETIRED;
+    }
+
+    fdps_chapter_27_event_deploy_wave_1(CH27D_ARGUMENT_KILLER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT], 0);
+    CHECK_EQ((int) ch27d_unit(CH27D_BOSS_UNIT_INDEX)->ai_behavior,
+             CH27D_STAGED_AI_BYTE);
+}
+
+/* The block is two literals and not the unit count: with the count stopping one
+   record short of the top of the block, the record past it is still asked, and
+   because he is the one left standing the body is still refused.  A poll bounded
+   by data_fdps_map_unit_count would have found the records it did ask all
+   retired and fired. */
+static void ch27d_the_block_does_not_follow_the_unit_count(void)
+{
+    ch27d_stage();
+    ch27d_retire_four_from(CH27D_FIRST_GENERAL);
+    ch27d_unit(CH27D_LAST_GENERAL)->flags = 0;
+    data_fdps_map_unit_count = CH27D_SHORT_UNIT_COUNT;
+
+    fdps_chapter_27_event_deploy_wave_1(CH27D_ARGUMENT_KILLER);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT], 0);
+    CHECK_EQ((int) ch27d_unit(CH27D_BOSS_UNIT_INDEX)->ai_behavior,
+             CH27D_STAGED_AI_BYTE);
+    CHECK_EQ(data_fdps_map_unit_count, CH27D_SHORT_UNIT_COUNT);
+    CHECK_EQ(CH27D_SHORT_UNIT_COUNT <= CH27D_LAST_GENERAL, 1);
+}
+
+/* The last death does all four things: the wave-1 records come onto the board
+   in the order the walk meets them, the boss comes out of hold position with his
+   flag bits intact, nothing else on the board moves, and the latch is raised in
+   its own element and in no neighbour.  The wave number is 1 and not the wave on
+   either side of it -- the records tagged 0 and 2 stay off the board -- and the
+   two arrivals keep the AI byte their deployment records name, which is what
+   says the behaviour merge covered one record and not the whole array. */
+static void ch27d_the_last_death_deploys_the_wave(void)
+{
+    int i;
+    int disturbed;
+
+    ch27d_stage_map();
+    ch27d_retire_four_on_map();
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT], 0);
+    CHECK_EQ(data_fdps_map_unit_count, CH27D_STAGED_UNITS);
+
+    ch26f_ensure_game_files();
+    if (!ch26f_files_ready) {
+        return;
+    }
+
+    fdps_chapter_27_event_deploy_wave_1(CH27D_ARGUMENT_KILLER);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH27D_STAGED_UNITS + 2);
+    CHECK_EQ((int) ch26f_unit(CH27D_FIRST_ARRIVAL_INDEX)->char_id,
+             CH27D_FIRST_ARRIVAL_CHAR_ID);
+    CHECK_EQ((int) ch26f_unit(CH27D_SECOND_ARRIVAL_INDEX)->char_id,
+             CH27D_SECOND_ARRIVAL_CHAR_ID);
+    CHECK_EQ((int) ch26f_unit(CH27D_FIRST_ARRIVAL_INDEX)->ai_behavior,
+             CH27D_FIRST_ARRIVAL_AI_BYTE);
+    CHECK_EQ((int) ch26f_unit(CH27D_SECOND_ARRIVAL_INDEX)->ai_behavior,
+             CH27D_SECOND_ARRIVAL_AI_BYTE);
+
+    CHECK_EQ((int) ch26f_unit(CH27D_BOSS_UNIT_INDEX)->ai_behavior,
+             CH27D_RELEASED_AI_BYTE);
+    CHECK_EQ((int) ch26f_unit(CH27D_BELOW_BOSS)->ai_behavior,
+             CH27D_STAGED_AI_BYTE);
+    CHECK_EQ((int) ch26f_unit(CH27D_FIRST_GENERAL)->ai_behavior,
+             CH27D_STAGED_AI_BYTE);
+
+    disturbed = 0;
+    for (i = 0; i < CH27D_STAGED_UNITS; i++) {
+        if (i == CH27D_BOSS_UNIT_INDEX) {
+            continue;
+        }
+        if ((int) ch26f_unit(i)->ai_behavior != CH27D_STAGED_AI_BYTE) {
+            disturbed++;
+        }
+    }
+    CHECK_EQ(disturbed, 0);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_AMBUSH_LATCH_SLOT],
+             0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_BOW_LATCH_SLOT], 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT_ABOVE],
+             0);
+}
+
+/* The whole high nibble of the boss's AI byte survives the merge, not just the
+   two bits the fixture's usual byte carries: a record staged with 0x5f comes
+   back holding 0x5b, so all four high bits are carried across and all four low
+   ones are replaced. */
+static void ch27d_the_merge_keeps_the_whole_high_nibble(void)
+{
+    ch27d_stage_map();
+    ch27d_retire_four_on_map();
+    ch26f_unit(CH27D_BOSS_UNIT_INDEX)->ai_behavior =
+        (unsigned char) CH27D_OTHER_STAGED_AI_BYTE;
+
+    ch26f_ensure_game_files();
+    if (!ch26f_files_ready) {
+        CHECK_EQ((int) ch26f_unit(CH27D_BOSS_UNIT_INDEX)->ai_behavior,
+                 CH27D_OTHER_STAGED_AI_BYTE);
+        return;
+    }
+
+    fdps_chapter_27_event_deploy_wave_1(CH27D_ARGUMENT_KILLER);
+
+    CHECK_EQ((int) ch26f_unit(CH27D_BOSS_UNIT_INDEX)->ai_behavior,
+             CH27D_OTHER_RELEASED_AI_BYTE);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT], 1);
+}
+
+/* The incoming index is stored over and never read: a firing handed the index
+   of one of the four generals does exactly what a firing handed the killer's
+   index does, and that general's own record is left as the poll found it. */
+static void ch27d_ignores_the_incoming_argument(void)
+{
+    ch27d_stage_map();
+    ch27d_retire_four_on_map();
+
+    ch26f_ensure_game_files();
+    if (!ch26f_files_ready) {
+        CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT], 0);
+        return;
+    }
+
+    fdps_chapter_27_event_deploy_wave_1(CH27D_ARGUMENT_INSIDE_BLOCK);
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH27D_LATCH_SLOT], 1);
+    CHECK_EQ(data_fdps_map_unit_count, CH27D_STAGED_UNITS + 2);
+    CHECK_EQ((int) ch26f_unit(CH27D_BOSS_UNIT_INDEX)->ai_behavior,
+             CH27D_RELEASED_AI_BYTE);
+    CHECK_EQ((int) ch26f_unit(CH27D_ARGUMENT_INSIDE_BLOCK)->ai_behavior,
+             CH27D_STAGED_AI_BYTE);
+    CHECK_EQ((int) ch26f_unit(CH27D_ARGUMENT_INSIDE_BLOCK)->flags,
+             CH27D_RETIRED_BIT);
+}
+
 void run_chevt5b_tests(void)
 {
     RUN_TEST(ch26a_record_shape_matches_the_offsets);
@@ -1248,4 +1737,14 @@ void run_chevt5b_tests(void)
     RUN_TEST(ch26w_ignores_the_incoming_argument);
     RUN_TEST(ch26w_the_block_does_not_follow_the_unit_count);
     RUN_TEST(ch26w_only_bit_zero_of_the_flags_byte_retires_a_unit);
+
+    RUN_TEST(ch27d_record_shape_matches_the_offsets);
+    RUN_TEST(ch27d_one_survivor_anywhere_holds_the_body);
+    RUN_TEST(ch27d_the_block_is_the_four_records_from_0x0d);
+    RUN_TEST(ch27d_a_raised_latch_refuses_the_body);
+    RUN_TEST(ch27d_only_bit_zero_of_the_flags_byte_retires_a_unit);
+    RUN_TEST(ch27d_the_block_does_not_follow_the_unit_count);
+    RUN_TEST(ch27d_the_last_death_deploys_the_wave);
+    RUN_TEST(ch27d_the_merge_keeps_the_whole_high_nibble);
+    RUN_TEST(ch27d_ignores_the_incoming_argument);
 }
