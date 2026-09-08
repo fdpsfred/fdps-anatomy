@@ -187,4 +187,33 @@ extern void fdps_chapter_25_event_upgrade_randis_sword(int unit_index);
 extern void fdps_chapter_25_event_marian_buys_wind_god_bow(int unit_index);
 #pragma aux fdps_chapter_25_event_marian_buys_wind_god_bow "*" parm caller [];
 
+/* Chapter 26's turn-4 event: one line of the chapter's own FDETXT26.TXT block
+   is spoken, and then the two ten-unit holding groups of the tower garrison
+   come off their holding behaviour and start advancing on the player.
+
+   MAP25.DAT's only live turn-event record is (turn 4, this slot, side 0), so
+   the event fires as the enemy phase of turn 4 opens -- immediately after the
+   player's fourth turn ends.  What it releases is unit indices 0x1a..0x2d,
+   deployment records 14..33 of the map's wave-0 block: two identical ten-unit
+   groups, every record of which the map file deploys in the holding behaviour
+   mode.  The commanders below them and the sixteen units above them keep
+   holding until fdps_chapter_26_event_deploy_waves_2_and_3, the next slot of
+   the same table, sweeps the whole wave-0 block.
+
+   ONLY THE BEHAVIOUR NIBBLE IS WRITTEN.  Each record's AI byte is merged, not
+   stored: the low nibble -- the mode fdps_map_actor_behavior_step dispatches
+   on -- goes to 0, and the high nibble is carried across because two of its
+   bits are per-unit flags the target scorers read on their own.
+
+   THE RANGE IS INCLUSIVE.  The last unit released is 0x2d and not 0x2c, and
+   the record above it is where the map's already-advancing units begin.
+
+   unit_index is the handler table's shared parameter and this handler does not
+   use it: the turn-event dispatcher that reaches this slot passes 0 and the
+   body overwrites the slot before anything else happens.
+
+   Table slot 40 at 00060264. */
+extern void fdps_chapter_26_event_enemies_advance(int unit_index);
+#pragma aux fdps_chapter_26_event_enemies_advance "*" parm caller [];
+
 #endif

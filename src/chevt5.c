@@ -653,3 +653,95 @@ void fdps_chapter_25_event_marian_buys_wind_god_bow(int unit_index)
             CH25_BOW_OFFER_ONE_SHOT_SLOT] = 1;
     }
 }
+
+/* Where chapter 26's advance order draws its line, PUSH 0xa0000 at 000391b1:
+   the top-left corner of the visible mode-13h page, kept a literal because it
+   is an address inside the display adapter's aperture rather than the address
+   of anything the linker places (rebuild_info/pitfalls.md, contract E). */
+#define CH26_TEXT_DEST 0x000a0000
+
+/* The entry of the chapter's own FDETXT26.TXT block the order speaks, PUSH
+   0x16 at 000391b6.  The message's token stream opens with speaker code -0x11
+   and operand 0x43, so the line is spoken by character id 0x43, one of the
+   chapter's four commanders. */
+#define CH26_ADVANCE_TEXT_ID 0x16
+
+/* The range the behaviour sweep covers and the mode it writes: 0x1a parked at
+   [EBP-0x20] at 000391c6, 0x2d at [EBP-0x1c] at 000391cd and 0 at [EBP-0x18]
+   at 000391d4.  0x1a is the first of the twenty records MAP25.DAT deploys in
+   the holding mode after the twelve party slots and the fourteen records below
+   them, 0x2d is the last of them, and mode 0 is the default movement chain
+   that paths a unit toward the nearest opposing unit. */
+#define CH26_ADVANCE_FIRST_UNIT_INDEX 0x1a
+#define CH26_ADVANCE_LAST_UNIT_INDEX 0x2d
+#define CH26_ADVANCE_BEHAVIOR_MODE 0
+
+/* 00039190.  Chapter 26's turn-4 advance order: a line of the chapter's text
+   is painted straight onto the screen and then the tower garrison's two
+   holding groups are switched to the advancing behaviour mode.
+
+   The frame is the family's four-push one with 0x20 bytes of locals -- PUSH
+   EBX / PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x20 at
+   00039190..00039196 -- so the one incoming dword sits at [EBP+0x14].  Both
+   caller-cleans in the body are this function's own (ADD ESP,0x1c after the
+   draw at 000391c3 and ADD ESP,0x4 after each record fetch at 0003920a), the
+   RET at 0003922c carries no immediate, and fdps_battle_run_turn_events -- the
+   dispatcher that reaches this table slot -- pushes one dword and drops it with
+   ADD ESP,0x4, so the convention is the stack one at both ends of the call.
+
+   THE INCOMING ARGUMENT IS NEVER READ.  MOV dword ptr [EBP+0x14],0x0 at
+   0003919c is the only access to the slot in the whole body and nothing loads
+   it afterwards.  The dispatcher pushes a literal 0 anyway, so no value is
+   lost by the store.
+
+   THE SWEEP IS INCLUSIVE AND SIGNED.  MOV EAX,[EBP-0x8] / CMP EAX,[EBP-0x10] /
+   JLE at 000391f3..000391f9, so unit 0x2d is written and a rewrite with a
+   strict less-than would leave it holding position.
+
+   THE MERGE KEEPS THE HIGH NIBBLE.  MOV DL,byte ptr [EAX+0x34] / AND DL,0xf0 /
+   MOV DH,byte ptr [EBP-0x14] / OR DH,DL / MOV byte ptr [EAX+0x34],DH at
+   00039213..00039221 reads the byte back, drops only its low four bits and
+   writes the merged value.  Writing the mode as a plain store also wipes bits
+   0x40 and 0x80, which fdps_map_actor_take_best_action (00012c6f) and
+   fdps_score_targets_for_item (0001337d) test as independent per-unit flags
+   (rebuild_info/pitfalls.md).
+
+   THE SWEEP IS AN INLINE EXPANSION AND NOT A CALL.  The three constants are
+   parked at [EBP-0x20], [EBP-0x1c] and [EBP-0x18] and copied into a second set
+   of slots at [EBP-0xc], [EBP-0x10] and [EBP-0x14] before the counter is
+   seeded -- the fingerprint of fdps_object_set_field34_low_nibble_range
+   expanded in place -- and the only CALL inside the loop is
+   fdps_get_unit_record, once per iteration.  Writing the range as a call to
+   that helper would put a CALL in the rebuild that the original does not make.
+
+   ONE VALUE IS USED AFTER A CALL.  The fdps_draw_text cursor is discarded --
+   the next instruction after the CALL at 000391be is the ADD ESP that cleans
+   its arguments -- while fdps_get_unit_record's record pointer comes back in
+   EAX and is stored to [EBP-0x4], which is re-read once for the load of the AI
+   byte and again for the store, so both halves of the merge address the record
+   that iteration fetched.  Nothing sets EAX before the RET and no dispatcher
+   reads what comes back, so the result is void. */
+void fdps_chapter_26_event_enemies_advance(int unit_index)
+{
+    /* The record the sweep is writing the behaviour mode into, re-resolved on
+       every pass. */
+    struct fdps_unit_record *advancing_unit;
+    int advancing_unit_index;
+
+    /* The store the original makes over its own argument slot and never reads
+       back; nothing here counts in it. */
+    unit_index = 0;
+
+    fdps_draw_text(data_fdps_current_chapter_text_ptr, CH26_ADVANCE_TEXT_ID,
+                   (unsigned char *) CH26_TEXT_DEST, VGA_SCREEN_PITCH,
+                   MESSAGE_FG_COLOR, MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+
+    for (advancing_unit_index = CH26_ADVANCE_FIRST_UNIT_INDEX;
+         advancing_unit_index <= CH26_ADVANCE_LAST_UNIT_INDEX;
+         advancing_unit_index++) {
+        advancing_unit = fdps_get_unit_record(advancing_unit_index);
+        advancing_unit->ai_behavior = (unsigned char)
+            ((advancing_unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+             CH26_ADVANCE_BEHAVIOR_MODE);
+    }
+}

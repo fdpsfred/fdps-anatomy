@@ -2026,6 +2026,260 @@ static void ch25b_seven_items_still_leave_room(void)
     CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH25B_LATCH_SLOT], 1);
 }
 
+/* ---------------------------------------------------------------------------
+   Chapter 26's turn-4 advance order, 00039190.
+
+   The handler has no gate, no latch and no global to branch on: it speaks one
+   line and then merges a constant behaviour mode into a fixed range of unit
+   records.  So the fixture is the smallest one in this file -- a chapter text
+   block and a unit array, nothing else -- and every case here is about the
+   three constants the range is built out of, 0x1a at 000391c6, 0x2d at
+   000391cd and 0 at 000391d4, and about the half of the AI byte the merge is
+   required to leave alone, AND DL,0xf0 at 00039216.
+
+   The line is drawn for real, the same way the chapter 24 cases above draw
+   theirs: the chapter text pointer is aimed at a block whose every entry names
+   one lone terminator, so fdps_draw_text walks the entry, paints nothing and
+   returns without needing a font, a message panel or mode 13h.  The block runs
+   to 0x17 entries because PUSH 0x16 at 000391b6 asks for the twenty-third of
+   them.  Nothing is left behind by a draw that paints nothing, which is why no
+   case here asserts a text id; that is pinned in src/chevt5.c against the
+   instruction address instead.
+
+   The unit array is static rather than malloc'd, unlike the chapter 24 and 25
+   fixtures: this handler deploys nothing, so nothing reallocs the block under
+   it.  It is longer than the range on both sides so that a case can watch the
+   records the sweep must not touch.
+   --------------------------------------------------------------------------- */
+
+/* The array's stride and the record count the fixture stages.  0x32 records
+   put one below the range and four above it. */
+#define CH26A_UNIT_STRIDE 0x50
+#define CH26A_STAGED_UNITS 0x32
+
+/* The range the sweep covers and the two records immediately outside it.  The
+   bound is inclusive -- MOV EAX,[EBP-0x8] / CMP EAX,[EBP-0x10] / JLE at
+   000391f3 -- so 0x2d is written and 0x2e is not. */
+#define CH26A_FIRST_ADVANCING 0x1a
+#define CH26A_LAST_ADVANCING 0x2d
+#define CH26A_BELOW_RANGE (CH26A_FIRST_ADVANCING - 1)
+#define CH26A_ABOVE_RANGE (CH26A_LAST_ADVANCING + 1)
+
+/* What every staged record's AI byte holds before a run and what the merge is
+   required to leave behind.  The low nibble is 2, the holding mode MAP25.DAT
+   deploys these twenty units in, and the high nibble carries both of the flag
+   bits the target scorers read on their own -- 0x40 in
+   fdps_map_actor_take_best_action and 0x80 in fdps_score_targets_for_item.  A
+   rebuild that wrote the mode as a whole byte would leave 0 here instead of
+   0xc0. */
+#define CH26A_STAGED_AI_BYTE 0xc2
+#define CH26A_ADVANCING_AI_BYTE 0xc0
+
+/* The chapter text block the order is spoken from: 0x17 entries, because PUSH
+   0x16 at 000391b6 asks for the last of them, each pointing at the same lone
+   terminator so that a draw walks it, paints nothing and returns. */
+#define CH26A_TEXT_IDS 0x17
+#define CH26A_TEXT_EMPTY_AT 0x40
+#define CH26A_TEXT_BLOCK_BYTES (CH26A_TEXT_EMPTY_AT + 2)
+#define CH26A_TEXT_END (-1)
+
+/* An argument that is a real unit index and is not the 0 the dispatcher pushes:
+   it names the record one below the range, so a handler that used it -- as
+   every other handler in this file does -- would show up as a write outside
+   the range. */
+#define CH26A_ARGUMENT_BELOW_RANGE CH26A_BELOW_RANGE
+
+/* A unit count far short of the range, parked in the global so a case can show
+   the bounds are literals and not derived from the array length. */
+#define CH26A_SHORT_UNIT_COUNT 4
+
+/* Any line height at all; the draw never reaches a glyph. */
+#define CH26A_FONT_LINE_HEIGHT 16
+
+static unsigned char ch26a_units[CH26A_STAGED_UNITS * CH26A_UNIT_STRIDE];
+static unsigned char ch26a_text_block[CH26A_TEXT_BLOCK_BYTES];
+
+static struct fdps_unit_record *ch26a_unit(int unit_index)
+{
+    return (struct fdps_unit_record *)
+           (data_fdps_map_unit_array_ptr + unit_index * CH26A_UNIT_STRIDE);
+}
+
+/* Fifty records all wearing the holding mode with both flag bits set, and a
+   text block every entry of which is empty. */
+static void ch26a_stage(void)
+{
+    int i;
+
+    memset(ch26a_text_block, 0, (size_t) CH26A_TEXT_BLOCK_BYTES);
+    *(short *) (ch26a_text_block + CH26A_TEXT_EMPTY_AT) = (short) CH26A_TEXT_END;
+    for (i = 0; i < CH26A_TEXT_IDS; i++) {
+        *(short *) (ch26a_text_block + i * 2) = (short) CH26A_TEXT_EMPTY_AT;
+    }
+    data_fdps_current_chapter_text_ptr = ch26a_text_block;
+    data_fdps_font_line_height = CH26A_FONT_LINE_HEIGHT;
+
+    memset(ch26a_units, 0, sizeof(ch26a_units));
+    data_fdps_map_unit_array_ptr = ch26a_units;
+    data_fdps_map_unit_count = CH26A_STAGED_UNITS;
+    for (i = 0; i < CH26A_STAGED_UNITS; i++) {
+        ch26a_unit(i)->ai_behavior = (unsigned char) CH26A_STAGED_AI_BYTE;
+    }
+}
+
+/* The one field the handler reaches through and the stride it is indexed by.
+   The merge is applied to byte [EAX+0x34] at 00039213 and 00039221, and
+   fdps_get_unit_record multiplies the index by 0x50, so those are the offset
+   and the stride the emitted names have to sit at. */
+static void ch26a_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), CH26A_UNIT_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ai_behavior), 0x34);
+}
+
+/* Every record of the range comes out of the holding mode, and every one of
+   them keeps its flag bits: 0xc2 becomes 0xc0 and not 0. */
+static void ch26a_clears_the_mode_over_the_whole_range(void)
+{
+    int i;
+    int wrong_value;
+
+    ch26a_stage();
+
+    fdps_chapter_26_event_enemies_advance(0);
+
+    wrong_value = 0;
+    for (i = CH26A_FIRST_ADVANCING; i <= CH26A_LAST_ADVANCING; i++) {
+        if ((int) ch26a_unit(i)->ai_behavior != CH26A_ADVANCING_AI_BYTE) {
+            wrong_value++;
+        }
+    }
+    CHECK_EQ(wrong_value, 0);
+    CHECK_EQ(CH26A_LAST_ADVANCING - CH26A_FIRST_ADVANCING + 1, 20);
+}
+
+/* The bound is inclusive at the top and the range starts where it starts: the
+   record at 0x2d is written and the ones at 0x19 and 0x2e are not. */
+static void ch26a_the_range_is_inclusive_at_both_ends(void)
+{
+    ch26a_stage();
+
+    fdps_chapter_26_event_enemies_advance(0);
+
+    CHECK_EQ((int) ch26a_unit(CH26A_FIRST_ADVANCING)->ai_behavior,
+             CH26A_ADVANCING_AI_BYTE);
+    CHECK_EQ((int) ch26a_unit(CH26A_LAST_ADVANCING)->ai_behavior,
+             CH26A_ADVANCING_AI_BYTE);
+    CHECK_EQ((int) ch26a_unit(CH26A_BELOW_RANGE)->ai_behavior,
+             CH26A_STAGED_AI_BYTE);
+    CHECK_EQ((int) ch26a_unit(CH26A_ABOVE_RANGE)->ai_behavior,
+             CH26A_STAGED_AI_BYTE);
+}
+
+/* Nothing outside the twenty records is touched at all, from index 0 up to the
+   end of the staged array. */
+static void ch26a_writes_nothing_outside_the_range(void)
+{
+    int i;
+    int disturbed;
+
+    ch26a_stage();
+
+    fdps_chapter_26_event_enemies_advance(0);
+
+    disturbed = 0;
+    for (i = 0; i < CH26A_STAGED_UNITS; i++) {
+        if (i >= CH26A_FIRST_ADVANCING && i <= CH26A_LAST_ADVANCING) {
+            continue;
+        }
+        if ((int) ch26a_unit(i)->ai_behavior != CH26A_STAGED_AI_BYTE) {
+            disturbed++;
+        }
+    }
+    CHECK_EQ(disturbed, 0);
+}
+
+/* The whole high nibble survives, not just the two bits the fixture's usual
+   byte carries: each record of the range is staged with a different one and
+   every one of them comes back unchanged with a zero low nibble. */
+static void ch26a_keeps_the_high_nibble_of_every_record(void)
+{
+    int i;
+    int wrong_value;
+    int expected;
+
+    ch26a_stage();
+    for (i = CH26A_FIRST_ADVANCING; i <= CH26A_LAST_ADVANCING; i++) {
+        ch26a_unit(i)->ai_behavior =
+            (unsigned char) (((i & 0xf) << 4) | 0x0f);
+    }
+
+    fdps_chapter_26_event_enemies_advance(0);
+
+    wrong_value = 0;
+    for (i = CH26A_FIRST_ADVANCING; i <= CH26A_LAST_ADVANCING; i++) {
+        expected = (i & 0xf) << 4;
+        if ((int) ch26a_unit(i)->ai_behavior != expected) {
+            wrong_value++;
+        }
+    }
+    CHECK_EQ(wrong_value, 0);
+    CHECK_EQ((int) ch26a_unit(CH26A_FIRST_ADVANCING)->ai_behavior,
+             (CH26A_FIRST_ADVANCING & 0xf) << 4);
+}
+
+/* The incoming argument is stored over and never read: a run handed the index
+   of the record just below the range does exactly what a run handed 0 does,
+   and that record is still holding afterwards. */
+static void ch26a_ignores_the_incoming_argument(void)
+{
+    ch26a_stage();
+
+    fdps_chapter_26_event_enemies_advance(CH26A_ARGUMENT_BELOW_RANGE);
+
+    CHECK_EQ((int) ch26a_unit(CH26A_ARGUMENT_BELOW_RANGE)->ai_behavior,
+             CH26A_STAGED_AI_BYTE);
+    CHECK_EQ((int) ch26a_unit(CH26A_FIRST_ADVANCING)->ai_behavior,
+             CH26A_ADVANCING_AI_BYTE);
+    CHECK_EQ((int) ch26a_unit(CH26A_LAST_ADVANCING)->ai_behavior,
+             CH26A_ADVANCING_AI_BYTE);
+}
+
+/* The bounds are literals and not the unit count: a count of four leaves the
+   same twenty records written.  Nothing in the body reads
+   data_fdps_map_unit_count, unlike the chapter 25 sweep next door, which takes
+   its top bound from it. */
+static void ch26a_range_does_not_follow_the_unit_count(void)
+{
+    ch26a_stage();
+    data_fdps_map_unit_count = CH26A_SHORT_UNIT_COUNT;
+
+    fdps_chapter_26_event_enemies_advance(0);
+
+    CHECK_EQ((int) ch26a_unit(CH26A_FIRST_ADVANCING)->ai_behavior,
+             CH26A_ADVANCING_AI_BYTE);
+    CHECK_EQ((int) ch26a_unit(CH26A_LAST_ADVANCING)->ai_behavior,
+             CH26A_ADVANCING_AI_BYTE);
+    CHECK_EQ(data_fdps_map_unit_count, CH26A_SHORT_UNIT_COUNT);
+}
+
+/* Running it twice changes nothing the first run did not: there is no latch and
+   no counter, so the order is simply re-issued. */
+static void ch26a_has_no_latch_and_repeats_cleanly(void)
+{
+    ch26a_stage();
+
+    fdps_chapter_26_event_enemies_advance(0);
+    ch26a_unit(CH26A_FIRST_ADVANCING)->ai_behavior =
+        (unsigned char) CH26A_STAGED_AI_BYTE;
+    fdps_chapter_26_event_enemies_advance(0);
+
+    CHECK_EQ((int) ch26a_unit(CH26A_FIRST_ADVANCING)->ai_behavior,
+             CH26A_ADVANCING_AI_BYTE);
+    CHECK_EQ((int) ch26a_unit(CH26A_BELOW_RANGE)->ai_behavior,
+             CH26A_STAGED_AI_BYTE);
+}
+
 void run_chevt5_tests(void)
 {
     RUN_TEST(ch24t_each_arrival_turn_deploys_its_own_wave);
@@ -2064,4 +2318,13 @@ void run_chevt5_tests(void)
     RUN_TEST(ch25b_latches_its_own_element_and_not_the_ambushs);
     RUN_TEST(ch25b_a_full_bag_is_refused);
     RUN_TEST(ch25b_seven_items_still_leave_room);
+
+    RUN_TEST(ch26a_record_shape_matches_the_offsets);
+    RUN_TEST(ch26a_clears_the_mode_over_the_whole_range);
+    RUN_TEST(ch26a_the_range_is_inclusive_at_both_ends);
+    RUN_TEST(ch26a_writes_nothing_outside_the_range);
+    RUN_TEST(ch26a_keeps_the_high_nibble_of_every_record);
+    RUN_TEST(ch26a_ignores_the_incoming_argument);
+    RUN_TEST(ch26a_range_does_not_follow_the_unit_count);
+    RUN_TEST(ch26a_has_no_latch_and_repeats_cleanly);
 }

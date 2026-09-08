@@ -3222,6 +3222,14 @@
       "status": "committed",
       "emitted_against": "0x12b",
       "rounds": 0
+    },
+    "00039190": {
+      "name": "fdps_chapter_26_event_enemies_advance",
+      "target": "chevt5.c",
+      "body_size": "0x9d",
+      "status": "committed",
+      "emitted_against": "0x9d",
+      "rounds": 0
     }
   }
 }
