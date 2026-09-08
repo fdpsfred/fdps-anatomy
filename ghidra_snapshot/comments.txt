@@ -10737,7 +10737,7 @@ Watcom alignment padding to the 00039e10 function entry: 8d 80 00 00 00 00 (lea 
 Destroys every enemy still standing on the battle map. Each of the post-battle and scripted scene handlers calls it first, before loading its scene script, so the map is cleared of enemies before the scene plays.
 
 Algorithm:
-Walks unit indices 0 .. DAT_00060150-1, the live unit count, fetching each 0x50-byte record with fdps_get_unit_record. Where the record's side byte at +0x6 is 0 -- the enemy side; 1 is the neutral side and 2 the player side -- it writes 0 into the current-HP word at +0x40, leaving max HP at +0x42 and every flag byte alone. It then calls FUN_0001d6c0 once, which plays the destruction sequence over every unit that is not retired and whose HP word is 0: it animates each one away, marks it removed and plays Explo.Saf over the map positions. Removing the units, updating their flags and redrawing the map are therefore all done by that one call, not by this loop.
+Walks unit indices 0 .. DAT_00060150-1, the live unit count, fetching each 0x50-byte record with fdps_get_unit_record. Where the record's side byte at +0x6 is 0 -- the enemy side; 1 is the neutral side and 2 the player side -- it writes 0 into the current-HP word at +0x40, leaving max HP at +0x42 and every flag byte alone. It then calls fdps_play_death_animation_and_mark_dead once, which plays the destruction sequence over every unit that is not retired and whose HP word is 0: it animates each one away, marks it removed and plays Explo.Saf over the map positions. Removing the units, updating their flags and redrawing the map are therefore all done by that one call, not by this loop.
 
 Parameters:
   None.
@@ -10748,7 +10748,7 @@ Returns:
 Pool: fdps  [reads the game's unit-count global at 0x00060150 and calls the game accessor fdps_get_unit_record; no Function ID hit in either the Watcom or the ail set, and all 27 references are direct CALLs from game-logic scene handlers]
 
 Rebuild note:
-The HP field is 16-bit: the instruction at 00039e53 is MOV word ptr [EAX+0x40],0x0, and the max-HP word sits immediately after it at +0x42. Declaring the field as int or long in the rebuild and writing rec->hp = 0 zeroes max HP as well, and the same scene handlers then run restore-current-from-maximum passes (FUN_0003b600 does one explicitly) which would bring every enemy back with a maximum of zero.
+The HP field is 16-bit: the instruction at 00039e53 is MOV word ptr [EAX+0x40],0x0, and the max-HP word sits immediately after it at +0x42. Declaring the field as int or long in the rebuild and writing rec->hp = 0 zeroes max HP as well, and the same scene handlers then run restore-current-from-maximum passes (fdps_chapter_24_end does one explicitly) which would bring every enemy back with a maximum of zero.
 
 === 00039e67 [EOL]
 Watcom multi-byte NOP alignment padding to 16-byte boundary at 00039e70

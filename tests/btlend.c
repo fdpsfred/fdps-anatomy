@@ -1,9 +1,10 @@
 /* tests/btlend.c -- cover for src/btlend.c.
  *
- * Three subjects: fdps_battle_count_remaining_units_on_side at 00018350,
- * fdps_battle_check_default_end_conditions at 0003a2e0 and
- * fdps_battle_show_win_fail_window at 00017ca0.  The notes below belong to the
- * first two; the third has its own banner further down.
+ * Four subjects: fdps_battle_count_remaining_units_on_side at 00018350,
+ * fdps_battle_check_default_end_conditions at 0003a2e0,
+ * fdps_battle_show_win_fail_window at 00017ca0 and
+ * fdps_battle_destroy_remaining_enemies at 00039e10.  The notes below belong
+ * to the first two; the last two have their own banners further down.
  *
  * Expected values come from the assembly at 00018350: the CMP EAX,[0x00060150]
  * / JL at 0001836d that bounds the walk with a signed compare before the body
@@ -994,6 +995,317 @@ static void the_previous_data_tables_are_leaked_and_nothing_else_is(void)
     CHECK_EQ(_heapchk(), _HEAPOK);
 }
 
+/* ------------------------------------------------------------------
+ * fdps_battle_destroy_remaining_enemies at 00039e10.
+ *
+ * Expected values come from the assembly at 00039e10: the CMP
+ * EAX,[0x00060150] / JL at 00039e26 that bounds the walk with a signed compare
+ * made before the body runs, the CMP byte ptr [EAX+0x6],0x0 / JNZ at 00039e4a
+ * that is the only test the loop makes, the MOV word ptr [EAX+0x40],0x0 at
+ * 00039e53 that clears the current hit-point word and nothing beside it, and
+ * the CALL 0x0001d6c0 at 00039e5b that sits outside the loop and is reached by
+ * falling out of it rather than by any branch.  None of them is read off the
+ * emitted C.
+ *
+ * WHY EVERY ENEMY IS RETIRED IN ALL BUT THE LAST CASE.  The call at the end is
+ * fdps_play_death_animation_and_mark_dead, which collects every unit that is
+ * not retired and whose hit-point word is 0 -- exactly the units the loop has
+ * just made -- and then spins and explodes them, which needs a graphics mode
+ * and a running timer.  A case that is about the loop alone therefore stages
+ * its enemies retired: the loop does not look at the flags byte, so their
+ * hit-point words are still cleared, while the routine at the end passes them
+ * over and returns having drawn nothing.  That is also what makes those cases
+ * a test of the loop's single test rather than of the two together.
+ *
+ * THE LAST CASE IS THE OTHER HALF and stages a live enemy, so the destruction
+ * sequence really runs.  It is what says the call happens at all, that it
+ * happens AFTER the loop -- the unit it destroys is one the loop brought to
+ * zero in the same call, and it entered with full hit points -- and that it is
+ * reached with no enemy left standing to make it conditional.  It needs the
+ * adapter in mode 13h and a timer interrupt for the reason tests/death.c
+ * gives, and it publishes a container holding an Explo.Saf of ZERO frames:
+ * the sheet is looked up and its frame count read before the explosion loop,
+ * so a count of zero runs the spin and the marking, which is what is asserted
+ * here, and skips the drawing, which tests/death.c already covers.
+ *
+ * The unit array is staged rather than read from a game file for the reason
+ * the first section gives: the function takes its whole input from the unit
+ * count global and the records the accessor resolves.  Nothing below asserts
+ * what either global holds on its own -- ticket 23 owns that.
+ * ------------------------------------------------------------------ */
+
+/* What a staged unit enters with.  The maximum is a different number from the
+   current so a store wider than the word at +0x40 shows up as a changed
+   maximum and not as a value that was already there. */
+#define DES_START_HP 30
+#define DES_MAX_HP 55
+
+/* The portrait id fdps_draw_map_unit drops a unit on, so no staged unit needs
+   a walk sprite when the last case composes a frame. */
+#define DES_NO_MAP_SPRITE 0x80
+
+/* The facing a staged unit enters with, so the spin's last frame -- 12 % 4 --
+   is visible as a change. */
+#define DES_START_FACING 2
+
+/* Where the live enemy stands.  Nothing is drawn over it, the sheet being
+   empty, so only the record matters. */
+#define DES_TILE_X 3
+#define DES_TILE_Y 3
+
+/* The synthetic sheet: a .SAF header carrying a frame count of zero, which is
+   the field fdps_saf_frame_count reads at 0x0c (resource_info/saf.md). */
+#define DES_SAF_FRAME_COUNT_AT 0x0c
+#define DES_SAF_BYTES 0x10
+
+/* The container it is looked up in, resource_info/vfs.md: an 11-byte header
+   naming the table offset and the entry count, a 24-byte packer signature, and
+   then 26-byte entries each opening with a NUL-terminated 8.3 name.  The name
+   is in upper case because that is the spelling the lookup produces from the
+   routine's own "Explo.Saf" literal before it compares. */
+#define DES_VFS_TABLE_AT 35
+#define DES_VFS_ENTRY_BYTES 26
+#define DES_VFS_ENTRY_SIZE_AT 0x0d
+#define DES_VFS_ENTRY_SIZE2_AT 0x11
+#define DES_VFS_ENTRY_START_AT 0x16
+#define DES_VFS_MEMBER "EXPLO.SAF"
+#define DES_VFS_MEMBER_AT (DES_VFS_TABLE_AT + DES_VFS_ENTRY_BYTES)
+#define DES_VFS_BYTES (DES_VFS_MEMBER_AT + DES_SAF_BYTES)
+
+static unsigned char des_saf[DES_SAF_BYTES];
+static unsigned char des_vfs[DES_VFS_BYTES];
+static void (__interrupt __far *des_saved_timer)();
+
+/* Advances the counter the way the game's timer does, which is what lets the
+   frames of the spin end. */
+static void __interrupt __far des_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(des_saved_timer);
+}
+
+/* Every unit alive, of the enemy side, holding a walk sprite the map drawer
+   will not look at, and published. */
+static void des_stage(int live_unit_count)
+{
+    int index;
+
+    stage(live_unit_count);
+    for (index = 0; index < STAGE_UNITS; index++) {
+        stage_units[index].portrait_id = DES_NO_MAP_SPRITE;
+        stage_units[index].facing = DES_START_FACING;
+        stage_units[index].hp_current = DES_START_HP;
+        stage_units[index].hp_max = DES_MAX_HP;
+    }
+}
+
+/* The record bytes the loop addresses by literal displacement: +6 for the side
+   byte it tests and +0x40 for the hit-point word it clears, with the maximum
+   at +0x42 right behind it and the 0x50 stride the accessor multiplies by.  If
+   the record measured anything else, the cases below would pass while reading
+   and writing the wrong bytes. */
+static void des_reads_the_measured_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 6);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_current), 0x40);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_max), 0x42);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 5);
+}
+
+/* CMP EAX,[0x00060150] / JL guards the body, so the count is a bound tested
+   first: a count of 0 resolves no record, and because the compare is the
+   signed JL a negative count does too rather than running away as an unsigned
+   one would. */
+static void des_an_empty_battle_destroys_nothing(void)
+{
+    des_stage(0);
+    stage_unit(0, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_battle_destroy_remaining_enemies();
+    CHECK_EQ((int) stage_units[0].hp_current, DES_START_HP);
+
+    des_stage(-1);
+    stage_unit(0, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_battle_destroy_remaining_enemies();
+    CHECK_EQ((int) stage_units[0].hp_current, DES_START_HP);
+}
+
+/* CMP byte ptr [EAX+0x6],0x0 / JNZ is an equality against zero, so the walk
+   clears the enemy side and leaves the other two exactly as they were.  The
+   maximum right behind the word says the store is the 16-bit one: an int-wide
+   store at +0x40 would take +0x42 with it. */
+static void des_only_the_enemy_side_is_brought_to_zero(void)
+{
+    des_stage(4);
+    stage_unit(0, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(1, SIDE_THIRD, FLAG_RETIRED);
+    stage_unit(2, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(3, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_battle_destroy_remaining_enemies();
+    CHECK_EQ((int) stage_units[0].hp_current, 0);
+    CHECK_EQ((int) stage_units[1].hp_current, DES_START_HP);
+    CHECK_EQ((int) stage_units[2].hp_current, DES_START_HP);
+    CHECK_EQ((int) stage_units[3].hp_current, 0);
+    CHECK_EQ((int) stage_units[0].hp_max, DES_MAX_HP);
+    CHECK_EQ((int) stage_units[3].hp_max, DES_MAX_HP);
+}
+
+/* Nothing but the hit-point word is written.  The flags byte, the facing and
+   the tile of a destroyed enemy all come back out untouched, which is what
+   makes the routine at the end the thing that removes the unit rather than
+   this loop. */
+static void des_no_other_field_of_the_record_is_written(void)
+{
+    des_stage(1);
+    stage_unit(0, SIDE_ENEMY, FLAG_RETIRED | FLAG_ACTED);
+    stage_units[0].pos_x = DES_TILE_X;
+    stage_units[0].pos_y = DES_TILE_Y;
+    fdps_battle_destroy_remaining_enemies();
+    CHECK_EQ((int) stage_units[0].hp_current, 0);
+    CHECK_EQ((int) stage_units[0].flags, FLAG_RETIRED | FLAG_ACTED);
+    CHECK_EQ((int) stage_units[0].facing, DES_START_FACING);
+    CHECK_EQ((int) stage_units[0].pos_x, DES_TILE_X);
+    CHECK_EQ((int) stage_units[0].pos_y, DES_TILE_Y);
+}
+
+/* The flags byte is not read at all: an enemy that has already left the battle
+   is cleared like one still standing, because the side byte is the loop's only
+   test. */
+static void des_a_retired_enemy_is_cleared_as_well(void)
+{
+    des_stage(2);
+    stage_unit(0, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED | FLAG_ACTED);
+    fdps_battle_destroy_remaining_enemies();
+    CHECK_EQ((int) stage_units[0].hp_current, 0);
+    CHECK_EQ((int) stage_units[1].hp_current, 0);
+}
+
+/* The bound is exclusive: the enemy sitting at index == count is outside the
+   walk even though the array holds it. */
+static void des_the_bound_is_exclusive(void)
+{
+    des_stage(2);
+    stage_unit(0, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_battle_destroy_remaining_enemies();
+    CHECK_EQ((int) stage_units[0].hp_current, 0);
+    CHECK_EQ((int) stage_units[1].hp_current, 0);
+    CHECK_EQ((int) stage_units[2].hp_current, DES_START_HP);
+}
+
+/* The record is resolved through the accessor with the loop index on every
+   iteration rather than stepped by 0x50, so the units written are the ones at
+   0..count-1 of the block that is published when the call is made. */
+static void des_the_walk_follows_the_published_array(void)
+{
+    des_stage(4);
+    stage_unit(0, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(3, SIDE_ENEMY, FLAG_RETIRED);
+    data_fdps_map_unit_array_ptr = (unsigned char *) &stage_units[2];
+    data_fdps_map_unit_count = 2;
+    fdps_battle_destroy_remaining_enemies();
+    CHECK_EQ((int) stage_units[0].hp_current, DES_START_HP);
+    CHECK_EQ((int) stage_units[1].hp_current, DES_START_HP);
+    CHECK_EQ((int) stage_units[2].hp_current, 0);
+    CHECK_EQ((int) stage_units[3].hp_current, 0);
+}
+
+/* An Explo.Saf of no frames, inside the container the destruction sequence
+   reads it out of, published as the resident BaseAni.vfs image. */
+static void des_stage_container(void)
+{
+    memset(des_saf, 0, (size_t) DES_SAF_BYTES);
+    des_saf[0] = 'S';
+    des_saf[1] = 'A';
+    des_saf[2] = 'F';
+    win_u16(des_saf, DES_SAF_FRAME_COUNT_AT, 0);
+
+    memset(des_vfs, 0, (size_t) DES_VFS_BYTES);
+    des_vfs[0] = 'V';
+    des_vfs[1] = 'F';
+    des_vfs[2] = 'S';
+    win_u16(des_vfs, 3, 1);
+    win_u16(des_vfs, 5, DES_VFS_TABLE_AT);
+    win_u32(des_vfs, 7, 1);
+    strcpy((char *) des_vfs + DES_VFS_TABLE_AT, DES_VFS_MEMBER);
+    win_u32(des_vfs, DES_VFS_TABLE_AT + DES_VFS_ENTRY_SIZE_AT,
+            (unsigned long) DES_SAF_BYTES);
+    win_u32(des_vfs, DES_VFS_TABLE_AT + DES_VFS_ENTRY_SIZE2_AT,
+            (unsigned long) DES_SAF_BYTES);
+    win_u32(des_vfs, DES_VFS_TABLE_AT + DES_VFS_ENTRY_START_AT,
+            (unsigned long) DES_VFS_MEMBER_AT);
+    memmove(des_vfs + DES_VFS_MEMBER_AT, des_saf, (size_t) DES_SAF_BYTES);
+}
+
+/* Nothing on the map and nothing in the way, so the frames the spin composes
+   carry only what the map drawer puts there for an empty scene. */
+static void des_stage_scene(void)
+{
+    des_stage_container();
+    data_fdps_animation_baseani_archive_ptr = des_vfs;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+}
+
+/* Put the staged globals back the way a freshly started program has them, for
+   the reason tests/death.c gives: both hold blocks the game's own loaders
+   free, and leaving one pointing at a static here hands a later test a free()
+   of storage that never came from the heap. */
+static void des_unstage(void)
+{
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_animation_baseani_archive_ptr = NULL;
+}
+
+/* One whole call with the adapter in the mode the sequence draws in and a
+   timer interrupt running, so the frames it paces itself with can end. */
+static void des_run_with_the_sequence(void)
+{
+    des_stage_scene();
+    win_set_mode(WIN_MODE_320X200X256);
+    des_saved_timer = _dos_getvect(WIN_TIMER_VECTOR);
+    _dos_setvect(WIN_TIMER_VECTOR, des_timer_isr);
+    fdps_battle_destroy_remaining_enemies();
+    _dos_setvect(WIN_TIMER_VECTOR, des_saved_timer);
+    win_set_mode(WIN_MODE_TEXT);
+}
+
+/* The call at 00039e5b runs, and it runs after the loop: the enemy staged here
+   walks in with full hit points and not retired, so the only thing that can
+   put it on the destruction sequence's list is the store the loop makes in
+   this same call.  It comes back marked -- flags byte 1 as a whole-byte store,
+   taking the acted flag with it -- and facing 0, the spin's thirteenth frame,
+   which is the sequence's own work and not the loop's.  The player unit beside
+   it is untouched, so the sequence took the enemy and nothing else. */
+static void des_the_destruction_sequence_runs_over_the_zeroed_enemy(void)
+{
+    des_stage(2);
+    stage_unit(0, SIDE_ENEMY, FLAG_ACTED);
+    stage_unit(1, SIDE_PLAYER, 0);
+    stage_units[0].pos_x = DES_TILE_X;
+    stage_units[0].pos_y = DES_TILE_Y;
+    des_run_with_the_sequence();
+    CHECK_EQ((int) stage_units[0].hp_current, 0);
+    CHECK_EQ((int) stage_units[0].hp_max, DES_MAX_HP);
+    CHECK_EQ((int) stage_units[0].flags, 1);
+    CHECK_EQ((int) stage_units[0].facing, 0);
+    CHECK_EQ((int) stage_units[1].hp_current, DES_START_HP);
+    CHECK_EQ((int) stage_units[1].flags, 0);
+    CHECK_EQ((int) stage_units[1].facing, DES_START_FACING);
+    des_unstage();
+}
+
 void run_btlend_tests(void)
 {
     RUN_TEST(record_layout_matches_the_offsets);
@@ -1022,4 +1334,12 @@ void run_btlend_tests(void)
     RUN_TEST(every_frame_recomposes_the_battle_map);
     RUN_TEST(opening_the_container_reloads_every_data_table);
     RUN_TEST(the_previous_data_tables_are_leaked_and_nothing_else_is);
+    RUN_TEST(des_reads_the_measured_offsets);
+    RUN_TEST(des_an_empty_battle_destroys_nothing);
+    RUN_TEST(des_only_the_enemy_side_is_brought_to_zero);
+    RUN_TEST(des_no_other_field_of_the_record_is_written);
+    RUN_TEST(des_a_retired_enemy_is_cleared_as_well);
+    RUN_TEST(des_the_bound_is_exclusive);
+    RUN_TEST(des_the_walk_follows_the_published_array);
+    RUN_TEST(des_the_destruction_sequence_runs_over_the_zeroed_enemy);
 }

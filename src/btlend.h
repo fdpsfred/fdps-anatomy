@@ -1,4 +1,5 @@
-/* btlend.h -- deciding a battle is over, and the window that reports it.
+/* btlend.h -- deciding a battle is over, clearing the map of enemies once it
+ * is, and the window that reports the outcome.
  *
  * The tallies here are what the win/fail test and the result window are
  * phrased in: how many units of a given side are still standing, and the
@@ -102,5 +103,28 @@ extern void fdps_battle_check_default_end_conditions(void);
    and the caller repaints. */
 extern void fdps_battle_show_win_fail_window(void);
 #pragma aux fdps_battle_show_win_fail_window "*" parm caller [];
+
+/* Destroys every enemy still standing on the map, which is what each of the
+   chapter-end and scripted-scene handlers does before it loads its scene
+   script.  Takes nothing and returns nothing.
+
+   It walks battle unit indices 0..data_fdps_map_unit_count-1 (gamedata.h) and
+   writes 0 into the current hit-point word -- struct fdps_unit_record's
+   hp_current at record offset 0x40 -- of every unit whose side byte at offset
+   6 is 0, the enemy side.  The side byte is the only thing examined: a retired
+   enemy is written like any other, and maximum HP, the flags byte and every
+   other field are left alone.  A unit count of 0 or below resolves no record,
+   the bound being a signed test made before the body runs.
+
+   IT THEN CALLS fdps_play_death_animation_and_mark_dead (death.h) ONCE,
+   unconditionally, and that call is what does the destroying: the loop only
+   brings the enemies to zero hit points, which is the condition that routine
+   collects on before it spins each of them away, sets its flags byte to 1 and
+   plays Explo.Saf over its tile.  So the animation and everything it needs --
+   a graphics mode, the resident BaseAni.vfs image, a running timer tick --
+   are requirements of this function too, and it sweeps up any unit ALREADY at
+   zero hit points, of whatever side, along with the enemies it just zeroed. */
+extern void fdps_battle_destroy_remaining_enemies(void);
+#pragma aux fdps_battle_destroy_remaining_enemies "*" parm caller [];
 
 #endif

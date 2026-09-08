@@ -1,5 +1,6 @@
-/* btlend.c -- the end of a battle: the win and fail tests and the window that
- * reports the outcome.
+/* btlend.c -- the end of a battle: the win and fail tests, the sweep that
+ * clears the map of enemies once the outcome is settled, and the window that
+ * reports it.
  *
  * See btlend.h for what each entry point is asked and what its answer means.
  * Nothing here owns state: the battle units are reached through unit.h and
@@ -21,6 +22,7 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "blit.h"
+#include "death.h"
 #include "keybd.h"
 #include "main.h"
 #include "mapdraw.h"
@@ -134,6 +136,53 @@ void fdps_battle_check_default_end_conditions(void)
             data_fdps_chapter_event_or_battle_end_code = 1;
         }
     }
+}
+
+/* 00039e10.  One walk over the battle unit array with a single test per unit,
+   and then one call that does the destroying.
+
+   The bound is data_fdps_map_unit_count compared with CMP EAX,[0x00060150] /
+   JL at 00039e26, so index and count are both signed and the test runs before
+   the body: a count of 0 or below resolves no record at all.
+
+   The side test is CMP byte ptr [EAX+0x6],0x0 / JNZ at 00039e4a, the record
+   byte compared in place against zero -- the enemy side, against 1 for the
+   third side and 2 for the player's.  It is the only test: the flags byte is
+   never read here, so a retired enemy's record is written exactly like a
+   standing one's.
+
+   THE STORE IS 16 BITS WIDE.  MOV word ptr [EAX+0x40],0x0 at 00039e53 clears
+   the current hit-point word and stops there, and maximum HP is the word
+   immediately behind it at +0x42.  The chapter-end handlers that call this
+   then run restore-current-from-maximum passes -- fdps_chapter_24_end does one
+   explicitly -- so a store widened to an int would bring every enemy back with
+   a maximum of zero (rebuild_info/pitfalls.md).
+
+   The CALL at 00039e5b is unconditional and sits outside the loop, so it runs
+   once whatever the walk found, including when it found nothing.  It is what
+   actually removes the units this loop has just brought to zero: it collects
+   every unit that is not retired and whose hit-point word is 0, spins them,
+   sets each one's flags byte to 1 and plays Explo.Saf over their tiles
+   (death.h).  This loop only sets up the condition that call reads, which is
+   why the order of the two is the whole behaviour and not a detail.
+
+   The record pointer is re-resolved on every iteration rather than stepped by
+   0x50, which is what the original does and what keeps the walk correct across
+   an array that has moved. */
+void fdps_battle_destroy_remaining_enemies(void)
+{
+    /* The record the walk is on, [EBP-0x4]. */
+    struct fdps_unit_record *unit;
+    /* Which unit the walk is on, [EBP-0x8]. */
+    int unit_index;
+
+    for (unit_index = 0; unit_index < data_fdps_map_unit_count; unit_index++) {
+        unit = fdps_get_unit_record(unit_index);
+        if (unit->side == 0) {
+            unit->hp_current = 0;
+        }
+    }
+    fdps_play_death_animation_and_mark_dead();
 }
 
 /* The container the panel's artwork and the nine data tables come out of, and
