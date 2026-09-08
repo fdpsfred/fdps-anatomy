@@ -10026,15 +10026,15 @@ Alignment padding: lea eax,[eax+0x0] 3-byte NOP before FUN_000384e0.
 Chapter 22's turn-scheduled event handler: the one slot map21.dat names for all five of the chapter's turn events, running whichever of them is due for the turn the player has just finished.
 
 Algorithm:
-An if/else ladder on the battle turn counter DAT_00069ce8 -- set to 1 by fdps_chapter_state_reset and bumped once per turn cycle by fdps_battle_advance_turn -- with one branch per scheduled turn and no default branch; every branch jumps to the single epilogue at 0003889b. The incoming argument slot [EBP+0x14] is never read, and the turn-5 and turn-8 branches reuse it as their own 0..11 frame counter.
+An if/else ladder on the battle turn counter data_fdps_battle_turn_counter -- set to 1 by fdps_chapter_state_reset and bumped once per turn cycle by fdps_battle_advance_turn -- with one branch per scheduled turn and no default branch; every branch jumps to the single epilogue at 0003889b. The incoming argument slot [EBP+0x14] is never read, and the turn-5 and turn-8 branches reuse it as their own 0..11 frame counter.
 
 Two step shapes repeat through the ladder:
 
-  Speak a line -- FUN_0001ff60(DAT_00060124, index, 0xa0000, 0x140, 0xd0, 0, 0x6d) renders one message of the chapter's text out of the "fdetxt%02d.txt" buffer fdps_load_field_chapter_resources holds in DAT_00060124 (fdetxt22.txt for this chapter) straight to the mode-13h VGA framebuffer at 0xa0000 with pitch 0x140; 0xd0, 0 and 0x6d are the glyph arguments it forwards to fdps_draw_glyph.
+  Speak a line -- fdps_draw_text(data_fdps_current_chapter_text_ptr, index, 0xa0000, 0x140, 0xd0, 0, 0x6d) renders one message of the chapter's text out of the "fdetxt%02d.txt" buffer fdps_load_field_chapter_resources holds in data_fdps_current_chapter_text_ptr (fdetxt22.txt for this chapter) straight to the mode-13h VGA framebuffer at 0xa0000 with pitch 0x140; 0xd0, 0 and 0x6d are the glyph arguments it forwards to fdps_draw_glyph.
 
-  Pan the camera -- DAT_00069cd0 = 0 blanks the map cursor (fdps_draw_map_cursor draws nothing unless that global holds 1..6, and fdps_map_cursor_move_to renders a frame per step while it is 0), fdps_map_cursor_move_to walks the view to a map pixel position at 0x18 pixels per tile, twelve fdps_render_view_frame calls hold it there, and DAT_00069cd0 = 1 restores the ordinary cursor at the end of the branch.
+  Pan the camera -- data_fdps_map_cursor_draw_mode = 0 blanks the map cursor (fdps_draw_map_cursor draws nothing unless that global holds 1..6, and fdps_map_cursor_move_to renders a frame per step while it is 0), fdps_map_cursor_move_to walks the view to a map pixel position at 0x18 pixels per tile, twelve fdps_render_view_frame calls hold it there, and data_fdps_map_cursor_draw_mode = 1 restores the ordinary cursor at the end of the branch.
 
-  turn 1 (000384ec) -- message 0x0c, then FUN_00023830(DAT_00069cf4, 1, 0) deploys every map21.dat record whose wave byte (+0x15) is 1: sixteen units, the reinforcements that arrive in the three corridors and behind the boss.
+  turn 1 (000384ec) -- message 0x0c, then fdps_deploy_wave(data_fdps_chapter_current_chapter_id, 1, 0) deploys every map21.dat record whose wave byte (+0x15) is 1: sixteen units, the reinforcements that arrive in the three corridors and behind the boss.
 
   turn 3 (00038530) -- message 0x0d, then wave 2, eight units beside the boss.
 

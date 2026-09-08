@@ -1262,6 +1262,325 @@ static void ch21b_fires_once_and_the_latch_is_the_shared_slot(void)
              1);
 }
 
+/* ---------------------------------------------------------------------- */
+
+/* Chapter 22's turn-scheduled handler at 000384e0, from here down.
+ *
+ * It is one handler for five scheduled turns, so what the cases are really for
+ * is the ladder: which turn brings on which wave, and that a turn the ladder
+ * does not name does nothing at all.  The staging is the ch21 one above --
+ * the same blank walkable map, the same MAP00.COD placements, the same text
+ * block whose entries all name one lone terminator -- with the battle turn
+ * counter set on top of it, because that counter is the only thing this
+ * handler branches on.
+ *
+ * TURNS 5 AND 8 ARE NOT DRIVEN FROM HERE AND CANNOT BE.  Both branches call
+ * fdps_render_view_frame twelve times per pan, and that function spins on
+ * data_fdps_timer_tick_counter until the tick moves (src/mapdraw.c); with no
+ * timer interrupt installed the first hold loop never returns.  So the cases
+ * below cover the three branches that are drivable -- turns 1, 3 and 9 -- and
+ * the fall-through, and the turn 5 and turn 8 branches are left to the manual
+ * playtest.  They are the reason the "does nothing" case lists its turns
+ * explicitly instead of sweeping a range.
+ *
+ * The expected wave numbers are read off the PUSHes in the ladder and not
+ * guessed from the turn: PUSH 0x1 at 0003851b for turn 1 and PUSH 0x2 at
+ * 0003855f for turn 3.  The mapping is not the identity further along -- turn 5
+ * puts on waves 3 and 5 and turn 8 puts on wave 4 -- which is exactly why the
+ * two that can be driven are driven against decoy records tagged with the
+ * neighbouring waves.
+ */
+
+/* The turns the ladder names, CMP dword ptr [0x00069ce8],0x1 / 0x3 / 0x5 / 0x8
+   / 0x9 at 000384ec, 00038530, 00038574, 000386eb and 000387ce. */
+#define CH22_TURN_WAVE_1 1
+#define CH22_TURN_WAVE_2 3
+#define CH22_TURN_BEHAVIOR 9
+
+/* The waves those two drivable turns ask for, PUSH 0x1 at 0003851b and PUSH
+   0x2 at 0003855f. */
+#define CH22_DEPLOYED_WAVE_ON_TURN_1 1
+#define CH22_DEPLOYED_WAVE_ON_TURN_3 2
+
+/* Turns the ladder does not name.  5 and 8 are deliberately absent -- see the
+   note above -- and 0 is below the counter's opening value of 1, which
+   fdps_chapter_state_reset writes. */
+#define CH22_QUIET_TURN_COUNT 7
+
+/* The two index ranges turn 9 walks, the literals at 000387db, 000387e2,
+   0003883b and 00038842: the boss alone at 0x0b, then everything from 0x0c to
+   0x41 inclusive. */
+#define CH22_BOSS_INDEX 0x0b
+#define CH22_FIRST_REINFORCEMENT_INDEX 0x0c
+#define CH22_LAST_REINFORCEMENT_INDEX 0x41
+
+/* One index below the boss and one past the end of the second range, so a case
+   can say the ranges are bounded where the literals put them.  The staged array
+   has to reach the second of them, which is why it is one longer. */
+#define CH22_BELOW_FIRST_RANGE_INDEX 0x0a
+#define CH22_PAST_LAST_RANGE_INDEX 0x42
+#define CH22_TURN_9_STAGED_UNITS (CH22_PAST_LAST_RANGE_INDEX + 1)
+
+/* The behaviour byte before and after each write.  The high nibble carries AI
+   flags the scorers read and the merge is AND 0xf0 / OR at 00038828 and
+   00038888, so every one of these keeps its top four bits: the boss takes mode
+   0xb and each reinforcement takes mode 0. */
+#define CH22_BEHAVIOR_IN_BELOW 0x3a
+#define CH22_BEHAVIOR_IN_BOSS 0xc3
+#define CH22_BEHAVIOR_OUT_BOSS 0xcb
+#define CH22_BEHAVIOR_IN_FIRST 0x45
+#define CH22_BEHAVIOR_OUT_FIRST 0x40
+#define CH22_BEHAVIOR_IN_LAST 0xf7
+#define CH22_BEHAVIOR_OUT_LAST 0xf0
+#define CH22_BEHAVIOR_IN_PAST 0x5c
+
+/* Where MAP00.COD puts deployment record 1 and where MAP01.COD puts record 0,
+   which is what the ch21 cases above already read out of the shipped files. */
+#define CH22_MAP00_RECORD_1_X 22
+#define CH22_MAP00_RECORD_1_Y 12
+#define CH22_MAP01_RECORD_0_X 9
+#define CH22_MAP01_RECORD_0_Y 4
+
+/* The argument the dispatcher really pushes, PUSH 0x0 at 0002e13e, and a
+   second value that is a valid unit index, so a case can say the body reads
+   neither. */
+#define CH22_DISPATCHER_ARG 0
+#define CH22_OTHER_ARG 0x41
+
+/* The ch21 staging with the battle turn counter on top of it, because that
+   counter is the only thing the ladder branches on.  The latch byte the ch21
+   handlers use is left down so a case can say this handler never touches it. */
+static void ch22_stage(int unit_count, int turn)
+{
+    ch21_stage(unit_count);
+    data_fdps_battle_turn_counter = turn;
+}
+
+/* Three deployment records tagged with the wave asked for and with the waves
+   either side of it, so a firing has to pick the middle one out.  Record 1 is
+   the tagged one, which is the record MAP00.COD places at (22, 12). */
+static void ch22_stage_wave_decoys(int wave_no)
+{
+    ch21_spawn_table[CH21_SPAWN_TABLE_COUNT_OFFSET] = 3;
+    ch21_set_spawn(0, 5, wave_no - 1);
+    ch21_set_spawn(1, 6, wave_no);
+    ch21_set_spawn(2, 7, wave_no + 1);
+}
+
+/* Turn 1 speaks its line and brings on wave 1, and wave 1 is what the PUSH at
+   0003851b says: of three records tagged 0, 1 and 2 only the middle one is
+   deployed, appended behind the unit already on the map and placed on MAP00.COD
+   record 1's tile. */
+static void ch22_turn_1_deploys_wave_1(void)
+{
+    ch21_ensure_game_files();
+    if (!ch21_files_ready) {
+        return;
+    }
+    ch22_stage(1, CH22_TURN_WAVE_1);
+    ch22_stage_wave_decoys(CH22_DEPLOYED_WAVE_ON_TURN_1);
+
+    fdps_chapter_22_event_for_turn(CH22_DISPATCHER_ARG);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch21_unit(1)->char_id, 6);
+    CHECK_EQ((int) ch21_unit(1)->pos_x, CH22_MAP00_RECORD_1_X);
+    CHECK_EQ((int) ch21_unit(1)->pos_y, CH22_MAP00_RECORD_1_Y);
+}
+
+/* Turn 3 brings on wave 2 and not wave 3: the turn number and the wave number
+   are two different literals in the ladder, and the mapping stops agreeing with
+   itself two turns later. */
+static void ch22_turn_3_deploys_wave_2(void)
+{
+    ch21_ensure_game_files();
+    if (!ch21_files_ready) {
+        return;
+    }
+    ch22_stage(1, CH22_TURN_WAVE_2);
+    ch22_stage_wave_decoys(CH22_DEPLOYED_WAVE_ON_TURN_3);
+
+    fdps_chapter_22_event_for_turn(CH22_DISPATCHER_ARG);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch21_unit(1)->char_id, 6);
+    CHECK_EQ((int) ch21_unit(1)->pos_x, CH22_MAP00_RECORD_1_X);
+    CHECK_EQ((int) ch21_unit(1)->pos_y, CH22_MAP00_RECORD_1_Y);
+}
+
+/* The ladder is five equalities with no default branch, so a turn it does not
+   name leaves the map exactly as it found it -- nothing deployed and no
+   behaviour byte touched.  Turn 0 is below the counter's opening value and the
+   turns after 9 are past the last test, which is the end a rebuild written as
+   ">= 9" would get wrong. */
+static void ch22_does_nothing_on_a_turn_it_does_not_name(void)
+{
+    static int quiet_turns[CH22_QUIET_TURN_COUNT] = {0, 2, 4, 6, 7, 10, 0x14};
+    int i;
+
+    for (i = 0; i < CH22_QUIET_TURN_COUNT; i++) {
+        ch22_stage(CH22_TURN_9_STAGED_UNITS, quiet_turns[i]);
+        ch22_stage_wave_decoys(CH22_DEPLOYED_WAVE_ON_TURN_1);
+        ch21_unit(CH22_BOSS_INDEX)->ai_behavior = CH22_BEHAVIOR_IN_BOSS;
+        ch21_unit(CH22_FIRST_REINFORCEMENT_INDEX)->ai_behavior =
+            CH22_BEHAVIOR_IN_FIRST;
+
+        fdps_chapter_22_event_for_turn(CH22_DISPATCHER_ARG);
+
+        CHECK_EQ(data_fdps_map_unit_count, CH22_TURN_9_STAGED_UNITS);
+        CHECK_EQ((int) ch21_unit(CH22_BOSS_INDEX)->ai_behavior,
+                 CH22_BEHAVIOR_IN_BOSS);
+        CHECK_EQ((int) ch21_unit(CH22_FIRST_REINFORCEMENT_INDEX)->ai_behavior,
+                 CH22_BEHAVIOR_IN_FIRST);
+    }
+}
+
+/* Turn 9 writes both ranges and stops where the literals say: index 0x0a is
+   below the first range and index 0x42 is one past the second, and neither
+   moves.  The boss takes mode 0xb and every reinforcement takes mode 0, so the
+   two ranges do not share a value either. */
+static void ch22_turn_9_writes_both_ranges_and_stops_at_their_ends(void)
+{
+    ch22_stage(CH22_TURN_9_STAGED_UNITS, CH22_TURN_BEHAVIOR);
+    ch21_unit(CH22_BELOW_FIRST_RANGE_INDEX)->ai_behavior =
+        CH22_BEHAVIOR_IN_BELOW;
+    ch21_unit(CH22_BOSS_INDEX)->ai_behavior = CH22_BEHAVIOR_IN_BOSS;
+    ch21_unit(CH22_FIRST_REINFORCEMENT_INDEX)->ai_behavior =
+        CH22_BEHAVIOR_IN_FIRST;
+    ch21_unit(CH22_LAST_REINFORCEMENT_INDEX)->ai_behavior =
+        CH22_BEHAVIOR_IN_LAST;
+    ch21_unit(CH22_PAST_LAST_RANGE_INDEX)->ai_behavior = CH22_BEHAVIOR_IN_PAST;
+
+    fdps_chapter_22_event_for_turn(CH22_DISPATCHER_ARG);
+
+    CHECK_EQ((int) ch21_unit(CH22_BELOW_FIRST_RANGE_INDEX)->ai_behavior,
+             CH22_BEHAVIOR_IN_BELOW);
+    CHECK_EQ((int) ch21_unit(CH22_BOSS_INDEX)->ai_behavior,
+             CH22_BEHAVIOR_OUT_BOSS);
+    CHECK_EQ((int) ch21_unit(CH22_FIRST_REINFORCEMENT_INDEX)->ai_behavior,
+             CH22_BEHAVIOR_OUT_FIRST);
+    CHECK_EQ((int) ch21_unit(CH22_LAST_REINFORCEMENT_INDEX)->ai_behavior,
+             CH22_BEHAVIOR_OUT_LAST);
+    CHECK_EQ((int) ch21_unit(CH22_PAST_LAST_RANGE_INDEX)->ai_behavior,
+             CH22_BEHAVIOR_IN_PAST);
+}
+
+/* The high nibble survives both writes.  All four expected values above keep
+   the top four bits of what was staged, and this case says so directly, because
+   an assignment of the mode instead of the merge would pass every range test
+   above while clearing the AI flags the scorers read. */
+static void ch22_turn_9_preserves_the_high_nibble(void)
+{
+    ch22_stage(CH22_TURN_9_STAGED_UNITS, CH22_TURN_BEHAVIOR);
+    ch21_unit(CH22_BOSS_INDEX)->ai_behavior = CH22_BEHAVIOR_IN_BOSS;
+    ch21_unit(CH22_FIRST_REINFORCEMENT_INDEX)->ai_behavior =
+        CH22_BEHAVIOR_IN_FIRST;
+    ch21_unit(CH22_LAST_REINFORCEMENT_INDEX)->ai_behavior =
+        CH22_BEHAVIOR_IN_LAST;
+
+    fdps_chapter_22_event_for_turn(CH22_DISPATCHER_ARG);
+
+    CHECK_EQ((int) ch21_unit(CH22_BOSS_INDEX)->ai_behavior & 0xf0,
+             CH22_BEHAVIOR_IN_BOSS & 0xf0);
+    CHECK_EQ((int) ch21_unit(CH22_FIRST_REINFORCEMENT_INDEX)->ai_behavior
+             & 0xf0, CH22_BEHAVIOR_IN_FIRST & 0xf0);
+    CHECK_EQ((int) ch21_unit(CH22_LAST_REINFORCEMENT_INDEX)->ai_behavior & 0xf0,
+             CH22_BEHAVIOR_IN_LAST & 0xf0);
+}
+
+/* Turn 9 deploys nothing and speaks nothing: its branch holds no call to
+   fdps_deploy_wave at all, so a wave record sitting in the table is left where
+   it is even though the map is on a turn the ladder names. */
+static void ch22_turn_9_deploys_nothing(void)
+{
+    ch22_stage(CH22_TURN_9_STAGED_UNITS, CH22_TURN_BEHAVIOR);
+    ch22_stage_wave_decoys(CH22_DEPLOYED_WAVE_ON_TURN_1);
+
+    fdps_chapter_22_event_for_turn(CH22_DISPATCHER_ARG);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH22_TURN_9_STAGED_UNITS);
+}
+
+/* The incoming argument is never read.  Turn 9 with the dispatcher's own 0 and
+   turn 9 with a valid unit index change the same two records, so neither range
+   end nor any lookup comes off it -- and the argument is the slot the pan loops
+   count in, which is only sound because nothing reads it first. */
+static void ch22_ignores_the_incoming_argument(void)
+{
+    ch22_stage(CH22_TURN_9_STAGED_UNITS, CH22_TURN_BEHAVIOR);
+    ch21_unit(CH22_BOSS_INDEX)->ai_behavior = CH22_BEHAVIOR_IN_BOSS;
+    ch21_unit(CH22_LAST_REINFORCEMENT_INDEX)->ai_behavior =
+        CH22_BEHAVIOR_IN_LAST;
+
+    fdps_chapter_22_event_for_turn(CH22_OTHER_ARG);
+
+    CHECK_EQ((int) ch21_unit(CH22_BOSS_INDEX)->ai_behavior,
+             CH22_BEHAVIOR_OUT_BOSS);
+    CHECK_EQ((int) ch21_unit(CH22_LAST_REINFORCEMENT_INDEX)->ai_behavior,
+             CH22_BEHAVIOR_OUT_LAST);
+
+    ch22_stage(CH22_TURN_9_STAGED_UNITS, CH22_TURN_BEHAVIOR);
+    ch21_unit(CH22_BELOW_FIRST_RANGE_INDEX)->ai_behavior =
+        CH22_BEHAVIOR_IN_BELOW;
+    ch21_unit(CH22_BOSS_INDEX)->ai_behavior = CH22_BEHAVIOR_IN_BOSS;
+
+    fdps_chapter_22_event_for_turn(CH22_DISPATCHER_ARG);
+
+    CHECK_EQ((int) ch21_unit(CH22_BOSS_INDEX)->ai_behavior,
+             CH22_BEHAVIOR_OUT_BOSS);
+    CHECK_EQ((int) ch21_unit(CH22_BELOW_FIRST_RANGE_INDEX)->ai_behavior,
+             CH22_BEHAVIOR_IN_BELOW);
+}
+
+/* There is no one-shot latch anywhere in this handler: it is scheduled by the
+   map's turn-event table rather than tripped by a unit, so firing it twice on
+   the same turn deploys the wave twice.  The latch byte the chapter 21 ambushes
+   above use is left down throughout, which says the handler does not share
+   theirs either. */
+static void ch22_has_no_one_shot_latch(void)
+{
+    ch21_ensure_game_files();
+    if (!ch21_files_ready) {
+        return;
+    }
+    ch22_stage(1, CH22_TURN_WAVE_1);
+    ch22_stage_wave_decoys(CH22_DEPLOYED_WAVE_ON_TURN_1);
+    data_fdps_map_cell_event_triggered_flags[CH21B_LATCH_SLOT] = 0;
+
+    fdps_chapter_22_event_for_turn(CH22_DISPATCHER_ARG);
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+
+    fdps_chapter_22_event_for_turn(CH22_DISPATCHER_ARG);
+    CHECK_EQ(data_fdps_map_unit_count, 3);
+
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH21_LATCH_SLOT],
+             0);
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH21B_LATCH_SLOT],
+             0);
+}
+
+/* The map number comes from data_fdps_chapter_current_chapter_id read at the
+   call site and not from anything the handler holds: with the global on 1 the
+   deployment reads MAP01.COD, whose record 0 is (9, 4), where map 0's record 0
+   is (18, 0). */
+static void ch22_map_number_comes_from_the_chapter_global(void)
+{
+    ch21_ensure_game_files();
+    if (!ch21_files_ready) {
+        return;
+    }
+    ch22_stage(1, CH22_TURN_WAVE_1);
+    ch21_spawn_table[CH21_SPAWN_TABLE_COUNT_OFFSET] = 1;
+    ch21_set_spawn(0, 5, CH22_DEPLOYED_WAVE_ON_TURN_1);
+    data_fdps_chapter_current_chapter_id = 1;
+
+    fdps_chapter_22_event_for_turn(CH22_DISPATCHER_ARG);
+
+    CHECK_EQ(data_fdps_map_unit_count, 2);
+    CHECK_EQ((int) ch21_unit(1)->pos_x, CH22_MAP01_RECORD_0_X);
+    CHECK_EQ((int) ch21_unit(1)->pos_y, CH22_MAP01_RECORD_0_Y);
+}
+
 void run_chevt4_tests(void)
 {
     RUN_TEST(ch20_record_shape_matches_the_offsets);
@@ -1292,4 +1611,13 @@ void run_chevt4_tests(void)
     RUN_TEST(ch21b_advance_range_is_inclusive_at_both_ends);
     RUN_TEST(ch21b_advance_preserves_the_high_nibble);
     RUN_TEST(ch21b_fires_once_and_the_latch_is_the_shared_slot);
+    RUN_TEST(ch22_turn_1_deploys_wave_1);
+    RUN_TEST(ch22_turn_3_deploys_wave_2);
+    RUN_TEST(ch22_does_nothing_on_a_turn_it_does_not_name);
+    RUN_TEST(ch22_turn_9_writes_both_ranges_and_stops_at_their_ends);
+    RUN_TEST(ch22_turn_9_preserves_the_high_nibble);
+    RUN_TEST(ch22_turn_9_deploys_nothing);
+    RUN_TEST(ch22_ignores_the_incoming_argument);
+    RUN_TEST(ch22_has_no_one_shot_latch);
+    RUN_TEST(ch22_map_number_comes_from_the_chapter_global);
 }

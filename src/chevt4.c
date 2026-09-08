@@ -15,6 +15,8 @@
 #include "unititem.h"
 #include "text.h"
 #include "deploy.h"
+#include "mapcur.h"
+#include "mapdraw.h"
 #include "chevt4.h"
 
 /* The one unit index the chapter 20 event answers to, CMP dword ptr
@@ -406,6 +408,294 @@ void fdps_chapter_21_event_deploy_wave_2(int unit_index)
             advancing_unit = fdps_get_unit_record(advancing_unit_index);
             advancing_unit->ai_behavior = (unsigned char)
                 ((advancing_unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+                 AI_BEHAVIOR_MODE_ADVANCE);
+        }
+    }
+}
+
+/* The five turn numbers the ladder at 000384ec..000387d5 tests
+   data_fdps_battle_turn_counter against, in the order it tests them: CMP
+   dword ptr [0x00069ce8],0x1 / 0x3 / 0x5 / 0x8 / 0x9, each with a JNZ on to
+   the next.  Every one of the five is an equality, so a turn the ladder does
+   not name -- and every turn past 9 -- falls out of the whole body doing
+   nothing.  MAP21.DAT's turn-event table names this one handler slot five
+   times, once per turn in this list, and the counter it is read off starts a
+   battle at 1. */
+#define CH22_WAVE_1_TURN 1
+#define CH22_WAVE_2_TURN 3
+#define CH22_WAVE_3_AND_5_TURN 5
+#define CH22_WAVE_4_TURN 8
+#define CH22_BEHAVIOR_SWITCH_TURN 9
+
+/* The waves each of those turns brings on, PUSH 0x1 / 0x2 / 0x3 / 0x5 / 0x4 at
+   0003851b, 0003855f, 000385a7, 00038648 and 0003871e: matched by
+   fdps_deploy_wave against byte 0x15 of each 0x1a-byte deployment record of the
+   resident MAP%02d.DAT block.
+
+   THE TURN-TO-WAVE MAPPING IS NOT THE IDENTITY.  Turn 5 deploys wave 3 and then
+   wave 5, and turn 8 deploys wave 4, so putting the waves on in numeric order
+   lands wave 4's twenty-two units on the map three turns early and holds wave
+   5's four back to turn 8. */
+#define CH22_WAVE_1 1
+#define CH22_WAVE_2 2
+#define CH22_WAVE_3 3
+#define CH22_WAVE_4 4
+#define CH22_WAVE_5 5
+
+/* How every one of the five waves is placed, XOR EAX,EAX / PUSH EAX before each
+   deployment call: zero, so fdps_deploy_wave passes 0 on to fdps_deploy_unit
+   and each arrival settles on the nearest free walkable tile to its placement
+   record's coordinates rather than on those coordinates themselves. */
+#define CH22_PLACE_ON_NEAREST_FREE_TILE 0
+
+/* The entries of the chapter's own text block the six lines are spoken from,
+   PUSH 0x0c / 0x0d / 0x0e / 0x0f / 0x10 / 0x11 at 00038508, 0003854c, 00038594,
+   00038635, 000386d6 and 0003870b, out of the FDETXT22.TXT block
+   data_fdps_current_chapter_text_ptr holds.  Turn 5 speaks three of them and
+   every other firing turn speaks one; turn 9 speaks none. */
+#define CH22_WAVE_1_TEXT_ID 0x0c
+#define CH22_WAVE_2_TEXT_ID 0x0d
+#define CH22_WAVE_3_TEXT_ID 0x0e
+#define CH22_WAVE_5_TEXT_ID 0x0f
+#define CH22_AFTER_WAVE_5_TEXT_ID 0x10
+#define CH22_WAVE_4_TEXT_ID 0x11
+
+/* Where the six lines are drawn, PUSH 0xa0000 before each draw: the top-left
+   corner of the visible mode-13h page.  It stays a literal because it is an
+   address inside the display adapter's aperture rather than the address of
+   anything the linker places (rebuild_info/pitfalls.md, contract E). */
+#define CH22_TEXT_DEST 0x000a0000
+
+/* What data_fdps_map_cursor_draw_mode is parked at while the view is panned and
+   what it is put back to afterwards, MOV dword ptr [0x00069cd0],0x0 and ,0x1 at
+   000385b7 / 00038618 / 00038658 / 000386b9 and 0003872e / 000387bf.  Zero is
+   the mode fdps_draw_map_cursor draws nothing in, so the cursor is off the
+   screen for the whole pan; 1 is the ordinary battle cursor that
+   fdps_chapter_state_reset leaves a chapter running in. */
+#define CH22_MAP_CURSOR_BLANK 0
+#define CH22_MAP_CURSOR_NORMAL 1
+
+/* The map pixel positions the view is panned to, PUSH 0x0 / PUSH 0x60 at
+   000385c3, PUSH 0x1b0 / PUSH 0x60 at 000385ed and PUSH 0x1b0 / PUSH 0x1f8 at
+   00038794, and they are pixels rather than tiles: fdps_map_cursor_move_to
+   walks the view at 0x18 pixels per tile, so 0x1b0 is tile column 18 and 0x1f8
+   is tile row 21.  Turn 5 pans to the first two, twice over, and turn 8 pans to
+   all three. */
+#define CH22_PAN_LEFT_X 0
+#define CH22_PAN_RIGHT_X 0x1b0
+#define CH22_PAN_NORTH_Y 0x60
+#define CH22_PAN_SOUTH_Y 0x1f8
+
+/* How long the view is held at each of those positions, CMP dword ptr
+   [EBP+0x14],0xc / JL at every one of the seven hold loops: twelve calls into
+   fdps_render_view_frame, each of which spins until the timer tick moves, so
+   the count IS the dwell and not an instruction budget
+   (rebuild_info/pitfalls.md, contract D).  Shortening it shortens the pause the
+   player gets to read the map by exactly that many ticks. */
+#define CH22_PAN_HOLD_FRAMES 0xc
+
+/* The behaviour mode the boss is moved to on turn 9, the 0xb parked at
+   [EBP-0x18] at 000387e9 and merged in at 00038831: the branch
+   fdps_map_actor_behavior_step takes at 00010652.  The mask the merge keeps and
+   the mode every reinforcement is handed back to are the
+   AI_BEHAVIOR_FLAG_NIBBLE and AI_BEHAVIOR_MODE_ADVANCE the chapter 21 handler
+   above already spells out. */
+#define CH22_BOSS_BEHAVIOR_MODE 0x0b
+
+/* The two inclusive index ranges turn 9 walks: the 0xb parked at [EBP-0x20] and
+   [EBP-0x1c] at 000387db and 000387e2, then the 0xc and 0x41 parked at
+   [EBP-0x24] and [EBP-0x28] at 0003883b and 00038842.  The first range's ends
+   are the same index, so it is one record: MAP21.COD places 66 units and
+   MAP21.DAT holds 55 deployment records, so 0..0x0a are the roster and the
+   map's single wave-0 record -- the level-20 boss 巫湯婆婆 -- lands at 0x0b.
+   0x0c..0x41 is then all 54 units the five waves have put on the map by the
+   time turn 9 comes round.  Both are literals in the instruction stream and
+   neither is bounded against data_fdps_map_unit_count. */
+#define CH22_BOSS_FIRST_UNIT_INDEX 0x0b
+#define CH22_BOSS_LAST_UNIT_INDEX 0x0b
+#define CH22_REINFORCEMENT_FIRST_UNIT_INDEX 0x0c
+#define CH22_REINFORCEMENT_LAST_UNIT_INDEX 0x41
+
+/* 000384e0.  Chapter 22's turn-scheduled event handler: the one slot MAP21.DAT
+   names for all five of the chapter's turn events, running whichever of them is
+   due for the turn the player has just finished.
+
+   The frame is the family's four-push one -- PUSH EBX / PUSH ESI / PUSH EDI /
+   PUSH EBP / MOV EBP,ESP / SUB ESP,0x40 at 000384e0..000384e6 -- so the one
+   incoming dword sits at [EBP+0x14].  Every caller-clean in the body is this
+   function's own (ADD ESP,0x1c after each draw, ADD ESP,0xc after each
+   deployment, ADD ESP,0x8 after each pan and ADD ESP,0x4 after each record
+   lookup), the RET at 000388a1 carries no immediate, and the dispatcher pushes
+   one dword and drops it with ADD ESP,0x4 at 0002e146, so the convention is the
+   stack one at both ends of the call.
+
+   THE LADDER HAS NO DEFAULT BRANCH.  Five equality tests on
+   data_fdps_battle_turn_counter, each falling through a JNZ into the next, and
+   the last JNZ at 000387d5 goes straight to the epilogue at 0003889b.  So the
+   handler is called on every scheduled turn and simply does nothing on a turn
+   it does not name -- there is nothing here to fold into a table or a switch
+   default.
+
+   THE INCOMING ARGUMENT IS NEVER READ.  Nothing loads [EBP+0x14] before the
+   turn-5 branch stores 0 over it at 000385cd, and the whole 0x40 of locals is
+   accounted for by the two inline expansions at the end (eight dword slots
+   each), so the pan loops have no counter of their own: they really do count in
+   the caller's argument slot.  fdps_battle_run_turn_events, the only dispatcher
+   that reaches this table slot, pushes a literal 0 at 0002e13e, so no value is
+   lost by that.
+
+   THE TURN-TO-WAVE MAPPING IS NOT THE IDENTITY -- see CH22_WAVE_1 above.  Turn
+   5 puts on wave 3 and then wave 5, and turn 8 puts on wave 4.
+
+   THE TURN-9 RANGES ARE INLINE EXPANSIONS AND NOT CALLS.  Both carry
+   fdps_object_set_field34_low_nibble_range's whole fingerprint: three constants
+   parked in one set of slots, copied into a second set, and only then the
+   counter seeded from the first of them (000387db..00038802 and
+   0003883b..00038865).  There is no CALL to that helper anywhere in the body --
+   the only CALLs are the five callees this file's other handlers already use --
+   so writing either range as a call to it would put a CALL in the rebuild that
+   the original does not make.
+
+   BOTH RANGES ARE INCLUSIVE AT BOTH ENDS.  CMP EAX,dword ptr [EBP-0x10] / JLE
+   at 0003880e and CMP EAX,dword ptr [EBP-0x34] / JLE at 0003886e are signed
+   compares jumping into the body, so 0x0b and 0x41 are the last indices
+   WRITTEN.  The first range's two ends are the same index, so its loop body
+   runs exactly once, on the boss.
+
+   THE MERGE IS A READ-MODIFY-WRITE AND NOT AN ASSIGNMENT: MOV DL,byte ptr
+   [EAX+0x34] / AND DL,0xf0 / MOV DH,byte ptr [EBP-0x14] / OR DH,DL / MOV byte
+   ptr [EAX+0x34],DH at 00038828..00038836 and the same shape at
+   00038888..00038896.  Storing the mode whole would clear the two AI flag bits
+   the scorers read out of the high nibble.
+
+   THE CURSOR IS BLANKED PER PAN PAIR AND RESTORED PER PAIR.  Turn 5 blanks it
+   at 000385b7, restores it at 00038618, blanks it again at 00038658 and
+   restores it at 000386b9, so the line spoken between the two pan pairs is
+   spoken with the ordinary cursor on the map; turn 8 blanks it once at 0003872e
+   and restores it once at 000387bf across all three of its pans.  Both branches
+   leave it on 1.
+
+   The map number handed to fdps_deploy_wave is read out of
+   data_fdps_chapter_current_chapter_id at each call site (PUSH dword ptr
+   [0x00069cf4]) and not out of anything this handler holds, so it is whichever
+   chapter is loaded -- 21 for this one, which is the map21 the handler's table
+   slot is only ever named from.
+
+   Only one call's value is used afterwards, and it is fdps_get_unit_record's:
+   stored to [EBP-0x4] at 00038822 and reloaded at 00038825 and 0003882e for the
+   read and the write of the one byte, and the same shape through [EBP-0x40] at
+   00038882.  Each of the six fdps_draw_text cursors is discarded -- the next
+   instruction is a PUSH or a store -- fdps_deploy_wave leaves nothing this body
+   reads, and fdps_map_cursor_move_to and fdps_render_view_frame return nothing.
+   Nothing sets EAX before the RET and no dispatcher reads what comes back, so
+   the result is void. */
+void fdps_chapter_22_event_for_turn(int event_arg)
+{
+    struct fdps_unit_record *boss_unit;
+    struct fdps_unit_record *reinforcement_unit;
+    int boss_unit_index;
+    int reinforcement_unit_index;
+
+    if (data_fdps_battle_turn_counter == CH22_WAVE_1_TURN) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH22_WAVE_1_TEXT_ID,
+                       (unsigned char *) CH22_TEXT_DEST, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id, CH22_WAVE_1,
+                         CH22_PLACE_ON_NEAREST_FREE_TILE);
+    } else if (data_fdps_battle_turn_counter == CH22_WAVE_2_TURN) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH22_WAVE_2_TEXT_ID,
+                       (unsigned char *) CH22_TEXT_DEST, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id, CH22_WAVE_2,
+                         CH22_PLACE_ON_NEAREST_FREE_TILE);
+    } else if (data_fdps_battle_turn_counter == CH22_WAVE_3_AND_5_TURN) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH22_WAVE_3_TEXT_ID,
+                       (unsigned char *) CH22_TEXT_DEST, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id, CH22_WAVE_3,
+                         CH22_PLACE_ON_NEAREST_FREE_TILE);
+
+        data_fdps_map_cursor_draw_mode = CH22_MAP_CURSOR_BLANK;
+        fdps_map_cursor_move_to(CH22_PAN_LEFT_X, CH22_PAN_NORTH_Y);
+        for (event_arg = 0; event_arg < CH22_PAN_HOLD_FRAMES; event_arg++) {
+            fdps_render_view_frame();
+        }
+        fdps_map_cursor_move_to(CH22_PAN_RIGHT_X, CH22_PAN_NORTH_Y);
+        for (event_arg = 0; event_arg < CH22_PAN_HOLD_FRAMES; event_arg++) {
+            fdps_render_view_frame();
+        }
+        data_fdps_map_cursor_draw_mode = CH22_MAP_CURSOR_NORMAL;
+
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH22_WAVE_5_TEXT_ID,
+                       (unsigned char *) CH22_TEXT_DEST, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id, CH22_WAVE_5,
+                         CH22_PLACE_ON_NEAREST_FREE_TILE);
+
+        data_fdps_map_cursor_draw_mode = CH22_MAP_CURSOR_BLANK;
+        fdps_map_cursor_move_to(CH22_PAN_LEFT_X, CH22_PAN_NORTH_Y);
+        for (event_arg = 0; event_arg < CH22_PAN_HOLD_FRAMES; event_arg++) {
+            fdps_render_view_frame();
+        }
+        fdps_map_cursor_move_to(CH22_PAN_RIGHT_X, CH22_PAN_NORTH_Y);
+        for (event_arg = 0; event_arg < CH22_PAN_HOLD_FRAMES; event_arg++) {
+            fdps_render_view_frame();
+        }
+        data_fdps_map_cursor_draw_mode = CH22_MAP_CURSOR_NORMAL;
+
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH22_AFTER_WAVE_5_TEXT_ID,
+                       (unsigned char *) CH22_TEXT_DEST, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+    } else if (data_fdps_battle_turn_counter == CH22_WAVE_4_TURN) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH22_WAVE_4_TEXT_ID,
+                       (unsigned char *) CH22_TEXT_DEST, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id, CH22_WAVE_4,
+                         CH22_PLACE_ON_NEAREST_FREE_TILE);
+
+        data_fdps_map_cursor_draw_mode = CH22_MAP_CURSOR_BLANK;
+        fdps_map_cursor_move_to(CH22_PAN_LEFT_X, CH22_PAN_NORTH_Y);
+        for (event_arg = 0; event_arg < CH22_PAN_HOLD_FRAMES; event_arg++) {
+            fdps_render_view_frame();
+        }
+        fdps_map_cursor_move_to(CH22_PAN_RIGHT_X, CH22_PAN_NORTH_Y);
+        for (event_arg = 0; event_arg < CH22_PAN_HOLD_FRAMES; event_arg++) {
+            fdps_render_view_frame();
+        }
+        fdps_map_cursor_move_to(CH22_PAN_RIGHT_X, CH22_PAN_SOUTH_Y);
+        for (event_arg = 0; event_arg < CH22_PAN_HOLD_FRAMES; event_arg++) {
+            fdps_render_view_frame();
+        }
+        data_fdps_map_cursor_draw_mode = CH22_MAP_CURSOR_NORMAL;
+    } else if (data_fdps_battle_turn_counter == CH22_BEHAVIOR_SWITCH_TURN) {
+        for (boss_unit_index = CH22_BOSS_FIRST_UNIT_INDEX;
+             boss_unit_index <= CH22_BOSS_LAST_UNIT_INDEX;
+             boss_unit_index++) {
+            boss_unit = fdps_get_unit_record(boss_unit_index);
+            boss_unit->ai_behavior = (unsigned char)
+                ((boss_unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+                 CH22_BOSS_BEHAVIOR_MODE);
+        }
+
+        for (reinforcement_unit_index = CH22_REINFORCEMENT_FIRST_UNIT_INDEX;
+             reinforcement_unit_index <= CH22_REINFORCEMENT_LAST_UNIT_INDEX;
+             reinforcement_unit_index++) {
+            reinforcement_unit =
+                fdps_get_unit_record(reinforcement_unit_index);
+            reinforcement_unit->ai_behavior = (unsigned char)
+                ((reinforcement_unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
                  AI_BEHAVIOR_MODE_ADVANCE);
         }
     }

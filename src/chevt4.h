@@ -131,4 +131,51 @@ extern void fdps_chapter_21_event_deploy_wave_1(int unit_index);
 extern void fdps_chapter_21_event_deploy_wave_2(int unit_index);
 #pragma aux fdps_chapter_21_event_deploy_wave_2 "*" parm caller [];
 
+/* Chapter 22's turn-scheduled event: the one handler MAP21.DAT names for all
+   five of the chapter's turn events, running whichever of them is due for the
+   turn the player has just finished.
+
+   It is an if/else ladder of five equality tests on the battle turn counter and
+   it has no default branch, so on any other turn it does nothing at all.  The
+   incoming argument is never read: the dispatcher pushes 0 for a turn-scheduled
+   event and two of the branches write over the slot and count their hold frames
+   in it.
+
+   turn 1 -- speaks the chapter's line 0x0c and brings on wave 1, the sixteen
+   reinforcements that arrive in the three corridors and behind the boss.
+   turn 3 -- line 0x0d and wave 2, eight units beside the boss.
+   turn 5 -- line 0x0e and wave 3, four units; pans the view to the map's north
+   west and north east and holds twelve frames at each; then line 0x0f and wave
+   5, four more; the same pair of pans again; then line 0x10.
+   turn 8 -- line 0x11 and wave 4, twenty-two units, then three pans: north
+   west, north east and south east.
+   turn 9 -- no line and no deployment.  The boss at unit index 0x0b is moved to
+   behaviour mode 0x0b, its own scripted chase, and every unit from 0x0c to 0x41
+   -- all 54 the five waves have put on the map -- is handed back to mode 0, the
+   default advance, so the whole map starts moving at once.
+
+   THE TURN-TO-WAVE MAPPING IS NOT THE IDENTITY.  Turn 5 deploys wave 3 and then
+   wave 5, and turn 8 deploys wave 4.  Ordering the deployments by wave number
+   puts wave 4's twenty-two units on the map three turns early and holds wave 5's
+   four back to turn 8.
+
+   THE BEHAVIOUR WRITES ARE READ-MODIFY-WRITE ON THE LOW NIBBLE.  Byte 0x34 of a
+   unit record is packed: the low nibble is the behaviour mode and the high
+   nibble carries AI flags other code tests, so assigning the mode whole clears
+   them.  Both index ranges are inclusive at both ends and neither is bounded
+   against the map's unit count.
+
+   THE PANS BLANK THE MAP CURSOR AND PUT IT BACK.  Turn 5 blanks it for each of
+   its two pan pairs and restores it between them, so the line it speaks in the
+   middle is spoken with the cursor on the map; turn 8 blanks it once across all
+   three of its pans.  Both branches leave the cursor mode on 1, which is what a
+   chapter runs in.  Each hold is twelve frames and each frame waits for the
+   timer tick, so the count is the dwell the player reads the map in.
+
+   Table slot 31, and chapter 22's map21.dat is the only shipped file that names
+   it: all five live entries of its turn-event table route to this slot, with
+   phase 0 -- the pass the turn advance runs as the player's phase ends. */
+extern void fdps_chapter_22_event_for_turn(int event_arg);
+#pragma aux fdps_chapter_22_event_for_turn "*" parm caller [];
+
 #endif
