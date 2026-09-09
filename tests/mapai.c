@@ -1102,6 +1102,26 @@ static void bs_the_behavior_is_the_low_nibble_of_byte_0x34(void)
 #define TBA_CURSOR_BYTES (TBA_CURSOR_STREAM_AT + TBA_TILE_PX * 2)
 #define TBA_CURSOR_COLOR 0x21
 
+/* The spell arm sets the cursor overlay to the spell record's reach plus 2, so
+   a reach of 0 asks for sprite 1 where the attack arm only ever asks for
+   sprite 0.  Every entry the table has room for before the stream is filled
+   in; an entry left at zero aims the decoder at the sheet's own header and
+   reads a kilobyte past the block. */
+#define TBA_CURSOR_ENTRIES 12
+
+/* Number.cel, the sheet the popups queued during a spell cast are blitted
+   from: the MISS word when the roll refuses, one digit a cell when it lands.
+   fdps_cel_blit_sprite takes the piece's size out of the SHEET's header at
+   +0x07 and +0x09 (src/sprite.c), so a zeroed header is not a smaller sheet
+   but a decoder whose row counter runs under zero and writes 65535 pixels a
+   row.  The table is staged past 0x36, the last glyph the MISS word uses. */
+#define TBA_GLYPH_ENTRIES 0x40
+#define TBA_GLYPH_W 6
+#define TBA_GLYPH_ROWS 8
+#define TBA_GLYPH_STREAM_AT (TBA_CEL_TABLE_AT + TBA_GLYPH_ENTRIES * 4)
+#define TBA_GLYPH_BYTES (TBA_GLYPH_STREAM_AT + TBA_GLYPH_ROWS * 2)
+#define TBA_GLYPH_COLOR 0x23
+
 /* The unit gauge sheet: three 43 by 6 graphics 0x102 bytes apart. */
 #define TBA_GAUGE_GRAPHIC_STRIDE 0x102
 #define TBA_GAUGE_BYTES (TBA_GAUGE_GRAPHIC_STRIDE * 3)
@@ -1136,6 +1156,7 @@ static unsigned char tba_event[EVENT_CELLS_AT + TBA_CELLS];
 static unsigned char tba_grid[4 + TBA_CELLS * 2];
 static unsigned char tba_classes[TBA_CLASSES * TBA_CLASS_STRIDE];
 static unsigned char tba_cursor_kit[TBA_CURSOR_BYTES];
+static unsigned char tba_glyphs[TBA_GLYPH_BYTES];
 static unsigned char tba_gauge_sheet[TBA_GAUGE_BYTES];
 static unsigned char tba_vfs[TBA_VFS_BYTES];
 static void (__interrupt __far *tba_saved_timer)();
@@ -1178,14 +1199,30 @@ static void tba_stage_sheets(void)
 {
     int row;
     int offset;
+    int entry;
 
     tba_zero(tba_cursor_kit, (int) sizeof(tba_cursor_kit));
-    tba_u32(tba_cursor_kit, TBA_CEL_TABLE_AT,
-            (unsigned long) TBA_CURSOR_STREAM_AT);
+    for (entry = 0; entry < TBA_CURSOR_ENTRIES; entry++) {
+        tba_u32(tba_cursor_kit, TBA_CEL_TABLE_AT + entry * 4,
+                (unsigned long) TBA_CURSOR_STREAM_AT);
+    }
     for (row = 0; row < TBA_TILE_PX; row++) {
         tba_cursor_kit[TBA_CURSOR_STREAM_AT + row * 2] =
             (unsigned char) (TBA_TILE_PX - 1);
         tba_cursor_kit[TBA_CURSOR_STREAM_AT + row * 2 + 1] = TBA_CURSOR_COLOR;
+    }
+
+    tba_zero(tba_glyphs, (int) sizeof(tba_glyphs));
+    ((struct fdps_cel_header *) tba_glyphs)->sprite_width = TBA_GLYPH_W;
+    ((struct fdps_cel_header *) tba_glyphs)->sprite_height = TBA_GLYPH_ROWS;
+    for (entry = 0; entry < TBA_GLYPH_ENTRIES; entry++) {
+        tba_u32(tba_glyphs, TBA_CEL_TABLE_AT + entry * 4,
+                (unsigned long) TBA_GLYPH_STREAM_AT);
+    }
+    for (row = 0; row < TBA_GLYPH_ROWS; row++) {
+        tba_glyphs[TBA_GLYPH_STREAM_AT + row * 2] =
+            (unsigned char) (TBA_GLYPH_W - 1);
+        tba_glyphs[TBA_GLYPH_STREAM_AT + row * 2 + 1] = TBA_GLYPH_COLOR;
     }
 
     for (offset = 0; offset < TBA_GAUGE_GRAPHIC_STRIDE; offset++) {
@@ -1302,15 +1339,22 @@ static void tba_stage(void)
     data_fdps_map_ai_best_spell_id = 0;
     data_fdps_map_cursor_draw_mode = TBA_DRAW_SENTINEL;
 
-    /* Everything from here down is for the arm that plays an attack, and
+    /* Everything from here down is for the two arms that play something, and
        nothing below is read by any of the three searches.  The animation flag
        is one of them and is named rather than inherited: left set, the attack
        arm plays the full-screen exchange instead, which composes its clip
        names out of a portrait id and blocks on a member no fixture here
-       holds. */
+       holds.
+
+       The spell arm plays its cast on the map, which loads Emg%02d.saf out of
+       the shipped MISC.VFS (tests/gamefile.lst) and floats a popup over every
+       unit it resolved -- so the glyph sheet below is staged for its sake and
+       not the attack's. */
     data_fdps_ui_battle_animation_enabled = 0;
     tba_stage_sheets();
     data_fdps_cursor_highlight_sprite_sheet_ptr = tba_cursor_kit;
+    data_fdps_number_glyph_sheet_ptr = tba_glyphs;
+    data_fdps_number_glyph_color_row = 0;
     data_fdps_unit_gauge_sheet_ptr = tba_gauge_sheet;
     data_fdps_animation_baseani_archive_ptr = tba_vfs;
     data_fdps_scene_layer_count = 0;

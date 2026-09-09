@@ -1,5 +1,10 @@
 /* tests/aiact.c -- cover for src/aiact.c.
  *
+ * Two fixtures, one per entry point: the attack action's below, and the spell
+ * cast's beside its own cases further down.  The second builds on the first --
+ * it calls aa_stage and then moves the units onto the geometry a blast needs
+ * and adds the MAGICDAT.DAT record the search is claimed to have chosen.
+ *
  * fdps_map_actor_move_and_attack is a sequencer: every decision it makes it
  * makes by driving src/mapcur.c, src/movegrid.c, src/unit.c, src/aitarget.c,
  * src/gauge.c, src/unitatk.c, src/combat.c, src/death.c and src/unitstat.c,
@@ -820,6 +825,419 @@ static void aa_the_animation_flag_picks_the_full_screen_fight(void)
     aa_unstage();
 }
 
+/* ---- fdps_map_actor_cast_chosen_spell, 00013c90 -----------------------
+ *
+ * The cast is a sequencer as well, so the same rule holds: every case runs it
+ * end to end against the real callees and against the real MISC.VFS,
+ * FIGHT.VFS, BACKGRND.VFS and blend tables staged by tests/gamefile.lst, and
+ * reads its answers off the unit records, the movement grid and the globals.
+ *
+ * Expected values come from the assembly at 00013c90 -- CMP byte ptr
+ * [EAX + 0x6],0x0 at 00013cb6 with the stores of 1 and 0 that follow it, the
+ * widened MOV AL,byte ptr [EDX + 0x6] on the other arm, CMP dword ptr
+ * [0x00063f88],0x6 / JL at 00013cd9, the push order at 00013cf2-00013d0e that
+ * makes [0x00063f9c] the x of the aim and [0x00063fa0] the y, PUSH 0x0 at
+ * 00013cf6, the CALL to fdps_map_grid_reset at 00013d1f AFTER the collect, the
+ * two IMUL by 0x18 at 00013d37 and 00013d3f, CMP EAX,0x1 / JNZ at 00013d72,
+ * MOV dword ptr [0x00069cec],0x0 at 00013ddc and MOV dword ptr
+ * [0x00069cd0],0x0 at 00013de6 -- and from the documented behaviour of the
+ * callees.  None of them is read off the emitted C.
+ *
+ * WHY THE SPELL IS 0x05 ON THE MAP CASES AND 0x00 ON THE ANIMATION ONE.
+ * MISC.VFS holds EMG05.SAF, so the map presentation finds the clip it composes
+ * out of the id, and a member it cannot find ends the process inside
+ * fdps_vfs_load_entry rather than failing an assertion.  Record 5's MP cost is
+ * also the only non-zero one in the staged table, which is what makes the
+ * caster's MP a witness that the id forwarded to the presentation is the one
+ * the search left in 00063f90.  The full-screen case has to use the id
+ * tests/cmbspell.c already drives that presentation with -- MISC.VFS ships
+ * MB00/ML00/ME00 and FIGHT.VFS MAGIC000.SAF, STAND000.SAF and STAND001.SAF --
+ * because the fight screen composes four further names of its own.
+ *
+ * THE GEOMETRY.  The blast is reach 1, a diamond of the aim tile and its four
+ * orthogonal neighbours, aimed at (4, 1).  The target stands on the aim tile
+ * on the player's side and the ally on (3, 1) on the enemy's, so the two are
+ * both inside the blast and only the side filter can tell them apart; the
+ * caster sits at (0, 0) and the witness at (1, 4), both outside it.  Aiming at
+ * the transposed tile (1, 4) instead puts the witness inside the blast and the
+ * other two outside, which is what a body that read the two tile globals the
+ * other way round would produce for the first aim. */
+
+/* The 0x28 records MAGICDAT.DAT holds, at the stride fdps_get_spell_record
+   multiplies by. */
+#define AS_SPELL_TABLE_ENTRIES 0x28
+#define AS_SPELL_RECORD_STRIDE 7
+
+#define AS_SPELL_MAP 0x05
+#define AS_SPELL_FIGHT 0x00
+
+/* A power of 10 against a magic-resist complement of 100 is the unscaled
+   figure tests/spell.c pins on fdps_spell_damage_unit, and a hit rate of 100
+   makes rand() % 100 < hit_rate true on every draw.  What each case reads is
+   only whether a record lost hit points, so the figure itself is that file's
+   assertion and not one made here. */
+#define AS_SPELL_POWER 10
+#define AS_ALWAYS_HITS 100
+#define AS_NO_RESISTANCE 100
+
+/* The only non-zero MP cost in the staged table. */
+#define AS_SPELL_MP_COST 3
+#define AS_CASTER_MP 40
+#define AS_MP_AFTER_CAST (AS_CASTER_MP - AS_SPELL_MP_COST)
+
+/* The record's reach byte. */
+#define AS_BLAST_REACH 1
+
+/* Either side of the JL at 00013cd9. */
+#define AS_SCORE_PASSES 6
+#define AS_SCORE_REFUSED 5
+
+/* side_select as the two phases pass it. */
+#define AS_ENEMY_PHASE 0
+#define AS_NPC_PHASE 1
+
+/* The authored target-side byte at record +6.  0 is the player-facing value
+   the enemy phase inverts; 2 is an authored value that is neither 0 nor a
+   select_mode the collector reads the same way, and 3 is the mode that keeps
+   side 2. */
+#define AS_SIDE_BYTE_PLAYER 0
+#define AS_SIDE_BYTE_TWO 2
+#define AS_SIDE_BYTE_THREE 3
+
+/* The fourth staged unit: the caster's own side, standing inside the blast. */
+#define AS_ALLY 3
+
+#define AS_CASTER_X 0
+#define AS_CASTER_Y 0
+#define AS_CAST_TILE_X 4
+#define AS_CAST_TILE_Y 1
+#define AS_ALLY_X 3
+#define AS_ALLY_Y 1
+#define AS_WITNESS_X 1
+#define AS_WITNESS_Y 4
+
+/* Where the cursor is parked before each run: a tile that is neither the
+   caster's nor the aim, so a run that moved it and a run that did not are told
+   apart. */
+#define AS_PARKED_TILE 2
+
+/* What the pending experience holds on the way in. */
+#define AS_STALE_CREDIT 999
+
+/* One cache slot of map unit sprites: twelve stream offsets at the base of the
+   block, which is the one sheet whose table starts there rather than at 0x0f
+   (src/mapdraw.c).  Every entry points at the same 24-row flat fill, so the
+   four units on the map draw as solid blocks. */
+#define AS_SPRITE_CACHE_ENTRIES 12
+#define AS_SPRITE_TABLE_BYTES (AS_SPRITE_CACHE_ENTRIES * 4)
+#define AS_SPRITE_CACHE_BYTES (AS_SPRITE_TABLE_BYTES + AA_TILE_PX * 2)
+#define AS_SPRITE_COLOR 0x24
+
+/* The shadow the first of fdps_draw_map_units' two sweeps lays down for every
+   unit whose portrait id is not one of the exempt ones.  Its table is at the
+   ordinary 0x0f and the frames it reaches are the walk frame and the acted
+   frame, so four entries would do and sixteen are staged.  The attack fixture
+   above leaves this sheet NULL because it draws no units at all; the cast
+   cases put four on the map, and the sweep does not test the pointer. */
+#define AS_SHADOW_ENTRIES 16
+#define AS_SHADOW_STREAM_AT (AA_CEL_TABLE_AT + AS_SHADOW_ENTRIES * 4)
+#define AS_SHADOW_BYTES (AS_SHADOW_STREAM_AT + AA_TILE_PX * 2)
+#define AS_SHADOW_COLOR 0x25
+
+/* The blast outline the overlay mode this function sets puts on the map.  Mode
+   3 draws its five cells from cursor sprites 2, 3, 4, 5 and 0x0e, and the
+   attack fixture's kit carries only sprite 0 -- an entry the other indices
+   reach is zero there, which aims the decoder at the sheet's own header.  The
+   whole 0x12 the three diamond modes can ask for are staged. */
+#define AS_CURSOR_ENTRIES 0x12
+#define AS_CURSOR_STREAM_AT (AA_CEL_TABLE_AT + AS_CURSOR_ENTRIES * 4)
+#define AS_CURSOR_BYTES (AS_CURSOR_STREAM_AT + AA_TILE_PX * 2)
+#define AS_CURSOR_COLOR 0x26
+
+static unsigned char as_spells[AS_SPELL_TABLE_ENTRIES * AS_SPELL_RECORD_STRIDE];
+static unsigned char as_sprite_cache[AS_SPRITE_CACHE_BYTES];
+static unsigned char as_shadow_sheet[AS_SHADOW_BYTES];
+static unsigned char as_cursor_kit[AS_CURSOR_BYTES];
+
+static struct fdps_spell_effect *as_spell(int spell_id)
+{
+    return (struct fdps_spell_effect *)
+           (as_spells + spell_id * AS_SPELL_RECORD_STRIDE);
+}
+
+/* aa_stage's whole battle environment, plus the MAGICDAT.DAT record and the
+   decision the spell search is claimed to have published.  The four units are
+   moved onto the geometry described above, the caster on the player's side so
+   the full-screen presentation composes the M-prefixed clip names MISC.VFS
+   holds for it. */
+static void as_stage(int spell_id, int target_side_byte)
+{
+    int i;
+
+    aa_stage();
+
+    memset(as_spells, 0, (size_t) sizeof(as_spells));
+    as_spell(spell_id)->power = AS_SPELL_POWER;
+    as_spell(spell_id)->hit_rate = AS_ALWAYS_HITS;
+    as_spell(spell_id)->area = AS_BLAST_REACH;
+    as_spell(spell_id)->mp_cost = AS_SPELL_MP_COST;
+    as_spell(spell_id)->target_side = (unsigned char) target_side_byte;
+    data_fdps_battle_spell_effect_table_ptr = as_spells;
+
+    for (i = 0; i < AA_CLASS_ROWS; i++) {
+        aa_class_row(i)->magic_resist_complement = AS_NO_RESISTANCE;
+    }
+
+    memset(as_sprite_cache, 0, (size_t) AS_SPRITE_CACHE_BYTES);
+    for (i = 0; i < AS_SPRITE_CACHE_ENTRIES; i++) {
+        aa_u32(as_sprite_cache, i * 4, (unsigned long) AS_SPRITE_TABLE_BYTES);
+    }
+    aa_fill_rows(as_sprite_cache + AS_SPRITE_TABLE_BYTES, AA_TILE_PX,
+                 AA_TILE_PX, AS_SPRITE_COLOR);
+    data_fdps_cel_sprite_cache_ptr = as_sprite_cache;
+
+    memset(as_shadow_sheet, 0, (size_t) AS_SHADOW_BYTES);
+    for (i = 0; i < AS_SHADOW_ENTRIES; i++) {
+        aa_u32(as_shadow_sheet, AA_CEL_TABLE_AT + i * 4,
+               (unsigned long) AS_SHADOW_STREAM_AT);
+    }
+    aa_fill_rows(as_shadow_sheet + AS_SHADOW_STREAM_AT, AA_TILE_PX, AA_TILE_PX,
+                 AS_SHADOW_COLOR);
+    data_fdps_shadow_sprite_sheet_ptr = as_shadow_sheet;
+
+    memset(as_cursor_kit, 0, (size_t) AS_CURSOR_BYTES);
+    for (i = 0; i < AS_CURSOR_ENTRIES; i++) {
+        aa_u32(as_cursor_kit, AA_CEL_TABLE_AT + i * 4,
+               (unsigned long) AS_CURSOR_STREAM_AT);
+    }
+    aa_fill_rows(as_cursor_kit + AS_CURSOR_STREAM_AT, AA_TILE_PX, AA_TILE_PX,
+                 AS_CURSOR_COLOR);
+    data_fdps_cursor_highlight_sprite_sheet_ptr = as_cursor_kit;
+
+    /* The damage figure this cast floats over its target is the first thing in
+       this file to blit a digit, and fdps_cel_blit_sprite takes the piece's
+       size out of the SHEET's header at +0x07 and +0x09 (src/sprite.c).  The
+       attack fixture leaves that header at zero because nothing there draws
+       one: a width of 0 sends the decoder's row counter under zero and it
+       decodes 65535 pixels a row for 65535 rows. */
+    ((struct fdps_cel_header *) aa_glyphs)->sprite_width = AA_GLYPH_W;
+    ((struct fdps_cel_header *) aa_glyphs)->sprite_height = AA_GLYPH_ROWS;
+
+    /* The fight screen builds these two and frees them without clearing the
+       pointers, so they are the witness that tells the two routes apart. */
+    data_fdps_combat_gauge_sprite_sheet_ptr = NULL;
+    data_fdps_gauge_fill_sheet_ptr = NULL;
+
+    aa_place(AA_ACTOR, AS_CASTER_X, AS_CASTER_Y, AA_PLAYER_SIDE,
+             AA_EXCHANGE_ACTOR_PORTRAIT, AA_ACTOR_LEVEL);
+    aa_place(AA_TARGET, AS_CAST_TILE_X, AS_CAST_TILE_Y, AA_PLAYER_SIDE,
+             AA_EXCHANGE_TARGET_PORTRAIT, AA_LEVEL_CAP);
+    aa_place(AS_ALLY, AS_ALLY_X, AS_ALLY_Y, AA_ENEMY_SIDE,
+             AA_EXCHANGE_TARGET_PORTRAIT, AA_LEVEL_CAP);
+    aa_place(AA_BYSTANDER, AS_WITNESS_X, AS_WITNESS_Y, AA_PLAYER_SIDE,
+             AA_EXCHANGE_TARGET_PORTRAIT, AA_LEVEL_CAP);
+    aa_units[AA_ACTOR].mp_current = AS_CASTER_MP;
+    data_fdps_map_unit_count = AA_UNITS;
+
+    data_fdps_map_cursor_world_x = AS_PARKED_TILE * AA_TILE_PX;
+    data_fdps_map_cursor_world_y = AS_PARKED_TILE * AA_TILE_PX;
+
+    data_fdps_map_ai_best_spell_id = spell_id;
+    data_fdps_battle_ai_best_spell_score = AS_SCORE_PASSES;
+    data_fdps_battle_ai_best_spell_target_x = (unsigned int) AS_CAST_TILE_X;
+    data_fdps_battle_ai_best_spell_target_y = (unsigned int) AS_CAST_TILE_Y;
+
+    data_fdps_battle_pending_xp_credit = AS_STALE_CREDIT;
+}
+
+static void as_unstage(void)
+{
+    aa_unstage();
+    data_fdps_battle_spell_effect_table_ptr = NULL;
+    data_fdps_shadow_sprite_sheet_ptr = NULL;
+    data_fdps_combat_gauge_sprite_sheet_ptr = NULL;
+    data_fdps_gauge_fill_sheet_ptr = NULL;
+}
+
+/* One whole cast, played in mode 13h with the tick moving under it. */
+static int as_run(int side_select)
+{
+    int acted;
+
+    aa_set_mode(AA_MODE_320X200X256);
+    aa_saved_timer = _dos_getvect(AA_TIMER_VECTOR);
+    _dos_setvect(AA_TIMER_VECTOR, aa_timer_isr);
+
+    acted = fdps_map_actor_cast_chosen_spell(AA_ACTOR, side_select);
+
+    _dos_setvect(AA_TIMER_VECTOR, aa_saved_timer);
+    aa_set_mode(AA_MODE_TEXT);
+    return acted;
+}
+
+/* How many of the movement grid's cells still carry the 0xff sentinel. */
+static int as_untouched_grid_cells(void)
+{
+    int cell_index;
+    int untouched;
+
+    untouched = 0;
+    for (cell_index = 0; cell_index < AA_CELLS; cell_index++) {
+        if (aa_grid[4 + cell_index * 2 + 1] == 0xff) {
+            untouched++;
+        }
+    }
+    return untouched;
+}
+
+/* Below 6 the whole body is skipped: no cursor is moved, no target is
+   collected, no spell is played, the overlay mode the caller was in survives
+   and the pending experience is not discarded.  The answer is 0, which is the
+   only path that produces it. */
+static void as_the_score_gate_refuses_below_six(void)
+{
+    int acted;
+
+    as_stage(AS_SPELL_MAP, AS_SIDE_BYTE_PLAYER);
+    data_fdps_battle_ai_best_spell_score = AS_SCORE_REFUSED;
+    acted = as_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ(acted, 0);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AA_DRAW_MODE_SENTINEL);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, AS_STALE_CREDIT);
+    CHECK_EQ(data_fdps_map_cursor_world_x, AS_PARKED_TILE * AA_TILE_PX);
+    CHECK_EQ(data_fdps_map_cursor_world_y, AS_PARKED_TILE * AA_TILE_PX);
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current, AA_START_HP);
+    CHECK_EQ((int) aa_units[AS_ALLY].hp_current, AA_START_HP);
+    CHECK_EQ((int) aa_units[AA_ACTOR].mp_current, AS_CASTER_MP);
+    CHECK_EQ(as_untouched_grid_cells(), AA_CELLS);
+    as_unstage();
+}
+
+/* A score of exactly 6 passes the gate: the answer is 1, the cursor is left on
+   the aim tile with no overlay at all -- 0, and not the 1 the on-map cast puts
+   there before returning -- the movement grid is back at its sentinel because
+   the reset is made after the collect, the pending experience is thrown away,
+   and the caster paid record 5's MP cost, which is how the spell id that
+   reached the presentation is known to be the one the search published. */
+static void as_a_cast_returns_one_and_leaves_no_overlay(void)
+{
+    int acted;
+
+    as_stage(AS_SPELL_MAP, AS_SIDE_BYTE_PLAYER);
+    acted = as_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ(acted, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 0);
+    CHECK_EQ(data_fdps_map_cursor_world_x, AS_CAST_TILE_X * AA_TILE_PX);
+    CHECK_EQ(data_fdps_map_cursor_world_y, AS_CAST_TILE_Y * AA_TILE_PX);
+    CHECK_EQ(as_untouched_grid_cells(), AA_CELLS);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 0);
+    CHECK_EQ((int) aa_units[AA_ACTOR].mp_current, AS_MP_AFTER_CAST);
+    as_unstage();
+}
+
+/* The enemy phase inverts the record's target side.  An authored 0 becomes the
+   filter that keeps every non-zero side, so the player-side target inside the
+   blast is struck and the caster's own ally beside it is not; an authored 2 --
+   any value but 0 -- collapses to the filter that keeps side 0, so the ally is
+   struck and the target is not.  A body that handed the byte through on this
+   arm would have aimed the first case at its own ranks. */
+static void as_the_enemy_phase_inverts_the_authored_side(void)
+{
+    as_stage(AS_SPELL_MAP, AS_SIDE_BYTE_PLAYER);
+    as_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current < AA_START_HP, 1);
+    CHECK_EQ((int) aa_units[AS_ALLY].hp_current, AA_START_HP);
+    CHECK_EQ((int) aa_units[AA_BYSTANDER].hp_current, AA_START_HP);
+
+    as_stage(AS_SPELL_MAP, AS_SIDE_BYTE_TWO);
+    as_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ((int) aa_units[AS_ALLY].hp_current < AA_START_HP, 1);
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current, AA_START_HP);
+    as_unstage();
+}
+
+/* The NPC phase hands the byte through unchanged.  The same authored 0 that
+   the enemy phase turned into "every non-zero side" is now the filter that
+   keeps side 0, so this time the ally is struck and the target is not; an
+   authored 3 keeps side 2 and strikes the target.  Both are the opposite of
+   what the inverting arm produces for the same record. */
+static void as_the_npc_phase_uses_the_authored_side(void)
+{
+    as_stage(AS_SPELL_MAP, AS_SIDE_BYTE_PLAYER);
+    as_run(AS_NPC_PHASE);
+
+    CHECK_EQ((int) aa_units[AS_ALLY].hp_current < AA_START_HP, 1);
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current, AA_START_HP);
+
+    as_stage(AS_SPELL_MAP, AS_SIDE_BYTE_THREE);
+    as_run(AS_NPC_PHASE);
+
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current < AA_START_HP, 1);
+    CHECK_EQ((int) aa_units[AS_ALLY].hp_current, AA_START_HP);
+    as_unstage();
+}
+
+/* The blast is centred on the tile the spell search named, x out of 00063f9c
+   and y out of 00063fa0, and the cursor is walked to that tile scaled by 24
+   pixels.  The second half asks for the transposed tile and gets the
+   transposed answer -- the witness on (1, 4) struck instead of the target on
+   (4, 1) -- which is what a body that read the two globals the other way round
+   would produce for the first. */
+static void as_the_blast_is_centred_on_the_tile_the_search_named(void)
+{
+    as_stage(AS_SPELL_MAP, AS_SIDE_BYTE_PLAYER);
+    as_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current < AA_START_HP, 1);
+    CHECK_EQ((int) aa_units[AA_BYSTANDER].hp_current, AA_START_HP);
+    CHECK_EQ(data_fdps_map_cursor_world_x, AS_CAST_TILE_X * AA_TILE_PX);
+    CHECK_EQ(data_fdps_map_cursor_world_y, AS_CAST_TILE_Y * AA_TILE_PX);
+
+    as_stage(AS_SPELL_MAP, AS_SIDE_BYTE_PLAYER);
+    data_fdps_battle_ai_best_spell_target_x = (unsigned int) AS_WITNESS_X;
+    data_fdps_battle_ai_best_spell_target_y = (unsigned int) AS_WITNESS_Y;
+    as_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ((int) aa_units[AA_BYSTANDER].hp_current < AA_START_HP, 1);
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current, AA_START_HP);
+    CHECK_EQ(data_fdps_map_cursor_world_x, AS_WITNESS_X * AA_TILE_PX);
+    CHECK_EQ(data_fdps_map_cursor_world_y, AS_WITNESS_Y * AA_TILE_PX);
+    as_unstage();
+}
+
+/* The animation setting is an equality against 1 and not a truth test.  A 2
+   takes the map route, which never builds a fight-screen gauge, so both gauge
+   pointers are still the NULL the fixture left them at.  A 1 takes the
+   full-screen route, which loads one sheet out of MISC.VFS and mallocs the
+   other and frees both without clearing either pointer, so both come back
+   non-NULL.  The target loses hit points on both routes, so the damage is not
+   what tells them apart -- under `if (flag)` the 2 would have gone to the
+   fight screen and this case would read the same figures with the pointers
+   set. */
+static void as_the_animation_flag_is_an_equality_with_one(void)
+{
+    as_stage(AS_SPELL_FIGHT, AS_SIDE_BYTE_PLAYER);
+    data_fdps_ui_battle_animation_enabled = 2;
+    as_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ(data_fdps_combat_gauge_sprite_sheet_ptr == NULL, 1);
+    CHECK_EQ(data_fdps_gauge_fill_sheet_ptr == NULL, 1);
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current < AA_START_HP, 1);
+
+    as_stage(AS_SPELL_FIGHT, AS_SIDE_BYTE_PLAYER);
+    data_fdps_ui_battle_animation_enabled = 1;
+    as_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ(data_fdps_combat_gauge_sprite_sheet_ptr == NULL, 0);
+    CHECK_EQ(data_fdps_gauge_fill_sheet_ptr == NULL, 0);
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current < AA_START_HP, 1);
+    as_unstage();
+}
+
 void run_aiact_tests(void)
 {
     RUN_TEST(aa_the_record_layouts_this_action_reads);
@@ -833,4 +1251,11 @@ void run_aiact_tests(void)
     RUN_TEST(aa_the_experience_is_paid_to_the_target);
     RUN_TEST(aa_the_pending_credit_is_cleared_on_entry);
     RUN_TEST(aa_the_animation_flag_picks_the_full_screen_fight);
+
+    RUN_TEST(as_the_score_gate_refuses_below_six);
+    RUN_TEST(as_a_cast_returns_one_and_leaves_no_overlay);
+    RUN_TEST(as_the_enemy_phase_inverts_the_authored_side);
+    RUN_TEST(as_the_npc_phase_uses_the_authored_side);
+    RUN_TEST(as_the_blast_is_centred_on_the_tile_the_search_named);
+    RUN_TEST(as_the_animation_flag_is_an_equality_with_one);
 }

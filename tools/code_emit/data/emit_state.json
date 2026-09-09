@@ -3315,6 +3315,14 @@
       "status": "committed",
       "emitted_against": "0x1eb",
       "rounds": 0
+    },
+    "00013c90": {
+      "name": "fdps_map_actor_cast_chosen_spell",
+      "target": "aiact.c",
+      "body_size": "0x17a",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x17a"
     }
   }
 }

@@ -59,7 +59,55 @@ extern int fdps_map_actor_move_and_attack(int unit_index, int side_select);
 
 /* 00013c90.  Casts data_fdps_map_ai_best_spell_id at the tile
    data_fdps_battle_ai_best_spell_target_x / _y name (gamedata.h), which is the
-   cast fdps_map_actor_score_best_spell last scored.  Not emitted yet. */
+   cast fdps_map_actor_score_best_spell (aiscore.h) last scored.  Answers 1 when
+   the spell was cast and 0 when it was not; both call sites discard it.
+
+   Nothing about the cast is an argument.  The spell id, the tile and the score
+   all come out of that search's four globals, and none of them is written
+   here.
+
+   THE SCORE IS THE ONLY GATE.  Below 6 the function does nothing whatever --
+   no cursor move, no target collection, no cast, no clearing of the pending
+   experience -- and returns 0.  Both callers have already applied the same
+   test, so in the shipped image that answer is never seen.
+
+   The sequence above the gate is: put the cursor on the actor; collect the
+   units the blast covers from the target tile with fdps_collect_targets_in_range
+   (aitarget.h), the spell record's reach byte as range_code and a min_dist of
+   0, into a 32-byte array; put the movement grid back with fdps_map_grid_reset
+   (movegrid.h); show the blast outline by setting
+   data_fdps_map_cursor_draw_mode to that reach plus 2 while
+   fdps_map_cursor_move_to (mapcur.h) walks the cursor to the tile scaled by 24
+   pixels; hold for a fifth of a second; clear the overlay and paint one frame;
+   play the spell; collect, animate and run the deaths it caused; and discard
+   the pending battle experience.
+
+   WHICH SIDE IS AIMED AT DEPENDS ON THE PHASE.  side_select is 0 on the enemy
+   phase and 1 on the NPC phase, and its only use here is the target-side
+   filter: on the enemy phase the filter is `spell record byte +6 == 0` and on
+   the NPC phase it is that byte itself.  So an enemy caster turns a
+   player-facing spell into one that hits every non-zero side and collapses any
+   other authored value to 0, while an NPC -- already on the player's side --
+   aims where the record says.
+
+   HOW THE SPELL IS PLAYED IS data_fdps_ui_battle_animation_enabled's DECISION,
+   and the test is an equality against 1.  Exactly 1 hands the cast to
+   fdps_combat_play_spell_on_targets (cmbspell.h) on the full-screen fight
+   presentation; every other value, 0 included, plays it on the map through
+   fdps_cast_spell_on_targets (spell.h).  Both are called with the same four
+   arguments.
+
+   THE PENDING EXPERIENCE IS THROWN AWAY.  data_fdps_battle_pending_xp_credit is
+   zeroed at the end and paid to nobody, where the attack action above scales it
+   by 15/10 and awards it: a spell earns no experience for the unit it hits.
+
+   THE CURSOR IS LEFT WITH NO OVERLAY.  The last store is 0, over the 1 that
+   fdps_cast_spell_on_targets leaves behind, so a caller that had any other mode
+   up does not get it back.
+
+   unit_index is the acting unit's place in the map unit array; it reaches
+   fdps_map_cursor_move_to_unit and is the caster id handed to whichever of the
+   two play routines runs. */
 extern int fdps_map_actor_cast_chosen_spell(int unit_index, int side_select);
 #pragma aux fdps_map_actor_cast_chosen_spell "*" parm caller [];
 
