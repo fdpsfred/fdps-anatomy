@@ -3622,13 +3622,13 @@ Two orderings here are load-bearing and neither is visible in any data file. The
 Alignment padding: 4-byte Watcom NOP form 8d 44 20 00 (lea eax,[eax+eiz*1+0x0]) aligning next function entry to 16 bytes.
 
 === 00020ef0 [PLATE]
-Chapter 2's entry handler: brings the game into chapter 2 by adding the priest 尤利安 to the party roster, resetting the chapter state, playing the chapter's opening IconAni cutscene and its title card, then parking the map cursor on the first unit. It is reached through slot 1 of the per-chapter entry-handler table at 00060074, indexed by the 0-based chapter index in DAT_00069cf4.
+Chapter 2's entry handler: brings the game into chapter 2 by adding the priest 尤利安 to the party roster, resetting the chapter state, playing the chapter's opening IconAni cutscene and its title card, then parking the map cursor on the first unit. It is reached through slot 1 of the per-chapter entry-handler table at 00060074, indexed by the 0-based chapter index in data_fdps_chapter_current_chapter_id.
 
 Algorithm:
-  1. fdps_roster_add_character(6) appends character 6 -- the priest 尤利安, who joins the party at the start of chapter 2 -- to the roster array based at DAT_00064108 and bumps the roster count at DAT_00064114. It runs before the reset because step 2 deploys the chapter's map units out of that same array.
-  2. fdps_chapter_state_reset rebuilds the per-chapter runtime state block and, through FUN_00022be0, the chapter's map unit records, from the chapter index held in DAT_00069cf4 and the roster base/count at DAT_00064108/DAT_00064114.
-  3. FUN_00021650("Icon01.dat") loads chapter 2's opening event script out of the IconAni.vfs archive and interprets it. The script number is the 0-based chapter index, so chapter 2's script is Icon01.dat; the neighbouring handlers use Icon00.dat (00020e90) and Icon02.dat (00020f30).
-  4. FUN_00020c60 shows the chapter title card: Chapter.saf and Chapter.pal out of MISC.VFS, the graphic again selected by DAT_00069cf4, faded up, held, then faded back to black.
+  1. fdps_roster_add_character(6) appends character 6 -- the priest 尤利安, who joins the party at the start of chapter 2 -- to the roster array based at data_fdps_roster_array_ptr and bumps the roster count at data_fdps_roster_member_count. It runs before the reset because step 2 deploys the chapter's map units out of that same array.
+  2. fdps_chapter_state_reset rebuilds the per-chapter runtime state block and, through fdps_build_map_unit_array, the chapter's map unit records, from the chapter index held in data_fdps_chapter_current_chapter_id and the roster base/count at data_fdps_roster_array_ptr/data_fdps_roster_member_count.
+  3. fdps_icon_script_run("Icon01.dat") loads chapter 2's opening event script out of the IconAni.vfs archive and interprets it. The script number is the 0-based chapter index, so chapter 2's script is Icon01.dat; the neighbouring handlers use Icon00.dat (00020e90) and Icon02.dat (00020f30).
+  4. fdps_show_chapter_title_card shows the chapter title card: Chapter.saf and Chapter.pal out of MISC.VFS, the graphic again selected by data_fdps_chapter_current_chapter_id, faded up, held, then faded back to black.
   5. fdps_map_cursor_move_to_unit(0) leaves the map cursor sitting on the tile of unit 0.
 
 Parameters:
@@ -3640,7 +3640,7 @@ Returns:
 Pool: fdps  [game asset string "Icon01.dat" and five game callees including fdps_chapter_state_reset and fdps_roster_add_character; Function ID finds no Watcom or ailv3.lib candidate, and the body does no runtime work -- no FPU, DOS interrupt, allocator or AIL state]
 
 Rebuild note:
-The roster add must come before the state reset, not after. fdps_chapter_state_reset deploys the chapter's map units out of the roster array and stops at the count in DAT_00064114, so writing this handler in the intuitive "initialise the chapter, then add the character who joins" order leaves 尤利安 out of chapter 2's deployment. fdps_roster_add_character also has no duplicate guard -- it appends and increments unconditionally -- so nothing here protects against the handler being entered twice.
+The roster add must come before the state reset, not after. fdps_chapter_state_reset deploys the chapter's map units out of the roster array and stops at the count in data_fdps_roster_member_count, so writing this handler in the intuitive "initialise the chapter, then add the character who joins" order leaves 尤利安 out of chapter 2's deployment. fdps_roster_add_character also has no duplicate guard -- it appends and increments unconditionally -- so nothing here protects against the handler being entered twice.
 
 === 00020f2d [EOL]
 Alignment padding: lea eax,[eax+0x0] (8d 40 00) aligning FUN_00020f30 to 16 bytes.

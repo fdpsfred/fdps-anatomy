@@ -118,3 +118,83 @@ void fdps_chapter_01_init(void)
 
     fdps_map_cursor_move_to_unit(CH01_CURSOR_UNIT);
 }
+
+/* --- fdps_chapter_02_init @ 00020ef0 ----------------------------------- */
+
+/* The character who joins at the start of chapter 2: 尤利安 the 僧侶,
+   character id 6 (assets/characters.md).  PUSH 0x6 at 00020efc.  He lands at
+   roster slot 1, behind 蘭迪斯, because the roster is in join order and is
+   never permuted -- the list chpost2.c reads off it by chapter 17 starts
+   蘭迪斯, 尤利安, 亞克. */
+#define CH02_JOINING_CHARACTER 6
+
+/* Chapter 2's opening cut-scene, the string at 0x61810 loaded into EAX at
+   00020f0b and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id and not a script id of its own, which is
+   why this is Icon01.dat and chapter 1's handler holds Icon00.dat at the same
+   position.
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON01.DAT by the
+   call and cannot live in read-only storage. */
+#define CH02_OPENING_SCRIPT "Icon01.dat"
+
+/* Which unit the cursor is left on: PUSH 0x0 at 00020f1e. */
+#define CH02_CURSOR_UNIT 0
+
+/* 00020ef0.  Five calls, straight line, no branch, no loop and no local.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 00020ef0..00020ef4 -- over SUB ESP,0x0, a zero-byte local area
+   written as the six-byte immediate form.  Nothing is addressed off EBP
+   anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 00020f28..00020f2b
+   and the RET at 00020f2c is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: PUSH 0x6 / CALL 0x00023bc0 / ADD ESP,0x4 at 00020efc, and the same
+   shape at 00020f0b and 00020f1e.  The two argument-less calls at 00020f06
+   and 00020f19 are bare CALLs with no push and no adjustment.  Nothing reads
+   [EBP+8] or above, so this function takes nothing itself, and EAX is never
+   set before the RET, so it returns nothing -- fdps_title_screen reaches it
+   through the second slot of the table at 00060074 (the dword at 00060078 is
+   00020ef0) and ignores EAX.
+
+   VALUES USED AFTER A CALL: none at all.  All five callees return void and
+   nothing here reads EAX after any of them; the only register written between
+   the prologue and the RET is the EAX that carries the script name literal
+   into the third call.
+
+   THE ORDER IS THE ALGORITHM.  The roster add runs BEFORE the state reset:
+   fdps_chapter_state_reset rebuilds the map unit array out of roster slot i
+   for each of the map's player slots and stops at the roster count
+   (src/deploy.c), so the intuitive "initialise the chapter, then add the
+   character who joins it" order leaves 尤利安 off chapter 2's map and turns
+   his slot into the zeroed, retired spare the rebuild writes for a player slot
+   with no member behind it.  MAP01.DAT declares two player slots, and 尤利安
+   is the second of the two the party has by then.
+
+   Nor is the add guarded: fdps_roster_add_character appends at the current
+   count and increments unconditionally, so entering this handler twice puts
+   him on the roster twice.  Adding a duplicate test here is a check the
+   original does not have.
+
+   Unlike chapter 1's handler this one writes nothing on a unit afterwards --
+   there are no stores in the body at all, only the five calls -- so chapter 2
+   opens every unit on whatever the deployment computed.
+
+   THE CHAPTER IS NOT SET HERE.  Both the script the third call loads and the
+   title-card graphic the fourth one shows are chosen from
+   data_fdps_chapter_current_chapter_id by the callees, and this handler
+   neither reads nor writes it -- the dispatcher that reached this slot is what
+   put the right value there.  The Icon01.dat above is the one place the
+   chapter number is spelled out rather than read. */
+void fdps_chapter_02_init(void)
+{
+    fdps_roster_add_character(CH02_JOINING_CHARACTER);
+    fdps_chapter_state_reset();
+    fdps_icon_script_run(CH02_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH02_CURSOR_UNIT);
+}

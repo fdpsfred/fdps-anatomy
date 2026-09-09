@@ -39,4 +39,23 @@
 extern void fdps_chapter_01_init(void);
 #pragma aux fdps_chapter_01_init "*" parm caller [];
 
+/* Chapter 2's entry handler: brings the game into chapter 2.  Takes nothing
+   and returns nothing.
+
+   In order, and the order is the content: character 6 -- 尤利安, the priest
+   who joins the party at the start of the chapter -- is appended to the party
+   roster; the chapter state is rebuilt around the roster that add has just
+   grown; the opening cut-scene Icon01.dat is interpreted; the chapter title
+   card is shown; and the map cursor is parked on unit 0's tile.
+
+   The roster add comes first because the state rebuild fills the map's player
+   slots out of the roster array and stops at the roster count, so running the
+   two the other way round leaves 尤利安 off the map.  Nothing here writes on
+   a unit record afterwards, which is what separates this handler from chapter
+   1's.
+
+   Table slot 1. */
+extern void fdps_chapter_02_init(void);
+#pragma aux fdps_chapter_02_init "*" parm caller [];
+
 #endif
