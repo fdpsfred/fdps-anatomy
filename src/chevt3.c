@@ -6,7 +6,8 @@
  * runner -- call it indirectly, so none of them appears as a static caller.
  *
  * See chevt3.h for what each handler does.  chevt1.c is the same family for
- * chapters 2 to 7 and chevt2.c for chapters 8 to 14.  Nothing here owns state.
+ * chapters 2 to 7, chevt2.c for chapter 8 and chevt2b.c for chapters 9 to 14.
+ * Nothing here owns state.
  */
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -43,7 +44,7 @@
    starts advancing on the party.
 
    The body is one copy of the inline expansion the chapter 2, 5 and 7 handlers
-   in chevt1.c and the chapter 13 handler in chevt2.c carry --
+   in chevt1.c and the chapter 13 handler in chevt2b.c carry --
    fdps_object_set_field34_low_nibble_range (00036b60) with the constant
    argument triple (0x1d, 0x25, 0) -- and it has the same fingerprint: the three
    constants are parked at [EBP-0x20], [EBP-0x1c] and [EBP-0x18]
@@ -718,7 +719,7 @@ void fdps_chapter_16_event_enemies_advance_for_turn(int unit_index)
 
    The map number is data_fdps_chapter_current_chapter_id read at the call site
    and not anything this handler holds, so it is whichever chapter is loaded --
-   the same way the chapter 10 ambush in chevt2.c reads it.
+   the same way the chapter 10 ambush in chevt2b.c reads it.
 
    The wave key is the raw subtraction with nothing on either side of it: no
    compare, no table and no lower bound.  Adding the guard that looks obvious
@@ -911,7 +912,7 @@ void fdps_chapter_19_event_lancelot_joins(int unit_index)
    latches: the byte at 0x000640e8, which is 0x10 past the block's base at
    0x000640d8 -- CMP byte ptr [0x000640e8],0x0 at 000381dc and MOV byte ptr
    [0x000640e8],0x1 at 000382d9.  It is the same slot the chapter 16 smith
-   scene above and the chapter 10 ambush in chevt2.c use, because the block is
+   scene above and the chapter 10 ambush in chevt2b.c use, because the block is
    cleared at every chapter start and only one chapter is ever loaded. */
 #define CH19_AMBUSH_LATCH_SLOT 0x10
 
@@ -986,7 +987,7 @@ void fdps_chapter_19_event_lancelot_joins(int unit_index)
    latch that is already up means fdps_get_unit_record is never reached; only
    when it is clear is the record fetched and CMP byte ptr [EAX+0x6],0x0 / JZ
    at 000381fb taken.  Writing the pair as one condition over a record fetched
-   up front -- which is what the chapter 10 ambush in chevt2.c really does --
+   up front -- which is what the chapter 10 ambush in chevt2b.c really does --
    would call into the unit array on a firing that is already spent.
 
    The side test is JZ over the whole byte, so it is a plain "not 0" and not a

@@ -2455,42 +2455,42 @@
     },
     "00037730": {
       "name": "fdps_chapter_09_event_deploy_wave_1",
-      "target": "chevt2.c",
+      "target": "chevt2b.c",
       "est_lines": 48,
       "body_size": 78,
       "status": "pending"
     },
     "00037780": {
       "name": "fdps_chapter_10_event_deploy_wave_for_turn",
-      "target": "chevt2.c",
+      "target": "chevt2b.c",
       "est_lines": 97,
       "body_size": 273,
       "status": "pending"
     },
     "000378a0": {
       "name": "fdps_chapter_10_event_deploy_wave_10",
-      "target": "chevt2.c",
+      "target": "chevt2b.c",
       "est_lines": 59,
       "body_size": 80,
       "status": "pending"
     },
     "000378f0": {
       "name": "fdps_chapter_11_event_deploy_wave_for_turn",
-      "target": "chevt2.c",
+      "target": "chevt2b.c",
       "est_lines": 95,
       "body_size": 219,
       "status": "pending"
     },
     "000379d0": {
       "name": "fdps_chapter_13_event_enemies_advance",
-      "target": "chevt2.c",
+      "target": "chevt2b.c",
       "est_lines": 101,
       "body_size": 122,
       "status": "pending"
     },
     "00037a50": {
       "name": "fdps_chapter_14_event_deploy_wave_4",
-      "target": "chevt2.c",
+      "target": "chevt2b.c",
       "est_lines": 75,
       "body_size": 158,
       "status": "pending"
@@ -3832,6 +3832,7 @@
         "chend2.c",
         "chevt1.c",
         "chevt2.c",
+        "chevt2b.c",
         "chevt3.c",
         "chevt4.c",
         "chevt5.c",
@@ -3848,7 +3849,7 @@
         "vilmenu.c",
         "vilshop.c"
       ],
-      "reason": "read from 19 files: btlend.c, chend2.c, chevt1.c, chevt2.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost1.c, chpost2.c, death.c, icon.c, main.c, rsrc.c, title.c, vilbar.c, vilmenu.c, vilshop.c",
+      "reason": "read from 20 files: btlend.c, chend2.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost1.c, chpost2.c, death.c, icon.c, main.c, rsrc.c, title.c, vilbar.c, vilmenu.c, vilshop.c",
       "status": "pending"
     },
     "00060131": {
@@ -6121,6 +6122,7 @@
         "chapter.c",
         "chevt1.c",
         "chevt2.c",
+        "chevt2b.c",
         "chevt3.c",
         "chevt4.c",
         "chevt5.c",
@@ -6129,7 +6131,7 @@
         "chpost2.c",
         "savefile.c"
       ],
-      "reason": "read from 14 files: anim.c, btlend.c, btlmenu.c, btlturn.c, chapter.c, chevt1.c, chevt2.c, chevt3.c, chevt4.c, chevt5.c, chevt6.c, chpost1.c, chpost2.c, savefile.c",
+      "reason": "read from 15 files: anim.c, btlend.c, btlmenu.c, btlturn.c, chapter.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt6.c, chpost1.c, chpost2.c, savefile.c",
       "status": "pending"
     },
     "00069cec": {
@@ -6190,6 +6192,7 @@
         "chend2.c",
         "chevt1.c",
         "chevt2.c",
+        "chevt2b.c",
         "chevt3.c",
         "chevt4.c",
         "chevt5.c",
@@ -6212,7 +6215,7 @@
         "village.c",
         "vilmenu.c"
       ],
-      "reason": "read from 29 files: btlend.c, btlmenu.c, btlturn.c, chapter.c, chend1.c, chend2.c, chevt1.c, chevt2.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost2.c, icon.c, main.c, menu.c, palcycle.c, roster.c, rsrc.c, save.c, savefile.c, shop.c, shopdraw.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c",
+      "reason": "read from 30 files: btlend.c, btlmenu.c, btlturn.c, chapter.c, chend1.c, chend2.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost2.c, icon.c, main.c, menu.c, palcycle.c, roster.c, rsrc.c, save.c, savefile.c, shop.c, shopdraw.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c",
       "status": "pending"
     },
     "00069cf8": {

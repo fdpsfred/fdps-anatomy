@@ -6,9 +6,9 @@
  * runner -- call it indirectly, so none of them appears as a static caller.
  *
  * See chevt5.h for what each handler does.  chevt1.c is the same family for
- * chapters 2 to 7, chevt2.c for 8 to 14, chevt3.c for 15 to 19, chevt4.c for
- * 20 to 23, chevt5b.c for 26 and 27 and chevt6.c for 28 to 30.  Nothing here
- * owns state.
+ * chapters 2 to 7, chevt2.c for chapter 8, chevt2b.c for 9 to 14, chevt3.c
+ * for 15 to 19, chevt4.c for 20 to 23, chevt5b.c for 26 and 27 and chevt6.c
+ * for 28 to 30.  Nothing here owns state.
  */
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -187,7 +187,7 @@ void fdps_chapter_24_event_deploy_wave_for_turn(int event_arg)
    ambush spent across a chapter restart and across a reload
    (rebuild_info/pitfalls.md).
 
-   src/chevt1.c, src/chevt2.c, src/chevt4.c and src/chpost2.c spell the same
+   src/chevt1.c, src/chevt2b.c, src/chevt4.c and src/chpost2.c spell the same
    slot out for the same reason; it stays file-local at every end because no
    header owns it. */
 #define CHAPTER_EVENT_ONE_SHOT_SLOT 0x10

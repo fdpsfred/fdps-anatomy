@@ -12,8 +12,8 @@
  * 11 branch and takes no argument.  It is here because it is chapter 30's
  * scripted behaviour and belongs with that chapter's other handlers.
  *
- * chevt1.h holds the same family for chapters 2 to 7, chevt2.h for 8 to 14 and
- * chevt3.h for 15 to 19.  Nothing here owns state.
+ * chevt1.h holds the same family for chapters 2 to 7, chevt2.h for chapter 8,
+ * chevt2b.h for 9 to 14 and chevt3.h for 15 to 19.  Nothing here owns state.
  */
 #ifndef CHEVT6_H
 #define CHEVT6_H

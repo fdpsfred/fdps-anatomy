@@ -7,8 +7,8 @@
  * passes 0 when the event is turn-scheduled rather than unit-attached, while
  * the cell search and the death-script runner pass a real index.
  *
- * chevt1.h holds the same family for chapters 2 to 7 and chevt2.h for chapters
- * 8 to 14.  Nothing here owns state.
+ * chevt1.h holds the same family for chapters 2 to 7, chevt2.h for chapter 8
+ * and chevt2b.h for chapters 9 to 14.  Nothing here owns state.
  */
 #ifndef CHEVT3_H
 #define CHEVT3_H

@@ -6,8 +6,8 @@
  * runner -- call it indirectly, so none of them appears as a static caller.
  *
  * See chevt4.h for what each handler does.  chevt1.c is the same family for
- * chapters 2 to 7, chevt2.c for 8 to 14 and chevt3.c for 15 to 19.  Nothing
- * here owns state.
+ * chapters 2 to 7, chevt2.c for chapter 8, chevt2b.c for 9 to 14 and
+ * chevt3.c for 15 to 19.  Nothing here owns state.
  */
 #include "fdpstype.h"
 #include "gamedata.h"
@@ -146,7 +146,7 @@ void fdps_chapter_20_event_upgrade_randis_sword(int unit_index)
    function-local static in its place would leave the ambush spent across a
    chapter restart and across a reload (rebuild_info/pitfalls.md).
 
-   src/chevt1.c, src/chevt2.c and src/chpost2.c spell the same slot out for the
+   src/chevt1.c, src/chevt2b.c and src/chpost2.c spell the same slot out for the
    same reason; it stays file-local at every end because no header owns it. */
 #define CHAPTER_EVENT_ONE_SHOT_SLOT 0x10
 

@@ -8,8 +8,8 @@
  * is not: fdps_map_actor_behavior_step calls it directly and by name.
  *
  * See chevt6.h for what each handler does.  chevt1.c is the same family for
- * chapters 2 to 7, chevt2.c for 8 to 14 and chevt3.c for 15 to 19.  Nothing
- * here owns state.
+ * chapters 2 to 7, chevt2.c for chapter 8, chevt2b.c for 9 to 14 and
+ * chevt3.c for 15 to 19.  Nothing here owns state.
  */
 #include <stdlib.h>
 #include <i86.h>
@@ -173,7 +173,7 @@ void fdps_chapter_28_event_deploy_wave_for_turn(int unit_index)
    tile is one of the party's own.
 
    The body is a side gate in front of one copy of the inline expansion the
-   chapter 2, 5, 7, 13, 15 and 16 handlers in chevt1.c, chevt2.c and chevt3.c
+   chapter 2, 5, 7, 13, 15 and 16 handlers in chevt1.c, chevt2b.c and chevt3.c
    carry -- fdps_object_set_field34_low_nibble_range (00036b60) with the
    constant argument triple (0x24, 0x59, 0) -- and it has the same fingerprint:
    the three constants are parked at [EBP-0x24], [EBP-0x20] and [EBP-0x1c]
@@ -339,8 +339,8 @@ void fdps_chapter_29_event_activate_all_enemies(int unit_index)
    latches: the byte at 0x000640e8, which is 0x10 past the block's base at
    0x000640d8 -- CMP byte ptr [0x000640e8],0x0 at 0003977c and MOV byte ptr
    [0x000640e8],0x1 at 00039830.  It is the same slot the chapter 10, 16 and 19
-   handlers in chevt2.c and chevt3.c latch, because the block is cleared at every
-   chapter start and only one chapter is ever loaded. */
+   handlers in chevt2b.c and chevt3.c latch, because the block is cleared at
+   every chapter start and only one chapter is ever loaded. */
 #define CH30W4_LATCH_SLOT 0x10
 
 /* The wave the ambush brings on, PUSH 0x4 at 0003978c, matched against byte
@@ -435,7 +435,7 @@ void fdps_chapter_29_event_activate_all_enemies(int unit_index)
    trigger, would silently skip the reinforcements.
 
    THE LATCH IS RAISED LAST, after the line has been spoken, which is the
-   opposite end of the body from the chapter 10 ambush's in chevt2.c.  Nothing
+   opposite end of the body from the chapter 10 ambush's in chevt2b.c.  Nothing
    this handler calls can re-enter it, so the two placements are
    indistinguishable from outside and the emitted one is where the original puts
    it.
@@ -630,7 +630,7 @@ void fdps_chapter_30_event_deploy_wave_2(int unit_index)
 
    The map number is data_fdps_chapter_current_chapter_id read at the call site
    and not anything this handler holds, so it is whichever chapter is loaded --
-   the same way the chapter 10 ambush in chevt2.c and the chapter 17 and 18
+   the same way the chapter 10 ambush in chevt2b.c and the chapter 17 and 18
    handlers in chevt3.c read it.
 
    What wave 3 means comes from the shipped map: this slot is named exactly once

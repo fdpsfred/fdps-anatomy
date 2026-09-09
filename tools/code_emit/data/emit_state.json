@@ -1110,7 +1110,7 @@
     },
     "000379d0": {
       "name": "fdps_chapter_13_event_enemies_advance",
-      "target": "chevt2.c",
+      "target": "chevt2b.c",
       "body_size": "0x7a",
       "status": "committed",
       "rounds": 0,
@@ -1801,7 +1801,7 @@
     },
     "000378a0": {
       "name": "fdps_chapter_10_event_deploy_wave_10",
-      "target": "chevt2.c",
+      "target": "chevt2b.c",
       "body_size": "0x50",
       "status": "committed",
       "emitted_against": "0x50",
@@ -3076,7 +3076,7 @@
     },
     "00037730": {
       "name": "fdps_chapter_09_event_deploy_wave_1",
-      "target": "chevt2.c",
+      "target": "chevt2b.c",
       "body_size": "0x4e",
       "status": "committed",
       "rounds": 0,
@@ -3084,7 +3084,7 @@
     },
     "00037780": {
       "name": "fdps_chapter_10_event_deploy_wave_for_turn",
-      "target": "chevt2.c",
+      "target": "chevt2b.c",
       "body_size": "0x111",
       "status": "committed",
       "emitted_against": "0x111",
@@ -3097,7 +3097,7 @@
     },
     "00037a50": {
       "name": "fdps_chapter_14_event_deploy_wave_4",
-      "target": "chevt2.c",
+      "target": "chevt2b.c",
       "body_size": "0x9e",
       "status": "committed",
       "emitted_against": "0x9e",

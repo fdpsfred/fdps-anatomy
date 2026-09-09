@@ -68,18 +68,24 @@ def chapter_event_file(n):
     why they are uneven: chapter 8's four handlers are worth as much as
     chapters 9 to 14 put together.
 
-    chevt5b.c is the second half of what chapters 24 to 27 were routed to as
-    one file: the four handlers of chapters 24 and 25 alone came out at 1113
-    emitted lines, so chapters 26 and 27 were cut off into a file of their own
-    rather than let chapter 27's handler land on top of that.  It is named for
-    the range it was split out of and not chevt7.c, because chevt6.c is
-    chapters 28 to 30 and already emitted: the letter keeps the family in
-    chapter order.
+    That last sentence is also where the chevt2 / chevt2b boundary is.  Both
+    halves of chapters 8 to 14 were routed to one file, which reached 1106
+    emitted lines with chapter 8's fourth handler still to come, so chapter 8
+    -- the half that is one chapter's own script, four handlers off one map
+    file -- keeps chevt2.c and chapters 9 to 14 went to chevt2b.c.
+
+    chevt5b.c is the same cut one family along: the four handlers of chapters
+    24 and 25 alone came out at 1113 emitted lines, so chapters 26 and 27 were
+    cut off into a file of their own rather than let chapter 27's handler land
+    on top of that.  Neither new file is chevt7.c, because chevt6.c is already
+    chapters 28 to 30: the letter keeps the family in chapter order.
     """
     if n <= 7:
         return "chevt1.c"
-    if n <= 14:
+    if n <= 8:
         return "chevt2.c"
+    if n <= 14:
+        return "chevt2b.c"
     if n <= 19:
         return "chevt3.c"
     if n <= 23:

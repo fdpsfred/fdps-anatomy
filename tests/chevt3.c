@@ -1363,7 +1363,7 @@ static void ch16_ignores_the_unit_index_argument(void)
  *   MAP01.COD  record 0 (9, 4)
  *
  * -- the same records tests/deploy.c's own wave cases and the chapter 10 cases
- * in tests/chevt2.c expect, staged through tests/gamefile.lst.  That function
+ * in tests/chevt2b.c expect, staged through tests/gamefile.lst.  That function
  * opens ICON.CEL and FIELD.VFS for itself and a run without them would not
  * fail a check, it would hang in fdps_wait_any_key, so every case here skips
  * itself when they are not there.
@@ -2279,7 +2279,7 @@ static void ch19_ignores_the_unit_index_argument(void)
 /* ------------------------------------------------------------------
  * The chapter 19 flank ambush at 000381d0.
  *
- * It is the chapter 10 ambush of tests/chevt2.c with three pans and a spoken
+ * It is the chapter 10 ambush of tests/chevt2b.c with three pans and a spoken
  * line added, so the cases below stand on the chapter 17 fixture the rest of
  * this file uses -- a blank walkable 32 x 16 map, a deployment table whose
  * records are also their own MAP%02d.COD placement records, and the real
@@ -2289,7 +2289,7 @@ static void ch19_ignores_the_unit_index_argument(void)
  *   several and the side gate can be shown reading the one it was handed;
  *
  *   the globals the frame compositor reads, staged the way the pan-bearing
- *   cases of tests/chevt2.c stage them: no scene layers, both HUD flags down,
+ *   cases of tests/chevt2b.c stage them: no scene layers, both HUD flags down,
  *   the view and the cursor at the origin, and a sentinel in the frame latch
  *   that a run composing no frame at all would leave behind;
  *
