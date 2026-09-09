@@ -1672,9 +1672,11 @@ if (nwl.error) {
   break
 }
 fns = nwl.functions
-if (nwl.remainingTotal !== undefined && nwl.remainingTotal !== null) {
-  remainingTotal = nwl.remainingTotal
-}
+// `remainingTotal` is deliberately NOT updated here. It is reported as
+// `remaining_at_start` and that is what it has to keep meaning: overwriting it
+// with a later segment's answer makes the report say a smaller number was left
+// than the run went on to commit, which is how t22-09 came out claiming 86 left
+// at the start and then landing 100.
 if (!fns.length) {
   log('nothing left to emit after the split')
   break

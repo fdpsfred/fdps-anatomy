@@ -64,13 +64,15 @@ emit 或 review 當下答不出來的等價性疑慮記進 `tools/code_emit/data
 
 `t22-08` 只落地 2 支就撞到第二次拆檔（`statwin.c` 1239 行，切成 `statwin.c`／`statunit.c`）而收工，98 支一支沒動。這暴露了拆檔處置的成本：**原本的規則是「拆完整批收工」，而拆檔會成群出現在後期批次**——它發生在檔案跨過行數預算的時候，正是最大的那些 function 陸續落地的時期。已改成**拆完重新問一次工作清單、用剩下的預算繼續跑**，`endedEarly` 只留給重抓失敗或預算用完。
 
-累計 335 支在 `emit_state.json` 記為 `committed`，`next_batch.py --stats` 說還剩 179 支。**續跑從這個進度接下去，不重跑已完成的；`failed` 與 `in_flight` 都會被重新發回清單。**
+`t22-09` **100 支全數落地**，中途拆了三次檔（`vilshop.c`、`chevt5.c`、`chevt2.c`）都靠重抓清單接續跑完，`segments` 回報 4——上一段那個改動實測有效，對照組是同樣觸發條件下 t22-07 停在 65 支、t22-08 停在 2 支。這批也暴露了那個改動自己帶進來的一個回報錯誤：重抓時順手更新了 `remainingTotal`，而它填的是語意為「開跑時」的 `remaining_at_start`，已修。
+
+累計 435 支在 `emit_state.json` 記為 `committed`，`next_batch.py --stats` 說還剩 79 支。**續跑從這個進度接下去，不重跑已完成的；`failed` 與 `in_flight` 都會被重新發回清單。**
 
 前兩支的區域變數命名經人工檢查合格，但那是 emitter 自己的判斷，當時 workflow 裡沒有任何規則要求它，所以不能拿它當「規則有效」的證據。第三支才是票 21.7 的實測：Ghidra 給的四個區域變數全是預設名（`sVar1`／`sVar2`／`local_18`／`local_14`），emit 出來是 `grid_width`／`grid_height`／`cell_index`／`cell`。
 
 **Blocked by:** 21, 21.5, 21.6, 21.7, 22.1 — 全部已完成，沒有東西擋著批次（22.1 剩下的是本票收尾時的總掃）
 
-**Status:** in-progress（514 支已落地 335 支，剩 179）
+**Status:** in-progress（514 支已落地 435 支，剩 79；`t22-09` 之後應使用者要求暫停，等指示再開下一批）
 
 - [ ] 遊戲本體 function 全部 emit 完成，每個都經 reviewer 通過
 - [ ] 每個 function 一次處理一個，無任何批次處理
