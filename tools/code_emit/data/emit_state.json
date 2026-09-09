@@ -3336,6 +3336,14 @@
       "status": "committed",
       "emitted_against": "0x7db",
       "rounds": 0
+    },
+    "000262a0": {
+      "name": "fdps_apply_item_effect_to_targets",
+      "target": "item.c",
+      "body_size": "0xb5b",
+      "status": "committed",
+      "emitted_against": "0xb5b",
+      "rounds": 0
     }
   }
 }

@@ -89,4 +89,49 @@ extern void fdps_apply_heal_to_targets(int target_count,
                                        int base_heal);
 #pragma aux fdps_apply_heal_to_targets "*" parm caller [];
 
+/* 000262a0.  Uses one item out of a battle unit's bag on a list of targets and
+   then settles whatever that killed.  Nothing is returned; both call sites
+   throw EAX away.
+
+   The item is named by WHERE IT SITS, not by its id: the id is read out of the
+   acting unit's record at offset 0xb + 2 * item_slot, so the caller has to hand
+   over a slot the unit really holds.  Its ITEM.DAT record supplies the two
+   fields everything below runs on -- the use-effect code at +0x0d and the
+   SIGNED use-amount word at +0x0e.
+
+   FOUR EFFECT CODES DO NOTHING AT ALL.  0x05 (空白道具), 0x06 (光之水晶,
+   空之魔石), 0x0d (精靈之劍) and 0x1b (封咒手套) match no branch, so using one
+   of those items plays nothing, changes nothing and does not consume the item.
+   That is the original's behaviour and not a gap to fill in.
+
+   WHICH CODES CONSUME THE ITEM IS NOT A PROPERTY OF THE EFFECT.  Five effects
+   come in an item form and a weapon form that do exactly the same thing, and
+   only the item form reaches fdps_unit_remove_item: 0x01/0x07 fire, 0x02/0x08
+   thunder, 0x03/0x09 ice, 0x04/0x0a earth, 0x0b/0x20 HP restore.  0x1e, the
+   beam cannons, is weapon-borne with no item twin and is never consumed.
+   Everything else -- the MP restore, the six stat-ups, the two status cures
+   and the three named-character upgrades -- is item-only and is consumed on
+   the arm that does the work.
+
+   The permanent stat-up codes (0x0f, 0x10, 0x11, 0x12, 0x13, 0x14) and the
+   three named-character upgrades (0x21, 0x22, 0x23) act on target_ids[0] ALONE
+   however long the list is, and their amounts are constants in the code: every
+   one of those items carries a use_amount of 0.
+
+   THE CALL BLOCKS FOR SECONDS AND CAN BLOCK FOR EVER.  Most branches play an
+   effect clip, a flash or 25 shake frames, all of which wait on the timer
+   interrupt, and the 0x21/0x22/0x23 branches open a modal message window.  The
+   death settlement at the end can run a whole reward sequence.  Only the four
+   dead codes above and 0x1e come back without touching the frame clock -- and
+   0x1e still drains the popup queue.
+
+   target_count and target_ids are the collector's output: a count that is
+   signed and an array of unit indices one byte each, each widened UNSIGNED.
+   unit_index is the acting unit, which is also who fdps_run_death_scripts pays
+   the rewards to at the end. */
+extern void fdps_apply_item_effect_to_targets(int unit_index, int item_slot,
+                                              int target_count,
+                                              unsigned char *target_ids);
+#pragma aux fdps_apply_item_effect_to_targets "*" parm caller [];
+
 #endif

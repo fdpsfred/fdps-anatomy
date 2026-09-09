@@ -5,10 +5,21 @@
  * records are reached through the index the target list carries and the popup
  * queue belongs to indicat.c.
  */
+#include <stdlib.h>
 #include "fdpstype.h"
+#include "gamedata.h"
 #include "anim.h"
-#include "unitstat.h"
+#include "audio.h"
+#include "death.h"
 #include "indicat.h"
+#include "mapdraw.h"
+#include "msgwin.h"
+#include "table.h"
+#include "text.h"
+#include "unit.h"
+#include "unititem.h"
+#include "unitstat.h"
+#include "vfs.h"
 #include "item.h"
 
 /* PUSH 0x0 at 00026280: the glyph id of digit zero in the damage digit set of
@@ -139,4 +150,551 @@ void fdps_apply_heal_to_targets(int target_count, unsigned char *target_ids,
     }
 
     fdps_play_indicator_queue();
+}
+
+/* ------------------------------------------------------------------------
+ * fdps_apply_item_effect_to_targets @ 000262a0
+ * ---------------------------------------------------------------------- */
+
+/* The use-effect codes the dispatch below runs on, the byte at ITEM.DAT +0x0d.
+   Which items carry which code is in assets/items.md; the pairing of an ITEM
+   code with a WEAPON code that does the same thing is what the dispatch is
+   built out of, because only the item half is consumed.
+
+   0x05, 0x06, 0x0d and 0x1b are absent on purpose: they exist in ITEM.DAT --
+   空白道具, 光之水晶 and 空之魔石, 精靈之劍, 封咒手套 -- and match no branch
+   here, so those items do nothing when used.  See item.h. */
+#define USE_EFFECT_FIRE_ITEM 0x01
+#define USE_EFFECT_THUNDER_ITEM 0x02
+#define USE_EFFECT_ICE_ITEM 0x03
+#define USE_EFFECT_EARTH_ITEM 0x04
+#define USE_EFFECT_FIRE_WEAPON 0x07
+#define USE_EFFECT_THUNDER_WEAPON 0x08
+#define USE_EFFECT_ICE_WEAPON 0x09
+#define USE_EFFECT_EARTH_WEAPON 0x0a
+#define USE_EFFECT_RESTORE_HP_ITEM 0x0b
+#define USE_EFFECT_RESTORE_MP_ITEM 0x0c
+#define USE_EFFECT_MAX_HP_UP 0x0f
+#define USE_EFFECT_MAX_MP_UP 0x10
+#define USE_EFFECT_AP_UP 0x11
+#define USE_EFFECT_DP_UP 0x12
+#define USE_EFFECT_DX_UP 0x13
+#define USE_EFFECT_MOVE_UP 0x14
+#define USE_EFFECT_CURE_POISON 0x16
+#define USE_EFFECT_CURE_PARALYSIS 0x18
+#define USE_EFFECT_BEAM_CANNON 0x1e
+#define USE_EFFECT_RESTORE_HP_WEAPON 0x20
+#define USE_EFFECT_GAIA_COMBAT_KIT 0x21
+#define USE_EFFECT_GAIA_HP_KIT 0x22
+#define USE_EFFECT_BRANDO_DEVICE 0x23
+
+/* The MISC.VFS members the four elemental effects and the two restore effects
+   play over the target list: MOV EAX,0x61b50 / 0x61b5c / 0x61b68 / 0x61b80 /
+   0x61b8c in front of the fdps_play_vfs_animation_over_units calls, and MOV
+   EAX,0x61b74 with MOV EAX,0x60128 at 0002646d for the earthquake's sample.
+
+   THE NAMES ARE WRITTEN TO.  fdps_vfs_load_entry upper-cases the CALLER'S
+   storage in place before it looks a member up (anim.h), so every one of these
+   has to live in writable storage -- the same contract anim.c's
+   ANIMATION_ARCHIVE carries (rebuild_info/pitfalls.md).  A member the loader
+   cannot find prints and ends the process rather than coming back, so a
+   mistyped name here does not merely lose the animation. */
+#define EFFECT_ARCHIVE "MISC.VFS"
+#define FIRE_EFFECT_CLIP "EMg00.saf"
+#define THUNDER_EFFECT_CLIP "EMg05.saf"
+#define ICE_EFFECT_CLIP "EMg08.saf"
+#define CURE_EFFECT_CLIP "Cure.saf"
+#define RESTORE_MP_EFFECT_CLIP "CureMP.saf"
+#define EARTHQUAKE_SAMPLE "EarQu.wav"
+
+/* The earth effect's screen shake, PUSH 0x1 at 00026482 and the loop at
+   000264a7 through 00026504: the sample is started once and the view is then
+   re-rendered 25 times with both scroll origins displaced.
+
+   THE JITTER IS NOT SYMMETRIC.  IDIV EBX with EBX = 4 and SUB EDX,0x2 at
+   000264c8 and 000264e1 makes it rand() % 4 - 2, which is -2, -1, 0 or +1: the
+   view leans one pixel up and left on average for the whole quake.  Writing it
+   as a symmetric -2..+2 shake, which is what it looks like it ought to be,
+   moves the picture.
+
+   BOTH DRAWS HAPPEN EVERY FRAME, before either origin is written, so the quake
+   costs the shared rand() stream exactly fifty values and every later roll in
+   the battle is shifted by that many.  The same shape and the same three
+   numbers are in spell.c's 裂地術. */
+#define EARTHQUAKE_SAMPLE_PLAY_ONCE 1
+#define EARTHQUAKE_SHAKE_FRAMES 0x19
+#define EARTHQUAKE_SHAKE_SPREAD 4
+#define EARTHQUAKE_SHAKE_BIAS 2
+
+/* PUSH 0xd in front of every stat-gain and MP-restore popup (00026590,
+   00026601, 00026670, 000266df, 00026761, 000267e3, 00026a34): the glyph id of
+   digit zero in the GAIN digit set of the Number.cel sheet.  The damage digits
+   are base 0 and the healing digits base 0x27; the direct-damage branch at
+   0x1e passes 0 like the rest of the damage paths. */
+#define GAIN_DIGIT_GLYPH_BASE 0x0d
+
+/* PUSH 0xff at 000268be, 0002694a and 0002699d: the palette index every pixel
+   of a flashed target becomes.  fdps_flash_units_in_color shifts the value left
+   by eight itself (indicat.h), so what is passed here is the colour and not the
+   blit operand it becomes. */
+#define EFFECT_FLASH_COLOR 0xff
+
+/* How much each permanent stat-up item moves its stat.  Every one of these is a
+   literal in the instruction that applies it -- ADD word ptr [EAX+0x42],0xf at
+   000265ef and its five siblings -- and NOT the item's use_amount, which is 0
+   on all six records (assets/items.md).  Writing the obvious `stat +=
+   use_amount` compiles, runs, and silently does nothing. */
+#define MAX_HP_UP_AMOUNT 0x0f
+#define MAX_MP_UP_AMOUNT 0x0f
+#define AP_UP_AMOUNT 7
+#define DP_UP_AMOUNT 7
+#define DX_UP_AMOUNT 7
+#define MOVE_UP_AMOUNT 1
+
+/* 蓋亞's two 強化套件 and 布蘭多's 高能量裝置: who they work on, what they
+   give, and the message ids they draw.
+
+   THE TWO KITS TEST THE FORM ID AT +0x07 AND THE DEVICE TESTS THE CHARACTER ID
+   AT +0x08.  MOV AL,byte ptr [EAX+0x7] at 00026b14 and 00026bfd against MOV
+   AL,byte ptr [EAX+0x8] at 00026cb0.  The two fields agree for a unit that has
+   never class-changed and part company for one that has, so unifying them is a
+   behaviour change either way round: onto +0x07 breaks the 高能量砲 trade for a
+   class-changed 布蘭多, onto +0x08 changes which portrait the message window
+   shows the kits under. */
+#define GAIA_FORM_ID 9
+#define BRANDO_CHARACTER_ID 8
+#define GAIA_AP_UP_AMOUNT 0x1e
+#define GAIA_DP_UP_AMOUNT 0x1e
+#define GAIA_MOVE_UP_AMOUNT 1
+#define GAIA_MAX_HP_UP_AMOUNT 100
+#define THUNDER_GOD_CANNON_SPELL 0x1d
+#define METAL_ORE_ITEM_ID 0xa3
+#define HIGH_ENERGY_CANNON_ITEM_ID 0xbe
+#define NO_ITEM_SLOT (-1)
+
+/* The four message entries the three upgrade branches draw out of the shared
+   text block, PUSH 0x21d / 0x21e / 0x21f / 0x220 / 0x221.  0x21d is the one
+   refusal all three share for a unit that is not the character the item was
+   made for. */
+#define UPGRADE_REFUSED_TEXT_ID 0x21d
+#define GAIA_COMBAT_KIT_TEXT_ID 0x21e
+#define GAIA_HP_KIT_TEXT_ID 0x21f
+#define BRANDO_NO_ORE_TEXT_ID 0x220
+#define BRANDO_TRADE_TEXT_ID 0x221
+
+/* Where the upgrade messages are drawn and in what colours, PUSH 0xaa44a /
+   PUSH 0x140 / PUSH 0xd0 / PUSH 0x0 / PUSH 0x6d in front of every one of the
+   seven fdps_draw_text calls.  0xaa44a is screen (138, 131), the pen inside the
+   message panel; it stays a literal because it is an address inside the display
+   adapter's aperture rather than the address of anything the linker places
+   (rebuild_info/pitfalls.md, contract E). */
+#define PANEL_TEXT_ORIGIN 0x000aa44a
+#define VGA_SCREEN_PITCH 0x140
+#define MESSAGE_FG_COLOR 0xd0
+#define MESSAGE_BG_COLOR 0
+#define MESSAGE_OUTLINE_COLOR 0x6d
+
+/* How big the buffer fdps_collect_death_scripts is handed is: 100 bytes,
+   thirty-three three-byte records.  The array runs from [EBP-0xa0], the address
+   pushed at 00026dc6, up to the item-id slot at [EBP-0x3c].  That collector is
+   given no capacity and writes one record per dead unit on the map, so the
+   figure is a contract with it and not a preference (death.h). */
+#define DEATH_SCRIPT_BUFFER_BYTES 100
+
+/* How the acting unit's bag slot becomes an item id: MOV EDX,item_slot / ADD
+   EDX,EDX / ADD EDX,record / MOV AL,byte ptr [EDX+0xb] at 000262f4.  The bag is
+   eight two-byte entries starting at record +0x0a and the id is the SECOND byte
+   of the entry, so the subscript is 2 * slot + 1 and its largest value is 15,
+   inside the sixteen inventory_slots holds. */
+#define BAG_ENTRY_ID_INDEX(slot) ((slot) * 2 + 1)
+
+/* 000262a0.  One long dispatch on the item's use-effect byte followed by one
+   death settlement, and the shape of the assembly is the shape of the C: the
+   fourteen codes from 0x01 to 0x0c form a single else-if chain that every arm
+   leaves with a JMP to 00026a59, and 0x1e, 0x21, 0x22 and 0x23 are four
+   SEPARATE ifs after it, each re-reading the same byte.  Nothing can match two
+   of them, so the split costs no behaviour, but it is what the original wrote
+   and the tail below is reached the same way from every one of them.
+
+   THE ARMS THAT SHARE A BODY DO NOT SHARE A CONSUME.  Each elemental arm tests
+   the code a SECOND time after the damage has landed -- CMP EAX,0x1 / JNZ at
+   0002637b and its three siblings -- and only the item half calls
+   fdps_unit_remove_item.  Collapsing the two tests into one is what loses the
+   distinction between a 炎之珠 and a 聖火之劍.
+
+   ELEVEN VALUES COME BACK FROM CALLS AND ARE USED.  fdps_get_unit_record's
+   pointer at 000262ee, 0002657c and its seven repeats in the stat-up arms,
+   00026882, 0002690e, 000269e4, 00026a96, 00026afa, 00026be3 and 00026c96;
+   fdps_get_item_record's at 00026322; fdps_unit_restore_mp's roll at 00026a23;
+   fdps_unit_apply_damage's roll at 00026ab3; fdps_unit_find_item_slot's slot at
+   00026d00 and 00026d85; and fdps_collect_death_scripts' count at 00026dd5.
+   Every other call's EAX is dropped -- fdps_audio_start_wav's voice handle at
+   00026488, all seven fdps_draw_text cursors and fdps_unit_add_item's answer at
+   00026daf among them -- so nothing here notices a failure any of them
+   reports.
+
+   ONE OF THOSE POINTERS IS FETCHED AND THROWN AWAY.  The record read at
+   00026a96 inside the 0x1e loop is stored to [EBP-0x20] and never read: the
+   direct-damage arm works entirely through unit indices.  The build is -od,
+   which does not delete a dead store (rebuild_info/build_flags.md), so the call
+   is what the source said rather than what an optimiser left, and it stays.
+
+   THE DEATH TAIL IS UNCONDITIONAL and its three steps are in the only order
+   that pays out: collect the scripts of everything now at or below zero HP,
+   THEN play the destruction sequence -- which sets the very flag the collect
+   rejects -- and only then run what was collected (death.h).  It runs even for
+   the four effect codes that matched nothing, which costs one sweep of the unit
+   array and, with nothing dead, nothing else. */
+void fdps_apply_item_effect_to_targets(int unit_index, int item_slot,
+                                       int target_count,
+                                       unsigned char *target_ids)
+{
+    /* Where fdps_collect_death_scripts packs what this effect killed. */
+    unsigned char death_scripts[DEATH_SCRIPT_BUFFER_BYTES];
+    /* The unit doing the using, read once so its bag can be indexed. */
+    struct fdps_unit_record *actor;
+    /* The ITEM.DAT record of whatever sat in that bag slot. */
+    struct fdps_item_effect *item;
+    /* The id the bag slot held.  The original spills it twice on the way to
+       the lookup, at [EBP-0xb8] and [EBP-0x3c]; frame allocation is not part of
+       the standard (ADR-0001). */
+    int item_id;
+    /* The record's use-effect byte, widened without sign, which the whole
+       dispatch runs on. */
+    unsigned char use_effect;
+    /* The record's use-amount, the SIGNED word at +0x0e widened by MOVSX at
+       00026328.  It is the power of every damage, heal and MP restore here and
+       is 0 on every one of the permanent stat-up items. */
+    int use_amount;
+    /* EarQu.wav, held just long enough to be handed to the mixer.  It is never
+       freed: the buffer leaks once per earth item used, which is the
+       original's behaviour. */
+    void *earthquake_sample;
+    /* Where the view sat before the quake, and where it is put back to. */
+    int saved_origin_x;
+    int saved_origin_y;
+    /* This shake frame's displacement from that, -2 to +1 on each axis. */
+    int shake_offset_x;
+    int shake_offset_y;
+    /* Which entry of target_ids the two walks are on. */
+    int target_slot;
+    /* Which of the quake's 25 re-renders is being drawn.  The original keeps
+       this, target_slot above and metal_ore_slot below in the one frame slot at
+       [EBP-0x2c] and carries nothing between them; frame allocation is not part
+       of the standard (ADR-0001). */
+    int shake_frame;
+    /* The record the stat-up arms, the MP-restore walk and the direct-damage
+       walk are working on.  One frame slot in the original, [EBP-0x20]. */
+    struct fdps_unit_record *target;
+    /* The record whose poison or paralysis byte is being cleared. */
+    struct fdps_unit_record *cure_target;
+    /* The record of the one named character an upgrade item acts on. */
+    struct fdps_unit_record *upgrade_target;
+    /* What the MP restore or the direct hit rolled: the figure the popup shows,
+       which is not the points the clamp let it move. */
+    int amount_rolled;
+    /* Which bag slot of the 布蘭多 target holds the 金屬礦, looked up a SECOND
+       time. */
+    int metal_ore_slot;
+    /* How many records fdps_collect_death_scripts wrote. */
+    int death_script_count;
+
+    data_fdps_indicator_queue_count = 0;
+    actor = fdps_get_unit_record(unit_index);
+    item_id = (int) actor->inventory_slots[BAG_ENTRY_ID_INDEX(item_slot)];
+    item = fdps_get_item_record(item_id);
+    use_amount = item->use_amount;
+    use_effect = item->use_effect;
+
+    if (use_effect == USE_EFFECT_FIRE_ITEM
+        || use_effect == USE_EFFECT_FIRE_WEAPON) {
+        fdps_play_vfs_animation_over_units(target_count, target_ids,
+                                           FIRE_EFFECT_CLIP);
+        fdps_apply_damage_to_targets(target_count, target_ids, use_amount);
+        if (use_effect == USE_EFFECT_FIRE_ITEM) {
+            fdps_unit_remove_item(unit_index, item_slot);
+        }
+    } else if (use_effect == USE_EFFECT_THUNDER_ITEM
+               || use_effect == USE_EFFECT_THUNDER_WEAPON) {
+        fdps_play_vfs_animation_over_units(target_count, target_ids,
+                                           THUNDER_EFFECT_CLIP);
+        fdps_apply_damage_to_targets(target_count, target_ids, use_amount);
+        if (use_effect == USE_EFFECT_THUNDER_ITEM) {
+            fdps_unit_remove_item(unit_index, item_slot);
+        }
+    } else if (use_effect == USE_EFFECT_ICE_ITEM
+               || use_effect == USE_EFFECT_ICE_WEAPON) {
+        fdps_play_vfs_animation_over_units(target_count, target_ids,
+                                           ICE_EFFECT_CLIP);
+        fdps_apply_damage_to_targets(target_count, target_ids, use_amount);
+        if (use_effect == USE_EFFECT_ICE_ITEM) {
+            fdps_unit_remove_item(unit_index, item_slot);
+        }
+    } else if (use_effect == USE_EFFECT_EARTH_ITEM
+               || use_effect == USE_EFFECT_EARTH_WEAPON) {
+        /* The earth effect has no clip of its own: the sample and the shake
+           ARE the animation, and the damage lands after the view has been put
+           back. */
+        earthquake_sample = fdps_vfs_load_entry(EFFECT_ARCHIVE,
+                                               EARTHQUAKE_SAMPLE);
+        fdps_audio_start_wav(earthquake_sample, EARTHQUAKE_SAMPLE_PLAY_ONCE,
+                             SFX_WAV_RATE_FROM_HEADER,
+                             SFX_WAV_VOLUME_FROM_DEFAULT);
+
+        saved_origin_x = data_fdps_battle_view_window_origin_x;
+        saved_origin_y = data_fdps_battle_view_window_origin_y;
+
+        for (shake_frame = 0; shake_frame < EARTHQUAKE_SHAKE_FRAMES;
+             shake_frame++) {
+            shake_offset_x = rand() % EARTHQUAKE_SHAKE_SPREAD
+                             - EARTHQUAKE_SHAKE_BIAS;
+            shake_offset_y = rand() % EARTHQUAKE_SHAKE_SPREAD
+                             - EARTHQUAKE_SHAKE_BIAS;
+            data_fdps_battle_view_window_origin_x =
+                saved_origin_x + shake_offset_x;
+            data_fdps_battle_view_window_origin_y =
+                saved_origin_y + shake_offset_y;
+            fdps_render_view_frame();
+        }
+
+        data_fdps_battle_view_window_origin_x = saved_origin_x;
+        data_fdps_battle_view_window_origin_y = saved_origin_y;
+        fdps_apply_damage_to_targets(target_count, target_ids, use_amount);
+        if (use_effect == USE_EFFECT_EARTH_ITEM) {
+            fdps_unit_remove_item(unit_index, item_slot);
+        }
+    } else if (use_effect == USE_EFFECT_MOVE_UP) {
+        fdps_play_vfs_animation_over_units(target_count, target_ids,
+                                           CURE_EFFECT_CLIP);
+        target = fdps_get_unit_record((int) target_ids[0]);
+        target->move = (unsigned char) (target->move + MOVE_UP_AMOUNT);
+        fdps_show_number_indicator(MOVE_UP_AMOUNT,
+                                   (unsigned char) GAIN_DIGIT_GLYPH_BASE,
+                                   (int) target_ids[0]);
+        fdps_unit_remove_item(unit_index, item_slot);
+        fdps_play_indicator_queue();
+    } else if (use_effect == USE_EFFECT_MAX_HP_UP) {
+        fdps_play_vfs_animation_over_units(target_count, target_ids,
+                                           CURE_EFFECT_CLIP);
+        target = fdps_get_unit_record((int) target_ids[0]);
+        target->hp_max = (short) (target->hp_max + MAX_HP_UP_AMOUNT);
+        fdps_show_number_indicator(MAX_HP_UP_AMOUNT,
+                                   (unsigned char) GAIN_DIGIT_GLYPH_BASE,
+                                   (int) target_ids[0]);
+        fdps_unit_remove_item(unit_index, item_slot);
+        fdps_play_indicator_queue();
+    } else if (use_effect == USE_EFFECT_MAX_MP_UP) {
+        fdps_play_vfs_animation_over_units(target_count, target_ids,
+                                           CURE_EFFECT_CLIP);
+        target = fdps_get_unit_record((int) target_ids[0]);
+        target->mp_max = (short) (target->mp_max + MAX_MP_UP_AMOUNT);
+        fdps_show_number_indicator(MAX_MP_UP_AMOUNT,
+                                   (unsigned char) GAIN_DIGIT_GLYPH_BASE,
+                                   (int) target_ids[0]);
+        fdps_unit_remove_item(unit_index, item_slot);
+        fdps_play_indicator_queue();
+    } else if (use_effect == USE_EFFECT_AP_UP) {
+        fdps_play_vfs_animation_over_units(target_count, target_ids,
+                                           CURE_EFFECT_CLIP);
+        target = fdps_get_unit_record((int) target_ids[0]);
+        target->ap_base = (short) (target->ap_base + AP_UP_AMOUNT);
+        fdps_show_number_indicator(AP_UP_AMOUNT,
+                                   (unsigned char) GAIN_DIGIT_GLYPH_BASE,
+                                   (int) target_ids[0]);
+        fdps_unit_remove_item(unit_index, item_slot);
+        /* Only the three arms that move a COMBAT stat recompute: the two
+           maximum-point arms and the movement arm above do not, because
+           nothing derived hangs off those three fields. */
+        fdps_unit_recompute_combat_stats((int) target_ids[0]);
+        fdps_play_indicator_queue();
+    } else if (use_effect == USE_EFFECT_DP_UP) {
+        fdps_play_vfs_animation_over_units(target_count, target_ids,
+                                           CURE_EFFECT_CLIP);
+        target = fdps_get_unit_record((int) target_ids[0]);
+        target->dp_base = (short) (target->dp_base + DP_UP_AMOUNT);
+        fdps_show_number_indicator(DP_UP_AMOUNT,
+                                   (unsigned char) GAIN_DIGIT_GLYPH_BASE,
+                                   (int) target_ids[0]);
+        fdps_unit_remove_item(unit_index, item_slot);
+        fdps_unit_recompute_combat_stats((int) target_ids[0]);
+        fdps_play_indicator_queue();
+    } else if (use_effect == USE_EFFECT_DX_UP) {
+        fdps_play_vfs_animation_over_units(target_count, target_ids,
+                                           CURE_EFFECT_CLIP);
+        target = fdps_get_unit_record((int) target_ids[0]);
+        target->dx_base = (short) (target->dx_base + DX_UP_AMOUNT);
+        fdps_show_number_indicator(DX_UP_AMOUNT,
+                                   (unsigned char) GAIN_DIGIT_GLYPH_BASE,
+                                   (int) target_ids[0]);
+        fdps_unit_remove_item(unit_index, item_slot);
+        fdps_unit_recompute_combat_stats((int) target_ids[0]);
+        fdps_play_indicator_queue();
+    } else if (use_effect == USE_EFFECT_RESTORE_HP_ITEM
+               || use_effect == USE_EFFECT_RESTORE_HP_WEAPON) {
+        /* The only arm with no animation of its own: the clip, the flash and
+           the queue drain all live inside fdps_apply_heal_to_targets. */
+        fdps_apply_heal_to_targets(target_count, target_ids, use_amount);
+        if (use_effect == USE_EFFECT_RESTORE_HP_ITEM) {
+            fdps_unit_remove_item(unit_index, item_slot);
+        }
+    } else if (use_effect == USE_EFFECT_CURE_POISON) {
+        cure_target = fdps_get_unit_record((int) target_ids[0]);
+        /* The popup is queued only when there was something to cure, but the
+           byte is cleared either way, and both happen BEFORE the clip: the
+           cure has already landed by the time the player sees it. */
+        if (cure_target->status_timers[3] != 0) {
+            fdps_show_cure_indicator((int) target_ids[0]);
+        }
+        cure_target->status_timers[3] = 0;
+        fdps_play_vfs_animation_over_units(target_count, target_ids,
+                                           CURE_EFFECT_CLIP);
+        fdps_flash_units_in_color(target_count, target_ids,
+                                  EFFECT_FLASH_COLOR);
+        fdps_unit_remove_item(unit_index, item_slot);
+        fdps_play_indicator_queue();
+    } else if (use_effect == USE_EFFECT_CURE_PARALYSIS) {
+        cure_target = fdps_get_unit_record((int) target_ids[0]);
+        if (cure_target->status_timers[4] != 0) {
+            fdps_show_cure_indicator((int) target_ids[0]);
+        }
+        cure_target->status_timers[4] = 0;
+        fdps_play_vfs_animation_over_units(target_count, target_ids,
+                                           CURE_EFFECT_CLIP);
+        fdps_flash_units_in_color(target_count, target_ids,
+                                  EFFECT_FLASH_COLOR);
+        fdps_unit_remove_item(unit_index, item_slot);
+        fdps_play_indicator_queue();
+    } else if (use_effect == USE_EFFECT_RESTORE_MP_ITEM) {
+        fdps_play_vfs_animation_over_units(target_count, target_ids,
+                                           RESTORE_MP_EFFECT_CLIP);
+        fdps_flash_units_in_color(target_count, target_ids,
+                                  EFFECT_FLASH_COLOR);
+        for (target_slot = 0; target_slot < target_count; target_slot++) {
+            target = fdps_get_unit_record((int) target_ids[target_slot]);
+            /* A unit with no MP at all gets MISS rather than a zero: the test
+               is on the MAXIMUM at +0x46 and not on what it currently has, so
+               a spent caster is still restored. */
+            if (target->mp_max == 0) {
+                fdps_show_miss_indicator((int) target_ids[target_slot]);
+            } else {
+                amount_rolled = fdps_unit_restore_mp(
+                    (int) target_ids[target_slot], use_amount);
+                fdps_show_number_indicator(
+                    amount_rolled, (unsigned char) GAIN_DIGIT_GLYPH_BASE,
+                    (int) target_ids[target_slot]);
+            }
+        }
+        fdps_unit_remove_item(unit_index, item_slot);
+        fdps_play_indicator_queue();
+    }
+
+    if (use_effect == USE_EFFECT_BEAM_CANNON) {
+        for (target_slot = 0; target_slot < target_count; target_slot++) {
+            /* Fetched and dropped -- see the note above the function. */
+            target = fdps_get_unit_record((int) target_ids[target_slot]);
+            amount_rolled = fdps_unit_apply_damage(
+                (int) target_ids[target_slot], use_amount);
+            fdps_show_number_indicator(
+                amount_rolled, (unsigned char) DAMAGE_DIGIT_GLYPH_BASE,
+                (int) target_ids[target_slot]);
+        }
+        fdps_play_indicator_queue();
+    }
+
+    if (use_effect == USE_EFFECT_GAIA_COMBAT_KIT) {
+        upgrade_target = fdps_get_unit_record((int) target_ids[0]);
+        fdps_message_window_open((int) upgrade_target->portrait_id);
+        if (upgrade_target->portrait_id == GAIA_FORM_ID) {
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           GAIA_COMBAT_KIT_TEXT_ID,
+                           (unsigned char *) PANEL_TEXT_ORIGIN,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+            upgrade_target->ap_base =
+                (short) (upgrade_target->ap_base + GAIA_AP_UP_AMOUNT);
+            upgrade_target->dp_base =
+                (short) (upgrade_target->dp_base + GAIA_DP_UP_AMOUNT);
+            upgrade_target->move =
+                (unsigned char) (upgrade_target->move + GAIA_MOVE_UP_AMOUNT);
+            fdps_set_flag_bit((int) target_ids[0], THUNDER_GOD_CANNON_SPELL);
+            fdps_unit_remove_item(unit_index, item_slot);
+            fdps_unit_recompute_combat_stats((int) target_ids[0]);
+        } else {
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           UPGRADE_REFUSED_TEXT_ID,
+                           (unsigned char *) PANEL_TEXT_ORIGIN,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+        }
+        fdps_message_window_close();
+    }
+
+    if (use_effect == USE_EFFECT_GAIA_HP_KIT) {
+        upgrade_target = fdps_get_unit_record((int) target_ids[0]);
+        fdps_message_window_open((int) upgrade_target->portrait_id);
+        if (upgrade_target->portrait_id == GAIA_FORM_ID) {
+            fdps_draw_text(data_fdps_all_game_text_ptr, GAIA_HP_KIT_TEXT_ID,
+                           (unsigned char *) PANEL_TEXT_ORIGIN,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+            upgrade_target->hp_max =
+                (short) (upgrade_target->hp_max + GAIA_MAX_HP_UP_AMOUNT);
+            fdps_unit_remove_item(unit_index, item_slot);
+        } else {
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           UPGRADE_REFUSED_TEXT_ID,
+                           (unsigned char *) PANEL_TEXT_ORIGIN,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+        }
+        fdps_message_window_close();
+    }
+
+    if (use_effect == USE_EFFECT_BRANDO_DEVICE) {
+        upgrade_target = fdps_get_unit_record((int) target_ids[0]);
+        fdps_message_window_open((int) upgrade_target->char_id);
+        if (upgrade_target->char_id == BRANDO_CHARACTER_ID) {
+            if (fdps_unit_find_item_slot((int) target_ids[0],
+                                         METAL_ORE_ITEM_ID) == NO_ITEM_SLOT) {
+                fdps_draw_text(data_fdps_all_game_text_ptr,
+                               BRANDO_NO_ORE_TEXT_ID,
+                               (unsigned char *) PANEL_TEXT_ORIGIN,
+                               VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                               MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+            } else {
+                fdps_draw_text(data_fdps_all_game_text_ptr,
+                               BRANDO_TRADE_TEXT_ID,
+                               (unsigned char *) PANEL_TEXT_ORIGIN,
+                               VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                               MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+                /* BOTH REMOVALS COME OUT OF THE TARGET'S BAG, and the first
+                   one uses the ACTING unit's slot index: PUSH [EBP+0x18] then
+                   the target id at 00026d56.  For the shipped path the two are
+                   the same unit, which is why it works.
+                   THE 金屬礦 IS LOOKED UP A SECOND TIME AFTER THAT REMOVAL, at
+                   00026d7d, and not remembered from the test above.  Removing
+                   an item compacts the eight-slot bag, so the index the first
+                   lookup found can already name something else by now; reusing
+                   it destroys the wrong item. */
+                fdps_unit_remove_item((int) target_ids[0], item_slot);
+                metal_ore_slot = fdps_unit_find_item_slot(
+                    (int) target_ids[0], METAL_ORE_ITEM_ID);
+                fdps_unit_remove_item((int) target_ids[0], metal_ore_slot);
+                fdps_unit_add_item((int) target_ids[0],
+                                   HIGH_ENERGY_CANNON_ITEM_ID);
+            }
+        } else {
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           UPGRADE_REFUSED_TEXT_ID,
+                           (unsigned char *) PANEL_TEXT_ORIGIN,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+        }
+        fdps_message_window_close();
+    }
+
+    data_fdps_battle_pending_xp_credit = 0;
+    death_script_count = fdps_collect_death_scripts(death_scripts);
+    fdps_play_death_animation_and_mark_dead();
+    fdps_run_death_scripts(unit_index, death_script_count, death_scripts);
 }

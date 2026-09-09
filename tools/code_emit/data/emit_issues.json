@@ -2348,5 +2348,33 @@
       "needs": "Ticket 23's data landing (for 0x03), and a playtest in DOSBox-X with the disc mounted running a chapter opening scene and a victory scene end to end -- ICON11.DAT in particular, since it holds the one shipped opcode 4 that takes its wave number from the choice prompt.",
       "status": "open"
     }
+  ],
+  "000262a0": [
+    {
+      "from": "emit",
+      "what": "The three upgrade arms -- 0x21 and 0x22, 蓋亞's two 強化套件, and 0x23, 布蘭多's 高能量裝置 -- are emitted from the assembly but never executed by a test. Each opens fdps_message_window_open on a field of the target's record, draws one of five text entries with fdps_draw_text at the fixed panel pen, and closes with fdps_message_window_close; running one needs Message.cel behind data_fdps_message_window_sheet_ptr, a portrait sheet, the scene layers fdps_message_window_close recomposes the backdrop from, and a text block behind data_fdps_all_game_text_ptr, which ticket 23 has not written. So three things rest on the assembly reading alone: that 0x21 and 0x22 test the FORM id at +0x07 (00026b14, 00026bfd) while 0x23 tests the CHARACTER id at +0x08 (00026cb0), which part company for a unit that has class-changed; that 0x21 grants spell bit 0x1d and recomputes the combat stats while 0x22 does neither; and that 0x23 looks the 金屬礦 slot up a SECOND time at 00026d7d after fdps_unit_remove_item has already compacted the bag. Narrowing it: WDISASM on the build's own ITEM.OBJ shows all three arms reproducing the original's order of field reads, adds and calls, so what is unverified is not the control flow but that the emitted C parameterises those calls as the original does at run time.",
+      "needs": "data_fdps_all_game_text_ptr and data_fdps_message_window_sheet_ptr filled by ticket 23, plus the message-window fixture tests/msgwin.c already builds, so a case here can drive one arm end to end; or a playtest that uses item A4 and item AD on 蓋亞 both before and after a class change, and item BB on 布蘭多 with and without a 金屬礦 in the bag, checking that the second use removes the ore and not the neighbouring item.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "The death settlement at the tail is reached by every case here with nothing to settle. The fixture keeps data_fdps_map_unit_count at 0, which is what keeps the destruction sequence and its Explo.Saf out of a unit test, and with a count of 0 fdps_collect_death_scripts answers 0 and both routines after it return at their own count tests. So the order death.h calls load-bearing -- collect BEFORE the routine that sets the flag the collect rejects on -- and the 100-byte capacity of the stack buffer at [EBP-0xa0] are unasserted from here. What is settled and needs no further evidence: the argument order and the buffer size are read straight off 00026dc6 through 00026dec, and all three callees have their own cover in tests/death.c.",
+      "needs": "A case with data_fdps_map_unit_count above zero and a unit staged at or below zero HP with a death-script opcode, which means staging Explo.Saf, the scene layers and the sprite cache fdps_play_death_animation_and_mark_dead composes its frames from -- the same fixture tests/death.c would need for its own end-to-end case.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed independently and adding one narrowing: the field-offset half of this concern is already settled and does not need the fixture. That 0x21 and 0x22 read +0x07 while 0x23 reads +0x08 is fixed by MOV AL,byte ptr [EAX+0x7] at 00026b14 and 00026bfd against MOV AL,byte ptr [EAX+0x8] at 00026cb0, and the_item_record_layout_matches_the_offsets_read already pins portrait_id at 0x07 and char_id at 0x08, so a C that swapped them would fail today. What genuinely waits on evidence is narrower than the emitter states: whether the three arms behave correctly at run time once a real text block and message-window sheet exist -- the draw calls, the modal open/close and the spell grant.",
+      "needs": "data_fdps_all_game_text_ptr and data_fdps_message_window_sheet_ptr filled by ticket 23 plus the message-window fixture in tests/msgwin.c; or a playtest using item A4 and item AD on 蓋亞 before and after a class change, and item BB on 布蘭多 with and without a 金屬礦 in the bag.",
+      "status": "open",
+      "same_as": "emit#0"
+    },
+    {
+      "from": "review",
+      "what": "Reached the same conclusion from the tail's own listing and add nothing beyond confirming the two numbers the emitter read off it. The buffer really is 100 bytes: LEA EAX,[EBP-0xa0] at 00026dc6 is the base and the lowest named local above it is the item-id slot at [EBP-0x3c], giving 0x64, and the argument order f(unit_index, count, buffer) is fixed by the pushes at 00026ddd-00026dec. Both are read off the frame rather than asserted, and with data_fdps_map_unit_count staged at 0 no case here exercises the collect-before-play ordering death.h calls load-bearing.",
+      "needs": "A case with data_fdps_map_unit_count above zero and a unit staged at or below zero HP carrying a death-script opcode, which means staging Explo.Saf, the scene layers and the sprite cache fdps_play_death_animation_and_mark_dead composes from -- the same fixture tests/death.c would need for its own end-to-end case.",
+      "status": "open",
+      "same_as": "emit#1"
+    }
   ]
 }
