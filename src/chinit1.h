@@ -77,4 +77,24 @@ extern void fdps_chapter_02_init(void);
 extern void fdps_chapter_03_init(void);
 #pragma aux fdps_chapter_03_init "*" parm caller [];
 
+/* Chapter 4's entry handler: brings the game into chapter 4.  Takes nothing
+   and returns nothing.
+
+   In order, and the order is the original's: character 1 -- 法蓮娜 the
+   魔導士 -- is appended to the party roster; the chapter state is rebuilt;
+   the opening cut-scene Icon03.dat is interpreted; the chapter title card is
+   shown; and the map cursor is parked on unit 0's tile.
+
+   The add still comes before the rebuild, but chapter 4 is where that stops
+   being observable: MAP03.DAT asks for three player slots and the party is
+   already three strong when the chapter opens, so 法蓮娜 lands at roster slot
+   3, one past the last slot the map fills, and is not one of chapter 4's map
+   units either way.  She comes onto the map from the map file instead, as the
+   level-8 side-2 record MAP03.DAT tags wave 3.  Nothing here writes on a unit
+   record.
+
+   Table slot 3. */
+extern void fdps_chapter_04_init(void);
+#pragma aux fdps_chapter_04_init "*" parm caller [];
+
 #endif

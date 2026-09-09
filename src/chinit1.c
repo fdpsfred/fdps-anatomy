@@ -287,3 +287,96 @@ void fdps_chapter_03_init(void)
     fdps_show_chapter_title_card();
     fdps_map_cursor_move_to_unit(CH03_CURSOR_UNIT);
 }
+
+/* --- fdps_chapter_04_init @ 00020f70 ----------------------------------- */
+
+/* The character who joins at the start of chapter 4: 法蓮娜 the 魔導士,
+   character id 1 (assets/characters.md).  PUSH 0x1 at 00020f7c.  She lands at
+   roster slot 3, behind 蘭迪斯, 尤利安 and 亞克, because the roster is in
+   join order and is never permuted -- chapters 1 to 3 are the only other
+   callers of fdps_roster_add_character the game reaches before this one. */
+#define CH04_JOINING_CHARACTER 1
+
+/* Chapter 4's opening cut-scene, the string at 0x61828 loaded into EAX at
+   00020f8b and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id and not a script id of its own, which is
+   why this is Icon03.dat where the three handlers above hold Icon00.dat,
+   Icon01.dat and Icon02.dat at the same position.
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON03.DAT by the
+   call and cannot live in read-only storage. */
+#define CH04_OPENING_SCRIPT "Icon03.dat"
+
+/* Which unit the cursor is left on: PUSH 0x0 at 00020f9e. */
+#define CH04_CURSOR_UNIT 0
+
+/* 00020f70.  Five calls, straight line, no branch, no loop and no local --
+   byte for byte the shape of chapter 3's handler with two different
+   arguments.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 00020f70..00020f74 -- over SUB ESP,0x0, a zero-byte local area
+   written as the six-byte immediate form.  Nothing is addressed off EBP
+   anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 00020fa8..00020fab
+   and the RET at 00020fac is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: PUSH 0x1 / CALL 0x00023bc0 / ADD ESP,0x4 at 00020f7c, and the same
+   shape at 00020f8b and 00020f9e.  The two argument-less calls at 00020f86
+   and 00020f99 are bare CALLs with no push and no adjustment.  Nothing reads
+   [EBP+8] or above, so this function takes nothing itself, and EAX is never
+   set before the RET, so it returns nothing -- the dispatcher reaches it
+   through the fourth slot of the table at 00060074 (the dword at 00060080 is
+   00020f70) and ignores EAX.
+
+   VALUES USED AFTER A CALL: none at all.  All five callees return void and
+   nothing here reads EAX after any of them; the only register written between
+   the prologue and the RET is the EAX that carries the script name literal
+   into the third call.
+
+   THE ORDER IS THE ORIGINAL'S AND IS KEPT, BUT CHAPTER 4 IS WHERE IT STOPS
+   BEING VISIBLE.  The add still runs before the reset, as it does in the three
+   handlers above.  What it no longer decides is chapter 4's deployment:
+   MAP03.DAT declares three player slots, the party already has three members
+   when the chapter opens -- 蘭迪斯, 尤利安 and 亞克, one from each of the
+   chapters before it -- and fdps_build_map_unit_array fills slot i from roster
+   slot i only while i is below the roster count (src/deploy.c).  法蓮娜 is
+   roster slot 3, one past the last slot the map asks for, so she is not one of
+   chapter 4's map units whichever way round the two calls run.
+
+   She reaches the map by the other road, and it is the third call above that
+   opens it: MAP03.DAT's deployment record 21 is side 2, character 1, level 8
+   and is tagged wave 3, and the shipped ICON03.DAT asks for exactly that wave
+   -- walked with the opcode ladder in src/icon.c its bytes are SET_MUSIC,
+   SET_VIEW_TILE, FACE_UNITS, PLAY_SAF and then DEPLOY_WAVE 3 with exact
+   placement at script offset 12.  So this handler does put her on the map; it
+   does it through the cut-scene and not through the roster add.
+
+   That deployment record and not the add is also where her level comes from --
+   the add builds her roster record from FRIAPRDA.DAT's level 3, and it is the
+   wave-3 record that makes the level-8 魔導士 the strategy guide lists for
+   this chapter (assets/characters.md).
+
+   WHAT THE MAP DEPLOYS ON ITS OWN.  MAP03.DAT tags exactly one of its 33
+   records wave 0 -- record 0, side 1, character 12, level 10, the guest hero
+   索爾 again -- so the state reset puts him down behind the three player slots
+   and this handler has no store in its body to make on him, exactly as chapter
+   3's has none.
+
+   THE CHAPTER IS NOT SET HERE.  Both the script the third call loads and the
+   title-card graphic the fourth one shows are chosen from
+   data_fdps_chapter_current_chapter_id by the callees, and this handler
+   neither reads nor writes it -- the dispatcher that reached this slot is what
+   put the right value there.  The Icon03.dat above is the one place the
+   chapter number is spelled out rather than read. */
+void fdps_chapter_04_init(void)
+{
+    fdps_roster_add_character(CH04_JOINING_CHARACTER);
+    fdps_chapter_state_reset();
+    fdps_icon_script_run(CH04_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH04_CURSOR_UNIT);
+}
