@@ -24,9 +24,13 @@
  * two tests that move the grid header away from the layer widths pin it.
  */
 #include <stddef.h>
+#include <string.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "audio.h"
 #include "keybd.h"
 #include "mapdraw.h"
 #include "maptile.h"
@@ -989,15 +993,24 @@ static void bs_the_behavior_is_the_low_nibble_of_byte_0x34(void)
 /* ---- fdps_map_actor_take_best_action, 00012c10 ----------------------------
  *
  * This one runs the three real scorers in src/aiscore.c and then dispatches to
- * src/aiact.c, which is NOT EMITTED YET: fdps_map_actor_move_and_attack,
- * fdps_map_actor_cast_chosen_spell and fdps_map_actor_use_item are all
- * zero-returning stubs with no side effects, so which of the five arms was
- * taken cannot be seen from outside this call.  What can be seen, and what
- * every case below reads back, is the pair the function itself produces: the
- * answer, and data_fdps_map_cursor_draw_mode, which is written 0 on the
- * dispatch path and not touched at all on the other.  The three score globals
- * are read back too, because they are what the decision was taken on and they
- * are what the fixture has to have arranged for the case to mean anything.
+ * src/aiact.c, of which only fdps_map_actor_move_and_attack is emitted:
+ * fdps_map_actor_cast_chosen_spell and fdps_map_actor_use_item are still
+ * zero-returning stubs with no side effects.  So which of the five arms was
+ * taken still cannot be told apart from outside this call, and what every case
+ * below reads back is the pair the function itself produces: the answer, and
+ * data_fdps_map_cursor_draw_mode, which is written 0 on the dispatch path and
+ * not touched at all on the other.  The three score globals are read back too,
+ * because they are what the decision was taken on and they are what the
+ * fixture has to have arranged for the case to mean anything.  What the attack
+ * arm's own effects are is tests/aiact.c's business, not this file's.
+ *
+ * THE ATTACK ARM IS LIVE, so every case here goes through tba_act, which puts
+ * the machine in the graphics mode and on a moving timer for the length of the
+ * dispatch.  A case that reaches that arm really walks the cursor, composes
+ * frames, shows the gauges and swings; without the timer the first presented
+ * frame would never return.  That is also why the wrapper is used by the cases
+ * that expect no arm to run: a dispatch that went to the wrong arm fails an
+ * assertion there instead of hanging the suite.
  *
  * Every case parks all three score globals on TBA_SCORE_SENTINEL first, which
  * is 0x5a and so well above the threshold.  Each scorer zeroes its own global
@@ -1061,6 +1074,58 @@ static void bs_the_behavior_is_the_low_nibble_of_byte_0x34(void)
    dispatch path stores, nor 1, so "untouched" and "stored" are told apart. */
 #define TBA_DRAW_SENTINEL 7
 
+/* WHAT THE ATTACK ARM NOW NEEDS, AND WHY THIS FIXTURE CARRIES IT.
+   fdps_map_actor_move_and_attack (aiact.h) is emitted, so a case whose scores
+   send the dispatch down the attack arm plays a whole attack for real: the
+   cursor walks, frames are composed and presented, the two HP gauges go up and
+   a swing is animated.  Everything below from here to tba_act is what those
+   need and nothing more -- a cursor kit for the overlay, a unit gauge sheet, a
+   resident animation container, and a handler on IRQ0 without which the first
+   presented frame never returns.  Nothing here changes what the searches
+   score: aiscore.c reads none of it. */
+#define TBA_TIMER_VECTOR 8
+#define TBA_MODE_TEXT 0x03
+#define TBA_MODE_320X200X256 0x13
+#define TBA_TILE_PX 24
+
+/* Portrait id 0x80 is the record that has no map sprite at all, so a composed
+   frame returns before it reaches for the unit sprite cache this file does not
+   stage (mapdraw.c).  The searches never read the byte. */
+#define TBA_NO_MAP_SPRITE 0x80
+
+/* The Cusor.cel kit: only the offset table at 0x0f is read, and
+   fdps_blit_cursor_tile takes 24 by 24 from its own constants.  One flat fill
+   run per row is the encoding src/rle.c decodes, a command byte of len - 1
+   followed by the pixel. */
+#define TBA_CEL_TABLE_AT 0x0f
+#define TBA_CURSOR_STREAM_AT 0x40
+#define TBA_CURSOR_BYTES (TBA_CURSOR_STREAM_AT + TBA_TILE_PX * 2)
+#define TBA_CURSOR_COLOR 0x21
+
+/* The unit gauge sheet: three 43 by 6 graphics 0x102 bytes apart. */
+#define TBA_GAUGE_GRAPHIC_STRIDE 0x102
+#define TBA_GAUGE_BYTES (TBA_GAUGE_GRAPHIC_STRIDE * 3)
+
+/* The resident BaseAni container, in the shape src/vfs.c reads it, holding one
+   member: the attack animation, whose .SAF header declares no frames, so
+   fdps_play_attack_animation resolves it and composes nothing.  The name is
+   stored upper case because the lookup folds only the query. */
+#define TBA_VFS_TABLE_OFFSET_AT 5
+#define TBA_VFS_COUNT_AT 7
+#define TBA_VFS_TABLE_AT 35
+#define TBA_VFS_ENTRY_BYTES 26
+#define TBA_VFS_ENTRY_SIZE_AT 0x0d
+#define TBA_VFS_ENTRY_START_AT 0x16
+#define TBA_VFS_MEMBER_AT (TBA_VFS_TABLE_AT + TBA_VFS_ENTRY_BYTES)
+#define TBA_SAF_BYTES 0x20
+#define TBA_SAF_FRAME_COUNT_AT 0x0c
+#define TBA_VFS_BYTES (TBA_VFS_MEMBER_AT + TBA_SAF_BYTES)
+#define TBA_ANIMATION_MEMBER "EASYANI.SAF"
+
+/* A chapter index the palette cycler's switch does not list, so the frames a
+   dispatching case presents change no DAC entry. */
+#define TBA_INERT_CHAPTER 1
+
 /* Any char_id other than 0, so the attack scorer's protagonist weighting stays
    out of every expected value below. */
 #define TBA_NOBODY 5
@@ -1070,6 +1135,10 @@ static unsigned char tba_attr[ATTR_ROWS_AT + TBA_ATTR_ROWS * 4];
 static unsigned char tba_event[EVENT_CELLS_AT + TBA_CELLS];
 static unsigned char tba_grid[4 + TBA_CELLS * 2];
 static unsigned char tba_classes[TBA_CLASSES * TBA_CLASS_STRIDE];
+static unsigned char tba_cursor_kit[TBA_CURSOR_BYTES];
+static unsigned char tba_gauge_sheet[TBA_GAUGE_BYTES];
+static unsigned char tba_vfs[TBA_VFS_BYTES];
+static void (__interrupt __far *tba_saved_timer)();
 static struct fdps_unit_record tba_units[TBA_UNITS];
 static struct fdps_item_effect tba_items[TBA_ITEMS];
 static struct fdps_spell_effect tba_spells[TBA_SPELLS];
@@ -1081,6 +1150,89 @@ static void tba_zero(unsigned char *block, int bytes)
     for (i = 0; i < bytes; i++) {
         block[i] = 0;
     }
+}
+
+static void __interrupt __far tba_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(tba_saved_timer);
+}
+
+static void tba_u16(unsigned char *image, int at, unsigned int value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void tba_u32(unsigned char *image, int at, unsigned long value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    image[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    image[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+/* The three sheets the attack arm draws out of.  What they hold does not
+   matter to any assertion here; that they are addressable does. */
+static void tba_stage_sheets(void)
+{
+    int row;
+    int offset;
+
+    tba_zero(tba_cursor_kit, (int) sizeof(tba_cursor_kit));
+    tba_u32(tba_cursor_kit, TBA_CEL_TABLE_AT,
+            (unsigned long) TBA_CURSOR_STREAM_AT);
+    for (row = 0; row < TBA_TILE_PX; row++) {
+        tba_cursor_kit[TBA_CURSOR_STREAM_AT + row * 2] =
+            (unsigned char) (TBA_TILE_PX - 1);
+        tba_cursor_kit[TBA_CURSOR_STREAM_AT + row * 2 + 1] = TBA_CURSOR_COLOR;
+    }
+
+    for (offset = 0; offset < TBA_GAUGE_GRAPHIC_STRIDE; offset++) {
+        tba_gauge_sheet[offset] = 10;
+        tba_gauge_sheet[TBA_GAUGE_GRAPHIC_STRIDE + offset] = 20;
+        tba_gauge_sheet[2 * TBA_GAUGE_GRAPHIC_STRIDE + offset] = 30;
+    }
+
+    tba_zero(tba_vfs, (int) sizeof(tba_vfs));
+    tba_u16(tba_vfs, TBA_VFS_TABLE_OFFSET_AT, (unsigned int) TBA_VFS_TABLE_AT);
+    tba_u32(tba_vfs, TBA_VFS_COUNT_AT, 1UL);
+    strcpy((char *) tba_vfs + TBA_VFS_TABLE_AT, TBA_ANIMATION_MEMBER);
+    tba_u32(tba_vfs, TBA_VFS_TABLE_AT + TBA_VFS_ENTRY_SIZE_AT,
+            (unsigned long) TBA_SAF_BYTES);
+    tba_u32(tba_vfs, TBA_VFS_TABLE_AT + TBA_VFS_ENTRY_START_AT,
+            (unsigned long) TBA_VFS_MEMBER_AT);
+    tba_vfs[TBA_VFS_MEMBER_AT] = 'S';
+    tba_vfs[TBA_VFS_MEMBER_AT + 1] = 'A';
+    tba_vfs[TBA_VFS_MEMBER_AT + 2] = 'F';
+    tba_u16(tba_vfs, TBA_VFS_MEMBER_AT + TBA_SAF_FRAME_COUNT_AT, 0);
+}
+
+static void tba_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* One dispatch, run the way the game runs it: in a graphics mode with the
+   timer moving, because whichever arm the scores pick may present frames.  A
+   case that expects no arm to run pays only for the two mode switches. */
+static int tba_act(int actor_index, int side_select)
+{
+    int acted;
+
+    tba_set_mode(TBA_MODE_320X200X256);
+    tba_saved_timer = _dos_getvect(TBA_TIMER_VECTOR);
+    _dos_setvect(TBA_TIMER_VECTOR, tba_timer_isr);
+
+    acted = fdps_map_actor_take_best_action(actor_index, side_select);
+
+    _dos_setvect(TBA_TIMER_VECTOR, tba_saved_timer);
+    tba_set_mode(TBA_MODE_TEXT);
+    return acted;
 }
 
 /* A 4x4 battle over uniform terrain 0 with every class row costing 1 a step,
@@ -1149,6 +1301,36 @@ static void tba_stage(void)
     data_fdps_battle_ai_best_physical_target_idx = 0;
     data_fdps_map_ai_best_spell_id = 0;
     data_fdps_map_cursor_draw_mode = TBA_DRAW_SENTINEL;
+
+    /* Everything from here down is for the arm that plays an attack, and
+       nothing below is read by any of the three searches.  The animation flag
+       is one of them and is named rather than inherited: left set, the attack
+       arm plays the full-screen exchange instead, which composes its clip
+       names out of a portrait id and blocks on a member no fixture here
+       holds. */
+    data_fdps_ui_battle_animation_enabled = 0;
+    tba_stage_sheets();
+    data_fdps_cursor_highlight_sprite_sheet_ptr = tba_cursor_kit;
+    data_fdps_unit_gauge_sheet_ptr = tba_gauge_sheet;
+    data_fdps_animation_baseani_archive_ptr = tba_vfs;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_chapter_current_chapter_id = TBA_INERT_CHAPTER;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_input_last_scancode = 3;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_battle_pending_xp_credit = 0;
+    data_fdps_audio_sfx_enabled_flag = 0;
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    for (i = 0; i < SFX_SAMPLE_SLOT_COUNT; i++) {
+        data_fdps_audio_sample_handle_table[i] = NULL;
+    }
+    for (i = 0; i < 6; i++) {
+        data_fdps_battle_tile_attr_ap_modifier_table[i] = 0;
+        data_fdps_battle_tile_attr_def_modifier_table[i] = 0;
+    }
 }
 
 static void tba_unit(int index, int x, int y, int side, int ap, int dp,
@@ -1158,6 +1340,7 @@ static void tba_unit(int index, int x, int y, int side, int ap, int dp,
     tba_units[index].pos_y = (unsigned char) y;
     tba_units[index].side = (unsigned char) side;
     tba_units[index].char_id = (unsigned char) TBA_NOBODY;
+    tba_units[index].portrait_id = (unsigned char) TBA_NO_MAP_SPRITE;
     tba_units[index].ap = (short) ap;
     tba_units[index].dp = (short) dp;
     tba_units[index].hp_current = (short) hp_current;
@@ -1261,7 +1444,7 @@ static void tba_no_score_reaches_the_threshold(void)
     tba_unit(0, 1, 1, 0, 10, 5, 100, 100);
     tba_empty_bag(0);
 
-    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 0);
+    CHECK_EQ(tba_act(0, 0), 0);
     CHECK_EQ(data_fdps_battle_ai_best_physical_score, 0);
     CHECK_EQ(data_fdps_battle_ai_best_spell_score, 0);
     CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
@@ -1287,7 +1470,7 @@ static void tba_a_physical_score_alone_acts(void)
     tba_carry(0, 0, 1, 1);
     tba_unit(1, 1, 0, 1, 0, 3, 100, 100);
 
-    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 1);
+    CHECK_EQ(tba_act(0, 0), 1);
     CHECK_EQ(data_fdps_battle_ai_best_physical_score, 8);
     CHECK_EQ(data_fdps_battle_ai_best_spell_score, 0);
     CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
@@ -1311,7 +1494,7 @@ static void tba_a_spell_score_alone_acts(void)
     tba_learns(0, 1);
     tba_unit(1, 1, 0, 1, 0, 3, 100, 100);
 
-    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 1);
+    CHECK_EQ(tba_act(0, 0), 1);
     CHECK_EQ(data_fdps_battle_ai_best_physical_score, 0);
     CHECK_EQ(data_fdps_battle_ai_best_spell_score, 8);
     CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
@@ -1342,7 +1525,7 @@ static void tba_the_threshold_is_six_and_six_acts(void)
     tba_unit(1, 1, 0, 0, 10, 5, 40, 100);
     data_fdps_map_unit_count = 1;
 
-    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 0);
+    CHECK_EQ(tba_act(0, 0), 0);
     CHECK_EQ(data_fdps_battle_ai_best_item_score, 3);
     CHECK_EQ(data_fdps_map_cursor_draw_mode, TBA_DRAW_SENTINEL);
 
@@ -1353,7 +1536,7 @@ static void tba_the_threshold_is_six_and_six_acts(void)
     tba_carry(0, 0, 3, 0);
     tba_unit(1, 1, 0, 0, 10, 5, 40, 100);
 
-    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 1);
+    CHECK_EQ(tba_act(0, 0), 1);
     CHECK_EQ(data_fdps_battle_ai_best_item_score, 6);
     CHECK_EQ(data_fdps_battle_ai_best_physical_score, 0);
     CHECK_EQ(data_fdps_battle_ai_best_spell_score, 0);
@@ -1377,7 +1560,7 @@ static void tba_side_select_reaches_the_searches(void)
     tba_carry(0, 0, 3, 0);
     tba_unit(1, 1, 0, 0, 10, 5, 40, 100);
 
-    CHECK_EQ(fdps_map_actor_take_best_action(0, 1), 0);
+    CHECK_EQ(tba_act(0, 1), 0);
     CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);
     CHECK_EQ(data_fdps_map_cursor_draw_mode, TBA_DRAW_SENTINEL);
 }
@@ -1393,9 +1576,10 @@ static void tba_side_select_reaches_the_searches(void)
    whichever option scored highest, or that answered 0 when no arm matched,
    fails this case.
  *
- * Which arm ran cannot be read back while src/aiact.c is stubbed; what this
-   case pins is the pair that is this function's own -- the answer and the
-   cursor mode -- on the arrangement that reaches none of them. */
+ * Which arm ran cannot be read back from here -- two of the three are still
+   stubs and the third's effects are tests/aiact.c's subject; what this case
+   pins is the pair that is this function's own -- the answer and the cursor
+   mode -- on the arrangement that reaches none of them. */
 static void tba_three_equal_scores_run_nothing_and_still_report_acted(void)
 {
     tba_stage();
@@ -1410,7 +1594,7 @@ static void tba_three_equal_scores_run_nothing_and_still_report_acted(void)
     tba_learns(0, 1);
     tba_unit(1, 1, 0, 1, 0, 3, 100, 100);
 
-    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 1);
+    CHECK_EQ(tba_act(0, 0), 1);
     CHECK_EQ(data_fdps_battle_ai_best_physical_score, 8);
     CHECK_EQ(data_fdps_battle_ai_best_spell_score, 8);
     CHECK_EQ(data_fdps_battle_ai_best_item_score, 8);
@@ -1427,8 +1611,9 @@ static void tba_three_equal_scores_run_nothing_and_still_report_acted(void)
    read through data_fdps_battle_ai_best_physical_target_idx and not through any
    argument.
  *
- * Which way the tie went is invisible while src/aiact.c is stubbed.  What this
-   case does pin is that the arm is reachable and survives the spell-record
+ * Which way the tie went is invisible from here: the spell arm is still a
+   stub.  What this case does pin is that the arm is reachable and survives the
+   spell-record
    fetch -- a fetch that would fault on a null spell table, and that the
    original makes before the 0x12 test and on both of its outcomes -- and that
    the function still answers 1 with the cursor mode stored. */
@@ -1444,7 +1629,7 @@ static void tba_the_attack_and_spell_tie_resolves_the_spell_record(void)
     tba_learns(0, 1);
     tba_unit(1, 1, 0, 1, 0, 3, 100, 100);
 
-    CHECK_EQ(fdps_map_actor_take_best_action(0, 0), 1);
+    CHECK_EQ(tba_act(0, 0), 1);
     CHECK_EQ(data_fdps_battle_ai_best_physical_score, 8);
     CHECK_EQ(data_fdps_battle_ai_best_spell_score, 8);
     CHECK_EQ(data_fdps_battle_ai_best_item_score, 0);

@@ -2297,5 +2297,33 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "00012e50": [
+    {
+      "what": "The three death-sequence calls are made in the order the assembly makes them -- fdps_collect_death_scripts into a 0x0c-byte stack buffer at 00012fda, fdps_play_death_animation_and_mark_dead at 00012fe9, fdps_run_death_scripts(target, count, buffer) at 00012ffc -- but no case in tests/aiact.c exercises them with anything to do. The fixture keeps data_fdps_map_unit_count at 0, which is what keeps the destruction sequence and its Explo.Saf out of a unit test, and with a count of 0 the collector answers 0 and all three are no-ops. So the order that death.h calls load-bearing (collect BEFORE the routine that sets the flag the collect rejects on) and the buffer's four-record capacity are unasserted here. What is settled and needs no further evidence: the argument order and the buffer size are read straight off the assembly, and fdps_collect_death_scripts / fdps_play_death_animation_and_mark_dead have their own cover in tests/death.c.",
+      "needs": "fdps_run_death_scripts emitted at 0001d990 -- it is still a zero-returning stub, so even with a dying unit staged nothing it does is observable from outside this function -- and then a case here with data_fdps_map_unit_count above 0, a unit the exchange kills carrying a script opcode other than 0xff, and EXPLO.SAF in the staged BaseAni container so the destruction sequence has a clip to play.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "No case distinguishes side_select 0 from side_select 1. That the second argument reaches fdps_battle_move_unit_toward's fourth parameter is settled by the assembly and needs nothing further -- PUSH [EBP+0x18] is the first push of the four at 00012e72, so it lands as the last argument -- and what the walk does with it is tests/movegrid.c's subject (zones of control and occupied tiles, read with opposite polarity). What is missing is only an end-to-end witness, and this fixture cannot carry one: it keeps data_fdps_map_unit_count at 0, so neither the zone-of-control pass nor the occupancy pass sees any unit and both polarities produce the same walk.",
+      "needs": "A case with data_fdps_map_unit_count above 0 and every staged unit's portrait id set to 0x80 so the composed frames need no sprite cache, arranged so that one polarity's zones of control stop the actor a tile short of the tile the search named and the other does not -- the shape tests/movegrid.c's toward_ally_tile_is_taken_out_of_the_range and toward_enemy_zone_of_control_stops_the_unit_short already use, with the expected tiles worked out from those two functions the way that file works its own out.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same gap independently and confirmed the emitter's account of it: the three death-sequence calls are in the assembly's order (fdps_collect_death_scripts at 00012fde into the 0x0c-byte buffer LEA'd at 00012fda, fdps_play_death_animation_and_mark_dead at 00012fe9, fdps_run_death_scripts at 00012ffc) but no case exercises them with work to do. I add only that this is not a coverage choice that could have gone the other way today: workspace/code_emit/undefined.json lists fdps_run_death_scripts as the one unemitted callee of this body, so even a fixture with a dying unit would be asserting against a stub. The argument order and the 12-byte capacity are settled off the assembly and need nothing further.",
+      "needs": "fdps_run_death_scripts emitted at 0001d990, then a case here with data_fdps_map_unit_count above 0, a unit the exchange kills carrying a death-script opcode other than 0xff, and EXPLO.SAF in the staged BaseAni container.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "My pass adds nothing to the emitter's description of this one beyond confirming its premise from the assembly: side_select's only use in the body is PUSH [EBP+0x18] at 00012e72, the first of the four pushes and so fdps_battle_move_unit_toward's fourth argument, which settles the pass-through completely. What is missing is an end-to-end witness, and I agree it is not settleable inside a fixture that holds data_fdps_map_unit_count at 0 -- with no other unit staged, neither polarity of the zone-of-control pass can change the walk. It is a coverage note rather than an unanswered question about the code.",
+      "needs": "A case with units staged (portrait id 0x80 so composed frames need no sprite cache) arranged so one polarity's zones of control stop the actor short of the named tile and the other does not, in the shape tests/movegrid.c already uses.",
+      "same_as": "emit#1",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

@@ -3307,6 +3307,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x231"
+    },
+    "00012e50": {
+      "name": "fdps_map_actor_move_and_attack",
+      "target": "aiact.c",
+      "body_size": "0x1eb",
+      "status": "committed",
+      "emitted_against": "0x1eb",
+      "rounds": 0
     }
   }
 }

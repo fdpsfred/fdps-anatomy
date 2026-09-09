@@ -1,0 +1,836 @@
+/* tests/aiact.c -- cover for src/aiact.c.
+ *
+ * fdps_map_actor_move_and_attack is a sequencer: every decision it makes it
+ * makes by driving src/mapcur.c, src/movegrid.c, src/unit.c, src/aitarget.c,
+ * src/gauge.c, src/unitatk.c, src/combat.c, src/death.c and src/unitstat.c,
+ * and the only things a caller can see afterwards are the two unit records,
+ * the globals it left behind and the screen.  So every case below is run end
+ * to end against the real callees, and what it asserts is read back off the
+ * records and the globals.
+ *
+ * Expected values come from the assembly at 00012e50 -- the two stores of 0
+ * and the two of 1 into [0x00069cd0], the push order at 00012e72 that makes
+ * [0x00063f80] the x and [0x00063f84] the y of the walk, PUSH 0x64 at
+ * 00012eb8, MOV dword ptr [0x00069cec],0x0 at 00012ec2, CMP byte ptr
+ * [0x00060010],0x0 / JNZ at 00012ecc, the two CMP EAX,0x1 at 00012f04 and
+ * 00012f6c, the TEST EAX,EAX at 00012f46 and the TEST [EBP-0x1c],EAX at
+ * 00012f84 that AND the two temporaries, ADD EAX,0x8 at 00012fb0, the argument
+ * order of the two fdps_unit_attack_target calls, PUSH dword ptr [0x00063f74]
+ * at 0001301c, and IMUL ...,0xf / IDIV 10 at 00013004 -- and from the
+ * documented behaviour of the callees, which is where the arithmetic of a blow
+ * and of an experience award comes from.  None of them is read off the emitted
+ * C.
+ *
+ * HOW A BLOW IS MADE CERTAIN.  The duel is the one tests/unitatk.c uses: AP
+ * 100 against DP 91 is a gap of 9 and so a damage of exactly 8, whose ninth is
+ * 0 and which therefore takes no random bonus; accuracy 200 against evasion 0
+ * lands on every draw; the class critical rate is 0 and the weapon's hit
+ * effect is 0, so neither of those rolls can fire.  The only roll left is the
+ * flat 3 percent that turns a swing into two blows, and the fixture seeds the
+ * generator with the lowest seed whose first 24 draws ALL answer 3 or more to
+ * rand() % 100 -- so no swing in a run can land a second blow, whichever draw
+ * of the stream its roll happens to fall on.
+ *
+ * WHAT THE EXPERIENCE FIGURES ARE.  The actor is an enemy-side unit and the
+ * target a player one, so the actor's own blow pays nothing at all -- the
+ * credit is only written when a player unit strikes an enemy record -- and
+ * every figure below is the COUNTERBLOW's: the award is the defender's level
+ * times its enemy record's reward over the attacker's level, and a defender
+ * that survives pays that award scaled by the fraction of its maximum HP the
+ * blow took off.  With the actor at level 20, enemy record 0 rewarding 70 and
+ * the actor surviving with 8 off 40, a target at level 40 earns 20 * 70 / 40 =
+ * 35, scaled to 35 * 8 / 40 = 7, and a target at level 20 earns 70 scaled to
+ * 14.  This function then multiplies by 15 and divides by 10: 7 becomes 10 and
+ * not 10.5, and 14 becomes 21.
+ *
+ * WHY THE TARGET IS AT THE LEVEL CAP IN MOST CASES.  fdps_unit_award_exp_and_
+ * level_up refuses a unit already at its cap and returns WITHOUT clearing the
+ * accumulator, so the scaled credit is still readable after the call and no
+ * frame of the floating figure is drawn.  The one case that lets the award run
+ * to the end drops the target to level 20 and reads the paid figure back out
+ * of the record's exp_carry byte.
+ *
+ * WHAT IS STAGED, AND WHAT IS DELIBERATELY EMPTY.  The battle-time environment
+ * the walk and the fight need is built here: the terrain layer, the attribute
+ * table, the movement grid, the cell-event layer, the PROMAP.DAT class table,
+ * the unit array, the item, enemy and growth tables, the cursor kit, the unit
+ * gauge sheet, the resident animation container and the master palette.
+ * data_fdps_map_unit_count is left at 0 on purpose: no unit is drawn into a
+ * composed frame, no death script is collected and no destruction sequence is
+ * played, which keeps these cases about the sequencer rather than about the
+ * three death routines -- their own cover is tests/death.c.  The walk's own
+ * frames are suppressed the way tests/movegrid.c suppresses them, with
+ * data_fdps_input_last_scancode parked on the skip code 3.
+ *
+ * THE TIMER INTERRUPT IS NOT OPTIONAL.  Every frame the cursor walk, the gauge
+ * display and the attack animation present ends waiting for
+ * data_fdps_timer_tick_counter to change, so each run installs a handler on
+ * IRQ0 that moves it and chains to the one that was there.  Without it the
+ * first presented frame never returns.
+ *
+ * Nothing below asserts what any staged global holds on its own; ticket 23
+ * owns that.
+ */
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+#include <conio.h>
+#include <dos.h>
+#include <i86.h>
+#include "testharn.h"
+#include "fdpstype.h"
+#include "gamedata.h"
+#include "audio.h"
+#include "gauge.h"
+#include "keybd.h"
+#include "aiact.h"
+
+/* The scene layers, in the shape src/maptile.c reads them: a terrain layer
+   whose tile width is at +7 and whose 16-bit tile ids start at +0x0b, an
+   attribute table whose 4-byte rows start at +0x11, a movement grid of 2-byte
+   cells after a 4-byte header, and an event layer whose width is at +7 and
+   whose cell bytes start at +0x10. */
+#define AA_TERRAIN_CELLS_AT 0x0b
+#define AA_ATTR_ROWS_AT 0x11
+#define AA_EVENT_CELLS_AT 0x10
+
+#define AA_MAP_W 5
+#define AA_MAP_H 5
+#define AA_CELLS (AA_MAP_W * AA_MAP_H)
+#define AA_ATTR_ROWS 32
+#define AA_TILE_PX 24
+
+/* Attribute row byte 0: flags 0x60 is what keeps fdps_map_set_pending_tile_
+   event out of the tile-event table during the walk. */
+#define AA_ATTR_FLAGS 0x60
+/* Byte 3 is the combat backdrop id.  7 is above zero, so the full-screen
+   exchange decrements it and names Back06.saf, the file tests/combat.c reaches
+   for with the same id. */
+#define AA_ATTR_BACKDROP_AT 3
+#define AA_BACKDROP_ID 7
+
+#define AA_UNITS 4
+#define AA_CLASS_ROWS 8
+#define AA_ITEMS 8
+#define AA_ENEMIES 4
+#define AA_GROWTHS 64
+
+/* Three of the four staged records are used.  The bystander sits well away
+   from the duel so that a run which strayed off the two indices the search
+   named would be visible in its record. */
+#define AA_ACTOR 0
+#define AA_BYSTANDER 1
+#define AA_TARGET 2
+
+/* Where everyone starts, and the tile the attack search claims to have picked.
+   The attack tile's x and y differ, and (1, 3) is as reachable as (3, 1), so a
+   body that read the two globals the other way round lands the actor on a real
+   tile rather than failing to move at all. */
+#define AA_ACTOR_START_X 1
+#define AA_ACTOR_START_Y 1
+#define AA_ATTACK_TILE_X 3
+#define AA_ATTACK_TILE_Y 1
+#define AA_TARGET_X 4
+#define AA_TARGET_Y 1
+#define AA_BYSTANDER_X 0
+#define AA_BYSTANDER_Y 4
+
+/* The duel's numbers, all of them from tests/unitatk.c's fixture. */
+#define AA_ATTACK_POWER 100
+#define AA_DEFENSE 91
+#define AA_ACCURACY 200
+#define AA_START_HP 40
+#define AA_BLOW_DAMAGE 8
+#define AA_ACTOR_MOVE 3
+
+/* AND AL,0x40 in fdps_unit_find_equipped_slot, and an item type inside the
+   weapon span 1..0x15. */
+#define AA_ENTRY_EQUIPPED 0x40
+#define AA_WEAPON_TYPE 1
+#define AA_WEAPON_ID 1
+/* fdps_check_can_counter_attack takes a range_min of exactly 1 and nothing
+   else. */
+#define AA_WEAPON_RANGE 1
+
+/* CMP EAX,0x2 on the attacker's side byte and CMP EAX,0x3c on the defender's
+   portrait id, the pair that gates an experience award. */
+#define AA_PLAYER_SIDE 2
+#define AA_ENEMY_SIDE 0
+#define AA_FIRST_ENEMY_PORTRAIT 0x3c
+#define AA_TARGET_PORTRAIT 5
+
+/* The level cap fdps_unit_award_exp_and_level_up refuses at, for every
+   portrait id but the machine soldier's. */
+#define AA_LEVEL_CAP 40
+#define AA_ACTOR_LEVEL 20
+#define AA_PAYABLE_LEVEL 20
+#define AA_ENEMY_EXP_REWARD 70
+
+/* The counterblow's award and what this function makes of it.  20 * 70 / 40 is
+   35 and 35 * 8 / 40 is 7, which 15/10 turns into 10 and not 10.5; with the
+   target payable the divisor is 20, so the award is 70, the scaled figure 14
+   and the paid figure 21. */
+#define AA_CREDIT_AGAINST_CAPPED 7
+#define AA_SCALED_AGAINST_CAPPED 10
+#define AA_PAID_TO_PAYABLE 21
+
+/* 0xff at record +0x31 is the "no death script" sentinel, so nothing this
+   fixture kills owes a script. */
+#define AA_NO_DEATH_SCRIPT 0xff
+
+/* What data_fdps_map_cursor_draw_mode holds going in: neither of the two
+   values the body stores, so "left in the box mode" is a store and not an
+   inheritance. */
+#define AA_DRAW_MODE_SENTINEL 7
+
+/* What the gauge position pairs hold going in.  No placement this fixture can
+   produce is either number, so a pair still holding one says the gauge call
+   was never made. */
+#define AA_POISON_X 200
+#define AA_POISON_Y 111
+
+/* The flat 3 percent second-strike roll, and how many draws of the stream a
+   seed has to keep clear of it.  Two swings spend six draws between them; 24
+   is well past the end of anything a run can consume before the last blow has
+   landed. */
+#define AA_BONUS_STRIKE_PERCENT 3
+#define AA_DRAWS_WATCHED 24
+#define AA_SEED_LIMIT 20000
+
+/* The cel kit fdps_blit_cursor_tile draws the cursor box out of: it hardwires
+   24 by 24 and reads only the offset table at 0x0f, so the header stays blank.
+   One flat fill run per row is the encoding src/rle.c decodes, a command byte
+   of len - 1 followed by the pixel. */
+#define AA_CEL_TABLE_AT 0x0f
+#define AA_CURSOR_STREAM_AT 0x80
+#define AA_CURSOR_BYTES (AA_CURSOR_STREAM_AT + AA_TILE_PX * 2)
+#define AA_CURSOR_COLOR 0x21
+
+/* The label plate the experience figure is drawn on comes out of Command.cel
+   through fdps_cel_blit_sprite, which takes the sprite's size from the sheet's
+   own header.  A one-pixel sprite is enough to carry that call: nothing here
+   asserts anything about the plate. */
+#define AA_PLATE_ENTRIES 64
+#define AA_PLATE_STREAM_AT (AA_CEL_TABLE_AT + AA_PLATE_ENTRIES * 4)
+#define AA_PLATE_BYTES (AA_PLATE_STREAM_AT + 2)
+#define AA_PLATE_COLOR 0x22
+
+/* The number glyph sheet fdps_draw_number reads: entry (colour row * 13 +
+   glyph) of the same offset table, and a glyph is 6 by 8. */
+#define AA_GLYPH_ENTRIES 16
+#define AA_GLYPH_W 6
+#define AA_GLYPH_ROWS 8
+#define AA_GLYPH_STREAM_AT (AA_CEL_TABLE_AT + AA_GLYPH_ENTRIES * 4)
+#define AA_GLYPH_BYTES (AA_GLYPH_STREAM_AT + AA_GLYPH_ROWS * 2)
+#define AA_GLYPH_COLOR 0x23
+
+/* The unit gauge sheet: three 43 by 6 graphics 0x102 bytes apart, filled one
+   flat value each the way tests/unitatk.c fills them. */
+#define AA_GAUGE_GRAPHIC_STRIDE 0x102
+#define AA_GAUGE_BYTES (AA_GAUGE_GRAPHIC_STRIDE * 3)
+
+/* The resident BaseAni container, in the shape src/vfs.c reads it: a 35-byte
+   header whose table offset is at 5 and whose entry count is at 7, then 26-byte
+   entries carrying a 13-byte name, a size at 0x0d and a start at 0x16.  The one
+   member is the attack animation, whose .SAF header declares no frames, so
+   fdps_play_attack_animation resolves it and composes nothing -- which is what
+   keeps these cases about the sequencer.  The name is stored upper case
+   because the lookup folds only the query. */
+#define AA_VFS_TABLE_OFFSET_AT 5
+#define AA_VFS_COUNT_AT 7
+#define AA_VFS_TABLE_AT 35
+#define AA_VFS_ENTRY_BYTES 26
+#define AA_VFS_ENTRY_SIZE_AT 0x0d
+#define AA_VFS_ENTRY_START_AT 0x16
+#define AA_VFS_MEMBER_AT (AA_VFS_TABLE_AT + AA_VFS_ENTRY_BYTES)
+#define AA_SAF_BYTES 0x20
+#define AA_SAF_FRAME_COUNT_AT 0x0c
+#define AA_VFS_BYTES (AA_VFS_MEMBER_AT + AA_SAF_BYTES)
+#define AA_ANIMATION_MEMBER "EASYANI.SAF"
+
+/* A chapter index the palette cycler's switch does not list, so the frames
+   these cases present change no DAC entry. */
+#define AA_INERT_CHAPTER 1
+
+#define AA_DAC_ENTRIES 256
+
+/* The adapter and the two modes a run switches between. */
+#define AA_MODE_TEXT 0x03
+#define AA_MODE_320X200X256 0x13
+#define AA_TIMER_VECTOR 8
+
+/* The two portrait ids the full-screen exchange composes its clip names out
+   of: ACT000.SAF and STAND000.SAF for the attacker, STAND001.SAF for the
+   defender, the same pair tests/combat.c drives that function with. */
+#define AA_EXCHANGE_ACTOR_PORTRAIT 0
+#define AA_EXCHANGE_TARGET_PORTRAIT 1
+
+static struct fdps_unit_record aa_units[AA_UNITS];
+static unsigned char aa_items[(AA_ITEMS + 1) * sizeof(struct fdps_item_effect)];
+static unsigned char aa_classes[AA_CLASS_ROWS * sizeof(struct fdps_class_record)];
+static unsigned char aa_enemies[AA_ENEMIES * sizeof(struct fdps_enemy_data)];
+static unsigned char aa_growths[AA_GROWTHS * sizeof(struct fdps_character_growth)];
+
+static unsigned char aa_tilemap[AA_TERRAIN_CELLS_AT + AA_CELLS * 2];
+static unsigned char aa_attr[AA_ATTR_ROWS_AT + AA_ATTR_ROWS * 4];
+static unsigned char aa_grid[4 + AA_CELLS * 2];
+static unsigned char aa_event[AA_EVENT_CELLS_AT + AA_CELLS];
+
+static unsigned char aa_cursor_kit[AA_CURSOR_BYTES];
+static unsigned char aa_plate[AA_PLATE_BYTES];
+static unsigned char aa_glyphs[AA_GLYPH_BYTES];
+static unsigned char aa_gauge_sheet[AA_GAUGE_BYTES];
+static unsigned char aa_vfs[AA_VFS_BYTES];
+static unsigned char aa_palette[AA_DAC_ENTRIES * 3];
+
+static void (__interrupt __far *aa_saved_timer)();
+
+/* Only ever read for its field offsets and sizes. */
+static struct fdps_unit_record aa_layout_probe;
+
+static void __interrupt __far aa_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(aa_saved_timer);
+}
+
+static void aa_u16(unsigned char *image, int at, unsigned int value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void aa_u32(unsigned char *image, int at, unsigned long value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    image[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    image[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+static struct fdps_item_effect *aa_item(int item_id)
+{
+    return (struct fdps_item_effect *)
+           (aa_items + (item_id + 1) * sizeof(struct fdps_item_effect));
+}
+
+static struct fdps_class_record *aa_class_row(int row_index)
+{
+    return (struct fdps_class_record *)
+           (aa_classes + row_index * sizeof(struct fdps_class_record));
+}
+
+static struct fdps_enemy_data *aa_enemy_row(int enemy_index)
+{
+    return (struct fdps_enemy_data *)
+           (aa_enemies + enemy_index * sizeof(struct fdps_enemy_data));
+}
+
+/* The lowest seed none of whose first AA_DRAWS_WATCHED draws fires the 3
+   percent second-strike roll.  Roughly half of all seeds qualify, so the
+   search never runs far. */
+static unsigned int aa_quiet_seed(void)
+{
+    unsigned int seed;
+    int draw;
+    int quiet;
+
+    for (seed = 1; seed < AA_SEED_LIMIT; seed++) {
+        srand(seed);
+        quiet = 1;
+        for (draw = 0; draw < AA_DRAWS_WATCHED; draw++) {
+            if (rand() % 100 < AA_BONUS_STRIKE_PERCENT) {
+                quiet = 0;
+            }
+        }
+        if (quiet != 0) {
+            return seed;
+        }
+    }
+    return 0;
+}
+
+/* One flat fill run per row, which is command byte (len - 1) followed by the
+   pixel value. */
+static void aa_fill_rows(unsigned char *stream, int rows, int width,
+                         int color)
+{
+    int row;
+
+    for (row = 0; row < rows; row++) {
+        stream[row * 2] = (unsigned char) (width - 1);
+        stream[row * 2 + 1] = (unsigned char) color;
+    }
+}
+
+static void aa_stage_sheets(void)
+{
+    int entry;
+    int offset;
+
+    memset(aa_cursor_kit, 0, (size_t) AA_CURSOR_BYTES);
+    aa_u32(aa_cursor_kit, AA_CEL_TABLE_AT, (unsigned long) AA_CURSOR_STREAM_AT);
+    aa_fill_rows(aa_cursor_kit + AA_CURSOR_STREAM_AT, AA_TILE_PX, AA_TILE_PX,
+                 AA_CURSOR_COLOR);
+
+    memset(aa_plate, 0, (size_t) AA_PLATE_BYTES);
+    ((struct fdps_cel_header *) aa_plate)->sprite_width = 1;
+    ((struct fdps_cel_header *) aa_plate)->sprite_height = 1;
+    for (entry = 0; entry < AA_PLATE_ENTRIES; entry++) {
+        aa_u32(aa_plate, AA_CEL_TABLE_AT + entry * 4,
+               (unsigned long) AA_PLATE_STREAM_AT);
+    }
+    aa_fill_rows(aa_plate + AA_PLATE_STREAM_AT, 1, 1, AA_PLATE_COLOR);
+
+    memset(aa_glyphs, 0, (size_t) AA_GLYPH_BYTES);
+    for (entry = 0; entry < AA_GLYPH_ENTRIES; entry++) {
+        aa_u32(aa_glyphs, AA_CEL_TABLE_AT + entry * 4,
+               (unsigned long) AA_GLYPH_STREAM_AT);
+    }
+    aa_fill_rows(aa_glyphs + AA_GLYPH_STREAM_AT, AA_GLYPH_ROWS, AA_GLYPH_W,
+                 AA_GLYPH_COLOR);
+
+    for (offset = 0; offset < AA_GAUGE_GRAPHIC_STRIDE; offset++) {
+        aa_gauge_sheet[offset] = 10;
+        aa_gauge_sheet[AA_GAUGE_GRAPHIC_STRIDE + offset] = 20;
+        aa_gauge_sheet[2 * AA_GAUGE_GRAPHIC_STRIDE + offset] = 30;
+    }
+
+    memset(aa_vfs, 0, (size_t) AA_VFS_BYTES);
+    aa_u16(aa_vfs, AA_VFS_TABLE_OFFSET_AT, (unsigned int) AA_VFS_TABLE_AT);
+    aa_u32(aa_vfs, AA_VFS_COUNT_AT, 1UL);
+    strcpy((char *) aa_vfs + AA_VFS_TABLE_AT, AA_ANIMATION_MEMBER);
+    aa_u32(aa_vfs, AA_VFS_TABLE_AT + AA_VFS_ENTRY_SIZE_AT,
+           (unsigned long) AA_SAF_BYTES);
+    aa_u32(aa_vfs, AA_VFS_TABLE_AT + AA_VFS_ENTRY_START_AT,
+           (unsigned long) AA_VFS_MEMBER_AT);
+    aa_vfs[AA_VFS_MEMBER_AT] = 'S';
+    aa_vfs[AA_VFS_MEMBER_AT + 1] = 'A';
+    aa_vfs[AA_VFS_MEMBER_AT + 2] = 'F';
+    aa_u16(aa_vfs, AA_VFS_MEMBER_AT + AA_SAF_FRAME_COUNT_AT, 0);
+
+    for (entry = 0; entry < AA_DAC_ENTRIES * 3; entry++) {
+        aa_palette[entry] = 0;
+    }
+}
+
+/* One combatant, on the tile it starts the case on. */
+static void aa_place(int unit_index, int x, int y, int side, int portrait,
+                     int level)
+{
+    aa_units[unit_index].pos_x = (unsigned char) x;
+    aa_units[unit_index].pos_y = (unsigned char) y;
+    aa_units[unit_index].side = (unsigned char) side;
+    aa_units[unit_index].portrait_id = (unsigned char) portrait;
+    aa_units[unit_index].level = (unsigned char) level;
+    aa_units[unit_index].clazz = 0;
+    aa_units[unit_index].move = AA_ACTOR_MOVE;
+    aa_units[unit_index].ap = AA_ATTACK_POWER;
+    aa_units[unit_index].dp = AA_DEFENSE;
+    aa_units[unit_index].hit = AA_ACCURACY;
+    aa_units[unit_index].ev = 0;
+    aa_units[unit_index].hp_current = AA_START_HP;
+    aa_units[unit_index].hp_max = AA_START_HP;
+    aa_units[unit_index].death_script_opcode = AA_NO_DEATH_SCRIPT;
+    aa_units[unit_index].inventory_slots[0] = AA_ENTRY_EQUIPPED;
+    aa_units[unit_index].inventory_slots[1] = AA_WEAPON_ID;
+}
+
+/* The whole battle-time environment, plus the decision the attack search is
+   claimed to have published. */
+static void aa_stage(void)
+{
+    int i;
+    int terrain;
+
+    memset(aa_units, 0, sizeof(aa_units));
+    memset(aa_items, 0, (size_t) sizeof(aa_items));
+    memset(aa_classes, 0, (size_t) sizeof(aa_classes));
+    memset(aa_enemies, 0, (size_t) sizeof(aa_enemies));
+    memset(aa_growths, 0, (size_t) sizeof(aa_growths));
+
+    memset(aa_tilemap, 0xaa, (size_t) AA_TERRAIN_CELLS_AT);
+    aa_u16(aa_tilemap, 7, (unsigned int) AA_MAP_W);
+    aa_u16(aa_tilemap, 9, (unsigned int) AA_MAP_H);
+    for (i = 0; i < AA_CELLS; i++) {
+        aa_u16(aa_tilemap, AA_TERRAIN_CELLS_AT + i * 2, (unsigned int) i);
+    }
+
+    memset(aa_attr, 0xaa, (size_t) AA_ATTR_ROWS_AT);
+    for (i = 0; i < AA_ATTR_ROWS; i++) {
+        aa_attr[AA_ATTR_ROWS_AT + i * 4] = AA_ATTR_FLAGS;
+        aa_attr[AA_ATTR_ROWS_AT + i * 4 + 1] = 0;
+        aa_attr[AA_ATTR_ROWS_AT + i * 4 + 2] = 0;
+        aa_attr[AA_ATTR_ROWS_AT + i * 4 + AA_ATTR_BACKDROP_AT] =
+            AA_BACKDROP_ID;
+    }
+
+    aa_u16(aa_grid, 0, (unsigned int) AA_MAP_W);
+    aa_u16(aa_grid, 2, (unsigned int) AA_MAP_H);
+    for (i = 0; i < AA_CELLS; i++) {
+        aa_grid[4 + i * 2] = 0x00;
+        aa_grid[4 + i * 2 + 1] = 0xff;
+    }
+
+    memset(aa_event, 0xaa, (size_t) AA_EVENT_CELLS_AT);
+    aa_u16(aa_event, 7, (unsigned int) AA_MAP_W);
+    for (i = 0; i < AA_CELLS; i++) {
+        aa_event[AA_EVENT_CELLS_AT + i] = 0;
+    }
+
+    for (i = 0; i < AA_CLASS_ROWS; i++) {
+        for (terrain = 0; terrain < 8; terrain++) {
+            aa_class_row(i)->move_cost[terrain] = 1;
+        }
+        aa_class_row(i)->critical = 0;
+    }
+
+    aa_item(AA_WEAPON_ID)->type = AA_WEAPON_TYPE;
+    aa_item(AA_WEAPON_ID)->range_min = AA_WEAPON_RANGE;
+    aa_item(AA_WEAPON_ID)->range_max = AA_WEAPON_RANGE;
+    aa_item(AA_WEAPON_ID)->hit_effect = 0;
+    aa_item(AA_WEAPON_ID)->hit_effect_rate = 0;
+
+    aa_enemy_row(0)->exp_reward = AA_ENEMY_EXP_REWARD;
+
+    aa_stage_sheets();
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) aa_units;
+    data_fdps_item_effect_table_ptr =
+        aa_items + sizeof(struct fdps_item_effect);
+    data_fdps_class_table_ptr = aa_classes;
+    data_fdps_battle_enemy_data_table_ptr = aa_enemies;
+    data_fdps_battle_character_growth_table_ptr = aa_growths;
+    data_fdps_scene_layer_tile_map_ptrs[0] = aa_tilemap;
+    data_fdps_scene_layer_tile_attr_ptr[0] = aa_attr;
+    data_fdps_battle_move_grid_ptr = aa_grid;
+    data_fdps_map_cell_event_code_layer_ptr = aa_event;
+    data_fdps_cursor_highlight_sprite_sheet_ptr = aa_cursor_kit;
+    data_fdps_command_sprite_sheet_ptr = aa_plate;
+    data_fdps_number_glyph_sheet_ptr = aa_glyphs;
+    data_fdps_number_glyph_color_row = 0;
+    data_fdps_unit_gauge_sheet_ptr = aa_gauge_sheet;
+    data_fdps_animation_baseani_archive_ptr = aa_vfs;
+    data_fdps_vga_main_palette_ptr = aa_palette;
+
+    data_fdps_map_unit_count = 0;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_chapter_current_chapter_id = AA_INERT_CHAPTER;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_input_last_scancode = 3;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_audio_sfx_enabled_flag = 0;
+    data_fdps_audio_sfx_driver_available_flag = 0;
+    for (i = 0; i < SFX_SAMPLE_SLOT_COUNT; i++) {
+        data_fdps_audio_sample_handle_table[i] = NULL;
+    }
+
+    for (i = 0; i < 6; i++) {
+        data_fdps_battle_tile_attr_ap_modifier_table[i] = 0;
+        data_fdps_battle_tile_attr_def_modifier_table[i] = 0;
+    }
+
+    aa_place(AA_ACTOR, AA_ACTOR_START_X, AA_ACTOR_START_Y, AA_ENEMY_SIDE,
+             AA_FIRST_ENEMY_PORTRAIT, AA_ACTOR_LEVEL);
+    aa_place(AA_TARGET, AA_TARGET_X, AA_TARGET_Y, AA_PLAYER_SIDE,
+             AA_TARGET_PORTRAIT, AA_LEVEL_CAP);
+    aa_place(AA_BYSTANDER, AA_BYSTANDER_X, AA_BYSTANDER_Y, AA_PLAYER_SIDE,
+             AA_TARGET_PORTRAIT, AA_LEVEL_CAP);
+
+    data_fdps_map_cursor_world_x = AA_ACTOR_START_X * AA_TILE_PX;
+    data_fdps_map_cursor_world_y = AA_ACTOR_START_Y * AA_TILE_PX;
+
+    data_fdps_battle_ai_best_physical_target_idx = AA_TARGET;
+    data_fdps_battle_ai_best_physical_target_x = AA_ATTACK_TILE_X;
+    data_fdps_battle_ai_best_attack_tile_y = AA_ATTACK_TILE_Y;
+    data_fdps_ui_battle_animation_enabled = 0;
+
+    data_fdps_map_cursor_draw_mode = AA_DRAW_MODE_SENTINEL;
+    data_fdps_battle_pending_xp_credit = 0;
+    data_fdps_battle_combat_gauge_pos_pairs[0] = AA_POISON_X;
+    data_fdps_battle_combat_gauge_pos_pairs[1] = AA_POISON_Y;
+    data_fdps_battle_combat_gauge_pos_pairs[2] = AA_POISON_X;
+    data_fdps_battle_combat_gauge_pos_pairs[3] = AA_POISON_Y;
+
+    srand(aa_quiet_seed());
+}
+
+/* Take the defender's weapon out of its hand without emptying the bag: the
+   entry is still carried, so the equipped search finds nothing to strike back
+   with. */
+static void aa_disarm(int unit_index)
+{
+    aa_units[unit_index].inventory_slots[0] = 0;
+}
+
+static void aa_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* One whole action, played in mode 13h with the tick moving under it. */
+static int aa_run(void)
+{
+    int acted;
+
+    aa_set_mode(AA_MODE_320X200X256);
+    aa_saved_timer = _dos_getvect(AA_TIMER_VECTOR);
+    _dos_setvect(AA_TIMER_VECTOR, aa_timer_isr);
+
+    acted = fdps_map_actor_move_and_attack(AA_ACTOR, AA_ENEMY_SIDE);
+
+    _dos_setvect(AA_TIMER_VECTOR, aa_saved_timer);
+    aa_set_mode(AA_MODE_TEXT);
+    return acted;
+}
+
+/* Put back the globals whose blocks the game's own loaders free, for the
+   reason tests/menu.c gives: a pointer left aiming at a static in this file is
+   a free() of storage that never came from the heap, made by whichever later
+   test calls one of those loaders.
+
+   THE ANIMATION FLAG GOES BACK TOO, and that one is not about free().  The
+   case below that turns it on is the only writer of it in this file, and a
+   later test file that reaches the map AI's attack arm with it still set plays
+   the full-screen exchange instead -- which composes its clip names out of a
+   portrait id and blocks on a member that file's fixture does not hold.  The
+   symptom lands in tests/mapai.c, nowhere near here. */
+static void aa_unstage(void)
+{
+    data_fdps_ui_battle_animation_enabled = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_cel_sprite_cache_count = 0;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_item_effect_table_ptr = NULL;
+    data_fdps_class_table_ptr = NULL;
+    data_fdps_battle_enemy_data_table_ptr = NULL;
+    data_fdps_battle_character_growth_table_ptr = NULL;
+    data_fdps_unit_gauge_sheet_ptr = NULL;
+    data_fdps_cursor_highlight_sprite_sheet_ptr = NULL;
+    data_fdps_command_sprite_sheet_ptr = NULL;
+    data_fdps_number_glyph_sheet_ptr = NULL;
+    data_fdps_animation_baseani_archive_ptr = NULL;
+    data_fdps_vga_main_palette_ptr = NULL;
+    data_fdps_scene_layer_tile_map_ptrs[0] = NULL;
+    data_fdps_scene_layer_tile_attr_ptr[0] = NULL;
+    data_fdps_battle_move_grid_ptr = NULL;
+    data_fdps_map_cell_event_code_layer_ptr = NULL;
+}
+
+/* Every expected value above is a field of one of these records at one of
+   these offsets, and the +8 of the counterblow's gauge argument is two ints
+   inside one four-int array rather than a step off the end of a two-int one
+   (rebuild_info/pitfalls.md, contract B). */
+static void aa_the_record_layouts_this_action_reads(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0x00);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 0x01);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 0x06);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, portrait_id), 0x07);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers), 0x22);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, death_script_opcode),
+             0x31);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, level), 0x21);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, move), 0x3b);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, exp_carry), 0x3c);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_current), 0x40);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_max), 0x42);
+    CHECK_EQ((int) sizeof(aa_layout_probe.hp_current), 2);
+
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, range_min), 0x0b);
+    CHECK_EQ((int) offsetof(struct fdps_enemy_data, exp_reward), 0x09);
+
+    CHECK_EQ((int) sizeof(data_fdps_battle_combat_gauge_pos_pairs),
+             4 * (int) sizeof(int));
+}
+
+/* The answer is the constant 1, and the cursor is left in the plain box mode
+   -- the last thing the body stores into it, and not the mode the caller was
+   in.  The award is refused here (the target is at its level cap), so that
+   store is this function's own and not the award routine's. */
+static void aa_returns_one_and_leaves_the_box_cursor(void)
+{
+    int acted;
+
+    aa_stage();
+    acted = aa_run();
+
+    CHECK_EQ(acted, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+    aa_unstage();
+}
+
+/* The walk goes to the tile the attack search named, x out of 00063f80 and y
+   out of 00063f84.  The second half asks for the transposed tile and gets the
+   transposed answer, which is what a body that read the two globals the other
+   way round would produce for the first. */
+static void aa_walks_the_actor_to_the_tile_the_search_named(void)
+{
+    aa_stage();
+    aa_run();
+
+    CHECK_EQ((int) aa_units[AA_ACTOR].pos_x, AA_ATTACK_TILE_X);
+    CHECK_EQ((int) aa_units[AA_ACTOR].pos_y, AA_ATTACK_TILE_Y);
+
+    aa_stage();
+    data_fdps_battle_ai_best_physical_target_x = AA_ATTACK_TILE_Y;
+    data_fdps_battle_ai_best_attack_tile_y = AA_ATTACK_TILE_X;
+    aa_run();
+
+    CHECK_EQ((int) aa_units[AA_ACTOR].pos_x, AA_ATTACK_TILE_Y);
+    CHECK_EQ((int) aa_units[AA_ACTOR].pos_y, AA_ATTACK_TILE_X);
+    aa_unstage();
+}
+
+/* The unit fought is the one 00063f74 names and not the neighbouring index:
+   the target loses one blow's worth of hit points and the bystander's record
+   is untouched. */
+static void aa_fights_the_unit_the_search_named(void)
+{
+    aa_stage();
+    aa_run();
+
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current,
+             AA_START_HP - AA_BLOW_DAMAGE);
+    CHECK_EQ((int) aa_units[AA_BYSTANDER].hp_current, AA_START_HP);
+    CHECK_EQ((int) aa_units[AA_BYSTANDER].pos_x, AA_BYSTANDER_X);
+    CHECK_EQ((int) aa_units[AA_BYSTANDER].pos_y, AA_BYSTANDER_Y);
+    aa_unstage();
+}
+
+/* A defender standing one tile away with a range-1 weapon answers 1 to both
+   counter-attack tests, so the counterblow is played and the actor takes a
+   blow of its own. */
+static void aa_an_armed_defender_strikes_back(void)
+{
+    aa_stage();
+    aa_run();
+
+    CHECK_EQ((int) aa_units[AA_ACTOR].hp_current,
+             AA_START_HP - AA_BLOW_DAMAGE);
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current,
+             AA_START_HP - AA_BLOW_DAMAGE);
+    aa_unstage();
+}
+
+/* A defender with nothing in its hand answers -1, and -1 is not 1.  This is
+   the case the natural `if (fdps_check_can_counter_attack(...))` gets wrong:
+   the actor would take a blow it never takes in the original. */
+static void aa_an_unarmed_defender_never_strikes_back(void)
+{
+    aa_stage();
+    aa_disarm(AA_TARGET);
+    aa_run();
+
+    CHECK_EQ((int) aa_units[AA_ACTOR].hp_current, AA_START_HP);
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current,
+             AA_START_HP - AA_BLOW_DAMAGE);
+    aa_unstage();
+}
+
+/* The other operand of the AND: an armed defender the actor's blow left on
+   zero hit points does not strike back, and no experience is credited because
+   the counterblow that would have earned it never happened. */
+static void aa_a_dead_defender_never_strikes_back(void)
+{
+    aa_stage();
+    aa_units[AA_TARGET].hp_current = AA_BLOW_DAMAGE;
+    aa_run();
+
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current, 0);
+    CHECK_EQ((int) aa_units[AA_ACTOR].hp_current, AA_START_HP);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 0);
+    aa_unstage();
+}
+
+/* The credit the counterblow earned is multiplied by 15 and divided by 10,
+   signed and truncating: an award of 7 comes out as 10 and not as 10.5 or 11.
+   It is still readable because the unit it is offered to is at its level cap,
+   which refuses the award without clearing the accumulator. */
+static void aa_the_credit_is_scaled_by_fifteen_tenths(void)
+{
+    aa_stage();
+    aa_run();
+
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, AA_SCALED_AGAINST_CAPPED);
+    aa_unstage();
+}
+
+/* The experience is paid to the unit that was attacked and not to the actor.
+   With the target below its cap the award runs to the end: the scaled figure
+   lands in the target's exp_carry, the accumulator is cleared, and the actor
+   -- which is not capped either, and would have taken the payment had its own
+   index been handed over -- is left carrying nothing. */
+static void aa_the_experience_is_paid_to_the_target(void)
+{
+    aa_stage();
+    aa_units[AA_TARGET].level = AA_PAYABLE_LEVEL;
+    aa_run();
+
+    CHECK_EQ((int) aa_units[AA_TARGET].exp_carry, AA_PAID_TO_PAYABLE);
+    CHECK_EQ((int) aa_units[AA_ACTOR].exp_carry, 0);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 0);
+    aa_unstage();
+}
+
+/* The accumulator is cleared on the way in, before a blow can add to it, so
+   whatever the previous action left there is not paid out again. */
+static void aa_the_pending_credit_is_cleared_on_entry(void)
+{
+    aa_stage();
+    aa_disarm(AA_TARGET);
+    data_fdps_battle_pending_xp_credit = 999;
+    aa_run();
+
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 0);
+    aa_unstage();
+}
+
+/* The animation setting is read as a byte against 0.  Clear, and the fight is
+   played on the map: the gauge call runs and writes both position pairs over
+   the fixture's poison.  Set, and the whole exchange goes to the full-screen
+   animation instead -- both pairs still hold the poison, so no gauge was put
+   on the map, and both records lost hit points, so the exchange really did
+   play the fight and its own counter-attack test. */
+static void aa_the_animation_flag_picks_the_full_screen_fight(void)
+{
+    aa_stage();
+    aa_run();
+
+    CHECK_EQ(data_fdps_battle_combat_gauge_pos_pairs[0] != AA_POISON_X, 1);
+    CHECK_EQ(data_fdps_battle_combat_gauge_pos_pairs[1] != AA_POISON_Y, 1);
+
+    aa_stage();
+    data_fdps_ui_battle_animation_enabled = 1;
+    aa_units[AA_ACTOR].portrait_id = AA_EXCHANGE_ACTOR_PORTRAIT;
+    aa_units[AA_TARGET].portrait_id = AA_EXCHANGE_TARGET_PORTRAIT;
+    aa_run();
+
+    CHECK_EQ(data_fdps_battle_combat_gauge_pos_pairs[0], AA_POISON_X);
+    CHECK_EQ(data_fdps_battle_combat_gauge_pos_pairs[1], AA_POISON_Y);
+    CHECK_EQ((int) aa_units[AA_TARGET].hp_current < AA_START_HP, 1);
+    CHECK_EQ((int) aa_units[AA_ACTOR].hp_current < AA_START_HP, 1);
+    aa_unstage();
+}
+
+void run_aiact_tests(void)
+{
+    RUN_TEST(aa_the_record_layouts_this_action_reads);
+    RUN_TEST(aa_returns_one_and_leaves_the_box_cursor);
+    RUN_TEST(aa_walks_the_actor_to_the_tile_the_search_named);
+    RUN_TEST(aa_fights_the_unit_the_search_named);
+    RUN_TEST(aa_an_armed_defender_strikes_back);
+    RUN_TEST(aa_an_unarmed_defender_never_strikes_back);
+    RUN_TEST(aa_a_dead_defender_never_strikes_back);
+    RUN_TEST(aa_the_credit_is_scaled_by_fifteen_tenths);
+    RUN_TEST(aa_the_experience_is_paid_to_the_target);
+    RUN_TEST(aa_the_pending_credit_is_cleared_on_entry);
+    RUN_TEST(aa_the_animation_flag_picks_the_full_screen_fight);
+}

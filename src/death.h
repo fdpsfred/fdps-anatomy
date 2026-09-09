@@ -129,4 +129,17 @@ extern int fdps_collect_death_script_events(unsigned char *out_events);
 extern void fdps_play_death_animation_and_mark_dead(void);
 #pragma aux fdps_play_death_animation_and_mark_dead "*" parm caller [];
 
+/* 0001d990.  Runs the death scripts one of the two collectors above gathered:
+   pays the item and gold rewards of the units the action killed to the acting
+   unit, fires their scripted chapter events and records the battle-end
+   verdicts they carry.  Not emitted yet.
+
+   actor_unit_index is the unit whose action caused the deaths -- it receives
+   the rewards and supplies the message window's portrait -- script_count is
+   what the collector returned, and scripts is the packed array of 3-byte
+   records it filled.  A script_count of 0 does nothing at all. */
+extern void fdps_run_death_scripts(int actor_unit_index, int script_count,
+                                   unsigned char *scripts);
+#pragma aux fdps_run_death_scripts "*" parm caller [];
+
 #endif
