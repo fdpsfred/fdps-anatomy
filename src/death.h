@@ -132,12 +132,54 @@ extern void fdps_play_death_animation_and_mark_dead(void);
 /* 0001d990.  Runs the death scripts one of the two collectors above gathered:
    pays the item and gold rewards of the units the action killed to the acting
    unit, fires their scripted chapter events and records the battle-end
-   verdicts they carry.  Not emitted yet.
+   verdicts they carry.
 
    actor_unit_index is the unit whose action caused the deaths -- it receives
    the rewards and supplies the message window's portrait -- script_count is
    what the collector returned, and scripts is the packed array of 3-byte
-   records it filled.  A script_count of 0 does nothing at all. */
+   records it filled.  A script_count of 0 does nothing at all: no record is
+   read, no record is resolved and the keyboard queue is not flushed.
+
+   Otherwise the actor's record is resolved once, the keystrokes queued during
+   the death animation are discarded, and the records are carried out front to
+   back, each one selected by its opcode byte:
+
+     0  the killed unit's item drop.  The operand is the item id; its name is
+        published in data_fdps_dialog_last_action_text_id_param as entry
+        id + 0xc9 of data_fdps_all_game_text_ptr and the message window goes up
+        on the actor's portrait.  With a bag slot free the item is added and
+        the window stands 0x1e ticks.  With the bag full the player is asked
+        whether to make room: agreeing opens the actor's bag so a slot can be
+        given up, and the item picked there is removed and replaced by the
+        drop; declining, or backing out of the bag, shows the "lost" line for
+        0x32 ticks and the drop is gone.
+     1  gold.  The operand goes into data_fdps_dialog_last_action_value_param,
+        the message stands 0x32 ticks, and that global -- not the operand -- is
+        then added to data_fdps_shared_party_total_gold.
+     2  a scripted chapter event: slot `operand` of
+        data_fdps_chapter_event_handler_table (chapter.h), called with
+        actor_unit_index as its single argument.
+     3 and above  a scripted line, drawn from the current chapter's text block
+        data_fdps_current_chapter_text_ptr straight onto the mode 13h screen.
+        An operand of 0xff or -1 means the record carries no line and the draw
+        is skipped -- BOTH values, so a test against -1 alone prints a message
+        the original suppresses.  Opcode 4 then sets
+        data_fdps_chapter_event_or_battle_end_code to 2, chapter cleared, and
+        opcode 5 sets it to 1, defeat; any other opcode of 3 or more stops at
+        the line.
+
+   THE REWARD GUARD ENDS THE WHOLE RUN, NOT THE ONE RECORD.  Opcodes 0 and 1
+   both require the actor to be on the player side (record byte +6 == 2) and
+   not retired, and when either test fails the function RETURNS: every record
+   still ahead of it is abandoned -- including the opcodes 4 and 5 that end the
+   battle -- and the closing flush of the keyboard queue does not happen.
+   Writing the natural continue there changes which battles can end, which is
+   also why fdps_collect_death_script_events filters the reward opcodes out at
+   the collect rather than leaving them to be skipped here.
+
+   Both text draws go to fixed screen addresses, so the caller must already be
+   in mode 13h, and the reward path blocks on the player: it opens modal
+   windows, waits on ticks and, with a full bag, on an answer. */
 extern void fdps_run_death_scripts(int actor_unit_index, int script_count,
                                    unsigned char *scripts);
 #pragma aux fdps_run_death_scripts "*" parm caller [];

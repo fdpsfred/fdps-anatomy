@@ -27,6 +27,8 @@
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "keybd.h"
+#include "chapter.h"
 #include "death.h"
 
 /* Eight slots, so a unit can be parked one past the count the walk is given
@@ -1138,6 +1140,527 @@ static void dth_only_the_inset_window_is_presented(void)
     dth_unstage();
 }
 
+
+/* ------------------------------------------------------------------
+ * fdps_run_death_scripts, 0001d990.
+ *
+ * Expected values come from the assembly: the CMP dword ptr [EBP+0x18],0x0 /
+ * JZ 0x0001dd21 at 0001d99c that leaves a count of zero past both flushes,
+ * the XOR EAX,EAX / MOV AL at 0001d9f1 and the MOVSX at 0001d9df that make the
+ * opcode an unsigned byte and the operand a signed word three bytes apart, the
+ * two JMP 0x0001dd21 at 0001da22 and 0001dc32 that leave the WHOLE function
+ * when the actor is not a live player unit, the LEA EDX,[EDX*0x4] / CALL dword
+ * ptr [EDX+0x601c4] / ADD ESP,0x4 at 0001dca3 that dispatches one argument
+ * through the chapter-event table, the CMP dword ptr [EBP-0x18],0xff at
+ * 0001dcbf and CMP dword ptr [EBP-0x18],-0x1 at 0001dcc8 that suppress a line
+ * on either sentinel, the PUSH 0xa0000 at 0001dcde that puts the line at the
+ * screen origin, and the MOV dword ptr [0x00069da0],0x2 at 0001dcfb and the
+ * same store of 1 at 0001dd0d.  None of them was read off the emitted C.
+ *
+ * THE KEYBOARD FLUSH IS THE INSTRUMENT.  fdps_flush_keyboard_queue is three
+ * instructions that make the ring's write index equal its read index
+ * (keybd.h), so staging the two apart makes each flush visible, and a
+ * chapter-event handler of the fixture's own that pushes them apart again
+ * makes the CLOSING flush visible on its own.  That is what tells the guard's
+ * return apart from a continue: the return abandons the closing flush as well
+ * as the records behind it.
+ *
+ * WHAT IS NOT COVERED.  Opcodes 0 and 1, the item drop and the gold, past
+ * their guard: both open a modal message window on a portrait, draw through
+ * the window and wait on the keyboard ring, and the bag-full arm additionally
+ * runs the two-choice prompt and the item-select window.  A unit runner has
+ * neither a keyboard nor the loaded resources those need, so the payout
+ * arithmetic -- the item name's id + 0xc9, the gold added from
+ * data_fdps_dialog_last_action_value_param rather than from the operand -- is
+ * left to the manual playtest (ADR-0003).  What the cases below do reach of
+ * those two opcodes is the guard that stands in front of them.
+ * ------------------------------------------------------------------ */
+
+/* Four staged units, of which index 2 is the actor every case passes, so an
+   argument that reached a handler as 0 or as the record index would be
+   visible.  Its portrait id is the one the reward path would open a window
+   on; nothing in these cases opens one. */
+#define RDS_UNITS 4
+#define RDS_ACTOR 2
+#define RDS_PORTRAIT 7
+
+/* The three sides the record's byte at offset 6 can hold. */
+#define RDS_SIDE_ENEMY 0
+#define RDS_SIDE_NPC 1
+#define RDS_SIDE_PLAYER 2
+
+/* Bit 0 of the flags byte, the retirement flag fdps_unit_is_retired answers
+   from. */
+#define RDS_FLAG_RETIRED 0x01
+
+/* The scancode ring's two indices, staged apart so a flush is visible.  A
+   flush stores the read index over the write index, so "flushed" is
+   write == RDS_QUEUE_HEAD and "not flushed" is write == RDS_QUEUE_WRITE. */
+#define RDS_QUEUE_HEAD 5
+#define RDS_QUEUE_WRITE 9
+
+/* Which chapter-event slot the fixture's handler is installed in.  Not 0, so a
+   dispatch that ignored the operand and took slot 0 would call the other
+   handler instead and be visible. */
+#define RDS_EVENT_SLOT 7
+#define RDS_OTHER_EVENT_SLOT 0
+
+/* The two verdicts and the "battle still running" value the fixture starts
+   from. */
+#define RDS_END_RUNNING 0
+#define RDS_END_CLEARED 2
+#define RDS_END_DEFEAT 1
+
+/* The operand that means "this record carries no line", and the other one. */
+#define RDS_NO_LINE 0xff
+
+/* The line's own fixture: one 8x1 glyph cell per glyph, one byte of it, whose
+   glyph 0 sets the bit for column 0.  So the screen byte the line lands on
+   says both that the draw happened and where its pen was. */
+#define RDS_CELL_WIDTH 8
+#define RDS_CELL_ROWS 1
+#define RDS_GLYPH_STRIDE 1
+#define RDS_ADVANCE 8
+#define RDS_LINE_HEIGHT 1
+
+/* The adapter and the byte the cases fill it with, the same arrangement the
+   destruction-sequence cases above use: mode 13h so the aperture at 0xa0000 is
+   decoded, and text mode again afterwards. */
+#define RDS_VGA_BASE 0x000a0000
+#define RDS_SCREEN_BYTES (0x140 * 0xc8)
+#define RDS_SCREEN_FILL 0xa5
+#define RDS_MODE_TEXT 0x03
+#define RDS_MODE_320X200X256 0x13
+
+/* The colours the draw asks for, PUSH 0x6d / PUSH 0x0 / PUSH 0xd0. */
+#define RDS_TEXT_FG 0xd0
+
+static struct fdps_unit_record rds_units[RDS_UNITS];
+static unsigned char rds_scripts[16];
+static unsigned char rds_font[RDS_GLYPH_STRIDE * 4];
+static unsigned char rds_text_block[32];
+static unsigned char *rds_screen;
+static int rds_handler_calls;
+static int rds_handler_arg;
+static int rds_other_handler_calls;
+
+/* The handler the event cases install: it records that it ran and with what,
+   and pushes the ring's two indices apart again so the closing flush has
+   something to close. */
+static void rds_event_handler(int unit_index)
+{
+    rds_handler_calls++;
+    rds_handler_arg = unit_index;
+    data_fdps_input_scancode_queue_write_index = RDS_QUEUE_WRITE;
+}
+
+static void rds_other_event_handler(int unit_index)
+{
+    rds_other_handler_calls++;
+    rds_handler_arg = unit_index;
+}
+
+static void rds_stage(int actor_side, int actor_flags)
+{
+    int offset;
+
+    for (offset = 0; offset < (int) sizeof(rds_units); offset++) {
+        ((unsigned char *) rds_units)[offset] = 0;
+    }
+    for (offset = 0; offset < (int) sizeof(rds_scripts); offset++) {
+        rds_scripts[offset] = 0;
+    }
+    rds_units[RDS_ACTOR].side = (unsigned char) actor_side;
+    rds_units[RDS_ACTOR].flags = (unsigned char) actor_flags;
+    rds_units[RDS_ACTOR].portrait_id = (unsigned char) RDS_PORTRAIT;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) rds_units;
+    data_fdps_map_unit_count = RDS_UNITS;
+    data_fdps_chapter_event_or_battle_end_code =
+        (unsigned int) RDS_END_RUNNING;
+    data_fdps_input_scancode_queue_head = RDS_QUEUE_HEAD;
+    data_fdps_input_scancode_queue_write_index = RDS_QUEUE_WRITE;
+
+    data_fdps_chapter_event_handler_table[RDS_EVENT_SLOT] = rds_event_handler;
+    data_fdps_chapter_event_handler_table[RDS_OTHER_EVENT_SLOT] =
+        rds_other_event_handler;
+    rds_handler_calls = 0;
+    rds_other_handler_calls = 0;
+    rds_handler_arg = -1;
+}
+
+/* Put back what a freshly started program holds, for the reason tests/anim.c
+   gives: these globals name blocks the game's own loaders free, and leaving
+   one pointing at a static here hands a later test a free() of storage that
+   never came from the heap.  The two table slots go back to null for the same
+   reason -- a code pointer into this file must not outlive the case. */
+static void rds_unstage(void)
+{
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_current_chapter_text_ptr = NULL;
+    data_fdps_font_sheet_ptr = NULL;
+    data_fdps_font_glyph_width = (unsigned char) 0;
+    data_fdps_glyph_cell_height = (unsigned char) 0;
+    data_fdps_font_glyph_stride_bytes = 0;
+    data_fdps_glyph_advance_x = 0;
+    data_fdps_font_line_height = 0;
+    data_fdps_chapter_event_handler_table[RDS_EVENT_SLOT] = NULL;
+    data_fdps_chapter_event_handler_table[RDS_OTHER_EVENT_SLOT] = NULL;
+}
+
+/* One record: the opcode byte and the signed 16-bit operand behind it, three
+   bytes apart. */
+static void rds_put(int record_index, int opcode, int operand)
+{
+    rds_scripts[record_index * 3] = (unsigned char) opcode;
+    *(short *) (rds_scripts + record_index * 3 + 1) = (short) operand;
+}
+
+/* CMP dword ptr [EBP+0x18],0x0 / JZ 0x0001dd21: a count of zero jumps to the
+   epilogue, so the record in the buffer is never read, no verdict is recorded
+   and NEITHER flush runs -- the ring's two indices are still apart. */
+static void rds_a_count_of_zero_does_nothing_at_all(void)
+{
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_put(0, 4, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 0, rds_scripts);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             RDS_END_RUNNING);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, RDS_QUEUE_WRITE);
+    rds_unstage();
+}
+
+/* MOV dword ptr [0x00069da0],0x2 at 0001dcfb and the same store of 1 at
+   0001dd0d: opcode 4 is the chapter cleared and opcode 5 the defeat.  Both
+   carry the no-line operand, so the verdict is recorded whether or not the
+   record had a line to draw. */
+static void rds_the_two_verdict_opcodes_set_the_end_code(void)
+{
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_put(0, 4, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 1, rds_scripts);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             RDS_END_CLEARED);
+
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_put(0, 5, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 1, rds_scripts);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code, RDS_END_DEFEAT);
+    rds_unstage();
+}
+
+/* CMP dword ptr [EBP-0x14],0x4 / JNZ and CMP 0x5 / JNZ: only those two write
+   the code.  Opcode 3 is a line and nothing else, and an opcode above the
+   window -- 6 here, and 0x80, which is only above it because the byte is
+   widened WITHOUT sign -- stops at the line as well. */
+static void rds_the_other_line_opcodes_leave_the_end_code_alone(void)
+{
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_put(0, 3, RDS_NO_LINE);
+    rds_put(1, 6, RDS_NO_LINE);
+    rds_put(2, 0x80, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 3, rds_scripts);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             RDS_END_RUNNING);
+    rds_unstage();
+}
+
+/* The walk is front to back and every record runs, so the LAST verdict in the
+   array is the one that stands.  Both orders are tried, because a walk that
+   ran backwards would pass one of them by accident. */
+static void rds_the_records_run_front_to_back(void)
+{
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_put(0, 5, RDS_NO_LINE);
+    rds_put(1, 4, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 2, rds_scripts);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             RDS_END_CLEARED);
+
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_put(0, 4, RDS_NO_LINE);
+    rds_put(1, 5, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 2, rds_scripts);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code, RDS_END_DEFEAT);
+    rds_unstage();
+}
+
+/* The count is the bound: a record sitting one past it is not run even though
+   the buffer holds it. */
+static void rds_the_count_bounds_the_walk(void)
+{
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_put(0, 4, RDS_NO_LINE);
+    rds_put(1, 5, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 1, rds_scripts);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             RDS_END_CLEARED);
+    rds_unstage();
+}
+
+/* LEA EDX,[EDX*0x4] / CALL dword ptr [EDX+0x601c4] / ADD ESP,0x4: the operand
+   is the slot, scaled by the four bytes a pointer takes, and the single
+   argument is the actor index this call was handed -- not the record index and
+   not 0.  The handler in slot 0 stays untouched, so a dispatch that ignored
+   the operand would be visible. */
+static void rds_the_event_opcode_calls_its_table_slot(void)
+{
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_put(0, 2, RDS_EVENT_SLOT);
+    fdps_run_death_scripts(RDS_ACTOR, 1, rds_scripts);
+    CHECK_EQ(rds_handler_calls, 1);
+    CHECK_EQ(rds_other_handler_calls, 0);
+    CHECK_EQ(rds_handler_arg, RDS_ACTOR);
+
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_put(0, 2, RDS_OTHER_EVENT_SLOT);
+    fdps_run_death_scripts(RDS_ACTOR, 1, rds_scripts);
+    CHECK_EQ(rds_handler_calls, 0);
+    CHECK_EQ(rds_other_handler_calls, 1);
+    rds_unstage();
+}
+
+/* Both flushes: the one at 0001d9b5 before the walk and the one at 0001dd1c
+   after it.  The handler pushes the ring's indices apart again in the middle
+   of the run, so the equal pair at the end is the CLOSING flush and not the
+   opening one. */
+static void rds_the_run_flushes_the_queue_at_both_ends(void)
+{
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_put(0, 2, RDS_EVENT_SLOT);
+    rds_put(1, 4, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 2, rds_scripts);
+    CHECK_EQ(rds_handler_calls, 1);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, RDS_QUEUE_HEAD);
+    rds_unstage();
+}
+
+/* CMP EAX,0x2 / JNZ 0x0001da22 -> JMP 0x0001dd21: an item record with an actor
+   that is not on the player side leaves the whole function.  The verdict
+   record behind it is dropped and the closing flush does not happen -- the
+   ring's indices are still where the handler in front of the item record put
+   them.  A continue in place of that return would set the end code and flush.
+   Both the enemy side and the NPC side are tried, because the test is an
+   equality against 2 and not a "not the enemy" one. */
+static void rds_an_item_record_from_a_non_player_actor_ends_the_run(void)
+{
+    rds_stage(RDS_SIDE_ENEMY, 0);
+    rds_put(0, 2, RDS_EVENT_SLOT);
+    rds_put(1, 0, 3);
+    rds_put(2, 4, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 3, rds_scripts);
+    CHECK_EQ(rds_handler_calls, 1);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             RDS_END_RUNNING);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, RDS_QUEUE_WRITE);
+
+    rds_stage(RDS_SIDE_NPC, 0);
+    rds_put(0, 0, 3);
+    rds_put(1, 4, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 2, rds_scripts);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             RDS_END_RUNNING);
+    rds_unstage();
+}
+
+/* The same guard on the gold record, CMP EAX,0x2 / JNZ 0x0001dc32: the run
+   ends there, the party purse is not touched and the verdict behind it is
+   dropped.  The event record in front is what pushes the ring's indices apart
+   again after the opening flush, so the pair still being apart at the end is
+   the closing flush not happening. */
+static void rds_a_gold_record_from_a_non_player_actor_ends_the_run(void)
+{
+    int purse;
+
+    rds_stage(RDS_SIDE_ENEMY, 0);
+    purse = data_fdps_shared_party_total_gold;
+    rds_put(0, 2, RDS_EVENT_SLOT);
+    rds_put(1, 1, 100);
+    rds_put(2, 4, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 3, rds_scripts);
+    CHECK_EQ(rds_handler_calls, 1);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             RDS_END_RUNNING);
+    CHECK_EQ(data_fdps_shared_party_total_gold, purse);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, RDS_QUEUE_WRITE);
+    rds_unstage();
+}
+
+/* TEST EAX,EAX / JZ after CALL fdps_unit_is_retired: the second half of the
+   guard.  A player-side actor that has been taken off the map ends the run in
+   exactly the same way, for the item record and for the gold one. */
+static void rds_a_retired_player_actor_ends_the_run(void)
+{
+    rds_stage(RDS_SIDE_PLAYER, RDS_FLAG_RETIRED);
+    rds_put(0, 2, RDS_EVENT_SLOT);
+    rds_put(1, 0, 3);
+    rds_put(2, 4, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 3, rds_scripts);
+    CHECK_EQ(rds_handler_calls, 1);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             RDS_END_RUNNING);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, RDS_QUEUE_WRITE);
+
+    rds_stage(RDS_SIDE_PLAYER, RDS_FLAG_RETIRED);
+    rds_put(0, 1, 100);
+    rds_put(1, 4, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 2, rds_scripts);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             RDS_END_RUNNING);
+    rds_unstage();
+}
+
+/* The guard stands in front of the reward opcodes ONLY: an event record and a
+   verdict record run for an enemy-side actor, which is what the map-AI path
+   relies on -- it hands this function the index of the unit its own actor
+   attacked. */
+static void rds_a_non_player_actor_still_runs_the_event_opcodes(void)
+{
+    rds_stage(RDS_SIDE_ENEMY, RDS_FLAG_RETIRED);
+    rds_put(0, 2, RDS_EVENT_SLOT);
+    rds_put(1, 4, RDS_NO_LINE);
+    fdps_run_death_scripts(RDS_ACTOR, 2, rds_scripts);
+    CHECK_EQ(rds_handler_calls, 1);
+    CHECK_EQ(rds_handler_arg, RDS_ACTOR);
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             RDS_END_CLEARED);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, RDS_QUEUE_HEAD);
+    rds_unstage();
+}
+
+/* The glyph sheet and the one-entry text block the line cases draw from, and
+   the font metrics fdps_draw_glyph reads out of the globals. */
+static void rds_stage_text(void)
+{
+    int i;
+
+    for (i = 0; i < (int) sizeof(rds_font); i++) {
+        rds_font[i] = 0;
+    }
+    rds_font[0] = 0x80;
+    for (i = 0; i < (int) sizeof(rds_text_block); i++) {
+        rds_text_block[i] = 0;
+    }
+    /* Entry 0 is at byte 8 of the block: one glyph-0 token and the
+       terminator. */
+    *(short *) (rds_text_block + 0) = (short) 8;
+    *(short *) (rds_text_block + 8) = (short) 0;
+    *(short *) (rds_text_block + 10) = (short) -1;
+
+    data_fdps_font_glyph_width = (unsigned char) RDS_CELL_WIDTH;
+    data_fdps_glyph_cell_height = (unsigned char) RDS_CELL_ROWS;
+    data_fdps_font_glyph_stride_bytes = RDS_GLYPH_STRIDE;
+    data_fdps_font_outline_enabled_flag = (unsigned char) 0;
+    data_fdps_glyph_shadow_row_offset = 0;
+    data_fdps_font_shadow_offset_x = 0;
+    data_fdps_glyph_advance_x = RDS_ADVANCE;
+    data_fdps_font_line_height = RDS_LINE_HEIGHT;
+    data_fdps_font_sheet_ptr = rds_font;
+    data_fdps_current_chapter_text_ptr = rds_text_block;
+}
+
+/* One run with the adapter in mode 13h, leaving the frame in rds_screen[]. */
+static void rds_run_on_screen(int record_count)
+{
+    union REGS regs;
+
+    rds_screen = (unsigned char *) malloc((size_t) RDS_SCREEN_BYTES);
+    CHECK_EQ(rds_screen != NULL, 1);
+    if (rds_screen == NULL) {
+        return;
+    }
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) RDS_MODE_320X200X256;
+    int386(0x10, &regs, &regs);
+    memset((void *) RDS_VGA_BASE, RDS_SCREEN_FILL, (size_t) RDS_SCREEN_BYTES);
+
+    fdps_run_death_scripts(RDS_ACTOR, record_count, rds_scripts);
+
+    memmove(rds_screen, (void *) RDS_VGA_BASE, (size_t) RDS_SCREEN_BYTES);
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) RDS_MODE_TEXT;
+    int386(0x10, &regs, &regs);
+}
+
+static void rds_free_screen(void)
+{
+    free(rds_screen);
+    rds_screen = NULL;
+}
+
+/* PUSH 0xa0000 / PUSH 0x140 at 0001dcde: the line goes to the screen ORIGIN at
+   the visible pitch, out of data_fdps_current_chapter_text_ptr and not out of
+   the global text block, and it is the operand that names the entry.  Glyph 0
+   of the fixture paints column 0 of row 0, so screen byte 0 carries the pen
+   colour and its neighbour does not. */
+static void rds_a_line_is_drawn_at_the_screen_origin(void)
+{
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_stage_text();
+    rds_put(0, 3, 0);
+    rds_run_on_screen(1);
+    if (rds_screen != NULL) {
+        CHECK_EQ((int) rds_screen[0], RDS_TEXT_FG);
+        CHECK_EQ((int) rds_screen[1], RDS_SCREEN_FILL);
+    }
+    rds_free_screen();
+    rds_unstage();
+}
+
+/* CMP dword ptr [EBP-0x18],0xff / JZ and CMP dword ptr [EBP-0x18],-0x1 / JNZ:
+   BOTH sentinels suppress the draw.  0x00ff is not -1 once the operand has
+   been sign-extended, so a test against -1 alone would print entry 255 here;
+   the screen staying filled is that not happening. */
+static void rds_both_no_line_operands_suppress_the_draw(void)
+{
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_stage_text();
+    rds_put(0, 3, RDS_NO_LINE);
+    rds_run_on_screen(1);
+    if (rds_screen != NULL) {
+        CHECK_EQ((int) rds_screen[0], RDS_SCREEN_FILL);
+    }
+    rds_free_screen();
+
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_stage_text();
+    rds_put(0, 3, -1);
+    rds_run_on_screen(1);
+    if (rds_screen != NULL) {
+        CHECK_EQ((int) rds_screen[0], RDS_SCREEN_FILL);
+    }
+    rds_free_screen();
+    rds_unstage();
+}
+
+/* The suppression is of the LINE only: opcode 4 with a no-line operand still
+   records the verdict, and opcode 4 with a real one draws and records both. */
+static void rds_a_verdict_records_whether_or_not_it_has_a_line(void)
+{
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_stage_text();
+    rds_put(0, 4, 0);
+    rds_run_on_screen(1);
+    if (rds_screen != NULL) {
+        CHECK_EQ((int) rds_screen[0], RDS_TEXT_FG);
+    }
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code,
+             RDS_END_CLEARED);
+    rds_free_screen();
+
+    rds_stage(RDS_SIDE_PLAYER, 0);
+    rds_stage_text();
+    rds_put(0, 5, RDS_NO_LINE);
+    rds_run_on_screen(1);
+    if (rds_screen != NULL) {
+        CHECK_EQ((int) rds_screen[0], RDS_SCREEN_FILL);
+    }
+    CHECK_EQ((int) data_fdps_chapter_event_or_battle_end_code, RDS_END_DEFEAT);
+    rds_free_screen();
+    rds_unstage();
+}
+
 void run_death_tests(void)
 {
     RUN_TEST(record_layout_matches_the_offsets);
@@ -1176,4 +1699,18 @@ void run_death_tests(void)
     RUN_TEST(dth_every_dying_unit_gets_its_own_explosion);
     RUN_TEST(dth_the_page_comes_back_to_the_heap);
     RUN_TEST(dth_only_the_inset_window_is_presented);
+    RUN_TEST(rds_a_count_of_zero_does_nothing_at_all);
+    RUN_TEST(rds_the_two_verdict_opcodes_set_the_end_code);
+    RUN_TEST(rds_the_other_line_opcodes_leave_the_end_code_alone);
+    RUN_TEST(rds_the_records_run_front_to_back);
+    RUN_TEST(rds_the_count_bounds_the_walk);
+    RUN_TEST(rds_the_event_opcode_calls_its_table_slot);
+    RUN_TEST(rds_the_run_flushes_the_queue_at_both_ends);
+    RUN_TEST(rds_an_item_record_from_a_non_player_actor_ends_the_run);
+    RUN_TEST(rds_a_gold_record_from_a_non_player_actor_ends_the_run);
+    RUN_TEST(rds_a_retired_player_actor_ends_the_run);
+    RUN_TEST(rds_a_non_player_actor_still_runs_the_event_opcodes);
+    RUN_TEST(rds_a_line_is_drawn_at_the_screen_origin);
+    RUN_TEST(rds_both_no_line_operands_suppress_the_draw);
+    RUN_TEST(rds_a_verdict_records_whether_or_not_it_has_a_line);
 }

@@ -717,3 +717,5 @@ enum /src_type | size=0x1
     INVALID4 = 0x4
     SOURCELIST = 0x20
     TO_ALIAS = 0x10
+funcdef /void_int_fn = /void()
+    # Function Signature Data Type

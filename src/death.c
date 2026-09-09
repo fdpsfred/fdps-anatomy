@@ -6,24 +6,31 @@
  * state: the battle units are reached through unit.h and their count through
  * gamedata.h.
  *
- * memmove comes from <string.h>, malloc and free from <stdlib.h> and inp from
- * <conio.h>, which is where Watcom 10.0a declares each of them, and all four
- * are real calls in the original -- CALL 0x0003d514 at 000261fd, CALL
- * 0x0003d375 at 0001d804, CALL 0x0003d478 at 0001d977 and CALL 0x0003d4e4 at
- * 0001d914 -- because the flag set carries no -oi (rebuild_info/
- * build_flags.md), so the plain declarations are what reproduce them.
+ * memmove comes from <string.h>, malloc and free from <stdlib.h>, inp from
+ * <conio.h> and delay from <i86.h>, which is where Watcom 10.0a declares each
+ * of them, and all five are real calls in the original -- CALL 0x0003d514 at
+ * 000261fd, CALL 0x0003d375 at 0001d804, CALL 0x0003d478 at 0001d977, CALL
+ * 0x0003d4e4 at 0001d914 and CALL 0x0003d370 at 0001daac -- because the flag
+ * set carries no -oi (rebuild_info/build_flags.md), so the plain declarations
+ * are what reproduce them.
  */
 #include <string.h>
 #include <stdlib.h>
 #include <conio.h>
+#include <i86.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "unit.h"
+#include "unititem.h"
 #include "vfs.h"
 #include "saf.h"
 #include "sprite.h"
 #include "blit.h"
 #include "mapdraw.h"
+#include "msgwin.h"
+#include "text.h"
+#include "keybd.h"
+#include "chapter.h"
 #include "death.h"
 
 /* How wide one collected record is: PUSH 0x3 at 000261f2 is memmove's byte
@@ -382,4 +389,260 @@ void fdps_play_death_animation_and_mark_dead(void)
     }
 
     free((void *) request[DRAW_REQUEST_DEST_BASE]);
+}
+
+/* Which side byte makes the acting unit the player's: CMP EAX,0x2 at 0001da0d
+   and 0001dc1d, on the record's side byte at offset 6 widened without sign.
+   0 is the enemy side and 1 the NPC side, and neither is paid. */
+#define ACTOR_SIDE_PLAYER 2
+
+/* The five death-script opcodes the executor knows.  Anything else of 3 or
+   more draws its line and stops there; 0xff, the "no script" sentinel, never
+   reaches here because both collectors reject it. */
+#define DEATH_SCRIPT_ITEM 0
+#define DEATH_SCRIPT_GOLD 1
+#define DEATH_SCRIPT_EVENT 2
+#define DEATH_SCRIPT_LINE 3
+#define DEATH_SCRIPT_CHAPTER_CLEARED 4
+#define DEATH_SCRIPT_DEFEAT 5
+
+/* The two verdicts opcodes 4 and 5 leave in
+   data_fdps_chapter_event_or_battle_end_code: MOV dword ptr [0x00069da0],0x2
+   at 0001dcfb and the same store of 1 at 0001dd0d. */
+#define BATTLE_END_CHAPTER_CLEARED 2
+#define BATTLE_END_DEFEAT 1
+
+/* ADD EAX,0xc9 at 0001da2a.  A dropped item's operand is its item id, and the
+   name string of item n is entry n + 0xc9 of the global text table, so this is
+   the id-to-text-entry offset and not a message number of its own. */
+#define ITEM_NAME_TEXT_ID_BASE 0xc9
+
+/* The four messages of the reward path, entries of data_fdps_all_game_text_ptr:
+   the item gained, the bag-full prompt, the "it was lost" line the two failure
+   paths share, and the gold gained. */
+#define MSG_ITEM_GAINED 0x1e6
+#define MSG_BAG_IS_FULL 0x1e7
+#define MSG_DROP_WAS_LOST 0x1e8
+#define MSG_GOLD_GAINED 0x1e9
+
+/* Where the message window's text goes: PUSH 0xaa44a at 0001da56 and at the
+   four other reward draws, which is screen byte 0xa44a -- pixel (266,131) at
+   pitch 0x140 -- inside the panel fdps_message_window_open has just put up.
+   The scripted line of opcode 3 and above is drawn at the screen origin
+   instead, PUSH 0xa0000 at 0001dcde, because it is painted straight onto the
+   map with no window under it. */
+#define MESSAGE_TEXT_AT 0xa44a
+
+/* The glyph colours every draw here asks for, PUSH 0x6d / PUSH 0x0 / PUSH 0xd0
+   at each call: the standard message pen, no cell fill, and the standard drop
+   shadow (text.h). */
+#define DEATH_TEXT_FG 0xd0
+#define DEATH_TEXT_BG 0
+#define DEATH_TEXT_OUTLINE 0x6d
+
+/* How long each message stands, in timer ticks, and the wait indicator's
+   argument: PUSH 0x1e / PUSH 0x1 after the item line and PUSH 0x32 / PUSH 0x1
+   after the gold and the two failure lines. */
+#define MESSAGE_WAIT_INDICATOR 1
+#define ITEM_MESSAGE_TICKS 0x1e
+#define MESSAGE_TICKS 0x32
+
+/* PUSH 0x64 / CALL delay at 0001daac and 0001db5e: 100 ms of wall clock
+   between taking one window away and putting the next one up. */
+#define WINDOW_CHANGE_DELAY_MS 100
+
+/* fdps_unit_add_item's "no slot free" answer and fdps_unit_item_select_window's
+   "the player backed out" answer, both a CMP against -1 (unititem.h). */
+#define BAG_IS_FULL (-1)
+#define ITEM_PICK_CANCELLED (-1)
+
+/* fdps_prompt_two_choice's first answer, the one that opens the bag so a slot
+   can be given up; anything else declines and the drop is lost (msgwin.h). */
+#define PROMPT_ANSWER_YES 0
+
+/* The operand value that means "this record carries no line": CMP dword ptr
+   [EBP-0x18],0xff / JZ at 0001dcbf and CMP dword ptr [EBP-0x18],-0x1 / JNZ at
+   0001dcc8.  BOTH are tested, on the SIGN-EXTENDED operand, so 0x00ff and
+   0xffff each suppress the draw and a test against -1 alone would print a
+   message the original does not (rebuild_info/pitfalls.md). */
+#define SCRIPT_NO_LINE 0xff
+
+/* 0001d990.  Walks the records one of the two collectors above filled and
+   carries each one out.  Three stack arguments -- the three PUSHes and the ADD
+   ESP,0xc at all five call sites, 00012ffc, 00013dd4, 00015ff3, 00026dec and
+   000280b1 -- and no call site reads EAX afterwards.
+
+   THE REWARD GUARD RETURNS OUT OF THE WHOLE ARRAY.  Both JMP 0x0001dd21 at
+   0001da22 and 0001dc32 go to the epilogue, not to the loop's increment: an
+   actor that is not a live player unit abandons every record still ahead of
+   the first item or gold one -- the opcodes 4 and 5 that end the battle
+   included -- and the closing flush never runs.  Writing the natural continue
+   there changes which battles can end (death.h, rebuild_info/pitfalls.md).
+
+   The opcode is read as an UNSIGNED byte (XOR EAX,EAX / MOV AL at 0001d9f1)
+   and the operand as a SIGNED word (MOVSX at 0001d9df), so an opcode of 0x80
+   is 128 and lands in the "3 and above" arm, while an operand of 0xffff is -1
+   and suppresses its line.
+
+   FIVE CALLS' ANSWERS ARE READ.  fdps_get_unit_record's is the actor record
+   every side test, portrait and reward below goes through;
+   fdps_unit_is_retired's is the second half of the guard;
+   fdps_unit_add_item's is tested against -1 for the bag-full path, while the
+   second call's answer is dropped; fdps_prompt_two_choice's picks the arm; and
+   fdps_unit_item_select_window's is tested against -1, with the slot it picked
+   coming back through the pointer argument rather than through the answer.
+   fdps_unit_get_item_id's answer is stored and never read -- the build is -od,
+   which keeps a dead store (rebuild_info/build_flags.md).  fdps_draw_text
+   returns a cursor nothing here looks at, and the message window calls,
+   fdps_flush_keyboard_queue and delay return nothing.
+
+   The gold is added from the GLOBAL and not from the operand: MOV
+   EAX,[0x00064038] at 0001dc8a re-reads the substitution slot the draw was
+   just handed, so anything that wrote it in between is what gets paid. */
+void fdps_run_death_scripts(int actor_unit_index, int script_count,
+                            unsigned char *scripts)
+{
+    /* The acting unit's record, resolved once before the walk and reused for
+       every side test, portrait and reward. */
+    struct fdps_unit_record *actor;
+    /* Which record of scripts the walk is on. */
+    int record_index;
+    /* The record's opcode byte, widened without sign. */
+    int opcode;
+    /* The record's signed 16-bit operand: an item id, a gold amount, a
+       chapter-event slot or a text entry id, depending on the opcode. */
+    int operand;
+    /* Which bag slot the player chose to give up, filled in by
+       fdps_unit_item_select_window through its pointer argument. */
+    int given_up_slot;
+    /* What was in that slot.  Read and thrown away; see the note above. */
+    int given_up_item_id;
+    /* Whether the player agreed to make room, and then whether a slot was
+       actually picked.  The original keeps both in the one frame slot at
+       [EBP-0x10]; nothing is carried from the first to the second, and frame
+       allocation is not part of the standard (ADR-0001). */
+    int make_room_answer;
+    int picked_slot_result;
+
+    if (script_count == 0) {
+        return;
+    }
+
+    actor = fdps_get_unit_record(actor_unit_index);
+    fdps_flush_keyboard_queue();
+
+    for (record_index = 0; record_index < script_count; record_index++) {
+        operand = (int) *(short *) (scripts
+                                    + record_index * DEATH_SCRIPT_RECORD_BYTES
+                                    + 1);
+        opcode = (int) scripts[record_index * DEATH_SCRIPT_RECORD_BYTES];
+
+        if (opcode == DEATH_SCRIPT_ITEM) {
+            if (actor->side != ACTOR_SIDE_PLAYER) {
+                return;
+            }
+            if (fdps_unit_is_retired(actor_unit_index) != 0) {
+                return;
+            }
+            data_fdps_dialog_last_action_text_id_param =
+                operand + ITEM_NAME_TEXT_ID_BASE;
+            fdps_message_window_open((int) actor->portrait_id);
+            fdps_draw_text(data_fdps_all_game_text_ptr, MSG_ITEM_GAINED,
+                           (unsigned char *) (VGA_SCREEN_BASE
+                                              + MESSAGE_TEXT_AT),
+                           VGA_SCREEN_PITCH, DEATH_TEXT_FG, DEATH_TEXT_BG,
+                           DEATH_TEXT_OUTLINE);
+            if (fdps_unit_add_item(actor_unit_index, operand) == BAG_IS_FULL) {
+                fdps_message_window_wait_key(MESSAGE_WAIT_INDICATOR,
+                                             ITEM_MESSAGE_TICKS);
+                fdps_message_window_close();
+                delay((unsigned int) WINDOW_CHANGE_DELAY_MS);
+                fdps_message_window_open((int) actor->portrait_id);
+                fdps_draw_text(data_fdps_all_game_text_ptr, MSG_BAG_IS_FULL,
+                               (unsigned char *) (VGA_SCREEN_BASE
+                                                  + MESSAGE_TEXT_AT),
+                               VGA_SCREEN_PITCH, DEATH_TEXT_FG, DEATH_TEXT_BG,
+                               DEATH_TEXT_OUTLINE);
+                make_room_answer = fdps_prompt_two_choice();
+                if (make_room_answer == PROMPT_ANSWER_YES) {
+                    fdps_message_window_close();
+                    given_up_slot = 0;
+                    picked_slot_result = fdps_unit_item_select_window(
+                        actor_unit_index, 0, &given_up_slot);
+                    if (picked_slot_result == ITEM_PICK_CANCELLED) {
+                        delay((unsigned int) WINDOW_CHANGE_DELAY_MS);
+                        fdps_message_window_open((int) actor->portrait_id);
+                        fdps_draw_text(data_fdps_all_game_text_ptr,
+                                       MSG_DROP_WAS_LOST,
+                                       (unsigned char *) (VGA_SCREEN_BASE
+                                                          + MESSAGE_TEXT_AT),
+                                       VGA_SCREEN_PITCH, DEATH_TEXT_FG,
+                                       DEATH_TEXT_BG, DEATH_TEXT_OUTLINE);
+                        fdps_message_window_wait_key(MESSAGE_WAIT_INDICATOR,
+                                                     MESSAGE_TICKS);
+                        fdps_message_window_close();
+                    } else {
+                        given_up_item_id =
+                            fdps_unit_get_item_id(actor_unit_index,
+                                                  given_up_slot);
+                        fdps_unit_remove_item(actor_unit_index, given_up_slot);
+                        fdps_unit_add_item(actor_unit_index, operand);
+                    }
+                } else {
+                    fdps_message_window_close();
+                    fdps_message_window_open((int) actor->portrait_id);
+                    fdps_draw_text(data_fdps_all_game_text_ptr,
+                                   MSG_DROP_WAS_LOST,
+                                   (unsigned char *) (VGA_SCREEN_BASE
+                                                      + MESSAGE_TEXT_AT),
+                                   VGA_SCREEN_PITCH, DEATH_TEXT_FG,
+                                   DEATH_TEXT_BG, DEATH_TEXT_OUTLINE);
+                    fdps_message_window_wait_key(MESSAGE_WAIT_INDICATOR,
+                                                 MESSAGE_TICKS);
+                    fdps_message_window_close();
+                }
+            } else {
+                fdps_message_window_wait_key(MESSAGE_WAIT_INDICATOR,
+                                             ITEM_MESSAGE_TICKS);
+                fdps_message_window_close();
+            }
+        } else if (opcode == DEATH_SCRIPT_GOLD) {
+            if (actor->side != ACTOR_SIDE_PLAYER) {
+                return;
+            }
+            if (fdps_unit_is_retired(actor_unit_index) != 0) {
+                return;
+            }
+            fdps_message_window_open((int) actor->portrait_id);
+            data_fdps_dialog_last_action_value_param = operand;
+            fdps_draw_text(data_fdps_all_game_text_ptr, MSG_GOLD_GAINED,
+                           (unsigned char *) (VGA_SCREEN_BASE
+                                              + MESSAGE_TEXT_AT),
+                           VGA_SCREEN_PITCH, DEATH_TEXT_FG, DEATH_TEXT_BG,
+                           DEATH_TEXT_OUTLINE);
+            fdps_message_window_wait_key(MESSAGE_WAIT_INDICATOR,
+                                         MESSAGE_TICKS);
+            fdps_message_window_close();
+            data_fdps_shared_party_total_gold +=
+                data_fdps_dialog_last_action_value_param;
+        } else if (opcode == DEATH_SCRIPT_EVENT) {
+            (*data_fdps_chapter_event_handler_table[operand])(
+                actor_unit_index);
+        } else if (opcode >= DEATH_SCRIPT_LINE) {
+            if (operand != SCRIPT_NO_LINE && operand != -1) {
+                fdps_draw_text(data_fdps_current_chapter_text_ptr, operand,
+                               (unsigned char *) VGA_SCREEN_BASE,
+                               VGA_SCREEN_PITCH, DEATH_TEXT_FG, DEATH_TEXT_BG,
+                               DEATH_TEXT_OUTLINE);
+            }
+            if (opcode == DEATH_SCRIPT_CHAPTER_CLEARED) {
+                data_fdps_chapter_event_or_battle_end_code =
+                    BATTLE_END_CHAPTER_CLEARED;
+            } else if (opcode == DEATH_SCRIPT_DEFEAT) {
+                data_fdps_chapter_event_or_battle_end_code = BATTLE_END_DEFEAT;
+            }
+        }
+    }
+
+    fdps_flush_keyboard_queue();
 }

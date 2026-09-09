@@ -63,4 +63,25 @@ extern void fdps_chapter_state_reset(void);
 extern void fdps_show_chapter_title_card(void);
 #pragma aux fdps_show_chapter_title_card "*" parm caller [];
 
+/* 000601c4.  The fifty scripted chapter-event handlers, indexed by the event
+   slot the map data names.  Eight indirect call sites in seven functions
+   reach it, and all eight spell the same call: the slot scaled by four,
+   CALL dword ptr [reg+0x601c4] with exactly ONE dword pushed, and ADD
+   ESP,0x4 afterwards.  The seven are fdps_battle_enemy_turn_phase (twice),
+   fdps_battle_npc_turn_phase, fdps_battle_system_menu,
+   fdps_battle_unit_turn, fdps_battle_search_cell_at_cursor,
+   fdps_battle_run_turn_events and fdps_run_death_scripts (death.h), which
+   reaches it on death-script opcode 2.
+
+   The argument is a battle unit index, and 48 of the 49 fdps_chapter_*
+   handlers declared across chevt1.h .. chevt6.h take exactly that one int;
+   the handlers that have no unit to work on ignore it.  Seven of the eight
+   sites push an index they hold; only fdps_battle_run_turn_events pushes a
+   literal 0.
+
+   Ghidra types the slots as void_fn, its placeholder for a code pointer of
+   unknown shape; the pushed argument is what makes them handlers of a unit
+   index. */
+extern void (*data_fdps_chapter_event_handler_table[50])(int unit_index);
+
 #endif

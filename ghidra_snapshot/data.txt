@@ -800,7 +800,7 @@
 000601b8 | 0x4 | /int | data_fdps_village_member_grid_scroll_offset | USER_DEFINED
 000601bc | 0x4 | /int | data_fdps_village_member_select_cursor_idx | USER_DEFINED
 000601c0 | 0x4 | /int | data_fdps_secret_code_match_pos | USER_DEFINED
-000601c4 | 0xc8 | /fdps/void_fn *[50] | data_fdps_chapter_event_handler_table | USER_DEFINED
+000601c4 | 0xc8 | /void_int_fn *[50] | data_fdps_chapter_event_handler_table | USER_DEFINED
 0006028c | 0x78 | /fdps/void_fn *[30] | data_fdps_chapter_post_action_handler_table | USER_DEFINED
 00060304 | 0x78 | /fdps/void_fn *[30] | data_fdps_chapter_end_handler_table | USER_DEFINED
 0006037c | 0x4 | /int | data_ail_file_error_code | USER_DEFINED

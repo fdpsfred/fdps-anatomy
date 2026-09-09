@@ -2325,5 +2325,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0001d990": [
+    {
+      "from": "emit",
+      "what": "The item and gold arms past their guard are emitted from the assembly but never executed by a test: both open a modal message window on the actor's portrait, draw through it and wait on the keyboard ring, and the bag-full arm additionally runs fdps_prompt_two_choice and fdps_unit_item_select_window. So the payout arithmetic -- the item name published as operand + 0xc9 in data_fdps_dialog_last_action_text_id_param, the gold added to data_fdps_shared_party_total_gold from data_fdps_dialog_last_action_value_param rather than from the operand, and the give-up-a-slot replacement -- rests on the assembly reading alone. What the tests do reach of those two opcodes is the guard in front of them. Narrowing it: WDISASM on the built DEATH.OBJ shows those arms reproducing the original's instruction sequence, so what is unverified is not the control flow through them but that this function orders and parameterises those calls correctly; the residual risk concentrates on the gold being re-read from data_fdps_dialog_last_action_value_param at 0001dc8a rather than taken from the operand, so whatever fdps_message_window_wait_key or fdps_draw_text writes to that global in between is what actually gets paid.",
+      "needs": "A playtest of a chapter whose map data carries death-script opcodes 0 and 1 (a scripted unit that drops an item or gold), watching that the item named in the window is the one added, that a full bag offers the swap, and that the purse moves by the operand rather than by some other value; alternatively a harness that can stand in for the message-window and prompt subsystems, which does not exist and would mean stubbing production code.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed independently and agreed that it is unreachable rather than unexamined. I checked why no unit case can enter the item and gold arms past their guard: fdps_message_window_open paints from data_fdps_message_window_sheet_ptr, which workspace/code_emit/undefined.json lists as a ticket-23 stub and so is null in the runner, and fdps_message_window_wait_key stands on the scancode ring; reaching those arms would mean stubbing production code, which ADR-0003 forbids. I also narrowed the risk the same way the emitter did but from my own read: WDISASM on DEATH.OBJ shows both arms reproducing the original's call order and literals exactly -- the 0xc9 add at 0x04a8, the store to data_fdps_dialog_last_action_text_id_param before the window opens in the item arm and after it opens in the gold arm (0x04ad versus 0x06c6, matching 0001da2f versus 0001dc4e), and the gold re-read from data_fdps_dialog_last_action_value_param at 0x0702 rather than from the operand. So what is untested is not the shape of those arms but whether the subsystems they call behave as read, which is what the playtest settles.",
+      "needs": "As emit#0.",
+      "status": "open",
+      "same_as": "emit#0"
+    }
   ]
 }
