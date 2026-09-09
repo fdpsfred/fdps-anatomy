@@ -1238,6 +1238,342 @@ static void as_the_animation_flag_is_an_equality_with_one(void)
     as_unstage();
 }
 
+/* The third fixture, for fdps_map_actor_use_item, and it builds on the cast's
+ * the way the cast's builds on the attack's: as_stage already puts up the map
+ * sprite cache, the shadow sheet, the whole 0x12-entry cursor kit the diamond
+ * modes reach into and the glyph header, all of which the item action needs
+ * for the same reasons.  What is added here is the two ITEM.DAT records, the
+ * bag entries they sit in, the line the beam is fired along and the decision
+ * the item search is claimed to have published.
+ *
+ * BOTH RECORDS CARRY A DEAD USE-EFFECT.  Code 5 matches no branch of
+ * fdps_apply_item_effect_to_targets (item.h): it plays nothing, changes
+ * nothing, consumes nothing and is one of the few codes that comes back
+ * without touching the frame clock.  That is deliberate -- these cases are
+ * about the target collection and the presentation this function drives, and
+ * the effect's own cover is tests/item.c.
+ *
+ * LAYER 0'S BLOB HAS TO OPEN WITH A REAL .MPL MAGIC.  The clamp on the
+ * swept-to tile reads its bounds from the signed words at +0 and +2 of it,
+ * which on a real .MPL are the first four bytes of the magic and never the
+ * map's dimensions (src/aiact.c).  aa_stage leaves 0xaa there, which is a
+ * bound no map ever presents, so the fixture writes the magic back.
+ *
+ * Expected values come from the assembly at 00027180 -- the byte at record
+ * +0xb + 2 * slot at 000271cf, CMP byte ptr [EAX + 0x11],0x0 at 000271f3, the
+ * CMP EAX,0xf / JLE at 00027233 and CMP EAX,0x10 / JGE at 000272d0, the push
+ * orders of the two collectors at 00027269 and 00027298, ADD EAX,0x2 at
+ * 000272c0, MOV dword ptr [0x00069cd0],0x6 at 00027356, the two MOVSX word
+ * reads at 00027365 and 00027370, the IDIV 0x18 pairs at 0002738a-000273f4,
+ * the four clamp arms at 000273fd-0002744d, MOV dword ptr [0x0006015c],0x14 at
+ * 0002744d and MOV dword ptr [0x00069cd0],0x0 at 0002746f -- and from the
+ * documented behaviour of the two collectors and of fdps_unit_face_target.
+ */
+
+/* Two ITEM.DAT records in the table aa_stage staged, one of each shape. */
+#define AI_AREA_ITEM 2
+#define AI_LINE_ITEM 3
+#define AI_DEAD_USE_EFFECT 5
+
+/* Which of the eight two-byte bag entries each of them sits in.  The id of
+   entry n is the record byte at 0x0b + 2 * n, so entry 2 and entry 3 are two
+   bytes apart and a body that dropped the doubling would read entry 3's id out
+   of the middle of entry 1. */
+#define AI_AREA_SLOT 2
+#define AI_LINE_SLOT 3
+
+/* The area record: a use_distance below 0x10 and a blast radius of 1, so the
+   overlay left up when the routine returns is mode 3. */
+#define AI_AREA_USE_DISTANCE 1
+#define AI_AREA_RADIUS 1
+#define AI_AREA_MODE (AI_AREA_RADIUS + 2)
+
+/* The line record: bit 0x10 marks the shape and the low nibble is the beam's
+   length in tiles.  Its radius is 0, so the diamond the sweep opens under is
+   mode 2 and the mode the sweep itself runs in is 6. */
+#define AI_BEAM_TILES 5
+#define AI_LINE_USE_DISTANCE (0x10 + AI_BEAM_TILES)
+#define AI_LINE_RADIUS 0
+
+/* The authored target side both records carry: the player-facing 0 that the
+   enemy phase inverts. */
+#define AI_SIDE_BYTE_PLAYER 0
+
+/* The row everything stands on, and who stands where.  The actor is on the
+   enemy side, so on the enemy phase the beam keeps side 0 -- the unit at
+   AI_ENEMY_TARGET_X -- and on the NPC phase it keeps every non-zero side --
+   the unit at AI_PLAYER_TARGET_X, one tile further out.  Which of the two the
+   beam picked is read back off the cursor, because the last thing the line arm
+   does is walk the cursor onto targets[0]. */
+#define AI_ROW_Y 1
+#define AI_ACTOR_X 1
+#define AI_ENEMY_TARGET_X 3
+#define AI_PLAYER_TARGET_X 4
+#define AI_WEST_TARGET_X 0
+
+/* The tile the search is claimed to have picked: one tile east of the actor,
+   which is a direction and not a distance -- the collector walks AI_BEAM_TILES
+   tiles that way whatever the aim tile's own distance is (aitarget.h). */
+#define AI_AIM_EAST_X 2
+
+/* Where the north beam's target stands, for the case that clamps the swept-to
+   y at 0. */
+#define AI_NORTH_TARGET_X 1
+#define AI_NORTH_TARGET_Y 0
+
+/* The aim tile of the area case, far enough from the actor that the walk to it
+   is more than one tile on the dominant axis. */
+#define AI_AREA_AIM_X 4
+
+/* Where the beam's far end lands: the actor's own tile plus the beam's length
+   times the step toward the aim tile, so 1 + 5 * (2 - 1).  Six is PAST the
+   staged map's own width of five and is left alone, because the clamp's bounds
+   come from the .MPL magic and not from the map -- a clamp against the real
+   width would have cut it to four. */
+#define AI_SWEEP_X (AI_ACTOR_X + AI_BEAM_TILES * (AI_AIM_EAST_X - AI_ACTOR_X))
+
+/* What the two bogus bounds actually are: the signed words the magic bytes
+   'M' 'P' and 'L' '\0' spell. */
+#define AI_MPL_BOUND_X 0x504d
+#define AI_MPL_BOUND_Y 0x004c
+
+/* MOV dword ptr [0x0006015c],0x14 on the line arm, and a phase the area arm
+   must leave exactly as it found it.  Nothing advances the ramp in these runs
+   because the fixture leaves data_fdps_scene_layer_count at 0 and the advance
+   lives in the per-layer draw (src/mapdraw.c), so both values are readable
+   after the run.  The sentinel is a phase the ramp modulo accepts, so a run
+   that did draw a layer would still not corrupt anything. */
+#define AI_TRAIL_PHASE 0x14
+#define AI_BLEND_SENTINEL 55
+
+/* fdps_unit_face_target's code for +x (unit.h), which is where every beam in
+   these cases but the two clamp ones points. */
+#define AI_FACING_RIGHT 3
+
+/* aa_stage's whole battle environment and as_stage's presentation kit, plus
+   the two item records, the bag entries holding them and the decision the item
+   search is claimed to have published.  bag_slot is which of the two entries
+   that decision names. */
+static void ai_stage(int bag_slot)
+{
+    as_stage(AS_SPELL_MAP, AS_SIDE_BYTE_PLAYER);
+
+    aa_tilemap[0] = 'M';
+    aa_tilemap[1] = 'P';
+    aa_tilemap[2] = 'L';
+    aa_tilemap[3] = 0;
+
+    aa_item(AI_AREA_ITEM)->use_effect = AI_DEAD_USE_EFFECT;
+    aa_item(AI_AREA_ITEM)->use_distance = AI_AREA_USE_DISTANCE;
+    aa_item(AI_AREA_ITEM)->use_target = AI_SIDE_BYTE_PLAYER;
+    aa_item(AI_AREA_ITEM)->use_radius = AI_AREA_RADIUS;
+
+    aa_item(AI_LINE_ITEM)->use_effect = AI_DEAD_USE_EFFECT;
+    aa_item(AI_LINE_ITEM)->use_distance = AI_LINE_USE_DISTANCE;
+    aa_item(AI_LINE_ITEM)->use_target = AI_SIDE_BYTE_PLAYER;
+    aa_item(AI_LINE_ITEM)->use_radius = AI_LINE_RADIUS;
+
+    aa_place(AA_ACTOR, AI_ACTOR_X, AI_ROW_Y, AA_ENEMY_SIDE,
+             AA_FIRST_ENEMY_PORTRAIT, AA_ACTOR_LEVEL);
+    aa_place(AA_BYSTANDER, AI_ENEMY_TARGET_X, AI_ROW_Y, AA_ENEMY_SIDE,
+             AA_TARGET_PORTRAIT, AA_LEVEL_CAP);
+    aa_place(AA_TARGET, AI_PLAYER_TARGET_X, AI_ROW_Y, AA_PLAYER_SIDE,
+             AA_TARGET_PORTRAIT, AA_LEVEL_CAP);
+    aa_place(AS_ALLY, AI_WEST_TARGET_X, AI_ROW_Y, AA_ENEMY_SIDE,
+             AA_TARGET_PORTRAIT, AA_LEVEL_CAP);
+
+    /* aa_place leaves entry 0 holding the equipped weapon, so neither of these
+       overwrites it. */
+    aa_units[AA_ACTOR].inventory_slots[AI_AREA_SLOT * 2 + 1] =
+        (unsigned char) AI_AREA_ITEM;
+    aa_units[AA_ACTOR].inventory_slots[AI_LINE_SLOT * 2 + 1] =
+        (unsigned char) AI_LINE_ITEM;
+
+    data_fdps_map_ai_best_item_bag_slot = bag_slot;
+    data_fdps_map_ai_best_item_target_x = AI_AIM_EAST_X;
+    data_fdps_battle_ai_best_item_target_y = AI_ROW_Y;
+
+    data_fdps_map_cursor_draw_mode = AA_DRAW_MODE_SENTINEL;
+    data_fdps_marked_tile_blend_phase = AI_BLEND_SENTINEL;
+    data_fdps_battle_pending_xp_credit = AS_STALE_CREDIT;
+}
+
+/* One whole item use, played in mode 13h with the tick moving under it. */
+static int ai_run(int side_select)
+{
+    int used;
+
+    aa_set_mode(AA_MODE_320X200X256);
+    aa_saved_timer = _dos_getvect(AA_TIMER_VECTOR);
+    _dos_setvect(AA_TIMER_VECTOR, aa_timer_isr);
+
+    used = fdps_map_actor_use_item(AA_ACTOR, side_select);
+
+    _dos_setvect(AA_TIMER_VECTOR, aa_saved_timer);
+    aa_set_mode(AA_MODE_TEXT);
+    return used;
+}
+
+/* Every offset this action reads a record at.  The bag entry's id byte is
+   0x0b + 2 * slot, which is inventory_slots[2 * slot + 1] only while that
+   array starts at 0x0a. */
+static void ai_the_record_layouts_this_action_reads(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, inventory_slots), 0x0a);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, use_effect), 0x0d);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, use_distance), 0x10);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, use_target), 0x11);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, use_radius), 0x12);
+}
+
+/* An area item -- use_distance below 0x10 -- collects with the range collector
+   around the tile the search named, walks the cursor there carrying the
+   radius-plus-two diamond and stops.  The two search coordinates are left
+   exactly as the search wrote them, the highlight ramp is not touched at all,
+   the diamond is still up when the routine returns, and the movement grid is
+   back at its sentinel because the reset is made after the collect.  The
+   answer is 0, which is the answer on every path. */
+static void ai_an_area_item_leaves_the_diamond_on_the_aim_tile(void)
+{
+    int used;
+
+    ai_stage(AI_AREA_SLOT);
+    data_fdps_map_ai_best_item_target_x = AI_AREA_AIM_X;
+    used = ai_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ(used, 0);
+    CHECK_EQ(data_fdps_map_cursor_world_x, AI_AREA_AIM_X * AA_TILE_PX);
+    CHECK_EQ(data_fdps_map_cursor_world_y, AI_ROW_Y * AA_TILE_PX);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AI_AREA_MODE);
+    CHECK_EQ(data_fdps_map_ai_best_item_target_x, AI_AREA_AIM_X);
+    CHECK_EQ(data_fdps_battle_ai_best_item_target_y, AI_ROW_Y);
+    CHECK_EQ(data_fdps_marked_tile_blend_phase, AI_BLEND_SENTINEL);
+    CHECK_EQ(as_untouched_grid_cells(), AA_CELLS);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 0);
+    as_unstage();
+}
+
+/* A line item -- use_distance from 0x10 up -- collects along the beam instead,
+   turns the actor to face the first unit it found, sweeps the cursor out to
+   the beam's far end and then brings it back onto that unit.  The far end is
+   the actor's tile plus the beam's length times the step toward the aim tile,
+   which is one tile PAST the staged map's own width and is left there; the
+   ramp is put back to its fixed phase; the overlay is cleared to 0 rather than
+   left on the diamond; and the grid is back at its sentinel, wiped a second
+   time after the mode-6 sweep marked every cell the cursor crossed. */
+static void ai_a_line_item_sweeps_the_beam_and_returns_to_the_first_target(void)
+{
+    int used;
+
+    ai_stage(AI_LINE_SLOT);
+    used = ai_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ(used, 0);
+    CHECK_EQ(data_fdps_map_ai_best_item_target_x, AI_SWEEP_X);
+    CHECK_EQ(data_fdps_battle_ai_best_item_target_y, AI_ROW_Y);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 0);
+    CHECK_EQ(data_fdps_marked_tile_blend_phase, AI_TRAIL_PHASE);
+    CHECK_EQ(data_fdps_map_cursor_world_x, AI_ENEMY_TARGET_X * AA_TILE_PX);
+    CHECK_EQ(data_fdps_map_cursor_world_y, AI_ROW_Y * AA_TILE_PX);
+    CHECK_EQ((int) aa_units[AA_ACTOR].facing, AI_FACING_RIGHT);
+    CHECK_EQ(as_untouched_grid_cells(), AA_CELLS);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 0);
+    as_unstage();
+}
+
+/* The bag slot the search published names the entry at record +0xb + 2 * slot.
+   Entry 2 holds the area record and entry 3 the line record, and the two arms
+   are told apart by what they leave behind: the area arm leaves the diamond up
+   and never touches the ramp, the line arm clears the overlay and parks the
+   ramp on its fixed phase.  A body that read the entry without the doubling,
+   or read the first byte of the pair instead of the second, would find neither
+   record. */
+static void ai_the_bag_slot_names_the_entry_two_bytes_apart(void)
+{
+    ai_stage(AI_AREA_SLOT);
+    ai_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, AI_AREA_MODE);
+    CHECK_EQ(data_fdps_marked_tile_blend_phase, AI_BLEND_SENTINEL);
+
+    ai_stage(AI_LINE_SLOT);
+    ai_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 0);
+    CHECK_EQ(data_fdps_marked_tile_blend_phase, AI_TRAIL_PHASE);
+    as_unstage();
+}
+
+/* The enemy phase inverts the record's authored target side and the NPC phase
+   hands it through.  With an authored 0 the enemy-side actor's beam keeps side
+   0 and stops on the enemy standing three tiles east; the NPC phase turns the
+   same record into the filter that keeps every non-zero side, so the beam runs
+   past that unit and stops on the player one behind it.  Where the beam
+   stopped is where the cursor is left, because targets[0] is what the line arm
+   walks back to.  A body that handed the byte through on both arms would have
+   aimed the enemy phase at the player's ranks. */
+static void ai_the_enemy_phase_inverts_the_authored_target_side(void)
+{
+    ai_stage(AI_LINE_SLOT);
+    ai_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, AI_ENEMY_TARGET_X * AA_TILE_PX);
+
+    ai_stage(AI_LINE_SLOT);
+    ai_run(AS_NPC_PHASE);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, AI_PLAYER_TARGET_X * AA_TILE_PX);
+    as_unstage();
+}
+
+/* The two lower clamps are the only ones that ever fire, and they fire at 0.
+   A beam aimed west from the actor's tile extrapolates to -4 and comes back 0;
+   one aimed north extrapolates the y to -4 and comes back 0 while the x, whose
+   difference is zero, stays on the actor's own column.  The upper arm is what
+   the case above shows never firing: it would have to reach 0x504d in x or
+   0x004c in y, which is what the .MPL magic reads as. */
+static void ai_the_sweep_is_clamped_at_zero(void)
+{
+    ai_stage(AI_LINE_SLOT);
+    data_fdps_map_ai_best_item_target_x = AI_WEST_TARGET_X;
+    ai_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ(data_fdps_map_ai_best_item_target_x, 0);
+    CHECK_EQ(data_fdps_battle_ai_best_item_target_y, AI_ROW_Y);
+    CHECK_EQ(data_fdps_map_cursor_world_x, AI_WEST_TARGET_X * AA_TILE_PX);
+    CHECK_EQ(data_fdps_map_cursor_world_y, AI_ROW_Y * AA_TILE_PX);
+
+    ai_stage(AI_LINE_SLOT);
+    aa_place(AS_ALLY, AI_NORTH_TARGET_X, AI_NORTH_TARGET_Y, AA_ENEMY_SIDE,
+             AA_TARGET_PORTRAIT, AA_LEVEL_CAP);
+    data_fdps_map_ai_best_item_target_x = AI_ACTOR_X;
+    data_fdps_battle_ai_best_item_target_y = AI_NORTH_TARGET_Y;
+    ai_run(AS_ENEMY_PHASE);
+
+    CHECK_EQ(data_fdps_battle_ai_best_item_target_y, 0);
+    CHECK_EQ(data_fdps_map_ai_best_item_target_x, AI_ACTOR_X);
+    CHECK_EQ(data_fdps_map_cursor_world_x, AI_NORTH_TARGET_X * AA_TILE_PX);
+    CHECK_EQ(data_fdps_map_cursor_world_y, AI_NORTH_TARGET_Y * AA_TILE_PX);
+    as_unstage();
+}
+
+/* What the clamp's two bounds are, read the way the action reads them: the
+   signed words at +0 and +2 of layer 0's blob.  They are the .MPL magic and
+   not the map, which is 5 by 5 in this fixture and 0x504d by 0x004c as far as
+   the clamp is concerned. */
+static void ai_the_clamp_bounds_come_from_the_magic(void)
+{
+    ai_stage(AI_LINE_SLOT);
+
+    CHECK_EQ((int) *(short *) data_fdps_scene_layer_tile_map_ptrs[0],
+             AI_MPL_BOUND_X);
+    CHECK_EQ((int) *(short *) (data_fdps_scene_layer_tile_map_ptrs[0] + 2),
+             AI_MPL_BOUND_Y);
+    CHECK_EQ((int) *(short *) (data_fdps_battle_move_grid_ptr), AA_MAP_W);
+    CHECK_EQ((int) *(short *) (data_fdps_battle_move_grid_ptr + 2), AA_MAP_H);
+    as_unstage();
+}
+
 void run_aiact_tests(void)
 {
     RUN_TEST(aa_the_record_layouts_this_action_reads);
@@ -1258,4 +1594,12 @@ void run_aiact_tests(void)
     RUN_TEST(as_the_npc_phase_uses_the_authored_side);
     RUN_TEST(as_the_blast_is_centred_on_the_tile_the_search_named);
     RUN_TEST(as_the_animation_flag_is_an_equality_with_one);
+
+    RUN_TEST(ai_the_record_layouts_this_action_reads);
+    RUN_TEST(ai_an_area_item_leaves_the_diamond_on_the_aim_tile);
+    RUN_TEST(ai_a_line_item_sweeps_the_beam_and_returns_to_the_first_target);
+    RUN_TEST(ai_the_bag_slot_names_the_entry_two_bytes_apart);
+    RUN_TEST(ai_the_enemy_phase_inverts_the_authored_target_side);
+    RUN_TEST(ai_the_sweep_is_clamped_at_zero);
+    RUN_TEST(ai_the_clamp_bounds_come_from_the_magic);
 }

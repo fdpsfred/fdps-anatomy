@@ -3344,6 +3344,14 @@
       "status": "committed",
       "emitted_against": "0xb5b",
       "rounds": 0
+    },
+    "00027180": {
+      "name": "fdps_map_actor_use_item",
+      "target": "aiact.c",
+      "body_size": "0x35f",
+      "status": "committed",
+      "rounds": 2,
+      "emitted_against": "0x35f"
     }
   }
 }

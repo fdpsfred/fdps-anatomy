@@ -114,7 +114,75 @@ extern int fdps_map_actor_cast_chosen_spell(int unit_index, int side_select);
 /* 00027180.  Uses the actor's bag entry data_fdps_map_ai_best_item_bag_slot
    names on the tile data_fdps_map_ai_best_item_target_x /
    data_fdps_battle_ai_best_item_target_y name (gamedata.h), which is the use
-   fdps_map_actor_score_best_item last scored.  Not emitted yet. */
+   fdps_map_actor_score_best_item (aiscore.h) last scored.  Answers 0 on every
+   path; both callers discard it.
+
+   Nothing about the use is an argument.  The bag slot and the tile come out of
+   that search's globals, and the item id out of the acting unit's own record
+   at +0x0b + 2 * slot.
+
+   THERE IS NO SCORE GATE HERE.  Unlike the cast above, this one carries the
+   decision out whatever the search scored; both callers have already applied
+   the threshold.
+
+   THE ITEM'S SHAPE IS ITS use_distance BYTE AT +0x10.  Below 0x10 the item
+   covers an area: the targets come from fdps_collect_targets_in_range
+   (aitarget.h) with the use_radius byte at +0x12 as the reach and a min_dist
+   of 0, and the presentation is the cursor walked to the aim tile carrying the
+   radius-plus-two blast diamond.  From 0x10 up it covers a straight line: the
+   targets come from fdps_collect_targets_in_line with the low nibble as the
+   length and the actor's own tile as the origin, and the presentation is the
+   whole beam -- the actor turned to face the first unit found, a white flash
+   ramped back to the normal palette, the cursor swept out to the beam's far
+   end in the overlay mode that leaves a highlight trail behind it, eight
+   frames holding that trail, and the cursor brought back onto that first unit.
+
+   WHAT THE SHIPPED TABLE ACTUALLY ASKS FOR.  Over the 251 records of ITEM.DAT
+   (MISC.VFS member 91) use_radius is only ever 0, 1 or 2, so the blast diamond
+   this action sets is only ever mode 2, 3 or 4 -- no real item reaches the
+   mode 6 that clears grid markers, which is why the area arm's leaving the
+   overlay up costs the grid nothing.  Three records take the line arm: 0x63
+   and 0xc7 (use_distance 0x1e, a 14-tile beam) and 0xbe (0x16, six tiles), all
+   three with use_target 5 and use_radius 0.  The other 248 cover an area.
+
+   WHICH SIDE IS AIMED AT DEPENDS ON THE PHASE, exactly as it does for the
+   cast.  side_select 0 -- the enemy phase, from fdps_battle_enemy_turn_phase
+   -- turns the item's authored use_target byte at +0x11 into the filter
+   `use_target == 0`, and side_select 1 -- the NPC phase, from
+   fdps_battle_npc_turn_phase -- passes the byte through.  That is what lets a
+   single authored healing item serve an enemy actor and a guest NPC alike.
+
+   THE SWEPT-TO TILE IS CLAMPED AGAINST THE .MPL MAGIC AND NOT AGAINST THE MAP.
+   The bounds are the signed words at +0 and +2 of layer 0's blob, which on a
+   real .MPL are the first four bytes of its magic: 0x504d and 0x004c whatever
+   map is loaded.  On x that bound of 20557 is out of reach, since the longest
+   beam in the shipped table is 14 tiles and no shipped .MPL is larger than 64
+   by 64, so only the clamp to 0 fires there; the y bound of 76 is reachable,
+   from six rows of aim difference up, and pins the sweep at row 75.  Either
+   way a beam aimed off the right or bottom edge sweeps the cursor past the
+   map, marking cells of the following row.  It is the original's behaviour,
+   and clamping against the real extents would not reproduce it
+   (rebuild_info/pitfalls.md).
+
+   THE SEARCH'S TWO COORDINATES ARE OVERWRITTEN ON THE LINE ARM.  They come out
+   holding the beam's far end rather than the tile the search chose, so a
+   caller that reads them after this returns is reading the sweep and not the
+   decision.  The area arm leaves both alone.
+
+   THE CURSOR OVERLAY IS LEFT UP ON THE AREA ARM.  That path ends with the
+   blast diamond still set, and only one of the two callers takes it back down:
+   fdps_map_actor_take_best_action clears it on its own shared exit, while
+   fdps_map_actor_behavior_step does not -- the diamond survives its return and
+   is cleared by whichever action runs next (fdps_map_actor_move_and_attack,
+   fdps_map_actor_move_toward_nearest_reachable_opponent, fdps_unit_rest) or,
+   failing all of those, by the phase loop itself.  The line arm ends at 0.
+
+   THE ACTOR IS CREDITED NO EXPERIENCE.  data_fdps_battle_pending_xp_credit is
+   zeroed at the end and paid to nobody, the same as the cast above.
+
+   unit_index is the acting unit's place in the map unit array: it is whose bag
+   the item comes out of, whose tile the beam starts from, and the actor the
+   effect is applied on behalf of. */
 extern int fdps_map_actor_use_item(int unit_index, int side_select);
 #pragma aux fdps_map_actor_use_item "*" parm caller [];
 

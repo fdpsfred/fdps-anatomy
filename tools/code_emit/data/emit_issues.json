@@ -2376,5 +2376,20 @@
       "status": "open",
       "same_as": "emit#1"
     }
+  ],
+  "00027180": [
+    {
+      "from": "emit",
+      "what": "The upper clamp on the swept-to y is never exercised by a test. The bound the original reads is 0x004c = 76, so reaching it needs an extrapolated y of 76 or more, and the mode-6 sweep out to such a tile computes its movement-grid cell as y * width + x -- which on the 5-by-5 grid the aiact fixture stages is far outside the 25-cell block and would corrupt the test file's own storage. The arm is not merely untested but live on a real map: with the shipped table's 14-tile beam the extrapolated y passes 76 as soon as the aim tile sits six or more rows below the actor, and the sweep is then pinned at row 75, well past any map (no shipped .MPL is taller than 64). The x side of the same clamp IS covered, and is dead in the other direction: the sweep reaches tile 6 on a 5-wide map and is left there, which is the same evidence that the bound is the magic and not the map. A further cost the reviewer noted and I agree with: fdps_map_cursor_move_to renders a frame per pixel step, so a sweep to row 75 is on the order of 1800 composed frames.",
+      "needs": "Either a fixture that stages a movement grid big enough for a y overshoot of 76 -- which means a map at least 76 rows tall and a matching terrain layer, so it is a fixture of its own rather than a case added to this one -- or a playtest on a real map with one of the three line items aimed six or more rows below the actor, watching whether the highlight trail wraps into the following rows.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Reached the same conclusion independently and add only this: the y upper clamp arm at 0002742f is the single arm of this function that no case drives, and I agree it is not reachable from a fixture of the size this file stages. What my pass adds is the measurement behind the claim -- the 68 .MPL headers in FIELD1.VFS top out at 64 by 64, so on a real map the extrapolated y with the shipped 14-tile beam passes 76 whenever the aim tile is about six or more rows from the actor, which makes this a live path in play and not merely an untested one. The x side of the same clamp is covered and is dead in the other direction, which is the same evidence.",
+      "needs": "A fixture staging a movement grid tall enough for a y overshoot past 76, or a playtest with item 0x63, 0xbe or 0xc7 aimed six or more rows from the actor, watching whether the highlight trail wraps into the rows below the map.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }

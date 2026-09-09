@@ -1098,16 +1098,19 @@ static void bs_the_behavior_is_the_low_nibble_of_byte_0x34(void)
    run per row is the encoding src/rle.c decodes, a command byte of len - 1
    followed by the pixel. */
 #define TBA_CEL_TABLE_AT 0x0f
-#define TBA_CURSOR_STREAM_AT 0x40
-#define TBA_CURSOR_BYTES (TBA_CURSOR_STREAM_AT + TBA_TILE_PX * 2)
 #define TBA_CURSOR_COLOR 0x21
 
-/* The spell arm sets the cursor overlay to the spell record's reach plus 2, so
-   a reach of 0 asks for sprite 1 where the attack arm only ever asks for
-   sprite 0.  Every entry the table has room for before the stream is filled
-   in; an entry left at zero aims the decoder at the sheet's own header and
-   reads a kilobyte past the block. */
-#define TBA_CURSOR_ENTRIES 12
+/* The spell arm sets the cursor overlay to the spell record's reach plus 2 and
+   the item arm to the item's use_radius plus 2, so a reach of 0 asks for
+   sprite 1 and a radius of 1 asks for the radius-1 diamond's five sprites --
+   2, 3, 4, 5 and 0x0e -- where the attack arm only ever asks for sprite 0.
+   The item arm holds its diamond up across the whole effect presentation, so
+   every index the three diamond modes can reach has to be staged: an entry
+   left at zero aims the decoder at the sheet's own header and reads a
+   kilobyte past the block. */
+#define TBA_CURSOR_ENTRIES 0x12
+#define TBA_CURSOR_STREAM_AT (TBA_CEL_TABLE_AT + TBA_CURSOR_ENTRIES * 4)
+#define TBA_CURSOR_BYTES (TBA_CURSOR_STREAM_AT + TBA_TILE_PX * 2)
 
 /* Number.cel, the sheet the popups queued during a spell cast are blitted
    from: the MISS word when the roll refuses, one digit a cell when it lands.
@@ -1121,6 +1124,20 @@ static void bs_the_behavior_is_the_low_nibble_of_byte_0x34(void)
 #define TBA_GLYPH_STREAM_AT (TBA_CEL_TABLE_AT + TBA_GLYPH_ENTRIES * 4)
 #define TBA_GLYPH_BYTES (TBA_GLYPH_STREAM_AT + TBA_GLYPH_ROWS * 2)
 #define TBA_GLYPH_COLOR 0x23
+
+/* One cache slot of map unit sprites: twelve stream offsets at the BASE of the
+   block, which is the one sheet whose table does not start at 0x0f
+   (src/mapdraw.c).  The item arm's effect presentation washes every unit it
+   touched through fdps_flash_units_in_color, which blits each of them with
+   fdps_blit_unit_sprite -- and that routine reads this block for any unit
+   inside the view window without looking at the portrait id that keeps a
+   composed frame off it (src/sprite.c).  So a fixture whose units stand on
+   screen has to stage it, where tests/item.c's own cases avoid it by parking
+   every target far outside the window. */
+#define TBA_SPRITE_CACHE_ENTRIES 12
+#define TBA_SPRITE_TABLE_BYTES (TBA_SPRITE_CACHE_ENTRIES * 4)
+#define TBA_SPRITE_CACHE_BYTES (TBA_SPRITE_TABLE_BYTES + TBA_TILE_PX * 2)
+#define TBA_SPRITE_COLOR 0x24
 
 /* The unit gauge sheet: three 43 by 6 graphics 0x102 bytes apart. */
 #define TBA_GAUGE_GRAPHIC_STRIDE 0x102
@@ -1156,6 +1173,7 @@ static unsigned char tba_event[EVENT_CELLS_AT + TBA_CELLS];
 static unsigned char tba_grid[4 + TBA_CELLS * 2];
 static unsigned char tba_classes[TBA_CLASSES * TBA_CLASS_STRIDE];
 static unsigned char tba_cursor_kit[TBA_CURSOR_BYTES];
+static unsigned char tba_sprite_cache[TBA_SPRITE_CACHE_BYTES];
 static unsigned char tba_glyphs[TBA_GLYPH_BYTES];
 static unsigned char tba_gauge_sheet[TBA_GAUGE_BYTES];
 static unsigned char tba_vfs[TBA_VFS_BYTES];
@@ -1223,6 +1241,18 @@ static void tba_stage_sheets(void)
         tba_glyphs[TBA_GLYPH_STREAM_AT + row * 2] =
             (unsigned char) (TBA_GLYPH_W - 1);
         tba_glyphs[TBA_GLYPH_STREAM_AT + row * 2 + 1] = TBA_GLYPH_COLOR;
+    }
+
+    tba_zero(tba_sprite_cache, (int) sizeof(tba_sprite_cache));
+    for (entry = 0; entry < TBA_SPRITE_CACHE_ENTRIES; entry++) {
+        tba_u32(tba_sprite_cache, entry * 4,
+                (unsigned long) TBA_SPRITE_TABLE_BYTES);
+    }
+    for (row = 0; row < TBA_TILE_PX; row++) {
+        tba_sprite_cache[TBA_SPRITE_TABLE_BYTES + row * 2] =
+            (unsigned char) (TBA_TILE_PX - 1);
+        tba_sprite_cache[TBA_SPRITE_TABLE_BYTES + row * 2 + 1] =
+            TBA_SPRITE_COLOR;
     }
 
     for (offset = 0; offset < TBA_GAUGE_GRAPHIC_STRIDE; offset++) {
@@ -1353,6 +1383,8 @@ static void tba_stage(void)
     data_fdps_ui_battle_animation_enabled = 0;
     tba_stage_sheets();
     data_fdps_cursor_highlight_sprite_sheet_ptr = tba_cursor_kit;
+    data_fdps_cel_sprite_cache_ptr = tba_sprite_cache;
+    data_fdps_map_unit_walk_anim_counter = 0;
     data_fdps_number_glyph_sheet_ptr = tba_glyphs;
     data_fdps_number_glyph_color_row = 0;
     data_fdps_unit_gauge_sheet_ptr = tba_gauge_sheet;
