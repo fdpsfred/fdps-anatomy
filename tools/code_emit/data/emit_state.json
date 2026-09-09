@@ -3360,6 +3360,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x167"
+    },
+    "000374e0": {
+      "name": "fdps_chapter_08_event_villagers_leave_cells",
+      "target": "chevt2.c",
+      "body_size": "0x117",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x117"
     }
   }
 }

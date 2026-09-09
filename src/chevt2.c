@@ -320,13 +320,165 @@ void fdps_chapter_08_event_send_guest_mage_to_cells(int unit_index)
                    MESSAGE_FG_COLOR, MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
 }
 
-/* The inclusive range of unit indices chapter 8's villager-escape handler
-   acts for, the two literals of CMP dword ptr [EBP+0x14],0xf / JL at 00037613
-   and CMP dword ptr [EBP+0x14],0x12 / JLE at 00037619.  Both compares are
-   signed, so a negative index falls out at the first of them.  These are the
-   four captives map07.dat deploys: the guide's LV12村民x2 and LV12村婦x2. */
+/* The inclusive range of unit indices chapter 8's four captives occupy, which
+   both of the handlers below carry as a literal pair: the cell-door one as the
+   bounds of its first inline range walk, MOV dword ptr [EBP-0x1c],0xf at
+   00037530 and MOV dword ptr [EBP-0x18],0x12 at 00037537, and the
+   villager-escape one as the range test its whole body sits inside, CMP dword
+   ptr [EBP+0x14],0xf / JL at 00037613 and CMP dword ptr [EBP+0x14],0x12 / JLE
+   at 00037619.  Both of the escape handler's compares are signed, so a
+   negative index falls out at the first of them.  These are the four captives
+   map07.dat deploys: the guide's LV12村民x2 and LV12村婦x2. */
 #define CH08_FIRST_VILLAGER_UNIT_INDEX 0x0f
 #define CH08_LAST_VILLAGER_UNIT_INDEX 0x12
+
+/* The slot of data_fdps_map_cell_event_triggered_flags (gamedata.h) the
+   cell-door handler latches: byte ptr [0x000640e8], element 0x10 of the
+   32-entry array based at 0x000640d8.  No map cell can carry event code 0x10 --
+   the shipped M%02d.DTL event planes only use 0 to 15 -- so the one-shot
+   handlers of every chapter use that element as private storage, which is safe
+   because one chapter is loaded at a time and fdps_chapter_state_reset clears
+   the whole array on chapter entry.  Being inside the array is also what makes
+   the latch survive a save, because the save image carries all 0x20 bytes. */
+#define CHAPTER_EVENT_ONE_SHOT_SLOT 0x10
+
+/* The cut-scene that opens the cell door: the pointer pushed at 00037507,
+   which is the string at 0x00062010.  It is a member of IconAni.vfs like the
+   two the turn handler names, and it is the script that brings the chapter's
+   reinforcements on -- nothing in this handler's own body deploys anything. */
+#define CH08_CELL_DOOR_SCRIPT "Icon7-3.dat"
+
+/* The destination tile written into the guest mage's own record before the two
+   range walks, MOV byte ptr [EAX+0x35],0x15 at 00037525 and MOV byte ptr
+   [EAX+0x36],0x4 at 0003752c: tile (21, 4).  It is written and then left
+   unused, because the walk that follows puts the same unit into behaviour mode
+   0, and only modes 4 and 7 read ai_dest_x / ai_dest_y. */
+#define CH08_CELL_DOOR_MAGE_DEST_X 0x15
+#define CH08_CELL_DOOR_MAGE_DEST_Y 4
+
+/* The behaviour code the second merge ORs in: the constant parked at
+   [EBP-0x30] at 0003759e and copied on into [EBP-0x3c] at 000375b4, which is
+   the slot MOV DH,byte ptr [EBP-0x3c] at 000375e6 reads.  Mode 0 is
+   fdps_map_actor_behavior_step's default chain, which paths a unit toward the
+   nearest opposing unit, so clearing the nibble to it hands the guest mage
+   back to ordinary map AI. */
+#define AI_BEHAVIOR_MODE_ADVANCE 0
+
+/* 000374e0.  Chapter 8's cell-door event: the first unit to finish a step onto
+   either cell-door tile plays the scene that opens the door and starts the
+   four captive villagers walking out, and hands the guest mage who normally
+   opens it back to ordinary map AI.
+
+   THE LATCH IS THE SHARED ONE-SHOT SLOT AND IT GUARDS EVERYTHING.  CMP byte
+   ptr [0x000640e8],0x0 / JNZ straight to the epilogue at 000374f3..000374fa,
+   then MOV byte ptr [0x000640e8],0x1 at 00037500.  The test is against 0 and
+   not against 1, so any non-zero value in the slot blocks the body, and the
+   latch is raised before the script runs rather than after the walks, so the
+   door cannot open twice even for a handler re-entered from inside the
+   interpreter.
+
+   BOTH RANGE WALKS ARE INLINE EXPANSIONS, NOT CALLS.  Each carries the
+   fingerprint the chapter 2, 5 and 7 handlers in chevt1.c and the two handlers
+   above carry -- fdps_object_set_field34_low_nibble_range (00036b60) with a
+   constant argument triple, (0xf, 0x12, 4) at 00037530..0003758e and
+   (0x13, 0x13, 0) at 00037590..000375ee: the three constants are parked in one
+   set of slots, copied into a second set, and only then is the counter seeded
+   from the first of them.  There is no CALL to that helper anywhere in the
+   body; the only calls are the script run at 0003750d and fdps_get_unit_record
+   at 00037517, 0003756f and 000375cf.  Writing either range as a call to the
+   helper would put a CALL in the rebuild that the original does not make, and
+   it is also why the second range is written with a first and a last bound
+   even though both hold 0x13.
+
+   Both compares -- CMP EAX,dword ptr [EBP-0xc] / JLE at 00037560 and CMP
+   EAX,dword ptr [EBP-0x38] / JLE at 000375c0 -- are signed and inclusive, so
+   the first walk touches 0xf, 0x10, 0x11 and 0x12 and the second touches
+   0x13 exactly once.
+
+   THE DESTINATION AND THE MODE THAT FOLLOWS IT DO NOT GO TOGETHER, AND THAT IS
+   NOT A BUG TO FIX.  The tile (21, 4) is written into unit 0x13's record and
+   then the second walk clears that unit's behaviour nibble to 0, which is the
+   one mode that ignores the destination; writing mode 4 instead so the mage
+   walks to the tile just given him would send him off to the cage rather than
+   leave him fighting where the original leaves him.  The four villagers are
+   the ones put into mode 4, and the tile each of them walks to is the
+   (0x15, 0x05) their own deployment records already hold -- this body writes
+   no destination for them.
+
+   BOTH MERGES KEEP THE HIGH NIBBLE.  MOV DL,[EAX+0x34] / AND DL,0xf0 / MOV
+   DH,[EBP-0x10] / OR DH,DL / MOV [EAX+0x34],DH at 0003757d..0003758b and the
+   same shape at 000375dd..000375eb, so only the behaviour code moves and the
+   0x40 and 0x80 flag bits fdps_map_actor_take_best_action and
+   fdps_score_targets_for_item read on their own are carried across.  Assigning
+   the byte whole would drop them.
+
+   NOTHING IS RANGE CHECKED.  data_fdps_map_unit_count is not read anywhere in
+   the body, and neither is any liveness flag: a villager the player has
+   already lost is put into mode 4 like the rest, and the destination write at
+   00037525 lands whether or not unit 0x13 is on the map yet.
+
+   Every record pointer comes back in EAX from a CALL and is stored before it
+   is used -- to [EBP-0x4] at 0003751f for the destination write, to [EBP-0x8]
+   at 00037577 and to [EBP-0x44] at 000375d7 for the two merges -- and each
+   merge re-reads its own slot for the load and again for the store, so both
+   halves address the record that iteration fetched.  fdps_icon_script_run
+   returns nothing.  Nothing sets EAX between the last store and the RET at
+   000375f6 -- it is left holding the last record pointer -- and the handler
+   table's dispatchers do not read what comes back, so the result is void.
+
+   unit_index is the handler table's shared parameter.  MOV dword ptr
+   [EBP+0x14],0x0 at 000374ec writes zero over the incoming slot before the
+   latch is even tested and nothing ever reads it back, so which unit stepped
+   onto the tile cannot reach anything this handler does; the store has no
+   observable effect either, because the slot belongs to the caller's outgoing
+   argument area and the caller drops it with its own ADD ESP,0x4.
+
+   Table slot 12, the entry at 000601f4, and the only reference to this
+   function anywhere in the image.  M07.DTL marks the two cell-door tiles
+   (0x1f, 6) and (0x20, 6) with tile-event code 1, and map07.dat's tile-event
+   table gives code 1 the pair 0c 00 -- slot 12, occasion 0, a unit finishing a
+   step onto the tile.  (0x1f, 6) is where
+   fdps_chapter_08_event_send_guest_mage_to_cells walks the mage, so he
+   normally trips it himself; a player unit that stops there opens the door
+   instead. */
+void fdps_chapter_08_event_villagers_leave_cells(int unit_index)
+{
+    struct fdps_unit_record *guest_mage;
+    struct fdps_unit_record *re_aimed_unit;
+    int re_aimed_unit_index;
+
+    unit_index = 0;
+
+    if (data_fdps_map_cell_event_triggered_flags[
+            CHAPTER_EVENT_ONE_SHOT_SLOT] != 0) {
+        return;
+    }
+    data_fdps_map_cell_event_triggered_flags[CHAPTER_EVENT_ONE_SHOT_SLOT] = 1;
+
+    fdps_icon_script_run(CH08_CELL_DOOR_SCRIPT);
+
+    guest_mage = fdps_get_unit_record(CH08_GUEST_MAGE_UNIT_INDEX);
+    guest_mage->ai_dest_x = CH08_CELL_DOOR_MAGE_DEST_X;
+    guest_mage->ai_dest_y = CH08_CELL_DOOR_MAGE_DEST_Y;
+
+    for (re_aimed_unit_index = CH08_FIRST_VILLAGER_UNIT_INDEX;
+         re_aimed_unit_index <= CH08_LAST_VILLAGER_UNIT_INDEX;
+         re_aimed_unit_index++) {
+        re_aimed_unit = fdps_get_unit_record(re_aimed_unit_index);
+        re_aimed_unit->ai_behavior = (unsigned char)
+            ((re_aimed_unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+             AI_BEHAVIOR_MODE_WALK_TO_DEST);
+    }
+
+    for (re_aimed_unit_index = CH08_GUEST_MAGE_UNIT_INDEX;
+         re_aimed_unit_index <= CH08_GUEST_MAGE_UNIT_INDEX;
+         re_aimed_unit_index++) {
+        re_aimed_unit = fdps_get_unit_record(re_aimed_unit_index);
+        re_aimed_unit->ai_behavior = (unsigned char)
+            ((re_aimed_unit->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+             AI_BEHAVIOR_MODE_ADVANCE);
+    }
+}
 
 /* The element of data_fdps_map_cell_event_triggered_flags (gamedata.h) this
    chapter counts escapes in: byte ptr [0x000640e9], element 0x11 of the

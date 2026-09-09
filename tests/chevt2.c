@@ -1015,7 +1015,13 @@ static void ch08e_only_bit_zero_counts_as_out(void)
    lookup compares against after it has upper-cased the caller's string where
    it stands. */
 #define CH08T_ARCHIVE_FILE "IconAni.vfs"
-#define CH08T_FIXTURE_MEMBERS 2
+
+/* Three members: the two this handler names and the one the cell-door section
+   at the bottom of the file names.  They live in one container because the
+   interpreter holds the container's name as a literal, so a second fixture of
+   the same name would have to take this one's place rather than sit beside
+   it. */
+#define CH08T_FIXTURE_MEMBERS 3
 
 /* resource_info/vfs.md: 35-byte header, then one 26-byte entry per member,
    then the member bytes end to end with no gaps. */
@@ -1032,6 +1038,8 @@ static void ch08e_only_bit_zero_counts_as_out(void)
 #define CH08T_SCRIPT1_TILE_Y 13
 #define CH08T_SCRIPT2_TILE_X 17
 #define CH08T_SCRIPT2_TILE_Y 19
+#define CH08T_SCRIPT3_TILE_X 23
+#define CH08T_SCRIPT3_TILE_Y 7
 #define CH08T_TILE_PIXELS 24
 
 static unsigned char ch08t_script1[] = {
@@ -1041,16 +1049,23 @@ static unsigned char ch08t_script2[] = {
     0x0d, CH08T_SCRIPT2_TILE_X, CH08T_SCRIPT2_TILE_Y, 0x00
 };
 
+/* Icon7-3.dat, the member the cell-door handler names.  Its tile is unlike
+   both of the others, so the origin the run comes to rest on says which of the
+   three names reached the loader. */
+static unsigned char ch08t_script3[] = {
+    0x0d, CH08T_SCRIPT3_TILE_X, CH08T_SCRIPT3_TILE_Y, 0x00
+};
+
 static char *ch08t_member_names[CH08T_FIXTURE_MEMBERS] = {
-    "ICON7-1.DAT", "ICON7-2.DAT"
+    "ICON7-1.DAT", "ICON7-2.DAT", "ICON7-3.DAT"
 };
 
 static unsigned char *ch08t_member_bytes[CH08T_FIXTURE_MEMBERS] = {
-    ch08t_script1, ch08t_script2
+    ch08t_script1, ch08t_script2, ch08t_script3
 };
 
 static int ch08t_member_lengths[CH08T_FIXTURE_MEMBERS] = {
-    sizeof(ch08t_script1), sizeof(ch08t_script2)
+    sizeof(ch08t_script1), sizeof(ch08t_script2), sizeof(ch08t_script3)
 };
 
 /* 0 not tried yet, 1 staged by us, 2 unusable and every script case skips. */
@@ -1524,6 +1539,387 @@ static void ch08t_ignores_the_event_argument(void)
     }
 }
 
+/* Chapter 8's cell-door handler at 000374e0, from here down.
+ *
+ * It sits below the turn handler's section because it runs a cut-scene of its
+ * own and so needs that section's container fixture, which the member list up
+ * there carries a third entry for.  Everything else it needs is the same map
+ * fixture, staged with enough units for index 0x13 and two witnesses past it.
+ *
+ * Which script reached the loader is read back the way the turn cases read it:
+ * the fixture member named Icon7-3.dat scrolls the view to a tile no other
+ * member names, so the origin the run leaves behind is what says the emitted C
+ * asked for that member and not for one of the other two.  It is also what
+ * says the run happened at all, because the staging puts a draw mode down that
+ * the interpreter cannot leave behind.
+ *
+ * The rest is the two inline range walks and the destination write between
+ * them, all of it behind the one-shot latch: every case either clears the
+ * latch through the staging or puts it up on purpose.
+ */
+
+/* The four captives and the guest mage, the constants of the two range walks
+   at 00037530, 00037537, 00037590 and 00037597. */
+#define CH08D_FIRST_VILLAGER_INDEX 0x0f
+#define CH08D_LAST_VILLAGER_INDEX 0x12
+#define CH08D_MAGE_INDEX 0x13
+
+/* The two behaviour codes the merges OR in, off the constants at 0003753e and
+   0003759e. */
+#define CH08D_WALK_MODE 4
+#define CH08D_ADVANCE_MODE 0
+
+/* The destination written into the mage's record, MOV byte ptr [EAX+0x35],0x15
+   and MOV byte ptr [EAX+0x36],0x4 at 00037525 and 0003752c. */
+#define CH08D_MAGE_DEST_X 0x15
+#define CH08D_MAGE_DEST_Y 4
+
+/* Two records past the last one the handler writes, so an off-by-one at either
+   end of either range has somewhere visible to land. */
+#define CH08D_STAGED_UNITS 0x16
+
+/* The AI byte every staged record starts on: behaviour code 8, the mode
+   map07.dat deploys the four villagers in, under a high nibble the merges have
+   to carry across untouched. */
+#define CH08D_STAGED_AI_BEHAVIOR 0x58
+
+/* A destination no record should come out of the handler holding except the
+   mage's, so a write that reached the wrong record is visible. */
+#define CH08D_STAGED_DEST_X 0x5a
+#define CH08D_STAGED_DEST_Y 0xa5
+
+/* The shared one-shot latch slot this handler tests and raises. */
+#define CH08D_LATCH_SLOT 0x10
+
+/* The turn section's map fixture with twenty-two units on it, every one of
+   them carrying the same AI byte and the same sentinel destination, the latch
+   down (ch10_stage clears it) and the draw-mode sentinel up. */
+static void ch08d_stage(void)
+{
+    int i;
+
+    ch10_stage(CH08D_STAGED_UNITS);
+
+    for (i = 0; i < CH08D_STAGED_UNITS; i++) {
+        ch10_unit(i)->ai_behavior = (unsigned char) CH08D_STAGED_AI_BEHAVIOR;
+        ch10_unit(i)->ai_dest_x = (unsigned char) CH08D_STAGED_DEST_X;
+        ch10_unit(i)->ai_dest_y = (unsigned char) CH08D_STAGED_DEST_Y;
+        ch10_unit(i)->portrait_id = (unsigned char) CH08T_ARRIVAL_CHAR_ID;
+    }
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_map_cursor_draw_mode = CH08T_NO_SCRIPT_DRAW_MODE;
+}
+
+/* The whole body in one call: Icon7-3.dat runs, the latch goes up, the four
+   villagers go into mode 4, the mage goes into mode 0 and the mage alone gets
+   the destination tile.  The origin is the third fixture member's tile, so a
+   rebuild that named either of the other two scripts fails here. */
+static void ch08d_opens_the_door_and_re_aims_everyone(void)
+{
+    int i;
+
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    ch08d_stage();
+    fdps_chapter_08_event_villagers_leave_cells(0);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x,
+             CH08T_SCRIPT3_TILE_X * CH08T_TILE_PIXELS);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y,
+             CH08T_SCRIPT3_TILE_Y * CH08T_TILE_PIXELS);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH08D_LATCH_SLOT],
+             1);
+
+    for (i = CH08D_FIRST_VILLAGER_INDEX; i <= CH08D_LAST_VILLAGER_INDEX; i++) {
+        CHECK_EQ((int) ch10_unit(i)->ai_behavior,
+                 (CH08D_STAGED_AI_BEHAVIOR & 0xf0) | CH08D_WALK_MODE);
+    }
+    CHECK_EQ((int) ch10_unit(CH08D_MAGE_INDEX)->ai_behavior,
+             (CH08D_STAGED_AI_BEHAVIOR & 0xf0) | CH08D_ADVANCE_MODE);
+    CHECK_EQ((int) ch10_unit(CH08D_MAGE_INDEX)->ai_dest_x, CH08D_MAGE_DEST_X);
+    CHECK_EQ((int) ch10_unit(CH08D_MAGE_INDEX)->ai_dest_y, CH08D_MAGE_DEST_Y);
+}
+
+/* Five records move and every other one is left as it was.  Both compares are
+   signed and inclusive, so 0x0f and 0x12 are written rather than skipped and
+   the one-element second range runs once; 0x0e and 0x14 are the witnesses that
+   catch a bound read as exclusive or as a count. */
+static void ch08d_re_aims_exactly_the_five_units(void)
+{
+    int i;
+
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    ch08d_stage();
+    fdps_chapter_08_event_villagers_leave_cells(0);
+
+    for (i = 0; i < CH08D_STAGED_UNITS; i++) {
+        if (i >= CH08D_FIRST_VILLAGER_INDEX &&
+            i <= CH08D_LAST_VILLAGER_INDEX) {
+            CHECK_EQ((int) ch10_unit(i)->ai_behavior,
+                     (CH08D_STAGED_AI_BEHAVIOR & 0xf0) | CH08D_WALK_MODE);
+        } else if (i == CH08D_MAGE_INDEX) {
+            CHECK_EQ((int) ch10_unit(i)->ai_behavior,
+                     (CH08D_STAGED_AI_BEHAVIOR & 0xf0) | CH08D_ADVANCE_MODE);
+        } else {
+            CHECK_EQ((int) ch10_unit(i)->ai_behavior,
+                     CH08D_STAGED_AI_BEHAVIOR);
+        }
+    }
+}
+
+/* THE MAGE IS LEFT IN MODE 0 AND THE DESTINATION HE IS GIVEN IS INERT.  This
+   is the pairing the source must not "fix": the tile is written into his
+   record and then his behaviour nibble is cleared to 0, the one mode that does
+   not read that tile, so the C that writes mode 4 here -- which is what the
+   sequence invites -- would send him walking off to the cage.  The villagers
+   are the ones in mode 4, and this case pins both nibbles at once. */
+static void ch08d_the_mage_is_left_in_mode_zero(void)
+{
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    ch08d_stage();
+    fdps_chapter_08_event_villagers_leave_cells(0);
+
+    CHECK_EQ((int) (ch10_unit(CH08D_MAGE_INDEX)->ai_behavior & 0x0f),
+             CH08D_ADVANCE_MODE);
+    CHECK_EQ((int) (ch10_unit(CH08D_FIRST_VILLAGER_INDEX)->ai_behavior & 0x0f),
+             CH08D_WALK_MODE);
+    CHECK_EQ((int) (ch10_unit(CH08D_LAST_VILLAGER_INDEX)->ai_behavior & 0x0f),
+             CH08D_WALK_MODE);
+    CHECK_EQ((int) ch10_unit(CH08D_MAGE_INDEX)->ai_dest_x, CH08D_MAGE_DEST_X);
+    CHECK_EQ((int) ch10_unit(CH08D_MAGE_INDEX)->ai_dest_y, CH08D_MAGE_DEST_Y);
+}
+
+/* Only the mage's record is given a destination.  The four villagers walk to
+   the tile their own deployment records already hold, so a body that wrote one
+   into them -- the obvious way to make mode 4 mean something -- is caught by
+   the sentinel every other record keeps. */
+static void ch08d_only_the_mage_gets_a_destination(void)
+{
+    int i;
+
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    ch08d_stage();
+    fdps_chapter_08_event_villagers_leave_cells(0);
+
+    for (i = 0; i < CH08D_STAGED_UNITS; i++) {
+        if (i == CH08D_MAGE_INDEX) {
+            continue;
+        }
+        CHECK_EQ((int) ch10_unit(i)->ai_dest_x, CH08D_STAGED_DEST_X);
+        CHECK_EQ((int) ch10_unit(i)->ai_dest_y, CH08D_STAGED_DEST_Y);
+    }
+}
+
+/* Both merges keep the high nibble.  Each staged byte carries the two AI flag
+   bits in a different combination and comes back with them intact, the
+   villager's low nibble at 4 and the mage's at 0; a whole-byte assignment
+   would leave the same two values behind whatever was staged and drop the bits
+   fdps_map_actor_take_best_action and fdps_score_targets_for_item read on
+   their own. */
+static void ch08d_both_merges_keep_the_high_nibble(void)
+{
+    static int staged[5] = {0x42, 0x82, 0xc2, 0xff, 0x04};
+    int i;
+
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    for (i = 0; i < 5; i++) {
+        ch08d_stage();
+        ch10_unit(CH08D_FIRST_VILLAGER_INDEX)->ai_behavior =
+            (unsigned char) staged[i];
+        ch10_unit(CH08D_MAGE_INDEX)->ai_behavior = (unsigned char) staged[i];
+        fdps_chapter_08_event_villagers_leave_cells(0);
+
+        CHECK_EQ((int) ch10_unit(CH08D_FIRST_VILLAGER_INDEX)->ai_behavior,
+                 (staged[i] & 0xf0) | CH08D_WALK_MODE);
+        CHECK_EQ((int) ch10_unit(CH08D_MAGE_INDEX)->ai_behavior,
+                 (staged[i] & 0xf0) | CH08D_ADVANCE_MODE);
+    }
+}
+
+/* The merges write the byte at offset 0x34 and nothing next to it, and the
+   destination write reaches 0x35 and 0x36 of the mage's record only.  The
+   bytes either side are stamped first so a store addressing 0x33 or 0x37 --
+   the death-script operand's high byte and the AP base's low one -- is caught
+   even though what it wrote there would look like a plausible value. */
+static void ch08d_touches_no_neighbouring_byte(void)
+{
+    unsigned char *mage;
+    unsigned char *villager;
+
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    ch08d_stage();
+    mage = (unsigned char *) ch10_unit(CH08D_MAGE_INDEX);
+    villager = (unsigned char *) ch10_unit(CH08D_FIRST_VILLAGER_INDEX);
+    mage[0x33] = 0x5a;
+    mage[0x37] = 0xa5;
+    villager[0x33] = 0x3c;
+    villager[0x37] = 0xc3;
+    fdps_chapter_08_event_villagers_leave_cells(0);
+
+    CHECK_EQ((int) mage[0x33], 0x5a);
+    CHECK_EQ((int) mage[0x37], 0xa5);
+    CHECK_EQ((int) mage[0x35], CH08D_MAGE_DEST_X);
+    CHECK_EQ((int) mage[0x36], CH08D_MAGE_DEST_Y);
+    CHECK_EQ((int) villager[0x33], 0x3c);
+    CHECK_EQ((int) villager[0x37], 0xc3);
+    CHECK_EQ((int) villager[0x35], CH08D_STAGED_DEST_X);
+    CHECK_EQ((int) villager[0x36], CH08D_STAGED_DEST_Y);
+}
+
+/* THE LATCH IS TESTED AGAINST 0, NOT AGAINST 1.  Any non-zero value in the
+   shared slot stops the whole body: no script runs -- the draw-mode sentinel
+   is still there -- no behaviour byte moves and no destination is written, and
+   the slot keeps the value it was staged with rather than being forced to 1.
+   0x80 stands for the other chapters' handlers, which put their own values in
+   the same element. */
+static void ch08d_a_raised_latch_stops_the_whole_body(void)
+{
+    static int staged_latch[2] = {1, 0x80};
+    int i;
+    int unit;
+
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    for (i = 0; i < 2; i++) {
+        ch08d_stage();
+        data_fdps_map_cell_event_triggered_flags[CH08D_LATCH_SLOT] =
+            (unsigned char) staged_latch[i];
+        fdps_chapter_08_event_villagers_leave_cells(0);
+
+        CHECK_EQ(data_fdps_map_cursor_draw_mode, CH08T_NO_SCRIPT_DRAW_MODE);
+        CHECK_EQ((int)
+                 data_fdps_map_cell_event_triggered_flags[CH08D_LATCH_SLOT],
+                 staged_latch[i]);
+        CHECK_EQ((int) ch10_unit(CH08D_MAGE_INDEX)->ai_dest_x,
+                 CH08D_STAGED_DEST_X);
+        for (unit = 0; unit < CH08D_STAGED_UNITS; unit++) {
+            CHECK_EQ((int) ch10_unit(unit)->ai_behavior,
+                     CH08D_STAGED_AI_BEHAVIOR);
+        }
+    }
+}
+
+/* The latch the first call raises is what blocks the second.  The state the
+   first call left is stamped back to what it was staged with, without clearing
+   the slot, and the second call is watched doing nothing at all -- which is
+   what keeps a unit the AI has since moved from being pushed back into mode 4
+   by a later step onto the same tile. */
+static void ch08d_the_latch_blocks_every_later_call(void)
+{
+    int i;
+
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    ch08d_stage();
+    fdps_chapter_08_event_villagers_leave_cells(0);
+    CHECK_EQ((int) data_fdps_map_cell_event_triggered_flags[CH08D_LATCH_SLOT],
+             1);
+
+    for (i = 0; i < CH08D_STAGED_UNITS; i++) {
+        ch10_unit(i)->ai_behavior = (unsigned char) CH08D_STAGED_AI_BEHAVIOR;
+        ch10_unit(i)->ai_dest_x = (unsigned char) CH08D_STAGED_DEST_X;
+        ch10_unit(i)->ai_dest_y = (unsigned char) CH08D_STAGED_DEST_Y;
+    }
+    data_fdps_map_cursor_draw_mode = CH08T_NO_SCRIPT_DRAW_MODE;
+
+    fdps_chapter_08_event_villagers_leave_cells(0);
+
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, CH08T_NO_SCRIPT_DRAW_MODE);
+    CHECK_EQ((int) ch10_unit(CH08D_MAGE_INDEX)->ai_dest_x,
+             CH08D_STAGED_DEST_X);
+    for (i = 0; i < CH08D_STAGED_UNITS; i++) {
+        CHECK_EQ((int) ch10_unit(i)->ai_behavior, CH08D_STAGED_AI_BEHAVIOR);
+    }
+}
+
+/* NOTHING IS RANGE CHECKED.  data_fdps_map_unit_count is not read anywhere in
+   the body, so a live count of zero -- which is what a battle whose enemies
+   are all dead comes to -- still has all five records written.  The array is
+   left where the staging put it so the writes have somewhere to land; the
+   original writes past the end of a shorter allocation, which is the behaviour
+   this case stands in for. */
+static void ch08d_writes_without_a_unit_count_check(void)
+{
+    int i;
+
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    ch08d_stage();
+    data_fdps_map_unit_count = 0;
+    fdps_chapter_08_event_villagers_leave_cells(0);
+
+    for (i = CH08D_FIRST_VILLAGER_INDEX; i <= CH08D_LAST_VILLAGER_INDEX; i++) {
+        CHECK_EQ((int) ch10_unit(i)->ai_behavior,
+                 (CH08D_STAGED_AI_BEHAVIOR & 0xf0) | CH08D_WALK_MODE);
+    }
+    CHECK_EQ((int) ch10_unit(CH08D_MAGE_INDEX)->ai_behavior,
+             (CH08D_STAGED_AI_BEHAVIOR & 0xf0) | CH08D_ADVANCE_MODE);
+    CHECK_EQ((int) ch10_unit(CH08D_MAGE_INDEX)->ai_dest_x, CH08D_MAGE_DEST_X);
+}
+
+/* The argument cannot reach anything.  It is overwritten with 0 before the
+   latch is even tested, so the index the event fired for -- one of the four
+   villagers, the mage, something outside the array, a negative -- leaves the
+   same five records rewritten and the same destination written. */
+static void ch08d_ignores_the_unit_index_argument(void)
+{
+    static int passed[5] = {0, 0x0f, 0x13, -1, 0x7fff};
+    int i;
+    int unit;
+
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    for (i = 0; i < 5; i++) {
+        ch08d_stage();
+        fdps_chapter_08_event_villagers_leave_cells(passed[i]);
+
+        for (unit = CH08D_FIRST_VILLAGER_INDEX;
+             unit <= CH08D_LAST_VILLAGER_INDEX; unit++) {
+            CHECK_EQ((int) ch10_unit(unit)->ai_behavior,
+                     (CH08D_STAGED_AI_BEHAVIOR & 0xf0) | CH08D_WALK_MODE);
+        }
+        CHECK_EQ((int) ch10_unit(CH08D_MAGE_INDEX)->ai_behavior,
+                 (CH08D_STAGED_AI_BEHAVIOR & 0xf0) | CH08D_ADVANCE_MODE);
+        CHECK_EQ((int) ch10_unit(CH08D_MAGE_INDEX)->ai_dest_x,
+                 CH08D_MAGE_DEST_X);
+        CHECK_EQ((int) ch10_unit(CH08D_MAGE_INDEX)->ai_dest_y,
+                 CH08D_MAGE_DEST_Y);
+    }
+}
+
 /* Removes the fixture container again.  It is a test rather than a teardown
    hook because the harness has no hook, and it asserts the removal so that a
    fixture left behind is reported instead of silently taking out the cover for
@@ -1581,5 +1977,15 @@ void run_chevt2_tests(void)
     RUN_TEST(ch08t_map_number_comes_from_the_chapter_global);
     RUN_TEST(ch08t_has_no_latch_and_fires_every_call);
     RUN_TEST(ch08t_ignores_the_event_argument);
+    RUN_TEST(ch08d_opens_the_door_and_re_aims_everyone);
+    RUN_TEST(ch08d_re_aims_exactly_the_five_units);
+    RUN_TEST(ch08d_the_mage_is_left_in_mode_zero);
+    RUN_TEST(ch08d_only_the_mage_gets_a_destination);
+    RUN_TEST(ch08d_both_merges_keep_the_high_nibble);
+    RUN_TEST(ch08d_touches_no_neighbouring_byte);
+    RUN_TEST(ch08d_a_raised_latch_stops_the_whole_body);
+    RUN_TEST(ch08d_the_latch_blocks_every_later_call);
+    RUN_TEST(ch08d_writes_without_a_unit_count_check);
+    RUN_TEST(ch08d_ignores_the_unit_index_argument);
     RUN_TEST(ch08t_the_fixture_container_is_cleaned_up);
 }

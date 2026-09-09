@@ -86,6 +86,52 @@ extern void fdps_chapter_08_event_for_turn(int event_arg);
 extern void fdps_chapter_08_event_send_guest_mage_to_cells(int unit_index);
 #pragma aux fdps_chapter_08_event_send_guest_mage_to_cells "*" parm caller [];
 
+/* Chapter 8's cell-door event: opens the cage, starts the four captive
+   villagers walking out and hands the guest mage back to ordinary map AI.
+
+   It runs at most once per chapter.  Element 0x10 of
+   data_fdps_map_cell_event_triggered_flags (gamedata.h) -- the slot shared by
+   every one-shot chapter handler, cleared for the whole chapter by
+   fdps_chapter_state_reset -- has to still be 0 or the call returns having
+   done nothing, and it is raised before the cut-scene runs rather than after
+   the rest, so the body cannot be entered twice.
+
+   Past the latch it plays Icon7-3.dat through fdps_icon_script_run (icon.h),
+   the scene that opens the door; that script, and not this body, is what
+   brings the chapter's reinforcements on.  It then writes tile (21, 4) into
+   unit 0x13's ai_dest_x / ai_dest_y, puts battle units 0xf through 0x12 --
+   the four captives -- into behaviour mode 4, which walks an actor toward the
+   destination its own record holds, and finally clears unit 0x13's behaviour
+   nibble to mode 0.
+
+   THE DESTINATION IT WRITES IS INERT.  Mode 0 is the one behaviour that does
+   not read ai_dest_x / ai_dest_y, so the tile written into the mage's record
+   never moves him; pairing that write with mode 4 instead -- the C the
+   sequence invites -- would send 費塔加 walking off to the cage rather than
+   leave him fighting where the original leaves him.  The villagers walk to the
+   (21, 5) their own deployment records already carry, which this handler does
+   not write.
+
+   Both rewrites keep the high nibble of the byte at record offset 0x34,
+   because bits 0x40 and 0x80 of it are independent AI flags other code reads
+   on their own, and every record is resolved through fdps_get_unit_record
+   (unit.h).  Nothing is range checked: data_fdps_map_unit_count is never read,
+   so a villager already lost is re-aimed like the rest and the mage's record
+   is written whether or not the cut-scene that deploys him has run.
+
+   unit_index is the handler table's shared parameter and is ignored: the
+   incoming slot is overwritten with 0 before the latch is even tested and is
+   never read, so any index behaves the same.
+
+   Table slot 12, the entry at 000601f4, reached when a unit finishes a step
+   onto either of map 7's two cell-door tiles.  One of them is where
+   fdps_chapter_08_event_send_guest_mage_to_cells walks the mage, so he
+   normally opens the door himself; a player unit that stops there opens it
+   instead.  fdps_chapter_08_event_villager_escapes below answers for each
+   villager this handler sets walking. */
+extern void fdps_chapter_08_event_villagers_leave_cells(int unit_index);
+#pragma aux fdps_chapter_08_event_villagers_leave_cells "*" parm caller [];
+
 /* Chapter 8's villager-escape event: one of the four captive villagers walks
    off the battlefield and speaks its line, and when the last of the four goes
    the chapter's reward item lands in the guest mage's bag, scaled to how many
