@@ -9469,7 +9469,7 @@ Chapter 8's turn-scheduled event handler: the one slot map07.dat names for all f
 Algorithm:
 Stores 0 over its own incoming argument slot [EBP+0x14] at 000372dc and never reads it back. The rest of the body is an if/else ladder on the battle turn counter DAT_00069ce8 -- set to 1 by fdps_chapter_state_reset and bumped once per turn cycle by fdps_battle_advance_turn -- with one branch per scheduled turn and no default branch, every branch jumping to the single epilogue at 00037430.
 
-  turn 1 -- FUN_0001ff60(DAT_00060124, 0xc, 0xa0000, 0x140, 0xd0, 0, 0x6d) paints message 0x0c of the chapter's text image straight to the mode-13h VGA framebuffer at 0xa0000 as 0x140 x 0xd0 with colour key 0x6d. DAT_00060124 is the "fdetxt%02d.txt" image fdps_field_load_chapter_resources loads for chapter index + 1, so FDETXT08.TXT here.
+  turn 1 -- FUN_0001ff60(DAT_00060124, 0xc, 0xa0000, 0x140, 0xd0, 0, 0x6d) paints message 0x0c of the chapter's text image straight to the mode-13h VGA framebuffer at 0xa0000 -- pitch 0x140, glyph fill 0xd0, no cell background, outline 0x6d, the values every ordinary line of game text is drawn with. DAT_00060124 is the "fdetxt%02d.txt" image fdps_field_load_chapter_resources loads for chapter index + 1, so FDETXT08.TXT here.
 
   turn 3 -- FUN_00021650("Icon7-1.dat") runs the IconAni.vfs scene that brings the guest mage 費塔加 onto the map. That script's deploy opcode names wave 1, which is map07.dat's single side-1 record of character id 2 at level 15, and it lands as battle unit 0x13; nothing in this body deploys it.
 

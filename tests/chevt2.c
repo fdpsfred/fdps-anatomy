@@ -33,6 +33,13 @@
  * chapter 8 sections: the guard-death handler's, and after the chapter 10
  * block the villager-escape handler's, which stages bag entries and the
  * chapter's escape counter as well.
+ *
+ * The last section covers chapter 8's turn handler, and it is the only one
+ * that stages a container: two of its five arms play a cut-scene, so the file
+ * builds a small IconAni.vfs holding the two members those arms name and
+ * removes it again in its last case.  Its own note says why the shipped
+ * container cannot be used and why leaving the fixture behind would matter to
+ * tests/icon.c.
  */
 #include <stddef.h>
 #include <stdio.h>
@@ -2886,6 +2893,667 @@ static void ch14_ignores_the_unit_index_argument(void)
     }
 }
 
+/* Chapter 8's turn-scheduled handler at 000372d0, from here down.
+ *
+ * It is five equality tests on data_fdps_battle_turn_counter with no default
+ * arm, so what the cases pin is which arm a turn lands in, what that arm asks
+ * for, and that a turn none of the five names does nothing at all.
+ *
+ * The map fixture is the chapter 10 ambush section's, reused rather than
+ * copied, with three things added on top of it.
+ *
+ * A TEXT BLOCK COVERING ALL THREE IDS THE HANDLER NAMES, 0x0c, 0x15 and 0x22,
+ * with every entry holding the same offset onto the lone -1 that follows the
+ * table, so whichever entry a draw resolves the stream ends before a glyph is
+ * drawn and before any of the modal codes fdps_draw_text would stand a
+ * keyboard wait on.  WHICH id each draw asks for is not asserted, for the
+ * reason the chapter 8 and chapter 9 sections above give: fdps_draw_text takes
+ * its whole effect through pixels at the VGA aperture, keeps no state and
+ * returns a cursor this handler discards.  What the cases do pin about the
+ * draws is that none of them stops what follows it.
+ *
+ * A CURSOR DRAW MODE SENTINEL.  fdps_icon_script_run ends by writing 1 into
+ * data_fdps_map_cursor_draw_mode (src/icon.c), so a value no arm can leave
+ * there tells a run that played a script from one that did not.  It is the
+ * only witness the two script arms have that is independent of what the
+ * scripts themselves do.
+ *
+ * A FIXTURE IconAni.vfs HOLDING THE TWO MEMBERS THE HANDLER NAMES.  The
+ * interpreter holds the container name as a literal, so the only way to put a
+ * chosen script in front of it is to have a container of that name hold the
+ * member -- the same position tests/icon.c is in, and the fixture is built to
+ * the layout in resource_info/vfs.md exactly as that file builds its own.  The
+ * shipped container cannot be used: its Icon7-1.dat and Icon7-2.dat open on
+ * opcodes that need a loaded chapter behind them.  Each fixture member is one
+ * SET_VIEW_TILE opcode and then the end opcode, and the two members name
+ * DIFFERENT tiles, which is what turns "the right script ran" into an
+ * assertion: the view origin the run comes to rest on says which of the two
+ * literals reached the loader, and swapping the two names in the emitted C
+ * swaps the two origins.
+ *
+ * The staging REFUSES TO OVERWRITE a file of that name that is already there,
+ * and the last case removes the fixture again.  Both matter beyond this file:
+ * tests/icon.c stages a container of the same name for its own cases and skips
+ * them all if one is already present, and tests run in file order, so a
+ * fixture left behind here would silently take that whole section out.
+ *
+ * Every case that reaches a deployment needs ICON.CEL and FIELD.VFS, which
+ * cannot be stood in for, and skips itself without them.  The coordinates
+ * those cases expect are MAP00.COD's and MAP01.COD's own placement records.
+ */
+
+/* The five turns the ladder names, read off the compares at 000372e3,
+   00037314, 00037330, 000373b0 and 000373f1. */
+#define CH08T_OPENING_ORDERS_TURN 1
+#define CH08T_GUEST_MAGE_TURN 3
+#define CH08T_CELL_GUARDS_TURN 4
+#define CH08T_FIRST_CAVALRY_TURN 10
+#define CH08T_SECOND_CAVALRY_TURN 12
+
+/* The two waves the last two arms ask for, PUSH 0x2 at 000373bc and PUSH 0x3
+   at 000373fd. */
+#define CH08T_FIRST_CAVALRY_WAVE 2
+#define CH08T_SECOND_CAVALRY_WAVE 3
+
+/* The one unit the turn-4 arm re-aims and the behaviour code it merges in,
+   read off the bound constants at 0003734b and 00037352 and the mode constant
+   at 00037359. */
+#define CH08T_STANDING_GUARD_INDEX 0x0e
+#define CH08T_CHASE_MODE 3
+
+/* Enough units for both neighbours of the one that moves to be live records,
+   and two past the last of them so an off-by-one has somewhere visible to
+   land. */
+#define CH08T_STAGED_UNITS 0x11
+
+/* The unit-record stride, the IMUL 0x50 inside fdps_get_unit_record. */
+#define CH08T_UNIT_STRIDE 0x50
+
+/* The shared one-shot latch slot.  This handler does not use it, and that is
+   what is asserted. */
+#define CH08T_LATCH_SLOT 0x10
+
+/* Enough entries for the highest id the handler names, 0x22, plus the
+   terminator every entry points at. */
+#define CH08T_TEXT_ENTRY_COUNT 0x23
+
+/* The deployment records the fixture lays down, one per wave the cases ask
+   about, at the table index that is also its MAP%02d.COD placement record.
+   Records 0 and 1 are the two whose coordinates the ambush cases above already
+   read back out of the real files. */
+#define CH08T_WAVE2_RECORD 0
+#define CH08T_WAVE3_RECORD 1
+#define CH08T_WAVE1_RECORD 2
+#define CH08T_WAVE4_RECORD 3
+#define CH08T_SPAWN_RECORD_COUNT 4
+
+/* The level each record carries, which is how the cases tell which one
+   arrived. */
+#define CH08T_WAVE2_LEVEL 22
+#define CH08T_WAVE3_LEVEL 33
+#define CH08T_WAVE1_LEVEL 11
+#define CH08T_WAVE4_LEVEL 44
+
+/* The character id every deployment record carries.  0x80 is
+   PORTRAIT_ID_NO_MAP_SPRITE, which keeps the map compositor off the arrivals
+   if anything ever draws them. */
+#define CH08T_ARRIVAL_CHAR_ID 0x80
+
+/* MAP00.COD's placement record 0 and record 1, and MAP01.COD's record 0 -- the
+   same coordinates the ambush cases above read back out of the real files. */
+#define CH08T_MAP00_RECORD0_X 18
+#define CH08T_MAP00_RECORD0_Y 0
+#define CH08T_MAP00_RECORD1_X 22
+#define CH08T_MAP00_RECORD1_Y 12
+#define CH08T_MAP01_RECORD0_X 9
+#define CH08T_MAP01_RECORD0_Y 4
+
+/* A cursor draw mode no arm of the handler can leave behind: the interpreter
+   ends on 1 and clears to 0 on the way round its loop, so finding this value
+   afterwards says no script ran. */
+#define CH08T_NO_SCRIPT_DRAW_MODE 4
+
+/* The AI byte every staged record starts on: behaviour code 2, the mode
+   map07.dat deploys the two cell guards in, under a high nibble the merge has
+   to carry across untouched. */
+#define CH08T_STAGED_AI_BEHAVIOR 0x52
+
+/* The container the interpreter holds as a literal, and the two members this
+   handler names.  Member names are stored upper-cased, which is what the
+   lookup compares against after it has upper-cased the caller's string where
+   it stands. */
+#define CH08T_ARCHIVE_FILE "IconAni.vfs"
+#define CH08T_FIXTURE_MEMBERS 2
+
+/* resource_info/vfs.md: 35-byte header, then one 26-byte entry per member,
+   then the member bytes end to end with no gaps. */
+#define CH08T_HEADER_BYTES 35
+#define CH08T_ENTRY_BYTES 26
+#define CH08T_NAME_FIELD_BYTES 13
+#define CH08T_SIGNATURE_BYTES 24
+
+/* The tile each fixture script scrolls the view to, and the pixels per tile
+   the opcode scales them by (MAP_TILE_PIXELS, src/icon.c).  The two pairs are
+   deliberately unlike each other and unlike anything the staging leaves
+   behind. */
+#define CH08T_SCRIPT1_TILE_X 11
+#define CH08T_SCRIPT1_TILE_Y 13
+#define CH08T_SCRIPT2_TILE_X 17
+#define CH08T_SCRIPT2_TILE_Y 19
+#define CH08T_TILE_PIXELS 24
+
+static unsigned char ch08t_script1[] = {
+    0x0d, CH08T_SCRIPT1_TILE_X, CH08T_SCRIPT1_TILE_Y, 0x00
+};
+static unsigned char ch08t_script2[] = {
+    0x0d, CH08T_SCRIPT2_TILE_X, CH08T_SCRIPT2_TILE_Y, 0x00
+};
+
+static char *ch08t_member_names[CH08T_FIXTURE_MEMBERS] = {
+    "ICON7-1.DAT", "ICON7-2.DAT"
+};
+
+static unsigned char *ch08t_member_bytes[CH08T_FIXTURE_MEMBERS] = {
+    ch08t_script1, ch08t_script2
+};
+
+static int ch08t_member_lengths[CH08T_FIXTURE_MEMBERS] = {
+    sizeof(ch08t_script1), sizeof(ch08t_script2)
+};
+
+/* 0 not tried yet, 1 staged by us, 2 unusable and every script case skips. */
+static int ch08t_archive_state = 0;
+
+static short ch08t_text_block[CH08T_TEXT_ENTRY_COUNT + 1];
+
+static void ch08t_write_word(FILE *fp, int value)
+{
+    unsigned char bytes[2];
+
+    bytes[0] = (unsigned char) (value & 0xff);
+    bytes[1] = (unsigned char) ((value >> 8) & 0xff);
+    fwrite(bytes, 1, 2, fp);
+}
+
+static void ch08t_write_dword(FILE *fp, long value)
+{
+    unsigned char bytes[4];
+
+    bytes[0] = (unsigned char) (value & 0xff);
+    bytes[1] = (unsigned char) ((value >> 8) & 0xff);
+    bytes[2] = (unsigned char) ((value >> 16) & 0xff);
+    bytes[3] = (unsigned char) ((value >> 24) & 0xff);
+    fwrite(bytes, 1, 4, fp);
+}
+
+/* The 13-byte name field: the name, a terminator, and zeroes to the end. */
+static void ch08t_write_name(FILE *fp, char *name)
+{
+    unsigned char field[CH08T_NAME_FIELD_BYTES];
+    int i;
+
+    for (i = 0; i < CH08T_NAME_FIELD_BYTES; i++) {
+        field[i] = 0;
+    }
+    for (i = 0; i < CH08T_NAME_FIELD_BYTES - 1 && name[i] != '\0'; i++) {
+        field[i] = (unsigned char) name[i];
+    }
+    fwrite(field, 1, CH08T_NAME_FIELD_BYTES, fp);
+}
+
+/* Builds the fixture container once and answers whether the script cases may
+   run.  A file of that name that was already there is left alone and the
+   answer is no: it would be the shipped 4.7 MB container, and overwriting it
+   would cost the next run a copy of it. */
+static int ch08t_stage_archive(void)
+{
+    FILE *fp;
+    long member_at;
+    int i;
+
+    if (ch08t_archive_state != 0) {
+        return ch08t_archive_state == 1;
+    }
+
+    fp = fopen(CH08T_ARCHIVE_FILE, "rb");
+    if (fp != NULL) {
+        fclose(fp);
+        ch08t_archive_state = 2;
+        return 0;
+    }
+
+    fp = fopen(CH08T_ARCHIVE_FILE, "wb");
+    if (fp == NULL) {
+        ch08t_archive_state = 2;
+        return 0;
+    }
+
+    fwrite("VFS", 1, 3, fp);
+    ch08t_write_word(fp, 1);
+    ch08t_write_word(fp, CH08T_HEADER_BYTES);
+    ch08t_write_dword(fp, (long) CH08T_FIXTURE_MEMBERS);
+    fwrite("Dynasty Information Co.,", 1, CH08T_SIGNATURE_BYTES, fp);
+
+    member_at = (long) CH08T_HEADER_BYTES
+                + (long) CH08T_FIXTURE_MEMBERS * CH08T_ENTRY_BYTES;
+    for (i = 0; i < CH08T_FIXTURE_MEMBERS; i++) {
+        ch08t_write_name(fp, ch08t_member_names[i]);
+        ch08t_write_dword(fp, (long) ch08t_member_lengths[i]);
+        ch08t_write_dword(fp, (long) ch08t_member_lengths[i]);
+        fputc(0, fp);
+        ch08t_write_dword(fp, member_at);
+        member_at += ch08t_member_lengths[i];
+    }
+    for (i = 0; i < CH08T_FIXTURE_MEMBERS; i++) {
+        fwrite(ch08t_member_bytes[i], 1, ch08t_member_lengths[i], fp);
+    }
+    fclose(fp);
+
+    ch08t_archive_state = 1;
+    return 1;
+}
+
+/* The ambush section's map fixture with seventeen units on it, every one of
+   them carrying the same AI byte, one deployment record per wave the cases ask
+   about, the text block, the view globals at the origin and the draw-mode
+   sentinel down. */
+static void ch08t_stage(int battle_turn)
+{
+    int i;
+
+    ch10_stage(CH08T_STAGED_UNITS);
+
+    for (i = 0; i < CH08T_STAGED_UNITS; i++) {
+        ch10_unit(i)->ai_behavior = (unsigned char) CH08T_STAGED_AI_BEHAVIOR;
+        ch10_unit(i)->portrait_id = (unsigned char) CH08T_ARRIVAL_CHAR_ID;
+    }
+
+    ch10_spawn_table[CH10_SPAWN_TABLE_COUNT_OFFSET] =
+        (unsigned char) CH08T_SPAWN_RECORD_COUNT;
+    ch10_set_spawn(CH08T_WAVE2_RECORD, CH08T_ARRIVAL_CHAR_ID,
+                   CH08T_FIRST_CAVALRY_WAVE);
+    ch10_set_spawn(CH08T_WAVE3_RECORD, CH08T_ARRIVAL_CHAR_ID,
+                   CH08T_SECOND_CAVALRY_WAVE);
+    ch10_set_spawn(CH08T_WAVE1_RECORD, CH08T_ARRIVAL_CHAR_ID, 1);
+    ch10_set_spawn(CH08T_WAVE4_RECORD, CH08T_ARRIVAL_CHAR_ID, 4);
+    ch10_spawn_at(CH08T_WAVE2_RECORD)->level = (unsigned char) CH08T_WAVE2_LEVEL;
+    ch10_spawn_at(CH08T_WAVE3_RECORD)->level = (unsigned char) CH08T_WAVE3_LEVEL;
+    ch10_spawn_at(CH08T_WAVE1_RECORD)->level = (unsigned char) CH08T_WAVE1_LEVEL;
+    ch10_spawn_at(CH08T_WAVE4_RECORD)->level = (unsigned char) CH08T_WAVE4_LEVEL;
+
+    for (i = 0; i < CH08T_TEXT_ENTRY_COUNT; i++) {
+        ch08t_text_block[i] = (short) (CH08T_TEXT_ENTRY_COUNT * 2);
+    }
+    ch08t_text_block[CH08T_TEXT_ENTRY_COUNT] = -1;
+    data_fdps_current_chapter_text_ptr = (unsigned char *) ch08t_text_block;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_map_cursor_draw_mode = CH08T_NO_SCRIPT_DRAW_MODE;
+
+    data_fdps_battle_turn_counter = battle_turn;
+}
+
+/* The two fields the cases read back and the stride they are indexed by.  The
+   behaviour byte is the one the merge rewrites and the level byte is what
+   tells one arrival from another, so both offsets have to be the ones the
+   emitted code and fdps_deploy_unit address. */
+static void ch08t_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), CH08T_UNIT_STRIDE);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, ai_behavior), 0x34);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, level), 0x21);
+}
+
+/* Turn 1 speaks and does nothing else: no script is played, no unit arrives
+   and no behaviour byte moves.  The first arm is the one an arm order that put
+   a deployment or the re-aim in front of the ladder would show up in. */
+static void ch08t_turn_one_only_speaks(void)
+{
+    int i;
+
+    ch08t_stage(CH08T_OPENING_ORDERS_TURN);
+    fdps_chapter_08_event_for_turn(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH08T_STAGED_UNITS);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, CH08T_NO_SCRIPT_DRAW_MODE);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    for (i = 0; i < CH08T_STAGED_UNITS; i++) {
+        CHECK_EQ((int) ch10_unit(i)->ai_behavior, CH08T_STAGED_AI_BEHAVIOR);
+    }
+}
+
+/* THE LADDER HAS NO DEFAULT ARM.  Six turns none of the five compares names --
+   one below the first, three between the scheduled ones, one between the last
+   two and one far above them -- each leave the unit array, the behaviour bytes
+   and the draw-mode sentinel exactly as the staging left them.  Every arm of
+   the handler writes at least one of those three, so a default arm of any kind
+   would show here. */
+static void ch08t_an_unnamed_turn_does_nothing(void)
+{
+    static int turns[6] = {0, 2, 5, 9, 11, 100};
+    int i;
+    int unit;
+
+    for (i = 0; i < 6; i++) {
+        ch08t_stage(turns[i]);
+        fdps_chapter_08_event_for_turn(0);
+
+        CHECK_EQ(data_fdps_map_unit_count, CH08T_STAGED_UNITS);
+        CHECK_EQ(data_fdps_map_cursor_draw_mode, CH08T_NO_SCRIPT_DRAW_MODE);
+        for (unit = 0; unit < CH08T_STAGED_UNITS; unit++) {
+            CHECK_EQ((int) ch10_unit(unit)->ai_behavior,
+                     CH08T_STAGED_AI_BEHAVIOR);
+        }
+    }
+}
+
+/* Turn 3 plays Icon7-1.dat and stops there.  The fixture member of that name
+   scrolls the view to tile (11, 13) and the one named by the other arm scrolls
+   it to (17, 19), so the origin the run comes to rest on is what says which of
+   the two literals reached the loader -- this is the case that fails if the
+   two names are swapped in the emitted C.  Nothing else happens: no unit
+   arrives and no behaviour byte moves, so the re-aim belongs to the turn-4 arm
+   and not to this one. */
+static void ch08t_turn_three_plays_the_first_script(void)
+{
+    int i;
+
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    ch08t_stage(CH08T_GUEST_MAGE_TURN);
+    fdps_chapter_08_event_for_turn(0);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x,
+             CH08T_SCRIPT1_TILE_X * CH08T_TILE_PIXELS);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y,
+             CH08T_SCRIPT1_TILE_Y * CH08T_TILE_PIXELS);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+    CHECK_EQ(data_fdps_map_unit_count, CH08T_STAGED_UNITS);
+    for (i = 0; i < CH08T_STAGED_UNITS; i++) {
+        CHECK_EQ((int) ch10_unit(i)->ai_behavior, CH08T_STAGED_AI_BEHAVIOR);
+    }
+}
+
+/* Turn 4 plays Icon7-2.dat -- the other member, so the other origin -- and
+   then re-aims the guard left standing.  Both halves are asserted in one case
+   because the order matters: the re-aim follows the script in the instruction
+   stream, and a rebuild that ran them the other way round would still leave
+   these values behind.  What pins the order is the case below. */
+static void ch08t_turn_four_plays_the_second_script_and_re_aims(void)
+{
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    ch08t_stage(CH08T_CELL_GUARDS_TURN);
+    fdps_chapter_08_event_for_turn(0);
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x,
+             CH08T_SCRIPT2_TILE_X * CH08T_TILE_PIXELS);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y,
+             CH08T_SCRIPT2_TILE_Y * CH08T_TILE_PIXELS);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+    CHECK_EQ((int) ch10_unit(CH08T_STANDING_GUARD_INDEX)->ai_behavior,
+             (CH08T_STAGED_AI_BEHAVIOR & 0xf0) | CH08T_CHASE_MODE);
+}
+
+/* Exactly one record moves and every other one is left as it was.  The two
+   neighbours are the witnesses that matter: 0x0d is the guard Icon7-2.dat
+   walks away and retires, and 0x0f is the first record past the pair, so both
+   ends of the one-element range have something to land on if either bound were
+   read as exclusive or as a count. */
+static void ch08t_turn_four_re_aims_exactly_one_unit(void)
+{
+    int i;
+
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    ch08t_stage(CH08T_CELL_GUARDS_TURN);
+    fdps_chapter_08_event_for_turn(0);
+
+    for (i = 0; i < CH08T_STAGED_UNITS; i++) {
+        if (i == CH08T_STANDING_GUARD_INDEX) {
+            CHECK_EQ((int) ch10_unit(i)->ai_behavior,
+                     (CH08T_STAGED_AI_BEHAVIOR & 0xf0) | CH08T_CHASE_MODE);
+        } else {
+            CHECK_EQ((int) ch10_unit(i)->ai_behavior,
+                     CH08T_STAGED_AI_BEHAVIOR);
+        }
+    }
+}
+
+/* The merge keeps the high nibble.  Three staged bytes carry the two flag bits
+   in different combinations and each comes out with its high nibble intact and
+   its low nibble 3; a whole-byte assignment would leave 3 in all three cases
+   and clear the bits fdps_map_actor_take_best_action and
+   fdps_score_targets_for_item read on their own. */
+static void ch08t_turn_four_keeps_the_high_nibble(void)
+{
+    static int staged[3] = {0x42, 0x82, 0xc2};
+    int i;
+
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    for (i = 0; i < 3; i++) {
+        ch08t_stage(CH08T_CELL_GUARDS_TURN);
+        ch10_unit(CH08T_STANDING_GUARD_INDEX)->ai_behavior =
+            (unsigned char) staged[i];
+        fdps_chapter_08_event_for_turn(0);
+
+        CHECK_EQ((int) ch10_unit(CH08T_STANDING_GUARD_INDEX)->ai_behavior,
+                 (staged[i] & 0xf0) | CH08T_CHASE_MODE);
+    }
+}
+
+/* The re-aim writes the byte next to the one it merges and nothing else.  The
+   record either side of ai_behavior is read back so that a merge addressing
+   0x33 or 0x35 instead would be caught even though the value it wrote there
+   would look like a plausible behaviour byte. */
+static void ch08t_turn_four_touches_no_neighbouring_byte(void)
+{
+    unsigned char *record;
+
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    ch08t_stage(CH08T_CELL_GUARDS_TURN);
+    record = (unsigned char *) ch10_unit(CH08T_STANDING_GUARD_INDEX);
+    record[0x33] = 0x5a;
+    record[0x35] = 0xa5;
+    fdps_chapter_08_event_for_turn(0);
+
+    CHECK_EQ((int) record[0x33], 0x5a);
+    CHECK_EQ((int) record[0x35], 0xa5);
+    CHECK_EQ((int) record[0x34],
+             (CH08T_STAGED_AI_BEHAVIOR & 0xf0) | CH08T_CHASE_MODE);
+}
+
+/* NOTHING GUARDS THE TURN-4 WRITE.  There is no compare against
+   data_fdps_map_unit_count in front of the walk, so a live count of zero --
+   which is what a battle whose enemies are all dead comes to -- still has the
+   handler write index 0x0e.  The unit array is left where the staging put it
+   so the write has somewhere to land; the original writes past the end of a
+   shorter allocation, which is the behaviour this case stands in for. */
+static void ch08t_turn_four_writes_without_a_unit_count_check(void)
+{
+    if (!ch08t_stage_archive()) {
+        return;
+    }
+
+    ch08t_stage(CH08T_CELL_GUARDS_TURN);
+    data_fdps_map_unit_count = 0;
+    fdps_chapter_08_event_for_turn(0);
+
+    CHECK_EQ((int) ch10_unit(CH08T_STANDING_GUARD_INDEX)->ai_behavior,
+             (CH08T_STAGED_AI_BEHAVIOR & 0xf0) | CH08T_CHASE_MODE);
+}
+
+/* Turn 10 brings on wave 2 and nothing else.  Four records tagged 2, 3, 1 and
+   4 leave exactly the first deployed, carrying its own level and MAP00.COD
+   record 0's coordinates; the wave-1 and wave-3 records sit either side of it
+   in the same table, so a handler that passed the turn counter, or the turn
+   less something, lands on a different record or on none.  No behaviour byte
+   moves, which is what keeps the re-aim on the turn-4 arm. */
+static void ch08t_turn_ten_deploys_wave_two(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    ch08t_stage(CH08T_FIRST_CAVALRY_TURN);
+    fdps_chapter_08_event_for_turn(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH08T_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS)->level, CH08T_WAVE2_LEVEL);
+    CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS)->pos_x,
+             CH08T_MAP00_RECORD0_X);
+    CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS)->pos_y,
+             CH08T_MAP00_RECORD0_Y);
+    CHECK_EQ((int) ch10_unit(CH08T_STANDING_GUARD_INDEX)->ai_behavior,
+             CH08T_STAGED_AI_BEHAVIOR);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, CH08T_NO_SCRIPT_DRAW_MODE);
+}
+
+/* Turn 12 brings on wave 3, the next record along, landing on MAP00.COD record
+   1's coordinates rather than record 0's.  Together with the case above this
+   is what pins the pair of wave numbers to the pair of turns: reading either
+   compare as the other's turn swaps which record arrives. */
+static void ch08t_turn_twelve_deploys_wave_three(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    ch08t_stage(CH08T_SECOND_CAVALRY_TURN);
+    fdps_chapter_08_event_for_turn(0);
+
+    CHECK_EQ(data_fdps_map_unit_count, CH08T_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS)->level, CH08T_WAVE3_LEVEL);
+    CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS)->pos_x,
+             CH08T_MAP00_RECORD1_X);
+    CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS)->pos_y,
+             CH08T_MAP00_RECORD1_Y);
+    CHECK_EQ((int) ch10_unit(CH08T_STANDING_GUARD_INDEX)->ai_behavior,
+             CH08T_STAGED_AI_BEHAVIOR);
+}
+
+/* The map number both deploying arms place under is
+   data_fdps_chapter_current_chapter_id and not a literal: the same wave under
+   chapter 0 and under chapter 1 puts the arrival on MAP00.COD's record 0 and
+   on MAP01.COD's, which are different tiles. */
+static void ch08t_map_number_comes_from_the_chapter_global(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    ch08t_stage(CH08T_FIRST_CAVALRY_TURN);
+    data_fdps_chapter_current_chapter_id = 0;
+    fdps_chapter_08_event_for_turn(0);
+    CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS)->pos_x,
+             CH08T_MAP00_RECORD0_X);
+    CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS)->pos_y,
+             CH08T_MAP00_RECORD0_Y);
+
+    ch08t_stage(CH08T_FIRST_CAVALRY_TURN);
+    data_fdps_chapter_current_chapter_id = 1;
+    fdps_chapter_08_event_for_turn(0);
+    CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS)->pos_x,
+             CH08T_MAP01_RECORD0_X);
+    CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS)->pos_y,
+             CH08T_MAP01_RECORD0_Y);
+}
+
+/* There is no guard of any kind: the family's shared one-shot slot raised does
+   not block the handler, and a second call on the same turn deploys a second
+   time rather than being refused.  The latch is raised rather than assumed
+   clear because its starting value is ticket 23's. */
+static void ch08t_has_no_latch_and_fires_every_call(void)
+{
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    ch08t_stage(CH08T_FIRST_CAVALRY_TURN);
+    data_fdps_map_cell_event_triggered_flags[CH08T_LATCH_SLOT] = 1;
+
+    fdps_chapter_08_event_for_turn(0);
+    CHECK_EQ(data_fdps_map_unit_count, CH08T_STAGED_UNITS + 1);
+    CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS)->level, CH08T_WAVE2_LEVEL);
+
+    fdps_chapter_08_event_for_turn(0);
+    CHECK_EQ(data_fdps_map_unit_count, CH08T_STAGED_UNITS + 2);
+    CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS + 1)->level,
+             CH08T_WAVE2_LEVEL);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[CH08T_LATCH_SLOT], 1);
+}
+
+/* The incoming argument cannot reach anything.  It is overwritten with 0 at
+   000372dc before the first turn compare and never read back, so an argument
+   of 7 and one of -1 deploy the same record onto the same tile.  A handler
+   that had let the value through would have to use it somewhere, and the only
+   thing in the body an index could feed is the record the re-aim fetches. */
+static void ch08t_ignores_the_event_argument(void)
+{
+    static int arguments[2] = {7, -1};
+    int i;
+
+    ch10_ensure_game_files();
+    if (!ch10_files_ready) {
+        return;
+    }
+
+    for (i = 0; i < 2; i++) {
+        ch08t_stage(CH08T_FIRST_CAVALRY_TURN);
+        fdps_chapter_08_event_for_turn(arguments[i]);
+
+        CHECK_EQ(data_fdps_map_unit_count, CH08T_STAGED_UNITS + 1);
+        CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS)->level,
+                 CH08T_WAVE2_LEVEL);
+        CHECK_EQ((int) ch10_unit(CH08T_STAGED_UNITS)->pos_x,
+                 CH08T_MAP00_RECORD0_X);
+    }
+}
+
+/* Removes the fixture container again.  It is a test rather than a teardown
+   hook because the harness has no hook, and it asserts the removal so that a
+   fixture left behind is reported instead of silently taking out the cover for
+   the interpreter in tests/icon.c, which stages a container of the same name
+   and skips every one of its script cases if one is already there. */
+static void ch08t_the_fixture_container_is_cleaned_up(void)
+{
+    FILE *fp;
+
+    if (ch08t_archive_state != 1) {
+        return;
+    }
+    remove(CH08T_ARCHIVE_FILE);
+    ch08t_archive_state = 2;
+
+    fp = fopen(CH08T_ARCHIVE_FILE, "rb");
+    if (fp != NULL) {
+        fclose(fp);
+    }
+    CHECK_EQ(fp == NULL, 1);
+}
+
 void run_chevt2_tests(void)
 {
     RUN_TEST(ch08_sends_exactly_the_guest_mage);
@@ -2957,4 +3625,19 @@ void run_chevt2_tests(void)
     RUN_TEST(ch14_holds_both_pans_for_twelve_frames);
     RUN_TEST(ch14_has_no_latch_and_fires_every_call);
     RUN_TEST(ch14_ignores_the_unit_index_argument);
+    RUN_TEST(ch08t_record_shape_matches_the_offsets);
+    RUN_TEST(ch08t_turn_one_only_speaks);
+    RUN_TEST(ch08t_an_unnamed_turn_does_nothing);
+    RUN_TEST(ch08t_turn_three_plays_the_first_script);
+    RUN_TEST(ch08t_turn_four_plays_the_second_script_and_re_aims);
+    RUN_TEST(ch08t_turn_four_re_aims_exactly_one_unit);
+    RUN_TEST(ch08t_turn_four_keeps_the_high_nibble);
+    RUN_TEST(ch08t_turn_four_touches_no_neighbouring_byte);
+    RUN_TEST(ch08t_turn_four_writes_without_a_unit_count_check);
+    RUN_TEST(ch08t_turn_ten_deploys_wave_two);
+    RUN_TEST(ch08t_turn_twelve_deploys_wave_three);
+    RUN_TEST(ch08t_map_number_comes_from_the_chapter_global);
+    RUN_TEST(ch08t_has_no_latch_and_fires_every_call);
+    RUN_TEST(ch08t_ignores_the_event_argument);
+    RUN_TEST(ch08t_the_fixture_container_is_cleaned_up);
 }

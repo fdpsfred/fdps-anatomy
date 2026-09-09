@@ -12,6 +12,7 @@
 #include "gamedata.h"
 #include "unit.h"
 #include "deploy.h"
+#include "icon.h"
 #include "unititem.h"
 #include "text.h"
 #include "mapcur.h"
@@ -57,6 +58,183 @@
 #define MESSAGE_FG_COLOR 0xd0
 #define MESSAGE_BG_COLOR 0
 #define MESSAGE_OUTLINE_COLOR 0x6d
+
+/* The five turns chapter 8's turn handler tests for, in the order the ladder
+   tests them: CMP dword ptr [0x00069ce8],0x1 at 000372e3, 0x3 at 00037314,
+   0x4 at 00037330, 0xa at 000373b0 and 0xc at 000373f1.  Each test is an
+   equality followed by a JNZ to the next one, and the last JNZ goes straight
+   to the epilogue, so there is no default arm: a turn none of the five names
+   leaves the function having done nothing.  The five are exactly the turns
+   map07.dat's turn-event table names for this slot. */
+#define CH08_OPENING_ORDERS_TURN 1
+#define CH08_GUEST_MAGE_TURN 3
+#define CH08_CELL_GUARDS_TURN 4
+#define CH08_FIRST_CAVALRY_TURN 10
+#define CH08_SECOND_CAVALRY_TURN 12
+
+/* The three lines the handler speaks, PUSH 0xc at 000372ff, PUSH 0x15 at
+   000373df and PUSH 0x22 at 00037420.  All three index the chapter's own
+   FDETXT08.TXT block rather than the shared one. */
+#define CH08_OPENING_ORDERS_TEXT_ID 0x0c
+#define CH08_FIRST_CAVALRY_TEXT_ID 0x15
+#define CH08_SECOND_CAVALRY_TEXT_ID 0x22
+
+/* The two cut-scene members the middle arms play, the strings at 0x61ff8 and
+   0x62004 loaded into EAX at 0003731d and 0003733d.  Icon7-1.dat brings the
+   guest mage 費塔加 onto the map -- its own deploy opcode names map07.dat's
+   single wave-1 record, so nothing in this handler deploys him -- and
+   Icon7-2.dat is the scene at the cell block that walks one of the two guards
+   away and retires him.  The pair is orderable the wrong way round and the
+   turn numbers do not say which is which, so the two literals are what the
+   cases in tests/chevt2.c pin. */
+#define CH08_GUEST_MAGE_SCRIPT "Icon7-1.dat"
+#define CH08_CELL_GUARDS_SCRIPT "Icon7-2.dat"
+
+/* The two waves the last two arms bring on, PUSH 0x2 at 000373bc and PUSH 0x3
+   at 000373fd, matched against byte 0x15 of each 0x1a-byte deployment record
+   of the resident MAP%02d.DAT block.  Wave 2 is map07.dat's four level-12
+   cavalry of character id 0x58 and wave 3 the level-20 knight of id 0x59 with
+   eight level-30 cavalry behind it. */
+#define CH08_FIRST_CAVALRY_WAVE 2
+#define CH08_SECOND_CAVALRY_WAVE 3
+
+/* How both arms place what they bring on: XOR EAX,EAX / PUSH EAX at 000373b9
+   and at 000373fa, so fdps_deploy_wave settles each unit on the nearest free
+   walkable tile to its placement record's coordinates rather than on the
+   coordinates themselves. */
+#define CH08_TURN_PLACE_EXACT 0
+
+/* The one unit index the turn-4 arm re-aims.  0x0e is parked twice, at
+   [EBP-0x20] (0003734b) and at [EBP-0x1c] (00037352), because the inline
+   range walk keeps a first and a last bound and here they hold the same
+   constant, so the loop runs exactly once.  Unit 0x0e is the second of the two
+   soldiers posted by the cells: they are the only two of the chapter's ten
+   opening enemies deployed in behaviour mode 2, the mode that holds ground,
+   and Icon7-2.dat walks the first of them (0x0d) away and retires it, so 0x0e
+   is the one left standing. */
+#define CH08_STANDING_GUARD_UNIT_INDEX 0x0e
+
+/* The behaviour code the turn-4 merge ORs in: the constant parked at
+   [EBP-0x18] at 00037359, copied on into [EBP-0x14] at 0003736f, which is the
+   slot MOV DH,byte ptr [EBP-0x14] at 000373a1 reads.  Mode 3 is the arm
+   fdps_map_actor_behavior_step reaches at 00010161: it resolves the record's
+   own byte 0x35 as a character id through fdps_battle_find_unit_by_character_id
+   and walks the actor toward whatever unit carries it.  Unit 0x0e's byte 0x35
+   is 0, out of deployment byte 0x12 of map07.dat record 18, so the guard left
+   standing sets off after 蘭迪斯. */
+#define AI_BEHAVIOR_MODE_CHASE_CHARACTER 3
+
+/* 000372d0.  Chapter 8's turn-scheduled event handler: the one slot map07.dat
+   names for all five of the chapter's turn events, running whichever of them
+   is due for the turn the player has just finished.
+
+   THE LADDER IS FIVE EQUALITIES AND HAS NO DEFAULT ARM.  Every test is a CMP
+   against data_fdps_battle_turn_counter followed by a JNZ to the next test,
+   and the fifth JNZ at 000373f8 goes to the epilogue at 00037430 that every
+   arm also jumps to.  A turn the five do not name therefore leaves the
+   function having done nothing, and nothing in the body tests anything else.
+   What keeps the arms off the other turns is map07.dat's own turn table, which
+   names this slot exactly five times: {1,10,0}, {3,10,0}, {4,10,0}, {10,10,0}
+   and {12,10,0}.
+
+   THE TURN-4 ARM'S RANGE WALK IS AN INLINE EXPANSION, NOT A CALL.  The body
+   carries the same fingerprint the chapter 8 guard-death handler below and the
+   chapter 13 one carry -- fdps_object_set_field34_low_nibble_range (00036b60)
+   with the constant argument triple (0xe, 0xe, 3): the three constants are
+   parked at [EBP-0x20], [EBP-0x1c] and [EBP-0x18] (0003734b..00037359),
+   copied into a second set of slots at [EBP-0xc], [EBP-0x10] and [EBP-0x14]
+   (00037360..0003736f), and only then is the counter at [EBP-0x8] seeded from
+   the first of them.  There is no CALL to that helper anywhere in the body;
+   the only calls are the two script runs, the two deployments, the three draws
+   and fdps_get_unit_record at 0003738a.  Writing the range as a call to the
+   helper would put a CALL in the rebuild that the original does not make.
+
+   The compare at 0003737b -- CMP EAX,dword ptr [EBP-0x10] / JLE 00037387 -- is
+   signed and inclusive, and both bounds hold 0x0e, so the walk touches exactly
+   one record and index 0x0e is written rather than skipped.
+
+   THE MERGE KEEPS THE HIGH NIBBLE.  MOV DL,[EAX+0x34] / AND DL,0xf0 / MOV
+   DH,[EBP-0x14] / OR DH,DL / MOV [EAX+0x34],DH at 00037398..000373a6, so the
+   behaviour code goes to 3 and the 0x40 and 0x80 flag bits
+   fdps_map_actor_take_best_action and fdps_score_targets_for_item read on
+   their own are carried across untouched.  Assigning the whole byte instead
+   sends the unit down a different AI path.
+
+   NOTHING IS GUARDED.  There is no one-shot latch, no liveness test on either
+   guard and no compare against data_fdps_map_unit_count in front of the walk:
+   the instruction after the argument-slot store at 000372dc is the first turn
+   compare, and the instruction after the script call's ADD ESP,0x4 at
+   00037348 is the first of the three constant stores.  Turn 4 plays Icon7-2.dat and rewrites unit
+   0x0e's behaviour byte whether or not the player has already cleared the two
+   guards, and adding the check that looks obviously missing would suppress a
+   message the original still paints (rebuild_info/pitfalls.md).
+
+   THE MAP NUMBER IS THE CHAPTER GLOBAL AND NOT A LITERAL.  PUSH dword ptr
+   [0x00069cf4] at 000373be and 000373ff is
+   data_fdps_chapter_current_chapter_id, so what the arrivals are placed by is
+   whichever MAP%02d.COD the loaded chapter names.
+
+   The record pointer comes back in EAX from the CALL at 0003738a and is
+   stored to [EBP-0x4] at 00037392, then re-read at 00037395 for the load and
+   again at 0003739e for the store, so both halves of the merge address the
+   record that iteration fetched.  fdps_icon_script_run and fdps_deploy_wave
+   leave nothing this body reads.  fdps_draw_text hands back a cursor in EAX
+   and all three call sites discard it: after the first two the next
+   instruction is the JMP to the epilogue and after the third it is the
+   epilogue itself.  Nothing sets EAX before the RET at 00037436 and no
+   dispatcher reads what comes back, so the result is void.
+
+   event_arg is the handler table's shared parameter.  MOV dword ptr
+   [EBP+0x14],0x0 at 000372dc writes zero over the incoming slot before the
+   first turn compare and nothing ever reads it back, so nothing a caller
+   passes can change what the handler does; the store has no observable effect
+   either, because the slot belongs to the caller's outgoing argument area and
+   fdps_battle_run_turn_events drops it with its own ADD ESP,0x4 at
+   0002e146. */
+void fdps_chapter_08_event_for_turn(int event_arg)
+{
+    struct fdps_unit_record *standing_guard;
+    int guard_unit_index;
+
+    event_arg = 0;
+
+    if (data_fdps_battle_turn_counter == CH08_OPENING_ORDERS_TURN) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH08_OPENING_ORDERS_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+    } else if (data_fdps_battle_turn_counter == CH08_GUEST_MAGE_TURN) {
+        fdps_icon_script_run(CH08_GUEST_MAGE_SCRIPT);
+    } else if (data_fdps_battle_turn_counter == CH08_CELL_GUARDS_TURN) {
+        fdps_icon_script_run(CH08_CELL_GUARDS_SCRIPT);
+
+        for (guard_unit_index = CH08_STANDING_GUARD_UNIT_INDEX;
+             guard_unit_index <= CH08_STANDING_GUARD_UNIT_INDEX;
+             guard_unit_index++) {
+            standing_guard = fdps_get_unit_record(guard_unit_index);
+            standing_guard->ai_behavior = (unsigned char)
+                ((standing_guard->ai_behavior & AI_BEHAVIOR_FLAG_NIBBLE) |
+                 AI_BEHAVIOR_MODE_CHASE_CHARACTER);
+        }
+    } else if (data_fdps_battle_turn_counter == CH08_FIRST_CAVALRY_TURN) {
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                         CH08_FIRST_CAVALRY_WAVE, CH08_TURN_PLACE_EXACT);
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH08_FIRST_CAVALRY_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+    } else if (data_fdps_battle_turn_counter == CH08_SECOND_CAVALRY_TURN) {
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                         CH08_SECOND_CAVALRY_WAVE, CH08_TURN_PLACE_EXACT);
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH08_SECOND_CAVALRY_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+    }
+}
 
 /* The one unit index chapter 8's guard-death handler re-aims.  0x13 is parked
    twice, at [EBP-0x20] (00037453) and at [EBP-0x1c] (0003745a), because the

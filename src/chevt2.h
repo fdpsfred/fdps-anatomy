@@ -13,6 +13,35 @@
 #ifndef CHEVT2_H
 #define CHEVT2_H
 
+/* Chapter 8's turn-scheduled event: the one handler slot map07.dat names for
+   all five of the chapter's turn events, running whichever of them is due for
+   the turn the player has just finished.
+
+   The body is an if/else ladder of five equality tests on the battle turn
+   counter with no default arm, so a turn the ladder does not name does
+   nothing at all.  Turn 1 paints the chapter's opening orders; turn 3 plays
+   the cut-scene that brings the guest mage onto the map; turn 4 plays the
+   cut-scene at the cell block and then re-aims the guard left standing there;
+   turns 10 and 12 bring on the two cavalry waves and speak a line for each.
+
+   NOTHING IN IT IS GUARDED.  There is no one-shot latch, no liveness test and
+   no check against the live unit count: turn 4 plays its scene and rewrites
+   unit 0x0e's behaviour byte whether or not the player has already killed the
+   two guards, and the check that looks obviously missing would suppress a
+   message the original still paints.
+
+   The turn-4 rewrite keeps the high nibble of the byte at record offset 0x34,
+   because the four bits it holds are AI flags other code reads on their own.
+   The record is resolved through fdps_get_unit_record (unit.h).
+
+   unit_index is the handler table's shared parameter.  This handler zeroes it
+   before anything reads it, so nothing a dispatcher passes can change what it
+   does; the store cannot be seen by the caller either, because the slot
+   belongs to the caller's outgoing argument area.  The turn-event runner is
+   the only dispatcher that reaches this slot and it passes 0. */
+extern void fdps_chapter_08_event_for_turn(int event_arg);
+#pragma aux fdps_chapter_08_event_for_turn "*" parm caller [];
+
 /* Chapter 8's guard-death event: sends the chapter's guest mage walking to the
    cell block and paints the line that goes with it.
 

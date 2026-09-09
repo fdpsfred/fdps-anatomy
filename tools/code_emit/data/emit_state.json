@@ -3352,6 +3352,14 @@
       "status": "committed",
       "rounds": 2,
       "emitted_against": "0x35f"
+    },
+    "000372d0": {
+      "name": "fdps_chapter_08_event_for_turn",
+      "target": "chevt2.c",
+      "body_size": "0x167",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x167"
     }
   }
 }
