@@ -2340,5 +2340,13 @@
       "status": "open",
       "same_as": "emit#0"
     }
+  ],
+  "00021650": [
+    {
+      "from": "review",
+      "what": "Eleven of the twenty-five opcodes have no unit-test assertion behind them and cannot get one from where this pipeline currently sits: 0x01, 0x02, 0x09 and 0x10 hand the whole instruction to handlers covered by their own cases, but 0x03 draws through data_fdps_current_chapter_text_ptr which ticket 23 has not filled, 0x04 and 0x62 deploy and step map actors, 0x06 and 0x08 need .saf and .wav members of the real container and a live audio driver, and 0x11 and 0x61 reload a chapter and rewrite the party roster. The twenty-slot .wav table, the frees that empty it on the way out, and the hand-off of opcode 0x63's answer into a following opcode 4 are unreachable for the same reasons. The emitted C for all of them is verified against the assembly and against the built object, so this is a gap in observation, not a doubt about the reading.",
+      "needs": "Ticket 23's data landing (for 0x03), and a playtest in DOSBox-X with the disc mounted running a chapter opening scene and a victory scene end to end -- ICON11.DAT in particular, since it holds the one shipped opcode 4 that takes its wave number from the choice prompt.",
+      "status": "open"
+    }
   ]
 }

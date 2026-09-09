@@ -17,15 +17,28 @@
  */
 #include <conio.h>
 #include <i86.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "audio.h"
+#include "cdaudio.h"
+#include "chapter.h"
+#include "deploy.h"
+#include "keybd.h"
+#include "mapai.h"
 #include "mapdraw.h"
+#include "maptile.h"
 #include "msgwin.h"
 #include "palcycle.h"
 #include "palette.h"
+#include "roster.h"
+#include "saf.h"
 #include "text.h"
 #include "unit.h"
+#include "unitstat.h"
+#include "vfs.h"
 #include "icon.h"
 
 /* VGA input status register 1.  Bit 3 is set while the vertical retrace is in
@@ -689,4 +702,436 @@ int fdps_icon_script_prompt_three_way_choice(void)
                    CHOICE_TEXT_BG_COLOR, CHOICE_TEXT_OUTLINE_COLOR);
 
     return chosen_branch;
+}
+
+/* The container every cut-scene script lives in.  The interpreter holds the
+   name itself -- all 67 call sites push nothing but the member name -- so a
+   caller cannot point it at another archive. */
+#define SCRIPT_ARCHIVE_NAME "IconAni.vfs"
+
+/* The diagnostic the archive's own failure prints.  It is followed by a wait
+   for a key and then by the load attempt on the null handle, so it reports the
+   failure without avoiding it. */
+#define SCRIPT_ARCHIVE_MISSING_MESSAGE "file not found: '%s'\n"
+
+/* The two member names an opcode composes out of its operand byte, and the
+   frame buffer they are composed into.  Forty bytes is the slot the original
+   reserves for it (EBP-0x58 up to EBP-0x30); the longest name either format
+   can produce is twelve characters and a terminator. */
+#define SCRIPT_SAF_MEMBER_FORMAT "Icon%04d.saf"
+#define SCRIPT_WAV_MEMBER_FORMAT "Icon%04d.wav"
+#define SCRIPT_MEMBER_NAME_BYTES 40
+
+/* How many .wav buffers one script can hold open at once.  The table is a
+   frame array of twenty pointers and the counter is compared against 20 with
+   JGE, so the twenty-first sound of a script is not loaded and does not play
+   (rebuild_info/pitfalls.md). */
+#define SCRIPT_WAV_SLOTS 20
+
+/* What opcode 8 asks fdps_audio_start_wav for: play the sample once, and take
+   the rate and the volume from the .wav's own header rather than overriding
+   them.  Both -1s are PUSH -0x1 in the original. */
+#define SCRIPT_WAV_LOOP_ONCE 1
+#define SCRIPT_WAV_RATE_FROM_HEADER (-1)
+#define SCRIPT_WAV_VOLUME_FROM_HEADER (-1)
+
+/* Opcode 7's operand and what it turns into.  0xff is the script's way of
+   asking for silence and the only operand the handler rewrites; every other
+   value is handed to the music layer as it stands. */
+#define SCRIPT_MUSIC_SILENCE_OPERAND 0xff
+#define SCRIPT_MUSIC_SILENCE (-1)
+
+/* Opcode 4's first operand when the wave number is not a literal but the
+   branch the player picked at opcode 0x63. */
+#define SCRIPT_WAVE_FROM_CHOICE 0xff
+
+/* Opcode 3's colours: the standard message colours, the same three the choice
+   prompt above draws its lines in.  They are constants in the opcode, not
+   operands -- a script cannot ask for another colour. */
+#define SCRIPT_TEXT_FG_COLOR 0xd0
+#define SCRIPT_TEXT_BG_COLOR 0
+#define SCRIPT_TEXT_OUTLINE_COLOR 0x6d
+
+/* Opcode 0x15 rewrites the whole DAC, entries 0 to 255 inclusive, exactly as
+   the two fade handlers do; only the three biases come out of the script. */
+#define SCRIPT_PALETTE_FIRST_ENTRY 0
+#define SCRIPT_PALETTE_LAST_ENTRY 0xff
+
+/* Bit 0 of a unit's flags byte: the unit has left the battle.  Opcode 0x0b
+   sets it and opcode 0x0c clears it, both leaving the other seven bits alone,
+   which is what separates them from the blink handler's whole-byte assign. */
+#define SCRIPT_UNIT_RETIRED_FLAG 1
+
+/* Opcode 0x0c zeroes the six status timer bytes, the whole of
+   struct fdps_unit_record's status_timers. */
+#define SCRIPT_UNIT_STATUS_TIMER_BYTES 6
+
+/* Opcode 0x12 writes record byte 0x25 + operand, and 0x25 is status_timers[3]
+   -- the array starts at 0x22.  The operand is not ranged against the array,
+   so a large one writes past it; that is the original's behaviour and the same
+   opcode also skips the unit-index bounds check its neighbours make
+   (rebuild_info/pitfalls.md). */
+#define SCRIPT_UNIT_TIMER_FIRST_INDEX 3
+
+/* The tile layer opcode 0x14 writes into: an 0xb-byte header followed by the
+   cells, two bytes each, with the row stride in the signed word at +7.  The
+   same layout fdps_map_apply_triggered_cell_changes walks (src/maptile.h). */
+#define SCRIPT_TILE_LAYER_HEADER_BYTES 0xb
+#define SCRIPT_TILE_LAYER_STRIDE_OFFSET 7
+
+/* Opcode 0x61's debug award: ten rounds of 99 experience handed to unit 3.
+   The award global is re-armed inside the loop, once per round, because the
+   award routine consumes it. */
+#define SCRIPT_XP_AWARD_ROUNDS 10
+#define SCRIPT_XP_AWARD_POINTS 99
+#define SCRIPT_XP_AWARD_UNIT 3
+
+/* The opcodes, in the order the compare ladder settles them.  Opcode 0 ends
+   the script and so does every value not listed here. */
+#define SCRIPT_OP_END 0x00
+#define SCRIPT_OP_WALK_UNITS 0x01
+#define SCRIPT_OP_FACE_UNITS 0x02
+#define SCRIPT_OP_DRAW_TEXT 0x03
+#define SCRIPT_OP_DEPLOY_WAVE 0x04
+#define SCRIPT_OP_SCROLL_VIEW 0x05
+#define SCRIPT_OP_PLAY_SAF 0x06
+#define SCRIPT_OP_SET_MUSIC 0x07
+#define SCRIPT_OP_PLAY_WAV 0x08
+#define SCRIPT_OP_BLINK_UNITS_OUT 0x09
+#define SCRIPT_OP_PLACE_UNIT 0x0a
+#define SCRIPT_OP_RETIRE_UNIT 0x0b
+#define SCRIPT_OP_REVIVE_UNIT 0x0c
+#define SCRIPT_OP_SET_VIEW_TILE 0x0d
+#define SCRIPT_OP_FADE_OUT 0x0e
+#define SCRIPT_OP_FADE_IN 0x0f
+#define SCRIPT_OP_SHAKE_VIEW 0x10
+#define SCRIPT_OP_SWITCH_MAP 0x11
+#define SCRIPT_OP_SET_UNIT_TIMER 0x12
+#define SCRIPT_OP_TRIGGER_CELL_EVENT 0x13
+#define SCRIPT_OP_SET_MAP_CELL 0x14
+#define SCRIPT_OP_BIAS_PALETTE 0x15
+#define SCRIPT_OP_DEBUG_LEVEL_UNIT_3 0x61
+#define SCRIPT_OP_ACTOR_BEHAVIOR_STEP 0x62
+#define SCRIPT_OP_ASK_THREE_WAY 0x63
+
+/* 00021650.  Loads one script member out of IconAni.vfs and runs its byte
+   opcodes until one of them stops it.  This is what every scripted cut-scene
+   in the game is: a chapter's opening scene is Icon%02d.dat and its victory
+   scene Win%02d.dat, and both arrive here as the one string the caller pushes.
+
+   THE ARCHIVE FAILING TO OPEN IS REPORTED AND THEN IGNORED.  CMP dword ptr
+   [EBP-0x2c],0x0 / JNZ at 00021690 guards nothing but the printf and the wait
+   for a key: control falls straight into the load at 000216ab with the null
+   handle in hand.  Adding a return there is the obvious repair and it is not
+   equivalent -- the original goes on to dereference that handle inside
+   fdps_vfs_find_entry (rebuild_info/pitfalls.md).
+
+   THE SCRIPT FAILING TO LOAD IS A DIFFERENT MATTER.  Its own test at 000216c2
+   jumps to 00021dd2, past the free of the script buffer and past the whole
+   interpreter loop, and the function then unwinds normally.
+
+   The loop is written round a running flag rather than a break: the ladder's
+   unknown-opcode arm and its opcode 0 arm both fall on MOV byte ptr [EBP-4],0
+   at 00021dbd and then re-enter the loop, which sees the flag and leaves.  The
+   flag is a byte, not an int -- MOV byte ptr, CMP byte ptr.
+
+   EVERY PASS FLUSHES THE KEYBOARD AND CLEARS THE CURSOR DRAW MODE, whatever
+   the opcode turns out to be, so a key pressed during one opcode cannot be
+   read by the next one and no map cursor is drawn over any of them.  The mode
+   is put back to 1 on the way out, not to what it held on entry.
+
+   Only three kinds of call here have their results used, and all three are
+   read off the assembly rather than the decompiler: fdps_vfs_open's handle and
+   fdps_vfs_load_file's buffer land in frame slots at 00021689 and 000216bb,
+   the five sub-handlers that own their own operands have their returns stored
+   back as the script position (MOV dword ptr [EBP-0x28],EAX at 00021882,
+   0002189a, 00021958, 00021a71 and 00021c10), and
+   fdps_icon_script_prompt_three_way_choice's answer is kept at 00021db2 for
+   whatever opcode 4 comes next.  Everything else discards EAX.
+
+   The epilogue reloads data_fdps_chapter_current_chapter_id and compares it
+   against the copy the prologue took at 00021678.  Nothing branches on the
+   result, the function returns void, and all 67 call sites destroy the flags
+   with ADD ESP,0x4 before they do anything else, so the comparison has no
+   observable and no local is kept here to feed it. */
+void fdps_icon_script_run(char *script_name)
+{
+    /* The loaded script image and how far into it the interpreter has got.
+       Every operand is read as script[offset + n], so the offset is what each
+       opcode advances rather than the pointer. */
+    unsigned char *script;
+    int offset;
+    /* The opened IconAni.vfs, and the buffers the two media opcodes load out
+       of it.  The .saf plays synchronously and is freed on the spot; the .wav
+       buffers have to outlive the call that starts them, so they are parked
+       and freed only when the script ends. */
+    void *archive;
+    void *saf_image;
+    void *wav_buffers[SCRIPT_WAV_SLOTS];
+    int wav_slots_used;
+    /* Cleared by the arm that ends the script; the loop runs while it holds. */
+    char script_running;
+    /* The opcode byte this pass is dispatching. */
+    unsigned char opcode;
+    /* The unit record an opcode edits, re-resolved for every opcode because
+       fdps_get_unit_record's answer is only good until the array moves. */
+    struct fdps_unit_record *unit;
+    /* Opcode 0x14's target: the addressed cell of the tile layer, and the row
+       stride the layer header declares. */
+    unsigned char *map_cell;
+    int map_row_stride;
+    /* Opcode 7's track, after 0xff has been turned into silence. */
+    int music_track;
+    /* The branch opcode 0x63 asked the player for, kept for the opcode 4 that
+       follows it.  It is not initialised: a script whose opcode 4 asks for the
+       chosen branch without having asked the question first deploys on
+       whatever the frame slot held, which is what the original does. */
+    int chosen_branch;
+    /* Where a composed member name is built. */
+    char member_name[SCRIPT_MEMBER_NAME_BYTES];
+    int xp_round;
+    int wav_slot;
+
+    script_running = 1;
+    offset = 0;
+    wav_slots_used = 0;
+
+    fdps_units_clear_status_bit7();
+
+    archive = fdps_vfs_open(SCRIPT_ARCHIVE_NAME);
+    if (archive == NULL) {
+        printf(SCRIPT_ARCHIVE_MISSING_MESSAGE, SCRIPT_ARCHIVE_NAME);
+        fdps_wait_any_key();
+    }
+
+    script = (unsigned char *) fdps_vfs_load_file(script_name, archive);
+    if (script == NULL) {
+        fdps_wait_any_key();
+    } else {
+        while (script_running) {
+            fdps_flush_keyboard_queue();
+            data_fdps_map_cursor_draw_mode = 0;
+            opcode = script[offset];
+
+            switch (opcode) {
+            case SCRIPT_OP_WALK_UNITS:
+                offset = fdps_icon_script_walk_units(script, offset);
+                break;
+
+            case SCRIPT_OP_FACE_UNITS:
+                offset = fdps_icon_script_set_unit_facing(script, offset);
+                break;
+
+            case SCRIPT_OP_DRAW_TEXT:
+                fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                               (int) script[offset + 1],
+                               (unsigned char *) VGA_SCREEN_BASE,
+                               VGA_SCREEN_PITCH, SCRIPT_TEXT_FG_COLOR,
+                               SCRIPT_TEXT_BG_COLOR,
+                               SCRIPT_TEXT_OUTLINE_COLOR);
+                offset += 2;
+                break;
+
+            case SCRIPT_OP_DEPLOY_WAVE:
+                if (script[offset + 1] == SCRIPT_WAVE_FROM_CHOICE) {
+                    fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                                     chosen_branch, script[offset + 2]);
+                } else {
+                    fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                                     (int) script[offset + 1],
+                                     script[offset + 2]);
+                }
+                offset += 3;
+                break;
+
+            case SCRIPT_OP_SCROLL_VIEW:
+                offset = fdps_icon_script_scroll_view_to_tile(script, offset);
+                break;
+
+            case SCRIPT_OP_PLAY_SAF:
+                sprintf(member_name, SCRIPT_SAF_MEMBER_FORMAT,
+                        (int) script[offset + 1]);
+                fdps_vfs_load_file_or_exit(archive, member_name, &saf_image);
+                fdps_saf_play_over_scene(saf_image);
+                free(saf_image);
+                offset += 2;
+                break;
+
+            case SCRIPT_OP_SET_MUSIC:
+                music_track = (int) script[offset + 1];
+                if (music_track == SCRIPT_MUSIC_SILENCE_OPERAND) {
+                    music_track = SCRIPT_MUSIC_SILENCE;
+                }
+                fdps_cd_set_music_track(music_track);
+                offset += 2;
+                break;
+
+            case SCRIPT_OP_PLAY_WAV:
+                /* The name is composed before the table is checked, so a
+                   twenty-first sound costs the sprintf and nothing else. */
+                sprintf(member_name, SCRIPT_WAV_MEMBER_FORMAT,
+                        (int) script[offset + 1]);
+                if (wav_slots_used < SCRIPT_WAV_SLOTS) {
+                    fdps_vfs_load_file_or_exit(archive, member_name,
+                                               &wav_buffers[wav_slots_used]);
+                    fdps_audio_start_wav(wav_buffers[wav_slots_used],
+                                         SCRIPT_WAV_LOOP_ONCE,
+                                         SCRIPT_WAV_RATE_FROM_HEADER,
+                                         SCRIPT_WAV_VOLUME_FROM_HEADER);
+                    wav_slots_used++;
+                }
+                offset += 2;
+                break;
+
+            case SCRIPT_OP_BLINK_UNITS_OUT:
+                offset = fdps_icon_script_blink_units_out(script, offset);
+                break;
+
+            case SCRIPT_OP_PLACE_UNIT:
+                if ((int) script[offset + 1] < data_fdps_map_unit_count) {
+                    unit = fdps_get_unit_record((int) script[offset + 1]);
+                    unit->pos_x = script[offset + 2];
+                    unit->pos_y = script[offset + 3];
+                    unit->facing = script[offset + 4];
+                }
+                offset += 5;
+                break;
+
+            case SCRIPT_OP_RETIRE_UNIT:
+                if ((int) script[offset + 1] < data_fdps_map_unit_count) {
+                    unit = fdps_get_unit_record((int) script[offset + 1]);
+                    unit->flags = (unsigned char)
+                                  (unit->flags | SCRIPT_UNIT_RETIRED_FLAG);
+                }
+                offset += 2;
+                break;
+
+            case SCRIPT_OP_REVIVE_UNIT:
+                if ((int) script[offset + 1] < data_fdps_map_unit_count) {
+                    unit = fdps_get_unit_record((int) script[offset + 1]);
+                    unit->flags = (unsigned char)
+                                  (unit->flags & ~SCRIPT_UNIT_RETIRED_FLAG);
+                    memset(unit->status_timers, 0,
+                           SCRIPT_UNIT_STATUS_TIMER_BYTES);
+                }
+                offset += 2;
+                break;
+
+            case SCRIPT_OP_SET_VIEW_TILE:
+                data_fdps_battle_view_window_origin_x =
+                    (int) script[offset + 1] * MAP_TILE_PIXELS;
+                data_fdps_battle_view_window_origin_y =
+                    (int) script[offset + 2] * MAP_TILE_PIXELS;
+                data_fdps_map_cursor_world_x =
+                    data_fdps_battle_view_window_origin_x + MAP_TILE_PIXELS;
+                data_fdps_map_cursor_world_y =
+                    data_fdps_battle_view_window_origin_y + MAP_TILE_PIXELS;
+                offset += 3;
+                break;
+
+            case SCRIPT_OP_FADE_OUT:
+                fdps_icon_script_fade_to_black((int) script[offset + 1]);
+                offset += 2;
+                break;
+
+            case SCRIPT_OP_FADE_IN:
+                fdps_icon_script_fade_in((int) script[offset + 1]);
+                offset += 2;
+                break;
+
+            case SCRIPT_OP_SHAKE_VIEW:
+                offset = fdps_icon_script_animate_view_offset(script, offset);
+                break;
+
+            case SCRIPT_OP_SWITCH_MAP:
+                data_fdps_chapter_current_chapter_id =
+                    (int) script[offset + 1];
+                fdps_chapter_state_reset();
+                offset += 2;
+                break;
+
+            case SCRIPT_OP_SET_UNIT_TIMER:
+                /* No bounds check on the unit index and none on the byte
+                   index either, both deliberate: this is the one unit opcode
+                   the original leaves unguarded. */
+                unit = fdps_get_unit_record((int) script[offset + 1]);
+                unit->status_timers[(int) script[offset + 2]
+                                    + SCRIPT_UNIT_TIMER_FIRST_INDEX] =
+                    script[offset + 3];
+                offset += 4;
+                break;
+
+            case SCRIPT_OP_TRIGGER_CELL_EVENT:
+                data_fdps_map_cell_event_triggered_flags[script[offset + 1]] =
+                    script[offset + 2];
+                offset += 3;
+                fdps_map_apply_triggered_cell_changes();
+                break;
+
+            case SCRIPT_OP_SET_MAP_CELL:
+                map_row_stride = (int) *(short *)
+                    (data_fdps_scene_layer_tile_map_ptrs[0]
+                     + SCRIPT_TILE_LAYER_STRIDE_OFFSET);
+                map_cell = data_fdps_scene_layer_tile_map_ptrs[0]
+                           + ((int) script[offset + 1]
+                              + map_row_stride * (int) script[offset + 2]) * 2
+                           + SCRIPT_TILE_LAYER_HEADER_BYTES;
+                /* One 16-bit move in and one out -- MOV DX,word ptr [EDX+3]
+                   then MOV word ptr [EAX],DX -- so the cell takes the two
+                   operand bytes as a word and not as two byte stores. */
+                *(short *) map_cell = *(short *) (script + offset + 3);
+                offset += 5;
+                break;
+
+            case SCRIPT_OP_BIAS_PALETTE:
+                fdps_set_palette_range(
+                    (struct fdps_palette_entry *)
+                        data_fdps_vga_main_palette_ptr,
+                    SCRIPT_PALETTE_FIRST_ENTRY, SCRIPT_PALETTE_LAST_ENTRY,
+                    (int) script[offset + 1], (int) script[offset + 2],
+                    (int) script[offset + 3]);
+                offset += 4;
+                break;
+
+            case SCRIPT_OP_DEBUG_LEVEL_UNIT_3:
+                for (xp_round = 0; xp_round < SCRIPT_XP_AWARD_ROUNDS;
+                     xp_round++) {
+                    data_fdps_battle_pending_xp_credit =
+                        SCRIPT_XP_AWARD_POINTS;
+                    fdps_unit_award_exp_and_level_up(SCRIPT_XP_AWARD_UNIT);
+                }
+                fdps_roster_write_back_battle_units();
+                offset++;
+                break;
+
+            case SCRIPT_OP_ACTOR_BEHAVIOR_STEP:
+                fdps_map_actor_behavior_step((int) script[offset + 1],
+                                             (int) script[offset + 2]);
+                offset += 3;
+                break;
+
+            case SCRIPT_OP_ASK_THREE_WAY:
+                chosen_branch = fdps_icon_script_prompt_three_way_choice();
+                offset++;
+                break;
+
+            default:
+                /* SCRIPT_OP_END lands here too: the ladder gives opcode 0 no
+                   arm of its own and every value it does not recognise ends
+                   the script the same way. */
+                script_running = 0;
+                break;
+            }
+        }
+
+        free(script);
+    }
+
+    free(archive);
+
+    for (wav_slot = 0; wav_slot < wav_slots_used; wav_slot++) {
+        free(wav_buffers[wav_slot]);
+    }
+
+    data_fdps_map_cursor_draw_mode = 1;
 }

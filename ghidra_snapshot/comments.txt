@@ -4317,40 +4317,40 @@ Alignment padding: 13 zero bytes aligning next function entry to 0x21650.
 Runs one IconAni event script: loads the named entry out of IconAni.vfs and interprets its byte-opcode stream until the script says stop. Every scripted cutscene in the game is one of these -- each chapter's opening scene (Icon%02d.dat) and each chapter's victory scene (Win%02d.dat).
 
 Algorithm:
-Clears status bit 7 on every unit through fdps_units_clear_status_bit7, saves the current map number DAT_00069cf4, and opens "IconAni.vfs" with fdps_vfs_open; when that fails it prints "file not found: '%s'", waits for a key and carries on with the null handle anyway. fdps_vfs_load_file(script_name, archive) then reads the script into a buffer, and a null buffer waits for a key and gives up.
-The interpreter loop clears DAT_00069cd0 on every pass, reads the opcode byte at script[offset] and dispatches it through a compare ladder; each handler advances offset past its own operands. b1/b2/b3/b4 below are the operand bytes following the opcode, and the number in brackets is how far offset moves.
+Clears status bit 7 on every unit through fdps_units_clear_status_bit7, saves the current chapter id data_fdps_chapter_current_chapter_id, and opens "IconAni.vfs" with fdps_vfs_open; when that fails it prints "file not found: '%s'", waits for a key and carries on with the null handle anyway. fdps_vfs_load_file(script_name, archive) then reads the script into a buffer, and a null buffer waits for a key and gives up.
+The interpreter loop clears data_fdps_map_cursor_draw_mode on every pass, reads the opcode byte at script[offset] and dispatches it through a compare ladder; each handler advances offset past its own operands. b1/b2/b3/b4 below are the operand bytes following the opcode, and the number in brackets is how far offset moves.
   0x00  end of script -- and so is every opcode the ladder does not recognise
   0x01  fdps_icon_script_walk_units
   0x02  fdps_icon_script_set_unit_facing
-  0x03  fdps_draw_text: text entry b1 of the block at DAT_00060124, drawn straight onto the VGA screen at 0xa0000, pitch 0x140, colours fg 0xd0 / bg 0 / outline 0x6d [2]
-  0x04  fdps_deploy_wave(DAT_00069cf4, b1, b2); b1 == 0xff means "the branch the player picked at opcode 0x63" instead of a literal wave number [3]
+  0x03  fdps_draw_text: text entry b1 of the block at data_fdps_current_chapter_text_ptr, drawn straight onto the VGA screen at 0xa0000, pitch 0x140, colours fg 0xd0 / bg 0 / outline 0x6d [2]
+  0x04  fdps_deploy_wave(data_fdps_chapter_current_chapter_id, b1, b2); b1 == 0xff means "the branch the player picked at opcode 0x63" instead of a literal wave number [3]
   0x05  fdps_icon_script_scroll_view_to_tile
   0x06  loads "Icon%04d.saf" b1 out of the archive, fdps_saf_play_over_scene, free [2]
   0x07  fdps_cd_set_music_track(b1), with 0xff turned into -1, i.e. silence [2]
   0x08  loads "Icon%04d.wav" b1 and starts it with fdps_audio_start_wav(buf, 1, -1, -1); the buffer is parked in a 20-slot stack table and freed only when the script ends. Past the twentieth sound in one script the file is not loaded and nothing plays [2]
   0x09  fdps_icon_script_blink_units_out
-  0x0a  writes b2, b3 and b4 into unit b1's record bytes +0, +1 and +3, when b1 < the unit count DAT_00060150 [5]
+  0x0a  writes b2, b3 and b4 into unit b1's record bytes +0, +1 and +3, when b1 < the unit count data_fdps_map_unit_count [5]
   0x0b  sets bit 0 of unit b1's record byte +5, same bounds check [2]
   0x0c  clears that bit and zeroes the six bytes at record +0x22, same bounds check [2]
-  0x0d  view bounds in pixels: DAT_00069ce4 = b1 * 24, DAT_00069ce0 = b2 * 24, with DAT_00069cd4 and DAT_00069ccc one 24-pixel tile past each [3]
+  0x0d  view window origin in pixels: data_fdps_battle_view_window_origin_x = b1 * 24, data_fdps_battle_view_window_origin_y = b2 * 24, with the map cursor world position data_fdps_map_cursor_world_x and data_fdps_map_cursor_world_y set one 24-pixel tile past each [3]
   0x0e  fdps_icon_script_fade_to_black(b1)
   0x0f  fdps_icon_script_fade_in(b1)
   0x10  fdps_icon_script_animate_view_offset
-  0x11  switches map: DAT_00069cf4 = b1, then fdps_chapter_state_reset [2]
+  0x11  switches chapter: data_fdps_chapter_current_chapter_id = b1, then fdps_chapter_state_reset [2]
   0x12  writes b3 into unit b1's record byte 0x25 + b2 -- the one unit opcode with no bounds check on b1 [4]
-  0x13  DAT_000640d8[b1] = b2, then fdps_map_apply_triggered_cell_changes [3]
-  0x14  writes a 16-bit map cell: the tile layer at DAT_00069cb0 has an 0xb-byte header and a row stride taken from the word at +7, and the cell at column b1, row b2 takes the script's next two bytes [5]
-  0x15  fdps_set_palette_range(DAT_000643bc, 0, 0xff, b1, b2, b3) -- b1/b2/b3 are the per-channel biases [4]
-  0x61  ten times over: sets the pending experience award DAT_00069cec to 99 and hands it to unit 3 through FUN_0001dd30, then banks the party with fdps_roster_write_back_battle_units [1]
+  0x13  data_fdps_map_cell_event_triggered_flags[b1] = b2, then fdps_map_apply_triggered_cell_changes [3]
+  0x14  writes a 16-bit map cell: the tile layer at data_fdps_scene_layer_tile_map_ptrs has an 0xb-byte header and a row stride taken from the word at +7, and the cell at column b1, row b2 takes the script's next two bytes [5]
+  0x15  fdps_set_palette_range(data_fdps_vga_main_palette_ptr, 0, 0xff, b1, b2, b3) -- b1/b2/b3 are the per-channel biases [4]
+  0x61  ten times over: sets the pending experience award data_fdps_battle_pending_xp_credit to 99 and hands it to unit 3 through fdps_unit_award_exp_and_level_up, then banks the party with fdps_roster_write_back_battle_units [1]
   0x62  fdps_map_actor_behavior_step(b1, b2) [3]
   0x63  runs fdps_icon_script_prompt_three_way_choice and keeps the answer for the next opcode 0x04 [1]
-On the way out it frees the script buffer and the archive handle, frees every .wav buffer it parked, and sets DAT_00069cd0 back to 1.
+On the way out it frees the script buffer and the archive handle, frees every .wav buffer it parked, and sets data_fdps_map_cursor_draw_mode back to 1.
 
 Parameters:
   script_name -- name of the script entry inside IconAni.vfs, passed on to fdps_vfs_load_file. Every caller hands it a string literal: "Icon00.dat" is chapter 1's opening scene, "Win00.dat" chapter 1's victory scene.
 
 Returns:
-  Nothing. The epilogue does leave DAT_00069cf4 in EAX and compare it against the copy saved on entry, but the flags are dead and no caller reads the result.
+  Nothing. The epilogue does leave data_fdps_chapter_current_chapter_id in EAX and compare it against the copy saved on entry, but the flags are dead and no caller reads the result.
 
 Pool: fdps  [no Function ID hit in any library; it writes the game's own globals and its only vendor callees are free, memset, sprintf and printf]
 

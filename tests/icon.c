@@ -2260,6 +2260,682 @@ static void choice_a_cancel_at_both_questions_answers_the_third(void)
     CHECK_EQ(choice_column(CHOICE_COL_SECOND_TAKEN), CHOICE_CLEAR_COLOR);
 }
 
+
+/* ---------------------------------------------------------------------------
+   Cover for the interpreter itself, 00021650.
+
+   HOW THE SCRIPTS GET IN.  fdps_icon_script_run holds the archive name as a
+   literal, so nothing a caller passes can point it at another container: the
+   only way to put a chosen opcode in front of the interpreter is to have
+   IconAni.vfs hold it.  The shipped IconAni.vfs cannot be used for that.  Its
+   133 members are the game's own cut-scenes and every one of them opens with
+   an opcode that needs a loaded chapter behind it -- a CD track, a walk over
+   the tile layers, a line of chapter text through a pointer that is null until
+   a chapter has been read -- so running one asserts nothing and faults on the
+   way.  What the cases below therefore run is a container staged here holding
+   fifteen short scripts, built to the layout in resource_info/vfs.md, opened
+   and read by the game's own fdps_vfs_open and fdps_vfs_load_file.  The
+   container format is not what is under test here and is covered against the
+   real containers in tests/vfs.c; what is under test is the ladder that
+   dispatches the bytes, and those bytes are the fixture.
+
+   The staging REFUSES TO OVERWRITE.  If a file of that name is already in the
+   run directory -- the shipped 4.7 MB container, staged by some later addition
+   to tests/gamefile.lst -- every case below skips instead of clobbering it,
+   and the fixture is removed again by the last case in the file.
+
+   WHAT THE SCRIPTS ARE BUILT AROUND.  Almost every one ends with the view
+   opcode 0x0d and then opcode 0, because 0x0d is the one opcode whose whole
+   effect is arithmetic on four globals: putting it after the opcode under test
+   turns "did the offset advance by the right number of bytes" into an
+   assertion, since a wrong advance reads the 0x0d or its operands as something
+   else.  Its own advance is pinned first, by a script that is nothing but two
+   of them.
+
+   Expected values come from the assembly at 00021650: the ladder's own
+   comparisons, each arm's ADD dword ptr [EBP-0x28] for the advance, IMUL
+   EAX,EAX,0x18 and ADD EAX,0x18 for the view arithmetic, AND EAX,0xff at every
+   operand load for the widening, CMP EAX,dword ptr [0x00060150] with JGE for
+   the three bounds-checked unit opcodes and its absence at 00021c48, MOV
+   byte ptr [EBX + 0x25] for the timer opcode's byte, MOVSX EAX,word ptr
+   [EAX + 0x7] with MOV word ptr [EAX],DX for the map cell, and MOV dword ptr
+   [0x00069cd0],0x1 at 00021e12 for the mode the call ends on.
+
+   WHAT IS NOT ASSERTED.  Nine opcodes are not scripted: 1, 2, 9 and 0x10 hand
+   the whole instruction to handlers with their own cases above, 3 draws
+   through a chapter text pointer ticket 23 has not filled, 4 and 0x62 deploy
+   and step map actors, 6 and 8 need .saf and .wav members of the real
+   container, and 0x11 and 0x61 reload a chapter and rewrite the party roster.
+   The twenty-slot .wav table and the frees that empty it on the way out are in
+   the same position: reaching them means loading real samples through the
+   audio driver, and a leak is not observable from inside the process anyway.
+   Opcode 0x63's answer reaching opcode 4 is likewise unreachable from here --
+   it needs both of those.  All of it is playtest ground
+   (rebuild_info/emit_pipeline.md). */
+
+/* 8.3, and the name the interpreter holds.  Written into the run directory the
+   test image starts in. */
+#define SCRIPT_ARCHIVE_FILE "IconAni.vfs"
+
+/* resource_info/vfs.md: 35-byte header, then one 26-byte entry per member,
+   then the member bytes end to end with no gaps. */
+#define SCRIPT_HEADER_BYTES 35
+#define SCRIPT_ENTRY_BYTES 26
+#define SCRIPT_NAME_FIELD_BYTES 13
+#define SCRIPT_SIGNATURE_BYTES 24
+#define SCRIPT_FIXTURE_MEMBERS 15
+
+/* Records staged for the unit opcodes, and how many of them the map says are
+   in play.  The array is longer than the count on purpose: indices 3 and up
+   are what a bounds check is supposed to keep an opcode away from. */
+#define SCRIPT_UNIT_RECORDS 12
+#define SCRIPT_UNIT_COUNT 3
+
+/* Staged into every record's flags byte: bit 7 for the entry sweep to clear
+   and bit 5 for it to leave alone, with bit 0 clear so the retire opcode has
+   something to do. */
+#define SCRIPT_STAGED_FLAGS 0xa0
+#define SCRIPT_SWEPT_FLAGS 0x20
+
+/* The tile layer the map-cell and cell-event opcodes are pointed at: 0xb bytes
+   of header and then the cells.  The row stride goes in the word at +7 and the
+   row count in the word at +9, and the row count is 0 so that the cell-event
+   opcode's sweep over the map has nothing to walk. */
+#define SCRIPT_TILE_LAYER_BYTES 256
+#define SCRIPT_TILE_LAYER_STRIDE 10
+
+/* Where the cell opcode's operands land: column 3 of row 2 at a stride of 10
+   is cell 23, and cell 23 starts at 0xb + 46. */
+#define SCRIPT_CELL_BYTE 57
+
+/* Staged into the four view globals before every run, so that finding a
+   computed value in them says the opcode wrote it. */
+#define SCRIPT_STAGED_ORIGIN_X 0x111
+#define SCRIPT_STAGED_ORIGIN_Y 0x222
+#define SCRIPT_STAGED_CURSOR_X 0x333
+#define SCRIPT_STAGED_CURSOR_Y 0x444
+
+/* Staged into the cursor draw mode, so that finding 1 says the exit wrote the
+   constant rather than put back what it found. */
+#define SCRIPT_STAGED_CURSOR_MODE 4
+
+/* The two keyboard ring indices, staged apart so that a wait for a key returns
+   at once and equal indices afterwards say the wait was entered. */
+#define SCRIPT_QUEUE_HEAD 5
+#define SCRIPT_QUEUE_WRITE 9
+
+/* The view tile almost every script closes on, and the pixels it comes to. */
+#define SCRIPT_TAIL_ORIGIN_X 48
+#define SCRIPT_TAIL_ORIGIN_Y 72
+#define SCRIPT_TAIL_CURSOR_X 72
+#define SCRIPT_TAIL_CURSOR_Y 96
+
+/* The master palette the palette opcode is run against, and the entry read
+   back out of the DAC afterwards. */
+#define SCRIPT_PAL_RED 10
+#define SCRIPT_PAL_GREEN 20
+#define SCRIPT_PAL_BLUE 30
+#define SCRIPT_PAL_PROBE_ENTRY 0x40
+
+static unsigned char script_end_dat[] = { 0x00, 0x0d, 5, 7 };
+static unsigned char script_unk_dat[] = { 0x7f, 0x0d, 5, 7 };
+static unsigned char script_view_dat[] = { 0x0d, 5, 7, 0x00 };
+static unsigned char script_viewu_dat[] = { 0x0d, 0xc8, 0xff, 0x00 };
+static unsigned char script_chain_dat[] = { 0x0d, 1, 2, 0x0d, 3, 4, 0x00 };
+static unsigned char script_place_dat[] =
+    { 0x0a, 1, 0x11, 0x22, 0x33, 0x0d, 2, 3, 0x00 };
+static unsigned char script_placeb_dat[] =
+    { 0x0a, 9, 0x11, 0x22, 0x33, 0x0d, 2, 3, 0x00 };
+static unsigned char script_retire_dat[] = { 0x0b, 1, 0x0d, 2, 3, 0x00 };
+static unsigned char script_revive_dat[] = { 0x0c, 1, 0x0d, 2, 3, 0x00 };
+static unsigned char script_timer_dat[] =
+    { 0x12, 5, 2, 0x77, 0x0d, 2, 3, 0x00 };
+static unsigned char script_cell_dat[] =
+    { 0x14, 3, 2, 0x34, 0x12, 0x0d, 2, 3, 0x00 };
+static unsigned char script_event_dat[] = { 0x13, 4, 1, 0x0d, 2, 3, 0x00 };
+static unsigned char script_scroll_dat[] =
+    { 0x0d, 5, 7, 0x05, 5, 7, 0x0d, 1, 1, 0x00 };
+static unsigned char script_pal_dat[] = { 0x15, 1, 2, 3, 0x0d, 2, 3, 0x00 };
+static unsigned char script_music_dat[] = { 0x07, 0xff, 0x0d, 2, 3, 0x00 };
+
+/* Member names are stored upper-cased, which is what the lookup compares
+   against after it has upper-cased the caller's string in place. */
+static char *script_member_names[SCRIPT_FIXTURE_MEMBERS] = {
+    "TEND.DAT", "TUNK.DAT", "TVIEW.DAT", "TVIEWU.DAT", "TCHAIN.DAT",
+    "TPLACE.DAT", "TPLACEB.DAT", "TRETIRE.DAT", "TREVIVE.DAT", "TTIMER.DAT",
+    "TCELL.DAT", "TEVENT.DAT", "TSCROLL.DAT", "TPAL.DAT", "TMUSIC.DAT"
+};
+
+static unsigned char *script_member_bytes[SCRIPT_FIXTURE_MEMBERS] = {
+    script_end_dat, script_unk_dat, script_view_dat, script_viewu_dat,
+    script_chain_dat, script_place_dat, script_placeb_dat, script_retire_dat,
+    script_revive_dat, script_timer_dat, script_cell_dat, script_event_dat,
+    script_scroll_dat, script_pal_dat, script_music_dat
+};
+
+static int script_member_lengths[SCRIPT_FIXTURE_MEMBERS] = {
+    sizeof(script_end_dat), sizeof(script_unk_dat), sizeof(script_view_dat),
+    sizeof(script_viewu_dat), sizeof(script_chain_dat),
+    sizeof(script_place_dat), sizeof(script_placeb_dat),
+    sizeof(script_retire_dat), sizeof(script_revive_dat),
+    sizeof(script_timer_dat), sizeof(script_cell_dat),
+    sizeof(script_event_dat), sizeof(script_scroll_dat),
+    sizeof(script_pal_dat), sizeof(script_music_dat)
+};
+
+/* 0 not tried yet, 1 staged by us, 2 unusable and every case skips. */
+static int script_archive_state = 0;
+
+static struct fdps_unit_record script_units[SCRIPT_UNIT_RECORDS];
+static unsigned char script_tile_layer[SCRIPT_TILE_LAYER_BYTES];
+static unsigned char script_event_layer[SCRIPT_TILE_LAYER_BYTES];
+static char script_name_buf[16];
+
+static void script_write_word(FILE *fp, int value)
+{
+    unsigned char bytes[2];
+
+    bytes[0] = (unsigned char) (value & 0xff);
+    bytes[1] = (unsigned char) ((value >> 8) & 0xff);
+    fwrite(bytes, 1, 2, fp);
+}
+
+static void script_write_dword(FILE *fp, long value)
+{
+    unsigned char bytes[4];
+
+    bytes[0] = (unsigned char) (value & 0xff);
+    bytes[1] = (unsigned char) ((value >> 8) & 0xff);
+    bytes[2] = (unsigned char) ((value >> 16) & 0xff);
+    bytes[3] = (unsigned char) ((value >> 24) & 0xff);
+    fwrite(bytes, 1, 4, fp);
+}
+
+/* The 13-byte name field: the name, a terminator, and zeroes to the end. */
+static void script_write_name(FILE *fp, char *name)
+{
+    unsigned char field[SCRIPT_NAME_FIELD_BYTES];
+    int i;
+
+    memset(field, 0, sizeof(field));
+    for (i = 0; i < SCRIPT_NAME_FIELD_BYTES - 1 && name[i] != '\0'; i++) {
+        field[i] = (unsigned char) name[i];
+    }
+    fwrite(field, 1, SCRIPT_NAME_FIELD_BYTES, fp);
+}
+
+/* Builds the fixture container once, and answers whether the cases may run.
+   A file of that name that was already there is left alone and the answer is
+   no: it would be the shipped container, and overwriting it would cost the
+   next run a 4.7 MB copy. */
+static int stage_script_archive(void)
+{
+    FILE *fp;
+    long member_at;
+    int i;
+
+    if (script_archive_state != 0) {
+        return script_archive_state == 1;
+    }
+
+    fp = fopen(SCRIPT_ARCHIVE_FILE, "rb");
+    if (fp != NULL) {
+        fclose(fp);
+        script_archive_state = 2;
+        return 0;
+    }
+
+    fp = fopen(SCRIPT_ARCHIVE_FILE, "wb");
+    if (fp == NULL) {
+        script_archive_state = 2;
+        return 0;
+    }
+
+    fwrite("VFS", 1, 3, fp);
+    script_write_word(fp, 1);
+    script_write_word(fp, SCRIPT_HEADER_BYTES);
+    script_write_dword(fp, (long) SCRIPT_FIXTURE_MEMBERS);
+    fwrite("Dynasty Information Co.,", 1, SCRIPT_SIGNATURE_BYTES, fp);
+
+    member_at = (long) SCRIPT_HEADER_BYTES
+                + (long) SCRIPT_FIXTURE_MEMBERS * SCRIPT_ENTRY_BYTES;
+    for (i = 0; i < SCRIPT_FIXTURE_MEMBERS; i++) {
+        script_write_name(fp, script_member_names[i]);
+        script_write_dword(fp, (long) script_member_lengths[i]);
+        script_write_dword(fp, (long) script_member_lengths[i]);
+        fputc(0, fp);
+        script_write_dword(fp, member_at);
+        member_at += script_member_lengths[i];
+    }
+    for (i = 0; i < SCRIPT_FIXTURE_MEMBERS; i++) {
+        fwrite(script_member_bytes[i], 1, script_member_lengths[i], fp);
+    }
+    fclose(fp);
+
+    script_archive_state = 1;
+    return 1;
+}
+
+/* Points the battle unit array, the tile layer and the cell-event layer at
+   storage here, marks a distinctive value in every global an opcode writes,
+   and separates the keyboard ring indices so a wait for a key returns. */
+static void script_stage(void)
+{
+    int unit;
+
+    memset(script_units, 0, sizeof(script_units));
+    for (unit = 0; unit < SCRIPT_UNIT_RECORDS; unit++) {
+        script_units[unit].flags = SCRIPT_STAGED_FLAGS;
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) script_units;
+    data_fdps_map_unit_count = SCRIPT_UNIT_COUNT;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+
+    memset(script_tile_layer, 0, sizeof(script_tile_layer));
+    script_tile_layer[7] = SCRIPT_TILE_LAYER_STRIDE;
+    data_fdps_scene_layer_tile_map_ptrs[0] = script_tile_layer;
+
+    memset(script_event_layer, 0, sizeof(script_event_layer));
+    data_fdps_map_cell_event_code_layer_ptr = script_event_layer;
+    memset(data_fdps_map_cell_event_triggered_flags, 0,
+           sizeof(data_fdps_map_cell_event_triggered_flags));
+
+    data_fdps_battle_view_window_origin_x = SCRIPT_STAGED_ORIGIN_X;
+    data_fdps_battle_view_window_origin_y = SCRIPT_STAGED_ORIGIN_Y;
+    data_fdps_map_cursor_world_x = SCRIPT_STAGED_CURSOR_X;
+    data_fdps_map_cursor_world_y = SCRIPT_STAGED_CURSOR_Y;
+    data_fdps_map_cursor_draw_mode = SCRIPT_STAGED_CURSOR_MODE;
+
+    data_fdps_input_scancode_queue_head = SCRIPT_QUEUE_HEAD;
+    data_fdps_input_scancode_queue_write_index = SCRIPT_QUEUE_WRITE;
+}
+
+/* Runs one member.  The name is copied into writable storage first because the
+   container lookup upper-cases the caller's string in place
+   (resource_info/vfs.md), and the copy is left where a case can look at it. */
+static void script_run(char *member)
+{
+    strcpy(script_name_buf, member);
+    fdps_icon_script_run(script_name_buf);
+}
+
+/* The view the tail of almost every script leaves behind. */
+static void script_check_tail_view(void)
+{
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, SCRIPT_TAIL_ORIGIN_X);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, SCRIPT_TAIL_ORIGIN_Y);
+}
+
+/* CMP byte ptr [EBP + 0xffffff54],0x1 / JC to 0002186d, which is the jump to
+   the arm that clears the running flag: opcode 0 has no arm of its own and
+   falls where an unrecognised opcode falls.  The 0x0d that follows it in the
+   member is never reached, so the view globals are still what the staging put
+   there. */
+static void script_the_end_opcode_stops_the_script(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("tend.dat");
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, SCRIPT_STAGED_ORIGIN_X);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, SCRIPT_STAGED_ORIGIN_Y);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+}
+
+/* The ladder's last two tests are CMP against 0x63 with JZ and then an
+   unconditional JMP to 00021dbd, so a value the ladder does not name ends the
+   script exactly as opcode 0 does rather than being skipped over.  0x7f is
+   above every opcode the ladder knows and below none of them. */
+static void script_an_unknown_opcode_stops_the_script(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("tunk.dat");
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, SCRIPT_STAGED_ORIGIN_X);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, SCRIPT_STAGED_ORIGIN_Y);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+}
+
+/* IMUL EAX,EAX,0x18 on each of the two operands and ADD EAX,0x18 on each
+   result: the operands are tiles, the globals are pixels, and the cursor sits
+   one tile past the origin on both axes.  The first operand is the x and the
+   second the y -- swapping them is the mistake this case catches. */
+static void script_the_view_opcode_scales_the_operands_by_a_tile(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("tview.dat");
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 5 * 24);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 7 * 24);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 5 * 24 + 24);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 7 * 24 + 24);
+}
+
+/* The member name reaches the container lookup, which upper-cases it where it
+   stands.  A run that found the member at all is the other half of it: the
+   handle it was looked up in came back from fdps_vfs_open on the interpreter's
+   own literal, so this is also what says which file that literal names. */
+static void script_the_member_name_reaches_the_lookup(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("tview.dat");
+
+    CHECK_EQ(strcmp(script_name_buf, "TVIEW.DAT"), 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 5 * 24);
+}
+
+/* AND EAX,0xff after each MOV AL: the operands are unsigned bytes, so tile 200
+   is 200 tiles in and not 56 tiles back.  A signed widening would put both of
+   these below zero. */
+static void script_the_view_operands_are_unsigned(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("tviewu.dat");
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 200 * 24);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 255 * 24);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 200 * 24 + 24);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 255 * 24 + 24);
+}
+
+/* ADD dword ptr [EBP + -0x28],0x3 at 00021bb7: the opcode and its two operands
+   are three bytes, so the second view opcode in this member is the next thing
+   dispatched.  An advance of 2 would read the second operand as an opcode and
+   an advance of 4 would read the second opcode's first operand as one. */
+static void script_the_view_opcode_advances_past_its_operands(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("tchain.dat");
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 3 * 24);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 4 * 24);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 3 * 24 + 24);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 4 * 24 + 24);
+}
+
+/* The three stores at 00021ab5, 00021ac3 and 00021ad2 land on record bytes +0,
+   +1 and +3 from operands 2, 3 and 4.  Byte +2 is stepped over, so the sprite
+   cache slot keeps whatever it held -- reading the three operands as three
+   consecutive bytes is the mistake this case catches.  The view opcode behind
+   it pins the advance of 5. */
+static void script_place_writes_the_position_and_the_facing(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_units[1].sprite_cache_slot = 0x5a;
+    script_run("tplace.dat");
+
+    CHECK_EQ(script_units[1].pos_x, 0x11);
+    CHECK_EQ(script_units[1].pos_y, 0x22);
+    CHECK_EQ(script_units[1].facing, 0x33);
+    CHECK_EQ(script_units[1].sprite_cache_slot, 0x5a);
+    script_check_tail_view();
+}
+
+/* CMP EAX,dword ptr [0x00060150] / JGE 00021ad5 at 00021a87: an index at or
+   above the map's unit count skips all three stores.  The jump lands on the
+   ADD, not past it, so the offset still advances by 5 and the view opcode
+   behind it still runs -- a bounds check written round the whole arm would
+   lose the rest of the script. */
+static void script_place_is_bounded_by_the_unit_count(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("tplaceb.dat");
+
+    CHECK_EQ(script_units[9].pos_x, 0);
+    CHECK_EQ(script_units[9].pos_y, 0);
+    CHECK_EQ(script_units[9].facing, 0);
+    script_check_tail_view();
+}
+
+/* OR byte ptr [EAX + 0x5],0x1 at 00021b11: bit 0 is set and the other seven
+   are kept, so a record that came in with bit 5 up still has it.  Bit 7 is
+   down because the entry sweep took it, which is the other thing this case
+   shows -- an assignment of 1 would leave 1 here and a missing sweep 0xa1. */
+static void script_retire_sets_bit_zero_and_keeps_the_rest(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("tretire.dat");
+
+    CHECK_EQ(script_units[1].flags, SCRIPT_SWEPT_FLAGS | 1);
+    script_check_tail_view();
+}
+
+/* AND byte ptr [EAX + 0x5],0xfe at 00021b51 and then memset of six bytes at
+   record +0x22.  Bit 5 survives the AND and the byte after the six timers
+   survives the memset: a memset of the whole tail of the record, or of the
+   nine-byte gap that follows the timers, would take it. */
+static void script_revive_clears_bit_zero_and_the_six_timers(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_units[1].flags = SCRIPT_STAGED_FLAGS | 1;
+    memset(script_units[1].status_timers, 0x5a,
+           sizeof(script_units[1].status_timers));
+    script_units[1].gap_028[0] = 0x5a;
+    script_run("trevive.dat");
+
+    CHECK_EQ(script_units[1].flags, SCRIPT_SWEPT_FLAGS);
+    CHECK_EQ(script_units[1].status_timers[0], 0);
+    CHECK_EQ(script_units[1].status_timers[5], 0);
+    CHECK_EQ(script_units[1].gap_028[0], 0x5a);
+    script_check_tail_view();
+}
+
+/* 00021c39 has no CMP against the unit count at all, and the store is MOV
+   byte ptr [EBX + 0x25] where EBX is the record plus the second operand: unit
+   5 is past the map's count of 3 and is written anyway, at record byte
+   0x25 + 2, which is status_timers[5].  Adding the bounds check its two
+   neighbours make would lose the write (rebuild_info/pitfalls.md). */
+static void script_the_timer_opcode_has_no_bounds_check(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("ttimer.dat");
+
+    CHECK_EQ(script_units[5].status_timers[5], 0x77);
+    CHECK_EQ(script_units[5].status_timers[3], 0);
+    CHECK_EQ(script_units[5].status_timers[4], 0);
+    script_check_tail_view();
+}
+
+/* MOVSX EAX,word ptr [EAX + 0x7] for the row stride, ADD EAX,EAX for the
+   two-byte cell and ADD EAX,0xb for the header, then one MOV word ptr
+   [EAX],DX: column 3 of row 2 at a stride of 10 is cell 23, and its two bytes
+   take the script's next two as a word.  The cells either side of it are
+   untouched, which is what an addressing error would show up in. */
+static void script_the_cell_opcode_writes_one_word_at_the_stride(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("tcell.dat");
+
+    CHECK_EQ(script_tile_layer[SCRIPT_CELL_BYTE], 0x34);
+    CHECK_EQ(script_tile_layer[SCRIPT_CELL_BYTE + 1], 0x12);
+    CHECK_EQ(script_tile_layer[SCRIPT_CELL_BYTE - 1], 0);
+    CHECK_EQ(script_tile_layer[SCRIPT_CELL_BYTE + 2], 0);
+    script_check_tail_view();
+}
+
+/* MOV byte ptr [EBX + 0x640d8],AL at 00021c8f: the first operand indexes the
+   triggered-event table and the second is the value written into it, and only
+   that one element moves.  The sweep the arm calls afterwards has a row count
+   of 0 to walk here, so what is asserted is the store and the advance of 3. */
+static void script_the_event_opcode_sets_one_flag(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("tevent.dat");
+
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[4], 1);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[3], 0);
+    CHECK_EQ(data_fdps_map_cell_event_triggered_flags[5], 0);
+    script_check_tail_view();
+}
+
+/* MOV dword ptr [EBP + -0x28],EAX at 00021958: the scroll handler owns its own
+   operands and hands back where the next opcode starts, and the interpreter
+   takes that as the script position rather than adding a constant of its own.
+   The member puts the view on the tile the scroll targets first, so the scroll
+   renders nothing, and closes with a view opcode that only runs if the
+   returned position was used. */
+static void script_a_handler_return_becomes_the_script_position(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("tscroll.dat");
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 24);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 24);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 48);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 48);
+}
+
+/* PUSH of operands 3, 2 and 1 in that order ahead of PUSH 0xff / PUSH 0x0 /
+   PUSH dword ptr [0x000643bc]: the three operands are the red, green and blue
+   biases in that order, applied to all 256 entries of the master palette.
+   Reading them in any other order is what this case catches, which is why the
+   three staged components and the three biases are all different. */
+static void script_the_palette_opcode_biases_each_channel(void)
+{
+    int components[3];
+    int origin_x;
+
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    save_dac();
+    stage_uniform_palette(SCRIPT_PAL_RED, SCRIPT_PAL_GREEN, SCRIPT_PAL_BLUE);
+    script_run("tpal.dat");
+    read_dac_entry(SCRIPT_PAL_PROBE_ENTRY, components);
+    origin_x = data_fdps_battle_view_window_origin_x;
+    restore_dac();
+
+    CHECK_EQ(components[0], SCRIPT_PAL_RED + 1);
+    CHECK_EQ(components[1], SCRIPT_PAL_GREEN + 2);
+    CHECK_EQ(components[2], SCRIPT_PAL_BLUE + 3);
+    CHECK_EQ(origin_x, SCRIPT_TAIL_ORIGIN_X);
+}
+
+/* CMP dword ptr [EBP + -0x20],0xff / JNZ 000219d4 with MOV dword ptr
+   [EBP + -0x20],0xffffffff between them: the operand 0xff is the script's way
+   of asking for silence and is rewritten to -1 before the music layer sees it.
+   Handing the byte straight over would publish 255 and ask the drive for track
+   256. */
+static void script_the_music_operand_ff_becomes_silence(void)
+{
+    unsigned char saved_bgm_enabled;
+
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    saved_bgm_enabled = data_fdps_audio_bgm_enabled_flag;
+    data_fdps_audio_bgm_enabled_flag = 1;
+    data_fdps_audio_cd_current_music_index = 7;
+    script_run("tmusic.dat");
+    data_fdps_audio_bgm_enabled_flag = saved_bgm_enabled;
+
+    CHECK_EQ(data_fdps_audio_cd_current_music_index, -1);
+    script_check_tail_view();
+}
+
+/* CMP dword ptr [EBP + -0x30],0x0 / JNZ 000216ce at 000216be: a member the
+   container does not hold leaves the load with nothing, and the arm waits for
+   a key and jumps past the whole interpreter loop.  Nothing is dispatched, so
+   the view globals are untouched; the wait was entered, so the two ring
+   indices are equal; and the exit still runs, so the cursor draw mode is 1. */
+static void script_a_missing_member_runs_no_opcode(void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("tnosuch.dat");
+
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, SCRIPT_STAGED_ORIGIN_X);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, SCRIPT_STAGED_ORIGIN_Y);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, SCRIPT_QUEUE_HEAD);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+}
+
+/* CALL 0002db50 at 0002166e, before the container is even opened: every unit
+   the map counts loses bit 7 whatever becomes of the script.  The sweep stops
+   at the count, so the records past it keep theirs -- this is the case that
+   would catch a sweep run over the whole array. */
+static void script_the_entry_sweep_clears_bit_seven_and_stops_at_the_count(
+    void)
+{
+    if (!stage_script_archive()) {
+        return;
+    }
+    script_stage();
+    script_run("tnosuch.dat");
+
+    CHECK_EQ(script_units[0].flags, SCRIPT_SWEPT_FLAGS);
+    CHECK_EQ(script_units[2].flags, SCRIPT_SWEPT_FLAGS);
+    CHECK_EQ(script_units[3].flags, SCRIPT_STAGED_FLAGS);
+    CHECK_EQ(script_units[9].flags, SCRIPT_STAGED_FLAGS);
+}
+
+/* Removes the fixture container again.  It is a test rather than a teardown
+   hook because the harness has no hook, and it asserts the removal so that a
+   fixture left behind is reported instead of silently outliving the run. */
+static void script_the_fixture_container_is_cleaned_up(void)
+{
+    FILE *fp;
+
+    if (script_archive_state != 1) {
+        return;
+    }
+    remove(SCRIPT_ARCHIVE_FILE);
+    script_archive_state = 2;
+
+    fp = fopen(SCRIPT_ARCHIVE_FILE, "rb");
+    if (fp != NULL) {
+        fclose(fp);
+    }
+    CHECK_EQ(fp == NULL, 1);
+}
+
 void run_icon_tests(void)
 {
     RUN_TEST(the_dac_reads_back_what_was_written);
@@ -2312,4 +2988,23 @@ void run_icon_tests(void)
     RUN_TEST(choice_the_right_option_twice_answers_the_third);
     RUN_TEST(choice_a_cancel_at_the_first_question_asks_the_second);
     RUN_TEST(choice_a_cancel_at_both_questions_answers_the_third);
+    RUN_TEST(script_the_end_opcode_stops_the_script);
+    RUN_TEST(script_an_unknown_opcode_stops_the_script);
+    RUN_TEST(script_the_view_opcode_scales_the_operands_by_a_tile);
+    RUN_TEST(script_the_member_name_reaches_the_lookup);
+    RUN_TEST(script_the_view_operands_are_unsigned);
+    RUN_TEST(script_the_view_opcode_advances_past_its_operands);
+    RUN_TEST(script_place_writes_the_position_and_the_facing);
+    RUN_TEST(script_place_is_bounded_by_the_unit_count);
+    RUN_TEST(script_retire_sets_bit_zero_and_keeps_the_rest);
+    RUN_TEST(script_revive_clears_bit_zero_and_the_six_timers);
+    RUN_TEST(script_the_timer_opcode_has_no_bounds_check);
+    RUN_TEST(script_the_cell_opcode_writes_one_word_at_the_stride);
+    RUN_TEST(script_the_event_opcode_sets_one_flag);
+    RUN_TEST(script_a_handler_return_becomes_the_script_position);
+    RUN_TEST(script_the_palette_opcode_biases_each_channel);
+    RUN_TEST(script_the_music_operand_ff_becomes_silence);
+    RUN_TEST(script_a_missing_member_runs_no_opcode);
+    RUN_TEST(script_the_entry_sweep_clears_bit_seven_and_stops_at_the_count);
+    RUN_TEST(script_the_fixture_container_is_cleaned_up);
 }

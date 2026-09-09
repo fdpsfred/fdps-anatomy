@@ -244,4 +244,29 @@ extern int fdps_icon_script_animate_view_offset(unsigned char *script,
 extern int fdps_icon_script_prompt_three_way_choice(void);
 #pragma aux fdps_icon_script_prompt_three_way_choice "*" parm caller [];
 
+/* Runs one cut-scene.  script_name is the member of IconAni.vfs to run, and it
+   is the only thing a caller supplies: the archive's own name is held here, so
+   there is no way to run a script out of anything else.  All 67 call sites
+   hand it a string literal -- "Icon00.dat" is chapter 1's opening scene,
+   "Win00.dat" chapter 1's victory scene.
+
+   THE STRING IS WRITTEN THROUGH.  The lookup inside fdps_vfs_load_file
+   upper-cases the name in the caller's own buffer (resource_info/vfs.md), so
+   a caller's literal comes back upper-cased and a caller that passes read-only
+   storage faults.  That is the container reader's contract, not this
+   function's, but it is the caller of this function that meets it.
+
+   Returns nothing.  The archive failing to open is announced on stdout and
+   then carried on from with the null handle; the script member failing to load
+   ends the call after a keypress, with no opcode run.
+
+   On the way out the map cursor draw mode data_fdps_map_cursor_draw_mode
+   (gamedata.h) is left at 1 whatever it held on entry, and every unit has had
+   status bit 7 cleared -- that happens first, before the archive is even
+   opened, so it happens even for a script that cannot be found.
+
+   The interpreter and its opcodes are documented on the definition. */
+extern void fdps_icon_script_run(char *script_name);
+#pragma aux fdps_icon_script_run "*" parm caller [];
+
 #endif
