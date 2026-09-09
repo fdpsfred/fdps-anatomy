@@ -56,4 +56,56 @@
 extern int fdps_battle_system_submenu(void);
 #pragma aux fdps_battle_system_submenu "*" parm caller [];
 
+/* 000184f0.  Offers the unit that has just finished acting the chance to
+   search the special map cell standing under the map cursor, and hands over
+   whatever that cell holds.  Takes the searching unit's index in the battle
+   unit array and returns nothing; everything it does is to that unit's bag,
+   to the party's gold, to the cell's own record and to the screen.  Its one
+   caller, fdps_battle_action_menu, passes the unit whose turn it is.
+
+   WHICH CELLS IT WILL SEARCH.  The cursor's world pixel is divided by the
+   24-pixel tile size and handed to fdps_map_load_tile_info (maptile.h); the
+   cell is searchable when the 0x60 field of its tile attribute byte is 0x20,
+   the chest class, or 0x40, the buried-treasure class, and 0x00 and 0x60 are
+   both refused.  A cell whose event code is already flagged in
+   data_fdps_map_cell_event_triggered_flags (gamedata.h) is refused as well.
+   On a refusal nothing at all happens: no window is opened and no global is
+   written.
+
+   WHAT A CELL HOLDS is a three-byte record in the resident MAP%02d.DAT block,
+   at offset 0x53 plus three times the cell's event code -- directly behind the
+   two-byte per-cell event table maptile.h describes at 0x33.  Byte 0 is the
+   kind and the word at byte 1 is the payload:
+
+     kind 0, an item: the payload is the ITEM.DAT id, added to the searching
+       unit's bag.  When it fits, the cell is flagged searched and
+       fdps_map_apply_triggered_cell_changes turns its tile over.
+     kind 1, money: the payload is added to data_fdps_shared_party_total_gold,
+       and the cell is flagged and turned over the same way.  A payload of zero
+       is a legal cell with its own line, not an empty one.
+     kind 2 and above, scripted: the payload -- not the kind -- indexes
+       data_fdps_chapter_event_handler_table (chapter.h), and that handler is
+       called with the same unit index after a 200 ms pause and the panel
+       coming down.  The flag and the tile are left entirely to it.
+
+   THE ITEM-FOR-ITEM TRADE DOES NOT CONSUME THE CELL.  When the bag is full the
+   player is asked again, and on yes the item list opens on the unit's own bag:
+   the entry chosen is removed, the cell's item takes its place, and the id of
+   the item given away is written back into the cell record's payload word.
+   The searched flag is NOT set on this path and the map is NOT repainted, so
+   the cell is still searchable and now holds the traded-away item -- flagging
+   the cell whenever the player accepts an item, which is the obvious way to
+   write it, loses that.
+
+   THE "FOUND IT" LINE IS DRAWN BEFORE THE BAG IS TRIED, so it appears even on
+   the run that turns out to have no room and goes on to offer the trade.
+
+   IT IS MODAL THROUGHOUT: two prompts through fdps_prompt_two_choice and, on
+   the trade path, the whole item list window (unititem.h).  It leaves the
+   message panel closed on every path that opened it, and it repaints nothing
+   of the map itself except through
+   fdps_map_apply_triggered_cell_changes. */
+extern void fdps_battle_search_cell_at_cursor(int unit_index);
+#pragma aux fdps_battle_search_cell_at_cursor "*" parm caller [];
+
 #endif

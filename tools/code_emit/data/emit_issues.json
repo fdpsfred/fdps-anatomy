@@ -2391,5 +2391,20 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "000184f0": [
+    {
+      "what": "The ACCEPTED item-for-item trade is emitted but not exercised by a unit test. What the code does is settled against the assembly and against the emitted object: fdps_unit_get_item_id is called before fdps_unit_remove_item (00018705 before 00018718), fdps_unit_add_item is then given the CELL's payload and not the discarded id (PUSH [EBP-0x14] at 00018720), the discarded id is written back into the cell record as a 16-bit store (MOV word ptr [EDX+0x54],AX at 00018741), data_fdps_dialog_subst_text_id_2 gets that id plus 0xc9, and neither data_fdps_map_cell_event_triggered_flags nor fdps_map_apply_triggered_cell_changes is touched on this path -- so the cell stays searchable holding the traded-away item. What is missing is a run that proves it. Reaching the arm means answering yes to the bag-full prompt, which opens the whole unit status window over the real Status.cel inside MISC.VFS and paints the panel through the number sheet, the gauge sheet, the sprite cache, the font and the item table; that is a second copy of tests/unititem.c's window fixture inside a test image whose headroom is a documented hazard (rebuild_info/emit_pipeline.md), so the DECLINED trade is covered instead and this arm is left as a playtest contract.",
+      "needs": "Either a playtest: on a real run, stand a unit with all eight inventory entries occupied on a chest cell, accept the search, accept the swap, and check that the item offered up is the one now in the cell and that the cell can be searched a second time and hands it back. Or, if tests/btlmenu.c is ever allowed to grow, the tests/unititem.c window fixture ported into it so the arm can be driven end to end.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same concern independently. What my pass adds is a second, stronger line of evidence that the arm is emitted correctly even though it is not run: besides confirming the assembly at 00018705 / 00018718 / 00018720 / 00018741 / 0001875c, I disassembled the emitted BTLMENU.OBJ and read the arm at 08af..093d, where get_item_id is called before remove_item (08b5 before 08c6), add_item is handed -1cH[ebp] and not the discarded id (08ce), the write-back is the 16-bit `mov +54H[edx],ax` (08ed), and there is no store to data_fdps_map_cell_event_triggered_flags and no call to fdps_map_apply_triggered_cell_changes anywhere between 08af and the jump out at 093d. So what remains unproven is only the end-to-end runtime behaviour, not the shape of the code. I also confirmed the stated blocker is real and not an excuse: the arm calls the real fdps_unit_item_select_window @000259c0, which unititem.h documents as owning the Status.cel frame, a screen copy and the list rectangle for the duration, so it cannot be reached from a unit test without that whole fixture.",
+      "needs": "A playtest run: stand a unit with all eight inventory entries occupied on a chest cell, accept the search, accept the swap, then check that the item offered up is the one the cell now holds and that the cell can be searched a second time and hands it back.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

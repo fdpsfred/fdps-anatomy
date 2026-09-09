@@ -3368,6 +3368,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x117"
+    },
+    "000184f0": {
+      "name": "fdps_battle_search_cell_at_cursor",
+      "target": "btlmenu.c",
+      "body_size": "0x43e",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x43e"
     }
   }
 }

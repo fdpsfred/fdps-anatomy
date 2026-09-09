@@ -24,12 +24,16 @@
 #include <i86.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "audio.h"
+#include "chapter.h"
 #include "keybd.h"
 #include "mapdraw.h"
+#include "maptile.h"
 #include "menu.h"
 #include "msgwin.h"
 #include "text.h"
 #include "unit.h"
+#include "unititem.h"
 #include "btlend.h"
 #include "savefile.h"
 #include "btlmenu.h"
@@ -459,4 +463,298 @@ int fdps_battle_system_submenu(void)
             return SUBMENU_DONE;
         }
     }
+}
+
+/* The 0x60 field of a tile's attribute byte is a four-value enumeration and
+   not two independent bits -- maptile.c says so from the other side, where
+   fdps_map_find_chest_cell wants exactly 0x20 and the repaint pass takes 0x20
+   and 0x60.  The search below takes the two the player can be offered: the
+   chest class 0x20 and the buried-treasure class 0x40, spelled as the pair of
+   rejections CMP dword ptr [EBP-0xc],0x0 at 00018550 and CMP ...,0x60 at
+   00018556. */
+#define CELL_CLASS_MASK 0x60
+#define CELL_CLASS_NONE 0x00
+#define CELL_CLASS_CHEST 0x20
+#define CELL_CLASS_BURIED 0x40
+#define CELL_CLASS_RESERVED 0x60
+
+/* The searchable-cell table inside the resident MAP%02d.DAT block: three
+   bytes per cell event code, from the MOVSX word ptr [EAX+0x54] at 00018600
+   and the MOV AL,byte ptr [EDX+0x53] at 00018617 against an index scaled by
+   LEA EAX,[EAX+EAX*0x2].  It sits directly behind the two-byte per-cell event
+   table maptile.h describes at 0x33: sixteen entries of two bytes end exactly
+   at 0x53.
+
+   THE KIND BYTE IS WIDENED WITHOUT SIGN AND THE PAYLOAD WORD WITH IT.  The
+   kind is XOR EAX,EAX / MOV AL and the payload is MOVSX, so a payload with the
+   top bit set is a negative amount of gold rather than a large one, and that
+   is the arithmetic the money arm does (contract C). */
+#define SEARCH_CELL_KIND_AT 0x53
+#define SEARCH_CELL_PAYLOAD_AT 0x54
+#define SEARCH_CELL_RECORD_BYTES 3
+
+/* What the kind byte selects, from CMP dword ptr [EBP-0x18],0x0 at 0001861d
+   and CMP ...,0x1 at 00018818.  Everything from 2 up is the scripted class and
+   there is no upper test on it. */
+#define SEARCH_CELL_KIND_ITEM 0
+#define SEARCH_CELL_KIND_MONEY 1
+
+/* The nine entries of data_fdps_all_game_text_ptr this function draws, pushed
+   at 000185c0 (through the slot at [EBP-0x8]), 00018660, 000186b4, 0001877e,
+   000187ba, 000187fb, 0001885c, 00018884 and 0001890f.  Each name says which
+   branch draws the line, which is what the assembly settles; the strings
+   themselves live in the chapter text block and are not read here. */
+#define TEXT_SEARCH_CHEST_PROMPT 0x20a
+#define TEXT_SEARCH_BURIED_PROMPT 0x20b
+#define TEXT_SEARCH_DECLINED 0x20c
+#define TEXT_SEARCH_ITEM_TAKEN 0x20d
+#define TEXT_SEARCH_BAG_FULL 0x20e
+#define TEXT_SEARCH_ITEM_SWAPPED 0x20f
+#define TEXT_SEARCH_NOTHING_TAKEN 0x210
+#define TEXT_SEARCH_MONEY_NONE 0x211
+#define TEXT_SEARCH_MONEY_TAKEN 0x212
+
+/* Where an item's name sits in the one text block: entry 0xc9 plus its
+   ITEM.DAT id, ADD EAX,0xc9 at 0001862a and 0001875c.  The same numbering the
+   shop, the status panel and the death scripts add. */
+#define ITEM_NAME_TEXT_BASE 0xc9
+
+/* What the two inventory calls answer with: fdps_unit_add_item's -1 for a full
+   bag, tested by CMP EAX,-0x1 at 00018683, and the item list's -1 for a
+   cancel, tested by CMP dword ptr [EBP-0x1c],-0x1 at 000186f3 (unititem.h).
+   The 0 pushed at 000186e2 is the list's usable_only argument: any entry the
+   cursor is on may be offered up, not only a usable one. */
+#define ADD_ITEM_BAG_FULL (-1)
+#define ITEM_SELECT_CANCELLED (-1)
+#define ITEM_SELECT_ANY_ENTRY 0
+
+/* How long the scripted class is left on the closed panel before the handler
+   takes over, PUSH 0xc8 at 000188b8. */
+#define SCRIPTED_CELL_HOLD_MS 200
+
+/* The sound the search plays once the player has said yes, PUSH 0x61600 at
+   000185e4.  It is passed as a writable string because the lookup upper-cases
+   it in the caller's own storage (audio.h, rebuild_info/pitfalls.md). */
+#define SEARCH_CONFIRMED_SOUND "Chess.wav"
+
+/* 000184f0.  See btlmenu.h for what a cell can hold and what each answer
+   does.
+
+   THE GUARDS ARE WRITTEN AS EARLY RETURNS.  The original is one `if` around
+   the whole body with a single epilogue; the arms below return instead, which
+   is the same program with the nesting taken out (ADR-0001).
+
+   EVERY LINE GOES TO THE PANEL'S FIRST TEXT ROW.  All nine calls push 0xaa44a
+   -- MESSAGE_QUESTION_AT above, named for the row and not for the kind of line
+   -- with the same pitch and the same three colours, so an answer replaces the
+   question in place rather than appearing under it the way the system
+   submenu's answers do.
+
+   THE PANEL IS CLOSED AND REOPENED BETWEEN THE QUESTION AND THE ANSWER on
+   every arm but one.  The exception is the bag-full line at 000186a1, which is
+   drawn over the window the item line is already on; every other transition
+   runs fdps_message_window_close followed by a fresh fdps_message_window_open
+   on the same portrait.
+
+   THE CELL RECORD IS REACHED THROUGH data_fdps_tile_event_data_table_ptr FOUR
+   TIMES and the pointer is loaded from the global on each of them, so a
+   handler that moved the block between two of them would be seen. */
+void fdps_battle_search_cell_at_cursor(int unit_index)
+{
+    /* The unit doing the searching, resolved once at 00018573 and read only
+       for the portrait byte every window below is opened on. */
+    struct fdps_unit_record *searching_unit;
+    /* The cell's event code, latched out of the tile-info block before the
+       first prompt: it indexes both the searched-flag table and the cell
+       record, and fdps_map_apply_triggered_cell_changes overwrites the
+       tile-info globals with the map's last cell on its way past. */
+    int cell_event_code;
+    /* Which of the four values the attribute byte's 0x60 field holds. */
+    int cell_class;
+    /* Which of the two questions this class asks. */
+    int prompt_text_id;
+    /* What the last modal thing answered.  The original keeps both prompts'
+       answers and the item list's in one stack slot, [EBP-0x1c]: 0 is the
+       prompt's yes and -1 is the item list's cancel. */
+    int menu_answer;
+    /* The cell record's kind byte and its payload word -- an item id, an
+       amount of gold or a chapter-event handler index, decided by the kind. */
+    int cell_kind;
+    int cell_payload;
+    /* The inventory slot the player offers up when the bag is full, and the id
+       of the item that was in it.  The slot is zeroed at 000184fc, before
+       anything can ask for it, and the item list writes into it. */
+    int offered_slot;
+    int offered_item_id;
+
+    offered_slot = 0;
+
+    fdps_map_load_tile_info(data_fdps_map_cursor_world_x / MAP_TILE_SIZE,
+                            data_fdps_map_cursor_world_y / MAP_TILE_SIZE);
+    cell_event_code = (int) data_fdps_map_current_cell_event_code;
+    cell_class = (int) (data_fdps_map_current_tile_attr_flags
+                        & CELL_CLASS_MASK);
+
+    if (cell_class == CELL_CLASS_NONE || cell_class == CELL_CLASS_RESERVED) {
+        return;
+    }
+    if (data_fdps_map_cell_event_triggered_flags[cell_event_code] != 0) {
+        return;
+    }
+
+    searching_unit = fdps_get_unit_record(unit_index);
+    fdps_message_window_open((int) searching_unit->portrait_id);
+
+    if ((cell_class & CELL_CLASS_MASK) == CELL_CLASS_CHEST) {
+        prompt_text_id = TEXT_SEARCH_CHEST_PROMPT;
+    } else {
+        prompt_text_id = TEXT_SEARCH_BURIED_PROMPT;
+    }
+    fdps_draw_text(data_fdps_all_game_text_ptr, prompt_text_id,
+                   (unsigned char *) MESSAGE_QUESTION_AT, VGA_SCREEN_PITCH,
+                   MESSAGE_TEXT_FG_COLOR, MESSAGE_TEXT_BG_COLOR,
+                   MESSAGE_TEXT_OUTLINE_COLOR);
+    menu_answer = fdps_prompt_two_choice();
+
+    if (menu_answer != PROMPT_ANSWER_YES) {
+        fdps_message_window_close();
+        fdps_message_window_open((int) searching_unit->portrait_id);
+        fdps_draw_text(data_fdps_all_game_text_ptr, TEXT_SEARCH_DECLINED,
+                       (unsigned char *) MESSAGE_QUESTION_AT,
+                       VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                       MESSAGE_TEXT_BG_COLOR, MESSAGE_TEXT_OUTLINE_COLOR);
+        fdps_message_window_close();
+        return;
+    }
+
+    fdps_play_sfx(SEARCH_CONFIRMED_SOUND);
+    cell_payload = (int) *(short *) (data_fdps_tile_event_data_table_ptr
+                                     + SEARCH_CELL_PAYLOAD_AT
+                                     + cell_event_code
+                                       * SEARCH_CELL_RECORD_BYTES);
+    cell_kind = (int) data_fdps_tile_event_data_table_ptr[
+                          SEARCH_CELL_KIND_AT
+                          + cell_event_code * SEARCH_CELL_RECORD_BYTES];
+
+    if (cell_kind == SEARCH_CELL_KIND_ITEM) {
+        /* The name of what was found is published before the line that reads
+           it, and the line is drawn BEFORE the bag is asked whether it fits:
+           the player is told the item was found even on the run where it
+           turns out there is no room for it. */
+        data_fdps_dialog_last_action_text_id_param = cell_payload
+                                                     + ITEM_NAME_TEXT_BASE;
+        fdps_message_window_close();
+        fdps_message_window_open((int) searching_unit->portrait_id);
+        fdps_draw_text(data_fdps_all_game_text_ptr, TEXT_SEARCH_ITEM_TAKEN,
+                       (unsigned char *) MESSAGE_QUESTION_AT,
+                       VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                       MESSAGE_TEXT_BG_COLOR, MESSAGE_TEXT_OUTLINE_COLOR);
+
+        if (fdps_unit_add_item(unit_index, cell_payload)
+                != ADD_ITEM_BAG_FULL) {
+            data_fdps_map_cell_event_triggered_flags[cell_event_code] = 1;
+            fdps_message_window_close();
+            fdps_map_apply_triggered_cell_changes();
+            return;
+        }
+
+        fdps_draw_text(data_fdps_all_game_text_ptr, TEXT_SEARCH_BAG_FULL,
+                       (unsigned char *) MESSAGE_QUESTION_AT,
+                       VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                       MESSAGE_TEXT_BG_COLOR, MESSAGE_TEXT_OUTLINE_COLOR);
+        menu_answer = fdps_prompt_two_choice();
+        fdps_message_window_close();
+
+        if (menu_answer != PROMPT_ANSWER_YES) {
+            fdps_message_window_open((int) searching_unit->portrait_id);
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           TEXT_SEARCH_NOTHING_TAKEN,
+                           (unsigned char *) MESSAGE_QUESTION_AT,
+                           VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                           MESSAGE_TEXT_BG_COLOR,
+                           MESSAGE_TEXT_OUTLINE_COLOR);
+            fdps_message_window_close();
+            return;
+        }
+
+        menu_answer = fdps_unit_item_select_window(unit_index,
+                                                   ITEM_SELECT_ANY_ENTRY,
+                                                   &offered_slot);
+        if (menu_answer == ITEM_SELECT_CANCELLED) {
+            fdps_message_window_open((int) searching_unit->portrait_id);
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           TEXT_SEARCH_NOTHING_TAKEN,
+                           (unsigned char *) MESSAGE_QUESTION_AT,
+                           VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                           MESSAGE_TEXT_BG_COLOR,
+                           MESSAGE_TEXT_OUTLINE_COLOR);
+            fdps_message_window_close();
+            return;
+        }
+
+        /* The trade.  The id is read out of the slot BEFORE the entry is
+           removed, because removing one packs the entries below it up
+           (unititem.h), and the cell record then keeps the item that was given
+           away -- data_fdps_map_cell_event_triggered_flags is NOT set on this
+           path and the map is NOT repainted, so the cell can be searched again
+           and hands the traded item back. */
+        offered_item_id = fdps_unit_get_item_id(unit_index, offered_slot);
+        fdps_unit_remove_item(unit_index, offered_slot);
+        fdps_unit_add_item(unit_index, cell_payload);
+        *(short *) (data_fdps_tile_event_data_table_ptr
+                    + SEARCH_CELL_PAYLOAD_AT
+                    + cell_event_code * SEARCH_CELL_RECORD_BYTES) =
+            (short) offered_item_id;
+        fdps_message_window_open((int) searching_unit->portrait_id);
+        data_fdps_dialog_subst_text_id_2 = offered_item_id
+                                           + ITEM_NAME_TEXT_BASE;
+        fdps_draw_text(data_fdps_all_game_text_ptr, TEXT_SEARCH_ITEM_SWAPPED,
+                       (unsigned char *) MESSAGE_QUESTION_AT,
+                       VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                       MESSAGE_TEXT_BG_COLOR, MESSAGE_TEXT_OUTLINE_COLOR);
+        fdps_message_window_close();
+        return;
+    }
+
+    if (cell_kind == SEARCH_CELL_KIND_MONEY) {
+        fdps_message_window_close();
+        fdps_message_window_open((int) searching_unit->portrait_id);
+        data_fdps_dialog_last_action_value_param = cell_payload;
+        if (cell_payload == 0) {
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           TEXT_SEARCH_MONEY_NONE,
+                           (unsigned char *) MESSAGE_QUESTION_AT,
+                           VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                           MESSAGE_TEXT_BG_COLOR,
+                           MESSAGE_TEXT_OUTLINE_COLOR);
+        } else {
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           TEXT_SEARCH_MONEY_TAKEN,
+                           (unsigned char *) MESSAGE_QUESTION_AT,
+                           VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                           MESSAGE_TEXT_BG_COLOR,
+                           MESSAGE_TEXT_OUTLINE_COLOR);
+        }
+        fdps_message_window_close();
+
+        /* The amount is added back out of the global and not out of the local
+           the global was set from, MOV EAX,[0x00064038] at 0001889c: a text
+           substitution that had rewritten the slot would be what the party
+           received. */
+        data_fdps_shared_party_total_gold +=
+            data_fdps_dialog_last_action_value_param;
+        data_fdps_map_cell_event_triggered_flags[cell_event_code] = 1;
+        fdps_map_apply_triggered_cell_changes();
+        return;
+    }
+
+    /* The scripted class.  THE HANDLER TABLE IS INDEXED WITH THE PAYLOAD WORD
+       AND NOT WITH THE KIND BYTE -- LEA EDX,[EDX*0x4] on [EBP-0x14] at
+       000188cd -- so the kind only says that this cell is scripted and the
+       payload says which of the fifty handlers runs.  Neither the searched
+       flag nor the tile is touched here: whatever the handler does about them
+       is the whole of what happens to this cell. */
+    delay(SCRIPTED_CELL_HOLD_MS);
+    fdps_message_window_close();
+    data_fdps_chapter_event_handler_table[cell_payload](unit_index);
 }
