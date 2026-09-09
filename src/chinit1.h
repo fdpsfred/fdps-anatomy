@@ -58,4 +58,23 @@ extern void fdps_chapter_01_init(void);
 extern void fdps_chapter_02_init(void);
 #pragma aux fdps_chapter_02_init "*" parm caller [];
 
+/* Chapter 3's entry handler: brings the game into chapter 3.  Takes nothing
+   and returns nothing.
+
+   In order, and the order is the content: character 4 -- 亞克, the level-7
+   knight who joins the party at the start of the chapter -- is appended to the
+   party roster; the chapter state is rebuilt around the roster that add has
+   just grown; the opening cut-scene Icon02.dat is interpreted; the chapter
+   title card is shown; and the map cursor is parked on unit 0's tile.
+
+   The roster add comes first because the state rebuild fills the map's player
+   slots out of the roster array and stops at the roster count, and MAP02.DAT
+   declares three player slots against a party that is three members strong
+   only once this add has run.  Nothing here writes on a unit record
+   afterwards.
+
+   Table slot 2. */
+extern void fdps_chapter_03_init(void);
+#pragma aux fdps_chapter_03_init "*" parm caller [];
+
 #endif

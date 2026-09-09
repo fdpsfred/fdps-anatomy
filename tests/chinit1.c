@@ -3,8 +3,8 @@
  * One entry handler per section, each with a run of its own that enters its
  * chapter once for real; the shared staging, the fixture container and the
  * two helpers that free the chapter globals sit at the top and are used by
- * every one of them.  fdps_chapter_01_init is first and fdps_chapter_02_init
- * follows it further down.
+ * every one of them.  fdps_chapter_01_init is first, then
+ * fdps_chapter_02_init, then fdps_chapter_03_init.
  *
  * WHAT THE HANDLER IS.  fdps_chapter_01_init at 00020e90 is six calls and two
  * stores with no branch anywhere in it, so nothing about it is worth testing
@@ -101,6 +101,7 @@
 #include "keybd.h"
 #include "mapdraw.h"
 #include "vfs.h"
+#include "roster.h"
 #include "chinit1.h"
 
 /* The shipped containers the run needs, and the sheet reader's own floor:
@@ -129,7 +130,7 @@
 #define VFS_ENTRY_BYTES 26
 #define VFS_NAME_FIELD_BYTES 13
 #define VFS_SIGNATURE_BYTES 24
-#define FIXTURE_MEMBERS 2
+#define FIXTURE_MEMBERS 3
 
 /* Chapter 1 is chapter id 0: the entry-handler table slot number is the
    0-based id, and this handler is slot 0 of the table at 00060074. */
@@ -250,6 +251,87 @@
    second one is exactly that. */
 #define UNIT_FLAG_RETIRED 1
 
+/* --- what the chapter 3 run below expects ------------------------------- */
+
+/* Chapter 3 is chapter id 2, and this handler is slot 2 of the table at
+   00060074: the dword at 0006007c is 00020f30. */
+#define CHAPTER_03_ID 2
+
+/* The character PUSH 0x4 at 00020f3c puts on the roster: 亞克 the 騎士,
+   character id 4 (assets/characters.md). */
+#define ARC_CHAR_ID 4
+
+/* The roster slot he lands in.  The run below puts 蘭迪斯 and 尤利安 on the
+   roster first, because that is the party the game has when chapter 3 opens
+   and because MAP02.DAT asks for three player slots -- the handler's own add
+   is what fills the third. */
+#define ARC_ROSTER_SLOT 2
+#define ARC_UNIT 2
+
+/* 亞克's own line out of FRIAPRDA.DAT and FRILEVUP.DAT
+   (assets/characters.md): level 7, 64 base HP, 10 HP a level, so the record
+   fdps_roster_add_character builds carries 124.  The strategy guide's opening
+   line for the chapter says the same number -- LV7 騎士亞克, HP124 -- so this
+   expectation is the shipped data and the guide agreeing, not an arithmetic
+   the test invented. */
+#define ARC_LEVEL 7
+#define ARC_HP_BASE 64
+#define ARC_HP_MIN 10
+#define ARC_HP_MAX (ARC_HP_BASE + ARC_HP_MIN * (ARC_LEVEL - 1))
+
+/* MAP02.DAT's own header bytes, read back to prove chapter 3's map is the one
+   that loaded: three player slots at +1 and 80 scripted deployments at +2,
+   against MAP00.DAT's 1 and 22 and MAP01.DAT's 2 and 27. */
+#define CH2_PLAYER_SLOTS 3
+#define CH2_CHAR_SPAWNS 80
+
+/* Unlike chapters 1 and 2, MAP02.DAT tags two of its 80 deployments wave 0, so
+   the chapter state reset's own opening deploy puts two units down before the
+   cut-scene runs: record 0 is side 1, character 12, level 10 -- 索爾, the
+   guest hero the guide lists as 友方 for this chapter -- and record 1 is the
+   side-0 LV8 魔導士 the chapter is won by killing.  They land behind the three
+   player slots, so 索爾 is unit 3. */
+#define CH2_WAVE_ZERO_UNITS 2
+#define CH2_GUEST_UNIT 3
+
+/* Which wave the fixture ICON02.DAT below asks for and how many records
+   MAP02.DAT tags with it: wave 10 is records 15, 16 and 78.  It is a wave
+   neither of the other two fixtures names, so the unit count alone says which
+   member the interpreter opened -- ICON00.DAT's wave 2 then wave 1 would add
+   nine of this map's records and ICON01.DAT's wave 3 would add two. */
+#define SCRIPT_CH03_WAVE 10
+#define CH2_SCRIPT_WAVE_UNITS 3
+
+/* How long the unit array is when the handler returns: the three player slots,
+   the map's own two wave-0 records, and the three the cut-scene deploys. */
+#define CH2_UNITS_AFTER_SCRIPT \
+    (CH2_PLAYER_SLOTS + CH2_WAVE_ZERO_UNITS + CH2_SCRIPT_WAVE_UNITS)
+
+/* What ICON02.DAT's SET_UNIT_TIMER writes, and where.  It marks unit 4 -- the
+   second of the map's own wave-0 records, an index no other map in this file
+   reaches -- and the value is one neither of the other two fixtures writes.
+
+   THE SLOT IS NOT FREE TO CHOOSE.  fdps_unit_select_status_icon reads five of
+   the six status bytes, record 0x22, 0x23, 0x24, 0x25 and 0x27, and a unit with
+   any of those set draws a status icon out of
+   data_fdps_unit_status_icon_sheet_ptr -- a ticket 23 global the build links
+   zero-filled, which sends fdps_draw_map_unit's icon blit through a null sheet
+   the moment the walk brings that unit into the view.  status_timers[4],
+   record 0x26, is the one byte that selector does not read, so it is the slot a
+   marker can use; the opcode's operand is measured from status_timers[3]
+   (src/icon.c), which makes that operand 1. */
+#define SCRIPT_CH03_MARKER_UNIT 4
+#define SCRIPT_CH03_MARKER_OPERAND 1
+#define SCRIPT_CH03_MARKER_SLOT 4
+#define SCRIPT_CH03_MARKER_VALUE 9
+
+/* MAP02.COD record 80 -- the placement behind the map's 80 scripted ones, and
+   so the first party slot's start tile -- is (25, 17).  The record a party
+   slot is put on is data_fdps_map_char_spawn_count + slot_index and not the
+   slot number (src/deploy.c). */
+#define CH2_PARTY_TILE_X 25
+#define CH2_PARTY_TILE_Y 17
+
 /* Table rows wide enough for every id the run touches: character 12 indexes
    the roster tables directly, and every item id including 0xff is a valid
    index because fdps_unit_recompute_combat_stats follows the equipped flag
@@ -311,14 +393,30 @@ static unsigned char fixture_icon01_dat[] = {
     0x00
 };
 
-static char *fixture_names[FIXTURE_MEMBERS] = { "ICON00.DAT", "ICON01.DAT" };
+/* ICON02.DAT: the member fdps_chapter_03_init names.  Its DEPLOY_WAVE asks for
+   wave 10, which on MAP02.DAT is three records and is a wave neither of the
+   other two fixtures names, and its SET_UNIT_TIMER marker writes a value of its
+   own onto a unit index only this chapter's map reaches.  So a run that opened
+   ICON00.DAT or ICON01.DAT instead is a different unit count AND a different
+   timer array. */
+static unsigned char fixture_icon02_dat[] = {
+    0x04, SCRIPT_CH03_WAVE, 0x01,
+    0x12, SCRIPT_CH03_MARKER_UNIT, SCRIPT_CH03_MARKER_OPERAND,
+    SCRIPT_CH03_MARKER_VALUE,
+    0x00
+};
+
+static char *fixture_names[FIXTURE_MEMBERS] = {
+    "ICON00.DAT", "ICON01.DAT", "ICON02.DAT"
+};
 
 static unsigned char *fixture_bytes[FIXTURE_MEMBERS] = {
-    fixture_icon00_dat, fixture_icon01_dat
+    fixture_icon00_dat, fixture_icon01_dat, fixture_icon02_dat
 };
 
 static int fixture_lengths[FIXTURE_MEMBERS] = {
-    sizeof(fixture_icon00_dat), sizeof(fixture_icon01_dat)
+    sizeof(fixture_icon00_dat), sizeof(fixture_icon01_dat),
+    sizeof(fixture_icon02_dat)
 };
 
 /* 0 not attempted, 1 the run happened and the snapshot below is good,
@@ -574,6 +672,9 @@ static void stage_globals(void)
     stage_char[JOINING_CHAR_ID].level = (unsigned char) JULIAN_LEVEL;
     stage_char[JOINING_CHAR_ID].hp_base = (short) JULIAN_HP_BASE;
     stage_growth[JOINING_CHAR_ID].hp_min = (unsigned char) JULIAN_HP_MIN;
+    stage_char[ARC_CHAR_ID].level = (unsigned char) ARC_LEVEL;
+    stage_char[ARC_CHAR_ID].hp_base = (short) ARC_HP_BASE;
+    stage_growth[ARC_CHAR_ID].hp_min = (unsigned char) ARC_HP_MIN;
 
     data_fdps_battle_character_base_table_ptr = (unsigned char *) stage_char;
     data_fdps_battle_character_growth_table_ptr =
@@ -999,6 +1100,267 @@ static void the_chapter_2_cursor_is_parked_on_unit_zero(void)
     CHECK_EQ(seen2_cursor_y, CH1_PARTY_TILE_Y * CURSOR_TILE_STEP);
 }
 
+/* --- fdps_chapter_03_init @ 00020f30 ------------------------------------
+ *
+ * Five calls, straight line, no branch and no store of its own -- the same
+ * shape as chapter 2's handler with two different arguments.  What it decides
+ * is which character joins, the ORDER of the five calls, and which cut-scene
+ * member and which unit the two arguments name, so the run below enters
+ * chapter 3 once for real and reads the answers off the state it leaves.
+ *
+ * Expected values come from the assembly at 00020f30 and from the shipped
+ * data, never from the emitted C:
+ *
+ *   PUSH 0x4 / CALL 0x00023bc0        character 4 joins the roster
+ *   CALL 0x00022750                   the chapter state is rebuilt
+ *   MOV EAX,0x6181c / PUSH EAX /
+ *     CALL 0x00021650                 the cut-scene "Icon02.dat" is run
+ *   CALL 0x00020c60                   the title card is shown
+ *   PUSH 0x0 / CALL 0x0002da50        the cursor is parked on unit 0
+ *
+ * WHY THE ROSTER IS NOT EMPTY THIS TIME.  The two runs above start from an
+ * empty roster because their chapters are where 蘭迪斯 and 尤利安 join.  By
+ * chapter 3 the party is those two plus the 亞克 this handler adds, and
+ * MAP02.DAT asks for exactly three player slots, so the run below puts the
+ * first two on the roster with the game's own fdps_roster_add_character before
+ * calling the handler.  That is what makes the third slot the witness: a body
+ * that reset the chapter before adding him leaves unit 2 as the zeroed,
+ * retired spare fdps_build_map_unit_array writes for a player slot with no
+ * member behind it, and the first two slots look right either way.
+ *
+ * WHAT THE MAP ITSELF DEPLOYS.  MAP02.DAT is the first of the three that tags
+ * any deployment wave 0, so the chapter state reset puts two more units down
+ * on its own: the guest hero 索爾 and the LV8 魔導士.  That is also why this
+ * handler has no store in its body where chapter 1's has two -- chapter 1's
+ * guest hero arrived from the cut-scene with nothing set on him, chapter 3's
+ * arrives from the map file at the health his deployment computes.
+ *
+ * WHY THE CUT-SCENE IS A FIXTURE.  Same reason the two runs above give: the
+ * shipped ICON02.DAT is a cinematic that switches maps, plays CD tracks and
+ * draws through pointers a test image has not filled.  The staged ICON02.DAT
+ * is three instructions -- a DEPLOY_WAVE for a wave the other two fixtures do
+ * not name, a SET_UNIT_TIMER marker, and the terminator -- and the container it
+ * lives in is the one the chapter 1 run already built.
+ */
+
+static int run3_state = 0;
+
+static int seen3_roster_count;
+static int seen3_roster_char_id;
+static int seen3_player_slots;
+static int seen3_char_spawns;
+static int seen3_unit_count;
+static int seen3_unit0_char_id;
+static unsigned char seen3_unit0_timers[STATUS_TIMER_COUNT];
+static int seen3_unit1_char_id;
+static int seen3_arc_char_id;
+static int seen3_arc_flags;
+static int seen3_arc_side;
+static int seen3_arc_level;
+static int seen3_arc_hp_current;
+static int seen3_arc_hp_max;
+static int seen3_guest_char_id;
+static int seen3_guest_level;
+static int seen3_guest_side;
+static int seen3_guest_hp_current;
+static int seen3_guest_hp_max;
+static unsigned char seen3_guest_timers[STATUS_TIMER_COUNT];
+static unsigned char seen3_marked_timers[STATUS_TIMER_COUNT];
+static int seen3_cursor_x;
+static int seen3_cursor_y;
+static int seen3_chapter_id;
+
+static void capture_chapter_03(void)
+{
+    struct fdps_unit_record *unit0;
+    struct fdps_unit_record *arc;
+    struct fdps_unit_record *guest;
+    struct fdps_unit_record *marked;
+    int slot;
+
+    seen3_roster_count = data_fdps_roster_member_count;
+    seen3_roster_char_id = (int) stage_roster[ARC_ROSTER_SLOT].char_id;
+    seen3_player_slots = data_fdps_map_player_slot_count;
+    seen3_char_spawns = data_fdps_map_char_spawn_count;
+    seen3_unit_count = data_fdps_map_unit_count;
+    seen3_cursor_x = data_fdps_map_cursor_world_x;
+    seen3_cursor_y = data_fdps_map_cursor_world_y;
+    seen3_chapter_id = data_fdps_chapter_current_chapter_id;
+
+    unit0 = (struct fdps_unit_record *) data_fdps_map_unit_array_ptr;
+    arc = unit0 + ARC_UNIT;
+    guest = unit0 + CH2_GUEST_UNIT;
+    marked = unit0 + SCRIPT_CH03_MARKER_UNIT;
+
+    seen3_unit0_char_id = (int) unit0->char_id;
+    seen3_unit1_char_id = (int) unit0[1].char_id;
+    for (slot = 0; slot < STATUS_TIMER_COUNT; slot++) {
+        seen3_unit0_timers[slot] = unit0->status_timers[slot];
+    }
+
+    seen3_arc_char_id = (int) arc->char_id;
+    seen3_arc_flags = (int) arc->flags;
+    seen3_arc_side = (int) arc->side;
+    seen3_arc_level = (int) arc->level;
+    seen3_arc_hp_current = (int) arc->hp_current;
+    seen3_arc_hp_max = (int) arc->hp_max;
+
+    seen3_guest_char_id = (int) guest->char_id;
+    seen3_guest_level = (int) guest->level;
+    seen3_guest_side = (int) guest->side;
+    seen3_guest_hp_current = (int) guest->hp_current;
+    seen3_guest_hp_max = (int) guest->hp_max;
+    for (slot = 0; slot < STATUS_TIMER_COUNT; slot++) {
+        seen3_guest_timers[slot] = guest->status_timers[slot];
+        seen3_marked_timers[slot] = marked->status_timers[slot];
+    }
+}
+
+/* Runs the chapter 3 handler once, against the shipped containers and the
+   fixture cut-scene, and records what it left behind.  The two roster members
+   the party already has when the chapter opens are put on with the game's own
+   add, so the handler's own add is the only thing that can fill the map's
+   third player slot.  The timer hook and the graphics mode are here for the
+   reasons the chapter 1 run gives. */
+static void run_chapter_03_handler(void)
+{
+    if (run3_state != 0) {
+        return;
+    }
+    run3_state = 2;
+
+    if (!containers_present()) {
+        return;
+    }
+    if (!stage_fixture_archive()) {
+        return;
+    }
+
+    stage_globals();
+    data_fdps_chapter_current_chapter_id = CHAPTER_03_ID;
+    data_fdps_cursor_highlight_sprite_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_entry(MISC_NAME, CURSOR_SHEET_MEMBER);
+
+    fdps_roster_add_character(OPENING_CHAR_ID);
+    fdps_roster_add_character(JOINING_CHAR_ID);
+
+    set_mode(MODE_320X200X256);
+    saved_timer = _dos_getvect(TIMER_VECTOR);
+    _dos_setvect(TIMER_VECTOR, tick_isr);
+
+    fdps_chapter_03_init();
+
+    _dos_setvect(TIMER_VECTOR, saved_timer);
+    set_mode(MODE_TEXT);
+
+    capture_chapter_03();
+    free_chapter_globals();
+    run3_state = 1;
+}
+
+/* 亞克 is the third roster member and a live player-side unit on the map,
+   which says the roster add ran BEFORE the state reset and that the argument
+   it was handed is character 4.  His HP is the number the shipped tables and
+   the strategy guide agree on, so a handler that added some other character
+   into the same slot is visible here as well.  The two map counts are read
+   back because they were staged at numbers no map carries and because
+   MAP02.DAT's pair is neither MAP00.DAT's nor MAP01.DAT's. */
+static void arc_joins_the_party_before_the_chapter_is_built(void)
+{
+    run_chapter_03_handler();
+    CHECK_EQ(run3_state, 1);
+    if (run3_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen3_roster_count, ARC_ROSTER_SLOT + 1);
+    CHECK_EQ(seen3_roster_char_id, ARC_CHAR_ID);
+    CHECK_EQ(seen3_player_slots, CH2_PLAYER_SLOTS);
+    CHECK_EQ(seen3_char_spawns, CH2_CHAR_SPAWNS);
+    CHECK_EQ(seen3_unit0_char_id, OPENING_CHAR_ID);
+    CHECK_EQ(seen3_unit1_char_id, JOINING_CHAR_ID);
+    CHECK_EQ(seen3_arc_char_id, ARC_CHAR_ID);
+    CHECK_EQ(seen3_arc_flags, 0);
+    CHECK_EQ(seen3_arc_side, PLAYER_SIDE);
+    CHECK_EQ(seen3_arc_level, ARC_LEVEL);
+    CHECK_EQ(seen3_arc_hp_max, ARC_HP_MAX);
+    CHECK_EQ(seen3_arc_hp_current, ARC_HP_MAX);
+}
+
+/* The map's own wave-0 pair went down during the state reset, and the handler
+   left both of them exactly as the deployment computed.  索爾 is unit 3 --
+   side 1, character 12, level 10 -- at full HP with every status timer clear:
+   chapter 1's handler poisons its guest hero and knocks his current HP down to
+   100 after the cut-scene, and this one has no store in its body at all, so
+   the same two fields are the assertion that says so. */
+static void the_chapter_3_guest_hero_is_left_as_the_map_deployed_him(void)
+{
+    int slot;
+
+    run_chapter_03_handler();
+    CHECK_EQ(run3_state, 1);
+    if (run3_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen3_guest_char_id, GUEST_HERO_CHAR_ID);
+    CHECK_EQ(seen3_guest_level, GUEST_HERO_LEVEL);
+    CHECK_EQ(seen3_guest_side, GUEST_HERO_SIDE);
+    CHECK_EQ(seen3_guest_hp_max, SOL_HP_MAX);
+    CHECK_EQ(seen3_guest_hp_current, SOL_HP_MAX);
+    for (slot = 0; slot < STATUS_TIMER_COUNT; slot++) {
+        CHECK_EQ(seen3_guest_timers[slot], 0);
+    }
+}
+
+/* The cut-scene the handler names is Icon02.dat and it really ran.  The unit
+   count is the three player slots, the map's two wave-0 records and the three
+   this member's DEPLOY_WAVE adds; ICON00.DAT would have added nine of this
+   map's records and ICON01.DAT two.  Its SET_UNIT_TIMER marker is on unit 4 --
+   an index that only exists because this map deployed its own wave 0 -- with a
+   value neither of the other two fixtures writes, and unit 0's own timers are
+   all clear, which is where ICON01.DAT's marker would have landed.  The chapter
+   id is untouched, the handler neither reading nor writing it -- both the script
+   number and the title-card graphic are chosen from it by the callees. */
+static void the_chapter_3_cutscene_is_icon02_dat(void)
+{
+    int slot;
+
+    run_chapter_03_handler();
+    CHECK_EQ(run3_state, 1);
+    if (run3_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen3_unit_count, CH2_UNITS_AFTER_SCRIPT);
+    CHECK_EQ(seen3_marked_timers[SCRIPT_CH03_MARKER_SLOT],
+             SCRIPT_CH03_MARKER_VALUE);
+    for (slot = 0; slot < STATUS_TIMER_COUNT; slot++) {
+        if (slot != SCRIPT_CH03_MARKER_SLOT) {
+            CHECK_EQ(seen3_marked_timers[slot], 0);
+        }
+        CHECK_EQ(seen3_unit0_timers[slot], 0);
+    }
+    CHECK_EQ(seen3_chapter_id, CHAPTER_03_ID);
+}
+
+/* The cursor ends on unit 0's tile and not on the newcomer's.  The walk starts
+   from the (0, 0) the state reset left, and MAP02.COD record 80 -- the first
+   record past the map's 80 scripted deployments -- puts the first party slot
+   on tile (25, 17), so the cursor globals are that tile scaled by the
+   24-pixel step. */
+static void the_chapter_3_cursor_is_parked_on_unit_zero(void)
+{
+    run_chapter_03_handler();
+    CHECK_EQ(run3_state, 1);
+    if (run3_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen3_cursor_x, CH2_PARTY_TILE_X * CURSOR_TILE_STEP);
+    CHECK_EQ(seen3_cursor_y, CH2_PARTY_TILE_Y * CURSOR_TILE_STEP);
+}
+
 /* Takes the fixture container away again, so tests/icon.c can stage its own.
    A container this file did not create is somebody else's and is left where
    it stands, which is also the only path on which this case asserts
@@ -1025,5 +1387,9 @@ void run_chinit1_tests(void)
     RUN_TEST(the_second_player_slot_is_the_retired_spare);
     RUN_TEST(the_chapter_2_cutscene_is_icon01_dat);
     RUN_TEST(the_chapter_2_cursor_is_parked_on_unit_zero);
+    RUN_TEST(arc_joins_the_party_before_the_chapter_is_built);
+    RUN_TEST(the_chapter_3_guest_hero_is_left_as_the_map_deployed_him);
+    RUN_TEST(the_chapter_3_cutscene_is_icon02_dat);
+    RUN_TEST(the_chapter_3_cursor_is_parked_on_unit_zero);
     RUN_TEST(the_fixture_container_is_removed);
 }

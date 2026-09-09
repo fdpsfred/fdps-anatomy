@@ -198,3 +198,92 @@ void fdps_chapter_02_init(void)
     fdps_show_chapter_title_card();
     fdps_map_cursor_move_to_unit(CH02_CURSOR_UNIT);
 }
+
+/* --- fdps_chapter_03_init @ 00020f30 ----------------------------------- */
+
+/* The character who joins at the start of chapter 3: 亞克 the 騎士,
+   character id 4 (assets/characters.md).  PUSH 0x4 at 00020f3c.  He lands at
+   roster slot 2, behind 蘭迪斯 and 尤利安, because the roster is in join
+   order and is never permuted -- and MAP02.DAT asks for exactly three player
+   slots, which is the party this add completes.  The strategy guide's opening
+   line for the chapter is the same character: LV7 騎士亞克 at 124 HP, which
+   is FRIAPRDA.DAT's 64 base plus FRILEVUP.DAT's 10 a level over his six
+   levels. */
+#define CH03_JOINING_CHARACTER 4
+
+/* Chapter 3's opening cut-scene, the string at 0x6181c loaded into EAX at
+   00020f4b and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id and not a script id of its own, which is
+   why this is Icon02.dat and the two handlers above hold Icon00.dat and
+   Icon01.dat at the same position.
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON02.DAT by the
+   call and cannot live in read-only storage. */
+#define CH03_OPENING_SCRIPT "Icon02.dat"
+
+/* Which unit the cursor is left on: PUSH 0x0 at 00020f5e. */
+#define CH03_CURSOR_UNIT 0
+
+/* 00020f30.  Five calls, straight line, no branch, no loop and no local --
+   the same shape as chapter 2's handler with two different arguments.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 00020f30..00020f34 -- over SUB ESP,0x0, a zero-byte local area
+   written as the six-byte immediate form.  Nothing is addressed off EBP
+   anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 00020f68..00020f6b
+   and the RET at 00020f6c is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: PUSH 0x4 / CALL 0x00023bc0 / ADD ESP,0x4 at 00020f3c, and the same
+   shape at 00020f4b and 00020f5e.  The two argument-less calls at 00020f46
+   and 00020f59 are bare CALLs with no push and no adjustment.  Nothing reads
+   [EBP+8] or above, so this function takes nothing itself, and EAX is never
+   set before the RET, so it returns nothing -- the dispatcher reaches it
+   through the third slot of the table at 00060074 (the dword at 0006007c is
+   00020f30) and ignores EAX.
+
+   VALUES USED AFTER A CALL: none at all.  All five callees return void and
+   nothing here reads EAX after any of them; the only register written between
+   the prologue and the RET is the EAX that carries the script name literal
+   into the third call.
+
+   THE ORDER IS THE ALGORITHM.  The roster add runs BEFORE the state reset:
+   fdps_chapter_state_reset rebuilds the map unit array out of roster slot i
+   for each of the map's player slots and stops at the roster count
+   (src/deploy.c), so the intuitive "initialise the chapter, then add the
+   character who joins it" order leaves 亞克 off chapter 3's map and turns his
+   slot into the zeroed, retired spare the rebuild writes for a player slot
+   with no member behind it.  MAP02.DAT declares three player slots and the
+   party is 蘭迪斯, 尤利安, 亞克 -- the add is what makes the third of the
+   three a live unit rather than that spare.
+
+   Nor is the add guarded: fdps_roster_add_character appends at the current
+   count and increments unconditionally, so entering this handler twice puts
+   him on the roster twice.  Adding a duplicate test here is a check the
+   original does not have.
+
+   WHY THIS HANDLER WRITES NOTHING ON A UNIT, unlike chapter 1's.  Chapter 3
+   opens with a guest hero as well -- 索爾, side 1, level 10 -- but he is
+   MAP02.DAT's own wave-0 record and so is deployed by the state reset out of
+   the map file, at the health his deployment computes.  Chapter 1's 索爾 came
+   out of the cut-scene and had to be given his poison and his 100 HP by hand;
+   here there is nothing left for the handler to say, and the body has no
+   store in it at all.
+
+   THE CHAPTER IS NOT SET HERE.  Both the script the third call loads and the
+   title-card graphic the fourth one shows are chosen from
+   data_fdps_chapter_current_chapter_id by the callees, and this handler
+   neither reads nor writes it -- the dispatcher that reached this slot is what
+   put the right value there.  The Icon02.dat above is the one place the
+   chapter number is spelled out rather than read. */
+void fdps_chapter_03_init(void)
+{
+    fdps_roster_add_character(CH03_JOINING_CHARACTER);
+    fdps_chapter_state_reset();
+    fdps_icon_script_run(CH03_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH03_CURSOR_UNIT);
+}
