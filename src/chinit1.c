@@ -380,3 +380,83 @@ void fdps_chapter_04_init(void)
     fdps_show_chapter_title_card();
     fdps_map_cursor_move_to_unit(CH04_CURSOR_UNIT);
 }
+
+/* --- fdps_chapter_05_init @ 00020fb0 ----------------------------------- */
+
+/* Chapter 5's opening cut-scene, the string at 0x61834 loaded into EAX at
+   00020fc1 and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id and not a script id of its own, which is
+   why this is Icon04.dat where the four handlers above hold Icon00.dat to
+   Icon03.dat at the same position.
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON04.DAT by the
+   call and cannot live in read-only storage. */
+#define CH05_OPENING_SCRIPT "Icon04.dat"
+
+/* Which unit the cursor is left on: PUSH 0x0 at 00020fd4. */
+#define CH05_CURSOR_UNIT 0
+
+/* 00020fb0.  Four calls, straight line, no branch, no loop and no local --
+   the handlers above with their fdps_roster_add_character taken off the
+   front, and the first slot of the table where that call is absent.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 00020fb0..00020fb4 -- over SUB ESP,0x0, a zero-byte local area
+   written as the six-byte immediate form.  Nothing is addressed off EBP
+   anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 00020fde..00020fe1
+   and the RET at 00020fe2 is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: MOV EAX,0x61834 / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4 at
+   00020fc1..00020fcc, and PUSH 0x0 / CALL 0x0002da50 / ADD ESP,0x4 at
+   00020fd4..00020fdb.  The two argument-less calls at 00020fbc and 00020fcf
+   are bare CALLs with no push and no adjustment.  Nothing reads [EBP+8] or
+   above, so this function takes nothing itself, and EAX is never set after
+   the third call, so it returns nothing -- the dispatcher reaches it through
+   the fifth slot of the table at 00060074 (the dword at 00060084 is
+   00020fb0) and ignores EAX.
+
+   VALUES USED AFTER A CALL: none at all.  All four callees return void and
+   nothing here reads EAX after any of them; the only register written between
+   the prologue and the RET is the EAX that carries the script name literal
+   into the second call.
+
+   NOBODY JOINS THE PARTY THIS CHAPTER, and the absence is the content.  The
+   four handlers above each open with fdps_roster_add_character; the first
+   instruction after this prologue is the state rebuild, so the roster is left
+   exactly as chapter 4 finished it -- 蘭迪斯, 尤利安, 亞克, 法蓮娜, four
+   members.  MAP04.DAT asks for FIVE player slots, and
+   fdps_build_map_unit_array fills slot i from roster slot i only while i is
+   below the roster count (src/deploy.c), so chapter 5 opens with slot 4 as
+   the zeroed, retired spare that rebuild writes for a slot with no member
+   behind it.  A handler that added a fifth character here to fill the map's
+   fifth slot would be a party the game does not have.
+
+   WHAT WRITES ON A UNIT INSTEAD.  The strategy guide lists chapter 5's ally
+   as LV10 英雄索爾 in 麻痺狀態, and neither half of that comes from this
+   function: MAP04.DAT's own deployment record 30 -- side 1, character 12,
+   level 10 -- is the map's single wave-0 record, so the state rebuild puts
+   him down as unit 5 behind the five player slots, and the shipped
+   ICON04.DAT is what paralyses him.  Walked with the opcode ladder in
+   src/icon.c its SET_UNIT_TIMER at script offset 74 names unit 5, timer slot
+   operand 1 -- status_timers[4], the paralysis counter -- and value 0xff.
+   The body here has no store in it at all, exactly as chapters 2 to 4 have
+   none, and chapter 1's pair of stores is the family's exception rather than
+   its shape.
+
+   THE CHAPTER IS NOT SET HERE.  Both the script the second call loads and the
+   title-card graphic the third one shows are chosen from
+   data_fdps_chapter_current_chapter_id by the callees, and this handler
+   neither reads nor writes it -- the dispatcher that reached this slot is what
+   put the right value there.  The Icon04.dat above is the one place the
+   chapter number is spelled out rather than read. */
+void fdps_chapter_05_init(void)
+{
+    fdps_chapter_state_reset();
+    fdps_icon_script_run(CH05_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH05_CURSOR_UNIT);
+}

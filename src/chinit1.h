@@ -97,4 +97,23 @@ extern void fdps_chapter_03_init(void);
 extern void fdps_chapter_04_init(void);
 #pragma aux fdps_chapter_04_init "*" parm caller [];
 
+/* Chapter 5's entry handler: brings the game into chapter 5.  Takes nothing
+   and returns nothing.
+
+   Four calls and nothing else: the chapter state is rebuilt, the opening
+   cut-scene Icon04.dat is interpreted, the chapter title card is shown, and
+   the map cursor is parked on unit 0's tile.  This is the plain form of the
+   family -- the first handler with no fdps_roster_add_character in front of
+   the rebuild and, like chapters 2 to 4, no store on a unit record behind it.
+
+   Nobody joins the party this chapter, and that is visible on the map rather
+   than merely absent from the body: MAP04.DAT asks for five player slots
+   against the four members the four handlers before this one have added, so
+   the fifth slot is the zeroed, retired spare fdps_build_map_unit_array
+   writes for a slot with no member behind it.
+
+   Table slot 4. */
+extern void fdps_chapter_05_init(void);
+#pragma aux fdps_chapter_05_init "*" parm caller [];
+
 #endif

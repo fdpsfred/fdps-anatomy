@@ -3702,7 +3702,7 @@ Algorithm:
   3. fdps_show_chapter_title_card draws the chapter title card: Chapter.saf and Chapter.pal out of MISC.VFS, the sprite entry again selected by DAT_00069cf4, faded up over black, held, then faded back to black.
   4. fdps_map_cursor_move_to_unit(0) leaves the map cursor sitting on the tile of unit 0.
 
-Unlike chapter 1's handler at 00020e90 and chapter 4's at 00020f70, this one calls no fdps_roster_add_character before the reset and patches no unit record afterwards; it is the plain four-step form of the family, byte-for-byte the same shape as chapter 6's at 00020ff0 with only the script name differing.
+Unlike chapter 1's handler at 00020e90 and chapter 4's at 00020f70, this one calls no fdps_roster_add_character before the reset; and unlike chapter 1's alone, it patches no unit record afterwards; it is the plain four-step form of the family, byte-for-byte the same shape as chapter 6's at 00020ff0 with only the script name differing.
 
 Parameters:
   none
