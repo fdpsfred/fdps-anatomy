@@ -169,4 +169,46 @@ extern void fdps_chapter_18_init(void);
 extern void fdps_chapter_19_init(void);
 #pragma aux fdps_chapter_19_init "*" parm caller [];
 
+/* Chapter 20's entry handler: brings the game into chapter 20.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon19.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 0's tile.
+
+   Nobody joins the party this chapter -- there is no fdps_roster_add_character
+   in the body -- and the roster is left as chapter 19 finished it, eleven
+   members: the ten chapters 1 to 15 assembled and 蘭斯洛特, whom chapter 19's
+   handler put on at roster slot 10.  MAP19.DAT is the first map to ask for
+   ELEVEN player slots, so every slot has a member behind it, no zeroed,
+   retired spare is written, and 蘭斯洛特 is a map unit for the first time.
+
+   THE CUT-SCENE IS STAGED ON ANOTHER MAP.  ICON19.DAT stages itself on
+   MAP58.DAT -- a cut-scene map with no player slots, whose three actors are
+   蘭迪斯, 法蓮娜 and 費塔加 -- and switches back to chapter 19 before it
+   ends, rebuilding the chapter state a second time.  Every RETIRE, REVIVE and
+   DEPLOY_WAVE it carries applies to the actors on that stage and is discarded
+   with them, so the board the handler returns on is the closing rebuild's: the
+   eleven player slots and the fifty-four records MAP19.DAT tags wave 0,
+   sixty-five units.  Nine of the thirty opening scripts are built this way --
+   ICON00, ICON06 to ICON09, ICON11, ICON19, ICON24 and ICON29 -- and this is
+   the first of them in this file; chapters 16 to 19 above are all of the other
+   kind.
+
+   Those fifty-four are the strategy guide's 敵方 list for the chapter to the
+   number: LV17 蛇魔使 x23 (character 75), LV18 野蠻戰士 x13 (80), LV17
+   狼人戰士 x10 (83) and LV28 冰魔導士 x8 (101).  The map's one remaining
+   record, a level-17 character 67 on wave 1, belongs to the chapter's own turn
+   events and is not down yet.
+
+   Because the closing rebuild comes after every walk in the scene, the tile
+   the cursor ends on is MAP19.COD's own player-slot-0 start tile, (5, 4), and
+   not a tile the cut-scene walked to.  Chapters 16 to 19 above are the other
+   way round: their scripts switch no map, so their cursor tile is the one
+   their walks reached.
+
+   Table slot 19. */
+extern void fdps_chapter_20_init(void);
+#pragma aux fdps_chapter_20_init "*" parm caller [];
+
 #endif
