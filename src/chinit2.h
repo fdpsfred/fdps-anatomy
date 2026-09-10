@@ -54,4 +54,42 @@
 extern void fdps_chapter_16_init(void);
 #pragma aux fdps_chapter_16_init "*" parm caller [];
 
+/* Chapter 17's entry handler: brings the game into chapter 17.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon16.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 3's tile.  Unit 3 is roster slot 3, 法蓮娜, and this is one of only
+   three handlers that park the cursor anywhere but unit 0 -- the other two are
+   chapters 22 and 23, and those three are exactly the chapters 法蓮娜 is the
+   loss condition of.
+
+   Nobody joins the party this chapter -- there is no fdps_roster_add_character
+   in the body -- and the roster is left as chapter 16 finished it, the same
+   ten members.  MAP16.DAT asks for ten player slots, so every slot has a
+   member behind it and no zeroed, retired spare is written.
+
+   The chapter is fought with the half of the party chapter 16 sat out, and the
+   cut-scene is what takes the other half off: ICON16.DAT retires map units 0,
+   1, 2, 5 and 6 -- the exact complement of ICON15.DAT's five -- and carries no
+   REVIVE, so the five the player commands are 法蓮娜, 裘娜, 蓋亞, 琴琴 and
+   瑪麗安, which is the strategy guide's 己方 line for the chapter.
+
+   The cut-scene puts nobody on the map: ICON16.DAT has no DEPLOY_WAVE at all,
+   so what is on the board when the handler returns is the reset's own opening
+   deploy -- the ten player slots and the twenty-three records MAP16.DAT tags
+   wave 0, thirty-three units.  Twenty of those twenty-three are enemy-side and
+   are the guide's opening 敵方 list to the number: LV16 暗魔導士 x2 (character
+   103), LV11 騎士 x6 (89), LV15 武士 x10 (99) and LV14 弓箭手 x2 (94).  The
+   other three carry side 1, the guest side: the hostages the chapter is named
+   for.  The map's remaining seven records -- six wave-1 武士 and one wave-2
+   狼人 -- belong to the chapter's own turn events and are not down yet.
+
+   The cut-scene also walks unit 3 off its start tile onto (2, 7), so the tile
+   the cursor ends on is ICON16.DAT's and not MAP16.COD's.
+
+   Table slot 16. */
+extern void fdps_chapter_17_init(void);
+#pragma aux fdps_chapter_17_init "*" parm caller [];
+
 #endif
