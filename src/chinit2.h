@@ -211,4 +211,45 @@ extern void fdps_chapter_19_init(void);
 extern void fdps_chapter_20_init(void);
 #pragma aux fdps_chapter_20_init "*" parm caller [];
 
+/* Chapter 21's entry handler: brings the game into chapter 21.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon20.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 0's tile.
+
+   Nobody joins the party this chapter -- there is no fdps_roster_add_character
+   in the body -- and the roster is left as chapter 20 finished it, the same
+   eleven members chapter 20 was fought with.  MAP20.DAT asks for the same
+   ELEVEN player slots MAP19.DAT did, so every slot has a member behind it and
+   no zeroed, retired spare is written.
+
+   THE CUT-SCENE CHANGES NO UNIT STATE.  ICON20.DAT has no SWITCH_MAP, no
+   RETIRE_UNIT, no REVIVE_UNIT, no DEPLOY_WAVE and no SET_UNIT_TIMER: it only
+   stands the eleven party units where the chapter opens and says one page of
+   chapter text.  So the board the handler returns on is the state rebuild's
+   alone -- the eleven player slots and the thirty-eight records MAP20.DAT tags
+   wave 0, forty-nine units.
+
+   Those thirty-eight are the first five lines of the strategy guide's 敵方
+   list for the chapter: LV17 黑暗祭司 (character 104), LV28 冰魔導士 x5 (101),
+   LV16 狂戰士 x3 (81), LV18 狼人戰士 x7 (83) and LV18 蛇魔使 x22 (75), all on
+   the enemy side.  The guide prints the 狂戰士 as LV18 and the map says level
+   16; the guide's own HP figure of 720 is the record's coefficient times
+   sixteen, so the file is the one the game plays.
+
+   The map's other thirty-two records are the two sixteen-strong reinforcement
+   waves the guide's last ten lines list, and neither is this handler's: both
+   are tile triggers, fdps_chapter_21_event_deploy_wave_1 and
+   fdps_chapter_21_event_deploy_wave_2 (chevt4.h).
+
+   Because the script switches no map, the tile the cursor ends on is the one
+   the cut-scene's four walks of unit 0 reached, (16, 20), and not MAP20.COD's
+   own player-slot-0 start tile (17, 20) one square to its right.  Chapter 20
+   above is the other way round.
+
+   Table slot 20. */
+extern void fdps_chapter_21_init(void);
+#pragma aux fdps_chapter_21_init "*" parm caller [];
+
 #endif
