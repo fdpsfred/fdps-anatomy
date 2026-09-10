@@ -139,4 +139,31 @@ extern void fdps_chapter_05_init(void);
 extern void fdps_chapter_06_init(void);
 #pragma aux fdps_chapter_06_init "*" parm caller [];
 
+/* Chapter 7's entry handler: brings the game into chapter 7.  Takes nothing
+   and returns nothing.
+
+   In order, and the order is the original's: character 3 -- 裘娜 the 戰士,
+   the LV15 warrior the strategy guide lists as this chapter's 加入 -- is
+   appended to the party roster; the chapter state is rebuilt; the opening
+   cut-scene Icon06.dat is interpreted; the chapter title card is shown; and
+   the map cursor is parked on unit 0's tile.
+
+   The add comes before the rebuild as it does in every handler that has one,
+   but chapter 7 is the second chapter where that is not observable: MAP06.DAT
+   asks for four player slots and the party is already four members strong, so
+   裘娜 lands at roster slot 4, one past the last slot the map fills, and is
+   not one of chapter 7's map units either way.  MAP07.DAT asks for five, so
+   chapter 8 is the first map she is deployed on.
+
+   She is on chapter 7's map as the enemy instead, and that is a different
+   record: MAP06.DAT's five scripted deployments are the guide's 敵方 line --
+   one side-0 level-15 character 116 and four side-0 level-14 character 86 --
+   and none of the five is tagged wave 0, so the whole opposition arrives from
+   the cut-scene's own two DEPLOY_WAVEs rather than from the rebuild.  Nothing
+   here writes on a unit record.
+
+   Table slot 6. */
+extern void fdps_chapter_07_init(void);
+#pragma aux fdps_chapter_07_init "*" parm caller [];
+
 #endif

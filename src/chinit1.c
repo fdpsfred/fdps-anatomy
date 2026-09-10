@@ -553,3 +553,123 @@ void fdps_chapter_06_init(void)
     fdps_show_chapter_title_card();
     fdps_map_cursor_move_to_unit(CH06_CURSOR_UNIT);
 }
+
+/* --- fdps_chapter_07_init @ 00021030 ----------------------------------- */
+
+/* The character who joins the party at the start of chapter 7: 裘娜 the 戰士,
+   character id 3 (assets/characters.md).  PUSH 0x3 at 0002103c.  She lands at
+   roster slot 4, behind 蘭迪斯, 尤利安, 亞克 and 法蓮娜, because the roster is
+   in join order and is never permuted and because chapters 5 and 6 added
+   nobody.
+
+   The strategy guide's 加入 line for this chapter is the same record read from
+   the other side: LV15 戰士裘娜, HP225, 鐵刀 and 青鎧甲.  That is exactly what
+   this add computes -- FRIAPRDA.DAT's level 15 and 85 base HP plus
+   FRILEVUP.DAT's 10 HP a level over her fourteen levels is 225, and the two
+   item ids on her line are 0x0f and 0x66 (assets/items.md). */
+#define CH07_JOINING_CHARACTER 3
+
+/* Chapter 7's opening cut-scene, the string at 0x6184c loaded into EAX at
+   0002104b and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id and not a script id of its own, which is
+   why this is Icon06.dat where fdps_chapter_06_init above holds Icon05.dat at
+   the same position.
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON06.DAT by the
+   call and cannot live in read-only storage. */
+#define CH07_OPENING_SCRIPT "Icon06.dat"
+
+/* Which unit the cursor is left on: PUSH 0x0 at 0002105e. */
+#define CH07_CURSOR_UNIT 0
+
+/* 00021030.  Five calls, straight line, no branch, no loop and no local --
+   the plain form of fdps_chapter_05_init and fdps_chapter_06_init with an
+   fdps_roster_add_character put back in front of it, which is the shape
+   chapters 2 to 4 have.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 00021030..00021034 -- over SUB ESP,0x0, a zero-byte local area
+   written as the six-byte immediate form.  Nothing is addressed off EBP
+   anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 00021068..0002106b
+   and the RET at 0002106c is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: PUSH 0x3 / CALL 0x00023bc0 / ADD ESP,0x4 at 0002103c..00021043,
+   MOV EAX,0x6184c / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4 at
+   0002104b..00021056, and PUSH 0x0 / CALL 0x0002da50 / ADD ESP,0x4 at
+   0002105e..00021065.  The two argument-less calls at 00021046 and 00021059
+   are bare CALLs with no push and no adjustment.  Nothing reads [EBP+8] or
+   above, so this function takes nothing itself, and EAX is never set after the
+   third call, so it returns nothing -- the dispatcher reaches it through the
+   seventh slot of the table at 00060074 (the dword at 0006008c is 00021030)
+   and ignores EAX.
+
+   VALUES USED AFTER A CALL: none at all.  All five callees return void and
+   nothing here reads EAX after any of them; the only register written between
+   the prologue and the RET is the EAX that carries the script name literal
+   into the third call.
+
+   THE ADD IS NOT WHAT PUTS ANYBODY ON THIS CHAPTER'S MAP, and chapter 7 is the
+   second handler where that is so.  MAP06.DAT declares FOUR player slots, the
+   party already has four members when the chapter opens -- 蘭迪斯, 尤利安,
+   亞克 and 法蓮娜, chapters 5 and 6 having added none -- and
+   fdps_build_map_unit_array fills slot i from roster slot i only while i is
+   below the roster count (src/deploy.c).  裘娜 is roster slot 4, one past the
+   last slot the map asks for, so she is not one of chapter 7's map units
+   whichever way round the first two calls run.  MAP07.DAT declares five, so
+   chapter 8 is the first map she is deployed on; the order is kept because it
+   is the original's and not because this chapter shows it.
+
+   SHE IS ON THE MAP ALL THE SAME, AS THE ENEMY, AND THAT IS A DIFFERENT
+   RECORD.  MAP06.DAT scripts five deployments and none of them is a roster
+   character: record 0 is side 0, character 116, level 15, and records 1 to 4
+   are side 0, character 86, level 14.  Those are the strategy guide's 敵方
+   line for the chapter to the number -- LV15 裘娜 and LV14 傭兵 x4 -- and what
+   ties character 116 to the 裘娜 the add is about is her equipment, the same
+   0x0f 鐵刀 and 0x66 青鎧甲 pair FRIAPRDA.DAT gives roster character 3.  The
+   roster record and the enemy record are two different characters as far as
+   the program is concerned, and both exist at once during this chapter.
+
+   THE WHOLE OPPOSITION COMES FROM THE CUT-SCENE.  MAP06.DAT tags NO record
+   wave 0 at all, so fdps_chapter_state_reset's own opening deploy matches
+   nothing and the array it leaves is the four player slots and no more.  The
+   shipped ICON06.DAT is what brings the five on: walked with the opcode ladder
+   in src/icon.c it holds DEPLOY_WAVE 1 at script offset 228, which is the four
+   傭兵, and DEPLOY_WAVE 2 at script offset 274, which is 裘娜, both with the
+   place-exact operand 0.  The handler therefore returns with nine units on the
+   map, which is exactly as many placement records as MAP06.COD carries: 63
+   bytes is nine records behind its nine-byte header, five for the scripted
+   deployments and four for the party's start tiles.
+
+   THE ARRAY THE CHAPTER IS PLAYED ON IS NOT THE ONE THIS HANDLER'S OWN RESET
+   BUILT.  ICON06.DAT's second opcode, at script offset 2, is SWITCH_MAP 0x2f,
+   which sets the chapter id to 47 and rebuilds on MAP47.DAT -- a cut-scene map
+   with no player slot and fourteen scripted deployments -- and its SWITCH_MAP
+   0x06 at script offset 210 sets the id back to 6 and rebuilds map 6 again
+   before either DEPLOY_WAVE runs.  So the chapter id is the 6 it entered with
+   by the time the title card is shown, and the roster add still has to precede
+   a reset because the reset that matters reads the roster the same way.
+
+   NOTHING IS WRITTEN ON A UNIT.  The body has no store in it at all, as
+   chapters 2 to 6 have none, and the cut-scene adds nothing either: walked
+   with the same ladder the shipped ICON06.DAT holds no SET_UNIT_TIMER
+   anywhere in its 557 bytes.  Chapter 7 opens with every unit on whatever its
+   deployment computed, and the guide lists no status on any of them.
+
+   THE CHAPTER IS NOT SET HERE.  Both the script the third call loads and the
+   title-card graphic the fourth one shows are chosen from
+   data_fdps_chapter_current_chapter_id by the callees, and this handler
+   neither reads nor writes it -- the dispatcher that reached this slot is what
+   put the right value there.  The Icon06.dat above is the one place the
+   chapter number is spelled out rather than read. */
+void fdps_chapter_07_init(void)
+{
+    fdps_roster_add_character(CH07_JOINING_CHARACTER);
+    fdps_chapter_state_reset();
+    fdps_icon_script_run(CH07_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH07_CURSOR_UNIT);
+}
