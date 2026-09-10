@@ -1,0 +1,123 @@
+/* chinit1b.c -- the per-chapter entry handlers, chapters 11 to 15: what the
+ * game does at the moment it enters a chapter, before the battle loop runs.
+ * Chapters 1 to 10 are chinit1.c and 16 to 30 are chinit2.c.
+ *
+ * These are slots of the handler table based at 00060074, indexed by the
+ * 0-based chapter id and called only through it, so the dispatcher in
+ * title.c is not a static caller of any of them.
+ *
+ * See chinit1b.h for what each handler sets up.  Nothing here owns state.
+ */
+#include "fdpstype.h"
+#include "roster.h"
+#include "chapter.h"
+#include "icon.h"
+#include "mapcur.h"
+#include "chinit1b.h"
+
+/* --- fdps_chapter_11_init @ 00021140 ----------------------------------- */
+
+/* The character who joins at the start of chapter 11: 琴琴 the 武道家,
+   character id 7 (assets/characters.md).  PUSH 0x7 at 0002114c.  She lands at
+   roster slot 8, behind the eight members chapters 1 to 4 and 7 to 9 have put
+   on, because the roster is in join order and is never permuted -- chapter 10
+   adds nobody, so the party is exactly eight when this handler runs. */
+#define CH11_JOINING_CHARACTER 7
+
+/* Chapter 11's opening cut-scene, the string at 0x6187c loaded into EAX at
+   0002115b and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id and not a script id of its own, which is
+   why this is Icon10.dat where fdps_chapter_10_init holds Icon09.dat at the
+   same position and fdps_chapter_12_init holds Icon11.dat.
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON10.DAT by the
+   call and cannot live in read-only storage. */
+#define CH11_OPENING_SCRIPT "Icon10.dat"
+
+/* Which unit the cursor is left on: PUSH 0x0 at 0002116e. */
+#define CH11_CURSOR_UNIT 0
+
+/* 00021140.  Five calls, straight line, no branch, no loop and no local -- the
+   same shape as chapters 2, 3 and 4, with a different character joining and a
+   different script name.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 00021140..00021144 -- over SUB ESP,0x0 at 00021146, a zero-byte
+   local area written as the six-byte immediate form.  Nothing is addressed off
+   EBP anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 00021178..0002117b
+   and the RET at 0002117c is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: PUSH 0x7 / CALL 0x00023bc0 / ADD ESP,0x4 at 0002114c..00021153,
+   MOV EAX,0x6187c / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4 at
+   0002115b..00021166, and PUSH 0x0 / CALL 0x0002da50 / ADD ESP,0x4 at
+   0002116e..00021175.  The two argument-less calls at 00021156 and 00021169
+   are bare CALLs with no push and no adjustment.  Nothing reads [EBP+8] or
+   above, so this function takes nothing itself, and EAX is never set before
+   the RET, so it returns nothing -- the dispatcher reaches it through the
+   eleventh slot of the table at 00060074 (the dword at 0006009c is 00021140,
+   and that data reference is the function's only xref) and ignores EAX.
+
+   VALUES USED AFTER A CALL: none at all.  Nothing here reads EAX after any of
+   the five; the only register written between the prologue and the RET is the
+   EAX that carries the script name literal into the third call.  The
+   interpreter does leave a result in EAX -- it is declared void in icon.h
+   because no caller in the image looks at it -- and the ADD ESP,0x4 at
+   00021166 is the stack cleanup, not a use of it.
+
+   THE ORDER DECIDES WHETHER THE CHAPTER HAS 琴琴 IN IT.  MAP10.DAT declares
+   NINE player slots -- byte +1 of the block (src/rsrc.c) -- and the party is
+   eight members when the chapter opens, so slot 8 exists for exactly one
+   person.  fdps_build_map_unit_array fills player slot i from roster slot i
+   only while i is below the roster count and writes the zeroed, retired spare
+   otherwise (src/deploy.c), so the add running BEFORE the reset is what makes
+   slot 8 a live unit rather than that spare.  The shipped ICON10.DAT then
+   spends most of its length on map unit 8 -- it walks her, poses her, retires
+   her with the three stand-ins, revives her alone and re-places her on tile
+   (11, 9) -- and the strategy guide's losing condition for the chapter is
+   蘭迪斯 or 琴琴 dying.  Written the other way round the chapter opens
+   without her.
+
+   Her level is the roster add's own and not a deployment record's: the add
+   builds her record from FRIAPRDA.DAT's level 15, 60 base HP and 12 base MP
+   and FRILEVUP.DAT's 12 HP and 2 MP a level, for HP 228 and MP 40, which is
+   the LV15 武道家琴琴（HP228,MP40）the strategy guide prints as this
+   chapter's 己方 addition (assets/characters.md).
+
+   THE CUT-SCENE DEPLOYS THE WHOLE OPPOSITION, AND SWITCHES NO MAP.  Walked
+   with the opcode ladder in src/icon.c, the shipped ICON10.DAT's 173 bytes
+   hold no SWITCH_MAP at all and three DEPLOY_WAVEs -- wave 1, then wave 2,
+   then wave 3, each with the place-exact operand 0 -- which on MAP10.DAT is
+   7, 3 and 4 of its 49 records.  The map itself tags only three records wave
+   0, all of them the same level-1 character, and those are the stand-ins the
+   script retires again part way through.  So the array the handler returns
+   with is nine player slots, three wave-0 stand-ins and fourteen deployed
+   enemies, twenty-six units, and those fourteen are the guide's opening 敵方
+   group by character id and level: LV15 魔導士 x3, LV15 冰魔導士 x2, LV14
+   野武士, LV13 狼人 x2, LV13 拳士 x3 and LV13 弓兵 x3.  The map's remaining
+   thirty-two records are its waves 4 and 5, the reinforcement lines the guide
+   lists against later turns, which no opcode here deploys.
+
+   NOTHING IS WRITTEN ON A UNIT.  The body has no store in it at all, as
+   chapters 2 to 10 have none, and the cut-scene adds no status either: walked
+   with the same ladder the shipped ICON10.DAT holds no SET_UNIT_TIMER
+   anywhere.  The guide lists no status on anybody this chapter.
+
+   THE CHAPTER IS NOT SET HERE.  Both the script the third call loads and the
+   title-card graphic the fourth one shows are chosen from
+   data_fdps_chapter_current_chapter_id by the callees, and this handler
+   neither reads nor writes it -- the dispatcher that reached this slot is what
+   put the right value there, and with no SWITCH_MAP in the script nothing
+   disturbs it on the way.  The Icon10.dat above is the one place the chapter
+   number is spelled out rather than read. */
+void fdps_chapter_11_init(void)
+{
+    fdps_roster_add_character(CH11_JOINING_CHARACTER);
+    fdps_chapter_state_reset();
+    fdps_icon_script_run(CH11_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH11_CURSOR_UNIT);
+}
