@@ -78,4 +78,30 @@ extern void fdps_chapter_11_init(void);
 extern void fdps_chapter_12_init(void);
 #pragma aux fdps_chapter_12_init "*" parm caller [];
 
+/* Chapter 13's entry handler: brings the game into chapter 13.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon12.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 0's tile.  Nobody joins the party this chapter -- there is no
+   fdps_roster_add_character in the body -- and the roster is left as chapter
+   12 finished it, nine members: the eight chapters 1 to 4 and 7 to 9 put on
+   and 琴琴.  MAP12.DAT asks for exactly nine player slots, so every slot has a
+   member behind it and no zeroed, retired spare is written.
+
+   The whole opposition is on the map before the cut-scene starts.  MAP12.DAT
+   tags every one of its thirty-seven deployment records wave 0, so the state
+   reset's own opening deploy puts all of them down and the array is forty-six
+   units by the time the script's first opcode runs; ICON12.DAT carries no
+   DEPLOY_WAVE and no SWITCH_MAP at all.  What the script does change is that
+   it retires one of the thirty-seven and never revives it -- map unit 29,
+   which is record 20, character 13 at level 15 -- and that is why the array
+   holds thirty-seven opponents where the strategy guide's 敵方 list for the
+   chapter counts thirty-six.  It also walks the party off its start tiles, so
+   the tile the cursor ends on is the script's and not MAP12.COD's.
+
+   Table slot 12. */
+extern void fdps_chapter_13_init(void);
+#pragma aux fdps_chapter_13_init "*" parm caller [];
+
 #endif
