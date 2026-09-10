@@ -92,4 +92,40 @@ extern void fdps_chapter_16_init(void);
 extern void fdps_chapter_17_init(void);
 #pragma aux fdps_chapter_17_init "*" parm caller [];
 
+/* Chapter 18's entry handler: brings the game into chapter 18.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon17.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 0's tile.
+
+   Nobody joins the party this chapter -- there is no fdps_roster_add_character
+   in the body -- and the roster is left as chapter 17 finished it, the same
+   ten members.  MAP17.DAT asks for ten player slots, so every slot has a
+   member behind it and no zeroed, retired spare is written.
+
+   The whole party fights.  ICON17.DAT retires map units 3, 4, 7, 8 and 9 for
+   the length of the scene and REVIVEs all five before it ends, which no other
+   chapter-init cut-scene does, so all ten player slots carry a clear flags
+   byte when the handler returns.
+
+   The board the chapter opens on is the cut-scene's doing and not the map's.
+   MAP17.DAT tags only two of its sixty-five deployment records wave 0 -- a
+   guest-side character 12 and a character 117, map units 10 and 11, the scene's
+   own actors -- and the cut-scene deploys wave 2 for a third, map unit 12, then
+   retires all three before it ends.  Its closing DEPLOY_WAVE brings in wave 1,
+   the fifteen records that are the strategy guide's opening 敵方 list to the
+   number: LV14 衛兵 x5 (character 90), LV15 弓箭手 x2 (94), LV13 騎士 x5 (89),
+   LV14 暗黑騎士 x2 (77) and LV16 暗魔導士 x1 (103).  The map's remaining
+   forty-eight records are the chapter's turn events -- flights of 飛兵 and
+   squads of 騎士 on waves 4 to 11, and the wave-13 reinforcement the guide
+   gives as 第十三回合 -- and are not down yet.
+
+   The cut-scene also walks unit 0 off its start tile onto (17, 19), so the
+   tile the cursor ends on is ICON17.DAT's and not MAP17.COD's.
+
+   Table slot 17. */
+extern void fdps_chapter_18_init(void);
+#pragma aux fdps_chapter_18_init "*" parm caller [];
+
 #endif
