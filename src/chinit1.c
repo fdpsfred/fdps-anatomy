@@ -930,3 +930,94 @@ void fdps_chapter_09_init(void)
     fdps_show_chapter_title_card();
     fdps_map_cursor_move_to_unit(CH09_CURSOR_UNIT);
 }
+
+/* --- fdps_chapter_10_init @ 00021100 ----------------------------------- */
+
+/* Chapter 10's opening cut-scene, the string at 0x61870 loaded into EAX at
+   00021111 and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id and not a script id of its own, which is
+   why this is Icon09.dat where fdps_chapter_09_init above holds Icon08.dat at
+   the same position.
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON09.DAT by the
+   call and cannot live in read-only storage. */
+#define CH10_OPENING_SCRIPT "Icon09.dat"
+
+/* Which unit the cursor is left on: PUSH 0x0 at 00021124. */
+#define CH10_CURSOR_UNIT 0
+
+/* 00021100.  Four calls, straight line, no branch, no loop and no local -- the
+   plain form of the family, the same four calls in the same order as
+   fdps_chapter_05_init and fdps_chapter_06_init, with no
+   fdps_roster_add_character in front of them and no store behind them.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 00021100..00021104 -- over SUB ESP,0x0 at 00021106, a zero-byte
+   local area written as the six-byte immediate form.  Nothing is addressed off
+   EBP anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 0002112e..00021131
+   and the RET at 00021132 is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: MOV EAX,0x61870 / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4 at
+   00021111..0002111c, and PUSH 0x0 / CALL 0x0002da50 / ADD ESP,0x4 at
+   00021124..0002112b.  The two argument-less calls at 0002110c and 0002111f
+   are bare CALLs with no push and no adjustment.  Nothing reads [EBP+8] or
+   above, so this function takes nothing itself, and EAX is never set after the
+   third call, so it returns nothing -- the dispatcher reaches it through the
+   tenth slot of the table at 00060074 (the dword at 00060098 is 00021100) and
+   ignores EAX.
+
+   VALUES USED AFTER A CALL: none at all.  All four callees return void and
+   nothing here reads EAX after any of them; the only register written between
+   the prologue and the RET is the EAX that carries the script name literal
+   into the second call.
+
+   NOBODY JOINS THE PARTY THIS CHAPTER, AND NO SLOT IS LEFT OVER.  The first
+   instruction after the prologue is the state rebuild, so the roster is left
+   exactly as chapter 9 finished it: 蘭迪斯, 尤利安, 亞克, 法蓮娜, 裘娜,
+   費塔加, 布蘭多 and 蓋亞, eight members, chapters 1 to 4 having added one
+   each and chapters 7, 8 and 9 the other four.  MAP09.DAT declares EIGHT
+   player slots -- byte +1 of the block (src/rsrc.c) -- so every slot has a
+   member behind it and fdps_build_map_unit_array writes no zeroed, retired
+   spare anywhere in the array (src/deploy.c).  The strategy guide's account of
+   the chapter is written around 己方八位人員, which is the same eight from the
+   other side.
+
+   THE CUT-SCENE SPENDS ITSELF ON TWO MAPS OF ITS OWN AND PUTS THIS ONE BACK,
+   AND DEPLOYS NOTHING ANYWHERE.  Walked with the opcode ladder in src/icon.c,
+   the shipped ICON09.DAT's 854 bytes hold three SWITCH_MAPs and no DEPLOY_WAVE
+   at all: SWITCH_MAP 0x25 at script offset 4 rebuilds on MAP37.DAT and
+   SWITCH_MAP 0x26 at offset 227 on MAP38.DAT -- cut-scene maps whose actors
+   are level-2 stand-ins, twelve and eleven of them, all tagged wave 0 -- and
+   SWITCH_MAP 0x09 at offset 701 sets the chapter id back to 9 and rebuilds map
+   9 from scratch.
+
+   So the array the handler returns with is the one that last switch built:
+   eight player slots and the eight records MAP09.DAT tags wave 0, for sixteen.
+   Those eight are the strategy guide's opening 敵方 group to the number --
+   four LV13 步兵, two LV13 騎兵 and two LV15 魔導士 -- and the forty records
+   the map tags waves 1 to 11 are the reinforcement lines the guide lists
+   against turns 3, 6 to 13 and 19, which no opcode here deploys.
+
+   NOTHING IS WRITTEN ON A UNIT.  The body has no store in it at all, as
+   chapters 2 to 9 have none, and the cut-scene adds nothing either: walked
+   with the same ladder the shipped ICON09.DAT holds no SET_UNIT_TIMER
+   anywhere.  The guide lists no status on anybody this chapter.
+
+   THE CHAPTER IS NOT SET HERE.  Both the script the second call loads and the
+   title-card graphic the third one shows are chosen from
+   data_fdps_chapter_current_chapter_id by the callees, and this handler
+   neither reads nor writes it -- the dispatcher that reached this slot is what
+   put the right value there, and the cut-scene's own run of switches leaves it
+   as it found it.  The Icon09.dat above is the one place the chapter number is
+   spelled out rather than read. */
+void fdps_chapter_10_init(void)
+{
+    fdps_chapter_state_reset();
+    fdps_icon_script_run(CH10_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH10_CURSOR_UNIT);
+}

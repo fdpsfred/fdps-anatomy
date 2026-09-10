@@ -3802,21 +3802,21 @@ Pool: fdps  [game asset string "Icon08.dat" and five game callees including fdps
 Watcom multi-byte NOP alignment padding: lea eax,[eax+0] then lea edx,[edx+0]
 
 === 00021100 [PLATE]
-Chapter 10's entry handler: brings the game into chapter 10 by resetting the chapter state, playing the chapter's opening IconAni cutscene and its title card, then parking the map cursor on the first unit. It is reached through slot 9 of the per-chapter entry-handler table at 00060074, indexed by the 0-based chapter index in DAT_00069cf4.
+Chapter 10's entry handler: brings the game into chapter 10 by resetting the chapter state, playing the chapter's opening IconAni cutscene and its title card, then parking the map cursor on the first unit. It is reached through slot 9 of the per-chapter entry-handler table at 00060074 (the dword at 00060098), which fdps_title_screen (at 0002a85e) and fdps_run_village_phase (at 00031505) both call as table[data_fdps_chapter_current_chapter_id], the 0-based chapter index.
 
 Algorithm:
-  1. fdps_chapter_state_reset rebuilds the per-chapter runtime state block and the chapter's unit roster from the chapter index held in DAT_00069cf4.
-  2. FUN_00021650("Icon09.dat") loads chapter 10's opening event script out of the IconAni.vfs archive and interprets it. The script number is the 0-based chapter index, so chapter 10's script is Icon09.dat; the neighbouring handlers use Icon08.dat (000210b0) and Icon10.dat (00021140).
-  3. FUN_00020c60 shows the chapter title card: Chapter.saf and Chapter.pal out of MISC.VFS, the graphic again selected by DAT_00069cf4, faded up, held, then faded back to black.
+  1. fdps_chapter_state_reset rebuilds the per-chapter runtime state block and the chapter's unit roster from the 0-based chapter index held in data_fdps_chapter_current_chapter_id.
+  2. fdps_icon_script_run("Icon09.dat") loads chapter 10's opening event script out of the IconAni.vfs archive and interprets it. The script number is the 0-based chapter index, so chapter 10's script is Icon09.dat; the neighbouring handlers use Icon08.dat (fdps_chapter_09_init at 000210b0) and Icon10.dat (00021140). The script leaves the chapter's map and comes back: walked with the opcode ladder in src/icon.c, ICON09.DAT's 854 bytes hold three SWITCH_MAPs -- 0x25 (37) at script offset 4, 0x26 (38) at 227 and 0x09 (9) at 701 -- and NO DEPLOY_WAVE and no SET_UNIT_TIMER at all. So the array the handler returns with is what the last switch rebuilt: MAP09.DAT's eight player slots plus its eight wave-0 records, sixteen units, and nobody opens the chapter with a status.
+  3. fdps_show_chapter_title_card shows the chapter title card: Chapter.saf and Chapter.pal out of MISC.VFS, the graphic again selected by data_fdps_chapter_current_chapter_id, faded up, held, then faded back to black.
   4. fdps_map_cursor_move_to_unit(0) leaves the map cursor sitting on the tile of unit 0.
 
-Unlike the handlers at 000210b0 and 00021140, this one hands no new character to the roster before the reset; it is the plain four-step form of the family.
+Unlike the handlers at 000210b0 and 00021140, this one hands no new character to the roster before the reset; it is the plain four-step form of the family, which 00020fb0 and 00020ff0 also take. What separates it from those two is that its cut-scene deploys nobody either -- ICON09.DAT carries no DEPLOY_WAVE.
 
 Parameters:
   none
 
 Returns:
-  nothing. The dispatch site calls it indirectly through the table and ignores EAX.
+  nothing. The two dispatch sites call it indirectly through the table and ignore EAX.
 
 Pool: fdps  [game asset string "Icon09.dat" and four game callees including fdps_chapter_state_reset; Function ID finds no Watcom or ailv3.lib candidate, and the body does no runtime work -- no FPU, DOS interrupt, allocator or AIL state]
 

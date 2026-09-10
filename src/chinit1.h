@@ -243,4 +243,30 @@ extern void fdps_chapter_08_init(void);
 extern void fdps_chapter_09_init(void);
 #pragma aux fdps_chapter_09_init "*" parm caller [];
 
+
+/* Chapter 10's entry handler: brings the game into chapter 10.  Takes nothing
+   and returns nothing.
+
+   Four calls and nothing else, the plain form chapters 5 and 6 have: the
+   chapter state is rebuilt, the opening cut-scene Icon09.dat is interpreted,
+   the chapter title card is shown, and the map cursor is parked on unit 0's
+   tile.  Nobody joins the party and nothing is written on a unit record.
+
+   The party is eight members when the chapter opens and MAP09.DAT asks for
+   eight player slots, so every slot has a member behind it and none of them is
+   the retired spare -- the fit chapter 6 has and chapter 5 does not.
+
+   The cut-scene deploys nobody at all, which is true of no other handler in
+   the file: ICON09.DAT switches to the cut-scene map 37, then to 38, then back
+   to map 9, and carries no DEPLOY_WAVE.  So the array the handler returns with
+   is the one that last switch rebuilt -- the eight player slots and the eight
+   records MAP09.DAT tags wave 0, for sixteen -- and those eight are the
+   strategy guide's opening 敵方 group: four LV13 步兵, two LV13 騎兵 and two
+   LV15 魔導士.  The map's other forty records are the reinforcements the guide
+   lists against later turns.
+
+   Table slot 9. */
+extern void fdps_chapter_10_init(void);
+#pragma aux fdps_chapter_10_init "*" parm caller [];
+
 #endif
