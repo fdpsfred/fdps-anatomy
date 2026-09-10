@@ -97,12 +97,35 @@ def chapter_event_file(n):
     return "chevt6.c"
 
 
+def chapter_init_file(n):
+    """Which chinitN.c a chapter's entry handler lands in.
+
+    chinit1b.c is the chevt2b.c cut made in the init family.  Chapters 1 to 15
+    were one file, which reached 1024 emitted lines with chapter 10's handler
+    -- five handlers still to come -- because every handler carries the map
+    file's player-slot count, the cut-scene's own deployments and the roster
+    arithmetic that decide whether its four or five calls do anything, and that
+    is a page of comment per handler whatever the body costs.  So chapters 1 to
+    10 keep chinit1.c and chapters 11 to 15 were cut off into a file of their
+    own before the eleventh landed on top of them.
+
+    It is not chinit3.c, because chinit2.c is already chapters 16 to 30: the
+    letter keeps the family in chapter order, as it does for chevt2b.c and
+    chevt5b.c.
+    """
+    if n <= 10:
+        return "chinit1.c"
+    if n <= 15:
+        return "chinit1b.c"
+    return "chinit2.c"
+
+
 # The chapter-numbered handler families.  Each is one family of thirty (or, for
 # the event handlers, of however many chapters scripted one), split by chapter
 # number alone because there is nothing else to group them by: no two chapters'
 # handlers share code, and the numbering is the game's own ordering.
 CHAPTER_SPLITS = [
-    (r"^fdps_chapter_(\d\d)_init$", lambda n: "chinit1.c" if n <= 15 else "chinit2.c"),
+    (r"^fdps_chapter_(\d\d)_init$", chapter_init_file),
     (r"^fdps_chapter_(\d\d)_post_action$", lambda n: "chpost1.c" if n <= 15 else "chpost2.c"),
     (r"^fdps_chapter_(\d\d)_end$", lambda n: "chend1.c" if n <= 15 else "chend2.c"),
     (r"^fdps_chapter_(\d\d)_event_", chapter_event_file),

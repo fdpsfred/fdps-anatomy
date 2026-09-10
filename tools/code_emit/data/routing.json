@@ -952,35 +952,35 @@
     },
     "00021140": {
       "name": "fdps_chapter_11_init",
-      "target": "chinit1.c",
+      "target": "chinit1b.c",
       "est_lines": 55,
       "body_size": 61,
       "status": "pending"
     },
     "00021180": {
       "name": "fdps_chapter_12_init",
-      "target": "chinit1.c",
+      "target": "chinit1b.c",
       "est_lines": 50,
       "body_size": 51,
       "status": "pending"
     },
     "000211c0": {
       "name": "fdps_chapter_13_init",
-      "target": "chinit1.c",
+      "target": "chinit1b.c",
       "est_lines": 42,
       "body_size": 51,
       "status": "pending"
     },
     "00021200": {
       "name": "fdps_chapter_14_init",
-      "target": "chinit1.c",
+      "target": "chinit1b.c",
       "est_lines": 52,
       "body_size": 51,
       "status": "pending"
     },
     "00021240": {
       "name": "fdps_chapter_15_init",
-      "target": "chinit1.c",
+      "target": "chinit1b.c",
       "est_lines": 63,
       "body_size": 66,
       "status": "pending"
@@ -8953,7 +8953,7 @@
         "fdps_chapter_12_init"
       ],
       "carried_in": [
-        "chinit1.c"
+        "chinit1b.c"
       ],
       "reason": "A string literal, not a named global. It comes back as the literal in the statement that uses it; naming it would invent a symbol the original never had. See rebuild_info/naming.md.",
       "status": "skip"

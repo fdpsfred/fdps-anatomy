@@ -1,5 +1,6 @@
-/* chinit1.c -- the per-chapter entry handlers, chapters 1 to 15: what the
+/* chinit1.c -- the per-chapter entry handlers, chapters 1 to 10: what the
  * game does at the moment it enters a chapter, before the battle loop runs.
+ * Chapters 11 to 15 are chinit1b.c and 16 to 30 are chinit2.c.
  *
  * These are slots of the handler table based at 00060074, indexed by the
  * 0-based chapter id and called only through it, so the dispatcher in

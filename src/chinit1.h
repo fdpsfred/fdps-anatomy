@@ -1,4 +1,5 @@
-/* chinit1.h -- the per-chapter entry handlers, chapters 1 to 15.
+/* chinit1.h -- the per-chapter entry handlers, chapters 1 to 10.  Chapters 11
+ * to 15 are chinit1b.h and 16 to 30 are chinit2.h.
  *
  * Every entry point here is a slot of the handler table based at 00060074,
  * and the slot number is the 0-based chapter id.  The table is reached

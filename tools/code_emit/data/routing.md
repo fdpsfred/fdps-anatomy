@@ -32,7 +32,8 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `chevt5.c` | 4 | 396 | 0 | 0 | 396 |
 | `chevt5b.c` | 4 | 444 | 0 | 0 | 444 |
 | `chevt6.c` | 7 | 704 | 0 | 0 | 704 |
-| `chinit1.c` | 15 | 752 | 0 | 0 | 752 |
+| `chinit1.c` | 10 | 490 | 0 | 0 | 490 |
+| `chinit1b.c` | 5 | 262 | 0 | 0 | 262 |
 | `chinit2.c` | 15 | 807 | 0 | 0 | 807 |
 | `chpost1.c` | 15 | 910 | 0 | 0 | 910 |
 | `chpost2.c` | 15 | 979 | 0 | 0 | 979 |
@@ -388,7 +389,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `00039840` | 82 | `fdps_chapter_30_event_deploy_wave_2` |
 | `000398c0` | 56 | `fdps_chapter_30_event_deploy_wave_3` |
 
-### `chinit1.c` -- 15 functions, 752 lines
+### `chinit1.c` -- 10 functions, 490 lines
 
 | address | lines | function |
 | --- | ---: | --- |
@@ -402,6 +403,11 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `00021070` | 45 | `fdps_chapter_08_init` |
 | `000210b0` | 48 | `fdps_chapter_09_init` |
 | `00021100` | 40 | `fdps_chapter_10_init` |
+
+### `chinit1b.c` -- 5 functions, 262 lines
+
+| address | lines | function |
+| --- | ---: | --- |
 | `00021140` | 55 | `fdps_chapter_11_init` |
 | `00021180` | 50 | `fdps_chapter_12_init` |
 | `000211c0` | 42 | `fdps_chapter_13_init` |
