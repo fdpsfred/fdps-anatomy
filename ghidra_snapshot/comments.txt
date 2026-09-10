@@ -4024,8 +4024,8 @@ Chapter 19's entry handler: hands the paladin 蘭斯洛特 to the party roster, 
 Algorithm:
   1. fdps_roster_add_character(0x0b) appends character 0x0b -- 蘭斯洛特, the 聖騎士 of FRIAPRDA.DAT row 0x0b -- to the party roster array at [0x00064108]. This is the step that distinguishes chapter 19's handler from the plain four-step form of fdps_chapter_18_init (00021310) and fdps_chapter_20_init (00021390), which are otherwise the same body byte for byte. The join happens here, on the way into the chapter; fdps_chapter_19_event_lancelot_joins (00038180) is only the turn-6 event that brings his unit onto the battle map.
   2. fdps_chapter_state_reset rebuilds the per-chapter runtime state block and the chapter's unit roster from the 0-based chapter index held in DAT_00069cf4.
-  3. FUN_00021650("Icon18.dat") loads chapter 19's opening event script out of the IconAni.vfs archive and interprets it. The script number is the 0-based chapter index, one less than the chapter number the player sees, so chapter 19's script is Icon18.dat; the neighbouring handlers use Icon17.dat (00021310) and Icon19.dat (00021390).
-  4. FUN_00020c60 shows the chapter title card: Chapter.saf and Chapter.pal out of MISC.VFS, the graphic again selected by DAT_00069cf4, faded up, held, then faded back to black.
+  3. fdps_icon_script_run("Icon18.dat") loads chapter 19's opening event script out of the IconAni.vfs archive and interprets it. The script number is the 0-based chapter index, one less than the chapter number the player sees, so chapter 19's script is Icon18.dat; the neighbouring handlers use Icon17.dat (00021310) and Icon19.dat (00021390).
+  4. fdps_show_chapter_title_card shows the chapter title card: Chapter.saf and Chapter.pal out of MISC.VFS, the graphic again selected by DAT_00069cf4, faded up, held, then faded back to black.
   5. fdps_map_cursor_move_to_unit(0) leaves the map cursor sitting on the tile of unit 0.
 
 Parameters:

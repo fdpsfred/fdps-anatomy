@@ -128,4 +128,45 @@ extern void fdps_chapter_17_init(void);
 extern void fdps_chapter_18_init(void);
 #pragma aux fdps_chapter_18_init "*" parm caller [];
 
+/* Chapter 19's entry handler: hands the 聖騎士 蘭斯洛特 to the party roster
+   and brings the game into chapter 19.  Takes nothing and returns nothing.
+
+   In order: character 11 is appended to the roster, the chapter state is
+   rebuilt, the opening cut-scene Icon18.dat is interpreted, the chapter title
+   card is shown, and the map cursor is parked on unit 0's tile.
+
+   蘭斯洛特 JOINS HERE, NOT AT THE ARRIVAL EVENT.  The add runs on the way into
+   the chapter, so he is on the roster before the battle starts even though the
+   unit the player sees walk on belongs to the turn-6 event
+   fdps_chapter_19_event_lancelot_joins.  The two are different records: the add
+   builds his roster line out of FRIAPRDA.DAT row 11 at level 15 and 616 HP,
+   while MAP18.DAT's wave-1 record puts a level-2 unit on the board.  The
+   strategy guide records both -- its 己方 line is the level-2 unit, and its
+   備註 says that finishing the chapter before the event fires still leaves him
+   in the party, at level 15 with 修羅之矛 and 重鎧甲, which is this add's
+   record exactly.
+
+   HE IS NOT ONE OF THIS CHAPTER'S MAP UNITS.  He lands at roster slot 10 and
+   MAP18.DAT asks for ten player slots, so the ten the chapter is fought with
+   are the same ten chapters 16 to 18 opened with and no slot is left over.
+
+   The board the chapter opens on is half the map's and half the cut-scene's.
+   MAP18.DAT tags five of its sixty-eight deployment records wave 0 -- LV15
+   暗黑騎士 (character 77) -- and ICON18.DAT's single DEPLOY_WAVE brings in the
+   thirty-nine records tagged wave 5, for fifty-four units.  Those thirty-nine
+   plus the five are the strategy guide's opening 敵方 list to the number: LV17
+   弓箭手 x14 (character 94), LV18 暗魔導士 x7 (103), LV17 飛兵 x6 (96), LV17
+   野蠻戰士 x5 (80) and LV15 暗黑騎士 x12 (77).  The map's remaining
+   twenty-four records are the chapter's own events -- wave 1 蘭斯洛特, the
+   wave-2 LV18 challenger the guide leaves unnamed, and the wave-6
+   reinforcement of fourteen LV17 飛兵 and eight LV15 武鬥家 -- and none of them
+   is down yet.
+
+   The cut-scene walks unit 0 off its start tile, so the tile the cursor ends on
+   is ICON18.DAT's and not MAP18.COD's.
+
+   Table slot 18. */
+extern void fdps_chapter_19_init(void);
+#pragma aux fdps_chapter_19_init "*" parm caller [];
+
 #endif

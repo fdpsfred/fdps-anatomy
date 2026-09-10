@@ -10,6 +10,7 @@
  */
 #include "fdpstype.h"
 #include "chapter.h"
+#include "roster.h"
 #include "icon.h"
 #include "mapcur.h"
 #include "chinit2.h"
@@ -356,4 +357,135 @@ void fdps_chapter_18_init(void)
     fdps_icon_script_run(CH18_OPENING_SCRIPT);
     fdps_show_chapter_title_card();
     fdps_map_cursor_move_to_unit(CH18_CURSOR_UNIT);
+}
+
+/* --- fdps_chapter_19_init @ 00021350 ----------------------------------- */
+
+/* The character who joins the party at the start of chapter 19: 蘭斯洛特 the
+   聖騎士, character id 11 (assets/characters.md).  PUSH 0xb at 0002135c.  He
+   lands at roster slot 10, behind the ten members chapters 16 to 18 were
+   fought with, because the roster is in join order and is never permuted.
+
+   THE RECORD THE ADD BUILDS IS NOT THE UNIT THE PLAYER SEES ARRIVE, and this
+   is the widest the two have been apart in the family.
+   fdps_roster_add_character reads FRIAPRDA.DAT row 11 and FRILEVUP.DAT row 11,
+   which is level 15 on 420 base HP and 0 base MP with 14 HP and 0 MP a level,
+   so the roster record is LV15 at 616 HP and 0 MP carrying 修羅之矛 and 重鎧甲
+   -- item ids 0x2d and 0x69 (assets/items.md).  MAP18.DAT's own wave-1 record
+   is a different line: side 2, character 11, level 2, items 0x29 and 0x6a,
+   which is the strategy guide's 己方 line for the chapter, LV2 聖騎士 蘭斯洛特
+   with 破陣之矛 and 精鋼鎧甲, and it is fdps_chapter_19_event_lancelot_joins
+   that deploys it on turn 6.
+
+   THE GUIDE RECORDS THE DIFFERENCE FROM THE PLAYER'S SIDE.  Its 備註 for the
+   chapter says that finishing before the arrival event fires still leaves
+   蘭斯洛特 in the party, but at LV15 with 616 HP, 0 MP, 修羅之矛 and 重鎧甲 --
+   which is this add's record read back, number for number.  So the add is
+   observable on its own, and moving it into the arrival event would lose the
+   behaviour the guide is describing. */
+#define CH19_JOINING_CHARACTER 11
+
+/* Chapter 19's opening cut-scene, the string at 0x618dc loaded into EAX at
+   0002136b and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id, so chapter 19's member is Icon18.dat,
+   the one after chapter 18's Icon17.dat at 0x618d0 -- the literals sit end to
+   end in the image.
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON18.DAT by the
+   call and cannot live in read-only storage. */
+#define CH19_OPENING_SCRIPT "Icon18.dat"
+
+/* Which unit the cursor is left on: PUSH 0x0 at 0002137e, the same unit
+   twenty-seven of the thirty handlers name. */
+#define CH19_CURSOR_UNIT 0
+
+/* 00021350.  Five calls, straight line, no branch, no loop and no local -- the
+   plain four-call form of fdps_chapter_18_init above it with an
+   fdps_roster_add_character put back in front of it, which is the shape
+   chapters 2 to 4, 7, 8 and 11 have.  At 0x3d bytes it is the plain form's
+   0x33 plus the ten bytes of the add.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 00021350..00021354 -- over SUB ESP,0x0 at 00021356, a zero-byte
+   local area written as the six-byte immediate form.  Nothing is addressed off
+   EBP anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 00021388..0002138b
+   and the RET at 0002138c is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: PUSH 0xb / CALL 0x00023bc0 / ADD ESP,0x4 at 0002135c..00021363,
+   MOV EAX,0x618dc / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4 at
+   0002136b..00021376, and PUSH 0x0 / CALL 0x0002da50 / ADD ESP,0x4 at
+   0002137e..00021385.  The two argument-less calls at 00021366 and 00021379
+   are bare CALLs with no push and no adjustment.  Nothing reads [EBP+8] or
+   above, so this function takes nothing itself, and EAX is never set after the
+   last call, so it returns nothing -- the dispatcher reaches it through the
+   nineteenth slot of the table at 00060074 (the dword at 000600bc is 00021350,
+   and that data reference is the function's only xref) and ignores EAX.
+
+   VALUES USED AFTER A CALL: none at all.  All five callees return void and
+   nothing here reads EAX after any of them; the only register written between
+   the prologue and the RET is the EAX that carries the script name literal
+   into the third call.
+
+   THE ADD RUNS BEFORE THE RESET, AND HERE THAT ORDER COSTS NOTHING.
+   fdps_chapter_state_reset fills player slot i from roster slot i only while i
+   is below the roster count (src/deploy.c), and MAP18.DAT declares TEN player
+   slots -- byte +1 of the block (src/rsrc.c) -- against a roster this add has
+   just made eleven.  蘭斯洛特 is roster slot 10, one past the last slot the map
+   asks for, so he is not one of chapter 19's map units whichever way round the
+   first two calls run; the ten that are behind those slots are the same ten
+   chapters 16 to 18 were fought with, every slot filled and no zeroed, retired
+   spare written anywhere in the array.  The order is kept because it is the
+   original's and not because this chapter shows it.
+
+   HALF THE OPENING BOARD IS THE MAP'S AND HALF IS THE CUT-SCENE'S.  MAP18.DAT
+   holds sixty-eight deployment records and tags five of them wave 0 -- LV15
+   暗黑騎士, character 77 -- so the reset's own opening deploy appends those
+   five behind the ten player slots as map units 10 to 14.  Walked with the
+   opcode ladder in src/icon.c, the shipped ICON18.DAT's 231 bytes hold one
+   DEPLOY_WAVE, at script offset 196: wave 5 with the place operand 0, the
+   nearest-free-tile search rather than the exact anchor (src/deploy.c), which
+   is thirty-nine more records.  The handler therefore returns with fifty-four
+   units on the map.
+
+   THOSE FORTY-FOUR ARE THE GUIDE'S OPENING 敵方 LIST TO THE NUMBER, by
+   character id and level: LV17 弓箭手 x14 is character 94, LV18 暗魔導士 x7 is
+   103, LV17 飛兵 x6 is 96, LV17 野蠻戰士 x5 is 80, and LV15 暗黑騎士 x12 is 77
+   -- five of those twelve on wave 0 and seven on wave 5.  The map's remaining
+   twenty-four records are the chapter's own events and none of them is down
+   yet: wave 1 is the single 蘭斯洛特 unit the turn-6 arrival deploys, wave 2 is
+   the LV18 character 35 the guide prints as ？？？？, the challenger who comes
+   for 裘娜, and wave 6 is the reinforcement of fourteen LV17 飛兵 and eight
+   LV15 武鬥家 the guide describes as arriving on the left, right and top.
+
+   NOBODY IS TAKEN OFF THE BOARD, AND NOTHING IS WRITTEN ON A UNIT'S STATUS.
+   The body has no store in it at all, and ICON18.DAT carries no RETIRE_UNIT,
+   no REVIVE_UNIT and no SET_UNIT_TIMER anywhere in its 231 bytes, so all ten
+   player slots carry a clear flags byte and clear status timers when the
+   handler returns.  The guide lists no status on anybody this chapter.
+
+   THE CUT-SCENE WALKS UNIT 0, SO THE CURSOR CALL IS NOT WHERE THE MAP PUT IT.
+   MAP18.COD gives the ten player slots ten different start tiles -- records 68
+   to 77, the first records past the map's sixty-eight scripted ones -- and
+   slot 0's is (12, 2).  Eight of the member's nine WALK_UNITS opcodes list map
+   unit 0, and their facings come to one tile left and four tiles down net, which
+   leaves it on (11, 6).  The cursor call is the last of the five.
+
+   THE CHAPTER IS NOT SET HERE.  Both the script the third call loads and the
+   title-card graphic the fourth one shows are chosen from
+   data_fdps_chapter_current_chapter_id by the callees, and this handler
+   neither reads nor writes it -- the dispatcher that reached this slot is what
+   put the right value there, and this member carries no SWITCH_MAP to disturb
+   it.  The Icon18.dat above is the one place the chapter number is spelled out
+   rather than read. */
+void fdps_chapter_19_init(void)
+{
+    fdps_roster_add_character(CH19_JOINING_CHARACTER);
+    fdps_chapter_state_reset();
+    fdps_icon_script_run(CH19_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH19_CURSOR_UNIT);
 }
