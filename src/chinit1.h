@@ -166,4 +166,38 @@ extern void fdps_chapter_06_init(void);
 extern void fdps_chapter_07_init(void);
 #pragma aux fdps_chapter_07_init "*" parm caller [];
 
+/* Chapter 8's entry handler: brings the game into chapter 8.  Takes nothing
+   and returns nothing.
+
+   In order, and the order is the original's: character 2 -- 費塔加 the
+   魔導士 -- is appended to the party roster; the chapter state is rebuilt;
+   the opening cut-scene Icon07.dat is interpreted; the chapter title card is
+   shown; and the map cursor is parked on unit 0's tile.
+
+   The add comes before the rebuild as it does in every handler that has one,
+   and chapter 8 is the third chapter where that is not observable: MAP07.DAT
+   asks for five player slots and the party is already five members strong, so
+   費塔加 lands at roster slot 5, one past the last slot the map fills, and is
+   not one of chapter 8's map units.
+
+   He is on chapter 8's map as a side-1 ally instead, and that is a different
+   record: MAP07.DAT's deployment 19 is side 1, character 2, level 15, carrying
+   光之杖 and 祭司袍, and it is tagged wave 1 -- a wave nothing this handler
+   runs ever deploys, so he is not on the map when the handler returns either.
+   The strategy guide's 加入 line for the chapter is that record and not the
+   roster record the add builds: LV15 at HP162 and MP163 against FRIAPRDA.DAT's
+   own level 13 at HP150 and MP149.
+
+   The cut-scene leaves the chapter on its own map even though it spends most
+   of itself somewhere else.  ICON07.DAT switches to map 48 -- a cut-scene map
+   with no player slot whose six deployments are the five party actors and
+   費塔加 -- and switches back to map 7 near its end, so the array the handler
+   returns with is the one that second switch rebuilt: five player slots and
+   MAP07.DAT's fourteen wave-0 records, for nineteen.  Nothing here writes on a
+   unit record and neither does the cut-scene.
+
+   Table slot 7. */
+extern void fdps_chapter_08_init(void);
+#pragma aux fdps_chapter_08_init "*" parm caller [];
+
 #endif
