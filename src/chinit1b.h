@@ -54,4 +54,28 @@
 extern void fdps_chapter_11_init(void);
 #pragma aux fdps_chapter_11_init "*" parm caller [];
 
+/* Chapter 12's entry handler: brings the game into chapter 12.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon11.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 0's tile.  Nobody joins the party this chapter -- there is no
+   fdps_roster_add_character in the body -- and the roster is left as chapter
+   11 finished it, nine members: the eight chapters 1 to 4 and 7 to 9 put on
+   and 琴琴.  MAP11.DAT asks for exactly nine player slots, so every slot has a
+   member behind it and no zeroed, retired spare is written.
+
+   The chapter's one opponent is chosen inside the cut-scene and not here.
+   ICON11.DAT switches to two cut-scene maps and back to map 11, and its last
+   DEPLOY_WAVE carries the wave operand 0xff, the form that takes the wave from
+   the answer the ASK_THREE_WAY question left behind (icon.h).  MAP11.DAT holds
+   three deployment records, tagged wave 1, 2 and 3 and tagged nothing wave 0
+   -- LV20 characters 113, 114 and 115, which are the strategy guide's
+   修佩魯, 雷德 and 亞德尼恩, one per room of 火神的宮殿 -- so the handler
+   returns with nine player slots and one opponent, ten units.
+
+   Table slot 11. */
+extern void fdps_chapter_12_init(void);
+#pragma aux fdps_chapter_12_init "*" parm caller [];
+
 #endif

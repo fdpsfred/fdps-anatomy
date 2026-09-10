@@ -1,6 +1,7 @@
 /* tests/chinit1b.c -- cover for src/chinit1b.c.
  *
- * One entry handler per section.  fdps_chapter_11_init is first.
+ * One entry handler per section, in address order: fdps_chapter_11_init at
+ * 00021140 and then fdps_chapter_12_init at 00021180.
  *
  * WHAT THE HANDLER IS.  fdps_chapter_11_init at 00021140 is five calls with no
  * branch, no loop and no store anywhere in it, so nothing about it is worth
@@ -40,23 +41,36 @@
  * with the opcode ladder in src/icon.c -- and adds a marker so the run can say
  * which member the interpreter opened.
  *
- * WHY THE TWO NEIGHBOURING MEMBERS ARE STAGED TOO.  Icon10.dat is chapter
- * ELEVEN's script -- the number in the name is the 0-based chapter id -- so the
- * mistake this file has to be able to catch is a handler naming Icon11.dat or
- * Icon09.dat instead.  A container holding only ICON10.DAT would turn that
- * mistake into a member the interpreter cannot find, and a member it cannot
- * find sends it into fdps_wait_any_key, which spins for a keyboard interrupt
- * that never comes.  So both neighbours are staged as well, each deploying
- * nobody and marking unit 0 with a value of its own: a run that opened either
- * one lands a shorter unit array AND a marked unit 0.
+ * WHY EVERY NEIGHBOURING MEMBER IS STAGED TOO.  Icon10.dat is chapter
+ * ELEVEN's script and Icon11.dat chapter TWELVE's -- the number in the name is
+ * the 0-based chapter id -- so the mistake this file has to be able to catch is
+ * a handler naming the member one either side of its own.  A container holding
+ * only the two members under test would turn that mistake into a member the
+ * interpreter cannot find, and a member it cannot find sends the interpreter
+ * into fdps_wait_any_key, which spins for a keyboard interrupt that never
+ * comes.  So the four members ICON09.DAT to ICON12.DAT are all staged: the two
+ * in the middle are the real fixtures the two handlers name, and the two on the
+ * outside are decoys that deploy nobody and mark unit 0 with a value of their
+ * own, so a run that opened one lands a short unit array AND a marked unit 0.
+ *
+ * WHAT THE CHAPTER 12 SECTION ADDS.  Its handler is the plain four-call form
+ * with no roster add at all, and its cut-scene is the one script in the game
+ * that asks the player a question: ICON11.DAT ends on a DEPLOY_WAVE whose wave
+ * operand is 0xff, the form that takes the wave from the answer ASK_THREE_WAY
+ * left behind (icon.h), and MAP11.DAT's three records are keyed wave 1, 2 and
+ * 3 -- the guide's three rooms of 火神的宮殿.  The fixture cannot put that
+ * question to a player, so it names one of the three waves outright and the
+ * section pins the room that answer opens; which of the three the answer picks
+ * is fdps_icon_script_prompt_three_way_choice's business and tests/icon.c's.
  *
  * WHAT IS STAGED AND WHAT IS REAL.  The four data tables and the roster block
  * are staged here, because they are ticket 23 symbols the build links
  * zero-filled; the character rows are FRIAPRDA.DAT's and FRILEVUP.DAT's own
  * numbers as recorded in assets/characters.md.  Everything the chapter load
- * reads is the real container: MAP10.DAT's counts and wave tags, MAP10.COD's
- * placement records, the tile layers, ICON.CEL's sprites, MISC.VFS's title
- * card.  Nothing below asserts what any global held before the run.
+ * reads is the real container: each chapter's own MAP%02d.DAT counts and wave
+ * tags, its MAP%02d.COD placement records, the tile layers, ICON.CEL's
+ * sprites, MISC.VFS's title card.  Nothing below asserts what any global held
+ * before the run.
  *
  * The staging REFUSES TO OVERWRITE an IconAni.vfs that is already in the run
  * directory, and removes its own again in the last case: tests/chinit1.c and
@@ -111,7 +125,7 @@
 #define VFS_ENTRY_BYTES 26
 #define VFS_NAME_FIELD_BYTES 13
 #define VFS_SIGNATURE_BYTES 24
-#define FIXTURE_MEMBERS 3
+#define FIXTURE_MEMBERS 4
 
 /* Chapter 11 is chapter id 10: the entry-handler table slot number is the
    0-based id, and this handler is slot 10 of the table at 00060074 -- the
@@ -281,14 +295,16 @@
 #define SCRIPT_CH11_MARKER_SLOT 4
 #define SCRIPT_CH11_MARKER_VALUE 57
 
-/* What the two decoy members write.  Both mark unit 0 -- a unit that exists on
-   any run at all -- with a value of their own and deploy nobody, so a handler
-   that named Icon09.dat or Icon11.dat lands a unit array of twelve and a
-   marked unit 0 instead of twenty-six and a marked unit 25. */
+/* What the two decoy members write.  Each marks unit 0 -- a unit that exists on
+   any run at all -- with a value of its own and deploys nobody.  ICON09.DAT is
+   chapter 10's script, the neighbour one chapter early of the chapter 11 run;
+   ICON12.DAT is chapter 13's, the neighbour one chapter late of the chapter 12
+   run.  The two members between them are real fixtures, because each of them is
+   the script one of the two handlers under test names. */
 #define SCRIPT_DECOY_MARKER_UNIT 0
 #define SCRIPT_DECOY_MARKER_OPERAND 1
 #define SCRIPT_CH10_DECOY_VALUE 41
-#define SCRIPT_CH12_DECOY_VALUE 47
+#define SCRIPT_CH13_DECOY_VALUE 47
 
 /* MAP10.COD record 49 -- the first record past the map's 49 scripted ones, and
    so the first party slot's start tile -- is (10, 21).  The record a party
@@ -299,6 +315,100 @@
 #define CH10_PARTY_TILE_X 10
 #define CH10_PARTY_TILE_Y 21
 #define CURSOR_TILE_STEP 24
+
+/* --- fdps_chapter_12_init @ 00021180 constants -------------------------- */
+
+/* Chapter 12 is chapter id 11, and this handler is slot 11 of the table at
+   00060074 -- the dword at 000600a0 is 00021180. */
+#define CHAPTER_12_ID 11
+
+/* The party when chapter 12 opens: the eight chapter 11 opened with, and
+   琴琴, whom fdps_chapter_11_init added.  This handler adds nobody -- there is
+   no PUSH/CALL 0x00023bc0 anywhere in its 0x33 bytes -- so the count the run
+   reads back is the nine the run itself put on. */
+#define PARTY_AT_CHAPTER_12 9
+
+/* MAP11.DAT's own header bytes, read back to prove chapter 12's map is the one
+   that loaded: nine player slots at +1 and three scripted deployments at +2.
+   Both were staged at other numbers before the run.  Nine slots for a nine
+   member party, so every slot has somebody behind it and no zeroed, retired
+   spare is written. */
+#define CH11_PLAYER_SLOTS 9
+#define CH11_CHAR_SPAWNS 3
+
+/* MAP11.DAT tags NONE of its three deployments wave 0 -- they are keyed 1, 2
+   and 3 -- so the chapter state reset's own opening deploy puts nobody down and
+   the player slots are the whole array until the cut-scene deploys. */
+#define CH11_WAVE_ZERO_UNITS 0
+
+/* The three rooms of 火神的宮殿, one deployment record each: characters 113,
+   114 and 115, all level 20, keyed waves 1, 2 and 3 in MAP11.DAT's record
+   order.  The strategy guide prints one 敵方 line and one map per room --
+   左邊房間 LV20 修佩魯, 中間房間 LV20 雷德, 右邊房間 LV20 亞德尼恩 -- which
+   is the same three from the other side. */
+#define CH11_ROOM_1_CHAR_ID 113
+#define CH11_ROOM_2_CHAR_ID 114
+#define CH11_ROOM_3_CHAR_ID 115
+#define CH11_ROOM_BOSS_LEVEL 20
+
+/* Which of the three the fixture opens, and the unit index the one opponent
+   lands at: the deploy appends, and the nine player slots are already down. */
+#define SCRIPT_CH12_ROOM_WAVE 1
+#define CH11_ROOM_UNIT 9
+#define CH11_ROOM_CHAR_ID CH11_ROOM_1_CHAR_ID
+
+/* How long the unit array is when the handler returns: the nine player slots,
+   no wave-0 record at all, and the single opponent the room wave deploys. */
+#define CH11_UNITS_AFTER_SCRIPT     (CH11_PLAYER_SLOTS + CH11_WAVE_ZERO_UNITS + 1)
+
+/* What the fixture ICON11.DAT does, read off the shipped member itself, walked
+   with the opcode ladder in src/icon.c: SWITCH_MAP 0x34 at script offset 4,
+   DEPLOY_WAVE 1 and DEPLOY_WAVE 2 both place-nearest at offsets 15 and 25,
+   SWITCH_MAP 0x28 at offset 217, DEPLOY_WAVE 1 place-exact at offset 272,
+   SWITCH_MAP 0x0b at offset 792 and a last DEPLOY_WAVE at offset 802.
+
+   That last one is the only opcode the fixture cannot copy: its wave operand is
+   0xff, the form that takes the wave from the answer the ASK_THREE_WAY at
+   offset 708 left behind (icon.h), and there is no player here to answer.  The
+   fixture names wave 1 outright instead, so this section pins the room that
+   answer opens and not the answering itself. */
+#define SCRIPT_CH12_FIRST_CUTSCENE_MAP 52
+#define SCRIPT_CH12_SECOND_CUTSCENE_MAP 40
+#define SCRIPT_CH12_CHAPTER_MAP 11
+#define SCRIPT_CH12_FIRST_WAVE 1
+#define SCRIPT_CH12_SECOND_WAVE 2
+/* The DEPLOY_WAVE place operand.  icon.c's DEPLOY_WAVE arm passes script[+2] to
+   fdps_deploy_wave, which hands it down as fdps_deploy_unit's third parameter,
+   and the test on it is CMP byte ptr [EBP + 0x1c],0x0 / JNZ 0x00023446 at
+   00023360.  Non-zero takes 00023446, which copies the anchor tile straight
+   through into the chosen tile -- so 1 is placement exactly on the anchor.
+   Zero falls through into the scan at 0002336a, the nearest-free-walkable-tile
+   search.  src/deploy.c's place_exact == 0 arm reads it the same way. */
+#define SCRIPT_CH12_PLACE_NEAREST 0
+#define SCRIPT_CH12_PLACE_EXACT 1
+
+/* What the fixture ICON11.DAT's SET_UNIT_TIMER writes, and where.  It marks the
+   one opponent -- unit 9, an index that exists only if the last SWITCH_MAP and
+   the room deploy both ran -- with a value no other member of the container
+   writes.  The slot is status_timers[4], record 0x26, for the reason
+   tests/chinit1.c gives: it is the one status byte fdps_unit_select_status_icon
+   does not read, so marking it cannot send fdps_draw_map_unit through the null
+   status-icon sheet.  The opcode's operand is measured from status_timers[3]
+   (src/icon.c), which makes that operand 1. */
+#define SCRIPT_CH12_MARKER_UNIT CH11_ROOM_UNIT
+#define SCRIPT_CH12_MARKER_OPERAND 1
+#define SCRIPT_CH12_MARKER_SLOT 4
+#define SCRIPT_CH12_MARKER_VALUE 63
+
+/* MAP11.COD record 3 -- the first record past the map's three scripted ones,
+   and so the first party slot's start tile -- is (0, 0).  The record a party
+   slot is put on is data_fdps_map_char_spawn_count + slot_index and not the
+   slot number, and a player slot is placed on its record exactly
+   (src/deploy.c), so the cursor globals end at that tile scaled by the 24-pixel
+   step.  Both were staged at other numbers before the run, so reading zero back
+   is the write and not the absence of one. */
+#define CH11_PARTY_TILE_X 0
+#define CH11_PARTY_TILE_Y 0
 
 /* The side code the player's own units carry and the one a map deployment
    carries, and the flag bit fdps_build_map_unit_array sets on a player slot
@@ -359,26 +469,53 @@ static unsigned char fixture_icon10_dat[] = {
     0x00
 };
 
-/* ICON11.DAT: the member the handler must NOT open, one chapter late, and the
-   one a rewrite that read the number out of the handler's own name would reach
-   for.  It deploys nobody and marks unit 0 with a value of its own. */
+/* ICON11.DAT: the member fdps_chapter_12_init names, and the member
+   fdps_chapter_11_init must NOT open -- it is the one a rewrite that read the
+   chapter number out of the handler's own name would reach for.  Its three
+   SWITCH_MAPs and its first three DEPLOY_WAVEs are the shipped member's own, in
+   its order and with its operands: out to cut-scene map 52 and its waves 1 and
+   2, on to cut-scene map 40 and its wave 1 placed exactly, and back to map 11,
+   whose reset rebuilds the chapter from scratch.  The shipped member's last
+   DEPLOY_WAVE asks for the wave the player's answer chose and this one names
+   wave 1, for the reason the constants above give, and the SET_UNIT_TIMER
+   marker then writes a value of its own onto the opponent that deploy
+   appended.  The shipped member's other hundred-odd opcodes walk, pose, retire,
+   revive and re-place the actors and are left out for the reason the file
+   comment gives. */
 static unsigned char fixture_icon11_dat[] = {
+    0x11, SCRIPT_CH12_FIRST_CUTSCENE_MAP,
+    0x04, SCRIPT_CH12_FIRST_WAVE, SCRIPT_CH12_PLACE_NEAREST,
+    0x04, SCRIPT_CH12_SECOND_WAVE, SCRIPT_CH12_PLACE_NEAREST,
+    0x11, SCRIPT_CH12_SECOND_CUTSCENE_MAP,
+    0x04, SCRIPT_CH12_FIRST_WAVE, SCRIPT_CH12_PLACE_EXACT,
+    0x11, SCRIPT_CH12_CHAPTER_MAP,
+    0x04, SCRIPT_CH12_ROOM_WAVE, SCRIPT_CH12_PLACE_NEAREST,
+    0x12, SCRIPT_CH12_MARKER_UNIT, SCRIPT_CH12_MARKER_OPERAND,
+    SCRIPT_CH12_MARKER_VALUE,
+    0x00
+};
+
+/* ICON12.DAT: the member the chapter 12 handler must NOT open, one chapter
+   late, and the one a rewrite that read the number out of its own name would
+   reach for.  It deploys nobody and marks unit 0 with a value of its own. */
+static unsigned char fixture_icon12_dat[] = {
     0x12, SCRIPT_DECOY_MARKER_UNIT, SCRIPT_DECOY_MARKER_OPERAND,
-    SCRIPT_CH12_DECOY_VALUE,
+    SCRIPT_CH13_DECOY_VALUE,
     0x00
 };
 
 static char *fixture_names[FIXTURE_MEMBERS] = {
-    "ICON09.DAT", "ICON10.DAT", "ICON11.DAT"
+    "ICON09.DAT", "ICON10.DAT", "ICON11.DAT", "ICON12.DAT"
 };
 
 static unsigned char *fixture_bytes[FIXTURE_MEMBERS] = {
-    fixture_icon09_dat, fixture_icon10_dat, fixture_icon11_dat
+    fixture_icon09_dat, fixture_icon10_dat, fixture_icon11_dat,
+    fixture_icon12_dat
 };
 
 static int fixture_lengths[FIXTURE_MEMBERS] = {
     sizeof(fixture_icon09_dat), sizeof(fixture_icon10_dat),
-    sizeof(fixture_icon11_dat)
+    sizeof(fixture_icon11_dat), sizeof(fixture_icon12_dat)
 };
 
 /* 0 not attempted, 1 the run happened and the snapshot below is good,
@@ -692,8 +829,9 @@ static void stage_globals(void)
     }
     data_fdps_vga_main_palette_ptr = stage_palette;
 
-    /* Both are staged at numbers MAP10.DAT does not carry, so reading its own
-       pair back -- 9 and 49 -- says the chapter really loaded. */
+    /* Both are staged at numbers neither chapter's map carries -- MAP10.DAT
+       says 9 and 49, MAP11.DAT says 9 and 3 -- so reading a map's own pair
+       back says the chapter really loaded. */
     data_fdps_map_player_slot_count = 99;
     data_fdps_map_char_spawn_count = 0;
     data_fdps_map_unit_count = 0;
@@ -938,8 +1076,10 @@ static void chapter_eleven_opens_with_the_guides_enemy_group(void)
 /* The cut-scene the handler names is Icon10.dat and not the neighbour on
    either side of it.  The marker sits on unit 25 with the value only
    ICON10.DAT writes, and unit 0's own timers are read back clear -- that is
-   where both decoy members put their markers, so a handler that had spelled
-   the script name out of its own chapter number would show up here.  Every
+   where ICON09.DAT's marker would have landed, and ICON11.DAT, chapter 12's
+   own script, would have shown up in the chapter id below instead: it ends on
+   a SWITCH_MAP that leaves the id at 11.  So a handler that had spelled the
+   script name out of its own chapter number shows up here either way.  Every
    other timer on the marked unit is clear too: neither the handler nor the
    shipped cut-scene writes a status on anybody this chapter.  The chapter id
    is still 10, which the handler neither reads nor writes and which the
@@ -984,6 +1124,256 @@ static void the_chapter_11_cursor_is_parked_on_unit_zero(void)
     CHECK_EQ(seen_cursor_y, CH10_PARTY_TILE_Y * CURSOR_TILE_STEP);
 }
 
+
+/* --- fdps_chapter_12_init @ 00021180 ------------------------------------
+ *
+ * Four calls, straight line, no branch and no store of its own -- the plain
+ * form, with no fdps_roster_add_character in front of the rebuild.  What it
+ * decides is the ORDER of the four calls and which cut-scene member and which
+ * unit its two arguments name, so the run below enters chapter 12 once for real
+ * and reads the answers off the state it leaves.
+ *
+ * Expected values come from the assembly at 00021180 and from the shipped
+ * data, never from the emitted C:
+ *
+ *   CALL 0x00022750                   the chapter state is rebuilt
+ *   MOV EAX,0x61888 / PUSH EAX /
+ *     CALL 0x00021650                 the cut-scene "Icon11.dat" is run
+ *   CALL 0x00020c60                   the title card is shown
+ *   PUSH 0x0 / CALL 0x0002da50        the cursor is parked on unit 0
+ *
+ * NOBODY JOINS AND NO SLOT IS LEFT OVER.  The party is nine members when the
+ * chapter opens -- the eight chapters 1 to 4 and 7 to 9 put on, and 琴琴 from
+ * chapter 11 -- and MAP11.DAT asks for nine player slots, so every slot has a
+ * member behind it and the array carries no zeroed, retired spare.  There is no
+ * untouched roster slot to read the 0xff sentinel out of, so what says the
+ * handler added nobody is the count still reading nine.
+ *
+ * THE MAP CARRIES NO WAVE-0 RECORD AT ALL, which is true of no other chapter
+ * map these two files stage: MAP11.DAT's three deployments are keyed waves 1,
+ * 2 and 3, the guide's three rooms, so the state reset's own opening deploy
+ * puts nobody down and the array is nine player slots until the cut-scene's
+ * last DEPLOY_WAVE appends the one opponent the player's answer chose.
+ */
+
+static int run12_state = 0;
+
+/* The party in join order, which is roster-slot order and so player-slot
+   order.  The run puts them on with the game's own add and the case below reads
+   the same nine back off the map. */
+static int chapter_12_party[PARTY_AT_CHAPTER_12] = {
+    RANDIS_CHAR_ID, JULIAN_CHAR_ID, ARC_CHAR_ID, FLARENA_CHAR_ID,
+    JUNA_CHAR_ID, FEITAGA_CHAR_ID, BRANDO_CHAR_ID, GAIA_CHAR_ID,
+    QINQIN_CHAR_ID
+};
+
+static int seen12_roster_count;
+static int seen12_player_slots;
+static int seen12_char_spawns;
+static int seen12_unit_count;
+static int seen12_party_char_ids[PARTY_AT_CHAPTER_12];
+static int seen12_party_live_slots;
+static int seen12_room_char_id;
+static int seen12_room_level;
+static int seen12_room_side;
+static unsigned char seen12_marked_timers[STATUS_TIMER_COUNT];
+static unsigned char seen12_unit0_timers[STATUS_TIMER_COUNT];
+static int seen12_cursor_x;
+static int seen12_cursor_y;
+static int seen12_chapter_id;
+
+static void capture_chapter_12(void)
+{
+    struct fdps_unit_record *unit0;
+    struct fdps_unit_record *marked;
+    int slot;
+
+    seen12_roster_count = data_fdps_roster_member_count;
+    seen12_player_slots = data_fdps_map_player_slot_count;
+    seen12_char_spawns = data_fdps_map_char_spawn_count;
+    seen12_unit_count = data_fdps_map_unit_count;
+    seen12_cursor_x = data_fdps_map_cursor_world_x;
+    seen12_cursor_y = data_fdps_map_cursor_world_y;
+    seen12_chapter_id = data_fdps_chapter_current_chapter_id;
+
+    unit0 = (struct fdps_unit_record *) data_fdps_map_unit_array_ptr;
+
+    seen12_party_live_slots = 0;
+    for (slot = 0; slot < PARTY_AT_CHAPTER_12; slot++) {
+        seen12_party_char_ids[slot] = (int) unit0[slot].char_id;
+        if ((int) unit0[slot].side == PLAYER_SIDE
+            && (int) unit0[slot].flags == 0) {
+            seen12_party_live_slots++;
+        }
+    }
+
+    for (slot = 0; slot < STATUS_TIMER_COUNT; slot++) {
+        seen12_marked_timers[slot] = 0;
+        seen12_unit0_timers[slot] = unit0->status_timers[slot];
+    }
+
+    /* The opponent and the marker both sit at index 9, which exists only if the
+       last SWITCH_MAP rebuilt map 11 and the room wave then deployed.  A run
+       that opened a decoy stops at nine units, and reading past the array to
+       say so would be reading memory the allocation does not cover -- so the
+       three fields are left at values no correct run produces and the cases
+       below fail on those instead. */
+    seen12_room_char_id = -1;
+    seen12_room_level = -1;
+    seen12_room_side = -1;
+    if (data_fdps_map_unit_count > CH11_ROOM_UNIT) {
+        marked = unit0 + CH11_ROOM_UNIT;
+        seen12_room_char_id = (int) marked->char_id;
+        seen12_room_level = (int) marked->level;
+        seen12_room_side = (int) marked->side;
+        for (slot = 0; slot < STATUS_TIMER_COUNT; slot++) {
+            seen12_marked_timers[slot] = marked->status_timers[slot];
+        }
+    }
+}
+
+/* Runs the chapter 12 handler once, against the shipped containers and the
+   fixture cut-scene, and records what it left behind.  The nine members the
+   party has when the chapter opens are put on with the game's own add, in join
+   order, because this handler adds nobody and MAP11.DAT's nine player slots
+   have to be filled from a roster the run staged honestly.  The timer hook and
+   the graphics mode are here for the reasons the file comment gives. */
+static void run_chapter_12_handler(void)
+{
+    int member;
+
+    if (run12_state != 0) {
+        return;
+    }
+    run12_state = 2;
+
+    if (!containers_present()) {
+        return;
+    }
+    if (!stage_fixture_archive()) {
+        return;
+    }
+
+    stage_globals();
+    data_fdps_chapter_current_chapter_id = CHAPTER_12_ID;
+    data_fdps_cursor_highlight_sprite_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_entry(MISC_NAME, CURSOR_SHEET_MEMBER);
+
+    for (member = 0; member < PARTY_AT_CHAPTER_12; member++) {
+        fdps_roster_add_character(chapter_12_party[member]);
+    }
+
+    set_mode(MODE_320X200X256);
+    saved_timer = _dos_getvect(TIMER_VECTOR);
+    _dos_setvect(TIMER_VECTOR, tick_isr);
+
+    fdps_chapter_12_init();
+
+    _dos_setvect(TIMER_VECTOR, saved_timer);
+    set_mode(MODE_TEXT);
+
+    capture_chapter_12();
+    free_chapter_globals();
+    run12_state = 1;
+}
+
+/* Nobody joins the party this chapter and no player slot is left over.  The
+   roster count is the nine the run put on and not ten, which is what says the
+   handler has no fdps_roster_add_character in it; the nine player slots carry
+   those same nine characters in join order, every one of them on the player
+   side with the retired bit clear, so none of them is the zeroed spare
+   fdps_build_map_unit_array writes for a slot with no member behind it.
+   MAP11.DAT's own two header counts are read back as well because they were
+   staged at numbers it does not carry. */
+static void nobody_joins_and_every_slot_is_filled_in_chapter_twelve(void)
+{
+    int slot;
+
+    run_chapter_12_handler();
+    CHECK_EQ(run12_state, 1);
+    if (run12_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen12_roster_count, PARTY_AT_CHAPTER_12);
+    CHECK_EQ(seen12_player_slots, CH11_PLAYER_SLOTS);
+    CHECK_EQ(seen12_char_spawns, CH11_CHAR_SPAWNS);
+    for (slot = 0; slot < PARTY_AT_CHAPTER_12; slot++) {
+        CHECK_EQ(seen12_party_char_ids[slot], chapter_12_party[slot]);
+    }
+    CHECK_EQ(seen12_party_live_slots, PARTY_AT_CHAPTER_12);
+}
+
+/* What the reset and the cut-scene together leave on the map: the nine player
+   slots, nothing from a wave-0 tag because MAP11.DAT has none, and the single
+   opponent the room wave deploys, for ten.  That opponent is read back by index
+   as MAP11.DAT's wave-1 record -- character 113, level 20, on the enemy side --
+   which is the strategy guide's 左邊房間 LV20 修佩魯.  A ten that came out as
+   nine would be a run whose script deployed nobody. */
+static void chapter_twelve_opens_on_the_one_room_boss(void)
+{
+    run_chapter_12_handler();
+    CHECK_EQ(run12_state, 1);
+    if (run12_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen12_unit_count, CH11_UNITS_AFTER_SCRIPT);
+    CHECK_EQ(seen12_room_char_id, CH11_ROOM_CHAR_ID);
+    CHECK_EQ(seen12_room_level, CH11_ROOM_BOSS_LEVEL);
+    CHECK_EQ(seen12_room_side, ENEMY_SIDE);
+}
+
+/* The cut-scene the handler names is Icon11.dat and not the neighbour on either
+   side of it.  The marker sits on unit 9 with the value only ICON11.DAT writes,
+   and unit 0's own timers are read back clear -- that is where ICON12.DAT's
+   marker would have landed, and ICON10.DAT, chapter 11's own script, deploys
+   three waves MAP11.DAT keys one record each, so a run that opened it would
+   land twelve units and no marker at all on unit 9.  Every other timer on the
+   marked unit is clear too: neither the handler nor the shipped cut-scene
+   writes a status on anybody this chapter.  The chapter id is back at 11, which
+   the handler neither reads nor writes -- the script's last SWITCH_MAP put it
+   there, after two cut-scene maps of its own -- and both the script number and
+   the title-card graphic are chosen from it by the callees. */
+static void the_chapter_12_cutscene_is_icon11_dat(void)
+{
+    int slot;
+
+    run_chapter_12_handler();
+    CHECK_EQ(run12_state, 1);
+    if (run12_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen12_marked_timers[SCRIPT_CH12_MARKER_SLOT],
+             SCRIPT_CH12_MARKER_VALUE);
+    for (slot = 0; slot < STATUS_TIMER_COUNT; slot++) {
+        if (slot != SCRIPT_CH12_MARKER_SLOT) {
+            CHECK_EQ(seen12_marked_timers[slot], 0);
+        }
+        CHECK_EQ(seen12_unit0_timers[slot], 0);
+    }
+    CHECK_EQ(seen12_chapter_id, CHAPTER_12_ID);
+}
+
+/* The cursor ends on unit 0's tile.  MAP11.COD record 3 -- the first record
+   past the map's three scripted deployments -- puts the first party slot on
+   tile (0, 0), and a player slot is placed on its record exactly, so the cursor
+   globals are that tile scaled by the 24-pixel step.  Both were staged at 48
+   and 72 before the run, so the zeroes are the walk arriving and not a global
+   nobody wrote. */
+static void the_chapter_12_cursor_is_parked_on_unit_zero(void)
+{
+    run_chapter_12_handler();
+    CHECK_EQ(run12_state, 1);
+    if (run12_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen12_cursor_x, CH11_PARTY_TILE_X * CURSOR_TILE_STEP);
+    CHECK_EQ(seen12_cursor_y, CH11_PARTY_TILE_Y * CURSOR_TILE_STEP);
+}
+
 /* Takes the fixture container away again, so a later test file can stage its
    own.  A container this file did not create is somebody else's and is left
    where it stands, which is also the only path on which this case asserts
@@ -1005,5 +1395,9 @@ void run_chinit1b_tests(void)
     RUN_TEST(chapter_eleven_opens_with_the_guides_enemy_group);
     RUN_TEST(the_chapter_11_cutscene_is_icon10_dat);
     RUN_TEST(the_chapter_11_cursor_is_parked_on_unit_zero);
+    RUN_TEST(nobody_joins_and_every_slot_is_filled_in_chapter_twelve);
+    RUN_TEST(chapter_twelve_opens_on_the_one_room_boss);
+    RUN_TEST(the_chapter_12_cutscene_is_icon11_dat);
+    RUN_TEST(the_chapter_12_cursor_is_parked_on_unit_zero);
     RUN_TEST(the_fixture_container_is_removed);
 }

@@ -2406,5 +2406,20 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00021180": [
+    {
+      "from": "emit",
+      "what": "The same place-operand inversion is present in four already-committed places that belong to other functions and were left untouched here on the reviewer's explicit scoping: tests/chinit1b.c's SCRIPT_CH11_PLACE_EXACT, SCRIPT_CH06_PLACE_EXACT and SCRIPT_CH07_PLACE_EXACT, and src/chevt1.c's CH03_PLACE_EXACT and CH04_PLACE_EXACT, each defined as 0. The assembly settles the meaning and is recorded above: at 00023360 CMP byte ptr [EBP + 0x1c],0x0 / JNZ 0x00023446, with 00023446 copying the anchor tile through (exact) and the fall-through at 0002336a being the nearest-free-tile search -- so 0 is the search and 1 is exact, and those five names say the reverse. Only the names and the prose are wrong; every byte value passed is the shipped one, so nothing behaves differently today, which is exactly why nothing will trip over it.",
+      "needs": "No new evidence -- this one is already settled, and it is recorded here only because it spans functions this batch item is not allowed to touch. Whoever picks it up can confirm it in one call (get_assembly_context 00023360) and check it against src/deploy.c's place_exact == 0 arm and OPENING_WAVE_PLACE_EXACT 1 at src/deploy.c:438, which are both already correct.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed the emitter's finding independently rather than restating it: at 00023360 CMP byte ptr [EBP + 0x1c],0x0 / JNZ 0x00023446, and 00023446 copies the anchor tile through ([EBP-0x1c] -> [EBP-0x58], [EBP-0x18] -> [EBP-0x54]) before the shared tail at 00023452, while the fall-through at 0002336a is the nearest-free-tile scan -- so operand 1 is exact and operand 0 is the search, and the five constants named PLACE_EXACT = 0 in tests/chinit1b.c (CH11, CH07, CH06) and src/chevt1.c (CH03, CH04) say the reverse. What my pass adds beyond the emitter's entry: [EBP+0x1c] really is the third parameter of the four-push frame, checked against IMUL EAX,[EBP+0x14],0x1a at 00023457 which fixes parameter 1 as the record index; and src/deploy.c:221 and src/deploy.c:438 are both already correct, so the defect is confined to those five names and the prose around them. Every byte passed is still the shipped one, so nothing behaves differently today.",
+      "needs": "Nothing new -- it is settled. It stays open only because it lives in functions this item may not touch.",
+      "same_as": "emit#0",
+      "status": "open"
+    }
   ]
 }
