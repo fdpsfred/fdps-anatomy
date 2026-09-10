@@ -104,4 +104,33 @@ extern void fdps_chapter_12_init(void);
 extern void fdps_chapter_13_init(void);
 #pragma aux fdps_chapter_13_init "*" parm caller [];
 
+/* Chapter 14's entry handler: brings the game into chapter 14.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon13.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 0's tile.  Nobody joins the party this chapter -- there is no
+   fdps_roster_add_character in the body -- and the roster is left as chapter
+   13 finished it, nine members: the eight chapters 1 to 4 and 7 to 9 put on
+   and 琴琴.  MAP13.DAT asks for exactly nine player slots, so every slot has a
+   member behind it and no zeroed, retired spare is written.
+
+   The whole opening opposition comes out of the cut-scene.  MAP13.DAT tags
+   none of its thirty-seven deployment records wave 0 -- eighteen are wave 1,
+   two are wave 2 and seventeen are wave 4 -- so the state reset deploys nobody
+   and the nine player slots stand alone until ICON13.DAT's two DEPLOY_WAVEs,
+   wave 2 and then wave 1, put twenty opponents down for an array of
+   twenty-nine.  Those twenty are the strategy guide's opening 敵方 group:
+   five LV13 武士 (character 99), six LV12 飛兵 (96), five LV11 弓箭手 (94)
+   and four LV13 暗魔導士 (103).  The map's wave 4 is the guide's turn-six
+   event -- sixteen more 武士 and the LV17 狼人 that opens the treasure chests
+   -- and no part of this handler deploys it.
+
+   The script also walks the party off its start tiles, so the tile the cursor
+   ends on is ICON13.DAT's and not MAP13.COD's.
+
+   Table slot 13. */
+extern void fdps_chapter_14_init(void);
+#pragma aux fdps_chapter_14_init "*" parm caller [];
+
 #endif
