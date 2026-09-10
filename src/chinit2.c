@@ -846,3 +846,146 @@ void fdps_chapter_22_init(void)
     fdps_show_chapter_title_card();
     fdps_map_cursor_move_to_unit(CH22_CURSOR_UNIT);
 }
+
+/* --- fdps_chapter_23_init @ 00021450 ----------------------------------- */
+
+/* Chapter 23's opening cut-scene, the string at 0x6190c loaded into EAX at
+   00021461 and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id and not a script id of its own, so this
+   is Icon22.dat where fdps_chapter_22_init above holds Icon21.dat at 0x61900
+   and the slot-23 handler at 00021490 holds Icon23.dat at 0x61918 -- the three
+   sit next to each other in the image, twelve bytes apart, each an eleven-byte
+   member name and a filler byte.  Spelling the member out of the handler's own
+   chapter number gives Icon23.dat, which loads, runs, and plays chapter 24's
+   opening scene under chapter 23's title card.
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON22.DAT by the
+   call and cannot live in read-only storage. */
+#define CH23_OPENING_SCRIPT "Icon22.dat"
+
+/* Which unit the cursor is left on: PUSH 0x3 at 00021474, not the PUSH 0x0
+   twenty-seven of the thirty handlers make.  Unit slot 3 is roster slot 3, and
+   the roster is in join order, so it is 法蓮娜 -- the guide's 失敗條件 for the
+   chapter is 法蓮娜死亡, and its 說明 has the chapter turning on her landing
+   the killing blow on the 死神.  Only fdps_chapter_17_init,
+   fdps_chapter_22_init and this handler pass 3, and those are the three
+   chapters that turn on her. */
+#define CH23_CURSOR_UNIT 3
+
+/* 00021450.  Four calls, straight line, no branch, no loop and no local -- the
+   plain form of the family, the same four calls in the same order as
+   fdps_chapter_22_init above, with no fdps_roster_add_character in front of
+   them and no store behind them.  At 0x33 bytes it is the shortest shape the
+   thirty handlers come in, and it is byte-for-byte the shape of its neighbour
+   with one operand changed: chapter 22 passes the same 3 to the cursor call,
+   so only the script literal separates the two bodies.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 00021450..00021454 -- over SUB ESP,0x0 at 00021456, a zero-byte
+   local area written as the six-byte immediate form.  Nothing is addressed off
+   EBP anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 0002147e..00021481
+   and the RET at 00021482 is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: MOV EAX,0x6190c / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4 at
+   00021461..0002146c, and PUSH 0x3 / CALL 0x0002da50 / ADD ESP,0x4 at
+   00021474..0002147b.  The two argument-less calls at 0002145c and 0002146f
+   are bare CALLs with no push and no adjustment.  Nothing reads [EBP+8] or
+   above, so this function takes nothing itself, and EAX is never set after the
+   second call, so it returns nothing -- the dispatcher reaches it through the
+   twenty-third slot of the table at 00060074 (the dword at 000600cc is
+   00021450, and that data reference is the function's only xref) and ignores
+   EAX.
+
+   VALUES USED AFTER A CALL: none at all.  All four callees return void and
+   nothing here reads EAX after any of them; the only register written between
+   the prologue and the RET is the EAX that carries the script name literal
+   into the second call.
+
+   NOBODY JOINS THE PARTY THIS CHAPTER AND NOBODY LEAVES IT.  The first
+   instruction after the prologue is the state rebuild, so the roster is left
+   exactly as chapter 22 finished it -- the eleven chapters 1 to 19 assembled,
+   蘭斯洛特 last -- and MAP22.DAT asks for the same ELEVEN player slots
+   MAP19.DAT to MAP21.DAT did, so every slot has a member behind it and
+   fdps_build_map_unit_array writes no zeroed, retired spare anywhere in the
+   array (src/deploy.c).  法蓮娜 leaves the party after this chapter, which is
+   the guide's 說明 and no part of what this handler does.
+
+   THE CUT-SCENE TAKES 蘭迪斯 OFF THE BOARD BEFORE IT DOES ANYTHING ELSE.
+   Walked with the opcode ladder in src/icon.c, ICON22.DAT's 626 bytes hold a
+   hundred and six opcodes, and the RETIRE_UNIT at script offset 4 -- naming
+   map unit 0, the third opcode of the member -- is the only one of them that
+   touches a player slot's flags byte.  There is no REVIVE anywhere behind it,
+   and the ten PLACE_UNITs at offsets 15 to 60 stand up units 1 to 10 and skip
+   0.  A player slot's map unit index is its roster slot and the roster is in
+   join order, so the ten the player commands are everybody but 蘭迪斯 -- the
+   guide's 己方 line for the chapter, 蘭迪斯以外的所有人, the same line chapter
+   22 carries.
+
+   THE MAP'S OWN OPENING DEPLOY IS ALL CAST AND NO OPPOSITION.  MAP22.DAT holds
+   eighty deployment records and tags twenty-one of them wave 0, and every one
+   of those twenty-one is on side 1, the guest side that
+   fdps_collect_targets_in_area selects with mode 2 and that the ambush gates
+   in src/chevt4.c refuse (src/aitarget.c).  They are characters 36 to 39,
+   FRIAPRDA.DAT template rows rather than named party members
+   (assets/characters.md), so the state rebuild appends twenty-one guests as
+   map units 11 to 31 and not a single enemy.
+
+   THE OPPOSITION IS THE CUT-SCENE'S, IN TWO DEPLOYS THAT MUST STAY IN ORDER.
+   ICON22.DAT's DEPLOY_WAVE at script offset 469 asks for wave 2, MAP22.DAT's
+   single LV23 死神 (character 72), which lands as map unit 32; its DEPLOY_WAVE
+   at offset 604 asks for wave 1, ten records, which land as map units 33 to
+   42.  Both carry the place operand 0, the nearest-free-tile search rather
+   than the exact anchor (src/deploy.c), and forty-three units is what the
+   handler returns on.  Map unit 32 is 0x20, the index
+   fdps_chapter_23_event_boss_defeat and
+   fdps_chapter_23_event_deploy_wave_for_turn both hold as a literal
+   (chevt4.h), and the twenty-six FACE_UNITS the member runs over unit 32
+   between the two deploys are the 死神 turning as it is revealed.  Deploying
+   wave 1 first would put it at map unit 42 and leave both of those events
+   pointing at a 地獄犬.
+
+   THOSE ELEVEN ARE THE GUIDE'S OPENING 敵方 GROUP, and the guide's own numbers
+   are what pin the four character ids: ENEMYDAT.DAT is indexed by the id less
+   60 and holds HP as a per-level coefficient with MV absolute
+   (assets/characters.md), so row 12 at 180 a level is the 死神's HP4140 at
+   LV23 and MV3, row 24 at 38 is the 骷髏兵's HP684 at LV18 and MV4, row 45 at
+   25 is the 幽魂's HP450 and MV4, and row 47 at 35 is the 地獄犬's HP630 and
+   MV7.  Wave 1 is three 骷髏兵, two 幽魂 and five 地獄犬, which is the guide's
+   second, third and fourth 敵方 lines to the number.  The map's remaining
+   forty-eight records are not down yet: waves 3 and 4 are the fifteen and
+   twenty-seven the guide gives as the 第三回合 and 第七回合 reinforcements,
+   both fdps_chapter_23_event_deploy_wave_for_turn's, and waves 5 to 10 are six
+   single guest-side records the chapter's own events bring on one at a time.
+
+   THE CURSOR ENDS ON THE TILE THE CUT-SCENE WALKED UNIT 3 TO.  ICON22.DAT
+   stands unit 3 at (11, 16) at script offset 35 and walks it exactly once, in
+   the seven-unit group walk at offset 128, one tile with the facing byte 2 --
+   up -- which is (11, 15).  Six later FACE_UNITS turn it, the last of them at
+   offset 615 leaving it facing up.  The tile is what the cursor call reads,
+   and MAP22.COD gives all eleven player slots the same start tile, record 83
+   at (30, 23), so a run whose script never opened lands nineteen tiles right
+   and eight down of where this one leaves the cursor.
+
+   NOTHING IS WRITTEN ON A UNIT'S STATUS.  The body has no store in it at all,
+   and the cut-scene adds none either: walked with the same ladder the shipped
+   ICON22.DAT holds no SET_UNIT_TIMER anywhere.  The guide lists no status on
+   anybody at the chapter's start.
+
+   THE CHAPTER IS SET, BUT NOT BY THIS FUNCTION.  Both the script the second
+   call loads and the title-card graphic the third one shows are chosen from
+   data_fdps_chapter_current_chapter_id by the callees, and this handler
+   neither reads nor writes it -- the dispatcher that reached this slot is what
+   put 22 there, and this member carries no SWITCH_MAP to disturb it.  The
+   Icon22.dat above is the one place the chapter number is spelled out rather
+   than read. */
+void fdps_chapter_23_init(void)
+{
+    fdps_chapter_state_reset();
+    fdps_icon_script_run(CH23_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH23_CURSOR_UNIT);
+}

@@ -300,4 +300,63 @@ extern void fdps_chapter_21_init(void);
 extern void fdps_chapter_22_init(void);
 #pragma aux fdps_chapter_22_init "*" parm caller [];
 
+/* Chapter 23's entry handler: brings the game into chapter 23.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon22.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 3's tile.  Unit 3 is roster slot 3, 法蓮娜, and this is the third
+   and last of the handlers that park the cursor anywhere but unit 0 -- the
+   other two are chapters 17 and 22, and those three are exactly the chapters
+   法蓮娜 is the loss condition of.
+
+   Nobody joins the party this chapter -- there is no fdps_roster_add_character
+   in the body -- and the roster is left as chapter 22 finished it, the same
+   eleven members chapters 20 to 22 were fought with.  MAP22.DAT asks for the
+   same ELEVEN player slots MAP19.DAT to MAP21.DAT did, so every slot has a
+   member behind it and no zeroed, retired spare is written.  法蓮娜 leaves the
+   party after this chapter, which no part of this handler does.
+
+   THE CHAPTER IS FOUGHT WITHOUT 蘭迪斯, AND AGAIN IT IS THE CUT-SCENE THAT
+   TAKES HIM OFF.  ICON22.DAT's RETIRE_UNIT at script offset 4 -- its third
+   opcode, ahead of everything else it does -- names map unit 0, with no REVIVE
+   anywhere behind it in its 626 bytes.  A player slot's map unit index is its
+   roster slot and the roster is in join order, so the ten the player commands
+   are everybody but 蘭迪斯 -- the strategy guide's 己方 line for the chapter,
+   蘭迪斯以外的所有人, the same line chapter 22 carries.
+
+   THE MAP DEPLOYS NO ENEMY AND THE CUT-SCENE DEPLOYS THEM ALL.  MAP22.DAT tags
+   twenty-one of its eighty records wave 0 and every one of them is on side 1,
+   the guest side: characters 36 to 39, FRIAPRDA.DAT template rows, the scene's
+   own cast.  The opposition arrives in the member's two DEPLOY_WAVEs, both
+   placed on the nearest free tile: wave 2 at script offset 469, the single
+   LV23 死神 (character 72), and wave 1 at offset 604, ten units.  That makes
+   forty-three units when the handler returns -- eleven player slots,
+   twenty-one guests, and eleven enemies.
+
+   THE ORDER OF THE TWO DEPLOYS IS LOAD-BEARING.  Wave 2 first puts the 死神 at
+   map unit 32, which is the index fdps_chapter_23_event_boss_defeat and
+   fdps_chapter_23_event_deploy_wave_for_turn both hold as a literal
+   (chevt4.h), and which the member's own twenty-six FACE_UNITS turn as the
+   boss is revealed.
+
+   Those eleven enemies are the strategy guide's opening 敵方 group to the
+   number, and its HP and MV figures settle which id is which: ENEMYDAT.DAT is
+   indexed by the character id less 60, holds HP as a per-level coefficient and
+   MV outright (assets/characters.md), so row 12 at 180 a level is the 死神's
+   LV23 HP4140 at MV3, row 24 at 38 is the 骷髏兵's LV18 HP684 at MV4, row 45
+   at 25 is the 幽魂's HP450 at MV4 and row 47 at 35 is the 地獄犬's HP630 at
+   MV7.  Wave 1 is three 骷髏兵 (character 84), two 幽魂 (105) and five 地獄犬
+   (107).  The map's other forty-eight records are not this handler's: waves 3
+   and 4 are the guide's 第三回合 and 第七回合 reinforcements, and waves 5 to 10
+   are six single guest-side records the chapter's own events bring on.
+
+   Because the script switches no map, the tile the cursor ends on is the one
+   the cut-scene left unit 3 on, (11, 15), and not MAP22.COD's own start tile
+   (30, 23) -- which is the tile all eleven player slots share on this map.
+
+   Table slot 22. */
+extern void fdps_chapter_23_init(void);
+#pragma aux fdps_chapter_23_init "*" parm caller [];
+
 #endif
