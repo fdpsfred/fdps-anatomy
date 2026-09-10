@@ -252,4 +252,52 @@ extern void fdps_chapter_20_init(void);
 extern void fdps_chapter_21_init(void);
 #pragma aux fdps_chapter_21_init "*" parm caller [];
 
+/* Chapter 22's entry handler: brings the game into chapter 22.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon21.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 3's tile.
+
+   Nobody joins the party this chapter -- there is no fdps_roster_add_character
+   in the body -- and the roster is left as chapter 21 finished it, the same
+   eleven members chapters 20 and 21 were fought with.  MAP21.DAT asks for the
+   same ELEVEN player slots MAP19.DAT and MAP20.DAT did, so every slot has a
+   member behind it and no zeroed, retired spare is written.
+
+   THE CHAPTER IS FOUGHT WITHOUT 蘭迪斯, AND IT IS THE CUT-SCENE THAT TAKES HIM
+   OFF.  ICON21.DAT carries exactly one unit-state opcode in its 283 bytes: the
+   RETIRE_UNIT at script offset 278, which names map unit 0, with no REVIVE
+   anywhere behind it.  A player slot's map unit index is its roster slot and
+   the roster is in join order, so the ten the player commands are everybody
+   but 蘭迪斯 -- the strategy guide's 己方 line for the chapter, 蘭迪斯以外的
+   所有人.  Chapter 21's own 說明 says the same thing one chapter ahead:
+   後面兩章蘭迪斯不會出場.
+
+   THE OPENING BOARD IS ONE UNIT.  MAP21.DAT tags exactly one of its fifty-five
+   records wave 0 -- a level-20 character 73, 巫湯婆婆 -- so the chapter state
+   reset appends that one behind the eleven player slots and the board is
+   twelve units when the handler returns.  The cut-scene adds nothing to it:
+   ICON21.DAT has no DEPLOY_WAVE and no SWITCH_MAP.
+
+   The other fifty-four records are the chapter's five reinforcement waves, and
+   none of them is this handler's: wave 1 is eight LV19 狼人戰士 (character 83)
+   with eight LV18 蛇魔使 (75), wave 2 four of each, wave 3 four LV17 幽魂
+   (105), wave 5 four LV17 骷髏兵 (84), and wave 4 the last twenty-two -- seven
+   of each of the first two and four of each of the second two.  Laid end to
+   end that is the strategy guide's 敵方 list for the chapter to the number,
+   and the HP figures the guide prints settle which id is which: ENEMYDAT.DAT
+   is indexed by the character id less 60 and holds HP as a per-level
+   coefficient (assets/characters.md), so row 45 at 25 a level is the 幽魂's
+   HP425 and row 24 at 38 a level is the 骷髏兵's HP646.  All fifty-five
+   records are on the enemy side, so the guest side is empty this chapter.
+
+   Because the script switches no map, the tile the cursor ends on is the one
+   the cut-scene's four walks of unit 3 reached, (6, 19), and not MAP21.COD's
+   own player-slot-3 start tile (2, 24).
+
+   Table slot 21. */
+extern void fdps_chapter_22_init(void);
+#pragma aux fdps_chapter_22_init "*" parm caller [];
+
 #endif
