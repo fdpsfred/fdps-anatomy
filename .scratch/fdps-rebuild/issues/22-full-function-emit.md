@@ -72,7 +72,7 @@ emit 或 review 當下答不出來的等價性疑慮記進 `tools/code_emit/data
 
 **Blocked by:** 21, 21.5, 21.6, 21.7, 22.1 — 全部已完成，沒有東西擋著批次（22.1 剩下的是本票收尾時的總掃）
 
-**Status:** in-progress（514 支已落地 435 支，剩 79；`t22-09` 之後應使用者要求暫停，等指示再開下一批）
+**Status:** in-progress（514 支已落地 435 支，剩 79；`t22-09` 之後暫停過一次，已恢復續跑）
 
 - [ ] 遊戲本體 function 全部 emit 完成，每個都經 reviewer 通過
 - [ ] 每個 function 一次處理一個，無任何批次處理
