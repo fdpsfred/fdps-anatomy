@@ -133,4 +133,48 @@ extern void fdps_chapter_13_init(void);
 extern void fdps_chapter_14_init(void);
 #pragma aux fdps_chapter_14_init "*" parm caller [];
 
+/* Chapter 15's entry handler: brings the game into chapter 15.  Takes nothing
+   and returns nothing.
+
+   In order: character 5 -- 瑪麗安 the 弓兵 -- is appended to the party roster;
+   the chapter state is rebuilt; the opening cut-scene Icon14.dat is
+   interpreted; the chapter title card is shown; the acted-this-turn bit is
+   cleared off every unit on the map; and the map cursor is parked on unit 0's
+   tile.  It is the only one of the thirty handlers that makes that fifth call.
+
+   THE ROSTER ADD IS FOR THE CHAPTERS AFTER THIS ONE, NOT FOR THIS ONE.
+   MAP14.DAT asks for NINE player slots and the party is already nine members
+   when the chapter opens -- the eight chapters 1 to 4 and 7 to 9 put on, and
+   琴琴 -- so the nine slots are filled from roster slots 0 to 8 and 瑪麗安,
+   who lands at roster slot 9, gets no player slot here at all.  She reaches
+   the chapter's map as MAP14.DAT's own record 0 instead: side 2, character 5,
+   level 20, keyed wave 1, carrying 狙擊弓, 銀鱗甲 and 再生藥, which is the
+   LV20 弓兵瑪麗安（HP250,MP38,AP250,DP165,DX70,MV4）the strategy guide prints
+   as this chapter's 己方 addition.  Her roster record is the level-10 line out
+   of FRIAPRDA.DAT, and it is what MAP15.DAT and every later map deploy: from
+   chapter 16 on the maps ask for TEN player slots.
+
+   The opening opposition is on the map before the cut-scene starts.  MAP14.DAT
+   keys forty-three of its forty-five deployments wave 0, so the state reset's
+   own opening deploy puts all of them down behind the nine player slots:
+   forty-two enemy-side units -- twenty-six LV14 野蠻戰士 (character 80), nine
+   LV15 弓箭手 (94), five LV19 冰魔導士 (101), one LV18 暗魔導士 (103) and the
+   LV16 光束砲座 (128) the chapter is won by destroying -- and one ally-side
+   LV15 actor (98).  ICON14.DAT then deploys wave 1, which is 瑪麗安 alone, for
+   fifty-three units when the handler returns.  The remaining record is wave 2,
+   the LV17 character 35 the guide lists against the twenty-five-turn event,
+   and nothing here deploys it.
+
+   THE CLEAR IS FOR WHAT THE CUT-SCENE DID.  ICON14.DAT is the only
+   Icon%02d.dat in the game carrying opcode 0x62, the scripted actor step: it
+   runs one behaviour step for map unit 35 -- MAP14.DAT's record 27, the
+   光束砲座 -- and that step ends in fdps_battle_mark_unit_done, which raises
+   the acted-this-turn bit.  fdps_icon_script_run clears that bit on entry, not
+   on exit, so without this handler's own call the cannon would sit out the
+   first player phase.
+
+   Table slot 14. */
+extern void fdps_chapter_15_init(void);
+#pragma aux fdps_chapter_15_init "*" parm caller [];
+
 #endif
