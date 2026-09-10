@@ -116,4 +116,27 @@ extern void fdps_chapter_04_init(void);
 extern void fdps_chapter_05_init(void);
 #pragma aux fdps_chapter_05_init "*" parm caller [];
 
+/* Chapter 6's entry handler: brings the game into chapter 6.  Takes nothing
+   and returns nothing.
+
+   Four calls and nothing else, the same plain form chapter 5 has: the chapter
+   state is rebuilt, the opening cut-scene Icon05.dat is interpreted, the
+   chapter title card is shown, and the map cursor is parked on unit 0's tile.
+   Nobody joins the party and nothing is written on a unit record.
+
+   Where chapter 5 left a slot over, this chapter fits: MAP05.DAT asks for four
+   player slots and the party the first four handlers built is four members, so
+   every player slot has a member behind it and none of them is the retired
+   spare.
+
+   The rebuild and the cut-scene divide the map's 32 deployment records between
+   them: the rebuild's opening deploy takes the two tagged wave 0 -- one of
+   which is the chapter's 友方 LV10 英雄索爾 -- and Icon05.dat's own DEPLOY_WAVE
+   brings in the twenty-three tagged wave 1, so the handler returns with 29
+   units on the map and the seven tagged wave 2 still to come from elsewhere.
+
+   Table slot 5. */
+extern void fdps_chapter_06_init(void);
+#pragma aux fdps_chapter_06_init "*" parm caller [];
+
 #endif

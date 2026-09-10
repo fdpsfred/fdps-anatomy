@@ -5,7 +5,8 @@
  * two helpers that free the chapter globals sit at the top and are used by
  * every one of them.  fdps_chapter_01_init is first, then
  * fdps_chapter_02_init, then fdps_chapter_03_init, then
- * fdps_chapter_04_init, then fdps_chapter_05_init.
+ * fdps_chapter_04_init, then fdps_chapter_05_init, then
+ * fdps_chapter_06_init.
  *
  * WHAT THE HANDLER IS.  fdps_chapter_01_init at 00020e90 is six calls and two
  * stores with no branch anywhere in it, so nothing about it is worth testing
@@ -131,7 +132,7 @@
 #define VFS_ENTRY_BYTES 26
 #define VFS_NAME_FIELD_BYTES 13
 #define VFS_SIGNATURE_BYTES 24
-#define FIXTURE_MEMBERS 5
+#define FIXTURE_MEMBERS 6
 
 /* Chapter 1 is chapter id 0: the entry-handler table slot number is the
    0-based id, and this handler is slot 0 of the table at 00060074. */
@@ -495,6 +496,122 @@
 #define CH4_PARTY_TILE_X 6
 #define CH4_PARTY_TILE_Y 21
 
+/* --- what the chapter 6 run below expects ------------------------------- */
+
+/* Chapter 6 is chapter id 5, and this handler is slot 5 of the table at
+   00060074: the dword at 00060088 is 00020ff0. */
+#define CHAPTER_06_ID 5
+
+/* How many members the party has when chapter 6 opens.  Chapter 5's handler
+   added nobody and this one adds nobody either, so the party is still the four
+   the first four handlers put on, and roster slot 4 still carries the 0xff
+   stage_globals wrote there. */
+#define PARTY_AT_CHAPTER_06 4
+
+/* MAP05.DAT's own header bytes, read back to prove chapter 6's map is the one
+   that loaded: FOUR player slots at +1 and 32 scripted deployments at +2.  The
+   pair is one no other map in this file carries -- MAP00.DAT's 1 and 22,
+   MAP01.DAT's 2 and 27, MAP02.DAT's 3 and 80, MAP03.DAT's 3 and 33,
+   MAP04.DAT's 5 and 33.
+
+   Four slots against a four-member party is the point of the first case: this
+   is the first map in the run whose slot count and party size agree, so unlike
+   chapter 5's fifth slot there is no retired spare anywhere in the array. */
+#define CH5_PLAYER_SLOTS 4
+#define CH5_CHAR_SPAWNS 32
+
+/* MAP05.DAT's 32 deployment records are tagged in three waves -- two wave 0,
+   twenty-three wave 1, seven wave 2 -- and the byte the tag is read from is
+   spawn record +0x15 (struct fdps_char_spawn_record's wave_no, src/fdpstype.h).
+   The chapter state reset's own opening deploy takes wave 0 alone, so two
+   records go down behind the four player slots before the cut-scene is
+   reached. */
+#define CH5_WAVE_ZERO_UNITS 2
+
+/* The last player slot, the one chapter 5's map left as a spare and this one
+   fills. */
+#define CH5_LAST_PLAYER_SLOT 3
+
+/* Deployment record 31 -- side 1, character 12, level 10, the guest hero
+   索爾 the strategy guide lists as chapter 6's 友方 -- is the second of the
+   map's two wave-0 records, and the deploy walks the table in record order, so
+   he lands at index 4 + 1 behind record 0's LV10 步兵. */
+#define CH5_GUEST_UNIT 5
+
+/* The census the strategy guide prints for this chapter and MAP05.DAT's own
+   wave tagging are the same list read from two sides.  The guide gives the
+   opposition in TWO groups -- LV10 魔導士 x3, LV10 步兵 x9, LV9 弓兵 x7,
+   LV8 騎兵 x5, and then x1, x3, x2, x1 -- and the split is the map's, not the
+   guide's presentation: the first group is the map's wave 0 and wave 1 counted
+   together by character id and the second is its wave 2 exactly.  What is on
+   the map when this handler returns is therefore the FIRST group, because the
+   reset deployed wave 0 and the cut-scene wave 1.
+
+   The four ids are all above the enemy id base of 60 and all below the
+   TABLE_ROWS rows staged for the enemy table, so every one of them deploys. */
+#define CH5_FOOT_CHAR_ID 98
+#define CH5_FOOT_COUNT 9
+#define CH5_ARCHER_CHAR_ID 93
+#define CH5_ARCHER_COUNT 7
+#define CH5_RIDER_CHAR_ID 88
+#define CH5_RIDER_COUNT 5
+#define CH5_MAGE_CHAR_ID 102
+#define CH5_MAGE_COUNT 3
+
+/* Which wave the fixture ICON05.DAT below asks for, and what the shipped
+   member asks for: wave 1, with the place-exact operand 0.  Both are read off
+   the shipped ICON05.DAT itself -- walked with the opcode ladder in src/icon.c,
+   its one DEPLOY_WAVE at script offset 83 carries those two operands -- and
+   MAP05.DAT tags twenty-three of its records wave 1, so the cut-scene is what
+   puts the chapter's army on the map.
+
+   That makes the unit count a witness of which member the interpreter opened,
+   which it was not on chapter 5's map: ICON00.DAT deploys wave 2 and then wave
+   1, which here is 7 + 23 for 36 units; ICON04.DAT's wave 2 alone is 13;
+   ICON01.DAT's wave 3, ICON02.DAT's wave 10 and ICON03.DAT's wave 5 match
+   nothing this map carries and leave 6. */
+#define SCRIPT_CH06_WAVE 1
+#define SCRIPT_CH06_PLACE_EXACT 0
+#define CH5_SCRIPT_WAVE_UNITS 23
+
+/* How long the unit array is when the handler returns: the four player slots,
+   the map's two wave-0 records, and the twenty-three the cut-scene deploys. */
+#define CH5_UNITS_AFTER_SCRIPT \
+    (CH5_PLAYER_SLOTS + CH5_WAVE_ZERO_UNITS + CH5_SCRIPT_WAVE_UNITS)
+
+/* What ICON05.DAT's SET_UNIT_TIMER writes, and where.  It marks the LAST unit
+   its own DEPLOY_WAVE puts down -- wave 1's twenty-three records land in record
+   order at indices 6 to 28, so index 28 is the map's record 30 -- with a value
+   none of the other five fixtures writes.  The case below reads that unit's
+   character id back as well, so the index is pinned to a record of the map and
+   not merely to a number, and an index of 28 exists at all only because the
+   cut-scene deployed: a run that opened any other member leaves the array too
+   short to reach it.
+
+   The slot is status_timers[4], record 0x26, for the reason the chapter 3
+   fixture gives: it is the one status byte fdps_unit_select_status_icon does
+   not read, so marking it cannot send fdps_draw_map_unit through the null
+   status-icon sheet.  The opcode's operand is measured from status_timers[3]
+   (src/icon.c), which makes that operand 1.
+
+   The SHIPPED ICON05.DAT has no SET_UNIT_TIMER anywhere in its 99 bytes, which
+   is the other half of the case below: chapter 5's 索爾 opens 麻痺 because the
+   shipped ICON04.DAT paralyses him, and chapter 6's opens clean because
+   neither the handler nor its cut-scene writes on a unit.  The guide's line for
+   him this chapter carries no status either. */
+#define SCRIPT_CH06_MARKER_UNIT 28
+#define SCRIPT_CH06_MARKER_UNIT_CHAR_ID 98
+#define SCRIPT_CH06_MARKER_OPERAND 1
+#define SCRIPT_CH06_MARKER_SLOT 4
+#define SCRIPT_CH06_MARKER_VALUE 21
+
+/* MAP05.COD record 32 -- the first record past the map's 32 scripted ones, and
+   so the first party slot's start tile -- is (4, 8).  The record a party slot
+   is put on is data_fdps_map_char_spawn_count + slot_index and not the slot
+   number (src/deploy.c). */
+#define CH5_PARTY_TILE_X 4
+#define CH5_PARTY_TILE_Y 8
+
 /* Table rows wide enough for every id the run touches: character 12 indexes
    the roster tables directly, and every item id including 0xff is a valid
    index because fdps_unit_recompute_combat_stats follows the equipped flag
@@ -595,19 +712,33 @@ static unsigned char fixture_icon04_dat[] = {
     0x00
 };
 
+/* ICON05.DAT: the member fdps_chapter_06_init names.  Its DEPLOY_WAVE is the
+   shipped member's own -- wave 1, place-exact 0 -- which on MAP05.DAT is
+   twenty-three records, and its SET_UNIT_TIMER marker then writes a value of
+   its own onto the last unit that deploy appended.  No other fixture names wave
+   1 alone, so a run that opened one of the other five is a different unit count
+   AND a different timer array. */
+static unsigned char fixture_icon05_dat[] = {
+    0x04, SCRIPT_CH06_WAVE, SCRIPT_CH06_PLACE_EXACT,
+    0x12, SCRIPT_CH06_MARKER_UNIT, SCRIPT_CH06_MARKER_OPERAND,
+    SCRIPT_CH06_MARKER_VALUE,
+    0x00
+};
+
 static char *fixture_names[FIXTURE_MEMBERS] = {
-    "ICON00.DAT", "ICON01.DAT", "ICON02.DAT", "ICON03.DAT", "ICON04.DAT"
+    "ICON00.DAT", "ICON01.DAT", "ICON02.DAT", "ICON03.DAT", "ICON04.DAT",
+    "ICON05.DAT"
 };
 
 static unsigned char *fixture_bytes[FIXTURE_MEMBERS] = {
     fixture_icon00_dat, fixture_icon01_dat, fixture_icon02_dat,
-    fixture_icon03_dat, fixture_icon04_dat
+    fixture_icon03_dat, fixture_icon04_dat, fixture_icon05_dat
 };
 
 static int fixture_lengths[FIXTURE_MEMBERS] = {
     sizeof(fixture_icon00_dat), sizeof(fixture_icon01_dat),
     sizeof(fixture_icon02_dat), sizeof(fixture_icon03_dat),
-    sizeof(fixture_icon04_dat)
+    sizeof(fixture_icon04_dat), sizeof(fixture_icon05_dat)
 };
 
 /* 0 not attempted, 1 the run happened and the snapshot below is good,
@@ -2136,6 +2267,316 @@ static void the_chapter_5_cursor_is_parked_on_unit_zero(void)
     CHECK_EQ(seen5_cursor_y, CH4_PARTY_TILE_Y * CURSOR_TILE_STEP);
 }
 
+/* --- fdps_chapter_06_init @ 00020ff0 ------------------------------------
+ *
+ * Four calls, straight line, no branch and no store of its own -- instruction
+ * for instruction fdps_chapter_05_init with one literal changed.  What it
+ * decides is that nobody joins the party, the ORDER of the four calls, and
+ * which cut-scene member and which unit the two arguments name, so the run
+ * below enters chapter 6 once for real and reads the answers off the state it
+ * leaves.
+ *
+ * Expected values come from the assembly at 00020ff0 and from the shipped
+ * data, never from the emitted C:
+ *
+ *   CALL 0x00022750                   the chapter state is rebuilt
+ *   MOV EAX,0x61840 / PUSH EAX /
+ *     CALL 0x00021650                 the cut-scene "Icon05.dat" is run
+ *   CALL 0x00020c60                   the title card is shown
+ *   PUSH 0x0 / CALL 0x0002da50        the cursor is parked on unit 0
+ *
+ * WHAT MAKES THIS CHAPTER DIFFERENT FROM THE ONE BEFORE IT.  Chapter 5 has the
+ * same body and a map that wants five player slots against a four-member party,
+ * so its fifth slot is the zeroed, retired spare.  MAP05.DAT wants FOUR, which
+ * the party already is, so every slot here has a member behind it and the array
+ * carries no spare at all -- and there is still no fdps_roster_add_character
+ * anywhere in the body, which the roster count and the untouched 0xff in roster
+ * slot 4 say from the other side.
+ *
+ * WHO PUTS THE CHAPTER'S ARMY ON THE MAP.  MAP05.DAT's 32 deployment records
+ * are tagged in three waves -- two wave 0, twenty-three wave 1, seven wave 2 --
+ * so the two calls divide them: the rebuild's opening deploy takes wave 0, which
+ * is record 0's LV10 步兵 and record 31's side-1 LV10 英雄索爾, and the
+ * cut-scene's own DEPLOY_WAVE takes wave 1.  The handler therefore returns with
+ * 29 units on the map, and the census case below finds among them exactly the
+ * strategy guide's FIRST enemy group -- 9 步兵, 7 弓兵, 5 騎兵, 3 魔導士.  The
+ * guide's second group is the map's wave 2 to the record, which nothing this
+ * handler calls deploys, so the guide and the shipped map are checked against
+ * each other rather than either being taken on trust.
+ *
+ * WHY THE CUT-SCENE IS A FIXTURE.  Same reason the five runs above give: the
+ * shipped ICON05.DAT is a cinematic that sets CD tracks, walks and turns units
+ * and draws chapter text through a pointer a test image has not filled.  The
+ * staged ICON05.DAT keeps the shipped member's own DEPLOY_WAVE -- wave 1, with
+ * the same place-exact operand -- and adds a marker so the run can say which
+ * member the interpreter opened; the container it lives in is the one the
+ * chapter 1 run already built.
+ */
+
+static int run6_state = 0;
+
+static int seen6_roster_count;
+static int seen6_spare_roster_char_id;
+static int seen6_player_slots;
+static int seen6_char_spawns;
+static int seen6_unit_count;
+static int seen6_unit0_char_id;
+static int seen6_unit1_char_id;
+static int seen6_unit2_char_id;
+static int seen6_unit3_char_id;
+static int seen6_unit3_side;
+static int seen6_unit3_flags;
+static int seen6_foot_soldiers;
+static int seen6_archers;
+static int seen6_riders;
+static int seen6_mages;
+static int seen6_guest_char_id;
+static int seen6_guest_level;
+static int seen6_guest_side;
+static int seen6_guest_hp_current;
+static int seen6_guest_hp_max;
+static unsigned char seen6_guest_timers[STATUS_TIMER_COUNT];
+static int seen6_marker_unit_char_id;
+static unsigned char seen6_marker_timers[STATUS_TIMER_COUNT];
+static unsigned char seen6_unit0_timers[STATUS_TIMER_COUNT];
+static int seen6_cursor_x;
+static int seen6_cursor_y;
+static int seen6_chapter_id;
+
+static void capture_chapter_06(void)
+{
+    struct fdps_unit_record *unit0;
+    struct fdps_unit_record *guest;
+    struct fdps_unit_record *marker_unit;
+    int unit_index;
+    int char_id;
+    int slot;
+
+    seen6_roster_count = data_fdps_roster_member_count;
+    seen6_spare_roster_char_id = (int) stage_roster[SPARE_ROSTER_SLOT].char_id;
+
+    seen6_player_slots = data_fdps_map_player_slot_count;
+    seen6_char_spawns = data_fdps_map_char_spawn_count;
+    seen6_unit_count = data_fdps_map_unit_count;
+    seen6_cursor_x = data_fdps_map_cursor_world_x;
+    seen6_cursor_y = data_fdps_map_cursor_world_y;
+    seen6_chapter_id = data_fdps_chapter_current_chapter_id;
+
+    unit0 = (struct fdps_unit_record *) data_fdps_map_unit_array_ptr;
+    guest = unit0 + CH5_GUEST_UNIT;
+    marker_unit = unit0 + SCRIPT_CH06_MARKER_UNIT;
+
+    seen6_unit0_char_id = (int) unit0->char_id;
+    seen6_unit1_char_id = (int) unit0[1].char_id;
+    seen6_unit2_char_id = (int) unit0[2].char_id;
+    seen6_unit3_char_id = (int) unit0[CH5_LAST_PLAYER_SLOT].char_id;
+    seen6_unit3_side = (int) unit0[CH5_LAST_PLAYER_SLOT].side;
+    seen6_unit3_flags = (int) unit0[CH5_LAST_PLAYER_SLOT].flags;
+
+    seen6_foot_soldiers = 0;
+    seen6_archers = 0;
+    seen6_riders = 0;
+    seen6_mages = 0;
+    for (unit_index = CH5_PLAYER_SLOTS;
+         unit_index < data_fdps_map_unit_count;
+         unit_index++) {
+        char_id = (int) unit0[unit_index].char_id;
+        if (char_id == CH5_FOOT_CHAR_ID) {
+            seen6_foot_soldiers++;
+        } else if (char_id == CH5_ARCHER_CHAR_ID) {
+            seen6_archers++;
+        } else if (char_id == CH5_RIDER_CHAR_ID) {
+            seen6_riders++;
+        } else if (char_id == CH5_MAGE_CHAR_ID) {
+            seen6_mages++;
+        }
+    }
+
+    seen6_guest_char_id = (int) guest->char_id;
+    seen6_guest_level = (int) guest->level;
+    seen6_guest_side = (int) guest->side;
+    seen6_guest_hp_current = (int) guest->hp_current;
+    seen6_guest_hp_max = (int) guest->hp_max;
+
+    seen6_marker_unit_char_id = (int) marker_unit->char_id;
+
+    for (slot = 0; slot < STATUS_TIMER_COUNT; slot++) {
+        seen6_guest_timers[slot] = guest->status_timers[slot];
+        seen6_marker_timers[slot] = marker_unit->status_timers[slot];
+        seen6_unit0_timers[slot] = unit0->status_timers[slot];
+    }
+}
+
+/* Runs the chapter 6 handler once, against the shipped containers and the
+   fixture cut-scene, and records what it left behind.  The four members the
+   party has when the chapter opens are put on with the game's own add, because
+   neither this handler nor chapter 5's adds any of them and MAP05.DAT's four
+   player slots have to be filled from a roster the run staged honestly.  The
+   timer hook and the graphics mode are here for the reasons the chapter 1 run
+   gives. */
+static void run_chapter_06_handler(void)
+{
+    if (run6_state != 0) {
+        return;
+    }
+    run6_state = 2;
+
+    if (!containers_present()) {
+        return;
+    }
+    if (!stage_fixture_archive()) {
+        return;
+    }
+
+    stage_globals();
+    data_fdps_chapter_current_chapter_id = CHAPTER_06_ID;
+    data_fdps_cursor_highlight_sprite_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_entry(MISC_NAME, CURSOR_SHEET_MEMBER);
+
+    fdps_roster_add_character(OPENING_CHAR_ID);
+    fdps_roster_add_character(JOINING_CHAR_ID);
+    fdps_roster_add_character(ARC_CHAR_ID);
+    fdps_roster_add_character(FLARENA_CHAR_ID);
+
+    set_mode(MODE_320X200X256);
+    saved_timer = _dos_getvect(TIMER_VECTOR);
+    _dos_setvect(TIMER_VECTOR, tick_isr);
+
+    fdps_chapter_06_init();
+
+    _dos_setvect(TIMER_VECTOR, saved_timer);
+    set_mode(MODE_TEXT);
+
+    capture_chapter_06();
+    free_chapter_globals();
+    run6_state = 1;
+}
+
+/* Nobody joins the party this chapter and, unlike chapter 5, nothing is left
+   over.  The roster is still the four members the run put on before it started
+   and roster slot 4 still carries its 0xff, so a fifth
+   fdps_roster_add_character in the body would move both; MAP05.DAT's four
+   player slots are those four in join order, and the last of them is a live
+   player-side record rather than the zeroed, retired spare chapter 5's fifth
+   slot is.  The two map counts are read back as well, because they were staged
+   at numbers no map carries and because this slot-and-spawn pair is one no
+   other map in this file has. */
+static void nobody_joins_and_no_slot_is_left_over_in_chapter_six(void)
+{
+    run_chapter_06_handler();
+    CHECK_EQ(run6_state, 1);
+    if (run6_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen6_roster_count, PARTY_AT_CHAPTER_06);
+    CHECK_EQ(seen6_spare_roster_char_id, EMPTY_ROSTER_SLOT_SENTINEL);
+    CHECK_EQ(seen6_player_slots, CH5_PLAYER_SLOTS);
+    CHECK_EQ(seen6_char_spawns, CH5_CHAR_SPAWNS);
+    CHECK_EQ(seen6_unit0_char_id, OPENING_CHAR_ID);
+    CHECK_EQ(seen6_unit1_char_id, JOINING_CHAR_ID);
+    CHECK_EQ(seen6_unit2_char_id, ARC_CHAR_ID);
+    CHECK_EQ(seen6_unit3_char_id, FLARENA_CHAR_ID);
+    CHECK_EQ(seen6_unit3_side, PLAYER_SIDE);
+    CHECK_EQ(seen6_unit3_flags, 0);
+}
+
+/* What the two calls together leave on the map: the four player slots, the two
+   wave-0 records the rebuild deploys and the twenty-three wave-1 records the
+   cut-scene deploys, for 29.  The census behind that count is the strategy
+   guide's FIRST enemy group -- 9 步兵, 7 弓兵, 5 騎兵, 3 魔導士 -- found by
+   character id in the array, and the guide's second group is the map's wave 2,
+   which is still to come when this handler returns. */
+static void chapter_six_opens_with_the_guides_first_enemy_group(void)
+{
+    run_chapter_06_handler();
+    CHECK_EQ(run6_state, 1);
+    if (run6_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen6_unit_count, CH5_UNITS_AFTER_SCRIPT);
+    CHECK_EQ(seen6_foot_soldiers, CH5_FOOT_COUNT);
+    CHECK_EQ(seen6_archers, CH5_ARCHER_COUNT);
+    CHECK_EQ(seen6_riders, CH5_RIDER_COUNT);
+    CHECK_EQ(seen6_mages, CH5_MAGE_COUNT);
+}
+
+/* The second of the map's two wave-0 records went down as unit 5 and the handler
+   left it exactly as the deployment computed.  索爾 is side 1, character 12,
+   level 10,
+   at full HP with every status timer clear: chapter 5's guest hero opens
+   麻痺 because the shipped ICON04.DAT paralyses him, and chapter 6's opens
+   clean because the shipped ICON05.DAT has no SET_UNIT_TIMER at all and this
+   handler, like chapter 5's, has no store in its body.  The guide's line for
+   him this chapter carries no status either. */
+static void the_chapter_6_guest_hero_is_left_as_the_map_deployed_him(void)
+{
+    int slot;
+
+    run_chapter_06_handler();
+    CHECK_EQ(run6_state, 1);
+    if (run6_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen6_guest_char_id, GUEST_HERO_CHAR_ID);
+    CHECK_EQ(seen6_guest_level, GUEST_HERO_LEVEL);
+    CHECK_EQ(seen6_guest_side, GUEST_HERO_SIDE);
+    CHECK_EQ(seen6_guest_hp_max, SOL_HP_MAX);
+    CHECK_EQ(seen6_guest_hp_current, SOL_HP_MAX);
+    for (slot = 0; slot < STATUS_TIMER_COUNT; slot++) {
+        CHECK_EQ(seen6_guest_timers[slot], 0);
+    }
+}
+
+/* The cut-scene the handler names is Icon05.dat and it really ran.  The marker
+   sits on unit 28 -- the last of the twenty-three its own DEPLOY_WAVE appended,
+   an index the array does not even reach unless wave 1 was the wave asked for --
+   with a value none of the other five fixtures writes, and that unit's character
+   id pins the index to MAP05.DAT's record 30 rather than to a bare number.
+   Unit 0's own timers are read back clear, which is where ICON00.DAT's and
+   ICON01.DAT's markers would have landed.  The chapter id is untouched, the
+   handler neither reading nor writing it -- both the script number and the
+   title-card graphic are chosen from it by the callees. */
+static void the_chapter_6_cutscene_is_icon05_dat(void)
+{
+    int slot;
+
+    run_chapter_06_handler();
+    CHECK_EQ(run6_state, 1);
+    if (run6_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen6_marker_unit_char_id, SCRIPT_CH06_MARKER_UNIT_CHAR_ID);
+    CHECK_EQ(seen6_marker_timers[SCRIPT_CH06_MARKER_SLOT],
+             SCRIPT_CH06_MARKER_VALUE);
+    for (slot = 0; slot < STATUS_TIMER_COUNT; slot++) {
+        if (slot != SCRIPT_CH06_MARKER_SLOT) {
+            CHECK_EQ(seen6_marker_timers[slot], 0);
+        }
+        CHECK_EQ(seen6_unit0_timers[slot], 0);
+    }
+    CHECK_EQ(seen6_chapter_id, CHAPTER_06_ID);
+}
+
+/* The cursor ends on unit 0's tile.  The walk starts from the (0, 0) the state
+   reset left, and MAP05.COD record 32 -- the first record past the map's 32
+   scripted deployments -- puts the first party slot on tile (4, 8), so the
+   cursor globals are that tile scaled by the 24-pixel step. */
+static void the_chapter_6_cursor_is_parked_on_unit_zero(void)
+{
+    run_chapter_06_handler();
+    CHECK_EQ(run6_state, 1);
+    if (run6_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen6_cursor_x, CH5_PARTY_TILE_X * CURSOR_TILE_STEP);
+    CHECK_EQ(seen6_cursor_y, CH5_PARTY_TILE_Y * CURSOR_TILE_STEP);
+}
+
 /* Takes the fixture container away again, so tests/icon.c can stage its own.
    A container this file did not create is somebody else's and is left where
    it stands, which is also the only path on which this case asserts
@@ -2176,5 +2617,10 @@ void run_chinit1_tests(void)
     RUN_TEST(the_chapter_5_guest_hero_is_left_as_the_map_deployed_him);
     RUN_TEST(the_chapter_5_cutscene_is_icon04_dat);
     RUN_TEST(the_chapter_5_cursor_is_parked_on_unit_zero);
+    RUN_TEST(nobody_joins_and_no_slot_is_left_over_in_chapter_six);
+    RUN_TEST(chapter_six_opens_with_the_guides_first_enemy_group);
+    RUN_TEST(the_chapter_6_guest_hero_is_left_as_the_map_deployed_him);
+    RUN_TEST(the_chapter_6_cutscene_is_icon05_dat);
+    RUN_TEST(the_chapter_6_cursor_is_parked_on_unit_zero);
     RUN_TEST(the_fixture_container_is_removed);
 }

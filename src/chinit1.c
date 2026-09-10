@@ -460,3 +460,96 @@ void fdps_chapter_05_init(void)
     fdps_show_chapter_title_card();
     fdps_map_cursor_move_to_unit(CH05_CURSOR_UNIT);
 }
+
+/* --- fdps_chapter_06_init @ 00020ff0 ----------------------------------- */
+
+/* Chapter 6's opening cut-scene, the string at 0x61840 loaded into EAX at
+   00021001 and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id and not a script id of its own, which is
+   why this is Icon05.dat where fdps_chapter_05_init above holds Icon04.dat at
+   the same position.
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON05.DAT by the
+   call and cannot live in read-only storage. */
+#define CH06_OPENING_SCRIPT "Icon05.dat"
+
+/* Which unit the cursor is left on: PUSH 0x0 at 00021014. */
+#define CH06_CURSOR_UNIT 0
+
+/* 00020ff0.  Four calls, straight line, no branch, no loop and no local --
+   instruction for instruction the same shape as fdps_chapter_05_init above,
+   with the script-name literal and nothing else changed.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 00020ff0..00020ff4 -- over SUB ESP,0x0, a zero-byte local area
+   written as the six-byte immediate form.  Nothing is addressed off EBP
+   anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 0002101e..00021021
+   and the RET at 00021022 is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: MOV EAX,0x61840 / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4 at
+   00021001..0002100c, and PUSH 0x0 / CALL 0x0002da50 / ADD ESP,0x4 at
+   00021014..0002101b.  The two argument-less calls at 00020ffc and 0002100f
+   are bare CALLs with no push and no adjustment.  Nothing reads [EBP+8] or
+   above, so this function takes nothing itself, and EAX is never set after
+   the third call, so it returns nothing -- the dispatcher reaches it through
+   the sixth slot of the table at 00060074 (the dword at 00060088 is
+   00020ff0) and ignores EAX.
+
+   VALUES USED AFTER A CALL: none at all.  All four callees return void and
+   nothing here reads EAX after any of them; the only register written between
+   the prologue and the RET is the EAX that carries the script name literal
+   into the second call.
+
+   NOBODY JOINS THE PARTY THIS CHAPTER EITHER, and this is where that stops
+   being a shortfall.  The party is the four members chapters 1 to 4 added --
+   蘭迪斯, 尤利安, 亞克, 法蓮娜 -- and MAP05.DAT asks for exactly FOUR player
+   slots, so every slot has a member behind it and fdps_build_map_unit_array
+   writes no retired spare at all (src/deploy.c).  Chapter 5's map wanted five
+   against the same four; this one is the first map in the run whose slot count
+   and party size agree.
+
+   THE CUT-SCENE IS WHAT BRINGS THE ARMY IN, AND THE ORDER OF THE FIRST TWO
+   CALLS IS THEREFORE LOAD-BEARING.  MAP05.DAT's 32 deployment records are
+   tagged in three waves: two wave 0, twenty-three wave 1, seven wave 2.  The
+   state rebuild's own opening deploy takes wave 0 alone, which is record 0 --
+   a side-0 LV10 步兵 -- and record 31, the side-1 LV10 英雄索爾 the strategy
+   guide lists as the chapter's 友方; the units land in record order behind the
+   four player slots, so 索爾 is unit 5.  The shipped ICON05.DAT's one
+   DEPLOY_WAVE, at script offset 83 walked with the opcode ladder in src/icon.c,
+   asks for wave 1, so the twenty-three arrive during the cut-scene and the
+   handler returns with 29 units on the map.  The seven wave-2 records are
+   nobody's business here: nothing this handler calls deploys them.
+
+   WHY THE GUIDE PRINTS THE ENEMIES AS TWO GROUPS.  The strategy guide lists
+   LV10 魔導士 x3, LV10 步兵 x9, LV9 弓兵 x7 and LV8 騎兵 x5, then a second
+   group of x1, x3, x2 and x1.  The first group is exactly the map's wave 0 and
+   wave 1 counted together by character id -- 102 three times, 98 nine times, 93
+   seven times, 88 five times -- and the second is exactly its wave 2.  The
+   split in the guide is the map's own wave tagging, so the twenty-four the
+   handler leaves behind is the number a player meets when the chapter opens and
+   not a shortfall.
+
+   NOTHING IS PARALYSED THIS CHAPTER.  Chapter 5's guest hero arrives in
+   麻痺狀態 and it is the shipped ICON05.DAT's predecessor that does it; walked
+   with the opcode ladder in src/icon.c the shipped ICON05.DAT holds no
+   SET_UNIT_TIMER at all, and the guide lists 索爾 here with no status.  So the
+   absence of a store in this body is not a gap the cut-scene fills -- neither
+   half writes on a unit in chapter 6.
+
+   THE CHAPTER IS NOT SET HERE.  Both the script the second call loads and the
+   title-card graphic the third one shows are chosen from
+   data_fdps_chapter_current_chapter_id by the callees, and this handler
+   neither reads nor writes it -- the dispatcher that reached this slot is what
+   put the right value there.  The Icon05.dat above is the one place the
+   chapter number is spelled out rather than read. */
+void fdps_chapter_06_init(void)
+{
+    fdps_chapter_state_reset();
+    fdps_icon_script_run(CH06_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH06_CURSOR_UNIT);
+}
