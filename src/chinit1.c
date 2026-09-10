@@ -794,3 +794,139 @@ void fdps_chapter_08_init(void)
     fdps_show_chapter_title_card();
     fdps_map_cursor_move_to_unit(CH08_CURSOR_UNIT);
 }
+
+/* --- fdps_chapter_09_init @ 000210b0 ----------------------------------- */
+
+/* The two characters who join the party at the start of chapter 9: 布蘭多 the
+   技師, character id 8, and 蓋亞 the 機兵, character id 9
+   (assets/characters.md).  PUSH 0x8 at 000210bc and PUSH 0x9 at 000210c6.
+   They land at roster slots 6 and 7, behind 蘭迪斯, 尤利安, 亞克, 法蓮娜,
+   裘娜 and 費塔加, because the roster is in join order and is never permuted.
+
+   THE RECORDS THESE TWO ADDS BUILD ARE THE STRATEGY GUIDE'S OWN LINE FOR THE
+   CHAPTER, which is what separates chapter 9 from chapter 8.
+   fdps_roster_add_character reads FRIAPRDA.DAT and FRILEVUP.DAT at index 08 --
+   level 14 on 50 base HP and 0 base MP with 9 HP and 3 MP a level -- and at
+   index 09 -- level 16 on 60 base HP and 0 base MP with 12 HP and 3 MP a level
+   -- so the two roster records carry 50 + 9 * 13 = 167 HP with 3 * 13 = 39 MP
+   and 60 + 12 * 15 = 240 HP with 3 * 15 = 45 MP.  The guide's 己方 line for
+   this chapter is LV14 技師布蘭多 HP167 MP39 and LV16 機兵蓋亞 HP240 MP45, to
+   the number.  Its AP and DP are the same records with their equipment added:
+   34 + 4 * 14 = 90 plus 電光砲's 80 is the guide's AP170, 8 + 3 * 14 = 50 plus
+   浸漬皮甲's 45 is its DP95, 0 + 7 * 16 = 112 plus 力量拳套's 130 is its AP242
+   and 0 + 5 * 16 = 80 plus 硬鐵裝甲's 50 is its DP130 (assets/items.md).
+
+   Chapter 8's 加入 was a MAP07.DAT deployment record wearing the same
+   character's name; MAP08.DAT carries neither of these two at all. */
+#define CH09_TECHNICIAN_CHARACTER 8
+#define CH09_MACHINE_SOLDIER_CHARACTER 9
+
+/* Chapter 9's opening cut-scene, the string at 0x61864 loaded into EAX at
+   000210d5 and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id and not a script id of its own, which is
+   why this is Icon08.dat where fdps_chapter_08_init above holds Icon07.dat at
+   the same position.
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON08.DAT by the
+   call and cannot live in read-only storage. */
+#define CH09_OPENING_SCRIPT "Icon08.dat"
+
+/* Which unit the cursor is left on: PUSH 0x0 at 000210e8. */
+#define CH09_CURSOR_UNIT 0
+
+/* 000210b0.  Six calls, straight line, no branch, no loop and no local -- the
+   shape of fdps_chapter_08_init above with a SECOND fdps_roster_add_character
+   in front of it, and nothing else changed.  It is the only handler in the
+   file that adds two.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 000210b0..000210b5 -- over SUB ESP,0x0 at 000210b6, a zero-byte
+   local area written as the six-byte immediate form.  Nothing is addressed off
+   EBP anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 000210f2..000210f5
+   and the RET at 000210f6 is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: PUSH 0x8 / CALL 0x00023bc0 / ADD ESP,0x4 at 000210bc..000210c3,
+   PUSH 0x9 / CALL 0x00023bc0 / ADD ESP,0x4 at 000210c6..000210cd,
+   MOV EAX,0x61864 / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4 at
+   000210d5..000210e0, and PUSH 0x0 / CALL 0x0002da50 / ADD ESP,0x4 at
+   000210e8..000210ef.  The two argument-less calls at 000210d0 and 000210e3
+   are bare CALLs with no push and no adjustment.  Nothing reads [EBP+8] or
+   above, so this function takes nothing itself, and EAX is never set after the
+   fourth call, so it returns nothing -- the dispatcher reaches it through the
+   ninth slot of the table at 00060074 (the dword at 00060094 is 000210b0) and
+   ignores EAX.
+
+   VALUES USED AFTER A CALL: none at all.  All six callees return void and
+   nothing here reads EAX after any of them; the only register written between
+   the prologue and the RET is the EAX that carries the script name literal
+   into the fourth call.
+
+   CHAPTER 9 IS THE FIRST CHAPTER WHERE THE ADD-BEFORE-REBUILD ORDER IS
+   OBSERVABLE.  MAP08.DAT declares EIGHT player slots -- byte +1 of the block
+   (src/rsrc.c) -- and the party is six members strong when the chapter opens:
+   chapters 1 to 4 add one each, chapters 5 and 6 add nobody, chapter 7 adds
+   裘娜 and chapter 8 adds 費塔加.  The two adds here take it to eight, which
+   is exactly what the map asks for.  fdps_build_map_unit_array fills player
+   slot i from roster slot i only while i is below the roster count and zeroes
+   the slot with UNIT_FLAG_RETIRED set otherwise (src/deploy.c), so a rebuild
+   that ran before these two adds would leave slots 6 and 7 as retired blanks
+   and neither 布蘭多 nor 蓋亞 would be on the map -- in a chapter whose losing
+   condition is either of them dying.  Chapters 4, 7 and 8 all put a member on
+   the roster one slot past the last the map wanted, which is why the same
+   ordering was invisible there.
+
+   AND THE ORDER OF THE TWO ADDS IS OBSERVABLE, WHICH IS TRUE NOWHERE ELSE IN
+   THE FILE.  A party slot is put on placement record
+   data_fdps_map_char_spawn_count + slot_index of MAP08.COD (src/deploy.c), so
+   roster slot 6 opens on record 37, tile (23, 12), and roster slot 7 on record
+   38, tile (24, 13).  Running PUSH 0x9 first would open the chapter with 蓋亞
+   on (23, 12) and 布蘭多 on (24, 13) -- the two of them swapped, on the far
+   right of the map away from the rest of the party, where the strategy guide's
+   whole account of the chapter is 布蘭多 sheltering behind 蓋亞.
+
+   THE CUT-SCENE SPENDS ITSELF ON TWO MAPS OF ITS OWN AND PUTS THIS ONE BACK.
+   Walked with the opcode ladder in src/icon.c, the shipped ICON08.DAT's 885
+   bytes hold three SWITCH_MAPs and one DEPLOY_WAVE: SWITCH_MAP 0x36 at script
+   offset 4 rebuilds on MAP54.DAT, a cut-scene map with no player slot whose
+   sixteen wave-0 actors are the party and nine scene-only characters all at
+   level 2; SWITCH_MAP 0x37 at offset 169 rebuilds on MAP55.DAT, three actors
+   of which 布蘭多 is wave 0 and 蓋亞 wave 1; DEPLOY_WAVE 1 with the
+   place-exact operand 1 at offset 295 is what brings that 蓋亞 stand-in on;
+   and SWITCH_MAP 0x08 at offset 421 sets the chapter id back to 8 and rebuilds
+   map 8 from scratch, with no DEPLOY_WAVE after it.
+
+   So the array the handler returns with is the one that last switch built:
+   eight player slots and the twenty-four records MAP08.DAT tags wave 0, for
+   thirty-two.  Those twenty-four are the strategy guide's opening 敵方 list to
+   the number -- one LV14 魔導士, three LV14 冰魔導士, five LV13 暗黑騎兵, five
+   LV13 騎兵, six LV13 傭兵L and four LV13 弓兵 -- and the six records the map
+   tags wave 1 are its 援軍 line, which no opcode here deploys: the chapter's
+   own turn-15 event is what brings them on.  MAP08.COD carries thirty-nine
+   placement records behind its nine-byte header, thirty-one scripted and eight
+   for the party, which is the same division from the other side.
+
+   NOTHING IS WRITTEN ON A UNIT.  The body has no store in it at all, as
+   chapters 2 to 8 have none, and the cut-scene adds nothing either: walked
+   with the same ladder the shipped ICON08.DAT holds no SET_UNIT_TIMER
+   anywhere.  The guide lists no status on anybody this chapter.
+
+   THE CHAPTER IS NOT SET HERE.  Both the script the fourth call loads and the
+   title-card graphic the fifth one shows are chosen from
+   data_fdps_chapter_current_chapter_id by the callees, and this handler
+   neither reads nor writes it -- the dispatcher that reached this slot is what
+   put the right value there, and the cut-scene's own run of switches leaves it
+   as it found it.  The Icon08.dat above is the one place the chapter number is
+   spelled out rather than read. */
+void fdps_chapter_09_init(void)
+{
+    fdps_roster_add_character(CH09_TECHNICIAN_CHARACTER);
+    fdps_roster_add_character(CH09_MACHINE_SOLDIER_CHARACTER);
+    fdps_chapter_state_reset();
+    fdps_icon_script_run(CH09_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH09_CURSOR_UNIT);
+}

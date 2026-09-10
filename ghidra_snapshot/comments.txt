@@ -3780,21 +3780,21 @@ Pool: fdps  [game asset string "Icon07.dat" and five game callees including fdps
 Alignment padding: lea eax,[eax+0x0] (8d 40 00), aligns next function entry to 16 bytes.
 
 === 000210b0 [PLATE]
-Chapter 9's entry handler: hands the technician 布蘭多 and the machine soldier 蓋亞 to the party roster, then brings the game into chapter 9 by resetting the chapter state, playing the chapter's opening IconAni cutscene and its title card, and parking the map cursor on the first unit. It is reached through slot 8 of the per-chapter entry-handler table at 00060074, indexed by the 0-based chapter index in DAT_00069cf4.
+Chapter 9's entry handler: hands the technician 布蘭多 and the machine soldier 蓋亞 to the party roster, then brings the game into chapter 9 by resetting the chapter state, playing the chapter's opening IconAni cutscene and its title card, and parking the map cursor on the first unit. It is reached through slot 8 of the per-chapter entry-handler table at 00060074 (the dword at 00060094), which fdps_title_screen (at 0002a85e) and fdps_run_village_phase (at 00031505) both call as table[DAT_00069cf4], the 0-based chapter index.
 
 Algorithm:
-  1. fdps_roster_add_character(8) appends character 8 -- 布蘭多, the level 14 技師 -- to the party roster array at [0x00064108].
-  2. fdps_roster_add_character(9) appends character 9 -- 蓋亞, the level 16 機兵. The two of them are what chapter 9 is named for, and both adds run before the state reset so that the reset picks the newcomers up. This pair of steps is what distinguishes chapter 9's handler from the plain four-step form of fdps_chapter_10_init; the handler at 00021070 does the same thing with one character.
+  1. fdps_roster_add_character(8) appends character 8 -- 布蘭多, the level 14 技師 of FRIAPRDA.DAT index 08 -- to the party roster array at [0x00064108]. The record the add builds is a LV14 one at 167 HP and 39 MP: 50 base HP with a growth minimum of 9 a level and 0 base MP with a minimum of 3, applied as base + minimum * (level - 1).
+  2. fdps_roster_add_character(9) appends character 9 -- 蓋亞, the level 16 機兵 of FRIAPRDA.DAT index 09 -- the same way, building a LV16 record at 240 HP and 45 MP (60 base HP + 12 a level, 0 base MP + 3 a level). MAP08.DAT carries no record for either character, so unlike chapter 8 -- where the strategy guide's line was a map deployment -- the guide's 己方 line for this chapter, LV14 技師布蘭多 HP167 MP39 and LV16 機兵蓋亞 HP240 MP45, is exactly these two roster records. Both adds run before the state reset, and that order is fact rather than intent: MAP08.DAT declares 8 player slots at byte +1 and the party is 6 members strong on entry, so these two adds fill slots 6 and 7 exactly. The add ORDER is observable too, because roster slot order is MAP08.COD placement order: record 37 at tile (23, 12) takes character 8 and record 38 at (24, 13) takes character 9. This pair of steps is what distinguishes chapter 9's handler from the plain four-step form of fdps_chapter_10_init; the handler at 00021070 does the same thing with one character.
   3. fdps_chapter_state_reset rebuilds the per-chapter runtime state block and the chapter's unit roster from the 0-based chapter index held in DAT_00069cf4.
-  4. FUN_00021650("Icon08.dat") loads chapter 9's opening event script out of the IconAni.vfs archive and interprets it. The script number is the 0-based chapter index, so chapter 9's script is Icon08.dat; the neighbouring handlers use Icon07.dat (00021070) and Icon09.dat (fdps_chapter_10_init at 00021100).
-  5. FUN_00020c60 shows the chapter title card: Chapter.saf and Chapter.pal out of MISC.VFS, the graphic again selected by DAT_00069cf4, faded up, held, then faded back to black.
+  4. fdps_icon_script_run("Icon08.dat") loads chapter 9's opening event script out of the IconAni.vfs archive and interprets it. The script number is the 0-based chapter index, so chapter 9's script is Icon08.dat; the neighbouring handlers use Icon07.dat (fdps_chapter_08_init at 00021070) and Icon09.dat (fdps_chapter_10_init at 00021100). The script leaves the chapter's map and comes back: ICON08.DAT is SWITCH_MAP 54 at script offset 4, SWITCH_MAP 55 at 169, DEPLOY_WAVE (wave 1, place-exact 1) at 295 and SWITCH_MAP 8 at 421 -- three SWITCH_MAPs and one DEPLOY_WAVE in all, with no DEPLOY_WAVE following the last switch. So the handler returns with map 8's 8 player slots and its 24 wave-0 records, 32 units, and with the chapter id it entered with. The script also holds no SET_UNIT_TIMER anywhere in its 885 bytes, so it leaves no status on anybody.
+  5. fdps_show_chapter_title_card shows the chapter title card: Chapter.saf and Chapter.pal out of MISC.VFS, the graphic again selected by DAT_00069cf4, faded up, held, then faded back to black.
   6. fdps_map_cursor_move_to_unit(0) leaves the map cursor sitting on the tile of unit 0.
 
 Parameters:
   none
 
 Returns:
-  nothing. The dispatch site calls it indirectly through the table and ignores EAX.
+  nothing. The two dispatch sites call it indirectly through the table and ignore EAX.
 
 Pool: fdps  [game asset string "Icon08.dat" and five game callees including fdps_chapter_state_reset and fdps_roster_add_character; Function ID finds no Watcom or ailv3.lib candidate, and the body does no runtime work -- no FPU, DOS interrupt, allocator or AIL state]
 

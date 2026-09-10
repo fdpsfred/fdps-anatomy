@@ -3440,6 +3440,14 @@
       "status": "committed",
       "rounds": 1,
       "emitted_against": "0x3d"
+    },
+    "000210b0": {
+      "name": "fdps_chapter_09_init",
+      "target": "chinit1.c",
+      "body_size": "0x47",
+      "status": "committed",
+      "rounds": 1,
+      "emitted_against": "0x47"
     }
   }
 }

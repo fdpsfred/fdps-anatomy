@@ -200,4 +200,47 @@ extern void fdps_chapter_07_init(void);
 extern void fdps_chapter_08_init(void);
 #pragma aux fdps_chapter_08_init "*" parm caller [];
 
+/* Chapter 9's entry handler: brings the game into chapter 9.  Takes nothing
+   and returns nothing.
+
+   In order, and the order is the original's: character 8 -- 布蘭多 the 技師 --
+   and then character 9 -- 蓋亞 the 機兵 -- are appended to the party roster;
+   the chapter state is rebuilt; the opening cut-scene Icon08.dat is
+   interpreted; the chapter title card is shown; and the map cursor is parked
+   on unit 0's tile.  Two adds is what separates this handler from every one
+   before it; the rest is chapter 8's shape unchanged.
+
+   The add comes before the rebuild as it does in every handler that has one,
+   and chapter 9 is the FIRST chapter where that is observable.  MAP08.DAT asks
+   for eight player slots and the party is six members strong when the chapter
+   opens, so the two newcomers land at roster slots 6 and 7 -- the last two
+   slots the map fills.  A rebuild that ran before them would find the roster
+   count still at six and leave both slots zeroed with the retired bit set,
+   which is to say 布蘭多 and 蓋亞 would not be on the map at all, and the
+   chapter is lost the moment either of them dies.
+
+   The order of the two adds is observable too, and only here.  Roster slot
+   order is player-slot order and player-slot order is start-tile order, so
+   character 8 takes MAP08.COD record 37 at tile (23, 12) and character 9
+   record 38 at (24, 13).  Swapping the two calls swaps the tiles the two of
+   them open the chapter on.
+
+   The record each add builds is this chapter's 己方 line in the strategy
+   guide, which is what separates chapter 9 from chapter 8: LV14 技師布蘭多 at
+   HP167 and MP39 and LV16 機兵蓋亞 at HP240 and MP45 are FRIAPRDA.DAT and
+   FRILEVUP.DAT read at those characters' own levels, with the guide's AP and
+   DP its equipment on top.  No MAP08.DAT record carries either of them.
+
+   The cut-scene spends itself on two maps of its own and puts this one back.
+   ICON08.DAT switches to map 54 and then to map 55 -- cut-scene maps with no
+   player slot, whose actors are level-2 stand-ins -- deploys map 55's one
+   wave-1 actor, and switches back to map 8 before it ends, so the array the
+   handler returns with is the one that last switch rebuilt: eight player slots
+   and MAP08.DAT's twenty-four wave-0 records, for thirty-two.  Nothing here
+   writes on a unit record and neither does the cut-scene.
+
+   Table slot 8. */
+extern void fdps_chapter_09_init(void);
+#pragma aux fdps_chapter_09_init "*" parm caller [];
+
 #endif
