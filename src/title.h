@@ -1,4 +1,4 @@
-/* title.h -- the front-of-house screens: the title menu and its demo, the
+/* title.h -- the front-of-house screens: the title screen and its demo, the
  * game-over screen, and the full-screen FMV playback all of them reach for
  * (rebuild_info/code_layout.md).  The ending is ending.h's, and it reaches for
  * the same movie player.
@@ -128,5 +128,61 @@ extern void fdps_show_game_over(void);
    global of its own. */
 extern void fdps_title_demo(void);
 #pragma aux fdps_title_demo "*" parm caller [];
+
+
+/* 0002a2b0.  Runs the whole title screen and returns the menu entry the player
+   finally picked, 0 for a new game, 1 for the load screen, 2 for resuming the
+   battle in FDE.SAV and 3 for quitting.  main is the only caller and it calls
+   it twice -- once at startup and once after the game-over screen -- and
+   discards the answer at both sites: what it acts on afterwards is the quit
+   flag and the state globals the branches below publish, not this return value.
+
+   It takes nothing and it does not come back until something has been chosen.
+   Everything that happens in between is one attract cycle repeated: the
+   "Logo.saf" clip over Dynasty.pal, the opening movie, and the title menu.  A
+   menu that sits untouched for its idle budget hands the screen to
+   fdps_title_demo and the cycle starts again with the other movie, so the
+   screen alternates between "FD1" and "FD2" for as long as it is left alone.
+
+   THE TWO SAVE-DEPENDENT ENTRIES ARE GATED ONCE, BEFORE THE CYCLE STARTS.
+   FDE.SAV is opened, read whole, decrypted and checksummed, and entries 1 and 2
+   are ungreyed only if the checksum holds AND the resume image's chapter byte
+   is not 0xff.  The gate runs once per call and is never revisited: a save
+   written by the load screen during this same call does not ungrey anything
+   until the title screen is entered again.
+
+   A greyed entry cannot be accepted -- the flag byte is tested along with the
+   key -- but the cursor still moves onto it, so Up and Down walk all four
+   entries whatever the save file says.
+
+   WHAT EACH SELECTION DOES BEFORE IT RETURNS.  0 empties the roster, sets the
+   chapter to 0 and runs that chapter's entry handler out of
+   data_fdps_chapter_init_handler_table (chapter.h) with the terrain panel
+   switched off around the call.  1 opens fdps_load_game_screen on a page of its
+   own and, if a slot really was loaded, runs the whole village phase before
+   coming back; a screen the player backed out of brings the title menu up
+   again instead of returning.  2 resumes the battle in FDE.SAV through
+   fdps_load_savegame.  3 sets data_fdps_shared_quit_game_requested, which is
+   what main reads to end the session.  Every one of them then publishes
+   data_fdps_map_cursor_draw_mode.
+
+   IT ENDS ON A BLANK SCREEN AND THE MASTER PALETTE.  Whichever entry was
+   picked, the menu fades out over ten retrace-paced steps, the mode 13h frame
+   is cleared and the DAC is reloaded unbiased from
+   data_fdps_vga_main_palette_ptr, so the branch that runs afterwards starts
+   from black rather than from the menu's own palette.
+
+   It needs the timer interrupt running: every frame of the clip, of the menu
+   and of the fade waits for data_fdps_timer_tick_counter to move.
+
+   Writes data_fdps_ui_play_active_flag, data_fdps_bonus_lottery_drawn_flag,
+   data_fdps_audio_bgm_enabled_flag and, per branch,
+   data_fdps_roster_member_count, data_fdps_chapter_current_chapter_id,
+   data_fdps_ui_terrain_hud_user_enabled,
+   data_fdps_village_skip_save_prompt_flag,
+   data_fdps_shared_quit_game_requested and
+   data_fdps_map_cursor_draw_mode. */
+extern int fdps_title_screen(void);
+#pragma aux fdps_title_screen "*" parm caller [];
 
 #endif

@@ -1095,7 +1095,7 @@
 00061e24 | 0xc | /string | s_Dynasty.pal_00061e24 | DEFAULT
 00061e30 | 0x9 | /string | s_Logo.saf_00061e30 | DEFAULT
 00061e3c | 0x5 | /char[5] | binary_artifact_string_literal_opening_movie_name_format_61e3c | USER_DEFINED
-00061e41 | 0xd | /string | - | -
+00061e44 | 0xa | /TerminatedCString | s_StSel.cel_00061e44 | DEFAULT
 00061e50 | 0xc | /char[12] | binary_artifact_string_literal_resource_filename_stboard_cel_61e50 | USER_DEFINED
 00061e5c | 0xc | /string | s_StBoard.pal_00061e5c | DEFAULT
 00061e68 | 0xd | /string | s_GameOver.saf_00061e68 | DEFAULT

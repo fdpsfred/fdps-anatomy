@@ -1891,6 +1891,436 @@ static void demo_hands_the_screen_back_blanked_and_the_party_disbanded(void)
     CHECK_EQ(seen_tail_last, MOVIE_SENTINEL);
 }
 
+
+/* --- fdps_title_screen @ 0002a2b0 ---------------------------------------
+ *
+ * This one is driven for real: one whole call, with the machine fenced the
+ * same way run_movie fences it -- the call plays a movie in the middle of
+ * itself -- and with the keyboard ring fed from the timer interrupt so that
+ * the run steers instead of idling out.
+ *
+ * WHY THE KEYS COME FROM AN INTERRUPT.  The function empties the ring as its
+ * very first act (CALL 0x000567b3 at 0002a2e0), so nothing stuffed before the
+ * call survives into it.  Everything it reads afterwards it reads one make
+ * code per frame, and every frame waits on data_fdps_timer_tick_counter, so
+ * the timer is both the clock the run is paced by and the only place a key can
+ * be put in front of it.
+ *
+ * THE ROUTE THE RUN IS STEERED DOWN is the quit entry, and it is the only one
+ * of the four a unit test can take.  Entry 0 runs a chapter's entry handler,
+ * entry 1 opens the load screen and can run a whole village phase, entry 2
+ * installs a saved battle over the live globals; entry 3 sets one flag and
+ * comes back.  So the interrupt presses Down three times and then Enter, and
+ * what the assertions read is what that route left behind.
+ *
+ * The sequence is delivered one key at a time and only while the ring is
+ * empty, which is what keeps it in order: the menu consumes one make code per
+ * frame and the interrupt refills behind it, so three Downs cannot arrive
+ * before the first frame has read any of them.  The Escape before them is the
+ * logo clip's abort -- CMP EAX,0x80 / JGE at 0002a4b1 takes any make code --
+ * and 0x01 is deliberately not one of the four codes the menu acts on, so an
+ * Escape still sitting in the ring when the menu opens is a no-op rather than
+ * a stray move.  The two phases are told apart by
+ * data_fdps_audio_bgm_enabled_flag, which the run sets at 0002a56b between the
+ * movie and the menu and which nothing else in this path writes.
+ *
+ * WHY THE INT 08h HOOK GOES ON BEFORE AIL_startup.  fdps_play_movie shuts the
+ * Miles stack down in the middle of the call and brings it back up again, and
+ * AIL's own timer hook restores whatever vector it found when it started.
+ * Installed first, this file's handler is what AIL saves and what AIL puts
+ * back, so it survives the shutdown; installed after, it would be dropped on
+ * the floor when the movie ends and the menu would then idle out into the
+ * demo.
+ *
+ * WHAT THE RUN IS OBSERVED THROUGH.  The eight globals the body publishes or
+ * deliberately leaves alone, the answer it returns, the mode 13h frame and the
+ * DAC.  The three globals that are only written by the OTHER three branches
+ * are parked on markers before the call, so the quit branch is pinned by what
+ * it did not touch as well as by what it did.
+ *
+ * WHAT IS LEFT TO THE PLAYTEST.  What the menu actually looks like: the board
+ * cel, the four entry cels and the frame index i * 3 + state each of them is
+ * drawn at are composed into a page that is freed before the call returns, and
+ * the screen the call hands back has been cleared.  The same goes for the
+ * fade, which moves the DAC ten times and is then overwritten by the closing
+ * upload the last case does assert.
+ */
+
+#define TS_VGA_BASE 0x000a0000
+#define TS_FRAME_BYTES 0xfa00
+#define TS_WINDOW_BYTES 0x10000
+#define TS_MODE_TEXT 0x03
+#define TS_MODE_320X200X256 0x13
+#define TS_TIMER_VECTOR 8
+
+#define TS_DAC_READ_INDEX 0x3c7
+#define TS_DAC_DATA 0x3c9
+#define TS_DAC_ENTRIES 256
+#define TS_DAC_COMPONENT_MASK 0x3f
+#define TS_DAC_RANGE 64
+#define TS_PAL_RED_STEP 5
+#define TS_PAL_GREEN_STEP 9
+#define TS_PAL_BLUE_STEP 17
+
+/* What the 64K window is filled with before the run.  The closing clear writes
+   zero over the frame and nothing over the bytes above it. */
+#define TS_SENTINEL 0x5a
+
+/* The make codes the interrupt delivers.  Escape is not one of the four the
+   menu acts on; Down is 0x50 and Enter is 0x1c, CMP against them at 0002a651
+   and 0002a616. */
+#define TS_KEY_ESCAPE 0x01
+#define TS_KEY_DOWN 0x50
+#define TS_KEY_ENTER 0x1c
+
+/* Three Downs from entry 0 lands on entry 3, the quit entry, because the move
+   is modulo four.  Two would land on Continue and four would come back round
+   to New Game, so the count is what the assertion about the answer is really
+   testing. */
+#define TS_DOWN_PRESSES 3
+#define TS_ENTRY_QUIT 3
+
+/* Parked in the three globals only the other branches write, so that "the quit
+   branch left them alone" is a value nothing in the body can produce.  The
+   chapter marker is not 0, which is what entry 0 would store. */
+#define TS_HUD_MARKER 0x5b
+#define TS_SKIP_PROMPT_MARKER 0x5c
+#define TS_CHAPTER_MARKER 17
+/* And in the lottery flag, which the body clears at 0002a2ec. */
+#define TS_LOTTERY_MARKER 0x33
+
+static unsigned char ts_pal[TS_DAC_ENTRIES * 3];
+
+static void (__interrupt __far *ts_saved_timer)();
+
+/* Written by the interrupt while the run is in flight. */
+static volatile long ts_ticks;
+static volatile int ts_phase_started;
+static volatile int ts_downs_sent;
+
+static int ts_ran;
+static int ts_ready;
+static int ts_answer;
+static int ts_downs_delivered;
+static int ts_quit_flag_after;
+static int ts_cursor_mode_after;
+static int ts_play_flag_after;
+static int ts_lottery_flag_after;
+static int ts_bgm_flag_after;
+static int ts_hud_after;
+static int ts_skip_prompt_after;
+static int ts_chapter_after;
+static long ts_frame_non_zero;
+static int ts_tail_first;
+static int ts_tail_last;
+static int ts_dac_mismatches;
+
+/* How many make codes the ring is holding, from the same two indices
+   fdps_read_keyboard_queue compares (keybd.h). */
+static int ts_queue_pending(void)
+{
+    int span;
+
+    span = data_fdps_input_scancode_queue_write_index
+           - data_fdps_input_scancode_queue_head;
+    if (span < 0) {
+        span += SCANCODE_QUEUE_LEN;
+    }
+    return span;
+}
+
+/* Put one make code in, the way fdps_keyboard_isr would: the byte at the write
+   index, then the index bumped past it and wrapped at ten. */
+static void ts_push_key(unsigned char make_code)
+{
+    int at;
+
+    at = data_fdps_input_scancode_queue_write_index;
+    data_fdps_input_scancode_queue[at] = make_code;
+    at++;
+    if (at >= SCANCODE_QUEUE_LEN) {
+        at = 0;
+    }
+    data_fdps_input_scancode_queue_write_index = at;
+}
+
+static void __interrupt __far ts_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    ts_ticks++;
+
+    if (ts_queue_pending() == 0) {
+        if (data_fdps_audio_bgm_enabled_flag == 0) {
+            ts_push_key(TS_KEY_ESCAPE);
+        } else {
+            ts_phase_started = 1;
+            if (ts_downs_sent < TS_DOWN_PRESSES) {
+                ts_push_key(TS_KEY_DOWN);
+                ts_downs_sent++;
+            } else {
+                ts_push_key(TS_KEY_ENTER);
+            }
+        }
+    }
+
+    _chain_intr(ts_saved_timer);
+}
+
+static long ts_frame_non_zero_count(void)
+{
+    unsigned char *frame;
+    long offset;
+    long bad;
+
+    frame = (unsigned char *) TS_VGA_BASE;
+    bad = 0;
+    for (offset = 0; offset < TS_FRAME_BYTES; offset++) {
+        if (frame[offset] != 0) {
+            bad++;
+        }
+    }
+    return bad;
+}
+
+static void ts_read_dac(void)
+{
+    int entry;
+    int red;
+    int green;
+    int blue;
+
+    ts_dac_mismatches = 0;
+    for (entry = 0; entry < TS_DAC_ENTRIES; entry++) {
+        outp(TS_DAC_READ_INDEX, entry);
+        red = (int) (inp(TS_DAC_DATA) & TS_DAC_COMPONENT_MASK);
+        green = (int) (inp(TS_DAC_DATA) & TS_DAC_COMPONENT_MASK);
+        blue = (int) (inp(TS_DAC_DATA) & TS_DAC_COMPONENT_MASK);
+        if (red != (int) ts_pal[entry * 3]
+            || green != (int) ts_pal[entry * 3 + 1]
+            || blue != (int) ts_pal[entry * 3 + 2]) {
+            ts_dac_mismatches++;
+        }
+    }
+}
+
+/* One whole call, fenced, run once. */
+static void run_title(void)
+{
+    unsigned char saved_irq_mask;
+    unsigned int saved_int9_offset;
+    unsigned short saved_int9_selector;
+    int entry;
+
+    if (ts_ran != 0) {
+        return;
+    }
+    ts_ran = 1;
+
+    for (entry = 0; entry < TS_DAC_ENTRIES; entry++) {
+        ts_pal[entry * 3] =
+            (unsigned char) ((entry * TS_PAL_RED_STEP) % TS_DAC_RANGE);
+        ts_pal[entry * 3 + 1] =
+            (unsigned char) ((entry * TS_PAL_GREEN_STEP) % TS_DAC_RANGE);
+        ts_pal[entry * 3 + 2] =
+            (unsigned char) ((entry * TS_PAL_BLUE_STEP) % TS_DAC_RANGE);
+    }
+    data_fdps_vga_main_palette_ptr = ts_pal;
+
+    /* The CD stop at the top of every attract pass stages its request header
+       through this block, and the movie in the middle of the call issues
+       another one. */
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    /* An empty prefix, so the composed player path is "\fd.exe": certainly not
+       staged, on a drive that certainly exists. */
+    data_fdps_cdrom_path[0] = '\0';
+
+    data_fdps_audio_bgm_enabled_flag = 0;
+    data_fdps_shared_quit_game_requested = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_bonus_lottery_drawn_flag = TS_LOTTERY_MARKER;
+    data_fdps_ui_terrain_hud_user_enabled = TS_HUD_MARKER;
+    data_fdps_village_skip_save_prompt_flag = TS_SKIP_PROMPT_MARKER;
+    data_fdps_chapter_current_chapter_id = TS_CHAPTER_MARKER;
+
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    ts_ticks = 0;
+    ts_phase_started = 0;
+    ts_downs_sent = 0;
+
+    saved_irq_mask = movie_mask_irq1();
+    saved_int9_offset = movie_read_int9_vector(&saved_int9_selector);
+    fdps_install_keyboard_isr();
+
+    ts_saved_timer = _dos_getvect(TS_TIMER_VECTOR);
+    _dos_setvect(TS_TIMER_VECTOR, ts_timer_isr);
+    AIL_startup();
+
+    over_set_mode(TS_MODE_320X200X256);
+    memset((void *) TS_VGA_BASE, TS_SENTINEL, (size_t) TS_WINDOW_BYTES);
+
+    ts_answer = fdps_title_screen();
+
+    ts_frame_non_zero = ts_frame_non_zero_count();
+    ts_tail_first = (int) ((unsigned char *) TS_VGA_BASE)[TS_FRAME_BYTES];
+    ts_tail_last = (int) ((unsigned char *) TS_VGA_BASE)[TS_WINDOW_BYTES - 1];
+    ts_read_dac();
+    over_set_mode(TS_MODE_TEXT);
+
+    /* The Miles stack goes down first so that AIL puts this file's handler
+       back on the vector, and only then is the original put back. */
+    fdps_audio_shutdown();
+    _dos_setvect(TS_TIMER_VECTOR, ts_saved_timer);
+    movie_write_int9_vector(saved_int9_selector, saved_int9_offset);
+    movie_restore_irq_mask(saved_irq_mask);
+
+    ts_downs_delivered = ts_downs_sent;
+    ts_quit_flag_after = (int) data_fdps_shared_quit_game_requested;
+    ts_cursor_mode_after = data_fdps_map_cursor_draw_mode;
+    ts_play_flag_after = (int) data_fdps_ui_play_active_flag;
+    ts_lottery_flag_after = data_fdps_bonus_lottery_drawn_flag;
+    ts_bgm_flag_after = (int) data_fdps_audio_bgm_enabled_flag;
+    ts_hud_after = (int) data_fdps_ui_terrain_hud_user_enabled;
+    ts_skip_prompt_after = (int) data_fdps_village_skip_save_prompt_flag;
+    ts_chapter_after = data_fdps_chapter_current_chapter_id;
+
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    ts_ready = 1;
+}
+
+/* The premise every case below rests on: the call was made and it came back,
+   and the menu phase really was reached -- the interrupt only starts pressing
+   Down once the body has set the music flag between the movie and the menu, so
+   a run that never got that far would leave this at 0 and every assertion
+   about a menu selection would be meaningless rather than false. */
+static void title_premise_the_run_reached_the_menu(void)
+{
+    run_title();
+
+    CHECK_EQ(ts_ready, 1);
+    CHECK_EQ(ts_phase_started, 1);
+}
+
+/* Three Downs from the entry the body opens on land on entry 3 and Enter takes
+   it: MOV [EBP-0x4c],0x0 at 0002a2bc opens on 0, INC EDX / IDIV 4 at 0002a65b
+   moves it, and MOV EAX,[EBP-0x4c] / MOV [EBP-0xc],EAX at 0002a946 is what
+   comes back.  A move that was not modulo four, or an entry the flag array had
+   greyed, would not answer 3. */
+static void title_answers_with_the_entry_that_was_picked(void)
+{
+    run_title();
+
+    CHECK_EQ(ts_ready, 1);
+    if (!ts_ready) {
+        return;
+    }
+
+    CHECK_EQ(ts_downs_delivered, TS_DOWN_PRESSES);
+    CHECK_EQ(ts_answer, TS_ENTRY_QUIT);
+}
+
+/* The quit branch's two writes: MOV byte ptr [0x000643eb],0x1 at 0002a8f7 and
+   MOV dword ptr [0x00069cd0],0x1 at 0002a8fe, the second of which every branch
+   shares.  Both globals go into the call holding 0. */
+static void title_quit_branch_publishes_its_two_globals(void)
+{
+    run_title();
+
+    if (!ts_ready) {
+        return;
+    }
+
+    CHECK_EQ(ts_quit_flag_after, 1);
+    CHECK_EQ(ts_cursor_mode_after, 1);
+}
+
+/* The two globals the body publishes before it has read anything: MOV byte ptr
+   [0x00060159],0x1 at 0002a2e5 and MOV dword ptr [0x00064110],0x0 at 0002a2ec.
+   The lottery flag goes in holding a marker, so the 0 is a write and not a
+   value that was already there. */
+static void title_opens_by_publishing_the_play_and_lottery_flags(void)
+{
+    run_title();
+
+    if (!ts_ready) {
+        return;
+    }
+
+    CHECK_EQ(ts_play_flag_after, 1);
+    CHECK_EQ(ts_lottery_flag_after, 0);
+}
+
+/* MOV byte ptr [0x00060008],0x1 at 0002a56b, between the movie and the menu.
+   It goes into the call holding 0 -- which is also what the interrupt watches
+   to tell the two phases apart -- so a 1 here can only have come from the
+   body. */
+static void title_turns_the_music_flag_on_after_the_movie(void)
+{
+    run_title();
+
+    if (!ts_ready) {
+        return;
+    }
+
+    CHECK_EQ(ts_bgm_flag_after, 1);
+}
+
+/* What the quit branch did NOT do.  The terrain panel flag is written only by
+   the new-game branch (0002a84b and 0002a864), the save-prompt flag only by
+   the load branch (0002a8c8), and the chapter id only by the new-game branch
+   (0002a841).  All three go in on markers, so a body that fell into the wrong
+   arm of the dispatch shows up here rather than only in the answer. */
+static void title_quit_branch_leaves_the_other_arms_globals_alone(void)
+{
+    run_title();
+
+    if (!ts_ready) {
+        return;
+    }
+
+    CHECK_EQ(ts_hud_after, TS_HUD_MARKER);
+    CHECK_EQ(ts_skip_prompt_after, TS_SKIP_PROMPT_MARKER);
+    CHECK_EQ(ts_chapter_after, TS_CHAPTER_MARKER);
+}
+
+/* PUSH 0xfa00 / PUSH 0x0 / PUSH 0xa0000 at 0002a7c8, after the fade and before
+   the frees.  The whole frame is colour 0 and nothing above it is: the window
+   goes in filled with a sentinel the clear cannot produce, and the two bytes
+   read back are the first byte past the frame and the last byte of the 64K
+   window. */
+static void title_hands_back_a_blank_frame(void)
+{
+    run_title();
+
+    if (!ts_ready) {
+        return;
+    }
+
+    CHECK_EQ(ts_frame_non_zero, 0);
+    CHECK_EQ(ts_tail_first, TS_SENTINEL);
+    CHECK_EQ(ts_tail_last, TS_SENTINEL);
+}
+
+/* The closing upload at 0002a80c..0002a81f: the master palette over the whole
+   DAC with all three biases 0.  It runs after the ten fade steps and after the
+   frame clear, so whatever the fade left in the DAC is gone; a body that
+   skipped it would leave the last fade step's -54 on every component and every
+   entry would disagree. */
+static void title_restores_the_master_palette_unbiased(void)
+{
+    run_title();
+
+    if (!ts_ready) {
+        return;
+    }
+
+    CHECK_EQ(ts_dac_mismatches, 0);
+}
+
 void run_title_tests(void)
 {
     RUN_TEST(movie_premise_the_aperture_reads_back);
@@ -1918,4 +2348,12 @@ void run_title_tests(void)
     RUN_TEST(demo_resets_the_low_nibble_of_every_party_behaviour_byte);
     RUN_TEST(demo_grants_one_spell_each_to_two_of_the_party);
     RUN_TEST(demo_hands_the_screen_back_blanked_and_the_party_disbanded);
+    RUN_TEST(title_premise_the_run_reached_the_menu);
+    RUN_TEST(title_answers_with_the_entry_that_was_picked);
+    RUN_TEST(title_quit_branch_publishes_its_two_globals);
+    RUN_TEST(title_opens_by_publishing_the_play_and_lottery_flags);
+    RUN_TEST(title_turns_the_music_flag_on_after_the_movie);
+    RUN_TEST(title_quit_branch_leaves_the_other_arms_globals_alone);
+    RUN_TEST(title_hands_back_a_blank_frame);
+    RUN_TEST(title_restores_the_master_palette_unbiased);
 }

@@ -2477,5 +2477,33 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0002a2b0": [
+    {
+      "what": "Only one of the four menu arms is exercised by anything but reading. The test drives a whole call down the quit arm, which is the only one a unit test can take: the new-game arm runs a chapter's entry handler out of data_fdps_chapter_init_handler_table, the load arm opens fdps_load_game_screen and can run a whole village phase, and the continue arm installs a saved battle over the live globals. What is established for the other three is the assembly reading alone: which globals each writes, in what order, and that all three join at the cursor-mode write at 0002a8fe. What is NOT established is that each arm hands control on the way the original does once the callee really runs -- in particular that the load arm's -1 to 0 fold at 0002a8af really does re-present the menu rather than fall out of it, and that the village phase it starts on a 1 comes back into the same menu loop.",
+      "needs": "A playtest on the real machine: start the game, take each of New Game, Load and Continue in turn from the title menu, and back out of the load screen once to confirm the title menu comes back up with the cursor still on Load rather than the program moving on.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "The idle path into the demo is read but not run. At 0002a90c the menu loop's done flag is forced on when the 0x6d6 budget reached zero, and at 0002a91e the outer loop calls fdps_title_demo and goes round again with the other movie index rather than returning. Reading the assembly settles the shape; what is not settled is the whole cycle end to end -- that the second pass really plays \"FD2\", that the selection the player had left the cursor on survives the demo (it lives outside every loop and nothing resets it), and that the demo's free of the roster block does not break the menu presentation that follows it. The test cannot reach it: 1750 frames at the harness's tick rate is about a minute and a half of idling per pass, and the demo drives the map AI over a roster the test process does not have.",
+      "needs": "A playtest: leave the title screen alone through two full idle timeouts and watch which movie plays on each pass and where the menu cursor is when the menu comes back.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Independently confirmed from the assembly that the three unexercised dispatch arms have the control flow the emitter describes, and settled one piece of its concern from the knowledge base rather than leaving it open: src/save.h already records fdps_load_game_screen's contract as 1 for a load that happened and -1 for a cancelled screen, and names fdps_title_screen as the caller that folds the -1 into 0 and stays on the title. So the -1 to 0 fold at 0002a8af is settled on paper; what remains genuinely open is only the real-machine behaviour of the three callees once they run for real.",
+      "needs": "A playtest on the real machine: take New Game, Load and Continue in turn from the title menu, and back out of the load screen once to confirm the menu comes back up with the cursor still on Load.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Reached the same concern independently and added nothing to it: the idle path at 0002a90c and 0002a91e reads exactly as the emitter describes, and 1750 frames per pass really does put two full timeouts out of a unit test's reach.",
+      "needs": "A playtest: leave the title screen alone through two full idle timeouts and watch which movie plays on each pass and where the menu cursor is when the menu comes back.",
+      "same_as": "emit#1",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }
