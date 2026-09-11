@@ -64,4 +64,47 @@
 extern void fdps_chapter_25_init(void);
 #pragma aux fdps_chapter_25_init "*" parm caller [];
 
+/* Chapter 26's entry handler: brings the game into chapter 26.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon25.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 0's tile.  Nobody joins the party this chapter -- there is no
+   fdps_roster_add_character in the body -- and the roster is left as chapter
+   24 finished it, twelve members: the eleven chapters 1 to 19 assembled and
+   珊.  MAP25.DAT asks for twelve player slots, so every slot has a member
+   behind it and no zeroed, retired spare is written.
+
+   The cut-scene switches no map and deploys no wave, which is what tells it
+   apart from chapter 25's: its 142 opcodes play entirely on the board this
+   handler's own reset built, and nothing but the dispatcher ever writes the
+   chapter id.
+
+   The chapter is fought without 法蓮娜, and the cut-scene is what leaves her
+   off: it retires map units 1 to 11 so that only 蘭迪斯 is drawn through the
+   opening, then revives 1, 2 and 4 to 11.  Map unit 3 is the one index the
+   revive run skips and nothing revives it later; a player slot's map unit
+   index is its roster slot, so the eleven left are the strategy guide's
+   己方 line, 法蓮娜以外的所有人.
+
+   The opening opposition is the map's own wave 0 and nothing else, and on this
+   chapter that is nearly the whole file.  MAP25.DAT tags sixty-eight of its
+   eighty deployment records wave 0, so the board is eighty units: the four
+   LV30 named generals 凱因巴, 塞克斯, 布魯森 and 汎拉沛 one each (characters
+   67, 64, 65 and 66), LV18 黑暗祭司 x4 (104), LV18 地獄騎士 x10 (78), LV18
+   神箭手 x10 (95), LV18 鎧甲武士 x24 (100) and LV18 天空騎士 x16 (97) --
+   the guide's 敵方 list bar one group, so all four 魔戰將軍 stand on the field
+   from the first turn.  The twelve records held back are seven more LV18
+   鎧甲武士 in wave 2 and, in wave 3, the guide's 友方: the LV40 英雄索爾 (12)
+   and four LV40 侍衛 (59).  Both waves belong to the guide's 事件 line and
+   this handler deploys neither.
+
+   The cursor ends on the tile the cut-scene walked unit 0 to: MAP25.COD starts
+   player slot 0 on (6, 36) and the member walks it four tiles up, so the
+   answer is (6, 32) and not the map's own start tile.
+
+   Table slot 25. */
+extern void fdps_chapter_26_init(void);
+#pragma aux fdps_chapter_26_init "*" parm caller [];
+
 #endif
