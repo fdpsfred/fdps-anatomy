@@ -989,3 +989,120 @@ void fdps_chapter_23_init(void)
     fdps_show_chapter_title_card();
     fdps_map_cursor_move_to_unit(CH23_CURSOR_UNIT);
 }
+/* --- fdps_chapter_24_init @ 00021490 ----------------------------------- */
+
+/* The character who joins the party at the start of chapter 24: 珊 the 法師,
+   character id 10 (assets/characters.md).  PUSH 0xa at 000214a1.  She lands at
+   roster slot 11, behind the eleven members chapters 20 to 23 were fought
+   with, because the roster is in join order and is never permuted.
+
+   THE ADD RUNS AFTER THE STATE RESET AND NOT BEFORE IT.  Every other handler
+   in the family that adds a member calls fdps_roster_add_character first; this
+   one calls fdps_chapter_state_reset at 0002149c and the add at 000214a3, and
+   the two orders are indistinguishable here.  fdps_build_map_unit_array walks
+   the map's player-slot count and reads the roster count only to decide
+   whether slot i is filled from the roster or zeroed and flagged retired
+   (src/deploy.c); MAP23.DAT asks for eleven slots against a roster that
+   already has eleven members, so every slot is filled either way and 珊, at
+   roster slot 11, is past the end of the array on both orders.  Neither call
+   reads what the other writes.  Chapter 1 is where the order matters, its map
+   asking for one player slot against an empty roster.
+
+   THE RECORD THE ADD BUILDS IS NOT THE UNIT THE PLAYER SEES ARRIVE, and the
+   strategy guide prints both.  fdps_roster_add_character reads FRIAPRDA.DAT
+   row 10 and FRILEVUP.DAT row 10 -- level 10 on 266 base HP and 232 base MP
+   with 11 HP and 12 MP a level -- so the roster record is LV10 at 365 HP and
+   340 MP carrying 光之杖 and 賢者之袍, item ids 0x33 and 0x85
+   (assets/items.md).  MAP23.DAT's record 10 is a different line: side 2,
+   character 10, level 15, items 0x36 and 0x8c, which at level 15 comes to 420
+   HP and 400 MP with 龍牙杖 and 金縷袍, and it is
+   fdps_chapter_24_event_deploy_wave_for_turn that deploys it on turn 7.
+
+   THE GUIDE RECORDS THE DIFFERENCE FROM THE PLAYER'S SIDE.  Its 己方 line for
+   the chapter gives 珊 at HP420, MP400, 龍牙杖 and 金縷袍, and its 備註 says
+   that finishing before the turn-7 arrival still leaves her in the party but
+   at HP365, MP340, 光之杖 and 賢者之袍 -- which is this add's record read back,
+   number for number.  Both lines are labelled LV10, so it is the HP and MP
+   pair and not the printed level that tells the map unit from the roster
+   record.  The add is therefore observable on its own, and moving it into the
+   arrival event would lose the behaviour the guide is describing. */
+#define CH24_JOINING_CHARACTER 10
+
+/* Chapter 24's opening cut-scene, the string at 0x61918 loaded into EAX at
+   000214ab and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id, so chapter 24's member is Icon23.dat,
+   the one after chapter 23's Icon22.dat at 0x6190c -- the literals sit end to
+   end in the image, "Icon23.dat" running from 0x61918 to its NUL at 0x61922.
+   Spelling the member out of the handler's own chapter number gives
+   Icon24.dat, which loads, runs, and plays chapter 25's opening scene under
+   chapter 24's title card.
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON23.DAT by the
+   call and cannot live in read-only storage. */
+#define CH24_OPENING_SCRIPT "Icon23.dat"
+
+/* Which unit the cursor is left on: PUSH 0x0 at 000214be, the same unit
+   twenty-seven of the thirty handlers name. */
+#define CH24_CURSOR_UNIT 0
+
+/* 00021490.  Five calls, straight line, no branch, no loop and no local -- the
+   plain four-call form with an fdps_roster_add_character among them, at 0x3d
+   bytes the plain form's 0x33 plus the ten bytes of the add.  What is unusual
+   is where the add sits: after the state reset rather than in front of it,
+   which no other adder in the family does.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 00021490..00021494 -- over SUB ESP,0x0 at 00021496, a zero-byte
+   local area written as the six-byte immediate form.  Nothing is addressed off
+   EBP anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 000214c8..000214cb
+   and the RET at 000214cc is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: PUSH 0xa / CALL 0x00023bc0 / ADD ESP,0x4 at 000214a1..000214a8,
+   MOV EAX,0x61918 / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4 at
+   000214ab..000214b6, and PUSH 0x0 / CALL 0x0002da50 / ADD ESP,0x4 at
+   000214be..000214c5.  The two argument-less calls at 0002149c and 000214b9
+   are bare CALLs with no push and no adjustment.  Nothing reads [EBP+8] or
+   above, so this function takes nothing itself, and EAX is never read after
+   any of the five calls, so it returns nothing -- the dispatcher reaches it
+   through the twenty-fourth slot of the table at 00060074 (the dword at
+   000600d0 is 00021490, and that data reference is the function's only xref)
+   and ignores EAX.
+
+   NOTHING IS WRITTEN ON A UNIT'S STATUS AND NO GLOBAL IS TOUCHED HERE.  The
+   body has no store in it at all: the map, the script member and the
+   title-card graphic are chosen from data_fdps_chapter_current_chapter_id by
+   the callees, and this handler neither reads nor writes it.  The dispatcher
+   that reached this slot is what put 23 there, and ICON23.DAT carries no
+   SWITCH_MAP to disturb it -- the Icon23.dat above is the one place the
+   chapter number is spelled out rather than read.
+
+   WHAT THE CUT-SCENE LEAVES BEHIND.  ICON23.DAT is 277 bytes and its second
+   opcode, the RETIRE_UNIT at script offset 2, takes map unit 3 -- roster slot
+   3, 法蓮娜 -- off the board with no REVIVE behind it, which is the guide's
+   己方 line, 法蓮娜以外的所有人.  Its single DEPLOY_WAVE, at offset 261, asks
+   for wave 1 with the place operand 0, the nearest-free-tile search rather
+   than the exact anchor (src/deploy.c): nine records, four LV19 幽魂
+   (character 105) and five LV19 骷髏兵 (84), behind the single LV20 黑暗祭司
+   (104) MAP23.DAT tags wave 0 and the state reset puts down.  Twenty-one units
+   is what the handler returns on, and those ten are the guide's opening 敵方
+   group to the number.
+
+   THE CURSOR ENDS ON THE MAP'S OWN START TILE, which is unusual for the family
+   and is the member's doing rather than the handler's.  ICON23.DAT has no
+   PLACE_UNIT at all and its one WALK_UNITS, at offset 18, walks map unit 9;
+   map unit 0 is never moved, so it is still on MAP23.COD's record 80 -- the
+   first record past the map's eighty scripted ones, and so player slot 0's
+   start tile -- at (29, 14) when the cursor call reads it.  This map gives its
+   eleven slots eleven different start tiles, so that tile is unit 0's alone. */
+void fdps_chapter_24_init(void)
+{
+    fdps_chapter_state_reset();
+    fdps_roster_add_character(CH24_JOINING_CHARACTER);
+    fdps_icon_script_run(CH24_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH24_CURSOR_UNIT);
+}

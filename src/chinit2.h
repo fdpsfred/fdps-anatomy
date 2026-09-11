@@ -358,5 +358,85 @@ extern void fdps_chapter_22_init(void);
    Table slot 22. */
 extern void fdps_chapter_23_init(void);
 #pragma aux fdps_chapter_23_init "*" parm caller [];
+/* Chapter 24's entry handler: brings the game into chapter 24.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, 珊 is added to the party roster, the
+   opening cut-scene Icon23.dat is interpreted, the chapter title card is
+   shown, and the map cursor is parked on unit 0's tile.
+
+   THE MEMBER WHO JOINS IS 珊 THE 法師, character id 10, and she lands at
+   roster slot 11, behind the eleven members chapters 20 to 23 were fought
+   with.  fdps_roster_add_character reads FRIAPRDA.DAT row 10 and FRILEVUP.DAT
+   row 10 -- level 10 on 266 base HP and 232 base MP with 11 HP and 12 MP a
+   level (assets/characters.md) -- so the record it builds is LV10 at 365 HP
+   and 340 MP carrying 光之杖 and 賢者之袍, item ids 0x33 and 0x85
+   (assets/items.md).
+
+   THE RECORD THE ADD BUILDS IS NOT THE UNIT THE PLAYER SEES ARRIVE, and the
+   strategy guide prints both.  MAP23.DAT's record 10 is the map's only
+   player-side deployment -- side 2, character 10, level 15, 龍牙杖 and 金縷袍
+   -- tagged wave 6, which fdps_chapter_24_event_deploy_wave_for_turn brings on
+   at the start of turn 7.  At level 15 the same two table rows come to 420 HP
+   and 400 MP, which is the guide's 己方 line for the chapter; its 備註 then
+   says that finishing before turn 7 still leaves 珊 in the party but at 365
+   HP, 340 MP, 光之杖 and 賢者之袍, which is this add's record read back number
+   for number.  The guide labels both lines LV10, so it is the HP and MP pair
+   and not the printed level that tells the two apart.
+
+   WHAT THE ROSTER RECORD BUYS IS EVERYTHING AFTER THE MAP.  MAP23.DAT asks for
+   ELEVEN player slots, exactly the roster size before she joins, so
+   fdps_build_map_unit_array fills every slot from a member the party already
+   has and 珊, at roster slot 11, is past the end of the array.  She is not on
+   this chapter's board and this call is not what puts her there.  It is
+   fdps_roster_write_back_battle_units that needs the slot: it matches battle
+   units to roster slots by character id, so with no slot carrying id 10 her
+   turn-7 unit would be banked nowhere, and chapter 25's map -- the first to
+   ask for twelve player slots -- would field a zeroed, retired slot in her
+   place.
+
+   THIS IS THE ONE ADDER THAT ADDS AFTER THE RESET.  Of the eleven entry
+   handlers that put somebody on the roster, this is the only one whose
+   fdps_roster_add_character comes after fdps_chapter_state_reset rather than
+   before it, and on this map the order makes no difference: the state rebuild
+   walks the map's eleven player slots and reads the roster count only to
+   decide whether a slot is filled or zeroed, and with eleven members against
+   eleven slots every slot is filled whichever side of the reset the twelfth
+   member is appended on.  The order is load-bearing in chapter 1, whose map
+   asks for one player slot against an empty roster, not here.
+
+   THE CHAPTER IS FOUGHT WITHOUT 法蓮娜, AND IT IS THE CUT-SCENE THAT TAKES HER
+   OFF.  ICON23.DAT's RETIRE_UNIT at script offset 2 is its second opcode and
+   names map unit 3, with no REVIVE anywhere behind it in its 277 bytes.  A
+   player slot's map unit index is its roster slot and the roster is in join
+   order, so the ten the player commands are everybody but 法蓮娜 -- the
+   strategy guide's 己方 line for the chapter, 法蓮娜以外的所有人.
+
+   THE MAP DEPLOYS ONE ENEMY AND THE CUT-SCENE DEPLOYS THE REST.  MAP23.DAT
+   tags one of its eighty records wave 0, the LV20 黑暗祭司 (character 104),
+   which the state rebuild appends as map unit 11; the member's single
+   DEPLOY_WAVE at script offset 261 asks for wave 1 with the nearest-free-tile
+   place operand, which is nine more records -- four LV19 幽魂 (105) and five
+   LV19 骷髏兵 (84).  Twenty-one units is what the handler returns on.
+
+   Those ten are the strategy guide's opening 敵方 group to the number, and its
+   HP and MV figures settle which id is which: ENEMYDAT.DAT is indexed by the
+   character id less 60, holds HP as a per-level coefficient and MV outright
+   (assets/characters.md), so row 44 at 40 a level is the 黑暗祭司's LV20 HP800
+   at MV4, row 45 at 25 is the 幽魂's LV19 HP475 at MV4 and row 24 at 38 is the
+   骷髏兵's LV19 HP722 at MV4.  The map's other seventy records are not this
+   handler's: waves 2 to 5 are the guide's 第五回合, 第十回合, 第十三回合 and
+   第十五回合 reinforcements, wave 6 is 珊 and wave 7 the LV40 challenger the
+   guide has coming for 裘娜 in a chapter finished inside twenty-five turns.
+
+   THE CURSOR ENDS ON THE MAP'S OWN START TILE.  ICON23.DAT never moves map
+   unit 0 -- it has no PLACE_UNIT at all and its one WALK_UNITS walks unit 9 --
+   so unit 0 is still on MAP23.COD's player-slot-0 tile, (29, 14), when the
+   cursor call reads it.  This map gives its eleven slots eleven different
+   start tiles, so that tile is unit 0's alone.
+
+   Table slot 23. */
+extern void fdps_chapter_24_init(void);
+#pragma aux fdps_chapter_24_init "*" parm caller [];
 
 #endif

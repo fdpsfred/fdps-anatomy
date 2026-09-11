@@ -4,7 +4,8 @@
  * fdps_chapter_16_init at 00021290, fdps_chapter_17_init at 000212d0,
  * fdps_chapter_18_init at 00021310, fdps_chapter_19_init at 00021350,
  * fdps_chapter_20_init at 00021390, fdps_chapter_21_init at 000213d0,
- * fdps_chapter_22_init at 00021410 and fdps_chapter_23_init at 00021450.
+ * fdps_chapter_22_init at 00021410, fdps_chapter_23_init at 00021450 and
+ * fdps_chapter_24_init at 00021490.
  *
  * WHAT THE HANDLER IS.  fdps_chapter_16_init is four calls with no branch, no
  * loop and no store anywhere in it, so nothing about it is worth testing in
@@ -59,15 +60,16 @@
  * A container holding only the member under test would turn that mistake into
  * a member the interpreter cannot find, and a member it cannot find sends the
  * interpreter into fdps_wait_any_key, which spins for a keyboard interrupt
- * that never comes.  So the container holds ten members: ICON15.DAT,
- * ICON16.DAT, ICON17.DAT, ICON18.DAT, ICON19.DAT, ICON20.DAT, ICON21.DAT and
- * ICON22.DAT, the eight under test, each of which is also its neighbour's
- * neighbour, and ICON14.DAT and ICON23.DAT at the two ends, decoys that deploy
- * nobody, retire nobody, switch no map and mark unit 0 with a value of their
- * own.  A run that opened the wrong member is caught whichever it was: the two
- * decoys leave a full party on the map and a marked unit 0, and each of the
- * eight real members leaves a party state no other member produces and writes
- * its own marker value on a unit index no other member reaches.
+ * that never comes.  So the container holds eleven members: ICON15.DAT,
+ * ICON16.DAT, ICON17.DAT, ICON18.DAT, ICON19.DAT, ICON20.DAT, ICON21.DAT,
+ * ICON22.DAT and ICON23.DAT, the nine under test, each of which is also its
+ * neighbour's neighbour, and ICON14.DAT and ICON24.DAT at the two ends,
+ * decoys that deploy nobody, retire nobody, switch no map and mark unit 0 with
+ * a value of their own.  A run that opened the wrong member is caught
+ * whichever it was: the two decoys leave a full party on the map and a marked
+ * unit 0, and each of the nine real members leaves a party state no other
+ * member produces and writes its own marker value on a unit index no other
+ * member reaches.
  *
  * WHAT IS STAGED AND WHAT IS REAL.  The four data tables and the roster block
  * are staged here, because they are ticket 23 symbols the build links
@@ -130,7 +132,7 @@
 #define VFS_ENTRY_BYTES 26
 #define VFS_NAME_FIELD_BYTES 13
 #define VFS_SIGNATURE_BYTES 24
-#define FIXTURE_MEMBERS 10
+#define FIXTURE_MEMBERS 11
 
 /* The side code the player's own units carry and the one a map deployment
    carries, and the flag bit a RETIRE raises. */
@@ -335,12 +337,12 @@
 /* What the two end decoys write, and where.  Unit 0 exists whichever member
    is opened, so a decoy's mark lands somewhere every case can read.  Neither
    value is one a real member writes.  The names are the chapters whose scripts
-   they are: ICON14.DAT is chapter 15's and ICON23.DAT is chapter 24's, one
+   they are: ICON14.DAT is chapter 15's and ICON24.DAT is chapter 25's, one
    below the first handler under test and one above the last. */
 #define SCRIPT_DECOY_MARKER_UNIT 0
 #define SCRIPT_DECOY_MARKER_OPERAND 1
 #define SCRIPT_CH15_DECOY_VALUE 85
-#define SCRIPT_CH24_DECOY_VALUE 105
+#define SCRIPT_CH25_DECOY_VALUE 107
 
 /* Where the cut-scene leaves map unit 0.  MAP15.COD record 25 -- the first
    record past the map's twenty-five scripted ones, and so player slot 0's
@@ -1284,6 +1286,155 @@
 #define CH23_CURSOR_TILE_Y SCRIPT_CH23_WALKED_TILE_Y
 
 
+/* --- fdps_chapter_24_init @ 00021490 constants -------------------------- */
+
+/* Chapter 24 is chapter id 23, and this handler is slot 23 of the table at
+   00060074 -- the dword at 000600d0 is 00021490, and that data reference is
+   the function's only xref. */
+#define CHAPTER_24_ID 23
+
+/* The party when chapter 24 opens, BEFORE the handler's own add: the same
+   eleven chapters 20 to 23 were fought with. */
+#define PARTY_AT_CHAPTER_24 11
+
+/* Who the handler puts on the roster and what the add computes for her.
+   PUSH 0xa at 000214a1 is 珊 the 法師, and FRIAPRDA.DAT row 10 with
+   FRILEVUP.DAT row 10 is level 10 on 266 base HP and 232 base MP with 11 HP
+   and 12 MP a level (assets/characters.md), so fdps_roster_add_character's
+   hp_base + hp_min * (level - 1) comes to 365 HP and 340 MP.  The strategy
+   guide's 備註 for the chapter prints the same pair -- it says that finishing
+   before the turn-7 arrival event still leaves 珊 in the party at HP365 and
+   MP340 with 光之杖 and 賢者之袍 -- so the two are checked against each other
+   rather than either being assumed.  She lands at roster slot 11, behind the
+   eleven. */
+#define SHAN_CHAR_ID 10
+#define SHAN_ROSTER_SLOT 11
+#define SHAN_LEVEL 10
+#define SHAN_HP_BASE 266
+#define SHAN_MP_BASE 232
+#define SHAN_HP_MIN 11
+#define SHAN_MP_MIN 12
+#define SHAN_HP_MAX 365
+#define SHAN_MP_MAX 340
+
+/* MAP23.DAT's own header bytes, read back to prove chapter 24's map is the one
+   that loaded: eleven player slots at +1 and eighty scripted deployments at +2
+   (src/rsrc.c).  Both were staged at other numbers before the run.
+
+   Eleven player slots against a roster the add has just made twelve is what
+   keeps 珊 off this chapter's board: fdps_build_map_unit_array fills slot i
+   from roster slot i only for the slots the map asks for, and slot 11 is one
+   past the last of them (src/deploy.c).  It is also why the add's position
+   after the state reset changes nothing here -- eleven members fill eleven
+   slots whichever side of the reset the twelfth is appended on.
+
+   The MAP23_ prefix is the FILE's name and not chapter 23's: a map file is
+   numbered by the 0-based chapter id. */
+#define MAP23_PLAYER_SLOTS 11
+#define MAP23_CHAR_SPAWNS 80
+
+/* What the chapter state reset puts on the board and what the cut-scene adds.
+   MAP23.DAT tags exactly ONE of its eighty records wave 0 -- record 0, the
+   LV20 黑暗祭司 -- which the reset appends as map unit 11, and the shipped
+   ICON23.DAT's single DEPLOY_WAVE at script offset 261 asks for wave 1 with
+   the place operand 0, the nearest-free-tile search rather than the exact
+   anchor (src/deploy.c), which is nine more.  Both numbers are read off the
+   shipped files themselves, the script walked with the opcode ladder in
+   src/icon.c. */
+#define MAP23_WAVE_ZERO_UNITS 1
+#define SCRIPT_CH24_ENEMY_WAVE 1
+#define SCRIPT_CH24_WAVE_PLACE_SEARCH 0
+#define MAP23_SCRIPT_WAVE_ONE_UNITS 9
+#define CH24_UNITS_AFTER_SCRIPT \
+    (PARTY_AT_CHAPTER_24 + MAP23_WAVE_ZERO_UNITS \
+     + MAP23_SCRIPT_WAVE_ONE_UNITS)
+#define CH24_ENEMY_SIDE_UNITS \
+    (MAP23_WAVE_ZERO_UNITS + MAP23_SCRIPT_WAVE_ONE_UNITS)
+#define CH24_GUEST_SIDE_UNITS 0
+
+/* The census those ten come to, by character id and level, which is the
+   strategy guide's opening 敵方 list for the chapter to the number.  The
+   guide's own HP and MV figures settle which id is which: ENEMYDAT.DAT is
+   indexed by the character id less 60, holds HP as a per-level coefficient and
+   MV outright (assets/characters.md), so row 44 at 40 a level is the guide's
+   LV20 黑暗祭司 HP800 MV4, row 45 at 25 is its LV19 幽魂 HP475 MV4 and row 24
+   at 38 is its LV19 骷髏兵 HP722 MV4.  Rows 24 and 45 are the two the chapter
+   23 section above pins at a level lower.
+
+     character 104, level 20, one   -- LV20 黑暗祭司, the map's wave 0
+     character 105, level 19, four  -- LV19 幽魂, the script's wave 1
+     character 84,  level 19, five  -- LV19 骷髏兵, the script's wave 1 */
+#define MAP23_PRIEST_CHAR_ID 104
+#define MAP23_PRIEST_LEVEL 20
+#define MAP23_PRIEST_COUNT 1
+#define MAP23_GHOST_CHAR_ID 105
+#define MAP23_GHOST_COUNT 4
+#define MAP23_SKELETON_CHAR_ID 84
+#define MAP23_SKELETON_COUNT 5
+#define MAP23_ENEMY_LEVEL 19
+
+/* Where the 黑暗祭司 lands, and why it is worth pinning by index and not only
+   by count.  The reset's own opening deploy runs before the script, so the
+   map's single wave-0 record is map unit 11, the first behind the eleven
+   player slots, and the nine the script deploys sit behind it.  A run that
+   deployed the script's wave before the board was rebuilt would not put it
+   there. */
+#define CH24_PRIEST_MAP_UNIT PARTY_AT_CHAPTER_24
+
+/* Two groups the map holds that must NOT be on the board yet, and the ids that
+   catch them.  MAP23.DAT's wave 4 is the guide's 第十回合 reinforcement,
+   twenty-seven records of which fifteen are LV16 天空騎士 -- an id the opening
+   board carries none of, so any count of it at all is a wave this handler must
+   not have deployed.  Wave 7 is the guide's LV40 challenger, character 35, the
+   one that comes for 裘娜 in a chapter finished inside twenty-five turns. */
+#define MAP23_SKY_KNIGHT_CHAR_ID 97
+#define MAP23_SKY_KNIGHT_LEVEL 16
+#define MAP23_CHALLENGER_CHAR_ID 35
+#define MAP23_CHALLENGER_LEVEL 40
+
+/* Which player slot the cut-scene takes off the board.  ICON23.DAT's
+   RETIRE_UNIT at script offset 2 is its second opcode, ahead of everything
+   else it does, and names map unit 3; there is no REVIVE anywhere behind it in
+   its 277 bytes.  A player slot's map unit index is its roster slot and the
+   roster is in join order, so the member taken off is 法蓮娜 and the ten left
+   are the guide's 己方 line for the chapter, 法蓮娜以外的所有人. */
+#define SCRIPT_CH24_RETIRED_UNIT 3
+#define CH24_RETIRED_SLOTS 1
+#define CH24_LIVE_SLOTS (PARTY_AT_CHAPTER_24 - CH24_RETIRED_SLOTS)
+
+/* Which unit the fixture's SET_UNIT_TIMER marks, and with what.  Index 20 is
+   the last of the twenty-one, so it exists only if the member's DEPLOY_WAVE
+   went down; a run that opened either end decoy, or the ICON22.DAT neighbour
+   whose own two deploys are chapter 23's wave numbers, is caught on it.  The
+   value is one no other member of the container writes.  The slot is
+   status_timers[4], record offset 0x26, for the reason tests/chinit1.c gives:
+   it is the one status byte fdps_unit_select_status_icon does not read, so
+   marking it cannot send fdps_draw_map_unit through the null status-icon
+   sheet.  The opcode's operand is measured from status_timers[3]
+   (src/icon.c), which makes that operand 1.  The shipped member has no
+   SET_UNIT_TIMER of its own, so this marker is the fixture's alone. */
+#define SCRIPT_CH24_MARKER_UNIT (CH24_UNITS_AFTER_SCRIPT - 1)
+#define SCRIPT_CH24_MARKER_OPERAND 1
+#define SCRIPT_CH24_MARKER_SLOT 4
+#define SCRIPT_CH24_MARKER_VALUE 105
+
+/* Where the cursor ends, and why it is the map's tile and not the script's.
+   ICON23.DAT never moves map unit 0: it carries no PLACE_UNIT at all, and its
+   one WALK_UNITS, at script offset 18, walks map unit 9.  So unit 0 is still
+   on MAP23.COD's record 80 -- the first record past the map's eighty scripted
+   ones, and so player slot 0's start tile -- which is (29, 14).  This map
+   gives its eleven slots eleven DIFFERENT start tiles, (30, 13) and (30, 15)
+   being slot 1's and slot 2's, so the tile below is unit 0's alone and a
+   handler that named any other unit lands somewhere else.  A handler that
+   skipped the call leaves the zeroes fdps_chapter_state_reset writes over
+   both globals (src/chapter.c); the staging below is a third value again, so
+   a run in which the reset never happened is told apart from both. */
+#define CH24_CURSOR_TILE_X 29
+#define CH24_CURSOR_TILE_Y 14
+#define CH24_STAGED_CURSOR_X 336
+#define CH24_STAGED_CURSOR_Y 240
+
+
 static struct fdps_unit_record stage_roster[ROSTER_SLOTS];
 static struct fdps_character_base_record stage_char[TABLE_ROWS];
 static struct fdps_character_growth stage_growth[TABLE_ROWS];
@@ -1526,27 +1677,52 @@ static unsigned char fixture_icon22_dat[] = {
     0x00
 };
 
-/* ICON23.DAT: the member fdps_chapter_23_init must NOT open, one chapter late
-   -- it is chapter 24's own script, and it is the one a rewrite that read the
-   chapter number out of the handler's own name would reach for.  It deploys
-   nobody, retires nobody, switches no map and marks unit 0 with a value of its
-   own. */
+/* ICON23.DAT: the member fdps_chapter_24_init names, and the member
+   fdps_chapter_23_init must NOT open -- it is the one a rewrite that read the
+   chapter number out of chapter 23's handler name would reach for.  It is 277
+   bytes and every map, unit-state and deployment opcode it carries is here in
+   its order and with its operands: the RETIRE_UNIT at script offset 2 that
+   takes 法蓮娜 off the board, and the nearest-free-tile DEPLOY_WAVE at offset
+   261 that brings the chapter's opening enemy group in behind the single
+   wave-0 record the state reset put down.  The RETIRE really is first -- it is
+   the member's second opcode, behind only its SET_MUSIC.
+
+   There is no PLACE_UNIT here because the shipped member has none: it never
+   moves map unit 0, so the cursor call reads the tile MAP23.COD gave that
+   slot, and a fabricated place would be asserting something the real run does
+   not do.  The SET_UNIT_TIMER marker at the end is this file's own addition:
+   it writes a value of its own onto the last unit the wave appended.  The
+   shipped member's other forty-odd opcodes pose the cast, scroll the view
+   eight times, shake it eight times, set the music and draw four pages of
+   chapter text, and are left out for the reason the file comment gives. */
 static unsigned char fixture_icon23_dat[] = {
+    0x0b, SCRIPT_CH24_RETIRED_UNIT,
+    0x04, SCRIPT_CH24_ENEMY_WAVE, SCRIPT_CH24_WAVE_PLACE_SEARCH,
+    0x12, SCRIPT_CH24_MARKER_UNIT, SCRIPT_CH24_MARKER_OPERAND,
+    SCRIPT_CH24_MARKER_VALUE,
+    0x00
+};
+
+/* ICON24.DAT: the member fdps_chapter_24_init must NOT open, one chapter late
+   -- it is chapter 25's own script.  It deploys nobody, retires nobody,
+   switches no map and marks unit 0 with a value of its own. */
+static unsigned char fixture_icon24_dat[] = {
     0x12, SCRIPT_DECOY_MARKER_UNIT, SCRIPT_DECOY_MARKER_OPERAND,
-    SCRIPT_CH24_DECOY_VALUE,
+    SCRIPT_CH25_DECOY_VALUE,
     0x00
 };
 
 static char *fixture_names[FIXTURE_MEMBERS] = {
     "ICON14.DAT", "ICON15.DAT", "ICON16.DAT", "ICON17.DAT", "ICON18.DAT",
-    "ICON19.DAT", "ICON20.DAT", "ICON21.DAT", "ICON22.DAT", "ICON23.DAT"
+    "ICON19.DAT", "ICON20.DAT", "ICON21.DAT", "ICON22.DAT", "ICON23.DAT",
+    "ICON24.DAT"
 };
 
 static unsigned char *fixture_bytes[FIXTURE_MEMBERS] = {
     fixture_icon14_dat, fixture_icon15_dat, fixture_icon16_dat,
     fixture_icon17_dat, fixture_icon18_dat, fixture_icon19_dat,
     fixture_icon20_dat, fixture_icon21_dat, fixture_icon22_dat,
-    fixture_icon23_dat
+    fixture_icon23_dat, fixture_icon24_dat
 };
 
 static int fixture_lengths[FIXTURE_MEMBERS] = {
@@ -1554,7 +1730,8 @@ static int fixture_lengths[FIXTURE_MEMBERS] = {
     sizeof(fixture_icon16_dat), sizeof(fixture_icon17_dat),
     sizeof(fixture_icon18_dat), sizeof(fixture_icon19_dat),
     sizeof(fixture_icon20_dat), sizeof(fixture_icon21_dat),
-    sizeof(fixture_icon22_dat), sizeof(fixture_icon23_dat)
+    sizeof(fixture_icon22_dat), sizeof(fixture_icon23_dat),
+    sizeof(fixture_icon24_dat)
 };
 
 /* 0 not attempted, 1 the run happened and the snapshot below is good,
@@ -1845,6 +2022,8 @@ static void stage_globals(void)
                     MARIAN_MP_BASE, MARIAN_HP_MIN, MARIAN_MP_MIN);
     stage_character(LANCELOT_CHAR_ID, LANCELOT_LEVEL, LANCELOT_HP_BASE,
                     LANCELOT_MP_BASE, LANCELOT_HP_MIN, LANCELOT_MP_MIN);
+    stage_character(SHAN_CHAR_ID, SHAN_LEVEL, SHAN_HP_BASE,
+                    SHAN_MP_BASE, SHAN_HP_MIN, SHAN_MP_MIN);
 
     data_fdps_battle_character_base_table_ptr = (unsigned char *) stage_char;
     data_fdps_battle_character_growth_table_ptr =
@@ -4330,8 +4509,8 @@ static void nobody_joins_and_every_slot_is_filled_in_chapter_twenty_three(void)
    opcode, with no REVIVE behind it -- and the other ten player slots carry a
    clear flags byte.  Read through the join order that is the strategy guide's
    己方 line for the chapter, 蘭迪斯以外的所有人.  Neither of the two end
-   decoys retires anybody, so a run that opened one is caught here as well as
-   on the board. */
+   decoys retires anybody, and chapter 24's member retires map unit 3, so a run
+   that opened any of the three is caught here as well as on the board. */
 static void chapter_twenty_three_is_fought_without_randis(void)
 {
     int slot;
@@ -4393,9 +4572,10 @@ static void chapter_twenty_three_opens_with_the_guides_enemy_group(void)
    ICON22.DAT writes, and unit 42 exists at all only because both of the
    member's DEPLOY_WAVEs ran: the neighbour one early is chapter 22's own
    member, which deploys nobody and would leave a thirty-two-unit board with no
-   unit 42 to mark, and the neighbour one late is the ICON23.DAT decoy, which
-   deploys nobody either and marks unit 0.  Unit 0's own timers are read back
-   clear, which is where that decoy's marker would have landed.  Every other
+   unit 42 to mark, and the neighbour one late is chapter 24's own member, which
+   deploys one wave of nine and would leave a forty-one-unit board with no unit
+   42 either.  Unit 0's own timers are read back clear, which is where either
+   end decoy's marker would have landed.  Every other
    timer on the marked unit is clear too: neither the handler nor the shipped
    cut-scene writes a status on anybody, ICON22.DAT having no SET_UNIT_TIMER in
    its 626 bytes.
@@ -4444,6 +4624,392 @@ static void the_chapter_23_cursor_is_parked_on_unit_three(void)
     CHECK_EQ(seen23_cursor_x, CH23_CURSOR_TILE_X * CURSOR_TILE_STEP);
     CHECK_EQ(seen23_cursor_y, CH23_CURSOR_TILE_Y * CURSOR_TILE_STEP);
 }
+
+
+/* --- fdps_chapter_24_init @ 00021490 ------------------------------------ */
+
+/* WHAT THE HANDLER IS.  The four calls of the sections above with a fifth
+   among them, the roster add, and it is the one member of the family that puts
+   the add AFTER the state reset instead of in front of it.  Expected values
+   come from the assembly at 00021490 and from the shipped data:
+
+     CALL 0x00022750                   the chapter state is rebuilt
+     PUSH 0xa / CALL 0x00023bc0        character 10 joins the roster
+     MOV EAX,0x61918 / PUSH EAX /
+       CALL 0x00021650                 the cut-scene "Icon23.dat" is run
+     CALL 0x00020c60                   the title card is shown
+     PUSH 0x0 / CALL 0x0002da50        the cursor is parked on unit 0
+
+   WHAT THE ORDER OF THE FIRST TWO CAN AND CANNOT BE ASKED.  Nothing below
+   asserts which of the two ran first, because on this map nothing can:
+   MAP23.DAT asks for eleven player slots against a roster that already holds
+   eleven members, so fdps_build_map_unit_array fills every slot from a member
+   either way and 珊, at roster slot 11, is past the end of the array on both
+   orders (src/deploy.c).  What the cases do pin is the pair of outcomes that
+   makes the add worth having at all -- the roster count going to twelve with
+   her record in slot 11, and character 10 appearing nowhere in the unit array.
+
+   WHAT THE ADD BUILDS, AND WHY THE GUIDE CAN CHECK IT.  FRIAPRDA.DAT row 10
+   and FRILEVUP.DAT row 10 give LV10 on 266 base HP and 232 base MP at 11 HP
+   and 12 MP a level, so the record is 365 HP and 340 MP; the guide's 備註 for
+   the chapter prints exactly that pair for a run that finishes before her
+   turn-7 arrival event.  The unit the player watches arrive on turn 7 is
+   MAP23.DAT's own wave-6 record at level 15, which the same two rows put at
+   420 HP and 400 MP -- the guide's 己方 line.  Both are checked, the first in
+   the roster block and the second by its absence from the board. */
+
+/* 0 not attempted, 1 the run happened and the snapshot below is good,
+   2 unavailable and every case skips. */
+static int run24_state = 0;
+
+/* Everything the chapter 24 cases assert, captured the instant the handler
+   returned. */
+static int seen24_roster_count;
+static int seen24_joined_char_id;
+static int seen24_joined_level;
+static int seen24_joined_side;
+static int seen24_joined_hp_current;
+static int seen24_joined_hp_max;
+static int seen24_joined_mp_current;
+static int seen24_joined_mp_max;
+static int seen24_player_slots;
+static int seen24_char_spawns;
+static int seen24_unit_count;
+static int seen24_party_char_ids[PARTY_AT_CHAPTER_24];
+static int seen24_party_sides[PARTY_AT_CHAPTER_24];
+static int seen24_party_flags[PARTY_AT_CHAPTER_24];
+static int seen24_shan_map_units;
+static int seen24_priest_char_id;
+static int seen24_priest_level;
+static int seen24_priests;
+static int seen24_ghosts;
+static int seen24_skeletons;
+static int seen24_sky_knights;
+static int seen24_challengers;
+static int seen24_enemy_side_units;
+static int seen24_guest_side_units;
+static unsigned char seen24_marked_timers[STATUS_TIMER_COUNT];
+static unsigned char seen24_unit0_timers[STATUS_TIMER_COUNT];
+static int seen24_cursor_x;
+static int seen24_cursor_y;
+static int seen24_chapter_id;
+
+static void capture_chapter_24(void)
+{
+    struct fdps_unit_record *unit0;
+    struct fdps_unit_record *marked;
+    struct fdps_unit_record *priest;
+    struct fdps_unit_record *joined;
+    int unit_index;
+    int char_id;
+    int level;
+    int slot;
+
+    seen24_roster_count = data_fdps_roster_member_count;
+
+    joined = &stage_roster[SHAN_ROSTER_SLOT];
+    seen24_joined_char_id = (int) joined->char_id;
+    seen24_joined_level = (int) joined->level;
+    seen24_joined_side = (int) joined->side;
+    seen24_joined_hp_current = (int) joined->hp_current;
+    seen24_joined_hp_max = (int) joined->hp_max;
+    seen24_joined_mp_current = (int) joined->mp_current;
+    seen24_joined_mp_max = (int) joined->mp_max;
+
+    seen24_player_slots = data_fdps_map_player_slot_count;
+    seen24_char_spawns = data_fdps_map_char_spawn_count;
+    seen24_unit_count = data_fdps_map_unit_count;
+    seen24_cursor_x = data_fdps_map_cursor_world_x;
+    seen24_cursor_y = data_fdps_map_cursor_world_y;
+    seen24_chapter_id = data_fdps_chapter_current_chapter_id;
+
+    unit0 = (struct fdps_unit_record *) data_fdps_map_unit_array_ptr;
+
+    for (slot = 0; slot < PARTY_AT_CHAPTER_24; slot++) {
+        seen24_party_char_ids[slot] = (int) unit0[slot].char_id;
+        seen24_party_sides[slot] = (int) unit0[slot].side;
+        seen24_party_flags[slot] = (int) unit0[slot].flags;
+    }
+
+    seen24_shan_map_units = 0;
+    seen24_priests = 0;
+    seen24_ghosts = 0;
+    seen24_skeletons = 0;
+    seen24_sky_knights = 0;
+    seen24_challengers = 0;
+    seen24_enemy_side_units = 0;
+    seen24_guest_side_units = 0;
+    for (unit_index = PARTY_AT_CHAPTER_24;
+         unit_index < data_fdps_map_unit_count;
+         unit_index++) {
+        char_id = (int) unit0[unit_index].char_id;
+        level = (int) unit0[unit_index].level;
+        if (unit0[unit_index].side == ENEMY_SIDE) {
+            seen24_enemy_side_units++;
+        } else if (unit0[unit_index].side == GUEST_SIDE) {
+            seen24_guest_side_units++;
+        }
+        if (char_id == SHAN_CHAR_ID) {
+            seen24_shan_map_units++;
+        }
+        if (char_id == MAP23_PRIEST_CHAR_ID && level == MAP23_PRIEST_LEVEL) {
+            seen24_priests++;
+        } else if (char_id == MAP23_SKY_KNIGHT_CHAR_ID
+                   && level == MAP23_SKY_KNIGHT_LEVEL) {
+            seen24_sky_knights++;
+        } else if (char_id == MAP23_CHALLENGER_CHAR_ID
+                   && level == MAP23_CHALLENGER_LEVEL) {
+            seen24_challengers++;
+        } else if (level == MAP23_ENEMY_LEVEL) {
+            if (char_id == MAP23_GHOST_CHAR_ID) {
+                seen24_ghosts++;
+            } else if (char_id == MAP23_SKELETON_CHAR_ID) {
+                seen24_skeletons++;
+            }
+        }
+    }
+
+    for (slot = 0; slot < STATUS_TIMER_COUNT; slot++) {
+        seen24_marked_timers[slot] = 0;
+        seen24_unit0_timers[slot] = unit0->status_timers[slot];
+    }
+
+    /* Both reads are guarded by the unit count: a run that opened a member
+       leaving a shorter array would not have the index, and reading past it
+       would be reading memory the allocation does not cover.  The cases below
+       fail on the zero that is left instead. */
+    seen24_priest_char_id = 0;
+    seen24_priest_level = 0;
+    if (data_fdps_map_unit_count > CH24_PRIEST_MAP_UNIT) {
+        priest = unit0 + CH24_PRIEST_MAP_UNIT;
+        seen24_priest_char_id = (int) priest->char_id;
+        seen24_priest_level = (int) priest->level;
+    }
+
+    if (data_fdps_map_unit_count > SCRIPT_CH24_MARKER_UNIT) {
+        marked = unit0 + SCRIPT_CH24_MARKER_UNIT;
+        for (slot = 0; slot < STATUS_TIMER_COUNT; slot++) {
+            seen24_marked_timers[slot] = marked->status_timers[slot];
+        }
+    }
+}
+
+/* Runs the chapter 24 handler once, against the shipped containers and the
+   fixture cut-scene, and records what it left behind.  The eleven members the
+   party has when the chapter opens are the same eleven in the same join order
+   the chapter 23 run stages, so chapter_23_party is the list here too -- the
+   twelfth is the handler's own business and is deliberately not staged. */
+static void run_chapter_24_handler(void)
+{
+    int member;
+
+    if (run24_state != 0) {
+        return;
+    }
+    run24_state = 2;
+
+    if (!containers_present()) {
+        return;
+    }
+    if (!stage_fixture_archive()) {
+        return;
+    }
+
+    stage_globals();
+    data_fdps_map_cursor_world_x = CH24_STAGED_CURSOR_X;
+    data_fdps_map_cursor_world_y = CH24_STAGED_CURSOR_Y;
+    data_fdps_chapter_current_chapter_id = CHAPTER_24_ID;
+    data_fdps_cursor_highlight_sprite_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_entry(MISC_NAME, CURSOR_SHEET_MEMBER);
+
+    for (member = 0; member < PARTY_AT_CHAPTER_24; member++) {
+        fdps_roster_add_character(chapter_23_party[member]);
+    }
+
+    set_mode(MODE_320X200X256);
+    saved_timer = _dos_getvect(TIMER_VECTOR);
+    _dos_setvect(TIMER_VECTOR, tick_isr);
+
+    fdps_chapter_24_init();
+
+    _dos_setvect(TIMER_VECTOR, saved_timer);
+    set_mode(MODE_TEXT);
+
+    capture_chapter_24();
+    free_chapter_globals();
+    run24_state = 1;
+}
+
+/* 珊 joins the roster when the chapter opens, and the record the add built is
+   the one the strategy guide's 備註 prints for a chapter finished before her
+   arrival event fires: LV10, 365 HP both current and maximum, 340 MP both
+   ways, on the player side.  365 is FRIAPRDA.DAT's 266 base plus
+   FRILEVUP.DAT's 11 a level over nine levels and 340 is its 232 plus 12 a
+   level over the same nine, which are the sums fdps_roster_add_character
+   computes and the numbers the guide prints, so the two are checked against
+   each other rather than either being assumed.  The count going from eleven to
+   twelve is what says the add ran at all, and the two map header counts are
+   read back as well because they were staged at numbers no map carries. */
+static void shan_joins_the_roster_when_chapter_twenty_four_opens(void)
+{
+    run_chapter_24_handler();
+    CHECK_EQ(run24_state, 1);
+    if (run24_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen24_roster_count, PARTY_AT_CHAPTER_24 + 1);
+    CHECK_EQ(seen24_joined_char_id, SHAN_CHAR_ID);
+    CHECK_EQ(seen24_joined_level, SHAN_LEVEL);
+    CHECK_EQ(seen24_joined_side, PLAYER_SIDE);
+    CHECK_EQ(seen24_joined_hp_max, SHAN_HP_MAX);
+    CHECK_EQ(seen24_joined_hp_current, SHAN_HP_MAX);
+    CHECK_EQ(seen24_joined_mp_max, SHAN_MP_MAX);
+    CHECK_EQ(seen24_joined_mp_current, SHAN_MP_MAX);
+    CHECK_EQ(seen24_player_slots, MAP23_PLAYER_SLOTS);
+    CHECK_EQ(seen24_char_spawns, MAP23_CHAR_SPAWNS);
+}
+
+/* And she is NOT one of chapter 24's map units.  MAP23.DAT's eleven player
+   slots are filled from roster slots 0 to 10 -- the eleven the chapter opened
+   with, read back in join order and every one of them on the player side --
+   and roster slot 11 is one past the last slot the map asks for, so character
+   10 appears nowhere in the array at all.  The unit the player sees arrive is
+   MAP23.DAT's own wave-6 record and the turn-7 event deploys it, not this
+   handler.
+
+   The chapter is fought without 法蓮娜, and it is the cut-scene that takes her
+   off: map unit 3 carries the retired bit when the handler returns -- the
+   RETIRE ICON23.DAT runs as its second opcode, with no REVIVE behind it -- and
+   the other ten player slots carry a clear flags byte, which also says no slot
+   fell through to the zeroed, retired spare fdps_build_map_unit_array writes
+   for a player slot with no roster member behind it.  Read through the join
+   order that is the guide's 己方 line for the chapter, 法蓮娜以外的所有人. */
+static void shan_is_not_one_of_the_chapter_twenty_four_map_units(void)
+{
+    int slot;
+
+    run_chapter_24_handler();
+    CHECK_EQ(run24_state, 1);
+    if (run24_state != 1) {
+        return;
+    }
+
+    for (slot = 0; slot < PARTY_AT_CHAPTER_24; slot++) {
+        CHECK_EQ(seen24_party_char_ids[slot], chapter_23_party[slot]);
+        CHECK_EQ(seen24_party_sides[slot], PLAYER_SIDE);
+        if (slot != SCRIPT_CH24_RETIRED_UNIT) {
+            CHECK_EQ(seen24_party_flags[slot], 0);
+        }
+    }
+
+    CHECK_EQ(seen24_party_char_ids[SCRIPT_CH24_RETIRED_UNIT], FLARENA_CHAR_ID);
+    CHECK_EQ(seen24_party_flags[SCRIPT_CH24_RETIRED_UNIT], UNIT_FLAG_RETIRED);
+
+    CHECK_EQ(seen24_shan_map_units, 0);
+}
+
+/* What the reset and the cut-scene together leave on the map: the eleven
+   player slots, MAP23.DAT's single wave-0 黑暗祭司, and the nine the member's
+   nearest-free-tile DEPLOY_WAVE adds, for twenty-one.  The census behind those
+   ten is the strategy guide's opening 敵方 list for the chapter found by
+   character id and level -- one LV20 黑暗祭司, four LV19 幽魂 and five LV19
+   骷髏兵 -- and all ten are on the enemy side, with no guest at all.
+
+   The 黑暗祭司 is asserted at map unit 11 by id and level and not merely
+   counted, because that index is what says the reset's own deploy ran ahead of
+   the script's: it is the first unit behind the player slots, and a run whose
+   script deployed first would leave a 幽魂 or a 骷髏兵 there.
+
+   Two counts say none of the chapter's later waves has fired.  The 天空騎士
+   census is fifteen of MAP23.DAT's wave 4, the guide's 第十回合 reinforcement,
+   and the 天空騎士 id appears nowhere in the opening board; the LV40
+   challenger is wave 7, the one the guide has coming for 裘娜.  Neither is on
+   the board. */
+static void chapter_twenty_four_opens_with_the_guides_enemy_group(void)
+{
+    run_chapter_24_handler();
+    CHECK_EQ(run24_state, 1);
+    if (run24_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen24_unit_count, CH24_UNITS_AFTER_SCRIPT);
+    CHECK_EQ(seen24_enemy_side_units, CH24_ENEMY_SIDE_UNITS);
+    CHECK_EQ(seen24_guest_side_units, CH24_GUEST_SIDE_UNITS);
+
+    CHECK_EQ(seen24_priest_char_id, MAP23_PRIEST_CHAR_ID);
+    CHECK_EQ(seen24_priest_level, MAP23_PRIEST_LEVEL);
+    CHECK_EQ(seen24_priests, MAP23_PRIEST_COUNT);
+
+    CHECK_EQ(seen24_ghosts, MAP23_GHOST_COUNT);
+    CHECK_EQ(seen24_skeletons, MAP23_SKELETON_COUNT);
+
+    CHECK_EQ(seen24_sky_knights, 0);
+    CHECK_EQ(seen24_challengers, 0);
+}
+
+/* The cut-scene the handler names is Icon23.dat and not the neighbour on
+   either side of it.  The marker sits on unit 20 with the value only
+   ICON23.DAT writes, and unit 20 exists at all only because the member's
+   DEPLOY_WAVE ran: the neighbour one early is chapter 23's own member, whose
+   two deploys ask for this map's waves 2 and 1 and leave a board of a
+   different length with a different unit at 20, and the neighbour one late is
+   the ICON24.DAT decoy, which deploys nobody and would leave a twelve-unit
+   board with no unit 20 to mark.  Unit 0's own timers are read back clear,
+   which is where either end decoy's marker would have landed.  Every other
+   timer on the marked unit is clear too: neither the handler nor the shipped
+   cut-scene writes a status on anybody this chapter, ICON23.DAT having no
+   SET_UNIT_TIMER in its 277 bytes.
+
+   The chapter id still reading 23 is the other half of the same question.
+   ICON23.DAT carries no SWITCH_MAP, so nothing in the run touches the global
+   the dispatcher set, and both the script member and the title-card graphic
+   are chosen from it by the callees. */
+static void the_chapter_24_cutscene_is_icon23_dat(void)
+{
+    int slot;
+
+    run_chapter_24_handler();
+    CHECK_EQ(run24_state, 1);
+    if (run24_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen24_marked_timers[SCRIPT_CH24_MARKER_SLOT],
+             SCRIPT_CH24_MARKER_VALUE);
+    for (slot = 0; slot < STATUS_TIMER_COUNT; slot++) {
+        if (slot != SCRIPT_CH24_MARKER_SLOT) {
+            CHECK_EQ(seen24_marked_timers[slot], 0);
+        }
+        CHECK_EQ(seen24_unit0_timers[slot], 0);
+    }
+
+    CHECK_EQ(seen24_chapter_id, CHAPTER_24_ID);
+}
+
+/* The cursor ends on unit 0's tile, and on this chapter that is MAP23.COD's
+   own start tile for player slot 0, (29, 14): ICON23.DAT carries no PLACE_UNIT
+   and its one WALK_UNITS moves map unit 9, so nothing in the run moves unit 0
+   off the tile the board rebuild put it on.  What the case pins is therefore
+   the call and its operand rather than its position in the order -- MAP23.COD
+   gives all eleven slots different start tiles, so a handler that named any
+   other unit lands on a tile that is not this one.  A handler that made no
+   cursor call at all leaves the zeroes fdps_chapter_state_reset writes over
+   both globals, and the staged (14, 10) is a third value again, so a run in
+   which the reset never happened is told apart from both. */
+static void the_chapter_24_cursor_is_parked_on_unit_zero(void)
+{
+    run_chapter_24_handler();
+    CHECK_EQ(run24_state, 1);
+    if (run24_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen24_cursor_x, CH24_CURSOR_TILE_X * CURSOR_TILE_STEP);
+    CHECK_EQ(seen24_cursor_y, CH24_CURSOR_TILE_Y * CURSOR_TILE_STEP);
+}
+
 
 /* Takes the fixture container away again, so a later test file can stage its
    own.  A container this file did not create is somebody else's and is left
@@ -4501,5 +5067,10 @@ void run_chinit2_tests(void)
     RUN_TEST(chapter_twenty_three_opens_with_the_guides_enemy_group);
     RUN_TEST(the_chapter_23_cutscene_is_icon22_dat);
     RUN_TEST(the_chapter_23_cursor_is_parked_on_unit_three);
+    RUN_TEST(shan_joins_the_roster_when_chapter_twenty_four_opens);
+    RUN_TEST(shan_is_not_one_of_the_chapter_twenty_four_map_units);
+    RUN_TEST(chapter_twenty_four_opens_with_the_guides_enemy_group);
+    RUN_TEST(the_chapter_24_cutscene_is_icon23_dat);
+    RUN_TEST(the_chapter_24_cursor_is_parked_on_unit_zero);
     RUN_TEST(the_fixture_container_is_removed);
 }
