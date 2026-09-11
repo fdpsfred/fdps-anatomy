@@ -49,7 +49,7 @@
 00015860 | 0x326 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_render_ring_menu_frame(int * cmd_icons, int * cmd_disabled, int radius, int cursor_dir)
 00015b90 | 0x4f | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps,shared_helper | void __cdecl fdps_blit_command_sprite(void * dst, int pitch, int sprite_index)
 00015be0 | 0x112 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps,shared_helper | void __cdecl fdps_cycle_ui_palette(void)
-00015d00 | 0x3dd | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | int __cdecl fdps_battle_action_menu(void * unit, int menu_ctx, int * cmd_disabled, int flag)
+00015d00 | 0x3dd | __cdecl | USER_DEFINED | 0x0 | - | backbone,pool_fdps,subsys_battle | int __cdecl fdps_battle_action_menu(int unit_index, int * cmd_icons, int * cmd_disabled, int unit_has_moved)
 000160e0 | 0x50 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | int __cdecl fdps_menu_find_first_enabled_entry(int * cmd_disabled)
 00016130 | 0x7c | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_menu_animate_open(int * cmd_icons, int * cmd_disabled, int cursor_dir)
 000161b0 | 0x50 | __cdecl | USER_DEFINED | 0x0 | - | pool_fdps | void __cdecl fdps_menu_animate_close(int * cmd_icons, int * cmd_disabled, int cursor_dir)

@@ -108,4 +108,69 @@ extern int fdps_battle_system_submenu(void);
 extern void fdps_battle_search_cell_at_cursor(int unit_index);
 #pragma aux fdps_battle_search_cell_at_cursor "*" parm caller [];
 
+/* 00015d00.  Runs one unit's action menu: works out which of the four commands
+   it may use this turn, opens the ring on them, and carries out the one the
+   player chooses -- looping back and reopening the ring whenever the chosen
+   command came back without spending the turn.
+
+   unit_index is the acting unit's index in the battle unit array.  cmd_icons
+   and cmd_disabled are the ring's two four-int arrays in slot order up, left,
+   right, down (menu.h); the slots here are 0 attack, 1 spell, 2 item and 3 the
+   fall-through, which searches the cell under the cursor.  unit_has_moved is
+   the caller's answer to "did this unit walk before opening the menu": its
+   only effect is that a unit that did NOT move rests when the fall-through
+   command runs.
+
+   It answers 1 when a command was carried out and the unit's turn is over, and
+   -1 when the player backed out of the ring with nothing done -- except that a
+   hand-over inside the item command turns a later back-out into 1 as well, see
+   below.
+
+   cmd_disabled IS AN IN AND OUT ARRAY AND ONLY SLOT 0 IS REBUILT.  Every pass
+   of the loop writes cmd_disabled[0] = 0 and then probes the attack command
+   afresh, while slots 1, 2 and 3 are only ever SET to 1 and never cleared.  So
+   the array arrives holding whatever the caller put in it -- fdps_battle_unit_turn
+   copies a template once, before its own loop -- and a command greyed out on
+   one pass stays greyed for every later pass and for every later call of this
+   function in the same turn.  Writing the obvious "clear all four at the top of
+   the pass" puts back commands the original leaves greyed.
+
+   WHICH PROBE GREYS WHICH SLOT.  Attack is greyed when the unit has no weapon
+   equipped, or when nothing its weapon can reach is standing in range; item is
+   greyed when the bag is empty; spell is greyed when the unit knows no spell,
+   and again, by a second and independent test, when its 封魔咒術 timer
+   status_timers[5] is running (unitstat.h).  The fall-through slot is never
+   probed at all: nothing here can grey it out.
+
+   THE FALL-THROUGH ARM IS THE ELSE OF THREE EQUALITY TESTS, NOT A TEST FOR
+   SLOT 3.  Any cursor value that is not 0, 1 or 2 runs it, and -1 is one of
+   them: a call in which all four entries are greyed opens the ring on -1
+   (menu.h leaves the cursor wherever it starts) and a confirm there rests,
+   searches and ends the turn.
+
+   HOW A COMMAND ENDS THE CALL.  Attack ends it once a target has been
+   confirmed; spell and item end it on any answer but -1; the fall-through arm
+   always ends it.  Every other answer falls out of the bottom of the pass and
+   the ring is opened again, with the probes re-run -- which is why cancelling
+   the attack's target cursor puts the player back on the menu rather than
+   ending the turn.  The one thing carried across those passes is the item
+   command's 2, a hand-over: it makes the eventual back-out answer 1 instead of
+   -1, so the unit's turn is spent even though the ring was cancelled
+   (item.h).
+
+   THE CURSOR IS PUT BACK WHERE IT STARTED ONLY ON A CANCELLED ATTACK.  The
+   attack arm saves data_fdps_map_cursor_world_x / _y before it hands the
+   cursor to the player and walks it back on a cancel; no other arm saves or
+   restores anything, so a command that moved the cursor and then came back
+   leaves it moved.
+
+   IT IS MODAL AND IT DRAWS THROUGHOUT: the ring's own sweeps and cursor loop,
+   a whole view repaint after every pass of the ring, and then whichever
+   command was chosen.  data_fdps_battle_pending_xp_credit is zeroed at the top
+   of every pass and again on the item command's successful arm, and the attack
+   arm scales what the exchange banked in it by 15/10 before paying it out. */
+extern int fdps_battle_action_menu(int unit_index, int *cmd_icons,
+                                   int *cmd_disabled, int unit_has_moved);
+#pragma aux fdps_battle_action_menu "*" parm caller [];
+
 #endif

@@ -2421,5 +2421,33 @@
       "same_as": "emit#0",
       "status": "open"
     }
+  ],
+  "00015d00": [
+    {
+      "from": "emit",
+      "what": "The item command's answer of 2 is emitted but not exercised. fdps_battle_item_menu answers 2 when an item changed hands (item.h); this function then lifts the cancel accumulator at [EBP-0x8] from -1 to 1 at 00016077, so that a LATER back-out of the ring answers 1 and the unit's turn is spent even though no command was carried out on that pass. That is the only value that survives a pass of the loop, and no unit test here reaches it: getting a 2 out of the item command means driving its hand-over arm -- a second ring, a bag list and a neighbour of the player's side standing next to the cursor -- from inside a case whose subject is this function.",
+      "needs": "A playtest: in a battle, open a unit's action menu, hand an item to a neighbour, back out of the item menu and then cancel the action ring, and confirm the unit's turn is spent (it cannot act again) rather than the ring simply closing. Alternatively a test that stages fdps_battle_item_menu's hand-over arm end to end, which is tests/item.c's fixture rather than this file's.",
+      "status": "open"
+    },
+    {
+      "from": "emit",
+      "what": "The attack arm's experience scaling is emitted but not exercised. data_fdps_battle_pending_xp_credit is multiplied by 15 and divided by 10 at 00015fc3, between the death animation and fdps_unit_award_exp_and_level_up, so an attack kill pays 1.5 times what the exchange banked, rounded toward zero. Nothing banks anything into that global without a real attack exchange and a real kill, so no assertion in this file can see the scale; the arithmetic itself is signed and truncating, which the object file confirms (imul edx,...,0fH / mov ebx,0aH / sar edx,1fH / idiv ebx).",
+      "needs": "A playtest that records the experience a unit gains from a killing blow against the experience the same exchange banks, or a test built on tests/combat.c's fixture for fdps_combat_play_attack_exchange, which is what makes the global non-zero.",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Confirmed for myself that nothing reachable from here settles it: the value survives a pass only through [EBP-0x8], written 1 at 00016077 and read at 00015ec0, and producing a 2 out of fdps_battle_item_menu@000252b0 needs its hand-over arm driven end to end, which is tests/item.c's fixture and not this file's. I add nothing to the emitter's description.",
+      "needs": "As emit#0.",
+      "same_as": "emit#0",
+      "status": "open"
+    },
+    {
+      "from": "review",
+      "what": "Same conclusion, reached separately. I verified the arithmetic itself from the built object (imul edx,data_fdps_battle_pending_xp_credit,0fH then sar edx,1fH / idiv ebx in BTLMENU.OBJ), so what is unexercised is only the end-to-end figure, not the rounding. Nothing in this file can make the global non-zero without a real attack exchange.",
+      "needs": "As emit#1.",
+      "same_as": "emit#1",
+      "status": "open"
+    }
   ]
 }

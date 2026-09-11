@@ -1,8 +1,9 @@
 /* tests/btlmenu.c -- cover for src/btlmenu.c.
  *
- * Two subjects: fdps_battle_system_submenu at 00014ea0 and
- * fdps_battle_search_cell_at_cursor at 000184f0.  The notes below belong to
- * the first; the second has its own block in front of its cases.
+ * Three subjects: fdps_battle_system_submenu at 00014ea0,
+ * fdps_battle_search_cell_at_cursor at 000184f0 and fdps_battle_action_menu
+ * at 00015d00.  The notes below belong to the first; the other two have their
+ * own block in front of their cases.
  *
  * Expected values come from the assembly, never from the emitted C: the four
  * command icon ids of the template at 00014700 and the all-zero descriptor at
@@ -1399,6 +1400,523 @@ static void a_scripted_cell_dispatches_on_the_payload(void)
     search_unstage();
 }
 
+/* ---------------------------------------------------------------------- *
+ * 00015d00 fdps_battle_action_menu
+ *
+ * The third subject of this file, and the one the other two are opened from.
+ * It is a modal driver like the system submenu above, so the cases below are
+ * run through the same fixture: the adapter in mode 13h, the four sheets and
+ * the text block staged, and the timer interrupt both advancing the clock and
+ * playing one scancode at a time into the ring.  What is new is that this
+ * function writes an array the caller owns, so most of what a case asserts is
+ * read back out of that array after the call rather than off the screen.
+ *
+ * Expected values come from the assembly at 00015d00: the MOV dword ptr
+ * [EAX],0x0 at 00015d16 and MOV dword ptr [0x00069cec],0x0 at 00015d1c that
+ * open every pass; the CMP dword ptr [EBP-0x38],-0x1 at 00015d37 that greys
+ * the attack entry when no weapon is equipped and the TEST EAX,EAX at 00015dc3
+ * that greys it when the collector counted nothing; the CALL 0x00010b20 at
+ * 00015dd0, which is inside the equipped-weapon arm and not after it; the TEST
+ * EAX,EAX at 00015de1 and the MOV dword ptr [EAX+0x8],0x1 at 00015de8 for the
+ * item entry; the same pair at 00015dfd / 00015e04 and the independent CMP
+ * byte ptr [EAX+0x27],0x0 at 00015e1d for the two tests that grey the spell
+ * entry; the four-slot scan at 00015e40 with its MOV dword ptr [EBP-0x60],
+ * 0xffffffff at 00015e69; the CMP dword ptr [EBP-0x3c],-0x1 at 00015eba that
+ * returns the accumulator; the dispatch chain CMP [EBP-0x10] against 0, 1 and
+ * 2 at 00015ecb, 0001601d and 0001605c with no fourth test; and the CMP dword
+ * ptr [EBP+0x20],0x0 at 0001609b that is the whole of what the fourth argument
+ * does.
+ *
+ * WHAT IS NOT ASSERTED, AND WHY.
+ *
+ * Three of the four arms are not driven: attack, spell and item all hand the
+ * player a whole second modal machine -- the target cursor and the attack
+ * exchange, the spell window, the item ring -- and each of those is the
+ * subject of its own test file with its own fixture.  What this file covers of
+ * them is the half that belongs to this function: whether the entry is offered
+ * at all, which is what the probe cases below read out of the descriptor.
+ *
+ * So the item command's 2 is not covered either.  It is the one value that
+ * survives a pass -- it lifts the accumulator at [EBP-0x8] so that a later
+ * cancel answers 1 instead of -1 -- and reaching it means driving the item
+ * ring's hand-over arm from in here.  It is recorded as a playtest contract in
+ * the emit issues instead.
+ *
+ * The ring's own picture is not read back off the screen, for the reason the
+ * system submenu's block above gives: every frame of it is overwritten by the
+ * CALL 0x0002beb0 at 00015eb5 before this function returns.
+ */
+
+/* The acting unit, the enemy the two attack-probe cases place, and the tile
+   the cursor stands on -- the same (1, 1) the search cases use, so the cell
+   under it is the plain one that the fall-through arm's search refuses. */
+#define ACTION_UNIT 0
+#define ACTION_ENEMY 1
+
+/* The unit array index the acting unit's record is at, as tiles. */
+#define ACTION_UNIT_TILE_X SEARCH_TILE_X
+#define ACTION_UNIT_TILE_Y SEARCH_TILE_Y
+
+/* The sides the two units are on.  The acting unit is on the player's side so
+   that the enemy sweep, which keeps side 0 alone, does not count it as a
+   target of its own attack. */
+#define ACTION_SIDE_ENEMY 0
+#define ACTION_SIDE_PLAYER 2
+
+/* The movement grid the attack probe sweeps: the same extents as the fixture
+   map, a four-byte header of two 16-bit tile counts and then one two-byte cell
+   per tile with the marker second (aitarget.h, movegrid.h). */
+#define ACTION_GRID_W SEARCH_MAP_W
+#define ACTION_GRID_H SEARCH_MAP_H
+#define ACTION_GRID_UNREACHED 0xff
+
+/* A marker value the game never leaves behind, so a grid still holding it
+   after a call is one that fdps_map_grid_reset did not run over. */
+#define ACTION_GRID_SENTINEL 0x33
+
+/* The equipped weapon.  Only three bytes of an ITEM.DAT record matter here:
+   the type at +0 has to be a weapon type for fdps_unit_find_equipped_slot to
+   accept the slot (unititem.h), and the two reach bytes at +0x0b and +0x0c are
+   what this function copies into the collector's min_dist and range_code.
+   0x11 is a straight-line cross with arms of one tile and a range_code of 0x10
+   or more ignores min_dist entirely (aitarget.h), which is what keeps this
+   fixture off the flood fill and off the class table. */
+#define ACTION_ITEM_STRIDE 0x17
+#define ACTION_ITEM_TYPE_AT 0x00
+#define ACTION_ITEM_RANGE_MIN_AT 0x0b
+#define ACTION_ITEM_RANGE_MAX_AT 0x0c
+#define ACTION_WEAPON_ID 1
+#define ACTION_WEAPON_TYPE 1
+#define ACTION_WEAPON_RANGE_MIN 0
+#define ACTION_WEAPON_RANGE_CODE 0x11
+#define ACTION_ITEM_TABLE_BYTES (ACTION_ITEM_STRIDE * 4)
+
+/* One inventory entry: flag byte then id byte, 0x80 empty and 0x40 equipped
+   (unititem.h).  An entry that is neither is an ordinary carried item, which
+   is what keeps the bag non-empty without equipping anything. */
+#define ACTION_ENTRY_EQUIPPED 0x40
+#define ACTION_ENTRY_CARRIED 0x00
+
+/* The spell bitmap byte that makes fdps_unit_collect_known_spells answer 1:
+   any one bit set is one known spell (unitstat.h). */
+#define ACTION_ONE_SPELL 0x01
+
+/* status_timers[5], record offset 0x27 -- the 封魔咒術 timer the spell entry's
+   second test reads -- and a number of turns for it to be running. */
+#define ACTION_SEAL_TIMER_SLOT 5
+#define ACTION_SEAL_TURNS 3
+
+/* The unit the rest cases heal: below its maximum and free of both timers, so
+   fdps_unit_rest accepts it and gives back a fifth of the maximum
+   (unitatk.h). */
+#define ACTION_HP_BEFORE 10
+#define ACTION_HP_MAX 20
+#define ACTION_HP_AFTER_REST (ACTION_HP_BEFORE + ACTION_HP_MAX / 5)
+
+/* Where the view window is put for the rest cases.  fdps_blit_unit_sprite
+   draws the rest flash only when the sprite's page row is strictly inside the
+   page -- sprite_y = pos_y * 0x18 - origin_y + 0x12 and the test is
+   sprite_y > 0 (sprite.c) -- so an origin that puts that row on exactly 0
+   leaves the flash undrawn and the case needs no sprite cache staged.  Nothing
+   else in these cases reads the origin: the map has no scene layers and both
+   units draw nothing. */
+#define ACTION_REST_VIEW_ORIGIN_Y (ACTION_UNIT_TILE_Y * SEARCH_TILE_SIZE + 0x12)
+
+/* What the fourth argument means to the caller and to the branch it drives. */
+#define ACTION_UNIT_STAYED_PUT 0
+#define ACTION_UNIT_MOVED 1
+
+/* What this function answers with. */
+#define ACTION_MENU_CANCELLED (-1)
+#define ACTION_MENU_DONE 1
+
+/* The descriptor value that greys an entry out.  The ring reads any non-zero
+   as greyed (menu.h) and 1 is what this function writes -- MOV dword ptr
+   [EAX],0x1 at 00015d40 and the three stores like it. */
+#define ACTION_ENTRY_GREYED 1
+
+/* The descriptor slots, in the ring's order. */
+#define ACTION_SLOT_ATTACK 0
+#define ACTION_SLOT_SPELL 1
+#define ACTION_SLOT_ITEM 2
+#define ACTION_SLOT_FALLTHROUGH 3
+
+/* A pending experience haul no arm of this function leaves behind, so a global
+   still holding it would be one the top of the pass never cleared. */
+#define ACTION_XP_SENTINEL 777
+
+static int action_icons[4];
+static int action_disabled[4];
+static unsigned char action_item_table[ACTION_ITEM_TABLE_BYTES];
+
+/* The grid the attack probe sweeps, laid over the map the search fixture
+   builds.  Every marker starts at the 0xff the game hands this function
+   (aitarget.h) unless a case asks for the sentinel. */
+static void action_build_grid(int marker)
+{
+    int cell;
+
+    memset(search_grid, 0, sizeof search_grid);
+    *(short *) search_grid = (short) ACTION_GRID_W;
+    *(short *) (search_grid + 2) = (short) ACTION_GRID_H;
+    for (cell = 0; cell < ACTION_GRID_W * ACTION_GRID_H; cell++) {
+        search_grid[4 + cell * 2 + 1] = (unsigned char) marker;
+    }
+}
+
+static int action_grid_marker(int tile_x, int tile_y)
+{
+    return (int) search_grid[4 + (tile_y * ACTION_GRID_W + tile_x) * 2 + 1];
+}
+
+/* Everything one call reads that is not already staged by the search fixture:
+   the acting unit on the cursor's own tile and on the player's side, an empty
+   descriptor, an item table with one weapon in it, and a grid in the state the
+   caller hands over. */
+static void action_stage(void)
+{
+    int slot;
+
+    search_stage(SEARCH_TILE_PLAIN, SEARCH_KIND_MONEY, 0);
+
+    menu_units[ACTION_UNIT].pos_x = (unsigned char) ACTION_UNIT_TILE_X;
+    menu_units[ACTION_UNIT].pos_y = (unsigned char) ACTION_UNIT_TILE_Y;
+    menu_units[ACTION_UNIT].side = (unsigned char) ACTION_SIDE_PLAYER;
+    menu_units[ACTION_UNIT].hp_current = (short) ACTION_HP_BEFORE;
+    menu_units[ACTION_UNIT].hp_max = (short) ACTION_HP_MAX;
+
+    for (slot = 0; slot < 4; slot++) {
+        action_icons[slot] = 0;
+        action_disabled[slot] = 0;
+    }
+
+    memset(action_item_table, 0, sizeof action_item_table);
+    action_item_table[ACTION_WEAPON_ID * ACTION_ITEM_STRIDE
+                      + ACTION_ITEM_TYPE_AT] = (unsigned char) ACTION_WEAPON_TYPE;
+    action_item_table[ACTION_WEAPON_ID * ACTION_ITEM_STRIDE
+                      + ACTION_ITEM_RANGE_MIN_AT] =
+        (unsigned char) ACTION_WEAPON_RANGE_MIN;
+    action_item_table[ACTION_WEAPON_ID * ACTION_ITEM_STRIDE
+                      + ACTION_ITEM_RANGE_MAX_AT] =
+        (unsigned char) ACTION_WEAPON_RANGE_CODE;
+    data_fdps_item_effect_table_ptr = action_item_table;
+
+    action_build_grid(ACTION_GRID_UNREACHED);
+    data_fdps_battle_pending_xp_credit = ACTION_XP_SENTINEL;
+}
+
+static void action_unstage(void)
+{
+    search_unstage();
+    data_fdps_item_effect_table_ptr = NULL;
+    data_fdps_battle_pending_xp_credit = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+}
+
+/* Puts one weapon in the acting unit's hands. */
+static void action_equip_weapon(void)
+{
+    menu_units[ACTION_UNIT].inventory_slots[0] =
+        (unsigned char) ACTION_ENTRY_EQUIPPED;
+    menu_units[ACTION_UNIT].inventory_slots[1] =
+        (unsigned char) ACTION_WEAPON_ID;
+}
+
+/* Puts one enemy on the map, on the tile named, still in the battle. */
+static void action_place_enemy(int tile_x, int tile_y)
+{
+    menu_stage_unit(ACTION_ENEMY, 0);
+    menu_units[ACTION_ENEMY].pos_x = (unsigned char) tile_x;
+    menu_units[ACTION_ENEMY].pos_y = (unsigned char) tile_y;
+    menu_units[ACTION_ENEMY].side = (unsigned char) ACTION_SIDE_ENEMY;
+    data_fdps_map_unit_count = ACTION_ENEMY + 1;
+}
+
+/* One whole run of the action menu. */
+static int action_run(int unit_index, int unit_has_moved, unsigned char *codes,
+                      int count)
+{
+    int answer;
+
+    menu_load_script(codes, count);
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_view_frame_last_tick = 0;
+
+    menu_set_mode(MENU_MODE_320X200X256);
+    memset((void *) MENU_VGA_BASE, 0, (size_t) MENU_SCREEN_BYTES);
+
+    menu_saved_timer = _dos_getvect(MENU_TIMER_VECTOR);
+    _dos_setvect(MENU_TIMER_VECTOR, menu_timer_isr);
+    answer = fdps_battle_action_menu(unit_index, action_icons, action_disabled,
+                                     unit_has_moved);
+    _dos_setvect(MENU_TIMER_VECTOR, menu_saved_timer);
+
+    menu_set_mode(MENU_MODE_TEXT);
+    return answer;
+}
+
+/* ---------------------------------------------------------------------- */
+
+/* A unit with nothing: no weapon equipped, an empty bag and no spell known.
+   All three probes fire, the fall-through entry is the only one left, and the
+   cancel walks straight back out with the -1 the accumulator was initialised
+   to at 00015d0c.  The turn is not spent -- no arm ran, so nothing ORed 0x80
+   into the flags byte -- and the experience global is the 0 the top of the
+   pass wrote over the sentinel.
+
+   The grid is the other half of this case.  fdps_map_grid_reset is INSIDE the
+   equipped-weapon arm, so a unit with no weapon leaves the markers exactly as
+   it found them; a body that ran the reset after the arm rather than inside it
+   would have put every one of them back to 0xff. */
+static void a_unit_with_nothing_greys_three_entries_and_cancels(void)
+{
+    unsigned char codes[2];
+
+    action_stage();
+    action_build_grid(ACTION_GRID_SENTINEL);
+    codes[0] = KEY_IGNORED;
+    codes[1] = KEY_ESC;
+
+    CHECK_EQ(action_run(ACTION_UNIT, ACTION_UNIT_MOVED, codes, 2),
+             ACTION_MENU_CANCELLED);
+    CHECK_EQ(action_disabled[ACTION_SLOT_ATTACK], ACTION_ENTRY_GREYED);
+    CHECK_EQ(action_disabled[ACTION_SLOT_SPELL], ACTION_ENTRY_GREYED);
+    CHECK_EQ(action_disabled[ACTION_SLOT_ITEM], ACTION_ENTRY_GREYED);
+    CHECK_EQ(action_disabled[ACTION_SLOT_FALLTHROUGH], 0);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, 0);
+    CHECK_EQ((int) (menu_units[ACTION_UNIT].flags & UNIT_FLAG_ACTED), 0);
+    CHECK_EQ(action_grid_marker(ACTION_UNIT_TILE_X, ACTION_UNIT_TILE_Y),
+             ACTION_GRID_SENTINEL);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    action_unstage();
+}
+
+/* One bit in the spell bitmap is one known spell, so the count is not zero and
+   the entry is left selectable.  The bag is still empty, which is the control:
+   the two probes are independent and only the one whose subject is missing
+   greys its entry. */
+static void a_known_spell_keeps_the_spell_entry(void)
+{
+    unsigned char codes[2];
+
+    action_stage();
+    menu_units[ACTION_UNIT].spells_known_bitmap[0] =
+        (unsigned char) ACTION_ONE_SPELL;
+    codes[0] = KEY_IGNORED;
+    codes[1] = KEY_ESC;
+
+    CHECK_EQ(action_run(ACTION_UNIT, ACTION_UNIT_MOVED, codes, 2),
+             ACTION_MENU_CANCELLED);
+    CHECK_EQ(action_disabled[ACTION_SLOT_SPELL], 0);
+    CHECK_EQ(action_disabled[ACTION_SLOT_ITEM], ACTION_ENTRY_GREYED);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    action_unstage();
+}
+
+/* The same unit with its 封魔咒術 timer running.  The second test at 00015e1d
+   is a plain zero test on record byte 0x27 and it greys the entry the first
+   test had just left alone, which is the whole reason there are two of them. */
+static void a_running_seal_timer_greys_the_spell_entry(void)
+{
+    unsigned char codes[2];
+
+    action_stage();
+    menu_units[ACTION_UNIT].spells_known_bitmap[0] =
+        (unsigned char) ACTION_ONE_SPELL;
+    menu_units[ACTION_UNIT].status_timers[ACTION_SEAL_TIMER_SLOT] =
+        (unsigned char) ACTION_SEAL_TURNS;
+    codes[0] = KEY_IGNORED;
+    codes[1] = KEY_ESC;
+
+    CHECK_EQ(action_run(ACTION_UNIT, ACTION_UNIT_MOVED, codes, 2),
+             ACTION_MENU_CANCELLED);
+    CHECK_EQ(action_disabled[ACTION_SLOT_SPELL], ACTION_ENTRY_GREYED);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    action_unstage();
+}
+
+/* One carried item is a bag that is not empty.  The entry it leaves alone is
+   the item entry and not the attack entry: the item is not equipped, so the
+   weapon probe still answers -1. */
+static void a_carried_item_keeps_the_item_entry(void)
+{
+    unsigned char codes[2];
+
+    action_stage();
+    menu_units[ACTION_UNIT].inventory_slots[0] =
+        (unsigned char) ACTION_ENTRY_CARRIED;
+    menu_units[ACTION_UNIT].inventory_slots[1] =
+        (unsigned char) ACTION_WEAPON_ID;
+    codes[0] = KEY_IGNORED;
+    codes[1] = KEY_ESC;
+
+    CHECK_EQ(action_run(ACTION_UNIT, ACTION_UNIT_MOVED, codes, 2),
+             ACTION_MENU_CANCELLED);
+    CHECK_EQ(action_disabled[ACTION_SLOT_ITEM], 0);
+    CHECK_EQ(action_disabled[ACTION_SLOT_ATTACK], ACTION_ENTRY_GREYED);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    action_unstage();
+}
+
+/* An equipped weapon and an enemy one tile away along the cursor's own row.
+   Both halves of the attack probe pass -- a slot came back from the equipment
+   walk and the collector counted one unit -- so the entry is left selectable,
+   which is the one path on which the MOV dword ptr [EAX],0x0 at 00015d16
+   survives to the end of the pass.
+
+   The grid is asserted too, from the other side of the case above: the arm
+   that ran the collector runs fdps_map_grid_reset after it, so the marking the
+   sweep left behind is back at the 0xff sentinel by the time this returns. */
+static void an_enemy_in_reach_keeps_the_attack_entry(void)
+{
+    unsigned char codes[2];
+
+    action_stage();
+    action_equip_weapon();
+    action_place_enemy(ACTION_UNIT_TILE_X + 1, ACTION_UNIT_TILE_Y);
+    codes[0] = KEY_IGNORED;
+    codes[1] = KEY_ESC;
+
+    CHECK_EQ(action_run(ACTION_UNIT, ACTION_UNIT_MOVED, codes, 2),
+             ACTION_MENU_CANCELLED);
+    CHECK_EQ(action_disabled[ACTION_SLOT_ATTACK], 0);
+    CHECK_EQ(action_grid_marker(ACTION_UNIT_TILE_X, ACTION_UNIT_TILE_Y),
+             ACTION_GRID_UNREACHED);
+    CHECK_EQ(action_grid_marker(ACTION_UNIT_TILE_X + 1, ACTION_UNIT_TILE_Y),
+             ACTION_GRID_UNREACHED);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    action_unstage();
+}
+
+/* The same weapon with the enemy two tiles off the cross the 0x11 reach marks.
+   The equipment walk still answers a slot, so this case separates the two
+   halves of the probe: it is the collector's zero that greys the entry. */
+static void an_enemy_out_of_reach_greys_the_attack_entry(void)
+{
+    unsigned char codes[2];
+
+    action_stage();
+    action_equip_weapon();
+    action_place_enemy(ACTION_UNIT_TILE_X + 2, ACTION_UNIT_TILE_Y - 1);
+    codes[0] = KEY_IGNORED;
+    codes[1] = KEY_ESC;
+
+    CHECK_EQ(action_run(ACTION_UNIT, ACTION_UNIT_MOVED, codes, 2),
+             ACTION_MENU_CANCELLED);
+    CHECK_EQ(action_disabled[ACTION_SLOT_ATTACK], ACTION_ENTRY_GREYED);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    action_unstage();
+}
+
+/* A descriptor that arrives with everything greyed out is not rebuilt.  The
+   unit staged here knows a spell and carries an item, so both of those probes
+   would leave their entries selectable if the pass cleared them first -- and
+   they stay greyed, because the only slot written to zero at the top of a pass
+   is the attack slot and the other three are only ever set.
+
+   The attack slot ends greyed as well, by its own probe: this unit has no
+   weapon.  What the case says about slot 0 is therefore only that clearing it
+   does not put back what the probe refuses. */
+static void the_greyed_entries_are_never_put_back(void)
+{
+    unsigned char codes[2];
+
+    action_stage();
+    menu_units[ACTION_UNIT].spells_known_bitmap[0] =
+        (unsigned char) ACTION_ONE_SPELL;
+    menu_units[ACTION_UNIT].inventory_slots[0] =
+        (unsigned char) ACTION_ENTRY_CARRIED;
+    action_disabled[ACTION_SLOT_ATTACK] = ACTION_ENTRY_GREYED;
+    action_disabled[ACTION_SLOT_SPELL] = ACTION_ENTRY_GREYED;
+    action_disabled[ACTION_SLOT_ITEM] = ACTION_ENTRY_GREYED;
+    action_disabled[ACTION_SLOT_FALLTHROUGH] = ACTION_ENTRY_GREYED;
+    codes[0] = KEY_IGNORED;
+    codes[1] = KEY_ESC;
+
+    CHECK_EQ(action_run(ACTION_UNIT, ACTION_UNIT_MOVED, codes, 2),
+             ACTION_MENU_CANCELLED);
+    CHECK_EQ(action_disabled[ACTION_SLOT_SPELL], ACTION_ENTRY_GREYED);
+    CHECK_EQ(action_disabled[ACTION_SLOT_ITEM], ACTION_ENTRY_GREYED);
+    CHECK_EQ(action_disabled[ACTION_SLOT_FALLTHROUGH], ACTION_ENTRY_GREYED);
+    CHECK_EQ(action_disabled[ACTION_SLOT_ATTACK], ACTION_ENTRY_GREYED);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    action_unstage();
+}
+
+/* Every entry greyed out, including the fall-through one, and the player
+   confirms anyway.  The scan answers -1 and the ring's cursor loop confirms on
+   whatever it is holding, so the dispatch is entered with -1 -- which is not
+   0, not 1 and not 2, and so runs the last arm.  That arm ends the call: the
+   turn is spent and the answer is 1.
+
+   This is what says the last arm is the ELSE of three equality tests and not a
+   fourth test against 3. */
+static void a_confirm_with_every_entry_greyed_runs_the_last_arm(void)
+{
+    unsigned char codes[2];
+
+    action_stage();
+    action_disabled[ACTION_SLOT_ATTACK] = ACTION_ENTRY_GREYED;
+    action_disabled[ACTION_SLOT_SPELL] = ACTION_ENTRY_GREYED;
+    action_disabled[ACTION_SLOT_ITEM] = ACTION_ENTRY_GREYED;
+    action_disabled[ACTION_SLOT_FALLTHROUGH] = ACTION_ENTRY_GREYED;
+    codes[0] = KEY_IGNORED;
+    codes[1] = KEY_ENTER;
+
+    CHECK_EQ(action_run(ACTION_UNIT, ACTION_UNIT_MOVED, codes, 2),
+             ACTION_MENU_DONE);
+    CHECK_EQ((int) (menu_units[ACTION_UNIT].flags & UNIT_FLAG_ACTED),
+             UNIT_FLAG_ACTED);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    action_unstage();
+}
+
+/* The fall-through arm on a unit that walked before opening the menu.  The
+   fourth argument is non-zero, so the rest is skipped and the unit's hit
+   points are exactly what they were; the search and the turn still happen. */
+static void a_unit_that_moved_does_not_rest(void)
+{
+    unsigned char codes[2];
+
+    action_stage();
+    data_fdps_battle_view_window_origin_y = ACTION_REST_VIEW_ORIGIN_Y;
+    codes[0] = KEY_IGNORED;
+    codes[1] = KEY_ENTER;
+
+    CHECK_EQ(action_run(ACTION_UNIT, ACTION_UNIT_MOVED, codes, 2),
+             ACTION_MENU_DONE);
+    CHECK_EQ((int) menu_units[ACTION_UNIT].hp_current, ACTION_HP_BEFORE);
+    CHECK_EQ((int) (menu_units[ACTION_UNIT].flags & UNIT_FLAG_ACTED),
+             UNIT_FLAG_ACTED);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    action_unstage();
+}
+
+/* The same arm on a unit that stayed where it was.  The fourth argument is
+   zero, fdps_unit_rest runs, and a fifth of the maximum comes back -- 20 / 5
+   on the fixture's unit, a signed divide that truncates (unitatk.h).  The
+   hit-point figure is the whole of what separates this case from the one
+   above. */
+static void a_unit_that_stayed_put_rests(void)
+{
+    unsigned char codes[2];
+
+    action_stage();
+    data_fdps_battle_view_window_origin_y = ACTION_REST_VIEW_ORIGIN_Y;
+    codes[0] = KEY_IGNORED;
+    codes[1] = KEY_ENTER;
+
+    CHECK_EQ(action_run(ACTION_UNIT, ACTION_UNIT_STAYED_PUT, codes, 2),
+             ACTION_MENU_DONE);
+    CHECK_EQ((int) menu_units[ACTION_UNIT].hp_current, ACTION_HP_AFTER_REST);
+    CHECK_EQ((int) (menu_units[ACTION_UNIT].flags & UNIT_FLAG_ACTED),
+             UNIT_FLAG_ACTED);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    action_unstage();
+}
+
 void run_btlmenu_tests(void)
 {
     RUN_TEST(a_cancelled_ring_answers_minus_one);
@@ -1422,4 +1940,14 @@ void run_btlmenu_tests(void)
     RUN_TEST(the_payload_word_is_read_signed);
     RUN_TEST(a_full_bag_that_declines_the_trade_spends_nothing);
     RUN_TEST(a_scripted_cell_dispatches_on_the_payload);
+    RUN_TEST(a_unit_with_nothing_greys_three_entries_and_cancels);
+    RUN_TEST(a_known_spell_keeps_the_spell_entry);
+    RUN_TEST(a_running_seal_timer_greys_the_spell_entry);
+    RUN_TEST(a_carried_item_keeps_the_item_entry);
+    RUN_TEST(an_enemy_in_reach_keeps_the_attack_entry);
+    RUN_TEST(an_enemy_out_of_reach_greys_the_attack_entry);
+    RUN_TEST(the_greyed_entries_are_never_put_back);
+    RUN_TEST(a_confirm_with_every_entry_greyed_runs_the_last_arm);
+    RUN_TEST(a_unit_that_moved_does_not_rest);
+    RUN_TEST(a_unit_that_stayed_put_rests);
 }

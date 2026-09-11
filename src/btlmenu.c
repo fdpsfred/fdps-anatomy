@@ -24,18 +24,29 @@
 #include <i86.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "aitarget.h"
 #include "audio.h"
 #include "chapter.h"
+#include "combat.h"
+#include "death.h"
 #include "keybd.h"
+#include "mapcur.h"
 #include "mapdraw.h"
 #include "maptile.h"
 #include "menu.h"
+#include "movegrid.h"
 #include "msgwin.h"
+#include "table.h"
 #include "text.h"
 #include "unit.h"
+#include "unitatk.h"
 #include "unititem.h"
+#include "unitstat.h"
 #include "btlend.h"
+#include "btlturn.h"
+#include "item.h"
 #include "savefile.h"
+#include "spellmnu.h"
 #include "btlmenu.h"
 
 /* The four entries of the system submenu in ring slot order -- 0 up, 1 left,
@@ -757,4 +768,271 @@ void fdps_battle_search_cell_at_cursor(int unit_index)
     delay(SCRIPTED_CELL_HOLD_MS);
     fdps_message_window_close();
     data_fdps_chapter_event_handler_table[cell_payload](unit_index);
+}
+
+/* Which slot commands what, in the ring's own order -- 0 up, 1 left, 2 right,
+   3 down (menu.h).  The dispatch is a chain of equality tests on the slot the
+   cursor finished on: CMP dword ptr [EBP-0x10],0x0 at 00015ecb, against 0x1 at
+   0001601d and against 0x2 at 0001605c.  There is no fourth test, so the last
+   arm is everything else and not slot 3 alone. */
+#define ACTION_SLOT_ATTACK 0
+#define ACTION_SLOT_SPELL 1
+#define ACTION_SLOT_ITEM 2
+
+/* How many slots the availability scan walks, CMP dword ptr [EBP-0x64],0x4 at
+   00015e40. */
+#define ACTION_SLOTS 4
+
+/* struct fdps_unit_record's status_timers[5] at record offset 0x27, the
+   封魔咒術 timer, tested as a byte by CMP byte ptr [EAX+0x27],0x0 at 00015e1d.
+   A unit under it may not cast (unitstat.h). */
+#define SEAL_TIMER_SLOT 5
+
+/* fdps_unit_find_equipped_slot's want_armor argument, the 0 pushed at
+   00015d26: the weapon and not the armour (unititem.h). */
+#define EQUIPPED_WEAPON 0
+
+/* fdps_collect_targets_in_range's select_mode, the 0 pushed at 00015d8d and
+   again at 00015ef2: keep side 0, the enemy side (aitarget.h). */
+#define TARGET_SELECT_ENEMIES 0
+
+/* fdps_map_cursor_select_loop's select_mode, PUSH 0x0 at 00015f49.  It is none
+   of the modes that function names, so a confirm needs a marked tile with an
+   accepted unit inside the cursor's overlay (mapcur.h). */
+#define CURSOR_SELECT_ATTACK_TARGET 0
+
+/* The scratch block the attack's target list is collected into, PUSH 0x64 at
+   00015ee5: 100 unit indices of one byte each.  malloc's answer is not tested
+   -- there is no CMP between the CALL at 00015ee7 and the store at 00015eef --
+   and neither is the count that fills it tested against the capacity. */
+#define TARGET_LIST_BYTES 100
+
+/* The death scripts one attack can collect, LEA EAX,[EBP-0x5c] at 00015faf and
+   00015fe7 against the -0x3c the next frame slot sits at: 0x20 bytes, ten
+   three-byte records with two to spare.  Nothing communicates the size to
+   fdps_collect_death_scripts and the original's frame is the only bound there
+   is (death.h). */
+#define DEATH_SCRIPT_BUFFER_BYTES 0x20
+
+/* What the three commands that answer more than a slot number say.  The -1 is
+   shared by the target cursor, the spell command and the item command and
+   means the same thing in all three -- the player backed out; the item
+   command's 2 is its hand-over arm and nothing else answers it (item.h,
+   mapcur.h, spellmnu.h). */
+#define COMMAND_CANCELLED (-1)
+#define ITEM_MENU_HANDED_OVER 2
+
+/* The experience an attack banked is scaled by 15/10 before it is paid, IMUL
+   EDX,[0x00069cec],0xf with IDIV by 0xa at 00015fc3.  Both the multiply and
+   the divide are signed and the divide truncates toward zero, which is what
+   the int the global is declared as gives (gamedata.h). */
+#define ATTACK_EXP_NUMERATOR 15
+#define ATTACK_EXP_DENOMINATOR 10
+
+/* The value the map cursor is put into for the attack's aim, MOV dword ptr
+   [0x00069cd0],0x1 at 00015f37 (gamedata.h). */
+#define MAP_CURSOR_VISIBLE 1
+
+/* What this function answers with (btlmenu.h). */
+#define ACTION_MENU_CANCELLED (-1)
+#define ACTION_MENU_DONE 1
+
+/* 00015d00.  See btlmenu.h for what each command does, what the two arrays
+   mean and which probe greys which slot.
+
+   THE FIRST-SELECTABLE SCAN IS WRITTEN OUT HERE RATHER THAN CALLED.  The
+   assembly at 00015e2d-00015e70 is an inline expansion of what
+   fdps_menu_find_first_enabled_entry (menu.h) does -- the same walk over the
+   same four ints, reached through two stack copies of the array pointer -- and
+   there is no CALL at that site.  Emitting the call instead would put one in
+   the rebuild that the original does not have, so the loop stays written out.
+
+   THE EXITS ARE WRITTEN AS RETURNS.  The original stores its answer into a
+   frame slot and jumps to one epilogue at 000160d3; the arms below return,
+   which is the same program with the jumps taken out (ADR-0001).
+
+   THE PROBES RUN EVERY PASS AND THE PASS COSTS A GRID RESET.  Each pass calls
+   fdps_collect_targets_in_range with a NULL buffer just to count, then
+   fdps_map_grid_reset to put the markers back -- and that reset is INSIDE the
+   equipped-weapon arm, so a unit with no weapon never runs it and leaves the
+   grid as it found it.
+
+   THE TWO ITEM BYTES CROSS OVER.  range_min at +0x0b is the collector's
+   min_dist and range_max at +0x0c is its range_code, which carries the reach
+   and the shape together (aitarget.h) -- the field names are the record's, not
+   the collector's.  Both are read XOR EAX,EAX / MOV AL, so both widen
+   unsigned.
+
+   THE ATTACK ARM COLLECTS THE TARGETS A SECOND TIME rather than keeping the
+   count the probe took: the probe counted with a NULL buffer and this one
+   fills the block.  Both are taken from the cursor's own tile, so a cursor
+   that has moved between them is a different list. */
+int fdps_battle_action_menu(int unit_index, int *cmd_icons, int *cmd_disabled,
+                            int unit_has_moved)
+{
+    /* The acting unit's record, re-resolved on every pass and read for one
+       byte: the 封魔咒術 timer that greys the spell command. */
+    struct fdps_unit_record *acting_unit;
+    /* The equipped weapon's ITEM.DAT record, and the bag slot and item id it
+       was reached through. */
+    struct fdps_item_effect *weapon;
+    int weapon_slot;
+    int weapon_item_id;
+    /* The weapon's reach, as fdps_collect_targets_in_range takes it: the code
+       that carries reach and shape together, and the minimum distance a code
+       below 0x10 clears out of the middle. */
+    int weapon_range_code;
+    int weapon_min_dist;
+    /* The scan's answer -- the first slot that is not greyed out, or -1 when
+       all four are -- and the slot it is walking. */
+    int first_enabled_slot;
+    int probe_slot;
+    /* Where the ring's cursor is: it goes in holding the scan's answer and
+       comes back holding the slot the player finished on, which is the slot
+       the dispatch below acts on. */
+    int chosen_slot;
+    /* The answer of whichever modal step ran last -- the ring's cursor loop,
+       the attack's target cursor, the spell command or the item command.  One
+       slot in the original's frame and one variable here, because every reader
+       of it is the test immediately after the call that set it. */
+    int step_result;
+    /* What a cancelled ring answers with.  It starts at -1 and the item
+       command's hand-over is the one thing that lifts it to 1, which is how a
+       turn spent on a hand-over survives the player then backing out. */
+    int answer_when_cancelled;
+    /* The attack's target list: the block, how many indices the collector put
+       in it, and the unit the player's cursor settled on. */
+    unsigned char *target_list;
+    int target_count;
+    int target_unit_index;
+    /* Where the map cursor stood before the attack's aim, in world pixels, so
+       that a cancelled aim can walk it back. */
+    int saved_cursor_x;
+    int saved_cursor_y;
+    /* What the kills the attack made owe, collected before the death animation
+       marks them dead and paid out after it (death.h). */
+    int death_script_count;
+    unsigned char death_scripts[DEATH_SCRIPT_BUFFER_BYTES];
+
+    answer_when_cancelled = ACTION_MENU_CANCELLED;
+
+    for (;;) {
+        cmd_disabled[ACTION_SLOT_ATTACK] = 0;
+        data_fdps_battle_pending_xp_credit = 0;
+
+        weapon_slot = fdps_unit_find_equipped_slot(unit_index,
+                                                   EQUIPPED_WEAPON);
+        if (weapon_slot == -1) {
+            cmd_disabled[ACTION_SLOT_ATTACK] = MENU_ENTRY_DISABLED;
+        } else {
+            weapon_item_id = fdps_unit_get_item_id(unit_index, weapon_slot);
+            weapon = fdps_get_item_record(weapon_item_id);
+            weapon_min_dist = (int) weapon->range_min;
+            weapon_range_code = (int) weapon->range_max;
+
+            if (fdps_collect_targets_in_range(
+                    data_fdps_map_cursor_world_x / MAP_TILE_SIZE,
+                    data_fdps_map_cursor_world_y / MAP_TILE_SIZE,
+                    NULL, weapon_range_code, weapon_min_dist,
+                    TARGET_SELECT_ENEMIES) == 0) {
+                cmd_disabled[ACTION_SLOT_ATTACK] = MENU_ENTRY_DISABLED;
+            }
+            fdps_map_grid_reset();
+        }
+
+        if (fdps_unit_item_count(unit_index) == 0) {
+            cmd_disabled[ACTION_SLOT_ITEM] = MENU_ENTRY_DISABLED;
+        }
+
+        if (fdps_unit_collect_known_spells(unit_index, NULL) == 0) {
+            cmd_disabled[ACTION_SLOT_SPELL] = MENU_ENTRY_DISABLED;
+        }
+
+        acting_unit = fdps_get_unit_record(unit_index);
+        if (acting_unit->status_timers[SEAL_TIMER_SLOT] != 0) {
+            cmd_disabled[ACTION_SLOT_SPELL] = MENU_ENTRY_DISABLED;
+        }
+
+        first_enabled_slot = -1;
+        for (probe_slot = 0; probe_slot < ACTION_SLOTS; probe_slot++) {
+            if (cmd_disabled[probe_slot] == 0) {
+                first_enabled_slot = probe_slot;
+                break;
+            }
+        }
+
+        chosen_slot = first_enabled_slot;
+        fdps_menu_animate_open(cmd_icons, cmd_disabled, chosen_slot);
+        step_result = fdps_menu_cursor_input_loop(cmd_icons, cmd_disabled,
+                                                  &chosen_slot);
+        fdps_menu_animate_close(cmd_icons, cmd_disabled, chosen_slot);
+        fdps_render_view_frame();
+
+        if (step_result == MENU_CURSOR_CANCELLED) {
+            return answer_when_cancelled;
+        }
+
+        if (chosen_slot == ACTION_SLOT_ATTACK) {
+            saved_cursor_x = data_fdps_map_cursor_world_x;
+            saved_cursor_y = data_fdps_map_cursor_world_y;
+
+            target_list = (unsigned char *) malloc((size_t) TARGET_LIST_BYTES);
+            target_count = fdps_collect_targets_in_range(
+                data_fdps_map_cursor_world_x / MAP_TILE_SIZE,
+                data_fdps_map_cursor_world_y / MAP_TILE_SIZE,
+                target_list, weapon_range_code, weapon_min_dist,
+                TARGET_SELECT_ENEMIES);
+
+            data_fdps_map_cursor_draw_mode = MAP_CURSOR_VISIBLE;
+            step_result = fdps_map_cursor_select_loop(
+                CURSOR_SELECT_ATTACK_TARGET, target_count, target_list);
+            fdps_map_grid_reset();
+            free(target_list);
+            fdps_flush_keyboard_queue();
+
+            if (step_result != COMMAND_CANCELLED) {
+                target_unit_index = fdps_battle_find_unit_at_cursor();
+                fdps_unit_face_target(unit_index, target_unit_index);
+                fdps_combat_play_attack_exchange(unit_index,
+                                                 target_unit_index);
+
+                death_script_count = fdps_collect_death_scripts(death_scripts);
+                fdps_play_death_animation_and_mark_dead();
+                data_fdps_battle_pending_xp_credit =
+                    data_fdps_battle_pending_xp_credit * ATTACK_EXP_NUMERATOR
+                    / ATTACK_EXP_DENOMINATOR;
+                fdps_unit_award_exp_and_level_up(unit_index);
+                fdps_run_death_scripts(unit_index, death_script_count,
+                                       death_scripts);
+
+                fdps_battle_mark_unit_done(unit_index);
+                fdps_flush_keyboard_queue();
+                return ACTION_MENU_DONE;
+            }
+
+            fdps_map_cursor_move_to(saved_cursor_x, saved_cursor_y);
+        } else if (chosen_slot == ACTION_SLOT_SPELL) {
+            step_result = fdps_battle_spell_command(unit_index);
+            if (step_result != COMMAND_CANCELLED) {
+                fdps_battle_mark_unit_done(unit_index);
+                data_fdps_ui_play_active_flag = 1;
+                return ACTION_MENU_DONE;
+            }
+        } else if (chosen_slot == ACTION_SLOT_ITEM) {
+            step_result = fdps_battle_item_menu(unit_index);
+            if (step_result == ITEM_MENU_HANDED_OVER) {
+                answer_when_cancelled = ACTION_MENU_DONE;
+            } else if (step_result != COMMAND_CANCELLED) {
+                data_fdps_battle_pending_xp_credit = 0;
+                return ACTION_MENU_DONE;
+            }
+        } else {
+            if (unit_has_moved == 0) {
+                fdps_unit_rest(unit_index);
+            }
+            fdps_battle_search_cell_at_cursor(unit_index);
+            fdps_battle_mark_unit_done(unit_index);
+            return ACTION_MENU_DONE;
+        }
+    }
 }

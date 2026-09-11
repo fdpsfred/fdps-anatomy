@@ -3632,6 +3632,14 @@
       "status": "committed",
       "emitted_against": "0x50d",
       "rounds": 0
+    },
+    "00015d00": {
+      "name": "fdps_battle_action_menu",
+      "target": "btlmenu.c",
+      "body_size": "0x3dd",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x3dd"
     }
   }
 }
