@@ -158,4 +158,59 @@ extern int fdps_spell_list_select_loop(int unit_index,
                                        int *cursor_index);
 #pragma aux fdps_spell_list_select_loop "*" parm caller [];
 
+/* Runs one player-controlled unit's whole cast: opens the caster's known-spell
+   list over the battle map, walks the player through target selection, and
+   plays the chosen spell out on the targets it settles on.  1 when the unit
+   cast something and -1 when the player backed out of the spell list without
+   acting; no other value is produced, and fdps_battle_action_menu marks the
+   unit done for anything that is not -1.
+
+   unit_index is a position in the current battle's unit array and is not range
+   checked.
+
+   IT IS A RETRY LOOP AND THE SPELL LIST IS ITS ONLY WAY OUT.  Backing out of
+   target selection reopens the list rather than ending the call, so the only
+   -1 the caller can see is the one the list itself answered.  The scroll
+   position and the highlighted row are kept across that reopening: the player
+   comes back to the page and the spell they were just on.
+
+   WHAT A SPELL'S RECORD DECIDES.  The MAGICDAT.DAT record
+   (struct fdps_spell_effect) drives the whole aim: cast_range_flags is the
+   reach and the shape -- 0 for a map-wide spell, up to 0x0f a radius in tiles,
+   from 0x10 up a line whose length is the low nibble -- area is the blast
+   radius the hit list is finally collected with, and target_side is both the
+   sweep's filter and the cursor mode the aim runs in (aitarget.h, mapcur.h).
+   The cursor's diamond footprint is area + 2 for the aim and back to the plain
+   cursor afterwards.
+
+   A MAP-WIDE SPELL STILL ASKS FOR A CONFIRMATION, in cursor mode 4 -- or in
+   mode 5, which never confirms, when the sweep from the caster's own tile
+   caught nobody.  Its hit list keeps side 0 only, whatever the record's
+   target_side says.
+
+   THE HIT LIST IS COLLECTED TWICE AND THE SECOND SWEEP RUNS EVEN ON A
+   CANCELLED AIM.  The first says what may be aimed at, the second is taken
+   about the tile the aim settled on and is what a confirmed cast is played
+   with.  A line spell's second sweep runs from the caster's own tile rather
+   than from the cursor and plays "Chess.wav" as it goes.
+
+   SPELL 0x15 TAKES A SECOND PICK.  傳送術 asks for a tile the first unit of
+   the hit list may stand on and leaves it in
+   data_fdps_battle_teleport_dest_tile_x / _y in TILES (gamedata.h);
+   fdps_cast_spell_on_targets is what reads them.  A hit list whose first entry
+   is the caster itself throws the cast away instead.
+
+   THE EXPERIENCE IS DIVIDED BEFORE IT IS PAID.  What the cast banked in
+   data_fdps_battle_pending_xp_credit is divided by the caster's level -- plus
+   30 for a promoted form, portrait id above 8 -- so a haul smaller than that
+   divisor rounds away to nothing.  The MP is spent inside
+   fdps_combat_play_spell_on_targets and not here.
+
+   IT IS MODAL AND IT DRAWS THROUGHOUT: the status window is composed, animated
+   in over a copy of the live screen and animated out again on every pass, and
+   the cursor is walked back onto the caster before the call ends.  Three heap
+   blocks are taken and released per pass and none of them is checked. */
+extern int fdps_battle_spell_command(int unit_index);
+#pragma aux fdps_battle_spell_command "*" parm caller [];
+
 #endif

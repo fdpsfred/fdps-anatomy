@@ -3624,6 +3624,14 @@
       "status": "committed",
       "emitted_against": "0x706",
       "rounds": 0
+    },
+    "00027c20": {
+      "name": "fdps_battle_spell_command",
+      "target": "spellmnu.c",
+      "body_size": "0x50d",
+      "status": "committed",
+      "emitted_against": "0x50d",
+      "rounds": 0
     }
   }
 }

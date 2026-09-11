@@ -36,12 +36,15 @@
  * the drawing pass does is a playtest contract until the sprite cache, the
  * shadow sheet and a running timer are all real.
  */
+#include <i86.h>
 #include <malloc.h>
+#include <stdio.h>
 #include <string.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "keybd.h"
 #include "sprite.h"
+#include "statunit.h"
 #include "table.h"
 #include "text.h"
 #include "unitstat.h"
@@ -1220,6 +1223,286 @@ static void the_page_is_drawn_with_the_callers_scroll_and_cursor(void)
     CHECK_EQ(sel_guard_touched(), 0);
 }
 
+/* ------------------------------------------------------------------------
+ * fdps_battle_spell_command -- the pass the player backs out of
+ * ---------------------------------------------------------------------- */
+
+/* WHY ONLY ONE OF ITS PATHS IS DRIVEN.  Every arm past the spell list goes
+   through fdps_map_cursor_select_loop, which repaints the whole battle view
+   once a pass out of the loaded scene layers, the tile sheets and the map unit
+   array, and which cannot return until a timer tick only the game's own INT 08h
+   handler moves.  The list's own cancel is the one way out of the retry loop
+   that a test binary can reach, and it is also the function's whole -1
+   contract: the early return at 00027d71, taken before the first store into
+   data_fdps_map_cursor_draw_mode, is what says the unit has not acted.
+   Everything past it is settled by comparing the built SPELLMNU.OBJ against
+   00027c20 instead.
+
+   The run is real all the way down: Status.cel is decoded out of the shipped
+   MISC.VFS, the caster's stat panel is painted through the sheets staged below
+   and the portrait read out of the shipped FACE.CEL, the window is animated in
+   over a copy of the adapter and out again, and the list's select loop is ended
+   by an armed Escape.  Nothing is mocked and no path is shortened.
+
+   THE VILLAGE FLAG IS SET FOR THE RUN.  fdps_close_status_window composes its
+   background from the scene layers when the flag is clear (statwin.h), which
+   needs a loaded map; with the flag set it copies the staged page instead, and
+   the cancel path this file drives is the same code either way.  The flag also
+   sends fdps_draw_unit_status_panel through the cache slot the unit INDEX
+   names, which is what makes data_fdps_village_status_window_unit_idx a witness
+   that the panel ran with the index this command was given. */
+
+/* The caster.  Unit 1 rather than unit 0, so an index that never travelled
+   would read a different record and paint a different panel. */
+#define CMD_CASTER 1
+
+/* Its HP and MP.  Current equals maximum on purpose: a shortfall sends
+   fdps_draw_unit_status_panel through colour row 3 of the number sheet
+   (statunit.c), and the fabricated Number.cel above is thirteen sprites -- row
+   0 only -- so the reduced row would index off the end of its offset table. */
+#define CMD_HP 20
+#define CMD_MP 10
+
+/* The fabricated Bar.cel gauge sheet: three graphics of 117 by 8 laid end to
+   end, which is the stride fdps_draw_gauge_bar steps by (gauge.h). */
+#define CMD_BAR_GRAPHIC_STRIDE 0x3a8
+#define CMD_BAR_SHEET_BYTES (3 * CMD_BAR_GRAPHIC_STRIDE)
+
+/* The fabricated sprite cache: eight slots of a twelve-entry offset table
+   followed by one 24 by 24 cell each.  A cell's stream is 24 rows of a single
+   fill run -- command 0x17 is op 00 with len-1 of 23, so 24 pixels of the
+   colour byte behind it (rle.h) -- and the colour is the slot number, so a cell
+   drawn from the wrong slot reads back as a different byte. */
+#define CMD_CACHE_SLOTS 8
+#define CMD_CELL_SIZE 24
+#define CMD_CELL_FILL_24 0x17
+#define CMD_CELL_COLOR_BASE 0x40
+#define CMD_CELL_STREAM_BYTES (CMD_CELL_SIZE * 2)
+#define CMD_CACHE_TABLE_BYTES \
+    (CMD_CACHE_SLOTS * (int) sizeof(struct fdps_cel_cache_slot))
+#define CMD_CACHE_BYTES \
+    (CMD_CACHE_TABLE_BYTES + CMD_CACHE_SLOTS * CMD_CELL_STREAM_BYTES)
+
+/* The village page the close puts back, a whole 320x200 frame.  It goes on the
+   heap rather than into a static: the test image's headroom is a documented
+   hazard (rebuild_info/emit_pipeline.md). */
+#define CMD_PAGE_BYTES 0xfa00
+#define CMD_PAGE_FILL 0x33
+
+/* The values the globals are seeded with before a run.  None of them is a
+   value the cancel path can produce, so each says on its own whether the
+   function ran past the early return. */
+#define CMD_CURSOR_MODE_SEED 0x5a
+#define CMD_XP_SEED 0x1234
+#define CMD_TELEPORT_X_SEED 0x11
+#define CMD_TELEPORT_Y_SEED 0x22
+#define CMD_PANEL_UNIT_SEED (-9)
+
+/* The mode the game draws this window in, and the one the console is put back
+   into before anything is reported on it. */
+#define CMD_VIDEO_MODE_TEXT 0x03
+#define CMD_VIDEO_MODE_320X200X256 0x13
+
+static unsigned char cmd_bar_sheet[CMD_BAR_SHEET_BYTES];
+static unsigned char cmd_cache[CMD_CACHE_BYTES];
+static struct fdps_vfs_image_header cmd_sfx_pack;
+static unsigned char *cmd_page;
+
+static void cmd_set_video_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* Both shipped files this path reads by name.  Neither can be stood in for:
+   fdps_load_status_cel_image names MISC.VFS and Status.cel as literals, and
+   fdps_load_and_draw_portrait ends the process at exit(1) on a FACE.CEL it
+   cannot open (statwin.h, msgwin.h). */
+static int cmd_inputs_present(void)
+{
+    FILE *probe;
+
+    probe = fopen("MISC.VFS", "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+    probe = fopen("FACE.CEL", "rb");
+    if (probe == NULL) {
+        return 0;
+    }
+    fclose(probe);
+    return 1;
+}
+
+/* Everything one run reads, seeded afresh: the caster, the two sheets the stat
+   panel draws through, the empty sound bank the close's sfx lookup misses in,
+   the village page, the four seeded globals and one armed Escape. */
+static void cmd_stage(void)
+{
+    int index;
+    int slot;
+    int row;
+    int stream_at;
+
+    spell_reset();
+    spell_give(CMD_CASTER, spell_set_bitmap);
+    spell_units[CMD_CASTER].hp_current = CMD_HP;
+    spell_units[CMD_CASTER].hp_max = CMD_HP;
+    spell_units[CMD_CASTER].mp_current = CMD_MP;
+    spell_units[CMD_CASTER].mp_max = CMD_MP;
+
+    for (index = 0; index < CMD_BAR_SHEET_BYTES; index++) {
+        cmd_bar_sheet[index] = (unsigned char) (index & 0x7f);
+    }
+
+    memset(cmd_cache, 0, sizeof cmd_cache);
+    for (slot = 0; slot < CMD_CACHE_SLOTS; slot++) {
+        stream_at = CMD_CACHE_TABLE_BYTES + slot * CMD_CELL_STREAM_BYTES;
+        ((struct fdps_cel_cache_slot *) cmd_cache)[slot].sprite_offset[0] =
+            stream_at;
+        for (row = 0; row < CMD_CELL_SIZE; row++) {
+            cmd_cache[stream_at + row * 2] = (unsigned char) CMD_CELL_FILL_24;
+            cmd_cache[stream_at + row * 2 + 1] =
+                (unsigned char) (CMD_CELL_COLOR_BASE + slot);
+        }
+    }
+
+    memset(&cmd_sfx_pack, 0, sizeof cmd_sfx_pack);
+    memset(cmd_page, CMD_PAGE_FILL, (size_t) CMD_PAGE_BYTES);
+
+    data_fdps_status_gauge_bar_sheet_ptr = cmd_bar_sheet;
+    data_fdps_cel_sprite_cache_ptr = cmd_cache;
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = (unsigned char *) &cmd_sfx_pack;
+    data_fdps_village_backdrop_page_ptr = cmd_page;
+    data_fdps_village_mode_flag = (unsigned char) 1;
+
+    data_fdps_village_status_window_unit_idx = CMD_PANEL_UNIT_SEED;
+    data_fdps_map_cursor_draw_mode = CMD_CURSOR_MODE_SEED;
+    data_fdps_battle_pending_xp_credit = CMD_XP_SEED;
+    data_fdps_battle_teleport_dest_tile_x = CMD_TELEPORT_X_SEED;
+    data_fdps_teleport_destination_tile_y = CMD_TELEPORT_Y_SEED;
+
+    wait_arm_scancode(SEL_KEY_ESC);
+}
+
+/* Nothing this file published may be left published: several of these globals
+   are freed unguarded by the resource loaders, and a static behind one of them
+   breaks the allocator for every later case (rebuild_info/emit_pipeline.md).
+   The portrait block the panel loaded is the one real allocation a run leaves
+   behind. */
+static void cmd_unstage(void)
+{
+    data_fdps_status_gauge_bar_sheet_ptr = NULL;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = NULL;
+    data_fdps_village_backdrop_page_ptr = NULL;
+    data_fdps_village_mode_flag = (unsigned char) 0;
+    data_fdps_selection_bar_sheet_ptr = NULL;
+    data_fdps_command_sprite_sheet_ptr = NULL;
+    data_fdps_number_glyph_sheet_ptr = NULL;
+    data_fdps_font_sheet_ptr = NULL;
+    data_fdps_all_game_text_ptr = NULL;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_battle_spell_effect_table_ptr = NULL;
+    if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+        free(data_fdps_portrait_sprite_buf_ptr);
+        data_fdps_portrait_sprite_buf_ptr = NULL;
+    }
+}
+
+/* One whole pass, with the adapter in the mode the window is drawn in and the
+   console put back before anything is reported. */
+static int cmd_run(void)
+{
+    int answer;
+
+    cmd_stage();
+    cmd_set_video_mode(CMD_VIDEO_MODE_320X200X256);
+    answer = fdps_battle_spell_command(CMD_CASTER);
+    cmd_set_video_mode(CMD_VIDEO_MODE_TEXT);
+    return answer;
+}
+
+/* Escape on the spell list ends the call at -1 and the unit has not acted.
+   The four seeded globals say so from the other side: every one of them is
+   written past the early return at 00027d71 -- the cursor mode on the very
+   next line at 00027db5, the two teleport tiles at 0002801c and 00028033 and
+   the experience at 000280e9 -- so a body that fell through into the aim would
+   move at least the first of them. */
+static void backing_out_of_the_spell_list_answers_minus_one(void)
+{
+    int answer;
+
+    CHECK_EQ(cmd_inputs_present(), 1);
+    if (!cmd_inputs_present()) {
+        return;
+    }
+
+    answer = cmd_run();
+
+    CHECK_EQ(answer, -1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, CMD_CURSOR_MODE_SEED);
+    CHECK_EQ(data_fdps_battle_pending_xp_credit, CMD_XP_SEED);
+    CHECK_EQ(data_fdps_battle_teleport_dest_tile_x, CMD_TELEPORT_X_SEED);
+    CHECK_EQ(data_fdps_teleport_destination_tile_y, CMD_TELEPORT_Y_SEED);
+    cmd_unstage();
+}
+
+/* The pass that was cancelled still built the whole window first, and built it
+   for the caster this command was given.  The panel's village store is the
+   index it was handed (statunit.h), the portrait block is the one allocation
+   fdps_load_and_draw_portrait leaves behind, and the reader's filter holds the
+   code the select loop's single poll consumed -- three witnesses spread across
+   the opening, the middle and the end of the pass, so a call that returned -1
+   without doing the work fails here rather than passing. */
+static void the_cancelled_pass_opened_the_window_for_the_caster(void)
+{
+    CHECK_EQ(cmd_inputs_present(), 1);
+    if (!cmd_inputs_present()) {
+        return;
+    }
+
+    cmd_run();
+
+    CHECK_EQ(data_fdps_village_status_window_unit_idx, CMD_CASTER);
+    CHECK_EQ(data_fdps_portrait_sprite_buf_ptr != NULL, 1);
+    CHECK_EQ((int) data_fdps_input_key_repeat_prev_scancode, SEL_KEY_ESC);
+    cmd_unstage();
+}
+
+/* All three blocks come back.  The window image, the 64000-byte copy of the
+   adapter and the 151 x 149 panel copy are taken at the top of the pass and
+   released after the close, at 00027d4d, 00027d59 and 00027d65, and every
+   block the callees take is released by the callee -- so a cancelled pass must
+   leave the heap where it found it.  The portrait is the one block that
+   outlives a call and is freed and taken again by the next one, which is why
+   the measured pass is the second.
+
+   Dropping any one of the three frees shows up here and nowhere else. */
+static void a_cancelled_pass_gives_all_three_blocks_back(void)
+{
+    int before;
+    int after;
+
+    CHECK_EQ(cmd_inputs_present(), 1);
+    if (!cmd_inputs_present()) {
+        return;
+    }
+
+    cmd_run();
+    before = wait_used_heap_blocks();
+    cmd_run();
+    after = wait_used_heap_blocks();
+
+    CHECK_EQ(after, before);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    cmd_unstage();
+}
+
 void run_spellmnu_tests(void)
 {
     RUN_TEST(empty_spell_list_draws_nothing);
@@ -1246,4 +1529,11 @@ void run_spellmnu_tests(void)
     RUN_TEST(the_panel_is_laid_back_over_the_list_area);
     RUN_TEST(the_panel_blit_stops_at_the_rectangles_edges);
     RUN_TEST(the_page_is_drawn_with_the_callers_scroll_and_cursor);
+
+    cmd_page = (unsigned char *) malloc((size_t) CMD_PAGE_BYTES);
+    RUN_TEST(backing_out_of_the_spell_list_answers_minus_one);
+    RUN_TEST(the_cancelled_pass_opened_the_window_for_the_caster);
+    RUN_TEST(a_cancelled_pass_gives_all_three_blocks_back);
+    free(cmd_page);
+    cmd_page = NULL;
 }

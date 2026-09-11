@@ -16,12 +16,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include "fdpstype.h"
+#include "aitarget.h"
+#include "audio.h"
 #include "blit.h"
+#include "cmbspell.h"
+#include "death.h"
 #include "gamedata.h"
 #include "keybd.h"
+#include "mapcur.h"
 #include "mapdraw.h"
+#include "movegrid.h"
 #include "palcycle.h"
 #include "sprite.h"
+#include "statunit.h"
+#include "statwin.h"
 #include "table.h"
 #include "text.h"
 #include "unit.h"
@@ -597,6 +605,329 @@ int fdps_spell_list_select_loop(int unit_index, unsigned char *window_buf,
             }
         } else if (scancode == SCANCODE_ESC || scancode == SCANCODE_DELETE) {
             return SPELL_SELECT_CANCELLED;
+        }
+    }
+}
+
+/* ------------------------------------------------------------------------
+ * fdps_battle_spell_command @ 00027c20
+ * ---------------------------------------------------------------------- */
+
+/* How many slide-in steps the window is opened with: CMP dword ptr
+   [EBP-0x30],0x9 / JL at 00027cf4.  fdps_close_status_window runs the same
+   nine counting down. */
+#define STATUS_WINDOW_ANIM_STEPS 9
+
+/* The 151 x 149 copy of the window's list area the select loop erases each
+   frame with, PUSH 0x57e3 at 00027c68.  PANEL_W and PANEL_H above are the two
+   extents the blit that fills it is given. */
+#define PANEL_BACKDROP_BYTES (PANEL_W * PANEL_H)
+
+/* The map cursor is held in world pixels and this is the tile size every
+   reader divides it by, MOV EBX,0x18 in front of each of the seven IDIV
+   (gamedata.h). */
+#define MAP_TILE_SIZE 0x18
+
+/* What data_fdps_map_cursor_draw_mode is set to and what the spell's blast
+   radius contributes to it.  0 paints nothing, 1 is the plain cursor, and
+   radius + 2 is the diamond footprint fdps_draw_map_cursor paints round it
+   (gamedata.h).  The bias is also how the radius is recovered on the map-wide
+   arm, SUB EAX,0x2 at 00027f2f. */
+#define CURSOR_OVERLAY_OFF 0
+#define CURSOR_OVERLAY_PLAIN 1
+#define CURSOR_FOOTPRINT_BIAS 2
+
+/* MAGICDAT.DAT's cast-range byte carries the reach and the shape together, the
+   same encoding fdps_collect_targets_in_range reads (aitarget.h): up to 0x0f
+   it is a radius in tiles, and from 0x10 up it is a straight line whose length
+   is the low nibble.  The test is CMP dword ptr [EBP-0xc],0xf / JLE at
+   00027e46, so 0x0f is the last radius and the line arm is the one that falls
+   through. */
+#define CAST_RANGE_LAST_RADIUS 0x0f
+#define CAST_RANGE_LINE_BIT 0x10
+
+/* The min_dist argument every sweep here passes, PUSH 0x0 at 00027ddb,
+   00027ed9 and 00027f41: the caster's own tile is kept.  The item menu is the
+   one caller that ever drops it (item.c). */
+#define AIM_SWEEP_KEEP_OWN_TILE 0
+
+/* The line sweep's side filter, PUSH 0x1 at 00027e5f --
+   fdps_collect_targets_in_line's select_enemy_side, and not a spell record
+   byte (aitarget.h). */
+#define LINE_SWEEP_KEEPS_ENEMY_SIDE 1
+
+/* The sound a line spell's aim plays once the sweep is done, MOV EAX,0x61ba4 /
+   PUSH EAX at 00027ebd.  It is passed as a writable string because the lookup
+   upper-cases it in the caller's own storage (audio.h,
+   rebuild_info/pitfalls.md). */
+#define LINE_SWEEP_SOUND "Chess.wav"
+
+/* The map-wide arm's four literals.  The sweep keeps side 0 only, PUSH 0x0 at
+   00027f3f -- fdps_collect_targets_in_range's select_mode 0 (aitarget.h) --
+   and the aim that follows is handed an empty candidate list, PUSH 0x0 at
+   00027fa0, so the mode is all that steers it.  Mode 4 is the map-wide aim and
+   mode 5 the one that never confirms, MOV dword ptr [EBP-0x3c],0x4 at 00027f85
+   and 0x5 at 00027f92. */
+#define MAP_WIDE_SELECT_MODE 0
+#define MAP_WIDE_AIM_LIST_COUNT 0
+#define MAP_WIDE_AIM_MODE 4
+#define MAP_WIDE_AIM_MODE_NO_TARGET 5
+
+/* 傳送術, the one spell that asks for a second tile after its target, CMP
+   EAX,0x15 / JZ at 00027fc3, and the cursor mode that second pick runs in,
+   PUSH 0x6 at 00027ff7 -- the mode that only accepts a tile the unit may stand
+   on (mapcur.h). */
+#define TELEPORT_SPELL_ID 0x15
+#define DESTINATION_SELECT_MODE 6
+
+/* The two hundred-byte stack buffers: the unit indices a sweep matches, and
+   the death scripts collected after the spell has been applied.  They are
+   [EBP-0xc8] and [EBP-0x12c], 0x64 bytes of frame each. */
+#define TARGET_BUFFER_BYTES 100
+#define DEATH_SCRIPT_BUFFER_BYTES 100
+
+/* What the experience banked for this cast is divided by before it is paid:
+   the caster's level byte, plus 30 when its portrait id is above 8, because a
+   promoted form's level byte has restarted at 1.  CMP EAX,0x8 / JLE at
+   000280cf, ADD dword ptr [EBP-0x30],0x1e at 000280d4.
+
+   fdps_unit_heal_and_credit_exp adds the same 30 for portrait ids 0x0f..0x21
+   (unitstat.c).  The two spans are different and the difference is what each
+   function credits; they are not one rule written twice. */
+#define LAST_UNPROMOTED_PORTRAIT_ID 8
+#define PROMOTED_LEVEL_BONUS 0x1e
+
+/* What this command answers with.  A cast is the select loop's own 1 handed
+   straight back out -- MOV EAX,dword ptr [EBP-0x3c] at 00028116 -- and the -1
+   is the only literal the function returns, MOV dword ptr [EBP-0x4],0xffffffff
+   at 00027d73. */
+#define SPELL_COMMAND_NOT_ACTED (-1)
+
+/* 00027c20.  See spellmnu.h for what the player sees and what the answer
+   means.
+
+   THE SCROLL POSITION AND THE CURSOR ROW ARE INITIALISED IN FRONT OF THE RETRY
+   LOOP, at 00027c2c and 00027c33 and not inside it, which is why a cancelled
+   aim reopens the list on the same page with the same spell still highlighted.
+   Declaring the two inside the loop body -- the obvious C -- sends the player
+   back to the top of the list every time.
+
+   THE ORIGINAL HOLDS SEVERAL OF THESE LOCALS IN ONE STACK SLOT: [EBP-0x30] is
+   the animation step and then the caster's effective level, [EBP-0xc] the cast
+   range and then the map-wide arm's radius, and [EBP-0x3c] the aim mode and
+   then the answer.  Each pair is two different measurements and each is named
+   as such here; a stack slot is not observable behaviour (ADR-0001). */
+int fdps_battle_spell_command(int unit_index)
+{
+    /* Where the spell list is scrolled to and which entry the cursor is on.
+       Both survive a cancelled aim; see the note above. */
+    int list_top;
+    int cursor_index;
+    /* The whole 320x200 frame the window is composed in: the Status.cel
+       artwork, then the caster's stat panel, then its spell list. */
+    unsigned char *window_image;
+    /* The screen as it stood before the window opened, which every animation
+       frame is drawn over and the close is handed back. */
+    void *background_frame;
+    /* The pristine copy of the window's list area, which the select loop lays
+       back over the list before it redraws it (spellmnu.h). */
+    unsigned char *panel_backdrop;
+    /* The caster's record.  Resolved once a pass, before the window is
+       animated, and read again at the end of the pass for the experience
+       divisor. */
+    struct fdps_unit_record *caster;
+    /* Which sprite cache slot the caster's walk cycle would come out of,
+       record byte 2 widened unsigned.  Nothing reads it: the wait loop that
+       needs it resolves the record for itself (spellmnu.h).  The load is kept
+       because the original makes it. */
+    int sprite_cache_slot;
+    /* Which step of the window's slide-in is being drawn. */
+    int step;
+    /* What the last window or cursor loop answered: a cancel or a confirm. */
+    int pick_result;
+    /* The caster's known spell ids, collected afresh after the list has closed
+       so that the row the cursor was left on can be turned back into an id. */
+    unsigned char spell_ids[SPELL_LIST_ID_BUFFER_BYTES];
+    /* The chosen spell's MAGICDAT.DAT record. */
+    struct fdps_spell_effect *spell;
+    /* That record's reach-and-shape byte, widened to the int the signed
+       compare against 0x0f is made on. */
+    int cast_range;
+    /* The blast radius a map-wide spell covers, read back out of the cursor
+       mode the line above installed it in. */
+    int map_wide_radius;
+    /* Which cursor mode the map-wide aim runs in: the one that confirms, or
+       the one that cannot. */
+    int map_wide_aim_mode;
+    /* Where a sweep writes the unit indices it matched, one byte each. */
+    unsigned char targets[TARGET_BUFFER_BYTES];
+    /* How many units the spell about to be played out covers. */
+    int target_count;
+    /* The caster's record fetched a second time, for the tile a line spell
+       sweeps from.  The aim runs between the two lookups, so this is a re-read
+       rather than a reuse of caster (unit.h). */
+    struct fdps_unit_record *line_origin_unit;
+    /* The death scripts whatever the spell killed leaves behind, and how many
+       of them there are. */
+    unsigned char death_scripts[DEATH_SCRIPT_BUFFER_BYTES];
+    int death_script_count;
+    /* The caster's level, with the promoted form's 30 added. */
+    int effective_level;
+
+    list_top = 0;
+    cursor_index = 0;
+
+    for (;;) {
+        /* The window: the artwork, a copy of the live screen to animate over,
+           and the copy of the list area the select loop erases with. */
+        window_image = (unsigned char *) fdps_load_status_cel_image();
+        background_frame = malloc((size_t) VGA_SCREEN_BYTES);
+        memmove(background_frame, (void *) VGA_SCREEN_BASE,
+                (size_t) VGA_SCREEN_BYTES);
+        panel_backdrop = (unsigned char *)
+            malloc((size_t) PANEL_BACKDROP_BYTES);
+        fdps_blit_rect((unsigned int) (window_image + LIST_AREA_AT),
+                       VGA_SCREEN_PITCH, panel_backdrop, PANEL_STRIDE,
+                       PANEL_W, PANEL_H);
+
+        fdps_draw_unit_status_panel(unit_index, window_image);
+        fdps_draw_spell_list_page(unit_index, list_top, cursor_index,
+                                  window_image + LIST_AREA_AT,
+                                  VGA_SCREEN_PITCH);
+
+        caster = fdps_get_unit_record(unit_index);
+        sprite_cache_slot = (int) caster->sprite_cache_slot;
+
+        for (step = 0; step < STATUS_WINDOW_ANIM_STEPS; step++) {
+            fdps_draw_status_window_anim_frame(background_frame, window_image,
+                                               step);
+        }
+
+        pick_result = fdps_spell_list_select_loop(unit_index, window_image,
+                                                  panel_backdrop, &list_top,
+                                                  &cursor_index);
+        fdps_close_status_window(window_image, background_frame);
+        free(window_image);
+        free(panel_backdrop);
+        free(background_frame);
+
+        if (pick_result == SPELL_SELECT_CANCELLED) {
+            return SPELL_COMMAND_NOT_ACTED;
+        }
+
+        /* The list is collected again to turn the row the cursor was left on
+           back into a spell id; the count the collector answers with is not
+           looked at. */
+        fdps_unit_collect_known_spells(unit_index, spell_ids);
+        spell = fdps_get_spell_record((int) spell_ids[cursor_index]);
+        data_fdps_map_cursor_draw_mode = (int) spell->area
+                                         + CURSOR_FOOTPRINT_BIAS;
+        cast_range = (int) spell->cast_range_flags;
+
+        if (cast_range != 0) {
+            /* An aimed spell: what is in reach of the cursor, then the aim,
+               then the units the effect really covers about the tile the aim
+               settled on. */
+            target_count = fdps_collect_targets_in_range(
+                data_fdps_map_cursor_world_x / MAP_TILE_SIZE,
+                data_fdps_map_cursor_world_y / MAP_TILE_SIZE, targets,
+                cast_range, AIM_SWEEP_KEEP_OWN_TILE,
+                (int) spell->target_side);
+            pick_result = fdps_map_cursor_select_loop(
+                (int) spell->target_side, target_count, targets);
+            fdps_map_grid_reset();
+
+            /* BOTH SWEEPS RUN EVEN ON A CANCELLED AIM, and the second one is
+               the count and the list a confirmed cast would be given. */
+            if (cast_range > CAST_RANGE_LAST_RADIUS) {
+                line_origin_unit = fdps_get_unit_record(unit_index);
+                target_count = fdps_collect_targets_in_line(
+                    data_fdps_map_cursor_world_x / MAP_TILE_SIZE,
+                    data_fdps_map_cursor_world_y / MAP_TILE_SIZE, targets,
+                    (int) line_origin_unit->pos_x,
+                    (int) line_origin_unit->pos_y,
+                    cast_range - CAST_RANGE_LINE_BIT,
+                    LINE_SWEEP_KEEPS_ENEMY_SIDE);
+                fdps_play_sfx(LINE_SWEEP_SOUND);
+            } else {
+                target_count = fdps_collect_targets_in_range(
+                    data_fdps_map_cursor_world_x / MAP_TILE_SIZE,
+                    data_fdps_map_cursor_world_y / MAP_TILE_SIZE, targets,
+                    (int) spell->area, AIM_SWEEP_KEEP_OWN_TILE,
+                    (int) spell->target_side);
+            }
+        } else {
+            /* A map-wide spell: nothing is aimed, so the footprint goes back
+               to a plain cursor and the sweep runs from where the cursor
+               already is. */
+            map_wide_radius = data_fdps_map_cursor_draw_mode
+                              - CURSOR_FOOTPRINT_BIAS;
+            data_fdps_map_cursor_draw_mode = CURSOR_OVERLAY_PLAIN;
+            target_count = fdps_collect_targets_in_range(
+                data_fdps_map_cursor_world_x / MAP_TILE_SIZE,
+                data_fdps_map_cursor_world_y / MAP_TILE_SIZE, targets,
+                map_wide_radius, AIM_SWEEP_KEEP_OWN_TILE,
+                MAP_WIDE_SELECT_MODE);
+            map_wide_aim_mode = MAP_WIDE_AIM_MODE;
+            if (target_count == 0) {
+                map_wide_aim_mode = MAP_WIDE_AIM_MODE_NO_TARGET;
+            }
+            pick_result = fdps_map_cursor_select_loop(map_wide_aim_mode,
+                                                      MAP_WIDE_AIM_LIST_COUNT,
+                                                      targets);
+        }
+
+        if (pick_result == SPELL_SELECT_CONFIRMED
+            && spell_ids[cursor_index] == TELEPORT_SPELL_ID) {
+            /* 傳送術 takes a second pick, the tile its one target is to be
+               moved to.  A hit list that starts with the caster itself throws
+               the whole cast away. */
+            fdps_map_grid_reset();
+            if ((int) targets[0] == unit_index) {
+                pick_result = SPELL_SELECT_CANCELLED;
+            }
+            if (pick_result == SPELL_SELECT_CONFIRMED) {
+                pick_result = fdps_map_cursor_select_loop(
+                    DESTINATION_SELECT_MODE, (int) targets[0], NULL);
+            }
+            if (pick_result == SPELL_SELECT_CONFIRMED) {
+                data_fdps_battle_teleport_dest_tile_x =
+                    data_fdps_map_cursor_world_x / MAP_TILE_SIZE;
+                data_fdps_teleport_destination_tile_y =
+                    data_fdps_map_cursor_world_y / MAP_TILE_SIZE;
+                data_fdps_map_cursor_draw_mode = CURSOR_OVERLAY_OFF;
+                fdps_map_cursor_move_to_unit(unit_index);
+                data_fdps_map_cursor_draw_mode = CURSOR_OVERLAY_PLAIN;
+            }
+        }
+
+        fdps_map_grid_reset();
+
+        if (pick_result == SPELL_SELECT_CONFIRMED) {
+            fdps_combat_play_spell_on_targets(unit_index,
+                                              (int) spell_ids[cursor_index],
+                                              target_count, targets);
+            death_script_count = fdps_collect_death_scripts(death_scripts);
+            fdps_play_death_animation_and_mark_dead();
+            fdps_run_death_scripts(unit_index, death_script_count,
+                                   death_scripts);
+
+            /* The haul is divided by the caster's level, so a haul smaller
+               than the divisor rounds away to nothing. */
+            effective_level = (int) caster->level;
+            if ((int) caster->portrait_id > LAST_UNPROMOTED_PORTRAIT_ID) {
+                effective_level += PROMOTED_LEVEL_BONUS;
+            }
+            data_fdps_battle_pending_xp_credit =
+                data_fdps_battle_pending_xp_credit / effective_level;
+            fdps_unit_award_exp_and_level_up(unit_index);
+        }
+
+        data_fdps_map_cursor_draw_mode = CURSOR_OVERLAY_PLAIN;
+        fdps_map_cursor_move_to_unit(unit_index);
+
+        if (pick_result == SPELL_SELECT_CONFIRMED) {
+            return pick_result;
         }
     }
 }
