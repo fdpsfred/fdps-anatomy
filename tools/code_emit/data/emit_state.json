@@ -3656,6 +3656,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x92"
+    },
+    "00031210": {
+      "name": "fdps_run_village_phase",
+      "target": "village.c",
+      "body_size": "0x313",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x313"
     }
   }
 }

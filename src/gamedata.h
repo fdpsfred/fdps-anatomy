@@ -1299,6 +1299,23 @@ extern unsigned char *data_fdps_portrait_sprite_buf_ptr;
    objects. */
 extern unsigned char data_fdps_village_mode_flag;
 
+/* 00060131.  Whether the village phase must NOT offer to save on its way past
+   a chapter that has no village.  Three instructions in the image touch it:
+   fdps_title_screen sets it at 0002a8c8, on the path that has just loaded a
+   save file and is about to hand control to fdps_run_village_phase;
+   fdps_run_village_phase tests it at 0003127c and clears it at 00031513.
+
+   What the test gates is the whole no-village interlude -- blanking the
+   adapter, putting data_fdps_vga_main_palette_ptr up and running
+   fdps_save_game_screen (save.h) -- so with the flag set the phase goes
+   straight on to the chapter script.  A player who has just picked a slot to
+   load from is not asked, one keystroke later, which slot to save into.
+
+   It is cleared unconditionally at the end of every village phase, whether or
+   not that phase was the one it was set for, so it is live for exactly one
+   pass through fdps_run_village_phase.  One byte, tested only against zero. */
+extern unsigned char data_fdps_village_skip_save_prompt_flag;
+
 /* 00063fb4.  The village phase's saved screen: a malloc'd 64000-byte page
    holding the finished 320x200 picture the visible screen is showing, kept so
    that a window opened over it can be taken away again without recomposing

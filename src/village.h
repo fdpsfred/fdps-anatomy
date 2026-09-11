@@ -196,4 +196,44 @@ extern void fdps_village_animate_window_zoom(unsigned char *screen_page,
                                              unsigned char closing);
 #pragma aux fdps_village_animate_window_zoom "*" parm caller [];
 
+/* Runs one whole village phase and answers with the signboard destination the
+   phase left on: 0 for a phase the player walked out of normally, and 0 again
+   for a phase that never ran because a quit was already pending.  Both call
+   sites -- main at 000293a7 and fdps_title_screen at 0002a8d5 -- throw the
+   answer away, so nothing in the image acts on it.
+
+   It takes no argument: everything it works on is global, and the chapter it
+   is running is data_fdps_chapter_current_chapter_id.
+
+   IT DOES NOT ALWAYS SHOW A TOWN.  Chapter ids 0x10, 0x11, 0x15, 0x16 and
+   everything above 0x19 have no village at all; for those the phase blanks the
+   screen, offers the save prompt and goes straight on to the chapter script.
+   The town itself -- the signboard menu and the five screens it opens -- runs
+   only for the other ids.  Which ids those are is the body's own comment.
+
+   IT ALWAYS ENDS BY ENTERING THE CHAPTER.  Whichever half ran, the tail calls
+   the chapter's entry in data_fdps_chapter_init_handler_table (chapter.h) and
+   then fdps_cd_verify_disc_and_play_track (cdaudio.h), so a caller returns
+   from this with the next chapter already set up and its music playing -- and
+   with the disc check having possibly stopped and prompted on the way.  The
+   script is skipped, but the disc check is not, when a quit came in while the
+   town was up.
+
+   WHAT IT NEEDS IN PLACE.  MISC.VFS has to be readable, because both town
+   sheets come out of it and a miss ends the process inside fdps_vfs_load_entry
+   (vfs.h).  The adapter has to be in mode 13h, since the zoom transitions draw
+   straight to 0xa0000 (transit.h).  The timer interrupt and the keyboard hook
+   both have to be running, because the signboard menu paces its frames on the
+   tick and reads the scancode ring.
+
+   WHAT IT LEAVES BEHIND.  data_fdps_village_mode_flag is clear, the map unit
+   array is released to a null pointer and a zero count, the terrain-HUD
+   setting is back at whatever it was, and the skip-save-prompt flag
+   data_fdps_village_skip_save_prompt_flag is clear whether or not it was set
+   (gamedata.h).  The chapter's resources, loaded by
+   fdps_load_field_chapter_resources (rsrc.h), stay loaded: they are what the
+   battle that follows runs on. */
+extern int fdps_run_village_phase(void);
+#pragma aux fdps_run_village_phase "*" parm caller [];
+
 #endif

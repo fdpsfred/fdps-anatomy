@@ -84,4 +84,28 @@ extern void fdps_show_chapter_title_card(void);
    index. */
 extern void (*data_fdps_chapter_event_handler_table[50])(int unit_index);
 
+/* 00060074.  The thirty per-chapter setup scripts, indexed by the chapter id
+   the game is entering.  Entry n is fdps_chapter_NN_init for NN = n + 1 --
+   entry 0 is fdps_chapter_01_init at 00020e90 and entry 29 is
+   fdps_chapter_30_init at 00021610 -- because the id is 0-based while the
+   chapter the player is shown is one more.  Thirty is the whole table: its 120
+   bytes run from 00060074 to 000600ec, where the "IconAni.vfs" literal starts.
+
+   Two indirect call sites reach it, CALL dword ptr [EAX + 0x60074] at
+   0002a85e in fdps_title_screen and at 00031505 in fdps_run_village_phase, and
+   both spell it the same way: the id scaled by four, nothing pushed and
+   nothing added to ESP afterwards, so the handlers take no argument and return
+   nothing.  Neither site range-checks the id -- a chapter past 29 calls
+   whatever the bytes after the table decode to.
+
+   Ghidra types the slots as void_fn, its placeholder for a code pointer of
+   unknown shape; that no argument is pushed at either site is what fixes them
+   as void (*)(void).
+
+   It is the SECOND of the two tables a chapter goes through.  This one runs
+   when the chapter is entered, out of the village phase or straight off the
+   title screen; data_fdps_chapter_event_handler_table above is the scripted
+   events inside the battle that follows. */
+extern void (*data_fdps_chapter_init_handler_table[30])(void);
+
 #endif

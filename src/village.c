@@ -1,20 +1,28 @@
 /* village.c -- the village phase: the between-battle town screen.
  *
- * See village.h for what the phase covers.  This file holds the signboard menu
- * itself -- the modal loop the player picks a destination in -- the walk
- * animation that carries the marker from one destination to the next, and the
- * menu's hidden entry: the per-chapter secret-shop unlock code and the state
- * machine that matches one keystroke at a time against it.
+ * See village.h for what the phase covers.  This file holds the phase driver
+ * itself -- the routine that decides whether this chapter has a town at all
+ * and, if it has, loops the signboard menu over the five town screens -- the
+ * signboard menu that loop runs, the walk animation that carries the marker
+ * from one destination to the next, the gold readout and the window zoom every
+ * shop opens with, and the menu's hidden entry: the per-chapter secret-shop
+ * unlock code and the state machine that matches one keystroke at a time
+ * against it.
  *
- * abs, malloc and free come from <stdlib.h>, memmove from <string.h> and inp
- * and outp from <conio.h>, which is where Watcom 10.0a declares each of them,
- * and all six are real calls in the original -- CALL 0x0003d364 at 00031fdc
- * and 00031fea, CALL 0x0003d375 at 00031d9e and 00032064, CALL 0x0003d478 at
- * 00031f39, 00031f4a and 00032352, CALL 0x0003d514 at 00031db6, 00031f1a,
- * 0003207c and 00032333, CALL 0x0003d4e4 at 00031e51, 00031f00, 00032308 and
- * 00032319 and CALL 0x00042cb8 at 00031e9a, 00031eb7, 00031ed4 and 00031ef1 --
- * because the flag set carries no -oi (rebuild_info/build_flags.md), so the
- * plain declarations are what reproduce them.
+ * abs, malloc and free come from <stdlib.h>, memmove and memset from
+ * <string.h> and inp and outp from <conio.h>, which is where Watcom 10.0a
+ * declares each of them, and every one of the seven is a real call in the
+ * original, because the flag set carries no -oi (rebuild_info/build_flags.md)
+ * and the plain declarations are what reproduce them:
+ *
+ *   abs      0x0003d364  00031fdc 00031fea
+ *   malloc   0x0003d375  000312b9 00031341 00031d9e 00032064
+ *   free     0x0003d478  000312e7 00031386 00031403 000314a4 000314b2
+ *                        00031f39 00031f4a 00032352
+ *   memmove  0x0003d514  00031db6 00031f1a 0003207c 00032333
+ *   memset   0x00042cd0  00031291 000312cf
+ *   inp      0x0003d4e4  00031e51 00031f00 00032308 00032319
+ *   outp     0x00042cb8  00031e9a 00031eb7 00031ed4 00031ef1
  */
 #include <stdlib.h>
 #include <string.h>
@@ -24,11 +32,19 @@
 #include "audio.h"
 #include "blit.h"
 #include "cdaudio.h"
+#include "chapter.h"
 #include "keybd.h"
+#include "palette.h"
+#include "rsrc.h"
+#include "save.h"
 #include "sprite.h"
 #include "text.h"
+#include "transit.h"
 #include "vfs.h"
+#include "vilbar.h"
 #include "village.h"
+#include "vilmenu.h"
+#include "vilshop.h"
 
 /* The 320x200 8bpp page the whole game composes in, its pitch and its size,
    and the adapter's own linear frame buffer.  PUSH 0xfa00 at 00031d99,
@@ -77,6 +93,234 @@
 /* Sprite 6 of the sheet is the empty plate frame, redrawn opaque under every
    name plate: PUSH 0x6 at 00031e19 and 000320fd. */
 #define PLATE_FRAME_SPRITE 6
+
+/* --- fdps_run_village_phase @ 00031210 ---------------------------------- */
+
+/* The town's own two sheets and the container they live in.  Both member
+   names reach fdps_vfs_load_entry, which upper-cases the MEMBER name in the
+   caller's own storage before the compare (vfs.h), so these two literals are
+   folded to VILLAGE.CEL and SHOPWIN.CEL by the first call and cannot live in
+   read-only storage (rebuild_info/pitfalls.md).  The container name is copied
+   raw and is left as it stands: the original holds one "MISC.VFS" at 0x60128
+   that every push in the image points at, and whether this translation unit
+   ends up with one copy of that text or two is not observable, because
+   nothing ever writes through a container path.  Sprite 0 of Village.cel is
+   the whole 320x200 town picture, PUSH 0x0 as the index at 00031374. */
+#define VILLAGE_ARCHIVE "MISC.VFS"
+#define VILLAGE_MAP_SHEET "Village.cel"
+#define VILLAGE_WINDOW_SHEET "ShopWin.Cel"
+#define VILLAGE_MAP_SPRITE 0
+
+/* The chapters that have no town between them and the battle.  Ids 0x10 and
+   0x11 are the player's chapters 17 and 18, 0x15 and 0x16 his 22 and 23, and
+   every id above 0x19 is chapter 27 onwards -- the run the story never comes
+   back to a village in.
+
+   It is a macro and not a helper because the original has no call here: the
+   five compares stand inline twice, at 0003123d..0003126c on the way in and
+   again at 00031432..00031461 after the bar shop, and both times read
+   data_fdps_chapter_current_chapter_id afresh for each one.  Every compare is
+   SIGNED -- JLE and not JBE -- so a negative id falls below the first range
+   rather than above the last (contract C). */
+#define NO_VILLAGE_RUN_FIRST 0x10
+#define NO_VILLAGE_RUN_LAST 0x11
+#define NO_VILLAGE_CHAPTER_A 0x15
+#define NO_VILLAGE_CHAPTER_B 0x16
+#define LAST_CHAPTER_WITH_VILLAGE 0x19
+
+#define CHAPTER_HAS_NO_VILLAGE(chapter_id)                                  \
+    ((((chapter_id) >= NO_VILLAGE_RUN_FIRST) &&                             \
+      ((chapter_id) <= NO_VILLAGE_RUN_LAST)) ||                             \
+     ((chapter_id) == NO_VILLAGE_CHAPTER_A) ||                              \
+     ((chapter_id) == NO_VILLAGE_CHAPTER_B) ||                              \
+     ((chapter_id) > LAST_CHAPTER_WITH_VILLAGE))
+
+/* Where the signboard cursor can be left standing, which is what the jump
+   table at 00031328 turns into a screen.  0 is the entry that ends the phase
+   and is the only value the do-while stops on; the other five are the five
+   town screens, in the order the table lists them. */
+#define VILLAGE_DESTINATION_LEAVE 0
+#define VILLAGE_DESTINATION_BAR 1
+#define VILLAGE_DESTINATION_CHURCH 2
+#define VILLAGE_DESTINATION_ITEMS 3
+#define VILLAGE_DESTINATION_WEAPONS 4
+#define VILLAGE_DESTINATION_SECRET 5
+
+/* The two directions fdps_transition_zoom is asked for (transit.h): non-zero
+   pulls the picture back out of the magnification and leaves it up, zero runs
+   the same ramp backwards and leaves the screen blank.  MOV EAX,0x1 at
+   0003138e opens the menu and XOR EAX,EAX at 000313d0 closes it, both centred
+   on the signboard the cursor is standing on. */
+#define ZOOM_PULL_BACK 1
+#define ZOOM_IN 0
+
+/* The music the phase asks for: index 2 is the town theme, PUSH 0x2 at
+   00031319, and -1 is silence, PUSH -0x1 at 00031272 and 000314e6.  Both are
+   0-based music indices and not CD track numbers (cdaudio.h). */
+#define VILLAGE_MUSIC_INDEX 2
+#define MUSIC_SILENCE -1
+
+/* The chapter track table has two columns and the village asks for the first,
+   PUSH 0x0 at 0003151a (cdaudio.h). */
+#define VILLAGE_TRACK_SLOT 0
+
+/* The whole DAC, PUSH 0xff / PUSH 0x0 at 0003129f and 000312a4, at no bias. */
+#define FIRST_DAC_ENTRY 0
+#define LAST_DAC_ENTRY 0xff
+
+/* 00031210.  One whole village phase.  See village.h for what a caller gets
+   back and what has to be in place before the call; what follows is how the
+   assembly maps onto the C.
+
+   THE KEYBOARD IS FLUSHED BEFORE THE QUIT IS TESTED.  CALL 0x000567b3 at
+   00031223 comes before CMP byte ptr [0x000643eb],0x0 at 00031228, so even
+   the phase that returns at once throws the pending keystrokes away.  That is
+   the only thing the early-out does.
+
+   THE TWO HALVES ARE A CHAPTER TEST AND THEY SHARE A TAIL.  The gate falls
+   through into the no-village half and jumps to the town at 000312f4, which
+   is an `if (no village) ... else ...` and not the other way round; the
+   doubled JMPs at 00031258 and 00031263 are what -od makes of an || chain.
+   Both halves then land on 000314d5, so the terrain-HUD save, the fade to
+   silence, the chapter script and the disc check run exactly once whichever
+   half ran.
+
+   THE PAGE LOCAL IS ONE LOCAL.  [EBP-0x10] is the blanked page the save
+   screen is handed on the no-village side and the composed town page inside
+   the menu loop on the other, and the frame is only 0x18 bytes -- six dwords
+   for a return temp, the saved HUD byte, the selection, this page, the map
+   sheet and the switch temp -- so the two uses are one variable and not two
+   that happened to share a slot.
+
+   THE MENU LOOP RELOADS EVERYTHING EVERY PASS.  The malloc at 00031341 and
+   the Village.cel load at 00031358 are both inside the loop and both are
+   released before the switch, so a phase that visited three screens made
+   three allocations and three loads.  Only ShopWin.Cel is loaded once,
+   outside, and held in data_fdps_village_window_sheet_ptr for the window
+   animations the shop screens play (village.h).  The answer from malloc is
+   not tested, the same as the original.
+
+   THE SELECTION SURVIVES THE SCREEN THAT RAN.  fdps_village_signboard_menu
+   writes it in place, the switch dispatches on it, and it is still what the
+   do-while tests afterwards -- so the next pass opens the zoom centred on the
+   signboard the player just used, and a screen that wanted the phase to end
+   would have to set it to 0.  Only the bar shop does: after it the chapter
+   test runs a second time and forces the selection back to 0 for a chapter
+   that has since stopped having a village, which is how a bar that advanced
+   the story ends the phase instead of returning to the signboard.
+
+   THE TERRAIN-HUD SETTING IS SAVED AS AN INT AND PUT BACK AS A BYTE.  XOR
+   EAX,EAX / MOV AL,[0x00060158] at 000314d5 widens the byte into the dword
+   local, and MOV AL,[EBP-0x8] / MOV [0x00060158],AL at 0003150b narrows it
+   again; the global is one unsigned byte read only as a boolean (gamedata.h),
+   so nothing here is sign-sensitive.
+
+   THE CHAPTER SCRIPT IS NOT RANGE-CHECKED.  CALL dword ptr [EAX + 0x60074] at
+   00031505 scales the id by four and calls, the id being whatever the chapter
+   that just ended left behind; see chapter.h for what the table is.  The disc
+   check after it is NOT guarded by the quit flag, so a phase the player quit
+   out of still stops the drive and may still ask for a disc. */
+int fdps_run_village_phase(void)
+{
+    int selection;
+    int saved_terrain_hud_enabled;
+    unsigned char *screen_page;
+    unsigned char *village_map_sheet;
+
+    selection = VILLAGE_DESTINATION_LEAVE;
+    fdps_flush_keyboard_queue();
+    if (data_fdps_shared_quit_game_requested != 0) {
+        return 0;
+    }
+
+    if (CHAPTER_HAS_NO_VILLAGE(data_fdps_chapter_current_chapter_id)) {
+        fdps_cd_set_music_track(MUSIC_SILENCE);
+        if (data_fdps_village_skip_save_prompt_flag == 0) {
+            memset((void *) VGA_SCREEN_BASE, 0, (size_t) VGA_SCREEN_BYTES);
+            fdps_set_palette_range(
+                (struct fdps_palette_entry *) data_fdps_vga_main_palette_ptr,
+                FIRST_DAC_ENTRY, LAST_DAC_ENTRY, 0, 0, 0);
+            screen_page = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+            memset(screen_page, 0, (size_t) VGA_SCREEN_BYTES);
+            fdps_save_game_screen(screen_page);
+            free(screen_page);
+        }
+    } else {
+        data_fdps_village_mode_flag = 1;
+        data_fdps_village_window_sheet_ptr = (unsigned char *)
+            fdps_vfs_load_entry(VILLAGE_ARCHIVE, VILLAGE_WINDOW_SHEET);
+        fdps_load_field_chapter_resources();
+        fdps_cd_set_music_track(VILLAGE_MUSIC_INDEX);
+
+        do {
+            screen_page = (unsigned char *) malloc((size_t) VGA_SCREEN_BYTES);
+            village_map_sheet = (unsigned char *)
+                fdps_vfs_load_entry(VILLAGE_ARCHIVE, VILLAGE_MAP_SHEET);
+            fdps_cel_blit_sprite(village_map_sheet, VILLAGE_MAP_SPRITE,
+                                 screen_page, VGA_SCREEN_PITCH, 0, 0, 0,
+                                 BLIT_MODE_OPAQUE);
+            free(village_map_sheet);
+
+            fdps_transition_zoom(
+                screen_page,
+                data_fdps_village_signboard_destination_x_table[selection],
+                data_fdps_village_destination_marker_y_table[selection],
+                ZOOM_PULL_BACK);
+            fdps_village_signboard_menu(screen_page, &selection);
+            fdps_transition_zoom(
+                screen_page,
+                data_fdps_village_signboard_destination_x_table[selection],
+                data_fdps_village_destination_marker_y_table[selection],
+                ZOOM_IN);
+            free(screen_page);
+
+            switch (selection) {
+            case VILLAGE_DESTINATION_BAR:
+                fdps_run_bar_shop();
+                if (CHAPTER_HAS_NO_VILLAGE(
+                        data_fdps_chapter_current_chapter_id)) {
+                    selection = VILLAGE_DESTINATION_LEAVE;
+                }
+                break;
+            case VILLAGE_DESTINATION_CHURCH:
+                fdps_run_church_screen();
+                break;
+            case VILLAGE_DESTINATION_ITEMS:
+                fdps_village_item_menu();
+                break;
+            case VILLAGE_DESTINATION_WEAPONS:
+                fdps_run_weapon_shop();
+                break;
+            case VILLAGE_DESTINATION_SECRET:
+                fdps_run_secret_menu();
+                break;
+            }
+
+            fdps_flush_keyboard_queue();
+        } while (selection != VILLAGE_DESTINATION_LEAVE &&
+                 data_fdps_shared_quit_game_requested == 0);
+
+        free(data_fdps_village_window_sheet_ptr);
+        free(data_fdps_shop_stock_table_ptr);
+        data_fdps_village_mode_flag = 0;
+        data_fdps_map_unit_count = 0;
+        data_fdps_map_unit_array_ptr = NULL;
+    }
+
+    saved_terrain_hud_enabled = data_fdps_ui_terrain_hud_user_enabled;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    fdps_cd_set_music_track(MUSIC_SILENCE);
+    if (data_fdps_shared_quit_game_requested == 0) {
+        (*data_fdps_chapter_init_handler_table[
+            data_fdps_chapter_current_chapter_id])();
+    }
+    data_fdps_ui_terrain_hud_user_enabled =
+        (unsigned char) saved_terrain_hud_enabled;
+    data_fdps_village_skip_save_prompt_flag = 0;
+    fdps_cd_verify_disc_and_play_track(data_fdps_chapter_current_chapter_id,
+                                       VILLAGE_TRACK_SLOT);
+    return selection;
+}
 
 /* The archive, the sheet and the cursor click.  All three are literals the
    original keeps in its writable data segment -- "MISC.VFS" at 0x60128 and

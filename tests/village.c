@@ -20,13 +20,17 @@
 #include <conio.h>
 #include <dos.h>
 #include <i86.h>
+#include <io.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "cd.h"
 #include "cdaudio.h"
+#include "chapter.h"
 #include "keybd.h"
 #include "sprite.h"
 #include "text.h"
+#include "vfs.h"
 #include "village.h"
 
 /* Chapter id 5 is the player's chapter 6, whose row is 1f 12 2e 13 12 14 --
@@ -2412,6 +2416,322 @@ static void zwin_frees_its_page_and_leaves_a_null_portrait_alone(void)
     zwin_unstage();
 }
 
+/* ---- fdps_run_village_phase, 00031210 ------------------------------------
+ *
+ * Two of the function's three paths can be run from a test.
+ *
+ * The early-out at 00031228 stands on its own: one call to
+ * fdps_flush_keyboard_queue, which copies one ring index over the other and
+ * touches nothing else (keybd.h), and a return.
+ *
+ * The no-village half and the tail both halves share run as a whole, with two
+ * things staged out of the way.  data_fdps_village_skip_save_prompt_flag is
+ * set, which is what the original's own test at 0003127c skips the blanking,
+ * the palette upload and fdps_save_game_screen with -- that last one is a
+ * modal slot picker and would never come back here.  And every entry of
+ * data_fdps_chapter_init_handler_table is pointed at a function of this file's
+ * own, which is what the table holds at run time anyway: a pointer the phase
+ * calls with nothing pushed (chapter.h).
+ *
+ * THE TOWN HALF CANNOT BE RUN AND NOTHING BELOW CLAIMS TO.  It opens
+ * fdps_village_signboard_menu, which spins on the scancode ring and the
+ * vertical retrace until a player confirms, and then one of five shop screens
+ * that do the same.  So the chapter gate is witnessed only from its no-village
+ * side: an id that should reach the town would hang rather than fail an
+ * assertion, and the boundary between the two halves is not something an
+ * assertion here can pin.
+ *
+ * The tail ends in fdps_cd_verify_disc_and_play_track, which is modal while
+ * the wrong disc is in the drive, so every case that reaches it probes for the
+ * disc first and skips itself when it is not there -- the same guard and the
+ * same interrupt fence tests/cdaudio.c puts round that function.
+ *
+ * Expected values come from the assembly at 00031210 and, for the track the
+ * disc check publishes, from column 0 of the sixty-byte chapter track table at
+ * 000304a0.
+ */
+
+/* A value no path through the function writes, so a global still holding it
+   afterwards says nothing touched it. */
+#define VPH_FLAG_POISON 0x5a
+
+/* A music index no chapter row holds, for the same reason. */
+#define VPH_MUSIC_POISON 0x5a5a5a5aL
+
+/* A chapter id the gate sends to the town: 0x0f is below the first no-village
+   run at 0x10 and is neither singleton.  Only the early-out cases use it, and
+   they never get as far as the gate -- which is the point of using it. */
+#define VPH_CHAPTER_WITH_A_VILLAGE 0x0f
+
+/* Two ring indices that differ, so one value standing in both afterwards is
+   the evidence that the flush at 00031223 ran. */
+#define VPH_QUEUE_READ_AT 3
+#define VPH_QUEUE_WRITE_AT 7
+
+/* The prefix the disc check composes "%s\Pack.vfs" from, and the same path
+   spelled out for this file's own probe (cdaudio.h). */
+#define VPH_DISC_DRIVE_LETTER 'E'
+#define VPH_PACK_VFS_PATH "E:\\Pack.vfs"
+#define VPH_PASS_DAT_MEMBER "Pass.Dat"
+#define VPH_DISC_DIGIT_BASE '0'
+
+/* Two no-village chapters on each disc whose column-0 tracks differ from each
+   other, and those tracks.  Row 0 is disc 1 and row 1 is disc 2.  The chapters
+   are the gate's own at 0003123d -- 16 and 17 are the run 0x10..0x11, 21 is
+   0x15 and 26 is past 0x19 -- and the tracks are column 0 of the table at
+   000304a0: 16 -> 0x0d, 17 -> 0x09, 21 -> 0x05, 26 -> 0x0d.  A disc 2 chapter
+   cannot be asked for while disc 1 is in without sending the disc check into
+   its prompt, which is why the pair is chosen by the disc that is actually
+   mounted. */
+static int vph_no_village_chapter[2][2] = { {16, 17}, {21, 26} };
+static int vph_no_village_track[2][2] = { {0x0d, 0x09}, {0x05, 0x0d} };
+
+/* How many entries the chapter script table holds (chapter.h). */
+#define VPH_CHAPTER_SCRIPTS 30
+
+/* INT 21h AH=35h for vector 09h: offset as the result, selector through the
+   pointer.  Written out here rather than shared with tests/cdaudio.c because a
+   test file is a translation unit of its own. */
+extern unsigned int vph_read_int9_vector(unsigned short *selector_out);
+#pragma aux vph_read_int9_vector =      \
+    "push es"                           \
+    "push esi"                          \
+    "mov  eax,3509h"                    \
+    "int  21h"                          \
+    "mov  ax,es"                        \
+    "pop  esi"                          \
+    "mov  [esi],ax"                     \
+    "pop  es"                           \
+    parm [esi]                          \
+    value [ebx]                         \
+    modify [eax ebx ecx edx];
+
+/* INT 21h AH=25h for vector 09h with an arbitrary selector:offset, which is
+   what putting the original handler back needs after the disc check has
+   installed the game's own. */
+extern void vph_write_int9_vector(unsigned short handler_selector,
+                                  unsigned int handler_offset);
+#pragma aux vph_write_int9_vector =     \
+    "push ds"                           \
+    "mov  eax,2509h"                    \
+    "mov  ds,cx"                        \
+    "int  21h"                          \
+    "pop  ds"                           \
+    parm [cx] [edx]                     \
+    modify [eax ebx ecx edx];
+
+/* Set bit 1 of the master 8259 mask so IRQ1 cannot be delivered while the
+   vector is being moved about, and hand the mask back as it was.  Masking
+   stops the interrupt rather than deferring it the way CLI would, and
+   deferral would not hold: DOS re-enables interrupts inside the very INT 21h
+   calls the disc check makes. */
+extern unsigned char vph_mask_irq1(void);
+#pragma aux vph_mask_irq1 =             \
+    "in   al,21h"                       \
+    "mov  ah,al"                        \
+    "or   al,2"                         \
+    "out  21h,al"                       \
+    "mov  al,ah"                        \
+    value [al]                          \
+    modify [eax];
+
+extern void vph_restore_irq_mask(unsigned char mask);
+#pragma aux vph_restore_irq_mask = "out 21h,al" parm [al] modify [eax];
+
+/* Which disc is in, read the way the disc check reads it: the first byte of
+   the Pass.Dat member less '0', or 0 when the container is not there at all.
+   Both arguments are this file's own arrays because fdps_vfs_load_entry
+   upper-cases the member name in the caller's buffer (vfs.h). */
+static int vph_inserted_disc(void)
+{
+    char container_path[20];
+    char member_name[16];
+    unsigned char *pass_dat_block;
+
+    if (access(VPH_PACK_VFS_PATH, F_OK) != 0) {
+        return 0;
+    }
+    strcpy(container_path, VPH_PACK_VFS_PATH);
+    strcpy(member_name, VPH_PASS_DAT_MEMBER);
+    pass_dat_block = (unsigned char *)
+        fdps_vfs_load_entry(container_path, member_name);
+    return *pass_dat_block - VPH_DISC_DIGIT_BASE;
+}
+
+/* What the staged chapter script saw and how often each of the two ran. */
+static int vph_script_runs;
+static int vph_other_script_runs;
+static int vph_hud_while_script_ran;
+
+/* The script the run points at the chapter it is running.  It reads the
+   terrain-HUD flag because the only place that reading is possible from is
+   inside the window the phase holds it clear for -- 000314df clears it and
+   0003150e puts it back, with the indirect call at 00031505 in between. */
+static void vph_chapter_script(void)
+{
+    vph_script_runs++;
+    vph_hud_while_script_ran = data_fdps_ui_terrain_hud_user_enabled;
+}
+
+/* The script every OTHER entry of the table is pointed at, so that a run which
+   indexed the table with anything but the chapter id is visible as this one
+   having been called. */
+static void vph_other_chapter_script(void)
+{
+    vph_other_script_runs++;
+}
+
+/* One whole no-village pass, fenced.  The save prompt is skipped the way the
+   original's own flag skips it; the CD request blocks are the ones cdaudio
+   allocates and the drive is named past every letter there is, so MSCDEX
+   refuses each request on the drive number before it follows ES:BX; and
+   vector 09h is saved, seeded and put back around the call, because the disc
+   check takes the keyboard hook down on the way in and puts the game's own up
+   on the way out. */
+static int vph_run_no_village(int chapter_id)
+{
+    unsigned char saved_irq_mask;
+    unsigned short vector_selector;
+    unsigned int vector_offset;
+    int answer;
+    int i;
+
+    if (data_fdps_cd_request_header_real_mode_seg == 0) {
+        fdps_cd_alloc_dos_buffers();
+    }
+    data_fdps_cdrom_drive_letter_index = 0xff;
+    data_fdps_cdrom_path[0] = VPH_DISC_DRIVE_LETTER;
+    data_fdps_cdrom_path[1] = ':';
+    data_fdps_cdrom_path[2] = '\0';
+    data_fdps_audio_bgm_enabled_flag = 1;
+    data_fdps_audio_cd_current_music_index = (int) VPH_MUSIC_POISON;
+
+    for (i = 0; i < VPH_CHAPTER_SCRIPTS; i++) {
+        data_fdps_chapter_init_handler_table[i] = vph_other_chapter_script;
+    }
+    data_fdps_chapter_init_handler_table[chapter_id] = vph_chapter_script;
+    vph_script_runs = 0;
+    vph_other_script_runs = 0;
+    vph_hud_while_script_ran = VPH_FLAG_POISON;
+
+    data_fdps_shared_quit_game_requested = 0;
+    data_fdps_village_mode_flag = 0;
+    data_fdps_village_skip_save_prompt_flag = 1;
+    data_fdps_ui_terrain_hud_user_enabled = 1;
+    data_fdps_chapter_current_chapter_id = chapter_id;
+
+    saved_irq_mask = vph_mask_irq1();
+    vector_offset = vph_read_int9_vector(&vector_selector);
+    data_fdps_input_prev_int9_handler_selector = vector_selector;
+    data_fdps_prev_int9_handler_offset = vector_offset;
+
+    answer = fdps_run_village_phase();
+
+    vph_write_int9_vector(vector_selector, vector_offset);
+    vph_restore_irq_mask(saved_irq_mask);
+    return answer;
+}
+
+/* CALL 0x000567b3 at 00031223 comes before CMP byte ptr [0x000643eb],0x0 at
+   00031228, so the phase that returns at once has still rewound the ring.  The
+   chapter id is one the gate would send to the town, which is what makes the
+   return a witness that the early-out happened before the gate rather than
+   after it: reaching the gate with this id would open the signboard menu and
+   never come back. */
+static void vph_quit_flushes_then_returns_zero(void)
+{
+    data_fdps_input_scancode_queue_head = VPH_QUEUE_READ_AT;
+    data_fdps_input_scancode_queue_write_index = VPH_QUEUE_WRITE_AT;
+    data_fdps_chapter_current_chapter_id = VPH_CHAPTER_WITH_A_VILLAGE;
+    data_fdps_shared_quit_game_requested = 1;
+
+    CHECK_EQ(fdps_run_village_phase(), 0);
+    CHECK_EQ(data_fdps_input_scancode_queue_write_index, VPH_QUEUE_READ_AT);
+    CHECK_EQ(data_fdps_input_scancode_queue_head, VPH_QUEUE_READ_AT);
+
+    data_fdps_shared_quit_game_requested = 0;
+}
+
+/* MOV dword ptr [EBP-0x4],0x0 / JMP 00031530 is the whole early-out: no
+   global is written on the way past, not even the two the tail clears on every
+   other path. */
+static void vph_quit_writes_no_global(void)
+{
+    data_fdps_village_mode_flag = VPH_FLAG_POISON;
+    data_fdps_ui_terrain_hud_user_enabled = VPH_FLAG_POISON;
+    data_fdps_village_skip_save_prompt_flag = VPH_FLAG_POISON;
+    data_fdps_chapter_current_chapter_id = VPH_CHAPTER_WITH_A_VILLAGE;
+    data_fdps_shared_quit_game_requested = 1;
+
+    CHECK_EQ(fdps_run_village_phase(), 0);
+    CHECK_EQ(data_fdps_village_mode_flag, VPH_FLAG_POISON);
+    CHECK_EQ(data_fdps_ui_terrain_hud_user_enabled, VPH_FLAG_POISON);
+    CHECK_EQ(data_fdps_village_skip_save_prompt_flag, VPH_FLAG_POISON);
+
+    data_fdps_shared_quit_game_requested = 0;
+    data_fdps_village_mode_flag = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_village_skip_save_prompt_flag = 0;
+}
+
+/* A chapter with no village runs the half at 00031272 and then the tail every
+   half shares, and the eight things asserted here are that whole tail:
+   000314d5 saves the terrain-HUD byte and 000314df clears it, 00031505 calls
+   the chapter script through the table, 0003150b puts the byte back, 00031513
+   clears the save-prompt flag and 00031522 sends the chapter to the disc
+   check, which publishes the chapter's own track.  The answer is the selection
+   the phase ended on, which on this half is the 0 the entry at 0003121c put
+   there and nothing since has changed; data_fdps_village_mode_flag standing at
+   0 is what says the town half was not the one that ran. */
+static void vph_no_village_runs_the_shared_tail(void)
+{
+    int disc;
+    int answer;
+
+    disc = vph_inserted_disc();
+    if (disc != 1 && disc != 2) {
+        return;
+    }
+
+    answer = vph_run_no_village(vph_no_village_chapter[disc - 1][0]);
+
+    CHECK_EQ(answer, 0);
+    CHECK_EQ(data_fdps_village_mode_flag, 0);
+    CHECK_EQ(vph_script_runs, 1);
+    CHECK_EQ(vph_other_script_runs, 0);
+    CHECK_EQ(vph_hud_while_script_ran, 0);
+    CHECK_EQ(data_fdps_ui_terrain_hud_user_enabled, 1);
+    CHECK_EQ(data_fdps_village_skip_save_prompt_flag, 0);
+    CHECK_EQ(data_fdps_audio_cd_current_music_index,
+             vph_no_village_track[disc - 1][0]);
+
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+}
+
+/* The same tail on the other no-village chapter of the mounted disc.  The
+   script that ran is the entry at THAT id and not the one the case before
+   used, and the track the disc check published is that chapter's row rather
+   than the first one's -- the two rows were picked to differ, so an emit that
+   handed either call a constant or the wrong global would show up here. */
+static void vph_no_village_tail_follows_the_chapter_id(void)
+{
+    int disc;
+
+    disc = vph_inserted_disc();
+    if (disc != 1 && disc != 2) {
+        return;
+    }
+
+    vph_run_no_village(vph_no_village_chapter[disc - 1][1]);
+
+    CHECK_EQ(vph_script_runs, 1);
+    CHECK_EQ(vph_other_script_runs, 0);
+    CHECK_EQ(data_fdps_audio_cd_current_music_index,
+             vph_no_village_track[disc - 1][1]);
+
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+}
+
 void run_village_tests(void)
 {
     RUN_TEST(village_secret_code_completes);
@@ -2468,4 +2788,9 @@ void run_village_tests(void)
     RUN_TEST(zwin_never_writes_the_callers_page);
     RUN_TEST(zwin_releases_the_portrait_buffer);
     RUN_TEST(zwin_frees_its_page_and_leaves_a_null_portrait_alone);
+
+    RUN_TEST(vph_quit_flushes_then_returns_zero);
+    RUN_TEST(vph_quit_writes_no_global);
+    RUN_TEST(vph_no_village_runs_the_shared_tail);
+    RUN_TEST(vph_no_village_tail_follows_the_chapter_id);
 }
