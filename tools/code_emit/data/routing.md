@@ -46,6 +46,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `death.c` | 4 | 503 | 0 | 0 | 503 |
 | `deploy.c` | 3 | 502 | 1 | 1 | 503 |
 | `dpmi.c` | 6 | 363 | 0 | 0 | 363 |
+| `ending.c` | 1 | 314 | 0 | 0 | 314 |
 | `gamedata.c` | 0 | 0 | 136 | 136 | 136 |
 | `gauge.c` | 9 | 955 | 1 | 1 | 956 |
 | `icon.c` | 9 | 956 | 0 | 0 | 956 |
@@ -82,7 +83,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `statwin.c` | 4 | 354 | 1 | 1 | 355 |
 | `table.c` | 10 | 390 | 0 | 0 | 390 |
 | `text.c` | 4 | 535 | 0 | 0 | 535 |
-| `title.c` | 5 | 903 | 0 | 0 | 903 |
+| `title.c` | 4 | 589 | 0 | 0 | 589 |
 | `transit.c` | 4 | 519 | 0 | 0 | 519 |
 | `unit.c` | 13 | 693 | 0 | 0 | 693 |
 | `unitatk.c` | 3 | 429 | 1 | 1 | 430 |
@@ -543,6 +544,12 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `0003cb93` | 50 | `fdps_dpmi_lock_size` |
 | `0003cbaa` | 44 | `fdps_dpmi_unlock_size` |
 
+### `ending.c` -- 1 functions, 314 lines
+
+| address | lines | function |
+| --- | ---: | --- |
+| `0001ba40` | 314 | `fdps_play_ending_credit_roll` |
+
 ### `gauge.c` -- 9 functions, 955 lines
 
 | address | lines | function |
@@ -896,11 +903,10 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `0001fed0` | 67 | `fdps_blit_glyph_1bpp` |
 | `0001ff60` | 237 | `fdps_draw_text` |
 
-### `title.c` -- 5 functions, 903 lines
+### `title.c` -- 4 functions, 589 lines
 
 | address | lines | function |
 | --- | ---: | --- |
-| `0001ba40` | 314 | `fdps_play_ending_credit_roll` |
 | `0002a2b0` | 301 | `fdps_title_screen` |
 | `0002a960` | 124 | `fdps_show_game_over` |
 | `0002ac10` | 104 | `fdps_title_demo` |
@@ -1122,7 +1128,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `00060058` | data | `data_fdps_battle_tile_attr_def_modifier_table` | read from 3 files: combat.c, mapcur.c, unitatk.c |
 | `00060070` | data | `data_fdps_village_mode_flag` | read from 7 files: msgwin.c, save.c, spellmnu.c, statunit.c, statwin.c, text.c, village.c |
 | `00060120` | data | `data_fdps_portrait_sprite_buf_ptr` | read from 4 files: main.c, msgwin.c, text.c, village.c |
-| `00060124` | data | `data_fdps_current_chapter_text_ptr` | read from 20 files: btlend.c, chend2.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost1.c, chpost2.c, death.c, icon.c, main.c, rsrc.c, title.c, vilbar.c, vilmenu.c, vilshop.c |
+| `00060124` | data | `data_fdps_current_chapter_text_ptr` | read from 20 files: btlend.c, chend2.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost1.c, chpost2.c, death.c, ending.c, icon.c, main.c, rsrc.c, vilbar.c, vilmenu.c, vilshop.c |
 | `00060131` | data | `data_fdps_village_skip_save_prompt_flag` | read from 2 files: title.c, village.c |
 | `00060138` | data | `data_fdps_cel_sprite_cache_ptr` | read from 16 files: church.c, deploy.c, main.c, mapcur.c, mapdraw.c, roster.c, rsrc.c, savefile.c, savepnl.c, shopdraw.c, spellmnu.c, sprite.c, statunit.c, unitstat.c, village.c, vilmenu.c |
 | `0006013c` | data | `data_fdps_tile_event_data_table_ptr` | read from 9 files: btlact.c, btlmenu.c, btlturn.c, deploy.c, main.c, mapai.c, maptile.c, rsrc.c, savefile.c |
@@ -1172,7 +1178,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `00064108` | bss | `data_fdps_roster_array_ptr` | read from 11 files: btlmenu.c, deploy.c, main.c, roster.c, rsrc.c, save.c, savefile.c, savepnl.c, table.c, title.c, unit.c |
 | `0006410c` | bss | `data_fdps_map_char_spawn_count` | read from 3 files: deploy.c, rsrc.c, savefile.c |
 | `00064110` | bss | `data_fdps_bonus_lottery_drawn_flag` | read from 3 files: save.c, title.c, vilbar.c |
-| `00064114` | bss | `data_fdps_roster_member_count` | read from 14 files: btlmenu.c, church.c, deploy.c, roster.c, rsrc.c, save.c, savefile.c, savepnl.c, shop.c, shopdraw.c, title.c, unit.c, village.c, vilmenu.c |
+| `00064114` | bss | `data_fdps_roster_member_count` | read from 15 files: btlmenu.c, church.c, deploy.c, ending.c, roster.c, rsrc.c, save.c, savefile.c, savepnl.c, shop.c, shopdraw.c, title.c, unit.c, village.c, vilmenu.c |
 | `00064118` | bss | `data_fdps_map_player_slot_count` | read from 3 files: deploy.c, rsrc.c, savefile.c |
 | `00064378` | bss | `data_fdps_indicator_queue_count` | read from 2 files: indicat.c, item.c |
 | `0006437c` | bss | `data_fdps_battle_teleport_dest_tile_x` | read from 3 files: item.c, spell.c, spellmnu.c |
@@ -1184,7 +1190,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `000643b0` | bss | `data_fdps_level_up_window_sheet_ptr` | read from 2 files: main.c, unitstat.c |
 | `000643b4` | bss | `data_fdps_unit_gauge_sheet_ptr` | read from 2 files: gauge.c, main.c |
 | `000643b8` | bss | `data_fdps_cursor_highlight_sprite_sheet_ptr` | read from 2 files: main.c, sprite.c |
-| `000643bc` | bss | `data_fdps_vga_main_palette_ptr` | read from 14 files: aiact.c, chapter.c, chevt6.c, church.c, cmbspell.c, combat.c, icon.c, main.c, savefile.c, spell.c, title.c, transit.c, unitatk.c, village.c |
+| `000643bc` | bss | `data_fdps_vga_main_palette_ptr` | read from 15 files: aiact.c, chapter.c, chevt6.c, church.c, cmbspell.c, combat.c, ending.c, icon.c, main.c, savefile.c, spell.c, title.c, transit.c, unitatk.c, village.c |
 | `000643c0` | bss | `data_fdps_selection_bar_sheet_ptr` | read from 7 files: church.c, main.c, shop.c, shopdraw.c, spellmnu.c, statunit.c, vilmenu.c |
 | `000643c4` | bss | `data_fdps_all_game_text_ptr` | read from 19 files: btlact.c, btlmenu.c, cdaudio.c, church.c, death.c, item.c, main.c, roster.c, savefile.c, savepnl.c, shop.c, shopdraw.c, spellmnu.c, statunit.c, text.c, unitstat.c, vilbar.c, vilmenu.c, vilshop.c |
 | `000643c8` | bss | `data_fdps_status_gauge_bar_sheet_ptr` | read from 2 files: gauge.c, main.c |
@@ -1194,11 +1200,11 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `000643d8` | bss | `data_fdps_number_glyph_sheet_ptr` | read from 3 files: indicat.c, main.c, text.c |
 | `000643dc` | bss | `data_fdps_shadow_sprite_sheet_ptr` | read from 5 files: main.c, mapdraw.c, msgwin.c, spellmnu.c, statunit.c |
 | `000643e0` | bss | `data_fdps_ui_terrain_hud_panel_sheet_ptr` | read from 2 files: main.c, mapcur.c |
-| `000643e4` | bss | `data_fdps_vga_fight_palette_ptr` | read from 5 files: church.c, cmbspell.c, combat.c, main.c, title.c |
+| `000643e4` | bss | `data_fdps_vga_fight_palette_ptr` | read from 5 files: church.c, cmbspell.c, combat.c, ending.c, main.c |
 | `000643e8` | bss | `data_fdps_cdrom_path` | read from 3 files: cdaudio.c, main.c, title.c |
 | `000643eb` | bss | `data_fdps_shared_quit_game_requested` | read from 6 files: btlmenu.c, chend2.c, main.c, title.c, vilbar.c, village.c |
-| `000643f0` | bss | `data_fdps_inverse_palette_cube` | read from 18 files: anim.c, church.c, cmbspell.c, combat.c, gauge.c, main.c, mapdraw.c, msgwin.c, palette.c, shopdraw.c, spell.c, sprite.c, statwin.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c |
-| `000653f0` | bss | `data_fdps_palette_shade_ramp_table` | read from 18 files: anim.c, church.c, cmbspell.c, combat.c, gauge.c, main.c, mapdraw.c, msgwin.c, palette.c, shopdraw.c, spell.c, sprite.c, statwin.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c |
+| `000643f0` | bss | `data_fdps_inverse_palette_cube` | read from 19 files: anim.c, church.c, cmbspell.c, combat.c, ending.c, gauge.c, main.c, mapdraw.c, msgwin.c, palette.c, shopdraw.c, spell.c, sprite.c, statwin.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c |
+| `000653f0` | bss | `data_fdps_palette_shade_ramp_table` | read from 19 files: anim.c, church.c, cmbspell.c, combat.c, ending.c, gauge.c, main.c, mapdraw.c, msgwin.c, palette.c, shopdraw.c, spell.c, sprite.c, statwin.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c |
 | `00069bf0` | bss | `data_fdps_scene_layer_scroll_x_accumulator` | read from 2 files: mapdraw.c, rsrc.c |
 | `00069c08` | bss | `data_fdps_scene_layer_scroll_offset_y` | read from 2 files: mapdraw.c, rsrc.c |
 | `00069c20` | bss | `data_fdps_scene_layer_tile_sheet_ptrs` | read from 5 files: main.c, mapcur.c, mapdraw.c, rsrc.c, sprite.c |
@@ -1219,7 +1225,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `00069ce8` | bss | `data_fdps_battle_turn_counter` | read from 15 files: anim.c, btlend.c, btlmenu.c, btlturn.c, chapter.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt6.c, chpost1.c, chpost2.c, savefile.c |
 | `00069cec` | bss | `data_fdps_battle_pending_xp_credit` | read from 9 files: aiact.c, btlact.c, btlturn.c, combat.c, icon.c, item.c, spellmnu.c, unitatk.c, unitstat.c |
 | `00069cf0` | bss | `data_fdps_cel_sprite_cache_count` | read from 6 files: deploy.c, main.c, roster.c, rsrc.c, savefile.c, savepnl.c |
-| `00069cf4` | bss | `data_fdps_chapter_current_chapter_id` | read from 30 files: btlend.c, btlmenu.c, btlturn.c, chapter.c, chend1.c, chend2.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost2.c, icon.c, main.c, menu.c, palcycle.c, roster.c, rsrc.c, save.c, savefile.c, shop.c, shopdraw.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c |
+| `00069cf4` | bss | `data_fdps_chapter_current_chapter_id` | read from 31 files: btlend.c, btlmenu.c, btlturn.c, chapter.c, chend1.c, chend2.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost2.c, ending.c, icon.c, main.c, menu.c, palcycle.c, roster.c, rsrc.c, save.c, savefile.c, shop.c, shopdraw.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c |
 | `00069cf8` | bss | `data_fdps_scene_layer_tile_attr_mode` | read from 2 files: mapdraw.c, rsrc.c |
 | `00069cfe` | bss | `data_fdps_scene_layer_draw_depth` | read from 2 files: mapdraw.c, rsrc.c |
 | `00069d04` | bss | `data_fdps_map_tile_info_tile_id` | read from 3 files: mapcur.c, maptile.c, overview.c |
@@ -1229,7 +1235,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `00069d0b` | bss | `data_fdps_map_tile_combat_backdrop_id` | read from 3 files: cmbspell.c, combat.c, maptile.c |
 | `00069d0c` | bss | `data_fdps_map_current_move_grid_marker` | read from 3 files: mapcur.c, maptile.c, movegrid.c |
 | `00069d54` | bss | `data_fdps_audio_cd_current_music_index` | read from 2 files: cdaudio.c, main.c |
-| `00069d64` | bss | `data_fdps_timer_tick_counter` | read from 31 files: anim.c, audio.c, btlend.c, cdaudio.c, church.c, cmbblow.c, cmbspell.c, combat.c, death.c, gauge.c, indicat.c, keybd.c, mapcur.c, mapdraw.c, msgwin.c, overview.c, palcycle.c, roster.c, saf.c, save.c, shop.c, shopdraw.c, spell.c, spellmnu.c, statunit.c, title.c, transit.c, unitstat.c, vilbar.c, village.c, vilmenu.c |
+| `00069d64` | bss | `data_fdps_timer_tick_counter` | read from 32 files: anim.c, audio.c, btlend.c, cdaudio.c, church.c, cmbblow.c, cmbspell.c, combat.c, death.c, ending.c, gauge.c, indicat.c, keybd.c, mapcur.c, mapdraw.c, msgwin.c, overview.c, palcycle.c, roster.c, saf.c, save.c, shop.c, shopdraw.c, spell.c, spellmnu.c, statunit.c, title.c, transit.c, unitstat.c, vilbar.c, village.c, vilmenu.c |
 | `00069d70` | bss | `data_fdps_audio_sfx_enabled_flag` | read from 5 files: audio.c, btlmenu.c, menu.c, save.c, savefile.c |
 | `00069d80` | bss | `data_fdps_shop_stock_table_ptr` | read from 3 files: rsrc.c, shop.c, village.c |
 | `00069d84` | bss | `data_fdps_village_window_sheet_ptr` | read from 6 files: church.c, shop.c, shopdraw.c, text.c, village.c, vilmenu.c |

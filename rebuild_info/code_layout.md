@@ -26,7 +26,7 @@ emit 是序列的，一次一支 function，每支各自 commit。檔案落點�
 
 **每個檔的預估行數不超過 1000。** 這不是程式的性質，是模型讀寫的效率界線：超過之後每次改一行都要把整個檔讀進 context。
 
-預估值的來源是 **Ghidra decompiled code 的行數**，由 `tools/code_emit/DumpRoutingInputs.java` 產生。全部 514 支合計約 50,000 行，分成 85 個 `.c`。這是估計不是保證——實際 emit 出來的 C 會偏離，處置規則見下面「超標了怎麼辦」。
+預估值的來源是 **Ghidra decompiled code 的行數**，由 `tools/code_emit/DumpRoutingInputs.java` 產生。全部 514 支合計約 50,000 行，分成 86 個 `.c`。這是估計不是保證——實際 emit 出來的 C 會偏離，處置規則見下面「超標了怎麼辦」。
 
 ## 資料符號歸誰
 
@@ -87,7 +87,7 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 
 ## 檔案表
 
-85 個 `.c`，各自配一個同名 `.h`。逐檔的 function 清單與行數在 `tools/code_emit/data/routing.md`。
+86 個 `.c`，各自配一個同名 `.h`。逐檔的 function 清單與行數在 `tools/code_emit/data/routing.md`。
 
 ### 戰鬥地圖 AI
 
@@ -214,5 +214,6 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 | `dpmi.c` | DPMI 的 DOS 記憶體配置與區段鎖定 |
 | `keybd.c` | 鍵盤 ISR、佇列與掃描碼讀取 |
 | `main.c` | 進入點、全域資源載入與釋放 |
-| `title.c` | 標題畫面、demo、game over、片尾、FMV |
+| `title.c` | 標題畫面、demo、game over、FMV 播放 |
+| `ending.c` | 片尾：roster 每個成員一張動畫卡與收尾的 End 影片。原本與標題畫面同屬 `title.c`，但四支落地後已 1117 行、`fdps_title_screen`還排在後面，於是把片尾這段自成一檔——它是唯一不屬於「標題與結束畫面」那組、由章節結局叫起來的前台演出 |
 | `gamedata.c` | 跨檔共用的全域狀態，唯一的資料專用檔 |

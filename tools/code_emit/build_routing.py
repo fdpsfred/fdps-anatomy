@@ -374,9 +374,11 @@ OVERRIDES = {
     "fdps_options_menu": ("menu.c",
         "Built out of the shared menu open/cursor/close primitives; a menu "
         "instance, not a settings subsystem."),
-    "fdps_play_ending_credit_roll": ("title.c",
-        "Front-of-house presentation like the title screen and game over; "
-        "reached from two chapter endings but owned by neither."),
+    "fdps_play_ending_credit_roll": ("ending.c",
+        "The ending sequence is a file of its own: one animated epilogue card "
+        "per roster member, reached from two chapter endings and owned by "
+        "neither, and big enough that title.c cannot hold it and the title "
+        "screen too."),
     "fdps_play_death_animation_and_mark_dead": ("death.c",
         "The death sequence and the scripts it fires are one pipeline."),
     "fdps_run_death_scripts": ("death.c",

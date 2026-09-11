@@ -2584,7 +2584,7 @@
     },
     "0001ba40": {
       "name": "fdps_play_ending_credit_roll",
-      "target": "title.c",
+      "target": "ending.c",
       "body_size": "0x832",
       "status": "committed",
       "emitted_against": "0x832",
