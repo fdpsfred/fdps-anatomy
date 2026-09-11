@@ -13,7 +13,95 @@
 #include "gamedata.h"
 #include "unit.h"
 #include "btlend.h"
+#include "text.h"
 #include "chpost1.h"
+
+/* The mode 13h aperture and its row stride, PUSH 0xa0000 at 0003a3dd and PUSH
+   0x140 at 0003a3d8 in front of chapter 1's one draw.  0xa0000 stays a literal
+   because it is where the display adapter answers and not the address of
+   anything the linker places (rebuild_info/pitfalls.md, contract E). */
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_SCREEN_PITCH 0x140
+
+/* The standard message colours, PUSH 0xd0 at 0003a3d3, PUSH 0x0 at 0003a3d1
+   and PUSH 0x6d at 0003a3cf: glyph fill, no cell background, and the shadow
+   the outline colour becomes while the font's outline flag is clear.  Every
+   ordinary line of spoken game text is drawn with these three. */
+#define MESSAGE_FG_COLOR 0xd0
+#define MESSAGE_BG_COLOR 0
+#define MESSAGE_OUTLINE_COLOR 0x6d
+
+/* The unit slot chapter 1's own defeat test asks about, PUSH 0x2 at 0003a3c1.
+   It is a position in this map's unit array and not a character id: map00.dat
+   declares one player slot in its header byte at +1, so the roster pass fills
+   only slot 0 with 蘭迪斯, and the opening ICON00.DAT script then deploys the
+   map's lone enemy record into slot 1 and its wave-1 record -- side 1,
+   character id 0x0c, level 10, the guest 索爾 -- into slot 2, which is the
+   slot the same script immediately retires, places at (14, 14) and unretires
+   again. */
+#define CH01_SOL_SLOT 2
+
+/* The entry of the chapter's own text block the death line is spoken from,
+   PUSH 0xf at 0003a3e2.  It is the last of FDETXT01.TXT's sixteen entries and
+   opens with the token -0x11 carrying character id 0x0c, so fdps_draw_text
+   raises the portrait of the very unit that has just been lost. */
+#define CH01_SOL_DEATH_TEXT_ID 15
+
+/* 0003a3b0.  The shared test, then one defeat test of this chapter's own that
+   speaks a line before it records its verdict.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003a3b0..0003a3b6 -- and
+   nothing in it is ever read, so there is no local to name.
+
+   CALL 0x0003a2e0 at 0003a3bc has nothing pushed in front of it and no ESP
+   adjustment behind it, so the shared test takes no argument, and the very
+   next instruction is PUSH 0x2: EAX is not consulted between the two calls, so
+   that call's result is not used here.  PUSH 0x2 / CALL 0x000109b0 / ADD
+   ESP,0x4 at 0003a3c1..0003a3c8 is fdps_unit_is_retired(2), the caller
+   clearing its one argument, and its EAX is used -- TEST EAX,EAX / JZ 0003a3fc
+   at 0003a3cb is the only branch in the body, skipping both the draw and the
+   store.
+
+   The seven pushes at 0003a3cf..0003a3e4 go in reverse argument order --
+   0x6d, 0x0, 0xd0, 0x140, 0xa0000, 0xf, then the dword at 0x00060124 -- so the
+   draw is fdps_draw_text(data_fdps_current_chapter_text_ptr, 15, 0xa0000,
+   0x140, 0xd0, 0, 0x6d), and ADD ESP,0x1c at 0003a3ef is this function
+   clearing all seven itself.  fdps_draw_text hands back the cursor it stopped
+   at; nothing here reads it, EAX being untouched between the CALL at 0003a3ea
+   and the MOV at 0003a3f2, so the result is discarded.
+
+   THE DRAW IS INSIDE THE BRANCH AND CARRIES NO GUARD OF ITS OWN.  It is not
+   conditioned on the battle-end code, so the line is spoken on the path where
+   the shared test had already settled a clear and on the path where it
+   returned at its gate because a chapter event had recorded a verdict.
+
+   MOV dword ptr [0x00069da0],0x1 at 0003a3f2 stores without reading the code
+   first.  So it overrides a 2 the shared test wrote moments earlier, and an
+   action that empties the enemy side and retires slot 2 at once is a defeat
+   and not a clear.  Gating the store on the code still being 0, or hanging it
+   off an else of the victory, inverts exactly that case.
+
+   The chapter's two stated lose conditions are 蘭迪斯 dying and 索爾 dying:
+   the first is the shared test's slot 0 and the second is this store.  Unlike
+   chapters 2 and 5, which carry their 索爾 condition as a death script on his
+   deployment record, chapter 1 enforces it here in code -- and it is the only
+   post-action handler in the file that speaks before it decides.
+
+   Table slot 0: the dword at 0006028c, the base of the table itself, is
+   0003a3b0. */
+void fdps_chapter_01_post_action(void)
+{
+    fdps_battle_check_default_end_conditions();
+    if (fdps_unit_is_retired(CH01_SOL_SLOT) != 0) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH01_SOL_DEATH_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+}
 
 /* 0003a450.  One CALL and a return, with no branch in the body at all.
 

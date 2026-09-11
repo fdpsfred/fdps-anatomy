@@ -19,6 +19,42 @@
 #ifndef CHPOST1_H
 #define CHPOST1_H
 
+/* Chapter 1's post-action test: the game's standard end conditions, and then
+   one defeat condition of its own -- unit slot 2 having left the battle, which
+   is announced with a spoken line before it is recorded.  Takes nothing,
+   returns nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h).
+
+   The two tests are sequential and not alternatives, and the slot-2 arm is
+   unguarded: it overwrites whatever
+   fdps_battle_check_default_end_conditions (btlend.h) just recorded, so a
+   defeat outranks a clear settled in the same call, and it fires even when the
+   shared test returned early because a chapter event had already recorded a
+   verdict.
+
+   The line is drawn first and it is inside the same unguarded arm: entry 15 of
+   the chapter's own text block, at the top-left corner of the visible mode-13h
+   page in the standard message colours, through fdps_draw_text (text.h).  That
+   entry opens with a speaker-by-character-id token, so fdps_draw_text takes
+   the pen away from the address handed to it, raises the portrait of character
+   0x0c and stands a modal wait on the keyboard; the cursor it returns is
+   discarded.  A build that recorded the verdict without speaking, or that
+   spoke only when the code was still 0, would differ on exactly the paths
+   above.
+
+   Slot 2 on this chapter's map is the guest 索爾.  map00.dat declares one
+   player slot, so the roster fills slot 0 with 蘭迪斯 alone and the opening
+   ICON00.DAT script deploys the map's lone enemy into slot 1 and 索爾 into
+   slot 2.  Slot 0, 蘭迪斯, is the shared test's business, and between them the
+   two tests are the chapter's whole stated rule set: clear the field to win,
+   lose either of the two to be defeated.  The index is a position in the unit
+   array and nothing more -- chapters 4, 5 and 6 reach their own guests with a
+   3.
+
+   Table slot 0. */
+extern void fdps_chapter_01_post_action(void);
+#pragma aux fdps_chapter_01_post_action "*" parm caller [];
+
 /* Chapter 2's post-action test: applies the game's standard end conditions
    and nothing else.  Takes nothing, returns nothing, and leaves the verdict
    in data_fdps_chapter_event_or_battle_end_code (gamedata.h) exactly as

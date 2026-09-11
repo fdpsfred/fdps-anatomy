@@ -1939,6 +1939,215 @@ static void ch14_an_open_battle_stays_open(void)
     CHECK_EQ(end_code(), 0);
 }
 
+/* ------------------------------------------------------------------ *
+ * Chapter 1's handler, 0003a3b0.  The shared test, then one defeat test of
+ * its own with a spoken line in front of the store: CALL 0x0003a2e0, then
+ * PUSH 0x2 / CALL 0x000109b0 / ADD ESP,0x4 / TEST EAX,EAX / JZ 0003a3fc,
+ * and behind that JZ the seven-push fdps_draw_text call at
+ * 0003a3cf..0003a3ef and the MOV dword ptr [0x00069da0],0x1 at 0003a3f2.
+ *
+ * The risk set is chapter 4's -- the order of the two tests, the absence of
+ * any guard on the store, and the literal 2 in the PUSH -- restaged on this
+ * chapter's map.  map00.dat declares one player slot, so the roster fills
+ * slot 0 with 蘭迪斯 alone and the opening ICON00.DAT script deploys the
+ * map's lone enemy into slot 1 and the guest 索爾 into slot 2.  The
+ * strategy guide's chapter 1 entry lists exactly two lose conditions,
+ * 蘭迪斯 dying and 索爾 dying, and unlike chapters 2 and 5 -- which carry
+ * their 索爾 condition as a map death script -- both of chapter 1's come
+ * from code: slot 0 from the shared test and slot 2 from here.
+ *
+ * Chapter id 0 is neither 0x10 nor 0x15, so inside the shared test the arm
+ * taken is PUSH 0x0 at 0003a382 -- slot 0, 蘭迪斯.
+ *
+ * WHETHER THE LINE IS DRAWN IS NOT ASSERTED BELOW.  fdps_draw_text takes
+ * its whole effect through pixels at the VGA aperture, keeps no state and
+ * returns a cursor this handler discards, so a unit test has nothing to
+ * read back; the entry id is a literal in the instruction stream (PUSH 0xf
+ * at 0003a3e2) and the reviewer's reading of it is what stands behind the
+ * emitted C.  What the staging below does do is keep the call harmless: the
+ * chapter text block is a fixture whose every entry names one lone
+ * terminator, so fdps_draw_text walks the entry, paints nothing and returns
+ * at once.  The real entry 15 opens with a speaker token and would stand a
+ * modal wait on a keyboard nothing is typing at.
+ * ------------------------------------------------------------------ */
+
+/* Chapter 1 is chapter id 0, table slot 0: the dword at 0006028c, the base of
+   the table itself, is 0003a3b0. */
+#define CHAPTER_01_ID 0
+
+/* The slot chapter 1's own defeat test asks about -- PUSH 0x2 at 0003a3c1.
+   On map00.dat that slot is the guest 索爾, deployed there by the opening
+   script rather than filled by the roster pass. */
+#define SOL_SLOT 2
+
+/* The synthetic chapter text block.  fdps_draw_text takes a table of signed
+   16-bit byte offsets measured from the block's own base and walks the stream
+   it points at until the token -1 (text.h), so a table whose every entry names
+   one lone terminator draws nothing at all and needs no font staged.  Sixteen
+   entries is what FDETXT01.TXT holds and covers the id 15 this handler asks
+   for. */
+#define CH01_TEXT_ENTRIES 16
+#define CH01_TEXT_TERMINATOR (-1)
+
+static short ch01_text[CH01_TEXT_ENTRIES + 1];
+
+/* Same staging as chapter 2's with the chapter id moved to chapter 1's, plus
+   the text block the draw inside the defeat arm reads. */
+static void stage_ch01(int live_unit_count, int battle_end_code)
+{
+    int entry;
+
+    for (entry = 0; entry < CH01_TEXT_ENTRIES; entry++) {
+        ch01_text[entry] = (short) (CH01_TEXT_ENTRIES * 2);
+    }
+    ch01_text[CH01_TEXT_ENTRIES] = CH01_TEXT_TERMINATOR;
+
+    stage(live_unit_count, battle_end_code);
+    data_fdps_chapter_current_chapter_id = CHAPTER_01_ID;
+    data_fdps_current_chapter_text_ptr = (unsigned char *) ch01_text;
+}
+
+/* The CALL at 0003a3bc is really taken: with every enemy retired and 索爾
+   standing, the shared test's up front 2 survives the handler, and a body that
+   did nothing would leave the 0 it was given. */
+static void ch01_the_shared_end_test_runs(void)
+{
+    stage_ch01(4, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(SOL_SLOT, SIDE_GUEST, 0);
+    stage_unit(3, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_01_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* One live enemy puts the code back to 0 inside the shared test, and the
+   defeat arm is not entered, so the battle carries on. */
+static void ch01_a_live_enemy_keeps_the_battle_going(void)
+{
+    stage_ch01(4, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(SOL_SLOT, SIDE_GUEST, 0);
+    stage_unit(3, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_01_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* Chapter 1 is not 0x10 or 0x15, so the shared test watches unit slot 0 --
+   蘭迪斯 -- and that half of the chapter's rule set is reached through this
+   handler unchanged, whether the field is cleared or not. */
+static void ch01_a_retired_randis_is_a_defeat(void)
+{
+    stage_ch01(3, 0);
+    stage_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(SOL_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_01_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch01(3, 0);
+    stage_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(SOL_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_01_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The whole point of the store being unguarded and last: the same action
+   empties the enemy side and retires 索爾.  The shared test writes 2 at
+   0003a2f9 and nothing puts it back to 0, then this handler overwrites it with
+   1.  An else, or a store gated on the code still being 0, would answer 2
+   here. */
+static void ch01_a_retired_sol_outranks_a_cleared_field(void)
+{
+    stage_ch01(4, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(SOL_SLOT, SIDE_GUEST, FLAG_RETIRED);
+    stage_unit(3, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_01_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The ordinary defeat: the battle is still going -- a live enemy settles the
+   shared test at 0 -- and the retired 索爾 turns that into 1. */
+static void ch01_a_retired_sol_is_a_defeat(void)
+{
+    stage_ch01(4, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(SOL_SLOT, SIDE_GUEST, FLAG_RETIRED);
+    stage_unit(3, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_01_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The other side of the JZ at 0003a3cd: with 索爾 standing the branch is not
+   taken and the shared test's verdict is what comes out, whichever it was. */
+static void ch01_a_live_sol_leaves_the_shared_verdict_alone(void)
+{
+    stage_ch01(3, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(SOL_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_01_post_action();
+    CHECK_EQ(end_code(), 0);
+
+    stage_ch01(3, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(SOL_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_01_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* The shared test abandons its body the moment it finds the code non-zero --
+   CMP dword ptr [0x00069da0],0x0 / JNZ at 0003a2ec -- but this handler's own
+   test runs on that path too, because it sits after the CALL and reads nothing
+   before it stores.  So a verdict a chapter event recorded is overwritten by a
+   retired 索爾, and left alone when he is standing. */
+static void ch01_the_sol_test_survives_a_recorded_verdict(void)
+{
+    stage_ch01(3, 2);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(SOL_SLOT, SIDE_GUEST, FLAG_RETIRED);
+    fdps_chapter_01_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch01(3, 2);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, 0);
+    stage_unit(SOL_SLOT, SIDE_GUEST, 0);
+    fdps_chapter_01_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* Only slots 0 and 2 end this battle from code.  Every other slot retires in
+   turn with a live enemy at slot 7 holding the shared test's answer at 0, so
+   anything but 0 would be a defeat test the handler does not have -- the
+   literal in the PUSH having drifted, or a second one having been invented. */
+static void ch01_no_slot_but_zero_and_two_ends_the_battle(void)
+{
+    int retired_slot;
+    int player_slot;
+
+    for (retired_slot = 1; retired_slot < STAGE_UNITS - 1; retired_slot++) {
+        if (retired_slot == SOL_SLOT) {
+            continue;
+        }
+        stage_ch01(STAGE_UNITS, 0);
+        for (player_slot = 0; player_slot < STAGE_UNITS - 1; player_slot++) {
+            stage_unit(player_slot, SIDE_PLAYER, 0);
+        }
+        stage_unit(STAGE_UNITS - 1, SIDE_ENEMY, 0);
+        stage_units[retired_slot].flags = FLAG_RETIRED;
+        fdps_chapter_01_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
 void run_chpost1_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -2010,4 +2219,12 @@ void run_chpost1_tests(void)
     RUN_TEST(ch14_no_other_slot_ends_the_battle);
     RUN_TEST(ch14_a_recorded_verdict_is_left_alone);
     RUN_TEST(ch14_an_open_battle_stays_open);
+    RUN_TEST(ch01_the_shared_end_test_runs);
+    RUN_TEST(ch01_a_live_enemy_keeps_the_battle_going);
+    RUN_TEST(ch01_a_retired_randis_is_a_defeat);
+    RUN_TEST(ch01_a_retired_sol_outranks_a_cleared_field);
+    RUN_TEST(ch01_a_retired_sol_is_a_defeat);
+    RUN_TEST(ch01_a_live_sol_leaves_the_shared_verdict_alone);
+    RUN_TEST(ch01_the_sol_test_survives_a_recorded_verdict);
+    RUN_TEST(ch01_no_slot_but_zero_and_two_ends_the_battle);
 }
