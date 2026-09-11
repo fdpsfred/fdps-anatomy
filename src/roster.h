@@ -127,4 +127,37 @@ extern void fdps_roster_preview_combat_stats_with_item(int roster_index,
 extern void fdps_roster_add_item_to_all(int item_id);
 #pragma aux fdps_roster_add_item_to_all "*" parm caller [];
 
+/* Revives every fallen member of the party roster at the cost of the party's
+   gold, and shows the player the bill.  Takes nothing and returns nothing; the
+   revived records, the reduced gold total and a rebuilt .CEL sprite cache are
+   the whole result.  The twenty-nine chapter-end handlers are its only
+   callers.
+
+   The sweep walks roster indices 0..data_fdps_roster_member_count-1 through
+   fdps_get_roster_record (table.h).  A member whose current HP word is 0 is
+   revived in place -- current HP takes the maximum, the flags byte is cleared
+   -- and the fee, that member's class fee per level times its level byte, is
+   subtracted from data_fdps_shared_party_total_gold.  With no fallen member
+   found the function returns having done nothing else.
+
+   THE FEE IS CHARGED WHATEVER THE PARTY CAN AFFORD.  There is no test before
+   the subtraction; the total is only lifted back to 0 after the panel has been
+   dismissed, so a party that could not pay ends the chapter broke rather than
+   with the revive refused.
+
+   THE PANEL DRAWS NOTHING FROM SEVEN FALLEN MEMBERS UP.  The row guard tests
+   the NUMBER of revived members against 7, not the row index, so six is the
+   largest party this shows a bill for and seven or more shows an empty frame
+   that still waits for a key.  Capping the panel at seven rows instead would
+   put a screen in front of the player that the original never draws.
+
+   The panel is animated: it holds until a make code arrives, redrawing one
+   frame per timer tick with the members' map icons walking, and each frame
+   goes out over a vertical retrace.  Rebuilding the sprite cache is part of
+   the setup and it is not put back afterwards: the cache is reseeded from
+   ICON.CEL with one group per roster member in roster order, so cache slot n
+   belongs to roster member n for whoever draws next. */
+extern void fdps_roster_revive_fallen_members(void);
+#pragma aux fdps_roster_revive_fallen_members "*" parm caller [];
+
 #endif

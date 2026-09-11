@@ -2020,6 +2020,157 @@ static void only_the_low_byte_of_the_item_id_is_stored(void)
     CHECK_EQ(unit_entry(1, 0)[1], HANDOUT_ITEM_HERB);
 }
 
+/* Cover for fdps_roster_revive_fallen_members @ 00039e70.
+ *
+ * ONLY THE SWEEP'S REJECTION PATH IS REACHABLE FROM A TEST, and that is a
+ * property of the function rather than a gap in the fixture.  The moment the
+ * sweep finds one fallen member the function stops being a computation: it
+ * frees and rebuilds the .CEL sprite cache, opens ICON.CEL and MISC.VFS, and
+ * then enters a frame loop that ends only on a keyboard make code.  Its first
+ * act is fdps_flush_keyboard_queue, so the ring reads empty and the body runs;
+ * the body waits for a vertical retrace on port 0x3da and then spins until
+ * data_fdps_timer_tick_counter moves.  Nothing in a test process advances that
+ * counter -- the INT 08h handler that does is not installed -- and nothing
+ * queues a scancode, so a case that revived a member would never return.  The
+ * revive arithmetic, the fee, the seven-row guard and the panel layout are
+ * therefore read off the assembly into the source and settled by playing the
+ * chapter end in DOSBox-X (ADR-0003), not here.
+ *
+ * What IS assertable is the guard that decides whether any of that happens:
+ * which records the sweep looks at, what makes a record count as fallen, and
+ * that a party with nobody fallen leaves the gold total and every record
+ * exactly as it found them.  Every expected value below comes from the
+ * assembly at 00039e9c..00039f2f -- CMP EAX,dword ptr [0x00064114] / JL for
+ * the bound, CMP word ptr [EAX+0x40],0x0 / JNZ for the test -- and from
+ * struct fdps_unit_record in src/fdpstype.h for the offsets.
+ */
+
+/* The gold total the cases start from, and the flags byte they fill records
+   with.  0xa5 is not a value the revive writes: the revive clears the byte to
+   0, so a record still carrying it was not touched. */
+#define REVIVE_GOLD_START 12345
+#define REVIVE_FILLER_FLAGS 0xa5
+
+/* Enough of a record for the sweep to judge it: the two HP words it compares
+   and copies, the class and level bytes the fee is built from, and a flags
+   byte that is not what a revive would leave behind. */
+static void stage_revive_member(int roster_index, int hp_current, int hp_max,
+                                int class_code, int level)
+{
+    unsigned char *record;
+
+    record = member_at(roster_index);
+    put_word(record + OFF_HP_CURRENT, hp_current);
+    put_word(record + OFF_HP_MAX, hp_max);
+    record[OFF_CLASS] = (unsigned char) class_code;
+    record[OFF_LEVEL] = (unsigned char) level;
+    record[OFF_FLAGS] = REVIVE_FILLER_FLAGS;
+}
+
+static void begin_revive_case(int member_count)
+{
+    clear_fixture();
+    data_fdps_roster_member_count = member_count;
+    data_fdps_shared_party_total_gold = REVIVE_GOLD_START;
+}
+
+/* A party with nobody down is swept from end to end and nothing comes of it:
+   no HP is rewritten, no flags byte is cleared and no fee is taken.  Three
+   members so the walk is a walk and not a single test. */
+static void an_alive_party_costs_nothing_and_is_left_alone(void)
+{
+    begin_revive_case(3);
+    stage_revive_member(0, 10, 40, 0, 5);
+    stage_revive_member(1, 1, 60, 0x19, 16);
+    stage_revive_member(2, 55, 55, 7, 1);
+
+    fdps_roster_revive_fallen_members();
+
+    CHECK_EQ(data_fdps_shared_party_total_gold, REVIVE_GOLD_START);
+    CHECK_EQ(stat_of(0, OFF_HP_CURRENT), 10);
+    CHECK_EQ(stat_of(1, OFF_HP_CURRENT), 1);
+    CHECK_EQ(stat_of(2, OFF_HP_CURRENT), 55);
+    CHECK_EQ(member_at(0)[OFF_FLAGS], REVIVE_FILLER_FLAGS);
+    CHECK_EQ(member_at(1)[OFF_FLAGS], REVIVE_FILLER_FLAGS);
+    CHECK_EQ(member_at(2)[OFF_FLAGS], REVIVE_FILLER_FLAGS);
+}
+
+/* data_fdps_roster_member_count is the bound and the roster block's 32 slots
+   are not: a fallen record one past the count is never looked at.  Record 1 is
+   left at 0 HP and with its filler flags, which is also the only reason this
+   case returns at all -- had the sweep reached it the function would have gone
+   into the panel and never come back. */
+static void the_member_count_bounds_the_sweep(void)
+{
+    begin_revive_case(1);
+    stage_revive_member(0, 12, 12, 0, 3);
+    stage_revive_member(1, 0, 99, 4, 9);
+
+    fdps_roster_revive_fallen_members();
+
+    CHECK_EQ(stat_of(1, OFF_HP_CURRENT), 0);
+    CHECK_EQ(member_at(1)[OFF_FLAGS], REVIVE_FILLER_FLAGS);
+    CHECK_EQ(data_fdps_shared_party_total_gold, REVIVE_GOLD_START);
+}
+
+/* A count of zero makes the JL at 00039ea5 fail on the first pass, so slot 0
+   is not read however dead the record in it is. */
+static void a_zero_member_count_sweeps_nothing(void)
+{
+    begin_revive_case(0);
+    stage_revive_member(0, 0, 77, 0, 4);
+
+    fdps_roster_revive_fallen_members();
+
+    CHECK_EQ(stat_of(0, OFF_HP_CURRENT), 0);
+    CHECK_EQ(member_at(0)[OFF_FLAGS], REVIVE_FILLER_FLAGS);
+    CHECK_EQ(data_fdps_shared_party_total_gold, REVIVE_GOLD_START);
+}
+
+/* The bound is a SIGNED compare (JL, not JB), so a negative count sweeps
+   nothing rather than wrapping into a walk of four billion records. */
+static void a_negative_member_count_sweeps_nothing(void)
+{
+    begin_revive_case(-1);
+    stage_revive_member(0, 0, 77, 0, 4);
+
+    fdps_roster_revive_fallen_members();
+
+    CHECK_EQ(stat_of(0, OFF_HP_CURRENT), 0);
+    CHECK_EQ(member_at(0)[OFF_FLAGS], REVIVE_FILLER_FLAGS);
+    CHECK_EQ(data_fdps_shared_party_total_gold, REVIVE_GOLD_START);
+}
+
+/* CMP word ptr [EAX+0x40],0x0 tests the whole 16-bit field.  A member on 256
+   HP has a zero LOW byte and is alive, which is what separates the real test
+   from the byte compare the record's byte-heavy neighbours invite. */
+static void the_whole_hp_word_decides_and_not_its_low_byte(void)
+{
+    begin_revive_case(1);
+    stage_revive_member(0, 0x0100, 0x0200, 0, 8);
+
+    fdps_roster_revive_fallen_members();
+
+    CHECK_EQ(stat_of(0, OFF_HP_CURRENT), 0x0100);
+    CHECK_EQ(member_at(0)[OFF_FLAGS], REVIVE_FILLER_FLAGS);
+    CHECK_EQ(data_fdps_shared_party_total_gold, REVIVE_GOLD_START);
+}
+
+/* And the test is for equality with zero, not for "not above zero": a record
+   carrying 0xffff in the HP word is alive as far as this sweep is concerned,
+   so a negative total left by anything else is not a revive trigger. */
+static void a_negative_hp_word_counts_as_alive(void)
+{
+    begin_revive_case(1);
+    stage_revive_member(0, -1, 30, 0, 8);
+
+    fdps_roster_revive_fallen_members();
+
+    CHECK_EQ(stat_of(0, OFF_HP_CURRENT), -1);
+    CHECK_EQ(member_at(0)[OFF_FLAGS], REVIVE_FILLER_FLAGS);
+    CHECK_EQ(data_fdps_shared_party_total_gold, REVIVE_GOLD_START);
+}
+
 void run_roster_tests(void)
 {
     RUN_TEST(the_base_stats_seed_the_totals);
@@ -2097,6 +2248,13 @@ void run_roster_tests(void)
     RUN_TEST(the_gate_takes_slot_three_and_no_other);
     RUN_TEST(only_the_low_byte_of_the_item_id_is_stored);
 
+    RUN_TEST(an_alive_party_costs_nothing_and_is_left_alone);
+    RUN_TEST(the_member_count_bounds_the_sweep);
+    RUN_TEST(a_zero_member_count_sweeps_nothing);
+    RUN_TEST(a_negative_member_count_sweeps_nothing);
+    RUN_TEST(the_whole_hp_word_decides_and_not_its_low_byte);
+    RUN_TEST(a_negative_hp_word_counts_as_alive);
+
     /* Put every global this file wrote back where it found it.  Ticket 23 has
        yet to define the five pointers, and leaving a pointer to this file's
        static buffers in any of them would hand the next unit an address it has
@@ -2111,4 +2269,5 @@ void run_roster_tests(void)
     data_fdps_roster_member_count = 0;
     data_fdps_map_unit_count = 0;
     data_fdps_chapter_current_chapter_id = 0;
+    data_fdps_shared_party_total_gold = 0;
 }

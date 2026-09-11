@@ -3672,6 +3672,14 @@
       "status": "committed",
       "emitted_against": "0x6a6",
       "rounds": 0
+    },
+    "00039e70": {
+      "name": "fdps_roster_revive_fallen_members",
+      "target": "roster.c",
+      "body_size": "0x463",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x463"
     }
   }
 }

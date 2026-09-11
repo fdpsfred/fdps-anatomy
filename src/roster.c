@@ -8,12 +8,21 @@
  * Nothing in this file owns state: every function works in place on the block
  * that pointer holds.
  */
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <conio.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "blit.h"
+#include "keybd.h"
+#include "rsrc.h"
+#include "sprite.h"
 #include "table.h"
+#include "text.h"
 #include "unit.h"
 #include "unititem.h"
+#include "vfs.h"
 #include "roster.h"
 
 /* The stride of one roster record, as the original writes it: IMUL
@@ -528,4 +537,354 @@ void fdps_roster_add_item_to_all(int item_id)
             fdps_unit_add_item(roster_index, item_id);
         }
     }
+}
+
+/* The revive fee, per level, for every class code a roster member can hold.
+   MOV ECX,0x1a / MOV ESI,0x39da0 / MOVSD.REP at 00039e83 copies twenty-six
+   dwords out of the image onto the stack, which is how wcc386 seeds an
+   initialised auto array; the table therefore belongs to the function and is
+   not a global, and the 0x39da0 in the copy is where the original linker put
+   the template rather than anything a caller can reach.
+
+   Twenty-six is not a truncation of the game's forty class codes.  The highest
+   class any roster member can carry is 0x19 -- 12 party characters whose base
+   forms run 0x00..0x19 and 17 promoted forms that stay inside that range
+   (assets/characters.md) -- and codes 0x1a upwards are the enemy and NPC
+   classes (assets/classes.md), which never enter the roster.  So the index
+   cannot run off the end here, and there is no clamp to add. */
+#define REVIVE_FEE_CLASS_COUNT 26
+
+/* How many revived members the list on the stack has room for: the twenty
+   bytes at [EBP-0x48].  A seventh fallen member already costs the player the
+   panel (see the row guard below), so the list only overflows in a party that
+   the panel has stopped describing anyway. */
+#define REVIVED_LIST_MAX 20
+
+/* The composing page and the screen it goes to.  0xa0000 and 0x3da are the
+   adapter's own linear address and its input status register, hardware
+   numbers rather than anything the rebuild places, so they stay literals the
+   way src/anim.c and src/village.c keep them. */
+#define PAGE_PITCH 0x140
+#define PAGE_BYTES 0xfa00
+#define VGA_SCREEN_BASE 0x000a0000
+#define VGA_INPUT_STATUS_1 0x3da
+#define VGA_STATUS_VERTICAL_RETRACE 0x08
+
+/* A scancode of 0x80 or above is a break code or the 0xff the queue answers
+   with when it is empty, and neither dismisses the panel: AND EAX,0xff / CMP
+   EAX,0x7f / JLE at 00039fd9 is what ends the hold. */
+#define SCANCODE_LAST_MAKE_CODE 0x7f
+
+/* Where the rows go: SHL EAX,0x4 / ADD EAX,0x17 at 0003a045 puts row n's
+   baseline at n * 16 + 23, and the four pieces of a row sit 3 or 4 scanlines
+   under it while the walking icon sits 13 above. */
+#define ROW_HEIGHT 0x10
+#define ROW_FIRST_Y 0x17
+#define ROW_CAPTION_Y_DROP 3
+#define ROW_FIGURE_Y_DROP 4
+#define ROW_ICON_Y_LIFT 0x0d
+
+/* THE GUARD IS ON THE COUNT, NOT ON THE ROW.  CMP dword ptr [EBP-0x34],0x7 /
+   JGE at 0003a0b2 compares how many members were revived, so a party with
+   seven or more fallen members is shown an empty Relive.cel frame that still
+   waits for a key.  Writing the natural "row < 7" caps the panel at seven rows
+   and puts a screen in front of the player that the original never draws.  It
+   stays here and not in rebuild_info/pitfalls.md because that file collects
+   the traps that recur across functions and sends a one-function detail back
+   to its own Rebuild note, which is where this one also lives. */
+#define PANEL_MAX_REVIVED 7
+
+/* The four Command.cel captions a row is built from and where each one lands:
+   sprites 0x2a and 0x2b make the label at the left, 0x3a marks the level
+   figure and 0x29 marks the fee. */
+#define CAPTION_LEFT_SPRITE 0x2a
+#define CAPTION_LEFT_X 0x3e
+#define CAPTION_RIGHT_SPRITE 0x2b
+#define CAPTION_RIGHT_X 0x57
+#define CAPTION_LEVEL_SPRITE 0x3a
+#define CAPTION_LEVEL_X 0xb4
+#define CAPTION_FEE_SPRITE 0x29
+#define CAPTION_FEE_X 0xd6
+
+/* The member's name, the level figure and the fee figure inside the row. */
+#define NAME_X 0x5d
+#define NAME_TEXT_ID_BIAS 1
+#define NAME_FG_COLOR 0xd0
+#define NAME_BG_COLOR 0
+#define NAME_OUTLINE_COLOR 0x6d
+#define LEVEL_X 0xc7
+#define LEVEL_DIGITS 2
+#define FEE_X 0xe3
+#define FEE_DIGITS 6
+
+/* The walking map icon: a 24 by 24 cell out of the member's own cache slot,
+   cycling 0, 1, 2, 1 because frame 3 is folded back onto 1 rather than
+   wrapping to 0 (CMP dword ptr [EBP-0x1c],0x3 / JNZ at 0003a0a5).  The cell
+   changes every four ticks: SHR EAX,0x2 / AND EAX,0x3 at 0003a09c, an
+   unsigned shift of the counter, which is why the divisor below is a power of
+   two and data_fdps_timer_tick_counter is unsigned at its declaration. */
+#define ICON_X 0x40
+#define ICON_WIDTH 0x18
+#define ICON_ROWS 0x18
+#define WALK_FRAME_TICKS 4
+#define WALK_FRAME_MASK 3
+#define WALK_FRAME_FOLD_FROM 3
+#define WALK_FRAME_FOLD_TO 1
+#define CACHE_SLOT_BYTES 0x30
+#define CEL_SUB_IMAGE_ENTRY_BYTES 4
+
+/* The two blits that ask for nothing beyond the opaque pass-through. */
+#define BLIT_OPERAND_NONE 0
+#define BLIT_MODE_OPAQUE 0
+
+/* The resources this panel opens by name. */
+#define ICON_SHEET "ICON.CEL"
+#define ICON_SHEET_MODE "rb"
+#define PANEL_ARCHIVE "MISC.VFS"
+#define PANEL_SHEET "Relive.cel"
+#define PANEL_BACKDROP_SPRITE 0
+
+/* 00039e70.  Revives the party's dead and presents the bill.  See roster.h for
+   what a caller gets out of it; what follows is why it is written this way.
+
+   THE SWEEP AND THE PANEL ARE ONE PASS EACH OVER THE SAME LIST.  The sweep
+   revives in roster order and records each revived member's index in a
+   twenty-byte list on the stack; the panel then walks that list, so row n is
+   the n-th fallen member and not roster member n.  The fee is worked out twice,
+   once to charge it and once to print it, out of the same class and level
+   bytes -- the number is not carried over from the sweep.
+
+   THE FEE IS CHARGED BEFORE ANYTHING IS DRAWN AND WITHOUT AN AFFORDABILITY
+   TEST.  SUB dword ptr [0x000643a4],EAX at 00039f23 runs inside the sweep, and
+   the only correction is the clamp at 0003a2ad, which lifts a negative total
+   back to 0 after the player has dismissed the panel.  A party too poor to pay
+   therefore gets its members back and ends the chapter with nothing, and the
+   test that the C invites -- refuse the revive, or cap the fee at the gold in
+   hand -- is a rule the original does not have.
+
+   THE CACHE REBUILD IS NOT PUT BACK.  Freeing the block, zeroing the count and
+   then asking fdps_cache_cel_sprite_group for one group per roster member is
+   what makes cache slot n belong to roster member n, which is the layout the
+   icon lookup below depends on; nothing restores whatever the caller had
+   cached, so the chapter-end handler that called this leaves with the roster's
+   own icons in the cache.
+
+   THE HOLD IS A FRAME LOOP, NOT A WAIT.  fdps_flush_keyboard_queue empties the
+   ring first, so the queue reads empty and the body runs at least once; each
+   pass allocates a fresh 64,000-byte page, composes the whole panel into it,
+   ships it inside a vertical retrace and then blocks until the timer tick
+   moves.  Contract D: the pacing is that tick and the retrace, not the length
+   of the body, so nothing here depends on an instruction count.
+
+   THE TICK LATCH IS NEVER SEEDED.  The wait at 0003a284 compares an
+   uninitialised local against data_fdps_timer_tick_counter and only then
+   latches it, exactly as src/village.c's two animations do, so the first frame
+   ends its wait immediately unless the stack happened to hold the live tick.
+   Seeding it from the counter before the loop is the intuitive C and adds a
+   tick to the first frame.
+
+   Contract C: the class code and the level are single bytes zero-extended with
+   XOR EAX,EAX / MOV AL (00039ef2 and 00039efd), the member count and the gold
+   total are signed 32-bit (JL at 00039ea5, JGE at 0003a2b4), and the scancode
+   is widened to 0..255 before a signed compare against 0x7f.  The current-HP
+   test is a 16-bit compare against zero, where signedness cannot matter.
+
+   Contract E: the two hardware numbers above are the only literal addresses;
+   the fee table arrives as a source-level initialiser and the four resource
+   names as string literals, so nothing here points at an address the original
+   linker chose.
+
+   Nothing is checked.  fopen's stream is not tested before it is handed to
+   fdps_cache_cel_sprite_group or to fclose, fdps_vfs_load_entry's buffer is not
+   tested before it is blitted, malloc's page is not tested before it is
+   cleared, and the member count is not compared against the roster block's 32
+   slots or against the twenty entries the revived list holds. */
+void fdps_roster_revive_fallen_members(void)
+{
+    /* The fee per level by class code, copied onto the stack by the prologue's
+       REP MOVSD. */
+    int revive_fee_per_level[REVIVE_FEE_CLASS_COUNT] = {
+        50, 100, 100, 120, 70, 120, 110, 70, 100, 120, 40, 80, 90,
+        40, 80, 70, 40, 100, 90, 40, 110, 100, 70, 100, 120, 80
+    };
+    /* Which roster members the sweep revived, in the order it found them. */
+    unsigned char revived_roster_index[REVIVED_LIST_MAX];
+    /* How many of those entries are filled -- and the number the panel's row
+       guard is tested against. */
+    int revived_count;
+    /* The sweep's cursor over the roster, and the loop counter of the cache
+       rebuild that follows it. */
+    int roster_index;
+    /* Which line of the panel is being drawn, an index into the list above. */
+    int row;
+    /* The member being revived, or the member that row is about. */
+    struct fdps_unit_record *member;
+    /* That member's class code and level, and the fee the two come to. */
+    int class_code;
+    int level;
+    int fee;
+    /* The top of this row's band of the page. */
+    int row_y;
+    /* ICON.CEL, open only for the length of the cache rebuild. */
+    FILE *icon_cel_fp;
+    /* The panel's own sheet, one sprite, held for the whole hold. */
+    unsigned char *relive_cel;
+    /* The 64,000-byte page this frame is composed in. */
+    unsigned char *page;
+    /* This row's walking cell, and the stream it resolves to in the cache. */
+    int walk_frame;
+    unsigned char *icon_stream;
+    /* The tick the previous frame ended on.  Deliberately not initialised --
+       see the note above. */
+    unsigned int last_tick;
+
+    revived_count = 0;
+
+    for (roster_index = 0;
+         roster_index < data_fdps_roster_member_count;
+         roster_index++) {
+        member = fdps_get_roster_record(roster_index);
+        if (member->hp_current != 0) {
+            continue;
+        }
+
+        revived_roster_index[revived_count] = (unsigned char) roster_index;
+        revived_count++;
+        member->hp_current = member->hp_max;
+        member->flags = 0;
+        class_code = member->clazz;
+        level = member->level;
+        fee = revive_fee_per_level[class_code] * level;
+        data_fdps_shared_party_total_gold =
+            data_fdps_shared_party_total_gold - fee;
+    }
+
+    if (revived_count == 0) {
+        return;
+    }
+
+    /* Dropping the buffer and zeroing the count together is what makes
+       fdps_cache_cel_sprite_group start handing out slot 0 again, so the group
+       cached for roster member n lands in slot n.  The count is zeroed whether
+       or not there was a buffer to free. */
+    if (data_fdps_cel_sprite_cache_count != 0) {
+        free(data_fdps_cel_sprite_cache_ptr);
+    }
+    data_fdps_cel_sprite_cache_count = 0;
+
+    icon_cel_fp = fopen(ICON_SHEET, ICON_SHEET_MODE);
+    for (roster_index = 0;
+         roster_index < data_fdps_roster_member_count;
+         roster_index++) {
+        /* The group is the PORTRAIT id at record +7, not the character id at
+           +8, which is what makes a promoted member walk with the sprite set
+           his new class was given.  The record is addressed inline here --
+           IMUL by 0x50 onto data_fdps_roster_array_ptr at 00039f8d -- rather
+           than through fdps_get_roster_record, whose CALL the original does
+           not make in this loop. */
+        member = (struct fdps_unit_record *)
+                 (data_fdps_roster_array_ptr
+                  + roster_index * ROSTER_RECORD_STRIDE);
+        fdps_cache_cel_sprite_group(member->portrait_id, icon_cel_fp);
+    }
+    fclose(icon_cel_fp);
+
+    relive_cel = (unsigned char *)
+                 fdps_vfs_load_entry(PANEL_ARCHIVE, PANEL_SHEET);
+    fdps_flush_keyboard_queue();
+
+    while (fdps_read_keyboard_queue() > SCANCODE_LAST_MAKE_CODE) {
+        page = (unsigned char *) malloc((size_t) PAGE_BYTES);
+        memset(page, 0, (size_t) PAGE_BYTES);
+        fdps_cel_blit_sprite(relive_cel, PANEL_BACKDROP_SPRITE, page,
+                             PAGE_PITCH, 0, 0, BLIT_OPERAND_NONE,
+                             BLIT_MODE_OPAQUE);
+
+        for (row = 0; row < revived_count; row++) {
+            row_y = row * ROW_HEIGHT + ROW_FIRST_Y;
+            member = fdps_get_roster_record(revived_roster_index[row]);
+            class_code = member->clazz;
+            level = member->level;
+            fee = revive_fee_per_level[class_code] * level;
+
+            walk_frame = (int) ((data_fdps_timer_tick_counter
+                                 / WALK_FRAME_TICKS) & WALK_FRAME_MASK);
+            if (walk_frame == WALK_FRAME_FOLD_FROM) {
+                walk_frame = WALK_FRAME_FOLD_TO;
+            }
+
+            if (revived_count < PANEL_MAX_REVIVED) {
+                fdps_cel_blit_sprite(data_fdps_command_sprite_sheet_ptr,
+                                     CAPTION_LEFT_SPRITE, page, PAGE_PITCH,
+                                     CAPTION_LEFT_X,
+                                     row_y + ROW_CAPTION_Y_DROP,
+                                     BLIT_OPERAND_NONE, BLIT_MODE_OPAQUE);
+                fdps_cel_blit_sprite(data_fdps_command_sprite_sheet_ptr,
+                                     CAPTION_RIGHT_SPRITE, page, PAGE_PITCH,
+                                     CAPTION_RIGHT_X,
+                                     row_y + ROW_CAPTION_Y_DROP,
+                                     BLIT_OPERAND_NONE, BLIT_MODE_OPAQUE);
+                fdps_draw_text(data_fdps_all_game_text_ptr,
+                               member->char_id + NAME_TEXT_ID_BIAS,
+                               page + row_y * PAGE_PITCH + NAME_X,
+                               PAGE_PITCH, NAME_FG_COLOR, NAME_BG_COLOR,
+                               NAME_OUTLINE_COLOR);
+                fdps_cel_blit_sprite(data_fdps_command_sprite_sheet_ptr,
+                                     CAPTION_LEVEL_SPRITE, page, PAGE_PITCH,
+                                     CAPTION_LEVEL_X,
+                                     row_y + ROW_FIGURE_Y_DROP,
+                                     BLIT_OPERAND_NONE, BLIT_MODE_OPAQUE);
+                fdps_draw_number(page
+                                     + (row_y + ROW_FIGURE_Y_DROP) * PAGE_PITCH
+                                     + LEVEL_X,
+                                 PAGE_PITCH, level, LEVEL_DIGITS, 0);
+                fdps_cel_blit_sprite(data_fdps_command_sprite_sheet_ptr,
+                                     CAPTION_FEE_SPRITE, page, PAGE_PITCH,
+                                     CAPTION_FEE_X,
+                                     row_y + ROW_CAPTION_Y_DROP,
+                                     BLIT_OPERAND_NONE, BLIT_MODE_OPAQUE);
+                fdps_draw_number(page
+                                     + (row_y + ROW_FIGURE_Y_DROP) * PAGE_PITCH
+                                     + FEE_X,
+                                 PAGE_PITCH, fee, FEE_DIGITS, 0);
+
+                /* A stored offset is measured from the base of the cache
+                   block, not from the slot it was read out of, and the slot is
+                   the member's ROSTER index because the rebuild above cached
+                   the groups in roster order. */
+                icon_stream = data_fdps_cel_sprite_cache_ptr
+                    + *(int *) (data_fdps_cel_sprite_cache_ptr
+                                + revived_roster_index[row] * CACHE_SLOT_BYTES
+                                + walk_frame * CEL_SUB_IMAGE_ENTRY_BYTES);
+                fdps_blit_dispatch(icon_stream,
+                                   page
+                                       + (row_y - ROW_ICON_Y_LIFT) * PAGE_PITCH
+                                       + ICON_X,
+                                   ICON_WIDTH, ICON_ROWS, PAGE_PITCH,
+                                   BLIT_OPERAND_NONE, BLIT_MODE_OPAQUE);
+            }
+        }
+
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) == 0) {
+            /* Spin until the retrace begins. */
+        }
+        while ((inp(VGA_INPUT_STATUS_1) & VGA_STATUS_VERTICAL_RETRACE) != 0) {
+            /* And until it ends, so the page reaches the adapter inside the
+               blanking interval. */
+        }
+        memmove((void *) VGA_SCREEN_BASE, page, (size_t) PAGE_BYTES);
+
+        while (last_tick == data_fdps_timer_tick_counter) {
+            /* Hold the frame until the timer interrupt moves the counter. */
+        }
+        last_tick = data_fdps_timer_tick_counter;
+
+        free(page);
+    }
+
+    fdps_flush_keyboard_queue();
+    if (data_fdps_shared_party_total_gold < 0) {
+        data_fdps_shared_party_total_gold = 0;
+    }
+    free(relive_cel);
 }
