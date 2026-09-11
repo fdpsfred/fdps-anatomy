@@ -3371,7 +3371,7 @@
     },
     "000184f0": {
       "name": "fdps_battle_search_cell_at_cursor",
-      "target": "btlmenu.c",
+      "target": "btlact.c",
       "body_size": "0x43e",
       "status": "committed",
       "rounds": 0,
@@ -3635,7 +3635,7 @@
     },
     "00015d00": {
       "name": "fdps_battle_action_menu",
-      "target": "btlmenu.c",
+      "target": "btlact.c",
       "body_size": "0x3dd",
       "status": "committed",
       "rounds": 0,

@@ -181,8 +181,17 @@ RULES = [
      r"end_phase_if_all_units_done|mark_unit_done)$", "btlturn.c"),
     (r"^fdps_battle_(check_default_end_conditions|destroy_remaining_enemies|"
      r"count_remaining_units_on_side|show_win_fail_window)$", "btlend.c"),
-    (r"^fdps_battle_(system_menu|system_submenu|action_menu|"
-     r"search_cell_at_cursor)$", "btlmenu.c"),
+    # The battle screen's menus were one file, which reached 1038 emitted
+    # lines with the outer system menu still to come.  They split along the
+    # line the two callers already draw: fdps_battle_player_phase_loop opens
+    # the system menu, which is the pause menu -- objectives, save, load, quit
+    # -- and carries the whole FDE.SAV image the save arm rebuilds, while
+    # fdps_battle_unit_turn opens the action ring one acting unit at a time,
+    # and the cell search is that ring's fourth command and has no other
+    # caller.  So btlmenu.c keeps the system pair and btlact.c takes the
+    # acting unit's commands.
+    (r"^fdps_battle_(system_menu|system_submenu)$", "btlmenu.c"),
+    (r"^fdps_battle_(action_menu|search_cell_at_cursor)$", "btlact.c"),
     (r"^fdps_battle_find_unit_", "unit.c"),
 
     # -------------------------------------------------------------- combat

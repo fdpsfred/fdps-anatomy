@@ -343,7 +343,7 @@
     },
     "00015d00": {
       "name": "fdps_battle_action_menu",
-      "target": "btlmenu.c",
+      "target": "btlact.c",
       "est_lines": 168,
       "body_size": 989,
       "status": "pending"
@@ -486,7 +486,7 @@
     },
     "000184f0": {
       "name": "fdps_battle_search_cell_at_cursor",
-      "target": "btlmenu.c",
+      "target": "btlact.c",
       "est_lines": 197,
       "body_size": 1086,
       "status": "pending"
@@ -3905,6 +3905,7 @@
       "est_lines": 1,
       "ref_count": 27,
       "reader_files": [
+        "btlact.c",
         "btlmenu.c",
         "btlturn.c",
         "deploy.c",
@@ -3914,7 +3915,7 @@
         "rsrc.c",
         "savefile.c"
       ],
-      "reason": "read from 8 files: btlmenu.c, btlturn.c, deploy.c, main.c, mapai.c, maptile.c, rsrc.c, savefile.c",
+      "reason": "read from 9 files: btlact.c, btlmenu.c, btlturn.c, deploy.c, main.c, mapai.c, maptile.c, rsrc.c, savefile.c",
       "status": "pending"
     },
     "00060140": {
@@ -4066,6 +4067,7 @@
       "est_lines": 1,
       "ref_count": 32,
       "reader_files": [
+        "btlact.c",
         "btlmenu.c",
         "btlturn.c",
         "chend2.c",
@@ -4074,7 +4076,7 @@
         "statwin.c",
         "title.c"
       ],
-      "reason": "read from 7 files: btlmenu.c, btlturn.c, chend2.c, icon.c, mapcur.c, statwin.c, title.c",
+      "reason": "read from 8 files: btlact.c, btlmenu.c, btlturn.c, chend2.c, icon.c, mapcur.c, statwin.c, title.c",
       "status": "pending"
     },
     "0006015c": {
@@ -4312,7 +4314,7 @@
       "est_lines": 7,
       "ref_count": 3,
       "reader_files": [
-        "btlmenu.c",
+        "btlact.c",
         "btlturn.c",
         "death.c"
       ],
@@ -4867,14 +4869,14 @@
       "est_lines": 1,
       "ref_count": 9,
       "reader_files": [
-        "btlmenu.c",
+        "btlact.c",
         "church.c",
         "death.c",
         "shop.c",
         "text.c",
         "vilmenu.c"
       ],
-      "reason": "read from 6 files: btlmenu.c, church.c, death.c, shop.c, text.c, vilmenu.c",
+      "reason": "read from 6 files: btlact.c, church.c, death.c, shop.c, text.c, vilmenu.c",
       "status": "pending"
     },
     "00064034": {
@@ -4886,13 +4888,13 @@
       "est_lines": 1,
       "ref_count": 5,
       "reader_files": [
-        "btlmenu.c",
+        "btlact.c",
         "church.c",
         "shop.c",
         "text.c",
         "vilmenu.c"
       ],
-      "reason": "read from 5 files: btlmenu.c, church.c, shop.c, text.c, vilmenu.c",
+      "reason": "read from 5 files: btlact.c, church.c, shop.c, text.c, vilmenu.c",
       "status": "pending"
     },
     "00064038": {
@@ -4904,7 +4906,7 @@
       "est_lines": 1,
       "ref_count": 34,
       "reader_files": [
-        "btlmenu.c",
+        "btlact.c",
         "church.c",
         "death.c",
         "shop.c",
@@ -4912,7 +4914,7 @@
         "unitstat.c",
         "vilmenu.c"
       ],
-      "reason": "read from 7 files: btlmenu.c, church.c, death.c, shop.c, text.c, unitstat.c, vilmenu.c",
+      "reason": "read from 7 files: btlact.c, church.c, death.c, shop.c, text.c, unitstat.c, vilmenu.c",
       "status": "pending"
     },
     "0006403c": {
@@ -5058,6 +5060,7 @@
       "est_lines": 1,
       "ref_count": 13,
       "reader_files": [
+        "btlact.c",
         "btlmenu.c",
         "chapter.c",
         "icon.c",
@@ -5065,7 +5068,7 @@
         "maptile.c",
         "savefile.c"
       ],
-      "reason": "read from 6 files: btlmenu.c, chapter.c, icon.c, mapai.c, maptile.c, savefile.c",
+      "reason": "read from 7 files: btlact.c, btlmenu.c, chapter.c, icon.c, mapai.c, maptile.c, savefile.c",
       "status": "pending"
     },
     "000640f8": {
@@ -5337,6 +5340,7 @@
       "est_lines": 1,
       "ref_count": 19,
       "reader_files": [
+        "btlact.c",
         "btlend.c",
         "btlmenu.c",
         "chevt3.c",
@@ -5350,7 +5354,7 @@
         "village.c",
         "vilmenu.c"
       ],
-      "reason": "read from 12 files: btlend.c, btlmenu.c, chevt3.c, chevt5.c, death.c, roster.c, save.c, savefile.c, shop.c, vilbar.c, village.c, vilmenu.c",
+      "reason": "read from 13 files: btlact.c, btlend.c, btlmenu.c, chevt3.c, chevt5.c, death.c, roster.c, save.c, savefile.c, shop.c, vilbar.c, village.c, vilmenu.c",
       "status": "pending"
     },
     "000643a8": {
@@ -5488,6 +5492,7 @@
       "est_lines": 1,
       "ref_count": 100,
       "reader_files": [
+        "btlact.c",
         "btlmenu.c",
         "cdaudio.c",
         "church.c",
@@ -5507,7 +5512,7 @@
         "vilmenu.c",
         "vilshop.c"
       ],
-      "reason": "read from 18 files: btlmenu.c, cdaudio.c, church.c, death.c, item.c, main.c, roster.c, savefile.c, savepnl.c, shop.c, shopdraw.c, spellmnu.c, statunit.c, text.c, unitstat.c, vilbar.c, vilmenu.c, vilshop.c",
+      "reason": "read from 19 files: btlact.c, btlmenu.c, cdaudio.c, church.c, death.c, item.c, main.c, roster.c, savefile.c, savepnl.c, shop.c, shopdraw.c, spellmnu.c, statunit.c, text.c, unitstat.c, vilbar.c, vilmenu.c, vilshop.c",
       "status": "pending"
     },
     "000643c8": {
@@ -5923,6 +5928,7 @@
       "reader_files": [
         "aiact.c",
         "aitarget.c",
+        "btlact.c",
         "btlmenu.c",
         "btlturn.c",
         "chapter.c",
@@ -5936,7 +5942,7 @@
         "unit.c",
         "walk.c"
       ],
-      "reason": "read from 14 files: aiact.c, aitarget.c, btlmenu.c, btlturn.c, chapter.c, icon.c, item.c, mapcur.c, menu.c, overview.c, savefile.c, spellmnu.c, unit.c, walk.c",
+      "reason": "read from 15 files: aiact.c, aitarget.c, btlact.c, btlmenu.c, btlturn.c, chapter.c, icon.c, item.c, mapcur.c, menu.c, overview.c, savefile.c, spellmnu.c, unit.c, walk.c",
       "status": "pending"
     },
     "00069cd0": {
@@ -5949,6 +5955,7 @@
       "ref_count": 96,
       "reader_files": [
         "aiact.c",
+        "btlact.c",
         "btlmenu.c",
         "btlturn.c",
         "chapter.c",
@@ -5968,7 +5975,7 @@
         "unitatk.c",
         "unitstat.c"
       ],
-      "reason": "read from 19 files: aiact.c, btlmenu.c, btlturn.c, chapter.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, icon.c, item.c, mapai.c, mapcur.c, msgwin.c, spell.c, spellmnu.c, title.c, unitatk.c, unitstat.c",
+      "reason": "read from 20 files: aiact.c, btlact.c, btlmenu.c, btlturn.c, chapter.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, icon.c, item.c, mapai.c, mapcur.c, msgwin.c, spell.c, spellmnu.c, title.c, unitatk.c, unitstat.c",
       "status": "pending"
     },
     "00069cd4": {
@@ -5982,6 +5989,7 @@
       "reader_files": [
         "aiact.c",
         "aitarget.c",
+        "btlact.c",
         "btlmenu.c",
         "btlturn.c",
         "chapter.c",
@@ -5995,7 +6003,7 @@
         "unit.c",
         "walk.c"
       ],
-      "reason": "read from 14 files: aiact.c, aitarget.c, btlmenu.c, btlturn.c, chapter.c, icon.c, item.c, mapcur.c, menu.c, overview.c, savefile.c, spellmnu.c, unit.c, walk.c",
+      "reason": "read from 15 files: aiact.c, aitarget.c, btlact.c, btlmenu.c, btlturn.c, chapter.c, icon.c, item.c, mapcur.c, menu.c, overview.c, savefile.c, spellmnu.c, unit.c, walk.c",
       "status": "pending"
     },
     "00069cd8": {
@@ -6144,7 +6152,7 @@
       "ref_count": 31,
       "reader_files": [
         "aiact.c",
-        "btlmenu.c",
+        "btlact.c",
         "btlturn.c",
         "combat.c",
         "icon.c",
@@ -6153,7 +6161,7 @@
         "unitatk.c",
         "unitstat.c"
       ],
-      "reason": "read from 9 files: aiact.c, btlmenu.c, btlturn.c, combat.c, icon.c, item.c, spellmnu.c, unitatk.c, unitstat.c",
+      "reason": "read from 9 files: aiact.c, btlact.c, btlturn.c, combat.c, icon.c, item.c, spellmnu.c, unitatk.c, unitstat.c",
       "status": "pending"
     },
     "00069cf0": {
@@ -6273,11 +6281,11 @@
       "est_lines": 1,
       "ref_count": 7,
       "reader_files": [
-        "btlmenu.c",
+        "btlact.c",
         "mapai.c",
         "maptile.c"
       ],
-      "reason": "read from 3 files: btlmenu.c, mapai.c, maptile.c",
+      "reason": "read from 3 files: btlact.c, mapai.c, maptile.c",
       "status": "pending"
     },
     "00069d08": {
@@ -6289,11 +6297,11 @@
       "est_lines": 1,
       "ref_count": 5,
       "reader_files": [
-        "btlmenu.c",
+        "btlact.c",
         "mapai.c",
         "maptile.c"
       ],
-      "reason": "read from 3 files: btlmenu.c, mapai.c, maptile.c",
+      "reason": "read from 3 files: btlact.c, mapai.c, maptile.c",
       "status": "pending"
     },
     "00069d09": {
