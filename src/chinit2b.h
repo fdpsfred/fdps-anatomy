@@ -197,4 +197,46 @@ extern void fdps_chapter_27_init(void);
 extern void fdps_chapter_28_init(void);
 #pragma aux fdps_chapter_28_init "*" parm caller [];
 
+/* Chapter 29's entry handler: brings the game into chapter 29.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon28.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 0's tile.  Nobody joins the party this chapter -- there is no
+   fdps_roster_add_character in the body -- and the roster is left as chapter
+   24 finished it, twelve members: the eleven chapters 1 to 19 assembled and
+   珊.  MAP28.DAT asks for twelve player slots, so every slot has a member
+   behind it and no zeroed, retired spare is written.
+
+   The cut-scene switches no map and deploys no wave, the same as chapters
+   26's, 27's and 28's and unlike chapter 25's: its eighty-nine opcodes play
+   entirely on the board this handler's own reset built, and nothing but the
+   dispatcher ever writes the chapter id.
+
+   The chapter is fought with the whole party, as chapter 28 is, but by a route
+   chapter 28's member has not got: ICON28.DAT carries no RETIRE_UNIT, and the
+   two BLINK_UNITS_OUT it does carry both name map units 90 and 91 -- the two
+   守護魔龍, which are the map's last two deployment records.  A blink leaves
+   its units retired, and each of these two is undone by a pair of
+   REVIVE_UNITs, so all ninety-two units on the board carry a clear flags byte
+   when the handler returns.  The strategy guide's entry for the chapter has no
+   己方 line of its own.
+
+   The opening opposition is the whole map file.  MAP28.DAT tags all eighty of
+   its deployment records wave 0, so the board is ninety-two units, and those
+   eighty are the guide's 敵方 list exactly: LV27 骷髏兵 x34 (character 84),
+   LV27 地獄犬 x25 (107), LV27 幽魂 x19 (105) and LV30 守護魔龍 x2 (112).
+   Record 0 is a 骷髏兵 and so lands at map unit 12; the two 守護魔龍 are
+   the file's last two records and so map units 90 and 91.  The map holds
+   nothing back: this chapter's 事件 line in the guide is the moment the
+   standing enemy groups start moving, not a reinforcement that arrives.
+
+   The cursor ends on the tile the cut-scene put unit 0 on and walked it from:
+   placed on (5, 24), then five tiles up, so the answer is (5, 19) and nothing
+   of MAP28.COD's own (4, 19) survives into it.
+
+   Table slot 28. */
+extern void fdps_chapter_29_init(void);
+#pragma aux fdps_chapter_29_init "*" parm caller [];
+
 #endif
