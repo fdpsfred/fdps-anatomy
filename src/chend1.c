@@ -1,0 +1,118 @@
+/* chend1.c -- the per-chapter end handlers, chapters 1 to 15: what the game
+ * does at the moment a chapter's battle has been won, before the village
+ * phase that follows it.  Chapters 16 to 30 are chend2.c.
+ *
+ * These are slots of the handler table based at 00060304, indexed by the
+ * 0-based chapter id and called only through it, so the dispatcher in main.c
+ * is not a static caller of any of them.
+ *
+ * See chend1.h for what each handler closes out.  Nothing here owns state.
+ */
+#include "fdpstype.h"
+#include "gamedata.h"
+#include "icon.h"
+#include "roster.h"
+#include "unit.h"
+#include "chend1.h"
+
+/* Which battle unit the spell below is granted to: PUSH 0x0 at 0003a41e, the
+   unit_index argument of fdps_set_flag_bit.  Chapter 1 deploys one party
+   member and he is battle unit 0 -- 蘭迪斯, roster character 0.
+
+   It is the BATTLE unit index and not a roster slot: fdps_set_flag_bit
+   resolves the record through fdps_get_unit_record, which walks
+   data_fdps_map_unit_array_ptr (src/unit.c). */
+#define CH01_SPELL_RECIPIENT_UNIT 0
+
+/* The spell he learns: PUSH 0x0 at 0003a41c, the spell_id argument, which
+   fdps_set_flag_bit turns into bit 0 of the five-byte spells_known_bitmap at
+   record +0x1a.  Spell 00 is 業火 (assets/spells.md).
+
+   蘭迪斯's own line in FRIAPRDA.DAT carries an empty spell mask, so this call
+   is the only place in the game he acquires it; none of the other fourteen
+   handlers in this file has an equivalent step.  Dropping it as a stray
+   one-off leaves the protagonist with no spells for the rest of the game
+   (rebuild_info/pitfalls.md). */
+#define CH01_STARTING_SPELL 0
+
+/* Chapter 1's victory cut-scene, the string at 0x620b0 loaded into EAX at
+   0003a42d and pushed as fdps_icon_script_run's only argument.  The
+   interpreter names IconAni.vfs itself and upper-cases the member name in
+   place before the container compare (vfs.h, rebuild_info/pitfalls.md), so
+   this literal is folded to WIN00.DAT by the call and cannot live in
+   read-only storage.
+
+   The number in the name is the 0-based chapter id and not a scene id of its
+   own, the same way the Icon00.dat the chapter opened with is numbered. */
+#define CH01_VICTORY_SCRIPT "Win00.dat"
+
+/* What the handler leaves in data_fdps_chapter_current_chapter_id: MOV dword
+   ptr [0x00069cf4],0x1 at 0003a440.  The index is 0-based, so 1 is chapter 2
+   -- both the village phase that runs next and the chapter loaded after it
+   read this global, so this one store is what advances the game.
+
+   It is an assignment of the chapter's successor and not an increment: the
+   handler was reached through slot 0 of a table indexed by this same global,
+   and every handler in the family stores its own literal. */
+#define CH01_NEXT_CHAPTER_ID 1
+
+/* 0003a410.  Four calls and one store, straight line, no branch and no loop.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 0003a410..0003a414 -- over SUB ESP,0x0, a zero-byte local area
+   written as the six-byte immediate form.  Nothing is addressed off EBP
+   anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 0003a44a..0003a44d
+   and the RET at 0003a44e is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: PUSH 0x0 / PUSH 0x0 / CALL 0x000282b0 / ADD ESP,0x8 at
+   0003a41c..0003a425, and MOV EAX,0x620b0 / PUSH EAX / CALL 0x00021650 / ADD
+   ESP,0x4 at 0003a42d..0003a438.  The two argument-less calls at 0003a428 and
+   0003a43b are bare CALLs with no push and no adjustment.  Nothing reads
+   [EBP+8] or above, so this function takes nothing itself, and EAX is never
+   set for a result before the RET -- the only write to it is the one that
+   carries the script name into the third call -- so it returns nothing.  The
+   one caller agrees: the dispatcher at 00029395 loads the chapter index,
+   scales it by four and CALLs through [EAX + 0x60304] with nothing pushed, no
+   stack cleanup afterwards and no read of EAX (the next instruction is
+   another CALL).
+
+   VALUES USED AFTER A CALL: none at all.  All four callees return void as far
+   as this body is concerned and nothing here reads EAX after any of them.
+   fdps_set_flag_bit does leave the resolved unit record in EAX, but this call
+   site is one of the five that discard it: ADD ESP,0x8 and then the next CALL
+   overwrite it.
+
+   THE ORDER IS THE ALGORITHM, and its first two steps are the reason this
+   handler is not interchangeable with the rest of the family.
+
+   The spell runs BEFORE the writeback.  fdps_roster_write_back_battle_units
+   memmoves the whole 0x50-byte battle record over the roster record and then
+   clears only the six status timers at +0x22 (src/roster.c); +0x1a, the spell
+   bitmap, is inside the copied block and outside the cleared range, so the
+   bit set on the live battle record is what reaches the roster.  Setting it
+   after the writeback, or on the roster record instead, leaves it on a copy
+   the next chapter's deployment overwrites and loses the spell with no
+   symptom at the point of the mistake.
+
+   The cut-scene runs AFTER the writeback and the revive AFTER the cut-scene.
+   The script is interpreted with the battle's unit array still standing, so a
+   unit-record edit it makes lands on a party that has already been banked and
+   reaches the roster only if the script itself asks for another writeback
+   (opcode 0x61, src/icon.c).  The revive then reads the roster the writeback
+   has just filled, which is what makes it see the battle's casualties at
+   all.
+
+   THE CHAPTER IS ADVANCED HERE and nowhere else on this path: the store at
+   0003a440 is the handler's last act and the only thing it leaves for the
+   phase that follows.  Like fdps_chapter_02_end it does not call
+   fdps_battle_destroy_remaining_enemies first. */
+void fdps_chapter_01_end(void)
+{
+    fdps_set_flag_bit(CH01_SPELL_RECIPIENT_UNIT, CH01_STARTING_SPELL);
+    fdps_roster_write_back_battle_units();
+    fdps_icon_script_run(CH01_VICTORY_SCRIPT);
+    fdps_roster_revive_fallen_members();
+    data_fdps_chapter_current_chapter_id = CH01_NEXT_CHAPTER_ID;
+}

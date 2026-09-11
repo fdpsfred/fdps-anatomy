@@ -10832,9 +10832,9 @@ Chapter 1's chapter-end handler: grants Randis his starting spell, banks the par
 Algorithm:
 Builds the standard four-push Watcom frame with an empty local area (SUB ESP,0x0), then runs five steps in order.
 1. fdps_set_flag_bit(0, 0) ORs bit 0 into the per-unit spell-learned bitfield at unit record +0x1a of battle unit 0, which in chapter 1 is Randis. Bit 0 is spell 00, 業火. Randis's FRIAPRDA.DAT record carries an empty spell mask, so this call is the only place he ever acquires that spell; the rest of the family has no equivalent step.
-2. FUN_00023980 writes every active battle unit record back into the persistent roster table with a 0x50-byte memmove and resets the per-battle fields at +0x22..+0x27. Offset 0x1a is inside the copied block and outside the cleared range, so the spell bit set in step 1 is what carries into the roster. The order matters: the bit is set on the live unit record, then copied.
-3. FUN_00021650, the IconAni.vfs event-script interpreter, is called with the ASCIIZ resource name "Win00.dat" at 0x000620b0 and plays chapter 1's victory scene.
-4. FUN_00039e70 revives every party unit left at 0 HP, restoring it from its maximum and charging the per-class revive cost.
+2. fdps_roster_write_back_battle_units writes every active battle unit record back into the persistent roster table with a 0x50-byte memmove and resets the per-battle fields at +0x22..+0x27. Offset 0x1a is inside the copied block and outside the cleared range, so the spell bit set in step 1 is what carries into the roster. The order matters: the bit is set on the live unit record, then copied.
+3. fdps_icon_script_run, the IconAni.vfs event-script interpreter, is called with the ASCIIZ resource name "Win00.dat" at 0x000620b0 and plays chapter 1's victory scene.
+4. fdps_roster_revive_fallen_members revives every party unit left at 0 HP, restoring it from its maximum and charging the per-class revive cost.
 5. The chapter index at DAT_00069cf4 is set to 1, so the village phase main runs next, and the chapter loaded after it, are chapter 2's.
 Like fdps_chapter_02_end it does not call fdps_battle_destroy_remaining_enemies first.
 
@@ -10847,7 +10847,7 @@ Returns:
 Pool: fdps  [calls only game code; its one data operand is the game resource name "Win00.dat"; it is reached from main through the game's own chapter-end handler table]
 
 Rebuild note:
-The fdps_set_flag_bit(0,0) call must stay ahead of the roster writeback FUN_00023980 and must target the live battle unit record, not the roster record: FUN_00023980 memmoves the unit's 0x50 bytes onto the roster, so setting the bit afterwards (or on the roster copy, which is then overwritten) silently loses it. It is also easy to drop the call as a stray one-off while emitting the family from the chapter_NN_end template -- Randis's FRIAPRDA.DAT record has an empty spell mask, so this single line is the only place he acquires 業火, and without it the protagonist has no spells for the rest of the game.
+The fdps_set_flag_bit(0,0) call must stay ahead of the roster writeback fdps_roster_write_back_battle_units and must target the live battle unit record, not the roster record: fdps_roster_write_back_battle_units memmoves the unit's 0x50 bytes onto the roster, so setting the bit afterwards (or on the roster copy, which is then overwritten) silently loses it. It is also easy to drop the call as a stray one-off while emitting the family from the chapter_NN_end template -- Randis's FRIAPRDA.DAT record has an empty spell mask, so this single line is the only place he acquires 業火, and without it the protagonist has no spells for the rest of the game.
 
 === 0003a44f [EOL]
 Single 0x90 NOP aligning FUN_0003a450 to a 16-byte boundary.
