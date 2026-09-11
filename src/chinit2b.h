@@ -107,4 +107,49 @@ extern void fdps_chapter_25_init(void);
 extern void fdps_chapter_26_init(void);
 #pragma aux fdps_chapter_26_init "*" parm caller [];
 
+/* Chapter 27's entry handler: brings the game into chapter 27.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon26.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 0's tile.  Nobody joins the party this chapter -- there is no
+   fdps_roster_add_character in the body -- and the roster is left as chapter
+   24 finished it, twelve members: the eleven chapters 1 to 19 assembled and
+   珊.  MAP26.DAT asks for twelve player slots, so every slot has a member
+   behind it and no zeroed, retired spare is written.
+
+   The cut-scene switches no map and deploys no wave, the same as chapter 26's
+   and unlike chapter 25's: its seventy-five opcodes play entirely on the board
+   this handler's own reset built, and nothing but the dispatcher ever writes
+   the chapter id.
+
+   The chapter is fought without 法蓮娜, and the cut-scene is what takes her
+   off: its one RETIRE_UNIT, the third opcode in the file, names map unit 3 and
+   nothing revives it -- ICON26.DAT carries no REVIVE_UNIT at all.  A player
+   slot's map unit index is its roster slot and the roster is in join order, so
+   the eleven left are the strategy guide's 己方 line for the chapter,
+   法蓮娜以外的所有人.  Chapter 25 arrives at the same eleven the same way and
+   chapter 26 by retiring everybody and bringing all but that one back.
+
+   The opening opposition is the map's own wave 0 and nothing else.  MAP26.DAT
+   tags twenty-five of its fifty-five deployment records wave 0, so the board is
+   thirty-seven units: LV40 魔導王吉歐 (character 63) once, the four LV30
+   魔戰將軍 塞克斯, 布魯森, 汎拉沫 and 凱因巴 (64, 65, 66 and 67) once each,
+   LV18 神箭手 x8 (95) and LV18 鑺甲武士 x12 (100).  吉歐 is the file's
+   first record and so lands at map unit 12, which is the slot chapter 27's
+   victory test asks about (src/chpost2.c); the four 魔戰將軍 follow him at 13 to
+   16.  The thirty records held back are all of wave 1 -- LV18 地獄騎士 x10
+   (78) and LV18 天空騎士 x20 (97) -- which is the guide's 事件, the
+   reinforcement that arrives once the four 魔戰將軍 are down, and this handler
+   deploys none of it.
+
+   The cursor ends on the tile the cut-scene walked unit 0 to: MAP26.COD starts
+   player slot 0 on (8, 27) and the member walks it four tiles up in four
+   separate group walks, so the answer is (8, 23) and not the map's own start
+   tile.
+
+   Table slot 26. */
+extern void fdps_chapter_27_init(void);
+#pragma aux fdps_chapter_27_init "*" parm caller [];
+
 #endif

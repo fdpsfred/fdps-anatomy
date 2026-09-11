@@ -227,3 +227,112 @@ void fdps_chapter_26_init(void)
     fdps_show_chapter_title_card();
     fdps_map_cursor_move_to_unit(CH26_CURSOR_UNIT);
 }
+
+/* --- fdps_chapter_27_init @ 00021550 ----------------------------------- */
+
+/* Chapter 27's opening cut-scene, the string at 0x6193c loaded into EAX at
+   00021561 and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id and not a script id of its own, so this
+   is Icon26.dat where the slot-25 handler at 00021510 holds Icon25.dat at
+   0x61930 and the slot-27 handler at 00021590 holds Icon27.dat at 0x61948 --
+   the literals sit end to end twelve bytes apart, eleven bytes of member name
+   and one filler byte each, so each is its own symbol and none is a folded
+   index off the one before it.  The byte at 0x6193c is the 'I' itself, so the
+   literal takes no offset (rebuild_info/pitfalls.md).  Spelling the member out
+   of the handler's own chapter number gives Icon27.dat, which loads, runs, and
+   plays chapter 28's opening scene under chapter 27's title card.
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON26.DAT by the
+   call and cannot live in read-only storage. */
+#define CH27_OPENING_SCRIPT "Icon26.dat"
+
+/* Which unit the cursor is left on: PUSH 0x0 at 00021574, roster slot 0 and so
+   蘭迪斯, which is what twenty-seven of the thirty handlers pass. */
+#define CH27_CURSOR_UNIT 0
+
+/* 00021550.  Four calls, straight line, no branch, no loop and no local -- the
+   plain form of the family, the same four calls in the same order as
+   fdps_chapter_26_init, with no fdps_roster_add_character in front of them and
+   no store behind them.  At 0x33 bytes it is the shortest shape the thirty
+   handlers come in, and every byte but the literal's address is the same as
+   the handler on either side.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 00021550..00021554 -- over SUB ESP,0x0 at 00021556, a zero-byte
+   local area written as the six-byte immediate form.  Nothing is addressed off
+   EBP anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 0002157e..00021581
+   and the RET at 00021582 is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: MOV EAX,0x6193c / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4 at
+   00021561..0002156c, and PUSH 0x0 / CALL 0x0002da50 / ADD ESP,0x4 at
+   00021574..0002157b.  The two argument-less calls at 0002155c and 0002156f
+   are bare CALLs with no push and no adjustment.  Nothing reads [EBP+8] or
+   above, so this function takes nothing itself, and EAX is never read after
+   any of the four calls, so it returns nothing -- the dispatcher reaches it
+   through the twenty-seventh slot of the table at 00060074 (the dword at
+   000600dc is 00021550, and that data reference is the function's only xref)
+   and ignores EAX.
+
+   VALUES USED AFTER A CALL: none at all.  All four callees return void and
+   nothing here reads EAX after any of them; the only register written between
+   the prologue and the RET is the EAX that carries the script name literal
+   into the second call.
+
+   NOBODY JOINS THE PARTY THIS CHAPTER either.  The first instruction after the
+   prologue is the state rebuild, so the roster is left exactly as chapter 24
+   finished it -- the eleven chapters 1 to 19 assembled plus 珊 -- and
+   MAP26.DAT asks for twelve player slots, so every slot has a member behind it
+   and fdps_build_map_unit_array writes no zeroed, retired spare anywhere in
+   the array (src/deploy.c).
+
+   THE CUT-SCENE SWITCHES NO MAP AND DEPLOYS NO WAVE, the same as chapter 26's
+   and unlike chapter 25's.  Walked with the opcode ladder in src/icon.c,
+   ICON26.DAT's 719 bytes hold seventy-five opcodes and not one of them is
+   SWITCH_MAP or DEPLOY_WAVE: the whole scene plays on the board this handler's
+   own reset built, and the chapter id is never written by anything but the
+   dispatcher that reached this slot.
+
+   WHAT THE CUT-SCENE LEAVES BEHIND is one player slot off the board.  Its
+   third opcode, the RETIRE_UNIT at script offset 4, names map unit 3, and the
+   member carries no REVIVE_UNIT at all.  A player slot's map unit index is its
+   roster slot and the roster is in join order, so the member left off is
+   法蓮娜 and the eleven remaining are the guide's 己方 line for the chapter,
+   法蓮娜以外的所有人.  The FACE_UNITS at script offset 298 lists eleven
+   units and skips 3, which is the same eleven read a second way.
+
+   THE OPENING BOARD IS THE MAP'S WAVE 0 AND NOTHING ELSE.  MAP26.DAT is a
+   131-byte header and fifty-five 26-byte deployment records -- the wave tag is
+   byte 21 of struct fdps_char_spawn_record -- and twenty-five of them are wave
+   0, which the rebuild puts down behind the twelve player slots for
+   thirty-seven map units in all.  Those twenty-five are the guide's 敌方 list
+   bar one group: LV40 魔導王吉歐 once (character 63), the four LV30
+   魔戰將軍 塞克斯, 布魯森, 汎拉沫 and 凱因巴 once each (64, 65, 66 and
+   67), LV18 神箭手 x8 (95) and LV18 鑺甲武士 x12 (100).  吉歐 is record 0
+   of the file and so becomes map unit 12, the slot chapter 27's victory test
+   asks about (src/chpost2.c), and the four 魔戰將軍 follow him at 13 to 16 --
+   so the boss and all four generals stand on the field from the first turn.
+   The thirty records held back are the whole of wave 1, LV18 地獄騎士 x10
+   (78) and LV18 天空騎士 x20 (97), which is the guide's 事件 -- the
+   reinforcement that arrives once the four 魔戰將軍 are down, landing at map
+   units 37 to 66 -- and no part of what this handler does.
+
+   THE CURSOR ENDS ON A TILE THE CUT-SCENE WALKED TO.  MAP26.COD starts player
+   slot 0 on (8, 27) -- the record at 0xb + (55 + 0) * 6, read as two signed
+   words (src/deploy.c) -- and ICON26.DAT walks map unit 0 one tile with facing
+   2 four separate times, at script offsets 326, 332, 351 and 367, which
+   src/icon.c's ladder makes a step up each; nothing places unit 0 outright
+   anywhere in the member.  So unit 0 is on (8, 23) when the cursor call reads
+   it and the cursor lands on (192, 552).  The only PLACE_UNIT in the member,
+   at script offset 6, is 吉歐's: map unit 12 is put on (8, 10) and then walked
+   two tiles up and one back down, which is nothing the cursor call reads. */
+void fdps_chapter_27_init(void)
+{
+    fdps_chapter_state_reset();
+    fdps_icon_script_run(CH27_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH27_CURSOR_UNIT);
+}
