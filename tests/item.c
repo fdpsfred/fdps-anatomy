@@ -1128,6 +1128,116 @@ static void the_earth_item_shakes_the_view_and_puts_it_back(void)
     use_unstage();
 }
 
+/* ========================================================================
+ * fdps_battle_item_menu @ 000252b0
+ * ======================================================================== */
+
+/* WHY ONLY THE EMPTY-BAG PATH IS COVERED HERE.  Every other path through this
+   function goes through the ring menu and the item window, and both of those
+   sit in a cursor loop that only a key from the player ends -- there is no
+   keyboard under the test runner, so a call that got that far would never come
+   back.  The one arm that returns without asking for anything is the count test
+   at 000252e7, and that is what these cases pin: the accumulator's seed of -1
+   (MOV dword ptr [EBP-0x8],0xffffffff at 000252d4) and the fact that NOTHING is
+   read or written before fdps_unit_item_count is asked.
+
+   The count itself is not a stub: fdps_unit_item_count is emitted in
+   src/unititem.c and counts the eight entries whose flag byte does not carry
+   0x80, so a bag whose every flag byte is 0x80 really does reach the early
+   return.
+
+   Expected values come from the assembly of 000252b0 -- the TEST EAX,EAX / JNZ
+   at 000252e7, the store of -1 at 000252d4, and the fact that the first read of
+   data_fdps_map_cursor_world_x is at 00025319, after that branch -- and from
+   the record layouts ticket 17 settled. */
+
+/* The unit the menu is opened on, and the units either side of it that a walk
+   straying by one record would disturb. */
+#define MENU_UNIT 4
+
+/* unititem.c's empty-entry bit and the eight two-byte entries it is tested
+   across. */
+#define MENU_INVENTORY_FLAG_EMPTY 0x80
+#define MENU_INVENTORY_ENTRIES 8
+
+/* What the accumulator is seeded with and what the empty bag therefore
+   answers. */
+#define MENU_NOTHING_DONE (-1)
+
+/* Values with no meaning to the game, put in the three globals the menu would
+   drive so that any touch at all shows up as a difference. */
+#define MENU_PROBE_CURSOR_X 0x123
+#define MENU_PROBE_CURSOR_Y 0x456
+#define MENU_PROBE_DRAW_MODE 4
+
+/* The fixture plus an empty bag on the acting unit and a marked cursor. */
+static void menu_stage_empty_bag(void)
+{
+    int entry_index;
+
+    stage();
+    for (entry_index = 0; entry_index < MENU_INVENTORY_ENTRIES;
+         entry_index++) {
+        unit(MENU_UNIT)->inventory_slots[entry_index * 2] =
+            MENU_INVENTORY_FLAG_EMPTY;
+    }
+
+    data_fdps_map_cursor_world_x = MENU_PROBE_CURSOR_X;
+    data_fdps_map_cursor_world_y = MENU_PROBE_CURSOR_Y;
+    data_fdps_map_cursor_draw_mode = MENU_PROBE_DRAW_MODE;
+}
+
+/* Put back what the fixture published, for the reason use_unstage gives. */
+static void menu_unstage(void)
+{
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+}
+
+/* The four ITEM.DAT bytes the use arm reads and the bag field the id comes out
+   of, at the offsets the assembly addresses them by. */
+static void the_menu_reads_its_fields_where_the_layout_puts_them(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, use_effect), 0x0d);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, use_distance), 0x10);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, use_radius), 0x12);
+    CHECK_EQ((int) offsetof(struct fdps_item_effect, select_mode), 0x15);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, inventory_slots), 0x0a);
+}
+
+/* A unit carrying nothing gets no ring menu at all and the answer is the
+   accumulator's seed, which is -1 and not 0. */
+static void an_empty_bag_answers_nothing_done(void)
+{
+    menu_stage_empty_bag();
+
+    CHECK_EQ(fdps_battle_item_menu(MENU_UNIT), MENU_NOTHING_DONE);
+
+    menu_unstage();
+}
+
+/* The count is asked before anything else happens: the adjacency probe, the
+   grid reset and every cursor write sit after that branch, so an empty bag
+   leaves the three cursor globals exactly as they were and writes nothing into
+   the record either. */
+static void an_empty_bag_touches_nothing_on_the_way_out(void)
+{
+    menu_stage_empty_bag();
+
+    fdps_battle_item_menu(MENU_UNIT);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, MENU_PROBE_CURSOR_X);
+    CHECK_EQ(data_fdps_map_cursor_world_y, MENU_PROBE_CURSOR_Y);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, MENU_PROBE_DRAW_MODE);
+    CHECK_EQ(unit(MENU_UNIT)->inventory_slots[0],
+             MENU_INVENTORY_FLAG_EMPTY);
+    CHECK_EQ(unit(MENU_UNIT)->flags, 0);
+
+    menu_unstage();
+}
+
 void run_item_tests(void)
 {
     RUN_TEST(the_record_layout_matches_the_offsets_read);
@@ -1156,4 +1266,7 @@ void run_item_tests(void)
     RUN_TEST(a_max_hp_item_adds_its_own_constant_to_target_zero_only);
     RUN_TEST(a_healing_item_is_consumed_and_a_healing_weapon_is_not);
     RUN_TEST(the_earth_item_shakes_the_view_and_puts_it_back);
+    RUN_TEST(the_menu_reads_its_fields_where_the_layout_puts_them);
+    RUN_TEST(an_empty_bag_answers_nothing_done);
+    RUN_TEST(an_empty_bag_touches_nothing_on_the_way_out);
 }

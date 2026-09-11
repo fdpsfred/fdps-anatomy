@@ -134,4 +134,40 @@ extern void fdps_apply_item_effect_to_targets(int unit_index, int item_slot,
                                               unsigned char *target_ids);
 #pragma aux fdps_apply_item_effect_to_targets "*" parm caller [];
 
+/* 000252b0.  Runs the item command of one unit's battle action menu: a
+   four-entry ring menu -- use, hand over, equip, discard -- over the items in
+   that unit's bag, looping until the player leaves it or the turn is spent.
+   The call does not return until then.
+
+   Returns 1 when the unit used an item and its turn is over, 2 when an item
+   changed hands, and -1 when the player backed out with neither having
+   happened.  fdps_battle_action_menu reads 1 as "the command was carried out"
+   and 2 as "count a later cancel of the whole action menu as an action
+   anyway".
+
+   EQUIPPING AND DISCARDING ANSWER -1, NOT 2.  Only the hand-over arm sets the
+   accumulator, so backing out of the action menu after only equipping or
+   throwing something away leaves the unit free to move and attack, while doing
+   so after a hand-over spends its turn.  Writing the obvious "every arm that
+   changed the bag answers 2" costs the unit its turn for an equip.
+
+   AN EMPTY BAG IS WHAT ENDS THE LOOP.  fdps_unit_item_count is asked at the top
+   of every pass and a count of zero returns at once, so a unit that discards or
+   hands over its last item leaves the menu without another ring being drawn --
+   and a unit called here with an empty bag never sees one at all.
+
+   THE HAND-OVER ENTRY IS GREYED OUT WHEN NOTHING OF THE PLAYER'S SIDE STANDS
+   NEXT TO THE CURSOR, and it is never put back: the flag table is built once
+   before the loop, so an entry greyed out on one pass stays greyed for the rest
+   of the call even if a neighbour arrives.
+
+   unit_index is the acting unit's index in the battle unit array reached
+   through data_fdps_map_unit_array_ptr (gamedata.h).  It is not range checked
+   and it reaches every window, collector and record lookup below unchanged.
+   The map cursor is expected to be standing on that unit, because the pixel
+   position the ring closes on is what the line sweep sweeps from and what the
+   hand-over arm walks the cursor back to. */
+extern int fdps_battle_item_menu(int unit_index);
+#pragma aux fdps_battle_item_menu "*" parm caller [];
+
 #endif

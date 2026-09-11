@@ -8,11 +8,17 @@
 #include <stdlib.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "aitarget.h"
 #include "anim.h"
 #include "audio.h"
+#include "btlturn.h"
 #include "death.h"
 #include "indicat.h"
+#include "keybd.h"
+#include "mapcur.h"
 #include "mapdraw.h"
+#include "menu.h"
+#include "movegrid.h"
 #include "msgwin.h"
 #include "table.h"
 #include "text.h"
@@ -697,4 +703,412 @@ void fdps_apply_item_effect_to_targets(int unit_index, int item_slot,
     death_script_count = fdps_collect_death_scripts(death_scripts);
     fdps_play_death_animation_and_mark_dead();
     fdps_run_death_scripts(unit_index, death_script_count, death_scripts);
+}
+
+/* ------------------------------------------------------------------------
+ * fdps_battle_item_menu @ 000252b0
+ * ---------------------------------------------------------------------- */
+
+/* The four ring-menu entries in slot order -- up, left, right, down (menu.h) --
+   and the Command.cel sub-image each one carries.  Both four-int tables are
+   copied onto the stack by four MOVSD each at 000252bc and 000252c8, out of the
+   read-only templates at 00024d50 (7, 4, 6, 5) and 00024d60 (four zeros).  They
+   are local array initialisers rather than globals, which is how
+   rebuild_info/code_layout.md classifies both templates.
+
+   BOTH COPIES ARE MADE ONCE, IN FRONT OF THE LOOP, and the flag table is only
+   ever written to 1 afterwards.  So an entry greyed out on one pass stays
+   greyed out for the rest of the call even once the condition that greyed it
+   has gone; re-copying the template at the top of every pass, which is what
+   putting the declaration inside the loop would do, would let the hand-over
+   entry come back. */
+#define ITEM_MENU_SLOTS 4
+#define ITEM_MENU_ENTRY_USE 0
+#define ITEM_MENU_ENTRY_HAND_OVER 1
+#define ITEM_MENU_ENTRY_EQUIP 2
+#define ITEM_MENU_ICON_USE 7
+#define ITEM_MENU_ICON_HAND_OVER 4
+#define ITEM_MENU_ICON_EQUIP 6
+#define ITEM_MENU_ICON_DISCARD 5
+
+/* MOV dword ptr [EBP-0x50],0x1 at 00025340: what marks a ring entry
+   unselectable in the flag table menu.c reads. */
+#define ITEM_MENU_ENTRY_DISABLED 1
+
+/* What fdps_battle_action_menu is told.  MOV dword ptr [EBP-0x8],0xffffffff at
+   000252d4 seeds the accumulator, the hand-over arm stores 2 over it at
+   0002585a and 0002594c, and the use arm leaves through a separate slot holding
+   1 at 000256b0.
+
+   EQUIPPING AND DISCARDING LEAVE THE ACCUMULATOR AT -1.  Neither writes it, so
+   backing out of the action menu after only equipping or throwing something
+   away still leaves the unit free to move and attack, while doing so after a
+   hand-over spends its turn.  The obvious "every branch that changed the bag
+   answers 2" costs the unit its turn for an equip (see item.h). */
+#define ITEM_MENU_NOTHING_DONE (-1)
+#define ITEM_MENU_TURN_SPENT 1
+#define ITEM_MENU_ITEM_MOVED 2
+
+/* Every window and cursor loop in here answers -1 for a cancel and 1 for a
+   confirm (unititem.h, mapcur.h).  The 1 is also stored by hand at 000256dc,
+   which is what sends the use arm back round its own loop. */
+#define SELECT_CANCELLED (-1)
+#define SELECT_CONFIRMED 1
+
+/* CMP EAX,-0x1 / JZ at 00025839: what fdps_unit_add_item answers when all eight
+   of the recipient's entries were occupied and it stored nothing (unititem.h).
+   It is the same number as a cancel and a different fact. */
+#define BAG_WAS_FULL (-1)
+
+/* One map tile is 24 pixels square, MOV EBX,0x18 in front of every one of the
+   fourteen IDIVs in this function: the cursor globals hold world pixels and
+   every collector, every destination global and every unit record holds tiles.
+   The divide is the signed CDQ shape, so a cursor left of or above the map
+   origin truncates towards zero (gamedata.h). */
+#define MAP_TILE_SIZE 0x18
+
+/* data_fdps_map_cursor_draw_mode (gamedata.h), the overlay the cursor paints:
+   0 draws nothing, 1 is the plain single-tile cursor, and an item's own
+   footprint is its use_radius plus 2 -- ADD EAX,0x2 at 0002545e, on the byte
+   at ITEM.DAT +0x12.
+
+   THE OVERLAY IS SWITCHED OFF ACROSS EVERY fdps_map_cursor_move_to_unit CALL
+   and put back to 1 afterwards (00025663 / 00025679, 000256bc / 000256d2), so
+   the cursor does not paint itself along the tiles it snaps over.  That is also
+   what makes the move instant: fdps_map_cursor_move_to skips its per-step frame
+   while the mode is 0 (mapcur.h). */
+#define CURSOR_OVERLAY_OFF 0
+#define CURSOR_OVERLAY_PLAIN 1
+#define CURSOR_FOOTPRINT_BIAS 2
+
+/* The adjacency probe, PUSH 0x3 / PUSH 0x1 / PUSH 0x1 / PUSH 0x0 at 000252f6
+   and the same three numbers with a real buffer at 0002572f: one tile of reach,
+   a minimum distance of 1 that drops the acting unit's own tile, and select
+   mode 3, which keeps side 2 -- the player's party (aitarget.h).  The same 3 is
+   handed to fdps_map_cursor_select_loop at 00025782 as its select mode, where
+   it is passed through to the area collector as the test a confirm has to
+   satisfy (mapcur.h).
+
+   THE FIRST PROBE PASSES A NULL BUFFER, so it only counts; the hand-over arm
+   runs the identical sweep again with somewhere to write. */
+#define NEIGHBOUR_PROBE_RANGE 1
+#define NEIGHBOUR_PROBE_MIN_DIST 1
+#define NEIGHBOUR_SELECT_MODE 3
+
+/* PUSH 0x1 at 00025476 / MOV byte ptr [EBP-0x4],0x0 at 0002547c: the minimum
+   distance the first target sweep runs with.  It is exclusive, so 1 drops the
+   acting unit's own tile and 0 keeps it. */
+#define AIM_SWEEP_KEEP_OWN_TILE 0
+#define AIM_SWEEP_DROP_OWN_TILE 1
+
+/* CMP dword ptr [EBP-0x34],0xf / JLE at 00025510.  Bit 0x10 of the ITEM.DAT
+   use_distance byte marks the straight-line shape and the low nibble is the
+   reach, so 0x10 is the lowest line-shaped value and a line's length is the
+   byte less 0x10 (aitarget.h).  PUSH 0x1 at 00025516 is that collector's
+   select_enemy_side, which runs the opposite way round from a select mode: 1
+   keeps side 0, the enemy side. */
+#define ITEM_USE_DISTANCE_LINE_BIT 0x10
+#define LINE_SWEEP_KEEPS_ENEMY_SIDE 1
+
+/* The two use-effect codes that make this menu ask for a DESTINATION tile on
+   top of the target it already has, CMP EAX,0x1c at 000255e9 and CMP EAX,0x19
+   at 000255f9; 0x1c is also the only code that drops the acting unit's own tile
+   from the first sweep, CMP EAX,0x1c at 00025471.
+
+   NO SHIPPED ITEM REACHES EITHER.  All 251 ITEM.DAT records were counted and
+   the use_effect byte at +0x0d never holds 0x19 or 0x1c, which is also what the
+   guide's K1 list says of both codes.  fdps_apply_item_effect_to_targets has no
+   arm for them either, so the destination this arm picks is written to globals
+   whose only reader is the spell path (gamedata.h) and the use itself then does
+   nothing.  The branch is emitted because the original runs it, not because
+   anything in the shipped data can get into it. */
+#define USE_EFFECT_DEST_TILE_19 0x19
+#define USE_EFFECT_DEST_TILE_1C 0x1c
+
+/* PUSH 0x6 at 00025622: fdps_map_cursor_select_loop's movement-destination
+   mode.  On that mode the middle argument is NOT a list length -- it carries
+   the ACTING UNIT'S INDEX, and the list pointer is NULL (mapcur.h).  What is
+   handed over is targets[0], read as one unsigned byte at 0002561b, so the
+   acting unit has to be the first entry the sweep above collected. */
+#define DESTINATION_SELECT_MODE 6
+
+/* PUSH 0x64 at 00025722: the candidate buffer the hand-over sweep is given, a
+   hundred bytes from malloc, freed again at 000257b0 before the arm does any
+   work.  Nothing tests the pointer. */
+#define HAND_OVER_CANDIDATE_BYTES 100
+
+/* The on-stack candidate buffer the use arm collects into, at [EBP-0x98].  Its
+   52 bytes are the distance up to the icon table that follows it at [EBP-0x64];
+   the collectors are given no capacity and write one byte per unit they match
+   (aitarget.h), so the figure is a contract with them and not a preference. */
+#define TARGET_BUFFER_BYTES 52
+
+/* 000252b0.  See item.h for what the four entries do and what the answer means.
+
+   THE WHOLE BODY IS ONE LOOP AROUND THE RING MENU, JMP 0x000252db at 000259a7,
+   and every arm that finishes without spending the turn falls back into it.
+   The bag is re-counted at the top of every pass and an empty bag is what ends
+   the call with whatever the accumulator holds.
+
+   ONE STACK SLOT, [EBP-0xc], IS BOTH THE RING ENTRY AND THE BAG ROW.  It is
+   seeded by fdps_menu_find_first_enabled_entry, steered by the ring's cursor
+   loop, tested to pick the arm, and then handed to fdps_unit_item_select_window
+   as the row that window's cursor starts on.  The hand-over and discard arms
+   store 0 into it first (000256fc, 00025969) and THE USE ARM DOES NOT: on its
+   first pass the value is already 0, because that is the entry that chose the
+   arm, but on every later pass through its own loop the item list reopens on
+   THE ROW THE PLAYER LAST PICKED.  The window's opening draw still highlights
+   row 0 and the bar jumps to the seeded row on the first pass of its cursor
+   loop (unititem.h), so seeding 0 here like the other two arms would change
+   both where the bar lands and what the player sees on the way.
+
+   THE CURSOR'S PIXEL POSITION IS SAVED ONCE THE RING HAS CLOSED, at 0002539a,
+   and it is the acting unit's tile because that is where the action menu left
+   the cursor.  Both arms that move the cursor read it back: the line sweep
+   sweeps FROM it, and the hand-over arm walks the cursor back to it.
+
+   TWO CALLS COME BACK WITH A VALUE THAT IS NOT LOOKED AT.  fdps_unit_add_item's
+   answer is tested -- that is what picks the swap -- but the second one made in
+   the swap is not, and the fdps_get_unit_record at 00025602 stores its record
+   pointer into [EBP-0x1c] and no instruction ever loads it.  The call is kept
+   because the original makes it. */
+int fdps_battle_item_menu(int unit_index)
+{
+    /* The two four-int tables the ring menu is described by, in slot order up,
+       left, right, down. */
+    int menu_icons[ITEM_MENU_SLOTS] = {
+        ITEM_MENU_ICON_USE, ITEM_MENU_ICON_HAND_OVER,
+        ITEM_MENU_ICON_EQUIP, ITEM_MENU_ICON_DISCARD
+    };
+    int menu_disabled[ITEM_MENU_SLOTS] = { 0, 0, 0, 0 };
+    /* Where the target sweeps write the unit indices they match, one byte
+       each. */
+    unsigned char targets[TARGET_BUFFER_BYTES];
+    /* The ring entry the cursor is on, and afterwards the bag row the item
+       window's cursor is on -- one slot for both, see the note above. */
+    int selected_entry;
+    /* What the last window or cursor loop answered: a cancel or a confirm. */
+    int pick_result;
+    /* What the call will hand back once the player leaves the menu. */
+    int result;
+    /* How many of the acting unit's own side are standing next to it, which is
+       what decides whether the hand-over entry can be chosen. */
+    int adjacent_count;
+    /* How many units the effect about to be used actually covers. */
+    int target_count;
+    /* The item the player picked out of the bag, and its ITEM.DAT record. */
+    int item_id;
+    struct fdps_item_effect *item;
+    /* That record's reach-and-shape byte, widened to the int the signed
+       compare against 0xf is made on. */
+    int use_distance;
+    /* Whether the first target sweep leaves the acting unit's own tile out. */
+    unsigned char skip_own_tile;
+    /* Where the cursor stood when the ring menu closed, in world pixels. */
+    int saved_cursor_x;
+    int saved_cursor_y;
+    /* The hundred-byte buffer the hand-over sweep collects into. */
+    unsigned char *candidates;
+    /* Who the player picked to hand the item to. */
+    int recipient;
+    /* The item that leaves the acting unit's bag, and, when the recipient's bag
+       was full and the two are traded instead, the one that comes back. */
+    int given_item_id;
+    int received_item_id;
+    /* Which row of the acting unit's bag the given item sat in, kept across the
+       second window because that window overwrites the shared slot. */
+    int donor_slot;
+
+    result = ITEM_MENU_NOTHING_DONE;
+
+    for (;;) {
+        if (fdps_unit_item_count(unit_index) == 0) {
+            return result;
+        }
+
+        adjacent_count = fdps_collect_targets_in_range(
+            data_fdps_map_cursor_world_x / MAP_TILE_SIZE,
+            data_fdps_map_cursor_world_y / MAP_TILE_SIZE,
+            NULL, NEIGHBOUR_PROBE_RANGE, NEIGHBOUR_PROBE_MIN_DIST,
+            NEIGHBOUR_SELECT_MODE);
+        fdps_map_grid_reset();
+        if (adjacent_count == 0) {
+            menu_disabled[ITEM_MENU_ENTRY_HAND_OVER] = ITEM_MENU_ENTRY_DISABLED;
+        }
+
+        selected_entry = fdps_menu_find_first_enabled_entry(menu_disabled);
+        fdps_menu_animate_open(menu_icons, menu_disabled, selected_entry);
+        pick_result = fdps_menu_cursor_input_loop(menu_icons, menu_disabled,
+                                                  &selected_entry);
+        fdps_menu_animate_close(menu_icons, menu_disabled, selected_entry);
+        fdps_render_view_frame();
+
+        saved_cursor_x = data_fdps_map_cursor_world_x;
+        saved_cursor_y = data_fdps_map_cursor_world_y;
+
+        if (pick_result == SELECT_CANCELLED) {
+            return result;
+        }
+
+        if (selected_entry == ITEM_MENU_ENTRY_USE) {
+            do {
+                pick_result = fdps_unit_item_select_window(unit_index, 1,
+                                                           &selected_entry);
+                if (pick_result != SELECT_CANCELLED) {
+                    item_id = (int) fdps_get_unit_record(unit_index)
+                        ->inventory_slots[BAG_ENTRY_ID_INDEX(selected_entry)];
+                    item = fdps_get_item_record(item_id);
+
+                    data_fdps_map_cursor_draw_mode =
+                        item->use_radius + CURSOR_FOOTPRINT_BIAS;
+                    if (item->use_effect == USE_EFFECT_DEST_TILE_1C) {
+                        skip_own_tile = AIM_SWEEP_DROP_OWN_TILE;
+                    } else {
+                        skip_own_tile = AIM_SWEEP_KEEP_OWN_TILE;
+                    }
+                    use_distance = (int) item->use_distance;
+
+                    /* Which tiles the player may aim at, and then the aim. */
+                    target_count = fdps_collect_targets_in_range(
+                        data_fdps_map_cursor_world_x / MAP_TILE_SIZE,
+                        data_fdps_map_cursor_world_y / MAP_TILE_SIZE,
+                        targets, use_distance, (int) skip_own_tile,
+                        (int) item->select_mode);
+                    pick_result = fdps_map_cursor_select_loop(
+                        (int) item->select_mode, target_count, targets);
+                    fdps_map_grid_reset();
+                    data_fdps_map_cursor_draw_mode = CURSOR_OVERLAY_PLAIN;
+
+                    /* The aim is settled; collect the units the effect really
+                       covers from where the cursor ended up.  THIS SWEEP RUNS
+                       EVEN ON A CANCELLED AIM, and it is the count and the list
+                       the apply below would be given. */
+                    if (use_distance < ITEM_USE_DISTANCE_LINE_BIT) {
+                        target_count = fdps_collect_targets_in_range(
+                            data_fdps_map_cursor_world_x / MAP_TILE_SIZE,
+                            data_fdps_map_cursor_world_y / MAP_TILE_SIZE,
+                            targets, (int) item->use_radius,
+                            AIM_SWEEP_KEEP_OWN_TILE, (int) item->select_mode);
+                    } else {
+                        target_count = fdps_collect_targets_in_line(
+                            data_fdps_map_cursor_world_x / MAP_TILE_SIZE,
+                            data_fdps_map_cursor_world_y / MAP_TILE_SIZE,
+                            targets, saved_cursor_x / MAP_TILE_SIZE,
+                            saved_cursor_y / MAP_TILE_SIZE,
+                            use_distance - ITEM_USE_DISTANCE_LINE_BIT,
+                            LINE_SWEEP_KEEPS_ENEMY_SIDE);
+                    }
+                    fdps_map_grid_reset();
+
+                    if (item->use_effect == USE_EFFECT_DEST_TILE_1C
+                        || item->use_effect == USE_EFFECT_DEST_TILE_19) {
+                        /* The record this resolves is never read; see the note
+                           on the function. */
+                        fdps_get_unit_record(unit_index);
+
+                        if (pick_result != SELECT_CANCELLED) {
+                            pick_result = fdps_map_cursor_select_loop(
+                                DESTINATION_SELECT_MODE, (int) targets[0],
+                                NULL);
+                        }
+                        if (pick_result != SELECT_CANCELLED) {
+                            data_fdps_battle_teleport_dest_tile_x =
+                                data_fdps_map_cursor_world_x / MAP_TILE_SIZE;
+                            data_fdps_teleport_destination_tile_y =
+                                data_fdps_map_cursor_world_y / MAP_TILE_SIZE;
+                            data_fdps_map_cursor_draw_mode = CURSOR_OVERLAY_OFF;
+                            fdps_map_cursor_move_to_unit(unit_index);
+                            data_fdps_map_cursor_draw_mode =
+                                CURSOR_OVERLAY_PLAIN;
+                        }
+                    }
+
+                    if (pick_result != SELECT_CANCELLED) {
+                        fdps_apply_item_effect_to_targets(unit_index,
+                                                          selected_entry,
+                                                          target_count,
+                                                          targets);
+                        fdps_battle_mark_unit_done(unit_index);
+                        return ITEM_MENU_TURN_SPENT;
+                    }
+
+                    /* The aim was backed out of: put the cursor on the acting
+                       unit again and reopen the item list. */
+                    data_fdps_map_cursor_draw_mode = CURSOR_OVERLAY_OFF;
+                    fdps_map_cursor_move_to_unit(unit_index);
+                    data_fdps_map_cursor_draw_mode = CURSOR_OVERLAY_PLAIN;
+                    pick_result = SELECT_CONFIRMED;
+                }
+            } while (pick_result == SELECT_CONFIRMED);
+        } else if (selected_entry == ITEM_MENU_ENTRY_HAND_OVER) {
+            selected_entry = 0;
+            pick_result = fdps_unit_item_select_window(unit_index, 0,
+                                                       &selected_entry);
+            if (pick_result != SELECT_CANCELLED) {
+                candidates = (unsigned char *)
+                    malloc((size_t) HAND_OVER_CANDIDATE_BYTES);
+                adjacent_count = fdps_collect_targets_in_range(
+                    data_fdps_map_cursor_world_x / MAP_TILE_SIZE,
+                    data_fdps_map_cursor_world_y / MAP_TILE_SIZE,
+                    candidates, NEIGHBOUR_PROBE_RANGE, NEIGHBOUR_PROBE_MIN_DIST,
+                    NEIGHBOUR_SELECT_MODE);
+                data_fdps_map_cursor_draw_mode = CURSOR_OVERLAY_PLAIN;
+                pick_result = fdps_map_cursor_select_loop(NEIGHBOUR_SELECT_MODE,
+                                                          adjacent_count,
+                                                          candidates);
+
+                /* Who was under the cursor, and the tidying up: all five of
+                   these run whether the pick was confirmed or cancelled. */
+                recipient = fdps_battle_find_unit_at_cursor();
+                fdps_map_grid_reset();
+                fdps_map_cursor_move_to(saved_cursor_x, saved_cursor_y);
+                free(candidates);
+                fdps_flush_keyboard_queue();
+
+                if (pick_result != SELECT_CANCELLED) {
+                    given_item_id = (int) fdps_get_unit_record(unit_index)
+                        ->inventory_slots[BAG_ENTRY_ID_INDEX(selected_entry)];
+
+                    if (fdps_unit_add_item(recipient, given_item_id)
+                            == BAG_WAS_FULL) {
+                        /* The recipient's bag was full, so the two units trade
+                           instead and the player picks what comes back. */
+                        donor_slot = selected_entry;
+                        selected_entry = 0;
+                        pick_result = fdps_unit_item_select_window(
+                            recipient, 0, &selected_entry);
+                        if (pick_result != SELECT_CANCELLED) {
+                            received_item_id =
+                                (int) fdps_get_unit_record(recipient)
+                                ->inventory_slots
+                                    [BAG_ENTRY_ID_INDEX(selected_entry)];
+                            fdps_unit_remove_item(recipient, selected_entry);
+                            fdps_unit_add_item(recipient, given_item_id);
+                            fdps_unit_remove_item(unit_index, donor_slot);
+                            fdps_unit_add_item(unit_index, received_item_id);
+                            fdps_unit_recompute_combat_stats(recipient);
+                            fdps_unit_recompute_combat_stats(unit_index);
+                            result = ITEM_MENU_ITEM_MOVED;
+                        }
+                    } else {
+                        fdps_unit_remove_item(unit_index, selected_entry);
+                        fdps_unit_recompute_combat_stats(unit_index);
+                        result = ITEM_MENU_ITEM_MOVED;
+                    }
+                }
+            }
+        } else if (selected_entry == ITEM_MENU_ENTRY_EQUIP) {
+            fdps_unit_equip_window(unit_index);
+        } else {
+            selected_entry = 0;
+            pick_result = fdps_unit_item_select_window(unit_index, 0,
+                                                       &selected_entry);
+            if (pick_result != SELECT_CANCELLED) {
+                fdps_unit_remove_item(unit_index, selected_entry);
+            }
+            /* OUTSIDE THE TEST, at 0002599b: the derived stats are rebuilt even
+               when the player backed out without discarding anything. */
+            fdps_unit_recompute_combat_stats(unit_index);
+        }
+    }
 }
