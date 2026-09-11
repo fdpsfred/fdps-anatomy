@@ -2449,5 +2449,33 @@
       "same_as": "emit#1",
       "status": "open"
     }
+  ],
+  "0002ac10": [
+    {
+      "what": "Whether the demo ends by itself after two passes over the unit array, and what those passes look like on screen, is not settled here. The unit test drives one actor turn and then ends the demo through its own escape -- a make code the fixture's timer interrupt puts in the scancode ring -- because the alternative is eighty actors twice through fdps_map_actor_behavior_step, whose tail spins on the frame clock and draws through half a dozen sprite-sheet globals ticket 23 has not filled. So the pass counter's initial 2 at 0002ad5c, and the mid-pass turn reset at unit index 12 (CMP dword ptr [EBP-0xc],0xc at 0002adc5, which no bounded run reaches), are both unasserted.",
+      "needs": "A person watching the title screen idle into the demo in DOSBox-X, on the rebuilt executable beside the original, and counting the passes: the demo should drive the whole map twice and return to the title by itself with nothing pressed. Alternatively, once ticket 23 has emitted the sprite-sheet and blend-table globals the unit draw reads, the bounded run below could be let go the whole way instead.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "What data_fdps_map_cursor_draw_mode holds when the demo returns is not asserted. The demo switches the overlay off at 0002acb4, and then the one actor turn the run takes writes that same global twice more on its way through fdps_map_actor_move_toward_nearest_opponent, so the value left behind is the AI's and not the demo's. The store at 0002acb4 is in the emitted C and is right; nothing in a bounded run can see it.",
+      "needs": "A run in which no actor takes a turn -- which needs every unit in the array retired before the loop, a state nothing outside the call can install because the array is complete only microseconds before the loop begins. Otherwise the same playtest as above: the demo must show no map cursor while it runs.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed independently that nothing in a bounded test run can reach the two-pass behaviour or the mid-pass turn reset, and narrowed what is actually at risk: WDISASM on the rebuilt TITLE.OBJ shows MOV dword ptr -0cH[ebp],00000002H and CMP dword ptr -8H[ebp],0000000cH / JNE compiled exactly as the original has them at 0002ad5c and 0002adc5, so the code path is byte-for-byte in place and only its runtime effect on screen is unobserved.",
+      "needs": "The playtest the emitter names: a person letting the title screen idle into the demo in DOSBox-X and watching it drive the map twice and return by itself with nothing pressed.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Nothing added. I reached the same point from the listing -- the store at 0002acb4 is present and correct, and the actor turn the bounded run takes overwrites that global downstream -- and have no further reachable evidence to offer.",
+      "needs": "As emit#1: the same DOSBox-X playtest, confirming no map cursor is drawn while the demo runs.",
+      "same_as": "emit#1",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

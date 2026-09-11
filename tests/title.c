@@ -1,8 +1,11 @@
 /* tests/title.c -- cover for src/title.c.
  *
- * fdps_play_movie @ 00030f40 and fdps_show_game_over @ 0002a960.  The
- * game-over cases are at the end of the file and set out what they assert
- * against above themselves; everything down to run_title_tests is the movie.
+ * Four entry points, each with its own fixture and its own block of cases,
+ * in the order the file holds them: fdps_play_movie @ 00030f40,
+ * fdps_show_game_over @ 0002a960, fdps_play_ending_credit_roll @ 0001ba40 and
+ * fdps_title_demo @ 0002ac10.  Every block but the movie's sets out what it
+ * asserts against, and why its run is bounded the way it is, above itself;
+ * everything from here to the game-over block is the movie.
  *
  * Expected values come from the assembly at 00030f40: the CALL kbhit / TEST
  * EAX,EAX / JZ / CALL getch / JMP at 00030f56..00030f64 that makes the drain a
@@ -76,7 +79,9 @@
 #include "audio.h"
 #include "blit.h"
 #include "cd.h"
+#include "deploy.h"
 #include "keybd.h"
+#include "mapdraw.h"
 #include "palette.h"
 #include "sprite.h"
 #include "text.h"
@@ -1805,6 +1810,829 @@ static void credits_leaks_one_page_for_every_card_but_the_last(void)
     CHECK_EQ(cr_pages_leaked, 3);
 }
 
+/* --- fdps_title_demo @ 0002ac10 ------------------------------------------
+ *
+ * The demo is run ONCE, whole, against the shipped containers, and every case
+ * below reads its answer off the state that one run left.  The unit array it
+ * builds is the map's own, so most of the expected values are numbers taken
+ * out of the shipped MAP25.DAT and MAP25.COD with tools/vfs_dump, and none of
+ * them is read off the emitted C:
+ *
+ *   MAP25.DAT opens TWELVE player slots behind EIGHTY scripted deployments,
+ *     sixty-eight of which are tagged wave 0, so the chapter reset leaves an
+ *     array of eighty records: the twelve party slots first, then the sixty-
+ *     eight deployments in record order.  Unit 12 is therefore deployment
+ *     record 0 -- side 0, character 64, AI class 2 -- and is the first record
+ *     the demo's twelve-record stat loop must NOT have touched.
+ *   MAP25.COD stands the twelve party slots on its records 80..91, which are
+ *     (6,36) (7,36) (8,36) (18,37) (9,36) (10,36) (11,36) (12,36) (7,37)
+ *     (8,37) (9,37) (10,37).  Slot 3 is the odd one out, eleven tiles to the
+ *     right of the rest, and the store at 0002acce is what brings it back.
+ *   THE NEAREST WAVE-0 DEPLOYMENT IS THIRTEEN TILES FROM THE NEAREST PARTY
+ *     TILE.  That, with the zeroed movement and the zeroed weapon range the
+ *     fixture tables give every unit, is what makes the one actor turn the run
+ *     takes a rest rather than a fight: nothing can reach anything, so no
+ *     blow, no death and no random draw enters the run.
+ *
+ * and the rest from the assembly at 0002ac10: MOV [0x00069cf4],0x19 at
+ * 0002ac1c, the twelve PUSH/CALL fdps_roster_add_character pairs from 0002ac37
+ * to 0002aca7, MOV byte ptr [EAX],0x4 at 0002acce on the record
+ * fdps_get_unit_record(3) returned, PUSH 0x0 / PUSH 0xb / PUSH 0x0 at
+ * 0002acd1, the two fdps_set_flag_bit calls at 0002acdf and 0002aceb, the
+ * seven stores into record offsets 6, 0x40, 0x42, 0x44, 0x46, 0x48 and 0x4c
+ * under CMP dword ptr [EBP-0xc],0xc at 0002acfe, and PUSH 0xfa00 / PUSH 0x0 /
+ * PUSH 0xa0000 at 0002ae19 for the closing clear.
+ *
+ * HOW THE RUN IS BOUNDED, AND WHY IT HAS TO BE.  The inner loop hands every
+ * one of the eighty actors to fdps_map_actor_behavior_step, whose tail spins
+ * on the frame clock (tests/mapai.c), and the only thing that ends the demo
+ * early is a make code in the scancode ring -- which the demo empties itself
+ * just before the loop, and which nothing in a test process refills, because
+ * the INT 09h handler that fills it is not installed.  So the fixture's timer
+ * interrupt does two jobs: it moves data_fdps_timer_tick_counter, without
+ * which the first frame never finishes, and it arms the ring with one make
+ * code on every tick.  The demo therefore notices a key on the first actor and
+ * leaves after one turn.  Two of the eighty deployments stand on a tile whose
+ * event code is not zero, and a turn-end tile event on one of those would run
+ * a chapter script rather than assert anything, so stopping at the first actor
+ * is also what keeps the run inside the part that can be observed.
+ *
+ * WHAT THAT LEAVES TO THE PLAYTEST.  How the two passes read on screen, and
+ * that the demo ends by itself when nobody presses anything, are not reachable
+ * from here and are for a person in DOSBox-X (ADR-0003).
+ * data_fdps_map_cursor_draw_mode is in the same position: the demo switches
+ * the overlay off at 0002acb4, and then the one actor turn writes that same
+ * global twice on its way through fdps_map_actor_move_and_attack, so what it
+ * holds afterwards is not the demo's answer.
+ *
+ * WHAT THE ONE ACTOR TURN DOES.  Unit 0 is a party record with behaviour 0,
+ * the plain fighter, so it runs the three action searches and then rests.  All
+ * three decline and the rest is refused, and the fixture is what makes that
+ * certain rather than likely: every item modifier is zero, so the weapon's
+ * reach is zero tiles and the attack search has no target area to look in; the
+ * unit knows no spell and carries no item with an effect; movement is zero, so
+ * neither approach can take a step; and fdps_unit_rest returns at its first
+ * test because the demo has just set current HP equal to maximum HP.  What is
+ * left is the turn-end tile event -- the party tiles all carry event code 0 in
+ * M25.DTL -- the acted-this-turn flag, and one drawn frame.
+ *
+ * WHAT THE FIXTURE TABLES ARE FOR.  The six data tables are the test file's
+ * own, as tests/chapter.c, tests/chinit1.c and tests/aiact.c stage them,
+ * because ticket 23 has not emitted the real ones.  Four of their fields are
+ * chosen rather than left at zero: every character's base defense is 77 and
+ * base dexterity 55, so that the two stat words the demo does NOT write --
+ * defense at record 0x4a and evade at 0x4e -- come back holding something a
+ * store of the demo's own constants could not have produced; every enemy
+ * record carries HP so that no deployment arrives already dead; and every
+ * terrain in the class table costs one movement point, WITHOUT WHICH THE RUN
+ * DOES NOT FINISH -- the move grid's flood fill spends the allowance one tile
+ * at a time and a table of zero costs never spends it.  Movement and every
+ * item modifier stay zero on purpose; see above.
+ *
+ * The roster block is a real heap block and has to be: the demo FREES it on
+ * the way out, and a static array handed to free() is not a failure a later
+ * check would get to report (rebuild_info/emit_pipeline.md).  It is filled
+ * with 0x5a first, which is how the behaviour byte is observed -- record byte
+ * 0x34 is one of the fields fdps_roster_add_character leaves standing and
+ * fdps_build_map_unit_array copies whole, so a party record reaches the demo
+ * carrying 0x5a and the range call at 0002acd1 has to leave 0x50.
+ */
+
+#define DEMO_CHAPTER_ID 0x19
+#define DEMO_STALE_CHAPTER_ID 3
+
+#define DEMO_MAP_PLAYER_SLOTS 12
+#define DEMO_MAP_CHAR_SPAWNS 80
+#define DEMO_MAP_UNITS 80
+
+/* Deployment record 0 of MAP25.DAT, which the reset lands at unit index 12.
+   Its maximum HP is not the fixture's enemy row as it stands: a deployment's
+   HP is the record's own level times that row's HP (src/deploy.c), and this
+   record is level 30. */
+#define DEMO_FIRST_DEPLOYED_UNIT 12
+#define DEMO_FIRST_DEPLOYED_CHAR 64
+#define DEMO_FIRST_DEPLOYED_SIDE 0
+#define DEMO_FIRST_DEPLOYED_AI 2
+#define DEMO_FIRST_DEPLOYED_LEVEL 30
+
+/* The party's columns on MAP25.COD, and the one the demo overwrites. */
+#define DEMO_UNIT0_POS_X 6
+#define DEMO_UNIT2_POS_X 8
+#define DEMO_UNIT4_POS_X 9
+#define DEMO_MOVED_UNIT 3
+#define DEMO_MOVED_POS_X 4
+#define DEMO_MOVED_POS_Y 37
+
+#define DEMO_PARTY_UNITS 12
+#define DEMO_SIDE_NPC 1
+#define DEMO_HP 2000
+#define DEMO_MP 800
+#define DEMO_ATTACK 800
+#define DEMO_HIT 400
+
+/* What the two untouched stat words have to read afterwards: the fixture's
+   base defense and base dexterity, carried through
+   fdps_unit_recompute_combat_stats with every item modifier zero. */
+#define DEMO_FIXTURE_DP_BASE 77
+#define DEMO_FIXTURE_DX_BASE 55
+
+/* The spell grants.  Spell 0x27 is bit 7 of bitmap byte 4 and spell 0x0b is
+   bit 3 of byte 1 (assets/spells.md, unit.h). */
+#define DEMO_GRANT_UNIT_A 1
+#define DEMO_GRANT_BYTE_A 4
+#define DEMO_GRANT_BIT_A 0x80
+#define DEMO_GRANT_UNIT_B 4
+#define DEMO_GRANT_BYTE_B 1
+#define DEMO_GRANT_BIT_B 0x08
+#define DEMO_BYSTANDER_UNIT 2
+
+/* The prefill, and what the behaviour byte has to read once the low nibble has
+   been reset over slots 0..11. */
+#define DEMO_ROSTER_PREFILL 0x5a
+#define DEMO_BEHAVIOR_AFTER_RESET 0x50
+
+#define DEMO_ROSTER_SLOTS 32
+#define DEMO_UNIT_STRIDE 0x50
+#define DEMO_TABLE_ROWS 128
+#define DEMO_ITEM_TABLE_ROWS 256
+#define DEMO_CELL_EVENT_FLAGS 32
+#define DEMO_DAC_ENTRIES 256
+#define DEMO_SCENE_LAYERS 6
+
+#define DEMO_STALE_ROSTER_COUNT 7
+#define DEMO_STALE_PLAYER_SLOTS 99
+
+#define DEMO_FIXTURE_LEVEL 1
+#define DEMO_FIXTURE_ENEMY_HP 100
+
+/* Every terrain costs one movement point in the fixture class table.  Being
+   non-zero is the whole of its importance: the movement grid's flood fill
+   walks until the allowance runs out, so a table of zero costs -- which is
+   what a null data_fdps_class_table_ptr gives, the pointer being a ticket 23
+   global -- never runs out and the fill does not terminate. */
+#define DEMO_TERRAIN_MOVE_COST 1
+#define DEMO_TERRAIN_TYPES 8
+
+/* The two .CEL sheets the unit draw reads: offset table at +0x0f, one two-byte
+   run per row, 24 rows for a map sprite and 11 for a status icon. */
+#define DEMO_SHEET_TABLE_AT 0x0f
+#define DEMO_TILE_PX 24
+#define DEMO_TILE_STREAM_BYTES (DEMO_TILE_PX * 2)
+#define DEMO_CEL_RUN_OP 0x17
+#define DEMO_SHADOW_SPRITES 4
+#define DEMO_SHADOW_STREAMS_AT (DEMO_SHEET_TABLE_AT + DEMO_SHADOW_SPRITES * 4)
+#define DEMO_ICON_SPRITES 5
+#define DEMO_ICON_ROWS 11
+#define DEMO_ICON_STREAM_BYTES (DEMO_ICON_ROWS * 2)
+#define DEMO_ICON_STREAMS_AT (DEMO_SHEET_TABLE_AT + DEMO_ICON_SPRITES * 4)
+#define DEMO_ICON_COLOR_BASE 0x80
+
+#define DEMO_MODE_TEXT 0x03
+#define DEMO_MODE_320X200X256 0x13
+#define DEMO_TIMER_VECTOR 8
+
+/* The make code the fixture's interrupt arms the ring with.  Anything below
+   0x7f ends the demo; this one is a function key, which nothing the run passes
+   through treats as a command. */
+#define DEMO_ARMED_MAKE_CODE 0x3b
+
+#define DEMO_CEL_NAME "ICON.CEL"
+#define DEMO_FIELD_NAME "FIELD.VFS"
+#define DEMO_FIELD1_NAME "FIELD1.VFS"
+#define DEMO_FIELD2_NAME "FIELD2.VFS"
+#define DEMO_MISC_NAME "MISC.VFS"
+#define DEMO_CURSOR_SHEET_MEMBER "Cusor.cel"
+#define DEMO_CEL_MIN_SIZE (15L + 0x2970L)
+
+static void demo_zero_bytes(void *block, int count)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) block;
+    for (i = 0; i < count; i++) {
+        bytes[i] = 0;
+    }
+}
+
+static struct fdps_character_base_record demo_char[DEMO_TABLE_ROWS];
+static struct fdps_character_growth demo_growth[DEMO_TABLE_ROWS];
+static struct fdps_enemy_data demo_enemy[DEMO_TABLE_ROWS];
+static struct fdps_item_effect demo_items[DEMO_ITEM_TABLE_ROWS];
+static struct fdps_class_record demo_classes[DEMO_TABLE_ROWS];
+static struct fdps_spell_effect demo_spells[DEMO_TABLE_ROWS];
+static unsigned char demo_palette[DEMO_DAC_ENTRIES * 3];
+static struct fdps_vfs_image_header demo_sfx_pack;
+static unsigned char demo_shadow_sheet[DEMO_SHADOW_STREAMS_AT
+                                       + DEMO_SHADOW_SPRITES
+                                             * DEMO_TILE_STREAM_BYTES];
+static unsigned char demo_icon_sheet[DEMO_ICON_STREAMS_AT
+                                     + DEMO_ICON_SPRITES
+                                           * DEMO_ICON_STREAM_BYTES];
+
+/* The two .CEL sheets fdps_draw_map_unit reads through, built to the offset
+   table at +0x0f and the one full-width run per row resource_info/cel.md
+   describes.  They are staged because both pointers are ticket 23 globals and
+   so null, and the decoder takes its row length out of the stream it is
+   handed: pointed at null it reads the interrupt vector table as run opcodes
+   and writes past the page it was given (rebuild_info/pitfalls.md).  What they
+   paint is not asserted -- whatever the render tail draws is overwritten by
+   the demo's own frame clear before the call returns. */
+static void demo_build_unit_sheets(void)
+{
+    int sprite;
+    int row;
+    int stream_at;
+
+    demo_zero_bytes(demo_shadow_sheet, (int) sizeof(demo_shadow_sheet));
+    demo_zero_bytes(demo_icon_sheet, (int) sizeof(demo_icon_sheet));
+
+    for (sprite = 0; sprite < DEMO_SHADOW_SPRITES; sprite++) {
+        stream_at = DEMO_SHADOW_STREAMS_AT + sprite * DEMO_TILE_STREAM_BYTES;
+        *(int *) (demo_shadow_sheet + DEMO_SHEET_TABLE_AT + sprite * 4) =
+            stream_at;
+        for (row = 0; row < DEMO_TILE_PX; row++) {
+            demo_shadow_sheet[stream_at + row * 2] = DEMO_CEL_RUN_OP;
+            demo_shadow_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) (sprite + 1);
+        }
+    }
+
+    for (sprite = 0; sprite < DEMO_ICON_SPRITES; sprite++) {
+        stream_at = DEMO_ICON_STREAMS_AT + sprite * DEMO_ICON_STREAM_BYTES;
+        *(int *) (demo_icon_sheet + DEMO_SHEET_TABLE_AT + sprite * 4) =
+            stream_at;
+        for (row = 0; row < DEMO_ICON_ROWS; row++) {
+            demo_icon_sheet[stream_at + row * 2] = DEMO_CEL_RUN_OP;
+            demo_icon_sheet[stream_at + row * 2 + 1] =
+                (unsigned char) (DEMO_ICON_COLOR_BASE + sprite);
+        }
+    }
+}
+
+static void (__interrupt __far *demo_saved_timer)();
+
+/* Moves the frame clock the render tail waits on, and arms the scancode ring
+   with one make code so that the demo's own escape ends it on the first
+   actor. */
+static void __interrupt __far demo_tick_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    data_fdps_input_scancode_queue[0] = DEMO_ARMED_MAKE_CODE;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 1;
+    _chain_intr(demo_saved_timer);
+}
+
+static void demo_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* 0 before the run, 1 once it has happened, 2 when it was skipped because a
+   shipped container is not staged. */
+static int demo_state = 0;
+
+static int seen_chapter_id;
+static int seen_player_slots;
+static int seen_char_spawns;
+static int seen_unit_count;
+static int seen_roster_count;
+static int seen_play_active;
+static int seen_frame_non_zero;
+static int seen_tail_first;
+static int seen_tail_last;
+static int seen_char_id[DEMO_PARTY_UNITS];
+static int seen_side[DEMO_PARTY_UNITS];
+static int seen_hp_current[DEMO_PARTY_UNITS];
+static int seen_hp_max[DEMO_PARTY_UNITS];
+static int seen_mp_current[DEMO_PARTY_UNITS];
+static int seen_mp_max[DEMO_PARTY_UNITS];
+static int seen_ap[DEMO_PARTY_UNITS];
+static int seen_hit[DEMO_PARTY_UNITS];
+static int seen_behavior[DEMO_PARTY_UNITS];
+static int seen_unit1_dp;
+static int seen_unit1_ev;
+static int seen_unit0_pos_x;
+static int seen_unit2_pos_x;
+static int seen_unit4_pos_x;
+static int seen_moved_pos_x;
+static int seen_moved_pos_y;
+static int seen_grant_a_byte;
+static int seen_grant_a_other;
+static int seen_grant_b_byte;
+static int seen_grant_b_other;
+static int seen_bystander_a_byte;
+static int seen_bystander_b_byte;
+static int seen_deployed_char;
+static int seen_deployed_side;
+static int seen_deployed_ai;
+static int seen_deployed_hp_max;
+
+static int demo_file_present(char *name)
+{
+    FILE *fp;
+
+    fp = fopen(name, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    fclose(fp);
+    return 1;
+}
+
+static int demo_containers_present(void)
+{
+    FILE *fp;
+    long size;
+
+    fp = fopen(DEMO_CEL_NAME, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    fseek(fp, 0, SEEK_END);
+    size = ftell(fp);
+    fclose(fp);
+    if (size < DEMO_CEL_MIN_SIZE) {
+        return 0;
+    }
+
+    return demo_file_present(DEMO_FIELD_NAME)
+           && demo_file_present(DEMO_FIELD1_NAME)
+           && demo_file_present(DEMO_FIELD2_NAME)
+           && demo_file_present(DEMO_MISC_NAME);
+}
+
+/* Nulling, not freeing: with a layer count of zero and null everywhere else
+   the chapter loader frees nothing, which is the state a freshly started
+   process is in. */
+static void demo_clear_chapter_globals(void)
+{
+    int layer;
+
+    for (layer = 0; layer < DEMO_SCENE_LAYERS; layer++) {
+        data_fdps_scene_layer_tile_map_ptrs[layer] = NULL;
+        data_fdps_scene_layer_tile_sheet_ptrs[layer] = NULL;
+        data_fdps_scene_layer_tile_attr_ptr[layer] = NULL;
+    }
+    data_fdps_scene_layer_count = 0;
+    data_fdps_current_chapter_text_ptr = NULL;
+    data_fdps_tile_event_data_table_ptr = NULL;
+    data_fdps_map_cell_event_code_layer_ptr = NULL;
+    data_fdps_battle_move_grid_ptr = NULL;
+    data_fdps_map_spawn_pos_table_ptr = NULL;
+}
+
+/* Everything the run allocated, released, and every global it was pointed at
+   put back the way a fresh process has it.  The roster pointer is nulled and
+   NOT freed: the demo freed that block itself, and this is exactly the global
+   the emit pipeline's rule about loader-freed pointers is about. */
+static void demo_free_globals(void)
+{
+    int layer;
+
+    for (layer = 0; layer < data_fdps_scene_layer_count; layer++) {
+        free(data_fdps_scene_layer_tile_map_ptrs[layer]);
+        free(data_fdps_scene_layer_tile_sheet_ptrs[layer]);
+        free(data_fdps_scene_layer_tile_attr_ptr[layer]);
+    }
+    free(data_fdps_current_chapter_text_ptr);
+    free(data_fdps_tile_event_data_table_ptr);
+    free(data_fdps_map_cell_event_code_layer_ptr);
+    free(data_fdps_battle_move_grid_ptr);
+    demo_clear_chapter_globals();
+
+    if (data_fdps_map_unit_count != 0) {
+        free(data_fdps_map_unit_array_ptr);
+    }
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_map_unit_count = 0;
+
+    if (data_fdps_cel_sprite_cache_count != 0) {
+        free(data_fdps_cel_sprite_cache_ptr);
+    }
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_cel_sprite_cache_count = 0;
+
+    free(data_fdps_cursor_highlight_sprite_sheet_ptr);
+    data_fdps_cursor_highlight_sprite_sheet_ptr = NULL;
+    data_fdps_vga_main_palette_ptr = NULL;
+
+    data_fdps_roster_array_ptr = NULL;
+    data_fdps_roster_member_count = 0;
+
+    data_fdps_battle_character_base_table_ptr = NULL;
+    data_fdps_battle_character_growth_table_ptr = NULL;
+    data_fdps_battle_enemy_data_table_ptr = NULL;
+    data_fdps_item_effect_table_ptr = NULL;
+    data_fdps_class_table_ptr = NULL;
+    data_fdps_battle_spell_effect_table_ptr = NULL;
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = NULL;
+    data_fdps_shadow_sprite_sheet_ptr = NULL;
+    data_fdps_unit_status_icon_sheet_ptr = NULL;
+
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+}
+
+static struct fdps_unit_record *demo_unit(int unit_index)
+{
+    return (struct fdps_unit_record *)
+           (data_fdps_map_unit_array_ptr + unit_index * DEMO_UNIT_STRIDE);
+}
+
+/* How many bytes of the frame are not zero, counted in the aperture itself
+   while the adapter is still in the mode that decodes it. */
+static int demo_frame_non_zero_count(void)
+{
+    unsigned char *frame;
+    int offset;
+    int bad;
+
+    frame = (unsigned char *) MOVIE_BASE;
+    bad = 0;
+    for (offset = 0; offset < MOVIE_FRAME_BYTES; offset++) {
+        if (frame[offset] != 0) {
+            bad++;
+        }
+    }
+    return bad;
+}
+
+static void demo_capture(void)
+{
+    struct fdps_unit_record *unit;
+    struct fdps_unit_record *deployed;
+    int slot;
+
+    seen_chapter_id = data_fdps_chapter_current_chapter_id;
+    seen_player_slots = data_fdps_map_player_slot_count;
+    seen_char_spawns = data_fdps_map_char_spawn_count;
+    seen_unit_count = data_fdps_map_unit_count;
+    seen_roster_count = data_fdps_roster_member_count;
+    seen_play_active = (int) data_fdps_ui_play_active_flag;
+
+    for (slot = 0; slot < DEMO_PARTY_UNITS; slot++) {
+        unit = demo_unit(slot);
+        seen_char_id[slot] = (int) unit->char_id;
+        seen_side[slot] = (int) unit->side;
+        seen_hp_current[slot] = (int) unit->hp_current;
+        seen_hp_max[slot] = (int) unit->hp_max;
+        seen_mp_current[slot] = (int) unit->mp_current;
+        seen_mp_max[slot] = (int) unit->mp_max;
+        seen_ap[slot] = (int) unit->ap;
+        seen_hit[slot] = (int) unit->hit;
+        seen_behavior[slot] = (int) unit->ai_behavior;
+    }
+
+    unit = demo_unit(DEMO_GRANT_UNIT_A);
+    seen_unit1_dp = (int) unit->dp;
+    seen_unit1_ev = (int) unit->ev;
+    seen_grant_a_byte = (int) unit->spells_known_bitmap[DEMO_GRANT_BYTE_A];
+    seen_grant_a_other = (int) unit->spells_known_bitmap[DEMO_GRANT_BYTE_B];
+
+    unit = demo_unit(DEMO_GRANT_UNIT_B);
+    seen_grant_b_byte = (int) unit->spells_known_bitmap[DEMO_GRANT_BYTE_B];
+    seen_grant_b_other = (int) unit->spells_known_bitmap[DEMO_GRANT_BYTE_A];
+
+    unit = demo_unit(DEMO_BYSTANDER_UNIT);
+    seen_bystander_a_byte = (int) unit->spells_known_bitmap[DEMO_GRANT_BYTE_A];
+    seen_bystander_b_byte = (int) unit->spells_known_bitmap[DEMO_GRANT_BYTE_B];
+
+    seen_unit0_pos_x = (int) demo_unit(0)->pos_x;
+    seen_unit2_pos_x = (int) demo_unit(2)->pos_x;
+    seen_unit4_pos_x = (int) demo_unit(4)->pos_x;
+    seen_moved_pos_x = (int) demo_unit(DEMO_MOVED_UNIT)->pos_x;
+    seen_moved_pos_y = (int) demo_unit(DEMO_MOVED_UNIT)->pos_y;
+
+    deployed = demo_unit(DEMO_FIRST_DEPLOYED_UNIT);
+    seen_deployed_char = (int) deployed->char_id;
+    seen_deployed_side = (int) deployed->side;
+    seen_deployed_ai = (int) deployed->ai_behavior;
+    seen_deployed_hp_max = (int) deployed->hp_max;
+}
+
+/* Stages the whole battle-time environment, runs the demo once and records
+   what it left behind. */
+static void demo_run(void)
+{
+    unsigned char *roster_block;
+    int index;
+    int entry;
+
+    if (demo_state != 0) {
+        return;
+    }
+    demo_state = 2;
+
+    if (!demo_containers_present()) {
+        return;
+    }
+
+    demo_clear_chapter_globals();
+
+    demo_zero_bytes(demo_char, (int) sizeof(demo_char));
+    demo_zero_bytes(demo_growth, (int) sizeof(demo_growth));
+    demo_zero_bytes(demo_enemy, (int) sizeof(demo_enemy));
+    demo_zero_bytes(demo_items, (int) sizeof(demo_items));
+    demo_zero_bytes(demo_classes, (int) sizeof(demo_classes));
+    demo_zero_bytes(demo_spells, (int) sizeof(demo_spells));
+    demo_zero_bytes(&demo_sfx_pack, (int) sizeof(demo_sfx_pack));
+    demo_build_unit_sheets();
+
+    for (index = 0; index < DEMO_TABLE_ROWS; index++) {
+        demo_char[index].level = (unsigned char) DEMO_FIXTURE_LEVEL;
+        demo_char[index].dp_base = (short) DEMO_FIXTURE_DP_BASE;
+        demo_char[index].dx_base = (short) DEMO_FIXTURE_DX_BASE;
+        demo_enemy[index].hp = (unsigned short) DEMO_FIXTURE_ENEMY_HP;
+        for (entry = 0; entry < DEMO_TERRAIN_TYPES; entry++) {
+            demo_classes[index].move_cost[entry] =
+                (unsigned char) DEMO_TERRAIN_MOVE_COST;
+        }
+    }
+
+    data_fdps_battle_character_base_table_ptr = (unsigned char *) demo_char;
+    data_fdps_battle_character_growth_table_ptr =
+        (unsigned char *) demo_growth;
+    data_fdps_battle_enemy_data_table_ptr = (unsigned char *) demo_enemy;
+    data_fdps_item_effect_table_ptr = (unsigned char *) demo_items;
+    data_fdps_class_table_ptr = (unsigned char *) demo_classes;
+    data_fdps_battle_spell_effect_table_ptr = (unsigned char *) demo_spells;
+    data_fdps_audio_basewav_sfx_bank_buf_ptr =
+        (unsigned char *) &demo_sfx_pack;
+    data_fdps_shadow_sprite_sheet_ptr = demo_shadow_sheet;
+    data_fdps_unit_status_icon_sheet_ptr = demo_icon_sheet;
+    data_fdps_map_unit_shadow_pass_flag = 0;
+    data_fdps_map_unit_walk_anim_counter = 0;
+    data_fdps_map_unit_status_icon_tick_counter = 0;
+    data_fdps_map_unit_status_icon_cycle = 0;
+    data_fdps_map_unit_anim_last_tick = 0;
+
+    roster_block = (unsigned char *)
+                   malloc((size_t) (DEMO_ROSTER_SLOTS * DEMO_UNIT_STRIDE));
+    if (roster_block == NULL) {
+        return;
+    }
+    memset(roster_block, DEMO_ROSTER_PREFILL,
+           (size_t) (DEMO_ROSTER_SLOTS * DEMO_UNIT_STRIDE));
+    data_fdps_roster_array_ptr = roster_block;
+    data_fdps_roster_member_count = DEMO_STALE_ROSTER_COUNT;
+
+    for (entry = 0; entry < DEMO_DAC_ENTRIES; entry++) {
+        demo_palette[entry * 3] = (unsigned char) (entry % 64);
+        demo_palette[entry * 3 + 1] = (unsigned char) ((entry * 3) % 64);
+        demo_palette[entry * 3 + 2] = (unsigned char) ((entry * 5) % 64);
+    }
+    data_fdps_vga_main_palette_ptr = demo_palette;
+    data_fdps_cursor_highlight_sprite_sheet_ptr =
+        (unsigned char *) fdps_vfs_load_entry(DEMO_MISC_NAME,
+                                              DEMO_CURSOR_SHEET_MEMBER);
+
+    data_fdps_chapter_current_chapter_id = DEMO_STALE_CHAPTER_ID;
+    data_fdps_map_player_slot_count = DEMO_STALE_PLAYER_SLOTS;
+    data_fdps_map_char_spawn_count = 0;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_cel_sprite_cache_count = 0;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+
+    for (index = 0; index < DEMO_CELL_EVENT_FLAGS; index++) {
+        data_fdps_map_cell_event_triggered_flags[index] = 0;
+    }
+
+    /* The terrain panel is left switched off, which is the state a fresh
+       process is in: it draws through two sheet pointers ticket 23 has not
+       filled and fdps_draw_cursor_info_panel tests this global first. */
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = DEMO_ROSTER_PREFILL;
+
+    data_fdps_chapter_event_or_battle_end_code = 0;
+    data_fdps_battle_turn_counter = 1;
+    data_fdps_map_cursor_draw_mode = 1;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+    data_fdps_scene_layer_scroll_last_tick = 0;
+    data_fdps_view_frame_last_tick = 0;
+
+    demo_set_mode(DEMO_MODE_320X200X256);
+    memset((void *) MOVIE_BASE, MOVIE_SENTINEL, (size_t) MOVIE_WINDOW_BYTES);
+
+    demo_saved_timer = _dos_getvect(DEMO_TIMER_VECTOR);
+    _dos_setvect(DEMO_TIMER_VECTOR, demo_tick_isr);
+
+    fdps_title_demo();
+
+    _dos_setvect(DEMO_TIMER_VECTOR, demo_saved_timer);
+
+    seen_frame_non_zero = demo_frame_non_zero_count();
+    seen_tail_first = (int) ((unsigned char *) MOVIE_BASE)[MOVIE_TAIL_FIRST];
+    seen_tail_last = (int) ((unsigned char *) MOVIE_BASE)[MOVIE_TAIL_LAST];
+
+    demo_set_mode(DEMO_MODE_TEXT);
+
+    demo_capture();
+    demo_free_globals();
+    demo_state = 1;
+}
+
+/* The demo rebuilds the chapter the STORE at 0002ac1c names, not the one that
+   was already loaded.  Both map counts are staged at numbers MAP25.DAT does
+   not carry -- 99 player slots and 0 deployments -- and the chapter global at
+   3, so the twelve, the eighty and the 0x19 coming back are the resource
+   load's own answer and say which map it loaded. */
+static void demo_loads_chapter_25_and_leaves_the_id_standing(void)
+{
+    demo_run();
+    CHECK_EQ(demo_state, 1);
+    if (demo_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen_chapter_id, DEMO_CHAPTER_ID);
+    CHECK_EQ(seen_player_slots, DEMO_MAP_PLAYER_SLOTS);
+    CHECK_EQ(seen_char_spawns, DEMO_MAP_CHAR_SPAWNS);
+    CHECK_EQ(seen_unit_count, DEMO_MAP_UNITS);
+}
+
+/* The twelve characters, and the ORDER they were enrolled in.  Player slot i
+   is filled from roster slot i, so the char_id sequence 0, 1, 8, 9, 2, 10, 3,
+   11, 4, 12, 5, 6 is the order of the twelve calls, and any pair swapped in
+   the body swaps a pair here.  The roster count is staged at 7 rather than 0,
+   so the store at 0002ac2d is what makes slot 0 the first member. */
+static void demo_enrols_its_twelve_characters_in_order(void)
+{
+    demo_run();
+    CHECK_EQ(demo_state, 1);
+    if (demo_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen_char_id[0], 0);
+    CHECK_EQ(seen_char_id[1], 1);
+    CHECK_EQ(seen_char_id[2], 8);
+    CHECK_EQ(seen_char_id[3], 9);
+    CHECK_EQ(seen_char_id[4], 2);
+    CHECK_EQ(seen_char_id[5], 10);
+    CHECK_EQ(seen_char_id[6], 3);
+    CHECK_EQ(seen_char_id[7], 11);
+    CHECK_EQ(seen_char_id[8], 4);
+    CHECK_EQ(seen_char_id[9], 12);
+    CHECK_EQ(seen_char_id[10], 5);
+    CHECK_EQ(seen_char_id[11], 6);
+}
+
+/* One byte of one record is written before the battle: unit 3's column, and
+   nothing else.  The tile row it keeps is MAP25.COD's 37 for that slot, and
+   the three columns read back beside it are the map's own -- a store that had
+   landed on the wrong record, or that had written the pair, would move one of
+   the five. */
+static void demo_moves_only_unit_threes_column(void)
+{
+    demo_run();
+    CHECK_EQ(demo_state, 1);
+    if (demo_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen_moved_pos_x, DEMO_MOVED_POS_X);
+    CHECK_EQ(seen_moved_pos_y, DEMO_MOVED_POS_Y);
+    CHECK_EQ(seen_unit0_pos_x, DEMO_UNIT0_POS_X);
+    CHECK_EQ(seen_unit2_pos_x, DEMO_UNIT2_POS_X);
+    CHECK_EQ(seen_unit4_pos_x, DEMO_UNIT4_POS_X);
+}
+
+/* The canned stat line, on all twelve.  The side is the one value that was not
+   already there: fdps_build_map_unit_array puts a party record on side 2, so
+   side 1 can only be the store at 0002ad20.  Current and maximum are asserted
+   separately for both HP and MP because the body writes each of the four with
+   its own instruction. */
+static void demo_gives_every_party_unit_the_same_canned_stats(void)
+{
+    int slot;
+
+    demo_run();
+    CHECK_EQ(demo_state, 1);
+    if (demo_state != 1) {
+        return;
+    }
+
+    for (slot = 0; slot < DEMO_PARTY_UNITS; slot++) {
+        CHECK_EQ(seen_side[slot], DEMO_SIDE_NPC);
+        CHECK_EQ(seen_hp_current[slot], DEMO_HP);
+        CHECK_EQ(seen_hp_max[slot], DEMO_HP);
+        CHECK_EQ(seen_mp_current[slot], DEMO_MP);
+        CHECK_EQ(seen_mp_max[slot], DEMO_MP);
+        CHECK_EQ(seen_ap[slot], DEMO_ATTACK);
+        CHECK_EQ(seen_hit[slot], DEMO_HIT);
+    }
+}
+
+/* The two stat words the loop steps over stay as the recompute left them.
+   Defense sits between maximum MP and hit and evade right after hit, so a body
+   that had walked the stat block instead of naming six offsets, or that had
+   put the 400 at 0x4e instead of 0x4c, would overwrite one of these two. */
+static void demo_leaves_defense_and_evade_alone(void)
+{
+    demo_run();
+    CHECK_EQ(demo_state, 1);
+    if (demo_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen_unit1_dp, DEMO_FIXTURE_DP_BASE);
+    CHECK_EQ(seen_unit1_ev, DEMO_FIXTURE_DX_BASE);
+}
+
+/* The stat loop stops at twelve and the behaviour reset at eleven, and unit 12
+   is what says so: it is MAP25.DAT's deployment record 0, and it still carries
+   that record's side, character and AI class and the fixture's enemy HP rather
+   than the demo's 2000 -- thirty levels of the fixture's hundred.  A bound of
+   data_fdps_map_unit_count instead of 0xc would have given it the canned
+   line. */
+static void demo_touches_the_twelve_party_slots_and_no_deployment(void)
+{
+    demo_run();
+    CHECK_EQ(demo_state, 1);
+    if (demo_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen_deployed_char, DEMO_FIRST_DEPLOYED_CHAR);
+    CHECK_EQ(seen_deployed_side, DEMO_FIRST_DEPLOYED_SIDE);
+    CHECK_EQ(seen_deployed_ai, DEMO_FIRST_DEPLOYED_AI);
+    CHECK_EQ(seen_deployed_hp_max,
+             DEMO_FIRST_DEPLOYED_LEVEL * DEMO_FIXTURE_ENEMY_HP);
+}
+
+/* The behaviour byte's low nibble is reset over slots 0..11 and its high
+   nibble survives.  The roster block reached the reset carrying 0x5a in that
+   field, so 0x50 is the whole of the claim: 0x00 would mean the byte was
+   assigned rather than masked, and 0x5a that the range never reached the
+   record. */
+static void demo_resets_the_low_nibble_of_every_party_behaviour_byte(void)
+{
+    int slot;
+
+    demo_run();
+    CHECK_EQ(demo_state, 1);
+    if (demo_state != 1) {
+        return;
+    }
+
+    for (slot = 0; slot < DEMO_PARTY_UNITS; slot++) {
+        CHECK_EQ(seen_behavior[slot], DEMO_BEHAVIOR_AFTER_RESET);
+    }
+}
+
+/* One spell to one unit, and a different one to another.  Each grant is read
+   as the bit it sets AND as the byte the other grant's bit lives in, so a body
+   that had passed a pair in the other order, or given both to one unit, moves
+   an answer; unit 2 is the bystander that must have neither. */
+static void demo_grants_one_spell_each_to_two_of_the_party(void)
+{
+    demo_run();
+    CHECK_EQ(demo_state, 1);
+    if (demo_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen_grant_a_byte, DEMO_GRANT_BIT_A);
+    CHECK_EQ(seen_grant_a_other, 0);
+    CHECK_EQ(seen_grant_b_byte, DEMO_GRANT_BIT_B);
+    CHECK_EQ(seen_grant_b_other, 0);
+    CHECK_EQ(seen_bystander_a_byte, 0);
+    CHECK_EQ(seen_bystander_b_byte, 0);
+}
+
+/* The way out: the party is disbanded, the terrain panel is switched back on,
+   and the whole mode 13h frame is blanked -- and only the frame, because the
+   two bytes above it still carry the sentinel the run painted the window with.
+   The member count reaches the store at 0002ae08 holding the demo's own twelve
+   and the play flag reaches 0002ae12 holding 0x5a, so neither answer is what
+   was there before. */
+static void demo_hands_the_screen_back_blanked_and_the_party_disbanded(void)
+{
+    demo_run();
+    CHECK_EQ(demo_state, 1);
+    if (demo_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen_roster_count, 0);
+    CHECK_EQ(seen_play_active, 1);
+    CHECK_EQ(seen_frame_non_zero, 0);
+    CHECK_EQ(seen_tail_first, MOVIE_SENTINEL);
+    CHECK_EQ(seen_tail_last, MOVIE_SENTINEL);
+}
+
 void run_title_tests(void)
 {
     RUN_TEST(movie_premise_the_aperture_reads_back);
@@ -1834,4 +2662,13 @@ void run_title_tests(void)
     RUN_TEST(credits_a_single_card_leaves_no_page_behind);
     RUN_TEST(credits_the_chapter_27_ending_skips_roster_slot_three);
     RUN_TEST(credits_leaks_one_page_for_every_card_but_the_last);
+    RUN_TEST(demo_loads_chapter_25_and_leaves_the_id_standing);
+    RUN_TEST(demo_enrols_its_twelve_characters_in_order);
+    RUN_TEST(demo_moves_only_unit_threes_column);
+    RUN_TEST(demo_gives_every_party_unit_the_same_canned_stats);
+    RUN_TEST(demo_leaves_defense_and_evade_alone);
+    RUN_TEST(demo_touches_the_twelve_party_slots_and_no_deployment);
+    RUN_TEST(demo_resets_the_low_nibble_of_every_party_behaviour_byte);
+    RUN_TEST(demo_grants_one_spell_each_to_two_of_the_party);
+    RUN_TEST(demo_hands_the_screen_back_blanked_and_the_party_disbanded);
 }

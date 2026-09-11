@@ -33,12 +33,16 @@
 #include "audio.h"
 #include "blit.h"
 #include "cdaudio.h"
+#include "chapter.h"
 #include "keybd.h"
+#include "mapai.h"
 #include "palette.h"
+#include "roster.h"
 #include "saf.h"
 #include "sprite.h"
 #include "table.h"
 #include "text.h"
+#include "unit.h"
 #include "vfs.h"
 #include "title.h"
 
@@ -920,4 +924,194 @@ void fdps_play_ending_credit_roll(void)
     fclose(blend_table_file);
 
     fdps_play_movie(CREDIT_MOVIE_NAME);
+}
+
+/* The chapter the demo battle is fought on, raw as
+   data_fdps_chapter_current_chapter_id counts them -- MOV dword ptr
+   [0x00069cf4],0x19 at 0002ac1c.  The player is told chapters from one, so
+   this is the twenty-sixth. */
+#define DEMO_CHAPTER_ID 0x19
+
+/* The twelve characters the demo enrols, in the order the twelve
+   PUSH/CALL pairs at 0002ac37..0002aca7 enrol them.  They are portrait ids
+   (assets/characters.md): the eleven playable characters other than 琴琴,
+   and 12, which is not a party member at all but the shared template row in
+   FRIAPRDA.DAT.  The order is what decides which map slot each of them ends
+   up standing in, because fdps_build_map_unit_array fills player slot i from
+   roster slot i. */
+#define DEMO_CHAR_RANDIS 0
+#define DEMO_CHAR_FLARENA 1
+#define DEMO_CHAR_BRANDO 8
+#define DEMO_CHAR_GAIA 9
+#define DEMO_CHAR_FEITAGA 2
+#define DEMO_CHAR_SAN 10
+#define DEMO_CHAR_JUNA 3
+#define DEMO_CHAR_LANCELOT 11
+#define DEMO_CHAR_ARC 4
+#define DEMO_CHAR_TEMPLATE 12
+#define DEMO_CHAR_MARIANNE 5
+#define DEMO_CHAR_JULIAN 6
+
+/* The cursor overlay is switched off for the whole demo: nobody is choosing
+   anything, so there is no cursor to show.  MOV dword ptr [0x00069cd0],0x0 at
+   0002acb4, after the chapter reset has just put the same global at 1. */
+#define DEMO_CURSOR_DRAW_MODE_OFF 0
+
+/* One unit is moved before the battle starts.  MAP25.COD stands player slot 3
+   on its own eleven tiles to the right of the other eleven, and this store
+   brings it back to the left edge of the row -- MOV byte ptr [EAX],0x4 at
+   0002acce, on the record fdps_get_unit_record(3) returned.  Only the x
+   coordinate is written; the tile row is the map's. */
+#define DEMO_MOVED_UNIT 3
+#define DEMO_MOVED_UNIT_POS_X 4
+
+/* The behaviour reset covers unit slots 0 through 11 inclusive -- PUSH 0x0 /
+   PUSH 0xb / PUSH 0x0 at 0002acd1..0002acd5, whose arguments are the first
+   index, the last index and the behaviour to OR in.  Behaviour 0 is the plain
+   fighter, which is what makes the demo a battle rather than a tableau. */
+#define DEMO_PARTY_LAST_UNIT 0xb
+#define DEMO_BEHAVIOR_PLAIN_FIGHTER 0
+
+/* The two spells the demo hands out so that the showcase party has something
+   to cast: 萬神降臨 to the unit in slot 1 and 封神裂震 to the one in slot 4
+   (assets/spells.md).  PUSH 0x27 / PUSH 0x1 at 0002acdf and PUSH 0xb /
+   PUSH 0x4 at 0002aceb -- the unit index is pushed last and so is the first
+   argument. */
+#define DEMO_GRANT_UNIT_A 1
+#define DEMO_GRANT_SPELL_A 0x27
+#define DEMO_GRANT_UNIT_B 4
+#define DEMO_GRANT_SPELL_B 0x0b
+
+/* The canned stats, and how many units get them.  The bound is the twelve
+   player slots MAP25.DAT opens, not data_fdps_map_unit_count -- CMP dword ptr
+   [EBP-0xc],0xc at 0002acfe -- so the scripted deployments behind them keep
+   the numbers their own records gave them. */
+#define DEMO_PARTY_UNITS 0xc
+
+/* The side byte the twelve are given -- MOV byte ptr [EAX+0x6],0x1 at
+   0002ad20.  Side 1 is the guest/NPC side, not the player's own, which is 2
+   (PLAYER_SIDE in src/deploy.c, from CMP EAX,0x2 / JNZ at 000237cf; see also
+   the side map in aitarget.h).  fdps_build_map_unit_array has just stood
+   every party record on side 2, so this store is what takes the showcase
+   party off player control and hands it to the map AI.  It is also the value
+   the actor loop forwards as side_select -- MOV AL,byte ptr [EAX+0x6] / AND
+   EAX,0xff / PUSH EAX at 0002adb0..0002adb8 -- so the twelve act on the NPC
+   phase, whose target filter keeps the side-0 deployments (mapai.h). */
+#define DEMO_SIDE_NPC 1
+
+#define DEMO_HP 2000
+#define DEMO_MP 800
+#define DEMO_ATTACK 800
+#define DEMO_HIT 400
+
+/* How many passes over the unit array the demo makes before it gives up and
+   returns on its own -- MOV dword ptr [EBP-0x8],0x2 at 0002ad5c. */
+#define DEMO_PASSES 2
+
+/* The turn reset is run once more in the middle of every pass, on the unit
+   index just past the twelve player slots -- CMP dword ptr [EBP-0xc],0xc /
+   JNZ at 0002adc5. */
+#define DEMO_MID_PASS_RESET_UNIT 0xc
+
+/* What counts as "the player pressed something".  fdps_read_keyboard_queue
+   answers with a make code in 0x01..0x7f or with 0xff for an empty ring
+   (keybd.h), and this test takes anything BELOW 0x7f as a key -- CMP EAX,0x7f
+   / JGE at 0002adda.  A make code of exactly 0x7f therefore falls on the
+   no-key side along with the marker. */
+#define DEMO_KEY_PRESSED_BELOW 0x7f
+
+/* 0002ac10.  Straight-line staging, then a two-pass loop with an inner walk
+   over the unit array; see title.h for what the demo is and what it leaves
+   behind.
+
+   THE RECORD POINTER IS RE-RESOLVED AND THEN HELD ACROSS ONE CALL.  Inside the
+   inner loop fdps_get_unit_record runs before fdps_unit_is_retired and the
+   pointer it returned is what the side byte is read through afterwards
+   (MOV EAX,[EBP-0x4] / MOV AL,[EAX+0x6] at 0002adad), so the order of those
+   two calls is part of the function: resolving the record after the retirement
+   test would be a different program if anything under it moved the array.
+
+   THE SIDE BYTE IS WIDENED, NOT SIGN-EXTENDED.  AND EAX,0xff at 0002adb3
+   follows the byte load, so a side of 0x80 or above reaches the behaviour step
+   as a number above 127 rather than as a negative one.
+
+   The key check ends the demo by setting the pass counter to 1 and leaving the
+   inner loop, not by returning: the turn reset at the end of the pass still
+   runs, and it is the decrement after it that takes the counter to 0. */
+void fdps_title_demo(void)
+{
+    struct fdps_unit_record *unit_record;
+    int unit_index;
+    int passes_left;
+    int key_code;
+
+    data_fdps_chapter_current_chapter_id = DEMO_CHAPTER_ID;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_roster_member_count = 0;
+
+    fdps_roster_add_character(DEMO_CHAR_RANDIS);
+    fdps_roster_add_character(DEMO_CHAR_FLARENA);
+    fdps_roster_add_character(DEMO_CHAR_BRANDO);
+    fdps_roster_add_character(DEMO_CHAR_GAIA);
+    fdps_roster_add_character(DEMO_CHAR_FEITAGA);
+    fdps_roster_add_character(DEMO_CHAR_SAN);
+    fdps_roster_add_character(DEMO_CHAR_JUNA);
+    fdps_roster_add_character(DEMO_CHAR_LANCELOT);
+    fdps_roster_add_character(DEMO_CHAR_ARC);
+    fdps_roster_add_character(DEMO_CHAR_TEMPLATE);
+    fdps_roster_add_character(DEMO_CHAR_MARIANNE);
+    fdps_roster_add_character(DEMO_CHAR_JULIAN);
+
+    fdps_chapter_state_reset();
+    data_fdps_map_cursor_draw_mode = DEMO_CURSOR_DRAW_MODE_OFF;
+
+    unit_record = fdps_get_unit_record(DEMO_MOVED_UNIT);
+    unit_record->pos_x = DEMO_MOVED_UNIT_POS_X;
+
+    fdps_object_set_field34_low_nibble_range(0, DEMO_PARTY_LAST_UNIT,
+                                            DEMO_BEHAVIOR_PLAIN_FIGHTER);
+    fdps_set_flag_bit(DEMO_GRANT_UNIT_A, DEMO_GRANT_SPELL_A);
+    fdps_set_flag_bit(DEMO_GRANT_UNIT_B, DEMO_GRANT_SPELL_B);
+
+    for (unit_index = 0; unit_index < DEMO_PARTY_UNITS; unit_index++) {
+        unit_record = fdps_get_unit_record(unit_index);
+        unit_record->side = DEMO_SIDE_NPC;
+        unit_record->hp_current = DEMO_HP;
+        unit_record->hp_max = DEMO_HP;
+        unit_record->mp_current = DEMO_MP;
+        unit_record->mp_max = DEMO_MP;
+        unit_record->ap = DEMO_ATTACK;
+        unit_record->hit = DEMO_HIT;
+    }
+
+    passes_left = DEMO_PASSES;
+    fdps_flush_keyboard_queue();
+
+    while (passes_left != 0) {
+        for (unit_index = 0;
+             unit_index < data_fdps_map_unit_count;
+             unit_index++) {
+            unit_record = fdps_get_unit_record(unit_index);
+            if (fdps_unit_is_retired(unit_index) == 0) {
+                fdps_map_actor_behavior_step(unit_index,
+                                             (int) unit_record->side);
+            }
+            if (unit_index == DEMO_MID_PASS_RESET_UNIT) {
+                fdps_units_clear_status_bit7();
+            }
+            key_code = fdps_read_keyboard_queue();
+            if (key_code < DEMO_KEY_PRESSED_BELOW) {
+                passes_left = 1;
+                break;
+            }
+        }
+        fdps_units_clear_status_bit7();
+        passes_left--;
+    }
+
+    free(data_fdps_roster_array_ptr);
+    data_fdps_roster_member_count = 0;
+    data_fdps_ui_play_active_flag = 1;
+    memset((void *) VGA_SCREEN_BASE, 0, (size_t) VGA_SCREEN_BYTES);
+    fdps_flush_keyboard_queue();
 }

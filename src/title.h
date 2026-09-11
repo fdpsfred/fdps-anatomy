@@ -138,4 +138,44 @@ extern void fdps_show_game_over(void);
 extern void fdps_play_ending_credit_roll(void);
 #pragma aux fdps_play_ending_credit_roll "*" parm caller [];
 
+/* 0002ac10.  Runs the title screen's attract-mode demo and returns when it is
+   over.  The idle timer in fdps_title_screen is the only caller and it passes
+   nothing: the demo takes no argument, reports nothing, and everything it does
+   is to the game-state globals and to the screen.
+
+   What it stages is a showcase party that cannot lose.  The chapter global is
+   set to 25 -- the map the demo battle is fought on -- the roster is emptied
+   and twelve characters are enrolled into it in a fixed order, and the chapter
+   state is then rebuilt on top of that roster, so the map's twelve player slots
+   come out holding those twelve characters in enrol order.  Every one of the
+   twelve is then given 2000 HP, 800 MP, 800 attack and 400 hit, put on the
+   guest/NPC side 1 rather than the player's own side 2 -- which is what takes
+   them off player control and is forwarded as the acting side below -- and
+   reset to behaviour 0; one of them is moved to the left edge of its row;
+   and two of them are handed a spell they would not otherwise know.  Defense
+   and evade are NOT written -- the twelve keep whatever
+   fdps_roster_add_character derived for them.
+
+   Then it drives the map AI: two passes over the whole unit array, each actor
+   through fdps_map_actor_behavior_step unless it has retired, with the acted-
+   this-turn flags cleared at the end of every pass.  A make code in the
+   scancode ring ends the demo at the actor it is noticed on -- the pass counter
+   is set to 1 rather than to 0, so the pass still finishes its turn reset
+   before the loop leaves.
+
+   ON THE WAY OUT IT FREES THE ROSTER BLOCK AND DOES NOT REPLACE IT.
+   fdps_load_global_resources allocates that block once at startup and this is
+   the only other free of it in the image, so every roster access after a demo
+   has run goes through a dangling pointer.  That is the original's behaviour
+   and it is not to be tidied (rebuild_info/pitfalls.md).  The member count is
+   put back to 0, the terrain panel is switched back on, the mode 13h frame is
+   blanked and the scancode ring is flushed.
+
+   Writes data_fdps_chapter_current_chapter_id, data_fdps_ui_play_active_flag,
+   data_fdps_roster_member_count and data_fdps_map_cursor_draw_mode, reads
+   data_fdps_map_unit_count and data_fdps_roster_array_ptr, and publishes no
+   global of its own. */
+extern void fdps_title_demo(void);
+#pragma aux fdps_title_demo "*" parm caller [];
+
 #endif
