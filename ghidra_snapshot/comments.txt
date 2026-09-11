@@ -4172,12 +4172,12 @@ The IconAni script number is the 0-based chapter index, so chapter 24's handler 
 Alignment padding: 3-byte NOP form lea eax,[eax+0] aligning 000214d0 to 16 bytes.
 
 === 000214d0 [PLATE]
-Chapter 25's entry handler: brings the game into chapter 25 by resetting the chapter state, playing the chapter's opening IconAni cutscene and its title card, then parking the map cursor on the first unit. It is reached through slot 24 of the per-chapter entry-handler table at 00060074, which fdps_title_screen and fdps_run_village_phase both call as table[DAT_00069cf4].
+Chapter 25's entry handler: brings the game into chapter 25 by resetting the chapter state, playing the chapter's opening IconAni cutscene and its title card, then parking the map cursor on the first unit. It is reached through slot 24 of the per-chapter entry-handler table at 00060074, which fdps_title_screen and fdps_run_village_phase both call as table[data_fdps_chapter_current_chapter_id].
 
 Algorithm:
-  1. fdps_chapter_state_reset rebuilds the per-chapter runtime state block and the chapter's unit roster from the chapter index held in DAT_00069cf4.
+  1. fdps_chapter_state_reset rebuilds the per-chapter runtime state block and the chapter's unit roster from the chapter index held in data_fdps_chapter_current_chapter_id.
   2. fdps_icon_script_run("Icon24.dat") loads chapter 25's opening event script out of IconAni.vfs and interprets its opcode stream. The script number is the 0-based chapter index, one less than the chapter number, so chapter 25's script is Icon24.dat; the neighbouring handlers use Icon23.dat (00021490) and Icon25.dat (00021510).
-  3. fdps_show_chapter_title_card draws the chapter title card: Chapter.saf and Chapter.pal out of MISC.VFS, the sprite entry again selected by DAT_00069cf4, faded up over black, held for a second, then faded back to black.
+  3. fdps_show_chapter_title_card draws the chapter title card: Chapter.saf and Chapter.pal out of MISC.VFS, the sprite entry again selected by data_fdps_chapter_current_chapter_id, faded up over black, held for a second, then faded back to black.
   4. fdps_map_cursor_move_to_unit(0) leaves the map cursor sitting on the tile of unit 0.
 
 Unlike chapter 24's handler at 00021490, this one calls no fdps_roster_add_character and patches no unit record; it is the plain four-step form of the family, the same 51-byte shape as chapter 5's at 00020fb0, chapter 26's at 00021510 and chapter 27's at 00021550 with only the script name differing.
