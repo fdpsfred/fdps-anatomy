@@ -1,5 +1,7 @@
-/* chinit2.h -- the per-chapter entry handlers, chapters 16 to 30.  Chapters 1
- * to 10 are chinit1.h and 11 to 15 are chinit1b.h.
+/* chinit2.h -- the per-chapter entry handlers, chapters 16 to 24.  Chapters 1
+ * to 10 are chinit1.h, 11 to 15 are chinit1b.h and 25 to 30 are chinit2b.h.
+ * Chapter 24 is where this file ends because it is the last chapter in the
+ * game whose entry handler adds anybody to the roster.
  *
  * Every entry point here is a slot of the handler table based at 00060074,
  * and the slot number is the 0-based chapter id.  The table is reached

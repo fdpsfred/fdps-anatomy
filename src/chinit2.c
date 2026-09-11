@@ -1,6 +1,10 @@
-/* chinit2.c -- the per-chapter entry handlers, chapters 16 to 30: what the
+/* chinit2.c -- the per-chapter entry handlers, chapters 16 to 24: what the
  * game does at the moment it enters a chapter, before the battle loop runs.
- * Chapters 1 to 10 are chinit1.c and 11 to 15 are chinit1b.c.
+ * Chapters 1 to 10 are chinit1.c, 11 to 15 are chinit1b.c and 25 to 30 are
+ * chinit2b.c.  Chapter 24 is where this file ends because it is the last
+ * chapter in the game whose entry handler adds anybody to the roster: the
+ * nine here are the handlers whose situation is roster arithmetic, and the six
+ * after them are the run-in to the ending.
  *
  * These are slots of the handler table based at 00060074, indexed by the
  * 0-based chapter id and called only through it, so the dispatcher in

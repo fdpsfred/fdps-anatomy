@@ -1050,42 +1050,42 @@
     },
     "000214d0": {
       "name": "fdps_chapter_25_init",
-      "target": "chinit2.c",
+      "target": "chinit2b.c",
       "est_lines": 44,
       "body_size": 51,
       "status": "pending"
     },
     "00021510": {
       "name": "fdps_chapter_26_init",
-      "target": "chinit2.c",
+      "target": "chinit2b.c",
       "est_lines": 43,
       "body_size": 51,
       "status": "pending"
     },
     "00021550": {
       "name": "fdps_chapter_27_init",
-      "target": "chinit2.c",
+      "target": "chinit2b.c",
       "est_lines": 51,
       "body_size": 51,
       "status": "pending"
     },
     "00021590": {
       "name": "fdps_chapter_28_init",
-      "target": "chinit2.c",
+      "target": "chinit2b.c",
       "est_lines": 53,
       "body_size": 51,
       "status": "pending"
     },
     "000215d0": {
       "name": "fdps_chapter_29_init",
-      "target": "chinit2.c",
+      "target": "chinit2b.c",
       "est_lines": 54,
       "body_size": 51,
       "status": "pending"
     },
     "00021610": {
       "name": "fdps_chapter_30_init",
-      "target": "chinit2.c",
+      "target": "chinit2b.c",
       "est_lines": 57,
       "body_size": 51,
       "status": "pending"
@@ -9009,7 +9009,7 @@
         "fdps_chapter_27_init"
       ],
       "carried_in": [
-        "chinit2.c"
+        "chinit2b.c"
       ],
       "reason": "A string literal, not a named global. It comes back as the literal in the statement that uses it; naming it would invent a symbol the original never had. See rebuild_info/naming.md.",
       "status": "skip"

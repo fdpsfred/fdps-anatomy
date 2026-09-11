@@ -109,15 +109,28 @@ def chapter_init_file(n):
     10 keep chinit1.c and chapters 11 to 15 were cut off into a file of their
     own before the eleventh landed on top of them.
 
-    It is not chinit3.c, because chinit2.c is already chapters 16 to 30: the
+    It is not chinit3.c, because chinit2.c was already chapters 16 to 30: the
     letter keeps the family in chapter order, as it does for chevt2b.c and
     chevt5b.c.
+
+    chinit2b.c is that same cut made a second time, for the same reason.
+    Chapters 16 to 30 were one file, which reached 1108 emitted lines with
+    chapter 24's handler and six more still to come.  Chapter 24 is where the
+    cut falls because it ends the run of chapters the party is assembled over:
+    蘭斯洛特 joins at 19 and 珊 at 24, and after that no entry handler adds
+    anybody, so chapters 16 to 24 are the handlers whose page of comment is
+    roster arithmetic -- who is on the roster, how many player slots the map
+    asks for, whether the add lands inside the array -- and chapters 25 to 30
+    are the run-in to the ending, all six of them the same plain four-call body
+    differing only in which cut-scene member they name.
     """
     if n <= 10:
         return "chinit1.c"
     if n <= 15:
         return "chinit1b.c"
-    return "chinit2.c"
+    if n <= 24:
+        return "chinit2.c"
+    return "chinit2b.c"
 
 
 # The chapter-numbered handler families.  Each is one family of thirty (or, for

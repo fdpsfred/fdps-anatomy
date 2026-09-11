@@ -26,7 +26,7 @@ emit 是序列的，一次一支 function，每支各自 commit。檔案落點�
 
 **每個檔的預估行數不超過 1000。** 這不是程式的性質，是模型讀寫的效率界線：超過之後每次改一行都要把整個檔讀進 context。
 
-預估值的來源是 **Ghidra decompiled code 的行數**，由 `tools/code_emit/DumpRoutingInputs.java` 產生。全部 514 支合計約 50,000 行，分成 83 個 `.c`。這是估計不是保證——實際 emit 出來的 C 會偏離，處置規則見下面「超標了怎麼辦」。
+預估值的來源是 **Ghidra decompiled code 的行數**，由 `tools/code_emit/DumpRoutingInputs.java` 產生。全部 514 支合計約 50,000 行，分成 84 個 `.c`。這是估計不是保證——實際 emit 出來的 C 會偏離，處置規則見下面「超標了怎麼辦」。
 
 ## 資料符號歸誰
 
@@ -87,7 +87,7 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 
 ## 檔案表
 
-83 個 `.c`，各自配一個同名 `.h`。逐檔的 function 清單與行數在 `tools/code_emit/data/routing.md`。
+84 個 `.c`，各自配一個同名 `.h`。逐檔的 function 清單與行數在 `tools/code_emit/data/routing.md`。
 
 ### 戰鬥地圖 AI
 
@@ -146,8 +146,9 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 | 檔 | 負責 |
 | --- | --- |
 | `chapter.c` | 章節框架：狀態重置、標題卡、四張 dispatch 表 |
-| `chinit1.c` / `chinit1b.c` / `chinit2.c` | 第 1–10 章／第 11–15 章／第 16–30 章的 init handler |
+| `chinit1.c` / `chinit1b.c` / `chinit2.c` / `chinit2b.c` | 第 1–10 章／第 11–15 章／第 16–24 章／第 25–30 章的 init handler |
 | `chinit1b.c` | 第 11–15 章的 init handler。`chinit1.c` 原本涵蓋第 1–15 章，寫到第 10 章就已經 1024 行——每支 handler 都要交代地圖宣告幾個 player slot、過場腳本自己部署了誰、以及 roster 加人排在重建之前有沒有差別，這份說明與函式本體只有幾行呼叫無關——於是趁第 11 章落地前把後五章切出來自成一檔；字母後綴的理由同 `chevt2b.c` |
+| `chinit2b.c` | 第 25–30 章的 init handler。`chinit2.c` 原本涵蓋第 16–30 章，寫到第 24 章就已經 1108 行、後面還排著六支，於是照「這支 handler 有沒有人入隊」的界線切開：全遊戲最後一個會呼叫 `fdps_roster_add_character` 的 init handler 就是第 24 章的，第 16–24 章那九支的說明重心都在 roster 與地圖 player slot 數的對帳，第 25–30 章則是結局前的收束，六支全是同一個四呼叫的平版形、彼此只差過場腳本的檔名。字母後綴的理由同 `chevt2b.c` |
 | `chpost1.c` / `chpost2.c` | 同上兩段的 post-action handler |
 | `chend1.c` / `chend2.c` | 同上兩段的 end handler |
 | `chevt1.c` … `chevt6.c` | 章節腳本事件 handler，依章號切段；切點不平均，因為第 8 章一章的四支 handler 就抵得上第 9–14 章的總和 |
