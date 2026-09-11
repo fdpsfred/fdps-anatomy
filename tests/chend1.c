@@ -495,6 +495,210 @@ static void the_chapter_index_is_advanced_to_chapter_two(void)
     CHECK_EQ(seen_chapter_id, CHAPTER_ID_AFTER);
 }
 
+/* ------------------------------------------------------------------------
+ * fdps_chapter_02_end at 0003a470.
+ *
+ * The same shape as the handler above with the spell grant taken away: three
+ * calls and one store, no branch.  What the cases below pin down is that the
+ * grant really is absent, that the cut-scene it names is WIN01.DAT and not its
+ * neighbour, and that the store leaves chapter 3's index.
+ *
+ *   0003a47c  CALL 0x00023980          the battle party is banked
+ *   0003a481  MOV EAX,0x620bc / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4
+ *             the cut-scene "Win01.dat" is interpreted
+ *   0003a48f  CALL 0x00039e70          the fallen are revived
+ *   0003a494  MOV dword ptr [0x00069cf4],0x2
+ *
+ * WHAT THE FIXTURE CAN AND CANNOT SEE.  WIN01.DAT retires nobody, so the
+ * writeback banks unit 0 whichever side of the script it runs on, and the one
+ * byte the script writes -- status_timers[3] of the LIVE record -- sits inside
+ * the six bytes the writeback memsets on the roster copy, so the roster reads
+ * back as zeroes either way.  The order of those two steps is therefore taken
+ * from the call order in the assembly and is not claimed by an assertion here;
+ * what the cases do pin is that both of them ran, that the script that ran was
+ * this handler's member, and that the revive found the banked party healthy.
+ *
+ * The run reuses the container the cases above staged -- that file holds
+ * WIN01.DAT precisely so this handler has a member to open -- and stages the
+ * record arrays again from scratch, so nothing it asserts depends on what the
+ * first run left behind.
+ * ---------------------------------------------------------------------- */
+
+/* The index the handler must leave: chapter 3, 0-based.  The run starts from
+   CHAPTER_ID_BEFORE, 9, so the store is pinned as an assignment and not as a
+   step from what was there. */
+#define CH02_CHAPTER_ID_AFTER 2
+
+static int ch02_run_state = 0;
+
+static unsigned char ch02_unit_spells[SPELL_BITMAP_BYTES];
+static unsigned char ch02_unit_timers[STATUS_TIMER_COUNT];
+static int ch02_unit_flags;
+static unsigned char ch02_slot_spells[SPELL_BITMAP_BYTES];
+static unsigned char ch02_slot_timers[STATUS_TIMER_COUNT];
+static int ch02_slot_char_id;
+static int ch02_slot_flags;
+static int ch02_slot_hp_current;
+static int ch02_slot_hp_max;
+static int ch02_slot_mp_current;
+static int ch02_slot_level;
+static int ch02_chapter_id;
+static int ch02_party_gold;
+
+/* The container is staged once for the whole file: if the cases above built
+   it, this run uses it as it stands, and if they did not -- because a file of
+   that name was already in the run directory -- this run says so the same way
+   they do rather than clobbering it. */
+static int ensure_fixture_archive(void)
+{
+    if (fixture_owned) {
+        return 1;
+    }
+    return stage_fixture_archive();
+}
+
+static void ch02_capture(void)
+{
+    int i;
+
+    for (i = 0; i < SPELL_BITMAP_BYTES; i++) {
+        ch02_unit_spells[i] = unit_image[RANDIS_UNIT].spells_known_bitmap[i];
+        ch02_slot_spells[i] =
+            roster_image[RANDIS_ROSTER_SLOT].spells_known_bitmap[i];
+    }
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        ch02_unit_timers[i] = unit_image[RANDIS_UNIT].status_timers[i];
+        ch02_slot_timers[i] =
+            roster_image[RANDIS_ROSTER_SLOT].status_timers[i];
+    }
+    ch02_unit_flags = (int) unit_image[RANDIS_UNIT].flags;
+    ch02_slot_char_id = (int) roster_image[RANDIS_ROSTER_SLOT].char_id;
+    ch02_slot_flags = (int) roster_image[RANDIS_ROSTER_SLOT].flags;
+    ch02_slot_hp_current = (int) roster_image[RANDIS_ROSTER_SLOT].hp_current;
+    ch02_slot_hp_max = (int) roster_image[RANDIS_ROSTER_SLOT].hp_max;
+    ch02_slot_mp_current = (int) roster_image[RANDIS_ROSTER_SLOT].mp_current;
+    ch02_slot_level = (int) roster_image[RANDIS_ROSTER_SLOT].level;
+    ch02_chapter_id = data_fdps_chapter_current_chapter_id;
+    ch02_party_gold = data_fdps_shared_party_total_gold;
+}
+
+static void run_chapter_02_handler(void)
+{
+    if (ch02_run_state != 0) {
+        return;
+    }
+    ch02_run_state = 2;
+
+    if (!ensure_fixture_archive()) {
+        return;
+    }
+
+    stage_globals();
+
+    fdps_chapter_02_end();
+
+    ch02_capture();
+    ch02_run_state = 1;
+}
+
+/* The battle party is banked: the slot that was 0xa5 filler now carries the
+   battle record's character id and level, its six status bytes were cleared by
+   the writeback's memset, its flags were masked to bit 0, its HP was lifted to
+   the maximum by the full heal and its MP by the restore that follows.  The
+   two HP figures differ before the run, so the maximum reading back in both is
+   the heal and not the record's own value. */
+static void chapter_02_banks_the_party_onto_the_roster(void)
+{
+    int i;
+
+    run_chapter_02_handler();
+    CHECK_EQ(ch02_run_state, 1);
+    if (ch02_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch02_slot_char_id, RANDIS_CHAR_ID);
+    CHECK_EQ(ch02_slot_level, RANDIS_LEVEL);
+    CHECK_EQ(ch02_slot_flags, 0);
+    CHECK_EQ(ch02_slot_hp_max, RANDIS_HP_MAX);
+    CHECK_EQ(ch02_slot_hp_current, RANDIS_HP_MAX);
+    CHECK_EQ(ch02_slot_mp_current, RANDIS_MP_MAX);
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        CHECK_EQ(ch02_slot_timers[i], 0);
+    }
+}
+
+/* No spell is granted.  The handler has no fdps_set_flag_bit call -- the first
+   thing at 0003a47c is the writeback -- so both the live record's bitmap and
+   the roster's copy of it stay at the zeroes the staging left.  This is the
+   one place chapter 2's handler differs in kind from chapter 1's, and a stray
+   grant copied over from the neighbour would show as byte 0 reading 0x01. */
+static void chapter_02_grants_no_spell(void)
+{
+    int i;
+
+    run_chapter_02_handler();
+    CHECK_EQ(ch02_run_state, 1);
+    if (ch02_run_state != 1) {
+        return;
+    }
+
+    for (i = 0; i < SPELL_BITMAP_BYTES; i++) {
+        CHECK_EQ(ch02_unit_spells[i], 0);
+        CHECK_EQ(ch02_slot_spells[i], 0);
+    }
+}
+
+/* The cut-scene the handler names is Win01.dat and it really ran: the fixture
+   member's marker is in status_timers[3] of the live battle record.
+   WIN00.DAT, the member the previous handler names, would instead have left
+   status_timers[4] at 6 and raised the retired bit in the flags byte, so
+   opening the wrong member is three failed assertions rather than a silent
+   pass.  Neither byte reaches the roster copy, whose timers the writeback
+   clears. */
+static void chapter_02_victory_cutscene_is_win01_dat(void)
+{
+    run_chapter_02_handler();
+    CHECK_EQ(ch02_run_state, 1);
+    if (ch02_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch02_unit_timers[WIN01_MARKER_SLOT], WIN01_MARKER_VALUE);
+    CHECK_EQ(ch02_unit_timers[WIN00_MARKER_SLOT], 0);
+    CHECK_EQ(ch02_unit_flags, 0);
+    CHECK_EQ(ch02_slot_timers[WIN01_MARKER_SLOT], 0);
+}
+
+/* Nobody fell, so the revive sweep charges nothing and never opens its panel:
+   the writeback ran first and put the one roster member on his maximum, which
+   leaves the sweep with no member at 0 HP to bill for.  The purse reading back
+   unchanged is also what proves the sweep returned at all -- its panel loop
+   waits for a key no test image queues. */
+static void chapter_02_revive_charges_nothing_when_nobody_fell(void)
+{
+    run_chapter_02_handler();
+    CHECK_EQ(ch02_run_state, 1);
+    if (ch02_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch02_party_gold, PARTY_GOLD_BEFORE);
+}
+
+/* The chapter index is left at chapter 3's, as an assignment and not as a step
+   from what was there: the run started it at 9. */
+static void chapter_02_advances_the_chapter_index_to_chapter_three(void)
+{
+    run_chapter_02_handler();
+    CHECK_EQ(ch02_run_state, 1);
+    if (ch02_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch02_chapter_id, CH02_CHAPTER_ID_AFTER);
+}
+
 /* The fixture container belongs to this file only while its run needs it:
    tests/icon.c and tests/chinit1.c stage a container of the same name for
    their own fixtures and refuse to start if one is already standing. */
@@ -517,5 +721,10 @@ void run_chend1_tests(void)
     RUN_TEST(the_victory_cutscene_is_win00_dat);
     RUN_TEST(the_revive_charges_nothing_when_nobody_fell);
     RUN_TEST(the_chapter_index_is_advanced_to_chapter_two);
+    RUN_TEST(chapter_02_banks_the_party_onto_the_roster);
+    RUN_TEST(chapter_02_grants_no_spell);
+    RUN_TEST(chapter_02_victory_cutscene_is_win01_dat);
+    RUN_TEST(chapter_02_revive_charges_nothing_when_nobody_fell);
+    RUN_TEST(chapter_02_advances_the_chapter_index_to_chapter_three);
     RUN_TEST(the_fixture_container_is_removed);
 }

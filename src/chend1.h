@@ -42,4 +42,21 @@
 extern void fdps_chapter_01_end(void);
 #pragma aux fdps_chapter_01_end "*" parm caller [];
 
+/* Chapter 2's end handler: closes chapter 2 out and hands the game to chapter
+   3.  Takes nothing and returns nothing.
+
+   In order, and the order is the content: the battle party is banked onto the
+   persistent roster; the victory cut-scene Win01.dat is interpreted; every
+   party member who fell is revived and billed for it; and the chapter index
+   is advanced to 2, chapter 3.
+
+   This is the family's plain three-step shape -- nothing is awarded before the
+   writeback the way chapter 1 awards 業火 -- and, like chapter 1's, it does
+   not sweep the map for surviving enemies first: chapter 2 is won only by
+   retiring every one of them.
+
+   Table slot 1. */
+extern void fdps_chapter_02_end(void);
+#pragma aux fdps_chapter_02_end "*" parm caller [];
+
 #endif
