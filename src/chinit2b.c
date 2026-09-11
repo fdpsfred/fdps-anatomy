@@ -561,3 +561,121 @@ void fdps_chapter_29_init(void)
     fdps_show_chapter_title_card();
     fdps_map_cursor_move_to_unit(CH29_CURSOR_UNIT);
 }
+
+/* --- fdps_chapter_30_init @ 00021610 ----------------------------------- */
+
+/* Chapter 30's opening cut-scene, the string at 0x61960 loaded into EAX at
+   00021621 and pushed as fdps_icon_script_run's only argument.  The number in
+   the name is the 0-based chapter id and not a script id of its own, so this
+   is Icon29.dat where the slot-28 handler at 000215d0 holds Icon28.dat at
+   0x61954 -- the two sit twelve bytes apart in the image, each an eleven-byte
+   member name and a filler byte, and there is no member above this one.
+   Spelling the member out of the handler's own chapter number gives
+   Icon30.dat, which ICONANI.VFS does not hold at all: the container runs
+   ICON00.DAT through ICON29.DAT and stops (resource_info/vfs.md).  A member
+   the interpreter cannot find is not a quiet miss either -- it stops in
+   fdps_wait_any_key and the last chapter of the game opens on a keypress the
+   player was never asked for, with no cut-scene, no wave-1 boss on the board
+   and the cell event never triggered (src/icon.c).
+
+   As with every member name, the interpreter names IconAni.vfs itself and
+   upper-cases this string in place before the container compare (vfs.h,
+   rebuild_info/pitfalls.md), so the literal is folded to ICON29.DAT by the
+   call and cannot live in read-only storage. */
+#define CH30_OPENING_SCRIPT "Icon29.dat"
+
+/* Which unit the cursor is left on: PUSH 0x0 at 00021634, roster slot 0 and so
+   蘭迪斯, which is what twenty-seven of the thirty handlers pass. */
+#define CH30_CURSOR_UNIT 0
+
+/* 00021610.  Four calls, straight line, no branch, no loop and no local -- the
+   plain form of the family, instruction for instruction the same body as
+   fdps_chapter_28_init at 00021590 and fdps_chapter_29_init at 000215d0 apart
+   from the script string.  At 0x33 bytes it is the shortest shape the thirty
+   handlers come in, and it is the last of them: there is no chapter 31.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 00021610..00021614 -- over SUB ESP,0x0 at 00021616, a zero-byte
+   local area written as the six-byte immediate form.  Nothing is addressed off
+   EBP anywhere in the body, so there is no local here to name and none is
+   declared; the four registers come back off the stack at 0002163e..00021641
+   and the RET at 00021642 is bare.
+
+   CALLING CONVENTION.  Every argument goes on the stack and the caller takes
+   it back: MOV EAX,0x61960 / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4 at
+   00021621..0002162c, and PUSH 0x0 / CALL 0x0002da50 / ADD ESP,0x4 at
+   00021634..0002163b.  The two argument-less calls at 0002161c and 0002162f
+   are bare CALLs with no push and no adjustment.  Nothing reads [EBP+8] or
+   above, so this function takes nothing itself, and EAX is never read after
+   any of the four calls, so it returns nothing -- the dispatcher reaches it
+   through the thirtieth and last slot of the table at 00060074 (the dword at
+   000600e8 is 00021610, and that data reference is the function's only xref)
+   and ignores EAX.
+
+   VALUES USED AFTER A CALL: none at all.  All four callees return void and
+   nothing here reads EAX after any of them; the only register written between
+   the prologue and the RET is the EAX that carries the script name literal
+   into the second call.
+
+   NOBODY JOINS THE PARTY THIS CHAPTER either.  The first instruction after the
+   prologue is the state rebuild, so the roster is left exactly as chapter 24
+   finished it -- the eleven chapters 1 to 19 assembled plus 珊 -- and
+   MAP29.DAT asks for twelve player slots, so every slot has a member behind it
+   and fdps_build_map_unit_array writes no zeroed, retired spare anywhere in
+   the array (src/deploy.c).
+
+   THE HANDLER'S OWN RESET PUTS NOTHING ON THE BOARD BUT THE PARTY.  MAP29.DAT
+   is a 131-byte header and seven 26-byte deployment records -- the wave tag is
+   byte 21 of struct fdps_char_spawn_record -- and not one of the seven is
+   tagged wave 0.  Six other maps open empty as well -- MAP00, MAP01, MAP06,
+   MAP11, MAP13 and the cut-scene stage MAP34 -- but this is the only one of
+   the six this file's handlers load, so where chapters 25 to 29 return on a
+   board the reset filled, here the twelve player slots are the whole of it and
+   everything the player sees opposite them is put there by a script.
+
+   THE CUT-SCENE IS WHAT DEPLOYS THE BOSS.  ICON29.DAT's 2,977 bytes hold 478
+   opcodes when walked with the opcode ladder in src/icon.c, and two of them
+   are DEPLOY_WAVE, at script offsets 435 and 2938, both reading `04 01 01` --
+   wave 1, placed on the tile its placement record names rather than on a
+   searched-for one.  MAP29.DAT's wave 1 is a single record, record 0: the LV40
+   平衡之神, character 60, whose ENEMYDAT.DAT row 0 carries 150 HP a level and
+   so the guide's HP6000 (assets/characters.md).  It lands at map unit 12, the
+   first index behind the twelve player slots, on MAP29.COD's record 0, (10, 3).
+   The three records the map tags waves 2 and 3 are the god's second and third
+   forms, characters 61 and 62, and the four it tags wave 4 are the endless
+   reinforcement pair the guide's 事件 line describes, LV20 死靈 x2 (character
+   106) and LV20 白骨戰士 x2 (85); none of the seven but record 0 is on the
+   board when this handler returns.
+
+   THE SECOND DEPLOY IS BEHIND A MAP SWITCH THAT CHANGES NOTHING.  The
+   SWITCH_MAP at script offset 2936 writes chapter id 0x1d -- 29, the id the
+   dispatcher already put there -- and resets the state again, so it rebuilds
+   the very board the handler's own reset built and throws away everything the
+   scene did to it: the four RETIRE_UNITs and four REVIVE_UNITs that flash the
+   god in and out, the four PLACE_UNITs that move it, and the first DEPLOY_WAVE
+   with it.  The deploy at 2938 puts wave 1 back.  So the board at the return
+   is thirteen units however the scene is read, and the chapter id still reads
+   29 because the only thing that ever wrote it wrote what was already there.
+
+   WHAT THE SCENE LEAVES BEHIND IT IS A CELL EVENT AND A FACING.  The
+   TRIGGER_CELL_EVENT at offset 2941 sets triggered flag 0 to 1 and applies the
+   map cell changes that follow from it, and that flag survives because the
+   reset that clears the flag table is now behind it; the FACE_UNITS at 2947
+   turns all twelve party members to facing 2, over the 0 the array build wrote
+   (src/deploy.c).  The 398 SET_MAP_CELLs, twelve view shakes and four text
+   draws in between are the scene itself and leave no state this handler's
+   caller can read.
+
+   THE CURSOR ENDS ON THE MAP'S OWN TILE, unlike chapters 25's and 29's.  All
+   four of ICON29.DAT's PLACE_UNITs name map unit 12, the god, and no walk in
+   the member lists a party member at all, so player slot 0 keeps the start
+   tile MAP29.COD gives it -- the record at 0xb + (7 + 0) * 6, read as two
+   signed words (src/deploy.c), which is (7, 15) -- and the cursor lands on
+   (168, 360). */
+void fdps_chapter_30_init(void)
+{
+    fdps_chapter_state_reset();
+    fdps_icon_script_run(CH30_OPENING_SCRIPT);
+    fdps_show_chapter_title_card();
+    fdps_map_cursor_move_to_unit(CH30_CURSOR_UNIT);
+}

@@ -239,4 +239,49 @@ extern void fdps_chapter_28_init(void);
 extern void fdps_chapter_29_init(void);
 #pragma aux fdps_chapter_29_init "*" parm caller [];
 
+/* Chapter 30's entry handler: brings the game into chapter 30, the last
+   chapter.  Takes nothing and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon29.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 0's tile.  Nobody joins the party this chapter -- there is no
+   fdps_roster_add_character in the body -- and the roster is left as chapter
+   24 finished it, twelve members: the eleven chapters 1 to 19 assembled and
+   珊.  MAP29.DAT asks for twelve player slots, so every slot has a member
+   behind it and no zeroed, retired spare is written.
+
+   The reset leaves nothing on the board but the party.  MAP29.DAT holds seven
+   deployment records and tags not one of them wave 0 -- the only one of the
+   six maps this file's handlers load that opens empty -- so everything the
+   player faces this chapter is put there by a script.
+
+   The cut-scene deploys the boss.  ICON29.DAT carries two DEPLOY_WAVEs, both
+   `04 01 01`, and MAP29.DAT's wave 1 is a single record: the LV40
+   平衡之神, character 60, the guide's HP6000 first form.  It
+   lands at map unit 12 on MAP29.COD's record 0, (10, 3), so the board is
+   thirteen units when the handler returns.  The god's second and third forms
+   (characters 61 and 62, waves 2 and 3) and the endless reinforcement pair the
+   guide's 事件 line describes (LV20 死靈 x2, character 106,
+   and LV20 白骨戰士 x2, 85, wave 4) are no part of it.
+
+   The cut-scene switches map once, at script offset 2936, and the switch
+   changes nothing: it writes chapter id 29, the id that was already there, and
+   the reset it makes rebuilds the same board -- discarding the first
+   DEPLOY_WAVE and the four RETIRE_UNIT / four REVIVE_UNIT / four PLACE_UNIT
+   opcodes that flash the god in and out of the scene -- before the second
+   DEPLOY_WAVE puts wave 1 back.
+
+   What the scene leaves behind it is a triggered cell event, flag 0 set to 1
+   past the last reset, and all twelve party members turned to facing 2 over
+   the 0 the array build wrote.
+
+   The cursor ends on the map's own tile, unlike chapters 25's and 29's: every
+   PLACE_UNIT in the member names map unit 12 and no walk lists a party member,
+   so player slot 0 keeps MAP29.COD's start tile (7, 15) and the cursor lands
+   on (168, 360).
+
+   Table slot 29, the last slot of the table: there is no chapter 31. */
+extern void fdps_chapter_30_init(void);
+#pragma aux fdps_chapter_30_init "*" parm caller [];
+
 #endif
