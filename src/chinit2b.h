@@ -152,4 +152,49 @@ extern void fdps_chapter_26_init(void);
 extern void fdps_chapter_27_init(void);
 #pragma aux fdps_chapter_27_init "*" parm caller [];
 
+/* Chapter 28's entry handler: brings the game into chapter 28.  Takes nothing
+   and returns nothing.
+
+   In order: the chapter state is rebuilt, the opening cut-scene Icon27.dat is
+   interpreted, the chapter title card is shown, and the map cursor is parked
+   on unit 0's tile.  Nobody joins the party this chapter -- there is no
+   fdps_roster_add_character in the body -- and the roster is left as chapter
+   24 finished it, twelve members: the eleven chapters 1 to 19 assembled and
+   珊.  MAP27.DAT asks for twelve player slots, so every slot has a member
+   behind it and no zeroed, retired spare is written.
+
+   The cut-scene switches no map and deploys no wave, the same as chapters 26's
+   and 27's and unlike chapter 25's: its thirty-one opcodes play entirely on
+   the board this handler's own reset built, and nothing but the dispatcher
+   ever writes the chapter id.
+
+   The chapter is fought with the whole party, which is what tells this handler
+   apart from the three before it.  ICON27.DAT carries no RETIRE_UNIT, no
+   REVIVE_UNIT and no BLINK_UNITS_OUT anywhere in its 267 bytes, so all twelve
+   player slots are on the board with a clear flags byte when the handler
+   returns; the strategy guide's entry for the chapter has no 己方 line of its
+   own to name anybody left off.  What the cut-scene does with the party
+   instead is place it: twelve PLACE_UNITs put map units 0 to 11 on tiles of
+   the script's own choosing, overwriting MAP27.COD's start records, and nine
+   group walks march them up the map.
+
+   The opening opposition is the map's own wave 0 and nothing else.  MAP27.DAT
+   tags thirty-seven of its sixty-five deployment records wave 0, so the board
+   is forty-nine units, and those thirty-seven are exactly the guide's 敵方 list
+   for the chapter: LV25 黑暗祭司 x4 (character 104), LV25 幽魂 x9 (105), LV25
+   骷髏兵 x10 (84) and LV25 地獄犬 x14 (107).  Record 0 of the file is wave 0
+   and a 骷髏兵, so it lands at map unit 12, the first unit behind the party.
+   The twenty-eight records held back are nine waves of three -- the guide's
+   事件, reinforcement arriving at the end of the player's 2nd, 4th, 6th, 7th,
+   10th, 12th, 14th, 16th and 18th turns -- and one record tagged 0xff, and
+   this handler deploys none of them.
+
+   The cursor ends on the tile the cut-scene put unit 0 on and walked it from:
+   placed on (11, 24), then five tiles up, one right and two more up, so the
+   answer is (12, 17) and nothing of MAP27.COD's own (8, 18) survives into it.
+
+   Table slot 27. */
+extern void fdps_chapter_28_init(void);
+#pragma aux fdps_chapter_28_init "*" parm caller [];
+
 #endif
