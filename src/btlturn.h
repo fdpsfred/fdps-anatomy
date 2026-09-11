@@ -24,4 +24,19 @@
 extern void fdps_battle_mark_unit_done(int unit_index);
 #pragma aux fdps_battle_mark_unit_done "*" parm caller [];
 
+/* Fires the chapter script's turn-scheduled events for one side's phase of the
+   current battle turn.  All sixteen entries of the turn-event table in the
+   resident MAP%02d.DAT block are walked; an entry whose scheduled turn equals
+   data_fdps_battle_turn_counter and whose side equals `side` calls its handler
+   out of data_fdps_chapter_event_handler_table (chapter.h) with 0 as the unit
+   index.  The walk does not stop at the first match, writes no global and
+   returns nothing.
+
+   `side` is in the encoding of unit record byte +6: 0 enemy, 1 friendly NPC,
+   2 player.  fdps_battle_advance_turn is the only caller and passes 1 before
+   the NPC pass, 0 before the enemy pass and 2 as it opens the next player
+   phase. */
+extern void fdps_battle_run_turn_events(int side);
+#pragma aux fdps_battle_run_turn_events "*" parm caller [];
+
 #endif

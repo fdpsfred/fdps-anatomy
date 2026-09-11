@@ -3648,6 +3648,14 @@
       "status": "committed",
       "emitted_against": "0x229",
       "rounds": 1
+    },
+    "0002e0c0": {
+      "name": "fdps_battle_run_turn_events",
+      "target": "btlturn.c",
+      "body_size": "0x92",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x92"
     }
   }
 }
