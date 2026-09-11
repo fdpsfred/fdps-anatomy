@@ -94,7 +94,7 @@
 | `ITEM.DAT` 的 23 個 byte 不是物品行為的全部 | 假設把這張表搬過去物品就完整了。每回合回復、以及生命之實與三種藥水這類永久強化的**幅度**都不在 record 裡——它們的 `use_effect` 有值而 `use_amount` 是 0 | [`assets/items.md`](../assets/items.md) |
 | 職業表的魔抗欄位存的是 100 減去魔法抗性 | 直接當抗性用，抗性高低會完全顛倒 | [`assets/tables/classes.md`](../assets/tables/classes.md) |
 | 法術的威力欄位為負數時是攻擊力加乘率的百分比，不是傷害 | 宣告成 `u16` 或直接當傷害用。八個絕招全部靠這個負值表示加乘 | [`assets/tables/spells.md`](../assets/tables/spells.md) |
-| `Icon%02d.dat` 的編號是**章節索引**（0 起算），而章節處理函式以玩家看到的章號命名，兩者差 1——`fdps_chapter_12_init` 載入的是 `Icon11.dat` | 照 function 名稱裡的章號寫檔名。三十支處理函式全部會播到下一章的開場動畫，而且照樣編譯照樣跑 | [`CONTEXT.md`](../CONTEXT.md) |
+| `Icon%02d.dat` 的編號是**章節索引**（0 起算），而章節處理函式以玩家看到的章號命名，兩者差 1——`fdps_chapter_12_init` 載入的是 `Icon11.dat` | 照 function 名稱裡的章號寫檔名。二十九支會播到下一章的開場動畫，第 30 章更糟：`ICONANI.VFS` 只到 `ICON29.DAT`，找不到成員會停在 `fdps_wait_any_key` 等玩家按鍵，接著開場沒有 boss——`MAP29.DAT` 沒有 wave 0，這隻 boss 是動畫裡的 `DEPLOY_WAVE` 放的。而且照樣編譯照樣跑 | [`CONTEXT.md`](../CONTEXT.md) |
 | `0x640d8` 起的 0x20 byte 是**章節共用**的事件旗標陣列：`fdps_chapter_state_reset` 每次進章節整塊 memset，讀檔時整塊還原，十幾支不同章節的處理函式各自latch 其中一個 byte | 把它寫成該處理函式裡的 `static char done`。那是 assembly 看起來的樣子，但重來一章時不會被清掉，讀檔也還原不了 | plate comment 的 `Rebuild note` |
 | CD 的 MSF 換算已經扣掉 150 frame 的 pregap：`fdps_cd_msf_to_sector` 回的是邏輯磁區號，`fdps_cd_sector_to_msf` 又再扣一次 150（因為它的輸入已經是扣過的） | 寫教科書版的 `minute*60*75 + second*75 + frame`。每一軌的起點都會差 150 frame，長度查詢則會少兩秒 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
 | **Ghidra 的字串定義常常早 1–2 byte 開始，把 Watcom 留在字面值之間的非零對齊填充算進去**：`s_Icon03.dat_00061827` 的值是 `"zIcon03.dat"`，反編譯印出的是 `fdps_icon_script_run(s_zIcon03_dat_00061827 + 1)` | 把反編譯印的字串原文抄進 C。抄到的是多了填充字元的字串，`fdps_vfs_find_entry` 一定找不到那個成員。這在 `.object2` 的字串區反覆發生，不是個案；判斷方式是看呼叫端有沒有 `+ 1` / `+ 2` 這種偏移 | [`program_info/data_structures.md`](../program_info/data_structures.md) |
