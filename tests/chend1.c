@@ -56,7 +56,7 @@
  * container.  The one staged here holds six short scripts built to the
  * layout in resource_info/vfs.md and read by the game's own fdps_vfs_open and
  * fdps_vfs_load_file: WIN00.DAT, the member this handler names, and WIN01.DAT
- * through WIN07.DAT, the members the handlers after it name, one short script
+ * through WIN08.DAT, the members the handlers after it name, one short script
  * per handler covered in this file.  Each writes a marker no other member
  * writes -- a slot of its own where the opcode still has one free, and
  * otherwise a value of its own in a shared slot.  A run that opened a
@@ -92,7 +92,7 @@
 #define VFS_ENTRY_BYTES 26
 #define VFS_NAME_FIELD_BYTES 13
 #define VFS_SIGNATURE_BYTES 24
-#define FIXTURE_MEMBERS 8
+#define FIXTURE_MEMBERS 9
 
 /* How many records each staged array holds.  One of each is all the run needs;
    the spares behind them are there so a write past the end of the array under
@@ -183,6 +183,14 @@
 #define WIN07_MARKER_OPERAND 2
 #define WIN07_MARKER_SLOT 5
 #define WIN07_MARKER_VALUE 29
+
+/* WIN08.DAT reuses WIN00.DAT's and WIN04.DAT's slot for the same reason, with
+   a value neither of them writes: the pair (slot 4, value 31) is reached by no
+   other member, so a run that opened either of those instead would read back 6
+   or 21 there. */
+#define WIN08_MARKER_OPERAND 1
+#define WIN08_MARKER_SLOT 4
+#define WIN08_MARKER_VALUE 31
 
 /* The retired bit in the flags byte at record +5, which the fixture's first
    opcode raises on unit 0. */
@@ -289,22 +297,34 @@ static unsigned char fixture_win07_dat[] = {
     0x00
 };
 
+/* WIN08.DAT: the member fdps_chapter_09_end names.  Like WIN02.DAT through
+   WIN07.DAT it retires battle unit 0 -- which is what makes the writeback's
+   character-0 exemption the witness that the banking happened first -- and it
+   writes a ninth marker, so opening any of the other eight members is visible
+   in the record rather than in a silent pass. */
+static unsigned char fixture_win08_dat[] = {
+    0x0b, RANDIS_UNIT,
+    0x12, RANDIS_UNIT, WIN08_MARKER_OPERAND, WIN08_MARKER_VALUE,
+    0x00
+};
+
 static char *fixture_names[FIXTURE_MEMBERS] = {
     "WIN00.DAT", "WIN01.DAT", "WIN02.DAT", "WIN03.DAT", "WIN04.DAT",
-    "WIN05.DAT", "WIN06.DAT", "WIN07.DAT"
+    "WIN05.DAT", "WIN06.DAT", "WIN07.DAT", "WIN08.DAT"
 };
 
 static unsigned char *fixture_bytes[FIXTURE_MEMBERS] = {
     fixture_win00_dat, fixture_win01_dat, fixture_win02_dat,
     fixture_win03_dat, fixture_win04_dat, fixture_win05_dat,
-    fixture_win06_dat, fixture_win07_dat
+    fixture_win06_dat, fixture_win07_dat, fixture_win08_dat
 };
 
 static int fixture_lengths[FIXTURE_MEMBERS] = {
     sizeof(fixture_win00_dat), sizeof(fixture_win01_dat),
     sizeof(fixture_win02_dat), sizeof(fixture_win03_dat),
     sizeof(fixture_win04_dat), sizeof(fixture_win05_dat),
-    sizeof(fixture_win06_dat), sizeof(fixture_win07_dat)
+    sizeof(fixture_win06_dat), sizeof(fixture_win07_dat),
+    sizeof(fixture_win08_dat)
 };
 
 /* 0 not attempted, 1 the run happened and the snapshot below is good,
@@ -2404,6 +2424,288 @@ static void chapter_08_advances_the_chapter_index_to_chapter_nine(void)
     CHECK_EQ(ch08_chapter_id, CH08_CHAPTER_ID_AFTER);
 }
 
+/* ------------------------------------------------------------------------
+ * fdps_chapter_09_end at 0003a880.
+ *
+ * Chapters 3 to 8's body instruction for instruction, with its own script name
+ * and its own stored index: four calls and one store, no branch.
+ *
+ *   0003a88c  CALL 0x00039e10          every unit on the enemy side is swept
+ *   0003a891  CALL 0x00023980          the battle party is banked
+ *   0003a896  MOV EAX,0x62110 / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4
+ *             the cut-scene "Win08.dat" is interpreted
+ *   0003a8a4  CALL 0x00039e70          the fallen are revived
+ *   0003a8a9  MOV dword ptr [0x00069cf4],0x9
+ *
+ * THE TWO NUMBERS DIFFER BY ONE, and the cases below pin both ends of that
+ * separately: the member opened is WIN08.DAT, the index of the chapter that
+ * has just been won, while the store leaves 9, the index of the chapter that
+ * comes next.  A handler that wrote the same number twice would pass one of
+ * the two assertions and fail the other.
+ *
+ * WHERE THE SWEEP SITS IN THIS CHAPTER.  Chapter 9's post-action test runs
+ * fdps_battle_check_default_end_conditions and then adds two defeat tests of
+ * its own for the guests at unit slots 6 and 7 (chpost1.h), so the clear that
+ * brings the dispatcher here is the shared one and the enemy side is normally
+ * already empty when the handler runs -- the belt-and-braces position the
+ * sweep has in chapters 4 to 7, not the load-bearing one it has in chapters 3
+ * and 8.  What the call does is not conditional on that, and the case below
+ * witnesses it on a staged enemy that still has hit points.
+ *
+ * The staging puts that enemy on the map ALREADY RETIRED, for the reason
+ * chapter 3's section above gives and not because the game reaches the handler
+ * that way: the death pass that ends fdps_battle_destroy_remaining_enemies
+ * collects units whose retired bit is clear and whose hit points are 0, and
+ * for a non-empty list it spins them, plays Explo.Saf and renders frames
+ * (src/death.c), none of which can run in a test image.  With the bit already
+ * raised the list comes back empty and the hit-point store is all the call
+ * did -- which is the part this file can witness.
+ *
+ * The enemy also carries a character id no roster slot holds, so the writeback
+ * that follows does not bank it and the roster assertions stay about the
+ * party.
+ *
+ * WIN08.DAT retires battle unit 0 the way WIN02.DAT through WIN07.DAT do, so
+ * the same witness for the order works here: the writeback skips a character-0
+ * unit that has left the field, and roster slot 0 carrying the battle record
+ * rather than the 0xa5 filler is what says the banking ran before the script.
+ * ---------------------------------------------------------------------- */
+
+/* The second battle unit the chapter 9 run stages: an enemy the sweep still
+   has hit points to zero.  Its character id is one no roster slot holds and
+   its retired bit is already raised, for the two reasons above. */
+#define CH09_ENEMY_UNIT 1
+#define CH09_ENEMY_CHAR_ID 9
+#define CH09_ENEMY_HP_CURRENT 50
+#define CH09_ENEMY_HP_MAX 50
+#define CH09_UNIT_COUNT 2
+
+/* The index the handler must leave: chapter 10, 0-based, the literal of the
+   store at 0003a8a9.
+
+   This run does NOT start from the file's shared CHAPTER_ID_BEFORE, because
+   that value is 9 as well and an assertion that reads back the number the run
+   put there proves nothing.  It starts from 3 instead, which is neither the
+   stored 9, nor the 8 an off-by-one would leave, nor the 4 an increment would
+   leave. */
+#define CH09_CHAPTER_ID_BEFORE 3
+#define CH09_CHAPTER_ID_AFTER 9
+
+static int ch09_run_state = 0;
+
+static unsigned char ch09_unit_spells[SPELL_BITMAP_BYTES];
+static unsigned char ch09_unit_timers[STATUS_TIMER_COUNT];
+static int ch09_unit_flags;
+static int ch09_unit_hp_current;
+static unsigned char ch09_slot_spells[SPELL_BITMAP_BYTES];
+static unsigned char ch09_slot_timers[STATUS_TIMER_COUNT];
+static int ch09_slot_char_id;
+static int ch09_slot_flags;
+static int ch09_slot_hp_current;
+static int ch09_slot_hp_max;
+static int ch09_slot_mp_current;
+static int ch09_slot_level;
+static int ch09_enemy_hp_current;
+static int ch09_enemy_hp_max;
+static int ch09_enemy_flags;
+static int ch09_chapter_id;
+static int ch09_party_gold;
+
+/* The staged battle array with the enemy added behind the party member, and
+   the player unit's side byte made explicit: stage_globals zeroes the record,
+   and a zero side byte is the ENEMY side, so a party member left at the
+   default would be swept by the first call. */
+static void ch09_stage_globals(void)
+{
+    stage_globals();
+
+    unit_image[RANDIS_UNIT].side = PLAYER_SIDE;
+
+    unit_image[CH09_ENEMY_UNIT].char_id = CH09_ENEMY_CHAR_ID;
+    unit_image[CH09_ENEMY_UNIT].side = ENEMY_SIDE;
+    unit_image[CH09_ENEMY_UNIT].flags = UNIT_FLAG_RETIRED;
+    unit_image[CH09_ENEMY_UNIT].hp_current = CH09_ENEMY_HP_CURRENT;
+    unit_image[CH09_ENEMY_UNIT].hp_max = CH09_ENEMY_HP_MAX;
+
+    data_fdps_map_unit_count = CH09_UNIT_COUNT;
+    data_fdps_chapter_current_chapter_id = CH09_CHAPTER_ID_BEFORE;
+}
+
+static void ch09_capture(void)
+{
+    int i;
+
+    for (i = 0; i < SPELL_BITMAP_BYTES; i++) {
+        ch09_unit_spells[i] = unit_image[RANDIS_UNIT].spells_known_bitmap[i];
+        ch09_slot_spells[i] =
+            roster_image[RANDIS_ROSTER_SLOT].spells_known_bitmap[i];
+    }
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        ch09_unit_timers[i] = unit_image[RANDIS_UNIT].status_timers[i];
+        ch09_slot_timers[i] =
+            roster_image[RANDIS_ROSTER_SLOT].status_timers[i];
+    }
+    ch09_unit_flags = (int) unit_image[RANDIS_UNIT].flags;
+    ch09_unit_hp_current = (int) unit_image[RANDIS_UNIT].hp_current;
+    ch09_slot_char_id = (int) roster_image[RANDIS_ROSTER_SLOT].char_id;
+    ch09_slot_flags = (int) roster_image[RANDIS_ROSTER_SLOT].flags;
+    ch09_slot_hp_current = (int) roster_image[RANDIS_ROSTER_SLOT].hp_current;
+    ch09_slot_hp_max = (int) roster_image[RANDIS_ROSTER_SLOT].hp_max;
+    ch09_slot_mp_current = (int) roster_image[RANDIS_ROSTER_SLOT].mp_current;
+    ch09_slot_level = (int) roster_image[RANDIS_ROSTER_SLOT].level;
+    ch09_enemy_hp_current = (int) unit_image[CH09_ENEMY_UNIT].hp_current;
+    ch09_enemy_hp_max = (int) unit_image[CH09_ENEMY_UNIT].hp_max;
+    ch09_enemy_flags = (int) unit_image[CH09_ENEMY_UNIT].flags;
+    ch09_chapter_id = data_fdps_chapter_current_chapter_id;
+    ch09_party_gold = data_fdps_shared_party_total_gold;
+}
+
+static void run_chapter_09_handler(void)
+{
+    if (ch09_run_state != 0) {
+        return;
+    }
+    ch09_run_state = 2;
+
+    if (!ensure_fixture_archive()) {
+        return;
+    }
+
+    ch09_stage_globals();
+
+    fdps_chapter_09_end();
+
+    ch09_capture();
+    ch09_run_state = 1;
+}
+
+/* The map is swept first, and swept the way 00039e10 sweeps it: the enemy
+   unit's hit-point word is 0 where the staging left 50, its maximum in the
+   word behind it is untouched -- the store is MOV word ptr [EAX+0x40],0x0 and
+   not a dword -- and the player unit, whose side byte is 2, keeps the hit
+   points the staging gave it.  A handler that omitted the call, the shape
+   chapters 1 and 2 have, would leave the enemy at 50. */
+static void chapter_09_sweeps_the_enemy_side(void)
+{
+    run_chapter_09_handler();
+    CHECK_EQ(ch09_run_state, 1);
+    if (ch09_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch09_enemy_hp_current, 0);
+    CHECK_EQ(ch09_enemy_hp_max, CH09_ENEMY_HP_MAX);
+    CHECK_EQ(ch09_enemy_flags, UNIT_FLAG_RETIRED);
+    CHECK_EQ(ch09_unit_hp_current, RANDIS_HP_CURRENT);
+}
+
+/* The battle party is banked, and banked BEFORE the cut-scene: the slot that
+   was 0xa5 filler carries the battle record's character id and level, its six
+   status bytes were cleared by the writeback's memset, its flags were masked
+   to bit 0, its HP was lifted to the maximum by the full heal and its MP by
+   the restore that follows.  WIN08.DAT retires unit 0 and the writeback skips
+   a retired character-0 unit, so a run that interpreted the script first would
+   leave every one of these at the filler. */
+static void chapter_09_banks_the_party_before_the_cutscene_runs(void)
+{
+    int i;
+
+    run_chapter_09_handler();
+    CHECK_EQ(ch09_run_state, 1);
+    if (ch09_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch09_slot_char_id, RANDIS_CHAR_ID);
+    CHECK_EQ(ch09_slot_level, RANDIS_LEVEL);
+    CHECK_EQ(ch09_slot_flags, 0);
+    CHECK_EQ(ch09_slot_hp_max, RANDIS_HP_MAX);
+    CHECK_EQ(ch09_slot_hp_current, RANDIS_HP_MAX);
+    CHECK_EQ(ch09_slot_mp_current, RANDIS_MP_MAX);
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        CHECK_EQ(ch09_slot_timers[i], 0);
+    }
+}
+
+/* No spell is granted.  The handler has no fdps_set_flag_bit call -- the first
+   thing at 0003a88c is the sweep -- so both the live record's bitmap and the
+   roster's copy of it stay at the zeroes the staging left.  A grant copied
+   over from chapter 1's neighbour would show as byte 0 reading 0x01. */
+static void chapter_09_grants_no_spell(void)
+{
+    int i;
+
+    run_chapter_09_handler();
+    CHECK_EQ(ch09_run_state, 1);
+    if (ch09_run_state != 1) {
+        return;
+    }
+
+    for (i = 0; i < SPELL_BITMAP_BYTES; i++) {
+        CHECK_EQ(ch09_unit_spells[i], 0);
+        CHECK_EQ(ch09_slot_spells[i], 0);
+    }
+}
+
+/* The cut-scene the handler names is Win08.dat and it really ran: both of the
+   fixture member's opcodes are on the live battle record -- the retired bit at
+   +5 and the marker value 31 in status_timers[4].  WIN00.DAT and WIN04.DAT
+   write that same slot with 6 and 21, WIN01.DAT, WIN03.DAT and WIN06.DAT write
+   status_timers[3] with 11, 13 and 17, and WIN02.DAT, WIN05.DAT and WIN07.DAT
+   write status_timers[5] with 7, 23 and 29, so opening any neighbour is a
+   failed assertion rather than a silent pass.  This is also the half of the
+   handler's deliberate off-by-one that carries the index of the chapter just
+   ENDED, 08, against the 9 the store leaves.  The marker does not reach the
+   roster copy, whose timers the writeback cleared before the script ran. */
+static void chapter_09_victory_cutscene_is_win08_dat(void)
+{
+    run_chapter_09_handler();
+    CHECK_EQ(ch09_run_state, 1);
+    if (ch09_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch09_unit_timers[WIN08_MARKER_SLOT], WIN08_MARKER_VALUE);
+    CHECK_EQ(ch09_unit_timers[WIN01_MARKER_SLOT], 0);
+    CHECK_EQ(ch09_unit_timers[WIN02_MARKER_SLOT], 0);
+    CHECK_EQ(ch09_unit_flags, UNIT_FLAG_RETIRED);
+    CHECK_EQ(ch09_slot_timers[WIN08_MARKER_SLOT], 0);
+}
+
+/* Nobody fell, so the revive sweep charges nothing and never opens its panel:
+   the writeback ran first and put the one roster member on his maximum, which
+   leaves the sweep with no member at 0 HP to bill for.  The purse reading back
+   unchanged is also what proves the sweep returned at all -- its panel loop
+   waits for a key no test image queues.  The enemy the first call left at 0 HP
+   is not a roster member and is not billed for either. */
+static void chapter_09_revive_charges_nothing_when_nobody_fell(void)
+{
+    run_chapter_09_handler();
+    CHECK_EQ(ch09_run_state, 1);
+    if (ch09_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch09_party_gold, PARTY_GOLD_BEFORE);
+}
+
+/* The chapter index is left at chapter 10's, 9, as an assignment and not as a
+   step from what was there: this run starts it at 3, so an increment would
+   read back 4 and the store's own literal reads back 9.  It also pins the
+   other half of the handler's deliberate off-by-one -- an 8 here, matching the
+   08 in the script name, would be chapter 9 replayed rather than chapter 10
+   started. */
+static void chapter_09_advances_the_chapter_index_to_chapter_ten(void)
+{
+    run_chapter_09_handler();
+    CHECK_EQ(ch09_run_state, 1);
+    if (ch09_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch09_chapter_id, CH09_CHAPTER_ID_AFTER);
+}
+
 /* The fixture container belongs to this file only while its run needs it:
    tests/icon.c and tests/chinit1.c stage a container of the same name for
    their own fixtures and refuse to start if one is already standing. */
@@ -2467,5 +2769,11 @@ void run_chend1_tests(void)
     RUN_TEST(chapter_08_victory_cutscene_is_win07_dat);
     RUN_TEST(chapter_08_revive_charges_nothing_when_nobody_fell);
     RUN_TEST(chapter_08_advances_the_chapter_index_to_chapter_nine);
+    RUN_TEST(chapter_09_sweeps_the_enemy_side);
+    RUN_TEST(chapter_09_banks_the_party_before_the_cutscene_runs);
+    RUN_TEST(chapter_09_grants_no_spell);
+    RUN_TEST(chapter_09_victory_cutscene_is_win08_dat);
+    RUN_TEST(chapter_09_revive_charges_nothing_when_nobody_fell);
+    RUN_TEST(chapter_09_advances_the_chapter_index_to_chapter_ten);
     RUN_TEST(the_fixture_container_is_removed);
 }

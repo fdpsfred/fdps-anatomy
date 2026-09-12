@@ -728,3 +728,100 @@ void fdps_chapter_08_end(void)
     fdps_roster_revive_fallen_members();
     data_fdps_chapter_current_chapter_id = CH08_NEXT_CHAPTER_ID;
 }
+
+/* Chapter 9's victory cut-scene, the string at 0x62110 loaded into EAX at
+   0003a896 and pushed as fdps_icon_script_run's only argument.  The
+   interpreter upper-cases the member name in place before the container
+   compare (vfs.h, rebuild_info/pitfalls.md), so this literal is folded to
+   WIN08.DAT by the call and cannot live in read-only storage.
+
+   The number in the name is the 0-based index of the chapter that has just
+   ENDED, so chapter 9's scene is Win08.dat -- the same slot number the handler
+   itself was dispatched through, and one less than the index it leaves
+   behind. */
+#define CH09_VICTORY_SCRIPT "Win08.dat"
+
+/* What the handler leaves in data_fdps_chapter_current_chapter_id: MOV dword
+   ptr [0x00069cf4],0x9 at 0003a8a9.  The index is 0-based, so 9 is chapter 10
+   -- both the village phase that runs next and the chapter loaded after it
+   read this global, so this one store is what advances the game.
+
+   It is an assignment of the chapter's successor and not an increment: the
+   handler was reached through slot 8 of a table indexed by this same global,
+   and every handler in the family stores its own literal.
+
+   THE TWO NUMBERS IN THIS HANDLER DIFFER BY ONE ON PURPOSE: the script above
+   is 08, the index of the chapter that has just been won, and this store is 9,
+   the index of the one that comes next.  Writing the same number in both
+   places is wrong in one of them. */
+#define CH09_NEXT_CHAPTER_ID 9
+
+/* 0003a880.  Four calls and one store, straight line, no branch and no loop --
+   instruction for instruction the same body as fdps_chapter_03_end through
+   fdps_chapter_08_end above, with a different script name and a different
+   stored index.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 0003a880..0003a884 -- over SUB ESP,0x0, a zero-byte local area
+   written as the six-byte immediate form at 0003a886..0003a88b.  Nothing is
+   addressed off EBP anywhere in the body, so there is no local here to name
+   and none is declared; the four registers come back off the stack at
+   0003a8b3..0003a8b6 and the RET at 0003a8b7 is bare.
+
+   CALLING CONVENTION.  The one argument goes on the stack and the caller takes
+   it back: MOV EAX,0x62110 / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4 at
+   0003a896..0003a8a1.  The three argument-less calls at 0003a88c, 0003a891 and
+   0003a8a4 are bare CALLs with no push and no adjustment.  Nothing reads
+   [EBP+8] or above, so this function takes nothing itself, and EAX is never
+   set for a result before the RET -- the only write to it is the one that
+   carries the script name into the third call -- so it returns nothing.  The
+   one caller agrees: the dispatcher at 00029395 loads the chapter index,
+   scales it by four and CALLs through [EAX + 0x60304] with nothing pushed, no
+   stack cleanup afterwards and no read of EAX (the next instruction is another
+   CALL, 000293a7).  Slot 8 of that table, at 00060324, holds 0003a880 and is
+   the only reference to this function in the image.
+
+   VALUES USED AFTER A CALL: none at all.  All four callees return void as far
+   as this body is concerned and nothing here reads EAX after any of them;
+   fdps_icon_script_run does leave a result in EAX and this call site discards
+   it -- the ADD ESP,0x4 and the CALL that follows overwrite it.
+
+   THE MAP IS SWEPT FIRST, and here the sweep is the belt-and-braces step it is
+   in chapters 4 to 7 rather than the load-bearing one it is in chapters 3 and
+   8.  Chapter 9's verdict comes from fdps_chapter_09_post_action (chpost1.h),
+   which runs the shared end test and then adds two defeat conditions of its
+   own -- the guests at unit slots 6 and 7, 布蘭多 and 蓋亞, having left the
+   battle -- and the shared test only records a clear when no unit on side 0 is
+   still standing (btlend.h); the dispatcher at 000293a1 reaches this table
+   only on that verdict.  So on the shipped data the sweep normally finds the
+   enemy side already empty and its hit-point stores land on units that have
+   retired.  What it does is not conditional on that:
+   fdps_battle_destroy_remaining_enemies zeroes the hit-point word of every
+   unit on side 0 whether or not it has left the field, and plays the ones that
+   are not already retired off the map (btlend.h).
+
+   THE ORDER OF THE REST IS THE ALGORITHM.  The cut-scene runs AFTER the
+   writeback and the revive AFTER the cut-scene.  The script is interpreted
+   with the battle's unit array still standing, so a unit-record edit it makes
+   lands on a party that has already been banked and reaches the roster only if
+   the script itself asks for another writeback (opcode 0x61, src/icon.c).  The
+   revive then reads the roster the writeback has just filled, which is what
+   makes it see the battle's casualties at all.
+
+   WHAT THIS HANDLER DOES NOT DO.  It grants nothing before the writeback, so
+   unlike fdps_chapter_01_end it awards no spell, and it does nothing about the
+   two guests the chapter is fought alongside: they were appended to the roster
+   by chapter 9's init handler and the writeback banks them like any other
+   party member.
+
+   THE CHAPTER IS ADVANCED HERE and nowhere else on this path: the store at
+   0003a8a9 is the handler's last act and the only thing it leaves for the
+   phase that follows. */
+void fdps_chapter_09_end(void)
+{
+    fdps_battle_destroy_remaining_enemies();
+    fdps_roster_write_back_battle_units();
+    fdps_icon_script_run(CH09_VICTORY_SCRIPT);
+    fdps_roster_revive_fallen_members();
+    data_fdps_chapter_current_chapter_id = CH09_NEXT_CHAPTER_ID;
+}
