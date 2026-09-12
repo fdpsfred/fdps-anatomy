@@ -59,4 +59,23 @@ extern void fdps_chapter_01_end(void);
 extern void fdps_chapter_02_end(void);
 #pragma aux fdps_chapter_02_end "*" parm caller [];
 
+/* Chapter 3's end handler: closes chapter 3 out and hands the game to chapter
+   4.  Takes nothing and returns nothing.
+
+   In order, and the order is the content: every unit still on the enemy side
+   is destroyed and played off the map; the battle party is banked onto the
+   persistent roster; the victory cut-scene Win02.dat is interpreted; every
+   party member who fell is revived and billed for it; and the chapter index is
+   advanced to 3, chapter 4.
+
+   It is the first handler of the family to sweep the map first, and it needs
+   to: chapter 3 is cleared by retiring unit slot 4, its 魔導士, without the
+   enemy side being looked at (fdps_chapter_03_post_action, chpost1.h), so the
+   chapter normally ends with enemies still standing.  Chapters 1 and 2 are
+   cleared only by emptying the enemy side and have no such call.
+
+   Table slot 2. */
+extern void fdps_chapter_03_end(void);
+#pragma aux fdps_chapter_03_end "*" parm caller [];
+
 #endif
