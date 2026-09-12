@@ -139,4 +139,26 @@ extern void fdps_chapter_05_end(void);
 extern void fdps_chapter_06_end(void);
 #pragma aux fdps_chapter_06_end "*" parm caller [];
 
+/* Chapter 7's end handler: closes chapter 7 out and hands the game to chapter
+   8.  Takes nothing and returns nothing.
+
+   In order, and the order is the content: every unit on the enemy side has its
+   hit points zeroed and any that had not already left the field is played off
+   it; the battle party is banked onto the persistent roster; the victory
+   cut-scene Win06.dat is interpreted; every party member who fell is revived
+   and billed for it; and the chapter index is advanced to 7, chapter 8.
+
+   The body is chapter 3's, chapter 4's, chapter 5's and chapter 6's,
+   instruction for instruction, with its own script name and its own stored
+   index.  As in chapters 4, 5 and 6 the sweep is a belt-and-braces step:
+   chapter 7 is cleared through the shared end test, which records a clear only
+   when the enemy side is already empty (fdps_chapter_07_post_action,
+   chpost1.h; btlend.h), so on the shipped data it normally has nothing left to
+   retire.  Chapter 7's post-action test is the shared one and nothing else,
+   where the three slots before it each add a defeat test of their own.
+
+   Table slot 6. */
+extern void fdps_chapter_07_end(void);
+#pragma aux fdps_chapter_07_end "*" parm caller [];
+
 #endif
