@@ -1614,6 +1614,629 @@ static void the_ch18_fixture_container_is_removed(void)
     CHECK_EQ(file_present(SCRIPT_ARCHIVE_FILE), 0);
 }
 
+/* --------------------------------------------------------------------------
+ * fdps_chapter_19_end at 0003b0b0.
+ *
+ * NOT THE FAMILY'S SHAPE EITHER, and it differs at both ends: a conditional
+ * free full recovery of the party stands in front, and the map sweep the
+ * halves above all make is simply absent.
+ *
+ *   0003b0bc  CMP byte ptr [0x000640e9],0x0 / JZ 0003b125
+ *             element 0x11 of data_fdps_map_cell_event_triggered_flags, the
+ *             duel latch: clear and the whole recovery is skipped
+ *   0003b0cf  CMP EAX,[0x00060150] / JL
+ *             the recovery walks the LIVE unit count, not a literal
+ *   0003b0e5  CALL 0x0002d210          the record is resolved
+ *   0003b0f3  MOV AL,[EAX+0x8] / AND EAX,0xff / CMP EAX,0xb / JG 0003b123
+ *             an UNSIGNED test on the character id
+ *   0003b103  MOV byte ptr [EAX+0x5],0x0      the whole flags byte
+ *   0003b10a  MOV DX,[EAX+0x42] / MOV [EAX+0x40],DX     hp_current = hp_max
+ *   0003b118  MOV DX,[EAX+0x46] / MOV [EAX+0x44],DX     mp_current = mp_max
+ *   0003b125  CALL 0x00023980          the battle party is banked
+ *   0003b12a  MOV EAX,0x62194 / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4
+ *             the cut-scene "Win18.dat" is interpreted
+ *   0003b138  CALL 0x00039e70          the fallen are revived
+ *   0003b13d  MOV dword ptr [0x00069cf4],0x13
+ *
+ * There is no CALL 0x00039e10 anywhere in the body, which is the one thing
+ * this half can witness that none of the three above can.
+ *
+ * TWO RUNS, because one run cannot witness a branch.  Each stages the battle
+ * array and the roster afresh and runs the whole handler for real:
+ *
+ *   A  the duel latch is UP.  Every staged record carries the retired bit the
+ *      duel staging leaves behind plus a second bit beside it, and every one
+ *      is staged below its maximum in both hit points and magic points.
+ *   B  the duel latch is DOWN, everything else identical, so nothing may be
+ *      recovered and the writeback's own rule -- keep the retired bit, do not
+ *      heal -- is what the roster ends up holding.
+ *
+ * WHAT EACH STAGED RECORD IS FOR.  The five inside the live count pin the two
+ * ends of the character-id test and the sign it is read with, and the sixth
+ * pins the loop bound:
+ *
+ *   unit 0   character 0, and the record the cut-scene retires
+ *   unit 1   character 0x0b, the LAST id the test lets through
+ *   unit 2   character 0x0c, the first it does not
+ *   unit 3   character 0x80, which a SIGNED test would let through as -128
+ *   unit 4   an enemy, character 0x1e, still standing with hit points left
+ *   unit 5   character 0x03, sitting BEYOND data_fdps_map_unit_count
+ *
+ * WHY THE ENEMY IS STAGED ALREADY RETIRED even though nothing here sweeps it:
+ * so that a handler which did call the sweep fails on the hit-point assertion
+ * rather than hanging.  The death pass that ends
+ * fdps_battle_destroy_remaining_enemies collects units whose retired bit is
+ * clear and whose hit points are 0, and for a non-empty list it spins them and
+ * renders frames, none of which can run in a test image (src/death.c).
+ *
+ * WHY NOBODY MAY BE LEFT AT 0 HIT POINTS on the roster, in either run: the
+ * revive panel ends in a frame loop that runs until a keyboard make code
+ * arrives and nothing queues one in a test image, the same reason the halves
+ * above give.  Run B's roster copies therefore keep the below-maximum hit
+ * points they were staged with rather than reaching 0.
+ *
+ * Everything else -- why the cut-scene is a fixture rather than the shipped
+ * WIN18.DAT, and the refusal protocol around the IconAni.vfs name -- is the
+ * reasoning at the top of this file, unchanged.  Both runs share ONE
+ * container, built by whichever runs first and removed by the last case.
+ * ------------------------------------------------------------------------ */
+
+/* The duel latch the whole recovery is gated on: element 0x11 of the 32-entry
+   array, the byte at 0x000640e9 the compare at 0003b0bc reads. */
+#define CH19_DUEL_LATCH_SLOT 0x11
+
+/* The three members, and the marker each writes.  WIN18.DAT is the one the
+   handler names; the two decoys share status_timers[5] with values of their
+   own, so one assertion that the slot is still 0 rules both out and the value
+   says which one ran if it is not.  WIN17.DAT is where a body copied from
+   fdps_chapter_18_end without changing the operand would land, and WIN19.DAT
+   is where a handler that named the chapter it hands ON to -- the 0x13 of the
+   store -- would land. */
+#define CH19_WIN18_MARKER_OPERAND 1
+#define CH19_WIN18_MARKER_SLOT 4
+#define CH19_WIN18_MARKER_VALUE 118
+#define CH19_DECOY_MARKER_OPERAND 2
+#define CH19_DECOY_MARKER_SLOT 5
+#define CH19_WIN17_DECOY_VALUE 117
+#define CH19_WIN19_DECOY_VALUE 119
+
+#define CH19_FIXTURE_MEMBERS 3
+
+/* The index chapter 19's handler must leave: chapter 20, 0-based, the literal
+   of the store at 0003b13d.
+
+   The run starts from the same 4 the halves above start from, which is none of
+   the numbers a mistake would leave behind: not the stored 19, not the 18 an
+   off-by-one that followed the script name would leave, and not the 5 an
+   increment would leave. */
+#define CH19_CHAPTER_ID_AFTER 19
+
+/* The battle array.  Six records staged, five of them inside the live count. */
+#define CH19_UNIT_CAPACITY 8
+#define CH19_UNIT_COUNT 5
+#define CH19_ROSTER_CAPACITY 4
+
+#define CH19_LAST_ROSTER_UNIT 1
+#define CH19_LAST_ROSTER_CHAR_ID 0x0b
+#define CH19_PAST_BOUND_UNIT 2
+#define CH19_PAST_BOUND_CHAR_ID 0x0c
+#define CH19_HIGH_ID_UNIT 3
+#define CH19_HIGH_ID_CHAR_ID 0x80
+#define CH19_ENEMY_UNIT_SLOT 4
+#define CH19_ENEMY_UNIT_CHAR_ID 0x1e
+#define CH19_BEYOND_COUNT_UNIT 5
+#define CH19_BEYOND_COUNT_CHAR_ID 0x03
+
+/* The roster block: character 0 in slot 0 and character 0x0b in slot 1, the
+   two the writeback has somewhere to bank. */
+#define CH19_LAST_ROSTER_SLOT 1
+#define CH19_ROSTER_MEMBERS 2
+
+/* What every record is staged with: the retired bit 0x01 the duel staging
+   leaves behind, and bit 0x04 beside it so that the handler's whole-byte store
+   can be told apart from an AND-NOT of bit 0, which would leave the 0x04.
+
+   THE SECOND BIT CANNOT BE 0x80.  fdps_icon_script_run opens by calling
+   fdps_units_clear_status_bit7, which masks 0x80 off every record inside
+   data_fdps_map_unit_count (src/icon.c), so a record staged with 0x81 comes
+   back holding 0x01 whether this handler touched it or not and neither the
+   whole-byte case nor the untouched-record cases would mean anything. */
+#define CH19_STAGED_FLAGS 0x05
+
+/* Every record is staged below its maximum in both pools, so the recovery's
+   two word stores are visible, and every one is well above 0 so the revive
+   panel never opens. */
+#define CH19_RANDIS_HP_CURRENT 25
+#define CH19_RANDIS_HP_MAX 40
+#define CH19_RANDIS_MP_CURRENT 2
+#define CH19_RANDIS_MP_MAX 9
+#define CH19_RANDIS_LEVEL 3
+#define CH19_LAST_ROSTER_HP_CURRENT 10
+#define CH19_LAST_ROSTER_HP_MAX 33
+#define CH19_LAST_ROSTER_MP_CURRENT 1
+#define CH19_LAST_ROSTER_MP_MAX 7
+#define CH19_PAST_BOUND_HP_CURRENT 12
+#define CH19_PAST_BOUND_HP_MAX 44
+#define CH19_PAST_BOUND_MP_CURRENT 3
+#define CH19_PAST_BOUND_MP_MAX 8
+#define CH19_HIGH_ID_HP_CURRENT 14
+#define CH19_HIGH_ID_HP_MAX 45
+#define CH19_HIGH_ID_MP_CURRENT 4
+#define CH19_HIGH_ID_MP_MAX 6
+#define CH19_BEYOND_HP_CURRENT 5
+#define CH19_BEYOND_HP_MAX 50
+#define CH19_ENEMY_HP 44
+
+static struct fdps_unit_record ch19_unit_image[CH19_UNIT_CAPACITY];
+static struct fdps_unit_record ch19_roster_image[CH19_ROSTER_CAPACITY];
+static unsigned char ch19_item_image[ITEM_TABLE_ROWS
+                                     * sizeof(struct fdps_item_effect)];
+
+/* WIN18.DAT: retire battle unit 0, write the marker into its
+   status_timers[4], stop.  The retire opcode is what makes a run that
+   interpreted the script BEFORE banking the party visible: the writeback
+   refuses to bank character 0 once he has left the field, so the roster slot
+   would still be filler. */
+static unsigned char fixture_win18_dat[] = {
+    0x0b, RANDIS_UNIT,
+    0x12, RANDIS_UNIT, CH19_WIN18_MARKER_OPERAND, CH19_WIN18_MARKER_VALUE,
+    0x00
+};
+
+/* WIN17.DAT: the decoy one step low.  It retires nobody, so a run that opened
+   it is two failed assertions rather than one. */
+static unsigned char fixture_ch19_win17_dat[] = {
+    0x12, RANDIS_UNIT, CH19_DECOY_MARKER_OPERAND, CH19_WIN17_DECOY_VALUE,
+    0x00
+};
+
+/* WIN19.DAT: the decoy a handler that named the chapter it hands ON to lands
+   on, retiring nobody for the same reason. */
+static unsigned char fixture_ch19_win19_dat[] = {
+    0x12, RANDIS_UNIT, CH19_DECOY_MARKER_OPERAND, CH19_WIN19_DECOY_VALUE,
+    0x00
+};
+
+static char *fixture_ch19_names[CH19_FIXTURE_MEMBERS] = {
+    "WIN17.DAT", "WIN18.DAT", "WIN19.DAT"
+};
+
+static unsigned char *fixture_ch19_bytes[CH19_FIXTURE_MEMBERS] = {
+    fixture_ch19_win17_dat, fixture_win18_dat, fixture_ch19_win19_dat
+};
+
+static int fixture_ch19_lengths[CH19_FIXTURE_MEMBERS] = {
+    sizeof(fixture_ch19_win17_dat), sizeof(fixture_win18_dat),
+    sizeof(fixture_ch19_win19_dat)
+};
+
+/* 0 not attempted, 1 built by this half and usable, 2 unavailable. */
+static int ch19_fixture_state = 0;
+
+/* What one run of the handler left behind. */
+struct ch19_snapshot {
+    unsigned char randis_timers[STATUS_TIMER_COUNT];
+    int randis_flags;
+    int randis_hp_current;
+    int randis_mp_current;
+    int last_roster_flags;
+    int last_roster_hp_current;
+    int last_roster_mp_current;
+    int past_bound_flags;
+    int past_bound_hp_current;
+    int past_bound_mp_current;
+    int high_id_flags;
+    int high_id_hp_current;
+    int high_id_mp_current;
+    int beyond_flags;
+    int beyond_hp_current;
+    int enemy_flags;
+    int enemy_hp_current;
+    int slot_level;
+    int slot_hp_current;
+    int slot_mp_current;
+    int last_slot_flags;
+    int last_slot_hp_current;
+    int chapter_id;
+    int party_gold;
+};
+
+/* 0 not attempted, 1 the run happened and its snapshot is good, 2 the run
+   could not be made and every case that reads it says so. */
+static int ch19_duel_state = 0;
+static int ch19_nolatch_state = 0;
+static struct ch19_snapshot ch19_duel_seen;
+static struct ch19_snapshot ch19_nolatch_seen;
+
+/* Builds the container the two runs share, once, to the layout in
+   resource_info/vfs.md and by the same refusal protocol as the halves above. */
+static int ch19_fixture_available(void)
+{
+    FILE *fp;
+    long member_at;
+    int i;
+
+    if (ch19_fixture_state != 0) {
+        return ch19_fixture_state == 1;
+    }
+    ch19_fixture_state = 2;
+
+    fp = fopen(SCRIPT_ARCHIVE_FILE, "rb");
+    if (fp != NULL) {
+        fclose(fp);
+        return 0;
+    }
+
+    fp = fopen(SCRIPT_ARCHIVE_FILE, "wb");
+    if (fp == NULL) {
+        return 0;
+    }
+
+    fwrite("VFS", 1, 3, fp);
+    write_word(fp, 1);
+    write_word(fp, VFS_HEADER_BYTES);
+    write_dword(fp, (long) CH19_FIXTURE_MEMBERS);
+    fwrite("Dynasty Information Co.,", 1, VFS_SIGNATURE_BYTES, fp);
+
+    member_at = (long) VFS_HEADER_BYTES
+                + (long) CH19_FIXTURE_MEMBERS * VFS_ENTRY_BYTES;
+    for (i = 0; i < CH19_FIXTURE_MEMBERS; i++) {
+        write_name(fp, fixture_ch19_names[i]);
+        write_dword(fp, (long) fixture_ch19_lengths[i]);
+        write_dword(fp, (long) fixture_ch19_lengths[i]);
+        fputc(0, fp);
+        write_dword(fp, member_at);
+        member_at += (long) fixture_ch19_lengths[i];
+    }
+    for (i = 0; i < CH19_FIXTURE_MEMBERS; i++) {
+        fwrite(fixture_ch19_bytes[i], 1, (size_t) fixture_ch19_lengths[i], fp);
+    }
+    fclose(fp);
+
+    ch19_fixture_state = 1;
+    return 1;
+}
+
+/* The battle array, the roster block and the item table as they stand when
+   chapter 19's battle has just been won and the duel has been staged over it.
+   latch says whether the chapter's duel was ever put to the player. */
+static void ch19_stage_globals(int latch)
+{
+    memset(ch19_unit_image, 0, sizeof(ch19_unit_image));
+    memset(ch19_roster_image, ROSTER_FILLER, sizeof(ch19_roster_image));
+    memset(ch19_item_image, 0, sizeof(ch19_item_image));
+
+    ch19_unit_image[RANDIS_UNIT].char_id = RANDIS_CHAR_ID;
+    ch19_unit_image[RANDIS_UNIT].side = PLAYER_SIDE;
+    ch19_unit_image[RANDIS_UNIT].flags = CH19_STAGED_FLAGS;
+    ch19_unit_image[RANDIS_UNIT].level = CH19_RANDIS_LEVEL;
+    ch19_unit_image[RANDIS_UNIT].hp_current = CH19_RANDIS_HP_CURRENT;
+    ch19_unit_image[RANDIS_UNIT].hp_max = CH19_RANDIS_HP_MAX;
+    ch19_unit_image[RANDIS_UNIT].mp_current = CH19_RANDIS_MP_CURRENT;
+    ch19_unit_image[RANDIS_UNIT].mp_max = CH19_RANDIS_MP_MAX;
+
+    ch19_unit_image[CH19_LAST_ROSTER_UNIT].char_id = CH19_LAST_ROSTER_CHAR_ID;
+    ch19_unit_image[CH19_LAST_ROSTER_UNIT].side = PLAYER_SIDE;
+    ch19_unit_image[CH19_LAST_ROSTER_UNIT].flags = CH19_STAGED_FLAGS;
+    ch19_unit_image[CH19_LAST_ROSTER_UNIT].hp_current =
+        CH19_LAST_ROSTER_HP_CURRENT;
+    ch19_unit_image[CH19_LAST_ROSTER_UNIT].hp_max = CH19_LAST_ROSTER_HP_MAX;
+    ch19_unit_image[CH19_LAST_ROSTER_UNIT].mp_current =
+        CH19_LAST_ROSTER_MP_CURRENT;
+    ch19_unit_image[CH19_LAST_ROSTER_UNIT].mp_max = CH19_LAST_ROSTER_MP_MAX;
+
+    ch19_unit_image[CH19_PAST_BOUND_UNIT].char_id = CH19_PAST_BOUND_CHAR_ID;
+    ch19_unit_image[CH19_PAST_BOUND_UNIT].side = PLAYER_SIDE;
+    ch19_unit_image[CH19_PAST_BOUND_UNIT].flags = CH19_STAGED_FLAGS;
+    ch19_unit_image[CH19_PAST_BOUND_UNIT].hp_current =
+        CH19_PAST_BOUND_HP_CURRENT;
+    ch19_unit_image[CH19_PAST_BOUND_UNIT].hp_max = CH19_PAST_BOUND_HP_MAX;
+    ch19_unit_image[CH19_PAST_BOUND_UNIT].mp_current =
+        CH19_PAST_BOUND_MP_CURRENT;
+    ch19_unit_image[CH19_PAST_BOUND_UNIT].mp_max = CH19_PAST_BOUND_MP_MAX;
+
+    ch19_unit_image[CH19_HIGH_ID_UNIT].char_id = CH19_HIGH_ID_CHAR_ID;
+    ch19_unit_image[CH19_HIGH_ID_UNIT].side = PLAYER_SIDE;
+    ch19_unit_image[CH19_HIGH_ID_UNIT].flags = CH19_STAGED_FLAGS;
+    ch19_unit_image[CH19_HIGH_ID_UNIT].hp_current = CH19_HIGH_ID_HP_CURRENT;
+    ch19_unit_image[CH19_HIGH_ID_UNIT].hp_max = CH19_HIGH_ID_HP_MAX;
+    ch19_unit_image[CH19_HIGH_ID_UNIT].mp_current = CH19_HIGH_ID_MP_CURRENT;
+    ch19_unit_image[CH19_HIGH_ID_UNIT].mp_max = CH19_HIGH_ID_MP_MAX;
+
+    ch19_unit_image[CH19_ENEMY_UNIT_SLOT].char_id = CH19_ENEMY_UNIT_CHAR_ID;
+    ch19_unit_image[CH19_ENEMY_UNIT_SLOT].side = ENEMY_SIDE;
+    ch19_unit_image[CH19_ENEMY_UNIT_SLOT].flags = UNIT_FLAG_RETIRED;
+    ch19_unit_image[CH19_ENEMY_UNIT_SLOT].hp_current = CH19_ENEMY_HP;
+    ch19_unit_image[CH19_ENEMY_UNIT_SLOT].hp_max = CH19_ENEMY_HP;
+
+    ch19_unit_image[CH19_BEYOND_COUNT_UNIT].char_id =
+        CH19_BEYOND_COUNT_CHAR_ID;
+    ch19_unit_image[CH19_BEYOND_COUNT_UNIT].side = PLAYER_SIDE;
+    ch19_unit_image[CH19_BEYOND_COUNT_UNIT].flags = CH19_STAGED_FLAGS;
+    ch19_unit_image[CH19_BEYOND_COUNT_UNIT].hp_current =
+        CH19_BEYOND_HP_CURRENT;
+    ch19_unit_image[CH19_BEYOND_COUNT_UNIT].hp_max = CH19_BEYOND_HP_MAX;
+
+    ch19_roster_image[RANDIS_ROSTER_SLOT].char_id = RANDIS_CHAR_ID;
+    ch19_roster_image[CH19_LAST_ROSTER_SLOT].char_id =
+        CH19_LAST_ROSTER_CHAR_ID;
+
+    data_fdps_map_cell_event_triggered_flags[CH19_DUEL_LATCH_SLOT] =
+        (unsigned char) latch;
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch19_unit_image;
+    data_fdps_roster_array_ptr = (unsigned char *) ch19_roster_image;
+    data_fdps_item_effect_table_ptr = ch19_item_image;
+    data_fdps_map_unit_count = CH19_UNIT_COUNT;
+    data_fdps_roster_member_count = CH19_ROSTER_MEMBERS;
+    data_fdps_chapter_current_chapter_id = CHAPTER_ID_BEFORE;
+    data_fdps_shared_party_total_gold = PARTY_GOLD_BEFORE;
+}
+
+static void ch19_capture(struct ch19_snapshot *seen)
+{
+    int i;
+
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        seen->randis_timers[i] = ch19_unit_image[RANDIS_UNIT].status_timers[i];
+    }
+    seen->randis_flags = (int) ch19_unit_image[RANDIS_UNIT].flags;
+    seen->randis_hp_current = (int) ch19_unit_image[RANDIS_UNIT].hp_current;
+    seen->randis_mp_current = (int) ch19_unit_image[RANDIS_UNIT].mp_current;
+    seen->last_roster_flags =
+        (int) ch19_unit_image[CH19_LAST_ROSTER_UNIT].flags;
+    seen->last_roster_hp_current =
+        (int) ch19_unit_image[CH19_LAST_ROSTER_UNIT].hp_current;
+    seen->last_roster_mp_current =
+        (int) ch19_unit_image[CH19_LAST_ROSTER_UNIT].mp_current;
+    seen->past_bound_flags = (int) ch19_unit_image[CH19_PAST_BOUND_UNIT].flags;
+    seen->past_bound_hp_current =
+        (int) ch19_unit_image[CH19_PAST_BOUND_UNIT].hp_current;
+    seen->past_bound_mp_current =
+        (int) ch19_unit_image[CH19_PAST_BOUND_UNIT].mp_current;
+    seen->high_id_flags = (int) ch19_unit_image[CH19_HIGH_ID_UNIT].flags;
+    seen->high_id_hp_current =
+        (int) ch19_unit_image[CH19_HIGH_ID_UNIT].hp_current;
+    seen->high_id_mp_current =
+        (int) ch19_unit_image[CH19_HIGH_ID_UNIT].mp_current;
+    seen->beyond_flags = (int) ch19_unit_image[CH19_BEYOND_COUNT_UNIT].flags;
+    seen->beyond_hp_current =
+        (int) ch19_unit_image[CH19_BEYOND_COUNT_UNIT].hp_current;
+    seen->enemy_flags = (int) ch19_unit_image[CH19_ENEMY_UNIT_SLOT].flags;
+    seen->enemy_hp_current =
+        (int) ch19_unit_image[CH19_ENEMY_UNIT_SLOT].hp_current;
+    seen->slot_level = (int) ch19_roster_image[RANDIS_ROSTER_SLOT].level;
+    seen->slot_hp_current =
+        (int) ch19_roster_image[RANDIS_ROSTER_SLOT].hp_current;
+    seen->slot_mp_current =
+        (int) ch19_roster_image[RANDIS_ROSTER_SLOT].mp_current;
+    seen->last_slot_flags =
+        (int) ch19_roster_image[CH19_LAST_ROSTER_SLOT].flags;
+    seen->last_slot_hp_current =
+        (int) ch19_roster_image[CH19_LAST_ROSTER_SLOT].hp_current;
+    seen->chapter_id = data_fdps_chapter_current_chapter_id;
+    seen->party_gold = data_fdps_shared_party_total_gold;
+}
+
+/* Run A: the duel was put to the player, so the recovery must run. */
+static void ch19_run_duel(void)
+{
+    if (ch19_duel_state != 0) {
+        return;
+    }
+    ch19_duel_state = 2;
+
+    if (!ch19_fixture_available()) {
+        return;
+    }
+
+    ch19_stage_globals(1);
+    fdps_chapter_19_end();
+    ch19_capture(&ch19_duel_seen);
+    ch19_duel_state = 1;
+}
+
+/* Run B: the duel was never offered, so the recovery must be skipped whole. */
+static void ch19_run_no_latch(void)
+{
+    if (ch19_nolatch_state != 0) {
+        return;
+    }
+    ch19_nolatch_state = 2;
+
+    if (!ch19_fixture_available()) {
+        return;
+    }
+
+    ch19_stage_globals(0);
+    fdps_chapter_19_end();
+    ch19_capture(&ch19_nolatch_seen);
+    ch19_nolatch_state = 1;
+}
+
+/* The recovery reaches the last id the test lets through, 0x0b, and it does
+   all three of its stores there: the whole flags byte is gone, hit points are
+   on the maximum and so are magic points.  Expected values are the record's
+   own maxima as staged, which is what MOV DX,[EAX+0x42] / MOV [EAX+0x40],DX
+   and MOV DX,[EAX+0x46] / MOV [EAX+0x44],DX at 0003b10a and 0003b118 copy. */
+static void chapter_19_recovers_the_party_when_the_duel_was_offered(void)
+{
+    ch19_run_duel();
+    CHECK_EQ(ch19_duel_state, 1);
+    CHECK_EQ(ch19_duel_seen.last_roster_flags, 0);
+    CHECK_EQ(ch19_duel_seen.last_roster_hp_current, CH19_LAST_ROSTER_HP_MAX);
+    CHECK_EQ(ch19_duel_seen.last_roster_mp_current, CH19_LAST_ROSTER_MP_MAX);
+}
+
+/* The flags store is a whole byte and not an AND-NOT of the retired bit: the
+   record was staged with 0x05 and the 0x04 has to be gone with the retired
+   one.  MOV byte ptr [EAX+0x5],0x0 at 0003b103. */
+static void chapter_19_recovery_clears_the_whole_flags_byte(void)
+{
+    ch19_run_duel();
+    CHECK_EQ(ch19_duel_state, 1);
+    CHECK_EQ(CH19_STAGED_FLAGS & 0x04, 0x04);
+    CHECK_EQ(ch19_duel_seen.last_roster_flags & 0x04, 0);
+    CHECK_EQ(ch19_duel_seen.last_roster_flags & 0x01, 0);
+}
+
+/* The character-id test stops at 0x0b: the record carrying 0x0c is left
+   exactly as it was staged, flags byte and both pools.  CMP EAX,0xb / JG
+   0003b123. */
+static void chapter_19_recovery_stops_after_character_id_eleven(void)
+{
+    ch19_run_duel();
+    CHECK_EQ(ch19_duel_state, 1);
+    CHECK_EQ(ch19_duel_seen.past_bound_flags, CH19_STAGED_FLAGS);
+    CHECK_EQ(ch19_duel_seen.past_bound_hp_current, CH19_PAST_BOUND_HP_CURRENT);
+    CHECK_EQ(ch19_duel_seen.past_bound_mp_current, CH19_PAST_BOUND_MP_CURRENT);
+}
+
+/* The character id is read UNSIGNED.  0x80 is 128 and fails the test; a signed
+   char would make it -128 and pass, healing the record.  AND EAX,0xff at
+   0003b0f6, and char_id declared unsigned char in src/fdpstype.h. */
+static void chapter_19_recovery_reads_the_character_id_unsigned(void)
+{
+    ch19_run_duel();
+    CHECK_EQ(ch19_duel_state, 1);
+    CHECK_EQ(ch19_duel_seen.high_id_flags, CH19_STAGED_FLAGS);
+    CHECK_EQ(ch19_duel_seen.high_id_hp_current, CH19_HIGH_ID_HP_CURRENT);
+    CHECK_EQ(ch19_duel_seen.high_id_mp_current, CH19_HIGH_ID_MP_CURRENT);
+}
+
+/* The sweep's bound is data_fdps_map_unit_count and not a literal: the sixth
+   record carries character id 3, which the test would let through, and sits
+   one past the count, so it must come out untouched.  CMP EAX,[0x00060150] /
+   JL at 0003b0cf. */
+static void chapter_19_recovery_walks_the_live_unit_count(void)
+{
+    ch19_run_duel();
+    CHECK_EQ(ch19_duel_state, 1);
+    CHECK_EQ(CH19_BEYOND_COUNT_UNIT >= CH19_UNIT_COUNT, 1);
+    CHECK_EQ(ch19_duel_seen.beyond_flags, CH19_STAGED_FLAGS);
+    CHECK_EQ(ch19_duel_seen.beyond_hp_current, CH19_BEYOND_HP_CURRENT);
+}
+
+/* The map is never swept.  There is no CALL 0x00039e10 in the body, so the
+   enemy staged with hit points left keeps every one of them -- the one thing
+   that separates this handler from chapters 16, 17 and 18. */
+static void chapter_19_does_not_sweep_the_enemy_side(void)
+{
+    ch19_run_duel();
+    CHECK_EQ(ch19_duel_state, 1);
+    CHECK_EQ(ch19_duel_seen.enemy_hp_current, CH19_ENEMY_HP);
+    CHECK_EQ(ch19_duel_seen.enemy_flags, UNIT_FLAG_RETIRED);
+}
+
+/* The recovery runs BEFORE the writeback.  The roster copy of character 0x0b
+   comes out un-retired and on its maximum; had the writeback gone first it
+   would have seen the retired bit, kept it and left the below-maximum hit
+   points beside it -- which is exactly what run B below shows. */
+static void chapter_19_recovers_the_party_before_banking_it(void)
+{
+    ch19_run_duel();
+    CHECK_EQ(ch19_duel_state, 1);
+    CHECK_EQ(ch19_duel_seen.last_slot_flags, 0);
+    CHECK_EQ(ch19_duel_seen.last_slot_hp_current, CH19_LAST_ROSTER_HP_MAX);
+}
+
+/* The party is banked BEFORE the cut-scene is interpreted.  WIN18.DAT's first
+   opcode retires battle unit 0, and the writeback refuses to bank character 0
+   once he has left the field, so a run that interpreted the script first would
+   leave roster slot 0 at its 0xa5 filler instead of carrying the record.  The
+   level the slot ends up holding is the battle record's, and the marker in the
+   LIVE record's status_timers[4] -- which the writeback's memset clears on the
+   roster copy but cannot reach on the battle record -- says the script ran. */
+static void chapter_19_banks_the_party_before_the_cutscene_runs(void)
+{
+    ch19_run_duel();
+    CHECK_EQ(ch19_duel_state, 1);
+    CHECK_EQ(ch19_duel_seen.slot_level, CH19_RANDIS_LEVEL);
+    CHECK_EQ(ch19_duel_seen.slot_hp_current, CH19_RANDIS_HP_MAX);
+    CHECK_EQ(ch19_duel_seen.slot_mp_current, CH19_RANDIS_MP_MAX);
+    CHECK_EQ(ch19_duel_seen.randis_flags, UNIT_FLAG_RETIRED);
+}
+
+/* The member opened is WIN18.DAT, the chapter just won, and neither of the two
+   decoys either side of it in the image.  MOV EAX,0x62194 at 0003b12a. */
+static void chapter_19_victory_cutscene_is_win18_dat(void)
+{
+    ch19_run_duel();
+    CHECK_EQ(ch19_duel_state, 1);
+    CHECK_EQ(ch19_duel_seen.randis_timers[CH19_WIN18_MARKER_SLOT],
+             CH19_WIN18_MARKER_VALUE);
+    CHECK_EQ(ch19_duel_seen.randis_timers[CH19_DECOY_MARKER_SLOT], 0);
+}
+
+/* The revive sweep charges nothing, because the recovery and the writeback
+   between them have left no roster member at 0 hit points for it to find. */
+static void chapter_19_revive_charges_nothing_when_nobody_fell(void)
+{
+    ch19_run_duel();
+    CHECK_EQ(ch19_duel_state, 1);
+    CHECK_EQ(ch19_duel_seen.party_gold, PARTY_GOLD_BEFORE);
+}
+
+/* The chapter index is advanced to 19, chapter 20, and not to the 18 the
+   script name carries.  MOV dword ptr [0x00069cf4],0x13 at 0003b13d. */
+static void chapter_19_advances_the_chapter_index_to_chapter_twenty(void)
+{
+    ch19_run_duel();
+    CHECK_EQ(ch19_duel_state, 1);
+    CHECK_EQ(ch19_duel_seen.chapter_id, CH19_CHAPTER_ID_AFTER);
+}
+
+/* Run B.  With the latch down the whole recovery is jumped over: the record
+   carrying character 0x0b keeps the flags byte and both below-maximum pools it
+   was staged with.  CMP byte ptr [0x000640e9],0x0 / JZ 0003b125 at 0003b0bc. */
+static void chapter_19_recovers_nobody_without_the_duel_latch(void)
+{
+    ch19_run_no_latch();
+    CHECK_EQ(ch19_nolatch_state, 1);
+    CHECK_EQ(ch19_nolatch_seen.last_roster_flags, CH19_STAGED_FLAGS);
+    CHECK_EQ(ch19_nolatch_seen.last_roster_hp_current,
+             CH19_LAST_ROSTER_HP_CURRENT);
+    CHECK_EQ(ch19_nolatch_seen.last_roster_mp_current,
+             CH19_LAST_ROSTER_MP_CURRENT);
+}
+
+/* And the writeback then does what it does with a retired record: it keeps the
+   masked bit and does NOT lift hit points to the maximum, which is why the
+   recovery has to run in front of it rather than behind it. */
+static void chapter_19_banks_a_retired_party_without_the_latch(void)
+{
+    ch19_run_no_latch();
+    CHECK_EQ(ch19_nolatch_state, 1);
+    CHECK_EQ(ch19_nolatch_seen.last_slot_flags, UNIT_FLAG_RETIRED);
+    CHECK_EQ(ch19_nolatch_seen.last_slot_hp_current,
+             CH19_LAST_ROSTER_HP_CURRENT);
+}
+
+/* The three unconditional steps run either way: the same cut-scene is opened
+   and the same chapter index is left behind. */
+static void chapter_19_still_closes_the_chapter_without_the_latch(void)
+{
+    ch19_run_no_latch();
+    CHECK_EQ(ch19_nolatch_state, 1);
+    CHECK_EQ(ch19_nolatch_seen.randis_timers[CH19_WIN18_MARKER_SLOT],
+             CH19_WIN18_MARKER_VALUE);
+    CHECK_EQ(ch19_nolatch_seen.randis_timers[CH19_DECOY_MARKER_SLOT], 0);
+    CHECK_EQ(ch19_nolatch_seen.chapter_id, CH19_CHAPTER_ID_AFTER);
+    CHECK_EQ(ch19_nolatch_seen.party_gold, PARTY_GOLD_BEFORE);
+}
+
+/* The shared fixture container goes again, so that nothing this file wrote
+   outlives its run and the next file that wants that name finds it free. */
+static void the_ch19_fixture_container_is_removed(void)
+{
+    if (ch19_fixture_state != 1) {
+        return;
+    }
+
+    remove(SCRIPT_ARCHIVE_FILE);
+    ch19_fixture_state = 0;
+    CHECK_EQ(file_present(SCRIPT_ARCHIVE_FILE), 0);
+}
+
 void run_chend2_tests(void)
 {
     RUN_TEST(chapter_16_sweeps_the_enemy_side);
@@ -1643,4 +2266,19 @@ void run_chend2_tests(void)
     RUN_TEST(chapter_18_grants_nothing_without_the_seal);
     RUN_TEST(chapter_18_ordinary_cutscene_runs_without_the_seal);
     RUN_TEST(the_ch18_fixture_container_is_removed);
+    RUN_TEST(chapter_19_recovers_the_party_when_the_duel_was_offered);
+    RUN_TEST(chapter_19_recovery_clears_the_whole_flags_byte);
+    RUN_TEST(chapter_19_recovery_stops_after_character_id_eleven);
+    RUN_TEST(chapter_19_recovery_reads_the_character_id_unsigned);
+    RUN_TEST(chapter_19_recovery_walks_the_live_unit_count);
+    RUN_TEST(chapter_19_does_not_sweep_the_enemy_side);
+    RUN_TEST(chapter_19_recovers_the_party_before_banking_it);
+    RUN_TEST(chapter_19_banks_the_party_before_the_cutscene_runs);
+    RUN_TEST(chapter_19_victory_cutscene_is_win18_dat);
+    RUN_TEST(chapter_19_revive_charges_nothing_when_nobody_fell);
+    RUN_TEST(chapter_19_advances_the_chapter_index_to_chapter_twenty);
+    RUN_TEST(chapter_19_recovers_nobody_without_the_duel_latch);
+    RUN_TEST(chapter_19_banks_a_retired_party_without_the_latch);
+    RUN_TEST(chapter_19_still_closes_the_chapter_without_the_latch);
+    RUN_TEST(the_ch19_fixture_container_is_removed);
 }

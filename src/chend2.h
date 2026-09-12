@@ -99,4 +99,32 @@ extern void fdps_chapter_17_end(void);
 extern void fdps_chapter_18_end(void);
 #pragma aux fdps_chapter_18_end "*" parm caller [];
 
+/* Chapter 19's end handler: closes chapter 19, 蛇口之道, out and hands the game
+   to chapter 20.  Takes nothing and returns nothing.
+
+   THE CHAPTER'S DUEL IS UNDONE HERE, and that is what makes this one
+   different.  If 裘娜's duel was PUT to the player -- whether it was accepted
+   or refused -- every battle unit carrying one of the twelve permanent roster
+   character ids has its flags byte cleared and its hit points and magic points
+   put back on their maxima, which takes the retired marks the duel staging
+   stamped on the field off again and revives, free, anyone who genuinely fell
+   during the chapter.  Nothing about that gate records which answer was given,
+   so refusing the duel buys the same free recovery: see the note in chend2.c.
+   The recovery runs BEFORE the party is banked, because the writeback reads
+   the same flags byte to decide whether to heal.
+
+   The rest is the family's, less one step: the battle party is banked onto the
+   persistent roster; the victory cut-scene Win18.dat is interpreted; every
+   party member still at 0 hit points is revived and billed for it; and the
+   chapter index is advanced to 19, chapter 20.
+
+   THE MAP IS NEVER SWEPT.  Unlike chapters 16 to 18 this handler does not call
+   fdps_battle_destroy_remaining_enemies at all, so an enemy still standing
+   when the chapter ends is still standing when the cut-scene plays -- chapters
+   1, 2, 15 and 19 are the only handlers that leave that step out.
+
+   Table slot 18. */
+extern void fdps_chapter_19_end(void);
+#pragma aux fdps_chapter_19_end "*" parm caller [];
+
 #endif
