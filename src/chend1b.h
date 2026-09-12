@@ -89,4 +89,40 @@ extern void fdps_chapter_13_end(void);
 extern void fdps_chapter_14_end(void);
 #pragma aux fdps_chapter_14_end "*" parm caller [];
 
+/* Chapter 15's end handler: closes chapter 15, 要塞砲危機, out and hands the
+   game to chapter 16, 羅特帝亞突入.  Takes nothing and returns nothing.
+
+   It is the one handler of this family that does NOT sweep the enemy side
+   first, and the one that has a branch in it at all.
+
+   In order: if chapter 15's duel was fought, the units the duel took off the
+   map are put back on it -- battle records 0..8 have their flags byte set to
+   0, and record 0x34 has its behaviour byte set to 0 while its flags byte is
+   left alone; then the battle party is banked onto the persistent roster; the
+   victory cut-scene Win14.dat is interpreted; every party member who fell is
+   revived and billed for it; and the chapter index is advanced to 15,
+   chapter 16.
+
+   THE DUEL BLOCK IS GATED, and the gate is element 0x10 of
+   data_fdps_map_cell_event_triggered_flags (gamedata.h), which
+   fdps_chapter_15_event_boss_defeat (chevt3.h) raises only when the player
+   accepted the duel.  A chapter won without the duel skips the block entirely
+   and nothing is un-retired.
+
+   THE BLOCK IS NOT THE DUEL EVENT'S MIRROR IMAGE.  The duel retired records
+   0..8 except 4, and record 0x34, by writing 1 into byte +5 of each.  This
+   handler clears byte +5 of 0..8 INCLUDING 4, and for record 0x34 it clears
+   byte +0x34 -- the behaviour byte -- and not byte +5, so unit 0x34 is still
+   retired when the writeback that follows decides which records to bank.
+
+   Why there is no sweep: chapter 15 reaches victory through
+   fdps_chapter_15_event_boss_defeat, whose first act is
+   fdps_battle_destroy_remaining_enemies -- the map is already cleared before
+   the duel can even be offered, so the sweep every other handler of the family
+   opens with would have nothing left to do here.
+
+   Table slot 14. */
+extern void fdps_chapter_15_end(void);
+#pragma aux fdps_chapter_15_end "*" parm caller [];
+
 #endif

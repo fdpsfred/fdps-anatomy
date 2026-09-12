@@ -1293,6 +1293,694 @@ static void the_ch14_fixture_container_is_removed(void)
     CHECK_EQ(file_present(SCRIPT_ARCHIVE_FILE), 0);
 }
 
+/* ------------------------------------------------------------------------
+ * fdps_chapter_15_end at 0003ac20.
+ *
+ * The odd one out of the family twice over, and both halves are what these
+ * cases are about:
+ *
+ *   0003ac2c  CMP byte ptr [0x000640e8],0x0 / JZ 0x0003ac78
+ *             the whole un-retire block is gated on the duel latch
+ *   0003ac3c  the loop over unit indices 0..8, MOV byte ptr [EAX+0x5],0x0
+ *   0003ac64  PUSH 0x34 / ... / MOV byte ptr [EAX+0x34],0x0
+ *   0003ac78  CALL 0x00023980          the battle party is banked
+ *   0003ac7d  MOV EAX,0x62158 / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4
+ *             the cut-scene "Win14.dat" is interpreted
+ *   0003ac8b  CALL 0x00039e70          the fallen are revived
+ *   0003ac90  MOV dword ptr [0x00069cf4],0xf
+ *
+ * THERE IS NO SWEEP.  Every other handler in this file opens with CALL
+ * 0x00039e10; this one does not, because chapter 15 reaches victory through
+ * fdps_chapter_15_event_boss_defeat, which swept the map itself before the
+ * duel was offered.  The staged enemy therefore keeps its hit points, and a
+ * handler that had the family's usual first call copied into it would zero
+ * them.
+ *
+ * TWO RUNS, ONE PER SIDE OF THE GATE.  The first stages the latch raised, the
+ * way an accepted duel leaves it, and the second stages it clear, the way a
+ * chapter 15 won without a duel leaves it.  Everything else about the two
+ * runs is identical, so every difference between the two snapshots is the
+ * branch.
+ *
+ * THE UN-RETIRE IS WITNESSED THROUGH THE WRITEBACK, not just by reading the
+ * flags bytes back.  The writeback skips a unit whose character id is 0 and
+ * which has left the field -- both halves, and unit 0 here is character 0
+ * (roster.h) -- so in the latched run the roster slot carries the battle
+ * record and in the unlatched run it is still the 0xa5 filler.  That is the
+ * order pinned down as well as the branch: un-retire first, bank second.
+ *
+ * THE RECORD-0x34 ASYMMETRY IS ITS OWN CASE.  The duel event retires records
+ * 0..8 except 4, and record 0x34, by writing 1 into byte +5.  This handler
+ * clears byte +5 of 0..8 INCLUDING 4, and for record 0x34 clears byte +0x34,
+ * the behaviour byte, leaving its flags byte alone.  Both records are staged
+ * retired with a non-zero behaviour byte, so writing the duel event's mirror
+ * image instead fails on both sides at once.
+ *
+ * WHY THE UNIT ARRAY IS ITS OWN AND MUCH LARGER.  The handler indexes record
+ * 0x34 unconditionally and fdps_get_unit_record bounds nothing, so the array
+ * under it has to be long enough to hold that record and the neighbours the
+ * cases below check were not touched.  data_fdps_map_unit_count stays at 2,
+ * because it is only the writeback that reads it and two records are all the
+ * writeback needs to see.
+ *
+ * Everything else -- why nobody may be left at 0 HP, why the cut-scene is a
+ * fixture rather than the shipped WIN14.DAT, the container refusal protocol --
+ * is the reasoning at the top of this file, unchanged.
+ * ------------------------------------------------------------------------ */
+
+/* WIN14.DAT, the member chapter 15's handler names: operand 1, so
+   status_timers[4], with a value no other fixture in this file writes. */
+#define WIN14_CH15_MARKER_OPERAND 1
+#define WIN14_CH15_MARKER_SLOT 4
+#define WIN14_CH15_MARKER_VALUE 83
+
+/* WIN13.DAT, the member a handler that followed its own script number one step
+   low would open, in a slot and with a value of its own. */
+#define WIN13_CH15_MARKER_OPERAND 0
+#define WIN13_CH15_MARKER_SLOT 3
+#define WIN13_CH15_MARKER_VALUE 89
+
+/* WIN15.DAT, the member a handler that named the chapter it hands ON to rather
+   than the one just won would open -- the exact slip the store's 15 invites --
+   in a third slot with a third value. */
+#define WIN15_CH15_MARKER_OPERAND 2
+#define WIN15_CH15_MARKER_SLOT 5
+#define WIN15_CH15_MARKER_VALUE 97
+
+/* The index chapter 15's handler must leave: chapter 16, 0-based, the literal
+   of the store at 0003ac90.
+
+   Both runs start from the same 4 the halves above use, which is none of the
+   numbers a mistake would leave behind: not the stored 15, not the 14 an
+   off-by-one that followed the script name would leave, and not the 5 an
+   increment would leave. */
+#define CH15_CHAPTER_ID_AFTER 15
+
+/* How long the unit array under this half is.  0x36 records: 0x34 is the one
+   the handler reaches outside the loop, and 0x33 and 0x35 sit either side of
+   it so that a store that landed on the wrong record is visible. */
+#define CH15_UNIT_CAPACITY 0x36
+
+/* The loop's bound, CMP dword ptr [EBP-0x8],0x9 / JL at 0003ac3c: records 0
+   through 8 are cleared and record 9 is the first that is not. */
+#define CH15_BLOCK_UNIT_COUNT 9
+
+/* The record the handler reaches outside the loop, PUSH 0x34 at 0003ac64, and
+   its two neighbours, which nothing in the handler may touch. */
+#define CH15_ARCHER_UNIT 0x34
+#define CH15_ARCHER_UNIT_BEFORE 0x33
+#define CH15_ARCHER_UNIT_AFTER 0x35
+
+/* The flags byte at record +5 as the staging leaves it: the retired bit 0x01,
+   the has-acted bit 0x80 that the source comment on CH15_UNIT_FLAGS_CLEARED
+   names, and bit 1 between them.  All three matter.  The handler's store is
+   MOV byte ptr [EAX+0x5],0x0 at 0003ac5e -- a whole byte -- and staging the
+   retired bit alone would let an `and-not the retired bit` implementation read
+   back 0 as well, which is exactly the spelling that comment warns against.
+   0x80 witnesses the comment's own claim that the has-acted bit goes with the
+   rest; bit 1 is there because 0x80 does not survive on every record for a
+   reason that is nothing to do with this handler -- see below. */
+#define CH15_FLAGS_STAGED 0x83
+
+/* What a staged flags byte reads back as on a record the handler did NOT
+   write.  fdps_icon_script_run opens with fdps_units_clear_status_bit7
+   (src/unit.c), which takes bit 0x80 off every record below
+   data_fdps_map_unit_count, and this fixture's count is UNIT_COUNT.  So
+   records 0 and 1 lose the has-acted bit to the script runner whatever this
+   handler does, and records 2 upward keep the whole staged byte.  Bit 1 is the
+   bit that stands on both sides of that line. */
+#define CH15_FLAGS_STAGED_AFTER_SCRIPT 0x03
+
+/* The behaviour byte at record +0x34 as the staging leaves it.  Record 0x34's
+   is the one and only byte of its kind the handler writes; every other
+   record's has to read back unchanged.
+
+   The high nibble is non-zero for the same reason the flags byte carries a
+   second bit: the handler's store is MOV byte ptr [EAX+0x34],0x0 at 0003ac74,
+   a whole byte, while the sibling merge in fdps_chapter_15_event_boss_defeat
+   (src/chevt3.c, MOV DL,[EAX+0x34] / AND DL,0xf0 / OR / store at
+   00037b50..00037b5e) preserves the two AI flag bits up there.  Staging a
+   low-nibble-only value would let that nibble-preserving spelling read back 0
+   too; 0x57 makes the two forms differ. */
+#define CH15_BEHAVIOR_STAGED 0x57
+
+/* The element of data_fdps_map_cell_event_triggered_flags the gate reads,
+   byte ptr [0x000640e8] against the array based at 0x000640d8. */
+#define CH15_LATCH_SLOT 0x10
+
+/* WIN14.DAT: retire battle unit 0, write the marker into its
+   status_timers[4], stop -- the same two opcodes the earlier fixtures use. */
+static unsigned char fixture_ch15_win14_dat[] = {
+    0x0b, RANDIS_UNIT,
+    0x12, RANDIS_UNIT, WIN14_CH15_MARKER_OPERAND, WIN14_CH15_MARKER_VALUE,
+    0x00
+};
+
+/* WIN13.DAT: the decoy one step low.  It retires nobody. */
+static unsigned char fixture_ch15_win13_dat[] = {
+    0x12, RANDIS_UNIT, WIN13_CH15_MARKER_OPERAND, WIN13_CH15_MARKER_VALUE,
+    0x00
+};
+
+/* WIN15.DAT: the decoy one step high, retiring nobody for the same reason. */
+static unsigned char fixture_ch15_win15_dat[] = {
+    0x12, RANDIS_UNIT, WIN15_CH15_MARKER_OPERAND, WIN15_CH15_MARKER_VALUE,
+    0x00
+};
+
+static char *fixture_ch15_names[FIXTURE_MEMBERS] = {
+    "WIN13.DAT", "WIN14.DAT", "WIN15.DAT"
+};
+
+static unsigned char *fixture_ch15_bytes[FIXTURE_MEMBERS] = {
+    fixture_ch15_win13_dat, fixture_ch15_win14_dat, fixture_ch15_win15_dat
+};
+
+static int fixture_ch15_lengths[FIXTURE_MEMBERS] = {
+    sizeof(fixture_ch15_win13_dat), sizeof(fixture_ch15_win14_dat),
+    sizeof(fixture_ch15_win15_dat)
+};
+
+/* The battle array this half runs against, long enough to hold record 0x34. */
+static struct fdps_unit_record ch15_unit_image[CH15_UNIT_CAPACITY];
+
+/* Whether this half created the container.  Both of its runs share one
+   container, so the staging answers yes to the second run without writing the
+   file again, and one case at the end takes it away. */
+static int ch15_fixture_owned = 0;
+
+/* 0 not attempted, 1 the run happened and the snapshot is good, 2 unavailable
+   and every case of that run says so.  One per side of the gate. */
+static int ch15_duel_run_state = 0;
+static int ch15_noduel_run_state = 0;
+
+/* What the latched run left behind. */
+static unsigned char ch15_duel_seen_block_flags[CH15_BLOCK_UNIT_COUNT];
+static unsigned char ch15_duel_seen_block_behavior[CH15_BLOCK_UNIT_COUNT];
+static unsigned char ch15_duel_seen_unit_spells[SPELL_BITMAP_BYTES];
+static unsigned char ch15_duel_seen_unit_timers[STATUS_TIMER_COUNT];
+static unsigned char ch15_duel_seen_slot_spells[SPELL_BITMAP_BYTES];
+static unsigned char ch15_duel_seen_slot_timers[STATUS_TIMER_COUNT];
+static int ch15_duel_seen_unit9_flags;
+static int ch15_duel_seen_unit9_behavior;
+static int ch15_duel_seen_archer_flags;
+static int ch15_duel_seen_archer_behavior;
+static int ch15_duel_seen_before_flags;
+static int ch15_duel_seen_before_behavior;
+static int ch15_duel_seen_after_flags;
+static int ch15_duel_seen_after_behavior;
+static int ch15_duel_seen_unit_flags;
+static int ch15_duel_seen_enemy_hp_current;
+static int ch15_duel_seen_enemy_hp_max;
+static int ch15_duel_seen_slot_char_id;
+static int ch15_duel_seen_slot_flags;
+static int ch15_duel_seen_slot_level;
+static int ch15_duel_seen_slot_hp_current;
+static int ch15_duel_seen_slot_hp_max;
+static int ch15_duel_seen_slot_mp_current;
+static int ch15_duel_seen_chapter_id;
+static int ch15_duel_seen_party_gold;
+
+/* What the unlatched run left behind. */
+static unsigned char ch15_noduel_seen_block_flags[CH15_BLOCK_UNIT_COUNT];
+static unsigned char ch15_noduel_seen_unit_timers[STATUS_TIMER_COUNT];
+static int ch15_noduel_seen_archer_flags;
+static int ch15_noduel_seen_archer_behavior;
+static int ch15_noduel_seen_enemy_hp_current;
+static int ch15_noduel_seen_slot_level;
+static int ch15_noduel_seen_slot_timer;
+static int ch15_noduel_seen_chapter_id;
+static int ch15_noduel_seen_party_gold;
+
+/* Builds chapter 15's fixture container once, or answers no, to the layout in
+   resource_info/vfs.md and by the same refusal protocol as the halves above:
+   a container already standing belongs to somebody else and is left alone. */
+static int stage_ch15_fixture_archive(void)
+{
+    FILE *fp;
+    long member_at;
+    int i;
+
+    if (ch15_fixture_owned) {
+        return 1;
+    }
+
+    fp = fopen(SCRIPT_ARCHIVE_FILE, "rb");
+    if (fp != NULL) {
+        fclose(fp);
+        return 0;
+    }
+
+    fp = fopen(SCRIPT_ARCHIVE_FILE, "wb");
+    if (fp == NULL) {
+        return 0;
+    }
+
+    fwrite("VFS", 1, 3, fp);
+    write_word(fp, 1);
+    write_word(fp, VFS_HEADER_BYTES);
+    write_dword(fp, (long) FIXTURE_MEMBERS);
+    fwrite("Dynasty Information Co.,", 1, VFS_SIGNATURE_BYTES, fp);
+
+    member_at = (long) VFS_HEADER_BYTES
+                + (long) FIXTURE_MEMBERS * VFS_ENTRY_BYTES;
+    for (i = 0; i < FIXTURE_MEMBERS; i++) {
+        write_name(fp, fixture_ch15_names[i]);
+        write_dword(fp, (long) fixture_ch15_lengths[i]);
+        write_dword(fp, (long) fixture_ch15_lengths[i]);
+        fputc(0, fp);
+        write_dword(fp, member_at);
+        member_at += (long) fixture_ch15_lengths[i];
+    }
+    for (i = 0; i < FIXTURE_MEMBERS; i++) {
+        fwrite(fixture_ch15_bytes[i], 1, (size_t) fixture_ch15_lengths[i], fp);
+    }
+    fclose(fp);
+
+    ch15_fixture_owned = 1;
+    return 1;
+}
+
+/* The map and the roster as they stand when chapter 15's battle is over and
+   the duel, if there was one, has just been fought: records 0..8 and record
+   0x34 retired the way fdps_chapter_15_event_boss_defeat leaves them, every
+   record carrying a non-zero behaviour byte, one roster slot holding the party
+   member's character id and filler everywhere else.  duel_fought raises or
+   clears the latch the handler branches on.
+
+   Both of the bytes the handler writes are staged with a second bit set
+   outside the one an obvious partial-update spelling would touch (see
+   CH15_FLAGS_STAGED and CH15_BEHAVIOR_STAGED), so that every CHECK_EQ of 0
+   below is a statement about the whole byte and not about one bit of it. */
+static void stage_ch15_globals(int duel_fought)
+{
+    int i;
+
+    memset(ch15_unit_image, 0, sizeof(ch15_unit_image));
+    memset(roster_image, ROSTER_FILLER, sizeof(roster_image));
+    memset(item_image, 0, sizeof(item_image));
+
+    for (i = 0; i < CH15_UNIT_CAPACITY; i++) {
+        ch15_unit_image[i].flags = CH15_FLAGS_STAGED;
+        ch15_unit_image[i].ai_behavior = CH15_BEHAVIOR_STAGED;
+    }
+
+    ch15_unit_image[RANDIS_UNIT].char_id = RANDIS_CHAR_ID;
+    ch15_unit_image[RANDIS_UNIT].side = PLAYER_SIDE;
+    ch15_unit_image[RANDIS_UNIT].level = RANDIS_LEVEL;
+    ch15_unit_image[RANDIS_UNIT].clazz = RANDIS_CLASS;
+    ch15_unit_image[RANDIS_UNIT].hp_current = RANDIS_HP_CURRENT;
+    ch15_unit_image[RANDIS_UNIT].hp_max = RANDIS_HP_MAX;
+    ch15_unit_image[RANDIS_UNIT].mp_current = RANDIS_MP_CURRENT;
+    ch15_unit_image[RANDIS_UNIT].mp_max = RANDIS_MP_MAX;
+
+    ch15_unit_image[ENEMY_UNIT].char_id = ENEMY_CHAR_ID;
+    ch15_unit_image[ENEMY_UNIT].side = ENEMY_SIDE;
+    ch15_unit_image[ENEMY_UNIT].hp_current = ENEMY_HP_CURRENT;
+    ch15_unit_image[ENEMY_UNIT].hp_max = ENEMY_HP_MAX;
+
+    roster_image[RANDIS_ROSTER_SLOT].char_id = RANDIS_CHAR_ID;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch15_unit_image;
+    data_fdps_roster_array_ptr = (unsigned char *) roster_image;
+    data_fdps_item_effect_table_ptr = item_image;
+    data_fdps_map_unit_count = UNIT_COUNT;
+    data_fdps_roster_member_count = 1;
+    data_fdps_chapter_current_chapter_id = CHAPTER_ID_BEFORE;
+    data_fdps_shared_party_total_gold = PARTY_GOLD_BEFORE;
+    data_fdps_map_cell_event_triggered_flags[CH15_LATCH_SLOT] =
+        (unsigned char) (duel_fought ? 1 : 0);
+}
+
+static void ch15_duel_capture(void)
+{
+    int i;
+
+    for (i = 0; i < CH15_BLOCK_UNIT_COUNT; i++) {
+        ch15_duel_seen_block_flags[i] = ch15_unit_image[i].flags;
+        ch15_duel_seen_block_behavior[i] = ch15_unit_image[i].ai_behavior;
+    }
+    for (i = 0; i < SPELL_BITMAP_BYTES; i++) {
+        ch15_duel_seen_unit_spells[i] =
+            ch15_unit_image[RANDIS_UNIT].spells_known_bitmap[i];
+        ch15_duel_seen_slot_spells[i] =
+            roster_image[RANDIS_ROSTER_SLOT].spells_known_bitmap[i];
+    }
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        ch15_duel_seen_unit_timers[i] =
+            ch15_unit_image[RANDIS_UNIT].status_timers[i];
+        ch15_duel_seen_slot_timers[i] =
+            roster_image[RANDIS_ROSTER_SLOT].status_timers[i];
+    }
+    ch15_duel_seen_unit9_flags =
+        (int) ch15_unit_image[CH15_BLOCK_UNIT_COUNT].flags;
+    ch15_duel_seen_unit9_behavior =
+        (int) ch15_unit_image[CH15_BLOCK_UNIT_COUNT].ai_behavior;
+    ch15_duel_seen_archer_flags = (int) ch15_unit_image[CH15_ARCHER_UNIT].flags;
+    ch15_duel_seen_archer_behavior =
+        (int) ch15_unit_image[CH15_ARCHER_UNIT].ai_behavior;
+    ch15_duel_seen_before_flags =
+        (int) ch15_unit_image[CH15_ARCHER_UNIT_BEFORE].flags;
+    ch15_duel_seen_before_behavior =
+        (int) ch15_unit_image[CH15_ARCHER_UNIT_BEFORE].ai_behavior;
+    ch15_duel_seen_after_flags =
+        (int) ch15_unit_image[CH15_ARCHER_UNIT_AFTER].flags;
+    ch15_duel_seen_after_behavior =
+        (int) ch15_unit_image[CH15_ARCHER_UNIT_AFTER].ai_behavior;
+    ch15_duel_seen_unit_flags = (int) ch15_unit_image[RANDIS_UNIT].flags;
+    ch15_duel_seen_enemy_hp_current =
+        (int) ch15_unit_image[ENEMY_UNIT].hp_current;
+    ch15_duel_seen_enemy_hp_max = (int) ch15_unit_image[ENEMY_UNIT].hp_max;
+    ch15_duel_seen_slot_char_id =
+        (int) roster_image[RANDIS_ROSTER_SLOT].char_id;
+    ch15_duel_seen_slot_flags = (int) roster_image[RANDIS_ROSTER_SLOT].flags;
+    ch15_duel_seen_slot_level = (int) roster_image[RANDIS_ROSTER_SLOT].level;
+    ch15_duel_seen_slot_hp_current =
+        (int) roster_image[RANDIS_ROSTER_SLOT].hp_current;
+    ch15_duel_seen_slot_hp_max =
+        (int) roster_image[RANDIS_ROSTER_SLOT].hp_max;
+    ch15_duel_seen_slot_mp_current =
+        (int) roster_image[RANDIS_ROSTER_SLOT].mp_current;
+    ch15_duel_seen_chapter_id = data_fdps_chapter_current_chapter_id;
+    ch15_duel_seen_party_gold = data_fdps_shared_party_total_gold;
+}
+
+static void ch15_noduel_capture(void)
+{
+    int i;
+
+    for (i = 0; i < CH15_BLOCK_UNIT_COUNT; i++) {
+        ch15_noduel_seen_block_flags[i] = ch15_unit_image[i].flags;
+    }
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        ch15_noduel_seen_unit_timers[i] =
+            ch15_unit_image[RANDIS_UNIT].status_timers[i];
+    }
+    ch15_noduel_seen_archer_flags =
+        (int) ch15_unit_image[CH15_ARCHER_UNIT].flags;
+    ch15_noduel_seen_archer_behavior =
+        (int) ch15_unit_image[CH15_ARCHER_UNIT].ai_behavior;
+    ch15_noduel_seen_enemy_hp_current =
+        (int) ch15_unit_image[ENEMY_UNIT].hp_current;
+    ch15_noduel_seen_slot_level = (int) roster_image[RANDIS_ROSTER_SLOT].level;
+    ch15_noduel_seen_slot_timer =
+        (int) roster_image[RANDIS_ROSTER_SLOT].status_timers[0];
+    ch15_noduel_seen_chapter_id = data_fdps_chapter_current_chapter_id;
+    ch15_noduel_seen_party_gold = data_fdps_shared_party_total_gold;
+}
+
+/* Runs the handler once with the duel latch raised. */
+static void run_ch15_duel_handler(void)
+{
+    if (ch15_duel_run_state != 0) {
+        return;
+    }
+    ch15_duel_run_state = 2;
+
+    if (!stage_ch15_fixture_archive()) {
+        return;
+    }
+
+    stage_ch15_globals(1);
+
+    fdps_chapter_15_end();
+
+    ch15_duel_capture();
+    ch15_duel_run_state = 1;
+}
+
+/* Runs the handler once with the duel latch clear. */
+static void run_ch15_noduel_handler(void)
+{
+    if (ch15_noduel_run_state != 0) {
+        return;
+    }
+    ch15_noduel_run_state = 2;
+
+    if (!stage_ch15_fixture_archive()) {
+        return;
+    }
+
+    stage_ch15_globals(0);
+
+    fdps_chapter_15_end();
+
+    ch15_noduel_capture();
+    ch15_noduel_run_state = 1;
+}
+
+/* There is no sweep.  The staged enemy is on side 0 with 50 hit points and it
+   still has them: the first instruction of the body is the latch compare at
+   0003ac2c and not the CALL 0x00039e10 every other handler in this file opens
+   with.  A copy of the family's usual first call would read back 0 here. */
+static void chapter_15_does_not_sweep_the_enemy_side(void)
+{
+    run_ch15_duel_handler();
+    CHECK_EQ(ch15_duel_run_state, 1);
+    if (ch15_duel_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch15_duel_seen_enemy_hp_current, ENEMY_HP_CURRENT);
+    CHECK_EQ(ch15_duel_seen_enemy_hp_max, ENEMY_HP_MAX);
+}
+
+/* With the latch raised, records 0 through 8 come back with their flags byte
+   at 0 -- index 4 included, which the duel event's own loop skips -- and
+   record 9 is still retired, which is the loop bound at 0003ac3c.  Record 0 is
+   excluded from the flags assertion because the fixture script's 0x0b opcode
+   retires it again after the handler's loop has cleared it, which is what
+   chapter_15_victory_cutscene_is_win14_dat asserts.
+
+   The staging left every one of those bytes at 0x83, so reading back 0 says
+   the store took the WHOLE byte: an `and-not the retired bit` spelling would
+   leave bit 1 standing on all nine, and the has-acted bit 0x80 standing on
+   records 2 upward -- which is the source comment's own claim about 0x80 under
+   direct test.  (Records 0 and 1 lose 0x80 to the script runner either way;
+   bit 1 is what discriminates on those two.)  The store is also only that byte
+   -- every one of these records keeps the behaviour byte 0x57 the staging gave
+   it. */
+static void chapter_15_un_retires_records_zero_to_eight_when_the_duel_ran(void)
+{
+    int i;
+
+    run_ch15_duel_handler();
+    CHECK_EQ(ch15_duel_run_state, 1);
+    if (ch15_duel_run_state != 1) {
+        return;
+    }
+
+    for (i = 0; i < CH15_BLOCK_UNIT_COUNT; i++) {
+        if (i != RANDIS_UNIT) {
+            CHECK_EQ(ch15_duel_seen_block_flags[i], 0);
+        }
+        CHECK_EQ(ch15_duel_seen_block_behavior[i], CH15_BEHAVIOR_STAGED);
+    }
+    CHECK_EQ(ch15_duel_seen_unit9_flags, CH15_FLAGS_STAGED);
+    CHECK_EQ(ch15_duel_seen_unit9_behavior, CH15_BEHAVIOR_STAGED);
+}
+
+/* Record 0x34 is the asymmetry, and this is the case that holds it.  The store
+   at 0003ac74 is MOV byte ptr [EAX+0x34],0x0, so the behaviour byte is 0 and
+   the flags byte at +5 is untouched -- the record stays exactly as the staging
+   left it, all three bits, record 0x34 being far past UNIT_COUNT and so out of
+   the script runner's bit-7 sweep as well.  Mirroring the duel event,
+   which retired this record through byte +5, would read back the opposite
+   pair.  Its two neighbours are untouched in both bytes, so a store that
+   landed one record out is visible too.
+
+   The behaviour byte was staged at 0x57, so reading back 0 is a statement
+   about the whole byte: the nibble-preserving merge the duel event uses on
+   this same byte (src/chevt3.c, AND DL,0xf0) would leave 0x50 standing. */
+static void chapter_15_clears_only_the_behaviour_byte_of_record_0x34(void)
+{
+    run_ch15_duel_handler();
+    CHECK_EQ(ch15_duel_run_state, 1);
+    if (ch15_duel_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch15_duel_seen_archer_behavior, 0);
+    CHECK_EQ(ch15_duel_seen_archer_flags, CH15_FLAGS_STAGED);
+    CHECK_EQ(ch15_duel_seen_before_flags, CH15_FLAGS_STAGED);
+    CHECK_EQ(ch15_duel_seen_before_behavior, CH15_BEHAVIOR_STAGED);
+    CHECK_EQ(ch15_duel_seen_after_flags, CH15_FLAGS_STAGED);
+    CHECK_EQ(ch15_duel_seen_after_behavior, CH15_BEHAVIOR_STAGED);
+}
+
+/* The party is banked, and banked AFTER the un-retire: the slot that was 0xa5
+   filler carries the battle record's character id and level, its six status
+   bytes were cleared by the writeback's memset, its flags were masked to bit
+   0, its HP was lifted to the maximum by the full heal and its MP by the
+   restore that follows.  The writeback skips a retired character-0 unit, so
+   every one of these would still be the filler if the un-retire had not run
+   first. */
+static void chapter_15_banks_the_party_after_un_retiring_it(void)
+{
+    int i;
+
+    run_ch15_duel_handler();
+    CHECK_EQ(ch15_duel_run_state, 1);
+    if (ch15_duel_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch15_duel_seen_slot_char_id, RANDIS_CHAR_ID);
+    CHECK_EQ(ch15_duel_seen_slot_level, RANDIS_LEVEL);
+    CHECK_EQ(ch15_duel_seen_slot_flags, 0);
+    CHECK_EQ(ch15_duel_seen_slot_hp_max, RANDIS_HP_MAX);
+    CHECK_EQ(ch15_duel_seen_slot_hp_current, RANDIS_HP_MAX);
+    CHECK_EQ(ch15_duel_seen_slot_mp_current, RANDIS_MP_MAX);
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        CHECK_EQ(ch15_duel_seen_slot_timers[i], 0);
+    }
+}
+
+/* No spell is granted.  The handler has no fdps_set_flag_bit call anywhere in
+   it, so both the live record's bitmap and the roster's copy of it stay at the
+   zeroes the staging left.  A grant copied over from fdps_chapter_01_end would
+   show as byte 0 reading 0x01. */
+static void chapter_15_grants_no_spell(void)
+{
+    int i;
+
+    run_ch15_duel_handler();
+    CHECK_EQ(ch15_duel_run_state, 1);
+    if (ch15_duel_run_state != 1) {
+        return;
+    }
+
+    for (i = 0; i < SPELL_BITMAP_BYTES; i++) {
+        CHECK_EQ(ch15_duel_seen_unit_spells[i], 0);
+        CHECK_EQ(ch15_duel_seen_slot_spells[i], 0);
+    }
+}
+
+/* The cut-scene the handler names is Win14.dat and it really ran: both of the
+   fixture member's opcodes are on the live battle record -- the retired bit at
+   +5, raised again after the un-retire cleared it, and the marker value 83 in
+   status_timers[4].  The two decoys in the container write 89 into
+   status_timers[3] and 97 into status_timers[5] and retire nobody, so a name
+   one step in either direction is three failed assertions rather than a silent
+   pass.  This is the half of the handler's deliberate off-by-one that carries
+   the index of the chapter just ENDED, 14, against the 15 the store leaves.
+   The marker does not reach the roster copy, whose timers the writeback
+   cleared before the script ran. */
+static void chapter_15_victory_cutscene_is_win14_dat(void)
+{
+    run_ch15_duel_handler();
+    CHECK_EQ(ch15_duel_run_state, 1);
+    if (ch15_duel_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch15_duel_seen_unit_timers[WIN14_CH15_MARKER_SLOT],
+             WIN14_CH15_MARKER_VALUE);
+    CHECK_EQ(ch15_duel_seen_unit_timers[WIN13_CH15_MARKER_SLOT], 0);
+    CHECK_EQ(ch15_duel_seen_unit_timers[WIN15_CH15_MARKER_SLOT], 0);
+    CHECK_EQ(ch15_duel_seen_unit_flags, UNIT_FLAG_RETIRED);
+    CHECK_EQ(ch15_duel_seen_slot_timers[WIN14_CH15_MARKER_SLOT], 0);
+}
+
+/* Nobody fell, so the revive sweep charges nothing and never opens its panel:
+   the writeback ran first and put the one roster member on his maximum, which
+   leaves the sweep with no member at 0 HP to bill for. */
+static void chapter_15_revive_charges_nothing_when_nobody_fell(void)
+{
+    run_ch15_duel_handler();
+    CHECK_EQ(ch15_duel_run_state, 1);
+    if (ch15_duel_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch15_duel_seen_party_gold, PARTY_GOLD_BEFORE);
+}
+
+/* The chapter index is left at chapter 16's, 15, as an assignment and not as a
+   step from what was there: this run starts it at 4, so an increment would
+   read back 5 and the store's own literal reads back 15.  It also pins the
+   other half of the handler's deliberate off-by-one -- a 14 here, matching the
+   14 in the script name, would be chapter 15 replayed rather than chapter 16
+   started. */
+static void chapter_15_advances_the_chapter_index_to_chapter_sixteen(void)
+{
+    run_ch15_duel_handler();
+    CHECK_EQ(ch15_duel_run_state, 1);
+    if (ch15_duel_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch15_duel_seen_chapter_id, CH15_CHAPTER_ID_AFTER);
+}
+
+/* The gate.  With element 0x10 of data_fdps_map_cell_event_triggered_flags at
+   0, the JZ at 0003ac33 jumps the whole block: every one of records 0..8 still
+   carries the retired bit and bit 1 the staging gave it -- records 0 and 1
+   minus the has-acted bit, which the script runner's opening
+   fdps_units_clear_status_bit7 takes off everything below UNIT_COUNT and which
+   is therefore nothing this handler did -- record 0x34 keeps the behaviour
+   byte the staging gave it, and
+   the writeback consequently skips the retired character-0 unit and leaves the
+   roster slot at its 0xa5 filler.  A handler that ran the block
+   unconditionally would fail on all three. */
+static void chapter_15_skips_the_whole_block_when_the_duel_did_not_run(void)
+{
+    int i;
+
+    run_ch15_noduel_handler();
+    CHECK_EQ(ch15_noduel_run_state, 1);
+    if (ch15_noduel_run_state != 1) {
+        return;
+    }
+
+    for (i = 0; i < CH15_BLOCK_UNIT_COUNT; i++) {
+        if (i < UNIT_COUNT) {
+            CHECK_EQ(ch15_noduel_seen_block_flags[i],
+                     CH15_FLAGS_STAGED_AFTER_SCRIPT);
+        } else {
+            CHECK_EQ(ch15_noduel_seen_block_flags[i], CH15_FLAGS_STAGED);
+        }
+    }
+    CHECK_EQ(ch15_noduel_seen_archer_behavior, CH15_BEHAVIOR_STAGED);
+    CHECK_EQ(ch15_noduel_seen_archer_flags, CH15_FLAGS_STAGED);
+    CHECK_EQ(ch15_noduel_seen_slot_level, ROSTER_FILLER);
+    CHECK_EQ(ch15_noduel_seen_slot_timer, ROSTER_FILLER);
+}
+
+/* Everything past the gate runs either way: the unlatched run still has no
+   sweep, still interprets Win14.dat -- the marker is on the live record --
+   still charges nothing for a revive it finds nobody for, and still leaves the
+   chapter index at 15.  Only the block above the writeback is conditional. */
+static void chapter_15_runs_the_rest_of_the_handler_without_the_duel(void)
+{
+    run_ch15_noduel_handler();
+    CHECK_EQ(ch15_noduel_run_state, 1);
+    if (ch15_noduel_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch15_noduel_seen_enemy_hp_current, ENEMY_HP_CURRENT);
+    CHECK_EQ(ch15_noduel_seen_unit_timers[WIN14_CH15_MARKER_SLOT],
+             WIN14_CH15_MARKER_VALUE);
+    CHECK_EQ(ch15_noduel_seen_unit_timers[WIN13_CH15_MARKER_SLOT], 0);
+    CHECK_EQ(ch15_noduel_seen_unit_timers[WIN15_CH15_MARKER_SLOT], 0);
+    CHECK_EQ(ch15_noduel_seen_party_gold, PARTY_GOLD_BEFORE);
+    CHECK_EQ(ch15_noduel_seen_chapter_id, CH15_CHAPTER_ID_AFTER);
+}
+
+/* Chapter 15's fixture container goes the same way the earlier ones did, so
+   that nothing this file wrote outlives its run. */
+static void the_ch15_fixture_container_is_removed(void)
+{
+    if (!ch15_fixture_owned) {
+        return;
+    }
+
+    remove(SCRIPT_ARCHIVE_FILE);
+    ch15_fixture_owned = 0;
+    CHECK_EQ(file_present(SCRIPT_ARCHIVE_FILE), 0);
+}
+
 void run_chend1b_tests(void)
 {
     RUN_TEST(chapter_12_sweeps_the_enemy_side);
@@ -1316,4 +2004,15 @@ void run_chend1b_tests(void)
     RUN_TEST(chapter_14_revive_charges_nothing_when_nobody_fell);
     RUN_TEST(chapter_14_advances_the_chapter_index_to_chapter_fifteen);
     RUN_TEST(the_ch14_fixture_container_is_removed);
+    RUN_TEST(chapter_15_does_not_sweep_the_enemy_side);
+    RUN_TEST(chapter_15_un_retires_records_zero_to_eight_when_the_duel_ran);
+    RUN_TEST(chapter_15_clears_only_the_behaviour_byte_of_record_0x34);
+    RUN_TEST(chapter_15_banks_the_party_after_un_retiring_it);
+    RUN_TEST(chapter_15_grants_no_spell);
+    RUN_TEST(chapter_15_victory_cutscene_is_win14_dat);
+    RUN_TEST(chapter_15_revive_charges_nothing_when_nobody_fell);
+    RUN_TEST(chapter_15_advances_the_chapter_index_to_chapter_sixteen);
+    RUN_TEST(chapter_15_skips_the_whole_block_when_the_duel_did_not_run);
+    RUN_TEST(chapter_15_runs_the_rest_of_the_handler_without_the_duel);
+    RUN_TEST(the_ch15_fixture_container_is_removed);
 }
