@@ -127,4 +127,27 @@ extern void fdps_chapter_18_end(void);
 extern void fdps_chapter_19_end(void);
 #pragma aux fdps_chapter_19_end "*" parm caller [];
 
+/* Chapter 20's end handler: closes chapter 20, 迷走之隧道, out and hands the
+   game to chapter 21.  Takes nothing and returns nothing.
+
+   The family's plain shape, the same five steps chapters 16 and 17 run and in
+   the same order: every enemy still standing on the battle map is swept; the
+   battle party is banked onto the persistent roster; the victory cut-scene
+   Win19.dat is interpreted; every party member still at 0 hit points is
+   revived and billed for it; and the chapter index is advanced to 20,
+   chapter 21, 地底神殿.
+
+   NOTHING STANDS IN FRONT OF THE FIVE.  Unlike chapter 19 just before it this
+   handler has no gate on a one-shot latch and no recovery of the field: the
+   duel that made chapter 19's handler put the party back together is that
+   chapter's business and chapter 20 stages nothing of its own on the party.
+
+   THE SWEEP IS BELT AND BRACES.  Chapter 20's 勝利條件 is the shared end
+   condition's own 敵人全滅, so the enemy side is normally empty already by the
+   time this handler runs.
+
+   Table slot 19. */
+extern void fdps_chapter_20_end(void);
+#pragma aux fdps_chapter_20_end "*" parm caller [];
+
 #endif

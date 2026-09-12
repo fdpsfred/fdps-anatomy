@@ -3869,6 +3869,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x9e"
+    },
+    "0003b1d0": {
+      "name": "fdps_chapter_20_end",
+      "target": "chend2.c",
+      "body_size": "0x38",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x38"
     }
   }
 }

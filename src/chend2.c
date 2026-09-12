@@ -460,3 +460,85 @@ void fdps_chapter_19_end(void)
     fdps_roster_revive_fallen_members();
     data_fdps_chapter_current_chapter_id = CH19_NEXT_CHAPTER_ID;
 }
+
+/* Chapter 20's victory cut-scene, the string at 0x621a0 loaded into EAX at
+   0003b1e6 and pushed as fdps_icon_script_run's only argument.  The member
+   name is based on the chapter that has just been WON: chapter 20 is the
+   0-based id 19, so this is Win19.dat.
+
+   The literal starts exactly where the instruction says it does: read_memory
+   at 0x62188 returns 57 69 6e 31 37 2e 64 61 74 00 64 61 57 69 6e 31 38 2e 64
+   61 74 00 64 61 57 69 6e 31 39 2e 64 61 74 00 64 61 57 69 6e 32 30 2e 64 61
+   74 00 64 61, so "Win18.dat" sits at 0x62194, 0x6219e..0x6219f is the 64 61
+   filler that pads it to a four-byte boundary, 0x621a0 is the W of
+   "Win19.dat" and "Win20.dat" follows it at 0x621ac.
+
+   BOTH NEIGHBOURS ARE REAL MEMBER NAMES, so neither slip announces itself:
+   0x62194 is what the sibling one chapter back really names, the member a
+   body copied from fdps_chapter_19_end without changing the operand would
+   open, and 0x621ac is what counting forward from the chapter number rather
+   than reading the operand at 0003b1e6 would reach.
+
+   The literal is the bare member name with no path and no container, and the
+   lower-case spelling is the original's: see CH16_VICTORY_SCRIPT above for
+   why it must not be tidied and why it cannot live in read-only storage. */
+#define CH20_VICTORY_SCRIPT "Win19.dat"
+
+/* What the handler leaves in data_fdps_chapter_current_chapter_id: MOV dword
+   ptr [0x00069cf4],0x14 at 0003b1f9.  The index is 0-based, so 20 is chapter
+   21, 地底神殿 -- both the village phase that runs next and the chapter loaded
+   after it read this global, so this one store is what advances the game.
+
+   It is an assignment of the chapter's successor and not an increment: the
+   handler was reached through slot 19 of a table indexed by this same global,
+   and every handler in the family stores its own literal.
+
+   THE TWO NUMBERS IN THIS HANDLER DIFFER BY ONE ON PURPOSE: the script above
+   is 19, the index of the chapter that has just been won, and this store is
+   20, the index of the one that comes next.  Writing the same number in both
+   places is wrong in one of them. */
+#define CH20_NEXT_CHAPTER_ID 0x14
+
+/* Chapter 20's end handler: the family's plain shape, four calls and one
+   store, no branch and no local anywhere in the body.  It is
+   fdps_chapter_16_end and fdps_chapter_17_end above instruction for
+   instruction, with its own script name and its own stored index -- the three
+   handlers differ in exactly two operands each.
+
+   THE ORDER OF THE FOUR IS THE ALGORITHM and it is the order the handlers
+   before it run in.  The cut-scene runs AFTER the writeback and the revive
+   AFTER the cut-scene.  The script is interpreted with the battle's unit array
+   still standing, so a unit-record edit it makes lands on a party that has
+   already been banked and reaches the roster only if the script itself asks
+   for another writeback (opcode 0x61, src/icon.c).  The revive then reads the
+   roster the writeback has just filled, which is what makes it see the
+   battle's casualties at all.
+
+   WHAT THIS HANDLER DOES NOT DO.  It grants nothing before the writeback, so
+   unlike fdps_chapter_01_end it awards no spell, and it hands nothing else to
+   the phase that follows: the store below is the only global it writes
+   directly.  Unlike fdps_chapter_19_end just above it has no gate on a
+   one-shot latch and no recovery sweep either -- the first instruction after
+   the frame is the sweep call at 0003b1dc, with nothing tested before it, and
+   the chapter's own staging is undone nowhere because chapter 20 stages
+   nothing on the party.
+
+   THE SWEEP IS BELT AND BRACES HERE, not the load-bearing step it is in
+   chapters 3, 8 and 10.  Chapter 20's 勝利條件 is the shared end condition's
+   own 敵人全滅 and fdps_chapter_20_post_action (chpost2.h) adds no end
+   condition of its own -- all it does during the battle is release the map's
+   held enemies three per turn -- so that condition records a clear only once
+   no unit on the enemy side is still standing, and the sweep normally finds
+   that side already empty.
+
+   THE CHAPTER IS ADVANCED HERE and nowhere else on this path: the store at
+   0003b1f9 is the handler's last act and the only thing it leaves for the
+   phase that follows. */
+void fdps_chapter_20_end(void)
+{
+    fdps_battle_destroy_remaining_enemies();
+    fdps_roster_write_back_battle_units();
+    fdps_icon_script_run(CH20_VICTORY_SCRIPT);
+    fdps_roster_revive_fallen_members();
+    data_fdps_chapter_current_chapter_id = CH20_NEXT_CHAPTER_ID;
+}
