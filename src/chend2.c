@@ -81,3 +81,81 @@ void fdps_chapter_16_end(void)
     fdps_roster_revive_fallen_members();
     data_fdps_chapter_current_chapter_id = CH16_NEXT_CHAPTER_ID;
 }
+
+/* Chapter 17's victory cut-scene, the string at 0x62170 loaded into EAX at
+   0003ad56 and pushed as fdps_icon_script_run's only argument.  The member
+   name is based on the chapter that has just been WON: chapter 17 is the
+   0-based id 16, so this is Win16.dat.
+
+   The literal starts exactly where the instruction says it does, unlike
+   chapter 16's above: read_memory at 0x62160 returns 74 00 64 61 57 69 6e 31
+   35 2e 64 61 74 00 64 61 57 69 6e 31 36 2e 64 61 74 00 64 61 57 69 6e 31 37
+   2d 31 2e 64 61 74 00, so 0x6216e..0x6216f is the 64 61 filler that pads
+   "Win15.dat" to a four-byte boundary and 0x62170 is the W of "Win16.dat".
+
+   The literal is the bare member name with no path and no container, and the
+   lower-case spelling is the original's: see CH16_VICTORY_SCRIPT above for
+   why it must not be tidied and why it cannot live in read-only storage.
+
+   THE NEIGHBOURING LITERAL IS NOT THIS ONE.  "Win17-1.dat" sits at 0x6217c,
+   immediately behind this string, and is not what this handler names -- a
+   member name reached by counting forward from the chapter number rather than
+   by reading the operand at 0003ad56 would land on it. */
+#define CH17_VICTORY_SCRIPT "Win16.dat"
+
+/* What the handler leaves in data_fdps_chapter_current_chapter_id: MOV dword
+   ptr [0x00069cf4],0x11 at 0003ad69.  The index is 0-based, so 17 is chapter
+   18, 咆哮的獅王 -- both the village phase that runs next and the chapter
+   loaded after it read this global, so this one store is what advances the
+   game.
+
+   It is an assignment of the chapter's successor and not an increment: the
+   handler was reached through slot 16 of a table indexed by this same global,
+   and every handler in the family stores its own literal.
+
+   THE TWO NUMBERS IN THIS HANDLER DIFFER BY ONE ON PURPOSE: the script above
+   is 16, the index of the chapter that has just been won, and this store is
+   17, the index of the one that comes next.  Writing the same number in both
+   places is wrong in one of them. */
+#define CH17_NEXT_CHAPTER_ID 0x11
+
+/* Chapter 17's end handler: the family's plain shape again, four calls and one
+   store, no branch and no local anywhere in the body.  It is
+   fdps_chapter_16_end above instruction for instruction, with its own script
+   name and its own stored index -- the two handlers differ in exactly two
+   operands.
+
+   THE ORDER OF THE FOUR IS THE ALGORITHM and it is the order the handlers
+   before it run in.  The cut-scene runs AFTER the writeback and the revive
+   AFTER the cut-scene.  The script is interpreted with the battle's unit array
+   still standing, so a unit-record edit it makes lands on a party that has
+   already been banked and reaches the roster only if the script itself asks
+   for another writeback (opcode 0x61, src/icon.c).  The revive then reads the
+   roster the writeback has just filled, which is what makes it see the
+   battle's casualties at all.
+
+   WHAT THIS HANDLER DOES NOT DO.  It grants nothing before the writeback, so
+   unlike fdps_chapter_01_end it awards no spell, and it hands nothing else to
+   the phase that follows: the store below is the only global it writes
+   directly.  It has no gate on a one-shot latch either -- the first
+   instruction after the frame is the sweep call at 0003ad4c, with nothing
+   tested before it.
+
+   THE SWEEP IS BELT AND BRACES HERE, not the load-bearing step it is in
+   chapters 3, 8 and 10.  Chapter 17's clear is the shared end condition's own
+   敵人全滅 (fdps_chapter_17_post_action, chpost2.h, adds only a defeat test on
+   unit slot 3), and that condition records a clear only once no unit on the
+   enemy side is still standing, so the sweep normally finds that side already
+   empty.
+
+   THE CHAPTER IS ADVANCED HERE and nowhere else on this path: the store at
+   0003ad69 is the handler's last act and the only thing it leaves for the
+   phase that follows. */
+void fdps_chapter_17_end(void)
+{
+    fdps_battle_destroy_remaining_enemies();
+    fdps_roster_write_back_battle_units();
+    fdps_icon_script_run(CH17_VICTORY_SCRIPT);
+    fdps_roster_revive_fallen_members();
+    data_fdps_chapter_current_chapter_id = CH17_NEXT_CHAPTER_ID;
+}

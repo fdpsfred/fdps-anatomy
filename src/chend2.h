@@ -45,4 +45,26 @@
 extern void fdps_chapter_16_end(void);
 #pragma aux fdps_chapter_16_end "*" parm caller [];
 
+/* Chapter 17's end handler: closes chapter 17, 人質的危機, out and hands the
+   game to chapter 18, 咆哮的獅王.  Takes nothing and returns nothing.
+
+   In order, and the order is the content: every unit on the enemy side has its
+   hit points zeroed and any that had not already left the field is played off
+   it; the battle party is banked onto the persistent roster; the victory
+   cut-scene Win16.dat is interpreted; every party member who fell is revived
+   and billed for it; and the chapter index is advanced to 17, chapter 18.
+
+   The body is chapter 16's, instruction for instruction, with its own script
+   name and its own stored index -- the handlers differ in exactly two
+   operands.  The sweep is the belt-and-braces step it is in chapters 12 to 16
+   rather than the load-bearing one it is in chapters 3, 8 and 10: chapter 17
+   wins on 敵人全滅, the shared end condition's own test, and
+   fdps_chapter_17_post_action (chpost2.h) adds only a defeat condition on unit
+   slot 3, so by the time this handler runs the enemy side is normally empty
+   already.
+
+   Table slot 16. */
+extern void fdps_chapter_17_end(void);
+#pragma aux fdps_chapter_17_end "*" parm caller [];
+
 #endif
