@@ -67,4 +67,36 @@ extern void fdps_chapter_16_end(void);
 extern void fdps_chapter_17_end(void);
 #pragma aux fdps_chapter_17_end "*" parm caller [];
 
+/* Chapter 18's end handler: closes chapter 18, 咆哮的獅王, out, hands the game
+   to chapter 19, 蛇口之道, and on the way decides whether 蘭迪斯 is given the
+   勇者徽章.  Takes nothing and returns nothing.
+
+   THE GATE IS WHAT MAKES THIS ONE DIFFERENT, and it is the only chapter end in
+   the game that hands out the 英雄 class-change route.  If 蘭迪斯 is still
+   carrying the 神的聖印 and not one of the first nine party members has
+   changed class, the seal is taken off him, the 勇者徽章 is put in his first
+   free bag entry and the chapter plays the alternative victory scene
+   Win17-1.dat; otherwise nothing is traded and the ordinary Win17.dat plays.
+   The guide states the same rule for this chapter.  Nine is a literal in the
+   sweep and not the live unit count, so 瑪麗安, who joins at slot 9, cannot
+   deny the trade (see the note in chend2.c).
+
+   Whichever way the gate went, the rest is the family's: every unit on the
+   enemy side has its hit points zeroed and any that had not already left the
+   field is played off it; the battle party is banked onto the persistent
+   roster; the victory cut-scene is interpreted; every party member who fell is
+   revived and billed for it; and the chapter index is advanced to 18, chapter
+   19.  The trade runs BEFORE the writeback, so the bag banked onto the roster
+   is the one the trade left.
+
+   The sweep of the map is the belt-and-braces step it is in chapters 12 to 17
+   rather than the load-bearing one it is in chapters 3, 8 and 10: chapter 18
+   wins on 敵人全滅, the shared end condition's own test, and
+   fdps_chapter_18_post_action (chpost2.h) adds nothing to it, so by the time
+   this handler runs the enemy side is normally empty already.
+
+   Table slot 17. */
+extern void fdps_chapter_18_end(void);
+#pragma aux fdps_chapter_18_end "*" parm caller [];
+
 #endif

@@ -644,6 +644,7 @@
 00062164 | Label | USER_DEFINED | primary | binary_artifact_string_literal_icon_script_win15_dat_62164
 00062170 | Label | USER_DEFINED | primary | binary_artifact_string_literal_chapter17_victory_script_name_62170
 0006217c | Label | USER_DEFINED | primary | binary_artifact_string_literal_chapter18_alt_victory_script_name_6217c
+00062188 | Label | USER_DEFINED | primary | binary_artifact_string_literal_chapter18_victory_script_name_62188
 00062194 | Label | USER_DEFINED | primary | binary_artifact_string_literal_icon_script_win18_dat_62194
 000621a0 | Label | USER_DEFINED | primary | binary_artifact_string_literal_icon_script_win19_dat_621a0
 000621ac | Label | USER_DEFINED | primary | binary_artifact_string_literal_chapter21_victory_script_name_621ac
