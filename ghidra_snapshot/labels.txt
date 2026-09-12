@@ -641,6 +641,7 @@
 000620a4 | Label | USER_DEFINED | primary | binary_artifact_string_literal_resource_filename_relive_cel_620a4
 0006214c | Label | USER_DEFINED | primary | binary_artifact_string_literal_chapter14_victory_script_name_6214c
 00062158 | Label | USER_DEFINED | primary | binary_artifact_string_literal_icon_script_win14_dat_62158
+00062164 | Label | USER_DEFINED | primary | binary_artifact_string_literal_icon_script_win15_dat_62164
 00062170 | Label | USER_DEFINED | primary | binary_artifact_string_literal_chapter17_victory_script_name_62170
 0006217c | Label | USER_DEFINED | primary | binary_artifact_string_literal_chapter18_alt_victory_script_name_6217c
 00062194 | Label | USER_DEFINED | primary | binary_artifact_string_literal_icon_script_win18_dat_62194

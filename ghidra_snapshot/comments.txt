@@ -11436,10 +11436,10 @@ Chapter 16's chapter-end handler: plays chapter 16's victory scene and hands the
 
 Algorithm:
   1. fdps_battle_destroy_remaining_enemies clears every enemy still standing on the battle map, so the victory scene plays over an empty field.
-  2. FUN_00023980 writes each active unit record back into the persistent roster table, resetting the per-battle fields.
-  3. FUN_00021650("Win15.dat") runs chapter 16's victory script out of the IconAni archive. The Win<NN>.dat scene scripts are numbered by 0-based chapter index, so chapter 16's is Win15.dat.
-  4. FUN_00039e70 revives every party unit that died in the battle, charging each one its per-class revive cost.
-  5. Stores 0x10 into the chapter index at DAT_00069cf4 -- chapter index 16, i.e. chapter 17 -- so the village phase main runs next, and the chapter loader after it, bring up chapter 17.
+  2. fdps_roster_write_back_battle_units writes each active unit record back into the persistent roster table, resetting the per-battle fields.
+  3. fdps_icon_script_run("Win15.dat") runs chapter 16's victory script out of the IconAni archive. The Win<NN>.dat scene scripts are numbered by 0-based chapter index, so chapter 16's is Win15.dat.
+  4. fdps_roster_revive_fallen_members revives every party unit that died in the battle, charging each one its per-class revive cost.
+  5. Stores 0x10 into the chapter index at data_fdps_chapter_current_chapter_id -- chapter index 16, i.e. chapter 17 -- so the village phase main runs next, and the chapter loader after it, bring up chapter 17.
 
 Parameters:
   none. main dispatches the slot with no arguments.

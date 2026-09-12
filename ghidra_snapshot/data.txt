@@ -1153,7 +1153,8 @@
 00062140 | 0xa | /string | s_Win12.dat_00062140 | DEFAULT
 0006214c | 0xa | /char[10] | binary_artifact_string_literal_chapter14_victory_script_name_6214c | USER_DEFINED
 00062158 | 0xa | /char[10] | binary_artifact_string_literal_icon_script_win14_dat_62158 | USER_DEFINED
-00062162 | 0xc | /string | - | -
+00062162 | 0x2 | /undefined1[2] | - | -
+00062164 | 0xa | /char[10] | binary_artifact_string_literal_icon_script_win15_dat_62164 | USER_DEFINED
 00062170 | 0xa | /char[10] | binary_artifact_string_literal_chapter17_victory_script_name_62170 | USER_DEFINED
 0006217c | 0xc | /char[12] | binary_artifact_string_literal_chapter18_alt_victory_script_name_6217c | USER_DEFINED
 00062188 | 0xa | /string | s_Win17.dat_00062188 | DEFAULT
