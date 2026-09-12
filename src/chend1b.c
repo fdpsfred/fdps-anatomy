@@ -211,3 +211,106 @@ void fdps_chapter_13_end(void)
     fdps_roster_revive_fallen_members();
     data_fdps_chapter_current_chapter_id = CH13_NEXT_CHAPTER_ID;
 }
+
+/* Chapter 14's victory cut-scene, the string at 0x6214c loaded into EAX at
+   0003ab06 and pushed as fdps_icon_script_run's only argument.  The member
+   name is based on the chapter that has just been WON: chapter 14 is the
+   0-based id 13, so this is Win13.dat.
+
+   The literal is the bare member name with no path and no container, for the
+   same reason chapters 12's and 13's are: the interpreter names IconAni.vfs
+   itself and upper-cases the member name in place before the container compare
+   (vfs.h, rebuild_info/pitfalls.md), so a lower-case spelling here is what the
+   original has and is not a defect to tidy, and the literal cannot live in
+   read-only storage. */
+#define CH14_VICTORY_SCRIPT "Win13.dat"
+
+/* What the handler leaves in data_fdps_chapter_current_chapter_id: MOV dword
+   ptr [0x00069cf4],0xe at 0003ab19.  The index is 0-based, so 14 is chapter
+   15, 要塞砲危機 -- both the village phase that runs next and the chapter
+   loaded after it read this global, so this one store is what advances the
+   game.
+
+   It is an assignment of the chapter's successor and not an increment: the
+   handler was reached through slot 13 of a table indexed by this same global,
+   and every handler in the family stores its own literal.
+
+   THE TWO NUMBERS IN THIS HANDLER DIFFER BY ONE ON PURPOSE: the script above
+   is 13, the index of the chapter that has just been won, and this store is
+   14, the index of the one that comes next.  Writing the same number in both
+   places is wrong in one of them. */
+#define CH14_NEXT_CHAPTER_ID 14
+
+/* 0003aaf0.  Four calls and one store, straight line, no branch and no loop --
+   instruction for instruction the same body as fdps_chapter_12_end and
+   fdps_chapter_13_end above and as fdps_chapter_03_end through
+   fdps_chapter_11_end (chend1.c), with a different script name and a different
+   stored index.  It differs from chapter 13's body in exactly two operands:
+   the string address at 0003ab06 and the immediate at 0003ab19.
+
+   The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP at 0003aaf0..0003aaf4 -- over SUB ESP,0x0, a zero-byte local area
+   written as the six-byte immediate form at 0003aaf6..0003aafb.  Nothing is
+   addressed off EBP anywhere in the body, so there is no local here to name
+   and none is declared; the four registers come back off the stack at
+   0003ab23..0003ab26 and the RET at 0003ab27 is bare.
+
+   CALLING CONVENTION.  The one argument goes on the stack and the caller takes
+   it back: MOV EAX,0x6214c / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4 at
+   0003ab06..0003ab11.  The three argument-less calls at 0003aafc, 0003ab01 and
+   0003ab14 are bare CALLs with no push and no adjustment.  Nothing reads
+   [EBP+8] or above, so this function takes nothing itself, and EAX is never
+   set for a result before the RET -- the only write to it is the one that
+   carries the script name into the third call -- so it returns nothing.  The
+   one caller agrees: the dispatcher at 00029395 loads the chapter index,
+   scales it by four and CALLs through [EAX + 0x60304] with nothing pushed, no
+   stack cleanup afterwards and no read of EAX.  Slot 13 of that table, at
+   00060338, holds 0003aaf0 and is the only reference to this function in the
+   image.
+
+   VALUES USED AFTER A CALL: none at all.  All four callees return void as far
+   as this body is concerned and nothing here reads EAX after any of them;
+   fdps_icon_script_run does leave a result in EAX and this call site discards
+   it -- the ADD ESP,0x4 and the CALL that follows overwrite it.
+
+   THE MAP IS SWEPT FIRST, and here the sweep is the belt-and-braces step it is
+   in chapters 12 and 13 rather than the load-bearing one it is in chapters 3,
+   8 and 10.  Chapter 14's verdict comes from fdps_chapter_14_post_action
+   (chpost1.h), whose whole body is one CALL to
+   fdps_battle_check_default_end_conditions -- the bare shared end test with no
+   condition of its own -- and that test records a clear only when no unit on
+   side 0 is still standing (btlend.h); the dispatcher at 000293a1 reaches this
+   table only on that verdict.  So on the shipped data the sweep normally finds
+   the enemy side already empty and its hit-point stores land on units that
+   have retired.  What it does is not conditional on that:
+   fdps_battle_destroy_remaining_enemies zeroes the hit-point word of every
+   unit on side 0 whether or not it has left the field, and plays the ones that
+   are not already retired off the map (btlend.h).
+
+   THE ORDER OF THE REST IS THE ALGORITHM, and it is chapter 12's order for
+   chapter 12's reasons.  The cut-scene runs AFTER the writeback and the revive
+   AFTER the cut-scene.  The script is interpreted with the battle's unit array
+   still standing, so a unit-record edit it makes lands on a party that has
+   already been banked and reaches the roster only if the script itself asks
+   for another writeback (opcode 0x61, src/icon.c).  The revive then reads the
+   roster the writeback has just filled, which is what makes it see the
+   battle's casualties at all.
+
+   WHAT THIS HANDLER DOES NOT DO.  It grants nothing before the writeback, so
+   unlike fdps_chapter_01_end it awards no spell, and it hands nothing else to
+   the phase that follows: the store below is the only global it writes
+   directly.  In particular 天空之騎士's stated lose condition -- 蘭迪斯 or
+   法蓮娜 falling -- leaves no mark here either; it is not in chapter 14's
+   post-action test and it is not in this handler.
+
+   THE CHAPTER IS ADVANCED HERE and nowhere else on this path: the store at
+   0003ab19 is the handler's last act and the only thing it leaves for the
+   phase that follows. */
+void fdps_chapter_14_end(void)
+{
+    fdps_battle_destroy_remaining_enemies();
+    fdps_roster_write_back_battle_units();
+    fdps_icon_script_run(CH14_VICTORY_SCRIPT);
+    fdps_roster_revive_fallen_members();
+    data_fdps_chapter_current_chapter_id = CH14_NEXT_CHAPTER_ID;
+}
