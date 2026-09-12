@@ -23,7 +23,8 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `cdaudio.c` | 14 | 853 | 5 | 5 | 858 |
 | `cdtoc.c` | 10 | 652 | 7 | 7 | 659 |
 | `chapter.c` | 2 | 163 | 4 | 19 | 182 |
-| `chend1.c` | 15 | 689 | 0 | 0 | 689 |
+| `chend1.c` | 11 | 484 | 0 | 0 | 484 |
+| `chend1b.c` | 4 | 205 | 0 | 0 | 205 |
 | `chend2.c` | 15 | 942 | 0 | 0 | 942 |
 | `chevt1.c` | 10 | 888 | 0 | 0 | 888 |
 | `chevt2.c` | 4 | 395 | 0 | 0 | 395 |
@@ -266,7 +267,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `00020c60` | 109 | `fdps_show_chapter_title_card` |
 | `00022750` | 54 | `fdps_chapter_state_reset` |
 
-### `chend1.c` -- 15 functions, 689 lines
+### `chend1.c` -- 11 functions, 484 lines
 
 | address | lines | function |
 | --- | ---: | --- |
@@ -281,6 +282,11 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `0003a880` | 52 | `fdps_chapter_09_end` |
 | `0003a960` | 42 | `fdps_chapter_10_end` |
 | `0003a9d0` | 47 | `fdps_chapter_11_end` |
+
+### `chend1b.c` -- 4 functions, 205 lines
+
+| address | lines | function |
+| --- | ---: | --- |
 | `0003aa30` | 41 | `fdps_chapter_12_end` |
 | `0003aa90` | 41 | `fdps_chapter_13_end` |
 | `0003aaf0` | 42 | `fdps_chapter_14_end` |
@@ -1225,7 +1231,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `00069ce8` | bss | `data_fdps_battle_turn_counter` | read from 15 files: anim.c, btlend.c, btlmenu.c, btlturn.c, chapter.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt6.c, chpost1.c, chpost2.c, savefile.c |
 | `00069cec` | bss | `data_fdps_battle_pending_xp_credit` | read from 9 files: aiact.c, btlact.c, btlturn.c, combat.c, icon.c, item.c, spellmnu.c, unitatk.c, unitstat.c |
 | `00069cf0` | bss | `data_fdps_cel_sprite_cache_count` | read from 6 files: deploy.c, main.c, roster.c, rsrc.c, savefile.c, savepnl.c |
-| `00069cf4` | bss | `data_fdps_chapter_current_chapter_id` | read from 31 files: btlend.c, btlmenu.c, btlturn.c, chapter.c, chend1.c, chend2.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost2.c, ending.c, icon.c, main.c, menu.c, palcycle.c, roster.c, rsrc.c, save.c, savefile.c, shop.c, shopdraw.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c |
+| `00069cf4` | bss | `data_fdps_chapter_current_chapter_id` | read from 32 files: btlend.c, btlmenu.c, btlturn.c, chapter.c, chend1.c, chend1b.c, chend2.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost2.c, ending.c, icon.c, main.c, menu.c, palcycle.c, roster.c, rsrc.c, save.c, savefile.c, shop.c, shopdraw.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c |
 | `00069cf8` | bss | `data_fdps_scene_layer_tile_attr_mode` | read from 2 files: mapdraw.c, rsrc.c |
 | `00069cfe` | bss | `data_fdps_scene_layer_draw_depth` | read from 2 files: mapdraw.c, rsrc.c |
 | `00069d04` | bss | `data_fdps_map_tile_info_tile_id` | read from 3 files: mapcur.c, maptile.c, overview.c |

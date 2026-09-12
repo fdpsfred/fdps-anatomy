@@ -133,6 +133,40 @@ def chapter_init_file(n):
     return "chinit2b.c"
 
 
+def chapter_end_file(n):
+    """Which chendN.c a chapter's end handler lands in.
+
+    chend1b.c is the chinit1b.c cut made in the end family.  Chapters 1 to 15
+    were one file, which reached 1021 emitted lines with chapter 11's handler
+    and four still to come.  The bodies are four or five calls each, but every
+    one of them carries a page saying whether its chapter can be reached with
+    enemies still standing -- which is what decides whether the map sweep that
+    opens the handler is the load-bearing step or a belt-and-braces one -- and
+    that page costs the same whatever the body costs.
+
+    The cut falls after chapter 11 because the four still to come are a segment
+    of their own: chapters 12 to 14 are the last three copies of the family's
+    template, sweep the map then bank the party, play the scene, revive the
+    fallen and store the next index, and chapter 15 is the segment's exception,
+    the only handler of chapters 3 to 15 that does not sweep the map and
+    instead puts back on the field the party members the fortress-cannon duel
+    retired.  Chapters 1 to 11 stay where they are, a shade over the estimate
+    with nothing further routed to them: they are code_layout.md's second
+    rule, a file over the estimate with no function left queued behind it, and
+    moving reviewed handlers and the fixture-sharing tests that cover them into
+    another file to buy twenty lines is what that rule says not to do.
+
+    It is not chend3.c, because chend2.c is already chapters 16 to 30: the
+    letter keeps the family in chapter order, as it does for chevt2b.c,
+    chevt5b.c, chinit1b.c and chinit2b.c.
+    """
+    if n <= 11:
+        return "chend1.c"
+    if n <= 15:
+        return "chend1b.c"
+    return "chend2.c"
+
+
 # The chapter-numbered handler families.  Each is one family of thirty (or, for
 # the event handlers, of however many chapters scripted one), split by chapter
 # number alone because there is nothing else to group them by: no two chapters'
@@ -140,7 +174,7 @@ def chapter_init_file(n):
 CHAPTER_SPLITS = [
     (r"^fdps_chapter_(\d\d)_init$", chapter_init_file),
     (r"^fdps_chapter_(\d\d)_post_action$", lambda n: "chpost1.c" if n <= 15 else "chpost2.c"),
-    (r"^fdps_chapter_(\d\d)_end$", lambda n: "chend1.c" if n <= 15 else "chend2.c"),
+    (r"^fdps_chapter_(\d\d)_end$", chapter_end_file),
     (r"^fdps_chapter_(\d\d)_event_", chapter_event_file),
     (r"^fdps_chapter_(\d\d)_revive_", chapter_event_file),
 ]
