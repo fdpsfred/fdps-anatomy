@@ -11269,16 +11269,16 @@ Pool: fdps  [no Function ID hit against CLIB3S/MATH387S/EMU387 or ailv3.lib; its
 Alignment padding: 6-byte lea eax,[eax+0] plus 4-byte lea edx,[edx+eiz*1+0], aligning FUN_0003aa30 to 16 bytes
 
 === 0003aa30 [PLATE]
-Chapter 12's chapter-end handler: clears the map, plays chapter 12's victory scene and hands the game on to chapter 13, reached through slot 11 of the chapter-end handler table based at 0x00060304.
+Chapter 12's chapter-end handler: clears the map, banks the battle units back into the persistent roster, plays chapter 12's victory scene, revives the fallen roster members and hands the game on to chapter 13, reached through slot 11 of the chapter-end handler table based at 0x00060304.
 
 Algorithm:
-Builds the standard four-push Watcom frame with an empty local area, then runs four steps in order. fdps_battle_destroy_remaining_enemies wipes every enemy still standing on the battle map, so the scene plays over a cleared field. FUN_00023980 writes every active battle unit record back into the persistent roster table, resetting the per-battle fields as it goes. FUN_00021650, the IconAni.vfs event-script interpreter, is called with the ASCIIZ resource name "Win11.dat" at 0x00062134 and plays chapter 12's victory scene. FUN_00039e70 revives every party unit left at 0 HP, restoring it from its maximum and charging the per-class revive cost. Finally the chapter index at DAT_00069cf4 is set to 0xc, the 0-based index of chapter 13, so the village phase main runs next and the chapter loaded after it are chapter 13's.
+Builds the standard four-push Watcom frame with an empty local area, then runs four steps in order. fdps_battle_destroy_remaining_enemies zeroes the hit-point word of EVERY unit whose side byte is 0, standing or not -- the store at 00039e53 is guarded only by CMP byte ptr [EAX+0x6],0x0; the retirement test belongs to the death pass it ends with at 0001d6c0, not to the store -- so the scene plays over a cleared field. fdps_roster_write_back_battle_units writes every active battle unit record back into the persistent roster table, resetting the per-battle fields as it goes. fdps_icon_script_run, the IconAni.vfs event-script interpreter, is called with the ASCIIZ resource name "Win11.dat" at 0x00062134 and plays chapter 12's victory scene. fdps_roster_revive_fallen_members walks the persistent roster block at data_fdps_roster_array_ptr bounded by data_fdps_roster_member_count and revives every member left at 0 HP, restoring it from its maximum and charging the per-class revive cost. Finally the chapter index at DAT_00069cf4 is set to 0xc, the 0-based index of chapter 13, so the village phase main runs next and the chapter loaded after it are chapter 13's.
 
 Parameters:
   none -- main dispatches through the table at 0x000293a1 with nothing pushed and no stack cleanup.
 
 Returns:
-  nothing; the effects are the cleared map, the roster writeback, the scene it played, the revived party and the advanced chapter index in DAT_00069cf4.
+  nothing; the effects are the cleared map, the roster writeback, the scene it played, the revived roster members and the advanced chapter index in DAT_00069cf4.
 
 Pool: fdps  [calls only game code; its one data operand is the game resource name "Win11.dat"; it is reached from main through the game's own chapter-end handler table, and Function ID finds no vendor candidate]
 
