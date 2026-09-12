@@ -42,9 +42,17 @@
  * the chapter id are its entire input.  Nothing below asserts what any of
  * those globals holds on its own -- ticket 23 owns that.
  */
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "keybd.h"
+#include "deploy.h"
 #include "chpost2.h"
 
 /* Eight slots so every index the "no condition of its own" sweep touches has
@@ -527,6 +535,968 @@ static void chapter_18_an_open_battle_stays_open(void)
     CHECK_EQ(end_code(), 0);
     fdps_chapter_18_post_action();
     CHECK_EQ(end_code(), 0);
+}
+
+/* --------------------------------------------------------------------------
+ * Chapter 19's handler, 0003ae80.  The only one in this file that speaks to
+ * the player, that moves an item, and that can put the battle-end code BACK to
+ * 0 after the shared test has cleared the chapter.
+ *
+ * IT IS TWO HALVES WITH ONE SWITCH BETWEEN THEM, element 0x11 of
+ * data_fdps_map_cell_event_triggered_flags, read at 0003ae8c and again at
+ * 0003af68.  Latch down: the top half is a bare forward to
+ * fdps_battle_check_default_end_conditions and the bottom half may offer the
+ * duel.  Latch up: the top half settles the duel instead and the bottom half
+ * is shut.  Every case below says which half it is about.
+ *
+ * WHAT MAKES "THE SHARED TEST DID NOT RUN" ASSERTABLE: with the latch up and
+ * unit slot 0 retired, a body that forwarded would leave the defeat code 1 in
+ * data_fdps_chapter_event_or_battle_end_code, because chapter 19's id is 0x12
+ * and that is neither of the two ids -- 0x10 and 0x15 -- the shared test
+ * singles out.  The handler must leave the sentinel instead.  That is the
+ * rebuild note's claim, and it is the difference between a working duel and an
+ * instant Game Over.
+ *
+ * THE STAGED MAP HAS NO ENEMY UNLESS A CASE PLANTS ONE.  The shared test
+ * writes the cleared code up front and only a live enemy-side unit puts it
+ * back, so the default staging is "the chapter has just been cleared" -- which
+ * is what the offer's second gate wants and what makes the gate cases cheap.
+ *
+ * THE OFFER'S FIVE GATES ARE SWEPT ONE AT A TIME.  Each case closes exactly one
+ * of them with the other four open, and reads the answer off the latch: the
+ * offer raises it at 0003b099 on both answers, so a latch still down after the
+ * call is a gate that held.  That is the only reading available, and it is
+ * enough: nothing else in the handler writes that byte.
+ *
+ * THREE CASES RUN THE OFFER FOR REAL and they are the expensive ones.  They
+ * need FIELD.VFS for fdps_deploy_wave, ICON.CEL for the sheet it opens across
+ * the walk, and FACE.CEL for the portrait the panel reveal carries -- a
+ * missing FIELD.VFS sends fdps_deploy_wave into fdps_wait_any_key and a missing
+ * FACE.CEL ends the process at exit(1), neither of which an assertion can
+ * catch, so those three skip themselves when the files are not next to the
+ * executable.  Each slides the panel in and out over twelve retrace-paced
+ * frames and runs a modal prompt, so each costs seconds and carries every
+ * claim its path can settle.
+ *
+ * HOW THE PROMPT IS ANSWERED is tests/chevt3.c's feeder: a timer handler that
+ * advances the game's clock and appends the case's next make code only while
+ * the ring is empty, stepping through the list on the read index moving rather
+ * than on ticks.  A run here contains exactly one prompt, and past the end of
+ * the list the last code is held, so a run that somehow asked twice answers the
+ * second the same way and fails an assertion instead of spinning forever.
+ *
+ * WHY THE OFFER RUNS IN VILLAGE MODE: data_fdps_village_mode_flag decides what
+ * fdps_prompt_two_choice draws its frames over, and with it raised the prompt
+ * lifts its backdrop off the visible page instead of composing a map scene per
+ * frame.  It is a harness choice and not the chapter's: what is being pinned
+ * here is which answer leads where, and the compositor is tests/mapdraw.c's.
+ *
+ * WHY EVERY STAGED UNIT CARRIES PORTRAIT 0x80: fdps_message_window_close
+ * recomposes the scene behind the retracting panel, which walks the whole unit
+ * array through fdps_draw_map_unit, and 0x80 is the id that routine drops
+ * before it needs a sprite cache.
+ *
+ * WHICH TEXT ENTRY EACH DRAW ASKS FOR IS NOT ASSERTED, for the reason the
+ * chapter 1 section of tests/chpost1.c gives: fdps_draw_text takes its whole
+ * effect through pixels at the VGA aperture, keeps no state, and returns a
+ * cursor this handler discards.  The six ids are literals in the instruction
+ * stream -- 0x11 at 0003aee0, 0x12 at 0003af3a, 0xd at 0003afc2, 0xe at
+ * 0003afef, 0x10 at 0003b025 and 0xf at 0003b089 -- and the text block is
+ * staged as entries that are a lone terminator, so a draw walks one, paints
+ * nothing and returns at once.  What the cases do pin about the draws is that
+ * none of them stops the handler: every case runs to the end of the function.
+ *
+ * WHICH WAVE THE DEPLOYMENT ASKS FOR IS NOT ASSERTED EITHER.  The staged
+ * deployment table holds no records at all, so fdps_deploy_wave matches nothing
+ * whatever wave it is given and the unit array keeps the 0x4e records these
+ * cases index; the alternative is the whole chapter 17 deployment fixture, and
+ * what it would buy is a literal -- PUSH 0x2 at 0003af9f -- that is already
+ * plain in the disassembly.  What IS asserted is that the deployment ran at
+ * all: fdps_deploy_wave frees the placement table it loaded and leaves
+ * data_fdps_map_spawn_pos_table_ptr NULL, so a pointer parked non-NULL before
+ * the call and found NULL after it is the call having happened.
+ * -------------------------------------------------------------------------- */
+
+/* Chapter 19 is chapter id 0x12: the table slot number is the 0-based id, and
+   the dword at 000602d4, eighteen entries into the table based at 0006028c, is
+   0003ae80.  It is neither of the two ids the shared test singles out, so the
+   slot that test watches for the defeat is 0, 蘭迪斯.  It is also the map
+   number fdps_deploy_wave formats into "map%02d.cod", and MAP18.COD is a
+   member of FIELD.VFS. */
+#define CH19_CHAPTER_ID 0x12
+
+/* The latch element, byte ptr [0x000640e9] -- element 0x11 of the 32-entry
+   array based at 0x000640d8. */
+#define CH19_LATCH_SLOT 0x11
+
+/* The two duellists, PUSH 0x4 and PUSH 0x4d, and how many records the array is
+   staged with: one more than the highest index the handler touches. */
+#define CH19_JUNA_SLOT 4
+#define CH19_CHALLENGER_SLOT 0x4d
+#define CH19_UNITS 0x4e
+
+/* The bound of the accepted branch's retire sweep, CMP dword ptr
+   [EBP + -0x8],0x4d / JL at 0003b03c: indices 0 through 0x4c. */
+#define CH19_SWEEP_COUNT 0x4d
+
+/* The two swords, and two other item ids that are neither of them so that
+   "only the 妖刀村雨 was taken" is readable. */
+#define CH19_MURASAME 0xa5
+#define CH19_MURAMASA 0xa6
+#define CH19_OTHER_ITEM_1 0x50
+#define CH19_OTHER_ITEM_2 0x51
+
+/* The last turn the offer is still made on and the first it is not, either
+   side of CMP dword ptr [0x00069ce8],0x14 / JG at 0003af54. */
+#define CH19_LAST_TURN 0x14
+#define CH19_FIRST_LATE_TURN 0x15
+
+/* An inventory entry nobody is carrying -- flag bit 0x80 is what
+   fdps_unit_item_count reads as empty and the stale id beside it is the 0xff a
+   deployment leaves -- and one that is carried but not equipped. */
+#define CH19_INVENTORY_ENTRIES 8
+#define CH19_EMPTY_FLAG 0x80
+#define CH19_EMPTY_ID 0xff
+#define CH19_CARRIED_FLAG 0x00
+
+/* The flags byte every staged unit starts with: the has-acted bit alone, which
+   leaves the retired bit clear.  It is what makes the retire sweep's store
+   readable as a store -- a byte that came out 0x81 would be an OR and a byte
+   that came out 1 is the whole-byte MOV at 0003b064. */
+#define CH19_STAGED_FLAGS 0x80
+#define CH19_RETIRED_FLAGS 1
+
+/* The portrait id fdps_draw_map_unit returns on before it needs a sprite
+   cache, which is what lets fdps_message_window_close recompose the scene over
+   a staged array. */
+#define CH19_PORTRAIT_NO_MAP_SPRITE 0x80
+
+/* Side codes, from the record's side byte at offset 6: the shared test's sweep
+   only looks at side 0. */
+#define CH19_SIDE_ENEMY 0
+#define CH19_SIDE_PLAYER 2
+
+/* Any non-zero hit points; what they buy is that nothing the compositor
+   touches thinks a staged unit is mid-death. */
+#define CH19_LIVE_HP 100
+
+/* The chapter text block: 0x13 entries, one past the highest id the handler
+   asks for, every one of them pointing at the same lone terminator. */
+#define CH19_TEXT_IDS 0x13
+#define CH19_TEXT_EMPTY_AT 0x40
+#define CH19_TEXT_BLOCK_BYTES (CH19_TEXT_EMPTY_AT + 2)
+#define CH19_TEXT_END (-1)
+
+/* The battle-end code parked before each run.  0 is not a value either half
+   writes on the paths that are supposed to leave the code alone, so "left
+   alone" and "written" are told apart. */
+#define CH19_END_OPEN 0
+#define CH19_END_DEFEAT 1
+#define CH19_END_CLEARED 2
+
+/* Where the deployment table's record count sits in the MAP%02d.DAT block,
+   MOV AL,byte ptr [EAX+0x2] at 000238bb, and how many bytes in front of the
+   records it is.  The count is staged at 0, so fdps_deploy_wave's walk matches
+   nothing and the unit array is left exactly as these cases built it. */
+#define CH19_SPAWN_TABLE_COUNT_OFFSET 2
+#define CH19_SPAWN_TABLE_RECORD_BASE 0x83
+
+/* The mode the offer is run in, the timer vector the feeder takes over, and
+   the make codes the prompt answers to: Enter confirms the highlighted cell,
+   which is the left one on entry, the right arrow moves to the other cell, and
+   Esc cancels with -1 (msgwin.h). */
+#define CH19_MODE_TEXT 0x03
+#define CH19_MODE_320X200X256 0x13
+#define CH19_TIMER_VECTOR 8
+#define CH19_KEY_ESC 0x01
+#define CH19_KEY_ENTER 0x1c
+#define CH19_KEY_RIGHT 0x4d
+#define CH19_KEYS_MAX 2
+
+/* The Message.cel stand-in: one 302 x 73 sprite encoded as five fill runs per
+   row, because a fill run cannot be longer than 64 pixels. */
+#define CH19_PANEL_W 302
+#define CH19_PANEL_H 73
+#define CH19_PANEL_FILL_MAX 64
+#define CH19_PANEL_SEGMENTS 5
+#define CH19_PANEL_LAST_SEGMENT_W 46
+#define CH19_PANEL_ROW_BYTES (CH19_PANEL_SEGMENTS * 2)
+#define CH19_PANEL_STREAM_AT 0x40
+#define CH19_PANEL_SHEET_BYTES (CH19_PANEL_STREAM_AT \
+                                + CH19_PANEL_H * CH19_PANEL_ROW_BYTES)
+#define CH19_PANEL_COLOR 0x40
+
+/* The Shadow.cel stand-in the prompt draws its two option cells out of:
+   fourteen 24 x 24 sprites, one fill run per row, sprite i filled with i. */
+#define CH19_SHADOW_SPRITES 14
+#define CH19_SHADOW_SPRITE_W 24
+#define CH19_SHADOW_SPRITE_H 24
+#define CH19_SHADOW_STREAM_BYTES (CH19_SHADOW_SPRITE_H * 2)
+#define CH19_SHADOW_STREAM_AT 0x50
+#define CH19_SHADOW_SHEET_BYTES (CH19_SHADOW_STREAM_AT \
+                                 + CH19_SHADOW_SPRITES \
+                                   * CH19_SHADOW_STREAM_BYTES)
+
+/* The .CEL header fields both fixtures carry, and a table position neither
+   reader may consult: both hardwire the table at 0x0f. */
+#define CH19_CEL_TABLE_AT 0x0f
+#define CH19_CEL_DECOY_TABLE_AT 0x100
+#define CH19_CEL_VERSION 1
+#define CH19_CEL_PIXEL_FORMAT 2
+
+/* The three files the offer cases cannot be run without, and the smallest
+   ICON.CEL that fdps_cache_cel_sprite_group's fixed 0x2970-byte bite out of
+   the offset table stays inside. */
+#define CH19_ICON_SHEET "ICON.CEL"
+#define CH19_FIELD_ARCHIVE "FIELD.VFS"
+#define CH19_FACE_SHEET "FACE.CEL"
+#define CH19_ICON_LEAST_BYTES (15L + 0x2970L)
+
+static struct fdps_unit_record ch19_units[CH19_UNITS];
+static unsigned char ch19_text_block[CH19_TEXT_BLOCK_BYTES];
+static unsigned char ch19_spawn_table[CH19_SPAWN_TABLE_RECORD_BASE];
+static unsigned char ch19_panel_sheet[CH19_PANEL_SHEET_BYTES];
+static unsigned char ch19_shadow_sheet[CH19_SHADOW_SHEET_BYTES];
+static unsigned char ch19_spawn_pos_decoy;
+static unsigned char ch19_keys[CH19_KEYS_MAX];
+static volatile int ch19_key_count;
+static volatile int ch19_keys_read;
+static volatile int ch19_last_head;
+static void (__interrupt __far *ch19_saved_timer)();
+static int ch19_sheets_built = 0;
+static int ch19_files_checked = 0;
+static int ch19_files_ready = 0;
+
+static struct fdps_unit_record *ch19_unit(int unit_index)
+{
+    return &ch19_units[unit_index];
+}
+
+/* Everything both halves read that is not a file: the unit array with nobody
+   retired, nobody on the enemy side and nobody carrying anything, the text
+   block, the empty deployment table, the latch and the two globals the gates
+   compare. */
+static void ch19_stage(int battle_turn, int latch, int battle_end_code)
+{
+    int i;
+    int entry;
+    int text_id;
+
+    memset(ch19_units, 0, sizeof(ch19_units));
+    for (i = 0; i < CH19_UNITS; i++) {
+        ch19_units[i].side = (unsigned char) CH19_SIDE_PLAYER;
+        ch19_units[i].flags = (unsigned char) CH19_STAGED_FLAGS;
+        ch19_units[i].portrait_id = (unsigned char) CH19_PORTRAIT_NO_MAP_SPRITE;
+        ch19_units[i].hp_current = (short) CH19_LIVE_HP;
+        for (entry = 0; entry < CH19_INVENTORY_ENTRIES; entry++) {
+            ch19_units[i].inventory_slots[entry * 2] = CH19_EMPTY_FLAG;
+            ch19_units[i].inventory_slots[entry * 2 + 1] = CH19_EMPTY_ID;
+        }
+    }
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch19_units;
+    data_fdps_map_unit_count = CH19_UNITS;
+
+    memset(ch19_text_block, 0, (size_t) CH19_TEXT_BLOCK_BYTES);
+    *(short *) (ch19_text_block + CH19_TEXT_EMPTY_AT) = (short) CH19_TEXT_END;
+    for (text_id = 0; text_id < CH19_TEXT_IDS; text_id++) {
+        *(short *) (ch19_text_block + text_id * 2) = (short) CH19_TEXT_EMPTY_AT;
+    }
+    data_fdps_current_chapter_text_ptr = ch19_text_block;
+
+    memset(ch19_spawn_table, 0, sizeof(ch19_spawn_table));
+    ch19_spawn_table[CH19_SPAWN_TABLE_COUNT_OFFSET] = 0;
+    data_fdps_tile_event_data_table_ptr = ch19_spawn_table;
+
+    for (i = 0; i < 32; i++) {
+        data_fdps_map_cell_event_triggered_flags[i] = 0;
+    }
+    data_fdps_map_cell_event_triggered_flags[CH19_LATCH_SLOT] =
+        (unsigned char) latch;
+
+    data_fdps_chapter_current_chapter_id = CH19_CHAPTER_ID;
+    data_fdps_battle_turn_counter = battle_turn;
+    data_fdps_chapter_event_or_battle_end_code = (unsigned int) battle_end_code;
+}
+
+static void ch19_retire(int unit_index)
+{
+    ch19_units[unit_index].flags = (unsigned char) CH19_RETIRED_FLAGS;
+}
+
+/* One live or retired enemy-side unit, which is what decides whether the shared
+   test leaves the cleared code standing. */
+static void ch19_plant_enemy(int unit_index, int retired)
+{
+    ch19_units[unit_index].side = (unsigned char) CH19_SIDE_ENEMY;
+    if (retired) {
+        ch19_units[unit_index].flags = (unsigned char) CH19_RETIRED_FLAGS;
+    }
+}
+
+/* Put an item in one of a unit's eight entries, packed from the front the way
+   fdps_unit_find_item_slot's 0..count-1 sweep needs. */
+static void ch19_give(int unit_index, int entry, int item_id)
+{
+    ch19_units[unit_index].inventory_slots[entry * 2] = CH19_CARRIED_FLAG;
+    ch19_units[unit_index].inventory_slots[entry * 2 + 1] =
+        (unsigned char) item_id;
+}
+
+static int ch19_entry_flag(int unit_index, int entry)
+{
+    return (int) ch19_units[unit_index].inventory_slots[entry * 2];
+}
+
+static int ch19_entry_id(int unit_index, int entry)
+{
+    return (int) ch19_units[unit_index].inventory_slots[entry * 2 + 1];
+}
+
+/* How many of the eight occupied entries hold that id, which is how a case says
+   an item was handed over, taken away, or handed over twice. */
+static int ch19_count_item(int unit_index, int item_id)
+{
+    int entry;
+    int found;
+
+    found = 0;
+    for (entry = 0; entry < CH19_INVENTORY_ENTRIES; entry++) {
+        if (ch19_entry_flag(unit_index, entry) != CH19_EMPTY_FLAG
+                && ch19_entry_id(unit_index, entry) == item_id) {
+            found++;
+        }
+    }
+    return found;
+}
+
+static int ch19_latch(void)
+{
+    return (int) data_fdps_map_cell_event_triggered_flags[CH19_LATCH_SLOT];
+}
+
+static void ch19_u16(unsigned char *image, int at, unsigned int value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+}
+
+static void ch19_u32(unsigned char *image, int at, unsigned long value)
+{
+    image[at] = (unsigned char) (value & 0xff);
+    image[at + 1] = (unsigned char) ((value >> 8) & 0xff);
+    image[at + 2] = (unsigned char) ((value >> 16) & 0xff);
+    image[at + 3] = (unsigned char) ((value >> 24) & 0xff);
+}
+
+static void ch19_cel_header(unsigned char *sheet, int width, int height,
+                            int sprites)
+{
+    sheet[0] = 'C';
+    sheet[1] = 'E';
+    sheet[2] = 'L';
+    ch19_u16(sheet, 0x03, CH19_CEL_VERSION);
+    ch19_u16(sheet, 0x05, CH19_CEL_DECOY_TABLE_AT);
+    ch19_u16(sheet, 0x07, (unsigned int) width);
+    ch19_u16(sheet, 0x09, (unsigned int) height);
+    ch19_u16(sheet, 0x0b, (unsigned int) sprites);
+    ch19_u16(sheet, 0x0d, CH19_CEL_PIXEL_FORMAT);
+}
+
+/* The panel and the option sheets.  Neither changes between cases, so they are
+   built once. */
+static void ch19_build_sheets(void)
+{
+    int row;
+    int segment;
+    int cursor;
+    int run;
+    int sprite;
+    int stream_at;
+
+    if (ch19_sheets_built) {
+        return;
+    }
+    ch19_sheets_built = 1;
+
+    memset(ch19_panel_sheet, 0, (size_t) CH19_PANEL_SHEET_BYTES);
+    ch19_cel_header(ch19_panel_sheet, CH19_PANEL_W, CH19_PANEL_H, 1);
+    ch19_u32(ch19_panel_sheet, CH19_CEL_TABLE_AT,
+             (unsigned long) CH19_PANEL_STREAM_AT);
+    ch19_u32(ch19_panel_sheet, CH19_CEL_TABLE_AT + 4,
+             (unsigned long) CH19_PANEL_SHEET_BYTES);
+    for (row = 0; row < CH19_PANEL_H; row++) {
+        cursor = CH19_PANEL_STREAM_AT + row * CH19_PANEL_ROW_BYTES;
+        for (segment = 0; segment < CH19_PANEL_SEGMENTS; segment++) {
+            if (segment == CH19_PANEL_SEGMENTS - 1) {
+                run = CH19_PANEL_LAST_SEGMENT_W;
+            } else {
+                run = CH19_PANEL_FILL_MAX;
+            }
+            ch19_panel_sheet[cursor] = (unsigned char) (run - 1);
+            ch19_panel_sheet[cursor + 1] = CH19_PANEL_COLOR;
+            cursor += 2;
+        }
+    }
+
+    memset(ch19_shadow_sheet, 0, (size_t) CH19_SHADOW_SHEET_BYTES);
+    ch19_cel_header(ch19_shadow_sheet, CH19_SHADOW_SPRITE_W,
+                    CH19_SHADOW_SPRITE_H, CH19_SHADOW_SPRITES);
+    for (sprite = 0; sprite < CH19_SHADOW_SPRITES; sprite++) {
+        stream_at = CH19_SHADOW_STREAM_AT + sprite * CH19_SHADOW_STREAM_BYTES;
+        ch19_u32(ch19_shadow_sheet, CH19_CEL_TABLE_AT + sprite * 4,
+                 (unsigned long) stream_at);
+        for (row = 0; row < CH19_SHADOW_SPRITE_H; row++) {
+            ch19_shadow_sheet[stream_at + row * 2] =
+                (unsigned char) (CH19_SHADOW_SPRITE_W - 1);
+            ch19_shadow_sheet[stream_at + row * 2 + 1] = (unsigned char) sprite;
+        }
+    }
+    ch19_u32(ch19_shadow_sheet, CH19_CEL_TABLE_AT + CH19_SHADOW_SPRITES * 4,
+             (unsigned long) CH19_SHADOW_SHEET_BYTES);
+}
+
+static void ch19_check_files(void)
+{
+    FILE *fp;
+    long size;
+
+    if (ch19_files_checked) {
+        return;
+    }
+    ch19_files_checked = 1;
+
+    fp = fopen(CH19_ICON_SHEET, "rb");
+    if (fp == NULL) {
+        return;
+    }
+    fseek(fp, 0, SEEK_END);
+    size = ftell(fp);
+    fclose(fp);
+    if (size < CH19_ICON_LEAST_BYTES) {
+        return;
+    }
+
+    fp = fopen(CH19_FIELD_ARCHIVE, "rb");
+    if (fp == NULL) {
+        return;
+    }
+    fclose(fp);
+
+    fp = fopen(CH19_FACE_SHEET, "rb");
+    if (fp == NULL) {
+        return;
+    }
+    fclose(fp);
+
+    ch19_files_ready = 1;
+}
+
+/* The player.  It advances the game's clock like the real timer handler and
+   appends the case's next make code the way fdps_keyboard_isr does, but only
+   while the ring is empty, and it steps through the list on the read index
+   moving rather than on ticks -- only fdps_read_keyboard_queue moves that. */
+static void __interrupt __far ch19_timer_isr(void)
+{
+    int slot;
+    int next_key;
+
+    ++data_fdps_timer_tick_counter;
+
+    if (data_fdps_input_scancode_queue_head != ch19_last_head) {
+        ch19_last_head = data_fdps_input_scancode_queue_head;
+        ch19_keys_read++;
+    }
+
+    if (data_fdps_input_scancode_queue_head
+            == data_fdps_input_scancode_queue_write_index) {
+        next_key = ch19_keys_read;
+        if (next_key >= ch19_key_count) {
+            next_key = ch19_key_count - 1;
+        }
+        slot = data_fdps_input_scancode_queue_write_index;
+        data_fdps_input_scancode_queue[slot] = ch19_keys[next_key];
+        slot++;
+        if (slot == SCANCODE_QUEUE_LEN) {
+            slot = 0;
+        }
+        data_fdps_input_scancode_queue_write_index = slot;
+    }
+
+    _chain_intr(ch19_saved_timer);
+}
+
+static void ch19_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+/* One whole firing of the offer: the sheets the panel and the prompt read, an
+   empty scene so the close's recomposition draws nothing but the staged units,
+   the placement pointer parked non-NULL so the deployment is readable off it,
+   the adapter in mode 13h, the feeder installed, and text mode back before
+   anything is asserted so a failure prints on a readable screen. */
+static void ch19_run_offer(int first_key, int second_key)
+{
+    ch19_build_sheets();
+
+    data_fdps_message_window_sheet_ptr = ch19_panel_sheet;
+    data_fdps_shadow_sprite_sheet_ptr = ch19_shadow_sheet;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_timer_tick_counter = 0;
+    data_fdps_map_spawn_pos_table_ptr = &ch19_spawn_pos_decoy;
+
+    ch19_keys[0] = (unsigned char) first_key;
+    ch19_keys[1] = (unsigned char) second_key;
+    ch19_key_count = CH19_KEYS_MAX;
+    ch19_keys_read = 0;
+    ch19_last_head = 0;
+    data_fdps_input_scancode_queue_head = 0;
+    data_fdps_input_scancode_queue_write_index = 0;
+
+    data_fdps_village_mode_flag = 1;
+    ch19_set_mode(CH19_MODE_320X200X256);
+    ch19_saved_timer = _dos_getvect(CH19_TIMER_VECTOR);
+    _dos_setvect(CH19_TIMER_VECTOR, ch19_timer_isr);
+
+    fdps_chapter_19_post_action();
+
+    _dos_setvect(CH19_TIMER_VECTOR, ch19_saved_timer);
+    ch19_set_mode(CH19_MODE_TEXT);
+    data_fdps_village_mode_flag = 0;
+
+    if (data_fdps_portrait_sprite_buf_ptr != NULL) {
+        free(data_fdps_portrait_sprite_buf_ptr);
+        data_fdps_portrait_sprite_buf_ptr = NULL;
+    }
+}
+
+/* The record fields these cases read back and the stride they are indexed by.
+   Every one of them would agree with itself while addressing another byte if
+   the layout were wrong. */
+static void chapter_19_record_shape_matches_the_offsets(void)
+{
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 5);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 6);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, portrait_id), 7);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, inventory_slots), 0x0a);
+}
+
+/* Latch down, and the CALL at 0003ae95 is really taken: with the enemy side
+   wiped out the shared test's up front 2 survives, and a body that did nothing
+   would leave the 0 it was given.  The offer does not follow, because 裘娜 is
+   carrying nothing -- the fifth gate. */
+static void chapter_19_the_shared_end_test_runs(void)
+{
+    ch19_stage(1, 0, CH19_END_OPEN);
+    ch19_plant_enemy(10, 1);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_CLEARED);
+    CHECK_EQ(ch19_latch(), 0);
+}
+
+/* One live enemy puts the code back to 0 inside the shared test, so the walk in
+   there is reached through this handler and not short circuited in front of the
+   CALL. */
+static void chapter_19_a_live_enemy_keeps_the_battle_going(void)
+{
+    ch19_stage(1, 0, CH19_END_OPEN);
+    ch19_plant_enemy(10, 0);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_OPEN);
+    CHECK_EQ(ch19_latch(), 0);
+}
+
+/* Chapter 19's id is 0x12, neither of the two the shared test singles out, so
+   the slot that test watches for the defeat is 0 -- 蘭迪斯, the chapter's
+   stated 失敗條件 -- and its store carries no guard. */
+static void chapter_19_a_retired_randis_is_a_defeat(void)
+{
+    ch19_stage(1, 0, CH19_END_OPEN);
+    ch19_plant_enemy(10, 0);
+    ch19_retire(0);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_DEFEAT);
+    CHECK_EQ(ch19_latch(), 0);
+}
+
+/* No slot but 0 ends the battle through the latch-down half.  Every other index
+   the array holds is retired on its own with TWO live enemies standing -- two,
+   so that the index being retired is never also the map's last live enemy and
+   the shared test's own clear cannot be mistaken for a condition of this
+   handler's -- and the answer has to stay 0 every time -- which is also what says this handler adds
+   no end condition of its own while the latch is down. */
+static void chapter_19_no_other_slot_ends_the_battle(void)
+{
+    int retired_slot;
+
+    for (retired_slot = 1; retired_slot < CH19_UNITS; retired_slot++) {
+        ch19_stage(1, 0, CH19_END_OPEN);
+        ch19_plant_enemy(10, 0);
+        ch19_plant_enemy(11, 0);
+        ch19_retire(retired_slot);
+        fdps_chapter_19_post_action();
+        CHECK_EQ(end_code(), CH19_END_OPEN);
+        CHECK_EQ(ch19_latch(), 0);
+    }
+}
+
+/* A verdict already recorded is the shared test's own gate and is not
+   recomputed, and it closes the offer's second gate as well: a 1 in the code is
+   not the 2 the CMP at 0003af5d asks for. */
+static void chapter_19_a_recorded_defeat_is_left_alone(void)
+{
+    ch19_stage(1, 0, CH19_END_DEFEAT);
+    ch19_plant_enemy(10, 0);
+    ch19_give(CH19_JUNA_SLOT, 0, CH19_MURASAME);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_DEFEAT);
+    CHECK_EQ(ch19_latch(), 0);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURASAME), 1);
+}
+
+/* The first gate: the turn counter 0x14 or less.  Three late turns are put
+   through -- the first one outside the window and two well past it -- because a
+   rebuild that had the compare as an equality would pass on 21 alone.  The
+   chapter is cleared each time and the offer is not made. */
+static void chapter_19_a_late_turn_withholds_the_offer(void)
+{
+    static int late_turns[3] = {CH19_FIRST_LATE_TURN, 0x1b, 100};
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        ch19_stage(late_turns[i], 0, CH19_END_OPEN);
+        ch19_give(CH19_JUNA_SLOT, 0, CH19_MURASAME);
+        fdps_chapter_19_post_action();
+        CHECK_EQ(end_code(), CH19_END_CLEARED);
+        CHECK_EQ(ch19_latch(), 0);
+        CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURASAME), 1);
+        CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURAMASA), 0);
+    }
+}
+
+/* The second gate: the code standing at 2.  With the battle still open the
+   offer is not made even on turn 1 with everything else in place, which is what
+   makes this an exit rite -- the challenge comes with the chapter's last
+   action and with no other. */
+static void chapter_19_an_open_battle_withholds_the_offer(void)
+{
+    ch19_stage(1, 0, CH19_END_OPEN);
+    ch19_plant_enemy(10, 0);
+    ch19_give(CH19_JUNA_SLOT, 0, CH19_MURASAME);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_OPEN);
+    CHECK_EQ(ch19_latch(), 0);
+}
+
+/* The fourth gate: 裘娜 standing.  The gate reads bit 0 of unit 4's flags byte
+   and nothing else, so the retired bit is put up on its own and then under the
+   has-acted bit as well, and both refuse; the has-acted bit on its own is what
+   every other case here runs with and it does not refuse. */
+static void chapter_19_a_retired_juna_withholds_the_offer(void)
+{
+    static int retired_flags[2] = {CH19_RETIRED_FLAGS, 0x81};
+    int i;
+
+    for (i = 0; i < 2; i++) {
+        ch19_stage(CH19_LAST_TURN, 0, CH19_END_OPEN);
+        ch19_give(CH19_JUNA_SLOT, 0, CH19_MURASAME);
+        ch19_units[CH19_JUNA_SLOT].flags = (unsigned char) retired_flags[i];
+        fdps_chapter_19_post_action();
+        CHECK_EQ(end_code(), CH19_END_CLEARED);
+        CHECK_EQ(ch19_latch(), 0);
+    }
+}
+
+/* The fifth gate: the 妖刀村雨 in her bag.  An empty bag refuses, and so does a
+   bag holding the 妖刀村正 the duel would have given her -- which is what stops
+   the offer being made twice over a reload, and is the only reason the item id
+   in the gate matters. */
+static void chapter_19_without_the_murasame_no_offer(void)
+{
+    ch19_stage(CH19_LAST_TURN, 0, CH19_END_OPEN);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_CLEARED);
+    CHECK_EQ(ch19_latch(), 0);
+
+    ch19_stage(CH19_LAST_TURN, 0, CH19_END_OPEN);
+    ch19_give(CH19_JUNA_SLOT, 0, CH19_MURAMASA);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_CLEARED);
+    CHECK_EQ(ch19_latch(), 0);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURAMASA), 1);
+}
+
+/* The gate reads one element of the latch array and no other.  Every other
+   element is set to 1 with element 0x11 left at 0, and the offer still has to
+   be withheld only by the gate this case closes -- here the item -- so neither
+   a neighbouring index nor a folded base is being read.  Element 0x10, the
+   chapter's other latch, is the one that would be reached by an off-by-one. */
+static void chapter_19_only_latch_slot_17_switches_the_halves(void)
+{
+    int flag_slot;
+
+    ch19_stage(CH19_LAST_TURN, 0, CH19_END_OPEN);
+    for (flag_slot = 0; flag_slot < 32; flag_slot++) {
+        if (flag_slot != CH19_LATCH_SLOT) {
+            data_fdps_map_cell_event_triggered_flags[flag_slot] = 1;
+        }
+    }
+    ch19_plant_enemy(10, 0);
+    ch19_retire(CH19_CHALLENGER_SLOT);
+    fdps_chapter_19_post_action();
+    /* The latch-down half ran, so the live enemy kept the battle open; had a
+       neighbouring element been read as the latch, the duel half would have
+       seen the retired challenger and written the cleared code. */
+    CHECK_EQ(end_code(), CH19_END_OPEN);
+    CHECK_EQ(ch19_latch(), 0);
+}
+
+/* Latch up, and the rebuild note's claim: the duel half does NOT forward to the
+   shared test.  蘭迪斯 is retired, which is exactly what the accepted branch
+   leaves behind, and a forward would put the defeat code 1 in the global and
+   end chapter 19's duel as a Game Over on its first action.  Both duellists are
+   standing, so the handler must write nothing at all. */
+static void chapter_19_the_duel_does_not_run_the_shared_test(void)
+{
+    ch19_stage(1, 1, CH19_END_OPEN);
+    ch19_retire(0);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_OPEN);
+    CHECK_EQ(ch19_latch(), 1);
+}
+
+/* While both duellists are standing the duel half writes nothing, which is what
+   keeps the battle loop running the duel.  The enemy side is empty, so a
+   forward to the shared test would have cleared the chapter, and the offer half
+   is shut by the latch even with 裘娜 carrying the 妖刀村雨 on turn 1. */
+static void chapter_19_both_duellists_standing_settles_nothing(void)
+{
+    ch19_stage(1, 1, CH19_END_OPEN);
+    ch19_give(CH19_JUNA_SLOT, 0, CH19_MURASAME);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_OPEN);
+    CHECK_EQ(ch19_latch(), 1);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURASAME), 1);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURAMASA), 0);
+}
+
+/* The challenger down is 裘娜's win: the chapter is cleared and the 妖刀村雨 is
+   traded for the 妖刀村正.  The trade is two calls and not one -- the remove is
+   gated on the find answering something other than -1 and the add is not -- so
+   this case is what says both ran. */
+static void chapter_19_a_retired_challenger_is_junas_win(void)
+{
+    ch19_stage(1, 1, CH19_END_OPEN);
+    ch19_give(CH19_JUNA_SLOT, 0, CH19_MURASAME);
+    ch19_retire(CH19_CHALLENGER_SLOT);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_CLEARED);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURASAME), 0);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURAMASA), 1);
+    CHECK_EQ(ch19_latch(), 1);
+}
+
+/* 裘娜 down is her loss: the chapter is cleared just the same and NOTHING moves.
+   The two arms share the store at 0003af4a and differ only in the item calls,
+   so a rebuild that hung the trade off the wrong side of the JZ at 0003aecb
+   would pass every other case here and fail this one. */
+static void chapter_19_a_retired_juna_is_her_loss(void)
+{
+    ch19_stage(1, 1, CH19_END_OPEN);
+    ch19_give(CH19_JUNA_SLOT, 0, CH19_MURASAME);
+    ch19_retire(CH19_JUNA_SLOT);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_CLEARED);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURASAME), 1);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURAMASA), 0);
+}
+
+/* Both down counts as her win, because the arm is picked by the THIRD call --
+   fdps_unit_is_retired(0x4d) again at 0003aebf -- and not by which of the first
+   two answered.  A rebuild that reused the || chain's answer would have to pick
+   one arm for this case and would pick the wrong one half the time. */
+static void chapter_19_both_falling_counts_as_junas_win(void)
+{
+    ch19_stage(1, 1, CH19_END_OPEN);
+    ch19_give(CH19_JUNA_SLOT, 0, CH19_MURASAME);
+    ch19_retire(CH19_JUNA_SLOT);
+    ch19_retire(CH19_CHALLENGER_SLOT);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_CLEARED);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURASAME), 0);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURAMASA), 1);
+}
+
+/* The add is outside the remove's if and not its else: a 裘娜 who won without
+   the 妖刀村雨 still gets the 妖刀村正, and the item she does hold is not
+   touched.  This is the -1 arm of the CMP at 0003af02. */
+static void chapter_19_the_win_gives_the_muramasa_without_the_murasame(void)
+{
+    ch19_stage(1, 1, CH19_END_OPEN);
+    ch19_give(CH19_JUNA_SLOT, 0, CH19_OTHER_ITEM_1);
+    ch19_retire(CH19_CHALLENGER_SLOT);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_CLEARED);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURAMASA), 1);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_OTHER_ITEM_1), 1);
+    CHECK_EQ(ch19_entry_id(CH19_JUNA_SLOT, 0), CH19_OTHER_ITEM_1);
+    CHECK_EQ(ch19_entry_id(CH19_JUNA_SLOT, 1), CH19_MURAMASA);
+}
+
+/* Exactly the 妖刀村雨 is taken and nothing else, and the entries stay packed:
+   she goes in holding the 妖刀村雨 first and two other things behind it, and
+   comes out with those two shifted to the front and the 妖刀村正 in the entry
+   the shift freed.  The slot the remove is given is the find's answer and not a
+   literal, which is what this ordering reads back. */
+static void chapter_19_the_win_removes_only_the_murasame(void)
+{
+    ch19_stage(1, 1, CH19_END_OPEN);
+    ch19_give(CH19_JUNA_SLOT, 0, CH19_MURASAME);
+    ch19_give(CH19_JUNA_SLOT, 1, CH19_OTHER_ITEM_1);
+    ch19_give(CH19_JUNA_SLOT, 2, CH19_OTHER_ITEM_2);
+    ch19_retire(CH19_CHALLENGER_SLOT);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(ch19_entry_id(CH19_JUNA_SLOT, 0), CH19_OTHER_ITEM_1);
+    CHECK_EQ(ch19_entry_id(CH19_JUNA_SLOT, 1), CH19_OTHER_ITEM_2);
+    CHECK_EQ(ch19_entry_id(CH19_JUNA_SLOT, 2), CH19_MURAMASA);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURASAME), 0);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURAMASA), 1);
+}
+
+/* The dispatchers run this handler after EVERY unit action, so it is called
+   twice here.  The verdict is stable, and the second call shows the add is
+   ungated: with the 妖刀村雨 already gone the find answers -1, nothing is
+   removed, and a second 妖刀村正 is handed over.  That is the original's
+   behaviour and not a defect to guard against -- the chapter ends on the first
+   of the two calls, so the second never happens in play. */
+static void chapter_19_the_duel_verdict_is_stable_across_calls(void)
+{
+    ch19_stage(1, 1, CH19_END_OPEN);
+    ch19_give(CH19_JUNA_SLOT, 0, CH19_MURASAME);
+    ch19_retire(CH19_CHALLENGER_SLOT);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_CLEARED);
+    fdps_chapter_19_post_action();
+    CHECK_EQ(end_code(), CH19_END_CLEARED);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURAMASA), 2);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURASAME), 0);
+    CHECK_EQ(ch19_latch(), 1);
+}
+
+/* The offer accepted, on the last turn the gate lets through.  Everything this
+   path settles comes out of the one firing: the deployment ran, the whole map
+   bar 裘娜 is retired with the whole-byte 1 rather than the 0x81 an OR would
+   leave, 裘娜 keeps the byte she was staged with, the challenger at 0x4d is
+   outside the sweep's bound and keeps his, the battle-end code goes BACK to 0
+   so the phase loop resumes, and the latch is up so the offer cannot be made
+   again.  Her 妖刀村雨 is untouched -- the trade belongs to the other half. */
+static void chapter_19_the_offer_accepted_retires_everyone_but_juna(void)
+{
+    int unit_index;
+    int retired_elsewhere;
+
+    /* Staged before the guard so that a machine without the game files still
+       leaves the latch array as the cases below this one expect to find it. */
+    ch19_stage(CH19_LAST_TURN, 0, CH19_END_OPEN);
+    ch19_give(CH19_JUNA_SLOT, 0, CH19_MURASAME);
+
+    ch19_check_files();
+    if (!ch19_files_ready) {
+        return;
+    }
+
+    ch19_run_offer(CH19_KEY_ENTER, CH19_KEY_ENTER);
+
+    CHECK_EQ(data_fdps_map_spawn_pos_table_ptr == NULL, 1);
+    CHECK_EQ(data_fdps_map_unit_count, CH19_UNITS);
+    CHECK_EQ(end_code(), CH19_END_OPEN);
+    CHECK_EQ(ch19_latch(), 1);
+
+    retired_elsewhere = 0;
+    for (unit_index = 0; unit_index < CH19_SWEEP_COUNT; unit_index++) {
+        if (unit_index == CH19_JUNA_SLOT) {
+            continue;
+        }
+        if ((int) ch19_unit(unit_index)->flags == CH19_RETIRED_FLAGS) {
+            retired_elsewhere++;
+        }
+    }
+    CHECK_EQ(retired_elsewhere, CH19_SWEEP_COUNT - 1);
+    CHECK_EQ((int) ch19_unit(0)->flags, CH19_RETIRED_FLAGS);
+    CHECK_EQ((int) ch19_unit(CH19_SWEEP_COUNT - 1)->flags, CH19_RETIRED_FLAGS);
+    CHECK_EQ((int) ch19_unit(CH19_JUNA_SLOT)->flags, CH19_STAGED_FLAGS);
+    CHECK_EQ((int) ch19_unit(CH19_CHALLENGER_SLOT)->flags, CH19_STAGED_FLAGS);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURASAME), 1);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURAMASA), 0);
+}
+
+/* The offer declined with the right cell.  The deployment still ran -- it is in
+   front of the question and not behind the answer -- the latch is still raised,
+   the cleared code is left standing so the chapter ends, and not one flags byte
+   moved. */
+static void chapter_19_the_offer_declined_ends_the_chapter(void)
+{
+    int unit_index;
+    int untouched;
+
+    /* Staged before the guard so that a machine without the game files still
+       leaves the latch array as the cases below this one expect to find it. */
+    ch19_stage(CH19_LAST_TURN, 0, CH19_END_OPEN);
+    ch19_give(CH19_JUNA_SLOT, 0, CH19_MURASAME);
+
+    ch19_check_files();
+    if (!ch19_files_ready) {
+        return;
+    }
+
+    ch19_run_offer(CH19_KEY_RIGHT, CH19_KEY_ENTER);
+
+    CHECK_EQ(data_fdps_map_spawn_pos_table_ptr == NULL, 1);
+    CHECK_EQ(end_code(), CH19_END_CLEARED);
+    CHECK_EQ(ch19_latch(), 1);
+
+    untouched = 0;
+    for (unit_index = 0; unit_index < CH19_UNITS; unit_index++) {
+        if ((int) ch19_unit(unit_index)->flags == CH19_STAGED_FLAGS) {
+            untouched++;
+        }
+    }
+    CHECK_EQ(untouched, CH19_UNITS);
+    CHECK_EQ(ch19_count_item(CH19_JUNA_SLOT, CH19_MURASAME), 1);
+}
+
+/* A cancel is not the right cell, but here it lands in the same place: the test
+   at 0003b00c is an equality against 0 and fdps_prompt_two_choice answers -1 on
+   Esc, so the refusal branch is taken.  A rebuild that wrote the test as
+   "answer != 1" would accept the duel on a cancel and retire the whole party. */
+static void chapter_19_a_cancel_declines_like_the_right_cell(void)
+{
+    /* Staged before the guard so that a machine without the game files still
+       leaves the latch array as the cases below this one expect to find it. */
+    ch19_stage(CH19_LAST_TURN, 0, CH19_END_OPEN);
+    ch19_give(CH19_JUNA_SLOT, 0, CH19_MURASAME);
+
+    ch19_check_files();
+    if (!ch19_files_ready) {
+        return;
+    }
+
+    ch19_run_offer(CH19_KEY_ESC, CH19_KEY_ESC);
+
+    CHECK_EQ(end_code(), CH19_END_CLEARED);
+    CHECK_EQ(ch19_latch(), 1);
+    CHECK_EQ((int) ch19_unit(0)->flags, CH19_STAGED_FLAGS);
+    CHECK_EQ((int) ch19_unit(CH19_JUNA_SLOT)->flags, CH19_STAGED_FLAGS);
 }
 
 /* ------------------------------------------------------------------------
@@ -2725,6 +3695,28 @@ void run_chpost2_tests(void)
     RUN_TEST(chapter_18_no_other_slot_ends_the_battle);
     RUN_TEST(chapter_18_a_recorded_verdict_is_left_alone);
     RUN_TEST(chapter_18_an_open_battle_stays_open);
+    RUN_TEST(chapter_19_record_shape_matches_the_offsets);
+    RUN_TEST(chapter_19_the_shared_end_test_runs);
+    RUN_TEST(chapter_19_a_live_enemy_keeps_the_battle_going);
+    RUN_TEST(chapter_19_a_retired_randis_is_a_defeat);
+    RUN_TEST(chapter_19_no_other_slot_ends_the_battle);
+    RUN_TEST(chapter_19_a_recorded_defeat_is_left_alone);
+    RUN_TEST(chapter_19_a_late_turn_withholds_the_offer);
+    RUN_TEST(chapter_19_an_open_battle_withholds_the_offer);
+    RUN_TEST(chapter_19_a_retired_juna_withholds_the_offer);
+    RUN_TEST(chapter_19_without_the_murasame_no_offer);
+    RUN_TEST(chapter_19_only_latch_slot_17_switches_the_halves);
+    RUN_TEST(chapter_19_the_duel_does_not_run_the_shared_test);
+    RUN_TEST(chapter_19_both_duellists_standing_settles_nothing);
+    RUN_TEST(chapter_19_a_retired_challenger_is_junas_win);
+    RUN_TEST(chapter_19_a_retired_juna_is_her_loss);
+    RUN_TEST(chapter_19_both_falling_counts_as_junas_win);
+    RUN_TEST(chapter_19_the_win_gives_the_muramasa_without_the_murasame);
+    RUN_TEST(chapter_19_the_win_removes_only_the_murasame);
+    RUN_TEST(chapter_19_the_duel_verdict_is_stable_across_calls);
+    RUN_TEST(chapter_19_the_offer_accepted_retires_everyone_but_juna);
+    RUN_TEST(chapter_19_the_offer_declined_ends_the_chapter);
+    RUN_TEST(chapter_19_a_cancel_declines_like_the_right_cell);
     RUN_TEST(chapter_20_turn_1_releases_slots_13_30_47);
     RUN_TEST(chapter_20_turn_17_still_releases);
     RUN_TEST(chapter_20_turn_18_releases_nothing);

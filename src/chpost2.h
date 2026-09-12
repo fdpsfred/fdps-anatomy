@@ -108,6 +108,58 @@ extern void fdps_chapter_17_post_action(void);
 extern void fdps_chapter_18_post_action(void);
 #pragma aux fdps_chapter_18_post_action "*" parm caller [];
 
+/* Chapter 19's post-action test: an ordinary battle whose exit is a duel.
+   Takes nothing, returns nothing, and leaves the verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h) -- but it is the one
+   handler in this file that can also put that verdict BACK to 0, and the one
+   that speaks to the player and moves an item.
+
+   Element 0x11 of data_fdps_map_cell_event_triggered_flags (gamedata.h) is the
+   switch between its two halves and is down for most of the chapter.  While it
+   is down the handler is a bare forward to
+   fdps_battle_check_default_end_conditions (btlend.h): every enemy retired
+   clears the chapter, a retired unit slot 0 is a defeat, and chapter 19's id,
+   0x12, is neither of the two the shared test singles out, so the slot it
+   watches for that defeat is 0, 蘭迪斯.  That is the chapter's stated rule set,
+   勝利條件 敵人全滅 and 失敗條件 蘭迪斯死亡.
+
+   The offer is the second half and it is an exit rite rather than an event: it
+   fires on the action that has just cleared the chapter and on no other.  All
+   five of the battle turn counter 20 or less, the battle-end code standing at
+   2, the latch still down, unit slot 4 -- 裘娜 -- not retired, and the
+   妖刀村雨 (item 0xa5) in her bag have to hold.  When they do, the map's wave 2
+   is deployed as the challenger, the challenge and the question are spoken
+   under FACE.CEL portrait 0x23, and fdps_prompt_two_choice (msgwin.h) takes the
+   answer.
+
+   Accepting retires every unit index 0 through 0x4c except 裘娜 -- the whole
+   party, 蘭迪斯 included -- and puts the battle-end code back to 0, so the
+   phase loop resumes with only the two duellists standing.  Declining says so
+   and leaves the cleared code alone.  Either answer raises the latch, which is
+   what makes the offer one-shot and what fdps_chapter_19_end reads to decide
+   whether to un-retire and restore the roster.
+
+   With the latch up the first half settles the duel instead of forwarding: it
+   watches unit 4 and unit 0x4d, writes nothing at all while both are standing,
+   and once one is down speaks the won or lost line and clears the chapter.
+   裘娜's win trades the 妖刀村雨 for the 妖刀村正 (item 0xa6); her loss moves
+   nothing.
+
+   IT MUST NOT FORWARD TO THE SHARED TEST WHILE THE LATCH IS UP.  The accepted
+   branch has just retired 蘭迪斯, so the shared test would force the defeat
+   code 1 the moment the duel began and the duel would be an instant Game Over.
+
+   0x4d is a hard-coded unit index and not a handle on the unit the deployment
+   appended: it names the challenger only while the array already holds exactly
+   0x4d units.  Clearing the chapter before the turn-6 wave has arrived appends
+   him at 0x4c instead, where the retire sweep kills him and the settle test
+   never fires.  That is shipped behaviour and not something the rebuild
+   corrects.
+
+   Table slot 18. */
+extern void fdps_chapter_19_post_action(void);
+#pragma aux fdps_chapter_19_post_action "*" parm caller [];
+
 /* Chapter 20's post-action test: releases three of the map's held enemies on
    each of the first seventeen turns, then applies the game's standard end
    conditions.  Takes nothing, returns nothing, and leaves the verdict in
