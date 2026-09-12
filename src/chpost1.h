@@ -75,6 +75,36 @@ extern void fdps_chapter_01_post_action(void);
 extern void fdps_chapter_02_post_action(void);
 #pragma aux fdps_chapter_02_post_action "*" parm caller [];
 
+/* Chapter 3's post-action test: the only two states the handler can see after
+   an action, as a strict else-if chain.  Takes nothing, returns nothing, and
+   leaves the verdict in data_fdps_chapter_event_or_battle_end_code
+   (gamedata.h).
+
+   It never calls fdps_battle_check_default_end_conditions (btlend.h), so
+   emptying the enemy side does not clear this chapter and a verdict a chapter
+   event already recorded is not protected by the shared test's gate: this
+   handler has no gate of its own and overwrites whatever it finds on either
+   arm.  Unit slot 0, the shared test's usual business, is tested here instead,
+   and it is tested FIRST -- a retired slot 0 records the defeat and returns,
+   so the second test is not reached at all.
+
+   The second test is unit slot 4, this map's 魔導士, and retiring him clears
+   the chapter: the handler speaks his own line -- entry 13 of the chapter's
+   text block, which opens with the portrait token and his character id 0x66 --
+   before recording the clear.  The guide states the chapter as 勝利條件 廿二
+   回合內打倒魔導士 against 失敗條件 蘭迪斯死亡, and the twenty-two turn half
+   of that is not here: map02.dat's turn-event table fires
+   fdps_chapter_03_event_turn_limit_game_over when the deadline passes.
+
+   Slot 4 is a position in this map's unit array, not a character id.  map02.dat
+   fields three player slots, so the roster fills 0..2 with 蘭迪斯, 尤利安 and
+   亞克, and the wave-0 deploy appends the guest 索爾 at slot 3 and the 魔導士
+   at slot 4.
+
+   Table slot 2. */
+extern void fdps_chapter_03_post_action(void);
+#pragma aux fdps_chapter_03_post_action "*" parm caller [];
+
 /* Chapter 4's post-action test: the game's standard end conditions, and then
    one defeat condition of its own -- unit slot 3 having left the battle.
    Takes nothing, returns nothing, and leaves the verdict in

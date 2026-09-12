@@ -2148,6 +2148,216 @@ static void ch01_no_slot_but_zero_and_two_ends_the_battle(void)
     }
 }
 
+/* ------------------------------------------------------------------ *
+ * Chapter 3's handler, 0003a4b0.  The only handler in this file whose two
+ * tests are ALTERNATIVES: PUSH 0x0 / CALL 0x000109b0 / ADD ESP,0x4 / TEST
+ * EAX,EAX / JZ 0003a4d6, the MOV dword ptr [0x00069da0],0x1 at 0003a4ca and
+ * then JMP 0003a511 straight to the epilogue, so the PUSH 0x4 / CALL
+ * 0x000109b0 at 0003a4d6 is only reached while slot 0 is standing.  Behind
+ * the second JZ sit the seven-push fdps_draw_text call at 0003a4e4..0003a4ff
+ * and MOV dword ptr [0x00069da0],0x2 at 0003a507.
+ *
+ * There is no CALL 0x0003a2e0 in the body at all, so the shared default end
+ * test is not part of this chapter: the guide gives it as 勝利條件 廿二回合
+ * 內打倒魔導士 against 失敗條件 蘭迪斯死亡, and emptying the enemy side is
+ * not one of them.  map02.dat fields three player slots, so the roster fills
+ * 0..2 with 蘭迪斯, 尤利安 and 亞克 and the wave-0 deploy appends the guest
+ * 索爾 at slot 3 and the 魔導士 at slot 4.
+ *
+ * The risk this file exists to catch is the else: chapters 1, 4, 5, 6, 9 and
+ * 11 all write their second test as an unguarded if, and there the override
+ * runs in the safe direction because it stamps a defeat over a clear.  Here
+ * the arms are reversed, so copying that shape would let an action that
+ * retires 蘭迪斯 and the 魔導士 together answer 2 instead of 1.
+ *
+ * The twenty-two turn half of the victory condition is not asserted here
+ * because it is not in this function: map02.dat's turn-event table fires
+ * chapter-event slot 5 when the counter reaches 22.
+ *
+ * WHETHER THE LINE IS DRAWN IS NOT ASSERTED BELOW, for chapter 1's reason --
+ * fdps_draw_text takes its whole effect through pixels at the VGA aperture
+ * and returns a cursor this handler discards, so a unit test has nothing to
+ * read back; the entry id is the literal PUSH 0xd at 0003a4f7.  The fixture
+ * below only keeps the call harmless.
+ * ------------------------------------------------------------------ */
+
+/* Chapter 3 is chapter id 2, table slot 2: the dword at 00060294, two entries
+   into the table based at 0006028c, is 0003a4b0. */
+#define CHAPTER_03_ID 2
+
+/* The slot chapter 3's victory test asks about -- PUSH 0x4 at 0003a4d6.  On
+   map02.dat that slot is the 魔導士, the second of the map's two wave-0
+   deployment records and the only enemy standing when it opens. */
+#define MAGE_SLOT 4
+
+/* The synthetic chapter text block, built like chapter 1's: every entry names
+   one lone terminator, so fdps_draw_text walks it, paints nothing and returns
+   at once with no font staged.  Twenty-four entries is what FDETXT03.TXT
+   holds and covers the id 13 this handler asks for; the real entry 13 opens
+   with the portrait token for character id 0x66 and would stand a modal wait
+   on a keyboard nothing is typing at. */
+#define CH03_TEXT_ENTRIES 24
+#define CH03_TEXT_TERMINATOR (-1)
+
+static short ch03_text[CH03_TEXT_ENTRIES + 1];
+
+/* Same staging as chapter 2's with the chapter id moved to chapter 3's, plus
+   the text block the draw inside the victory arm reads. */
+static void stage_ch03(int live_unit_count, int battle_end_code)
+{
+    int entry;
+
+    for (entry = 0; entry < CH03_TEXT_ENTRIES; entry++) {
+        ch03_text[entry] = (short) (CH03_TEXT_ENTRIES * 2);
+    }
+    ch03_text[CH03_TEXT_ENTRIES] = CH03_TEXT_TERMINATOR;
+
+    stage(live_unit_count, battle_end_code);
+    data_fdps_chapter_current_chapter_id = CHAPTER_03_ID;
+    data_fdps_current_chapter_text_ptr = (unsigned char *) ch03_text;
+}
+
+/* The first arm: a retired slot 0 is the chapter's one lose condition, and it
+   is decided here rather than in the shared test.  The 魔導士 is standing and
+   the field is not cleared, so nothing else could have written the 1. */
+static void ch03_a_retired_randis_is_a_defeat(void)
+{
+    stage_ch03(5, 0);
+    stage_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(1, SIDE_PLAYER, 0);
+    stage_unit(2, SIDE_PLAYER, 0);
+    stage_unit(3, SIDE_GUEST, 0);
+    stage_unit(MAGE_SLOT, SIDE_ENEMY, 0);
+    fdps_chapter_03_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The whole reason this handler is an else-if: the same action retires
+   蘭迪斯 and the 魔導士.  The JMP at 0003a4d4 takes the defeat arm past the
+   unit-4 test entirely, so the answer is 1.  Written as two unguarded ifs --
+   which is the shape of every other handler in this file -- the victory arm
+   would run second and answer 2, clearing a chapter the original loses. */
+static void ch03_a_retired_randis_outranks_a_retired_mage(void)
+{
+    stage_ch03(5, 0);
+    stage_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(1, SIDE_PLAYER, 0);
+    stage_unit(2, SIDE_PLAYER, 0);
+    stage_unit(3, SIDE_GUEST, 0);
+    stage_unit(MAGE_SLOT, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_03_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The second arm: with 蘭迪斯 standing the unit-4 test is reached, and a
+   retired 魔導士 clears the chapter even though the rest of the enemy side is
+   still on the field -- which is the guide's condition and not the shared
+   test's. */
+static void ch03_a_retired_mage_is_a_clear(void)
+{
+    stage_ch03(6, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_PLAYER, 0);
+    stage_unit(2, SIDE_PLAYER, 0);
+    stage_unit(3, SIDE_GUEST, 0);
+    stage_unit(MAGE_SLOT, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(5, SIDE_ENEMY, 0);
+    fdps_chapter_03_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* Neither arm taken: the handler has no unconditional store anywhere in the
+   body, so whatever the battle loop or a chapter event left in the code comes
+   back untouched. */
+static void ch03_neither_test_firing_leaves_the_code_alone(void)
+{
+    stage_ch03(6, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(MAGE_SLOT, SIDE_ENEMY, 0);
+    stage_unit(5, SIDE_ENEMY, 0);
+    fdps_chapter_03_post_action();
+    CHECK_EQ(end_code(), 0);
+
+    stage_ch03(6, 1);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(MAGE_SLOT, SIDE_ENEMY, 0);
+    stage_unit(5, SIDE_ENEMY, 0);
+    fdps_chapter_03_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch03(6, 2);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(MAGE_SLOT, SIDE_ENEMY, 0);
+    stage_unit(5, SIDE_ENEMY, 0);
+    fdps_chapter_03_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* Neither store consults the code before writing, because there is no gate in
+   front of either: this handler does not call the shared test and so inherits
+   none of its CMP dword ptr [0x00069da0],0x0 / JNZ early return.  So a verdict
+   a chapter event recorded is overwritten by either arm, in both directions --
+   a recorded clear becomes the defeat, a recorded defeat becomes the clear. */
+static void ch03_a_recorded_verdict_is_overwritten(void)
+{
+    stage_ch03(5, 2);
+    stage_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage_unit(MAGE_SLOT, SIDE_ENEMY, 0);
+    fdps_chapter_03_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch03(5, 1);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(MAGE_SLOT, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_03_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* The shared default end test is not called.  Every unit on the enemy side is
+   retired, which is the one situation where that test writes its 2 and leaves
+   it standing; slot 0 and slot 4 are both live, so this handler writes
+   nothing and the code stays 0.  Slot 4 is staged on the player side here
+   precisely because it has to be standing while the enemy side is empty --
+   the index is a position in the array and nothing about the record it finds
+   is read by fdps_unit_is_retired except the retirement bit. */
+static void ch03_the_shared_end_test_is_not_run(void)
+{
+    stage_ch03(6, 0);
+    stage_unit(0, SIDE_PLAYER, 0);
+    stage_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(2, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(3, SIDE_ENEMY, FLAG_RETIRED);
+    stage_unit(MAGE_SLOT, SIDE_PLAYER, 0);
+    stage_unit(5, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_03_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* Only slots 0 and 4 decide anything.  Every other slot retires in turn with
+   both of those standing, so any non-zero answer would be a test the handler
+   does not have -- a literal in one of the two PUSHes having drifted, or a
+   third test having been invented.  Slot 7 stays a live enemy throughout; the
+   case above is what holds the shared test out, not this sweep. */
+static void ch03_no_slot_but_zero_and_four_ends_the_battle(void)
+{
+    int retired_slot;
+    int player_slot;
+
+    for (retired_slot = 1; retired_slot < STAGE_UNITS - 1; retired_slot++) {
+        if (retired_slot == MAGE_SLOT) {
+            continue;
+        }
+        stage_ch03(STAGE_UNITS, 0);
+        for (player_slot = 0; player_slot < STAGE_UNITS - 1; player_slot++) {
+            stage_unit(player_slot, SIDE_PLAYER, 0);
+        }
+        stage_unit(STAGE_UNITS - 1, SIDE_ENEMY, 0);
+        stage_units[retired_slot].flags = FLAG_RETIRED;
+        fdps_chapter_03_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
 void run_chpost1_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -2227,4 +2437,11 @@ void run_chpost1_tests(void)
     RUN_TEST(ch01_a_live_sol_leaves_the_shared_verdict_alone);
     RUN_TEST(ch01_the_sol_test_survives_a_recorded_verdict);
     RUN_TEST(ch01_no_slot_but_zero_and_two_ends_the_battle);
+    RUN_TEST(ch03_a_retired_randis_is_a_defeat);
+    RUN_TEST(ch03_a_retired_randis_outranks_a_retired_mage);
+    RUN_TEST(ch03_a_retired_mage_is_a_clear);
+    RUN_TEST(ch03_neither_test_firing_leaves_the_code_alone);
+    RUN_TEST(ch03_a_recorded_verdict_is_overwritten);
+    RUN_TEST(ch03_the_shared_end_test_is_not_run);
+    RUN_TEST(ch03_no_slot_but_zero_and_four_ends_the_battle);
 }

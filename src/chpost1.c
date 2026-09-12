@@ -47,6 +47,24 @@
    raises the portrait of the very unit that has just been lost. */
 #define CH01_SOL_DEATH_TEXT_ID 15
 
+/* The unit slot chapter 3's victory test asks about, PUSH 0x4 at 0003a4d6.
+   It is a position in this map's unit array and not a character id:
+   map02.dat declares three player slots in its header byte at +1, so the
+   roster pass fills 0, 1 and 2 with 蘭迪斯, 尤利安 and 亞克, and the wave-0
+   deploy that ends the array build appends the map's two wave-0 records in
+   table order -- side 1, character id 0x0c, level 10, the guest 索爾 at slot
+   3, then side 0, character id 0x66, level 8, the 魔導士 at slot 4.  He is
+   the only enemy standing when the map opens: of the other 78 deployment
+   records, 5 are the level-5 狼人 of wave 1 and the remaining 73 are level-6
+   石巨神 spread over waves 2 to 15. */
+#define CH03_MAGE_SLOT 4
+
+/* The entry of the chapter's own text block the victory line is spoken from,
+   PUSH 0xd at 0003a4f7.  FDETXT03.TXT holds twenty-four entries and entry 13
+   opens with the token pair -0x11, 102 -- the portrait code carrying
+   character id 0x66 -- so the line is the 魔導士's own. */
+#define CH03_MAGE_DEATH_TEXT_ID 13
+
 /* 0003a3b0.  The shared test, then one defeat test of this chapter's own that
    speaks a line before it records its verdict.
 
@@ -126,6 +144,63 @@ void fdps_chapter_01_post_action(void)
 void fdps_chapter_02_post_action(void)
 {
     fdps_battle_check_default_end_conditions();
+}
+
+/* 0003a4b0.  No shared test at all: two tests of this chapter's own, written
+   as a strict else-if chain, and nothing else in the body.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003a4b0..0003a4b6 --
+   and nothing in it is ever read, so there is no local to name.
+
+   PUSH 0x0 / CALL 0x000109b0 / ADD ESP,0x4 at 0003a4bc..0003a4c3 is
+   fdps_unit_is_retired(0), the caller clearing its one argument, and its EAX
+   is used: TEST EAX,EAX / JZ 0003a4d6 at 0003a4c6 picks between MOV dword ptr
+   [0x00069da0],0x1 at 0003a4ca and the second test.  PUSH 0x4 / CALL
+   0x000109b0 / ADD ESP,0x4 at 0003a4d6..0003a4dd is fdps_unit_is_retired(4)
+   and its EAX is used the same way -- TEST EAX,EAX / JZ 0003a511 at 0003a4e0
+   skips the whole victory arm.
+
+   THE TWO TESTS ARE ONE ELSE-IF CHAIN AND NOT TWO INDEPENDENT IFS.  JMP
+   0003a511 at 0003a4d4 takes the defeat arm straight to the epilogue, so the
+   unit-4 test never runs once slot 0 is found retired.  The siblings above
+   and below do write their second test as an unguarded if, but there the
+   override runs in the safe direction: it stamps a defeat over a clear.  Here
+   the arms are the other way round, so an action that retires 蘭迪斯 and the
+   魔導士 together would have the 2 overwrite the 1, speak the victory line and
+   clear a chapter the original loses.
+
+   The victory arm speaks before it records: PUSH 0x6d / 0x0 / 0xd0 / 0x140 /
+   0xa0000 / 0xd / dword ptr [0x00060124] then CALL 0x0001ff60 and ADD
+   ESP,0x1c at 0003a4e4..0003a504, the caller clearing all seven arguments.
+   Nothing reads EAX after that CALL, so the cursor fdps_draw_text returns is
+   discarded.  Then MOV dword ptr [0x00069da0],0x2 at 0003a507.
+
+   There is no CALL 0x0003a2e0 anywhere in this function, so emptying the
+   enemy side is not a clear here -- the reinforcement waves keep arriving and
+   only the 魔導士's death ends it, which is the guide's 勝利條件 廿二回合內打
+   倒魔導士.  The turn half of that condition is not enforced here either:
+   map02.dat's turn-event table ends its live records with (22, 5, 0) and
+   fdps_battle_run_turn_events calls chapter-event slot 5 when the counter
+   reaches it.  And neither store is gated on the code's current value, so a
+   verdict a chapter event already recorded is overwritten by either arm --
+   this handler has none of the shared test's early-return protection because
+   it does not call it.
+
+   Table slot 2: the dword at 00060294, two entries into the table based at
+   0006028c, is 0003a4b0. */
+void fdps_chapter_03_post_action(void)
+{
+    if (fdps_unit_is_retired(0) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    } else if (fdps_unit_is_retired(CH03_MAGE_SLOT) != 0) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH03_MAGE_DEATH_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        data_fdps_chapter_event_or_battle_end_code = 2;
+    }
 }
 
 /* 0003a560.  The shared test, then one defeat test of this chapter's own.
