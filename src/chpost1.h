@@ -390,4 +390,43 @@ extern void fdps_chapter_13_post_action(void);
 extern void fdps_chapter_14_post_action(void);
 #pragma aux fdps_chapter_14_post_action "*" parm caller [];
 
+/* Chapter 15's post-action test: two different tests behind one flag.  Takes
+   nothing, returns nothing, and leaves its verdict in
+   data_fdps_chapter_event_or_battle_end_code (gamedata.h).
+
+   While element 0x10 of data_fdps_map_cell_event_triggered_flags (gamedata.h)
+   is clear -- which is every moment of the chapter but one -- this is a bare
+   forward to fdps_battle_check_default_end_conditions (btlend.h) and nothing
+   else, the same shape as chapters 2's, 7's, 12's, 13's and 14's.
+
+   Non-zero, the chapter's optional duel is running.
+   fdps_chapter_15_event_boss_defeat (chevt3.h) raises that flag on the arm
+   where the fortress cannon fell on battle turn 25 or earlier and the player
+   accepted the challenger's offer; the same event had already retired every
+   unit at indices 0..8 except 裘娜's at slot 4, unit 0x34 with them, and
+   deployed the challenger as unit 0x35, so those two are the only ones left
+   standing.  This handler then asks fdps_unit_is_retired (unit.h) about slot 4
+   and, only while she is standing, about slot 0x35: with both still up it
+   returns having written nothing, so the battle loop keeps the duel going.
+   Once one of them is down a third call to the same test says which, the
+   matching line of the chapter's text block is spoken -- entry 0x16 for
+   裘娜 beaten, entry 0x17 for the challenger beaten -- and the chapter ends
+   with the cleared code EITHER WAY.
+
+   Winning also pays out: fdps_unit_item_count (unititem.h) is asked about slot
+   4, and on any answer but exactly 8 entry 0x18 is spoken and
+   fdps_unit_add_item puts item 0xa5, the 妖刀村雨, into her first free
+   inventory entry.  A full bag skips both silently -- no swap prompt, no
+   forced grant, and no line to say the sword was refused.
+
+   THE SHARED TEST MUST NOT RUN WHILE THE FLAG IS UP.  Unit 0, 蘭迪斯, is
+   one of the records the duel setup retires, so the shared test would force the
+   defeat code the moment the player accepts: the ordinary "call the shared test
+   first, then add the chapter's own condition" shape that every other handler
+   in this file has turns chapter 15's duel into an instant Game Over.
+
+   Table slot 14. */
+extern void fdps_chapter_15_post_action(void);
+#pragma aux fdps_chapter_15_post_action "*" parm caller [];
+
 #endif

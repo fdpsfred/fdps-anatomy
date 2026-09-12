@@ -2699,6 +2699,339 @@ static void ch08_no_unnamed_slot_ends_the_battle(void)
     }
 }
 
+
+/* Chapter 15 is chapter id 14, table slot 14: the dword at 000602c4, fourteen
+   entries into the table based at 0006028c, is 0003ab30. */
+#define CHAPTER_15_ID 14
+
+/* The byte the whole handler divides on, CMP byte ptr [0x000640e8],0x0 at
+   0003ab3c: element 0x10 of the 32-byte block based at 0x000640d8. */
+#define CH15_DUEL_FLAG_SLOT 0x10
+
+/* The two duellists, PUSH 0x4 and PUSH 0x35 at 0003ab4f and 0003ab5d: unit
+   array positions, 裘娜 at 4 and the challenger at 0x35. */
+#define CH15_JUNA_SLOT 4
+#define CH15_CHALLENGER_SLOT 0x35
+
+/* One record past the challenger so slot 0x35 is inside the staged array. */
+#define CH15_STAGE_UNITS 0x36
+
+/* FDETXT15.TXT's own entry count, so entries 0x16, 0x17 and 0x18 sit where the
+   shipped file has them.  Every entry points at the terminator word that
+   follows the table, which is what keeps fdps_draw_text from opening a message
+   window and waiting on the keyboard while the test runs. */
+#define CH15_TEXT_ENTRIES 29
+#define CH15_TEXT_TERMINATOR (-1)
+
+/* The eight 2-byte inventory entries of a unit record and the empty bit of an
+   entry's flag byte, the mask fdps_unit_item_count and fdps_unit_add_item both
+   use. */
+#define CH15_BAG_ENTRIES 8
+#define CH15_BAG_ENTRY_EMPTY 0x80
+
+/* The item the duel pays out, PUSH 0xa5 at 0003abf7: 妖刀村雨. */
+#define CH15_MURASAME_ITEM_ID 0xa5
+
+/* A filler id for an entry that was already occupied before the duel: any
+   value but the sword's, so a check can tell a pre-existing item from the
+   grant. */
+#define CH15_FILLER_ITEM_ID 0x10
+
+static struct fdps_unit_record ch15_units[CH15_STAGE_UNITS];
+static short ch15_text[CH15_TEXT_ENTRIES + 1];
+
+/* Every unit standing on the player side, so the shared test finds no live
+   enemy and its up-front 2 survives; every one of 裘娜's eight inventory
+   entries empty.  Each case edits only what it is about. */
+static void ch15_stage(int duel_flag, int battle_end_code)
+{
+    unsigned char *bytes;
+    int entry;
+    int i;
+
+    for (entry = 0; entry < CH15_TEXT_ENTRIES; entry++) {
+        ch15_text[entry] = (short) (CH15_TEXT_ENTRIES * 2);
+    }
+    ch15_text[CH15_TEXT_ENTRIES] = CH15_TEXT_TERMINATOR;
+
+    bytes = (unsigned char *) ch15_units;
+    for (i = 0; i < (int) sizeof(ch15_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < CH15_STAGE_UNITS; i++) {
+        ch15_units[i].side = SIDE_PLAYER;
+    }
+    for (entry = 0; entry < CH15_BAG_ENTRIES; entry++) {
+        ch15_units[CH15_JUNA_SLOT].inventory_slots[entry * 2] =
+            CH15_BAG_ENTRY_EMPTY;
+    }
+
+    for (i = 0; i < 32; i++) {
+        data_fdps_map_cell_event_triggered_flags[i] = 0;
+    }
+    data_fdps_map_cell_event_triggered_flags[CH15_DUEL_FLAG_SLOT] =
+        (unsigned char) duel_flag;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch15_units;
+    data_fdps_map_unit_count = CH15_STAGE_UNITS;
+    data_fdps_chapter_current_chapter_id = CHAPTER_15_ID;
+    data_fdps_current_chapter_text_ptr = (unsigned char *) ch15_text;
+    data_fdps_chapter_event_or_battle_end_code = (unsigned int) battle_end_code;
+}
+
+static void ch15_retire(int unit_index)
+{
+    ch15_units[unit_index].flags = FLAG_RETIRED;
+}
+
+/* Occupy the first occupied_count of 裘娜's eight entries and leave the
+   rest empty, which is exactly what fdps_unit_item_count counts. */
+static void ch15_fill_bag(int occupied_count)
+{
+    int entry;
+
+    for (entry = 0; entry < CH15_BAG_ENTRIES; entry++) {
+        if (entry < occupied_count) {
+            ch15_units[CH15_JUNA_SLOT].inventory_slots[entry * 2] = 0;
+            ch15_units[CH15_JUNA_SLOT].inventory_slots[entry * 2 + 1] =
+                (unsigned char) (CH15_FILLER_ITEM_ID + entry);
+        } else {
+            ch15_units[CH15_JUNA_SLOT].inventory_slots[entry * 2] =
+                CH15_BAG_ENTRY_EMPTY;
+            ch15_units[CH15_JUNA_SLOT].inventory_slots[entry * 2 + 1] = 0;
+        }
+    }
+}
+
+/* Which entry of 裘娜's bag holds the sword, or -1 for none.  An entry
+   counts only when its flag byte is the plain 0 fdps_unit_add_item writes, so
+   a leftover empty bit beside the right id would not pass. */
+static int ch15_murasame_entry(void)
+{
+    int entry;
+
+    for (entry = 0; entry < CH15_BAG_ENTRIES; entry++) {
+        if (ch15_units[CH15_JUNA_SLOT].inventory_slots[entry * 2] == 0 &&
+            ch15_units[CH15_JUNA_SLOT].inventory_slots[entry * 2 + 1] ==
+                CH15_MURASAME_ITEM_ID) {
+            return entry;
+        }
+    }
+    return -1;
+}
+
+/* The flag clear is the ordinary case and the CALL at 0003ab45 is really
+   taken: with no live enemy the shared test's up-front 2 survives, and a
+   handler whose body did nothing would leave the 0 it was given. */
+static void ch15_a_clear_flag_runs_the_shared_test(void)
+{
+    ch15_stage(0, 0);
+    fdps_chapter_15_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* The rest of the shared test runs too, both halves of it: a standing enemy
+   knocks the code back to 0 and a retired unit slot 0 then stamps the defeat
+   over it.  Chapter id 14 is neither 0x10 nor 0x15, so the slot the shared
+   test asks about is 0 and not 3. */
+static void ch15_a_clear_flag_keeps_the_whole_shared_test(void)
+{
+    ch15_stage(0, 0);
+    ch15_units[1].side = SIDE_ENEMY;
+    fdps_chapter_15_post_action();
+    CHECK_EQ(end_code(), 0);
+
+    ch15_stage(0, 0);
+    ch15_units[1].side = SIDE_ENEMY;
+    ch15_retire(0);
+    fdps_chapter_15_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* JNZ 0003ab4f at 0003ab43 is the only way into the duel arm, so with the flag
+   clear the duellists are never looked at: both of them down is still just the
+   shared test's answer and no sword changes hands. */
+static void ch15_a_clear_flag_never_settles_the_duel(void)
+{
+    ch15_stage(0, 0);
+    ch15_retire(CH15_JUNA_SLOT);
+    ch15_retire(CH15_CHALLENGER_SLOT);
+    fdps_chapter_15_post_action();
+    CHECK_EQ(end_code(), 2);
+    CHECK_EQ(ch15_murasame_entry(), -1);
+}
+
+/* The compare at 0003ab3c is against 0 and not against 1, so every other byte
+   value takes the duel arm -- where two standing duellists leave the code
+   alone, which a flag of 0 would have turned into the shared test's 2. */
+static void ch15_any_non_zero_flag_takes_the_duel_arm(void)
+{
+    int flag;
+    int values[3];
+
+    values[0] = 1;
+    values[1] = 2;
+    values[2] = 0xff;
+    for (flag = 0; flag < 3; flag++) {
+        ch15_stage(values[flag], 0);
+        fdps_chapter_15_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
+/* JZ 0003ac10 at 0003ab69: both duellists standing leaves through the epilogue
+   with nothing written, so whatever code was standing is still standing and
+   the battle loop keeps the duel going. */
+static void ch15_two_standing_duellists_leave_the_code_alone(void)
+{
+    int incoming;
+
+    for (incoming = 0; incoming <= 2; incoming++) {
+        ch15_stage(1, incoming);
+        fdps_chapter_15_post_action();
+        CHECK_EQ(end_code(), incoming);
+    }
+}
+
+/* THE SHARED TEST IS NOT RUN WHILE THE DUEL IS ON.  The event that raises the
+   flag retires unit 0 along with the rest of the roster, so a handler that
+   called the shared test first would report the defeat here; the original
+   leaves the code untouched and the duel plays on. */
+static void ch15_a_retired_randis_does_not_end_the_duel(void)
+{
+    ch15_stage(1, 0);
+    ch15_retire(0);
+    fdps_chapter_15_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* 裘娜 down is the duel lost, and it still ends the chapter with the
+   cleared code -- MOV dword ptr [0x00069da0],0x2 at 0003ac06 is reached from
+   both arms.  Nothing is granted on this arm. */
+static void ch15_a_lost_duel_still_clears_the_chapter(void)
+{
+    ch15_stage(1, 0);
+    ch15_retire(CH15_JUNA_SLOT);
+    fdps_chapter_15_post_action();
+    CHECK_EQ(end_code(), 2);
+    CHECK_EQ(ch15_murasame_entry(), -1);
+}
+
+/* The challenger down with 裘娜 standing is the duel won: the same
+   cleared code, and the sword goes into her first free entry with the plain
+   zero flag byte that makes it count. */
+static void ch15_a_won_duel_clears_and_pays_out(void)
+{
+    ch15_stage(1, 0);
+    ch15_retire(CH15_CHALLENGER_SLOT);
+    fdps_chapter_15_post_action();
+    CHECK_EQ(end_code(), 2);
+    CHECK_EQ(ch15_murasame_entry(), 0);
+}
+
+/* The third call at 0003ab6f is what picks the arm, and it asks about
+   裘娜 alone: with BOTH duellists down it is her arm that runs, so the
+   sword is not handed out even though the challenger fell too. */
+static void ch15_both_down_is_settled_as_a_loss(void)
+{
+    ch15_stage(1, 0);
+    ch15_retire(CH15_JUNA_SLOT);
+    ch15_retire(CH15_CHALLENGER_SLOT);
+    fdps_chapter_15_post_action();
+    CHECK_EQ(end_code(), 2);
+    CHECK_EQ(ch15_murasame_entry(), -1);
+}
+
+/* CMP EAX,0x8 / JZ 0003ac06 at 0003abcf is an equality and not a bound: every
+   count from 0 to 7 leaves room and is paid, and exactly 8 is the full bag
+   that is passed over.  The chapter is cleared either way. */
+static void ch15_the_bag_test_is_an_equality(void)
+{
+    int occupied;
+
+    for (occupied = 0; occupied <= CH15_BAG_ENTRIES; occupied++) {
+        ch15_stage(1, 0);
+        ch15_fill_bag(occupied);
+        ch15_retire(CH15_CHALLENGER_SLOT);
+        fdps_chapter_15_post_action();
+        CHECK_EQ(end_code(), 2);
+        if (occupied == CH15_BAG_ENTRIES) {
+            CHECK_EQ(ch15_murasame_entry(), -1);
+        } else {
+            CHECK_EQ(ch15_murasame_entry(), occupied);
+        }
+    }
+}
+
+/* A full bag is silent: no entry is overwritten, so all eight ids are the ones
+   they were staged with.  A build that swapped an item out, or forced the
+   sword in, would fail here. */
+static void ch15_a_full_bag_keeps_every_entry(void)
+{
+    int entry;
+
+    ch15_stage(1, 0);
+    ch15_fill_bag(CH15_BAG_ENTRIES);
+    ch15_retire(CH15_CHALLENGER_SLOT);
+    fdps_chapter_15_post_action();
+    for (entry = 0; entry < CH15_BAG_ENTRIES; entry++) {
+        CHECK_EQ(ch15_units[CH15_JUNA_SLOT].inventory_slots[entry * 2], 0);
+        CHECK_EQ(ch15_units[CH15_JUNA_SLOT].inventory_slots[entry * 2 + 1],
+                 CH15_FILLER_ITEM_ID + entry);
+    }
+}
+
+/* The grant lands in the first free entry and touches nothing else: with two
+   entries already occupied the sword takes the third and the first two keep
+   their ids. */
+static void ch15_the_grant_takes_the_first_free_entry(void)
+{
+    ch15_stage(1, 0);
+    ch15_fill_bag(2);
+    ch15_retire(CH15_CHALLENGER_SLOT);
+    fdps_chapter_15_post_action();
+    CHECK_EQ(ch15_murasame_entry(), 2);
+    CHECK_EQ(ch15_units[CH15_JUNA_SLOT].inventory_slots[1],
+             CH15_FILLER_ITEM_ID);
+    CHECK_EQ(ch15_units[CH15_JUNA_SLOT].inventory_slots[3],
+             CH15_FILLER_ITEM_ID + 1);
+}
+
+/* The store at 0003ac06 reads nothing first, so the duel's verdict overrides
+   whatever was already recorded -- a defeat a chapter event had settled
+   included -- and a retired unit 0 does not change that either. */
+static void ch15_the_duel_verdict_overrides_a_recorded_code(void)
+{
+    ch15_stage(1, 1);
+    ch15_retire(CH15_CHALLENGER_SLOT);
+    fdps_chapter_15_post_action();
+    CHECK_EQ(end_code(), 2);
+
+    ch15_stage(1, 0);
+    ch15_retire(0);
+    ch15_retire(CH15_CHALLENGER_SLOT);
+    fdps_chapter_15_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* No unit but the two duellists has any say while the duel is on: retiring any
+   other slot in turn, with both of them standing, leaves the code alone. */
+static void ch15_no_other_slot_settles_the_duel(void)
+{
+    int retired_slot;
+
+    for (retired_slot = 0; retired_slot < CH15_STAGE_UNITS; retired_slot++) {
+        if (retired_slot == CH15_JUNA_SLOT ||
+            retired_slot == CH15_CHALLENGER_SLOT) {
+            continue;
+        }
+        ch15_stage(1, 0);
+        ch15_retire(retired_slot);
+        fdps_chapter_15_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
 void run_chpost1_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -2798,4 +3131,18 @@ void run_chpost1_tests(void)
     RUN_TEST(ch08_the_shared_end_test_is_not_run);
     RUN_TEST(ch08_a_recorded_verdict_is_left_alone);
     RUN_TEST(ch08_no_unnamed_slot_ends_the_battle);
+    RUN_TEST(ch15_a_clear_flag_runs_the_shared_test);
+    RUN_TEST(ch15_a_clear_flag_keeps_the_whole_shared_test);
+    RUN_TEST(ch15_a_clear_flag_never_settles_the_duel);
+    RUN_TEST(ch15_any_non_zero_flag_takes_the_duel_arm);
+    RUN_TEST(ch15_two_standing_duellists_leave_the_code_alone);
+    RUN_TEST(ch15_a_retired_randis_does_not_end_the_duel);
+    RUN_TEST(ch15_a_lost_duel_still_clears_the_chapter);
+    RUN_TEST(ch15_a_won_duel_clears_and_pays_out);
+    RUN_TEST(ch15_both_down_is_settled_as_a_loss);
+    RUN_TEST(ch15_the_bag_test_is_an_equality);
+    RUN_TEST(ch15_a_full_bag_keeps_every_entry);
+    RUN_TEST(ch15_the_grant_takes_the_first_free_entry);
+    RUN_TEST(ch15_the_duel_verdict_overrides_a_recorded_code);
+    RUN_TEST(ch15_no_other_slot_settles_the_duel);
 }

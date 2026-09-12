@@ -12,6 +12,7 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "unit.h"
+#include "unititem.h"
 #include "btlend.h"
 #include "text.h"
 #include "chpost1.h"
@@ -781,6 +782,43 @@ void fdps_chapter_13_post_action(void)
     fdps_battle_check_default_end_conditions();
 }
 
+/* The element of data_fdps_map_cell_event_triggered_flags chapter 15's duel
+   runs behind, CMP byte ptr [0x000640e8],0x0 at 0003ab3c: 0x000640e8 is
+   0x000640d8 + 0x10, so it is element 0x10 of the 32-byte block, the slot the
+   chapter-event handlers use as their one-shot latch.
+   fdps_chapter_15_event_boss_defeat (chevt3.h) raises it at 00037c83 on the
+   arm where the player accepts the challenge, and fdps_chapter_15_end reads
+   the same byte at 0003ac2c. */
+#define CH15_DUEL_FLAG_SLOT 0x10
+
+/* The two duellists, PUSH 0x4 at 0003ab4f, 0003ab6f and 0003abc5 and PUSH
+   0x35 at 0003ab5d.  Both are positions in this map's unit array and not
+   character ids: chapter 15 lays down nine roster records at indices 0..8 and
+   裘娜, character id 0x03, is the fifth of them, while unit 0x35 is the map's
+   one wave-2 deployment record -- the level 17 challenger -- which
+   fdps_chapter_15_event_boss_defeat appends when the offer is accepted. */
+#define CH15_JUNA_SLOT 4
+#define CH15_CHALLENGER_SLOT 0x35
+
+/* The three entries of the chapter's own text block this handler speaks,
+   PUSH 0x16 at 0003ab90, PUSH 0x17 at 0003abb5 and PUSH 0x18 at 0003abe7.
+   FDETXT15.TXT holds twenty-nine entries, so all three are in range, and each
+   of them opens with the token pair -0x11, 0x23 -- the portrait code carrying
+   character id 0x23, the challenger's -- so he speaks all three lines, the one
+   for the duel he lost included. */
+#define CH15_DUEL_LOST_TEXT_ID 0x16
+#define CH15_DUEL_WON_TEXT_ID 0x17
+#define CH15_MURASAME_GIVEN_TEXT_ID 0x18
+
+/* The answer from fdps_unit_item_count that means 裘娜 has no room, CMP
+   EAX,0x8 at 0003abcf: a unit record carries eight inventory entries, so eight
+   occupied is a full bag and anything below it leaves a slot free. */
+#define CH15_BAG_FULL_COUNT 8
+
+/* The item the duel pays out, PUSH 0xa5 at 0003abf7: 妖刀村雨, AP 170,
+   HIT 130, 20% 麻痺 (assets/items.md). */
+#define CH15_MURASAME_ITEM_ID 0xa5
+
 /* 0003aad0.  One CALL and a return, with no branch in the body at all --
    instruction for instruction the chapter 2, 7, 12 and 13 handlers above,
    reached through a fifth table slot.
@@ -827,4 +865,110 @@ void fdps_chapter_13_post_action(void)
 void fdps_chapter_14_post_action(void)
 {
     fdps_battle_check_default_end_conditions();
+}
+
+/* 0003ab30.  Two handlers in one body, picked apart by a single flag: while
+   chapter 15's optional duel is running this settles the duel and the shared
+   end test is never called at all; at every other moment it is a bare forward
+   to that shared test.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003ab30..0003ab36 -- and
+   nothing in it is ever read, so there is no local to name.  The epilogue is
+   the four bare POPs at 0003ac10..0003ac13 with no MOV ESP,EBP in front of
+   them, which is what an empty local area leaves behind.
+
+   CMP byte ptr [0x000640e8],0x0 / JNZ 0003ab4f at 0003ab3c is the whole
+   division.  Falling through, CALL 0x0003a2e0 at 0003ab45 has nothing pushed
+   in front of it and no ESP adjustment behind it, so the shared test takes no
+   argument, and JMP 0003ac10 at 0003ab4a goes straight to the epilogue with
+   EAX never read: the callee's result is not used and this arm stores nothing
+   of its own.  The compare is against 0 and not against 1, so any non-zero
+   byte takes the duel arm.
+
+   THE TWO ARMS ARE EXCLUSIVE AND THE ORDER CANNOT BE REVERSED.  Writing this
+   as the shared test first and the duel test after it -- the shape every other
+   handler in this file has -- turns the duel into an instant defeat: the event
+   that raises the flag retires unit records 0..8 except 裘娜's, unit 0 among
+   them, and the shared test makes a retired unit 0 a defeat.  The original
+   never asks it while the flag is up, and that is what keeps the duel running.
+
+   The duel arm's first two calls are the both-still-standing gate.  PUSH 0x4 /
+   CALL 0x000109b0 / ADD ESP,0x4 at 0003ab4f..0003ab56 is
+   fdps_unit_is_retired(4), the caller clearing its one argument, and its EAX
+   is used: TEST EAX,EAX / JNZ 0003ab6f at 0003ab59 jumps the second call
+   ENTIRELY, so the pair short circuits.  PUSH 0x35 / CALL 0x000109b0 / ADD
+   ESP,0x4 at 0003ab5d..0003ab64 is fdps_unit_is_retired(0x35) and its EAX is
+   used the same way -- TEST EAX,EAX / JZ 0003ac10 at 0003ab67 leaves through
+   the epilogue without touching the battle-end code, so the battle loop keeps
+   running and the duel plays on.
+
+   PUSH 0x4 / CALL 0x000109b0 / ADD ESP,0x4 at 0003ab6f..0003ab76 asks the same
+   question a THIRD time, now to find out which of the two fell, and its EAX
+   decides the arm: TEST EAX,EAX / JZ 0003aba2 at 0003ab79 sends the
+   challenger-fell case to 0003aba2 and lets the 裘娜-fell case run on.  The
+   value is re-read rather than carried over from the first call because a CALL
+   sits between them, and both calls are emitted.
+
+   The three draws are each seven pushes in reverse argument order -- 0x6d,
+   0x0, 0xd0, 0x140, 0xa0000, the text id, then the dword at 0x00060124 -- with
+   ADD ESP,0x1c behind them, this function clearing all seven itself.
+   fdps_draw_text hands back the cursor it stopped at and none of the three
+   results is read: after 0003ab9d comes JMP 0003ac06, after 0003abc2 a PUSH
+   0x4, and after 0003abf4 a PUSH 0xa5.
+
+   PUSH 0x4 / CALL 0x00025240 / ADD ESP,0x4 at 0003abc5..0003abcc is
+   fdps_unit_item_count(4) and its EAX is used: CMP EAX,0x8 / JZ 0003ac06 at
+   0003abcf skips both the third draw and the grant.  It is an EQUALITY against
+   8 and not a >= test, and the message goes with the item -- a full bag says
+   nothing and hands over nothing, with no swap prompt and no forced grant.
+   PUSH 0xa5 / PUSH 0x4 / CALL 0x00025d20 / ADD ESP,0x8 at 0003abf7..0003ac03
+   is fdps_unit_add_item(4, 0xa5) with the arguments pushed in reverse and the
+   caller clearing both; its EAX, the 1 or -1 the callee answers with, is not
+   read, the next instruction being the store at 0003ac06.
+
+   MOV dword ptr [0x00069da0],0x2 at 0003ac06 is reached from both outcomes:
+   the JMP at 0003aba0 carries the 裘娜-fell arm to it and the challenger-fell
+   arm falls into it.  So the chapter is CLEARED whichever way the duel went,
+   and losing it costs the sword and nothing else.  The store reads nothing
+   first, so it overrides whatever code was standing.
+
+   Table slot 14: the dword at 000602c4, fourteen entries into the table based
+   at 0006028c, is 0003ab30, and that table entry is the function's only
+   xref. */
+void fdps_chapter_15_post_action(void)
+{
+    if (data_fdps_map_cell_event_triggered_flags[CH15_DUEL_FLAG_SLOT] == 0) {
+        fdps_battle_check_default_end_conditions();
+        return;
+    }
+
+    if (fdps_unit_is_retired(CH15_JUNA_SLOT) == 0 &&
+        fdps_unit_is_retired(CH15_CHALLENGER_SLOT) == 0) {
+        return;
+    }
+
+    if (fdps_unit_is_retired(CH15_JUNA_SLOT) != 0) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH15_DUEL_LOST_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+    } else {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CH15_DUEL_WON_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        if (fdps_unit_item_count(CH15_JUNA_SLOT) != CH15_BAG_FULL_COUNT) {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CH15_MURASAME_GIVEN_TEXT_ID,
+                           (unsigned char *) VGA_SCREEN_BASE,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+            fdps_unit_add_item(CH15_JUNA_SLOT, CH15_MURASAME_ITEM_ID);
+        }
+    }
+
+    data_fdps_chapter_event_or_battle_end_code = 2;
 }

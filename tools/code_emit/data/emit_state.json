@@ -3813,6 +3813,14 @@
       "status": "committed",
       "emitted_against": "0x38",
       "rounds": 0
+    },
+    "0003ab30": {
+      "name": "fdps_chapter_15_post_action",
+      "target": "chpost1.c",
+      "body_size": "0xe5",
+      "status": "committed",
+      "emitted_against": "0xe5",
+      "rounds": 0
     }
   }
 }
