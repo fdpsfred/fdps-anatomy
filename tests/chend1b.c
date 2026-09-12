@@ -573,6 +573,365 @@ static void the_fixture_container_is_removed(void)
     CHECK_EQ(file_present(SCRIPT_ARCHIVE_FILE), 0);
 }
 
+/* ------------------------------------------------------------------------
+ * fdps_chapter_13_end at 0003aa90.
+ *
+ * The same four calls and one store as chapter 12's handler, differing in
+ * exactly two operands, so the cases below pin exactly those two operands plus
+ * the order the four calls run in:
+ *
+ *   0003aa9c  CALL 0x00039e10          every unit on the enemy side is swept
+ *   0003aaa1  CALL 0x00023980          the battle party is banked
+ *   0003aaa6  MOV EAX,0x62140 / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4
+ *             the cut-scene "Win12.dat" is interpreted
+ *   0003aab4  CALL 0x00039e70          the fallen are revived
+ *   0003aab9  MOV dword ptr [0x00069cf4],0xd
+ *
+ * THE OFF-BY-ONE IS PINNED AT BOTH ENDS the way chapter 12's is: the member
+ * opened is WIN12.DAT, the index of the chapter just won, while the store
+ * leaves 13, the index of the chapter that comes next.  The fixture container
+ * therefore also holds WIN11.DAT and WIN13.DAT -- the members a slip in either
+ * direction would open -- each writing a marker of its own into a different
+ * status-timer slot, so a wrong name is a failed assertion rather than a
+ * missing member and a silent pass.  The marker values differ from chapter
+ * 12's fixture as well, so a snapshot taken from the wrong run is visible too.
+ *
+ * THE CONTAINER IS STAGED AGAIN, NOT SHARED.  Chapter 12's cases run first and
+ * the case that removes their container runs between the two families, so this
+ * half builds an IconAni.vfs of its own with its own three members.  The same
+ * refusal protocol applies: a container already standing is left alone, and
+ * then every case here fails on its run-state assertion rather than passing on
+ * whatever that other container happened to hold.
+ *
+ * Everything else -- why the enemy is staged already retired, why nobody may
+ * be left at 0 HP, why the cut-scene is a fixture rather than the shipped
+ * WIN12.DAT -- is the reasoning at the top of this file, unchanged.
+ * ------------------------------------------------------------------------ */
+
+/* WIN12.DAT, the member chapter 13's handler names: operand 2, so
+   status_timers[5], with a value none of the other members writes. */
+#define WIN12_CH13_MARKER_OPERAND 2
+#define WIN12_CH13_MARKER_SLOT 5
+#define WIN12_CH13_MARKER_VALUE 53
+
+/* WIN11.DAT, the member a handler that followed its own script number one step
+   low would open, in a slot and with a value of its own. */
+#define WIN11_CH13_MARKER_OPERAND 1
+#define WIN11_CH13_MARKER_SLOT 4
+#define WIN11_CH13_MARKER_VALUE 51
+
+/* WIN13.DAT, the member a handler that named the chapter it hands ON to rather
+   than the one just won would open -- the exact slip the store's 13 invites --
+   in a third slot with a third value. */
+#define WIN13_CH13_MARKER_OPERAND 0
+#define WIN13_CH13_MARKER_SLOT 3
+#define WIN13_CH13_MARKER_VALUE 59
+
+/* The index chapter 13's handler must leave: chapter 14, 0-based, the literal
+   of the store at 0003aab9.
+
+   The run starts from the same 4 chapter 12's does, which is none of the three
+   numbers a mistake would leave behind: not the stored 13, not the 12 an
+   off-by-one that followed the script name would leave, and not the 5 an
+   increment would leave. */
+#define CH13_CHAPTER_ID_AFTER 13
+
+/* WIN12.DAT: retire battle unit 0, write the marker into its status_timers[5],
+   stop -- the same two opcodes chapter 12's real member uses, so the order
+   argument below is the same one. */
+static unsigned char fixture_ch13_win12_dat[] = {
+    0x0b, RANDIS_UNIT,
+    0x12, RANDIS_UNIT, WIN12_CH13_MARKER_OPERAND, WIN12_CH13_MARKER_VALUE,
+    0x00
+};
+
+/* WIN11.DAT: the decoy one step low.  It retires nobody, so a run that opened
+   it is two failed assertions rather than one. */
+static unsigned char fixture_ch13_win11_dat[] = {
+    0x12, RANDIS_UNIT, WIN11_CH13_MARKER_OPERAND, WIN11_CH13_MARKER_VALUE,
+    0x00
+};
+
+/* WIN13.DAT: the decoy one step high, retiring nobody for the same reason. */
+static unsigned char fixture_ch13_win13_dat[] = {
+    0x12, RANDIS_UNIT, WIN13_CH13_MARKER_OPERAND, WIN13_CH13_MARKER_VALUE,
+    0x00
+};
+
+static char *fixture_ch13_names[FIXTURE_MEMBERS] = {
+    "WIN11.DAT", "WIN12.DAT", "WIN13.DAT"
+};
+
+static unsigned char *fixture_ch13_bytes[FIXTURE_MEMBERS] = {
+    fixture_ch13_win11_dat, fixture_ch13_win12_dat, fixture_ch13_win13_dat
+};
+
+static int fixture_ch13_lengths[FIXTURE_MEMBERS] = {
+    sizeof(fixture_ch13_win11_dat), sizeof(fixture_ch13_win12_dat),
+    sizeof(fixture_ch13_win13_dat)
+};
+
+/* 0 not attempted, 1 the run happened and the snapshot below is good,
+   2 unavailable and every case says so. */
+static int ch13_run_state = 0;
+
+/* Whether this half created the container, and so whether it may remove it. */
+static int ch13_fixture_owned = 0;
+
+/* Everything chapter 13's cases assert, captured the instant it returned. */
+static unsigned char ch13_seen_unit_spells[SPELL_BITMAP_BYTES];
+static unsigned char ch13_seen_unit_timers[STATUS_TIMER_COUNT];
+static unsigned char ch13_seen_slot_spells[SPELL_BITMAP_BYTES];
+static unsigned char ch13_seen_slot_timers[STATUS_TIMER_COUNT];
+static int ch13_seen_unit_flags;
+static int ch13_seen_unit_hp_current;
+static int ch13_seen_slot_char_id;
+static int ch13_seen_slot_flags;
+static int ch13_seen_slot_hp_current;
+static int ch13_seen_slot_hp_max;
+static int ch13_seen_slot_mp_current;
+static int ch13_seen_slot_level;
+static int ch13_seen_enemy_hp_current;
+static int ch13_seen_enemy_hp_max;
+static int ch13_seen_enemy_flags;
+static int ch13_seen_chapter_id;
+static int ch13_seen_party_gold;
+
+/* Builds chapter 13's fixture container, or answers no, to the layout in
+   resource_info/vfs.md and by the same refusal protocol as the half above. */
+static int stage_ch13_fixture_archive(void)
+{
+    FILE *fp;
+    long member_at;
+    int i;
+
+    fp = fopen(SCRIPT_ARCHIVE_FILE, "rb");
+    if (fp != NULL) {
+        fclose(fp);
+        return 0;
+    }
+
+    fp = fopen(SCRIPT_ARCHIVE_FILE, "wb");
+    if (fp == NULL) {
+        return 0;
+    }
+
+    fwrite("VFS", 1, 3, fp);
+    write_word(fp, 1);
+    write_word(fp, VFS_HEADER_BYTES);
+    write_dword(fp, (long) FIXTURE_MEMBERS);
+    fwrite("Dynasty Information Co.,", 1, VFS_SIGNATURE_BYTES, fp);
+
+    member_at = (long) VFS_HEADER_BYTES
+                + (long) FIXTURE_MEMBERS * VFS_ENTRY_BYTES;
+    for (i = 0; i < FIXTURE_MEMBERS; i++) {
+        write_name(fp, fixture_ch13_names[i]);
+        write_dword(fp, (long) fixture_ch13_lengths[i]);
+        write_dword(fp, (long) fixture_ch13_lengths[i]);
+        fputc(0, fp);
+        write_dword(fp, member_at);
+        member_at += (long) fixture_ch13_lengths[i];
+    }
+    for (i = 0; i < FIXTURE_MEMBERS; i++) {
+        fwrite(fixture_ch13_bytes[i], 1, (size_t) fixture_ch13_lengths[i], fp);
+    }
+    fclose(fp);
+
+    ch13_fixture_owned = 1;
+    return 1;
+}
+
+static void ch13_capture(void)
+{
+    int i;
+
+    for (i = 0; i < SPELL_BITMAP_BYTES; i++) {
+        ch13_seen_unit_spells[i] =
+            unit_image[RANDIS_UNIT].spells_known_bitmap[i];
+        ch13_seen_slot_spells[i] =
+            roster_image[RANDIS_ROSTER_SLOT].spells_known_bitmap[i];
+    }
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        ch13_seen_unit_timers[i] = unit_image[RANDIS_UNIT].status_timers[i];
+        ch13_seen_slot_timers[i] =
+            roster_image[RANDIS_ROSTER_SLOT].status_timers[i];
+    }
+    ch13_seen_unit_flags = (int) unit_image[RANDIS_UNIT].flags;
+    ch13_seen_unit_hp_current = (int) unit_image[RANDIS_UNIT].hp_current;
+    ch13_seen_slot_char_id = (int) roster_image[RANDIS_ROSTER_SLOT].char_id;
+    ch13_seen_slot_flags = (int) roster_image[RANDIS_ROSTER_SLOT].flags;
+    ch13_seen_slot_hp_current =
+        (int) roster_image[RANDIS_ROSTER_SLOT].hp_current;
+    ch13_seen_slot_hp_max = (int) roster_image[RANDIS_ROSTER_SLOT].hp_max;
+    ch13_seen_slot_mp_current =
+        (int) roster_image[RANDIS_ROSTER_SLOT].mp_current;
+    ch13_seen_slot_level = (int) roster_image[RANDIS_ROSTER_SLOT].level;
+    ch13_seen_enemy_hp_current = (int) unit_image[ENEMY_UNIT].hp_current;
+    ch13_seen_enemy_hp_max = (int) unit_image[ENEMY_UNIT].hp_max;
+    ch13_seen_enemy_flags = (int) unit_image[ENEMY_UNIT].flags;
+    ch13_seen_chapter_id = data_fdps_chapter_current_chapter_id;
+    ch13_seen_party_gold = data_fdps_shared_party_total_gold;
+}
+
+/* Runs chapter 13's handler once, against freshly staged arrays and its own
+   fixture cut-scene, and records what it left behind. */
+static void run_ch13_handler(void)
+{
+    if (ch13_run_state != 0) {
+        return;
+    }
+    ch13_run_state = 2;
+
+    if (!stage_ch13_fixture_archive()) {
+        return;
+    }
+
+    stage_globals();
+
+    fdps_chapter_13_end();
+
+    ch13_capture();
+    ch13_run_state = 1;
+}
+
+/* The map is swept first, and swept the way 00039e10 sweeps it: the enemy
+   unit's hit-point word is 0 where the staging left 50, its maximum in the
+   word behind it is untouched -- the store is MOV word ptr [EAX+0x40],0x0 and
+   not a dword -- and the player unit, whose side byte is 2, keeps the hit
+   points the staging gave it.  A handler that omitted the call, the shape
+   chapters 1 and 2 have, would leave the enemy at 50. */
+static void chapter_13_sweeps_the_enemy_side(void)
+{
+    run_ch13_handler();
+    CHECK_EQ(ch13_run_state, 1);
+    if (ch13_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch13_seen_enemy_hp_current, 0);
+    CHECK_EQ(ch13_seen_enemy_hp_max, ENEMY_HP_MAX);
+    CHECK_EQ(ch13_seen_enemy_flags, UNIT_FLAG_RETIRED);
+    CHECK_EQ(ch13_seen_unit_hp_current, RANDIS_HP_CURRENT);
+}
+
+/* The battle party is banked, and banked BEFORE the cut-scene: the slot that
+   was 0xa5 filler carries the battle record's character id and level, its six
+   status bytes were cleared by the writeback's memset, its flags were masked
+   to bit 0, its HP was lifted to the maximum by the full heal and its MP by
+   the restore that follows.  WIN12.DAT retires unit 0 and the writeback skips
+   a retired character-0 unit, so a run that interpreted the script first would
+   leave every one of these at the filler. */
+static void chapter_13_banks_the_party_before_the_cutscene_runs(void)
+{
+    int i;
+
+    run_ch13_handler();
+    CHECK_EQ(ch13_run_state, 1);
+    if (ch13_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch13_seen_slot_char_id, RANDIS_CHAR_ID);
+    CHECK_EQ(ch13_seen_slot_level, RANDIS_LEVEL);
+    CHECK_EQ(ch13_seen_slot_flags, 0);
+    CHECK_EQ(ch13_seen_slot_hp_max, RANDIS_HP_MAX);
+    CHECK_EQ(ch13_seen_slot_hp_current, RANDIS_HP_MAX);
+    CHECK_EQ(ch13_seen_slot_mp_current, RANDIS_MP_MAX);
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        CHECK_EQ(ch13_seen_slot_timers[i], 0);
+    }
+}
+
+/* No spell is granted.  The handler has no fdps_set_flag_bit call -- the first
+   thing at 0003aa9c is the sweep -- so both the live record's bitmap and the
+   roster's copy of it stay at the zeroes the staging left.  A grant copied
+   over from fdps_chapter_01_end would show as byte 0 reading 0x01. */
+static void chapter_13_grants_no_spell(void)
+{
+    int i;
+
+    run_ch13_handler();
+    CHECK_EQ(ch13_run_state, 1);
+    if (ch13_run_state != 1) {
+        return;
+    }
+
+    for (i = 0; i < SPELL_BITMAP_BYTES; i++) {
+        CHECK_EQ(ch13_seen_unit_spells[i], 0);
+        CHECK_EQ(ch13_seen_slot_spells[i], 0);
+    }
+}
+
+/* The cut-scene the handler names is Win12.dat and it really ran: both of the
+   fixture member's opcodes are on the live battle record -- the retired bit at
+   +5 and the marker value 53 in status_timers[5].  The two decoys in the
+   container write 51 into status_timers[4] and 59 into status_timers[3] and
+   retire nobody, so a name one step in either direction is three failed
+   assertions rather than a silent pass.  This is the half of the handler's
+   deliberate off-by-one that carries the index of the chapter just ENDED, 12,
+   against the 13 the store leaves.  The marker does not reach the roster copy,
+   whose timers the writeback cleared before the script ran. */
+static void chapter_13_victory_cutscene_is_win12_dat(void)
+{
+    run_ch13_handler();
+    CHECK_EQ(ch13_run_state, 1);
+    if (ch13_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch13_seen_unit_timers[WIN12_CH13_MARKER_SLOT],
+             WIN12_CH13_MARKER_VALUE);
+    CHECK_EQ(ch13_seen_unit_timers[WIN11_CH13_MARKER_SLOT], 0);
+    CHECK_EQ(ch13_seen_unit_timers[WIN13_CH13_MARKER_SLOT], 0);
+    CHECK_EQ(ch13_seen_unit_flags, UNIT_FLAG_RETIRED);
+    CHECK_EQ(ch13_seen_slot_timers[WIN12_CH13_MARKER_SLOT], 0);
+}
+
+/* Nobody fell, so the revive sweep charges nothing and never opens its panel:
+   the writeback ran first and put the one roster member on his maximum, which
+   leaves the sweep with no member at 0 HP to bill for.  The enemy the first
+   call left at 0 HP is not a roster member and is not billed for either. */
+static void chapter_13_revive_charges_nothing_when_nobody_fell(void)
+{
+    run_ch13_handler();
+    CHECK_EQ(ch13_run_state, 1);
+    if (ch13_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch13_seen_party_gold, PARTY_GOLD_BEFORE);
+}
+
+/* The chapter index is left at chapter 14's, 13, as an assignment and not as a
+   step from what was there: this run starts it at 4, so an increment would
+   read back 5 and the store's own literal reads back 13.  It also pins the
+   other half of the handler's deliberate off-by-one -- a 12 here, matching the
+   12 in the script name, would be chapter 13 replayed rather than chapter 14
+   started. */
+static void chapter_13_advances_the_chapter_index_to_chapter_fourteen(void)
+{
+    run_ch13_handler();
+    CHECK_EQ(ch13_run_state, 1);
+    if (ch13_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch13_seen_chapter_id, CH13_CHAPTER_ID_AFTER);
+}
+
+/* Chapter 13's fixture container goes the same way chapter 12's did, so that
+   nothing this file wrote outlives its run. */
+static void the_ch13_fixture_container_is_removed(void)
+{
+    if (!ch13_fixture_owned) {
+        return;
+    }
+
+    remove(SCRIPT_ARCHIVE_FILE);
+    ch13_fixture_owned = 0;
+    CHECK_EQ(file_present(SCRIPT_ARCHIVE_FILE), 0);
+}
+
 void run_chend1b_tests(void)
 {
     RUN_TEST(chapter_12_sweeps_the_enemy_side);
@@ -582,4 +941,11 @@ void run_chend1b_tests(void)
     RUN_TEST(chapter_12_revive_charges_nothing_when_nobody_fell);
     RUN_TEST(chapter_12_advances_the_chapter_index_to_chapter_thirteen);
     RUN_TEST(the_fixture_container_is_removed);
+    RUN_TEST(chapter_13_sweeps_the_enemy_side);
+    RUN_TEST(chapter_13_banks_the_party_before_the_cutscene_runs);
+    RUN_TEST(chapter_13_grants_no_spell);
+    RUN_TEST(chapter_13_victory_cutscene_is_win12_dat);
+    RUN_TEST(chapter_13_revive_charges_nothing_when_nobody_fell);
+    RUN_TEST(chapter_13_advances_the_chapter_index_to_chapter_fourteen);
+    RUN_TEST(the_ch13_fixture_container_is_removed);
 }

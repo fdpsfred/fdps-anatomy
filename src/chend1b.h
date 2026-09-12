@@ -45,4 +45,26 @@
 extern void fdps_chapter_12_end(void);
 #pragma aux fdps_chapter_12_end "*" parm caller [];
 
+/* Chapter 13's end handler: closes chapter 13, 地獄三鬥神, out and hands the
+   game to chapter 14, 天空之騎士.  Takes nothing and returns nothing.
+
+   In order, and the order is the content: every unit on the enemy side has its
+   hit points zeroed and any that had not already left the field is played off
+   it; the battle party is banked onto the persistent roster; the victory
+   cut-scene Win12.dat is interpreted; every party member who fell is revived
+   and billed for it; and the chapter index is advanced to 13, chapter 14.
+
+   The body is chapter 12's, instruction for instruction, with its own script
+   name and its own stored index -- the two handlers differ in exactly two
+   operands.  The sweep is the belt-and-braces step it is in chapter 12 rather
+   than the load-bearing one it is in chapters 3, 8 and 10: chapter 13's
+   post-action test is the bare shared end condition with nothing added
+   (fdps_chapter_13_post_action, chpost1.h), and that condition records a clear
+   only once no unit on the enemy side is still standing, so the sweep normally
+   finds that side already empty.
+
+   Table slot 12. */
+extern void fdps_chapter_13_end(void);
+#pragma aux fdps_chapter_13_end "*" parm caller [];
+
 #endif
