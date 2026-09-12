@@ -2358,6 +2358,347 @@ static void ch03_no_slot_but_zero_and_four_ends_the_battle(void)
     }
 }
 
+
+/* ------------------------------------------------------------------ *
+ * Chapter 8's handler, 0003a710.  Three rules of its own and no CALL
+ * 0x0003a2e0 anywhere in the body: PUSH 0x0 / CALL 0x000109b0 and an
+ * unguarded MOV dword ptr [0x00069da0],0x1 at 0003a71c..0003a72a, then the
+ * turn-gated CMP dword ptr [0x00069ce8],0x3 / JLE over PUSH 0x13 / CALL
+ * 0x000109b0 at 0003a734..0003a74d, then the four-term chain PUSH 0xf, 0x10,
+ * 0x11, 0x12 at 0003a757..0003a785 over CMP byte ptr [0x000640e9],0x0 / JNZ
+ * 0003a7cd at 0003a795 and its two endings.
+ *
+ * The risk set is the three the assembly makes easy to get wrong.  The
+ * missing shared test, which would add a victory condition the chapter does
+ * not have and would move the slot-0 rule somewhere it is not.  The turn
+ * gate on the 費塔加 test, which is what keeps the handler from reporting a
+ * defeat over a unit slot the chapter script has not deployed yet.  And the
+ * escape tally, where the clear is every value but 0 and not "all four got
+ * out" -- the guide's 失敗條件 村民全滅 is exactly the 0.
+ *
+ * The staging is this file's, widened: the handler asks about unit index
+ * 0x13, past the eight slots the other cases share, so chapter 8 publishes a
+ * twenty-record array of its own.  The handler never reads a side byte or
+ * the unit count -- it has no walk of the array in it -- so the only fields
+ * that matter are the retirement bits.
+ *
+ * WHETHER EITHER LINE IS DRAWN IS NOT ASSERTED BELOW.  fdps_draw_text takes
+ * its whole effect through pixels at the VGA aperture, keeps no state and
+ * returns a cursor this handler discards, so a unit test has nothing to read
+ * back; the two entry ids are literals in the instruction stream (PUSH 0x1b
+ * at 0003a7bb and PUSH 0x23 at 0003a7e0).  The staging keeps the call
+ * harmless the same way chapters 1 and 3 do: a fixture text block whose every
+ * entry names one lone terminator, so fdps_draw_text walks the entry, paints
+ * nothing and returns at once.
+ * ------------------------------------------------------------------ */
+
+/* Chapter 8 is chapter id 7, table slot 7: the dword at 000602a8, seven
+   entries into the table based at 0006028c, is 0003a710. */
+#define CHAPTER_08_ID 7
+
+/* The four slots the handler's third rule asks about -- PUSH 0xf, 0x10, 0x11
+   and 0x12 -- and the two it tests on its own account, PUSH 0x0 and PUSH
+   0x13. */
+#define CH08_RANDIS_SLOT 0
+#define CH08_VILLAGER_1_SLOT 0x0f
+#define CH08_VILLAGER_2_SLOT 0x10
+#define CH08_VILLAGER_3_SLOT 0x11
+#define CH08_VILLAGER_4_SLOT 0x12
+#define CH08_GUEST_MAGE_SLOT 0x13
+
+/* Twenty records, one past the highest index the handler names. */
+#define CH08_STAGE_UNITS 20
+
+/* Element 0x11 of data_fdps_map_cell_event_triggered_flags, the byte at
+   0x000640e9 the ending reads. */
+#define CH08_TALLY_SLOT 0x11
+
+/* The turn the 費塔加 rule is armed after, CMP dword ptr [0x00069ce8],0x3 /
+   JLE at 0003a734: the test runs only above 3. */
+#define CH08_GUEST_MAGE_ARMED_AFTER_TURN 3
+
+/* The synthetic chapter text block, built like chapter 1's and chapter 3's:
+   every entry names one lone terminator, so fdps_draw_text walks it, paints
+   nothing and returns at once with no font staged.  Thirty-six entries is
+   what FDETXT08.TXT holds -- its first table slot is the offset 72, which is
+   the table's own length at two bytes an entry -- so ids run 0 to 0x23 and
+   the 0x23 this handler asks for is the last of them. */
+#define CH08_TEXT_ENTRIES 36
+#define CH08_TEXT_TERMINATOR (-1)
+
+static struct fdps_unit_record ch08_units[CH08_STAGE_UNITS];
+static short ch08_text[CH08_TEXT_ENTRIES + 1];
+
+/* Publish a cleared twenty-record array, the fixture text block, the turn
+   counter the gate reads, the escape tally the ending reads and the incoming
+   battle-end code.  Every unit starts standing; each case retires only the
+   slots it is about. */
+static void stage_ch08(int turn_counter, int escaped_villager_count,
+                       int battle_end_code)
+{
+    unsigned char *bytes;
+    int entry;
+    int i;
+
+    for (entry = 0; entry < CH08_TEXT_ENTRIES; entry++) {
+        ch08_text[entry] = (short) (CH08_TEXT_ENTRIES * 2);
+    }
+    ch08_text[CH08_TEXT_ENTRIES] = CH08_TEXT_TERMINATOR;
+
+    bytes = (unsigned char *) ch08_units;
+    for (i = 0; i < (int) sizeof(ch08_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < 32; i++) {
+        data_fdps_map_cell_event_triggered_flags[i] = 0;
+    }
+    data_fdps_map_cell_event_triggered_flags[CH08_TALLY_SLOT] =
+        (unsigned char) escaped_villager_count;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch08_units;
+    data_fdps_map_unit_count = CH08_STAGE_UNITS;
+    data_fdps_chapter_current_chapter_id = CHAPTER_08_ID;
+    data_fdps_current_chapter_text_ptr = (unsigned char *) ch08_text;
+    data_fdps_battle_turn_counter = turn_counter;
+    data_fdps_chapter_event_or_battle_end_code =
+        (unsigned int) battle_end_code;
+}
+
+static void ch08_retire(int unit_index)
+{
+    ch08_units[unit_index].flags = FLAG_RETIRED;
+}
+
+/* Put one record on the player side with the retirement bit clear.  Only the
+   case that holds the shared end test out needs this: that test's walk skips
+   a record whose side byte is non-zero, and skips a retired one, so a slot
+   staged this way is the one thing that keeps its up front 2 standing. */
+static void ch08_stand_on_player_side(int unit_index)
+{
+    ch08_units[unit_index].side = (unsigned char) SIDE_PLAYER;
+    ch08_units[unit_index].flags = 0;
+}
+
+/* Retire the four captives one short of all of them and the battle is still
+   open: the chain at 0003a757..0003a791 is an and, so a single standing
+   captive funnels through the JMPs at 0003a773, 0003a783 or 0003a793 to the
+   epilogue with no store made.  Each of the four is checked in turn, because
+   a chain written as an or -- or one that dropped a term -- would end the
+   chapter on any of these four stagings. */
+static void ch08_one_captive_still_in_leaves_the_battle_open(void)
+{
+    int standing_slot;
+    int slot;
+
+    for (standing_slot = CH08_VILLAGER_1_SLOT;
+         standing_slot <= CH08_VILLAGER_4_SLOT;
+         standing_slot++) {
+        stage_ch08(1, 2, 0);
+        for (slot = CH08_VILLAGER_1_SLOT; slot <= CH08_VILLAGER_4_SLOT;
+             slot++) {
+            if (slot != standing_slot) {
+                ch08_retire(slot);
+            }
+        }
+        fdps_chapter_08_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
+/* All four off the battlefield with at least one of them out alive is the
+   clear.  The tally is the byte at 0x000640e9 and the test is CMP against 0,
+   so 1, 2, 3 and 4 all take the JNZ at 0003a79c to the victory arm -- a
+   handler that asked for all four escapes would answer 1 on the first three
+   of these. */
+static void ch08_one_survivor_is_enough_to_clear(void)
+{
+    int escaped;
+
+    for (escaped = 1; escaped <= 4; escaped++) {
+        stage_ch08(1, escaped, 0);
+        ch08_retire(CH08_VILLAGER_1_SLOT);
+        ch08_retire(CH08_VILLAGER_2_SLOT);
+        ch08_retire(CH08_VILLAGER_3_SLOT);
+        ch08_retire(CH08_VILLAGER_4_SLOT);
+        fdps_chapter_08_post_action();
+        CHECK_EQ(end_code(), 2);
+    }
+}
+
+/* The other arm of the same compare: all four gone and none of them out
+   alive, which is the guide's 失敗條件 村民全滅.  This is the only way the
+   captives can lose the chapter. */
+static void ch08_no_survivor_is_a_defeat(void)
+{
+    stage_ch08(1, 0, 0);
+    ch08_retire(CH08_VILLAGER_1_SLOT);
+    ch08_retire(CH08_VILLAGER_2_SLOT);
+    ch08_retire(CH08_VILLAGER_3_SLOT);
+    ch08_retire(CH08_VILLAGER_4_SLOT);
+    fdps_chapter_08_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The tally is read as a byte and the compare is against 0, not a signed
+   "greater than 0": a tally whose top bit is set still takes the victory arm.
+   A count that high cannot arise from the four captives, but declaring the
+   array signed or comparing with > would change this answer, and the array is
+   data_fdps_map_cell_event_triggered_flags, an unsigned char[32]. */
+static void ch08_a_high_bit_tally_still_clears(void)
+{
+    stage_ch08(1, 0x80, 0);
+    ch08_retire(CH08_VILLAGER_1_SLOT);
+    ch08_retire(CH08_VILLAGER_2_SLOT);
+    ch08_retire(CH08_VILLAGER_3_SLOT);
+    ch08_retire(CH08_VILLAGER_4_SLOT);
+    fdps_chapter_08_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* The ending reads element 0x11 of the array and no neighbour of it: with
+   0x10 and 0x12 carrying counts and 0x11 clear, the answer is still the
+   defeat.  0x000640e9 sits one past the shared one-shot latch at 0x000640e8,
+   so an off-by-one on the element index reads a byte other chapters raise. */
+static void ch08_the_tally_is_element_seventeen(void)
+{
+    stage_ch08(1, 0, 0);
+    data_fdps_map_cell_event_triggered_flags[CH08_TALLY_SLOT - 1] = 4;
+    data_fdps_map_cell_event_triggered_flags[CH08_TALLY_SLOT + 1] = 4;
+    ch08_retire(CH08_VILLAGER_1_SLOT);
+    ch08_retire(CH08_VILLAGER_2_SLOT);
+    ch08_retire(CH08_VILLAGER_3_SLOT);
+    ch08_retire(CH08_VILLAGER_4_SLOT);
+    fdps_chapter_08_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* Rule 1 on its own: a retired slot 0 is a defeat, and it is this handler's
+   instruction rather than the shared test's -- nothing else in the staging
+   could have written the 1, since the captives are standing and the enemy
+   side is never looked at. */
+static void ch08_a_retired_randis_is_a_defeat(void)
+{
+    stage_ch08(1, 0, 0);
+    ch08_retire(CH08_RANDIS_SLOT);
+    fdps_chapter_08_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The turn gate.  CMP dword ptr [0x00069ce8],0x3 / JLE 0003a74b skips the
+   PUSH 0x13 call entirely, so a retired slot 0x13 is not a defeat while the
+   counter is 3 or below -- which is the whole point of the gate: 費塔加 is
+   not deployed onto the map until the end of the player's third turn, and an
+   ungated test would lose the chapter on turns 1 to 3. */
+static void ch08_the_guest_mage_test_is_gated_on_the_turn(void)
+{
+    int turn;
+
+    for (turn = 1; turn <= CH08_GUEST_MAGE_ARMED_AFTER_TURN; turn++) {
+        stage_ch08(turn, 0, 0);
+        ch08_retire(CH08_GUEST_MAGE_SLOT);
+        fdps_chapter_08_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
+/* The other side of the same JLE: one turn past the gate the call is reached
+   and the defeat is recorded.  Turn 4 is the first turn on which it can be,
+   so this pins the boundary and not just the direction. */
+static void ch08_a_retired_guest_mage_past_the_gate_is_a_defeat(void)
+{
+    stage_ch08(CH08_GUEST_MAGE_ARMED_AFTER_TURN + 1, 0, 0);
+    ch08_retire(CH08_GUEST_MAGE_SLOT);
+    fdps_chapter_08_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* Past the gate with 費塔加 standing, the store behind the second TEST is not
+   reached and the code is left where it was. */
+static void ch08_a_live_guest_mage_past_the_gate_records_nothing(void)
+{
+    stage_ch08(CH08_GUEST_MAGE_ARMED_AFTER_TURN + 1, 0, 0);
+    fdps_chapter_08_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* The three rules are sequential and every store is unguarded, so the last
+   one to fire is the verdict: the same action that loses 蘭迪斯 and empties
+   the cells with survivors answers 2, because the captive arm runs after the
+   slot-0 store and overwrites it.  Written as an else-if chain, or with the
+   captive arm gated on the code still being 0, this would answer 1. */
+static void ch08_the_captive_ending_overwrites_an_earlier_defeat(void)
+{
+    stage_ch08(1, 2, 0);
+    ch08_retire(CH08_RANDIS_SLOT);
+    ch08_retire(CH08_VILLAGER_1_SLOT);
+    ch08_retire(CH08_VILLAGER_2_SLOT);
+    ch08_retire(CH08_VILLAGER_3_SLOT);
+    ch08_retire(CH08_VILLAGER_4_SLOT);
+    fdps_chapter_08_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* There is no CALL 0x0003a2e0 in the body: an emptied enemy side is not a
+   clear on this chapter.  The staging is the one the shared test answers 2
+   to and keeps: it writes 2 up front at 0003a2f9, and the only record its
+   walk puts the code back to 0 for is one whose side byte is 0 with the
+   retirement bit clear (CMP byte ptr [EAX + 0x6],0x0 / AND AL,0x1 at
+   0003a331..0003a34a), so every slot here is either on the player side or a
+   retired enemy; its closing test is the slot 0 one at 0003a382, and slot 0
+   is standing.  Meanwhile all three of this handler's own rules stay silent
+   -- slot 0 standing, turn 1 so the 費塔加 gate is shut, and all four
+   captives standing so the chain fails on its first term -- so the answer
+   must be the 0 the handler was given.  Adding the shared call would make it
+   2 and fail here. */
+static void ch08_the_shared_end_test_is_not_run(void)
+{
+    int slot;
+
+    stage_ch08(1, 0, 0);
+    for (slot = 0; slot < CH08_STAGE_UNITS; slot++) {
+        ch08_units[slot].side = (unsigned char) SIDE_ENEMY;
+        ch08_units[slot].flags = FLAG_RETIRED;
+    }
+    ch08_stand_on_player_side(CH08_RANDIS_SLOT);
+    ch08_stand_on_player_side(CH08_VILLAGER_1_SLOT);
+    ch08_stand_on_player_side(CH08_VILLAGER_2_SLOT);
+    ch08_stand_on_player_side(CH08_VILLAGER_3_SLOT);
+    ch08_stand_on_player_side(CH08_VILLAGER_4_SLOT);
+    ch08_stand_on_player_side(CH08_GUEST_MAGE_SLOT);
+    fdps_chapter_08_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* No store is unconditional, so a verdict a chapter event already recorded
+   survives a call in which none of the three rules fires -- in either
+   direction. */
+static void ch08_a_recorded_verdict_is_left_alone(void)
+{
+    stage_ch08(1, 0, 1);
+    fdps_chapter_08_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage_ch08(1, 0, 2);
+    fdps_chapter_08_post_action();
+    CHECK_EQ(end_code(), 2);
+}
+
+/* Only slots 0, 0x0f..0x12 and 0x13 are named in the body, so retiring any
+   other one on its own leaves the battle open.  The sweep runs at turn 1, at
+   which the 0x13 test is behind its gate as well, and the captive chain needs
+   all four so no single captive can end it either. */
+static void ch08_no_unnamed_slot_ends_the_battle(void)
+{
+    int retired_slot;
+
+    for (retired_slot = 1; retired_slot < CH08_STAGE_UNITS; retired_slot++) {
+        stage_ch08(1, 0, 0);
+        ch08_retire(retired_slot);
+        fdps_chapter_08_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
 void run_chpost1_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -2444,4 +2785,17 @@ void run_chpost1_tests(void)
     RUN_TEST(ch03_a_recorded_verdict_is_overwritten);
     RUN_TEST(ch03_the_shared_end_test_is_not_run);
     RUN_TEST(ch03_no_slot_but_zero_and_four_ends_the_battle);
+    RUN_TEST(ch08_one_captive_still_in_leaves_the_battle_open);
+    RUN_TEST(ch08_one_survivor_is_enough_to_clear);
+    RUN_TEST(ch08_no_survivor_is_a_defeat);
+    RUN_TEST(ch08_a_high_bit_tally_still_clears);
+    RUN_TEST(ch08_the_tally_is_element_seventeen);
+    RUN_TEST(ch08_a_retired_randis_is_a_defeat);
+    RUN_TEST(ch08_the_guest_mage_test_is_gated_on_the_turn);
+    RUN_TEST(ch08_a_retired_guest_mage_past_the_gate_is_a_defeat);
+    RUN_TEST(ch08_a_live_guest_mage_past_the_gate_records_nothing);
+    RUN_TEST(ch08_the_captive_ending_overwrites_an_earlier_defeat);
+    RUN_TEST(ch08_the_shared_end_test_is_not_run);
+    RUN_TEST(ch08_a_recorded_verdict_is_left_alone);
+    RUN_TEST(ch08_no_unnamed_slot_ends_the_battle);
 }

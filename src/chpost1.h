@@ -204,6 +204,38 @@ extern void fdps_chapter_06_post_action(void);
 extern void fdps_chapter_07_post_action(void);
 #pragma aux fdps_chapter_07_post_action "*" parm caller [];
 
+/* Chapter 8's post-action test: three conditions of its own and not one line
+   of the shared default test.  Takes nothing, returns nothing, and leaves the
+   verdict in data_fdps_chapter_event_or_battle_end_code (gamedata.h).
+
+   This is the underground-prison chapter, where the party walks four captives
+   off the battlefield.  It is the only handler in this file that neither
+   forwards to nor opens with fdps_battle_check_default_end_conditions
+   (btlend.h), so emptying the enemy side is not a clear here at all.
+
+   The three rules run in order and each one stores without consulting what is
+   already recorded, so the last one to fire is the verdict.  Unit slot 0,
+   蘭迪斯, retired is a defeat -- tested here rather than inherited from the
+   shared test.  Unit slot 0x13, the guest mage 費塔加, retired is a defeat,
+   but only once data_fdps_battle_turn_counter (gamedata.h) is strictly above
+   3: he is not deployed onto the map until the end of the player's third
+   turn, and an ungated test reports a defeat on turns 1 to 3.  And when all
+   four captives at slots 0x0f to 0x12 are off the battlefield the chapter is
+   over either way: element 0x11 of
+   data_fdps_map_cell_event_triggered_flags (gamedata.h), the tally
+   fdps_chapter_08_event_villager_escapes (chevt2.h) bumps for each one that
+   walks out alive, decides which ending it is.
+
+   A TALLY OF ZERO IS THE ONLY DEFEAT.  One survivor clears the chapter; the
+   guide's 失敗條件 村民全滅 is exactly the zero case, so requiring all four
+   to have escaped turns a partial rescue into a defeat.  Each ending speaks
+   its own line of the chapter's text block first -- entry 0x1b for the total
+   loss, entry 0x23 for the escape -- and the drawn cursor is discarded.
+
+   Table slot 7. */
+extern void fdps_chapter_08_post_action(void);
+#pragma aux fdps_chapter_08_post_action "*" parm caller [];
+
 /* Chapter 9's post-action test: the game's standard end conditions, and then
    two defeat conditions of its own -- unit slot 6 or unit slot 7 having left
    the battle.  Takes nothing, returns nothing, and leaves the verdict in

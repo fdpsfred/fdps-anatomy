@@ -378,6 +378,139 @@ void fdps_chapter_07_post_action(void)
     fdps_battle_check_default_end_conditions();
 }
 
+/* The unit slot chapter 8's first defeat test asks about, PUSH 0x0 at
+   0003a71c.  This handler never calls fdps_battle_check_default_end_conditions
+   (btlend.h), so unlike every other 蘭迪斯 test in this file it is the
+   chapter's own instruction and not the shared test's. */
+#define CH08_RANDIS_UNIT_INDEX 0
+
+/* The guest mage 費塔加 on this map, PUSH 0x13 at 0003a73d.  He is not in the
+   unit array when the battle opens:
+   fdps_chapter_08_event_send_guest_mage_to_cells (chevt2.h) is what deploys
+   him. */
+#define CH08_GUEST_MAGE_UNIT_INDEX 0x13
+
+/* The turn the 費塔加 test is armed after, CMP dword ptr [0x00069ce8],0x3 /
+   JLE 0003a74b at 0003a734.  The compare is signed and the jump is JLE, so the
+   test runs only while the counter is strictly greater than 3 -- the chapter
+   script deploys him at the end of the player's third turn, and asking about a
+   slot that is not filled yet would report a defeat on turns 1 to 3. */
+#define CH08_GUEST_MAGE_ARMED_AFTER_TURN 3
+
+/* The four captives this chapter escorts off the map, PUSH 0xf, 0x10, 0x11 and
+   0x12 at 0003a757, 0003a765, 0003a775 and 0003a785.  They are positions in
+   this map's unit array; the same four indices are the range
+   fdps_chapter_08_event_villager_escapes (chevt2.h) accepts. */
+#define CH08_VILLAGER_1_UNIT_INDEX 0x0f
+#define CH08_VILLAGER_2_UNIT_INDEX 0x10
+#define CH08_VILLAGER_3_UNIT_INDEX 0x11
+#define CH08_VILLAGER_4_UNIT_INDEX 0x12
+
+/* Where the escape tally lives, byte ptr [0x000640e9] at 0003a795: element
+   0x11 of data_fdps_map_cell_event_triggered_flags (gamedata.h), the 32-entry
+   array based at 0x000640d8 that fdps_chapter_state_reset clears on entry.
+   fdps_chapter_08_event_villager_escapes bumps it once per villager that walks
+   out alive, so it is a count and not a flag. */
+#define CH08_ESCAPED_VILLAGER_COUNT_SLOT 0x11
+
+/* The two closing lines, PUSH 0x1b at 0003a7bb and PUSH 0x23 at 0003a7e0:
+   entries of the chapter's own text block for the total failure and for the
+   escape. */
+#define CH08_NO_VILLAGER_RESCUED_TEXT_ID 0x1b
+#define CH08_VILLAGERS_ESCAPED_TEXT_ID 0x23
+
+/* 0003a710.  Three rules of this chapter's own and no shared test at all: the
+   two guests that may not be lost, and the captives-are-all-off-the-map ending
+   that is a defeat or a clear depending on a count.
+
+   The frame is the standard four-push Watcom one with an empty local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003a710..0003a716 -- and
+   nothing in it is ever read, so there is no local to name.
+
+   THERE IS NO CALL 0x0003a2e0 ANYWHERE IN THE BODY.  Every other handler in
+   this file either forwards to fdps_battle_check_default_end_conditions or
+   runs it first, and chapter 8 does not: emptying the enemy side is not a
+   clear here, and a retired slot 0 is a defeat only because this function
+   tests it itself.  Opening with the shared call by analogy with the siblings
+   adds a victory condition the chapter does not have.
+
+   Rule 1.  PUSH 0x0 / CALL 0x000109b0 / ADD ESP,0x4 at 0003a71c..0003a723 is
+   fdps_unit_is_retired(0), the caller clearing its one argument, and its EAX
+   is used -- TEST EAX,EAX / JZ 0003a734 at 0003a726 skips the MOV dword ptr
+   [0x00069da0],0x1 at 0003a72a.  The store is unguarded and the rules that
+   follow are not alternatives to it, so a call that both loses 蘭迪斯 and
+   empties the cells writes 1 here and 2 below, and the last write wins.
+
+   Rule 2.  CMP dword ptr [0x00069ce8],0x3 / JLE 0003a74b at 0003a734 gates the
+   second call entirely: PUSH 0x13 / CALL 0x000109b0 / ADD ESP,0x4 at
+   0003a73d..0003a744 is reached only when the turn counter is strictly above
+   3, and its EAX is used by TEST EAX,EAX / JNZ 0003a74d at 0003a747.  The two
+   JMPs at 0003a74b and the store at 0003a74d are the -od spelling of a
+   short-circuiting and over one store, not two tests with a store each.
+
+   Rule 3.  Four calls in a row -- PUSH 0xf, 0x10, 0x11, 0x12, each CALL
+   0x000109b0 / ADD ESP,0x4, at 0003a757, 0003a765, 0003a775 and 0003a785 --
+   each EAX used at once by TEST EAX,EAX and a jump, and every failing arm
+   funnels through the JMP chain at 0003a773, 0003a783 and 0003a793 to the
+   epilogue.  So it is a four-term short-circuiting and: the ending is reached
+   only when all four captives are off the battlefield, whether they walked out
+   or were killed.
+
+   The ending itself is CMP byte ptr [0x000640e9],0x0 / JNZ 0003a7cd at
+   0003a795 over the escape tally, and the two arms differ in more than the
+   text id.  A tally of 0 -- none of the four got out alive -- stores 1 and
+   then draws; any other tally draws and then stores 2.  THE CLEAR DOES NOT
+   REQUIRE ALL FOUR TO HAVE ESCAPED: one survivor is enough, and the guide's
+   失敗條件 村民全滅 is exactly the == 0 case.  Writing the obvious "all four
+   escaped is the clear" turns a partial rescue into a defeat.
+
+   fdps_draw_text's return is discarded on both arms -- ADD ESP,0x1c at
+   0003a7c8 and 0003a7ed with nothing reading EAX behind either -- and its
+   seven pushed arguments are the family's fixed tail: the chapter text block,
+   the entry id, the mode 13h aperture, the row pitch, and the three message
+   colours.
+
+   Nothing here writes data_fdps_chapter_event_or_battle_end_code
+   unconditionally, so a battle that has met none of the three rules leaves
+   whatever the loop or a chapter event put there untouched.
+
+   Table slot 7: the dword at 000602a8, seven entries into the table based at
+   0006028c, is 0003a710, and that table entry is the function's only xref. */
+void fdps_chapter_08_post_action(void)
+{
+    if (fdps_unit_is_retired(CH08_RANDIS_UNIT_INDEX) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+
+    if (data_fdps_battle_turn_counter > CH08_GUEST_MAGE_ARMED_AFTER_TURN &&
+        fdps_unit_is_retired(CH08_GUEST_MAGE_UNIT_INDEX) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+
+    if (fdps_unit_is_retired(CH08_VILLAGER_1_UNIT_INDEX) != 0 &&
+        fdps_unit_is_retired(CH08_VILLAGER_2_UNIT_INDEX) != 0 &&
+        fdps_unit_is_retired(CH08_VILLAGER_3_UNIT_INDEX) != 0 &&
+        fdps_unit_is_retired(CH08_VILLAGER_4_UNIT_INDEX) != 0) {
+
+        if (data_fdps_map_cell_event_triggered_flags
+                [CH08_ESCAPED_VILLAGER_COUNT_SLOT] == 0) {
+            data_fdps_chapter_event_or_battle_end_code = 1;
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CH08_NO_VILLAGER_RESCUED_TEXT_ID,
+                           (unsigned char *) VGA_SCREEN_BASE,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+        } else {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CH08_VILLAGERS_ESCAPED_TEXT_ID,
+                           (unsigned char *) VGA_SCREEN_BASE,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+            data_fdps_chapter_event_or_battle_end_code = 2;
+        }
+    }
+}
+
 /* 0003a840.  The shared test, then two defeat tests of this chapter's own,
    the first one short circuiting the second.
 
