@@ -150,4 +150,32 @@ extern void fdps_chapter_19_end(void);
 extern void fdps_chapter_20_end(void);
 #pragma aux fdps_chapter_20_end "*" parm caller [];
 
+/* Chapter 21's end handler: closes chapter 21, 地底神殿, out and hands the
+   game to chapter 22.  Takes nothing and returns nothing.
+
+   The family's plain shape, the same five steps chapters 16, 17 and 20 run and
+   in the same order: every enemy still standing on the battle map is swept;
+   the battle party is banked onto the persistent roster; the victory cut-scene
+   Win20.dat is interpreted; every party member still at 0 hit points is
+   revived and billed for it; and the chapter index is advanced to 21,
+   chapter 22, 巫湯婆婆.
+
+   NOTHING STANDS IN FRONT OF THE FIVE: no latch is read, no unit record is
+   recovered and nothing is granted before the sweep.  It is
+   fdps_chapter_20_end one slot back instruction for instruction, differing in
+   the script name and the stored index alone.
+
+   THE SWEEP IS BELT AND BRACES.  Chapter 21's 勝利條件 is the shared end
+   condition's own 敵人全滅, so the enemy side is normally empty already by the
+   time this handler runs.
+
+   THE INDEX IT LEAVES IS ALSO AN END-CONDITION INPUT: 21 is one of the two
+   chapter ids the shared end test singles out, so the chapter this handler
+   selects is one whose defeat condition watches unit slot 3 rather than
+   slot 0.
+
+   Table slot 20. */
+extern void fdps_chapter_21_end(void);
+#pragma aux fdps_chapter_21_end "*" parm caller [];
+
 #endif

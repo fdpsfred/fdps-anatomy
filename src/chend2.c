@@ -542,3 +542,88 @@ void fdps_chapter_20_end(void)
     fdps_roster_revive_fallen_members();
     data_fdps_chapter_current_chapter_id = CH20_NEXT_CHAPTER_ID;
 }
+
+/* Chapter 21's victory cut-scene, the string at 0x621ac loaded into EAX at
+   0003b246 and pushed as fdps_icon_script_run's only argument.  The member
+   name is based on the chapter that has just been WON: chapter 21 is the
+   0-based id 20, so this is Win20.dat.
+
+   The literal starts exactly where the instruction says it does: read_memory
+   at 0x62190 returns 74 00 64 61 57 69 6e 31 38 2e 64 61 74 00 64 61 57 69 6e
+   31 39 2e 64 61 74 00 64 61 57 69 6e 32 30 2e 64 61 74 00 64 61 57 69 6e 32
+   31 2e 64 61, so "Win19.dat" sits at 0x621a0, 0x621aa..0x621ab is the 64 61
+   filler that pads it to a four-byte boundary, 0x621ac is the W of
+   "Win20.dat" and "Win21.dat" follows it at 0x621b8.
+
+   BOTH NEIGHBOURS ARE REAL MEMBER NAMES, so neither slip announces itself:
+   0x621a0 is what the sibling one chapter back really names, the member a
+   body copied from fdps_chapter_20_end without changing the operand would
+   open, and 0x621b8 is what counting forward from the stored chapter index
+   rather than reading the operand at 0003b246 would reach.
+
+   The literal is the bare member name with no path and no container, and the
+   lower-case spelling is the original's: see CH16_VICTORY_SCRIPT above for
+   why it must not be tidied and why it cannot live in read-only storage. */
+#define CH21_VICTORY_SCRIPT "Win20.dat"
+
+/* What the handler leaves in data_fdps_chapter_current_chapter_id: MOV dword
+   ptr [0x00069cf4],0x15 at 0003b259.  The index is 0-based, so 21 is chapter
+   22, 巫湯婆婆, the chapter this one hands the game on to.  The store is an
+   assignment and not a step: nothing reads the global first.
+
+   THIS PARTICULAR INDEX IS ALSO READ BY THE SHARED END TEST.  0x15 is one of
+   the two chapter ids fdps_battle_check_default_end_conditions singles out
+   (btlend.h), so the chapter this store selects is one whose defeat condition
+   watches unit slot 3 rather than slot 0 -- see fdps_chapter_22_post_action
+   (chpost2.h).  Getting this literal wrong therefore changes more than which
+   chapter plays next.
+
+   THE TWO NUMBERS IN THIS HANDLER DIFFER BY ONE ON PURPOSE: the script above
+   is 20, the index of the chapter that has just been won, and this store is
+   21, the index of the one that comes next.  Writing the same number in both
+   places is wrong in one of them. */
+#define CH21_NEXT_CHAPTER_ID 0x15
+
+/* Chapter 21's end handler: the family's plain shape, four calls and one
+   store, no branch and no local anywhere in the body.  It is
+   fdps_chapter_20_end immediately above it instruction for instruction, with
+   its own script name and its own stored index -- the two handlers differ in
+   exactly two operands.
+
+   THE ORDER OF THE FOUR IS THE ALGORITHM and it is the order the handlers
+   before it run in.  The cut-scene runs AFTER the writeback and the revive
+   AFTER the cut-scene.  The script is interpreted with the battle's unit array
+   still standing, so a unit-record edit it makes lands on a party that has
+   already been banked and reaches the roster only if the script itself asks
+   for another writeback (opcode 0x61, src/icon.c).  The revive then reads the
+   roster the writeback has just filled, which is what makes it see the
+   battle's casualties at all.
+
+   WHAT THIS HANDLER DOES NOT DO.  It grants nothing before the writeback, so
+   unlike fdps_chapter_01_end it awards no spell, and it hands nothing else to
+   the phase that follows: the store below is the only global it writes
+   directly.  It has no gate on a one-shot latch and no recovery sweep -- the
+   first instruction after the frame is the sweep call at 0003b23c, with
+   nothing tested before it -- and chapter 21 stages nothing on the party for a
+   recovery to undo.
+
+   THE SWEEP IS BELT AND BRACES HERE, not the load-bearing step it is in
+   chapters 3, 8 and 10.  Chapter 21's 勝利條件 is the shared end condition's
+   own 敵人全滅 and fdps_chapter_21_post_action (chpost2.h) is a bare forward
+   to that shared test, adding no end condition of its own, so the clear is
+   recorded only once no unit on the enemy side is still standing and the sweep
+   normally finds that side already empty.  The chapter's two reinforcement
+   waves are position triggers rather than post-action business, so they do not
+   change that.
+
+   THE CHAPTER IS ADVANCED HERE and nowhere else on this path: the store at
+   0003b259 is the handler's last act and the only thing it leaves for the
+   phase that follows. */
+void fdps_chapter_21_end(void)
+{
+    fdps_battle_destroy_remaining_enemies();
+    fdps_roster_write_back_battle_units();
+    fdps_icon_script_run(CH21_VICTORY_SCRIPT);
+    fdps_roster_revive_fallen_members();
+    data_fdps_chapter_current_chapter_id = CH21_NEXT_CHAPTER_ID;
+}

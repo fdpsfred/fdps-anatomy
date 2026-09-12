@@ -11657,10 +11657,10 @@ Chapter 21's chapter-end handler: clears the map, banks the party, plays chapter
 
 Algorithm:
   1. fdps_battle_destroy_remaining_enemies() kills every enemy still standing on the battle map, so the map is empty before the scene plays.
-  2. FUN_00023980() writes each active battle unit record back into the persistent roster table, resetting the per-battle fields as it goes.
-  3. FUN_00021650("Win20.dat") runs chapter 21's victory scene: the named event script is loaded from IconAni.vfs and interpreted. The scripts are named Win%02d.dat by the 0-based chapter index, so chapter 21 uses Win20.dat. The return value is ignored and the single stack argument is cleaned by ADD ESP,4.
-  4. FUN_00039e70() revives every party unit that ended the battle at 0 HP, restoring HP from the unit's maximum and charging the per-class revive cost.
-  5. Stores 0x15 into DAT_00069cf4, the 0-based chapter index the game plays next: 21, i.e. chapter 22.
+  2. fdps_roster_write_back_battle_units() writes each active battle unit record back into the persistent roster table, resetting the per-battle fields as it goes.
+  3. fdps_icon_script_run("Win20.dat") runs chapter 21's victory scene: the named event script is loaded from IconAni.vfs and interpreted. The scripts are named Win%02d.dat by the 0-based chapter index, so chapter 21 uses Win20.dat. The return value is ignored and the single stack argument is cleaned by ADD ESP,4.
+  4. fdps_roster_revive_fallen_members() revives every party unit that ended the battle at 0 HP, restoring HP from the unit's maximum and charging the per-class revive cost.
+  5. Stores 0x15 into data_fdps_chapter_current_chapter_id, the 0-based chapter index the game plays next: 21, i.e. chapter 22.
 
 Parameters:
   none.
