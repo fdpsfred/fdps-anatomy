@@ -3113,7 +3113,7 @@
     },
     "0003b6b0": {
       "name": "fdps_chapter_25_post_action",
-      "target": "chpost2.c",
+      "target": "chpost3.c",
       "est_lines": 59,
       "body_size": 97,
       "status": "pending"
@@ -3127,7 +3127,7 @@
     },
     "0003b760": {
       "name": "fdps_chapter_26_post_action",
-      "target": "chpost2.c",
+      "target": "chpost3.c",
       "est_lines": 69,
       "body_size": 151,
       "status": "pending"
@@ -3141,7 +3141,7 @@
     },
     "0003b8a0": {
       "name": "fdps_chapter_27_post_action",
-      "target": "chpost2.c",
+      "target": "chpost3.c",
       "est_lines": 53,
       "body_size": 65,
       "status": "pending"
@@ -3155,7 +3155,7 @@
     },
     "0003b990": {
       "name": "fdps_chapter_28_post_action",
-      "target": "chpost2.c",
+      "target": "chpost3.c",
       "est_lines": 35,
       "body_size": 22,
       "status": "pending"
@@ -3169,7 +3169,7 @@
     },
     "0003b9f0": {
       "name": "fdps_chapter_29_post_action",
-      "target": "chpost2.c",
+      "target": "chpost3.c",
       "est_lines": 48,
       "body_size": 22,
       "status": "pending"
@@ -3183,7 +3183,7 @@
     },
     "0003ba50": {
       "name": "fdps_chapter_30_post_action",
-      "target": "chpost2.c",
+      "target": "chpost3.c",
       "est_lines": 43,
       "body_size": 41,
       "status": "pending"
@@ -6732,10 +6732,11 @@
         "chevt4.c",
         "chpost1.c",
         "chpost2.c",
+        "chpost3.c",
         "death.c",
         "main.c"
       ],
-      "reason": "read from 10 files: btlend.c, btlturn.c, chapter.c, chevt1.c, chevt3.c, chevt4.c, chpost1.c, chpost2.c, death.c, main.c",
+      "reason": "read from 11 files: btlend.c, btlturn.c, chapter.c, chevt1.c, chevt3.c, chevt4.c, chpost1.c, chpost2.c, chpost3.c, death.c, main.c",
       "status": "pending"
     },
     "00069da4": {

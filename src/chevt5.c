@@ -187,7 +187,7 @@ void fdps_chapter_24_event_deploy_wave_for_turn(int event_arg)
    ambush spent across a chapter restart and across a reload
    (rebuild_info/pitfalls.md).
 
-   src/chevt1.c, src/chevt2b.c, src/chevt4.c and src/chpost2.c spell the same
+   src/chevt1.c, src/chevt2b.c, src/chevt4.c and src/chpost3.c spell the same
    slot out for the same reason; it stays file-local at every end because no
    header owns it. */
 #define CHAPTER_EVENT_ONE_SHOT_SLOT 0x10

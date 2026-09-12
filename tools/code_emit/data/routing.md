@@ -39,7 +39,8 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `chinit2.c` | 9 | 505 | 0 | 0 | 505 |
 | `chinit2b.c` | 6 | 302 | 0 | 0 | 302 |
 | `chpost1.c` | 15 | 910 | 0 | 0 | 910 |
-| `chpost2.c` | 15 | 979 | 0 | 0 | 979 |
+| `chpost2.c` | 9 | 672 | 0 | 0 | 672 |
+| `chpost3.c` | 6 | 307 | 0 | 0 | 307 |
 | `church.c` | 3 | 717 | 0 | 0 | 717 |
 | `cmbblow.c` | 1 | 383 | 0 | 0 | 383 |
 | `cmbspell.c` | 1 | 651 | 0 | 0 | 651 |
@@ -473,7 +474,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `0003aad0` | 34 | `fdps_chapter_14_post_action` |
 | `0003ab30` | 101 | `fdps_chapter_15_post_action` |
 
-### `chpost2.c` -- 15 functions, 979 lines
+### `chpost2.c` -- 9 functions, 672 lines
 
 | address | lines | function |
 | --- | ---: | --- |
@@ -486,6 +487,11 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `0003b270` | 47 | `fdps_chapter_22_post_action` |
 | `0003b2e0` | 67 | `fdps_chapter_23_post_action` |
 | `0003b3d0` | 158 | `fdps_chapter_24_post_action` |
+
+### `chpost3.c` -- 6 functions, 307 lines
+
+| address | lines | function |
+| --- | ---: | --- |
 | `0003b6b0` | 59 | `fdps_chapter_25_post_action` |
 | `0003b760` | 69 | `fdps_chapter_26_post_action` |
 | `0003b8a0` | 53 | `fdps_chapter_27_post_action` |
@@ -1246,7 +1252,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `00069d80` | bss | `data_fdps_shop_stock_table_ptr` | read from 3 files: rsrc.c, shop.c, village.c |
 | `00069d84` | bss | `data_fdps_village_window_sheet_ptr` | read from 6 files: church.c, shop.c, shopdraw.c, text.c, village.c, vilmenu.c |
 | `00069d90` | bss | `data_fdps_chapter_pending_event_idx` | read from 3 files: btlmenu.c, btlturn.c, maptile.c |
-| `00069da0` | bss | `data_fdps_chapter_event_or_battle_end_code` | read from 10 files: btlend.c, btlturn.c, chapter.c, chevt1.c, chevt3.c, chevt4.c, chpost1.c, chpost2.c, death.c, main.c |
+| `00069da0` | bss | `data_fdps_chapter_event_or_battle_end_code` | read from 11 files: btlend.c, btlturn.c, chapter.c, chevt1.c, chevt3.c, chevt4.c, chpost1.c, chpost2.c, chpost3.c, death.c, main.c |
 | `00069da4` | bss | `data_fdps_cd_ioctl_buffer` | read from 3 files: cd.c, cdaudio.c, cdtoc.c |
 | `00069da8` | bss | `data_fdps_cd_ioctl_buffer_real_mode_ptr` | read from 3 files: cd.c, cdaudio.c, cdtoc.c |
 | `00069de8` | bss | `data_fdps_cd_request_header_buffer` | read from 3 files: cd.c, cdaudio.c, cdtoc.c |

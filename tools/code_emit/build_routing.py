@@ -167,13 +167,55 @@ def chapter_end_file(n):
     return "chend2.c"
 
 
+def chapter_post_action_file(n):
+    """Which chpostN.c a chapter's post-action handler lands in.
+
+    chpost3.c is the chinit2b.c cut made in the post-action family, and it
+    falls after the same chapter for a related reason.  Chapters 16 to 30 were
+    one file, which reached 1160 emitted lines with chapters 23 and 24 -- one
+    of them the longest handler of the fifteen -- still to come.
+
+    The cut is after chapter 24 because that is where the map stops changing
+    shape.  Every hard-coded unit index these handlers carry is measured from
+    the map's player-slot count, header byte +1 of MAPnn.DAT: the unit array is
+    built by laying the player slots down first and appending the deployment
+    records behind them, so an enemy's slot is that count plus its record
+    number.  The count reads 10 for MAP15 to MAP18, chapters 16 to 19; 11 for
+    MAP19 to MAP23, chapters 20 to 24; and 12 for MAP24 to MAP29, chapters 25
+    to 30, stepping as 蘭斯洛特 joins in chapter 19 and 珊 in chapter 24, after
+    which no handler of any family adds anybody.  So chapters 25 to 30 are the
+    six played on a settled twelve-slot map, which is what puts the 魔戰將軍 and
+    the 魔導王 at slots 0x0c onwards, and the paragraph deriving that base is
+    written out in three of the six.
+
+    The cut also keeps this file's two pairs together.  Chapters 19 and 24 are
+    the second and third 妖刀 duels -- the first is chapter 15's, in chpost1.c --
+    and they are the only two handlers of chapters 16 to 30 that speak to the
+    player and move an item, sharing the frame-buffer, panel-pen and
+    message-colour constants chapter 19 already carries.  Chapters 22 and 23 are
+    the two that declare no victory of their own and lose on 法蓮娜 at slot 3.
+    A cut anywhere between chapter 19 and chapter 24 separates one of the two
+    pairs.
+
+    It is chpost3.c and not chpost2b.c because chpost2.c is this family's
+    highest-numbered file: unlike chevt2b.c, chinit1b.c and chinit2b.c, there is
+    no later-numbered sibling for a new file to jump over, so a plain number
+    keeps the family in chapter order by itself.
+    """
+    if n <= 15:
+        return "chpost1.c"
+    if n <= 24:
+        return "chpost2.c"
+    return "chpost3.c"
+
+
 # The chapter-numbered handler families.  Each is one family of thirty (or, for
 # the event handlers, of however many chapters scripted one), split by chapter
 # number alone because there is nothing else to group them by: no two chapters'
 # handlers share code, and the numbering is the game's own ordering.
 CHAPTER_SPLITS = [
     (r"^fdps_chapter_(\d\d)_init$", chapter_init_file),
-    (r"^fdps_chapter_(\d\d)_post_action$", lambda n: "chpost1.c" if n <= 15 else "chpost2.c"),
+    (r"^fdps_chapter_(\d\d)_post_action$", chapter_post_action_file),
     (r"^fdps_chapter_(\d\d)_end$", chapter_end_file),
     (r"^fdps_chapter_(\d\d)_event_", chapter_event_file),
     (r"^fdps_chapter_(\d\d)_revive_", chapter_event_file),

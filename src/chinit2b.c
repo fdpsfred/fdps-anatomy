@@ -313,7 +313,7 @@ void fdps_chapter_26_init(void)
    魔戰將軍 塞克斯, 布魯森, 汎拉沫 and 凱因巴 once each (64, 65, 66 and
    67), LV18 神箭手 x8 (95) and LV18 鑺甲武士 x12 (100).  吉歐 is record 0
    of the file and so becomes map unit 12, the slot chapter 27's victory test
-   asks about (src/chpost2.c), and the four 魔戰將軍 follow him at 13 to 16 --
+   asks about (src/chpost3.c), and the four 魔戰將軍 follow him at 13 to 16 --
    so the boss and all four generals stand on the field from the first turn.
    The thirty records held back are the whole of wave 1, LV18 地獄騎士 x10
    (78) and LV18 天空騎士 x20 (97), which is the guide's 事件 -- the

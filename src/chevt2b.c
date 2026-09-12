@@ -30,7 +30,7 @@
    makes the latch survive a save, because the save and load paths move all
    0x20 bytes to and from the slot image.
 
-   src/chevt1.c and src/chpost2.c spell the same slot out for the same reason;
+   src/chevt1.c and src/chpost3.c spell the same slot out for the same reason;
    it stays file-local at all three ends because no header owns it. */
 #define CHAPTER_EVENT_ONE_SHOT_SLOT 0x10
 

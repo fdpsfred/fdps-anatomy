@@ -1817,7 +1817,7 @@ static void the_chapter_26_fixture_container_is_removed(void)
    file order behind the twelve player slots, and record 0 -- the first record
    in the file, the file's only level-40 record, and one the map tags wave 0 --
    is the LV40 魔導王吉歐.  So he is map unit 12, which is the slot chapter
-   27's victory test names (src/chpost2.c).  A run that deployed before the
+   27's victory test names (src/chpost3.c).  A run that deployed before the
    board was rebuilt, or that rebuilt the board after the cut-scene, would not
    put him there. */
 #define CH27_FIRST_ENEMY_MAP_UNIT PARTY_AT_CHAPTER_27

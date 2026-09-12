@@ -146,7 +146,7 @@ void fdps_chapter_20_event_upgrade_randis_sword(int unit_index)
    function-local static in its place would leave the ambush spent across a
    chapter restart and across a reload (rebuild_info/pitfalls.md).
 
-   src/chevt1.c, src/chevt2b.c and src/chpost2.c spell the same slot out for the
+   src/chevt1.c, src/chevt2b.c and src/chpost3.c spell the same slot out for the
    same reason; it stays file-local at every end because no header owns it. */
 #define CHAPTER_EVENT_ONE_SHOT_SLOT 0x10
 
