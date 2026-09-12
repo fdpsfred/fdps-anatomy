@@ -230,4 +230,26 @@ extern void fdps_chapter_09_end(void);
 extern void fdps_chapter_10_end(void);
 #pragma aux fdps_chapter_10_end "*" parm caller [];
 
+/* Chapter 11's end handler: closes chapter 11 out and hands the game to
+   chapter 12.  Takes nothing and returns nothing.
+
+   In order, and the order is the content: every unit on the enemy side has its
+   hit points zeroed and any that had not already left the field is played off
+   it; the battle party is banked onto the persistent roster; the victory
+   cut-scene Win10.dat is interpreted; every party member who fell is revived
+   and billed for it; and the chapter index is advanced to 11, chapter 12.
+
+   The body is chapter 3's through chapter 10's, instruction for instruction,
+   with its own script name and its own stored index.  The sweep is the
+   belt-and-braces step it is in chapters 4 to 7 and 9 rather than the
+   load-bearing one it is in chapters 3, 8 and 10: chapter 11's post-action
+   test runs the shared end condition and only then adds one defeat test of its
+   own, for unit slot 8, the guest 琴琴 (fdps_chapter_11_post_action,
+   chpost1.h), so a clear is recorded only once nothing on the enemy side is
+   still standing and the sweep normally finds it empty.
+
+   Table slot 10. */
+extern void fdps_chapter_11_end(void);
+#pragma aux fdps_chapter_11_end "*" parm caller [];
+
 #endif
