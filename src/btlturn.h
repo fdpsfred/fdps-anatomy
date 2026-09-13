@@ -39,4 +39,25 @@ extern void fdps_battle_mark_unit_done(int unit_index);
 extern void fdps_battle_run_turn_events(int side);
 #pragma aux fdps_battle_run_turn_events "*" parm caller [];
 
+/* Runs the enemy side's whole phase of the current battle turn.  Takes
+   nothing, returns nothing; whether the battle ended part-way through is left
+   in data_fdps_chapter_event_or_battle_end_code (gamedata.h), which
+   fdps_battle_advance_turn -- the only caller -- tests the instant this
+   returns.
+
+   The array is swept TWICE.  The first sweep lets an enemy act only when
+   fdps_map_actor_score_best_spell or fdps_map_actor_score_best_item (aiscore.h)
+   scores at least 6; the second gives a behaviour step to every enemy still
+   eligible, which is exactly those the first sweep's gate turned away.  So the
+   enemies with something worth casting or drinking all move first, and every
+   enemy still gets one turn.
+
+   An enemy is eligible when its side byte is 0, neither bit 0 (retired) nor
+   bit 7 (already acted) is set in its status byte, and its paralysis counter
+   at status_timers[4] is zero.  Enemies deployed by an event part-way through
+   either sweep are reached, because the bound is re-read from
+   data_fdps_map_unit_count every iteration. */
+extern void fdps_battle_enemy_turn_phase(void);
+#pragma aux fdps_battle_enemy_turn_phase "*" parm caller [];
+
 #endif

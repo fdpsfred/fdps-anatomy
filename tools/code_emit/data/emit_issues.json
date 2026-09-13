@@ -2561,5 +2561,33 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00012960": [
+    {
+      "what": "The score gate's POSITIVE side is unverified by test: no case here reaches fdps_map_actor_behavior_step through `data_fdps_battle_ai_best_spell_score >= 6 || data_fdps_battle_ai_best_item_score >= 6`. What is established is the negative side and the gate's operands -- both scorers are shown running, both come back 0, and the unit is refused -- plus, from the assembly, that the compare is signed (JGE at 000129fd, JL at 00012a06) and that the two tests are a short-circuited OR with the spell score first. The obstacle is not this function: a score of six or more needs the loaded MAGICDAT.DAT / ITEM.DAT tables and a live movement grid, and the behaviour step it would then call ends in fdps_render_view_frame, which spins on the VGA retrace bit and then on a tick counter no test process moves (tests/mapai.c documents the same wall).",
+      "needs": "Either a harness that can drive fdps_render_view_frame to completion -- a stand-in timer tick, which ADR-0003 rules out inside src/ -- or an observation of a real enemy phase in DOSBox-X: an enemy holding a healing item or an offensive spell with a target in range should move in the FIRST sweep, before an enemy whose only option is to walk up and swing.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "The event dispatch at 00012a22 / 00012ad9 is likewise verified only on its negative side: no test can make data_fdps_chapter_pending_event_idx non-0xff at the moment the phase tests it. The slot is seeded with 0xff at the top of each iteration and the only code between that seed and the test is the two scorers, which never write it, and the behaviour step, which is out of reach for the reason above. fdps_map_set_pending_tile_event (maptile.h), called from inside the behaviour step's tail, is the writer the original relies on. What IS pinned is that the seed happens once per unit rather than once per phase, and that the handler is called with the unit index rather than with a literal (PUSH EAX at 00012a2f and 00012ae6, against PUSH 0x0 at the one site in fdps_battle_run_turn_events).",
+      "needs": "The same real enemy phase in DOSBox-X: an enemy that finishes its move on a tile carrying a turn-end event should fire that event's handler before the chapter's post-action handler runs, and before the next enemy is looked at.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same wall independently and confirmed it is a real one rather than a lookup the emitter skipped. The gate's positive side cannot be staged from a test: a test cannot simply plant a score of 6 and call the phase, because fdps_map_actor_score_best_spell's first statement (src/aiscore.c:547) stores 0 into data_fdps_battle_ai_best_spell_score and the item scorer does the same, so the scorers overwrite anything planted before the CMP at 000129f6 ever runs. Reaching six needs real MAGICDAT.DAT / ITEM.DAT tables and a live movement grid, and the fdps_map_actor_behavior_step the gate would then call ends in fdps_render_view_frame's frame clock. So the evidence genuinely does not exist yet. What I add: the operands and the branch sense are settled from the assembly regardless -- JGE at 000129fd taking the OR's short-circuit arm, JL at 00012a06 falling out, spell score first -- and the emitter's needs field describes an observation rather than instructing a later stage, so it is within bounds.",
+      "needs": "An observation of a real enemy phase in DOSBox-X: an enemy holding a usable healing item or an offensive spell with a target in range should move during the FIRST sweep, ahead of an enemy whose only option is to close and swing.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Confirmed for myself that no test can drive the event dispatch's positive side. MOV dword ptr [0x00069d90],0xff at 000129a9 and 00012a8e seeds the slot after the record fetch and before the gate, and the only code between that seed and CMP dword ptr [0x00069d90],0xff at 00012a16 / 00012acd is the two scorers and the behaviour step -- the scorers do not touch 0x69d90 and the behaviour step is unreachable for the reason above -- so the slot is provably 0xff at the test in any staged run. Nothing to add beyond that; the emitter's account matches what I read, and what it did pin (the per-iteration seed, and PUSH EAX rather than a literal at 00012a2f / 00012ae6) is the part that was reachable and it went and got it.",
+      "needs": "The same real enemy phase in DOSBox-X: an enemy finishing its move on a tile carrying a turn-end event should fire that event's handler before the chapter's post-action handler and before the next enemy is looked at.",
+      "same_as": "emit#1",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

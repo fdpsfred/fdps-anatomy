@@ -6,7 +6,10 @@
  */
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "aiscore.h"
 #include "chapter.h"
+#include "mapai.h"
+#include "unit.h"
 #include "btlturn.h"
 
 /* The chapter script's turn-event table, in the resident MAP%02d.DAT block
@@ -96,6 +99,129 @@ void fdps_battle_run_turn_events(int side)
             (int) entry[TURN_EVENT_SIDE_AT] == side) {
             data_fdps_chapter_event_handler_table[entry[TURN_EVENT_HANDLER_AT]](
                 TURN_EVENT_HANDLER_UNIT_INDEX);
+        }
+    }
+}
+
+/* Values the phase engine's own tests compare against.  The side byte is
+   record +6, 0 enemy / 1 friendly NPC / 2 player, and 0 is both the side this
+   phase sweeps and the side_select it hands the scorers and the behaviour
+   step.  The mask is AND AL,0x81: bit 0 retired, bit 7 acted this turn, tested
+   together and in one instruction.  The immobilising byte is record +0x26,
+   struct field status_timers[4], the paralysis counter (aitarget.h).  Six is
+   the score a spell or an item has to reach before the phase is willing to
+   spend the unit's turn on it -- the same threshold, and the same tier scale,
+   as src/mapai.c's MAP_AI_ACTION_SCORE_THRESHOLD, which is what lets the two
+   be compared at all. */
+#define ENEMY_PHASE_SIDE 0
+#define UNIT_BUSY_FLAGS_MASK 0x81
+#define STATUS_TIMER_PARALYSIS 4
+#define PHASE_ACTION_SCORE_THRESHOLD 6
+
+/* MOV dword ptr [0x00069cd0],0x0: the map-cursor overlay is put away before
+   each enemy acts, the same value src/mapai.c calls CURSOR_DRAW_MODE_HIDDEN. */
+#define CURSOR_DRAW_MODE_HIDDEN 0
+
+/* The "no event is pending" value the four turn drivers seed
+   data_fdps_chapter_pending_event_idx with and test it back against
+   (gamedata.h).  CMP dword ptr [0x00069d90],0xff at 00012a16 and 00012acd. */
+#define NO_PENDING_EVENT 0xff
+
+/* 00012960.  The enemy side's whole phase of one battle turn, as TWO sweeps
+   over the unit array rather than one.
+
+   FIRST SWEEP.  Every eligible enemy has its best spell and its best item
+   scored, and acts only if one of the two scores reaches
+   PHASE_ACTION_SCORE_THRESHOLD.  SECOND SWEEP.  The same index range and the
+   same eligibility test, no scoring: whoever is still eligible acts.  Since
+   fdps_map_actor_behavior_step ends by raising the acted-this-turn bit
+   (00010745, which UNIT_BUSY_FLAGS_MASK then catches), the second sweep picks
+   up exactly the enemies the score gate turned away in the first, and every
+   enemy ends the phase having had one behaviour step.  What the two sweeps
+   really buy is ORDER: the enemies with something worth casting or drinking
+   all move before the ones with nothing to do.
+
+   Folding them into one loop would lose that, and it would also move three
+   things the SECOND sweep deliberately does not do -- the cursor-mode clear,
+   fdps_relocate_unit_array, and the two scorers.
+
+   The bound is re-read from data_fdps_map_unit_count at the top of every
+   iteration (CMP EAX,dword ptr [0x00060150] inside the loop, not hoisted) and
+   the record pointer is re-fetched from fdps_get_unit_record after the
+   relocation, never cached across it.  Both are load-bearing: an event handler
+   may deploy more enemies part-way through, which fdps_deploy_unit appends at
+   the end of the array so the growing bound reaches them, and
+   fdps_relocate_unit_array zeroes and frees the block every pointer into the
+   array was aimed at (unit.h).
+
+   The tail after a unit has been dealt with runs whether or not it acted, and
+   is the same in both sweeps.  If the pending-event slot is no longer
+   NO_PENDING_EVENT -- fdps_map_set_pending_tile_event (maptile.h) fills it
+   when the tile the unit finished on carries an event -- the handler it names
+   is called with this unit's index.  The current chapter's post-action handler
+   is then called with no argument.  A non-zero battle-end code in
+   data_fdps_chapter_event_or_battle_end_code returns at once, from whichever
+   sweep is running; fdps_battle_advance_turn tests the same global on the
+   instruction after the call (0001e5f0).
+
+   The physical-attack scorer is not called here.  The gate this phase applies
+   is on the spell and item scores only -- the decision to close on somebody
+   and hit them stays inside fdps_map_actor_behavior_step, which runs its own
+   attack search.  So an enemy whose only good move is to walk up and swing
+   fails the gate in the first sweep and gets its turn in the second. */
+void fdps_battle_enemy_turn_phase(void)
+{
+    int unit_index;
+    struct fdps_unit_record *unit;
+
+    for (unit_index = 0; unit_index < data_fdps_map_unit_count; unit_index++) {
+        data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;
+        fdps_relocate_unit_array();
+        unit = fdps_get_unit_record(unit_index);
+        data_fdps_chapter_pending_event_idx = NO_PENDING_EVENT;
+
+        if ((int) unit->side == ENEMY_PHASE_SIDE &&
+            (unit->flags & UNIT_BUSY_FLAGS_MASK) == 0 &&
+            unit->status_timers[STATUS_TIMER_PARALYSIS] == 0) {
+            fdps_map_actor_score_best_spell(unit_index, ENEMY_PHASE_SIDE);
+            fdps_map_actor_score_best_item(unit_index, ENEMY_PHASE_SIDE);
+            if (data_fdps_battle_ai_best_spell_score >=
+                    PHASE_ACTION_SCORE_THRESHOLD ||
+                data_fdps_battle_ai_best_item_score >=
+                    PHASE_ACTION_SCORE_THRESHOLD) {
+                fdps_map_actor_behavior_step(unit_index, ENEMY_PHASE_SIDE);
+            }
+        }
+
+        if (data_fdps_chapter_pending_event_idx != NO_PENDING_EVENT) {
+            data_fdps_chapter_event_handler_table
+                [data_fdps_chapter_pending_event_idx](unit_index);
+        }
+        data_fdps_chapter_post_action_handler_table
+            [data_fdps_chapter_current_chapter_id]();
+        if (data_fdps_chapter_event_or_battle_end_code != 0) {
+            return;
+        }
+    }
+
+    for (unit_index = 0; unit_index < data_fdps_map_unit_count; unit_index++) {
+        unit = fdps_get_unit_record(unit_index);
+        data_fdps_chapter_pending_event_idx = NO_PENDING_EVENT;
+
+        if ((int) unit->side == ENEMY_PHASE_SIDE &&
+            (unit->flags & UNIT_BUSY_FLAGS_MASK) == 0 &&
+            unit->status_timers[STATUS_TIMER_PARALYSIS] == 0) {
+            fdps_map_actor_behavior_step(unit_index, ENEMY_PHASE_SIDE);
+        }
+
+        if (data_fdps_chapter_pending_event_idx != NO_PENDING_EVENT) {
+            data_fdps_chapter_event_handler_table
+                [data_fdps_chapter_pending_event_idx](unit_index);
+        }
+        data_fdps_chapter_post_action_handler_table
+            [data_fdps_chapter_current_chapter_id]();
+        if (data_fdps_chapter_event_or_battle_end_code != 0) {
+            return;
         }
     }
 }

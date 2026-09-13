@@ -84,6 +84,26 @@ extern void fdps_show_chapter_title_card(void);
    index. */
 extern void (*data_fdps_chapter_event_handler_table[50])(int unit_index);
 
+/* 0006028c.  The thirty per-chapter post-action scripts, indexed by the
+   chapter id in data_fdps_chapter_current_chapter_id (gamedata.h).  It sits
+   immediately behind data_fdps_chapter_event_handler_table above -- fifty
+   slots of four bytes end exactly at 0006028c -- and is the second of the two
+   tables a unit's action goes through: the event table fires what the unit
+   stepped on, this one then gives the chapter itself a look at the new state.
+
+   Five indirect call sites reach it and all five spell it the same way: MOV
+   EAX,[0x00069cf4] / LEA EAX,[EAX*0x4 + 0x0] / CALL dword ptr [EAX+0x6028c]
+   with nothing pushed and no ADD ESP afterwards, so the handlers take no
+   argument and return nothing.  They are fdps_battle_enemy_turn_phase at
+   00012a48 and 00012aff -- once per sweep -- fdps_battle_npc_turn_phase at
+   00012beb, fdps_battle_unit_turn at 0001584e and
+   fdps_battle_tick_status_effects at 0001fb50.  No site range-checks the id.
+
+   Ghidra types the slots as void_fn, its placeholder for a code pointer of
+   unknown shape; that no argument is pushed at any of the five sites is what
+   fixes them as void (*)(void). */
+extern void (*data_fdps_chapter_post_action_handler_table[30])(void);
+
 /* 00060074.  The thirty per-chapter setup scripts, indexed by the chapter id
    the game is entering.  Entry n is fdps_chapter_NN_init for NN = n + 1 --
    entry 0 is fdps_chapter_01_init at 00020e90 and entry 29 is
