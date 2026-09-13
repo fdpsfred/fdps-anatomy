@@ -11766,7 +11766,7 @@ Alignment filler: 8b c0 (mov eax,eax), 2-byte NOP form padding to the 16-byte-al
 Chapter 24's post-action handler: the win/lose test the battle loop runs after a unit has acted, which on the way out of the chapter offers 裘娜 the wandering swordsman's duel and, when she wins it, trades her 妖刀村正 (item 0xa6) for the 妖刀正宗 (item 0xa7). Reached through slot 23 of the per-chapter handler table based at 0x0006028c.
 
 Algorithm:
-Builds the standard four-push Watcom frame with a 0xc-byte local area, then branches on DAT_000640e9, chapter 24's duel flag -- one byte of the 0x20-byte per-chapter event flag block at 0x000640d8 that fdps_chapter_state_reset clears when a chapter starts.
+Builds the standard four-push Watcom frame with a 0xc-byte local area, then branches on DAT_000640e9, chapter 24's duel flag -- one byte per map-cell event code in the 32-entry table at 000640d8, non-zero once that code's event has fired on the current map, which fdps_chapter_state_reset memsets at 00022782 when a chapter starts.
 
 Flag clear, the ordinary case: it calls fdps_battle_check_default_end_conditions and adds no condition of its own. That check leaves 2 (chapter cleared) in the battle-end code DAT_00069da0 once every enemy-side unit is retired, and forces 1 (game over) when unit 0, 蘭迪斯, is retired.
 

@@ -3909,6 +3909,14 @@
       "status": "committed",
       "rounds": 1,
       "emitted_against": "0x7e"
+    },
+    "0003b3d0": {
+      "name": "fdps_chapter_24_post_action",
+      "target": "chpost2.c",
+      "body_size": "0x22c",
+      "status": "committed",
+      "rounds": 0,
+      "emitted_against": "0x22c"
     }
   }
 }

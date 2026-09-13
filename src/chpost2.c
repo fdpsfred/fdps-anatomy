@@ -757,3 +757,285 @@ void fdps_chapter_23_post_action(void)
         data_fdps_chapter_event_or_battle_end_code = 1;
     }
 }
+
+/* The latch element, byte ptr [0x000640e9] at 0003b3dc, 0003b4b8 and 0003b5ee
+   -- element 0x11 of the 32-entry per-cell event flag array based at 000640d8
+   (gamedata.h), which fdps_chapter_state_reset clears at 00022782 when a
+   chapter starts.  Chapter 19's duel uses the same element; the two chapters
+   never run together and that reset is what keeps them apart. */
+#define CHAPTER_24_DUEL_LATCH_SLOT 0x11
+#define CHAPTER_24_DUEL_LATCH_SET 1
+
+/* The two duellists, PUSH 0x4 at 0003b3ef, 0003b445, 0003b4c3 and 0003b4d8 and
+   PUSH 0x52 at 0003b3fd and 0003b40f.
+
+   4 is 裘娜's battle-map slot -- unit slot i is roster slot i and the roster is
+   in join order.  0x52 is the challenger, and it is a HARD-CODED INDEX rather
+   than a handle on the unit fdps_deploy_wave has just appended: it names him
+   only while the array already holds exactly 0x52 units at the moment the offer
+   is accepted, which is after all five of this map's turn waves have arrived.
+
+   The retire sweep is NOT what an early clear breaks.  Its bound is the live
+   count less one and the challenger is the record the deployment has just put
+   at the end, so he is spared wherever he lands.  What breaks is the settle
+   test: with fewer units on the map the challenger is appended below 0x52 and
+   fdps_unit_is_retired(0x52) then asks about a slot past the array's last
+   record rather than about him.  That is shipped behaviour; resolving the
+   challenger from what the deployment appended would quietly change it.
+
+   The guide records both chapters' early-clear results and they differ exactly
+   as the two handlers do.  Chapter 19, whose sweep bound IS a literal and so
+   does reach its challenger: 若第五回合以前便結束，則狂戰士會消失，造成本章無法
+   結束 -- the challenger disappears and the chapter can no longer be ended.
+   Chapter 24: 若第七回合以前便結束，則兩人對戰的第一回合己方結束時，狂戰士便
+   自動認輸 -- he is still there and forfeits on the first turn, which is what
+   the settle test answering about a slot he never occupied looks like from the
+   player's side. */
+#define CHAPTER_24_JUNA_UNIT_INDEX 4
+#define CHAPTER_24_CHALLENGER_UNIT_INDEX 0x52
+
+/* The two swords the duel trades, PUSH 0xa6 at 0003b440 and 0003b4d3 and PUSH
+   0xa7 at 0003b466: 妖刀村正 and 妖刀正宗 (assets/items.md).  The 妖刀村正 is
+   both the stake -- the offer is not made to a 裘娜 who is not carrying it --
+   and what is taken off her when she wins; chapter 19's duel is where she got
+   it.  The guide's chapter 24 entry describes exactly that trade,
+   如果之前有取得妖刀村正 ... 打贏他就可換到他手中的妖刀正宗. */
+#define CHAPTER_24_MURAMASA_ITEM_ID 0xa6
+#define CHAPTER_24_MASAMUNE_ITEM_ID 0xa7
+
+/* What fdps_unit_find_item_slot answers when the unit is not carrying the item,
+   CMP dword ptr [EBP + -0xc],-0x1 at 0003b452 and CMP EAX,-0x1 at 0003b4e2
+   (unititem.h). */
+#define CHAPTER_24_ITEM_SLOT_NONE (-1)
+
+/* The six FDETXT entries the handler speaks, each a literal in the instruction
+   stream: the duel won at 0003b430, the duel lost at 0003b48a, the challenge at
+   0003b512, the question at 0003b53f, the acceptance at 0003b575 and the
+   refusal at 0003b5de. */
+#define CHAPTER_24_DUEL_WON_TEXT_ID 0x19
+#define CHAPTER_24_DUEL_LOST_TEXT_ID 0x1a
+#define CHAPTER_24_CHALLENGE_TEXT_ID 0x15
+#define CHAPTER_24_QUESTION_TEXT_ID 0x16
+#define CHAPTER_24_ACCEPTED_TEXT_ID 0x17
+#define CHAPTER_24_DECLINED_TEXT_ID 0x18
+
+/* The last turn the offer is still made on, CMP dword ptr [0x00069ce8],0x19 /
+   JG 0x0003b4b6 at 0003b4a4: the branch that skips the offer is taken only for
+   a turn counter strictly greater than 0x19, so turn 25 still gets the duel and
+   turn 26 does not.  JG and not JA, so the comparison is signed.  The guide
+   gives the same number in words -- 本章務必在25回合內結束. */
+#define CHAPTER_24_DUEL_LAST_TURN 0x19
+
+/* What fdps_deploy_wave is asked for, PUSH 0x7 at 0003b4ef and the XOR EAX,EAX
+   / PUSH EAX at 0003b4ec: the current map's wave 7, placed on the nearest free
+   tile rather than exactly on its placement record's own (deploy.h).  Wave 7 is
+   the one wave fdps_chapter_24_event_deploy_wave_for_turn never brings on --
+   its five calls at 00038d0a, 00038d5c, 00038da0, 00038e07 and 00038e48 push
+   waves 2, 6, 4, 3 and 5 -- so the challenger reaches the map through this
+   handler alone.  MAP23.DAT carries exactly one wave-7 deployment record, its
+   record 71: enemy side, character record 0x23 at level 40, which is the one
+   unit on the map built from a FRIAPRDA.DAT form rather than an ENEMYDAT.DAT
+   one. */
+#define CHAPTER_24_DUEL_WAVE 7
+#define CHAPTER_24_PLACE_NEAREST_FREE_TILE 0
+
+/* The FACE.CEL record the panel reveal carries, PUSH 0x23 at 0003b522: the
+   challenger's portrait, the same record chapter 19's duel uses.  It is also
+   his character record index -- MAP23.DAT's wave-7 record names form 0x23 --
+   which is what a portrait index under 60 means (assets/characters.md). */
+#define CHAPTER_24_DUEL_SPEAKER_FACE_INDEX 0x23
+
+/* The answer that accepts, CMP dword ptr [EBP + -0xc],0x0 / JNZ 0x0003b5cb at
+   0003b55c.  fdps_prompt_two_choice answers 0 for the left cell, 1 for the
+   right and -1 for a cancel (msgwin.h), and this is an equality against 0, so a
+   cancel declines exactly as the right cell does. */
+#define CHAPTER_24_DUEL_ANSWER_ACCEPT 0
+
+/* What each swept record's flags byte is left holding, MOV byte ptr
+   [EAX + 0x5],0x1 at 0003b5b9.  IT IS A WHOLE-BYTE STORE AND NOT AN OR: it
+   raises the retired bit 0x01 that fdps_unit_is_retired reads and drops the
+   has-acted bit 0x80 along with everything else that byte was carrying. */
+#define CHAPTER_24_RETIRED_FLAG_BYTE 1
+
+/* 0003b3d0.  Chapter 24's post-action test: the same two-halves shape as
+   chapter 19's above, with a second duel at the chapter's exit.
+
+   The frame is the standard four-push Watcom one with a 0xc-byte local area --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0xc at 0003b3d0..0003b3d6 -- and
+   the epilogue is MOV ESP,EBP followed by the four POPs at 0003b5f5..0003b5fa,
+   which is what a non-empty local area leaves behind; the RET at 0003b5fb
+   carries no immediate.  No argument is read from [EBP+8] or above, and every
+   call in the body pushes its arguments and clears them itself -- ADD ESP,0x4,
+   0x8, 0xc and 0x1c -- which is the stack convention, caller cleans.
+
+   THE DUEL HALF MUST NOT FALL BACK ON THE SHARED TEST, and the CMP byte ptr
+   [0x000640e9],0x0 / JNZ at 0003b3dc..0003b3e3 is what keeps it from doing so.
+   The accepted branch below retires unit 0, 蘭迪斯, along with everyone else
+   but 裘娜, so fdps_battle_check_default_end_conditions would force the defeat
+   code 1 the moment the duel started.  Writing the obvious "run the default
+   check first, then add the chapter's extra" turns the duel into an instant
+   Game Over.
+
+   The duel is settled by three calls to fdps_unit_is_retired and not two.  PUSH
+   0x4 / CALL 0x000109b0 at 0003b3ef with TEST EAX,EAX / JNZ at 0003b3f9 and
+   PUSH 0x52 / CALL at 0003b3fd with TEST EAX,EAX / JZ 0x0003b4a4 at 0003b407
+   are a short-circuiting || chain: while both duellists are standing control
+   leaves for the offer half and NOTHING AT ALL IS WRITTEN, which is what keeps
+   the battle loop running the duel.  Once one of them is down the third call at
+   0003b411 asks about the challenger again to see which, and its TEST EAX,EAX /
+   JZ 0x0003b477 at 0003b419 picks the arm: challenger retired is 裘娜's win,
+   anything else is her loss.
+
+   Her win is the only path that moves an item.  The slot
+   fdps_unit_find_item_slot answers with is kept at [EBP-0xc] and compared
+   against -1 at 0003b452, so the 妖刀村正 is taken off her only if she still
+   has it, while fdps_unit_add_item hands over the 妖刀正宗 either way -- the
+   add is outside the branch, at 0003b46d, and not its else.  Both arms then
+   join at MOV dword ptr [0x00069da0],0x2 at 0003b49a, so the chapter ends
+   whichever way the duel went.
+
+   The offer half is one short-circuiting && chain of five, every failure
+   jumping to the same exit at 0003b5f5: the turn counter 0x19 or less (signed),
+   the battle-end code already 2, the latch still down, 裘娜 not retired, and
+   the 妖刀村正 in her bag.  The second of those is what makes this an exit rite
+   rather than an event: the offer is made on the action that has just cleared
+   the chapter, and on no other.
+
+   Everything after that runs in source order with nothing conditional in it
+   until the answer: the challenger is appended as the map's wave 7, the
+   challenge is spoken on the visible page, the panel is revealed under FACE.CEL
+   record 0x23, the question is written inside it, fdps_prompt_two_choice runs
+   the modal prompt and the panel is retracted before the answer is looked at.
+   Only fdps_prompt_two_choice's result is used -- it is stored at 0003b554 and
+   every draw's returned cursor is discarded.
+
+   THE ACCEPTED BRANCH LEAVES THE BATTLE OPEN, and that is the whole point of
+   it.  It retires every unit index the sweep reaches except 裘娜 -- so 蘭迪斯
+   and the entire party go with them -- and then puts the battle-end code BACK
+   to 0 at 0003b5bf so the phase loop resumes with only the two duellists on the
+   map.  fdps_get_unit_record is called for index 4 as well and its answer is
+   simply discarded; the CMP dword ptr [EBP + -0x8],0x4 / JZ at 0003b5b0 guards
+   the store alone.  Declining writes its refusal line and nothing else, so the
+   cleared code stands and the chapter ends.
+
+   THE SWEEP'S BOUND IS READ FROM THE LIVE UNIT COUNT, NOT FROM A LITERAL, which
+   is the difference from chapter 19's otherwise identical branch: MOV
+   EAX,[0x00060150] / DEC EAX / CMP EAX,dword ptr [EBP + -0x8] / JG at
+   0003b58c..0003b595 re-reads data_fdps_map_unit_count on every iteration and
+   stops one short of the end of the array, which is where fdps_deploy_wave has
+   just put the challenger.  The comparison is JG and not JA, so it is signed.
+
+   Either answer raises the latch at 0003b5ee, which is outside the if/else and
+   is therefore what makes the offer one-shot; fdps_chapter_24_end reads the
+   same element at 0003b60c.
+
+   THE REFUSAL LINE IS DRAWN INSIDE A PANEL THAT IS NO LONGER THERE.  PUSH
+   0xaa44a at 0003b5d9 sends it to the panel's interior pen, but
+   fdps_message_window_close has already run at 0003b557 and repainted the whole
+   visible page; the acceptance line at 0003b570 goes to the screen origin
+   instead.  Giving the two lines the same destination is the natural tidy-up
+   and it moves where the refusal appears.
+
+   Table slot 23: the dword at 000602e8, twenty-three entries into the table
+   based at 0006028c, is 0003b3d0, and that table entry is the function's only
+   xref. */
+void fdps_chapter_24_post_action(void)
+{
+    /* Where 裘娜 is keeping the 妖刀村正, or -1 when she is not carrying it:
+       the slot fdps_unit_find_item_slot answered with, kept at [EBP-0xc]. */
+    int muramasa_slot;
+    /* Which cell of the offer the player committed to: 0 accepts, 1 declines
+       and -1 is a cancel.  The original keeps it in the same [EBP-0xc] the
+       item slot above used, the two never being live at once. */
+    int duel_answer;
+    /* The retire sweep's counter, [EBP-0x8]. */
+    int unit_index;
+    /* The record the sweep's store is made through, [EBP-0x4]. */
+    struct fdps_unit_record *unit;
+
+    if (data_fdps_map_cell_event_triggered_flags[CHAPTER_24_DUEL_LATCH_SLOT]
+            == 0) {
+        fdps_battle_check_default_end_conditions();
+    } else if (fdps_unit_is_retired(CHAPTER_24_JUNA_UNIT_INDEX) != 0 ||
+               fdps_unit_is_retired(CHAPTER_24_CHALLENGER_UNIT_INDEX) != 0) {
+        if (fdps_unit_is_retired(CHAPTER_24_CHALLENGER_UNIT_INDEX) != 0) {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CHAPTER_24_DUEL_WON_TEXT_ID,
+                           (unsigned char *) VGA_SCREEN_BASE,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+            muramasa_slot =
+                fdps_unit_find_item_slot(CHAPTER_24_JUNA_UNIT_INDEX,
+                                         CHAPTER_24_MURAMASA_ITEM_ID);
+            if (muramasa_slot != CHAPTER_24_ITEM_SLOT_NONE) {
+                fdps_unit_remove_item(CHAPTER_24_JUNA_UNIT_INDEX,
+                                      muramasa_slot);
+            }
+            fdps_unit_add_item(CHAPTER_24_JUNA_UNIT_INDEX,
+                               CHAPTER_24_MASAMUNE_ITEM_ID);
+        } else {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CHAPTER_24_DUEL_LOST_TEXT_ID,
+                           (unsigned char *) VGA_SCREEN_BASE,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+        }
+        data_fdps_chapter_event_or_battle_end_code =
+            BATTLE_END_CHAPTER_CLEARED;
+    }
+
+    if (data_fdps_battle_turn_counter <= CHAPTER_24_DUEL_LAST_TURN &&
+        data_fdps_chapter_event_or_battle_end_code ==
+            BATTLE_END_CHAPTER_CLEARED &&
+        data_fdps_map_cell_event_triggered_flags[CHAPTER_24_DUEL_LATCH_SLOT]
+            == 0 &&
+        fdps_unit_is_retired(CHAPTER_24_JUNA_UNIT_INDEX) == 0 &&
+        fdps_unit_find_item_slot(CHAPTER_24_JUNA_UNIT_INDEX,
+                                 CHAPTER_24_MURAMASA_ITEM_ID)
+            != CHAPTER_24_ITEM_SLOT_NONE) {
+
+        fdps_deploy_wave(data_fdps_chapter_current_chapter_id,
+                         CHAPTER_24_DUEL_WAVE,
+                         CHAPTER_24_PLACE_NEAREST_FREE_TILE);
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CHAPTER_24_CHALLENGE_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        fdps_message_window_open(CHAPTER_24_DUEL_SPEAKER_FACE_INDEX);
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CHAPTER_24_QUESTION_TEXT_ID,
+                       (unsigned char *) PANEL_TEXT_ORIGIN,
+                       VGA_SCREEN_PITCH, MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        duel_answer = fdps_prompt_two_choice();
+        fdps_message_window_close();
+
+        if (duel_answer == CHAPTER_24_DUEL_ANSWER_ACCEPT) {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CHAPTER_24_ACCEPTED_TEXT_ID,
+                           (unsigned char *) VGA_SCREEN_BASE,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+            for (unit_index = 0;
+                 unit_index < data_fdps_map_unit_count - 1;
+                 unit_index++) {
+                unit = fdps_get_unit_record(unit_index);
+                if (unit_index != CHAPTER_24_JUNA_UNIT_INDEX) {
+                    unit->flags = CHAPTER_24_RETIRED_FLAG_BYTE;
+                }
+            }
+            data_fdps_chapter_event_or_battle_end_code =
+                BATTLE_END_BATTLE_CONTINUES;
+        } else {
+            fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                           CHAPTER_24_DECLINED_TEXT_ID,
+                           (unsigned char *) PANEL_TEXT_ORIGIN,
+                           VGA_SCREEN_PITCH, MESSAGE_FG_COLOR,
+                           MESSAGE_BG_COLOR, MESSAGE_OUTLINE_COLOR);
+        }
+
+        data_fdps_map_cell_event_triggered_flags[CHAPTER_24_DUEL_LATCH_SLOT] =
+            CHAPTER_24_DUEL_LATCH_SET;
+    }
+}

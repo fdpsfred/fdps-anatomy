@@ -2533,5 +2533,33 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003b3d0": [
+    {
+      "what": "The refusal line, FDETXT entry 0x18, is drawn to 0xaa44a -- the pen inside the message panel -- by the PUSH at 0003b5d9, but fdps_message_window_close has already run at 0003b557 and repainted the visible page, while the acceptance line at 0003b570 goes to the screen origin instead. The emitted C reproduces both destinations exactly, so nothing is at risk in the code; what is not established is what the player actually sees when the refusal is painted into a panel that is no longer on screen. Chapter 19's handler has the same pairing at 0003b084, so it is a shared shape rather than a slip in one chapter.",
+      "needs": "Play chapter 24 in DOSBox-X to the offer with the 妖刀村正 in 裘娜's bag and decline, then look at where entry 0x18 lands on the visible page. Nothing short of a real run settles it: the destination is a raw frame-buffer address and what is under it depends on what fdps_message_window_close left there.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "On an early clear the settle test reads past the end of the unit array, and whether the rebuild's heap answers the same way as the original's is not established. What IS established: MAP23.DAT holds 80 deployment records with exactly one wave-7 record (record 71, enemy side, character form 0x23 at level 40); the turn handler deploys waves 2, 6, 4, 3 and 5; the retire sweep's bound is the live count less one, so the challenger -- always the record fdps_deploy_wave has just appended at the end -- is spared wherever he lands; and with the array shorter than 0x53 records fdps_unit_is_retired(0x52) at 0003b3fd and 0003b40f therefore asks about a slot past the last record the array holds. The guide gives the shipped result of exactly that state, 若第七回合以前便結束，則兩人對戰的第一回合己方結束時，狂戰士便自動認輸 -- the challenger forfeits on the duel's first turn -- which is the out-of-range slot reading back as retired. (Chapter 19's guide entry gives the different result its literal-bounded sweep produces, 若第五回合以前便結束，則狂戰士會消失，造成本章無法結束, which is independent confirmation of the reading.) The concern that remains is only this: the answer is a byte of whatever the DOS/4G heap holds one record past the unit array, so the rebuild could read it as standing, and then killing the challenger would never satisfy a test asking about a different slot and the chapter could not be ended. The emitted C keeps the literal and the count-driven bound exactly as the assembly has them, so nothing in the source can be changed to make this safer without changing behaviour on the normal path.",
+      "needs": "A real run of the rebuilt executable in DOSBox-X: clear chapter 24 before turn 7 with the 妖刀村正 carried, accept the duel, and check that the challenger forfeits at the end of the first turn as the guide describes. Only a run on the rebuild's own heap settles what that out-of-range byte holds.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed for myself from the instruction stream: PUSH 0xaa44a at 0003b5d9 sends the refusal line to the panel's interior pen while CALL fdps_message_window_close has already run at 0003b557, and the acceptance line at 0003b570 pushes 0xa0000 instead. The emitted object reproduces both destinations exactly (push 000aa44aH at 05e4, push 000a0000H at 057f), so nothing in the source is at risk. My pass added no site the emitter missed.",
+      "needs": "A real run: play chapter 24 to the offer with the 妖刀村正 carried and decline, then look at where FDETXT entry 0x18 lands on the visible page.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Reached independently: the challenger is the literal PUSH 0x52 at 0003b3fd and 0003b40f, while the retire sweep's bound is read live from [0x00060150] at 0003b58c, so the two name the same unit only while the array holds exactly 0x53 records. What my pass adds is the direction of the failure, checked rather than assumed: the sweep can never reach the appended challenger, since its bound is the count less one and he is the last record, so an early clear leaves him standing and it is the settle test at 0003b3fd and 0003b40f that reads past the array instead. The emitted C keeps both the literal and the live bound exactly as the assembly has them, which is the right call -- resolving the challenger from what the deployment appended would change shipped behaviour.",
+      "needs": "A real run of the rebuilt executable in DOSBox-X: clear chapter 24 before turn 7 carrying the 妖刀村正, accept the duel, and check that the challenger forfeits at the end of the duel's first turn. Only a run on the rebuild's own heap settles what the byte one record past the unit array holds.",
+      "same_as": "emit#1",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }
