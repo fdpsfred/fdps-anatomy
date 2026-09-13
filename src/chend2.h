@@ -203,4 +203,33 @@ extern void fdps_chapter_21_end(void);
 extern void fdps_chapter_22_end(void);
 #pragma aux fdps_chapter_22_end "*" parm caller [];
 
+/* Chapter 23's end handler: closes chapter 23, 死神冥河, out and hands the
+   game to chapter 24, 魔精石之秘密.  Takes nothing and returns nothing.
+
+   THE MAP'S THIRD SIDE IS CLEARED HERE, and that is what makes this one
+   different.  After the enemy side is swept, every battle unit from index 11
+   up whose side byte is 1 has its flags byte set to exactly 1, which raises
+   the retired bit and drops everything else the byte held.  Chapter 23's map
+   carries twenty-six such units of its own plus the keepsake-ring spirit, and
+   nothing else in the handler family removes them -- the enemy sweep only
+   looks at side 0 -- so this loop is what empties the map before the
+   cut-scene plays.  Index 11 is the map's player-slot count, so the party's
+   own slots are stepped over rather than tested.
+
+   The rest is the family's, in the family's order: every unit on the enemy
+   side has its hit points zeroed and any that had not already left the field
+   is played off it; the battle party is banked onto the persistent roster; the
+   victory cut-scene Win22.dat is interpreted; every party member still at 0
+   hit points is revived and billed for it; and the chapter index is advanced
+   to 23, chapter 24.  The third-side sweep runs BEFORE the party is banked,
+   because the writeback reads the same flags byte to decide whether to heal.
+
+   THE SWEEP OF THE ENEMY SIDE IS NOT BELT AND BRACES HERE, for the same reason
+   it is not in chapter 22: chapter 23 clears on one named boss rather than on
+   敵人全滅, so the handler is entered with the boss's escort still standing.
+
+   Table slot 22. */
+extern void fdps_chapter_23_end(void);
+#pragma aux fdps_chapter_23_end "*" parm caller [];
+
 #endif

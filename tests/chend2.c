@@ -3452,6 +3452,705 @@ static void the_ch22_fixture_container_is_removed(void)
     CHECK_EQ(file_present(SCRIPT_ARCHIVE_FILE), 0);
 }
 
+/* --------------------------------------------------------------------------
+ * fdps_chapter_23_end at 0003b350.
+ *
+ * The family's four calls and one store, with a sweep of the map's THIRD SIDE
+ * wedged between the first two -- and that sweep is the whole reason this half
+ * stages a battle array of its own instead of the two-record one the plain
+ * handlers share.
+ *
+ *   0003b35c  CALL 0x00039e10          every unit on the enemy side is swept
+ *   0003b361  MOV dword ptr [EBP-0x8],0xb
+ *   0003b36b  CMP EAX,dword ptr [0x00060150] / JL
+ *   0003b381  CALL 0x0002d210          the record of unit [EBP-0x8]
+ *   0003b38f  MOV AL,[EAX+0x6] / AND EAX,0xff / CMP EAX,0x1 / JNZ
+ *   0003b39f  MOV byte ptr [EAX+0x5],0x1
+ *   0003b3a5  CALL 0x00023980          the battle party is banked
+ *   0003b3aa  MOV EAX,0x621c4 / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4
+ *             the cut-scene "Win22.dat" is interpreted
+ *   0003b3b8  CALL 0x00039e70          the fallen are revived
+ *   0003b3bd  MOV dword ptr [0x00069cf4],0x17
+ *
+ * WHAT THE STAGED ARRAY IS SHAPED TO CATCH.  Four of the six records exist
+ * only as probes of the loop's three edges, and each one would be rewritten by
+ * a different plausible mistake:
+ *
+ *   unit 10 is side 1 and sits one index BELOW the start.  A sweep written
+ *   from 0 rather than from 11 retires it.
+ *
+ *   unit 11 is side 1 and is the first index the sweep does reach.  It is the
+ *   only record whose flags byte may change, and it is staged carrying two
+ *   spare bits so that the WHOLE-BYTE store is separable from an OR: the byte
+ *   must read back 1 and not 7.
+ *
+ *   unit 12 is side 2 and sits above the start.  A sweep that dropped the side
+ *   test, or tested it for "not the enemy side", retires it.
+ *
+ *   unit 14 is side 1 and sits one index past data_fdps_map_unit_count.  A
+ *   bound written as the array's capacity, or as the map's opening size,
+ *   reaches it; the live count does not.
+ *
+ * HOW THE SWEEP'S PLACE IN THE ORDER IS PINNED DOWN.  Unit 11 carries a
+ * character id that roster slot 1 also carries, so the writeback banks it.
+ * fdps_roster_write_back_battle_units masks the banked flags byte to bit 0 and
+ * then skips the restore-from-maximum whenever that bit survived (src/
+ * roster.c), so with the sweep in front of it slot 1 arrives holding the
+ * battle's 12 hit points, and with the sweep moved behind it -- or left out
+ * altogether -- slot 1 arrives healed to 30.  That single number is the whole
+ * ordering argument.
+ *
+ * WHY EVERY STAGED RECORD IS EITHER ALIVE OR ALREADY RETIRED.  The death pass
+ * that ends fdps_battle_destroy_remaining_enemies collects units whose retired
+ * bit is clear and whose hit points are 0 and plays them off the map, none of
+ * which can run in a test image.  The enemy is staged with the bit already up
+ * and everything else is staged with hit points to spare, so the pass finds an
+ * empty list.  The third-side records are not at risk from the first call
+ * either way: it only zeroes hit points on side 0.
+ *
+ * WHY NOBODY MAY BE LEFT AT 0 HP ON THE ROSTER, why the cut-scene is a fixture
+ * rather than the shipped WIN22.DAT, and why the container refuses to
+ * overwrite one that is already there, are the reasoning at the top of this
+ * file, unchanged.
+ * ------------------------------------------------------------------------ */
+
+/* WIN22.DAT, the member chapter 23's handler names: operand 1, so
+   status_timers[4], with a value neither decoy writes. */
+#define WIN22_CH23_MARKER_OPERAND 1
+#define WIN22_CH23_MARKER_SLOT 4
+#define WIN22_CH23_MARKER_VALUE 73
+
+/* WIN21.DAT, the member a handler that followed its own script number one step
+   low would open.  It is also the member the sibling handler one chapter back
+   really does name, so a body copied from fdps_chapter_22_end without changing
+   the operand lands here. */
+#define WIN21_CH23_MARKER_OPERAND 0
+#define WIN21_CH23_MARKER_SLOT 3
+#define WIN21_CH23_MARKER_VALUE 61
+
+/* WIN23.DAT, the member a handler that named the chapter it hands ON to rather
+   than the one just won would open -- the exact slip the store's 0x17 invites.
+   It is a real member of the shipped container too, sitting at 0x621d0
+   immediately behind the name this handler uses, so the slip would not
+   announce itself as a missing member. */
+#define WIN23_CH23_MARKER_OPERAND 2
+#define WIN23_CH23_MARKER_SLOT 5
+#define WIN23_CH23_MARKER_VALUE 67
+
+/* The index chapter 23's handler must leave: chapter 24, 0-based, the literal
+   of the store at 0003b3bd.
+
+   The run starts from the same 4 chapter 16's does, which is none of the three
+   numbers a mistake would leave behind: not the stored 23, not the 22 an
+   off-by-one that followed the script name would leave, and not the 5 an
+   increment would leave. */
+#define CH23_CHAPTER_ID_AFTER 23
+
+/* The battle array this half stages.  Fourteen records are in play and two
+   more sit behind them: one is the past-the-count probe and the last is spare,
+   so a walk that ran off the end lands somewhere this file can see. */
+#define CH23_UNIT_COUNT 14
+#define CH23_UNIT_CAPACITY 16
+
+/* The roster block: two members, because the second is what makes the
+   writeback's treatment of a swept unit visible. */
+#define CH23_ROSTER_MEMBERS 2
+#define CH23_ROSTER_CAPACITY 4
+#define CH23_NPC_ROSTER_SLOT 1
+
+/* The four probes and the enemy.  10 is the last index below the sweep's
+   start, 11 the first index it reaches, 12 a player-side record above the
+   start, 13 the enemy and 14 one past the live count. */
+#define CH23_EARLY_NPC_UNIT 10
+#define CH23_NPC_UNIT 11
+#define CH23_PLAYER_SIDE_UNIT 12
+#define CH23_ENEMY_UNIT 13
+#define CH23_BEYOND_COUNT_UNIT 14
+
+/* The side byte at record +6 that the sweep is looking for: 1, the third side,
+   against 0 for the enemy and 2 for the player's. */
+#define CH23_NPC_SIDE 1
+
+/* The character ids the probes carry.  Only CH23_NPC_CHAR_ID is also a roster
+   slot's, so it is the only one of them the writeback banks; the others are
+   ids no slot holds, which keeps every roster assertion about the two members
+   that are meant to move. */
+#define CH23_NPC_CHAR_ID 37
+#define CH23_EARLY_NPC_CHAR_ID 38
+#define CH23_PLAYER_SIDE_CHAR_ID 40
+#define CH23_BEYOND_COUNT_CHAR_ID 39
+#define CH23_ENEMY_CHAR_ID 84
+
+/* What the filler records between the probes carry, one per index so that a
+   stray write can be told apart from a record that was always going to hold
+   that value.  The range 50..65 misses both roster slots' ids. */
+#define CH23_FILLER_CHAR_ID_BASE 50
+
+/* What the third-side probes are staged carrying in their flags byte: bits 1
+   and 2, which nothing in this handler's reach reads or writes.  It is what
+   separates the handler's whole-byte store from an OR -- an OR leaves 7 --
+   and what makes an untouched probe tell itself apart from a swept one.
+
+   IT CANNOT BE THE 0x80 HAS-ACTED BIT, which is the obvious mark to stage.
+   fdps_icon_script_run opens by calling fdps_units_clear_status_bit7, which
+   ANDs 0x7f over the flags byte of every unit below data_fdps_map_unit_count
+   (src/unit.c), so a 0x80 staged here is gone by the time the run is captured
+   whatever the sweep did -- both probes would read 0 and the swept record
+   would read 1 either way. */
+#define CH23_STAGED_NPC_FLAGS 0x06
+
+/* A mark the party member is staged carrying, above the bit 0 the writeback
+   keeps: bit 1 of the flags byte at record +5.  It is what makes the absence
+   of a recovery sweep of the kind fdps_chapter_19_end has visible, and it also
+   catches a third-side sweep written from index 0. */
+#define CH23_STAGED_PARTY_FLAGS 2
+
+/* Unit 11's pools.  hp_current is well below hp_max on purpose: which of the
+   two reaches roster slot 1 is the ordering assertion this half turns on. */
+#define CH23_NPC_HP_CURRENT 12
+#define CH23_NPC_HP_MAX 30
+#define CH23_NPC_MP_CURRENT 1
+#define CH23_NPC_MP_MAX 4
+#define CH23_NPC_LEVEL 1
+
+/* Hit points for the probes that only have to stay above zero, so that the
+   death pass inside the first call finds an empty list. */
+#define CH23_PROBE_HP 9
+#define CH23_ENEMY_HP 50
+
+/* WIN22.DAT: retire battle unit 0, write the marker into its status_timers[4],
+   stop -- the same two opcodes the halves above use, so the order argument
+   below is the same one. */
+static unsigned char fixture_ch23_win22_dat[] = {
+    0x0b, RANDIS_UNIT,
+    0x12, RANDIS_UNIT, WIN22_CH23_MARKER_OPERAND, WIN22_CH23_MARKER_VALUE,
+    0x00
+};
+
+/* WIN21.DAT: the decoy one step low.  It retires nobody, so a run that opened
+   it is two failed assertions rather than one. */
+static unsigned char fixture_ch23_win21_dat[] = {
+    0x12, RANDIS_UNIT, WIN21_CH23_MARKER_OPERAND, WIN21_CH23_MARKER_VALUE,
+    0x00
+};
+
+/* WIN23.DAT: the decoy one step high, retiring nobody for the same reason. */
+static unsigned char fixture_ch23_win23_dat[] = {
+    0x12, RANDIS_UNIT, WIN23_CH23_MARKER_OPERAND, WIN23_CH23_MARKER_VALUE,
+    0x00
+};
+
+static char *fixture_ch23_names[FIXTURE_MEMBERS] = {
+    "WIN21.DAT", "WIN22.DAT", "WIN23.DAT"
+};
+
+static unsigned char *fixture_ch23_bytes[FIXTURE_MEMBERS] = {
+    fixture_ch23_win21_dat, fixture_ch23_win22_dat, fixture_ch23_win23_dat
+};
+
+static int fixture_ch23_lengths[FIXTURE_MEMBERS] = {
+    sizeof(fixture_ch23_win21_dat), sizeof(fixture_ch23_win22_dat),
+    sizeof(fixture_ch23_win23_dat)
+};
+
+static struct fdps_unit_record ch23_unit_image[CH23_UNIT_CAPACITY];
+static struct fdps_unit_record ch23_roster_image[CH23_ROSTER_CAPACITY];
+static unsigned char ch23_item_image[ITEM_TABLE_ROWS
+                                     * sizeof(struct fdps_item_effect)];
+
+/* 0 not attempted, 1 the run happened and the snapshot below is good,
+   2 unavailable and every case says so. */
+static int ch23_run_state = 0;
+
+/* Whether this half created the container, and so whether it may remove it. */
+static int ch23_fixture_owned = 0;
+
+/* Everything chapter 23's cases assert, captured the instant it returned. */
+static unsigned char ch23_seen_unit_spells[SPELL_BITMAP_BYTES];
+static unsigned char ch23_seen_unit_timers[STATUS_TIMER_COUNT];
+static unsigned char ch23_seen_slot_spells[SPELL_BITMAP_BYTES];
+static unsigned char ch23_seen_slot_timers[STATUS_TIMER_COUNT];
+static int ch23_seen_unit_flags;
+static int ch23_seen_unit_hp_current;
+static int ch23_seen_unit_mp_current;
+static int ch23_seen_slot_char_id;
+static int ch23_seen_slot_flags;
+static int ch23_seen_slot_hp_current;
+static int ch23_seen_slot_hp_max;
+static int ch23_seen_slot_mp_current;
+static int ch23_seen_slot_level;
+static int ch23_seen_enemy_hp_current;
+static int ch23_seen_enemy_hp_max;
+static int ch23_seen_enemy_flags;
+static int ch23_seen_early_npc_flags;
+static int ch23_seen_npc_flags;
+static int ch23_seen_npc_hp_current;
+static int ch23_seen_player_side_flags;
+static int ch23_seen_beyond_count_flags;
+static int ch23_seen_npc_slot_char_id;
+static int ch23_seen_npc_slot_flags;
+static int ch23_seen_npc_slot_hp_current;
+static int ch23_seen_npc_slot_hp_max;
+static int ch23_seen_npc_slot_mp_current;
+static int ch23_seen_chapter_id;
+static int ch23_seen_party_gold;
+
+/* Builds chapter 23's fixture container, or answers no, to the layout in
+   resource_info/vfs.md and by the same refusal protocol as the halves above. */
+static int stage_ch23_fixture_archive(void)
+{
+    FILE *fp;
+    long member_at;
+    int i;
+
+    fp = fopen(SCRIPT_ARCHIVE_FILE, "rb");
+    if (fp != NULL) {
+        fclose(fp);
+        return 0;
+    }
+
+    fp = fopen(SCRIPT_ARCHIVE_FILE, "wb");
+    if (fp == NULL) {
+        return 0;
+    }
+
+    fwrite("VFS", 1, 3, fp);
+    write_word(fp, 1);
+    write_word(fp, VFS_HEADER_BYTES);
+    write_dword(fp, (long) FIXTURE_MEMBERS);
+    fwrite("Dynasty Information Co.,", 1, VFS_SIGNATURE_BYTES, fp);
+
+    member_at = (long) VFS_HEADER_BYTES
+                + (long) FIXTURE_MEMBERS * VFS_ENTRY_BYTES;
+    for (i = 0; i < FIXTURE_MEMBERS; i++) {
+        write_name(fp, fixture_ch23_names[i]);
+        write_dword(fp, (long) fixture_ch23_lengths[i]);
+        write_dword(fp, (long) fixture_ch23_lengths[i]);
+        fputc(0, fp);
+        write_dword(fp, member_at);
+        member_at += (long) fixture_ch23_lengths[i];
+    }
+    for (i = 0; i < FIXTURE_MEMBERS; i++) {
+        fwrite(fixture_ch23_bytes[i], 1, (size_t) fixture_ch23_lengths[i], fp);
+    }
+    fclose(fp);
+
+    ch23_fixture_owned = 1;
+    return 1;
+}
+
+/* The battle array, the roster block and the item table as they stand when
+   chapter 23's battle has just been won: one live party member, four
+   third-side and player-side probes around the sweep's three edges, and one
+   already retired enemy. */
+static void ch23_stage_globals(void)
+{
+    int unit_index;
+
+    memset(ch23_unit_image, 0, sizeof(ch23_unit_image));
+    memset(ch23_roster_image, ROSTER_FILLER, sizeof(ch23_roster_image));
+    memset(ch23_item_image, 0, sizeof(ch23_item_image));
+
+    /* Every record in the array is filled first, and none of them may be left
+       as the zeroed block memset produced: a zeroed record is side 0 with 0
+       hit points and a clear retired bit, which is exactly the shape the death
+       pass inside fdps_battle_destroy_remaining_enemies collects and plays off
+       the map, and that pass renders frames and cannot run in a test image.
+       The filler slots are therefore the party's own side with hit points to
+       spare, and they carry character ids no roster slot holds so that they
+       take no part in the writeback. */
+    for (unit_index = 0; unit_index < CH23_UNIT_CAPACITY; unit_index++) {
+        ch23_unit_image[unit_index].char_id =
+            (unsigned char) (CH23_FILLER_CHAR_ID_BASE + unit_index);
+        ch23_unit_image[unit_index].side = PLAYER_SIDE;
+        ch23_unit_image[unit_index].hp_current = CH23_PROBE_HP;
+        ch23_unit_image[unit_index].hp_max = CH23_PROBE_HP;
+    }
+
+    ch23_unit_image[RANDIS_UNIT].char_id = RANDIS_CHAR_ID;
+    ch23_unit_image[RANDIS_UNIT].flags = CH23_STAGED_PARTY_FLAGS;
+    ch23_unit_image[RANDIS_UNIT].side = PLAYER_SIDE;
+    ch23_unit_image[RANDIS_UNIT].level = RANDIS_LEVEL;
+    ch23_unit_image[RANDIS_UNIT].clazz = RANDIS_CLASS;
+    ch23_unit_image[RANDIS_UNIT].hp_current = RANDIS_HP_CURRENT;
+    ch23_unit_image[RANDIS_UNIT].hp_max = RANDIS_HP_MAX;
+    ch23_unit_image[RANDIS_UNIT].mp_current = RANDIS_MP_CURRENT;
+    ch23_unit_image[RANDIS_UNIT].mp_max = RANDIS_MP_MAX;
+
+    ch23_unit_image[CH23_EARLY_NPC_UNIT].char_id = CH23_EARLY_NPC_CHAR_ID;
+    ch23_unit_image[CH23_EARLY_NPC_UNIT].side = CH23_NPC_SIDE;
+    ch23_unit_image[CH23_EARLY_NPC_UNIT].flags = CH23_STAGED_NPC_FLAGS;
+    ch23_unit_image[CH23_EARLY_NPC_UNIT].hp_current = CH23_PROBE_HP;
+    ch23_unit_image[CH23_EARLY_NPC_UNIT].hp_max = CH23_PROBE_HP;
+
+    ch23_unit_image[CH23_NPC_UNIT].char_id = CH23_NPC_CHAR_ID;
+    ch23_unit_image[CH23_NPC_UNIT].side = CH23_NPC_SIDE;
+    ch23_unit_image[CH23_NPC_UNIT].flags = CH23_STAGED_NPC_FLAGS;
+    ch23_unit_image[CH23_NPC_UNIT].level = CH23_NPC_LEVEL;
+    ch23_unit_image[CH23_NPC_UNIT].hp_current = CH23_NPC_HP_CURRENT;
+    ch23_unit_image[CH23_NPC_UNIT].hp_max = CH23_NPC_HP_MAX;
+    ch23_unit_image[CH23_NPC_UNIT].mp_current = CH23_NPC_MP_CURRENT;
+    ch23_unit_image[CH23_NPC_UNIT].mp_max = CH23_NPC_MP_MAX;
+
+    ch23_unit_image[CH23_PLAYER_SIDE_UNIT].char_id = CH23_PLAYER_SIDE_CHAR_ID;
+    ch23_unit_image[CH23_PLAYER_SIDE_UNIT].side = PLAYER_SIDE;
+    ch23_unit_image[CH23_PLAYER_SIDE_UNIT].flags = CH23_STAGED_NPC_FLAGS;
+    ch23_unit_image[CH23_PLAYER_SIDE_UNIT].hp_current = CH23_PROBE_HP;
+    ch23_unit_image[CH23_PLAYER_SIDE_UNIT].hp_max = CH23_PROBE_HP;
+
+    ch23_unit_image[CH23_ENEMY_UNIT].char_id = CH23_ENEMY_CHAR_ID;
+    ch23_unit_image[CH23_ENEMY_UNIT].side = ENEMY_SIDE;
+    ch23_unit_image[CH23_ENEMY_UNIT].flags = UNIT_FLAG_RETIRED;
+    ch23_unit_image[CH23_ENEMY_UNIT].hp_current = CH23_ENEMY_HP;
+    ch23_unit_image[CH23_ENEMY_UNIT].hp_max = CH23_ENEMY_HP;
+
+    ch23_unit_image[CH23_BEYOND_COUNT_UNIT].char_id =
+        CH23_BEYOND_COUNT_CHAR_ID;
+    ch23_unit_image[CH23_BEYOND_COUNT_UNIT].side = CH23_NPC_SIDE;
+    ch23_unit_image[CH23_BEYOND_COUNT_UNIT].flags = CH23_STAGED_NPC_FLAGS;
+    ch23_unit_image[CH23_BEYOND_COUNT_UNIT].hp_current = CH23_PROBE_HP;
+    ch23_unit_image[CH23_BEYOND_COUNT_UNIT].hp_max = CH23_PROBE_HP;
+
+    ch23_roster_image[RANDIS_ROSTER_SLOT].char_id = RANDIS_CHAR_ID;
+    ch23_roster_image[CH23_NPC_ROSTER_SLOT].char_id = CH23_NPC_CHAR_ID;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch23_unit_image;
+    data_fdps_roster_array_ptr = (unsigned char *) ch23_roster_image;
+    data_fdps_item_effect_table_ptr = ch23_item_image;
+    data_fdps_map_unit_count = CH23_UNIT_COUNT;
+    data_fdps_roster_member_count = CH23_ROSTER_MEMBERS;
+    data_fdps_chapter_current_chapter_id = CHAPTER_ID_BEFORE;
+    data_fdps_shared_party_total_gold = PARTY_GOLD_BEFORE;
+}
+
+static void ch23_capture(void)
+{
+    int i;
+
+    for (i = 0; i < SPELL_BITMAP_BYTES; i++) {
+        ch23_seen_unit_spells[i] =
+            ch23_unit_image[RANDIS_UNIT].spells_known_bitmap[i];
+        ch23_seen_slot_spells[i] =
+            ch23_roster_image[RANDIS_ROSTER_SLOT].spells_known_bitmap[i];
+    }
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        ch23_seen_unit_timers[i] =
+            ch23_unit_image[RANDIS_UNIT].status_timers[i];
+        ch23_seen_slot_timers[i] =
+            ch23_roster_image[RANDIS_ROSTER_SLOT].status_timers[i];
+    }
+    ch23_seen_unit_flags = (int) ch23_unit_image[RANDIS_UNIT].flags;
+    ch23_seen_unit_hp_current = (int) ch23_unit_image[RANDIS_UNIT].hp_current;
+    ch23_seen_unit_mp_current = (int) ch23_unit_image[RANDIS_UNIT].mp_current;
+    ch23_seen_slot_char_id =
+        (int) ch23_roster_image[RANDIS_ROSTER_SLOT].char_id;
+    ch23_seen_slot_flags = (int) ch23_roster_image[RANDIS_ROSTER_SLOT].flags;
+    ch23_seen_slot_hp_current =
+        (int) ch23_roster_image[RANDIS_ROSTER_SLOT].hp_current;
+    ch23_seen_slot_hp_max =
+        (int) ch23_roster_image[RANDIS_ROSTER_SLOT].hp_max;
+    ch23_seen_slot_mp_current =
+        (int) ch23_roster_image[RANDIS_ROSTER_SLOT].mp_current;
+    ch23_seen_slot_level = (int) ch23_roster_image[RANDIS_ROSTER_SLOT].level;
+    ch23_seen_enemy_hp_current =
+        (int) ch23_unit_image[CH23_ENEMY_UNIT].hp_current;
+    ch23_seen_enemy_hp_max = (int) ch23_unit_image[CH23_ENEMY_UNIT].hp_max;
+    ch23_seen_enemy_flags = (int) ch23_unit_image[CH23_ENEMY_UNIT].flags;
+    ch23_seen_early_npc_flags =
+        (int) ch23_unit_image[CH23_EARLY_NPC_UNIT].flags;
+    ch23_seen_npc_flags = (int) ch23_unit_image[CH23_NPC_UNIT].flags;
+    ch23_seen_npc_hp_current =
+        (int) ch23_unit_image[CH23_NPC_UNIT].hp_current;
+    ch23_seen_player_side_flags =
+        (int) ch23_unit_image[CH23_PLAYER_SIDE_UNIT].flags;
+    ch23_seen_beyond_count_flags =
+        (int) ch23_unit_image[CH23_BEYOND_COUNT_UNIT].flags;
+    ch23_seen_npc_slot_char_id =
+        (int) ch23_roster_image[CH23_NPC_ROSTER_SLOT].char_id;
+    ch23_seen_npc_slot_flags =
+        (int) ch23_roster_image[CH23_NPC_ROSTER_SLOT].flags;
+    ch23_seen_npc_slot_hp_current =
+        (int) ch23_roster_image[CH23_NPC_ROSTER_SLOT].hp_current;
+    ch23_seen_npc_slot_hp_max =
+        (int) ch23_roster_image[CH23_NPC_ROSTER_SLOT].hp_max;
+    ch23_seen_npc_slot_mp_current =
+        (int) ch23_roster_image[CH23_NPC_ROSTER_SLOT].mp_current;
+    ch23_seen_chapter_id = data_fdps_chapter_current_chapter_id;
+    ch23_seen_party_gold = data_fdps_shared_party_total_gold;
+}
+
+/* Runs chapter 23's handler once, against freshly staged arrays and its own
+   fixture cut-scene, and records what it left behind. */
+static void run_ch23_handler(void)
+{
+    if (ch23_run_state != 0) {
+        return;
+    }
+    ch23_run_state = 2;
+
+    if (!stage_ch23_fixture_archive()) {
+        return;
+    }
+
+    ch23_stage_globals();
+
+    fdps_chapter_23_end();
+
+    ch23_capture();
+    ch23_run_state = 1;
+}
+
+/* The map is swept first, and swept the way 00039e10 sweeps it: the enemy
+   unit's hit-point word is 0 where the staging left 50, its maximum in the
+   word behind it is untouched -- the store is MOV word ptr [EAX+0x40],0x0 and
+   not a dword -- and the player unit, whose side byte is 2, keeps the hit
+   points the staging gave it.  The third-side record at unit 11 keeps its hit
+   points too: 00039e10 tests for side 0 alone, so the handler's own sweep
+   below is the only thing in this function that touches side 1. */
+static void chapter_23_sweeps_the_enemy_side(void)
+{
+    run_ch23_handler();
+    CHECK_EQ(ch23_run_state, 1);
+    if (ch23_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch23_seen_enemy_hp_current, 0);
+    CHECK_EQ(ch23_seen_enemy_hp_max, CH23_ENEMY_HP);
+    CHECK_EQ(ch23_seen_enemy_flags, UNIT_FLAG_RETIRED);
+    CHECK_EQ(ch23_seen_unit_hp_current, RANDIS_HP_CURRENT);
+    CHECK_EQ(ch23_seen_npc_hp_current, CH23_NPC_HP_CURRENT);
+}
+
+/* The third side is retired, and retired by a WHOLE-BYTE STORE.  Unit 11 was
+   staged holding bits 1 and 2 and reads back exactly 1: both of them are gone,
+   which is what separates MOV byte ptr [EAX+0x5],0x1 at 0003b39f from the
+   unit->flags |= 1 a reader would write by reflex.  An OR would leave 7, and
+   nothing between the sweep and the capture would take those bits off again --
+   the cut-scene's opening AND 0x7f reaches only bit 7. */
+static void chapter_23_retires_the_third_side(void)
+{
+    run_ch23_handler();
+    CHECK_EQ(ch23_run_state, 1);
+    if (ch23_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch23_seen_npc_flags, UNIT_FLAG_RETIRED);
+    CHECK_EQ(ch23_seen_npc_flags & CH23_STAGED_NPC_FLAGS, 0);
+}
+
+/* The sweep starts at unit 11 and not at unit 0.  Unit 10 is side 1 and sits
+   one index below the literal 0xb the counter is seeded with at 0003b361, and
+   it is left holding the 0x06 it was staged with.  A sweep written from 0
+   rewrites its byte to 1, and a sweep written from any start below 11 that is
+   still above 0 is caught by the same record. */
+static void chapter_23_third_side_sweep_starts_at_unit_eleven(void)
+{
+    run_ch23_handler();
+    CHECK_EQ(ch23_run_state, 1);
+    if (ch23_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch23_seen_early_npc_flags, CH23_STAGED_NPC_FLAGS);
+}
+
+/* The sweep tests for side 1 exactly.  Unit 12 is side 2 and sits above the
+   start, and it keeps the 0x06 it was staged with: the test at 0003b397 is
+   CMP EAX,0x1 and not a test for "not the enemy side", which would retire the
+   player's own units from index 11 up. */
+static void chapter_23_third_side_sweep_skips_the_player_side(void)
+{
+    run_ch23_handler();
+    CHECK_EQ(ch23_run_state, 1);
+    if (ch23_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch23_seen_player_side_flags, CH23_STAGED_NPC_FLAGS);
+}
+
+/* The sweep's bound is data_fdps_map_unit_count, re-read every iteration at
+   0003b36b.  Unit 14 is side 1 and sits one index past the live count of 14,
+   and it keeps the 0x06 it was staged with: a bound written as the array's
+   capacity, or as a literal taken from the map's opening size, would reach
+   it. */
+static void chapter_23_third_side_sweep_walks_the_live_unit_count(void)
+{
+    run_ch23_handler();
+    CHECK_EQ(ch23_run_state, 1);
+    if (ch23_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch23_seen_beyond_count_flags, CH23_STAGED_NPC_FLAGS);
+}
+
+/* THE SWEEP RUNS BEFORE THE WRITEBACK, and roster slot 1 is where that shows.
+   Unit 11 carries the character id slot 1 holds, so the writeback banks it:
+   the flags byte arrives masked to bit 0, which is 1, and because that bit
+   survived the mask the restore-from-maximum is skipped, so the slot holds the
+   battle's 12 hit points against a maximum of 30.  Move the sweep behind the
+   writeback -- or leave it out -- and the same slot arrives healed to 30.  The
+   magic points are restored either way, because that store sits after the join
+   (src/roster.c). */
+static void chapter_23_banks_the_swept_third_side_out_of_play(void)
+{
+    run_ch23_handler();
+    CHECK_EQ(ch23_run_state, 1);
+    if (ch23_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch23_seen_npc_slot_char_id, CH23_NPC_CHAR_ID);
+    CHECK_EQ(ch23_seen_npc_slot_flags, UNIT_FLAG_RETIRED);
+    CHECK_EQ(ch23_seen_npc_slot_hp_current, CH23_NPC_HP_CURRENT);
+    CHECK_EQ(ch23_seen_npc_slot_hp_max, CH23_NPC_HP_MAX);
+    CHECK_EQ(ch23_seen_npc_slot_mp_current, CH23_NPC_MP_MAX);
+}
+
+/* The battle party is banked, and banked BEFORE the cut-scene: the slot that
+   was 0xa5 filler carries the battle record's character id and level, its six
+   status bytes were cleared by the writeback's memset, its flags were masked
+   to bit 0 -- the staged 2 does not survive that mask -- its HP was lifted to
+   the maximum by the full heal and its MP by the restore that follows.
+   WIN22.DAT retires unit 0 and the writeback skips a retired character-0 unit,
+   so a run that interpreted the script first would leave every one of these at
+   the filler. */
+static void chapter_23_banks_the_party_before_the_cutscene_runs(void)
+{
+    int i;
+
+    run_ch23_handler();
+    CHECK_EQ(ch23_run_state, 1);
+    if (ch23_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch23_seen_slot_char_id, RANDIS_CHAR_ID);
+    CHECK_EQ(ch23_seen_slot_level, RANDIS_LEVEL);
+    CHECK_EQ(ch23_seen_slot_flags, 0);
+    CHECK_EQ(ch23_seen_slot_hp_max, RANDIS_HP_MAX);
+    CHECK_EQ(ch23_seen_slot_hp_current, RANDIS_HP_MAX);
+    CHECK_EQ(ch23_seen_slot_mp_current, RANDIS_MP_MAX);
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        CHECK_EQ(ch23_seen_slot_timers[i], 0);
+    }
+}
+
+/* NOTHING RECOVERS THE PARTY'S LIVE RECORDS.  The handler's only unit-record
+   store is the third-side one, so 蘭迪斯's live magic points are still the 2
+   the staging gave rather than the maximum a recovery of the kind
+   fdps_chapter_19_end has would have restored, and his live hit points are
+   still the battle's 25.  His flags byte still carries the staged 2 as well,
+   underneath the retired bit the cut-scene raised on him afterwards -- a
+   recovery would have cleared the byte before the writeback ever ran. */
+static void chapter_23_recovers_nobody_before_banking(void)
+{
+    run_ch23_handler();
+    CHECK_EQ(ch23_run_state, 1);
+    if (ch23_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch23_seen_unit_flags,
+             CH23_STAGED_PARTY_FLAGS | UNIT_FLAG_RETIRED);
+    CHECK_EQ(ch23_seen_unit_mp_current, RANDIS_MP_CURRENT);
+    CHECK_EQ(ch23_seen_unit_hp_current, RANDIS_HP_CURRENT);
+}
+
+/* No spell is granted.  The handler has no fdps_set_flag_bit call -- the first
+   thing at 0003b35c is the enemy sweep -- so both the live record's bitmap and
+   the roster's copy of it stay at the zeroes the staging left.  A grant copied
+   over from fdps_chapter_01_end would show as byte 0 reading 0x01. */
+static void chapter_23_grants_no_spell(void)
+{
+    int i;
+
+    run_ch23_handler();
+    CHECK_EQ(ch23_run_state, 1);
+    if (ch23_run_state != 1) {
+        return;
+    }
+
+    for (i = 0; i < SPELL_BITMAP_BYTES; i++) {
+        CHECK_EQ(ch23_seen_unit_spells[i], 0);
+        CHECK_EQ(ch23_seen_slot_spells[i], 0);
+    }
+}
+
+/* The cut-scene the handler names is Win22.dat and it really ran: the marker
+   value 73 is in status_timers[4] of the live battle record, where only that
+   member's second opcode puts it.  The two decoys in the container write 61
+   into status_timers[3] and 67 into status_timers[5], so a name one step in
+   either direction is three failed assertions rather than a silent pass -- and
+   both of those names are real members of the shipped container as well, so
+   neither slip would show up as a missing member.  This is the half of the
+   handler's deliberate off-by-one that carries the index of the chapter just
+   ENDED, 22, against the 23 the store leaves.  The marker does not reach the
+   roster copy, whose timers the writeback cleared before the script ran. */
+static void chapter_23_victory_cutscene_is_win22_dat(void)
+{
+    run_ch23_handler();
+    CHECK_EQ(ch23_run_state, 1);
+    if (ch23_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch23_seen_unit_timers[WIN22_CH23_MARKER_SLOT],
+             WIN22_CH23_MARKER_VALUE);
+    CHECK_EQ(ch23_seen_unit_timers[WIN21_CH23_MARKER_SLOT], 0);
+    CHECK_EQ(ch23_seen_unit_timers[WIN23_CH23_MARKER_SLOT], 0);
+    CHECK_EQ(ch23_seen_slot_timers[WIN22_CH23_MARKER_SLOT], 0);
+}
+
+/* Nobody fell, so the revive sweep charges nothing and never opens its panel.
+   Both roster members are above 0 hit points when it runs: the writeback put
+   slot 0 on its maximum, and slot 1 -- the swept third-side record, which the
+   writeback deliberately did NOT heal -- still carries the 12 it came out of
+   the battle with. */
+static void chapter_23_revive_charges_nothing_when_nobody_fell(void)
+{
+    run_ch23_handler();
+    CHECK_EQ(ch23_run_state, 1);
+    if (ch23_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch23_seen_party_gold, PARTY_GOLD_BEFORE);
+}
+
+/* The chapter index is left at chapter 24's, 23, as an assignment and not as a
+   step from what was there: this run starts it at 4, so an increment would
+   read back 5 and the store's own literal reads back 23.  It also pins the
+   other half of the handler's deliberate off-by-one -- a 22 here, matching the
+   22 in the script name, would be chapter 23 replayed rather than chapter 24
+   started. */
+static void chapter_23_advances_the_chapter_index_to_chapter_twenty_four(void)
+{
+    run_ch23_handler();
+    CHECK_EQ(ch23_run_state, 1);
+    if (ch23_run_state != 1) {
+        return;
+    }
+
+    CHECK_EQ(ch23_seen_chapter_id, CH23_CHAPTER_ID_AFTER);
+}
+
+/* Chapter 23's fixture container goes again, so that nothing this file wrote
+   outlives its run and the next file that wants that name finds it free. */
+static void the_ch23_fixture_container_is_removed(void)
+{
+    if (!ch23_fixture_owned) {
+        return;
+    }
+
+    remove(SCRIPT_ARCHIVE_FILE);
+    ch23_fixture_owned = 0;
+    CHECK_EQ(file_present(SCRIPT_ARCHIVE_FILE), 0);
+}
+
 void run_chend2_tests(void)
 {
     RUN_TEST(chapter_16_sweeps_the_enemy_side);
@@ -3520,4 +4219,17 @@ void run_chend2_tests(void)
     RUN_TEST(chapter_22_revive_charges_nothing_when_nobody_fell);
     RUN_TEST(chapter_22_advances_the_chapter_index_to_chapter_twenty_three);
     RUN_TEST(the_ch22_fixture_container_is_removed);
+    RUN_TEST(chapter_23_sweeps_the_enemy_side);
+    RUN_TEST(chapter_23_retires_the_third_side);
+    RUN_TEST(chapter_23_third_side_sweep_starts_at_unit_eleven);
+    RUN_TEST(chapter_23_third_side_sweep_skips_the_player_side);
+    RUN_TEST(chapter_23_third_side_sweep_walks_the_live_unit_count);
+    RUN_TEST(chapter_23_banks_the_swept_third_side_out_of_play);
+    RUN_TEST(chapter_23_banks_the_party_before_the_cutscene_runs);
+    RUN_TEST(chapter_23_recovers_nobody_before_banking);
+    RUN_TEST(chapter_23_grants_no_spell);
+    RUN_TEST(chapter_23_victory_cutscene_is_win22_dat);
+    RUN_TEST(chapter_23_revive_charges_nothing_when_nobody_fell);
+    RUN_TEST(chapter_23_advances_the_chapter_index_to_chapter_twenty_four);
+    RUN_TEST(the_ch23_fixture_container_is_removed);
 }

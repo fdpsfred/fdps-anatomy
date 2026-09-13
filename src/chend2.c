@@ -722,3 +722,157 @@ void fdps_chapter_22_end(void)
     fdps_roster_revive_fallen_members();
     data_fdps_chapter_current_chapter_id = CH22_NEXT_CHAPTER_ID;
 }
+
+/* Where chapter 23's own sweep starts, MOV dword ptr [EBP-0x8],0xb at
+   0003b361.  Eleven is MAP22.DAT's player-slot count, the byte at +1 of its
+   header, and that is what the number means: fdps_build_map_unit_array fills
+   battle unit slots 0 through player_slot_count-1 from the roster and every
+   scripted deployment is appended behind them (src/deploy.c), so starting at
+   11 is "skip the party's own slots and walk only what the map deployed".
+
+   IT IS A LITERAL AND NOT data_fdps_map_player_slot_count.  The original has
+   the 11 written into the instruction, so the sweep is pinned to the map this
+   handler was written for and would walk the wrong range if the map ever asked
+   for a different number of party slots.  Reading the global instead is the
+   obvious improvement and it is a different program. */
+#define CH23_NPC_SWEEP_FIRST_UNIT 11
+
+/* The side the sweep is looking for, MOV AL,[EAX+0x6] / AND EAX,0xff / CMP
+   EAX,0x1 / JNZ at 0003b38f..0003b39a.  The codes are 0 enemy, 1 the third
+   side and 2 the player's, so this is every unit that is neither the party's
+   nor the enemy's.
+
+   MAP22.DAT deploys twenty-one of them on wave 0 -- records 1 to 21, character
+   ids 36 to 39, none of which is one of the twelve permanent roster characters
+   -- and five more on waves 5 to 9, and chapter 23's keepsake-ring event adds
+   the wave-10 spirit, character id 13 (chevt4.h).  Those are what this sweep
+   is for.
+
+   The byte is read zero-extended and compared as an int, so the test is
+   unsigned (contract C); side is an unsigned char in src/fdpstype.h and must
+   stay one. */
+#define CH23_NPC_SIDE 1
+
+/* What a swept unit's flags byte is left holding, MOV byte ptr [EAX+0x5],0x1
+   at 0003b39f.
+
+   IT IS A WHOLE-BYTE STORE AND NOT AN OR (rebuild_info/pitfalls.md).  Bit 0 is
+   the bit fdps_unit_is_retired reads and fdps_draw_map_unit returns on
+   (src/mapdraw.c), so raising it is what takes the unit off the map before the
+   victory scene is interpreted; but writing the natural unit->flags |= 1 also
+   leaves the 0x80 has-acted bit and anything else the byte was carrying
+   standing, and the script this handler goes on to run edits unit records.
+   Unlike the sweep in step 1 it does not touch hit points at all. */
+#define CH23_NPC_RETIRED 1
+
+/* Chapter 23's victory cut-scene, the string at 0x621c4 loaded into EAX at
+   0003b3aa and pushed as fdps_icon_script_run's only argument.  The member is
+   named for the chapter that has just been WON: chapter 23 is the 0-based id
+   22, so this is Win22.dat.
+
+   read_memory at 0x621b8 returns 57 69 6e 32 31 2e 64 61 74 00 64 61 57 69 6e
+   32 32 2e 64 61 74 00 64 61 57 69 6e 32 33 2e 64 61, so "Win21.dat" sits at
+   0x621b8 and "Win23.dat" at 0x621d0, each separated from this one by two
+   bytes of 64 61 filler.  BOTH NEIGHBOURS ARE REAL MEMBER NAMES: 0x621b8 is
+   what a body copied from fdps_chapter_22_end without changing the operand
+   would open, and 0x621d0 is what counting forward from the stored index
+   rather than reading the operand at 0003b3aa would reach, so neither slip
+   announces itself as a missing member.
+
+   The literal is the bare member name with no path and no container, and the
+   lower-case spelling is the original's: see CH16_VICTORY_SCRIPT above for why
+   it must not be tidied and why it cannot live in read-only storage. */
+#define CH23_VICTORY_SCRIPT "Win22.dat"
+
+/* What the handler leaves in data_fdps_chapter_current_chapter_id: MOV dword
+   ptr [0x00069cf4],0x17 at 0003b3bd.  The index is 0-based, so 23 is chapter
+   24 -- both the village phase that runs next and the chapter loaded after it
+   read this global, so this one store is what advances the game.  It is an
+   assignment and not a step: nothing reads the global first.
+
+   THE TWO NUMBERS IN THIS HANDLER DIFFER BY ONE ON PURPOSE: the script above
+   is 22, the index of the chapter that has just been won, and this store is
+   23, the index of the one that comes next.  Writing the same number in both
+   places is wrong in one of them. */
+#define CH23_NEXT_CHAPTER_ID 0x17
+
+/* Chapter 23's end handler: the family's four calls and one store, with a
+   sweep of its own wedged between the first two.
+
+   WHAT THE EXTRA SWEEP IS FOR.  Chapter 23 is fought across a map that is
+   populated with twenty-one third-side units from the moment it opens --
+   MAP22.DAT's wave-0 records 1 to 21, character ids 36 to 39 -- with five more
+   arriving on waves 5 to 9 and the keepsake-ring spirit on wave 10.
+   fdps_battle_destroy_remaining_enemies only ever touches side 0 (btlend.h),
+   so none of them is removed by it, and the chapter's own clear waits on one
+   named boss rather than on the enemy side being empty, so they are all still
+   standing when the handler is entered.  This loop raises the retired bit on
+   every one of them, and fdps_draw_map_unit returns on that bit, which is what
+   empties the map before Win22.dat is interpreted.
+
+   IT STARTS AT 11 AND THE 11 IS THE PARTY: see CH23_NPC_SWEEP_FIRST_UNIT.
+   Starting at 0 would walk the party's own slots as well, and a party member
+   is side 2, so nothing would be retired by mistake -- what the 11 really buys
+   is the eleven record lookups it does not make.
+
+   IT MUST STAY WHERE IT IS, IN FRONT OF fdps_roster_write_back_battle_units
+   (rebuild_info/pitfalls.md).  The writeback banks a battle unit over the
+   roster slot holding the same character id, masks the flags byte down to
+   bit 0 and then refuses to restore hit points from the maximum whenever that
+   bit survived (roster.h).  A swept unit whose character id does reach a
+   roster slot is therefore banked as out of play; move the sweep behind the
+   writeback and that same unit is banked as a live member on full hit points
+   instead.  On the SHIPPED map no such unit exists -- ids 36 to 39 and the
+   spirit's 13 are none of the twelve permanent roster characters, so the
+   writeback passes over every unit this loop touches -- but the ordering is
+   the original's and the difference is behavioural wherever a side-1 unit does
+   carry a roster id.
+
+   THE BOUND IS THE LIVE COUNT, data_fdps_map_unit_count, re-read every
+   iteration: CMP EAX,[0x00060150] / JL at 0003b36b.  It has to be, because the
+   wave-5 to wave-10 deployments append their records to the array during the
+   chapter and a literal taken from the map's opening size would miss them.
+
+   VALUES USED AFTER A CALL: one.  fdps_get_unit_record's record pointer is
+   stored to [EBP-0x4] at 0003b389 and reloaded from that slot at 0003b38c and
+   0003b39c for the side read and the flags store.  Nothing else here reads EAX
+   after a CALL: the four bare CALLs return void, and fdps_icon_script_run does
+   leave a uint in EAX which this call site discards -- the ADD ESP,0x4 at
+   0003b3b5 and the CALL at 0003b3b8 are all that follow it.
+
+   THE ORDER OF THE FOUR CALLS IS THE ALGORITHM and it is the family's: the
+   cut-scene runs AFTER the writeback and the revive AFTER the cut-scene.  The
+   script is interpreted with the battle's unit array still standing, so a
+   unit-record edit it makes lands on a party that has already been banked and
+   reaches the roster only if the script asks for another writeback (opcode
+   0x61, src/icon.c).  The revive then reads the roster the writeback has just
+   filled, which is what makes it see the battle's casualties at all.
+
+   THE CHAPTER IS ADVANCED HERE and nowhere else on this path: the store at
+   0003b3bd is the handler's last act and the only thing it leaves for the
+   phase that follows. */
+void fdps_chapter_23_end(void)
+{
+    /* The record the sweep is on, [EBP-0x4].  The original reloads the slot
+       into EAX between the call and each of the two uses rather than keeping
+       the pointer in a register. */
+    struct fdps_unit_record *unit;
+    /* The sweep's cursor over the battle array, [EBP-0x8]: a unit index. */
+    int unit_index;
+
+    fdps_battle_destroy_remaining_enemies();
+
+    for (unit_index = CH23_NPC_SWEEP_FIRST_UNIT;
+         unit_index < data_fdps_map_unit_count;
+         unit_index++) {
+        unit = fdps_get_unit_record(unit_index);
+        if (unit->side == CH23_NPC_SIDE) {
+            unit->flags = CH23_NPC_RETIRED;
+        }
+    }
+
+    fdps_roster_write_back_battle_units();
+    fdps_icon_script_run(CH23_VICTORY_SCRIPT);
+    fdps_roster_revive_fallen_members();
+    data_fdps_chapter_current_chapter_id = CH23_NEXT_CHAPTER_ID;
+}
