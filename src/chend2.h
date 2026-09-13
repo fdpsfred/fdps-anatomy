@@ -178,4 +178,29 @@ extern void fdps_chapter_20_end(void);
 extern void fdps_chapter_21_end(void);
 #pragma aux fdps_chapter_21_end "*" parm caller [];
 
+/* Chapter 22's end handler: closes chapter 22, 巫湯婆婆, out and hands the
+   game to chapter 23, 死神冥河.  Takes nothing and returns nothing.
+
+   The family's plain shape, the same five steps chapters 16, 17, 20 and 21 run
+   and in the same order: every enemy still standing on the battle map is
+   swept; the battle party is banked onto the persistent roster; the victory
+   cut-scene Win21.dat is interpreted; every party member still at 0 hit points
+   is revived and billed for it; and the chapter index is advanced to 22,
+   chapter 23.
+
+   NOTHING STANDS IN FRONT OF THE FIVE: no latch is read, no unit record is
+   recovered and nothing is granted before the sweep.  It is
+   fdps_chapter_21_end one slot back instruction for instruction, differing in
+   the script name and the stored index alone.
+
+   THE SWEEP IS NOT BELT AND BRACES HERE, which is the one behavioural
+   difference from the handlers it copies.  Chapter 22's 勝利條件 is 擊倒巫湯婆婆
+   rather than 敵人全滅 and its post-action test declares no victory of its own,
+   so the chapter clears while the boss's minions are still on the map and this
+   sweep is what removes them.
+
+   Table slot 21. */
+extern void fdps_chapter_22_end(void);
+#pragma aux fdps_chapter_22_end "*" parm caller [];
+
 #endif
